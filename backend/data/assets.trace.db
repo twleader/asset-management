@@ -1,0 +1,35 @@
+2026-04-12 15:17:45.229295+08:00 jdbc[64]: exception
+org.h2.jdbc.JdbcSQLTimeoutException: Timeout trying to lock table "STOCK_PRICE"; SQL statement:
+update stock_price set change_percent=?,closed=?,market=?,price=?,price_change=?,source=?,stock_code=?,stock_name=?,trading_date=?,updated_at=? where id=? [50200-232]
+2026-04-12 15:17:45.236281+08:00 jdbc[64]: exception
+org.h2.jdbc.JdbcSQLNonTransientException: The object is already closed [90007-232]
+2026-04-12 15:22:45.212333+08:00 jdbc[65]: exception
+org.h2.jdbc.JdbcSQLTimeoutException: Timeout trying to lock table "STOCK_PRICE"; SQL statement:
+update stock_price set change_percent=?,closed=?,market=?,price=?,price_change=?,source=?,stock_code=?,stock_name=?,trading_date=?,updated_at=? where id=? [50200-232]
+2026-04-12 15:22:45.216932+08:00 jdbc[65]: exception
+org.h2.jdbc.JdbcSQLNonTransientException: The object is already closed [90007-232]
+2026-04-12 15:27:45.212085+08:00 jdbc[66]: exception
+org.h2.jdbc.JdbcSQLTimeoutException: Timeout trying to lock table "STOCK_PRICE"; SQL statement:
+update stock_price set change_percent=?,closed=?,market=?,price=?,price_change=?,source=?,stock_code=?,stock_name=?,trading_date=?,updated_at=? where id=? [50200-232]
+2026-04-12 15:27:45.217643+08:00 jdbc[66]: exception
+org.h2.jdbc.JdbcSQLNonTransientException: The object is already closed [90007-232]
+2026-04-12 15:32:45.217027+08:00 jdbc[67]: exception
+org.h2.jdbc.JdbcSQLTimeoutException: Timeout trying to lock table "STOCK_PRICE"; SQL statement:
+update stock_price set change_percent=?,closed=?,market=?,price=?,price_change=?,source=?,stock_code=?,stock_name=?,trading_date=?,updated_at=? where id=? [50200-232]
+2026-04-12 15:32:45.221920+08:00 jdbc[67]: exception
+org.h2.jdbc.JdbcSQLNonTransientException: The object is already closed [90007-232]
+2026-04-12 15:37:45.222962+08:00 jdbc[68]: exception
+org.h2.jdbc.JdbcSQLTimeoutException: Timeout trying to lock table "STOCK_PRICE"; SQL statement:
+update stock_price set change_percent=?,closed=?,market=?,price=?,price_change=?,source=?,stock_code=?,stock_name=?,trading_date=?,updated_at=? where id=? [50200-232]
+2026-04-12 15:37:45.226362+08:00 jdbc[68]: exception
+org.h2.jdbc.JdbcSQLNonTransientException: The object is already closed [90007-232]
+2026-04-12 15:42:45.233967+08:00 jdbc[73]: exception
+org.h2.jdbc.JdbcSQLTimeoutException: Timeout trying to lock table "STOCK_PRICE"; SQL statement:
+update stock_price set change_percent=?,closed=?,market=?,price=?,price_change=?,source=?,stock_code=?,stock_name=?,trading_date=?,updated_at=? where id=? [50200-232]
+2026-04-12 15:42:45.237690+08:00 jdbc[73]: exception
+org.h2.jdbc.JdbcSQLNonTransientException: The object is already closed [90007-232]
+2026-04-12 15:47:45.232942+08:00 jdbc[75]: exception
+org.h2.jdbc.JdbcSQLTimeoutException: Timeout trying to lock table "STOCK_PRICE"; SQL statement:
+update stock_price set change_percent=?,closed=?,market=?,price=?,price_change=?,source=?,stock_code=?,stock_name=?,trading_date=?,updated_at=? where id=? [50200-232]
+2026-04-12 15:47:45.237527+08:00 jdbc[75]: exception
+org.h2.jdbc.JdbcSQLNonTransientException: The object is already closed [90007-232]

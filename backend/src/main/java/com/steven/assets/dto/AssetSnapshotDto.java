@@ -1,0 +1,147 @@
+package com.steven.assets.dto;
+
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.PastOrPresent;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.List;
+
+public class AssetSnapshotDto {
+
+    // ===== Request =====
+    public record CreateSnapshotRequest(
+            @NotNull @PastOrPresent LocalDate snapshotDate,
+            BigDecimal usdExchangeRate,
+            String notes,
+            List<DepositRequest> deposits,
+            List<FundRequest> funds,
+            List<StockRequest> stocks
+    ) {}
+
+    public record DepositRequest(
+            Long bankId,                   // 參照 bank.id（取代原 BankName enum）
+            @NotNull String depositType,
+            @NotNull BigDecimal amount,
+            BigDecimal originalAmount,
+            String currency,
+            String notes
+    ) {}
+
+    public record FundRequest(
+            @NotNull String fundName,
+            String fundCode,
+            Long bankId,                   // 參照 bank.id（銷售銀行）
+            @NotNull BigDecimal investmentAmount,
+            @NotNull BigDecimal currentValue
+    ) {}
+
+    public record StockRequest(
+            @NotNull String stockCode,
+            @NotNull String stockName,
+            @NotNull String market,
+            Long brokerId,                 // 參照 broker.id（取代原 Broker enum）
+            @NotNull BigDecimal shares,
+            @NotNull BigDecimal investmentCost,
+            @NotNull BigDecimal currentValue,
+            BigDecimal estimatedDividend,
+            BigDecimal dividendRate,
+            String currency,
+            BigDecimal originalCurrencyValue
+    ) {}
+
+    // ===== Response =====
+    public record SnapshotSummaryResponse(
+            Long id,
+            LocalDate snapshotDate,
+            BigDecimal usdExchangeRate,
+            BigDecimal totalDeposit,
+            BigDecimal totalFundValue,
+            BigDecimal totalFundCost,
+            BigDecimal totalStockValue,
+            BigDecimal totalStockCost,
+            BigDecimal totalAssets,
+            BigDecimal estimatedAnnualDividend,
+            BigDecimal realizedGain,
+            BigDecimal fundProfit,
+            BigDecimal stockProfit,
+            String notes
+    ) {}
+
+    public record SnapshotDetailResponse(
+            Long id,
+            LocalDate snapshotDate,
+            BigDecimal usdExchangeRate,
+            BigDecimal totalDeposit,
+            BigDecimal totalFundValue,
+            BigDecimal totalFundCost,
+            BigDecimal totalStockValue,
+            BigDecimal totalStockCost,
+            BigDecimal totalAssets,
+            BigDecimal estimatedAnnualDividend,
+            BigDecimal realizedGain,
+            String notes,
+            List<DepositResponse> deposits,
+            List<FundResponse> funds,
+            List<StockResponse> stocks
+    ) {}
+
+    public record DepositResponse(
+            Long id,
+            Long bankId,
+            String bankDisplayName,
+            String depositType,
+            String depositDisplayName,
+            BigDecimal amount,
+            BigDecimal originalAmount,
+            String currency,
+            String notes
+    ) {}
+
+    public record FundResponse(
+            Long id,
+            String fundName,
+            String fundCode,
+            Long bankId,
+            String bankDisplayName,
+            BigDecimal investmentAmount,
+            BigDecimal currentValue,
+            BigDecimal profit,
+            BigDecimal profitRate
+    ) {}
+
+    public record StockResponse(
+            Long id,
+            String stockCode,
+            String stockName,
+            String market,
+            Long brokerId,
+            String brokerDisplayName,
+            BigDecimal shares,
+            BigDecimal investmentCost,
+            BigDecimal currentValue,
+            BigDecimal profit,
+            BigDecimal profitRate,
+            BigDecimal estimatedDividend,
+            BigDecimal dividendRate,
+            String currency,
+            BigDecimal originalCurrencyValue
+    ) {}
+
+    // ===== Asset History =====
+    public record AssetHistoryResponse(
+            Long id,
+            LocalDate snapshotDate,
+            BigDecimal totalDeposit,
+            BigDecimal totalFundValue,
+            BigDecimal totalTwStockValue,
+            BigDecimal totalUsStockValue,
+            BigDecimal totalStockValue,
+            BigDecimal totalAssets,
+            BigDecimal increase,
+            BigDecimal increaseRate,
+            BigDecimal investmentRate,
+            BigDecimal estimatedAnnualDividend,
+            BigDecimal realizedGain
+    ) {}
+}
