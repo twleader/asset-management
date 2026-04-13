@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict 2yDD5aCE3x1XXZiXsR9dlb1tg7xvQC5eNudiAYS4UvAJqHhywwygGmRSyXQ3lSl
+\restrict hHpv0b9BHsd0iufpeyxhEJoiRylR9fQR8aveDoKrvTuuHZGSFkT51GiubzkfV6H
 
 -- Dumped from database version 16.13
 -- Dumped by pg_dump version 16.13
@@ -80,14 +80,13 @@ ALTER TABLE public.bank OWNER TO assets;
 CREATE TABLE public.bank_deposit (
     id bigint NOT NULL,
     amount numeric(20,2) NOT NULL,
-    bank_name character varying(30) NOT NULL,
+    bank_name character varying(30),
     currency character varying(3),
     deposit_type character varying(30) NOT NULL,
     notes character varying(200),
     original_amount numeric(20,4),
     snapshot_id bigint NOT NULL,
     bank_id bigint,
-    CONSTRAINT bank_deposit_bank_name_check CHECK (((bank_name)::text = ANY (ARRAY[('富邦'::character varying)::text, ('國泰世華'::character varying)::text, ('台新'::character varying)::text, ('華南'::character varying)::text, ('LINE_BANK'::character varying)::text, ('元大'::character varying)::text, ('永豐'::character varying)::text]))),
     CONSTRAINT bank_deposit_deposit_type_check CHECK (((deposit_type)::text = ANY (ARRAY[('活存'::character varying)::text, ('定存'::character varying)::text, ('美元活存'::character varying)::text, ('美元定存'::character varying)::text, ('證券戶'::character varying)::text, ('信用卡待付款'::character varying)::text])))
 );
 
@@ -222,8 +221,7 @@ CREATE TABLE public.fund_holding (
     fund_name character varying(100) NOT NULL,
     investment_amount numeric(20,2) NOT NULL,
     snapshot_id bigint NOT NULL,
-    bank_id bigint,
-    CONSTRAINT fund_holding_bank_check CHECK (((bank)::text = ANY (ARRAY[('富邦'::character varying)::text, ('國泰世華'::character varying)::text, ('台新'::character varying)::text, ('華南'::character varying)::text, ('LINE_BANK'::character varying)::text, ('元大'::character varying)::text, ('永豐'::character varying)::text])))
+    bank_id bigint
 );
 
 
@@ -330,9 +328,7 @@ CREATE TABLE public.stock_holding (
     stock_code character varying(20) NOT NULL,
     stock_name character varying(50) NOT NULL,
     snapshot_id bigint NOT NULL,
-    broker_id bigint,
-    CONSTRAINT stock_holding_broker_check CHECK (((broker)::text = ANY (ARRAY[('富邦證券'::character varying)::text, ('國泰證券'::character varying)::text, ('元大證券'::character varying)::text, ('華南證券'::character varying)::text]))),
-    CONSTRAINT stock_holding_market_check CHECK (((market)::text = ANY (ARRAY[('台股'::character varying)::text, ('美股'::character varying)::text])))
+    broker_id bigint
 );
 
 
@@ -840,13 +836,13 @@ COPY public.stock_holding (id, broker, currency, current_value, dividend_rate, e
 --
 
 COPY public.stock_price (id, change_percent, closed, market, price, price_change, source, stock_code, stock_name, trading_date, updated_at) FROM stdin;
-1	0.0254	f	美股	380.2950	9.4250	NASDAQ	MSFT	MSFT	2026-04-13	2026-04-13 15:33:18.802642
-2	-0.0003	f	美股	188.5700	-0.0600	NASDAQ	NVDA	NVDA	2026-04-13	2026-04-13 15:33:18.802642
-3	0.0054	f	美股	318.9400	1.7000	NASDAQ	GOOGL	GOOGL	2026-04-13	2026-04-13 15:33:18.802642
-4	0.0001	f	美股	624.6800	0.0800	NASDAQ	VOO	VOO	2026-04-13	2026-04-13 15:33:18.802642
-5	0.0072	f	美股	374.2100	2.6600	NASDAQ	AVGO	AVGO	2026-04-13	2026-04-13 15:33:18.802642
-6	-0.0008	f	美股	144.8700	-0.1100	NASDAQ	VT	VT	2026-04-13	2026-04-13 15:33:18.802642
-7	-0.0007	f	美股	238.2200	-0.1600	NASDAQ	AMZN	AMZN	2026-04-13	2026-04-13 15:33:18.802642
+7	-0.0001	f	美股	238.3600	-0.0200	NASDAQ	AMZN	AMZN	2026-04-13	2026-04-13 16:21:49.975711
+1	0.0261	f	美股	380.5499	9.6799	NASDAQ	MSFT	MSFT	2026-04-13	2026-04-13 16:21:49.975711
+2	-0.0018	f	美股	188.2850	-0.3450	NASDAQ	NVDA	NVDA	2026-04-13	2026-04-13 16:21:49.975711
+3	0.0043	f	美股	318.5900	1.3500	NASDAQ	GOOGL	GOOGL	2026-04-13	2026-04-13 16:21:49.975711
+4	0.0013	f	美股	625.4150	0.8150	NASDAQ	VOO	VOO	2026-04-13	2026-04-13 16:21:49.975711
+5	0.0050	f	美股	373.4200	1.8700	NASDAQ	AVGO	AVGO	2026-04-13	2026-04-13 16:21:49.975711
+6	0.0010	f	美股	145.1200	0.1400	NASDAQ	VT	VT	2026-04-13	2026-04-13 16:21:49.975711
 \.
 
 
@@ -55001,7 +54997,7 @@ SELECT pg_catalog.setval('public.asset_snapshot_id_seq', 9, true);
 -- Name: bank_deposit_id_seq; Type: SEQUENCE SET; Schema: public; Owner: assets
 --
 
-SELECT pg_catalog.setval('public.bank_deposit_id_seq', 377, true);
+SELECT pg_catalog.setval('public.bank_deposit_id_seq', 381, true);
 
 
 --
@@ -55293,5 +55289,5 @@ ALTER TABLE ONLY public.fund_holding
 -- PostgreSQL database dump complete
 --
 
-\unrestrict 2yDD5aCE3x1XXZiXsR9dlb1tg7xvQC5eNudiAYS4UvAJqHhywwygGmRSyXQ3lSl
+\unrestrict hHpv0b9BHsd0iufpeyxhEJoiRylR9fQR8aveDoKrvTuuHZGSFkT51GiubzkfV6H
 
