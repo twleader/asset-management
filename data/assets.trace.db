@@ -1,0 +1,6 @@
+2026-04-13 22:35:55.413635+08:00 jdbc[3]: exception
+org.h2.jdbc.JdbcSQLSyntaxErrorException: Table "BANK_ENTITY" not found (this database is empty); SQL statement:
+SELECT id, name, display_name FROM bank_entity ORDER BY id [42104-232]
+2026-04-13 22:35:55.415419+08:00 jdbc[3]: exception
+org.h2.jdbc.JdbcSQLSyntaxErrorException: Table "BROKER_ENTITY" not found (this database is empty); SQL statement:
+ SELECT id, name, display_name FROM broker_entity ORDER BY id [42104-232]

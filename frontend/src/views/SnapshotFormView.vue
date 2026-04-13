@@ -1447,9 +1447,9 @@ onMounted(async () => {
 
 // ===== Submit =====
 const submit = async () => {
-  await formRef.value.validate()
   saving.value = true
   try {
+    await formRef.value.validate()
     const deposits = form.deposits.map(d => ({
       bankId: d.bankId || null,
       depositType: d.depositType,
@@ -1458,7 +1458,21 @@ const submit = async () => {
       originalAmount: d.currency === 'USD' ? d.amount : null,  // 原幣金額
       notes: d.notes || null
     }))
-    const payload = { ...form, deposits, stocks: flattenStocks() }
+    const funds = form.funds.map(f => ({
+      fundName: f.fundName,
+      fundCode: f.fundCode || null,
+      bankId: f.bankId || null,
+      investmentAmount: f.investmentAmount,
+      currentValue: f.currentValue
+    }))
+    const payload = {
+      snapshotDate: form.snapshotDate,
+      usdExchangeRate: form.usdExchangeRate,
+      notes: form.notes,
+      deposits,
+      funds,
+      stocks: flattenStocks()
+    }
     if (isEdit.value) {
       await store.updateSnapshot(route.params.id, payload)
       ElMessage.success('更新成功')
@@ -1471,7 +1485,9 @@ const submit = async () => {
       }
     }
   } catch (e) {
-    ElMessage.error('儲存失敗：' + (e.response?.data?.message || e.message || '未知錯誤'))
+    const msg = e.response?.data?.detail || e.response?.data?.message || e.message || '未知錯誤'
+    console.error('存檔失敗', e)
+    ElMessage.error('儲存失敗：' + msg)
   } finally {
     saving.value = false
   }
