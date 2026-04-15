@@ -416,6 +416,40 @@
 
 ---
 
+### Task 14: 即時股價排程與資產估算
+
+**對應 Requirements:** Requirement 7（新增條目）、Requirement 9（新增條目）
+**前置任務:** Task 6, Task 9
+
+#### Steps:
+
+- [x] 14.1 `StockPriceService.scheduledPriceUpdate()` — 已實作每 5 分鐘排程
+  - 台股 09:00～13:30、美股 09:30～16:00（美東）交易時間內更新
+  - 收盤視窗（台股 13:30～13:50、美股 16:00～16:20）以 `markClosed=true` 標記
+
+- [x] 14.2 `HistoricalDataService` 每日收盤價寫入 `StockPriceHistory` — 已實作
+  - 台股：14:00 排程（backfillTwStock，FinMind）
+  - 美股：06:00 排程（backfillUsStock，Yahoo Finance）
+  - 啟動時自動補齊 10 年缺漏資料（startupBackfill）
+
+- [x] 14.3 `StockPriceService.getLiveAssets()` — 新增即時資產估算方法
+  - 取得最新快照持倉（snapshotRepo.findLatestWithStocks）
+  - 取得最新 USD/TWD 匯率（rateHistRepo.findClosestRate）
+  - 對每筆持股查詢 StockPrice 快取，計算 liveValue
+  - 回傳 LiveAssetsResponse（含各股明細、匯總、市場狀態）
+
+- [x] 14.4 `MarketDataController` 新增 `GET /api/market-data/live-assets` 端點
+
+- [x] 14.5 前端 `DashboardView.vue` 新增「即時資產估算」區塊
+  - 顯示 liveTotalAssets（即時總資產）、liveStockValue
+  - 顯示各股即時現值（表格）
+  - 交易時間內每 5 分鐘自動刷新（setInterval）
+  - 收盤後顯示「收盤估值」標籤，非交易時間不自動更新
+
+- [x] 14.6 前端 `api/index.js` 新增 `getLiveAssets()` API 呼叫
+
+---
+
 ### Task 13: 文件與部署
 
 **前置任務:** Task 1–12

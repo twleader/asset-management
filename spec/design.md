@@ -278,6 +278,7 @@ GET    /api/market-data/exchange-rate?currency=USD&start=&end= # 匯率歷史（
 GET    /api/market-data/exchange-rate/latest?currency=USD      # 最新匯率
 POST   /api/market-data/exchange-rate/refresh?currency=USD     # 刷新最新匯率
 POST   /api/market-data/exchange-rate/backfill-history?currency=USD&since= # 補齊指定日期起歷史匯率
+GET    /api/market-data/live-assets                            # 以最新快照持倉 × 當前快取股價，即時計算總資產估值
 ```
 
 #### Settings - Banks
@@ -367,6 +368,23 @@ totalProfit  = totalStock - totalCost
 10. 計算並寫入總額
 11. 若同日期已存在：根據 overwrite 參數決定跳過或覆蓋
 ```
+
+### 即時資產估算（Live Assets）
+
+```
+1. 取得最新 AssetSnapshot（含 StockHolding 清單）
+2. 取得最新 USD/TWD 匯率（ExchangeRateHistory）
+3. 對每筆 StockHolding，查詢 StockPrice 快取：
+   - 台股：liveValue = shares × price（TWD）
+   - 美股：liveValue = shares × price × exchangeRate（USD→TWD）
+4. liveStockValue = Σ(liveValue)
+5. liveTotalAssets = snapshot.totalDeposit + snapshot.totalFundValue + liveStockValue
+6. 回傳：liveStockValue, liveTotalAssets, perStock[{code, market, price, liveValue, closed}],
+         twMarketOpen, usMarketOpen, priceUpdatedAt
+```
+
+> 存款與基金以快照當時值為準；股票部位反映最新市價。
+> `closed=true` 表示該股已使用收盤價，不再盤中更新。
 
 ### 股利率查詢（Yahoo Finance）
 

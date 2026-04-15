@@ -158,6 +158,12 @@ public class AssetService {
     @Transactional
     public AssetSnapshotDto.SnapshotSummaryResponse updateSnapshot(Long id, AssetSnapshotDto.CreateSnapshotRequest req) {
         AssetSnapshot snapshot = findSnapshot(id);
+        if (req.snapshotDate() != null && !req.snapshotDate().equals(snapshot.getSnapshotDate())) {
+            if (snapshotRepo.existsBySnapshotDate(req.snapshotDate())) {
+                throw new IllegalArgumentException("該日期的快照已存在: " + req.snapshotDate());
+            }
+            snapshot.setSnapshotDate(req.snapshotDate());
+        }
         snapshot.setUsdExchangeRate(req.usdExchangeRate());
         snapshot.setNotes(req.notes());
 

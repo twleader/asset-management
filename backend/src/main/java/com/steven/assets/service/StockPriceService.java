@@ -3,7 +3,9 @@ package com.steven.assets.service;
 import com.steven.assets.model.StockPrice;
 import com.steven.assets.model.StockHolding;
 import com.steven.assets.model.AssetSnapshot;
+import com.steven.assets.model.ExchangeRateHistory;
 import com.steven.assets.repository.AssetSnapshotRepository;
+import com.steven.assets.repository.ExchangeRateHistoryRepository;
 import com.steven.assets.repository.StockPriceRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -12,6 +14,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.*;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -30,6 +33,7 @@ public class StockPriceService {
 
     private final StockPriceRepository priceRepo;
     private final AssetSnapshotRepository snapshotRepo;
+    private final ExchangeRateHistoryRepository rateHistRepo;
     private final MarketDataService marketDataService;
 
     private static final ZoneId TW_ZONE = ZoneId.of("Asia/Taipei");
@@ -236,6 +240,99 @@ public class StockPriceService {
         );
     }
 
+    // ===================== 即時資產估算 =====================
+
+    /**
+     * 以最新快照持倉 × 當前快取股價，即時計算總資產估值。
+     * - 存款、基金沿用快照靜態值
+     * - 股票部位依 StockPrice 快取即時計算（美股換算為台幣）
+     */
+    @Transactional(readOnly = true)
+    public LiveAssetsResponse getLiveAssets() {
+        Optional<AssetSnapshot> latestOpt = snapshotRepo.findLatestWithStocks();
+        if (latestOpt.isEmpty()) {
+            return null;
+        }
+        AssetSnapshot snapshot = latestOpt.get();
+
+        // 取最新 USD/TWD 匯率（優先快照匯率，其次資料庫最近一筆）
+        BigDecimal exchangeRate = snapshot.getUsdExchangeRate();
+        if (exchangeRate == null || exchangeRate.compareTo(BigDecimal.ZERO) == 0) {
+            exchangeRate = rateHistRepo.findClosestRate("USD", LocalDate.now())
+                    .map(ExchangeRateHistory::getMidRate)
+                    .orElse(BigDecimal.valueOf(32));
+        }
+
+        // 計算各股即時市值
+        List<LiveStockItem> stockItems = new ArrayList<>();
+        BigDecimal liveStockValue = BigDecimal.ZERO;
+        LocalDateTime latestUpdate = null;
+
+        for (StockHolding sh : snapshot.getStocks()) {
+            Optional<StockPrice> spOpt = priceRepo.findByStockCodeAndMarket(sh.getStockCode(), sh.getMarket());
+            BigDecimal price = null;
+            Boolean closed = null;
+            String tradingDate = null;
+            LocalDateTime updatedAt = null;
+
+            if (spOpt.isPresent()) {
+                StockPrice sp = spOpt.get();
+                price = sp.getPrice();
+                closed = sp.getClosed();
+                tradingDate = sp.getTradingDate() != null ? sp.getTradingDate().toString() : null;
+                updatedAt = sp.getUpdatedAt();
+                if (latestUpdate == null || (updatedAt != null && updatedAt.isAfter(latestUpdate))) {
+                    latestUpdate = updatedAt;
+                }
+            }
+
+            BigDecimal liveValue = null;
+            if (price != null && sh.getShares() != null) {
+                if ("美股".equals(sh.getMarket())) {
+                    liveValue = sh.getShares().multiply(price).multiply(exchangeRate)
+                            .setScale(0, RoundingMode.HALF_UP);
+                } else {
+                    liveValue = sh.getShares().multiply(price)
+                            .setScale(0, RoundingMode.HALF_UP);
+                }
+                liveStockValue = liveStockValue.add(liveValue);
+            } else if (sh.getCurrentValue() != null) {
+                // 無快取則 fallback 至快照存值
+                liveValue = sh.getCurrentValue();
+                liveStockValue = liveStockValue.add(liveValue);
+            }
+
+            stockItems.add(new LiveStockItem(
+                sh.getStockCode(),
+                sh.getStockName(),
+                sh.getMarket(),
+                sh.getShares(),
+                price,
+                liveValue,
+                closed,
+                tradingDate
+            ));
+        }
+
+        BigDecimal totalDeposit = snapshot.getTotalDeposit() != null ? snapshot.getTotalDeposit() : BigDecimal.ZERO;
+        BigDecimal totalFundValue = snapshot.getTotalFundValue() != null ? snapshot.getTotalFundValue() : BigDecimal.ZERO;
+        BigDecimal liveTotalAssets = totalDeposit.add(totalFundValue).add(liveStockValue);
+
+        return new LiveAssetsResponse(
+            snapshot.getId(),
+            snapshot.getSnapshotDate().toString(),
+            exchangeRate,
+            totalDeposit,
+            totalFundValue,
+            liveStockValue,
+            liveTotalAssets,
+            stockItems,
+            isTwMarketOpen(),
+            isUsMarketOpen(),
+            latestUpdate != null ? latestUpdate.toString() : null
+        );
+    }
+
     // ===================== DTO =====================
 
     public record StockPriceDto(
@@ -265,4 +362,29 @@ public class StockPriceService {
             sp.getSource()
         );
     }
+
+    public record LiveStockItem(
+        String stockCode,
+        String stockName,
+        String market,
+        BigDecimal shares,
+        BigDecimal currentPrice,   // 快取股價（原幣）
+        BigDecimal liveValue,      // 即時市值（台幣）
+        Boolean closed,            // true = 收盤價，false/null = 盤中價
+        String tradingDate
+    ) {}
+
+    public record LiveAssetsResponse(
+        Long snapshotId,
+        String snapshotDate,
+        BigDecimal exchangeRate,   // USD/TWD 匯率
+        BigDecimal totalDeposit,   // 存款（快照靜態值）
+        BigDecimal totalFundValue, // 基金（快照靜態值）
+        BigDecimal liveStockValue, // 股票即時總市值（台幣）
+        BigDecimal liveTotalAssets,// 即時總資產
+        List<LiveStockItem> stocks,
+        boolean twMarketOpen,
+        boolean usMarketOpen,
+        String priceUpdatedAt      // 股價最後更新時間
+    ) {}
 }

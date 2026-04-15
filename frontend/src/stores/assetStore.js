@@ -52,7 +52,7 @@ export const useAssetStore = defineStore('asset', {
 
     async updateSnapshot(id, data) {
       const result = await snapshotApi.update(id, data)
-      await this.fetchSnapshots()
+      await Promise.all([this.fetchSnapshots(), this.fetchHistory()])
       return result
     },
 

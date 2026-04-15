@@ -2,6 +2,7 @@ package com.steven.assets.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.steven.assets.repository.StockPriceRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -35,11 +36,13 @@ public class MarketDataService {
 
     private final HttpClient httpClient;
     private final ObjectMapper mapper;
+    private final StockPriceRepository stockPriceRepo;
 
     /** Yahoo Finance crumb（session 期間有效） */
     private volatile String yahooCrumb = null;
 
-    public MarketDataService() {
+    public MarketDataService(StockPriceRepository stockPriceRepo) {
+        this.stockPriceRepo = stockPriceRepo;
         CookieManager cm = new CookieManager(null, CookiePolicy.ACCEPT_ALL);
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
@@ -473,10 +476,18 @@ public class MarketDataService {
             double avgAnnualDividend = recent.stream().mapToDouble(Double::doubleValue).average().orElse(0);
             if (avgAnnualDividend <= 0) return Optional.empty();
 
-            // 取當前股價
+            // 取當前股價：優先即時 API，若抓不到改用 DB 快取
+            double price = 0;
             Optional<PriceResult> priceOpt = getTwseRealTimePrice(stockCode);
-            if (priceOpt.isEmpty()) return Optional.empty();
-            double price = priceOpt.get().price().doubleValue();
+            if (priceOpt.isPresent() && priceOpt.get().price().compareTo(BigDecimal.ZERO) > 0) {
+                price = priceOpt.get().price().doubleValue();
+            } else {
+                var cached = stockPriceRepo.findByStockCodeAndMarket(stockCode, "台股");
+                if (cached.isPresent() && cached.get().getPrice() != null) {
+                    price = cached.get().getPrice().doubleValue();
+                    log.info("FinMind({}) {} 即時股價不可用，改用 DB 快取價格 {}", dataset, stockCode, price);
+                }
+            }
             if (price <= 0) return Optional.empty();
 
             double yieldRate = avgAnnualDividend / price;

@@ -165,7 +165,7 @@ import { TitleComponent, TooltipComponent, LegendComponent, GridComponent } from
 import VChart from 'vue-echarts'
 import { ArrowRight } from '@element-plus/icons-vue'
 import { useAssetStore } from '@/stores/assetStore'
-import { marketDataApi } from '@/api'
+import { marketDataApi, snapshotApi } from '@/api'
 
 use([CanvasRenderer, PieChart, LineChart, BarChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent])
 
@@ -184,6 +184,14 @@ onMounted(async () => {
   }
   await fetchStockPrices()
   priceTimer = setInterval(fetchStockPrices, 5 * 60 * 1000)
+
+  // 背景補齊所有快照缺漏的配息率（不阻塞頁面載入）
+  snapshotApi.enrichAllDividendRates().then(() => {
+    // 補齊後重新載入資料讓儀表板顯示最新值
+    return Promise.all([store.fetchSnapshots(), store.fetchHistory()])
+  }).then(() => {
+    if (store.snapshots.length > 0) store.fetchSnapshotDetail(store.snapshots[0].id)
+  }).catch(() => {})
 })
 
 onUnmounted(() => {

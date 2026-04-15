@@ -76,6 +76,17 @@ public class MarketDataController {
     }
 
     /**
+     * 即時資產估算：最新快照持倉 × 當前快取股價
+     * GET /api/market-data/live-assets
+     */
+    @GetMapping("/live-assets")
+    public ResponseEntity<StockPriceService.LiveAssetsResponse> getLiveAssets() {
+        StockPriceService.LiveAssetsResponse response = stockPriceService.getLiveAssets();
+        if (response == null) return ResponseEntity.notFound().build();
+        return ResponseEntity.ok(response);
+    }
+
+    /**
      * 手動觸發股價更新（不限交易時間）
      * POST /api/market-data/prices/refresh
      */

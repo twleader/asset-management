@@ -99,7 +99,8 @@ export const marketDataApi = {
   refreshExchangeRate: (currency = 'USD') =>
     api.post('/market-data/exchange-rate/refresh', null, { params: { currency } }),
   getPricesOnDate: (date, stocks) =>
-    api.post('/market-data/history/prices-on-date', stocks, { params: { date } })
+    api.post('/market-data/history/prices-on-date', stocks, { params: { date } }),
+  getLiveAssets: () => api.get('/market-data/live-assets')
 }
 
 export default api

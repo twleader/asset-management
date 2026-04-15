@@ -1278,8 +1278,9 @@ let priceTimer = null
  */
 async function loadAllPrices() {
   try {
-    if (isEdit.value && form.snapshotDate) {
-      // ── 歷史收盤價模式 ──
+    const today = new Date().toISOString().slice(0, 10)
+    if (isEdit.value && form.snapshotDate && form.snapshotDate < today) {
+      // ── 歷史收盤價模式（日期 < 今天）──
       const stocks = form.stocks
         .filter(s => s.stockCode)
         .map(s => ({ code: s.stockCode, market: s.market }))
@@ -1320,7 +1321,7 @@ async function loadAllPrices() {
       return
     }
 
-    // ── 新增快照：最新股價模式 ──
+    // ── 今天或新增快照：最新股價模式（live cache） ──
     const [prices, status] = await Promise.all([
       marketDataApi.getAllPrices(),
       marketDataApi.getMarketStatus()
@@ -1328,6 +1329,7 @@ async function loadAllPrices() {
     marketStatus.value = status
     const map = {}
     for (const p of prices) map[`${p.market}_${p.stockCode}`] = p
+    const missingRows = []
     for (const row of form.stocks) {
       const key = `${row.market}_${row.stockCode}`
       const p = map[key]
@@ -1335,8 +1337,28 @@ async function loadAllPrices() {
         row.latestPrice    = p.price
         row.priceChange    = p.priceChange
         row.priceChangePct = p.changePercent != null ? p.changePercent / 100 : null
+      } else if (row.stockCode) {
+        missingRows.push(row)
       }
       if (p && p.stockName && !row.stockName) row.stockName = p.stockName
+    }
+
+    // live cache 缺漏時，回退到歷史收盤價補齊
+    if (missingRows.length > 0 && form.snapshotDate) {
+      try {
+        const stocks = missingRows.map(s => ({ code: s.stockCode, market: s.market }))
+        const hist = await marketDataApi.getPricesOnDate(form.snapshotDate, stocks)
+        const histMap = {}
+        for (const p of hist) histMap[`${p.market}_${p.stockCode}`] = p
+        for (const row of missingRows) {
+          const p = histMap[`${row.market}_${row.stockCode}`]
+          if (p && p.price != null) {
+            row.latestPrice    = p.price
+            row.priceChange    = null
+            row.priceChangePct = null
+          }
+        }
+      } catch {}
     }
   } catch (e) {
     console.warn('批次載入股價失敗:', e)
@@ -1378,10 +1400,21 @@ async function loadExchangeRateForDate(date) {
   }
 }
 
-// ===== 新增快照時：日期變更自動查詢匯率 =====
-watch(() => form.snapshotDate, (newDate) => {
-  if (!isEdit.value && newDate) {
-    loadExchangeRateForDate(newDate)
+// ===== 日期變更：自動查詢匯率 + 重新抓取各股收盤價 =====
+// oldDate 為 '' 時代表 onMounted 初始賦值，不重複觸發（onMounted 自行呼叫 loadAllPrices）
+watch(() => form.snapshotDate, async (newDate, oldDate) => {
+  if (!oldDate || !newDate || newDate === oldDate) return
+  // 1. 匯率（新增與編輯都查）
+  loadExchangeRateForDate(newDate)
+  // 2. 清空舊股價，讓畫面立即反映「正在查詢」
+  for (const row of form.stocks) {
+    row.latestPrice    = null
+    row.priceChange    = null
+    row.priceChangePct = null
+  }
+  // 3. 批次查詢新日期的收盤價（含 backfill 重試）
+  if (form.stocks.length > 0) {
+    await loadAllPrices()
   }
 })
 
@@ -1438,9 +1471,11 @@ onMounted(async () => {
   await loadAllPrices()
   startPriceAutoRefresh()
 
-  // 補查缺名稱的股票（載入後靜默補齊）
+  // 補查缺名稱或缺配息率的股票（載入後靜默補齊）
   for (const row of form.stocks) {
-    if (!row.stockName && row.stockCode) fetchPriceForRow(row)
+    if (row.stockCode && (!row.stockName || row.dividendRate == null)) {
+      fetchPriceForRow(row)
+    }
   }
 
 })
