@@ -178,85 +178,6 @@
         </div>
       </el-card>
 
-      <!-- Funds -->
-      <el-card style="margin-bottom:16px">
-        <template #header>
-          <div style="display:flex;align-items:center;justify-content:space-between">
-            <span class="section-title">📊 信託基金</span>
-            <div style="display:flex;gap:8px">
-              <el-button size="small" type="primary" :loading="saving" @click="submit">存檔</el-button>
-              <el-button size="small" :loading="copyingPrev.funds" @click="copyPrevFunds">複製前一版</el-button>
-              <el-button size="small" :icon="Plus" @click="addFund">新增</el-button>
-            </div>
-          </div>
-        </template>
-        <el-table :data="form.funds" size="small">
-          <el-table-column width="44">
-            <template #default="{ $index }">
-              <div class="sort-btns">
-                <el-button size="small" text :disabled="$index===0" @click="moveRow(form.funds,$index,-1)">↑</el-button>
-                <el-button size="small" text :disabled="$index===form.funds.length-1" @click="moveRow(form.funds,$index,1)">↓</el-button>
-              </div>
-            </template>
-          </el-table-column>
-          <el-table-column label="基金名稱" min-width="140">
-            <template #default="{ row }">
-              <el-input v-model="row.fundName" size="small" />
-            </template>
-          </el-table-column>
-          <el-table-column label="銀行" width="160">
-            <template #default="{ row }">
-              <el-select v-model="row.bankId" size="small" style="width:100%" clearable>
-                <el-option v-for="b in bankOptions" :key="b.value" :label="b.label" :value="b.value" />
-              </el-select>
-            </template>
-          </el-table-column>
-          <el-table-column label="投資金額">
-            <template #default="{ row }">
-              <el-input v-model="row.investmentAmountStr" size="small" style="width:100%" :input-style="{ textAlign: 'right' }"
-                @blur="row.investmentAmount = numParse(row.investmentAmountStr, 0); row.investmentAmountStr = numFmt(row.investmentAmount)" />
-            </template>
-          </el-table-column>
-          <el-table-column label="現值">
-            <template #default="{ row }">
-              <el-input v-model="row.currentValueStr" size="small" style="width:100%" :input-style="{ textAlign: 'right' }"
-                @blur="row.currentValue = numParse(row.currentValueStr, 0); row.currentValueStr = numFmt(row.currentValue)" />
-            </template>
-          </el-table-column>
-          <el-table-column label="損益" width="120" align="right">
-            <template #default="{ row }">
-              <span :class="(row.currentValue-row.investmentAmount)>=0?'profit':'loss'">
-                {{ fmt(row.currentValue - row.investmentAmount) }}
-              </span>
-            </template>
-          </el-table-column>
-          <el-table-column width="50">
-            <template #default="{ $index }">
-              <el-button type="danger" size="small" :icon="Delete" circle @click="form.funds.splice($index,1)" />
-            </template>
-          </el-table-column>
-        </el-table>
-        <div class="sec-summary">
-          <div class="ds-item">
-            <span class="ds-label">投資金額</span>
-            <span class="ds-val">{{ fmt(fundTotalInvest) }}</span>
-          </div>
-          <div class="ds-sep" />
-          <div class="ds-item">
-            <span class="ds-label">現值</span>
-            <span class="ds-val">{{ fmt(fundTotalValue) }}</span>
-          </div>
-          <div class="ds-sep" />
-          <div class="ds-item">
-            <span class="ds-label">損益</span>
-            <span class="ds-val" :class="fundTotalProfit >= 0 ? 'profit' : 'loss'">
-              {{ fmt(fundTotalProfit) }}
-              <small style="font-weight:400"> ({{ pct(fundTotalInvest > 0 ? fundTotalProfit / fundTotalInvest : 0) }})</small>
-            </span>
-          </div>
-        </div>
-      </el-card>
-
       <!-- Stocks -->
       <el-card style="margin-bottom:16px">
         <template #header>
@@ -697,6 +618,85 @@
           </el-tab-pane>
         </el-tabs>
 
+      </el-card>
+
+      <!-- Funds -->
+      <el-card style="margin-bottom:16px">
+        <template #header>
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <span class="section-title">📊 信託基金</span>
+            <div style="display:flex;gap:8px">
+              <el-button size="small" type="primary" :loading="saving" @click="submit">存檔</el-button>
+              <el-button size="small" :loading="copyingPrev.funds" @click="copyPrevFunds">複製前一版</el-button>
+              <el-button size="small" :icon="Plus" @click="form.funds.push({fundName:'',bankId:null,investmentAmount:0,investmentAmountStr:'0',currentValue:0,currentValueStr:'0'})">新增</el-button>
+            </div>
+          </div>
+        </template>
+        <el-table :data="form.funds" size="small">
+          <el-table-column width="44">
+            <template #default="{ $index }">
+              <div class="sort-btns">
+                <el-button size="small" text :disabled="$index===0" @click="moveRow(form.funds,$index,-1)">↑</el-button>
+                <el-button size="small" text :disabled="$index===form.funds.length-1" @click="moveRow(form.funds,$index,1)">↓</el-button>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="基金名稱" min-width="140">
+            <template #default="{ row }">
+              <el-input v-model="row.fundName" size="small" />
+            </template>
+          </el-table-column>
+          <el-table-column label="銀行" width="160">
+            <template #default="{ row }">
+              <el-select v-model="row.bankId" size="small" style="width:100%" clearable>
+                <el-option v-for="b in bankOptions" :key="b.value" :label="b.label" :value="b.value" />
+              </el-select>
+            </template>
+          </el-table-column>
+          <el-table-column label="投資金額">
+            <template #default="{ row }">
+              <el-input v-model="row.investmentAmountStr" size="small" style="width:100%" :input-style="{ textAlign: 'right' }"
+                @blur="row.investmentAmount = numParse(row.investmentAmountStr, 0); row.investmentAmountStr = numFmt(row.investmentAmount)" />
+            </template>
+          </el-table-column>
+          <el-table-column label="現值">
+            <template #default="{ row }">
+              <el-input v-model="row.currentValueStr" size="small" style="width:100%" :input-style="{ textAlign: 'right' }"
+                @blur="row.currentValue = numParse(row.currentValueStr, 0); row.currentValueStr = numFmt(row.currentValue)" />
+            </template>
+          </el-table-column>
+          <el-table-column label="損益" width="120" align="right">
+            <template #default="{ row }">
+              <span :class="(row.currentValue-row.investmentAmount)>=0?'profit':'loss'">
+                {{ fmt(row.currentValue - row.investmentAmount) }}
+              </span>
+            </template>
+          </el-table-column>
+          <el-table-column width="50">
+            <template #default="{ $index }">
+              <el-button type="danger" size="small" :icon="Delete" circle @click="form.funds.splice($index,1)" />
+            </template>
+          </el-table-column>
+        </el-table>
+        <div class="sec-summary">
+          <div class="ds-item">
+            <span class="ds-label">投資金額</span>
+            <span class="ds-val">{{ fmt(fundTotalInvest) }}</span>
+          </div>
+          <div class="ds-sep" />
+          <div class="ds-item">
+            <span class="ds-label">現值</span>
+            <span class="ds-val">{{ fmt(fundTotalValue) }}</span>
+          </div>
+          <div class="ds-sep" />
+          <div class="ds-item">
+            <span class="ds-label">損益</span>
+            <span class="ds-val" :class="fundTotalProfit >= 0 ? 'profit' : 'loss'">
+              {{ fmt(fundTotalProfit) }}
+              <small style="font-weight:400"> ({{ pct(fundTotalInvest > 0 ? fundTotalProfit / fundTotalInvest : 0) }})</small>
+            </span>
+          </div>
+        </div>
       </el-card>
 
       <div style="text-align:center;margin-top:20px">
