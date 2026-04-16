@@ -96,6 +96,7 @@
       </el-card>
 
       <!-- Deposits -->
+      <!-- Deposits -->
       <el-card style="margin-bottom:16px">
         <template #header>
           <div style="display:flex;align-items:center;justify-content:space-between">
@@ -103,78 +104,290 @@
             <div style="display:flex;gap:8px">
               <el-button size="small" type="primary" :loading="saving" @click="submit">存檔</el-button>
               <el-button size="small" :loading="copyingPrev.deposits" @click="copyPrevDeposits">複製前一版</el-button>
-              <el-button size="small" :icon="Plus" @click="addDeposit">新增</el-button>
+              <el-button size="small" :icon="Plus" @click="addDeposit(depositTab)">新增</el-button>
             </div>
           </div>
         </template>
-        <el-table :data="form.deposits" size="small">
-          <el-table-column width="44">
-            <template #default="{ $index }">
-              <div class="sort-btns">
-                <el-button size="small" text :disabled="$index===0" @click="moveRow(form.deposits,$index,-1)">↑</el-button>
-                <el-button size="small" text :disabled="$index===form.deposits.length-1" @click="moveRow(form.deposits,$index,1)">↓</el-button>
+
+        <el-tabs v-model="depositTab">
+          <!-- 台幣 Tab -->
+          <el-tab-pane label="台幣" name="TWD">
+            <el-table :data="twdDeposits" size="small">
+              <el-table-column width="44">
+                <template #default="{ row }">
+                  <div class="sort-btns">
+                    <el-button size="small" text :disabled="twdDeposits.indexOf(row)===0" @click="moveDepositRow(row,-1)">↑</el-button>
+                    <el-button size="small" text :disabled="twdDeposits.indexOf(row)===twdDeposits.length-1" @click="moveDepositRow(row,1)">↓</el-button>
+                  </div>
+                </template>
+              </el-table-column>
+              <el-table-column label="銀行" width="160">
+                <template #default="{ row }">
+                  <el-select v-model="row.bankId" size="small" style="width:100%" clearable>
+                    <el-option v-for="b in bankOptions" :key="b.value" :label="b.label" :value="b.value" />
+                  </el-select>
+                </template>
+              </el-table-column>
+              <el-table-column label="存款類型" width="150">
+                <template #default="{ row }">
+                  <el-select v-model="row.depositType" size="small" style="width:100%">
+                    <el-option v-for="t in depositTypeOptions" :key="t.value" :label="t.label" :value="t.value" />
+                  </el-select>
+                </template>
+              </el-table-column>
+              <el-table-column label="金額（TWD）" align="right">
+                <template #default="{ row }">
+                  <el-input v-model="row.amountStr" size="small" style="width:100%" :input-style="{ textAlign: 'right' }"
+                    @blur="row.amount = numParse(row.amountStr, 0); row.amountStr = numFmt(row.amount)" />
+                </template>
+              </el-table-column>
+              <el-table-column label="備註">
+                <template #default="{ row }">
+                  <el-input v-model="row.notes" size="small" />
+                </template>
+              </el-table-column>
+              <el-table-column width="50">
+                <template #default="{ row }">
+                  <el-button type="danger" size="small" :icon="Delete" circle
+                    @click="form.deposits.splice(form.deposits.indexOf(row),1)" />
+                </template>
+              </el-table-column>
+            </el-table>
+            <!-- 台幣小計 -->
+            <div class="deposit-summary">
+              <div class="ds-item">
+                <span class="ds-label">台幣存款總計</span>
+                <span class="ds-val">{{ fmt(depositTwdTotal) }}</span>
               </div>
-            </template>
-          </el-table-column>
-          <el-table-column label="銀行" width="140">
-            <template #default="{ row }">
-              <el-select v-model="row.bankId" size="small" style="width:100%" clearable>
-                <el-option v-for="b in bankOptions" :key="b.value" :label="b.label" :value="b.value" />
-              </el-select>
-            </template>
-          </el-table-column>
-          <el-table-column label="存款類型" width="130">
-            <template #default="{ row }">
-              <el-select v-model="row.depositType" size="small" style="width:100%">
-                <el-option v-for="t in depositTypeOptions" :key="t.value" :label="t.label" :value="t.value" />
-              </el-select>
-            </template>
-          </el-table-column>
-          <el-table-column label="幣別" width="80">
-            <template #default="{ row }">
-              <el-select v-model="row.currency" size="small">
-                <el-option value="TWD" label="TWD" />
-                <el-option value="USD" label="USD" />
-              </el-select>
-            </template>
-          </el-table-column>
-          <el-table-column label="金額">
-            <template #default="{ row }">
-              <el-input v-model="row.amountStr" size="small" style="width:100%" :input-style="{ textAlign: 'right' }"
-                @blur="row.amount = numParse(row.amountStr, row.currency === 'USD' ? 2 : 0); row.amountStr = numFmt(row.amount)" />
-            </template>
-          </el-table-column>
-          <el-table-column label="台幣金額" align="right" width="130">
-            <template #default="{ row }">
-              <span style="font-size:13px;padding-right:6px">{{ fmt(depositTwd(row)) }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="備註">
-            <template #default="{ row }">
-              <el-input v-model="row.notes" size="small" />
-            </template>
-          </el-table-column>
-          <el-table-column width="50">
-            <template #default="{ $index }">
-              <el-button type="danger" size="small" :icon="Delete" circle @click="form.deposits.splice($index,1)" />
-            </template>
-          </el-table-column>
-        </el-table>
-        <div class="deposit-summary">
+              <div class="ds-sep" />
+              <div class="ds-item">
+                <span class="ds-label">定存</span>
+                <span class="ds-val">{{ fmt(depositTwdFixed) }}</span>
+              </div>
+              <div class="ds-sep" />
+              <div class="ds-item">
+                <span class="ds-label">活存／其他</span>
+                <span class="ds-val">{{ fmt(depositTwdDemand) }}</span>
+              </div>
+            </div>
+          </el-tab-pane>
+
+          <!-- 美元 Tab -->
+          <el-tab-pane label="美元" name="USD">
+            <el-table :data="usdDeposits" size="small">
+              <el-table-column width="44">
+                <template #default="{ row }">
+                  <div class="sort-btns">
+                    <el-button size="small" text :disabled="usdDeposits.indexOf(row)===0" @click="moveDepositRow(row,-1)">↑</el-button>
+                    <el-button size="small" text :disabled="usdDeposits.indexOf(row)===usdDeposits.length-1" @click="moveDepositRow(row,1)">↓</el-button>
+                  </div>
+                </template>
+              </el-table-column>
+              <el-table-column label="銀行" width="160">
+                <template #default="{ row }">
+                  <el-select v-model="row.bankId" size="small" style="width:100%" clearable>
+                    <el-option v-for="b in bankOptions" :key="b.value" :label="b.label" :value="b.value" />
+                  </el-select>
+                </template>
+              </el-table-column>
+              <el-table-column label="存款類型" width="150">
+                <template #default="{ row }">
+                  <el-select v-model="row.depositType" size="small" style="width:100%">
+                    <el-option v-for="t in depositTypeOptions" :key="t.value" :label="t.label" :value="t.value" />
+                  </el-select>
+                </template>
+              </el-table-column>
+              <el-table-column label="金額（USD）" align="right">
+                <template #default="{ row }">
+                  <el-input v-model="row.amountStr" size="small" style="width:100%" :input-style="{ textAlign: 'right' }"
+                    @blur="row.amount = numParse(row.amountStr, 2); row.amountStr = numFmt(row.amount)" />
+                </template>
+              </el-table-column>
+              <el-table-column label="台幣等值" align="right" width="130">
+                <template #default="{ row }">
+                  <span style="font-size:13px;color:#64748b">{{ fmt(depositTwd(row)) }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="備註">
+                <template #default="{ row }">
+                  <el-input v-model="row.notes" size="small" />
+                </template>
+              </el-table-column>
+              <el-table-column width="50">
+                <template #default="{ row }">
+                  <el-button type="danger" size="small" :icon="Delete" circle
+                    @click="form.deposits.splice(form.deposits.indexOf(row),1)" />
+                </template>
+              </el-table-column>
+            </el-table>
+            <!-- 美元小計 -->
+            <div class="deposit-summary">
+              <div class="ds-item">
+                <span class="ds-label">美元存款</span>
+                <span class="ds-val">USD {{ numFmt(usdDeposits.reduce((s,d)=>s+Number(d.amount||0),0).toFixed(2)) }}</span>
+              </div>
+              <div class="ds-sep" />
+              <div class="ds-item">
+                <span class="ds-label">台幣等值</span>
+                <span class="ds-val">{{ fmt(depositUsdTotal) }}</span>
+              </div>
+              <div class="ds-sep" />
+              <div class="ds-item">
+                <span class="ds-label">匯率</span>
+                <span class="ds-val" style="font-size:13px">{{ numFmt(form.usdExchangeRate) }} TWD/USD</span>
+              </div>
+            </div>
+          </el-tab-pane>
+
+          <!-- 在途款項 Tab -->
+          <el-tab-pane label="在途款項" name="TRANSIT">
+            <el-tabs v-model="transitTab" size="small" style="margin-top:4px">
+              <!-- 台幣 -->
+              <el-tab-pane label="台幣" name="TWD">
+                <el-table :data="transitTwdDeposits" size="small">
+                  <el-table-column width="44">
+                    <template #default="{ row }">
+                      <div class="sort-btns">
+                        <el-button size="small" text :disabled="transitTwdDeposits.indexOf(row)===0" @click="moveDepositRow(row,-1)">↑</el-button>
+                        <el-button size="small" text :disabled="transitTwdDeposits.indexOf(row)===transitTwdDeposits.length-1" @click="moveDepositRow(row,1)">↓</el-button>
+                      </div>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="銀行" width="160">
+                    <template #default="{ row }">
+                      <el-select v-model="row.bankId" size="small" style="width:100%" clearable>
+                        <el-option v-for="b in bankOptions" :key="b.value" :label="b.label" :value="b.value" />
+                      </el-select>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="類型" width="170">
+                    <template #default="{ row }">
+                      <el-select v-model="row.depositType" size="small" style="width:100%">
+                        <el-option v-for="t in transitTypeOptions" :key="t.value" :label="t.label" :value="t.value" />
+                      </el-select>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="金額（TWD）" align="right">
+                    <template #default="{ row }">
+                      <el-input v-model="row.amountStr" size="small" style="width:100%"
+                        :input-style="{ textAlign:'right', color: isTransitPayable(row) ? '#dc2626' : '#16a34a' }"
+                        @blur="row.amount = numParse(row.amountStr, 0); row.amountStr = numFmt(row.amount)" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="備註">
+                    <template #default="{ row }">
+                      <el-input v-model="row.notes" size="small" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column width="50">
+                    <template #default="{ row }">
+                      <el-button type="danger" size="small" :icon="Delete" circle
+                        @click="form.deposits.splice(form.deposits.indexOf(row),1)" />
+                    </template>
+                  </el-table-column>
+                </el-table>
+                <div class="deposit-summary" style="background:#f8fafc">
+                  <div class="ds-item">
+                    <span class="ds-label" style="color:#dc2626">待付</span>
+                    <span class="ds-val" style="color:#dc2626">
+                      {{ fmt(transitTwdDeposits.filter(isTransitPayable).reduce((s,d)=>s+Number(d.amount||0),0)) }}
+                    </span>
+                  </div>
+                  <div class="ds-sep" />
+                  <div class="ds-item">
+                    <span class="ds-label" style="color:#16a34a">待收</span>
+                    <span class="ds-val" style="color:#16a34a">
+                      {{ fmt(transitTwdDeposits.filter(d=>!isTransitPayable(d)).reduce((s,d)=>s+Number(d.amount||0),0)) }}
+                    </span>
+                  </div>
+                </div>
+              </el-tab-pane>
+              <!-- 外幣 -->
+              <el-tab-pane label="外幣" name="USD">
+                <el-table :data="transitUsdDeposits" size="small">
+                  <el-table-column width="44">
+                    <template #default="{ row }">
+                      <div class="sort-btns">
+                        <el-button size="small" text :disabled="transitUsdDeposits.indexOf(row)===0" @click="moveDepositRow(row,-1)">↑</el-button>
+                        <el-button size="small" text :disabled="transitUsdDeposits.indexOf(row)===transitUsdDeposits.length-1" @click="moveDepositRow(row,1)">↓</el-button>
+                      </div>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="銀行" width="160">
+                    <template #default="{ row }">
+                      <el-select v-model="row.bankId" size="small" style="width:100%" clearable>
+                        <el-option v-for="b in bankOptions" :key="b.value" :label="b.label" :value="b.value" />
+                      </el-select>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="類型" width="170">
+                    <template #default="{ row }">
+                      <el-select v-model="row.depositType" size="small" style="width:100%">
+                        <el-option v-for="t in transitTypeOptions" :key="t.value" :label="t.label" :value="t.value" />
+                      </el-select>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="金額（USD）" align="right">
+                    <template #default="{ row }">
+                      <el-input v-model="row.amountStr" size="small" style="width:100%"
+                        :input-style="{ textAlign:'right', color: isTransitPayable(row) ? '#dc2626' : '#16a34a' }"
+                        @blur="row.amount = numParse(row.amountStr, 2); row.amountStr = numFmt(row.amount)" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="台幣等值" align="right" width="120">
+                    <template #default="{ row }">
+                      <span :style="{ fontSize:'13px', color: isTransitPayable(row) ? '#dc2626' : '#16a34a' }">
+                        {{ isTransitPayable(row) ? '-' : '' }}{{ fmt(Math.abs(depositTwd(row))) }}
+                      </span>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="備註">
+                    <template #default="{ row }">
+                      <el-input v-model="row.notes" size="small" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column width="50">
+                    <template #default="{ row }">
+                      <el-button type="danger" size="small" :icon="Delete" circle
+                        @click="form.deposits.splice(form.deposits.indexOf(row),1)" />
+                    </template>
+                  </el-table-column>
+                </el-table>
+                <div class="deposit-summary" style="background:#f8fafc">
+                  <div class="ds-item">
+                    <span class="ds-label" style="color:#dc2626">待付（台幣等值）</span>
+                    <span class="ds-val" style="color:#dc2626">
+                      {{ fmt(transitUsdDeposits.filter(isTransitPayable).reduce((s,d)=>s+Math.abs(depositTwd(d)),0)) }}
+                    </span>
+                  </div>
+                  <div class="ds-sep" />
+                  <div class="ds-item">
+                    <span class="ds-label" style="color:#16a34a">待收（台幣等值）</span>
+                    <span class="ds-val" style="color:#16a34a">
+                      {{ fmt(transitUsdDeposits.filter(d=>!isTransitPayable(d)).reduce((s,d)=>s+Math.abs(depositTwd(d)),0)) }}
+                    </span>
+                  </div>
+                </div>
+              </el-tab-pane>
+            </el-tabs>
+          </el-tab-pane>
+        </el-tabs>
+
+        <!-- 合計 -->
+        <div class="deposit-summary" style="border-top:1px solid #e2e8f0;margin-top:0">
           <div class="ds-item">
-            <span class="ds-label">存款總計</span>
-            <span class="ds-val">{{ fmt(depositTotal) }}</span>
+            <span class="ds-label">存款總計（台幣）</span>
+            <span class="ds-val" style="font-weight:700">{{ fmt(depositTotal) }}</span>
           </div>
-          <div class="ds-sep" />
-          <div class="ds-item">
-            <span class="ds-label">定存</span>
-            <span class="ds-val">{{ fmt(depositFixed) }}</span>
-          </div>
-          <div class="ds-sep" />
-          <div class="ds-item">
-            <span class="ds-label">活存</span>
-            <span class="ds-val">{{ fmt(depositDemand) }}</span>
-          </div>
+          <template v-if="transitNetTwd !== 0">
+            <div class="ds-sep" />
+            <div class="ds-item">
+              <span class="ds-label" :style="{ color: transitNetTwd < 0 ? '#dc2626' : '#16a34a' }">在途款項</span>
+              <span class="ds-val" :style="{ color: transitNetTwd < 0 ? '#dc2626' : '#16a34a' }">
+                {{ transitNetTwd < 0 ? '-' : '+' }}{{ fmt(Math.abs(transitNetTwd)) }}
+              </span>
+            </div>
+          </template>
         </div>
       </el-card>
 
@@ -295,14 +508,16 @@
                 </template>
               </el-table-column>
 
-              <!-- 均價（唯讀，加權平均；多券商時顯示 "-"） -->
+              <!-- 均價（唯讀，加權平均） -->
               <el-table-column label="均價" width="90" align="right">
                 <template #default="{ row }">
-                  <span style="font-size:13px">
-                    {{ row.brokerRows.length === 1
-                        ? numFmt(row.brokerRows[0].avgCost)
-                        : '-' }}
-                  </span>
+                  <span style="font-size:13px">{{
+                    (() => {
+                      const totalShares = row.brokerRows.reduce((s, br) => s + Number(br.shares || 0), 0)
+                      const totalCost   = row.brokerRows.reduce((s, br) => s + Number(br.investmentCost || 0), 0)
+                      return totalShares > 0 ? numFmt(Number((totalCost / totalShares).toFixed(2))) : '-'
+                    })()
+                  }}</span>
                 </template>
               </el-table-column>
 
@@ -515,14 +730,16 @@
                 </template>
               </el-table-column>
 
-              <!-- 均價（唯讀，單券商顯示；多券商顯示 "-"） -->
+              <!-- 均價（唯讀，加權平均） -->
               <el-table-column label="均價" width="100" align="right">
                 <template #default="{ row }">
-                  <span style="font-size:13px">
-                    {{ row.brokerRows.length === 1
-                        ? numFmt(row.brokerRows[0].avgCost)
-                        : '-' }}
-                  </span>
+                  <span style="font-size:13px">{{
+                    (() => {
+                      const totalShares = row.brokerRows.reduce((s, br) => s + Number(br.shares || 0), 0)
+                      const totalCost   = row.brokerRows.reduce((s, br) => s + Number(br.investmentCost || 0), 0)
+                      return totalShares > 0 ? numFmt(Number((totalCost / totalShares).toFixed(4))) : '-'
+                    })()
+                  }}</span>
                 </template>
               </el-table-column>
 
@@ -861,9 +1078,19 @@ const stockProfitRate = (s) => { const c = stockCost(s); return c > 0 ? stockPro
 const stockDividend = (s) => stockValue(s) * Number(s.dividendRate || 0)
 
 // ===== Computed: deposits =====
+const transitPayableTypes = new Set(['信用卡待付款', '買股待付款'])  // 負值（待付）
+const isTransitPayable = (d) => transitPayableTypes.has(d.depositType)
+
 const depositTwd = (d) => {
   const amt = Number(d.amount || 0)
-  return d.currency === 'USD' ? Math.round(amt * (form.usdExchangeRate || 1)) : amt
+  if (d.currency === 'USD')         return Math.round(amt * (form.usdExchangeRate || 1))
+  if (d.currency === 'DEBT')        return -amt   // 舊版相容
+  if (d.currency === 'TRANSIT_TWD') return isTransitPayable(d) ? -amt : amt
+  if (d.currency === 'TRANSIT_USD') {
+    const twd = Math.round(amt * (form.usdExchangeRate || 1))
+    return isTransitPayable(d) ? -twd : twd
+  }
+  return amt
 }
 const depositTotal = computed(() =>
   form.deposits.reduce((sum, d) => sum + depositTwd(d), 0)
@@ -901,9 +1128,70 @@ const twSummary  = computed(() => calcGroupedSummary(twStocks.value))
 const usSummary  = computed(() => calcGroupedSummary(usStocks.value))
 const allSummary = computed(() => calcGroupedSummary(form.stocks))
 
+// ===== Deposit helpers =====
+const transitTypeOptions = [
+  { value: '信用卡待付款', label: '信用卡待付款' },
+  { value: '買股待付款',   label: '買股待付款' },
+  { value: '賣股待收款',   label: '賣股待收款' },
+]
+
+// 將後端 deposit DTO 轉成前端 row（顯示用金額一律為正數）
+const mapDepositFromApi = (d, rate = 1) => {
+  let currency = d.currency || 'TWD'
+  let displayAmt
+  if (currency === 'USD') {
+    displayAmt = d.originalAmount != null ? d.originalAmount : Number((d.amount / rate).toFixed(2))
+  } else if (currency === 'TRANSIT_USD') {
+    displayAmt = d.originalAmount != null ? d.originalAmount : Number((Math.abs(d.amount) / rate).toFixed(2))
+  } else if (currency === 'DEBT') {
+    // 舊版 DEBT → 移到 TRANSIT_TWD
+    currency = 'TRANSIT_TWD'
+    displayAmt = Math.abs(d.amount)
+  } else if (currency === 'TRANSIT_TWD') {
+    displayAmt = Math.abs(d.amount)
+  } else if (d.amount < 0) {
+    // 舊版 TWD 負值 → 移到 TRANSIT_TWD
+    currency = 'TRANSIT_TWD'
+    displayAmt = Math.abs(d.amount)
+  } else {
+    displayAmt = d.amount
+  }
+  return { bankId: d.bankId || null, depositType: d.depositType, currency, amount: displayAmt, amountStr: numFmt(displayAmt), notes: d.notes }
+}
+
+// ===== Deposit Tabs =====
+const depositTab  = ref('TWD')
+const transitTab  = ref('TWD')
+const twdDeposits         = computed(() => form.deposits.filter(d => d.currency === 'TWD'))
+const usdDeposits         = computed(() => form.deposits.filter(d => d.currency === 'USD'))
+const transitTwdDeposits  = computed(() => form.deposits.filter(d => d.currency === 'TRANSIT_TWD'))
+const transitUsdDeposits  = computed(() => form.deposits.filter(d => d.currency === 'TRANSIT_USD'))
+const transitDeposits     = computed(() => [...transitTwdDeposits.value, ...transitUsdDeposits.value])
+const depositTwdTotal  = computed(() => twdDeposits.value.reduce((s, d) => s + depositTwd(d), 0))
+const depositTwdFixed  = computed(() => twdDeposits.value.filter(d => (d.depositType || '').includes('定存')).reduce((s, d) => s + depositTwd(d), 0))
+const depositTwdDemand = computed(() => depositTwdTotal.value - depositTwdFixed.value)
+const depositUsdTotal  = computed(() => usdDeposits.value.reduce((s, d) => s + depositTwd(d), 0))
+const transitNetTwd    = computed(() => transitDeposits.value.reduce((s, d) => s + depositTwd(d), 0))
+
+const moveDepositRow = (row, dir) => {
+  const idx = form.deposits.indexOf(row)
+  if (idx < 0) return
+  const newIdx = idx + dir
+  if (newIdx < 0 || newIdx >= form.deposits.length) return
+  form.deposits.splice(idx, 1)
+  form.deposits.splice(newIdx, 0, row)
+}
+
 // ===== Mutations =====
-const addDeposit = () =>
-  form.deposits.push({ bankId: null, depositType: '活存', currency: 'TWD', amount: 0, amountStr: '0' })
+const addDeposit = (outerTab = 'TWD') => {
+  if (outerTab === 'TRANSIT') {
+    const currency = transitTab.value === 'USD' ? 'TRANSIT_USD' : 'TRANSIT_TWD'
+    form.deposits.push({ bankId: null, depositType: '信用卡待付款', currency, amount: 0, amountStr: '0' })
+    return
+  }
+  const typeMap = { USD: '美元活存', TWD: '活存' }
+  form.deposits.push({ bankId: null, depositType: typeMap[outerTab] ?? '活存', currency: outerTab, amount: 0, amountStr: '0' })
+}
 
 const addFund = () =>
   form.funds.push({ fundName: '', bankId: null, investmentAmount: 0, investmentAmountStr: '0', currentValue: 0, currentValueStr: '0' })
@@ -1069,13 +1357,7 @@ const copyPrevDeposits = async () => {
   try {
     const detail = await snapshotApi.getDetail(prevId)
     const rate = form.usdExchangeRate || 1
-    form.deposits = detail.deposits.map(d => {
-      const displayAmt = d.currency === 'USD'
-        ? (d.originalAmount != null ? d.originalAmount : Number((d.amount / rate).toFixed(2)))
-        : d.amount
-      return { bankId: d.bankId || null, depositType: d.depositType, currency: d.currency,
-               amount: displayAmt, amountStr: numFmt(displayAmt), notes: d.notes }
-    })
+    form.deposits = detail.deposits.map(d => mapDepositFromApi(d, rate))
     ElMessage.success(`已複製前一版存款明細（${detail.snapshotDate}，共 ${detail.deposits.length} 筆）`)
   } catch (e) { if (e?.message !== 'cancel') throw e
   } finally { copyingPrev.deposits = false }
@@ -1430,21 +1712,7 @@ onMounted(async () => {
       snapshotDate:    detail.snapshotDate,
       usdExchangeRate: detail.usdExchangeRate,
       notes:           detail.notes,
-      deposits: detail.deposits.map(d => {
-        // amount 欄位存放「該幣別的原始金額」：
-        //   USD：優先用 originalAmount；若無則由台幣金額 ÷ 匯率反推
-        //   TWD：直接用 amount
-        const rate = detail.usdExchangeRate || 1
-        const displayAmt = d.currency === 'USD'
-          ? (d.originalAmount != null ? d.originalAmount : Number((d.amount / rate).toFixed(2)))
-          : d.amount
-        return {
-          bankId: d.bankId || null, depositType: d.depositType, currency: d.currency,
-          amount: displayAmt,
-          amountStr: numFmt(displayAmt),
-          notes: d.notes
-        }
-      }),
+      deposits: detail.deposits.map(d => mapDepositFromApi(d, detail.usdExchangeRate || 1)),
       funds: detail.funds.map(f => ({
         fundName: f.fundName, fundCode: f.fundCode, bankId: f.bankId || null,
         investmentAmount: f.investmentAmount, investmentAmountStr: numFmt(f.investmentAmount),
@@ -1489,8 +1757,8 @@ const submit = async () => {
       bankId: d.bankId || null,
       depositType: d.depositType,
       currency: d.currency,
-      amount: depositTwd(d),                            // 台幣金額
-      originalAmount: d.currency === 'USD' ? d.amount : null,  // 原幣金額
+      amount: depositTwd(d),                                                              // 台幣金額（在途待付為負）
+      originalAmount: (d.currency === 'USD' || d.currency === 'TRANSIT_USD') ? d.amount : null,
       notes: d.notes || null
     }))
     const funds = form.funds.map(f => ({

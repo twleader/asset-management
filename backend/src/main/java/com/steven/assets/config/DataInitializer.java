@@ -50,7 +50,8 @@ public class DataInitializer implements ApplicationRunner {
             new BankSeed("huanan",   "華南銀行",     "華南,Hua Nan"),
             new BankSeed("line",     "Line Bank",    "Line,LINE"),
             new BankSeed("yuanta",   "元大銀行",     "元大,Yuanta"),
-            new BankSeed("sinopac",  "永豐銀行",     "永豐,SinoPac")
+            new BankSeed("sinopac",  "永豐銀行",     "永豐,SinoPac"),
+            new BankSeed("dbs",      "星展銀行",     "星展,DBS")
         );
 
         for (BankSeed s : seeds) {
