@@ -79,18 +79,18 @@ export const useAssetStore = defineStore('asset', {
 
     async createRealizedGain(data) {
       const result = await gainApi.create(data)
-      await this.fetchRealizedGains()
+      await Promise.all([this.fetchRealizedGains(), this.fetchHistory()])
       return result
     },
 
     async deleteRealizedGain(id) {
       await gainApi.delete(id)
-      await this.fetchRealizedGains()
+      await Promise.all([this.fetchRealizedGains(), this.fetchHistory()])
     },
 
     async importRealizedGains(file) {
       const result = await gainApi.importExcel(file)
-      await this.fetchRealizedGains()
+      await Promise.all([this.fetchRealizedGains(), this.fetchHistory()])
       return result
     }
   }

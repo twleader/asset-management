@@ -218,11 +218,20 @@ public class AssetService {
         BigDecimal prevTotal = null;
         var result = new java.util.ArrayList<AssetSnapshotDto.AssetHistoryResponse>();
 
-        // 預先加總每個年度的已實現損益（台幣）
+        // 預先加總每個年度的已實現損益（台幣等值）
         java.util.Map<Integer, BigDecimal> realizedByYear = new java.util.HashMap<>();
         for (Integer year : gainRepo.findDistinctYears()) {
             BigDecimal total = gainRepo.findByYearOrderByTradeDateAsc(year).stream()
-                .map(g -> g.getProfit() != null ? g.getProfit() : BigDecimal.ZERO)
+                .map(g -> {
+                    if (g.getProfit() == null) return BigDecimal.ZERO;
+                    // USD 計價：profit × exchangeRate 換算台幣
+                    if ("USD".equals(g.getCurrency())) {
+                        BigDecimal rate = g.getExchangeRate();
+                        if (rate == null) rate = lookupExchangeRate(g.getTradeDate());
+                        if (rate != null) return g.getProfit().multiply(rate).setScale(0, RoundingMode.HALF_UP);
+                    }
+                    return g.getProfit();
+                })
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
             realizedByYear.put(year, total);
         }
