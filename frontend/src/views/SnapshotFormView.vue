@@ -652,11 +652,22 @@
                         <template #default="{ row: br }">
                           <el-input v-model="br.sharesStr" size="small"
                             style="width:100%" :input-style="{ textAlign: 'right' }"
-                            @blur="() => { br.shares = numParse(br.sharesStr, 5); br.sharesStr = numFmt(br.shares); if (br.avgCost) { const p = br.currency === 'USD' ? 6 : 2; br.investmentCost = numParse(((br.avgCost||0)*(br.shares||0)).toFixed(p), p); br.investmentCostStr = numFmt(br.investmentCost) } }" />
+                            @blur="() => {
+                              br.shares = numParse(br.sharesStr, 5); br.sharesStr = numFmt(br.shares)
+                              if (br.avgCost) {
+                                if (br.currency === 'USD') {
+                                  br.investmentCost = numParse(((br.avgCost||0)*(br.shares||0)).toFixed(6), 6)
+                                  br.investmentCostStr = numFmt(br.investmentCost)
+                                } else {
+                                  const twd = Math.round((br.avgCost||0)*(br.shares||0)*(form.usdExchangeRate||1))
+                                  br.investmentCost = twd; br.investmentCostStr = numFmt(twd)
+                                }
+                              }
+                            }" />
                         </template>
                       </el-table-column>
-                      <!-- 幣別 -->
-                      <el-table-column label="幣別" width="110">
+                      <!-- 幣別（持股成本幣別） -->
+                      <el-table-column label="成本幣別" width="110">
                         <template #default="{ row: br }">
                           <el-select v-model="br.currency" size="small" style="width:100%">
                             <el-option value="TWD" label="TWD" />
@@ -664,34 +675,55 @@
                           </el-select>
                         </template>
                       </el-table-column>
-                      <!-- 均價（輸入後自動計算持股成本） -->
-                      <el-table-column label="均價" width="130">
+                      <!-- 均價(USD)：永遠以 USD 輸入；連動計算持股成本 -->
+                      <el-table-column label="均價(USD)" width="130">
                         <template #default="{ row: br }">
                           <el-input v-model="br.avgCostStr" size="small"
                             style="width:100%" :input-style="{ textAlign: 'right' }"
-                            @blur="() => { const p = br.currency === 'USD' ? 6 : 2; br.avgCost = numParse(br.avgCostStr, p); br.avgCostStr = numFmt(br.avgCost); br.investmentCost = numParse(((br.avgCost||0)*(br.shares||0)).toFixed(p), p); br.investmentCostStr = numFmt(br.investmentCost); if (br.currency === 'USD') br.originalCurrencyValue = br.avgCost }" />
+                            @blur="() => {
+                              br.avgCost = numParse(br.avgCostStr, 6)
+                              br.avgCostStr = numFmt(br.avgCost)
+                              br.originalCurrencyValue = br.avgCost
+                              if (br.currency === 'USD') {
+                                br.investmentCost = numParse(((br.avgCost||0)*(br.shares||0)).toFixed(6), 6)
+                                br.investmentCostStr = numFmt(br.investmentCost)
+                              } else {
+                                const twd = Math.round((br.avgCost||0)*(br.shares||0)*(form.usdExchangeRate||1))
+                                br.investmentCost = twd; br.investmentCostStr = numFmt(twd)
+                              }
+                            }" />
                         </template>
                       </el-table-column>
-                      <!-- 持股成本（可輸入，blur 後反算均價） -->
-                      <el-table-column label="持股成本" width="130">
+                      <!-- 持股成本：TWD 時為台幣，USD 時為美元；反算均價(USD) -->
+                      <el-table-column label="持股成本" width="145">
                         <template #default="{ row: br }">
                           <el-input v-model="br.investmentCostStr" size="small"
                             style="width:100%" :input-style="{ textAlign: 'right' }"
-                            @blur="() => { const p = br.currency === 'USD' ? 6 : 2; br.investmentCost = numParse(br.investmentCostStr, p); br.investmentCostStr = numFmt(br.investmentCost); if (br.shares > 0) { br.avgCost = parseFloat((br.investmentCost / br.shares).toFixed(p)); br.avgCostStr = numFmt(br.avgCost); if (br.currency === 'USD') br.originalCurrencyValue = br.avgCost } }" />
+                            :placeholder="br.currency"
+                            @blur="() => {
+                              const p = br.currency === 'USD' ? 6 : 0
+                              br.investmentCost = numParse(br.investmentCostStr, p)
+                              br.investmentCostStr = numFmt(br.investmentCost)
+                              if (br.shares > 0) {
+                                if (br.currency === 'USD') {
+                                  br.avgCost = parseFloat((br.investmentCost / br.shares).toFixed(6))
+                                } else {
+                                  br.avgCost = parseFloat((br.investmentCost / br.shares / (form.usdExchangeRate||1)).toFixed(6))
+                                }
+                                br.avgCostStr = numFmt(br.avgCost)
+                                br.originalCurrencyValue = br.avgCost
+                              }
+                            }" />
                         </template>
                       </el-table-column>
-                      <!-- 現值(原幣)：唯讀，由最新股價 × 股數計算 -->
-                      <el-table-column label="現值(原幣)" width="130" align="right">
+                      <!-- 現值(USD)：唯讀 -->
+                      <el-table-column label="現值(USD)" width="110" align="right">
                         <template #default="{ row: br }">
-                          <span style="font-size:13px">
-                            {{ br.currency === 'USD'
-                              ? numFmt(calcBrOriginalValue(br, row).toFixed(2))
-                              : fmt(calcBrTwdValue(br, row)) }}
-                          </span>
+                          <span style="font-size:13px">{{ numFmt(calcBrOriginalValue(br, row).toFixed(2)) }}</span>
                         </template>
                       </el-table-column>
-                      <!-- 現值(台幣)：唯讀，USD 再乘匯率 -->
-                      <el-table-column label="現值(台幣)" width="130" align="right">
+                      <!-- 現值(台幣)：唯讀 -->
+                      <el-table-column label="現值(台幣)" width="120" align="right">
                         <template #default="{ row: br }">
                           <span style="font-size:13px">{{ fmt(calcBrTwdValue(br, row)) }}</span>
                         </template>
@@ -730,14 +762,15 @@
                 </template>
               </el-table-column>
 
-              <!-- 均價（唯讀，加權平均） -->
-              <el-table-column label="均價" width="100" align="right">
+              <!-- 均價(USD)（唯讀，加權平均 originalCurrencyValue） -->
+              <el-table-column label="均價(USD)" width="110" align="right">
                 <template #default="{ row }">
                   <span style="font-size:13px">{{
                     (() => {
-                      const totalShares = row.brokerRows.reduce((s, br) => s + Number(br.shares || 0), 0)
-                      const totalCost   = row.brokerRows.reduce((s, br) => s + Number(br.investmentCost || 0), 0)
-                      return totalShares > 0 ? numFmt(Number((totalCost / totalShares).toFixed(4))) : '-'
+                      const totalShares  = row.brokerRows.reduce((s, br) => s + Number(br.shares || 0), 0)
+                      const totalUsdCost = row.brokerRows.reduce((s, br) =>
+                        s + Number(br.originalCurrencyValue || br.avgCost || 0) * Number(br.shares || 0), 0)
+                      return totalShares > 0 ? numFmt(Number((totalUsdCost / totalShares).toFixed(4))) : '-'
                     })()
                   }}</span>
                 </template>
