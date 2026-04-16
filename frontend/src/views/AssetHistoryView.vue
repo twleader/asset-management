@@ -45,8 +45,11 @@
           :formatter="(r) => r.investmentRate ? pct(r.investmentRate) : '-'" />
         <el-table-column label="預估配息" align="right"
           :formatter="(r) => r.estimatedAnnualDividend ? fmt(r.estimatedAnnualDividend) : '-'" />
-        <el-table-column label="已實現損益" align="right"
-          :formatter="(r) => r.realizedGain ? fmt(r.realizedGain) : '-'" />
+        <el-table-column label="已實現損益" align="right">
+          <template #default="{ row }">
+            {{ isLastOfYear(row) && row.realizedGain ? fmt(row.realizedGain) : '-' }}
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="130" fixed="right" align="center">
           <template #default="{ row }">
             <el-button size="small" :icon="Edit" link type="primary"
@@ -117,6 +120,17 @@ const handleRecalcDividends = async () => {
     recalculating.value = false
   }
 }
+
+// 每年最後一筆的 id 集合（用於「已實現損益」只顯示當年最後一筆）
+const lastOfYearIds = computed(() => {
+  const map = {}
+  for (const r of store.history) {
+    const year = r.snapshotDate?.slice(0, 4)
+    if (year) map[year] = r.id
+  }
+  return new Set(Object.values(map))
+})
+const isLastOfYear = (row) => lastOfYearIds.value.has(row.id)
 
 const deleteSnapshot = async (id) => {
   await store.deleteSnapshot(id)

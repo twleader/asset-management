@@ -915,10 +915,13 @@
                 @blur="row.currentValue = numParse(row.currentValueStr, 0); row.currentValueStr = numFmt(row.currentValue)" />
             </template>
           </el-table-column>
-          <el-table-column label="損益" width="120" align="right">
+          <el-table-column label="損益" width="150" align="right">
             <template #default="{ row }">
               <span :class="(row.currentValue-row.investmentAmount)>=0?'profit':'loss'">
                 {{ fmt(row.currentValue - row.investmentAmount) }}
+                <small v-if="row.investmentAmount>0" style="font-weight:400">
+                  ({{ pct((row.currentValue - row.investmentAmount) / row.investmentAmount) }})
+                </small>
               </span>
             </template>
           </el-table-column>
