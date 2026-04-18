@@ -165,6 +165,19 @@ public class MarketDataController {
     }
 
     /**
+     * 取得指定日期（或之前最近）的歷史匯率
+     * GET /api/market-data/exchange-rate/on-date?currency=USD&date=2025-01-15
+     */
+    @GetMapping("/exchange-rate/on-date")
+    public ResponseEntity<ExchangeRateHistory> getExchangeRateOnDate(
+            @RequestParam(defaultValue = "USD") String currency,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        return historicalDataService.getExchangeRateOnDate(currency, date)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    /**
      * 取得最新匯率（資料庫中最近一筆）
      * GET /api/market-data/exchange-rate/latest?currency=USD
      */

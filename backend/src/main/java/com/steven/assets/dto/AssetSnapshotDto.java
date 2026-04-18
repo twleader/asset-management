@@ -1,7 +1,6 @@
 package com.steven.assets.dto;
 
 import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.PastOrPresent;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -11,7 +10,7 @@ public class AssetSnapshotDto {
 
     // ===== Request =====
     public record CreateSnapshotRequest(
-            @NotNull @PastOrPresent LocalDate snapshotDate,
+            @NotNull LocalDate snapshotDate,
             BigDecimal usdExchangeRate,
             String notes,
             List<DepositRequest> deposits,
@@ -47,7 +46,10 @@ public class AssetSnapshotDto {
             BigDecimal estimatedDividend,
             BigDecimal dividendRate,
             String currency,
-            BigDecimal originalCurrencyValue
+            BigDecimal originalCurrencyValue,
+            String transactionType,
+            LocalDate transactionDate,
+            BigDecimal transactionExchangeRate
     ) {}
 
     // ===== Response =====
@@ -125,7 +127,10 @@ public class AssetSnapshotDto {
             BigDecimal estimatedDividend,
             BigDecimal dividendRate,
             String currency,
-            BigDecimal originalCurrencyValue
+            BigDecimal originalCurrencyValue,
+            String transactionType,
+            LocalDate transactionDate,
+            BigDecimal transactionExchangeRate
     ) {}
 
     // ===== Asset History =====

@@ -475,3 +475,32 @@
 - [ ] 13.4 資料庫遷移策略
   - 評估從 `ddl-auto=update` 遷移至 Flyway/Liquibase
   - 建立初始 schema migration script（含 Bank / Broker Seed Data）
+
+---
+
+### Task 14: 股票交易類型與日期
+
+**對應 Requirements:** Requirement 3
+**前置任務:** Task 2, Task 3
+
+#### Steps:
+
+- [ ] 14.1 StockHolding model 新增欄位
+  - `transactionType` (String)：買 / 賣
+  - `transactionDate` (LocalDate)：交易日期
+  - `transactionExchangeRate` (BigDecimal, precision 10,4)：交易日當日匯率（美股用）
+
+- [ ] 14.2 StockRequest DTO 新增對應欄位
+
+- [ ] 14.3 AssetService 映射新欄位（createSnapshot / updateSnapshot）
+
+- [ ] 14.4 新增 API endpoint `GET /api/market-data/exchange-rate/on-date?currency=USD&date=YYYY-MM-DD`
+  - 使用 ExchangeRateHistoryRepository.findClosestRate() 查詢
+
+- [ ] 14.5 前端 newBrokerRow / groupStocks / flattenStocks 支援新欄位
+
+- [ ] 14.6 台股 broker row 表格加入「買/賣」與「交易日期」欄位
+
+- [ ] 14.7 美股 broker row 表格加入「買/賣」與「交易日期」欄位；日期選定後自動抓取歷史匯率
+
+- [ ] 14.8 成本計算改用 transactionExchangeRate（優先）或 form.usdExchangeRate（備援）

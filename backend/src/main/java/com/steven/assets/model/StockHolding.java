@@ -8,6 +8,7 @@ import lombok.Builder;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 
 /**
  * 股票持有明細
@@ -74,6 +75,17 @@ public class StockHolding {
     /** 原幣現值 (用於美股原幣計算) */
     @Column(precision = 20, scale = 4)
     private BigDecimal originalCurrencyValue;
+
+    /** 交易類型：買 / 賣 */
+    @Column(length = 10)
+    private String transactionType;
+
+    /** 交易日期 */
+    private LocalDate transactionDate;
+
+    /** 交易日當日匯率（美股用，TWD/USD） */
+    @Column(precision = 10, scale = 4)
+    private BigDecimal transactionExchangeRate;
 
     /** 損益 = 現值 - 投資成本 */
     public BigDecimal getProfit() {

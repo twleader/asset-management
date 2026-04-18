@@ -633,6 +633,12 @@ public class HistoricalDataService {
         return rateHistRepo.findClosestRate(currency, LocalDate.now());
     }
 
+    /** 取得指定日期或之前最近一筆匯率（用於歷史交易日匯率查詢） */
+    @Transactional(readOnly = true)
+    public java.util.Optional<ExchangeRateHistory> getExchangeRateOnDate(String currency, LocalDate date) {
+        return rateHistRepo.findClosestRate(currency, date);
+    }
+
     // ═══════════════════════════════════════════════════════════════════════
     //  Helpers
     // ═══════════════════════════════════════════════════════════════════════

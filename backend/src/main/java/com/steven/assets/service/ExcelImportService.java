@@ -185,7 +185,8 @@ public class ExcelImportService {
                     stocks.add(new AssetSnapshotDto.StockRequest(
                         stockCode, stockName != null ? stockName : stockCode,
                         market, brokerId,
-                        shares, cost, value, div, null, "TWD", null
+                        shares, cost, value, div, null, "TWD", null,
+                        null, null, null
                     ));
                 }
             }

@@ -5,3 +5,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/v1.1.0-drop-legacy-constraints.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.2.0-extend-deposit-currency.sql
+      relativeToChangelogFile: false

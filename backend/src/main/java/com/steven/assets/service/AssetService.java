@@ -145,6 +145,9 @@ public class AssetService {
                         .dividendRate(st.dividendRate())
                         .currency(st.currency() != null ? st.currency() : "TWD")
                         .originalCurrencyValue(st.originalCurrencyValue())
+                        .transactionType(st.transactionType())
+                        .transactionDate(st.transactionDate())
+                        .transactionExchangeRate(st.transactionExchangeRate())
                         .build();
                 snapshot.getStocks().add(stock);
             });
@@ -197,7 +200,11 @@ public class AssetService {
                     .investmentCost(st.investmentCost()).currentValue(st.currentValue())
                     .estimatedDividend(st.estimatedDividend()).dividendRate(st.dividendRate())
                     .currency(st.currency() != null ? st.currency() : "TWD")
-                    .originalCurrencyValue(st.originalCurrencyValue()).build());
+                    .originalCurrencyValue(st.originalCurrencyValue())
+                    .transactionType(st.transactionType())
+                    .transactionDate(st.transactionDate())
+                    .transactionExchangeRate(st.transactionExchangeRate())
+                    .build());
             });
         }
 
@@ -578,7 +585,8 @@ public class AssetService {
                     st.getShares(), st.getInvestmentCost(), st.getCurrentValue(),
                     st.getProfit(), st.getProfitRate(),
                     st.getEstimatedDividend(), st.getDividendRate(),
-                    st.getCurrency(), st.getOriginalCurrencyValue()
+                    st.getCurrency(), st.getOriginalCurrencyValue(),
+                    st.getTransactionType(), st.getTransactionDate(), st.getTransactionExchangeRate()
                 )).toList();
 
         return new AssetSnapshotDto.SnapshotDetailResponse(
