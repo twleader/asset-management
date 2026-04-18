@@ -441,29 +441,6 @@
                           </el-select>
                         </template>
                       </el-table-column>
-                      <el-table-column label="股數" width="110">
-                        <template #default="{ row: br }">
-                          <el-input v-model="br.sharesStr" size="small"
-                            style="width:100%" :input-style="{ textAlign: 'right' }"
-                            @blur="br.shares = numParse(br.sharesStr, 0); br.sharesStr = numFmt(br.shares)" />
-                        </template>
-                      </el-table-column>
-                      <!-- 均價（每股）→ 輸入後自動算總成本 -->
-                      <el-table-column label="均價" width="110">
-                        <template #default="{ row: br }">
-                          <el-input v-model="br.avgCostStr" size="small"
-                            style="width:100%" :input-style="{ textAlign: 'right' }"
-                            @blur="br.avgCost = numParse(br.avgCostStr, 2); br.avgCostStr = numFmt(br.avgCost); br.investmentCost = Math.round((br.avgCost||0) * (br.shares||0)); br.investmentCostStr = numFmt(br.investmentCost)" />
-                        </template>
-                      </el-table-column>
-                      <!-- 持股成本（總額）→ 輸入後自動算均價 -->
-                      <el-table-column label="持股成本" width="120">
-                        <template #default="{ row: br }">
-                          <el-input v-model="br.investmentCostStr" size="small"
-                            style="width:100%" :input-style="{ textAlign: 'right' }"
-                            @blur="br.investmentCost = numParse(br.investmentCostStr, 0); br.investmentCostStr = numFmt(br.investmentCost); if (br.shares > 0) { br.avgCost = Number((br.investmentCost / br.shares).toFixed(2)); br.avgCostStr = numFmt(br.avgCost) }" />
-                        </template>
-                      </el-table-column>
                       <!-- 買/賣 -->
                       <el-table-column label="買/賣" width="80">
                         <template #default="{ row: br }">
@@ -480,16 +457,44 @@
                             style="width:100%" value-format="YYYY-MM-DD" placeholder="選擇日期" />
                         </template>
                       </el-table-column>
+                      <el-table-column label="股數" width="110">
+                        <template #default="{ row: br }">
+                          <el-input v-model="br.sharesStr" size="small"
+                            style="width:100%" :input-style="{ textAlign: 'right' }"
+                            @blur="br.shares = numParse(br.sharesStr, 0); br.sharesStr = numFmt(br.shares)" />
+                        </template>
+                      </el-table-column>
+                      <!-- 均價（每股）→ 輸入後自動算總成本 -->
+                      <el-table-column label="均價" width="110">
+                        <template #default="{ row: br }">
+                          <el-input v-model="br.avgCostStr" size="small"
+                            style="width:100%" :input-style="{ textAlign: 'right' }"
+                            @blur="br.avgCost = numParse(br.avgCostStr, 2); br.avgCostStr = numFmt(br.avgCost); br.investmentCost = numParse(((br.avgCost||0) * (br.shares||0)).toFixed(2), 2); br.investmentCostStr = numFmt(br.investmentCost)" />
+                        </template>
+                      </el-table-column>
+                      <!-- 持股成本（總額）→ 輸入後自動算均價 -->
+                      <el-table-column label="持股成本" width="120">
+                        <template #default="{ row: br }">
+                          <el-input v-model="br.investmentCostStr" size="small"
+                            style="width:100%" :input-style="{ textAlign: 'right' }"
+                            @blur="br.investmentCost = numParse(br.investmentCostStr, 2); br.investmentCostStr = numFmt(br.investmentCost); if (br.shares > 0) { br.avgCost = Number((br.investmentCost / br.shares).toFixed(2)); br.avgCostStr = numFmt(br.avgCost) }" />
+                        </template>
+                      </el-table-column>
                       <el-table-column label="現值" width="120" align="right">
                         <template #default="{ row: br }">
                           <span style="font-size:13px">{{ fmt(calcBrTwdValue(br, row)) }}</span>
                         </template>
                       </el-table-column>
-                      <el-table-column label="損益" width="110" align="right">
+                      <el-table-column label="損益" width="130" align="right">
                         <template #default="{ row: br }">
                           <span :class="(calcBrTwdValue(br, row) - brCost(br))>=0?'profit':'loss'">
                             {{ fmt(calcBrTwdValue(br, row) - brCost(br)) }}
                           </span>
+                          <small v-if="brCost(br) > 0"
+                            :class="(calcBrTwdValue(br, row) - brCost(br))>=0?'profit':'loss'"
+                            style="display:block;font-weight:400">
+                            ({{ pct((calcBrTwdValue(br, row) - brCost(br)) / brCost(br)) }})
+                          </small>
                         </template>
                       </el-table-column>
                       <el-table-column width="40">
@@ -1175,23 +1180,19 @@ const calcBrTwdValue = (br, stock) => {
   return Math.round(orig)
 }
 
-/** 單一 brokerRow 的 DB 儲存值：
- *  - 美股 TWD 幣別：回傳 investmentCostTwd（台幣原始支出），沒有則由 USD 成本 × 匯率換算
- *  - 美股 USD 幣別：直接回傳 USD investmentCost
- *  - 台股：回傳 TWD investmentCost */
+/** 單一 brokerRow 的原幣成本：
+ *  - 美股 TWD 幣別（有 investmentCostTwd）：回傳台幣原始支出
+ *  - 其他（台股 TWD、美股 USD）：直接回傳 investmentCost */
 const brCost = (br) => {
-  // 美股 TWD 幣別：DB 存台幣
+  // 美股 TWD 幣別：優先使用台幣原始支出
   if (br.currency === 'TWD' && br.investmentCostTwd != null) return br.investmentCostTwd
-  if (br.currency === 'TWD' && br.investmentCostTwd == null) {
-    // 新填入的 TWD 列：USD 成本 × 匯率換算為台幣
-    const ic = Number(br.investmentCost || 0)
-    if (ic > 0) return Math.round(ic * effectiveRate(br))
-    return Math.round(Number(br.avgCost || 0) * Number(br.shares || 0) * effectiveRate(br))
-  }
-  // USD 幣別
+  // 台股或其他：直接回傳（台股 = 台幣；美股 USD = 美元）【v3-fixed】
   const ic = Number(br.investmentCost || 0)
   if (ic > 0) return ic
-  return parseFloat((Number(br.avgCost || 0) * Number(br.shares || 0)).toFixed(6))
+  const fromAvg = Number(br.avgCost || 0) * Number(br.shares || 0)
+  return br.currency === 'USD'
+    ? parseFloat(fromAvg.toFixed(6))
+    : Math.round(fromAvg)
 }
 
 /** 台幣投資成本（USD 計價的 br 需乘有效匯率換算） */
@@ -1637,9 +1638,10 @@ const groupStocks = (flat) => {
     }
     const sh = Number(s.shares || 0)
     const ic = Number(s.investmentCost || 0)
-    const cur = s.currency || 'TWD'
-    const txRate = s.transactionExchangeRate ? Number(s.transactionExchangeRate) : null
     const isUs = s.market === '美股'
+    // 台股永遠使用 TWD，不受 DB 中可能錯誤的 currency 值影響
+    const cur = isUs ? (s.currency || 'TWD') : 'TWD'
+    const txRate = s.transactionExchangeRate ? Number(s.transactionExchangeRate) : null
 
     // 美股：持股成本統一以 USD 儲存在 br.investmentCost；TWD 原始金額存 investmentCostTwd
     let avg, totalCost, investmentCostTwd
@@ -1648,13 +1650,14 @@ const groupStocks = (flat) => {
       investmentCostTwd = ic
       totalCost = Number((ic / txRate).toFixed(6))
       avg = sh > 0 ? Number((totalCost / sh).toFixed(6)) : 0
-    } else if (cur === 'USD' && s.originalCurrencyValue) {
+    } else if (isUs && cur === 'USD' && s.originalCurrencyValue) {
       investmentCostTwd = null
       avg = Number(s.originalCurrencyValue)
       totalCost = Number((avg * sh).toFixed(5))
     } else {
+      // 台股（及美股 fallback）：直接以原幣成本計算
       investmentCostTwd = null
-      avg = sh > 0 ? Number((ic / sh).toFixed(4)) : 0
+      avg = sh > 0 ? Number((ic / sh).toFixed(2)) : 0
       totalCost = ic
     }
 
@@ -1669,8 +1672,8 @@ const groupStocks = (flat) => {
       investmentCostTwd,                              // 美股 TWD 幣別的原始台幣成本（供 DB 儲存及重算用）
       avgCost: avg,
       avgCostStr: numFmt(avg),
-      originalCurrencyValue: (isUs || cur === 'USD') ? avg : null,
-      originalCurrencyValueStr: (isUs || cur === 'USD') ? numFmt(avg) : '',
+      originalCurrencyValue: isUs ? avg : null,
+      originalCurrencyValueStr: isUs ? numFmt(avg) : '',
       currentValueOriginal: 0,
       currentValueOriginalStr: '0',
       currentValue: s.currentValue,
@@ -1691,12 +1694,12 @@ const flattenStocks = () =>
       market:                stock.market,
       brokerId:              br.brokerId || null,
       shares:                br.shares,
-      investmentCost:        brCost(br),
+      investmentCost:        stock.market === '美股' ? brCost(br) : Number(br.investmentCost || 0),
       currentValue:          calcBrTwdValue(br, stock),
       estimatedDividend:     Math.round(calcBrTwdValue(br, stock) * Number(stock.dividendRate || 0)),
       dividendRate:          stock.dividendRate,
-      currency:              br.currency || 'TWD',
-      originalCurrencyValue: br.originalCurrencyValue || null,
+      currency:              stock.market === '美股' ? (br.currency || 'TWD') : 'TWD',
+      originalCurrencyValue: stock.market === '美股' ? (br.originalCurrencyValue || null) : null,
       transactionType:       br.transactionType || '買',
       transactionDate:       br.transactionDate || null,
       transactionExchangeRate: br.transactionExchangeRate || null
