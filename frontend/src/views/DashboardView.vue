@@ -62,16 +62,85 @@
       <!-- Deposit by Bank -->
       <el-col :span="12">
         <el-card>
-          <template #header><span class="card-title">各銀行存款分佈</span></template>
+          <template #header>
+            <div style="display:flex;align-items:center;justify-content:space-between">
+              <span class="card-title">各銀行存款分佈</span>
+              <el-tabs v-model="bankCurrencyTab" class="chart-market-tabs" style="margin:0">
+                <el-tab-pane label="台幣" name="TWD" />
+                <el-tab-pane label="美元" name="USD" />
+              </el-tabs>
+            </div>
+          </template>
           <v-chart :option="bankOption" style="height: 280px" autoresize />
+          <div class="chart-summary-bar">
+            <template v-if="bankCurrencyTab === 'TWD'">
+              <div class="csb-item">
+                <span class="csb-label">定存</span>
+                <span class="csb-val" style="color:#16a34a">{{ formatCurrency(bankSummary.fixed) }}</span>
+              </div>
+              <div class="csb-sep" />
+              <div class="csb-item">
+                <span class="csb-label">活存／其他</span>
+                <span class="csb-val" style="color:#2563eb">{{ formatCurrency(bankSummary.demand) }}</span>
+              </div>
+              <div class="csb-sep" />
+              <div class="csb-item">
+                <span class="csb-label">台幣合計</span>
+                <span class="csb-val">{{ formatCurrency(bankSummary.fixed + bankSummary.demand) }}</span>
+              </div>
+            </template>
+            <template v-else>
+              <div class="csb-item">
+                <span class="csb-label">美元定存（台幣值）</span>
+                <span class="csb-val" style="color:#16a34a">{{ formatCurrency(bankSummary.usdFixed) }}</span>
+              </div>
+              <div class="csb-sep" />
+              <div class="csb-item">
+                <span class="csb-label">美元活存（台幣值）</span>
+                <span class="csb-val" style="color:#2563eb">{{ formatCurrency(bankSummary.usdDemand) }}</span>
+              </div>
+              <div class="csb-sep" />
+              <div class="csb-item">
+                <span class="csb-label">美元合計（台幣值）</span>
+                <span class="csb-val">{{ formatCurrency(bankSummary.usd) }}</span>
+              </div>
+            </template>
+          </div>
         </el-card>
       </el-col>
 
       <!-- Stock Portfolio -->
       <el-col :span="12">
         <el-card>
-          <template #header><span class="card-title">持股明細 (現值)</span></template>
+          <template #header>
+            <div style="display:flex;align-items:center;justify-content:space-between">
+              <span class="card-title">持股明細 (現值)</span>
+              <el-tabs v-model="chartMarketTab" class="chart-market-tabs" style="margin:0">
+                <el-tab-pane label="台股" name="台股" />
+                <el-tab-pane label="美股" name="美股" />
+              </el-tabs>
+            </div>
+          </template>
           <v-chart :option="stockBarOption" style="height: 280px" autoresize />
+          <div class="chart-summary-bar">
+            <div class="csb-item">
+              <span class="csb-label">總值</span>
+              <span class="csb-val">{{ formatCurrency(chartSummary.totalValue) }}</span>
+            </div>
+            <div class="csb-sep" />
+            <div class="csb-item">
+              <span class="csb-label">成本</span>
+              <span class="csb-val">{{ formatCurrency(chartSummary.totalCost) }}</span>
+            </div>
+            <div class="csb-sep" />
+            <div class="csb-item">
+              <span class="csb-label">損益</span>
+              <span class="csb-val" :class="chartSummary.profit >= 0 ? 'profit' : 'loss'">
+                {{ formatCurrency(chartSummary.profit) }}
+                <small style="font-weight:400"> ({{ formatPct(chartSummary.profitRate) }})</small>
+              </span>
+            </div>
+          </div>
         </el-card>
       </el-col>
     </el-row>
@@ -335,13 +404,43 @@ const trendOption = computed(() => {
   }
 })
 
+const bankCurrencyTab = ref('TWD')
+
+const bankSummary = computed(() => {
+  const deposits = detail.value?.deposits || []
+  let fixed = 0, demand = 0, usdFixed = 0, usdDemand = 0
+  deposits.forEach(d => {
+    const amt = Number(d.amount || 0)
+    const cur = d.currency || 'TWD'
+    const type = d.depositType || ''
+    if (cur === 'USD') {
+      if (type.includes('定存')) usdFixed += amt
+      else usdDemand += amt
+    } else if (cur === 'TRANSIT_TWD' || cur === 'TRANSIT_USD') {
+      demand += amt   // 在途（負值）歸入活存淨額
+    } else {
+      if (type.includes('定存')) fixed += amt
+      else demand += amt
+    }
+  })
+  const usd = usdFixed + usdDemand
+  return { fixed, demand, usdFixed, usdDemand, usd, total: fixed + demand + usd }
+})
+
 const bankOption = computed(() => {
   const deposits = detail.value?.deposits || []
   if (!deposits.length) return {}
 
-  // 依銀行分組，區分定存 vs 活存
+  // 依銀行分組，區分定存 vs 活存；依頁籤決定幣別
+  // TRANSIT 在途款項不計入 bar
+  const isTwdTab = bankCurrencyTab.value === 'TWD'
   const bankMap = {} // { bankName: { fixed: 0, demand: 0 } }
   deposits.forEach(d => {
+    const cur = d.currency || 'TWD'
+    if (cur === 'TRANSIT_TWD' || cur === 'TRANSIT_USD') return
+    // 篩選幣別
+    if (isTwdTab && cur === 'USD') return
+    if (!isTwdTab && cur !== 'USD') return
     const bank = d.bankDisplayName || d.bankName
     if (!bankMap[bank]) bankMap[bank] = { fixed: 0, demand: 0 }
     const amt = Number(d.amount || 0)
@@ -370,7 +469,9 @@ const bankOption = computed(() => {
         return s
       }
     },
-    legend: { data: ['定存', '活存'], top: 0, right: 0, textStyle: { fontSize: 12 } },
+    legend: { data: ['定存', '活存'], top: 0, right: 0, textStyle: { fontSize: 12 },
+      textStyle: { fontSize: 12 },
+      formatter: name => isTwdTab ? name : (name === '定存' ? '美元定存' : '美元活存') },
     grid: { left: 100, right: 130, top: 30, bottom: 30 },
     xAxis: { type: 'value', axisLabel: { formatter: v => `${(v / 1e4).toFixed(0)}萬` } },
     yAxis: { type: 'category', data: banks },
@@ -386,7 +487,7 @@ const bankOption = computed(() => {
         name: '活存',
         type: 'bar',
         stack: 'total',
-        data: sorted.map(e => e[1].demand),
+        data: sorted.map(e => Math.max(0, e[1].demand)),
         itemStyle: { color: '#3b82f6', borderRadius: [0,0,0,0] },
       }
     ].map((s, i, arr) => ({
@@ -445,20 +546,37 @@ const stockTableData = computed(() =>
   mergedStocks.value.filter(s => s.market === stockMarketTab.value)
 )
 
+const chartMarketTab = ref('台股')
+
+const chartFilteredStocks = computed(() =>
+  mergedStocks.value.filter(s => s.market === chartMarketTab.value)
+)
+
+const chartSummary = computed(() => {
+  const stocks = chartFilteredStocks.value
+  const totalValue  = stocks.reduce((s, x) => s + Number(x.currentValue || 0), 0)
+  const totalCost   = stocks.reduce((s, x) => s + Number(x.investmentCost || 0), 0)
+  const profit      = totalValue - totalCost
+  const profitRate  = totalCost > 0 ? profit / totalCost : 0
+  return { totalValue, totalCost, profit, profitRate }
+})
+
 const stockBarOption = computed(() => {
-  const stocks = mergedStocks.value
-  if (!stocks.length) return {}
-  const sorted = [...stocks].slice(0, 12)
+  const filtered = chartFilteredStocks.value
+  if (!filtered.length) return {}
+  const sorted = [...filtered].sort((a, b) => a.currentValue - b.currentValue)
+  const isTw = chartMarketTab.value === '台股'
+  const barColor = isTw ? '#3b82f6' : '#f59e0b'
   return {
     tooltip: { trigger: 'axis', formatter: (p) => `${p[0].name}: $${Number(p[0].value).toLocaleString()}` },
-    grid: { left: 90, right: 130, top: 10, bottom: 30 },
+    grid: { left: 100, right: 140, top: 10, bottom: 30 },
     xAxis: { type: 'value', axisLabel: { formatter: v => `${(v / 1e4).toFixed(0)}萬` } },
     yAxis: { type: 'category', data: sorted.map(s => s.stockName || s.stockCode) },
     series: [{
       type: 'bar',
       data: sorted.map(s => ({
         value: Math.round(Number(s.currentValue)),
-        itemStyle: { color: s.market === '台股' ? '#3b82f6' : '#f59e0b', borderRadius: [0,4,4,0] }
+        itemStyle: { color: barColor, borderRadius: [0,4,4,0] }
       })),
       label: {
         show: true,
@@ -497,5 +615,18 @@ const stockBarOption = computed(() => {
 .loss { color: #dc2626; font-weight: 600; }
 .stock-tabs { margin-bottom: 4px; }
 .stock-tabs :deep(.el-tabs__header) { margin-bottom: 8px; }
+.chart-market-tabs :deep(.el-tabs__header) { margin-bottom: 0; }
+.chart-market-tabs :deep(.el-tabs__nav-wrap::after) { display: none; }
+
+.chart-summary-bar {
+  display: flex; align-items: center; gap: 0;
+  background: #f8fafc; border-radius: 8px;
+  padding: 8px 16px; margin-top: 10px;
+  border: 1px solid #e2e8f0;
+}
+.csb-item { display: flex; flex-direction: column; align-items: center; flex: 1; }
+.csb-label { font-size: 12px; color: #64748b; margin-bottom: 2px; }
+.csb-val { font-size: 14px; font-weight: 600; color: #1e293b; }
+.csb-sep { width: 1px; height: 32px; background: #e2e8f0; margin: 0 8px; }
 :deep(.el-table__row--striped .el-table__cell) { background: #f7f8fa !important; }
 </style>
