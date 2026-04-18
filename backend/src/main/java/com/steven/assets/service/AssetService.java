@@ -479,6 +479,20 @@ public class AssetService {
     // ===================== Dividend Rate Patch =====================
 
     /**
+     * 更新指定快照中各股票的自訂顯示順序。
+     * 同一支股票可能有多筆 StockHolding（不同券商），統一套用相同 displayOrder。
+     */
+    @Transactional
+    public void updateStockDisplayOrder(Long snapshotId,
+                                        java.util.List<AssetSnapshotDto.StockOrderRequest> orders) {
+        findSnapshot(snapshotId); // 確認快照存在
+        for (AssetSnapshotDto.StockOrderRequest order : orders) {
+            stockRepo.updateDisplayOrder(
+                snapshotId, order.stockCode(), order.market(), order.displayOrder());
+        }
+    }
+
+    /**
      * 將前端即時查詢到的配息率回寫到 DB，同時更新各持股 estimatedDividend 及快照合計。
      * rates: stockCode → dividendRate (e.g. "0050" → 0.047492)
      */
@@ -578,6 +592,8 @@ public class AssetService {
                 )).toList();
 
         List<AssetSnapshotDto.StockResponse> stocks = s.getStocks().stream()
+                .sorted(java.util.Comparator.comparing(
+                    st -> st.getDisplayOrder() != null ? st.getDisplayOrder() : Integer.MAX_VALUE))
                 .map(st -> new AssetSnapshotDto.StockResponse(
                     st.getId(), st.getStockCode(), st.getStockName(), st.getMarket(),
                     st.getBroker() != null ? st.getBroker().getId() : null,
@@ -586,7 +602,8 @@ public class AssetService {
                     st.getProfit(), st.getProfitRate(),
                     st.getEstimatedDividend(), st.getDividendRate(),
                     st.getCurrency(), st.getOriginalCurrencyValue(),
-                    st.getTransactionType(), st.getTransactionDate(), st.getTransactionExchangeRate()
+                    st.getTransactionType(), st.getTransactionDate(), st.getTransactionExchangeRate(),
+                    st.getDisplayOrder()
                 )).toList();
 
         return new AssetSnapshotDto.SnapshotDetailResponse(

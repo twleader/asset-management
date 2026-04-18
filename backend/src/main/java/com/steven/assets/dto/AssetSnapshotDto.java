@@ -130,7 +130,14 @@ public class AssetSnapshotDto {
             BigDecimal originalCurrencyValue,
             String transactionType,
             LocalDate transactionDate,
-            BigDecimal transactionExchangeRate
+            BigDecimal transactionExchangeRate,
+            Integer displayOrder
+    ) {}
+
+    public record StockOrderRequest(
+            @NotNull String stockCode,
+            @NotNull String market,
+            @NotNull Integer displayOrder
     ) {}
 
     // ===== Asset History =====

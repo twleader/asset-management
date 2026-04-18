@@ -172,7 +172,21 @@
             <el-tab-pane label="台股" name="台股" />
             <el-tab-pane label="美股" name="美股" />
           </el-tabs>
-          <el-table :data="stockTableData" size="small" :max-height="500" stripe>
+          <el-table
+            :data="stockTableData"
+            size="small"
+            :max-height="500"
+            stripe
+            style="cursor:pointer"
+            @row-dblclick="onStockDblClick">
+            <el-table-column label="" width="36">
+              <template #default="{ $index }">
+                <div class="sort-btns">
+                  <el-button size="small" text :disabled="$index === 0" @click.stop="moveStockRow($index, -1)">↑</el-button>
+                  <el-button size="small" text :disabled="$index === stockTableData.length - 1" @click.stop="moveStockRow($index, 1)">↓</el-button>
+                </div>
+              </template>
+            </el-table-column>
             <el-table-column prop="stockCode" label="代號" width="90" />
             <el-table-column prop="stockName" label="名稱" min-width="130" />
             <el-table-column label="股數" width="120" align="right">
@@ -223,6 +237,41 @@
         </el-card>
       </el-col>
     </el-row>
+
+    <!-- Stock Analysis Dialog -->
+    <el-dialog
+      v-model="analysisVisible"
+      :title="`${analysisStock?.stockCode} ${analysisStock?.stockName}　股價走勢分析`"
+      width="900px"
+      destroy-on-close
+      draggable>
+      <div v-if="analysisLoading" class="analysis-loading">
+        <el-icon class="is-loading" size="36"><Loading /></el-icon>
+        <div>載入歷史股價中…</div>
+      </div>
+      <div v-else-if="!analysisHistory.length" class="analysis-empty">
+        無歷史資料，請先執行股價補齊
+      </div>
+      <template v-else>
+        <div class="analysis-meta">
+          <el-tag size="small" type="info">雙擊任意股票可開啟分析</el-tag>
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="color:#64748b;font-size:12px">期間：</span>
+            <el-button-group>
+              <el-button
+                v-for="y in [1,2,3,5,10]" :key="y"
+                size="small"
+                :type="analysisYears === y ? 'primary' : 'default'"
+                @click="analysisYears = y">
+                {{ y }}年
+              </el-button>
+            </el-button-group>
+            <span style="color:#64748b;font-size:12px;margin-left:8px">滾輪縮放 / 拖曳平移</span>
+          </div>
+        </div>
+        <v-chart :option="analysisChartOption" style="height:580px" autoresize />
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -230,13 +279,15 @@
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { PieChart, LineChart, BarChart } from 'echarts/charts'
-import { TitleComponent, TooltipComponent, LegendComponent, GridComponent } from 'echarts/components'
+import { TitleComponent, TooltipComponent, LegendComponent, GridComponent, DataZoomComponent, MarkLineComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
-import { ArrowRight } from '@element-plus/icons-vue'
+import { ArrowRight, Loading } from '@element-plus/icons-vue'
 import { useAssetStore } from '@/stores/assetStore'
-import { bffApi, snapshotApi } from '@/api'
+import { bffApi, snapshotApi, marketDataApi } from '@/api'
 
-use([CanvasRenderer, PieChart, LineChart, BarChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent])
+let orderSaveTimer = null
+
+use([CanvasRenderer, PieChart, LineChart, BarChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent, DataZoomComponent, MarkLineComponent])
 
 const store = useAssetStore()
 const stockPrices = ref({})
@@ -457,7 +508,7 @@ const bankOption = computed(() => {
       bankMap[bank].demand += amt
     }
   })
-  const sorted = Object.entries(bankMap).sort((a, b) => (b[1].fixed + b[1].demand) - (a[1].fixed + a[1].demand))
+  const sorted = Object.entries(bankMap).sort((a, b) => (a[1].fixed + a[1].demand) - (b[1].fixed + b[1].demand))
   const banks = sorted.map(e => e[0])
   return {
     tooltip: {
@@ -523,6 +574,7 @@ const mergedStocks = computed(() => {
         stockName: s.stockName,
         market: s.market,
         dividendRate: null,
+        displayOrder: null,
         shares: 0,
         investmentCost: 0,
         currentValue: 0,
@@ -534,8 +586,9 @@ const mergedStocks = computed(() => {
     g.investmentCost += Number(s.investmentCost || 0)
     g.currentValue += Number(s.currentValue || 0)
     g.estimatedDividend += Number(s.estimatedDividend || 0)
-    // 取任一有值的 dividendRate
     if (s.dividendRate && !g.dividendRate) g.dividendRate = Number(s.dividendRate)
+    // 取任一有效的 displayOrder
+    if (s.displayOrder != null && g.displayOrder == null) g.displayOrder = s.displayOrder
   }
   return [...map.values()]
     .map(g => ({
@@ -544,13 +597,63 @@ const mergedStocks = computed(() => {
       profit: g.currentValue - g.investmentCost,
       profitRate: g.investmentCost > 0 ? (g.currentValue - g.investmentCost) / g.investmentCost : 0
     }))
-    .sort((a, b) => b.currentValue - a.currentValue)
+    .sort((a, b) => {
+      // 已設定順序的依 displayOrder 排；未設定的（新增持股）排在最後，依現值降序
+      if (a.displayOrder != null && b.displayOrder != null) return a.displayOrder - b.displayOrder
+      if (a.displayOrder != null) return -1
+      if (b.displayOrder != null) return 1
+      return b.currentValue - a.currentValue
+    })
 })
 
 const stockMarketTab = ref('台股')
-const stockTableData = computed(() =>
-  mergedStocks.value.filter(s => s.market === stockMarketTab.value)
-)
+
+// 保留使用者自訂排序；若股票清單相同只更新數值，若清單變動才重置順序
+const customTableData = reactive({ '台股': [], '美股': [] })
+
+watch(mergedStocks, (stocks) => {
+  for (const market of ['台股', '美股']) {
+    const incoming = stocks.filter(s => s.market === market)
+    const existing = customTableData[market]
+    const incomingKeys = incoming.map(s => s.stockCode).sort().join(',')
+    const existingKeys = existing.map(s => s.stockCode).sort().join(',')
+    if (incomingKeys === existingKeys && existing.length > 0) {
+      // 股票清單不變，只刷新數值、保留使用者排序
+      customTableData[market] = existing.map(s =>
+        incoming.find(n => n.stockCode === s.stockCode) ?? s
+      )
+    } else {
+      // 股票清單有異動，使用後端儲存的 displayOrder 決定順序
+      customTableData[market] = incoming
+    }
+  }
+}, { immediate: true })
+
+const stockTableData = computed(() => customTableData[stockMarketTab.value] ?? [])
+
+function moveStockRow(idx, dir) {
+  const list = customTableData[stockMarketTab.value]
+  const to = idx + dir
+  if (to < 0 || to >= list.length) return
+  const item = list.splice(idx, 1)[0]
+  list.splice(to, 0, item)
+  scheduleSaveOrder()
+}
+
+function scheduleSaveOrder() {
+  if (orderSaveTimer) clearTimeout(orderSaveTimer)
+  orderSaveTimer = setTimeout(() => {
+    const snapshotId = selectedSnapshotId.value
+    if (!snapshotId) return
+    const market = stockMarketTab.value
+    const orders = customTableData[market].map((stock, idx) => ({
+      stockCode: stock.stockCode,
+      market: stock.market,
+      displayOrder: idx
+    }))
+    snapshotApi.updateStockOrder(snapshotId, orders).catch(() => {})
+  }, 400)
+}
 
 const chartMarketTab = ref('台股')
 
@@ -590,6 +693,189 @@ const stockBarOption = computed(() => {
         formatter: p => `$${Number(p.value).toLocaleString('zh-TW', { maximumFractionDigits: 0 })}`
       }
     }]
+  }
+})
+
+// ── Stock Analysis Dialog ─────────────────────────────────────
+const analysisVisible = ref(false)
+const analysisStock = ref(null)
+const analysisLoading = ref(false)
+const analysisHistory = ref([])
+const analysisYears = ref(2)
+
+async function fetchAnalysisHistory() {
+  if (!analysisStock.value) return
+  analysisLoading.value = true
+  analysisHistory.value = []
+  try {
+    const end = new Date().toISOString().split('T')[0]
+    const startDate = new Date()
+    startDate.setFullYear(startDate.getFullYear() - analysisYears.value)
+    const start = startDate.toISOString().split('T')[0]
+    const data = await marketDataApi.getStockHistory(
+      analysisStock.value.stockCode, analysisStock.value.market, start, end
+    )
+    analysisHistory.value = Array.isArray(data) ? data : []
+  } catch (e) {
+    console.warn('無法取得歷史股價:', e)
+  } finally {
+    analysisLoading.value = false
+  }
+}
+
+watch(analysisYears, () => { if (analysisVisible.value) fetchAnalysisHistory() })
+
+async function onStockDblClick(row) {
+  analysisStock.value = row
+  analysisYears.value = 2
+  analysisVisible.value = true
+  await fetchAnalysisHistory()
+}
+
+function calcMA(prices, n) {
+  return prices.map((_, i) => {
+    if (i < n - 1) return null
+    const avg = prices.slice(i - n + 1, i + 1).reduce((s, v) => s + v, 0) / n
+    return parseFloat(avg.toFixed(2))
+  })
+}
+
+// KD 隨機指標（台灣常用 9 日 RSV，平滑因子 1/3）
+function calcKD(hist, period = 9) {
+  const highs  = hist.map(d => Number(d.highPrice  || d.closePrice || 0))
+  const lows   = hist.map(d => Number(d.lowPrice   || d.closePrice || 0))
+  const closes = hist.map(d => Number(d.closePrice || 0))
+  const K = [], D = []
+  let prevK = 50, prevD = 50
+  for (let i = 0; i < closes.length; i++) {
+    if (i < period - 1) { K.push(null); D.push(null); continue }
+    const sliceHigh = highs.slice(i - period + 1, i + 1)
+    const sliceLow  = lows.slice(i - period + 1, i + 1)
+    const hh = Math.max(...sliceHigh)
+    const ll  = Math.min(...sliceLow)
+    const rsv = hh === ll ? 50 : (closes[i] - ll) / (hh - ll) * 100
+    const k = prevK * 2 / 3 + rsv / 3
+    const d = prevD * 2 / 3 + k  / 3
+    K.push(parseFloat(k.toFixed(2)))
+    D.push(parseFloat(d.toFixed(2)))
+    prevK = k; prevD = d
+  }
+  return { K, D }
+}
+
+const analysisChartOption = computed(() => {
+  const hist = analysisHistory.value
+  if (!hist.length) return {}
+  const s = analysisStock.value
+  const dates  = hist.map(d => d.tradingDate)
+  const prices = hist.map(d => parseFloat(Number(d.closePrice || 0).toFixed(2)))
+  const ma20   = calcMA(prices, 20)
+  const ma60   = calcMA(prices, 60)
+  const ma240  = calcMA(prices, 240)
+  const { K, D } = calcKD(hist)
+  const cost = s.shares > 0 ? s.investmentCost / s.shares : null
+
+  // DataZoom: since we already fetched exactly N years, show 100% of the data
+  const dzStart = 0
+
+  return {
+    backgroundColor: '#fff',
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'cross', link: [{ xAxisIndex: 'all' }] },
+      formatter: params => {
+        let html = `<strong>${params[0].axisValue}</strong><br/>`
+        params.forEach(p => {
+          if (p.value != null)
+            html += `${p.marker} ${p.seriesName}: <b>${p.value}</b><br/>`
+        })
+        return html
+      }
+    },
+    legend: {
+      data: ['收盤價', '月線MA20', '季線MA60', '年線MA240', 'K', 'D'],
+      top: 8, textStyle: { fontSize: 12 }
+    },
+    axisPointer: { link: [{ xAxisIndex: 'all' }] },
+    grid: [
+      { left: 64, right: 24, top: 48, bottom: 190 },
+      { left: 64, right: 24, top: 'auto', height: 90, bottom: 60 }
+    ],
+    dataZoom: [
+      { type: 'inside', xAxisIndex: [0, 1], start: dzStart, end: 100 },
+      { type: 'slider', xAxisIndex: [0, 1], start: dzStart, end: 100, height: 20, bottom: 8 }
+    ],
+    xAxis: [
+      {
+        gridIndex: 0, type: 'category', data: dates, boundaryGap: false,
+        axisLabel: { show: false }, axisLine: { onZero: false }
+      },
+      {
+        gridIndex: 1, type: 'category', data: dates, boundaryGap: false,
+        axisLabel: { rotate: 30, fontSize: 10, formatter: v => v.substring(0, 7) }
+      }
+    ],
+    yAxis: [
+      {
+        gridIndex: 0, type: 'value', scale: true,
+        axisLabel: { formatter: v => v.toFixed(0) },
+        splitLine: { lineStyle: { color: '#f0f0f0' } }
+      },
+      {
+        gridIndex: 1, type: 'value', min: 0, max: 100,
+        splitNumber: 2,
+        axisLabel: { fontSize: 10 },
+        splitLine: { lineStyle: { color: '#f0f0f0' } }
+      }
+    ],
+    series: [
+      {
+        name: '收盤價', type: 'line', xAxisIndex: 0, yAxisIndex: 0,
+        data: prices,
+        lineStyle: { width: 2, color: '#3b82f6' },
+        itemStyle: { color: '#3b82f6' },
+        showSymbol: false,
+        areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+          colorStops: [{ offset: 0, color: 'rgba(59,130,246,0.12)' }, { offset: 1, color: 'rgba(59,130,246,0)' }] } },
+        markLine: cost ? {
+          silent: true,
+          data: [{ yAxis: parseFloat(cost.toFixed(2)), name: '成本均價' }],
+          lineStyle: { color: '#64748b', type: 'dashed', width: 1.5 },
+          label: { formatter: '成本 {c}', position: 'start', fontSize: 11, color: '#64748b' }
+        } : undefined
+      },
+      {
+        name: '月線MA20', type: 'line', xAxisIndex: 0, yAxisIndex: 0,
+        data: ma20, lineStyle: { width: 1.5, color: '#f59e0b' },
+        itemStyle: { color: '#f59e0b' }, showSymbol: false
+      },
+      {
+        name: '季線MA60', type: 'line', xAxisIndex: 0, yAxisIndex: 0,
+        data: ma60, lineStyle: { width: 1.5, color: '#8b5cf6' },
+        itemStyle: { color: '#8b5cf6' }, showSymbol: false
+      },
+      {
+        name: '年線MA240', type: 'line', xAxisIndex: 0, yAxisIndex: 0,
+        data: ma240, lineStyle: { width: 1.5, color: '#ef4444' },
+        itemStyle: { color: '#ef4444' }, showSymbol: false
+      },
+      {
+        name: 'K', type: 'line', xAxisIndex: 1, yAxisIndex: 1,
+        data: K, lineStyle: { width: 1.5, color: '#f59e0b' },
+        itemStyle: { color: '#f59e0b' }, showSymbol: false,
+        markLine: {
+          silent: true,
+          data: [{ yAxis: 80 }, { yAxis: 20 }],
+          lineStyle: { color: '#94a3b8', type: 'dashed', width: 1 },
+          label: { formatter: '{c}', fontSize: 10, color: '#94a3b8' }
+        }
+      },
+      {
+        name: 'D', type: 'line', xAxisIndex: 1, yAxisIndex: 1,
+        data: D, lineStyle: { width: 1.5, color: '#3b82f6' },
+        itemStyle: { color: '#3b82f6' }, showSymbol: false
+      }
+    ]
   }
 })
 </script>
@@ -635,4 +921,20 @@ const stockBarOption = computed(() => {
 .csb-val { font-size: 14px; font-weight: 600; color: #1e293b; }
 .csb-sep { width: 1px; height: 32px; background: #e2e8f0; margin: 0 8px; }
 :deep(.el-table__row--striped .el-table__cell) { background: #f7f8fa !important; }
+
+.sort-btns { display: flex; flex-direction: column; align-items: center; gap: 0; }
+.sort-btns :deep(.el-button) { padding: 0 2px; height: 16px; min-height: 0; font-size: 11px; color: #94a3b8; }
+.sort-btns :deep(.el-button:not(:disabled):hover) { color: #3b82f6; }
+
+.analysis-loading {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 12px; padding: 60px 0; color: #64748b; font-size: 14px;
+}
+.analysis-empty {
+  text-align: center; padding: 60px 0; color: #94a3b8; font-size: 14px;
+}
+.analysis-meta {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 8px;
+}
 </style>

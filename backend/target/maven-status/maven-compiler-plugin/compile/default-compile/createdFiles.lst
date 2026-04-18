@@ -85,6 +85,7 @@ com/steven/assets/model/Bank$BankBuilder.class
 com/steven/assets/service/HistoricalDataService$SnapshotPriceDto.class
 com/steven/assets/model/FundHolding$FundHoldingBuilder.class
 com/steven/assets/dto/AssetSnapshotDto$StockRequest.class
+com/steven/assets/dto/AssetSnapshotDto$StockOrderRequest.class
 com/steven/assets/repository/RealizedGainRepository.class
 com/steven/assets/dto/InstitutionDto$UpdateBankRequest.class
 com/steven/assets/dto/InstitutionDto$CreateDepositTypeRequest.class

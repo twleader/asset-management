@@ -87,6 +87,10 @@ public class StockHolding {
     @Column(precision = 10, scale = 4)
     private BigDecimal transactionExchangeRate;
 
+    /** 儀表板自訂顯示順序（null 表示未設定，排在最後） */
+    @Column(name = "display_order")
+    private Integer displayOrder;
+
     /** 損益 = 現值 - 投資成本 */
     public BigDecimal getProfit() {
         if (currentValue == null || investmentCost == null) return BigDecimal.ZERO;

@@ -32,6 +32,7 @@ export const snapshotApi = {
     })
   },
   updateDividendRates: (id, rates) => api.patch(`/snapshots/${id}/dividend-rates`, rates),
+  updateStockOrder: (id, orders) => api.patch(`/snapshots/${id}/stock-order`, orders),
   enrichAllDividendRates: () => api.post('/snapshots/enrich-all-dividend-rates'),
   recalcDividends: () => api.post('/snapshots/recalc-dividends')
 }

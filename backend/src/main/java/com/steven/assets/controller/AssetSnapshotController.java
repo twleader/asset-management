@@ -57,6 +57,18 @@ public class AssetSnapshotController {
     }
 
     /**
+     * PATCH /api/snapshots/{id}/stock-order
+     * Body: [{"stockCode":"0050","market":"台股","displayOrder":0}, ...]
+     */
+    @PatchMapping("/{id}/stock-order")
+    public ResponseEntity<Void> updateStockOrder(
+            @PathVariable Long id,
+            @RequestBody List<AssetSnapshotDto.StockOrderRequest> orders) {
+        assetService.updateStockDisplayOrder(id, orders);
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
      * PATCH /api/snapshots/{id}/dividend-rates
      * Body: { "0050": 0.047492, "006208": 0.0161 }
      * 將即時查詢到的配息率回寫至 DB（各持股 dividendRate + estimatedDividend）
