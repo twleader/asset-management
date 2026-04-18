@@ -24,7 +24,7 @@
 - Spring Data JPA（H2 開發 / PostgreSQL 生產）
 - Apache POI（Excel 匯入）
 - Lombok
-- `ddl-auto: update`（開發環境自動建表）
+- `ddl-auto: none` + Liquibase（資料庫 Schema 版本管理）
 
 ### Frontend
 - Vue 3 + Vite 5

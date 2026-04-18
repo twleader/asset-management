@@ -473,6 +473,19 @@ public class HistoricalDataService {
         log.info("排程：更新匯率（收盤後，FinMind 回補 + 清理舊資料）");
         backfillExchangeRate("USD", LocalDate.now().minusDays(5));
         purgeOldExchangeRates("USD", 10);
+        purgeOldStockPriceHistory(10);
+    }
+
+    /**
+     * 清除超過指定年數的股價歷史資料（所有市場）
+     */
+    @Transactional
+    public void purgeOldStockPriceHistory(int keepYears) {
+        LocalDate cutoff = LocalDate.now().minusYears(keepYears);
+        long deleted = priceHistRepo.deleteByTradingDateBefore(cutoff);
+        if (deleted > 0) {
+            log.info("已清除 {} 筆超過 {} 年的股價歷史資料", deleted, keepYears);
+        }
     }
 
     /**
