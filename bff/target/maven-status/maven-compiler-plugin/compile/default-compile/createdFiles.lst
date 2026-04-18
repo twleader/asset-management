@@ -1,0 +1,10 @@
+com/steven/assets/bff/dashboard/DashboardBffController$2.class
+com/steven/assets/bff/dashboard/DashboardBffController.class
+com/steven/assets/bff/dashboard/DashboardBffController$1.class
+com/steven/assets/bff/dashboard/dto/DashboardSummaryDto.class
+com/steven/assets/bff/snapshot/SnapshotBffRoutes.class
+com/steven/assets/bff/BffApplication.class
+com/steven/assets/bff/marketdata/MarketDataBffRoutes.class
+com/steven/assets/bff/settings/SettingsBffRoutes.class
+com/steven/assets/bff/realizedgain/RealizedGainBffRoutes.class
+com/steven/assets/bff/config/WebClientConfig.class

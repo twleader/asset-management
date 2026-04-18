@@ -14,7 +14,7 @@
 
 - [x] 1.1 建立 Spring Boot 專案結構（com.steven.assets）
   - 建立 `AssetManagementApplication.java` 啟動類別
-  - 設定 `pom.xml`（Spring Boot 3.4.4, Java 21, JPA, PostgreSQL, H2, Apache POI, Lombok）
+  - 設定 `pom.xml`（Spring Boot 3.4.4, Java 25, JPA, PostgreSQL, H2, Apache POI, Lombok）
 
 - [x] 1.2 設定資料庫連線
   - `application.yml`：H2 記憶體資料庫（開發環境）
@@ -27,7 +27,7 @@
   - 設定 `vite.config.js`（自動匯入、元件自動註冊）
 
 - [x] 1.4 設定 CORS（`WebConfig.java`）
-  - 允許來源：`http://localhost:5173`
+  - 允許來源：`http://localhost`、`https://localhost`
   - 允許方法：GET, POST, PUT, DELETE, OPTIONS
 
 - [x] 1.5 建立 Docker Compose 部署設定
@@ -350,7 +350,6 @@
 - [x] 12.1 建立 `Bank` 與 `BrokerEntity` Entity
   - `Bank.java`：欄位 id、code（唯一）、displayName、keywords（逗號分隔字串）、active
   - `BrokerEntity.java`：同結構（命名加 Entity 避免與舊 Enum 衝突）
-  - 刪除 `BankName.java` 與 `Broker.java` Enum
 
 - [x] 12.2 建立 `BankRepository` / `BrokerRepository`
 
@@ -386,7 +385,6 @@
 
 - [x] 13.1 建立 `DepositTypeEntity` / `MarketType` Entity
   - 欄位：id、code（唯一，同時作為存入欄位的值）、displayName、sortOrder、active
-  - 刪除 `DepositType.java` 與 `Market.java` Enum
 
 - [x] 13.2 建立 `DepositTypeRepository` / `MarketTypeRepository`
 
@@ -504,3 +502,48 @@
 - [ ] 14.7 美股 broker row 表格加入「買/賣」與「交易日期」欄位；日期選定後自動抓取歷史匯率
 
 - [ ] 14.8 成本計算改用 transactionExchangeRate（優先）或 form.usdExchangeRate（備援）
+
+---
+
+### Task 15: 微服務架構重構（MVC → BFF + Business Services）
+
+**對應 Requirements:** 非功能性需求（架構升級）
+**前置任務:** Task 1–14
+
+#### 架構決策
+- **BFF Container**（`bff/`）：Spring Cloud Gateway + 頁面專屬路由設定 + Dashboard 聚合 Controller
+- **Business Services Container**（`backend/`）：現有 Spring Boot MVC 應用，無需改動 API 程式碼
+- **通訊**：BFF 透過 Docker internal network HTTP 呼叫 Business Services
+- **資料庫**：維持單一 PostgreSQL（不拆分）
+
+#### Steps:
+
+- [x] 15.1 更新 `spec/tasks.md`（本任務）
+
+- [x] 15.2 建立 `bff/` Spring Boot + Gateway 專案
+  - `pom.xml`：spring-cloud-starter-gateway + spring-boot-starter-actuator
+  - `BffApplication.java`：Spring Boot 啟動類別
+  - `application.yml`：port 8080、CORS 設定、business-services URL 設定
+
+- [x] 15.3 建立 per-page BFF 路由設定（`RouteLocator` @Bean，每頁一個 @Configuration）
+  - `SnapshotBffRoutes.java`：`/api/snapshots/**` → business-services
+  - `RealizedGainBffRoutes.java`：`/api/realized-gains/**` → business-services
+  - `MarketDataBffRoutes.java`：`/api/market-data/**` → business-services
+  - `SettingsBffRoutes.java`：`/api/settings/**` → business-services
+
+- [x] 15.4 實作 `DashboardBffController`（BFF 聚合端點）
+  - `GET /api/bff/dashboard/summary`：並行呼叫 snapshots、history、prices、market-status，一次回傳前端所需全部資料
+  - `DashboardSummaryDto`：聚合 DTO（snapshots、history、stockPrices、marketStatus）
+
+- [x] 15.5 建立 `bff/Dockerfile`（Maven 多階段建置 → JRE Alpine）
+
+- [x] 15.6 更新 `docker-compose.yml`
+  - 新增 `bff` service（port 8080，depends on business-services）
+  - `backend` 移除 host port 暴露（僅 internal Docker network）
+  - `frontend` depends_on 改為 `bff`
+
+- [x] 15.7 更新 `frontend/nginx.conf`（`/api/` proxy 改指向 `bff:8080`）
+
+- [x] 15.8 更新前端 `DashboardView.vue`
+  - `onMounted` 改呼叫 `GET /api/bff/dashboard/summary`（單一請求取代 5 次並行請求）
+  - 新增 `bffApi.getDashboardSummary()` 至 `frontend/src/api/index.js`

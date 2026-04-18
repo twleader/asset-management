@@ -234,7 +234,7 @@ import { TitleComponent, TooltipComponent, LegendComponent, GridComponent } from
 import VChart from 'vue-echarts'
 import { ArrowRight } from '@element-plus/icons-vue'
 import { useAssetStore } from '@/stores/assetStore'
-import { marketDataApi, snapshotApi } from '@/api'
+import { bffApi, snapshotApi } from '@/api'
 
 use([CanvasRenderer, PieChart, LineChart, BarChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent])
 
@@ -246,20 +246,13 @@ const selectedSnapshotId = ref(null)
 let priceTimer = null
 
 onMounted(async () => {
-  await Promise.all([store.fetchSnapshots(), store.fetchHistory()])
-  if (store.snapshots.length > 0) {
-    selectedSnapshotId.value = store.snapshots[0].id
-    await store.fetchSnapshotDetail(store.snapshots[0].id)
-  }
-  await fetchStockPrices()
-  priceTimer = setInterval(fetchStockPrices, 5 * 60 * 1000)
+  // Single BFF call aggregates: snapshots + history + latestSnapshotDetail + prices + marketStatus
+  await loadDashboardSummary()
+  priceTimer = setInterval(refreshPricesAndStatus, 5 * 60 * 1000)
 
   // 背景補齊所有快照缺漏的配息率（不阻塞頁面載入）
   snapshotApi.enrichAllDividendRates().then(() => {
-    // 補齊後重新載入資料讓儀表板顯示最新值
-    return Promise.all([store.fetchSnapshots(), store.fetchHistory()])
-  }).then(() => {
-    if (store.snapshots.length > 0) store.fetchSnapshotDetail(store.snapshots[0].id)
+    return loadDashboardSummary()
   }).catch(() => {})
 })
 
@@ -267,25 +260,38 @@ onUnmounted(() => {
   if (priceTimer) { clearInterval(priceTimer); priceTimer = null }
 })
 
-async function onSnapshotChange(id) {
-  await store.fetchSnapshotDetail(id)
+async function loadDashboardSummary() {
+  try {
+    const summary = await bffApi.getDashboardSummary()
+    store.snapshots = summary.snapshots ?? []
+    store.history = summary.history ?? []
+    if (summary.latestSnapshotDetail && summary.latestSnapshotDetail.id) {
+      store.currentSnapshot = summary.latestSnapshotDetail
+      selectedSnapshotId.value = summary.latestSnapshotDetail.id
+    }
+    applyPricesAndStatus(summary.stockPrices ?? [], summary.marketStatus ?? {})
+  } catch (e) {
+    console.warn('載入儀表板摘要失敗:', e)
+  }
 }
 
-async function fetchStockPrices() {
-  try {
-    const [prices, status] = await Promise.all([
-      marketDataApi.getAllPrices(),
-      marketDataApi.getMarketStatus()
-    ])
-    marketStatus.value = status
-    const map = {}
-    for (const p of prices) {
-      map[`${p.market}_${p.stockCode}`] = p
-    }
-    stockPrices.value = map
-  } catch (e) {
-    console.warn('取得股價失敗:', e)
+async function refreshPricesAndStatus() {
+  // Reload the full summary to keep prices and snapshot data in sync
+  await loadDashboardSummary()
+}
+
+async function onSnapshotChange(id) {
+  await store.fetchSnapshotDetail(id)
+  selectedSnapshotId.value = id
+}
+
+function applyPricesAndStatus(prices, status) {
+  marketStatus.value = status
+  const map = {}
+  for (const p of prices) {
+    map[`${p.market}_${p.stockCode}`] = p
   }
+  stockPrices.value = map
 }
 
 const latest = computed(() =>

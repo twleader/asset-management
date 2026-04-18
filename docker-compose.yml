@@ -23,12 +23,13 @@ services:
     networks:
       - asset-net
 
-  # ── Spring Boot Backend ─────────────────────────────────────
-  backend:
+  # ── Business Services (Spring Boot MVC) ────────────────────
+  # Internal only — not exposed to host. BFF is the sole entry point.
+  business-services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: asset-backend
+    container_name: asset-business-services
     restart: unless-stopped
     env_file: .env
     environment:
@@ -37,8 +38,6 @@ services:
       DB_NAME: ${POSTGRES_DB}
       DB_USERNAME: ${POSTGRES_USER}
       DB_PASSWORD: ${POSTGRES_PASSWORD}
-    ports:
-      - "8081:8080"   # 8080 被其他服務占用時改用 8081
     depends_on:
       postgres:
         condition: service_healthy
@@ -51,6 +50,29 @@ services:
       retries: 10
       start_period: 30s
 
+  # ── BFF Layer (Spring Cloud Gateway) ───────────────────────
+  bff:
+    build:
+      context: ./bff
+      dockerfile: Dockerfile
+    container_name: asset-bff
+    restart: unless-stopped
+    environment:
+      BUSINESS_SERVICES_URL: http://business-services:8080
+    ports:
+      - "8080:8080"
+    depends_on:
+      business-services:
+        condition: service_healthy
+    networks:
+      - asset-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
   # ── Vue Frontend (Nginx) ────────────────────────────────────
   frontend:
     build:
@@ -61,7 +83,7 @@ services:
     ports:
       - "80:80"
     depends_on:
-      backend:
+      bff:
         condition: service_healthy
     networks:
       - asset-net

@@ -1,0 +1,44 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: asset-management-bff
+  cloud:
+    gateway:
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedOrigins:
+              - "http://localhost"
+              - "https://localhost"
+              - "http://localhost:5173"
+            allowedMethods:
+              - GET
+              - POST
+              - PUT
+              - DELETE
+              - PATCH
+              - OPTIONS
+            allowedHeaders: "*"
+            allowCredentials: false
+            maxAge: 3600
+      # 停用預設的 metrics-based circuit breaker，保持輕量
+      default-filters: []
+
+business-services:
+  url: ${BUSINESS_SERVICES_URL:http://localhost:8081}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
+
+logging:
+  level:
+    com.steven.assets.bff: INFO
+    org.springframework.cloud.gateway: WARN

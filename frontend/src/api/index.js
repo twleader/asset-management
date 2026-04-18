@@ -105,4 +105,10 @@ export const marketDataApi = {
     api.get('/market-data/exchange-rate/on-date', { params: { currency, date } })
 }
 
+// ===== BFF Aggregated Endpoints =====
+export const bffApi = {
+  // Dashboard page: single call that aggregates snapshots, history, prices, and market status
+  getDashboardSummary: () => api.get('/bff/dashboard/summary')
+}
+
 export default api

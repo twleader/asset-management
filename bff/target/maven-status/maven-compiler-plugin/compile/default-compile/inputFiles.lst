@@ -1,0 +1,8 @@
+/Users/steven/Project/asset-management/bff/src/main/java/com/steven/assets/bff/BffApplication.java
+/Users/steven/Project/asset-management/bff/src/main/java/com/steven/assets/bff/config/WebClientConfig.java
+/Users/steven/Project/asset-management/bff/src/main/java/com/steven/assets/bff/dashboard/DashboardBffController.java
+/Users/steven/Project/asset-management/bff/src/main/java/com/steven/assets/bff/dashboard/dto/DashboardSummaryDto.java
+/Users/steven/Project/asset-management/bff/src/main/java/com/steven/assets/bff/marketdata/MarketDataBffRoutes.java
+/Users/steven/Project/asset-management/bff/src/main/java/com/steven/assets/bff/realizedgain/RealizedGainBffRoutes.java
+/Users/steven/Project/asset-management/bff/src/main/java/com/steven/assets/bff/settings/SettingsBffRoutes.java
+/Users/steven/Project/asset-management/bff/src/main/java/com/steven/assets/bff/snapshot/SnapshotBffRoutes.java
