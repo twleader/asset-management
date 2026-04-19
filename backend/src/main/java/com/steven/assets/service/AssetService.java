@@ -31,6 +31,7 @@ public class AssetService {
     private final MarketDataService marketDataService;
     private final BankRepository bankRepo;
     private final BrokerRepository brokerRepo;
+    private final StockRepository stockMasterRepo;
 
     // ===================== Snapshot =====================
 
@@ -150,6 +151,12 @@ public class AssetService {
                         .transactionExchangeRate(st.transactionExchangeRate())
                         .build();
                 snapshot.getStocks().add(stock);
+                // 同步到 stock 主檔（名稱不得與代號相同，否則視為無效資料）
+                if (st.stockCode() != null && st.stockName() != null
+                        && !st.stockName().isBlank()
+                        && !st.stockName().equalsIgnoreCase(st.stockCode())) {
+                    stockMasterRepo.upsert(st.stockCode(), st.market(), st.stockName());
+                }
             });
         }
 
@@ -205,6 +212,11 @@ public class AssetService {
                     .transactionDate(st.transactionDate())
                     .transactionExchangeRate(st.transactionExchangeRate())
                     .build());
+                if (st.stockCode() != null && st.stockName() != null
+                        && !st.stockName().isBlank()
+                        && !st.stockName().equalsIgnoreCase(st.stockCode())) {
+                    stockMasterRepo.upsert(st.stockCode(), st.market(), st.stockName());
+                }
             });
         }
 

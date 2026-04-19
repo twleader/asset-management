@@ -14,3 +14,30 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/v1.4.0-stock-display-order.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.5.0-stock-alert.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.6.0-notification-setting.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.7.0-stock-master.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.7.1-stock-master-cleanup.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.7.2-stock-alert-triggered-price.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.7.3-remove-email.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.7.4-stock-alert-triggered-kd.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.7.5-stock-alert-triggered-ma-d.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.7.6-stock-alert-display-order.sql
+      relativeToChangelogFile: false

@@ -686,6 +686,62 @@ public class HistoricalDataService {
         return resp.body();
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    //  股票名稱查詢（FinMind TaiwanStockInfo / Yahoo Finance）
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * 查詢台股名稱（使用 FinMind TaiwanStockInfo）
+     * 回傳空字串表示查不到
+     */
+    public String fetchTwStockName(String code) {
+        try {
+            String url = "https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockInfo&data_id="
+                    + code.trim().toUpperCase();
+            String body = httpGet(url);
+            JsonNode data = mapper.readTree(body).path("data");
+            if (data.isArray() && data.size() > 0) {
+                String name = data.get(0).path("stock_name").asText("").trim();
+                if (!name.isEmpty() && !name.equalsIgnoreCase(code)) {
+                    return name;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("FinMind 查詢台股名稱失敗 {}: {}", code, e.getMessage());
+        }
+        return "";
+    }
+
+    /**
+     * 查詢美股名稱（使用 Yahoo Finance chart meta）
+     * 回傳空字串表示查不到
+     */
+    public String fetchUsStockName(String code) {
+        try {
+            String url = "https://query2.finance.yahoo.com/v8/finance/chart/" + code.trim().toUpperCase()
+                    + "?interval=1d&range=1d";
+            // Yahoo 需要 curl 避免被擋
+            ProcessBuilder pb = new ProcessBuilder("curl", "-s",
+                    "-H", "User-Agent: Mozilla/5.0",
+                    url);
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
+            String body = new String(p.getInputStream().readAllBytes());
+            p.waitFor();
+            JsonNode meta = mapper.readTree(body)
+                    .path("chart").path("result").path(0).path("meta");
+            // Yahoo 回傳 shortName 或 longName
+            String name = meta.path("shortName").asText("").trim();
+            if (name.isEmpty()) name = meta.path("longName").asText("").trim();
+            if (!name.isEmpty() && !name.equalsIgnoreCase(code)) {
+                return name;
+            }
+        } catch (Exception e) {
+            log.warn("Yahoo 查詢美股名稱失敗 {}: {}", code, e.getMessage());
+        }
+        return "";
+    }
+
     private BigDecimal decimal(JsonNode node, String field) {
         JsonNode v = node.path(field);
         if (v.isMissingNode() || v.isNull()) return null;

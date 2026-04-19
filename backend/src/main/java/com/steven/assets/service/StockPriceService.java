@@ -35,6 +35,7 @@ public class StockPriceService {
     private final AssetSnapshotRepository snapshotRepo;
     private final ExchangeRateHistoryRepository rateHistRepo;
     private final MarketDataService marketDataService;
+    private final StockAlertService stockAlertService;
 
     private static final ZoneId TW_ZONE = ZoneId.of("Asia/Taipei");
     private static final ZoneId US_ZONE = ZoneId.of("America/New_York");
@@ -123,6 +124,9 @@ public class StockPriceService {
             log.info("更新美股即時價格 ({} 檔)...", usCodes.size());
             updatePrices(usCodes, "美股", usJustClosed);
         }
+
+        // 股價更新後立即檢查到價警示
+        stockAlertService.checkAlerts();
     }
 
     /**

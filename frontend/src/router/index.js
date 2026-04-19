@@ -62,6 +62,12 @@ const router = createRouter({
       meta: { title: '台幣兌美元', icon: 'Money' }
     },
     {
+      path: '/stock-alerts',
+      name: 'StockAlerts',
+      component: () => import('@/views/StockAlertView.vue'),
+      meta: { title: '股票到價警示', icon: 'Bell' }
+    },
+    {
       path: '/settings/banks',
       name: 'BankSettings',
       component: () => import('@/views/BankSettingsView.vue'),
@@ -84,7 +90,7 @@ const router = createRouter({
       name: 'MarketTypeSettings',
       component: () => import('@/views/MarketTypeSettingsView.vue'),
       meta: { title: '市場類型設定', icon: 'Setting' }
-    }
+    },
   ]
 })
 
