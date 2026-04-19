@@ -625,6 +625,20 @@ public class AssetService {
                 .orElse(null);
     }
 
+    /** 將所有 currency=USD 的已實現損益改為 TWD（Excel 匯入欄位均為台幣）*/
+    @Transactional
+    public int fixRealizedGainCurrencyToTwd() {
+        List<RealizedGain> usdRecords = gainRepo.findAll().stream()
+                .filter(g -> "USD".equals(g.getCurrency()))
+                .toList();
+        usdRecords.forEach(g -> {
+            g.setCurrency("TWD");
+            g.setExchangeRate(null);
+        });
+        gainRepo.saveAll(usdRecords);
+        return usdRecords.size();
+    }
+
     private RealizedGainDto.RealizedGainResponse toGainResponse(RealizedGain g) {
         String currency = g.getCurrency() != null ? g.getCurrency() : ("美股".equals(g.getMarket()) ? "USD" : "TWD");
         BigDecimal rate = g.getExchangeRate();

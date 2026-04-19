@@ -448,9 +448,9 @@
 
 ---
 
-### Task 13: 文件與部署
+### Task 16: 文件與部署
 
-**前置任務:** Task 1–12
+**前置任務:** Task 1–15
 
 #### Steps:
 
@@ -476,23 +476,24 @@
 
 ---
 
-### Task 14: 股票交易類型與日期
+### Task 14b: 股票交易類型與日期
 
 **對應 Requirements:** Requirement 3
 **前置任務:** Task 2, Task 3
 
 #### Steps:
 
-- [ ] 14.1 StockHolding model 新增欄位
+- [x] 14.1 StockHolding model 新增欄位（已實作）
   - `transactionType` (String)：買 / 賣
   - `transactionDate` (LocalDate)：交易日期
   - `transactionExchangeRate` (BigDecimal, precision 10,4)：交易日當日匯率（美股用）
+  - `displayOrder` (Integer)：持倉顯示排序
 
-- [ ] 14.2 StockRequest DTO 新增對應欄位
+- [x] 14.2 StockRequest DTO 新增對應欄位（已實作）
 
-- [ ] 14.3 AssetService 映射新欄位（createSnapshot / updateSnapshot）
+- [x] 14.3 AssetService 映射新欄位（createSnapshot / updateSnapshot）（已實作）
 
-- [ ] 14.4 新增 API endpoint `GET /api/market-data/exchange-rate/on-date?currency=USD&date=YYYY-MM-DD`
+- [x] 14.4 新增 API endpoint `GET /api/market-data/exchange-rate/on-date?currency=USD&date=YYYY-MM-DD`（已實作）
   - 使用 ExchangeRateHistoryRepository.findClosestRate() 查詢
 
 - [ ] 14.5 前端 newBrokerRow / groupStocks / flattenStocks 支援新欄位
@@ -547,3 +548,23 @@
 - [x] 15.8 更新前端 `DashboardView.vue`
   - `onMounted` 改呼叫 `GET /api/bff/dashboard/summary`（單一請求取代 5 次並行請求）
   - 新增 `bffApi.getDashboardSummary()` 至 `frontend/src/api/index.js`
+
+---
+
+### Task 17: Excel 批次匯出
+
+**對應 Requirements:** Requirement 5b
+**前置任務:** Task 3, Task 5
+
+#### Steps:
+
+- [ ] 17.1 實作後端 `ExcelExportService`
+  - 使用 Apache POI 產生 `.xlsx`
+  - 以工作表名稱（YYYYMMDD）對應快照日期
+  - 涵蓋銀行存款、股票持倉、基金持倉工作表
+
+- [ ] 17.2 新增 `GET /api/snapshots/export` 或 `POST /api/snapshots/export` endpoint
+  - 回傳 `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`
+
+- [ ] 17.3 前端 SnapshotListView 新增「匯出 Excel」按鈕
+  - 觸發檔案下載

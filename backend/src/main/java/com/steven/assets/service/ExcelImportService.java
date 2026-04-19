@@ -266,8 +266,10 @@ public class ExcelImportService {
             String market = code != null && isUsStock(code) ? "美股" : "台股";
 
             try {
+                // Excel 損益欄位均為台幣（已實現損益工作表統一用台幣記錄），
+                // 明確傳入 "TWD" 避免系統誤判美股代號而套用匯率換算
                 assetService.createRealizedGain(new RealizedGainDto.CreateRealizedGainRequest(
-                    name, code, market, null, null, tradeDate,
+                    name, code, market, "TWD", null, tradeDate,
                     getBigDecimal(row, 3), getBigDecimal(row, 4),
                     proceeds, cost, profit, profitRate
                 ));

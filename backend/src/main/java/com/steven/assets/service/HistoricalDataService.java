@@ -464,6 +464,13 @@ public class HistoricalDataService {
                     sleep(2000);
                 }
             }
+
+            // 匯率：若最早資料晚於 10 年前，強制從 10 年前回補
+            LocalDate rateMinDate = rateHistRepo.findMinDate("USD").orElse(null);
+            if (rateMinDate == null || since.isBefore(rateMinDate)) {
+                log.info("啟動補齊 USD 匯率 (minDate={}，補齊至 {})", rateMinDate, since);
+                backfillExchangeRateFrom("USD", since);
+            }
             log.info("啟動補齊完成");
         });
     }

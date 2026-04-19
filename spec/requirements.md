@@ -74,7 +74,7 @@
 - [ ] 匯入結果需回報成功筆數與錯誤明細
 - [ ] 支援匯入已實現損益資料（另一張工作表）
 
-### Requirement 5: Excel 批次匯出
+### Requirement 5b: Excel 批次匯出
 
 **User Story:** 作為使用者，我希望能將資料匯出成 Excel
 
@@ -82,6 +82,8 @@
 
 - [ ] 匯出成 `.xlsx`
 - [ ] 以工作表名稱（格式：YYYYMMDD）識別快照日期
+
+> ⚠️ **尚未實作**：後端無 export endpoint，前端無匯出按鈕，tasks.md 亦無對應任務。
 
 ### Requirement 6: 已實現損益追蹤
 

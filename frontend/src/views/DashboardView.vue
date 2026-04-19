@@ -259,11 +259,11 @@
             <span style="color:#64748b;font-size:12px">期間：</span>
             <el-button-group>
               <el-button
-                v-for="y in [1,2,3,5,10]" :key="y"
+                v-for="opt in rangeOptions" :key="opt.label"
                 size="small"
-                :type="analysisYears === y ? 'primary' : 'default'"
-                @click="analysisYears = y">
-                {{ y }}年
+                :type="analysisMonths === opt.months ? 'primary' : 'default'"
+                @click="analysisMonths = opt.months">
+                {{ opt.label }}
               </el-button>
             </el-button-group>
             <span style="color:#64748b;font-size:12px;margin-left:8px">滾輪縮放 / 拖曳平移</span>
@@ -701,7 +701,17 @@ const analysisVisible = ref(false)
 const analysisStock = ref(null)
 const analysisLoading = ref(false)
 const analysisHistory = ref([])
-const analysisYears = ref(2)
+const analysisMonths = ref(12)
+
+const rangeOptions = [
+  { label: '1個月', months: 1 },
+  { label: '3個月', months: 3 },
+  { label: '1年',   months: 12 },
+  { label: '2年',   months: 24 },
+  { label: '3年',   months: 36 },
+  { label: '5年',   months: 60 },
+  { label: '10年',  months: 120 },
+]
 
 async function fetchAnalysisHistory() {
   if (!analysisStock.value) return
@@ -710,7 +720,7 @@ async function fetchAnalysisHistory() {
   try {
     const end = new Date().toISOString().split('T')[0]
     const startDate = new Date()
-    startDate.setFullYear(startDate.getFullYear() - analysisYears.value)
+    startDate.setMonth(startDate.getMonth() - analysisMonths.value)
     const start = startDate.toISOString().split('T')[0]
     const data = await marketDataApi.getStockHistory(
       analysisStock.value.stockCode, analysisStock.value.market, start, end
@@ -723,11 +733,11 @@ async function fetchAnalysisHistory() {
   }
 }
 
-watch(analysisYears, () => { if (analysisVisible.value) fetchAnalysisHistory() })
+watch(analysisMonths, () => { if (analysisVisible.value) fetchAnalysisHistory() })
 
 async function onStockDblClick(row) {
   analysisStock.value = row
-  analysisYears.value = 2
+  analysisMonths.value = 12
   analysisVisible.value = true
   await fetchAnalysisHistory()
 }
@@ -773,7 +783,12 @@ const analysisChartOption = computed(() => {
   const ma60   = calcMA(prices, 60)
   const ma240  = calcMA(prices, 240)
   const { K, D } = calcKD(hist)
-  const cost = s.shares > 0 ? s.investmentCost / s.shares : null
+  const costTwd = s.shares > 0 ? s.investmentCost / s.shares : null
+  // 美股 closePrice 為 USD，investmentCost 為 TWD，需除以匯率換算
+  const usdRate = detail.value?.usdExchangeRate ? Number(detail.value.usdExchangeRate) : null
+  const cost = costTwd != null && s.market === '美股' && usdRate
+    ? costTwd / usdRate
+    : costTwd
 
   // DataZoom: since we already fetched exactly N years, show 100% of the data
   const dzStart = 0
@@ -793,13 +808,13 @@ const analysisChartOption = computed(() => {
       }
     },
     legend: {
-      data: ['收盤價', '月線MA20', '季線MA60', '年線MA240', 'K', 'D'],
+      data: ['收盤價', '月線MA20', '季線MA60', '年線MA240', '成本均價', 'K', 'D'],
       top: 8, textStyle: { fontSize: 12 }
     },
     axisPointer: { link: [{ xAxisIndex: 'all' }] },
     grid: [
-      { left: 64, right: 24, top: 48, bottom: 190 },
-      { left: 64, right: 24, top: 'auto', height: 90, bottom: 60 }
+      { left: 64, right: 80, top: 48, bottom: 190 },
+      { left: 64, right: 80, top: 'auto', height: 90, bottom: 60 }
     ],
     dataZoom: [
       { type: 'inside', xAxisIndex: [0, 1], start: dzStart, end: 100 },
@@ -837,12 +852,6 @@ const analysisChartOption = computed(() => {
         showSymbol: false,
         areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
           colorStops: [{ offset: 0, color: 'rgba(59,130,246,0.12)' }, { offset: 1, color: 'rgba(59,130,246,0)' }] } },
-        markLine: cost ? {
-          silent: true,
-          data: [{ yAxis: parseFloat(cost.toFixed(2)), name: '成本均價' }],
-          lineStyle: { color: '#64748b', type: 'dashed', width: 1.5 },
-          label: { formatter: '成本 {c}', position: 'start', fontSize: 11, color: '#64748b' }
-        } : undefined
       },
       {
         name: '月線MA20', type: 'line', xAxisIndex: 0, yAxisIndex: 0,
@@ -859,6 +868,19 @@ const analysisChartOption = computed(() => {
         data: ma240, lineStyle: { width: 1.5, color: '#ef4444' },
         itemStyle: { color: '#ef4444' }, showSymbol: false
       },
+      ...(cost != null ? [{
+        name: '成本均價', type: 'line', xAxisIndex: 0, yAxisIndex: 0,
+        data: dates.map(() => parseFloat(cost.toFixed(2))),
+        lineStyle: { color: '#64748b', type: 'dashed', width: 1.5 },
+        itemStyle: { color: '#64748b' },
+        showSymbol: false,
+        endLabel: {
+          show: true,
+          formatter: '成本 {c}',
+          fontSize: 11,
+          color: prices[prices.length - 1] >= cost ? '#16a34a' : '#ef4444'
+        }
+      }] : []),
       {
         name: 'K', type: 'line', xAxisIndex: 1, yAxisIndex: 1,
         data: K, lineStyle: { width: 1.5, color: '#f59e0b' },

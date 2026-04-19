@@ -20,6 +20,9 @@ public interface ExchangeRateHistoryRepository extends JpaRepository<ExchangeRat
     @Query("SELECT MAX(e.rateDate) FROM ExchangeRateHistory e WHERE e.currency = ?1")
     Optional<LocalDate> findMaxRateDate(String currency);
 
+    @Query("SELECT MIN(e.rateDate) FROM ExchangeRateHistory e WHERE e.currency = ?1")
+    Optional<LocalDate> findMinDate(String currency);
+
     long countByCurrency(String currency);
 
     /** 刪除指定幣別中日期早於指定日的舊資料 */

@@ -45,6 +45,13 @@ public class RealizedGainController {
         return ResponseEntity.noContent().build();
     }
 
+    /** 一次性資料修正：將所有 currency=USD 的記錄改為 TWD（Excel 匯入欄位均為台幣） */
+    @PostMapping("/fix-currency-to-twd")
+    public Map<String, Object> fixCurrencyToTwd() {
+        int fixed = assetService.fixRealizedGainCurrencyToTwd();
+        return Map.of("fixed", fixed);
+    }
+
     /**
      * POST /api/realized-gains/import
      * 從 Excel 檔案匯入已實現損益（支援含「已實現損益」工作表或以首個工作表為資料來源）

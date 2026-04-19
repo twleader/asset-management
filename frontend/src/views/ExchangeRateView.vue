@@ -124,8 +124,8 @@ async function fetchData() {
 async function onBackfill() {
   backfilling.value = true
   try {
-    const result = await marketDataApi.backfillHistory()
-    ElMessage.success(`匯率匯入 ${result.exchangeRateRecords} 筆，台股 ${result.twRecords} 筆，美股 ${result.usRecords} 筆`)
+    const result = await marketDataApi.backfillExchangeRateHistory()
+    ElMessage.success(`匯率回補完成，新增 ${result.backfilled} 筆`)
     await fetchData()
   } catch {} finally {
     backfilling.value = false

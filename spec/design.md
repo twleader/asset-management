@@ -5,20 +5,22 @@
 資產管理系統採用前後端分離的全端架構，以 Spring Boot 提供 RESTful API，Vue 3 SPA 負責使用者介面，PostgreSQL 作為生產資料庫，透過 Docker Compose 進行容器化部署。系統核心能力包含多資產類型管理、Excel 批次匯入、外部市場資料整合，以及豐富的圖表視覺化分析。
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        Docker Compose                        │
-│  ┌──────────────┐   ┌──────────────┐   ┌────────────────┐  │
-│  │   Frontend   │   │   Backend    │   │   PostgreSQL   │  │
-│  │  Vue 3 SPA   │──▶│ Spring Boot  │──▶│      16        │  │
-│  │  Nginx :80   │   │   :8080      │   │    :5432       │  │
-│  └──────────────┘   └──────────────┘   └────────────────┘  │
-│                             │                                │
-│                    ┌────────┴────────┐                       │
-│                    │ External APIs   │                       │
-│                    │ TWSE / Yahoo    │                       │
-│                    └─────────────────┘                       │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│                              Docker Compose                               │
+│  ┌──────────────┐  ┌────────────────┐  ┌──────────────┐  ┌────────────┐ │
+│  │   Frontend   │  │      BFF       │  │   Backend    │  │ PostgreSQL │ │
+│  │  Vue 3 SPA   │─▶│ Spring Cloud   │─▶│ Spring Boot  │─▶│     16     │ │
+│  │  Nginx :80   │  │ Gateway :8080  │  │ (internal)   │  │   :5432    │ │
+│  └──────────────┘  └────────────────┘  └──────────────┘  └────────────┘ │
+│                            │ /api/bff/**  ↓ (Dashboard 聚合)              │
+│                            └──────────────────────────────────────────┐  │
+│                                       External APIs                   │  │
+│                                       TWSE / Yahoo Finance            │  │
+│                                       （由 Backend 呼叫）              │  │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
+
+> **微服務架構（Task 15 已完成）：** BFF（`bff/`）作為 API Gateway，前端所有 `/api/*` 請求先到 BFF，BFF 透過 Spring Cloud Gateway 路由至 Backend（`backend/`）。BFF 另提供 `GET /api/bff/dashboard/summary` 聚合端點，並行呼叫多個 Backend API 一次回傳儀表板所需資料。
 
 ## Architecture
 
@@ -45,13 +47,15 @@ com.steven.assets/
 - `AssetService`: 快照 CRUD、總額計算、損益運算、歷史分析
 - `ExcelImportService`: Excel 解析、格式偵測、資料清洗、批次儲存
 - `MarketDataService`: 外部 API 呼叫、Cookie/Crumb 管理、股利率查詢
-- `StockPriceService`: 股價快取管理、多市場支援
+- `StockPriceService`: 股價快取管理、多市場支援、每 5 分鐘排程更新
 - `HistoricalDataService`: 歷史股價與匯率資料管理
-
-**Service 層新增**
 - `InstitutionService`: 銀行、券商、存款類型、市場類型的 CRUD、停用管理、關鍵字比對邏輯
 
-**Repository 層**（Spring Data JPA，共 12 個）
+**BFF 層**（`bff/` 模組）
+- Spring Cloud Gateway：所有 `/api/*` 路由至 Backend
+- `DashboardBffController`：`GET /api/bff/dashboard/summary`（並行聚合儀表板資料）
+
+**Repository 層**（Spring Data JPA，共 13 個）
 - `AssetSnapshotRepository`
 - `StockHoldingRepository`
 - `FundHoldingRepository`
@@ -64,6 +68,7 @@ com.steven.assets/
 - `BrokerRepository`
 - `DepositTypeRepository`
 - `MarketTypeRepository`
+- `HolidayRepository`（假日快取）
 
 ### Frontend Architecture (Vue 3)
 
@@ -71,11 +76,11 @@ com.steven.assets/
 src/
 ├── App.vue              # Root layout: sidebar navigation + router-view
 ├── main.js              # App bootstrap, plugin registration
-├── router/index.js      # Route definitions (6 routes + 3 nested)
+├── router/index.js      # Route definitions (14 routes)
 ├── stores/assetStore.js # Pinia global state
 ├── api/index.js         # Axios instance, API methods
 ├── components/          # Reusable components (TaiwanMap, UsaMap)
-└── views/               # Page-level components (8 views)
+└── views/               # Page-level components (12 views)
 ```
 
 **State Management (Pinia)**
@@ -85,10 +90,12 @@ src/
 **Routing**
 | Path | View | 說明 |
 |------|------|------|
-| `/` | DashboardView | 資產總覽儀表板 |
+| `/` | → redirect | 導向 `/dashboard` |
+| `/dashboard` | DashboardView | 資產總覽儀表板 |
 | `/snapshots` | SnapshotListView | 快照列表 |
+| `/snapshots/new` | SnapshotFormView | 新增快照（需定義在 `:id` 之前） |
 | `/snapshots/:id` | SnapshotDetailView | 快照明細 |
-| `/snapshots/new` | SnapshotFormView | 新增快照 |
+| `/snapshots/:id/edit` | SnapshotFormView | 編輯快照 |
 | `/history` | AssetHistoryView | 歷史趨勢 |
 | `/realized-gains` | RealizedGainView | 已實現損益 |
 | `/exchange-rate` | ExchangeRateView | 匯率走勢 |
@@ -193,12 +200,16 @@ MarketType            (市場類型主檔，code 值存入 StockHolding.market)
 | market | String | 市場代碼（對應 MarketType.code，不建立 FK 以保持靈活性） |
 | broker | BrokerEntity | FK（取代原 Broker enum） |
 | shares | BigDecimal | 持股數量 |
-| investmentCost | BigDecimal | 總投資成本 |
+| investmentCost | BigDecimal | 總投資成本（= shares × 成本均價） |
 | currentValue | BigDecimal | 當前市值 |
 | dividendRate | BigDecimal | 現金股利率 |
 | estimatedDividend | BigDecimal | 預估年配息 |
 | currency | String | 幣別（TWD/USD） |
 | originalCurrencyValue | BigDecimal | 原幣現值（美股） |
+| transactionType | String | 交易類型（買 / 賣） |
+| transactionDate | LocalDate | 交易日期 |
+| transactionExchangeRate | BigDecimal | 交易日當日匯率（美股，precision 10,4） |
+| displayOrder | Integer | 持倉顯示排序（拖曳排序用） |
 
 #### FundHolding
 | 欄位 | 型別 | 說明 |
@@ -221,7 +232,7 @@ MarketType            (市場類型主檔，code 值存入 StockHolding.market)
 | currency | String | 幣別（TWD/USD） |
 | broker | String | 券商名稱 |
 | tradeDate | LocalDate | 交易日期 |
-| year | Integer | 年度（DB 計算欄） |
+| year | Integer | 年度（應用層計算，存入 trade_year 欄位） |
 | shares | BigDecimal | 交易股數 |
 | salePrice | BigDecimal | 賣出均價（原幣） |
 | proceeds | BigDecimal | 收帳金額（原幣） |
@@ -250,6 +261,7 @@ DELETE /api/snapshots/{id}                         # 刪除快照
 GET    /api/snapshots/history                      # 資產歷史趨勢
 POST   /api/snapshots/import                       # Excel 批次匯入（含同日期自動覆蓋）
 PATCH  /api/snapshots/{id}/dividend-rates          # 回寫指定快照配息率
+PATCH  /api/snapshots/{id}/stock-order             # 更新持倉顯示排序
 POST   /api/snapshots/enrich-all-dividend-rates    # 批次補齊所有快照缺漏配息率
 POST   /api/snapshots/recalc-dividends             # 重算所有快照預估配息（依現值×配息率）
 ```
@@ -270,15 +282,22 @@ GET    /api/market-data/price?code=2330&market=台股            # 取得即時�
 GET    /api/market-data/prices                                 # 列出所有快取股價
 POST   /api/market-data/prices/refresh                         # 刷新所有持股現價
 GET    /api/market-data/market-status                          # 開盤狀態（台股/美股）
+GET    /api/market-data/holidays?year=2026                     # 台股與美股假日清單
 POST   /api/market-data/history/backfill                       # 補齊所有歷史股價
 POST   /api/market-data/history/backfill-stock?code=&market=&since=&until=  # 補齊單支股票歷史股價
 GET    /api/market-data/history/stock?code=&market=            # 查詢單支股票歷史股價
 POST   /api/market-data/history/prices-on-date?date=           # 批次查詢指定日期各股收盤價
 GET    /api/market-data/exchange-rate?currency=USD&start=&end= # 匯率歷史（省略區間則回傳全部）
 GET    /api/market-data/exchange-rate/latest?currency=USD      # 最新匯率
+GET    /api/market-data/exchange-rate/on-date?currency=USD&date= # 指定日期最近匯率（新增快照自動帶入）
 POST   /api/market-data/exchange-rate/refresh?currency=USD     # 刷新最新匯率
 POST   /api/market-data/exchange-rate/backfill-history?currency=USD&since= # 補齊指定日期起歷史匯率
 GET    /api/market-data/live-assets                            # 以最新快照持倉 × 當前快取股價，即時計算總資產估值
+```
+
+#### BFF Aggregation
+```
+GET    /api/bff/dashboard/summary                  # 並行聚合儀表板所需資料（snapshots + history + prices + market-status）
 ```
 
 #### Settings - Banks
@@ -344,12 +363,12 @@ POST   /api/market-data/exchange-rate/backfill-history?currency=USD&since=2021-0
 ### 資產總額計算
 
 ```
-totalDeposit = Σ(bankDeposit.twdAmount)
+totalDeposit = Σ(bankDeposit.amount)           # amount 為台幣換算金額
 totalFund    = Σ(fundHolding.currentValue)
-totalStock   = Σ(twStock.shares × twStock.currentPrice)
-             + Σ(usStock.shares × usStock.currentPrice × usdToTwd)
+totalStock   = Σ(twStock.currentValue)
+             + Σ(usStock.originalCurrencyValue × usdToTwd)
 totalAssets  = totalDeposit + totalFund + totalStock
-totalCost    = Σ(stock.shares × stock.costPerShare)  (股票成本)
+totalCost    = Σ(stock.investmentCost)         # 儲存總投資成本，非每股成本
 totalProfit  = totalStock - totalCost
 ```
 
@@ -366,7 +385,7 @@ totalProfit  = totalStock - totalCost
 8. 解析股票持倉（格式：代號+名稱 或 代號/名稱分欄，依資料庫 keywords 動態比對 Broker）
 9. 解析基金持倉
 10. 計算並寫入總額
-11. 若同日期已存在：根據 overwrite 參數決定跳過或覆蓋
+11. 若同日期已存在：一律覆蓋（`overwrite` 參數設計存在於 tasks/spec 但實際 Controller 未暴露，目前行為等同 overwrite=true）
 ```
 
 ### 即時資產估算（Live Assets）
@@ -410,14 +429,19 @@ services:
 
   backend:
     build: ./backend
-    ports: ["8081:8080"]
+    # 不暴露 host port（僅 Docker internal network）
     depends_on: postgres (healthy)
     environment: SPRING_PROFILES_ACTIVE=postgres
+
+  bff:
+    build: ./bff
+    ports: ["8080:8080"]
+    depends_on: [backend]
 
   frontend:
     build: ./frontend
     ports: ["80:80"]
-    depends_on: [backend]
+    depends_on: [bff]
 ```
 
 ### Nginx Configuration (Frontend)
