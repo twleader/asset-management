@@ -22,7 +22,9 @@
       <el-col :span="6" v-for="kpi in kpiCards" :key="kpi.label">
         <el-card class="kpi-card">
           <div class="kpi-icon" :style="{ background: kpi.bg }">
-            <el-icon size="22" :color="kpi.color"><component :is="kpi.icon" /></el-icon>
+            <img v-if="kpi.img" :src="kpi.img" style="width:30px;height:30px;object-fit:contain" />
+            <span v-else-if="kpi.emoji" style="font-size:26px;line-height:1">{{ kpi.emoji }}</span>
+            <el-icon v-else size="22" :color="kpi.color"><component :is="kpi.icon" /></el-icon>
           </div>
           <div class="kpi-content">
             <div class="kpi-label">{{ kpi.label }}</div>
@@ -408,13 +410,13 @@ const kpiCards = computed(() => {
 
   return [
     {
-      label: '資產總計', icon: 'Wallet',
+      label: '資產總計', img: '/icons/gold-coins.svg',
       value: formatCurrency(total), bg: '#eff6ff', color: '#2563eb',
       sub: change != null ? `較上次 ${change >= 0 ? '+' : ''}${change}%` : null,
       valueColor: '#1e293b'
     },
     {
-      label: '存款總計', icon: 'Bank',
+      label: '存款總計', emoji: '📒',
       value: formatCurrency(s.totalDeposit), bg: '#f0fdf4', color: '#16a34a',
       sub: `佔比 ${total > 0 ? (Number(s.totalDeposit) / total * 100).toFixed(1) : 0}%`,
       valueColor: '#1e293b'
@@ -426,7 +428,7 @@ const kpiCards = computed(() => {
       valueColor: Number(s.stockProfit) >= 0 ? '#16a34a' : '#dc2626'
     },
     {
-      label: '預估年配息', icon: 'Money',
+      label: '預估年配息', emoji: '💵',
       value: formatCurrency(s.estimatedAnnualDividend), bg: '#fdf4ff', color: '#9333ea',
       sub: `殖利率 ${total > 0 ? (Number(s.estimatedAnnualDividend || 0) / total * 100).toFixed(2) : 0}%`,
       valueColor: '#1e293b'
