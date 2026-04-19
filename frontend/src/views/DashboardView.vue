@@ -173,23 +173,29 @@
             <el-tab-pane label="美股" name="美股" />
           </el-tabs>
           <el-table
+            ref="stockTableRef"
             :data="stockTableData"
-            size="small"
             :max-height="500"
+            border
             stripe
             style="cursor:pointer"
             @row-dblclick="onStockDblClick">
-            <el-table-column label="" width="36">
-              <template #default="{ $index }">
-                <div class="sort-btns">
-                  <el-button size="small" text :disabled="$index === 0" @click.stop="moveStockRow($index, -1)">↑</el-button>
-                  <el-button size="small" text :disabled="$index === stockTableData.length - 1" @click.stop="moveStockRow($index, 1)">↓</el-button>
-                </div>
+            <el-table-column width="36" align="center">
+              <template #default>
+                <el-icon class="drag-handle" style="cursor:grab;color:#94a3b8"><Operation /></el-icon>
               </template>
             </el-table-column>
-            <el-table-column prop="stockCode" label="代號" width="90" />
-            <el-table-column prop="stockName" label="名稱" min-width="130" />
-            <el-table-column label="股數" width="120" align="right">
+            <el-table-column label="股票代號" width="110">
+              <template #default="{ row }">
+                <span style="font-weight:600">{{ row.stockCode }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="股票名稱" min-width="130">
+              <template #default="{ row }">
+                <span style="color:#475569">{{ row.stockName }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="股數" width="110" align="right">
               <template #default="{ row }">
                 {{ formatShares(row.shares, row.market) }}
               </template>
@@ -197,7 +203,7 @@
             <el-table-column label="股價" width="140" align="right">
               <template #default="{ row }">
                 <span v-if="getRealtimePrice(row)">
-                  {{ formatPrice(getRealtimePrice(row).price) }}
+                  <span style="font-weight:600">{{ formatPrice(getRealtimePrice(row).price) }}</span>
                   <span v-if="getRealtimePrice(row).changePercent != null"
                     :style="{ color: getRealtimePrice(row).changePercent >= 0 ? '#16a34a' : '#dc2626', fontSize: '11px' }">
                     {{ getRealtimePrice(row).changePercent >= 0 ? '▲' : '▼' }}{{ Math.abs(getRealtimePrice(row).changePercent).toFixed(2) }}%
@@ -207,15 +213,21 @@
                 <span v-else style="color:#94a3b8">-</span>
               </template>
             </el-table-column>
-            <el-table-column prop="investmentCost" label="投資成本" align="right"
-              :formatter="(r,c,v) => formatCurrency(v)" />
-            <el-table-column prop="currentValue" label="現值" align="right"
-              :formatter="(r,c,v) => formatCurrency(v)" />
-            <el-table-column label="損益" align="right">
+            <el-table-column label="投資成本" align="right" width="120">
               <template #default="{ row }">
-                <span :class="row.profit >= 0 ? 'profit' : 'loss'">
+                <span style="color:#475569">{{ formatCurrency(row.investmentCost) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="現值" align="right" width="120">
+              <template #default="{ row }">
+                <span style="font-weight:600">{{ formatCurrency(row.currentValue) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="損益" align="right" width="160">
+              <template #default="{ row }">
+                <span :class="row.profit >= 0 ? 'profit' : 'loss'" style="font-weight:600">
                   {{ formatCurrency(row.profit) }}
-                  ({{ formatPct(row.profitRate) }})
+                  <span style="font-size:12px">({{ formatPct(row.profitRate) }})</span>
                 </span>
               </template>
             </el-table-column>
@@ -229,7 +241,7 @@
             </el-table-column>
             <el-table-column label="預估配息" align="right" width="110">
               <template #default="{ row }">
-                <span v-if="row.estimatedDividend">{{ formatCurrency(row.estimatedDividend) }}</span>
+                <span v-if="row.estimatedDividend" style="color:#0369a1;font-weight:600">{{ formatCurrency(row.estimatedDividend) }}</span>
                 <span v-else style="color:#94a3b8">-</span>
               </template>
             </el-table-column>
@@ -281,11 +293,14 @@ import { CanvasRenderer } from 'echarts/renderers'
 import { PieChart, LineChart, BarChart } from 'echarts/charts'
 import { TitleComponent, TooltipComponent, LegendComponent, GridComponent, DataZoomComponent, MarkLineComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
-import { ArrowRight, Loading } from '@element-plus/icons-vue'
+import { ArrowRight, Loading, Operation } from '@element-plus/icons-vue'
+import Sortable from 'sortablejs'
 import { useAssetStore } from '@/stores/assetStore'
 import { bffApi, snapshotApi, marketDataApi } from '@/api'
 
 let orderSaveTimer = null
+let stockSortable = null
+const stockTableRef = ref(null)
 
 use([CanvasRenderer, PieChart, LineChart, BarChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent, DataZoomComponent, MarkLineComponent])
 
@@ -309,6 +324,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (priceTimer) { clearInterval(priceTimer); priceTimer = null }
+  if (stockSortable) { stockSortable.destroy(); stockSortable = null }
 })
 
 async function loadDashboardSummary() {
@@ -611,6 +627,11 @@ const stockMarketTab = ref('台股')
 // 保留使用者自訂排序；若股票清單相同只更新數值，若清單變動才重置順序
 const customTableData = reactive({ '台股': [], '美股': [] })
 
+watch(stockMarketTab, () => nextTick(initStockSortable))
+
+// 每次資料更新（首次載入 or 價格刷新）都確保 Sortable 已綁定
+watch(() => customTableData[stockMarketTab.value], () => nextTick(initStockSortable), { deep: false })
+
 watch(mergedStocks, (stocks) => {
   for (const market of ['台股', '美股']) {
     const incoming = stocks.filter(s => s.market === market)
@@ -631,13 +652,23 @@ watch(mergedStocks, (stocks) => {
 
 const stockTableData = computed(() => customTableData[stockMarketTab.value] ?? [])
 
-function moveStockRow(idx, dir) {
-  const list = customTableData[stockMarketTab.value]
-  const to = idx + dir
-  if (to < 0 || to >= list.length) return
-  const item = list.splice(idx, 1)[0]
-  list.splice(to, 0, item)
-  scheduleSaveOrder()
+function initStockSortable() {
+  if (stockSortable) { stockSortable.destroy(); stockSortable = null }
+  const el = stockTableRef.value?.$el
+  if (!el) return
+  const tbody = el.querySelector('.el-table__body tbody') ?? el.querySelector('tbody')
+  if (!tbody || tbody.children.length === 0) return
+  stockSortable = Sortable.create(tbody, {
+    handle: '.drag-handle',
+    animation: 150,
+    onEnd({ oldIndex, newIndex }) {
+      if (oldIndex === newIndex) return
+      const list = customTableData[stockMarketTab.value]
+      const moved = list.splice(oldIndex, 1)[0]
+      list.splice(newIndex, 0, moved)
+      scheduleSaveOrder()
+    }
+  })
 }
 
 function scheduleSaveOrder() {
@@ -944,9 +975,6 @@ const analysisChartOption = computed(() => {
 .csb-sep { width: 1px; height: 32px; background: #e2e8f0; margin: 0 8px; }
 :deep(.el-table__row--striped .el-table__cell) { background: #f7f8fa !important; }
 
-.sort-btns { display: flex; flex-direction: column; align-items: center; gap: 0; }
-.sort-btns :deep(.el-button) { padding: 0 2px; height: 16px; min-height: 0; font-size: 11px; color: #94a3b8; }
-.sort-btns :deep(.el-button:not(:disabled):hover) { color: #3b82f6; }
 
 .analysis-loading {
   display: flex; flex-direction: column; align-items: center;
