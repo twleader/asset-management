@@ -591,20 +591,36 @@ public class AssetService {
                     f.getInvestmentAmount(), f.getCurrentValue(), f.getProfit(), f.getProfitRate()
                 )).toList();
 
+        // 快照匯率作為 fallback
+        BigDecimal snapshotUsdRate = s.getUsdExchangeRate() != null
+                ? s.getUsdExchangeRate() : BigDecimal.ONE;
+
         List<AssetSnapshotDto.StockResponse> stocks = s.getStocks().stream()
                 .sorted(java.util.Comparator.comparing(
                     st -> st.getDisplayOrder() != null ? st.getDisplayOrder() : Integer.MAX_VALUE))
-                .map(st -> new AssetSnapshotDto.StockResponse(
-                    st.getId(), st.getStockCode(), st.getStockName(), st.getMarket(),
-                    st.getBroker() != null ? st.getBroker().getId() : null,
-                    st.getBroker() != null ? st.getBroker().getDisplayName() : null,
-                    st.getShares(), st.getInvestmentCost(), st.getCurrentValue(),
-                    st.getProfit(), st.getProfitRate(),
-                    st.getEstimatedDividend(), st.getDividendRate(),
-                    st.getCurrency(), st.getOriginalCurrencyValue(),
-                    st.getTransactionType(), st.getTransactionDate(), st.getTransactionExchangeRate(),
-                    st.getDisplayOrder()
-                )).toList();
+                .map(st -> {
+                    // investmentCostTwd：USD 幣別須乘有效匯率換算台幣，供匯總顯示用
+                    BigDecimal rawCost = st.getInvestmentCost() != null ? st.getInvestmentCost() : BigDecimal.ZERO;
+                    BigDecimal investmentCostTwd;
+                    if ("USD".equals(st.getCurrency())) {
+                        BigDecimal rate = st.getTransactionExchangeRate() != null
+                                ? st.getTransactionExchangeRate() : snapshotUsdRate;
+                        investmentCostTwd = rawCost.multiply(rate).setScale(0, RoundingMode.HALF_UP);
+                    } else {
+                        investmentCostTwd = rawCost.setScale(0, RoundingMode.HALF_UP);
+                    }
+                    return new AssetSnapshotDto.StockResponse(
+                        st.getId(), st.getStockCode(), st.getStockName(), st.getMarket(),
+                        st.getBroker() != null ? st.getBroker().getId() : null,
+                        st.getBroker() != null ? st.getBroker().getDisplayName() : null,
+                        st.getShares(), rawCost, investmentCostTwd, st.getCurrentValue(),
+                        st.getProfit(), st.getProfitRate(),
+                        st.getEstimatedDividend(), st.getDividendRate(),
+                        st.getCurrency(), st.getOriginalCurrencyValue(),
+                        st.getTransactionType(), st.getTransactionDate(), st.getTransactionExchangeRate(),
+                        st.getDisplayOrder()
+                    );
+                }).toList();
 
         return new AssetSnapshotDto.SnapshotDetailResponse(
             s.getId(), s.getSnapshotDate(), s.getUsdExchangeRate(),

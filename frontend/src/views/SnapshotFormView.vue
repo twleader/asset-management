@@ -131,7 +131,7 @@
               <el-table-column label="存款類型" width="150">
                 <template #default="{ row }">
                   <el-select v-model="row.depositType" size="small" style="width:100%">
-                    <el-option v-for="t in depositTypeOptions" :key="t.value" :label="t.label" :value="t.value" />
+                    <el-option v-for="t in twdDepositTypeOptions" :key="t.value" :label="t.label" :value="t.value" />
                   </el-select>
                 </template>
               </el-table-column>
@@ -153,23 +153,6 @@
                 </template>
               </el-table-column>
             </el-table>
-            <!-- 台幣小計 -->
-            <div class="deposit-summary">
-              <div class="ds-item">
-                <span class="ds-label">台幣存款總計</span>
-                <span class="ds-val">{{ fmt(depositTwdTotal) }}</span>
-              </div>
-              <div class="ds-sep" />
-              <div class="ds-item">
-                <span class="ds-label">定存</span>
-                <span class="ds-val">{{ fmt(depositTwdFixed) }}</span>
-              </div>
-              <div class="ds-sep" />
-              <div class="ds-item">
-                <span class="ds-label">活存／其他</span>
-                <span class="ds-val">{{ fmt(depositTwdDemand) }}</span>
-              </div>
-            </div>
           </el-tab-pane>
 
           <!-- 美元 Tab -->
@@ -193,7 +176,7 @@
               <el-table-column label="存款類型" width="150">
                 <template #default="{ row }">
                   <el-select v-model="row.depositType" size="small" style="width:100%">
-                    <el-option v-for="t in depositTypeOptions" :key="t.value" :label="t.label" :value="t.value" />
+                    <el-option v-for="t in usdDepositTypeOptions" :key="t.value" :label="t.label" :value="t.value" />
                   </el-select>
                 </template>
               </el-table-column>
@@ -223,13 +206,30 @@
             <!-- 美元小計 -->
             <div class="deposit-summary">
               <div class="ds-item">
-                <span class="ds-label">美元存款</span>
-                <span class="ds-val">USD {{ numFmt(usdDeposits.reduce((s,d)=>s+Number(d.amount||0),0).toFixed(2)) }}</span>
+                <span class="ds-label">活存</span>
+                <span class="ds-val">USD {{ numFmt(usdDemandAmt.toFixed(2)) }}</span>
+              </div>
+              <div class="ds-sep" />
+              <div class="ds-item">
+                <span class="ds-label">定存</span>
+                <span class="ds-val">USD {{ numFmt(usdFixedAmt.toFixed(2)) }}</span>
+              </div>
+              <div class="ds-sep" />
+              <div class="ds-item">
+                <span class="ds-label" :style="{ color: transitUsdNetAmt < 0 ? '#dc2626' : '#16a34a' }">在途款項</span>
+                <span class="ds-val" :style="{ color: transitUsdNetAmt < 0 ? '#dc2626' : '#16a34a' }">
+                  {{ transitUsdNetAmt < 0 ? '-' : '+' }}USD {{ numFmt(Math.abs(transitUsdNetAmt).toFixed(2)) }}
+                </span>
+              </div>
+              <div class="ds-sep" />
+              <div class="ds-item">
+                <span class="ds-label">美元總計</span>
+                <span class="ds-val">USD {{ numFmt(usdGrandAmt.toFixed(2)) }}</span>
               </div>
               <div class="ds-sep" />
               <div class="ds-item">
                 <span class="ds-label">台幣等值</span>
-                <span class="ds-val">{{ fmt(depositUsdTotal) }}</span>
+                <span class="ds-val">{{ fmt(usdGrandTwd) }}</span>
               </div>
               <div class="ds-sep" />
               <div class="ds-item">
@@ -373,11 +373,21 @@
           </el-tab-pane>
         </el-tabs>
 
-        <!-- 合計 -->
-        <div class="deposit-summary" style="border-top:1px solid #e2e8f0;margin-top:0">
+        <!-- 合計（單列）：僅台幣 tab 顯示 -->
+        <div v-if="depositTab === 'TWD'" class="deposit-summary" style="border-top:1px solid #e2e8f0;margin-top:0">
           <div class="ds-item">
-            <span class="ds-label">存款總計（台幣）</span>
-            <span class="ds-val" style="font-weight:700">{{ fmt(depositTotal) }}</span>
+            <span class="ds-label">台幣存款總計</span>
+            <span class="ds-val">{{ fmt(depositTwdTotal) }}</span>
+          </div>
+          <div class="ds-sep" />
+          <div class="ds-item">
+            <span class="ds-label">定存</span>
+            <span class="ds-val">{{ fmt(depositTwdFixed) }}</span>
+          </div>
+          <div class="ds-sep" />
+          <div class="ds-item">
+            <span class="ds-label">活存／其他</span>
+            <span class="ds-val">{{ fmt(depositTwdDemand) }}</span>
           </div>
           <template v-if="transitNetTwd !== 0">
             <div class="ds-sep" />
@@ -1066,6 +1076,8 @@ const rules = {
 const bankOptions        = ref([])   // { value: id, label: displayName }
 const brokerOptions      = ref([])   // { value: id, label: displayName }
 const depositTypeOptions = ref([])   // { value: code, label: displayName }
+const twdDepositTypeOptions = computed(() => depositTypeOptions.value.filter(t => !t.value.startsWith('美元')))
+const usdDepositTypeOptions = computed(() => depositTypeOptions.value.filter(t => t.value.startsWith('美元')))
 
 async function loadInstitutions() {
   const [banks, brokers, depositTypes] = await Promise.all([
@@ -1301,6 +1313,12 @@ const depositTwdFixed  = computed(() => twdDeposits.value.filter(d => (d.deposit
 const depositTwdDemand = computed(() => depositTwdTotal.value - depositTwdFixed.value)
 const depositUsdTotal  = computed(() => usdDeposits.value.reduce((s, d) => s + depositTwd(d), 0))
 const transitNetTwd    = computed(() => transitDeposits.value.reduce((s, d) => s + depositTwd(d), 0))
+const transitUsdNetTwd = computed(() => transitUsdDeposits.value.reduce((s, d) => s + depositTwd(d), 0))
+const usdDemandAmt     = computed(() => usdDeposits.value.filter(d => !d.depositType?.includes('定存')).reduce((s, d) => s + Number(d.amount || 0), 0))
+const usdFixedAmt      = computed(() => usdDeposits.value.filter(d => d.depositType?.includes('定存')).reduce((s, d) => s + Number(d.amount || 0), 0))
+const transitUsdNetAmt = computed(() => transitUsdDeposits.value.reduce((s, d) => s + (isTransitPayable(d) ? -1 : 1) * Number(d.amount || 0), 0))
+const usdGrandAmt      = computed(() => usdDemandAmt.value + usdFixedAmt.value + transitUsdNetAmt.value)
+const usdGrandTwd      = computed(() => Math.round(usdGrandAmt.value * (form.usdExchangeRate || 1)))
 
 const moveDepositRow = (row, dir) => {
   const idx = form.deposits.indexOf(row)

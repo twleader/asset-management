@@ -583,7 +583,7 @@ const mergedStocks = computed(() => {
     }
     const g = map.get(key)
     g.shares += Number(s.shares || 0)
-    g.investmentCost += Number(s.investmentCost || 0)
+    g.investmentCost += Number(s.investmentCostTwd ?? s.investmentCost ?? 0)
     g.currentValue += Number(s.currentValue || 0)
     g.estimatedDividend += Number(s.estimatedDividend || 0)
     if (s.dividendRate && !g.dividendRate) g.dividendRate = Number(s.dividendRate)

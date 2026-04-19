@@ -120,7 +120,8 @@ public class AssetSnapshotDto {
             Long brokerId,
             String brokerDisplayName,
             BigDecimal shares,
-            BigDecimal investmentCost,
+            BigDecimal investmentCost,      // 原始幣別金額（USD 就是美元）
+            BigDecimal investmentCostTwd,   // 統一台幣換算值（供 Dashboard 等匯總頁使用）
             BigDecimal currentValue,
             BigDecimal profit,
             BigDecimal profitRate,
