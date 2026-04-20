@@ -523,12 +523,14 @@
               </el-table-column>
 
               <!-- 股號/股名 -->
-              <el-table-column label="股號/股名" min-width="140">
+              <el-table-column label="股號/股名" min-width="200">
                 <template #default="{ row }">
-                  <el-input v-model="row.stockCode" size="small" placeholder="代號"
-                    style="margin-bottom:3px"
-                    @blur="fetchPriceForRow(row)" />
-                  <el-input v-model="row.stockName" size="small" placeholder="股票名稱" />
+                  <div style="display:flex;gap:4px">
+                    <el-input v-model="row.stockCode" size="small" placeholder="代號"
+                      style="width:80px;flex-shrink:0"
+                      @blur="fetchPriceForRow(row)" />
+                    <el-input v-model="row.stockName" size="small" placeholder="股票名稱" />
+                  </div>
                 </template>
               </el-table-column>
 
@@ -614,13 +616,13 @@
             <!-- 台股小計 -->
             <div class="sec-summary">
               <div class="ds-item">
-                <span class="ds-label">投資成本</span>
-                <span class="ds-val">{{ fmt(twSummary.cost) }}</span>
+                <span class="ds-label">目前總值</span>
+                <span class="ds-val">{{ fmt(twSummary.value) }}</span>
               </div>
               <div class="ds-sep" />
               <div class="ds-item">
-                <span class="ds-label">目前總值</span>
-                <span class="ds-val">{{ fmt(twSummary.value) }}</span>
+                <span class="ds-label">投資成本</span>
+                <span class="ds-val">{{ fmt(twSummary.cost) }}</span>
               </div>
               <div class="ds-sep" />
               <div class="ds-item">
@@ -804,13 +806,15 @@
               </el-table-column>
 
               <!-- 股號/股名 -->
-              <el-table-column label="股號/股名" min-width="155">
+              <el-table-column label="股號/股名" min-width="200">
                 <template #default="{ row }">
-                  <el-input v-model="row.stockCode" size="small" placeholder="Ticker"
-                    style="margin-bottom:3px"
-                    @input="row.stockCode = row.stockCode.toUpperCase()"
-                    @blur="fetchPriceForRow(row)" />
-                  <el-input v-model="row.stockName" size="small" placeholder="股票名稱" />
+                  <div style="display:flex;gap:4px">
+                    <el-input v-model="row.stockCode" size="small" placeholder="Ticker"
+                      style="width:80px;flex-shrink:0"
+                      @input="row.stockCode = row.stockCode.toUpperCase()"
+                      @blur="fetchPriceForRow(row)" />
+                    <el-input v-model="row.stockName" size="small" placeholder="股票名稱" />
+                  </div>
                 </template>
               </el-table-column>
 
@@ -897,13 +901,13 @@
             <!-- 美股小計 -->
             <div class="sec-summary">
               <div class="ds-item">
-                <span class="ds-label">投資成本</span>
-                <span class="ds-val">{{ fmt(usSummary.cost) }}</span>
+                <span class="ds-label">目前總值</span>
+                <span class="ds-val">{{ fmt(usSummary.value) }}</span>
               </div>
               <div class="ds-sep" />
               <div class="ds-item">
-                <span class="ds-label">目前總值</span>
-                <span class="ds-val">{{ fmt(usSummary.value) }}</span>
+                <span class="ds-label">投資成本</span>
+                <span class="ds-val">{{ fmt(usSummary.cost) }}</span>
               </div>
               <div class="ds-sep" />
               <div class="ds-item">

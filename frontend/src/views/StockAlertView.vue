@@ -46,14 +46,10 @@
             <el-icon class="drag-handle" style="cursor:grab;color:#94a3b8"><Operation /></el-icon>
           </template>
         </el-table-column>
-        <el-table-column label="股票代號" width="100">
+        <el-table-column label="股號／股名" min-width="180">
           <template #default="{ row }">
-            <span style="font-weight:600">{{ row.stockCode }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="股票名稱" min-width="120">
-          <template #default="{ row }">
-            <span style="color:#475569">{{ row.stockName }}</span>
+            <span style="font-weight:600;margin-right:8px">{{ row.stockCode }}</span>
+            <span style="color:#475569;font-size:13px">{{ row.stockName }}</span>
           </template>
         </el-table-column>
         <el-table-column label="警示條件" min-width="180">
