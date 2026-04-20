@@ -14,6 +14,9 @@ FROM eclipse-temurin:21-jre-alpine
 
 WORKDIR /app
 
+# Install curl (required for Yahoo Finance API calls)
+RUN apk add --no-cache curl
+
 # Create non-root user
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 

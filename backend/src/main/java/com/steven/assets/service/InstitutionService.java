@@ -5,10 +5,12 @@ import com.steven.assets.model.Bank;
 import com.steven.assets.model.BrokerEntity;
 import com.steven.assets.model.DepositTypeEntity;
 import com.steven.assets.model.MarketType;
+import com.steven.assets.model.TransitFundType;
 import com.steven.assets.repository.BankRepository;
 import com.steven.assets.repository.BrokerRepository;
 import com.steven.assets.repository.DepositTypeRepository;
 import com.steven.assets.repository.MarketTypeRepository;
+import com.steven.assets.repository.TransitFundTypeRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,6 +27,7 @@ public class InstitutionService {
     private final BrokerRepository brokerRepo;
     private final DepositTypeRepository depositTypeRepo;
     private final MarketTypeRepository marketTypeRepo;
+    private final TransitFundTypeRepository transitFundTypeRepo;
 
     // ===================== Bank =====================
 
@@ -251,6 +254,55 @@ public class InstitutionService {
         return toMarketTypeResponse(marketTypeRepo.save(entity));
     }
 
+    // ===================== TransitFundType =====================
+
+    @Transactional(readOnly = true)
+    public List<InstitutionDto.TransitFundTypeResponse> getAllTransitFundTypes() {
+        return transitFundTypeRepo.findAllByOrderBySortOrderAscDisplayNameAsc().stream()
+                .map(this::toTransitFundTypeResponse)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<InstitutionDto.TransitFundTypeResponse> getActiveTransitFundTypes() {
+        return transitFundTypeRepo.findByActiveTrueOrderBySortOrderAscDisplayNameAsc().stream()
+                .map(this::toTransitFundTypeResponse)
+                .toList();
+    }
+
+    @Transactional
+    public InstitutionDto.TransitFundTypeResponse createTransitFundType(InstitutionDto.CreateTransitFundTypeRequest req) {
+        if (transitFundTypeRepo.findByCode(req.code()).isPresent()) {
+            throw new IllegalArgumentException("在途款項類型代碼已存在: " + req.code());
+        }
+        TransitFundType entity = TransitFundType.builder()
+                .code(req.code())
+                .displayName(req.displayName())
+                .payable(req.payable() != null ? req.payable() : true)
+                .sortOrder(req.sortOrder() != null ? req.sortOrder() : 0)
+                .active(true)
+                .build();
+        return toTransitFundTypeResponse(transitFundTypeRepo.save(entity));
+    }
+
+    @Transactional
+    public InstitutionDto.TransitFundTypeResponse updateTransitFundType(Long id, InstitutionDto.UpdateTransitFundTypeRequest req) {
+        TransitFundType entity = transitFundTypeRepo.findById(id)
+                .orElseThrow(() -> new java.util.NoSuchElementException("找不到在途款項類型 ID: " + id));
+        entity.setDisplayName(req.displayName());
+        if (req.payable() != null) entity.setPayable(req.payable());
+        if (req.sortOrder() != null) entity.setSortOrder(req.sortOrder());
+        return toTransitFundTypeResponse(transitFundTypeRepo.save(entity));
+    }
+
+    @Transactional
+    public InstitutionDto.TransitFundTypeResponse setTransitFundTypeActive(Long id, boolean active) {
+        TransitFundType entity = transitFundTypeRepo.findById(id)
+                .orElseThrow(() -> new java.util.NoSuchElementException("找不到在途款項類型 ID: " + id));
+        entity.setActive(active);
+        return toTransitFundTypeResponse(transitFundTypeRepo.save(entity));
+    }
+
     // ===================== Helpers =====================
 
     private InstitutionDto.BankResponse toBankResponse(Bank b) {
@@ -267,5 +319,9 @@ public class InstitutionService {
 
     private InstitutionDto.MarketTypeResponse toMarketTypeResponse(MarketType m) {
         return new InstitutionDto.MarketTypeResponse(m.getId(), m.getCode(), m.getDisplayName(), m.getSortOrder(), m.getActive());
+    }
+
+    private InstitutionDto.TransitFundTypeResponse toTransitFundTypeResponse(TransitFundType t) {
+        return new InstitutionDto.TransitFundTypeResponse(t.getId(), t.getCode(), t.getDisplayName(), t.getPayable(), t.getSortOrder(), t.getActive());
     }
 }

@@ -87,4 +87,28 @@ public class InstitutionDto {
             @NotBlank String displayName,
             Integer sortOrder
     ) {}
+
+    // ===== TransitFundType =====
+
+    public record TransitFundTypeResponse(
+            Long id,
+            String code,
+            String displayName,
+            Boolean payable,
+            Integer sortOrder,
+            Boolean active
+    ) {}
+
+    public record CreateTransitFundTypeRequest(
+            @NotBlank String code,
+            @NotBlank String displayName,
+            Boolean payable,
+            Integer sortOrder
+    ) {}
+
+    public record UpdateTransitFundTypeRequest(
+            @NotBlank String displayName,
+            Boolean payable,
+            Integer sortOrder
+    ) {}
 }

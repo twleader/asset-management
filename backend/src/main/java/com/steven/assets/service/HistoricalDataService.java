@@ -9,6 +9,7 @@ import com.steven.assets.model.AssetSnapshot;
 import com.steven.assets.repository.AssetSnapshotRepository;
 import com.steven.assets.repository.ExchangeRateHistoryRepository;
 import com.steven.assets.repository.StockPriceHistoryRepository;
+import com.steven.assets.repository.StockPriceRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -34,6 +35,7 @@ import java.util.*;
 public class HistoricalDataService {
 
     private final StockPriceHistoryRepository priceHistRepo;
+    private final StockPriceRepository priceRepo;
     private final ExchangeRateHistoryRepository rateHistRepo;
     private final AssetSnapshotRepository snapshotRepo;
 
@@ -612,7 +614,30 @@ public class HistoricalDataService {
 
     @Transactional(readOnly = true)
     public List<StockPriceHistory> getStockHistory(String stockCode, String market, LocalDate start, LocalDate end) {
-        return priceHistRepo.findByStockCodeAndMarketAndTradingDateBetweenOrderByTradingDateAsc(stockCode, market, start, end);
+        List<StockPriceHistory> history = new ArrayList<>(
+            priceHistRepo.findByStockCodeAndMarketAndTradingDateBetweenOrderByTradingDateAsc(stockCode, market, start, end)
+        );
+
+        // 若查詢範圍包含今天，從 StockPrice 快取補上今日即時價
+        ZoneId tz = "美股".equals(market) ? ZoneId.of("America/New_York") : ZoneId.of("Asia/Taipei");
+        LocalDate today = LocalDate.now(tz);
+        if (!end.isBefore(today) && !today.isBefore(start)) {
+            boolean alreadyHasToday = history.stream().anyMatch(h -> h.getTradingDate().equals(today));
+            if (!alreadyHasToday) {
+                priceRepo.findByStockCodeAndMarket(stockCode, market).ifPresent(sp -> {
+                    if (sp.getPrice() != null && today.equals(sp.getTradingDate())) {
+                        history.add(StockPriceHistory.builder()
+                            .stockCode(stockCode)
+                            .market(market)
+                            .tradingDate(today)
+                            .closePrice(sp.getPrice())
+                            .build());
+                    }
+                });
+            }
+        }
+
+        return history;
     }
 
     /**
@@ -720,17 +745,9 @@ public class HistoricalDataService {
         try {
             String url = "https://query2.finance.yahoo.com/v8/finance/chart/" + code.trim().toUpperCase()
                     + "?interval=1d&range=1d";
-            // Yahoo 需要 curl 避免被擋
-            ProcessBuilder pb = new ProcessBuilder("curl", "-s",
-                    "-H", "User-Agent: Mozilla/5.0",
-                    url);
-            pb.redirectErrorStream(true);
-            Process p = pb.start();
-            String body = new String(p.getInputStream().readAllBytes());
-            p.waitFor();
+            String body = curlGetWithRetry(url, 1);
             JsonNode meta = mapper.readTree(body)
                     .path("chart").path("result").path(0).path("meta");
-            // Yahoo 回傳 shortName 或 longName
             String name = meta.path("shortName").asText("").trim();
             if (name.isEmpty()) name = meta.path("longName").asText("").trim();
             if (!name.isEmpty() && !name.equalsIgnoreCase(code)) {

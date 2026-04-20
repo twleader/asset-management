@@ -58,7 +58,13 @@ export const institutionApi = {
   getAllMarketTypes:    () => api.get('/settings/market-types'),
   createMarketType:    (data) => api.post('/settings/market-types', data),
   updateMarketType:    (id, data) => api.put(`/settings/market-types/${id}`, data),
-  setMarketTypeActive: (id, active) => api.patch(`/settings/market-types/${id}/active`, { active })
+  setMarketTypeActive: (id, active) => api.patch(`/settings/market-types/${id}/active`, { active }),
+  // Transit Fund Types
+  getAllTransitFundTypes:    () => api.get('/settings/transit-fund-types'),
+  getActiveTransitFundTypes: () => api.get('/settings/transit-fund-types/active'),
+  createTransitFundType:    (data) => api.post('/settings/transit-fund-types', data),
+  updateTransitFundType:    (id, data) => api.put(`/settings/transit-fund-types/${id}`, data),
+  setTransitFundTypeActive: (id, active) => api.patch(`/settings/transit-fund-types/${id}/active`, { active })
 }
 
 // ===== Realized Gains =====

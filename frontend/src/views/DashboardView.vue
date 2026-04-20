@@ -256,7 +256,7 @@
     <el-dialog
       v-model="analysisVisible"
       :title="`${analysisStock?.stockCode} ${analysisStock?.stockName}　股價走勢分析`"
-      width="900px"
+      width="1100px"
       destroy-on-close
       draggable>
       <div v-if="analysisLoading" class="analysis-loading">
@@ -410,7 +410,7 @@ const kpiCards = computed(() => {
 
   return [
     {
-      label: '資產總計', img: '/icons/gold-coins.svg',
+      label: '資產總計', img: '/icons/gold-coins-v2.svg',
       value: formatCurrency(total), bg: '#eff6ff', color: '#2563eb',
       sub: change != null ? `較上次 ${change >= 0 ? '+' : ''}${change}%` : null,
       valueColor: '#1e293b'
@@ -846,8 +846,8 @@ const analysisChartOption = computed(() => {
     },
     axisPointer: { link: [{ xAxisIndex: 'all' }] },
     grid: [
-      { left: 64, right: 80, top: 48, bottom: 190 },
-      { left: 64, right: 80, top: 'auto', height: 90, bottom: 60 }
+      { left: 64, right: 110, top: 48, bottom: 190 },
+      { left: 64, right: 110, top: 'auto', height: 90, bottom: 60 }
     ],
     dataZoom: [
       { type: 'inside', xAxisIndex: [0, 1], start: dzStart, end: 100 },
@@ -883,23 +883,31 @@ const analysisChartOption = computed(() => {
         lineStyle: { width: 2, color: '#3b82f6' },
         itemStyle: { color: '#3b82f6' },
         showSymbol: false,
+        endLabel: { show: true, formatter: '{c}', fontSize: 11, color: '#3b82f6', fontWeight: 700 },
+        labelLayout: { hideOverlap: false },
         areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
           colorStops: [{ offset: 0, color: 'rgba(59,130,246,0.12)' }, { offset: 1, color: 'rgba(59,130,246,0)' }] } },
       },
       {
         name: '月線MA20', type: 'line', xAxisIndex: 0, yAxisIndex: 0,
         data: ma20, lineStyle: { width: 1.5, color: '#f59e0b' },
-        itemStyle: { color: '#f59e0b' }, showSymbol: false
+        itemStyle: { color: '#f59e0b' }, showSymbol: false,
+        endLabel: { show: true, formatter: '{c}', fontSize: 11, color: '#f59e0b' },
+        labelLayout: { hideOverlap: false }
       },
       {
         name: '季線MA60', type: 'line', xAxisIndex: 0, yAxisIndex: 0,
         data: ma60, lineStyle: { width: 1.5, color: '#8b5cf6' },
-        itemStyle: { color: '#8b5cf6' }, showSymbol: false
+        itemStyle: { color: '#8b5cf6' }, showSymbol: false,
+        endLabel: { show: true, formatter: '{c}', fontSize: 11, color: '#8b5cf6' },
+        labelLayout: { hideOverlap: false }
       },
       {
         name: '年線MA240', type: 'line', xAxisIndex: 0, yAxisIndex: 0,
         data: ma240, lineStyle: { width: 1.5, color: '#ef4444' },
-        itemStyle: { color: '#ef4444' }, showSymbol: false
+        itemStyle: { color: '#ef4444' }, showSymbol: false,
+        endLabel: { show: true, formatter: '{c}', fontSize: 11, color: '#ef4444' },
+        labelLayout: { hideOverlap: false }
       },
       ...(cost != null ? [{
         name: '成本均價', type: 'line', xAxisIndex: 0, yAxisIndex: 0,
@@ -918,6 +926,8 @@ const analysisChartOption = computed(() => {
         name: 'K', type: 'line', xAxisIndex: 1, yAxisIndex: 1,
         data: K, lineStyle: { width: 1.5, color: '#f59e0b' },
         itemStyle: { color: '#f59e0b' }, showSymbol: false,
+        endLabel: { show: true, formatter: '{c}', fontSize: 11, color: '#f59e0b' },
+        labelLayout: { hideOverlap: false },
         markLine: {
           silent: true,
           data: [{ yAxis: 80 }, { yAxis: 20 }],
@@ -928,7 +938,9 @@ const analysisChartOption = computed(() => {
       {
         name: 'D', type: 'line', xAxisIndex: 1, yAxisIndex: 1,
         data: D, lineStyle: { width: 1.5, color: '#3b82f6' },
-        itemStyle: { color: '#3b82f6' }, showSymbol: false
+        itemStyle: { color: '#3b82f6' }, showSymbol: false,
+        endLabel: { show: true, formatter: '{c}', fontSize: 11, color: '#3b82f6' },
+        labelLayout: { hideOverlap: false }
       }
     ]
   }

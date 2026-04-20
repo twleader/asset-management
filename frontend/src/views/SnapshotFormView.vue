@@ -1080,14 +1080,17 @@ const twdDepositTypeOptions = computed(() => depositTypeOptions.value.filter(t =
 const usdDepositTypeOptions = computed(() => depositTypeOptions.value.filter(t => t.value.startsWith('美元')))
 
 async function loadInstitutions() {
-  const [banks, brokers, depositTypes] = await Promise.all([
+  const [banks, brokers, depositTypes, transitTypes] = await Promise.all([
     institutionApi.getAllBanks(),
     institutionApi.getAllBrokers(),
-    institutionApi.getAllDepositTypes()
+    institutionApi.getAllDepositTypes(),
+    institutionApi.getActiveTransitFundTypes()
   ])
   bankOptions.value        = banks.filter(b => b.active).map(b => ({ value: b.id, label: b.displayName }))
   brokerOptions.value      = brokers.filter(b => b.active).map(b => ({ value: b.id, label: b.displayName }))
   depositTypeOptions.value = depositTypes.filter(d => d.active).map(d => ({ value: d.code, label: d.displayName }))
+  transitTypeOptions.value = transitTypes.map(t => ({ value: t.code, label: t.displayName, payable: t.payable }))
+  transitPayableSet.value  = new Set(transitTypes.filter(t => t.payable).map(t => t.code))
 }
 
 const stockTab = ref('tw')
@@ -1219,8 +1222,7 @@ const stockProfitRate = (s) => { const c = stockCost(s); return c > 0 ? stockPro
 const stockDividend = (s) => stockValue(s) * Number(s.dividendRate || 0)
 
 // ===== Computed: deposits =====
-const transitPayableTypes = new Set(['信用卡待付款', '買股待付款'])  // 負值（待付）
-const isTransitPayable = (d) => transitPayableTypes.has(d.depositType)
+const isTransitPayable = (d) => transitPayableSet.value.has(d.depositType)
 
 const depositTwd = (d) => {
   const amt = Number(d.amount || 0)
@@ -1270,11 +1272,8 @@ const usSummary  = computed(() => calcGroupedSummary(usStocks.value))
 const allSummary = computed(() => calcGroupedSummary(form.stocks))
 
 // ===== Deposit helpers =====
-const transitTypeOptions = [
-  { value: '信用卡待付款', label: '信用卡待付款' },
-  { value: '買股待付款',   label: '買股待付款' },
-  { value: '賣股待收款',   label: '賣股待收款' },
-]
+const transitTypeOptions = ref([])
+const transitPayableSet  = ref(new Set(['信用卡待付款', '買股待付款']))
 
 // 將後端 deposit DTO 轉成前端 row（顯示用金額一律為正數）
 const mapDepositFromApi = (d, rate = 1) => {
@@ -1333,7 +1332,8 @@ const moveDepositRow = (row, dir) => {
 const addDeposit = (outerTab = 'TWD') => {
   if (outerTab === 'TRANSIT') {
     const currency = transitTab.value === 'USD' ? 'TRANSIT_USD' : 'TRANSIT_TWD'
-    form.deposits.push({ bankId: null, depositType: '信用卡待付款', currency, amount: 0, amountStr: '0' })
+    const defaultType = transitTypeOptions.value[0]?.value ?? '信用卡待付款'
+    form.deposits.push({ bankId: null, depositType: defaultType, currency, amount: 0, amountStr: '0' })
     return
   }
   const typeMap = { USD: '美元活存', TWD: '活存' }

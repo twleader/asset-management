@@ -4,10 +4,12 @@ import com.steven.assets.model.Bank;
 import com.steven.assets.model.BrokerEntity;
 import com.steven.assets.model.DepositTypeEntity;
 import com.steven.assets.model.MarketType;
+import com.steven.assets.model.TransitFundType;
 import com.steven.assets.repository.BankRepository;
 import com.steven.assets.repository.BrokerRepository;
 import com.steven.assets.repository.DepositTypeRepository;
 import com.steven.assets.repository.MarketTypeRepository;
+import com.steven.assets.repository.TransitFundTypeRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationArguments;
@@ -30,6 +32,7 @@ public class DataInitializer implements ApplicationRunner {
     private final BrokerRepository brokerRepo;
     private final DepositTypeRepository depositTypeRepo;
     private final MarketTypeRepository marketTypeRepo;
+    private final TransitFundTypeRepository transitFundTypeRepo;
 
     @Override
     @Transactional
@@ -38,6 +41,7 @@ public class DataInitializer implements ApplicationRunner {
         seedBrokers();
         seedDepositTypes();
         seedMarketTypes();
+        seedTransitFundTypes();
     }
 
     private void seedBanks() {
@@ -132,6 +136,29 @@ public class DataInitializer implements ApplicationRunner {
                         .active(true)
                         .build());
                 log.info("初始化市場類型: {}", s.displayName());
+            }
+        }
+    }
+
+    private void seedTransitFundTypes() {
+        record TransitFundTypeSeed(String code, String displayName, boolean payable, int sortOrder) {}
+
+        List<TransitFundTypeSeed> seeds = List.of(
+            new TransitFundTypeSeed("信用卡待付款", "信用卡待付款", true,  1),
+            new TransitFundTypeSeed("買股待付款",   "買股待付款",   true,  2),
+            new TransitFundTypeSeed("賣股待收款",   "賣股待收款",   false, 3)
+        );
+
+        for (TransitFundTypeSeed s : seeds) {
+            if (transitFundTypeRepo.findByCode(s.code()).isEmpty()) {
+                transitFundTypeRepo.save(TransitFundType.builder()
+                        .code(s.code())
+                        .displayName(s.displayName())
+                        .payable(s.payable())
+                        .sortOrder(s.sortOrder())
+                        .active(true)
+                        .build());
+                log.info("初始化在途款項類型: {}", s.displayName());
             }
         }
     }

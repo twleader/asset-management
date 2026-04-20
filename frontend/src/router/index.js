@@ -91,6 +91,12 @@ const router = createRouter({
       component: () => import('@/views/MarketTypeSettingsView.vue'),
       meta: { title: '市場類型設定', icon: 'Setting' }
     },
+    {
+      path: '/settings/transit-fund-types',
+      name: 'TransitFundTypeSettings',
+      component: () => import('@/views/TransitFundTypeSettingsView.vue'),
+      meta: { title: '在途款項類型設定', icon: 'Setting' }
+    },
   ]
 })
 

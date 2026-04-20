@@ -117,6 +117,8 @@ public class StockAlertService {
                 case "KD_BELOW"              -> checkKdValue(alert, false, false);
                 case "KD_D_ABOVE"            -> checkKdValue(alert, true, true);
                 case "KD_D_BELOW"            -> checkKdValue(alert, true, false);
+                case "PRICE_ABOVE"           -> currentPrice >= alert.getThreshold().doubleValue();
+                case "PRICE_BELOW"           -> currentPrice <= alert.getThreshold().doubleValue();
                 default -> false;
             };
 
@@ -227,6 +229,8 @@ public class StockAlertService {
             case "KD_BELOW"              -> String.format("K 值低於 %.0f", thr);
             case "KD_D_ABOVE"            -> String.format("D 值高於 %.0f", thr);
             case "KD_D_BELOW"            -> String.format("D 值低於 %.0f", thr);
+            case "PRICE_ABOVE"           -> String.format("股價高於 %s", a.getThreshold().stripTrailingZeros().toPlainString());
+            case "PRICE_BELOW"           -> String.format("股價低於 %s", a.getThreshold().stripTrailingZeros().toPlainString());
             default -> a.getAlertType();
         };
     }

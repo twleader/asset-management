@@ -128,4 +128,37 @@ public class InstitutionController {
         boolean active = Boolean.TRUE.equals(body.get("active"));
         return ResponseEntity.ok(institutionService.setMarketTypeActive(id, active));
     }
+
+    // ===================== TransitFundTypes =====================
+
+    @GetMapping("/transit-fund-types")
+    public List<InstitutionDto.TransitFundTypeResponse> getAllTransitFundTypes() {
+        return institutionService.getAllTransitFundTypes();
+    }
+
+    @GetMapping("/transit-fund-types/active")
+    public List<InstitutionDto.TransitFundTypeResponse> getActiveTransitFundTypes() {
+        return institutionService.getActiveTransitFundTypes();
+    }
+
+    @PostMapping("/transit-fund-types")
+    public ResponseEntity<InstitutionDto.TransitFundTypeResponse> createTransitFundType(
+            @Valid @RequestBody InstitutionDto.CreateTransitFundTypeRequest req) {
+        return ResponseEntity.ok(institutionService.createTransitFundType(req));
+    }
+
+    @PutMapping("/transit-fund-types/{id}")
+    public ResponseEntity<InstitutionDto.TransitFundTypeResponse> updateTransitFundType(
+            @PathVariable Long id,
+            @Valid @RequestBody InstitutionDto.UpdateTransitFundTypeRequest req) {
+        return ResponseEntity.ok(institutionService.updateTransitFundType(id, req));
+    }
+
+    @PatchMapping("/transit-fund-types/{id}/active")
+    public ResponseEntity<InstitutionDto.TransitFundTypeResponse> setTransitFundTypeActive(
+            @PathVariable Long id,
+            @RequestBody Map<String, Boolean> body) {
+        boolean active = Boolean.TRUE.equals(body.get("active"));
+        return ResponseEntity.ok(institutionService.setTransitFundTypeActive(id, active));
+    }
 }

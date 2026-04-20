@@ -14,32 +14,36 @@
         </template>
       </el-alert>
 
-<el-table ref="tableRef" :data="alerts" v-loading="loading" border stripe row-key="id"
+      <el-tabs v-model="marketTab" style="margin-bottom:12px" @tab-change="() => nextTick(initSortable)">
+        <el-tab-pane name="台股">
+          <template #label>
+            <span style="display:inline-flex;align-items:center;gap:6px">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="14" viewBox="0 0 60 40" style="border-radius:2px;flex-shrink:0;vertical-align:middle">
+                <rect width="60" height="40" fill="#009900"/>
+                <rect x="0" y="14" width="60" height="12" fill="white"/>
+                <rect x="22" y="0" width="16" height="40" fill="white"/>
+                <polygon points="30,8 33,13 35,18 34,23 31,27 28,26 26,22 27,16 29,11" fill="#009900"/>
+              </svg>
+              台股 <el-tag size="small" style="margin-left:2px">{{ twAlerts.length }}</el-tag>
+            </span>
+          </template>
+        </el-tab-pane>
+        <el-tab-pane name="美股">
+          <template #label>
+            <span style="display:inline-flex;align-items:center;gap:6px">
+              <span style="font-size:16px;line-height:1">🇺🇸</span>
+              美股 <el-tag size="small" style="margin-left:2px">{{ usAlerts.length }}</el-tag>
+            </span>
+          </template>
+        </el-tab-pane>
+      </el-tabs>
+
+      <el-table ref="tableRef" :data="currentAlerts" v-loading="loading" border stripe row-key="id"
         @row-dblclick="onStockDblClick">
         <!-- 拖拽把手 -->
         <el-table-column width="36" align="center">
           <template #default>
             <el-icon class="drag-handle" style="cursor:grab;color:#94a3b8"><Operation /></el-icon>
-          </template>
-        </el-table-column>
-        <el-table-column label="市場" width="90">
-          <template #default="{ row }">
-            <span style="display:inline-flex;align-items:center;gap:5px;font-size:13px;font-weight:500">
-              <!-- 民進黨黨旗 SVG -->
-              <svg v-if="row.market === '台股'" xmlns="http://www.w3.org/2000/svg"
-                   width="24" height="16" viewBox="0 0 60 40" style="border-radius:2px;flex-shrink:0">
-                <!-- 綠底 -->
-                <rect width="60" height="40" fill="#009900"/>
-                <!-- 白色橫帶 -->
-                <rect x="0" y="14" width="60" height="12" fill="white"/>
-                <!-- 白色縱帶 -->
-                <rect x="22" y="0" width="16" height="40" fill="white"/>
-                <!-- 台灣島形（簡化輪廓） -->
-                <polygon points="30,8 33,13 35,18 34,23 31,27 28,26 26,22 27,16 29,11" fill="#009900"/>
-              </svg>
-              <span v-else style="font-size:18px;line-height:16px;display:inline-block;width:24px;text-align:center;flex-shrink:0">🇺🇸</span>
-              <span>{{ row.market }}</span>
-            </span>
           </template>
         </el-table-column>
         <el-table-column label="股票代號" width="100">
@@ -157,11 +161,25 @@
 
         <el-form-item label="條件類型" required>
           <el-select v-model="form.conditionGroup" style="width:100%" @change="onGroupChange">
+            <el-option value="PRICE"        label="價位" />
             <el-option value="QUARTERLY_MA" label="季線偏離（60 日均線）" />
             <el-option value="ANNUAL_MA"    label="年線偏離（240 日均線）" />
             <el-option value="KD"          label="KD 值" />
           </el-select>
         </el-form-item>
+
+        <!-- 價位 -->
+        <template v-if="form.conditionGroup === 'PRICE'">
+          <el-form-item label="方向">
+            <el-radio-group v-model="form.direction">
+              <el-radio value="ABOVE">高於</el-radio>
+              <el-radio value="BELOW">低於</el-radio>
+            </el-radio-group>
+          </el-form-item>
+          <el-form-item label="目標價位">
+            <el-input-number v-model="form.priceThreshold" :min="0" :precision="2" :step="1" style="width:160px" />
+          </el-form-item>
+        </template>
 
         <!-- 季線 -->
         <template v-if="form.conditionGroup === 'QUARTERLY_MA'">
@@ -246,7 +264,10 @@ import api, { marketDataApi } from '@/api/index.js'
 use([CanvasRenderer, LineChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent, DataZoomComponent, MarkLineComponent])
 
 // ===== State =====
-const alerts = ref([])
+const marketTab = ref('台股')
+const twAlerts  = ref([])
+const usAlerts  = ref([])
+const currentAlerts = computed(() => marketTab.value === '台股' ? twAlerts.value : usAlerts.value)
 const loading = ref(false)
 const saving = ref(false)
 const lookingUpName = ref(false)
@@ -260,8 +281,9 @@ const defaultForm = () => ({
   stockName: '',
   conditionGroup: 'QUARTERLY_MA',
   direction: 'ABOVE',
-  kdIndicator: 'K',   // K 或 D，僅 KD 條件使用
+  kdIndicator: 'K',
   threshold: 5,
+  priceThreshold: 0,
   active: true,
 })
 const form = reactive(defaultForm())
@@ -271,25 +293,28 @@ async function loadAlerts() {
   loading.value = true
   try {
     const res = await api.get('/stock-alerts')
-    alerts.value = res
+    twAlerts.value = res.filter(a => a.market === '台股')
+    usAlerts.value = res.filter(a => a.market === '美股')
   } finally {
     loading.value = false
   }
 }
 
 // ===== Drag & Drop 排序 =====
+let sortableInstance = null
 function initSortable() {
   const tbody = tableRef.value?.$el?.querySelector('tbody')
   if (!tbody) return
-  Sortable.create(tbody, {
+  if (sortableInstance) { sortableInstance.destroy(); sortableInstance = null }
+  sortableInstance = Sortable.create(tbody, {
     handle: '.drag-handle',
     animation: 150,
     onEnd({ oldIndex, newIndex }) {
       if (oldIndex === newIndex) return
-      const moved = alerts.value.splice(oldIndex, 1)[0]
-      alerts.value.splice(newIndex, 0, moved)
-      // 儲存新順序
-      api.put('/stock-alerts/reorder', alerts.value.map(a => a.id))
+      const arr = marketTab.value === '台股' ? twAlerts.value : usAlerts.value
+      const moved = arr.splice(oldIndex, 1)[0]
+      arr.splice(newIndex, 0, moved)
+      api.put('/stock-alerts/reorder', [...twAlerts.value, ...usAlerts.value].map(a => a.id))
         .catch(() => ElMessage.error('排序儲存失敗'))
     }
   })
@@ -304,6 +329,7 @@ onMounted(async () => {
 // ===== Dialog =====
 function openDialog(row = null) {
   Object.assign(form, defaultForm())
+  form.market = marketTab.value
   editId.value = null
   if (row) {
     editId.value = row.id
@@ -317,7 +343,11 @@ function openDialog(row = null) {
 }
 
 function parseAlertType(alertType, threshold) {
-  if (alertType.startsWith('QUARTERLY_MA')) {
+  if (alertType.startsWith('PRICE')) {
+    form.conditionGroup = 'PRICE'
+    form.direction = alertType.includes('ABOVE') ? 'ABOVE' : 'BELOW'
+    form.priceThreshold = Number(threshold)
+  } else if (alertType.startsWith('QUARTERLY_MA')) {
     form.conditionGroup = 'QUARTERLY_MA'
     form.direction = alertType.includes('ABOVE') ? 'ABOVE' : 'BELOW'
     form.threshold = Number(threshold)
@@ -327,7 +357,6 @@ function parseAlertType(alertType, threshold) {
     form.threshold = Number(threshold)
   } else {
     form.conditionGroup = 'KD'
-    // KD_D_ABOVE / KD_D_BELOW → D 值；KD_ABOVE / KD_BELOW → K 值
     form.kdIndicator = alertType.startsWith('KD_D') ? 'D' : 'K'
     form.direction = alertType.includes('ABOVE') ? 'ABOVE' : 'BELOW'
     form.threshold = Number(threshold)
@@ -338,13 +367,14 @@ function onGroupChange() {
   form.direction = 'ABOVE'
   form.kdIndicator = 'K'
   form.threshold = form.conditionGroup === 'KD' ? 80 : 5
+  form.priceThreshold = 0
 }
 
 function buildAlertType() {
   const dir = form.direction
+  if (form.conditionGroup === 'PRICE')        return `PRICE_${dir}`
   if (form.conditionGroup === 'QUARTERLY_MA') return `QUARTERLY_MA_${dir}_PCT`
   if (form.conditionGroup === 'ANNUAL_MA')    return `ANNUAL_MA_${dir}_PCT`
-  // KD：K 值 → KD_ABOVE/BELOW；D 值 → KD_D_ABOVE/BELOW
   return form.kdIndicator === 'D' ? `KD_D_${dir}` : `KD_${dir}`
 }
 
@@ -379,7 +409,7 @@ async function save() {
       stockCode: form.stockCode.toUpperCase(),
       stockName: form.stockName || null,
       alertType: buildAlertType(),
-      threshold: form.threshold,
+      threshold: form.conditionGroup === 'PRICE' ? form.priceThreshold : form.threshold,
       active: form.active,
     }
     if (editId.value) {
