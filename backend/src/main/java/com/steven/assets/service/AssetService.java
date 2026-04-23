@@ -131,6 +131,7 @@ public class AssetService {
 
         // 股票
         if (req.stocks() != null) {
+            java.util.Map<String, Integer> displayOrderMap = assignDisplayOrder(req.stocks());
             req.stocks().forEach(st -> {
                 BrokerEntity broker = st.brokerId() != null ? brokerRepo.findById(st.brokerId()).orElse(null) : null;
                 StockHolding stock = StockHolding.builder()
@@ -149,6 +150,7 @@ public class AssetService {
                         .transactionType(st.transactionType())
                         .transactionDate(st.transactionDate())
                         .transactionExchangeRate(st.transactionExchangeRate())
+                        .displayOrder(displayOrderMap.get(st.market() + "_" + st.stockCode()))
                         .build();
                 snapshot.getStocks().add(stock);
                 // 同步到 stock 主檔（名稱不得與代號相同，否則視為無效資料）
@@ -163,6 +165,23 @@ public class AssetService {
         recalcTotals(snapshot);
         AssetSnapshot saved = snapshotRepo.save(snapshot);
         return toSummaryResponse(saved);
+    }
+
+    /**
+     * 依 req.stocks() 的提交順序，為每個 (market, stockCode) 分配 displayOrder（每個市場獨立編號）。
+     * 多筆 StockHolding 屬於同一支股票（不同券商）時套用相同 displayOrder。
+     */
+    private java.util.Map<String, Integer> assignDisplayOrder(List<AssetSnapshotDto.StockRequest> stocks) {
+        java.util.Map<String, Integer> result = new java.util.LinkedHashMap<>();
+        java.util.Map<String, Integer> perMarketNextIdx = new java.util.HashMap<>();
+        for (AssetSnapshotDto.StockRequest st : stocks) {
+            String key = st.market() + "_" + st.stockCode();
+            if (result.containsKey(key)) continue;
+            int idx = perMarketNextIdx.getOrDefault(st.market(), 0);
+            result.put(key, idx);
+            perMarketNextIdx.put(st.market(), idx + 1);
+        }
+        return result;
     }
 
     @Transactional
@@ -199,6 +218,7 @@ public class AssetService {
             });
         }
         if (req.stocks() != null) {
+            java.util.Map<String, Integer> displayOrderMap = assignDisplayOrder(req.stocks());
             req.stocks().forEach(st -> {
                 BrokerEntity broker = st.brokerId() != null ? brokerRepo.findById(st.brokerId()).orElse(null) : null;
                 snapshot.getStocks().add(StockHolding.builder()
@@ -211,6 +231,7 @@ public class AssetService {
                     .transactionType(st.transactionType())
                     .transactionDate(st.transactionDate())
                     .transactionExchangeRate(st.transactionExchangeRate())
+                    .displayOrder(displayOrderMap.get(st.market() + "_" + st.stockCode()))
                     .build());
                 if (st.stockCode() != null && st.stockName() != null
                         && !st.stockName().isBlank()

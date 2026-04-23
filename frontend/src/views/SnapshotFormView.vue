@@ -2184,7 +2184,7 @@ const submit = async () => {
 /* price cell */
 .price-cell { display: flex; flex-direction: row; justify-content: flex-end; align-items: baseline; gap: 6px; white-space: nowrap; }
 .price-main { display: flex; align-items: center; gap: 6px; }
-.price-num  { font-size: 16px; font-weight: 700; color: #1e293b; }
+.price-num  { font-size: 13px; font-weight: 600; color: #1e293b; }
 .price-empty { color: #94a3b8; font-size: 13px; }
 .price-change { font-size: 12px; font-weight: 600; }
 .price-up   { color: #dc2626; }  /* 台股漲為紅 */
