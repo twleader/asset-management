@@ -113,7 +113,7 @@
                     </template>
                   </el-table-column>
                   <!-- 均價（每股台幣）→ 輸入後自動算總成本 -->
-                  <el-table-column label="均價" width="110" align="right">
+                  <el-table-column label="買入均價" width="110" align="right">
                     <template #default="{ row: br }">
                       <el-input
                         :model-value="numFmt(br.avgCost)"
@@ -131,7 +131,7 @@
                     </template>
                   </el-table-column>
                   <!-- 均價(USD)（美股，選原幣時才啟用） -->
-                  <el-table-column v-if="row.market === '美股'" label="均價(USD)" width="110" align="right">
+                  <el-table-column v-if="row.market === '美股'" label="買入均價(USD)" width="130" align="right">
                     <template #default="{ row: br }">
                       <el-input
                         :model-value="br.currency === 'USD' ? numFmt(br.originalCurrencyValue) : ''"
@@ -159,8 +159,12 @@
                   <!-- 刪除 -->
                   <el-table-column width="44">
                     <template #default="{ $index }">
-                      <el-button type="danger" size="small" :icon="Delete" circle
-                        @click="removeBrokerRow(row, $index)" />
+                      <el-popconfirm title="確定刪除此筆券商持股？" width="240" confirm-button-text="刪除" cancel-button-text="取消" confirm-button-type="danger"
+                        @confirm="removeBrokerRow(row, $index)">
+                        <template #reference>
+                          <el-button type="danger" size="small" :icon="Delete" circle />
+                        </template>
+                      </el-popconfirm>
                     </template>
                   </el-table-column>
                 </el-table>

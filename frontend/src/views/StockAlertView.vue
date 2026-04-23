@@ -308,8 +308,12 @@ function initSortable() {
   sortableInstance = Sortable.create(tbody, {
     handle: '.drag-handle',
     animation: 150,
-    onEnd({ oldIndex, newIndex }) {
+    onEnd({ oldIndex, newIndex, item, from }) {
       if (oldIndex === newIndex) return
+      // 還原 Sortable 的 DOM 變動，避免與 el-table 的渲染衝突
+      from.removeChild(item)
+      if (oldIndex >= from.children.length) from.appendChild(item)
+      else from.insertBefore(item, from.children[oldIndex])
       const arr = marketTab.value === '台股' ? twAlerts.value : usAlerts.value
       const moved = arr.splice(oldIndex, 1)[0]
       arr.splice(newIndex, 0, moved)

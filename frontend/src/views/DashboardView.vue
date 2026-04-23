@@ -180,6 +180,7 @@
             :max-height="500"
             border
             stripe
+            row-key="stockCode"
             style="cursor:pointer"
             @row-dblclick="onStockDblClick">
             <el-table-column width="36" align="center">
@@ -197,11 +198,6 @@
                 <span style="color:#475569">{{ row.stockName }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="股數" width="110" align="right">
-              <template #default="{ row }">
-                {{ formatShares(row.shares, row.market) }}
-              </template>
-            </el-table-column>
             <el-table-column label="股價" width="140" align="right">
               <template #default="{ row }">
                 <span v-if="getRealtimePrice(row)">
@@ -213,6 +209,16 @@
                 </span>
                 <span v-else-if="row.stockPrice != null" style="color:#94a3b8">{{ formatPrice(row.stockPrice) }}</span>
                 <span v-else style="color:#94a3b8">-</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="股數" width="110" align="right">
+              <template #default="{ row }">
+                {{ formatShares(row.shares, row.market) }}
+              </template>
+            </el-table-column>
+            <el-table-column label="買入均價" width="110" align="right">
+              <template #default="{ row }">
+                <span style="color:#475569">{{ row.shares > 0 ? formatPrice(row.investmentCost / row.shares) : '-' }}</span>
               </template>
             </el-table-column>
             <el-table-column label="投資成本" align="right" width="120">
@@ -663,8 +669,16 @@ function initStockSortable() {
   stockSortable = Sortable.create(tbody, {
     handle: '.drag-handle',
     animation: 150,
-    onEnd({ oldIndex, newIndex }) {
+    onEnd({ oldIndex, newIndex, item, from }) {
       if (oldIndex === newIndex) return
+      // Sortable 已實際移動 DOM；先還原以避免與 el-table 的虛擬渲染衝突，
+      // 再交由資料 splice 觸發 Vue 重新渲染至正確位置。
+      from.removeChild(item)
+      if (oldIndex >= from.children.length) {
+        from.appendChild(item)
+      } else {
+        from.insertBefore(item, from.children[oldIndex])
+      }
       const list = customTableData[stockMarketTab.value]
       const moved = list.splice(oldIndex, 1)[0]
       list.splice(newIndex, 0, moved)

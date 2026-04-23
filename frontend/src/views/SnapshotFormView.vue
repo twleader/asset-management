@@ -112,13 +112,10 @@
         <el-tabs v-model="depositTab">
           <!-- 台幣 Tab -->
           <el-tab-pane label="台幣" name="TWD">
-            <el-table :data="twdDeposits" size="small">
-              <el-table-column width="44">
-                <template #default="{ row }">
-                  <div class="sort-btns">
-                    <el-button size="small" text :disabled="twdDeposits.indexOf(row)===0" @click="moveDepositRow(row,-1)">↑</el-button>
-                    <el-button size="small" text :disabled="twdDeposits.indexOf(row)===twdDeposits.length-1" @click="moveDepositRow(row,1)">↓</el-button>
-                  </div>
+            <el-table ref="twdDepositTableRef" :data="twdDeposits" size="small" row-key="_rowId">
+              <el-table-column width="36" align="center">
+                <template #default>
+                  <el-icon class="row-drag-handle" style="cursor:grab;color:#94a3b8"><Operation /></el-icon>
                 </template>
               </el-table-column>
               <el-table-column label="銀行" width="160">
@@ -148,8 +145,12 @@
               </el-table-column>
               <el-table-column width="50">
                 <template #default="{ row }">
-                  <el-button type="danger" size="small" :icon="Delete" circle
-                    @click="form.deposits.splice(form.deposits.indexOf(row),1)" />
+                  <el-popconfirm title="確定刪除此筆存款？" width="220" confirm-button-text="刪除" cancel-button-text="取消" confirm-button-type="danger"
+                    @confirm="form.deposits.splice(form.deposits.indexOf(row),1)">
+                    <template #reference>
+                      <el-button type="danger" size="small" :icon="Delete" circle />
+                    </template>
+                  </el-popconfirm>
                 </template>
               </el-table-column>
             </el-table>
@@ -157,13 +158,10 @@
 
           <!-- 美元 Tab -->
           <el-tab-pane label="美元" name="USD">
-            <el-table :data="usdDeposits" size="small">
-              <el-table-column width="44">
-                <template #default="{ row }">
-                  <div class="sort-btns">
-                    <el-button size="small" text :disabled="usdDeposits.indexOf(row)===0" @click="moveDepositRow(row,-1)">↑</el-button>
-                    <el-button size="small" text :disabled="usdDeposits.indexOf(row)===usdDeposits.length-1" @click="moveDepositRow(row,1)">↓</el-button>
-                  </div>
+            <el-table ref="usdDepositTableRef" :data="usdDeposits" size="small" row-key="_rowId">
+              <el-table-column width="36" align="center">
+                <template #default>
+                  <el-icon class="row-drag-handle" style="cursor:grab;color:#94a3b8"><Operation /></el-icon>
                 </template>
               </el-table-column>
               <el-table-column label="銀行" width="160">
@@ -198,8 +196,12 @@
               </el-table-column>
               <el-table-column width="50">
                 <template #default="{ row }">
-                  <el-button type="danger" size="small" :icon="Delete" circle
-                    @click="form.deposits.splice(form.deposits.indexOf(row),1)" />
+                  <el-popconfirm title="確定刪除此筆存款？" width="220" confirm-button-text="刪除" cancel-button-text="取消" confirm-button-type="danger"
+                    @confirm="form.deposits.splice(form.deposits.indexOf(row),1)">
+                    <template #reference>
+                      <el-button type="danger" size="small" :icon="Delete" circle />
+                    </template>
+                  </el-popconfirm>
                 </template>
               </el-table-column>
             </el-table>
@@ -244,13 +246,10 @@
             <el-tabs v-model="transitTab" size="small" style="margin-top:4px">
               <!-- 台幣 -->
               <el-tab-pane label="台幣" name="TWD">
-                <el-table :data="transitTwdDeposits" size="small">
-                  <el-table-column width="44">
-                    <template #default="{ row }">
-                      <div class="sort-btns">
-                        <el-button size="small" text :disabled="transitTwdDeposits.indexOf(row)===0" @click="moveDepositRow(row,-1)">↑</el-button>
-                        <el-button size="small" text :disabled="transitTwdDeposits.indexOf(row)===transitTwdDeposits.length-1" @click="moveDepositRow(row,1)">↓</el-button>
-                      </div>
+                <el-table ref="transitTwdDepositTableRef" :data="transitTwdDeposits" size="small" row-key="_rowId">
+                  <el-table-column width="36" align="center">
+                    <template #default>
+                      <el-icon class="row-drag-handle" style="cursor:grab;color:#94a3b8"><Operation /></el-icon>
                     </template>
                   </el-table-column>
                   <el-table-column label="銀行" width="160">
@@ -281,8 +280,12 @@
                   </el-table-column>
                   <el-table-column width="50">
                     <template #default="{ row }">
-                      <el-button type="danger" size="small" :icon="Delete" circle
-                        @click="form.deposits.splice(form.deposits.indexOf(row),1)" />
+                      <el-popconfirm title="確定刪除此筆在途款項？" width="240" confirm-button-text="刪除" cancel-button-text="取消" confirm-button-type="danger"
+                        @confirm="form.deposits.splice(form.deposits.indexOf(row),1)">
+                        <template #reference>
+                          <el-button type="danger" size="small" :icon="Delete" circle />
+                        </template>
+                      </el-popconfirm>
                     </template>
                   </el-table-column>
                 </el-table>
@@ -304,13 +307,10 @@
               </el-tab-pane>
               <!-- 外幣 -->
               <el-tab-pane label="外幣" name="USD">
-                <el-table :data="transitUsdDeposits" size="small">
-                  <el-table-column width="44">
-                    <template #default="{ row }">
-                      <div class="sort-btns">
-                        <el-button size="small" text :disabled="transitUsdDeposits.indexOf(row)===0" @click="moveDepositRow(row,-1)">↑</el-button>
-                        <el-button size="small" text :disabled="transitUsdDeposits.indexOf(row)===transitUsdDeposits.length-1" @click="moveDepositRow(row,1)">↓</el-button>
-                      </div>
+                <el-table ref="transitUsdDepositTableRef" :data="transitUsdDeposits" size="small" row-key="_rowId">
+                  <el-table-column width="36" align="center">
+                    <template #default>
+                      <el-icon class="row-drag-handle" style="cursor:grab;color:#94a3b8"><Operation /></el-icon>
                     </template>
                   </el-table-column>
                   <el-table-column label="銀行" width="160">
@@ -348,8 +348,12 @@
                   </el-table-column>
                   <el-table-column width="50">
                     <template #default="{ row }">
-                      <el-button type="danger" size="small" :icon="Delete" circle
-                        @click="form.deposits.splice(form.deposits.indexOf(row),1)" />
+                      <el-popconfirm title="確定刪除此筆在途款項？" width="240" confirm-button-text="刪除" cancel-button-text="取消" confirm-button-type="danger"
+                        @confirm="form.deposits.splice(form.deposits.indexOf(row),1)">
+                        <template #reference>
+                          <el-button type="danger" size="small" :icon="Delete" circle />
+                        </template>
+                      </el-popconfirm>
                     </template>
                   </el-table-column>
                 </el-table>
@@ -430,13 +434,10 @@
               <el-button size="small" :icon="Plus" @click="addStock('台股')">新增台股</el-button>
             </div>
 
-            <el-table :data="twStocks" size="small" row-key="_rowId" stripe>
-              <el-table-column width="44">
-                <template #default="{ row }">
-                  <div class="sort-btns">
-                    <el-button size="small" text :disabled="twStocks.indexOf(row)===0" @click="moveStock(row,-1)">↑</el-button>
-                    <el-button size="small" text :disabled="twStocks.indexOf(row)===twStocks.length-1" @click="moveStock(row,1)">↓</el-button>
-                  </div>
+            <el-table ref="twStockTableRef" :data="twStocks" size="small" row-key="_rowId" stripe>
+              <el-table-column width="36" align="center">
+                <template #default>
+                  <el-icon class="stock-drag-handle" style="cursor:grab;color:#94a3b8"><Operation /></el-icon>
                 </template>
               </el-table-column>
               <!-- Expand -->
@@ -475,7 +476,7 @@
                         </template>
                       </el-table-column>
                       <!-- 均價（每股）→ 輸入後自動算總成本 -->
-                      <el-table-column label="均價" width="110">
+                      <el-table-column label="買入均價" width="110">
                         <template #default="{ row: br }">
                           <el-input v-model="br.avgCostStr" size="small"
                             style="width:100%" :input-style="{ textAlign: 'right' }"
@@ -509,8 +510,12 @@
                       </el-table-column>
                       <el-table-column width="40">
                         <template #default="{ $index }">
-                          <el-button type="danger" size="small" :icon="Delete" circle
-                            @click="removeBrokerRow(row, $index)" />
+                          <el-popconfirm title="確定刪除此筆券商持股？" width="240" confirm-button-text="刪除" cancel-button-text="取消" confirm-button-type="danger"
+                            @confirm="removeBrokerRow(row, $index)">
+                            <template #reference>
+                              <el-button type="danger" size="small" :icon="Delete" circle />
+                            </template>
+                          </el-popconfirm>
                         </template>
                       </el-table-column>
                     </el-table>
@@ -523,7 +528,7 @@
               </el-table-column>
 
               <!-- 股號/股名 -->
-              <el-table-column label="股號/股名" min-width="200">
+              <el-table-column label="股號/股名" min-width="170">
                 <template #default="{ row }">
                   <div style="display:flex;gap:4px">
                     <el-input v-model="row.stockCode" size="small" placeholder="代號"
@@ -534,28 +539,8 @@
                 </template>
               </el-table-column>
 
-              <!-- 股數（唯讀，合計所有券商） -->
-              <el-table-column label="股數" width="100" align="right">
-                <template #default="{ row }">
-                  <span style="font-size:13px">{{ fmtShares(stockShares(row), '台股') }}</span>
-                </template>
-              </el-table-column>
-
-              <!-- 均價（唯讀，加權平均） -->
-              <el-table-column label="均價" width="90" align="right">
-                <template #default="{ row }">
-                  <span style="font-size:13px">{{
-                    (() => {
-                      const totalShares = row.brokerRows.reduce((s, br) => s + Number(br.shares || 0), 0)
-                      const totalCost   = row.brokerRows.reduce((s, br) => s + Number(br.investmentCost || 0), 0)
-                      return totalShares > 0 ? numFmt(Number((totalCost / totalShares).toFixed(2))) : '-'
-                    })()
-                  }}</span>
-                </template>
-              </el-table-column>
-
               <!-- 股價/漲跌 -->
-              <el-table-column label="股價/漲跌(%)" width="160" align="right">
+              <el-table-column label="股價/漲跌(%)" width="190" align="right">
                 <template #default="{ row }">
                   <div class="price-cell">
                     <span v-if="row.latestPrice" class="price-num">{{ fmtPrice(row.latestPrice) }}</span>
@@ -568,6 +553,26 @@
                       ({{ (Number(row.priceChangePct) * 100).toFixed(2) }}%)
                     </div>
                   </div>
+                </template>
+              </el-table-column>
+
+              <!-- 股數（唯讀，合計所有券商） -->
+              <el-table-column label="股數" width="100" align="right">
+                <template #default="{ row }">
+                  <span style="font-size:13px">{{ fmtShares(stockShares(row), '台股') }}</span>
+                </template>
+              </el-table-column>
+
+              <!-- 均價（唯讀，加權平均） -->
+              <el-table-column label="買入均價" width="110" align="right">
+                <template #default="{ row }">
+                  <span style="font-size:13px">{{
+                    (() => {
+                      const totalShares = row.brokerRows.reduce((s, br) => s + Number(br.shares || 0), 0)
+                      const totalCost   = row.brokerRows.reduce((s, br) => s + Number(br.investmentCost || 0), 0)
+                      return totalShares > 0 ? numFmt(Number((totalCost / totalShares).toFixed(2))) : '-'
+                    })()
+                  }}</span>
                 </template>
               </el-table-column>
 
@@ -584,10 +589,10 @@
               </el-table-column>
 
               <!-- 損益 -->
-              <el-table-column label="損益" width="120" align="right">
+              <el-table-column label="損益" width="160" align="right">
                 <template #default="{ row }">
                   <span :class="stockProfit(row)>=0?'profit':'loss'">{{ fmt(stockProfit(row)) }}</span>
-                  <small :class="stockProfit(row)>=0?'profit':'loss'" style="display:block;font-weight:400">
+                  <small :class="stockProfit(row)>=0?'profit':'loss'" style="font-weight:400;margin-left:4px">
                     ({{ pct(stockProfitRate(row)) }})
                   </small>
                 </template>
@@ -608,7 +613,12 @@
               <!-- 刪除 -->
               <el-table-column width="40" fixed="right">
                 <template #default="{ row }">
-                  <el-button type="danger" size="small" :icon="Delete" circle @click="removeStock(row)" />
+                  <el-popconfirm title="確定刪除此檔股票（含所有券商持股）？" width="280" confirm-button-text="刪除" cancel-button-text="取消" confirm-button-type="danger"
+                    @confirm="removeStock(row)">
+                    <template #reference>
+                      <el-button type="danger" size="small" :icon="Delete" circle />
+                    </template>
+                  </el-popconfirm>
                 </template>
               </el-table-column>
             </el-table>
@@ -658,13 +668,10 @@
               <el-button size="small" :icon="Plus" @click="addStock('美股')">新增美股</el-button>
             </div>
 
-            <el-table :data="usStocks" size="small" row-key="_rowId" stripe>
-              <el-table-column width="44">
-                <template #default="{ row }">
-                  <div class="sort-btns">
-                    <el-button size="small" text :disabled="usStocks.indexOf(row)===0" @click="moveStock(row,-1)">↑</el-button>
-                    <el-button size="small" text :disabled="usStocks.indexOf(row)===usStocks.length-1" @click="moveStock(row,1)">↓</el-button>
-                  </div>
+            <el-table ref="usStockTableRef" :data="usStocks" size="small" row-key="_rowId" stripe>
+              <el-table-column width="36" align="center">
+                <template #default>
+                  <el-icon class="stock-drag-handle" style="cursor:grab;color:#94a3b8"><Operation /></el-icon>
                 </template>
               </el-table-column>
               <!-- Expand -->
@@ -715,7 +722,7 @@
                         </template>
                       </el-table-column>
                       <!-- 均價(USD)：永遠以 USD 輸入；連動計算持股成本 -->
-                      <el-table-column label="均價(USD)" width="130">
+                      <el-table-column label="買入均價(USD)" width="140">
                         <template #default="{ row: br }">
                           <el-input v-model="br.avgCostStr" size="small"
                             style="width:100%" :input-style="{ textAlign: 'right' }"
@@ -792,8 +799,12 @@
                       <!-- 刪除 -->
                       <el-table-column width="40">
                         <template #default="{ $index }">
-                          <el-button type="danger" size="small" :icon="Delete" circle
-                            @click="removeBrokerRow(row, $index)" />
+                          <el-popconfirm title="確定刪除此筆券商持股？" width="240" confirm-button-text="刪除" cancel-button-text="取消" confirm-button-type="danger"
+                            @confirm="removeBrokerRow(row, $index)">
+                            <template #reference>
+                              <el-button type="danger" size="small" :icon="Delete" circle />
+                            </template>
+                          </el-popconfirm>
                         </template>
                       </el-table-column>
                     </el-table>
@@ -806,7 +817,7 @@
               </el-table-column>
 
               <!-- 股號/股名 -->
-              <el-table-column label="股號/股名" min-width="200">
+              <el-table-column label="股號/股名" min-width="170">
                 <template #default="{ row }">
                   <div style="display:flex;gap:4px">
                     <el-input v-model="row.stockCode" size="small" placeholder="Ticker"
@@ -818,29 +829,8 @@
                 </template>
               </el-table-column>
 
-              <!-- 股數（唯讀，合計所有券商） -->
-              <el-table-column label="股數" width="110" align="right">
-                <template #default="{ row }">
-                  <span style="font-size:13px">{{ fmtShares(stockShares(row), '美股') }}</span>
-                </template>
-              </el-table-column>
-
-              <!-- 均價(USD)（唯讀，加權平均 originalCurrencyValue） -->
-              <el-table-column label="均價(USD)" width="110" align="right">
-                <template #default="{ row }">
-                  <span style="font-size:13px">{{
-                    (() => {
-                      const totalShares  = row.brokerRows.reduce((s, br) => s + Number(br.shares || 0), 0)
-                      const totalUsdCost = row.brokerRows.reduce((s, br) =>
-                        s + Number(br.originalCurrencyValue || br.avgCost || 0) * Number(br.shares || 0), 0)
-                      return totalShares > 0 ? numFmt(Number((totalUsdCost / totalShares).toFixed(4))) : '-'
-                    })()
-                  }}</span>
-                </template>
-              </el-table-column>
-
               <!-- 股價/漲跌 -->
-              <el-table-column label="股價/漲跌(%)" width="185" align="right">
+              <el-table-column label="股價/漲跌(%)" width="250" align="right">
                 <template #default="{ row }">
                   <div class="price-cell">
                     <span v-if="row.latestPrice" class="price-num">{{ fmtPriceUs(row.latestPrice) }}</span>
@@ -853,6 +843,27 @@
                       ({{ (Number(row.priceChangePct) * 100).toFixed(4) }}%)
                     </div>
                   </div>
+                </template>
+              </el-table-column>
+
+              <!-- 股數（唯讀，合計所有券商） -->
+              <el-table-column label="股數" width="110" align="right">
+                <template #default="{ row }">
+                  <span style="font-size:13px">{{ fmtShares(stockShares(row), '美股') }}</span>
+                </template>
+              </el-table-column>
+
+              <!-- 均價(USD)（唯讀，加權平均 originalCurrencyValue） -->
+              <el-table-column label="買入均價(USD)" width="130" align="right">
+                <template #default="{ row }">
+                  <span style="font-size:13px">{{
+                    (() => {
+                      const totalShares  = row.brokerRows.reduce((s, br) => s + Number(br.shares || 0), 0)
+                      const totalUsdCost = row.brokerRows.reduce((s, br) =>
+                        s + Number(br.originalCurrencyValue || br.avgCost || 0) * Number(br.shares || 0), 0)
+                      return totalShares > 0 ? numFmt(Number((totalUsdCost / totalShares).toFixed(4))) : '-'
+                    })()
+                  }}</span>
                 </template>
               </el-table-column>
 
@@ -869,10 +880,10 @@
               </el-table-column>
 
               <!-- 損益 -->
-              <el-table-column label="損益" width="130" align="right">
+              <el-table-column label="損益" width="170" align="right">
                 <template #default="{ row }">
                   <span :class="stockProfit(row)>=0?'profit':'loss'">{{ fmt(stockProfit(row)) }}</span>
-                  <small :class="stockProfit(row)>=0?'profit':'loss'" style="display:block;font-weight:400">
+                  <small :class="stockProfit(row)>=0?'profit':'loss'" style="font-weight:400;margin-left:4px">
                     ({{ pct(stockProfitRate(row)) }})
                   </small>
                 </template>
@@ -893,7 +904,12 @@
               <!-- 刪除 -->
               <el-table-column width="40" fixed="right">
                 <template #default="{ row }">
-                  <el-button type="danger" size="small" :icon="Delete" circle @click="removeStock(row)" />
+                  <el-popconfirm title="確定刪除此檔股票（含所有券商持股）？" width="280" confirm-button-text="刪除" cancel-button-text="取消" confirm-button-type="danger"
+                    @confirm="removeStock(row)">
+                    <template #reference>
+                      <el-button type="danger" size="small" :icon="Delete" circle />
+                    </template>
+                  </el-popconfirm>
                 </template>
               </el-table-column>
             </el-table>
@@ -941,17 +957,14 @@
             <div style="display:flex;gap:8px">
               <el-button size="small" type="primary" :loading="saving" @click="submit">存檔</el-button>
               <el-button size="small" :loading="copyingPrev.funds" @click="copyPrevFunds">複製前一版</el-button>
-              <el-button size="small" :icon="Plus" @click="form.funds.push({fundName:'',bankId:null,investmentAmount:0,investmentAmountStr:'0',currentValue:0,currentValueStr:'0'})">新增</el-button>
+              <el-button size="small" :icon="Plus" @click="addFund">新增</el-button>
             </div>
           </div>
         </template>
-        <el-table :data="form.funds" size="small">
-          <el-table-column width="44">
-            <template #default="{ $index }">
-              <div class="sort-btns">
-                <el-button size="small" text :disabled="$index===0" @click="moveRow(form.funds,$index,-1)">↑</el-button>
-                <el-button size="small" text :disabled="$index===form.funds.length-1" @click="moveRow(form.funds,$index,1)">↓</el-button>
-              </div>
+        <el-table ref="fundTableRef" :data="form.funds" size="small" row-key="_rowId">
+          <el-table-column width="36" align="center">
+            <template #default>
+              <el-icon class="row-drag-handle" style="cursor:grab;color:#94a3b8"><Operation /></el-icon>
             </template>
           </el-table-column>
           <el-table-column label="基金名稱" min-width="140">
@@ -990,7 +1003,12 @@
           </el-table-column>
           <el-table-column width="50">
             <template #default="{ $index }">
-              <el-button type="danger" size="small" :icon="Delete" circle @click="form.funds.splice($index,1)" />
+              <el-popconfirm title="確定刪除此筆基金？" width="220" confirm-button-text="刪除" cancel-button-text="取消" confirm-button-type="danger"
+                @confirm="form.funds.splice($index,1)">
+                <template #reference>
+                  <el-button type="danger" size="small" :icon="Delete" circle />
+                </template>
+              </el-popconfirm>
             </template>
           </el-table-column>
         </el-table>
@@ -1026,13 +1044,14 @@
 </template>
 
 <script setup>
-import { ArrowLeft, Plus, Delete } from '@element-plus/icons-vue'
+import { ArrowLeft, Plus, Delete, Operation } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { useAssetStore } from '@/stores/assetStore'
 import { marketDataApi, institutionApi, snapshotApi } from '@/api/index'
 import TaiwanMap from '@/components/TaiwanMap.vue'
 import UsaMap from '@/components/UsaMap.vue'
+import Sortable from 'sortablejs'
 
 const route  = useRoute()
 const router = useRouter()
@@ -1042,22 +1061,138 @@ const saving  = ref(false)
 const loading = ref(false)
 
 // ===== Row sort helpers =====
-const moveRow = (array, idx, dir) => {
-  const target = idx + dir
-  if (target < 0 || target >= array.length) return
-  const item = array.splice(idx, 1)[0]
-  array.splice(target, 0, item)
+// 將某市場（台股 / 美股）內的股票，從 oldIndex 拖移到 newIndex（皆為市場內視覺索引）
+const reorderStockByMarket = (market, oldIndex, newIndex) => {
+  if (oldIndex === newIndex) return
+  const peers = form.stocks.filter(s => s.market === market)
+  const moving = peers[oldIndex]
+  if (!moving) return
+  form.stocks.splice(form.stocks.indexOf(moving), 1)
+  const remaining = form.stocks.filter(s => s.market === market)
+  if (newIndex < remaining.length) {
+    form.stocks.splice(form.stocks.indexOf(remaining[newIndex]), 0, moving)
+  } else if (remaining.length === 0) {
+    form.stocks.push(moving)
+  } else {
+    const lastPeer = remaining[remaining.length - 1]
+    form.stocks.splice(form.stocks.indexOf(lastPeer) + 1, 0, moving)
+  }
 }
 
-const moveStock = (stock, dir) => {
-  const peers = form.stocks.filter(s => s.market === stock.market)
-  const vi = peers.indexOf(stock)
-  const vt = vi + dir
-  if (vt < 0 || vt >= peers.length) return
-  const fi = form.stocks.indexOf(stock)
-  const ft = form.stocks.indexOf(peers[vt])
-  form.stocks.splice(fi, 1)
-  form.stocks.splice(ft, 0, stock)
+// ===== Stock 拖拉排序（與 DashboardView 相同模式） =====
+const twStockTableRef = ref(null)
+const usStockTableRef = ref(null)
+let twStockSortable = null
+let usStockSortable = null
+
+function initStockSortable(market) {
+  const isTw = market === '台股'
+  const tableRef = isTw ? twStockTableRef : usStockTableRef
+  const existing = isTw ? twStockSortable : usStockSortable
+  if (existing) { existing.destroy() }
+  const el = tableRef.value?.$el
+  if (!el) return null
+  const tbody = el.querySelector('.el-table__body tbody') ?? el.querySelector('tbody')
+  if (!tbody || tbody.children.length === 0) return null
+  const sortable = Sortable.create(tbody, {
+    handle: '.stock-drag-handle',
+    animation: 150,
+    onEnd({ oldIndex, newIndex, item, from }) {
+      if (oldIndex === newIndex) return
+      // 還原 Sortable 的 DOM 變動，避免與 el-table 虛擬渲染衝突
+      from.removeChild(item)
+      if (oldIndex >= from.children.length) {
+        from.appendChild(item)
+      } else {
+        from.insertBefore(item, from.children[oldIndex])
+      }
+      reorderStockByMarket(market, oldIndex, newIndex)
+    }
+  })
+  if (isTw) twStockSortable = sortable
+  else      usStockSortable = sortable
+  return sortable
+}
+
+function refreshStockSortables() {
+  nextTick(() => {
+    initStockSortable('台股')
+    initStockSortable('美股')
+  })
+}
+
+// ===== 通用 Sortable 綁定工具 =====
+// 對 el-table tbody 綁定 Sortable，並在 onEnd 中還原 Sortable 的 DOM 變動，
+// 避免與 el-table 的渲染衝突；資料層的順序變動由 onReorder callback 處理。
+function bindRowSortable(tableRef, handleSelector, onReorder) {
+  const el = tableRef.value?.$el
+  if (!el) return null
+  const tbody = el.querySelector('.el-table__body tbody') ?? el.querySelector('tbody')
+  if (!tbody || tbody.children.length === 0) return null
+  return Sortable.create(tbody, {
+    handle: handleSelector,
+    animation: 150,
+    onEnd({ oldIndex, newIndex, item, from }) {
+      if (oldIndex === newIndex) return
+      from.removeChild(item)
+      if (oldIndex >= from.children.length) from.appendChild(item)
+      else from.insertBefore(item, from.children[oldIndex])
+      onReorder(oldIndex, newIndex)
+    }
+  })
+}
+
+// ===== 在途/存款 拖拉排序 =====
+// form.deposits 是單一陣列，但畫面依 currency 篩出多個子表（TWD/USD/TRANSIT_TWD/TRANSIT_USD）。
+// 拖拉發生在子表內，需要將子表內的 oldIndex/newIndex 對應回 form.deposits 的真實位置。
+const reorderDepositByCurrency = (currency, oldIndex, newIndex) => {
+  if (oldIndex === newIndex) return
+  const peers = form.deposits.filter(d => d.currency === currency)
+  const moving = peers[oldIndex]
+  if (!moving) return
+  form.deposits.splice(form.deposits.indexOf(moving), 1)
+  const remaining = form.deposits.filter(d => d.currency === currency)
+  if (newIndex < remaining.length) {
+    form.deposits.splice(form.deposits.indexOf(remaining[newIndex]), 0, moving)
+  } else if (remaining.length === 0) {
+    form.deposits.push(moving)
+  } else {
+    form.deposits.splice(form.deposits.indexOf(remaining[remaining.length - 1]) + 1, 0, moving)
+  }
+}
+
+const twdDepositTableRef        = ref(null)
+const usdDepositTableRef        = ref(null)
+const transitTwdDepositTableRef = ref(null)
+const transitUsdDepositTableRef = ref(null)
+const fundTableRef              = ref(null)
+let twdDepositSortable        = null
+let usdDepositSortable        = null
+let transitTwdDepositSortable = null
+let transitUsdDepositSortable = null
+let fundSortable              = null
+
+function refreshDepositSortables() {
+  nextTick(() => {
+    if (twdDepositSortable)        { twdDepositSortable.destroy();        twdDepositSortable = null }
+    if (usdDepositSortable)        { usdDepositSortable.destroy();        usdDepositSortable = null }
+    if (transitTwdDepositSortable) { transitTwdDepositSortable.destroy(); transitTwdDepositSortable = null }
+    if (transitUsdDepositSortable) { transitUsdDepositSortable.destroy(); transitUsdDepositSortable = null }
+    twdDepositSortable        = bindRowSortable(twdDepositTableRef,        '.row-drag-handle', (o, n) => reorderDepositByCurrency('TWD',         o, n))
+    usdDepositSortable        = bindRowSortable(usdDepositTableRef,        '.row-drag-handle', (o, n) => reorderDepositByCurrency('USD',         o, n))
+    transitTwdDepositSortable = bindRowSortable(transitTwdDepositTableRef, '.row-drag-handle', (o, n) => reorderDepositByCurrency('TRANSIT_TWD', o, n))
+    transitUsdDepositSortable = bindRowSortable(transitUsdDepositTableRef, '.row-drag-handle', (o, n) => reorderDepositByCurrency('TRANSIT_USD', o, n))
+  })
+}
+
+function refreshFundSortable() {
+  nextTick(() => {
+    if (fundSortable) { fundSortable.destroy(); fundSortable = null }
+    fundSortable = bindRowSortable(fundTableRef, '.row-drag-handle', (oldIndex, newIndex) => {
+      const moved = form.funds.splice(oldIndex, 1)[0]
+      form.funds.splice(newIndex, 0, moved)
+    })
+  })
 }
 
 const isEdit = computed(() => !!route.params.id && route.params.id !== 'new')
@@ -1300,7 +1435,7 @@ const mapDepositFromApi = (d, rate = 1) => {
   } else {
     displayAmt = d.amount
   }
-  return { bankId: d.bankId || null, depositType: d.depositType, currency, amount: displayAmt, amountStr: numFmt(displayAmt), notes: d.notes }
+  return { _rowId: `dep_${_idSeq++}`, bankId: d.bankId || null, depositType: d.depositType, currency, amount: displayAmt, amountStr: numFmt(displayAmt), notes: d.notes }
 }
 
 // ===== Deposit Tabs =====
@@ -1323,29 +1458,20 @@ const transitUsdNetAmt = computed(() => transitUsdDeposits.value.reduce((s, d) =
 const usdGrandAmt      = computed(() => usdDemandAmt.value + usdFixedAmt.value + transitUsdNetAmt.value)
 const usdGrandTwd      = computed(() => Math.round(usdGrandAmt.value * (form.usdExchangeRate || 1)))
 
-const moveDepositRow = (row, dir) => {
-  const idx = form.deposits.indexOf(row)
-  if (idx < 0) return
-  const newIdx = idx + dir
-  if (newIdx < 0 || newIdx >= form.deposits.length) return
-  form.deposits.splice(idx, 1)
-  form.deposits.splice(newIdx, 0, row)
-}
-
 // ===== Mutations =====
 const addDeposit = (outerTab = 'TWD') => {
   if (outerTab === 'TRANSIT') {
     const currency = transitTab.value === 'USD' ? 'TRANSIT_USD' : 'TRANSIT_TWD'
     const defaultType = transitTypeOptions.value[0]?.value ?? '信用卡待付款'
-    form.deposits.push({ bankId: null, depositType: defaultType, currency, amount: 0, amountStr: '0' })
+    form.deposits.push({ _rowId: `dep_${_idSeq++}`, bankId: null, depositType: defaultType, currency, amount: 0, amountStr: '0' })
     return
   }
   const typeMap = { USD: '美元活存', TWD: '活存' }
-  form.deposits.push({ bankId: null, depositType: typeMap[outerTab] ?? '活存', currency: outerTab, amount: 0, amountStr: '0' })
+  form.deposits.push({ _rowId: `dep_${_idSeq++}`, bankId: null, depositType: typeMap[outerTab] ?? '活存', currency: outerTab, amount: 0, amountStr: '0' })
 }
 
 const addFund = () =>
-  form.funds.push({ fundName: '', bankId: null, investmentAmount: 0, investmentAmountStr: '0', currentValue: 0, currentValueStr: '0' })
+  form.funds.push({ _rowId: `fund_${_idSeq++}`, fundName: '', bankId: null, investmentAmount: 0, investmentAmountStr: '0', currentValue: 0, currentValueStr: '0' })
 
 let _idSeq = 1
 const newBrokerRow = (_market) => ({
@@ -1528,6 +1654,7 @@ const copyPrevFunds = async () => {
   try {
     const detail = await snapshotApi.getDetail(prevId)
     form.funds = detail.funds.map(f => ({
+      _rowId: `fund_${_idSeq++}`,
       fundName: f.fundName, fundCode: f.fundCode, bankId: f.bankId || null,
       investmentAmount: f.investmentAmount, investmentAmountStr: numFmt(f.investmentAmount),
       currentValue: f.currentValue, currentValueStr: numFmt(f.currentValue)
@@ -1839,7 +1966,28 @@ function stopPriceAutoRefresh() {
   if (priceTimer) { clearInterval(priceTimer); priceTimer = null }
 }
 
-onUnmounted(() => stopPriceAutoRefresh())
+onUnmounted(() => {
+  stopPriceAutoRefresh()
+  if (twStockSortable)          { twStockSortable.destroy();          twStockSortable = null }
+  if (usStockSortable)          { usStockSortable.destroy();          usStockSortable = null }
+  if (twdDepositSortable)        { twdDepositSortable.destroy();        twdDepositSortable = null }
+  if (usdDepositSortable)        { usdDepositSortable.destroy();        usdDepositSortable = null }
+  if (transitTwdDepositSortable) { transitTwdDepositSortable.destroy(); transitTwdDepositSortable = null }
+  if (transitUsdDepositSortable) { transitUsdDepositSortable.destroy(); transitUsdDepositSortable = null }
+  if (fundSortable)              { fundSortable.destroy();              fundSortable = null }
+})
+
+// 切換 Tab 或筆數變動時，重新綁定對應 Sortable
+watch(stockTab, refreshStockSortables)
+watch(() => twStocks.value.length, refreshStockSortables)
+watch(() => usStocks.value.length, refreshStockSortables)
+watch(depositTab, refreshDepositSortables)
+watch(transitTab, refreshDepositSortables)
+watch(() => twdDeposits.value.length, refreshDepositSortables)
+watch(() => usdDeposits.value.length, refreshDepositSortables)
+watch(() => transitTwdDeposits.value.length, refreshDepositSortables)
+watch(() => transitUsdDeposits.value.length, refreshDepositSortables)
+watch(() => form.funds.length, refreshFundSortable)
 
 // ===== 依日期查詢匯率 =====
 async function loadExchangeRateForDate(date) {
@@ -1893,6 +2041,7 @@ onMounted(async () => {
       notes:           detail.notes,
       deposits: detail.deposits.map(d => mapDepositFromApi(d, detail.usdExchangeRate || 1)),
       funds: detail.funds.map(f => ({
+        _rowId: `fund_${_idSeq++}`,
         fundName: f.fundName, fundCode: f.fundCode, bankId: f.bankId || null,
         investmentAmount: f.investmentAmount, investmentAmountStr: numFmt(f.investmentAmount),
         currentValue: f.currentValue, currentValueStr: numFmt(f.currentValue)
@@ -1938,6 +2087,9 @@ onMounted(async () => {
     }
   }
 
+  refreshStockSortables()
+  refreshDepositSortables()
+  refreshFundSortable()
 })
 
 // ===== Submit =====
@@ -2030,7 +2182,7 @@ const submit = async () => {
 .sort-btns .el-button:not(:disabled):hover { color: #3b82f6; }
 
 /* price cell */
-.price-cell { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+.price-cell { display: flex; flex-direction: row; justify-content: flex-end; align-items: baseline; gap: 6px; white-space: nowrap; }
 .price-main { display: flex; align-items: center; gap: 6px; }
 .price-num  { font-size: 16px; font-weight: 700; color: #1e293b; }
 .price-empty { color: #94a3b8; font-size: 13px; }
