@@ -440,7 +440,7 @@ const pieOption = computed(() => {
   const s = latest.value
   if (!s) return {}
   return {
-    tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+    tooltip: { trigger: 'item', formatter: p => `${p.name}: $${Number(p.value).toLocaleString()} (${p.percent}%)` },
     legend: { bottom: 0, textStyle: { fontSize: 12 } },
     series: [{
       type: 'pie', radius: ['40%', '70%'],

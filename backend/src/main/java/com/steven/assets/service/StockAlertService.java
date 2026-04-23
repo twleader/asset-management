@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -132,9 +133,28 @@ public class StockAlertService {
         }
     }
 
+    private List<StockPriceHistory> withTodayIfMissing(List<StockPriceHistory> desc, String code, String market) {
+        LocalDate today = java.time.LocalDate.now();
+        if (!desc.isEmpty() && desc.get(0).getTradingDate().equals(today)) return desc;
+        return priceRepo.findByStockCodeAndMarket(code, market)
+                .filter(sp -> sp.getTradingDate() != null && sp.getTradingDate().equals(today))
+                .map(sp -> {
+                    StockPriceHistory t = StockPriceHistory.builder()
+                            .stockCode(code).market(market).tradingDate(today)
+                            .closePrice(sp.getPrice()).highPrice(sp.getPrice()).lowPrice(sp.getPrice())
+                            .build();
+                    List<StockPriceHistory> r = new java.util.ArrayList<>();
+                    r.add(t);
+                    r.addAll(desc);
+                    return r;
+                })
+                .orElse(desc);
+    }
+
     private boolean checkMaDeviation(StockAlert alert, double currentPrice, int days, boolean above) {
-        List<StockPriceHistory> history = historyRepo
-                .findRecentN(alert.getStockCode(), alert.getMarket(), days);
+        List<StockPriceHistory> history = withTodayIfMissing(
+                historyRepo.findRecentN(alert.getStockCode(), alert.getMarket(), days),
+                alert.getStockCode(), alert.getMarket());
         if (history.size() < days / 2) return false; // 資料不足
 
         double ma = history.stream()
@@ -159,8 +179,9 @@ public class StockAlertService {
      */
     private boolean checkKdValue(StockAlert alert, boolean useD, boolean above) {
         // 需至少 40 天資料計算穩定 KD
-        List<StockPriceHistory> history = historyRepo
-                .findRecentN(alert.getStockCode(), alert.getMarket(), 60);
+        List<StockPriceHistory> history = withTodayIfMissing(
+                historyRepo.findRecentN(alert.getStockCode(), alert.getMarket(), 60),
+                alert.getStockCode(), alert.getMarket());
         if (history.size() < 9) return false;
 
         // history 是降序，反轉成升序計算

@@ -4,7 +4,10 @@
       <template #header>
         <div style="display:flex;align-items:center;justify-content:space-between">
           <span class="section-title">🔔 股票到價警示</span>
-          <el-button type="primary" :icon="Plus" @click="openDialog()">新增警示</el-button>
+          <div style="display:flex;gap:8px">
+            <el-button :loading="checking" @click="triggerCheck">立即檢查</el-button>
+            <el-button type="primary" :icon="Plus" @click="openDialog()">新增警示</el-button>
+          </div>
         </div>
       </template>
 
@@ -251,7 +254,7 @@ import { CanvasRenderer } from 'echarts/renderers'
 import { LineChart } from 'echarts/charts'
 import { TitleComponent, TooltipComponent, LegendComponent, GridComponent, DataZoomComponent, MarkLineComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
-import { Plus, Edit, Delete, Loading, Operation } from '@element-plus/icons-vue'
+import { Plus, Edit, Delete, Loading, Operation, Refresh } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import Sortable from 'sortablejs'
 import dayjs from 'dayjs'

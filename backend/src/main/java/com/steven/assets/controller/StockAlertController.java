@@ -53,6 +53,13 @@ public class StockAlertController {
         return ResponseEntity.noContent().build();
     }
 
+    /** 手動觸發一次到價警示檢查 */
+    @PostMapping("/check")
+    public ResponseEntity<Void> triggerCheck() {
+        service.checkAlerts();
+        return ResponseEntity.noContent().build();
+    }
+
     /**
      * 查詢股票名稱：
      * 1. 先查 stock 主檔
