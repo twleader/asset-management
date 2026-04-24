@@ -550,7 +550,7 @@
                       class="price-change">
                       {{ Number(row.priceChange) >= 0 ? '▲' : '▼' }}
                       {{ Math.abs(Number(row.priceChange)).toFixed(2) }}
-                      ({{ (Number(row.priceChangePct) * 100).toFixed(2) }}%)
+                      ({{ Number(row.priceChangePct).toFixed(2) }}%)
                     </div>
                   </div>
                 </template>
@@ -817,7 +817,7 @@
               </el-table-column>
 
               <!-- 股號/股名 -->
-              <el-table-column label="股號/股名" min-width="170">
+              <el-table-column label="股號/股名" min-width="280">
                 <template #default="{ row }">
                   <div style="display:flex;gap:4px">
                     <el-input v-model="row.stockCode" size="small" placeholder="Ticker"
@@ -839,8 +839,8 @@
                       :class="Number(row.priceChange) >= 0 ? 'price-up' : 'price-down'"
                       class="price-change">
                       {{ Number(row.priceChange) >= 0 ? '▲' : '▼' }}
-                      {{ Math.abs(Number(row.priceChange)).toFixed(4) }}
-                      ({{ (Number(row.priceChangePct) * 100).toFixed(4) }}%)
+                      {{ Math.abs(Number(row.priceChange)).toFixed(2) }}
+                      ({{ Number(row.priceChangePct).toFixed(2) }}%)
                     </div>
                   </div>
                 </template>
@@ -1538,8 +1538,9 @@ const removeBrokerRow = (stockRow, idx) => {
 async function fetchPriceForRow(row) {
   if (!row.stockCode) return
   try {
-    if (isEdit.value && form.snapshotDate) {
-      // 歷史收盤價
+    const today = new Date().toISOString().slice(0, 10)
+    if (isEdit.value && form.snapshotDate && form.snapshotDate < today) {
+      // 歷史收盤價（僅當快照日期早於今天）
       let prices = await marketDataApi.getPricesOnDate(form.snapshotDate, [{ code: row.stockCode, market: row.market }])
       if (prices.length === 0) {
         // 針對此股票精準 backfill：只拉快照日期前後各 30 天的資料，避免拉全量
@@ -1601,7 +1602,7 @@ const fetchPrice = async (row) => {
     row.priceChange   = result.change
     row.priceChangePct = result.changePct
     const sign = Number(result.change) >= 0 ? '▲' : '▼'
-    const changePctStr = (Math.abs(Number(result.changePct)) * 100).toFixed(2)
+    const changePctStr = Math.abs(Number(result.changePct)).toFixed(2)
     ElMessage.success(
       `${row.stockCode} ${fmtPrice(result.price)}　${sign}${Math.abs(Number(result.change)).toFixed(2)} (${changePctStr}%)　來源：${result.source}`
     )
@@ -1924,7 +1925,7 @@ async function loadAllPrices() {
       if (p && p.price != null) {
         row.latestPrice    = p.price
         row.priceChange    = p.priceChange
-        row.priceChangePct = p.changePercent != null ? p.changePercent / 100 : null
+        row.priceChangePct = p.changePercent != null ? p.changePercent : null
       } else if (row.stockCode) {
         missingRows.push(row)
       }

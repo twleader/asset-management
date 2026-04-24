@@ -144,8 +144,7 @@ public class MarketDataService {
 
             String pctStr = pd.path("percentageChange").asText("0%")
                     .replace("%", "").replace("+", "").replace(",", "").trim();
-            BigDecimal changePct = new BigDecimal(pctStr)
-                    .divide(BigDecimal.valueOf(100), 6, RoundingMode.HALF_UP);
+            BigDecimal changePct = new BigDecimal(pctStr).setScale(6, RoundingMode.HALF_UP);
             // netChange 可能是負值，pct 跟著調整符號
             if (change.compareTo(BigDecimal.ZERO) < 0 && changePct.compareTo(BigDecimal.ZERO) > 0) {
                 changePct = changePct.negate();
@@ -212,7 +211,8 @@ public class MarketDataService {
                 BigDecimal price = new BigDecimal(priceStr);
                 BigDecimal change = prevClose != null ? price.subtract(prevClose) : BigDecimal.ZERO;
                 BigDecimal changePct = (prevClose != null && prevClose.compareTo(BigDecimal.ZERO) != 0)
-                        ? change.divide(prevClose, 6, RoundingMode.HALF_UP) : BigDecimal.ZERO;
+                        ? change.multiply(BigDecimal.valueOf(100)).divide(prevClose, 6, RoundingMode.HALF_UP)
+                        : BigDecimal.ZERO;
 
                 return Optional.of(new PriceResult(stockCode, "台股", price, change, changePct, "TWSE",
                         name.isEmpty() ? null : name));
@@ -284,7 +284,7 @@ public class MarketDataService {
             Optional<DividendRateResult> fiveYear = getTwseFiveYearAvgDividendRate(stockCode);
             if (fiveYear.isPresent()) return fiveYear.get();
 
-            throw new RuntimeException("查無配息資料：" + stockCode);
+            return new DividendRateResult(stockCode, market, null, "N/A", "查無配息資料", null);
         } else {
             // 美股：NASDAQ API 優先
             Optional<DividendRateResult> nasdaq = getNasdaqDividendRateAny(stockCode);
@@ -294,7 +294,7 @@ public class MarketDataService {
             Optional<DividendRateResult> known = getKnownUsEtfDividendRate(stockCode);
             if (known.isPresent()) return known.get();
 
-            throw new RuntimeException("查無配息資料：" + stockCode);
+            return new DividendRateResult(stockCode, market, null, "N/A", "查無配息資料", null);
         }
     }
 
