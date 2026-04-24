@@ -95,6 +95,29 @@ public class MarketDataController {
         return stockPriceService.manualRefresh();
     }
 
+    /**
+     * ETF 成分持股
+     * GET /api/market-data/etf-holdings?code=0050&market=台股
+     */
+    @GetMapping("/etf-holdings")
+    public ResponseEntity<MarketDataService.EtfHoldingsResult> getEtfHoldings(
+            @RequestParam String code,
+            @RequestParam String market) {
+        return ResponseEntity.ok(marketDataService.getEtfHoldings(code, market));
+    }
+
+    /**
+     * 最近 N 年股利
+     * GET /api/market-data/dividends?code=0050&market=台股&years=10
+     */
+    @GetMapping("/dividends")
+    public ResponseEntity<MarketDataService.DividendHistoryResult> getDividendHistory(
+            @RequestParam String code,
+            @RequestParam String market,
+            @RequestParam(defaultValue = "10") int years) {
+        return ResponseEntity.ok(marketDataService.getDividendHistory(code, market, years));
+    }
+
     // ===== 歷史收盤價 =====
 
     /**

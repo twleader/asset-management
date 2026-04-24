@@ -67,6 +67,39 @@ public class MarketDataService {
         }
     }
 
+    public record EtfHolding(
+            String stockCode,
+            String stockName,
+            BigDecimal weight,        // 持股占比（%）
+            BigDecimal shares         // 持股數（原始資料常無此欄位，可為 null）
+    ) {}
+
+    public record EtfHoldingsResult(
+            String stockCode,
+            String market,
+            boolean supported,
+            String source,
+            String asOfDate,
+            String message,
+            List<EtfHolding> holdings
+    ) {}
+
+    public record DividendRow(
+            Integer year,
+            BigDecimal cashDividend,
+            BigDecimal stockDividend,
+            String exDividendDate,   // YYYY-MM-DD
+            BigDecimal yieldPct      // 當年殖利率（%），可為 null
+    ) {}
+
+    public record DividendHistoryResult(
+            String stockCode,
+            String market,
+            String source,
+            String message,
+            List<DividendRow> rows
+    ) {}
+
     public record PriceResult(
             String stockCode,
             String market,
@@ -871,5 +904,282 @@ public class MarketDataService {
         int month = (h + l - 7 * m + 114) / 31;
         int day = ((h + l - 7 * m + 114) % 31) + 1;
         return LocalDate.of(year, month, day).minusDays(2).toString();
+    }
+
+    // =====================================================================
+    // ETF 判斷 / 持股明細 / 股利歷史 （Requirement 13）
+    // =====================================================================
+
+    private static final java.util.Set<String> US_ETF_WHITELIST = java.util.Set.of(
+            "VOO", "VT", "VTI", "VGT", "VYM", "VNQ", "VXUS",
+            "SPY", "QQQ", "DIA", "IVV", "IWM",
+            "AVGO",   // 保留：使用者持倉白名單擴充用
+            "SCHD", "JEPI", "JEPQ"
+    );
+
+    /** 判斷是否為 ETF。 台股：00 開頭；美股：白名單 */
+    public boolean isEtf(String stockCode, String market) {
+        if (stockCode == null) return false;
+        if ("台股".equals(market)) return stockCode.startsWith("00");
+        if ("美股".equals(market)) return US_ETF_WHITELIST.contains(stockCode.toUpperCase());
+        return false;
+    }
+
+    /**
+     * ETF 成分持股。台股用 FinMind TaiwanETFHoldings（免認證）；美股暫不支援。
+     */
+    public EtfHoldingsResult getEtfHoldings(String stockCode, String market) {
+        if (!isEtf(stockCode, market)) {
+            return new EtfHoldingsResult(stockCode, market, false, null, null,
+                    "此股票非 ETF 或未在支援清單", List.of());
+        }
+        // 優先嘗試 Yahoo Finance topHoldings（美股 ETF 效果最佳；台股通常只回前 10 大）
+        try {
+            EtfHoldingsResult y = getYahooEtfHoldings(stockCode, market);
+            if (y != null && !y.holdings().isEmpty()) return y;
+        } catch (Exception ignore) {}
+
+        if ("美股".equals(market)) {
+            return new EtfHoldingsResult(stockCode, market, false, null, null,
+                    "Yahoo Finance 未提供此 ETF 的成分股資料", List.of());
+        }
+        // 台股 ETF：FinMind 的 ETF 持股資料集需付費方案；保留呼叫以便未來升級
+        try {
+            String url = "https://api.finmindtrade.com/api/v4/data"
+                    + "?dataset=TaiwanETFHoldings"
+                    + "&data_id=" + stockCode;
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .timeout(Duration.ofSeconds(15))
+                    .header("User-Agent", UA)
+                    .header("Accept", "application/json")
+                    .header("Accept-Encoding", "identity")
+                    .GET().build();
+            HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() != 200) {
+                return new EtfHoldingsResult(stockCode, market, true, "FinMind", null,
+                        "FinMind 回應 " + resp.statusCode(), List.of());
+            }
+            JsonNode root = mapper.readTree(resp.body());
+            JsonNode data = root.path("data");
+            if (!data.isArray() || data.isEmpty()) {
+                return new EtfHoldingsResult(stockCode, market, true, "FinMind", null,
+                        "查無成分股資料", List.of());
+            }
+
+            // 取最新日期的資料
+            String latestDate = "";
+            for (JsonNode n : data) {
+                String d = n.path("date").asText("");
+                if (d.compareTo(latestDate) > 0) latestDate = d;
+            }
+            List<EtfHolding> holdings = new ArrayList<>();
+            for (JsonNode n : data) {
+                if (!latestDate.equals(n.path("date").asText(""))) continue;
+                String code = n.path("stock_id").asText("");
+                String name = n.path("stock_name").asText("");
+                double weight = n.path("weight").asDouble(0);
+                if (code.isEmpty() && name.isEmpty()) continue;
+                holdings.add(new EtfHolding(
+                        code, name,
+                        BigDecimal.valueOf(weight).setScale(4, RoundingMode.HALF_UP),
+                        null
+                ));
+            }
+            // 依權重由大到小
+            holdings.sort((a, b) -> b.weight().compareTo(a.weight()));
+            return new EtfHoldingsResult(stockCode, market, true, "FinMind",
+                    latestDate, null, holdings);
+        } catch (Exception e) {
+            log.warn("ETF 持股查詢失敗 {}: {}", stockCode, e.getMessage());
+            return new EtfHoldingsResult(stockCode, market, true, "FinMind", null,
+                    "查詢失敗：" + e.getMessage(), List.of());
+        }
+    }
+
+    /**
+     * 透過 Yahoo Finance quoteSummary topHoldings 取得 ETF 前十大成分股
+     */
+    private EtfHoldingsResult getYahooEtfHoldings(String stockCode, String market) {
+        try {
+            String symbol = "台股".equals(market) ? stockCode + ".TW" : stockCode;
+            String crumb = getYahooCrumb();
+            String url = "https://query2.finance.yahoo.com/v10/finance/quoteSummary/"
+                    + symbol + "?modules=topHoldings&crumb="
+                    + java.net.URLEncoder.encode(crumb, java.nio.charset.StandardCharsets.UTF_8);
+            String body = get(url, UA);
+            JsonNode root = mapper.readTree(body);
+            JsonNode result = root.path("quoteSummary").path("result");
+            if (!result.isArray() || result.isEmpty()) return null;
+
+            JsonNode top = result.get(0).path("topHoldings");
+            JsonNode arr = top.path("holdings");
+            if (!arr.isArray() || arr.isEmpty()) {
+                // 試 .TWO（上櫃）
+                if ("台股".equals(market)) {
+                    symbol = stockCode + ".TWO";
+                    url = "https://query2.finance.yahoo.com/v10/finance/quoteSummary/"
+                            + symbol + "?modules=topHoldings&crumb="
+                            + java.net.URLEncoder.encode(crumb, java.nio.charset.StandardCharsets.UTF_8);
+                    body = get(url, UA);
+                    root = mapper.readTree(body);
+                    arr = root.path("quoteSummary").path("result").get(0)
+                            .path("topHoldings").path("holdings");
+                }
+            }
+            if (!arr.isArray() || arr.isEmpty()) return null;
+
+            List<EtfHolding> list = new ArrayList<>();
+            for (JsonNode h : arr) {
+                String code = h.path("symbol").asText("");
+                String name = h.path("holdingName").asText("");
+                double weight = h.path("holdingPercent").path("raw").asDouble(0) * 100.0;
+                list.add(new EtfHolding(
+                        code, name,
+                        BigDecimal.valueOf(weight).setScale(4, RoundingMode.HALF_UP),
+                        null
+                ));
+            }
+            list.sort((a, b) -> b.weight().compareTo(a.weight()));
+            return new EtfHoldingsResult(stockCode, market, true, "Yahoo Finance (前 10 大)",
+                    null, null, list);
+        } catch (Exception e) {
+            log.warn("Yahoo topHoldings 查詢失敗 {}: {}", stockCode, e.getMessage());
+            if (e.getMessage() != null && (e.getMessage().contains("401") || e.getMessage().contains("429"))) {
+                yahooCrumb = null;
+            }
+            return null;
+        }
+    }
+
+    /**
+     * 最近 N 年股利。台股：FinMind TaiwanStockDividend；美股：NASDAQ dividends API
+     */
+    public DividendHistoryResult getDividendHistory(String stockCode, String market, int years) {
+        int n = Math.max(1, Math.min(years, 20));
+        if ("台股".equals(market)) {
+            return getTwDividendHistory(stockCode, n);
+        } else if ("美股".equals(market)) {
+            return getUsDividendHistory(stockCode, n);
+        }
+        return new DividendHistoryResult(stockCode, market, null, "不支援的市場", List.of());
+    }
+
+    private DividendHistoryResult getTwDividendHistory(String stockCode, int years) {
+        try {
+            String startDate = LocalDate.now().minusYears(years).toString();
+            String url = "https://api.finmindtrade.com/api/v4/data"
+                    + "?dataset=TaiwanStockDividend"
+                    + "&data_id=" + stockCode
+                    + "&start_date=" + startDate;
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .timeout(Duration.ofSeconds(15))
+                    .header("User-Agent", UA)
+                    .header("Accept", "application/json")
+                    .header("Accept-Encoding", "identity")
+                    .GET().build();
+            HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() != 200) {
+                return new DividendHistoryResult(stockCode, "台股", "FinMind",
+                        "FinMind 回應 " + resp.statusCode(), List.of());
+            }
+            JsonNode root = mapper.readTree(resp.body());
+            JsonNode data = root.path("data");
+            if (!data.isArray() || data.isEmpty()) {
+                return new DividendHistoryResult(stockCode, "台股", "FinMind",
+                        "查無股利資料", List.of());
+            }
+
+            // 依年度彙總（一年可能多次配息）
+            Map<Integer, double[]> agg = new java.util.TreeMap<>(); // year -> [cash, stock]
+            Map<Integer, String> firstExDate = new java.util.HashMap<>();
+            for (JsonNode item : data) {
+                String date = item.path("date").asText("");
+                if (date.length() < 4) continue;
+                int year;
+                try { year = Integer.parseInt(date.substring(0, 4)); }
+                catch (NumberFormatException e) { continue; }
+                double cash = item.path("CashEarningsDistribution").asDouble(0)
+                            + item.path("CashStatutorySurplus").asDouble(0);
+                double stock = item.path("StockEarningsDistribution").asDouble(0)
+                             + item.path("StockStatutorySurplus").asDouble(0);
+                if (cash == 0 && stock == 0) continue;
+                agg.computeIfAbsent(year, y -> new double[]{0, 0});
+                agg.get(year)[0] += cash;
+                agg.get(year)[1] += stock;
+                String exDate = item.path("CashExDividendTradingDate").asText("");
+                if (exDate.isEmpty()) exDate = item.path("StockExDividendTradingDate").asText("");
+                if (!exDate.isEmpty()) firstExDate.putIfAbsent(year, exDate);
+            }
+
+            List<DividendRow> rows = new ArrayList<>();
+            agg.forEach((year, arr) -> rows.add(new DividendRow(
+                    year,
+                    BigDecimal.valueOf(arr[0]).setScale(4, RoundingMode.HALF_UP),
+                    BigDecimal.valueOf(arr[1]).setScale(4, RoundingMode.HALF_UP),
+                    firstExDate.get(year),
+                    null
+            )));
+            // 最新年度在前
+            rows.sort((a, b) -> b.year().compareTo(a.year()));
+            return new DividendHistoryResult(stockCode, "台股", "FinMind", null, rows);
+        } catch (Exception e) {
+            log.warn("台股股利歷史查詢失敗 {}: {}", stockCode, e.getMessage());
+            return new DividendHistoryResult(stockCode, "台股", "FinMind",
+                    "查詢失敗：" + e.getMessage(), List.of());
+        }
+    }
+
+    private DividendHistoryResult getUsDividendHistory(String stockCode, int years) {
+        int fromYear = LocalDate.now().getYear() - years + 1;
+        for (String assetClass : new String[]{"stocks", "etf"}) {
+            try {
+                String url = "https://api.nasdaq.com/api/quote/" + stockCode
+                        + "/dividends?assetclass=" + assetClass;
+                String body = get(url, UA);
+                JsonNode root = mapper.readTree(body);
+                JsonNode rowsNode = root.path("data").path("dividends").path("rows");
+                if (!rowsNode.isArray() || rowsNode.isEmpty()) continue;
+
+                Map<Integer, double[]> agg = new java.util.TreeMap<>(); // year -> [cash]
+                Map<Integer, String> firstExDate = new java.util.HashMap<>();
+                for (JsonNode r : rowsNode) {
+                    String exDate = r.path("exOrEffDate").asText("");
+                    if (exDate.length() < 10) continue;
+                    // NASDAQ 日期格式 MM/DD/YYYY
+                    int year;
+                    try {
+                        String[] p = exDate.split("/");
+                        year = Integer.parseInt(p[2]);
+                    } catch (Exception e) { continue; }
+                    if (year < fromYear) continue;
+                    String amtStr = r.path("amount").asText("").replace("$", "").trim();
+                    if (amtStr.isEmpty() || amtStr.equals("N/A")) continue;
+                    double amt;
+                    try { amt = Double.parseDouble(amtStr); }
+                    catch (NumberFormatException e) { continue; }
+                    agg.computeIfAbsent(year, y -> new double[]{0});
+                    agg.get(year)[0] += amt;
+                    firstExDate.putIfAbsent(year, exDate);
+                }
+                if (agg.isEmpty()) continue;
+
+                List<DividendRow> rows = new ArrayList<>();
+                agg.forEach((year, arr) -> rows.add(new DividendRow(
+                        year,
+                        BigDecimal.valueOf(arr[0]).setScale(4, RoundingMode.HALF_UP),
+                        BigDecimal.ZERO,
+                        firstExDate.get(year),
+                        null
+                )));
+                rows.sort((a, b) -> b.year().compareTo(a.year()));
+                return new DividendHistoryResult(stockCode, "美股", "NASDAQ", null, rows);
+            } catch (Exception e) {
+                log.warn("美股股利歷史查詢失敗 {} ({}): {}", stockCode, assetClass, e.getMessage());
+            }
+        }
+        return new DividendHistoryResult(stockCode, "美股", "NASDAQ",
+                "查無股利資料", List.of());
     }
 }

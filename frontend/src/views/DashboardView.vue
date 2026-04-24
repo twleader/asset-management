@@ -261,36 +261,86 @@
     <!-- Stock Analysis Dialog -->
     <el-dialog
       v-model="analysisVisible"
-      :title="`${analysisStock?.stockCode} ${analysisStock?.stockName}　股價走勢分析`"
+      :title="`${analysisStock?.stockCode} ${analysisStock?.stockName}　股票分析`"
       width="1100px"
       destroy-on-close
       draggable>
-      <div v-if="analysisLoading" class="analysis-loading">
-        <el-icon class="is-loading" size="36"><Loading /></el-icon>
-        <div>載入歷史股價中…</div>
-      </div>
-      <div v-else-if="!analysisHistory.length" class="analysis-empty">
-        無歷史資料，請先執行股價補齊
-      </div>
-      <template v-else>
-        <div class="analysis-meta">
-          <el-tag size="small" type="info">雙擊任意股票可開啟分析</el-tag>
-          <div style="display:flex;align-items:center;gap:6px">
-            <span style="color:#64748b;font-size:12px">期間：</span>
-            <el-button-group>
-              <el-button
-                v-for="opt in rangeOptions" :key="opt.label"
-                size="small"
-                :type="analysisMonths === opt.months ? 'primary' : 'default'"
-                @click="analysisMonths = opt.months">
-                {{ opt.label }}
-              </el-button>
-            </el-button-group>
-            <span style="color:#64748b;font-size:12px;margin-left:8px">滾輪縮放 / 拖曳平移</span>
+      <el-tabs v-model="analysisTab" @tab-change="onAnalysisTabChange">
+        <!-- 走勢圖 -->
+        <el-tab-pane label="走勢圖" name="chart">
+          <div v-if="analysisLoading" class="analysis-loading">
+            <el-icon class="is-loading" size="36"><Loading /></el-icon>
+            <div>載入歷史股價中…</div>
           </div>
-        </div>
-        <v-chart :option="analysisChartOption" style="height:580px" autoresize />
-      </template>
+          <div v-else-if="!analysisHistory.length" class="analysis-empty">
+            無歷史資料，請先執行股價補齊
+          </div>
+          <template v-else>
+            <div class="analysis-meta">
+              <el-tag size="small" type="info">雙擊任意股票可開啟分析</el-tag>
+              <div style="display:flex;align-items:center;gap:6px">
+                <span style="color:#64748b;font-size:12px">期間：</span>
+                <el-button-group>
+                  <el-button
+                    v-for="opt in rangeOptions" :key="opt.label"
+                    size="small"
+                    :type="analysisMonths === opt.months ? 'primary' : 'default'"
+                    @click="analysisMonths = opt.months">
+                    {{ opt.label }}
+                  </el-button>
+                </el-button-group>
+                <span style="color:#64748b;font-size:12px;margin-left:8px">滾輪縮放 / 拖曳平移</span>
+              </div>
+            </div>
+            <v-chart :option="analysisChartOption" style="height:580px" autoresize />
+          </template>
+        </el-tab-pane>
+
+        <!-- 持股明細（ETF only） -->
+        <el-tab-pane v-if="isEtfStock" label="持股明細" name="holdings">
+          <div style="padding:24px 8px">
+            <div style="color:#475569;font-size:14px;line-height:1.8;margin-bottom:16px">
+              ETF 成分股資料目前免費資料源都有限制（TWSE 無此 API、FinMind 需付費方案、發行商官網為 SPA）。
+              <br>點擊以下外部連結可查看最新完整成分股：
+            </div>
+            <div style="display:flex;flex-direction:column;gap:10px">
+              <el-link
+                v-for="link in etfExternalLinks" :key="link.url"
+                :href="link.url" target="_blank" type="primary"
+                style="font-size:14px">
+                🔗 {{ link.label }}
+              </el-link>
+            </div>
+          </div>
+        </el-tab-pane>
+
+        <!-- 股利歷史 -->
+        <el-tab-pane label="股利歷史（10 年）" name="dividends">
+          <div v-if="dividendsLoading" class="analysis-loading">
+            <el-icon class="is-loading" size="36"><Loading /></el-icon>
+            <div>載入股利資料中…</div>
+          </div>
+          <div v-else-if="!dividendHistory.rows?.length" class="analysis-empty">
+            {{ dividendHistory.message || '查無股利資料' }}
+          </div>
+          <template v-else>
+            <div style="margin-bottom:8px;color:#64748b;font-size:12px">
+              資料來源：{{ dividendHistory.source }}
+            </div>
+            <el-table :data="dividendHistory.rows" size="small" border max-height="500"
+              style="width:100%">
+              <el-table-column label="年度" prop="year" width="100" align="center" />
+              <el-table-column label="現金股利" width="140" align="right">
+                <template #default="{ row }">{{ Number(row.cashDividend || 0).toFixed(4) }}</template>
+              </el-table-column>
+              <el-table-column label="股票股利" width="140" align="right">
+                <template #default="{ row }">{{ Number(row.stockDividend || 0).toFixed(4) }}</template>
+              </el-table-column>
+              <el-table-column label="除息日" prop="exDividendDate" min-width="140" align="center" />
+            </el-table>
+          </template>
+        </el-tab-pane>
+      </el-tabs>
     </el-dialog>
   </div>
 </template>
@@ -785,8 +835,67 @@ watch(analysisMonths, () => { if (analysisVisible.value) fetchAnalysisHistory() 
 async function onStockDblClick(row) {
   analysisStock.value = row
   analysisMonths.value = 12
+  analysisTab.value = 'chart'
+  dividendHistory.value = { rows: [] }
   analysisVisible.value = true
   await fetchAnalysisHistory()
+}
+
+// ── Tabs：持股明細（外連） / 股利歷史 ─────────────────────
+const analysisTab = ref('chart')
+const dividendHistory = ref({ rows: [] })
+const dividendsLoading = ref(false)
+
+const isEtfStock = computed(() => {
+  const s = analysisStock.value
+  if (!s) return false
+  if (s.market === '台股') return /^00/.test(s.stockCode || '')
+  if (s.market === '美股') {
+    const white = ['VOO','VT','VTI','VGT','VYM','VNQ','VXUS','SPY','QQQ','DIA','IVV','IWM','AVGO','SCHD','JEPI','JEPQ']
+    return white.includes((s.stockCode || '').toUpperCase())
+  }
+  return false
+})
+
+const etfExternalLinks = computed(() => {
+  const s = analysisStock.value
+  if (!s) return []
+  const code = s.stockCode || ''
+  if (s.market === '台股') {
+    return [
+      { label: `MoneyDJ 成分股（${code}）`, url: `https://www.moneydj.com/etf/x/basic/basic0007A.xdjhtm?etfid=${code}.TW` },
+      { label: `Goodinfo 成分股（${code}）`, url: `https://goodinfo.tw/tw/ETFControlBasicInfo.asp?STOCK_ID=${code}` },
+      { label: `Yahoo 奇摩股市（${code}）`, url: `https://tw.stock.yahoo.com/quote/${code}.TW/holding` },
+    ]
+  }
+  if (s.market === '美股') {
+    return [
+      { label: `ETFdb 成分股（${code}）`, url: `https://etfdb.com/etf/${code}/#holdings` },
+      { label: `Morningstar 成分股（${code}）`, url: `https://www.morningstar.com/etfs/arcx/${code}/portfolio` },
+      { label: `Yahoo Finance（${code}）`, url: `https://finance.yahoo.com/quote/${code}/holdings` },
+    ]
+  }
+  return []
+})
+
+async function fetchDividendHistory() {
+  if (!analysisStock.value) return
+  dividendsLoading.value = true
+  try {
+    dividendHistory.value = await marketDataApi.getDividendHistory(
+      analysisStock.value.stockCode, analysisStock.value.market, 10
+    )
+  } catch (e) {
+    dividendHistory.value = { rows: [], message: '查詢失敗' }
+  } finally {
+    dividendsLoading.value = false
+  }
+}
+
+async function onAnalysisTabChange(name) {
+  if (name === 'dividends' && !dividendHistory.value.rows?.length && !dividendsLoading.value) {
+    await fetchDividendHistory()
+  }
 }
 
 function calcMA(prices, n) {

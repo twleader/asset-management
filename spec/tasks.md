@@ -568,3 +568,26 @@
 
 - [ ] 17.3 前端 SnapshotListView 新增「匯出 Excel」按鈕
   - 觸發檔案下載
+
+### Task 18: 股票走勢圖 Popup 延伸（ETF 持股明細 + 股利歷史）
+
+- [ ] 18.1 後端：`MarketDataService` 新增 ETF 判斷工具方法
+  - 台股：code 以 `00` 開頭
+  - 美股：白名單常數（VOO / VT / AVGO / VGT / QQQ / SPY … 可擴充）
+
+- [ ] 18.2 後端：新增 `GET /api/market-data/etf-holdings?code=&market=`
+  - 台股：呼叫 FinMind `TaiwanETFHoldings`；回傳成分股（代號、名稱、持股比例、股數）
+  - 美股：回 `{ supported: false }` 提示尚未支援
+  - 失敗時回空清單 + 錯誤訊息，不丟 500
+
+- [ ] 18.3 後端：新增 `GET /api/market-data/dividends?code=&market=&years=10`
+  - 台股：FinMind `TaiwanStockDividend`，取最近 N 年；欄位含年度、現金股利、股票股利、除息日
+  - 美股：NASDAQ `/api/quote/{code}/dividends`
+  - 當年殖利率以當前股價概估（optional）
+
+- [ ] 18.4 前端：DashboardView Popup 加入 `el-tabs`
+  - 頁籤：走勢圖（預設）、持股明細（僅 ETF 顯示）、股利歷史
+  - `isEtf(row)` 以代號規則判斷；走勢圖邏輯維持不動
+
+- [ ] 18.5 前端：持股明細頁籤呼叫新 API，以 `el-table` 顯示成分股
+- [ ] 18.6 前端：股利歷史頁籤以 `el-table` 顯示 10 年股利

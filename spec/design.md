@@ -293,7 +293,13 @@ GET    /api/market-data/exchange-rate/on-date?currency=USD&date= # 指定日期�
 POST   /api/market-data/exchange-rate/refresh?currency=USD     # 刷新最新匯率
 POST   /api/market-data/exchange-rate/backfill-history?currency=USD&since= # 補齊指定日期起歷史匯率
 GET    /api/market-data/live-assets                            # 以最新快照持倉 × 當前快取股價，即時計算總資產估值
+GET    /api/market-data/etf-holdings?code=0050&market=台股     # ETF 成分持股（台股 FinMind TaiwanETFHoldings；美股尚未支援）
+GET    /api/market-data/dividends?code=0050&market=台股&years=10 # 最近 N 年股利（台股 FinMind；美股 NASDAQ）
 ```
+
+##### ETF 判斷規則
+- 台股：`stockCode` 以 `00` 開頭
+- 美股：白名單（VOO、VT、AVGO、VGT、QQQ、SPY … 可於 constant 維護）
 
 #### BFF Aggregation
 ```

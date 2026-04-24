@@ -101,6 +101,10 @@ export const marketDataApi = {
   },
   getStockHistory: (code, market, start, end) =>
     api.get('/market-data/history/stock', { params: { code, market, start, end } }),
+  getEtfHoldings: (code, market) =>
+    api.get('/market-data/etf-holdings', { params: { code, market } }),
+  getDividendHistory: (code, market, years = 10) =>
+    api.get('/market-data/dividends', { params: { code, market, years } }),
   getExchangeRate: (currency, start, end) =>
     api.get('/market-data/exchange-rate', { params: { currency, start, end } }),
   refreshExchangeRate: (currency = 'USD') =>
