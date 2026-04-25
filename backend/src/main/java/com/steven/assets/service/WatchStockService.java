@@ -18,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -30,6 +31,7 @@ public class WatchStockService {
     private final StockPriceHistoryRepository historyRepo;
     private final StockRepository stockMasterRepo;
     private final TechnicalIndicatorService indicatorService;
+    private final StockPriceService stockPriceService;
 
     @Transactional(readOnly = true)
     public List<WatchStockDto.Response> findAll() {
@@ -66,6 +68,13 @@ public class WatchStockService {
                     .map(s -> s.getName()).orElse(code);
         }
         stockMasterRepo.upsert(code, req.getMarket(), name);
+
+        // 立即抓一次即時報價，避免等到下次美股/台股開盤前畫面都是空值
+        try {
+            stockPriceService.updatePrices(Set.of(code), req.getMarket(), false);
+        } catch (Exception e) {
+            log.warn("新增觀察 {} {} 後即時抓價失敗: {}", req.getMarket(), code, e.getMessage());
+        }
 
         return toResponse(saved);
     }
