@@ -15,6 +15,21 @@
 > 如果是 bug fix 或細部 UI 調整（不涉及新功能或架構變動），可不更新 spec，
 > 但凡涉及新 Entity、新 API endpoint、新頁面、新業務邏輯，**一定要先更新 spec**。
 
+### Pre-commit Hook（強制 SDD 同步）
+
+本專案內建 pre-commit hook（`scripts/git-hooks/pre-commit`），staged 變更若觸及
+controller / model / dto / views / router / db changelog / bff 等「會改變功能或契約」
+的檔案，**強制要求同 commit 也包含 `spec/` 變更**，否則阻擋提交。
+
+**首次安裝（每個 clone / worktree 各執行一次）：**
+```bash
+git config core.hooksPath scripts/git-hooks
+```
+
+**例外：**
+- 確定僅為 bug fix / 樣式調整：commit 訊息加 `[skip-spec]`
+- 緊急情況：`git commit --no-verify`（請審慎）
+
 ---
 
 ## 技術棧
@@ -70,6 +85,6 @@ cd frontend
 
 | 文件 | 說明 |
 |------|------|
-| `spec/requirements.md` | User Stories + Acceptance Criteria（12 個 Requirements） |
+| `spec/requirements.md` | User Stories + Acceptance Criteria（17 個 Requirements） |
 | `spec/design.md` | 架構圖、ERD、API 端點、關鍵業務邏輯 |
-| `spec/tasks.md` | 實作任務清單（13 個 Tasks，含完成狀態） |
+| `spec/tasks.md` | 實作任務清單（22 個 Tasks，含完成狀態） |

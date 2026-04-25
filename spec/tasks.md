@@ -19,7 +19,7 @@
 - [x] 1.2 設定資料庫連線
   - `application.yml`：H2 記憶體資料庫（開發環境）
   - `application-postgres.yml`：PostgreSQL（生產環境）
-  - 設定 JPA `ddl-auto=update`
+  - 設定 JPA `ddl-auto: none`，Schema 由 Liquibase 管理
 
 - [x] 1.3 建立 Vue 3 前端專案
   - 初始化 Vite + Vue 3 專案
@@ -65,7 +65,7 @@
   - `DepositTypeEntity.java`：存款類型設定 Entity（id、code、displayName、sortOrder、active）
   - `MarketType.java`：市場類型設定 Entity（同結構）
 
-- [x] 2.3 建立 Spring Data JPA Repository（共 12 個）
+- [x] 2.3 建立 Spring Data JPA Repository（共 16 個）
   - 各 Repository 繼承 `JpaRepository`
   - `AssetSnapshotRepository`：`findBySnapshotDate(LocalDate)`
   - `StockPriceRepository`：`findByStockCodeAndMarket(String, String)`
@@ -117,10 +117,12 @@
 
 ---
 
-### Task 4: Excel 批次匯入
+### Task 4: Excel 批次匯入（已停用）
 
-**對應 Requirements:** Requirement 5
+**對應 Requirements:** Requirement 5（功能已轉為匯出，見 Task 17）
 **前置任務:** Task 3
+
+> ⚠️ Excel 匯入功能已停用：`ExcelImportService` 程式碼保留，但 controller 端點（`POST /api/snapshots/import`、`POST /api/realized-gains/import`）皆已移除。下方步驟標記 `[x]` 表示原始實作已完成；現行系統不再暴露這些端點。
 
 #### Steps:
 
@@ -148,8 +150,8 @@
   - 同日期已存在時，依 `overwrite` 參數決定行為
   - 回傳匯入結果：成功筆數、跳過筆數、錯誤明細
 
-- [x] 4.6 新增 `POST /api/snapshots/import` endpoint
-  - 接受 `multipart/form-data`（file + overwrite 參數）
+- [x] 4.6 ~~新增 `POST /api/snapshots/import` endpoint~~（已撤回，端點已從 Controller 移除）
+  - 原本接受 `multipart/form-data`（file + overwrite 參數）
 
 ---
 
@@ -165,7 +167,9 @@
   - `POST /api/realized-gains`
   - `PUT /api/realized-gains/{id}`
   - `DELETE /api/realized-gains/{id}`
-  - `POST /api/realized-gains/import`
+  - ~~`POST /api/realized-gains/import`~~（已撤回，端點已移除）
+  - `POST /api/realized-gains/fix-currency-to-twd`（資料修正工具）
+  - `GET /api/realized-gains/export`（Excel 匯出，見 Task 17）
 
 - [x] 5.2 在 `ExcelImportService` 新增損益匯入邏輯
   - 讀取損益工作表
@@ -454,25 +458,25 @@
 
 #### Steps:
 
-- [x] 13.1 建立 README.md
+- [x] 16.1 建立 README.md
   - 專案簡介與功能說明
   - 本地開發環境設定步驟（`start.sh` 說明）
   - Docker Compose 部署說明
   - Excel 格式規格說明
   - 完整 API 端點列表
 
-- [x] 13.2 建立 `spec` 文件（本文件集）
+- [x] 16.2 建立 `spec` 文件（本文件集）
   - `requirements.md`：需求與驗收條件
   - `design.md`：系統架構與資料模型（已與實作同步）
   - `tasks.md`：實作任務清單（本文件）
 
-- [x] 13.3 環境變數文件
+- [x] 16.3 環境變數文件
   - 建立 `.env.example` 說明所有必要環境變數
   - 建立 `.gitignore`，確認 `.env` 已排除版本控制
 
-- [ ] 13.4 資料庫遷移策略
-  - 評估從 `ddl-auto=update` 遷移至 Flyway/Liquibase
-  - 建立初始 schema migration script（含 Bank / Broker Seed Data）
+- [x] 16.4 資料庫遷移策略
+  - 已採用 Liquibase，`ddl-auto: none`
+  - `db/changelog/` 內含初始 schema 與後續變更（含 Bank / Broker / DepositType / MarketType / WatchStock / StockAlert / TransitFundType Seed Data）
 
 ---
 
@@ -496,13 +500,13 @@
 - [x] 14.4 新增 API endpoint `GET /api/market-data/exchange-rate/on-date?currency=USD&date=YYYY-MM-DD`（已實作）
   - 使用 ExchangeRateHistoryRepository.findClosestRate() 查詢
 
-- [ ] 14.5 前端 newBrokerRow / groupStocks / flattenStocks 支援新欄位
+- [x] 14.5 前端 newBrokerRow / groupStocks / flattenStocks 支援新欄位
 
-- [ ] 14.6 台股 broker row 表格加入「買/賣」與「交易日期」欄位
+- [x] 14.6 台股 broker row 表格加入「買/賣」與「交易日期」欄位
 
-- [ ] 14.7 美股 broker row 表格加入「買/賣」與「交易日期」欄位；日期選定後自動抓取歷史匯率
+- [x] 14.7 美股 broker row 表格加入「買/賣」與「交易日期」欄位；日期選定後自動抓取歷史匯率
 
-- [ ] 14.8 成本計算改用 transactionExchangeRate（優先）或 form.usdExchangeRate（備援）
+- [x] 14.8 成本計算改用 transactionExchangeRate（優先）或 form.usdExchangeRate（備援）；美股持股成本依幣別顯示（TWD/USD 各自彙總）
 
 ---
 
@@ -558,95 +562,95 @@
 
 #### Steps:
 
-- [ ] 17.1 實作後端 `ExcelExportService`
+- [x] 17.1 實作後端 `ExcelExportService`
   - 使用 Apache POI 產生 `.xlsx`
   - 以工作表名稱（YYYYMMDD）對應快照日期
   - 涵蓋銀行存款、股票持倉、基金持倉工作表
 
-- [ ] 17.2 新增 `GET /api/snapshots/export` 或 `POST /api/snapshots/export` endpoint
+- [x] 17.2 新增 `GET /api/snapshots/export` 與 `GET /api/realized-gains/export` endpoint
   - 回傳 `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`
 
-- [ ] 17.3 前端 SnapshotListView 新增「匯出 Excel」按鈕
+- [x] 17.3 前端「資產快照」、「歷年資產」、「已實現損益」頁面新增「匯出 Excel」按鈕
   - 觸發檔案下載
 
 ### Task 18: 股票走勢圖 Popup 延伸（ETF 持股明細 + 股利歷史）
 
-- [ ] 18.1 後端：`MarketDataService` 新增 ETF 判斷工具方法
+- [x] 18.1 後端：`MarketDataService` 新增 ETF 判斷工具方法
   - 台股：code 以 `00` 開頭
   - 美股：白名單常數（VOO / VT / AVGO / VGT / QQQ / SPY … 可擴充）
 
-- [ ] 18.2 後端：新增 `GET /api/market-data/etf-holdings?code=&market=`
+- [x] 18.2 後端：新增 `GET /api/market-data/etf-holdings?code=&market=`
   - 台股：呼叫 FinMind `TaiwanETFHoldings`；回傳成分股（代號、名稱、持股比例、股數）
   - 美股：回 `{ supported: false }` 提示尚未支援
   - 失敗時回空清單 + 錯誤訊息，不丟 500
 
-- [ ] 18.3 後端：新增 `GET /api/market-data/dividends?code=&market=&years=10`
+- [x] 18.3 後端：新增 `GET /api/market-data/dividends?code=&market=&years=10`
   - 台股：FinMind `TaiwanStockDividend`，取最近 N 年；欄位含年度、現金股利、股票股利、除息日
   - 美股：NASDAQ `/api/quote/{code}/dividends`
   - 當年殖利率以當前股價概估（optional）
 
-- [ ] 18.4 前端：DashboardView Popup 加入 `el-tabs`
+- [x] 18.4 前端：DashboardView Popup 加入 `el-tabs`
   - 頁籤：走勢圖（預設）、持股明細（僅 ETF 顯示）、股利歷史
   - `isEtf(row)` 以代號規則判斷；走勢圖邏輯維持不動
 
-- [ ] 18.5 前端：持股明細頁籤呼叫新 API，以 `el-table` 顯示成分股
-- [ ] 18.6 前端：股利歷史頁籤以 `el-table` 顯示 10 年股利
+- [x] 18.5 前端：持股明細頁籤呼叫新 API，以 `el-table` 顯示成分股
+- [x] 18.6 前端：股利歷史頁籤以 `el-table` 顯示 10 年股利
 
 ### Task 19: 觀察股票清單
 
-- [ ] 19.1 後端：擴充 `stock_price` 與 `StockPrice` 實體，新增 buy_price / sell_price / open_price / previous_close / high_price / low_price / volume 欄位
+- [x] 19.1 後端：擴充 `stock_price` 與 `StockPrice` 實體，新增 buy_price / sell_price / open_price / previous_close / high_price / low_price / volume 欄位
   - Liquibase migration `v1.9.0-stock-price-quote-fields.sql`
 
-- [ ] 19.2 後端：擴充 `MarketDataService.PriceResult` 與 TWSE / NASDAQ / Yahoo 解析邏輯，補齊買賣/開盤/昨收/最高/最低/成交量
+- [x] 19.2 後端：擴充 `MarketDataService.PriceResult` 與 TWSE / NASDAQ / Yahoo 解析邏輯，補齊買賣/開盤/昨收/最高/最低/成交量
   - 台股 TWSE mis API：a/b（五檔賣/買）、o（開盤）、y（昨收）、h（最高）、l（最低）、v（成交量，張）
   - 美股 NASDAQ info API：openPrice、previousClosePrice、bidPrice、askPrice、dayHighLow、volume
   - Yahoo Finance fallback：summaryDetail.bid / ask / open / previousClose / dayHigh / dayLow / regularMarketVolume
 
-- [ ] 19.3 後端：`StockPriceService.updatePrices` 將新欄位一併寫入快取
+- [x] 19.3 後端：`StockPriceService.updatePrices` 將新欄位一併寫入快取
 
-- [ ] 19.4 後端：新增 `WatchStock` 實體 + Repository + Service + Controller
+- [x] 19.4 後端：新增 `WatchStock` 實體 + Repository + Service + Controller
   - Liquibase migration `v1.9.1-watch-stock.sql` 建立 `watch_stock` 資料表（unique: stock_code + market）
   - Endpoints: `GET/POST/DELETE /api/watch-stocks`、`PUT /api/watch-stocks/reorder`
   - 列表回傳整合 StockPrice（報價欄位）與 StockAlert（最近一次觸發時間/股價/均線/KD）
   - 將觀察股票的代號併入 `StockPriceService.collectHeldStockCodes` 的更新範圍
 
-- [ ] 19.5 前端：新增 `views/WatchStockView.vue`、route `/watch-stocks`、左側選單 `觀察股票`
+- [x] 19.5 前端：新增 `views/WatchStockView.vue` 與 `views/StockMonitorView.vue`，route `/stocks`（含 `tab` query），舊路徑 `/watch-stocks`、`/stock-alerts` 自動 redirect；左側選單 `股票觀察`
   - 台股 / 美股 兩個頁籤
   - 欄位：股名/股號、股價、漲跌、漲跌幅(%)、買進、賣出、開盤、昨收、最高、最低、成交量(張)、警示
-  - 支援 sortablejs 拖曳排序、新增/刪除（含確認對話框）、自動帶股名（沿用 `/api/stock-alerts/lookup-name`）
+  - 支援 sortablejs 拖曳排序（拖拉欄位置於最左邊）、新增/刪除（含確認對話框）、自動帶股名（沿用 `/api/stock-alerts/lookup-name`）
 
 ### Task 20: 資料庫備份／還原（UI 介面）
 
 對應 Requirements: 15
 前置任務: `scripts/backup.sh` 已就緒、host 端 `gdrive-crypt` rclone remote 已設定完成
 
-- [ ] 20.1 基礎建設：`backend/Dockerfile` 加裝 `postgresql-client` 與 `rclone`
+- [x] 20.1 基礎建設：`backend/Dockerfile` 加裝 `postgresql-client` 與 `rclone`
   - 在 runtime stage（alpine）加 `RUN apk add --no-cache postgresql16-client rclone`
   - 確認 `pg_dump --version` 主版號需與 PostgreSQL server 一致（16）
   - rebuild backend image：`docker compose build business-services`
 
-- [ ] 20.2 基礎建設：`docker-compose.yml` 在 `business-services` 加掛載
+- [x] 20.2 基礎建設：`docker-compose.yml` 在 `business-services` 加掛載
   ```yaml
   volumes:
     - ${HOME}/.config/rclone:/root/.config/rclone:ro
   ```
   驗證：`docker exec asset-business-services rclone lsd gdrive-crypt:` 應正常列出資料夾
 
-- [ ] 20.3 後端：新增 `BackupController` (`/api/backups`)，三個 endpoint：
+- [x] 20.3 後端：新增 `BackupController` (`/api/backups`)，三個 endpoint：
   - `POST /api/backups` 立即備份
   - `GET /api/backups` 列出所有備份（合併四個資料夾、依時間新→舊排序）
   - `POST /api/backups/restore` 還原（body: folder / filename / confirmation）
 
-- [ ] 20.4 後端：新增 `BackupService`，封裝 ProcessBuilder 呼叫
+- [x] 20.4 後端：新增 `BackupService`，封裝 ProcessBuilder 呼叫
   - `runBackup(boolean isAutoPreRestore)`：pg_dump → rclone copy → 輪替（保留 5 份；自救點不計入）
   - `listBackups()`：對 manual/daily/weekly/monthly 各執行 `rclone lsjson --files-only`，合併後依 ModTime 排序
   - `runRestore(folder, filename)`：先呼叫 `runBackup(true)` 建自救點 → rclone copy 下載 → pg_restore --clean --if-exists
   - 所有指令參數白名單化，不接受使用者輸入拼接
   - 失敗時拋 `BackupException`，由 ControllerAdvice 統一格式
 
-- [ ] 20.5 後端：新增 `dto.BackupItem` record，欄位：folder / filename / sizeBytes / modifiedAt / isAutoPreRestore
+- [x] 20.5 後端：新增 `dto.BackupItem` record，欄位：folder / filename / sizeBytes / modifiedAt / isAutoPreRestore
 
-- [ ] 20.6 前端：新增 `views/BackupRestoreView.vue`
+- [x] 20.6 前端：新增 `views/BackupRestoreView.vue`
   - 上半部「立即備份」：按鈕 + 最近一次手動備份結果顯示
   - 下半部「還原資料」：`el-table` 列出所有備份，欄位 folder / filename / 備份時間 / 檔案大小，預設「新→舊」
   - 每列「還原」按鈕 → 開啟 `el-dialog`，需於 input 內輸入「確認還原」字樣，按鈕才 enable
@@ -654,16 +658,54 @@
   - 還原成功後 `ElMessage.success` + `setTimeout(() => location.reload(), 1500)`
   - 失敗時顯示後端回傳的錯誤訊息
 
-- [ ] 20.7 前端：`router/index.js` 加 route `/settings/backup-restore`，`App.vue` 系統設定子選單追加項目「備份/還原 資料」
+- [x] 20.7 前端：`router/index.js` 加 route `/settings/backup-restore`，`App.vue` 系統設定子選單追加項目「備份/還原 資料」
 
-- [ ] 20.8 前端：`api/index.js` 新增 `backupApi`：
+- [x] 20.8 前端：`api/index.js` 新增 `backupApi`：
   - `list()` → `GET /api/backups`
   - `create()` → `POST /api/backups`
   - `restore({folder, filename, confirmation})` → `POST /api/backups/restore`
   - 為 `create` / `restore` 拉長 axios timeout 至 120 秒（pg_dump + pg_restore 可能需時）
 
-- [ ] 20.9 整合測試：
+- [x] 20.9 整合測試：
   - 手動備份 → 到 Google Drive 確認 `manual/` 多一份加密檔
   - 連續備份 6 次 → 確認最舊一份被刪、保留 5 份
   - 還原 → 確認 `manual/` 多一份 `auto-pre-restore_*` 自救點、目前 DB 資料被覆蓋為所選備份內容
   - 還原進行中前端遮罩生效、完成後自動 reload
+
+---
+
+### Task 21: 到價警示（Stock Alerts）
+
+**對應 Requirements:** Requirement 16
+
+#### Steps:
+
+- [x] 21.1 後端：新增 `StockAlert` 實體 + Repository + Service + Controller
+  - 欄位：id、stockCode、stockName、market、condition（價格門檻、均線、KD 等）、active、displayOrder、lastTriggeredAt、lastTriggeredPrice、lastTriggeredMa、lastTriggeredKd
+  - Liquibase migration 建立 `stock_alert` 資料表
+
+- [x] 21.2 後端：`StockAlertController` 端點
+  - `GET /api/stock-alerts`、`POST /api/stock-alerts`、`PUT /api/stock-alerts/{id}`、`DELETE /api/stock-alerts/{id}`
+  - `PATCH /api/stock-alerts/{id}/active`、`PUT /api/stock-alerts/reorder`
+  - `POST /api/stock-alerts/check`、`GET /api/stock-alerts/lookup-name`
+
+- [x] 21.3 前端：警示頁面整併進 `StockMonitorView.vue`「警示條件」頁籤（路徑 `/stocks?tab=alerts`，舊路徑 `/stock-alerts` 自動 redirect）
+
+---
+
+### Task 22: 待轉入資金類型設定管理（TransitFundType）
+
+**對應 Requirements:** Requirement 17
+
+#### Steps:
+
+- [x] 22.1 後端：新增 `TransitFundType` 實體 + Repository
+  - 欄位：id、code（唯一）、displayName、sortOrder、active
+
+- [x] 22.2 後端：`InstitutionService` 擴充 + `InstitutionController` 端點
+  - `GET /api/settings/transit-fund-types`、`GET /api/settings/transit-fund-types/active`
+  - `POST`、`PUT /{id}`、`PATCH /{id}/active`
+
+- [x] 22.3 後端：Seed Data（`DataInitializer`）建立預設待轉入資金類型
+
+- [x] 22.4 前端：新增 `TransitFundTypeSettingsView.vue`，左側「系統設定」追加項目

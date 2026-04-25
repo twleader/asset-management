@@ -85,7 +85,7 @@
 - [ ] 依年度彙總損益並計算獲利率
 - [ ] 列表可依年度篩選
 - [ ] 支援手動新增、編輯、刪除交易記錄
-- [ ] 支援從 Excel 批次匯入
+- [ ] 支援匯出 Excel（見 Requirement 5；批次匯入功能已停用）
 
 ### Requirement 7: 市場資料整合
 
@@ -196,9 +196,9 @@
 
 **Acceptance Criteria:**
 
-- [ ] 左側導覽選單新增「觀察股票」項目，路徑 `/watch-stocks`
+- [ ] 左側導覽選單新增「股票觀察」項目，路徑 `/stocks`（內含「觀察清單」、「警示條件」兩個頁籤；舊路徑 `/watch-stocks`、`/stock-alerts` 自動 redirect 並帶 `tab` query）
 - [ ] 頁面提供「台股」、「美股」兩個頁籤，依市場分流顯示
-- [ ] 觀察清單為獨立資料表（`watch_stock`），可手動新增、刪除、拖曳排序
+- [ ] 觀察清單為獨立資料表（`watch_stock`），可手動新增、刪除、拖曳排序（拖拉欄置於最左邊）
 - [ ] 每列顯示欄位：股名/股號、股價、漲跌、漲跌幅(%)、買進、賣出、開盤、昨收、最高、最低、成交量(張)、警示（觸發時間/股價/均線/KD）
 - [ ] 「警示」欄取自 `stock_alert` 中該檔股票最近一筆 `lastTriggeredAt`，呈現觸發時間、觸發價、均線值、KD 值
 - [ ] 報價來源 `StockPrice` 擴充欄位：buyPrice（買進）、sellPrice（賣出）、openPrice（開盤）、previousClose（昨收）、highPrice（最高）、lowPrice（最低）、volume（成交量，台股為張）
@@ -226,3 +226,31 @@
 - [ ] 還原完成後自動重新載入頁面（HikariCP 會自動重連 PostgreSQL）
 - [ ] 備份／還原失敗時顯示錯誤訊息（含後端 stderr 訊息摘要），不直接拋 500
 - [ ] 後端需透過 `ProcessBuilder` 呼叫 `pg_dump` / `pg_restore` / `rclone`，相關工具透過 Dockerfile 安裝、rclone 設定檔以 read-only volume 從 host 掛入
+
+---
+
+### Requirement 16: 到價警示（Stock Alerts）
+
+**User Story:** 作為使用者，我希望能設定股票的到價警示（價格門檻、均線、KD 等），系統定期檢查並記錄最近一次觸發資訊，於股票觀察頁面彙總顯示。
+
+**Acceptance Criteria:**
+
+- [x] 警示資料儲存於獨立資料表 `stock_alert`，欄位含股票代號、名稱、市場、條件、啟用狀態、顯示排序、最近觸發時間/股價/均線/KD
+- [x] 警示頁面整併進股票觀察頁（路徑 `/stocks?tab=alerts`，舊路徑 `/stock-alerts` 自動 redirect）
+- [x] 提供新增、編輯、刪除、啟用/停用、拖曳排序、手動觸發檢查
+- [x] 觀察股票列表（Requirement 14）顯示對應股票最近一次觸發資訊
+- [x] 提供 `GET /api/stock-alerts/lookup-name` 由代號自動帶名稱（觀察股票與警示新增表單共用）
+
+---
+
+### Requirement 17: 待轉入資金類型設定管理
+
+**User Story:** 作為使用者，我希望「待轉入資金類型」也能由資料庫管理，能在系統介面中新增、編輯、停用，不寫死於程式碼。
+
+**Acceptance Criteria:**
+
+- [x] 待轉入資金類型有獨立資料表，不以 Enum 寫死
+- [x] 每個類型有識別代碼（code，唯一）、顯示名稱、顯示排序、啟用狀態
+- [x] 使用者可新增、編輯、停用，停用後不出現於下拉選單但歷史資料仍正常顯示
+- [x] 系統提供預設 Seed Data（`DataInitializer`）
+- [x] 前端新增 `/settings/transit-fund-types` 設定頁面

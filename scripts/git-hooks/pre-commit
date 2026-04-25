@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+#
+# SDD pre-commit hook — 強制 spec 與 code 同步
+#
+# 規則：當 staged 變更觸及「會改變功能或契約」的檔案時，
+#       同一 commit 必須也包含 spec/ 下的修改。
+#
+# 觸發路徑：
+#   - backend/src/main/java/**/controller/*.java   （API 端點）
+#   - backend/src/main/java/**/model/*.java        （Entity / 欄位）
+#   - backend/src/main/java/**/dto/*.java          （API 契約）
+#   - frontend/src/views/*.vue                     （頁面）
+#   - frontend/src/router/**                       （路由）
+#   - db/changelog/**                              （Schema）
+#   - bff/src/main/java/**                         （BFF 路由 / 聚合）
+#
+# 例外（不阻擋）：
+#   - commit 訊息含 [skip-spec]（真正的 bug fix / 樣式調整）
+#   - git commit --no-verify
+#
+# 安裝：
+#   git config core.hooksPath scripts/git-hooks
+#
+
+set -euo pipefail
+
+# 取得 staged 的檔案（A=新增, M=修改, R=改名）
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+
+# 沒有任何 staged 檔（空 commit 等）—— 放行
+[ -z "$staged" ] && exit 0
+
+# 偵測是否觸及「需要 spec 同步」的檔案
+trigger=$(echo "$staged" | grep -E \
+  -e '^backend/src/main/java/.*/controller/.*\.java$' \
+  -e '^backend/src/main/java/.*/model/.*\.java$' \
+  -e '^backend/src/main/java/.*/dto/.*\.java$' \
+  -e '^frontend/src/views/.*\.vue$' \
+  -e '^frontend/src/router/' \
+  -e '^db/changelog/' \
+  -e '^bff/src/main/java/' \
+  || true)
+
+[ -z "$trigger" ] && exit 0
+
+# 是否有 spec/ 變更
+spec_changed=$(echo "$staged" | grep -E '^spec/' || true)
+
+if [ -n "$spec_changed" ]; then
+  exit 0
+fi
+
+# 檢查 commit 訊息是否標註 [skip-spec]
+# pre-commit 階段尚未產生 commit message，需從 -m 參數或 COMMIT_EDITMSG 推斷
+msg_file="$(git rev-parse --git-path COMMIT_EDITMSG)"
+if [ -f "$msg_file" ] && grep -qF '[skip-spec]' "$msg_file"; then
+  exit 0
+fi
+
+# === 阻擋並說明 ===
+cat >&2 <<EOF
+✗ SDD 檢查未通過：偵測到功能性變更，但 spec/ 未同步更新
+
+下列 staged 檔案屬於「會改變功能或契約」的範圍：
+$(echo "$trigger" | sed 's/^/    /')
+
+依 CLAUDE.md 規範，新增 Entity / API endpoint / 頁面 / 業務邏輯
+必須先更新 spec：
+    1. spec/requirements.md  → User Story + Acceptance Criteria
+    2. spec/design.md        → 架構 / 資料模型 / API
+    3. spec/tasks.md         → Task 與完成狀態
+
+如何處理：
+    A. 補上 spec/ 變更 → git add spec/... → 重新 commit
+    B. 若這次確實只是 bug fix / 樣式調整：
+       git commit -m '[skip-spec] 你的訊息'
+    C. 緊急情況：git commit --no-verify（請審慎使用）
+
+EOF
+
+exit 1

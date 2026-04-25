@@ -55,7 +55,7 @@ com.steven.assets/
 - Spring Cloud Gateway：所有 `/api/*` 路由至 Backend
 - `DashboardBffController`：`GET /api/bff/dashboard/summary`（並行聚合儀表板資料）
 
-**Repository 層**（Spring Data JPA，共 13 個）
+**Repository 層**（Spring Data JPA，共 16 個）
 - `AssetSnapshotRepository`
 - `StockHoldingRepository`
 - `FundHoldingRepository`
@@ -63,12 +63,15 @@ com.steven.assets/
 - `RealizedGainRepository`
 - `StockPriceRepository`
 - `StockPriceHistoryRepository`
+- `StockRepository`（股票主檔）
 - `ExchangeRateHistoryRepository`
 - `BankRepository`
 - `BrokerRepository`
 - `DepositTypeRepository`
 - `MarketTypeRepository`
-- `HolidayRepository`（假日快取）
+- `TransitFundTypeRepository`
+- `WatchStockRepository`
+- `StockAlertRepository`
 
 ### Frontend Architecture (Vue 3)
 
@@ -82,6 +85,12 @@ src/
 ├── components/          # Reusable components (TaiwanMap, UsaMap)
 └── views/               # Page-level components (12 views)
 ```
+
+**Service 層補充**
+- `BackupService`: 透過 ProcessBuilder 呼叫 pg_dump / pg_restore / rclone，支援手動備份、列表（合併 manual/daily/weekly/monthly 四個資料夾）、還原（自動先建自救點）
+- `WatchStockService`: 觀察股票 CRUD、拖曳排序、整合 StockPrice 報價與 StockAlert 觸發資訊
+- `StockAlertService`: 到價警示 CRUD、條件評估、排序、最近觸發資訊回寫
+- `ExcelExportService`: Apache POI 產生快照與已實現損益的 .xlsx 匯出檔
 
 **State Management (Pinia)**
 - `assetStore`: 持有快照列表、當前快照、載入狀態
@@ -104,6 +113,8 @@ src/
 | `/settings/brokers` | BrokerSettingsView | 券商設定管理 |
 | `/settings/deposit-types` | DepositTypeSettingsView | 存款類型設定管理 |
 | `/settings/market-types` | MarketTypeSettingsView | 市場類型設定管理 |
+| `/settings/transit-fund-types` | TransitFundTypeSettingsView | 待轉入資金類型設定管理 |
+| `/settings/backup-restore` | BackupRestoreView | 資料庫備份／還原 |
 | `/stocks` | StockMonitorView | 股票觀察（含「觀察清單」、「警示條件」兩個頁籤；舊路徑 `/watch-stocks`、`/stock-alerts` 自動 redirect 並帶 `tab` query） |
 
 ## Data Model
@@ -124,6 +135,8 @@ StockPriceHistory     (歷史股價紀錄)
 ExchangeRateHistory   (歷史匯率紀錄)
 DepositTypeEntity     (存款類型主檔，code 值存入 BankDeposit.depositType)
 MarketType            (市場類型主檔，code 值存入 StockHolding.market)
+TransitFundType       (待轉入資金類型主檔)
+StockAlert            (到價警示，獨立資料表；WatchStock 列表彙總其最近觸發資訊)
 ```
 
 ### Core Entities
@@ -278,6 +291,30 @@ MarketType            (市場類型主檔，code 值存入 StockHolding.market)
 
 > Unique constraint：(stockCode, market)。觀察清單中的股票會被併入排程更新；報價直接查 `StockPrice`，警示資訊則彙總自 `StockAlert`。
 
+#### StockAlert（新增）
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| id | Long | PK |
+| stockCode | String | 股票代號 |
+| stockName | String | 股票名稱 |
+| market | String | 市場代碼（台股/美股） |
+| condition | String/JSON | 觸發條件（價格門檻、均線、KD 等） |
+| active | Boolean | 是否啟用 |
+| displayOrder | Integer | 拖曳排序 |
+| lastTriggeredAt | LocalDateTime | 最近一次觸發時間 |
+| lastTriggeredPrice | BigDecimal | 觸發時股價 |
+| lastTriggeredMa | BigDecimal | 觸發時均線值 |
+| lastTriggeredKd | BigDecimal | 觸發時 KD 值 |
+
+#### TransitFundType（新增）
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| id | Long | PK |
+| code | String | 識別代碼（唯一） |
+| displayName | String | 顯示名稱 |
+| sortOrder | Integer | 顯示排序 |
+| active | Boolean | 是否啟用（軟刪除用） |
+
 > **設計決策（零遷移策略）：** `Bank`/`Broker`/`DepositType`/`MarketType` 全部改為資料庫 Entity，不使用任何 Enum。原 `@Enumerated(EnumType.STRING)` 欄位已以 VARCHAR 儲存 Enum 名稱，改為 `String` 欄位時無需資料庫 Migration，現有資料值（如 `"台股"`、`"活存"`）完全相容。`DepositTypeEntity.code` 與 `MarketType.code` 即為寫入欄位的值，與歷史資料對應。
 
 ## API Design
@@ -296,20 +333,25 @@ GET    /api/snapshots/{id}                         # 取得快照明細
 PUT    /api/snapshots/{id}                         # 更新快照
 DELETE /api/snapshots/{id}                         # 刪除快照
 GET    /api/snapshots/history                      # 資產歷史趨勢
-POST   /api/snapshots/import                       # Excel 批次匯入（含同日期自動覆蓋）
+GET    /api/snapshots/export                       # Excel 批次匯出
 PATCH  /api/snapshots/{id}/dividend-rates          # 回寫指定快照配息率
 PATCH  /api/snapshots/{id}/stock-order             # 更新持倉顯示排序
 POST   /api/snapshots/enrich-all-dividend-rates    # 批次補齊所有快照缺漏配息率
 POST   /api/snapshots/recalc-dividends             # 重算所有快照預估配息（依現值×配息率）
+
+# Excel 批次匯入端點（POST /api/snapshots/import）已停用
 ```
 
 #### Realized Gains
 ```
-GET    /api/realized-gains               # 列出（依年度彙總，含明細）
-POST   /api/realized-gains               # 新增
-PUT    /api/realized-gains/{id}          # 更新
-DELETE /api/realized-gains/{id}          # 刪除
-POST   /api/realized-gains/import        # 從獨立 Excel 匯入已實現損益
+GET    /api/realized-gains                       # 列出（依年度彙總，含明細）
+POST   /api/realized-gains                       # 新增
+PUT    /api/realized-gains/{id}                  # 更新
+DELETE /api/realized-gains/{id}                  # 刪除
+POST   /api/realized-gains/fix-currency-to-twd   # 資料修正工具：將舊紀錄缺漏 currency 欄補為 TWD
+GET    /api/realized-gains/export                # Excel 匯出（單獨損益 sheet）
+
+# Excel 批次匯入端點（POST /api/realized-gains/import）已停用
 ```
 
 #### Market Data
@@ -381,6 +423,27 @@ GET    /api/settings/market-types               # 列出所有市場類型（含
 POST   /api/settings/market-types              # 新增市場類型
 PUT    /api/settings/market-types/{id}         # 更新市場類型
 PATCH  /api/settings/market-types/{id}/active  # 啟用/停用市場類型
+```
+
+#### Settings - Transit Fund Types（新增）
+```
+GET    /api/settings/transit-fund-types               # 列出所有待轉入資金類型（含停用）
+GET    /api/settings/transit-fund-types/active        # 僅列出啟用中
+POST   /api/settings/transit-fund-types              # 新增
+PUT    /api/settings/transit-fund-types/{id}         # 更新
+PATCH  /api/settings/transit-fund-types/{id}/active  # 啟用/停用
+```
+
+#### Stock Alerts（到價警示，新增）
+```
+GET    /api/stock-alerts                  # 列出所有警示（含最近觸發資訊）
+POST   /api/stock-alerts                  # 新增警示
+PUT    /api/stock-alerts/{id}             # 更新
+DELETE /api/stock-alerts/{id}             # 刪除
+PATCH  /api/stock-alerts/{id}/active      # 啟用/停用
+PUT    /api/stock-alerts/reorder          # 拖曳排序（body: ordered ids）
+POST   /api/stock-alerts/check            # 手動觸發檢查
+GET    /api/stock-alerts/lookup-name      # 以股票代號查名稱（前端共用）
 ```
 
 #### Exchange Rate History（新增）
@@ -526,7 +589,7 @@ location / {
 
 | 軌道 | 觸發 | 目的 | 儲存位置 | 保留 |
 |------|------|------|---------|------|
-| 排程備份（既有） | host 端 launchd 每日 05:00 | 災難復原 | `gdrive-crypt:backups/{daily,weekly,monthly}/` | 7 / 4 / 6 |
+| 排程備份（既有） | host 端 launchd 每日 05:00 | 災難復原 | `gdrive-crypt:backups/{daily,weekly,monthly}/` | 15 / 4 / 6 |
 | 手動備份（新增） | UI 按鈕觸發 | 排程失敗時補救、還原前自救點 | `gdrive-crypt:backups/manual/` | 5（自救點不計入） |
 
 還原來源涵蓋四個資料夾，使用者可從任一備份點還原。
