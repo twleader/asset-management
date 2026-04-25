@@ -165,15 +165,19 @@ public class MarketDataService {
             Optional<PriceResult> nasdaq = getNasdaqPrice(stockCode);
             if (nasdaq.isPresent()) {
                 PriceResult r = nasdaq.get();
-                // NASDAQ 拿到價格但無公司名稱時，去 Yahoo 補名稱
-                if (r.stockName() == null || r.stockName().isBlank()) {
-                    String name = getYahooPrice(stockCode, stockCode, market)
-                            .map(PriceResult::stockName)
-                            .filter(n -> n != null && !n.isBlank())
-                            .orElse(null);
+                // NASDAQ 沒有五檔（buy/sell）也常缺 stockName，必要時呼叫 Yahoo 補齊
+                boolean needName = r.stockName() == null || r.stockName().isBlank();
+                boolean needBidAsk = r.buyPrice() == null || r.sellPrice() == null;
+                if (needName || needBidAsk) {
+                    Optional<PriceResult> y = getYahooPrice(stockCode, stockCode, market);
+                    String name = needName
+                            ? y.map(PriceResult::stockName).filter(n -> n != null && !n.isBlank()).orElse(null)
+                            : r.stockName();
+                    BigDecimal bid = needBidAsk ? y.map(PriceResult::buyPrice).orElse(null)  : r.buyPrice();
+                    BigDecimal ask = needBidAsk ? y.map(PriceResult::sellPrice).orElse(null) : r.sellPrice();
                     return new PriceResult(r.stockCode(), r.market(), r.price(), r.change(), r.changePct(),
                             r.source(), name,
-                            r.buyPrice(), r.sellPrice(), r.openPrice(), r.previousClose(),
+                            bid, ask, r.openPrice(), r.previousClose(),
                             r.highPrice(), r.lowPrice(), r.volume());
                 }
                 return r;
