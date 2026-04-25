@@ -18,7 +18,7 @@ BACKUP_DIR="/Users/steven/Backups/asset-management"
 REMOTE="gdrive-crypt:backups"
 LOG_FILE="/Users/steven/Library/Logs/asset-management-backup.log"
 
-RETENTION_DAILY=7      # 每日備份保留 7 天
+RETENTION_DAILY=15     # 每日備份保留 15 天
 RETENTION_WEEKLY=4     # 每週備份保留 4 週
 RETENTION_MONTHLY=6    # 每月備份保留 6 個月
 RETENTION_LOCAL=3      # 本地保留 3 天作為快速還原
