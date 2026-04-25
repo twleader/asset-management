@@ -19,9 +19,7 @@
         <div style="display:flex;align-items:center;justify-content:space-between">
           <span class="section-title">{{ selectedYear ? selectedYear + ' 年已實現損益明細' : '已實現損益明細' }}</span>
           <div style="display:flex;gap:8px">
-            <el-upload :show-file-list="false" :before-upload="handleImport" accept=".xlsx" style="display:inline-block">
-              <el-button size="small" :icon="Upload" :loading="importing">匯入 Excel</el-button>
-            </el-upload>
+            <el-button size="small" :icon="Download" :loading="exporting" @click="handleExport">匯出 Excel</el-button>
             <el-button type="primary" size="small" :icon="Plus" @click="openCreateDialog">新增</el-button>
           </div>
         </div>
@@ -233,8 +231,9 @@
 </template>
 
 <script setup>
-import { Plus, Edit, Delete, Upload } from '@element-plus/icons-vue'
+import { Plus, Edit, Delete, Download } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import dayjs from 'dayjs'
 import { useAssetStore } from '@/stores/assetStore'
 import { gainApi, institutionApi } from '@/api'
 
@@ -242,7 +241,7 @@ const store = useAssetStore()
 const brokerOptions = ref([])
 const dialogVisible = ref(false)
 const saving = ref(false)
-const importing = ref(false)
+const exporting = ref(false)
 const selectedYear = ref(null)
 const editingId = ref(null)
 
@@ -353,16 +352,20 @@ const resetForm = () => {
   })
 }
 
-const handleImport = async (file) => {
-  importing.value = true
+async function handleExport() {
+  exporting.value = true
   try {
-    const result = await store.importRealizedGains(file)
-    ElMessage.success(`匯入完成：${result.imported} 筆損益`)
-    if (result.errors?.length) result.errors.forEach(e => ElMessage.warning(e))
+    const blob = await gainApi.exportExcel()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `已實現損益_${dayjs().format('YYYYMMDD')}.xlsx`
+    document.body.appendChild(a); a.click(); document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    ElMessage.success('匯出完成')
   } finally {
-    importing.value = false
+    exporting.value = false
   }
-  return false
 }
 
 const openCreateDialog = () => {

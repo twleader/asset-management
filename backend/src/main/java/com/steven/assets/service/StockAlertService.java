@@ -26,6 +26,7 @@ public class StockAlertService {
     private final StockAlertRepository alertRepo;
     private final StockPriceRepository priceRepo;
     private final StockPriceHistoryRepository historyRepo;
+    private final TechnicalIndicatorService indicatorService;
 
     // ===== CRUD =====
 
@@ -234,6 +235,14 @@ public class StockAlertService {
         r.setLastTriggeredMaValue(a.getLastTriggeredMaValue());
         r.setLastTriggeredKdValue(a.getLastTriggeredKdValue());
         r.setLastTriggeredDValue(a.getLastTriggeredDValue());
+        // 觸發後展開時，連帶提供當前技術指標（季線、K、D）
+        if (a.getLastTriggeredAt() != null) {
+            TechnicalIndicatorService.Indicators ind =
+                    indicatorService.compute(a.getStockCode(), a.getMarket());
+            r.setQuarterlyMa(ind.quarterlyMa());
+            r.setKValue(ind.k());
+            r.setDValue(ind.d());
+        }
         r.setCreatedAt(a.getCreatedAt());
         r.setConditionLabel(buildLabel(a));
         return r;

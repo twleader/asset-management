@@ -434,7 +434,8 @@
               <el-button size="small" :icon="Plus" @click="addStock('台股')">新增台股</el-button>
             </div>
 
-            <el-table ref="twStockTableRef" :data="twStocks" size="small" row-key="_rowId" stripe>
+            <el-table ref="twStockTableRef" :data="twStocks" size="small" row-key="_rowId" stripe
+              @row-dblclick="onStockDblClick">
               <el-table-column width="36" align="center">
                 <template #default>
                   <el-icon class="stock-drag-handle" style="cursor:grab;color:#94a3b8"><Operation /></el-icon>
@@ -668,7 +669,8 @@
               <el-button size="small" :icon="Plus" @click="addStock('美股')">新增美股</el-button>
             </div>
 
-            <el-table ref="usStockTableRef" :data="usStocks" size="small" row-key="_rowId" stripe>
+            <el-table ref="usStockTableRef" :data="usStocks" size="small" row-key="_rowId" stripe
+              @row-dblclick="onStockDblClick">
               <el-table-column width="36" align="center">
                 <template #default>
                   <el-icon class="stock-drag-handle" style="cursor:grab;color:#94a3b8"><Operation /></el-icon>
@@ -1040,6 +1042,8 @@
         </el-button>
       </div>
     </el-form>
+
+    <StockAnalysisDialog v-model="analysisVisible" :stock="analysisStock" :usd-rate="form.usdExchangeRate" />
   </div>
 </template>
 
@@ -1050,6 +1054,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useAssetStore } from '@/stores/assetStore'
 import { marketDataApi, institutionApi, snapshotApi } from '@/api/index'
 import TaiwanMap from '@/components/TaiwanMap.vue'
+import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
 import UsaMap from '@/components/UsaMap.vue'
 import Sortable from 'sortablejs'
 
@@ -1393,6 +1398,21 @@ const fundTotalProfit  = computed(() => fundTotalValue.value - fundTotalInvest.v
 // ===== Computed: filtered stock groups =====
 const twStocks = computed(() => form.stocks.filter(s => s.market === '台股'))
 const usStocks = computed(() => form.stocks.filter(s => s.market === '美股'))
+
+// 雙擊持股 → 開啟股票分析 dialog
+const analysisVisible = ref(false)
+const analysisStock = ref(null)
+function onStockDblClick(row) {
+  if (!row?.stockCode) return
+  analysisStock.value = {
+    stockCode: row.stockCode,
+    stockName: row.stockName,
+    market: row.market,
+    shares: row.shares,
+    investmentCost: row.investmentCost
+  }
+  analysisVisible.value = true
+}
 
 const calcGroupedSummary = (stocks) => {
   let cost = 0, value = 0, dividend = 0

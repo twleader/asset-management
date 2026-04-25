@@ -24,17 +24,11 @@ export const snapshotApi = {
   update: (id, data) => api.put(`/snapshots/${id}`, data),
   delete: (id) => api.delete(`/snapshots/${id}`),
   getHistory: () => api.get('/snapshots/history'),
-  importExcel: (file) => {
-    const form = new FormData()
-    form.append('file', file)
-    return api.post('/snapshots/import', form, {
-      headers: { 'Content-Type': 'multipart/form-data' }
-    })
-  },
   updateDividendRates: (id, rates) => api.patch(`/snapshots/${id}/dividend-rates`, rates),
   updateStockOrder: (id, orders) => api.patch(`/snapshots/${id}/stock-order`, orders),
   enrichAllDividendRates: () => api.post('/snapshots/enrich-all-dividend-rates'),
-  recalcDividends: () => api.post('/snapshots/recalc-dividends')
+  recalcDividends: () => api.post('/snapshots/recalc-dividends'),
+  exportExcel: () => api.get('/snapshots/export', { responseType: 'blob' })
 }
 
 // ===== Institution Settings (Banks, Brokers, DepositTypes, MarketTypes) =====
@@ -73,13 +67,7 @@ export const gainApi = {
   create: (data) => api.post('/realized-gains', data),
   update: (id, data) => api.put(`/realized-gains/${id}`, data),
   delete: (id) => api.delete(`/realized-gains/${id}`),
-  importExcel: (file) => {
-    const form = new FormData()
-    form.append('file', file)
-    return api.post('/realized-gains/import', form, {
-      headers: { 'Content-Type': 'multipart/form-data' }
-    })
-  }
+  exportExcel: () => api.get('/realized-gains/export', { responseType: 'blob' })
 }
 
 // ===== Market Data =====
@@ -116,6 +104,14 @@ export const marketDataApi = {
   getLiveAssets: () => api.get('/market-data/live-assets'),
   getExchangeRateOnDate: (currency, date) =>
     api.get('/market-data/exchange-rate/on-date', { params: { currency, date } })
+}
+
+// ===== Watch Stocks =====
+export const watchStockApi = {
+  getAll:   () => api.get('/watch-stocks'),
+  create:   (data) => api.post('/watch-stocks', data),
+  delete:   (id) => api.delete(`/watch-stocks/${id}`),
+  reorder:  (orderedIds) => api.put('/watch-stocks/reorder', orderedIds)
 }
 
 // ===== BFF Aggregated Endpoints =====

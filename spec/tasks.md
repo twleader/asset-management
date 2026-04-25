@@ -591,3 +591,26 @@
 
 - [ ] 18.5 前端：持股明細頁籤呼叫新 API，以 `el-table` 顯示成分股
 - [ ] 18.6 前端：股利歷史頁籤以 `el-table` 顯示 10 年股利
+
+### Task 19: 觀察股票清單
+
+- [ ] 19.1 後端：擴充 `stock_price` 與 `StockPrice` 實體，新增 buy_price / sell_price / open_price / previous_close / high_price / low_price / volume 欄位
+  - Liquibase migration `v1.9.0-stock-price-quote-fields.sql`
+
+- [ ] 19.2 後端：擴充 `MarketDataService.PriceResult` 與 TWSE / NASDAQ / Yahoo 解析邏輯，補齊買賣/開盤/昨收/最高/最低/成交量
+  - 台股 TWSE mis API：a/b（五檔賣/買）、o（開盤）、y（昨收）、h（最高）、l（最低）、v（成交量，張）
+  - 美股 NASDAQ info API：openPrice、previousClosePrice、bidPrice、askPrice、dayHighLow、volume
+  - Yahoo Finance fallback：summaryDetail.bid / ask / open / previousClose / dayHigh / dayLow / regularMarketVolume
+
+- [ ] 19.3 後端：`StockPriceService.updatePrices` 將新欄位一併寫入快取
+
+- [ ] 19.4 後端：新增 `WatchStock` 實體 + Repository + Service + Controller
+  - Liquibase migration `v1.9.1-watch-stock.sql` 建立 `watch_stock` 資料表（unique: stock_code + market）
+  - Endpoints: `GET/POST/DELETE /api/watch-stocks`、`PUT /api/watch-stocks/reorder`
+  - 列表回傳整合 StockPrice（報價欄位）與 StockAlert（最近一次觸發時間/股價/均線/KD）
+  - 將觀察股票的代號併入 `StockPriceService.collectHeldStockCodes` 的更新範圍
+
+- [ ] 19.5 前端：新增 `views/WatchStockView.vue`、route `/watch-stocks`、左側選單 `觀察股票`
+  - 台股 / 美股 兩個頁籤
+  - 欄位：股名/股號、股價、漲跌、漲跌幅(%)、買進、賣出、開盤、昨收、最高、最低、成交量(張)、警示
+  - 支援 sortablejs 拖曳排序、新增/刪除（含確認對話框）、自動帶股名（沿用 `/api/stock-alerts/lookup-name`）

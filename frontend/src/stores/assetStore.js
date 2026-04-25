@@ -61,13 +61,6 @@ export const useAssetStore = defineStore('asset', {
       await this.fetchSnapshots()
     },
 
-    async importExcel(file) {
-      const result = await snapshotApi.importExcel(file)
-      await this.fetchSnapshots()
-      await this.fetchRealizedGains()
-      return result
-    },
-
     async recalcDividends() {
       // Step 1: fetch missing dividend rates from market API
       await snapshotApi.enrichAllDividendRates()
@@ -88,10 +81,5 @@ export const useAssetStore = defineStore('asset', {
       await Promise.all([this.fetchRealizedGains(), this.fetchHistory()])
     },
 
-    async importRealizedGains(file) {
-      const result = await gainApi.importExcel(file)
-      await Promise.all([this.fetchRealizedGains(), this.fetchHistory()])
-      return result
-    }
   }
 })

@@ -104,6 +104,7 @@ src/
 | `/settings/brokers` | BrokerSettingsView | 券商設定管理 |
 | `/settings/deposit-types` | DepositTypeSettingsView | 存款類型設定管理 |
 | `/settings/market-types` | MarketTypeSettingsView | 市場類型設定管理 |
+| `/stocks` | StockMonitorView | 股票觀察（含「觀察清單」、「警示條件」兩個頁籤；舊路徑 `/watch-stocks`、`/stock-alerts` 自動 redirect 並帶 `tab` query） |
 
 ## Data Model
 
@@ -117,7 +118,8 @@ AssetSnapshot (1) ──── (N) BankDeposit
 AssetSnapshot (1) ──── (N) StockHolding
 AssetSnapshot (1) ──── (N) FundHolding
 RealizedGain          (獨立，不關聯快照)
-StockPrice            (快取，依 code+market 索引)
+StockPrice            (快取，依 code+market 索引；含買賣/開昨/高低/量)
+WatchStock            (觀察股票清單，code+market 唯一)
 StockPriceHistory     (歷史股價紀錄)
 ExchangeRateHistory   (歷史匯率紀錄)
 DepositTypeEntity     (存款類型主檔，code 值存入 BankDeposit.depositType)
@@ -241,6 +243,41 @@ MarketType            (市場類型主檔，code 值存入 StockHolding.market)
 | exchangeRate | BigDecimal | 交易時匯率 |
 | profitRate | BigDecimal | 報酬率（profit / investmentCost） |
 
+#### StockPrice（擴充）
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| id | Long | PK |
+| stockCode | String | 股票代號 |
+| stockName | String | 股票名稱 |
+| market | String | 市場代碼 |
+| price | BigDecimal | 最新成交價 |
+| priceChange | BigDecimal | 漲跌金額 |
+| changePercent | BigDecimal | 漲跌幅(%) |
+| buyPrice | BigDecimal | 五檔買進最佳價（新增） |
+| sellPrice | BigDecimal | 五檔賣出最佳價（新增） |
+| openPrice | BigDecimal | 開盤價（新增） |
+| previousClose | BigDecimal | 昨收（新增） |
+| highPrice | BigDecimal | 當日最高（新增） |
+| lowPrice | BigDecimal | 當日最低（新增） |
+| volume | Long | 成交量（台股單位為張，美股為股；新增） |
+| tradingDate | LocalDate | 交易日 |
+| updatedAt | LocalDateTime | 更新時間 |
+| closed | Boolean | 是否為收盤價 |
+| source | String | 資料來源 |
+
+#### WatchStock（新增）
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| id | Long | PK |
+| stockCode | String | 股票代號 |
+| stockName | String | 股票名稱 |
+| market | String | 市場代碼（台股/美股） |
+| displayOrder | Integer | 顯示排序（拖曳排序用） |
+| createdAt | LocalDateTime | 建立時間 |
+| updatedAt | LocalDateTime | 更新時間 |
+
+> Unique constraint：(stockCode, market)。觀察清單中的股票會被併入排程更新；報價直接查 `StockPrice`，警示資訊則彙總自 `StockAlert`。
+
 > **設計決策（零遷移策略）：** `Bank`/`Broker`/`DepositType`/`MarketType` 全部改為資料庫 Entity，不使用任何 Enum。原 `@Enumerated(EnumType.STRING)` 欄位已以 VARCHAR 儲存 Enum 名稱，改為 `String` 欄位時無需資料庫 Migration，現有資料值（如 `"台股"`、`"活存"`）完全相容。`DepositTypeEntity.code` 與 `MarketType.code` 即為寫入欄位的值，與歷史資料對應。
 
 ## API Design
@@ -328,6 +365,14 @@ GET    /api/settings/deposit-types              # 列出所有存款類型（含
 POST   /api/settings/deposit-types             # 新增存款類型
 PUT    /api/settings/deposit-types/{id}        # 更新存款類型
 PATCH  /api/settings/deposit-types/{id}/active # 啟用/停用存款類型
+```
+
+#### Watch Stocks（新增）
+```
+GET    /api/watch-stocks                       # 列出所有觀察股票（含對應的最新報價、警示彙總）
+POST   /api/watch-stocks                       # 新增觀察股票（市場 + 代號 + 名稱）
+DELETE /api/watch-stocks/{id}                  # 刪除觀察股票
+PUT    /api/watch-stocks/reorder               # body: ordered ids 陣列
 ```
 
 #### Settings - Market Types（新增）

@@ -4,9 +4,11 @@ import com.steven.assets.model.StockPrice;
 import com.steven.assets.model.StockHolding;
 import com.steven.assets.model.AssetSnapshot;
 import com.steven.assets.model.ExchangeRateHistory;
+import com.steven.assets.model.WatchStock;
 import com.steven.assets.repository.AssetSnapshotRepository;
 import com.steven.assets.repository.ExchangeRateHistoryRepository;
 import com.steven.assets.repository.StockPriceRepository;
+import com.steven.assets.repository.WatchStockRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -36,6 +38,7 @@ public class StockPriceService {
     private final ExchangeRateHistoryRepository rateHistRepo;
     private final MarketDataService marketDataService;
     private final StockAlertService stockAlertService;
+    private final WatchStockRepository watchStockRepo;
 
     private static final ZoneId TW_ZONE = ZoneId.of("Asia/Taipei");
     private static final ZoneId US_ZONE = ZoneId.of("America/New_York");
@@ -135,14 +138,21 @@ public class StockPriceService {
      */
     public void collectHeldStockCodes(Set<String> twCodes, Set<String> usCodes) {
         Optional<AssetSnapshot> latestOpt = snapshotRepo.findLatestWithStocks();
-        if (latestOpt.isEmpty()) return;
-
-        AssetSnapshot latest = latestOpt.get();
-        for (StockHolding sh : latest.getStocks()) {
-            if ("美股".equals(sh.getMarket())) {
-                usCodes.add(sh.getStockCode());
+        if (latestOpt.isPresent()) {
+            for (StockHolding sh : latestOpt.get().getStocks()) {
+                if ("美股".equals(sh.getMarket())) {
+                    usCodes.add(sh.getStockCode());
+                } else {
+                    twCodes.add(sh.getStockCode());
+                }
+            }
+        }
+        // 觀察清單中的股票一併納入更新
+        for (WatchStock w : watchStockRepo.findAll()) {
+            if ("美股".equals(w.getMarket())) {
+                usCodes.add(w.getStockCode());
             } else {
-                twCodes.add(sh.getStockCode());
+                twCodes.add(w.getStockCode());
             }
         }
     }
@@ -169,6 +179,13 @@ public class StockPriceService {
                 sp.setPrice(result.price());
                 sp.setPriceChange(result.change());
                 sp.setChangePercent(result.changePct());
+                if (result.buyPrice()      != null) sp.setBuyPrice(result.buyPrice());
+                if (result.sellPrice()     != null) sp.setSellPrice(result.sellPrice());
+                if (result.openPrice()     != null) sp.setOpenPrice(result.openPrice());
+                if (result.previousClose() != null) sp.setPreviousClose(result.previousClose());
+                if (result.highPrice()     != null) sp.setHighPrice(result.highPrice());
+                if (result.lowPrice()      != null) sp.setLowPrice(result.lowPrice());
+                if (result.volume()        != null) sp.setVolume(result.volume());
                 sp.setTradingDate(LocalDate.now("美股".equals(market) ? US_ZONE : TW_ZONE));
                 sp.setUpdatedAt(now);
                 sp.setClosed(markClosed);

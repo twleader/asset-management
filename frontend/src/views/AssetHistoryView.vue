@@ -6,9 +6,7 @@
         <div style="display:flex;align-items:center;justify-content:space-between">
           <span class="section-title">📅 歷年資產管理</span>
           <div style="display:flex;gap:8px">
-            <el-upload :show-file-list="false" :before-upload="handleImport" accept=".xlsx" style="display:inline-block">
-              <el-button size="small" :icon="Upload" :loading="importing">匯入 Excel</el-button>
-            </el-upload>
+            <el-button size="small" :icon="Download" :loading="exporting" @click="handleExport">匯出 Excel</el-button>
             <el-button size="small" :icon="Refresh" :loading="recalculating" @click="handleRecalcDividends">重算配息</el-button>
             <el-button size="small" type="primary" :icon="Plus" @click="$router.push('/snapshots/new')">新增快照</el-button>
           </div>
@@ -97,14 +95,16 @@ import { CanvasRenderer } from 'echarts/renderers'
 import { LineChart, BarChart } from 'echarts/charts'
 import { TitleComponent, TooltipComponent, LegendComponent, GridComponent, MarkLineComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
-import { Plus, Upload, Edit, Delete, Refresh } from '@element-plus/icons-vue'
+import { Plus, Download, Edit, Delete, Refresh } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import dayjs from 'dayjs'
 import { useAssetStore } from '@/stores/assetStore'
+import { snapshotApi } from '@/api'
 
 use([CanvasRenderer, LineChart, BarChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent, MarkLineComponent])
 
 const store = useAssetStore()
-const importing = ref(false)
+const exporting = ref(false)
 const recalculating = ref(false)
 
 onMounted(() => store.fetchHistory())
@@ -137,19 +137,20 @@ const deleteSnapshot = async (id) => {
   await store.fetchHistory()
 }
 
-const handleImport = async (file) => {
-  importing.value = true
+async function handleExport() {
+  exporting.value = true
   try {
-    const result = await store.importExcel(file)
-    ElMessage.success(`匯入完成：${result.snapshotsImported} 個快照，${result.gainsImported} 筆損益`)
-    if (result.errors?.length) {
-      result.errors.forEach(e => ElMessage.warning(e))
-    }
-    await store.fetchHistory()
+    const blob = await snapshotApi.exportExcel()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `資產管理_${dayjs().format('YYYYMMDD')}.xlsx`
+    document.body.appendChild(a); a.click(); document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    ElMessage.success('匯出完成')
   } finally {
-    importing.value = false
+    exporting.value = false
   }
-  return false
 }
 
 const fmt = (v) => {

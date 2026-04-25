@@ -60,30 +60,20 @@
 - [ ] 系統計算基金的未實現損益
 - [ ] 基金資料可在快照中新增、編輯、刪除
 
-### Requirement 5: Excel 批次匯入
+### Requirement 5: Excel 批次匯出
 
-**User Story:** 作為使用者，我希望能從 Excel 檔案批次匯入資產資料，避免逐筆手動輸入的繁瑣。
-
-**Acceptance Criteria:**
-
-- [ ] 接受 `.xlsx` 格式的 Excel 檔案上傳
-- [ ] 以工作表名稱（格式：YYYYMMDD）識別快照日期
-- [ ] 支援新舊兩種 Excel 格式（向後相容）
-- [ ] 自動從欄位關鍵字識別銀行名稱與券商
-- [ ] 同日期快照存在時，使用者可選擇覆蓋
-- [ ] 匯入結果需回報成功筆數與錯誤明細
-- [ ] 支援匯入已實現損益資料（另一張工作表）
-
-### Requirement 5b: Excel 批次匯出
-
-**User Story:** 作為使用者，我希望能將資料匯出成 Excel
+**User Story:** 作為使用者，我希望能將資料匯出成 Excel，作為備份與後續離線分析之用。
 
 **Acceptance Criteria:**
 
-- [ ] 匯出成 `.xlsx`
-- [ ] 以工作表名稱（格式：YYYYMMDD）識別快照日期
+- [x] 匯出成 `.xlsx`
+- [x] 每個快照產生一張 sheet，名稱格式 YYYYMMDD
+- [x] 每個 sheet 內依序顯示：頂部摘要（日期/匯率/總資產）、銀行存款區塊、基金區塊、股票區塊
+- [x] 已實現損益單獨一張 sheet（資產名稱／代號／交易日期／股數／賣出均價／收帳金額／投資成本／損益／報酬率／市場／幣別／券商／匯率／年度）
+- [x] 提供 `GET /api/snapshots/export`（完整匯出）與 `GET /api/realized-gains/export`（僅損益）
+- [x] 前端在「資產快照」、「歷年資產」、「已實現損益」頁面提供「匯出 Excel」按鈕
 
-> ⚠️ **尚未實作**：後端無 export endpoint，前端無匯出按鈕，tasks.md 亦無對應任務。
+> ⚠️ Excel 批次匯入功能已停用（按鈕改為匯出），原 ExcelImportService 保留但 controller 端點移除。
 
 ### Requirement 6: 已實現損益追蹤
 
@@ -197,4 +187,22 @@
 - [ ] 股利歷史頁籤顯示最近 10 年股利：年度 / 每股現金股利 / 每股股票股利 / 除息日 / 當年殖利率
 - [ ] 台股股利資料來源 FinMind `TaiwanStockDividend`；美股股利資料來源 NASDAQ `/api/quote/{code}/dividends`
 - [ ] 資料查無或來源失敗時顯示友善提示，不拋例外
+
+---
+
+### Requirement 14: 觀察股票清單
+
+**User Story:** 作為使用者，我希望能維護一份「觀察股票」名單（不一定持有），在同一頁面上即時掌握該批股票的詳細報價（買進/賣出/開盤/昨收/最高/最低/成交量等）以及對應的到價警示觸發狀態，以方便進場或出場時參考。
+
+**Acceptance Criteria:**
+
+- [ ] 左側導覽選單新增「觀察股票」項目，路徑 `/watch-stocks`
+- [ ] 頁面提供「台股」、「美股」兩個頁籤，依市場分流顯示
+- [ ] 觀察清單為獨立資料表（`watch_stock`），可手動新增、刪除、拖曳排序
+- [ ] 每列顯示欄位：股名/股號、股價、漲跌、漲跌幅(%)、買進、賣出、開盤、昨收、最高、最低、成交量(張)、警示（觸發時間/股價/均線/KD）
+- [ ] 「警示」欄取自 `stock_alert` 中該檔股票最近一筆 `lastTriggeredAt`，呈現觸發時間、觸發價、均線值、KD 值
+- [ ] 報價來源 `StockPrice` 擴充欄位：buyPrice（買進）、sellPrice（賣出）、openPrice（開盤）、previousClose（昨收）、highPrice（最高）、lowPrice（最低）、volume（成交量，台股為張）
+- [ ] 觀察清單中的股票同樣納入排程的股價更新（與持股一併更新）
+- [ ] 新增時可輸入股票代號，系統自動帶出股票名稱（同 StockAlert 行為）
+- [ ] 同市場 + 股票代號的組合僅允許一筆觀察紀錄
 

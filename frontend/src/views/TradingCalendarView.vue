@@ -72,9 +72,14 @@
         </div>
       </template>
       <div class="legend" style="margin-bottom:12px">
-        <span class="legend-item"><span class="legend-dot tw" /> 台股交易日</span>
-        <span class="legend-item"><span class="legend-dot us" /> 美股交易日</span>
-        <span class="legend-item"><span class="legend-dot both" /> 兩市同交易</span>
+        <span class="legend-item"><TaiwanMap :size="16" /> 台股交易日</span>
+        <span class="legend-item"><UsFlag :size="20" /> 美股交易日</span>
+        <span class="legend-item">
+          <span style="display:inline-flex;align-items:center;gap:3px">
+            <TaiwanMap :size="16" /><UsFlag :size="20" />
+          </span>
+          兩市同交易
+        </span>
         <span class="legend-item"><span class="legend-dot holiday" /> 假日/休市</span>
       </div>
       <table class="cal-table">
@@ -91,8 +96,8 @@
               <div v-if="day.day" class="cal-cell">
                 <span class="cal-day" :class="{ today: day.isToday }">{{ day.day }}</span>
                 <div class="cal-tags">
-                  <span v-if="day.tw" class="dot tw" title="台股" />
-                  <span v-if="day.us" class="dot us" title="美股" />
+                  <TaiwanMap v-if="day.tw" :size="12" />
+                  <UsFlag v-if="day.us" :size="14" />
                 </div>
                 <div v-if="day.twHoliday || day.usHoliday" class="cal-holiday">
                   <small v-if="day.twHoliday" style="color:#ef4444">{{ day.twHoliday }}</small>
@@ -123,6 +128,7 @@ import { marketDataApi } from '@/api'
 import dayjs from 'dayjs'
 import TaiwanMap from '@/components/TaiwanMap.vue'
 import UsaMap from '@/components/UsaMap.vue'
+import UsFlag from '@/components/UsFlag.vue'
 
 const status = ref({ twMarketOpen: false, usMarketOpen: false, twTime: '', usTime: '' })
 const calendarYear = ref(dayjs().year())

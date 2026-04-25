@@ -3,7 +3,7 @@ package com.steven.assets.controller;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.steven.assets.dto.AssetSnapshotDto;
 import com.steven.assets.service.AssetService;
-import com.steven.assets.service.ExcelImportService;
+import com.steven.assets.service.ExcelExportService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -30,7 +30,7 @@ class AssetSnapshotControllerTest {
     @Autowired ObjectMapper mapper;
 
     @MockBean AssetService assetService;
-    @MockBean ExcelImportService excelImportService;
+    @MockBean ExcelExportService excelExportService;
 
     // ---- GET /api/snapshots ----
 

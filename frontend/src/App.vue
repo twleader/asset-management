@@ -100,9 +100,9 @@ const mainMenuItems = computed(() => [
   { path: '/dashboard', title: '總覽儀表板', icon: 'DataLine' },
   { path: '/history', title: '歷年資產管理', icon: 'TrendCharts' },
   { path: '/realized-gains', title: '已實現損益', icon: 'Money' },
+  { path: '/stocks', title: '股票觀察', icon: 'View' },
   { path: '/trading-calendar', title: '交易日曆', icon: 'AlarmClock' },
-  { path: '/exchange-rate', title: '台幣兌美元', icon: 'Money' },
-  { path: '/stock-alerts', title: '股票到價警示', icon: 'Bell' }
+  { path: '/exchange-rate', title: '台幣兌美元', icon: 'Money' }
 ])
 </script>
 

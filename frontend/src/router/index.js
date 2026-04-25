@@ -62,10 +62,20 @@ const router = createRouter({
       meta: { title: '台幣兌美元', icon: 'Money' }
     },
     {
+      path: '/stocks',
+      name: 'StockMonitor',
+      component: () => import('@/views/StockMonitorView.vue'),
+      meta: { title: '股票觀察', icon: 'View' }
+    },
+    {
       path: '/stock-alerts',
-      name: 'StockAlerts',
-      component: () => import('@/views/StockAlertView.vue'),
-      meta: { title: '股票到價警示', icon: 'Bell' }
+      redirect: { path: '/stocks', query: { tab: 'alert' } },
+      meta: { hidden: true }
+    },
+    {
+      path: '/watch-stocks',
+      redirect: { path: '/stocks', query: { tab: 'watch' } },
+      meta: { hidden: true }
     },
     {
       path: '/settings/banks',

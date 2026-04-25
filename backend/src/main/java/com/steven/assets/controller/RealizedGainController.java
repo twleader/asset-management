@@ -2,14 +2,19 @@ package com.steven.assets.controller;
 
 import com.steven.assets.dto.RealizedGainDto;
 import com.steven.assets.service.AssetService;
-import com.steven.assets.service.ExcelImportService;
+import com.steven.assets.service.ExcelExportService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
@@ -19,7 +24,7 @@ import java.util.Map;
 public class RealizedGainController {
 
     private final AssetService assetService;
-    private final ExcelImportService excelImportService;
+    private final ExcelExportService excelExportService;
 
     @GetMapping
     public List<RealizedGainDto.YearSummaryResponse> getAll() {
@@ -52,17 +57,18 @@ public class RealizedGainController {
         return Map.of("fixed", fixed);
     }
 
-    /**
-     * POST /api/realized-gains/import
-     * 從 Excel 檔案匯入已實現損益（支援含「已實現損益」工作表或以首個工作表為資料來源）
-     */
-    @PostMapping("/import")
-    public ResponseEntity<Map<String, Object>> importExcel(
-            @RequestParam("file") MultipartFile file) throws IOException {
-        ExcelImportService.ImportResult result = excelImportService.importRealizedGainsFromFile(file);
-        return ResponseEntity.ok(Map.of(
-            "imported", result.gainsImported(),
-            "errors", result.errors()
-        ));
+    @GetMapping("/export")
+    public ResponseEntity<ByteArrayResource> exportExcel() throws IOException {
+        byte[] data = excelExportService.exportRealizedGains();
+        String filename = "已實現損益_" + LocalDate.now() + ".xlsx";
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentDisposition(ContentDisposition
+                .attachment().filename(filename, StandardCharsets.UTF_8).build());
+        return ResponseEntity.ok()
+                .headers(headers)
+                .contentType(MediaType.parseMediaType(
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .contentLength(data.length)
+                .body(new ByteArrayResource(data));
     }
 }

@@ -3,9 +3,8 @@
     <div class="page-header">
       <div>
         <el-button type="primary" :icon="Plus" @click="$router.push('/snapshots/new')">新增快照</el-button>
-        <el-upload :show-file-list="false" :before-upload="handleImport" accept=".xlsx" style="display:inline-block;margin-left:10px">
-          <el-button :icon="Upload" :loading="importing">匯入 Excel</el-button>
-        </el-upload>
+        <el-button :icon="Download" :loading="exporting" @click="handleExport"
+          style="margin-left:10px">匯出 Excel</el-button>
       </div>
     </div>
 
@@ -44,12 +43,14 @@
 </template>
 
 <script setup>
-import { Plus, Upload, Edit, Delete } from '@element-plus/icons-vue'
+import { Plus, Download, Edit, Delete } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import dayjs from 'dayjs'
 import { useAssetStore } from '@/stores/assetStore'
+import { snapshotApi } from '@/api'
 
 const store = useAssetStore()
-const importing = ref(false)
+const exporting = ref(false)
 
 onMounted(() => store.fetchSnapshots())
 
@@ -59,18 +60,26 @@ const fmt = (v) => {
   return `$${n.toLocaleString('zh-TW', { maximumFractionDigits: 0 })}`
 }
 
-const handleImport = async (file) => {
-  importing.value = true
+async function handleExport() {
+  exporting.value = true
   try {
-    const result = await store.importExcel(file)
-    ElMessage.success(`匯入完成：${result.snapshotsImported} 個快照，${result.gainsImported} 筆損益`)
-    if (result.errors?.length) {
-      result.errors.forEach(e => ElMessage.warning(e))
-    }
+    const blob = await snapshotApi.exportExcel()
+    downloadBlob(blob, `資產管理_${dayjs().format('YYYYMMDD')}.xlsx`)
+    ElMessage.success('匯出完成')
   } finally {
-    importing.value = false
+    exporting.value = false
   }
-  return false
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
 }
 </script>
 

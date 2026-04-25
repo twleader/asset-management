@@ -2,6 +2,8 @@ package com.steven.assets.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.steven.assets.model.StockPriceHistory;
+import com.steven.assets.repository.StockPriceHistoryRepository;
 import com.steven.assets.repository.StockPriceRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -37,12 +39,15 @@ public class MarketDataService {
     private final HttpClient httpClient;
     private final ObjectMapper mapper;
     private final StockPriceRepository stockPriceRepo;
+    private final StockPriceHistoryRepository stockPriceHistoryRepo;
 
     /** Yahoo Finance crumb（session 期間有效） */
     private volatile String yahooCrumb = null;
 
-    public MarketDataService(StockPriceRepository stockPriceRepo) {
+    public MarketDataService(StockPriceRepository stockPriceRepo,
+                             StockPriceHistoryRepository stockPriceHistoryRepo) {
         this.stockPriceRepo = stockPriceRepo;
+        this.stockPriceHistoryRepo = stockPriceHistoryRepo;
         CookieManager cm = new CookieManager(null, CookiePolicy.ACCEPT_ALL);
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
@@ -88,9 +93,18 @@ public class MarketDataService {
             Integer year,
             BigDecimal cashDividend,
             BigDecimal stockDividend,
-            String exDividendDate,   // YYYY-MM-DD
-            BigDecimal yieldPct      // 當年殖利率（%），可為 null
-    ) {}
+            String exDividendDate,         // 除息日 YYYY-MM-DD
+            BigDecimal yieldPct,           // 當年殖利率（%），可為 null
+            String cashPaymentDate,        // 現金股利發放日
+            String stockPaymentDate,       // 股票股利發放日
+            Integer fillDays               // 填息天數（尚未填息為 null）
+    ) {
+        /** 向後相容：舊建構（無 payment dates / fillDays） */
+        public DividendRow(Integer year, BigDecimal cashDividend, BigDecimal stockDividend,
+                           String exDividendDate, BigDecimal yieldPct) {
+            this(year, cashDividend, stockDividend, exDividendDate, yieldPct, null, null, null);
+        }
+    }
 
     public record DividendHistoryResult(
             String stockCode,
@@ -107,12 +121,27 @@ public class MarketDataService {
             BigDecimal change,
             BigDecimal changePct,
             String source,
-            String stockName
+            String stockName,
+            BigDecimal buyPrice,
+            BigDecimal sellPrice,
+            BigDecimal openPrice,
+            BigDecimal previousClose,
+            BigDecimal highPrice,
+            BigDecimal lowPrice,
+            Long volume
     ) {
         /** 向後相容：不帶 stockName 的建構 */
         public PriceResult(String stockCode, String market, BigDecimal price,
                            BigDecimal change, BigDecimal changePct, String source) {
-            this(stockCode, market, price, change, changePct, source, null);
+            this(stockCode, market, price, change, changePct, source, null,
+                    null, null, null, null, null, null, null);
+        }
+
+        /** 向後相容：帶 stockName 但不帶詳細報價的建構 */
+        public PriceResult(String stockCode, String market, BigDecimal price,
+                           BigDecimal change, BigDecimal changePct, String source, String stockName) {
+            this(stockCode, market, price, change, changePct, source, stockName,
+                    null, null, null, null, null, null, null);
         }
     }
 
@@ -142,7 +171,10 @@ public class MarketDataService {
                             .map(PriceResult::stockName)
                             .filter(n -> n != null && !n.isBlank())
                             .orElse(null);
-                    return new PriceResult(r.stockCode(), r.market(), r.price(), r.change(), r.changePct(), r.source(), name);
+                    return new PriceResult(r.stockCode(), r.market(), r.price(), r.change(), r.changePct(),
+                            r.source(), name,
+                            r.buyPrice(), r.sellPrice(), r.openPrice(), r.previousClose(),
+                            r.highPrice(), r.lowPrice(), r.volume());
                 }
                 return r;
             }
@@ -186,7 +218,20 @@ public class MarketDataService {
             String companyName = root.path("data").path("companyName").asText("");
             if (companyName.isBlank()) companyName = null;
 
-            return Optional.of(new PriceResult(stockCode, "美股", price, change, changePct, "NASDAQ", companyName));
+            // 解析 keyStats 的開/昨/高低/量
+            JsonNode keyStats = root.path("data").path("keyStats");
+            BigDecimal openPrice    = parseDollar(keyStats.path("OpenPrice").path("value").asText(""));
+            BigDecimal previousClose = parseDollar(keyStats.path("PreviousClose").path("value").asText(""));
+            BigDecimal[] hl         = parseRange(keyStats.path("DayrangeHigh").path("value").asText(""));
+            if (hl[0] == null && hl[1] == null) {
+                hl = parseRange(keyStats.path("Dayrange").path("value").asText(""));
+            }
+            Long volume = parseLong(keyStats.path("Volume").path("value").asText("").replace(",", ""));
+
+            // bid/ask 在 NASDAQ info API 通常無提供，留 null
+            return Optional.of(new PriceResult(stockCode, "美股", price, change, changePct, "NASDAQ",
+                    companyName,
+                    null, null, openPrice, previousClose, hl[0], hl[1], volume));
         } catch (Exception e) {
             log.warn("NASDAQ price 查詢失敗 {} ({}): {}", stockCode, assetClass, e.getMessage());
         }
@@ -231,12 +276,22 @@ public class MarketDataService {
                 BigDecimal prevClose = (prevStr.isEmpty() || prevStr.startsWith("-"))
                         ? null : new BigDecimal(prevStr);
 
+                // 解析買賣五檔（取最佳價）、開高低、成交量（張）
+                BigDecimal buyPrice  = parseFirstQuote(item.path("b").asText(""));
+                BigDecimal sellPrice = parseFirstQuote(item.path("a").asText(""));
+                BigDecimal openPrice = parseDecimal(item.path("o").asText(""));
+                BigDecimal highPrice = parseDecimal(item.path("h").asText(""));
+                BigDecimal lowPrice  = parseDecimal(item.path("l").asText(""));
+                Long volumeLots      = parseLong(item.path("v").asText("")); // TWSE 已以「張」為單位
+
                 // z = "--" 表示未成交（收盤後或開盤前），改用昨收
                 if (priceStr.isEmpty() || priceStr.startsWith("-")) {
                     if (prevClose != null) {
                         return Optional.of(new PriceResult(
                                 stockCode, "台股", prevClose,
-                                BigDecimal.ZERO, BigDecimal.ZERO, "TWSE(前收)", name.isEmpty() ? null : name));
+                                BigDecimal.ZERO, BigDecimal.ZERO, "TWSE(前收)",
+                                name.isEmpty() ? null : name,
+                                buyPrice, sellPrice, openPrice, prevClose, highPrice, lowPrice, volumeLots));
                     }
                     continue;
                 }
@@ -248,7 +303,8 @@ public class MarketDataService {
                         : BigDecimal.ZERO;
 
                 return Optional.of(new PriceResult(stockCode, "台股", price, change, changePct, "TWSE",
-                        name.isEmpty() ? null : name));
+                        name.isEmpty() ? null : name,
+                        buyPrice, sellPrice, openPrice, prevClose, highPrice, lowPrice, volumeLots));
 
             } catch (Exception e) {
                 log.warn("TWSE mis 查詢失敗 {} ({}): {}", stockCode, ex, e.getMessage());
@@ -265,7 +321,7 @@ public class MarketDataService {
         try {
             String crumb = getYahooCrumb();
             String url = "https://query2.finance.yahoo.com/v10/finance/quoteSummary/"
-                    + symbol + "?modules=price&crumb="
+                    + symbol + "?modules=price,summaryDetail&crumb="
                     + java.net.URLEncoder.encode(crumb, java.nio.charset.StandardCharsets.UTF_8);
             String body = get(url, UA);
 
@@ -282,13 +338,26 @@ public class MarketDataService {
             String name = priceNode.path("shortName").asText("");
             if (name.isEmpty()) name = priceNode.path("longName").asText("");
 
+            JsonNode sd = result.get(0).path("summaryDetail");
+            BigDecimal bid    = yahooDecimal(sd.path("bid"));
+            BigDecimal ask    = yahooDecimal(sd.path("ask"));
+            BigDecimal open   = yahooDecimal(sd.path("open").has("raw") ? sd.path("open") : priceNode.path("regularMarketOpen"));
+            BigDecimal prev   = yahooDecimal(sd.path("previousClose").has("raw") ? sd.path("previousClose") : priceNode.path("regularMarketPreviousClose"));
+            BigDecimal high   = yahooDecimal(sd.path("dayHigh").has("raw") ? sd.path("dayHigh") : priceNode.path("regularMarketDayHigh"));
+            BigDecimal low    = yahooDecimal(sd.path("dayLow").has("raw") ? sd.path("dayLow") : priceNode.path("regularMarketDayLow"));
+            long volRaw = sd.path("regularMarketVolume").path("raw").asLong(
+                    priceNode.path("regularMarketVolume").path("raw").asLong(0));
+            // 台股 Yahoo 回傳成交量為「股」，換算為「張」
+            Long volume = volRaw > 0 ? ("台股".equals(market) ? volRaw / 1000 : volRaw) : null;
+
             return Optional.of(new PriceResult(
                     stockCode, market,
                     BigDecimal.valueOf(currentPrice).setScale(4, RoundingMode.HALF_UP),
                     BigDecimal.valueOf(change).setScale(4, RoundingMode.HALF_UP),
                     BigDecimal.valueOf(changePct).setScale(6, RoundingMode.HALF_UP),
                     "Yahoo Finance",
-                    name.isEmpty() ? null : name));
+                    name.isEmpty() ? null : name,
+                    bid, ask, open, prev, high, low, volume));
         } catch (Exception e) {
             log.warn("Yahoo Finance 股價查詢失敗 {}: {}", symbol, e.getMessage());
             if (e.getMessage() != null && (e.getMessage().contains("401") || e.getMessage().contains("429"))) {
@@ -907,6 +976,101 @@ public class MarketDataService {
     }
 
     // =====================================================================
+    // 詳細報價解析輔助
+    // =====================================================================
+
+    /** 解析 TWSE 五檔字串（"650.0000_651.0000_..."），取最佳檔（第一個） */
+    private static BigDecimal parseFirstQuote(String s) {
+        if (s == null || s.isBlank() || s.startsWith("-")) return null;
+        String first = s.split("_")[0].trim();
+        return parseDecimal(first);
+    }
+
+    private static BigDecimal parseDecimal(String s) {
+        if (s == null) return null;
+        String trim = s.trim();
+        if (trim.isEmpty() || "-".equals(trim) || "--".equals(trim) || "N/A".equalsIgnoreCase(trim)) return null;
+        try { return new BigDecimal(trim.replace(",", "")); }
+        catch (NumberFormatException e) { return null; }
+    }
+
+    private static Long parseLong(String s) {
+        if (s == null) return null;
+        String trim = s.trim();
+        if (trim.isEmpty() || "-".equals(trim) || "--".equals(trim) || "N/A".equalsIgnoreCase(trim)) return null;
+        try { return Long.parseLong(trim.replace(",", "")); }
+        catch (NumberFormatException e) { return null; }
+    }
+
+    /** "$182.63" / "182.63" → BigDecimal */
+    private static BigDecimal parseDollar(String s) {
+        if (s == null) return null;
+        String t = s.replace("$", "").replace(",", "").trim();
+        return parseDecimal(t);
+    }
+
+    /** NASDAQ keyStats 的 dayrange 欄位通常為 "180.00 - 185.00"，回傳 [high, low] */
+    private static BigDecimal[] parseRange(String s) {
+        if (s == null || s.isBlank()) return new BigDecimal[]{null, null};
+        String[] parts = s.replace("$", "").split("-");
+        if (parts.length < 2) return new BigDecimal[]{null, null};
+        BigDecimal a = parseDecimal(parts[0]);
+        BigDecimal b = parseDecimal(parts[1]);
+        if (a == null || b == null) return new BigDecimal[]{a, b};
+        return a.compareTo(b) >= 0
+                ? new BigDecimal[]{a, b}
+                : new BigDecimal[]{b, a};
+    }
+
+    /**
+     * 計算填息天數：除息日當天股價 vs 除息日前一交易日的收盤價（基準價）。
+     * 從除息日（含）起，找第一筆收盤 >= 基準價的交易日，回傳之間的交易日數。
+     * 尚未填息或資料不足回傳 null。
+     */
+    private Integer calcFillDays(String stockCode, String market, String exDate) {
+        if (exDate == null || exDate.length() < 10) return null;
+        try {
+            LocalDate ex = LocalDate.parse(exDate);
+            // 取除息日前後各 1 年的歷史，足夠多數情況下找到填息日
+            LocalDate from = ex.minusDays(20);
+            LocalDate to   = ex.plusDays(400);
+            List<StockPriceHistory> series = stockPriceHistoryRepo
+                    .findByStockCodeAndMarketAndTradingDateBetweenOrderByTradingDateAsc(
+                            stockCode, market, from, to);
+            if (series.size() < 2) return null;
+
+            // 基準價 = 除息日前一個交易日的收盤
+            int exIdx = -1;
+            for (int i = 0; i < series.size(); i++) {
+                if (!series.get(i).getTradingDate().isBefore(ex)) { exIdx = i; break; }
+            }
+            if (exIdx <= 0) return null;
+            BigDecimal basis = series.get(exIdx - 1).getClosePrice();
+            if (basis == null) return null;
+
+            // 從除息日（含）起，找第一筆收盤 >= basis
+            for (int i = exIdx; i < series.size(); i++) {
+                BigDecimal close = series.get(i).getClosePrice();
+                if (close != null && close.compareTo(basis) >= 0) {
+                    return i - exIdx;   // 0 表示除息日當天即填息
+                }
+            }
+            return null; // 尚未填息
+        } catch (Exception e) {
+            log.debug("calcFillDays failed for {} {} ex={}: {}", stockCode, market, exDate, e.getMessage());
+            return null;
+        }
+    }
+
+    private static BigDecimal yahooDecimal(JsonNode node) {
+        if (node == null || node.isMissingNode()) return null;
+        if (!node.has("raw")) return null;
+        double v = node.path("raw").asDouble(Double.NaN);
+        if (Double.isNaN(v)) return null;
+        return BigDecimal.valueOf(v).setScale(4, RoundingMode.HALF_UP);
+    }
+
+    // =====================================================================
     // ETF 判斷 / 持股明細 / 股利歷史 （Requirement 13）
     // =====================================================================
 
@@ -1091,38 +1255,50 @@ public class MarketDataService {
                         "查無股利資料", List.of());
             }
 
-            // 依年度彙總（一年可能多次配息）
-            Map<Integer, double[]> agg = new java.util.TreeMap<>(); // year -> [cash, stock]
-            Map<Integer, String> firstExDate = new java.util.HashMap<>();
+            // 一筆配息事件 = 一列（不再依年度彙總，因 0050、台積電等每年多次配息）
+            List<DividendRow> rows = new ArrayList<>();
             for (JsonNode item : data) {
-                String date = item.path("date").asText("");
-                if (date.length() < 4) continue;
-                int year;
-                try { year = Integer.parseInt(date.substring(0, 4)); }
-                catch (NumberFormatException e) { continue; }
                 double cash = item.path("CashEarningsDistribution").asDouble(0)
                             + item.path("CashStatutorySurplus").asDouble(0);
                 double stock = item.path("StockEarningsDistribution").asDouble(0)
                              + item.path("StockStatutorySurplus").asDouble(0);
                 if (cash == 0 && stock == 0) continue;
-                agg.computeIfAbsent(year, y -> new double[]{0, 0});
-                agg.get(year)[0] += cash;
-                agg.get(year)[1] += stock;
+
                 String exDate = item.path("CashExDividendTradingDate").asText("");
                 if (exDate.isEmpty()) exDate = item.path("StockExDividendTradingDate").asText("");
-                if (!exDate.isEmpty()) firstExDate.putIfAbsent(year, exDate);
-            }
 
-            List<DividendRow> rows = new ArrayList<>();
-            agg.forEach((year, arr) -> rows.add(new DividendRow(
-                    year,
-                    BigDecimal.valueOf(arr[0]).setScale(4, RoundingMode.HALF_UP),
-                    BigDecimal.valueOf(arr[1]).setScale(4, RoundingMode.HALF_UP),
-                    firstExDate.get(year),
-                    null
-            )));
-            // 最新年度在前
-            rows.sort((a, b) -> b.year().compareTo(a.year()));
+                Integer year = null;
+                if (exDate.length() >= 4) {
+                    try { year = Integer.parseInt(exDate.substring(0, 4)); }
+                    catch (NumberFormatException ignore) {}
+                }
+                if (year == null) {
+                    String date = item.path("date").asText("");
+                    if (date.length() < 4) continue;
+                    try { year = Integer.parseInt(date.substring(0, 4)); }
+                    catch (NumberFormatException e) { continue; }
+                }
+
+                String cashPay  = item.path("CashDividendPaymentDate").asText("");
+                String stockPay = item.path("StockDividendPaymentDate").asText("");
+
+                rows.add(new DividendRow(
+                        year,
+                        BigDecimal.valueOf(cash).setScale(4, RoundingMode.HALF_UP),
+                        BigDecimal.valueOf(stock).setScale(4, RoundingMode.HALF_UP),
+                        exDate.isEmpty() ? null : exDate,
+                        null,
+                        cashPay.isEmpty() ? null : cashPay,
+                        stockPay.isEmpty() ? null : stockPay,
+                        calcFillDays(stockCode, "台股", exDate)
+                ));
+            }
+            // 除息日新→舊
+            rows.sort((a, b) -> {
+                String ea = a.exDividendDate() != null ? a.exDividendDate() : "";
+                String eb = b.exDividendDate() != null ? b.exDividendDate() : "";
+                return eb.compareTo(ea);
+            });
             return new DividendHistoryResult(stockCode, "台股", "FinMind", null, rows);
         } catch (Exception e) {
             log.warn("台股股利歷史查詢失敗 {}: {}", stockCode, e.getMessage());
@@ -1142,38 +1318,54 @@ public class MarketDataService {
                 JsonNode rowsNode = root.path("data").path("dividends").path("rows");
                 if (!rowsNode.isArray() || rowsNode.isEmpty()) continue;
 
-                Map<Integer, double[]> agg = new java.util.TreeMap<>(); // year -> [cash]
-                Map<Integer, String> firstExDate = new java.util.HashMap<>();
+                List<DividendRow> rows = new ArrayList<>();
                 for (JsonNode r : rowsNode) {
                     String exDate = r.path("exOrEffDate").asText("");
                     if (exDate.length() < 10) continue;
-                    // NASDAQ 日期格式 MM/DD/YYYY
                     int year;
+                    String exIso;
                     try {
+                        // NASDAQ 日期格式 MM/DD/YYYY → 轉 ISO
                         String[] p = exDate.split("/");
                         year = Integer.parseInt(p[2]);
+                        exIso = String.format("%04d-%02d-%02d", year,
+                                Integer.parseInt(p[0]), Integer.parseInt(p[1]));
                     } catch (Exception e) { continue; }
                     if (year < fromYear) continue;
+
                     String amtStr = r.path("amount").asText("").replace("$", "").trim();
                     if (amtStr.isEmpty() || amtStr.equals("N/A")) continue;
                     double amt;
                     try { amt = Double.parseDouble(amtStr); }
                     catch (NumberFormatException e) { continue; }
-                    agg.computeIfAbsent(year, y -> new double[]{0});
-                    agg.get(year)[0] += amt;
-                    firstExDate.putIfAbsent(year, exDate);
-                }
-                if (agg.isEmpty()) continue;
 
-                List<DividendRow> rows = new ArrayList<>();
-                agg.forEach((year, arr) -> rows.add(new DividendRow(
-                        year,
-                        BigDecimal.valueOf(arr[0]).setScale(4, RoundingMode.HALF_UP),
-                        BigDecimal.ZERO,
-                        firstExDate.get(year),
-                        null
-                )));
-                rows.sort((a, b) -> b.year().compareTo(a.year()));
+                    String payDate = r.path("paymentDate").asText("");
+                    String payIso = null;
+                    if (payDate.length() >= 10) {
+                        try {
+                            String[] pp = payDate.split("/");
+                            payIso = String.format("%04d-%02d-%02d",
+                                    Integer.parseInt(pp[2]), Integer.parseInt(pp[0]), Integer.parseInt(pp[1]));
+                        } catch (Exception ignore) {}
+                    }
+
+                    rows.add(new DividendRow(
+                            year,
+                            BigDecimal.valueOf(amt).setScale(4, RoundingMode.HALF_UP),
+                            BigDecimal.ZERO,
+                            exIso,
+                            null,
+                            payIso,
+                            null,
+                            calcFillDays(stockCode, "美股", exIso)
+                    ));
+                }
+                if (rows.isEmpty()) continue;
+                rows.sort((a, b) -> {
+                    String ea = a.exDividendDate() != null ? a.exDividendDate() : "";
+                    String eb = b.exDividendDate() != null ? b.exDividendDate() : "";
+                    return eb.compareTo(ea);
+                });
                 return new DividendHistoryResult(stockCode, "美股", "NASDAQ", null, rows);
             } catch (Exception e) {
                 log.warn("美股股利歷史查詢失敗 {} ({}): {}", stockCode, assetClass, e.getMessage());

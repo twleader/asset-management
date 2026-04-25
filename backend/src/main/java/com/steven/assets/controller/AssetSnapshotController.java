@@ -2,15 +2,18 @@ package com.steven.assets.controller;
 
 import com.steven.assets.dto.AssetSnapshotDto;
 import com.steven.assets.service.AssetService;
-import com.steven.assets.service.ExcelImportService;
+import com.steven.assets.service.ExcelExportService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
@@ -20,7 +23,7 @@ import java.util.Map;
 public class AssetSnapshotController {
 
     private final AssetService assetService;
-    private final ExcelImportService excelImportService;
+    private final ExcelExportService excelExportService;
 
     @GetMapping
     public List<AssetSnapshotDto.SnapshotSummaryResponse> getAll() {
@@ -101,10 +104,18 @@ public class AssetSnapshotController {
         return ResponseEntity.ok(Map.of("updated", updated));
     }
 
-    @PostMapping("/import")
-    public ResponseEntity<ExcelImportService.ImportResult> importExcel(
-            @RequestParam("file") MultipartFile file) throws IOException {
-        ExcelImportService.ImportResult result = excelImportService.importExcel(file);
-        return ResponseEntity.ok(result);
+    @GetMapping("/export")
+    public ResponseEntity<ByteArrayResource> exportExcel() throws IOException {
+        byte[] data = excelExportService.exportFull();
+        String filename = "資產管理_" + LocalDate.now() + ".xlsx";
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentDisposition(org.springframework.http.ContentDisposition
+                .attachment().filename(filename, java.nio.charset.StandardCharsets.UTF_8).build());
+        return ResponseEntity.ok()
+                .headers(headers)
+                .contentType(MediaType.parseMediaType(
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .contentLength(data.length)
+                .body(new ByteArrayResource(data));
     }
 }

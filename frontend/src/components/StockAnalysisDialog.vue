@@ -1,0 +1,339 @@
+<template>
+  <el-dialog
+    :model-value="modelValue"
+    @update:model-value="$emit('update:modelValue', $event)"
+    :title="`${stock?.stockCode} ${stock?.stockName || ''}　股票分析`"
+    width="1100px"
+    destroy-on-close
+    draggable
+    @open="onOpen">
+    <el-tabs v-model="activeTab" @tab-change="onTabChange">
+      <!-- 走勢圖 -->
+      <el-tab-pane label="走勢圖" name="chart">
+        <div v-if="loading" class="analysis-loading">
+          <el-icon class="is-loading" size="36"><Loading /></el-icon>
+          <div>載入歷史股價中…</div>
+        </div>
+        <div v-else-if="!history.length" class="analysis-empty">
+          無歷史資料，請先執行股價補齊
+        </div>
+        <template v-else>
+          <div class="analysis-meta">
+            <el-tag size="small" type="info">雙擊任意股票可開啟分析</el-tag>
+            <div style="display:flex;align-items:center;gap:6px">
+              <span style="color:#64748b;font-size:12px">期間：</span>
+              <el-button-group>
+                <el-button
+                  v-for="opt in rangeOptions" :key="opt.label"
+                  size="small"
+                  :type="months === opt.months ? 'primary' : 'default'"
+                  @click="months = opt.months">
+                  {{ opt.label }}
+                </el-button>
+              </el-button-group>
+              <span style="color:#64748b;font-size:12px;margin-left:8px">滾輪縮放 / 拖曳平移</span>
+            </div>
+          </div>
+          <v-chart :option="chartOption" style="height:580px" autoresize />
+        </template>
+      </el-tab-pane>
+
+      <!-- 持股明細（ETF only） -->
+      <el-tab-pane v-if="isEtf" label="持股明細" name="holdings">
+        <div style="padding:24px 8px">
+          <div style="color:#475569;font-size:14px;line-height:1.8;margin-bottom:16px">
+            ETF 成分股資料目前免費資料源都有限制（TWSE 無此 API、FinMind 需付費方案、發行商官網為 SPA）。
+            <br>點擊以下外部連結可查看最新完整成分股：
+          </div>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <el-link
+              v-for="link in etfExternalLinks" :key="link.url"
+              :href="link.url" target="_blank" type="primary"
+              style="font-size:14px">
+              🔗 {{ link.label }}
+            </el-link>
+          </div>
+        </div>
+      </el-tab-pane>
+
+      <!-- 股利歷史 -->
+      <el-tab-pane label="股利歷史（10 年）" name="dividends">
+        <div v-if="dividendsLoading" class="analysis-loading">
+          <el-icon class="is-loading" size="36"><Loading /></el-icon>
+          <div>載入股利資料中…</div>
+        </div>
+        <div v-else-if="!dividendHistory.rows?.length" class="analysis-empty">
+          {{ dividendHistory.message || '查無股利資料' }}
+        </div>
+        <template v-else>
+          <div style="margin-bottom:8px;color:#64748b;font-size:12px">
+            資料來源：{{ dividendHistory.source }}
+          </div>
+          <el-table :data="dividendHistory.rows" size="small" border max-height="500" style="width:100%">
+            <el-table-column label="年度" prop="year" width="80" align="center" />
+            <el-table-column label="現金股利" width="100" align="right">
+              <template #default="{ row }">{{ Number(row.cashDividend || 0).toFixed(4) }}</template>
+            </el-table-column>
+            <el-table-column label="股票股利" width="100" align="right">
+              <template #default="{ row }">{{ Number(row.stockDividend || 0).toFixed(4) }}</template>
+            </el-table-column>
+            <el-table-column label="除息日" prop="exDividendDate" width="120" align="center" />
+            <el-table-column label="現金股利發放日" prop="cashPaymentDate" width="140" align="center">
+              <template #default="{ row }">{{ row.cashPaymentDate || '—' }}</template>
+            </el-table-column>
+            <el-table-column label="股票股利發放日" prop="stockPaymentDate" width="140" align="center">
+              <template #default="{ row }">{{ row.stockPaymentDate || '—' }}</template>
+            </el-table-column>
+            <el-table-column label="填息天數" width="100" align="right">
+              <template #default="{ row }">
+                <span v-if="row.fillDays === 0" style="color:#16a34a">當日</span>
+                <span v-else-if="row.fillDays != null">{{ row.fillDays }} 天</span>
+                <span v-else style="color:#94a3b8">尚未填息</span>
+              </template>
+            </el-table-column>
+          </el-table>
+        </template>
+      </el-tab-pane>
+    </el-tabs>
+  </el-dialog>
+</template>
+
+<script setup>
+import { use } from 'echarts/core'
+import { CanvasRenderer } from 'echarts/renderers'
+import { LineChart } from 'echarts/charts'
+import { TitleComponent, TooltipComponent, LegendComponent, GridComponent, DataZoomComponent, MarkLineComponent } from 'echarts/components'
+import VChart from 'vue-echarts'
+import { Loading } from '@element-plus/icons-vue'
+import { marketDataApi } from '@/api/index.js'
+
+use([CanvasRenderer, LineChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent, DataZoomComponent, MarkLineComponent])
+
+const props = defineProps({
+  modelValue: { type: Boolean, default: false },
+  stock: { type: Object, default: null },
+  usdRate: { type: [Number, String], default: null }
+})
+defineEmits(['update:modelValue'])
+
+const activeTab = ref('chart')
+const loading = ref(false)
+const history = ref([])
+const months = ref(12)
+const dividendHistory = ref({ rows: [] })
+const dividendsLoading = ref(false)
+
+const rangeOptions = [
+  { label: '1個月', months: 1 },
+  { label: '3個月', months: 3 },
+  { label: '1年',   months: 12 },
+  { label: '2年',   months: 24 },
+  { label: '3年',   months: 36 },
+  { label: '5年',   months: 60 },
+  { label: '10年',  months: 120 },
+]
+
+async function fetchHistory() {
+  if (!props.stock) return
+  loading.value = true
+  history.value = []
+  try {
+    const end = new Date().toISOString().split('T')[0]
+    const startDate = new Date()
+    startDate.setMonth(startDate.getMonth() - months.value)
+    const start = startDate.toISOString().split('T')[0]
+    const data = await marketDataApi.getStockHistory(props.stock.stockCode, props.stock.market, start, end)
+    history.value = Array.isArray(data) ? data : []
+  } catch (e) {
+    console.warn('無法取得歷史股價:', e)
+  } finally {
+    loading.value = false
+  }
+}
+
+watch(months, () => { if (props.modelValue) fetchHistory() })
+
+function onOpen() {
+  activeTab.value = 'chart'
+  months.value = 12
+  dividendHistory.value = { rows: [] }
+  fetchHistory()
+}
+
+async function fetchDividendHistory() {
+  if (!props.stock) return
+  dividendsLoading.value = true
+  try {
+    dividendHistory.value = await marketDataApi.getDividendHistory(props.stock.stockCode, props.stock.market, 10)
+  } catch (e) {
+    dividendHistory.value = { rows: [], message: '查詢失敗' }
+  } finally {
+    dividendsLoading.value = false
+  }
+}
+
+async function onTabChange(name) {
+  if (name === 'dividends' && !dividendHistory.value.rows?.length && !dividendsLoading.value) {
+    await fetchDividendHistory()
+  }
+}
+
+const isEtf = computed(() => {
+  const s = props.stock
+  if (!s) return false
+  if (s.market === '台股') return /^00/.test(s.stockCode || '')
+  if (s.market === '美股') {
+    const white = ['VOO','VT','VTI','VGT','VYM','VNQ','VXUS','SPY','QQQ','DIA','IVV','IWM','AVGO','SCHD','JEPI','JEPQ']
+    return white.includes((s.stockCode || '').toUpperCase())
+  }
+  return false
+})
+
+const etfExternalLinks = computed(() => {
+  const s = props.stock
+  if (!s) return []
+  const code = s.stockCode || ''
+  if (s.market === '台股') {
+    return [
+      { label: `MoneyDJ 成分股（${code}）`, url: `https://www.moneydj.com/etf/x/basic/basic0007A.xdjhtm?etfid=${code}.TW` },
+      { label: `Goodinfo 成分股（${code}）`, url: `https://goodinfo.tw/tw/ETFControlBasicInfo.asp?STOCK_ID=${code}` },
+      { label: `Yahoo 奇摩股市（${code}）`, url: `https://tw.stock.yahoo.com/quote/${code}.TW/holding` },
+    ]
+  }
+  if (s.market === '美股') {
+    return [
+      { label: `ETFdb 成分股（${code}）`, url: `https://etfdb.com/etf/${code}/#holdings` },
+      { label: `Morningstar 成分股（${code}）`, url: `https://www.morningstar.com/etfs/arcx/${code}/portfolio` },
+      { label: `Yahoo Finance（${code}）`, url: `https://finance.yahoo.com/quote/${code}/holdings` },
+    ]
+  }
+  return []
+})
+
+function calcMA(prices, n) {
+  return prices.map((_, i) => {
+    if (i < n - 1) return null
+    const avg = prices.slice(i - n + 1, i + 1).reduce((s, v) => s + v, 0) / n
+    return parseFloat(avg.toFixed(2))
+  })
+}
+
+function calcKD(hist, period = 9) {
+  const highs  = hist.map(d => Number(d.highPrice  || d.closePrice || 0))
+  const lows   = hist.map(d => Number(d.lowPrice   || d.closePrice || 0))
+  const closes = hist.map(d => Number(d.closePrice || 0))
+  const K = [], D = []
+  let prevK = 50, prevD = 50
+  for (let i = 0; i < closes.length; i++) {
+    if (i < period - 1) { K.push(null); D.push(null); continue }
+    const hh = Math.max(...highs.slice(i - period + 1, i + 1))
+    const ll = Math.min(...lows.slice(i - period + 1, i + 1))
+    const rsv = hh === ll ? 50 : (closes[i] - ll) / (hh - ll) * 100
+    const k = prevK * 2 / 3 + rsv / 3
+    const d = prevD * 2 / 3 + k  / 3
+    K.push(parseFloat(k.toFixed(2)))
+    D.push(parseFloat(d.toFixed(2)))
+    prevK = k; prevD = d
+  }
+  return { K, D }
+}
+
+const chartOption = computed(() => {
+  const hist = history.value
+  if (!hist.length) return {}
+  const s = props.stock || {}
+  const dates  = hist.map(d => d.tradingDate)
+  const prices = hist.map(d => parseFloat(Number(d.closePrice || 0).toFixed(2)))
+  const ma20  = calcMA(prices, 20)
+  const ma60  = calcMA(prices, 60)
+  const ma240 = calcMA(prices, 240)
+  const { K, D } = calcKD(hist)
+
+  // 成本均價：若提供 shares + investmentCost 才畫
+  const costTwd = s.shares > 0 && s.investmentCost ? s.investmentCost / s.shares : null
+  const usd = props.usdRate ? Number(props.usdRate) : null
+  const cost = costTwd != null && s.market === '美股' && usd ? costTwd / usd : costTwd
+
+  return {
+    backgroundColor: '#fff',
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'cross', link: [{ xAxisIndex: 'all' }] },
+      formatter: params => {
+        let html = `<strong>${params[0].axisValue}</strong><br/>`
+        params.forEach(p => { if (p.value != null) html += `${p.marker} ${p.seriesName}: <b>${p.value}</b><br/>` })
+        return html
+      }
+    },
+    legend: {
+      data: cost != null
+        ? ['收盤價', '月線MA20', '季線MA60', '年線MA240', '成本均價', 'K', 'D']
+        : ['收盤價', '月線MA20', '季線MA60', '年線MA240', 'K', 'D'],
+      top: 8, textStyle: { fontSize: 12 }
+    },
+    axisPointer: { link: [{ xAxisIndex: 'all' }] },
+    grid: [
+      { left: 64, right: 110, top: 48, bottom: 190 },
+      { left: 64, right: 110, top: 'auto', height: 90, bottom: 60 }
+    ],
+    dataZoom: [
+      { type: 'inside', xAxisIndex: [0, 1], start: 0, end: 100 },
+      { type: 'slider', xAxisIndex: [0, 1], start: 0, end: 100, height: 20, bottom: 8 }
+    ],
+    xAxis: [
+      { gridIndex: 0, type: 'category', data: dates, boundaryGap: false, axisLabel: { show: false }, axisLine: { onZero: false } },
+      { gridIndex: 1, type: 'category', data: dates, boundaryGap: false, axisLabel: { rotate: 30, fontSize: 10, formatter: v => v.substring(0, 7) } }
+    ],
+    yAxis: [
+      { gridIndex: 0, type: 'value', scale: true, axisLabel: { formatter: v => v.toFixed(0) }, splitLine: { lineStyle: { color: '#f0f0f0' } } },
+      { gridIndex: 1, type: 'value', min: 0, max: 100, splitNumber: 2, axisLabel: { fontSize: 10 }, splitLine: { lineStyle: { color: '#f0f0f0' } } }
+    ],
+    series: [
+      { name: '收盤價', type: 'line', xAxisIndex: 0, yAxisIndex: 0, data: prices,
+        lineStyle: { width: 2, color: '#3b82f6' }, itemStyle: { color: '#3b82f6' }, showSymbol: false,
+        endLabel: { show: true, formatter: '{c}', fontSize: 11, color: '#3b82f6', fontWeight: 700 },
+        areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+          colorStops: [{ offset: 0, color: 'rgba(59,130,246,0.12)' }, { offset: 1, color: 'rgba(59,130,246,0)' }] } }
+      },
+      { name: '月線MA20', type: 'line', xAxisIndex: 0, yAxisIndex: 0, data: ma20,
+        lineStyle: { width: 1.5, color: '#f59e0b' }, itemStyle: { color: '#f59e0b' }, showSymbol: false,
+        endLabel: { show: true, formatter: '{c}', fontSize: 11, color: '#f59e0b' } },
+      { name: '季線MA60', type: 'line', xAxisIndex: 0, yAxisIndex: 0, data: ma60,
+        lineStyle: { width: 1.5, color: '#8b5cf6' }, itemStyle: { color: '#8b5cf6' }, showSymbol: false,
+        endLabel: { show: true, formatter: '{c}', fontSize: 11, color: '#8b5cf6' } },
+      { name: '年線MA240', type: 'line', xAxisIndex: 0, yAxisIndex: 0, data: ma240,
+        lineStyle: { width: 1.5, color: '#ef4444' }, itemStyle: { color: '#ef4444' }, showSymbol: false,
+        endLabel: { show: true, formatter: '{c}', fontSize: 11, color: '#ef4444' } },
+      ...(cost != null ? [{
+        name: '成本均價', type: 'line', xAxisIndex: 0, yAxisIndex: 0,
+        data: dates.map(() => parseFloat(cost.toFixed(2))),
+        lineStyle: { color: '#64748b', type: 'dashed', width: 1.5 },
+        itemStyle: { color: '#64748b' }, showSymbol: false,
+        endLabel: {
+          show: true, formatter: '成本 {c}', fontSize: 11,
+          color: prices[prices.length - 1] >= cost ? '#16a34a' : '#ef4444'
+        }
+      }] : []),
+      { name: 'K', type: 'line', xAxisIndex: 1, yAxisIndex: 1, data: K,
+        lineStyle: { width: 1.5, color: '#f59e0b' }, itemStyle: { color: '#f59e0b' }, showSymbol: false,
+        endLabel: { show: true, formatter: '{c}', fontSize: 11, color: '#f59e0b' },
+        markLine: {
+          silent: true, data: [{ yAxis: 80 }, { yAxis: 20 }],
+          lineStyle: { color: '#94a3b8', type: 'dashed', width: 1 },
+          label: { formatter: '{c}', fontSize: 10, color: '#94a3b8' }
+        }
+      },
+      { name: 'D', type: 'line', xAxisIndex: 1, yAxisIndex: 1, data: D,
+        lineStyle: { width: 1.5, color: '#3b82f6' }, itemStyle: { color: '#3b82f6' }, showSymbol: false,
+        endLabel: { show: true, formatter: '{c}', fontSize: 11, color: '#3b82f6' }
+      }
+    ]
+  }
+})
+</script>
+
+<style scoped>
+.analysis-loading { display:flex;flex-direction:column;align-items:center;gap:12px;padding:60px 0;color:#64748b;font-size:14px }
+.analysis-empty   { text-align:center;padding:60px 0;color:#94a3b8;font-size:14px }
+.analysis-meta    { display:flex;align-items:center;justify-content:space-between;margin-bottom:8px }
+</style>
