@@ -819,7 +819,7 @@
               </el-table-column>
 
               <!-- 股號/股名 -->
-              <el-table-column label="股號/股名" min-width="280">
+              <el-table-column label="股號/股名" min-width="220">
                 <template #default="{ row }">
                   <div style="display:flex;gap:4px">
                     <el-input v-model="row.stockCode" size="small" placeholder="Ticker"
@@ -832,7 +832,7 @@
               </el-table-column>
 
               <!-- 股價/漲跌 -->
-              <el-table-column label="股價/漲跌(%)" width="250" align="right">
+              <el-table-column label="股價/漲跌(%)" width="200" align="right">
                 <template #default="{ row }">
                   <div class="price-cell">
                     <span v-if="row.latestPrice" class="price-num">{{ fmtPriceUs(row.latestPrice) }}</span>
