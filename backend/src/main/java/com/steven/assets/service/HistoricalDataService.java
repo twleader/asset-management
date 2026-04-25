@@ -276,16 +276,9 @@ public class HistoricalDataService {
                 if (sell == null) sell = decimal(row, "spot_sell");
                 if (buy == null && sell == null) continue;
 
-                BigDecimal mid;
-                if (buy != null && sell != null) {
-                    mid = buy.add(sell).divide(BigDecimal.valueOf(2), 4, RoundingMode.HALF_UP);
-                } else {
-                    mid = buy != null ? buy : sell;
-                }
-
                 rateHistRepo.save(ExchangeRateHistory.builder()
                         .currency(currency).rateDate(date)
-                        .buyRate(buy).sellRate(sell).midRate(mid)
+                        .buyRate(buy).sellRate(sell)
                         .build());
                 count++;
             }
@@ -323,19 +316,11 @@ public class HistoricalDataService {
                 if (sell == null) sell = decimal(row, "spot_sell");
                 if (buy == null && sell == null) continue;
 
-                BigDecimal mid;
-                if (buy != null && sell != null) {
-                    mid = buy.add(sell).divide(BigDecimal.valueOf(2), 4, RoundingMode.HALF_UP);
-                } else {
-                    mid = buy != null ? buy : sell;
-                }
-
                 rateHistRepo.save(ExchangeRateHistory.builder()
                         .currency(currency)
                         .rateDate(date)
                         .buyRate(buy)
                         .sellRate(sell)
-                        .midRate(mid)
                         .build());
                 count++;
             }
@@ -568,18 +553,15 @@ public class HistoricalDataService {
                     return;
                 }
 
-                BigDecimal mid = spotBuy.add(spotSell).divide(BigDecimal.valueOf(2), 4, RoundingMode.HALF_UP);
-
                 LocalDate today = LocalDate.now(ZoneId.of("Asia/Taipei"));
                 ExchangeRateHistory record = rateHistRepo.findByCurrencyAndRateDate(currency, today)
                         .orElse(ExchangeRateHistory.builder().currency(currency).rateDate(today).build());
 
                 record.setBuyRate(spotBuy);
                 record.setSellRate(spotSell);
-                record.setMidRate(mid);
                 rateHistRepo.save(record);
                 log.info("台灣銀行 {} 匯率: buy={}, sell={}, mid={} ({})",
-                        currency, spotBuy, spotSell, mid, today);
+                        currency, spotBuy, spotSell, record.getMidRate(), today);
                 return;
             }
             log.warn("台灣銀行 CSV 找不到 {} 的匯率資料", currency);

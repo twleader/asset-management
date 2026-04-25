@@ -54,12 +54,12 @@ public class WatchStockService {
 
         WatchStock w = WatchStock.builder()
                 .stockCode(code)
-                .stockName(req.getStockName())
                 .market(req.getMarket())
                 .displayOrder(maxOrder + 1)
                 .build();
         WatchStock saved = watchRepo.save(w);
 
+        // 同步寫入 stock 主檔（單一名稱來源）
         String name = req.getStockName() != null ? req.getStockName().trim() : "";
         if (name.isEmpty()) {
             name = stockMasterRepo.findByCodeAndMarket(code, req.getMarket())
@@ -87,10 +87,12 @@ public class WatchStockService {
     }
 
     private WatchStockDto.Response toResponse(WatchStock w) {
+        String stockName = stockMasterRepo.findByCodeAndMarket(w.getStockCode(), w.getMarket())
+                .map(s -> s.getName()).orElse(w.getStockCode());
         WatchStockDto.Response r = WatchStockDto.Response.builder()
                 .id(w.getId())
                 .stockCode(w.getStockCode())
-                .stockName(w.getStockName())
+                .stockName(stockName)
                 .market(w.getMarket())
                 .build();
 
@@ -110,10 +112,6 @@ public class WatchStockService {
             r.setTradingDate(sp.getTradingDate() != null ? sp.getTradingDate().toString() : null);
             r.setPriceUpdatedAt(sp.getUpdatedAt() != null ? sp.getUpdatedAt().toString() : null);
             r.setClosed(sp.getClosed());
-            // 若 watch 沒有股名，用報價快取補
-            if ((w.getStockName() == null || w.getStockName().isBlank()) && sp.getStockName() != null) {
-                r.setStockName(sp.getStockName());
-            }
         });
 
         // 對於非交易時間或新加入觀察股票，買賣/開盤/昨收/最高/最低/成交量可能為 null

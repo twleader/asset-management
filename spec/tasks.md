@@ -746,3 +746,39 @@
 - [x] 25.2 `HistoricalDataService.collectAllHeldCodes` 改以 `stock` 主檔為主來源，並聯集歷史快照中的持股代號（保險用）
   - 影響：`backfillAll`、`dailyTwStockUpdate`、`dailyUsStockUpdate`、`startupBackfill` 皆自動套用新範圍
   - 結果：凡列入主檔的股票（含觀察清單與警示）皆保有 10 年歷史收盤價並納入每日更新
+
+### Task 26: 全面正規化 — 移除冗餘 / 衍生欄位
+
+**對應需求:** 技術債清理（非功能性需求）— 對應 CLAUDE.md「資料庫完整正規化」規範。
+
+#### 背景
+
+CLAUDE.md 規定「相同的資料只能存一份；禁止同一欄位同時以 FK 和字串冗餘儲存；禁止存可由其他欄位計算得出的衍生值」。
+全 Entity 稽核後發現以下違規欄位，本 Task 統一清理。
+
+| Entity | 欄位 | 違規類型 | 處理 |
+|---|---|---|---|
+| StockHolding | stockName | 重複（stock 主檔已有） | DROP，DTO 由 join 填入 |
+| StockAlert | stockName | 重複（stock 主檔已有） | DROP，DTO 由 join 填入 |
+| WatchStock | stockName | 重複（stock 主檔已有） | DROP，DTO 由 join 填入 |
+| StockPrice | stockName | 重複（stock 主檔已有） | DROP，DTO 由 join 填入 |
+| StockPrice | priceChange | 衍生（price - previousClose） | DROP，改為 @Transient |
+| StockPrice | changePercent | 衍生（priceChange / previousClose） | DROP，改為 @Transient |
+| ExchangeRateHistory | midRate | 衍生（(buyRate+sellRate)/2） | DROP，改為 @Transient |
+| RealizedGain | year (trade_year) | 衍生（YEAR(tradeDate)） | DROP，改為 @Transient |
+
+#### Steps:
+
+- [x] 26.1 新增 Liquibase migration `v1.9.4-drop-redundant-columns.sql` 一次 DROP 上述所有欄位
+- [x] 26.2 Entity 層
+  - StockHolding/StockAlert/WatchStock/StockPrice 移除 `stockName` 欄位
+  - StockPrice 移除 `priceChange` / `changePercent` 欄位
+  - ExchangeRateHistory 移除 `midRate` 欄位，新增 `@Transient getMidRate()`
+  - RealizedGain 移除 `year` 欄位，新增 `@Transient getYear()`
+  - StockPrice 新增 `@Transient getPriceChange()` / `@Transient getChangePercent()`
+- [x] 26.3 Service 層
+  - `AssetService` / `StockAlertService` / `WatchStockService` / `StockPriceService` / `ExcelExportService` 在組裝 DTO 時改以 `StockRepository.findByCodeAndMarket()` 取得 stockName
+  - 寫入流程（create / update / Excel 匯入 / 行情抓取）若請求包含 stockName，呼叫 `stockMasterRepo.upsert()` 而非寫回 entity
+  - `RealizedGainRepository.findByYearOrderByTradeDateAsc` 改用 `tradeDate BETWEEN start AND end` 區間查詢
+  - `HistoricalDataService` 移除 `midRate` 計算與 setter，改用 entity 的 @Transient getter
+- [x] 26.4 DTO 與前端 API 契約保持不變（`stockName` / `priceChange` / `changePercent` / `midRate` / `year` 仍回傳，由後端計算或 join 取得）

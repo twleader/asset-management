@@ -7,6 +7,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
@@ -32,10 +33,6 @@ public class StockPrice {
     @Column(nullable = false, length = 20)
     private String stockCode;
 
-    /** 股票名稱 */
-    @Column(length = 50)
-    private String stockName;
-
     /** 市場 */
     @Column(nullable = false, length = 20)
     private String market;
@@ -44,13 +41,22 @@ public class StockPrice {
     @Column(nullable = false, precision = 15, scale = 4)
     private BigDecimal price;
 
-    /** 漲跌金額 */
-    @Column(precision = 15, scale = 4)
-    private BigDecimal priceChange;
+    /** 漲跌金額 = price - previousClose（即時計算） */
+    @Transient
+    public BigDecimal getPriceChange() {
+        if (price == null || previousClose == null) return null;
+        return price.subtract(previousClose).setScale(4, RoundingMode.HALF_UP);
+    }
 
-    /** 漲跌幅 (%) */
-    @Column(precision = 10, scale = 4)
-    private BigDecimal changePercent;
+    /** 漲跌幅 (%) = priceChange / previousClose × 100（即時計算） */
+    @Transient
+    public BigDecimal getChangePercent() {
+        if (previousClose == null || previousClose.signum() == 0 || price == null) return null;
+        return price.subtract(previousClose)
+                .divide(previousClose, 6, RoundingMode.HALF_UP)
+                .multiply(BigDecimal.valueOf(100))
+                .setScale(4, RoundingMode.HALF_UP);
+    }
 
     /** 五檔買進最佳價 */
     @Column(precision = 15, scale = 4)

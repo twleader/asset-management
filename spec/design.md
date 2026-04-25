@@ -247,7 +247,7 @@ StockAlert            (到價警示，獨立資料表；WatchStock 列表彙總�
 | currency | String | 幣別（TWD/USD） |
 | broker | String | 券商名稱 |
 | tradeDate | LocalDate | 交易日期 |
-| year | Integer | 年度（應用層計算，存入 trade_year 欄位） |
+| year | Integer | 年度（@Transient，由 tradeDate.getYear() 計算；v1.9.4 起移除實體欄位 trade_year） |
 | shares | BigDecimal | 交易股數 |
 | salePrice | BigDecimal | 賣出均價（原幣） |
 | proceeds | BigDecimal | 收帳金額（原幣） |
@@ -255,6 +255,12 @@ StockAlert            (到價警示，獨立資料表；WatchStock 列表彙總�
 | exchangeRate | BigDecimal | 交易時匯率 |
 
 > 正規化：`profit` 與 `profitRate` 為衍生值（`proceeds - investmentCost` 與其除以 `investmentCost`），不入庫，於 DTO 層即時計算後回傳。v1.9.3 起移除實體欄位。
+>
+> v1.9.4 進一步移除冗餘 / 衍生欄位：
+> - `stock_holding.stock_name` / `stock_alert.stock_name` / `watch_stock.stock_name` / `stock_price.stock_name`：與 `stock` 主檔重複，DROP，DTO 由 `StockRepository.findByCodeAndMarket()` join 補上。
+> - `stock_price.price_change` / `change_percent`：可由 `price - previousClose` 即時計算，改為 `@Transient`。
+> - `exchange_rate_history.mid_rate`：可由 `(buyRate + sellRate) / 2` 即時計算，改為 `@Transient`。
+> - `realized_gain.trade_year`：可由 `YEAR(tradeDate)` 即時計算，改為 `@Transient`，相關 query 改以日期區間替代。
 
 #### StockPrice（擴充）
 | 欄位 | 型別 | 說明 |

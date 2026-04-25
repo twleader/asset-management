@@ -21,9 +21,6 @@ public class StockAlert {
     @Column(nullable = false, length = 20)
     private String stockCode;
 
-    @Column(length = 100)
-    private String stockName;
-
     @Column(nullable = false, length = 20)
     private String market;
 
