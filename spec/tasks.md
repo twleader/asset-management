@@ -782,3 +782,17 @@ CLAUDE.md 規定「相同的資料只能存一份；禁止同一欄位同時以 
   - `RealizedGainRepository.findByYearOrderByTradeDateAsc` 改用 `tradeDate BETWEEN start AND end` 區間查詢
   - `HistoricalDataService` 移除 `midRate` 計算與 setter，改用 entity 的 @Transient getter
 - [x] 26.4 DTO 與前端 API 契約保持不變（`stockName` / `priceChange` / `changePercent` / `midRate` / `year` 仍回傳，由後端計算或 join 取得）
+
+### Task 27: 新增觀察股票時即時抓價
+
+對應 Requirements: 7（觀察清單體驗）
+
+#### 背景
+
+`stock_price`（即時報價表）只由 `StockPriceService.scheduledPriceUpdate` 在「市場開盤中或剛收盤」時段寫入。
+若使用者在非交易時段把新股票加入觀察清單，畫面欄位（股價/開盤/昨收/最高/最低/成交量）會空白直到下次開盤，體驗不佳。
+
+#### Steps:
+
+- [x] 27.1 `WatchStockService.create` 在 upsert 完 stock 主檔後，呼叫 `stockPriceService.updatePrices(Set.of(code), market, false)`，即時抓一次行情寫入 `stock_price`
+- [x] 27.2 抓價失敗以 warn log 記錄，不阻斷新增動作（觀察記錄仍寫入成功）
