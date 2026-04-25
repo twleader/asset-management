@@ -714,10 +714,11 @@
                             @blur="() => {
                               br.shares = numParse(br.sharesStr, 5); br.sharesStr = numFmt(br.shares)
                               if (br.avgCost) {
-                                // 美股 investmentCost 統一 USD
+                                // avgCost 永遠以 USD 為基準
                                 const usd = numParse(((br.avgCost||0)*(br.shares||0)).toFixed(6), 6)
-                                br.investmentCost = usd; br.investmentCostStr = numFmt(usd)
+                                br.investmentCost = usd
                                 if (br.currency === 'TWD') br.investmentCostTwd = Math.round(usd * effectiveRate(br))
+                                syncBrCostStr(br)
                               }
                             }" />
                         </template>
@@ -728,12 +729,11 @@
                           <el-select v-model="br.currency" size="small" style="width:100%"
                             @change="() => {
                               if (br.avgCost && br.shares) {
-                                // 美股 investmentCost 統一 USD，切換幣別時同步更新 investmentCostTwd
                                 const usd = numParse(((br.avgCost||0)*(br.shares||0)).toFixed(6), 6)
                                 br.investmentCost = usd
-                                br.investmentCostStr = numFmt(usd)
                                 br.investmentCostTwd = br.currency === 'TWD' ? Math.round(usd * effectiveRate(br)) : null
                               }
+                              syncBrCostStr(br)
                             }">
                             <el-option value="TWD" label="TWD" />
                             <el-option value="USD" label="USD" />
@@ -749,27 +749,31 @@
                               br.avgCost = numParse(br.avgCostStr, 6)
                               br.avgCostStr = numFmt(br.avgCost)
                               br.originalCurrencyValue = br.avgCost
-                              // 美股 investmentCost 統一 USD（avgCost 永遠以 USD 輸入）
                               const usd = numParse(((br.avgCost||0)*(br.shares||0)).toFixed(6), 6)
                               br.investmentCost = usd
-                              br.investmentCostStr = numFmt(usd)
                               br.investmentCostTwd = br.currency === 'TWD' ? Math.round(usd * effectiveRate(br)) : null
+                              syncBrCostStr(br)
                             }" />
                         </template>
                       </el-table-column>
-                      <!-- 持股成本（USD）：美股統一以 USD 顯示與輸入；反算均價(USD) -->
-                      <el-table-column label="持股成本(USD)" width="145">
+                      <!-- 持股成本：依幣別顯示／輸入（TWD→TWD，USD→USD） -->
+                      <el-table-column label="持股成本" width="145">
                         <template #default="{ row: br }">
                           <el-input v-model="br.investmentCostStr" size="small"
                             style="width:100%" :input-style="{ textAlign: 'right' }"
-                            placeholder="USD"
+                            :placeholder="br.currency"
                             @blur="() => {
-                              // 使用者輸入 USD 成本
-                              br.investmentCost = numParse(br.investmentCostStr, 6)
-                              br.investmentCostStr = numFmt(br.investmentCost)
-                              // TWD 幣別：同步更新台幣原始成本（供 DB 儲存及重算）
-                              br.investmentCostTwd = br.currency === 'TWD'
-                                ? Math.round(br.investmentCost * effectiveRate(br)) : null
+                              const decimals = br.currency === 'USD' ? 6 : 0
+                              const parsed = numParse(br.investmentCostStr, decimals)
+                              if (br.currency === 'TWD') {
+                                br.investmentCostTwd = Math.round(parsed)
+                                br.investmentCost = effectiveRate(br) > 0
+                                  ? Number((parsed / effectiveRate(br)).toFixed(6)) : 0
+                              } else {
+                                br.investmentCost = parsed
+                                br.investmentCostTwd = null
+                              }
+                              syncBrCostStr(br)
                               if (br.shares > 0) {
                                 br.avgCost = parseFloat((br.investmentCost / br.shares).toFixed(6))
                                 br.avgCostStr = numFmt(br.avgCost)
@@ -1295,6 +1299,15 @@ const calcBrOriginalValue = (br, stock) => {
 /** 取得 br 的有效匯率：優先用交易日匯率，備援快照匯率 */
 const effectiveRate = (br) => br.transactionExchangeRate || form.usdExchangeRate || 1
 
+/** 依幣別重新填入持股成本顯示字串：TWD 顯示 investmentCostTwd，USD 顯示 investmentCost */
+function syncBrCostStr(br) {
+  if (br.currency === 'TWD') {
+    br.investmentCostStr = numFmt(br.investmentCostTwd ?? 0)
+  } else {
+    br.investmentCostStr = numFmt(br.investmentCost ?? 0)
+  }
+}
+
 /** 日期選定後自動抓取歷史匯率，並依新匯率重算 USD 成本
  *  - TWD 幣別：investmentCostTwd（台幣固定支出）÷ 新匯率 → USD 成本
  *  - USD 幣別：成本本身就是 USD，不受匯率影響 */
@@ -1308,11 +1321,11 @@ async function onUsTransactionDateChange(br, date) {
     const res = await marketDataApi.getExchangeRateOnDate('USD', dateStr)
     const newRate = Number(res.midRate)
     br.transactionExchangeRate = newRate
-    // TWD 幣別：以台幣固定支出反推新 USD 成本
+    // TWD 幣別：以台幣固定支出反推新 USD 成本（顯示維持 TWD）
     if (br.currency === 'TWD' && br.investmentCostTwd && newRate > 0) {
       const newUsd = Number((br.investmentCostTwd / newRate).toFixed(6))
       br.investmentCost = newUsd
-      br.investmentCostStr = numFmt(newUsd)
+      syncBrCostStr(br)
       if (br.shares > 0) {
         br.avgCost = Number((newUsd / br.shares).toFixed(6))
         br.avgCostStr = numFmt(br.avgCost)
@@ -1831,6 +1844,10 @@ const groupStocks = (flat) => {
       totalCost = ic
     }
 
+    // 顯示用字串：TWD 顯示原始 TWD 金額；USD 顯示 USD
+    const costDisplay = isUs && cur === 'TWD' && investmentCostTwd
+      ? investmentCostTwd
+      : totalCost
     map.get(key).brokerRows.push({
       _id: _idSeq++,
       brokerId: s.brokerId || null,
@@ -1838,7 +1855,7 @@ const groupStocks = (flat) => {
       sharesStr: numFmt(sh),
       currency: cur,
       investmentCost: totalCost,
-      investmentCostStr: numFmt(totalCost),
+      investmentCostStr: numFmt(costDisplay),
       investmentCostTwd,                              // 美股 TWD 幣別的原始台幣成本（供 DB 儲存及重算用）
       avgCost: avg,
       avgCostStr: numFmt(avg),
