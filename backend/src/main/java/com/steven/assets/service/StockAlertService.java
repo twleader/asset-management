@@ -7,6 +7,7 @@ import com.steven.assets.model.StockPriceHistory;
 import com.steven.assets.repository.StockAlertRepository;
 import com.steven.assets.repository.StockPriceHistoryRepository;
 import com.steven.assets.repository.StockPriceRepository;
+import com.steven.assets.repository.StockRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -26,6 +27,7 @@ public class StockAlertService {
     private final StockAlertRepository alertRepo;
     private final StockPriceRepository priceRepo;
     private final StockPriceHistoryRepository historyRepo;
+    private final StockRepository stockMasterRepo;
 
     // ===== CRUD =====
 
@@ -39,15 +41,18 @@ public class StockAlertService {
         int maxOrder = alertRepo.findAllByOrderByDisplayOrderAsc().stream()
                 .mapToInt(a -> a.getDisplayOrder() != null ? a.getDisplayOrder() : 0)
                 .max().orElse(0);
+        String code = req.getStockCode().trim().toUpperCase();
         StockAlert alert = StockAlert.builder()
-                .stockCode(req.getStockCode().trim().toUpperCase())
-                .stockName(req.getStockName())
+                .stockCode(code)
                 .market(req.getMarket())
                 .alertType(req.getAlertType())
                 .threshold(req.getThreshold())
                 .active(req.getActive() != null ? req.getActive() : true)
                 .displayOrder(maxOrder + 1)
                 .build();
+        if (req.getStockName() != null && !req.getStockName().isBlank()) {
+            stockMasterRepo.upsert(code, req.getMarket(), req.getStockName().trim());
+        }
         return toResponse(alertRepo.save(alert));
     }
 
@@ -66,9 +71,12 @@ public class StockAlertService {
     public StockAlertDto.Response update(Long id, StockAlertDto.Request req) {
         StockAlert alert = alertRepo.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Alert not found: " + id));
-        alert.setStockCode(req.getStockCode().trim().toUpperCase());
-        alert.setStockName(req.getStockName());
+        String code = req.getStockCode().trim().toUpperCase();
+        alert.setStockCode(code);
         alert.setMarket(req.getMarket());
+        if (req.getStockName() != null && !req.getStockName().isBlank()) {
+            stockMasterRepo.upsert(code, req.getMarket(), req.getStockName().trim());
+        }
         alert.setAlertType(req.getAlertType());
         alert.setThreshold(req.getThreshold());
         if (req.getActive() != null) alert.setActive(req.getActive());
@@ -224,7 +232,9 @@ public class StockAlertService {
         StockAlertDto.Response r = new StockAlertDto.Response();
         r.setId(a.getId());
         r.setStockCode(a.getStockCode());
-        r.setStockName(a.getStockName());
+        String name = stockMasterRepo.findByCodeAndMarket(a.getStockCode(), a.getMarket())
+                .map(s -> s.getName()).orElse(a.getStockCode());
+        r.setStockName(name);
         r.setMarket(a.getMarket());
         r.setAlertType(a.getAlertType());
         r.setThreshold(a.getThreshold());

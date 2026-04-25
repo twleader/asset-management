@@ -27,9 +27,6 @@ public class WatchStock {
     @Column(name = "stock_code", nullable = false, length = 20)
     private String stockCode;
 
-    @Column(name = "stock_name", length = 100)
-    private String stockName;
-
     @Column(nullable = false, length = 20)
     private String market;
 

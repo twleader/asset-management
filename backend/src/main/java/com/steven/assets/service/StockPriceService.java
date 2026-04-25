@@ -8,6 +8,7 @@ import com.steven.assets.model.WatchStock;
 import com.steven.assets.repository.AssetSnapshotRepository;
 import com.steven.assets.repository.ExchangeRateHistoryRepository;
 import com.steven.assets.repository.StockPriceRepository;
+import com.steven.assets.repository.StockRepository;
 import com.steven.assets.repository.WatchStockRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -39,6 +40,7 @@ public class StockPriceService {
     private final MarketDataService marketDataService;
     private final StockAlertService stockAlertService;
     private final WatchStockRepository watchStockRepo;
+    private final StockRepository stockMasterRepo;
 
     private static final ZoneId TW_ZONE = ZoneId.of("Asia/Taipei");
     private static final ZoneId US_ZONE = ZoneId.of("America/New_York");
@@ -177,8 +179,6 @@ public class StockPriceService {
                                 .build());
 
                 sp.setPrice(result.price());
-                sp.setPriceChange(result.change());
-                sp.setChangePercent(result.changePct());
                 if (result.buyPrice()      != null) sp.setBuyPrice(result.buyPrice());
                 if (result.sellPrice()     != null) sp.setSellPrice(result.sellPrice());
                 if (result.openPrice()     != null) sp.setOpenPrice(result.openPrice());
@@ -191,9 +191,10 @@ public class StockPriceService {
                 sp.setClosed(markClosed);
                 sp.setSource(result.source());
 
-                // 嘗試從最新快照取得股票名稱
-                if (sp.getStockName() == null) {
-                    sp.setStockName(code);
+                // 股票名稱寫入 stock 主檔（單一來源）
+                if (result.stockName() != null && !result.stockName().isBlank()
+                        && !result.stockName().equalsIgnoreCase(code)) {
+                    stockMasterRepo.upsert(code, market, result.stockName());
                 }
 
                 priceRepo.save(sp);
@@ -323,9 +324,11 @@ public class StockPriceService {
                 liveStockValue = liveStockValue.add(liveValue);
             }
 
+            String shName = stockMasterRepo.findByCodeAndMarket(sh.getStockCode(), sh.getMarket())
+                    .map(s -> s.getName()).orElse(sh.getStockCode());
             stockItems.add(new LiveStockItem(
                 sh.getStockCode(),
-                sh.getStockName(),
+                shName,
                 sh.getMarket(),
                 sh.getShares(),
                 price,
@@ -370,9 +373,11 @@ public class StockPriceService {
     ) {}
 
     private StockPriceDto toDto(StockPrice sp) {
+        String name = stockMasterRepo.findByCodeAndMarket(sp.getStockCode(), sp.getMarket())
+                .map(s -> s.getName()).orElse(sp.getStockCode());
         return new StockPriceDto(
             sp.getStockCode(),
-            sp.getStockName(),
+            name,
             sp.getMarket(),
             sp.getPrice(),
             sp.getPriceChange(),

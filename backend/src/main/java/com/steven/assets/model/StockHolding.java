@@ -34,10 +34,6 @@ public class StockHolding {
     @Column(nullable = false, length = 20)
     private String stockCode;
 
-    /** 股票名稱 */
-    @Column(nullable = false, length = 50)
-    private String stockName;
-
     /** 市場 */
     @Column(nullable = false, length = 20)
     private String market;

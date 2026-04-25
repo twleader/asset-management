@@ -3,6 +3,7 @@ package com.steven.assets.service;
 import com.steven.assets.model.*;
 import com.steven.assets.repository.AssetSnapshotRepository;
 import com.steven.assets.repository.RealizedGainRepository;
+import com.steven.assets.repository.StockRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.ss.usermodel.*;
@@ -28,6 +29,7 @@ public class ExcelExportService {
 
     private final AssetSnapshotRepository snapshotRepo;
     private final RealizedGainRepository gainRepo;
+    private final StockRepository stockMasterRepo;
 
     private static final DateTimeFormatter SHEET_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
     private static final DateTimeFormatter ISO = DateTimeFormatter.ISO_LOCAL_DATE;
@@ -139,7 +141,9 @@ public class ExcelExportService {
             cell(row, 0, sk.getBroker() != null ? sk.getBroker().getDisplayName() : "", null);
             cell(row, 1, sk.getMarket(), null);
             cell(row, 2, sk.getStockCode(), null);
-            cell(row, 3, sk.getStockName(), null);
+            String stName = stockMasterRepo.findByCodeAndMarket(sk.getStockCode(), sk.getMarket())
+                    .map(Stock::getName).orElse(sk.getStockCode());
+            cell(row, 3, stName, null);
             cell(row, 4, sk.getShares(), st.num4);
             cell(row, 5, sk.getInvestmentCost(), st.money);
             cell(row, 6, sk.getCurrentValue(), st.money);

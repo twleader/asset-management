@@ -69,7 +69,9 @@ public class RealizedGain {
     @Column(precision = 10, scale = 4)
     private BigDecimal exchangeRate;
 
-    /** 年度 (trade_year 避免 SQL 保留字衝突) */
-    @Column(name = "trade_year", nullable = false)
-    private Integer year;
+    /** 年度，由 tradeDate 即時衍生 */
+    @Transient
+    public Integer getYear() {
+        return tradeDate != null ? tradeDate.getYear() : null;
+    }
 }

@@ -66,11 +66,11 @@ public class AssetService {
                             st.getCurrentValue().multiply(r.dividendRate()).setScale(0, RoundingMode.HALF_UP));
                     }
                     updated = true;
-                    log.info("自動補齊配息率 {} {}: {}%", st.getStockCode(), st.getStockName(),
+                    log.info("自動補齊配息率 {} {}: {}%", st.getStockCode(), st.getMarket(),
                             r.dividendRate().multiply(BigDecimal.valueOf(100)).setScale(2, RoundingMode.HALF_UP));
                 }
             } catch (Exception e) {
-                log.warn("查詢配息率失敗 {} {}: {}", st.getStockCode(), st.getStockName(), e.getMessage());
+                log.warn("查詢配息率失敗 {} {}: {}", st.getStockCode(), st.getMarket(), e.getMessage());
             }
         }
         if (updated) {
@@ -137,7 +137,6 @@ public class AssetService {
                 StockHolding stock = StockHolding.builder()
                         .snapshot(snapshot)
                         .stockCode(st.stockCode())
-                        .stockName(st.stockName())
                         .market(st.market())
                         .broker(broker)
                         .shares(st.shares())
@@ -222,7 +221,7 @@ public class AssetService {
             req.stocks().forEach(st -> {
                 BrokerEntity broker = st.brokerId() != null ? brokerRepo.findById(st.brokerId()).orElse(null) : null;
                 snapshot.getStocks().add(StockHolding.builder()
-                    .snapshot(snapshot).stockCode(st.stockCode()).stockName(st.stockName())
+                    .snapshot(snapshot).stockCode(st.stockCode())
                     .market(st.market()).broker(broker).shares(st.shares())
                     .investmentCost(st.investmentCost()).currentValue(st.currentValue())
                     .estimatedDividend(st.estimatedDividend()).dividendRate(st.dividendRate())
@@ -370,7 +369,6 @@ public class AssetService {
                 .proceeds(req.proceeds())
                 .investmentCost(req.investmentCost())
                 .exchangeRate(exchangeRate)
-                .year(req.tradeDate().getYear())
                 .build();
 
         return toGainResponse(gainRepo.save(gain));
@@ -403,7 +401,6 @@ public class AssetService {
         gain.setProceeds(req.proceeds());
         gain.setInvestmentCost(req.investmentCost());
         gain.setExchangeRate(exchangeRate);
-        gain.setYear(req.tradeDate().getYear());
 
         return toGainResponse(gainRepo.save(gain));
     }
@@ -628,8 +625,10 @@ public class AssetService {
                     } else {
                         investmentCostTwd = rawCost.setScale(0, RoundingMode.HALF_UP);
                     }
+                    String stName = stockMasterRepo.findByCodeAndMarket(st.getStockCode(), st.getMarket())
+                            .map(Stock::getName).orElse(st.getStockCode());
                     return new AssetSnapshotDto.StockResponse(
-                        st.getId(), st.getStockCode(), st.getStockName(), st.getMarket(),
+                        st.getId(), st.getStockCode(), stName, st.getMarket(),
                         st.getBroker() != null ? st.getBroker().getId() : null,
                         st.getBroker() != null ? st.getBroker().getDisplayName() : null,
                         st.getShares(), rawCost, investmentCostTwd, st.getCurrentValue(),
