@@ -709,3 +709,17 @@
 - [x] 22.3 後端：Seed Data（`DataInitializer`）建立預設待轉入資金類型
 
 - [x] 22.4 前端：新增 `TransitFundTypeSettingsView.vue`，左側「系統設定」追加項目
+
+---
+
+### Task 23: 資料庫正規化 — 移除 legacy 字串欄位
+
+**對應需求:** 技術債清理（非功能性需求）
+
+#### Steps:
+
+- [x] 23.1 新增 Liquibase migration `v1.9.2-drop-legacy-string-columns.sql`
+  - DROP `bank_deposit.bank_name`（已由 `bank_id` FK 取代，Java Entity 未對應）
+  - DROP `fund_holding.bank`（字串欄，已由 `bank_id` FK 取代，Java Entity 未對應）
+  - DROP `stock_holding.broker`（字串欄，已由 `broker_id` FK 取代，Java Entity 未對應）
+  - 保留 `realized_gain.broker`（歷史交易記錄，無 FK，屬刻意設計）
