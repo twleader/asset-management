@@ -796,3 +796,20 @@ CLAUDE.md 規定「相同的資料只能存一份；禁止同一欄位同時以 
 
 - [x] 27.1 `WatchStockService.create` 在 upsert 完 stock 主檔後，呼叫 `stockPriceService.updatePrices(Set.of(code), market, false)`，即時抓一次行情寫入 `stock_price`
 - [x] 27.2 抓價失敗以 warn log 記錄，不阻斷新增動作（觀察記錄仍寫入成功）
+
+### Task 28: 啟動補抓主檔缺報價的股票
+
+對應 Requirements: 7
+
+#### 背景
+
+`stock_price` 表只在「市場開盤中或剛收盤」由排程寫入。
+若 stock 主檔（涵蓋持股 / 觀察 / 警示）中有股票尚無 `stock_price` 記錄，
+畫面欄位會持續為空直到下次該市場開盤；即使 Task 27 為新增觀察補上了即時抓價，舊資料仍會空白。
+
+#### Steps:
+
+- [x] 28.1 `StockPriceService` 新增 `@EventListener(ApplicationReadyEvent.class)` 啟動補抓
+  - 掃描 `stock` 主檔，找出沒有對應 `stock_price` 記錄的 (code, market)
+  - 開獨立執行緒呼叫 `updatePrices()`，避免阻塞 Spring 啟動
+  - `markClosed` 由 `isTwMarketOpen() / isUsMarketOpen()` 推導

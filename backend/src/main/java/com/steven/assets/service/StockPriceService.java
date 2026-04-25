@@ -1,5 +1,6 @@
 package com.steven.assets.service;
 
+import com.steven.assets.model.Stock;
 import com.steven.assets.model.StockPrice;
 import com.steven.assets.model.StockHolding;
 import com.steven.assets.model.AssetSnapshot;
@@ -12,6 +13,8 @@ import com.steven.assets.repository.StockRepository;
 import com.steven.assets.repository.WatchStockRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -95,6 +98,29 @@ public class StockPriceService {
 
         LocalTime time = now.toLocalTime();
         return time.isAfter(LocalTime.of(16, 0)) && time.isBefore(LocalTime.of(16, 20));
+    }
+
+    // ===================== 啟動補抓 =====================
+
+    /**
+     * 啟動完成後，補抓 stock 主檔中尚無 stock_price 紀錄的股票
+     * 主檔涵蓋持股、觀察、警示，凡列入主檔皆應有即時報價可查。
+     */
+    @EventListener(ApplicationReadyEvent.class)
+    public void backfillMissingPricesOnStartup() {
+        Set<String> twMissing = new LinkedHashSet<>();
+        Set<String> usMissing = new LinkedHashSet<>();
+        for (Stock s : stockMasterRepo.findAll()) {
+            if (priceRepo.findByStockCodeAndMarket(s.getCode(), s.getMarket()).isPresent()) continue;
+            if ("美股".equals(s.getMarket())) usMissing.add(s.getCode());
+            else twMissing.add(s.getCode());
+        }
+        if (twMissing.isEmpty() && usMissing.isEmpty()) return;
+        log.info("啟動補抓主檔中無即時報價的股票：台股 {} 檔、美股 {} 檔", twMissing.size(), usMissing.size());
+        new Thread(() -> {
+            if (!twMissing.isEmpty()) updatePrices(twMissing, "台股", !isTwMarketOpen());
+            if (!usMissing.isEmpty()) updatePrices(usMissing, "美股", !isUsMarketOpen());
+        }, "startup-price-backfill").start();
     }
 
     // ===================== 排程更新 =====================
