@@ -3,6 +3,7 @@ package com.steven.assets.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.steven.assets.dto.BackupDto;
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -10,6 +11,8 @@ import org.springframework.stereotype.Service;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
@@ -32,6 +35,11 @@ public class BackupService {
     private static final DateTimeFormatter TS_FMT = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss");
     private static final long PROCESS_TIMEOUT_SEC = 300;
 
+    /** 唯讀掛入的 rclone 設定來源（docker-compose mount） */
+    private static final Path RCLONE_CONFIG_SOURCE = Path.of("/etc/rclone/rclone.conf");
+    /** rclone 實際使用的 config 路徑（可寫，給 token 自動續期使用） */
+    private static final Path RCLONE_CONFIG_WRITABLE = Path.of("/tmp/rclone.conf");
+
     private final String dbHost;
     private final String dbPort;
     private final String dbName;
@@ -50,6 +58,30 @@ public class BackupService {
         this.dbName = dbName;
         this.dbUser = dbUser;
         this.dbPassword = dbPassword;
+    }
+
+    /**
+     * 啟動時把唯讀掛入的 rclone 設定複製到可寫位置，
+     * 避免 rclone 自動更新 OAuth token 寫回失敗（exit non-zero）
+     */
+    @PostConstruct
+    void initRcloneConfig() {
+        try {
+            if (Files.exists(RCLONE_CONFIG_SOURCE)) {
+                Files.copy(RCLONE_CONFIG_SOURCE, RCLONE_CONFIG_WRITABLE, StandardCopyOption.REPLACE_EXISTING);
+                try {
+                    Files.setPosixFilePermissions(RCLONE_CONFIG_WRITABLE,
+                            PosixFilePermissions.fromString("rw-------"));
+                } catch (UnsupportedOperationException ignored) {
+                    // 非 POSIX 系統，跳過
+                }
+                log.info("rclone config 已複製至可寫路徑：{}", RCLONE_CONFIG_WRITABLE);
+            } else {
+                log.warn("找不到 rclone 設定來源：{}（備份/還原功能將無法使用）", RCLONE_CONFIG_SOURCE);
+            }
+        } catch (IOException e) {
+            log.error("初始化 rclone config 失敗：{}", e.getMessage(), e);
+        }
     }
 
     /** 立即備份。autoPreRestore=true 時使用「自救點」檔名前綴，且不做 5 份輪替。 */
@@ -242,8 +274,8 @@ public class BackupService {
             ProcessBuilder pb = new ProcessBuilder(cmd);
             // PostgreSQL 密碼
             pb.environment().put("PGPASSWORD", dbPassword);
-            // rclone 設定路徑（docker-compose 已設 RCLONE_CONFIG，這裡保險再注入一次）
-            pb.environment().putIfAbsent("RCLONE_CONFIG", "/etc/rclone/rclone.conf");
+            // rclone 設定路徑：使用可寫副本（覆寫 docker-compose 的唯讀路徑）
+            pb.environment().put("RCLONE_CONFIG", RCLONE_CONFIG_WRITABLE.toString());
 
             if (stdoutFile != null) pb.redirectOutput(stdoutFile.toFile());
             if (stdinFile != null) pb.redirectInput(stdinFile.toFile());
