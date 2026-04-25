@@ -507,7 +507,7 @@ const fmtShares = (v, market) => {
 }
 const fmtPrice = (v) => {
   if (v == null) return '-'
-  return Number(v).toLocaleString('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return `$${Number(v).toLocaleString('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
 const summaryCards = computed(() => {

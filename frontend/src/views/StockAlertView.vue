@@ -70,10 +70,10 @@
             <template v-if="row.lastTriggeredAt">
               <div style="font-size:12px;color:#64748b">{{ fmtDt(row.lastTriggeredAt) }}</div>
               <div style="font-size:12px;color:#0f172a">
-                股價 <strong>{{ row.lastTriggeredPrice != null ? Number(row.lastTriggeredPrice).toLocaleString() : '—' }}</strong>
+                股價 <strong>{{ row.lastTriggeredPrice != null ? '$' + Number(row.lastTriggeredPrice).toLocaleString() : '—' }}</strong>
               </div>
               <div style="font-size:12px;color:#0f172a">
-                季線 <strong>{{ row.quarterlyMa != null ? Number(row.quarterlyMa).toLocaleString() : '—' }}</strong>
+                季線 <strong>{{ row.quarterlyMa != null ? '$' + Number(row.quarterlyMa).toLocaleString() : '—' }}</strong>
               </div>
               <div style="font-size:12px;color:#2563eb">
                 <span>K {{ row.kValue != null ? Number(row.kValue).toFixed(1) : '—' }}</span>

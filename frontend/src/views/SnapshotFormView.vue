@@ -209,24 +209,24 @@
             <div class="deposit-summary">
               <div class="ds-item">
                 <span class="ds-label">活存</span>
-                <span class="ds-val">USD {{ numFmt(usdDemandAmt.toFixed(2)) }}</span>
+                <span class="ds-val">USD ${{ numFmt(usdDemandAmt.toFixed(2)) }}</span>
               </div>
               <div class="ds-sep" />
               <div class="ds-item">
                 <span class="ds-label">定存</span>
-                <span class="ds-val">USD {{ numFmt(usdFixedAmt.toFixed(2)) }}</span>
+                <span class="ds-val">USD ${{ numFmt(usdFixedAmt.toFixed(2)) }}</span>
               </div>
               <div class="ds-sep" />
               <div class="ds-item">
                 <span class="ds-label" :style="{ color: transitUsdNetAmt < 0 ? '#dc2626' : '#16a34a' }">在途款項</span>
                 <span class="ds-val" :style="{ color: transitUsdNetAmt < 0 ? '#dc2626' : '#16a34a' }">
-                  {{ transitUsdNetAmt < 0 ? '-' : '+' }}USD {{ numFmt(Math.abs(transitUsdNetAmt).toFixed(2)) }}
+                  {{ transitUsdNetAmt < 0 ? '-' : '+' }}USD ${{ numFmt(Math.abs(transitUsdNetAmt).toFixed(2)) }}
                 </span>
               </div>
               <div class="ds-sep" />
               <div class="ds-item">
                 <span class="ds-label">美元總計</span>
-                <span class="ds-val">USD {{ numFmt(usdGrandAmt.toFixed(2)) }}</span>
+                <span class="ds-val">USD ${{ numFmt(usdGrandAmt.toFixed(2)) }}</span>
               </div>
               <div class="ds-sep" />
               <div class="ds-item">
@@ -550,7 +550,7 @@
                       :class="Number(row.priceChange) >= 0 ? 'price-up' : 'price-down'"
                       class="price-change">
                       {{ Number(row.priceChange) >= 0 ? '▲' : '▼' }}
-                      {{ Math.abs(Number(row.priceChange)).toFixed(2) }}
+                      ${{ Math.abs(Number(row.priceChange)).toFixed(2) }}
                       ({{ Number(row.priceChangePct).toFixed(2) }}%)
                     </div>
                   </div>
@@ -571,7 +571,7 @@
                     (() => {
                       const totalShares = row.brokerRows.reduce((s, br) => s + Number(br.shares || 0), 0)
                       const totalCost   = row.brokerRows.reduce((s, br) => s + Number(br.investmentCost || 0), 0)
-                      return totalShares > 0 ? numFmt(Number((totalCost / totalShares).toFixed(2))) : '-'
+                      return totalShares > 0 ? '$' + numFmt(Number((totalCost / totalShares).toFixed(2))) : '-'
                     })()
                   }}</span>
                 </template>
@@ -785,7 +785,7 @@
                       <!-- 現值(USD)：唯讀 -->
                       <el-table-column label="現值(USD)" width="110" align="right">
                         <template #default="{ row: br }">
-                          <span style="font-size:13px">{{ numFmt(calcBrOriginalValue(br, row).toFixed(2)) }}</span>
+                          <span style="font-size:13px">${{ numFmt(calcBrOriginalValue(br, row).toFixed(2)) }}</span>
                         </template>
                       </el-table-column>
                       <!-- 現值(台幣)：唯讀 -->
@@ -845,7 +845,7 @@
                       :class="Number(row.priceChange) >= 0 ? 'price-up' : 'price-down'"
                       class="price-change">
                       {{ Number(row.priceChange) >= 0 ? '▲' : '▼' }}
-                      {{ Math.abs(Number(row.priceChange)).toFixed(2) }}
+                      ${{ Math.abs(Number(row.priceChange)).toFixed(2) }}
                       ({{ Number(row.priceChangePct).toFixed(2) }}%)
                     </div>
                   </div>
@@ -867,7 +867,7 @@
                       const totalShares  = row.brokerRows.reduce((s, br) => s + Number(br.shares || 0), 0)
                       const totalUsdCost = row.brokerRows.reduce((s, br) =>
                         s + Number(br.originalCurrencyValue || br.avgCost || 0) * Number(br.shares || 0), 0)
-                      return totalShares > 0 ? numFmt(Number((totalUsdCost / totalShares).toFixed(4))) : '-'
+                      return totalShares > 0 ? '$' + numFmt(Number((totalUsdCost / totalShares).toFixed(4))) : '-'
                     })()
                   }}</span>
                 </template>
@@ -1267,11 +1267,11 @@ const fmt = (v) => {
 }
 const fmtPrice = (v) => {
   if (v == null) return '-'
-  return Number(v).toLocaleString('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 4 })
+  return `$${Number(v).toLocaleString('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`
 }
 const fmtPriceUs = (v) => {
   if (v == null) return '-'
-  return Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })
+  return `$${Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })}`
 }
 const pct = (v) => v != null ? `${(Number(v) * 100).toFixed(2)}%` : '-'
 const fmtShares = (v, market) => {

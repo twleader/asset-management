@@ -385,6 +385,8 @@ GET    /api/market-data/dividends?code=0050&market=台股&years=10 # 最近 N �
 GET    /api/bff/dashboard/summary                  # 並行聚合儀表板所需資料（snapshots + history + prices + market-status）
 ```
 
+> BFF Enrichment：`latestSnapshotDetail.stocks[]` 由 BFF 補上 `investmentCostOriginal`（美股 USD、台股 TWD），legacy 美股 `currency='TWD'` 記錄會用 `transactionExchangeRate` 換回 USD，前端買入均價直接使用此欄位以避免各頁面重複正規化。
+
 #### Settings - Banks
 ```
 GET    /api/settings/banks                      # 列出所有銀行（含停用）

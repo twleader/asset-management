@@ -219,7 +219,7 @@
             </el-table-column>
             <el-table-column label="買入均價" width="110" align="right">
               <template #default="{ row }">
-                <span style="color:#475569">{{ row.shares > 0 ? formatPrice(row.investmentCost / row.shares) : '-' }}</span>
+                <span style="color:#475569">{{ row.shares > 0 ? formatPrice(row.investmentCostOriginal / row.shares) : '-' }}</span>
               </template>
             </el-table-column>
             <el-table-column label="投資成本" align="right" width="120">
@@ -360,7 +360,7 @@ const formatShares = (v, market) => {
 }
 const formatPrice = (v) => {
   if (v == null) return '-'
-  return Number(v).toLocaleString('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return `$${Number(v).toLocaleString('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
 const formatCurrency = (v) => {
@@ -443,7 +443,7 @@ const trendOption = computed(() => {
     legend: { top: 0, data: ['存款', '基金', '台股', '美股', '總資產'] },
     grid: { left: 60, right: 20, top: 40, bottom: 40 },
     xAxis: { type: 'category', data: h.map(r => r.snapshotDate), axisLabel: { rotate: 30, fontSize: 11 } },
-    yAxis: { type: 'value', axisLabel: { formatter: v => `${(v / 1e4).toFixed(0)}萬` } },
+    yAxis: { type: 'value', axisLabel: { formatter: v => `$${(v / 1e4).toFixed(0)}萬` } },
     series: [
       { name: '存款', type: 'line', smooth: true, data: h.map(r => Number(r.totalDeposit || 0)), itemStyle: { color: '#3b82f6' } },
       { name: '基金', type: 'line', smooth: true, data: h.map(r => Number(r.totalFundValue || 0)), itemStyle: { color: '#10b981' } },
@@ -523,7 +523,7 @@ const bankOption = computed(() => {
       textStyle: { fontSize: 12 },
       formatter: name => isTwdTab ? name : (name === '定存' ? '美元定存' : '美元活存') },
     grid: { left: 100, right: 130, top: 30, bottom: 30 },
-    xAxis: { type: 'value', axisLabel: { formatter: v => `${(v / 1e4).toFixed(0)}萬` } },
+    xAxis: { type: 'value', axisLabel: { formatter: v => `$${(v / 1e4).toFixed(0)}萬` } },
     yAxis: { type: 'category', data: banks },
     series: [
       {
@@ -570,6 +570,7 @@ const mergedStocks = computed(() => {
         displayOrder: null,
         shares: 0,
         investmentCost: 0,
+        investmentCostOriginal: 0,
         currentValue: 0,
         estimatedDividend: 0
       })
@@ -577,6 +578,8 @@ const mergedStocks = computed(() => {
     const g = map.get(key)
     g.shares += Number(s.shares || 0)
     g.investmentCost += Number(s.investmentCostTwd ?? s.investmentCost ?? 0)
+    // 買入均價：BFF 已將美股 legacy TWD 記錄換算為 USD，前端直接 sum 即可
+    g.investmentCostOriginal += Number(s.investmentCostOriginal ?? s.investmentCost ?? 0)
     g.currentValue += Number(s.currentValue || 0)
     g.estimatedDividend += Number(s.estimatedDividend || 0)
     if (s.dividendRate && !g.dividendRate) g.dividendRate = Number(s.dividendRate)
@@ -693,9 +696,25 @@ const stockBarOption = computed(() => {
   const isTw = chartMarketTab.value === '台股'
   const barColor = isTw ? '#3b82f6' : '#f59e0b'
   return {
-    tooltip: { trigger: 'axis', formatter: (p) => `${p[0].name}: $${Number(p[0].value).toLocaleString()}` },
+    tooltip: {
+      trigger: 'axis',
+      formatter: (p) => {
+        const s = p[0]?.data?.stock
+        if (!s) return ''
+        const value = Number(s.currentValue || 0)
+        const cost = Number(s.investmentCost || 0)
+        const profit = value - cost
+        const rate = cost > 0 ? (profit / cost * 100).toFixed(2) : '0.00'
+        const color = profit >= 0 ? '#16a34a' : '#dc2626'
+        const fmt = n => `$${Math.round(n).toLocaleString()}`
+        return `<b>${p[0].name}</b><br/>`
+          + `現值：${fmt(value)}<br/>`
+          + `成本：${fmt(cost)}<br/>`
+          + `損益：<span style="color:${color}">${fmt(profit)} (${rate}%)</span>`
+      }
+    },
     grid: { left: 100, right: 140, top: 10, bottom: 30 },
-    xAxis: { type: 'value', axisLabel: { formatter: v => `${(v / 1e4).toFixed(0)}萬` } },
+    xAxis: { type: 'value', axisLabel: { formatter: v => `$${(v / 1e4).toFixed(0)}萬` } },
     yAxis: { type: 'category', data: sorted.map(s => s.stockName || s.stockCode) },
     series: [{
       type: 'bar',

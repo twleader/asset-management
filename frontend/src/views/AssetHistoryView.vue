@@ -156,7 +156,7 @@ async function handleExport() {
 const fmt = (v) => {
   if (v == null) return '-'
   const n = Number(v)
-  return n.toLocaleString('zh-TW', { maximumFractionDigits: 0 })
+  return `$${n.toLocaleString('zh-TW', { maximumFractionDigits: 0 })}`
 }
 const pct = (v) => v ? `${(Number(v) * 100).toFixed(1)}%` : '-'
 
@@ -176,7 +176,7 @@ const totalTrendOption = computed(() => ({
   legend: { data: ['總資產', '存款', '基金', '台股', '美股'] },
   grid: { left: 70, right: 30, top: 50, bottom: 50 },
   xAxis: { type: 'category', data: dates.value, axisLabel: { rotate: 30 } },
-  yAxis: { type: 'value', axisLabel: { formatter: v => `${(v/1e4).toFixed(0)}萬` } },
+  yAxis: { type: 'value', axisLabel: { formatter: v => `$${(v/1e4).toFixed(0)}萬` } },
   series: [
     {
       name: '總資產', type: 'line', smooth: true,
@@ -218,7 +218,7 @@ const stackedOption = computed(() => ({
   legend: { data: ['存款', '基金', '台股', '美股'] },
   grid: { left: 70, right: 20, top: 40, bottom: 50 },
   xAxis: { type: 'category', data: dates.value, axisLabel: { rotate: 30, fontSize: 11 } },
-  yAxis: { type: 'value', axisLabel: { formatter: v => `${(v/1e4).toFixed(0)}萬` } },
+  yAxis: { type: 'value', axisLabel: { formatter: v => `$${(v/1e4).toFixed(0)}萬` } },
   series: [
     { name: '存款', type: 'bar', stack: 'total', data: store.history.map(h => Number(h.totalDeposit||0)), itemStyle: { color: '#3b82f6' } },
     { name: '基金', type: 'bar', stack: 'total', data: store.history.map(h => Number(h.totalFundValue||0)), itemStyle: { color: '#10b981' } },
@@ -234,7 +234,7 @@ const stackedOption = computed(() => ({
           const h = store.history[p.dataIndex]
           if (!h) return ''
           const total = Number(h.totalAssets || 0)
-          return `${(total / 1e4).toFixed(0)}萬`
+          return `$${(total / 1e4).toFixed(0)}萬`
         },
         fontSize: 11,
         color: '#374151',

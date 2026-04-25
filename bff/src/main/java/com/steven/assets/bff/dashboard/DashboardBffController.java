@@ -11,6 +11,8 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -98,9 +100,49 @@ public class DashboardBffController {
                             .bodyToMono(MAP)
                             .onErrorReturn(Collections.emptyMap())
                             .map(detail -> {
+                                enrichStockHoldings(detail);
                                 dto.setLatestSnapshotDetail(detail);
                                 return ResponseEntity.ok(dto);
                             });
                 });
+    }
+
+    /**
+     * 為每筆持股加上 investmentCostOriginal（買入均價計算用）：
+     * 美股以 USD 為基準，台股維持 TWD。
+     * Legacy 美股記錄 currency='TWD' 時用 transactionExchangeRate 換回 USD，
+     * 讓前端各頁面共用同一個欄位、不需各自處理 currency。
+     */
+    @SuppressWarnings("unchecked")
+    private void enrichStockHoldings(Map<String, Object> detail) {
+        Object stocksObj = detail.get("stocks");
+        if (!(stocksObj instanceof List<?> list)) return;
+        for (Object item : list) {
+            if (!(item instanceof Map<?, ?> m)) continue;
+            Map<String, Object> stock = (Map<String, Object>) m;
+            BigDecimal cost = toBigDecimal(stock.get("investmentCost"));
+            if (cost == null) continue;
+            String market = asString(stock.get("market"));
+            String currency = asString(stock.get("currency"));
+            BigDecimal rate = toBigDecimal(stock.get("transactionExchangeRate"));
+
+            BigDecimal original = cost;
+            if ("美股".equals(market) && !"USD".equals(currency)
+                    && rate != null && rate.compareTo(BigDecimal.ZERO) > 0) {
+                original = cost.divide(rate, 6, RoundingMode.HALF_UP);
+            }
+            stock.put("investmentCostOriginal", original);
+        }
+    }
+
+    private static BigDecimal toBigDecimal(Object v) {
+        if (v == null) return null;
+        if (v instanceof BigDecimal b) return b;
+        if (v instanceof Number n) return BigDecimal.valueOf(n.doubleValue());
+        try { return new BigDecimal(v.toString()); } catch (NumberFormatException e) { return null; }
+    }
+
+    private static String asString(Object v) {
+        return v == null ? null : v.toString();
     }
 }

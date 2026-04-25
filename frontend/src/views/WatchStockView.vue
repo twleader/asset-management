@@ -91,10 +91,10 @@
             <template v-if="row.lastTriggeredAt">
               <div style="font-size:12px;color:#64748b">{{ fmtDt(row.lastTriggeredAt) }}</div>
               <div style="font-size:12px;color:#0f172a">
-                股價 <strong>{{ row.lastTriggeredPrice != null ? Number(row.lastTriggeredPrice).toLocaleString() : '—' }}</strong>
+                股價 <strong>{{ row.lastTriggeredPrice != null ? '$' + Number(row.lastTriggeredPrice).toLocaleString() : '—' }}</strong>
               </div>
               <div style="font-size:12px;color:#0f172a">
-                季線 <strong>{{ row.quarterlyMa != null ? Number(row.quarterlyMa).toLocaleString() : '—' }}</strong>
+                季線 <strong>{{ row.quarterlyMa != null ? '$' + Number(row.quarterlyMa).toLocaleString() : '—' }}</strong>
               </div>
               <div style="font-size:12px;color:#2563eb">
                 <span>K {{ row.kValue != null ? Number(row.kValue).toFixed(1) : '—' }}</span>
@@ -271,14 +271,14 @@ const fmtDt = (dt) => dayjs(dt).format('MM/DD HH:mm')
 const fmtNum = (v) => {
   if (v == null) return '—'
   const n = Number(v)
-  return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
 const fmtChange = (v) => {
   if (v == null) return '—'
   const n = Number(v)
   const sign = n > 0 ? '▲' : n < 0 ? '▼' : ''
-  return `${sign}${Math.abs(n).toFixed(2)}`
+  return `${sign}$${Math.abs(n).toFixed(2)}`
 }
 
 const fmtPct = (v) => {

@@ -78,13 +78,13 @@
         </el-table-column>
         <el-table-column label="買入均價" align="right" width="95">
           <template #default="{ row }">
-            <span v-if="row.shares > 0">{{ Number(row.investmentCost / row.shares).toLocaleString('zh-TW', { maximumFractionDigits: 4 }) }}</span>
+            <span v-if="row.shares > 0">${{ Number(row.investmentCost / row.shares).toLocaleString('zh-TW', { maximumFractionDigits: 4 }) }}</span>
             <span v-else>-</span>
           </template>
         </el-table-column>
         <el-table-column label="賣出價格" align="right" width="95">
           <template #default="{ row }">
-            <span v-if="row.salePrice != null">{{ Number(row.salePrice).toLocaleString('zh-TW', { maximumFractionDigits: 4 }) }}</span>
+            <span v-if="row.salePrice != null">${{ Number(row.salePrice).toLocaleString('zh-TW', { maximumFractionDigits: 4 }) }}</span>
             <span v-else>-</span>
           </template>
         </el-table-column>
@@ -324,13 +324,13 @@ watch(() => store.realizedGains, (v) => {
 const fmt = (v) => {
   if (v == null) return '-'
   const n = Number(v)
-  return n.toLocaleString('zh-TW', { maximumFractionDigits: 0 })
+  return `$${n.toLocaleString('zh-TW', { maximumFractionDigits: 0 })}`
 }
 const fmtCurrency = (v, currency) => {
   if (v == null) return '-'
   const n = Number(v)
   const decimals = currency === 'USD' ? 2 : 0
-  return n.toLocaleString('zh-TW', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
+  return `$${n.toLocaleString('zh-TW', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`
 }
 const fmtShares = (v, market) => {
   if (v == null) return '-'

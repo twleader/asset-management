@@ -72,7 +72,7 @@
           <el-table :data="dividendHistory.rows" size="small" border max-height="500" style="width:100%">
             <el-table-column label="年度" prop="year" width="80" align="center" />
             <el-table-column label="現金股利" width="100" align="right">
-              <template #default="{ row }">{{ Number(row.cashDividend || 0).toFixed(4) }}</template>
+              <template #default="{ row }">${{ Number(row.cashDividend || 0).toFixed(4) }}</template>
             </el-table-column>
             <el-table-column label="股票股利" width="100" align="right">
               <template #default="{ row }">{{ Number(row.stockDividend || 0).toFixed(4) }}</template>
