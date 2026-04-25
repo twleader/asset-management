@@ -54,7 +54,7 @@ public class BackupService {
 
     /** 立即備份。autoPreRestore=true 時使用「自救點」檔名前綴，且不做 5 份輪替。 */
     public BackupDto.CreateResponse runBackup(boolean autoPreRestore) {
-        String ts = LocalDateTime.now().format(TS_FMT);
+        String ts = LocalDateTime.now(DISPLAY_ZONE).format(TS_FMT);
         String prefix = autoPreRestore ? AUTO_PRE_RESTORE_PREFIX : MANUAL_PREFIX;
         String filename = prefix + ts + ".dump";
         Path dumpFile = Path.of("/tmp", filename);
@@ -83,7 +83,7 @@ public class BackupService {
             return BackupDto.CreateResponse.builder()
                     .filename(filename)
                     .sizeBytes(size)
-                    .uploadedAt(LocalDateTime.now())
+                    .uploadedAt(LocalDateTime.now(DISPLAY_ZONE))
                     .build();
         } finally {
             try {
@@ -297,9 +297,12 @@ public class BackupService {
         }
     }
 
+    private static final ZoneId DISPLAY_ZONE = ZoneId.of("Asia/Taipei");
+
     private static LocalDateTime parseRcloneTime(String iso) {
-        if (iso == null || iso.isBlank()) return LocalDateTime.now();
-        // rclone ModTime 為 ISO-8601，例如 2026-04-25T17:00:00.123456789Z
-        return ZonedDateTime.parse(iso).withZoneSameInstant(ZoneId.systemDefault()).toLocalDateTime();
+        if (iso == null || iso.isBlank()) return LocalDateTime.now(DISPLAY_ZONE);
+        // rclone ModTime 為 ISO-8601 UTC（例：2026-04-25T17:00:00.123456789Z）
+        // 統一轉成 Asia/Taipei 顯示
+        return ZonedDateTime.parse(iso).withZoneSameInstant(DISPLAY_ZONE).toLocalDateTime();
     }
 }
