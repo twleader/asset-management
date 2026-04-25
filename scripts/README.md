@@ -29,18 +29,24 @@ rclone config
 ```
 
 第一個 remote — Google Drive：
-- `n` (new) → name: `gdrive` → storage: `drive`
-- 走預設 OAuth（會開瀏覽器登入授權）
-- scope 選 `drive.file`（只能存取本工具建立的檔案，較安全）
-- 完成後到 Google Drive 網頁手動建立資料夾 `asset-management-backup`
+- `n` (new) → name: `GoogleDriver` → storage: `24` (Google Drive)
+- `client_id` / `client_secret`：直接 Enter 留空（用 rclone 內建即可）
+- `scope`：選 `3` (drive.file) — 僅能存取 rclone 自己建立的檔案，最安全
+- `service_account_file`：直接 Enter 留空
+- 走預設 OAuth（會開瀏覽器登入授權）→ 同意後回 terminal 按 `y` 確認
+- 完成後到 Google Drive 網頁**手動建立資料夾 `asset-management-backup`**
+  （drive.file scope 不允許 rclone 建立頂層資料夾）
 
 第二個 remote — 加密層：
-- `n` (new) → name: `gdrive-crypt` → storage: `crypt`
-- remote: `gdrive:asset-management-backup`
-- filename_encryption: `standard`
-- directory_name_encryption: `true`
+- `n` (new) → name: `gdrive-crypt` → storage: `16` (crypt)
+- remote: `GoogleDriver:asset-management-backup` ← **注意大小寫要對應第一個 remote 的名稱**
+- filename_encryption: `1` (standard)
+- directory_name_encryption: `1` (true)
 - 設一組強密碼（**必須另存於密碼管理器 + 紙本，遺失等於備份報廢**）
-- second password (salt) 留空或自訂
+- second password (salt)：留空或自訂
+
+> 本機現行設定使用 `GoogleDriver` 與 `gdrive-crypt` 兩個 remote 名稱。
+> 如重新設定請保持一致，否則 `backup.sh` 內 `REMOTE="gdrive-crypt:backups"` 也要改。
 
 測試：
 ```bash
@@ -162,4 +168,27 @@ sudo pmset repeat cancel
 - `.env`（含 `POSTGRES_PASSWORD`）已在 `.gitignore`，**絕對不可 commit**
 - `~/.config/rclone/rclone.conf` 在 repo 之外，安全
 - rclone crypt 密碼 **遺失無法復原**，務必另存於密碼管理器 + 紙本
-- Google Drive 個人帳號免費 15GB，定期用 `rclone about gdrive:` 查容量
+- Google Drive 個人帳號免費 15GB，定期用 `rclone about GoogleDriver:` 查容量
+
+## Troubleshooting
+
+### 首次執行 rotate 階段報 `directory not found`
+腳本已在 `rclone delete` 前先 `rclone mkdir` 建立 `daily/` `weekly/` `monthly/` 三個遠端目錄，避免首次執行時因目錄不存在而失敗。若仍出現此錯誤，手動執行一次：
+```bash
+rclone mkdir gdrive-crypt:backups/daily/
+rclone mkdir gdrive-crypt:backups/weekly/
+rclone mkdir gdrive-crypt:backups/monthly/
+```
+
+### `pg_dump` 找不到容器
+確認 Docker Desktop 已啟動且容器在跑：
+```bash
+docker ps --filter name=asset-postgres
+# 沒看到就：
+cd /Users/steven/Project/asset-management && docker compose up -d
+```
+
+### launchd 5 AM 沒觸發
+- 檢查 Mac 是否接電源（`pmset` 喚醒需要電源）
+- 檢查 plist 有無載入：`launchctl list | grep asset-management`
+- 看 log：`tail -100 /Users/steven/Library/Logs/asset-management-backup.log`
