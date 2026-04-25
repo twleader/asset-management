@@ -211,6 +211,13 @@ public class BackupService {
         try {
             execProcess(List.of("rclone", "lsjson", "--files-only", remote), tmpOut, null, "rclone lsjson");
             return Files.readString(tmpOut);
+        } catch (RuntimeException e) {
+            // 資料夾尚未建立時 rclone 會回 "directory not found"，視為空清單
+            if (e.getMessage() != null && e.getMessage().contains("directory not found")) {
+                log.debug("rclone lsjson: {} 不存在，視為空", remote);
+                return "[]";
+            }
+            throw e;
         } catch (IOException e) {
             throw new RuntimeException("讀取 rclone lsjson 結果失敗: " + e.getMessage(), e);
         } finally {
