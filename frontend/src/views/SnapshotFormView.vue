@@ -689,6 +689,23 @@
                           </el-select>
                         </template>
                       </el-table-column>
+                      <!-- 買/賣 -->
+                      <el-table-column label="買/賣" width="80">
+                        <template #default="{ row: br }">
+                          <el-select v-model="br.transactionType" size="small" style="width:100%">
+                            <el-option value="買" label="買" />
+                            <el-option value="賣" label="賣" />
+                          </el-select>
+                        </template>
+                      </el-table-column>
+                      <!-- 交易日期 + 自動抓匯率 -->
+                      <el-table-column label="交易日期" width="155">
+                        <template #default="{ row: br }">
+                          <el-date-picker v-model="br.transactionDate" type="date" size="small"
+                            style="width:100%" value-format="YYYY-MM-DD" placeholder="選擇日期"
+                            @change="(d) => onUsTransactionDateChange(br, d)" />
+                        </template>
+                      </el-table-column>
                       <!-- 股數 -->
                       <el-table-column label="股數" width="130">
                         <template #default="{ row: br }">
@@ -759,23 +776,6 @@
                                 br.originalCurrencyValue = br.avgCost
                               }
                             }" />
-                        </template>
-                      </el-table-column>
-                      <!-- 買/賣 -->
-                      <el-table-column label="買/賣" width="80">
-                        <template #default="{ row: br }">
-                          <el-select v-model="br.transactionType" size="small" style="width:100%">
-                            <el-option value="買" label="買" />
-                            <el-option value="賣" label="賣" />
-                          </el-select>
-                        </template>
-                      </el-table-column>
-                      <!-- 交易日期 + 自動抓匯率 -->
-                      <el-table-column label="交易日期" width="155">
-                        <template #default="{ row: br }">
-                          <el-date-picker v-model="br.transactionDate" type="date" size="small"
-                            style="width:100%" value-format="YYYY-MM-DD" placeholder="選擇日期"
-                            @change="(d) => onUsTransactionDateChange(br, d)" />
                         </template>
                       </el-table-column>
                       <!-- 交易日匯率（自動填入，唯讀） -->
