@@ -206,3 +206,23 @@
 - [ ] 新增時可輸入股票代號，系統自動帶出股票名稱（同 StockAlert 行為）
 - [ ] 同市場 + 股票代號的組合僅允許一筆觀察紀錄
 
+---
+
+### Requirement 15: 資料庫備份／還原（UI 介面）
+
+**User Story:** 作為使用者，我希望在「系統設定」選單下有一個「備份/還原 資料」功能，能夠在 launchd 5:00 AM 排程備份失敗時手動觸發備份，並且在換另一台電腦使用時，能從 Google Drive 上的歷史備份中挑選一份還原到目前的資料庫，以確保資料連續性與災難復原能力。
+
+**Acceptance Criteria:**
+
+- [ ] 左側導覽選單「系統設定」子選單下新增「備份/還原 資料」項目，路徑 `/settings/backup-restore`
+- [ ] 頁面分成兩個區塊：「立即備份」與「還原資料」
+- [ ] 「立即備份」按鈕觸發 `POST /api/backups`，後端執行 `pg_dump` 並上傳加密檔到 `gdrive-crypt:backups/manual/`
+- [ ] 手動備份檔案名稱格式 `asset_manual_YYYYMMDD_HHMMSS.dump`，僅保留最近 5 份（超過 5 份自動刪除最舊）
+- [ ] 「還原資料」區塊以 `el-table` 列出 Google Drive 上**所有**備份（含 manual / daily / weekly / monthly 四個資料夾），欄位：來源資料夾、檔名、備份時間、檔案大小
+- [ ] 列表預設依備份時間「新→舊」排序
+- [ ] 每列提供「還原」按鈕，點擊後跳出二次確認對話框，需在輸入框輸入「確認還原」字樣才能執行
+- [ ] 還原前自動建立「自救點」備份（`asset_auto-pre-restore_YYYYMMDD_HHMMSS.dump`，存於 `manual/`，不計入 5 份保留上限）
+- [ ] 還原期間 UI 顯示遮罩「還原中…請勿關閉視窗」，禁止其他操作
+- [ ] 還原完成後自動重新載入頁面（HikariCP 會自動重連 PostgreSQL）
+- [ ] 備份／還原失敗時顯示錯誤訊息（含後端 stderr 訊息摘要），不直接拋 500
+- [ ] 後端需透過 `ProcessBuilder` 呼叫 `pg_dump` / `pg_restore` / `rclone`，相關工具透過 Dockerfile 安裝、rclone 設定檔以 read-only volume 從 host 掛入

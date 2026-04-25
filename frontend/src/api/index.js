@@ -114,6 +114,15 @@ export const watchStockApi = {
   reorder:  (orderedIds) => api.put('/watch-stocks/reorder', orderedIds)
 }
 
+// ===== Backup / Restore =====
+// pg_dump + rclone 上傳/下載可能耗時，提高 timeout
+export const backupApi = {
+  list:    () => api.get('/backups'),
+  create:  () => api.post('/backups', null, { timeout: 120000 }),
+  restore: ({ folder, filename, confirmation }) =>
+    api.post('/backups/restore', { folder, filename, confirmation }, { timeout: 180000 })
+}
+
 // ===== BFF Aggregated Endpoints =====
 export const bffApi = {
   // Dashboard page: single call that aggregates snapshots, history, prices, and market status

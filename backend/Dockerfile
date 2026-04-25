@@ -14,8 +14,11 @@ FROM eclipse-temurin:21-jre-alpine
 
 WORKDIR /app
 
-# Install curl (required for Yahoo Finance API calls)
-RUN apk add --no-cache curl
+# Install:
+# - curl: required for Yahoo Finance API calls
+# - postgresql16-client: pg_dump / pg_restore (must match server major version)
+# - rclone: upload backups to Google Drive (crypt remote)
+RUN apk add --no-cache curl postgresql16-client rclone
 
 # Create non-root user
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup

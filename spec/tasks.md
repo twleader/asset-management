@@ -614,3 +614,56 @@
   - 台股 / 美股 兩個頁籤
   - 欄位：股名/股號、股價、漲跌、漲跌幅(%)、買進、賣出、開盤、昨收、最高、最低、成交量(張)、警示
   - 支援 sortablejs 拖曳排序、新增/刪除（含確認對話框）、自動帶股名（沿用 `/api/stock-alerts/lookup-name`）
+
+### Task 20: 資料庫備份／還原（UI 介面）
+
+對應 Requirements: 15
+前置任務: `scripts/backup.sh` 已就緒、host 端 `gdrive-crypt` rclone remote 已設定完成
+
+- [ ] 20.1 基礎建設：`backend/Dockerfile` 加裝 `postgresql-client` 與 `rclone`
+  - 在 runtime stage（alpine）加 `RUN apk add --no-cache postgresql16-client rclone`
+  - 確認 `pg_dump --version` 主版號需與 PostgreSQL server 一致（16）
+  - rebuild backend image：`docker compose build business-services`
+
+- [ ] 20.2 基礎建設：`docker-compose.yml` 在 `business-services` 加掛載
+  ```yaml
+  volumes:
+    - ${HOME}/.config/rclone:/root/.config/rclone:ro
+  ```
+  驗證：`docker exec asset-business-services rclone lsd gdrive-crypt:` 應正常列出資料夾
+
+- [ ] 20.3 後端：新增 `BackupController` (`/api/backups`)，三個 endpoint：
+  - `POST /api/backups` 立即備份
+  - `GET /api/backups` 列出所有備份（合併四個資料夾、依時間新→舊排序）
+  - `POST /api/backups/restore` 還原（body: folder / filename / confirmation）
+
+- [ ] 20.4 後端：新增 `BackupService`，封裝 ProcessBuilder 呼叫
+  - `runBackup(boolean isAutoPreRestore)`：pg_dump → rclone copy → 輪替（保留 5 份；自救點不計入）
+  - `listBackups()`：對 manual/daily/weekly/monthly 各執行 `rclone lsjson --files-only`，合併後依 ModTime 排序
+  - `runRestore(folder, filename)`：先呼叫 `runBackup(true)` 建自救點 → rclone copy 下載 → pg_restore --clean --if-exists
+  - 所有指令參數白名單化，不接受使用者輸入拼接
+  - 失敗時拋 `BackupException`，由 ControllerAdvice 統一格式
+
+- [ ] 20.5 後端：新增 `dto.BackupItem` record，欄位：folder / filename / sizeBytes / modifiedAt / isAutoPreRestore
+
+- [ ] 20.6 前端：新增 `views/BackupRestoreView.vue`
+  - 上半部「立即備份」：按鈕 + 最近一次手動備份結果顯示
+  - 下半部「還原資料」：`el-table` 列出所有備份，欄位 folder / filename / 備份時間 / 檔案大小，預設「新→舊」
+  - 每列「還原」按鈕 → 開啟 `el-dialog`，需於 input 內輸入「確認還原」字樣，按鈕才 enable
+  - 還原期間以 `v-loading` 全螢幕遮罩 + 文案「還原中…請勿關閉視窗」
+  - 還原成功後 `ElMessage.success` + `setTimeout(() => location.reload(), 1500)`
+  - 失敗時顯示後端回傳的錯誤訊息
+
+- [ ] 20.7 前端：`router/index.js` 加 route `/settings/backup-restore`，`App.vue` 系統設定子選單追加項目「備份/還原 資料」
+
+- [ ] 20.8 前端：`api/index.js` 新增 `backupApi`：
+  - `list()` → `GET /api/backups`
+  - `create()` → `POST /api/backups`
+  - `restore({folder, filename, confirmation})` → `POST /api/backups/restore`
+  - 為 `create` / `restore` 拉長 axios timeout 至 120 秒（pg_dump + pg_restore 可能需時）
+
+- [ ] 20.9 整合測試：
+  - 手動備份 → 到 Google Drive 確認 `manual/` 多一份加密檔
+  - 連續備份 6 次 → 確認最舊一份被刪、保留 5 份
+  - 還原 → 確認 `manual/` 多一份 `auto-pre-restore_*` 自救點、目前 DB 資料被覆蓋為所選備份內容
+  - 還原進行中前端遮罩生效、完成後自動 reload

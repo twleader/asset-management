@@ -518,6 +518,102 @@ location / {
 **Backend**: `maven:3.9-eclipse-temurin-21` → `eclipse-temurin:21-jre-alpine`
 **Frontend**: `node:18-alpine` (build) → `nginx:alpine` (serve)
 
+## Backup / Restore (Requirement 15)
+
+### 概念
+
+兩條獨立的備份軌道：
+
+| 軌道 | 觸發 | 目的 | 儲存位置 | 保留 |
+|------|------|------|---------|------|
+| 排程備份（既有） | host 端 launchd 每日 05:00 | 災難復原 | `gdrive-crypt:backups/{daily,weekly,monthly}/` | 7 / 4 / 6 |
+| 手動備份（新增） | UI 按鈕觸發 | 排程失敗時補救、還原前自救點 | `gdrive-crypt:backups/manual/` | 5（自救點不計入） |
+
+還原來源涵蓋四個資料夾，使用者可從任一備份點還原。
+
+### 架構
+
+```
+[Frontend Vue]
+   │  POST /api/backups          (立即備份)
+   │  GET  /api/backups          (列出所有備份)
+   │  POST /api/backups/restore  (還原)
+   ▼
+[BFF asset-bff]
+   ▼
+[asset-business-services container]
+   ├─ BackupController
+   ├─ BackupService
+   │    ├─ ProcessBuilder → pg_dump  -h postgres -U $POSTGRES_USER -d $POSTGRES_DB --format=custom --compress=9
+   │    ├─ ProcessBuilder → rclone   rcat / copy / lsjson / delete
+   │    └─ ProcessBuilder → pg_restore -h postgres ... --clean --if-exists
+   ▼
+[postgres container]   [Google Drive via rclone crypt]
+```
+
+容器內需安裝 `postgresql-client`（提供 pg_dump / pg_restore）與 `rclone`，rclone 設定以 read-only volume 從 host 掛入：
+```yaml
+volumes:
+  - ${HOME}/.config/rclone:/root/.config/rclone:ro
+```
+
+### API 端點
+
+| Method | Path | 說明 | Request | Response |
+|--------|------|------|---------|----------|
+| `POST` | `/api/backups` | 觸發手動備份 | （無 body） | `{ filename, sizeBytes, uploadedAt }` |
+| `GET`  | `/api/backups` | 列出所有遠端備份 | （無） | `BackupItem[]` |
+| `POST` | `/api/backups/restore` | 從指定備份還原 | `{ folder, filename, confirmation: "確認還原" }` | `{ status, preRestoreBackup }` |
+
+`BackupItem` 結構：
+```json
+{
+  "folder": "manual" | "daily" | "weekly" | "monthly",
+  "filename": "asset_manual_20260425_170000.dump",
+  "sizeBytes": 1456789,
+  "modifiedAt": "2026-04-25T17:00:00+08:00",
+  "isAutoPreRestore": false
+}
+```
+
+### 後端流程
+
+**Backup (`POST /api/backups`)**
+1. 產生時間戳 `YYYYMMDD_HHMMSS`
+2. 暫存檔 `/tmp/asset_manual_${ts}.dump`
+3. 執行 `pg_dump --format=custom --compress=9 --no-owner --no-acl`，stdout 重導至暫存檔
+4. 執行 `rclone copy /tmp/asset_manual_${ts}.dump gdrive-crypt:backups/manual/`
+5. 列出 `manual/` 內 `asset_manual_*.dump`（排除 `auto-pre-restore`），保留最新 5 份，刪除其餘
+6. 刪除暫存檔
+7. 回傳成功訊息
+
+**List (`GET /api/backups`)**
+1. 對 `daily/` `weekly/` `monthly/` `manual/` 各執行 `rclone lsjson --files-only`
+2. 合併結果，標註 `folder` 欄位，依 `ModTime` 由新到舊排序
+3. 解析檔名前綴判斷 `isAutoPreRestore`
+
+**Restore (`POST /api/backups/restore`)**
+1. 驗證 `confirmation === "確認還原"`，否則回 400
+2. 執行手動備份流程（自救點），檔名 `asset_auto-pre-restore_${ts}.dump`，**不**做 5 份輪替
+3. `rclone copy gdrive-crypt:backups/${folder}/${filename} /tmp/`
+4. `pg_restore --clean --if-exists --no-owner --no-acl -h postgres -U $user -d $db /tmp/${filename}`
+5. 刪除暫存檔
+6. 回傳成功（不需重啟 backend，HikariCP 會自動重連）
+
+### 安全
+
+- 還原為破壞性操作，必須二次確認 + 自動先建自救點
+- `pg_restore --clean` 期間 backend 對 DB 的請求會短暫失敗，前端 UI 加遮罩防止使用者誤觸
+- 備份檔在 Google Drive 上由 rclone crypt 加密，檔名與內容皆不可讀
+- 後端僅透過 ProcessBuilder 執行**白名單**指令，不接受使用者輸入拼接命令
+
+### 前端
+
+- 新增 `views/BackupRestoreView.vue`，路由 `/settings/backup-restore`
+- `App.vue` 系統設定子選單追加項目
+- `api/index.js` 新增 `backupApi.list() / create() / restore()`
+- 還原成功後 `setTimeout(() => location.reload(), 1500)`，避免 stale store 殘留
+
 ## Security Considerations
 
 - CORS 設定於 `WebConfig.java`，限制允許的來源與方法
@@ -525,3 +621,4 @@ location / {
 - 資料庫憑證透過 `.env` 檔案管理，不提交至版本控制
 - 使用 BigDecimal 處理所有金融數值，避免浮點數精度問題
 - 財務計算精度：20 位數，2-4 位小數
+- 備份／還原 API 僅執行白名單指令，命令參數不接受使用者拼接

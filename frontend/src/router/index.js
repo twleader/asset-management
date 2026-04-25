@@ -107,6 +107,12 @@ const router = createRouter({
       component: () => import('@/views/TransitFundTypeSettingsView.vue'),
       meta: { title: '在途款項類型設定', icon: 'Setting' }
     },
+    {
+      path: '/settings/backup-restore',
+      name: 'BackupRestore',
+      component: () => import('@/views/BackupRestoreView.vue'),
+      meta: { title: '備份/還原 資料', icon: 'Setting' }
+    },
   ]
 })
 
