@@ -115,9 +115,9 @@ export const watchStockApi = {
 }
 
 // ===== Backup / Restore =====
-// pg_dump + rclone 上傳/下載可能耗時，提高 timeout
+// pg_dump + rclone 上傳/下載/列舉可能耗時，提高 timeout
 export const backupApi = {
-  list:    () => api.get('/backups'),
+  list:    () => api.get('/backups', { timeout: 60000 }),
   create:  () => api.post('/backups', null, { timeout: 120000 }),
   restore: ({ folder, filename, confirmation }) =>
     api.post('/backups/restore', { folder, filename, confirmation }, { timeout: 180000 })

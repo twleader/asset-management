@@ -21,6 +21,8 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
 @Service
@@ -128,30 +130,49 @@ public class BackupService {
 
     /** 列出 manual/daily/weekly/monthly 所有備份，依 modifiedAt 由新→舊排序。 */
     public List<BackupDto.BackupItem> listBackups() {
+        // 4 個資料夾並行查詢，縮短整體等待時間
+        List<CompletableFuture<List<BackupDto.BackupItem>>> futures = FOLDERS.stream()
+                .map(folder -> CompletableFuture.supplyAsync(() -> listFolder(folder)))
+                .toList();
+
         List<BackupDto.BackupItem> items = new ArrayList<>();
-        for (String folder : FOLDERS) {
-            String json = rcloneLsJson(REMOTE_BASE + "/" + folder + "/");
-            if (json == null || json.isBlank()) continue;
+        for (CompletableFuture<List<BackupDto.BackupItem>> f : futures) {
             try {
-                JsonNode arr = mapper.readTree(json);
-                for (JsonNode node : arr) {
-                    if (node.path("IsDir").asBoolean(false)) continue;
-                    String name = node.path("Name").asText();
-                    if (!name.endsWith(".dump")) continue;
-                    items.add(BackupDto.BackupItem.builder()
-                            .folder(folder)
-                            .filename(name)
-                            .sizeBytes(node.path("Size").asLong(0))
-                            .modifiedAt(parseRcloneTime(node.path("ModTime").asText()))
-                            .autoPreRestore(name.startsWith(AUTO_PRE_RESTORE_PREFIX))
-                            .build());
-                }
-            } catch (IOException e) {
-                throw new RuntimeException("解析 rclone lsjson 失敗 (" + folder + "): " + e.getMessage(), e);
+                items.addAll(f.get());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException("列出備份被中斷", e);
+            } catch (ExecutionException e) {
+                Throwable cause = e.getCause() != null ? e.getCause() : e;
+                throw new RuntimeException("列出備份失敗：" + cause.getMessage(), cause);
             }
         }
         items.sort(Comparator.comparing(BackupDto.BackupItem::getModifiedAt).reversed());
         return items;
+    }
+
+    private List<BackupDto.BackupItem> listFolder(String folder) {
+        List<BackupDto.BackupItem> result = new ArrayList<>();
+        String json = rcloneLsJson(REMOTE_BASE + "/" + folder + "/");
+        if (json == null || json.isBlank()) return result;
+        try {
+            JsonNode arr = mapper.readTree(json);
+            for (JsonNode node : arr) {
+                if (node.path("IsDir").asBoolean(false)) continue;
+                String name = node.path("Name").asText();
+                if (!name.endsWith(".dump")) continue;
+                result.add(BackupDto.BackupItem.builder()
+                        .folder(folder)
+                        .filename(name)
+                        .sizeBytes(node.path("Size").asLong(0))
+                        .modifiedAt(parseRcloneTime(node.path("ModTime").asText()))
+                        .autoPreRestore(name.startsWith(AUTO_PRE_RESTORE_PREFIX))
+                        .build());
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("解析 rclone lsjson 失敗 (" + folder + "): " + e.getMessage(), e);
+        }
+        return result;
     }
 
     /** 還原：先建自救點 → rclone copy → pg_restore --clean。 */
