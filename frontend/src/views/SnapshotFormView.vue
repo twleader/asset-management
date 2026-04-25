@@ -1345,7 +1345,7 @@ function recalcCostByRate(br) {
   br.investmentCostStr = numFmt(br.investmentCost)
 }
 
-/** 單一 brokerRow 的台幣現值（美股原幣 × 匯率；台股直接為 TWD） */
+/** 單一 brokerRow 的台幣現值（美股原幣 × 快照匯率；台股直接為 TWD） */
 const calcBrTwdValue = (br, stock) => {
   const orig = calcBrOriginalValue(br, stock)
   if (stock.market === '美股') return Math.round(orig * (form.usdExchangeRate || 1))
@@ -2094,6 +2094,10 @@ onMounted(async () => {
       })))
     })
     loading.value = false
+    // 舊快照若未存匯率，補抓
+    if (!form.usdExchangeRate) {
+      await loadExchangeRateForDate(form.snapshotDate)
+    }
   }
 
   // 新增快照時：載入今天匯率作為預設值
