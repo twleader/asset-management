@@ -778,14 +778,6 @@
                             }" />
                         </template>
                       </el-table-column>
-                      <!-- 交易日匯率（自動填入，唯讀） -->
-                      <el-table-column label="交易日匯率" width="115" align="right">
-                        <template #default="{ row: br }">
-                          <span style="font-size:13px; color: #606266;">
-                            {{ br.transactionExchangeRate ? Number(br.transactionExchangeRate).toFixed(4) : (br.transactionDate ? '抓取中...' : '同快照匯率') }}
-                          </span>
-                        </template>
-                      </el-table-column>
                       <!-- 現值(USD)：唯讀 -->
                       <el-table-column label="現值(USD)" width="110" align="right">
                         <template #default="{ row: br }">
@@ -796,6 +788,14 @@
                       <el-table-column label="現值(台幣)" width="120" align="right">
                         <template #default="{ row: br }">
                           <span style="font-size:13px">{{ fmt(calcBrTwdValue(br, row)) }}</span>
+                        </template>
+                      </el-table-column>
+                      <!-- 交易日匯率（自動填入，唯讀） -->
+                      <el-table-column label="交易日匯率" width="115" align="right">
+                        <template #default="{ row: br }">
+                          <span style="font-size:13px; color: #606266;">
+                            {{ br.transactionExchangeRate ? Number(br.transactionExchangeRate).toFixed(4) : (br.transactionDate ? '抓取中...' : '同快照匯率') }}
+                          </span>
                         </template>
                       </el-table-column>
                       <!-- 刪除 -->
