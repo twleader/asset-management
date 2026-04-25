@@ -29,12 +29,12 @@
 
       <el-table ref="tableRef" :data="currentList" v-loading="loading" border stripe row-key="id" size="small"
         @row-dblclick="onStockDblClick">
-        <el-table-column width="36" align="center">
+        <el-table-column width="36" align="center" fixed="left">
           <template #default>
             <el-icon class="drag-handle" style="cursor:grab;color:#94a3b8"><Operation /></el-icon>
           </template>
         </el-table-column>
-        <el-table-column label="股名／股號" min-width="170" fixed>
+        <el-table-column label="股名／股號" min-width="170">
           <template #default="{ row }">
             <div style="font-weight:600">{{ row.stockCode }}</div>
             <div style="color:#475569;font-size:12px">{{ row.stockName || '—' }}</div>
