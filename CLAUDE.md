@@ -12,8 +12,10 @@
 4. 實作程式碼
 ```
 
-> 如果是 bug fix 或細部 UI 調整（不涉及新功能或架構變動），可不更新 spec，
-> 但凡涉及新 Entity、新 API endpoint、新頁面、新業務邏輯，**一定要先更新 spec**。
+> **凡涉及商業邏輯變更（新增、刪除、修改、bug fix），都必須同步更新 spec/**。
+> 包含：新 Entity、新 API endpoint、新頁面、新業務邏輯，以及修正既有商業邏輯的 bug fix。
+>
+> 唯一例外（可不更新 spec）：純樣式 / CSS 微調、純 typo、純 import 整理等不影響功能契約的變更。
 
 ### Pre-commit Hook（強制 SDD 同步）
 
@@ -27,7 +29,7 @@ git config core.hooksPath scripts/git-hooks
 ```
 
 **例外：**
-- 確定僅為 bug fix / 樣式調整：commit 訊息加 `[skip-spec]`
+- 純樣式 / 無商業邏輯影響的調整：commit 訊息加 `[skip-spec]`
 - 緊急情況：`git commit --no-verify`（請審慎）
 
 ---

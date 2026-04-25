@@ -3,6 +3,7 @@ package com.steven.assets.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.steven.assets.model.ExchangeRateHistory;
+import com.steven.assets.model.Stock;
 import com.steven.assets.model.StockHolding;
 import com.steven.assets.model.StockPriceHistory;
 import com.steven.assets.model.AssetSnapshot;
@@ -10,6 +11,7 @@ import com.steven.assets.repository.AssetSnapshotRepository;
 import com.steven.assets.repository.ExchangeRateHistoryRepository;
 import com.steven.assets.repository.StockPriceHistoryRepository;
 import com.steven.assets.repository.StockPriceRepository;
+import com.steven.assets.repository.StockRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -38,6 +40,7 @@ public class HistoricalDataService {
     private final StockPriceRepository priceRepo;
     private final ExchangeRateHistoryRepository rateHistRepo;
     private final AssetSnapshotRepository snapshotRepo;
+    private final StockRepository stockMasterRepo;
 
     private static final String UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
@@ -688,10 +691,17 @@ public class HistoricalDataService {
     //  Helpers
     // ═══════════════════════════════════════════════════════════════════════
 
+    /**
+     * 收集所有需要回補歷史價格的股票代號：
+     * 來源 = stock 主檔（含曾持有、觀察清單、警示）∪ 歷史快照中的持股（保險用）
+     */
     private void collectAllHeldCodes(Set<String> twCodes, Set<String> usCodes) {
-        // 使用 JOIN FETCH 避免 LazyInitializationException
+        for (Stock s : stockMasterRepo.findAll()) {
+            if ("美股".equals(s.getMarket())) usCodes.add(s.getCode());
+            else twCodes.add(s.getCode());
+        }
+        // 保險：歷史快照中的持股（避免主檔被誤刪時資料消失）
         List<AssetSnapshot> snapshots = snapshotRepo.findAllWithStocksOrderByDateAsc();
-        // 從所有快照收集曾持有的股票（不只最新）
         for (AssetSnapshot s : snapshots) {
             for (StockHolding sh : s.getStocks()) {
                 if ("美股".equals(sh.getMarket())) usCodes.add(sh.getStockCode());

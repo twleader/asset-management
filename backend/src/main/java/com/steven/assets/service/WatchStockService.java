@@ -8,6 +8,7 @@ import com.steven.assets.model.WatchStock;
 import com.steven.assets.repository.StockAlertRepository;
 import com.steven.assets.repository.StockPriceHistoryRepository;
 import com.steven.assets.repository.StockPriceRepository;
+import com.steven.assets.repository.StockRepository;
 import com.steven.assets.repository.WatchStockRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -27,6 +28,7 @@ public class WatchStockService {
     private final StockPriceRepository priceRepo;
     private final StockAlertRepository alertRepo;
     private final StockPriceHistoryRepository historyRepo;
+    private final StockRepository stockMasterRepo;
     private final TechnicalIndicatorService indicatorService;
 
     @Transactional(readOnly = true)
@@ -56,7 +58,16 @@ public class WatchStockService {
                 .market(req.getMarket())
                 .displayOrder(maxOrder + 1)
                 .build();
-        return toResponse(watchRepo.save(w));
+        WatchStock saved = watchRepo.save(w);
+
+        String name = req.getStockName() != null ? req.getStockName().trim() : "";
+        if (name.isEmpty()) {
+            name = stockMasterRepo.findByCodeAndMarket(code, req.getMarket())
+                    .map(s -> s.getName()).orElse(code);
+        }
+        stockMasterRepo.upsert(code, req.getMarket(), name);
+
+        return toResponse(saved);
     }
 
     @Transactional

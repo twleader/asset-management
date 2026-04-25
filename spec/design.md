@@ -48,7 +48,7 @@ com.steven.assets/
 - `ExcelImportService`: Excel 解析、格式偵測、資料清洗、批次儲存
 - `MarketDataService`: 外部 API 呼叫、Cookie/Crumb 管理、股利率查詢
 - `StockPriceService`: 股價快取管理、多市場支援、每 5 分鐘排程更新
-- `HistoricalDataService`: 歷史股價與匯率資料管理
+- `HistoricalDataService`: 歷史股價與匯率資料管理；歷史回補範圍以 `stock` 主檔（含曾持有 / 觀察清單 / 警示）為主，並聯集歷史快照中的持股代號
 - `InstitutionService`: 銀行、券商、存款類型、市場類型的 CRUD、停用管理、關鍵字比對邏輯
 
 **BFF 層**（`bff/` 模組）
