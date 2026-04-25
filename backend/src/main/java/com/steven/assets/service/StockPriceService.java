@@ -8,6 +8,7 @@ import com.steven.assets.model.ExchangeRateHistory;
 import com.steven.assets.model.WatchStock;
 import com.steven.assets.repository.AssetSnapshotRepository;
 import com.steven.assets.repository.ExchangeRateHistoryRepository;
+import com.steven.assets.repository.StockPriceHistoryRepository;
 import com.steven.assets.repository.StockPriceRepository;
 import com.steven.assets.repository.StockRepository;
 import com.steven.assets.repository.WatchStockRepository;
@@ -44,6 +45,7 @@ public class StockPriceService {
     private final StockAlertService stockAlertService;
     private final WatchStockRepository watchStockRepo;
     private final StockRepository stockMasterRepo;
+    private final StockPriceHistoryRepository historyRepo;
 
     private static final ZoneId TW_ZONE = ZoneId.of("Asia/Taipei");
     private static final ZoneId US_ZONE = ZoneId.of("America/New_York");
@@ -212,6 +214,14 @@ public class StockPriceService {
                 if (result.highPrice()     != null) sp.setHighPrice(result.highPrice());
                 if (result.lowPrice()      != null) sp.setLowPrice(result.lowPrice());
                 if (result.volume()        != null) sp.setVolume(result.volume());
+
+                // 若資料源未提供昨收，從歷史最近一筆收盤價回填
+                // → priceChange / changePercent (entity @Transient) 才能算得出來
+                if (sp.getPreviousClose() == null) {
+                    historyRepo.findRecentN(code, market, 1).stream().findFirst()
+                            .ifPresent(h -> sp.setPreviousClose(h.getClosePrice()));
+                }
+
                 sp.setTradingDate(LocalDate.now("美股".equals(market) ? US_ZONE : TW_ZONE));
                 sp.setUpdatedAt(now);
                 sp.setClosed(markClosed);

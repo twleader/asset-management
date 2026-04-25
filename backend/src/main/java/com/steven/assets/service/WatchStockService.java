@@ -148,6 +148,18 @@ public class WatchStockService {
             }
         }
 
+        // priceChange / changePercent 由 DTO 上的 price / previousClose 即時計算
+        // （含上面從歷史回填後的 previousClose）
+        if (r.getPrice() != null && r.getPreviousClose() != null
+                && r.getPreviousClose().signum() != 0) {
+            java.math.BigDecimal diff = r.getPrice().subtract(r.getPreviousClose());
+            r.setPriceChange(diff.setScale(4, java.math.RoundingMode.HALF_UP));
+            r.setChangePercent(diff
+                    .divide(r.getPreviousClose(), 6, java.math.RoundingMode.HALF_UP)
+                    .multiply(java.math.BigDecimal.valueOf(100))
+                    .setScale(4, java.math.RoundingMode.HALF_UP));
+        }
+
         // 警示彙總：取該股最近一筆 lastTriggeredAt（僅顯示時間 + 觸發股價）
         List<StockAlert> alerts = alertRepo.findByStockCodeAndMarket(w.getStockCode(), w.getMarket());
         alerts.stream()
