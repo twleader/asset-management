@@ -65,17 +65,9 @@ public class RealizedGain {
     @Column(nullable = false, precision = 20, scale = 2)
     private BigDecimal investmentCost;
 
-    /** 實現獲利 = 收帳 - 成本 */
-    @Column(nullable = false, precision = 20, scale = 2)
-    private BigDecimal profit;
-
     /** 交易當天匯率 (USD 計價時使用) */
     @Column(precision = 10, scale = 4)
     private BigDecimal exchangeRate;
-
-    /** 獲利率 */
-    @Column(precision = 10, scale = 6)
-    private BigDecimal profitRate;
 
     /** 年度 (trade_year 避免 SQL 保留字衝突) */
     @Column(name = "trade_year", nullable = false)

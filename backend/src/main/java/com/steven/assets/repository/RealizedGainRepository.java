@@ -19,7 +19,7 @@ public interface RealizedGainRepository extends JpaRepository<RealizedGain, Long
     @Query("SELECT DISTINCT r.year FROM RealizedGain r ORDER BY r.year DESC")
     List<Integer> findDistinctYears();
 
-    @Query("SELECT SUM(r.profit) FROM RealizedGain r WHERE r.year = :year")
+    @Query("SELECT SUM(r.proceeds - r.investmentCost) FROM RealizedGain r WHERE r.year = :year")
     BigDecimal sumProfitByYear(@Param("year") Integer year);
 
     @Query("SELECT SUM(r.proceeds) FROM RealizedGain r WHERE r.year = :year")

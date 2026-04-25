@@ -723,3 +723,17 @@
   - DROP `fund_holding.bank`（字串欄，已由 `bank_id` FK 取代，Java Entity 未對應）
   - DROP `stock_holding.broker`（字串欄，已由 `broker_id` FK 取代，Java Entity 未對應）
   - 保留 `realized_gain.broker`（歷史交易記錄，無 FK，屬刻意設計）
+
+### Task 24: 資料庫正規化 — 移除 RealizedGain 衍生欄位
+
+**對應需求:** 技術債清理（非功能性需求）
+
+#### Steps:
+
+- [x] 24.1 新增 Liquibase migration `v1.9.3-drop-realized-gain-derived-columns.sql`
+  - DROP `realized_gain.profit`（= `proceeds - investment_cost`，衍生值）
+  - DROP `realized_gain.profit_rate`（= `profit / investment_cost`，衍生值）
+- [x] 24.2 `RealizedGain` Entity 移除 `profit` / `profitRate` 欄位
+- [x] 24.3 `RealizedGainRepository.sumProfitByYear` 改為 `SUM(r.proceeds - r.investmentCost)`
+- [x] 24.4 `AssetService` 寫入時忽略 `req.profit` / `req.profitRate`，讀取時於 DTO 層即時計算
+- [x] 24.5 DTO 與前端 API 契約保持不變（`RealizedGainResponse` 仍回傳 `profit` / `profitRate`，由後端計算）

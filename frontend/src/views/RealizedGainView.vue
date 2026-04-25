@@ -397,7 +397,6 @@ const submitGain = async () => {
     const salePrice = parseNum(gainForm.salePriceStr)
     const proceeds = parseNum(gainForm.proceedsStr)
     const investmentCost = parseNum(gainForm.investmentCostStr)
-    const profit = proceeds - investmentCost
 
     const payload = {
       assetName: gainForm.assetName,
@@ -406,7 +405,7 @@ const submitGain = async () => {
       currency: gainForm.currency,
       broker: gainForm.broker || null,
       tradeDate: gainForm.tradeDate,
-      shares, salePrice, proceeds, investmentCost, profit
+      shares, salePrice, proceeds, investmentCost
     }
 
     if (editingId.value) {

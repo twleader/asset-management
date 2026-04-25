@@ -263,14 +263,14 @@ public class AssetService {
         for (Integer year : gainRepo.findDistinctYears()) {
             BigDecimal total = gainRepo.findByYearOrderByTradeDateAsc(year).stream()
                 .map(g -> {
-                    if (g.getProfit() == null) return BigDecimal.ZERO;
+                    BigDecimal profit = g.getProceeds().subtract(g.getInvestmentCost());
                     // USD 計價：profit × exchangeRate 換算台幣
                     if ("USD".equals(g.getCurrency())) {
                         BigDecimal rate = g.getExchangeRate();
                         if (rate == null) rate = lookupExchangeRate(g.getTradeDate());
-                        if (rate != null) return g.getProfit().multiply(rate).setScale(0, RoundingMode.HALF_UP);
+                        if (rate != null) return profit.multiply(rate).setScale(0, RoundingMode.HALF_UP);
                     }
-                    return g.getProfit();
+                    return profit;
                 })
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
             realizedByYear.put(year, total);
@@ -347,11 +347,6 @@ public class AssetService {
 
     @Transactional
     public RealizedGainDto.RealizedGainResponse createRealizedGain(RealizedGainDto.CreateRealizedGainRequest req) {
-        BigDecimal profitRate = req.profitRate();
-        if (profitRate == null && req.investmentCost().compareTo(BigDecimal.ZERO) != 0) {
-            profitRate = req.profit().divide(req.investmentCost(), 6, RoundingMode.HALF_UP);
-        }
-
         String currency = req.currency();
         if (currency == null || currency.isBlank()) {
             currency = "美股".equals(req.market()) ? "USD" : "TWD";
@@ -374,9 +369,7 @@ public class AssetService {
                 .salePrice(req.salePrice())
                 .proceeds(req.proceeds())
                 .investmentCost(req.investmentCost())
-                .profit(req.profit())
                 .exchangeRate(exchangeRate)
-                .profitRate(profitRate)
                 .year(req.tradeDate().getYear())
                 .build();
 
@@ -387,11 +380,6 @@ public class AssetService {
     public RealizedGainDto.RealizedGainResponse updateRealizedGain(Long id, RealizedGainDto.CreateRealizedGainRequest req) {
         RealizedGain gain = gainRepo.findById(id)
                 .orElseThrow(() -> new RuntimeException("RealizedGain not found: " + id));
-
-        BigDecimal profitRate = req.profitRate();
-        if (profitRate == null && req.investmentCost().compareTo(BigDecimal.ZERO) != 0) {
-            profitRate = req.profit().divide(req.investmentCost(), 6, RoundingMode.HALF_UP);
-        }
 
         String currency = req.currency();
         if (currency == null || currency.isBlank()) {
@@ -414,9 +402,7 @@ public class AssetService {
         gain.setSalePrice(req.salePrice());
         gain.setProceeds(req.proceeds());
         gain.setInvestmentCost(req.investmentCost());
-        gain.setProfit(req.profit());
         gain.setExchangeRate(exchangeRate);
-        gain.setProfitRate(profitRate);
         gain.setYear(req.tradeDate().getYear());
 
         return toGainResponse(gainRepo.save(gain));
@@ -697,23 +683,28 @@ public class AssetService {
             rate = lookupExchangeRate(g.getTradeDate());
         }
 
+        BigDecimal profit = g.getProceeds().subtract(g.getInvestmentCost());
+        BigDecimal profitRate = g.getInvestmentCost().compareTo(BigDecimal.ZERO) != 0
+                ? profit.divide(g.getInvestmentCost(), 6, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO;
+
         BigDecimal proceedsTwd, investmentCostTwd, profitTwd;
         if ("USD".equals(currency) && rate != null) {
             proceedsTwd = g.getProceeds().multiply(rate).setScale(0, RoundingMode.HALF_UP);
             investmentCostTwd = g.getInvestmentCost().multiply(rate).setScale(0, RoundingMode.HALF_UP);
-            profitTwd = g.getProfit().multiply(rate).setScale(0, RoundingMode.HALF_UP);
+            profitTwd = profit.multiply(rate).setScale(0, RoundingMode.HALF_UP);
         } else {
             // TWD 計價或無匯率：原值即台幣
             proceedsTwd = g.getProceeds().setScale(0, RoundingMode.HALF_UP);
             investmentCostTwd = g.getInvestmentCost().setScale(0, RoundingMode.HALF_UP);
-            profitTwd = g.getProfit().setScale(0, RoundingMode.HALF_UP);
+            profitTwd = profit.setScale(0, RoundingMode.HALF_UP);
         }
 
         return new RealizedGainDto.RealizedGainResponse(
             g.getId(), g.getAssetName(), g.getAssetCode(), g.getMarket(),
             currency, g.getBroker(), rate,
             g.getTradeDate(), g.getShares(), g.getSalePrice(),
-            g.getProceeds(), g.getInvestmentCost(), g.getProfit(), g.getProfitRate(),
+            g.getProceeds(), g.getInvestmentCost(), profit, profitRate,
             proceedsTwd, investmentCostTwd, profitTwd,
             g.getYear()
         );

@@ -169,8 +169,12 @@ public class ExcelExportService {
             cell(row, 4, g.getSalePrice(), st.num4);
             cell(row, 5, g.getProceeds(), st.money);
             cell(row, 6, g.getInvestmentCost(), st.money);
-            cell(row, 7, g.getProfit(), st.money);
-            cell(row, 8, g.getProfitRate(), st.num4);
+            BigDecimal profit = g.getProceeds().subtract(g.getInvestmentCost());
+            BigDecimal profitRate = g.getInvestmentCost().compareTo(BigDecimal.ZERO) != 0
+                    ? profit.divide(g.getInvestmentCost(), 6, java.math.RoundingMode.HALF_UP)
+                    : BigDecimal.ZERO;
+            cell(row, 7, profit, st.money);
+            cell(row, 8, profitRate, st.num4);
             cell(row, 9, g.getMarket(), null);
             cell(row, 10, g.getCurrency(), null);
             cell(row, 11, g.getBroker(), null);

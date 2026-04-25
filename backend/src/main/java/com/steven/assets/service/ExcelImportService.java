@@ -258,10 +258,8 @@ public class ExcelImportService {
 
             BigDecimal proceeds = getBigDecimal(row, 5);
             BigDecimal cost = getBigDecimal(row, 6);
-            BigDecimal profit = getBigDecimal(row, 7);
-            BigDecimal profitRate = getBigDecimal(row, 8);
 
-            if (proceeds == null || cost == null || profit == null) continue;
+            if (proceeds == null || cost == null) continue;
 
             String market = code != null && isUsStock(code) ? "美股" : "台股";
 
@@ -271,7 +269,7 @@ public class ExcelImportService {
                 assetService.createRealizedGain(new RealizedGainDto.CreateRealizedGainRequest(
                     name, code, market, "TWD", null, tradeDate,
                     getBigDecimal(row, 3), getBigDecimal(row, 4),
-                    proceeds, cost, profit, profitRate
+                    proceeds, cost
                 ));
                 count++;
             } catch (Exception e) {

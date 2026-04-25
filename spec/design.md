@@ -252,9 +252,9 @@ StockAlert            (到價警示，獨立資料表；WatchStock 列表彙總�
 | salePrice | BigDecimal | 賣出均價（原幣） |
 | proceeds | BigDecimal | 收帳金額（原幣） |
 | investmentCost | BigDecimal | 投資成本（原幣） |
-| profit | BigDecimal | 損益金額（原幣） |
 | exchangeRate | BigDecimal | 交易時匯率 |
-| profitRate | BigDecimal | 報酬率（profit / investmentCost） |
+
+> 正規化：`profit` 與 `profitRate` 為衍生值（`proceeds - investmentCost` 與其除以 `investmentCost`），不入庫，於 DTO 層即時計算後回傳。v1.9.3 起移除實體欄位。
 
 #### StockPrice（擴充）
 | 欄位 | 型別 | 說明 |

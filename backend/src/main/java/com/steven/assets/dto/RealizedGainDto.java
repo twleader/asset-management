@@ -18,9 +18,7 @@ public class RealizedGainDto {
             BigDecimal shares,
             BigDecimal salePrice,
             @NotNull BigDecimal proceeds,
-            @NotNull BigDecimal investmentCost,
-            @NotNull BigDecimal profit,
-            BigDecimal profitRate
+            @NotNull BigDecimal investmentCost
     ) {}
 
     public record RealizedGainResponse(
