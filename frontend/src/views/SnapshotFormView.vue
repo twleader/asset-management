@@ -790,11 +790,11 @@
                           <span style="font-size:13px">{{ fmt(calcBrTwdValue(br, row)) }}</span>
                         </template>
                       </el-table-column>
-                      <!-- 交易日匯率（自動填入，唯讀） -->
+                      <!-- 交易日匯率（自動填入，唯讀；無交易日匯率時顯示快照匯率） -->
                       <el-table-column label="交易日匯率" width="115" align="right">
                         <template #default="{ row: br }">
                           <span style="font-size:13px; color: #606266;">
-                            {{ br.transactionExchangeRate ? Number(br.transactionExchangeRate).toFixed(4) : (br.transactionDate ? '抓取中...' : '同快照匯率') }}
+                            {{ Number(effectiveRate(br)).toFixed(4) }}
                           </span>
                         </template>
                       </el-table-column>
