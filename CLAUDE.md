@@ -53,6 +53,16 @@ git config core.hooksPath scripts/git-hooks
 
 ## 架構規範
 
+### 資料庫完整正規化
+相同的資料只能存一份。禁止：
+- 同一欄位同時以 FK 和字串冗餘儲存（如 `bank_id` + `bank_name`）
+- 存入可從其他欄位計算得出的衍生值（如 `profit = currentValue - investmentCost`）
+- 跨資料表重複儲存同一事實
+
+例外（刻意的 denormalization，需加註說明）：
+- 歷史快照的匯總欄位（`asset_snapshot` 的 `total_*`，供歷史回溯）
+- 歷史交易記錄中的名稱字串（如 `realized_gain.broker`，記錄成交當下的券商名稱）
+
 ### 禁止 Enum 寫死
 所有業務分類（銀行、券商、存款類型、市場類型）**必須存入資料庫**，由 `DataInitializer` 提供 Seed Data，並提供 `/api/settings/*` 管理端點與前端設定頁面。
 
