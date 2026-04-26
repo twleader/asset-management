@@ -132,8 +132,6 @@ public class StockAlertService {
             };
 
             if (triggered) {
-                // 觸發時間錨在最近一個實際交易日的收盤時間（台股 13:30 / 美股 16:00），
-                // 不用 cron 執行的隨機時點。
                 LocalDate tradingDate = historyRepo.findMaxTradingDate(
                         alert.getStockCode(), alert.getMarket()).orElse(LocalDate.now());
                 java.time.LocalTime closeTime = "美股".equals(alert.getMarket())
@@ -141,10 +139,107 @@ public class StockAlertService {
                 alert.setLastTriggeredAt(tradingDate.atTime(closeTime));
                 alert.setLastTriggeredPrice(BigDecimal.valueOf(currentPrice));
                 alertRepo.save(alert);
+                return;
+            }
+
+            // 補抓：今天 close 沒觸發、但最近 3 個交易日內可能在「盤中」跨過門檻
+            // （cron 5 分鐘採樣會漏掉短暫尖峰）。用每天的日內 HIGH/LOW 重算指標。
+            if (alert.getLastTriggeredAt() == null) {
+                findRecentIntradayTrigger(alert, 3).ifPresent(m -> {
+                    java.time.LocalTime closeTime = "美股".equals(alert.getMarket())
+                            ? java.time.LocalTime.of(16, 0) : java.time.LocalTime.of(13, 30);
+                    alert.setLastTriggeredAt(m.date.atTime(closeTime));
+                    alert.setLastTriggeredPrice(m.price);
+                    alertRepo.save(alert);
+                });
             }
         } catch (Exception e) {
             log.warn("Error evaluating alert {}: {}", alert.getId(), e.getMessage());
         }
+    }
+
+    private record IntradayMatch(LocalDate date, BigDecimal price) {}
+
+    /** 在最近 N 個交易日內，用日內 HIGH/LOW 補抓盤中可能觸發的時點。 */
+    private Optional<IntradayMatch> findRecentIntradayTrigger(StockAlert alert, int recentDays) {
+        LocalDate end = LocalDate.now();
+        LocalDate start = end.minusYears(2);
+        List<StockPriceHistory> asc = historyRepo
+                .findByStockCodeAndMarketAndTradingDateBetweenOrderByTradingDateAsc(
+                        alert.getStockCode(), alert.getMarket(), start, end);
+        if (asc.isEmpty()) return Optional.empty();
+
+        // cutoff = 第 N 個最近交易日
+        if (asc.size() < recentDays) return Optional.empty();
+        LocalDate cutoff = asc.get(asc.size() - recentDays).getTradingDate();
+
+        String type = alert.getAlertType();
+        double threshold = alert.getThreshold().doubleValue();
+        IntradayMatch last = null;
+
+        if ("PRICE_ABOVE".equals(type) || "PRICE_BELOW".equals(type)) {
+            boolean above = "PRICE_ABOVE".equals(type);
+            for (StockPriceHistory h : asc) {
+                if (h.getTradingDate().isBefore(cutoff)) continue;
+                BigDecimal probe = above
+                        ? (h.getHighPrice() != null ? h.getHighPrice() : h.getClosePrice())
+                        : (h.getLowPrice() != null ? h.getLowPrice() : h.getClosePrice());
+                double p = probe.doubleValue();
+                if ((above && p >= threshold) || (!above && p <= threshold)) {
+                    last = new IntradayMatch(h.getTradingDate(), probe);
+                }
+            }
+            return Optional.ofNullable(last);
+        }
+
+        if (type.startsWith("KD_")) {
+            boolean useD = type.startsWith("KD_D_");
+            boolean above = type.endsWith("_ABOVE");
+            int period = 9;
+            if (asc.size() < period) return Optional.empty();
+            double k = 50, d = 50;
+            for (int i = period - 1; i < asc.size(); i++) {
+                StockPriceHistory today = asc.get(i);
+                List<StockPriceHistory> window = asc.subList(i - period + 1, i + 1);
+                double highest = window.stream().mapToDouble(h -> h.getHighPrice() != null
+                        ? h.getHighPrice().doubleValue() : h.getClosePrice().doubleValue())
+                        .max().orElse(0);
+                double lowest = window.stream().mapToDouble(h -> h.getLowPrice() != null
+                        ? h.getLowPrice().doubleValue() : h.getClosePrice().doubleValue())
+                        .min().orElse(0);
+
+                double prevK = k, prevD = d;
+                // close-based K：propagate state
+                double rsvClose = (highest == lowest) ? 50
+                        : (today.getClosePrice().doubleValue() - lowest) / (highest - lowest) * 100;
+                k = prevK * 2.0 / 3 + rsvClose / 3.0;
+                d = prevD * 2.0 / 3 + k / 3.0;
+
+                if (today.getTradingDate().isBefore(cutoff)) continue;
+
+                // 盤中 K_peak：用該日 HIGH（above）或 LOW（below）當 close
+                double probe = above
+                        ? (today.getHighPrice() != null ? today.getHighPrice().doubleValue() : today.getClosePrice().doubleValue())
+                        : (today.getLowPrice() != null ? today.getLowPrice().doubleValue() : today.getClosePrice().doubleValue());
+                double rsvProbe = (highest == lowest) ? 50
+                        : (probe - lowest) / (highest - lowest) * 100;
+                double kProbe = prevK * 2.0 / 3 + rsvProbe / 3.0;
+                double dProbe = prevD * 2.0 / 3 + kProbe / 3.0;
+                double check = useD ? Math.max(d, dProbe) : Math.max(k, kProbe);
+                double checkLow = useD ? Math.min(d, dProbe) : Math.min(k, kProbe);
+                boolean hit = above ? check >= threshold : checkLow <= threshold;
+                if (hit) {
+                    BigDecimal triggerPrice = above
+                            ? (today.getHighPrice() != null ? today.getHighPrice() : today.getClosePrice())
+                            : (today.getLowPrice()  != null ? today.getLowPrice()  : today.getClosePrice());
+                    last = new IntradayMatch(today.getTradingDate(), triggerPrice);
+                }
+            }
+            return Optional.ofNullable(last);
+        }
+
+        // MA 類別不需盤中補抓（MA 為 close 累積，盤中不會大幅偏離單日結果）
+        return Optional.empty();
     }
 
     private List<StockPriceHistory> withTodayIfMissing(List<StockPriceHistory> desc, String code, String market) {
