@@ -30,6 +30,7 @@ public class WatchStockService {
     private final StockAlertRepository alertRepo;
     private final StockPriceHistoryRepository historyRepo;
     private final StockRepository stockMasterRepo;
+    private final TechnicalIndicatorService indicatorService;
     private final StockPriceService stockPriceService;
 
     @Transactional(readOnly = true)
@@ -159,39 +160,24 @@ public class WatchStockService {
                     .setScale(4, java.math.RoundingMode.HALF_UP));
         }
 
-        // 警示彙總：取該股最近一筆 lastTriggeredAt，且只顯示「最近 3 個交易日」內的觸發
-        // （超過 3 個交易日視為過期，不顯示。前端看到的就是最近的觸發狀況。）
+        // 警示彙總：取該股最近一筆 lastTriggeredAt（僅顯示時間 + 觸發股價）
         List<StockAlert> alerts = alertRepo.findByStockCodeAndMarket(w.getStockCode(), w.getMarket());
-        java.time.LocalDateTime cutoff = recentTradingDayCutoff(w.getMarket(), 3);
         alerts.stream()
                 .filter(a -> a.getLastTriggeredAt() != null)
-                .filter(a -> cutoff == null || !a.getLastTriggeredAt().isBefore(cutoff))
                 .max(Comparator.comparing(StockAlert::getLastTriggeredAt))
                 .ifPresent(a -> {
                     r.setLastTriggeredAt(a.getLastTriggeredAt());
                     r.setLastTriggeredPrice(a.getLastTriggeredPrice());
                     r.setLastTriggeredAlertType(a.getAlertType());
-                    r.setLastTriggeredMaValue(a.getLastTriggeredMaValue());
-                    r.setLastTriggeredKValue(a.getLastTriggeredKdValue());
-                    r.setLastTriggeredDValue(a.getLastTriggeredDValue());
                 });
 
-        return r;
-    }
+        // 不論警示是否設定／觸發，皆計算當前的季線(MA60)、KD
+        TechnicalIndicatorService.Indicators ind = indicatorService.compute(w.getStockCode(), w.getMarket());
+        r.setQuarterlyMa(ind.quarterlyMa());
+        r.setKValue(ind.k());
+        r.setDValue(ind.d());
 
-    /**
-     * 取得「最近 N 個交易日」中最早那天的午夜當作 cutoff。
-     * 用 stock_price_history 抓最近 N 個 trading_date；不足 N 筆時回 null（不過濾）。
-     */
-    private java.time.LocalDateTime recentTradingDayCutoff(String market, int n) {
-        // 拿任一支該市場的股票歷史就夠了，trading_date 對齊整個市場
-        Optional<StockPriceHistory> sample = historyRepo.findFirstByMarketOrderByTradingDateDesc(market);
-        if (sample.isEmpty()) return null;
-        // 從最新交易日往前數 N 個 distinct trading_date
-        List<java.time.LocalDate> dates = historyRepo
-                .findDistinctTradingDatesByMarket(market, org.springframework.data.domain.PageRequest.of(0, n));
-        if (dates.size() < n) return null;
-        return dates.get(dates.size() - 1).atStartOfDay();
+        return r;
     }
 
 }

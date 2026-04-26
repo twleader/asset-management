@@ -42,14 +42,15 @@ public class WatchStockDto {
         private String tradingDate;
         private String priceUpdatedAt;
         private Boolean closed;
-        // 警示彙總（最近一次觸發；以下技術指標皆為「觸發當下」的快照值）
+        // 警示彙總（最近一次觸發）
         private LocalDateTime lastTriggeredAt;
         private BigDecimal lastTriggeredPrice;
         private String lastTriggeredAlertType;
-        private BigDecimal lastTriggeredMaValue;   // 觸發當下的季線
-        @JsonProperty("lastTriggeredKValue")
-        private BigDecimal lastTriggeredKValue;    // 觸發當下的 K 值
-        @JsonProperty("lastTriggeredDValue")
-        private BigDecimal lastTriggeredDValue;    // 觸發當下的 D 值
+        // 即時技術指標（不論是否觸發警示，皆計算最新值）
+        private BigDecimal quarterlyMa;   // 季線 MA60
+        @JsonProperty("kValue")
+        private BigDecimal kValue;        // KD 之 K
+        @JsonProperty("dValue")
+        private BigDecimal dValue;        // KD 之 D
     }
 }

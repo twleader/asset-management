@@ -16,7 +16,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.LocalTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -73,12 +72,6 @@ public class StockAlertService {
         StockAlert alert = alertRepo.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Alert not found: " + id));
         String code = req.getStockCode().trim().toUpperCase();
-        boolean conditionChanged = !java.util.Objects.equals(alert.getStockCode(), code)
-                || !java.util.Objects.equals(alert.getMarket(), req.getMarket())
-                || !java.util.Objects.equals(alert.getAlertType(), req.getAlertType())
-                || (alert.getThreshold() == null
-                    ? req.getThreshold() != null
-                    : alert.getThreshold().compareTo(req.getThreshold()) != 0);
         alert.setStockCode(code);
         alert.setMarket(req.getMarket());
         if (req.getStockName() != null && !req.getStockName().isBlank()) {
@@ -87,14 +80,6 @@ public class StockAlertService {
         alert.setAlertType(req.getAlertType());
         alert.setThreshold(req.getThreshold());
         if (req.getActive() != null) alert.setActive(req.getActive());
-        // 條件變更（代號／市場／類型／門檻）時重設觸發快照，原快照不再代表新條件
-        if (conditionChanged) {
-            alert.setLastTriggeredAt(null);
-            alert.setLastTriggeredPrice(null);
-            alert.setLastTriggeredMaValue(null);
-            alert.setLastTriggeredKdValue(null);
-            alert.setLastTriggeredDValue(null);
-        }
         return toResponse(alertRepo.save(alert));
     }
 
@@ -107,16 +92,7 @@ public class StockAlertService {
     public StockAlertDto.Response toggleActive(Long id) {
         StockAlert alert = alertRepo.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Alert not found: " + id));
-        boolean turningOn = !alert.getActive();
-        alert.setActive(turningOn);
-        // 從關閉切換到開啟時，順便重設觸發快照，讓警示能再次觸發並重新捕捉當下值
-        if (turningOn) {
-            alert.setLastTriggeredAt(null);
-            alert.setLastTriggeredPrice(null);
-            alert.setLastTriggeredMaValue(null);
-            alert.setLastTriggeredKdValue(null);
-            alert.setLastTriggeredDValue(null);
-        }
+        alert.setActive(!alert.getActive());
         return toResponse(alertRepo.save(alert));
     }
 
@@ -129,17 +105,17 @@ public class StockAlertService {
         actives.forEach(this::evaluate);
     }
 
-    /**
-     * 警示評估：每次跑都重新依今天的價格 / 指標判斷是否符合條件。
-     * 條件成立 → 把今天的快照寫入 last_triggered_*（會覆寫前次值）。
-     * 條件不成立 → 不動。前端會依「最近 3 個交易日」過濾顯示，超過就視為過期不顯示。
-     */
     private void evaluate(StockAlert alert) {
         try {
             Optional<StockPrice> priceOpt = priceRepo.findByStockCodeAndMarket(alert.getStockCode(), alert.getMarket());
             if (priceOpt.isEmpty()) return;
-            StockPrice sp = priceOpt.get();
-            double currentPrice = sp.getPrice().doubleValue();
+            double currentPrice = priceOpt.get().getPrice().doubleValue();
+
+            // 24-hour cooldown
+            if (alert.getLastTriggeredAt() != null &&
+                    alert.getLastTriggeredAt().isAfter(LocalDateTime.now().minusHours(24))) {
+                return;
+            }
 
             boolean triggered = switch (alert.getAlertType()) {
                 case "QUARTERLY_MA_ABOVE_PCT" -> checkMaDeviation(alert, currentPrice, 60, true);
@@ -156,12 +132,7 @@ public class StockAlertService {
             };
 
             if (triggered) {
-                // 觸發時間錨在「最近一個實際交易日的收盤時間」（台股 13:30 / 美股 16:00 wall-clock）。
-                // 不採用 stock_price.trading_date —— 該欄位在非交易日仍可能被 refresh 覆寫成今天。
-                LocalDate tradingDate = historyRepo.findMaxTradingDate(
-                        alert.getStockCode(), alert.getMarket()).orElse(LocalDate.now());
-                LocalTime closeTime = "美股".equals(alert.getMarket()) ? LocalTime.of(16, 0) : LocalTime.of(13, 30);
-                alert.setLastTriggeredAt(tradingDate.atTime(closeTime));
+                alert.setLastTriggeredAt(LocalDateTime.now());
                 alert.setLastTriggeredPrice(BigDecimal.valueOf(currentPrice));
                 alertRepo.save(alert);
             }
