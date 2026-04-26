@@ -1571,12 +1571,11 @@ const removeBrokerRow = (stockRow, idx) => {
 async function fetchPriceForRow(row) {
   if (!row.stockCode) return
   try {
-    const today = new Date().toISOString().slice(0, 10)
-    if (isEdit.value && form.snapshotDate && form.snapshotDate < today) {
-      // 歷史收盤價（僅當快照日期早於今天）
+    if (form.snapshotDate) {
+      // 一律以快照日期讀取歷史收盤價（非交易日往前找最近）
       let prices = await marketDataApi.getPricesOnDate(form.snapshotDate, [{ code: row.stockCode, market: row.market }])
       if (prices.length === 0) {
-        // 針對此股票精準 backfill：只拉快照日期前後各 30 天的資料，避免拉全量
+        // DB 無資料 → 針對此股票精準 backfill 後重試
         const sinceDate = new Date(new Date(form.snapshotDate).getTime() - 30 * 86400000)
           .toISOString().slice(0, 10)
         const untilDate = new Date(new Date(form.snapshotDate).getTime() + 5 * 86400000)
@@ -1589,20 +1588,9 @@ async function fetchPriceForRow(row) {
         row.priceChange    = null
         row.priceChangePct = null
       }
-    } else {
-      // 新增快照：呼叫即時股價 API（同時取得股票名稱）
-      const result = await marketDataApi.getPrice(row.stockCode, row.market)
-      if (result && result.price != null) {
-        row.latestPrice    = result.price
-        row.priceChange    = result.change
-        row.priceChangePct = result.changePct
-      }
-      if (result && result.stockName && !row.stockName) {
-        row.stockName = result.stockName
-      }
     }
 
-    // 若名稱仍未填（任何市場），嘗試用即時 API 補名稱
+    // 若名稱仍未填，嘗試用即時 API 補名稱
     if (!row.stockName) {
       try {
         const result = await marketDataApi.getPrice(row.stockCode, row.market)
@@ -1904,88 +1892,58 @@ let priceTimer = null
  */
 async function loadAllPrices() {
   try {
-    const today = new Date().toISOString().slice(0, 10)
-    if (isEdit.value && form.snapshotDate && form.snapshotDate < today) {
-      // ── 歷史收盤價模式（日期 < 今天）──
-      const stocks = form.stocks
-        .filter(s => s.stockCode)
-        .map(s => ({ code: s.stockCode, market: s.market }))
-      if (stocks.length === 0) return
+    // 一律以快照日期到歷史收盤價表抓取（USD/TWD 原幣別），非交易日往前 fallback
+    const stocks = form.stocks
+      .filter(s => s.stockCode)
+      .map(s => ({ code: s.stockCode, market: s.market }))
 
-      const applyHistoricalPrices = (prices) => {
-        const map = {}
-        for (const p of prices) map[`${p.market}_${p.stockCode}`] = p
-        for (const row of form.stocks) {
-          const key = `${row.market}_${row.stockCode}`
-          const p = map[key]
-          if (p && p.price != null) {
-            row.latestPrice    = p.price
-            row.priceChange    = null
-            row.priceChangePct = null
-          }
+    const applyHistoricalPrices = (prices) => {
+      const map = {}
+      for (const p of prices) map[`${p.market}_${p.stockCode}`] = p
+      for (const row of form.stocks) {
+        const key = `${row.market}_${row.stockCode}`
+        const p = map[key]
+        if (p && p.price != null) {
+          row.latestPrice    = p.price
+          row.priceChange    = null
+          row.priceChangePct = null
         }
       }
+    }
 
-      // 第一次查詢
+    if (stocks.length > 0 && form.snapshotDate) {
       let prices = await marketDataApi.getPricesOnDate(form.snapshotDate, stocks)
+      if (prices.length === 0) {
+        // DB 無資料 → 觸發 backfill 後重試一次
+        console.warn('歷史股價資料不足，嘗試回補...')
+        try { await marketDataApi.backfillHistory() } catch {}
+        prices = await marketDataApi.getPricesOnDate(form.snapshotDate, stocks)
+      }
       if (prices.length > 0) {
         applyHistoricalPrices(prices)
-        return
+      } else {
+        console.warn(`找不到 ${form.snapshotDate} 的歷史收盤價，將使用快照存檔值`)
       }
-
-      // DB 無資料 → 觸發 backfill 後重試一次
-      console.warn('歷史股價資料不足，嘗試回補...')
-      try { await marketDataApi.backfillHistory() } catch {}
-      prices = await marketDataApi.getPricesOnDate(form.snapshotDate, stocks)
-      if (prices.length > 0) {
-        applyHistoricalPrices(prices)
-        return
-      }
-
-      // 仍無資料：保持 latestPrice = null，由 calcBrOriginalValue 沿用 br.currentValue
-      console.warn(`找不到 ${form.snapshotDate} 的歷史收盤價，將使用快照存檔值`)
-      return
     }
 
-    // ── 今天或新增快照：最新股價模式（live cache） ──
-    const [prices, status] = await Promise.all([
-      marketDataApi.getAllPrices(),
-      marketDataApi.getMarketStatus()
-    ])
-    marketStatus.value = status
-    const map = {}
-    for (const p of prices) map[`${p.market}_${p.stockCode}`] = p
-    const missingRows = []
-    for (const row of form.stocks) {
-      const key = `${row.market}_${row.stockCode}`
-      const p = map[key]
-      if (p && p.price != null) {
-        row.latestPrice    = p.price
-        row.priceChange    = p.priceChange
-        row.priceChangePct = p.changePercent != null ? p.changePercent : null
-      } else if (row.stockCode) {
-        missingRows.push(row)
-      }
-      if (p && p.stockName && !row.stockName) row.stockName = p.stockName
-    }
-
-    // live cache 缺漏時，回退到歷史收盤價補齊
-    if (missingRows.length > 0 && form.snapshotDate) {
-      try {
-        const stocks = missingRows.map(s => ({ code: s.stockCode, market: s.market }))
-        const hist = await marketDataApi.getPricesOnDate(form.snapshotDate, stocks)
-        const histMap = {}
-        for (const p of hist) histMap[`${p.market}_${p.stockCode}`] = p
-        for (const row of missingRows) {
-          const p = histMap[`${row.market}_${row.stockCode}`]
-          if (p && p.price != null) {
-            row.latestPrice    = p.price
-            row.priceChange    = null
-            row.priceChangePct = null
-          }
+    // 額外取得即時市場狀態與漲跌資訊（僅供「漲跌(%)」顯示用，不覆蓋價格）
+    try {
+      const [livePrices, status] = await Promise.all([
+        marketDataApi.getAllPrices(),
+        marketDataApi.getMarketStatus()
+      ])
+      marketStatus.value = status
+      const liveMap = {}
+      for (const p of livePrices) liveMap[`${p.market}_${p.stockCode}`] = p
+      for (const row of form.stocks) {
+        const p = liveMap[`${row.market}_${row.stockCode}`]
+        if (p) {
+          if (p.priceChange != null) row.priceChange = p.priceChange
+          if (p.changePercent != null) row.priceChangePct = p.changePercent
+          if (p.stockName && !row.stockName) row.stockName = p.stockName
         }
-      } catch {}
-    }
+      }
+    } catch {}
   } catch (e) {
     console.warn('批次載入股價失敗:', e)
   }
