@@ -1377,7 +1377,13 @@ const stockCost = (s) => s.brokerRows.reduce((a, r) => {
 const stockValue    = (s) => s.brokerRows.reduce((a, r) => a + calcBrTwdValue(r, s), 0)
 const stockProfit   = (s) => stockValue(s) - stockCost(s)
 const stockProfitRate = (s) => { const c = stockCost(s); return c > 0 ? stockProfit(s) / c : 0 }
-const stockDividend = (s) => stockValue(s) * Number(s.dividendRate || 0)
+// 預估配息：優先用 snapshot 儲存當下的值（與 AssetHistory / 其他頁面同源），
+// 新增的持股或舊資料缺值時才 fallback 用即時 stockValue × dividendRate 計算。
+const stockDividend = (s) => {
+  const stored = Number(s?.storedEstimatedDividend || 0)
+  if (stored > 0) return stored
+  return stockValue(s) * Number(s?.dividendRate || 0)
+}
 
 // ===== Computed: deposits =====
 const isTransitPayable = (d) => transitPayableSet.value.has(d.depositType)
@@ -1794,6 +1800,9 @@ const groupStocks = (flat) => {
         stockName: s.stockName,
         market: s.market,
         dividendRate: s.dividendRate,
+        // 累計各券商列的 stored estimated_dividend（snapshot 儲存當下算好的值，
+        // 用來對齊 AssetHistory 等其他頁面顯示的總配息）
+        storedEstimatedDividend: 0,
         latestPrice: null,
         priceChange: null,
         priceChangePct: null,
@@ -1802,6 +1811,7 @@ const groupStocks = (flat) => {
         brokerRows: []
       })
     }
+    map.get(key).storedEstimatedDividend += Number(s.estimatedDividend || 0)
     const sh = Number(s.shares || 0)
     const ic = Number(s.investmentCost || 0)
     const isUs = s.market === '美股'
