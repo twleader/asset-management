@@ -141,10 +141,10 @@
                         @change="(v) => { br.originalCurrencyValue = numParseF(v, 2); markDirty() }" />
                     </template>
                   </el-table-column>
-                  <!-- 現值(台幣) — 唯讀，= 股數 × 每股現價 -->
+                  <!-- 現值(台幣) — 唯讀，= 股數 × 每股 TWD 現值 -->
                   <el-table-column label="現值(台幣)" width="120" align="right">
                     <template #default="{ row: br }">
-                      <span class="readonly-val">{{ fmt(Math.round(br.shares * row.unitPrice)) }}</span>
+                      <span class="readonly-val">{{ fmt(Math.round(br.shares * row.unitPriceTwd)) }}</span>
                     </template>
                   </el-table-column>
                   <!-- 損益 -->
@@ -218,10 +218,10 @@
             </template>
           </el-table-column>
 
-          <!-- 股價 -->
+          <!-- 股價（快照基準日收盤價，原幣別：美股 USD / 台股 TWD） -->
           <el-table-column label="股價" align="right" width="100">
             <template #default="{ row }">
-              {{ row.unitPrice ? fmtPrice(row.unitPrice) : '-' }}
+              {{ row.stockPrice != null ? fmtPrice(row.stockPrice) : '-' }}
             </template>
           </el-table-column>
 
@@ -274,7 +274,7 @@ import { ArrowLeft, Edit, Plus, Delete, Check } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useRoute } from 'vue-router'
 import { useAssetStore } from '@/stores/assetStore'
-import { snapshotApi, marketDataApi, institutionApi } from '@/api'
+import { snapshotApi, bffApi, institutionApi } from '@/api'
 
 const route  = useRoute()
 const store  = useAssetStore()
@@ -301,64 +301,44 @@ const groupedStocks = computed(() =>
 )
 
 onMounted(async () => {
-  await Promise.all([
-    store.fetchSnapshotDetail(route.params.id),
-    loadBrokers()
-  ])
-  buildGroups()
-  fetchMissingDividendRates()
+  await Promise.all([fetchDetail(), loadBrokers()])
 })
 
-// 配息率由後端 getSnapshotDetail 自動補齊並存回 DB，前端不需另行查詢
-async function fetchMissingDividendRates() {
-  // no-op：後端已在回傳 snapshot detail 時自動補齊 dividendRate 並存回 PostgreSQL
+async function fetchDetail() {
+  const data = await bffApi.getSnapshotDetail(route.params.id)
+  store.currentSnapshot = data
+  rebuildFromBff()
+  isDirty.value = false
 }
 
 const detail = computed(() => store.currentSnapshot)
 
-watch(() => store.currentSnapshot, () => {
-  buildGroups()
-  isDirty.value = false
-})
-
-function buildGroups() {
-  const stocks = store.currentSnapshot?.stocks || []
-  const map = new Map()
-  for (const s of stocks) {
-    const key = `${s.market}_${s.stockCode}`
-    if (!map.has(key)) {
-      map.set(key, {
-        groupKey:     key,
-        stockCode:    s.stockCode,
-        stockName:    s.stockName,
-        market:       s.market,
-        dividendRate: s.dividendRate,
-        unitPrice:    0,   // 每股現價，下方計算
-        brokerRows:   []
-      })
-    }
-    const sh = Number(s.shares || 0)
-    const ic = Number(s.investmentCost || 0)
-    map.get(key).brokerRows.push({
-      brokerId:              s.brokerId || null,
-      shares:                sh,
-      currency:              s.currency || 'TWD',
-      investmentCost:        ic,
-      avgCost:               sh > 0 ? Number((ic / sh).toFixed(4)) : 0,
-      originalCurrencyValue: s.originalCurrencyValue ? Number(s.originalCurrencyValue) : null,
-      storedCurrentValue:    Number(s.currentValue || 0)  // 儲存原始值備用
-    })
-  }
-  // 計算每股現價 = 各券商 currentValue 總和 ÷ 總股數，並回填每筆 currentValue
-  for (const g of map.values()) {
-    const totalVal = g.brokerRows.reduce((a, b) => a + b.storedCurrentValue, 0)
-    const totalSh  = g.brokerRows.reduce((a, b) => a + b.shares, 0)
-    g.unitPrice = totalSh > 0 ? totalVal / totalSh : 0
-    for (const br of g.brokerRows) {
-      br.currentValue = Math.round(br.shares * g.unitPrice)
-    }
-  }
-  allGroupedStocks.value = [...map.values()]
+/**
+ * 由 BFF 預先彙整好的 mergedStocks 直接複製成可編輯的本地結構。
+ * BFF 已計算好 stockPrice (收盤價，原幣別)、unitPriceTwd (每股 TWD)、
+ * profit / profitRate / avgCostOriginal，前端不再做 buildGroups。
+ */
+function rebuildFromBff() {
+  const groups = store.currentSnapshot?.mergedStocks ?? []
+  allGroupedStocks.value = groups.map(g => ({
+    groupKey:     `${g.market}_${g.stockCode}`,
+    stockCode:    g.stockCode,
+    stockName:    g.stockName,
+    market:       g.market,
+    dividendRate: g.dividendRate != null ? Number(g.dividendRate) : null,
+    stockPrice:   g.stockPrice != null ? Number(g.stockPrice) : null,
+    unitPriceTwd: g.unitPriceTwd != null ? Number(g.unitPriceTwd) : 0,
+    brokerRows:   (g.brokerRows ?? []).map(br => ({
+      brokerId:              br.brokerId ?? null,
+      shares:                Number(br.shares || 0),
+      currency:              br.currency || 'TWD',
+      investmentCost:        Number(br.investmentCost || 0),
+      avgCost:               Number(br.avgCost || 0),
+      originalCurrencyValue: br.originalCurrencyValue != null ? Number(br.originalCurrencyValue) : null,
+      storedCurrentValue:    Number(br.storedCurrentValue || 0),
+      currentValue:          Math.round(Number(br.shares || 0) * Number(g.unitPriceTwd || 0))
+    }))
+  }))
 }
 
 // ── cost / avgCost sync helpers ─────────────────────────────────────────
@@ -373,7 +353,7 @@ const syncFromAvg = (br) => {
 // 修改「股數」→ 保持均價不變，重算總成本；同時更新 currentValue
 const syncFromShares = (br, group) => {
   br.investmentCost = Math.round((br.avgCost || 0) * (br.shares || 0))
-  br.currentValue   = Math.round((br.shares || 0) * (group?.unitPrice || 0))
+  br.currentValue   = Math.round((br.shares || 0) * (group?.unitPriceTwd || 0))
 }
 
 // ── broker row mutations ────────────────────────────────────────────────
@@ -414,8 +394,8 @@ const saveChanges = async () => {
         brokerId:              br.brokerId || null,
         shares:                br.shares,
         investmentCost:        br.investmentCost || 0,
-        currentValue:          Math.round(br.shares * g.unitPrice),
-        estimatedDividend:     Math.round(br.shares * g.unitPrice * Number(g.dividendRate || 0)),
+        currentValue:          Math.round(br.shares * g.unitPriceTwd),
+        estimatedDividend:     Math.round(br.shares * g.unitPriceTwd * Number(g.dividendRate || 0)),
         dividendRate:          g.dividendRate,
         currency:              br.currency || 'TWD',
         originalCurrencyValue: br.currency === 'USD' ? br.originalCurrencyValue : null
@@ -439,8 +419,7 @@ const saveChanges = async () => {
     }
 
     await snapshotApi.update(route.params.id, payload)
-    await store.fetchSnapshotDetail(route.params.id)
-    isDirty.value = false
+    await fetchDetail()
     ElMessage.success('券商資料已儲存')
   } catch {
     // interceptor shows error

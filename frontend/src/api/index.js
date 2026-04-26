@@ -130,7 +130,9 @@ export const bffApi = {
   // Dashboard page: single call that aggregates snapshots, history, prices, and market status
   getDashboardSummary: () => api.get('/bff/dashboard/summary'),
   getDashboardSnapshot: (id) => api.get(`/bff/dashboard/snapshot/${id}`),
-  getDashboardRealtime: () => api.get('/bff/dashboard/realtime')
+  getDashboardRealtime: () => api.get('/bff/dashboard/realtime'),
+  // SnapshotDetailView：回傳 enriched detail + mergedStocks（含 brokerRows）
+  getSnapshotDetail: (id) => api.get(`/bff/snapshot-detail/${id}`)
 }
 
 export default api

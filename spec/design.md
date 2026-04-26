@@ -54,10 +54,13 @@ com.steven.assets/
 **BFF 層**（`bff/` 模組）
 - Spring Cloud Gateway：所有 `/api/*` 路由至 Backend
 - 設計原則：**一個前端頁面對應一個 BFF controller**；前端只 render，aggregation 與計算（profit / profitRate / 買入均價 / 收盤價對齊等）一律由 BFF 預先處理
-- `DashboardBffController`：
-  - `GET /api/bff/dashboard/summary`：並行聚合 snapshots / history / prices / marketStatus / latestSnapshotDetail，並附上預先彙總的 `mergedStocks`（依 stockCode + market 合併 broker rows，含 stockPrice 收盤價、profit、profitRate、avgCostOriginal）
-  - `GET /api/bff/dashboard/snapshot/{id}`：切換快照時用，回傳 enriched detail + mergedStocks
+- `SnapshotEnricher`（共用工具，`bff/.../common`）：注入 investmentCostOriginal、抓快照基準日歷史收盤價、依 stockCode + market 合併 broker rows 為 mergedStocks（含 stockPrice、unitPriceTwd、profit、profitRate、avgCostOriginal）。各 BFF controller 一律走此工具，確保「同義欄位 = 同一邏輯」
+- `DashboardBffController`（DashboardView 專屬）：
+  - `GET /api/bff/dashboard/summary`：並行聚合 snapshots / history / prices / marketStatus / latestSnapshotDetail + mergedStocks
+  - `GET /api/bff/dashboard/snapshot/{id}`：切換快照時用
   - `GET /api/bff/dashboard/realtime`：5 分鐘輪詢用，回傳 stockPrices + marketStatus
+- `SnapshotDetailBffController`（SnapshotDetailView 專屬）：
+  - `GET /api/bff/snapshot-detail/{id}`：回傳 enriched detail + mergedStocks（含 brokerRows 子陣列，供編輯頁直接使用）
 
 **Repository 層**（Spring Data JPA，共 16 個）
 - `AssetSnapshotRepository`
