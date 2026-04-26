@@ -17,8 +17,8 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * 共用技術指標計算：季線 MA60、KD9。
- * 取最近 60 筆歷史，若當日已有報價但未寫入 history，會把今日股價合併入計算。
+ * 共用技術指標計算：月線 MA20、季線 MA60、年線 MA240、KD9。
+ * 取最近 240 筆歷史，若當日已有報價但未寫入 history，會把今日股價合併入計算。
  */
 @Service
 @RequiredArgsConstructor
@@ -28,14 +28,35 @@ public class TechnicalIndicatorService {
     private final StockPriceHistoryRepository historyRepo;
     private final StockPriceRepository priceRepo;
 
+    /** 季線 + KD（保留舊簽名供 WatchStock 等列表頁使用，避免不必要的 MA240 計算成本） */
     public record Indicators(BigDecimal quarterlyMa, BigDecimal k, BigDecimal d) {
         public static final Indicators EMPTY = new Indicators(null, null, null);
     }
 
+    /** 完整 5 指標：警示觸發紀錄使用 */
+    public record FullIndicators(
+            BigDecimal monthlyMa,
+            BigDecimal quarterlyMa,
+            BigDecimal annualMa,
+            BigDecimal k,
+            BigDecimal d) {
+        public static final FullIndicators EMPTY = new FullIndicators(null, null, null, null, null);
+    }
+
     @Transactional(readOnly = true)
     public Indicators compute(String stockCode, String market) {
+        FullIndicators f = computeAll(stockCode, market);
+        return new Indicators(f.quarterlyMa, f.k, f.d);
+    }
+
+    /**
+     * 一次計算 MA20 / MA60 / MA240 / K / D。
+     * 歷史資料不足以撐滿某個視窗時，該欄位回傳 null（其他仍照算）。
+     */
+    @Transactional(readOnly = true)
+    public FullIndicators computeAll(String stockCode, String market) {
         try {
-            List<StockPriceHistory> desc = historyRepo.findRecentN(stockCode, market, 60);
+            List<StockPriceHistory> desc = historyRepo.findRecentN(stockCode, market, 240);
             LocalDate today = LocalDate.now();
             List<StockPriceHistory> series = new ArrayList<>(desc);
 
@@ -53,12 +74,11 @@ public class TechnicalIndicatorService {
                 }
             }
 
-            if (series.isEmpty()) return Indicators.EMPTY;
+            if (series.isEmpty()) return FullIndicators.EMPTY;
 
-            int n = Math.min(60, series.size());
-            double sum = 0;
-            for (int i = 0; i < n; i++) sum += series.get(i).getClosePrice().doubleValue();
-            BigDecimal ma60 = BigDecimal.valueOf(sum / n).setScale(2, RoundingMode.HALF_UP);
+            BigDecimal ma20  = simpleMa(series, 20);
+            BigDecimal ma60  = simpleMa(series, 60);
+            BigDecimal ma240 = simpleMa(series, 240);
 
             BigDecimal kVal = null, dVal = null;
             if (series.size() >= 9) {
@@ -79,10 +99,18 @@ public class TechnicalIndicatorService {
                 kVal = BigDecimal.valueOf(k).setScale(2, RoundingMode.HALF_UP);
                 dVal = BigDecimal.valueOf(d).setScale(2, RoundingMode.HALF_UP);
             }
-            return new Indicators(ma60, kVal, dVal);
+            return new FullIndicators(ma20, ma60, ma240, kVal, dVal);
         } catch (Exception e) {
             log.warn("compute indicators failed for {} {}", stockCode, market, e);
-            return Indicators.EMPTY;
+            return FullIndicators.EMPTY;
         }
+    }
+
+    /** 取最近 days 筆收盤價平均；series 為 desc。資料不足時回傳 null。 */
+    private static BigDecimal simpleMa(List<StockPriceHistory> series, int days) {
+        if (series.size() < days) return null;
+        double sum = 0;
+        for (int i = 0; i < days; i++) sum += series.get(i).getClosePrice().doubleValue();
+        return BigDecimal.valueOf(sum / days).setScale(2, RoundingMode.HALF_UP);
     }
 }

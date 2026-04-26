@@ -65,3 +65,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/v1.10.0-backup-setting.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.11.0-stock-alert-trigger.sql
+      relativeToChangelogFile: false

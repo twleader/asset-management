@@ -83,7 +83,7 @@ com.steven.assets/
   - `GET /api/bff/stock-analysis/dividends` → `/api/market-data/dividends`
   - `GET /api/bff/stock-analysis/etf-holdings` → `/api/market-data/etf-holdings`
 
-**Repository 層**（Spring Data JPA，共 17 個）
+**Repository 層**（Spring Data JPA，共 18 個）
 - `AssetSnapshotRepository`
 - `StockHoldingRepository`
 - `FundHoldingRepository`
@@ -100,6 +100,7 @@ com.steven.assets/
 - `TransitFundTypeRepository`
 - `WatchStockRepository`
 - `StockAlertRepository`
+- `StockAlertTriggerRepository`（警示觸發歷史，30 天輪替）
 - `BackupSettingRepository`（備份保留代數設定，單列資料表）
 
 ### Frontend Architecture (Vue 3)
@@ -171,6 +172,7 @@ DepositTypeEntity     (存款類型主檔，code 值存入 BankDeposit.depositTy
 MarketType            (市場類型主檔，code 值存入 StockHolding.market)
 TransitFundType       (待轉入資金類型主檔)
 StockAlert            (到價警示，獨立資料表；WatchStock 列表彙總其最近觸發資訊)
+StockAlertTrigger     (警示觸發歷史，FK→stock_alert，保留 30 天)
 BackupSetting         (備份保留代數設定，單列資料表，id = 1)
 ```
 
@@ -346,6 +348,29 @@ BackupSetting         (備份保留代數設定，單列資料表，id = 1)
 | lastTriggeredPrice | BigDecimal | 觸發時股價 |
 | lastTriggeredMa | BigDecimal | 觸發時均線值 |
 | lastTriggeredKd | BigDecimal | 觸發時 KD 值 |
+
+#### StockAlertTrigger（觸發歷史，新增）
+
+每次警示條件成立時，除了覆寫 `StockAlert.last_triggered_*` 欄位外，另寫一筆 `stock_alert_trigger` 紀錄，保留近 30 天供事後追蹤。
+
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| id | Long | PK |
+| alertId | Long | FK → `stock_alert.id`（CASCADE on delete） |
+| stockCode | String | 觸發當下的股票代號（denorm 快取，避免 JOIN） |
+| market | String | 市場 |
+| triggeredAt | LocalDateTime | 觸發時間（同 `StockAlert.lastTriggeredAt`） |
+| price | BigDecimal | 觸發當下股價 |
+| monthlyMa | BigDecimal | 月線 MA20 |
+| quarterlyMa | BigDecimal | 季線 MA60 |
+| annualMa | BigDecimal | 年線 MA240 |
+| kValue | BigDecimal | K 值（KD9） |
+| dValue | BigDecimal | D 值（KD9） |
+| createdAt | LocalDateTime | row 寫入時間（用於 30 天輪替） |
+
+> **保留策略**：每日排程刪除 `created_at < NOW() - 30 days` 的紀錄（`StockAlertService.cleanupOldTriggers` @Scheduled cron `0 0 4 * * *` Asia/Taipei）。
+> **資料填寫**：5 個技術指標皆無條件計算寫入（不論觸發類型是 PRICE / MA / KD），便於事後分析「觸發當下整個技術面狀態」。透過 `TechnicalIndicatorService.computeAll()` 一次取得 MA20 / MA60 / MA240 / K / D。
+
 
 #### TransitFundType（新增）
 | 欄位 | 型別 | 說明 |

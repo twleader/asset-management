@@ -2,14 +2,17 @@ package com.steven.assets.service;
 
 import com.steven.assets.dto.StockAlertDto;
 import com.steven.assets.model.StockAlert;
+import com.steven.assets.model.StockAlertTrigger;
 import com.steven.assets.model.StockPrice;
 import com.steven.assets.model.StockPriceHistory;
 import com.steven.assets.repository.StockAlertRepository;
+import com.steven.assets.repository.StockAlertTriggerRepository;
 import com.steven.assets.repository.StockPriceHistoryRepository;
 import com.steven.assets.repository.StockPriceRepository;
 import com.steven.assets.repository.StockRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,6 +32,7 @@ import java.util.TreeMap;
 public class StockAlertService {
 
     private final StockAlertRepository alertRepo;
+    private final StockAlertTriggerRepository triggerRepo;
     private final StockPriceRepository priceRepo;
     private final StockPriceHistoryRepository historyRepo;
     private final StockRepository stockMasterRepo;
@@ -142,9 +146,11 @@ public class StockAlertService {
                         alert.getStockCode(), alert.getMarket()).orElse(LocalDate.now());
                 java.time.LocalTime closeTime = "美股".equals(alert.getMarket())
                         ? java.time.LocalTime.of(16, 0) : java.time.LocalTime.of(13, 30);
-                alert.setLastTriggeredAt(tradingDate.atTime(closeTime));
+                LocalDateTime triggeredAt = tradingDate.atTime(closeTime);
+                alert.setLastTriggeredAt(triggeredAt);
                 alert.setLastTriggeredPrice(BigDecimal.valueOf(currentPrice));
                 alertRepo.save(alert);
+                recordTrigger(alert, triggeredAt, BigDecimal.valueOf(currentPrice));
                 return;
             }
 
@@ -158,6 +164,7 @@ public class StockAlertService {
                     alert.setLastTriggeredKdValue(m.k);
                     alert.setLastTriggeredDValue(m.d);
                     alertRepo.save(alert);
+                    recordTrigger(alert, m.time, m.price);
                 });
             }
         } catch (Exception e) {
@@ -550,6 +557,42 @@ public class StockAlertService {
                 market, org.springframework.data.domain.PageRequest.of(0, n));
         if (dates.size() < n) return null;
         return dates.get(dates.size() - 1).atStartOfDay();
+    }
+
+    /**
+     * 寫入觸發歷史紀錄。5 個技術指標欄位皆無條件計算填寫（不論觸發類型），
+     * 便於事後追蹤觸發當下的完整技術面狀態。保留 30 天。
+     */
+    private void recordTrigger(StockAlert alert, LocalDateTime triggeredAt, BigDecimal price) {
+        try {
+            TechnicalIndicatorService.FullIndicators ind = indicatorService.computeAll(
+                    alert.getStockCode(), alert.getMarket());
+            triggerRepo.save(StockAlertTrigger.builder()
+                    .alertId(alert.getId())
+                    .stockCode(alert.getStockCode())
+                    .market(alert.getMarket())
+                    .triggeredAt(triggeredAt)
+                    .price(price)
+                    .monthlyMa(ind.monthlyMa())
+                    .quarterlyMa(ind.quarterlyMa())
+                    .annualMa(ind.annualMa())
+                    .kValue(ind.k())
+                    .dValue(ind.d())
+                    .build());
+        } catch (Exception e) {
+            log.warn("recordTrigger failed for alert {}: {}", alert.getId(), e.getMessage());
+        }
+    }
+
+    /**
+     * 每日 04:00 (Asia/Taipei) 清理 30 天前的觸發紀錄。
+     */
+    @Scheduled(cron = "0 0 4 * * *", zone = "Asia/Taipei")
+    @Transactional
+    public void cleanupOldTriggers() {
+        LocalDateTime cutoff = LocalDateTime.now().minusDays(30);
+        int deleted = triggerRepo.deleteByCreatedAtBefore(cutoff);
+        if (deleted > 0) log.info("清理 {} 筆 30 天前的警示觸發紀錄", deleted);
     }
 
     private String buildLabel(StockAlert a) {
