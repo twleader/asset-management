@@ -146,7 +146,7 @@ import { Plus, Delete, Loading, Operation } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import Sortable from 'sortablejs'
 import dayjs from 'dayjs'
-import api, { watchStockApi } from '@/api/index.js'
+import { bffApi } from '@/api/index.js'
 import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
 import TaiwanMap from '@/components/TaiwanMap.vue'
 
@@ -171,7 +171,7 @@ const form = reactive(defaultForm())
 async function load() {
   loading.value = true
   try {
-    list.value = await watchStockApi.getAll()
+    list.value = await bffApi.watchStock.getAll()
   } finally {
     loading.value = false
   }
@@ -200,7 +200,7 @@ function initSortable() {
       reordered.splice(oldIndex, 1)
       reordered.splice(newIndex, 0, moved)
       list.value = [...reordered, ...otherMarket]
-      watchStockApi.reorder(list.value.map(w => w.id))
+      bffApi.watchStock.reorder(list.value.map(w => w.id))
         .catch(() => ElMessage.error('排序儲存失敗'))
     }
   })
@@ -222,8 +222,8 @@ async function fetchStockName() {
   if (!form.stockCode || !form.market) return
   lookingUpName.value = true
   try {
-    const res = await api.get('/stock-alerts/lookup-name', {
-      params: { code: form.stockCode.trim().toUpperCase(), market: form.market }
+    const res = await bffApi.stockAlert.lookupName({
+      code: form.stockCode.trim().toUpperCase(), market: form.market
     })
     if (res.stockName) form.stockName = res.stockName
     else ElMessage.warning('找不到此股票名稱，請手動填寫')
@@ -241,7 +241,7 @@ async function save() {
   }
   saving.value = true
   try {
-    await watchStockApi.create({
+    await bffApi.watchStock.create({
       market: form.market,
       stockCode: form.stockCode.toUpperCase(),
       stockName: form.stockName || null
@@ -260,7 +260,7 @@ async function remove(row) {
     `確定將 ${row.stockCode} ${row.stockName || ''} 從觀察清單移除？`,
     '移除觀察', { type: 'warning' }
   )
-  await watchStockApi.delete(row.id)
+  await bffApi.watchStock.delete(row.id)
   ElMessage.success('已移除')
   await load()
 }

@@ -1319,7 +1319,7 @@ async function onUsTransactionDateChange(br, date) {
     ? date.toISOString().slice(0, 10)
     : String(date).slice(0, 10)
   try {
-    const res = await bffApi.getSnapshotFormExchangeRate(dateStr)
+    const res = await bffApi.snapshotForm.exchangeRate(dateStr)
     const newRate = Number(res.midRate)
     br.transactionExchangeRate = newRate
     // TWD 幣別：以台幣固定支出反推新 USD 成本（顯示維持 TWD）
@@ -1597,7 +1597,7 @@ async function fetchPriceForRow(row) {
   if (!row.stockCode || !form.snapshotDate) return
   try {
     // 一支 BFF 端點處理：歷史收盤價 + 自動 backfill + 名稱 + 配息率 + 漲跌
-    const result = await bffApi.batchSnapshotFormPrices(form.snapshotDate,
+    const result = await bffApi.snapshotForm.prices(form.snapshotDate,
       [{ code: row.stockCode, market: row.market }])
     applyEnrichedPrices(result, [row])
   } catch {
@@ -1628,7 +1628,7 @@ const fetchPrice = async (row) => {
   }
   row._fetchingPrice = true
   try {
-    const list = await bffApi.batchSnapshotFormPrices(form.snapshotDate,
+    const list = await bffApi.snapshotForm.prices(form.snapshotDate,
       [{ code: row.stockCode, market: row.market }])
     const result = list?.[0] ?? {}
     row.latestPrice    = result.price != null ? Number(result.price) : null
@@ -1674,7 +1674,7 @@ const copyPrevDeposits = async () => {
   }).catch(() => { throw new Error('cancel') })
   copyingPrev.deposits = true
   try {
-    const detail = await bffApi.getSnapshotFormDetail(prevId)
+    const detail = await bffApi.snapshotForm.get(prevId)
     const rate = form.usdExchangeRate || 1
     form.deposits = detail.deposits.map(d => mapDepositFromApi(d, rate))
     ElMessage.success(`已複製前一版存款明細（${detail.snapshotDate}，共 ${detail.deposits.length} 筆）`)
@@ -1690,7 +1690,7 @@ const copyPrevFunds = async () => {
   }).catch(() => { throw new Error('cancel') })
   copyingPrev.funds = true
   try {
-    const detail = await bffApi.getSnapshotFormDetail(prevId)
+    const detail = await bffApi.snapshotForm.get(prevId)
     form.funds = detail.funds.map(f => ({
       _rowId: `fund_${_idSeq++}`,
       fundName: f.fundName, fundCode: f.fundCode, bankId: f.bankId || null,
@@ -1710,7 +1710,7 @@ const copyPrevStocks = async () => {
   }).catch(() => { throw new Error('cancel') })
   copyingPrev.stocks = true
   try {
-    const detail = await bffApi.getSnapshotFormDetail(prevId)
+    const detail = await bffApi.snapshotForm.get(prevId)
     form.stocks = groupStocks(detail.stocks.map(s => ({
       stockCode: s.stockCode, stockName: s.stockName, market: s.market,
       brokerId: s.brokerId || null, shares: s.shares, investmentCost: s.investmentCost,
@@ -1735,7 +1735,7 @@ const refreshAllPrices = async () => {
   try {
     // 新增模式：先觸發後端 refresh live 行情，再載入
     if (!isEdit.value) {
-      try { await bffApi.getSnapshotFormRealtime() } catch {}
+      try { await bffApi.snapshotForm.realtime() } catch {}
     }
     // 一支 BFF 端點處理批次：歷史價 + 自動 backfill + 名稱 + 配息率 + 漲跌
     await loadAllPrices()
@@ -1763,7 +1763,7 @@ const fetchDividendRate = async (row) => {
   row._fetchingDividend = true
   try {
     // 透過 BFF 批次端點取得配息率（同時也會帶回名稱與股價）
-    const list = await bffApi.batchSnapshotFormPrices(form.snapshotDate,
+    const list = await bffApi.snapshotForm.prices(form.snapshotDate,
       [{ code: row.stockCode, market: row.market }])
     const result = list?.[0] ?? {}
     if (result.dividendRate != null) {
@@ -1892,12 +1892,12 @@ async function loadAllPrices() {
       .map(s => ({ code: s.stockCode, market: s.market }))
 
     if (stocks.length > 0 && form.snapshotDate) {
-      const prices = await bffApi.batchSnapshotFormPrices(form.snapshotDate, stocks)
+      const prices = await bffApi.snapshotForm.prices(form.snapshotDate, stocks)
       applyEnrichedPrices(prices, form.stocks)
     }
 
     try {
-      const realtime = await bffApi.getSnapshotFormRealtime()
+      const realtime = await bffApi.snapshotForm.realtime()
       marketStatus.value = realtime?.marketStatus ?? marketStatus.value
     } catch {}
   } catch (e) {
@@ -1941,7 +1941,7 @@ watch(() => form.funds.length, refreshFundSortable)
 async function loadExchangeRateForDate(date) {
   if (!date) return
   try {
-    const res = await bffApi.getSnapshotFormExchangeRate(date)
+    const res = await bffApi.snapshotForm.exchangeRate(date)
     if (res && res.midRate != null) {
       form.usdExchangeRate = Number(res.midRate)
     }
@@ -1975,7 +1975,7 @@ onMounted(async () => {
 
   if (isEdit.value) {
     loading.value = true
-    const detail = await bffApi.getSnapshotFormDetail(route.params.id)
+    const detail = await bffApi.snapshotForm.get(route.params.id)
     store.currentSnapshot = detail
     Object.assign(form, {
       snapshotDate:    detail.snapshotDate,

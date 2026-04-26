@@ -12,7 +12,7 @@
           </div>
         </div>
       </template>
-      <el-table :data="store.history" size="small" stripe>
+      <el-table :data="history" size="small" stripe>
         <el-table-column prop="snapshotDate" label="日期" width="110" />
         <el-table-column label="存款" align="right" :formatter="(r) => fmt(r.totalDeposit)" />
         <el-table-column label="信託基金" align="right" :formatter="(r) => fmt(r.totalFundValue)" />
@@ -98,22 +98,23 @@ import VChart from 'vue-echarts'
 import { Plus, Download, Edit, Delete, Refresh } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
-import { useAssetStore } from '@/stores/assetStore'
-import { snapshotApi } from '@/api'
+import { bffApi } from '@/api'
 
 use([CanvasRenderer, LineChart, BarChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent, MarkLineComponent])
 
-const store = useAssetStore()
+const history = ref([])
 const exporting = ref(false)
 const recalculating = ref(false)
 
-onMounted(() => store.fetchHistory())
+const reload = async () => { history.value = await bffApi.assetHistory.getHistory() }
+onMounted(reload)
 
 const handleRecalcDividends = async () => {
   recalculating.value = true
   try {
-    const result = await store.recalcDividends()
+    const result = await bffApi.assetHistory.recalcDividends()
     ElMessage.success(`配息重算完成：${result.updated} 個快照已更新`)
+    await reload()
   } catch (e) {
     ElMessage.error('重算失敗，請稍後再試')
   } finally {
@@ -121,26 +122,18 @@ const handleRecalcDividends = async () => {
   }
 }
 
-// 每年最後一筆的 id 集合（用於「已實現損益」只顯示當年最後一筆）
-const lastOfYearIds = computed(() => {
-  const map = {}
-  for (const r of store.history) {
-    const year = r.snapshotDate?.slice(0, 4)
-    if (year) map[year] = r.id
-  }
-  return new Set(Object.values(map))
-})
-const isLastOfYear = (row) => lastOfYearIds.value.has(row.id)
+// BFF 已預先標註 isLastOfYear（每年最後一筆，用於「已實現損益」欄位顯示判斷）
+const isLastOfYear = (row) => !!row?.isLastOfYear
 
 const deleteSnapshot = async (id) => {
-  await store.deleteSnapshot(id)
-  await store.fetchHistory()
+  await bffApi.assetHistory.deleteSnapshot(id)
+  await reload()
 }
 
 async function handleExport() {
   exporting.value = true
   try {
-    const blob = await snapshotApi.exportExcel()
+    const blob = await bffApi.assetHistory.exportExcel()
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
@@ -160,7 +153,7 @@ const fmt = (v) => {
 }
 const pct = (v) => v ? `${(Number(v) * 100).toFixed(1)}%` : '-'
 
-const dates = computed(() => store.history.map(h => h.snapshotDate))
+const dates = computed(() => history.map(h => h.snapshotDate))
 
 const totalTrendOption = computed(() => ({
   tooltip: {
@@ -180,7 +173,7 @@ const totalTrendOption = computed(() => ({
   series: [
     {
       name: '總資產', type: 'line', smooth: true,
-      data: store.history.map(h => Number(h.totalAssets || 0)),
+      data: history.map(h => Number(h.totalAssets || 0)),
       itemStyle: { color: '#8b5cf6' },
       lineStyle: { width: 3 },
       areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
@@ -188,25 +181,25 @@ const totalTrendOption = computed(() => ({
     },
     {
       name: '存款', type: 'line', smooth: true,
-      data: store.history.map(h => Number(h.totalDeposit || 0)),
+      data: history.map(h => Number(h.totalDeposit || 0)),
       itemStyle: { color: '#3b82f6' },
       lineStyle: { width: 2 }
     },
     {
       name: '基金', type: 'line', smooth: true,
-      data: store.history.map(h => Number(h.totalFundValue || 0)),
+      data: history.map(h => Number(h.totalFundValue || 0)),
       itemStyle: { color: '#10b981' },
       lineStyle: { width: 2 }
     },
     {
       name: '台股', type: 'line', smooth: true,
-      data: store.history.map(h => Number(h.totalTwStockValue || 0)),
+      data: history.map(h => Number(h.totalTwStockValue || 0)),
       itemStyle: { color: '#f59e0b' },
       lineStyle: { width: 2 }
     },
     {
       name: '美股', type: 'line', smooth: true,
-      data: store.history.map(h => Number(h.totalUsStockValue || 0)),
+      data: history.map(h => Number(h.totalUsStockValue || 0)),
       itemStyle: { color: '#ef4444' },
       lineStyle: { width: 2 }
     }
@@ -220,18 +213,18 @@ const stackedOption = computed(() => ({
   xAxis: { type: 'category', data: dates.value, axisLabel: { rotate: 30, fontSize: 11 } },
   yAxis: { type: 'value', axisLabel: { formatter: v => `$${(v/1e4).toFixed(0)}萬` } },
   series: [
-    { name: '存款', type: 'bar', stack: 'total', data: store.history.map(h => Number(h.totalDeposit||0)), itemStyle: { color: '#3b82f6' } },
-    { name: '基金', type: 'bar', stack: 'total', data: store.history.map(h => Number(h.totalFundValue||0)), itemStyle: { color: '#10b981' } },
-    { name: '台股', type: 'bar', stack: 'total', data: store.history.map(h => Number(h.totalTwStockValue||0)), itemStyle: { color: '#f59e0b' } },
+    { name: '存款', type: 'bar', stack: 'total', data: history.map(h => Number(h.totalDeposit||0)), itemStyle: { color: '#3b82f6' } },
+    { name: '基金', type: 'bar', stack: 'total', data: history.map(h => Number(h.totalFundValue||0)), itemStyle: { color: '#10b981' } },
+    { name: '台股', type: 'bar', stack: 'total', data: history.map(h => Number(h.totalTwStockValue||0)), itemStyle: { color: '#f59e0b' } },
     {
       name: '美股', type: 'bar', stack: 'total',
-      data: store.history.map(h => Number(h.totalUsStockValue||0)),
+      data: history.map(h => Number(h.totalUsStockValue||0)),
       itemStyle: { color: '#ef4444' },
       label: {
         show: true,
         position: 'top',
         formatter: p => {
-          const h = store.history[p.dataIndex]
+          const h = history[p.dataIndex]
           if (!h) return ''
           const total = Number(h.totalAssets || 0)
           return `$${(total / 1e4).toFixed(0)}萬`
@@ -245,7 +238,7 @@ const stackedOption = computed(() => ({
 }))
 
 const increaseOption = computed(() => {
-  const data = store.history.map(h => ({ value: h.increaseRate ? Number(h.increaseRate)*100 : null, date: h.snapshotDate }))
+  const data = history.map(h => ({ value: h.increaseRate ? Number(h.increaseRate)*100 : null, date: h.snapshotDate }))
     .filter(d => d.value != null)
   return {
     tooltip: { trigger: 'axis', formatter: p => `${p[0].name}: ${p[0].value?.toFixed(1)}%` },

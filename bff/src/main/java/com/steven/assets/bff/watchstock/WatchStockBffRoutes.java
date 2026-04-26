@@ -16,7 +16,10 @@ public class WatchStockBffRoutes {
     public RouteLocator watchStockRoutes(RouteLocatorBuilder builder) {
         return builder.routes()
                 .route("watch-stock-route", r -> r
-                        .path("/api/watch-stocks/**")
+                        .path("/api/bff/watch-stock/**")
+                        .filters(f -> f.rewritePath(
+                                "/api/bff/watch-stock(?<seg>/?.*)",
+                                "/api/watch-stocks${seg}"))
                         .uri(businessServicesUrl))
                 .build();
     }

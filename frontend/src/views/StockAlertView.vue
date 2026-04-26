@@ -211,7 +211,7 @@ import { Plus, Edit, Delete, Loading, Operation, Refresh } from '@element-plus/i
 import { ElMessage, ElMessageBox } from 'element-plus'
 import Sortable from 'sortablejs'
 import dayjs from 'dayjs'
-import api from '@/api/index.js'
+import { bffApi } from '@/api/index.js'
 import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
 import TaiwanMap from '@/components/TaiwanMap.vue'
 
@@ -244,7 +244,7 @@ const form = reactive(defaultForm())
 async function loadAlerts() {
   loading.value = true
   try {
-    const res = await api.get('/stock-alerts')
+    const res = await bffApi.stockAlert.getAll()
     twAlerts.value = res.filter(a => a.market === '台股')
     usAlerts.value = res.filter(a => a.market === '美股')
   } finally {
@@ -270,7 +270,7 @@ function initSortable() {
       const arr = marketTab.value === '台股' ? twAlerts.value : usAlerts.value
       const moved = arr.splice(oldIndex, 1)[0]
       arr.splice(newIndex, 0, moved)
-      api.put('/stock-alerts/reorder', [...twAlerts.value, ...usAlerts.value].map(a => a.id))
+      bffApi.stockAlert.reorder( [...twAlerts.value, ...usAlerts.value].map(a => a.id))
         .catch(() => ElMessage.error('排序儲存失敗'))
     }
   })
@@ -338,8 +338,8 @@ async function fetchStockName() {
   if (!form.stockCode || !form.market) return
   lookingUpName.value = true
   try {
-    const res = await api.get('/stock-alerts/lookup-name', {
-      params: { code: form.stockCode.trim().toUpperCase(), market: form.market }
+    const res = await bffApi.stockAlert.lookupName({
+      code: form.stockCode.trim().toUpperCase(), market: form.market
     })
     if (res.stockName) {
       form.stockName = res.stockName
@@ -369,9 +369,9 @@ async function save() {
       active: form.active,
     }
     if (editId.value) {
-      await api.put(`/stock-alerts/${editId.value}`, payload)
+      await bffApi.stockAlert.update(editId.value, payload)
     } else {
-      await api.post('/stock-alerts', payload)
+      await bffApi.stockAlert.create(payload)
     }
     ElMessage.success('儲存成功')
     dialogVisible.value = false
@@ -385,7 +385,7 @@ async function save() {
 
 async function toggleActive(row) {
   try {
-    const res = await api.patch(`/stock-alerts/${row.id}/active`)
+    const res = await bffApi.stockAlert.toggleActive(row.id)
     Object.assign(row, res.data)
   } catch {
     row.active = !row.active
@@ -398,7 +398,7 @@ async function remove(row) {
     `確定刪除 ${row.stockCode} 的「${row.conditionLabel}」警示？`,
     '刪除警示', { type: 'warning' }
   )
-  await api.delete(`/stock-alerts/${row.id}`)
+  await bffApi.stockAlert.delete(row.id)
   ElMessage.success('已刪除')
   loadAlerts()
 }

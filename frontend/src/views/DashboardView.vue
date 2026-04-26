@@ -310,7 +310,7 @@ onUnmounted(() => {
 
 async function loadDashboardSummary() {
   try {
-    const summary = await bffApi.getDashboardSummary()
+    const summary = await bffApi.dashboard.summary()
     store.snapshots = summary.snapshots ?? []
     store.history = summary.history ?? []
     // 僅在使用者尚未選擇任何快照、或目前選的就是最新時才更新；保留使用者選擇避免被輪詢覆蓋
@@ -329,7 +329,7 @@ async function loadDashboardSummary() {
 async function refreshPricesAndStatus() {
   // 5 分鐘輪詢只刷新即時股價與市場狀態，避免覆蓋使用者選擇的基準日
   try {
-    const data = await bffApi.getDashboardRealtime()
+    const data = await bffApi.dashboard.realtime()
     applyPricesAndStatus(data?.stockPrices ?? [], data?.marketStatus ?? {})
   } catch (e) {
     console.warn('刷新股價/市場狀態失敗:', e)
@@ -338,7 +338,7 @@ async function refreshPricesAndStatus() {
 
 async function onSnapshotChange(id) {
   try {
-    const detail = await bffApi.getDashboardSnapshot(id)
+    const detail = await bffApi.dashboard.snapshot(id)
     store.currentSnapshot = detail
     selectedSnapshotId.value = id
     mergedStocksFromBff.value = detail.mergedStocks ?? []

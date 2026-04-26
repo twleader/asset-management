@@ -131,7 +131,7 @@
 import { Upload, Refresh } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
-import { backupApi } from '@/api'
+import { bffApi } from '@/api'
 
 const loadingList = ref(false)
 const backing = ref(false)
@@ -152,7 +152,7 @@ const settings = reactive({ manualRetention: 5, dailyRetention: 50, weeklyRetent
 async function loadSettings() {
   loadingSettings.value = true
   try {
-    const s = await backupApi.getSettings()
+    const s = await bffApi.backupRestore.getSettings()
     settings.manualRetention = s.manualRetention
     settings.dailyRetention  = s.dailyRetention
     settings.weeklyRetention = s.weeklyRetention
@@ -164,7 +164,7 @@ async function loadSettings() {
 async function saveSettings() {
   savingSettings.value = true
   try {
-    const s = await backupApi.updateSettings({
+    const s = await bffApi.backupRestore.updateSettings({
       manualRetention: settings.manualRetention,
       dailyRetention:  settings.dailyRetention,
       weeklyRetention: settings.weeklyRetention
@@ -181,7 +181,7 @@ async function saveSettings() {
 async function loadList() {
   loadingList.value = true
   try {
-    backups.value = await backupApi.list()
+    backups.value = await bffApi.backupRestore.list()
   } finally {
     loadingList.value = false
   }
@@ -190,7 +190,7 @@ async function loadList() {
 async function doBackup() {
   backing.value = true
   try {
-    lastBackup.value = await backupApi.create()
+    lastBackup.value = await bffApi.backupRestore.create()
     ElMessage.success('備份完成')
     await loadList()
   } finally {
@@ -210,7 +210,7 @@ async function doRestore() {
   restoring.value = true
   dialogVisible.value = false
   try {
-    const res = await backupApi.restore({
+    const res = await bffApi.backupRestore.restore({
       folder: selected.value.folder,
       filename: selected.value.filename,
       confirmation: confirmText.value

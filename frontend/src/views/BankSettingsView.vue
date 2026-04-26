@@ -64,7 +64,7 @@
 <script setup>
 import { Plus, Edit } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { institutionApi } from '@/api'
+import { bffApi } from '@/api'
 
 const loading = ref(false)
 const saving  = ref(false)
@@ -84,7 +84,7 @@ const splitKeywords = (kw) =>
 
 async function load() {
   loading.value = true
-  try { banks.value = await institutionApi.getAllBanks() }
+  try { banks.value = await bffApi.bankSettings.getAll() }
   finally { loading.value = false }
 }
 
@@ -107,13 +107,13 @@ async function save() {
   saving.value = true
   try {
     if (editing.value) {
-      await institutionApi.updateBank(editing.value.id, {
+      await bffApi.bankSettings.update(editing.value.id, {
         displayName: form.displayName,
         keywords: form.keywords
       })
       ElMessage.success('已更新')
     } else {
-      await institutionApi.createBank({
+      await bffApi.bankSettings.create({
         code: form.code,
         displayName: form.displayName,
         keywords: form.keywords
@@ -130,7 +130,7 @@ async function save() {
 async function toggleActive(bank) {
   const action = bank.active ? '停用' : '啟用'
   await ElMessageBox.confirm(`確定要${action}「${bank.displayName}」嗎？`, '確認', { type: 'warning' })
-  await institutionApi.setBankActive(bank.id, !bank.active)
+  await bffApi.bankSettings.setActive(bank.id, !bank.active)
   ElMessage.success(`已${action}`)
   await load()
 }

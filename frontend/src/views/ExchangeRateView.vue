@@ -81,7 +81,7 @@ import { CanvasRenderer } from 'echarts/renderers'
 import { LineChart } from 'echarts/charts'
 import { TitleComponent, TooltipComponent, LegendComponent, GridComponent, DataZoomComponent, MarkLineComponent, MarkPointComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
-import { marketDataApi } from '@/api'
+import { bffApi } from '@/api'
 import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
 
@@ -100,19 +100,13 @@ const rangeOptions = [
   { key: 'all', label: '全部' },
 ]
 
-onMounted(async () => {
-  // 先刷新匯率（FinMind 回補 + 台灣銀行即時），再載入資料
-  try { await marketDataApi.refreshExchangeRate('USD') } catch {}
-  await fetchData()
-})
+onMounted(fetchData)
 
 async function fetchData() {
   try {
-    // 只載入最近 5 年的匯率資料
-    const fiveYearsAgo = dayjs().subtract(5, 'year').format('YYYY-MM-DD')
-    const today = dayjs().format('YYYY-MM-DD')
-    const data = await marketDataApi.getExchangeRate('USD', fiveYearsAgo, today)
-    rateData.value = data.map(d => ({
+    // BFF 一支端點：自動 refresh + 回傳 5 年歷史
+    const res = await bffApi.exchangeRate.getHistory('USD')
+    rateData.value = (res.rates ?? []).map(d => ({
       ...d,
       midRate: Number(d.midRate),
       buyRate: d.buyRate ? Number(d.buyRate) : null,
@@ -124,7 +118,7 @@ async function fetchData() {
 async function onBackfill() {
   backfilling.value = true
   try {
-    const result = await marketDataApi.backfillExchangeRateHistory()
+    const result = await bffApi.exchangeRate.backfill('USD')
     ElMessage.success(`匯率回補完成，新增 ${result.backfilled} 筆`)
     await fetchData()
   } catch {} finally {

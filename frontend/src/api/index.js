@@ -16,7 +16,7 @@ api.interceptors.response.use(
   }
 )
 
-// ===== Snapshots =====
+// ===== Snapshots（共享 CRUD，給 store 使用；單一頁面的資料請走對應 bffApi.<page>） =====
 export const snapshotApi = {
   getAll: () => api.get('/snapshots'),
   getDetail: (id) => api.get(`/snapshots/${id}`),
@@ -31,37 +31,27 @@ export const snapshotApi = {
   exportExcel: () => api.get('/snapshots/export', { responseType: 'blob' })
 }
 
-// ===== Institution Settings (Banks, Brokers, DepositTypes, MarketTypes) =====
+// ===== Institution Settings（共享 lookups，下拉用；CRUD 請走 bffApi.<xxx>Settings） =====
 export const institutionApi = {
-  // Banks
   getAllBanks:    () => api.get('/settings/banks'),
-  createBank:    (data) => api.post('/settings/banks', data),
-  updateBank:    (id, data) => api.put(`/settings/banks/${id}`, data),
-  setBankActive: (id, active) => api.patch(`/settings/banks/${id}/active`, { active }),
-  // Brokers
   getAllBrokers:    () => api.get('/settings/brokers'),
-  createBroker:    (data) => api.post('/settings/brokers', data),
-  updateBroker:    (id, data) => api.put(`/settings/brokers/${id}`, data),
-  setBrokerActive: (id, active) => api.patch(`/settings/brokers/${id}/active`, { active }),
-  // Deposit Types
   getAllDepositTypes:    () => api.get('/settings/deposit-types'),
-  createDepositType:    (data) => api.post('/settings/deposit-types', data),
-  updateDepositType:    (id, data) => api.put(`/settings/deposit-types/${id}`, data),
-  setDepositTypeActive: (id, active) => api.patch(`/settings/deposit-types/${id}/active`, { active }),
-  // Market Types
   getAllMarketTypes:    () => api.get('/settings/market-types'),
-  createMarketType:    (data) => api.post('/settings/market-types', data),
-  updateMarketType:    (id, data) => api.put(`/settings/market-types/${id}`, data),
-  setMarketTypeActive: (id, active) => api.patch(`/settings/market-types/${id}/active`, { active }),
-  // Transit Fund Types
   getAllTransitFundTypes:    () => api.get('/settings/transit-fund-types'),
-  getActiveTransitFundTypes: () => api.get('/settings/transit-fund-types/active'),
-  createTransitFundType:    (data) => api.post('/settings/transit-fund-types', data),
-  updateTransitFundType:    (id, data) => api.put(`/settings/transit-fund-types/${id}`, data),
-  setTransitFundTypeActive: (id, active) => api.patch(`/settings/transit-fund-types/${id}/active`, { active })
+  getActiveTransitFundTypes: () => api.get('/settings/transit-fund-types/active')
 }
 
-// ===== Realized Gains =====
+// ===== Market Data (共享 lookups for components like StockAnalysisDialog) =====
+export const marketDataApi = {
+  getStockHistory: (code, market, start, end) =>
+    api.get('/market-data/history/stock', { params: { code, market, start, end } }),
+  getDividendHistory: (code, market, years = 10) =>
+    api.get('/market-data/dividends', { params: { code, market, years } }),
+  getEtfHoldings: (code, market) =>
+    api.get('/market-data/etf-holdings', { params: { code, market } })
+}
+
+// ===== Realized Gains（store 用） =====
 export const gainApi = {
   getAll: () => api.get('/realized-gains'),
   create: (data) => api.post('/realized-gains', data),
@@ -70,77 +60,131 @@ export const gainApi = {
   exportExcel: () => api.get('/realized-gains/export', { responseType: 'blob' })
 }
 
-// ===== Market Data =====
-export const marketDataApi = {
-  getDividendRate: (code, market) =>
-    api.get('/market-data/dividend-rate', { params: { code, market } }),
-  getPrice: (code, market) =>
-    api.get('/market-data/price', { params: { code, market } }),
-  getAllPrices: () => api.get('/market-data/prices'),
-  getMarketStatus: () => api.get('/market-data/market-status'),
-  getHolidays: (year) => api.get('/market-data/holidays', { params: { year } }),
-  refreshPrices: () => api.post('/market-data/prices/refresh'),
-  backfillHistory: () => api.post('/market-data/history/backfill'),
-  backfillSingleStock: (code, market, since, until) => {
-    const params = new URLSearchParams({ code, market })
-    if (since) params.append('since', since)
-    if (until) params.append('until', until)
-    return api.post(`/market-data/history/backfill-stock?${params.toString()}`)
-  },
-  getStockHistory: (code, market, start, end) =>
-    api.get('/market-data/history/stock', { params: { code, market, start, end } }),
-  getEtfHoldings: (code, market) =>
-    api.get('/market-data/etf-holdings', { params: { code, market } }),
-  getDividendHistory: (code, market, years = 10) =>
-    api.get('/market-data/dividends', { params: { code, market, years } }),
-  getExchangeRate: (currency, start, end) =>
-    api.get('/market-data/exchange-rate', { params: { currency, start, end } }),
-  refreshExchangeRate: (currency = 'USD') =>
-    api.post('/market-data/exchange-rate/refresh', null, { params: { currency } }),
-  backfillExchangeRateHistory: (currency = 'USD', since) =>
-    api.post('/market-data/exchange-rate/backfill-history', null, { params: { currency, ...(since && { since }) } }),
-  getPricesOnDate: (date, stocks) =>
-    api.post('/market-data/history/prices-on-date', stocks, { params: { date } }),
-  getLiveAssets: () => api.get('/market-data/live-assets'),
-  getExchangeRateOnDate: (currency, date) =>
-    api.get('/market-data/exchange-rate/on-date', { params: { currency, date } })
-}
-
-// ===== Watch Stocks =====
-export const watchStockApi = {
-  getAll:   () => api.get('/watch-stocks'),
-  create:   (data) => api.post('/watch-stocks', data),
-  delete:   (id) => api.delete(`/watch-stocks/${id}`),
-  reorder:  (orderedIds) => api.put('/watch-stocks/reorder', orderedIds)
-}
-
-// ===== Backup / Restore =====
-// pg_dump + rclone 上傳/下載/列舉可能耗時，提高 timeout
-export const backupApi = {
-  list:    () => api.get('/backups', { timeout: 60000 }),
-  create:  () => api.post('/backups', null, { timeout: 120000 }),
-  restore: ({ folder, filename, confirmation }) =>
-    api.post('/backups/restore', { folder, filename, confirmation }, { timeout: 180000 }),
-  getSettings:    () => api.get('/backups/settings'),
-  updateSettings: (data) => api.put('/backups/settings', data)
-}
-
-// ===== BFF Aggregated Endpoints =====
+// ============================================================
+// BFF：每個前端頁面對應一個獨立的 namespace
+// 前端 view 一律走 bffApi.<page>.<method>，不直接呼叫共享 *Api
+// ============================================================
 export const bffApi = {
-  // Dashboard page: single call that aggregates snapshots, history, prices, and market status
-  getDashboardSummary: () => api.get('/bff/dashboard/summary'),
-  getDashboardSnapshot: (id) => api.get(`/bff/dashboard/snapshot/${id}`),
-  getDashboardRealtime: () => api.get('/bff/dashboard/realtime'),
-  // SnapshotDetailView：回傳 enriched detail + mergedStocks（含 brokerRows）
-  getSnapshotDetail: (id) => api.get(`/bff/snapshot-detail/${id}`),
-  // SnapshotFormView 專用 endpoints
-  getSnapshotFormDetail: (id) => api.get(`/bff/snapshot-form/${id}`),
-  // 批次取得每筆股票的歷史收盤價 + 漲跌 + 名稱 + 配息率（含自動 backfill 重試）
-  batchSnapshotFormPrices: (date, stocks) =>
-    api.post('/bff/snapshot-form/prices', stocks, { params: { date } }),
-  getSnapshotFormRealtime: () => api.get('/bff/snapshot-form/realtime'),
-  getSnapshotFormExchangeRate: (date) =>
-    api.get('/bff/snapshot-form/exchange-rate', { params: { date } })
+  // Dashboard
+  dashboard: {
+    summary: () => api.get('/bff/dashboard/summary'),
+    snapshot: (id) => api.get(`/bff/dashboard/snapshot/${id}`),
+    realtime: () => api.get('/bff/dashboard/realtime')
+  },
+
+  // SnapshotDetail
+  snapshotDetail: {
+    get: (id) => api.get(`/bff/snapshot-detail/${id}`)
+  },
+
+  // SnapshotForm
+  snapshotForm: {
+    get: (id) => api.get(`/bff/snapshot-form/${id}`),
+    prices: (date, stocks) =>
+      api.post('/bff/snapshot-form/prices', stocks, { params: { date } }),
+    realtime: () => api.get('/bff/snapshot-form/realtime'),
+    exchangeRate: (date) =>
+      api.get('/bff/snapshot-form/exchange-rate', { params: { date } })
+  },
+
+  // AssetHistory
+  assetHistory: {
+    getHistory:        () => api.get('/bff/asset-history'),
+    recalcDividends:   () => api.post('/bff/asset-history/recalc-dividends'),
+    deleteSnapshot:    (id) => api.delete(`/bff/asset-history/${id}`),
+    exportExcel:       () => api.get('/bff/asset-history/export', { responseType: 'blob' })
+  },
+
+  // RealizedGain
+  realizedGain: {
+    getAll:      () => api.get('/bff/realized-gain'),
+    create:      (data) => api.post('/bff/realized-gain', data),
+    update:      (id, data) => api.put(`/bff/realized-gain/${id}`, data),
+    delete:      (id) => api.delete(`/bff/realized-gain/${id}`),
+    exportExcel: () => api.get('/bff/realized-gain/export', { responseType: 'blob' })
+  },
+
+  // ExchangeRate
+  exchangeRate: {
+    getHistory: (currency = 'USD') =>
+      api.get('/bff/exchange-rate', { params: { currency } }),
+    backfill:   (currency = 'USD', since) =>
+      api.post('/bff/exchange-rate/backfill', null, { params: { currency, ...(since && { since }) } })
+  },
+
+  // TradingCalendar
+  tradingCalendar: {
+    get:           (year) => api.get('/bff/trading-calendar', { params: year ? { year } : {} }),
+    marketStatus: () => api.get('/bff/trading-calendar/market-status')
+  },
+
+  // SnapshotList
+  snapshotList: {
+    getAll:      () => api.get('/bff/snapshot-list'),
+    delete:      (id) => api.delete(`/bff/snapshot-list/${id}`),
+    exportExcel: () => api.get('/bff/snapshot-list/export', { responseType: 'blob' })
+  },
+
+  // StockAlert
+  stockAlert: {
+    getAll:    () => api.get('/bff/stock-alert'),
+    reorder:   (ids) => api.put('/bff/stock-alert/reorder', ids),
+    lookupName:(params) => api.get('/bff/stock-alert/lookup-name', { params }),
+    create:    (data) => api.post('/bff/stock-alert', data),
+    update:    (id, data) => api.put(`/bff/stock-alert/${id}`, data),
+    toggleActive: (id) => api.patch(`/bff/stock-alert/${id}/active`),
+    delete:    (id) => api.delete(`/bff/stock-alert/${id}`)
+  },
+
+  // WatchStock
+  watchStock: {
+    getAll:  () => api.get('/bff/watch-stock'),
+    create:  (data) => api.post('/bff/watch-stock', data),
+    delete:  (id) => api.delete(`/bff/watch-stock/${id}`),
+    reorder: (orderedIds) => api.put('/bff/watch-stock/reorder', orderedIds)
+  },
+
+  // BackupRestore
+  backupRestore: {
+    list:           () => api.get('/bff/backup-restore', { timeout: 60000 }),
+    create:         () => api.post('/bff/backup-restore', null, { timeout: 120000 }),
+    restore:        ({ folder, filename, confirmation }) =>
+      api.post('/bff/backup-restore/restore', { folder, filename, confirmation }, { timeout: 180000 }),
+    getSettings:    () => api.get('/bff/backup-restore/settings'),
+    updateSettings: (data) => api.put('/bff/backup-restore/settings', data)
+  },
+
+  // Settings 頁面（CRUD 走各自 BFF）
+  bankSettings: {
+    getAll:    () => api.get('/bff/bank-settings'),
+    create:    (data) => api.post('/bff/bank-settings', data),
+    update:    (id, data) => api.put(`/bff/bank-settings/${id}`, data),
+    setActive: (id, active) => api.patch(`/bff/bank-settings/${id}/active`, { active })
+  },
+  brokerSettings: {
+    getAll:    () => api.get('/bff/broker-settings'),
+    create:    (data) => api.post('/bff/broker-settings', data),
+    update:    (id, data) => api.put(`/bff/broker-settings/${id}`, data),
+    setActive: (id, active) => api.patch(`/bff/broker-settings/${id}/active`, { active })
+  },
+  depositTypeSettings: {
+    getAll:    () => api.get('/bff/deposit-type-settings'),
+    create:    (data) => api.post('/bff/deposit-type-settings', data),
+    update:    (id, data) => api.put(`/bff/deposit-type-settings/${id}`, data),
+    setActive: (id, active) => api.patch(`/bff/deposit-type-settings/${id}/active`, { active })
+  },
+  marketTypeSettings: {
+    getAll:    () => api.get('/bff/market-type-settings'),
+    create:    (data) => api.post('/bff/market-type-settings', data),
+    update:    (id, data) => api.put(`/bff/market-type-settings/${id}`, data),
+    setActive: (id, active) => api.patch(`/bff/market-type-settings/${id}/active`, { active })
+  },
+  transitFundTypeSettings: {
+    getAll:    () => api.get('/bff/transit-fund-type-settings'),
+    create:    (data) => api.post('/bff/transit-fund-type-settings', data),
+    update:    (id, data) => api.put(`/bff/transit-fund-type-settings/${id}`, data),
+    setActive: (id, active) => api.patch(`/bff/transit-fund-type-settings/${id}/active`, { active })
+  }
 }
 
 export default api

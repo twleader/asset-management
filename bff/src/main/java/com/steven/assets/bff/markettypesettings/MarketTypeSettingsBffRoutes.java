@@ -1,4 +1,4 @@
-package com.steven.assets.bff.stockalert;
+package com.steven.assets.bff.markettypesettings;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cloud.gateway.route.RouteLocator;
@@ -7,19 +7,19 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 @Configuration
-public class StockAlertBffRoutes {
+public class MarketTypeSettingsBffRoutes {
 
     @Value("${business-services.url}")
     private String businessServicesUrl;
 
     @Bean
-    public RouteLocator stockAlertRoutes(RouteLocatorBuilder builder) {
+    public RouteLocator marketTypeSettingsRoutes(RouteLocatorBuilder builder) {
         return builder.routes()
-                .route("stock-alert-route", r -> r
-                        .path("/api/bff/stock-alert/**")
+                .route("market-type-settings-route", r -> r
+                        .path("/api/bff/market-type-settings/**")
                         .filters(f -> f.rewritePath(
-                                "/api/bff/stock-alert(?<seg>/?.*)",
-                                "/api/stock-alerts${seg}"))
+                                "/api/bff/market-type-settings(?<seg>/?.*)",
+                                "/api/market-types${seg}"))
                         .uri(businessServicesUrl))
                 .build();
     }
