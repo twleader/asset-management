@@ -74,7 +74,7 @@ com.steven.assets/
   - `GET /api/bff/snapshot-form/realtime`：5 分鐘輪詢用，先 trigger 後端刷新行情再回傳 stockPrices + marketStatus
   - `GET /api/bff/snapshot-form/exchange-rate?date=YYYY-MM-DD`：取指定日期 USD 匯率（今天會先 refresh，假日往前 fallback）
 
-**Repository 層**（Spring Data JPA，共 16 個）
+**Repository 層**（Spring Data JPA，共 17 個）
 - `AssetSnapshotRepository`
 - `StockHoldingRepository`
 - `FundHoldingRepository`
@@ -91,6 +91,7 @@ com.steven.assets/
 - `TransitFundTypeRepository`
 - `WatchStockRepository`
 - `StockAlertRepository`
+- `BackupSettingRepository`（備份保留代數設定，單列資料表）
 
 ### Frontend Architecture (Vue 3)
 
@@ -161,6 +162,7 @@ DepositTypeEntity     (存款類型主檔，code 值存入 BankDeposit.depositTy
 MarketType            (市場類型主檔，code 值存入 StockHolding.market)
 TransitFundType       (待轉入資金類型主檔)
 StockAlert            (到價警示，獨立資料表；WatchStock 列表彙總其最近觸發資訊)
+BackupSetting         (備份保留代數設定，單列資料表，id = 1)
 ```
 
 ### Core Entities
