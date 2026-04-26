@@ -15,7 +15,7 @@
 │                            │ /api/bff/**  ↓ (Dashboard 聚合)              │
 │                            └──────────────────────────────────────────┐  │
 │                                       External APIs                   │  │
-│                                       TWSE / Yahoo Finance            │  │
+│                                       TWSE / FinMind / NASDAQ          │  │
 │                                       （由 Backend 呼叫）              │  │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
@@ -562,16 +562,61 @@ totalProfit  = totalStock - totalCost
 > 存款與基金以快照當時值為準；股票部位反映最新市價。
 > `closed=true` 表示該股已使用收盤價，不再盤中更新。
 
-### 股利率查詢（Yahoo Finance）
+### 配息率（殖利率）查詢與計算
+
+由 `MarketDataService.getDividendRate(stockCode, market)` 統一提供，所有頁面（Dashboard、SnapshotDetail、SnapshotForm）一律走此函式，避免不同頁面值不一致。
+
+**台股查詢優先序**（依序 fallback，皆「最近 3 年平均」口徑）：
+1. **FinMind** 近 3 年平均殖利率（ETF / 個股皆適用，免認證）— 主要來源
+2. **TWSE BWIBBU 歷史** 近 3 年平均（FinMind 失敗時備援）
+3. **TWSE OpenAPI BWIBBU_ALL** 當日殖利率（最後備援，僅涵蓋上市個股，不含 ETF）
+
+**美股查詢優先序**：
+1. **NASDAQ API** 即時殖利率
+2. **內建已知 ETF 表**（Vanguard 等 NASDAQ API 查不到的常見 ETF）
+
+> Yahoo Finance 已停用（Docker 環境被擋，且其數據與台灣公開資料口徑不一致）。
+
+**「最近 3 年平均」演算法**（`getFinMindDividendRate` / `getTwseThreeYearAvgDividendRate`）：
 
 ```
-1. 取得 Yahoo Finance session cookie
-2. 取得 crumb token（API 認證）
-3. 請求 /v10/finance/quoteSummary/{symbol}?modules=summaryDetail
-4. 解析 trailingAnnualDividendRate / dividendYield
-5. 快取結果至 StockPrice entity
-6. 台股先嘗試 {code}.TW，失敗則嘗試 {code}.TWO
+分子：依年份彙總每年現金配息金額（CashEarningsDistribution + CashStatutorySurplus）
+     ↓ 排除當年度（資料不完整會壓低平均）
+     ↓ 取最近 3 個完整年度的算術平均 = avgAnnualDividend
+
+分母：當前股價（current price）
+     ├── 優先：即時 API（getTwseRealTimePrice）
+     └── Fallback：DB stock_price 快取
+
+殖利率 = avgAnnualDividend / currentPrice
 ```
+
+> **設計決策**：分母固定使用「當前股價」而非「3 年平均股價」。早期版本曾改為 3 年均價想與分子時間窗對齊，但與 Yahoo / Goodinfo 等公開資料源差距反而拉大；最終決定回到「現價分母」貼近市場慣用口徑。
+
+### 預估配息資料來源（estimatedAnnualDividend）
+
+**單一資料來源原則**：所有 view 顯示的「預估年配息」一律讀自 `asset_snapshot.estimated_annual_dividend` 欄位，**不再於 BFF / 前端即時重算**。
+
+**寫入時機**（由 `AssetService.autoEnrichDividendRates` 與 `AssetService.recalcAllEstimatedDividends` 維護）：
+
+```
+對快照中每個 StockHolding：
+  if dividendRate > 0 且 currentValue > 0:
+    estimatedDividend = currentValue × dividendRate
+快照層級：
+  asset_snapshot.estimated_annual_dividend = Σ holding.estimatedDividend
+```
+
+**讀取面**：
+- `AssetService.getAssetHistory()`（行 340）— 直接 `snapshot.getEstimatedAnnualDividend()`，不重算
+- `DashboardBffController` / `SnapshotDetailBffController` / `SnapshotFormBffController`：透過 `SnapshotEnricher` 取得已存的值
+
+**觸發補算的端點**：
+- `POST /api/snapshots/recalc-dividends`：對所有快照重跑 `currentValue × dividendRate` 並回寫
+- `POST /api/snapshots/enrich-all-dividend-rates`：背景補齊缺漏的 `dividendRate`，順帶更新 estimatedDividend
+- 新建 / 編輯快照存檔時亦會寫入
+
+> **歷史背景**：早期 BFF 在 response 動態組裝 estimatedAnnualDividend，導致同一張快照在 AssetHistory 與 Dashboard 顯示不同值（一邊用即時股價、一邊用快照當日股價）。改為「snapshot 欄位即真相」後三邊一致，並符合 CLAUDE.md「同義欄位、同一 business service API」原則。
 
 ## Infrastructure
 
