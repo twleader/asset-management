@@ -30,7 +30,7 @@ import java.util.stream.Collectors;
  * 股價即時更新服務
  * - 台股交易時間：週一～五 09:00～13:30 (台灣時間)
  * - 美股交易時間：週一～五 09:30～16:00 (美東時間) = 台灣 22:30～隔日 05:00
- * - 盤中每 5 分鐘更新一次
+ * - 盤中每 2 分鐘更新一次
  * - 收盤後存收盤價，不再更新直到下次開盤
  */
 @Slf4j
@@ -131,7 +131,7 @@ public class StockPriceService {
      * 每 10 分鐘執行一次
      * 根據交易時間決定是否需要更新台股/美股
      */
-    @Scheduled(fixedRate = 300_000, initialDelay = 10_000) // 5分鐘, 啟動10秒後開始
+    @Scheduled(fixedRate = 120_000, initialDelay = 10_000) // 2分鐘, 啟動10秒後開始
     public void scheduledPriceUpdate() {
         boolean twOpen = isTwMarketOpen();
         boolean usOpen = isUsMarketOpen();
