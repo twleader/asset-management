@@ -943,6 +943,20 @@ public class MarketDataService {
         return h;
     }
 
+    /** 該日是否為台股交易日（非週末且不在 TWSE 假日表） */
+    public boolean isTwTradingDay(LocalDate date) {
+        DayOfWeek dow = date.getDayOfWeek();
+        if (dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY) return false;
+        return !getTwHolidays(date.getYear()).containsKey(date.toString());
+    }
+
+    /** 該日是否為美股交易日（非週末且不在 NYSE 假日表） */
+    public boolean isUsTradingDay(LocalDate date) {
+        DayOfWeek dow = date.getDayOfWeek();
+        if (dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY) return false;
+        return !getUsHolidays(date.getYear()).containsKey(date.toString());
+    }
+
     private void addObserved(Map<String, String> h, int year, int month, int day, String name) {
         LocalDate date = LocalDate.of(year, month, day);
         DayOfWeek dow = date.getDayOfWeek();

@@ -209,16 +209,27 @@
 
 ---
 
-### Requirement 15: 資料庫備份／還原（UI 介面）
+### Requirement 15: 資料庫備份／還原（UI 介面 + 自動排程）
 
-**User Story:** 作為使用者，我希望在「系統設定」選單下有一個「備份/還原 資料」功能，能夠在 launchd 5:00 AM 排程備份失敗時手動觸發備份，並且在換另一台電腦使用時，能從 Google Drive 上的歷史備份中挑選一份還原到目前的資料庫，以確保資料連續性與災難復原能力。
+**User Story:** 作為使用者，我希望系統能依交易日曆自動於每個交易日收盤後與每周日定時備份資料庫到 Google Drive，並能在「系統設定」選單下手動觸發備份／挑選歷史備份還原，以確保資料連續性與災難復原能力。
 
 **Acceptance Criteria:**
 
 - [ ] 左側導覽選單「系統設定」子選單下新增「備份/還原 資料」項目，路徑 `/settings/backup-restore`
 - [ ] 頁面分成兩個區塊：「立即備份」與「還原資料」
 - [ ] 「立即備份」按鈕觸發 `POST /api/backups`，後端執行 `pg_dump` 並上傳加密檔到 `gdrive-crypt:backups/manual/`
-- [ ] 手動備份檔案名稱格式 `asset_manual_YYYYMMDD_HHMMSS.dump`，僅保留最近 5 份（超過 5 份自動刪除最舊）
+- [ ] **自動備份排程（後端 `@Scheduled`，時區 `Asia/Taipei`）：**
+  - **台股交易日備份**：每個台股交易日收盤（13:30）後 2 小時，於 15:30 啟動，檔案上傳至 `daily/`，檔名 `asset_daily_tw_YYYYMMDD_HHmmss.dump`。台股是否為交易日依 TWSE Open API 假日表（`MarketDataService.getTwHolidays`）為準。
+  - **美股交易日備份**：每個美股交易日收盤（美東 16:00）後 2 小時，對應台北時間 06:00～07:00（依夏令／標準時切換），統一於台北時間 07:00 啟動（隔日 TUE–SAT），檔案上傳至 `daily/`，檔名 `asset_daily_us_YYYYMMDD_HHmmss.dump`。美股是否為交易日依 NYSE 假日規則（`MarketDataService.getUsHolidays`）為準。
+  - **每周備份**：每周日台北時間 05:00 啟動，檔案上傳至 `weekly/`，檔名 `asset_weekly_YYYYMMDD_HHmmss.dump`，不檢查交易日。
+- [ ] **保留代數（自動輪替，依資料夾分別計算；可由使用者於 UI 調整，預設值如下）：**
+  - `daily/`：預設 **50** 份（`asset_daily_*` 才計入；超過自動刪除最舊）
+  - `weekly/`：預設 **5** 份
+  - `manual/`：預設 **5** 份手動備份（`asset_manual_*`，自救點 `asset_auto-pre-restore_*` 不計入）
+  - 設定儲存於 `backup_setting` 單列資料表，欄位 `manual_retention` / `daily_retention` / `weekly_retention`（INT，1～999）
+  - 端點：`GET /api/backups/settings`、`PUT /api/backups/settings`
+  - 前端「備份/還原 資料」頁新增「保留設定」區塊，三個 number input + 儲存按鈕；儲存成功顯示 `ElMessage.success`，數值即時生效於下一次輪替
+- [ ] 手動備份檔案名稱格式 `asset_manual_YYYYMMDD_HHMMSS.dump`
 - [ ] 「還原資料」區塊以 `el-table` 列出 Google Drive 上**所有**備份（含 manual / daily / weekly / monthly 四個資料夾），欄位：來源資料夾、檔名、備份時間、檔案大小
 - [ ] 列表預設依備份時間「新→舊」排序
 - [ ] 每列提供「還原」按鈕，點擊後跳出二次確認對話框，需在輸入框輸入「確認還原」字樣才能執行

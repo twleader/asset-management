@@ -1,10 +1,12 @@
 package com.steven.assets.controller;
 
 import com.steven.assets.dto.BackupDto;
+import com.steven.assets.model.BackupSetting;
 import com.steven.assets.service.BackupService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -39,5 +41,28 @@ public class BackupController {
             throw new IllegalArgumentException("請輸入「" + CONFIRMATION_PHRASE + "」以確認還原");
         }
         return service.runRestore(req.getFolder(), req.getFilename());
+    }
+
+    /** 取得保留代數設定。 */
+    @GetMapping("/settings")
+    public BackupDto.SettingResponse getSettings() {
+        BackupSetting s = service.getSetting();
+        return BackupDto.SettingResponse.builder()
+                .manualRetention(s.getManualRetention())
+                .dailyRetention(s.getDailyRetention())
+                .weeklyRetention(s.getWeeklyRetention())
+                .build();
+    }
+
+    /** 更新保留代數設定。 */
+    @PutMapping("/settings")
+    public BackupDto.SettingResponse updateSettings(@RequestBody BackupDto.SettingRequest req) {
+        BackupSetting s = service.updateSetting(
+                req.getManualRetention(), req.getDailyRetention(), req.getWeeklyRetention());
+        return BackupDto.SettingResponse.builder()
+                .manualRetention(s.getManualRetention())
+                .dailyRetention(s.getDailyRetention())
+                .weeklyRetention(s.getWeeklyRetention())
+                .build();
     }
 }
