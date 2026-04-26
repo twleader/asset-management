@@ -7,7 +7,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -130,6 +133,35 @@ public class DashboardBffController {
      * GET /api/bff/dashboard/snapshot/{id}
      * 切換快照時用：取得指定快照的 enriched detail + mergedStocks。
      */
+    /**
+     * POST /api/bff/dashboard/enrich-dividend-rates
+     * 背景補齊所有快照缺漏的配息率（fire-and-forget，不阻塞 UI）。
+     */
+    @PostMapping("/enrich-dividend-rates")
+    public Mono<ResponseEntity<Void>> enrichDividendRates() {
+        return businessServicesClient.post()
+                .uri("/api/snapshots/enrich-all-dividend-rates")
+                .retrieve()
+                .bodyToMono(Void.class)
+                .then(Mono.just(ResponseEntity.ok().<Void>build()));
+    }
+
+    /**
+     * PATCH /api/bff/dashboard/snapshot/{id}/stock-order
+     * 持股顯示順序拖曳後寫回。
+     */
+    @PatchMapping("/snapshot/{id}/stock-order")
+    public Mono<ResponseEntity<Void>> updateStockOrder(
+            @PathVariable Long id,
+            @RequestBody List<Map<String, Object>> orders) {
+        return businessServicesClient.patch()
+                .uri("/api/snapshots/{id}/stock-order", id)
+                .bodyValue(orders)
+                .retrieve()
+                .bodyToMono(Void.class)
+                .then(Mono.just(ResponseEntity.ok().<Void>build()));
+    }
+
     @GetMapping("/snapshot/{id}")
     public Mono<ResponseEntity<Map<String, Object>>> getSnapshot(@PathVariable Long id) {
         return businessServicesClient.get()

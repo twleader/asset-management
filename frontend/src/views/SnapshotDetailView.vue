@@ -274,7 +274,7 @@ import { ArrowLeft, Edit, Plus, Delete, Check } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useRoute } from 'vue-router'
 import { useAssetStore } from '@/stores/assetStore'
-import { snapshotApi, bffApi, institutionApi } from '@/api'
+import { bffApi } from '@/api'
 
 const route  = useRoute()
 const store  = useAssetStore()
@@ -286,8 +286,8 @@ const stockFilter = ref('')
 const brokerOptions = ref([])   // { value: id, label: displayName }
 
 async function loadBrokers() {
-  const brokers = await institutionApi.getAllBrokers()
-  brokerOptions.value = brokers.filter(b => b.active).map(b => ({ value: b.id, label: b.displayName }))
+  const brokers = await bffApi.snapshotDetail.getBrokers()
+  brokerOptions.value = brokers.map(b => ({ value: b.id, label: b.displayName }))
 }
 
 // ── allGroupedStocks: 全量群組（不受 filter 影響，供編輯/儲存使用）
@@ -418,7 +418,7 @@ const saveChanges = async () => {
       stocks
     }
 
-    await snapshotApi.update(route.params.id, payload)
+    await bffApi.snapshotDetail.update(route.params.id, payload)
     await fetchDetail()
     ElMessage.success('券商資料已儲存')
   } catch {

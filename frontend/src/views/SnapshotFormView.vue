@@ -1056,7 +1056,7 @@ import { ArrowLeft, Plus, Delete, Operation } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { useAssetStore } from '@/stores/assetStore'
-import { bffApi, institutionApi } from '@/api/index'
+import { bffApi } from '@/api/index'
 import TaiwanMap from '@/components/TaiwanMap.vue'
 import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
 import UsaMap from '@/components/UsaMap.vue'
@@ -1229,17 +1229,12 @@ const twdDepositTypeOptions = computed(() => depositTypeOptions.value.filter(t =
 const usdDepositTypeOptions = computed(() => depositTypeOptions.value.filter(t => t.value.startsWith('美元')))
 
 async function loadInstitutions() {
-  const [banks, brokers, depositTypes, transitTypes] = await Promise.all([
-    institutionApi.getAllBanks(),
-    institutionApi.getAllBrokers(),
-    institutionApi.getAllDepositTypes(),
-    institutionApi.getActiveTransitFundTypes()
-  ])
-  bankOptions.value        = banks.filter(b => b.active).map(b => ({ value: b.id, label: b.displayName }))
-  brokerOptions.value      = brokers.filter(b => b.active).map(b => ({ value: b.id, label: b.displayName }))
-  depositTypeOptions.value = depositTypes.filter(d => d.active).map(d => ({ value: d.code, label: d.displayName }))
-  transitTypeOptions.value = transitTypes.map(t => ({ value: t.code, label: t.displayName, payable: t.payable }))
-  transitPayableSet.value  = new Set(transitTypes.filter(t => t.payable).map(t => t.code))
+  const { banks, brokers, depositTypes, transitFundTypes } = await bffApi.snapshotForm.getLookups()
+  bankOptions.value        = banks.map(b => ({ value: b.id, label: b.displayName }))
+  brokerOptions.value      = brokers.map(b => ({ value: b.id, label: b.displayName }))
+  depositTypeOptions.value = depositTypes.map(d => ({ value: d.code, label: d.displayName }))
+  transitTypeOptions.value = transitFundTypes.map(t => ({ value: t.code, label: t.displayName, payable: t.payable }))
+  transitPayableSet.value  = new Set(transitFundTypes.filter(t => t.payable).map(t => t.code))
 }
 
 const stockTab = ref('tw')

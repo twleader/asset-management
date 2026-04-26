@@ -69,12 +69,17 @@ export const bffApi = {
   dashboard: {
     summary: () => api.get('/bff/dashboard/summary'),
     snapshot: (id) => api.get(`/bff/dashboard/snapshot/${id}`),
-    realtime: () => api.get('/bff/dashboard/realtime')
+    realtime: () => api.get('/bff/dashboard/realtime'),
+    enrichDividendRates: () => api.post('/bff/dashboard/enrich-dividend-rates'),
+    updateStockOrder: (snapshotId, orders) =>
+      api.patch(`/bff/dashboard/snapshot/${snapshotId}/stock-order`, orders)
   },
 
   // SnapshotDetail
   snapshotDetail: {
-    get: (id) => api.get(`/bff/snapshot-detail/${id}`)
+    get: (id) => api.get(`/bff/snapshot-detail/${id}`),
+    getBrokers: () => api.get('/bff/snapshot-detail/brokers'),
+    update: (id, payload) => api.put(`/bff/snapshot-detail/${id}`, payload)
   },
 
   // SnapshotForm
@@ -84,7 +89,18 @@ export const bffApi = {
       api.post('/bff/snapshot-form/prices', stocks, { params: { date } }),
     realtime: () => api.get('/bff/snapshot-form/realtime'),
     exchangeRate: (date) =>
-      api.get('/bff/snapshot-form/exchange-rate', { params: { date } })
+      api.get('/bff/snapshot-form/exchange-rate', { params: { date } }),
+    getLookups: () => api.get('/bff/snapshot-form/lookups')
+  },
+
+  // StockAnalysisDialog（跨 view 共用元件）
+  stockAnalysis: {
+    getStockHistory: (code, market, start, end) =>
+      api.get('/bff/stock-analysis/history/stock', { params: { code, market, start, end } }),
+    getDividendHistory: (code, market, years = 10) =>
+      api.get('/bff/stock-analysis/dividends', { params: { code, market, years } }),
+    getEtfHoldings: (code, market) =>
+      api.get('/bff/stock-analysis/etf-holdings', { params: { code, market } })
   },
 
   // AssetHistory
