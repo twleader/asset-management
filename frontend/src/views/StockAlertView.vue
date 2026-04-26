@@ -403,12 +403,7 @@ async function remove(row) {
   loadAlerts()
 }
 
-const fmtDt = (dt) => {
-  if (!dt) return ''
-  const d = dayjs(dt)
-  // 00:00 視為「盤中觸發」sentinel（無精確時間）
-  return (d.hour() === 0 && d.minute() === 0) ? d.format('MM/DD 盤中') : d.format('MM/DD HH:mm')
-}
+const fmtDt = (dt) => dayjs(dt).format('MM/DD HH:mm')
 
 // ===== 股價走勢分析 =====
 const analysisVisible = ref(false)

@@ -266,11 +266,7 @@ async function remove(row) {
 }
 
 // ===== Formatters =====
-const fmtDt = (dt) => {
-  if (!dt) return ''
-  const d = dayjs(dt)
-  return (d.hour() === 0 && d.minute() === 0) ? d.format('MM/DD 盤中') : d.format('MM/DD HH:mm')
-}
+const fmtDt = (dt) => dayjs(dt).format('MM/DD HH:mm')
 
 const fmtNum = (v) => {
   if (v == null) return '—'

@@ -174,6 +174,50 @@ public class HistoricalDataService {
         throw new RuntimeException("Yahoo Finance 重試 " + maxRetries + " 次仍失敗");
     }
 
+    /** 盤中分鐘級資料 bar：開盤後某 5 分鐘的 OHLC。 */
+    public record IntradayBar(LocalDateTime time, BigDecimal open, BigDecimal high,
+                               BigDecimal low, BigDecimal close) {}
+
+    /**
+     * 抓取指定股票最近 N 個交易日的 5 分鐘 K 線（用 Yahoo Finance chart API）。
+     * 用於警示盤中觸發補抓 — 從 5 分鐘 bar 找出條件第一次成立的精確時點。
+     * 台股需 .TW 後綴；美股直接用 ticker。
+     */
+    public List<IntradayBar> fetchIntraday5m(String stockCode, String market, int daysBack) {
+        try {
+            String ticker = "美股".equals(market) ? stockCode : stockCode + ".TW";
+            String range = Math.max(1, daysBack) + "d";
+            String url = "https://query2.finance.yahoo.com/v8/finance/chart/" + ticker
+                    + "?interval=5m&range=" + range;
+            String body = curlGetWithRetry(url, 2);
+
+            JsonNode root = mapper.readTree(body);
+            JsonNode chart = root.path("chart").path("result").path(0);
+            JsonNode timestamps = chart.path("timestamp");
+            JsonNode quotes = chart.path("indicators").path("quote").path(0);
+            String tz = chart.path("meta").path("exchangeTimezoneName").asText("Asia/Taipei");
+            ZoneId zone = ZoneId.of(tz);
+            if (!timestamps.isArray()) return List.of();
+
+            List<IntradayBar> bars = new ArrayList<>();
+            for (int i = 0; i < timestamps.size(); i++) {
+                long ts = timestamps.get(i).asLong();
+                JsonNode close = quotes.path("close").path(i);
+                if (close.isNull() || close.isMissingNode()) continue;
+                LocalDateTime time = Instant.ofEpochSecond(ts).atZone(zone).toLocalDateTime();
+                bars.add(new IntradayBar(time,
+                        jsonDecimal(quotes.path("open").path(i)),
+                        jsonDecimal(quotes.path("high").path(i)),
+                        jsonDecimal(quotes.path("low").path(i)),
+                        jsonDecimal(close)));
+            }
+            return bars;
+        } catch (Exception e) {
+            log.warn("抓取 {} {} 盤中分鐘資料失敗: {}", market, stockCode, e.getMessage());
+            return List.of();
+        }
+    }
+
     @Transactional
     public int backfillUsStock(String stockCode, LocalDate since) {
         return backfillUsStock(stockCode, since, null);
