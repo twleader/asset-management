@@ -19,7 +19,7 @@ public class BrokerSettingsBffRoutes {
                         .path("/api/bff/broker-settings/**")
                         .filters(f -> f.rewritePath(
                                 "/api/bff/broker-settings(?<seg>/?.*)",
-                                "/api/brokers${seg}"))
+                                "/api/settings/brokers${seg}"))
                         .uri(businessServicesUrl))
                 .build();
     }

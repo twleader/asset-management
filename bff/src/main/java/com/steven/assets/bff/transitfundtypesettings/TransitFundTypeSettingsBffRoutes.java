@@ -19,7 +19,7 @@ public class TransitFundTypeSettingsBffRoutes {
                         .path("/api/bff/transit-fund-type-settings/**")
                         .filters(f -> f.rewritePath(
                                 "/api/bff/transit-fund-type-settings(?<seg>/?.*)",
-                                "/api/transit-fund-types${seg}"))
+                                "/api/settings/transit-fund-types${seg}"))
                         .uri(businessServicesUrl))
                 .build();
     }

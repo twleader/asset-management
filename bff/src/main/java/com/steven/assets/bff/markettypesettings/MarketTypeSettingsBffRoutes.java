@@ -19,7 +19,7 @@ public class MarketTypeSettingsBffRoutes {
                         .path("/api/bff/market-type-settings/**")
                         .filters(f -> f.rewritePath(
                                 "/api/bff/market-type-settings(?<seg>/?.*)",
-                                "/api/market-types${seg}"))
+                                "/api/settings/market-types${seg}"))
                         .uri(businessServicesUrl))
                 .build();
     }

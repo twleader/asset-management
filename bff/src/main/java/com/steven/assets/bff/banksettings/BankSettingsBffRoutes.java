@@ -20,7 +20,7 @@ public class BankSettingsBffRoutes {
                         .path("/api/bff/bank-settings/**")
                         .filters(f -> f.rewritePath(
                                 "/api/bff/bank-settings(?<seg>/?.*)",
-                                "/api/banks${seg}"))
+                                "/api/settings/banks${seg}"))
                         .uri(businessServicesUrl))
                 .build();
     }
