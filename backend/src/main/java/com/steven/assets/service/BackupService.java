@@ -3,9 +3,12 @@ package com.steven.assets.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.steven.assets.dto.BackupDto;
+import com.steven.assets.model.BackupSetting;
+import com.steven.assets.repository.BackupSettingRepository;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -13,6 +16,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
@@ -31,8 +35,13 @@ public class BackupService {
 
     private static final String REMOTE_BASE = "gdrive-crypt:backups";
     private static final List<String> FOLDERS = List.of("manual", "daily", "weekly", "monthly");
-    private static final int MANUAL_RETENTION = 5;
+    private static final int DEFAULT_MANUAL_RETENTION = 5;
+    private static final int DEFAULT_DAILY_RETENTION = 50;
+    private static final int DEFAULT_WEEKLY_RETENTION = 5;
     private static final String MANUAL_PREFIX = "asset_manual_";
+    private static final String DAILY_TW_PREFIX = "asset_daily_tw_";
+    private static final String DAILY_US_PREFIX = "asset_daily_us_";
+    private static final String WEEKLY_PREFIX = "asset_weekly_";
     private static final String AUTO_PRE_RESTORE_PREFIX = "asset_auto-pre-restore_";
     private static final DateTimeFormatter TS_FMT = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss");
     private static final long PROCESS_TIMEOUT_SEC = 300;
@@ -47,6 +56,8 @@ public class BackupService {
     private final String dbName;
     private final String dbUser;
     private final String dbPassword;
+    private final MarketDataService marketDataService;
+    private final BackupSettingRepository settingRepo;
     private final ObjectMapper mapper = new ObjectMapper();
 
     public BackupService(
@@ -54,12 +65,47 @@ public class BackupService {
             @Value("${DB_PORT:5432}") String dbPort,
             @Value("${DB_NAME}") String dbName,
             @Value("${DB_USERNAME}") String dbUser,
-            @Value("${DB_PASSWORD}") String dbPassword) {
+            @Value("${DB_PASSWORD}") String dbPassword,
+            MarketDataService marketDataService,
+            BackupSettingRepository settingRepo) {
         this.dbHost = dbHost;
         this.dbPort = dbPort;
         this.dbName = dbName;
         this.dbUser = dbUser;
         this.dbPassword = dbPassword;
+        this.marketDataService = marketDataService;
+        this.settingRepo = settingRepo;
+    }
+
+    /** 取得目前保留代數設定（無資料時回預設值，不寫入）。 */
+    public BackupSetting getSetting() {
+        return settingRepo.findById(1).orElseGet(() -> BackupSetting.builder()
+                .id(1)
+                .manualRetention(DEFAULT_MANUAL_RETENTION)
+                .dailyRetention(DEFAULT_DAILY_RETENTION)
+                .weeklyRetention(DEFAULT_WEEKLY_RETENTION)
+                .updatedAt(LocalDateTime.now(DISPLAY_ZONE))
+                .build());
+    }
+
+    /** 更新保留代數設定，數值需介於 1～999。 */
+    public BackupSetting updateSetting(Integer manual, Integer daily, Integer weekly) {
+        validateRange("manualRetention", manual);
+        validateRange("dailyRetention", daily);
+        validateRange("weeklyRetention", weekly);
+        BackupSetting s = getSetting();
+        s.setId(1);
+        s.setManualRetention(manual);
+        s.setDailyRetention(daily);
+        s.setWeeklyRetention(weekly);
+        s.setUpdatedAt(LocalDateTime.now(DISPLAY_ZONE));
+        return settingRepo.save(s);
+    }
+
+    private static void validateRange(String field, Integer v) {
+        if (v == null || v < 1 || v > 999) {
+            throw new IllegalArgumentException(field + " 必須介於 1～999");
+        }
     }
 
     /**
@@ -86,16 +132,24 @@ public class BackupService {
         }
     }
 
-    /** 立即備份。autoPreRestore=true 時使用「自救點」檔名前綴，且不做 5 份輪替。 */
+    /** 手動立即備份。autoPreRestore=true 時使用「自救點」檔名前綴，且不做 5 份輪替。 */
     public BackupDto.CreateResponse runBackup(boolean autoPreRestore) {
-        String ts = LocalDateTime.now(DISPLAY_ZONE).format(TS_FMT);
         String prefix = autoPreRestore ? AUTO_PRE_RESTORE_PREFIX : MANUAL_PREFIX;
+        BackupDto.CreateResponse resp = doBackup("manual", prefix);
+        if (!autoPreRestore) {
+            rotateFolder("manual", MANUAL_PREFIX, getSetting().getManualRetention());
+        }
+        return resp;
+    }
+
+    /** 通用備份：dump → 上傳到指定資料夾，不負責輪替。 */
+    private BackupDto.CreateResponse doBackup(String folder, String prefix) {
+        String ts = LocalDateTime.now(DISPLAY_ZONE).format(TS_FMT);
         String filename = prefix + ts + ".dump";
         Path dumpFile = Path.of("/tmp", filename);
 
         try {
-            // 1. pg_dump → file
-            log.info("Backup start: {}", filename);
+            log.info("Backup start: {}/{}", folder, filename);
             pgDump(dumpFile);
             long size;
             try {
@@ -105,14 +159,8 @@ public class BackupService {
             }
             log.info("pg_dump done, size={} bytes", size);
 
-            // 2. rclone copy → manual/
-            rcloneCopy(dumpFile, REMOTE_BASE + "/manual/");
-            log.info("Uploaded to {}/manual/", REMOTE_BASE);
-
-            // 3. 輪替（自救點不算）
-            if (!autoPreRestore) {
-                rotateManual();
-            }
+            rcloneCopy(dumpFile, REMOTE_BASE + "/" + folder + "/");
+            log.info("Uploaded to {}/{}/", REMOTE_BASE, folder);
 
             return BackupDto.CreateResponse.builder()
                     .filename(filename)
@@ -125,6 +173,51 @@ public class BackupService {
             } catch (IOException e) {
                 log.warn("Failed to delete temp file {}: {}", dumpFile, e.getMessage());
             }
+        }
+    }
+
+    // ===== 自動排程 =====
+
+    /** 台股交易日 15:30（收盤後 2 小時）→ daily/asset_daily_tw_*.dump */
+    @Scheduled(cron = "0 30 15 * * MON-FRI", zone = "Asia/Taipei")
+    public void scheduledDailyTwBackup() {
+        LocalDate today = LocalDate.now(DISPLAY_ZONE);
+        if (!marketDataService.isTwTradingDay(today)) {
+            log.info("Skip TW daily backup: {} 非台股交易日", today);
+            return;
+        }
+        try {
+            doBackup("daily", DAILY_TW_PREFIX);
+            rotateFolder("daily", "asset_daily_", getSetting().getDailyRetention());
+        } catch (RuntimeException e) {
+            log.error("台股每日備份失敗: {}", e.getMessage(), e);
+        }
+    }
+
+    /** 美股收盤後 2 小時，台北時間隔日 07:00 → daily/asset_daily_us_*.dump */
+    @Scheduled(cron = "0 0 7 * * TUE-SAT", zone = "Asia/Taipei")
+    public void scheduledDailyUsBackup() {
+        LocalDate prevUsDay = LocalDate.now(DISPLAY_ZONE).minusDays(1);
+        if (!marketDataService.isUsTradingDay(prevUsDay)) {
+            log.info("Skip US daily backup: {} 非美股交易日", prevUsDay);
+            return;
+        }
+        try {
+            doBackup("daily", DAILY_US_PREFIX);
+            rotateFolder("daily", "asset_daily_", getSetting().getDailyRetention());
+        } catch (RuntimeException e) {
+            log.error("美股每日備份失敗: {}", e.getMessage(), e);
+        }
+    }
+
+    /** 每周日 05:00 → weekly/asset_weekly_*.dump */
+    @Scheduled(cron = "0 0 5 * * SUN", zone = "Asia/Taipei")
+    public void scheduledWeeklyBackup() {
+        try {
+            doBackup("weekly", WEEKLY_PREFIX);
+            rotateFolder("weekly", WEEKLY_PREFIX, getSetting().getWeeklyRetention());
+        } catch (RuntimeException e) {
+            log.error("每周備份失敗: {}", e.getMessage(), e);
         }
     }
 
@@ -323,30 +416,33 @@ public class BackupService {
 
     // ===== 輔助 =====
 
-    /** 保留最新 5 份 manual/asset_manual_*.dump，自救點不計入此限。 */
-    private void rotateManual() {
-        String json = rcloneLsJson(REMOTE_BASE + "/manual/");
+    /**
+     * 保留指定資料夾下、檔名前綴匹配的最新 retention 份備份；超過者刪除最舊。
+     * 其他前綴的檔案（例如 manual/ 內的自救點）不受影響。
+     */
+    private void rotateFolder(String folder, String prefix, int retention) {
+        String json = rcloneLsJson(REMOTE_BASE + "/" + folder + "/");
         if (json == null || json.isBlank()) return;
 
-        List<Map.Entry<String, LocalDateTime>> manualFiles = new ArrayList<>();
+        List<Map.Entry<String, LocalDateTime>> files = new ArrayList<>();
         try {
             JsonNode arr = mapper.readTree(json);
             for (JsonNode node : arr) {
                 if (node.path("IsDir").asBoolean(false)) continue;
                 String name = node.path("Name").asText();
-                if (!name.startsWith(MANUAL_PREFIX) || !name.endsWith(".dump")) continue;
-                manualFiles.add(Map.entry(name, parseRcloneTime(node.path("ModTime").asText())));
+                if (!name.startsWith(prefix) || !name.endsWith(".dump")) continue;
+                files.add(Map.entry(name, parseRcloneTime(node.path("ModTime").asText())));
             }
         } catch (IOException e) {
-            throw new RuntimeException("輪替時解析 rclone lsjson 失敗: " + e.getMessage(), e);
+            throw new RuntimeException("輪替時解析 rclone lsjson 失敗 (" + folder + "): " + e.getMessage(), e);
         }
 
-        if (manualFiles.size() <= MANUAL_RETENTION) return;
-        manualFiles.sort(Map.Entry.<String, LocalDateTime>comparingByValue().reversed());
-        for (int i = MANUAL_RETENTION; i < manualFiles.size(); i++) {
-            String name = manualFiles.get(i).getKey();
-            log.info("Rotate: deleting old manual backup {}", name);
-            rcloneDelete(REMOTE_BASE + "/manual/" + name);
+        if (files.size() <= retention) return;
+        files.sort(Map.Entry.<String, LocalDateTime>comparingByValue().reversed());
+        for (int i = retention; i < files.size(); i++) {
+            String name = files.get(i).getKey();
+            log.info("Rotate: deleting old backup {}/{}", folder, name);
+            rcloneDelete(REMOTE_BASE + "/" + folder + "/" + name);
         }
     }
 

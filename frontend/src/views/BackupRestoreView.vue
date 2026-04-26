@@ -22,6 +22,30 @@
       </div>
     </el-card>
 
+    <!-- 保留設定 -->
+    <el-card class="section" v-loading="loadingSettings">
+      <template #header>
+        <div class="card-title">保留設定</div>
+      </template>
+      <p class="hint">
+        各類備份保留的代數（份數）。超過設定上限時，每次備份完成後會自動刪除最舊的檔案。範圍 1～999。
+      </p>
+      <el-form :model="settings" inline label-width="120px" class="settings-form">
+        <el-form-item label="人工備份">
+          <el-input-number v-model="settings.manualRetention" :min="1" :max="999" controls-position="right" />
+        </el-form-item>
+        <el-form-item label="交易日備份">
+          <el-input-number v-model="settings.dailyRetention" :min="1" :max="999" controls-position="right" />
+        </el-form-item>
+        <el-form-item label="周備份">
+          <el-input-number v-model="settings.weeklyRetention" :min="1" :max="999" controls-position="right" />
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" :loading="savingSettings" @click="saveSettings">儲存設定</el-button>
+        </el-form-item>
+      </el-form>
+    </el-card>
+
     <!-- 還原資料 -->
     <el-card class="section" v-loading="loadingList">
       <template #header>
@@ -121,6 +145,39 @@ const dialogVisible = ref(false)
 const selected = ref(null)
 const confirmText = ref('')
 
+const loadingSettings = ref(false)
+const savingSettings = ref(false)
+const settings = reactive({ manualRetention: 5, dailyRetention: 50, weeklyRetention: 5 })
+
+async function loadSettings() {
+  loadingSettings.value = true
+  try {
+    const s = await backupApi.getSettings()
+    settings.manualRetention = s.manualRetention
+    settings.dailyRetention  = s.dailyRetention
+    settings.weeklyRetention = s.weeklyRetention
+  } finally {
+    loadingSettings.value = false
+  }
+}
+
+async function saveSettings() {
+  savingSettings.value = true
+  try {
+    const s = await backupApi.updateSettings({
+      manualRetention: settings.manualRetention,
+      dailyRetention:  settings.dailyRetention,
+      weeklyRetention: settings.weeklyRetention
+    })
+    settings.manualRetention = s.manualRetention
+    settings.dailyRetention  = s.dailyRetention
+    settings.weeklyRetention = s.weeklyRetention
+    ElMessage.success('保留設定已更新')
+  } finally {
+    savingSettings.value = false
+  }
+}
+
 async function loadList() {
   loadingList.value = true
   try {
@@ -187,7 +244,10 @@ function formatTime(t) {
   return dayjs(t).format('YYYY-MM-DD HH:mm:ss')
 }
 
-onMounted(loadList)
+onMounted(() => {
+  loadList()
+  loadSettings()
+})
 </script>
 
 <style scoped>

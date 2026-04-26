@@ -43,6 +43,24 @@ public class BackupDto {
     @NoArgsConstructor
     @AllArgsConstructor
     @Builder
+    public static class SettingResponse {
+        private Integer manualRetention;
+        private Integer dailyRetention;
+        private Integer weeklyRetention;
+    }
+
+    @Data
+    @NoArgsConstructor
+    public static class SettingRequest {
+        private Integer manualRetention;
+        private Integer dailyRetention;
+        private Integer weeklyRetention;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
     public static class RestoreResponse {
         private String status;                  // success
         private String preRestoreBackup;        // 自救點檔名

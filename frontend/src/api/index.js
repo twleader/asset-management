@@ -120,7 +120,9 @@ export const backupApi = {
   list:    () => api.get('/backups', { timeout: 60000 }),
   create:  () => api.post('/backups', null, { timeout: 120000 }),
   restore: ({ folder, filename, confirmation }) =>
-    api.post('/backups/restore', { folder, filename, confirmation }, { timeout: 180000 })
+    api.post('/backups/restore', { folder, filename, confirmation }, { timeout: 180000 }),
+  getSettings:    () => api.get('/backups/settings'),
+  updateSettings: (data) => api.put('/backups/settings', data)
 }
 
 // ===== BFF Aggregated Endpoints =====
