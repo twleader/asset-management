@@ -73,11 +73,11 @@
                 股價 <strong>{{ row.lastTriggeredPrice != null ? '$' + Number(row.lastTriggeredPrice).toLocaleString() : '—' }}</strong>
               </div>
               <div style="font-size:12px;color:#0f172a">
-                季線 <strong>{{ row.lastTriggeredMaValue != null ? '$' + Number(row.lastTriggeredMaValue).toLocaleString() : '—' }}</strong>
+                季線 <strong>{{ row.quarterlyMa != null ? '$' + Number(row.quarterlyMa).toLocaleString() : '—' }}</strong>
               </div>
               <div style="font-size:12px;color:#2563eb">
-                <span>K {{ row.lastTriggeredKdValue != null ? Number(row.lastTriggeredKdValue).toFixed(1) : '—' }}</span>
-                <span style="margin-left:6px">D {{ row.lastTriggeredDValue != null ? Number(row.lastTriggeredDValue).toFixed(1) : '—' }}</span>
+                <span>K {{ row.kValue != null ? Number(row.kValue).toFixed(1) : '—' }}</span>
+                <span style="margin-left:6px">D {{ row.dValue != null ? Number(row.dValue).toFixed(1) : '—' }}</span>
               </div>
             </template>
             <span v-else style="font-size:12px;color:#94a3b8">尚未觸發</span>
