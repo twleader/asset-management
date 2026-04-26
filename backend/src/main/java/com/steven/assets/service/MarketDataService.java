@@ -457,7 +457,8 @@ public class MarketDataService {
             int currentYear = LocalDate.now().getYear();
             List<Double> yields = new ArrayList<>();
 
-            for (int y = currentYear; y >= currentYear - 2; y--) {
+            // 取最近 3 個完整年度（不含當年度）
+            for (int y = currentYear - 1; y >= currentYear - 3; y--) {
                 try {
                     String url = "https://www.twse.com.tw/exchangeReport/BWIBBU?response=json&date="
                             + y + "1201&stockNo=" + stockCode;
@@ -538,7 +539,8 @@ public class MarketDataService {
     private Optional<DividendRateResult> getFinMindFromDataset(
             String stockCode, String dataset, String dividendField) {
         try {
-            String startDate = LocalDate.now().minusYears(3).toString();
+            // 抓 4 年資料，確保能涵蓋完整的 3 個歷史年度（避開當年度不完整資料）
+            String startDate = LocalDate.now().minusYears(4).toString();
             String url = "https://api.finmindtrade.com/api/v4/data"
                     + "?dataset=" + dataset
                     + "&data_id=" + stockCode
@@ -581,6 +583,11 @@ public class MarketDataService {
                 annualDividend.merge(year, cash, Double::sum);
             }
 
+            if (annualDividend.isEmpty()) return Optional.empty();
+
+            // 排除當年度（資料不完整會壓低平均），取最近 3 個完整年度
+            int currentYear = LocalDate.now().getYear();
+            annualDividend.remove(currentYear);
             if (annualDividend.isEmpty()) return Optional.empty();
 
             List<Double> yearlyDividends = new ArrayList<>(annualDividend.values());
