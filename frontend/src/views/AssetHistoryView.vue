@@ -153,7 +153,7 @@ const fmt = (v) => {
 }
 const pct = (v) => v ? `${(Number(v) * 100).toFixed(1)}%` : '-'
 
-const dates = computed(() => history.map(h => h.snapshotDate))
+const dates = computed(() => history.value.map(h => h.snapshotDate))
 
 const totalTrendOption = computed(() => ({
   tooltip: {
@@ -173,7 +173,7 @@ const totalTrendOption = computed(() => ({
   series: [
     {
       name: '總資產', type: 'line', smooth: true,
-      data: history.map(h => Number(h.totalAssets || 0)),
+      data: history.value.map(h => Number(h.totalAssets || 0)),
       itemStyle: { color: '#8b5cf6' },
       lineStyle: { width: 3 },
       areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
@@ -181,25 +181,25 @@ const totalTrendOption = computed(() => ({
     },
     {
       name: '存款', type: 'line', smooth: true,
-      data: history.map(h => Number(h.totalDeposit || 0)),
+      data: history.value.map(h => Number(h.totalDeposit || 0)),
       itemStyle: { color: '#3b82f6' },
       lineStyle: { width: 2 }
     },
     {
       name: '基金', type: 'line', smooth: true,
-      data: history.map(h => Number(h.totalFundValue || 0)),
+      data: history.value.map(h => Number(h.totalFundValue || 0)),
       itemStyle: { color: '#10b981' },
       lineStyle: { width: 2 }
     },
     {
       name: '台股', type: 'line', smooth: true,
-      data: history.map(h => Number(h.totalTwStockValue || 0)),
+      data: history.value.map(h => Number(h.totalTwStockValue || 0)),
       itemStyle: { color: '#f59e0b' },
       lineStyle: { width: 2 }
     },
     {
       name: '美股', type: 'line', smooth: true,
-      data: history.map(h => Number(h.totalUsStockValue || 0)),
+      data: history.value.map(h => Number(h.totalUsStockValue || 0)),
       itemStyle: { color: '#ef4444' },
       lineStyle: { width: 2 }
     }
@@ -213,18 +213,18 @@ const stackedOption = computed(() => ({
   xAxis: { type: 'category', data: dates.value, axisLabel: { rotate: 30, fontSize: 11 } },
   yAxis: { type: 'value', axisLabel: { formatter: v => `$${(v/1e4).toFixed(0)}萬` } },
   series: [
-    { name: '存款', type: 'bar', stack: 'total', data: history.map(h => Number(h.totalDeposit||0)), itemStyle: { color: '#3b82f6' } },
-    { name: '基金', type: 'bar', stack: 'total', data: history.map(h => Number(h.totalFundValue||0)), itemStyle: { color: '#10b981' } },
-    { name: '台股', type: 'bar', stack: 'total', data: history.map(h => Number(h.totalTwStockValue||0)), itemStyle: { color: '#f59e0b' } },
+    { name: '存款', type: 'bar', stack: 'total', data: history.value.map(h => Number(h.totalDeposit||0)), itemStyle: { color: '#3b82f6' } },
+    { name: '基金', type: 'bar', stack: 'total', data: history.value.map(h => Number(h.totalFundValue||0)), itemStyle: { color: '#10b981' } },
+    { name: '台股', type: 'bar', stack: 'total', data: history.value.map(h => Number(h.totalTwStockValue||0)), itemStyle: { color: '#f59e0b' } },
     {
       name: '美股', type: 'bar', stack: 'total',
-      data: history.map(h => Number(h.totalUsStockValue||0)),
+      data: history.value.map(h => Number(h.totalUsStockValue||0)),
       itemStyle: { color: '#ef4444' },
       label: {
         show: true,
         position: 'top',
         formatter: p => {
-          const h = history[p.dataIndex]
+          const h = history.value[p.dataIndex]
           if (!h) return ''
           const total = Number(h.totalAssets || 0)
           return `$${(total / 1e4).toFixed(0)}萬`
@@ -238,7 +238,7 @@ const stackedOption = computed(() => ({
 }))
 
 const increaseOption = computed(() => {
-  const data = history.map(h => ({ value: h.increaseRate ? Number(h.increaseRate)*100 : null, date: h.snapshotDate }))
+  const data = history.value.map(h => ({ value: h.increaseRate ? Number(h.increaseRate)*100 : null, date: h.snapshotDate }))
     .filter(d => d.value != null)
   return {
     tooltip: { trigger: 'axis', formatter: p => `${p[0].name}: ${p[0].value?.toFixed(1)}%` },
