@@ -94,14 +94,14 @@
 **Acceptance Criteria:**
 
 - [ ] 從 TWSE API 取得台股即時股價
-- [ ] 從 Yahoo Finance 取得美股即時股價與台股股利率
+- [ ] 從 NASDAQ API 取得美股即時股價；台股股利率改由 FinMind / TWSE BWIBBU 取得（Yahoo Finance 已停用）
 - [ ] 自動偵測股票市場（先嘗試 .TW，失敗則嘗試 .TWO）
 - [ ] 股價資料快取以減少外部 API 呼叫次數
 - [ ] 從央行或第三方 API 取得美元/台幣歷史匯率
 - [ ] 交易日曆顯示台股與美股的開收盤狀態
 - [ ] 台股（週一～五 09:00～13:30）與美股（週一～五 09:30～16:00 美東）交易期間，每 5 分鐘自動更新一次股價快取
 - [ ] 收盤時（台股 13:30、美股 16:00）將當日收盤價寫入 StockPriceHistory，並標記 StockPrice.closed = true
-- [ ] 歷史收盤價保存至少 10 年（透過 FinMind / Yahoo Finance 回補）
+- [ ] 歷史收盤價保存至少 10 年（透過 FinMind / TWSE 回補；Yahoo Finance 已停用）
 - [ ] 凡列入 `stock` 主檔的股票（含曾持有、觀察清單、設有警示）皆自動納入 10 年歷史收盤價回補與每日排程更新範圍；新增觀察股票時即同步寫入 `stock` 主檔
 - [ ] 提供 `GET /api/market-data/live-assets` 端點：以最新快照持倉 × 當前快取股價，即時計算總資產估值
 
