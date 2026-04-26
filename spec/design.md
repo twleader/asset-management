@@ -314,7 +314,7 @@ BackupSetting         (備份保留代數設定，單列資料表，id = 1)
 | highPrice | BigDecimal | 當日最高（新增） |
 | lowPrice | BigDecimal | 當日最低（新增） |
 | volume | Long | 成交量（台股單位為張，美股為股；新增） |
-| tradingDate | LocalDate | 交易日 |
+| tradingDate | LocalDate | **這筆價格資料對應的真實交易日**（不是 cache 寫入當下日期） |
 | updatedAt | LocalDateTime | 更新時間 |
 | closed | Boolean | 是否為收盤價 |
 | source | String | 資料來源 |
@@ -553,6 +553,30 @@ totalProfit  = totalStock - totalCost
 10. 計算並寫入總額
 11. 若同日期已存在：一律覆蓋（`overwrite` 參數設計存在於 tasks/spec 但實際 Controller 未暴露，目前行為等同 overwrite=true）
 ```
+
+### StockPrice.tradingDate 語意（盤外刷新防呆）
+
+`stock_price.trading_date` 代表**這筆價格資料對應的真實交易日**，不是 cache 寫入當下日期。
+
+**為什麼重要**：TWSE mis API 在週日深夜或非交易時段仍會回傳上一個交易日的最後成交資料。若 `manualRefresh()`（盤外也能執行的手動刷新，被 `/api/market-data/prices/refresh` 與 BFF realtime 端點呼叫）盲目把 `trading_date` 設為 `LocalDate.now()`，會造成：
+- `TechnicalIndicatorService.compute()` 看到 `stockPrice.tradingDate == today` 就把它當「今天的 K 棒」併入 KD/MA9 序列
+- 實際上那筆資料是上週五的收盤 → 等於把上週五重複算了一次，污染技術指標
+
+**規則**（`StockPriceService.resolveTradingDate`）：
+
+```
+isLiveSession = (該市場 isOpen) || (剛收盤 20 分鐘窗口)
+                 // 台股：09:00–13:30 + 13:30–13:50
+                 // 美股：09:30–16:00 ET + 16:00–16:20 ET
+
+if isLiveSession:
+    trading_date = LocalDate.now(market timezone)   // 資料確實來自今天
+else:
+    trading_date = max(stock_price_history.trading_date for this code+market)
+                    fallback today                  // 上一個有真實資料的交易日
+```
+
+> 此規則 fix 過去歷史 bug：盤外刷新會把所有 stock_price 的 `trading_date` 蓋成今天，導致 KD9 把上一交易日的 OHLC 當成今天的 K 棒。
 
 ### 即時資產估算（Live Assets）
 

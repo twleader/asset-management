@@ -222,7 +222,7 @@ public class StockPriceService {
                             .ifPresent(h -> sp.setPreviousClose(h.getClosePrice()));
                 }
 
-                sp.setTradingDate(LocalDate.now("美股".equals(market) ? US_ZONE : TW_ZONE));
+                sp.setTradingDate(resolveTradingDate(code, market));
                 sp.setUpdatedAt(now);
                 sp.setClosed(markClosed);
                 sp.setSource(result.source());
@@ -242,6 +242,35 @@ public class StockPriceService {
                 log.warn("更新 {} {} 股價失敗: {}", marketName, code, e.getMessage());
             }
         }
+    }
+
+    /**
+     * 解析股價對應的交易日。
+     *
+     * **語意**：`trading_date` 代表「這筆價格資料對應的真實交易日」，**不是**「我們抓資料的當下日期」。
+     *
+     * 這個區別在盤外手動刷新時很關鍵：TWSE mis API 在週日深夜或非交易時段仍會回傳上一個交易日的最後成交資料，
+     * 若直接 stamp 為 `LocalDate.now()` 會讓 cache 顯示「今天有資料」，污染 KD/MA 等技術指標計算
+     * （`TechnicalIndicatorService.compute` 會把 `tradingDate == today` 的快取當成今日 K 棒併入序列）。
+     *
+     * 規則：
+     * - 市場目前在交易時段（含剛收盤的 20 分鐘窗口）→ 用今日，因為資料確實來自今天
+     * - 否則（盤外、週末、假日）→ 用該股票 `stock_price_history` 中最近一筆的 trading_date
+     * - 若連歷史紀錄都沒有 → fallback 到今天
+     */
+    private LocalDate resolveTradingDate(String stockCode, String market) {
+        boolean isUs = "美股".equals(market);
+        ZoneId zone = isUs ? US_ZONE : TW_ZONE;
+        boolean liveSession = isUs
+                ? (isUsMarketOpen() || isUsMarketJustClosed())
+                : (isTwMarketOpen() || isTwMarketJustClosed());
+        if (liveSession) {
+            return LocalDate.now(zone);
+        }
+        return historyRepo.findRecentN(stockCode, market, 1).stream()
+                .findFirst()
+                .map(h -> h.getTradingDate())
+                .orElse(LocalDate.now(zone));
     }
 
     // ===================== 查詢 API =====================
