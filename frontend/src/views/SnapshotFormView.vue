@@ -1913,7 +1913,7 @@ async function loadAllPrices() {
 /** 啟動 5 分鐘定時刷新（盤中自動更新） */
 function startPriceAutoRefresh() {
   stopPriceAutoRefresh()
-  priceTimer = setInterval(loadAllPrices, 5 * 60 * 1000)
+  priceTimer = setInterval(loadAllPrices, 2 * 60 * 1000)
 }
 function stopPriceAutoRefresh() {
   if (priceTimer) { clearInterval(priceTimer); priceTimer = null }

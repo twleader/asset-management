@@ -295,7 +295,7 @@ let priceTimer = null
 onMounted(async () => {
   // Single BFF call aggregates: snapshots + history + latestSnapshotDetail + prices + marketStatus
   await loadDashboardSummary()
-  priceTimer = setInterval(refreshPricesAndStatus, 5 * 60 * 1000)
+  priceTimer = setInterval(refreshPricesAndStatus, 2 * 60 * 1000)
 
   // 背景補齊所有快照缺漏的配息率（不阻塞頁面載入）
   bffApi.dashboard.enrichDividendRates().then(() => {

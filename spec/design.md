@@ -47,7 +47,7 @@ com.steven.assets/
 - `AssetService`: 快照 CRUD、總額計算、損益運算、歷史分析
 - `ExcelImportService`: Excel 解析、格式偵測、資料清洗、批次儲存
 - `MarketDataService`: 外部 API 呼叫、Cookie/Crumb 管理、股利率查詢
-- `StockPriceService`: 股價快取管理、多市場支援、每 5 分鐘排程更新
+- `StockPriceService`: 股價快取管理、多市場支援、每 2 分鐘排程更新
 - `HistoricalDataService`: 歷史股價與匯率資料管理；歷史回補範圍以 `stock` 主檔（含曾持有 / 觀察清單 / 警示）為主，並聯集歷史快照中的持股代號
 - `InstitutionService`: 銀行、券商、存款類型、市場類型的 CRUD、停用管理、關鍵字比對邏輯
 
@@ -58,7 +58,7 @@ com.steven.assets/
 - `DashboardBffController`（DashboardView 專屬）：
   - `GET /api/bff/dashboard/summary`：並行聚合 snapshots / history / prices / marketStatus / latestSnapshotDetail + mergedStocks
   - `GET /api/bff/dashboard/snapshot/{id}`：切換快照時用
-  - `GET /api/bff/dashboard/realtime`：5 分鐘輪詢用，回傳 stockPrices + marketStatus
+  - `GET /api/bff/dashboard/realtime`：2 分鐘輪詢用，回傳 stockPrices + marketStatus
   - `POST /api/bff/dashboard/enrich-dividend-rates`：背景補齊所有快照缺漏的配息率
   - `PATCH /api/bff/dashboard/snapshot/{id}/stock-order`：拖曳排序持股後寫回
 - `SnapshotDetailBffController`（SnapshotDetailView 專屬）：
@@ -75,7 +75,7 @@ com.steven.assets/
 - `SnapshotFormBffController`（SnapshotFormView 專屬）：把表單頁的多步協調邏輯（價格批次查 + backfill fallback + 配息率補抓 + 名稱補齊 + 匯率智慧 fallback）集中於此
   - `GET /api/bff/snapshot-form/{id}`：編輯模式 bootstrap，回傳 enriched detail + mergedStocks
   - `POST /api/bff/snapshot-form/prices?date=YYYY-MM-DD`：批次取得每筆股票的歷史收盤價 + 漲跌 + 名稱 + 配息率（DB 缺資料時自動 backfill 重試）
-  - `GET /api/bff/snapshot-form/realtime`：5 分鐘輪詢用，先 trigger 後端刷新行情再回傳 stockPrices + marketStatus
+  - `GET /api/bff/snapshot-form/realtime`：2 分鐘輪詢用，先 trigger 後端刷新行情再回傳 stockPrices + marketStatus
   - `GET /api/bff/snapshot-form/exchange-rate?date=YYYY-MM-DD`：取指定日期 USD 匯率（今天會先 refresh，假日往前 fallback）
   - `GET /api/bff/snapshot-form/lookups`：表單下拉一次取齊（banks / brokers / depositTypes / transitFundTypes，皆已過濾 active）
 - `StockAnalysisBffRoutes`（StockAnalysisDialog 跨 view 共用元件專屬）：對話框被 Dashboard / SnapshotForm / WatchStock / StockAlert 四個 view 同時使用，依「同義欄位、同一 business service API」原則拆為獨立 BFF route，避免在四個父 view 的 BFF 各自重複代理。提供：
@@ -453,12 +453,12 @@ GET    /api/bff/dashboard/summary                  # 並行聚合儀表板所需
 
 > BFF Enrichment：`latestSnapshotDetail.stocks[]` 由 BFF 補上 `investmentCostOriginal`（美股 USD、台股 TWD），legacy 美股 `currency='TWD'` 記錄會用 `transactionExchangeRate` 換回 USD，前端買入均價直接使用此欄位以避免各頁面重複正規化。
 
-> 儀表板「股票持股」股價顯示規則（與「觀察股票」共用同一 `StockPriceRepository` 快取，由 `StockPriceService.scheduledPriceUpdate()` 每 5 分鐘更新）：
-> - 當所選快照 `snapshotDate === 今日` 且該市場（台股／美股）`marketStatus.{tw|us}MarketOpen === true` 時，「股價」欄顯示來自 `stockPrices` 的即時價＋漲跌%，前端每 5 分鐘輪詢更新。
+> 儀表板「股票持股」股價顯示規則（與「觀察股票」共用同一 `StockPriceRepository` 快取，由 `StockPriceService.scheduledPriceUpdate()` 每 2 分鐘更新）：
+> - 當所選快照 `snapshotDate === 今日` 且該市場（台股／美股）`marketStatus.{tw|us}MarketOpen === true` 時，「股價」欄顯示來自 `stockPrices` 的即時價＋漲跌%，前端每 2 分鐘輪詢更新。
 > - 其他情形（基準日為過去日期，或當日該市場已休市）一律顯示快照中保存的當日 `stockPrice`（即 `latestSnapshotDetail.stocks[].stockPrice`），不顯示漲跌%、不參與 polling 切換。
 >
 > 儀表板基準日切換行為：
-> - 5 分鐘輪詢 `refreshPricesAndStatus()` 只刷新 `stockPrices` 與 `marketStatus`（呼叫 `marketDataApi.getAllPrices()` + `getMarketStatus()`），**不得重抓 dashboard summary** 以免覆蓋使用者選擇的快照。
+> - 2 分鐘輪詢 `refreshPricesAndStatus()` 只刷新 `stockPrices` 與 `marketStatus`（呼叫 `marketDataApi.getAllPrices()` + `getMarketStatus()`），**不得重抓 dashboard summary** 以免覆蓋使用者選擇的快照。
 > - 初次載入才呼叫 `bffApi.getDashboardSummary()` 並把 `selectedSnapshotId` 設為最新；之後使用者透過快照選擇器切換時，僅 `store.fetchSnapshotDetail(id)` 取得明細。
 > - 「資產歷史趨勢」圖與 KPI 卡「較上次」皆以 `snapshotDate <= 基準日` 過濾後計算。
 
