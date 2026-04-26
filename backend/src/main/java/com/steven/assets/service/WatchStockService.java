@@ -30,7 +30,6 @@ public class WatchStockService {
     private final StockAlertRepository alertRepo;
     private final StockPriceHistoryRepository historyRepo;
     private final StockRepository stockMasterRepo;
-    private final TechnicalIndicatorService indicatorService;
     private final StockPriceService stockPriceService;
 
     @Transactional(readOnly = true)
@@ -160,7 +159,8 @@ public class WatchStockService {
                     .setScale(4, java.math.RoundingMode.HALF_UP));
         }
 
-        // 警示彙總：取該股最近一筆 lastTriggeredAt（僅顯示時間 + 觸發股價）
+        // 警示彙總：取該股最近一筆 lastTriggeredAt
+        // 重要：所有技術指標（季線 / K / D）也用「觸發當下」的快照值，不是當前計算結果。
         List<StockAlert> alerts = alertRepo.findByStockCodeAndMarket(w.getStockCode(), w.getMarket());
         alerts.stream()
                 .filter(a -> a.getLastTriggeredAt() != null)
@@ -169,13 +169,10 @@ public class WatchStockService {
                     r.setLastTriggeredAt(a.getLastTriggeredAt());
                     r.setLastTriggeredPrice(a.getLastTriggeredPrice());
                     r.setLastTriggeredAlertType(a.getAlertType());
+                    r.setLastTriggeredMaValue(a.getLastTriggeredMaValue());
+                    r.setLastTriggeredKValue(a.getLastTriggeredKdValue());
+                    r.setLastTriggeredDValue(a.getLastTriggeredDValue());
                 });
-
-        // 不論警示是否設定／觸發，皆計算當前的季線(MA60)、KD
-        TechnicalIndicatorService.Indicators ind = indicatorService.compute(w.getStockCode(), w.getMarket());
-        r.setQuarterlyMa(ind.quarterlyMa());
-        r.setKValue(ind.k());
-        r.setDValue(ind.d());
 
         return r;
     }
