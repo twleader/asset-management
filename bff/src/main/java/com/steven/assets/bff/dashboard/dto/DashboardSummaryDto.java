@@ -26,4 +26,11 @@ public class DashboardSummaryDto {
 
     /** Current market open/closed status */
     private Map<String, Object> marketStatus;
+
+    /**
+     * 預先彙總的持股清單（依 stockCode + market 合併多筆 broker rows），
+     * 已附上 stockPrice (快照日歷史收盤價，原幣別) 與 profit / profitRate。
+     * 前端直接 render，無需再做計算。
+     */
+    private List<Map<String, Object>> mergedStocks;
 }
