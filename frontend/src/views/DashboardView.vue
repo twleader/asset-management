@@ -312,7 +312,8 @@ async function loadDashboardSummary() {
     const summary = await bffApi.getDashboardSummary()
     store.snapshots = summary.snapshots ?? []
     store.history = summary.history ?? []
-    if (summary.latestSnapshotDetail && summary.latestSnapshotDetail.id) {
+    // 僅在使用者尚未選擇任何快照時才預設為最新；之後保留使用者的選擇，避免被輪詢覆蓋
+    if (selectedSnapshotId.value == null && summary.latestSnapshotDetail?.id) {
       store.currentSnapshot = summary.latestSnapshotDetail
       selectedSnapshotId.value = summary.latestSnapshotDetail.id
     }
@@ -323,8 +324,16 @@ async function loadDashboardSummary() {
 }
 
 async function refreshPricesAndStatus() {
-  // Reload the full summary to keep prices and snapshot data in sync
-  await loadDashboardSummary()
+  // 5 分鐘輪詢只刷新即時股價與市場狀態，避免覆蓋使用者選擇的基準日
+  try {
+    const [prices, status] = await Promise.all([
+      marketDataApi.getAllPrices(),
+      marketDataApi.getMarketStatus()
+    ])
+    applyPricesAndStatus(prices ?? [], status ?? {})
+  } catch (e) {
+    console.warn('刷新股價/市場狀態失敗:', e)
+  }
 }
 
 async function onSnapshotChange(id) {
@@ -388,14 +397,20 @@ const formatCurrency = (v) => {
 }
 const formatPct = (v) => v ? `${(Number(v) * 100).toFixed(1)}%` : '-'
 
+const filteredHistory = computed(() => {
+  const baseline = latest.value?.snapshotDate
+  if (!baseline) return store.history
+  return store.history.filter(r => r.snapshotDate <= baseline)
+})
+
 const kpiCards = computed(() => {
   const s = latest.value
   if (!s) return []
   const total = Number(s.totalAssets || 0)
-  // 找選中快照在 history 中的前一筆
-  const h = store.history
+  // 在過濾後的 history 中找選中快照的前一筆
+  const h = filteredHistory.value
   const idx = h.findIndex(r => r.snapshotDate === s.snapshotDate)
-  const prev = idx > 0 ? h[idx - 1] : null
+  const prev = idx > 0 ? h[idx - 1] : (idx === -1 && h.length > 0 ? h[h.length - 1] : null)
   const prevTotal = prev ? Number(prev.totalAssets || 0) : 0
   const change = prevTotal > 0 ? ((total - prevTotal) / prevTotal * 100).toFixed(1) : null
 
@@ -449,7 +464,7 @@ const pieOption = computed(() => {
 })
 
 const trendOption = computed(() => {
-  const h = store.history
+  const h = filteredHistory.value
   if (!h.length) return {}
   return {
     tooltip: { trigger: 'axis', formatter: (params) =>

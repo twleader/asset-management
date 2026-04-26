@@ -399,8 +399,13 @@ GET    /api/bff/dashboard/summary                  # 並行聚合儀表板所需
 > BFF Enrichment：`latestSnapshotDetail.stocks[]` 由 BFF 補上 `investmentCostOriginal`（美股 USD、台股 TWD），legacy 美股 `currency='TWD'` 記錄會用 `transactionExchangeRate` 換回 USD，前端買入均價直接使用此欄位以避免各頁面重複正規化。
 
 > 儀表板「股票持股」股價顯示規則（與「觀察股票」共用同一 `StockPriceRepository` 快取，由 `StockPriceService.scheduledPriceUpdate()` 每 5 分鐘更新）：
-> - 當所選快照 `snapshotDate === 今日` 且該市場（台股／美股）`marketStatus.{tw|us}MarketOpen === true` 時，「股價」欄顯示來自 `summary.stockPrices` 的即時價＋漲跌%，前端每 5 分鐘輪詢 `bffApi.getDashboardSummary()` 刷新。
+> - 當所選快照 `snapshotDate === 今日` 且該市場（台股／美股）`marketStatus.{tw|us}MarketOpen === true` 時，「股價」欄顯示來自 `stockPrices` 的即時價＋漲跌%，前端每 5 分鐘輪詢更新。
 > - 其他情形（基準日為過去日期，或當日該市場已休市）一律顯示快照中保存的當日 `stockPrice`（即 `latestSnapshotDetail.stocks[].stockPrice`），不顯示漲跌%、不參與 polling 切換。
+>
+> 儀表板基準日切換行為：
+> - 5 分鐘輪詢 `refreshPricesAndStatus()` 只刷新 `stockPrices` 與 `marketStatus`（呼叫 `marketDataApi.getAllPrices()` + `getMarketStatus()`），**不得重抓 dashboard summary** 以免覆蓋使用者選擇的快照。
+> - 初次載入才呼叫 `bffApi.getDashboardSummary()` 並把 `selectedSnapshotId` 設為最新；之後使用者透過快照選擇器切換時，僅 `store.fetchSnapshotDetail(id)` 取得明細。
+> - 「資產歷史趨勢」圖與 KPI 卡「較上次」皆以 `snapshotDate <= 基準日` 過濾後計算。
 
 #### Settings - Banks
 ```
