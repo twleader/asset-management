@@ -596,33 +596,16 @@ public class MarketDataService {
             double avgAnnualDividend = recent.stream().mapToDouble(Double::doubleValue).average().orElse(0);
             if (avgAnnualDividend <= 0) return Optional.empty();
 
-            // 殖利率分母用「最近 3 個完整年度的平均收盤價」，與分子的時間窗對齊
-            // （Yahoo 等公開來源的 3Y 平均殖利率採用此計算方式）。
-            // 抓不到歷史均價時 fallback 用當前股價。
-            int currentYear2 = LocalDate.now().getYear();
-            LocalDate avgStart = LocalDate.of(currentYear2 - 3, 1, 1);
-            LocalDate avgEnd = LocalDate.of(currentYear2 - 1, 12, 31);
-            double avgPrice = stockPriceHistoryRepo
-                    .findByStockCodeAndMarketAndTradingDateBetweenOrderByTradingDateAsc(
-                            stockCode, "台股", avgStart, avgEnd)
-                    .stream()
-                    .mapToDouble(h -> h.getClosePrice().doubleValue())
-                    .average().orElse(0);
-            double price;
-            String priceLabel;
-            if (avgPrice > 0) {
-                price = avgPrice;
-                priceLabel = "3 年均價";
+            // 取當前股價：優先即時 API，若抓不到改用 DB 快取
+            double price = 0;
+            Optional<PriceResult> priceOpt = getTwseRealTimePrice(stockCode);
+            if (priceOpt.isPresent() && priceOpt.get().price().compareTo(BigDecimal.ZERO) > 0) {
+                price = priceOpt.get().price().doubleValue();
             } else {
-                Optional<PriceResult> priceOpt = getTwseRealTimePrice(stockCode);
-                if (priceOpt.isPresent() && priceOpt.get().price().compareTo(BigDecimal.ZERO) > 0) {
-                    price = priceOpt.get().price().doubleValue();
-                } else {
-                    var cached = stockPriceRepo.findByStockCodeAndMarket(stockCode, "台股");
-                    price = cached.isPresent() && cached.get().getPrice() != null
-                            ? cached.get().getPrice().doubleValue() : 0;
+                var cached = stockPriceRepo.findByStockCodeAndMarket(stockCode, "台股");
+                if (cached.isPresent() && cached.get().getPrice() != null) {
+                    price = cached.get().getPrice().doubleValue();
                 }
-                priceLabel = "現價";
             }
             if (price <= 0) return Optional.empty();
 
@@ -630,16 +613,14 @@ public class MarketDataService {
             BigDecimal rate = BigDecimal.valueOf(yieldRate).setScale(6, RoundingMode.HALF_UP);
             String pctStr = BigDecimal.valueOf(yieldRate * 100).setScale(2, RoundingMode.HALF_UP).toPlainString();
             String divStr = BigDecimal.valueOf(avgAnnualDividend).setScale(2, RoundingMode.HALF_UP).toPlainString();
-            String priceStr = BigDecimal.valueOf(price).setScale(2, RoundingMode.HALF_UP).toPlainString();
 
-            log.info("FinMind({}) {} 近 3 年平均配息={}, {}={}, 殖利率={}%",
-                    dataset, stockCode, divStr, priceLabel, priceStr, pctStr);
+            log.info("FinMind({}) {} 近 {} 年平均配息={}, 現價={}, 殖利率={}%",
+                    dataset, stockCode, recent.size(), divStr, price, pctStr);
 
             return Optional.of(new DividendRateResult(
                     stockCode, "台股", rate,
                     "FinMind(3Y平均)",
-                    "近 %d 年平均配息 %s 元 / %s %s 元，殖利率 %s%%"
-                            .formatted(recent.size(), divStr, priceLabel, priceStr, pctStr)
+                    "近 %d 年平均配息 %s 元，殖利率 %s%%".formatted(recent.size(), divStr, pctStr)
             ));
         } catch (Exception e) {
             log.warn("FinMind({}) 查詢失敗 {}: {}", dataset, stockCode, e.getMessage());
