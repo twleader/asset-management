@@ -603,7 +603,6 @@ const mergedStocks = computed(() => {
         investmentCost: 0,
         investmentCostOriginal: 0,
         currentValue: 0,
-        currentValueOriginal: 0,
         estimatedDividend: 0
       })
     }
@@ -613,20 +612,26 @@ const mergedStocks = computed(() => {
     // 買入均價：BFF 已將美股 legacy TWD 記錄換算為 USD，前端直接 sum 即可
     g.investmentCostOriginal += Number(s.investmentCostOriginal ?? s.investmentCost ?? 0)
     g.currentValue += Number(s.currentValue || 0)
-    // 原幣現值：美股為 USD、台股為 TWD（fallback 用 currentValue 即台幣值）
-    g.currentValueOriginal += Number(s.originalCurrencyValue ?? s.currentValue ?? 0)
     g.estimatedDividend += Number(s.estimatedDividend || 0)
     if (s.dividendRate && !g.dividendRate) g.dividendRate = Number(s.dividendRate)
     // 取任一有效的 displayOrder
     if (s.displayOrder != null && g.displayOrder == null) g.displayOrder = s.displayOrder
   }
+  // 美股 currentValue 為台幣換算值，需除以快照匯率還原為 USD 顯示
+  const usdRate = Number(detail.value?.usdExchangeRate || 0)
   return [...map.values()]
-    .map(g => ({
-      ...g,
-      stockPrice: g.shares > 0 ? g.currentValueOriginal / g.shares : null,
-      profit: g.currentValue - g.investmentCost,
-      profitRate: g.investmentCost > 0 ? (g.currentValue - g.investmentCost) / g.investmentCost : 0
-    }))
+    .map(g => {
+      const pricePerShareTwd = g.shares > 0 ? g.currentValue / g.shares : null
+      const stockPrice = pricePerShareTwd != null && g.market === '美股' && usdRate > 0
+        ? pricePerShareTwd / usdRate
+        : pricePerShareTwd
+      return {
+        ...g,
+        stockPrice,
+        profit: g.currentValue - g.investmentCost,
+        profitRate: g.investmentCost > 0 ? (g.currentValue - g.investmentCost) / g.investmentCost : 0
+      }
+    })
     .sort((a, b) => {
       // 已設定順序的依 displayOrder 排；未設定的（新增持股）排在最後，依現值降序
       if (a.displayOrder != null && b.displayOrder != null) return a.displayOrder - b.displayOrder
