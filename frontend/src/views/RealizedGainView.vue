@@ -58,8 +58,8 @@
           </template>
         </el-table-column>
         <el-table-column prop="tradeDate" label="交易日期" width="105" />
-        <el-table-column prop="assetName" label="名稱" width="110" show-overflow-tooltip />
         <el-table-column prop="assetCode" label="代號" width="75" />
+        <el-table-column prop="assetName" label="名稱" width="110" show-overflow-tooltip />
         <el-table-column label="市場" width="60" align="center">
           <template #default="{ row }">
             <el-tag :type="row.market === '台股' ? 'primary' : 'warning'" size="small">{{ row.market }}</el-tag>
