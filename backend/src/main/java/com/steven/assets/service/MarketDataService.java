@@ -384,17 +384,18 @@ public class MarketDataService {
      */
     public DividendRateResult getDividendRate(String stockCode, String market) {
         if ("台股".equals(market)) {
-            // 1. TWSE OpenAPI 當日殖利率（快速、從 Docker 可連；個股有值，ETF 通常為 "-"）
-            Optional<DividendRateResult> twse = getTwseDividendRate(stockCode);
-            if (twse.isPresent()) return twse.get();
-
-            // 2. FinMind 近 5 年平均現金股利殖利率（ETF 適用，免認證，Docker 可連）
+            // 一律使用「最近 3 年平均殖利率」。優先序：
+            // 1. FinMind 近 3 年平均（ETF/個股皆適用，免認證）
             Optional<DividendRateResult> finmind = getFinMindDividendRate(stockCode);
             if (finmind.isPresent()) return finmind.get();
 
-            // 3. TWSE BWIBBU 歷史 5 年平均殖利率（備用，較慢）
-            Optional<DividendRateResult> fiveYear = getTwseFiveYearAvgDividendRate(stockCode);
-            if (fiveYear.isPresent()) return fiveYear.get();
+            // 2. TWSE BWIBBU 近 3 年平均（FinMind 失敗時的備用）
+            Optional<DividendRateResult> threeYear = getTwseThreeYearAvgDividendRate(stockCode);
+            if (threeYear.isPresent()) return threeYear.get();
+
+            // 3. TWSE OpenAPI 當日殖利率（最後備援，個股才有值）
+            Optional<DividendRateResult> twse = getTwseDividendRate(stockCode);
+            if (twse.isPresent()) return twse.get();
 
             return new DividendRateResult(stockCode, market, null, "N/A", "查無配息資料", null);
         } else {
@@ -448,15 +449,15 @@ public class MarketDataService {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // TWSE BWIBBU 近 5 年平均殖利率
+    // TWSE BWIBBU 近 3 年平均殖利率
     // Endpoint: https://www.twse.com.tw/exchangeReport/BWIBBU?response=json&date={YEAR}1201&stockNo={stockCode}
     // ─────────────────────────────────────────────────────────────────────────
-    private Optional<DividendRateResult> getTwseFiveYearAvgDividendRate(String stockCode) {
+    private Optional<DividendRateResult> getTwseThreeYearAvgDividendRate(String stockCode) {
         try {
             int currentYear = LocalDate.now().getYear();
             List<Double> yields = new ArrayList<>();
 
-            for (int y = currentYear; y >= currentYear - 4; y--) {
+            for (int y = currentYear; y >= currentYear - 2; y--) {
                 try {
                     String url = "https://www.twse.com.tw/exchangeReport/BWIBBU?response=json&date="
                             + y + "1201&stockNo=" + stockCode;
@@ -509,7 +510,7 @@ public class MarketDataService {
 
             return Optional.of(new DividendRateResult(
                     stockCode, "台股", rate,
-                    "TWSE(5Y平均)",
+                    "TWSE(3Y平均)",
                     "近 %d 年平均殖利率（%s%%）".formatted(yields.size(), pctStr)
             ));
         } catch (Exception e) {
@@ -537,7 +538,7 @@ public class MarketDataService {
     private Optional<DividendRateResult> getFinMindFromDataset(
             String stockCode, String dataset, String dividendField) {
         try {
-            String startDate = LocalDate.now().minusYears(5).toString();
+            String startDate = LocalDate.now().minusYears(3).toString();
             String url = "https://api.finmindtrade.com/api/v4/data"
                     + "?dataset=" + dataset
                     + "&data_id=" + stockCode
@@ -583,7 +584,7 @@ public class MarketDataService {
             if (annualDividend.isEmpty()) return Optional.empty();
 
             List<Double> yearlyDividends = new ArrayList<>(annualDividend.values());
-            int fromIdx = Math.max(0, yearlyDividends.size() - 5);
+            int fromIdx = Math.max(0, yearlyDividends.size() - 3);
             List<Double> recent = yearlyDividends.subList(fromIdx, yearlyDividends.size());
             double avgAnnualDividend = recent.stream().mapToDouble(Double::doubleValue).average().orElse(0);
             if (avgAnnualDividend <= 0) return Optional.empty();
@@ -612,7 +613,7 @@ public class MarketDataService {
 
             return Optional.of(new DividendRateResult(
                     stockCode, "台股", rate,
-                    "FinMind(5Y平均)",
+                    "FinMind(3Y平均)",
                     "近 %d 年平均配息 %s 元，殖利率 %s%%".formatted(recent.size(), divStr, pctStr)
             ));
         } catch (Exception e) {
