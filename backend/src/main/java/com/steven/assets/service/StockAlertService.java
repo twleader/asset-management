@@ -132,7 +132,13 @@ public class StockAlertService {
             };
 
             if (triggered) {
-                alert.setLastTriggeredAt(LocalDateTime.now());
+                // 觸發時間錨在最近一個實際交易日的收盤時間（台股 13:30 / 美股 16:00），
+                // 不用 cron 執行的隨機時點。
+                LocalDate tradingDate = historyRepo.findMaxTradingDate(
+                        alert.getStockCode(), alert.getMarket()).orElse(LocalDate.now());
+                java.time.LocalTime closeTime = "美股".equals(alert.getMarket())
+                        ? java.time.LocalTime.of(16, 0) : java.time.LocalTime.of(13, 30);
+                alert.setLastTriggeredAt(tradingDate.atTime(closeTime));
                 alert.setLastTriggeredPrice(BigDecimal.valueOf(currentPrice));
                 alertRepo.save(alert);
             }
