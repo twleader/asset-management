@@ -28,9 +28,10 @@ public class StockAlertDto {
         private Boolean active;
         private LocalDateTime lastTriggeredAt;
         private BigDecimal lastTriggeredPrice;
-        private BigDecimal lastTriggeredMaValue;
-        private BigDecimal lastTriggeredKdValue;
-        private BigDecimal lastTriggeredDValue;
+        // 當前技術指標（不論是哪一類警示，皆計算當前值；與觀察清單共用 TechnicalIndicatorService）
+        private BigDecimal quarterlyMa;
+        private BigDecimal kValue;
+        private BigDecimal dValue;
         private LocalDateTime createdAt;
         private String conditionLabel;
     }
