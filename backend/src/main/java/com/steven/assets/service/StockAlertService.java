@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -135,10 +136,99 @@ public class StockAlertService {
                 alert.setLastTriggeredAt(LocalDateTime.now());
                 alert.setLastTriggeredPrice(BigDecimal.valueOf(currentPrice));
                 alertRepo.save(alert);
+                return;
+            }
+
+            // 沒有觸發記錄時，回掃歷史找到最後一次條件成立的交易日（避免警示一啟用就空白）
+            if (alert.getLastTriggeredAt() == null) {
+                findLastHistoricalTrigger(alert).ifPresent(h -> {
+                    LocalTime closeTime = "美股".equals(alert.getMarket())
+                            ? LocalTime.of(16, 0) : LocalTime.of(13, 30);
+                    alert.setLastTriggeredAt(h.date.atTime(closeTime));
+                    alert.setLastTriggeredPrice(h.close);
+                    alertRepo.save(alert);
+                });
             }
         } catch (Exception e) {
             log.warn("Error evaluating alert {}: {}", alert.getId(), e.getMessage());
         }
+    }
+
+    private record HistMatch(LocalDate date, BigDecimal close) {}
+
+    /** 走訪歷史資料，回傳最後一次條件成立的交易日（若沒有則 empty）。 */
+    private Optional<HistMatch> findLastHistoricalTrigger(StockAlert alert) {
+        LocalDate end = LocalDate.now();
+        LocalDate start = end.minusYears(5);
+        List<StockPriceHistory> asc = historyRepo
+                .findByStockCodeAndMarketAndTradingDateBetweenOrderByTradingDateAsc(
+                        alert.getStockCode(), alert.getMarket(), start, end);
+        if (asc.isEmpty()) return Optional.empty();
+
+        String type = alert.getAlertType();
+        double threshold = alert.getThreshold().doubleValue();
+        HistMatch last = null;
+
+        if ("PRICE_ABOVE".equals(type) || "PRICE_BELOW".equals(type)) {
+            boolean above = "PRICE_ABOVE".equals(type);
+            for (StockPriceHistory h : asc) {
+                double close = h.getClosePrice().doubleValue();
+                if ((above && close >= threshold) || (!above && close <= threshold)) {
+                    last = new HistMatch(h.getTradingDate(), h.getClosePrice());
+                }
+            }
+            return Optional.ofNullable(last);
+        }
+
+        if (type.startsWith("QUARTERLY_MA_") || type.startsWith("ANNUAL_MA_")) {
+            int days = type.startsWith("QUARTERLY") ? 60 : 240;
+            boolean above = type.endsWith("_ABOVE_PCT");
+            if (asc.size() < days) return Optional.empty();
+            double sum = 0;
+            for (int i = 0; i < days; i++) sum += asc.get(i).getClosePrice().doubleValue();
+            for (int i = days - 1; i < asc.size(); i++) {
+                double ma = sum / days;
+                double close = asc.get(i).getClosePrice().doubleValue();
+                double thresholdPrice = ma * (1 + (above ? threshold : -threshold) / 100.0);
+                if ((above && close >= thresholdPrice) || (!above && close <= thresholdPrice)) {
+                    last = new HistMatch(asc.get(i).getTradingDate(), asc.get(i).getClosePrice());
+                }
+                if (i + 1 < asc.size()) {
+                    sum -= asc.get(i - days + 1).getClosePrice().doubleValue();
+                    sum += asc.get(i + 1).getClosePrice().doubleValue();
+                }
+            }
+            return Optional.ofNullable(last);
+        }
+
+        if (type.startsWith("KD_")) {
+            boolean useD = type.startsWith("KD_D_");
+            boolean above = type.endsWith("_ABOVE");
+            int period = 9;
+            if (asc.size() < period) return Optional.empty();
+            double k = 50, d = 50;
+            for (int i = period - 1; i < asc.size(); i++) {
+                List<StockPriceHistory> window = asc.subList(i - period + 1, i + 1);
+                double highest = window.stream().mapToDouble(h -> h.getHighPrice() != null
+                        ? h.getHighPrice().doubleValue() : h.getClosePrice().doubleValue())
+                        .max().orElse(0);
+                double lowest = window.stream().mapToDouble(h -> h.getLowPrice() != null
+                        ? h.getLowPrice().doubleValue() : h.getClosePrice().doubleValue())
+                        .min().orElse(0);
+                double rsv = (highest == lowest) ? 50
+                        : (asc.get(i).getClosePrice().doubleValue() - lowest)
+                        / (highest - lowest) * 100;
+                k = k * 2.0 / 3 + rsv / 3.0;
+                d = d * 2.0 / 3 + k / 3.0;
+                double check = useD ? d : k;
+                if ((above && check >= threshold) || (!above && check <= threshold)) {
+                    last = new HistMatch(asc.get(i).getTradingDate(), asc.get(i).getClosePrice());
+                }
+            }
+            return Optional.ofNullable(last);
+        }
+
+        return Optional.empty();
     }
 
     private List<StockPriceHistory> withTodayIfMissing(List<StockPriceHistory> desc, String code, String market) {
