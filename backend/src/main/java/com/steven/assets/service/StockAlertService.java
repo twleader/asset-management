@@ -239,14 +239,26 @@ public class StockAlertService {
         r.setAlertType(a.getAlertType());
         r.setThreshold(a.getThreshold());
         r.setActive(a.getActive());
-        r.setLastTriggeredAt(a.getLastTriggeredAt());
-        r.setLastTriggeredPrice(a.getLastTriggeredPrice());
-        r.setLastTriggeredMaValue(a.getLastTriggeredMaValue());
-        r.setLastTriggeredKdValue(a.getLastTriggeredKdValue());
-        r.setLastTriggeredDValue(a.getLastTriggeredDValue());
+        // 觸發欄位只顯示最近 3 個交易日內的；超過就視為過期不傳
+        java.time.LocalDateTime cutoff = recentTradingDayCutoff(a.getMarket(), 3);
+        if (a.getLastTriggeredAt() != null
+                && (cutoff == null || !a.getLastTriggeredAt().isBefore(cutoff))) {
+            r.setLastTriggeredAt(a.getLastTriggeredAt());
+            r.setLastTriggeredPrice(a.getLastTriggeredPrice());
+            r.setLastTriggeredMaValue(a.getLastTriggeredMaValue());
+            r.setLastTriggeredKdValue(a.getLastTriggeredKdValue());
+            r.setLastTriggeredDValue(a.getLastTriggeredDValue());
+        }
         r.setCreatedAt(a.getCreatedAt());
         r.setConditionLabel(buildLabel(a));
         return r;
+    }
+
+    private java.time.LocalDateTime recentTradingDayCutoff(String market, int n) {
+        List<java.time.LocalDate> dates = historyRepo.findDistinctTradingDatesByMarket(
+                market, org.springframework.data.domain.PageRequest.of(0, n));
+        if (dates.size() < n) return null;
+        return dates.get(dates.size() - 1).atStartOfDay();
     }
 
     private String buildLabel(StockAlert a) {
