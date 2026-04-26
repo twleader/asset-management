@@ -2043,14 +2043,20 @@ const submit = async () => {
   saving.value = true
   try {
     await formRef.value.validate()
-    const deposits = form.deposits.map(d => ({
-      bankId: d.bankId || null,
-      depositType: d.depositType,
-      currency: d.currency,
-      amount: depositTwd(d),                                                              // 台幣金額（在途待付為負）
-      originalAmount: (d.currency === 'USD' || d.currency === 'TRANSIT_USD') ? d.amount : null,
-      notes: d.notes || null
-    }))
+    const deposits = form.deposits.map(d => {
+      const isUs = d.currency === 'USD' || d.currency === 'TRANSIT_USD'
+      // 後端負責：(1) USD/TRANSIT_USD 用 snapshot 匯率算 amount；(2) TRANSIT_* 依 deposit_type 自動處理正負號
+      // 前端只送原始輸入：amount 一律送正數，USD 類另外送 originalAmount
+      const absAmt = Math.abs(Number(d.amount || 0))
+      return {
+        bankId: d.bankId || null,
+        depositType: d.depositType,
+        currency: d.currency,
+        amount: isUs ? null : absAmt,
+        originalAmount: isUs ? absAmt : null,
+        notes: d.notes || null
+      }
+    })
     const funds = form.funds.map(f => ({
       fundName: f.fundName,
       fundCode: f.fundCode || null,

@@ -32,6 +32,7 @@ public class AssetService {
     private final BankRepository bankRepo;
     private final BrokerRepository brokerRepo;
     private final StockRepository stockMasterRepo;
+    private final TransitFundTypeRepository transitFundTypeRepo;
 
     // ===================== Snapshot =====================
 
@@ -104,7 +105,7 @@ public class AssetService {
                         .snapshot(snapshot)
                         .bank(bank)
                         .depositType(d.depositType())
-                        .amount(d.amount())
+                        .amount(normalizeDepositAmount(d, req.usdExchangeRate()))
                         .originalAmount(d.originalAmount())
                         .currency(d.currency() != null ? d.currency() : "TWD")
                         .notes(d.notes())
@@ -167,6 +168,41 @@ public class AssetService {
     }
 
     /**
+     * 把存款的台幣值（amount）由後端統一決定，不信任前端的計算結果。
+     *
+     * 規則：
+     *  - TWD：amount = abs(前端送的值)
+     *  - TRANSIT_TWD：amount = abs；若 deposit_type 為 payable 則 negate
+     *  - USD：amount = originalAmount × snapshotRate（無匯率時 fallback 前端 amount）
+     *  - TRANSIT_USD：amount = originalAmount × snapshotRate；若 payable 則 negate
+     */
+    private BigDecimal normalizeDepositAmount(AssetSnapshotDto.DepositRequest d, BigDecimal snapshotRate) {
+        String currency = d.currency() != null ? d.currency() : "TWD";
+        boolean isUsd = "USD".equals(currency) || "TRANSIT_USD".equals(currency);
+        boolean isTransit = "TRANSIT_TWD".equals(currency) || "TRANSIT_USD".equals(currency);
+
+        BigDecimal twd;
+        if (isUsd && d.originalAmount() != null
+                && snapshotRate != null && snapshotRate.compareTo(BigDecimal.ZERO) > 0) {
+            twd = d.originalAmount().abs().multiply(snapshotRate)
+                    .setScale(0, RoundingMode.HALF_UP);
+        } else {
+            twd = d.amount() != null ? d.amount().abs() : BigDecimal.ZERO;
+        }
+        if (isTransit && isTransitPayable(d.depositType())) {
+            twd = twd.negate();
+        }
+        return twd;
+    }
+
+    private boolean isTransitPayable(String depositType) {
+        if (depositType == null) return false;
+        return transitFundTypeRepo.findByCode(depositType)
+                .map(TransitFundType::getPayable)
+                .orElse(false);
+    }
+
+    /**
      * 依 req.stocks() 的提交順序，為每個 (market, stockCode) 分配 displayOrder（每個市場獨立編號）。
      * 多筆 StockHolding 屬於同一支股票（不同券商）時套用相同 displayOrder。
      */
@@ -204,7 +240,8 @@ public class AssetService {
                 Bank bank = d.bankId() != null ? bankRepo.findById(d.bankId()).orElse(null) : null;
                 snapshot.getDeposits().add(BankDeposit.builder()
                     .snapshot(snapshot).bank(bank).depositType(d.depositType())
-                    .amount(d.amount()).originalAmount(d.originalAmount())
+                    .amount(normalizeDepositAmount(d, req.usdExchangeRate()))
+                    .originalAmount(d.originalAmount())
                     .currency(d.currency() != null ? d.currency() : "TWD").notes(d.notes()).build());
             });
         }
