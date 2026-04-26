@@ -706,6 +706,13 @@
 
 - [x] 21.3 前端：警示頁面整併進 `StockMonitorView.vue`「警示條件」頁籤（路徑 `/stocks?tab=alerts`，舊路徑 `/stock-alerts` 自動 redirect）
 
+- [ ] 21.4 觸發歷史紀錄（對應 Requirement 16 新增條目）
+  - Liquibase `v1.11.0-stock-alert-trigger.sql`：建立 `stock_alert_trigger` 表，欄位 `id` / `alert_id` (FK CASCADE) / `stock_code` / `market` / `triggered_at` / `price` / `monthly_ma` / `quarterly_ma` / `annual_ma` / `k_value` / `d_value` / `created_at`，以 `(alert_id, triggered_at DESC)` 與 `(created_at)` 各一個索引
+  - 後端：新增 `StockAlertTrigger` 實體 + Repository
+  - `TechnicalIndicatorService` 擴充：新增 `computeAll(code, market)` 一次回 MA20 / MA60 / MA240 / K / D（保留舊 `compute()` 簽名以相容 WatchStockService）
+  - `StockAlertService.evaluate` 觸發時除了更新 `last_triggered_*` 外，另計算完整指標並 INSERT 一筆 `stock_alert_trigger`
+  - 新增 `@Scheduled(cron = "0 0 4 * * *", zone = "Asia/Taipei")` 每日清理 `created_at < NOW() - 30 days` 的舊紀錄
+
 ---
 
 ### Task 22: 待轉入資金類型設定管理（TransitFundType）
