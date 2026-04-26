@@ -861,3 +861,19 @@ KPI 卡 / 圓餅 / 持股表回跳到最新；另外資產歷史趨勢圖一直�
 - [x] 30.1 `refreshPricesAndStatus` 只呼叫 `marketDataApi.getAllPrices()` + `getMarketStatus()`，不再重抓 summary
 - [x] 30.2 `loadDashboardSummary` 僅在初次（`selectedSnapshotId == null`）時設定 `selectedSnapshotId` 為最新；後續呼叫保留使用者選擇
 - [x] 30.3 `trendOption` 與 KPI「較上次」都以 `snapshotDate <= 基準日` 過濾後的 history 計算
+
+### Task 31: 股利歷史新增「除息日昨收價」欄位
+
+對應 Requirements: Requirement 13
+
+#### 背景
+
+股利歷史頁籤需顯示除息日前一個交易日的收盤價，作為填息基準的參考。
+原本 `calcFillDays` 內部已抓出該基準價但僅用於計算填息天數，未對外暴露。
+
+#### Steps:
+
+- [x] 31.1 後端 `MarketDataService.DividendRow` 新增 `previousClose` 欄位；提取共用 `DividendBasis` record，
+       由 `calcDividendBasis()` 一次回傳前一交易日收盤與填息天數，避免重複查 `StockPriceHistory`
+- [x] 31.2 `getTwDividendHistory` / `getUsDividendHistory` 改呼叫 `calcDividendBasis()` 並回傳 `previousClose`
+- [x] 31.3 前端 `StockAnalysisDialog.vue` 股利歷史表格在「除息日」欄前新增「除息日昨收價」欄位（金額右對齊，無資料顯示 —）

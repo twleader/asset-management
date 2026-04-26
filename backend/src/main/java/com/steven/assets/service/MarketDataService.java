@@ -97,13 +97,19 @@ public class MarketDataService {
             BigDecimal yieldPct,           // 當年殖利率（%），可為 null
             String cashPaymentDate,        // 現金股利發放日
             String stockPaymentDate,       // 股票股利發放日
-            Integer fillDays               // 填息天數（尚未填息為 null）
+            Integer fillDays,              // 填息天數（尚未填息為 null）
+            BigDecimal previousClose       // 除息日前一交易日收盤價（無資料為 null）
     ) {
-        /** 向後相容：舊建構（無 payment dates / fillDays） */
+        /** 向後相容：舊建構（無 payment dates / fillDays / previousClose） */
         public DividendRow(Integer year, BigDecimal cashDividend, BigDecimal stockDividend,
                            String exDividendDate, BigDecimal yieldPct) {
-            this(year, cashDividend, stockDividend, exDividendDate, yieldPct, null, null, null);
+            this(year, cashDividend, stockDividend, exDividendDate, yieldPct, null, null, null, null);
         }
+    }
+
+    /** 除息日參考資料：前一交易日收盤價 + 填息天數 */
+    private record DividendBasis(BigDecimal previousClose, Integer fillDays) {
+        static final DividendBasis EMPTY = new DividendBasis(null, null);
     }
 
     public record DividendHistoryResult(
@@ -1046,7 +1052,12 @@ public class MarketDataService {
      * 尚未填息或資料不足回傳 null。
      */
     private Integer calcFillDays(String stockCode, String market, String exDate) {
-        if (exDate == null || exDate.length() < 10) return null;
+        return calcDividendBasis(stockCode, market, exDate).fillDays();
+    }
+
+    /** 一次查詢除息日前後價格序列，回傳前一交易日收盤價與填息天數。 */
+    private DividendBasis calcDividendBasis(String stockCode, String market, String exDate) {
+        if (exDate == null || exDate.length() < 10) return DividendBasis.EMPTY;
         try {
             LocalDate ex = LocalDate.parse(exDate);
             // 取除息日前後各 1 年的歷史，足夠多數情況下找到填息日
@@ -1055,28 +1066,30 @@ public class MarketDataService {
             List<StockPriceHistory> series = stockPriceHistoryRepo
                     .findByStockCodeAndMarketAndTradingDateBetweenOrderByTradingDateAsc(
                             stockCode, market, from, to);
-            if (series.size() < 2) return null;
+            if (series.size() < 2) return DividendBasis.EMPTY;
 
             // 基準價 = 除息日前一個交易日的收盤
             int exIdx = -1;
             for (int i = 0; i < series.size(); i++) {
                 if (!series.get(i).getTradingDate().isBefore(ex)) { exIdx = i; break; }
             }
-            if (exIdx <= 0) return null;
+            if (exIdx <= 0) return DividendBasis.EMPTY;
             BigDecimal basis = series.get(exIdx - 1).getClosePrice();
-            if (basis == null) return null;
+            if (basis == null) return DividendBasis.EMPTY;
 
             // 從除息日（含）起，找第一筆收盤 >= basis
+            Integer fillDays = null;
             for (int i = exIdx; i < series.size(); i++) {
                 BigDecimal close = series.get(i).getClosePrice();
                 if (close != null && close.compareTo(basis) >= 0) {
-                    return i - exIdx;   // 0 表示除息日當天即填息
+                    fillDays = i - exIdx;   // 0 表示除息日當天即填息
+                    break;
                 }
             }
-            return null; // 尚未填息
+            return new DividendBasis(basis, fillDays);
         } catch (Exception e) {
-            log.debug("calcFillDays failed for {} {} ex={}: {}", stockCode, market, exDate, e.getMessage());
-            return null;
+            log.debug("calcDividendBasis failed for {} {} ex={}: {}", stockCode, market, exDate, e.getMessage());
+            return DividendBasis.EMPTY;
         }
     }
 
@@ -1300,6 +1313,7 @@ public class MarketDataService {
                 String cashPay  = item.path("CashDividendPaymentDate").asText("");
                 String stockPay = item.path("StockDividendPaymentDate").asText("");
 
+                DividendBasis basis = calcDividendBasis(stockCode, "台股", exDate);
                 rows.add(new DividendRow(
                         year,
                         BigDecimal.valueOf(cash).setScale(4, RoundingMode.HALF_UP),
@@ -1308,7 +1322,8 @@ public class MarketDataService {
                         null,
                         cashPay.isEmpty() ? null : cashPay,
                         stockPay.isEmpty() ? null : stockPay,
-                        calcFillDays(stockCode, "台股", exDate)
+                        basis.fillDays(),
+                        basis.previousClose()
                 ));
             }
             // 除息日新→舊
@@ -1367,6 +1382,7 @@ public class MarketDataService {
                         } catch (Exception ignore) {}
                     }
 
+                    DividendBasis basis = calcDividendBasis(stockCode, "美股", exIso);
                     rows.add(new DividendRow(
                             year,
                             BigDecimal.valueOf(amt).setScale(4, RoundingMode.HALF_UP),
@@ -1375,7 +1391,8 @@ public class MarketDataService {
                             null,
                             payIso,
                             null,
-                            calcFillDays(stockCode, "美股", exIso)
+                            basis.fillDays(),
+                            basis.previousClose()
                     ));
                 }
                 if (rows.isEmpty()) continue;
