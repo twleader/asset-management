@@ -39,7 +39,7 @@ public class RealizedGainBffController {
     public Mono<ResponseEntity<Map<String, Object>>> getAll() {
         return Mono.zip(
                 businessServicesClient.get().uri("/api/realized-gains").retrieve().bodyToMono(LIST_MAP),
-                businessServicesClient.get().uri("/api/brokers").retrieve().bodyToMono(LIST_MAP)
+                businessServicesClient.get().uri("/api/settings/brokers").retrieve().bodyToMono(LIST_MAP)
         ).map(t -> {
             Map<String, Object> body = new java.util.HashMap<>();
             body.put("gains", t.getT1());

@@ -19,7 +19,7 @@ public class DepositTypeSettingsBffRoutes {
                         .path("/api/bff/deposit-type-settings/**")
                         .filters(f -> f.rewritePath(
                                 "/api/bff/deposit-type-settings(?<seg>/?.*)",
-                                "/api/deposit-types${seg}"))
+                                "/api/settings/deposit-types${seg}"))
                         .uri(businessServicesUrl))
                 .build();
     }
