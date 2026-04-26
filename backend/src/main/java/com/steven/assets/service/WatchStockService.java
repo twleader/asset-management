@@ -159,11 +159,13 @@ public class WatchStockService {
                     .setScale(4, java.math.RoundingMode.HALF_UP));
         }
 
-        // 警示彙總：取該股最近一筆 lastTriggeredAt
-        // 重要：所有技術指標（季線 / K / D）也用「觸發當下」的快照值，不是當前計算結果。
+        // 警示彙總：取該股最近一筆 lastTriggeredAt，且只顯示「最近 3 個交易日」內的觸發
+        // （超過 3 個交易日視為過期，不顯示。前端看到的就是最近的觸發狀況。）
         List<StockAlert> alerts = alertRepo.findByStockCodeAndMarket(w.getStockCode(), w.getMarket());
+        java.time.LocalDateTime cutoff = recentTradingDayCutoff(w.getMarket(), 3);
         alerts.stream()
                 .filter(a -> a.getLastTriggeredAt() != null)
+                .filter(a -> cutoff == null || !a.getLastTriggeredAt().isBefore(cutoff))
                 .max(Comparator.comparing(StockAlert::getLastTriggeredAt))
                 .ifPresent(a -> {
                     r.setLastTriggeredAt(a.getLastTriggeredAt());
@@ -175,6 +177,21 @@ public class WatchStockService {
                 });
 
         return r;
+    }
+
+    /**
+     * 取得「最近 N 個交易日」中最早那天的午夜當作 cutoff。
+     * 用 stock_price_history 抓最近 N 個 trading_date；不足 N 筆時回 null（不過濾）。
+     */
+    private java.time.LocalDateTime recentTradingDayCutoff(String market, int n) {
+        // 拿任一支該市場的股票歷史就夠了，trading_date 對齊整個市場
+        Optional<StockPriceHistory> sample = historyRepo.findFirstByMarketOrderByTradingDateDesc(market);
+        if (sample.isEmpty()) return null;
+        // 從最新交易日往前數 N 個 distinct trading_date
+        List<java.time.LocalDate> dates = historyRepo
+                .findDistinctTradingDatesByMarket(market, org.springframework.data.domain.PageRequest.of(0, n));
+        if (dates.size() < n) return null;
+        return dates.get(dates.size() - 1).atStartOfDay();
     }
 
 }

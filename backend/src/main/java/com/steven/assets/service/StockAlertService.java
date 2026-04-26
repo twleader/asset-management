@@ -16,7 +16,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.LocalTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -130,120 +129,38 @@ public class StockAlertService {
     }
 
     /**
-     * 警示評估：找出歷史上「條件首次成立」的那一天，將該天的快照（收盤價、MA、K、D）
-     * 凍結為觸發紀錄。Fire-once：一旦設定後不再覆寫，避免「警示快照 = 當天收盤」。
-     * 使用者要重新評估時可透過「停用 → 啟用」（toggleActive 會清空快照）。
+     * 警示評估：每次跑都重新依今天的價格 / 指標判斷是否符合條件。
+     * 條件成立 → 把今天的快照寫入 last_triggered_*（會覆寫前次值）。
+     * 條件不成立 → 不動。前端會依「最近 3 個交易日」過濾顯示，超過就視為過期不顯示。
      */
     private void evaluate(StockAlert alert) {
         try {
-            if (alert.getLastTriggeredAt() != null) return;
+            Optional<StockPrice> priceOpt = priceRepo.findByStockCodeAndMarket(alert.getStockCode(), alert.getMarket());
+            if (priceOpt.isEmpty()) return;
+            double currentPrice = priceOpt.get().getPrice().doubleValue();
 
-            Optional<TriggerSnapshot> snapshot = findFirstHistoricalTrigger(alert);
-            if (snapshot.isEmpty()) return;
+            boolean triggered = switch (alert.getAlertType()) {
+                case "QUARTERLY_MA_ABOVE_PCT" -> checkMaDeviation(alert, currentPrice, 60, true);
+                case "QUARTERLY_MA_BELOW_PCT" -> checkMaDeviation(alert, currentPrice, 60, false);
+                case "ANNUAL_MA_ABOVE_PCT"    -> checkMaDeviation(alert, currentPrice, 240, true);
+                case "ANNUAL_MA_BELOW_PCT"    -> checkMaDeviation(alert, currentPrice, 240, false);
+                case "KD_ABOVE"              -> checkKdValue(alert, false, true);
+                case "KD_BELOW"              -> checkKdValue(alert, false, false);
+                case "KD_D_ABOVE"            -> checkKdValue(alert, true, true);
+                case "KD_D_BELOW"            -> checkKdValue(alert, true, false);
+                case "PRICE_ABOVE"           -> currentPrice >= alert.getThreshold().doubleValue();
+                case "PRICE_BELOW"           -> currentPrice <= alert.getThreshold().doubleValue();
+                default -> false;
+            };
 
-            TriggerSnapshot s = snapshot.get();
-            // 觸發時間使用該交易日的收盤時間（台股 13:30、美股 16:00 wall-clock）
-            LocalTime closeTime = "美股".equals(alert.getMarket())
-                    ? LocalTime.of(16, 0) : LocalTime.of(13, 30);
-            alert.setLastTriggeredAt(s.date().atTime(closeTime));
-            alert.setLastTriggeredPrice(s.close());
-            alert.setLastTriggeredMaValue(s.ma());
-            alert.setLastTriggeredKdValue(s.k());
-            alert.setLastTriggeredDValue(s.d());
-            alertRepo.save(alert);
-            log.info("警示 {} ({} {}) 首次歷史觸發於 {}", alert.getId(), alert.getStockCode(),
-                    alert.getAlertType(), s.date());
+            if (triggered) {
+                alert.setLastTriggeredAt(LocalDateTime.now());
+                alert.setLastTriggeredPrice(BigDecimal.valueOf(currentPrice));
+                alertRepo.save(alert);
+            }
         } catch (Exception e) {
             log.warn("Error evaluating alert {}: {}", alert.getId(), e.getMessage());
         }
-    }
-
-    /** 觸發當下的快照值（單一日期）。 */
-    private record TriggerSnapshot(LocalDate date, BigDecimal close,
-                                    BigDecimal ma, BigDecimal k, BigDecimal d) {}
-
-    /**
-     * 走訪歷史資料，找到符合條件的「第一個」交易日及當下的指標值。
-     */
-    private Optional<TriggerSnapshot> findFirstHistoricalTrigger(StockAlert alert) {
-        LocalDate end = LocalDate.now();
-        LocalDate start = end.minusYears(5);
-        List<StockPriceHistory> asc = historyRepo
-                .findByStockCodeAndMarketAndTradingDateBetweenOrderByTradingDateAsc(
-                        alert.getStockCode(), alert.getMarket(), start, end);
-        if (asc.isEmpty()) return Optional.empty();
-
-        String type = alert.getAlertType();
-        double threshold = alert.getThreshold().doubleValue();
-
-        if ("PRICE_ABOVE".equals(type) || "PRICE_BELOW".equals(type)) {
-            boolean above = "PRICE_ABOVE".equals(type);
-            for (StockPriceHistory h : asc) {
-                double close = h.getClosePrice().doubleValue();
-                if ((above && close >= threshold) || (!above && close <= threshold)) {
-                    return Optional.of(new TriggerSnapshot(h.getTradingDate(),
-                            h.getClosePrice(), null, null, null));
-                }
-            }
-            return Optional.empty();
-        }
-
-        if (type.startsWith("QUARTERLY_MA_") || type.startsWith("ANNUAL_MA_")) {
-            int days = type.startsWith("QUARTERLY") ? 60 : 240;
-            boolean above = type.endsWith("_ABOVE_PCT");
-            if (asc.size() < days) return Optional.empty();
-            double sum = 0;
-            for (int i = 0; i < days; i++) sum += asc.get(i).getClosePrice().doubleValue();
-            for (int i = days - 1; i < asc.size(); i++) {
-                double ma = sum / days;
-                double close = asc.get(i).getClosePrice().doubleValue();
-                double thresholdPrice = ma * (1 + (above ? threshold : -threshold) / 100.0);
-                if ((above && close >= thresholdPrice) || (!above && close <= thresholdPrice)) {
-                    return Optional.of(new TriggerSnapshot(asc.get(i).getTradingDate(),
-                            asc.get(i).getClosePrice(),
-                            BigDecimal.valueOf(ma).setScale(2, java.math.RoundingMode.HALF_UP),
-                            null, null));
-                }
-                if (i + 1 < asc.size()) {
-                    sum -= asc.get(i - days + 1).getClosePrice().doubleValue();
-                    sum += asc.get(i + 1).getClosePrice().doubleValue();
-                }
-            }
-            return Optional.empty();
-        }
-
-        if (type.startsWith("KD_")) {
-            boolean useD = type.startsWith("KD_D_");
-            boolean above = type.endsWith("_ABOVE");
-            int period = 9;
-            if (asc.size() < period) return Optional.empty();
-            double k = 50, d = 50;
-            for (int i = period - 1; i < asc.size(); i++) {
-                List<StockPriceHistory> window = asc.subList(i - period + 1, i + 1);
-                double highest = window.stream().mapToDouble(h -> h.getHighPrice() != null
-                        ? h.getHighPrice().doubleValue() : h.getClosePrice().doubleValue())
-                        .max().orElse(0);
-                double lowest = window.stream().mapToDouble(h -> h.getLowPrice() != null
-                        ? h.getLowPrice().doubleValue() : h.getClosePrice().doubleValue())
-                        .min().orElse(0);
-                double rsv = (highest == lowest) ? 50
-                        : (asc.get(i).getClosePrice().doubleValue() - lowest)
-                        / (highest - lowest) * 100;
-                k = k * 2.0 / 3 + rsv / 3.0;
-                d = d * 2.0 / 3 + k / 3.0;
-
-                double check = useD ? d : k;
-                if ((above && check >= threshold) || (!above && check <= threshold)) {
-                    return Optional.of(new TriggerSnapshot(asc.get(i).getTradingDate(),
-                            asc.get(i).getClosePrice(), null,
-                            BigDecimal.valueOf(k).setScale(2, java.math.RoundingMode.HALF_UP),
-                            BigDecimal.valueOf(d).setScale(2, java.math.RoundingMode.HALF_UP)));
-                }
-            }
-            return Optional.empty();
-        }
-
-        return Optional.empty();
     }
 
     private List<StockPriceHistory> withTodayIfMissing(List<StockPriceHistory> desc, String code, String market) {
