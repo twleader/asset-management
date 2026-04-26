@@ -77,6 +77,23 @@ git config core.hooksPath scripts/git-hooks
 - 設定管理：`/api/settings/{resource}`
 - 市場資料：`/api/market-data/{action}`
 
+### BFF 與資料來源規範
+
+**1. 一個前端頁面一個 BFF**
+
+每個前端頁面對應一支獨立的 BFF controller（或 route 設定），路徑前綴 `/api/bff/{page-name}/...`。
+- 前端 view 一律走自己頁面對應的 BFF endpoint，不直接呼叫 business service `/api/{resource}`
+- BFF 負責跨服務 aggregation、預先計算 / 排序 / 過濾，前端只負責 render
+- 範例：`DashboardBffController`、`SnapshotFormBffController`、`AssetHistoryBffController`、`BankSettingsBffRoutes`（純 passthrough 也要有自己的 route）
+
+**2. 同義欄位、同一 business service API**
+
+不同頁面顯示「同樣意義的值」時，BFF 必須呼叫**同一支 business service API**取得，避免值在不同頁面不一致。
+- 例：股票即時 K/D/季線 → 兩個頁面都透過 `TechnicalIndicatorService.compute()`
+- 例：snapshot 預估配息 → 各頁面都讀 `asset_snapshot.estimated_annual_dividend`（不要前端各自重算）
+- 例：股價收盤值 → 一律從 `stock_price_history` 抓
+- 共用邏輯抽到 `bff/common/`（如 `SnapshotEnricher`），各 BFF controller 注入使用
+
 ### 服務啟動
 ```bash
 # 後端（port 8080）
