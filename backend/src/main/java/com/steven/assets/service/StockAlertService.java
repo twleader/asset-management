@@ -156,9 +156,10 @@ public class StockAlertService {
             };
 
             if (triggered) {
-                // 觸發時間錨在「該股價對應交易日的收盤時間」，避免顯示成 cron 執行時的隨機時點
-                // （台股 13:30 收盤；美股 16:00 ET 收盤，這裡簡化用 wall clock）
-                LocalDate tradingDate = sp.getTradingDate() != null ? sp.getTradingDate() : LocalDate.now();
+                // 觸發時間錨在「最近一個實際交易日的收盤時間」（台股 13:30 / 美股 16:00 wall-clock）。
+                // 不採用 stock_price.trading_date —— 該欄位在非交易日仍可能被 refresh 覆寫成今天。
+                LocalDate tradingDate = historyRepo.findMaxTradingDate(
+                        alert.getStockCode(), alert.getMarket()).orElse(LocalDate.now());
                 LocalTime closeTime = "美股".equals(alert.getMarket()) ? LocalTime.of(16, 0) : LocalTime.of(13, 30);
                 alert.setLastTriggeredAt(tradingDate.atTime(closeTime));
                 alert.setLastTriggeredPrice(BigDecimal.valueOf(currentPrice));
