@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -137,7 +138,8 @@ public class StockAlertService {
         try {
             Optional<StockPrice> priceOpt = priceRepo.findByStockCodeAndMarket(alert.getStockCode(), alert.getMarket());
             if (priceOpt.isEmpty()) return;
-            double currentPrice = priceOpt.get().getPrice().doubleValue();
+            StockPrice sp = priceOpt.get();
+            double currentPrice = sp.getPrice().doubleValue();
 
             boolean triggered = switch (alert.getAlertType()) {
                 case "QUARTERLY_MA_ABOVE_PCT" -> checkMaDeviation(alert, currentPrice, 60, true);
@@ -154,7 +156,11 @@ public class StockAlertService {
             };
 
             if (triggered) {
-                alert.setLastTriggeredAt(LocalDateTime.now());
+                // 觸發時間錨在「該股價對應交易日的收盤時間」，避免顯示成 cron 執行時的隨機時點
+                // （台股 13:30 收盤；美股 16:00 ET 收盤，這裡簡化用 wall clock）
+                LocalDate tradingDate = sp.getTradingDate() != null ? sp.getTradingDate() : LocalDate.now();
+                LocalTime closeTime = "美股".equals(alert.getMarket()) ? LocalTime.of(16, 0) : LocalTime.of(13, 30);
+                alert.setLastTriggeredAt(tradingDate.atTime(closeTime));
                 alert.setLastTriggeredPrice(BigDecimal.valueOf(currentPrice));
                 alertRepo.save(alert);
             }
