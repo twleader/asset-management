@@ -53,7 +53,11 @@ com.steven.assets/
 
 **BFF 層**（`bff/` 模組）
 - Spring Cloud Gateway：所有 `/api/*` 路由至 Backend
-- `DashboardBffController`：`GET /api/bff/dashboard/summary`（並行聚合儀表板資料）
+- 設計原則：**一個前端頁面對應一個 BFF controller**；前端只 render，aggregation 與計算（profit / profitRate / 買入均價 / 收盤價對齊等）一律由 BFF 預先處理
+- `DashboardBffController`：
+  - `GET /api/bff/dashboard/summary`：並行聚合 snapshots / history / prices / marketStatus / latestSnapshotDetail，並附上預先彙總的 `mergedStocks`（依 stockCode + market 合併 broker rows，含 stockPrice 收盤價、profit、profitRate、avgCostOriginal）
+  - `GET /api/bff/dashboard/snapshot/{id}`：切換快照時用，回傳 enriched detail + mergedStocks
+  - `GET /api/bff/dashboard/realtime`：5 分鐘輪詢用，回傳 stockPrices + marketStatus
 
 **Repository 層**（Spring Data JPA，共 16 個）
 - `AssetSnapshotRepository`

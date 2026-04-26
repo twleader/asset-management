@@ -6,6 +6,7 @@
 
 # Java build output
 backend/target/
+bff/target/
 
 # Node modules
 frontend/node_modules/

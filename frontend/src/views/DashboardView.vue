@@ -222,7 +222,7 @@
             </el-table-column>
             <el-table-column label="買入均價" width="110" align="right">
               <template #default="{ row }">
-                <span style="color:#475569">{{ row.shares > 0 ? formatPrice(row.investmentCostOriginal / row.shares) : '-' }}</span>
+                <span style="color:#475569">{{ row.avgCostOriginal != null ? formatPrice(row.avgCostOriginal) : '-' }}</span>
               </template>
             </el-table-column>
             <el-table-column label="投資成本" align="right" width="120">
@@ -275,7 +275,7 @@ import VChart from 'vue-echarts'
 import { ArrowRight, Loading, Operation } from '@element-plus/icons-vue'
 import Sortable from 'sortablejs'
 import { useAssetStore } from '@/stores/assetStore'
-import { bffApi, snapshotApi, marketDataApi } from '@/api'
+import { bffApi, snapshotApi } from '@/api'
 import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
 
 let orderSaveTimer = null
@@ -286,7 +286,7 @@ use([CanvasRenderer, PieChart, LineChart, BarChart, TitleComponent, TooltipCompo
 
 const store = useAssetStore()
 const stockPrices = ref({})
-const snapshotClosePrices = ref({}) // 快照基準日（或之前最近）的收盤價，原幣別（美股 USD、台股 TWD）
+const mergedStocksFromBff = ref([]) // 由 BFF 預先彙總（含 stockPrice、profit、profitRate 等）
 const marketStatus = ref({ twMarketOpen: false, usMarketOpen: false })
 const selectedSnapshotId = ref(null)
 
@@ -313,13 +313,14 @@ async function loadDashboardSummary() {
     const summary = await bffApi.getDashboardSummary()
     store.snapshots = summary.snapshots ?? []
     store.history = summary.history ?? []
-    // 僅在使用者尚未選擇任何快照時才預設為最新；之後保留使用者的選擇，避免被輪詢覆蓋
-    if (selectedSnapshotId.value == null && summary.latestSnapshotDetail?.id) {
+    // 僅在使用者尚未選擇任何快照、或目前選的就是最新時才更新；保留使用者選擇避免被輪詢覆蓋
+    const latestId = summary.latestSnapshotDetail?.id
+    if (latestId != null && (selectedSnapshotId.value == null || selectedSnapshotId.value === latestId)) {
       store.currentSnapshot = summary.latestSnapshotDetail
-      selectedSnapshotId.value = summary.latestSnapshotDetail.id
+      selectedSnapshotId.value = latestId
+      mergedStocksFromBff.value = summary.mergedStocks ?? []
     }
     applyPricesAndStatus(summary.stockPrices ?? [], summary.marketStatus ?? {})
-    await loadSnapshotClosePrices()
   } catch (e) {
     console.warn('載入儀表板摘要失敗:', e)
   }
@@ -328,45 +329,21 @@ async function loadDashboardSummary() {
 async function refreshPricesAndStatus() {
   // 5 分鐘輪詢只刷新即時股價與市場狀態，避免覆蓋使用者選擇的基準日
   try {
-    const [prices, status] = await Promise.all([
-      marketDataApi.getAllPrices(),
-      marketDataApi.getMarketStatus()
-    ])
-    applyPricesAndStatus(prices ?? [], status ?? {})
+    const data = await bffApi.getDashboardRealtime()
+    applyPricesAndStatus(data?.stockPrices ?? [], data?.marketStatus ?? {})
   } catch (e) {
     console.warn('刷新股價/市場狀態失敗:', e)
   }
 }
 
 async function onSnapshotChange(id) {
-  await store.fetchSnapshotDetail(id)
-  selectedSnapshotId.value = id
-  await loadSnapshotClosePrices()
-}
-
-async function loadSnapshotClosePrices() {
-  const d = store.currentSnapshot
-  if (!d?.snapshotDate || !Array.isArray(d.stocks) || d.stocks.length === 0) {
-    snapshotClosePrices.value = {}
-    return
-  }
-  const seen = new Set()
-  const stocks = []
-  for (const s of d.stocks) {
-    const key = `${s.market}_${s.stockCode}`
-    if (seen.has(key)) continue
-    seen.add(key)
-    stocks.push({ code: s.stockCode, market: s.market })
-  }
   try {
-    const prices = await marketDataApi.getPricesOnDate(d.snapshotDate, stocks)
-    const map = {}
-    for (const p of prices ?? []) {
-      map[`${p.market}_${p.stockCode}`] = Number(p.price)
-    }
-    snapshotClosePrices.value = map
+    const detail = await bffApi.getDashboardSnapshot(id)
+    store.currentSnapshot = detail
+    selectedSnapshotId.value = id
+    mergedStocksFromBff.value = detail.mergedStocks ?? []
   } catch (e) {
-    console.warn('載入快照收盤價失敗:', e)
+    console.warn('載入快照失敗:', e)
   }
 }
 
@@ -616,53 +593,22 @@ const bankOption = computed(() => {
   }
 })
 
-const mergedStocks = computed(() => {
-  const stocks = detail.value?.stocks || []
-  const map = new Map()
-  for (const s of stocks) {
-    const key = `${s.market}_${s.stockCode}`
-    if (!map.has(key)) {
-      map.set(key, {
-        stockCode: s.stockCode,
-        stockName: s.stockName,
-        market: s.market,
-        dividendRate: null,
-        displayOrder: null,
-        shares: 0,
-        investmentCost: 0,
-        investmentCostOriginal: 0,
-        currentValue: 0,
-        estimatedDividend: 0
-      })
-    }
-    const g = map.get(key)
-    g.shares += Number(s.shares || 0)
-    g.investmentCost += Number(s.investmentCostTwd ?? s.investmentCost ?? 0)
-    // 買入均價：BFF 已將美股 legacy TWD 記錄換算為 USD，前端直接 sum 即可
-    g.investmentCostOriginal += Number(s.investmentCostOriginal ?? s.investmentCost ?? 0)
-    g.currentValue += Number(s.currentValue || 0)
-    g.estimatedDividend += Number(s.estimatedDividend || 0)
-    if (s.dividendRate && !g.dividendRate) g.dividendRate = Number(s.dividendRate)
-    // 取任一有效的 displayOrder
-    if (s.displayOrder != null && g.displayOrder == null) g.displayOrder = s.displayOrder
-  }
-  // 股價：直接使用快照基準日的歷史收盤價（美股 USD、台股 TWD）
-  const closeMap = snapshotClosePrices.value
-  return [...map.values()]
-    .map(g => ({
-      ...g,
-      stockPrice: closeMap[`${g.market}_${g.stockCode}`] ?? null,
-      profit: g.currentValue - g.investmentCost,
-      profitRate: g.investmentCost > 0 ? (g.currentValue - g.investmentCost) / g.investmentCost : 0
-    }))
-    .sort((a, b) => {
-      // 已設定順序的依 displayOrder 排；未設定的（新增持股）排在最後，依現值降序
-      if (a.displayOrder != null && b.displayOrder != null) return a.displayOrder - b.displayOrder
-      if (a.displayOrder != null) return -1
-      if (b.displayOrder != null) return 1
-      return b.currentValue - a.currentValue
-    })
-})
+// 由 BFF 預先彙總、排序好的持股清單；前端只負責 render
+const mergedStocks = computed(() =>
+  (mergedStocksFromBff.value ?? []).map(g => ({
+    ...g,
+    shares: Number(g.shares || 0),
+    investmentCost: Number(g.investmentCost || 0),
+    investmentCostOriginal: Number(g.investmentCostOriginal || 0),
+    currentValue: Number(g.currentValue || 0),
+    estimatedDividend: Number(g.estimatedDividend || 0),
+    profit: Number(g.profit || 0),
+    profitRate: Number(g.profitRate || 0),
+    stockPrice: g.stockPrice != null ? Number(g.stockPrice) : null,
+    avgCostOriginal: g.avgCostOriginal != null ? Number(g.avgCostOriginal) : null,
+    dividendRate: g.dividendRate != null ? Number(g.dividendRate) : null
+  }))
+)
 
 const stockMarketTab = ref('台股')
 
