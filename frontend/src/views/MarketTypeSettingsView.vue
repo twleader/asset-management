@@ -55,7 +55,7 @@
 <script setup>
 import { Plus, Edit } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { institutionApi } from '@/api'
+import { bffApi } from '@/api'
 
 const loading = ref(false)
 const saving  = ref(false)
@@ -72,7 +72,7 @@ const rules = {
 
 async function load() {
   loading.value = true
-  try { marketTypes.value = await institutionApi.getAllMarketTypes() }
+  try { marketTypes.value = await bffApi.marketTypeSettings.getAll() }
   finally { loading.value = false }
 }
 
@@ -95,13 +95,13 @@ async function save() {
   saving.value = true
   try {
     if (editing.value) {
-      await institutionApi.updateMarketType(editing.value.id, {
+      await bffApi.marketTypeSettings.update(editing.value.id, {
         displayName: form.displayName,
         sortOrder: form.sortOrder
       })
       ElMessage.success('已更新')
     } else {
-      await institutionApi.createMarketType({
+      await bffApi.marketTypeSettings.create({
         code: form.code,
         displayName: form.displayName,
         sortOrder: form.sortOrder
@@ -118,7 +118,7 @@ async function save() {
 async function toggleActive(item) {
   const action = item.active ? '停用' : '啟用'
   await ElMessageBox.confirm(`確定要${action}「${item.displayName}」嗎？`, '確認', { type: 'warning' })
-  await institutionApi.setMarketTypeActive(item.id, !item.active)
+  await bffApi.marketTypeSettings.setActive(item.id, !item.active)
   ElMessage.success(`已${action}`)
   await load()
 }

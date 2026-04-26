@@ -68,7 +68,7 @@
 <script setup>
 import { Plus, Edit } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { institutionApi } from '@/api'
+import { bffApi } from '@/api'
 
 const loading = ref(false)
 const saving  = ref(false)
@@ -85,7 +85,7 @@ const rules = {
 
 async function load() {
   loading.value = true
-  try { types.value = await institutionApi.getAllTransitFundTypes() }
+  try { types.value = await bffApi.transitFundTypeSettings.getAll() }
   finally { loading.value = false }
 }
 
@@ -110,14 +110,14 @@ async function save() {
   saving.value = true
   try {
     if (editing.value) {
-      await institutionApi.updateTransitFundType(editing.value.id, {
+      await bffApi.transitFundTypeSettings.update(editing.value.id, {
         displayName: form.displayName,
         payable:     form.payable,
         sortOrder:   form.sortOrder
       })
       ElMessage.success('已更新')
     } else {
-      await institutionApi.createTransitFundType({
+      await bffApi.transitFundTypeSettings.create({
         code:        form.code,
         displayName: form.displayName,
         payable:     form.payable,
@@ -135,7 +135,7 @@ async function save() {
 async function toggleActive(item) {
   const action = item.active ? '停用' : '啟用'
   await ElMessageBox.confirm(`確定要${action}「${item.displayName}」嗎？`, '確認', { type: 'warning' })
-  await institutionApi.setTransitFundTypeActive(item.id, !item.active)
+  await bffApi.transitFundTypeSettings.setActive(item.id, !item.active)
   ElMessage.success(`已${action}`)
   await load()
 }

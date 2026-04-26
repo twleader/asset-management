@@ -8,8 +8,8 @@
       </div>
     </div>
 
-    <el-card v-loading="store.loading">
-      <el-table :data="store.snapshots" row-key="id" @row-click="row => $router.push('/snapshots/'+row.id)">
+    <el-card v-loading="loading">
+      <el-table :data="snapshots" row-key="id" @row-click="row => $router.push('/snapshots/'+row.id)">
         <el-table-column prop="snapshotDate" label="日期" width="120" sortable />
         <el-table-column label="存款" align="right" :formatter="(r) => fmt(r.totalDeposit)" />
         <el-table-column label="信託基金現值" align="right" :formatter="(r) => fmt(r.totalFundValue)" />
@@ -30,7 +30,7 @@
         <el-table-column label="操作" width="140" fixed="right">
           <template #default="{ row }">
             <el-button size="small" :icon="Edit" @click.stop="$router.push('/snapshots/'+row.id+'/edit')">編輯</el-button>
-            <el-popconfirm title="確定刪除此快照？" @confirm="store.deleteSnapshot(row.id)">
+            <el-popconfirm title="確定刪除此快照？" @confirm="onDelete(row.id)">
               <template #reference>
                 <el-button size="small" type="danger" :icon="Delete" @click.stop />
               </template>
@@ -46,13 +46,23 @@
 import { Plus, Download, Edit, Delete } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
-import { useAssetStore } from '@/stores/assetStore'
-import { snapshotApi } from '@/api'
+import { bffApi } from '@/api'
 
-const store = useAssetStore()
+const snapshots = ref([])
+const loading = ref(false)
 const exporting = ref(false)
 
-onMounted(() => store.fetchSnapshots())
+const reload = async () => {
+  loading.value = true
+  try { snapshots.value = await bffApi.snapshotList.getAll() }
+  finally { loading.value = false }
+}
+onMounted(reload)
+
+const onDelete = async (id) => {
+  await bffApi.snapshotList.delete(id)
+  await reload()
+}
 
 const fmt = (v) => {
   if (v == null) return '-'
@@ -63,7 +73,7 @@ const fmt = (v) => {
 async function handleExport() {
   exporting.value = true
   try {
-    const blob = await snapshotApi.exportExcel()
+    const blob = await bffApi.snapshotList.exportExcel()
     downloadBlob(blob, `資產管理_${dayjs().format('YYYYMMDD')}.xlsx`)
     ElMessage.success('匯出完成')
   } finally {

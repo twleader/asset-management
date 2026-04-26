@@ -305,7 +305,7 @@ onMounted(async () => {
 })
 
 async function fetchDetail() {
-  const data = await bffApi.getSnapshotDetail(route.params.id)
+  const data = await bffApi.snapshotDetail.get(route.params.id)
   store.currentSnapshot = data
   rebuildFromBff()
   isDirty.value = false

@@ -124,7 +124,7 @@
 </template>
 
 <script setup>
-import { marketDataApi } from '@/api'
+import { bffApi } from '@/api'
 import dayjs from 'dayjs'
 import TaiwanMap from '@/components/TaiwanMap.vue'
 import UsaMap from '@/components/UsaMap.vue'
@@ -143,10 +143,11 @@ async function loadHolidays(year) {
   if (holidayCache.value[year]) return
   holidaysLoading.value = true
   try {
-    const data = await marketDataApi.getHolidays(year)
-    holidayCache.value = { ...holidayCache.value, [year]: data }
+    // BFF 一支端點：holidays + marketStatus
+    const res = await bffApi.tradingCalendar.get(year)
+    holidayCache.value = { ...holidayCache.value, [year]: res.holidays ?? { tw: {}, us: {} } }
+    if (res.marketStatus) status.value = res.marketStatus
   } catch (e) {
-    // fallback: empty (weekends still blocked)
     holidayCache.value = { ...holidayCache.value, [year]: { tw: {}, us: {} } }
   } finally {
     holidaysLoading.value = false
@@ -156,13 +157,10 @@ async function loadHolidays(year) {
 watch(calendarYear, (y) => loadHolidays(y), { immediate: false })
 
 onMounted(async () => {
-  try {
-    status.value = await marketDataApi.getMarketStatus()
-  } catch {}
-  setInterval(async () => {
-    try { status.value = await marketDataApi.getMarketStatus() } catch {}
-  }, 60000)
   loadHolidays(calendarYear.value)
+  setInterval(async () => {
+    try { status.value = await bffApi.tradingCalendar.marketStatus() } catch {}
+  }, 60000)
 })
 
 const twTimeDisplay = computed(() => {

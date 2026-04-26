@@ -64,7 +64,7 @@
 <script setup>
 import { Plus, Edit } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { institutionApi } from '@/api'
+import { bffApi } from '@/api'
 
 const loading = ref(false)
 const saving  = ref(false)
@@ -84,7 +84,7 @@ const splitKeywords = (kw) =>
 
 async function load() {
   loading.value = true
-  try { brokers.value = await institutionApi.getAllBrokers() }
+  try { brokers.value = await bffApi.brokerSettings.getAll() }
   finally { loading.value = false }
 }
 
@@ -107,13 +107,13 @@ async function save() {
   saving.value = true
   try {
     if (editing.value) {
-      await institutionApi.updateBroker(editing.value.id, {
+      await bffApi.brokerSettings.update(editing.value.id, {
         displayName: form.displayName,
         keywords: form.keywords
       })
       ElMessage.success('已更新')
     } else {
-      await institutionApi.createBroker({
+      await bffApi.brokerSettings.create({
         code: form.code,
         displayName: form.displayName,
         keywords: form.keywords
@@ -130,7 +130,7 @@ async function save() {
 async function toggleActive(broker) {
   const action = broker.active ? '停用' : '啟用'
   await ElMessageBox.confirm(`確定要${action}「${broker.displayName}」嗎？`, '確認', { type: 'warning' })
-  await institutionApi.setBrokerActive(broker.id, !broker.active)
+  await bffApi.brokerSettings.setActive(broker.id, !broker.active)
   ElMessage.success(`已${action}`)
   await load()
 }

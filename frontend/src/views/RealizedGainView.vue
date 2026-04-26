@@ -234,10 +234,9 @@
 import { Plus, Edit, Delete, Download } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
-import { useAssetStore } from '@/stores/assetStore'
-import { gainApi, institutionApi } from '@/api'
+import { bffApi } from '@/api'
 
-const store = useAssetStore()
+const realizedGains = ref([])
 const brokerOptions = ref([])
 const dialogVisible = ref(false)
 const saving = ref(false)
@@ -290,16 +289,17 @@ const computedProceeds = computed(() => parseNum(gainForm.proceedsStr))
 const computedCost = computed(() => parseNum(gainForm.investmentCostStr))
 const computedProfit = computed(() => computedProceeds.value - computedCost.value)
 
-onMounted(async () => {
-  await store.fetchRealizedGains()
-  const brokers = await institutionApi.getAllBrokers()
-  brokerOptions.value = brokers.filter(b => b.active).map(b => b.displayName)
-})
+const reload = async () => {
+  const data = await bffApi.realizedGain.getAll()
+  realizedGains.value = data.gains ?? []
+  brokerOptions.value = (data.brokers ?? []).map(b => b.displayName)
+}
+onMounted(reload)
 
 const marketFilter = ref('')
 
-const yearSummaries = computed(() => store.realizedGains)
-const selectedData = computed(() => store.realizedGains.find(g => g.year === selectedYear.value) || store.realizedGains[0])
+const yearSummaries = computed(() => realizedGains.value)
+const selectedData = computed(() => realizedGains.value.find(g => g.year === selectedYear.value) || realizedGains.value[0])
 
 const filteredRecords = computed(() => {
   const records = selectedData.value?.records || []
@@ -316,7 +316,7 @@ const filteredStats = computed(() => {
   return { totalProceedsTwd, totalCostTwd, totalProfitTwd, avgProfitRate }
 })
 
-watch(() => store.realizedGains, (v) => {
+watch(realizedGains, (v) => {
   if (v.length && !selectedYear.value) selectedYear.value = v[0].year
 }, { immediate: true })
 
@@ -355,7 +355,7 @@ const resetForm = () => {
 async function handleExport() {
   exporting.value = true
   try {
-    const blob = await gainApi.exportExcel()
+    const blob = await bffApi.realizedGain.exportExcel()
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
@@ -409,22 +409,23 @@ const submitGain = async () => {
     }
 
     if (editingId.value) {
-      await gainApi.update(editingId.value, payload)
+      await bffApi.realizedGain.update(editingId.value, payload)
       ElMessage.success('更新成功')
     } else {
-      await store.createRealizedGain(payload)
+      await bffApi.realizedGain.create(payload)
       ElMessage.success('新增成功')
       selectedYear.value = gainForm.tradeDate ? new Date(gainForm.tradeDate).getFullYear() : selectedYear.value
     }
     dialogVisible.value = false
-    await store.fetchRealizedGains()
+    await reload()
   } finally {
     saving.value = false
   }
 }
 
 const handleDelete = async (id) => {
-  await store.deleteRealizedGain(id)
+  await bffApi.realizedGain.delete(id)
+  await reload()
   ElMessage.success('已刪除')
 }
 </script>
