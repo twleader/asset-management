@@ -1056,7 +1056,7 @@ import { ArrowLeft, Plus, Delete, Operation } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { useAssetStore } from '@/stores/assetStore'
-import { marketDataApi, institutionApi, snapshotApi } from '@/api/index'
+import { bffApi, institutionApi } from '@/api/index'
 import TaiwanMap from '@/components/TaiwanMap.vue'
 import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
 import UsaMap from '@/components/UsaMap.vue'
@@ -1318,7 +1318,7 @@ async function onUsTransactionDateChange(br, date) {
     ? date.toISOString().slice(0, 10)
     : String(date).slice(0, 10)
   try {
-    const res = await marketDataApi.getExchangeRateOnDate('USD', dateStr)
+    const res = await bffApi.getSnapshotFormExchangeRate(dateStr)
     const newRate = Number(res.midRate)
     br.transactionExchangeRate = newRate
     // TWD 幣別：以台幣固定支出反推新 USD 成本（顯示維持 TWD）
@@ -1569,44 +1569,29 @@ const removeBrokerRow = (stockRow, idx) => {
  *  - new 模式（新增快照）：從即時股價快取取得最新價格
  */
 async function fetchPriceForRow(row) {
-  if (!row.stockCode) return
+  if (!row.stockCode || !form.snapshotDate) return
   try {
-    if (form.snapshotDate) {
-      // 一律以快照日期讀取歷史收盤價（非交易日往前找最近）
-      let prices = await marketDataApi.getPricesOnDate(form.snapshotDate, [{ code: row.stockCode, market: row.market }])
-      if (prices.length === 0) {
-        // DB 無資料 → 針對此股票精準 backfill 後重試
-        const sinceDate = new Date(new Date(form.snapshotDate).getTime() - 30 * 86400000)
-          .toISOString().slice(0, 10)
-        const untilDate = new Date(new Date(form.snapshotDate).getTime() + 5 * 86400000)
-          .toISOString().slice(0, 10)
-        try { await marketDataApi.backfillSingleStock(row.stockCode, row.market, sinceDate, untilDate) } catch {}
-        prices = await marketDataApi.getPricesOnDate(form.snapshotDate, [{ code: row.stockCode, market: row.market }])
-      }
-      if (prices.length > 0 && prices[0].price != null) {
-        row.latestPrice    = prices[0].price
-        row.priceChange    = null
-        row.priceChangePct = null
-      }
-    }
-
-    // 若名稱仍未填，嘗試用即時 API 補名稱
-    if (!row.stockName) {
-      try {
-        const result = await marketDataApi.getPrice(row.stockCode, row.market)
-        if (result && result.stockName) row.stockName = result.stockName
-      } catch {}
-    }
-    // 自動補查配息率；名稱若仍空白也補查（不受 dividendRate 是否已有值影響）
-    if (row.dividendRate == null || !row.stockName) {
-      try {
-        const dr = await marketDataApi.getDividendRate(row.stockCode, row.market)
-        if (dr && dr.dividendRate != null) row.dividendRate = dr.dividendRate
-        if (dr && dr.stockName && !row.stockName) row.stockName = dr.stockName
-      } catch {}
-    }
+    // 一支 BFF 端點處理：歷史收盤價 + 自動 backfill + 名稱 + 配息率 + 漲跌
+    const result = await bffApi.batchSnapshotFormPrices(form.snapshotDate,
+      [{ code: row.stockCode, market: row.market }])
+    applyEnrichedPrices(result, [row])
   } catch {
-    // 查不到就靜默略過，不打擾使用者
+    // 查不到就靜默略過
+  }
+}
+
+/** 把 BFF 批次回傳的 enriched prices 套用到指定的 rows 上 */
+function applyEnrichedPrices(prices, rows) {
+  const map = {}
+  for (const p of prices ?? []) map[`${p.market}_${p.stockCode}`] = p
+  for (const row of rows) {
+    const p = map[`${row.market}_${row.stockCode}`]
+    if (!p) continue
+    if (p.price != null) row.latestPrice = Number(p.price)
+    if (p.priceChange != null) row.priceChange = Number(p.priceChange)
+    if (p.changePercent != null) row.priceChangePct = Number(p.changePercent)
+    if (p.stockName && !row.stockName) row.stockName = p.stockName
+    if (p.dividendRate != null) row.dividendRate = Number(p.dividendRate)
   }
 }
 
@@ -1618,12 +1603,18 @@ const fetchPrice = async (row) => {
   }
   row._fetchingPrice = true
   try {
-    const result = await marketDataApi.getPrice(row.stockCode, row.market)
-    row.latestPrice   = result.price
-    row.priceChange   = result.change
-    row.priceChangePct = result.changePct
-    const sign = Number(result.change) >= 0 ? '▲' : '▼'
-    const changePctStr = Math.abs(Number(result.changePct)).toFixed(2)
+    const list = await bffApi.batchSnapshotFormPrices(form.snapshotDate,
+      [{ code: row.stockCode, market: row.market }])
+    const result = list?.[0] ?? {}
+    row.latestPrice    = result.price != null ? Number(result.price) : null
+    row.priceChange    = result.priceChange != null ? Number(result.priceChange) : null
+    row.priceChangePct = result.changePercent != null ? Number(result.changePercent) : null
+    if (result.stockName && !row.stockName) row.stockName = result.stockName
+    if (result.dividendRate != null) row.dividendRate = Number(result.dividendRate)
+    const change = Number(result.priceChange ?? 0)
+    const changePctVal = Number(result.changePercent ?? 0)
+    const sign = change >= 0 ? '▲' : '▼'
+    const changePctStr = Math.abs(changePctVal).toFixed(2)
     ElMessage.success(
       `${row.stockCode} ${fmtPrice(result.price)}　${sign}${Math.abs(Number(result.change)).toFixed(2)} (${changePctStr}%)　來源：${result.source}`
     )
@@ -1658,7 +1649,7 @@ const copyPrevDeposits = async () => {
   }).catch(() => { throw new Error('cancel') })
   copyingPrev.deposits = true
   try {
-    const detail = await snapshotApi.getDetail(prevId)
+    const detail = await bffApi.getSnapshotFormDetail(prevId)
     const rate = form.usdExchangeRate || 1
     form.deposits = detail.deposits.map(d => mapDepositFromApi(d, rate))
     ElMessage.success(`已複製前一版存款明細（${detail.snapshotDate}，共 ${detail.deposits.length} 筆）`)
@@ -1674,7 +1665,7 @@ const copyPrevFunds = async () => {
   }).catch(() => { throw new Error('cancel') })
   copyingPrev.funds = true
   try {
-    const detail = await snapshotApi.getDetail(prevId)
+    const detail = await bffApi.getSnapshotFormDetail(prevId)
     form.funds = detail.funds.map(f => ({
       _rowId: `fund_${_idSeq++}`,
       fundName: f.fundName, fundCode: f.fundCode, bankId: f.bankId || null,
@@ -1694,7 +1685,7 @@ const copyPrevStocks = async () => {
   }).catch(() => { throw new Error('cancel') })
   copyingPrev.stocks = true
   try {
-    const detail = await snapshotApi.getDetail(prevId)
+    const detail = await bffApi.getSnapshotFormDetail(prevId)
     form.stocks = groupStocks(detail.stocks.map(s => ({
       stockCode: s.stockCode, stockName: s.stockName, market: s.market,
       brokerId: s.brokerId || null, shares: s.shares, investmentCost: s.investmentCost,
@@ -1717,52 +1708,25 @@ const refreshingAll = ref(false)
 const refreshAllPrices = async () => {
   refreshingAll.value = true
   try {
-    if (isEdit.value) {
-      // 歷史快照模式：針對每支股票精準 backfill（只拉快照日期前後 30 天），再批次載入
-      const sinceDate = new Date(new Date(form.snapshotDate).getTime() - 30 * 86400000)
-        .toISOString().slice(0, 10)
-      const untilDate = new Date(new Date(form.snapshotDate).getTime() + 5 * 86400000)
-        .toISOString().slice(0, 10)
-      const stocksToBackfill = form.stocks.filter(s => s.stockCode)
-      await Promise.all(stocksToBackfill.map(s =>
-        marketDataApi.backfillSingleStock(s.stockCode, s.market, sinceDate, untilDate).catch(() => {})
-      ))
-      await loadAllPrices()
-      await refreshAllDividendRates()
-      const count = form.stocks.filter(s => s.latestPrice != null).length
-      if (count > 0) {
-        ElMessage.success(`已載入 ${count} 支股票的歷史收盤價及配息率（${form.snapshotDate}）`)
-      } else {
-        ElMessage.warning(`找不到 ${form.snapshotDate} 的歷史收盤價，請確認歷史資料是否已回補`)
-      }
-    } else {
-      // 新增快照模式：先觸發後端抓取最新行情，再載入
-      await marketDataApi.refreshPrices()
-      await loadAllPrices()
-      await refreshAllDividendRates()
-      const count = form.stocks.filter(s => s.latestPrice != null).length
-      ElMessage.success(`已更新 ${count} 支股票的股價及配息率`)
+    // 新增模式：先觸發後端 refresh live 行情，再載入
+    if (!isEdit.value) {
+      try { await bffApi.getSnapshotFormRealtime() } catch {}
+    }
+    // 一支 BFF 端點處理批次：歷史價 + 自動 backfill + 名稱 + 配息率 + 漲跌
+    await loadAllPrices()
+    const count = form.stocks.filter(s => s.latestPrice != null).length
+    if (count > 0) {
+      ElMessage.success(isEdit.value
+        ? `已載入 ${count} 支股票的歷史收盤價及配息率（${form.snapshotDate}）`
+        : `已更新 ${count} 支股票的股價及配息率`)
+    } else if (isEdit.value) {
+      ElMessage.warning(`找不到 ${form.snapshotDate} 的歷史收盤價，請確認歷史資料是否已回補`)
     }
   } catch {
     ElMessage.error('更新失敗')
   } finally {
     refreshingAll.value = false
   }
-}
-
-/** 批次更新所有股票的配息率 */
-async function refreshAllDividendRates() {
-  const promises = form.stocks
-    .filter(s => s.stockCode)
-    .map(async (row) => {
-      try {
-        const result = await marketDataApi.getDividendRate(row.stockCode, row.market)
-        row.dividendRate = result.dividendRate
-      } catch {
-        // 部分股票（如 ETF）可能無配息率，忽略錯誤
-      }
-    })
-  await Promise.all(promises)
 }
 
 // ===== Data fetching: dividend rate =====
@@ -1773,11 +1737,17 @@ const fetchDividendRate = async (row) => {
   }
   row._fetchingDividend = true
   try {
-    const result = await marketDataApi.getDividendRate(row.stockCode, row.market)
-    row.dividendRate = result.dividendRate
-    ElMessage.success(
-      `${row.stockCode} 配息率：${(Number(result.dividendRate) * 100).toFixed(2)}%（${result.source} · ${result.description}）`
-    )
+    // 透過 BFF 批次端點取得配息率（同時也會帶回名稱與股價）
+    const list = await bffApi.batchSnapshotFormPrices(form.snapshotDate,
+      [{ code: row.stockCode, market: row.market }])
+    const result = list?.[0] ?? {}
+    if (result.dividendRate != null) {
+      row.dividendRate = Number(result.dividendRate)
+      ElMessage.success(`${row.stockCode} 配息率：${(row.dividendRate * 100).toFixed(2)}%`)
+    } else if (row.market === '台股' && /^0\d/.test(row.stockCode)) {
+      ElMessage.warning(`${row.stockCode} 為台灣ETF，請手動填入配息率`)
+    }
+    if (result.stockName && !row.stockName) row.stockName = result.stockName
   } catch {
     if (row.market === '台股' && /^0\d/.test(row.stockCode)) {
       ElMessage.warning(`${row.stockCode} 為台灣ETF，請手動填入配息率`)
@@ -1885,64 +1855,25 @@ const flattenStocks = () =>
 const marketStatus = ref({ twMarketOpen: false, usMarketOpen: false })
 let priceTimer = null
 
-/** 批次載入股價到各 row
- *  - edit 模式：用快照日期的歷史收盤價（closest-on-or-before）；
- *               若 DB 無資料則觸發 backfill 後重試；仍無資料則沿用 br.currentValue
- *  - new 模式：用 stock_price 快取表的最新價格
+/**
+ * 批次載入股價到各 row：
+ *  - 一支 BFF 端點處理：歷史收盤價 (USD/TWD 原幣別) + 自動 backfill + 名稱 + 配息率 + 漲跌
+ *  - 同步取得即時市場開盤狀態（供「漲跌(%)」顯示用）
  */
 async function loadAllPrices() {
   try {
-    // 一律以快照日期到歷史收盤價表抓取（USD/TWD 原幣別），非交易日往前 fallback
     const stocks = form.stocks
       .filter(s => s.stockCode)
       .map(s => ({ code: s.stockCode, market: s.market }))
 
-    const applyHistoricalPrices = (prices) => {
-      const map = {}
-      for (const p of prices) map[`${p.market}_${p.stockCode}`] = p
-      for (const row of form.stocks) {
-        const key = `${row.market}_${row.stockCode}`
-        const p = map[key]
-        if (p && p.price != null) {
-          row.latestPrice    = p.price
-          row.priceChange    = null
-          row.priceChangePct = null
-        }
-      }
-    }
-
     if (stocks.length > 0 && form.snapshotDate) {
-      let prices = await marketDataApi.getPricesOnDate(form.snapshotDate, stocks)
-      if (prices.length === 0) {
-        // DB 無資料 → 觸發 backfill 後重試一次
-        console.warn('歷史股價資料不足，嘗試回補...')
-        try { await marketDataApi.backfillHistory() } catch {}
-        prices = await marketDataApi.getPricesOnDate(form.snapshotDate, stocks)
-      }
-      if (prices.length > 0) {
-        applyHistoricalPrices(prices)
-      } else {
-        console.warn(`找不到 ${form.snapshotDate} 的歷史收盤價，將使用快照存檔值`)
-      }
+      const prices = await bffApi.batchSnapshotFormPrices(form.snapshotDate, stocks)
+      applyEnrichedPrices(prices, form.stocks)
     }
 
-    // 額外取得即時市場狀態與漲跌資訊（僅供「漲跌(%)」顯示用，不覆蓋價格）
     try {
-      const [livePrices, status] = await Promise.all([
-        marketDataApi.getAllPrices(),
-        marketDataApi.getMarketStatus()
-      ])
-      marketStatus.value = status
-      const liveMap = {}
-      for (const p of livePrices) liveMap[`${p.market}_${p.stockCode}`] = p
-      for (const row of form.stocks) {
-        const p = liveMap[`${row.market}_${row.stockCode}`]
-        if (p) {
-          if (p.priceChange != null) row.priceChange = p.priceChange
-          if (p.changePercent != null) row.priceChangePct = p.changePercent
-          if (p.stockName && !row.stockName) row.stockName = p.stockName
-        }
-      }
+      const realtime = await bffApi.getSnapshotFormRealtime()
+      marketStatus.value = realtime?.marketStatus ?? marketStatus.value
     } catch {}
   } catch (e) {
     console.warn('批次載入股價失敗:', e)
@@ -1952,11 +1883,7 @@ async function loadAllPrices() {
 /** 啟動 5 分鐘定時刷新（盤中自動更新） */
 function startPriceAutoRefresh() {
   stopPriceAutoRefresh()
-  priceTimer = setInterval(async () => {
-    // 先觸發後端更新 stock_price 表，再載入
-    try { await marketDataApi.refreshPrices() } catch {}
-    await loadAllPrices()
-  }, 5 * 60 * 1000) // 5 分鐘
+  priceTimer = setInterval(loadAllPrices, 5 * 60 * 1000)
 }
 function stopPriceAutoRefresh() {
   if (priceTimer) { clearInterval(priceTimer); priceTimer = null }
@@ -1985,20 +1912,13 @@ watch(() => transitTwdDeposits.value.length, refreshDepositSortables)
 watch(() => transitUsdDeposits.value.length, refreshDepositSortables)
 watch(() => form.funds.length, refreshFundSortable)
 
-// ===== 依日期查詢匯率 =====
+// ===== 依日期查詢匯率（一支 BFF 端點處理 today 刷新 + 假日 fallback） =====
 async function loadExchangeRateForDate(date) {
   if (!date) return
   try {
-    const isToday = date === new Date().toISOString().slice(0, 10)
-    // 如果是今天，先觸發後端刷新（取得最新即時匯率）
-    if (isToday) {
-      try { await marketDataApi.refreshExchangeRate('USD') } catch {}
-    }
-    // 查詢該日期前後 10 天的歷史匯率，取最近一筆（應對假日無資料）
-    const startDate = new Date(new Date(date).getTime() - 10 * 86400000).toISOString().slice(0, 10)
-    const rates = await marketDataApi.getExchangeRate('USD', startDate, date)
-    if (rates && rates.length > 0) {
-      form.usdExchangeRate = rates[rates.length - 1].midRate
+    const res = await bffApi.getSnapshotFormExchangeRate(date)
+    if (res && res.midRate != null) {
+      form.usdExchangeRate = Number(res.midRate)
     }
   } catch (e) {
     console.warn('載入匯率失敗:', e)
@@ -2030,7 +1950,8 @@ onMounted(async () => {
 
   if (isEdit.value) {
     loading.value = true
-    const detail = await store.fetchSnapshotDetail(route.params.id)
+    const detail = await bffApi.getSnapshotFormDetail(route.params.id)
+    store.currentSnapshot = detail
     Object.assign(form, {
       snapshotDate:    detail.snapshotDate,
       usdExchangeRate: detail.usdExchangeRate,

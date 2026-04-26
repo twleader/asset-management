@@ -132,7 +132,15 @@ export const bffApi = {
   getDashboardSnapshot: (id) => api.get(`/bff/dashboard/snapshot/${id}`),
   getDashboardRealtime: () => api.get('/bff/dashboard/realtime'),
   // SnapshotDetailView：回傳 enriched detail + mergedStocks（含 brokerRows）
-  getSnapshotDetail: (id) => api.get(`/bff/snapshot-detail/${id}`)
+  getSnapshotDetail: (id) => api.get(`/bff/snapshot-detail/${id}`),
+  // SnapshotFormView 專用 endpoints
+  getSnapshotFormDetail: (id) => api.get(`/bff/snapshot-form/${id}`),
+  // 批次取得每筆股票的歷史收盤價 + 漲跌 + 名稱 + 配息率（含自動 backfill 重試）
+  batchSnapshotFormPrices: (date, stocks) =>
+    api.post('/bff/snapshot-form/prices', stocks, { params: { date } }),
+  getSnapshotFormRealtime: () => api.get('/bff/snapshot-form/realtime'),
+  getSnapshotFormExchangeRate: (date) =>
+    api.get('/bff/snapshot-form/exchange-rate', { params: { date } })
 }
 
 export default api

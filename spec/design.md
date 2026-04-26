@@ -61,6 +61,11 @@ com.steven.assets/
   - `GET /api/bff/dashboard/realtime`：5 分鐘輪詢用，回傳 stockPrices + marketStatus
 - `SnapshotDetailBffController`（SnapshotDetailView 專屬）：
   - `GET /api/bff/snapshot-detail/{id}`：回傳 enriched detail + mergedStocks（含 brokerRows 子陣列，供編輯頁直接使用）
+- `SnapshotFormBffController`（SnapshotFormView 專屬）：把表單頁的多步協調邏輯（價格批次查 + backfill fallback + 配息率補抓 + 名稱補齊 + 匯率智慧 fallback）集中於此
+  - `GET /api/bff/snapshot-form/{id}`：編輯模式 bootstrap，回傳 enriched detail + mergedStocks
+  - `POST /api/bff/snapshot-form/prices?date=YYYY-MM-DD`：批次取得每筆股票的歷史收盤價 + 漲跌 + 名稱 + 配息率（DB 缺資料時自動 backfill 重試）
+  - `GET /api/bff/snapshot-form/realtime`：5 分鐘輪詢用，先 trigger 後端刷新行情再回傳 stockPrices + marketStatus
+  - `GET /api/bff/snapshot-form/exchange-rate?date=YYYY-MM-DD`：取指定日期 USD 匯率（今天會先 refresh，假日往前 fallback）
 
 **Repository 層**（Spring Data JPA，共 16 個）
 - `AssetSnapshotRepository`
