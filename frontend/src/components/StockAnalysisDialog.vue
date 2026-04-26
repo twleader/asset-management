@@ -69,30 +69,55 @@
           <div style="margin-bottom:8px;color:#64748b;font-size:12px">
             資料來源：{{ dividendHistory.source }}
           </div>
-          <el-table :data="dividendHistory.rows" size="small" border max-height="500" style="width:100%">
-            <el-table-column label="年度" prop="year" width="80" align="center" />
+          <el-table :data="dividendDisplayRows" size="small" border max-height="500" style="width:100%"
+            :row-class-name="dividendRowClass">
+            <el-table-column label="年度" width="80" align="center">
+              <template #default="{ row }">
+                <span v-if="row.isYearSummary" style="font-weight:700">{{ row.year }}</span>
+                <span v-else>{{ row.year }}</span>
+              </template>
+            </el-table-column>
             <el-table-column label="現金股利" width="100" align="right">
               <template #default="{ row }">${{ Number(row.cashDividend || 0).toFixed(4) }}</template>
             </el-table-column>
             <el-table-column label="股票股利" width="100" align="right">
               <template #default="{ row }">{{ Number(row.stockDividend || 0).toFixed(4) }}</template>
             </el-table-column>
-            <el-table-column label="除息日昨收價" width="120" align="right">
+            <el-table-column label="現金殖利率" width="110" align="right">
               <template #default="{ row }">
-                <span v-if="row.previousClose != null">${{ Number(row.previousClose).toFixed(2) }}</span>
+                <span v-if="row.yieldPct != null">{{ row.yieldPct.toFixed(2) }}%</span>
                 <span v-else style="color:#94a3b8">—</span>
               </template>
             </el-table-column>
-            <el-table-column label="除息日" prop="exDividendDate" width="120" align="center" />
-            <el-table-column label="現金股利發放日" prop="cashPaymentDate" width="140" align="center">
-              <template #default="{ row }">{{ row.cashPaymentDate || '—' }}</template>
+            <el-table-column label="除息日昨收價" width="120" align="right">
+              <template #default="{ row }">
+                <span v-if="row.isYearSummary" style="color:#94a3b8">—</span>
+                <span v-else-if="row.previousClose != null">${{ Number(row.previousClose).toFixed(2) }}</span>
+                <span v-else style="color:#94a3b8">—</span>
+              </template>
             </el-table-column>
-            <el-table-column label="股票股利發放日" prop="stockPaymentDate" width="140" align="center">
-              <template #default="{ row }">{{ row.stockPaymentDate || '—' }}</template>
+            <el-table-column label="除息日" width="120" align="center">
+              <template #default="{ row }">
+                <span v-if="row.isYearSummary" style="color:#94a3b8">—</span>
+                <span v-else>{{ row.exDividendDate || '—' }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="現金股利發放日" width="140" align="center">
+              <template #default="{ row }">
+                <span v-if="row.isYearSummary" style="color:#94a3b8">—</span>
+                <span v-else>{{ row.cashPaymentDate || '—' }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="股票股利發放日" width="140" align="center">
+              <template #default="{ row }">
+                <span v-if="row.isYearSummary" style="color:#94a3b8">—</span>
+                <span v-else>{{ row.stockPaymentDate || '—' }}</span>
+              </template>
             </el-table-column>
             <el-table-column label="填息天數" width="100" align="right">
               <template #default="{ row }">
-                <span v-if="row.fillDays === 0" style="color:#16a34a">當日</span>
+                <span v-if="row.isYearSummary" style="color:#94a3b8">—</span>
+                <span v-else-if="row.fillDays === 0" style="color:#16a34a">當日</span>
                 <span v-else-if="row.fillDays != null">{{ row.fillDays }} 天</span>
                 <span v-else style="color:#94a3b8">尚未填息</span>
               </template>
@@ -182,6 +207,55 @@ async function onTabChange(name) {
   if (name === 'dividends' && !dividendHistory.value.rows?.length && !dividendsLoading.value) {
     await fetchDividendHistory()
   }
+}
+
+// 股利歷史：將原始事件依年度分組，年度小計列插在每年事件之上
+const dividendDisplayRows = computed(() => {
+  const rows = dividendHistory.value.rows || []
+  if (!rows.length) return []
+  // 為每筆事件附上 yieldPct（以除息日昨收價為分母）
+  const enriched = rows.map(r => {
+    const cash = Number(r.cashDividend || 0)
+    const prev = r.previousClose != null ? Number(r.previousClose) : null
+    return {
+      ...r,
+      isYearSummary: false,
+      yieldPct: prev && prev > 0 ? (cash / prev) * 100 : null
+    }
+  })
+  // 依年度（除息日年）分組；年度新→舊
+  const byYear = new Map()
+  for (const r of enriched) {
+    const y = r.year
+    if (y == null) continue
+    if (!byYear.has(y)) byYear.set(y, [])
+    byYear.get(y).push(r)
+  }
+  const years = [...byYear.keys()].sort((a, b) => b - a)
+  const out = []
+  for (const y of years) {
+    const items = byYear.get(y)
+    const totalCash = items.reduce((s, r) => s + Number(r.cashDividend || 0), 0)
+    const totalStock = items.reduce((s, r) => s + Number(r.stockDividend || 0), 0)
+    // 年度殖利率：以該年最近一次除息事件的昨收價為分母（與 Yahoo 顯示口徑一致）
+    const firstWithPrev = items.find(r => r.previousClose != null)
+    const yearYield = firstWithPrev && Number(firstWithPrev.previousClose) > 0
+      ? (totalCash / Number(firstWithPrev.previousClose)) * 100
+      : null
+    out.push({
+      isYearSummary: true,
+      year: y,
+      cashDividend: totalCash,
+      stockDividend: totalStock,
+      yieldPct: yearYield
+    })
+    out.push(...items)
+  }
+  return out
+})
+
+function dividendRowClass({ row }) {
+  return row.isYearSummary ? 'dividend-year-summary' : ''
 }
 
 const isEtf = computed(() => {
@@ -342,4 +416,13 @@ const chartOption = computed(() => {
 .analysis-loading { display:flex;flex-direction:column;align-items:center;gap:12px;padding:60px 0;color:#64748b;font-size:14px }
 .analysis-empty   { text-align:center;padding:60px 0;color:#94a3b8;font-size:14px }
 .analysis-meta    { display:flex;align-items:center;justify-content:space-between;margin-bottom:8px }
+</style>
+
+<style>
+/* 年度小計列（el-table row-class-name 注入後不在 scoped 範圍內，改用全域 style） */
+.el-table .dividend-year-summary > td {
+  background: #f1f5f9 !important;
+  font-weight: 700;
+  color: #0f172a;
+}
 </style>
