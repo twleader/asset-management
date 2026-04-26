@@ -77,6 +77,12 @@
             <el-table-column label="股票股利" width="100" align="right">
               <template #default="{ row }">{{ Number(row.stockDividend || 0).toFixed(4) }}</template>
             </el-table-column>
+            <el-table-column label="除息日昨收價" width="120" align="right">
+              <template #default="{ row }">
+                <span v-if="row.previousClose != null">${{ Number(row.previousClose).toFixed(2) }}</span>
+                <span v-else style="color:#94a3b8">—</span>
+              </template>
+            </el-table-column>
             <el-table-column label="除息日" prop="exDividendDate" width="120" align="center" />
             <el-table-column label="現金股利發放日" prop="cashPaymentDate" width="140" align="center">
               <template #default="{ row }">{{ row.cashPaymentDate || '—' }}</template>
