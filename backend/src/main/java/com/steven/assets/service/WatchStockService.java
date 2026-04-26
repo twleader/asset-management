@@ -160,10 +160,12 @@ public class WatchStockService {
                     .setScale(4, java.math.RoundingMode.HALF_UP));
         }
 
-        // 警示彙總：取該股最近一筆 lastTriggeredAt（僅顯示時間 + 觸發股價）
+        // 警示彙總：取該股最近一筆 lastTriggeredAt，且只顯示最近 3 個交易日內的觸發
         List<StockAlert> alerts = alertRepo.findByStockCodeAndMarket(w.getStockCode(), w.getMarket());
+        java.time.LocalDateTime cutoff = recentTradingDayCutoff(w.getMarket(), 3);
         alerts.stream()
                 .filter(a -> a.getLastTriggeredAt() != null)
+                .filter(a -> cutoff == null || !a.getLastTriggeredAt().isBefore(cutoff))
                 .max(Comparator.comparing(StockAlert::getLastTriggeredAt))
                 .ifPresent(a -> {
                     r.setLastTriggeredAt(a.getLastTriggeredAt());
@@ -180,4 +182,12 @@ public class WatchStockService {
         return r;
     }
 
+    /** 回傳「最近 N 個交易日中最早一天的午夜」當作 cutoff；資料不足回 null（不過濾）。 */
+    private java.time.LocalDateTime recentTradingDayCutoff(String market, int n) {
+        List<java.time.LocalDate> dates = historyRepo
+                .findDistinctTradingDatesByMarket(market,
+                        org.springframework.data.domain.PageRequest.of(0, n));
+        if (dates.size() < n) return null;
+        return dates.get(dates.size() - 1).atStartOfDay();
+    }
 }
