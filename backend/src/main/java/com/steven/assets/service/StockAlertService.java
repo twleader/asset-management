@@ -146,9 +146,8 @@ public class StockAlertService {
             // （cron 5 分鐘採樣會漏掉短暫尖峰）。用每天的日內 HIGH/LOW 重算指標。
             if (alert.getLastTriggeredAt() == null) {
                 findRecentIntradayTrigger(alert, 3).ifPresent(m -> {
-                    java.time.LocalTime closeTime = "美股".equals(alert.getMarket())
-                            ? java.time.LocalTime.of(16, 0) : java.time.LocalTime.of(13, 30);
-                    alert.setLastTriggeredAt(m.date.atTime(closeTime));
+                    // 盤中觸發：時間錨在該日 00:00 當作 sentinel，前端會顯示「MM/DD 盤中」
+                    alert.setLastTriggeredAt(m.date.atStartOfDay());
                     alert.setLastTriggeredPrice(m.price);
                     alert.setLastTriggeredMaValue(m.ma);
                     alert.setLastTriggeredKdValue(m.k);
