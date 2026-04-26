@@ -275,7 +275,7 @@ import VChart from 'vue-echarts'
 import { ArrowRight, Loading, Operation } from '@element-plus/icons-vue'
 import Sortable from 'sortablejs'
 import { useAssetStore } from '@/stores/assetStore'
-import { bffApi, snapshotApi } from '@/api'
+import { bffApi } from '@/api'
 import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
 
 let orderSaveTimer = null
@@ -298,7 +298,7 @@ onMounted(async () => {
   priceTimer = setInterval(refreshPricesAndStatus, 5 * 60 * 1000)
 
   // 背景補齊所有快照缺漏的配息率（不阻塞頁面載入）
-  snapshotApi.enrichAllDividendRates().then(() => {
+  bffApi.dashboard.enrichDividendRates().then(() => {
     return loadDashboardSummary()
   }).catch(() => {})
 })
@@ -678,7 +678,7 @@ function scheduleSaveOrder() {
       market: stock.market,
       displayOrder: idx
     }))
-    snapshotApi.updateStockOrder(snapshotId, orders).catch(() => {})
+    bffApi.dashboard.updateStockOrder(snapshotId, orders).catch(() => {})
   }, 400)
 }
 

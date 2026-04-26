@@ -136,7 +136,7 @@ import { LineChart } from 'echarts/charts'
 import { TitleComponent, TooltipComponent, LegendComponent, GridComponent, DataZoomComponent, MarkLineComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
 import { Loading } from '@element-plus/icons-vue'
-import { marketDataApi } from '@/api/index.js'
+import { bffApi } from '@/api/index.js'
 
 use([CanvasRenderer, LineChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent, DataZoomComponent, MarkLineComponent])
 
@@ -173,7 +173,7 @@ async function fetchHistory() {
     const startDate = new Date()
     startDate.setMonth(startDate.getMonth() - months.value)
     const start = startDate.toISOString().split('T')[0]
-    const data = await marketDataApi.getStockHistory(props.stock.stockCode, props.stock.market, start, end)
+    const data = await bffApi.stockAnalysis.getStockHistory(props.stock.stockCode, props.stock.market, start, end)
     history.value = Array.isArray(data) ? data : []
   } catch (e) {
     console.warn('無法取得歷史股價:', e)
@@ -195,7 +195,7 @@ async function fetchDividendHistory() {
   if (!props.stock) return
   dividendsLoading.value = true
   try {
-    dividendHistory.value = await marketDataApi.getDividendHistory(props.stock.stockCode, props.stock.market, 10)
+    dividendHistory.value = await bffApi.stockAnalysis.getDividendHistory(props.stock.stockCode, props.stock.market, 10)
   } catch (e) {
     dividendHistory.value = { rows: [], message: '查詢失敗' }
   } finally {

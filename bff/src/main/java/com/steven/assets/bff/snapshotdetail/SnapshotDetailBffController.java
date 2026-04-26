@@ -7,6 +7,8 @@ import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -14,6 +16,7 @@ import reactor.core.publisher.Mono;
 
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -32,6 +35,8 @@ public class SnapshotDetailBffController {
     private final SnapshotEnricher enricher;
 
     private static final ParameterizedTypeReference<Map<String, Object>> MAP =
+            new ParameterizedTypeReference<>() {};
+    private static final ParameterizedTypeReference<List<Map<String, Object>>> LIST_MAP =
             new ParameterizedTypeReference<>() {};
 
     /**
@@ -55,5 +60,37 @@ public class SnapshotDetailBffController {
                         return ResponseEntity.ok(body);
                     });
                 });
+    }
+
+    /**
+     * GET /api/bff/snapshot-detail/brokers
+     * 編輯券商欄位用：回傳 active brokers。
+     */
+    @GetMapping("/brokers")
+    public Mono<ResponseEntity<List<Map<String, Object>>>> getActiveBrokers() {
+        return businessServicesClient.get()
+                .uri("/api/settings/brokers")
+                .retrieve()
+                .bodyToMono(LIST_MAP)
+                .onErrorReturn(Collections.emptyList())
+                .map(list -> ResponseEntity.ok(list.stream()
+                        .filter(b -> Boolean.TRUE.equals(b.get("active")))
+                        .toList()));
+    }
+
+    /**
+     * PUT /api/bff/snapshot-detail/{id}
+     * 儲存編輯後的快照。
+     */
+    @PutMapping("/{id}")
+    public Mono<ResponseEntity<Map<String, Object>>> update(
+            @PathVariable Long id,
+            @RequestBody Map<String, Object> payload) {
+        return businessServicesClient.put()
+                .uri("/api/snapshots/{id}", id)
+                .bodyValue(payload)
+                .retrieve()
+                .bodyToMono(MAP)
+                .map(ResponseEntity::ok);
     }
 }

@@ -127,6 +127,43 @@ public class SnapshotFormBffController {
     }
 
     /**
+     * GET /api/bff/snapshot-form/lookups
+     * 表單下拉一次取齊：banks（active）/ brokers（active）/ depositTypes（active）/ transitFundTypes（active payable map）。
+     * 每筆 List Map 已過濾 active=true，前端不需再做 filter，避免 4 次 round-trip。
+     */
+    @GetMapping("/lookups")
+    public Mono<ResponseEntity<Map<String, Object>>> getLookups() {
+        Mono<List<Map<String, Object>>> banks = businessServicesClient.get()
+                .uri("/api/settings/banks").retrieve().bodyToMono(LIST_MAP)
+                .onErrorReturn(Collections.emptyList())
+                .map(this::filterActive);
+        Mono<List<Map<String, Object>>> brokers = businessServicesClient.get()
+                .uri("/api/settings/brokers").retrieve().bodyToMono(LIST_MAP)
+                .onErrorReturn(Collections.emptyList())
+                .map(this::filterActive);
+        Mono<List<Map<String, Object>>> depositTypes = businessServicesClient.get()
+                .uri("/api/settings/deposit-types").retrieve().bodyToMono(LIST_MAP)
+                .onErrorReturn(Collections.emptyList())
+                .map(this::filterActive);
+        Mono<List<Map<String, Object>>> transitTypes = businessServicesClient.get()
+                .uri("/api/settings/transit-fund-types/active").retrieve().bodyToMono(LIST_MAP)
+                .onErrorReturn(Collections.emptyList());
+
+        return Mono.zip(banks, brokers, depositTypes, transitTypes).map(t -> {
+            Map<String, Object> body = new HashMap<>();
+            body.put("banks", t.getT1());
+            body.put("brokers", t.getT2());
+            body.put("depositTypes", t.getT3());
+            body.put("transitFundTypes", t.getT4());
+            return ResponseEntity.ok(body);
+        });
+    }
+
+    private List<Map<String, Object>> filterActive(List<Map<String, Object>> list) {
+        return list.stream().filter(m -> Boolean.TRUE.equals(m.get("active"))).toList();
+    }
+
+    /**
      * GET /api/bff/snapshot-form/{id}
      * 編輯模式 bootstrap：回傳 enriched detail + mergedStocks（同 snapshot-detail）。
      * 表單頁雖然會用自己的 groupStocks 處理巢狀資料，但此端點仍提供一致的入口。

@@ -59,8 +59,12 @@ com.steven.assets/
   - `GET /api/bff/dashboard/summary`：並行聚合 snapshots / history / prices / marketStatus / latestSnapshotDetail + mergedStocks
   - `GET /api/bff/dashboard/snapshot/{id}`：切換快照時用
   - `GET /api/bff/dashboard/realtime`：5 分鐘輪詢用，回傳 stockPrices + marketStatus
+  - `POST /api/bff/dashboard/enrich-dividend-rates`：背景補齊所有快照缺漏的配息率
+  - `PATCH /api/bff/dashboard/snapshot/{id}/stock-order`：拖曳排序持股後寫回
 - `SnapshotDetailBffController`（SnapshotDetailView 專屬）：
   - `GET /api/bff/snapshot-detail/{id}`：回傳 enriched detail + mergedStocks（含 brokerRows 子陣列，供編輯頁直接使用）
+  - `GET /api/bff/snapshot-detail/brokers`：編輯券商欄位用，回傳 active brokers
+  - `PUT /api/bff/snapshot-detail/{id}`：儲存編輯後的快照
 - 存款 amount 換算規則（後端 `AssetService.normalizeDepositAmount`）：原幣值（`originalAmount` USD）由前端輸入直接傳入，**台幣 amount 一律由後端用 snapshot 匯率算出**（`amount = originalAmount × usdExchangeRate`），TRANSIT_* 的正負號也由後端依 `TransitFundType.payable` 決定。前端不做這部份計算，避免 snapshot 匯率為 null 時誤把 USD 數字寫進 TWD 欄位。
 - `AssetHistoryBffController`（AssetHistoryView 專屬）：`GET /api/bff/asset-history`（history + isLastOfYear flag）、`POST /api/bff/asset-history/recalc-dividends`、`DELETE /api/bff/asset-history/{id}`、`GET /api/bff/asset-history/export`
 - `RealizedGainBffController`（RealizedGainView 專屬）：`GET /api/bff/realized-gain`（gains + active brokers 一起回傳）、CRUD、export
@@ -73,6 +77,11 @@ com.steven.assets/
   - `POST /api/bff/snapshot-form/prices?date=YYYY-MM-DD`：批次取得每筆股票的歷史收盤價 + 漲跌 + 名稱 + 配息率（DB 缺資料時自動 backfill 重試）
   - `GET /api/bff/snapshot-form/realtime`：5 分鐘輪詢用，先 trigger 後端刷新行情再回傳 stockPrices + marketStatus
   - `GET /api/bff/snapshot-form/exchange-rate?date=YYYY-MM-DD`：取指定日期 USD 匯率（今天會先 refresh，假日往前 fallback）
+  - `GET /api/bff/snapshot-form/lookups`：表單下拉一次取齊（banks / brokers / depositTypes / transitFundTypes，皆已過濾 active）
+- `StockAnalysisBffRoutes`（StockAnalysisDialog 跨 view 共用元件專屬）：對話框被 Dashboard / SnapshotForm / WatchStock / StockAlert 四個 view 同時使用，依「同義欄位、同一 business service API」原則拆為獨立 BFF route，避免在四個父 view 的 BFF 各自重複代理。提供：
+  - `GET /api/bff/stock-analysis/history/stock` → `/api/market-data/history/stock`
+  - `GET /api/bff/stock-analysis/dividends` → `/api/market-data/dividends`
+  - `GET /api/bff/stock-analysis/etf-holdings` → `/api/market-data/etf-holdings`
 
 **Repository 層**（Spring Data JPA，共 17 個）
 - `AssetSnapshotRepository`
