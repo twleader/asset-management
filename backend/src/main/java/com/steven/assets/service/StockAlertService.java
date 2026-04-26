@@ -150,6 +150,9 @@ public class StockAlertService {
                             ? java.time.LocalTime.of(16, 0) : java.time.LocalTime.of(13, 30);
                     alert.setLastTriggeredAt(m.date.atTime(closeTime));
                     alert.setLastTriggeredPrice(m.price);
+                    alert.setLastTriggeredMaValue(m.ma);
+                    alert.setLastTriggeredKdValue(m.k);
+                    alert.setLastTriggeredDValue(m.d);
                     alertRepo.save(alert);
                 });
             }
@@ -158,7 +161,8 @@ public class StockAlertService {
         }
     }
 
-    private record IntradayMatch(LocalDate date, BigDecimal price) {}
+    private record IntradayMatch(LocalDate date, BigDecimal price,
+                                  BigDecimal ma, BigDecimal k, BigDecimal d) {}
 
     /** 在最近 N 個交易日內，用日內 HIGH/LOW 補抓盤中可能觸發的時點。 */
     private Optional<IntradayMatch> findRecentIntradayTrigger(StockAlert alert, int recentDays) {
@@ -186,7 +190,7 @@ public class StockAlertService {
                         : (h.getLowPrice() != null ? h.getLowPrice() : h.getClosePrice());
                 double p = probe.doubleValue();
                 if ((above && p >= threshold) || (!above && p <= threshold)) {
-                    last = new IntradayMatch(h.getTradingDate(), probe);
+                    last = new IntradayMatch(h.getTradingDate(), probe, null, null, null);
                 }
             }
             return Optional.ofNullable(last);
@@ -232,13 +236,46 @@ public class StockAlertService {
                     BigDecimal triggerPrice = above
                             ? (today.getHighPrice() != null ? today.getHighPrice() : today.getClosePrice())
                             : (today.getLowPrice()  != null ? today.getLowPrice()  : today.getClosePrice());
-                    last = new IntradayMatch(today.getTradingDate(), triggerPrice);
+                    BigDecimal kSnap = BigDecimal.valueOf(useD ? Math.max(d, dProbe) : Math.max(k, kProbe))
+                            .setScale(2, java.math.RoundingMode.HALF_UP);
+                    BigDecimal kKVal = BigDecimal.valueOf(Math.max(k, kProbe)).setScale(2, java.math.RoundingMode.HALF_UP);
+                    BigDecimal dDVal = BigDecimal.valueOf(Math.max(d, dProbe)).setScale(2, java.math.RoundingMode.HALF_UP);
+                    last = new IntradayMatch(today.getTradingDate(), triggerPrice, null, kKVal, dDVal);
                 }
             }
             return Optional.ofNullable(last);
         }
 
-        // MA 類別不需盤中補抓（MA 為 close 累積，盤中不會大幅偏離單日結果）
+        if (type.startsWith("QUARTERLY_MA_") || type.startsWith("ANNUAL_MA_")) {
+            int days = type.startsWith("QUARTERLY") ? 60 : 240;
+            boolean above = type.endsWith("_ABOVE_PCT");
+            if (asc.size() < days) return Optional.empty();
+            double sum = 0;
+            for (int i = 0; i < days; i++) sum += asc.get(i).getClosePrice().doubleValue();
+            for (int i = days - 1; i < asc.size(); i++) {
+                StockPriceHistory today = asc.get(i);
+                double ma = sum / days;
+                if (!today.getTradingDate().isBefore(cutoff)) {
+                    // 用該日 HIGH（above）或 LOW（below）當盤中極端值來判定
+                    BigDecimal probe = above
+                            ? (today.getHighPrice() != null ? today.getHighPrice() : today.getClosePrice())
+                            : (today.getLowPrice()  != null ? today.getLowPrice()  : today.getClosePrice());
+                    double p = probe.doubleValue();
+                    double thresholdPrice = ma * (1 + (above ? threshold : -threshold) / 100.0);
+                    if ((above && p >= thresholdPrice) || (!above && p <= thresholdPrice)) {
+                        last = new IntradayMatch(today.getTradingDate(), probe,
+                                BigDecimal.valueOf(ma).setScale(2, java.math.RoundingMode.HALF_UP),
+                                null, null);
+                    }
+                }
+                if (i + 1 < asc.size()) {
+                    sum -= asc.get(i - days + 1).getClosePrice().doubleValue();
+                    sum += asc.get(i + 1).getClosePrice().doubleValue();
+                }
+            }
+            return Optional.ofNullable(last);
+        }
+
         return Optional.empty();
     }
 
