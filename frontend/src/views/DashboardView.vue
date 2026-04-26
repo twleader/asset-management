@@ -286,6 +286,7 @@ use([CanvasRenderer, PieChart, LineChart, BarChart, TitleComponent, TooltipCompo
 
 const store = useAssetStore()
 const stockPrices = ref({})
+const snapshotClosePrices = ref({}) // 快照基準日（或之前最近）的收盤價，原幣別（美股 USD、台股 TWD）
 const marketStatus = ref({ twMarketOpen: false, usMarketOpen: false })
 const selectedSnapshotId = ref(null)
 
@@ -318,6 +319,7 @@ async function loadDashboardSummary() {
       selectedSnapshotId.value = summary.latestSnapshotDetail.id
     }
     applyPricesAndStatus(summary.stockPrices ?? [], summary.marketStatus ?? {})
+    await loadSnapshotClosePrices()
   } catch (e) {
     console.warn('載入儀表板摘要失敗:', e)
   }
@@ -339,6 +341,33 @@ async function refreshPricesAndStatus() {
 async function onSnapshotChange(id) {
   await store.fetchSnapshotDetail(id)
   selectedSnapshotId.value = id
+  await loadSnapshotClosePrices()
+}
+
+async function loadSnapshotClosePrices() {
+  const d = store.currentSnapshot
+  if (!d?.snapshotDate || !Array.isArray(d.stocks) || d.stocks.length === 0) {
+    snapshotClosePrices.value = {}
+    return
+  }
+  const seen = new Set()
+  const stocks = []
+  for (const s of d.stocks) {
+    const key = `${s.market}_${s.stockCode}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    stocks.push({ code: s.stockCode, market: s.market })
+  }
+  try {
+    const prices = await marketDataApi.getPricesOnDate(d.snapshotDate, stocks)
+    const map = {}
+    for (const p of prices ?? []) {
+      map[`${p.market}_${p.stockCode}`] = Number(p.price)
+    }
+    snapshotClosePrices.value = map
+  } catch (e) {
+    console.warn('載入快照收盤價失敗:', e)
+  }
 }
 
 function applyPricesAndStatus(prices, status) {
@@ -617,21 +646,15 @@ const mergedStocks = computed(() => {
     // 取任一有效的 displayOrder
     if (s.displayOrder != null && g.displayOrder == null) g.displayOrder = s.displayOrder
   }
-  // 美股 currentValue 為台幣換算值，需除以快照匯率還原為 USD 顯示
-  const usdRate = Number(detail.value?.usdExchangeRate || 0)
+  // 股價：直接使用快照基準日的歷史收盤價（美股 USD、台股 TWD）
+  const closeMap = snapshotClosePrices.value
   return [...map.values()]
-    .map(g => {
-      const pricePerShareTwd = g.shares > 0 ? g.currentValue / g.shares : null
-      const stockPrice = pricePerShareTwd != null && g.market === '美股' && usdRate > 0
-        ? pricePerShareTwd / usdRate
-        : pricePerShareTwd
-      return {
-        ...g,
-        stockPrice,
-        profit: g.currentValue - g.investmentCost,
-        profitRate: g.investmentCost > 0 ? (g.currentValue - g.investmentCost) / g.investmentCost : 0
-      }
-    })
+    .map(g => ({
+      ...g,
+      stockPrice: closeMap[`${g.market}_${g.stockCode}`] ?? null,
+      profit: g.currentValue - g.investmentCost,
+      profitRate: g.investmentCost > 0 ? (g.currentValue - g.investmentCost) / g.investmentCost : 0
+    }))
     .sort((a, b) => {
       // 已設定順序的依 displayOrder 排；未設定的（新增持股）排在最後，依現值降序
       if (a.displayOrder != null && b.displayOrder != null) return a.displayOrder - b.displayOrder
