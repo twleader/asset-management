@@ -39,13 +39,13 @@
           <!-- 總資產 -->
           <div class="sb-item sb-total">
             <div class="sb-label">🏆 總資產</div>
-            <div class="sb-val">{{ fmt(depositTotal + fundTotalValue + allSummary.value) }}</div>
+            <div class="sb-val">{{ fmt(summaryTotalAssets) }}</div>
           </div>
           <div class="sb-sep" />
           <!-- 存款 -->
           <div class="sb-item">
             <div class="sb-label">💰 存款</div>
-            <div class="sb-val">{{ fmt(depositTotal) }}</div>
+            <div class="sb-val">{{ fmt(summaryDeposit) }}</div>
           </div>
           <div class="sb-sep" />
           <!-- 台股 -->
@@ -77,20 +77,20 @@
           <!-- 共同基金 -->
           <div class="sb-item">
             <div class="sb-label">📊 共同基金現值</div>
-            <div class="sb-val">{{ fmt(fundTotalValue) }}</div>
+            <div class="sb-val">{{ fmt(summaryFundValue) }}</div>
           </div>
           <div class="sb-item">
             <div class="sb-label">基金損益</div>
-            <div class="sb-val" :class="fundTotalProfit >= 0 ? 'profit' : 'loss'">
-              {{ fmt(fundTotalProfit) }}
-              <small style="font-weight:400"> ({{ pct(fundTotalInvest > 0 ? fundTotalProfit / fundTotalInvest : 0) }})</small>
+            <div class="sb-val" :class="summaryFundProfit >= 0 ? 'profit' : 'loss'">
+              {{ fmt(summaryFundProfit) }}
+              <small style="font-weight:400"> ({{ pct(summaryFundCost > 0 ? summaryFundProfit / summaryFundCost : 0) }})</small>
             </div>
           </div>
           <div class="sb-sep" />
           <!-- 預估年配息 -->
           <div class="sb-item">
             <div class="sb-label">預估年配息</div>
-            <div class="sb-val sb-dividend">{{ fmt(allSummary.dividend) }}</div>
+            <div class="sb-val sb-dividend">{{ fmt(summaryDividend) }}</div>
           </div>
         </div>
       </el-card>
@@ -1215,6 +1215,7 @@ const form = reactive({
   stocks: []   // grouped: each item has brokerRows[]
 })
 
+
 const rules = {
   snapshotDate: [{ required: true, message: '請選擇日期' }]
 }
@@ -1442,6 +1443,30 @@ const calcGroupedSummary = (stocks) => {
 const twSummary  = computed(() => calcGroupedSummary(twStocks.value))
 const usSummary  = computed(() => calcGroupedSummary(usStocks.value))
 const allSummary = computed(() => calcGroupedSummary(form.stocks))
+
+/**
+ * 顯示用的彙整：
+ *  - 編輯模式（既有快照）→ 一律以 BFF 回傳的快照原始 stored 值為準（單一事實來源）。
+ *    為何：歷史快照可能在 usdExchangeRate=null 時被存入，USD 存款的 amount 欄位
+ *    與 originalAmount 被存成同一個數字（未換匯）；若 live 重算（amount × rate），
+ *    同一筆會被當成 USD 再乘一次匯率，造成總資產被放大數倍。
+ *    儲存後重新呼叫 BFF detail，summary 會自動更新。
+ *  - 新增模式（尚無 stored 值）→ 用 reactive 即時計算結果。
+ */
+const storedDetail = computed(() => store.currentSnapshot)
+const pickStored = (storedKey, live, fallback = 0) => {
+  if (!isEdit.value) return Number(live ?? fallback)
+  const stored = storedDetail.value?.[storedKey]
+  return stored != null ? Number(stored) : Number(live ?? fallback)
+}
+
+const summaryDeposit = computed(() => pickStored('totalDeposit', depositTotal.value))
+const summaryFundValue = computed(() => pickStored('totalFundValue', fundTotalValue.value))
+const summaryFundCost = computed(() => pickStored('totalFundCost', fundTotalInvest.value))
+const summaryFundProfit = computed(() => summaryFundValue.value - summaryFundCost.value)
+const summaryTotalAssets = computed(() => pickStored('totalAssets',
+  depositTotal.value + fundTotalValue.value + allSummary.value.value))
+const summaryDividend = computed(() => pickStored('estimatedAnnualDividend', allSummary.value.dividend))
 
 // ===== Deposit helpers =====
 const transitTypeOptions = ref([])
