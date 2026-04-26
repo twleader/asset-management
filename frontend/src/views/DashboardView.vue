@@ -603,6 +603,7 @@ const mergedStocks = computed(() => {
         investmentCost: 0,
         investmentCostOriginal: 0,
         currentValue: 0,
+        currentValueOriginal: 0,
         estimatedDividend: 0
       })
     }
@@ -612,6 +613,8 @@ const mergedStocks = computed(() => {
     // 買入均價：BFF 已將美股 legacy TWD 記錄換算為 USD，前端直接 sum 即可
     g.investmentCostOriginal += Number(s.investmentCostOriginal ?? s.investmentCost ?? 0)
     g.currentValue += Number(s.currentValue || 0)
+    // 原幣現值：美股為 USD、台股為 TWD（fallback 用 currentValue 即台幣值）
+    g.currentValueOriginal += Number(s.originalCurrencyValue ?? s.currentValue ?? 0)
     g.estimatedDividend += Number(s.estimatedDividend || 0)
     if (s.dividendRate && !g.dividendRate) g.dividendRate = Number(s.dividendRate)
     // 取任一有效的 displayOrder
@@ -620,7 +623,7 @@ const mergedStocks = computed(() => {
   return [...map.values()]
     .map(g => ({
       ...g,
-      stockPrice: g.shares > 0 ? g.currentValue / g.shares : null,
+      stockPrice: g.shares > 0 ? g.currentValueOriginal / g.shares : null,
       profit: g.currentValue - g.investmentCost,
       profitRate: g.investmentCost > 0 ? (g.currentValue - g.investmentCost) / g.investmentCost : 0
     }))
