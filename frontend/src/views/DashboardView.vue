@@ -208,7 +208,10 @@
                     {{ getRealtimePrice(row).changePercent >= 0 ? '▲' : '▼' }}{{ Math.abs(getRealtimePrice(row).changePercent).toFixed(2) }}%
                   </span>
                 </span>
-                <span v-else-if="row.stockPrice != null" style="color:#94a3b8">{{ formatPrice(row.stockPrice) }}</span>
+                <span v-else-if="row.stockPrice != null"
+                  :style="{ fontWeight: 600, color: isBaselineToday() ? '#94a3b8' : '#1e293b' }">
+                  {{ formatPrice(row.stockPrice) }}
+                </span>
                 <span v-else style="color:#94a3b8">-</span>
               </template>
             </el-table-column>
@@ -343,7 +346,20 @@ const latest = computed(() =>
 )
 const detail = computed(() => store.currentSnapshot)
 
+function isBaselineToday() {
+  const d = latest.value?.snapshotDate
+  if (!d) return false
+  const today = new Date()
+  const yyyy = today.getFullYear()
+  const mm = String(today.getMonth() + 1).padStart(2, '0')
+  const dd = String(today.getDate()).padStart(2, '0')
+  return d === `${yyyy}-${mm}-${dd}`
+}
+
 function getRealtimePrice(row) {
+  if (!isBaselineToday()) return null
+  const isOpen = row.market === '美股' ? marketStatus.value.usMarketOpen : marketStatus.value.twMarketOpen
+  if (!isOpen) return null
   const key = `${row.market}_${row.stockCode}`
   const p = stockPrices.value[key]
   if (!p || p.price == null) return null

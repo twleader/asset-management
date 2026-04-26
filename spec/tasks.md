@@ -828,3 +828,21 @@ CLAUDE.md 規定「相同的資料只能存一份；禁止同一欄位同時以 
   - 掃描 `stock` 主檔，找出沒有對應 `stock_price` 記錄的 (code, market)
   - 開獨立執行緒呼叫 `updatePrices()`，避免阻塞 Spring 啟動
   - `markClosed` 由 `isTwMarketOpen() / isUsMarketOpen()` 推導
+
+### Task 29: 儀表板「股票持股」股價依基準日顯示
+
+對應 Requirements: Requirement 9
+
+#### 背景
+
+總覽儀表板右上角的快照選擇器（snapshotDate）即「基準日」。原本 `DashboardView.getRealtimePrice()` 不分基準日，
+一律以 `summary.stockPrices`（即時快取）覆蓋顯示，導致選擇過去日期的快照時，「股價」欄仍是當下最新價，
+與買入均價／投資成本／現值（依快照計算）的時間基準不一致。
+
+#### Steps:
+
+- [x] 29.1 `DashboardView.vue` 新增 `isBaselineToday()` 判斷（`latest.snapshotDate === 今日 yyyy-MM-dd`）
+- [x] 29.2 修改 `getRealtimePrice(row)`：
+  - 僅當「基準日 = 今日」且該市場（`row.market`）`marketStatus.{tw|us}MarketOpen === true` 時，才回傳 `stockPrices` 即時價＋漲跌%
+  - 否則回 `null`，模板自動 fallback 顯示快照中保存的 `row.stockPrice`（不顯示漲跌%）
+- [x] 29.3 即時價來源（`StockPriceRepository`）已與「觀察股票」共用，無需後端調整；前端輪詢仍維持 5 分鐘

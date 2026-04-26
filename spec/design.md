@@ -398,6 +398,10 @@ GET    /api/bff/dashboard/summary                  # 並行聚合儀表板所需
 
 > BFF Enrichment：`latestSnapshotDetail.stocks[]` 由 BFF 補上 `investmentCostOriginal`（美股 USD、台股 TWD），legacy 美股 `currency='TWD'` 記錄會用 `transactionExchangeRate` 換回 USD，前端買入均價直接使用此欄位以避免各頁面重複正規化。
 
+> 儀表板「股票持股」股價顯示規則（與「觀察股票」共用同一 `StockPriceRepository` 快取，由 `StockPriceService.scheduledPriceUpdate()` 每 5 分鐘更新）：
+> - 當所選快照 `snapshotDate === 今日` 且該市場（台股／美股）`marketStatus.{tw|us}MarketOpen === true` 時，「股價」欄顯示來自 `summary.stockPrices` 的即時價＋漲跌%，前端每 5 分鐘輪詢 `bffApi.getDashboardSummary()` 刷新。
+> - 其他情形（基準日為過去日期，或當日該市場已休市）一律顯示快照中保存的當日 `stockPrice`（即 `latestSnapshotDetail.stocks[].stockPrice`），不顯示漲跌%、不參與 polling 切換。
+
 #### Settings - Banks
 ```
 GET    /api/settings/banks                      # 列出所有銀行（含停用）
