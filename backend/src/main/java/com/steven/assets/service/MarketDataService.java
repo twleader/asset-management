@@ -257,8 +257,11 @@ public class MarketDataService {
     private Optional<PriceResult> getTwseRealTimePrice(String stockCode) {
         for (String ex : new String[]{"tse", "otc"}) {
             try {
+                // 注意：必須用 delay=3000（3 秒延遲報價），不要用 delay=0。
+                // delay=0 在連續交易期間 z（最近成交價）欄位常常回傳 "-"（兩個 tick 之間），
+                // 即便 v（成交量）正常累計也一樣；delay=3000 是 TWSE 標準延遲報價，z 才會穩定填值。
                 String url = "https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch="
-                        + ex + "_" + stockCode + ".tw&json=1&delay=0";
+                        + ex + "_" + stockCode + ".tw&json=1&delay=3000";
                 HttpRequest req = HttpRequest.newBuilder()
                         .uri(URI.create(url))
                         .timeout(Duration.ofSeconds(10))
