@@ -191,6 +191,60 @@ public class MarketDataService {
         }
     }
 
+    /**
+     * 從 FinMind TaiwanStockPrice 取得台股當日（含 start_date 起最後一筆）收盤資訊。
+     * 用於收盤後排程記錄收盤價，避開 TWSE mis 在 Docker 連線不穩造成的卡頓。
+     * 不含買賣五檔。
+     */
+    public Optional<PriceResult> getTwClosingPriceFromFinMind(String stockCode, LocalDate startDate) {
+        try {
+            String url = "https://api.finmindtrade.com/api/v4/data"
+                    + "?dataset=TaiwanStockPrice"
+                    + "&data_id=" + stockCode
+                    + "&start_date=" + startDate.toString();
+            HttpResponse<String> resp = httpClient.send(
+                    finmindRequest(url, 15), HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() != 200) {
+                log.warn("FinMind TaiwanStockPrice {} 回應 {}（token {}）", stockCode,
+                        resp.statusCode(), finmindToken.isEmpty() ? "未設定" : "已設定");
+                return Optional.empty();
+            }
+            JsonNode data = mapper.readTree(resp.body()).path("data");
+            if (!data.isArray() || data.isEmpty()) return Optional.empty();
+            JsonNode row = data.get(data.size() - 1);     // 最新一筆
+            BigDecimal close = finmindDecimal(row, "close");
+            if (close == null) return Optional.empty();
+            BigDecimal open  = finmindDecimal(row, "open");
+            BigDecimal high  = finmindDecimal(row, "max");
+            BigDecimal low   = finmindDecimal(row, "min");
+            BigDecimal spread = finmindDecimal(row, "spread");   // 漲跌價差
+            long volume = row.path("Trading_Volume").asLong(0);
+            BigDecimal previousClose = spread != null ? close.subtract(spread) : null;
+            BigDecimal changePct = null;
+            if (spread != null && previousClose != null && previousClose.signum() > 0) {
+                changePct = spread.divide(previousClose, 6, RoundingMode.HALF_UP)
+                        .multiply(BigDecimal.valueOf(100));
+            }
+            return Optional.of(new PriceResult(
+                    stockCode, "台股", close, spread, changePct, "FinMind",
+                    null,
+                    null, null,
+                    open, previousClose, high, low,
+                    volume == 0 ? null : volume));
+        } catch (Exception e) {
+            log.warn("FinMind 取得台股 {} 收盤失敗: {}", stockCode, e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    private BigDecimal finmindDecimal(JsonNode row, String field) {
+        JsonNode n = row.path(field);
+        if (n.isMissingNode() || n.isNull()) return null;
+        String s = n.asText("");
+        if (s.isBlank() || "null".equalsIgnoreCase(s)) return null;
+        try { return new BigDecimal(s); } catch (Exception e) { return null; }
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // NASDAQ quote info API：美股即時報價
     // GET https://api.nasdaq.com/api/quote/{symbol}/info?assetClass=stocks

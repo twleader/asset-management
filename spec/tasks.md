@@ -978,3 +978,21 @@ Dashboard `bankSummary` 將 `TRANSIT_TWD` 與 `TRANSIT_USD` 同一條件分支�
 
 - [x] 37.1 `getStockPrice` 移除 Yahoo Finance fallback：台股只用 TWSE mis、美股只用 NASDAQ；查無時直接 throw「查無股價：xxx」
 - [x] 37.2 `getYahooCrumb` 加 5 分鐘 negative cache（`yahooCrumbBlockedUntil`），失敗後短時間內 fast-fail，不再讓其他 Yahoo 呼叫者（股利率、ETF 等）也被拖滿
+
+### Task 38: 台股收盤價紀錄改用 FinMind
+
+對應 Requirements: Requirement 7（市場資料整合）
+
+#### 背景
+
+13:35 cron `recordTwClosingPrice` 原本透過 `getStockPrice` → TWSE mis 取當日收盤；TWSE mis 在 Docker 環境
+偶爾完全連不到（"HTTP/1.1 header parser received no bytes"）會導致整批漏寫。FinMind TaiwanStockPrice
+日結資料穩定且本來就有 token，足以涵蓋收盤價需求（無買賣五檔，但收盤後本就用不到）。
+
+#### Steps:
+
+- [x] 38.1 `MarketDataService` 新增 `getTwClosingPriceFromFinMind(code, startDate)`：呼叫 FinMind TaiwanStockPrice，
+       回傳 `PriceResult`（close / open / max / min / spread / 估算 changePct / previousClose=close-spread / volume），
+       source = `FinMind`
+- [x] 38.2 `StockPriceService.recordTwClosingPrice` 改為迭代呼叫 FinMind 方法 + `persistPrice(...closed=true)`，
+       不再走 `getStockPrice` / TWSE mis；log 紀錄成功與缺漏檔數

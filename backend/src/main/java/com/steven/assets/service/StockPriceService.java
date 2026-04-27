@@ -160,14 +160,32 @@ public class StockPriceService {
 
     /**
      * 台股收盤後 5 分鐘記錄當日收盤價（13:35 Asia/Taipei，單次）。
+     * 直接走 FinMind TaiwanStockPrice，避開 TWSE mis 在 Docker 環境的連線不穩。
      */
     @Scheduled(cron = "0 35 13 * * MON-FRI", zone = "Asia/Taipei")
     public void recordTwClosingPrice() {
-        log.info("排程：記錄台股當日收盤價");
+        log.info("排程：記錄台股當日收盤價（FinMind）");
         Set<String> twCodes = new LinkedHashSet<>();
         Set<String> usCodes = new LinkedHashSet<>();
         collectHeldStockCodes(twCodes, usCodes);
-        if (!twCodes.isEmpty()) updatePrices(twCodes, "台股", true);
+
+        LocalDate today = LocalDate.now(TW_ZONE);
+        LocalDateTime now = LocalDateTime.now();
+        int ok = 0, miss = 0;
+        for (String code : twCodes) {
+            try {
+                Optional<MarketDataService.PriceResult> r =
+                        marketDataService.getTwClosingPriceFromFinMind(code, today);
+                if (r.isEmpty()) { miss++; continue; }
+                self.persistPrice(code, "台股", r.get(), true, now);
+                ok++;
+                Thread.sleep(300);
+            } catch (Exception e) {
+                log.warn("FinMind 記錄台股 {} 收盤失敗: {}", code, e.getMessage());
+                miss++;
+            }
+        }
+        log.info("台股收盤價紀錄完成：成功 {} 檔，缺漏 {} 檔", ok, miss);
     }
 
     /**
