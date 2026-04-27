@@ -142,11 +142,7 @@ public class StockAlertService {
             };
 
             if (triggered) {
-                LocalDate tradingDate = historyRepo.findMaxTradingDate(
-                        alert.getStockCode(), alert.getMarket()).orElse(LocalDate.now());
-                java.time.LocalTime closeTime = "美股".equals(alert.getMarket())
-                        ? java.time.LocalTime.of(16, 0) : java.time.LocalTime.of(13, 30);
-                LocalDateTime triggeredAt = tradingDate.atTime(closeTime);
+                LocalDateTime triggeredAt = LocalDateTime.now();
                 alert.setLastTriggeredAt(triggeredAt);
                 alert.setLastTriggeredPrice(BigDecimal.valueOf(currentPrice));
                 alertRepo.save(alert);
