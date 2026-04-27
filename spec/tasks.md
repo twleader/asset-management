@@ -998,3 +998,24 @@ Dashboard `bankSummary` 將 `TRANSIT_TWD` 與 `TRANSIT_USD` 同一條件分支�
        source = `FinMind`
 - [x] 38.2 `StockPriceService.recordTwClosingPrice` 改為迭代呼叫 FinMind 方法 + `persistPrice(...closed=true)`，
        不再走 `getStockPrice` / TWSE mis；log 紀錄成功與缺漏檔數
+
+### Task 39: 股價基準日規則改 per-market（修正美股盤中誤顯示前一交易日收盤）
+
+對應 Requirements: Requirement 9（儀表板基準日股價）、Requirement 7（市場資料整合）
+
+#### 背景
+
+`SnapshotEnricher.isCurrentBasedate(basedate)` 原本只比對 `basedate == LocalDate.now(Asia/Taipei)`，
+不分市場。實際使用者多在 TW 收盤後建快照（basedate = TW 那天），但美股 session 跨午夜（TW 21:30 → 隔日 05:00），
+TW 已過午夜後 `basedate（昨天）== TW 今日（今天）` 必失敗 → Dashboard 走 `closeMapToPriceList(closeMap, basedate)`
+鎖死在 basedate 收盤價，即使後端 cache 裡美股已是盤中即時價，畫面仍顯示前一交易日收盤。
+
+#### Steps:
+
+- [ ] 39.1 `SnapshotEnricher` 新增 `isCurrentBasedate(LocalDate basedate, String market)` per-market 多載：
+        台股比對 `Asia/Taipei`、美股比對 `America/New_York`（EST/EDT 由 JVM `ZoneId` 自動處理）；
+        舊單參數版本移除（呼叫端全部改為帶 market 的新版）
+- [ ] 39.2 `DashboardBffController` 不再對整批 stockPrices 做 all-or-nothing 替換；改為 **per-stock**：
+        每筆 price 依其 market 套 `isCurrentBasedate(basedate, market)` 決定保留 live 或換成 basedate 收盤
+- [ ] 39.3 `SnapshotFormBffController.enrichBatch` 同樣 per-stock：每 row 依 market 各自決定 useLive
+- [ ] 39.4 `closeMapToPriceList` 改為依需求 build 單筆 / 單市場版本（或在呼叫端按 market 篩選 closeMap）

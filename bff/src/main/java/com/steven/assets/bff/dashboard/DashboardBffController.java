@@ -100,12 +100,11 @@ public class DashboardBffController {
                                 dto.setLatestSnapshotDetail(detail);
                                 return enricher.fetchSnapshotClosePrices(detail)
                                         .map(closeMap -> {
-                                            // 「股價基準日規則」：基準日不是今天 → 用基準日收盤價蓋掉即時股價，
-                                            // 鎖定在那一天，避免 Dashboard 對舊快照仍持續顯示今日波動。
-                                            if (!SnapshotEnricher.isCurrentBasedate(basedate)) {
-                                                dto.setStockPrices(
-                                                        SnapshotEnricher.closeMapToPriceList(closeMap, basedate));
-                                            }
+                                            // 「股價基準日規則」per-market：每筆 live price 依其市場各自決定
+                                            // 保留 live（basedate == 該市場時區的今日）或換成 basedate 收盤價。
+                                            // 解決過去 TW 過午夜後美股盤中（TW 凌晨）被誤判為非當日 → 顯示前一交易日收盤的問題。
+                                            dto.setStockPrices(SnapshotEnricher.mergePerMarketPrices(
+                                                    basedate, prices, closeMap));
                                             dto.setMergedStocks(
                                                     enricher.buildMergedStocks(detail, closeMap, false));
                                             return ResponseEntity.ok(dto);

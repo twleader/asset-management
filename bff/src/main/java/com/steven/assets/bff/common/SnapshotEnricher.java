@@ -37,17 +37,21 @@ public class SnapshotEnricher {
             new ParameterizedTypeReference<>() {};
 
     private static final ZoneId TW_ZONE = ZoneId.of("Asia/Taipei");
+    private static final ZoneId US_ZONE = ZoneId.of("America/New_York");
 
     /**
-     * 「股價基準日規則」：當快照的基準日（snapshotDate）剛好是今天，才回傳即時價格（會持續變動）；
-     * 其他日期一律回傳該基準日的收盤價（鎖定在當天）。
+     * 「股價基準日規則」（per-market）：當基準日 == 該市場時區的今日，才回傳即時價格（會持續變動）；
+     * 其他情形一律回傳該基準日的收盤價（鎖定在當天）。
      *
-     * 設計理由：使用者編輯舊快照時，期望看到「那一天」的價格快照；只有編輯今天的快照，才需要持續刷新。
-     * 本規則由 Dashboard 與 SnapshotForm 共用，避免兩頁顯示不一致。
+     * 為什麼分市場：使用者多在 TW 收盤後建快照（basedate = TW 那天），但美股 session 跨午夜
+     * （TW 21:30 → 隔日 05:00），TW 過午夜後 basedate（昨天）== TW 今日（今天）會誤判，導致美股盤中
+     * 顯示前一交易日收盤。改用 basedate == 美東今日 才能正確涵蓋 TW 凌晨對應的美股盤中。
+     * EST/EDT 由 JVM `ZoneId` 自動處理。
      */
-    public static boolean isCurrentBasedate(LocalDate basedate) {
+    public static boolean isCurrentBasedate(LocalDate basedate, String market) {
         if (basedate == null) return false;
-        return basedate.equals(LocalDate.now(TW_ZONE));
+        ZoneId zone = "美股".equals(market) ? US_ZONE : TW_ZONE;
+        return basedate.equals(LocalDate.now(zone));
     }
 
     /** 將 closeMap（基準日收盤價）轉換成與即時 /api/market-data/prices 同形狀的 list，priceChange 留空。 */
@@ -57,17 +61,61 @@ public class SnapshotEnricher {
         for (Map.Entry<String, BigDecimal> e : closeMap.entrySet()) {
             String[] mc = e.getKey().split("_", 2);
             if (mc.length != 2) continue;
-            Map<String, Object> p = new HashMap<>();
-            p.put("market", mc[0]);
-            p.put("stockCode", mc[1]);
-            p.put("price", e.getValue());
-            p.put("priceChange", null);
-            p.put("changePercent", null);
-            p.put("tradingDate", basedate != null ? basedate.toString() : null);
-            p.put("closed", true);
-            out.add(p);
+            out.add(buildSnapshotPrice(mc[0], mc[1], e.getValue(), basedate));
         }
         return out;
+    }
+
+    /**
+     * Per-market 合併 live 即時價與 basedate 收盤價：
+     *  - basedate == 該市場時區的今日 → 保留該市場的 live price
+     *  - 否則 → 該市場的所有 live price 換成 closeMap 中的 basedate 收盤價
+     * Live cache 沒涵蓋但 closeMap 有的（可能是觀察清單以外的持股）一併補上。
+     */
+    public static List<Map<String, Object>> mergePerMarketPrices(
+            LocalDate basedate,
+            List<Map<String, Object>> livePrices,
+            Map<String, BigDecimal> closeMap) {
+        List<Map<String, Object>> out = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        for (Map<String, Object> p : livePrices) {
+            String code = asString(p.get("stockCode"));
+            String market = asString(p.get("market"));
+            if (code == null || market == null) continue;
+            String key = market + "_" + code;
+            seen.add(key);
+            if (isCurrentBasedate(basedate, market)) {
+                out.add(p);
+                continue;
+            }
+            BigDecimal close = closeMap.get(key);
+            if (close != null) {
+                out.add(buildSnapshotPrice(market, code, close, basedate));
+            } else {
+                out.add(p);
+            }
+        }
+        for (Map.Entry<String, BigDecimal> e : closeMap.entrySet()) {
+            if (seen.contains(e.getKey())) continue;
+            String[] mc = e.getKey().split("_", 2);
+            if (mc.length != 2) continue;
+            if (isCurrentBasedate(basedate, mc[0])) continue;
+            out.add(buildSnapshotPrice(mc[0], mc[1], e.getValue(), basedate));
+        }
+        return out;
+    }
+
+    private static Map<String, Object> buildSnapshotPrice(
+            String market, String code, BigDecimal price, LocalDate basedate) {
+        Map<String, Object> p = new HashMap<>();
+        p.put("market", market);
+        p.put("stockCode", code);
+        p.put("price", price);
+        p.put("priceChange", null);
+        p.put("changePercent", null);
+        p.put("tradingDate", basedate != null ? basedate.toString() : null);
+        p.put("closed", true);
+        return p;
     }
 
     /** 為每筆持股加上 investmentCostOriginal（買入均價計算用，原幣別）。 */
