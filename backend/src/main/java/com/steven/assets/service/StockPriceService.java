@@ -85,26 +85,22 @@ public class StockPriceService {
         return !time.isBefore(LocalTime.of(9, 30)) && !time.isAfter(LocalTime.of(16, 0));
     }
 
-    /**
-     * 台股是否剛收盤（13:30～13:45 之間，用於觸發收盤價更新）
-     */
+    // 收盤後的單次 closing 紀錄改由獨立 cron 觸發（recordTwClosingPrice / recordUsClosingPrice），
+    // 不再用 isXxxJustClosed() 在 fixedRate 排程內反覆抓收盤價。
+    // 但 resolveTradingDate 仍需區分「剛收盤窗口內」以決定 K 棒日期，故保留 isXxxJustClosed()。
+
     private boolean isTwMarketJustClosed() {
         ZonedDateTime now = ZonedDateTime.now(TW_ZONE);
         DayOfWeek dow = now.getDayOfWeek();
         if (dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY) return false;
-
         LocalTime time = now.toLocalTime();
         return time.isAfter(LocalTime.of(13, 30)) && time.isBefore(LocalTime.of(13, 50));
     }
 
-    /**
-     * 美股是否剛收盤（16:00～16:20 美東時間）
-     */
     private boolean isUsMarketJustClosed() {
         ZonedDateTime now = ZonedDateTime.now(US_ZONE);
         DayOfWeek dow = now.getDayOfWeek();
         if (dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY) return false;
-
         LocalTime time = now.toLocalTime();
         return time.isAfter(LocalTime.of(16, 0)) && time.isBefore(LocalTime.of(16, 20));
     }
@@ -135,38 +131,55 @@ public class StockPriceService {
     // ===================== 排程更新 =====================
 
     /**
-     * 每 10 分鐘執行一次
-     * 根據交易時間決定是否需要更新台股/美股
+     * 開盤期間每 2 分鐘抓即時價（盤中價，closed=false）。
+     * 收盤後 fixedRate 直接 return，避免在收盤窗口反覆觸發。
      */
-    @Scheduled(fixedRate = 120_000, initialDelay = 10_000) // 2分鐘, 啟動10秒後開始
+    @Scheduled(fixedRate = 120_000, initialDelay = 10_000)
     public void scheduledPriceUpdate() {
         boolean twOpen = isTwMarketOpen();
         boolean usOpen = isUsMarketOpen();
-        boolean twJustClosed = isTwMarketJustClosed();
-        boolean usJustClosed = isUsMarketJustClosed();
-
-        if (!twOpen && !usOpen && !twJustClosed && !usJustClosed) {
-            log.debug("台股/美股均非交易時間，跳過更新");
+        if (!twOpen && !usOpen) {
+            log.debug("台股/美股均非交易時間，跳過即時更新");
             return;
         }
 
-        // 取得最新快照中持有的所有股票代號
         Set<String> twCodes = new LinkedHashSet<>();
         Set<String> usCodes = new LinkedHashSet<>();
         collectHeldStockCodes(twCodes, usCodes);
 
-        if (twOpen || twJustClosed) {
+        if (twOpen) {
             log.info("更新台股即時價格 ({} 檔)...", twCodes.size());
-            updatePrices(twCodes, "台股", twJustClosed);
+            updatePrices(twCodes, "台股", false);
         }
-
-        if (usOpen || usJustClosed) {
+        if (usOpen) {
             log.info("更新美股即時價格 ({} 檔)...", usCodes.size());
-            updatePrices(usCodes, "美股", usJustClosed);
+            updatePrices(usCodes, "美股", false);
         }
-
-        // 股價更新後立即檢查到價警示
         stockAlertService.checkAlerts();
+    }
+
+    /**
+     * 台股收盤後 5 分鐘記錄當日收盤價（13:35 Asia/Taipei，單次）。
+     */
+    @Scheduled(cron = "0 35 13 * * MON-FRI", zone = "Asia/Taipei")
+    public void recordTwClosingPrice() {
+        log.info("排程：記錄台股當日收盤價");
+        Set<String> twCodes = new LinkedHashSet<>();
+        Set<String> usCodes = new LinkedHashSet<>();
+        collectHeldStockCodes(twCodes, usCodes);
+        if (!twCodes.isEmpty()) updatePrices(twCodes, "台股", true);
+    }
+
+    /**
+     * 美股收盤後 5 分鐘記錄當日收盤價（16:05 America/New_York，單次）。
+     */
+    @Scheduled(cron = "0 5 16 * * MON-FRI", zone = "America/New_York")
+    public void recordUsClosingPrice() {
+        log.info("排程：記錄美股當日收盤價");
+        Set<String> twCodes = new LinkedHashSet<>();
+        Set<String> usCodes = new LinkedHashSet<>();
+        collectHeldStockCodes(twCodes, usCodes);
+        if (!usCodes.isEmpty()) updatePrices(usCodes, "美股", true);
     }
 
     /**
