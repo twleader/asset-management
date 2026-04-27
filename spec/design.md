@@ -47,7 +47,7 @@ com.steven.assets/
 - `AssetService`: 快照 CRUD、總額計算、損益運算、歷史分析
 - `ExcelImportService`: Excel 解析、格式偵測、資料清洗、批次儲存
 - `MarketDataService`: 外部 API 呼叫、Cookie/Crumb 管理、股利率查詢
-- `StockPriceService`: 股價快取管理、多市場支援、每 2 分鐘排程更新
+- `StockPriceService`: 股價快取管理、多市場支援；台股 / 美股採**獨立 cron 排程**各自每 2 分鐘更新（zone=`Asia/Taipei` / `America/New_York`，美股由 JVM 時區自動處理 EST/EDT 夏令切換），收盤後另由獨立 cron 觸發單次收盤價寫入
 - `HistoricalDataService`: 歷史股價與匯率資料管理；歷史回補範圍以 `stock` 主檔（含曾持有 / 觀察清單 / 警示）為主，並聯集歷史快照中的持股代號
 - `InstitutionService`: 銀行、券商、存款類型、市場類型的 CRUD、停用管理、關鍵字比對邏輯
 
@@ -453,7 +453,7 @@ GET    /api/bff/dashboard/summary                  # 並行聚合儀表板所需
 
 > BFF Enrichment：`latestSnapshotDetail.stocks[]` 由 BFF 補上 `investmentCostOriginal`（美股 USD、台股 TWD），legacy 美股 `currency='TWD'` 記錄會用 `transactionExchangeRate` 換回 USD，前端買入均價直接使用此欄位以避免各頁面重複正規化。
 
-> 儀表板「股票持股」股價顯示規則（與「觀察股票」共用同一 `StockPriceRepository` 快取，由 `StockPriceService.scheduledPriceUpdate()` 每 2 分鐘更新）：
+> 儀表板「股票持股」股價顯示規則（與「觀察股票」共用同一 `StockPriceRepository` 快取，由 `StockPriceService.scheduledTwIntradayUpdate()` / `scheduledUsIntradayUpdate()` 兩支獨立 cron 各自每 2 分鐘更新）：
 > - 當所選快照 `snapshotDate === 今日` 且該市場（台股／美股）`marketStatus.{tw|us}MarketOpen === true` 時，「股價」欄顯示來自 `stockPrices` 的即時價＋漲跌%，前端每 2 分鐘輪詢更新。
 > - 其他情形（基準日為過去日期，或當日該市場已休市）一律顯示快照中保存的當日 `stockPrice`（即 `latestSnapshotDetail.stocks[].stockPrice`），不顯示漲跌%、不參與 polling 切換。
 >
