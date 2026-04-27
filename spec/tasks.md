@@ -1074,3 +1074,18 @@ fallback 到 `row.stockPrice`（基準日收盤）→ Dashboard 顯示前一交�
         非 null → live（套漲跌色 / %）；null → 退回 `row.stockPrice` frozen 顯示
 - [x] 42.2 移除 / 保留 `isBaselineToday()`：價格判斷不再用，但 styling（淡灰色）若仍需要可保留
 - [x] 42.3 spec/design.md 寫清「per-market 判斷一律由 BFF 完成；前端禁止重做」
+
+### Task 43: 到價警示觸發時間改用 LocalDateTime.now()（不再寫成收盤時間）
+
+對應 Requirements: Requirement 14（到價警示）
+
+#### 背景
+
+`StockAlertService.evaluate` live 觸發路徑把 `lastTriggeredAt` 設為 `max(history.tradingDate)@13:30`（台股）或 `@16:00`（美股），
+不是真正的觸發當下時間。畫面顯示「04/24 13:30」=「上一交易日的收盤時間」，與使用者期待的「cron 偵測到的當下時間」不符。
+背景路徑（findRecentIntradayTrigger 從 Yahoo 5m 補抓）已正確用 bar 時間，無此問題。
+
+#### Steps:
+
+- [x] 43.1 `StockAlertService.evaluate` live 觸發路徑改 `triggeredAt = LocalDateTime.now()`，
+        移除 `tradingDate.atTime(closeTime)` 的近似邏輯
