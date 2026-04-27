@@ -51,6 +51,11 @@ public class MarketDataService {
     private volatile long yahooCrumbBlockedUntil = 0L;
     private static final long YAHOO_CRUMB_BLOCK_MS = 5 * 60 * 1000L; // 5 分鐘
 
+    /** 殖利率 in-memory cache：殖利率年級頻率變動，1 小時 cache 即可避免每次重打 FinMind 5-13 秒。 */
+    private record CachedDividendRate(DividendRateResult result, long expiresAt) {}
+    private final Map<String, CachedDividendRate> dividendRateCache = new ConcurrentHashMap<>();
+    private static final long DIVIDEND_RATE_TTL_MS = 60 * 60 * 1000L; // 1 小時
+
     public MarketDataService(StockPriceRepository stockPriceRepo,
                              StockPriceHistoryRepository stockPriceHistoryRepo,
                              @Value("${finmind.token:${FINMIND_TOKEN:}}") String finmindToken) {
@@ -452,6 +457,18 @@ public class MarketDataService {
      * - 美股：NASDAQ（可連），不使用 Yahoo Finance（Docker 環境被擋）
      */
     public DividendRateResult getDividendRate(String stockCode, String market) {
+        String cacheKey = market + "_" + stockCode;
+        long now = System.currentTimeMillis();
+        CachedDividendRate cached = dividendRateCache.get(cacheKey);
+        if (cached != null && cached.expiresAt > now) {
+            return cached.result;
+        }
+        DividendRateResult result = computeDividendRate(stockCode, market);
+        dividendRateCache.put(cacheKey, new CachedDividendRate(result, now + DIVIDEND_RATE_TTL_MS));
+        return result;
+    }
+
+    private DividendRateResult computeDividendRate(String stockCode, String market) {
         if ("台股".equals(market)) {
             // 一律使用「最近 3 年平均殖利率」。優先序：
             // 1. FinMind 近 3 年平均（ETF/個股皆適用，免認證）

@@ -1035,3 +1035,23 @@ TW 已過午夜後 `basedate（昨天）== TW 今日（今天）` 必失敗 → 
 - [x] 40.1 `enrichBatch` dividend-rate Flux concurrency 從 4 提高到 16（21 檔內 1–2 批可消化）
 - [x] 40.2 每筆 dividend-rate 加 per-call timeout 3 秒（`Mono.timeout(...).onErrorReturn(emptyMap)`），
         單檔 hang 不影響整批回應
+
+### Task 41: dividend-rate 加 backend in-memory cache (TTL 1h)
+
+對應 Requirements: Requirement 7（市場資料整合）
+
+#### 背景
+
+`MarketDataService.getDividendRate` 每次都重打 FinMind / TWSE，cold call 5-13 秒（受 FinMind 後端拉資料 + 計算近 3 年平均影響）。
+即使 BFF 把 concurrency 拉到 16 + per-call 3s timeout，21 檔 SnapshotForm 一發只會有 ~5 檔在 3s 內回；
+其餘 dividendRate 為 null（畫面 fallback 顯示 snapshot 已存的值，但失去「重新整理拿最新」的功能）。
+殖利率本身年級頻率變動，1 小時 cache 完全合理。
+
+#### Steps:
+
+- [x] 41.1 `MarketDataService` 新增 `dividendRateCache: ConcurrentHashMap<String, CachedRate>`，
+        key = `code + "_" + market`，value 含 `(DividendRateResult, expiresAt)`，TTL 1 小時
+- [x] 41.2 `getDividendRate` 進入時先查 cache：未過期回 cached；過期或 miss 才走原本 fallback chain，
+        成功取得後 put cache（失敗的 N/A 也 cache 1 小時，避免 cold storm 反覆打 FinMind）
+- [x] 41.3 SnapshotFormBffController 把 dividend-rate per-call timeout 從 3s 放寬到 8s
+        （cold call 路徑也能完整回，cache 命中後本就 <5ms）
