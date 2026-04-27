@@ -252,7 +252,7 @@ public class SnapshotFormBffController {
                                 .build())
                         .retrieve()
                         .bodyToMono(MAP)
-                        .timeout(Duration.ofSeconds(3))
+                        .timeout(Duration.ofSeconds(8))
                         .onErrorReturn(Collections.emptyMap())
                         .map(dr -> Map.entry(s.get("market") + "_" + s.get("code"), dr)), 16)
                 .collectMap(Map.Entry::getKey, Map.Entry::getValue);
