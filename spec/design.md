@@ -635,6 +635,14 @@ else:
 
 > Yahoo Finance 已停用（Docker 環境被擋，且其數據與台灣公開資料口徑不一致）。
 
+#### FinMind 認證
+
+FinMind 自 2025 年起對匿名呼叫額度收緊，超量會回 `402 Payment Required`，造成股利歷史 / ETF 持股 / 歷史收盤價回補等功能失敗。後端統一從環境變數 `FINMIND_TOKEN`（亦可用 `finmind.token` Spring property）讀取 token，所有 `api.finmindtrade.com` 的呼叫於有 token 時加上 `Authorization: Bearer <token>` header；未設定時保持匿名行為向下相容。
+
+實作位置：
+- `MarketDataService.finmindRequest()`：股利率、ETF 持股、股利歷史
+- `HistoricalDataService.httpGet()`：歷史收盤價、匯率歷史、股票名稱（自動偵測 URL 為 FinMind 時加上 header）
+
 **「最近 3 年平均」演算法**（`getFinMindDividendRate` / `getTwseThreeYearAvgDividendRate`）：
 
 ```
