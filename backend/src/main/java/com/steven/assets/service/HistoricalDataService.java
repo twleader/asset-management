@@ -14,6 +14,7 @@ import com.steven.assets.repository.StockPriceRepository;
 import com.steven.assets.repository.StockRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -41,6 +42,10 @@ public class HistoricalDataService {
     private final ExchangeRateHistoryRepository rateHistRepo;
     private final AssetSnapshotRepository snapshotRepo;
     private final StockRepository stockMasterRepo;
+
+    /** FinMind API token（免費註冊，未設定時走匿名額度，超過會回 402） */
+    @Value("${finmind.token:${FINMIND_TOKEN:}}")
+    private String finmindToken;
 
     private static final String UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
@@ -737,12 +742,14 @@ public class HistoricalDataService {
     }
 
     private String httpGet(String url) throws Exception {
-        HttpRequest req = HttpRequest.newBuilder(URI.create(url))
+        HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(url))
                 .header("User-Agent", UA)
                 .header("Accept", "application/json")
-                .timeout(Duration.ofSeconds(20))
-                .GET().build();
-        HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+                .timeout(Duration.ofSeconds(20));
+        if (url.contains("api.finmindtrade.com") && finmindToken != null && !finmindToken.isBlank()) {
+            b.header("Authorization", "Bearer " + finmindToken.trim());
+        }
+        HttpResponse<String> resp = httpClient.send(b.GET().build(), HttpResponse.BodyHandlers.ofString());
         if (resp.statusCode() != 200) throw new RuntimeException("HTTP " + resp.statusCode());
         return resp.body();
     }

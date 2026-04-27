@@ -6,6 +6,7 @@ import com.steven.assets.model.StockPriceHistory;
 import com.steven.assets.repository.StockPriceHistoryRepository;
 import com.steven.assets.repository.StockPriceRepository;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -41,13 +42,18 @@ public class MarketDataService {
     private final StockPriceRepository stockPriceRepo;
     private final StockPriceHistoryRepository stockPriceHistoryRepo;
 
+    /** FinMind API token（免費註冊取得，未設定時走匿名額度，超過會回 402） */
+    private final String finmindToken;
+
     /** Yahoo Finance crumb（session 期間有效） */
     private volatile String yahooCrumb = null;
 
     public MarketDataService(StockPriceRepository stockPriceRepo,
-                             StockPriceHistoryRepository stockPriceHistoryRepo) {
+                             StockPriceHistoryRepository stockPriceHistoryRepo,
+                             @Value("${finmind.token:${FINMIND_TOKEN:}}") String finmindToken) {
         this.stockPriceRepo = stockPriceRepo;
         this.stockPriceHistoryRepo = stockPriceHistoryRepo;
+        this.finmindToken = finmindToken == null ? "" : finmindToken.trim();
         CookieManager cm = new CookieManager(null, CookiePolicy.ACCEPT_ALL);
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
@@ -55,6 +61,20 @@ public class MarketDataService {
                 .cookieHandler(cm)
                 .build();
         this.mapper = new ObjectMapper();
+    }
+
+    /** 建構帶 token（若有設定）的 FinMind HttpRequest。 */
+    private HttpRequest finmindRequest(String url, int timeoutSec) {
+        HttpRequest.Builder b = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .timeout(Duration.ofSeconds(timeoutSec))
+                .header("User-Agent", UA)
+                .header("Accept", "application/json")
+                .header("Accept-Encoding", "identity");
+        if (!finmindToken.isEmpty()) {
+            b.header("Authorization", "Bearer " + finmindToken);
+        }
+        return b.GET().build();
     }
 
     public record DividendRateResult(
@@ -564,15 +584,13 @@ public class MarketDataService {
                     + "&data_id=" + stockCode
                     + "&start_date=" + startDate;
 
-            HttpRequest req = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .timeout(Duration.ofSeconds(10))
-                    .header("User-Agent", UA)
-                    .header("Accept", "application/json")
-                    .header("Accept-Encoding", "identity")
-                    .GET().build();
-            HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() != 200) return Optional.empty();
+            HttpResponse<String> resp = httpClient.send(
+                    finmindRequest(url, 10), HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() != 200) {
+                log.warn("FinMind({}) {} 回應 {}（token {}）", dataset, stockCode,
+                        resp.statusCode(), finmindToken.isEmpty() ? "未設定" : "已設定");
+                return Optional.empty();
+            }
 
             JsonNode root = mapper.readTree(resp.body());
             JsonNode data = root.path("data");
@@ -1168,14 +1186,8 @@ public class MarketDataService {
             String url = "https://api.finmindtrade.com/api/v4/data"
                     + "?dataset=TaiwanETFHoldings"
                     + "&data_id=" + stockCode;
-            HttpRequest req = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .timeout(Duration.ofSeconds(15))
-                    .header("User-Agent", UA)
-                    .header("Accept", "application/json")
-                    .header("Accept-Encoding", "identity")
-                    .GET().build();
-            HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> resp = httpClient.send(
+                    finmindRequest(url, 15), HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() != 200) {
                 return new EtfHoldingsResult(stockCode, market, true, "FinMind", null,
                         "FinMind 回應 " + resp.statusCode(), List.of());
@@ -1292,14 +1304,8 @@ public class MarketDataService {
                     + "?dataset=TaiwanStockDividend"
                     + "&data_id=" + stockCode
                     + "&start_date=" + startDate;
-            HttpRequest req = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .timeout(Duration.ofSeconds(15))
-                    .header("User-Agent", UA)
-                    .header("Accept", "application/json")
-                    .header("Accept-Encoding", "identity")
-                    .GET().build();
-            HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> resp = httpClient.send(
+                    finmindRequest(url, 15), HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() != 200) {
                 return new DividendHistoryResult(stockCode, "台股", "FinMind",
                         "FinMind 回應 " + resp.statusCode(), List.of());

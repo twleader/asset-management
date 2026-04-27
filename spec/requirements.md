@@ -195,6 +195,7 @@
 - [ ] 「現金殖利率」每筆事件 = 現金股利 / 除息日昨收價 × 100%（無昨收價時顯示「—」）
 - [ ] 表格除了顯示每次除息事件外，還需在每年事件之上插入該年度小計列（年度／合計現金股利／合計股票股利／年度殖利率），年度小計列以較深背景與粗體區隔；年度殖利率以「該年合計現金股利 / 該年最近一次除息事件的昨收價」計算
 - [ ] 台股股利資料來源 FinMind `TaiwanStockDividend`；美股股利資料來源 NASDAQ `/api/quote/{code}/dividends`
+- [ ] 後端呼叫 FinMind 時若環境變數 `FINMIND_TOKEN` 有值，需在 HTTP request header 帶 `Authorization: Bearer <token>`，避免匿名額度耗盡時被回 402 Payment Required；未設定時保持匿名呼叫向下相容
 - [ ] 資料查無或來源失敗時顯示友善提示，不拋例外
 
 ---

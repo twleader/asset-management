@@ -900,3 +900,19 @@ KPI 卡 / 圓餅 / 持股表回跳到最新；另外資產歷史趨勢圖一直�
        於每年事件之上插入 `isYearSummary=true` 的小計列（合計現金股利、合計股票股利、年度殖利率）
 - [x] 32.2 新增「現金殖利率」欄：事件列 = `cashDividend / previousClose × 100%`；年度列 = `年合計現金 / 該年最近一次事件的昨收價 × 100%`
 - [x] 32.3 透過 `row-class-name="dividend-year-summary"` 與全域 CSS 將年度小計列以淺灰背景與粗體呈現
+
+### Task 33: FinMind API token 支援（修正股利歷史 402）
+
+對應 Requirements: Requirement 13
+
+#### 背景
+
+FinMind 自 2025 年起調整匿名呼叫額度，使用者開啟股票分析 → 股利歷史頁籤時前端顯示「FinMind 回應 402」。
+後端原本所有 FinMind 呼叫皆未帶 token，匿名額度耗盡即全部失敗（影響股利歷史、ETF 持股、歷史收盤價回補等）。
+
+#### Steps:
+
+- [x] 33.1 後端新增環境變數 `FINMIND_TOKEN`（Spring property `finmind.token`），未設定時保持匿名行為向下相容
+- [x] 33.2 `MarketDataService` 注入 token 並新增 `finmindRequest(url, timeoutSec)` 共用 builder，套用至股利率、ETF 持股、股利歷史三個 FinMind 呼叫
+- [x] 33.3 `HistoricalDataService.httpGet()` 偵測 URL 為 `api.finmindtrade.com` 時自動加上 `Authorization: Bearer <token>` header（涵蓋歷史價、匯率、股票名稱）
+- [x] 33.4 非 200 回應於 log 標記 token 是否有設定，方便除錯
