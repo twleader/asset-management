@@ -8,6 +8,8 @@ import reactor.core.publisher.Mono;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -33,6 +35,40 @@ public class SnapshotEnricher {
 
     private static final ParameterizedTypeReference<List<Map<String, Object>>> LIST_MAP =
             new ParameterizedTypeReference<>() {};
+
+    private static final ZoneId TW_ZONE = ZoneId.of("Asia/Taipei");
+
+    /**
+     * 「股價基準日規則」：當快照的基準日（snapshotDate）剛好是今天，才回傳即時價格（會持續變動）；
+     * 其他日期一律回傳該基準日的收盤價（鎖定在當天）。
+     *
+     * 設計理由：使用者編輯舊快照時，期望看到「那一天」的價格快照；只有編輯今天的快照，才需要持續刷新。
+     * 本規則由 Dashboard 與 SnapshotForm 共用，避免兩頁顯示不一致。
+     */
+    public static boolean isCurrentBasedate(LocalDate basedate) {
+        if (basedate == null) return false;
+        return basedate.equals(LocalDate.now(TW_ZONE));
+    }
+
+    /** 將 closeMap（基準日收盤價）轉換成與即時 /api/market-data/prices 同形狀的 list，priceChange 留空。 */
+    public static List<Map<String, Object>> closeMapToPriceList(
+            Map<String, BigDecimal> closeMap, LocalDate basedate) {
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (Map.Entry<String, BigDecimal> e : closeMap.entrySet()) {
+            String[] mc = e.getKey().split("_", 2);
+            if (mc.length != 2) continue;
+            Map<String, Object> p = new HashMap<>();
+            p.put("market", mc[0]);
+            p.put("stockCode", mc[1]);
+            p.put("price", e.getValue());
+            p.put("priceChange", null);
+            p.put("changePercent", null);
+            p.put("tradingDate", basedate != null ? basedate.toString() : null);
+            p.put("closed", true);
+            out.add(p);
+        }
+        return out;
+    }
 
     /** 為每筆持股加上 investmentCostOriginal（買入均價計算用，原幣別）。 */
     @SuppressWarnings("unchecked")
