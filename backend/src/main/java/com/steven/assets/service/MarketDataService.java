@@ -297,16 +297,31 @@ public class MarketDataService {
                 BigDecimal lowPrice  = parseDecimal(item.path("l").asText(""));
                 Long volumeLots      = parseLong(item.path("v").asText("")); // TWSE 已以「張」為單位
 
-                // z = "--" 表示未成交（收盤後或開盤前），改用昨收
+                // z 為 "-" 表示「兩個 tick 之間沒有最新成交價」，TWSE mis 在連續交易時段也常常如此。
+                // 直接退回昨收會讓 price 永遠等於 previousClose、漲跌固定為 0。
+                // 因此盤中（買賣五檔有值）改用最佳買賣中價作為當下價格估計，沒有買賣盤才退回昨收。
                 if (priceStr.isEmpty() || priceStr.startsWith("-")) {
-                    if (prevClose != null) {
-                        return Optional.of(new PriceResult(
-                                stockCode, "台股", prevClose,
-                                BigDecimal.ZERO, BigDecimal.ZERO, "TWSE(前收)",
-                                name.isEmpty() ? null : name,
-                                buyPrice, sellPrice, openPrice, prevClose, highPrice, lowPrice, volumeLots));
+                    BigDecimal estimated;
+                    String source;
+                    if (buyPrice != null && sellPrice != null) {
+                        estimated = buyPrice.add(sellPrice)
+                                .divide(BigDecimal.valueOf(2), 4, RoundingMode.HALF_UP);
+                        source = "TWSE(買賣中價)";
+                    } else if (prevClose != null) {
+                        estimated = prevClose;
+                        source = "TWSE(前收)";
+                    } else {
+                        continue;
                     }
-                    continue;
+                    BigDecimal estChange = prevClose != null ? estimated.subtract(prevClose) : BigDecimal.ZERO;
+                    BigDecimal estChangePct = (prevClose != null && prevClose.compareTo(BigDecimal.ZERO) != 0)
+                            ? estChange.multiply(BigDecimal.valueOf(100)).divide(prevClose, 6, RoundingMode.HALF_UP)
+                            : BigDecimal.ZERO;
+                    return Optional.of(new PriceResult(
+                            stockCode, "台股", estimated,
+                            estChange, estChangePct, source,
+                            name.isEmpty() ? null : name,
+                            buyPrice, sellPrice, openPrice, prevClose, highPrice, lowPrice, volumeLots));
                 }
 
                 BigDecimal price = new BigDecimal(priceStr);
