@@ -425,9 +425,11 @@
 
 #### Steps:
 
-- [x] 14.1 `StockPriceService.scheduledPriceUpdate()` — 已實作每 5 分鐘排程
-  - 台股 09:00～13:30、美股 09:30～16:00（美東）交易時間內更新
-  - 收盤視窗（台股 13:30～13:50、美股 16:00～16:20）以 `markClosed=true` 標記
+- [x] 14.1 `StockPriceService` 即時股價排程（台股 / 美股獨立 cron）
+  - `scheduledTwIntradayUpdate()`：cron `0 0/2 9-13 * * MON-FRI` zone `Asia/Taipei`；方法內以 `isTwMarketOpen()` 過濾 09:00–13:30
+  - `scheduledUsIntradayUpdate()`：cron `0 0/2 9-16 * * MON-FRI` zone `America/New_York`；方法內以 `isUsMarketOpen()` 過濾 09:30–16:00；EST/EDT 夏令由 JVM `ZoneId` 自動切換
+  - 收盤後當日收盤價分別由 `recordTwClosingPrice()`（13:35 Asia/Taipei）/ `recordUsClosingPrice()`（16:05 America/New_York）單次 cron 觸發
+  - 移除舊有單支 `scheduledPriceUpdate()` fixedRate（避免兩市場排程混雜、非交易時段空轉）
 
 - [x] 14.2 `HistoricalDataService` 每日收盤價寫入 `StockPriceHistory` — 已實作
   - 台股：14:00 排程（backfillTwStock，FinMind）
@@ -811,7 +813,7 @@ CLAUDE.md 規定「相同的資料只能存一份；禁止同一欄位同時以 
 
 #### 背景
 
-`stock_price`（即時報價表）只由 `StockPriceService.scheduledPriceUpdate` 在「市場開盤中或剛收盤」時段寫入。
+`stock_price`（即時報價表）只由 `StockPriceService.scheduledTwIntradayUpdate` / `scheduledUsIntradayUpdate` 在「市場開盤中或剛收盤」時段寫入。
 若使用者在非交易時段把新股票加入觀察清單，畫面欄位（股價/開盤/昨收/最高/最低/成交量）會空白直到下次開盤，體驗不佳。
 
 #### Steps:

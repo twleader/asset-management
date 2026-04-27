@@ -31,8 +31,8 @@ import java.util.stream.Collectors;
 /**
  * 股價即時更新服務
  * - 台股交易時間：週一～五 09:00～13:30 (台灣時間)
- * - 美股交易時間：週一～五 09:30～16:00 (美東時間) = 台灣 22:30～隔日 05:00
- * - 盤中每 2 分鐘更新一次
+ * - 美股交易時間：週一～五 09:30～16:00 (美東時間，JVM ZoneId 自動處理 EST/EDT 夏令)
+ * - 盤中每 2 分鐘更新一次（台股 / 美股各自獨立 cron，不共用 fixedRate）
  * - 收盤後存收盤價，不再更新直到下次開盤
  */
 @Slf4j
@@ -131,30 +131,35 @@ public class StockPriceService {
     // ===================== 排程更新 =====================
 
     /**
-     * 開盤期間每 2 分鐘抓即時價（盤中價，closed=false）。
-     * 收盤後 fixedRate 直接 return，避免在收盤窗口反覆觸發。
+     * 台股盤中每 2 分鐘抓即時價（closed=false）。
+     * cron 限制在台北時間 9–13 時觸發，再由 isTwMarketOpen() 精準過濾 09:00–13:30。
      */
-    @Scheduled(fixedRate = 120_000, initialDelay = 10_000)
-    public void scheduledPriceUpdate() {
-        boolean twOpen = isTwMarketOpen();
-        boolean usOpen = isUsMarketOpen();
-        if (!twOpen && !usOpen) {
-            log.debug("台股/美股均非交易時間，跳過即時更新");
-            return;
-        }
-
+    @Scheduled(cron = "0 0/2 9-13 * * MON-FRI", zone = "Asia/Taipei")
+    public void scheduledTwIntradayUpdate() {
+        if (!isTwMarketOpen()) return;
         Set<String> twCodes = new LinkedHashSet<>();
         Set<String> usCodes = new LinkedHashSet<>();
         collectHeldStockCodes(twCodes, usCodes);
+        if (twCodes.isEmpty()) return;
+        log.info("更新台股即時價格 ({} 檔)...", twCodes.size());
+        updatePrices(twCodes, "台股", false);
+        stockAlertService.checkAlerts();
+    }
 
-        if (twOpen) {
-            log.info("更新台股即時價格 ({} 檔)...", twCodes.size());
-            updatePrices(twCodes, "台股", false);
-        }
-        if (usOpen) {
-            log.info("更新美股即時價格 ({} 檔)...", usCodes.size());
-            updatePrices(usCodes, "美股", false);
-        }
+    /**
+     * 美股盤中每 2 分鐘抓即時價（closed=false）。
+     * cron 採 America/New_York 時區，JVM ZoneId 會自動處理 EST/EDT 夏令切換。
+     * cron 限制在美東 9–16 時觸發，再由 isUsMarketOpen() 精準過濾 09:30–16:00。
+     */
+    @Scheduled(cron = "0 0/2 9-16 * * MON-FRI", zone = "America/New_York")
+    public void scheduledUsIntradayUpdate() {
+        if (!isUsMarketOpen()) return;
+        Set<String> twCodes = new LinkedHashSet<>();
+        Set<String> usCodes = new LinkedHashSet<>();
+        collectHeldStockCodes(twCodes, usCodes);
+        if (usCodes.isEmpty()) return;
+        log.info("更新美股即時價格 ({} 檔)...", usCodes.size());
+        updatePrices(usCodes, "美股", false);
         stockAlertService.checkAlerts();
     }
 
