@@ -14,7 +14,9 @@ import com.steven.assets.repository.StockRepository;
 import com.steven.assets.repository.WatchStockRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -46,6 +48,11 @@ public class StockPriceService {
     private final WatchStockRepository watchStockRepo;
     private final StockRepository stockMasterRepo;
     private final StockPriceHistoryRepository historyRepo;
+
+    /** 自身代理 — 為了讓 {@link #persistPrice} 的 {@code @Transactional} 能透過 Spring proxy 生效（同類內呼叫會繞過代理）。 */
+    @Autowired
+    @Lazy
+    private StockPriceService self;
 
     private static final ZoneId TW_ZONE = ZoneId.of("Asia/Taipei");
     private static final ZoneId US_ZONE = ZoneId.of("America/New_York");
@@ -189,59 +196,72 @@ public class StockPriceService {
 
     /**
      * 批次更新指定市場的股價
+     *
+     * 注意：本方法 **不可** 加 {@code @Transactional}。Yahoo Finance / NASDAQ HTTP 呼叫
+     * 偶爾會卡到 30 秒（Yahoo crumb 重試），若整個迴圈包在同一個 transaction，
+     * HikariCP 連線會被外部 HTTP 等待長時間占住，造成連線池耗盡 → 使用者前端「存檔」拿不到連線而 timeout。
+     * 將 DB 寫入拆到 {@link #persistPrice} 的短 transaction，HTTP 期間不占連線。
      */
-    @Transactional
     public void updatePrices(Set<String> codes, String market, boolean markClosed) {
-        String marketName = market;
         LocalDateTime now = LocalDateTime.now();
 
         for (String code : codes) {
             try {
-                MarketDataService.PriceResult result = marketDataService.getStockPrice(code, marketName);
+                MarketDataService.PriceResult result = marketDataService.getStockPrice(code, market);
                 if (result.price() == null) continue;
 
-                StockPrice sp = priceRepo.findByStockCodeAndMarket(code, market)
-                        .orElse(StockPrice.builder()
-                                .stockCode(code)
-                                .market(market)
-                                .build());
-
-                sp.setPrice(result.price());
-                if (result.buyPrice()      != null) sp.setBuyPrice(result.buyPrice());
-                if (result.sellPrice()     != null) sp.setSellPrice(result.sellPrice());
-                if (result.openPrice()     != null) sp.setOpenPrice(result.openPrice());
-                if (result.previousClose() != null) sp.setPreviousClose(result.previousClose());
-                if (result.highPrice()     != null) sp.setHighPrice(result.highPrice());
-                if (result.lowPrice()      != null) sp.setLowPrice(result.lowPrice());
-                if (result.volume()        != null) sp.setVolume(result.volume());
-
-                // 若資料源未提供昨收，從歷史最近一筆收盤價回填
-                // → priceChange / changePercent (entity @Transient) 才能算得出來
-                if (sp.getPreviousClose() == null) {
-                    historyRepo.findRecentN(code, market, 1).stream().findFirst()
-                            .ifPresent(h -> sp.setPreviousClose(h.getClosePrice()));
-                }
-
-                sp.setTradingDate(resolveTradingDate(code, market));
-                sp.setUpdatedAt(now);
-                sp.setClosed(markClosed);
-                sp.setSource(result.source());
-
-                // 股票名稱寫入 stock 主檔（單一來源）
-                if (result.stockName() != null && !result.stockName().isBlank()
-                        && !result.stockName().equalsIgnoreCase(code)) {
-                    stockMasterRepo.upsert(code, market, result.stockName());
-                }
-
-                priceRepo.save(sp);
-                log.debug("更新 {} {} 價格: {}", marketName, code, result.price());
+                self.persistPrice(code, market, result, markClosed, now);
+                log.debug("更新 {} {} 價格: {}", market, code, result.price());
 
                 // 避免太頻繁呼叫 API
                 Thread.sleep(500);
             } catch (Exception e) {
-                log.warn("更新 {} {} 股價失敗: {}", marketName, code, e.getMessage());
+                log.warn("更新 {} {} 股價失敗: {}", market, code, e.getMessage());
             }
         }
+    }
+
+    /**
+     * 將單檔股價寫入 DB（短 transaction，不跨 HTTP 呼叫）。
+     */
+    @Transactional
+    public void persistPrice(String code, String market,
+                             MarketDataService.PriceResult result,
+                             boolean markClosed, LocalDateTime now) {
+        StockPrice sp = priceRepo.findByStockCodeAndMarket(code, market)
+                .orElse(StockPrice.builder()
+                        .stockCode(code)
+                        .market(market)
+                        .build());
+
+        sp.setPrice(result.price());
+        if (result.buyPrice()      != null) sp.setBuyPrice(result.buyPrice());
+        if (result.sellPrice()     != null) sp.setSellPrice(result.sellPrice());
+        if (result.openPrice()     != null) sp.setOpenPrice(result.openPrice());
+        if (result.previousClose() != null) sp.setPreviousClose(result.previousClose());
+        if (result.highPrice()     != null) sp.setHighPrice(result.highPrice());
+        if (result.lowPrice()      != null) sp.setLowPrice(result.lowPrice());
+        if (result.volume()        != null) sp.setVolume(result.volume());
+
+        // 若資料源未提供昨收，從歷史最近一筆收盤價回填
+        // → priceChange / changePercent (entity @Transient) 才能算得出來
+        if (sp.getPreviousClose() == null) {
+            historyRepo.findRecentN(code, market, 1).stream().findFirst()
+                    .ifPresent(h -> sp.setPreviousClose(h.getClosePrice()));
+        }
+
+        sp.setTradingDate(resolveTradingDate(code, market));
+        sp.setUpdatedAt(now);
+        sp.setClosed(markClosed);
+        sp.setSource(result.source());
+
+        // 股票名稱寫入 stock 主檔（單一來源）
+        if (result.stockName() != null && !result.stockName().isBlank()
+                && !result.stockName().equalsIgnoreCase(code)) {
+            stockMasterRepo.upsert(code, market, result.stockName());
+        }
+
+        priceRepo.save(sp);
     }
 
     /**
@@ -297,8 +317,12 @@ public class StockPriceService {
 
     /**
      * 手動觸發更新（不限交易時間）
+     *
+     * 注意：本方法 **不可** 加 {@code @Transactional}。會在迴圈裡逐檔呼叫 Yahoo Finance / NASDAQ HTTP，
+     * 一檔可能卡到 30 秒（Yahoo crumb 重試）。若整段包在 transaction 裡，HikariCP 連線會被外部 HTTP
+     * 等待長時間占住，造成連線池耗盡 → 使用者前端「存檔」拿不到連線而 timeout。
+     * DB 寫入由內部 {@link #persistPrice} 各自走短 transaction。
      */
-    @Transactional
     public Map<String, Object> manualRefresh() {
         Set<String> twCodes = new LinkedHashSet<>();
         Set<String> usCodes = new LinkedHashSet<>();
