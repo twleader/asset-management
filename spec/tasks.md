@@ -916,3 +916,19 @@ FinMind 自 2025 年起調整匿名呼叫額度，使用者開啟股票分析 �
 - [x] 33.2 `MarketDataService` 注入 token 並新增 `finmindRequest(url, timeoutSec)` 共用 builder，套用至股利率、ETF 持股、股利歷史三個 FinMind 呼叫
 - [x] 33.3 `HistoricalDataService.httpGet()` 偵測 URL 為 `api.finmindtrade.com` 時自動加上 `Authorization: Bearer <token>` header（涵蓋歷史價、匯率、股票名稱）
 - [x] 33.4 非 200 回應於 log 標記 token 是否有設定，方便除錯
+
+### Task 34: SnapshotForm「台幣存款總計」併入在途款項
+
+對應 Requirements: Requirement 1（資產快照 / 存款管理）
+
+#### 背景
+
+SnapshotForm 下方資訊列原本 `台幣存款總計` 只 sum `currency=TWD` 的存款，不含 TRANSIT_TWD，
+使用者看到「在途 −287,047」分列在右邊會誤以為頂端 KPI `存款 / 總資產` 沒把在途扣掉
+（實際上後端 `recalcTotals` 已將 TRANSIT_TWD 簽號合計進 `total_deposit`）。
+
+#### Steps:
+
+- [x] 34.1 前端 `SnapshotFormView.vue` 將 `depositTwdTotal` 改為「定存 + 活存 + 在途淨額」，
+       使台幣 tab 下方總計 = 頂端 KPI `存款` 邏輯（皆含在途）；
+       `depositTwdDemand` 改為直接 sum 非定存 TWD 條目，避免被總計倒推時混進在途

@@ -1505,9 +1505,10 @@ const usdDeposits         = computed(() => form.deposits.filter(d => d.currency 
 const transitTwdDeposits  = computed(() => form.deposits.filter(d => d.currency === 'TRANSIT_TWD'))
 const transitUsdDeposits  = computed(() => form.deposits.filter(d => d.currency === 'TRANSIT_USD'))
 const transitDeposits     = computed(() => [...transitTwdDeposits.value, ...transitUsdDeposits.value])
-const depositTwdTotal  = computed(() => twdDeposits.value.reduce((s, d) => s + depositTwd(d), 0))
 const depositTwdFixed  = computed(() => twdDeposits.value.filter(d => (d.depositType || '').includes('定存')).reduce((s, d) => s + depositTwd(d), 0))
-const depositTwdDemand = computed(() => depositTwdTotal.value - depositTwdFixed.value)
+const depositTwdDemand = computed(() => twdDeposits.value.filter(d => !(d.depositType || '').includes('定存')).reduce((s, d) => s + depositTwd(d), 0))
+// 台幣存款總計 包含 TRANSIT_TWD（在途）以對齊 stored total_deposit / 上方 KPI
+const depositTwdTotal  = computed(() => depositTwdFixed.value + depositTwdDemand.value + transitNetTwd.value)
 const depositUsdTotal  = computed(() => usdDeposits.value.reduce((s, d) => s + depositTwd(d), 0))
 const transitNetTwd    = computed(() => transitDeposits.value.reduce((s, d) => s + depositTwd(d), 0))
 const transitUsdNetTwd = computed(() => transitUsdDeposits.value.reduce((s, d) => s + depositTwd(d), 0))
