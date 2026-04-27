@@ -226,8 +226,8 @@ public class SnapshotFormBffController {
     /**
      * 把歷史價、即時快取（漲跌 / 名稱）、配息率合併成一筆 enriched DTO。
      *
-     * 套用「股價基準日規則」（{@link SnapshotEnricher#isCurrentBasedate}）：
-     *  - 基準日剛好是今天 → 用即時 price + priceChange（會持續變動）
+     * 套用「股價基準日規則」（{@link SnapshotEnricher#isCurrentBasedate}），**per-market** 判斷：
+     *  - basedate == 該市場時區的今日 → 用即時 price + priceChange（會持續變動）
      *  - 否則 → 用基準日的收盤價（hist.price），priceChange 留空（snapshot 已凍結在那一天）
      *
      * Dashboard 也套同一規則，兩頁顯示一致。
@@ -235,7 +235,7 @@ public class SnapshotFormBffController {
     private Mono<List<Map<String, Object>>> enrichBatch(
             String date, List<Map<String, Object>> historical, List<Map<String, String>> stocks) {
 
-        boolean isCurrent = SnapshotEnricher.isCurrentBasedate(LocalDate.parse(date));
+        LocalDate basedate = LocalDate.parse(date);
 
         Mono<List<Map<String, Object>>> liveMono = businessServicesClient.get()
                 .uri("/api/market-data/prices")
@@ -282,7 +282,8 @@ public class SnapshotFormBffController {
                 Map<String, Object> row = new HashMap<>();
                 row.put("stockCode", code);
                 row.put("market", market);
-                boolean useLive = isCurrent && live.get("price") != null;
+                boolean useLive = SnapshotEnricher.isCurrentBasedate(basedate, market)
+                        && live.get("price") != null;
                 row.put("price", useLive ? live.get("price") : hist.get("price"));
                 row.put("tradingDate", useLive ? live.get("tradingDate") : hist.get("tradingDate"));
                 row.put("priceChange", useLive ? live.get("priceChange") : null);

@@ -454,8 +454,11 @@ GET    /api/bff/dashboard/summary                  # 並行聚合儀表板所需
 > BFF Enrichment：`latestSnapshotDetail.stocks[]` 由 BFF 補上 `investmentCostOriginal`（美股 USD、台股 TWD），legacy 美股 `currency='TWD'` 記錄會用 `transactionExchangeRate` 換回 USD，前端買入均價直接使用此欄位以避免各頁面重複正規化。
 
 > 儀表板「股票持股」股價顯示規則（與「觀察股票」共用同一 `StockPriceRepository` 快取，由 `StockPriceService.scheduledTwIntradayUpdate()` / `scheduledUsIntradayUpdate()` 兩支獨立 cron 各自每 2 分鐘更新）：
-> - 當所選快照 `snapshotDate === 今日` 且該市場（台股／美股）`marketStatus.{tw|us}MarketOpen === true` 時，「股價」欄顯示來自 `stockPrices` 的即時價＋漲跌%，前端每 2 分鐘輪詢更新。
-> - 其他情形（基準日為過去日期，或當日該市場已休市）一律顯示快照中保存的當日 `stockPrice`（即 `latestSnapshotDetail.stocks[].stockPrice`），不顯示漲跌%、不參與 polling 切換。
+> - 規則 **per-market 判斷**：對每一檔股票，依其市場各自決定是否顯示即時價。
+>   - **台股**：`basedate == LocalDate.now(Asia/Taipei)` → 顯示 `stockPrices` 即時價＋漲跌%（盤中由 cron 每 2 分鐘更新）。
+>   - **美股**：`basedate == LocalDate.now(America/New_York)` → 顯示 `stockPrices` 即時價＋漲跌%。EST/EDT 由 JVM `ZoneId` 自動處理。
+>   - 為什麼分市場：使用者通常在 TW 收盤後建快照（`basedate = TW 那天`），但美股 session 跨午夜（TW 21:30 → 隔日 05:00），TW 已過午夜後 `basedate（昨天）== TW 今日（今天）` 會誤判；改用 `basedate == 美東今日` 才能正確涵蓋 TW 凌晨對應的美股盤中。
+> - 否則（basedate 為過去日期、或該市場非當日）顯示快照保存的當日 `stockPrice`（即 `latestSnapshotDetail.stocks[].stockPrice`），不顯示漲跌%、不參與 polling 切換。
 >
 > 儀表板基準日切換行為：
 > - 2 分鐘輪詢 `refreshPricesAndStatus()` 只刷新 `stockPrices` 與 `marketStatus`（呼叫 `marketDataApi.getAllPrices()` + `getMarketStatus()`），**不得重抓 dashboard summary** 以免覆蓋使用者選擇的快照。
