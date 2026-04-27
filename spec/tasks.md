@@ -946,3 +946,20 @@ Dashboard `bankSummary` 將 `TRANSIT_TWD` 與 `TRANSIT_USD` 同一條件分支�
 
 - [x] 35.1 前端 `DashboardView.vue` `bankSummary` 拆分 TRANSIT_TWD / TRANSIT_USD：
        TRANSIT_TWD → `demand`（台幣活存淨額）、TRANSIT_USD → `usdDemand`（美元活存淨額，amount 已是台幣值）
+
+### Task 36: 即時股價排程拆成「開盤抓即時 + 收盤後單次紀錄」
+
+對應 Requirements: Requirement 7（市場資料整合）
+
+#### 背景
+
+`StockPriceService.scheduledPriceUpdate` 原本以 fixedRate 2 分鐘 + `isXxxJustClosed()`（收盤後 20 分鐘窗口）
+觸發收盤價更新，導致同一個收盤窗口會被 fixedRate 反覆觸發 ~10 次；當 TWSE mis 連線異常 fallback 到 Yahoo
+（已停用、每次 ~25 秒重試）時，請求堆積把整個 backend handler thread 拖滿，前端拿不到資料。
+
+#### Steps:
+
+- [x] 36.1 `StockPriceService.scheduledPriceUpdate` fixedRate 2 分鐘僅在 `isTwMarketOpen()` / `isUsMarketOpen()` 為 true 時抓即時價（closed=false），收盤後直接 return
+- [x] 36.2 新增 `recordTwClosingPrice` cron `0 35 13 * * MON-FRI` Asia/Taipei，收盤後 5 分鐘單次寫入收盤價（closed=true）
+- [x] 36.3 新增 `recordUsClosingPrice` cron `0 5 16 * * MON-FRI` America/New_York，收盤後 5 分鐘單次寫入收盤價
+- [x] 36.4 `isXxxJustClosed()` 保留供 `resolveTradingDate` 判斷剛收盤窗口的 K 棒日期使用，但不再驅動排程
