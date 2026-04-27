@@ -963,3 +963,18 @@ Dashboard `bankSummary` 將 `TRANSIT_TWD` 與 `TRANSIT_USD` 同一條件分支�
 - [x] 36.2 新增 `recordTwClosingPrice` cron `0 35 13 * * MON-FRI` Asia/Taipei，收盤後 5 分鐘單次寫入收盤價（closed=true）
 - [x] 36.3 新增 `recordUsClosingPrice` cron `0 5 16 * * MON-FRI` America/New_York，收盤後 5 分鐘單次寫入收盤價
 - [x] 36.4 `isXxxJustClosed()` 保留供 `resolveTradingDate` 判斷剛收盤窗口的 K 棒日期使用，但不再驅動排程
+
+### Task 37: 即時股價移除 Yahoo Finance fallback + Yahoo crumb negative cache
+
+對應 Requirements: Requirement 7（市場資料整合）
+
+#### 背景
+
+`MarketDataService.getStockPrice` 原本在 TWSE mis / NASDAQ 失敗時 fallback 到 Yahoo Finance；但 spec design.md
+已標註 Yahoo Finance 在 Docker 環境被擋（無法取得 crumb），每次呼叫會跑 ~25 秒重試後失敗，且 `getYahooCrumb`
+為 `synchronized`，所有 thread 序列化排隊，造成排程觸發時整個 backend 卡住。
+
+#### Steps:
+
+- [x] 37.1 `getStockPrice` 移除 Yahoo Finance fallback：台股只用 TWSE mis、美股只用 NASDAQ；查無時直接 throw「查無股價：xxx」
+- [x] 37.2 `getYahooCrumb` 加 5 分鐘 negative cache（`yahooCrumbBlockedUntil`），失敗後短時間內 fast-fail，不再讓其他 Yahoo 呼叫者（股利率、ETF 等）也被拖滿

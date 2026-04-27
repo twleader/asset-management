@@ -47,6 +47,9 @@ public class MarketDataService {
 
     /** Yahoo Finance crumb（session 期間有效） */
     private volatile String yahooCrumb = null;
+    /** Yahoo crumb 取得失敗的 negative cache 到期時間（millis），避免短時間內重複拖長重試 */
+    private volatile long yahooCrumbBlockedUntil = 0L;
+    private static final long YAHOO_CRUMB_BLOCK_MS = 5 * 60 * 1000L; // 5 分鐘
 
     public MarketDataService(StockPriceRepository stockPriceRepo,
                              StockPriceHistoryRepository stockPriceHistoryRepo,
@@ -173,43 +176,17 @@ public class MarketDataService {
 
     // ─────────────────────────────────────────────────────────────────────────
     // 股票最新股價（含漲跌）
-    // 台股：TWSE mis API → Yahoo Finance .TW → .TWO
-    // 美股：NASDAQ info API → Yahoo Finance
+    // 台股：TWSE mis API
+    // 美股：NASDAQ info API
+    // Yahoo Finance 在 Docker 環境下 crumb 取不到、整批呼叫會把 thread pool 拖滿，
+    // 已不在 hot path 作為 fallback；spec design.md 亦標註已停用。
     // ─────────────────────────────────────────────────────────────────────────
     public PriceResult getStockPrice(String stockCode, String market) {
         if ("台股".equals(market)) {
-            Optional<PriceResult> twse = getTwseRealTimePrice(stockCode);
-            if (twse.isPresent()) return twse.get();
-
-            Optional<PriceResult> tw = getYahooPrice(stockCode, stockCode + ".TW", market);
-            if (tw.isPresent()) return tw.get();
-
-            return getYahooPrice(stockCode, stockCode + ".TWO", market)
+            return getTwseRealTimePrice(stockCode)
                     .orElseThrow(() -> new RuntimeException("查無股價：" + stockCode));
         } else {
-            // 美股：NASDAQ 優先，Yahoo 備用
-            Optional<PriceResult> nasdaq = getNasdaqPrice(stockCode);
-            if (nasdaq.isPresent()) {
-                PriceResult r = nasdaq.get();
-                // NASDAQ 沒有五檔（buy/sell）也常缺 stockName，必要時呼叫 Yahoo 補齊
-                boolean needName = r.stockName() == null || r.stockName().isBlank();
-                boolean needBidAsk = r.buyPrice() == null || r.sellPrice() == null;
-                if (needName || needBidAsk) {
-                    Optional<PriceResult> y = getYahooPrice(stockCode, stockCode, market);
-                    String name = needName
-                            ? y.map(PriceResult::stockName).filter(n -> n != null && !n.isBlank()).orElse(null)
-                            : r.stockName();
-                    BigDecimal bid = needBidAsk ? y.map(PriceResult::buyPrice).orElse(null)  : r.buyPrice();
-                    BigDecimal ask = needBidAsk ? y.map(PriceResult::sellPrice).orElse(null) : r.sellPrice();
-                    return new PriceResult(r.stockCode(), r.market(), r.price(), r.change(), r.changePct(),
-                            r.source(), name,
-                            bid, ask, r.openPrice(), r.previousClose(),
-                            r.highPrice(), r.lowPrice(), r.volume());
-                }
-                return r;
-            }
-
-            return getYahooPrice(stockCode, stockCode, market)
+            return getNasdaqPrice(stockCode)
                     .orElseThrow(() -> new RuntimeException("查無股價：" + stockCode));
         }
     }
@@ -843,6 +820,9 @@ public class MarketDataService {
      */
     private synchronized String getYahooCrumb() throws Exception {
         if (yahooCrumb != null) return yahooCrumb;
+        if (System.currentTimeMillis() < yahooCrumbBlockedUntil) {
+            throw new RuntimeException("Yahoo Finance crumb negative cache 中，5 分鐘內不重試");
+        }
 
         log.info("初始化 Yahoo Finance session...");
 
@@ -885,7 +865,8 @@ public class MarketDataService {
             }
         }
 
-        throw new RuntimeException("無法取得 Yahoo Finance crumb（已重試多次）");
+        yahooCrumbBlockedUntil = System.currentTimeMillis() + YAHOO_CRUMB_BLOCK_MS;
+        throw new RuntimeException("無法取得 Yahoo Finance crumb（已重試多次，5 分鐘內 negative cache）");
     }
 
     private String get(String url, String userAgent) throws Exception {
