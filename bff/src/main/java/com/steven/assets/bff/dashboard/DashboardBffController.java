@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
+import java.time.LocalDate;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -87,6 +88,8 @@ public class DashboardBffController {
                     }
 
                     Object latestId = snapshots.get(0).get("id");
+                    Object basedateObj = snapshots.get(0).get("snapshotDate");
+                    LocalDate basedate = basedateObj != null ? LocalDate.parse(basedateObj.toString()) : null;
                     return businessServicesClient.get()
                             .uri("/api/snapshots/{id}", latestId)
                             .retrieve()
@@ -97,6 +100,12 @@ public class DashboardBffController {
                                 dto.setLatestSnapshotDetail(detail);
                                 return enricher.fetchSnapshotClosePrices(detail)
                                         .map(closeMap -> {
+                                            // 「股價基準日規則」：基準日不是今天 → 用基準日收盤價蓋掉即時股價，
+                                            // 鎖定在那一天，避免 Dashboard 對舊快照仍持續顯示今日波動。
+                                            if (!SnapshotEnricher.isCurrentBasedate(basedate)) {
+                                                dto.setStockPrices(
+                                                        SnapshotEnricher.closeMapToPriceList(closeMap, basedate));
+                                            }
                                             dto.setMergedStocks(
                                                     enricher.buildMergedStocks(detail, closeMap, false));
                                             return ResponseEntity.ok(dto);
