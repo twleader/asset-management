@@ -1089,3 +1089,25 @@ fallback 到 `row.stockPrice`（基準日收盤）→ Dashboard 顯示前一交�
 
 - [x] 43.1 `StockAlertService.evaluate` live 觸發路徑改 `triggeredAt = LocalDateTime.now()`，
         移除 `tradingDate.atTime(closeTime)` 的近似邏輯
+
+### Task 44: 警示頁面 MA / KD 顯示「觸發時」值（不再混入當前值）
+
+對應 Requirements: Requirement 14（到價警示）
+
+#### 背景
+
+`StockAlertDto.Response.{quarterlyMa,kValue,dValue}` 現由 `toResponse()` 用 `indicatorService.compute()` 即時計算，
+與 `lastTriggeredAt/Price`（觸發時凍結值）混排在同一欄「觸發時間 / 股價 / 季線 / KD」，造成顯示不一致：
+例如 0050「K 值高於 96」alert，觸發當時 K=96.59、D=94.14 都正確 ≥ 門檻，但畫面顯示 K=90.3 D=90.8（當前值），
+看起來像「沒滿足條件卻觸發」誤導使用者。
+
+`StockAlert` model 早已有 `lastTriggeredMaValue / lastTriggeredKdValue / lastTriggeredDValue`，
+`checkMaDeviation` / `checkKdValue` 觸發時會自動寫入；只需 DTO 改回傳這些欄位、前端改 binding。
+
+#### Steps:
+
+- [x] 44.1 `StockAlertDto.Response` 把 `quarterlyMa/kValue/dValue` 改名為 `lastTriggeredMaValue/lastTriggeredKdValue/lastTriggeredDValue`
+- [x] 44.2 `StockAlertService.toResponse()` 從 `alert.getLastTriggered*Value()` 讀取，不再呼叫 `indicatorService.compute()`
+        （副作用：每筆 alert 少一次 indicator 計算，列表 query 加快）
+- [x] 44.3 `StockAlertView.vue` 把 `row.quarterlyMa / kValue / dValue` 改為 `row.lastTriggeredMaValue / KdValue / DValue`
+- [x] 44.4 PRICE_ABOVE/BELOW 等不算 MA/KD 的 alert 觸發後該欄位為 null，前端顯示 `—`（保持現有 fallback）

@@ -530,19 +530,16 @@ public class StockAlertService {
         r.setAlertType(a.getAlertType());
         r.setThreshold(a.getThreshold());
         r.setActive(a.getActive());
-        // 觸發時間/股價：只顯示最近 3 個交易日內的；超過就視為過期不傳
+        // 觸發時間 / 股價 / MA / K / D：全部用觸發時凍結值，最近 3 個交易日內的才傳；超過就視為過期不傳
         java.time.LocalDateTime cutoff = recentTradingDayCutoff(a.getMarket(), 3);
         if (a.getLastTriggeredAt() != null
                 && (cutoff == null || !a.getLastTriggeredAt().isBefore(cutoff))) {
             r.setLastTriggeredAt(a.getLastTriggeredAt());
             r.setLastTriggeredPrice(a.getLastTriggeredPrice());
+            r.setLastTriggeredMaValue(a.getLastTriggeredMaValue());
+            r.setLastTriggeredKdValue(a.getLastTriggeredKdValue());
+            r.setLastTriggeredDValue(a.getLastTriggeredDValue());
         }
-        // 季線/K/D：取「當前」技術指標值（與觀察清單共用 TechnicalIndicatorService），
-        // 不論警示類型為何皆計算，避免 MA 警示時 K/D 為空。
-        TechnicalIndicatorService.Indicators ind = indicatorService.compute(a.getStockCode(), a.getMarket());
-        r.setQuarterlyMa(ind.quarterlyMa());
-        r.setKValue(ind.k());
-        r.setDValue(ind.d());
         r.setCreatedAt(a.getCreatedAt());
         r.setConditionLabel(buildLabel(a));
         return r;
