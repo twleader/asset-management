@@ -70,7 +70,7 @@ public class SnapshotFormBffController {
                     }
                     return Mono.just(historical);
                 })
-                .flatMap(historical -> enrichBatch(historical, stocks))
+                .flatMap(historical -> enrichBatch(date, historical, stocks))
                 .map(ResponseEntity::ok);
     }
 
@@ -223,9 +223,22 @@ public class SnapshotFormBffController {
                 .then(fetchHistoricalPrices(date, stocks));
     }
 
-    /** 把歷史價、即時快取（漲跌 / 名稱）、配息率合併成一筆 enriched DTO。 */
+    /**
+     * 把歷史價、即時快取（漲跌 / 名稱）、配息率合併成一筆 enriched DTO。
+     *
+     * 價格欄位選擇：
+     *  - snapshot 日期屬「當前快照」（今天或前 1 天，handle 週末/收盤後）→ 用即時 price，與 priceChange 同源
+     *  - 真正的歷史快照（更早日期）→ 用歷史收盤價（hist.price）
+     *
+     * 沒做這個區分的話，priceChange 是即時的、price 卻是歷史收盤，UI 會顯示
+     * 「昨收 ▲ 今日漲跌」的不一致組合（price + priceChange 加起來才是真正當下價）。
+     */
     private Mono<List<Map<String, Object>>> enrichBatch(
-            List<Map<String, Object>> historical, List<Map<String, String>> stocks) {
+            String date, List<Map<String, Object>> historical, List<Map<String, String>> stocks) {
+
+        LocalDate snapshotDate = LocalDate.parse(date);
+        LocalDate today = LocalDate.now(java.time.ZoneId.of("Asia/Taipei"));
+        boolean preferLive = !snapshotDate.isBefore(today.minusDays(1));
 
         Mono<List<Map<String, Object>>> liveMono = businessServicesClient.get()
                 .uri("/api/market-data/prices")
@@ -272,8 +285,9 @@ public class SnapshotFormBffController {
                 Map<String, Object> row = new HashMap<>();
                 row.put("stockCode", code);
                 row.put("market", market);
-                row.put("price", hist.get("price"));
-                row.put("tradingDate", hist.get("tradingDate"));
+                boolean useLive = preferLive && live.get("price") != null;
+                row.put("price", useLive ? live.get("price") : hist.get("price"));
+                row.put("tradingDate", useLive ? live.get("tradingDate") : hist.get("tradingDate"));
                 row.put("priceChange", live.get("priceChange"));
                 row.put("changePercent", live.get("changePercent"));
                 row.put("stockName", firstNonNull(div.get("stockName"), live.get("stockName")));
