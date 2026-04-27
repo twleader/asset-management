@@ -459,6 +459,7 @@ GET    /api/bff/dashboard/summary                  # 並行聚合儀表板所需
 >   - **美股**：`basedate == LocalDate.now(America/New_York)` → 顯示 `stockPrices` 即時價＋漲跌%。EST/EDT 由 JVM `ZoneId` 自動處理。
 >   - 為什麼分市場：使用者通常在 TW 收盤後建快照（`basedate = TW 那天`），但美股 session 跨午夜（TW 21:30 → 隔日 05:00），TW 已過午夜後 `basedate（昨天）== TW 今日（今天）` 會誤判；改用 `basedate == 美東今日` 才能正確涵蓋 TW 凌晨對應的美股盤中。
 > - 否則（basedate 為過去日期、或該市場非當日）顯示快照保存的當日 `stockPrice`（即 `latestSnapshotDetail.stocks[].stockPrice`），不顯示漲跌%、不參與 polling 切換。
+> - **per-market 判斷一律由 BFF 完成**（`SnapshotEnricher.mergePerMarketPrices`），前端禁止重做 basedate / 市場開盤判斷。BFF 把判斷結果編碼在 response：`stockPrices[].priceChange != null` 即代表該檔為 live；`priceChange == null` 即為 frozen 快照價。前端 `getRealtimePrice()` 只能依此 flag 決定 render，避免「同義欄位、不同邏輯」造成 Dashboard 與 SnapshotForm 兩頁顯示不一致。
 >
 > 儀表板基準日切換行為：
 > - 2 分鐘輪詢 `refreshPricesAndStatus()` 只刷新 `stockPrices` 與 `marketStatus`（呼叫 `marketDataApi.getAllPrices()` + `getMarketStatus()`），**不得重抓 dashboard summary** 以免覆蓋使用者選擇的快照。

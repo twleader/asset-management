@@ -372,12 +372,10 @@ function isBaselineToday() {
 }
 
 function getRealtimePrice(row) {
-  if (!isBaselineToday()) return null
-  const isOpen = row.market === '美股' ? marketStatus.value.usMarketOpen : marketStatus.value.twMarketOpen
-  if (!isOpen) return null
   const key = `${row.market}_${row.stockCode}`
   const p = stockPrices.value[key]
   if (!p || p.price == null) return null
+  if (p.priceChange == null) return null
   return { price: Number(p.price), changePercent: p.changePercent != null ? Number(p.changePercent) : null }
 }
 

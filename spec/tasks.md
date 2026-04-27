@@ -1055,3 +1055,22 @@ TW 已過午夜後 `basedate（昨天）== TW 今日（今天）` 必失敗 → 
         成功取得後 put cache（失敗的 N/A 也 cache 1 小時，避免 cold storm 反覆打 FinMind）
 - [x] 41.3 SnapshotFormBffController 把 dividend-rate per-call timeout 從 3s 放寬到 8s
         （cold call 路徑也能完整回，cache 命中後本就 <5ms）
+
+### Task 42: Dashboard 前端不再重做 basedate 判斷，一律信任 BFF flag
+
+對應 Requirements: Requirement 9（儀表板基準日股價）、CLAUDE.md「同義欄位、同一 business service API」
+
+#### 背景
+
+Task 39 把 BFF `isCurrentBasedate` 改成 per-market，Dashboard BFF 也改成 `mergePerMarketPrices`，
+但 `DashboardView.vue` 的 `getRealtimePrice()` 仍自己跑一遍 `isBaselineToday()`（純比 TW 今日）+ `marketStatus.{tw|us}MarketOpen`，
+與 BFF 的 per-market 判斷重複且邏輯落後。
+結果：BFF 已經把美股 live 價放進 `dto.stockPrices`，但前端 `getRealtimePrice` 第一行就 `if (!isBaselineToday()) return null`，
+fallback 到 `row.stockPrice`（基準日收盤）→ Dashboard 顯示前一交易日收盤，與 SnapshotForm 不一致。
+
+#### Steps:
+
+- [x] 42.1 `DashboardView.vue` `getRealtimePrice(row)` 改成只看 `stockPrices[key].priceChange`：
+        非 null → live（套漲跌色 / %）；null → 退回 `row.stockPrice` frozen 顯示
+- [x] 42.2 移除 / 保留 `isBaselineToday()`：價格判斷不再用，但 styling（淡灰色）若仍需要可保留
+- [x] 42.3 spec/design.md 寫清「per-market 判斷一律由 BFF 完成；前端禁止重做」
