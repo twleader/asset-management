@@ -16,6 +16,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -251,8 +252,9 @@ public class SnapshotFormBffController {
                                 .build())
                         .retrieve()
                         .bodyToMono(MAP)
+                        .timeout(Duration.ofSeconds(3))
                         .onErrorReturn(Collections.emptyMap())
-                        .map(dr -> Map.entry(s.get("market") + "_" + s.get("code"), dr)), 4)
+                        .map(dr -> Map.entry(s.get("market") + "_" + s.get("code"), dr)), 16)
                 .collectMap(Map.Entry::getKey, Map.Entry::getValue);
 
         return Mono.zip(liveMono, dividendsMono).map(t -> {

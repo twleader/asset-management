@@ -1019,3 +1019,19 @@ TW 已過午夜後 `basedate（昨天）== TW 今日（今天）` 必失敗 → 
         每筆 price 依其 market 套 `isCurrentBasedate(basedate, market)` 決定保留 live 或換成 basedate 收盤
 - [ ] 39.3 `SnapshotFormBffController.enrichBatch` 同樣 per-stock：每 row 依 market 各自決定 useLive
 - [ ] 39.4 `closeMapToPriceList` 改為依需求 build 單筆 / 單市場版本（或在呼叫端按 market 篩選 closeMap）
+
+### Task 40: SnapshotForm BFF 配息率批次抓取避免 30s timeout
+
+對應 Requirements: Requirement 7（市場資料整合）
+
+#### 背景
+
+`SnapshotFormBffController.enrichBatch` 對每檔股票分別呼叫 `/api/market-data/dividend-rate`，
+原 concurrency=4、無 per-call timeout。21 檔持股若任一檔 FinMind 偶發 hang，整批會被拖到前端 axios 30s timeout，
+畫面顯示 "-" 並 console 報 `批次載入股價失敗: AxiosError: timeout of 30000ms exceeded`。
+
+#### Steps:
+
+- [x] 40.1 `enrichBatch` dividend-rate Flux concurrency 從 4 提高到 16（21 檔內 1–2 批可消化）
+- [x] 40.2 每筆 dividend-rate 加 per-call timeout 3 秒（`Mono.timeout(...).onErrorReturn(emptyMap)`），
+        單檔 hang 不影響整批回應
