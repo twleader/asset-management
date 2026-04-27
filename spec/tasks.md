@@ -932,3 +932,17 @@ SnapshotForm 下方資訊列原本 `台幣存款總計` 只 sum `currency=TWD` �
 - [x] 34.1 前端 `SnapshotFormView.vue` 將 `depositTwdTotal` 改為「定存 + 活存 + 在途淨額」，
        使台幣 tab 下方總計 = 頂端 KPI `存款` 邏輯（皆含在途）；
        `depositTwdDemand` 改為直接 sum 非定存 TWD 條目，避免被總計倒推時混進在途
+
+### Task 35: Dashboard 美元存款併入 TRANSIT_USD
+
+對應 Requirements: Requirement 1（資產快照 / 存款管理）
+
+#### 背景
+
+Dashboard `bankSummary` 將 `TRANSIT_TWD` 與 `TRANSIT_USD` 同一條件分支都計入 TWD 的 `demand`，
+導致美元在途（TRANSIT_USD）誤併進台幣活存，使 `美元合計` 不含在途、跨幣別分配失真。
+
+#### Steps:
+
+- [x] 35.1 前端 `DashboardView.vue` `bankSummary` 拆分 TRANSIT_TWD / TRANSIT_USD：
+       TRANSIT_TWD → `demand`（台幣活存淨額）、TRANSIT_USD → `usdDemand`（美元活存淨額，amount 已是台幣值）

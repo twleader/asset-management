@@ -503,8 +503,10 @@ const bankSummary = computed(() => {
     if (cur === 'USD') {
       if (type.includes('定存')) usdFixed += amt
       else usdDemand += amt
-    } else if (cur === 'TRANSIT_TWD' || cur === 'TRANSIT_USD') {
-      demand += amt   // 在途（負值）歸入活存淨額
+    } else if (cur === 'TRANSIT_TWD') {
+      demand += amt   // 台幣在途歸入台幣活存淨額
+    } else if (cur === 'TRANSIT_USD') {
+      usdDemand += amt   // 美元在途（amount 已是台幣值）歸入美元活存淨額
     } else {
       if (type.includes('定存')) fixed += amt
       else demand += amt
