@@ -624,7 +624,7 @@
 ### Task 20: 資料庫備份／還原（UI 介面）
 
 對應 Requirements: 15
-前置任務: `scripts/backup.sh` 已就緒、host 端 `gdrive-crypt` rclone remote 已設定完成
+前置任務: host 端 `gdrive-crypt` rclone remote 已設定完成（舊 host launchd 排程 `scripts/backup.sh` 已停用並移除，全改由 Spring Boot `BackupService` 排程）
 
 - [x] 20.1 基礎建設：`backend/Dockerfile` 加裝 `postgresql-client` 與 `rclone`
   - 在 runtime stage（alpine）加 `RUN apk add --no-cache postgresql16-client rclone`
