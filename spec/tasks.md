@@ -1136,3 +1136,6 @@ SnapshotFormView 編輯模式（`/snapshots/:id/edit`，標題「管理資產」
         新增第三參數，true 時帶 `historicalOnly=true` query
 - [ ] 45.3 `SnapshotFormView.vue` 所有 `bffApi.snapshotForm.prices(...)` 呼叫處改帶 `isEdit.value`
         （`fetchPriceForRow` / `fetchPrice` / `loadHistoricalPrices` / 複製前一版股票補價 / `loadPricesForExistingStocks`）
+- [ ] 45.4 `enrichBatch` 當 basedate==今日（市場時區）時改優先用 live cache 的價（盤後 = 當日收盤），
+        不再依賴 `stock_price_history` 是否已匯入當日。修正「basedate 4/28 但顯示 4/27 收盤」的問題：
+        live cache 在盤後即有 4/28 收盤，歷史表通常要再過幾小時才匯入。`historicalOnly=true` 時仍不回傳漲跌

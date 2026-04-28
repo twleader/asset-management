@@ -286,13 +286,18 @@ public class SnapshotFormBffController {
                 Map<String, Object> row = new HashMap<>();
                 row.put("stockCode", code);
                 row.put("market", market);
-                boolean useLive = !historicalOnly
-                        && SnapshotEnricher.isCurrentBasedate(basedate, market)
-                        && live.get("price") != null;
-                row.put("price", useLive ? live.get("price") : hist.get("price"));
-                row.put("tradingDate", useLive ? live.get("tradingDate") : hist.get("tradingDate"));
-                row.put("priceChange", useLive ? live.get("priceChange") : null);
-                row.put("changePercent", useLive ? live.get("changePercent") : null);
+                // basedate==今日（市場時區）時，優先用 live cache 的價：
+                //  - 盤中：即時價
+                //  - 盤後：當日收盤（live cache 已收完盤）
+                // 歷史表（stock_price_history）通常在盤後幾小時才匯入當日資料，
+                // 在那之前 prices-on-date 會 fallback 到前一交易日，造成「基準日 4/28 卻顯示 4/27」。
+                boolean isToday = SnapshotEnricher.isCurrentBasedate(basedate, market);
+                boolean preferLive = isToday && live.get("price") != null;
+                boolean showLiveDelta = !historicalOnly && preferLive;
+                row.put("price", preferLive ? live.get("price") : hist.get("price"));
+                row.put("tradingDate", preferLive ? live.get("tradingDate") : hist.get("tradingDate"));
+                row.put("priceChange", showLiveDelta ? live.get("priceChange") : null);
+                row.put("changePercent", showLiveDelta ? live.get("changePercent") : null);
                 row.put("stockName", firstNonNull(div.get("stockName"), live.get("stockName")));
                 BigDecimal dr = SnapshotEnricher.toBigDecimal(div.get("dividendRate"));
                 row.put("dividendRate", dr);
