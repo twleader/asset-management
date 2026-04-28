@@ -1139,3 +1139,21 @@ SnapshotFormView 編輯模式（`/snapshots/:id/edit`，標題「管理資產」
 - [ ] 45.4 `enrichBatch` 當 basedate==今日（市場時區）時改優先用 live cache 的價（盤後 = 當日收盤），
         不再依賴 `stock_price_history` 是否已匯入當日。修正「basedate 4/28 但顯示 4/27 收盤」的問題：
         live cache 在盤後即有 4/28 收盤，歷史表通常要再過幾小時才匯入。`historicalOnly=true` 時仍不回傳漲跌
+
+### Task 46: 美股漲跌幅錯誤 — `previous_close` 改用歷史表權威值
+
+對應 Requirements: Requirement 7（市場資料整合）、Requirement 9（儀表板基準日股價）
+
+#### 背景
+
+`StockPrice.priceChange / changePercent`（@Transient）= `price - previousClose`，
+`previousClose` 寫入時優先取自 Yahoo `regularMarketPreviousClose`。觀察到 Yahoo 在週末 / 美股盤外
+回傳異常舊值（NVDA 4/28 收到 4/22 close = 202.50；正確應為 4/27 close = 216.61），
+造成 Dashboard 顯示 NVDA ▲5%、GOOGL ▲3.61% 等明顯錯誤的漲跌幅。
+
+歷史表（`stock_price_history`）由我們自家的收盤紀錄 cron 寫入，是權威值；應一律以此為準。
+
+#### Steps:
+
+- [ ] 46.1 `StockPriceService.persistPrice` 改用 `historyRepo.findClosestPrice(code, market, tradingDate.minusDays(1))`
+        覆寫 `previousClose`；找不到歷史時才退回資料源提供的值；都沒有就維持 null
