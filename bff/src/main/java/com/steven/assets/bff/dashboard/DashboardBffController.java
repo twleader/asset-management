@@ -115,26 +115,28 @@ public class DashboardBffController {
 
     /**
      * GET /api/bff/dashboard/realtime
-     * 5 分鐘輪詢用：只回傳即時股價與市場開盤狀態。
+     * 2 分鐘輪詢用：先 trigger 後端從 Yahoo 拉最新行情，再回傳 stockPrices + marketStatus。
+     * 只讀取 cache 在後端 cron 跑得不夠頻繁時會看到舊值，故每次輪詢主動 refresh 一次。
      */
     @GetMapping("/realtime")
     public Mono<ResponseEntity<Map<String, Object>>> getRealtime() {
-        Mono<List<Map<String, Object>>> pricesMono = businessServicesClient.get()
-                .uri("/api/market-data/prices")
+        Mono<Void> refresh = businessServicesClient.post()
+                .uri("/api/market-data/prices/refresh")
                 .retrieve()
-                .bodyToMono(LIST_MAP)
-                .onErrorReturn(Collections.emptyList());
-        Mono<Map<String, Object>> statusMono = businessServicesClient.get()
-                .uri("/api/market-data/market-status")
-                .retrieve()
-                .bodyToMono(MAP)
-                .onErrorReturn(Collections.emptyMap());
-        return Mono.zip(pricesMono, statusMono).map(t -> {
+                .bodyToMono(Void.class)
+                .onErrorResume(e -> Mono.empty());
+
+        return refresh.then(Mono.zip(
+                businessServicesClient.get().uri("/api/market-data/prices")
+                        .retrieve().bodyToMono(LIST_MAP).onErrorReturn(Collections.emptyList()),
+                businessServicesClient.get().uri("/api/market-data/market-status")
+                        .retrieve().bodyToMono(MAP).onErrorReturn(Collections.emptyMap())
+        ).map(t -> {
             Map<String, Object> body = new HashMap<>();
             body.put("stockPrices", t.getT1());
             body.put("marketStatus", t.getT2());
             return ResponseEntity.ok(body);
-        });
+        }));
     }
 
     /**
