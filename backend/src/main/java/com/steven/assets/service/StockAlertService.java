@@ -17,8 +17,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -142,7 +146,7 @@ public class StockAlertService {
             };
 
             if (triggered) {
-                LocalDateTime triggeredAt = LocalDateTime.now();
+                LocalDateTime triggeredAt = computeTriggeredAt(alert);
                 alert.setLastTriggeredAt(triggeredAt);
                 alert.setLastTriggeredPrice(BigDecimal.valueOf(currentPrice));
                 alertRepo.save(alert);
@@ -550,6 +554,32 @@ public class StockAlertService {
                 market, org.springframework.data.domain.PageRequest.of(0, n));
         if (dates.size() < n) return null;
         return dates.get(dates.size() - 1).atStartOfDay();
+    }
+
+    /**
+     * 觸發時間一律落在「該市場交易時段內」：
+     *  - 若 cron 偵測時剛好在交易時段內（市場時區） → 用 LocalDateTime.now()
+     *  - 否則（盤後 / 假日） → 退回最近一筆交易日的收盤時間（max(history.tradingDate)@close）
+     * 設計目的：cron 5 分鐘採樣常在收盤後幾分鐘才偵測到當日收盤觸發，
+     * 直接用 now() 會顯示 13:35 / 16:05 等盤外時間，與「到價」語意不符。
+     */
+    private LocalDateTime computeTriggeredAt(StockAlert alert) {
+        boolean isUs = "美股".equals(alert.getMarket());
+        ZoneId zone = isUs ? ZoneId.of("America/New_York") : ZoneId.of("Asia/Taipei");
+        LocalTime open = isUs ? LocalTime.of(9, 30) : LocalTime.of(9, 0);
+        LocalTime close = isUs ? LocalTime.of(16, 0) : LocalTime.of(13, 30);
+
+        ZonedDateTime nowZ = ZonedDateTime.now(zone);
+        DayOfWeek dow = nowZ.getDayOfWeek();
+        boolean isWeekday = dow != DayOfWeek.SATURDAY && dow != DayOfWeek.SUNDAY;
+        LocalTime nowT = nowZ.toLocalTime();
+        if (isWeekday && !nowT.isBefore(open) && !nowT.isAfter(close)) {
+            return LocalDateTime.now();
+        }
+
+        return historyRepo.findMaxTradingDate(alert.getStockCode(), alert.getMarket())
+                .map(d -> d.atTime(close))
+                .orElseGet(LocalDateTime::now);
     }
 
     /**

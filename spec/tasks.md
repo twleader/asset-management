@@ -1089,6 +1089,9 @@ fallback 到 `row.stockPrice`（基準日收盤）→ Dashboard 顯示前一交�
 
 - [x] 43.1 `StockAlertService.evaluate` live 觸發路徑改 `triggeredAt = LocalDateTime.now()`，
         移除 `tradingDate.atTime(closeTime)` 的近似邏輯
+- [x] 43.2 `triggeredAt` 一律 clamp 到該市場交易時段內：盤中（市場時區，週一～週五，TW 09:00–13:30 / US 09:30–16:00）用 `now()`；
+        盤後或假日退回 `max(history.tradingDate)@close`。理由：cron 通常在收盤後幾分鐘才偵測到當日收盤觸發，
+        裸 `now()` 會顯示 13:35 / 17:28 等盤外時間，與「到價」語意不符
 
 ### Task 44: 警示頁面 MA / KD 顯示「觸發時」值（不再混入當前值）
 
