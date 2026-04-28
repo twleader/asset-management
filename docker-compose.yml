@@ -23,6 +23,24 @@ services:
     networks:
       - asset-net
 
+  # ── Redis (Cache) ───────────────────────────────────────────
+  # 未來作為 backend / BFF 的 cache 層（市場資料、技術指標、配息率…）。
+  # 預設只開內部 6379；如需 host 連線除錯可暫時加 ports: ["6379:6379"]。
+  redis:
+    image: redis:7-alpine
+    container_name: asset-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redis_data:/data
+    networks:
+      - asset-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   # ── Business Services (Spring Boot MVC) ────────────────────
   # Internal only — not exposed to host. BFF is the sole entry point.
   business-services:
@@ -101,3 +119,5 @@ networks:
 volumes:
   postgres_data:
     name: asset-postgres-data
+  redis_data:
+    name: asset-redis-data
