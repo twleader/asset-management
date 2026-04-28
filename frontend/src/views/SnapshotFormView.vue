@@ -1600,7 +1600,7 @@ async function fetchPriceForRow(row) {
   try {
     // 一支 BFF 端點處理：歷史收盤價 + 自動 backfill + 名稱 + 配息率 + 漲跌
     const result = await bffApi.snapshotForm.prices(form.snapshotDate,
-      [{ code: row.stockCode, market: row.market }])
+      [{ code: row.stockCode, market: row.market }], isEdit.value)
     applyEnrichedPrices(result, [row])
   } catch {
     // 查不到就靜默略過
@@ -1631,7 +1631,7 @@ const fetchPrice = async (row) => {
   row._fetchingPrice = true
   try {
     const list = await bffApi.snapshotForm.prices(form.snapshotDate,
-      [{ code: row.stockCode, market: row.market }])
+      [{ code: row.stockCode, market: row.market }], isEdit.value)
     const result = list?.[0] ?? {}
     row.latestPrice    = result.price != null ? Number(result.price) : null
     row.priceChange    = result.priceChange != null ? Number(result.priceChange) : null
@@ -1766,7 +1766,7 @@ const fetchDividendRate = async (row) => {
   try {
     // 透過 BFF 批次端點取得配息率（同時也會帶回名稱與股價）
     const list = await bffApi.snapshotForm.prices(form.snapshotDate,
-      [{ code: row.stockCode, market: row.market }])
+      [{ code: row.stockCode, market: row.market }], isEdit.value)
     const result = list?.[0] ?? {}
     if (result.dividendRate != null) {
       row.dividendRate = Number(result.dividendRate)
@@ -1898,7 +1898,7 @@ async function loadAllPrices() {
       .map(s => ({ code: s.stockCode, market: s.market }))
 
     if (stocks.length > 0 && form.snapshotDate) {
-      const prices = await bffApi.snapshotForm.prices(form.snapshotDate, stocks)
+      const prices = await bffApi.snapshotForm.prices(form.snapshotDate, stocks, isEdit.value)
       applyEnrichedPrices(prices, form.stocks)
     }
 
@@ -2017,9 +2017,9 @@ onMounted(async () => {
     await loadExchangeRateForDate(today)
   }
 
-  // 載入所有已快取的股價，並啟動自動更新
+  // 載入所有已快取的股價，並啟動自動更新（編輯模式凍結基準日，不需輪詢）
   await loadAllPrices()
-  startPriceAutoRefresh()
+  if (!isEdit.value) startPriceAutoRefresh()
 
   // 補抓美股 broker row 有交易日期但無匯率的情況
   for (const stock of form.stocks) {

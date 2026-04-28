@@ -85,8 +85,10 @@ export const bffApi = {
   // SnapshotForm
   snapshotForm: {
     get: (id) => api.get(`/bff/snapshot-form/${id}`),
-    prices: (date, stocks) =>
-      api.post('/bff/snapshot-form/prices', stocks, { params: { date } }),
+    prices: (date, stocks, historicalOnly = false) =>
+      api.post('/bff/snapshot-form/prices', stocks, {
+        params: historicalOnly ? { date, historicalOnly: true } : { date }
+      }),
     realtime: () => api.get('/bff/snapshot-form/realtime'),
     exchangeRate: (date) =>
       api.get('/bff/snapshot-form/exchange-rate', { params: { date } }),

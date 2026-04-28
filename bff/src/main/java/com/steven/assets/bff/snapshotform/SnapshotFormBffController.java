@@ -60,6 +60,7 @@ public class SnapshotFormBffController {
     @PostMapping("/prices")
     public Mono<ResponseEntity<List<Map<String, Object>>>> batchPrices(
             @RequestParam String date,
+            @RequestParam(defaultValue = "false") boolean historicalOnly,
             @RequestBody List<Map<String, String>> stocks) {
         if (stocks == null || stocks.isEmpty()) {
             return Mono.just(ResponseEntity.ok(Collections.emptyList()));
@@ -71,7 +72,7 @@ public class SnapshotFormBffController {
                     }
                     return Mono.just(historical);
                 })
-                .flatMap(historical -> enrichBatch(date, historical, stocks))
+                .flatMap(historical -> enrichBatch(date, historical, stocks, historicalOnly))
                 .map(ResponseEntity::ok);
     }
 
@@ -234,7 +235,8 @@ public class SnapshotFormBffController {
      * Dashboard 也套同一規則，兩頁顯示一致。
      */
     private Mono<List<Map<String, Object>>> enrichBatch(
-            String date, List<Map<String, Object>> historical, List<Map<String, String>> stocks) {
+            String date, List<Map<String, Object>> historical, List<Map<String, String>> stocks,
+            boolean historicalOnly) {
 
         LocalDate basedate = LocalDate.parse(date);
 
@@ -284,7 +286,8 @@ public class SnapshotFormBffController {
                 Map<String, Object> row = new HashMap<>();
                 row.put("stockCode", code);
                 row.put("market", market);
-                boolean useLive = SnapshotEnricher.isCurrentBasedate(basedate, market)
+                boolean useLive = !historicalOnly
+                        && SnapshotEnricher.isCurrentBasedate(basedate, market)
                         && live.get("price") != null;
                 row.put("price", useLive ? live.get("price") : hist.get("price"));
                 row.put("tradingDate", useLive ? live.get("tradingDate") : hist.get("tradingDate"));
