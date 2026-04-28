@@ -2,6 +2,7 @@ package com.steven.assets.service;
 
 import com.steven.assets.model.Stock;
 import com.steven.assets.model.StockPrice;
+import com.steven.assets.model.StockPriceHistory;
 import com.steven.assets.model.StockHolding;
 import com.steven.assets.model.AssetSnapshot;
 import com.steven.assets.model.ExchangeRateHistory;
@@ -274,19 +275,25 @@ public class StockPriceService {
         if (result.buyPrice()      != null) sp.setBuyPrice(result.buyPrice());
         if (result.sellPrice()     != null) sp.setSellPrice(result.sellPrice());
         if (result.openPrice()     != null) sp.setOpenPrice(result.openPrice());
-        if (result.previousClose() != null) sp.setPreviousClose(result.previousClose());
         if (result.highPrice()     != null) sp.setHighPrice(result.highPrice());
         if (result.lowPrice()      != null) sp.setLowPrice(result.lowPrice());
         if (result.volume()        != null) sp.setVolume(result.volume());
 
-        // 若資料源未提供昨收，從歷史最近一筆收盤價回填
-        // → priceChange / changePercent (entity @Transient) 才能算得出來
-        if (sp.getPreviousClose() == null) {
-            historyRepo.findRecentN(code, market, 1).stream().findFirst()
-                    .ifPresent(h -> sp.setPreviousClose(h.getClosePrice()));
+        sp.setTradingDate(resolveTradingDate(code, market));
+
+        // previousClose 一律以歷史表「< 當前 tradingDate」最新一筆為準，不信 Yahoo。
+        // Yahoo 的 regularMarketPreviousClose 在盤外/週末會回傳異常舊值（觀察到 NVDA 4/28 拿到 4/22 close）
+        // 造成 priceChange / changePercent 看起來離譜（5% 漲跌），改用自家歷史表最權威。
+        // 找不到歷史 → 回退用資料源提供的值；都沒有就維持 null（priceChange 會算成 null）。
+        Optional<StockPriceHistory> prev = historyRepo.findClosestPrice(
+                code, market, sp.getTradingDate().minusDays(1));
+        if (prev.isPresent()) {
+            sp.setPreviousClose(prev.get().getClosePrice());
+        } else if (result.previousClose() != null) {
+            sp.setPreviousClose(result.previousClose());
         }
 
-        sp.setTradingDate(resolveTradingDate(code, market));
+
         sp.setUpdatedAt(now);
         sp.setClosed(markClosed);
         sp.setSource(result.source());
