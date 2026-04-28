@@ -258,6 +258,35 @@
               </template>
             </el-table-column>
           </el-table>
+          <div class="chart-summary-bar">
+            <div class="csb-item">
+              <span class="csb-label">目前總值</span>
+              <span class="csb-val">{{ formatCurrency(stockTableSummary.value) }}</span>
+            </div>
+            <div class="csb-sep" />
+            <div class="csb-item">
+              <span class="csb-label">投資成本</span>
+              <span class="csb-val">{{ formatCurrency(stockTableSummary.cost) }}</span>
+            </div>
+            <div class="csb-sep" />
+            <div class="csb-item">
+              <span class="csb-label">損益</span>
+              <span class="csb-val" :class="stockTableSummary.profit >= 0 ? 'profit' : 'loss'">
+                {{ formatCurrency(stockTableSummary.profit) }}
+                <small style="font-weight:400"> ({{ formatPct(stockTableSummary.profitRate) }})</small>
+              </span>
+            </div>
+            <div class="csb-sep" />
+            <div class="csb-item">
+              <span class="csb-label">預估配息</span>
+              <span class="csb-val" style="color:#0369a1">{{ formatCurrency(stockTableSummary.dividend) }}</span>
+            </div>
+            <div class="csb-sep" />
+            <div class="csb-item">
+              <span class="csb-label">持股數</span>
+              <span class="csb-val">{{ stockTableSummary.count }} 檔</span>
+            </div>
+          </div>
         </el-card>
       </el-col>
     </el-row>
@@ -639,6 +668,16 @@ watch(mergedStocks, (stocks) => {
 }, { immediate: true })
 
 const stockTableData = computed(() => customTableData[stockMarketTab.value] ?? [])
+
+const stockTableSummary = computed(() => {
+  const stocks = stockTableData.value
+  const value    = stocks.reduce((s, x) => s + Number(x.currentValue || 0), 0)
+  const cost     = stocks.reduce((s, x) => s + Number(x.investmentCost || 0), 0)
+  const dividend = stocks.reduce((s, x) => s + Number(x.estimatedDividend || 0), 0)
+  const profit     = value - cost
+  const profitRate = cost > 0 ? profit / cost : 0
+  return { value, cost, profit, profitRate, dividend, count: stocks.length }
+})
 
 function initStockSortable() {
   if (stockSortable) { stockSortable.destroy(); stockSortable = null }
