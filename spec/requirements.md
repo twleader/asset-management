@@ -138,6 +138,7 @@
 - [ ] 資產歷史趨勢圖需以基準日為終點：只顯示 `snapshotDate <= 基準日` 的歷史點；KPI「較上次」變化率亦以此篩選後的前一筆比較
 - [ ] 股票持股表格下方顯示該市場小計：目前總值、投資成本、損益（含 %）、預估配息、持股數，與管理資產（SnapshotForm）的市場小計欄位一致
 - [ ] 基準日 == 今日（市場時區）且該市場開盤時，2 分鐘輪詢回傳的 live price 需即時驅動持股表的「現值 / 損益 / 預估配息」與下方市場小計重算（依 `shares × livePrice ×（美股）匯率`），不可只更新股價欄位而值欄位停留在快照儲存值
+- [ ] Dashboard 的 `/api/bff/dashboard/realtime` 每次輪詢需先 trigger 後端 `/api/market-data/prices/refresh` 主動向 Yahoo 拉最新行情，再回傳；不可僅讀取 cache（與 SnapshotForm `/realtime` 一致，避免後端 cron 漏跑時前端看到舊值）
 
 ### Requirement 10: 匯率歷史查詢
 
