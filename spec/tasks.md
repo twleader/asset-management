@@ -1111,3 +1111,25 @@ fallback 到 `row.stockPrice`（基準日收盤）→ Dashboard 顯示前一交�
         （副作用：每筆 alert 少一次 indicator 計算，列表 query 加快）
 - [x] 44.3 `StockAlertView.vue` 把 `row.quarterlyMa / kValue / dValue` 改為 `row.lastTriggeredMaValue / KdValue / DValue`
 - [x] 44.4 PRICE_ABOVE/BELOW 等不算 MA/KD 的 alert 觸發後該欄位為 null，前端顯示 `—`（保持現有 fallback）
+
+### Task 45: 管理資產（SnapshotForm 編輯模式）股價一律基準日收盤
+
+對應 Requirements: Requirement 1（資產快照管理）
+
+#### 背景
+
+SnapshotFormView 編輯模式（`/snapshots/:id/edit`，標題「管理資產」）股票表格的「股價」欄
+目前共用 `/api/bff/snapshot-form/prices` 並套 per-market `isCurrentBasedate` 規則：
+若所選快照的 basedate == 今日（市場時區），會回傳即時 price + priceChange。
+但管理資產為純歷史檢視/編輯，價格隨盤中跳動會干擾使用者；應一律以基準日收盤為準（與 SnapshotDetail 一致）。
+
+新增模式（`/snapshots/new`，標題「新增快照」，basedate=今日）保留即時價，使用者建檔時看活價。
+
+#### Steps:
+
+- [ ] 45.1 `SnapshotFormBffController.batchPrices` 加可選 query `historicalOnly`（預設 false），
+        傳入 `enrichBatch`；true 時強制 `useLive=false`、`priceChange/changePercent=null`
+- [ ] 45.2 `frontend/src/api/index.js` `snapshotForm.prices(date, stocks, historicalOnly=false)`
+        新增第三參數，true 時帶 `historicalOnly=true` query
+- [ ] 45.3 `SnapshotFormView.vue` 所有 `bffApi.snapshotForm.prices(...)` 呼叫處改帶 `isEdit.value`
+        （`fetchPriceForRow` / `fetchPrice` / `loadHistoricalPrices` / 複製前一版股票補價 / `loadPricesForExistingStocks`）
