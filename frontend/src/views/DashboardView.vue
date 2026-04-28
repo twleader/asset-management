@@ -667,7 +667,26 @@ watch(mergedStocks, (stocks) => {
   }
 }, { immediate: true })
 
-const stockTableData = computed(() => customTableData[stockMarketTab.value] ?? [])
+// 基準日 == 今日且該市場開盤 → 用 live price 重算 currentValue / profit / estimatedDividend，
+// 讓 2 分鐘輪詢能即時反映最新行情；否則直接回傳 BFF 預先算好的快照值（凍結在基準日）。
+function overlayLivePrice(row) {
+  const live = getRealtimePrice(row)
+  const shares = Number(row.shares ?? 0)
+  if (!live || shares <= 0) return row
+  const fx = Number(detail.value?.usdExchangeRate ?? 0)
+  const livePriceTwd = row.market === '美股' ? Number(live.price) * fx : Number(live.price)
+  const cv = shares * livePriceTwd
+  const cost = Number(row.investmentCost ?? 0)
+  const profit = cv - cost
+  const profitRate = cost > 0 ? profit / cost : 0
+  const dr = Number(row.dividendRate ?? 0)
+  const estimatedDividend = dr > 0 ? cv * dr : Number(row.estimatedDividend ?? 0)
+  return { ...row, currentValue: cv, profit, profitRate, estimatedDividend }
+}
+
+const stockTableData = computed(() =>
+  (customTableData[stockMarketTab.value] ?? []).map(overlayLivePrice)
+)
 
 const stockTableSummary = computed(() => {
   const stocks = stockTableData.value
@@ -724,7 +743,7 @@ function scheduleSaveOrder() {
 const chartMarketTab = ref('台股')
 
 const chartFilteredStocks = computed(() =>
-  mergedStocks.value.filter(s => s.market === chartMarketTab.value)
+  mergedStocks.value.filter(s => s.market === chartMarketTab.value).map(overlayLivePrice)
 )
 
 const chartSummary = computed(() => {
