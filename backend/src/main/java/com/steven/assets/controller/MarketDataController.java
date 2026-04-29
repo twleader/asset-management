@@ -4,12 +4,17 @@ import com.steven.assets.model.ExchangeRateHistory;
 import com.steven.assets.model.StockPriceHistory;
 import com.steven.assets.service.HistoricalDataService;
 import com.steven.assets.service.MarketDataService;
+import com.steven.assets.service.PriceStreamService;
 import com.steven.assets.service.StockPriceService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.bind.annotation.*;
+import reactor.core.publisher.Flux;
 
+import java.time.Duration;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
@@ -22,6 +27,7 @@ public class MarketDataController {
     private final MarketDataService marketDataService;
     private final StockPriceService stockPriceService;
     private final HistoricalDataService historicalDataService;
+    private final PriceStreamService priceStreamService;
 
     /**
      * 取得交易日曆假日（台股：TWSE Open API；美股：NYSE 規則計算）
@@ -53,6 +59,24 @@ public class MarketDataController {
     @GetMapping("/prices")
     public List<StockPriceService.StockPriceDto> getAllPrices() {
         return stockPriceService.getAllPrices();
+    }
+
+    /**
+     * 即時推送股價更新（SSE）。
+     * 訂閱來源：Redis pub/sub channel `price-update`，由 price-service 寫 Redis 時 publish。
+     * 連線後不主動推 snapshot；前端須先打 /prices 拿初始狀態，之後 onmessage 增量更新。
+     * 每 30 秒送一筆 keep-alive heartbeat（comment SSE event）避免中介 proxy 切連線。
+     */
+    @GetMapping(value = "/prices/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<ServerSentEvent<String>> streamPrices() {
+        Flux<ServerSentEvent<String>> updates = priceStreamService.stream()
+                .map(json -> ServerSentEvent.<String>builder()
+                        .event("price-update")
+                        .data(json)
+                        .build());
+        Flux<ServerSentEvent<String>> heartbeat = Flux.interval(Duration.ofSeconds(30))
+                .map(i -> ServerSentEvent.<String>builder().comment("keep-alive").build());
+        return Flux.merge(updates, heartbeat);
     }
 
     /**

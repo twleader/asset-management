@@ -73,6 +73,8 @@ public class PriceCacheWriter {
             redis.opsForValue().set(key, json, LIVE_TTL);
             redis.opsForSet().add(indexKey, code);
             redis.expire(indexKey, LIVE_TTL);
+            // 發布到 pub/sub channel，business-services 訂閱後 SSE 推到前端
+            redis.convertAndSend("price-update", json);
         } catch (Exception e) {
             log.warn("寫入 Redis 失敗 {} {}: {}", market, code, e.getMessage());
         }
