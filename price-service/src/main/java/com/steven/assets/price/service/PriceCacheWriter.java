@@ -54,8 +54,9 @@ public class PriceCacheWriter {
         payload.put("price", result.price());
         BigDecimal previousClose = result.previousClose();
         payload.put("previousClose", previousClose);
-        payload.put("change", changeOrNull(result.price(), previousClose, result.change()));
-        payload.put("changePct", changePctOrNull(result.price(), previousClose, result.changePct()));
+        // 使用前端 / business-services DTO 一致的欄位名（priceChange / changePercent），SSE / /prices 介面對得上
+        payload.put("priceChange", changeOrNull(result.price(), previousClose, result.change()));
+        payload.put("changePercent", changePctOrNull(result.price(), previousClose, result.changePct()));
         payload.put("buyPrice", result.buyPrice());
         payload.put("sellPrice", result.sellPrice());
         payload.put("openPrice", result.openPrice());

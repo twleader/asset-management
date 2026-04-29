@@ -52,8 +52,8 @@ public class PriceQueryService {
             String market,
             BigDecimal price,
             BigDecimal previousClose,
-            BigDecimal change,
-            BigDecimal changePct,
+            BigDecimal priceChange,
+            BigDecimal changePercent,
             BigDecimal buyPrice,
             BigDecimal sellPrice,
             BigDecimal openPrice,
@@ -65,8 +65,8 @@ public class PriceQueryService {
             Boolean closed,
             String source
     ) {
-        public BigDecimal priceChange() { return change; }
-        public BigDecimal changePercent() { return changePct; }
+        public BigDecimal change() { return priceChange; }
+        public BigDecimal changePct() { return changePercent; }
     }
 
     public Optional<LivePrice> getLive(String stockCode, String market) {
@@ -137,8 +137,8 @@ public class PriceQueryService {
                 text(n, "market"),
                 bd(n, "price"),
                 bd(n, "previousClose"),
-                bd(n, "change"),
-                bd(n, "changePct"),
+                bd(n, "priceChange"),
+                bd(n, "changePercent"),
                 bd(n, "buyPrice"),
                 bd(n, "sellPrice"),
                 bd(n, "openPrice"),
