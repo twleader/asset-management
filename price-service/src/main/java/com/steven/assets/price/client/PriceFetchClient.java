@@ -41,10 +41,13 @@ public class PriceFetchClient {
     public PriceFetchClient(@Value("${finmind.token:${FINMIND_TOKEN:}}") String finmindToken) {
         this.finmindToken = finmindToken == null ? "" : finmindToken.trim();
         CookieManager cm = new CookieManager(null, CookiePolicy.ACCEPT_ALL);
+        // 強制 HTTP/1.1：NASDAQ / Cloudflare 對 Java 的 HTTP/2 fingerprint 偵測會回 RST_STREAM。
+        // 用 HTTP/1.1 才能穩定取到資料。
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
                 .followRedirects(HttpClient.Redirect.NORMAL)
                 .cookieHandler(cm)
+                .version(HttpClient.Version.HTTP_1_1)
                 .build();
     }
 
