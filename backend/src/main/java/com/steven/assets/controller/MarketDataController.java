@@ -47,18 +47,7 @@ public class MarketDataController {
     }
 
     /**
-     * 查詢股票最新股價與漲跌（即時查詢外部 API）
-     * GET /api/market-data/price?code=2330&market=台股
-     */
-    @GetMapping("/price")
-    public ResponseEntity<MarketDataService.PriceResult> getStockPrice(
-            @RequestParam String code,
-            @RequestParam String market) {
-        return ResponseEntity.ok(marketDataService.getStockPrice(code, market));
-    }
-
-    /**
-     * 取得所有持股的最新價格（從 DB 讀取，由排程自動更新）
+     * 取得所有持股的最新價格（自 Redis live cache 讀取，由 price-service 排程更新；miss 則 fallback 至歷史表）
      * GET /api/market-data/prices
      */
     @GetMapping("/prices")

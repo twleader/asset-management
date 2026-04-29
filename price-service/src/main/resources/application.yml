@@ -1,0 +1,29 @@
+spring:
+  application:
+    name: asset-price-service
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:postgres}:${DB_PORT:5432}/${POSTGRES_DB:assetdb}
+    username: ${POSTGRES_USER:assetuser}
+    password: ${POSTGRES_PASSWORD:assetpass}
+    driver-class-name: org.postgresql.Driver
+
+  data:
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+      timeout: 2000
+
+  threads:
+    virtual:
+      enabled: true
+
+server:
+  port: 8080
+
+finmind:
+  token: ${FINMIND_TOKEN:}
+
+logging:
+  level:
+    com.steven.assets.price: INFO

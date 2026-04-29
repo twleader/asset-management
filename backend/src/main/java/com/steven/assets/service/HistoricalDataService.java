@@ -10,7 +10,6 @@ import com.steven.assets.model.AssetSnapshot;
 import com.steven.assets.repository.AssetSnapshotRepository;
 import com.steven.assets.repository.ExchangeRateHistoryRepository;
 import com.steven.assets.repository.StockPriceHistoryRepository;
-import com.steven.assets.repository.StockPriceRepository;
 import com.steven.assets.repository.StockRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -38,7 +37,7 @@ import java.util.*;
 public class HistoricalDataService {
 
     private final StockPriceHistoryRepository priceHistRepo;
-    private final StockPriceRepository priceRepo;
+    private final PriceQueryService priceQuery;
     private final ExchangeRateHistoryRepository rateHistRepo;
     private final AssetSnapshotRepository snapshotRepo;
     private final StockRepository stockMasterRepo;
@@ -658,13 +657,13 @@ public class HistoricalDataService {
         if (!end.isBefore(today) && !today.isBefore(start)) {
             boolean alreadyHasToday = history.stream().anyMatch(h -> h.getTradingDate().equals(today));
             if (!alreadyHasToday) {
-                priceRepo.findByStockCodeAndMarket(stockCode, market).ifPresent(sp -> {
-                    if (sp.getPrice() != null && today.equals(sp.getTradingDate())) {
+                priceQuery.getLive(stockCode, market).ifPresent(sp -> {
+                    if (sp.price() != null && sp.tradingDate() != null && today.toString().equals(sp.tradingDate())) {
                         history.add(StockPriceHistory.builder()
                             .stockCode(stockCode)
                             .market(market)
                             .tradingDate(today)
-                            .closePrice(sp.getPrice())
+                            .closePrice(sp.price())
                             .build());
                     }
                 });

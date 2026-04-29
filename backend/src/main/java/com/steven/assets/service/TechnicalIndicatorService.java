@@ -1,9 +1,7 @@
 package com.steven.assets.service;
 
-import com.steven.assets.model.StockPrice;
 import com.steven.assets.model.StockPriceHistory;
 import com.steven.assets.repository.StockPriceHistoryRepository;
-import com.steven.assets.repository.StockPriceRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -26,7 +24,7 @@ import java.util.Optional;
 public class TechnicalIndicatorService {
 
     private final StockPriceHistoryRepository historyRepo;
-    private final StockPriceRepository priceRepo;
+    private final PriceQueryService priceQuery;
 
     /** 季線 + KD（保留舊簽名供 WatchStock 等列表頁使用，避免不必要的 MA240 計算成本） */
     public record Indicators(BigDecimal quarterlyMa, BigDecimal k, BigDecimal d) {
@@ -61,14 +59,15 @@ public class TechnicalIndicatorService {
             List<StockPriceHistory> series = new ArrayList<>(desc);
 
             if (series.isEmpty() || !today.equals(series.get(0).getTradingDate())) {
-                Optional<StockPrice> spOpt = priceRepo.findByStockCodeAndMarket(stockCode, market);
-                if (spOpt.isPresent() && today.equals(spOpt.get().getTradingDate())) {
-                    StockPrice sp = spOpt.get();
+                Optional<PriceQueryService.LivePrice> spOpt = priceQuery.getLive(stockCode, market);
+                if (spOpt.isPresent() && spOpt.get().tradingDate() != null
+                        && today.toString().equals(spOpt.get().tradingDate())) {
+                    PriceQueryService.LivePrice sp = spOpt.get();
                     StockPriceHistory t = StockPriceHistory.builder()
                             .stockCode(stockCode).market(market).tradingDate(today)
-                            .closePrice(sp.getPrice())
-                            .highPrice(sp.getHighPrice() != null ? sp.getHighPrice() : sp.getPrice())
-                            .lowPrice(sp.getLowPrice()  != null ? sp.getLowPrice()  : sp.getPrice())
+                            .closePrice(sp.price())
+                            .highPrice(sp.highPrice() != null ? sp.highPrice() : sp.price())
+                            .lowPrice(sp.lowPrice()  != null ? sp.lowPrice()  : sp.price())
                             .build();
                     series.add(0, t);
                 }

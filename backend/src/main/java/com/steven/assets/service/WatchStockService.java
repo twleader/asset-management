@@ -2,12 +2,10 @@ package com.steven.assets.service;
 
 import com.steven.assets.dto.WatchStockDto;
 import com.steven.assets.model.StockAlert;
-import com.steven.assets.model.StockPrice;
 import com.steven.assets.model.StockPriceHistory;
 import com.steven.assets.model.WatchStock;
 import com.steven.assets.repository.StockAlertRepository;
 import com.steven.assets.repository.StockPriceHistoryRepository;
-import com.steven.assets.repository.StockPriceRepository;
 import com.steven.assets.repository.StockRepository;
 import com.steven.assets.repository.WatchStockRepository;
 import lombok.RequiredArgsConstructor;
@@ -26,7 +24,7 @@ import java.util.Set;
 public class WatchStockService {
 
     private final WatchStockRepository watchRepo;
-    private final StockPriceRepository priceRepo;
+    private final PriceQueryService priceQuery;
     private final StockAlertRepository alertRepo;
     private final StockPriceHistoryRepository historyRepo;
     private final StockRepository stockMasterRepo;
@@ -69,9 +67,9 @@ public class WatchStockService {
         }
         stockMasterRepo.upsert(code, req.getMarket(), name);
 
-        // 立即抓一次即時報價，避免等到下次美股/台股開盤前畫面都是空值
+        // 立即觸發 price-service 抓一次（會涵蓋所有持股 + 觀察清單，包含這檔新加入的）
         try {
-            stockPriceService.updatePrices(Set.of(code), req.getMarket(), false);
+            stockPriceService.manualRefresh();
         } catch (Exception e) {
             log.warn("新增觀察 {} {} 後即時抓價失敗: {}", req.getMarket(), code, e.getMessage());
         }
@@ -106,21 +104,21 @@ public class WatchStockService {
                 .build();
 
         // 報價
-        Optional<StockPrice> priceOpt = priceRepo.findByStockCodeAndMarket(w.getStockCode(), w.getMarket());
+        Optional<PriceQueryService.LivePrice> priceOpt = priceQuery.getLive(w.getStockCode(), w.getMarket());
         priceOpt.ifPresent(sp -> {
-            r.setPrice(sp.getPrice());
-            r.setPriceChange(sp.getPriceChange());
-            r.setChangePercent(sp.getChangePercent());
-            r.setBuyPrice(sp.getBuyPrice());
-            r.setSellPrice(sp.getSellPrice());
-            r.setOpenPrice(sp.getOpenPrice());
-            r.setPreviousClose(sp.getPreviousClose());
-            r.setHighPrice(sp.getHighPrice());
-            r.setLowPrice(sp.getLowPrice());
-            r.setVolume(sp.getVolume());
-            r.setTradingDate(sp.getTradingDate() != null ? sp.getTradingDate().toString() : null);
-            r.setPriceUpdatedAt(sp.getUpdatedAt() != null ? sp.getUpdatedAt().toString() : null);
-            r.setClosed(sp.getClosed());
+            r.setPrice(sp.price());
+            r.setPriceChange(sp.priceChange());
+            r.setChangePercent(sp.changePercent());
+            r.setBuyPrice(sp.buyPrice());
+            r.setSellPrice(sp.sellPrice());
+            r.setOpenPrice(sp.openPrice());
+            r.setPreviousClose(sp.previousClose());
+            r.setHighPrice(sp.highPrice());
+            r.setLowPrice(sp.lowPrice());
+            r.setVolume(sp.volume());
+            r.setTradingDate(sp.tradingDate());
+            r.setPriceUpdatedAt(sp.updatedAt());
+            r.setClosed(sp.closed());
         });
 
         // 對於非交易時間或新加入觀察股票，買賣/開盤/昨收/最高/最低/成交量可能為 null

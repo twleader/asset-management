@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.steven.assets.model.StockPriceHistory;
 import com.steven.assets.repository.StockPriceHistoryRepository;
-import com.steven.assets.repository.StockPriceRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -39,7 +38,6 @@ public class MarketDataService {
 
     private final HttpClient httpClient;
     private final ObjectMapper mapper;
-    private final StockPriceRepository stockPriceRepo;
     private final StockPriceHistoryRepository stockPriceHistoryRepo;
 
     /** FinMind API token（免費註冊取得，未設定時走匿名額度，超過會回 402） */
@@ -56,10 +54,8 @@ public class MarketDataService {
     private final Map<String, CachedDividendRate> dividendRateCache = new ConcurrentHashMap<>();
     private static final long DIVIDEND_RATE_TTL_MS = 60 * 60 * 1000L; // 1 小時
 
-    public MarketDataService(StockPriceRepository stockPriceRepo,
-                             StockPriceHistoryRepository stockPriceHistoryRepo,
+    public MarketDataService(StockPriceHistoryRepository stockPriceHistoryRepo,
                              @Value("${finmind.token:${FINMIND_TOKEN:}}") String finmindToken) {
-        this.stockPriceRepo = stockPriceRepo;
         this.stockPriceHistoryRepo = stockPriceHistoryRepo;
         this.finmindToken = finmindToken == null ? "" : finmindToken.trim();
         CookieManager cm = new CookieManager(null, CookiePolicy.ACCEPT_ALL);
@@ -179,68 +175,8 @@ public class MarketDataService {
         }
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // 股票最新股價（含漲跌）
-    // 台股：TWSE mis API
-    // 美股：NASDAQ info API
-    // Yahoo Finance 在 Docker 環境下 crumb 取不到、整批呼叫會把 thread pool 拖滿，
-    // 已不在 hot path 作為 fallback；spec design.md 亦標註已停用。
-    // ─────────────────────────────────────────────────────────────────────────
-    public PriceResult getStockPrice(String stockCode, String market) {
-        if ("台股".equals(market)) {
-            return getTwseRealTimePrice(stockCode)
-                    .orElseThrow(() -> new RuntimeException("查無股價：" + stockCode));
-        } else {
-            return getNasdaqPrice(stockCode)
-                    .orElseThrow(() -> new RuntimeException("查無股價：" + stockCode));
-        }
-    }
-
-    /**
-     * 從 FinMind TaiwanStockPrice 取得台股當日（含 start_date 起最後一筆）收盤資訊。
-     * 用於收盤後排程記錄收盤價，避開 TWSE mis 在 Docker 連線不穩造成的卡頓。
-     * 不含買賣五檔。
-     */
-    public Optional<PriceResult> getTwClosingPriceFromFinMind(String stockCode, LocalDate startDate) {
-        try {
-            String url = "https://api.finmindtrade.com/api/v4/data"
-                    + "?dataset=TaiwanStockPrice"
-                    + "&data_id=" + stockCode
-                    + "&start_date=" + startDate.toString();
-            HttpResponse<String> resp = httpClient.send(
-                    finmindRequest(url, 15), HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() != 200) {
-                log.warn("FinMind TaiwanStockPrice {} 回應 {}（token {}）", stockCode,
-                        resp.statusCode(), finmindToken.isEmpty() ? "未設定" : "已設定");
-                return Optional.empty();
-            }
-            JsonNode data = mapper.readTree(resp.body()).path("data");
-            if (!data.isArray() || data.isEmpty()) return Optional.empty();
-            JsonNode row = data.get(data.size() - 1);     // 最新一筆
-            BigDecimal close = finmindDecimal(row, "close");
-            if (close == null) return Optional.empty();
-            BigDecimal open  = finmindDecimal(row, "open");
-            BigDecimal high  = finmindDecimal(row, "max");
-            BigDecimal low   = finmindDecimal(row, "min");
-            BigDecimal spread = finmindDecimal(row, "spread");   // 漲跌價差
-            long volume = row.path("Trading_Volume").asLong(0);
-            BigDecimal previousClose = spread != null ? close.subtract(spread) : null;
-            BigDecimal changePct = null;
-            if (spread != null && previousClose != null && previousClose.signum() > 0) {
-                changePct = spread.divide(previousClose, 6, RoundingMode.HALF_UP)
-                        .multiply(BigDecimal.valueOf(100));
-            }
-            return Optional.of(new PriceResult(
-                    stockCode, "台股", close, spread, changePct, "FinMind",
-                    null,
-                    null, null,
-                    open, previousClose, high, low,
-                    volume == 0 ? null : volume));
-        } catch (Exception e) {
-            log.warn("FinMind 取得台股 {} 收盤失敗: {}", stockCode, e.getMessage());
-            return Optional.empty();
-        }
-    }
+    // 對外抓價（getStockPrice / getTwClosingPriceFromFinMind）已搬至獨立的 price-service。
+    // 此處保留 getTwseRealTimePrice / getNasdaqPrice 作為「殖利率分母 = 當前股價」的內部 helper（非 hot path）。
 
     private BigDecimal finmindDecimal(JsonNode row, String field) {
         JsonNode n = row.path(field);
@@ -686,9 +622,10 @@ public class MarketDataService {
             if (priceOpt.isPresent() && priceOpt.get().price().compareTo(BigDecimal.ZERO) > 0) {
                 price = priceOpt.get().price().doubleValue();
             } else {
-                var cached = stockPriceRepo.findByStockCodeAndMarket(stockCode, "台股");
-                if (cached.isPresent() && cached.get().getPrice() != null) {
-                    price = cached.get().getPrice().doubleValue();
+                // 即時抓不到時改用歷史表最近一筆收盤當分母
+                var hist = stockPriceHistoryRepo.findRecentN(stockCode, "台股", 1);
+                if (!hist.isEmpty() && hist.get(0).getClosePrice() != null) {
+                    price = hist.get(0).getClosePrice().doubleValue();
                 }
             }
             if (price <= 0) return Optional.empty();
