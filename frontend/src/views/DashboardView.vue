@@ -209,7 +209,7 @@
                   </span>
                 </span>
                 <span v-else-if="row.stockPrice != null"
-                  :style="{ fontWeight: 600, color: isBaselineToday() ? '#94a3b8' : '#1e293b' }">
+                  :style="{ fontWeight: 600, color: isBaselineToday(row.market) ? '#94a3b8' : '#1e293b' }">
                   {{ formatPrice(row.stockPrice) }}
                 </span>
                 <span v-else style="color:#94a3b8">-</span>
@@ -390,14 +390,20 @@ const latest = computed(() =>
 )
 const detail = computed(() => store.currentSnapshot)
 
-function isBaselineToday() {
+function isBaselineToday(market) {
+  // 跨時區處理：基準日要與「該市場當地時區的今天」比，不是 host machine 時區。
+  // 例：台灣已 4/30 凌晨，但美東仍是 4/29 下午盤中 → 對美股而言 basedate=4/29 仍視為今天。
   const d = latest.value?.snapshotDate
   if (!d) return false
-  const today = new Date()
-  const yyyy = today.getFullYear()
-  const mm = String(today.getMonth() + 1).padStart(2, '0')
-  const dd = String(today.getDate()).padStart(2, '0')
-  return d === `${yyyy}-${mm}-${dd}`
+  const tz = market === '美股' ? 'America/New_York' : 'Asia/Taipei'
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: tz }) // YYYY-MM-DD
+  return d === today
+}
+
+/** 該市場 row 是否該套 live 行情（基準日==市場當地今日，且市場開盤）。 */
+function shouldApplyLive(market) {
+  if (!isBaselineToday(market)) return false
+  return market === '美股' ? !!marketStatus.value.usMarketOpen : !!marketStatus.value.twMarketOpen
 }
 
 function getRealtimePrice(row) {
@@ -437,7 +443,7 @@ const filteredHistory = computed(() => {
 })
 
 const kpiCards = computed(() => {
-  const s = latest.value
+  const s = liveLatest.value
   if (!s) return []
   const total = Number(s.totalAssets || 0)
   // 在過濾後的 history 中找選中快照的前一筆
@@ -476,7 +482,7 @@ const kpiCards = computed(() => {
 })
 
 const pieOption = computed(() => {
-  const s = latest.value
+  const s = liveLatest.value
   if (!s) return {}
   return {
     tooltip: { trigger: 'item', formatter: p => `${p.name}: $${Number(p.value).toLocaleString()} (${p.percent}%)` },
@@ -497,8 +503,20 @@ const pieOption = computed(() => {
 })
 
 const trendOption = computed(() => {
-  const h = filteredHistory.value
-  if (!h.length) return {}
+  const baseH = filteredHistory.value
+  if (!baseH.length) return {}
+  // 若選中快照=該市場當地今日且市場開盤，把該日 history row 的對應欄位用 liveLatest 覆蓋，
+  // 讓趨勢線最後一點隨輪詢同步跳動。
+  const live = liveLatest.value
+  const h = (live && latest.value) ? baseH.map(r =>
+    r.snapshotDate === latest.value.snapshotDate
+      ? { ...r,
+          totalStockValue: live.totalStockValue,
+          totalTwStockValue: live.totalTwStockValue ?? r.totalTwStockValue,
+          totalUsStockValue: live.totalUsStockValue ?? r.totalUsStockValue,
+          totalAssets: live.totalAssets }
+      : r
+  ) : baseH
   return {
     tooltip: { trigger: 'axis', formatter: (params) =>
       params[0].axisValue + '<br>' +
@@ -667,9 +685,10 @@ watch(mergedStocks, (stocks) => {
   }
 }, { immediate: true })
 
-// 基準日 == 今日且該市場開盤 → 用 live price 重算 currentValue / profit / estimatedDividend，
+// 基準日 == 該市場當地今日，且該市場開盤 → 用 live price 重算 currentValue / profit / estimatedDividend，
 // 讓 2 分鐘輪詢能即時反映最新行情；否則直接回傳 BFF 預先算好的快照值（凍結在基準日）。
 function overlayLivePrice(row) {
+  if (!shouldApplyLive(row.market)) return row
   const live = getRealtimePrice(row)
   const shares = Number(row.shares ?? 0)
   if (!live || shares <= 0) return row
@@ -683,6 +702,47 @@ function overlayLivePrice(row) {
   const estimatedDividend = dr > 0 ? cv * dr : Number(row.estimatedDividend ?? 0)
   return { ...row, currentValue: cv, profit, profitRate, estimatedDividend }
 }
+
+/**
+ * 將 latest snapshot 的總額（totalStockValue / stockProfit / estimatedAnnualDividend / totalAssets）
+ * 用 live 行情重算。僅限「basedate==該市場當地今日 & 該市場開盤」的市場才套 live；
+ * 另一個市場仍維持快照凍結值。讓 KPI 卡 / 配置 donut / 趨勢線最後一點隨 2 分鐘輪詢更新。
+ */
+const liveLatest = computed(() => {
+  const s = latest.value
+  if (!s) return null
+  const twLive = shouldApplyLive('台股')
+  const usLive = shouldApplyLive('美股')
+  if (!twLive && !usLive) return s
+
+  const tw = customTableData['台股'] ?? []
+  const us = customTableData['美股'] ?? []
+  const sumOf = (rows, applyLive) => rows.reduce((a, row) => {
+    const r = applyLive ? overlayLivePrice(row) : row
+    a.value    += Number(r.currentValue || 0)
+    a.cost     += Number(r.investmentCost || 0)
+    a.dividend += Number(r.estimatedDividend || 0)
+    return a
+  }, { value: 0, cost: 0, dividend: 0 })
+
+  const t = sumOf(tw, twLive)
+  const u = sumOf(us, usLive)
+  const totalStockValue = t.value + u.value
+  const totalStockCost = t.cost + u.cost
+  const stockProfit = totalStockValue - totalStockCost
+  const estimatedAnnualDividend = t.dividend + u.dividend
+  const totalDeposit = Number(s.totalDeposit || 0)
+  const totalFundValue = Number(s.totalFundValue || 0)
+  const totalAssets = totalDeposit + totalFundValue + totalStockValue
+  const totalTwStockValue = t.value
+  const totalUsStockValue = u.value
+
+  return {
+    ...s,
+    totalStockValue, totalStockCost, stockProfit, estimatedAnnualDividend,
+    totalAssets, totalTwStockValue, totalUsStockValue
+  }
+})
 
 const stockTableData = computed(() =>
   (customTableData[stockMarketTab.value] ?? []).map(overlayLivePrice)
