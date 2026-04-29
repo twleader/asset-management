@@ -101,8 +101,12 @@
 - [ ] 從央行或第三方 API 取得美元/台幣歷史匯率
 - [ ] 交易日曆顯示台股與美股的開收盤狀態
 - [ ] 台股（週一～五 09:00～13:30 Asia/Taipei）與美股（週一～五 09:30～16:00 America/New_York，含 EST/EDT 夏令切換）採**獨立 cron 排程**，各自每 2 分鐘更新一次股價快取；非該市場交易時段不空轉、不混用單一 fixedRate
-- [ ] 收盤時（台股 13:30、美股 16:00）將當日收盤價寫入 StockPriceHistory，並標記 StockPrice.closed = true
+- [ ] 收盤時（台股 13:30、美股 16:00）將當日收盤價寫入 `stock_price_history`
 - [ ] 歷史收盤價保存至少 10 年（透過 FinMind / TWSE 回補；Yahoo Finance 已停用）
+- [ ] 抓價子系統獨立為 `price-service` 微服務（獨立 image / container），盤中 2 分鐘 cron 將 live 價寫入 Redis（key `price:{market}:{code}`，TTL 10 分鐘），盤後將收盤價寫入 `stock_price_history`
+- [ ] `business-services` 不再直接呼叫外部行情 API；live 股價一律先讀 Redis、miss 則 fallback 至 `stock_price_history` 最近一筆收盤；歷史收盤價直接讀 DB
+- [ ] 市場開收盤狀態由 `price-service` 維護並寫入 Redis（key `market:status`），各 BFF 透過 `business-services` 統一讀取
+- [ ] `POST /api/market-data/prices/refresh` 改由 `business-services` 內部呼叫 `price-service` 的觸發端點，價格刷新後再從 Redis 回讀
 - [ ] 凡列入 `stock` 主檔的股票（含曾持有、觀察清單、設有警示）皆自動納入 10 年歷史收盤價回補與每日排程更新範圍；新增觀察股票時即同步寫入 `stock` 主檔
 - [ ] 提供 `GET /api/market-data/live-assets` 端點：以最新快照持倉 × 當前快取股價，即時計算總資產估值
 
