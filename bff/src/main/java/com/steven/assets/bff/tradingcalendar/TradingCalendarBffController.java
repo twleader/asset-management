@@ -13,7 +13,6 @@ import reactor.core.publisher.Mono;
 import java.time.LocalDate;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -26,8 +25,6 @@ public class TradingCalendarBffController {
 
     private final WebClient businessServicesClient;
 
-    private static final ParameterizedTypeReference<List<Map<String, Object>>> LIST_MAP =
-            new ParameterizedTypeReference<>() {};
     private static final ParameterizedTypeReference<Map<String, Object>> MAP =
             new ParameterizedTypeReference<>() {};
 
@@ -43,7 +40,7 @@ public class TradingCalendarBffController {
                 businessServicesClient.get()
                         .uri(uri -> uri.path("/api/market-data/holidays")
                                 .queryParam("year", targetYear).build())
-                        .retrieve().bodyToMono(LIST_MAP).onErrorReturn(Collections.emptyList()),
+                        .retrieve().bodyToMono(MAP).onErrorReturn(Collections.emptyMap()),
                 businessServicesClient.get()
                         .uri("/api/market-data/market-status")
                         .retrieve().bodyToMono(MAP).onErrorReturn(Collections.emptyMap())
