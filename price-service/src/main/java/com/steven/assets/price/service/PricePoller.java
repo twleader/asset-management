@@ -9,9 +9,10 @@ import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDate;
 import java.util.LinkedHashSet;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * 盤中股價輪詢：
@@ -77,23 +78,28 @@ public class PricePoller {
 
     public record RefreshSummary(int twUpdated, int usUpdated, boolean twMarketOpen, boolean usMarketOpen) {}
 
+    /**
+     * 並行抓價：每檔一個 virtual thread。
+     * 對 23 檔股票（每檔 HTTP RTT 約 300ms~10s 含 fallback）總時間從 sequential 數十秒降到 ≈ 最慢一檔的耗時。
+     * 用 try-with-resources 的 ExecutorService 在區塊結束時等待所有任務完成。
+     */
     void updatePrices(Set<String> codes, String market, boolean markClosed) {
-        for (String code : codes) {
-            try {
-                PriceResult r = client.getStockPrice(code, market);
-                if (r.price() == null) continue;
-                writer.write(r, markClosed);
-                if (r.stockName() != null && !r.stockName().isBlank()) {
-                    source.upsertStockName(code, market, r.stockName());
-                }
-                Thread.sleep(500);
-            } catch (Exception e) {
-                log.warn("更新 {} {} 股價失敗: {}", market, code, e.getMessage());
+        if (codes.isEmpty()) return;
+        try (ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor()) {
+            for (String code : codes) {
+                pool.submit(() -> {
+                    try {
+                        PriceResult r = client.getStockPrice(code, market);
+                        if (r.price() == null) return;
+                        writer.write(r, markClosed);
+                        if (r.stockName() != null && !r.stockName().isBlank()) {
+                            source.upsertStockName(code, market, r.stockName());
+                        }
+                    } catch (Exception e) {
+                        log.warn("更新 {} {} 股價失敗: {}", market, code, e.getMessage());
+                    }
+                });
             }
-        }
+        } // executor.close() 等所有 task 完成
     }
-
-    // 不再使用，僅為 compatibility 預留（避免 IDE 警告）
-    @SuppressWarnings("unused")
-    private LocalDate today() { return LocalDate.now(); }
 }
