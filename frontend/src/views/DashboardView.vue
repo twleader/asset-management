@@ -319,12 +319,18 @@ const mergedStocksFromBff = ref([]) // 由 BFF 預先彙總（含 stockPrice、p
 const marketStatus = ref({ twMarketOpen: false, usMarketOpen: false })
 const selectedSnapshotId = ref(null)
 
-let priceTimer = null
+let priceStream = null
+let statusTimer = null
 
 onMounted(async () => {
   // Single BFF call aggregates: snapshots + history + latestSnapshotDetail + prices + marketStatus
   await loadDashboardSummary()
-  priceTimer = setInterval(refreshPricesAndStatus, 2 * 60 * 1000)
+
+  // 即時股價：透過 SSE 訂閱 price-service 推送（取代原本 2 分鐘 polling）
+  openPriceStream()
+
+  // marketStatus 仍用低頻 polling（每分鐘）— 純時區判斷，不需要即時推
+  statusTimer = setInterval(refreshMarketStatus, 60 * 1000)
 
   // 背景補齊所有快照缺漏的配息率（不阻塞頁面載入）
   bffApi.dashboard.enrichDividendRates().then(() => {
@@ -333,9 +339,40 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  if (priceTimer) { clearInterval(priceTimer); priceTimer = null }
+  if (priceStream) { priceStream.close(); priceStream = null }
+  if (statusTimer) { clearInterval(statusTimer); statusTimer = null }
   if (stockSortable) { stockSortable.destroy(); stockSortable = null }
 })
+
+function openPriceStream() {
+  if (priceStream) priceStream.close()
+  priceStream = new EventSource('/api/market-data/prices/stream')
+  priceStream.addEventListener('price-update', (ev) => {
+    try {
+      const p = JSON.parse(ev.data)
+      // 後端 SSE payload 用 changePct，前端內部用 changePercent，順手 mirror 一下
+      if (p.changePct != null && p.changePercent == null) p.changePercent = p.changePct
+      stockPrices.value = { ...stockPrices.value, [`${p.market}_${p.stockCode}`]: p }
+    } catch (e) {
+      console.warn('SSE 解析失敗:', e)
+    }
+  })
+  priceStream.onerror = () => {
+    // EventSource 內建 reconnect；只在被永久關閉時重建
+    if (priceStream && priceStream.readyState === EventSource.CLOSED) {
+      setTimeout(openPriceStream, 5000)
+    }
+  }
+}
+
+async function refreshMarketStatus() {
+  try {
+    const data = await bffApi.dashboard.realtime()
+    if (data?.marketStatus) marketStatus.value = data.marketStatus
+  } catch (e) {
+    /* silent */
+  }
+}
 
 async function loadDashboardSummary() {
   try {
@@ -355,15 +392,6 @@ async function loadDashboardSummary() {
   }
 }
 
-async function refreshPricesAndStatus() {
-  // 5 分鐘輪詢只刷新即時股價與市場狀態，避免覆蓋使用者選擇的基準日
-  try {
-    const data = await bffApi.dashboard.realtime()
-    applyPricesAndStatus(data?.stockPrices ?? [], data?.marketStatus ?? {})
-  } catch (e) {
-    console.warn('刷新股價/市場狀態失敗:', e)
-  }
-}
 
 async function onSnapshotChange(id) {
   try {

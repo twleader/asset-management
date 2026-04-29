@@ -1195,3 +1195,30 @@ live 行情先讀 Redis，miss fallback 到 `stock_price_history` 最近一筆�
         - `GET /api/market-data/prices` 仍正常回傳
         - `POST /api/market-data/prices/refresh` 觸發後 Redis 內容更新
         - Dashboard / WatchStock / SnapshotForm 顯示股價無回歸
+
+### Task 48: Live 股價即時推送（Redis pub/sub + SSE，取代前端 polling）
+
+對應 Requirements: Requirement 7（市場資料整合）、Requirement 9（儀表板總覽）
+
+#### 背景
+
+前端 2 分鐘 polling + price-service 2 分鐘 cron 的相位差可能讓最壞情況價格 lag 達 ~4 分鐘。
+改用 Redis pub/sub：price-service 寫入 Redis 同時 PUBLISH，business-services 訂閱後透過 SSE
+推到前端，前端 EventSource 即時收到、零輪詢。
+
+#### Steps:
+
+- [ ] 48.1 price-service `PriceCacheWriter.write()` 寫完 Redis SET 後，
+        `redis.convertAndSend("price-update", json)` 發布同一份 payload
+- [ ] 48.2 backend 新增 `PriceStreamService`：`Sinks.Many<String>` fan-out sink；
+        新增 `RedisSubscriberConfig` 啟動 `RedisMessageListenerContainer` 訂閱 `price-update`
+        channel，把 message body 餵給 sink
+- [ ] 48.3 backend `MarketDataController` 新增 `GET /api/market-data/prices/stream`
+        回 `Flux<ServerSentEvent<String>>`，從 sink 即時串流
+- [ ] 48.4 bff 新增 passthrough route `/api/bff/market-data/stream` →
+        `/api/market-data/prices/stream`
+- [ ] 48.5 frontend nginx config：`location /api/bff/market-data/stream { proxy_buffering off; ... }`
+        避免 SSE 被 buffer 卡住
+- [ ] 48.6 `DashboardView.vue`：把 setInterval 改成 `new EventSource(...)`；onmessage 解析
+        JSON 並更新 stockPrices reactive map；onerror 自動 reconnect。初始載入仍走
+        `/api/bff/dashboard/summary`，後續增量更新走 SSE

@@ -156,6 +156,34 @@ com.steven.assets.price/
    → ClosePersister → [DB stock_price_history INSERT]
 ```
 
+**Live price push（Redis pub/sub + SSE，取代輪詢）：**
+
+為了消除前端 2 分鐘 polling 與 price-service 2 分鐘 cron 的相位差（最差 ~4 分鐘 lag），
+價格寫入後即時推到前端：
+
+- Redis channel：`price-update`
+- price-service `PriceCacheWriter.write()` 寫完 Redis SET 後，`PUBLISH price-update <json>`
+- business-services `PriceStreamService` 透過 `RedisMessageListenerContainer` 訂閱該 channel，
+  fan-out 到 `Sinks.Many<String>`
+- business-services 暴露 `GET /api/market-data/prices/stream`（`text/event-stream`），
+  從 sink 串流 SSE
+- BFF 加 passthrough route `/api/bff/market-data/stream` → backend SSE endpoint
+- 前端用 `EventSource('/api/bff/market-data/stream')` 訂閱，每筆訊息更新 stockPrices reactive state
+
+```
+[price-service write] → Redis SET price:*:*
+                     └→ Redis PUBLISH price-update {json}
+                                          ↓
+                     [business-services PriceStreamService 訂閱] 
+                                          ↓
+                     [SSE /api/market-data/prices/stream]
+                                          ↓
+                     [BFF passthrough] → [Frontend EventSource] → stockPrices state
+```
+
+> nginx 對 `/api/bff/market-data/stream` 路徑需設 `proxy_buffering off`，否則 SSE 會被 buffering 卡住。
+> 前端仍保留初始 GET `/api/bff/dashboard/realtime` 載入第一份 snapshot；之後增量更新走 SSE，不再用 setInterval polling。
+
 ### Frontend Architecture (Vue 3)
 
 ```
