@@ -107,29 +107,26 @@ public class PriceQueryService {
         return all;
     }
 
-    /** 觸發 price-service 同步刷新所有持股 → 寫 Redis；回傳統計 map。 */
+    /**
+     * 觸發 price-service 背景刷新所有持股（fire-and-forget）。
+     *
+     * 抓 20+ 檔股票每檔最多 ~10s（含 fallback），整批可能 30s+；
+     * BFF dashboard realtime 端點若同步等它，前端 axios 30s timeout 會炸。
+     * Price-service 本身有 2 分鐘 cron，refresh 觸發只是想加速一次性刷新；
+     * 不必等結果，下一次輪詢自然會讀到 Redis 最新內容。
+     */
     public java.util.Map<String, Object> triggerRefresh() {
-        try {
-            JsonNode resp = priceServiceClient.post()
-                    .uri("/internal/refresh")
-                    .retrieve()
-                    .bodyToMono(JsonNode.class)
-                    .block();
-            if (resp == null) return java.util.Map.of("twUpdated", 0, "usUpdated", 0);
-            return java.util.Map.of(
-                    "twUpdated", resp.path("twUpdated").asInt(0),
-                    "usUpdated", resp.path("usUpdated").asInt(0),
-                    "twMarketOpen", resp.path("twMarketOpen").asBoolean(false),
-                    "usMarketOpen", resp.path("usMarketOpen").asBoolean(false)
-            );
-        } catch (Exception e) {
-            log.warn("呼叫 price-service /internal/refresh 失敗: {}", e.getMessage());
-            return java.util.Map.of(
-                    "error", e.getMessage(),
-                    "twUpdated", 0,
-                    "usUpdated", 0
-            );
-        }
+        priceServiceClient.post()
+                .uri("/internal/refresh")
+                .retrieve()
+                .bodyToMono(JsonNode.class)
+                .subscribe(
+                        resp -> log.info("price-service refresh 完成 tw={} us={}",
+                                resp.path("twUpdated").asInt(0),
+                                resp.path("usUpdated").asInt(0)),
+                        err -> log.warn("呼叫 price-service /internal/refresh 失敗: {}", err.getMessage())
+                );
+        return java.util.Map.of("triggered", true);
     }
 
     private LivePrice parse(String json) throws Exception {
