@@ -78,17 +78,12 @@ public class SnapshotFormBffController {
 
     /**
      * GET /api/bff/snapshot-form/realtime
-     * 5 分鐘輪詢用：先 trigger 後端刷新最新行情，再回傳 stockPrices + marketStatus。
+     * 輪詢用：直接讀 Redis live cache，不再從 BFF 觸發 refresh
+     * （price-service 自己 2 分鐘 cron 維護 Redis）。
      */
     @GetMapping("/realtime")
     public Mono<ResponseEntity<Map<String, Object>>> realtime() {
-        Mono<Void> refresh = businessServicesClient.post()
-                .uri("/api/market-data/prices/refresh")
-                .retrieve()
-                .bodyToMono(Void.class)
-                .onErrorResume(e -> Mono.empty());
-
-        return refresh.then(Mono.zip(
+        return Mono.zip(
                 businessServicesClient.get().uri("/api/market-data/prices")
                         .retrieve().bodyToMono(LIST_MAP).onErrorReturn(Collections.emptyList()),
                 businessServicesClient.get().uri("/api/market-data/market-status")
@@ -98,7 +93,7 @@ public class SnapshotFormBffController {
             body.put("stockPrices", t.getT1());
             body.put("marketStatus", t.getT2());
             return ResponseEntity.ok(body);
-        }));
+        });
     }
 
     /**

@@ -115,18 +115,13 @@ public class DashboardBffController {
 
     /**
      * GET /api/bff/dashboard/realtime
-     * 2 分鐘輪詢用：先 trigger 後端從 Yahoo 拉最新行情，再回傳 stockPrices + marketStatus。
-     * 只讀取 cache 在後端 cron 跑得不夠頻繁時會看到舊值，故每次輪詢主動 refresh 一次。
+     * 2 分鐘輪詢用：直接從 business-services 讀 Redis live cache + market status。
+     * 不再從 BFF 觸發 refresh — price-service 自己 2 分鐘 cron 維護 Redis，盤中各市場開盤期間
+     * 自動寫入最新報價；BFF 只負責讀。
      */
     @GetMapping("/realtime")
     public Mono<ResponseEntity<Map<String, Object>>> getRealtime() {
-        Mono<Void> refresh = businessServicesClient.post()
-                .uri("/api/market-data/prices/refresh")
-                .retrieve()
-                .bodyToMono(Void.class)
-                .onErrorResume(e -> Mono.empty());
-
-        return refresh.then(Mono.zip(
+        return Mono.zip(
                 businessServicesClient.get().uri("/api/market-data/prices")
                         .retrieve().bodyToMono(LIST_MAP).onErrorReturn(Collections.emptyList()),
                 businessServicesClient.get().uri("/api/market-data/market-status")
@@ -136,7 +131,7 @@ public class DashboardBffController {
             body.put("stockPrices", t.getT1());
             body.put("marketStatus", t.getT2());
             return ResponseEntity.ok(body);
-        }));
+        });
     }
 
     /**
