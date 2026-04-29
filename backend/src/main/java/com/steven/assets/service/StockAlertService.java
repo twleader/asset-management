@@ -3,12 +3,10 @@ package com.steven.assets.service;
 import com.steven.assets.dto.StockAlertDto;
 import com.steven.assets.model.StockAlert;
 import com.steven.assets.model.StockAlertTrigger;
-import com.steven.assets.model.StockPrice;
 import com.steven.assets.model.StockPriceHistory;
 import com.steven.assets.repository.StockAlertRepository;
 import com.steven.assets.repository.StockAlertTriggerRepository;
 import com.steven.assets.repository.StockPriceHistoryRepository;
-import com.steven.assets.repository.StockPriceRepository;
 import com.steven.assets.repository.StockRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -37,7 +35,7 @@ public class StockAlertService {
 
     private final StockAlertRepository alertRepo;
     private final StockAlertTriggerRepository triggerRepo;
-    private final StockPriceRepository priceRepo;
+    private final PriceQueryService priceQuery;
     private final StockPriceHistoryRepository historyRepo;
     private final StockRepository stockMasterRepo;
     private final HistoricalDataService historicalDataService;
@@ -121,9 +119,9 @@ public class StockAlertService {
 
     private void evaluate(StockAlert alert) {
         try {
-            Optional<StockPrice> priceOpt = priceRepo.findByStockCodeAndMarket(alert.getStockCode(), alert.getMarket());
-            if (priceOpt.isEmpty()) return;
-            double currentPrice = priceOpt.get().getPrice().doubleValue();
+            Optional<PriceQueryService.LivePrice> priceOpt = priceQuery.getLive(alert.getStockCode(), alert.getMarket());
+            if (priceOpt.isEmpty() || priceOpt.get().price() == null) return;
+            double currentPrice = priceOpt.get().price().doubleValue();
 
             // 24-hour cooldown
             if (alert.getLastTriggeredAt() != null &&
@@ -439,12 +437,12 @@ public class StockAlertService {
     private List<StockPriceHistory> withTodayIfMissing(List<StockPriceHistory> desc, String code, String market) {
         LocalDate today = java.time.LocalDate.now();
         if (!desc.isEmpty() && desc.get(0).getTradingDate().equals(today)) return desc;
-        return priceRepo.findByStockCodeAndMarket(code, market)
-                .filter(sp -> sp.getTradingDate() != null && sp.getTradingDate().equals(today))
-                .map(sp -> {
+        return priceQuery.getLive(code, market)
+                .filter(lp -> lp.tradingDate() != null && today.toString().equals(lp.tradingDate()))
+                .map(lp -> {
                     StockPriceHistory t = StockPriceHistory.builder()
                             .stockCode(code).market(market).tradingDate(today)
-                            .closePrice(sp.getPrice()).highPrice(sp.getPrice()).lowPrice(sp.getPrice())
+                            .closePrice(lp.price()).highPrice(lp.price()).lowPrice(lp.price())
                             .build();
                     List<StockPriceHistory> r = new java.util.ArrayList<>();
                     r.add(t);
