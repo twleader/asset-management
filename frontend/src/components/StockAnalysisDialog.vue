@@ -2,11 +2,21 @@
   <el-dialog
     :model-value="modelValue"
     @update:model-value="$emit('update:modelValue', $event)"
-    :title="`${stock?.stockCode} ${stock?.stockName || ''}　股票分析`"
     width="1100px"
     destroy-on-close
     draggable
     @open="onOpen">
+    <template #header>
+      <div style="display:flex;align-items:center;gap:24px">
+        <span style="font-size:18px;font-weight:600;color:#1e293b">
+          {{ stock?.stockCode }} {{ stock?.stockName || '' }}　股票分析
+        </span>
+        <span v-if="activeTab === 'chart' && latestTradingDate"
+          style="color:#1e293b;font-size:13px;font-weight:600">
+          資料截止：{{ latestTradingDate }}
+        </span>
+      </div>
+    </template>
     <el-tabs v-model="activeTab" @tab-change="onTabChange">
       <!-- 走勢圖 -->
       <el-tab-pane label="走勢圖" name="chart">
@@ -19,14 +29,8 @@
         </div>
         <template v-else>
           <div class="analysis-meta">
-            <div style="display:flex;align-items:center;gap:12px">
-              <el-tag size="small" type="info">雙擊任意股票可開啟分析</el-tag>
-              <span v-if="latestTradingDate"
-                style="color:#1e293b;font-size:13px;font-weight:600">
-                資料截止：{{ latestTradingDate }}
-              </span>
-            </div>
-            <div style="display:flex;align-items:center;gap:6px">
+            <el-tag size="small" type="info">雙擊任意股票可開啟分析</el-tag>
+            <div style="display:flex;align-items:center;gap:6px;margin-left:32px">
               <span style="color:#64748b;font-size:12px">期間：</span>
               <el-button-group>
                 <el-button
@@ -427,7 +431,7 @@ const chartOption = computed(() => {
 <style scoped>
 .analysis-loading { display:flex;flex-direction:column;align-items:center;gap:12px;padding:60px 0;color:#64748b;font-size:14px }
 .analysis-empty   { text-align:center;padding:60px 0;color:#94a3b8;font-size:14px }
-.analysis-meta    { display:flex;align-items:center;justify-content:space-between;margin-bottom:8px }
+.analysis-meta    { display:flex;align-items:center;margin-bottom:8px }
 </style>
 
 <style>
