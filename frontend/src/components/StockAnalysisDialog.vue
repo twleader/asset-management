@@ -32,6 +32,10 @@
                 </el-button>
               </el-button-group>
               <span style="color:#64748b;font-size:12px;margin-left:8px">滾輪縮放 / 拖曳平移</span>
+              <span v-if="latestTradingDate"
+                style="color:#1e293b;font-size:13px;font-weight:600;margin-left:16px">
+                資料截止：{{ latestTradingDate }}
+              </span>
             </div>
           </div>
           <v-chart :option="chartOption" style="height:580px" autoresize />
@@ -153,6 +157,12 @@ const history = ref([])
 const months = ref(12)
 const dividendHistory = ref({ rows: [] })
 const dividendsLoading = ref(false)
+
+const latestTradingDate = computed(() => {
+  const h = history.value
+  if (!h || !h.length) return null
+  return h[h.length - 1]?.tradingDate ?? null
+})
 
 const rangeOptions = [
   { label: '1個月', months: 1 },
