@@ -1158,7 +1158,7 @@ SnapshotFormView 編輯模式（`/snapshots/:id/edit`，標題「管理資產」
 - [ ] 46.1 `StockPriceService.persistPrice` 改用 `historyRepo.findClosestPrice(code, market, tradingDate.minusDays(1))`
         覆寫 `previousClose`；找不到歷史時才退回資料源提供的值；都沒有就維持 null
 
-### Task 47: 抓股價拆出獨立微服務（price-service + Redis live cache）
+### Task 47: 抓股價拆出獨立微服務（external-materials-service + Redis live cache）
 
 對應 Requirements: Requirement 7（市場資料整合）
 
@@ -1166,16 +1166,16 @@ SnapshotFormView 編輯模式（`/snapshots/:id/edit`，標題「管理資產」
 
 抓價邏輯（外部 API、cron、市場時段）目前內嵌於 `business-services`，外部 API 失敗會拖垮主服務、無法獨立 scale；
 且 live 行情寫在 `stock_price` 表、收盤寫 `stock_price_history`，兩處 cache 容易漂移。
-拆成獨立微服務 `price-service`，盤中 2 分鐘抓價寫 Redis，盤後寫 DB；`business-services` 只當消費者，
+拆成獨立微服務 `external-materials-service`，盤中 2 分鐘抓價寫 Redis，盤後寫 DB；`business-services` 只當消費者，
 live 行情先讀 Redis，miss fallback 到 `stock_price_history` 最近一筆。
 
 #### Steps:
 
-- [ ] 47.1 新增 Maven module `price-service/`：pom（spring-boot-starter-web + data-redis + jpa
+- [ ] 47.1 新增 Maven module `external-materials-service/`：pom（spring-boot-starter-web + data-redis + jpa
         + lettuce-core + 共享 model jar），自己的 `Application.java`
 - [ ] 47.2 從 `backend/` 搬 `MarketDataService` 抓價相關（TWSE mis、NASDAQ info、FinMind close）、
         `StockPriceService.scheduledTw/UsIntradayUpdate`、`recordTw/UsClosingPrice`、
-        `isTwMarketOpen/isUsMarketOpen`、`resolveTradingDate` 至 price-service
+        `isTwMarketOpen/isUsMarketOpen`、`resolveTradingDate` 至 external-materials-service
 - [ ] 47.3 新增 `PriceCacheWriter`：序列化 price JSON 寫入 Redis key `price:{market}:{code}`
         TTL 600s；同步寫入 `price:index:{market}` set；`market:status` key TTL 90s
 - [ ] 47.4 新增 `ClosePersister`：盤後 cron 觸發，對 stock 主檔每筆呼叫 close 來源、寫 `stock_price_history`
@@ -1185,9 +1185,9 @@ live 行情先讀 Redis，miss fallback 到 `stock_price_history` 最近一筆�
         `getAll()` 透過 `price:index:*` 列舉
 - [ ] 47.7 `MarketDataController` 的 `/api/market-data/prices`、`/live-assets`、`/market-status`、
         `/prices/refresh` 改打 `PriceQueryService`；`/prices/refresh` 走 WebClient 呼叫
-        `http://price-service:8080/internal/refresh` 後再從 Redis 回讀
-- [ ] 47.8 `Dockerfile` for price-service（同 backend multi-stage）；docker-compose 新增
-        `price-service` container，depends_on postgres + redis；business-services depends_on redis
+        `http://external-materials-service:8080/internal/refresh` 後再從 Redis 回讀
+- [ ] 47.8 `Dockerfile` for external-materials-service（同 backend multi-stage）；docker-compose 新增
+        `external-materials-service` container，depends_on postgres + redis；business-services depends_on redis
 - [ ] 47.9 Liquibase changelog `1.x.x` drop `stock_price` 表；移除 `StockPrice` Entity、
         `StockPriceRepository`；其他引用點改用 `PriceQueryService` 回傳的 DTO
 - [ ] 47.10 build 全套 image、docker compose up，smoke test：
@@ -1202,13 +1202,13 @@ live 行情先讀 Redis，miss fallback 到 `stock_price_history` 最近一筆�
 
 #### 背景
 
-前端 2 分鐘 polling + price-service 2 分鐘 cron 的相位差可能讓最壞情況價格 lag 達 ~4 分鐘。
-改用 Redis pub/sub：price-service 寫入 Redis 同時 PUBLISH，business-services 訂閱後透過 SSE
+前端 2 分鐘 polling + external-materials-service 2 分鐘 cron 的相位差可能讓最壞情況價格 lag 達 ~4 分鐘。
+改用 Redis pub/sub：external-materials-service 寫入 Redis 同時 PUBLISH，business-services 訂閱後透過 SSE
 推到前端，前端 EventSource 即時收到、零輪詢。
 
 #### Steps:
 
-- [ ] 48.1 price-service `PriceCacheWriter.write()` 寫完 Redis SET 後，
+- [ ] 48.1 external-materials-service `PriceCacheWriter.write()` 寫完 Redis SET 後，
         `redis.convertAndSend("price-update", json)` 發布同一份 payload
 - [ ] 48.2 backend 新增 `PriceStreamService`：`Sinks.Many<String>` fan-out sink；
         新增 `RedisSubscriberConfig` 啟動 `RedisMessageListenerContainer` 訂閱 `price-update`

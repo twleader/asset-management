@@ -7,7 +7,7 @@
 # Java build output
 backend/target/
 bff/target/
-price-service/target/
+external-materials-service/target/
 
 # Node modules
 frontend/node_modules/

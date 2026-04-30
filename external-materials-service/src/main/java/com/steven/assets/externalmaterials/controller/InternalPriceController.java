@@ -1,12 +1,14 @@
-package com.steven.assets.price.controller;
+package com.steven.assets.externalmaterials.controller;
 
-import com.steven.assets.price.service.MarketClock;
-import com.steven.assets.price.service.PricePoller;
-import com.steven.assets.price.service.PricePoller.RefreshSummary;
+import com.steven.assets.externalmaterials.service.DividendPersister;
+import com.steven.assets.externalmaterials.service.MarketClock;
+import com.steven.assets.externalmaterials.service.PricePoller;
+import com.steven.assets.externalmaterials.service.PricePoller.RefreshSummary;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Map;
@@ -21,6 +23,7 @@ public class InternalPriceController {
 
     private final PricePoller poller;
     private final MarketClock clock;
+    private final DividendPersister dividendPersister;
 
     /**
      * 同步抓所有持股報價、寫 Redis 後回傳統計。
@@ -29,6 +32,15 @@ public class InternalPriceController {
     @PostMapping("/refresh")
     public RefreshSummary refresh() {
         return poller.refreshAll();
+    }
+
+    /**
+     * Backend cold-cache fallback：抓單檔股利 + 寫 stock_dividend_history，回傳寫入筆數。
+     */
+    @PostMapping("/dividend/sync")
+    public Map<String, Object> syncDividend(@RequestParam String code, @RequestParam String market) {
+        int n = dividendPersister.syncOne(code, market);
+        return Map.of("written", n);
     }
 
     @GetMapping("/health")
