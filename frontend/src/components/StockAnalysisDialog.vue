@@ -360,16 +360,38 @@ const chartOption = computed(() => {
         return html
       }
     },
-    legend: {
-      data: cost != null
-        ? ['股價', '月線MA20', '季線MA60', '年線MA240', '成本均價', 'K', 'D']
-        : ['股價', '月線MA20', '季線MA60', '年線MA240', 'K', 'D'],
-      top: 8, textStyle: { fontSize: 12 }
-    },
+    legend: (() => {
+      const last = arr => arr.length ? arr[arr.length - 1] : null
+      const fmt = v => (v == null ? '' : Number(v).toFixed(2))
+      const map = {
+        '股價':       fmt(last(prices)),
+        '月線MA20':   fmt(last(ma20)),
+        '季線MA60':   fmt(last(ma60)),
+        '年線MA240':  fmt(last(ma240)),
+        '成本均價':   cost != null ? fmt(cost) : '',
+        'K':          fmt(last(K)),
+        'D':          fmt(last(D))
+      }
+      return {
+        data: cost != null
+          ? ['股價', '月線MA20', '季線MA60', '年線MA240', '成本均價', 'K', 'D']
+          : ['股價', '月線MA20', '季線MA60', '年線MA240', 'K', 'D'],
+        top: 8,
+        itemGap: 36,
+        formatter: name => `${name}\n${map[name] || ''}`,
+        textStyle: {
+          fontSize: 12,
+          color: '#475569',
+          rich: {
+            // 第二行（值）粗體稍深
+          }
+        }
+      }
+    })(),
     axisPointer: { link: [{ xAxisIndex: 'all' }] },
     grid: [
-      { left: 64, right: 110, top: 48, bottom: 190 },
-      { left: 64, right: 110, top: 'auto', height: 90, bottom: 60 }
+      { left: 64, right: 64, top: 72, bottom: 190 },
+      { left: 64, right: 64, top: 'auto', height: 90, bottom: 60 }
     ],
     dataZoom: [
       { type: 'inside', xAxisIndex: [0, 1], start: 0, end: 100 },
