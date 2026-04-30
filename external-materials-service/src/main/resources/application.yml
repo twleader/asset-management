@@ -26,4 +26,4 @@ finmind:
 
 logging:
   level:
-    com.steven.assets.price: INFO
+    com.steven.assets.externalmaterials: INFO
