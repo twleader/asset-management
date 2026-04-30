@@ -58,8 +58,8 @@
           </template>
         </el-table-column>
         <el-table-column prop="tradeDate" label="交易日期" width="105" />
-        <el-table-column prop="assetCode" label="代號" width="75" />
-        <el-table-column prop="assetName" label="名稱" width="110" show-overflow-tooltip />
+        <el-table-column prop="assetCode" label="股號" width="75" />
+        <el-table-column prop="assetName" label="股名" width="110" show-overflow-tooltip />
         <el-table-column label="市場" width="60" align="center">
           <template #default="{ row }">
             <el-tag :type="row.market === '台股' ? 'primary' : 'warning'" size="small">{{ row.market }}</el-tag>
@@ -143,13 +143,13 @@
       <el-form :model="gainForm" label-width="90px" size="default">
         <el-row :gutter="16">
           <el-col :span="12">
-            <el-form-item label="名稱">
-              <el-input v-model="gainForm.assetName" />
+            <el-form-item label="股號">
+              <el-input v-model="gainForm.assetCode" @blur="autoFillAssetName" @change="autoFillAssetName" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="代號">
-              <el-input v-model="gainForm.assetCode" />
+            <el-form-item label="股名">
+              <el-input v-model="gainForm.assetName" />
             </el-form-item>
           </el-col>
         </el-row>
@@ -282,6 +282,21 @@ const onBlurField = (field, precision) => {
   const strKey = fieldMap[field].str
   const val = parseNum(gainForm[strKey])
   gainForm[strKey] = fmtNum(val, precision)
+}
+
+// 輸入股號後自動帶出股名（先查 stock 主檔，找不到再打外部 API）
+const autoFillAssetName = async () => {
+  const code = (gainForm.assetCode || '').trim().toUpperCase()
+  if (!code) return
+  gainForm.assetCode = code
+  // 已有股名就不覆寫（使用者自填的優先）
+  if (gainForm.assetName && gainForm.assetName.trim()) return
+  try {
+    const res = await bffApi.stockAlert.lookupName({ code, market: gainForm.market })
+    if (res?.name) gainForm.assetName = res.name
+  } catch (e) {
+    /* silent */
+  }
 }
 
 // Computed profit from string fields
