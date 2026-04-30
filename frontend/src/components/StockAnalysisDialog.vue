@@ -390,8 +390,8 @@ const chartOption = computed(() => {
     })(),
     axisPointer: { link: [{ xAxisIndex: 'all' }] },
     grid: [
-      { left: 64, right: 64, top: 72, bottom: 190 },
-      { left: 64, right: 64, top: 'auto', height: 90, bottom: 60 }
+      { left: 64, right: 96, top: 72, bottom: 190 },
+      { left: 64, right: 96, top: 'auto', height: 90, bottom: 60 }
     ],
     dataZoom: [
       { type: 'inside', xAxisIndex: [0, 1], start: 0, end: 100 },
