@@ -1,4 +1,4 @@
-package com.steven.assets.price.client;
+package com.steven.assets.externalmaterials.client;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;

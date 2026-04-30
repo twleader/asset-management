@@ -1,4 +1,4 @@
-package com.steven.assets.price.service;
+package com.steven.assets.externalmaterials.service;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -127,6 +127,86 @@ public class StockSourceQuery {
                 jdbc.update("INSERT INTO stock (code, market, name) VALUES (?, ?, ?) ON CONFLICT (code, market) DO NOTHING",
                         code, market, name);
             } catch (Exception ignored) {}
+        }
+    }
+
+    /** 取得除息日前一交易日收盤 (basis) + 填息天數（除息日後幾天股價回到 basis）。 */
+    public DividendBasis calcDividendBasis(String stockCode, String market, java.time.LocalDate exDate) {
+        java.time.LocalDate from = exDate.minusDays(20);
+        java.time.LocalDate to   = exDate.plusDays(400);
+        java.util.List<java.time.LocalDate> dates = new java.util.ArrayList<>();
+        java.util.List<BigDecimal> closes = new java.util.ArrayList<>();
+        jdbc.query(
+                "SELECT trading_date, close_price FROM stock_price_history " +
+                        "WHERE stock_code=? AND market=? AND trading_date BETWEEN ? AND ? ORDER BY trading_date ASC",
+                ps -> { ps.setString(1, stockCode); ps.setString(2, market);
+                         ps.setObject(3, from); ps.setObject(4, to); },
+                rs -> {
+                    dates.add(rs.getDate(1).toLocalDate());
+                    closes.add(rs.getBigDecimal(2));
+                });
+        if (dates.size() < 2) return DividendBasis.EMPTY;
+        int exIdx = -1;
+        for (int i = 0; i < dates.size(); i++) {
+            if (!dates.get(i).isBefore(exDate)) { exIdx = i; break; }
+        }
+        if (exIdx <= 0) return DividendBasis.EMPTY;
+        BigDecimal basis = closes.get(exIdx - 1);
+        if (basis == null) return DividendBasis.EMPTY;
+        Integer fillDays = null;
+        for (int i = exIdx; i < closes.size(); i++) {
+            BigDecimal c = closes.get(i);
+            if (c != null && c.compareTo(basis) >= 0) {
+                fillDays = i - exIdx;
+                break;
+            }
+        }
+        return new DividendBasis(basis, fillDays);
+    }
+
+    public record DividendBasis(BigDecimal previousClose, Integer fillDays) {
+        public static final DividendBasis EMPTY = new DividendBasis(null, null);
+    }
+
+    /** Upsert 股利歷史。同一檔某年某 ex-date 視為同一筆覆寫。 */
+    public void upsertDividend(String code, String market, Integer year,
+                               BigDecimal cashDividend, BigDecimal stockDividend,
+                               java.time.LocalDate exDividendDate,
+                               java.time.LocalDate cashPaymentDate,
+                               java.time.LocalDate stockPaymentDate,
+                               BigDecimal yieldPct, Integer fillDays,
+                               BigDecimal previousClose, String source) {
+        Long existing = exDividendDate != null
+                ? jdbc.query(
+                        "SELECT id FROM stock_dividend_history " +
+                                "WHERE stock_code=? AND market=? AND year=? AND ex_dividend_date=?",
+                        ps -> { ps.setString(1, code); ps.setString(2, market);
+                                 ps.setInt(3, year); ps.setObject(4, exDividendDate); },
+                        rs -> rs.next() ? rs.getLong(1) : null)
+                : jdbc.query(
+                        "SELECT id FROM stock_dividend_history " +
+                                "WHERE stock_code=? AND market=? AND year=? AND ex_dividend_date IS NULL",
+                        ps -> { ps.setString(1, code); ps.setString(2, market); ps.setInt(3, year); },
+                        rs -> rs.next() ? rs.getLong(1) : null);
+        if (existing != null) {
+            jdbc.update(
+                    "UPDATE stock_dividend_history SET cash_dividend=?, stock_dividend=?, " +
+                            "ex_dividend_date=?, yield_pct=?, cash_payment_date=?, stock_payment_date=?, " +
+                            "fill_days=?, previous_close=?, source=?, updated_at=NOW() WHERE id=?",
+                    cashDividend, stockDividend,
+                    exDividendDate, yieldPct,
+                    cashPaymentDate, stockPaymentDate,
+                    fillDays, previousClose, source, existing);
+        } else {
+            jdbc.update(
+                    "INSERT INTO stock_dividend_history (stock_code, market, year, cash_dividend, " +
+                            "stock_dividend, ex_dividend_date, yield_pct, cash_payment_date, " +
+                            "stock_payment_date, fill_days, previous_close, source, updated_at) " +
+                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())",
+                    code, market, year, cashDividend, stockDividend,
+                    exDividendDate, yieldPct,
+                    cashPaymentDate, stockPaymentDate,
+                    fillDays, previousClose, source);
         }
     }
 

@@ -39,7 +39,7 @@ public class PriceQueryService {
 
     public PriceQueryService(StringRedisTemplate redis,
                              StockPriceHistoryRepository historyRepo,
-                             @Value("${price-service.base-url:http://price-service:8080}") String priceServiceUrl) {
+                             @Value("${external-materials.base-url:http://external-materials-service:8080}") String priceServiceUrl) {
         this.redis = redis;
         this.historyRepo = historyRepo;
         this.priceServiceClient = WebClient.builder().baseUrl(priceServiceUrl).build();

@@ -1,8 +1,8 @@
-package com.steven.assets.price.service;
+package com.steven.assets.externalmaterials.service;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.steven.assets.price.client.PriceFetchClient.PriceResult;
+import com.steven.assets.externalmaterials.client.PriceFetchClient.PriceResult;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;

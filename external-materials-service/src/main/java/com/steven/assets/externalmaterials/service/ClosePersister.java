@@ -1,9 +1,9 @@
-package com.steven.assets.price.service;
+package com.steven.assets.externalmaterials.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.steven.assets.price.client.PriceFetchClient;
-import com.steven.assets.price.client.PriceFetchClient.PriceResult;
+import com.steven.assets.externalmaterials.client.PriceFetchClient;
+import com.steven.assets.externalmaterials.client.PriceFetchClient.PriceResult;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;

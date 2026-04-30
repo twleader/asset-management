@@ -75,14 +75,15 @@ services:
       retries: 10
       start_period: 30s
 
-  # ── Price Service (抓股價微服務) ───────────────────────────
-  # 盤中 2 分鐘 cron 抓 TWSE / NASDAQ 寫 Redis；盤後寫 stock_price_history。
-  # 不對外暴露；business-services 透過 docker network 內部呼叫 /internal/refresh。
-  price-service:
+  # ── External Materials Service ─────────────────────────────
+  # 集中所有「向外部抓資料」的邏輯：盤中 2 分鐘抓股價寫 Redis、盤後寫
+  # stock_price_history、每日抓股利寫 stock_dividend_history。
+  # 不對外暴露；business-services 透過 docker network 內部呼叫 /internal/*。
+  external-materials-service:
     build:
-      context: ./price-service
+      context: ./external-materials-service
       dockerfile: Dockerfile
-    container_name: asset-price-service
+    container_name: asset-external-materials-service
     restart: unless-stopped
     env_file: .env
     environment:

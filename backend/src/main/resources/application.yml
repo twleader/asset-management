@@ -36,8 +36,8 @@ spring:
     virtual:
       enabled: true
 
-price-service:
-  base-url: ${PRICE_SERVICE_URL:http://price-service:8080}
+external-materials:
+  base-url: ${EXTERNAL_MATERIALS_URL:http://external-materials-service:8080}
 
 server:
   port: ${SERVER_PORT:8080}

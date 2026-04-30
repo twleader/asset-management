@@ -12,10 +12,10 @@
     </parent>
 
     <groupId>com.steven</groupId>
-    <artifactId>asset-price-service</artifactId>
+    <artifactId>asset-external-materials-service</artifactId>
     <version>1.0.0</version>
-    <name>asset-price-service</name>
-    <description>抓股價微服務：盤中 2 分鐘 poll 寫 Redis；盤後寫 stock_price_history</description>
+    <name>asset-external-materials-service</name>
+    <description>外部資料抓取微服務（盤中股價、盤後收盤、股利歷史等對外 API 統一這裡抓）</description>
 
     <properties>
         <java.version>21</java.version>

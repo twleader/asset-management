@@ -326,7 +326,7 @@ onMounted(async () => {
   // Single BFF call aggregates: snapshots + history + latestSnapshotDetail + prices + marketStatus
   await loadDashboardSummary()
 
-  // 即時股價：透過 SSE 訂閱 price-service 推送（取代原本 2 分鐘 polling）
+  // 即時股價：透過 SSE 訂閱 external-materials-service 推送（取代原本 2 分鐘 polling）
   openPriceStream()
 
   // marketStatus 仍用低頻 polling（每分鐘）— 純時區判斷，不需要即時推

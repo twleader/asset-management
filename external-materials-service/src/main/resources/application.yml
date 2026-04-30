@@ -1,6 +1,6 @@
 spring:
   application:
-    name: asset-price-service
+    name: asset-external-materials-service
 
   datasource:
     url: jdbc:postgresql://${DB_HOST:postgres}:${DB_PORT:5432}/${POSTGRES_DB:assetdb}

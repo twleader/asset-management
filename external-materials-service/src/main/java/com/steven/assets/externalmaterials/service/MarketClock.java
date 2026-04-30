@@ -1,4 +1,4 @@
-package com.steven.assets.price.service;
+package com.steven.assets.externalmaterials.service;
 
 import org.springframework.stereotype.Component;
 

@@ -46,8 +46,8 @@ com.steven.assets/
 **Service 層職責**
 - `AssetService`: 快照 CRUD、總額計算、損益運算、歷史分析
 - `ExcelImportService`: Excel 解析、格式偵測、資料清洗、批次儲存
-- `MarketDataService`: 股利率查詢、ETF 持股查詢等不屬於即時報價的市場資料（外部抓價已搬至 `price-service`）
-- `PriceQueryService`: 對 `price-service` 寫入 Redis 的 live 行情做唯讀；live 一律先讀 Redis，miss 則 fallback 至 `stock_price_history` 最近一筆收盤；歷史收盤直接讀 DB。`MarketDataController` 等對外 endpoint 皆透過此 service 取值，介面對 BFF / 前端不變
+- `MarketDataService`: 股利率查詢、ETF 持股查詢等不屬於即時報價的市場資料（外部抓價已搬至 `external-materials-service`）
+- `PriceQueryService`: 對 `external-materials-service` 寫入 Redis 的 live 行情做唯讀；live 一律先讀 Redis，miss 則 fallback 至 `stock_price_history` 最近一筆收盤；歷史收盤直接讀 DB。`MarketDataController` 等對外 endpoint 皆透過此 service 取值，介面對 BFF / 前端不變
 - `HistoricalDataService`: 歷史股價與匯率資料管理；歷史回補範圍以 `stock` 主檔（含曾持有 / 觀察清單 / 警示）為主，並聯集歷史快照中的持股代號
 - `InstitutionService`: 銀行、券商、存款類型、市場類型的 CRUD、停用管理、關鍵字比對邏輯
 
@@ -102,11 +102,11 @@ com.steven.assets/
 - `StockAlertTriggerRepository`（警示觸發歷史，30 天輪替）
 - `BackupSettingRepository`（備份保留代數設定，單列資料表）
 
-### Price Service Architecture（獨立微服務 / image：`asset-price-service`）
+### External Materials Service Architecture（獨立微服務 / image：`asset-external-materials-service`）
 
 抓取與分發股價的子系統獨立成單一 Spring Boot image，部署為獨立 container。背後動機：抓價邏輯（外部 API、cron、市場時段）與主業務邏輯解耦，外部 API 失敗或限流不會拖垮 `business-services`，並可獨立重啟 / scale。
 
-**模組結構（Maven module `price-service/`）：**
+**模組結構（Maven module `external-materials-service/`）：**
 ```
 com.steven.assets.price/
 ├── config/             # WebClient、Redis 連線設定
@@ -127,7 +127,7 @@ com.steven.assets.price/
 | `price:index:{market}` | Set，紀錄該市場所有有 cache 的 stockCode | 600s | 同上 |
 | `market:status` | JSON `{ twMarketOpen, usMarketOpen, twTime, usTime }` | 90s（短於輪詢） | `MarketClock` 每分鐘 |
 
-> `market:status` TTL 設 90s 短於輪詢間隔，確保 Redis 過期前一定會被覆寫；fail-safe 若 price-service 掛了，`PriceQueryService` 視 Redis miss 為「未開盤」（保守處理）。
+> `market:status` TTL 設 90s 短於輪詢間隔，確保 Redis 過期前一定會被覆寫；fail-safe 若 external-materials-service 掛了，`PriceQueryService` 視 Redis miss 為「未開盤」（保守處理）。
 
 **抓價來源同舊**：TWSE mis API（台股 live）、NASDAQ info API（美股 live）、FinMind TaiwanStockPrice（台股盤後收盤）。
 
@@ -147,22 +147,22 @@ com.steven.assets.price/
 
 **Sequence（盤中 2 分鐘排程）：**
 ```
-[price-service @Scheduled] → TWSE/NASDAQ → PriceCacheWriter → [Redis SET price:*:*]
+[external-materials-service @Scheduled] → TWSE/NASDAQ → PriceCacheWriter → [Redis SET price:*:*]
 ```
 
 **Sequence（盤後收盤）：**
 ```
-[price-service @Scheduled 13:35/16:05] → FinMind/NASDAQ
+[external-materials-service @Scheduled 13:35/16:05] → FinMind/NASDAQ
    → ClosePersister → [DB stock_price_history INSERT]
 ```
 
 **Live price push（Redis pub/sub + SSE，取代輪詢）：**
 
-為了消除前端 2 分鐘 polling 與 price-service 2 分鐘 cron 的相位差（最差 ~4 分鐘 lag），
+為了消除前端 2 分鐘 polling 與 external-materials-service 2 分鐘 cron 的相位差（最差 ~4 分鐘 lag），
 價格寫入後即時推到前端：
 
 - Redis channel：`price-update`
-- price-service `PriceCacheWriter.write()` 寫完 Redis SET 後，`PUBLISH price-update <json>`
+- external-materials-service `PriceCacheWriter.write()` 寫完 Redis SET 後，`PUBLISH price-update <json>`
 - business-services `PriceStreamService` 透過 `RedisMessageListenerContainer` 訂閱該 channel，
   fan-out 到 `Sinks.Many<String>`
 - business-services 暴露 `GET /api/market-data/prices/stream`（`text/event-stream`），
@@ -171,7 +171,7 @@ com.steven.assets.price/
 - 前端用 `EventSource('/api/bff/market-data/stream')` 訂閱，每筆訊息更新 stockPrices reactive state
 
 ```
-[price-service write] → Redis SET price:*:*
+[external-materials-service write] → Redis SET price:*:*
                      └→ Redis PUBLISH price-update {json}
                                           ↓
                      [business-services PriceStreamService 訂閱] 
@@ -380,7 +380,7 @@ BackupSetting         (備份保留代數設定，單列資料表，id = 1)
 
 #### Live 行情（Redis）
 
-`StockPrice` Entity 與 `stock_price` 表已廢除，盤中即時行情改存 Redis（schema 見上方 Price Service Architecture）。`PriceQueryService` 從 Redis 取值並組裝成原 `StockPriceDto` 形狀，對 BFF / 前端介面不變。
+`StockPrice` Entity 與 `stock_price` 表已廢除，盤中即時行情改存 Redis（schema 見上方 External Materials Service Architecture）。`PriceQueryService` 從 Redis 取值並組裝成原 `StockPriceDto` 形狀，對 BFF / 前端介面不變。
 
 #### WatchStock（新增）
 | 欄位 | 型別 | 說明 |
@@ -393,7 +393,7 @@ BackupSetting         (備份保留代數設定，單列資料表，id = 1)
 | createdAt | LocalDateTime | 建立時間 |
 | updatedAt | LocalDateTime | 更新時間 |
 
-> Unique constraint：(stockCode, market)。觀察清單中的股票會被併入 `price-service` 排程更新；報價透過 `PriceQueryService` 自 Redis 取得，警示資訊則彙總自 `StockAlert`。
+> Unique constraint：(stockCode, market)。觀察清單中的股票會被併入 `external-materials-service` 排程更新；報價透過 `PriceQueryService` 自 Redis 取得，警示資訊則彙總自 `StockAlert`。
 
 #### StockAlert（新增）
 | 欄位 | 型別 | 說明 |
@@ -514,7 +514,7 @@ GET    /api/bff/dashboard/summary                  # 並行聚合儀表板所需
 
 > BFF Enrichment：`latestSnapshotDetail.stocks[]` 由 BFF 補上 `investmentCostOriginal`（美股 USD、台股 TWD），legacy 美股 `currency='TWD'` 記錄會用 `transactionExchangeRate` 換回 USD，前端買入均價直接使用此欄位以避免各頁面重複正規化。
 
-> 儀表板「股票持股」股價顯示規則（與「觀察股票」共用同一 Redis live cache，由 `price-service` 兩支獨立 cron 各自每 2 分鐘更新）：
+> 儀表板「股票持股」股價顯示規則（與「觀察股票」共用同一 Redis live cache，由 `external-materials-service` 兩支獨立 cron 各自每 2 分鐘更新）：
 > - 規則 **per-market 判斷**：對每一檔股票，依其市場各自決定是否顯示即時價。
 >   - **台股**：`basedate == LocalDate.now(Asia/Taipei)` → 顯示 `stockPrices` 即時價＋漲跌%（盤中由 cron 每 2 分鐘更新）。
 >   - **美股**：`basedate == LocalDate.now(America/New_York)` → 顯示 `stockPrices` 即時價＋漲跌%。EST/EDT 由 JVM `ZoneId` 自動處理。
@@ -648,11 +648,11 @@ totalProfit  = totalStock - totalCost
 
 Redis 中 `price:{market}:{code}` 的 `tradingDate` 欄位代表**這筆價格資料對應的真實交易日**，不是 cache 寫入當下日期。
 
-**為什麼重要**：TWSE mis API 在週日深夜或非交易時段仍會回傳上一個交易日的最後成交資料。若 `price-service` 的 `/internal/refresh` 盤外被觸發時盲目把 `tradingDate` 設為 `LocalDate.now()`，會造成：
+**為什麼重要**：TWSE mis API 在週日深夜或非交易時段仍會回傳上一個交易日的最後成交資料。若 `external-materials-service` 的 `/internal/refresh` 盤外被觸發時盲目把 `tradingDate` 設為 `LocalDate.now()`，會造成：
 - `TechnicalIndicatorService.compute()` 看到 live `tradingDate == today` 就把它當「今天的 K 棒」併入 KD/MA9 序列
 - 實際上那筆資料是上週五的收盤 → 等於把上週五重複算了一次，污染技術指標
 
-**規則**（`price-service` 的 `PriceCacheWriter.resolveTradingDate`）：
+**規則**（`external-materials-service` 的 `PriceCacheWriter.resolveTradingDate`）：
 
 ```
 isLiveSession = (該市場 isOpen) || (剛收盤 20 分鐘窗口)
@@ -771,8 +771,8 @@ services:
     depends_on: [postgres (healthy), redis (healthy)]
     environment: SPRING_PROFILES_ACTIVE=postgres
 
-  price-service:
-    build: ./price-service
+  external-materials-service:
+    build: ./external-materials-service
     # 不暴露 host port；僅 docker network 可達
     depends_on: [postgres (healthy), redis (healthy)]
     environment:
@@ -810,7 +810,7 @@ location / {
 
 ### Multi-Stage Docker Builds
 
-**Backend / BFF / Price Service**: `maven:3.9-eclipse-temurin-21` → `eclipse-temurin:21-jre-alpine`
+**Backend / BFF / External Materials Service**: `maven:3.9-eclipse-temurin-21` → `eclipse-temurin:21-jre-alpine`
 **Frontend**: `node:18-alpine` (build) → `nginx:alpine` (serve)
 
 ## Backup / Restore (Requirement 15)
