@@ -7,7 +7,7 @@
     draggable
     @open="onOpen">
     <template #header>
-      <div style="display:flex;align-items:center;gap:24px">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding-right:32px">
         <span style="font-size:18px;font-weight:600;color:#1e293b">
           {{ stock?.stockCode }} {{ stock?.stockName || '' }}　股票分析
         </span>
@@ -30,7 +30,7 @@
         <template v-else>
           <div class="analysis-meta">
             <el-tag size="small" type="info">雙擊任意股票可開啟分析</el-tag>
-            <div style="display:flex;align-items:center;gap:6px;margin-left:32px">
+            <div style="display:flex;align-items:center;gap:6px;margin-left:auto">
               <span style="color:#64748b;font-size:12px">期間：</span>
               <el-button-group>
                 <el-button
