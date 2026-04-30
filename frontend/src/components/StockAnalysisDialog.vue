@@ -452,11 +452,13 @@ const chartOption = computed(() => {
 <style scoped>
 .analysis-loading { display:flex;flex-direction:column;align-items:center;gap:12px;padding:60px 0;color:#64748b;font-size:14px }
 .analysis-empty   { text-align:center;padding:60px 0;color:#94a3b8;font-size:14px }
-.analysis-meta    { display:flex;align-items:center;margin-bottom:8px }
+/* 右邊保留的空間要對齊 echarts grid.right (96px)，這樣 period selector / 資料截止 才會
+   和 chart 內容（endLabels 落點）的右緣切齊，不會越界到圖外。 */
+.analysis-meta    { display:flex;align-items:center;margin-bottom:8px;padding-right:96px }
 .tabs-wrap        { position: relative; }
 .tabs-trailing    {
   position: absolute;
-  right: 0;
+  right: 96px;
   top: 12px;
   color: #1e293b;
   font-size: 13px;
