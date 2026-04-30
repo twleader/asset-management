@@ -200,17 +200,24 @@ public class PriceFetchClient {
                 String companyName = root.path("data").path("companyName").asText("");
                 if (companyName.isBlank()) companyName = null;
 
+                // NASDAQ API 現況（2026/04 起）：keyStats 對 ETF 為 null，對 stocks 只剩 dayrange + 52 週區間，
+                // 不再提供 OpenPrice / PreviousClose / Volume。改從 primaryData 取，OpenPrice 無資料就留 null。
                 JsonNode keyStats = root.path("data").path("keyStats");
-                BigDecimal openPrice = parseDollar(keyStats.path("OpenPrice").path("value").asText(""));
-                BigDecimal previousClose = parseDollar(keyStats.path("PreviousClose").path("value").asText(""));
-                BigDecimal[] hl = parseRange(keyStats.path("DayrangeHigh").path("value").asText(""));
+                BigDecimal[] hl = parseRange(keyStats.path("dayrange").path("value").asText(""));
                 if (hl[0] == null && hl[1] == null) {
                     hl = parseRange(keyStats.path("Dayrange").path("value").asText(""));
                 }
-                Long volume = parseLong(keyStats.path("Volume").path("value").asText("").replace(",", ""));
+                BigDecimal openPrice = null; // 暫無對應欄位
+
+                // previousClose = price − netChange（API 拿不到實際昨收，用即時計算）
+                BigDecimal previousClose = price.subtract(change);
+
+                BigDecimal buyPrice = parseDollar(pd.path("bidPrice").asText(""));
+                BigDecimal sellPrice = parseDollar(pd.path("askPrice").asText(""));
+                Long volume = parseLong(pd.path("volume").asText(""));
 
                 return Optional.of(new PriceResult(stockCode, "美股", price, change, changePct, "NASDAQ",
-                        companyName, null, null, openPrice, previousClose, hl[0], hl[1], volume));
+                        companyName, buyPrice, sellPrice, openPrice, previousClose, hl[0], hl[1], volume));
             } catch (Exception e) {
                 log.warn("NASDAQ price 查詢失敗 {} ({}): {}", stockCode, assetClass, e.getMessage());
             }
@@ -330,7 +337,11 @@ public class PriceFetchClient {
         if (s == null) return null;
         String t = s.trim();
         if (t.isEmpty() || "-".equals(t) || "--".equals(t) || "N/A".equalsIgnoreCase(t)) return null;
-        try { return Long.parseLong(t.replace(",", "")); }
+        // NASDAQ volume 可能帶小數（如 "108,567,313.747204"），truncate 取整
+        String cleaned = t.replace(",", "");
+        int dot = cleaned.indexOf('.');
+        if (dot >= 0) cleaned = cleaned.substring(0, dot);
+        try { return Long.parseLong(cleaned); }
         catch (NumberFormatException e) { return null; }
     }
 
