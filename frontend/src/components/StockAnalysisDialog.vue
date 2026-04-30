@@ -7,16 +7,14 @@
     draggable
     @open="onOpen">
     <template #header>
-      <div style="display:flex;align-items:center;justify-content:space-between;padding-right:32px">
-        <span style="font-size:18px;font-weight:600;color:#1e293b">
-          {{ stock?.stockCode }} {{ stock?.stockName || '' }}　股票分析
-        </span>
-        <span v-if="activeTab === 'chart' && latestTradingDate"
-          style="color:#1e293b;font-size:13px;font-weight:600">
-          資料截止：{{ latestTradingDate }}
-        </span>
-      </div>
+      <span style="font-size:18px;font-weight:600;color:#1e293b">
+        {{ stock?.stockCode }} {{ stock?.stockName || '' }}　股票分析
+      </span>
     </template>
+    <div class="tabs-wrap">
+      <span v-if="activeTab === 'chart' && latestTradingDate" class="tabs-trailing">
+        資料截止：{{ latestTradingDate }}
+      </span>
     <el-tabs v-model="activeTab" @tab-change="onTabChange">
       <!-- 走勢圖 -->
       <el-tab-pane label="走勢圖" name="chart">
@@ -136,6 +134,7 @@
         </template>
       </el-tab-pane>
     </el-tabs>
+    </div>
   </el-dialog>
 </template>
 
@@ -432,6 +431,16 @@ const chartOption = computed(() => {
 .analysis-loading { display:flex;flex-direction:column;align-items:center;gap:12px;padding:60px 0;color:#64748b;font-size:14px }
 .analysis-empty   { text-align:center;padding:60px 0;color:#94a3b8;font-size:14px }
 .analysis-meta    { display:flex;align-items:center;margin-bottom:8px }
+.tabs-wrap        { position: relative; }
+.tabs-trailing    {
+  position: absolute;
+  right: 0;
+  top: 12px;
+  color: #1e293b;
+  font-size: 13px;
+  font-weight: 600;
+  z-index: 1;
+}
 </style>
 
 <style>
