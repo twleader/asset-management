@@ -70,10 +70,21 @@ public class ClosePersister {
                 }
                 ZonedDateTime nowUs = ZonedDateTime.now(MarketClock.US_ZONE);
                 LocalDate todayUs = nowUs.toLocalDate();
-                if (isWeekday(nowUs) && nowUs.toLocalTime().isAfter(LocalTime.of(16, 2))
-                        && !hasAnyHistoryFor(todayUs, "美股")) {
-                    log.info("self-heal: 美股今日 ({}) DB 無資料，dump Redis 補一次", todayUs);
-                    dumpUsCloseFromRedis();
+                if (isWeekday(nowUs)) {
+                    if (nowUs.toLocalTime().isAfter(LocalTime.of(18, 0))) {
+                        if (!hasAnyHistoryFor(todayUs, "美股")) {
+                            log.info("self-heal: 美股今日 ({}) DB 無資料，跑 FinMind 校正", todayUs);
+                            int finmindOk = verifyUsCloseWithFinMind();
+                            if (finmindOk == 0) {
+                                log.info("self-heal: 美股 FinMind 全空，改用 Redis dump");
+                                dumpUsCloseFromRedis();
+                            }
+                        }
+                    } else if (nowUs.toLocalTime().isAfter(LocalTime.of(16, 2))
+                            && !hasAnyHistoryFor(todayUs, "美股")) {
+                        log.info("self-heal: 美股今日 ({}) DB 無資料，dump Redis 補一次", todayUs);
+                        dumpUsCloseFromRedis();
+                    }
                 }
             } catch (Exception e) {
                 log.warn("close self-heal 失敗: {}", e.getMessage());
@@ -132,6 +143,35 @@ public class ClosePersister {
         log.info("排程：dump 美股 Redis 收盤價到 DB ({})", today);
         int n = dumpRedisToDb("美股", today);
         log.info("美股 Redis dump 完成：{} 檔", n);
+    }
+
+    /**
+     * 18:00 ET：用 FinMind USStockPrice 校正美股當日收盤。FinMind 有回值即覆寫 16:02 dump 值。
+     */
+    @Scheduled(cron = "0 0 18 * * MON-FRI", zone = "America/New_York")
+    public int verifyUsCloseWithFinMind() {
+        log.info("排程：FinMind 校正美股當日收盤價");
+        Set<String> tw = new LinkedHashSet<>(), us = new LinkedHashSet<>();
+        source.collectHeldStockCodes(tw, us);
+        LocalDate today = LocalDate.now(MarketClock.US_ZONE);
+        int ok = 0, miss = 0;
+        for (String code : us) {
+            try {
+                Optional<PriceResult> r = client.getUsClosingPriceFromFinMind(code, today);
+                if (r.isEmpty()) { miss++; continue; }
+                PriceResult pr = r.get();
+                source.upsertHistory(code, "美股", today,
+                        pr.openPrice(), pr.highPrice(), pr.lowPrice(),
+                        pr.price(), pr.volume());
+                ok++;
+                Thread.sleep(300);
+            } catch (Exception e) {
+                log.warn("FinMind 校正美股 {} 收盤失敗: {}", code, e.getMessage());
+                miss++;
+            }
+        }
+        log.info("FinMind 校正美股收盤完成：成功覆寫 {} 檔，缺漏 {} 檔", ok, miss);
+        return ok;
     }
 
     /** 共用：遍歷 Redis price:{market}:* 把每筆 upsert 進 stock_price_history。 */
