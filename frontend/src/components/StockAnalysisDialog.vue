@@ -184,9 +184,10 @@ async function fetchHistory() {
   loading.value = true
   history.value = []
   try {
+    // 一次抓 10 年（DB 查詢 < 100ms），之後切期間只調 dataZoom，不再 roundtrip
     const end = new Date().toISOString().split('T')[0]
     const startDate = new Date()
-    startDate.setMonth(startDate.getMonth() - months.value)
+    startDate.setMonth(startDate.getMonth() - 120)
     const start = startDate.toISOString().split('T')[0]
     const data = await bffApi.stockAnalysis.getStockHistory(props.stock.stockCode, props.stock.market, start, end)
     history.value = Array.isArray(data) ? data : []
@@ -196,8 +197,6 @@ async function fetchHistory() {
     loading.value = false
   }
 }
-
-watch(months, () => { if (props.modelValue) fetchHistory() })
 
 function onOpen() {
   activeTab.value = 'chart'
@@ -415,10 +414,16 @@ const chartOption = computed(() => {
       { left: 64, right: 96, top: 72, bottom: 190 },
       { left: 64, right: 96, top: 'auto', height: 90, bottom: 60 }
     ],
-    dataZoom: [
-      { type: 'inside', xAxisIndex: [0, 1], start: 0, end: 100 },
-      { type: 'slider', xAxisIndex: [0, 1], start: 0, end: 100, height: 20, bottom: 8 }
-    ],
+    dataZoom: (() => {
+      // 抓 10 年資料，期間按鈕只調 dataZoom 的 start% 而非重新打 API
+      const total = dates.length
+      const want = Math.max(20, Math.round(months.value * 21))  // ~21 trading days/month
+      const startPct = total > 0 ? Math.max(0, 100 * (total - want) / total) : 0
+      return [
+        { type: 'inside', xAxisIndex: [0, 1], start: startPct, end: 100 },
+        { type: 'slider', xAxisIndex: [0, 1], start: startPct, end: 100, height: 20, bottom: 8 }
+      ]
+    })(),
     xAxis: [
       { gridIndex: 0, type: 'category', data: dates, boundaryGap: false, axisLabel: { show: false }, axisLine: { onZero: false } },
       { gridIndex: 1, type: 'category', data: dates, boundaryGap: false, axisLabel: { rotate: 30, fontSize: 10, formatter: v => v.substring(0, 7) } }
