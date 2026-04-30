@@ -19,7 +19,13 @@
         </div>
         <template v-else>
           <div class="analysis-meta">
-            <el-tag size="small" type="info">雙擊任意股票可開啟分析</el-tag>
+            <div style="display:flex;align-items:center;gap:12px">
+              <el-tag size="small" type="info">雙擊任意股票可開啟分析</el-tag>
+              <span v-if="latestTradingDate"
+                style="color:#1e293b;font-size:13px;font-weight:600">
+                資料截止：{{ latestTradingDate }}
+              </span>
+            </div>
             <div style="display:flex;align-items:center;gap:6px">
               <span style="color:#64748b;font-size:12px">期間：</span>
               <el-button-group>
@@ -32,10 +38,6 @@
                 </el-button>
               </el-button-group>
               <span style="color:#64748b;font-size:12px;margin-left:8px">滾輪縮放 / 拖曳平移</span>
-              <span v-if="latestTradingDate"
-                style="color:#1e293b;font-size:13px;font-weight:600;margin-left:16px">
-                資料截止：{{ latestTradingDate }}
-              </span>
             </div>
           </div>
           <v-chart :option="chartOption" style="height:580px" autoresize />
