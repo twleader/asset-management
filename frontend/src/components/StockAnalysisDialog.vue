@@ -363,8 +363,8 @@ const chartOption = computed(() => {
     },
     legend: {
       data: cost != null
-        ? ['收盤價', '月線MA20', '季線MA60', '年線MA240', '成本均價', 'K', 'D']
-        : ['收盤價', '月線MA20', '季線MA60', '年線MA240', 'K', 'D'],
+        ? ['股價', '月線MA20', '季線MA60', '年線MA240', '成本均價', 'K', 'D']
+        : ['股價', '月線MA20', '季線MA60', '年線MA240', 'K', 'D'],
       top: 8, textStyle: { fontSize: 12 }
     },
     axisPointer: { link: [{ xAxisIndex: 'all' }] },
@@ -385,7 +385,7 @@ const chartOption = computed(() => {
       { gridIndex: 1, type: 'value', min: 0, max: 100, splitNumber: 2, axisLabel: { fontSize: 10 }, splitLine: { lineStyle: { color: '#f0f0f0' } } }
     ],
     series: [
-      { name: '收盤價', type: 'line', xAxisIndex: 0, yAxisIndex: 0, data: prices,
+      { name: '股價', type: 'line', xAxisIndex: 0, yAxisIndex: 0, data: prices,
         lineStyle: { width: 2, color: '#3b82f6' }, itemStyle: { color: '#3b82f6' }, showSymbol: false,
         endLabel: { show: true, formatter: '{c}', fontSize: 11, color: '#3b82f6', fontWeight: 700 },
         areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
