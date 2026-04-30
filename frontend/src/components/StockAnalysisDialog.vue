@@ -382,12 +382,15 @@ const chartOption = computed(() => {
         '年線MA240': '#ef4444',
         '成本均價':  '#64748b',
         'K':         '#f59e0b',
-        'D':         '#3b82f6'
+        'D':         '#15803d'
       }
-      const valueStyleKeyOf = name => 'v_' + name.replace(/[^a-zA-Z0-9]/g, '')
+      // 用 index 當 rich key（避免中文字無法作為 echarts rich style key）
+      const keyByName = {}
       const richStyles = { n: { fontSize: 12, color: '#475569', lineHeight: 16 } }
-      Object.entries(colorMap).forEach(([name, color]) => {
-        richStyles[valueStyleKeyOf(name)] = {
+      Object.entries(colorMap).forEach(([name, color], i) => {
+        const k = 'v' + i
+        keyByName[name] = k
+        richStyles[k] = {
           fontSize: 12, color, lineHeight: 16, fontWeight: 700, padding: [2, 0, 0, 0]
         }
       })
@@ -398,7 +401,7 @@ const chartOption = computed(() => {
         top: 8,
         itemGap: 36,
         formatter: name => map[name]
-          ? `{n|${name}}\n{${valueStyleKeyOf(name)}|${map[name]}}`
+          ? `{n|${name}}\n{${keyByName[name] || 'n'}|${map[name]}}`
           : name,
         textStyle: {
           fontSize: 12,
@@ -460,8 +463,8 @@ const chartOption = computed(() => {
         }
       },
       { name: 'D', type: 'line', xAxisIndex: 1, yAxisIndex: 1, data: D,
-        lineStyle: { width: 1.5, color: '#3b82f6' }, itemStyle: { color: '#3b82f6' }, showSymbol: false,
-        endLabel: { show: true, formatter: '{c}', fontSize: 11, color: '#3b82f6' }
+        lineStyle: { width: 1.5, color: '#15803d' }, itemStyle: { color: '#15803d' }, showSymbol: false,
+        endLabel: { show: true, formatter: '{c}', fontSize: 11, color: '#15803d' }
       }
     ]
   }
