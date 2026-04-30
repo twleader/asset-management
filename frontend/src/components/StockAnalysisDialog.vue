@@ -362,7 +362,9 @@ const chartOption = computed(() => {
     },
     legend: (() => {
       const last = arr => arr.length ? arr[arr.length - 1] : null
-      const fmt = v => (v == null ? '' : Number(v).toFixed(2))
+      const fmt = v => (v == null ? '' : Number(v).toLocaleString('en-US', {
+        minimumFractionDigits: 2, maximumFractionDigits: 2
+      }))
       const map = {
         '股價':       fmt(last(prices)),
         '月線MA20':   fmt(last(ma20)),
@@ -372,6 +374,23 @@ const chartOption = computed(() => {
         'K':          fmt(last(K)),
         'D':          fmt(last(D))
       }
+      // 每個 series 在 legend 數值的色彩，對應線條顏色（與 logo 一致）
+      const colorMap = {
+        '股價':      '#3b82f6',
+        '月線MA20':  '#f59e0b',
+        '季線MA60':  '#8b5cf6',
+        '年線MA240': '#ef4444',
+        '成本均價':  '#64748b',
+        'K':         '#f59e0b',
+        'D':         '#3b82f6'
+      }
+      const valueStyleKeyOf = name => 'v_' + name.replace(/[^a-zA-Z0-9]/g, '')
+      const richStyles = { n: { fontSize: 12, color: '#475569', lineHeight: 16 } }
+      Object.entries(colorMap).forEach(([name, color]) => {
+        richStyles[valueStyleKeyOf(name)] = {
+          fontSize: 12, color, lineHeight: 16, fontWeight: 700, padding: [2, 0, 0, 0]
+        }
+      })
       return {
         data: cost != null
           ? ['股價', '月線MA20', '季線MA60', '年線MA240', '成本均價', 'K', 'D']
@@ -379,15 +398,12 @@ const chartOption = computed(() => {
         top: 8,
         itemGap: 36,
         formatter: name => map[name]
-          ? `{n|${name}}\n{v|${map[name]}}`
+          ? `{n|${name}}\n{${valueStyleKeyOf(name)}|${map[name]}}`
           : name,
         textStyle: {
           fontSize: 12,
           color: '#475569',
-          rich: {
-            n: { fontSize: 12, color: '#475569', lineHeight: 16 },
-            v: { fontSize: 12, color: '#1e293b', lineHeight: 16, padding: [2, 0, 0, 0] }
-          }
+          rich: richStyles
         }
       }
     })(),
