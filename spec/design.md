@@ -108,7 +108,7 @@ com.steven.assets/
 
 **模組結構（Maven module `external-materials-service/`）：**
 ```
-com.steven.assets.price/
+com.steven.assets.externalmaterials/
 ├── config/             # WebClient、Redis 連線設定
 ├── client/             # TwseClient、NasdaqClient、FinMindClient（從 backend 搬出）
 ├── service/

@@ -1,4 +1,4 @@
-package com.steven.assets.price;
+package com.steven.assets.externalmaterials;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
