@@ -117,6 +117,19 @@ public class StockAlertService {
         actives.forEach(this::evaluate);
     }
 
+    /**
+     * 只比對單一股票的警示（由 Redis pub/sub price-update 訊息觸發，
+     * 每次 price-service 寫一筆 Redis 都會 fire 一次，避免每次都 scan 所有 active alerts）。
+     */
+    public void checkAlertsFor(String stockCode, String market) {
+        if (stockCode == null || market == null) return;
+        List<StockAlert> matching = alertRepo.findByActiveTrue().stream()
+                .filter(a -> stockCode.equals(a.getStockCode()) && market.equals(a.getMarket()))
+                .toList();
+        if (matching.isEmpty()) return;
+        matching.forEach(this::evaluate);
+    }
+
     private void evaluate(StockAlert alert) {
         try {
             Optional<PriceQueryService.LivePrice> priceOpt = priceQuery.getLive(alert.getStockCode(), alert.getMarket());
