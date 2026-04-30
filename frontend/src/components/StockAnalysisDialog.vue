@@ -378,12 +378,15 @@ const chartOption = computed(() => {
           : ['股價', '月線MA20', '季線MA60', '年線MA240', 'K', 'D'],
         top: 8,
         itemGap: 36,
-        formatter: name => `${name}\n${map[name] || ''}`,
+        formatter: name => map[name]
+          ? `{n|${name}}\n{v|${map[name]}}`
+          : name,
         textStyle: {
           fontSize: 12,
           color: '#475569',
           rich: {
-            // 第二行（值）粗體稍深
+            n: { fontSize: 12, color: '#475569', lineHeight: 16 },
+            v: { fontSize: 12, color: '#1e293b', lineHeight: 16, padding: [2, 0, 0, 0] }
           }
         }
       }
