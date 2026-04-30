@@ -293,7 +293,8 @@ const autoFillAssetName = async () => {
   if (gainForm.assetName && gainForm.assetName.trim()) return
   try {
     const res = await bffApi.stockAlert.lookupName({ code, market: gainForm.market })
-    if (res?.name) gainForm.assetName = res.name
+    const name = res?.stockName || res?.name
+    if (name) gainForm.assetName = name
   } catch (e) {
     /* silent */
   }
