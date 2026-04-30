@@ -160,6 +160,17 @@ public class StockAlertService {
                 LocalDateTime triggeredAt = computeTriggeredAt(alert);
                 alert.setLastTriggeredAt(triggeredAt);
                 alert.setLastTriggeredPrice(BigDecimal.valueOf(currentPrice));
+                // 不論觸發原因為何，把當下 MA / KD / D 一併凍結進 alert，UI 才能完整顯示
+                try {
+                    TechnicalIndicatorService.FullIndicators ind = indicatorService.computeAll(
+                            alert.getStockCode(), alert.getMarket());
+                    BigDecimal ma = pickMaForAlert(alert.getAlertType(), ind);
+                    if (ma != null) alert.setLastTriggeredMaValue(ma);
+                    if (ind.k() != null) alert.setLastTriggeredKdValue(ind.k());
+                    if (ind.d() != null) alert.setLastTriggeredDValue(ind.d());
+                } catch (Exception e) {
+                    log.warn("快照觸發指標失敗 alert {}: {}", alert.getId(), e.getMessage());
+                }
                 alertRepo.save(alert);
                 recordTrigger(alert, triggeredAt, BigDecimal.valueOf(currentPrice));
                 return;
@@ -181,6 +192,16 @@ public class StockAlertService {
         } catch (Exception e) {
             log.warn("Error evaluating alert {}: {}", alert.getId(), e.getMessage());
         }
+    }
+
+    /** 依警示類型挑出對應的 MA（季線 60 / 年線 240），其他類型回 quarterly 當預設。 */
+    private static BigDecimal pickMaForAlert(String type, TechnicalIndicatorService.FullIndicators ind) {
+        if (type == null) return ind.quarterlyMa();
+        return switch (type) {
+            case "ANNUAL_MA_ABOVE_PCT", "ANNUAL_MA_BELOW_PCT" -> ind.annualMa();
+            case "QUARTERLY_MA_ABOVE_PCT", "QUARTERLY_MA_BELOW_PCT" -> ind.quarterlyMa();
+            default -> ind.quarterlyMa();
+        };
     }
 
     private record IntradayMatch(LocalDateTime time, BigDecimal price,
