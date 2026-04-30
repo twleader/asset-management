@@ -2,6 +2,7 @@ package com.steven.assets.controller;
 
 import com.steven.assets.model.ExchangeRateHistory;
 import com.steven.assets.model.StockPriceHistory;
+import com.steven.assets.service.DividendHistoryService;
 import com.steven.assets.service.HistoricalDataService;
 import com.steven.assets.service.MarketDataService;
 import com.steven.assets.service.PriceStreamService;
@@ -28,6 +29,7 @@ public class MarketDataController {
     private final StockPriceService stockPriceService;
     private final HistoricalDataService historicalDataService;
     private final PriceStreamService priceStreamService;
+    private final DividendHistoryService dividendHistoryService;
 
     /**
      * 取得交易日曆假日（台股：TWSE Open API；美股：NYSE 規則計算）
@@ -120,7 +122,7 @@ public class MarketDataController {
     }
 
     /**
-     * 最近 N 年股利
+     * 最近 N 年股利（由 DB 讀取，每日 17:00 TW cron 同步；DB 空則一次性 fallback 抓 + 寫）
      * GET /api/market-data/dividends?code=0050&market=台股&years=10
      */
     @GetMapping("/dividends")
@@ -128,7 +130,7 @@ public class MarketDataController {
             @RequestParam String code,
             @RequestParam String market,
             @RequestParam(defaultValue = "10") int years) {
-        return ResponseEntity.ok(marketDataService.getDividendHistory(code, market, years));
+        return ResponseEntity.ok(dividendHistoryService.findFromDb(code, market, years));
     }
 
     // ===== 歷史收盤價 =====

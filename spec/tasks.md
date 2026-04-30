@@ -1222,3 +1222,24 @@ live 行情先讀 Redis，miss fallback 到 `stock_price_history` 最近一筆�
 - [ ] 48.6 `DashboardView.vue`：把 setInterval 改成 `new EventSource(...)`；onmessage 解析
         JSON 並更新 stockPrices reactive map；onerror 自動 reconnect。初始載入仍走
         `/api/bff/dashboard/summary`，後續增量更新走 SSE
+
+### Task 49: 股利歷史快取至 DB（每日同步，UI 直讀 DB）
+
+對應 Requirements: Requirement 7（市場資料整合）、Requirement 13（股票走勢圖延伸資訊）
+
+#### 背景
+
+`StockAnalysisDialog` 的股利歷史分頁每次開啟都打 FinMind，慢且耗 quota。
+改為每日由 cron 從 FinMind 抓寫進 `stock_dividend_history`，前端只讀 DB。
+
+#### Steps:
+
+- [ ] 49.1 Liquibase changelog `v1.13.0`：新增 `stock_dividend_history` 表
+       （PK id，唯一鍵 (stockCode, market, year, COALESCE(exDividendDate, epoch))）
+- [ ] 49.2 新增 `StockDividendHistory` Entity + `StockDividendHistoryRepository`
+- [ ] 49.3 新增 `DividendHistoryService`：
+        - `@Scheduled cron "0 0 17 * * MON-FRI"`：iterate `stock` 主檔，呼叫
+          `MarketDataService.getDividendHistory(10)` 後 upsert
+        - `findFromDb(code, market, years)`：DB 查詢，DB 空一次性 fallback 抓+寫
+        - `@EventListener(ApplicationReadyEvent)`：背景補齊主檔中尚無資料的股票
+- [ ] 49.4 `MarketDataController /dividends` 改呼叫 `DividendHistoryService.findFromDb`
