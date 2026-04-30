@@ -77,6 +77,43 @@ public class PriceFetchClient {
                 .orElseThrow(() -> new RuntimeException("查無股價：" + stockCode));
     }
 
+    /**
+     * 從 FinMind USStockPrice 取得美股當日收盤資訊（盤後 1-2 小時發佈）。
+     * 用於 16:02 ET Redis dump 之後 18:00 ET 的權威性校正。
+     */
+    public Optional<PriceResult> getUsClosingPriceFromFinMind(String stockCode, LocalDate startDate) {
+        try {
+            String url = "https://api.finmindtrade.com/api/v4/data"
+                    + "?dataset=USStockPrice"
+                    + "&data_id=" + stockCode
+                    + "&start_date=" + startDate.toString();
+            HttpResponse<String> resp = httpClient.send(
+                    finmindRequest(url, 15), HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() != 200) {
+                log.warn("FinMind USStockPrice {} 回應 {}（token {}）", stockCode,
+                        resp.statusCode(), finmindToken.isEmpty() ? "未設定" : "已設定");
+                return Optional.empty();
+            }
+            JsonNode data = mapper.readTree(resp.body()).path("data");
+            if (!data.isArray() || data.isEmpty()) return Optional.empty();
+            JsonNode row = data.get(data.size() - 1);
+            BigDecimal close = finmindDecimal(row, "Close");
+            if (close == null) return Optional.empty();
+            BigDecimal open = finmindDecimal(row, "Open");
+            BigDecimal high = finmindDecimal(row, "High");
+            BigDecimal low = finmindDecimal(row, "Low");
+            long volume = row.path("Volume").asLong(0);
+            return Optional.of(new PriceResult(
+                    stockCode, "美股", close, null, null, "FinMind",
+                    null, null, null,
+                    open, null, high, low,
+                    volume == 0 ? null : volume));
+        } catch (Exception e) {
+            log.warn("FinMind 取得美股 {} 收盤失敗: {}", stockCode, e.getMessage());
+            return Optional.empty();
+        }
+    }
+
     public Optional<PriceResult> getTwClosingPriceFromFinMind(String stockCode, LocalDate startDate) {
         try {
             String url = "https://api.finmindtrade.com/api/v4/data"
