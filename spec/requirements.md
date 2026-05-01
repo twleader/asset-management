@@ -314,4 +314,6 @@
 - [ ] 後端提供獨立資源端點 `/api/taiwan-gdp` 與 `/api/twse-year-end-index`
 - [ ] BFF 端點 `/api/bff/gdp-twse`，前端只呼叫 BFF
 - [ ] 滑鼠移到任一年份時，tooltip 同時顯示該年人均 GDP 與大盤收盤點位
+- [ ] 「回補 GDP」按鈕呼叫 IMF DataMapper API（`NGDPDPC/TWN`）upsert 至 DB，覆蓋 1980 至最新年度
+- [ ] 「回補大盤」按鈕呼叫 TWSE FMTQIK 月報，逐年抓 12 月最後一筆收盤 upsert 至 DB
 

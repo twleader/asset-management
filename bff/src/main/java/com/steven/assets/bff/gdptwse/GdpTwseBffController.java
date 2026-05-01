@@ -4,12 +4,14 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
+import java.time.Duration;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -74,6 +76,39 @@ public class GdpTwseBffController {
             body.put("years", yearsList);
             body.put("gdpPerCapitaUsd", gdpList);
             body.put("twseYearEndClose", twseList);
+            return ResponseEntity.ok(body);
+        });
+    }
+
+    /**
+     * 並行觸發 GDP（IMF）+ 大盤年末收盤（TWSE FMTQIK）回補。
+     */
+    @PostMapping("/refresh")
+    public Mono<ResponseEntity<Map<String, Object>>> refresh(
+            @RequestParam(defaultValue = "30") int years) {
+        int currentYear = LocalDate.now().getYear();
+        int from = currentYear - years + 1;
+
+        ParameterizedTypeReference<Map<String, Object>> mapRef = new ParameterizedTypeReference<>() {};
+
+        Mono<Map<String, Object>> gdp = businessServicesClient.post()
+                .uri("/api/taiwan-gdp/refresh-from-imf")
+                .retrieve().bodyToMono(mapRef)
+                .timeout(Duration.ofSeconds(30))
+                .onErrorResume(e -> Mono.just(Map.of("error", e.getMessage())));
+
+        // 30 年 × ~0.8s sleep + http roundtrip → 預計 30~60s
+        Mono<Map<String, Object>> twse = businessServicesClient.post()
+                .uri(uri -> uri.path("/api/twse-year-end-index/refresh")
+                        .queryParam("from", from).queryParam("to", currentYear).build())
+                .retrieve().bodyToMono(mapRef)
+                .timeout(Duration.ofSeconds(120))
+                .onErrorResume(e -> Mono.just(Map.of("error", e.getMessage())));
+
+        return Mono.zip(gdp, twse).map(tuple -> {
+            Map<String, Object> body = new HashMap<>();
+            body.put("gdp", tuple.getT1());
+            body.put("twse", tuple.getT2());
             return ResponseEntity.ok(body);
         });
     }
