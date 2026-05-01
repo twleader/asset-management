@@ -606,12 +606,13 @@ public class StockAlertService {
         boolean isWeekday = dow != DayOfWeek.SATURDAY && dow != DayOfWeek.SUNDAY;
         LocalTime nowT = nowZ.toLocalTime();
         if (isWeekday && !nowT.isBefore(open) && !nowT.isAfter(close)) {
-            return LocalDateTime.now();
+            // 用市場時區的 wall time，與其他路徑（Yahoo intraday bar, tradingDate.atTime）一致
+            return nowZ.toLocalDateTime();
         }
 
         return historyRepo.findMaxTradingDate(alert.getStockCode(), alert.getMarket())
                 .map(d -> d.atTime(close))
-                .orElseGet(LocalDateTime::now);
+                .orElseGet(() -> nowZ.toLocalDateTime());
     }
 
     /**

@@ -68,7 +68,7 @@
         <el-table-column label="觸發時間 / 股價 / 季線 / KD" width="200">
           <template #default="{ row }">
             <template v-if="row.lastTriggeredAt">
-              <div style="font-size:12px;color:#64748b">{{ fmtDt(row.lastTriggeredAt) }}</div>
+              <div style="font-size:12px;color:#64748b">{{ fmtDt(row.lastTriggeredAt, row.market) }}</div>
               <div style="font-size:12px;color:#0f172a">
                 股價 <strong>{{ row.lastTriggeredPrice != null ? '$' + Number(row.lastTriggeredPrice).toLocaleString() : '—' }}</strong>
               </div>
@@ -403,7 +403,11 @@ async function remove(row) {
   loadAlerts()
 }
 
-const fmtDt = (dt) => dayjs(dt).format('MM/DD HH:mm')
+const fmtDt = (dt, market) => {
+  if (!dt) return ''
+  const base = dayjs(dt).format('MM/DD HH:mm')
+  return market ? `${base} ${market === '美股' ? 'NY' : 'TW'}` : base
+}
 
 // ===== 股價走勢分析 =====
 const analysisVisible = ref(false)
