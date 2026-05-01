@@ -47,16 +47,18 @@ public class MacroHistoryService {
 
     @Transactional
     public Map<String, Object> refreshGdpFromImf() throws Exception {
-        HttpRequest req = HttpRequest.newBuilder(URI.create(IMF_GDP_URL))
-                .header("Accept", "application/json")
-                .header("User-Agent", "Mozilla/5.0")
-                .timeout(Duration.ofSeconds(20))
-                .GET().build();
-        HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString());
-        if (res.statusCode() / 100 != 2) {
-            throw new RuntimeException("IMF API HTTP " + res.statusCode());
-        }
-        JsonNode twn = mapper.readTree(res.body())
+        // IMF 後面是 Akamai WAF；UA 設為 Mozilla 或 Java-http-client 會被 403。
+        // 用 curl shell-out，沿用既有 HistoricalDataService 的模式（避免 Java TLS fingerprint 被擋）。
+        ProcessBuilder pb = new ProcessBuilder(
+                "curl", "-sS", "--max-time", "20",
+                "-H", "Accept: application/json",
+                IMF_GDP_URL);
+        pb.redirectErrorStream(true);
+        Process proc = pb.start();
+        String body = new String(proc.getInputStream().readAllBytes());
+        int exit = proc.waitFor();
+        if (exit != 0) throw new RuntimeException("curl exit=" + exit + ": " + body);
+        JsonNode twn = mapper.readTree(body)
                 .path("values").path("NGDPDPC").path("TWN");
         if (!twn.isObject() || twn.isEmpty()) {
             throw new RuntimeException("IMF 回應未含 TWN 資料");
