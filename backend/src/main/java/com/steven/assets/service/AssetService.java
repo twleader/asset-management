@@ -337,6 +337,20 @@ public class AssetService {
                 }
             }
 
+            // 計算台幣 / 美元存款分項（與前端 bankSummary 同邏輯：TRANSIT_TWD/TRANSIT_USD 各歸對應幣別，
+            // amount 已是台幣等值，可直接相加）
+            BigDecimal twdDeposit = BigDecimal.ZERO;
+            BigDecimal usdDeposit = BigDecimal.ZERO;
+            for (var d : s.getDeposits()) {
+                BigDecimal amt = d.getAmount() != null ? d.getAmount() : BigDecimal.ZERO;
+                String cur = d.getCurrency();
+                if ("USD".equals(cur) || "TRANSIT_USD".equals(cur)) {
+                    usdDeposit = usdDeposit.add(amt);
+                } else {
+                    twdDeposit = twdDeposit.add(amt);
+                }
+            }
+
             // 直接使用 DB 已存的 estimatedAnnualDividend（由 autoEnrichDividendRates 維護）
             BigDecimal estimatedDividend = s.getEstimatedAnnualDividend() != null
                     ? s.getEstimatedAnnualDividend() : BigDecimal.ZERO;
@@ -344,7 +358,9 @@ public class AssetService {
             BigDecimal realizedGain = realizedByYear.get(s.getSnapshotDate().getYear());
 
             result.add(new AssetSnapshotDto.AssetHistoryResponse(
-                s.getId(), s.getSnapshotDate(), s.getTotalDeposit(), s.getTotalFundValue(),
+                s.getId(), s.getSnapshotDate(), s.getTotalDeposit(),
+                twdDeposit, usdDeposit,
+                s.getTotalFundValue(),
                 twStockValue, usStockValue,
                 s.getTotalStockValue(), total, increase, increaseRate, investRate,
                 estimatedDividend, realizedGain

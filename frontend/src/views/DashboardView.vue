@@ -574,11 +574,12 @@ const pieOption = computed(() => {
   const hoverDate = hoveredHistoryDate.value
   let segments
   if (hoverDate) {
-    // 歷史時間點：history row 沒有存款幣別細分，只能用合併「存款」+ 台股 / 美股 / 基金
     const r = filteredHistory.value.find(x => x.snapshotDate === hoverDate)
     if (!r) return {}
+    // 歷史時間點：BFF history row 已預先聚合台幣/美元存款，與最新狀態同樣 5 區
     segments = [
-      { value: Math.round(Number(r.totalDeposit || 0)),       name: '存款',      color: '#3b82f6' },
+      { value: Math.round(Number(r.totalTwdDeposit || 0)),    name: '台幣存款',  color: '#3b82f6' },
+      { value: Math.round(Number(r.totalUsdDeposit || 0)),    name: '美元存款',  color: '#60a5fa' },
       { value: Math.round(Number(r.totalTwStockValue || 0)),  name: '台股',      color: '#f59e0b' },
       { value: Math.round(Number(r.totalUsStockValue || 0)),  name: '美股',      color: '#ef4444' },
       { value: Math.round(Number(r.totalFundValue || 0)),     name: '信託基金',  color: '#10b981' }
