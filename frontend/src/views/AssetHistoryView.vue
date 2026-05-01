@@ -67,8 +67,22 @@
     <el-row :gutter="20">
       <el-col :span="24">
         <el-card style="margin-bottom:20px">
-          <template #header><span class="section-title">總資產趨勢</span></template>
-          <v-chart :option="totalTrendOption" style="height:350px" autoresize />
+          <template #header>
+            <span class="section-title">總資產趨勢</span>
+            <span class="card-sub">{{ trendDate }}</span>
+          </template>
+          <div class="trend-legend">
+            <div v-for="item in trendLegendItems" :key="item.name" class="trend-legend-item">
+              <span class="tl-dot" :style="{ background: item.color }"></span>
+              <div class="tl-text">
+                <div class="tl-name">{{ item.name }}</div>
+                <div class="tl-amount" :style="{ color: item.color }">{{ fmt(item.value) }}</div>
+              </div>
+            </div>
+          </div>
+          <v-chart :option="totalTrendOption" style="height:300px" autoresize
+            @updateAxisPointer="onTrendAxisPointer"
+            @globalout="onTrendLeave" />
         </el-card>
       </el-col>
     </el-row>
@@ -156,6 +170,31 @@ const pct = (v) => v ? `${(Number(v) * 100).toFixed(1)}%` : '-'
 
 const dates = computed(() => history.value.map(h => h.snapshotDate))
 
+// hover 連動 legend：未 hover 時顯示最新一筆
+const hoveredDate = ref(null)
+function onTrendAxisPointer(e) {
+  const idx = e?.axesInfo?.[0]?.value
+  if (typeof idx !== 'number') return
+  hoveredDate.value = history.value[idx]?.snapshotDate ?? null
+}
+function onTrendLeave() { hoveredDate.value = null }
+const trendDate = computed(() =>
+  hoveredDate.value ?? history.value[history.value.length - 1]?.snapshotDate ?? '')
+
+const trendLegendItems = computed(() => {
+  const r = history.value.find(h => h.snapshotDate === trendDate.value)
+        ?? history.value[history.value.length - 1]
+  if (!r) return []
+  return [
+    { name: '總資產',   value: Number(r.totalAssets || 0),         color: '#8b5cf6' },
+    { name: '台幣存款', value: Number(r.totalTwdDeposit || 0),     color: '#3b82f6' },
+    { name: '美元存款', value: Number(r.totalUsdDeposit || 0),     color: '#60a5fa' },
+    { name: '基金',     value: Number(r.totalFundValue || 0),      color: '#10b981' },
+    { name: '台股',     value: Number(r.totalTwStockValue || 0),   color: '#f59e0b' },
+    { name: '美股',     value: Number(r.totalUsStockValue || 0),   color: '#ef4444' }
+  ]
+})
+
 const totalTrendOption = computed(() => ({
   tooltip: {
     trigger: 'axis',
@@ -167,8 +206,8 @@ const totalTrendOption = computed(() => ({
       return s
     }
   },
-  legend: { data: ['總資產', '台幣存款', '美元存款', '基金', '台股', '美股'] },
-  grid: { left: 70, right: 30, top: 50, bottom: 50 },
+  legend: { show: false },
+  grid: { left: 70, right: 30, top: 20, bottom: 50 },
   xAxis: { type: 'category', data: dates.value, axisLabel: { rotate: 30 } },
   yAxis: { type: 'value', axisLabel: { formatter: v => `$${(v/1e4).toFixed(0)}萬` } },
   series: [
@@ -274,8 +313,17 @@ const increaseOption = computed(() => {
 
 <style scoped>
 .section-title { font-size: 15px; font-weight: 600; }
+.card-sub { font-size: 12px; color: #94a3b8; margin-left: 8px; font-weight: 400; }
 .profit { color: #16a34a; font-weight: 600; }
 .loss { color: #dc2626; font-weight: 600; }
 :deep(.el-table .el-table__cell) { font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', ui-monospace, monospace; }
 :deep(.el-table .el-table__cell:first-child) { font-family: inherit; }
+
+/* 趨勢圖自訂 legend：6 項集中置中、間距 32px、下方寫金額（同色） */
+.trend-legend { display: flex; justify-content: center; padding: 6px 16px 12px; gap: 32px; flex-wrap: wrap; }
+.trend-legend-item { display: flex; align-items: center; gap: 8px; }
+.tl-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.tl-text { display: flex; flex-direction: column; line-height: 1.25; }
+.tl-name   { font-size: 12px; color: #64748b; }
+.tl-amount { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
 </style>
