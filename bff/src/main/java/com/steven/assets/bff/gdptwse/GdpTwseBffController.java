@@ -12,7 +12,6 @@ import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -45,16 +44,16 @@ public class GdpTwseBffController {
             @RequestParam(defaultValue = "30") int years) {
         int currentYear = LocalDate.now().getYear();
         int since = currentYear - years + 1;
-        // 算年增率需要前一年資料，因此向 backend 多要一年
-        int fetchSince = since - 1;
 
-        Mono<List<Map<String, Object>>> gdp = fetchSeries("/api/taiwan-gdp", fetchSince);
-        Mono<List<Map<String, Object>>> kor = fetchSeries("/api/korea-gdp", fetchSince);
+        Mono<List<Map<String, Object>>> gdp = fetchSeries("/api/taiwan-gdp", since);
+        Mono<List<Map<String, Object>>> kor = fetchSeries("/api/korea-gdp", since);
         Mono<List<Map<String, Object>>> twse = fetchSeries("/api/twse-year-end-index", since);
 
         return Mono.zip(gdp, kor, twse).map(t -> {
             TreeMap<Integer, BigDecimal> twGdpAll = toMap(t.getT1(), "gdpUsd");
             TreeMap<Integer, BigDecimal> krGdpAll = toMap(t.getT2(), "gdpUsd");
+            TreeMap<Integer, BigDecimal> twGrowthAll = toMap(t.getT1(), "realGdpGrowthRate");
+            TreeMap<Integer, BigDecimal> krGrowthAll = toMap(t.getT2(), "realGdpGrowthRate");
             TreeMap<Integer, BigDecimal> twseClose = toMap(t.getT3(), "closePoint");
 
             // X 軸：since..currentYear 取所有 series 的聯集
@@ -73,8 +72,8 @@ public class GdpTwseBffController {
                 twGdp.add(twGdpAll.get(y));
                 krGdp.add(krGdpAll.get(y));
                 twseList.add(twseClose.get(y));
-                twGrowth.add(growth(twGdpAll.get(y - 1), twGdpAll.get(y)));
-                krGrowth.add(growth(krGdpAll.get(y - 1), krGdpAll.get(y)));
+                twGrowth.add(twGrowthAll.get(y));
+                krGrowth.add(krGrowthAll.get(y));
             }
 
             Map<String, Object> body = new HashMap<>();
@@ -104,14 +103,6 @@ public class GdpTwseBffController {
             m.put(y, new BigDecimal(v.toString()));
         }
         return m;
-    }
-
-    /** 年增率 %，無前年資料則 null。 */
-    private BigDecimal growth(BigDecimal prev, BigDecimal curr) {
-        if (prev == null || curr == null || prev.signum() == 0) return null;
-        return curr.subtract(prev)
-                .multiply(BigDecimal.valueOf(100))
-                .divide(prev, 2, RoundingMode.HALF_UP);
     }
 
     /**

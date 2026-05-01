@@ -33,8 +33,10 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class MacroHistoryService {
 
-    private static final String IMF_GDP_URL_TPL =
-            "https://www.imf.org/external/datamapper/api/v1/NGDPDPC/";
+    private static final String IMF_API_TPL =
+            "https://www.imf.org/external/datamapper/api/v1/";
+    private static final String IMF_GDP_INDICATOR = "NGDPDPC";        // 人均 GDP（USD）
+    private static final String IMF_GROWTH_INDICATOR = "NGDP_RPCH";    // Real GDP growth %
     private static final String TWSE_FMTQIK_URL =
             "https://www.twse.com.tw/exchangeReport/FMTQIK?response=json&date=";
 
@@ -50,66 +52,72 @@ public class MacroHistoryService {
 
     @Transactional
     public Map<String, Object> refreshGdpFromImf() throws Exception {
-        return refreshFromImf("TWN", (year, value) -> {
+        Map<Integer, BigDecimal> gdp = fetchImf(IMF_GDP_INDICATOR, "TWN", 2);
+        Map<Integer, BigDecimal> growth = fetchImf(IMF_GROWTH_INDICATOR, "TWN", 4);
+        for (var e : gdp.entrySet()) {
+            int year = e.getKey();
             TaiwanGdpPerCapitaHistory row = gdpRepo.findById(year)
                     .orElseGet(() -> {
                         TaiwanGdpPerCapitaHistory r = new TaiwanGdpPerCapitaHistory();
                         r.setYear(year);
                         return r;
                     });
-            row.setGdpUsd(value);
+            row.setGdpUsd(e.getValue());
+            row.setRealGdpGrowthRate(growth.get(year));
             gdpRepo.save(row);
-        });
+        }
+        log.info("IMF refresh (TWN): {} 年 GDP, {} 年 growth", gdp.size(), growth.size());
+        return Map.of("upserted", gdp.size(), "growthUpserted", growth.size(),
+                "source", "IMF NGDPDPC+NGDP_RPCH/TWN");
     }
 
     @Transactional
     public Map<String, Object> refreshKoreaGdpFromImf() throws Exception {
-        return refreshFromImf("KOR", (year, value) -> {
+        Map<Integer, BigDecimal> gdp = fetchImf(IMF_GDP_INDICATOR, "KOR", 2);
+        Map<Integer, BigDecimal> growth = fetchImf(IMF_GROWTH_INDICATOR, "KOR", 4);
+        for (var e : gdp.entrySet()) {
+            int year = e.getKey();
             KoreaGdpPerCapitaHistory row = koreaGdpRepo.findById(year)
                     .orElseGet(() -> {
                         KoreaGdpPerCapitaHistory r = new KoreaGdpPerCapitaHistory();
                         r.setYear(year);
                         return r;
                     });
-            row.setGdpUsd(value);
+            row.setGdpUsd(e.getValue());
+            row.setRealGdpGrowthRate(growth.get(year));
             koreaGdpRepo.save(row);
-        });
+        }
+        log.info("IMF refresh (KOR): {} 年 GDP, {} 年 growth", gdp.size(), growth.size());
+        return Map.of("upserted", gdp.size(), "growthUpserted", growth.size(),
+                "source", "IMF NGDPDPC+NGDP_RPCH/KOR");
     }
 
-    @FunctionalInterface
-    private interface YearValueSink { void accept(int year, BigDecimal value); }
-
-    private Map<String, Object> refreshFromImf(String countryCode, YearValueSink sink) throws Exception {
+    private Map<Integer, BigDecimal> fetchImf(String indicator, String countryCode, int scale) throws Exception {
         // IMF 後面是 Akamai WAF；UA 設為 Mozilla 或 Java-http-client 會被 403。
         // 用 curl shell-out，沿用既有 HistoricalDataService 的模式（避免 Java TLS fingerprint 被擋）。
         ProcessBuilder pb = new ProcessBuilder(
                 "curl", "-sS", "--max-time", "20",
                 "-H", "Accept: application/json",
-                IMF_GDP_URL_TPL + countryCode);
+                IMF_API_TPL + indicator + "/" + countryCode);
         pb.redirectErrorStream(true);
         Process proc = pb.start();
         String body = new String(proc.getInputStream().readAllBytes());
         int exit = proc.waitFor();
         if (exit != 0) throw new RuntimeException("curl exit=" + exit + ": " + body);
         JsonNode node = mapper.readTree(body)
-                .path("values").path("NGDPDPC").path(countryCode);
+                .path("values").path(indicator).path(countryCode);
         if (!node.isObject() || node.isEmpty()) {
-            throw new RuntimeException("IMF 回應未含 " + countryCode + " 資料");
+            throw new RuntimeException("IMF 回應未含 " + indicator + "/" + countryCode);
         }
-
-        int upserted = 0;
+        Map<Integer, BigDecimal> out = new java.util.LinkedHashMap<>();
         Iterator<Map.Entry<String, JsonNode>> it = node.fields();
         while (it.hasNext()) {
             Map.Entry<String, JsonNode> e = it.next();
-            int year = Integer.parseInt(e.getKey());
             if (e.getValue().isNull()) continue;
-            BigDecimal v = BigDecimal.valueOf(e.getValue().asDouble())
-                    .setScale(2, RoundingMode.HALF_UP);
-            sink.accept(year, v);
-            upserted++;
+            out.put(Integer.parseInt(e.getKey()),
+                    BigDecimal.valueOf(e.getValue().asDouble()).setScale(scale, RoundingMode.HALF_UP));
         }
-        log.info("IMF GDP refresh ({}): upserted {} 年", countryCode, upserted);
-        return Map.of("upserted", upserted, "source", "IMF NGDPDPC/" + countryCode);
+        return out;
     }
 
     /**

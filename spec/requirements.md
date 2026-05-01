@@ -320,4 +320,5 @@
 - [ ] 同頁下方加第二張「台韓人均 GDP 比較」圖：左 Y 軸為 TW/KR 人均 GDP（折線），右 Y 軸為各自年增率（柱狀）
 - [ ] 韓國資料同樣由 IMF DataMapper API（`NGDPDPC/KOR`）回補，存於 `korea_gdp_per_capita_history`
 - [ ] 「回補資料」按鈕同步觸發 TWN + KOR 兩國 GDP 回補
+- [ ] 經濟成長率改取自 IMF `NGDP_RPCH`（Real GDP growth, annual % change），不再由前後端用人均 GDP（USD）相減推算（因含匯率波動會失真）；存於 `*_gdp_per_capita_history.real_gdp_growth_rate`
 

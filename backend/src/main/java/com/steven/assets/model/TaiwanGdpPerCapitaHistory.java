@@ -23,4 +23,8 @@ public class TaiwanGdpPerCapitaHistory {
 
     @Column(name = "gdp_usd", nullable = false, precision = 12, scale = 2)
     private BigDecimal gdpUsd;
+
+    /** IMF NGDP_RPCH：Real GDP growth, annual % change */
+    @Column(name = "real_gdp_growth_rate", precision = 8, scale = 4)
+    private BigDecimal realGdpGrowthRate;
 }
