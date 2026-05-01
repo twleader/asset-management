@@ -660,7 +660,7 @@
           <el-tab-pane name="us">
             <template #label>
               <span style="display:inline-flex;align-items:center;gap:4px">
-                <UsaMap :size="12" /> 美股
+                <UsFlag :size="20" /> 美股
               </span>
               <el-badge :value="usStocks.length" type="warning" style="margin-left:4px" />
             </template>
@@ -1059,7 +1059,7 @@ import { useAssetStore } from '@/stores/assetStore'
 import { bffApi } from '@/api/index'
 import TaiwanMap from '@/components/TaiwanMap.vue'
 import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
-import UsaMap from '@/components/UsaMap.vue'
+import UsFlag from '@/components/UsFlag.vue'
 import Sortable from 'sortablejs'
 
 const route  = useRoute()

@@ -27,7 +27,7 @@
       </el-col>
       <el-col :span="12">
         <el-card>
-          <template #header><span class="section-title" style="display:inline-flex;align-items:center;gap:6px"><UsaMap :size="14" /> 美股</span></template>
+          <template #header><span class="section-title" style="display:inline-flex;align-items:center;gap:6px"><UsFlag :size="22" /> 美股</span></template>
           <div class="market-info">
             <div class="status-row">
               <span class="status-dot" :class="status.usMarketOpen ? 'open' : 'closed'" />
@@ -127,7 +127,6 @@
 import { bffApi } from '@/api'
 import dayjs from 'dayjs'
 import TaiwanMap from '@/components/TaiwanMap.vue'
-import UsaMap from '@/components/UsaMap.vue'
 import UsFlag from '@/components/UsFlag.vue'
 
 const status = ref({ twMarketOpen: false, usMarketOpen: false, twTime: '', usTime: '' })
