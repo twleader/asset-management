@@ -66,12 +66,12 @@
             <span class="page-title">{{ $route.meta.title }}</span>
           </div>
           <div class="header-right header-clocks">
-            <el-tag type="success" size="small" class="clock-tag">
+            <span class="clock-tag clock-tpe">
               <span class="clock-label">TPE</span> <span class="clock-time">{{ tpeNow }}</span>
-            </el-tag>
-            <el-tag type="warning" size="small" class="clock-tag">
+            </span>
+            <span class="clock-tag clock-nyc">
               <span class="clock-label">NYC</span> <span class="clock-time">{{ nycNow }}</span>
-            </el-tag>
+            </span>
           </div>
         </el-header>
 
@@ -217,8 +217,14 @@ body {
 
 /* 標頭雙時區時鐘：間距 11px、整體左移 10px、字型略大、用等寬數字避免跳動 */
 .header-clocks { display: flex; gap: 11px; margin-right: 10px; }
-.header-clocks .clock-tag { font-size: 13px; padding: 2px 10px; }
-.clock-label { font-weight: 600; }
+.clock-tag {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; padding: 4px 12px; border-radius: 6px;
+  color: #fff; font-weight: 500; letter-spacing: 0.2px;
+}
+.clock-tpe { background: #16a34a; box-shadow: 0 1px 2px rgba(22,163,74,0.3); }
+.clock-nyc { background: #d97706; box-shadow: 0 1px 2px rgba(217,119,6,0.3); }
+.clock-label { font-weight: 700; font-size: 12px; opacity: 0.9; }
 .clock-time { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
 
 /* Global card style */
