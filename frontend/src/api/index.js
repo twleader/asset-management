@@ -132,7 +132,9 @@ export const bffApi = {
 
   // GdpTwse (GDP + 台股大盤年度走勢)
   gdpTwse: {
-    get: (years = 30) => api.get('/bff/gdp-twse', { params: { years } })
+    get: (years = 30) => api.get('/bff/gdp-twse', { params: { years } }),
+    refresh: (years = 30) =>
+      api.post('/bff/gdp-twse/refresh', null, { params: { years }, timeout: 180000 })
   },
 
   // TradingCalendar

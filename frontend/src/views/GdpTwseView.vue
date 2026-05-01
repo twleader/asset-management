@@ -2,7 +2,12 @@
   <div>
     <el-card>
       <template #header>
-        <span class="section-title">台灣人均 GDP vs 台股大盤年末收盤（近 30 年）</span>
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <span class="section-title">台灣人均 GDP vs 台股大盤年末收盤（近 30 年）</span>
+          <el-button size="small" @click="onRefresh" :loading="refreshing">
+            回補資料（IMF + TWSE）
+          </el-button>
+        </div>
       </template>
       <v-chart v-if="hasData" :option="chartOption" style="height:520px" autoresize />
       <el-empty v-else description="尚無資料" />
@@ -20,6 +25,7 @@ import {
 } from 'echarts/components'
 import VChart from 'vue-echarts'
 import { bffApi } from '@/api'
+import { ElMessage } from 'element-plus'
 
 use([CanvasRenderer, LineChart, TitleComponent, TooltipComponent, LegendComponent,
      GridComponent, DataZoomComponent, MarkPointComponent])
@@ -27,17 +33,33 @@ use([CanvasRenderer, LineChart, TitleComponent, TooltipComponent, LegendComponen
 const years = ref([])
 const gdp = ref([])
 const twse = ref([])
+const refreshing = ref(false)
 
 const hasData = computed(() => years.value.length > 0)
 
-onMounted(async () => {
+async function fetchData() {
   try {
     const res = await bffApi.gdpTwse.get(30)
     years.value = res.years ?? []
     gdp.value = (res.gdpPerCapitaUsd ?? []).map(v => v == null ? null : Number(v))
     twse.value = (res.twseYearEndClose ?? []).map(v => v == null ? null : Number(v))
   } catch {}
-})
+}
+
+onMounted(fetchData)
+
+async function onRefresh() {
+  refreshing.value = true
+  try {
+    const r = await bffApi.gdpTwse.refresh(30)
+    const g = r.gdp?.upserted ?? 0
+    const t = r.twse?.upserted ?? 0
+    ElMessage.success(`回補完成：GDP ${g} 筆、大盤 ${t} 筆`)
+    await fetchData()
+  } catch {} finally {
+    refreshing.value = false
+  }
+}
 
 const chartOption = computed(() => ({
   tooltip: {

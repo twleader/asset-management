@@ -1365,4 +1365,8 @@ NASDAQ info API 自 2026/04 起對 ETF 的 `keyStats` 為 null，VOO/VT 等 ETF 
         business API 回傳 `{ years, gdpPerCapitaUsd, twseYearEndClose }`
 - [ ] 53.5 前端：`GdpTwseView.vue` 雙 Y 軸折線圖（左 GDP / 右 大盤點位），`router/index.js` 加
         `/gdp-twse` route，`App.vue` 左側選單 push 一項，`api/index.js` 加 `bffApi.gdpTwse`
+- [ ] 53.6 後端 `MacroHistoryService` + `POST /api/taiwan-gdp/refresh-from-imf`、
+        `POST /api/twse-year-end-index/refresh?from=YYYY&to=YYYY`：分別呼叫 IMF DataMapper
+        (NGDPDPC/TWN) 與 TWSE FMTQIK 月報 upsert 至 DB
+- [ ] 53.7 BFF `POST /api/bff/gdp-twse/refresh`（並行觸發兩支 refresh），前端按鈕串接
 
