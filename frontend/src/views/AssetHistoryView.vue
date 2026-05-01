@@ -77,6 +77,7 @@
               <div class="tl-text">
                 <div class="tl-name">{{ item.name }}</div>
                 <div class="tl-amount" :style="{ color: item.color }">{{ fmt(item.value) }}</div>
+                <div class="tl-pct" :style="{ color: item.color }">{{ item.pct }}</div>
               </div>
             </div>
           </div>
@@ -185,13 +186,15 @@ const trendLegendItems = computed(() => {
   const r = history.value.find(h => h.snapshotDate === trendDate.value)
         ?? history.value[history.value.length - 1]
   if (!r) return []
+  const total = Number(r.totalAssets || 0)
+  const pctOf = v => total > 0 ? `${(v / total * 100).toFixed(1)}%` : '-'
   return [
-    { name: '總資產',   value: Number(r.totalAssets || 0),         color: '#8b5cf6' },
-    { name: '台幣存款', value: Number(r.totalTwdDeposit || 0),     color: '#3b82f6' },
-    { name: '美元存款', value: Number(r.totalUsdDeposit || 0),     color: '#60a5fa' },
-    { name: '基金',     value: Number(r.totalFundValue || 0),      color: '#10b981' },
-    { name: '台股',     value: Number(r.totalTwStockValue || 0),   color: '#f59e0b' },
-    { name: '美股',     value: Number(r.totalUsStockValue || 0),   color: '#ef4444' }
+    { name: '總資產',   value: Number(r.totalAssets || 0),       pct: '100.0%',                                color: '#8b5cf6' },
+    { name: '台幣存款', value: Number(r.totalTwdDeposit || 0),   pct: pctOf(Number(r.totalTwdDeposit || 0)),   color: '#3b82f6' },
+    { name: '美元存款', value: Number(r.totalUsdDeposit || 0),   pct: pctOf(Number(r.totalUsdDeposit || 0)),   color: '#60a5fa' },
+    { name: '台股',     value: Number(r.totalTwStockValue || 0), pct: pctOf(Number(r.totalTwStockValue || 0)), color: '#f59e0b' },
+    { name: '美股',     value: Number(r.totalUsStockValue || 0), pct: pctOf(Number(r.totalUsStockValue || 0)), color: '#ef4444' },
+    { name: '基金',     value: Number(r.totalFundValue || 0),    pct: pctOf(Number(r.totalFundValue || 0)),    color: '#10b981' }
   ]
 })
 
@@ -326,4 +329,5 @@ const increaseOption = computed(() => {
 .tl-text { display: flex; flex-direction: column; line-height: 1.25; }
 .tl-name   { font-size: 12px; color: #64748b; }
 .tl-amount { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tl-pct    { font-size: 11px; font-weight: 600; }
 </style>
