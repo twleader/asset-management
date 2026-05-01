@@ -65,12 +65,12 @@
           <div class="header-left">
             <span class="page-title">{{ $route.meta.title }}</span>
           </div>
-          <div class="header-right">
-            <el-tag type="success" size="small">
-              <span style="font-weight:600">TPE</span> {{ tpeNow }}
+          <div class="header-right header-clocks">
+            <el-tag type="success" size="small" class="clock-tag">
+              <span class="clock-label">TPE</span> <span class="clock-time">{{ tpeNow }}</span>
             </el-tag>
-            <el-tag type="warning" size="small" style="margin-left:8px">
-              <span style="font-weight:600">NYC</span> {{ nycNow }}
+            <el-tag type="warning" size="small" class="clock-tag">
+              <span class="clock-label">NYC</span> <span class="clock-time">{{ nycNow }}</span>
             </el-tag>
           </div>
         </el-header>
@@ -214,6 +214,12 @@ body {
 
 .fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
+
+/* 標頭雙時區時鐘：間距 11px、整體左移 10px、字型略大、用等寬數字避免跳動 */
+.header-clocks { display: flex; gap: 11px; margin-right: 10px; }
+.header-clocks .clock-tag { font-size: 13px; padding: 2px 10px; }
+.clock-label { font-weight: 600; }
+.clock-time { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
 
 /* Global card style */
 .el-card { border-radius: 12px !important; border: none !important; box-shadow: 0 1px 8px rgba(0,0,0,0.08) !important; }
