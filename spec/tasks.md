@@ -1314,3 +1314,33 @@ NASDAQ info API 自 2026/04 起對 ETF 的 `keyStats` 為 null，VOO/VT 等 ETF 
         - tooltip 顯示現值 / 成本 / 損益（含 %）
 - [ ] 51.2 卡片下方 `chart-summary-bar` 顯示總值 / 成本 / 損益（含 %）小計
 - [ ] 51.3 資料來源直接讀 `detail.value.funds`（不需新 BFF endpoint，基金不參與盤中輪詢）
+
+### Task 52: 備份開關 + 紀錄改存 DB
+
+對應 Requirements: Requirement 15（資料庫備份/還原）
+
+#### 背景
+
+原本「還原資料」UI 每次開啟都呼叫 rclone 列 Google Drive，慢且耗 quota；且沒有「暫停備份」開關，
+排程預設一直跑。改為：備份成功後把 metadata 寫進 DB，UI 直接從 DB 讀；新增 `backup_enabled` 開關
+讓使用者可以暫時關閉所有排程／手動備份。
+
+#### Steps:
+
+- [ ] 52.1 Liquibase changelog `v1.15.0`：
+        - `backup_setting` 加 `backup_enabled BOOLEAN NOT NULL DEFAULT TRUE`
+        - 新增 `backup_record` (id PK, folder, filename UNIQUE, size_bytes, modified_at,
+          auto_pre_restore, created_at)
+- [ ] 52.2 `BackupSetting` entity 加 `backupEnabled`；新增 `BackupRecord` entity + repository
+- [ ] 52.3 `BackupService`：
+        - `runBackup` / 三個 `@Scheduled` 進入流程前檢查 `backupEnabled`，false 直接 skip / 拋
+          錯（自救點 `autoPreRestore=true` 不受開關影響，避免還原無自救）
+        - 每次 `doBackup` 成功 upload → insert `backup_record`
+        - `rotateFolder` 刪除舊檔時連帶 `delete by folder+filename`
+        - `listBackups()` 改成 `repo.findAllByOrderByModifiedAtDesc()`
+        - 新增 `syncFromRemote()`：列 rclone → upsert / 清孤兒列
+- [ ] 52.4 `BackupController` + DTO 補 `backupEnabled`；新增 `POST /api/backups/sync` 對應
+        `syncFromRemote`
+- [ ] 52.5 BFF passthrough route 補 `/api/bff/backup-restore/sync`
+- [ ] 52.6 `BackupRestoreView.vue` 「保留設定」加 `el-switch`「啟用備份」；「還原資料」加
+        「從 Google Drive 同步」按鈕；「立即備份」按鈕在開關 off 時 disabled

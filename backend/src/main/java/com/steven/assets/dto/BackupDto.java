@@ -47,6 +47,7 @@ public class BackupDto {
         private Integer manualRetention;
         private Integer dailyRetention;
         private Integer weeklyRetention;
+        private Boolean backupEnabled;
     }
 
     @Data
@@ -55,6 +56,17 @@ public class BackupDto {
         private Integer manualRetention;
         private Integer dailyRetention;
         private Integer weeklyRetention;
+        private Boolean backupEnabled;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class SyncResponse {
+        private int inserted;       // 從 GDrive 補進 DB 的筆數
+        private int deleted;        // DB 有但 GDrive 已不存在被清除的筆數
+        private int total;          // GDrive 上目前的總檔案數
     }
 
     @Data
