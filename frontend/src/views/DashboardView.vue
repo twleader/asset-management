@@ -557,21 +557,29 @@ const kpiCards = computed(() => {
 const pieOption = computed(() => {
   const s = liveLatest.value
   if (!s) return {}
+  // 存款拆台幣 / 美元（用 bankSummary 已聚合的數值，含 TRANSIT 在途歸入活存）
+  const twdDeposit = bankSummary.value.fixed + bankSummary.value.demand
+  const usdDeposit = bankSummary.value.usd
+  // 股票拆台股 / 美股（用 liveLatest 已含的市場別小計）
+  const twStock = Number(s.totalTwStockValue || 0)
+  const usStock = Number(s.totalUsStockValue || 0)
+  const data = [
+    { value: Math.round(twdDeposit),                  name: '台幣存款',  color: '#3b82f6' },
+    { value: Math.round(usdDeposit),                  name: '美元存款',  color: '#60a5fa' },
+    { value: Math.round(twStock),                     name: '台股',      color: '#f59e0b' },
+    { value: Math.round(usStock),                     name: '美股',      color: '#ef4444' },
+    { value: Math.round(Number(s.totalFundValue || 0)), name: '信託基金', color: '#10b981' }
+  ].filter(d => d.value > 0)
   return {
     tooltip: { trigger: 'item', formatter: p => `${p.name}: $${Number(p.value).toLocaleString()} (${p.percent}%)` },
     legend: { bottom: 0, textStyle: { fontSize: 12 } },
     series: [{
       type: 'pie', radius: ['40%', '70%'],
       center: ['50%', '45%'],
-      data: [
-        { value: Math.round(Number(s.totalDeposit || 0)), name: '存款' },
-        { value: Math.round(Number(s.totalFundValue || 0)), name: '信託基金' },
-        { value: Math.round(Number(s.totalStockValue || 0)), name: '股票' }
-      ],
+      data: data.map(d => ({ value: d.value, name: d.name, itemStyle: { color: d.color } })),
       label: { formatter: '{b}\n{d}%' },
       itemStyle: { borderRadius: 6 }
-    }],
-    color: ['#3b82f6', '#10b981', '#f59e0b']
+    }]
   }
 })
 
