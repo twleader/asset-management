@@ -148,6 +148,38 @@
       </el-col>
     </el-row>
 
+    <!-- Third Charts Row -->
+    <el-row v-if="fundFilteredHoldings.length" :gutter="20" class="chart-row">
+      <el-col :span="24">
+        <el-card>
+          <template #header>
+            <span class="card-title">信託基金（現值）</span>
+            <span class="card-sub">{{ latest?.snapshotDate }}</span>
+          </template>
+          <v-chart :option="fundBarOption" style="height: 280px" autoresize />
+          <div class="chart-summary-bar">
+            <div class="csb-item">
+              <span class="csb-label">總值</span>
+              <span class="csb-val">{{ formatCurrency(fundSummary.totalValue) }}</span>
+            </div>
+            <div class="csb-sep" />
+            <div class="csb-item">
+              <span class="csb-label">成本</span>
+              <span class="csb-val">{{ formatCurrency(fundSummary.totalCost) }}</span>
+            </div>
+            <div class="csb-sep" />
+            <div class="csb-item">
+              <span class="csb-label">損益</span>
+              <span class="csb-val" :class="fundSummary.profit >= 0 ? 'profit' : 'loss'">
+                {{ formatCurrency(fundSummary.profit) }}
+                <small style="font-weight:400"> ({{ formatPct(fundSummary.profitRate) }})</small>
+              </span>
+            </div>
+          </div>
+        </el-card>
+      </el-col>
+    </el-row>
+
     <!-- Quick Stats Table -->
     <el-row :gutter="20" class="chart-row">
       <el-col :span="24">
@@ -827,6 +859,66 @@ function scheduleSaveOrder() {
     bffApi.dashboard.updateStockOrder(snapshotId, orders).catch(() => {})
   }, 400)
 }
+
+// ── 信託基金圖（資料來自 detail.funds，不參與盤中輪詢） ─────────────
+const fundFilteredHoldings = computed(() => detail.value?.funds ?? [])
+
+const fundSummary = computed(() => {
+  const funds = fundFilteredHoldings.value
+  const totalValue = funds.reduce((s, f) => s + Number(f.currentValue || 0), 0)
+  const totalCost  = funds.reduce((s, f) => s + Number(f.investmentAmount || 0), 0)
+  const profit     = totalValue - totalCost
+  const profitRate = totalCost > 0 ? profit / totalCost : 0
+  return { totalValue, totalCost, profit, profitRate }
+})
+
+const fundBarOption = computed(() => {
+  const funds = fundFilteredHoldings.value
+  if (!funds.length) return {}
+  const sorted = [...funds].sort(
+    (a, b) => Number(a.currentValue || 0) - Number(b.currentValue || 0)
+  )
+  const profitColor = '#16a34a'
+  const lossColor   = '#dc2626'
+  return {
+    tooltip: {
+      trigger: 'axis',
+      formatter: (p) => {
+        const f = p[0]?.data?.fund
+        if (!f) return ''
+        const value = Number(f.currentValue || 0)
+        const cost  = Number(f.investmentAmount || 0)
+        const profit = value - cost
+        const rate = cost > 0 ? (profit / cost * 100).toFixed(2) : '0.00'
+        const color = profit >= 0 ? profitColor : lossColor
+        const fmt = n => `$${Math.round(n).toLocaleString()}`
+        return `<b>${f.fundName || f.fundCode || ''}</b><br/>`
+          + `現值：${fmt(value)}<br/>`
+          + `成本：${fmt(cost)}<br/>`
+          + `損益：<span style="color:${color}">${fmt(profit)} (${rate}%)</span>`
+      }
+    },
+    grid: { left: 160, right: 140, top: 10, bottom: 30 },
+    xAxis: { type: 'value', axisLabel: { formatter: v => `$${(v / 1e4).toFixed(0)}萬` } },
+    yAxis: { type: 'category', data: sorted.map(f => f.fundName || f.fundCode || '—') },
+    series: [{
+      type: 'bar',
+      data: sorted.map(f => {
+        const profit = Number(f.currentValue || 0) - Number(f.investmentAmount || 0)
+        return {
+          value: Math.round(Number(f.currentValue || 0)),
+          fund: f,
+          itemStyle: { color: profit >= 0 ? profitColor : lossColor, borderRadius: [0,4,4,0] }
+        }
+      }),
+      label: {
+        show: true,
+        position: 'right',
+        formatter: p => `$${Number(p.value).toLocaleString('zh-TW', { maximumFractionDigits: 0 })}`
+      }
+    }]
+  }
+})
 
 const chartMarketTab = ref('台股')
 

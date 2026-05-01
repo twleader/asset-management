@@ -1270,3 +1270,47 @@ live 行情先讀 Redis，miss fallback 到 `stock_price_history` 最近一筆�
         - `findFromDb(code, market, years)`：DB 查詢，DB 空一次性 fallback 抓+寫
         - `@EventListener(ApplicationReadyEvent)`：背景補齊主檔中尚無資料的股票
 - [ ] 49.4 `MarketDataController /dividends` 改呼叫 `DividendHistoryService.findFromDb`
+
+### Task 50: 盤中 high / low 自行聚合（修 NASDAQ ETF 無 dayrange）
+
+對應 Requirements: Requirement 14（觀察股票清單 — 盤中 high/low）
+
+#### 背景
+
+NASDAQ info API 自 2026/04 起對 ETF 的 `keyStats` 為 null，VOO/VT 等 ETF 的盤中
+最高 / 最低永遠抓不到（Redis 寫 null，盤後 dump 進 history 後 `low_price` 也是 null，
+顯示為「—」或 `$0.00`）。改由 `external-materials-service` 自行以「每輪 cron 觀察到
+的成交價」聚合當日 high / low。
+
+#### Steps:
+
+- [ ] 50.1 新增 `IntradayHighLowTracker`（`external-materials-service`）：
+        - Redis key `price:dayhl:{market}:{code}:{tradingDate}`，TTL 36h
+        - `observe(code, market, tradingDate, price) → (high, low)`：以新價更新 Redis
+          中的 high / low（max / min），回傳更新後的值
+- [ ] 50.2 `PriceCacheWriter.write()` 寫 `price:{market}:{code}` 前先呼叫 tracker：
+        - external API 已給 high/low → 取 `max(extHigh, aggHigh)` / `min(extLow, aggLow)`
+        - external API 未給 → 直接用聚合值
+- [ ] 50.3 `StockSourceQuery.upsertHistory` 移除 open / high 上的 `nz(...)` 包裝
+        （與 low 一致改為直接寫入，保留 null 表「無資料」），避免 history 假裝有 0；
+        close 仍套 nz 作雙保險（上游已用 price 過濾 null）
+- [ ] 50.4 Liquibase changelog `v1.14.0`：`stock_price_history.open_price` /
+        `high_price` 改為可 null（原本 NOT NULL 是 50.3 用 0 偽裝的根因）
+
+### Task 51: 儀表板新增「信託基金」長條圖
+
+對應 Requirements: Requirement 9（儀表板總覽）、Requirement 4（基金資料）
+
+#### 背景
+
+儀表板目前只有銀行存款 bar 與持股 bar，沒有信託基金的明細圖；圓餅圖雖含基金佔比但無法看到單檔基金損益。
+基金資料已隨 `/api/bff/dashboard/summary` 的 `latestSnapshotDetail.funds` 一起送到前端，純前端 render 即可。
+
+#### Steps:
+
+- [ ] 51.1 `DashboardView.vue` 在第二排（銀行 / 持股）下方新增第三排卡片「信託基金」
+        - 橫向 bar 圖，y 軸基金名稱、x 軸現值（升冪排序）
+        - 顏色：profit >= 0 → 綠 (#16a34a)，否則紅 (#dc2626)；與 `stockBarOption` 同調
+        - tooltip 顯示現值 / 成本 / 損益（含 %）
+- [ ] 51.2 卡片下方 `chart-summary-bar` 顯示總值 / 成本 / 損益（含 %）小計
+- [ ] 51.3 資料來源直接讀 `detail.value.funds`（不需新 BFF endpoint，基金不參與盤中輪詢）

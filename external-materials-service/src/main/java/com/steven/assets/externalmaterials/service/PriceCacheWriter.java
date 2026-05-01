@@ -34,6 +34,7 @@ public class PriceCacheWriter {
     private final StringRedisTemplate redis;
     private final MarketClock clock;
     private final StockSourceQuery source;
+    private final IntradayHighLowTracker hlTracker;
 
     private static final ObjectMapper MAPPER = new ObjectMapper()
             .setSerializationInclusion(JsonInclude.Include.NON_NULL);
@@ -48,6 +49,13 @@ public class PriceCacheWriter {
 
         LocalDate tradingDate = resolveTradingDate(code, market);
 
+        // 盤中聚合 high / low：以本輪成交價更新當日累計，再與外部 API 給的 high/low 取 max/min。
+        // 動機：NASDAQ info API 對 ETF 的 keyStats 為 null（VOO/VT 等抓不到 dayrange）。
+        IntradayHighLowTracker.HighLow agg =
+                hlTracker.observe(code, market, tradingDate, result.price());
+        BigDecimal mergedHigh = mergeHigh(result.highPrice(), agg.high());
+        BigDecimal mergedLow  = mergeLow(result.lowPrice(),  agg.low());
+
         Map<String, Object> payload = new HashMap<>();
         payload.put("stockCode", code);
         payload.put("market", market);
@@ -60,8 +68,8 @@ public class PriceCacheWriter {
         payload.put("buyPrice", result.buyPrice());
         payload.put("sellPrice", result.sellPrice());
         payload.put("openPrice", result.openPrice());
-        payload.put("highPrice", result.highPrice());
-        payload.put("lowPrice", result.lowPrice());
+        payload.put("highPrice", mergedHigh);
+        payload.put("lowPrice", mergedLow);
         payload.put("volume", result.volume());
         payload.put("stockName", result.stockName());
         payload.put("source", result.source());
@@ -79,6 +87,18 @@ public class PriceCacheWriter {
         } catch (Exception e) {
             log.warn("寫入 Redis 失敗 {} {}: {}", market, code, e.getMessage());
         }
+    }
+
+    private static BigDecimal mergeHigh(BigDecimal ext, BigDecimal agg) {
+        if (ext == null) return agg;
+        if (agg == null) return ext;
+        return ext.compareTo(agg) >= 0 ? ext : agg;
+    }
+
+    private static BigDecimal mergeLow(BigDecimal ext, BigDecimal agg) {
+        if (ext == null) return agg;
+        if (agg == null) return ext;
+        return ext.compareTo(agg) <= 0 ? ext : agg;
     }
 
     private BigDecimal changeOrNull(BigDecimal price, BigDecimal prev, BigDecimal fallback) {

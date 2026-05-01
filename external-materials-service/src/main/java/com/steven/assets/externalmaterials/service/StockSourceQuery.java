@@ -103,16 +103,18 @@ public class StockSourceQuery {
                 "SELECT id FROM stock_price_history WHERE stock_code=? AND market=? AND trading_date=?",
                 ps -> { ps.setString(1, stockCode); ps.setString(2, market); ps.setObject(3, tradingDate); },
                 rs -> rs.next() ? rs.getLong(1) : null);
+        // open / high / low / close 一律保留 null（無資料），不再用 0 偽裝。
+        // close 仍套 nz：上游 dumpRedisToDb 已先用 price 過濾掉 null，留 nz 只是雙保險。
         if (existing != null) {
             jdbc.update(
                     "UPDATE stock_price_history SET open_price=?, high_price=?, low_price=?, close_price=?, volume=? WHERE id=?",
-                    nz(open), nz(high), low, nz(close), volume == null ? 0L : volume, existing);
+                    open, high, low, nz(close), volume == null ? 0L : volume, existing);
         } else {
             jdbc.update(
                     "INSERT INTO stock_price_history (stock_code, market, trading_date, open_price, high_price, low_price, close_price, volume) " +
                             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     stockCode, market, tradingDate,
-                    nz(open), nz(high), low, nz(close), volume == null ? 0L : volume);
+                    open, high, low, nz(close), volume == null ? 0L : volume);
         }
     }
 

@@ -125,7 +125,14 @@ com.steven.assets.externalmaterials/
 |-----|------|-----|--------|
 | `price:{market}:{code}` | JSON `{ price, prevClose, changePercent, open, high, low, volume, tradingDate, source, updatedAt }` | 600s（盤後自然過期） | `PriceCacheWriter` 每 2 分鐘 |
 | `price:index:{market}` | Set，紀錄該市場所有有 cache 的 stockCode | 600s | 同上 |
+| `price:dayhl:{market}:{code}:{tradingDate}` | JSON `{ high, low }` 該交易日累積觀察到的最高 / 最低成交價 | 36 小時（跨日 dump 後仍可佐證） | `IntradayHighLowTracker` 每次 cron tick |
 | `market:status` | JSON `{ twMarketOpen, usMarketOpen, twTime, usTime }` | 90s（短於輪詢） | `MarketClock` 每分鐘 |
+
+**盤中 high / low 聚合（`IntradayHighLowTracker`）：**
+NASDAQ info API 自 2026/04 起對 ETF 的 `keyStats` 為 null（無 dayrange 欄位），對 stocks 也僅剩 dayrange，無法穩定取得「今日最高/最低」。為避免 ETF（VOO/VT 等）的 high/low 為 null，`external-materials-service` 在每輪抓價後自行聚合：以該檔當日已記錄的 high/low 與最新成交價做 max / min，回寫 Redis。`PriceCacheWriter` 在寫 `price:{market}:{code}` 時：
+- 若外部 API 已回傳 high/low，最終值取「外部值與聚合值的 max(high) / min(low)」（覆蓋 cron 起點之前已過去的盤中波動）
+- 若外部 API 未回傳，直接採用聚合值
+- 聚合 key 的 `tradingDate` 與 JSON 中的 `tradingDate` 同源（`PriceCacheWriter.resolveTradingDate`），確保跨日（美股 session 跨 ET 午夜在 TW 看為當日）能正確分桶
 
 > `market:status` TTL 設 90s 短於輪詢間隔，確保 Redis 過期前一定會被覆寫；fail-safe 若 external-materials-service 掛了，`PriceQueryService` 視 Redis miss 為「未開盤」（保守處理）。
 
