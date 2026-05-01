@@ -1013,6 +1013,19 @@ Dashboard `bankSummary` 將 `TRANSIT_TWD` 與 `TRANSIT_USD` 同一條件分支�
 - [x] 39.1 `DashboardView.vue` `stockBarOption.yAxis.data` 依 `chartMarketTab` 區分：台股用 `stockName`、美股改用 `stockCode`
 - [x] 39.2 tooltip 標題保留「代號 + 名稱」完整資訊，避免 y 軸僅用代號時失去名稱可讀性
 
+### Task 40: Dashboard 持股 bar 依損益上色
+
+對應 Requirements: Requirement 8（資產歷史趨勢）
+
+#### 背景
+
+`持股明細 (現值)` bar 原本台股一律藍、美股一律橘，無法一眼看出哪些賺哪些賠。改為依該檔損益正負上色。
+
+#### Steps:
+
+- [x] 40.1 `DashboardView.vue` `stockBarOption` 移除 `barColor`（依市場著色），改為每筆 `itemStyle.color`
+       依 `currentValue - investmentCost >= 0 ? 綠 : 紅`，台美股一致
+
 ### Task 39: 股價基準日規則改 per-market（修正美股盤中誤顯示前一交易日收盤）
 
 對應 Requirements: Requirement 9（儀表板基準日股價）、Requirement 7（市場資料整合）

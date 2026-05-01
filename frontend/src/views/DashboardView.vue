@@ -848,7 +848,8 @@ const stockBarOption = computed(() => {
   if (!filtered.length) return {}
   const sorted = [...filtered].sort((a, b) => a.currentValue - b.currentValue)
   const isTw = chartMarketTab.value === '台股'
-  const barColor = isTw ? '#3b82f6' : '#f59e0b'
+  const profitColor = '#16a34a'  // 賺錢：綠色
+  const lossColor   = '#dc2626'  // 賠錢：紅色
   return {
     tooltip: {
       trigger: 'axis',
@@ -874,11 +875,14 @@ const stockBarOption = computed(() => {
     yAxis: { type: 'category', data: sorted.map(s => isTw ? (s.stockName || s.stockCode) : s.stockCode) },
     series: [{
       type: 'bar',
-      data: sorted.map(s => ({
-        value: Math.round(Number(s.currentValue)),
-        stock: s,
-        itemStyle: { color: barColor, borderRadius: [0,4,4,0] }
-      })),
+      data: sorted.map(s => {
+        const profit = Number(s.currentValue || 0) - Number(s.investmentCost || 0)
+        return {
+          value: Math.round(Number(s.currentValue)),
+          stock: s,
+          itemStyle: { color: profit >= 0 ? profitColor : lossColor, borderRadius: [0,4,4,0] }
+        }
+      }),
       label: {
         show: true,
         position: 'right',
