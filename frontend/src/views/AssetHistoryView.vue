@@ -14,7 +14,8 @@
       </template>
       <el-table :data="history" size="small" stripe>
         <el-table-column prop="snapshotDate" label="日期" width="110" />
-        <el-table-column label="存款" align="right" :formatter="(r) => fmt(r.totalDeposit)" />
+        <el-table-column label="台幣存款" align="right" :formatter="(r) => fmt(r.totalTwdDeposit)" />
+        <el-table-column label="美元存款" align="right" :formatter="(r) => fmt(r.totalUsdDeposit)" />
         <el-table-column label="信託基金" align="right" :formatter="(r) => fmt(r.totalFundValue)" />
         <el-table-column label="台股" align="right" :formatter="(r) => fmt(r.totalTwStockValue)" />
         <el-table-column label="美股" align="right" :formatter="(r) => fmt(r.totalUsStockValue)" />
@@ -166,7 +167,7 @@ const totalTrendOption = computed(() => ({
       return s
     }
   },
-  legend: { data: ['總資產', '存款', '基金', '台股', '美股'] },
+  legend: { data: ['總資產', '台幣存款', '美元存款', '基金', '台股', '美股'] },
   grid: { left: 70, right: 30, top: 50, bottom: 50 },
   xAxis: { type: 'category', data: dates.value, axisLabel: { rotate: 30 } },
   yAxis: { type: 'value', axisLabel: { formatter: v => `$${(v/1e4).toFixed(0)}萬` } },
@@ -180,9 +181,15 @@ const totalTrendOption = computed(() => ({
         colorStops: [{ offset: 0, color: 'rgba(139,92,246,0.15)' }, { offset: 1, color: 'rgba(139,92,246,0)' }] } }
     },
     {
-      name: '存款', type: 'line', smooth: true,
-      data: history.value.map(h => Number(h.totalDeposit || 0)),
+      name: '台幣存款', type: 'line', smooth: true,
+      data: history.value.map(h => Number(h.totalTwdDeposit || 0)),
       itemStyle: { color: '#3b82f6' },
+      lineStyle: { width: 2 }
+    },
+    {
+      name: '美元存款', type: 'line', smooth: true,
+      data: history.value.map(h => Number(h.totalUsdDeposit || 0)),
+      itemStyle: { color: '#60a5fa' },
       lineStyle: { width: 2 }
     },
     {
@@ -208,12 +215,13 @@ const totalTrendOption = computed(() => ({
 
 const stackedOption = computed(() => ({
   tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-  legend: { data: ['存款', '基金', '台股', '美股'] },
+  legend: { data: ['台幣存款', '美元存款', '基金', '台股', '美股'] },
   grid: { left: 70, right: 20, top: 40, bottom: 50 },
   xAxis: { type: 'category', data: dates.value, axisLabel: { rotate: 30, fontSize: 11 } },
   yAxis: { type: 'value', axisLabel: { formatter: v => `$${(v/1e4).toFixed(0)}萬` } },
   series: [
-    { name: '存款', type: 'bar', stack: 'total', data: history.value.map(h => Number(h.totalDeposit||0)), itemStyle: { color: '#3b82f6' } },
+    { name: '台幣存款', type: 'bar', stack: 'total', data: history.value.map(h => Number(h.totalTwdDeposit||0)), itemStyle: { color: '#3b82f6' } },
+    { name: '美元存款', type: 'bar', stack: 'total', data: history.value.map(h => Number(h.totalUsdDeposit||0)), itemStyle: { color: '#60a5fa' } },
     { name: '基金', type: 'bar', stack: 'total', data: history.value.map(h => Number(h.totalFundValue||0)), itemStyle: { color: '#10b981' } },
     { name: '台股', type: 'bar', stack: 'total', data: history.value.map(h => Number(h.totalTwStockValue||0)), itemStyle: { color: '#f59e0b' } },
     {
