@@ -632,16 +632,15 @@ const trendOption = computed(() => {
       params[0].axisValue + '<br>' +
       params.map(p => `${p.seriesName}: $${Number(p.value).toLocaleString()}`).join('<br>')
     },
-    legend: { top: 0, data: ['存款', '基金', '台股', '美股', '總資產'] },
+    legend: { top: 0, data: ['總資產', '存款', '投資'] },
     grid: { left: 60, right: 20, top: 40, bottom: 40 },
     xAxis: { type: 'category', data: h.map(r => r.snapshotDate), axisLabel: { rotate: 30, fontSize: 11 } },
     yAxis: { type: 'value', axisLabel: { formatter: v => `$${(v / 1e4).toFixed(0)}萬` } },
     series: [
+      { name: '總資產', type: 'line', smooth: true, lineStyle: { width: 3 }, data: h.map(r => Number(r.totalAssets || 0)), itemStyle: { color: '#8b5cf6' } },
       { name: '存款', type: 'line', smooth: true, data: h.map(r => Number(r.totalDeposit || 0)), itemStyle: { color: '#3b82f6' } },
-      { name: '基金', type: 'line', smooth: true, data: h.map(r => Number(r.totalFundValue || 0)), itemStyle: { color: '#10b981' } },
-      { name: '台股', type: 'line', smooth: true, data: h.map(r => Number(r.totalTwStockValue || 0)), itemStyle: { color: '#f59e0b' } },
-      { name: '美股', type: 'line', smooth: true, data: h.map(r => Number(r.totalUsStockValue || 0)), itemStyle: { color: '#ef4444' } },
-      { name: '總資產', type: 'line', smooth: true, lineStyle: { width: 3 }, data: h.map(r => Number(r.totalAssets || 0)), itemStyle: { color: '#8b5cf6' } }
+      // 投資 = 信託基金 + 股票（與資產配置圓餅圖中「投資類」一致）
+      { name: '投資', type: 'line', smooth: true, data: h.map(r => Number(r.totalFundValue || 0) + Number(r.totalStockValue || 0)), itemStyle: { color: '#f59e0b' } }
     ]
   }
 })
