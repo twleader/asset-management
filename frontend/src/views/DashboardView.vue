@@ -571,33 +571,26 @@ function onTrendLeave() { hoveredHistoryDate.value = null }
 const pieDate = computed(() => hoveredHistoryDate.value ?? latest.value?.snapshotDate ?? null)
 
 const pieOption = computed(() => {
-  const hoverDate = hoveredHistoryDate.value
-  let segments
-  if (hoverDate) {
-    const r = filteredHistory.value.find(x => x.snapshotDate === hoverDate)
-    if (!r) return {}
-    // 歷史時間點：BFF history row 已預先聚合台幣/美元存款，與最新狀態同樣 5 區
-    segments = [
-      { value: Math.round(Number(r.totalTwdDeposit || 0)),    name: '台幣存款',  color: '#3b82f6' },
-      { value: Math.round(Number(r.totalUsdDeposit || 0)),    name: '美元存款',  color: '#60a5fa' },
-      { value: Math.round(Number(r.totalTwStockValue || 0)),  name: '台股',      color: '#f59e0b' },
-      { value: Math.round(Number(r.totalUsStockValue || 0)),  name: '美股',      color: '#ef4444' },
-      { value: Math.round(Number(r.totalFundValue || 0)),     name: '信託基金',  color: '#10b981' }
-    ]
-  } else {
-    const s = liveLatest.value
-    if (!s) return {}
-    // 最新 / 選中快照：可從 detail.deposits 拆台幣 / 美元
-    const twdDeposit = bankSummary.value.fixed + bankSummary.value.demand
-    const usdDeposit = bankSummary.value.usd
-    segments = [
-      { value: Math.round(twdDeposit),                          name: '台幣存款',  color: '#3b82f6' },
-      { value: Math.round(usdDeposit),                          name: '美元存款',  color: '#60a5fa' },
-      { value: Math.round(Number(s.totalTwStockValue || 0)),    name: '台股',      color: '#f59e0b' },
-      { value: Math.round(Number(s.totalUsStockValue || 0)),    name: '美股',      color: '#ef4444' },
-      { value: Math.round(Number(s.totalFundValue || 0)),       name: '信託基金',  color: '#10b981' }
-    ]
-  }
+  // 一律從 filteredHistory（已含 totalTwdDeposit / totalUsdDeposit / totalTw|UsStockValue / totalFundValue）
+  // 取資料：hover 時用對應日期那筆；否則用選中／最新快照那筆。
+  // 這樣不論選的是哪個快照，5 區都能正確顯示。
+  const targetDate = hoveredHistoryDate.value ?? latest.value?.snapshotDate
+  const r = filteredHistory.value.find(x => x.snapshotDate === targetDate)
+  if (!r) return {}
+  // 若顯示的是「最新／選中快照 + 該快照=最新」且盤中即時跳動：用 liveLatest 的台股/美股值覆蓋（hover 時不覆蓋）
+  const useLive = !hoveredHistoryDate.value && liveLatest.value
+        && targetDate === liveLatest.value.snapshotDate
+  const twStock = useLive ? Number(liveLatest.value.totalTwStockValue ?? r.totalTwStockValue ?? 0)
+                          : Number(r.totalTwStockValue || 0)
+  const usStock = useLive ? Number(liveLatest.value.totalUsStockValue ?? r.totalUsStockValue ?? 0)
+                          : Number(r.totalUsStockValue || 0)
+  const segments = [
+    { value: Math.round(Number(r.totalTwdDeposit || 0)),    name: '台幣存款',  color: '#3b82f6' },
+    { value: Math.round(Number(r.totalUsdDeposit || 0)),    name: '美元存款',  color: '#60a5fa' },
+    { value: Math.round(twStock),                           name: '台股',      color: '#f59e0b' },
+    { value: Math.round(usStock),                           name: '美股',      color: '#ef4444' },
+    { value: Math.round(Number(r.totalFundValue || 0)),     name: '信託基金',  color: '#10b981' }
+  ]
   const data = segments.filter(d => d.value > 0)
   return {
     tooltip: { trigger: 'item', formatter: p => `${p.name}: $${Number(p.value).toLocaleString()} (${p.percent}%)` },
