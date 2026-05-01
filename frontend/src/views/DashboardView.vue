@@ -146,42 +146,6 @@
       </el-col>
     </el-row>
 
-    <!-- Third Charts Row -->
-    <el-row :gutter="20" class="chart-row">
-      <el-col :span="24">
-        <el-card>
-          <template #header>
-            <span class="card-title">信託基金（現值）</span>
-            <span class="card-sub">{{ latest?.snapshotDate }}</span>
-          </template>
-          <div v-if="!fundFilteredHoldings.length"
-               style="height:280px;display:flex;align-items:center;justify-content:center;color:#94a3b8">
-            尚無基金資料
-          </div>
-          <v-chart v-else :option="fundBarOption" style="height: 280px" autoresize />
-          <div class="chart-summary-bar">
-            <div class="csb-item">
-              <span class="csb-label">總值</span>
-              <span class="csb-val">{{ formatCurrency(fundSummary.totalValue) }}</span>
-            </div>
-            <div class="csb-sep" />
-            <div class="csb-item">
-              <span class="csb-label">成本</span>
-              <span class="csb-val">{{ formatCurrency(fundSummary.totalCost) }}</span>
-            </div>
-            <div class="csb-sep" />
-            <div class="csb-item">
-              <span class="csb-label">損益</span>
-              <span class="csb-val" :class="fundSummary.profit >= 0 ? 'profit' : 'loss'">
-                {{ formatCurrency(fundSummary.profit) }}
-                <small style="font-weight:400"> ({{ formatPct(fundSummary.profitRate) }})</small>
-              </span>
-            </div>
-          </div>
-        </el-card>
-      </el-col>
-    </el-row>
-
     <!-- Quick Stats Table -->
     <el-row :gutter="20" class="chart-row">
       <el-col :span="24">
@@ -319,6 +283,42 @@
             <div class="csb-item">
               <span class="csb-label">持股數</span>
               <span class="csb-val">{{ stockTableSummary.count }} 檔</span>
+            </div>
+          </div>
+        </el-card>
+      </el-col>
+    </el-row>
+
+    <!-- 信託基金圖表（放在股票持股下方，重要性次於股票） -->
+    <el-row :gutter="20" class="chart-row">
+      <el-col :span="24">
+        <el-card>
+          <template #header>
+            <span class="card-title">信託基金（現值）</span>
+            <span class="card-sub">{{ latest?.snapshotDate }}</span>
+          </template>
+          <div v-if="!fundFilteredHoldings.length"
+               style="height:280px;display:flex;align-items:center;justify-content:center;color:#94a3b8">
+            尚無基金資料
+          </div>
+          <v-chart v-else :option="fundBarOption" style="height: 280px" autoresize />
+          <div class="chart-summary-bar">
+            <div class="csb-item">
+              <span class="csb-label">總值</span>
+              <span class="csb-val">{{ formatCurrency(fundSummary.totalValue) }}</span>
+            </div>
+            <div class="csb-sep" />
+            <div class="csb-item">
+              <span class="csb-label">成本</span>
+              <span class="csb-val">{{ formatCurrency(fundSummary.totalCost) }}</span>
+            </div>
+            <div class="csb-sep" />
+            <div class="csb-item">
+              <span class="csb-label">損益</span>
+              <span class="csb-val" :class="fundSummary.profit >= 0 ? 'profit' : 'loss'">
+                {{ formatCurrency(fundSummary.profit) }}
+                <small style="font-weight:400"> ({{ formatPct(fundSummary.profitRate) }})</small>
+              </span>
             </div>
           </div>
         </el-card>
@@ -529,6 +529,12 @@ const kpiCards = computed(() => {
       valueColor: '#1e293b'
     },
     {
+      label: '股票現值', icon: 'TrendCharts',
+      value: formatCurrency(s.totalStockValue), bg: '#fef3c7', color: '#d97706',
+      sub: `損益 ${formatCurrency(s.stockProfit)}`,
+      valueColor: Number(s.stockProfit) >= 0 ? '#16a34a' : '#dc2626'
+    },
+    {
       label: '信託基金', emoji: '📊',
       value: formatCurrency(s.totalFundValue), bg: '#ecfdf5', color: '#10b981',
       sub: (() => {
@@ -538,12 +544,6 @@ const kpiCards = computed(() => {
       })(),
       subColor: (Number(s.totalFundValue || 0) - Number(s.totalFundCost || 0)) >= 0 ? '#16a34a' : '#dc2626',
       valueColor: '#1e293b'
-    },
-    {
-      label: '股票現值', icon: 'TrendCharts',
-      value: formatCurrency(s.totalStockValue), bg: '#fef3c7', color: '#d97706',
-      sub: `損益 ${formatCurrency(s.stockProfit)}`,
-      valueColor: Number(s.stockProfit) >= 0 ? '#16a34a' : '#dc2626'
     },
     {
       label: '預估年配息', emoji: '💵',
