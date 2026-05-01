@@ -317,4 +317,7 @@
 - [ ] 「回補 GDP」按鈕呼叫 IMF DataMapper API（`NGDPDPC/TWN`）upsert 至 DB，覆蓋 1980 至最新年度
 - [ ] 「回補大盤」按鈕呼叫 TWSE FMTQIK 月報，逐年抓 12 月最後一筆收盤 upsert 至 DB
 - [ ] BFF 在組裝 X 軸年份時過濾 `> 當年`（IMF 含未來預測，不顯示）
+- [ ] 同頁下方加第二張「台韓人均 GDP 比較」圖：左 Y 軸為 TW/KR 人均 GDP（折線），右 Y 軸為各自年增率（柱狀）
+- [ ] 韓國資料同樣由 IMF DataMapper API（`NGDPDPC/KOR`）回補，存於 `korea_gdp_per_capita_history`
+- [ ] 「回補資料」按鈕同步觸發 TWN + KOR 兩國 GDP 回補
 

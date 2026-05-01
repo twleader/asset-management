@@ -2,8 +2,10 @@ package com.steven.assets.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.steven.assets.model.KoreaGdpPerCapitaHistory;
 import com.steven.assets.model.TaiwanGdpPerCapitaHistory;
 import com.steven.assets.model.TwseIndexYearEndHistory;
+import com.steven.assets.repository.KoreaGdpPerCapitaHistoryRepository;
 import com.steven.assets.repository.TaiwanGdpPerCapitaHistoryRepository;
 import com.steven.assets.repository.TwseIndexYearEndHistoryRepository;
 import lombok.RequiredArgsConstructor;
@@ -31,12 +33,13 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class MacroHistoryService {
 
-    private static final String IMF_GDP_URL =
-            "https://www.imf.org/external/datamapper/api/v1/NGDPDPC/TWN";
+    private static final String IMF_GDP_URL_TPL =
+            "https://www.imf.org/external/datamapper/api/v1/NGDPDPC/";
     private static final String TWSE_FMTQIK_URL =
             "https://www.twse.com.tw/exchangeReport/FMTQIK?response=json&date=";
 
     private final TaiwanGdpPerCapitaHistoryRepository gdpRepo;
+    private final KoreaGdpPerCapitaHistoryRepository koreaGdpRepo;
     private final TwseIndexYearEndHistoryRepository twseRepo;
 
     private final HttpClient http = HttpClient.newBuilder()
@@ -47,43 +50,66 @@ public class MacroHistoryService {
 
     @Transactional
     public Map<String, Object> refreshGdpFromImf() throws Exception {
-        // IMF 後面是 Akamai WAF；UA 設為 Mozilla 或 Java-http-client 會被 403。
-        // 用 curl shell-out，沿用既有 HistoricalDataService 的模式（避免 Java TLS fingerprint 被擋）。
-        ProcessBuilder pb = new ProcessBuilder(
-                "curl", "-sS", "--max-time", "20",
-                "-H", "Accept: application/json",
-                IMF_GDP_URL);
-        pb.redirectErrorStream(true);
-        Process proc = pb.start();
-        String body = new String(proc.getInputStream().readAllBytes());
-        int exit = proc.waitFor();
-        if (exit != 0) throw new RuntimeException("curl exit=" + exit + ": " + body);
-        JsonNode twn = mapper.readTree(body)
-                .path("values").path("NGDPDPC").path("TWN");
-        if (!twn.isObject() || twn.isEmpty()) {
-            throw new RuntimeException("IMF 回應未含 TWN 資料");
-        }
-
-        int upserted = 0;
-        Iterator<Map.Entry<String, JsonNode>> it = twn.fields();
-        while (it.hasNext()) {
-            Map.Entry<String, JsonNode> e = it.next();
-            int year = Integer.parseInt(e.getKey());
-            if (e.getValue().isNull()) continue;
-            BigDecimal v = BigDecimal.valueOf(e.getValue().asDouble())
-                    .setScale(2, RoundingMode.HALF_UP);
+        return refreshFromImf("TWN", (year, value) -> {
             TaiwanGdpPerCapitaHistory row = gdpRepo.findById(year)
                     .orElseGet(() -> {
                         TaiwanGdpPerCapitaHistory r = new TaiwanGdpPerCapitaHistory();
                         r.setYear(year);
                         return r;
                     });
-            row.setGdpUsd(v);
+            row.setGdpUsd(value);
             gdpRepo.save(row);
+        });
+    }
+
+    @Transactional
+    public Map<String, Object> refreshKoreaGdpFromImf() throws Exception {
+        return refreshFromImf("KOR", (year, value) -> {
+            KoreaGdpPerCapitaHistory row = koreaGdpRepo.findById(year)
+                    .orElseGet(() -> {
+                        KoreaGdpPerCapitaHistory r = new KoreaGdpPerCapitaHistory();
+                        r.setYear(year);
+                        return r;
+                    });
+            row.setGdpUsd(value);
+            koreaGdpRepo.save(row);
+        });
+    }
+
+    @FunctionalInterface
+    private interface YearValueSink { void accept(int year, BigDecimal value); }
+
+    private Map<String, Object> refreshFromImf(String countryCode, YearValueSink sink) throws Exception {
+        // IMF 後面是 Akamai WAF；UA 設為 Mozilla 或 Java-http-client 會被 403。
+        // 用 curl shell-out，沿用既有 HistoricalDataService 的模式（避免 Java TLS fingerprint 被擋）。
+        ProcessBuilder pb = new ProcessBuilder(
+                "curl", "-sS", "--max-time", "20",
+                "-H", "Accept: application/json",
+                IMF_GDP_URL_TPL + countryCode);
+        pb.redirectErrorStream(true);
+        Process proc = pb.start();
+        String body = new String(proc.getInputStream().readAllBytes());
+        int exit = proc.waitFor();
+        if (exit != 0) throw new RuntimeException("curl exit=" + exit + ": " + body);
+        JsonNode node = mapper.readTree(body)
+                .path("values").path("NGDPDPC").path(countryCode);
+        if (!node.isObject() || node.isEmpty()) {
+            throw new RuntimeException("IMF 回應未含 " + countryCode + " 資料");
+        }
+
+        int upserted = 0;
+        Iterator<Map.Entry<String, JsonNode>> it = node.fields();
+        while (it.hasNext()) {
+            Map.Entry<String, JsonNode> e = it.next();
+            int year = Integer.parseInt(e.getKey());
+            if (e.getValue().isNull()) continue;
+            BigDecimal v = BigDecimal.valueOf(e.getValue().asDouble())
+                    .setScale(2, RoundingMode.HALF_UP);
+            sink.accept(year, v);
             upserted++;
         }
-        log.info("IMF GDP refresh: upserted {} 年", upserted);
-        return Map.of("upserted", upserted, "source", "IMF NGDPDPC/TWN");
+        log.info("IMF GDP refresh ({}): upserted {} 年", countryCode, upserted);
+        return Map.of("upserted", upserted, "source", "IMF NGDPDPC/" + countryCode);
     }
 
     /**

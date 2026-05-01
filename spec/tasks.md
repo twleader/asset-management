@@ -1369,4 +1369,9 @@ NASDAQ info API 自 2026/04 起對 ETF 的 `keyStats` 為 null，VOO/VT 等 ETF 
         `POST /api/twse-year-end-index/refresh?from=YYYY&to=YYYY`：分別呼叫 IMF DataMapper
         (NGDPDPC/TWN) 與 TWSE FMTQIK 月報 upsert 至 DB
 - [ ] 53.7 BFF `POST /api/bff/gdp-twse/refresh`（並行觸發兩支 refresh），前端按鈕串接
+- [ ] 53.8 加入韓國比較：v1.17.0 changelog 建 `korea_gdp_per_capita_history`；後端
+        `KoreaGdpPerCapitaHistory` entity/repo + `MacroHistoryService.refreshKoreaGdpFromImf`；
+        controller 新增 `GET /api/korea-gdp` 與 `POST /api/korea-gdp/refresh-from-imf`；
+        BFF 擴充回傳 `koreaGdpPerCapitaUsd` 與 `taiwanGdpGrowthRate` / `koreaGdpGrowthRate`；
+        前端在原圖下加第二張卡（左 Y 折線雙國 GDP，右 Y 柱狀雙國年增率）
 
