@@ -49,6 +49,7 @@ public class MacroHistoryService {
     public Map<String, Object> refreshGdpFromImf() throws Exception {
         HttpRequest req = HttpRequest.newBuilder(URI.create(IMF_GDP_URL))
                 .header("Accept", "application/json")
+                .header("User-Agent", "Mozilla/5.0")
                 .timeout(Duration.ofSeconds(20))
                 .GET().build();
         HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString());
