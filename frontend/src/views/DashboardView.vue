@@ -861,7 +861,8 @@ const stockBarOption = computed(() => {
         const rate = cost > 0 ? (profit / cost * 100).toFixed(2) : '0.00'
         const color = profit >= 0 ? '#16a34a' : '#dc2626'
         const fmt = n => `$${Math.round(n).toLocaleString()}`
-        return `<b>${p[0].name}</b><br/>`
+        const title = s.stockName ? `${s.stockCode} ${s.stockName}` : s.stockCode
+        return `<b>${title}</b><br/>`
           + `現值：${fmt(value)}<br/>`
           + `成本：${fmt(cost)}<br/>`
           + `損益：<span style="color:${color}">${fmt(profit)} (${rate}%)</span>`
@@ -869,7 +870,8 @@ const stockBarOption = computed(() => {
     },
     grid: { left: 100, right: 140, top: 10, bottom: 30 },
     xAxis: { type: 'value', axisLabel: { formatter: v => `$${(v / 1e4).toFixed(0)}萬` } },
-    yAxis: { type: 'category', data: sorted.map(s => s.stockName || s.stockCode) },
+    // 美股股名太長（如 Vanguard S&P 500 ETF），y 軸用代號顯示；台股名稱短，沿用名稱
+    yAxis: { type: 'category', data: sorted.map(s => isTw ? (s.stockName || s.stockCode) : s.stockCode) },
     series: [{
       type: 'bar',
       data: sorted.map(s => ({

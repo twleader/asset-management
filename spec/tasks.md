@@ -999,6 +999,20 @@ Dashboard `bankSummary` 將 `TRANSIT_TWD` 與 `TRANSIT_USD` 同一條件分支�
 - [x] 38.2 `StockPriceService.recordTwClosingPrice` 改為迭代呼叫 FinMind 方法 + `persistPrice(...closed=true)`，
        不再走 `getStockPrice` / TWSE mis；log 紀錄成功與缺漏檔數
 
+### Task 39: Dashboard 美股持股 bar 改用股票代號
+
+對應 Requirements: Requirement 8（資產歷史趨勢）
+
+#### 背景
+
+`持股明細 (現值)` bar chart 的 y 軸原本都用 `stockName`，美股名稱常很長（如 "Vanguard S&P 500 ETF"），
+被 grid.left=100 截斷。台股名稱短沒問題。
+
+#### Steps:
+
+- [x] 39.1 `DashboardView.vue` `stockBarOption.yAxis.data` 依 `chartMarketTab` 區分：台股用 `stockName`、美股改用 `stockCode`
+- [x] 39.2 tooltip 標題保留「代號 + 名稱」完整資訊，避免 y 軸僅用代號時失去名稱可讀性
+
 ### Task 39: 股價基準日規則改 per-market（修正美股盤中誤顯示前一交易日收盤）
 
 對應 Requirements: Requirement 9（儀表板基準日股價）、Requirement 7（市場資料整合）
