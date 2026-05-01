@@ -40,7 +40,7 @@
         <el-card>
           <template #header>
             <span class="card-title">資產配置分佈</span>
-            <span class="card-sub">{{ latest?.snapshotDate }}</span>
+            <span class="card-sub">{{ pieDate }}</span>
           </template>
           <v-chart :option="pieOption" style="height: 320px" autoresize />
         </el-card>
@@ -52,7 +52,9 @@
           <template #header>
             <span class="card-title">資產歷史趨勢</span>
           </template>
-          <v-chart :option="trendOption" style="height: 320px" autoresize />
+          <v-chart :option="trendOption" style="height: 320px" autoresize
+            @updateAxisPointer="onTrendAxisPointer"
+            @globalout="onTrendLeave" />
         </el-card>
       </el-col>
     </el-row>
@@ -554,22 +556,48 @@ const kpiCards = computed(() => {
   ]
 })
 
+// 趨勢圖 hover 狀態：指向 history row 的 snapshotDate；null 表示沒 hover → 顯示最新
+const hoveredHistoryDate = ref(null)
+function onTrendAxisPointer(e) {
+  const ai = e?.axesInfo?.[0]
+  // value 在 category xAxis 是 dataIndex（number），label 是 snapshotDate string
+  const idx = typeof ai?.value === 'number' ? ai.value : null
+  if (idx == null) return
+  const row = filteredHistory.value[idx]
+  hoveredHistoryDate.value = row?.snapshotDate ?? null
+}
+function onTrendLeave() { hoveredHistoryDate.value = null }
+
+const pieDate = computed(() => hoveredHistoryDate.value ?? latest.value?.snapshotDate ?? null)
+
 const pieOption = computed(() => {
-  const s = liveLatest.value
-  if (!s) return {}
-  // 存款拆台幣 / 美元（用 bankSummary 已聚合的數值，含 TRANSIT 在途歸入活存）
-  const twdDeposit = bankSummary.value.fixed + bankSummary.value.demand
-  const usdDeposit = bankSummary.value.usd
-  // 股票拆台股 / 美股（用 liveLatest 已含的市場別小計）
-  const twStock = Number(s.totalTwStockValue || 0)
-  const usStock = Number(s.totalUsStockValue || 0)
-  const data = [
-    { value: Math.round(twdDeposit),                  name: '台幣存款',  color: '#3b82f6' },
-    { value: Math.round(usdDeposit),                  name: '美元存款',  color: '#60a5fa' },
-    { value: Math.round(twStock),                     name: '台股',      color: '#f59e0b' },
-    { value: Math.round(usStock),                     name: '美股',      color: '#ef4444' },
-    { value: Math.round(Number(s.totalFundValue || 0)), name: '信託基金', color: '#10b981' }
-  ].filter(d => d.value > 0)
+  const hoverDate = hoveredHistoryDate.value
+  let segments
+  if (hoverDate) {
+    // 歷史時間點：history row 沒有存款幣別細分，只能用合併「存款」+ 台股 / 美股 / 基金
+    const r = filteredHistory.value.find(x => x.snapshotDate === hoverDate)
+    if (!r) return {}
+    segments = [
+      { value: Math.round(Number(r.totalDeposit || 0)),       name: '存款',      color: '#3b82f6' },
+      { value: Math.round(Number(r.totalTwStockValue || 0)),  name: '台股',      color: '#f59e0b' },
+      { value: Math.round(Number(r.totalUsStockValue || 0)),  name: '美股',      color: '#ef4444' },
+      { value: Math.round(Number(r.totalFundValue || 0)),     name: '信託基金',  color: '#10b981' }
+    ]
+  } else {
+    const s = liveLatest.value
+    if (!s) return {}
+    // 最新 / 選中快照：可從 detail.deposits 拆台幣 / 美元
+    const twdDeposit = bankSummary.value.fixed + bankSummary.value.demand
+    const usdDeposit = bankSummary.value.usd
+    segments = [
+      { value: Math.round(twdDeposit),                          name: '台幣存款',  color: '#3b82f6' },
+      { value: Math.round(usdDeposit),                          name: '美元存款',  color: '#60a5fa' },
+      { value: Math.round(Number(s.totalTwStockValue || 0)),    name: '台股',      color: '#f59e0b' },
+      { value: Math.round(Number(s.totalUsStockValue || 0)),    name: '美股',      color: '#ef4444' },
+      { value: Math.round(Number(s.totalFundValue || 0)),       name: '信託基金',  color: '#10b981' }
+    ]
+  }
+  const data = segments.filter(d => d.value > 0)
   return {
     tooltip: { trigger: 'item', formatter: p => `${p.name}: $${Number(p.value).toLocaleString()} (${p.percent}%)` },
     legend: { bottom: 0, textStyle: { fontSize: 12 } },

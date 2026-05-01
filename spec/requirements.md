@@ -129,7 +129,7 @@
 **Acceptance Criteria:**
 
 - [ ] 顯示最新快照的總資產、存款、投資金額等 KPI 卡片
-- [ ] 圓餅圖呈現資產類別分配，分為 5 區：台幣存款、美元存款、台股、美股、信託基金；存款拆分依 `BankDeposit.currency`（USD vs TWD/null，TRANSIT_TWD/TRANSIT_USD 各歸對應幣別活存），股票拆分依 `liveLatest.totalTwStockValue / totalUsStockValue`；值為 0 的區段自動隱藏
+- [ ] 圓餅圖呈現資產類別分配。當未 hover 趨勢圖時顯示「最新／選中快照」，分 5 區：台幣存款、美元存款、台股、美股、信託基金（存款拆分依 `BankDeposit.currency`，股票拆分依 `liveLatest.totalTwStockValue / totalUsStockValue`）。當 hover 右側趨勢圖某時間點時，圓餅圖即時切換顯示該時間點的分配，分 4 區：存款（合併，因 `AssetHistoryResponse` 不含幣別細分）、台股、美股、信託基金；卡片副標題同步顯示對應日期。值為 0 的區段自動隱藏
 - [ ] 顯示台股與美股的持倉市值
 - [ ] 點擊指定股票時，能顯示該股價走勢，包含月線、季線、年線
 - [ ] 顯示預估年化股利收入
