@@ -1,7 +1,9 @@
 package com.steven.assets.controller;
 
+import com.steven.assets.model.KoreaGdpPerCapitaHistory;
 import com.steven.assets.model.TaiwanGdpPerCapitaHistory;
 import com.steven.assets.model.TwseIndexYearEndHistory;
+import com.steven.assets.repository.KoreaGdpPerCapitaHistoryRepository;
 import com.steven.assets.repository.TaiwanGdpPerCapitaHistoryRepository;
 import com.steven.assets.repository.TwseIndexYearEndHistoryRepository;
 import com.steven.assets.service.MacroHistoryService;
@@ -26,6 +28,7 @@ import java.util.Map;
 public class MacroHistoryController {
 
     private final TaiwanGdpPerCapitaHistoryRepository gdpRepo;
+    private final KoreaGdpPerCapitaHistoryRepository koreaGdpRepo;
     private final TwseIndexYearEndHistoryRepository twseRepo;
     private final MacroHistoryService macroHistoryService;
 
@@ -48,6 +51,19 @@ public class MacroHistoryController {
     @PostMapping("/taiwan-gdp/refresh-from-imf")
     public Map<String, Object> refreshGdpFromImf() throws Exception {
         return macroHistoryService.refreshGdpFromImf();
+    }
+
+    @GetMapping("/korea-gdp")
+    public List<KoreaGdpPerCapitaHistory> getKoreaGdp(
+            @RequestParam(required = false) Integer since) {
+        return since == null
+                ? koreaGdpRepo.findAllByOrderByYearAsc()
+                : koreaGdpRepo.findByYearGreaterThanEqualOrderByYearAsc(since);
+    }
+
+    @PostMapping("/korea-gdp/refresh-from-imf")
+    public Map<String, Object> refreshKoreaGdpFromImf() throws Exception {
+        return macroHistoryService.refreshKoreaGdpFromImf();
     }
 
     @PostMapping("/twse-year-end-index/refresh")
