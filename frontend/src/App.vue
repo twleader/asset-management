@@ -67,7 +67,10 @@
           </div>
           <div class="header-right">
             <el-tag type="success" size="small">
-              {{ today }}
+              <span style="font-weight:600">TPE</span> {{ tpeNow }}
+            </el-tag>
+            <el-tag type="warning" size="small" style="margin-left:8px">
+              <span style="font-weight:600">NYC</span> {{ nycNow }}
             </el-tag>
           </div>
         </el-header>
@@ -86,18 +89,39 @@
 
 <script setup>
 import zhTw from 'element-plus/dist/locale/zh-tw.mjs'
-import dayjs from 'dayjs'
 import { useAssetStore } from '@/stores/assetStore'
 
 const collapsed = ref(false)
-const today = dayjs().format('YYYY/MM/DD')
 const store = useAssetStore()
+
+// 雙時區即時時鐘（每秒更新）
+const tpeNow = ref('')
+const nycNow = ref('')
+let clockTimer = null
+function fmtNow(tz) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+  }).formatToParts(new Date())
+  const get = t => parts.find(p => p.type === t)?.value ?? ''
+  return `${get('year')}/${get('month')}/${get('day')} ${get('hour')}:${get('minute')}:${get('second')}`
+}
+function tickClock() {
+  tpeNow.value = fmtNow('Asia/Taipei')
+  nycNow.value = fmtNow('America/New_York')
+}
+tickClock()
 
 // 載入快照列表以取得最新快照 ID
 onMounted(async () => {
+  clockTimer = setInterval(tickClock, 1000)
   if (store.snapshots.length === 0) {
     await store.fetchSnapshots()
   }
+})
+
+onUnmounted(() => {
+  if (clockTimer) clearInterval(clockTimer)
 })
 
 const mainMenuItems = computed(() => [
