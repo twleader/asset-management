@@ -53,13 +53,15 @@ public class GdpTwseBffController {
         return Mono.zip(gdp, twse).map(tuple -> {
             TreeMap<Integer, Object> gdpByYear = new TreeMap<>();
             TreeMap<Integer, Object> twseByYear = new TreeMap<>();
+            // IMF 回傳含未來年度預測，X 軸不顯示
             for (Map<String, Object> row : tuple.getT1()) {
-                gdpByYear.put(((Number) row.get("year")).intValue(), row.get("gdpUsd"));
+                int y = ((Number) row.get("year")).intValue();
+                if (y >= since && y <= currentYear) gdpByYear.put(y, row.get("gdpUsd"));
             }
             for (Map<String, Object> row : tuple.getT2()) {
-                twseByYear.put(((Number) row.get("year")).intValue(), row.get("closePoint"));
+                int y = ((Number) row.get("year")).intValue();
+                if (y >= since && y <= currentYear) twseByYear.put(y, row.get("closePoint"));
             }
-            // 以兩個 series 的年份聯集為 X 軸
             TreeMap<Integer, Boolean> allYears = new TreeMap<>();
             gdpByYear.keySet().forEach(y -> allYears.put(y, true));
             twseByYear.keySet().forEach(y -> allYears.put(y, true));
