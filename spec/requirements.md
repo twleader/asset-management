@@ -298,3 +298,20 @@
 - [x] 使用者可新增、編輯、停用，停用後不出現於下拉選單但歷史資料仍正常顯示
 - [x] 系統提供預設 Seed Data（`DataInitializer`）
 - [x] 前端新增 `/settings/transit-fund-types` 設定頁面
+
+---
+
+### Requirement 18: 台灣人均 GDP 與台股大盤年度走勢比較
+
+**User Story:** 作為使用者，我希望能在同一張圖上比較近 30 年「台灣人均 GDP」與「台股大盤 12/31 收盤點位」的年度變化，以理解總體經濟成長與股市表現的關聯。
+
+**Acceptance Criteria:**
+
+- [ ] 左側選單新增「GDP + 台股大盤」項目，路徑 `/gdp-twse`
+- [ ] 頁面以雙 Y 軸折線圖呈現：左 Y 軸為人均 GDP（USD），右 Y 軸為台股大盤年末收盤點位
+- [ ] 預設顯示近 30 年（含當年度若已有資料）
+- [ ] 兩種年度資料各自存於資料庫獨立資料表（`taiwan_gdp_per_capita_history`、`twse_index_year_end_history`），由 Liquibase changelog seed
+- [ ] 後端提供獨立資源端點 `/api/taiwan-gdp` 與 `/api/twse-year-end-index`
+- [ ] BFF 端點 `/api/bff/gdp-twse`，前端只呼叫 BFF
+- [ ] 滑鼠移到任一年份時，tooltip 同時顯示該年人均 GDP 與大盤收盤點位
+

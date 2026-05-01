@@ -1344,3 +1344,25 @@ NASDAQ info API 自 2026/04 起對 ETF 的 `keyStats` 為 null，VOO/VT 等 ETF 
 - [ ] 52.5 BFF passthrough route 補 `/api/bff/backup-restore/sync`
 - [ ] 52.6 `BackupRestoreView.vue` 「保留設定」加 `el-switch`「啟用備份」；「還原資料」加
         「從 Google Drive 同步」按鈕；「立即備份」按鈕在開關 off 時 disabled
+
+### Task 53: GDP + 台股大盤年度走勢頁
+
+對應 Requirements: Requirement 18（台灣人均 GDP 與台股大盤年度走勢比較）
+
+#### 背景
+
+新增一頁靜態總體經濟資訊，比較近 30 年「台灣人均 GDP（USD）」與「台股大盤 12/31 收盤」。
+資料為歷史已知值，直接於 Liquibase changelog seed，不需外部 API。
+
+#### Steps:
+
+- [ ] 53.1 Liquibase changelog `v1.16.0`：建立 `taiwan_gdp_per_capita_history` 與
+        `twse_index_year_end_history`，並 INSERT 1996–2025 共 30 年資料
+- [ ] 53.2 後端 entities：`TaiwanGdpPerCapitaHistory`、`TwseIndexYearEndHistory`；對應 repository
+- [ ] 53.3 後端 controller：`MacroHistoryController` 提供 `/api/taiwan-gdp` 與
+        `/api/twse-year-end-index`
+- [ ] 53.4 BFF：`bff/gdptwse/GdpTwseBffController`，路徑 `/api/bff/gdp-twse`，aggregate 兩支
+        business API 回傳 `{ years, gdpPerCapitaUsd, twseYearEndClose }`
+- [ ] 53.5 前端：`GdpTwseView.vue` 雙 Y 軸折線圖（左 GDP / 右 大盤點位），`router/index.js` 加
+        `/gdp-twse` route，`App.vue` 左側選單 push 一項，`api/index.js` 加 `bffApi.gdpTwse`
+

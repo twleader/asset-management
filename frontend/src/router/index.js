@@ -62,6 +62,12 @@ const router = createRouter({
       meta: { title: '台幣兌美元', icon: 'Money' }
     },
     {
+      path: '/gdp-twse',
+      name: 'GdpTwse',
+      component: () => import('@/views/GdpTwseView.vue'),
+      meta: { title: 'GDP + 台股大盤', icon: 'TrendCharts' }
+    },
+    {
       path: '/stocks',
       name: 'StockMonitor',
       component: () => import('@/views/StockMonitorView.vue'),

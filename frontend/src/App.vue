@@ -130,7 +130,8 @@ const mainMenuItems = computed(() => [
   { path: '/realized-gains', title: '已實現損益', icon: 'Money' },
   { path: '/stocks', title: '股票觀察', icon: 'View' },
   { path: '/trading-calendar', title: '交易日曆', icon: 'AlarmClock' },
-  { path: '/exchange-rate', title: '台幣兌美元', icon: 'Money' }
+  { path: '/exchange-rate', title: '台幣兌美元', icon: 'Money' },
+  { path: '/gdp-twse', title: 'GDP + 台股大盤', icon: 'TrendCharts' }
 ])
 </script>
 

@@ -601,6 +601,31 @@ POST   /api/market-data/exchange-rate/backfill-history?currency=USD&since=2021-0
                                                # 強制補齊指定日期起的歷史匯率（忽略現有 maxDate）
 ```
 
+#### Macro History（Requirement 18：GDP + 台股大盤）
+```
+GET    /api/taiwan-gdp                         # 全部年度人均 GDP（USD）
+GET    /api/taiwan-gdp?since=1996              # 起始年（含）以後
+GET    /api/twse-year-end-index                # 全部年度大盤年末收盤點位
+GET    /api/twse-year-end-index?since=1996
+
+GET    /api/bff/gdp-twse?years=30              # 前端 view 專用，回傳近 N 年彙整資料
+```
+
+回傳格式（BFF）：
+```json
+{
+  "years": [1996, 1997, ..., 2025],
+  "gdpPerCapitaUsd": [13571, 13888, ...],
+  "twseYearEndClose": [6933.94, 8187.27, ...]
+}
+```
+
+對應資料表：
+- `taiwan_gdp_per_capita_history` (year PK, gdp_usd NUMERIC(12,2))
+- `twse_index_year_end_history` (year PK, close_point NUMERIC(12,2))
+
+兩表 seed data 直接寫入 Liquibase changelog（歷史值不變、可重複套用）。
+
 ### Response Format
 
 **成功回應**
