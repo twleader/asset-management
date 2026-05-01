@@ -51,8 +51,19 @@
         <el-card>
           <template #header>
             <span class="card-title">資產歷史趨勢</span>
+            <span class="card-sub">{{ pieDate }}</span>
           </template>
-          <v-chart :option="trendOption" style="height: 320px" autoresize
+          <div class="trend-legend">
+            <div v-for="item in trendLegendItems" :key="item.name" class="trend-legend-item">
+              <span class="tl-dot" :style="{ background: item.color }"></span>
+              <div class="tl-text">
+                <div class="tl-name">{{ item.name }}</div>
+                <div class="tl-amount">{{ formatCurrency(item.value) }}</div>
+                <div class="tl-pct" :style="{ color: item.color }">{{ item.pct }}</div>
+              </div>
+            </div>
+          </div>
+          <v-chart :option="trendOption" style="height: 260px" autoresize
             @updateAxisPointer="onTrendAxisPointer"
             @globalout="onTrendLeave" />
         </el-card>
@@ -570,6 +581,27 @@ function onTrendLeave() { hoveredHistoryDate.value = null }
 
 const pieDate = computed(() => hoveredHistoryDate.value ?? latest.value?.snapshotDate ?? null)
 
+// 趨勢圖下方自訂 legend：跟著 pieDate（hover 或選中快照）顯示金額與佔比
+const trendLegendItems = computed(() => {
+  const r = filteredHistory.value.find(x => x.snapshotDate === pieDate.value)
+  if (!r) {
+    return [
+      { name: '總資產', value: 0, pct: '-', color: '#8b5cf6' },
+      { name: '存款',   value: 0, pct: '-', color: '#3b82f6' },
+      { name: '投資',   value: 0, pct: '-', color: '#f59e0b' }
+    ]
+  }
+  const total   = Number(r.totalAssets || 0)
+  const deposit = Number(r.totalDeposit || 0)
+  const invest  = Number(r.totalFundValue || 0) + Number(r.totalStockValue || 0)
+  const pct = v => total > 0 ? `${(v / total * 100).toFixed(1)}%` : '-'
+  return [
+    { name: '總資產', value: total,   pct: '100.0%',     color: '#8b5cf6' },
+    { name: '存款',   value: deposit, pct: pct(deposit), color: '#3b82f6' },
+    { name: '投資',   value: invest,  pct: pct(invest),  color: '#f59e0b' }
+  ]
+})
+
 const pieOption = computed(() => {
   // 一律從 filteredHistory（已含 totalTwdDeposit / totalUsdDeposit / totalTw|UsStockValue / totalFundValue）
   // 取資料：hover 時用對應日期那筆；否則用選中／最新快照那筆。
@@ -625,8 +657,8 @@ const trendOption = computed(() => {
       params[0].axisValue + '<br>' +
       params.map(p => `${p.seriesName}: $${Number(p.value).toLocaleString()}`).join('<br>')
     },
-    legend: { top: 0, data: ['總資產', '存款', '投資'] },
-    grid: { left: 60, right: 20, top: 40, bottom: 40 },
+    legend: { show: false },
+    grid: { left: 60, right: 20, top: 10, bottom: 40 },
     xAxis: { type: 'category', data: h.map(r => r.snapshotDate), axisLabel: { rotate: 30, fontSize: 11 } },
     yAxis: { type: 'value', axisLabel: { formatter: v => `$${(v / 1e4).toFixed(0)}萬` } },
     series: [
@@ -1054,6 +1086,15 @@ function onBarDblClick(params) {
 .kpi-row, .chart-row { margin: 0 !important; }
 .kpi-flex { display: flex; gap: 20px; flex-wrap: nowrap; }
 .kpi-flex-item { flex: 1 1 0; min-width: 0; }
+
+/* 資產歷史趨勢自訂 legend：3 個項目均分、有金額與佔比 */
+.trend-legend { display: flex; justify-content: space-around; padding: 8px 24px 12px; gap: 24px; }
+.trend-legend-item { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+.tl-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+.tl-text { display: flex; flex-direction: column; line-height: 1.3; min-width: 0; }
+.tl-name   { font-size: 12px; color: #64748b; }
+.tl-amount { font-size: 16px; font-weight: 700; color: #1e293b; font-variant-numeric: tabular-nums; }
+.tl-pct    { font-size: 12px; font-weight: 600; }
 
 .kpi-card :deep(.el-card__body) {
   display: flex; align-items: center; gap: 16px; padding: 20px;
