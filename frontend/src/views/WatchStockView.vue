@@ -20,8 +20,7 @@
         <el-tab-pane name="美股">
           <template #label>
             <span style="display:inline-flex;align-items:center;gap:6px">
-              <img src="/icons/us-flag.svg" alt="US"
-                   style="width:22px;height:14px;object-fit:cover;border-radius:2px;vertical-align:middle" />
+              <UsFlag :size="22" />
               美股 <el-tag size="small" style="margin-left:2px">{{ usList.length }}</el-tag>
             </span>
           </template>
@@ -150,6 +149,7 @@ import dayjs from 'dayjs'
 import { bffApi } from '@/api/index.js'
 import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
 import TaiwanMap from '@/components/TaiwanMap.vue'
+import UsFlag from '@/components/UsFlag.vue'
 
 // ===== State =====
 const marketTab = ref('台股')
