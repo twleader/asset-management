@@ -130,6 +130,11 @@ export const bffApi = {
       api.post('/bff/exchange-rate/backfill', null, { params: { currency, ...(since && { since }) } })
   },
 
+  // GdpTwse (GDP + 台股大盤年度走勢)
+  gdpTwse: {
+    get: (years = 30) => api.get('/bff/gdp-twse', { params: { years } })
+  },
+
   // TradingCalendar
   tradingCalendar: {
     get:           (year) => api.get('/bff/trading-calendar', { params: year ? { year } : {} }),
