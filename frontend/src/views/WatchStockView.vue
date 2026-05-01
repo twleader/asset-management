@@ -20,7 +20,8 @@
         <el-tab-pane name="美股">
           <template #label>
             <span style="display:inline-flex;align-items:center;gap:6px">
-              <span style="font-size:16px;line-height:1">🇺🇸</span>
+              <img src="/icons/us-flag.svg" alt="US"
+                   style="width:22px;height:14px;object-fit:cover;border-radius:2px;vertical-align:middle" />
               美股 <el-tag size="small" style="margin-left:2px">{{ usList.length }}</el-tag>
             </span>
           </template>
