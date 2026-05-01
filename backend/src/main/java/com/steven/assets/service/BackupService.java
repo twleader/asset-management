@@ -3,13 +3,16 @@ package com.steven.assets.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.steven.assets.dto.BackupDto;
+import com.steven.assets.model.BackupRecord;
 import com.steven.assets.model.BackupSetting;
+import com.steven.assets.repository.BackupRecordRepository;
 import com.steven.assets.repository.BackupSettingRepository;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -22,7 +25,6 @@ import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -58,6 +60,7 @@ public class BackupService {
     private final String dbPassword;
     private final MarketDataService marketDataService;
     private final BackupSettingRepository settingRepo;
+    private final BackupRecordRepository recordRepo;
     private final ObjectMapper mapper = new ObjectMapper();
 
     public BackupService(
@@ -67,7 +70,8 @@ public class BackupService {
             @Value("${DB_USERNAME}") String dbUser,
             @Value("${DB_PASSWORD}") String dbPassword,
             MarketDataService marketDataService,
-            BackupSettingRepository settingRepo) {
+            BackupSettingRepository settingRepo,
+            BackupRecordRepository recordRepo) {
         this.dbHost = dbHost;
         this.dbPort = dbPort;
         this.dbName = dbName;
@@ -75,6 +79,7 @@ public class BackupService {
         this.dbPassword = dbPassword;
         this.marketDataService = marketDataService;
         this.settingRepo = settingRepo;
+        this.recordRepo = recordRepo;
     }
 
     /** 取得目前保留代數設定（無資料時回預設值，不寫入）。 */
@@ -84,12 +89,13 @@ public class BackupService {
                 .manualRetention(DEFAULT_MANUAL_RETENTION)
                 .dailyRetention(DEFAULT_DAILY_RETENTION)
                 .weeklyRetention(DEFAULT_WEEKLY_RETENTION)
+                .backupEnabled(Boolean.TRUE)
                 .updatedAt(LocalDateTime.now(DISPLAY_ZONE))
                 .build());
     }
 
-    /** 更新保留代數設定，數值需介於 1～999。 */
-    public BackupSetting updateSetting(Integer manual, Integer daily, Integer weekly) {
+    /** 更新保留代數設定（含啟用開關），數值需介於 1～999。 */
+    public BackupSetting updateSetting(Integer manual, Integer daily, Integer weekly, Boolean backupEnabled) {
         validateRange("manualRetention", manual);
         validateRange("dailyRetention", daily);
         validateRange("weeklyRetention", weekly);
@@ -98,6 +104,7 @@ public class BackupService {
         s.setManualRetention(manual);
         s.setDailyRetention(daily);
         s.setWeeklyRetention(weekly);
+        if (backupEnabled != null) s.setBackupEnabled(backupEnabled);
         s.setUpdatedAt(LocalDateTime.now(DISPLAY_ZONE));
         return settingRepo.save(s);
     }
@@ -132,19 +139,24 @@ public class BackupService {
         }
     }
 
-    /** 手動立即備份。autoPreRestore=true 時使用「自救點」檔名前綴，且不做 5 份輪替。 */
+    /** 手動立即備份。autoPreRestore=true 時使用「自救點」檔名前綴，且不做 5 份輪替；
+     *  也不受 backup_enabled 開關控制（還原前自救必跑）。 */
     public BackupDto.CreateResponse runBackup(boolean autoPreRestore) {
+        if (!autoPreRestore && !Boolean.TRUE.equals(getSetting().getBackupEnabled())) {
+            throw new IllegalStateException("備份功能已停用，請於「保留設定」中開啟「啟用備份」後再試");
+        }
         String prefix = autoPreRestore ? AUTO_PRE_RESTORE_PREFIX : MANUAL_PREFIX;
-        BackupDto.CreateResponse resp = doBackup("manual", prefix);
+        BackupDto.CreateResponse resp = doBackup("manual", prefix, autoPreRestore);
         if (!autoPreRestore) {
             rotateFolder("manual", MANUAL_PREFIX, getSetting().getManualRetention());
         }
         return resp;
     }
 
-    /** 通用備份：dump → 上傳到指定資料夾，不負責輪替。 */
-    private BackupDto.CreateResponse doBackup(String folder, String prefix) {
-        String ts = LocalDateTime.now(DISPLAY_ZONE).format(TS_FMT);
+    /** 通用備份：dump → 上傳到指定資料夾，不負責輪替。成功上傳後寫一筆 backup_record。 */
+    private BackupDto.CreateResponse doBackup(String folder, String prefix, boolean autoPreRestore) {
+        LocalDateTime now = LocalDateTime.now(DISPLAY_ZONE);
+        String ts = now.format(TS_FMT);
         String filename = prefix + ts + ".dump";
         Path dumpFile = Path.of("/tmp", filename);
 
@@ -162,10 +174,20 @@ public class BackupService {
             rcloneCopy(dumpFile, REMOTE_BASE + "/" + folder + "/");
             log.info("Uploaded to {}/{}/", REMOTE_BASE, folder);
 
+            // metadata 入 DB，UI 列表直接讀這裡
+            recordRepo.save(BackupRecord.builder()
+                    .folder(folder)
+                    .filename(filename)
+                    .sizeBytes(size)
+                    .modifiedAt(now)
+                    .autoPreRestore(autoPreRestore)
+                    .createdAt(now)
+                    .build());
+
             return BackupDto.CreateResponse.builder()
                     .filename(filename)
                     .sizeBytes(size)
-                    .uploadedAt(LocalDateTime.now(DISPLAY_ZONE))
+                    .uploadedAt(now)
                     .build();
         } finally {
             try {
@@ -181,13 +203,17 @@ public class BackupService {
     /** 台股交易日 15:30（收盤後 2 小時）→ daily/asset_daily_tw_*.dump */
     @Scheduled(cron = "0 30 15 * * MON-FRI", zone = "Asia/Taipei")
     public void scheduledDailyTwBackup() {
+        if (!Boolean.TRUE.equals(getSetting().getBackupEnabled())) {
+            log.info("Skip TW daily backup: 備份開關已關閉");
+            return;
+        }
         LocalDate today = LocalDate.now(DISPLAY_ZONE);
         if (!marketDataService.isTwTradingDay(today)) {
             log.info("Skip TW daily backup: {} 非台股交易日", today);
             return;
         }
         try {
-            doBackup("daily", DAILY_TW_PREFIX);
+            doBackup("daily", DAILY_TW_PREFIX, false);
             rotateFolder("daily", "asset_daily_", getSetting().getDailyRetention());
         } catch (RuntimeException e) {
             log.error("台股每日備份失敗: {}", e.getMessage(), e);
@@ -197,13 +223,17 @@ public class BackupService {
     /** 美股收盤後 2 小時，台北時間隔日 07:00 → daily/asset_daily_us_*.dump */
     @Scheduled(cron = "0 0 7 * * TUE-SAT", zone = "Asia/Taipei")
     public void scheduledDailyUsBackup() {
+        if (!Boolean.TRUE.equals(getSetting().getBackupEnabled())) {
+            log.info("Skip US daily backup: 備份開關已關閉");
+            return;
+        }
         LocalDate prevUsDay = LocalDate.now(DISPLAY_ZONE).minusDays(1);
         if (!marketDataService.isUsTradingDay(prevUsDay)) {
             log.info("Skip US daily backup: {} 非美股交易日", prevUsDay);
             return;
         }
         try {
-            doBackup("daily", DAILY_US_PREFIX);
+            doBackup("daily", DAILY_US_PREFIX, false);
             rotateFolder("daily", "asset_daily_", getSetting().getDailyRetention());
         } catch (RuntimeException e) {
             log.error("美股每日備份失敗: {}", e.getMessage(), e);
@@ -213,59 +243,106 @@ public class BackupService {
     /** 每周日 05:00 → weekly/asset_weekly_*.dump */
     @Scheduled(cron = "0 0 5 * * SUN", zone = "Asia/Taipei")
     public void scheduledWeeklyBackup() {
+        if (!Boolean.TRUE.equals(getSetting().getBackupEnabled())) {
+            log.info("Skip weekly backup: 備份開關已關閉");
+            return;
+        }
         try {
-            doBackup("weekly", WEEKLY_PREFIX);
+            doBackup("weekly", WEEKLY_PREFIX, false);
             rotateFolder("weekly", WEEKLY_PREFIX, getSetting().getWeeklyRetention());
         } catch (RuntimeException e) {
             log.error("每周備份失敗: {}", e.getMessage(), e);
         }
     }
 
-    /** 列出 manual/daily/weekly/monthly 所有備份，依 modifiedAt 由新→舊排序。 */
+    /** 列出所有備份：直接從 DB 讀，無需連 rclone。 */
     public List<BackupDto.BackupItem> listBackups() {
-        // 4 個資料夾並行查詢，縮短整體等待時間
-        List<CompletableFuture<List<BackupDto.BackupItem>>> futures = FOLDERS.stream()
-                .map(folder -> CompletableFuture.supplyAsync(() -> listFolder(folder)))
+        return recordRepo.findAllByOrderByModifiedAtDesc().stream()
+                .map(r -> BackupDto.BackupItem.builder()
+                        .folder(r.getFolder())
+                        .filename(r.getFilename())
+                        .sizeBytes(r.getSizeBytes())
+                        .modifiedAt(r.getModifiedAt())
+                        .autoPreRestore(Boolean.TRUE.equals(r.getAutoPreRestore()))
+                        .build())
                 .toList();
-
-        List<BackupDto.BackupItem> items = new ArrayList<>();
-        for (CompletableFuture<List<BackupDto.BackupItem>> f : futures) {
-            try {
-                items.addAll(f.get());
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new RuntimeException("列出備份被中斷", e);
-            } catch (ExecutionException e) {
-                Throwable cause = e.getCause() != null ? e.getCause() : e;
-                throw new RuntimeException("列出備份失敗：" + cause.getMessage(), cause);
-            }
-        }
-        items.sort(Comparator.comparing(BackupDto.BackupItem::getModifiedAt).reversed());
-        return items;
     }
 
-    private List<BackupDto.BackupItem> listFolder(String folder) {
-        List<BackupDto.BackupItem> result = new ArrayList<>();
-        String json = rcloneLsJson(REMOTE_BASE + "/" + folder + "/");
-        if (json == null || json.isBlank()) return result;
-        try {
-            JsonNode arr = mapper.readTree(json);
-            for (JsonNode node : arr) {
-                if (node.path("IsDir").asBoolean(false)) continue;
-                String name = node.path("Name").asText();
-                if (!name.endsWith(".dump")) continue;
-                result.add(BackupDto.BackupItem.builder()
-                        .folder(folder)
-                        .filename(name)
-                        .sizeBytes(node.path("Size").asLong(0))
-                        .modifiedAt(parseRcloneTime(node.path("ModTime").asText()))
-                        .autoPreRestore(name.startsWith(AUTO_PRE_RESTORE_PREFIX))
-                        .build());
+    /**
+     * 從 Google Drive 列出實際檔案，與 backup_record 對齊：
+     *  - rclone 有但 DB 沒 → INSERT
+     *  - DB 有但 rclone 沒 → DELETE
+     * 用於首次部署或外部直接刪檔後手動對齊。
+     */
+    @Transactional
+    public BackupDto.SyncResponse syncFromRemote() {
+        // 1. 先抓 rclone 上所有檔案
+        record Remote(String folder, String filename, long size, LocalDateTime modifiedAt) {}
+        List<Remote> remoteFiles = new ArrayList<>();
+        List<CompletableFuture<List<Remote>>> futures = FOLDERS.stream()
+                .map(folder -> CompletableFuture.supplyAsync(() -> {
+                    List<Remote> out = new ArrayList<>();
+                    String json = rcloneLsJson(REMOTE_BASE + "/" + folder + "/");
+                    if (json == null || json.isBlank()) return out;
+                    try {
+                        JsonNode arr = mapper.readTree(json);
+                        for (JsonNode node : arr) {
+                            if (node.path("IsDir").asBoolean(false)) continue;
+                            String name = node.path("Name").asText();
+                            if (!name.endsWith(".dump")) continue;
+                            out.add(new Remote(folder, name,
+                                    node.path("Size").asLong(0),
+                                    parseRcloneTime(node.path("ModTime").asText())));
+                        }
+                    } catch (IOException e) {
+                        throw new RuntimeException("解析 rclone lsjson 失敗 (" + folder + "): " + e.getMessage(), e);
+                    }
+                    return out;
+                }))
+                .toList();
+        for (CompletableFuture<List<Remote>> f : futures) {
+            try { remoteFiles.addAll(f.get()); }
+            catch (InterruptedException e) { Thread.currentThread().interrupt();
+                throw new RuntimeException("同步被中斷", e); }
+            catch (ExecutionException e) {
+                Throwable c = e.getCause() != null ? e.getCause() : e;
+                throw new RuntimeException("同步失敗：" + c.getMessage(), c);
             }
-        } catch (IOException e) {
-            throw new RuntimeException("解析 rclone lsjson 失敗 (" + folder + "): " + e.getMessage(), e);
         }
-        return result;
+
+        // 2. upsert insert-missing
+        int inserted = 0;
+        java.util.Set<String> remoteKeys = new java.util.HashSet<>();
+        LocalDateTime now = LocalDateTime.now(DISPLAY_ZONE);
+        for (Remote r : remoteFiles) {
+            remoteKeys.add(r.folder() + "/" + r.filename());
+            boolean exists = recordRepo.findByFolderAndFilename(r.folder(), r.filename()).isPresent();
+            if (!exists) {
+                recordRepo.save(BackupRecord.builder()
+                        .folder(r.folder())
+                        .filename(r.filename())
+                        .sizeBytes(r.size())
+                        .modifiedAt(r.modifiedAt())
+                        .autoPreRestore(r.filename().startsWith(AUTO_PRE_RESTORE_PREFIX))
+                        .createdAt(now)
+                        .build());
+                inserted++;
+            }
+        }
+        // 3. 清孤兒（DB 有但 rclone 已不存在）
+        int deleted = 0;
+        for (BackupRecord row : recordRepo.findAll()) {
+            if (!remoteKeys.contains(row.getFolder() + "/" + row.getFilename())) {
+                recordRepo.delete(row);
+                deleted++;
+            }
+        }
+        log.info("Backup sync done: inserted={}, deleted={}", inserted, deleted);
+        return BackupDto.SyncResponse.builder()
+                .inserted(inserted)
+                .deleted(deleted)
+                .total(remoteFiles.size())
+                .build();
     }
 
     /** 還原：先建自救點 → rclone copy → pg_restore --clean。 */
@@ -443,6 +520,7 @@ public class BackupService {
             String name = files.get(i).getKey();
             log.info("Rotate: deleting old backup {}/{}", folder, name);
             rcloneDelete(REMOTE_BASE + "/" + folder + "/" + name);
+            recordRepo.findByFolderAndFilename(folder, name).ifPresent(recordRepo::delete);
         }
     }
 

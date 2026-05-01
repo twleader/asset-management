@@ -164,10 +164,11 @@ export const bffApi = {
 
   // BackupRestore
   backupRestore: {
-    list:           () => api.get('/bff/backup-restore', { timeout: 60000 }),
+    list:           () => api.get('/bff/backup-restore'),
     create:         () => api.post('/bff/backup-restore', null, { timeout: 120000 }),
     restore:        ({ folder, filename, confirmation }) =>
       api.post('/bff/backup-restore/restore', { folder, filename, confirmation }, { timeout: 180000 }),
+    sync:           () => api.post('/bff/backup-restore/sync', null, { timeout: 60000 }),
     getSettings:    () => api.get('/bff/backup-restore/settings'),
     updateSettings: (data) => api.put('/bff/backup-restore/settings', data)
   },

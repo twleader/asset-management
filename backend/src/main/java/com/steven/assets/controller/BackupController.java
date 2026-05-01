@@ -43,7 +43,7 @@ public class BackupController {
         return service.runRestore(req.getFolder(), req.getFilename());
     }
 
-    /** 取得保留代數設定。 */
+    /** 取得保留代數設定（含啟用開關）。 */
     @GetMapping("/settings")
     public BackupDto.SettingResponse getSettings() {
         BackupSetting s = service.getSetting();
@@ -51,18 +51,27 @@ public class BackupController {
                 .manualRetention(s.getManualRetention())
                 .dailyRetention(s.getDailyRetention())
                 .weeklyRetention(s.getWeeklyRetention())
+                .backupEnabled(s.getBackupEnabled())
                 .build();
     }
 
-    /** 更新保留代數設定。 */
+    /** 更新保留代數設定（含啟用開關）。 */
     @PutMapping("/settings")
     public BackupDto.SettingResponse updateSettings(@RequestBody BackupDto.SettingRequest req) {
         BackupSetting s = service.updateSetting(
-                req.getManualRetention(), req.getDailyRetention(), req.getWeeklyRetention());
+                req.getManualRetention(), req.getDailyRetention(),
+                req.getWeeklyRetention(), req.getBackupEnabled());
         return BackupDto.SettingResponse.builder()
                 .manualRetention(s.getManualRetention())
                 .dailyRetention(s.getDailyRetention())
                 .weeklyRetention(s.getWeeklyRetention())
+                .backupEnabled(s.getBackupEnabled())
                 .build();
+    }
+
+    /** 從 Google Drive 同步：upsert 缺漏 / 清孤兒。 */
+    @PostMapping("/sync")
+    public BackupDto.SyncResponse sync() {
+        return service.syncFromRemote();
     }
 }

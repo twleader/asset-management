@@ -11,11 +11,17 @@
       </template>
       <p class="hint">
         手動觸發一次 PostgreSQL 備份，加密上傳到 Google Drive 的
-        <code>backups/manual/</code>。手動備份僅保留最近 5 份（自救點不計入）。
+        <code>backups/manual/</code>。手動備份僅保留最近 {{ settings.manualRetention }} 份（自救點不計入）。
       </p>
-      <el-button type="primary" :icon="Upload" :loading="backing" @click="doBackup">
+      <el-button type="primary" :icon="Upload"
+                 :loading="backing"
+                 :disabled="!settings.backupEnabled"
+                 @click="doBackup">
         立即備份
       </el-button>
+      <span v-if="!settings.backupEnabled" style="margin-left:12px;color:#94a3b8;font-size:13px">
+        備份開關已關閉
+      </span>
       <div v-if="lastBackup" class="last-backup">
         最近一次手動備份：<b>{{ lastBackup.filename }}</b>
         （{{ formatBytes(lastBackup.sizeBytes) }}，{{ formatTime(lastBackup.uploadedAt) }}）
@@ -31,6 +37,10 @@
         各類備份保留的代數（份數）。超過設定上限時，每次備份完成後會自動刪除最舊的檔案。範圍 1～999。
       </p>
       <el-form :model="settings" inline label-width="120px" class="settings-form">
+        <el-form-item label="啟用備份">
+          <el-switch v-model="settings.backupEnabled"
+                     active-text="開啟" inactive-text="關閉" inline-prompt />
+        </el-form-item>
         <el-form-item label="人工備份">
           <el-input-number v-model="settings.manualRetention" :min="1" :max="999" controls-position="right" />
         </el-form-item>
@@ -44,6 +54,9 @@
           <el-button type="primary" :loading="savingSettings" @click="saveSettings">儲存設定</el-button>
         </el-form-item>
       </el-form>
+      <p class="hint" style="margin-top:8px;margin-bottom:0;color:#94a3b8;font-size:12px">
+        關閉「啟用備份」後，所有自動排程與手動備份都會 skip；還原前的「自救點」備份不受影響。
+      </p>
     </el-card>
 
     <!-- 還原資料 -->
@@ -54,10 +67,16 @@
           <el-button size="small" :icon="Refresh" @click="loadList" style="margin-left: 12px">
             重新整理
           </el-button>
+          <el-button size="small" :icon="Connection"
+                     :loading="syncing" @click="doSync" style="margin-left: 8px">
+            從 Google Drive 同步
+          </el-button>
         </div>
       </template>
       <p class="hint">
-        從 Google Drive 列出所有備份（依時間新→舊）。執行還原會
+        備份紀錄存於本地資料庫，列表開啟即時顯示，<b>不會每次都連 Google Drive</b>。
+        若 Google Drive 上的檔案有外部變動（手動刪檔、其他設備同步），按
+        <b>「從 Google Drive 同步」</b>對齊。執行還原會
         <b style="color: #ef4444">覆蓋目前資料庫</b>，
         系統會在還原前自動建立一份「自救點」備份。
       </p>
@@ -128,7 +147,7 @@
 </template>
 
 <script setup>
-import { Upload, Refresh } from '@element-plus/icons-vue'
+import { Upload, Refresh, Connection } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
 import { bffApi } from '@/api'
@@ -147,7 +166,10 @@ const confirmText = ref('')
 
 const loadingSettings = ref(false)
 const savingSettings = ref(false)
-const settings = reactive({ manualRetention: 5, dailyRetention: 50, weeklyRetention: 5 })
+const syncing = ref(false)
+const settings = reactive({
+  manualRetention: 5, dailyRetention: 50, weeklyRetention: 5, backupEnabled: true
+})
 
 async function loadSettings() {
   loadingSettings.value = true
@@ -156,6 +178,7 @@ async function loadSettings() {
     settings.manualRetention = s.manualRetention
     settings.dailyRetention  = s.dailyRetention
     settings.weeklyRetention = s.weeklyRetention
+    settings.backupEnabled   = s.backupEnabled !== false
   } finally {
     loadingSettings.value = false
   }
@@ -167,14 +190,27 @@ async function saveSettings() {
     const s = await bffApi.backupRestore.updateSettings({
       manualRetention: settings.manualRetention,
       dailyRetention:  settings.dailyRetention,
-      weeklyRetention: settings.weeklyRetention
+      weeklyRetention: settings.weeklyRetention,
+      backupEnabled:   settings.backupEnabled
     })
     settings.manualRetention = s.manualRetention
     settings.dailyRetention  = s.dailyRetention
     settings.weeklyRetention = s.weeklyRetention
+    settings.backupEnabled   = s.backupEnabled !== false
     ElMessage.success('保留設定已更新')
   } finally {
     savingSettings.value = false
+  }
+}
+
+async function doSync() {
+  syncing.value = true
+  try {
+    const res = await bffApi.backupRestore.sync()
+    ElMessage.success(`同步完成：新增 ${res.inserted}、刪除孤兒 ${res.deleted}、Google Drive 共 ${res.total} 份`)
+    await loadList()
+  } finally {
+    syncing.value = false
   }
 }
 
