@@ -58,7 +58,7 @@
               <span class="tl-dot" :style="{ background: item.color }"></span>
               <div class="tl-text">
                 <div class="tl-name">{{ item.name }}</div>
-                <div class="tl-amount">{{ formatCurrency(item.value) }}</div>
+                <div class="tl-amount" :style="{ color: item.color }">{{ formatCurrency(item.value) }}</div>
                 <div class="tl-pct" :style="{ color: item.color }">{{ item.pct }}</div>
               </div>
             </div>
@@ -1087,14 +1087,14 @@ function onBarDblClick(params) {
 .kpi-flex { display: flex; gap: 20px; flex-wrap: nowrap; }
 .kpi-flex-item { flex: 1 1 0; min-width: 0; }
 
-/* 資產歷史趨勢自訂 legend：3 個項目均分、有金額與佔比 */
-.trend-legend { display: flex; justify-content: space-around; padding: 8px 24px 12px; gap: 24px; }
-.trend-legend-item { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
-.tl-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
-.tl-text { display: flex; flex-direction: column; line-height: 1.3; min-width: 0; }
+/* 資產歷史趨勢自訂 legend：3 個項目集中置上方中央，項目間留固定間距避免數字相疊 */
+.trend-legend { display: flex; justify-content: center; padding: 6px 16px 10px; gap: 36px; flex-wrap: wrap; }
+.trend-legend-item { display: flex; align-items: center; gap: 8px; }
+.tl-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.tl-text { display: flex; flex-direction: column; line-height: 1.25; }
 .tl-name   { font-size: 12px; color: #64748b; }
-.tl-amount { font-size: 16px; font-weight: 700; color: #1e293b; font-variant-numeric: tabular-nums; }
-.tl-pct    { font-size: 12px; font-weight: 600; }
+.tl-amount { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tl-pct    { font-size: 11px; font-weight: 600; }
 
 .kpi-card :deep(.el-card__body) {
   display: flex; align-items: center; gap: 16px; padding: 20px;
