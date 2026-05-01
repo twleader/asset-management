@@ -146,6 +146,8 @@ public class AssetSnapshotDto {
             Long id,
             LocalDate snapshotDate,
             BigDecimal totalDeposit,
+            BigDecimal totalTwdDeposit,
+            BigDecimal totalUsdDeposit,
             BigDecimal totalFundValue,
             BigDecimal totalTwStockValue,
             BigDecimal totalUsStockValue,
