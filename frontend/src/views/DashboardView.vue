@@ -18,22 +18,20 @@
     </div>
 
     <!-- KPI Cards -->
-    <el-row :gutter="20" class="kpi-row">
-      <el-col :span="6" v-for="kpi in kpiCards" :key="kpi.label">
-        <el-card class="kpi-card">
-          <div class="kpi-icon" :style="{ background: kpi.bg }">
-            <img v-if="kpi.img" :src="kpi.img" style="width:30px;height:30px;object-fit:contain" />
-            <span v-else-if="kpi.emoji" style="font-size:26px;line-height:1">{{ kpi.emoji }}</span>
-            <el-icon v-else size="22" :color="kpi.color"><component :is="kpi.icon" /></el-icon>
-          </div>
-          <div class="kpi-content">
-            <div class="kpi-label">{{ kpi.label }}</div>
-            <div class="kpi-value" :style="{ color: kpi.valueColor }">{{ kpi.value }}</div>
-            <div class="kpi-sub" v-if="kpi.sub">{{ kpi.sub }}</div>
-          </div>
-        </el-card>
-      </el-col>
-    </el-row>
+    <div class="kpi-row kpi-flex">
+      <el-card v-for="kpi in kpiCards" :key="kpi.label" class="kpi-card kpi-flex-item">
+        <div class="kpi-icon" :style="{ background: kpi.bg }">
+          <img v-if="kpi.img" :src="kpi.img" style="width:30px;height:30px;object-fit:contain" />
+          <span v-else-if="kpi.emoji" style="font-size:26px;line-height:1">{{ kpi.emoji }}</span>
+          <el-icon v-else size="22" :color="kpi.color"><component :is="kpi.icon" /></el-icon>
+        </div>
+        <div class="kpi-content">
+          <div class="kpi-label">{{ kpi.label }}</div>
+          <div class="kpi-value" :style="{ color: kpi.valueColor }">{{ kpi.value }}</div>
+          <div class="kpi-sub" v-if="kpi.sub" :style="kpi.subColor ? { color: kpi.subColor } : null">{{ kpi.sub }}</div>
+        </div>
+      </el-card>
+    </div>
 
     <!-- Charts Row -->
     <el-row :gutter="20" class="chart-row">
@@ -149,14 +147,18 @@
     </el-row>
 
     <!-- Third Charts Row -->
-    <el-row v-if="fundFilteredHoldings.length" :gutter="20" class="chart-row">
+    <el-row :gutter="20" class="chart-row">
       <el-col :span="24">
         <el-card>
           <template #header>
             <span class="card-title">信託基金（現值）</span>
             <span class="card-sub">{{ latest?.snapshotDate }}</span>
           </template>
-          <v-chart :option="fundBarOption" style="height: 280px" autoresize />
+          <div v-if="!fundFilteredHoldings.length"
+               style="height:280px;display:flex;align-items:center;justify-content:center;color:#94a3b8">
+            尚無基金資料
+          </div>
+          <v-chart v-else :option="fundBarOption" style="height: 280px" autoresize />
           <div class="chart-summary-bar">
             <div class="csb-item">
               <span class="csb-label">總值</span>
@@ -524,6 +526,17 @@ const kpiCards = computed(() => {
       label: '存款總計', emoji: '📒',
       value: formatCurrency(s.totalDeposit), bg: '#f0fdf4', color: '#16a34a',
       sub: `佔比 ${total > 0 ? (Number(s.totalDeposit) / total * 100).toFixed(1) : 0}%`,
+      valueColor: '#1e293b'
+    },
+    {
+      label: '信託基金', emoji: '📊',
+      value: formatCurrency(s.totalFundValue), bg: '#ecfdf5', color: '#10b981',
+      sub: (() => {
+        const cost = Number(s.totalFundCost || 0)
+        const profit = Number(s.totalFundValue || 0) - cost
+        return `損益 ${formatCurrency(profit)}`
+      })(),
+      subColor: (Number(s.totalFundValue || 0) - Number(s.totalFundCost || 0)) >= 0 ? '#16a34a' : '#dc2626',
       valueColor: '#1e293b'
     },
     {
@@ -1010,6 +1023,8 @@ function onBarDblClick(params) {
 }
 .dashboard-title { font-size: 18px; font-weight: 700; color: #1e293b; margin: 0; }
 .kpi-row, .chart-row { margin: 0 !important; }
+.kpi-flex { display: flex; gap: 20px; flex-wrap: nowrap; }
+.kpi-flex-item { flex: 1 1 0; min-width: 0; }
 
 .kpi-card :deep(.el-card__body) {
   display: flex; align-items: center; gap: 16px; padding: 20px;
