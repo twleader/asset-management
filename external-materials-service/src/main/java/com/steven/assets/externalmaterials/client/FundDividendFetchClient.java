@@ -65,11 +65,17 @@ public class FundDividendFetchClient {
                     ? "/api/offshore/fund-info/info-dividend/query"
                     : "/api/onshore/fund-info/info-dividend/query-dividend");
 
+            // offshore 接受 baseBeginDate / baseEndDate（YYYY/MM）合併欄位；
+            // onshore 嚴格要求 startYear / startMonth / endYear / endMonth 四個分開欄位 → 同時都帶以兼容。
             String body = String.format(
                     "{\"queryType\":\"1\",\"searchName\":\"\",\"organizeCode\":\"%s\","
                   + "\"fundCode\":\"%s\",\"fundClassCode\":\"%s\",\"asiFreqList\":[],"
-                  + "\"baseBeginDate\":\"%s\",\"baseEndDate\":\"%s\",\"_pageNum\":1,\"_pageSize\":50}",
-                    fcOrg, fcFund, fcClass, beginYM, endYM);
+                  + "\"baseBeginDate\":\"%s\",\"baseEndDate\":\"%s\","
+                  + "\"startYear\":\"%d\",\"startMonth\":\"%02d\",\"endYear\":\"%d\",\"endMonth\":\"%02d\","
+                  + "\"_pageNum\":1,\"_pageSize\":50}",
+                    fcOrg, fcFund, fcClass, beginYM, endYM,
+                    from.getYear(), from.getMonthValue(),
+                    today.getYear(), today.getMonthValue());
 
             HttpRequest req = HttpRequest.newBuilder()
                     .uri(URI.create(url))
@@ -89,7 +95,14 @@ public class FundDividendFetchClient {
             }
             JsonNode root = mapper.readTree(resp.body());
             if (root.has("message") && !root.has("list")) {
-                log.warn("FundClear dividend {} message: {}", site, root.path("message").asText());
+                String msg = root.path("message").asText();
+                // 「無符合您搜尋條件」= 該基金（多半是累積型）無配息紀錄，正常情況
+                if (msg.contains("無符合")) {
+                    log.info("FundClear dividend {} 無配息紀錄（可能為累積型基金）: org={} fund={} class={}",
+                            site, fcOrg, fcFund, fcClass);
+                    return List.of();
+                }
+                log.warn("FundClear dividend {} message: {}", site, msg);
                 return List.of();
             }
 
