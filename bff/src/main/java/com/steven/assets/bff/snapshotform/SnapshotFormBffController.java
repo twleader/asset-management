@@ -167,12 +167,13 @@ public class SnapshotFormBffController {
      */
     @GetMapping("/funds")
     public Mono<ResponseEntity<List<Map<String, Object>>>> listFunds() {
+        // 回傳所有基金（含 inactive），前端 dropdown 對 inactive 顯示「(已停售)」並 disabled，
+        // 確保歷史 snapshot 已選的 inactive 基金能正確顯示 label，不會只顯示 raw fundCode。
         return businessServicesClient.get()
                 .uri("/api/funds")
                 .retrieve()
                 .bodyToMono(LIST_MAP)
                 .onErrorReturn(Collections.emptyList())
-                .map(this::filterActive)
                 .map(ResponseEntity::ok);
     }
 
