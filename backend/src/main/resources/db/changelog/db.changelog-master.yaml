@@ -92,3 +92,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/v1.19.0-fund-master-and-nav.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.20.0-fund-dividend-history.sql
+      relativeToChangelogFile: false

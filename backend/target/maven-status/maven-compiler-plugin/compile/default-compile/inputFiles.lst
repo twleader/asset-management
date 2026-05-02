@@ -26,6 +26,7 @@
 /Users/steven/Project/asset-management/.claude/worktrees/upbeat-snyder-7cb5fd/backend/src/main/java/com/steven/assets/model/BrokerEntity.java
 /Users/steven/Project/asset-management/.claude/worktrees/upbeat-snyder-7cb5fd/backend/src/main/java/com/steven/assets/model/DepositTypeEntity.java
 /Users/steven/Project/asset-management/.claude/worktrees/upbeat-snyder-7cb5fd/backend/src/main/java/com/steven/assets/model/ExchangeRateHistory.java
+/Users/steven/Project/asset-management/.claude/worktrees/upbeat-snyder-7cb5fd/backend/src/main/java/com/steven/assets/model/FundDividendHistory.java
 /Users/steven/Project/asset-management/.claude/worktrees/upbeat-snyder-7cb5fd/backend/src/main/java/com/steven/assets/model/FundHolding.java
 /Users/steven/Project/asset-management/.claude/worktrees/upbeat-snyder-7cb5fd/backend/src/main/java/com/steven/assets/model/FundMaster.java
 /Users/steven/Project/asset-management/.claude/worktrees/upbeat-snyder-7cb5fd/backend/src/main/java/com/steven/assets/model/FundNav.java
@@ -51,6 +52,7 @@
 /Users/steven/Project/asset-management/.claude/worktrees/upbeat-snyder-7cb5fd/backend/src/main/java/com/steven/assets/repository/BrokerRepository.java
 /Users/steven/Project/asset-management/.claude/worktrees/upbeat-snyder-7cb5fd/backend/src/main/java/com/steven/assets/repository/DepositTypeRepository.java
 /Users/steven/Project/asset-management/.claude/worktrees/upbeat-snyder-7cb5fd/backend/src/main/java/com/steven/assets/repository/ExchangeRateHistoryRepository.java
+/Users/steven/Project/asset-management/.claude/worktrees/upbeat-snyder-7cb5fd/backend/src/main/java/com/steven/assets/repository/FundDividendHistoryRepository.java
 /Users/steven/Project/asset-management/.claude/worktrees/upbeat-snyder-7cb5fd/backend/src/main/java/com/steven/assets/repository/FundHoldingRepository.java
 /Users/steven/Project/asset-management/.claude/worktrees/upbeat-snyder-7cb5fd/backend/src/main/java/com/steven/assets/repository/FundMasterRepository.java
 /Users/steven/Project/asset-management/.claude/worktrees/upbeat-snyder-7cb5fd/backend/src/main/java/com/steven/assets/repository/FundNavRepository.java
@@ -72,6 +74,7 @@
 /Users/steven/Project/asset-management/.claude/worktrees/upbeat-snyder-7cb5fd/backend/src/main/java/com/steven/assets/service/DividendHistoryService.java
 /Users/steven/Project/asset-management/.claude/worktrees/upbeat-snyder-7cb5fd/backend/src/main/java/com/steven/assets/service/ExcelExportService.java
 /Users/steven/Project/asset-management/.claude/worktrees/upbeat-snyder-7cb5fd/backend/src/main/java/com/steven/assets/service/ExcelImportService.java
+/Users/steven/Project/asset-management/.claude/worktrees/upbeat-snyder-7cb5fd/backend/src/main/java/com/steven/assets/service/FundDividendService.java
 /Users/steven/Project/asset-management/.claude/worktrees/upbeat-snyder-7cb5fd/backend/src/main/java/com/steven/assets/service/FundNavService.java
 /Users/steven/Project/asset-management/.claude/worktrees/upbeat-snyder-7cb5fd/backend/src/main/java/com/steven/assets/service/HistoricalDataService.java
 /Users/steven/Project/asset-management/.claude/worktrees/upbeat-snyder-7cb5fd/backend/src/main/java/com/steven/assets/service/InstitutionService.java

@@ -140,7 +140,7 @@ public class ExcelImportService {
                 if (invest != null && invest.compareTo(BigDecimal.ZERO) > 0 && value != null) {
                     Long bankId = institutionService.matchBankByKeyword(currentBank)
                             .map(b -> b.getId()).orElse(null);
-                    funds.add(new AssetSnapshotDto.FundRequest(fundName, null, bankId, invest, value, null));
+                    funds.add(new AssetSnapshotDto.FundRequest(fundName, null, bankId, invest, value, null, null));
                 }
             }
 

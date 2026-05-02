@@ -2,6 +2,7 @@ com/steven/assets/config/DataInitializer$1DepositTypeSeed.class
 com/steven/assets/dto/BackupDto$BackupItem.class
 com/steven/assets/dto/StockAlertDto.class
 com/steven/assets/service/WatchStockService.class
+com/steven/assets/service/FundDividendService$AnnualDividendEstimate.class
 com/steven/assets/model/WatchStock$WatchStockBuilder.class
 com/steven/assets/repository/TransitFundTypeRepository.class
 com/steven/assets/service/MarketDataService$PriceResult.class
@@ -64,6 +65,7 @@ com/steven/assets/dto/RealizedGainDto$YearSummaryResponse.class
 com/steven/assets/model/TaiwanGdpPerCapitaHistory.class
 com/steven/assets/service/MarketDataService$DividendRow.class
 com/steven/assets/dto/InstitutionDto$MarketTypeResponse.class
+com/steven/assets/repository/FundDividendHistoryRepository.class
 com/steven/assets/service/AssetService.class
 com/steven/assets/dto/AssetSnapshotDto.class
 com/steven/assets/repository/StockPriceHistoryRepository.class
@@ -84,6 +86,7 @@ com/steven/assets/model/BrokerEntity.class
 com/steven/assets/repository/AssetSnapshotRepository.class
 com/steven/assets/dto/WatchStockDto$Request.class
 com/steven/assets/dto/BackupDto$CreateResponse.class
+com/steven/assets/service/FundDividendService.class
 com/steven/assets/dto/InstitutionDto$UpdateTransitFundTypeRequest.class
 com/steven/assets/dto/InstitutionDto$TransitFundTypeResponse.class
 com/steven/assets/dto/AssetSnapshotDto$StockRequest.class
@@ -134,8 +137,10 @@ com/steven/assets/model/FundMaster$FundMasterBuilder.class
 com/steven/assets/model/StockAlert$StockAlertBuilder.class
 com/steven/assets/repository/BankRepository.class
 com/steven/assets/service/MarketDataService$DividendHistoryResult.class
+com/steven/assets/model/FundDividendHistory.class
 com/steven/assets/dto/InstitutionDto$UpdateDepositTypeRequest.class
 com/steven/assets/service/StockPriceService$LiveStockItem.class
+com/steven/assets/model/FundDividendHistory$FundDividendHistoryBuilder.class
 com/steven/assets/dto/StockAlertDto$Request.class
 com/steven/assets/model/Stock$StockBuilder.class
 com/steven/assets/repository/TaiwanGdpPerCapitaHistoryRepository.class

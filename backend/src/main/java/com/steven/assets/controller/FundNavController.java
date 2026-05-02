@@ -41,15 +41,18 @@ public class FundNavController {
     private final FundMasterRepository fundMasterRepo;
     private final BankRepository bankRepo;
     private final FundNavService fundNavService;
+    private final com.steven.assets.service.FundDividendService fundDividendService;
     private final WebClient externalClient;
 
     public FundNavController(FundMasterRepository fundMasterRepo,
                              BankRepository bankRepo,
                              FundNavService fundNavService,
+                             com.steven.assets.service.FundDividendService fundDividendService,
                              @Value("${external-materials.base-url:http://external-materials-service:8080}") String externalUrl) {
         this.fundMasterRepo = fundMasterRepo;
         this.bankRepo = bankRepo;
         this.fundNavService = fundNavService;
+        this.fundDividendService = fundDividendService;
         this.externalClient = WebClient.builder().baseUrl(externalUrl).build();
     }
 
@@ -130,6 +133,29 @@ public class FundNavController {
         }
     }
 
+    /**
+     * 同步全抓信託基金配息歷史 (Requirement 20)。
+     */
+    @PostMapping(value = "/fund-dividend/refresh", produces = MediaType.APPLICATION_JSON_VALUE)
+    public Map<String, Object> refreshDividend() {
+        try {
+            JsonNode resp = externalClient.post()
+                    .uri("/internal/fund-dividend/refresh")
+                    .retrieve()
+                    .bodyToMono(JsonNode.class)
+                    .block();
+            if (resp == null) return Map.of("success", 0, "failed", 0, "total", 0, "written", 0);
+            return Map.of(
+                    "success", resp.path("success").asInt(0),
+                    "failed", resp.path("failed").asInt(0),
+                    "total", resp.path("total").asInt(0),
+                    "written", resp.path("written").asInt(0));
+        } catch (Exception e) {
+            log.warn("呼叫 external-materials-service /internal/fund-dividend/refresh 失敗: {}", e.toString());
+            return Map.of("error", e.toString());
+        }
+    }
+
     @GetMapping("/fund-nav/latest")
     public Map<String, Object> latestNav(@RequestParam String fundCode) {
         return fundNavService.getLatestNavTwd(fundCode)
@@ -161,7 +187,9 @@ public class FundNavController {
             LocalDate latestNavDate,
             BigDecimal latestFxRate,
             LocalDate latestFxDate,
-            BigDecimal twdPerUnit
+            BigDecimal twdPerUnit,
+            BigDecimal annualDividendPerUnitTwd,  // Requirement 20：近 12 個月加總 × FX
+            Integer dividendMonthsCounted          // 統計用，前端可顯示「近 N 個月」
     ) {}
 
     public record CreateFundRequest(
@@ -188,6 +216,7 @@ public class FundNavController {
 
     private FundDto toDto(FundMaster m) {
         var latest = fundNavService.getLatestNavTwd(m.getFundCode()).orElse(null);
+        var div = fundDividendService.getAnnualEstimateTwd(m.getFundCode()).orElse(null);
         return new FundDto(
                 m.getFundCode(),
                 m.getFundName(),
@@ -203,7 +232,9 @@ public class FundNavController {
                 latest != null ? latest.navDate() : null,
                 latest != null ? latest.fxRate() : null,
                 latest != null ? latest.fxDate() : null,
-                latest != null ? latest.twdPerUnit() : null
+                latest != null ? latest.twdPerUnit() : null,
+                div != null ? div.annualPerUnitTwd() : null,
+                div != null ? div.monthsCounted() : null
         );
     }
 }

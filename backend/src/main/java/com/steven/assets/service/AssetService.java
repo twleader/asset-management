@@ -34,6 +34,7 @@ public class AssetService {
     private final StockRepository stockMasterRepo;
     private final TransitFundTypeRepository transitFundTypeRepo;
     private final FundNavService fundNavService;
+    private final FundDividendService fundDividendService;
 
     /**
      * 算 FundHolding currentValue：若 units 非空 → 嘗試 NAV × FX 自動算（Requirement 19），
@@ -42,6 +43,15 @@ public class AssetService {
     private BigDecimal resolveFundCurrentValue(String fundCode, BigDecimal units, BigDecimal manualCurrentValue) {
         if (units == null || fundCode == null || fundCode.isBlank()) return manualCurrentValue;
         return fundNavService.computeCurrentValueTwd(fundCode, units).orElse(manualCurrentValue);
+    }
+
+    /**
+     * 算 FundHolding estimatedDividend (Requirement 20)：units 非空 + 配息歷史齊全才覆寫，
+     * 否則保留前端送進來的值（向後相容 / 手動覆寫）。
+     */
+    private BigDecimal resolveFundEstimatedDividend(String fundCode, BigDecimal units, BigDecimal manualValue) {
+        if (units == null || fundCode == null || fundCode.isBlank()) return manualValue;
+        return fundDividendService.computeAnnualDividendTwd(fundCode, units).orElse(manualValue);
     }
 
     // ===================== Snapshot =====================
@@ -129,6 +139,7 @@ public class AssetService {
             req.funds().forEach(f -> {
                 Bank bank = f.bankId() != null ? bankRepo.findById(f.bankId()).orElse(null) : null;
                 BigDecimal cv = resolveFundCurrentValue(f.fundCode(), f.units(), f.currentValue());
+                BigDecimal divEst = resolveFundEstimatedDividend(f.fundCode(), f.units(), f.estimatedDividend());
                 FundHolding fund = FundHolding.builder()
                         .snapshot(snapshot)
                         .fundName(f.fundName())
@@ -137,6 +148,7 @@ public class AssetService {
                         .investmentAmount(f.investmentAmount())
                         .currentValue(cv)
                         .units(f.units())
+                        .estimatedDividend(divEst)
                         .build();
                 snapshot.getFunds().add(fund);
             });
@@ -261,10 +273,11 @@ public class AssetService {
             req.funds().forEach(f -> {
                 Bank bank = f.bankId() != null ? bankRepo.findById(f.bankId()).orElse(null) : null;
                 BigDecimal cv = resolveFundCurrentValue(f.fundCode(), f.units(), f.currentValue());
+                BigDecimal divEst = resolveFundEstimatedDividend(f.fundCode(), f.units(), f.estimatedDividend());
                 snapshot.getFunds().add(FundHolding.builder()
                     .snapshot(snapshot).fundName(f.fundName()).fundCode(f.fundCode())
                     .bank(bank).investmentAmount(f.investmentAmount()).currentValue(cv)
-                    .units(f.units()).build());
+                    .units(f.units()).estimatedDividend(divEst).build());
             });
         }
         if (req.stocks() != null) {
@@ -627,10 +640,15 @@ public class AssetService {
         BigDecimal totalStockCost = s.getStocks().stream()
                 .map(StockHolding::getInvestmentCost)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal totalDividend = s.getStocks().stream()
+        BigDecimal totalStockDividend = s.getStocks().stream()
                 .filter(st -> st.getEstimatedDividend() != null)
                 .map(StockHolding::getEstimatedDividend)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal totalFundDividend = s.getFunds().stream()
+                .filter(fh -> fh.getEstimatedDividend() != null)
+                .map(FundHolding::getEstimatedDividend)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal totalDividend = totalStockDividend.add(totalFundDividend);
 
         s.setTotalDeposit(totalDeposit);
         s.setTotalFundValue(totalFundValue);
@@ -667,13 +685,20 @@ public class AssetService {
                 )).toList();
 
         List<AssetSnapshotDto.FundResponse> funds = s.getFunds().stream()
-                .map(f -> new AssetSnapshotDto.FundResponse(
-                    f.getId(), f.getFundName(), f.getFundCode(),
-                    f.getBank() != null ? f.getBank().getId() : null,
-                    f.getBank() != null ? f.getBank().getDisplayName() : null,
-                    f.getInvestmentAmount(), f.getCurrentValue(), f.getUnits(),
-                    f.getProfit(), f.getProfitRate()
-                )).toList();
+                .map(f -> {
+                    BigDecimal cv = f.getCurrentValue();
+                    BigDecimal divEst = f.getEstimatedDividend();
+                    BigDecimal divRate = (divEst != null && cv != null && cv.compareTo(BigDecimal.ZERO) > 0)
+                            ? divEst.divide(cv, 6, RoundingMode.HALF_UP) : null;
+                    return new AssetSnapshotDto.FundResponse(
+                        f.getId(), f.getFundName(), f.getFundCode(),
+                        f.getBank() != null ? f.getBank().getId() : null,
+                        f.getBank() != null ? f.getBank().getDisplayName() : null,
+                        f.getInvestmentAmount(), cv, f.getUnits(),
+                        divEst, divRate,
+                        f.getProfit(), f.getProfitRate()
+                    );
+                }).toList();
 
         // 快照匯率作為 fallback
         BigDecimal snapshotUsdRate = s.getUsdExchangeRate() != null
