@@ -25,29 +25,41 @@ public class FundDividendBackfillService {
         var funds = source.findActiveFunds();
         int totalRows = 0, fundOk = 0, fundFail = 0;
         for (FundMasterRow f : funds) {
-            try {
-                List<DividendRow> rows = client.fetchRecent(
-                        f.site(), f.fundclearOrgCode(), f.fundclearFundCode(),
-                        f.fundclearClassCode(), years * 12);
-                if (rows.isEmpty()) {
-                    log.info("配息 backfill {} 0 筆（累積型 / 無資料）", f.fundCode());
-                    fundOk++;
-                    continue;
-                }
-                for (DividendRow r : rows) {
-                    source.upsertDividend(f.fundCode(), r.baseDate(), r.amount(),
-                            r.currency(), r.frequency());
-                    totalRows++;
-                }
-                log.info("配息 backfill {} {} 年共 {} 筆", f.fundCode(), years, rows.size());
-                fundOk++;
-            } catch (Exception e) {
-                log.warn("配息 backfill 異常 {}: {}", f.fundCode(), e.toString());
-                fundFail++;
-            }
+            int written = backfillOne(f, years);
+            if (written >= 0) { fundOk++; totalRows += written; }
+            else fundFail++;
         }
         log.info("配息 backfill 完成：基金 OK={} 失敗={} 總筆數={}", fundOk, fundFail, totalRows);
         return new BackfillSummary(fundOk, fundFail, funds.size(), totalRows);
+    }
+
+    /** 分年呼叫 FundClear（單次大範圍會被 API 內部分頁 cap，須逐年抓）。 */
+    private int backfillOne(FundMasterRow f, int years) {
+        int written = 0;
+        try {
+            for (int y = 0; y < years; y++) {
+                // fetchRecent 接 monthsBack；用 12 配合每段一年；以「往前 y*12 ~ y*12+12」為單位
+                // FundClear 的 API 是 baseBeginDate ~ baseEndDate，所以實作時改 fetchRecent 簽名直接傳 from~to 也可
+                // 這裡簡化：每段呼叫 fetchRecent(monthsBack=12) 12 次共 12 年，超過 years 跳出
+                if (y >= years) break;
+                int monthsBackTo = y * 12;
+                int monthsBackFrom = (y + 1) * 12;
+                List<DividendRow> rows = client.fetchRange(
+                        f.site(), f.fundclearOrgCode(), f.fundclearFundCode(), f.fundclearClassCode(),
+                        monthsBackFrom, monthsBackTo);
+                if (rows == null) continue;
+                for (DividendRow r : rows) {
+                    source.upsertDividend(f.fundCode(), r.baseDate(), r.amount(),
+                            r.currency(), r.frequency());
+                    written++;
+                }
+            }
+            log.info("配息 backfill {} {} 年共 {} 筆", f.fundCode(), years, written);
+            return written;
+        } catch (Exception e) {
+            log.warn("配息 backfill 異常 {}: {}", f.fundCode(), e.toString());
+            return -1;
+        }
     }
 
     public record BackfillSummary(int fundOk, int fundFail, int total, int rowsWritten) {}
