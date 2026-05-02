@@ -172,6 +172,7 @@ public class SnapshotFormBffController {
                 .retrieve()
                 .bodyToMono(LIST_MAP)
                 .onErrorReturn(Collections.emptyList())
+                .map(this::filterActive)
                 .map(ResponseEntity::ok);
     }
 

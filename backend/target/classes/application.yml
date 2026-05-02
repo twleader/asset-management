@@ -26,9 +26,18 @@ spring:
       max-file-size: 10MB
       max-request-size: 10MB
 
+  data:
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+      timeout: 2000
+
   threads:
     virtual:
       enabled: true
+
+external-materials:
+  base-url: ${EXTERNAL_MATERIALS_URL:http://external-materials-service:8080}
 
 server:
   port: ${SERVER_PORT:8080}

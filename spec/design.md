@@ -383,6 +383,8 @@ BackupSetting         (備份保留代數設定，單列資料表，id = 1)
 
 > Offshore / onshore DTO 欄位名不同：offshore 用 `organizeCode` / `fundCode` / `fundClassCode`，onshore 用 `orgId` / `fundNo` / `fundClassCode`。`FundNavFetchClient` 需依 `site` 分流。
 
+> `fund_master` 由「信託基金設定」頁面（`/settings/funds`）管理，CRUD 經 `FundNavController` 暴露 `POST/PUT/PATCH /api/funds*`；DataInitializer 僅在 fund_code 不存在時 seed 預設 7 筆，不覆蓋使用者編輯。
+
 > 設計理由：基金本身屬性（幣別、所屬銷售銀行）與「某次 snapshot 的持有狀態」分離，避免 `FundHolding` 跨筆冗餘儲存同一事實。`fund_holding.fund_code` 形成弱 FK 至 `fund_master.fund_code`，但不加 DB 級 FK 以避免破壞既有歷史資料（舊 FundHolding 的 fundCode 可能不在主檔內）。
 
 #### FundNav（Requirement 19 新增）

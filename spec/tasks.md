@@ -1431,3 +1431,26 @@ NASDAQ info API 自 2026/04 起對 ETF 的 `keyStats` 為 null，VOO/VT 等 ETF 
         fallback 走手填路徑）；驗證歷史 snapshot 顯示不變
 - [ ] 54.13 commit + spec 同步
 
+### Task 55: 信託基金主檔設定頁 + SnapshotForm 欄位合併
+
+對應 Requirements: Requirement 19（信託基金最新淨值自動估值）
+
+#### 背景
+
+Task 54 把 fund_master 7 筆寫死在 DataInitializer，使用者沒有 UI 可以新增 / 編輯（例如 1616 多了一個 share class、或新增其他銀行的基金）。同時 SnapshotForm 信託基金區塊「基金代號」「基金名稱」兩欄並列其實重複——dropdown 已含 `「{code}　{name}」` label，名稱欄變多餘。
+
+#### Steps:
+
+- [ ] 55.1 backend `FundNavController` 擴充 CRUD：`POST /api/funds`、`PUT /api/funds/{fundCode}`、
+        `PATCH /api/funds/{fundCode}/active`；DTO `CreateFundRequest` / `UpdateFundRequest`
+        （PK fundCode 僅 create 可填，update 不可改）
+- [ ] 55.2 BFF `FundBffRoutes` 既有 `/api/funds/**` passthrough 涵蓋新 CRUD，無需改動
+- [ ] 55.3 frontend `bffApi.fundSettings`：`getAll`、`create`、`update`、`setActive`
+- [ ] 55.4 frontend `FundSettingsView.vue` + `router/index.js` 加 `/settings/funds` route + `App.vue` 左側選單
+        新增「💰 信託基金設定」項；表單欄位：fundCode（新增時可編輯）/ fundName / bank dropdown /
+        currency / site / FundClear 三段代碼
+- [ ] 55.5 frontend `SnapshotFormView.vue` 信託基金區塊：移除「基金名稱」欄，dropdown 加寬；
+        onFundCodeChange 仍會把 fundName 寫進 row（送出 payload 用），UI 不再顯示
+- [ ] 55.6 DataInitializer.seedFundMasters 確認為 idempotent（只插入不存在的 code）
+- [ ] 55.7 commit + spec 同步
+
