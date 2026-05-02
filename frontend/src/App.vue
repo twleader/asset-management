@@ -178,7 +178,12 @@ body {
 .el-menu {
   border-right: none !important;
   flex: 1;
+  overflow-y: auto;
+  /* 隱藏自訂捲軸視覺，但仍可滾動 */
+  scrollbar-width: thin;
 }
+.el-menu::-webkit-scrollbar { width: 6px; }
+.el-menu::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
 
 .el-menu-item.is-active {
   background: #1d4ed8 !important;
