@@ -114,6 +114,12 @@ const router = createRouter({
       meta: { title: '在途款項類型設定', icon: 'Setting' }
     },
     {
+      path: '/settings/funds',
+      name: 'FundSettings',
+      component: () => import('@/views/FundSettingsView.vue'),
+      meta: { title: '信託基金設定', icon: 'Setting' }
+    },
+    {
       path: '/settings/backup-restore',
       name: 'BackupRestore',
       component: () => import('@/views/BackupRestoreView.vue'),

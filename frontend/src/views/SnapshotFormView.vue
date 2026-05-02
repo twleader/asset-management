@@ -974,18 +974,15 @@
               <el-icon class="row-drag-handle" style="cursor:grab;color:#94a3b8"><Operation /></el-icon>
             </template>
           </el-table-column>
-          <el-table-column label="基金代號" width="140">
+          <el-table-column label="基金" min-width="280">
             <template #default="{ row }">
               <el-select v-model="row.fundCode" size="small" filterable clearable style="width:100%"
-                placeholder="（選填）"
+                placeholder="（選擇基金 — 至「信託基金設定」管理選項）"
                 @change="onFundCodeChange(row)">
                 <el-option v-for="o in fundOptions" :key="o.value" :label="o.label" :value="o.value" />
               </el-select>
-            </template>
-          </el-table-column>
-          <el-table-column label="基金名稱" min-width="140">
-            <template #default="{ row }">
-              <el-input v-model="row.fundName" size="small" />
+              <!-- 舊資料 fundCode 為空時顯示原 fundName，以兼容歷史 snapshot 的展示 -->
+              <div v-if="!row.fundCode && row.fundName" class="legacy-fund-name">{{ row.fundName }}</div>
             </template>
           </el-table-column>
           <el-table-column label="銀行" width="160">
@@ -2309,4 +2306,5 @@ const submit = async () => {
 .sb-dividend { color: #34d399; }
 .summary-bar .profit { color: #4ade80; }
 .summary-bar .loss   { color: #f87171; }
+.legacy-fund-name { font-size: 12px; color: #94a3b8; margin-top: 2px; padding-left: 4px; }
 </style>

@@ -212,6 +212,13 @@ export const bffApi = {
     create:    (data) => api.post('/bff/transit-fund-type-settings', data),
     update:    (id, data) => api.put(`/bff/transit-fund-type-settings/${id}`, data),
     setActive: (id, active) => api.patch(`/bff/transit-fund-type-settings/${id}/active`, { active })
+  },
+  // 信託基金主檔（Requirement 19）— 走 FundBffRoutes 既有的 /api/funds/** passthrough
+  fundSettings: {
+    getAll:    () => api.get('/funds'),
+    create:    (data) => api.post('/funds', data),
+    update:    (fundCode, data) => api.put(`/funds/${fundCode}`, data),
+    setActive: (fundCode, active) => api.patch(`/funds/${fundCode}/active`, { active })
   }
 }
 

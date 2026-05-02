@@ -47,6 +47,10 @@
               <el-icon><Timer /></el-icon>
               <template #title>在途款項類型設定</template>
             </el-menu-item>
+            <el-menu-item index="/settings/funds">
+              <el-icon><Money /></el-icon>
+              <template #title>信託基金設定</template>
+            </el-menu-item>
             <el-menu-item index="/settings/backup-restore">
               <el-icon><FolderOpened /></el-icon>
               <template #title>備份/還原 資料</template>
