@@ -1454,3 +1454,47 @@ Task 54 把 fund_master 7 筆寫死在 DataInitializer，使用者沒有 UI 可�
 - [ ] 55.6 DataInitializer.seedFundMasters 確認為 idempotent（只插入不存在的 code）
 - [ ] 55.7 commit + spec 同步
 
+### Task 56: 信託基金預估年配息
+
+對應 Requirements: Requirement 20（信託基金預估年配息）
+
+#### 背景
+
+每支基金近 12 個月「每單位配息」累加 × units × FX = 年配息台幣估算。FundClear `info-dividend/query` 提供完整月配息歷史。模型對齊 `StockHolding.estimatedDividend`：snapshot 凍結值，建立 / 更新時由系統自動算入。
+
+#### Steps:
+
+- [ ] 56.1 Liquibase changelog `v1.20.0`：建立 `fund_dividend_history` (id PK, fund_code, base_date,
+        amount NUMERIC(20,6), currency, frequency, fetched_at)；唯一鍵 `(fund_code, base_date)`；
+        index `(fund_code, base_date DESC)`。`fund_holding` 新增 `estimated_dividend NUMERIC(20,2) NULL`
+- [ ] 56.2 backend entity `FundDividendHistory` + `FundDividendHistoryRepository`；`FundHolding` 加
+        `estimatedDividend` 欄位（nullable）
+- [ ] 56.3 external-materials-service `FundDividendFetchClient`：offshore POST
+        `/api/offshore/fund-info/info-dividend/query`（`queryType:"1"`、`organizeCode`、`fundCode`、
+        `fundClassCode`、`baseBeginDate/baseEndDate` YYYY/MM、`asiFreqList:[]`、`_pageNum:1`、
+        `_pageSize:50`），onshore POST `/api/onshore/fund-info/info-dividend/query-dividend`；
+        回應解析 `list[].asiBaseDate`（YYYY/MM/DD）與 `asiAmt`
+- [ ] 56.4 external-materials-service `FundDividendSourceQuery`：upsert `fund_dividend_history`
+        （`(fund_code, base_date)` 視為覆寫）；讀取現有 fund_master active 清單沿用
+        `FundNavSourceQuery.findActiveFunds()`
+- [ ] 56.5 external-materials-service `FundDividendPoller`：`@Scheduled(cron="0 5 9 * * *",
+        zone="Asia/Taipei")`（NAV 排程後 5 分鐘）；每支 active 基金抓近 13 個月
+- [ ] 56.6 external-materials-service `InternalPriceController` 加
+        `POST /internal/fund-dividend/refresh`
+- [ ] 56.7 backend `FundDividendService.getAnnualEstimateTwd(fundCode)`：
+        `fund_dividend_history` 近 12 個月 amount 加總 × FX；找不到資料回 Optional.empty；
+        TWD 計價基金 fxRate=1
+- [ ] 56.8 backend `FundNavController` 加 `POST /api/fund-dividend/refresh`（proxy 至 external）；
+        `GET /api/fund-dividend/latest?fundCode=...` 給 BFF 預載用
+- [ ] 56.9 backend `AssetService.createSnapshot` / `updateSnapshot`：對每筆 FundHolding，
+        若 `units` 非 null 且 `FundDividendService` 回傳 estimate，
+        `fund.estimatedDividend = units × annualPerUnitTwd`，否則保留前端送進來的值（向後相容）
+- [ ] 56.10 backend `AssetService.recalcTotals`：`estimatedAnnualDividend` 合計加入 fund.estimatedDividend
+        （目前只算 stock）；確認 SnapshotEnricher / Dashboard / AssetHistory 抓的是 snapshot 層級欄位
+- [ ] 56.11 backend `AssetSnapshotDto.FundResponse` + `FundRequest` 加 `estimatedDividend`、`dividendRate`
+- [ ] 56.12 BFF `SnapshotFormBffController.listFunds()` 回傳 fund_master 時併回 `annualDividendPerUnitTwd`
+        欄位，前端用以即時預覽（同 NAV 預覽路徑）
+- [ ] 56.13 frontend `SnapshotFormView.vue` 信託基金 row 加「預估年配息」column（read-only），
+        units 變更時即時算；底部 sec-summary 加「預估年配息」彙總
+- [ ] 56.14 commit + spec 同步
+

@@ -53,6 +53,10 @@ public class FundHolding {
     @Column(precision = 20, scale = 4)
     private BigDecimal units;
 
+    /** 預估年配息台幣 (Requirement 20) — snapshot 凍結值；units 非空時由系統 NAV / FundClear 配息歷史自動算 */
+    @Column(name = "estimated_dividend", precision = 20, scale = 2)
+    private BigDecimal estimatedDividend;
+
     /** 損益 = 現值 - 投資金額 */
     public BigDecimal getProfit() {
         if (currentValue == null || investmentAmount == null) return BigDecimal.ZERO;

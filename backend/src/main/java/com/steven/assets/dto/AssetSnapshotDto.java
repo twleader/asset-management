@@ -33,7 +33,8 @@ public class AssetSnapshotDto {
             Long bankId,                   // 參照 bank.id（銷售銀行）
             @NotNull BigDecimal investmentAmount,
             @NotNull BigDecimal currentValue,
-            BigDecimal units               // (Requirement 19) 非空時，currentValue 由系統 NAV × FX 自動算出覆寫
+            BigDecimal units,              // (Requirement 19) 非空時，currentValue 由系統 NAV × FX 自動算出覆寫
+            BigDecimal estimatedDividend   // (Requirement 20) 預估年配息台幣；units 非空時由系統自動算覆寫
     ) {}
 
     public record StockRequest(
@@ -109,7 +110,9 @@ public class AssetSnapshotDto {
             String bankDisplayName,
             BigDecimal investmentAmount,
             BigDecimal currentValue,
-            BigDecimal units,             // (Requirement 19)
+            BigDecimal units,                 // (Requirement 19)
+            BigDecimal estimatedDividend,     // (Requirement 20) 預估年配息台幣
+            BigDecimal dividendRate,          // estimatedDividend / currentValue
             BigDecimal profit,
             BigDecimal profitRate
     ) {}

@@ -367,6 +367,20 @@ BackupSetting         (備份保留代數設定，單列資料表，id = 1)
 | investmentAmount | BigDecimal | 投入成本（程式欄位名，原 spec 為 investedAmount） |
 | currentValue | BigDecimal | 當前市值（snapshot 凍結值；若 units 非空，由系統 `units × NAV × FX` 算出寫入；否則使用者手填） |
 | units | BigDecimal | 總單位數（Requirement 19 新增；nullable 向後相容；非空時觸發自動計算 currentValue） |
+| estimatedDividend | BigDecimal | 預估年配息台幣 (Requirement 20)；snapshot 凍結值；`units × 近 12 月每單位配息加總 × FX` 自動算 |
+
+#### FundDividendHistory（Requirement 20 新增）
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| id | Long | PK |
+| fundCode | String | FK 至 `fund_master.fund_code` |
+| baseDate | LocalDate | 配息基準日（FundClear `asiBaseDate`） |
+| amount | BigDecimal | 每單位原幣配息金額（scale 6） |
+| currency | String | 計價幣別（複用 fund_master.currency） |
+| frequency | String | 配息頻率描述（每月 / 每季 / …） |
+| fetchedAt | Instant | 抓取時間 |
+
+唯一鍵：`(fund_code, base_date)`。external-materials-service 每日 cron 寫入；`FundDividendService` 取近 12 個月 amount 加總算年估值。
 
 #### FundMaster（Requirement 19 新增）
 | 欄位 | 型別 | 說明 |

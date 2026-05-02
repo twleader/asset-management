@@ -1018,6 +1018,15 @@
                 @blur="row.currentValue = numParse(row.currentValueStr, 0); row.currentValueStr = numFmt(row.currentValue)" />
             </template>
           </el-table-column>
+          <el-table-column label="預估年配息" width="130" align="right" header-align="right">
+            <template #default="{ row }">
+              <span v-if="row.estimatedDividend != null && row.estimatedDividend !== ''"
+                    style="color:#34d399">
+                {{ fmt(row.estimatedDividend) }}
+              </span>
+              <span v-else style="color:#94a3b8">-</span>
+            </template>
+          </el-table-column>
           <el-table-column label="損益" width="150" align="right">
             <template #default="{ row }">
               <span :class="(row.currentValue-row.investmentAmount)>=0?'profit':'loss'">
@@ -1310,13 +1319,24 @@ function onUnitsBlur(row) {
   recalcRowCurrentValue(row)
 }
 
+/** Requirement 20：給定 fundCode + units 算預估年配息台幣，無資料回 null。 */
+function autoCalcFundDividend(fundCode, units) {
+  if (!fundCode || units == null || units === '' || isNaN(Number(units))) return null
+  const m = fundMasterMap.value[fundCode]
+  if (!m || m.annualDividendPerUnitTwd == null) return null
+  const v = Number(units) * Number(m.annualDividendPerUnitTwd)
+  return Math.round(v * 100) / 100
+}
+
 function recalcRowCurrentValue(row) {
   if (row.fundCode && row.units != null && row.units !== '') {
-    const v = autoCalcFundCurrentValue(row.fundCode, row.units)
-    if (v != null) {
-      row.currentValue = v
-      row.currentValueStr = numFmt(v)
+    const cv = autoCalcFundCurrentValue(row.fundCode, row.units)
+    if (cv != null) {
+      row.currentValue = cv
+      row.currentValueStr = numFmt(cv)
     }
+    const div = autoCalcFundDividend(row.fundCode, row.units)
+    if (div != null) row.estimatedDividend = div
   }
 }
 
@@ -1327,7 +1347,11 @@ function navHint(row) {
   const fxStr = m.currency === 'TWD'
     ? '台幣計價，無需匯率'
     : `匯率 ${m.latestFxRate || '-'}（${m.latestFxDate || '-'}）`
-  return `${navStr}　${fxStr}`
+  let divStr = ''
+  if (m.annualDividendPerUnitTwd != null) {
+    divStr = `\n預估年配息／單位：${m.annualDividendPerUnitTwd} TWD（近 ${m.dividendMonthsCounted || 0} 個月）`
+  }
+  return `${navStr}　${fxStr}${divStr}`
 }
 
 async function refreshFundNav() {
@@ -1654,7 +1678,8 @@ const addFund = () =>
   form.funds.push({ _rowId: `fund_${_idSeq++}`, fundCode: null, fundName: '', bankId: null,
     investmentAmount: 0, investmentAmountStr: '0',
     units: null, unitsStr: '',
-    currentValue: 0, currentValueStr: '0' })
+    currentValue: 0, currentValueStr: '0',
+    estimatedDividend: null })
 
 let _idSeq = 1
 const newBrokerRow = (_market) => ({
@@ -1822,7 +1847,8 @@ const copyPrevFunds = async () => {
       investmentAmount: f.investmentAmount, investmentAmountStr: numFmt(f.investmentAmount),
       units: f.units != null ? f.units : null,
       unitsStr: f.units != null ? String(f.units) : '',
-      currentValue: f.currentValue, currentValueStr: numFmt(f.currentValue)
+      currentValue: f.currentValue, currentValueStr: numFmt(f.currentValue),
+      estimatedDividend: f.estimatedDividend != null ? f.estimatedDividend : null
     }))
     ElMessage.success(`已複製前一版信託基金（${detail.snapshotDate}，共 ${detail.funds.length} 筆）`)
   } catch (e) { if (e?.message !== 'cancel') throw e
@@ -2120,7 +2146,8 @@ onMounted(async () => {
         investmentAmount: f.investmentAmount, investmentAmountStr: numFmt(f.investmentAmount),
         units: f.units != null ? f.units : null,
         unitsStr: f.units != null ? String(f.units) : '',
-        currentValue: f.currentValue, currentValueStr: numFmt(f.currentValue)
+        currentValue: f.currentValue, currentValueStr: numFmt(f.currentValue),
+        estimatedDividend: f.estimatedDividend != null ? f.estimatedDividend : null
       })),
       stocks: groupStocks(detail.stocks.map(s => ({
         stockCode: s.stockCode, stockName: s.stockName, market: s.market,
@@ -2197,7 +2224,8 @@ const submit = async () => {
       bankId: f.bankId || null,
       investmentAmount: f.investmentAmount,
       currentValue: f.currentValue,
-      units: f.units != null && f.units !== '' ? Number(f.units) : null
+      units: f.units != null && f.units !== '' ? Number(f.units) : null,
+      estimatedDividend: f.estimatedDividend != null && f.estimatedDividend !== '' ? Number(f.estimatedDividend) : null
     }))
     const payload = {
       snapshotDate: form.snapshotDate,
