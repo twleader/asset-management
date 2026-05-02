@@ -27,6 +27,9 @@ public class FundBffRoutes {
                 .route("fund-nav-route", r -> r
                         .path("/api/fund-nav/**")
                         .uri(businessServicesUrl))
+                .route("fund-dividend-route", r -> r
+                        .path("/api/fund-dividend/**")
+                        .uri(businessServicesUrl))
                 .build();
     }
 }
