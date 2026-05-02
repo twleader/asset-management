@@ -2130,6 +2130,17 @@ onMounted(async () => {
   // 先載入銀行/券商選項（取代 hardcoded）
   await loadInstitutions()
   await loadFundMasters()
+  // 編輯模式時：fund_master 載入後自動算入既有 row 的預估年配息（原值若 DB 已凍結，這裡只覆寫顯示用）
+  // 這個 watcher 會在 form.funds 更新後觸發一次（loadDetail 之後）
+  watchEffect(() => {
+    if (Object.keys(fundMasterMap.value).length === 0) return
+    for (const row of form.funds) {
+      if (row.fundCode && row.units != null && row.units !== '' && row.estimatedDividend == null) {
+        const v = autoCalcFundDividend(row.fundCode, row.units)
+        if (v != null) row.estimatedDividend = v
+      }
+    }
+  })
 
   if (isEdit.value) {
     loading.value = true
