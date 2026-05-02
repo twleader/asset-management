@@ -1299,9 +1299,13 @@ function onFundCodeChange(row) {
 }
 
 function onUnitsBlur(row) {
-  const u = numParse(row.unitsStr, null)
-  row.units = u
-  row.unitsStr = u != null ? String(u) : ''
+  const raw = String(row.unitsStr ?? '').replace(/,/g, '').trim()
+  if (raw === '') { row.units = null; row.unitsStr = ''; recalcRowCurrentValue(row); return }
+  const n = parseFloat(raw)
+  if (isNaN(n)) { row.units = null; row.unitsStr = ''; recalcRowCurrentValue(row); return }
+  // 保留至 4 位小數，移除多餘 trailing zero（647.9300 → 647.93；647.9304 → 647.9304）
+  row.units = parseFloat(n.toFixed(4))
+  row.unitsStr = String(row.units)
   recalcRowCurrentValue(row)
 }
 
