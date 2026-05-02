@@ -45,9 +45,13 @@ public class FundHolding {
     @Column(nullable = false, precision = 20, scale = 2)
     private BigDecimal investmentAmount;
 
-    /** 現值 (台幣) */
+    /** 現值 (台幣) — snapshot 凍結值；若 units 非 null 由系統用 units × NAV × FX 算出寫入 */
     @Column(nullable = false, precision = 20, scale = 2)
     private BigDecimal currentValue;
+
+    /** 總單位數 (Requirement 19) — nullable 向後相容；非空時觸發 NAV × FX 自動計算 currentValue */
+    @Column(precision = 20, scale = 4)
+    private BigDecimal units;
 
     /** 損益 = 現值 - 投資金額 */
     public BigDecimal getProfit() {

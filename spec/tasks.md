@@ -1375,3 +1375,59 @@ NASDAQ info API 自 2026/04 起對 ETF 的 `keyStats` 為 null，VOO/VT 等 ETF 
         BFF 擴充回傳 `koreaGdpPerCapitaUsd` 與 `taiwanGdpGrowthRate` / `koreaGdpGrowthRate`；
         前端在原圖下加第二張卡（左 Y 折線雙國 GDP，右 Y 柱狀雙國年增率）
 
+### Task 54: 信託基金最新淨值自動估值
+
+對應 Requirements: Requirement 19（信託基金最新淨值自動估值）
+
+#### 背景
+
+`FundHolding.currentValue` 目前使用者每次建 snapshot 都要去華南銀行網銀抓最新值手填。
+基金日結淨值是公開資訊（FundClear 境外基金資訊觀測站），改由系統自動抓淨值 + 匯率，
+使用者只要填 `units`（總單位數），系統用 `units × NAV × FX` 算出 `currentValue` 寫入 snapshot。
+
+抓 NAV 邏輯放 `external-materials-service`（與股價、股利同層級），對 backend 暴露
+`POST /internal/fund-nav/refresh`。先用純 `java.net.http.HttpClient` 抓 FundClear，
+不行再 fallback MoneyDJ；若兩家都因 SPA 抓不到，再回頭討論 Playwright。
+
+僅 seed 6 支華南境外基金（02A8 / 02B9 / 01C2 / 1680 / 24B2 / 1616）；元大日本基金後續再加。
+
+#### Steps:
+
+- [ ] 54.1 Liquibase changelog `v1.19.0`：建立 `fund_master`、`fund_nav` 兩表（含 `site` /
+        `fundclear_org_code` / `fundclear_fund_code` / `fundclear_class_code` 欄位）；
+        alter `fund_holding` 新增 `units NUMERIC(20,4) NULL`；seed `fund_master` 7 筆 —
+        6 支華南 offshore（02A8/02B9/01C2 USD、1680/24B2 ZAR、1616 USD）+ 1 支元大
+        onshore（93100953A TWD）
+- [ ] 54.2 backend entities + repos：`FundMaster`（含 site / fundclear 三段代碼）、`FundNav`；
+        `FundHolding` 加 `units` 欄位（nullable）；`FundMasterRepository`、
+        `FundNavRepository`（後者提供 `findTopByFundCodeOrderByNavDateDesc`）
+- [ ] 54.3 backend `HistoricalDataService.dailyExchangeRateUpdate` 與 `fetchBotExchangeRate`
+        擴充：原本只抓 USD，改為遍歷 `fund_master` 出現的所有非 TWD currency 集合（ZAR 等）
+- [ ] 54.4 external-materials-service `FundNavFetchClient`：純 `java.net.http.HttpClient` +
+        UA / Referer / Origin，依 `fund_master.site` 分流 — offshore 打
+        `POST /api/offshore/nav-profit/query-history`（DTO 用 `organizeCode`/`fundCode`/
+        `fundClassCode`），onshore 打 `POST /api/onshore/nav-profit/query-history`（DTO 用
+        `orgId`/`fundNo`/`fundClassCode`）；日期格式 `YYYY/MM/DD`；回傳取 `tableList[0]` 最新
+        `navValue`
+- [ ] 54.5 external-materials-service `FundNavPoller`：`@Scheduled(cron="0 0 9 * * *",
+        zone="Asia/Taipei")` 全抓啟用基金；`FundNavPersister` upsert 至 `fund_nav`
+- [ ] 54.6 external-materials-service `InternalPriceController` 新增
+        `POST /internal/fund-nav/refresh`，同步呼叫 `FundNavPoller.refreshAll()`
+- [ ] 54.7 backend `FundNavService`：`getLatestNavTwd(fundCode)` 回傳
+        `{ nav, navDate, fxRate, fxDate, currency, twdPerUnit }`；TWD 計價基金 fxRate=1；
+        找不到 NAV 時回 Optional.empty
+- [ ] 54.8 backend `AssetService.createSnapshot` / `updateSnapshot`：對每筆 FundHolding，
+        若 `units` 非 null 且能查到 NAV+FX → 自動算 `currentValue = units × nav × fxRate`；
+        否則保留使用者手填值（向後相容）
+- [ ] 54.9 backend `FundNavController`：`POST /api/fund-nav/refresh`（proxy 至 external
+        `/internal/fund-nav/refresh`）；`GET /api/funds`（fund_master 列表，給前端 dropdown 用）
+- [ ] 54.10 BFF `SnapshotFormBffController` 預載 fund_master + 最新 NAV，回傳每支基金的
+        `latestNav / latestFxRate / latestNavDate / currency`，前端可即時預覽 currentValue
+- [ ] 54.11 frontend `SnapshotFormView.vue` 信託基金區塊：基金代號改為 dropdown（從
+        `/api/funds`）、新增 `units` 欄位、現值欄位改唯讀（顯示
+        `units × NAV × FX` 即時計算）、加「刷新最新淨值」按鈕（呼叫
+        `/api/fund-nav/refresh` 後重載 BFF）；NAV 日期早於今日 N 天時加警示 badge
+- [ ] 54.12 既有 6 筆 FundHolding 維持原 `currentValue` 凍結值（units 為 NULL，計算邏輯
+        fallback 走手填路徑）；驗證歷史 snapshot 顯示不變
+- [ ] 54.13 commit + spec 同步
+

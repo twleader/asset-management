@@ -92,7 +92,9 @@ export const bffApi = {
     realtime: () => api.get('/bff/snapshot-form/realtime'),
     exchangeRate: (date) =>
       api.get('/bff/snapshot-form/exchange-rate', { params: { date } }),
-    getLookups: () => api.get('/bff/snapshot-form/lookups')
+    getLookups: () => api.get('/bff/snapshot-form/lookups'),
+    getFunds: () => api.get('/bff/snapshot-form/funds'),
+    refreshFundNav: () => api.post('/bff/snapshot-form/fund-nav/refresh')
   },
 
   // StockAnalysisDialog（跨 view 共用元件）

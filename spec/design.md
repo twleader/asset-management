@@ -115,9 +115,15 @@ com.steven.assets.externalmaterials/
 │   ├── PricePoller     # 兩段獨立 cron（搬自原 StockPriceService.scheduledTw/UsIntradayUpdate）
 │   ├── ClosePersister  # 盤後收盤 cron（搬自 recordTw/UsClosingPrice），寫 stock_price_history
 │   ├── MarketClock     # isTwMarketOpen / isUsMarketOpen（搬出後集中此處）
-│   └── PriceCacheWriter # 寫入 Redis（封裝 key schema）
+│   ├── PriceCacheWriter # 寫入 Redis（封裝 key schema）
+│   ├── FundNavPoller   # 信託基金 NAV 每日 cron（Requirement 19）
+│   └── FundNavPersister # 寫 fund_nav 表
+├── client/
+│   ├── PriceFetchClient
+│   ├── DividendFetchClient
+│   └── FundNavFetchClient # FundClear / MoneyDJ 抓 NAV（Requirement 19）
 └── controller/
-    └── InternalPriceController # POST /internal/refresh（同步觸發抓價）
+    └── InternalPriceController # POST /internal/refresh、POST /internal/fund-nav/refresh
 ```
 
 **Redis key schema：**
@@ -359,7 +365,37 @@ BackupSetting         (備份保留代數設定，單列資料表，id = 1)
 | fundCode | String | 基金代號（選填） |
 | bank | Bank | FK 至銷售銀行（選填） |
 | investmentAmount | BigDecimal | 投入成本（程式欄位名，原 spec 為 investedAmount） |
-| currentValue | BigDecimal | 當前市值 |
+| currentValue | BigDecimal | 當前市值（snapshot 凍結值；若 units 非空，由系統 `units × NAV × FX` 算出寫入；否則使用者手填） |
+| units | BigDecimal | 總單位數（Requirement 19 新增；nullable 向後相容；非空時觸發自動計算 currentValue） |
+
+#### FundMaster（Requirement 19 新增）
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| fundCode | String | PK，銀行內代號（華南 4 碼如 `02A8`，元大用 FundClear class code 如 `93100953A`） |
+| fundName | String | 基金中文名稱 |
+| currency | String | 計價幣別（USD / ZAR / TWD / EUR…）；TWD 表示無需 FX 換算 |
+| bank | Bank | FK，銷售銀行 |
+| site | String | `offshore` 或 `onshore`，決定走 FundClear 哪組 API |
+| fundclearOrgCode | String | FundClear 機構代碼（offshore 為 3 碼如 `043`；onshore 為 `Annnn` 如 `A0005`） |
+| fundclearFundCode | String | FundClear 基金代碼（offshore 為 10 碼 `A003800030`；onshore 為 8 碼 `93100953`） |
+| fundclearClassCode | String | FundClear 級別代碼（offshore 多為 ISIN 如 `LU0937949237`，少數投信內部 code 如 `GSBAMU`、`ABGHYATUSD`；onshore 為 `93100953A`） |
+| active | Boolean | 是否啟用（`fund_master` 抓 cron 只抓啟用中） |
+
+> Offshore / onshore DTO 欄位名不同：offshore 用 `organizeCode` / `fundCode` / `fundClassCode`，onshore 用 `orgId` / `fundNo` / `fundClassCode`。`FundNavFetchClient` 需依 `site` 分流。
+
+> 設計理由：基金本身屬性（幣別、所屬銷售銀行）與「某次 snapshot 的持有狀態」分離，避免 `FundHolding` 跨筆冗餘儲存同一事實。`fund_holding.fund_code` 形成弱 FK 至 `fund_master.fund_code`，但不加 DB 級 FK 以避免破壞既有歷史資料（舊 FundHolding 的 fundCode 可能不在主檔內）。
+
+#### FundNav（Requirement 19 新增）
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| id | Long | PK |
+| fundCode | String | FK 至 `fund_master.fund_code` |
+| navDate | LocalDate | 淨值日 |
+| nav | BigDecimal | 最新淨值（原幣計價，scale 6） |
+| source | String | 抓取來源（`FUNDCLEAR` / `MONEYDJ`） |
+| fetchedAt | Instant | 抓取時間 |
+
+唯一鍵：`(fund_code, nav_date)`。external-materials-service 每日 cron 寫入；business-services 讀取最新一筆。
 
 #### RealizedGain
 | 欄位 | 型別 | 說明 |

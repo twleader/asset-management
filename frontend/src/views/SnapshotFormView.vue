@@ -963,6 +963,7 @@
             <div style="display:flex;gap:8px">
               <el-button size="small" type="primary" :loading="saving" @click="submit">存檔</el-button>
               <el-button size="small" :loading="copyingPrev.funds" @click="copyPrevFunds">複製前一版</el-button>
+              <el-button size="small" :loading="refreshingFundNav" @click="refreshFundNav">刷新最新淨值</el-button>
               <el-button size="small" :icon="Plus" @click="addFund">新增</el-button>
             </div>
           </div>
@@ -971,6 +972,15 @@
           <el-table-column width="36" align="center">
             <template #default>
               <el-icon class="row-drag-handle" style="cursor:grab;color:#94a3b8"><Operation /></el-icon>
+            </template>
+          </el-table-column>
+          <el-table-column label="基金代號" width="140">
+            <template #default="{ row }">
+              <el-select v-model="row.fundCode" size="small" filterable clearable style="width:100%"
+                placeholder="（選填）"
+                @change="onFundCodeChange(row)">
+                <el-option v-for="o in fundOptions" :key="o.value" :label="o.label" :value="o.value" />
+              </el-select>
             </template>
           </el-table-column>
           <el-table-column label="基金名稱" min-width="140">
@@ -985,15 +995,29 @@
               </el-select>
             </template>
           </el-table-column>
-          <el-table-column label="投資金額">
+          <el-table-column label="投資金額" width="130">
             <template #default="{ row }">
               <el-input v-model="row.investmentAmountStr" size="small" style="width:100%" :input-style="{ textAlign: 'right' }"
                 @blur="row.investmentAmount = numParse(row.investmentAmountStr, 0); row.investmentAmountStr = numFmt(row.investmentAmount)" />
             </template>
           </el-table-column>
-          <el-table-column label="現值">
+          <el-table-column label="單位數" width="130">
             <template #default="{ row }">
-              <el-input v-model="row.currentValueStr" size="small" style="width:100%" :input-style="{ textAlign: 'right' }"
+              <el-input v-model="row.unitsStr" size="small" style="width:100%" :input-style="{ textAlign: 'right' }"
+                placeholder="（選填）"
+                @blur="onUnitsBlur(row)" />
+            </template>
+          </el-table-column>
+          <el-table-column label="現值" width="160">
+            <template #default="{ row }">
+              <div v-if="row.fundCode && row.units != null && row.units !== ''"
+                   style="display:flex;align-items:center;justify-content:flex-end;gap:6px">
+                <span style="font-weight:500">{{ fmt(row.currentValue) }}</span>
+                <el-tooltip :content="navHint(row)" placement="top">
+                  <el-icon style="color:#94a3b8"><InfoFilled /></el-icon>
+                </el-tooltip>
+              </div>
+              <el-input v-else v-model="row.currentValueStr" size="small" style="width:100%" :input-style="{ textAlign: 'right' }"
                 @blur="row.currentValue = numParse(row.currentValueStr, 0); row.currentValueStr = numFmt(row.currentValue)" />
             </template>
           </el-table-column>
@@ -1052,7 +1076,7 @@
 </template>
 
 <script setup>
-import { ArrowLeft, Plus, Delete, Operation } from '@element-plus/icons-vue'
+import { ArrowLeft, Plus, Delete, Operation, InfoFilled } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { useAssetStore } from '@/stores/assetStore'
@@ -1228,6 +1252,13 @@ const depositTypeOptions = ref([])   // { value: code, label: displayName }
 const twdDepositTypeOptions = computed(() => depositTypeOptions.value.filter(t => !t.value.startsWith('美元')))
 const usdDepositTypeOptions = computed(() => depositTypeOptions.value.filter(t => t.value.startsWith('美元')))
 
+// 信託基金主檔（Requirement 19）：含最新 NAV / FX，前端用 fundCode 對應算出 currentValue
+const fundMasterMap      = ref({})    // { [fundCode]: { fundName, bankId, currency, latestNav, latestNavDate, latestFxRate, twdPerUnit } }
+const fundOptions        = computed(() =>
+  Object.values(fundMasterMap.value).map(f => ({ value: f.fundCode, label: `${f.fundCode}　${f.fundName}` }))
+)
+const refreshingFundNav  = ref(false)
+
 async function loadInstitutions() {
   const { banks, brokers, depositTypes, transitFundTypes } = await bffApi.snapshotForm.getLookups()
   bankOptions.value        = banks.map(b => ({ value: b.id, label: b.displayName }))
@@ -1235,6 +1266,90 @@ async function loadInstitutions() {
   depositTypeOptions.value = depositTypes.map(d => ({ value: d.code, label: d.displayName }))
   transitTypeOptions.value = transitFundTypes.map(t => ({ value: t.code, label: t.displayName, payable: t.payable }))
   transitPayableSet.value  = new Set(transitFundTypes.filter(t => t.payable).map(t => t.code))
+}
+
+async function loadFundMasters() {
+  try {
+    const list = await bffApi.snapshotForm.getFunds()
+    const map = {}
+    for (const f of list) map[f.fundCode] = f
+    fundMasterMap.value = map
+  } catch (e) {
+    console.warn('載入基金主檔失敗', e)
+  }
+}
+
+/** 給定 fundCode + units 算 台幣現值；無 NAV / FX 時回 null（caller 應 fallback 手填值）。 */
+function autoCalcFundCurrentValue(fundCode, units) {
+  if (!fundCode || units == null || units === '' || isNaN(Number(units))) return null
+  const m = fundMasterMap.value[fundCode]
+  if (!m || m.twdPerUnit == null) return null
+  const v = Number(units) * Number(m.twdPerUnit)
+  return Math.round(v * 100) / 100
+}
+
+/** 選擇 fundCode 時自動帶入 fundName / bankId（若 row 還沒填），並重算現值。 */
+function onFundCodeChange(row) {
+  const m = fundMasterMap.value[row.fundCode]
+  if (m) {
+    if (!row.fundName) row.fundName = m.fundName
+    if (row.bankId == null && m.bankId != null) row.bankId = m.bankId
+  }
+  recalcRowCurrentValue(row)
+}
+
+function onUnitsBlur(row) {
+  const u = numParse(row.unitsStr, null)
+  row.units = u
+  row.unitsStr = u != null ? String(u) : ''
+  recalcRowCurrentValue(row)
+}
+
+function recalcRowCurrentValue(row) {
+  if (row.fundCode && row.units != null && row.units !== '') {
+    const v = autoCalcFundCurrentValue(row.fundCode, row.units)
+    if (v != null) {
+      row.currentValue = v
+      row.currentValueStr = numFmt(v)
+    }
+  }
+}
+
+function navHint(row) {
+  const m = fundMasterMap.value[row.fundCode]
+  if (!m || m.latestNav == null) return '無 NAV 資料'
+  const navStr = `淨值 ${m.latestNav} ${m.currency}（${m.latestNavDate || '-'}）`
+  const fxStr = m.currency === 'TWD'
+    ? '台幣計價，無需匯率'
+    : `匯率 ${m.latestFxRate || '-'}（${m.latestFxDate || '-'}）`
+  return `${navStr}　${fxStr}`
+}
+
+async function refreshFundNav() {
+  refreshingFundNav.value = true
+  try {
+    const r = await bffApi.snapshotForm.refreshFundNav()
+    await loadFundMasters()
+    // 重新計算現值
+    for (const row of form.funds) {
+      if (row.fundCode && row.units != null && row.units !== '') {
+        const v = autoCalcFundCurrentValue(row.fundCode, row.units)
+        if (v != null) {
+          row.currentValue = v
+          row.currentValueStr = numFmt(v)
+        }
+      }
+    }
+    if (r && r.failed > 0) {
+      ElMessage.warning(`刷新完成：成功 ${r.success}、失敗 ${r.failed} / 共 ${r.total} 支`)
+    } else if (r && r.success != null) {
+      ElMessage.success(`刷新完成：${r.success} 支基金 NAV 已更新`)
+    }
+  } catch (e) {
+    ElMessage.error('刷新 NAV 失敗：' + (e?.message || e))
+  } finally {
+    refreshingFundNav.value = false
+  }
 }
 
 const stockTab = ref('tw')
@@ -1531,7 +1646,10 @@ const addDeposit = (outerTab = 'TWD') => {
 }
 
 const addFund = () =>
-  form.funds.push({ _rowId: `fund_${_idSeq++}`, fundName: '', bankId: null, investmentAmount: 0, investmentAmountStr: '0', currentValue: 0, currentValueStr: '0' })
+  form.funds.push({ _rowId: `fund_${_idSeq++}`, fundCode: null, fundName: '', bankId: null,
+    investmentAmount: 0, investmentAmountStr: '0',
+    units: null, unitsStr: '',
+    currentValue: 0, currentValueStr: '0' })
 
 let _idSeq = 1
 const newBrokerRow = (_market) => ({
@@ -1697,6 +1815,8 @@ const copyPrevFunds = async () => {
       _rowId: `fund_${_idSeq++}`,
       fundName: f.fundName, fundCode: f.fundCode, bankId: f.bankId || null,
       investmentAmount: f.investmentAmount, investmentAmountStr: numFmt(f.investmentAmount),
+      units: f.units != null ? f.units : null,
+      unitsStr: f.units != null ? String(f.units) : '',
       currentValue: f.currentValue, currentValueStr: numFmt(f.currentValue)
     }))
     ElMessage.success(`已複製前一版信託基金（${detail.snapshotDate}，共 ${detail.funds.length} 筆）`)
@@ -1978,6 +2098,7 @@ watch(() => form.snapshotDate, async (newDate, oldDate) => {
 onMounted(async () => {
   // 先載入銀行/券商選項（取代 hardcoded）
   await loadInstitutions()
+  await loadFundMasters()
 
   if (isEdit.value) {
     loading.value = true
@@ -1992,6 +2113,8 @@ onMounted(async () => {
         _rowId: `fund_${_idSeq++}`,
         fundName: f.fundName, fundCode: f.fundCode, bankId: f.bankId || null,
         investmentAmount: f.investmentAmount, investmentAmountStr: numFmt(f.investmentAmount),
+        units: f.units != null ? f.units : null,
+        unitsStr: f.units != null ? String(f.units) : '',
         currentValue: f.currentValue, currentValueStr: numFmt(f.currentValue)
       })),
       stocks: groupStocks(detail.stocks.map(s => ({
@@ -2068,7 +2191,8 @@ const submit = async () => {
       fundCode: f.fundCode || null,
       bankId: f.bankId || null,
       investmentAmount: f.investmentAmount,
-      currentValue: f.currentValue
+      currentValue: f.currentValue,
+      units: f.units != null && f.units !== '' ? Number(f.units) : null
     }))
     const payload = {
       snapshotDate: form.snapshotDate,
