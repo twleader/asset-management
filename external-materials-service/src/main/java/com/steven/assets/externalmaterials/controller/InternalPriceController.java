@@ -1,7 +1,9 @@
 package com.steven.assets.externalmaterials.controller;
 
 import com.steven.assets.externalmaterials.service.DividendPersister;
+import com.steven.assets.externalmaterials.service.FundDividendBackfillService;
 import com.steven.assets.externalmaterials.service.FundDividendPoller;
+import com.steven.assets.externalmaterials.service.FundNavBackfillService;
 import com.steven.assets.externalmaterials.service.FundNavPoller;
 import com.steven.assets.externalmaterials.service.MarketClock;
 import com.steven.assets.externalmaterials.service.PricePoller;
@@ -28,6 +30,8 @@ public class InternalPriceController {
     private final DividendPersister dividendPersister;
     private final FundNavPoller fundNavPoller;
     private final FundDividendPoller fundDividendPoller;
+    private final FundNavBackfillService fundNavBackfillService;
+    private final FundDividendBackfillService fundDividendBackfillService;
 
     /**
      * 同步抓所有持股報價、寫 Redis 後回傳統計。
@@ -62,6 +66,20 @@ public class InternalPriceController {
     @PostMapping("/fund-dividend/refresh")
     public FundDividendPoller.RefreshSummary refreshFundDividend() {
         return fundDividendPoller.refreshAll();
+    }
+
+    /** 信託基金 NAV 歷史回補 (Requirement 21)。 */
+    @PostMapping("/fund-nav/backfill")
+    public FundNavBackfillService.BackfillSummary backfillFundNav(
+            @RequestParam(defaultValue = "10") int years) {
+        return fundNavBackfillService.backfillAll(years);
+    }
+
+    /** 信託基金配息歷史回補 (Requirement 21)。 */
+    @PostMapping("/fund-dividend/backfill")
+    public FundDividendBackfillService.BackfillSummary backfillFundDividend(
+            @RequestParam(defaultValue = "10") int years) {
+        return fundDividendBackfillService.backfillAll(years);
     }
 
     @GetMapping("/health")

@@ -37,21 +37,23 @@ public class AssetService {
     private final FundDividendService fundDividendService;
 
     /**
-     * 算 FundHolding currentValue：若 units 非空 → 嘗試 NAV × FX 自動算（Requirement 19），
-     * 失敗（NAV 缺 / FX 缺）就 fallback 用使用者手填值。
+     * 算 FundHolding currentValue：若 units 非空 → 嘗試 NAV(basedate) × FX(basedate) 自動算
+     * (Requirement 19, 21)，失敗（NAV / FX 缺）就 fallback 用使用者手填值。
      */
-    private BigDecimal resolveFundCurrentValue(String fundCode, BigDecimal units, BigDecimal manualCurrentValue) {
+    private BigDecimal resolveFundCurrentValue(String fundCode, BigDecimal units,
+                                               BigDecimal manualCurrentValue, java.time.LocalDate basedate) {
         if (units == null || fundCode == null || fundCode.isBlank()) return manualCurrentValue;
-        return fundNavService.computeCurrentValueTwd(fundCode, units).orElse(manualCurrentValue);
+        return fundNavService.computeCurrentValueTwdOnDate(fundCode, units, basedate).orElse(manualCurrentValue);
     }
 
     /**
-     * 算 FundHolding estimatedDividend (Requirement 20)：units 非空 + 配息歷史齊全才覆寫，
-     * 否則保留前端送進來的值（向後相容 / 手動覆寫）。
+     * 算 FundHolding estimatedDividend (Requirement 20, 21)：units 非空 + 配息歷史齊全才覆寫，
+     * 否則保留前端送進來的值。basedate 用於決定「12 個月區間」與「FX 取值日」。
      */
-    private BigDecimal resolveFundEstimatedDividend(String fundCode, BigDecimal units, BigDecimal manualValue) {
+    private BigDecimal resolveFundEstimatedDividend(String fundCode, BigDecimal units,
+                                                    BigDecimal manualValue, java.time.LocalDate basedate) {
         if (units == null || fundCode == null || fundCode.isBlank()) return manualValue;
-        return fundDividendService.computeAnnualDividendTwd(fundCode, units).orElse(manualValue);
+        return fundDividendService.computeAnnualDividendTwdOnDate(fundCode, units, basedate).orElse(manualValue);
     }
 
     // ===================== Snapshot =====================
@@ -138,8 +140,8 @@ public class AssetService {
         if (req.funds() != null) {
             req.funds().forEach(f -> {
                 Bank bank = f.bankId() != null ? bankRepo.findById(f.bankId()).orElse(null) : null;
-                BigDecimal cv = resolveFundCurrentValue(f.fundCode(), f.units(), f.currentValue());
-                BigDecimal divEst = resolveFundEstimatedDividend(f.fundCode(), f.units(), f.estimatedDividend());
+                BigDecimal cv = resolveFundCurrentValue(f.fundCode(), f.units(), f.currentValue(), req.snapshotDate());
+                BigDecimal divEst = resolveFundEstimatedDividend(f.fundCode(), f.units(), f.estimatedDividend(), req.snapshotDate());
                 FundHolding fund = FundHolding.builder()
                         .snapshot(snapshot)
                         .fundName(f.fundName())
@@ -272,8 +274,8 @@ public class AssetService {
         if (req.funds() != null) {
             req.funds().forEach(f -> {
                 Bank bank = f.bankId() != null ? bankRepo.findById(f.bankId()).orElse(null) : null;
-                BigDecimal cv = resolveFundCurrentValue(f.fundCode(), f.units(), f.currentValue());
-                BigDecimal divEst = resolveFundEstimatedDividend(f.fundCode(), f.units(), f.estimatedDividend());
+                BigDecimal cv = resolveFundCurrentValue(f.fundCode(), f.units(), f.currentValue(), req.snapshotDate());
+                BigDecimal divEst = resolveFundEstimatedDividend(f.fundCode(), f.units(), f.estimatedDividend(), req.snapshotDate());
                 snapshot.getFunds().add(FundHolding.builder()
                     .snapshot(snapshot).fundName(f.fundName()).fundCode(f.fundCode())
                     .bank(bank).investmentAmount(f.investmentAmount()).currentValue(cv)

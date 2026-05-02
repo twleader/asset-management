@@ -93,7 +93,7 @@ export const bffApi = {
     exchangeRate: (date) =>
       api.get('/bff/snapshot-form/exchange-rate', { params: { date } }),
     getLookups: () => api.get('/bff/snapshot-form/lookups'),
-    getFunds: () => api.get('/bff/snapshot-form/funds'),
+    getFunds: (date) => api.get('/bff/snapshot-form/funds', { params: date ? { date } : {} }),
     refreshFundNav: () => api.post('/bff/snapshot-form/fund-nav/refresh')
   },
 
