@@ -103,7 +103,7 @@ const chartOption = computed(() => ({
     }
   },
   legend: { data: ['人均 GDP (USD)', '台股大盤年末收盤', '人均 GDP 成長率'], top: 0 },
-  grid: { left: 70, right: 130, top: 50, bottom: 60 },
+  grid: { left: 130, right: 70, top: 50, bottom: 60 },
   xAxis: {
     type: 'category',
     data: years.value,
@@ -127,7 +127,7 @@ const chartOption = computed(() => ({
     {
       type: 'value',
       name: '成長率 (%)',
-      position: 'right',
+      position: 'left',
       offset: 60,
       axisLine: { show: true, lineStyle: { color: '#94a3b8' } },
       axisLabel: { formatter: v => `${v}%` },
