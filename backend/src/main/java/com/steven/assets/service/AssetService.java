@@ -559,16 +559,46 @@ public class AssetService {
                     changed = true;
                 }
             }
-            // Always resum in case individual dividends were updated externally
-            BigDecimal totalDiv = snapshot.getStocks().stream()
+            // 信託基金 (Requirement 20, 21)：對每筆 fund_holding 用基準日 NAV / 配息歷史重算 estimatedDividend
+            // - 若有 units 直接用 units × annualPerUnitTwd
+            // - 沒 units 但 currentValue > 0 → 用 dividend yield × currentValue 反推
+            for (FundHolding fh : snapshot.getFunds()) {
+                if (fh.getFundCode() == null || fh.getFundCode().isBlank()) continue;
+                java.time.LocalDate basedate = snapshot.getSnapshotDate();
+                BigDecimal newDiv = null;
+                if (fh.getUnits() != null && fh.getUnits().compareTo(BigDecimal.ZERO) > 0) {
+                    newDiv = fundDividendService
+                            .computeAnnualDividendTwdOnDate(fh.getFundCode(), fh.getUnits(), basedate)
+                            .orElse(null);
+                } else if (fh.getCurrentValue() != null && fh.getCurrentValue().compareTo(BigDecimal.ZERO) > 0) {
+                    var navInfo = fundNavService.getNavTwdOnDate(fh.getFundCode(), basedate).orElse(null);
+                    if (navInfo != null) {
+                        newDiv = fundDividendService
+                                .estimateFromCurrentValue(fh.getFundCode(), fh.getCurrentValue(), basedate, navInfo)
+                                .orElse(null);
+                    }
+                }
+                if (newDiv != null && !newDiv.equals(fh.getEstimatedDividend())) {
+                    fh.setEstimatedDividend(newDiv);
+                    changed = true;
+                }
+            }
+            // Always resum (stocks + funds) in case individual dividends were updated externally
+            BigDecimal totalStockDiv = snapshot.getStocks().stream()
                     .filter(st -> st.getEstimatedDividend() != null)
                     .map(StockHolding::getEstimatedDividend)
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
+            BigDecimal totalFundDiv = snapshot.getFunds().stream()
+                    .filter(fh -> fh.getEstimatedDividend() != null)
+                    .map(FundHolding::getEstimatedDividend)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            BigDecimal totalDiv = totalStockDiv.add(totalFundDiv);
             if (changed || !totalDiv.equals(snapshot.getEstimatedAnnualDividend())) {
                 snapshot.setEstimatedAnnualDividend(totalDiv);
                 snapshotRepo.save(snapshot);
                 updatedCount++;
-                log.info("重算配息完成: 快照 {} {} estimatedAnnualDividend={}", snapshot.getId(), snapshot.getSnapshotDate(), totalDiv);
+                log.info("重算配息完成: 快照 {} {} estimatedAnnualDividend={} (stock={}, fund={})",
+                        snapshot.getId(), snapshot.getSnapshotDate(), totalDiv, totalStockDiv, totalFundDiv);
             }
         }
         return updatedCount;

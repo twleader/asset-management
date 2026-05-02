@@ -88,6 +88,23 @@ public class FundDividendService {
                 units.multiply(e.annualPerUnitTwd()).setScale(2, RoundingMode.HALF_UP));
     }
 
+    /**
+     * 從凍結 currentValue 反推年配息估算 (Requirement 21 重算用)：
+     * estimatedDividend = currentValue × (annualPerUnitTwd / twdPerUnit) at basedate
+     * 這樣不依賴 units 即可估算，便於對舊 snapshot 沒回填 units 的情境。
+     */
+    public Optional<BigDecimal> estimateFromCurrentValue(String fundCode, BigDecimal currentValue,
+                                                         LocalDate basedate,
+                                                         FundNavService.LatestNav navInfo) {
+        if (currentValue == null || currentValue.compareTo(BigDecimal.ZERO) <= 0) return Optional.empty();
+        var divEst = getAnnualEstimateOnDate(fundCode, basedate).orElse(null);
+        if (divEst == null || navInfo == null) return Optional.empty();
+        BigDecimal twdPerUnit = navInfo.twdPerUnit();
+        if (twdPerUnit == null || twdPerUnit.compareTo(BigDecimal.ZERO) == 0) return Optional.empty();
+        BigDecimal yield = divEst.annualPerUnitTwd().divide(twdPerUnit, 6, RoundingMode.HALF_UP);
+        return Optional.of(currentValue.multiply(yield).setScale(0, RoundingMode.HALF_UP));
+    }
+
     public record AnnualDividendEstimate(
             String fundCode,
             String currency,
