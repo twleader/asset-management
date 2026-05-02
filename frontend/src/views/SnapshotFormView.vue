@@ -979,7 +979,7 @@
               <el-select v-model="row.fundCode" size="small" filterable clearable style="width:100%"
                 placeholder="（選擇基金 — 至「信託基金設定」管理選項）"
                 @change="onFundCodeChange(row)">
-                <el-option v-for="o in fundOptions" :key="o.value" :label="o.label" :value="o.value" />
+                <el-option v-for="o in fundOptions" :key="o.value" :label="o.label" :value="o.value" :disabled="o.disabled" />
               </el-select>
               <!-- 舊資料 fundCode 為空時顯示原 fundName，以兼容歷史 snapshot 的展示 -->
               <div v-if="!row.fundCode && row.fundName" class="legacy-fund-name">{{ row.fundName }}</div>
@@ -1252,7 +1252,11 @@ const usdDepositTypeOptions = computed(() => depositTypeOptions.value.filter(t =
 // 信託基金主檔（Requirement 19）：含最新 NAV / FX，前端用 fundCode 對應算出 currentValue
 const fundMasterMap      = ref({})    // { [fundCode]: { fundName, bankId, currency, latestNav, latestNavDate, latestFxRate, twdPerUnit } }
 const fundOptions        = computed(() =>
-  Object.values(fundMasterMap.value).map(f => ({ value: f.fundCode, label: `${f.fundCode}　${f.fundName}` }))
+  Object.values(fundMasterMap.value).map(f => ({
+    value: f.fundCode,
+    label: `${f.fundCode}　${f.fundName}${f.active === false ? '（已停售）' : ''}`,
+    disabled: f.active === false
+  }))
 )
 const refreshingFundNav  = ref(false)
 
