@@ -992,20 +992,20 @@
               </el-select>
             </template>
           </el-table-column>
-          <el-table-column label="投資金額" width="130">
+          <el-table-column label="投資金額" width="130" align="right" header-align="right">
             <template #default="{ row }">
               <el-input v-model="row.investmentAmountStr" size="small" style="width:100%" :input-style="{ textAlign: 'right' }"
                 @blur="row.investmentAmount = numParse(row.investmentAmountStr, 0); row.investmentAmountStr = numFmt(row.investmentAmount)" />
             </template>
           </el-table-column>
-          <el-table-column label="單位數" width="130">
+          <el-table-column label="單位數" width="130" align="right" header-align="right">
             <template #default="{ row }">
               <el-input v-model="row.unitsStr" size="small" style="width:100%" :input-style="{ textAlign: 'right' }"
                 placeholder="（選填）"
                 @blur="onUnitsBlur(row)" />
             </template>
           </el-table-column>
-          <el-table-column label="現值" width="160">
+          <el-table-column label="現值" width="160" align="right" header-align="right">
             <template #default="{ row }">
               <div v-if="row.fundCode && row.units != null && row.units !== ''"
                    style="display:flex;align-items:center;justify-content:flex-end;gap:6px">
