@@ -321,8 +321,9 @@ public class HistoricalDataService {
 
                 BigDecimal buy = decimal(row, "cash_buy");
                 BigDecimal sell = decimal(row, "cash_sell");
-                if (buy == null) buy = decimal(row, "spot_buy");
-                if (sell == null) sell = decimal(row, "spot_sell");
+                // FinMind 對非現金交易幣別（如 ZAR / EUR）cash_buy / cash_sell 一律 0；fallback 到 spot
+                if (buy == null || buy.compareTo(BigDecimal.ZERO) == 0) buy = decimal(row, "spot_buy");
+                if (sell == null || sell.compareTo(BigDecimal.ZERO) == 0) sell = decimal(row, "spot_sell");
                 if (buy == null && sell == null) continue;
 
                 rateHistRepo.save(ExchangeRateHistory.builder()
