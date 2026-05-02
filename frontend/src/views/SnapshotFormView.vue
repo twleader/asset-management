@@ -1285,10 +1285,23 @@ async function loadInstitutions() {
 
 async function loadFundMasters() {
   try {
-    const list = await bffApi.snapshotForm.getFunds()
+    // Requirement 21：傳 snapshotDate 讓 backend 取「基準日 NAV / FX / 配息」而非最新值
+    const list = await bffApi.snapshotForm.getFunds(form.snapshotDate || undefined)
     const map = {}
     for (const f of list) map[f.fundCode] = f
     fundMasterMap.value = map
+    // 重抓後既有 row 的現值 / 預估配息要用新基準日 NAV 重算
+    for (const row of form.funds) {
+      if (row.fundCode && row.units != null && row.units !== '') {
+        const cv = autoCalcFundCurrentValue(row.fundCode, row.units)
+        if (cv != null) {
+          row.currentValue = cv
+          row.currentValueStr = numFmt(cv)
+        }
+        const div = autoCalcFundDividend(row.fundCode, row.units)
+        if (div != null) row.estimatedDividend = div
+      }
+    }
   } catch (e) {
     console.warn('載入基金主檔失敗', e)
   }
@@ -2130,6 +2143,8 @@ watch(() => form.snapshotDate, async (newDate, oldDate) => {
   if (form.stocks.length > 0) {
     await loadAllPrices()
   }
+  // 4. Requirement 21：fund_master 預載 NAV / 配息也要用新基準日重抓
+  await loadFundMasters()
 })
 
 // ===== Lifecycle =====

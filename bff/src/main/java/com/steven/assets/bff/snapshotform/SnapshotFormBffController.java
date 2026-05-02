@@ -166,11 +166,15 @@ public class SnapshotFormBffController {
      * 前端以此即時預覽 currentValue = units × twdPerUnit。
      */
     @GetMapping("/funds")
-    public Mono<ResponseEntity<List<Map<String, Object>>>> listFunds() {
-        // 回傳所有基金（含 inactive），前端 dropdown 對 inactive 顯示「(已停售)」並 disabled，
-        // 確保歷史 snapshot 已選的 inactive 基金能正確顯示 label，不會只顯示 raw fundCode。
+    public Mono<ResponseEntity<List<Map<String, Object>>>> listFunds(
+            @RequestParam(required = false) String date) {
+        // 回傳所有基金（含 inactive）。帶 date 時 NAV / FX / 配息估算改用該基準日（Requirement 21）。
         return businessServicesClient.get()
-                .uri("/api/funds")
+                .uri(uri -> {
+                    var b = uri.path("/api/funds");
+                    if (date != null && !date.isBlank()) b.queryParam("date", date);
+                    return b.build();
+                })
                 .retrieve()
                 .bodyToMono(LIST_MAP)
                 .onErrorReturn(Collections.emptyList())

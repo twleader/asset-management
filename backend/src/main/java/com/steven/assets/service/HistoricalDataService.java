@@ -504,11 +504,13 @@ public class HistoricalDataService {
                 }
             }
 
-            // 匯率：若最早資料晚於 10 年前，強制從 10 年前回補
-            LocalDate rateMinDate = rateHistRepo.findMinDate("USD").orElse(null);
-            if (rateMinDate == null || since.isBefore(rateMinDate)) {
-                log.info("啟動補齊 USD 匯率 (minDate={}，補齊至 {})", rateMinDate, since);
-                backfillExchangeRateFrom("USD", since);
+            // 匯率：對所有需追蹤幣別（USD + fund_master 上的非 TWD 幣別）若最早資料晚於 10 年前，強制從 10 年前回補
+            for (String currency : currenciesToTrack()) {
+                LocalDate rateMinDate = rateHistRepo.findMinDate(currency).orElse(null);
+                if (rateMinDate == null || since.isBefore(rateMinDate)) {
+                    log.info("啟動補齊 {} 匯率 (minDate={}，補齊至 {})", currency, rateMinDate, since);
+                    backfillExchangeRateFrom(currency, since);
+                }
             }
             log.info("啟動補齊完成");
         });

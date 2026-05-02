@@ -58,11 +58,15 @@ public class FundNavController {
 
     // ───────── fund_master CRUD ─────────
 
-    /** 全部 fund_master（含 inactive）— 設定頁用。SnapshotForm BFF 自行過濾 active。 */
+    /**
+     * 全部 fund_master（含 inactive）。
+     * 帶 ?date=YYYY-MM-DD 時，每筆 NAV / FX / 配息估算改用該基準日（Requirement 21）。
+     */
     @GetMapping("/funds")
-    public List<FundDto> listFunds() {
+    public List<FundDto> listFunds(@RequestParam(required = false) String date) {
+        LocalDate basedate = (date == null || date.isBlank()) ? null : LocalDate.parse(date);
         return fundMasterRepo.findAll().stream()
-                .map(this::toDto)
+                .map(m -> toDto(m, basedate))
                 .toList();
     }
 
@@ -129,6 +133,37 @@ public class FundNavController {
                     "total", resp.path("total").asInt(0));
         } catch (Exception e) {
             log.warn("呼叫 external-materials-service /internal/fund-nav/refresh 失敗: {}", e.toString());
+            return Map.of("error", e.toString());
+        }
+    }
+
+    /** 信託基金 NAV 歷史回補 (Requirement 21)，proxy 至 external-materials-service。 */
+    @PostMapping(value = "/fund-nav/backfill", produces = MediaType.APPLICATION_JSON_VALUE)
+    public Map<String, Object> backfillNav(@RequestParam(defaultValue = "10") int years) {
+        return proxyBackfill("/internal/fund-nav/backfill?years=" + years);
+    }
+
+    /** 信託基金配息歷史回補 (Requirement 21)。 */
+    @PostMapping(value = "/fund-dividend/backfill", produces = MediaType.APPLICATION_JSON_VALUE)
+    public Map<String, Object> backfillDividend(@RequestParam(defaultValue = "10") int years) {
+        return proxyBackfill("/internal/fund-dividend/backfill?years=" + years);
+    }
+
+    private Map<String, Object> proxyBackfill(String path) {
+        try {
+            JsonNode resp = externalClient.post()
+                    .uri(path)
+                    .retrieve()
+                    .bodyToMono(JsonNode.class)
+                    .block(java.time.Duration.ofMinutes(5));
+            if (resp == null) return Map.of("fundOk", 0, "fundFail", 0, "total", 0, "rowsWritten", 0);
+            return Map.of(
+                    "fundOk", resp.path("fundOk").asInt(0),
+                    "fundFail", resp.path("fundFail").asInt(0),
+                    "total", resp.path("total").asInt(0),
+                    "rowsWritten", resp.path("rowsWritten").asInt(0));
+        } catch (Exception e) {
+            log.warn("呼叫 external-materials-service {} 失敗: {}", path, e.toString());
             return Map.of("error", e.toString());
         }
     }
@@ -214,9 +249,11 @@ public class FundNavController {
             @NotBlank String fundclearClassCode
     ) {}
 
-    private FundDto toDto(FundMaster m) {
-        var latest = fundNavService.getLatestNavTwd(m.getFundCode()).orElse(null);
-        var div = fundDividendService.getAnnualEstimateTwd(m.getFundCode()).orElse(null);
+    private FundDto toDto(FundMaster m) { return toDto(m, null); }
+
+    private FundDto toDto(FundMaster m, LocalDate basedate) {
+        var latest = fundNavService.getNavTwdOnDate(m.getFundCode(), basedate).orElse(null);
+        var div = fundDividendService.getAnnualEstimateOnDate(m.getFundCode(), basedate).orElse(null);
         return new FundDto(
                 m.getFundCode(),
                 m.getFundName(),

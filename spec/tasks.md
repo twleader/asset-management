@@ -1498,3 +1498,24 @@ Task 54 把 fund_master 7 筆寫死在 DataInitializer，使用者沒有 UI 可�
         units 變更時即時算；底部 sec-summary 加「預估年配息」彙總
 - [ ] 56.14 commit + spec 同步
 
+### Task 57: 信託基金歷史 NAV / 配息 / FX 回補 + 基準日估值
+
+對應 Requirements: Requirement 21（信託基金歷史 NAV 與基準日估值）
+
+#### 背景
+
+既有 `fund_nav` / `fund_dividend_history` 只抓「最新」/「近 13 月」。要支援編輯舊 snapshot 用基準日 NAV / FX / 配息計算，需 10 年歷史回補 + AssetService 改為 date-aware。決議 A：存檔覆寫使用者手填 currentValue 為基準日值。
+
+#### Steps:
+
+- [ ] 57.1 external-materials-service `FundNavBackfillService`：對每支 active 基金分段（每段一年）抓 10 年 NAV，呼叫既有 `FundNavSourceQuery.upsertNav`；`InternalPriceController` 加 `POST /internal/fund-nav/backfill?years=10`
+- [ ] 57.2 external-materials-service `FundDividendBackfillService`：同 57.1 模式，10 年配息
+- [ ] 57.3 backend `HistoricalDataService.startupBackfill` 擴充：對 `fund_master` 中所有非 TWD currency 補 10 年（`backfillExchangeRateFrom(currency, 10y)`）
+- [ ] 57.4 backend `FundNavService.getNavTwdOnDate(fundCode, basedate)`：closest-on-or-before NAV + 該日 closest FX；TWD fxRate=1
+- [ ] 57.5 backend `FundDividendService.getAnnualEstimateOnDate(fundCode, basedate)`：取 `[basedate-12m, basedate]` 區間 amount 加總 × 該日 FX
+- [ ] 57.6 backend `AssetService` snapshot create / update 把 basedate 傳進 `resolveFundCurrentValue` / `resolveFundEstimatedDividend`；helper 改 signature
+- [ ] 57.7 backend `FundNavController` `POST /api/fund-nav/backfill?years=10`、`POST /api/fund-dividend/backfill?years=10` proxy；`FundDto` 加 `?date=YYYY-MM-DD` 支援基準日值
+- [ ] 57.8 BFF `SnapshotFormBffController.listFunds` 接 `?date=YYYY-MM-DD` 參數透傳到 backend
+- [ ] 57.9 frontend `bffApi.snapshotForm.getFunds(date)` 加 date 參數；`loadFundMasters` 帶 `form.snapshotDate`；改 snapshotDate 時重抓
+- [ ] 57.10 commit + spec 同步
+

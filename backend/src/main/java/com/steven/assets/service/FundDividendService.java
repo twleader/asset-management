@@ -34,12 +34,22 @@ public class FundDividendService {
      * 取得每單位年配息台幣（近 12 個月加總 × FX）。無資料回 Optional.empty。
      */
     public Optional<AnnualDividendEstimate> getAnnualEstimateTwd(String fundCode) {
+        return getAnnualEstimateOnDate(fundCode, null);
+    }
+
+    /**
+     * 指定基準日的年配息估算 (Requirement 21)：
+     * basedate=null → 現在往前 12 個月
+     * basedate=X → [X-12 個月, X] 區間 amount 加總 × 該日 FX (closest-on-or-before)
+     */
+    public Optional<AnnualDividendEstimate> getAnnualEstimateOnDate(String fundCode, LocalDate basedate) {
         FundMaster master = fundMasterRepo.findById(fundCode).orElse(null);
         if (master == null) return Optional.empty();
 
-        LocalDate since = LocalDate.now().minusMonths(12);
+        LocalDate to = basedate != null ? basedate : LocalDate.now();
+        LocalDate from = to.minusMonths(12);
         List<FundDividendHistory> rows = divHistRepo
-                .findByFundCodeAndBaseDateGreaterThanEqualOrderByBaseDateDesc(fundCode, since);
+                .findByFundCodeAndBaseDateBetweenOrderByBaseDateDesc(fundCode, from, to);
         if (rows.isEmpty()) return Optional.empty();
 
         BigDecimal annualPerUnit = rows.stream()
@@ -50,11 +60,13 @@ public class FundDividendService {
         if ("TWD".equalsIgnoreCase(master.getCurrency())) {
             fxRate = BigDecimal.ONE;
         } else {
-            ExchangeRateHistory fx = rateHistRepo
-                    .findFirstByCurrencyOrderByRateDateDesc(master.getCurrency().toUpperCase())
-                    .orElse(null);
+            String cur = master.getCurrency().toUpperCase();
+            ExchangeRateHistory fx = (basedate == null
+                    ? rateHistRepo.findFirstByCurrencyOrderByRateDateDesc(cur)
+                    : rateHistRepo.findClosestRate(cur, basedate)
+            ).orElse(null);
             if (fx == null) {
-                log.warn("找不到 {} 匯率，無法計算 {} 年配息估算", master.getCurrency(), fundCode);
+                log.warn("找不到 {} 匯率（basedate={}），無法計算 {} 年配息估算", cur, basedate, fundCode);
                 return Optional.empty();
             }
             fxRate = fx.getMidRate();
@@ -64,10 +76,15 @@ public class FundDividendService {
                 fundCode, master.getCurrency(), annualPerUnit, annualPerUnitTwd, fxRate, rows.size()));
     }
 
-    /** 給定 units 算年配息台幣（給 AssetService.createSnapshot 用）。 */
+    /** 給定 units 算年配息台幣（最新）。 */
     public Optional<BigDecimal> computeAnnualDividendTwd(String fundCode, BigDecimal units) {
+        return computeAnnualDividendTwdOnDate(fundCode, units, null);
+    }
+
+    /** 給定 units 與基準日算年配息台幣 (Requirement 21)。 */
+    public Optional<BigDecimal> computeAnnualDividendTwdOnDate(String fundCode, BigDecimal units, LocalDate basedate) {
         if (units == null) return Optional.empty();
-        return getAnnualEstimateTwd(fundCode).map(e ->
+        return getAnnualEstimateOnDate(fundCode, basedate).map(e ->
                 units.multiply(e.annualPerUnitTwd()).setScale(2, RoundingMode.HALF_UP));
     }
 
