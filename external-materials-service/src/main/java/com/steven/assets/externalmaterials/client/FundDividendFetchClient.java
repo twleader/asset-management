@@ -54,11 +54,21 @@ public class FundDividendFetchClient {
     /** 抓近 N 個月的配息紀錄（依 base_date 由新到舊排序）。失敗回 empty list。 */
     public List<DividendRow> fetchRecent(String site, String fcOrg, String fcFund,
                                          String fcClass, int monthsBack) {
+        return fetchRange(site, fcOrg, fcFund, fcClass, monthsBack, 0);
+    }
+
+    /**
+     * 抓 [today - monthsBackFrom, today - monthsBackTo] 區間。
+     * 一次 API 呼叫上限約 60 筆，請以「每段 12 個月」分段呼叫避免被截斷。
+     */
+    public List<DividendRow> fetchRange(String site, String fcOrg, String fcFund,
+                                        String fcClass, int monthsBackFrom, int monthsBackTo) {
         try {
             LocalDate today = LocalDate.now();
-            LocalDate from = today.minusMonths(monthsBack);
+            LocalDate from = today.minusMonths(monthsBackFrom);
+            LocalDate to = today.minusMonths(monthsBackTo);
             String beginYM = MONTH_FMT.format(from);
-            String endYM = MONTH_FMT.format(today);
+            String endYM = MONTH_FMT.format(to);
 
             boolean offshore = "offshore".equalsIgnoreCase(site);
             String url = BASE + (offshore
@@ -75,7 +85,7 @@ public class FundDividendFetchClient {
                   + "\"_pageNum\":1,\"_pageSize\":50}",
                     fcOrg, fcFund, fcClass, beginYM, endYM,
                     from.getYear(), from.getMonthValue(),
-                    today.getYear(), today.getMonthValue());
+                    to.getYear(), to.getMonthValue());
 
             HttpRequest req = HttpRequest.newBuilder()
                     .uri(URI.create(url))
