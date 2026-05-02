@@ -41,10 +41,11 @@ public class FundDividendPoller {
                         f.site(), f.fundclearOrgCode(), f.fundclearFundCode(),
                         f.fundclearClassCode(), MONTHS_BACK);
                 if (rows.isEmpty()) {
-                    log.info("配息抓不到 {} (site={}, org={}, fund={}, class={})",
-                            f.fundCode(), f.site(), f.fundclearOrgCode(),
+                    // 沒配息資料（累積型基金或網路錯誤），不算失敗 — 算 0 配息基金
+                    log.info("配息 0 筆 {} (累積型 / 無配息)：org={} fund={} class={}",
+                            f.fundCode(), f.fundclearOrgCode(),
                             f.fundclearFundCode(), f.fundclearClassCode());
-                    fail++;
+                    success++;
                     continue;
                 }
                 for (DividendRow r : rows) {
