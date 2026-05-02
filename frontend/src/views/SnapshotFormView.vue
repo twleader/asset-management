@@ -1066,6 +1066,11 @@
               <small style="font-weight:400"> ({{ pct(fundTotalInvest > 0 ? fundTotalProfit / fundTotalInvest : 0) }})</small>
             </span>
           </div>
+          <div class="ds-sep" />
+          <div class="ds-item">
+            <span class="ds-label">預估年配息</span>
+            <span class="ds-val sb-dividend">{{ fmt(fundTotalDividend) }}</span>
+          </div>
         </div>
       </el-card>
 
@@ -1553,6 +1558,7 @@ const depositDemand = computed(() =>
 const fundTotalInvest  = computed(() => form.funds.reduce((s, f) => s + Number(f.investmentAmount || 0), 0))
 const fundTotalValue   = computed(() => form.funds.reduce((s, f) => s + Number(f.currentValue || 0), 0))
 const fundTotalProfit  = computed(() => fundTotalValue.value - fundTotalInvest.value)
+const fundTotalDividend = computed(() => form.funds.reduce((s, f) => s + Number(f.estimatedDividend || 0), 0))
 
 // ===== Computed: filtered stock groups =====
 const twStocks = computed(() => form.stocks.filter(s => s.market === '台股'))
@@ -1611,7 +1617,8 @@ const summaryFundCost = computed(() => pickStored('totalFundCost', fundTotalInve
 const summaryFundProfit = computed(() => summaryFundValue.value - summaryFundCost.value)
 const summaryTotalAssets = computed(() => pickStored('totalAssets',
   depositTotal.value + fundTotalValue.value + allSummary.value.value))
-const summaryDividend = computed(() => pickStored('estimatedAnnualDividend', allSummary.value.dividend))
+// 預估年配息合計 = 股票 + 基金（即時計算；不用 pickStored 因為基金部分使用者改 units 時要即時反應）
+const summaryDividend = computed(() => allSummary.value.dividend + fundTotalDividend.value)
 
 // ===== Deposit helpers =====
 const transitTypeOptions = ref([])
