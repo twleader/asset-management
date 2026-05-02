@@ -94,7 +94,7 @@ const chartOption = computed(() => ({
         const v = p.value
         let txt
         if (v == null) txt = '-'
-        else if (p.seriesName.includes('漲跌幅')) txt = `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`
+        else if (p.seriesName.includes('成長率')) txt = `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`
         else if (p.seriesName.includes('GDP')) txt = `US$ ${Number(v).toLocaleString()}`
         else txt = Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
         s += `${p.marker}${p.seriesName}: ${txt}<br/>`
@@ -102,7 +102,7 @@ const chartOption = computed(() => ({
       return s
     }
   },
-  legend: { data: ['人均 GDP (USD)', '台股大盤年末收盤', '人均 GDP 漲跌幅'], top: 0 },
+  legend: { data: ['人均 GDP (USD)', '台股大盤年末收盤', '人均 GDP 成長率'], top: 0 },
   grid: { left: 70, right: 130, top: 50, bottom: 60 },
   xAxis: {
     type: 'category',
@@ -126,7 +126,7 @@ const chartOption = computed(() => ({
     },
     {
       type: 'value',
-      name: '漲跌幅 (%)',
+      name: '成長率 (%)',
       position: 'right',
       offset: 60,
       axisLine: { show: true, lineStyle: { color: '#94a3b8' } },
@@ -162,7 +162,7 @@ const chartOption = computed(() => ({
       itemStyle: { color: '#dc2626' }
     },
     {
-      name: '人均 GDP 漲跌幅',
+      name: '人均 GDP 成長率',
       type: 'bar',
       yAxisIndex: 2,
       data: gdpYoy.value,
