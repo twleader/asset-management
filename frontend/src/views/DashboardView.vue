@@ -333,6 +333,11 @@
                 <small style="font-weight:400"> ({{ formatPct(fundSummary.profitRate) }})</small>
               </span>
             </div>
+            <div class="csb-sep" />
+            <div class="csb-item">
+              <span class="csb-label">預估年配息</span>
+              <span class="csb-val" style="color:#16a34a">{{ formatCurrency(fundSummary.totalDividend) }}</span>
+            </div>
           </div>
         </el-card>
       </el-col>
@@ -941,9 +946,10 @@ const fundSummary = computed(() => {
   const funds = fundFilteredHoldings.value
   const totalValue = funds.reduce((s, f) => s + Number(f.currentValue || 0), 0)
   const totalCost  = funds.reduce((s, f) => s + Number(f.investmentAmount || 0), 0)
+  const totalDividend = funds.reduce((s, f) => s + Number(f.estimatedDividend || 0), 0)
   const profit     = totalValue - totalCost
   const profitRate = totalCost > 0 ? profit / totalCost : 0
-  return { totalValue, totalCost, profit, profitRate }
+  return { totalValue, totalCost, totalDividend, profit, profitRate }
 })
 
 const fundBarOption = computed(() => {
