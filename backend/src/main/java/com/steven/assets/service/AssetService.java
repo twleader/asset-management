@@ -33,6 +33,16 @@ public class AssetService {
     private final BrokerRepository brokerRepo;
     private final StockRepository stockMasterRepo;
     private final TransitFundTypeRepository transitFundTypeRepo;
+    private final FundNavService fundNavService;
+
+    /**
+     * 算 FundHolding currentValue：若 units 非空 → 嘗試 NAV × FX 自動算（Requirement 19），
+     * 失敗（NAV 缺 / FX 缺）就 fallback 用使用者手填值。
+     */
+    private BigDecimal resolveFundCurrentValue(String fundCode, BigDecimal units, BigDecimal manualCurrentValue) {
+        if (units == null || fundCode == null || fundCode.isBlank()) return manualCurrentValue;
+        return fundNavService.computeCurrentValueTwd(fundCode, units).orElse(manualCurrentValue);
+    }
 
     // ===================== Snapshot =====================
 
@@ -118,13 +128,15 @@ public class AssetService {
         if (req.funds() != null) {
             req.funds().forEach(f -> {
                 Bank bank = f.bankId() != null ? bankRepo.findById(f.bankId()).orElse(null) : null;
+                BigDecimal cv = resolveFundCurrentValue(f.fundCode(), f.units(), f.currentValue());
                 FundHolding fund = FundHolding.builder()
                         .snapshot(snapshot)
                         .fundName(f.fundName())
                         .fundCode(f.fundCode())
                         .bank(bank)
                         .investmentAmount(f.investmentAmount())
-                        .currentValue(f.currentValue())
+                        .currentValue(cv)
+                        .units(f.units())
                         .build();
                 snapshot.getFunds().add(fund);
             });
@@ -248,9 +260,11 @@ public class AssetService {
         if (req.funds() != null) {
             req.funds().forEach(f -> {
                 Bank bank = f.bankId() != null ? bankRepo.findById(f.bankId()).orElse(null) : null;
+                BigDecimal cv = resolveFundCurrentValue(f.fundCode(), f.units(), f.currentValue());
                 snapshot.getFunds().add(FundHolding.builder()
                     .snapshot(snapshot).fundName(f.fundName()).fundCode(f.fundCode())
-                    .bank(bank).investmentAmount(f.investmentAmount()).currentValue(f.currentValue()).build());
+                    .bank(bank).investmentAmount(f.investmentAmount()).currentValue(cv)
+                    .units(f.units()).build());
             });
         }
         if (req.stocks() != null) {
@@ -657,7 +671,8 @@ public class AssetService {
                     f.getId(), f.getFundName(), f.getFundCode(),
                     f.getBank() != null ? f.getBank().getId() : null,
                     f.getBank() != null ? f.getBank().getDisplayName() : null,
-                    f.getInvestmentAmount(), f.getCurrentValue(), f.getProfit(), f.getProfitRate()
+                    f.getInvestmentAmount(), f.getCurrentValue(), f.getUnits(),
+                    f.getProfit(), f.getProfitRate()
                 )).toList();
 
         // 快照匯率作為 fallback

@@ -1,6 +1,7 @@
 package com.steven.assets.externalmaterials.controller;
 
 import com.steven.assets.externalmaterials.service.DividendPersister;
+import com.steven.assets.externalmaterials.service.FundNavPoller;
 import com.steven.assets.externalmaterials.service.MarketClock;
 import com.steven.assets.externalmaterials.service.PricePoller;
 import com.steven.assets.externalmaterials.service.PricePoller.RefreshSummary;
@@ -24,6 +25,7 @@ public class InternalPriceController {
     private final PricePoller poller;
     private final MarketClock clock;
     private final DividendPersister dividendPersister;
+    private final FundNavPoller fundNavPoller;
 
     /**
      * 同步抓所有持股報價、寫 Redis 後回傳統計。
@@ -41,6 +43,15 @@ public class InternalPriceController {
     public Map<String, Object> syncDividend(@RequestParam String code, @RequestParam String market) {
         int n = dividendPersister.syncOne(code, market);
         return Map.of("written", n);
+    }
+
+    /**
+     * 同步全抓信託基金 NAV 寫入 fund_nav 表（Requirement 19）。
+     * Backend / BFF 「刷新最新淨值」按鈕對應內部觸發。
+     */
+    @PostMapping("/fund-nav/refresh")
+    public FundNavPoller.RefreshSummary refreshFundNav() {
+        return fundNavPoller.refreshAll();
     }
 
     @GetMapping("/health")

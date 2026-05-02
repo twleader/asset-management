@@ -161,6 +161,35 @@ public class SnapshotFormBffController {
     }
 
     /**
+     * GET /api/bff/snapshot-form/funds
+     * 信託基金主檔（Requirement 19）：每筆已含 latestNav / latestFxRate / latestNavDate / twdPerUnit，
+     * 前端以此即時預覽 currentValue = units × twdPerUnit。
+     */
+    @GetMapping("/funds")
+    public Mono<ResponseEntity<List<Map<String, Object>>>> listFunds() {
+        return businessServicesClient.get()
+                .uri("/api/funds")
+                .retrieve()
+                .bodyToMono(LIST_MAP)
+                .onErrorReturn(Collections.emptyList())
+                .map(ResponseEntity::ok);
+    }
+
+    /**
+     * POST /api/bff/snapshot-form/fund-nav/refresh
+     * 觸發後端 → external-materials-service 立即刷新所有基金 NAV，回傳 { success, failed, total }。
+     */
+    @PostMapping("/fund-nav/refresh")
+    public Mono<ResponseEntity<Map<String, Object>>> refreshFundNav() {
+        return businessServicesClient.post()
+                .uri("/api/fund-nav/refresh")
+                .retrieve()
+                .bodyToMono(MAP)
+                .onErrorReturn(Map.of("error", "external service unreachable"))
+                .map(ResponseEntity::ok);
+    }
+
+    /**
      * GET /api/bff/snapshot-form/{id}
      * 編輯模式 bootstrap：回傳 enriched detail + mergedStocks（同 snapshot-detail）。
      * 表單頁雖然會用自己的 groupStocks 處理巢狀資料，但此端點仍提供一致的入口。

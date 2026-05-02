@@ -41,6 +41,7 @@ public class HistoricalDataService {
     private final ExchangeRateHistoryRepository rateHistRepo;
     private final AssetSnapshotRepository snapshotRepo;
     private final StockRepository stockMasterRepo;
+    private final com.steven.assets.repository.FundMasterRepository fundMasterRepo;
 
     /** FinMind API token（免費註冊，未設定時走匿名額度，超過會回 402） */
     @Value("${finmind.token:${FINMIND_TOKEN:}}")
@@ -516,9 +517,26 @@ public class HistoricalDataService {
     @Scheduled(cron = "0 0 17 * * MON-FRI", zone = "Asia/Taipei")
     public void dailyExchangeRateUpdate() {
         log.info("排程：更新匯率（收盤後，FinMind 回補 + 清理舊資料）");
-        backfillExchangeRate("USD", LocalDate.now().minusDays(5));
-        purgeOldExchangeRates("USD", 10);
+        for (String currency : currenciesToTrack()) {
+            backfillExchangeRate(currency, LocalDate.now().minusDays(5));
+            purgeOldExchangeRates(currency, 10);
+        }
         purgeOldStockPriceHistory(10);
+    }
+
+    /**
+     * 系統需追蹤的非 TWD 計價幣別集合：股票美股 USD + fund_master 上所有非 TWD 幣別 (Requirement 19)。
+     */
+    private java.util.Set<String> currenciesToTrack() {
+        java.util.Set<String> set = new java.util.LinkedHashSet<>();
+        set.add("USD");
+        for (com.steven.assets.model.FundMaster fm : fundMasterRepo.findByActiveTrue()) {
+            String c = fm.getCurrency();
+            if (c != null && !c.isBlank() && !"TWD".equalsIgnoreCase(c)) {
+                set.add(c.toUpperCase());
+            }
+        }
+        return set;
     }
 
     /**
@@ -546,7 +564,9 @@ public class HistoricalDataService {
         // 09:00 整點跳過（市場尚未開盤）
         if (hour == 9 && minute < 5) return;
         log.info("排程：盤中更新匯率（台灣銀行） ({}:{})", hour, String.format("%02d", minute));
-        fetchBotExchangeRate("USD");
+        for (String currency : currenciesToTrack()) {
+            fetchBotExchangeRate(currency);
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════

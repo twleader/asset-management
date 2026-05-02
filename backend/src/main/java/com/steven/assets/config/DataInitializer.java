@@ -3,11 +3,13 @@ package com.steven.assets.config;
 import com.steven.assets.model.Bank;
 import com.steven.assets.model.BrokerEntity;
 import com.steven.assets.model.DepositTypeEntity;
+import com.steven.assets.model.FundMaster;
 import com.steven.assets.model.MarketType;
 import com.steven.assets.model.TransitFundType;
 import com.steven.assets.repository.BankRepository;
 import com.steven.assets.repository.BrokerRepository;
 import com.steven.assets.repository.DepositTypeRepository;
+import com.steven.assets.repository.FundMasterRepository;
 import com.steven.assets.repository.MarketTypeRepository;
 import com.steven.assets.repository.TransitFundTypeRepository;
 import lombok.RequiredArgsConstructor;
@@ -33,6 +35,7 @@ public class DataInitializer implements ApplicationRunner {
     private final DepositTypeRepository depositTypeRepo;
     private final MarketTypeRepository marketTypeRepo;
     private final TransitFundTypeRepository transitFundTypeRepo;
+    private final FundMasterRepository fundMasterRepo;
 
     @Override
     @Transactional
@@ -42,6 +45,7 @@ public class DataInitializer implements ApplicationRunner {
         seedDepositTypes();
         seedMarketTypes();
         seedTransitFundTypes();
+        seedFundMasters();
     }
 
     private void seedBanks() {
@@ -160,6 +164,46 @@ public class DataInitializer implements ApplicationRunner {
                         .build());
                 log.info("初始化在途款項類型: {}", s.displayName());
             }
+        }
+    }
+
+    private void seedFundMasters() {
+        // (fundCode, fundName, bankCode, currency, site, fundclearOrgCode, fundclearFundCode, fundclearClassCode)
+        record FundSeed(String fundCode, String fundName, String bankCode, String currency,
+                        String site, String fcOrg, String fcFund, String fcClass) {}
+
+        List<FundSeed> seeds = List.of(
+            new FundSeed("02A8", "富達亞洲非投資等級債券基金 A股F1穩定月配息美元",
+                "huanan", "USD", "offshore", "043", "A003800030", "LU0937949237"),
+            new FundSeed("02B9", "富達歐洲入息基金 A股F1穩定月配息美元避險",
+                "huanan", "USD", "offshore", "043", "A003800063", "LU0997587240"),
+            new FundSeed("01C2", "摩根環球策略債券基金 JPM美元A股每月派息",
+                "huanan", "USD", "offshore", "007", "A001100067", "GSBAMU"),
+            new FundSeed("1680", "聯博全球非投資等級債券基金 AA穩定月配南非幣避險",
+                "huanan", "ZAR", "offshore", "029", "A001800015", "ABGHYAAZARH"),
+            new FundSeed("24B2", "施羅德環球收息債券 南非幣避險A月配固定C",
+                "huanan", "ZAR", "offshore", "052", "A004200088", "LU1884787869"),
+            new FundSeed("1616", "聯博全球非投資等級債券基金 AT股美元",
+                "huanan", "USD", "offshore", "029", "A001800015", "ABGHYATUSD"),
+            new FundSeed("93100953A", "元大日本龍頭企業基金 新台幣A類型",
+                "yuanta", "TWD", "onshore", "A0005", "93100953", "93100953A")
+        );
+
+        for (FundSeed s : seeds) {
+            if (fundMasterRepo.existsById(s.fundCode())) continue;
+            Bank bank = bankRepo.findByCode(s.bankCode()).orElse(null);
+            fundMasterRepo.save(FundMaster.builder()
+                    .fundCode(s.fundCode())
+                    .fundName(s.fundName())
+                    .bank(bank)
+                    .currency(s.currency())
+                    .site(s.site())
+                    .fundclearOrgCode(s.fcOrg())
+                    .fundclearFundCode(s.fcFund())
+                    .fundclearClassCode(s.fcClass())
+                    .active(true)
+                    .build());
+            log.info("初始化基金主檔: {} {}", s.fundCode(), s.fundName());
         }
     }
 }

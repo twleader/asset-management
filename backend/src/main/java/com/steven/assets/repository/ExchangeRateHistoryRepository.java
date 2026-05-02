@@ -31,4 +31,7 @@ public interface ExchangeRateHistoryRepository extends JpaRepository<ExchangeRat
     /** 取得指定日期或之前最近的匯率 (用於歷史交易查匯率) */
     @Query("SELECT e FROM ExchangeRateHistory e WHERE e.currency = ?1 AND e.rateDate <= ?2 ORDER BY e.rateDate DESC LIMIT 1")
     Optional<ExchangeRateHistory> findClosestRate(String currency, LocalDate date);
+
+    /** 該幣別最新一筆匯率（不限日期）。 */
+    Optional<ExchangeRateHistory> findFirstByCurrencyOrderByRateDateDesc(String currency);
 }
