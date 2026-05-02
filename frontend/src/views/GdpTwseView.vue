@@ -78,6 +78,12 @@ async function onRefresh() {
   }
 }
 
+// 人均 GDP 年增率（USD 基礎）：以前一年值反推 ((curr - prev) / prev × 100)；首個年無 prev → null
+const gdpYoy = computed(() => gdp.value.map((v, i) => {
+  if (i === 0 || v == null || gdp.value[i - 1] == null || gdp.value[i - 1] === 0) return null
+  return Number(((v - gdp.value[i - 1]) / gdp.value[i - 1] * 100).toFixed(2))
+}))
+
 const chartOption = computed(() => ({
   tooltip: {
     trigger: 'axis',
@@ -86,17 +92,18 @@ const chartOption = computed(() => ({
       let s = `<strong>${year}</strong><br/>`
       params.forEach(p => {
         const v = p.value
-        const txt = v == null ? '-' :
-          (p.seriesName.includes('GDP')
-            ? `US$ ${Number(v).toLocaleString()}`
-            : Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
+        let txt
+        if (v == null) txt = '-'
+        else if (p.seriesName.includes('漲跌幅')) txt = `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`
+        else if (p.seriesName.includes('GDP')) txt = `US$ ${Number(v).toLocaleString()}`
+        else txt = Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
         s += `${p.marker}${p.seriesName}: ${txt}<br/>`
       })
       return s
     }
   },
-  legend: { data: ['人均 GDP (USD)', '台股大盤年末收盤'], top: 0 },
-  grid: { left: 70, right: 70, top: 50, bottom: 60 },
+  legend: { data: ['人均 GDP (USD)', '台股大盤年末收盤', '人均 GDP 漲跌幅'], top: 0 },
+  grid: { left: 70, right: 130, top: 50, bottom: 60 },
   xAxis: {
     type: 'category',
     data: years.value,
@@ -116,6 +123,15 @@ const chartOption = computed(() => ({
       position: 'right',
       axisLine: { show: true, lineStyle: { color: '#dc2626' } },
       axisLabel: { formatter: v => v.toLocaleString() }
+    },
+    {
+      type: 'value',
+      name: '漲跌幅 (%)',
+      position: 'right',
+      offset: 60,
+      axisLine: { show: true, lineStyle: { color: '#94a3b8' } },
+      axisLabel: { formatter: v => `${v}%` },
+      splitLine: { show: false }
     }
   ],
   dataZoom: [
@@ -144,6 +160,18 @@ const chartOption = computed(() => ({
       symbolSize: 6,
       lineStyle: { width: 2, color: '#dc2626' },
       itemStyle: { color: '#dc2626' }
+    },
+    {
+      name: '人均 GDP 漲跌幅',
+      type: 'bar',
+      yAxisIndex: 2,
+      data: gdpYoy.value,
+      barWidth: '40%',
+      itemStyle: {
+        color: p => (p.value == null ? '#94a3b8' : (p.value >= 0 ? '#10b98155' : '#ef444455')),
+        borderColor: p => (p.value == null ? '#94a3b8' : (p.value >= 0 ? '#10b981' : '#ef4444')),
+        borderWidth: 1
+      }
     }
   ]
 }))
