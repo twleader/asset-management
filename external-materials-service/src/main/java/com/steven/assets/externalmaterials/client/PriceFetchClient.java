@@ -264,29 +264,12 @@ public class PriceFetchClient {
                 Long volumeLots = parseLong(item.path("v").asText(""));
 
                 if (priceStr.isEmpty() || priceStr.startsWith("-")) {
-                    BigDecimal estimated;
-                    String source;
-                    if (buyPrice != null && sellPrice != null) {
-                        BigDecimal mid = buyPrice.add(sellPrice)
-                                .divide(BigDecimal.valueOf(2), 4, RoundingMode.HALF_UP);
-                        // 台股成交只可能落在合法 tick 上，中價平均後可能落在非合法價
-                        // （例：個股 bid 2270 + ask 2275 → 2272.5 違反 ≥1000 為 5 元 tick），
-                        // 對齊到最近合法 tick 後再回傳，避免前端顯示不可能成交的價位。
-                        // ETF（代碼以 "00" 開頭）tick 一律 0.01，與個股不同。
-                        estimated = snapToTwTick(mid, stockCode);
-                        source = "TWSE(買賣中價)";
-                    } else if (prevClose != null) {
-                        estimated = prevClose;
-                        source = "TWSE(前收)";
-                    } else {
-                        continue;
-                    }
-                    BigDecimal estChange = prevClose != null ? estimated.subtract(prevClose) : BigDecimal.ZERO;
-                    BigDecimal estChangePct = (prevClose != null && prevClose.compareTo(BigDecimal.ZERO) != 0)
-                            ? estChange.multiply(BigDecimal.valueOf(100)).divide(prevClose, 6, RoundingMode.HALF_UP)
-                            : BigDecimal.ZERO;
+                    // 系統一律以「成交價」呈現股價。`z` 為 `-` 表示兩 tick 之間無新成交，
+                    // 不得用買賣中價推估（中價非真實成交價、且可能落在非合法 tick）。
+                    // 唯一合理 fallback 是退回前收（昨日真實成交價），change% 自然為 0。
+                    if (prevClose == null) continue;
                     return Optional.of(new PriceResult(
-                            stockCode, "台股", estimated, estChange, estChangePct, source,
+                            stockCode, "台股", prevClose, BigDecimal.ZERO, BigDecimal.ZERO, "TWSE(前收)",
                             name.isEmpty() ? null : name,
                             buyPrice, sellPrice, openPrice, prevClose, highPrice, lowPrice, volumeLots));
                 }
@@ -367,30 +350,4 @@ public class PriceFetchClient {
                 : new BigDecimal[]{b, a};
     }
 
-    /**
-     * 把估算的台股盤中價對齊到合法 tick：
-     * - 個股：≥1000=5 / 500–1000=1 / 100–500=0.5 / 50–100=0.1 / 10–50=0.05 / <10=0.01
-     * - ETF（代碼以 "00" 開頭，如 0050 / 006208 / 00878）：一律 0.01
-     * 用於 TWSE `z` 為 `-` 時以買賣中價推估的價格，避免出現非合法成交價位。
-     */
-    static BigDecimal snapToTwTick(BigDecimal price, String stockCode) {
-        if (price == null || price.signum() <= 0) return price;
-        BigDecimal tick;
-        if (isTwEtf(stockCode)) {
-            tick = new BigDecimal("0.01");
-        } else {
-            double v = price.doubleValue();
-            if      (v >= 1000) tick = new BigDecimal("5");
-            else if (v >= 500)  tick = new BigDecimal("1");
-            else if (v >= 100)  tick = new BigDecimal("0.5");
-            else if (v >= 50)   tick = new BigDecimal("0.1");
-            else if (v >= 10)   tick = new BigDecimal("0.05");
-            else                tick = new BigDecimal("0.01");
-        }
-        return price.divide(tick, 0, RoundingMode.HALF_UP).multiply(tick).setScale(4, RoundingMode.HALF_UP);
-    }
-
-    private static boolean isTwEtf(String stockCode) {
-        return stockCode != null && stockCode.startsWith("00");
-    }
 }
