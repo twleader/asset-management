@@ -68,18 +68,26 @@ public class DashboardBffController {
                 .bodyToMono(MAP)
                 .onErrorReturn(Collections.emptyMap());
 
-        return Mono.zip(snapshotsMono, historyMono, pricesMono, marketStatusMono)
+        Mono<Map<String, Object>> liveAssetsMono = businessServicesClient.get()
+                .uri("/api/market-data/live-assets")
+                .retrieve()
+                .bodyToMono(MAP)
+                .onErrorReturn(Collections.emptyMap());
+
+        return Mono.zip(snapshotsMono, historyMono, pricesMono, marketStatusMono, liveAssetsMono)
                 .flatMap(tuple -> {
                     List<Map<String, Object>> snapshots = tuple.getT1();
                     List<Map<String, Object>> history = tuple.getT2();
                     List<Map<String, Object>> prices = tuple.getT3();
                     Map<String, Object> marketStatus = tuple.getT4();
+                    Map<String, Object> liveAssets = tuple.getT5();
 
                     DashboardSummaryDto dto = new DashboardSummaryDto();
                     dto.setSnapshots(snapshots);
                     dto.setHistory(history);
                     dto.setStockPrices(prices);
                     dto.setMarketStatus(marketStatus);
+                    dto.setLiveAssets(liveAssets);
 
                     if (snapshots.isEmpty()) {
                         dto.setLatestSnapshotDetail(Collections.emptyMap());
@@ -125,11 +133,14 @@ public class DashboardBffController {
                 businessServicesClient.get().uri("/api/market-data/prices")
                         .retrieve().bodyToMono(LIST_MAP).onErrorReturn(Collections.emptyList()),
                 businessServicesClient.get().uri("/api/market-data/market-status")
+                        .retrieve().bodyToMono(MAP).onErrorReturn(Collections.emptyMap()),
+                businessServicesClient.get().uri("/api/market-data/live-assets")
                         .retrieve().bodyToMono(MAP).onErrorReturn(Collections.emptyMap())
         ).map(t -> {
             Map<String, Object> body = new HashMap<>();
             body.put("stockPrices", t.getT1());
             body.put("marketStatus", t.getT2());
+            body.put("liveAssets", t.getT3());
             return ResponseEntity.ok(body);
         });
     }

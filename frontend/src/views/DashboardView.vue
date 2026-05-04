@@ -369,6 +369,10 @@ const store = useAssetStore()
 const stockPrices = ref({})
 const mergedStocksFromBff = ref([]) // 由 BFF 預先彙總（含 stockPrice、profit、profitRate 等）
 const marketStatus = ref({ twMarketOpen: false, usMarketOpen: false })
+// 由 /api/market-data/live-assets 回傳：含 liveStockValue / liveTotalAssets / per-stock liveValue。
+// 收盤後 backend 會 fallback 至 stock_price_history（前一交易日收盤價），故此值一律存在。
+// 與「歷年資產管理」共用同源 API，確保 KPI「資產總計」兩頁一致。
+const liveAssets = ref(null)
 const selectedSnapshotId = ref(null)
 
 let priceStream = null
@@ -421,6 +425,7 @@ async function refreshMarketStatus() {
   try {
     const data = await bffApi.dashboard.realtime()
     if (data?.marketStatus) marketStatus.value = data.marketStatus
+    if (data?.liveAssets) liveAssets.value = data.liveAssets
   } catch (e) {
     /* silent */
   }
@@ -439,6 +444,7 @@ async function loadDashboardSummary() {
       mergedStocksFromBff.value = summary.mergedStocks ?? []
     }
     applyPricesAndStatus(summary.stockPrices ?? [], summary.marketStatus ?? {})
+    liveAssets.value = summary.liveAssets ?? null
   } catch (e) {
     console.warn('載入儀表板摘要失敗:', e)
   }
@@ -480,10 +486,21 @@ function isBaselineToday(market) {
   return d === today
 }
 
-/** 該市場 row 是否該套 live 行情（基準日==市場當地今日，且市場開盤）。 */
+/** 該市場 row 是否該套 live 行情（基準日==市場當地今日；不再加「市場開盤」閘門）。
+ *  收盤後 Redis cache 會於 10 分鐘後過期，但 liveAssets 後端已 fallback 至最近一筆收盤價，
+ *  故此函式只判斷 basedate；live overlay 是否真的可用由 overlayLivePrice 內部判斷。 */
 function shouldApplyLive(market) {
-  if (!isBaselineToday(market)) return false
-  return market === '美股' ? !!marketStatus.value.usMarketOpen : !!marketStatus.value.twMarketOpen
+  return isBaselineToday(market)
+}
+
+/** 從 liveAssets.stocks 找對應 row 的即時估值（台幣）。後端已乘 shares × livePrice ×（美股）匯率。
+ *  收盤後仍會回傳前一交易日收盤價計算結果，與「歷年資產管理」今日列數值一致。 */
+function getLiveValueFromAssets(row) {
+  const list = liveAssets.value?.stocks
+  if (!Array.isArray(list)) return null
+  const m = list.find(x => x.market === row.market && x.stockCode === row.stockCode)
+  const v = m?.liveValue
+  return v == null ? null : Number(v)
 }
 
 function getRealtimePrice(row) {
@@ -837,16 +854,25 @@ watch(mergedStocks, (stocks) => {
   }
 }, { immediate: true })
 
-// 基準日 == 該市場當地今日，且該市場開盤 → 用 live price 重算 currentValue / profit / estimatedDividend，
-// 讓 2 分鐘輪詢能即時反映最新行情；否則直接回傳 BFF 預先算好的快照值（凍結在基準日）。
+// 基準日 == 該市場當地今日 → 用 live 估值重算 currentValue / profit / estimatedDividend，
+// 讓 2 分鐘輪詢即時反映最新行情；否則直接回傳 BFF 預先算好的快照值（凍結在基準日）。
+// 數值來源優先序：
+//  1. liveAssets.stocks[].liveValue（與「歷年資產管理」共用同一支 API，收盤後 fallback 至最近收盤價）
+//  2. stockPrices map 即時價（SSE 推播；收盤後 Redis cache 10 分鐘 TTL 過後此來源會失效）
+//  3. row 原值（BFF 凍結在基準日的快照值）
 function overlayLivePrice(row) {
   if (!shouldApplyLive(row.market)) return row
-  const live = getRealtimePrice(row)
   const shares = Number(row.shares ?? 0)
-  if (!live || shares <= 0) return row
-  const fx = Number(detail.value?.usdExchangeRate ?? 0)
-  const livePriceTwd = row.market === '美股' ? Number(live.price) * fx : Number(live.price)
-  const cv = shares * livePriceTwd
+  if (shares <= 0) return row
+
+  let cv = getLiveValueFromAssets(row)
+  if (cv == null) {
+    const live = getRealtimePrice(row)
+    if (!live) return row
+    const fx = Number(detail.value?.usdExchangeRate ?? 0)
+    const livePriceTwd = row.market === '美股' ? Number(live.price) * fx : Number(live.price)
+    cv = shares * livePriceTwd
+  }
   const cost = Number(row.investmentCost ?? 0)
   const profit = cv - cost
   const profitRate = cost > 0 ? profit / cost : 0
@@ -857,8 +883,11 @@ function overlayLivePrice(row) {
 
 /**
  * 將 latest snapshot 的總額（totalStockValue / stockProfit / estimatedAnnualDividend / totalAssets）
- * 用 live 行情重算。僅限「basedate==該市場當地今日 & 該市場開盤」的市場才套 live；
+ * 用 live 行情重算。basedate==該市場當地今日才套 live（不再加「市場開盤」閘門）；
  * 另一個市場仍維持快照凍結值。讓 KPI 卡 / 配置 donut / 趨勢線最後一點隨 2 分鐘輪詢更新。
+ *
+ * 「資產總計」優先採用 liveAssets.liveTotalAssets（與「歷年資產管理」共用同一支 API），
+ * 其餘小計（台股 / 美股 / 預估配息）以 customTableData × overlay 重算。
  */
 const liveLatest = computed(() => {
   const s = latest.value
@@ -885,7 +914,13 @@ const liveLatest = computed(() => {
   const estimatedAnnualDividend = t.dividend + u.dividend
   const totalDeposit = Number(s.totalDeposit || 0)
   const totalFundValue = Number(s.totalFundValue || 0)
-  const totalAssets = totalDeposit + totalFundValue + totalStockValue
+  // 「資產總計」優先採用 liveAssets.liveTotalAssets（與「歷年資產管理」共用同一支 API），
+  // 確保兩頁顯示同一個數字；liveAssets 不存在或非同一筆快照才 fallback 至前端加總。
+  const live = liveAssets.value
+  const liveMatchesLatest = live && live.snapshotDate === s.snapshotDate
+  const totalAssets = liveMatchesLatest && live.liveTotalAssets != null
+        ? Number(live.liveTotalAssets)
+        : totalDeposit + totalFundValue + totalStockValue
   const totalTwStockValue = t.value
   const totalUsStockValue = u.value
 

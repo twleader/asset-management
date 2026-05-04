@@ -568,7 +568,8 @@ GET    /api/market-data/dividends?code=0050&market=台股&years=10 # 最近 N �
 
 #### BFF Aggregation
 ```
-GET    /api/bff/dashboard/summary                  # 並行聚合儀表板所需資料（snapshots + history + prices + market-status）
+GET    /api/bff/dashboard/summary                  # 並行聚合儀表板所需資料（snapshots + history + prices + market-status + live-assets）
+GET    /api/bff/dashboard/realtime                  # 2 分鐘輪詢用：最新 prices + market-status + live-assets，不重抓 summary
 ```
 
 > BFF Enrichment：`latestSnapshotDetail.stocks[]` 由 BFF 補上 `investmentCostOriginal`（美股 USD、台股 TWD），legacy 美股 `currency='TWD'` 記錄會用 `transactionExchangeRate` 換回 USD，前端買入均價直接使用此欄位以避免各頁面重複正規化。
@@ -581,8 +582,10 @@ GET    /api/bff/dashboard/summary                  # 並行聚合儀表板所需
 > - 否則（basedate 為過去日期、或該市場非當日）顯示快照保存的當日 `stockPrice`（即 `latestSnapshotDetail.stocks[].stockPrice`），不顯示漲跌%、不參與 polling 切換。
 > - **per-market 判斷一律由 BFF 完成**（`SnapshotEnricher.mergePerMarketPrices`），前端禁止重做 basedate / 市場開盤判斷。BFF 把判斷結果編碼在 response：`stockPrices[].priceChange != null` 即代表該檔為 live；`priceChange == null` 即為 frozen 快照價。前端 `getRealtimePrice()` 只能依此 flag 決定 render，避免「同義欄位、不同邏輯」造成 Dashboard 與 SnapshotForm 兩頁顯示不一致。
 >
+> KPI「資產總計」一致性：Dashboard `liveLatest.totalAssets` 一律優先採用 `liveAssets.liveTotalAssets`（來自 `/api/market-data/live-assets`），與「歷年資產管理」今日列共用同一支 business-service API。即使收盤後 Redis cache 過期（10 分鐘 TTL），`PriceQueryService.getLive()` 會 fallback 至 `stock_price_history` 最近一筆收盤價，確保兩頁永遠顯示同一個總資產數字。**禁止前端再加「市場開盤」閘門**；basedate 是否==今日由 BFF 與 `liveAssets.snapshotDate` 比對結果決定即可。
+>
 > 儀表板基準日切換行為：
-> - 2 分鐘輪詢 `refreshPricesAndStatus()` 只刷新 `stockPrices` 與 `marketStatus`（呼叫 `marketDataApi.getAllPrices()` + `getMarketStatus()`），**不得重抓 dashboard summary** 以免覆蓋使用者選擇的快照。
+> - 2 分鐘輪詢 `refreshPricesAndStatus()` 只刷新 `stockPrices` / `marketStatus` / `liveAssets`（呼叫 `bffApi.dashboard.realtime()`），**不得重抓 dashboard summary** 以免覆蓋使用者選擇的快照。
 > - 初次載入才呼叫 `bffApi.getDashboardSummary()` 並把 `selectedSnapshotId` 設為最新；之後使用者透過快照選擇器切換時，僅 `store.fetchSnapshotDetail(id)` 取得明細。
 > - 「資產歷史趨勢」圖與 KPI 卡「較上次」皆以 `snapshotDate <= 基準日` 過濾後計算。
 
