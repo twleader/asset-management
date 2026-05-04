@@ -1534,5 +1534,7 @@ Task 54 把 fund_master 7 筆寫死在 DataInitializer，使用者沒有 UI 可�
 - [x] 58.3 frontend `SnapshotFormView.vue` summaryTotalAssets 改為「存款 + 基金 + 台股 + 美股」直接加總，不再讀 stored `totalAssets`，避免 bar 上分項與總資產對不起來
 - [x] 58.4 frontend `DashboardView.vue` `trendLegendItems` 比照 `trendOption` 套用 liveLatest overlay，使趨勢圖例「總資產」與上方 KPI「資產總計」、趨勢線最後一點同步（之前 KPI 顯示 18,165,410 但圖例仍顯示 stored 17,836,374）
 - [x] 58.5 BFF `AssetHistoryBffController` `getHistory` 在最新一筆 snapshotDate == 今日（即 live-assets 指向同一筆 snapshot）時，呼叫 `/api/market-data/live-assets` 並用其結果覆蓋最新列的 totalTwStockValue / totalUsStockValue / totalStockValue / totalAssets / increase / increaseRate / investmentRate，使「歷年資產管理」最新列與 Dashboard live 顯示一致
-- [ ] 58.6 commit + spec 同步
+- [x] 58.6 external-materials-service `PriceFetchClient.snapToTwTick` 加入 stockCode 參數：ETF（代碼以 "00" 開頭）tick = 0.01，個股仍依價格分級。先前 ETF 中價估算被 snap 到 0.5 元 tick，造成 006208 等寫入 219.0000（實為 219.20）。
+- [x] 58.7 external-materials-service `InternalPriceController` 新增 `POST /internal/close/verify-tw` / `verify-us`，手動觸發 FinMind 校正當日收盤（同 16:00 / 18:00 排程），用以修復 ETF tick 修正前已寫錯的 row
+- [ ] 58.8 commit + spec 同步
 

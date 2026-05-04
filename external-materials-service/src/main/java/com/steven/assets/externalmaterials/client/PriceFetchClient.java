@@ -270,9 +270,10 @@ public class PriceFetchClient {
                         BigDecimal mid = buyPrice.add(sellPrice)
                                 .divide(BigDecimal.valueOf(2), 4, RoundingMode.HALF_UP);
                         // 台股成交只可能落在合法 tick 上，中價平均後可能落在非合法價
-                        // （例：bid 2270 + ask 2275 → 2272.5 違反 ≥1000 為 5 元 tick），
-                        // 對齊到最近合法 tick 後再回傳，避免前端顯示像 2272.5 這種不可能成交的價位。
-                        estimated = snapToTwTick(mid);
+                        // （例：個股 bid 2270 + ask 2275 → 2272.5 違反 ≥1000 為 5 元 tick），
+                        // 對齊到最近合法 tick 後再回傳，避免前端顯示不可能成交的價位。
+                        // ETF（代碼以 "00" 開頭）tick 一律 0.01，與個股不同。
+                        estimated = snapToTwTick(mid, stockCode);
                         source = "TWSE(買賣中價)";
                     } else if (prevClose != null) {
                         estimated = prevClose;
@@ -368,19 +369,28 @@ public class PriceFetchClient {
 
     /**
      * 把估算的台股盤中價對齊到合法 tick：
-     * ≥1000=5 / 500–1000=1 / 100–500=0.5 / 50–100=0.1 / 10–50=0.05 / <10=0.01。
+     * - 個股：≥1000=5 / 500–1000=1 / 100–500=0.5 / 50–100=0.1 / 10–50=0.05 / <10=0.01
+     * - ETF（代碼以 "00" 開頭，如 0050 / 006208 / 00878）：一律 0.01
      * 用於 TWSE `z` 為 `-` 時以買賣中價推估的價格，避免出現非合法成交價位。
      */
-    static BigDecimal snapToTwTick(BigDecimal price) {
+    static BigDecimal snapToTwTick(BigDecimal price, String stockCode) {
         if (price == null || price.signum() <= 0) return price;
-        double v = price.doubleValue();
         BigDecimal tick;
-        if      (v >= 1000) tick = new BigDecimal("5");
-        else if (v >= 500)  tick = new BigDecimal("1");
-        else if (v >= 100)  tick = new BigDecimal("0.5");
-        else if (v >= 50)   tick = new BigDecimal("0.1");
-        else if (v >= 10)   tick = new BigDecimal("0.05");
-        else                tick = new BigDecimal("0.01");
+        if (isTwEtf(stockCode)) {
+            tick = new BigDecimal("0.01");
+        } else {
+            double v = price.doubleValue();
+            if      (v >= 1000) tick = new BigDecimal("5");
+            else if (v >= 500)  tick = new BigDecimal("1");
+            else if (v >= 100)  tick = new BigDecimal("0.5");
+            else if (v >= 50)   tick = new BigDecimal("0.1");
+            else if (v >= 10)   tick = new BigDecimal("0.05");
+            else                tick = new BigDecimal("0.01");
+        }
         return price.divide(tick, 0, RoundingMode.HALF_UP).multiply(tick).setScale(4, RoundingMode.HALF_UP);
+    }
+
+    private static boolean isTwEtf(String stockCode) {
+        return stockCode != null && stockCode.startsWith("00");
     }
 }

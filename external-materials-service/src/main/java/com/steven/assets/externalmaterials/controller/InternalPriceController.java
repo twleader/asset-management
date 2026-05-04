@@ -1,5 +1,6 @@
 package com.steven.assets.externalmaterials.controller;
 
+import com.steven.assets.externalmaterials.service.ClosePersister;
 import com.steven.assets.externalmaterials.service.DividendPersister;
 import com.steven.assets.externalmaterials.service.FundDividendBackfillService;
 import com.steven.assets.externalmaterials.service.FundDividendPoller;
@@ -32,6 +33,7 @@ public class InternalPriceController {
     private final FundDividendPoller fundDividendPoller;
     private final FundNavBackfillService fundNavBackfillService;
     private final FundDividendBackfillService fundDividendBackfillService;
+    private final ClosePersister closePersister;
 
     /**
      * 同步抓所有持股報價、寫 Redis 後回傳統計。
@@ -80,6 +82,20 @@ public class InternalPriceController {
     public FundDividendBackfillService.BackfillSummary backfillFundDividend(
             @RequestParam(defaultValue = "10") int years) {
         return fundDividendBackfillService.backfillAll(years);
+    }
+
+    /** 手動觸發 FinMind 校正當日台股收盤價（同 16:00 排程），覆寫 stock_price_history。 */
+    @PostMapping("/close/verify-tw")
+    public Map<String, Object> verifyTwClose() {
+        int ok = closePersister.verifyTwCloseWithFinMind();
+        return Map.of("verified", ok);
+    }
+
+    /** 手動觸發 FinMind 校正當日美股收盤價（同 18:00 ET 排程）。 */
+    @PostMapping("/close/verify-us")
+    public Map<String, Object> verifyUsClose() {
+        int ok = closePersister.verifyUsCloseWithFinMind();
+        return Map.of("verified", ok);
     }
 
     @GetMapping("/health")
