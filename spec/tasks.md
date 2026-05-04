@@ -1539,3 +1539,18 @@ Task 54 把 fund_master 7 筆寫死在 DataInitializer，使用者沒有 UI 可�
 - [x] 58.8 確立全域規則「股價一律是成交價」：移除 `PriceFetchClient.getTwseRealTimePrice` 的買賣中價估算分支與 `snapToTwTick` helper；`z` 為 `-` 時直接退回 prevClose（real 昨日成交價）。Dashboard / 管理資產 / 走勢圖等所有消費者都不再可能拿到中價估算
 - [ ] 58.9 commit + spec 同步
 
+### Task 59: Dashboard KPI「資產總計」與「歷年資產管理」對齊
+
+對應 Requirements: Requirement 9（儀表板總覽）
+
+#### 背景
+
+Dashboard 頂部 KPI「資產總計」走前端 `liveLatest` 計算，且加上「市場開盤」閘門 — 收盤後（含週末）整段 live overlay 跳過，回退到快照 stored value。「歷年資產管理」今日列則是 BFF 直接呼叫 `/api/market-data/live-assets`，後端 `getLive()` 在 Redis cache 過期時會 fallback 到 `stock_price_history` 最近一筆收盤，故任何時段都能算出「上一交易日收盤」估值。結果：週末看到 Dashboard 資產總計 ≠ 歷年資產管理今日列資產總計，違反 CLAUDE.md「同義欄位、同一 business service API」。
+
+#### Steps:
+
+- [x] 59.1 BFF `DashboardSummaryDto` 加 `liveAssets` 欄位；`DashboardBffController` `/summary` 與 `/realtime` 並行呼叫 `/api/market-data/live-assets` 並回傳，與「歷年資產管理」共用同一支 API
+- [x] 59.2 frontend `DashboardView.vue` 新增 `liveAssets` state（由 summary / realtime 寫入）；`shouldApplyLive` 移除「市場開盤」閘門僅留 `isBaselineToday`；`overlayLivePrice` 優先使用 `liveAssets.stocks[].liveValue` 重算 row 現值；`liveLatest.totalAssets` 優先採用 `liveAssets.liveTotalAssets`
+- [x] 59.3 spec 同步 — Requirement 9「市場開盤」閘門條款移除；design.md 加註 KPI 一致性規則與 BFF Aggregation 端點清單
+- [ ] 59.4 commit + 服務重啟驗證
+

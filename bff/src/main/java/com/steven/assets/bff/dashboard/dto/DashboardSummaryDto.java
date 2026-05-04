@@ -33,4 +33,13 @@ public class DashboardSummaryDto {
      * 前端直接 render，無需再做計算。
      */
     private List<Map<String, Object>> mergedStocks;
+
+    /**
+     * 與「歷年資產管理」共用的 /api/market-data/live-assets 回應：
+     * 即時持倉估值（liveStockValue / liveTotalAssets / per-stock liveValue 等）。
+     * 即使收盤後 Redis cache 過期，後端會 fallback 至 stock_price_history（最近一筆收盤價），
+     * 故此欄位永遠有值。前端 KPI / 每股 row 應一律以此覆蓋快照凍結值，
+     * 避免 Dashboard 與「歷年資產管理」今日列出現不同的「資產總計」。
+     */
+    private Map<String, Object> liveAssets;
 }
