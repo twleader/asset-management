@@ -1536,5 +1536,6 @@ Task 54 把 fund_master 7 筆寫死在 DataInitializer，使用者沒有 UI 可�
 - [x] 58.5 BFF `AssetHistoryBffController` `getHistory` 在最新一筆 snapshotDate == 今日（即 live-assets 指向同一筆 snapshot）時，呼叫 `/api/market-data/live-assets` 並用其結果覆蓋最新列的 totalTwStockValue / totalUsStockValue / totalStockValue / totalAssets / increase / increaseRate / investmentRate，使「歷年資產管理」最新列與 Dashboard live 顯示一致
 - [x] 58.6 external-materials-service `PriceFetchClient.snapToTwTick` 加入 stockCode 參數：ETF（代碼以 "00" 開頭）tick = 0.01，個股仍依價格分級。先前 ETF 中價估算被 snap 到 0.5 元 tick，造成 006208 等寫入 219.0000（實為 219.20）。
 - [x] 58.7 external-materials-service `InternalPriceController` 新增 `POST /internal/close/verify-tw` / `verify-us`，手動觸發 FinMind 校正當日收盤（同 16:00 / 18:00 排程），用以修復 ETF tick 修正前已寫錯的 row
-- [ ] 58.8 commit + spec 同步
+- [x] 58.8 確立全域規則「股價一律是成交價」：移除 `PriceFetchClient.getTwseRealTimePrice` 的買賣中價估算分支與 `snapToTwTick` helper；`z` 為 `-` 時直接退回 prevClose（real 昨日成交價）。Dashboard / 管理資產 / 走勢圖等所有消費者都不再可能拿到中價估算
+- [ ] 58.9 commit + spec 同步
 

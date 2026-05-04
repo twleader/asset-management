@@ -96,7 +96,7 @@
 
 **Acceptance Criteria:**
 
-- [ ] 從 TWSE API 取得台股即時股價（`z` 欄位）。`z` 為 `-`（兩 tick 之間）時以「買賣中價」或「前收」估算僅供 Dashboard 即時資產估算使用；走勢圖「股價」線一律僅顯示實際成交價，估算值（`source` 含括號，如 `TWSE(買賣中價)`、`TWSE(前收)`）不得被 `getStockHistory` 拼為今日 closePrice，避免出現像 2262.5（違反台積電 5 元 tick）這種非實際成交價
+- [ ] **股價一律是成交價**：系統內所有顯示的股價（盤中、收盤、走勢圖、Dashboard、管理資產、即時資產估算等所有功能）必須是真實成交過的價格，不得使用買賣中價、買價、賣價或任何衍生估算值。TWSE `z` 為 `-`（兩 tick 之間無新成交）時，唯一合理 fallback 是退回前收（昨日真實成交價，change% = 0）；走勢圖今日格 `getStockHistory` 也只在 `LivePrice.source` 不含括號（=真實成交來源 "TWSE" / "NASDAQ"）時才拼入
 - [ ] 從 NASDAQ API 取得美股即時股價；台股股利率改由 FinMind / TWSE BWIBBU 取得（Yahoo Finance 已停用）
 - [ ] 自動偵測股票市場（先嘗試 .TW，失敗則嘗試 .TWO）
 - [ ] 股價資料快取以減少外部 API 呼叫次數
