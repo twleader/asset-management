@@ -593,14 +593,22 @@ const pieDate = computed(() => hoveredHistoryDate.value ?? latest.value?.snapsho
 
 // 趨勢圖下方自訂 legend：跟著 pieDate（hover 或選中快照）顯示金額與佔比
 const trendLegendItems = computed(() => {
-  const r = filteredHistory.value.find(x => x.snapshotDate === pieDate.value)
-  if (!r) {
+  const baseRow = filteredHistory.value.find(x => x.snapshotDate === pieDate.value)
+  if (!baseRow) {
     return [
       { name: '總資產', value: 0, pct: '-', color: '#8b5cf6' },
       { name: '存款',   value: 0, pct: '-', color: '#3b82f6' },
       { name: '投資',   value: 0, pct: '-', color: '#f59e0b' }
     ]
   }
+  // 若選中快照 == 最新且盤中有 live overlay，使用 liveLatest 覆蓋的值，與上方 KPI / 趨勢線最後一點一致
+  const live = liveLatest.value
+  const useLive = live && latest.value && pieDate.value === latest.value.snapshotDate
+  const r = useLive
+    ? { ...baseRow,
+        totalStockValue: live.totalStockValue,
+        totalAssets: live.totalAssets }
+    : baseRow
   const total   = Number(r.totalAssets || 0)
   const deposit = Number(r.totalDeposit || 0)
   const invest  = Number(r.totalFundValue || 0) + Number(r.totalStockValue || 0)

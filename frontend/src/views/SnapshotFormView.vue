@@ -1628,8 +1628,11 @@ const summaryDeposit = computed(() => pickStored('totalDeposit', depositTotal.va
 const summaryFundValue = computed(() => pickStored('totalFundValue', fundTotalValue.value))
 const summaryFundCost = computed(() => pickStored('totalFundCost', fundTotalInvest.value))
 const summaryFundProfit = computed(() => summaryFundValue.value - summaryFundCost.value)
-const summaryTotalAssets = computed(() => pickStored('totalAssets',
-  depositTotal.value + fundTotalValue.value + allSummary.value.value))
+// 總資產一律從 bar 上顯示的四個分項（存款 / 台股 / 美股 / 基金）加總，避免 stored totalAssets
+// 與分項顯示值不同步時 bar 算不平（例：stored 抓自 BFF 的快照值，但分項是 reactive 即時值）。
+const summaryTotalAssets = computed(() =>
+  Number(summaryDeposit.value) + Number(summaryFundValue.value)
+  + Number(twSummary.value.value) + Number(usSummary.value.value))
 // 預估年配息合計 = 股票 + 基金（即時計算；不用 pickStored 因為基金部分使用者改 units 時要即時反應）
 const summaryDividend = computed(() => allSummary.value.dividend + fundTotalDividend.value)
 

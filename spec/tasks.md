@@ -1519,3 +1519,19 @@ Task 54 把 fund_master 7 筆寫死在 DataInitializer，使用者沒有 UI 可�
 - [ ] 57.9 frontend `bffApi.snapshotForm.getFunds(date)` 加 date 參數；`loadFundMasters` 帶 `form.snapshotDate`；改 snapshotDate 時重抓
 - [ ] 57.10 commit + spec 同步
 
+### Task 58: 走勢圖「股價」線只取實際成交價
+
+對應 Requirements: Requirement 7（市場資料整合）
+
+#### 背景
+
+走勢圖的「股價」依定義為實際成交價（成交價）。`PriceFetchClient.getTwseRealTimePrice` 在 TWSE `z` 為 `-`（兩 tick 之間）時改用「買賣中價」或「前收」估算現價（`source = "TWSE(買賣中價)"` / `"TWSE(前收)"`），這對 Dashboard 即時資產估值有用，但若 `HistoricalDataService.getStockHistory` 把它拼為今日 closePrice，就會讓走勢圖股價末端出現如台積電 2262.5（違反 5 元 tick）這種「不可能成交」的數字。
+
+#### Steps:
+
+- [x] 58.1 backend `HistoricalDataService.getStockHistory`：補今日 live 價時檢查 `LivePrice.source`，若含括號（估算來源）則略過，僅在實際成交（`source == "TWSE"` / `"NASDAQ"` 等不含括號）時才拼入
+- [x] 58.2 external-materials-service `PriceFetchClient` 新增 `snapToTwTick` helper；TWSE 中價估算分支套用，使 Dashboard 即時資產列表也只顯示合法 tick 價位（change/changePct 從對齊後的 estimated 重算，已是現有邏輯）
+- [x] 58.3 frontend `SnapshotFormView.vue` summaryTotalAssets 改為「存款 + 基金 + 台股 + 美股」直接加總，不再讀 stored `totalAssets`，避免 bar 上分項與總資產對不起來
+- [x] 58.4 frontend `DashboardView.vue` `trendLegendItems` 比照 `trendOption` 套用 liveLatest overlay，使趨勢圖例「總資產」與上方 KPI「資產總計」、趨勢線最後一點同步（之前 KPI 顯示 18,165,410 但圖例仍顯示 stored 17,836,374）
+- [ ] 58.5 commit + spec 同步
+
