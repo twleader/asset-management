@@ -493,14 +493,22 @@ function shouldApplyLive(market) {
   return isBaselineToday(market)
 }
 
-/** 從 liveAssets.stocks 找對應 row 的即時估值（台幣）。後端已乘 shares × livePrice ×（美股）匯率。
- *  收盤後仍會回傳前一交易日收盤價計算結果，與「歷年資產管理」今日列數值一致。 */
+/** 從 liveAssets.stocks 加總對應 row 的即時估值（台幣）。後端已乘 shares × livePrice ×（美股）匯率。
+ *  注意：liveAssets.stocks 是「每 broker 每股票」一筆（同一檔在多家券商會有多筆），
+ *  customTableData 是依 stockCode+market 合併過的（一檔一列），故必須 sum 全部 match 的 broker 列。
+ *  若沒有任何一筆有 liveValue，回傳 null 讓上層 fallback。 */
 function getLiveValueFromAssets(row) {
   const list = liveAssets.value?.stocks
   if (!Array.isArray(list)) return null
-  const m = list.find(x => x.market === row.market && x.stockCode === row.stockCode)
-  const v = m?.liveValue
-  return v == null ? null : Number(v)
+  let sum = 0
+  let any = false
+  for (const x of list) {
+    if (x.market !== row.market || x.stockCode !== row.stockCode) continue
+    if (x.liveValue == null) continue
+    sum += Number(x.liveValue)
+    any = true
+  }
+  return any ? sum : null
 }
 
 function getRealtimePrice(row) {
