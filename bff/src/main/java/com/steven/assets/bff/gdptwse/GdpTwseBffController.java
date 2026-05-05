@@ -106,7 +106,7 @@ public class GdpTwseBffController {
     }
 
     /**
-     * 並行觸發 TWN/KOR GDP（IMF）+ 大盤年末收盤（TWSE FMTQIK）回補。
+     * 並行觸發 TWN/KOR GDP（IMF）+ 大盤年末收盤 + 大盤日線（TWSE FMTQIK）四項回補。
      */
     @PostMapping("/refresh")
     public Mono<ResponseEntity<Map<String, Object>>> refresh(
@@ -136,12 +136,94 @@ public class GdpTwseBffController {
                 .timeout(Duration.ofSeconds(120))
                 .onErrorResume(e -> Mono.just(Map.of("error", e.getMessage())));
 
-        return Mono.zip(gdp, kor, twse).map(tuple -> {
+        // 10 年 × 12 個月 × 0.8s sleep ≈ 100s
+        Mono<Map<String, Object>> twseDaily = businessServicesClient.post()
+                .uri(uri -> uri.path("/api/twse-daily-index/refresh")
+                        .queryParam("years", 10).build())
+                .retrieve().bodyToMono(mapRef)
+                .timeout(Duration.ofSeconds(180))
+                .onErrorResume(e -> Mono.just(Map.of("error", e.getMessage())));
+
+        return Mono.zip(gdp, kor, twse, twseDaily).map(tuple -> {
             Map<String, Object> body = new HashMap<>();
             body.put("gdp", tuple.getT1());
             body.put("korea", tuple.getT2());
             body.put("twse", tuple.getT3());
+            body.put("twseDaily", tuple.getT4());
             return ResponseEntity.ok(body);
         });
+    }
+
+    /**
+     * 大盤日線（近 N 年）+ MA20 / MA60 / MA240。
+     * 一次回傳完整資料；前端切換區間僅用 dataZoom 不重打 API。
+     */
+    @GetMapping("/twse-daily")
+    public Mono<ResponseEntity<Map<String, Object>>> getTwseDaily(
+            @RequestParam(defaultValue = "10") int years) {
+        LocalDate today = LocalDate.now();
+        LocalDate fromDate = today.minusYears(years);
+
+        return businessServicesClient.get()
+                .uri(uri -> uri.path("/api/twse-daily-index")
+                        .queryParam("from", fromDate.toString())
+                        .queryParam("to", today.toString())
+                        .build())
+                .retrieve().bodyToMono(LIST_MAP)
+                .onErrorReturn(Collections.emptyList())
+                .map(rows -> {
+                    int n = rows.size();
+                    List<String> dates = new ArrayList<>(n);
+                    List<BigDecimal> closes = new ArrayList<>(n);
+                    for (Map<String, Object> r : rows) {
+                        Object d = r.get("tradingDate");
+                        Object c = r.get("closePoint");
+                        if (d == null || c == null) continue;
+                        dates.add(d.toString());
+                        closes.add(new BigDecimal(c.toString()));
+                    }
+                    Map<String, Object> body = new HashMap<>();
+                    body.put("dates", dates);
+                    body.put("closes", closes);
+                    body.put("ma20", movingAverage(closes, 20));
+                    body.put("ma60", movingAverage(closes, 60));
+                    body.put("ma240", movingAverage(closes, 240));
+                    return ResponseEntity.ok(body);
+                });
+    }
+
+    /**
+     * 觸發 10 年大盤日線單獨回補（不含 GDP / 年末），耗時 1~2 分鐘。
+     */
+    @PostMapping("/refresh-twse-daily")
+    public Mono<ResponseEntity<Map<String, Object>>> refreshTwseDaily(
+            @RequestParam(defaultValue = "10") int years) {
+        ParameterizedTypeReference<Map<String, Object>> mapRef = new ParameterizedTypeReference<>() {};
+        return businessServicesClient.post()
+                .uri(uri -> uri.path("/api/twse-daily-index/refresh")
+                        .queryParam("years", years).build())
+                .retrieve().bodyToMono(mapRef)
+                .timeout(Duration.ofSeconds(180))
+                .onErrorResume(e -> Mono.just(Map.of("error", e.getMessage())))
+                .map(ResponseEntity::ok);
+    }
+
+    /**
+     * 簡單移動平均：window 不足時填 null。回傳 List<Object>（可含 null）。
+     */
+    private List<Object> movingAverage(List<BigDecimal> values, int window) {
+        int n = values.size();
+        List<Object> out = new ArrayList<>(n);
+        BigDecimal sum = BigDecimal.ZERO;
+        for (int i = 0; i < n; i++) {
+            sum = sum.add(values.get(i));
+            if (i >= window) sum = sum.subtract(values.get(i - window));
+            if (i >= window - 1) {
+                out.add(sum.divide(BigDecimal.valueOf(window), 2, java.math.RoundingMode.HALF_UP));
+            } else {
+                out.add(null);
+            }
+        }
+        return out;
     }
 }

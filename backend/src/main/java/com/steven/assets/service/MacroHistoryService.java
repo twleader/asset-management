@@ -4,9 +4,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.steven.assets.model.KoreaGdpPerCapitaHistory;
 import com.steven.assets.model.TaiwanGdpPerCapitaHistory;
+import com.steven.assets.model.TwseIndexDailyHistory;
 import com.steven.assets.model.TwseIndexYearEndHistory;
 import com.steven.assets.repository.KoreaGdpPerCapitaHistoryRepository;
 import com.steven.assets.repository.TaiwanGdpPerCapitaHistoryRepository;
+import com.steven.assets.repository.TwseIndexDailyHistoryRepository;
 import com.steven.assets.repository.TwseIndexYearEndHistoryRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -21,6 +23,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -43,6 +46,7 @@ public class MacroHistoryService {
     private final TaiwanGdpPerCapitaHistoryRepository gdpRepo;
     private final KoreaGdpPerCapitaHistoryRepository koreaGdpRepo;
     private final TwseIndexYearEndHistoryRepository twseRepo;
+    private final TwseIndexDailyHistoryRepository twseDailyRepo;
 
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
@@ -168,6 +172,83 @@ public class MacroHistoryService {
         } catch (Exception e) {
             log.warn("TWSE FMTQIK {} 抓取失敗：{}", year, e.getMessage());
             return null;
+        }
+    }
+
+    /**
+     * 抓取近 N 年（含當月）每日大盤收盤點位 upsert 至 `twse_index_daily_history`。
+     * 逐月呼叫 TWSE FMTQIK，每月 ~20 筆交易日，sleep 800ms。
+     * 10 年 ≈ 120 個月、~2 分鐘。
+     */
+    @Transactional
+    public Map<String, Object> refreshTwseDaily(int years) {
+        java.time.LocalDate today = java.time.LocalDate.now();
+        java.time.YearMonth start = java.time.YearMonth.from(today).minusYears(years).plusMonths(1);
+        java.time.YearMonth end = java.time.YearMonth.from(today);
+
+        int upserted = 0;
+        int skippedMonths = 0;
+        int totalMonths = 0;
+        for (java.time.YearMonth ym = start; !ym.isAfter(end); ym = ym.plusMonths(1)) {
+            totalMonths++;
+            List<TwseIndexDailyHistory> rows = fetchTwseMonthlyDaily(ym);
+            if (rows.isEmpty()) {
+                skippedMonths++;
+            } else {
+                twseDailyRepo.saveAll(rows);
+                upserted += rows.size();
+            }
+            try { Thread.sleep(800); } catch (InterruptedException ignore) {}
+        }
+        log.info("TWSE daily refresh {}~{}: upserted={} rows, skippedMonths={}/{}",
+                start, end, upserted, skippedMonths, totalMonths);
+        return Map.of(
+                "upserted", upserted,
+                "skippedMonths", skippedMonths,
+                "totalMonths", totalMonths,
+                "from", start.toString(),
+                "to", end.toString()
+        );
+    }
+
+    /**
+     * 抓單一月份 FMTQIK 月報。每筆 data：
+     *   [民國日期(yyy/MM/dd), 成交股數, 成交金額, 成交筆數, 發行量加權股價指數收盤, 漲跌點數]
+     */
+    private List<TwseIndexDailyHistory> fetchTwseMonthlyDaily(java.time.YearMonth ym) {
+        try {
+            String date = String.format("%04d%02d01", ym.getYear(), ym.getMonthValue());
+            HttpRequest req = HttpRequest.newBuilder(URI.create(TWSE_FMTQIK_URL + date))
+                    .header("Accept", "application/json")
+                    .header("User-Agent", "Mozilla/5.0")
+                    .timeout(Duration.ofSeconds(15))
+                    .GET().build();
+            HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString());
+            if (res.statusCode() / 100 != 2) return java.util.Collections.emptyList();
+            JsonNode root = mapper.readTree(res.body());
+            if (!"OK".equals(root.path("stat").asText())) return java.util.Collections.emptyList();
+            JsonNode data = root.path("data");
+            if (!data.isArray() || data.isEmpty()) return java.util.Collections.emptyList();
+
+            List<TwseIndexDailyHistory> out = new java.util.ArrayList<>();
+            for (JsonNode row : data) {
+                String mingoDate = row.get(0).asText();   // e.g. "114/05/02"
+                String[] p = mingoDate.split("/");
+                if (p.length != 3) continue;
+                int year = Integer.parseInt(p[0]) + 1911;
+                java.time.LocalDate d;
+                try {
+                    d = java.time.LocalDate.of(year, Integer.parseInt(p[1]), Integer.parseInt(p[2]));
+                } catch (Exception e) { continue; }
+                String idxStr = row.get(4).asText().replace(",", "");
+                if (idxStr.isEmpty() || "-".equals(idxStr)) continue;
+                BigDecimal close = new BigDecimal(idxStr).setScale(2, RoundingMode.HALF_UP);
+                out.add(new TwseIndexDailyHistory(d, close));
+            }
+            return out;
+        } catch (Exception e) {
+            log.warn("TWSE FMTQIK {} 月報抓取失敗：{}", ym, e.getMessage());
+            return java.util.Collections.emptyList();
         }
     }
 }

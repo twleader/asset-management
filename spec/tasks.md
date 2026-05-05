@@ -1374,6 +1374,35 @@ NASDAQ info API 自 2026/04 起對 ETF 的 `keyStats` 為 null，VOO/VT 等 ETF 
         controller 新增 `GET /api/korea-gdp` 與 `POST /api/korea-gdp/refresh-from-imf`；
         BFF 擴充回傳 `koreaGdpPerCapitaUsd` 與 `taiwanGdpGrowthRate` / `koreaGdpGrowthRate`；
         前端在原圖下加第二張卡（左 Y 折線雙國 GDP，右 Y 柱狀雙國年增率）
+- [ ] 53.10 觀察清單支援代號 `0000`（= 台股大盤 / TAIEX）：
+        - `StockAlertController.lookupName`：`code=0000` + `market=台股` 短路回傳
+          `{"stockName":"台股大盤"}`，不打外部、不寫 stock 主檔
+        - `WatchStockService.create`：偵測 `0000` 時跳過 `stockMasterRepo.upsert`（避免被
+          排程抓價當作真股票），仍可單獨儲存
+        - `WatchStockService.toResponse`：`0000` 改讀 `twse_index_daily_history` 最新與次新
+          一筆 → 填 `price` / `previousClose`，計算 `priceChange` / `changePercent`；
+          季線從近 60 筆收盤平均；KD / buy / sell / open / high / low / volume 為 null
+        - `TwseIndexDailyHistoryRepository` 補 `findTop2ByOrderByTradingDateDesc()` /
+          `findTopNByOrderByTradingDateDesc(int n)` 取最新 N 筆
+- [ ] 53.9 加入大盤日線（近 10 年 + MA20/60/240）：
+        - Liquibase `v1.21.0-twse-daily-history.sql` 建 `twse_index_daily_history`（trading_date PK,
+          close_point NUMERIC(12,2)），不 seed 歷史值
+        - 後端 `TwseIndexDailyHistory` entity / `TwseIndexDailyHistoryRepository`
+          （`findByTradingDateBetweenOrderByTradingDateAsc`、`findTopByOrderByTradingDateDesc`）
+        - `MacroHistoryService.refreshTwseDaily(int years)`：current month 起逐月往前抓 FMTQIK
+          月報，把每筆交易日的 `index_close` upsert 至 `twse_index_daily_history`；月份間
+          sleep 800ms。共 ~120 個月、~2 分鐘
+        - `MacroHistoryController` 新增 `GET /api/twse-daily-index?from=&to=` 與
+          `POST /api/twse-daily-index/refresh?years=10`
+        - BFF `GdpTwseBffController` 新增 `GET /api/bff/gdp-twse/twse-daily?years=10`：
+          載入近 N 年日線並計算 MA20/60/240（移動平均不足視窗時填 null），一次回 dates / closes /
+          ma20 / ma60 / ma240
+        - BFF 新增 `POST /api/bff/gdp-twse/refresh-twse-daily?years=10` proxy 至 business（timeout 180s）
+        - 既有 `POST /api/bff/gdp-twse/refresh` 同步觸發大盤日線回補（與 GDP / 年末三項並行）
+        - 前端 `GdpTwseView.vue` 最上方加第三張卡：ECharts line（4 條曲線：close、MA20、MA60、MA240）
+          + el-radio-group 區間切換（1m / 3m / 6m / 1y / 2y / 5y）；切區間僅調整 dataZoom
+          start/end，不重新打 API
+        - `api/index.js` `bffApi.gdpTwse` 增 `getTwseDaily(years=10)` / `refreshTwseDaily(years=10)`
 
 ### Task 54: 信託基金最新淨值自動估值
 

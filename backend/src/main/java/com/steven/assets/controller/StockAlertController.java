@@ -72,6 +72,11 @@ public class StockAlertController {
             @RequestParam String market) {
         String upperCode = code.trim().toUpperCase();
 
+        // 0000 = 台股大盤（TAIEX）特殊代號：直接回傳，不打外部、不寫 stock 主檔
+        if ("0000".equals(upperCode) && "台股".equals(market)) {
+            return ResponseEntity.ok(Map.of("stockName", "台股大盤"));
+        }
+
         // 1. 查本地 stock 主檔
         String name = stockMasterRepo.findByCodeAndMarket(upperCode, market)
                 .map(s -> s.getName())

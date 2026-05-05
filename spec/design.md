@@ -662,11 +662,16 @@ GET    /api/taiwan-gdp                         # 全部年度人均 GDP（USD）
 GET    /api/taiwan-gdp?since=1996              # 起始年（含）以後
 GET    /api/twse-year-end-index                # 全部年度大盤年末收盤點位
 GET    /api/twse-year-end-index?since=1996
+GET    /api/twse-daily-index?from=YYYY-MM-DD&to=YYYY-MM-DD
+                                               # 大盤每日收盤（10 年回補後使用）
+POST   /api/twse-daily-index/refresh?years=10  # 逐月呼叫 TWSE FMTQIK 抓所有交易日 upsert
 
 GET    /api/bff/gdp-twse?years=30              # 前端 view 專用，回傳近 N 年彙整資料
+GET    /api/bff/gdp-twse/twse-daily?years=10   # 大盤日線 + MA20/60/240（一次載入，前端 dataZoom 切區間）
+POST   /api/bff/gdp-twse/refresh-twse-daily?years=10  # 觸發日線 10 年回補（耗時 1~2 分鐘）
 ```
 
-回傳格式（BFF）：
+回傳格式（BFF `/api/bff/gdp-twse`）：
 ```json
 {
   "years": [1996, 1997, ..., 2025],
@@ -675,11 +680,28 @@ GET    /api/bff/gdp-twse?years=30              # 前端 view 專用，回傳近 
 }
 ```
 
-對應資料表：
-- `taiwan_gdp_per_capita_history` (year PK, gdp_usd NUMERIC(12,2))
-- `twse_index_year_end_history` (year PK, close_point NUMERIC(12,2))
+回傳格式（BFF `/api/bff/gdp-twse/twse-daily`）：
+```json
+{
+  "dates":  ["2016-05-05", ..., "2026-05-05"],
+  "closes": [8295.74, ..., 23000.00],
+  "ma20":   [null, ..., 22950.12],
+  "ma60":   [null, ..., 22500.45],
+  "ma240":  [null, ..., 21800.30]
+}
+```
+（`null` 代表移動平均尚未滿視窗的早期資料點）
 
-兩表 seed data 直接寫入 Liquibase changelog（歷史值不變、可重複套用）。
+對應資料表：
+- `taiwan_gdp_per_capita_history` (year PK, gdp_usd, real_gdp_growth_rate)
+- `korea_gdp_per_capita_history`  (year PK, gdp_usd, real_gdp_growth_rate)
+- `twse_index_year_end_history`   (year PK, close_point NUMERIC(12,2))
+- `twse_index_daily_history`      (trading_date PK, close_point NUMERIC(12,2))
+
+GDP 與年末收盤兩表 seed data 直接寫入 Liquibase changelog（歷史值不變）。
+日線表（10 年 ~2400 筆）改由使用者按「回補資料」觸發 TWSE FMTQIK 月報抓取（changelog 僅建表不 seed），原因：
+- 資料量大、會隨時間遞增，不適合寫死於 changelog
+- 與既有 `MacroHistoryService.refreshTwseYearEnd` 同走 FMTQIK，邏輯共用
 
 ### Response Format
 
