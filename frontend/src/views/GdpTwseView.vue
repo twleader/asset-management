@@ -2,6 +2,30 @@
   <div>
     <el-card>
       <template #header>
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+          <span class="section-title">台股大盤每日收盤（近 10 年，含月線/季線/年線）</span>
+          <div style="display:flex;align-items:center;gap:12px">
+            <el-radio-group v-model="dailyRange" size="small">
+              <el-radio-button label="1m">1 個月</el-radio-button>
+              <el-radio-button label="3m">3 個月</el-radio-button>
+              <el-radio-button label="6m">半年</el-radio-button>
+              <el-radio-button label="1y">1 年</el-radio-button>
+              <el-radio-button label="2y">2 年</el-radio-button>
+              <el-radio-button label="5y">5 年</el-radio-button>
+              <el-radio-button label="10y">10 年</el-radio-button>
+            </el-radio-group>
+            <el-button size="small" @click="onRefreshDaily" :loading="dailyRefreshing">
+              回補日線（10 年）
+            </el-button>
+          </div>
+        </div>
+      </template>
+      <v-chart v-if="hasDailyData" :option="dailyChartOption" style="height:480px" autoresize />
+      <el-empty v-else description="尚無日線資料，請先按「回補日線（10 年）」" />
+    </el-card>
+
+    <el-card style="margin-top:20px">
+      <template #header>
         <div style="display:flex;align-items:center;justify-content:space-between">
           <span class="section-title">台灣人均 GDP vs 台股大盤年末收盤（近 30 年）</span>
           <el-button size="small" @click="onRefresh" :loading="refreshing">
@@ -46,7 +70,17 @@ const twGrowth = ref([])
 const krGrowth = ref([])
 const refreshing = ref(false)
 
+// 大盤日線（近 10 年）
+const dailyDates = ref([])
+const dailyCloses = ref([])
+const dailyMa20 = ref([])
+const dailyMa60 = ref([])
+const dailyMa240 = ref([])
+const dailyRange = ref('1y')
+const dailyRefreshing = ref(false)
+
 const hasData = computed(() => years.value.length > 0)
+const hasDailyData = computed(() => dailyDates.value.length > 0)
 
 function num(v) { return v == null ? null : Number(v) }
 
@@ -62,7 +96,21 @@ async function fetchData() {
   } catch {}
 }
 
-onMounted(fetchData)
+async function fetchDailyData() {
+  try {
+    const res = await bffApi.gdpTwse.getTwseDaily(10)
+    dailyDates.value = res.dates ?? []
+    dailyCloses.value = (res.closes ?? []).map(num)
+    dailyMa20.value = (res.ma20 ?? []).map(num)
+    dailyMa60.value = (res.ma60 ?? []).map(num)
+    dailyMa240.value = (res.ma240 ?? []).map(num)
+  } catch {}
+}
+
+onMounted(() => {
+  fetchData()
+  fetchDailyData()
+})
 
 async function onRefresh() {
   refreshing.value = true
@@ -71,12 +119,130 @@ async function onRefresh() {
     const g = r.gdp?.upserted ?? 0
     const k = r.korea?.upserted ?? 0
     const t = r.twse?.upserted ?? 0
-    ElMessage.success(`回補完成：台灣 GDP ${g} 筆、韓國 GDP ${k} 筆、大盤 ${t} 筆`)
+    const d = r.twseDaily?.upserted ?? 0
+    ElMessage.success(`回補完成：台灣 GDP ${g} 筆、韓國 GDP ${k} 筆、大盤年末 ${t} 筆、大盤日線 ${d} 筆`)
     await fetchData()
+    await fetchDailyData()
   } catch {} finally {
     refreshing.value = false
   }
 }
+
+async function onRefreshDaily() {
+  dailyRefreshing.value = true
+  try {
+    const r = await bffApi.gdpTwse.refreshTwseDaily(10)
+    ElMessage.success(`大盤日線回補完成：${r.upserted ?? 0} 筆（${r.from} ~ ${r.to}）`)
+    await fetchDailyData()
+  } catch {} finally {
+    dailyRefreshing.value = false
+  }
+}
+
+// 區間 → dataZoom start/end（百分比，以陣列末端對齊）
+const RANGE_TRADING_DAYS = {
+  '1m': 21, '3m': 63, '6m': 125, '1y': 250, '2y': 500, '5y': 1250, '10y': 2500
+}
+const dailyZoomRange = computed(() => {
+  const total = dailyDates.value.length
+  if (total === 0) return { start: 0, end: 100 }
+  const want = RANGE_TRADING_DAYS[dailyRange.value] ?? 250
+  const startIdx = Math.max(0, total - want)
+  return { start: (startIdx / total) * 100, end: 100 }
+})
+
+const dailyChartOption = computed(() => ({
+  tooltip: {
+    trigger: 'axis',
+    formatter: params => {
+      if (!params || params.length === 0) return ''
+      let s = `<strong>${params[0].axisValue}</strong><br/>`
+      params.forEach(p => {
+        const v = p.value
+        const txt = v == null ? '-' : Number(v).toLocaleString(undefined, {
+          minimumFractionDigits: 2, maximumFractionDigits: 2
+        })
+        s += `${p.marker}${p.seriesName}: ${txt}<br/>`
+      })
+      return s
+    }
+  },
+  legend: {
+    data: ['收盤', '月線 (MA20)', '季線 (MA60)', '年線 (MA240)'],
+    top: 0,
+    itemGap: 30,
+    textStyle: { lineHeight: 18 },
+    formatter: name => {
+      const map = {
+        '收盤': dailyCloses.value,
+        '月線 (MA20)': dailyMa20.value,
+        '季線 (MA60)': dailyMa60.value,
+        '年線 (MA240)': dailyMa240.value
+      }
+      const arr = map[name] ?? []
+      let v = null
+      for (let i = arr.length - 1; i >= 0; i--) {
+        if (arr[i] != null) { v = arr[i]; break }
+      }
+      if (v == null) return `${name}\n-`
+      return `${name}\n${Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    }
+  },
+  grid: { left: 70, right: 30, top: 70, bottom: 60 },
+  xAxis: {
+    type: 'category',
+    data: dailyDates.value,
+    axisLabel: { fontSize: 11 }
+  },
+  yAxis: {
+    type: 'value',
+    name: '收盤點位',
+    scale: true,
+    axisLabel: { formatter: v => v.toLocaleString() }
+  },
+  dataZoom: [
+    { type: 'inside', start: dailyZoomRange.value.start, end: dailyZoomRange.value.end },
+    { type: 'slider', start: dailyZoomRange.value.start, end: dailyZoomRange.value.end, height: 20, bottom: 10 }
+  ],
+  series: [
+    {
+      name: '收盤',
+      type: 'line',
+      data: dailyCloses.value,
+      showSymbol: false,
+      sampling: 'lttb',
+      lineStyle: { width: 1.5, color: '#1f2937' },
+      itemStyle: { color: '#1f2937' }
+    },
+    {
+      name: '月線 (MA20)',
+      type: 'line',
+      data: dailyMa20.value,
+      showSymbol: false,
+      smooth: true,
+      lineStyle: { width: 1.5, color: '#f59e0b' },
+      itemStyle: { color: '#f59e0b' }
+    },
+    {
+      name: '季線 (MA60)',
+      type: 'line',
+      data: dailyMa60.value,
+      showSymbol: false,
+      smooth: true,
+      lineStyle: { width: 1.5, color: '#10b981' },
+      itemStyle: { color: '#10b981' }
+    },
+    {
+      name: '年線 (MA240)',
+      type: 'line',
+      data: dailyMa240.value,
+      showSymbol: false,
+      smooth: true,
+      lineStyle: { width: 1.5, color: '#3b82f6' },
+      itemStyle: { color: '#3b82f6' }
+    }
+  ]
+}))
 
 // 人均 GDP 年增率（USD 基礎）：以前一年值反推 ((curr - prev) / prev × 100)；首個年無 prev → null
 const gdpYoy = computed(() => gdp.value.map((v, i) => {

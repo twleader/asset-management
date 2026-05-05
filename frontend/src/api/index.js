@@ -136,7 +136,11 @@ export const bffApi = {
   gdpTwse: {
     get: (years = 30) => api.get('/bff/gdp-twse', { params: { years } }),
     refresh: (years = 30) =>
-      api.post('/bff/gdp-twse/refresh', null, { params: { years }, timeout: 180000 })
+      api.post('/bff/gdp-twse/refresh', null, { params: { years }, timeout: 240000 }),
+    getTwseDaily: (years = 10) =>
+      api.get('/bff/gdp-twse/twse-daily', { params: { years } }),
+    refreshTwseDaily: (years = 10) =>
+      api.post('/bff/gdp-twse/refresh-twse-daily', null, { params: { years }, timeout: 180000 })
   },
 
   // TradingCalendar

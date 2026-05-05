@@ -2,9 +2,11 @@ package com.steven.assets.controller;
 
 import com.steven.assets.model.KoreaGdpPerCapitaHistory;
 import com.steven.assets.model.TaiwanGdpPerCapitaHistory;
+import com.steven.assets.model.TwseIndexDailyHistory;
 import com.steven.assets.model.TwseIndexYearEndHistory;
 import com.steven.assets.repository.KoreaGdpPerCapitaHistoryRepository;
 import com.steven.assets.repository.TaiwanGdpPerCapitaHistoryRepository;
+import com.steven.assets.repository.TwseIndexDailyHistoryRepository;
 import com.steven.assets.repository.TwseIndexYearEndHistoryRepository;
 import com.steven.assets.service.MacroHistoryService;
 import lombok.RequiredArgsConstructor;
@@ -30,6 +32,7 @@ public class MacroHistoryController {
     private final TaiwanGdpPerCapitaHistoryRepository gdpRepo;
     private final KoreaGdpPerCapitaHistoryRepository koreaGdpRepo;
     private final TwseIndexYearEndHistoryRepository twseRepo;
+    private final TwseIndexDailyHistoryRepository twseDailyRepo;
     private final MacroHistoryService macroHistoryService;
 
     @GetMapping("/taiwan-gdp")
@@ -74,5 +77,24 @@ public class MacroHistoryController {
         int f = from == null ? currentYear - 29 : from;
         int t = to == null ? currentYear : to;
         return macroHistoryService.refreshTwseYearEnd(f, t);
+    }
+
+    @GetMapping("/twse-daily-index")
+    public List<TwseIndexDailyHistory> getTwseDaily(
+            @RequestParam(required = false) LocalDate from,
+            @RequestParam(required = false) LocalDate to) {
+        if (from != null && to != null) {
+            return twseDailyRepo.findByTradingDateBetweenOrderByTradingDateAsc(from, to);
+        }
+        if (from != null) {
+            return twseDailyRepo.findByTradingDateGreaterThanEqualOrderByTradingDateAsc(from);
+        }
+        return twseDailyRepo.findAllByOrderByTradingDateAsc();
+    }
+
+    @PostMapping("/twse-daily-index/refresh")
+    public Map<String, Object> refreshTwseDaily(
+            @RequestParam(defaultValue = "10") int years) {
+        return macroHistoryService.refreshTwseDaily(years);
     }
 }

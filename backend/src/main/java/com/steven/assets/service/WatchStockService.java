@@ -3,10 +3,12 @@ package com.steven.assets.service;
 import com.steven.assets.dto.WatchStockDto;
 import com.steven.assets.model.StockAlert;
 import com.steven.assets.model.StockPriceHistory;
+import com.steven.assets.model.TwseIndexDailyHistory;
 import com.steven.assets.model.WatchStock;
 import com.steven.assets.repository.StockAlertRepository;
 import com.steven.assets.repository.StockPriceHistoryRepository;
 import com.steven.assets.repository.StockRepository;
+import com.steven.assets.repository.TwseIndexDailyHistoryRepository;
 import com.steven.assets.repository.WatchStockRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -23,6 +25,10 @@ import java.util.Set;
 @Slf4j
 public class WatchStockService {
 
+    /** 台股大盤（TAIEX）特殊代號：可加入觀察清單，價格走 twse_index_daily_history。 */
+    public static final String TAIEX_INDEX_CODE = "0000";
+    public static final String TAIEX_INDEX_NAME = "台股大盤";
+
     private final WatchStockRepository watchRepo;
     private final PriceQueryService priceQuery;
     private final StockAlertRepository alertRepo;
@@ -30,6 +36,11 @@ public class WatchStockService {
     private final StockRepository stockMasterRepo;
     private final TechnicalIndicatorService indicatorService;
     private final StockPriceService stockPriceService;
+    private final TwseIndexDailyHistoryRepository twseDailyRepo;
+
+    private static boolean isTaiex(String code, String market) {
+        return TAIEX_INDEX_CODE.equals(code) && "台股".equals(market);
+    }
 
     @Transactional(readOnly = true)
     public List<WatchStockDto.Response> findAll() {
@@ -58,6 +69,11 @@ public class WatchStockService {
                 .displayOrder(maxOrder + 1)
                 .build();
         WatchStock saved = watchRepo.save(w);
+
+        // 0000 = 大盤：不寫入 stock 主檔（避免進入排程抓價），不觸發 manualRefresh
+        if (isTaiex(code, req.getMarket())) {
+            return toResponse(saved);
+        }
 
         // 同步寫入 stock 主檔（單一名稱來源）
         String name = req.getStockName() != null ? req.getStockName().trim() : "";
@@ -94,6 +110,9 @@ public class WatchStockService {
     }
 
     private WatchStockDto.Response toResponse(WatchStock w) {
+        if (isTaiex(w.getStockCode(), w.getMarket())) {
+            return toIndexResponse(w);
+        }
         String stockName = stockMasterRepo.findByCodeAndMarket(w.getStockCode(), w.getMarket())
                 .map(s -> s.getName()).orElse(w.getStockCode());
         WatchStockDto.Response r = WatchStockDto.Response.builder()
@@ -176,6 +195,47 @@ public class WatchStockService {
         r.setQuarterlyMa(ind.quarterlyMa());
         r.setKValue(ind.k());
         r.setDValue(ind.d());
+
+        return r;
+    }
+
+    /**
+     * 0000 = 台股大盤（TAIEX）的 Response：價格走 twse_index_daily_history。
+     * 只有收盤點位，沒有 OHLC / 量 / KD；季線（MA60）取近 60 個交易日收盤平均。
+     */
+    private WatchStockDto.Response toIndexResponse(WatchStock w) {
+        WatchStockDto.Response r = WatchStockDto.Response.builder()
+                .id(w.getId())
+                .stockCode(w.getStockCode())
+                .stockName(TAIEX_INDEX_NAME)
+                .market(w.getMarket())
+                .build();
+
+        List<TwseIndexDailyHistory> recent = twseDailyRepo.findTop60ByOrderByTradingDateDesc();
+        if (recent.isEmpty()) return r;
+
+        TwseIndexDailyHistory latest = recent.get(0);
+        r.setPrice(latest.getClosePoint());
+        r.setTradingDate(latest.getTradingDate().toString());
+        r.setClosed(true);
+        if (recent.size() >= 2) {
+            r.setPreviousClose(recent.get(1).getClosePoint());
+        }
+        if (r.getPrice() != null && r.getPreviousClose() != null
+                && r.getPreviousClose().signum() != 0) {
+            java.math.BigDecimal diff = r.getPrice().subtract(r.getPreviousClose());
+            r.setPriceChange(diff.setScale(4, java.math.RoundingMode.HALF_UP));
+            r.setChangePercent(diff
+                    .divide(r.getPreviousClose(), 6, java.math.RoundingMode.HALF_UP)
+                    .multiply(java.math.BigDecimal.valueOf(100))
+                    .setScale(4, java.math.RoundingMode.HALF_UP));
+        }
+
+        // 季線 MA60：近 60 筆收盤平均（不足 60 筆則用所有可用筆數平均）
+        java.math.BigDecimal sum = java.math.BigDecimal.ZERO;
+        for (TwseIndexDailyHistory row : recent) sum = sum.add(row.getClosePoint());
+        r.setQuarterlyMa(sum.divide(java.math.BigDecimal.valueOf(recent.size()),
+                2, java.math.RoundingMode.HALF_UP));
 
         return r;
     }

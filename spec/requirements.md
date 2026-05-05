@@ -234,6 +234,12 @@
 - [ ] 新增時可輸入股票代號，系統自動帶出股票名稱（同 StockAlert 行為）
 - [ ] 同市場 + 股票代號的組合僅允許一筆觀察紀錄
 - [ ] 盤中即時 `highPrice` / `lowPrice` 由 `external-materials-service` 自行聚合：每輪 cron 觀察到的成交價與當日已記錄的高/低做 max/min，存於 Redis（key `price:dayhl:{market}:{code}:{tradingDate}`，TTL 36 小時）。寫入 `price:{market}:{code}` 時，若外部 API 有提供 high/low 則取「外部值與聚合值的 max(high)/min(low)」；若外部 API 未提供（如 NASDAQ 對 ETF 的 `keyStats` 為 null），則直接採用聚合值。盤後 `dumpRedisToDb` 沿用同一份 Redis JSON 寫入 `stock_price_history`
+- [ ] 觀察清單支援代號 `0000`（市場 = 台股）= 台股大盤（TAIEX）：
+  - `lookup-name` 端點看到 `code=0000&market=台股` 直接回 `{"stockName":"台股大盤"}`，不打外部 API、不寫入 stock 主檔
+  - `WatchStockService.create` 對 `0000` 不寫入 `stock` 主檔（避免進入排程抓價），允許單獨儲存
+  - `WatchStockService.toResponse` 對 `0000` 改讀 `twse_index_daily_history` 最新與次新一筆 → 填 `price` / `previousClose` / 計算 `priceChange` / `changePercent`；buyPrice / sellPrice / openPrice / highPrice / lowPrice / volume 為 null（FMTQIK 無 OHLC）
+  - 季線（MA60）由 `twse_index_daily_history` 最近 60 個交易日收盤平均；KD 留空（資料只有收盤、無高低，不足計算）
+  - 警示彙總（`lastTriggered*`）對 `0000` 不顯示
 
 ---
 
@@ -323,6 +329,14 @@
 - [ ] 韓國資料同樣由 IMF DataMapper API（`NGDPDPC/KOR`）回補，存於 `korea_gdp_per_capita_history`
 - [ ] 「回補資料」按鈕同步觸發 TWN + KOR 兩國 GDP 回補
 - [ ] 經濟成長率改取自 IMF `NGDP_RPCH`（Real GDP growth, annual % change），不再由前後端用人均 GDP（USD）相減推算（因含匯率波動會失真）；存於 `*_gdp_per_capita_history.real_gdp_growth_rate`
+- [ ] 同頁「最上方」加第三張卡：台股大盤（TAIEX）每日收盤近 10 年走勢圖
+  - 顯示每日收盤點位（`close_point`）+ 月線（MA20）+ 季線（MA60）+ 年線（MA240）四條曲線
+  - 區間切換按鈕：1 個月 / 3 個月 / 半年 / 1 年 / 2 年 / 5 年（透過 dataZoom 對齊 X 軸末端，前段 240 個交易日仍保留以利 MA240 完整顯示）
+  - 後端日線資料表 `twse_index_daily_history`（`trading_date` PK, `close_point`），由 Liquibase changelog 建立（不 seed 歷史值）
+  - business service 新增 `GET /api/twse-daily-index?from=YYYY-MM-DD&to=YYYY-MM-DD` 與 `POST /api/twse-daily-index/refresh?years=10`，後者逐月呼叫 TWSE FMTQIK 月報抓全部交易日 `index_close` upsert 至 DB
+  - BFF 新增 `GET /api/bff/gdp-twse/twse-daily?years=10`：載入近 N 年日線並計算 MA20/60/240 後一次回傳；前端切換區間僅用 dataZoom 不再打 API
+  - BFF 新增 `POST /api/bff/gdp-twse/refresh-twse-daily?years=10`：proxy 至 business `/api/twse-daily-index/refresh`，回補可能要 1~2 分鐘
+  - 「回補資料」按鈕同步觸發 TWN GDP + KOR GDP + 大盤年末 + 大盤日線四項回補
 
 ---
 
