@@ -238,144 +238,43 @@ public class HistoricalDataService {
     //  啟動 10 年回補已搬到 external-materials-service HistoricalBackfillService.startupBackfill。
     // ═══════════════════════════════════════════════════════════════════════
 
-    @Scheduled(cron = "0 0 17 * * MON-FRI", zone = "Asia/Taipei")
-    public void dailyExchangeRateUpdate() {
-        log.info("排程：更新匯率（收盤後，proxy /internal/backfill/exchange-rate + 清理舊資料）");
-        for (String currency : currenciesToTrack()) {
-            backfillExchangeRate(currency, LocalDate.now().minusDays(5));
-            purgeOldExchangeRates(currency, 10);
-        }
-        purgeOldStockPriceHistory(10);
-    }
-
     /**
-     * 系統需追蹤的非 TWD 計價幣別集合：股票美股 USD + fund_master 上所有非 TWD 幣別 (Requirement 19)。
+     * 收盤後本地清理：刪除 10 年以前的 stock_price_history、exchange_rate_history。
+     * 匯率排程（盤中 BOT 5 分鐘 / 收盤 17:00 FinMind）已搬到 ext-materials-service ExchangeRatePoller。
      */
-    private java.util.Set<String> currenciesToTrack() {
-        java.util.Set<String> set = new java.util.LinkedHashSet<>();
-        set.add("USD");
+    @Scheduled(cron = "0 30 17 * * MON-FRI", zone = "Asia/Taipei")
+    @Transactional
+    public void purgeOldHistory() {
+        LocalDate cutoff = LocalDate.now().minusYears(10);
+        long stockDeleted = priceHistRepo.deleteByTradingDateBefore(cutoff);
+        if (stockDeleted > 0) log.info("已清除 {} 筆超過 10 年的股價歷史資料", stockDeleted);
+        java.util.Set<String> currencies = new java.util.LinkedHashSet<>();
+        currencies.add("USD");
         for (com.steven.assets.model.FundMaster fm : fundMasterRepo.findByActiveTrue()) {
             String c = fm.getCurrency();
-            if (c != null && !c.isBlank() && !"TWD".equalsIgnoreCase(c)) {
-                set.add(c.toUpperCase());
-            }
+            if (c != null && !c.isBlank() && !"TWD".equalsIgnoreCase(c)) currencies.add(c.toUpperCase());
         }
-        return set;
-    }
-
-    /**
-     * 清除超過指定年數的股價歷史資料（所有市場）
-     */
-    @Transactional
-    public void purgeOldStockPriceHistory(int keepYears) {
-        LocalDate cutoff = LocalDate.now().minusYears(keepYears);
-        long deleted = priceHistRepo.deleteByTradingDateBefore(cutoff);
-        if (deleted > 0) {
-            log.info("已清除 {} 筆超過 {} 年的股價歷史資料", deleted, keepYears);
+        for (String c : currencies) {
+            long n = rateHistRepo.deleteByCurrencyAndRateDateBefore(c, cutoff);
+            if (n > 0) log.info("已清除 {} 筆超過 10 年的 {} 匯率資料", n, c);
         }
     }
 
-    /**
-     * 盤中匯率更新：每 5 分鐘從台灣銀行即時牌告抓取 USD 匯率
-     * 台灣外匯市場交易時間：週一～五 09:00 ~ 16:00 (台北時間)
-     * Cron 在 09:05 ~ 15:55 每 5 分鐘執行（09:00 市場尚未開盤跳過）
-     */
-    @Scheduled(cron = "0 0/5 9-15 * * MON-FRI", zone = "Asia/Taipei")
-    public void intradayExchangeRateUpdate() {
-        ZonedDateTime now = ZonedDateTime.now(ZoneId.of("Asia/Taipei"));
-        int hour = now.getHour();
-        int minute = now.getMinute();
-        // 09:00 整點跳過（市場尚未開盤）
-        if (hour == 9 && minute < 5) return;
-        log.info("排程：盤中更新匯率（台灣銀行） ({}:{})", hour, String.format("%02d", minute));
-        for (String currency : currenciesToTrack()) {
-            fetchBotExchangeRate(currency);
-        }
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //  台灣銀行即時匯率 — BOT CSV endpoint
-    // ═══════════════════════════════════════════════════════════════════════
-
-    /**
-     * 從台灣銀行牌告匯率 CSV 取得即時匯率並寫入 ExchangeRateHistory
-     * CSV endpoint: https://rate.bot.com.tw/xrt/flcsv/0/day
-     * 注意：BOT CSV 回傳 UTF-8 with BOM + CRLF 換行
-     * 買入區欄位: 0=幣別, 1=匯率, 2=現金買入, 3=即期買入
-     * 賣出區欄位: 11=匯率, 12=現金賣出, 13=即期賣出
-     * 使用 curl 避免 Java HttpClient 被 BOT 擋
-     */
-    @Transactional
+    /** 手動觸發 BOT 即期匯率抓取（前端 /api/market-data/exchange-rate/refresh proxy）。 */
     public void fetchBotExchangeRate(String currency) {
         try {
-            String url = "https://rate.bot.com.tw/xrt/flcsv/0/day";
-            ProcessBuilder pb = new ProcessBuilder("curl", "-s",
-                    "-H", "User-Agent: Mozilla/5.0",
-                    url);
-            pb.redirectErrorStream(true);
-            Process proc = pb.start();
-            String csvBody = new String(proc.getInputStream().readAllBytes());
-            proc.waitFor();
-
-            if (csvBody == null || csvBody.trim().isEmpty()) {
-                log.warn("台灣銀行 CSV 回傳空白");
-                return;
-            }
-
-            // 移除 UTF-8 BOM，統一換行符
-            csvBody = csvBody.replace("\uFEFF", "");
-            String[] lines = csvBody.split("\\r?\\n");
-
-            for (String line : lines) {
-                String trimmed = line.trim();
-                if (!trimmed.startsWith(currency + ",")) continue;
-
-                String[] cols = trimmed.split(",");
-                if (cols.length < 14) {
-                    log.warn("台灣銀行 CSV {} 欄位不足: {} 欄", currency, cols.length);
-                    return;
-                }
-
-                // 即期買入 = index 3, 即期賣出 = index 13
-                BigDecimal spotBuy = parseBotDecimal(cols[3]);
-                BigDecimal spotSell = parseBotDecimal(cols[13]);
-
-                if (spotBuy == null || spotSell == null) {
-                    log.warn("台灣銀行 CSV {} 即期匯率解析失敗: buy=[{}], sell=[{}]", currency, cols[3], cols[13]);
-                    return;
-                }
-
-                LocalDate today = LocalDate.now(ZoneId.of("Asia/Taipei"));
-                ExchangeRateHistory record = rateHistRepo.findByCurrencyAndRateDate(currency, today)
-                        .orElse(ExchangeRateHistory.builder().currency(currency).rateDate(today).build());
-
-                record.setBuyRate(spotBuy);
-                record.setSellRate(spotSell);
-                rateHistRepo.save(record);
-                log.info("台灣銀行 {} 匯率: buy={}, sell={}, mid={} ({})",
-                        currency, spotBuy, spotSell, record.getMidRate(), today);
-                return;
-            }
-            log.warn("台灣銀行 CSV 找不到 {} 的匯率資料", currency);
+            priceServiceClient.post()
+                    .uri(uriBuilder -> uriBuilder.path("/internal/exchange-rate/refresh-bot")
+                            .queryParam("currency", currency).build())
+                    .retrieve()
+                    .toBodilessEntity()
+                    .block();
         } catch (Exception e) {
-            log.warn("台灣銀行匯率抓取失敗 ({}): {}", currency, e.getMessage());
+            log.warn("呼叫 ext-materials-service /internal/exchange-rate/refresh-bot 失敗: {}", e.getMessage());
         }
     }
 
-    private BigDecimal parseBotDecimal(String value) {
-        if (value == null) return null;
-        String trimmed = value.trim().replaceAll("[^0-9.]", "");
-        if (trimmed.isEmpty()) return null;
-        try {
-            return new BigDecimal(trimmed).setScale(4, RoundingMode.HALF_UP);
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
-    /**
-     * 清除超過指定年數的匯率歷史資料
-     */
+    /** 手動清理 X 年以前的單一幣別匯率（給 /api/market-data/exchange-rate/refresh 用）。 */
     @Transactional
     public void purgeOldExchangeRates(String currency, int keepYears) {
         LocalDate cutoff = LocalDate.now().minusYears(keepYears);
@@ -384,6 +283,7 @@ public class HistoricalDataService {
             log.info("已清除 {} 筆超過 {} 年的 {} 匯率資料", deleted, keepYears, currency);
         }
     }
+
 
     // ═══════════════════════════════════════════════════════════════════════
     //  查詢 API

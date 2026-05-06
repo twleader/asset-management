@@ -1608,6 +1608,28 @@ Dashboard 頂部 KPI「資產總計」走前端 `liveLatest` 計算，且加上�
 - [x] 60b.7 編譯驗證（business-services + external-materials-service 均通過）
 - [ ] 60b.8 commit + 服務重啟驗證（觀察 ext-materials-service 啟動時 8s 後執行 startupBackfill；business-services 啟動 log 無 "啟動補齊"；前端按「回補資料」仍可運作）
 
+### Task 60c: 匯率排程（BOT 5 分鐘 + FinMind 17:00）搬到 external-materials-service
+
+對應 Requirements: Requirement 7 — [requirements.md:108-109](spec/requirements.md)
+
+#### 背景
+
+business-services `HistoricalDataService` 仍持有：
+- `intradayExchangeRateUpdate` `@Scheduled(cron = "0 0/5 9-15 ...")`：每 5 分鐘呼叫 `fetchBotExchangeRate` 抓 BOT CSV
+- `dailyExchangeRateUpdate` `@Scheduled(cron = "0 0 17 ...")`：呼叫 backfillExchangeRate（FinMind 增量）+ purgeOldExchangeRates
+- `fetchBotExchangeRate(currency)`：直接 curl 抓 https://rate.bot.com.tw/xrt/flcsv/0/day
+
+依規則「對外抓行情 / 匯率全集中 ext-materials-service」，這三項都該搬走。本地清理 (`purgeOldStockPriceHistory` / `purgeOldExchangeRates`) 因只動 DB 可留；改名為 `purgeOldHistory` 收斂為單一排程於 17:30 跑。
+
+#### Steps:
+
+- [x] 60c.1 ext-materials-service 新增 `BotFxFetchClient`：BOT CSV via curl，回 `SpotQuote(spotBuy, spotSell)`
+- [x] 60c.2 ext-materials-service 新增 `ExchangeRatePoller`：`@Scheduled` 盤中 5 分鐘 BOT + 17:00 FinMind FinMind 增量補；提供 `refreshBotNow(currency)` 給手動觸發
+- [x] 60c.3 `InternalPriceController` 加 `POST /internal/exchange-rate/refresh-bot`
+- [x] 60c.4 business-services `HistoricalDataService`：刪除原 BOT 抓 / 排程 / `currenciesToTrack` / `parseBotDecimal`；`fetchBotExchangeRate` 改為 WebClient proxy；新增 `purgeOldHistory` `@Scheduled(17:30)` 收斂本地清理
+- [x] 60c.5 編譯驗證（business-services + ext-materials-service 皆通過）
+- [ ] 60c.6 commit + 服務重啟驗證（觀察 ext-materials-service 9-15 點 5 分鐘 log、business-services 不再有 BOT log）
+
 ### Task 60a: 移除 business-services 重複的每日股價收盤排程
 
 對應 Requirements: Requirement 7（即時股價/快取）— [requirements.md:108-109](spec/requirements.md)

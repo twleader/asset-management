@@ -2,6 +2,7 @@ package com.steven.assets.externalmaterials.controller;
 
 import com.steven.assets.externalmaterials.service.ClosePersister;
 import com.steven.assets.externalmaterials.service.DividendPersister;
+import com.steven.assets.externalmaterials.service.ExchangeRatePoller;
 import com.steven.assets.externalmaterials.service.FundDividendBackfillService;
 import com.steven.assets.externalmaterials.service.FundDividendPoller;
 import com.steven.assets.externalmaterials.service.FundNavBackfillService;
@@ -38,6 +39,7 @@ public class InternalPriceController {
     private final FundDividendBackfillService fundDividendBackfillService;
     private final ClosePersister closePersister;
     private final HistoricalBackfillService historicalBackfill;
+    private final ExchangeRatePoller exchangeRatePoller;
 
     /**
      * 同步抓所有持股報價、寫 Redis 後回傳統計。
@@ -134,6 +136,13 @@ public class InternalPriceController {
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate since) {
         int n = historicalBackfill.backfillExchangeRateFrom(currency, since);
         return Map.of("currency", currency, "records", n);
+    }
+
+    /** 手動觸發 BOT 即期匯率抓取（同盤中 5 分鐘排程）。 */
+    @PostMapping("/exchange-rate/refresh-bot")
+    public Map<String, Object> refreshBotFx(@RequestParam String currency) {
+        boolean ok = exchangeRatePoller.refreshBotNow(currency);
+        return Map.of("currency", currency, "refreshed", ok);
     }
 
     @GetMapping("/health")
