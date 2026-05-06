@@ -16,6 +16,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -348,6 +349,143 @@ public class PriceFetchClient {
         return a.compareTo(b) >= 0
                 ? new BigDecimal[]{a, b}
                 : new BigDecimal[]{b, a};
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  歷史收盤價 range 抓取（10 年回補 / 缺口補齊用）
+    // ═══════════════════════════════════════════════════════════════════════
+
+    public record HistoricalBar(
+            LocalDate tradingDate,
+            BigDecimal open, BigDecimal high, BigDecimal low, BigDecimal close,
+            Long volume,
+            String resolvedCode  // FinMind 部分 ETF 需後綴 (00642U/L/R/B)，回傳實際抓到的 code 供 log
+    ) {}
+
+    /**
+     * FinMind TaiwanStockPrice 拉指定日期區間。部分特殊 ETF 需後綴 (U/L/R/B)，依序嘗試。
+     */
+    public List<HistoricalBar> fetchTwHistoricalRange(String stockCode, LocalDate start, LocalDate end) {
+        List<String> candidates = new java.util.ArrayList<>();
+        candidates.add(stockCode);
+        if (stockCode.matches("\\d{5}")) {
+            candidates.add(stockCode + "U");
+            candidates.add(stockCode + "L");
+            candidates.add(stockCode + "R");
+            candidates.add(stockCode + "B");
+        }
+        for (String candidate : candidates) {
+            try {
+                String url = "https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockPrice"
+                        + "&data_id=" + candidate + "&start_date=" + start + "&end_date=" + end;
+                HttpResponse<String> resp = httpClient.send(
+                        finmindRequest(url, 20), HttpResponse.BodyHandlers.ofString());
+                if (resp.statusCode() != 200) {
+                    log.warn("FinMind TaiwanStockPrice {} 回應 {}", candidate, resp.statusCode());
+                    continue;
+                }
+                JsonNode data = mapper.readTree(resp.body()).path("data");
+                if (!data.isArray() || data.isEmpty()) continue;
+                List<HistoricalBar> bars = new java.util.ArrayList<>();
+                for (JsonNode row : data) {
+                    LocalDate date = LocalDate.parse(row.path("date").asText());
+                    BigDecimal close = finmindDecimal(row, "close");
+                    if (close == null) continue;
+                    bars.add(new HistoricalBar(
+                            date,
+                            finmindDecimal(row, "open"),
+                            finmindDecimal(row, "max"),
+                            finmindDecimal(row, "min"),
+                            close,
+                            row.path("Trading_Volume").asLong(0),
+                            candidate));
+                }
+                if (!candidate.equals(stockCode)) {
+                    log.info("台股 {} 在 FinMind 的完整代號為 {}", stockCode, candidate);
+                }
+                return bars;
+            } catch (Exception e) {
+                log.warn("FinMind TaiwanStockPrice {} 失敗: {}", candidate, e.getMessage());
+            }
+        }
+        return List.of();
+    }
+
+    /**
+     * Yahoo Finance chart API 拉美股指定日期區間（用 curl 子程序，避開 Yahoo 對 Java HTTP/2 fingerprint 的封鎖）。
+     */
+    public List<HistoricalBar> fetchUsHistoricalRange(String stockCode, LocalDate start, LocalDate end) {
+        try {
+            long period1 = start.atStartOfDay(java.time.ZoneId.of("America/New_York")).toEpochSecond();
+            long period2 = end.plusDays(1).atStartOfDay(java.time.ZoneId.of("America/New_York")).toEpochSecond();
+            String url = "https://query2.finance.yahoo.com/v8/finance/chart/" + stockCode
+                    + "?period1=" + period1 + "&period2=" + period2 + "&interval=1d";
+            String body = curlGetWithRetry(url, 2);
+
+            JsonNode root = mapper.readTree(body);
+            JsonNode chart = root.path("chart").path("result").path(0);
+            JsonNode timestamps = chart.path("timestamp");
+            JsonNode quotes = chart.path("indicators").path("quote").path(0);
+            if (!timestamps.isArray()) {
+                String err = root.path("chart").path("error").path("description").asText("");
+                log.warn("Yahoo Finance {} 無資料: {}", stockCode, err.isEmpty() ? "no timestamps" : err);
+                return List.of();
+            }
+            List<HistoricalBar> bars = new java.util.ArrayList<>();
+            for (int i = 0; i < timestamps.size(); i++) {
+                long ts = timestamps.get(i).asLong();
+                LocalDate date = java.time.Instant.ofEpochSecond(ts)
+                        .atZone(java.time.ZoneId.of("America/New_York")).toLocalDate();
+                if (date.isBefore(start)) continue;
+                JsonNode close = quotes.path("close").path(i);
+                if (close.isNull() || close.isMissingNode()) continue;
+                bars.add(new HistoricalBar(
+                        date,
+                        jsonDecimal(quotes.path("open").path(i)),
+                        jsonDecimal(quotes.path("high").path(i)),
+                        jsonDecimal(quotes.path("low").path(i)),
+                        jsonDecimal(close),
+                        quotes.path("volume").path(i).asLong(0),
+                        stockCode));
+            }
+            return bars;
+        } catch (Exception e) {
+            log.warn("Yahoo Finance {} 區間抓取失敗: {}", stockCode, e.getMessage());
+            return List.of();
+        }
+    }
+
+    /**
+     * curl 子程序 + 重試（Yahoo Finance 對 Java HTTP client 友善度差，且偶發 429）。
+     * 回應非 JSON 視為被擋，等 10s/20s/30s... 後重試，最多 maxRetries 次。
+     */
+    private String curlGetWithRetry(String url, int maxRetries) throws Exception {
+        for (int attempt = 0; attempt <= maxRetries; attempt++) {
+            ProcessBuilder pb = new ProcessBuilder("curl", "-s",
+                    "-H", "User-Agent: Mozilla/5.0",
+                    url);
+            pb.redirectErrorStream(true);
+            Process proc = pb.start();
+            String body = new String(proc.getInputStream().readAllBytes());
+            proc.waitFor();
+            String trimmed = body.trim();
+            if (trimmed.startsWith("{") || trimmed.startsWith("[")) return body;
+            if (attempt < maxRetries) {
+                long waitMs = (attempt + 1) * 10000L;
+                log.info("Yahoo Finance 回非 JSON（疑 429），{}s 後重試 ({}/{})",
+                        waitMs / 1000, attempt + 1, maxRetries);
+                try { Thread.sleep(waitMs); } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException("中斷", e);
+                }
+            }
+        }
+        throw new RuntimeException("Yahoo Finance 重試 " + maxRetries + " 次仍失敗");
+    }
+
+    private static BigDecimal jsonDecimal(JsonNode v) {
+        if (v == null || v.isNull() || v.isMissingNode()) return null;
+        return BigDecimal.valueOf(v.asDouble()).setScale(4, RoundingMode.HALF_UP);
     }
 
 }

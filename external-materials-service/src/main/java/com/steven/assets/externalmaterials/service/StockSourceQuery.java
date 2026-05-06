@@ -93,6 +93,105 @@ public class StockSourceQuery {
                 }));
     }
 
+    /** 取該股票歷史表中最早一筆 trading_date（用於判斷是否需要向前回補）。 */
+    public Optional<LocalDate> findMinTradingDate(String stockCode, String market) {
+        return Optional.ofNullable(jdbc.query(
+                "SELECT MIN(trading_date) FROM stock_price_history WHERE stock_code = ? AND market = ?",
+                ps -> { ps.setString(1, stockCode); ps.setString(2, market); },
+                rs -> {
+                    if (rs.next()) {
+                        LocalDate d = rs.getDate(1) == null ? null : rs.getDate(1).toLocalDate();
+                        return d;
+                    }
+                    return null;
+                }));
+    }
+
+    /** 判斷該股票該日是否已有歷史紀錄（避免回補重複插入）。 */
+    public boolean existsHistory(String stockCode, String market, LocalDate tradingDate) {
+        org.springframework.jdbc.core.ResultSetExtractor<Boolean> ex = rs -> rs.next();
+        Boolean b = jdbc.query(
+                "SELECT 1 FROM stock_price_history WHERE stock_code=? AND market=? AND trading_date=? LIMIT 1",
+                ps -> { ps.setString(1, stockCode); ps.setString(2, market); ps.setObject(3, tradingDate); },
+                ex);
+        return Boolean.TRUE.equals(b);
+    }
+
+    /** 取匯率最早日期（用於判斷是否需向前回補 10 年）。 */
+    public Optional<LocalDate> findMinRateDate(String currency) {
+        return Optional.ofNullable(jdbc.query(
+                "SELECT MIN(rate_date) FROM exchange_rate_history WHERE currency = ?",
+                ps -> ps.setString(1, currency),
+                rs -> {
+                    if (rs.next()) {
+                        return rs.getDate(1) == null ? null : rs.getDate(1).toLocalDate();
+                    }
+                    return null;
+                }));
+    }
+
+    /** 取匯率最近日期（增量回補時用）。 */
+    public Optional<LocalDate> findMaxRateDate(String currency) {
+        return Optional.ofNullable(jdbc.query(
+                "SELECT MAX(rate_date) FROM exchange_rate_history WHERE currency = ?",
+                ps -> ps.setString(1, currency),
+                rs -> {
+                    if (rs.next()) {
+                        return rs.getDate(1) == null ? null : rs.getDate(1).toLocalDate();
+                    }
+                    return null;
+                }));
+    }
+
+    /** Upsert 匯率歷史（同一 currency+rate_date 視為覆寫）。 */
+    public void upsertExchangeRate(String currency, LocalDate rateDate, BigDecimal buyRate, BigDecimal sellRate) {
+        Long existing = jdbc.query(
+                "SELECT id FROM exchange_rate_history WHERE currency=? AND rate_date=?",
+                ps -> { ps.setString(1, currency); ps.setObject(2, rateDate); },
+                rs -> rs.next() ? rs.getLong(1) : null);
+        if (existing != null) {
+            jdbc.update(
+                    "UPDATE exchange_rate_history SET buy_rate=?, sell_rate=? WHERE id=?",
+                    buyRate, sellRate, existing);
+        } else {
+            jdbc.update(
+                    "INSERT INTO exchange_rate_history (currency, rate_date, buy_rate, sell_rate) VALUES (?, ?, ?, ?)",
+                    currency, rateDate, buyRate, sellRate);
+        }
+    }
+
+    /** 系統需追蹤的非 TWD 計價幣別：強制含 USD（美股），加上 fund_master.active 上的非 TWD 幣別。 */
+    public Set<String> collectTrackedCurrencies() {
+        Set<String> set = new LinkedHashSet<>();
+        set.add("USD");
+        jdbc.query("SELECT DISTINCT currency FROM fund_master WHERE active = TRUE", rs -> {
+            String c = rs.getString(1);
+            if (c != null && !c.isBlank() && !"TWD".equalsIgnoreCase(c.trim())) {
+                set.add(c.trim().toUpperCase());
+            }
+        });
+        return set;
+    }
+
+    /**
+     * 收集所有需要回補歷史價格的股票代號：stock 主檔 ∪ 歷史所有 snapshot 的持股
+     * （與 collectAllStockCodes 不同：後者只看最新 snapshot；這個版本要涵蓋曾經持有的）。
+     */
+    public void collectAllHeldCodes(Set<String> twCodes, Set<String> usCodes) {
+        jdbc.query("SELECT code, market FROM stock", rs -> {
+            String code = rs.getString("code");
+            String market = rs.getString("market");
+            if ("美股".equals(market)) usCodes.add(code);
+            else twCodes.add(code);
+        });
+        jdbc.query("SELECT DISTINCT stock_code, market FROM stock_holding", rs -> {
+            String code = rs.getString("stock_code");
+            String market = rs.getString("market");
+            if ("美股".equals(market)) usCodes.add(code);
+            else twCodes.add(code);
+        });
+    }
+
     /**
      * 寫入或更新 stock_price_history（同一 trading_date 視為覆寫）。
      */
