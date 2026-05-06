@@ -3,22 +3,15 @@ package com.steven.assets.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.steven.assets.model.ExchangeRateHistory;
-import com.steven.assets.model.Stock;
-import com.steven.assets.model.StockHolding;
 import com.steven.assets.model.StockPriceHistory;
-import com.steven.assets.model.AssetSnapshot;
-import com.steven.assets.repository.AssetSnapshotRepository;
 import com.steven.assets.repository.ExchangeRateHistoryRepository;
 import com.steven.assets.repository.StockPriceHistoryRepository;
-import com.steven.assets.repository.StockRepository;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.context.event.ApplicationReadyEvent;
-import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.reactive.function.client.WebClient;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -31,19 +24,24 @@ import java.net.http.HttpResponse;
 import java.time.*;
 import java.util.*;
 
+/**
+ * 業務端歷史資料 service：
+ *  - 讀取：直接讀 DB（stock_price_history / exchange_rate_history）
+ *  - 寫入 / 對外抓：proxy 至 external-materials-service /internal/backfill/*
+ *  - 仍保留：BOT CSV 即時匯率（intradayExchangeRateUpdate / fetchBotExchangeRate，Phase 1C 再搬）、
+ *           股票名稱查詢（fetchTw/UsStockName，Phase 2 再搬）、5 分鐘 K 線（fetchIntraday5m，Phase 1D 再搬）
+ */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class HistoricalDataService {
 
     private final StockPriceHistoryRepository priceHistRepo;
     private final PriceQueryService priceQuery;
     private final ExchangeRateHistoryRepository rateHistRepo;
-    private final AssetSnapshotRepository snapshotRepo;
-    private final StockRepository stockMasterRepo;
     private final com.steven.assets.repository.FundMasterRepository fundMasterRepo;
+    private final WebClient priceServiceClient;
 
-    /** FinMind API token（免費註冊，未設定時走匿名額度，超過會回 402） */
+    /** FinMind API token（fetchTw/UsStockName 仍會用到，待 Phase 2 一併搬走） */
     @Value("${finmind.token:${FINMIND_TOKEN:}}")
     private String finmindToken;
 
@@ -56,101 +54,28 @@ public class HistoricalDataService {
             .build();
     private final ObjectMapper mapper = new ObjectMapper();
 
-    // Yahoo Finance crumb 認證
-    private volatile String yahooCrumb = null;
-    private volatile boolean yahooCookieInitialized = false;
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //  台股歷史收盤價 — FinMind TaiwanStockPrice
-    // ═══════════════════════════════════════════════════════════════════════
-
-    @Transactional
-    public int backfillTwStock(String stockCode, LocalDate since) {
-        return backfillTwStock(stockCode, since, null);
-    }
-
-    @Transactional
-    public int backfillTwStock(String stockCode, LocalDate since, LocalDate until) {
-        LocalDate maxDate = priceHistRepo.findMaxTradingDate(stockCode, "台股").orElse(null);
-        LocalDate minDate = priceHistRepo.findMinTradingDate(stockCode, "台股").orElse(null);
-        // 若 since 早於目前最早紀錄（向前缺漏），從 since 開始；否則從 maxDate+1 向後補齊
-        LocalDate start;
-        if (maxDate == null) {
-            start = since;
-        } else if (minDate != null && since.isBefore(minDate)) {
-            start = since; // 有向前缺漏，從 since 重新拉（重複資料由 findBy... 判斷跳過）
-        } else {
-            start = maxDate.plusDays(1); // 只需向後補齊
-        }
-        LocalDate end = (until != null) ? until : LocalDate.now();
-        if (!start.isBefore(end)) return 0;
-
-        log.info("回補台股 {} 歷史價格: {} ~ {}", stockCode, start, end);
-        try {
-            // 部分特殊 ETF 在 FinMind 需要帶後綴（如 00642U、00637L、00638R）
-            // 若用原始代號查不到資料，依序嘗試常見後綴
-            List<String> candidates = new ArrayList<>();
-            candidates.add(stockCode);
-            if (stockCode.matches("\\d{5}")) { // 5位數才嘗試後綴
-                candidates.add(stockCode + "U");
-                candidates.add(stockCode + "L");
-                candidates.add(stockCode + "R");
-                candidates.add(stockCode + "B");
-            }
-
-            JsonNode data = null;
-            String resolvedCode = stockCode;
-            for (String candidate : candidates) {
-                String url = "https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockPrice"
-                        + "&data_id=" + candidate + "&start_date=" + start + "&end_date=" + end;
-                String body = httpGet(url);
-                JsonNode d = mapper.readTree(body).path("data");
-                if (d.isArray() && d.size() > 0) {
-                    data = d;
-                    resolvedCode = candidate;
-                    if (!candidate.equals(stockCode)) {
-                        log.info("台股 {} 在 FinMind 的完整代號為 {}", stockCode, resolvedCode);
-                    }
-                    break;
-                }
-            }
-            if (data == null || !data.isArray()) return 0;
-
-            int count = 0;
-            for (JsonNode row : data) {
-                LocalDate date = LocalDate.parse(row.path("date").asText());
-                // 以使用者輸入的原始代號存入 DB（保持一致性）
-                if (priceHistRepo.findByStockCodeAndMarketAndTradingDate(stockCode, "台股", date).isPresent())
-                    continue;
-
-                priceHistRepo.save(StockPriceHistory.builder()
-                        .stockCode(stockCode)
-                        .market("台股")
-                        .tradingDate(date)
-                        .openPrice(decimal(row, "open"))
-                        .highPrice(decimal(row, "max"))
-                        .lowPrice(decimal(row, "min"))
-                        .closePrice(decimal(row, "close"))
-                        .volume(row.path("Trading_Volume").asLong(0))
-                        .build());
-                count++;
-            }
-            log.info("台股 {} 匯入 {} 筆", stockCode, count);
-            return count;
-        } catch (Exception e) {
-            log.warn("回補台股 {} 失敗: {}", stockCode, e.getMessage());
-            return 0;
-        }
+    public HistoricalDataService(
+            StockPriceHistoryRepository priceHistRepo,
+            PriceQueryService priceQuery,
+            ExchangeRateHistoryRepository rateHistRepo,
+            com.steven.assets.repository.FundMasterRepository fundMasterRepo,
+            @Value("${external-materials.base-url:http://external-materials-service:8080}") String externalUrl) {
+        this.priceHistRepo = priceHistRepo;
+        this.priceQuery = priceQuery;
+        this.rateHistRepo = rateHistRepo;
+        this.fundMasterRepo = fundMasterRepo;
+        this.priceServiceClient = WebClient.builder().baseUrl(externalUrl).build();
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    //  美股歷史收盤價 — Yahoo Finance Chart API
+    //  歷史收盤價回補：proxy 至 external-materials-service
+    //  business-services 不再直接呼叫 FinMind / Yahoo（spec/requirements.md:108-109）
     // ═══════════════════════════════════════════════════════════════════════
 
-    /**
-     * 用 curl 呼叫外部 API（避免 Java HttpClient 被 Yahoo 擋）
-     * 支援重試：遇到非 JSON 回應（如 429 "Too Many Requests"）會等待後重試
-     */
+    // ═══════════════════════════════════════════════════════════════════════
+    //  Yahoo curl helper：留給 fetchIntraday5m（Phase 1D 再搬）與 fetchUsStockName（Phase 2 再搬）
+    // ═══════════════════════════════════════════════════════════════════════
+
     private String curlGetWithRetry(String url, int maxRetries) throws Exception {
         for (int attempt = 0; attempt <= maxRetries; attempt++) {
             // 使用精簡 User-Agent 避免被 Yahoo 限速（長 UA 會觸發 429）
@@ -223,276 +148,99 @@ public class HistoricalDataService {
         }
     }
 
-    @Transactional
-    public int backfillUsStock(String stockCode, LocalDate since) {
-        return backfillUsStock(stockCode, since, null);
-    }
-
-    @Transactional
-    public int backfillUsStock(String stockCode, LocalDate since, LocalDate until) {
-        LocalDate maxDate = priceHistRepo.findMaxTradingDate(stockCode, "美股").orElse(null);
-        LocalDate minDate = priceHistRepo.findMinTradingDate(stockCode, "美股").orElse(null);
-        // 若 since 早於目前最早紀錄（向前缺漏），從 since 開始；否則從 maxDate+1 向後補齊
-        LocalDate start;
-        if (maxDate == null) {
-            start = since;
-        } else if (minDate != null && since.isBefore(minDate)) {
-            start = since;
-        } else {
-            start = maxDate.plusDays(1);
-        }
-        LocalDate end = (until != null) ? until : LocalDate.now();
-        if (!start.isBefore(end)) return 0;
-
-        log.info("回補美股 {} 歷史價格: {} ~ {}", stockCode, start, end);
-        try {
-            // 使用 period1/period2 精確指定範圍（比 range 更精準）
-            long period1 = start.atStartOfDay(ZoneId.of("America/New_York")).toEpochSecond();
-            long period2 = end.plusDays(1).atStartOfDay(ZoneId.of("America/New_York")).toEpochSecond();
-            String url = "https://query2.finance.yahoo.com/v8/finance/chart/" + stockCode
-                    + "?period1=" + period1 + "&period2=" + period2 + "&interval=1d";
-
-            String body = curlGetWithRetry(url, 2);
-
-            JsonNode root = mapper.readTree(body);
-            JsonNode chart = root.path("chart").path("result").path(0);
-            JsonNode timestamps = chart.path("timestamp");
-            JsonNode quotes = chart.path("indicators").path("quote").path(0);
-            if (!timestamps.isArray()) {
-                String err = root.path("chart").path("error").path("description").asText("");
-                log.warn("Yahoo Finance {} 無資料: {}", stockCode, err.isEmpty() ? "timestamps not found" : err);
-                return 0;
-            }
-
-            int count = 0;
-            for (int i = 0; i < timestamps.size(); i++) {
-                long ts = timestamps.get(i).asLong();
-                LocalDate date = Instant.ofEpochSecond(ts).atZone(ZoneId.of("America/New_York")).toLocalDate();
-                if (date.isBefore(start)) continue;
-
-                JsonNode close = quotes.path("close").path(i);
-                if (close.isNull() || close.isMissingNode()) continue;
-
-                if (priceHistRepo.findByStockCodeAndMarketAndTradingDate(stockCode, "美股", date).isPresent())
-                    continue;
-
-                priceHistRepo.save(StockPriceHistory.builder()
-                        .stockCode(stockCode)
-                        .market("美股")
-                        .tradingDate(date)
-                        .openPrice(jsonDecimal(quotes.path("open").path(i)))
-                        .highPrice(jsonDecimal(quotes.path("high").path(i)))
-                        .lowPrice(jsonDecimal(quotes.path("low").path(i)))
-                        .closePrice(jsonDecimal(close))
-                        .volume(quotes.path("volume").path(i).asLong(0))
-                        .build());
-                count++;
-            }
-            log.info("美股 {} 匯入 {} 筆", stockCode, count);
-            return count;
-        } catch (Exception e) {
-            log.warn("回補美股 {} 失敗: {}", stockCode, e.getMessage());
-            return 0;
-        }
-    }
-
     // ═══════════════════════════════════════════════════════════════════════
-    //  匯率歷史 — FinMind TaiwanExchangeRate
+    //  Backfill proxy methods — 對外抓的職責在 external-materials-service，
+    //  business-services 透過 /internal/backfill/* 觸發，不再自己呼叫 FinMind / Yahoo。
+    //  啟動時 10 年回補也搬到 external-materials-service 的 HistoricalBackfillService.startupBackfill()。
     // ═══════════════════════════════════════════════════════════════════════
 
-    /**
-     * 強制從指定日期補齊歷史匯率（忽略現有 maxDate，補齊中間缺漏的區段）
-     */
-    @Transactional
-    public int backfillExchangeRateFrom(String currency, LocalDate since) {
-        if (!since.isBefore(LocalDate.now())) return 0;
-        log.info("強制回補 {} 匯率: {} ~ today", currency, since);
-        try {
-            String url = "https://api.finmindtrade.com/api/v4/data?dataset=TaiwanExchangeRate"
-                    + "&data_id=" + currency + "&start_date=" + since;
-            String body = httpGet(url);
-            JsonNode data = mapper.readTree(body).path("data");
-            if (!data.isArray()) return 0;
-
-            int count = 0;
-            for (JsonNode row : data) {
-                LocalDate date = LocalDate.parse(row.path("date").asText());
-                if (rateHistRepo.findByCurrencyAndRateDate(currency, date).isPresent()) continue;
-
-                BigDecimal buy = decimal(row, "cash_buy");
-                BigDecimal sell = decimal(row, "cash_sell");
-                // FinMind 對非現金交易幣別（如 ZAR / EUR）cash_buy/cash_sell 為 0（近年）或 -1（舊資料）；fallback 到 spot
-                if (buy == null || buy.compareTo(BigDecimal.ZERO) <= 0) buy = decimal(row, "spot_buy");
-                if (sell == null || sell.compareTo(BigDecimal.ZERO) <= 0) sell = decimal(row, "spot_sell");
-                if (buy == null && sell == null) continue;
-
-                rateHistRepo.save(ExchangeRateHistory.builder()
-                        .currency(currency).rateDate(date)
-                        .buyRate(buy).sellRate(sell)
-                        .build());
-                count++;
-            }
-            log.info("{} 匯率強制補齊 {} 筆", currency, count);
-            return count;
-        } catch (Exception e) {
-            log.warn("強制回補 {} 匯率失敗: {}", currency, e.getMessage());
-            return 0;
-        }
-    }
-
-    @Transactional
-    public int backfillExchangeRate(String currency, LocalDate since) {
-        LocalDate maxDate = rateHistRepo.findMaxRateDate(currency).orElse(null);
-        LocalDate start = maxDate != null ? maxDate.plusDays(1) : since;
-        if (!start.isBefore(LocalDate.now())) return 0;
-
-        log.info("回補 {} 匯率: {} ~ today", currency, start);
-        try {
-            String url = "https://api.finmindtrade.com/api/v4/data?dataset=TaiwanExchangeRate"
-                    + "&data_id=" + currency + "&start_date=" + start;
-            String body = httpGet(url);
-            JsonNode data = mapper.readTree(body).path("data");
-            if (!data.isArray()) return 0;
-
-            int count = 0;
-            for (JsonNode row : data) {
-                LocalDate date = LocalDate.parse(row.path("date").asText());
-                if (rateHistRepo.findByCurrencyAndRateDate(currency, date).isPresent()) continue;
-
-                BigDecimal buy = decimal(row, "cash_buy");
-                BigDecimal sell = decimal(row, "cash_sell");
-                // 如果沒有現金買賣，用即期
-                if (buy == null) buy = decimal(row, "spot_buy");
-                if (sell == null) sell = decimal(row, "spot_sell");
-                if (buy == null && sell == null) continue;
-
-                rateHistRepo.save(ExchangeRateHistory.builder()
-                        .currency(currency)
-                        .rateDate(date)
-                        .buyRate(buy)
-                        .sellRate(sell)
-                        .build());
-                count++;
-            }
-            log.info("{} 匯率匯入 {} 筆", currency, count);
-            return count;
-        } catch (Exception e) {
-            log.warn("回補 {} 匯率失敗: {}", currency, e.getMessage());
-            return 0;
-        }
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //  批次回補：所有持股 + 匯率
-    // ═══════════════════════════════════════════════════════════════════════
-
-    /**
-     * 回補單一股票的歷史收盤價（供前端即時補齊用）
-     * since：起始日期（含）；until：截止日期（含），null 表示到今日
-     */
+    @SuppressWarnings("unchecked")
     public Map<String, Object> backfillSingleStock(String stockCode, String market, LocalDate since, LocalDate until) {
-        int count = 0;
-        if ("台股".equals(market)) {
-            count = backfillTwStock(stockCode, since, until);
-        } else {
-            count = backfillUsStock(stockCode, since, until);
+        try {
+            return priceServiceClient.post()
+                    .uri(uriBuilder -> {
+                        uriBuilder.path("/internal/backfill/stock")
+                                .queryParam("code", stockCode)
+                                .queryParam("market", market)
+                                .queryParam("since", since.toString());
+                        if (until != null) uriBuilder.queryParam("until", until.toString());
+                        return uriBuilder.build();
+                    })
+                    .retrieve()
+                    .bodyToMono(Map.class)
+                    .block();
+        } catch (Exception e) {
+            log.warn("呼叫 ext-materials-service /internal/backfill/stock 失敗: {}", e.getMessage());
+            return Map.of("stockCode", stockCode, "market", market, "records", 0,
+                    "since", since.toString(), "error", e.getMessage());
         }
-        return Map.of("stockCode", stockCode, "market", market, "records", count, "since", since.toString());
     }
 
-    /** 向後相容的無 until 版本（供 backfillAll 使用） */
     public Map<String, Object> backfillSingleStock(String stockCode, String market, LocalDate since) {
         return backfillSingleStock(stockCode, market, since, null);
     }
 
+    @SuppressWarnings("unchecked")
     public Map<String, Object> backfillAll() {
-        LocalDate twoYearsAgo = LocalDate.now().minusYears(10);
-        Set<String> twCodes = new LinkedHashSet<>();
-        Set<String> usCodes = new LinkedHashSet<>();
-        collectAllHeldCodes(twCodes, usCodes);
-
-        int twTotal = 0, usTotal = 0;
-        for (String code : twCodes) {
-            twTotal += backfillTwStock(code, twoYearsAgo);
-            sleep(600); // 避免被限速
+        try {
+            return priceServiceClient.post()
+                    .uri("/internal/backfill/all")
+                    .retrieve()
+                    .bodyToMono(Map.class)
+                    .block();
+        } catch (Exception e) {
+            log.warn("呼叫 ext-materials-service /internal/backfill/all 失敗: {}", e.getMessage());
+            return Map.of("error", e.getMessage());
         }
-        for (String code : usCodes) {
-            usTotal += backfillUsStock(code, twoYearsAgo);
-            sleep(2000); // Yahoo Finance 需要較長間隔避免 429
+    }
+
+    public int backfillExchangeRate(String currency, LocalDate since) {
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> resp = priceServiceClient.post()
+                    .uri(uriBuilder -> uriBuilder.path("/internal/backfill/exchange-rate")
+                            .queryParam("currency", currency)
+                            .queryParam("since", since.toString())
+                            .build())
+                    .retrieve()
+                    .bodyToMono(Map.class)
+                    .block();
+            return resp == null ? 0 : ((Number) resp.getOrDefault("records", 0)).intValue();
+        } catch (Exception e) {
+            log.warn("呼叫 ext-materials-service /internal/backfill/exchange-rate 失敗: {}", e.getMessage());
+            return 0;
         }
+    }
 
-        int rateTotal = backfillExchangeRate("USD", LocalDate.now().minusYears(10));
-
-        return Map.of("twRecords", twTotal, "usRecords", usTotal,
-                "exchangeRateRecords", rateTotal,
-                "twStocks", twCodes.size(), "usStocks", usCodes.size());
+    public int backfillExchangeRateFrom(String currency, LocalDate since) {
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> resp = priceServiceClient.post()
+                    .uri(uriBuilder -> uriBuilder.path("/internal/backfill/exchange-rate-from")
+                            .queryParam("currency", currency)
+                            .queryParam("since", since.toString())
+                            .build())
+                    .retrieve()
+                    .bodyToMono(Map.class)
+                    .block();
+            return resp == null ? 0 : ((Number) resp.getOrDefault("records", 0)).intValue();
+        } catch (Exception e) {
+            log.warn("呼叫 ext-materials-service /internal/backfill/exchange-rate-from 失敗: {}", e.getMessage());
+            return 0;
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    //  每日排程：匯率（17:00）
-    //  股票每日收盤價排程已搬到 external-materials-service ClosePersister：
+    //  每日排程：匯率（17:00 收盤後，proxy 至 ext-materials-service + 本地清理舊資料）
+    //  股票收盤價排程已搬到 external-materials-service ClosePersister：
     //    台股 13:32（Redis dump）+ 16:00（FinMind 校驗）；
     //    美股 16:02 ET（Redis dump）+ 18:00 ET（FinMind 校驗）。
-    //  business-services 不再自己排程抓股價，符合 spec/requirements.md:108-109。
+    //  啟動 10 年回補已搬到 external-materials-service HistoricalBackfillService.startupBackfill。
     // ═══════════════════════════════════════════════════════════════════════
-
-    /**
-     * 啟動時自動補齊：App 重啟後在背景執行，填滿所有持股的歷史缺漏
-     * - 若有股票無資料或資料超過 7 天未更新，從 10 年前開始補齊
-     * - 已有最新資料的股票，backfillTwStock/backfillUsStock 會自動從 maxDate+1 開始，幾乎不耗時
-     */
-    @EventListener(ApplicationReadyEvent.class)
-    public void startupBackfill() {
-        Thread.ofVirtual().name("startup-backfill").start(() -> {
-            try { Thread.sleep(8000); } catch (InterruptedException e) { return; }
-            log.info("啟動補齊：開始檢查所有持股歷史價格缺漏...");
-            LocalDate since = LocalDate.now().minusYears(10);
-            LocalDate staleThreshold = LocalDate.now().minusDays(7);
-
-            Set<String> twCodes = new LinkedHashSet<>();
-            Set<String> usCodes = new LinkedHashSet<>();
-            collectAllHeldCodes(twCodes, usCodes);
-
-            for (String code : twCodes) {
-                LocalDate maxDate = priceHistRepo.findMaxTradingDate(code, "台股").orElse(null);
-                LocalDate minDate = priceHistRepo.findMinTradingDate(code, "台股").orElse(null);
-                boolean needsFill = maxDate == null
-                        || maxDate.isBefore(staleThreshold)
-                        || (minDate != null && since.isBefore(minDate));
-                if (needsFill) {
-                    log.info("啟動補齊台股 {} (maxDate={}, minDate={})", code, maxDate, minDate);
-                    backfillTwStock(code, since);
-                    sleep(600);
-                }
-            }
-            for (String code : usCodes) {
-                LocalDate maxDate = priceHistRepo.findMaxTradingDate(code, "美股").orElse(null);
-                LocalDate minDate = priceHistRepo.findMinTradingDate(code, "美股").orElse(null);
-                boolean needsFill = maxDate == null
-                        || maxDate.isBefore(staleThreshold)
-                        || (minDate != null && since.isBefore(minDate));
-                if (needsFill) {
-                    log.info("啟動補齊美股 {} (maxDate={}, minDate={})", code, maxDate, minDate);
-                    backfillUsStock(code, since);
-                    sleep(2000);
-                }
-            }
-
-            // 匯率：對所有需追蹤幣別（USD + fund_master 上的非 TWD 幣別）若最早資料晚於 10 年前，強制從 10 年前回補
-            for (String currency : currenciesToTrack()) {
-                LocalDate rateMinDate = rateHistRepo.findMinDate(currency).orElse(null);
-                if (rateMinDate == null || since.isBefore(rateMinDate)) {
-                    log.info("啟動補齊 {} 匯率 (minDate={}，補齊至 {})", currency, rateMinDate, since);
-                    backfillExchangeRateFrom(currency, since);
-                }
-            }
-            log.info("啟動補齊完成");
-        });
-    }
 
     @Scheduled(cron = "0 0 17 * * MON-FRI", zone = "Asia/Taipei")
     public void dailyExchangeRateUpdate() {
-        log.info("排程：更新匯率（收盤後，FinMind 回補 + 清理舊資料）");
+        log.info("排程：更新匯率（收盤後，proxy /internal/backfill/exchange-rate + 清理舊資料）");
         for (String currency : currenciesToTrack()) {
             backfillExchangeRate(currency, LocalDate.now().minusDays(5));
             purgeOldExchangeRates(currency, 10);
@@ -721,25 +469,6 @@ public class HistoricalDataService {
     // ═══════════════════════════════════════════════════════════════════════
     //  Helpers
     // ═══════════════════════════════════════════════════════════════════════
-
-    /**
-     * 收集所有需要回補歷史價格的股票代號：
-     * 來源 = stock 主檔（含曾持有、觀察清單、警示）∪ 歷史快照中的持股（保險用）
-     */
-    private void collectAllHeldCodes(Set<String> twCodes, Set<String> usCodes) {
-        for (Stock s : stockMasterRepo.findAll()) {
-            if ("美股".equals(s.getMarket())) usCodes.add(s.getCode());
-            else twCodes.add(s.getCode());
-        }
-        // 保險：歷史快照中的持股（避免主檔被誤刪時資料消失）
-        List<AssetSnapshot> snapshots = snapshotRepo.findAllWithStocksOrderByDateAsc();
-        for (AssetSnapshot s : snapshots) {
-            for (StockHolding sh : s.getStocks()) {
-                if ("美股".equals(sh.getMarket())) usCodes.add(sh.getStockCode());
-                else twCodes.add(sh.getStockCode());
-            }
-        }
-    }
 
     private String httpGet(String url) throws Exception {
         HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(url))

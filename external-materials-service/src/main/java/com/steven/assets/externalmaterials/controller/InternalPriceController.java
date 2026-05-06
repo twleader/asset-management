@@ -6,16 +6,19 @@ import com.steven.assets.externalmaterials.service.FundDividendBackfillService;
 import com.steven.assets.externalmaterials.service.FundDividendPoller;
 import com.steven.assets.externalmaterials.service.FundNavBackfillService;
 import com.steven.assets.externalmaterials.service.FundNavPoller;
+import com.steven.assets.externalmaterials.service.HistoricalBackfillService;
 import com.steven.assets.externalmaterials.service.MarketClock;
 import com.steven.assets.externalmaterials.service.PricePoller;
 import com.steven.assets.externalmaterials.service.PricePoller.RefreshSummary;
 import lombok.RequiredArgsConstructor;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.LocalDate;
 import java.util.Map;
 
 /**
@@ -34,6 +37,7 @@ public class InternalPriceController {
     private final FundNavBackfillService fundNavBackfillService;
     private final FundDividendBackfillService fundDividendBackfillService;
     private final ClosePersister closePersister;
+    private final HistoricalBackfillService historicalBackfill;
 
     /**
      * 同步抓所有持股報價、寫 Redis 後回傳統計。
@@ -96,6 +100,40 @@ public class InternalPriceController {
     public Map<String, Object> verifyUsClose() {
         int ok = closePersister.verifyUsCloseWithFinMind();
         return Map.of("verified", ok);
+    }
+
+    /** 回補單支股票歷史收盤價（FinMind 台股 / Yahoo 美股）。 */
+    @PostMapping("/backfill/stock")
+    public Map<String, Object> backfillStock(
+            @RequestParam String code,
+            @RequestParam String market,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate since,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate until) {
+        return historicalBackfill.backfillSingleStock(code, market, since, until);
+    }
+
+    /** 全持股 + USD 匯率 10 年回補（耗時操作）。 */
+    @PostMapping("/backfill/all")
+    public Map<String, Object> backfillAll() {
+        return historicalBackfill.backfillAll();
+    }
+
+    /** 增量補匯率：從 max(rate_date)+1 至今。 */
+    @PostMapping("/backfill/exchange-rate")
+    public Map<String, Object> backfillExchangeRate(
+            @RequestParam String currency,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate since) {
+        int n = historicalBackfill.backfillExchangeRate(currency, since);
+        return Map.of("currency", currency, "records", n);
+    }
+
+    /** 強制從 since 補匯率（補中間缺漏）。 */
+    @PostMapping("/backfill/exchange-rate-from")
+    public Map<String, Object> backfillExchangeRateFrom(
+            @RequestParam String currency,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate since) {
+        int n = historicalBackfill.backfillExchangeRateFrom(currency, since);
+        return Map.of("currency", currency, "records", n);
     }
 
     @GetMapping("/health")

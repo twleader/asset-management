@@ -1583,6 +1583,31 @@ Dashboard 頂部 KPI「資產總計」走前端 `liveLatest` 計算，且加上�
 - [x] 59.3 spec 同步 — Requirement 9「市場開盤」閘門條款移除；design.md 加註 KPI 一致性規則與 BFF Aggregation 端點清單
 - [ ] 59.4 commit + 服務重啟驗證
 
+### Task 60b: 將股票歷史回補 + 啟動 10 年回補 + FX FinMind 回補搬到 external-materials-service
+
+對應 Requirements: Requirement 7（即時股價/快取）— [requirements.md:108-109](spec/requirements.md)
+
+#### 背景
+
+`HistoricalDataService` 仍保有大量「business-services 直接呼叫外部行情 API」的違反：
+- `@EventListener(ApplicationReadyEvent)` 啟動時 10 年回補 — FinMind / Yahoo
+- `backfillTwStock`、`backfillUsStock` — 對前端 `/api/market-data/history/backfill*` 端點公開
+- `backfillExchangeRate` / `backfillExchangeRateFrom` — FinMind TaiwanExchangeRate
+- `dailyExchangeRateUpdate`（17:00 排程）— 內部呼叫上述 FinMind 方法
+
+依「即時股價走 Redis、外部行情 API 全部集中 external-materials-service」的規則（spec L108-109），這些對外抓取邏輯都應集中到 external-materials-service。business-services 只該透過內部 endpoint 觸發、再從 DB 讀回結果。
+
+#### Steps:
+
+- [x] 60b.1 external-materials-service 新增 `HistoricalBackfillService`：含 `@EventListener(ApplicationReadyEvent)` 啟動 10 年回補（股票 + USD/fund_master 幣別）、`backfillTwStock`、`backfillUsStock`、`backfillExchangeRate`、`backfillExchangeRateFrom`、`backfillSingleStock`、`backfillAll`
+- [x] 60b.2 external-materials-service `PriceFetchClient` 新增 `fetchTwHistoricalRange`（FinMind TaiwanStockPrice 區間 + ETF 後綴 retry）、`fetchUsHistoricalRange`（Yahoo Finance chart API via curl + 429 retry）
+- [x] 60b.3 external-materials-service 新增 `ExchangeRateFetchClient`：FinMind TaiwanExchangeRate 區間抓取（cash_buy/cash_sell fallback spot_buy/spot_sell）
+- [x] 60b.4 `StockSourceQuery` 新增 JDBC：`findMinTradingDate`、`existsHistory`、`findMaxRateDate` / `findMinRateDate`、`upsertExchangeRate`、`collectTrackedCurrencies`、`collectAllHeldCodes`
+- [x] 60b.5 `InternalPriceController` 新增 `/internal/backfill/stock`、`/internal/backfill/all`、`/internal/backfill/exchange-rate`、`/internal/backfill/exchange-rate-from`
+- [x] 60b.6 business-services `HistoricalDataService`：刪除 startupBackfill / backfillTw/UsStock / backfillExchangeRate(From) / collectAllHeldCodes / 不再用的 imports；`backfillSingleStock` / `backfillAll` / `backfillExchangeRate` / `backfillExchangeRateFrom` 改 WebClient proxy 至 ext-materials；`dailyExchangeRateUpdate` 仍在本地排程但內部走 proxy
+- [x] 60b.7 編譯驗證（business-services + external-materials-service 均通過）
+- [ ] 60b.8 commit + 服務重啟驗證（觀察 ext-materials-service 啟動時 8s 後執行 startupBackfill；business-services 啟動 log 無 "啟動補齊"；前端按「回補資料」仍可運作）
+
 ### Task 60a: 移除 business-services 重複的每日股價收盤排程
 
 對應 Requirements: Requirement 7（即時股價/快取）— [requirements.md:108-109](spec/requirements.md)
