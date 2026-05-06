@@ -1664,6 +1664,23 @@ business-services `HistoricalDataService` 仍持有：
 - [x] 60e.6 編譯驗證（business-services + ext-materials-service 皆通過）
 - [ ] 60e.7 commit + 服務重啟驗證（前端配息率 / ETF 持股 / 假日 / 股票名稱查詢仍正常）
 
+### Task 60f: MacroHistoryService IMF / TWSE FMTQIK 搬到 external-materials-service
+
+對應 Requirements: Requirement 7（外部行情 API 集中）
+
+#### 背景
+
+`MacroHistoryService` 直接呼叫 IMF DataMapper（curl shell-out 避 Akamai WAF）與 TWSE FMTQIK 月報。為集中外部抓取於 ext-materials-service，搬遷其 HTTP 部分；JPA 寫入留在 business-services（涉及 4 個 Repo / Entity，DB 邏輯複雜，proxy 後再寫 JPA 較簡潔）。
+
+#### Steps:
+
+- [x] 60f.1 ext-materials-service 新增 `MacroDataFetchClient`：`fetchImf(indicator, country, scale)`、`fetchTwseDecemberClose(year)`、`fetchTwseMonthlyDaily(year, month)` 回傳 `DailyClose(date, close)`
+- [x] 60f.2 `InternalPriceController` 加 `/internal/macro/imf`、`/internal/macro/twse-year-end`、`/internal/macro/twse-monthly`
+- [x] 60f.3 business-services `MacroHistoryService`：HTTP / curl 全部刪除；refresh* 方法保留 `@Transactional` + JPA 寫入；新增 `fetchImfProxy` / `fetchTwseDecemberCloseProxy` / `fetchTwseMonthlyDailyProxy` 走 WebClient
+- [x] 60f.4 全 codebase 確認 backend / bff 無 twse / nasdaq / finmind / yahoo / bot / imf 等對外行情 URL（v1.21.0 changelog 註解一行除外）
+- [x] 60f.5 編譯驗證
+- [ ] 60f.6 commit + 服務重啟驗證
+
 ### Task 60a: 移除 business-services 重複的每日股價收盤排程
 
 對應 Requirements: Requirement 7（即時股價/快取）— [requirements.md:108-109](spec/requirements.md)

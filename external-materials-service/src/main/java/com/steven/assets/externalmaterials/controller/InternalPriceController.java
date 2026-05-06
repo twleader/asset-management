@@ -43,6 +43,7 @@ public class InternalPriceController {
     private final ExchangeRatePoller exchangeRatePoller;
     private final com.steven.assets.externalmaterials.client.PriceFetchClient priceFetch;
     private final MarketDataFetchService marketData;
+    private final com.steven.assets.externalmaterials.client.MacroDataFetchClient macro;
 
     /**
      * 同步抓所有持股報價、寫 Redis 後回傳統計。
@@ -139,6 +140,32 @@ public class InternalPriceController {
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate since) {
         int n = historicalBackfill.backfillExchangeRateFrom(currency, since);
         return Map.of("currency", currency, "records", n);
+    }
+
+    /** IMF DataMapper 指標查詢（NGDPDPC 人均 GDP / NGDP_RPCH GDP 成長率）。 */
+    @GetMapping("/macro/imf")
+    public Map<Integer, java.math.BigDecimal> imf(
+            @RequestParam String indicator,
+            @RequestParam String country,
+            @RequestParam(defaultValue = "2") int scale) throws Exception {
+        return macro.fetchImf(indicator, country, scale);
+    }
+
+    /** TWSE 加權指數年末收盤點位。 */
+    @GetMapping("/macro/twse-year-end")
+    public Map<String, Object> twseYearEnd(@RequestParam int year) {
+        java.math.BigDecimal close = macro.fetchTwseDecemberClose(year);
+        java.util.Map<String, Object> m = new java.util.HashMap<>();
+        m.put("year", year);
+        m.put("closePoint", close);
+        return m;
+    }
+
+    /** TWSE 加權指數月線（月報整月）。 */
+    @GetMapping("/macro/twse-monthly")
+    public java.util.List<com.steven.assets.externalmaterials.client.MacroDataFetchClient.DailyClose>
+        twseMonthly(@RequestParam int year, @RequestParam int month) {
+        return macro.fetchTwseMonthlyDaily(year, month);
     }
 
     /** 殖利率（TWSE / FinMind / NASDAQ 級聯）。 */

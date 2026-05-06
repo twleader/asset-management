@@ -49,6 +49,7 @@ com/steven/assets/service/ExcelExportService.class
 com/steven/assets/repository/KoreaGdpPerCapitaHistoryRepository.class
 com/steven/assets/service/BackupService.class
 com/steven/assets/dto/WatchStockDto$Response.class
+com/steven/assets/service/MacroHistoryService$DailyCloseDto.class
 com/steven/assets/model/BackupSetting.class
 com/steven/assets/repository/BackupRecordRepository.class
 com/steven/assets/service/ExcelImportService$ImportResult.class
@@ -119,6 +120,7 @@ com/steven/assets/model/AssetSnapshot$AssetSnapshotBuilder.class
 com/steven/assets/model/StockAlertTrigger$StockAlertTriggerBuilder.class
 com/steven/assets/service/FundNavService.class
 com/steven/assets/model/StockHolding$StockHoldingBuilder.class
+com/steven/assets/service/MacroHistoryService$1.class
 com/steven/assets/dto/BackupDto$SyncResponse.class
 com/steven/assets/service/MarketDataService$1.class
 com/steven/assets/model/RealizedGain.class
