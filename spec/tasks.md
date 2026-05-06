@@ -1608,6 +1608,79 @@ Dashboard 頂部 KPI「資產總計」走前端 `liveLatest` 計算，且加上�
 - [x] 60b.7 編譯驗證（business-services + external-materials-service 均通過）
 - [ ] 60b.8 commit + 服務重啟驗證（觀察 ext-materials-service 啟動時 8s 後執行 startupBackfill；business-services 啟動 log 無 "啟動補齊"；前端按「回補資料」仍可運作）
 
+### Task 60c: 匯率排程（BOT 5 分鐘 + FinMind 17:00）搬到 external-materials-service
+
+對應 Requirements: Requirement 7 — [requirements.md:108-109](spec/requirements.md)
+
+#### 背景
+
+business-services `HistoricalDataService` 仍持有：
+- `intradayExchangeRateUpdate` `@Scheduled(cron = "0 0/5 9-15 ...")`：每 5 分鐘呼叫 `fetchBotExchangeRate` 抓 BOT CSV
+- `dailyExchangeRateUpdate` `@Scheduled(cron = "0 0 17 ...")`：呼叫 backfillExchangeRate（FinMind 增量）+ purgeOldExchangeRates
+- `fetchBotExchangeRate(currency)`：直接 curl 抓 https://rate.bot.com.tw/xrt/flcsv/0/day
+
+依規則「對外抓行情 / 匯率全集中 ext-materials-service」，這三項都該搬走。本地清理 (`purgeOldStockPriceHistory` / `purgeOldExchangeRates`) 因只動 DB 可留；改名為 `purgeOldHistory` 收斂為單一排程於 17:30 跑。
+
+#### Steps:
+
+- [x] 60c.1 ext-materials-service 新增 `BotFxFetchClient`：BOT CSV via curl，回 `SpotQuote(spotBuy, spotSell)`
+- [x] 60c.2 ext-materials-service 新增 `ExchangeRatePoller`：`@Scheduled` 盤中 5 分鐘 BOT + 17:00 FinMind FinMind 增量補；提供 `refreshBotNow(currency)` 給手動觸發
+- [x] 60c.3 `InternalPriceController` 加 `POST /internal/exchange-rate/refresh-bot`
+- [x] 60c.4 business-services `HistoricalDataService`：刪除原 BOT 抓 / 排程 / `currenciesToTrack` / `parseBotDecimal`；`fetchBotExchangeRate` 改為 WebClient proxy；新增 `purgeOldHistory` `@Scheduled(17:30)` 收斂本地清理
+- [x] 60c.5 編譯驗證（business-services + ext-materials-service 皆通過）
+- [ ] 60c.6 commit + 服務重啟驗證（觀察 ext-materials-service 9-15 點 5 分鐘 log、business-services 不再有 BOT log）
+
+### Task 60d: 警示盤中 5 分鐘 K 線抓取搬到 external-materials-service
+
+對應 Requirements: Requirement 7、Requirement 16（警示）
+
+#### 背景
+
+`HistoricalDataService.fetchIntraday5m(code, market, daysBack)` 直接呼叫 `query2.finance.yahoo.com/v8/finance/chart/{ticker}?interval=5m&range=Nd`（透過 curl + 429 retry），用於 `StockAlertService` 警示觸發補抓精確時點。仍然違反「對外行情 API 集中 ext-materials-service」原則。
+
+#### Steps:
+
+- [x] 60d.1 ext-materials-service `PriceFetchClient.fetchIntraday5m`：搬遷 Yahoo 5m + curl retry 邏輯，回傳 `IntradayBar(time:String, OHLC)`
+- [x] 60d.2 `InternalPriceController` 加 `GET /internal/intraday-5m?code=&market=&daysBack=`
+- [x] 60d.3 business-services `HistoricalDataService.fetchIntraday5m` 改為 WebClient proxy；`IntradayBar(LocalDateTime, OHLC)` 對外型別保持不變（`StockAlertService` 不需動）；內部用 `IntradayBarDto(String time)` 解 JSON
+- [x] 60d.4 編譯驗證（兩個 service 通過）
+- [ ] 60d.5 commit + 服務重啟驗證
+
+### Task 60e: MarketDataService 配息率 / ETF / 股利歷史 / TWSE 假日 / 股票名稱搬到 external-materials-service
+
+對應 Requirements: Requirement 7、Requirement 13（配息率）
+
+#### 背景
+
+`MarketDataService` 仍持有大量直接呼叫外部行情 API 的方法（TWSE OpenAPI / TWSE BWIBBU per-stock / FinMind dividend datasets / NASDAQ /quote/{code}/dividends / Yahoo quoteSummary + crumb 認證 / FinMind TaiwanETFHoldings），共約 1400 行。`HistoricalDataService.fetchTw/UsStockName` 同樣直連 FinMind / Yahoo。需全部搬到 ext-materials-service。
+
+#### Steps:
+
+- [x] 60e.1 ext-materials-service 新增 `MarketDataFetchService`：含殖利率級聯（TWSE OpenAPI / TWSE BWIBBU 3Y / FinMind dataset / NASDAQ / Known US ETF）、ETF 持股（Yahoo topHoldings + 台股 FinMind fallback）、股利歷史（FinMind / NASDAQ）、TWSE 假日表、股票名稱（FinMind / Yahoo via curl）、Yahoo crumb 認證
+- [x] 60e.2 `StockSourceQuery` 新增 `findRecentClose(code, market)` 提供殖利率分母 fallback
+- [x] 60e.3 `InternalPriceController` 加 `/internal/dividend-rate`、`/internal/etf-holdings`、`/internal/dividend-history`、`/internal/tw-holidays`、`/internal/stock-name`
+- [x] 60e.4 business-services `MarketDataService`：刪除 ~1300 行 HTTP 邏輯；保留公開 record 類型 + 1 小時 dividend rate 快取 + per-year holiday 快取 + NYSE 假日純計算 + ETF 白名單；其餘全改 WebClient proxy
+- [x] 60e.5 business-services `HistoricalDataService.fetchTwStockName/fetchUsStockName` 改 proxy 至 `/internal/stock-name`；移除 `curlGetWithRetry` / `httpGet` / 不再用的 imports（JsonNode / ObjectMapper / HttpClient / 等）
+- [x] 60e.6 編譯驗證（business-services + ext-materials-service 皆通過）
+- [ ] 60e.7 commit + 服務重啟驗證（前端配息率 / ETF 持股 / 假日 / 股票名稱查詢仍正常）
+
+### Task 60f: MacroHistoryService IMF / TWSE FMTQIK 搬到 external-materials-service
+
+對應 Requirements: Requirement 7（外部行情 API 集中）
+
+#### 背景
+
+`MacroHistoryService` 直接呼叫 IMF DataMapper（curl shell-out 避 Akamai WAF）與 TWSE FMTQIK 月報。為集中外部抓取於 ext-materials-service，搬遷其 HTTP 部分；JPA 寫入留在 business-services（涉及 4 個 Repo / Entity，DB 邏輯複雜，proxy 後再寫 JPA 較簡潔）。
+
+#### Steps:
+
+- [x] 60f.1 ext-materials-service 新增 `MacroDataFetchClient`：`fetchImf(indicator, country, scale)`、`fetchTwseDecemberClose(year)`、`fetchTwseMonthlyDaily(year, month)` 回傳 `DailyClose(date, close)`
+- [x] 60f.2 `InternalPriceController` 加 `/internal/macro/imf`、`/internal/macro/twse-year-end`、`/internal/macro/twse-monthly`
+- [x] 60f.3 business-services `MacroHistoryService`：HTTP / curl 全部刪除；refresh* 方法保留 `@Transactional` + JPA 寫入；新增 `fetchImfProxy` / `fetchTwseDecemberCloseProxy` / `fetchTwseMonthlyDailyProxy` 走 WebClient
+- [x] 60f.4 全 codebase 確認 backend / bff 無 twse / nasdaq / finmind / yahoo / bot / imf 等對外行情 URL（v1.21.0 changelog 註解一行除外）
+- [x] 60f.5 編譯驗證
+- [ ] 60f.6 commit + 服務重啟驗證
+
 ### Task 60a: 移除 business-services 重複的每日股價收盤排程
 
 對應 Requirements: Requirement 7（即時股價/快取）— [requirements.md:108-109](spec/requirements.md)

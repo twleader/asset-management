@@ -1,7 +1,5 @@
 package com.steven.assets.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.steven.assets.model.ExchangeRateHistory;
 import com.steven.assets.model.StockPriceHistory;
 import com.steven.assets.repository.ExchangeRateHistoryRepository;
@@ -14,23 +12,9 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
-import java.net.CookieManager;
-import java.net.CookiePolicy;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.*;
 import java.util.*;
 
-/**
- * 業務端歷史資料 service：
- *  - 讀取：直接讀 DB（stock_price_history / exchange_rate_history）
- *  - 寫入 / 對外抓：proxy 至 external-materials-service /internal/backfill/*
- *  - 仍保留：BOT CSV 即時匯率（intradayExchangeRateUpdate / fetchBotExchangeRate，Phase 1C 再搬）、
- *           股票名稱查詢（fetchTw/UsStockName，Phase 2 再搬）、5 分鐘 K 線（fetchIntraday5m，Phase 1D 再搬）
- */
 @Slf4j
 @Service
 public class HistoricalDataService {
@@ -41,18 +25,6 @@ public class HistoricalDataService {
     private final com.steven.assets.repository.FundMasterRepository fundMasterRepo;
     private final WebClient priceServiceClient;
 
-    /** FinMind API token（fetchTw/UsStockName 仍會用到，待 Phase 2 一併搬走） */
-    @Value("${finmind.token:${FINMIND_TOKEN:}}")
-    private String finmindToken;
-
-    private static final String UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
-
-    private final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(15))
-            .followRedirects(HttpClient.Redirect.NORMAL)
-            .cookieHandler(new CookieManager(null, CookiePolicy.ACCEPT_ALL))
-            .build();
-    private final ObjectMapper mapper = new ObjectMapper();
 
     public HistoricalDataService(
             StockPriceHistoryRepository priceHistRepo,
@@ -72,78 +44,38 @@ public class HistoricalDataService {
     //  business-services 不再直接呼叫 FinMind / Yahoo（spec/requirements.md:108-109）
     // ═══════════════════════════════════════════════════════════════════════
 
-    // ═══════════════════════════════════════════════════════════════════════
-    //  Yahoo curl helper：留給 fetchIntraday5m（Phase 1D 再搬）與 fetchUsStockName（Phase 2 再搬）
-    // ═══════════════════════════════════════════════════════════════════════
-
-    private String curlGetWithRetry(String url, int maxRetries) throws Exception {
-        for (int attempt = 0; attempt <= maxRetries; attempt++) {
-            // 使用精簡 User-Agent 避免被 Yahoo 限速（長 UA 會觸發 429）
-            ProcessBuilder pb = new ProcessBuilder("curl", "-s",
-                    "-H", "User-Agent: Mozilla/5.0",
-                    url);
-            pb.redirectErrorStream(true);
-            Process proc = pb.start();
-            String body = new String(proc.getInputStream().readAllBytes());
-            proc.waitFor();
-
-            // 檢查是否為有效 JSON（以 { 開頭）
-            String trimmed = body.trim();
-            if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-                return body;
-            }
-
-            // 非 JSON 回應（可能是 429 "Too Many Requests"）
-            if (attempt < maxRetries) {
-                long waitMs = (attempt + 1) * 10000L; // 10s, 20s, 30s...
-                log.info("Yahoo Finance 回傳非 JSON（可能 429），等待 {}s 後重試 ({}/{})",
-                        waitMs / 1000, attempt + 1, maxRetries);
-                sleep(waitMs);
-            }
-        }
-        throw new RuntimeException("Yahoo Finance 重試 " + maxRetries + " 次仍失敗");
-    }
-
     /** 盤中分鐘級資料 bar：開盤後某 5 分鐘的 OHLC。 */
     public record IntradayBar(LocalDateTime time, BigDecimal open, BigDecimal high,
                                BigDecimal low, BigDecimal close) {}
 
+    /** 內部 DTO：對應 ext-materials-service 的回應格式（time 為 ISO 字串）。 */
+    private record IntradayBarDto(String time, BigDecimal open, BigDecimal high,
+                                   BigDecimal low, BigDecimal close) {}
+
     /**
-     * 抓取指定股票最近 N 個交易日的 5 分鐘 K 線（用 Yahoo Finance chart API）。
-     * 用於警示盤中觸發補抓 — 從 5 分鐘 bar 找出條件第一次成立的精確時點。
-     * 台股需 .TW 後綴；美股直接用 ticker。
+     * 警示盤中觸發補抓專用：5 分鐘 K 線。
+     * 對外呼叫已搬到 ext-materials-service /internal/intraday-5m（FinMind/Yahoo 集中）。
      */
     public List<IntradayBar> fetchIntraday5m(String stockCode, String market, int daysBack) {
         try {
-            String ticker = "美股".equals(market) ? stockCode : stockCode + ".TW";
-            String range = Math.max(1, daysBack) + "d";
-            String url = "https://query2.finance.yahoo.com/v8/finance/chart/" + ticker
-                    + "?interval=5m&range=" + range;
-            String body = curlGetWithRetry(url, 2);
-
-            JsonNode root = mapper.readTree(body);
-            JsonNode chart = root.path("chart").path("result").path(0);
-            JsonNode timestamps = chart.path("timestamp");
-            JsonNode quotes = chart.path("indicators").path("quote").path(0);
-            String tz = chart.path("meta").path("exchangeTimezoneName").asText("Asia/Taipei");
-            ZoneId zone = ZoneId.of(tz);
-            if (!timestamps.isArray()) return List.of();
-
+            IntradayBarDto[] resp = priceServiceClient.get()
+                    .uri(uriBuilder -> uriBuilder.path("/internal/intraday-5m")
+                            .queryParam("code", stockCode)
+                            .queryParam("market", market)
+                            .queryParam("daysBack", daysBack).build())
+                    .retrieve()
+                    .bodyToMono(IntradayBarDto[].class)
+                    .block();
+            if (resp == null) return List.of();
             List<IntradayBar> bars = new ArrayList<>();
-            for (int i = 0; i < timestamps.size(); i++) {
-                long ts = timestamps.get(i).asLong();
-                JsonNode close = quotes.path("close").path(i);
-                if (close.isNull() || close.isMissingNode()) continue;
-                LocalDateTime time = Instant.ofEpochSecond(ts).atZone(zone).toLocalDateTime();
-                bars.add(new IntradayBar(time,
-                        jsonDecimal(quotes.path("open").path(i)),
-                        jsonDecimal(quotes.path("high").path(i)),
-                        jsonDecimal(quotes.path("low").path(i)),
-                        jsonDecimal(close)));
+            for (IntradayBarDto d : resp) {
+                bars.add(new IntradayBar(LocalDateTime.parse(d.time()),
+                        d.open(), d.high(), d.low(), d.close()));
             }
             return bars;
         } catch (Exception e) {
-            log.warn("抓取 {} {} 盤中分鐘資料失敗: {}", market, stockCode, e.getMessage());
+            log.warn("呼叫 ext-materials-service /internal/intraday-5m 失敗 ({} {}): {}",
+                    market, stockCode, e.getMessage());
             return List.of();
         }
     }
@@ -238,144 +170,43 @@ public class HistoricalDataService {
     //  啟動 10 年回補已搬到 external-materials-service HistoricalBackfillService.startupBackfill。
     // ═══════════════════════════════════════════════════════════════════════
 
-    @Scheduled(cron = "0 0 17 * * MON-FRI", zone = "Asia/Taipei")
-    public void dailyExchangeRateUpdate() {
-        log.info("排程：更新匯率（收盤後，proxy /internal/backfill/exchange-rate + 清理舊資料）");
-        for (String currency : currenciesToTrack()) {
-            backfillExchangeRate(currency, LocalDate.now().minusDays(5));
-            purgeOldExchangeRates(currency, 10);
-        }
-        purgeOldStockPriceHistory(10);
-    }
-
     /**
-     * 系統需追蹤的非 TWD 計價幣別集合：股票美股 USD + fund_master 上所有非 TWD 幣別 (Requirement 19)。
+     * 收盤後本地清理：刪除 10 年以前的 stock_price_history、exchange_rate_history。
+     * 匯率排程（盤中 BOT 5 分鐘 / 收盤 17:00 FinMind）已搬到 ext-materials-service ExchangeRatePoller。
      */
-    private java.util.Set<String> currenciesToTrack() {
-        java.util.Set<String> set = new java.util.LinkedHashSet<>();
-        set.add("USD");
+    @Scheduled(cron = "0 30 17 * * MON-FRI", zone = "Asia/Taipei")
+    @Transactional
+    public void purgeOldHistory() {
+        LocalDate cutoff = LocalDate.now().minusYears(10);
+        long stockDeleted = priceHistRepo.deleteByTradingDateBefore(cutoff);
+        if (stockDeleted > 0) log.info("已清除 {} 筆超過 10 年的股價歷史資料", stockDeleted);
+        java.util.Set<String> currencies = new java.util.LinkedHashSet<>();
+        currencies.add("USD");
         for (com.steven.assets.model.FundMaster fm : fundMasterRepo.findByActiveTrue()) {
             String c = fm.getCurrency();
-            if (c != null && !c.isBlank() && !"TWD".equalsIgnoreCase(c)) {
-                set.add(c.toUpperCase());
-            }
+            if (c != null && !c.isBlank() && !"TWD".equalsIgnoreCase(c)) currencies.add(c.toUpperCase());
         }
-        return set;
-    }
-
-    /**
-     * 清除超過指定年數的股價歷史資料（所有市場）
-     */
-    @Transactional
-    public void purgeOldStockPriceHistory(int keepYears) {
-        LocalDate cutoff = LocalDate.now().minusYears(keepYears);
-        long deleted = priceHistRepo.deleteByTradingDateBefore(cutoff);
-        if (deleted > 0) {
-            log.info("已清除 {} 筆超過 {} 年的股價歷史資料", deleted, keepYears);
+        for (String c : currencies) {
+            long n = rateHistRepo.deleteByCurrencyAndRateDateBefore(c, cutoff);
+            if (n > 0) log.info("已清除 {} 筆超過 10 年的 {} 匯率資料", n, c);
         }
     }
 
-    /**
-     * 盤中匯率更新：每 5 分鐘從台灣銀行即時牌告抓取 USD 匯率
-     * 台灣外匯市場交易時間：週一～五 09:00 ~ 16:00 (台北時間)
-     * Cron 在 09:05 ~ 15:55 每 5 分鐘執行（09:00 市場尚未開盤跳過）
-     */
-    @Scheduled(cron = "0 0/5 9-15 * * MON-FRI", zone = "Asia/Taipei")
-    public void intradayExchangeRateUpdate() {
-        ZonedDateTime now = ZonedDateTime.now(ZoneId.of("Asia/Taipei"));
-        int hour = now.getHour();
-        int minute = now.getMinute();
-        // 09:00 整點跳過（市場尚未開盤）
-        if (hour == 9 && minute < 5) return;
-        log.info("排程：盤中更新匯率（台灣銀行） ({}:{})", hour, String.format("%02d", minute));
-        for (String currency : currenciesToTrack()) {
-            fetchBotExchangeRate(currency);
-        }
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //  台灣銀行即時匯率 — BOT CSV endpoint
-    // ═══════════════════════════════════════════════════════════════════════
-
-    /**
-     * 從台灣銀行牌告匯率 CSV 取得即時匯率並寫入 ExchangeRateHistory
-     * CSV endpoint: https://rate.bot.com.tw/xrt/flcsv/0/day
-     * 注意：BOT CSV 回傳 UTF-8 with BOM + CRLF 換行
-     * 買入區欄位: 0=幣別, 1=匯率, 2=現金買入, 3=即期買入
-     * 賣出區欄位: 11=匯率, 12=現金賣出, 13=即期賣出
-     * 使用 curl 避免 Java HttpClient 被 BOT 擋
-     */
-    @Transactional
+    /** 手動觸發 BOT 即期匯率抓取（前端 /api/market-data/exchange-rate/refresh proxy）。 */
     public void fetchBotExchangeRate(String currency) {
         try {
-            String url = "https://rate.bot.com.tw/xrt/flcsv/0/day";
-            ProcessBuilder pb = new ProcessBuilder("curl", "-s",
-                    "-H", "User-Agent: Mozilla/5.0",
-                    url);
-            pb.redirectErrorStream(true);
-            Process proc = pb.start();
-            String csvBody = new String(proc.getInputStream().readAllBytes());
-            proc.waitFor();
-
-            if (csvBody == null || csvBody.trim().isEmpty()) {
-                log.warn("台灣銀行 CSV 回傳空白");
-                return;
-            }
-
-            // 移除 UTF-8 BOM，統一換行符
-            csvBody = csvBody.replace("\uFEFF", "");
-            String[] lines = csvBody.split("\\r?\\n");
-
-            for (String line : lines) {
-                String trimmed = line.trim();
-                if (!trimmed.startsWith(currency + ",")) continue;
-
-                String[] cols = trimmed.split(",");
-                if (cols.length < 14) {
-                    log.warn("台灣銀行 CSV {} 欄位不足: {} 欄", currency, cols.length);
-                    return;
-                }
-
-                // 即期買入 = index 3, 即期賣出 = index 13
-                BigDecimal spotBuy = parseBotDecimal(cols[3]);
-                BigDecimal spotSell = parseBotDecimal(cols[13]);
-
-                if (spotBuy == null || spotSell == null) {
-                    log.warn("台灣銀行 CSV {} 即期匯率解析失敗: buy=[{}], sell=[{}]", currency, cols[3], cols[13]);
-                    return;
-                }
-
-                LocalDate today = LocalDate.now(ZoneId.of("Asia/Taipei"));
-                ExchangeRateHistory record = rateHistRepo.findByCurrencyAndRateDate(currency, today)
-                        .orElse(ExchangeRateHistory.builder().currency(currency).rateDate(today).build());
-
-                record.setBuyRate(spotBuy);
-                record.setSellRate(spotSell);
-                rateHistRepo.save(record);
-                log.info("台灣銀行 {} 匯率: buy={}, sell={}, mid={} ({})",
-                        currency, spotBuy, spotSell, record.getMidRate(), today);
-                return;
-            }
-            log.warn("台灣銀行 CSV 找不到 {} 的匯率資料", currency);
+            priceServiceClient.post()
+                    .uri(uriBuilder -> uriBuilder.path("/internal/exchange-rate/refresh-bot")
+                            .queryParam("currency", currency).build())
+                    .retrieve()
+                    .toBodilessEntity()
+                    .block();
         } catch (Exception e) {
-            log.warn("台灣銀行匯率抓取失敗 ({}): {}", currency, e.getMessage());
+            log.warn("呼叫 ext-materials-service /internal/exchange-rate/refresh-bot 失敗: {}", e.getMessage());
         }
     }
 
-    private BigDecimal parseBotDecimal(String value) {
-        if (value == null) return null;
-        String trimmed = value.trim().replaceAll("[^0-9.]", "");
-        if (trimmed.isEmpty()) return null;
-        try {
-            return new BigDecimal(trimmed).setScale(4, RoundingMode.HALF_UP);
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
-    /**
-     * 清除超過指定年數的匯率歷史資料
-     */
+    /** 手動清理 X 年以前的單一幣別匯率（給 /api/market-data/exchange-rate/refresh 用）。 */
     @Transactional
     public void purgeOldExchangeRates(String currency, int keepYears) {
         LocalDate cutoff = LocalDate.now().minusYears(keepYears);
@@ -384,6 +215,7 @@ public class HistoricalDataService {
             log.info("已清除 {} 筆超過 {} 年的 {} 匯率資料", deleted, keepYears, currency);
         }
     }
+
 
     // ═══════════════════════════════════════════════════════════════════════
     //  查詢 API
@@ -466,87 +298,33 @@ public class HistoricalDataService {
         return rateHistRepo.findClosestRate(currency, date);
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    //  Helpers
-    // ═══════════════════════════════════════════════════════════════════════
-
-    private String httpGet(String url) throws Exception {
-        HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(url))
-                .header("User-Agent", UA)
-                .header("Accept", "application/json")
-                .timeout(Duration.ofSeconds(20));
-        if (url.contains("api.finmindtrade.com") && finmindToken != null && !finmindToken.isBlank()) {
-            b.header("Authorization", "Bearer " + finmindToken.trim());
-        }
-        HttpResponse<String> resp = httpClient.send(b.GET().build(), HttpResponse.BodyHandlers.ofString());
-        if (resp.statusCode() != 200) throw new RuntimeException("HTTP " + resp.statusCode());
-        return resp.body();
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //  股票名稱查詢（FinMind TaiwanStockInfo / Yahoo Finance）
-    // ═══════════════════════════════════════════════════════════════════════
-
-    /**
-     * 查詢台股名稱（使用 FinMind TaiwanStockInfo）
-     * 回傳空字串表示查不到
-     */
+    /** 股票名稱查詢：proxy 至 ext-materials-service /internal/stock-name。 */
+    @SuppressWarnings("unchecked")
     public String fetchTwStockName(String code) {
-        try {
-            String url = "https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockInfo&data_id="
-                    + code.trim().toUpperCase();
-            String body = httpGet(url);
-            JsonNode data = mapper.readTree(body).path("data");
-            if (data.isArray() && data.size() > 0) {
-                String name = data.get(0).path("stock_name").asText("").trim();
-                if (!name.isEmpty() && !name.equalsIgnoreCase(code)) {
-                    return name;
-                }
-            }
-        } catch (Exception e) {
-            log.warn("FinMind 查詢台股名稱失敗 {}: {}", code, e.getMessage());
-        }
-        return "";
+        return fetchStockName(code, "台股");
     }
 
-    /**
-     * 查詢美股名稱（使用 Yahoo Finance chart meta）
-     * 回傳空字串表示查不到
-     */
     public String fetchUsStockName(String code) {
+        return fetchStockName(code, "美股");
+    }
+
+    private String fetchStockName(String code, String market) {
         try {
-            String url = "https://query2.finance.yahoo.com/v8/finance/chart/" + code.trim().toUpperCase()
-                    + "?interval=1d&range=1d";
-            String body = curlGetWithRetry(url, 1);
-            JsonNode meta = mapper.readTree(body)
-                    .path("chart").path("result").path(0).path("meta");
-            String name = meta.path("shortName").asText("").trim();
-            if (name.isEmpty()) name = meta.path("longName").asText("").trim();
-            if (!name.isEmpty() && !name.equalsIgnoreCase(code)) {
-                return name;
-            }
+            Map<String, String> resp = priceServiceClient.get()
+                    .uri(uriBuilder -> uriBuilder.path("/internal/stock-name")
+                            .queryParam("code", code).queryParam("market", market).build())
+                    .retrieve()
+                    .bodyToMono(Map.class)
+                    .map(m -> {
+                        @SuppressWarnings("unchecked")
+                        Map<String, String> r = (Map<String, String>) m;
+                        return r;
+                    })
+                    .block();
+            return resp == null ? "" : resp.getOrDefault("name", "");
         } catch (Exception e) {
-            log.warn("Yahoo 查詢美股名稱失敗 {}: {}", code, e.getMessage());
+            log.warn("呼叫 /internal/stock-name 失敗 {} {}: {}", market, code, e.getMessage());
+            return "";
         }
-        return "";
-    }
-
-    private BigDecimal decimal(JsonNode node, String field) {
-        JsonNode v = node.path(field);
-        if (v.isMissingNode() || v.isNull()) return null;
-        try {
-            return new BigDecimal(v.asText()).setScale(4, RoundingMode.HALF_UP);
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private BigDecimal jsonDecimal(JsonNode v) {
-        if (v == null || v.isNull() || v.isMissingNode()) return null;
-        return BigDecimal.valueOf(v.asDouble()).setScale(4, RoundingMode.HALF_UP);
-    }
-
-    private void sleep(long ms) {
-        try { Thread.sleep(ms); } catch (InterruptedException ignored) {}
     }
 }

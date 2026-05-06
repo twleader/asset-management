@@ -455,6 +455,50 @@ public class PriceFetchClient {
         }
     }
 
+    /** 盤中 5 分鐘 K 線：Yahoo Finance chart API range=Nd / interval=5m，用於警示觸發補抓精確時點。 */
+    public record IntradayBar(
+            String time,        // ISO LocalDateTime（exchangeTimezone 當地時區）
+            BigDecimal open,
+            BigDecimal high,
+            BigDecimal low,
+            BigDecimal close
+    ) {}
+
+    public List<IntradayBar> fetchIntraday5m(String stockCode, String market, int daysBack) {
+        try {
+            String ticker = "美股".equals(market) ? stockCode : stockCode + ".TW";
+            String range = Math.max(1, daysBack) + "d";
+            String url = "https://query2.finance.yahoo.com/v8/finance/chart/" + ticker
+                    + "?interval=5m&range=" + range;
+            String body = curlGetWithRetry(url, 2);
+
+            JsonNode root = mapper.readTree(body);
+            JsonNode chart = root.path("chart").path("result").path(0);
+            JsonNode timestamps = chart.path("timestamp");
+            JsonNode quotes = chart.path("indicators").path("quote").path(0);
+            String tz = chart.path("meta").path("exchangeTimezoneName").asText("Asia/Taipei");
+            java.time.ZoneId zone = java.time.ZoneId.of(tz);
+            if (!timestamps.isArray()) return List.of();
+
+            List<IntradayBar> bars = new java.util.ArrayList<>();
+            for (int i = 0; i < timestamps.size(); i++) {
+                long ts = timestamps.get(i).asLong();
+                JsonNode close = quotes.path("close").path(i);
+                if (close.isNull() || close.isMissingNode()) continue;
+                String time = java.time.Instant.ofEpochSecond(ts).atZone(zone).toLocalDateTime().toString();
+                bars.add(new IntradayBar(time,
+                        jsonDecimal(quotes.path("open").path(i)),
+                        jsonDecimal(quotes.path("high").path(i)),
+                        jsonDecimal(quotes.path("low").path(i)),
+                        jsonDecimal(close)));
+            }
+            return bars;
+        } catch (Exception e) {
+            log.warn("抓取 {} {} 盤中 5m 失敗: {}", market, stockCode, e.getMessage());
+            return List.of();
+        }
+    }
+
     /**
      * curl 子程序 + 重試（Yahoo Finance 對 Java HTTP client 友善度差，且偶發 429）。
      * 回應非 JSON 視為被擋，等 10s/20s/30s... 後重試，最多 maxRetries 次。

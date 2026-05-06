@@ -107,6 +107,20 @@ public class StockSourceQuery {
                 }));
     }
 
+    /** 該股票歷史表最近一筆收盤價（用於 dividend yield 分母 fallback）。 */
+    public Optional<BigDecimal> findRecentClose(String stockCode, String market) {
+        return Optional.ofNullable(jdbc.query(
+                "SELECT close_price FROM stock_price_history WHERE stock_code=? AND market=? " +
+                        "ORDER BY trading_date DESC LIMIT 1",
+                ps -> { ps.setString(1, stockCode); ps.setString(2, market); },
+                rs -> {
+                    if (rs.next()) {
+                        return rs.getBigDecimal(1);
+                    }
+                    return null;
+                }));
+    }
+
     /** 判斷該股票該日是否已有歷史紀錄（避免回補重複插入）。 */
     public boolean existsHistory(String stockCode, String market, LocalDate tradingDate) {
         org.springframework.jdbc.core.ResultSetExtractor<Boolean> ex = rs -> rs.next();
