@@ -1630,6 +1630,19 @@ business-services `HistoricalDataService` 仍持有：
 - [x] 60c.5 編譯驗證（business-services + ext-materials-service 皆通過）
 - [ ] 60c.6 commit + 服務重啟驗證（觀察 ext-materials-service 9-15 點 5 分鐘 log、business-services 不再有 BOT log）
 
+### Task 60g: 警示頁文案校正（沒有基準日，盤中每 2 分鐘隨股價更新檢查）
+
+對應 Requirements: Requirement 16（警示）
+
+#### 背景
+
+[StockAlertView.vue:16](frontend/src/views/StockAlertView.vue) 文案寫「每 5 分鐘隨股價更新自動檢查」，但實際排程是 ext-materials-service `PricePoller` 每 **2 分鐘** poll 一次（台股 09:00–13:30 / 美股 09:30–16:00 ET），寫 Redis 後 publish 到 `price-update` channel，business-services 立即 `StockAlertService.checkAlertsFor` 評估。Alert 完全沒有基準日 / snapshot 概念 — 盤中只要 Redis 有新報價，警示條件就會被檢查。
+
+#### Steps:
+
+- [x] 60g.1 `StockAlertView.vue` 改為「盤中（台股 09:00–13:30、美股 09:30–16:00 ET）每次股價更新（每 2 分鐘）即時檢查」
+- [ ] 60g.2 commit + 前端重建驗證
+
 ### Task 60d: 警示盤中 5 分鐘 K 線抓取搬到 external-materials-service
 
 對應 Requirements: Requirement 7、Requirement 16（警示）

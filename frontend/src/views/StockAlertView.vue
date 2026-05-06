@@ -13,7 +13,7 @@
 
       <el-alert type="info" :closable="false" style="margin-bottom:16px">
         <template #title>
-          系統每 5 分鐘隨股價更新自動檢查，條件符合時記錄觸發時間與股價（同一條件 24 小時內不重複觸發）。
+          盤中（台股 09:00–13:30、美股 09:30–16:00 ET）每次股價更新（每 2 分鐘）即時檢查，條件符合時記錄觸發時間與股價（同一條件 24 小時內不重複觸發）。
         </template>
       </el-alert>
 
