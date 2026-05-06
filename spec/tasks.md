@@ -1630,6 +1630,30 @@ business-services `HistoricalDataService` 仍持有：
 - [x] 60c.5 編譯驗證（business-services + ext-materials-service 皆通過）
 - [ ] 60c.6 commit + 服務重啟驗證（觀察 ext-materials-service 9-15 點 5 分鐘 log、business-services 不再有 BOT log）
 
+### Task 60h: 修台股大盤日線抓取（舊 URL 失效 + 加每日排程）
+
+對應 Requirements: Requirement（GDP+大盤）
+
+#### 背景
+
+台股大盤每日收盤圖表停在 5/5 之後沒更新到 5/6。診斷發現兩個問題：
+1. **舊端點 `https://www.twse.com.tw/exchangeReport/FMTQIK?response=json&date=...` 站台維護中** —— 用 curl HTTP/1.1 直打回傳 `<html>網站維護中</html>`，HTTP/2 直接 timeout。`MacroDataFetchClient.fetchTwseMonthlyDaily` 因此只回 `[]`。
+2. **無自動排程** —— 之前完全靠前端「回補日線」按鈕手動觸發。即使按鈕能用，使用者也得每天記得按。
+
+替代端點 `https://openapi.twse.com.tw/v1/exchangeReport/FMTQIK?date=YYYYMM01` 仍可用，但 schema 不同：
+- 直接是 array of objects（無 `stat`/`data` 包裝）
+- `Date` 為民國格式 `"1150504"` 而非 `"115/05/04"`
+- 收盤值欄位名為 `TAIEX` 而非陣列 index 4
+
+#### Steps:
+
+- [x] 60h.1 `MacroDataFetchClient` 改用 openapi 端點 + 解析 array-of-objects schema（新 Date 格式 7 字元、TAIEX 鍵）
+- [x] 60h.2 ext-materials-service 新增 `TwseIndexPoller`：`@Scheduled` 14:00 / 17:00 / 隔日 08:30 三次抓當月（每月 1~5 日跨月時補上月）`upsert` 至 `twse_index_daily_history`
+- [x] 60h.3 `StockSourceQuery` 新增 `upsertTwseIndexDaily(date, closePoint)`
+- [x] 60h.4 `fetchTwseDecemberClose` 改 reuse `fetchTwseMonthlyDaily(year, 12).last`，避免重複維護
+- [x] 60h.5 編譯驗證
+- [ ] 60h.6 commit + 服務重啟驗證（隔日 08:30 cron 跑後 5/6 應寫入 DB；openapi 此刻還沒上 5/6）
+
 ### Task 60g: 警示頁文案校正（沒有基準日，盤中每 2 分鐘隨股價更新檢查）
 
 對應 Requirements: Requirement 16（警示）

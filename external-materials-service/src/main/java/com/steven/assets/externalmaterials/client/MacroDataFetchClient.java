@@ -29,8 +29,13 @@ import java.util.Map;
 public class MacroDataFetchClient {
 
     private static final String IMF_API_TPL = "https://www.imf.org/external/datamapper/api/v1/";
+    /**
+     * TWSE FMTQIK（盤後成交資訊）。原 www.twse.com.tw 端點於 2026 站台維護期間長時間無回應，
+     * 改用 openapi 版（無 response 包裝層、直接是 array）。
+     * 回應 schema: [{ Date: "115mmdd"（民國）, TradeVolume, TradeValue, Transaction, TAIEX, Change }, ...]
+     */
     private static final String TWSE_FMTQIK_URL =
-            "https://www.twse.com.tw/exchangeReport/FMTQIK?response=json&date=";
+            "https://openapi.twse.com.tw/v1/exchangeReport/FMTQIK?date=";
 
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
@@ -70,30 +75,17 @@ public class MacroDataFetchClient {
 
     /** TWSE FMTQIK 12 月份月報，取該月最後一筆作為年末加權指數收盤。 */
     public BigDecimal fetchTwseDecemberClose(int year) {
-        try {
-            HttpRequest req = HttpRequest.newBuilder(URI.create(TWSE_FMTQIK_URL + year + "1201"))
-                    .header("Accept", "application/json")
-                    .header("User-Agent", "Mozilla/5.0")
-                    .timeout(Duration.ofSeconds(15))
-                    .GET().build();
-            HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString());
-            if (res.statusCode() / 100 != 2) return null;
-            JsonNode root = mapper.readTree(res.body());
-            if (!"OK".equals(root.path("stat").asText())) return null;
-            JsonNode data = root.path("data");
-            if (!data.isArray() || data.isEmpty()) return null;
-            JsonNode last = data.get(data.size() - 1);
-            String idxStr = last.get(4).asText().replace(",", "");
-            return new BigDecimal(idxStr).setScale(2, RoundingMode.HALF_UP);
-        } catch (Exception e) {
-            log.warn("TWSE FMTQIK {} 抓取失敗：{}", year, e.getMessage());
-            return null;
-        }
+        List<DailyClose> rows = fetchTwseMonthlyDaily(year, 12);
+        if (rows.isEmpty()) return null;
+        return rows.get(rows.size() - 1).close();
     }
 
     public record DailyClose(LocalDate tradingDate, BigDecimal close) {}
 
-    /** TWSE FMTQIK 月報：每筆 [民國日期, 成交股數, 成交金額, 成交筆數, 加權指數收盤, 漲跌點數]。 */
+    /**
+     * TWSE FMTQIK 月報（openapi.twse.com.tw 版本）。
+     * 回應為 JSON array，每筆 {Date, TAIEX, ...}；Date 是民國格式如 "1150504"（前 3 碼民國年 + 4 碼月日）。
+     */
     public List<DailyClose> fetchTwseMonthlyDaily(int year, int month) {
         try {
             String date = String.format("%04d%02d01", year, month);
@@ -105,21 +97,23 @@ public class MacroDataFetchClient {
             HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString());
             if (res.statusCode() / 100 != 2) return Collections.emptyList();
             JsonNode root = mapper.readTree(res.body());
-            if (!"OK".equals(root.path("stat").asText())) return Collections.emptyList();
-            JsonNode data = root.path("data");
-            if (!data.isArray() || data.isEmpty()) return Collections.emptyList();
+            if (!root.isArray() || root.isEmpty()) return Collections.emptyList();
 
             List<DailyClose> out = new ArrayList<>();
-            for (JsonNode row : data) {
-                String mingoDate = row.get(0).asText();
-                String[] p = mingoDate.split("/");
-                if (p.length != 3) continue;
-                int gYear = Integer.parseInt(p[0]) + 1911;
-                LocalDate d;
+            for (JsonNode row : root) {
+                String mingoDate = row.path("Date").asText("");  // e.g. "1150504"
+                if (mingoDate.length() != 7) continue;
+                int gYear, mm, dd;
                 try {
-                    d = LocalDate.of(gYear, Integer.parseInt(p[1]), Integer.parseInt(p[2]));
-                } catch (Exception e) { continue; }
-                String idxStr = row.get(4).asText().replace(",", "");
+                    gYear = Integer.parseInt(mingoDate.substring(0, 3)) + 1911;
+                    mm = Integer.parseInt(mingoDate.substring(3, 5));
+                    dd = Integer.parseInt(mingoDate.substring(5, 7));
+                } catch (NumberFormatException e) { continue; }
+                LocalDate d;
+                try { d = LocalDate.of(gYear, mm, dd); }
+                catch (Exception e) { continue; }
+
+                String idxStr = row.path("TAIEX").asText("").replace(",", "");
                 if (idxStr.isEmpty() || "-".equals(idxStr)) continue;
                 BigDecimal close = new BigDecimal(idxStr).setScale(2, RoundingMode.HALF_UP);
                 out.add(new DailyClose(d, close));
