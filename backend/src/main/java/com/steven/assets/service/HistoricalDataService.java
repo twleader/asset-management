@@ -429,39 +429,12 @@ public class HistoricalDataService {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    //  每日排程：收盤後更新當日收盤價 + 匯率
-    //  台股：每日 14:00 (收盤後 30 分鐘)
-    //  美股：每日 06:00 台灣時間 (收盤後)
-    //  匯率：每日 17:00
+    //  每日排程：匯率（17:00）
+    //  股票每日收盤價排程已搬到 external-materials-service ClosePersister：
+    //    台股 13:32（Redis dump）+ 16:00（FinMind 校驗）；
+    //    美股 16:02 ET（Redis dump）+ 18:00 ET（FinMind 校驗）。
+    //  business-services 不再自己排程抓股價，符合 spec/requirements.md:108-109。
     // ═══════════════════════════════════════════════════════════════════════
-
-    @Scheduled(cron = "0 0 14 * * MON-FRI", zone = "Asia/Taipei")
-    public void dailyTwStockUpdate() {
-        log.info("排程：更新台股當日收盤價");
-        Set<String> twCodes = new LinkedHashSet<>();
-        Set<String> usCodes = new LinkedHashSet<>();
-        collectAllHeldCodes(twCodes, usCodes);
-
-        LocalDate today = LocalDate.now(ZoneId.of("Asia/Taipei"));
-        for (String code : twCodes) {
-            backfillTwStock(code, today.minusDays(5));
-            sleep(500);
-        }
-    }
-
-    @Scheduled(cron = "0 0 6 * * MON-FRI", zone = "Asia/Taipei")
-    public void dailyUsStockUpdate() {
-        log.info("排程：更新美股當日收盤價");
-        Set<String> twCodes = new LinkedHashSet<>();
-        Set<String> usCodes = new LinkedHashSet<>();
-        collectAllHeldCodes(twCodes, usCodes);
-
-        LocalDate recent = LocalDate.now().minusDays(5);
-        for (String code : usCodes) {
-            backfillUsStock(code, recent);
-            sleep(2000); // Yahoo Finance 需要較長間隔避免 429
-        }
-    }
 
     /**
      * 啟動時自動補齊：App 重啟後在背景執行，填滿所有持股的歷史缺漏
