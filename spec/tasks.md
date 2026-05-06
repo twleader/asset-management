@@ -1583,6 +1583,22 @@ Dashboard 頂部 KPI「資產總計」走前端 `liveLatest` 計算，且加上�
 - [x] 59.3 spec 同步 — Requirement 9「市場開盤」閘門條款移除；design.md 加註 KPI 一致性規則與 BFF Aggregation 端點清單
 - [ ] 59.4 commit + 服務重啟驗證
 
+### Task 60a: 移除 business-services 重複的每日股價收盤排程
+
+對應 Requirements: Requirement 7（即時股價/快取）— [requirements.md:108-109](spec/requirements.md)
+
+#### 背景
+
+`HistoricalDataService` 留有兩支 `@Scheduled` — `dailyTwStockUpdate`（14:00 TW，FinMind）與 `dailyUsStockUpdate`（06:00 TW，Yahoo）— 在收盤後重新抓當日收盤寫入 `stock_price_history`。但 external-materials-service 已經有 `ClosePersister` 完整負責這件事（台股 13:32 Redis dump + 16:00 FinMind 校驗；美股 16:02 ET Redis dump + 18:00 ET FinMind 校驗）。business-services 這兩支不只重複還直接違反「不再呼叫外部行情 API」的規定。
+
+`HistoricalDataService` 其餘責任（10 年回補 / FX 排程 / 5 分鐘 K 線等）後續再分階段移轉，暫時保留。
+
+#### Steps:
+
+- [x] 60a.1 刪除 `HistoricalDataService.dailyTwStockUpdate()` 與 `dailyUsStockUpdate()` 兩支 `@Scheduled`，並在原位置加註解說明已交給 ClosePersister
+- [x] 60a.2 編譯驗證（`mvn -q -DskipTests compile` 通過）
+- [ ] 60a.3 commit + 服務重啟驗證（觀察台股 13:32–16:00 / 美股 16:02–18:00 ClosePersister 寫入 `stock_price_history`，business-services 不再有 14:00 / 06:00 抓價 log）
+
 ### Task 60: 修復 SSE 推送讓「股價」欄滲入非基準日的 live 價（Task 29 回歸）
 
 對應 Requirements: Requirement 9（[requirements.md:144-147](spec/requirements.md)）
