@@ -107,6 +107,21 @@ public class StockSourceQuery {
                 }));
     }
 
+    /** Upsert 台股大盤每日收盤點位。同一 trading_date 視為覆寫。 */
+    public void upsertTwseIndexDaily(LocalDate tradingDate, BigDecimal closePoint) {
+        Long existing = jdbc.query(
+                "SELECT 1 FROM twse_index_daily_history WHERE trading_date=?",
+                ps -> ps.setObject(1, tradingDate),
+                rs -> rs.next() ? 1L : null);
+        if (existing != null) {
+            jdbc.update("UPDATE twse_index_daily_history SET close_point=? WHERE trading_date=?",
+                    closePoint, tradingDate);
+        } else {
+            jdbc.update("INSERT INTO twse_index_daily_history (trading_date, close_point) VALUES (?, ?)",
+                    tradingDate, closePoint);
+        }
+    }
+
     /** 該股票歷史表最近一筆收盤價（用於 dividend yield 分母 fallback）。 */
     public Optional<BigDecimal> findRecentClose(String stockCode, String market) {
         return Optional.ofNullable(jdbc.query(
