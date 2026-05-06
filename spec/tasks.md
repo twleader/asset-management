@@ -1646,6 +1646,24 @@ business-services `HistoricalDataService` 仍持有：
 - [x] 60d.4 編譯驗證（兩個 service 通過）
 - [ ] 60d.5 commit + 服務重啟驗證
 
+### Task 60e: MarketDataService 配息率 / ETF / 股利歷史 / TWSE 假日 / 股票名稱搬到 external-materials-service
+
+對應 Requirements: Requirement 7、Requirement 13（配息率）
+
+#### 背景
+
+`MarketDataService` 仍持有大量直接呼叫外部行情 API 的方法（TWSE OpenAPI / TWSE BWIBBU per-stock / FinMind dividend datasets / NASDAQ /quote/{code}/dividends / Yahoo quoteSummary + crumb 認證 / FinMind TaiwanETFHoldings），共約 1400 行。`HistoricalDataService.fetchTw/UsStockName` 同樣直連 FinMind / Yahoo。需全部搬到 ext-materials-service。
+
+#### Steps:
+
+- [x] 60e.1 ext-materials-service 新增 `MarketDataFetchService`：含殖利率級聯（TWSE OpenAPI / TWSE BWIBBU 3Y / FinMind dataset / NASDAQ / Known US ETF）、ETF 持股（Yahoo topHoldings + 台股 FinMind fallback）、股利歷史（FinMind / NASDAQ）、TWSE 假日表、股票名稱（FinMind / Yahoo via curl）、Yahoo crumb 認證
+- [x] 60e.2 `StockSourceQuery` 新增 `findRecentClose(code, market)` 提供殖利率分母 fallback
+- [x] 60e.3 `InternalPriceController` 加 `/internal/dividend-rate`、`/internal/etf-holdings`、`/internal/dividend-history`、`/internal/tw-holidays`、`/internal/stock-name`
+- [x] 60e.4 business-services `MarketDataService`：刪除 ~1300 行 HTTP 邏輯；保留公開 record 類型 + 1 小時 dividend rate 快取 + per-year holiday 快取 + NYSE 假日純計算 + ETF 白名單；其餘全改 WebClient proxy
+- [x] 60e.5 business-services `HistoricalDataService.fetchTwStockName/fetchUsStockName` 改 proxy 至 `/internal/stock-name`；移除 `curlGetWithRetry` / `httpGet` / 不再用的 imports（JsonNode / ObjectMapper / HttpClient / 等）
+- [x] 60e.6 編譯驗證（business-services + ext-materials-service 皆通過）
+- [ ] 60e.7 commit + 服務重啟驗證（前端配息率 / ETF 持股 / 假日 / 股票名稱查詢仍正常）
+
 ### Task 60a: 移除 business-services 重複的每日股價收盤排程
 
 對應 Requirements: Requirement 7（即時股價/快取）— [requirements.md:108-109](spec/requirements.md)

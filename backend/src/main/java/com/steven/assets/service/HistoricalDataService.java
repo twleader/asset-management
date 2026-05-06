@@ -1,7 +1,5 @@
 package com.steven.assets.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.steven.assets.model.ExchangeRateHistory;
 import com.steven.assets.model.StockPriceHistory;
 import com.steven.assets.repository.ExchangeRateHistoryRepository;
@@ -14,23 +12,9 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
-import java.net.CookieManager;
-import java.net.CookiePolicy;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.*;
 import java.util.*;
 
-/**
- * 業務端歷史資料 service：
- *  - 讀取：直接讀 DB（stock_price_history / exchange_rate_history）
- *  - 寫入 / 對外抓：proxy 至 external-materials-service /internal/backfill/*
- *  - 仍保留：BOT CSV 即時匯率（intradayExchangeRateUpdate / fetchBotExchangeRate，Phase 1C 再搬）、
- *           股票名稱查詢（fetchTw/UsStockName，Phase 2 再搬）、5 分鐘 K 線（fetchIntraday5m，Phase 1D 再搬）
- */
 @Slf4j
 @Service
 public class HistoricalDataService {
@@ -41,18 +25,6 @@ public class HistoricalDataService {
     private final com.steven.assets.repository.FundMasterRepository fundMasterRepo;
     private final WebClient priceServiceClient;
 
-    /** FinMind API token（fetchTw/UsStockName 仍會用到，待 Phase 2 一併搬走） */
-    @Value("${finmind.token:${FINMIND_TOKEN:}}")
-    private String finmindToken;
-
-    private static final String UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
-
-    private final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(15))
-            .followRedirects(HttpClient.Redirect.NORMAL)
-            .cookieHandler(new CookieManager(null, CookiePolicy.ACCEPT_ALL))
-            .build();
-    private final ObjectMapper mapper = new ObjectMapper();
 
     public HistoricalDataService(
             StockPriceHistoryRepository priceHistRepo,
@@ -71,38 +43,6 @@ public class HistoricalDataService {
     //  歷史收盤價回補：proxy 至 external-materials-service
     //  business-services 不再直接呼叫 FinMind / Yahoo（spec/requirements.md:108-109）
     // ═══════════════════════════════════════════════════════════════════════
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //  Yahoo curl helper：留給 fetchIntraday5m（Phase 1D 再搬）與 fetchUsStockName（Phase 2 再搬）
-    // ═══════════════════════════════════════════════════════════════════════
-
-    private String curlGetWithRetry(String url, int maxRetries) throws Exception {
-        for (int attempt = 0; attempt <= maxRetries; attempt++) {
-            // 使用精簡 User-Agent 避免被 Yahoo 限速（長 UA 會觸發 429）
-            ProcessBuilder pb = new ProcessBuilder("curl", "-s",
-                    "-H", "User-Agent: Mozilla/5.0",
-                    url);
-            pb.redirectErrorStream(true);
-            Process proc = pb.start();
-            String body = new String(proc.getInputStream().readAllBytes());
-            proc.waitFor();
-
-            // 檢查是否為有效 JSON（以 { 開頭）
-            String trimmed = body.trim();
-            if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-                return body;
-            }
-
-            // 非 JSON 回應（可能是 429 "Too Many Requests"）
-            if (attempt < maxRetries) {
-                long waitMs = (attempt + 1) * 10000L; // 10s, 20s, 30s...
-                log.info("Yahoo Finance 回傳非 JSON（可能 429），等待 {}s 後重試 ({}/{})",
-                        waitMs / 1000, attempt + 1, maxRetries);
-                sleep(waitMs);
-            }
-        }
-        throw new RuntimeException("Yahoo Finance 重試 " + maxRetries + " 次仍失敗");
-    }
 
     /** 盤中分鐘級資料 bar：開盤後某 5 分鐘的 OHLC。 */
     public record IntradayBar(LocalDateTime time, BigDecimal open, BigDecimal high,
@@ -358,87 +298,33 @@ public class HistoricalDataService {
         return rateHistRepo.findClosestRate(currency, date);
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    //  Helpers
-    // ═══════════════════════════════════════════════════════════════════════
-
-    private String httpGet(String url) throws Exception {
-        HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(url))
-                .header("User-Agent", UA)
-                .header("Accept", "application/json")
-                .timeout(Duration.ofSeconds(20));
-        if (url.contains("api.finmindtrade.com") && finmindToken != null && !finmindToken.isBlank()) {
-            b.header("Authorization", "Bearer " + finmindToken.trim());
-        }
-        HttpResponse<String> resp = httpClient.send(b.GET().build(), HttpResponse.BodyHandlers.ofString());
-        if (resp.statusCode() != 200) throw new RuntimeException("HTTP " + resp.statusCode());
-        return resp.body();
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //  股票名稱查詢（FinMind TaiwanStockInfo / Yahoo Finance）
-    // ═══════════════════════════════════════════════════════════════════════
-
-    /**
-     * 查詢台股名稱（使用 FinMind TaiwanStockInfo）
-     * 回傳空字串表示查不到
-     */
+    /** 股票名稱查詢：proxy 至 ext-materials-service /internal/stock-name。 */
+    @SuppressWarnings("unchecked")
     public String fetchTwStockName(String code) {
-        try {
-            String url = "https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockInfo&data_id="
-                    + code.trim().toUpperCase();
-            String body = httpGet(url);
-            JsonNode data = mapper.readTree(body).path("data");
-            if (data.isArray() && data.size() > 0) {
-                String name = data.get(0).path("stock_name").asText("").trim();
-                if (!name.isEmpty() && !name.equalsIgnoreCase(code)) {
-                    return name;
-                }
-            }
-        } catch (Exception e) {
-            log.warn("FinMind 查詢台股名稱失敗 {}: {}", code, e.getMessage());
-        }
-        return "";
+        return fetchStockName(code, "台股");
     }
 
-    /**
-     * 查詢美股名稱（使用 Yahoo Finance chart meta）
-     * 回傳空字串表示查不到
-     */
     public String fetchUsStockName(String code) {
+        return fetchStockName(code, "美股");
+    }
+
+    private String fetchStockName(String code, String market) {
         try {
-            String url = "https://query2.finance.yahoo.com/v8/finance/chart/" + code.trim().toUpperCase()
-                    + "?interval=1d&range=1d";
-            String body = curlGetWithRetry(url, 1);
-            JsonNode meta = mapper.readTree(body)
-                    .path("chart").path("result").path(0).path("meta");
-            String name = meta.path("shortName").asText("").trim();
-            if (name.isEmpty()) name = meta.path("longName").asText("").trim();
-            if (!name.isEmpty() && !name.equalsIgnoreCase(code)) {
-                return name;
-            }
+            Map<String, String> resp = priceServiceClient.get()
+                    .uri(uriBuilder -> uriBuilder.path("/internal/stock-name")
+                            .queryParam("code", code).queryParam("market", market).build())
+                    .retrieve()
+                    .bodyToMono(Map.class)
+                    .map(m -> {
+                        @SuppressWarnings("unchecked")
+                        Map<String, String> r = (Map<String, String>) m;
+                        return r;
+                    })
+                    .block();
+            return resp == null ? "" : resp.getOrDefault("name", "");
         } catch (Exception e) {
-            log.warn("Yahoo 查詢美股名稱失敗 {}: {}", code, e.getMessage());
+            log.warn("呼叫 /internal/stock-name 失敗 {} {}: {}", market, code, e.getMessage());
+            return "";
         }
-        return "";
-    }
-
-    private BigDecimal decimal(JsonNode node, String field) {
-        JsonNode v = node.path(field);
-        if (v.isMissingNode() || v.isNull()) return null;
-        try {
-            return new BigDecimal(v.asText()).setScale(4, RoundingMode.HALF_UP);
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private BigDecimal jsonDecimal(JsonNode v) {
-        if (v == null || v.isNull() || v.isMissingNode()) return null;
-        return BigDecimal.valueOf(v.asDouble()).setScale(4, RoundingMode.HALF_UP);
-    }
-
-    private void sleep(long ms) {
-        try { Thread.sleep(ms); } catch (InterruptedException ignored) {}
     }
 }

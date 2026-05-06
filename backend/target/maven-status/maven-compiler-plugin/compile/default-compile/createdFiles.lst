@@ -6,7 +6,6 @@ com/steven/assets/service/FundDividendService$AnnualDividendEstimate.class
 com/steven/assets/model/WatchStock$WatchStockBuilder.class
 com/steven/assets/repository/TransitFundTypeRepository.class
 com/steven/assets/service/MarketDataService$PriceResult.class
-com/steven/assets/service/MarketDataService$DividendBasis.class
 com/steven/assets/dto/InstitutionDto$UpdateMarketTypeRequest.class
 com/steven/assets/model/StockId.class
 com/steven/assets/config/DataInitializer$1BankSeed.class
@@ -121,6 +120,7 @@ com/steven/assets/model/StockAlertTrigger$StockAlertTriggerBuilder.class
 com/steven/assets/service/FundNavService.class
 com/steven/assets/model/StockHolding$StockHoldingBuilder.class
 com/steven/assets/dto/BackupDto$SyncResponse.class
+com/steven/assets/service/MarketDataService$1.class
 com/steven/assets/model/RealizedGain.class
 com/steven/assets/dto/AssetSnapshotDto$FundResponse.class
 com/steven/assets/dto/AssetSnapshotDto$DepositResponse.class
