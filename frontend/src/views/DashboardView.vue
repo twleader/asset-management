@@ -512,6 +512,9 @@ function getLiveValueFromAssets(row) {
 }
 
 function getRealtimePrice(row) {
+  // 基準日 != 該市場當地今日時，股價欄一律凍結為快照儲存的收盤價（priceChange 顯示由模板 fallback 處理）。
+  // 不加閘門會讓 SSE 推送的 live 價滲入歷史快照的「股價」欄，與其他欄位（現值/損益/預估配息）凍結值不一致。
+  if (!shouldApplyLive(row.market)) return null
   const key = `${row.market}_${row.stockCode}`
   const p = stockPrices.value[key]
   if (!p || p.price == null) return null

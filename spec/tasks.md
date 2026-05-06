@@ -1583,3 +1583,18 @@ Dashboard 頂部 KPI「資產總計」走前端 `liveLatest` 計算，且加上�
 - [x] 59.3 spec 同步 — Requirement 9「市場開盤」閘門條款移除；design.md 加註 KPI 一致性規則與 BFF Aggregation 端點清單
 - [ ] 59.4 commit + 服務重啟驗證
 
+### Task 60: 修復 SSE 推送讓「股價」欄滲入非基準日的 live 價（Task 29 回歸）
+
+對應 Requirements: Requirement 9（[requirements.md:144-147](spec/requirements.md)）
+
+#### 背景
+
+Task 59 移除 `shouldApplyLive` 的「市場開盤」閘門時，`getRealtimePrice(row)` 的「基準日 = 該市場當地今日」閘門（原 Task 29.2）一併被拆掉，只剩 `priceChange != null` 判斷。Task 51 後又改用 SSE (`/api/market-data/prices/stream`) 推播 live 價，連線是無條件開的；外部行情服務開盤期間推送的 `price-update` 一定帶 `priceChange`，會直接覆寫 `stockPrices.value[key]`。
+
+結果：使用者切到非今日的歷史快照時，「股價」欄初次載入正確顯示基準日收盤價，但只要該市場開盤、SSE 一推送，股價就跳成今日 live 價並出現 ▲▼ 漲跌%——和 Requirement 9「其他情形：顯示快照保存的收盤價，不顯示漲跌%、不參與輪詢更新」直接違背。台股、美股都中。同列其他欄位（現值/損益/預估配息）因走 `overlayLivePrice` → `shouldApplyLive`，凍結正確；只有股價欄會跳，視覺上一列基準不一致。
+
+#### Steps:
+
+- [x] 60.1 `DashboardView.vue` `getRealtimePrice(row)` 開頭加 `if (!shouldApplyLive(row.market)) return null`，與 `overlayLivePrice` 共用同一個 per-market 基準日閘門
+- [ ] 60.2 commit + 服務重啟驗證（切到歷史快照、台股盤中重整，股價欄應穩定顯示快照 stockPrice、無漲跌%、不被 SSE 覆蓋）
+
