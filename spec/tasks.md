@@ -1630,6 +1630,22 @@ business-services `HistoricalDataService` 仍持有：
 - [x] 60c.5 編譯驗證（business-services + ext-materials-service 皆通過）
 - [ ] 60c.6 commit + 服務重啟驗證（觀察 ext-materials-service 9-15 點 5 分鐘 log、business-services 不再有 BOT log）
 
+### Task 60d: 警示盤中 5 分鐘 K 線抓取搬到 external-materials-service
+
+對應 Requirements: Requirement 7、Requirement 16（警示）
+
+#### 背景
+
+`HistoricalDataService.fetchIntraday5m(code, market, daysBack)` 直接呼叫 `query2.finance.yahoo.com/v8/finance/chart/{ticker}?interval=5m&range=Nd`（透過 curl + 429 retry），用於 `StockAlertService` 警示觸發補抓精確時點。仍然違反「對外行情 API 集中 ext-materials-service」原則。
+
+#### Steps:
+
+- [x] 60d.1 ext-materials-service `PriceFetchClient.fetchIntraday5m`：搬遷 Yahoo 5m + curl retry 邏輯，回傳 `IntradayBar(time:String, OHLC)`
+- [x] 60d.2 `InternalPriceController` 加 `GET /internal/intraday-5m?code=&market=&daysBack=`
+- [x] 60d.3 business-services `HistoricalDataService.fetchIntraday5m` 改為 WebClient proxy；`IntradayBar(LocalDateTime, OHLC)` 對外型別保持不變（`StockAlertService` 不需動）；內部用 `IntradayBarDto(String time)` 解 JSON
+- [x] 60d.4 編譯驗證（兩個 service 通過）
+- [ ] 60d.5 commit + 服務重啟驗證
+
 ### Task 60a: 移除 business-services 重複的每日股價收盤排程
 
 對應 Requirements: Requirement 7（即時股價/快取）— [requirements.md:108-109](spec/requirements.md)

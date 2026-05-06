@@ -40,6 +40,7 @@ public class InternalPriceController {
     private final ClosePersister closePersister;
     private final HistoricalBackfillService historicalBackfill;
     private final ExchangeRatePoller exchangeRatePoller;
+    private final com.steven.assets.externalmaterials.client.PriceFetchClient priceFetch;
 
     /**
      * 同步抓所有持股報價、寫 Redis 後回傳統計。
@@ -136,6 +137,15 @@ public class InternalPriceController {
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate since) {
         int n = historicalBackfill.backfillExchangeRateFrom(currency, since);
         return Map.of("currency", currency, "records", n);
+    }
+
+    /** 盤中 5 分鐘 K 線（StockAlertService 警示觸發補抓用）。 */
+    @GetMapping("/intraday-5m")
+    public java.util.List<com.steven.assets.externalmaterials.client.PriceFetchClient.IntradayBar> intraday5m(
+            @RequestParam String code,
+            @RequestParam String market,
+            @RequestParam(defaultValue = "5") int daysBack) {
+        return priceFetch.fetchIntraday5m(code, market, daysBack);
     }
 
     /** 手動觸發 BOT 即期匯率抓取（同盤中 5 分鐘排程）。 */

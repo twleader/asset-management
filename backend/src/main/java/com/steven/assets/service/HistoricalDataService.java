@@ -108,42 +108,34 @@ public class HistoricalDataService {
     public record IntradayBar(LocalDateTime time, BigDecimal open, BigDecimal high,
                                BigDecimal low, BigDecimal close) {}
 
+    /** 內部 DTO：對應 ext-materials-service 的回應格式（time 為 ISO 字串）。 */
+    private record IntradayBarDto(String time, BigDecimal open, BigDecimal high,
+                                   BigDecimal low, BigDecimal close) {}
+
     /**
-     * 抓取指定股票最近 N 個交易日的 5 分鐘 K 線（用 Yahoo Finance chart API）。
-     * 用於警示盤中觸發補抓 — 從 5 分鐘 bar 找出條件第一次成立的精確時點。
-     * 台股需 .TW 後綴；美股直接用 ticker。
+     * 警示盤中觸發補抓專用：5 分鐘 K 線。
+     * 對外呼叫已搬到 ext-materials-service /internal/intraday-5m（FinMind/Yahoo 集中）。
      */
     public List<IntradayBar> fetchIntraday5m(String stockCode, String market, int daysBack) {
         try {
-            String ticker = "美股".equals(market) ? stockCode : stockCode + ".TW";
-            String range = Math.max(1, daysBack) + "d";
-            String url = "https://query2.finance.yahoo.com/v8/finance/chart/" + ticker
-                    + "?interval=5m&range=" + range;
-            String body = curlGetWithRetry(url, 2);
-
-            JsonNode root = mapper.readTree(body);
-            JsonNode chart = root.path("chart").path("result").path(0);
-            JsonNode timestamps = chart.path("timestamp");
-            JsonNode quotes = chart.path("indicators").path("quote").path(0);
-            String tz = chart.path("meta").path("exchangeTimezoneName").asText("Asia/Taipei");
-            ZoneId zone = ZoneId.of(tz);
-            if (!timestamps.isArray()) return List.of();
-
+            IntradayBarDto[] resp = priceServiceClient.get()
+                    .uri(uriBuilder -> uriBuilder.path("/internal/intraday-5m")
+                            .queryParam("code", stockCode)
+                            .queryParam("market", market)
+                            .queryParam("daysBack", daysBack).build())
+                    .retrieve()
+                    .bodyToMono(IntradayBarDto[].class)
+                    .block();
+            if (resp == null) return List.of();
             List<IntradayBar> bars = new ArrayList<>();
-            for (int i = 0; i < timestamps.size(); i++) {
-                long ts = timestamps.get(i).asLong();
-                JsonNode close = quotes.path("close").path(i);
-                if (close.isNull() || close.isMissingNode()) continue;
-                LocalDateTime time = Instant.ofEpochSecond(ts).atZone(zone).toLocalDateTime();
-                bars.add(new IntradayBar(time,
-                        jsonDecimal(quotes.path("open").path(i)),
-                        jsonDecimal(quotes.path("high").path(i)),
-                        jsonDecimal(quotes.path("low").path(i)),
-                        jsonDecimal(close)));
+            for (IntradayBarDto d : resp) {
+                bars.add(new IntradayBar(LocalDateTime.parse(d.time()),
+                        d.open(), d.high(), d.low(), d.close()));
             }
             return bars;
         } catch (Exception e) {
-            log.warn("抓取 {} {} 盤中分鐘資料失敗: {}", market, stockCode, e.getMessage());
+            log.warn("呼叫 ext-materials-service /internal/intraday-5m 失敗 ({} {}): {}",
+                    market, stockCode, e.getMessage());
             return List.of();
         }
     }

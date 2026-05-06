@@ -16,6 +16,7 @@ com/steven/assets/repository/BackupSettingRepository.class
 com/steven/assets/config/RedisSubscriberConfig$MessageHandler.class
 com/steven/assets/dto/InstitutionDto$CreateBankRequest.class
 com/steven/assets/controller/InstitutionController.class
+com/steven/assets/model/TwseIndexDailyHistory.class
 com/steven/assets/service/PriceQueryService.class
 com/steven/assets/model/BankDeposit$BankDepositBuilder.class
 com/steven/assets/dto/AssetSnapshotDto$DepositRequest.class
@@ -42,6 +43,7 @@ com/steven/assets/model/DepositTypeEntity$DepositTypeEntityBuilder.class
 com/steven/assets/dto/AssetSnapshotDto$CreateSnapshotRequest.class
 com/steven/assets/config/WebConfig.class
 com/steven/assets/service/StockAlertService.class
+com/steven/assets/service/HistoricalDataService$IntradayBarDto.class
 com/steven/assets/service/MarketDataService$EtfHolding.class
 com/steven/assets/model/FundNav.class
 com/steven/assets/service/ExcelExportService.class
@@ -105,6 +107,7 @@ com/steven/assets/dto/BackupDto.class
 com/steven/assets/service/MarketDataService.class
 com/steven/assets/service/MacroHistoryService.class
 com/steven/assets/dto/AssetSnapshotDto$SnapshotDetailResponse.class
+com/steven/assets/repository/TwseIndexDailyHistoryRepository.class
 com/steven/assets/model/StockAlert.class
 com/steven/assets/service/PriceQueryService$LivePrice.class
 com/steven/assets/controller/FundNavController$CreateFundRequest.class
