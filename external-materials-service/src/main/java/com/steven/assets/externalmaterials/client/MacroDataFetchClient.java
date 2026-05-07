@@ -30,12 +30,12 @@ public class MacroDataFetchClient {
 
     private static final String IMF_API_TPL = "https://www.imf.org/external/datamapper/api/v1/";
     /**
-     * TWSE FMTQIK（盤後成交資訊）。原 www.twse.com.tw 端點於 2026 站台維護期間長時間無回應，
-     * 改用 openapi 版（無 response 包裝層、直接是 array）。
-     * 回應 schema: [{ Date: "115mmdd"（民國）, TradeVolume, TradeValue, Transaction, TAIEX, Change }, ...]
+     * TWSE 大盤每日 OHLC 月報（openapi 版）。從 FMTQIK（只有 close）改用 MI_5MINS_HIST，提供 OHLC 四欄，
+     * 供觀察清單 0000 KD 計算與大盤 K 線圖共用。
+     * 回應 schema: [{ Date: "115mmdd"（民國）, OpeningIndex, HighestIndex, LowestIndex, ClosingIndex }, ...]
      */
-    private static final String TWSE_FMTQIK_URL =
-            "https://openapi.twse.com.tw/v1/exchangeReport/FMTQIK?date=";
+    private static final String TWSE_DAILY_OHLC_URL =
+            "https://openapi.twse.com.tw/v1/exchangeReport/MI_5MINS_HIST?date=";
 
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
@@ -73,23 +73,26 @@ public class MacroDataFetchClient {
         return out;
     }
 
-    /** TWSE FMTQIK 12 月份月報，取該月最後一筆作為年末加權指數收盤。 */
+    /** TWSE 大盤 12 月份 OHLC 月報，取該月最後一筆作為年末加權指數收盤。 */
     public BigDecimal fetchTwseDecemberClose(int year) {
-        List<DailyClose> rows = fetchTwseMonthlyDaily(year, 12);
+        List<DailyOhlc> rows = fetchTwseMonthlyDaily(year, 12);
         if (rows.isEmpty()) return null;
         return rows.get(rows.size() - 1).close();
     }
 
-    public record DailyClose(LocalDate tradingDate, BigDecimal close) {}
+    /** 大盤每日 OHLC（從 MI_5MINS_HIST 月報拆出）。 */
+    public record DailyOhlc(LocalDate tradingDate,
+                             BigDecimal open, BigDecimal high, BigDecimal low, BigDecimal close) {}
 
     /**
-     * TWSE FMTQIK 月報（openapi.twse.com.tw 版本）。
-     * 回應為 JSON array，每筆 {Date, TAIEX, ...}；Date 是民國格式如 "1150504"（前 3 碼民國年 + 4 碼月日）。
+     * TWSE MI_5MINS_HIST 月報（openapi 版）。回應為 JSON array，每筆
+     * {Date, OpeningIndex, HighestIndex, LowestIndex, ClosingIndex}；Date 是民國格式如 "1150504"
+     * （前 3 碼民國年 + 4 碼月日）。
      */
-    public List<DailyClose> fetchTwseMonthlyDaily(int year, int month) {
+    public List<DailyOhlc> fetchTwseMonthlyDaily(int year, int month) {
         try {
             String date = String.format("%04d%02d01", year, month);
-            HttpRequest req = HttpRequest.newBuilder(URI.create(TWSE_FMTQIK_URL + date))
+            HttpRequest req = HttpRequest.newBuilder(URI.create(TWSE_DAILY_OHLC_URL + date))
                     .header("Accept", "application/json")
                     .header("User-Agent", "Mozilla/5.0")
                     .timeout(Duration.ofSeconds(15))
@@ -99,9 +102,9 @@ public class MacroDataFetchClient {
             JsonNode root = mapper.readTree(res.body());
             if (!root.isArray() || root.isEmpty()) return Collections.emptyList();
 
-            List<DailyClose> out = new ArrayList<>();
+            List<DailyOhlc> out = new ArrayList<>();
             for (JsonNode row : root) {
-                String mingoDate = row.path("Date").asText("");  // e.g. "1150504"
+                String mingoDate = row.path("Date").asText("");
                 if (mingoDate.length() != 7) continue;
                 int gYear, mm, dd;
                 try {
@@ -113,15 +116,25 @@ public class MacroDataFetchClient {
                 try { d = LocalDate.of(gYear, mm, dd); }
                 catch (Exception e) { continue; }
 
-                String idxStr = row.path("TAIEX").asText("").replace(",", "");
-                if (idxStr.isEmpty() || "-".equals(idxStr)) continue;
-                BigDecimal close = new BigDecimal(idxStr).setScale(2, RoundingMode.HALF_UP);
-                out.add(new DailyClose(d, close));
+                BigDecimal open  = parseIndex(row.path("OpeningIndex").asText(""));
+                BigDecimal high  = parseIndex(row.path("HighestIndex").asText(""));
+                BigDecimal low   = parseIndex(row.path("LowestIndex").asText(""));
+                BigDecimal close = parseIndex(row.path("ClosingIndex").asText(""));
+                if (close == null) continue;
+                out.add(new DailyOhlc(d, open, high, low, close));
             }
             return out;
         } catch (Exception e) {
-            log.warn("TWSE FMTQIK {}/{} 月報抓取失敗：{}", year, month, e.getMessage());
+            log.warn("TWSE MI_5MINS_HIST {}/{} 月報抓取失敗：{}", year, month, e.getMessage());
             return Collections.emptyList();
         }
+    }
+
+    private static BigDecimal parseIndex(String raw) {
+        if (raw == null) return null;
+        String s = raw.replace(",", "").trim();
+        if (s.isEmpty() || "-".equals(s)) return null;
+        try { return new BigDecimal(s).setScale(2, RoundingMode.HALF_UP); }
+        catch (NumberFormatException e) { return null; }
     }
 }

@@ -161,9 +161,9 @@ public class InternalPriceController {
         return m;
     }
 
-    /** TWSE 加權指數月線（月報整月）。 */
+    /** TWSE 加權指數月線 OHLC（月報整月）。 */
     @GetMapping("/macro/twse-monthly")
-    public java.util.List<com.steven.assets.externalmaterials.client.MacroDataFetchClient.DailyClose>
+    public java.util.List<com.steven.assets.externalmaterials.client.MacroDataFetchClient.DailyOhlc>
         twseMonthly(@RequestParam int year, @RequestParam int month) {
         return macro.fetchTwseMonthlyDaily(year, month);
     }

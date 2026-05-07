@@ -98,3 +98,9 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/v1.21.0-twse-daily-history.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.22.0-twse-daily-ohlc.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.22.1-drop-watch-stock.sql
+      relativeToChangelogFile: false

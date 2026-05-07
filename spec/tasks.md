@@ -1749,3 +1749,62 @@ Task 59 移除 `shouldApplyLive` 的「市場開盤」閘門時，`getRealtimePr
 - [x] 60.1 `DashboardView.vue` `getRealtimePrice(row)` 開頭加 `if (!shouldApplyLive(row.market)) return null`，與 `overlayLivePrice` 共用同一個 per-market 基準日閘門
 - [ ] 60.2 commit + 服務重啟驗證（切到歷史快照、台股盤中重整，股價欄應穩定顯示快照 stockPrice、無漲跌%、不被 SSE 覆蓋）
 
+### Task 61: 觀察清單由 stock_alert 衍生（廢止 watch_stock 表 + 大盤 0000 KD）
+
+對應 Requirements: Requirement 14（觀察股票清單）、Requirement 16（到價警示）、Requirement 18（台股大盤日線）
+
+#### 背景
+
+目前 `watch_stock` 表與 `stock_alert` 表獨立並存，違反「相同的資料只能存一份」正規化原則：使用者必須同時維護兩份名單，常出現「警示條件設了 0050、但觀察清單忘了加」的不一致。重構為「觀察清單 = `stock_alert` 群組去重衍生」單一資料源。
+
+同時 `twse_index_daily_history` 目前只存 `close_point`，使得觀察清單的 0000（台股大盤）無法計算 KD（需要日內 high/low）。TWSE FMTQIK 月報其實同時提供 `OpeningIndex` / `HighestIndex` / `LowestIndex`，本任務一起補完 OHLC，讓 0000 與一般股票走完全相同的技術指標路徑。
+
+#### Steps:
+
+**A. Schema 變更**
+
+- [ ] 61.1 Liquibase changelog `v1.x.x-twse-index-daily-ohlc.sql`：`twse_index_daily_history` 加 `open_point` / `high_point` / `low_point`（皆 NUMERIC(12,2), nullable，舊資料未抓 OHLC 維持 null，由下次 refresh 補完）
+- [ ] 61.2 Liquibase changelog `v1.x.x-drop-watch-stock.sql`：`DROP TABLE watch_stock`（資料完全由 stock_alert 衍生，無需資料移轉；既有觀察清單若有純觀察、無 alert 的股票，必須在 release notes 中提示使用者重新建立 alert，否則這些股票不再出現於觀察清單）
+
+**B. ext-materials-service**
+
+- [ ] 61.3 `MacroDataFetchClient.fetchTwseMonthlyDaily` 回傳結構從 `DailyClose(date, close)` 擴為 `DailyOhlc(date, open, high, low, close)`；對應 internal endpoint 的 JSON
+- [ ] 61.4 `StockSourceQuery.upsertTwseIndexDaily` 簽名擴 OHLC 四欄
+
+**C. business-services Backend**
+
+- [ ] 61.5 `TwseIndexDailyHistory` entity 加 `openPoint` / `highPoint` / `lowPoint` 欄位
+- [ ] 61.6 `MacroHistoryService.refreshTwseDaily` 解析 FMTQIK `OpeningIndex` / `HighestIndex` / `LowestIndex` / `ClosingIndex` 同步 upsert
+- [ ] 61.7 `TechnicalIndicatorService` 對 `code=0000 & market=台股` 改讀 `twse_index_daily_history` 計算 MA20 / MA60 / MA240 / KD（與一般股票同算法，high/low 來自 OHLC 欄位）
+- [ ] 61.8 刪除 `WatchStock` entity / `WatchStockRepository` / `WatchStockController` / `WatchStockService`（service 邏輯移至 BFF/衍生 view）
+- [ ] 61.9 `StockAlertRepository` 新增：
+        - `findDistinctStockCodeMarket()`：回傳所有 (stockCode, market) 去重對 + 該對最小 displayOrder
+        - `findByStockCodeAndMarket(code, market)`：取該股票全部 alert（用於拖曳重排與級聯刪除）
+- [ ] 61.10 `StockAlertService.create` 對 `0000 & 台股` 跳過 `stockMasterRepo.upsert`（避免被排程當真股票抓價）；`lookupName` 對 `0000` 短路回 `台股大盤`
+- [ ] 61.11 新增 `WatchListService`（取代舊 `WatchStockService`）：
+        - `findAll()`：呼叫 `StockAlertRepository.findDistinctStockCodeMarket()` → 對每筆組裝 live 報價（`PriceQueryService`，0000 走 `twse_index_daily_history`）+ 技術指標 + 該股票最近觸發資訊
+        - `delete(stockCode, market)`：刪除該 (code, market) 所有 alert（FK 級聯 trigger 歷史）
+        - `reorder(orderedKeys)`：依 orderedKeys 順序，把每個股票所有 alert 的 `displayOrder` 整組區段重排（保持條件之間的相對順序）
+- [ ] 61.12 `WatchStockController` 改為 `WatchListController`，路徑 `/api/watch-list`：`GET`、`DELETE /{stockCode}/{market}`、`PUT /order`（接 `[{stockCode, market}]` 陣列）；不再有 POST（建立由 `/api/stock-alerts` 接手）
+
+**D. BFF**
+
+- [ ] 61.13 `WatchStockBffController` 改名 `WatchListBffController`：rewrite `/api/bff/watch-stock/**` → `/api/watch-list/**`（路徑可保留 `watch-stock` 不動以維持前端 URL 穩定，僅內部 rewrite 目標改變）
+
+**E. Frontend**
+
+- [ ] 61.14 `WatchStockView.vue` 新增按鈕改為直接開啟「警示條件」新增 dialog（reuse `StockAlertView` 既有 dialog component）；建立成功後回到觀察清單自動 reload
+- [ ] 61.15 `WatchStockView.vue` 刪除按鈕的二次確認文字改為「將同時刪除 N 筆警示條件，確定？」N 從 BFF 回傳資料計算
+- [ ] 61.16 `WatchStockView.vue` 拖曳排序 callback 改呼叫 `PUT /api/bff/watch-stock/order`（payload 為 `[{stockCode, market}]` 陣列），不再傳 watch_stock id
+
+**F. 編譯與驗證**
+
+- [ ] 61.17 編譯驗證（business-services + bff + ext-materials-service）
+- [ ] 61.18 commit + 服務重啟驗證：
+        - 新增警示條件 → 觀察清單自動出現該股票
+        - 同股票多筆警示 → 觀察清單只一列
+        - 刪除觀察清單某列 → 該股票所有 alert 與 trigger 歷史皆消失
+        - 觀察清單拖曳 → 警示條件頁的該股票條件群組整體位置改變、群組內順序不變
+        - 0000 加入觀察 → 季線/年線/KD 皆有值（不再是 dash）
+        - 0000 可設 KD 警示且觸發後 lastTriggered* 顯示
+

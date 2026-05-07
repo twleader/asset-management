@@ -195,22 +195,25 @@ public class MacroHistoryService {
                 "to", end.toString());
     }
 
-    private record DailyCloseDto(String tradingDate, BigDecimal close) {}
+    private record DailyOhlcDto(String tradingDate, BigDecimal open, BigDecimal high,
+                                 BigDecimal low, BigDecimal close) {}
 
     private List<TwseIndexDailyHistory> fetchTwseMonthlyDailyProxy(YearMonth ym) {
         try {
-            DailyCloseDto[] arr = priceServiceClient.get()
+            DailyOhlcDto[] arr = priceServiceClient.get()
                     .uri(uriBuilder -> uriBuilder.path("/internal/macro/twse-monthly")
                             .queryParam("year", ym.getYear())
                             .queryParam("month", ym.getMonthValue()).build())
                     .retrieve()
-                    .bodyToMono(DailyCloseDto[].class)
+                    .bodyToMono(DailyOhlcDto[].class)
                     .block();
             if (arr == null) return List.of();
             List<TwseIndexDailyHistory> out = new ArrayList<>();
-            for (DailyCloseDto d : arr) {
+            for (DailyOhlcDto d : arr) {
                 if (d.tradingDate() == null || d.close() == null) continue;
-                out.add(new TwseIndexDailyHistory(LocalDate.parse(d.tradingDate()), d.close()));
+                out.add(new TwseIndexDailyHistory(
+                        LocalDate.parse(d.tradingDate()),
+                        d.open(), d.high(), d.low(), d.close()));
             }
             return out;
         } catch (Exception e) {

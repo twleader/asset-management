@@ -71,7 +71,12 @@ com.steven.assets/
 - `ExchangeRateBffController`（ExchangeRateView 專屬）：`GET /api/bff/exchange-rate`（先 refresh 再回 5 年歷史）、`POST /api/bff/exchange-rate/backfill`
 - `TradingCalendarBffController`（TradingCalendarView 專屬）：`GET /api/bff/trading-calendar?year=Y`（`holidays` 為 `{tw: {date→name}, us: {date→name}}` 物件 + `marketStatus`）、`GET /api/bff/trading-calendar/market-status`
 - `SnapshotListBffController`（SnapshotListView 專屬）：`GET /api/bff/snapshot-list`、`DELETE /{id}`、`GET /export`
-- 其他 settings/passthrough（每頁一支 Spring Cloud Gateway route 配置，rewrite `/api/bff/{page}/**` → `/api/{resource}/**`）：BankSettings、BrokerSettings、DepositTypeSettings、MarketTypeSettings、TransitFundTypeSettings、WatchStock（`/api/bff/watch-stock/**`）、StockAlert（`/api/bff/stock-alert/**`）、BackupRestore（`/api/bff/backup-restore/**`）
+- 其他 settings/passthrough（每頁一支 Spring Cloud Gateway route 配置，rewrite `/api/bff/{page}/**` → `/api/{resource}/**`）：BankSettings、BrokerSettings、DepositTypeSettings、MarketTypeSettings、TransitFundTypeSettings、StockAlert（`/api/bff/stock-alert/**`）、BackupRestore（`/api/bff/backup-restore/**`）
+- `WatchStockBffController`（WatchStockView 專屬，`/api/bff/watch-stock/**`）：觀察清單已改為「`stock_alert` 衍生 view」，BFF 提供：
+  - `GET /api/bff/watch-stock`：呼叫 `business-services` 衍生端點 → 對每筆 (stockCode, market) 補上 live 報價、技術指標、最近觸發資訊
+  - `DELETE /api/bff/watch-stock/{stockCode}/{market}`：刪除該股票所有 alert（級聯 trigger 歷史）
+  - `PUT /api/bff/watch-stock/order`：拖曳排序時把該股票所有 alert 的 displayOrder 整組重排
+  - 新增觀察則由前端直接呼叫 `/api/bff/stock-alert/**` 建立警示條件，不再有 watch-stock 級的 create 端點
 - `SnapshotFormBffController`（SnapshotFormView 專屬）：把表單頁的多步協調邏輯（價格批次查 + backfill fallback + 配息率補抓 + 名稱補齊 + 匯率智慧 fallback）集中於此
   - `GET /api/bff/snapshot-form/{id}`：編輯模式 bootstrap，回傳 enriched detail + mergedStocks
   - `POST /api/bff/snapshot-form/prices?date=YYYY-MM-DD`：批次取得每筆股票的歷史收盤價 + 漲跌 + 名稱 + 配息率（DB 缺資料時自動 backfill 重試）
@@ -83,7 +88,7 @@ com.steven.assets/
   - `GET /api/bff/stock-analysis/dividends` → `/api/market-data/dividends`
   - `GET /api/bff/stock-analysis/etf-holdings` → `/api/market-data/etf-holdings`
 
-**Repository 層**（Spring Data JPA，共 18 個）
+**Repository 層**（Spring Data JPA，共 16 個）
 - `AssetSnapshotRepository`
 - `StockHoldingRepository`
 - `FundHoldingRepository`
@@ -97,8 +102,7 @@ com.steven.assets/
 - `DepositTypeRepository`
 - `MarketTypeRepository`
 - `TransitFundTypeRepository`
-- `WatchStockRepository`
-- `StockAlertRepository`
+- `StockAlertRepository`（含衍生 query：`findDistinctStockCodeMarket()` 提供觀察清單去重結果）
 - `StockAlertTriggerRepository`（警示觸發歷史，30 天輪替）
 - `BackupSettingRepository`（備份保留代數設定，單列資料表）
 
@@ -217,8 +221,8 @@ src/
   - `0 0 5 * * SUN` Asia/Taipei：每周日 05:00 → 上傳 `weekly/asset_weekly_*.dump`
   - 輪替策略：`daily/` 保留 50 份、`weekly/` 保留 5 份、`manual/` 保留 5 份（自救點不計入）
   - 交易日判定委派至 `MarketDataService.getTwHolidays(year)` / `getUsHolidays(year)`，並排除週末
-- `WatchStockService`: 觀察股票 CRUD、拖曳排序、整合 Redis live 報價（透過 `PriceQueryService`）與 StockAlert 觸發資訊
-- `StockAlertService`: 到價警示 CRUD、條件評估、排序、最近觸發資訊回寫
+- `WatchStockService`: 觀察清單 view 服務（不再對應實體表）。`findAll()` 由 `StockAlertRepository.findDistinctStockCodeMarket()` 取得去重 (stockCode, market) 清單後，整合 Redis live 報價（透過 `PriceQueryService`）、技術指標（`TechnicalIndicatorService`）與該股票最近一次 StockAlert 觸發資訊；`delete(stockCode, market)` 級聯刪除該股票所有 alert；`reorder(orderedStockKeys)` 拖曳重排時把每個股票所有 alert 的 `displayOrder` 整組依新順序重新指派
+- `StockAlertService`: 到價警示 CRUD、條件評估、排序、最近觸發資訊回寫；`create` 對 `0000`（台股大盤）跳過 `stockMasterRepo.upsert`
 - `ExcelExportService`: Apache POI 產生快照與已實現損益的 .xlsx 匯出檔
 
 **State Management (Pinia)**
@@ -258,13 +262,12 @@ AssetSnapshot (1) ──── (N) BankDeposit
 AssetSnapshot (1) ──── (N) StockHolding
 AssetSnapshot (1) ──── (N) FundHolding
 RealizedGain          (獨立，不關聯快照)
-WatchStock            (觀察股票清單，code+market 唯一)
 StockPriceHistory     (歷史股價紀錄；live 行情改由 Redis 提供)
 ExchangeRateHistory   (歷史匯率紀錄)
 DepositTypeEntity     (存款類型主檔，code 值存入 BankDeposit.depositType)
 MarketType            (市場類型主檔，code 值存入 StockHolding.market)
 TransitFundType       (待轉入資金類型主檔)
-StockAlert            (到價警示，獨立資料表；WatchStock 列表彙總其最近觸發資訊)
+StockAlert            (到價警示，獨立資料表；觀察清單由此表 GROUP BY (stockCode, market) 衍生)
 StockAlertTrigger     (警示觸發歷史，FK→stock_alert，保留 30 天)
 BackupSetting         (備份保留代數設定，單列資料表，id = 1)
 ```
@@ -441,18 +444,9 @@ BackupSetting         (備份保留代數設定，單列資料表，id = 1)
 
 `StockPrice` Entity 與 `stock_price` 表已廢除，盤中即時行情改存 Redis（schema 見上方 External Materials Service Architecture）。`PriceQueryService` 從 Redis 取值並組裝成原 `StockPriceDto` 形狀，對 BFF / 前端介面不變。
 
-#### WatchStock（新增）
-| 欄位 | 型別 | 說明 |
-|------|------|------|
-| id | Long | PK |
-| stockCode | String | 股票代號 |
-| stockName | String | 股票名稱 |
-| market | String | 市場代碼（台股/美股） |
-| displayOrder | Integer | 顯示排序（拖曳排序用） |
-| createdAt | LocalDateTime | 建立時間 |
-| updatedAt | LocalDateTime | 更新時間 |
+#### WatchStock（已廢止）
 
-> Unique constraint：(stockCode, market)。觀察清單中的股票會被併入 `external-materials-service` 排程更新；報價透過 `PriceQueryService` 自 Redis 取得，警示資訊則彙總自 `StockAlert`。
+`watch_stock` 表已廢止（v1.x 重構：「觀察清單由 stock_alert 衍生」）。觀察清單一律由 `StockAlert` 群組去重產生，不再有獨立的觀察 entity。被併入 `external-materials-service` 排程的股票範圍 = 持股 + `stock_alert.stockCode` distinct（含 `0000` 大盤特例不送排程，由 TWSE 日線 cron 寫入 `twse_index_daily_history`）。
 
 #### StockAlert（新增）
 | 欄位 | 型別 | 說明 |
@@ -696,7 +690,9 @@ POST   /api/bff/gdp-twse/refresh-twse-daily?years=10  # 觸發日線 10 年回�
 - `taiwan_gdp_per_capita_history` (year PK, gdp_usd, real_gdp_growth_rate)
 - `korea_gdp_per_capita_history`  (year PK, gdp_usd, real_gdp_growth_rate)
 - `twse_index_year_end_history`   (year PK, close_point NUMERIC(12,2))
-- `twse_index_daily_history`      (trading_date PK, close_point NUMERIC(12,2))
+- `twse_index_daily_history`      (trading_date PK, open_point / high_point / low_point / close_point 皆 NUMERIC(12,2))
+  - OHLC 同時供 Requirement 18 大盤日線圖、Requirement 14 觀察清單 0000 KD 計算使用
+  - `MacroHistoryService.refreshTwseDaily` 從 TWSE FMTQIK 月報抓取四欄（`OpeningIndex` / `HighestIndex` / `LowestIndex` / `ClosingIndex`），同步 upsert
 
 GDP 與年末收盤兩表 seed data 直接寫入 Liquibase changelog（歷史值不變）。
 日線表（10 年 ~2400 筆）改由使用者按「回補資料」觸發 TWSE FMTQIK 月報抓取（changelog 僅建表不 seed），原因：

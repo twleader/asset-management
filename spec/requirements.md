@@ -218,28 +218,30 @@
 
 ---
 
-### Requirement 14: 觀察股票清單
+### Requirement 14: 觀察股票清單（由警示條件衍生）
 
-**User Story:** 作為使用者，我希望能維護一份「觀察股票」名單（不一定持有），在同一頁面上即時掌握該批股票的詳細報價（買進/賣出/開盤/昨收/最高/最低/成交量等）以及對應的到價警示觸發狀態，以方便進場或出場時參考。
+**User Story:** 作為使用者，我希望「觀察清單」即「警示條件」中出現過的去重股票清單，這樣在警示條件設了多筆 0050 條件時，觀察清單就會自動有一筆 0050；不必同時維護兩份名單。
 
 **Acceptance Criteria:**
 
-- [ ] 左側導覽選單新增「股票觀察」項目，路徑 `/stocks`（內含「觀察清單」、「警示條件」兩個頁籤；舊路徑 `/watch-stocks`、`/stock-alerts` 自動 redirect 並帶 `tab` query）
+- [ ] 左側導覽選單「股票觀察」項目，路徑 `/stocks`（內含「觀察清單」、「警示條件」兩個頁籤；舊路徑 `/watch-stocks`、`/stock-alerts` 自動 redirect 並帶 `tab` query）
 - [ ] 頁面提供「台股」、「美股」兩個頁籤，依市場分流顯示
-- [ ] 觀察清單為獨立資料表（`watch_stock`），可手動新增、刪除、拖曳排序（拖拉欄置於最左邊）
+- [ ] **觀察清單不另存資料表**：`watch_stock` 表廢止；觀察清單一律由 `stock_alert` 群組去重衍生 = `SELECT stockCode, market, MIN(displayOrder) FROM stock_alert GROUP BY stockCode, market`。同一檔股票即使有多筆條件也僅顯示一列
 - [ ] 每列顯示欄位：股名/股號、股價、漲跌、漲跌幅(%)、買進、賣出、開盤、昨收、最高、最低、成交量(張)、警示（觸發時間/股價/均線/KD）
-- [ ] 「警示」欄取自 `stock_alert` 中該檔股票最近一筆 `lastTriggeredAt`，呈現觸發時間、觸發價、均線值、KD 值
+- [ ] 「警示」欄取自該股票所有 alert 中最近一筆 `lastTriggeredAt`，呈現觸發時間、觸發價、均線值、KD 值（最近 3 個交易日內才顯示，過期不顯示）
 - [ ] 報價來源 `StockPrice` 擴充欄位：buyPrice（買進）、sellPrice（賣出）、openPrice（開盤）、previousClose（昨收）、highPrice（最高）、lowPrice（最低）、volume（成交量，台股為張）
 - [ ] 觀察清單中的股票同樣納入排程的股價更新（與持股一併更新）
-- [ ] 新增時可輸入股票代號，系統自動帶出股票名稱（同 StockAlert 行為）
-- [ ] 同市場 + 股票代號的組合僅允許一筆觀察紀錄
+- [ ] **新增觀察的入口 = 新增警示條件**：觀察清單頁的「新增」按鈕直接開啟警示條件新增表單；至少必須設一筆條件，建立成功後該股票自動出現在觀察清單
+- [ ] **刪除觀察 = 刪除該股票所有 alert**：觀察清單頁刪除某列時，連帶刪除該 (stockCode, market) 在 `stock_alert` 中的所有條件（含其 `stock_alert_trigger` 歷史，FK 級聯）；前端二次確認文字明示「將同時刪除 N 筆警示條件」
+- [ ] **觀察清單拖曳排序 = 移動該股票所有 alert**：拖曳一列時將該股票所有 alert 的 `displayOrder` 整組重排到新位置（保持條件之間的相對順序）；警示條件頁的拖曳維持單筆 alert 級行為
 - [ ] 盤中即時 `highPrice` / `lowPrice` 由 `external-materials-service` 自行聚合：每輪 cron 觀察到的成交價與當日已記錄的高/低做 max/min，存於 Redis（key `price:dayhl:{market}:{code}:{tradingDate}`，TTL 36 小時）。寫入 `price:{market}:{code}` 時，若外部 API 有提供 high/low 則取「外部值與聚合值的 max(high)/min(low)」；若外部 API 未提供（如 NASDAQ 對 ETF 的 `keyStats` 為 null），則直接採用聚合值。盤後 `dumpRedisToDb` 沿用同一份 Redis JSON 寫入 `stock_price_history`
-- [ ] 觀察清單支援代號 `0000`（市場 = 台股）= 台股大盤（TAIEX）：
+- [ ] **觀察清單支援代號 `0000`（市場 = 台股）= 台股大盤（TAIEX）**（含 KD）：
+  - 加入觀察 = 設一筆 0000 的 alert（與其他股票流程一致）
   - `lookup-name` 端點看到 `code=0000&market=台股` 直接回 `{"stockName":"台股大盤"}`，不打外部 API、不寫入 stock 主檔
-  - `WatchStockService.create` 對 `0000` 不寫入 `stock` 主檔（避免進入排程抓價），允許單獨儲存
-  - `WatchStockService.toResponse` 對 `0000` 改讀 `twse_index_daily_history` 最新與次新一筆 → 填 `price` / `previousClose` / 計算 `priceChange` / `changePercent`；buyPrice / sellPrice / openPrice / highPrice / lowPrice / volume 為 null（FMTQIK 無 OHLC）
-  - 季線（MA60）由 `twse_index_daily_history` 最近 60 個交易日收盤平均；KD 留空（資料只有收盤、無高低，不足計算）
-  - 警示彙總（`lastTriggered*`）對 `0000` 不顯示
+  - `StockAlertService.create` 對 `0000` 不寫入 `stock` 主檔（避免被排程當作真股票抓價）；報價/技術指標一律從 `twse_index_daily_history` 取
+  - 觀察清單列：`price` / `previousClose` 取 `twse_index_daily_history` 最新與次新；`openPrice` / `highPrice` / `lowPrice` 從同表 OHLC 欄位填；`buyPrice` / `sellPrice` / `volume` 為 null（大盤無買賣盤口、無成交量定義）
+  - 季線（MA60）、年線（MA240）、KD 皆從 `twse_index_daily_history` 計算（與一般股票同算法），`TechnicalIndicatorService` 對 `0000` 改讀此表代替 `stock_price_history`
+  - 警示彙總（`lastTriggered*`）對 `0000` 比照其他股票顯示
 
 ---
 
@@ -288,6 +290,8 @@
 - [x] 提供新增、編輯、刪除、啟用/停用、拖曳排序、手動觸發檢查
 - [x] 觀察股票列表（Requirement 14）顯示對應股票最近一次觸發資訊
 - [x] 提供 `GET /api/stock-alerts/lookup-name` 由代號自動帶名稱（觀察股票與警示新增表單共用）
+- [ ] **`stock_alert` 是觀察清單的唯一資料來源**：新增、編輯、刪除任一 alert 後，觀察清單需同步反映（出現新股票、移除最後一筆條件被刪的股票、displayOrder 變更後排序更新）
+- [ ] 支援 `stockCode = 0000`（台股大盤）的 alert：可設 PRICE / QUARTERLY_MA / ANNUAL_MA / KD 各類型；報價與技術指標來源改為 `twse_index_daily_history`（含 OHLC）；不寫入 `stock` 主檔
 - [ ] 每次警示觸發都記錄一筆歷史於 `stock_alert_trigger`，欄位含 `alert_id`、`triggered_at`、`price`、`monthly_ma` (MA20)、`quarterly_ma` (MA60)、`annual_ma` (MA240)、`k_value`、`d_value`、`created_at`
 - [ ] 觸發紀錄只保留 30 天：每日排程刪除 `created_at < NOW() - 30 days` 的舊紀錄
 - [ ] 觸發紀錄表透過 `alert_id` FK 級聯刪除（警示本體被刪時，歷史一併清除）
@@ -332,8 +336,9 @@
 - [ ] 同頁「最上方」加第三張卡：台股大盤（TAIEX）每日收盤近 10 年走勢圖
   - 顯示每日收盤點位（`close_point`）+ 月線（MA20）+ 季線（MA60）+ 年線（MA240）四條曲線
   - 區間切換按鈕：1 個月 / 3 個月 / 半年 / 1 年 / 2 年 / 5 年（透過 dataZoom 對齊 X 軸末端，前段 240 個交易日仍保留以利 MA240 完整顯示）
-  - 後端日線資料表 `twse_index_daily_history`（`trading_date` PK, `close_point`），由 Liquibase changelog 建立（不 seed 歷史值）
-  - business service 新增 `GET /api/twse-daily-index?from=YYYY-MM-DD&to=YYYY-MM-DD` 與 `POST /api/twse-daily-index/refresh?years=10`，後者逐月呼叫 TWSE FMTQIK 月報抓全部交易日 `index_close` upsert 至 DB
+  - 後端日線資料表 `twse_index_daily_history`（`trading_date` PK, `open_point`, `high_point`, `low_point`, `close_point` 各 NUMERIC(12,2)），由 Liquibase changelog 建立（不 seed 歷史值）
+  - business service 新增 `GET /api/twse-daily-index?from=YYYY-MM-DD&to=YYYY-MM-DD` 與 `POST /api/twse-daily-index/refresh?years=10`，後者逐月呼叫 TWSE FMTQIK 月報抓全部交易日 OHLC（`OpeningIndex` / `HighestIndex` / `LowestIndex` / `ClosingIndex`）upsert 至 DB
+  - 大盤 OHLC 同時供 Requirement 14（觀察清單 0000 KD 計算）使用，不另建表
   - BFF 新增 `GET /api/bff/gdp-twse/twse-daily?years=10`：載入近 N 年日線並計算 MA20/60/240 後一次回傳；前端切換區間僅用 dataZoom 不再打 API
   - BFF 新增 `POST /api/bff/gdp-twse/refresh-twse-daily?years=10`：proxy 至 business `/api/twse-daily-index/refresh`，回補可能要 1~2 分鐘
   - 「回補資料」按鈕同步觸發 TWN GDP + KOR GDP + 大盤年末 + 大盤日線四項回補

@@ -4,7 +4,7 @@
       <template #header>
         <div style="display:flex;align-items:center;justify-content:space-between">
           <span class="section-title">👁️ 觀察股票</span>
-          <el-button type="primary" :icon="Plus" @click="openDialog()">新增觀察</el-button>
+          <el-button type="primary" :icon="Plus" @click="emit('request-new-alert', marketTab)">新增觀察</el-button>
         </div>
       </template>
 
@@ -27,7 +27,8 @@
         </el-tab-pane>
       </el-tabs>
 
-      <el-table ref="tableRef" :data="currentList" v-loading="loading" border stripe row-key="id" size="small"
+      <el-table ref="tableRef" :data="currentList" v-loading="loading" border stripe
+        :row-key="row => `${row.market}_${row.stockCode}`" size="small"
         @row-dblclick="onStockDblClick">
         <el-table-column width="36" align="center" fixed="left">
           <template #default>
@@ -113,36 +114,11 @@
     </el-card>
 
     <StockAnalysisDialog v-model="analysisVisible" :stock="analysisStock" />
-
-    <!-- 新增觀察 Dialog -->
-    <el-dialog v-model="dialogVisible" title="新增觀察股票" width="460px">
-      <el-form :model="form" label-width="90px">
-        <el-form-item label="市場" required>
-          <el-radio-group v-model="form.market">
-            <el-radio value="台股">台股</el-radio>
-            <el-radio value="美股">美股</el-radio>
-          </el-radio-group>
-        </el-form-item>
-        <el-form-item label="股票代號" required>
-          <el-input v-model="form.stockCode" placeholder="例：2330 或 AAPL"
-            style="width:140px;margin-right:8px"
-            @blur="fetchStockName" />
-          <el-input v-model="form.stockName" placeholder="（離開欄位自動帶入）"
-            style="width:200px"
-            :suffix-icon="lookingUpName ? Loading : undefined" />
-        </el-form-item>
-      </el-form>
-
-      <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="save">新增</el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { Plus, Delete, Loading, Operation } from '@element-plus/icons-vue'
+import { Plus, Delete, Operation } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import Sortable from 'sortablejs'
 import dayjs from 'dayjs'
@@ -151,6 +127,9 @@ import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
 import TaiwanMap from '@/components/TaiwanMap.vue'
 import UsFlag from '@/components/UsFlag.vue'
 
+// 觀察清單由 stock_alert 衍生：「新增觀察」按鈕請父層 (StockMonitorView) 切到警示條件 tab 並彈出新增 dialog
+const emit = defineEmits(['request-new-alert'])
+
 // ===== State =====
 const marketTab = ref('台股')
 const list = ref([])
@@ -158,15 +137,9 @@ const twList = computed(() => list.value.filter(w => w.market === '台股'))
 const usList = computed(() => list.value.filter(w => w.market === '美股'))
 const currentList = computed(() => marketTab.value === '台股' ? twList.value : usList.value)
 const loading = ref(false)
-const saving = ref(false)
-const dialogVisible = ref(false)
-const lookingUpName = ref(false)
 const tableRef = ref(null)
 
 const volumeLabel = computed(() => marketTab.value === '台股' ? '成交量(張)' : '成交量(股)')
-
-const defaultForm = () => ({ market: '台股', stockCode: '', stockName: '' })
-const form = reactive(defaultForm())
 
 // ===== Load =====
 async function load() {
@@ -178,7 +151,7 @@ async function load() {
   }
 }
 
-// ===== Sortable =====
+// ===== Sortable（觀察清單拖一列 = 該股票所有 alert 整組移動）=====
 let sortableInstance = null
 function initSortable() {
   const tbody = tableRef.value?.$el?.querySelector('tbody')
@@ -195,13 +168,14 @@ function initSortable() {
 
       const arr = marketTab.value === '台股' ? twList.value : usList.value
       const moved = arr[oldIndex]
-      // 在原始 list 中重排該市場的順序
       const otherMarket = list.value.filter(w => w.market !== marketTab.value)
       const reordered = [...arr]
       reordered.splice(oldIndex, 1)
       reordered.splice(newIndex, 0, moved)
       list.value = [...reordered, ...otherMarket]
-      bffApi.watchStock.reorder(list.value.map(w => w.id))
+      // 後端會把每個股票所有 alert 的 displayOrder 整組依此順序連續重排
+      const orderedKeys = list.value.map(w => ({ stockCode: w.stockCode, market: w.market }))
+      bffApi.watchStock.reorder(orderedKeys)
         .catch(() => ElMessage.error('排序儲存失敗'))
     }
   })
@@ -212,59 +186,18 @@ onMounted(async () => {
   nextTick(initSortable)
 })
 
-// ===== CRUD =====
-function openDialog() {
-  Object.assign(form, defaultForm())
-  form.market = marketTab.value
-  dialogVisible.value = true
-}
-
-async function fetchStockName() {
-  if (!form.stockCode || !form.market) return
-  lookingUpName.value = true
-  try {
-    const res = await bffApi.stockAlert.lookupName({
-      code: form.stockCode.trim().toUpperCase(), market: form.market
-    })
-    if (res.stockName) form.stockName = res.stockName
-    else ElMessage.warning('找不到此股票名稱，請手動填寫')
-  } catch (e) {
-    ElMessage.error('查詢失敗：' + (e.message || ''))
-  } finally {
-    lookingUpName.value = false
-  }
-}
-
-async function save() {
-  if (!form.stockCode || !form.market) {
-    ElMessage.warning('請填寫股票代號與市場')
-    return
-  }
-  saving.value = true
-  try {
-    await bffApi.watchStock.create({
-      market: form.market,
-      stockCode: form.stockCode.toUpperCase(),
-      stockName: form.stockName || null
-    })
-    ElMessage.success('已加入觀察清單')
-    dialogVisible.value = false
-    await load()
-    nextTick(initSortable)
-  } finally {
-    saving.value = false
-  }
-}
-
 async function remove(row) {
   await ElMessageBox.confirm(
-    `確定將 ${row.stockCode} ${row.stockName || ''} 從觀察清單移除？`,
+    `將 ${row.stockCode} ${row.stockName || ''} 從觀察清單移除，會同時刪除該股票的所有警示條件與觸發歷史。確定？`,
     '移除觀察', { type: 'warning' }
   )
-  await bffApi.watchStock.delete(row.id)
+  await bffApi.watchStock.delete(row.stockCode, row.market)
   ElMessage.success('已移除')
   await load()
 }
+
+// 父層在警示條件儲存後會呼叫此 reload，讓觀察清單重新載入
+defineExpose({ reload: async () => { await load(); nextTick(initSortable) } })
 
 // ===== Formatters =====
 const fmtDt = (dt, market) => {
