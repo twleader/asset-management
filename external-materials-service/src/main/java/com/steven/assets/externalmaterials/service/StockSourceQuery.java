@@ -48,7 +48,10 @@ public class StockSourceQuery {
                         else twCodes.add(code);
                     });
         }
-        jdbc.query("SELECT stock_code, market FROM watch_stock", rs -> {
+        // watch_stock 表已廢止（v1.22）；觀察清單由 stock_alert 衍生
+        // 排除 0000（台股大盤）— 走 twse_index_daily_history，不打 TWSE mis API
+        jdbc.query("SELECT DISTINCT stock_code, market FROM stock_alert " +
+                "WHERE NOT (stock_code = '0000' AND market = '台股')", rs -> {
             String code = rs.getString("stock_code");
             String market = rs.getString("market");
             if ("美股".equals(market)) usCodes.add(code);
@@ -71,7 +74,10 @@ public class StockSourceQuery {
                         else twCodes.add(code);
                     });
         }
-        jdbc.query("SELECT stock_code, market FROM watch_stock", rs -> {
+        // watch_stock 表已廢止（v1.22）；觀察清單由 stock_alert 衍生
+        // 排除 0000（台股大盤）— 走 twse_index_daily_history，不打 TWSE mis API
+        jdbc.query("SELECT DISTINCT stock_code, market FROM stock_alert " +
+                "WHERE NOT (stock_code = '0000' AND market = '台股')", rs -> {
             String code = rs.getString("stock_code");
             String market = rs.getString("market");
             if ("美股".equals(market)) usCodes.add(code);
