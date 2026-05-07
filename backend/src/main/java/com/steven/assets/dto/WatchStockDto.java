@@ -11,11 +11,12 @@ import java.time.LocalDateTime;
 
 public class WatchStockDto {
 
+    /** 觀察清單操作以 (stockCode, market) tuple 識別股票（不再有獨立 watch_stock.id）。 */
     @Data
     @NoArgsConstructor
-    public static class Request {
+    @AllArgsConstructor
+    public static class Key {
         private String stockCode;
-        private String stockName;
         private String market;
     }
 
@@ -24,7 +25,6 @@ public class WatchStockDto {
     @AllArgsConstructor
     @Builder
     public static class Response {
-        private Long id;
         private String stockCode;
         private String stockName;
         private String market;

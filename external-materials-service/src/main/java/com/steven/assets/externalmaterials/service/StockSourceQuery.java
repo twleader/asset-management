@@ -107,18 +107,22 @@ public class StockSourceQuery {
                 }));
     }
 
-    /** Upsert 台股大盤每日收盤點位。同一 trading_date 視為覆寫。 */
-    public void upsertTwseIndexDaily(LocalDate tradingDate, BigDecimal closePoint) {
+    /** Upsert 台股大盤每日 OHLC（同一 trading_date 視為覆寫；OHLC 任一者可為 null）。 */
+    public void upsertTwseIndexDaily(LocalDate tradingDate,
+                                      BigDecimal openPoint, BigDecimal highPoint,
+                                      BigDecimal lowPoint, BigDecimal closePoint) {
         Long existing = jdbc.query(
                 "SELECT 1 FROM twse_index_daily_history WHERE trading_date=?",
                 ps -> ps.setObject(1, tradingDate),
                 rs -> rs.next() ? 1L : null);
         if (existing != null) {
-            jdbc.update("UPDATE twse_index_daily_history SET close_point=? WHERE trading_date=?",
-                    closePoint, tradingDate);
+            jdbc.update("UPDATE twse_index_daily_history " +
+                            "SET open_point=?, high_point=?, low_point=?, close_point=? WHERE trading_date=?",
+                    openPoint, highPoint, lowPoint, closePoint, tradingDate);
         } else {
-            jdbc.update("INSERT INTO twse_index_daily_history (trading_date, close_point) VALUES (?, ?)",
-                    tradingDate, closePoint);
+            jdbc.update("INSERT INTO twse_index_daily_history " +
+                            "(trading_date, open_point, high_point, low_point, close_point) VALUES (?, ?, ?, ?, ?)",
+                    tradingDate, openPoint, highPoint, lowPoint, closePoint);
         }
     }
 

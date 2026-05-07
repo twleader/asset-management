@@ -167,12 +167,12 @@ export const bffApi = {
     delete:    (id) => api.delete(`/bff/stock-alert/${id}`)
   },
 
-  // WatchStock
+  // WatchStock — v1.22 起改為 stock_alert 衍生 view，操作以 (stockCode, market) tuple
   watchStock: {
     getAll:  () => api.get('/bff/watch-stock'),
-    create:  (data) => api.post('/bff/watch-stock', data),
-    delete:  (id) => api.delete(`/bff/watch-stock/${id}`),
-    reorder: (orderedIds) => api.put('/bff/watch-stock/reorder', orderedIds)
+    delete:  (stockCode, market) => api.delete(
+        `/bff/watch-stock/${encodeURIComponent(stockCode)}/${encodeURIComponent(market)}`),
+    reorder: (orderedKeys) => api.put('/bff/watch-stock/order', orderedKeys)
   },
 
   // BackupRestore

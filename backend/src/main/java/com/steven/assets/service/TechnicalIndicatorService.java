@@ -1,7 +1,9 @@
 package com.steven.assets.service;
 
 import com.steven.assets.model.StockPriceHistory;
+import com.steven.assets.model.TwseIndexDailyHistory;
 import com.steven.assets.repository.StockPriceHistoryRepository;
+import com.steven.assets.repository.TwseIndexDailyHistoryRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -25,6 +27,12 @@ public class TechnicalIndicatorService {
 
     private final StockPriceHistoryRepository historyRepo;
     private final PriceQueryService priceQuery;
+    private final TwseIndexDailyHistoryRepository twseDailyRepo;
+
+    /** 0000 = 台股大盤特例：價格 / 指標來源走 twse_index_daily_history（含 OHLC）。 */
+    private static boolean isTaiex(String code, String market) {
+        return "0000".equals(code) && "台股".equals(market);
+    }
 
     /** 季線 + KD（保留舊簽名供 WatchStock 等列表頁使用，避免不必要的 MA240 計算成本） */
     public record Indicators(BigDecimal quarterlyMa, BigDecimal k, BigDecimal d) {
@@ -53,6 +61,9 @@ public class TechnicalIndicatorService {
      */
     @Transactional(readOnly = true)
     public FullIndicators computeAll(String stockCode, String market) {
+        if (isTaiex(stockCode, market)) {
+            return computeAllForTaiex();
+        }
         try {
             List<StockPriceHistory> desc = historyRepo.findRecentN(stockCode, market, 240);
             LocalDate today = LocalDate.now();
@@ -110,6 +121,52 @@ public class TechnicalIndicatorService {
         if (series.size() < days) return null;
         double sum = 0;
         for (int i = 0; i < days; i++) sum += series.get(i).getClosePrice().doubleValue();
+        return BigDecimal.valueOf(sum / days).setScale(2, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * 0000 台股大盤：從 twse_index_daily_history 計算 MA20 / MA60 / MA240 / KD。
+     * OHLC 在 v1.21 之後才補；舊資料 high/low/open 可能為 null，KD 計算時 fallback 用 close。
+     */
+    private FullIndicators computeAllForTaiex() {
+        try {
+            List<TwseIndexDailyHistory> desc = twseDailyRepo.findTopNByOrderByTradingDateDesc(240);
+            if (desc.isEmpty()) return FullIndicators.EMPTY;
+
+            BigDecimal ma20  = taiexSimpleMa(desc, 20);
+            BigDecimal ma60  = taiexSimpleMa(desc, 60);
+            BigDecimal ma240 = taiexSimpleMa(desc, 240);
+
+            BigDecimal kVal = null, dVal = null;
+            if (desc.size() >= 9) {
+                List<TwseIndexDailyHistory> asc = new ArrayList<>(desc).reversed();
+                double k = 50, d = 50;
+                int period = 9;
+                for (int i = period - 1; i < asc.size(); i++) {
+                    List<TwseIndexDailyHistory> window = asc.subList(i - period + 1, i + 1);
+                    double highest = window.stream().mapToDouble(h -> h.getHighPoint() != null
+                            ? h.getHighPoint().doubleValue() : h.getClosePoint().doubleValue()).max().orElse(0);
+                    double lowest  = window.stream().mapToDouble(h -> h.getLowPoint() != null
+                            ? h.getLowPoint().doubleValue() : h.getClosePoint().doubleValue()).min().orElse(0);
+                    double close = asc.get(i).getClosePoint().doubleValue();
+                    double rsv = (highest == lowest) ? 50 : (close - lowest) / (highest - lowest) * 100;
+                    k = k * 2.0 / 3 + rsv / 3.0;
+                    d = d * 2.0 / 3 + k  / 3.0;
+                }
+                kVal = BigDecimal.valueOf(k).setScale(2, RoundingMode.HALF_UP);
+                dVal = BigDecimal.valueOf(d).setScale(2, RoundingMode.HALF_UP);
+            }
+            return new FullIndicators(ma20, ma60, ma240, kVal, dVal);
+        } catch (Exception e) {
+            log.warn("compute TAIEX indicators failed", e);
+            return FullIndicators.EMPTY;
+        }
+    }
+
+    private static BigDecimal taiexSimpleMa(List<TwseIndexDailyHistory> desc, int days) {
+        if (desc.size() < days) return null;
+        double sum = 0;
+        for (int i = 0; i < days; i++) sum += desc.get(i).getClosePoint().doubleValue();
         return BigDecimal.valueOf(sum / days).setScale(2, RoundingMode.HALF_UP);
     }
 }

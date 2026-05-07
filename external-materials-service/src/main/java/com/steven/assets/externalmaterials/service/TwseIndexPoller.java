@@ -1,7 +1,7 @@
 package com.steven.assets.externalmaterials.service;
 
 import com.steven.assets.externalmaterials.client.MacroDataFetchClient;
-import com.steven.assets.externalmaterials.client.MacroDataFetchClient.DailyClose;
+import com.steven.assets.externalmaterials.client.MacroDataFetchClient.DailyOhlc;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -49,9 +49,9 @@ public class TwseIndexPoller {
     }
 
     private int upsertMonth(YearMonth ym) {
-        List<DailyClose> rows = macroFetch.fetchTwseMonthlyDaily(ym.getYear(), ym.getMonthValue());
-        for (DailyClose r : rows) {
-            store.upsertTwseIndexDaily(r.tradingDate(), r.close());
+        List<DailyOhlc> rows = macroFetch.fetchTwseMonthlyDaily(ym.getYear(), ym.getMonthValue());
+        for (DailyOhlc r : rows) {
+            store.upsertTwseIndexDaily(r.tradingDate(), r.open(), r.high(), r.low(), r.close());
         }
         return rows.size();
     }

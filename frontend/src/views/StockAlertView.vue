@@ -216,6 +216,9 @@ import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
 import TaiwanMap from '@/components/TaiwanMap.vue'
 import UsFlag from '@/components/UsFlag.vue'
 
+// 父層（StockMonitorView）監聽 alert-saved，藉以重新載入觀察清單（觀察清單由 stock_alert 衍生）
+const emit = defineEmits(['alert-saved'])
+
 // ===== State =====
 const marketTab = ref('台股')
 const twAlerts  = ref([])
@@ -377,6 +380,7 @@ async function save() {
     ElMessage.success('儲存成功')
     dialogVisible.value = false
     loadAlerts()
+    emit('alert-saved')
   } catch (e) {
     ElMessage.error('儲存失敗')
   } finally {
@@ -418,6 +422,14 @@ function onStockDblClick(row) {
   analysisStock.value = { stockCode: row.stockCode, stockName: row.stockName, market: row.market }
   analysisVisible.value = true
 }
+
+// 父層（StockMonitorView）會在「觀察清單頁的新增按鈕」被按下時，切到此頁籤後呼叫 openNewDialog
+defineExpose({
+  openNewDialog(initMarket) {
+    if (initMarket) marketTab.value = initMarket
+    openDialog(null)
+  }
+})
 </script>
 
 <style scoped>

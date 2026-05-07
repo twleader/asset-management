@@ -62,7 +62,9 @@ public class StockAlertService {
                 .active(req.getActive() != null ? req.getActive() : true)
                 .displayOrder(maxOrder + 1)
                 .build();
-        if (req.getStockName() != null && !req.getStockName().isBlank()) {
+        // 0000 = 台股大盤：不寫入 stock 主檔（避免被排程當真股票抓價，價格走 twse_index_daily_history）
+        boolean isTaiex = "0000".equals(code) && "台股".equals(req.getMarket());
+        if (!isTaiex && req.getStockName() != null && !req.getStockName().isBlank()) {
             stockMasterRepo.upsert(code, req.getMarket(), req.getStockName().trim());
         }
         return toResponse(alertRepo.save(alert));
@@ -86,7 +88,8 @@ public class StockAlertService {
         String code = req.getStockCode().trim().toUpperCase();
         alert.setStockCode(code);
         alert.setMarket(req.getMarket());
-        if (req.getStockName() != null && !req.getStockName().isBlank()) {
+        boolean isTaiex = "0000".equals(code) && "台股".equals(req.getMarket());
+        if (!isTaiex && req.getStockName() != null && !req.getStockName().isBlank()) {
             stockMasterRepo.upsert(code, req.getMarket(), req.getStockName().trim());
         }
         alert.setAlertType(req.getAlertType());
@@ -559,8 +562,13 @@ public class StockAlertService {
         StockAlertDto.Response r = new StockAlertDto.Response();
         r.setId(a.getId());
         r.setStockCode(a.getStockCode());
-        String name = stockMasterRepo.findByCodeAndMarket(a.getStockCode(), a.getMarket())
-                .map(s -> s.getName()).orElse(a.getStockCode());
+        String name;
+        if ("0000".equals(a.getStockCode()) && "台股".equals(a.getMarket())) {
+            name = "台股大盤";
+        } else {
+            name = stockMasterRepo.findByCodeAndMarket(a.getStockCode(), a.getMarket())
+                    .map(s -> s.getName()).orElse(a.getStockCode());
+        }
         r.setStockName(name);
         r.setMarket(a.getMarket());
         r.setAlertType(a.getAlertType());
