@@ -8,8 +8,18 @@ import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 
 public class WatchStockDto {
+
+    /** 該股票一筆警示條件的扁平表示（供前端「警示條件」欄逐條顯示）。 */
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class Condition {
+        private String label;
+        private Boolean active;
+    }
 
     /** 觀察清單操作以 (stockCode, market) tuple 識別股票（不再有獨立 watch_stock.id）。 */
     @Data
@@ -42,6 +52,8 @@ public class WatchStockDto {
         private String tradingDate;
         private String priceUpdatedAt;
         private Boolean closed;
+        // 該股票所有警示條件（依 displayOrder 升冪），「警示條件」欄逐條列出
+        private List<Condition> conditions;
         // 警示彙總（最近一次觸發）
         private LocalDateTime lastTriggeredAt;
         private BigDecimal lastTriggeredPrice;

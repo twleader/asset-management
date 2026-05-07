@@ -227,7 +227,8 @@
 - [ ] 左側導覽選單「股票觀察」項目，路徑 `/stocks`（內含「觀察清單」、「警示條件」兩個頁籤；舊路徑 `/watch-stocks`、`/stock-alerts` 自動 redirect 並帶 `tab` query）
 - [ ] 頁面提供「台股」、「美股」兩個頁籤，依市場分流顯示
 - [ ] **觀察清單不另存資料表**：`watch_stock` 表廢止；觀察清單一律由 `stock_alert` 群組去重衍生 = `SELECT stockCode, market, MIN(displayOrder) FROM stock_alert GROUP BY stockCode, market`。同一檔股票即使有多筆條件也僅顯示一列
-- [ ] 每列顯示欄位：股名/股號、股價、漲跌、漲跌幅(%)、買進、賣出、開盤、昨收、最高、最低、成交量(張)、警示（觸發時間/股價/均線/KD）
+- [ ] 每列顯示欄位：股名/股號、股價、漲跌、漲跌幅(%)、開盤、昨收、最高、最低、成交量(張)、警示條件（該股票所有 alert 條件 label 清單）、警示（最近一次觸發資訊：觸發時間/股價/均線/KD）
+- [ ] 「警示條件」欄列出該 (stockCode, market) 在 `stock_alert` 中所有條件（依 displayOrder 升冪），每條顯示其 condition label（如「高於季線 5%」「K 值低於 20」），停用條件以淺色 + 「(停用)」標註
 - [ ] 「警示」欄取自該股票所有 alert 中最近一筆 `lastTriggeredAt`，呈現觸發時間、觸發價、均線值、KD 值（最近 3 個交易日內才顯示，過期不顯示）
 - [ ] 報價來源 `StockPrice` 擴充欄位：buyPrice（買進）、sellPrice（賣出）、openPrice（開盤）、previousClose（昨收）、highPrice（最高）、lowPrice（最低）、volume（成交量，台股為張）
 - [ ] 觀察清單中的股票同樣納入排程的股價更新（與持股一併更新）

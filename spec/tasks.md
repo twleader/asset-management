@@ -618,7 +618,7 @@
 
 - [x] 19.5 前端：新增 `views/WatchStockView.vue` 與 `views/StockMonitorView.vue`，route `/stocks`（含 `tab` query），舊路徑 `/watch-stocks`、`/stock-alerts` 自動 redirect；左側選單 `股票觀察`
   - 台股 / 美股 兩個頁籤
-  - 欄位：股名/股號、股價、漲跌、漲跌幅(%)、買進、賣出、開盤、昨收、最高、最低、成交量(張)、警示
+  - 欄位：股名/股號、股價、漲跌、漲跌幅(%)、開盤、昨收、最高、最低、成交量(張)、警示條件（所有 alert label）、警示（最近一次觸發）
   - 支援 sortablejs 拖曳排序（拖拉欄位置於最左邊）、新增/刪除（含確認對話框）、自動帶股名（沿用 `/api/stock-alerts/lookup-name`）
 
 ### Task 20: 資料庫備份／還原（UI 介面）
@@ -1808,3 +1808,18 @@ Task 59 移除 `shouldApplyLive` 的「市場開盤」閘門時，`getRealtimePr
         - 0000 加入觀察 → 季線/年線/KD 皆有值（不再是 dash）
         - 0000 可設 KD 警示且觸發後 lastTriggered* 顯示
 
+### Task 62: 觀察清單欄位調整（移除買進/賣出、新增警示條件欄）
+
+對應 Requirements: Requirement 14（觀察股票清單）
+
+#### 背景
+
+觀察清單目前最近一次觸發只有一條訊息，看不出該股票實際設了哪些條件。把「買進／賣出」兩欄拿掉（資訊量低且台股大盤、ETF 多半為 null），改加一欄「警示條件」列出該股票所有條件 label，方便快速確認設了什麼。
+
+#### Steps:
+
+- [x] 62.1 `StockAlertService.buildLabel` 提升為 `public static`（或抽到 util），讓 `WatchStockService` 共用同一份 label 文案
+- [x] 62.2 `WatchStockDto.Response` 加 `conditions: List<{label, active}>`（依 displayOrder 升冪）
+- [x] 62.3 `WatchStockService.toResponse` / `toIndexResponse` 填入 conditions（`alertRepo.findByStockCodeAndMarket` 排序後 map 成 `{label, active}`）
+- [x] 62.4 前端 `WatchStockView.vue` 移除買進、賣出兩個 column；在「警示」欄前面加「警示條件」欄，每條換行顯示，停用條件淺色 + 「(停用)」
+- [ ] 62.5 commit + 服務重啟驗證

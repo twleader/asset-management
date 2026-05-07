@@ -152,8 +152,11 @@ public class WatchStockService {
                     .setScale(4, RoundingMode.HALF_UP));
         }
 
-        // 警示彙總：取該股最近一筆 lastTriggeredAt，且只顯示最近 3 個交易日內的觸發
+        // 警示條件：列出該股票所有 alert 條件 label（依 displayOrder 升冪）
         List<StockAlert> alerts = alertRepo.findByStockCodeAndMarket(code, market);
+        r.setConditions(buildConditions(alerts));
+
+        // 警示彙總：取該股最近一筆 lastTriggeredAt，且只顯示最近 3 個交易日內的觸發
         java.time.LocalDateTime cutoff = recentTradingDayCutoff(market, 3);
         alerts.stream()
                 .filter(a -> a.getLastTriggeredAt() != null)
@@ -209,8 +212,11 @@ public class WatchStockService {
             }
         }
 
-        // 警示彙總（0000 也同樣顯示）
+        // 警示條件：列出該股票所有 alert 條件 label
         List<StockAlert> alerts = alertRepo.findByStockCodeAndMarket(code, market);
+        r.setConditions(buildConditions(alerts));
+
+        // 警示彙總（0000 也同樣顯示）
         java.time.LocalDateTime cutoff = recentTradingDayCutoff(market, 3);
         alerts.stream()
                 .filter(a -> a.getLastTriggeredAt() != null)
@@ -227,6 +233,16 @@ public class WatchStockService {
         r.setKValue(ind.k());
         r.setDValue(ind.d());
         return r;
+    }
+
+    /** 把該股票所有 alert 排序成 condition list，含 label 與 active 旗標，供前端「警示條件」欄逐條呈現。 */
+    private static List<WatchStockDto.Condition> buildConditions(List<StockAlert> alerts) {
+        return alerts.stream()
+                .sorted(Comparator.comparingInt(a -> a.getDisplayOrder() != null ? a.getDisplayOrder() : 0))
+                .map(a -> new WatchStockDto.Condition(
+                        StockAlertService.buildLabel(a),
+                        Boolean.TRUE.equals(a.getActive())))
+                .toList();
     }
 
     /** 回傳「最近 N 個交易日中最早一天的午夜」當作 cutoff；資料不足回 null（不過濾）。 */
