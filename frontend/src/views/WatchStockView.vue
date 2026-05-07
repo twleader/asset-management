@@ -85,7 +85,7 @@
           <template #default="{ row }">
             <template v-if="row.conditions && row.conditions.length">
               <div v-for="(c, i) in row.conditions" :key="i"
-                :style="{ fontSize: '12px', color: c.active ? '#0f172a' : '#94a3b8' }">
+                :style="{ fontSize: '12px', color: conditionColor(c) }">
                 {{ c.label }}<span v-if="!c.active"> (停用)</span>
               </div>
             </template>
@@ -234,6 +234,12 @@ const fmtPct = (v) => {
 const fmtVolume = (v) => {
   if (v == null) return '—'
   return Number(v).toLocaleString()
+}
+
+const conditionColor = (c) => {
+  if (!c.active) return '#94a3b8'   // 停用：淺色
+  if (c.triggered) return '#dc2626' // 已觸發（最近 3 個交易日內）：紅
+  return '#0f172a'                  // 啟用未觸發：深色
 }
 
 const priceColor = (v) => {

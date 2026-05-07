@@ -19,6 +19,8 @@ public class WatchStockDto {
     public static class Condition {
         private String label;
         private Boolean active;
+        /** 該條件最近 3 個交易日內已觸發（與「警示」欄使用同一份 cutoff），前端以紅字顯示。 */
+        private Boolean triggered;
     }
 
     /** 觀察清單操作以 (stockCode, market) tuple 識別股票（不再有獨立 watch_stock.id）。 */
