@@ -30,12 +30,17 @@ public class MacroDataFetchClient {
 
     private static final String IMF_API_TPL = "https://www.imf.org/external/datamapper/api/v1/";
     /**
-     * TWSE 大盤每日 OHLC 月報（openapi 版）。從 FMTQIK（只有 close）改用 MI_5MINS_HIST，提供 OHLC 四欄，
-     * 供觀察清單 0000 KD 計算與大盤 K 線圖共用。
-     * 回應 schema: [{ Date: "115mmdd"（民國）, OpeningIndex, HighestIndex, LowestIndex, ClosingIndex }, ...]
+     * TWSE 大盤每日 OHLC 月報。從 FMTQIK（只有 close）改用 MI_5MINS_HIST 提供 OHLC 四欄。
+     *
+     * 用 www.twse.com.tw 版本（支援 ?date= 歷史月份查詢；openapi 版的 MI_5MINS_HIST 永遠
+     * 回最新資料、不支援 date 參數，無法回補歷史）。FMTQIK 在 2026 站台維護期失效但
+     * MI_5MINS_HIST 仍可用。
+     *
+     * 回應 schema: { stat:"OK", fields:[日期, 開盤指數, 最高指數, 最低指數, 收盤指數],
+     *                data:[["民國年/月/日","12,345.67",...], ...] }
      */
     private static final String TWSE_DAILY_OHLC_URL =
-            "https://openapi.twse.com.tw/v1/exchangeReport/MI_5MINS_HIST?date=";
+            "https://www.twse.com.tw/rwd/zh/TAIEX/MI_5MINS_HIST?response=json&date=";
 
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
@@ -85,9 +90,9 @@ public class MacroDataFetchClient {
                              BigDecimal open, BigDecimal high, BigDecimal low, BigDecimal close) {}
 
     /**
-     * TWSE MI_5MINS_HIST 月報（openapi 版）。回應為 JSON array，每筆
-     * {Date, OpeningIndex, HighestIndex, LowestIndex, ClosingIndex}；Date 是民國格式如 "1150504"
-     * （前 3 碼民國年 + 4 碼月日）。
+     * TWSE MI_5MINS_HIST 月報（www.twse.com.tw 版本）。
+     * 回應 schema: { stat: "OK", fields: [日期, 開盤指數, 最高指數, 最低指數, 收盤指數],
+     *               data: [["民國年/月/日","12,345.67",...], ...] }
      */
     public List<DailyOhlc> fetchTwseMonthlyDaily(int year, int month) {
         try {
@@ -100,26 +105,28 @@ public class MacroDataFetchClient {
             HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString());
             if (res.statusCode() / 100 != 2) return Collections.emptyList();
             JsonNode root = mapper.readTree(res.body());
-            if (!root.isArray() || root.isEmpty()) return Collections.emptyList();
+            if (!"OK".equals(root.path("stat").asText())) return Collections.emptyList();
+            JsonNode data = root.path("data");
+            if (!data.isArray() || data.isEmpty()) return Collections.emptyList();
 
             List<DailyOhlc> out = new ArrayList<>();
-            for (JsonNode row : root) {
-                String mingoDate = row.path("Date").asText("");
-                if (mingoDate.length() != 7) continue;
-                int gYear, mm, dd;
-                try {
-                    gYear = Integer.parseInt(mingoDate.substring(0, 3)) + 1911;
-                    mm = Integer.parseInt(mingoDate.substring(3, 5));
-                    dd = Integer.parseInt(mingoDate.substring(5, 7));
-                } catch (NumberFormatException e) { continue; }
+            for (JsonNode row : data) {
+                if (!row.isArray() || row.size() < 5) continue;
+                String rocDate = row.get(0).asText("");  // e.g. "115/05/04"
+                String[] parts = rocDate.split("/");
+                if (parts.length != 3) continue;
                 LocalDate d;
-                try { d = LocalDate.of(gYear, mm, dd); }
-                catch (Exception e) { continue; }
+                try {
+                    d = LocalDate.of(
+                            Integer.parseInt(parts[0]) + 1911,
+                            Integer.parseInt(parts[1]),
+                            Integer.parseInt(parts[2]));
+                } catch (Exception e) { continue; }
 
-                BigDecimal open  = parseIndex(row.path("OpeningIndex").asText(""));
-                BigDecimal high  = parseIndex(row.path("HighestIndex").asText(""));
-                BigDecimal low   = parseIndex(row.path("LowestIndex").asText(""));
-                BigDecimal close = parseIndex(row.path("ClosingIndex").asText(""));
+                BigDecimal open  = parseIndex(row.get(1).asText(""));
+                BigDecimal high  = parseIndex(row.get(2).asText(""));
+                BigDecimal low   = parseIndex(row.get(3).asText(""));
+                BigDecimal close = parseIndex(row.get(4).asText(""));
                 if (close == null) continue;
                 out.add(new DailyOhlc(d, open, high, low, close));
             }
