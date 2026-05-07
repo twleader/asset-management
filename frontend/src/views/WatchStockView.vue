@@ -62,12 +62,6 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="買進" width="80" align="right">
-          <template #default="{ row }">{{ fmtNum(row.buyPrice) }}</template>
-        </el-table-column>
-        <el-table-column label="賣出" width="80" align="right">
-          <template #default="{ row }">{{ fmtNum(row.sellPrice) }}</template>
-        </el-table-column>
         <el-table-column label="開盤" width="80" align="right">
           <template #default="{ row }">{{ fmtNum(row.openPrice) }}</template>
         </el-table-column>
@@ -86,6 +80,17 @@
         </el-table-column>
         <el-table-column :label="volumeLabel" width="100" align="right">
           <template #default="{ row }">{{ fmtVolume(row.volume) }}</template>
+        </el-table-column>
+        <el-table-column label="警示條件" min-width="170">
+          <template #default="{ row }">
+            <template v-if="row.conditions && row.conditions.length">
+              <div v-for="(c, i) in row.conditions" :key="i"
+                :style="{ fontSize: '12px', color: c.active ? '#0f172a' : '#94a3b8' }">
+                {{ c.label }}<span v-if="!c.active"> (停用)</span>
+              </div>
+            </template>
+            <span v-else style="font-size:12px;color:#94a3b8">—</span>
+          </template>
         </el-table-column>
         <el-table-column label="警示（觸發時間／股價／季線／KD）" min-width="210">
           <template #default="{ row }">

@@ -659,7 +659,8 @@ public class StockAlertService {
         if (deleted > 0) log.info("清理 {} 筆 30 天前的警示觸發紀錄", deleted);
     }
 
-    private String buildLabel(StockAlert a) {
+    /** 公開為 static：WatchStockService 在組裝「警示條件」欄時共用同一份文案。 */
+    public static String buildLabel(StockAlert a) {
         double thr = a.getThreshold().doubleValue();
         return switch (a.getAlertType()) {
             case "QUARTERLY_MA_ABOVE_PCT" -> String.format("高於季線 %.0f%%", thr);
