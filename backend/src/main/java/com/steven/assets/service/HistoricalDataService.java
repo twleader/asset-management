@@ -2,8 +2,10 @@ package com.steven.assets.service;
 
 import com.steven.assets.model.ExchangeRateHistory;
 import com.steven.assets.model.StockPriceHistory;
+import com.steven.assets.model.TwseIndexDailyHistory;
 import com.steven.assets.repository.ExchangeRateHistoryRepository;
 import com.steven.assets.repository.StockPriceHistoryRepository;
+import com.steven.assets.repository.TwseIndexDailyHistoryRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -23,6 +25,7 @@ public class HistoricalDataService {
     private final PriceQueryService priceQuery;
     private final ExchangeRateHistoryRepository rateHistRepo;
     private final com.steven.assets.repository.FundMasterRepository fundMasterRepo;
+    private final TwseIndexDailyHistoryRepository twseDailyRepo;
     private final WebClient priceServiceClient;
 
 
@@ -31,11 +34,13 @@ public class HistoricalDataService {
             PriceQueryService priceQuery,
             ExchangeRateHistoryRepository rateHistRepo,
             com.steven.assets.repository.FundMasterRepository fundMasterRepo,
+            TwseIndexDailyHistoryRepository twseDailyRepo,
             @Value("${external-materials.base-url:http://external-materials-service:8080}") String externalUrl) {
         this.priceHistRepo = priceHistRepo;
         this.priceQuery = priceQuery;
         this.rateHistRepo = rateHistRepo;
         this.fundMasterRepo = fundMasterRepo;
+        this.twseDailyRepo = twseDailyRepo;
         this.priceServiceClient = WebClient.builder().baseUrl(externalUrl).build();
     }
 
@@ -223,6 +228,12 @@ public class HistoricalDataService {
 
     @Transactional(readOnly = true)
     public List<StockPriceHistory> getStockHistory(String stockCode, String market, LocalDate start, LocalDate end) {
+        // 0000 = 台股大盤：歷史走勢來自 twse_index_daily_history（含 OHLC）
+        if ("0000".equals(stockCode) && "台股".equals(market)) {
+            return twseDailyRepo.findByTradingDateBetweenOrderByTradingDateAsc(start, end).stream()
+                    .map(d -> taiexToStockHistory(d, stockCode, market))
+                    .toList();
+        }
         List<StockPriceHistory> history = new ArrayList<>(
             priceHistRepo.findByStockCodeAndMarketAndTradingDateBetweenOrderByTradingDateAsc(stockCode, market, start, end)
         );
@@ -326,5 +337,18 @@ public class HistoricalDataService {
             log.warn("呼叫 /internal/stock-name 失敗 {} {}: {}", market, code, e.getMessage());
             return "";
         }
+    }
+
+    /** 把大盤日線 row 包成 StockPriceHistory 形狀，讓走勢圖等通用 API 直接使用。 */
+    private static StockPriceHistory taiexToStockHistory(TwseIndexDailyHistory d, String code, String market) {
+        return StockPriceHistory.builder()
+                .stockCode(code)
+                .market(market)
+                .tradingDate(d.getTradingDate())
+                .openPrice(d.getOpenPoint())
+                .highPrice(d.getHighPoint())
+                .lowPrice(d.getLowPoint())
+                .closePrice(d.getClosePoint())
+                .build();
     }
 }
