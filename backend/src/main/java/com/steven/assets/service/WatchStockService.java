@@ -154,10 +154,11 @@ public class WatchStockService {
 
         // 警示條件：列出該股票所有 alert 條件 label（依 displayOrder 升冪）
         List<StockAlert> alerts = alertRepo.findByStockCodeAndMarket(code, market);
-        r.setConditions(buildConditions(alerts));
+        // 「警示條件」欄與「警示」欄共用同一份 cutoff：最近 3 個交易日內觸發者套紅字
+        java.time.LocalDateTime cutoff = recentTradingDayCutoff(market, 3);
+        r.setConditions(buildConditions(alerts, cutoff));
 
         // 警示彙總：取該股最近一筆 lastTriggeredAt，且只顯示最近 3 個交易日內的觸發
-        java.time.LocalDateTime cutoff = recentTradingDayCutoff(market, 3);
         alerts.stream()
                 .filter(a -> a.getLastTriggeredAt() != null)
                 .filter(a -> cutoff == null || !a.getLastTriggeredAt().isBefore(cutoff))
@@ -214,10 +215,8 @@ public class WatchStockService {
 
         // 警示條件：列出該股票所有 alert 條件 label
         List<StockAlert> alerts = alertRepo.findByStockCodeAndMarket(code, market);
-        r.setConditions(buildConditions(alerts));
-
-        // 警示彙總（0000 也同樣顯示）
         java.time.LocalDateTime cutoff = recentTradingDayCutoff(market, 3);
+        r.setConditions(buildConditions(alerts, cutoff));
         alerts.stream()
                 .filter(a -> a.getLastTriggeredAt() != null)
                 .filter(a -> cutoff == null || !a.getLastTriggeredAt().isBefore(cutoff))
@@ -235,13 +234,21 @@ public class WatchStockService {
         return r;
     }
 
-    /** 把該股票所有 alert 排序成 condition list，含 label 與 active 旗標，供前端「警示條件」欄逐條呈現。 */
-    private static List<WatchStockDto.Condition> buildConditions(List<StockAlert> alerts) {
+    /**
+     * 把該股票所有 alert 排序成 condition list，含 label / active / triggered 旗標。
+     * triggered = `alert.lastTriggeredAt` 落在 cutoff（最近 3 個交易日）之內，前端據此套紅字。
+     */
+    private static List<WatchStockDto.Condition> buildConditions(List<StockAlert> alerts, LocalDateTime cutoff) {
         return alerts.stream()
                 .sorted(Comparator.comparingInt(a -> a.getDisplayOrder() != null ? a.getDisplayOrder() : 0))
-                .map(a -> new WatchStockDto.Condition(
-                        StockAlertService.buildLabel(a),
-                        Boolean.TRUE.equals(a.getActive())))
+                .map(a -> {
+                    boolean triggered = a.getLastTriggeredAt() != null
+                            && (cutoff == null || !a.getLastTriggeredAt().isBefore(cutoff));
+                    return new WatchStockDto.Condition(
+                            StockAlertService.buildLabel(a),
+                            Boolean.TRUE.equals(a.getActive()),
+                            triggered);
+                })
                 .toList();
     }
 

@@ -1822,4 +1822,5 @@ Task 59 移除 `shouldApplyLive` 的「市場開盤」閘門時，`getRealtimePr
 - [x] 62.2 `WatchStockDto.Response` 加 `conditions: List<{label, active}>`（依 displayOrder 升冪）
 - [x] 62.3 `WatchStockService.toResponse` / `toIndexResponse` 填入 conditions（`alertRepo.findByStockCodeAndMarket` 排序後 map 成 `{label, active}`）
 - [x] 62.4 前端 `WatchStockView.vue` 移除買進、賣出兩個 column；在「警示」欄前面加「警示條件」欄，每條換行顯示，停用條件淺色 + 「(停用)」
-- [ ] 62.5 commit + 服務重啟驗證
+- [x] 62.5 commit + 服務重啟驗證
+- [ ] 62.6 已觸發條件以紅字顯示：`Condition` DTO 加 `triggered` 欄位，由 `WatchStockService` 比對 alert.lastTriggeredAt 與最近 3 個交易日 cutoff（與「警示」欄共用同一份 cutoff）填入；前端依此 flag 套紅色字
