@@ -108,8 +108,7 @@ async function fetchDailyData() {
 }
 
 onMounted(() => {
-  fetchData()
-  fetchDailyData()
+  Promise.allSettled([fetchData(), fetchDailyData()])
 })
 
 async function onRefresh() {
@@ -121,8 +120,7 @@ async function onRefresh() {
     const t = r.twse?.upserted ?? 0
     const d = r.twseDaily?.upserted ?? 0
     ElMessage.success(`回補完成：台灣 GDP ${g} 筆、韓國 GDP ${k} 筆、大盤年末 ${t} 筆、大盤日線 ${d} 筆`)
-    await fetchData()
-    await fetchDailyData()
+    await Promise.allSettled([fetchData(), fetchDailyData()])
   } catch {} finally {
     refreshing.value = false
   }
