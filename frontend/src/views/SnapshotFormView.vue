@@ -2142,19 +2142,16 @@ watch(() => form.snapshotDate, async (newDate, oldDate) => {
     row.priceChange    = null
     row.priceChangePct = null
   }
-  // 3. 批次查詢新日期的收盤價（含 backfill 重試）
-  if (form.stocks.length > 0) {
-    await loadAllPrices()
-  }
-  // 4. Requirement 21：fund_master 預載 NAV / 配息也要用新基準日重抓
-  await loadFundMasters()
+  // 3 + 4. 並行：批次查詢新日期收盤價 + 依基準日重抓 fund_master NAV / 配息（彼此獨立）
+  const tasks = [loadFundMasters()]
+  if (form.stocks.length > 0) tasks.push(loadAllPrices())
+  await Promise.allSettled(tasks)
 })
 
 // ===== Lifecycle =====
 onMounted(async () => {
-  // 先載入銀行/券商選項（取代 hardcoded）
-  await loadInstitutions()
-  await loadFundMasters()
+  // 銀行/券商選項 + fund_master 並行載入（彼此獨立）
+  await Promise.allSettled([loadInstitutions(), loadFundMasters()])
   // 編輯模式時：fund_master 載入後自動算入既有 row 的預估年配息（原值若 DB 已凍結，這裡只覆寫顯示用）
   // 這個 watcher 會在 form.funds 更新後觸發一次（loadDetail 之後）
   watchEffect(() => {
