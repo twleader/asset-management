@@ -893,12 +893,13 @@ function overlayLivePrice(row) {
 }
 
 /**
- * 將 latest snapshot 的總額（totalStockValue / stockProfit / estimatedAnnualDividend / totalAssets）
+ * 將 latest snapshot 的總額（totalStockValue / stockProfit / totalAssets）
  * 用 live 行情重算。basedate==該市場當地今日才套 live（不再加「市場開盤」閘門）；
  * 另一個市場仍維持快照凍結值。讓 KPI 卡 / 配置 donut / 趨勢線最後一點隨 2 分鐘輪詢更新。
  *
  * 「資產總計」優先採用 liveAssets.liveTotalAssets（與「歷年資產管理」共用同一支 API），
- * 其餘小計（台股 / 美股 / 預估配息）以 customTableData × overlay 重算。
+ * 台股 / 美股 小計以 customTableData × overlay 重算。
+ * 「預估配息」一律讀 snapshot 凍結值 s.estimatedAnnualDividend（含基金），不前端重算 — 與歷年資產管理同源。
  */
 const liveLatest = computed(() => {
   const s = latest.value
@@ -911,18 +912,16 @@ const liveLatest = computed(() => {
   const us = customTableData['美股'] ?? []
   const sumOf = (rows, applyLive) => rows.reduce((a, row) => {
     const r = applyLive ? overlayLivePrice(row) : row
-    a.value    += Number(r.currentValue || 0)
-    a.cost     += Number(r.investmentCost || 0)
-    a.dividend += Number(r.estimatedDividend || 0)
+    a.value += Number(r.currentValue || 0)
+    a.cost  += Number(r.investmentCost || 0)
     return a
-  }, { value: 0, cost: 0, dividend: 0 })
+  }, { value: 0, cost: 0 })
 
   const t = sumOf(tw, twLive)
   const u = sumOf(us, usLive)
   const totalStockValue = t.value + u.value
   const totalStockCost = t.cost + u.cost
   const stockProfit = totalStockValue - totalStockCost
-  const estimatedAnnualDividend = t.dividend + u.dividend
   const totalDeposit = Number(s.totalDeposit || 0)
   const totalFundValue = Number(s.totalFundValue || 0)
   // 「資產總計」優先採用 liveAssets.liveTotalAssets（與「歷年資產管理」共用同一支 API），
@@ -937,7 +936,7 @@ const liveLatest = computed(() => {
 
   return {
     ...s,
-    totalStockValue, totalStockCost, stockProfit, estimatedAnnualDividend,
+    totalStockValue, totalStockCost, stockProfit,
     totalAssets, totalTwStockValue, totalUsStockValue
   }
 })
