@@ -639,12 +639,16 @@ public class AssetService {
             }
         }
 
-        // 重算快照層級的 estimatedAnnualDividend
-        BigDecimal totalDividend = snapshot.getStocks().stream()
+        // 重算快照層級的 estimatedAnnualDividend（stocks + funds，與 recalcAllDividends 行為一致）
+        BigDecimal totalStockDiv = snapshot.getStocks().stream()
                 .filter(st -> st.getEstimatedDividend() != null)
                 .map(StockHolding::getEstimatedDividend)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
-        snapshot.setEstimatedAnnualDividend(totalDividend);
+        BigDecimal totalFundDiv = snapshot.getFunds().stream()
+                .filter(fh -> fh.getEstimatedDividend() != null)
+                .map(FundHolding::getEstimatedDividend)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        snapshot.setEstimatedAnnualDividend(totalStockDiv.add(totalFundDiv));
 
         snapshotRepo.save(snapshot);
     }
