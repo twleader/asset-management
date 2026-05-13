@@ -106,7 +106,23 @@ public class BackupService {
         s.setWeeklyRetention(weekly);
         if (backupEnabled != null) s.setBackupEnabled(backupEnabled);
         s.setUpdatedAt(LocalDateTime.now(DISPLAY_ZONE));
-        return settingRepo.save(s);
+        BackupSetting saved = settingRepo.save(s);
+
+        // 儲存設定當下立即套用新 retention，讓使用者下調保留代數時不必等到下一次排程備份才生效。
+        // 任何單一資料夾失敗只記 log、不影響其他資料夾與 PUT 200 OK。
+        rotateQuietly("manual", MANUAL_PREFIX, saved.getManualRetention());
+        rotateQuietly("daily", "asset_daily_", saved.getDailyRetention());
+        rotateQuietly("weekly", WEEKLY_PREFIX, saved.getWeeklyRetention());
+
+        return saved;
+    }
+
+    private void rotateQuietly(String folder, String prefix, int retention) {
+        try {
+            rotateFolder(folder, prefix, retention);
+        } catch (RuntimeException e) {
+            log.warn("更新保留代數後輪替 {} 失敗: {}", folder, e.getMessage(), e);
+        }
     }
 
     private static void validateRange(String field, Integer v) {
