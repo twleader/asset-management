@@ -1824,3 +1824,25 @@ Task 59 移除 `shouldApplyLive` 的「市場開盤」閘門時，`getRealtimePr
 - [x] 62.4 前端 `WatchStockView.vue` 移除買進、賣出兩個 column；在「警示」欄前面加「警示條件」欄，每條換行顯示，停用條件淺色 + 「(停用)」
 - [x] 62.5 commit + 服務重啟驗證
 - [ ] 62.6 已觸發條件以紅字顯示：`Condition` DTO 加 `triggered` 欄位，由 `WatchStockService` 比對 alert.lastTriggeredAt 與最近 3 個交易日 cutoff（與「警示」欄共用同一份 cutoff）填入；前端依此 flag 套紅色字
+
+### Task 63: 保留設定儲存時立即套用 retention
+
+對應 Requirements: Requirement 15（資料庫備份/還原）
+
+#### 背景
+
+原本 `updateSetting()` 只把新的保留代數寫進 `backup_setting`，輪替只在下一次排程／手動備份完成時才會跑。若使用者把 `dailyRetention` 從 50 下調到 20，daily 資料夾現有 > 20 份檔案要等到下一次台股交易日 15:30 或美股 07:00 排程跑完才會被清掉，不符合使用者「我改設定就是要立刻只留 N 份」的直覺。
+
+#### Steps:
+
+- [ ] 63.1 `BackupService.updateSetting()` 在 `settingRepo.save(s)` 之後依新的 retention 值對三個資料夾各跑一次 `rotateFolder`：
+        - `rotateFolder("manual", MANUAL_PREFIX, manual)`
+        - `rotateFolder("daily", "asset_daily_", daily)`
+        - `rotateFolder("weekly", WEEKLY_PREFIX, weekly)`
+        每支獨立 try/catch RuntimeException 包住，失敗只 `log.warn`，不讓 PUT `/api/backups/settings` 整支 fail（設定值仍要存進去）
+- [ ] 63.2 重啟後端，於前端「保留設定」把 `dailyRetention` 從原值下調到一個小於目前 daily 檔案數的值並儲存，確認：
+        - PUT 200 OK、UI 顯示「儲存成功」
+        - Google Drive `daily/` 內 `asset_daily_*` 只剩新上限份數（最舊的被刪）
+        - `backup_record` 表對應 daily folder 的 row 也同步減少
+        - manual / weekly 同理
+
