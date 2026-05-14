@@ -236,6 +236,7 @@
 - [ ] **刪除觀察 = 刪除該股票所有 alert**：觀察清單頁刪除某列時，連帶刪除該 (stockCode, market) 在 `stock_alert` 中的所有條件（含其 `stock_alert_trigger` 歷史，FK 級聯）；前端二次確認文字明示「將同時刪除 N 筆警示條件」
 - [ ] **觀察清單拖曳排序 = 移動該股票所有 alert**：拖曳一列時將該股票所有 alert 的 `displayOrder` 整組重排到新位置（保持條件之間的相對順序）；警示條件頁的拖曳維持單筆 alert 級行為
 - [ ] 盤中即時 `highPrice` / `lowPrice` 由 `external-materials-service` 自行聚合：每輪 cron 觀察到的成交價與當日已記錄的高/低做 max/min，存於 Redis（key `price:dayhl:{market}:{code}:{tradingDate}`，TTL 36 小時）。寫入 `price:{market}:{code}` 時，若外部 API 有提供 high/low 則取「外部值與聚合值的 max(high)/min(low)」；若外部 API 未提供（如 NASDAQ 對 ETF 的 `keyStats` 為 null），則直接採用聚合值。盤後 `dumpRedisToDb` 沿用同一份 Redis JSON 寫入 `stock_price_history`
+- [ ] 美股 `openPrice` 來源：NASDAQ `/info` endpoint 自 2026/04 起不再回傳 `OpenPrice`，`PriceFetchClient.getNasdaqPrice` 額外打 NASDAQ `/historical` endpoint（`fromdate = todate = 美東今日`）抓今日 `open` 欄位；若 NASDAQ 尚未開盤、historical 無今日列、或查詢失敗，`openPrice = null`，下游 `WatchStockService` 維持 `stock_price_history` fallback 行為。台股維持 TWSE mis API 的 `o` 欄位
 - [ ] **觀察清單支援代號 `0000`（市場 = 台股）= 台股大盤（TAIEX）**（含 KD）：
   - 加入觀察 = 設一筆 0000 的 alert（與其他股票流程一致）
   - `lookup-name` 端點看到 `code=0000&market=台股` 直接回 `{"stockName":"台股大盤"}`，不打外部 API、不寫入 stock 主檔

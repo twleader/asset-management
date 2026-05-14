@@ -202,13 +202,13 @@ public class PriceFetchClient {
                 if (companyName.isBlank()) companyName = null;
 
                 // NASDAQ API 現況（2026/04 起）：keyStats 對 ETF 為 null，對 stocks 只剩 dayrange + 52 週區間，
-                // 不再提供 OpenPrice / PreviousClose / Volume。改從 primaryData 取，OpenPrice 無資料就留 null。
+                // 不再提供 OpenPrice / PreviousClose / Volume。改從 primaryData 取，OpenPrice 改打 /historical 補。
                 JsonNode keyStats = root.path("data").path("keyStats");
                 BigDecimal[] hl = parseRange(keyStats.path("dayrange").path("value").asText(""));
                 if (hl[0] == null && hl[1] == null) {
                     hl = parseRange(keyStats.path("Dayrange").path("value").asText(""));
                 }
-                BigDecimal openPrice = null; // 暫無對應欄位
+                BigDecimal openPrice = getNasdaqOpenPrice(stockCode, assetClass).orElse(null);
 
                 // previousClose = price − netChange（API 拿不到實際昨收，用即時計算）
                 BigDecimal previousClose = price.subtract(change);
@@ -224,6 +224,28 @@ public class PriceFetchClient {
             }
         }
         return Optional.empty();
+    }
+
+    /**
+     * NASDAQ `/info` endpoint 自 2026/04 不再提供 OpenPrice；改打 `/historical` 取今日 open。
+     * 盤前 historical 無今日列，回 Optional.empty()，下游 fallback 至 stock_price_history。
+     */
+    private Optional<BigDecimal> getNasdaqOpenPrice(String stockCode, String assetClass) {
+        try {
+            LocalDate today = LocalDate.now(java.time.ZoneId.of("America/New_York"));
+            String url = "https://api.nasdaq.com/api/quote/" + stockCode
+                    + "/historical?assetclass=" + assetClass
+                    + "&fromdate=" + today + "&todate=" + today + "&limit=1";
+            String body = httpGet(url);
+            JsonNode rows = mapper.readTree(body)
+                    .path("data").path("tradesTable").path("rows");
+            if (!rows.isArray() || rows.isEmpty()) return Optional.empty();
+            return Optional.ofNullable(parseDollar(rows.get(0).path("open").asText("")));
+        } catch (Exception e) {
+            log.debug("NASDAQ historical open 查詢失敗 {} ({}): {}",
+                    stockCode, assetClass, e.getMessage());
+            return Optional.empty();
+        }
     }
 
     private Optional<PriceResult> getTwseRealTimePrice(String stockCode) {

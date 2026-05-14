@@ -1846,3 +1846,21 @@ Task 59 移除 `shouldApplyLive` 的「市場開盤」閘門時，`getRealtimePr
         - `backup_record` 表對應 daily folder 的 row 也同步減少
         - manual / weekly 同理
 
+### Task 64: 美股觀察清單「開盤」欄補上今日 open（NASDAQ historical endpoint）
+
+對應 Requirements: Requirement 14（觀察股票清單 — 美股 openPrice 來源）
+
+#### 背景
+
+NASDAQ `/info` endpoint 自 2026/04 起不再回傳 `OpenPrice`，`PriceFetchClient.getNasdaqPrice` 把 `openPrice` 寫死為 null，導致觀察清單頁面美股（VOO/QQQ/VT 等）「開盤」欄一律顯示「—」。下游 `WatchStockService` 雖有 `stock_price_history` fallback，但只會撈到昨日 open，且若無歷史紀錄仍是 null。改打 NASDAQ `/historical` endpoint 補今日真實 open。
+
+#### Steps:
+
+- [ ] 64.1 `PriceFetchClient` 新增 `getNasdaqOpenPrice(stockCode, assetClass)`：
+        - URL `https://api.nasdaq.com/api/quote/{code}/historical?assetclass={class}&fromdate={今日(ET)}&todate={今日(ET)}&limit=1`
+        - 解析 `data.tradesTable.rows[0].open`（格式 `$XXX.XX`），用 `parseDollar` 轉 `BigDecimal`
+        - 任何例外或無 row 回 `Optional.empty()`，僅以 `log.debug` 記錄，不噴 warn（盤前無資料屬正常）
+- [ ] 64.2 `PriceFetchClient.getNasdaqPrice` 把 `BigDecimal openPrice = null` 替換為 `BigDecimal openPrice = getNasdaqOpenPrice(stockCode, assetClass).orElse(null);`，原註解一併更新
+- [ ] 64.3 編譯驗證（`mvn -q -DskipTests compile`）
+- [ ] 64.4 服務重啟，於美股盤中（NYSE 09:30–16:00 ET）開「股票觀察 → 美股」頁，VOO / QQQ / VT 「開盤」欄應顯示今日真實開盤價（非昨日、非「—」）；盤前則 fallback 為 `stock_price_history` 最近一筆 open（與台股相同行為）
+

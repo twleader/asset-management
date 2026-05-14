@@ -148,6 +148,8 @@ NASDAQ info API 自 2026/04 起對 ETF 的 `keyStats` 為 null（無 dayrange �
 
 **抓價來源同舊**：TWSE mis API（台股 live）、NASDAQ info API（美股 live）、FinMind TaiwanStockPrice（台股盤後收盤）。
 
+**美股盤中 `openPrice` 補強（2026/05）：** NASDAQ `/info` endpoint 自 2026/04 起不再回傳 `OpenPrice`，`PriceFetchClient.getNasdaqPrice` 在主呼叫之後額外打 `https://api.nasdaq.com/api/quote/{code}/historical?assetclass=...&fromdate=YYYY-MM-DD&todate=YYYY-MM-DD&limit=1`（日期皆為美東今日），由 `data.tradesTable.rows[0].open` 取得今日開盤價。失敗或無今日列時保留 null，由 `WatchStockService` 的 `stock_price_history` fallback 接手（顯示昨日 open；不接受時可在 UI 端忽略）。HTTP 呼叫在 `PricePoller.updatePrices` 的 virtual-thread pool 中與其他 stock 並行執行，不會延長 cron 週期。
+
 **對外介面：**
 - `POST /internal/refresh`（僅 docker network 內 `business-services` 呼叫）：同步抓所有持股一次、寫 Redis、回 200。供使用者按「刷新」時用
 - 不對前端暴露 REST；前端仍打 `business-services` 的 `/api/market-data/*`，由 `PriceQueryService` 從 Redis 取值
