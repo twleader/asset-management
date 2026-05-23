@@ -9,6 +9,7 @@
             {{ fmt(s.totalProfitTwd) }}
           </div>
           <div class="year-sub">{{ pct(s.avgProfitRate) }} 平均報酬</div>
+          <div class="year-sub">總收帳 {{ fmt(s.totalProceedsTwd) }}</div>
         </el-card>
       </el-col>
     </el-row>
