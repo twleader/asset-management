@@ -1870,7 +1870,7 @@ NASDAQ `/info` endpoint 自 2026/04 起不再回傳 `OpenPrice`，`PriceFetchCli
 
 #### 背景
 
-使用者長期以 Google Sheet 維護「分類 / 項目 / 帳戶 / 備註」的代繳對照表（範例如：市話 + MOD → momo 信用卡 → 用戶號碼 Y046509）。需在系統內提供獨立「代繳設定」頁面取代手工表格，分類採 DB 維護（不寫死 Enum），帳戶採純字串（不與 `bank` / `broker` 建立 FK），不影響任何資產計算。
+使用者長期以 Google Sheet 維護「分類 / 項目 / 帳戶 / 備註」的代繳對照表（範例如：市話 + MOD → momo 信用卡 → 用戶號碼 Y046509）。需在系統內提供獨立「自動代繳」頁面取代手工表格，分類採 DB 維護（不寫死 Enum），帳戶採純字串（不與 `bank` / `broker` 建立 FK），不影響任何資產計算。
 
 #### Steps:
 
@@ -1890,7 +1890,7 @@ NASDAQ `/info` endpoint 自 2026/04 起不再回傳 `OpenPrice`，`PriceFetchCli
 - [ ] 65.11 前端 `views/PaymentAccountSettingsView.vue`：上半段「分類維護」（小表格 + 新增/編輯/啟用-停用 dialog）、下半段「代繳記錄」主表格（欄位：分類 tag、項目、帳戶、備註、操作（編輯/刪除））；新增 dialog 含分類下拉（僅啟用中）、項目、帳戶、備註、排序
 - [ ] 65.12 `frontend/src/router/index.js` 新增 route `/settings/payment-accounts` → `PaymentAccountSettings`；`App.vue` 系統設定 submenu 加一個 `el-menu-item index="/settings/payment-accounts"`，icon `Document` 或 `Tickets`
 - [ ] 65.13 編譯驗證（`mvn -q -DskipTests compile` 對 backend 與 bff 兩個 module）
-- [ ] 65.14 服務重啟，前端進入「系統設定 → 代繳設定」：
+- [ ] 65.14 服務重啟，前端進入主選單「自動代繳」：
         - 預設出現三個分類；新增一筆「市話 + MOD / momo 信用卡 / 2626-2305 (用戶號碼: Y046509)」於「繳費」分類
         - 編輯、刪除、停用分類、按分類過濾皆正常
 - [ ] 65.15 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）

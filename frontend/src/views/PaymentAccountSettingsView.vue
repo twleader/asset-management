@@ -1,7 +1,7 @@
 <template>
   <div v-loading="loading">
     <div class="page-header">
-      <h2>📋 代繳設定</h2>
+      <h2>📋 自動代繳</h2>
       <el-button :icon="Setting" @click="categoryDialogVisible = true">分類維護</el-button>
       <el-button type="primary" :icon="Plus" @click="openAccountDialog()">新增代繳項目</el-button>
     </div>

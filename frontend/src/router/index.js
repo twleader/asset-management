@@ -123,7 +123,7 @@ const router = createRouter({
       path: '/payment-accounts',
       name: 'PaymentAccountSettings',
       component: () => import('@/views/PaymentAccountSettingsView.vue'),
-      meta: { title: '代繳設定', icon: 'Tickets' }
+      meta: { title: '自動代繳', icon: 'Tickets' }
     },
     {
       path: '/settings/payment-accounts',
