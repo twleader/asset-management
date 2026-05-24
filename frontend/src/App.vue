@@ -51,10 +51,6 @@
               <el-icon><Money /></el-icon>
               <template #title>信託基金設定</template>
             </el-menu-item>
-            <el-menu-item index="/settings/payment-accounts">
-              <el-icon><Tickets /></el-icon>
-              <template #title>代繳設定</template>
-            </el-menu-item>
             <el-menu-item index="/settings/backup-restore">
               <el-icon><FolderOpened /></el-icon>
               <template #title>備份/還原 資料</template>
@@ -139,7 +135,8 @@ const mainMenuItems = computed(() => [
   { path: '/stocks', title: '股票觀察', icon: 'View' },
   { path: '/trading-calendar', title: '交易日曆', icon: 'AlarmClock' },
   { path: '/exchange-rate', title: '台幣兌美元', icon: 'Money' },
-  { path: '/gdp-twse', title: 'GDP + 台股大盤', icon: 'TrendCharts' }
+  { path: '/gdp-twse', title: 'GDP + 台股大盤', icon: 'TrendCharts' },
+  { path: '/settings/payment-accounts', title: '代繳設定', icon: 'Tickets' }
 ])
 </script>
 
