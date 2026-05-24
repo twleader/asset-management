@@ -223,6 +223,18 @@ export const bffApi = {
     create:    (data) => api.post('/funds', data),
     update:    (fundCode, data) => api.put(`/funds/${fundCode}`, data),
     setActive: (fundCode, active) => api.patch(`/funds/${fundCode}/active`, { active })
+  },
+
+  // 代繳設定（Requirement 22）— 分類 + 代繳記錄走同一支 BFF
+  paymentAccountSettings: {
+    getCategories:     () => api.get('/bff/payment-account-settings/categories'),
+    createCategory:    (data) => api.post('/bff/payment-account-settings/categories', data),
+    updateCategory:    (id, data) => api.put(`/bff/payment-account-settings/categories/${id}`, data),
+    setCategoryActive: (id, active) => api.patch(`/bff/payment-account-settings/categories/${id}/active`, { active }),
+    getAccounts:       () => api.get('/bff/payment-account-settings/accounts'),
+    createAccount:     (data) => api.post('/bff/payment-account-settings/accounts', data),
+    updateAccount:     (id, data) => api.put(`/bff/payment-account-settings/accounts/${id}`, data),
+    deleteAccount:     (id) => api.delete(`/bff/payment-account-settings/accounts/${id}`)
   }
 }
 

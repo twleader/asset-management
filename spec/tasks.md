@@ -1864,3 +1864,34 @@ NASDAQ `/info` endpoint 自 2026/04 起不再回傳 `OpenPrice`，`PriceFetchCli
 - [ ] 64.3 編譯驗證（`mvn -q -DskipTests compile`）
 - [ ] 64.4 服務重啟，於美股盤中（NYSE 09:30–16:00 ET）開「股票觀察 → 美股」頁，VOO / QQQ / VT 「開盤」欄應顯示今日真實開盤價（非昨日、非「—」）；盤前則 fallback 為 `stock_price_history` 最近一筆 open（與台股相同行為）
 
+### Task 65: 代繳帳戶記錄管理（Requirement 22）
+
+對應 Requirements: Requirement 22
+
+#### 背景
+
+使用者長期以 Google Sheet 維護「分類 / 項目 / 帳戶 / 備註」的代繳對照表（範例如：市話 + MOD → momo 信用卡 → 用戶號碼 Y046509）。需在系統內提供獨立「代繳設定」頁面取代手工表格，分類採 DB 維護（不寫死 Enum），帳戶採純字串（不與 `bank` / `broker` 建立 FK），不影響任何資產計算。
+
+#### Steps:
+
+- [ ] 65.1 Liquibase changeset `v1.23.0-payment-account.sql` 建立兩張表：
+        - `payment_category(id BIGINT IDENTITY PK, code VARCHAR(30) UNIQUE NOT NULL, display_name VARCHAR(50) NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, active BOOLEAN NOT NULL DEFAULT TRUE)`
+        - `payment_account(id BIGINT IDENTITY PK, category_id BIGINT NOT NULL REFERENCES payment_category(id), item_name VARCHAR(100) NOT NULL, payment_account VARCHAR(100), note VARCHAR(255), sort_order INTEGER NOT NULL DEFAULT 0)`
+        - 加 `INDEX idx_payment_account_category ON payment_account(category_id)`
+- [ ] 65.2 在 `db.changelog-master.yaml` 末尾 `include` 該 changeset
+- [ ] 65.3 新增 Entity：`PaymentCategory`（仿 `DepositTypeEntity` 樣式）、`PaymentAccount`（含 `@ManyToOne PaymentCategory category`）
+- [ ] 65.4 新增 Repository：`PaymentCategoryRepository`（`findByCode`、`findAllByOrderBySortOrderAscDisplayNameAsc`、`findByActiveTrueOrderBySortOrderAscDisplayNameAsc`）、`PaymentAccountRepository`（`findAllByOrderByCategorySortOrderAscSortOrderAscIdAsc` 或 service 端排序）
+- [ ] 65.5 新增 DTO `PaymentDto`：`CategoryResponse` / `CreateCategoryRequest` / `UpdateCategoryRequest` / `AccountResponse`（含 categoryId + categoryDisplayName） / `CreateAccountRequest`（含 categoryId） / `UpdateAccountRequest`
+- [ ] 65.6 在 `InstitutionService` 加入 `PaymentCategory` 區段（5 個方法：getAll/getActive/create/update/setActive），與 Bank/Broker 同檔；另新增 `PaymentAccountService`（getAll/create/update/delete）
+- [ ] 65.7 在 `InstitutionController` 加入 `/api/settings/payment-categories` 路由（GET/POST/PUT/PATCH active）；新增 `PaymentAccountController` 提供 `/api/payment-accounts` GET/POST/PUT/DELETE
+- [ ] 65.8 `DataInitializer.seedPaymentCategories()` seed 三筆預設分類：`bill / 繳費 / 1`、`tax / 繳稅 / 2`、`service / 服務 / 3`（findByCode 檢查避免重複）；代繳記錄本身不 seed
+- [ ] 65.9 新增 BFF `PaymentAccountSettingsBffRoutes`（路徑 `/api/bff/payment-account-settings/categories/**` rewrite 至 `/api/settings/payment-categories/**`；`/api/bff/payment-account-settings/accounts/**` rewrite 至 `/api/payment-accounts/**`）
+- [ ] 65.10 前端 `frontend/src/api/index.js` 新增 `bffApi.paymentAccountSettings`：`getCategories` / `createCategory` / `updateCategory` / `setCategoryActive` / `getAccounts` / `createAccount` / `updateAccount` / `deleteAccount`
+- [ ] 65.11 前端 `views/PaymentAccountSettingsView.vue`：上半段「分類維護」（小表格 + 新增/編輯/啟用-停用 dialog）、下半段「代繳記錄」主表格（欄位：分類 tag、項目、帳戶、備註、操作（編輯/刪除））；新增 dialog 含分類下拉（僅啟用中）、項目、帳戶、備註、排序
+- [ ] 65.12 `frontend/src/router/index.js` 新增 route `/settings/payment-accounts` → `PaymentAccountSettings`；`App.vue` 系統設定 submenu 加一個 `el-menu-item index="/settings/payment-accounts"`，icon `Document` 或 `Tickets`
+- [ ] 65.13 編譯驗證（`mvn -q -DskipTests compile` 對 backend 與 bff 兩個 module）
+- [ ] 65.14 服務重啟，前端進入「系統設定 → 代繳設定」：
+        - 預設出現三個分類；新增一筆「市話 + MOD / momo 信用卡 / 2626-2305 (用戶號碼: Y046509)」於「繳費」分類
+        - 編輯、刪除、停用分類、按分類過濾皆正常
+- [ ] 65.15 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+

@@ -251,6 +251,7 @@ src/
 | `/settings/market-types` | MarketTypeSettingsView | 市場類型設定管理 |
 | `/settings/transit-fund-types` | TransitFundTypeSettingsView | 待轉入資金類型設定管理 |
 | `/settings/backup-restore` | BackupRestoreView | 資料庫備份／還原 |
+| `/settings/payment-accounts` | PaymentAccountSettingsView | 代繳帳戶記錄管理（Requirement 22） |
 | `/stocks` | StockMonitorView | 股票觀察（含「觀察清單」、「警示條件」兩個頁籤；舊路徑 `/watch-stocks`、`/stock-alerts` 自動 redirect 並帶 `tab` query） |
 
 ## Data Model
@@ -500,6 +501,27 @@ BackupSetting         (備份保留代數設定，單列資料表，id = 1)
 
 > **設計決策（零遷移策略）：** `Bank`/`Broker`/`DepositType`/`MarketType` 全部改為資料庫 Entity，不使用任何 Enum。原 `@Enumerated(EnumType.STRING)` 欄位已以 VARCHAR 儲存 Enum 名稱，改為 `String` 欄位時無需資料庫 Migration，現有資料值（如 `"台股"`、`"活存"`）完全相容。`DepositTypeEntity.code` 與 `MarketType.code` 即為寫入欄位的值，與歷史資料對應。
 
+#### PaymentCategory（Requirement 22 新增）
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| id | Long | PK |
+| code | String | 識別代碼（唯一，如 `bill` / `tax` / `service`） |
+| displayName | String | 顯示名稱（如 `繳費` / `繳稅` / `服務`） |
+| sortOrder | Integer | 顯示排序 |
+| active | Boolean | 是否啟用（停用後不出現於新增 dialog 下拉選單，但舊記錄仍顯示分類） |
+
+#### PaymentAccount（Requirement 22 新增）
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| id | Long | PK |
+| category | PaymentCategory | FK |
+| itemName | String | 項目名稱（自由輸入，如 `市話 + MOD`、`台電電費`） |
+| paymentAccount | String | 扣款帳戶（自由輸入字串，可填銀行帳戶或信用卡名稱；**不**與 `bank` / `broker` 建立 FK） |
+| note | String | 備註（自由輸入，可放用戶號碼、電號、水號等） |
+| sortOrder | Integer | 顯示排序 |
+
+> **設計理由（不關聯資產表）：** 代繳記錄屬於「個人資料記錄簿」，目的是替代手工 Excel/便利貼，不參與任何資產計算。`paymentAccount` 刻意採純字串而非 FK：使用者可能輸入「momo 信用卡」這類不在 `bank` 表中的卡別，硬綁 FK 反而綁手綁腳；停用銀行也不應影響舊代繳紀錄的可讀性。
+
 ## API Design
 
 ### Base URL
@@ -633,6 +655,22 @@ GET    /api/settings/transit-fund-types/active        # 僅列出啟用中
 POST   /api/settings/transit-fund-types              # 新增
 PUT    /api/settings/transit-fund-types/{id}         # 更新
 PATCH  /api/settings/transit-fund-types/{id}/active  # 啟用/停用
+```
+
+#### Payment Accounts / Categories（Requirement 22 新增）
+```
+GET    /api/settings/payment-categories               # 列出所有分類（含停用）
+POST   /api/settings/payment-categories               # 新增分類
+PUT    /api/settings/payment-categories/{id}          # 更新分類
+PATCH  /api/settings/payment-categories/{id}/active   # 啟用/停用分類
+
+GET    /api/payment-accounts                          # 列出所有代繳記錄（含 category 展開）
+POST   /api/payment-accounts                          # 新增代繳記錄
+PUT    /api/payment-accounts/{id}                     # 更新代繳記錄
+DELETE /api/payment-accounts/{id}                     # 刪除代繳記錄（硬刪除）
+
+# 前端 view 經 BFF：rewrite /api/bff/payment-account-settings/categories/** → /api/settings/payment-categories/**
+#                  rewrite /api/bff/payment-account-settings/accounts/**   → /api/payment-accounts/**
 ```
 
 #### Stock Alerts（到價警示，新增）
