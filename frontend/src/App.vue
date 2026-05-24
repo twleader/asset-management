@@ -136,7 +136,7 @@ const mainMenuItems = computed(() => [
   { path: '/trading-calendar', title: '交易日曆', icon: 'AlarmClock' },
   { path: '/exchange-rate', title: '台幣兌美元', icon: 'Money' },
   { path: '/gdp-twse', title: 'GDP + 台股大盤', icon: 'TrendCharts' },
-  { path: '/settings/payment-accounts', title: '代繳設定', icon: 'Tickets' }
+  { path: '/payment-accounts', title: '代繳設定', icon: 'Tickets' }
 ])
 </script>
 

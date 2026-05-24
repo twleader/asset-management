@@ -251,7 +251,7 @@ src/
 | `/settings/market-types` | MarketTypeSettingsView | 市場類型設定管理 |
 | `/settings/transit-fund-types` | TransitFundTypeSettingsView | 待轉入資金類型設定管理 |
 | `/settings/backup-restore` | BackupRestoreView | 資料庫備份／還原 |
-| `/settings/payment-accounts` | PaymentAccountSettingsView | 代繳帳戶記錄管理（Requirement 22） |
+| `/payment-accounts` | PaymentAccountSettingsView | 代繳帳戶記錄管理（Requirement 22）；舊路徑 `/settings/payment-accounts` 自動 redirect |
 | `/stocks` | StockMonitorView | 股票觀察（含「觀察清單」、「警示條件」兩個頁籤；舊路徑 `/watch-stocks`、`/stock-alerts` 自動 redirect 並帶 `tab` query） |
 
 ## Data Model

@@ -120,10 +120,15 @@ const router = createRouter({
       meta: { title: '信託基金設定', icon: 'Setting' }
     },
     {
-      path: '/settings/payment-accounts',
+      path: '/payment-accounts',
       name: 'PaymentAccountSettings',
       component: () => import('@/views/PaymentAccountSettingsView.vue'),
-      meta: { title: '代繳設定', icon: 'Setting' }
+      meta: { title: '代繳設定', icon: 'Tickets' }
+    },
+    {
+      path: '/settings/payment-accounts',
+      redirect: '/payment-accounts',
+      meta: { hidden: true }
     },
     {
       path: '/settings/backup-restore',
