@@ -5,12 +5,14 @@ import com.steven.assets.model.BrokerEntity;
 import com.steven.assets.model.DepositTypeEntity;
 import com.steven.assets.model.FundMaster;
 import com.steven.assets.model.MarketType;
+import com.steven.assets.model.PaymentCategory;
 import com.steven.assets.model.TransitFundType;
 import com.steven.assets.repository.BankRepository;
 import com.steven.assets.repository.BrokerRepository;
 import com.steven.assets.repository.DepositTypeRepository;
 import com.steven.assets.repository.FundMasterRepository;
 import com.steven.assets.repository.MarketTypeRepository;
+import com.steven.assets.repository.PaymentCategoryRepository;
 import com.steven.assets.repository.TransitFundTypeRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -36,6 +38,7 @@ public class DataInitializer implements ApplicationRunner {
     private final MarketTypeRepository marketTypeRepo;
     private final TransitFundTypeRepository transitFundTypeRepo;
     private final FundMasterRepository fundMasterRepo;
+    private final PaymentCategoryRepository paymentCategoryRepo;
 
     @Override
     @Transactional
@@ -46,6 +49,7 @@ public class DataInitializer implements ApplicationRunner {
         seedMarketTypes();
         seedTransitFundTypes();
         seedFundMasters();
+        seedPaymentCategories();
     }
 
     private void seedBanks() {
@@ -204,6 +208,28 @@ public class DataInitializer implements ApplicationRunner {
                     .active(true)
                     .build());
             log.info("初始化基金主檔: {} {}", s.fundCode(), s.fundName());
+        }
+    }
+
+    private void seedPaymentCategories() {
+        record PaymentCategorySeed(String code, String displayName, int sortOrder) {}
+
+        List<PaymentCategorySeed> seeds = List.of(
+            new PaymentCategorySeed("bill",    "繳費", 1),
+            new PaymentCategorySeed("tax",     "繳稅", 2),
+            new PaymentCategorySeed("service", "服務", 3)
+        );
+
+        for (PaymentCategorySeed s : seeds) {
+            if (paymentCategoryRepo.findByCode(s.code()).isEmpty()) {
+                paymentCategoryRepo.save(PaymentCategory.builder()
+                        .code(s.code())
+                        .displayName(s.displayName())
+                        .sortOrder(s.sortOrder())
+                        .active(true)
+                        .build());
+                log.info("初始化代繳分類: {}", s.displayName());
+            }
         }
     }
 }
