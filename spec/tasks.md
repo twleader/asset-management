@@ -1895,3 +1895,22 @@ NASDAQ `/info` endpoint 自 2026/04 起不再回傳 `OpenPrice`，`PriceFetchCli
         - 編輯、刪除、停用分類、按分類過濾皆正常
 - [ ] 65.15 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
 
+### Task 66: SnapshotForm 台股 broker 列修改股數時自動重算持股成本
+
+對應 Requirements: Requirement 1（管理資產 — 持股成本與均價連動）
+
+#### 背景
+
+`SnapshotFormView.vue` 台股 broker row 的「股數」欄 `@blur` 只更新 `br.shares`，未重算 `br.investmentCost`，
+導致使用者把股數改小（例如賣出後從 1478 改成 1000）後，持股成本仍維持原本 54,996.38（=1478 × 37.21），
+與「股數 × 買入均價」不符。美股欄位本已具備此連動（line 714–723），且 `SnapshotDetailView.syncFromShares`
+也採同策略；只是台股欄位漏寫。
+
+#### Steps:
+
+- [x] 66.1 `frontend/src/views/SnapshotFormView.vue` 台股 broker 列「股數」`@blur` 加上：
+        `br.investmentCost = numParse(((br.avgCost||0) * (br.shares||0)).toFixed(2), 2); br.investmentCostStr = numFmt(br.investmentCost)`
+        保持均價不變、以「均價 × 新股數」重算總成本（與美股欄位、`SnapshotDetailView.syncFromShares` 一致）
+- [ ] 66.2 服務重啟，於 SnapshotForm 編輯既有台股 broker row（例如 元大證券 1478→1000 股），確認「持股成本」自動更新為 37,210；「均價」維持 37.21；「現值／損益」隨之刷新
+- [ ] 66.3 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+
