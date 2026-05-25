@@ -1618,8 +1618,11 @@ const allSummary = computed(() => calcGroupedSummary(form.stocks))
  *  - 新增模式（尚無 stored 值）→ 用 reactive 即時計算結果。
  */
 const storedDetail = computed(() => store.currentSnapshot)
+// userEdited 在 onMounted 載入完成後才開始追蹤；一旦使用者改動 deposits/funds/stocks/usdExchangeRate，
+// summary 就切換回 live 重算，讓 KPI 即時反映編輯（修正：原本鎖 stored 導致改在途款項後總資產不變）
+const userEdited = ref(false)
 const pickStored = (storedKey, live, fallback = 0) => {
-  if (!isEdit.value) return Number(live ?? fallback)
+  if (!isEdit.value || userEdited.value) return Number(live ?? fallback)
   const stored = storedDetail.value?.[storedKey]
   return stored != null ? Number(stored) : Number(live ?? fallback)
 }
@@ -2230,6 +2233,15 @@ onMounted(async () => {
   refreshStockSortables()
   refreshDepositSortables()
   refreshFundSortable()
+
+  // 等所有 post-load 的程式化 mutation（loadExchangeRateForDate / onUsTransactionDateChange / fetchPriceForRow）
+  // 都 settle 後再註冊 watcher，避免初始化噪音誤觸 userEdited
+  await nextTick()
+  watch(
+    () => [form.deposits, form.funds, form.stocks, form.usdExchangeRate],
+    () => { userEdited.value = true },
+    { deep: true }
+  )
 })
 
 // ===== Submit =====

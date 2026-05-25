@@ -1914,3 +1914,30 @@ NASDAQ `/info` endpoint 自 2026/04 起不再回傳 `OpenPrice`，`PriceFetchCli
 - [ ] 66.2 服務重啟，於 SnapshotForm 編輯既有台股 broker row（例如 元大證券 1478→1000 股），確認「持股成本」自動更新為 37,210；「均價」維持 37.21；「現值／損益」隨之刷新
 - [ ] 66.3 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
 
+### Task 67: SnapshotForm 編輯模式下使用者改動後 KPI 改用 live 計算
+
+對應 Requirements: Requirement 1（管理資產 — 上方 KPI 即時反映表單編輯）
+
+#### 背景
+
+`SnapshotFormView.vue` 的 `pickStored()`（line 1611–1635）在編輯模式下一律回傳 BFF 的 stored 值
+（`totalDeposit` / `totalFundValue` / `totalFundCost`），目的是避免歷史快照 `usdExchangeRate=null`
+時 live 重算把 USD 存款再乘一次匯率。但副作用是：使用者在表單裡改動「在途款項 / 一般存款 / 基金」
+後，上方 KPI（總資產 / 存款 / 共同基金現值）不會更新，直到存檔 + BFF 重抓才同步。
+
+修法：載入完成（含 `loadExchangeRateForDate` / `onUsTransactionDateChange` / `fetchPriceForRow`
+等程式化 mutation）後才掛 watcher；watcher 偵測到任何 user-driven 改動就把 `userEdited=true`，
+`pickStored` 改回 live。如此 legacy USD 防呆只在「初始 render 且未編輯」生效，編輯後即時反映。
+
+#### Steps:
+
+- [x] 67.1 `SnapshotFormView.vue` 新增 `userEdited` ref；`pickStored` 改為 `!isEdit.value || userEdited.value → live`
+- [x] 67.2 `onMounted` 末段（所有 sortable refresh 之後）`await nextTick()` 後註冊
+        `watch(() => [form.deposits, form.funds, form.stocks, form.usdExchangeRate], ..., { deep: true })`
+        將 `userEdited` 設為 true
+- [ ] 67.3 服務重啟，於編輯既有 snapshot：
+        - 改在途款項任一筆金額 → blur → 上方 `總資產` / `存款` 即時更新（含 transitNetTwd）
+        - 改基金 units / currentValue → 上方 `共同基金現值` 即時更新
+        - 初始載入時 KPI 應仍等於 stored 值（沒有抖動）
+- [ ] 67.4 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+
