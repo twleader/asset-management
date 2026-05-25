@@ -473,7 +473,7 @@
                         <template #default="{ row: br }">
                           <el-input v-model="br.sharesStr" size="small"
                             style="width:100%" :input-style="{ textAlign: 'right' }"
-                            @blur="br.shares = numParse(br.sharesStr, 0); br.sharesStr = numFmt(br.shares)" />
+                            @blur="br.shares = numParse(br.sharesStr, 0); br.sharesStr = numFmt(br.shares); br.investmentCost = numParse(((br.avgCost||0) * (br.shares||0)).toFixed(2), 2); br.investmentCostStr = numFmt(br.investmentCost)" />
                         </template>
                       </el-table-column>
                       <!-- 均價（每股）→ 輸入後自動算總成本 -->
