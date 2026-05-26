@@ -1970,3 +1970,34 @@ StockAnalysis BFF / WatchStock 等）自動受惠，stockName 變成「殖利率
         「iShares 0-3 Month Treasury Bond ETF」（即使 live cache 尚未 warm-up）
 - [ ] 68.5 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
 
+### Task 69: 美股殖利率新增 Yahoo Finance fallback（覆蓋 NYSE / NYSEARCA）
+
+對應 Requirements: Requirement 5（殖利率 / 預估配息 — 美股 ETF 非 NASDAQ 也要可查）
+
+#### 背景
+
+`MarketDataFetchService.getDividendRate("美股", ...)` 目前只用：
+1. NASDAQ `/api/quote/{code}/dividends`：對非 NASDAQ 上市（NYSE / NYSEARCA）一律回
+   `"Dividend History for Non-Nasdaq symbols is not available"`，所有欄位 N/A
+2. 寫死 `KNOWN_US_ETF_YIELDS` map（VOO/VT/VTI/VXUS/BND/QQQ 六檔）
+
+導致 SGOV（NYSEARCA，iShares 0-3 Month Treasury Bond ETF，月配息 TTM ~4%）、BIL、SCHD、JEPI、JEPQ、TLT
+等都查不到殖利率，UI 顯示「查無配息資料 / 預估配息 = -」。
+
+修法：在 NASDAQ 與 KNOWN_US_ETF_YIELDS 之間插入 Yahoo Finance fallback。Yahoo
+`/v8/finance/chart/{code}?range=1y&events=div` 不需 crumb、且涵蓋所有 US-listed。
+TTM 殖利率 = sum(最近 1 年 dividends) ÷ regularMarketPrice。走 curl 子程序避免
+fingerprint 偵測（與既有 `fetchUsStockName` 同一模式）。
+
+#### Steps:
+
+- [x] 69.1 `MarketDataFetchService` 新增 `getYahooDividendRate(stockCode)`：curl 取 Yahoo chart
+        events=div，累加 amount ÷ regularMarketPrice 得 TTM 殖利率，組成 `DividendRateResult`
+        （source="Yahoo Finance"，description 含「TTM N 筆配息合計 $X.XX，殖利率 X.XX%」）
+- [x] 69.2 `getDividendRate("美股", ...)` 鏈調整為 NASDAQ → Yahoo → KNOWN_US_ETF_YIELDS → N/A
+- [x] 69.3 編譯驗證（`mvn -q -DskipTests compile`）
+- [ ] 69.4 重啟 external-materials-service + business-services（清掉 1 小時 dividend cache），
+        於 SnapshotForm 編輯模式含 SGOV 的快照：「預估配息」應出現 ~4% 的數字；
+        SGOV / BIL / SCHD / JEPI / JEPQ / TLT 也都應有殖利率
+- [ ] 69.5 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+

@@ -105,6 +105,10 @@ public class MarketDataFetchService {
         } else {
             Optional<DividendRateResult> nasdaq = getNasdaqDividendRateAny(stockCode);
             if (nasdaq.isPresent()) return nasdaq.get();
+            // Yahoo fallback：NASDAQ API 對非 NASDAQ 上市（NYSE / NYSEARCA）一律回 N/A，
+            // 例如 SGOV / BIL / SCHD / JEPI / TLT。改用 Yahoo chart events=div 計算 TTM 殖利率。
+            Optional<DividendRateResult> yahoo = getYahooDividendRate(stockCode);
+            if (yahoo.isPresent()) return yahoo.get();
             Optional<DividendRateResult> known = getKnownUsEtfDividendRate(stockCode);
             if (known.isPresent()) return known.get();
             return new DividendRateResult(stockCode, market, null, "N/A", "查無配息資料", null);
@@ -262,6 +266,45 @@ public class MarketDataFetchService {
         return Optional.of(new DividendRateResult(
                 stockCode, "美股", rate, "預設值",
                 "常見 ETF 參考殖利率 %.2f%%（資料來源：基金公司官網）".formatted(vals[1]), null));
+    }
+
+    /**
+     * Yahoo Finance fallback：對所有 US-listed（含 NYSE / NYSEARCA）標的，
+     * 用 chart endpoint 取最近 1 年的 dividends events，TTM 配息加總 ÷ 現價 = 殖利率。
+     * 走 curl 子程序避免 Yahoo 的 fingerprint 偵測（與 fetchUsStockName 同一個模式）。
+     */
+    private Optional<DividendRateResult> getYahooDividendRate(String stockCode) {
+        try {
+            String url = "https://query2.finance.yahoo.com/v8/finance/chart/"
+                    + stockCode.trim().toUpperCase() + "?interval=1d&range=1y&events=div";
+            ProcessBuilder pb = new ProcessBuilder("curl", "-s",
+                    "-H", "User-Agent: Mozilla/5.0", url);
+            pb.redirectErrorStream(true);
+            Process proc = pb.start();
+            String body = new String(proc.getInputStream().readAllBytes());
+            proc.waitFor();
+            JsonNode result = mapper.readTree(body).path("chart").path("result").path(0);
+            if (result.isMissingNode()) return Optional.empty();
+            double price = result.path("meta").path("regularMarketPrice").asDouble(0);
+            if (price <= 0) return Optional.empty();
+            JsonNode divs = result.path("events").path("dividends");
+            if (!divs.isObject() || divs.isEmpty()) return Optional.empty();
+            double ttm = 0; int n = 0;
+            for (JsonNode d : divs) {
+                double amt = d.path("amount").asDouble(0);
+                if (amt > 0) { ttm += amt; n++; }
+            }
+            if (n == 0 || ttm <= 0) return Optional.empty();
+            BigDecimal rate = BigDecimal.valueOf(ttm / price).setScale(6, RoundingMode.HALF_UP);
+            BigDecimal pct = BigDecimal.valueOf(ttm / price * 100).setScale(2, RoundingMode.HALF_UP);
+            return Optional.of(new DividendRateResult(
+                    stockCode, "美股", rate, "Yahoo Finance",
+                    "TTM %d 筆配息合計 $%.4f，殖利率 %s%%".formatted(n, ttm, pct.toPlainString()),
+                    null));
+        } catch (Exception e) {
+            log.warn("Yahoo dividend 查詢失敗 {}: {}", stockCode, e.getMessage());
+            return Optional.empty();
+        }
     }
 
     private Optional<DividendRateResult> getNasdaqDividendRateAny(String stockCode) {
