@@ -1941,3 +1941,32 @@ NASDAQ `/info` endpoint 自 2026/04 起不再回傳 `OpenPrice`，`PriceFetchCli
         - 初始載入時 KPI 應仍等於 stored 值（沒有抖動）
 - [ ] 67.4 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
 
+### Task 68: MarketDataService.getDividendRate 無配息資料時用 stock 主檔補 stockName
+
+對應 Requirements: Requirement 1（管理資產 — 股票名稱自動帶出）/ Requirement 3（持股自動補名稱）
+
+#### 背景
+
+SnapshotForm `/api/bff/snapshot-form/prices` 取 stockName 只看：
+(1) `/api/market-data/prices`（即時 cache）的 stockName
+(2) `/api/market-data/dividend-rate` 回應的 stockName
+
+對於沒有配息的標的（例如 SGOV iShares 0-3 Month Treasury Bond ETF）`dividend-rate` 回 `stockName=null`，
+若 live cache 又尚未 warm-up（剛啟動或 ext-materials 暫時無回應），BFF 就會回 `stockName=null`，
+前端股票名稱欄位留空。但 `stock` 主檔早已存過該名稱（透過先前的 upsert）。
+
+修法：在 `MarketDataService.getDividendRate()` 取得 ext-materials 結果後，若 stockName 為空，
+就從 `StockRepository.findByCodeAndMarket()` 補上。所有 caller（SnapshotForm BFF / Dashboard BFF /
+StockAnalysis BFF / WatchStock 等）自動受惠，stockName 變成「殖利率來源 OR 主檔」雙重 fallback。
+
+#### Steps:
+
+- [x] 68.1 `MarketDataService` 注入 `StockRepository stockMasterRepo`（手動 constructor，因原有 `@Value`）
+- [x] 68.2 `getDividendRate()` 在 result 形成後（含 ext-materials 失敗的 fallback path），
+        如果 `result.stockName()` 為 null/blank，從 `stockMasterRepo.findByCodeAndMarket(code, market)`
+        取 name，補回 DividendRateResult 再 cache
+- [x] 68.3 編譯驗證（`mvn -q -DskipTests compile`）
+- [ ] 68.4 服務重啟後在 SnapshotForm 編輯模式打開含 SGOV 的快照：「股票名稱」欄位應立即顯示
+        「iShares 0-3 Month Treasury Bond ETF」（即使 live cache 尚未 warm-up）
+- [ ] 68.5 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+
