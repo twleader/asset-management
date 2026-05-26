@@ -65,7 +65,7 @@
             <el-switch v-model="row.active" @change="toggleActive(row)" />
           </template>
         </el-table-column>
-        <el-table-column label="觸發時間 / 股價 / 季線 / KD" width="200">
+        <el-table-column label="觸發時間 / 股價 / 均線 / KD" width="200">
           <template #default="{ row }">
             <template v-if="row.lastTriggeredAt">
               <div style="font-size:12px;color:#64748b">{{ fmtDt(row.lastTriggeredAt, row.market) }}</div>
@@ -73,7 +73,7 @@
                 股價 <strong>{{ row.lastTriggeredPrice != null ? '$' + Number(row.lastTriggeredPrice).toLocaleString() : '—' }}</strong>
               </div>
               <div style="font-size:12px;color:#0f172a">
-                季線 <strong>{{ row.lastTriggeredMaValue != null ? '$' + Number(row.lastTriggeredMaValue).toLocaleString() : '—' }}</strong>
+                {{ rowMaLabel(row) }} <strong>{{ row.lastTriggeredMaValue != null ? '$' + Number(row.lastTriggeredMaValue).toLocaleString() : '—' }}</strong>
               </div>
               <div style="font-size:12px;color:#2563eb">
                 <span>K {{ row.lastTriggeredKdValue != null ? Number(row.lastTriggeredKdValue).toFixed(1) : '—' }}</span>
@@ -118,10 +118,11 @@
 
         <el-form-item label="條件類型" required>
           <el-select v-model="form.conditionGroup" style="width:100%" @change="onGroupChange">
-            <el-option value="PRICE"        label="價位" />
-            <el-option value="QUARTERLY_MA" label="季線偏離（60 日均線）" />
-            <el-option value="ANNUAL_MA"    label="年線偏離（240 日均線）" />
-            <el-option value="KD"          label="KD 值" />
+            <el-option value="PRICE"  label="價位" />
+            <el-option value="MA_20"  label="月線偏離（20 日均線）" />
+            <el-option value="MA_60"  label="季線偏離（60 日均線）" />
+            <el-option value="MA_240" label="年線偏離（240 日均線）" />
+            <el-option value="KD"     label="KD 值" />
           </el-select>
         </el-form-item>
 
@@ -138,12 +139,12 @@
           </el-form-item>
         </template>
 
-        <!-- 季線 -->
-        <template v-if="form.conditionGroup === 'QUARTERLY_MA'">
+        <!-- 均線（月線 / 季線 / 年線共用） -->
+        <template v-if="isMaGroup">
           <el-form-item label="方向">
             <el-radio-group v-model="form.direction">
-              <el-radio value="ABOVE">高於季線</el-radio>
-              <el-radio value="BELOW">低於季線</el-radio>
+              <el-radio value="ABOVE">高於{{ maName }}</el-radio>
+              <el-radio value="BELOW">低於{{ maName }}</el-radio>
             </el-radio-group>
           </el-form-item>
           <el-form-item label="幅度">
@@ -153,22 +154,6 @@
               <el-radio :value="10">10%</el-radio>
               <el-radio :value="15">15%</el-radio>
               <el-radio :value="20">20%</el-radio>
-            </el-radio-group>
-          </el-form-item>
-        </template>
-
-        <!-- 年線 -->
-        <template v-if="form.conditionGroup === 'ANNUAL_MA'">
-          <el-form-item label="方向">
-            <el-radio-group v-model="form.direction">
-              <el-radio value="ABOVE">高於年線</el-radio>
-              <el-radio value="BELOW">低於年線</el-radio>
-            </el-radio-group>
-          </el-form-item>
-          <el-form-item label="幅度">
-            <el-radio-group v-model="form.threshold">
-              <el-radio :value="0">剛高於／低於（0%）</el-radio>
-              <el-radio :value="5">5%</el-radio>
             </el-radio-group>
           </el-form-item>
         </template>
@@ -235,7 +220,7 @@ const defaultForm = () => ({
   market: '台股',
   stockCode: '',
   stockName: '',
-  conditionGroup: 'QUARTERLY_MA',
+  conditionGroup: 'MA_60',
   direction: 'ABOVE',
   kdIndicator: 'K',
   threshold: 5,
@@ -243,6 +228,15 @@ const defaultForm = () => ({
   active: true,
 })
 const form = reactive(defaultForm())
+
+const MA_GROUPS = { MA_20: 20, MA_60: 60, MA_240: 240 }
+const MA_NAMES = { 20: '月線', 60: '季線', 240: '年線' }
+const isMaGroup = computed(() => form.conditionGroup in MA_GROUPS)
+const maName = computed(() => MA_NAMES[MA_GROUPS[form.conditionGroup]] || '均線')
+
+function rowMaLabel(row) {
+  return MA_NAMES[row.maPeriod] || '均線'
+}
 
 // ===== Load =====
 async function loadAlerts() {
@@ -297,22 +291,18 @@ function openDialog(row = null) {
     form.stockCode = row.stockCode
     form.stockName = row.stockName || ''
     form.active = row.active
-    parseAlertType(row.alertType, row.threshold)
+    parseAlertType(row.alertType, row.threshold, row.maPeriod)
   }
   dialogVisible.value = true
 }
 
-function parseAlertType(alertType, threshold) {
+function parseAlertType(alertType, threshold, maPeriod) {
   if (alertType.startsWith('PRICE')) {
     form.conditionGroup = 'PRICE'
     form.direction = alertType.includes('ABOVE') ? 'ABOVE' : 'BELOW'
     form.priceThreshold = Number(threshold)
-  } else if (alertType.startsWith('QUARTERLY_MA')) {
-    form.conditionGroup = 'QUARTERLY_MA'
-    form.direction = alertType.includes('ABOVE') ? 'ABOVE' : 'BELOW'
-    form.threshold = Number(threshold)
-  } else if (alertType.startsWith('ANNUAL_MA')) {
-    form.conditionGroup = 'ANNUAL_MA'
+  } else if (alertType.startsWith('MA_')) {
+    form.conditionGroup = `MA_${maPeriod}`
     form.direction = alertType.includes('ABOVE') ? 'ABOVE' : 'BELOW'
     form.threshold = Number(threshold)
   } else {
@@ -332,9 +322,8 @@ function onGroupChange() {
 
 function buildAlertType() {
   const dir = form.direction
-  if (form.conditionGroup === 'PRICE')        return `PRICE_${dir}`
-  if (form.conditionGroup === 'QUARTERLY_MA') return `QUARTERLY_MA_${dir}_PCT`
-  if (form.conditionGroup === 'ANNUAL_MA')    return `ANNUAL_MA_${dir}_PCT`
+  if (form.conditionGroup === 'PRICE') return `PRICE_${dir}`
+  if (isMaGroup.value)                 return `MA_${dir}_PCT`
   return form.kdIndicator === 'D' ? `KD_D_${dir}` : `KD_${dir}`
 }
 
@@ -369,6 +358,7 @@ async function save() {
       stockCode: form.stockCode.toUpperCase(),
       stockName: form.stockName || null,
       alertType: buildAlertType(),
+      maPeriod: isMaGroup.value ? MA_GROUPS[form.conditionGroup] : null,
       threshold: form.conditionGroup === 'PRICE' ? form.priceThreshold : form.threshold,
       active: form.active,
     }

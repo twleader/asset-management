@@ -26,15 +26,17 @@ public class StockAlert {
 
     /**
      * 警示類型：
-     * QUARTERLY_MA_ABOVE_PCT  — 現價高於季線 X%
-     * QUARTERLY_MA_BELOW_PCT  — 現價低於季線 X%
-     * ANNUAL_MA_ABOVE_PCT     — 現價高於年線 X%（threshold=0 表示剛高於年線）
-     * ANNUAL_MA_BELOW_PCT     — 現價低於年線 X%
-     * KD_ABOVE                — K 值高於 threshold
-     * KD_BELOW                — K 值低於 threshold
+     * PRICE_ABOVE / PRICE_BELOW  — 現價高於 / 低於 threshold
+     * MA_ABOVE_PCT / MA_BELOW_PCT — 現價偏離 MA{maPeriod} 達 threshold %（threshold=0 表示剛跨過）
+     * KD_ABOVE / KD_BELOW        — K 值高於 / 低於 threshold
+     * KD_D_ABOVE / KD_D_BELOW    — D 值高於 / 低於 threshold
      */
     @Column(nullable = false, length = 50)
     private String alertType;
+
+    /** 均線天數（僅 MA_*_PCT 類型使用，例：20=月線、60=季線、240=年線；其他類型為 null） */
+    @Column(name = "ma_period")
+    private Integer maPeriod;
 
     @Column(nullable = false, precision = 10, scale = 4)
     private BigDecimal threshold;

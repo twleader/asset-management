@@ -13,6 +13,8 @@ public class StockAlertDto {
         private String stockName;
         private String market;
         private String alertType;
+        /** MA_*_PCT 類型必填：均線天數（20 / 60 / 240） */
+        private Integer maPeriod;
         private BigDecimal threshold;
         private Boolean active = true;
     }
@@ -24,6 +26,7 @@ public class StockAlertDto {
         private String stockName;
         private String market;
         private String alertType;
+        private Integer maPeriod;
         private BigDecimal threshold;
         private Boolean active;
         private LocalDateTime lastTriggeredAt;

@@ -2049,3 +2049,30 @@ fingerprint 偵測（與既有 `fetchUsStockName` 同一模式）。
 - [ ] 71.2 服務重啟，把 weeklyRetention 暫調為 2 → 儲存 → 列表應立即少一筆（不需手動 reload）
 - [ ] 71.3 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
 
+### Task 72: 均線警示通用化（新增月線 MA20、改為 `MA_*_PCT` + `ma_period`）
+
+對應 Requirements: Requirement 16（到價警示）
+
+#### 背景
+
+原本 `stock_alert.alertType` 把每個均線寫成獨立字串：`QUARTERLY_MA_ABOVE_PCT` / `QUARTERLY_MA_BELOW_PCT` /
+`ANNUAL_MA_ABOVE_PCT` / `ANNUAL_MA_BELOW_PCT`，每加一條均線就要在 enum-like 字串、`evaluate` switch、
+`buildLabel`、`matchInIntradayBars`、`matchInDailyOhlc`、`pickMaForAlert`、前端 `parseAlertType` / `buildAlertType`
+七個地方各加一組分支，違反 OCP。
+
+改法：把「均線天數」從 alertType 字串拆出來變成獨立欄位 `ma_period` (INT)，alertType 統一為
+`MA_ABOVE_PCT` / `MA_BELOW_PCT`，前端下拉只增加 `maPeriod` 選項即可。本次同時新增「月線（MA20）」選項。
+
+#### Steps:
+
+- [ ] 72.1 Liquibase `v1.24.0-stock-alert-ma-period.sql`：
+  - `ALTER TABLE stock_alert ADD COLUMN ma_period INTEGER`
+  - `UPDATE stock_alert SET ma_period = 60, alert_type = REPLACE(alert_type, 'QUARTERLY_MA_', 'MA_') WHERE alert_type LIKE 'QUARTERLY_MA_%'`
+  - `UPDATE stock_alert SET ma_period = 240, alert_type = REPLACE(alert_type, 'ANNUAL_MA_', 'MA_') WHERE alert_type LIKE 'ANNUAL_MA_%'`
+- [ ] 72.2 `StockAlert` model 新增 `maPeriod` 欄位（Integer，nullable）；`StockAlertDto.Request/Response` 同步
+- [ ] 72.3 `StockAlertService.evaluate` switch 改為通用 `MA_ABOVE_PCT` / `MA_BELOW_PCT` 走 `checkMaDeviation(alert, currentPrice, alert.getMaPeriod(), above)`，刪除 `QUARTERLY_MA_*` / `ANNUAL_MA_*` 分支
+- [ ] 72.4 `StockAlertService.pickMaForAlert` 改為依 `maPeriod` 從 `FullIndicators` 取對應 MA（20→monthlyMa、60→quarterlyMa、240→annualMa）；`buildLabel` 用 `maPeriod` 動態組「高於月線/季線/年線 X%」；`matchInIntradayBars` / `matchInDailyOhlc` 內 MA 分支用 `alert.getMaPeriod()` 取代寫死的 60/240
+- [ ] 72.5 前端 `StockAlertView.vue`：下拉條件類型新增「月線偏離（20 日均線）」；form 新增 `maPeriod` 欄位；`buildAlertType` 對 MA 一律回 `MA_${dir}_PCT`，payload 帶 `maPeriod`；`parseAlertType` 依 alertType + maPeriod 還原 conditionGroup
+- [ ] 72.6 編譯與重啟驗證（`mvn -q -DskipTests compile`、啟動 backend / frontend）
+- [ ] 72.7 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+
