@@ -1,5 +1,6 @@
 package com.steven.assets.service;
 
+import com.steven.assets.repository.StockRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
@@ -27,10 +28,13 @@ import java.util.concurrent.ConcurrentHashMap;
 public class MarketDataService {
 
     private final WebClient priceServiceClient;
+    private final StockRepository stockMasterRepo;
 
     public MarketDataService(@Value("${external-materials.base-url:http://external-materials-service:8080}")
-                             String externalUrl) {
+                             String externalUrl,
+                             StockRepository stockMasterRepo) {
         this.priceServiceClient = WebClient.builder().baseUrl(externalUrl).build();
+        this.stockMasterRepo = stockMasterRepo;
     }
 
     public record DividendRateResult(
@@ -108,6 +112,16 @@ public class MarketDataService {
             log.warn("呼叫 /internal/dividend-rate 失敗 {} {}: {}", market, stockCode, e.getMessage());
             result = new DividendRateResult(stockCode, market, null, "N/A",
                     "查詢失敗：" + e.getMessage(), null);
+        }
+        // stockName fallback：ext-materials 無配息資料時（如 SGOV 國庫債 ETF）stockName 會是 null，
+        // 從 stock 主檔補上，讓 SnapshotForm BFF 即使 live cache 還沒 warm-up 也能拿到名稱
+        if (result.stockName() == null || result.stockName().isBlank()) {
+            String masterName = stockMasterRepo.findByCodeAndMarket(stockCode, market)
+                    .map(s -> s.getName()).orElse(null);
+            if (masterName != null && !masterName.isBlank()) {
+                result = new DividendRateResult(result.stockCode(), result.market(),
+                        result.dividendRate(), result.source(), result.description(), masterName);
+            }
         }
         dividendRateCache.put(cacheKey, new CachedDividendRate(result, now + DIVIDEND_RATE_TTL_MS));
         return result;
