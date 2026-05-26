@@ -58,6 +58,7 @@ public class StockAlertService {
                 .stockCode(code)
                 .market(req.getMarket())
                 .alertType(req.getAlertType())
+                .maPeriod(req.getMaPeriod())
                 .threshold(req.getThreshold())
                 .active(req.getActive() != null ? req.getActive() : true)
                 .displayOrder(maxOrder + 1)
@@ -93,6 +94,7 @@ public class StockAlertService {
             stockMasterRepo.upsert(code, req.getMarket(), req.getStockName().trim());
         }
         alert.setAlertType(req.getAlertType());
+        alert.setMaPeriod(req.getMaPeriod());
         alert.setThreshold(req.getThreshold());
         if (req.getActive() != null) alert.setActive(req.getActive());
         return toResponse(alertRepo.save(alert));
@@ -146,10 +148,10 @@ public class StockAlertService {
             }
 
             boolean triggered = switch (alert.getAlertType()) {
-                case "QUARTERLY_MA_ABOVE_PCT" -> checkMaDeviation(alert, currentPrice, 60, true);
-                case "QUARTERLY_MA_BELOW_PCT" -> checkMaDeviation(alert, currentPrice, 60, false);
-                case "ANNUAL_MA_ABOVE_PCT"    -> checkMaDeviation(alert, currentPrice, 240, true);
-                case "ANNUAL_MA_BELOW_PCT"    -> checkMaDeviation(alert, currentPrice, 240, false);
+                case "MA_ABOVE_PCT" -> alert.getMaPeriod() != null
+                        && checkMaDeviation(alert, currentPrice, alert.getMaPeriod(), true);
+                case "MA_BELOW_PCT" -> alert.getMaPeriod() != null
+                        && checkMaDeviation(alert, currentPrice, alert.getMaPeriod(), false);
                 case "KD_ABOVE"              -> checkKdValue(alert, false, true);
                 case "KD_BELOW"              -> checkKdValue(alert, false, false);
                 case "KD_D_ABOVE"            -> checkKdValue(alert, true, true);
@@ -167,7 +169,7 @@ public class StockAlertService {
                 try {
                     TechnicalIndicatorService.FullIndicators ind = indicatorService.computeAll(
                             alert.getStockCode(), alert.getMarket());
-                    BigDecimal ma = pickMaForAlert(alert.getAlertType(), ind);
+                    BigDecimal ma = pickMaForAlert(alert.getAlertType(), alert.getMaPeriod(), ind);
                     if (ma != null) alert.setLastTriggeredMaValue(ma);
                     if (ind.k() != null) alert.setLastTriggeredKdValue(ind.k());
                     if (ind.d() != null) alert.setLastTriggeredDValue(ind.d());
@@ -197,12 +199,14 @@ public class StockAlertService {
         }
     }
 
-    /** 依警示類型挑出對應的 MA（季線 60 / 年線 240），其他類型回 quarterly 當預設。 */
-    private static BigDecimal pickMaForAlert(String type, TechnicalIndicatorService.FullIndicators ind) {
-        if (type == null) return ind.quarterlyMa();
-        return switch (type) {
-            case "ANNUAL_MA_ABOVE_PCT", "ANNUAL_MA_BELOW_PCT" -> ind.annualMa();
-            case "QUARTERLY_MA_ABOVE_PCT", "QUARTERLY_MA_BELOW_PCT" -> ind.quarterlyMa();
+    /** 依 maPeriod 挑出對應的 MA（20=月線、60=季線、240=年線）；非 MA 類型或無 maPeriod 時回 quarterly 當預設。 */
+    private static BigDecimal pickMaForAlert(String type, Integer maPeriod,
+                                              TechnicalIndicatorService.FullIndicators ind) {
+        if (maPeriod == null) return ind.quarterlyMa();
+        return switch (maPeriod) {
+            case 20 -> ind.monthlyMa();
+            case 60 -> ind.quarterlyMa();
+            case 240 -> ind.annualMa();
             default -> ind.quarterlyMa();
         };
     }
@@ -224,6 +228,7 @@ public class StockAlertService {
         int N = Math.min(recentDays, asc.size());
         LocalDate cutoff = asc.get(asc.size() - N).getTradingDate();
         String type = alert.getAlertType();
+        Integer maPeriod = alert.getMaPeriod();
         double threshold = alert.getThreshold().doubleValue();
 
         // 抓 5 分鐘 K 線（多抓一天保險）
@@ -235,18 +240,18 @@ public class StockAlertService {
 
         Optional<IntradayMatch> precise = bars.isEmpty()
                 ? Optional.empty()
-                : matchInIntradayBars(asc, bars, cutoff, type, threshold);
+                : matchInIntradayBars(asc, bars, cutoff, type, maPeriod, threshold);
         if (precise.isPresent()) return precise;
 
         // Fallback: 日內 HIGH/LOW 粗估，時間錨在該日收盤
-        return matchInDailyOhlc(asc, cutoff, alert.getMarket(), type, threshold);
+        return matchInDailyOhlc(asc, cutoff, alert.getMarket(), type, maPeriod, threshold);
     }
 
     /** 用 5 分鐘 K 線精確定位觸發時點。 */
     private Optional<IntradayMatch> matchInIntradayBars(
             List<StockPriceHistory> asc,
             List<HistoricalDataService.IntradayBar> bars,
-            LocalDate cutoff, String type, double threshold) {
+            LocalDate cutoff, String type, Integer maPeriod, double threshold) {
 
         if ("PRICE_ABOVE".equals(type) || "PRICE_BELOW".equals(type)) {
             boolean above = "PRICE_ABOVE".equals(type);
@@ -314,10 +319,10 @@ public class StockAlertService {
             return Optional.empty();
         }
 
-        if (type.startsWith("QUARTERLY_MA_") || type.startsWith("ANNUAL_MA_")) {
-            int days = type.startsWith("QUARTERLY") ? 60 : 240;
+        if (type.startsWith("MA_") && maPeriod != null) {
+            int days = maPeriod;
             boolean above = type.endsWith("_ABOVE_PCT");
-            // 預先算每天的 MA60/MA240
+            // 預先算每天的 MA{days}
             Map<LocalDate, Double> maByDay = new HashMap<>();
             if (asc.size() < days) return Optional.empty();
             double sum = 0;
@@ -357,7 +362,7 @@ public class StockAlertService {
     /** Fallback：5m 抓不到時用日內 HIGH/LOW 粗估，時間錨在該日收盤。 */
     private Optional<IntradayMatch> matchInDailyOhlc(
             List<StockPriceHistory> asc, LocalDate cutoff,
-            String market, String type, double threshold) {
+            String market, String type, Integer maPeriod, double threshold) {
         java.time.LocalTime closeTime = "美股".equals(market)
                 ? java.time.LocalTime.of(16, 0) : java.time.LocalTime.of(13, 30);
         IntradayMatch last = null;
@@ -415,8 +420,8 @@ public class StockAlertService {
             return Optional.ofNullable(last);
         }
 
-        if (type.startsWith("QUARTERLY_MA_") || type.startsWith("ANNUAL_MA_")) {
-            int days = type.startsWith("QUARTERLY") ? 60 : 240;
+        if (type.startsWith("MA_") && maPeriod != null) {
+            int days = maPeriod;
             boolean above = type.endsWith("_ABOVE_PCT");
             if (asc.size() < days) return Optional.empty();
             double sum = 0;
@@ -572,6 +577,7 @@ public class StockAlertService {
         r.setStockName(name);
         r.setMarket(a.getMarket());
         r.setAlertType(a.getAlertType());
+        r.setMaPeriod(a.getMaPeriod());
         r.setThreshold(a.getThreshold());
         r.setActive(a.getActive());
         // 觸發時間 / 股價 / MA / K / D：全部用觸發時凍結值，最近 3 個交易日內的才傳；超過就視為過期不傳
@@ -663,10 +669,12 @@ public class StockAlertService {
     public static String buildLabel(StockAlert a) {
         double thr = a.getThreshold().doubleValue();
         return switch (a.getAlertType()) {
-            case "QUARTERLY_MA_ABOVE_PCT" -> String.format("高於季線 %.0f%%", thr);
-            case "QUARTERLY_MA_BELOW_PCT" -> String.format("低於季線 %.0f%%", thr);
-            case "ANNUAL_MA_ABOVE_PCT"    -> thr == 0 ? "高於年線" : String.format("高於年線 %.0f%%", thr);
-            case "ANNUAL_MA_BELOW_PCT"    -> thr == 0 ? "低於年線" : String.format("低於年線 %.0f%%", thr);
+            case "MA_ABOVE_PCT" -> thr == 0
+                    ? String.format("高於%s", maPeriodName(a.getMaPeriod()))
+                    : String.format("高於%s %.0f%%", maPeriodName(a.getMaPeriod()), thr);
+            case "MA_BELOW_PCT" -> thr == 0
+                    ? String.format("低於%s", maPeriodName(a.getMaPeriod()))
+                    : String.format("低於%s %.0f%%", maPeriodName(a.getMaPeriod()), thr);
             case "KD_ABOVE"              -> String.format("K 值高於 %.0f", thr);
             case "KD_BELOW"              -> String.format("K 值低於 %.0f", thr);
             case "KD_D_ABOVE"            -> String.format("D 值高於 %.0f", thr);
@@ -674,6 +682,17 @@ public class StockAlertService {
             case "PRICE_ABOVE"           -> String.format("股價高於 %s", a.getThreshold().stripTrailingZeros().toPlainString());
             case "PRICE_BELOW"           -> String.format("股價低於 %s", a.getThreshold().stripTrailingZeros().toPlainString());
             default -> a.getAlertType();
+        };
+    }
+
+    /** maPeriod → 顯示名稱（20=月線、60=季線、240=年線，其他則回「MA{n}」）。 */
+    private static String maPeriodName(Integer period) {
+        if (period == null) return "均線";
+        return switch (period) {
+            case 20 -> "月線";
+            case 60 -> "季線";
+            case 240 -> "年線";
+            default -> "MA" + period;
         };
     }
 }

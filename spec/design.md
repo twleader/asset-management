@@ -459,13 +459,17 @@ BackupSetting         (備份保留代數設定，單列資料表，id = 1)
 | stockCode | String | 股票代號 |
 | stockName | String | 股票名稱 |
 | market | String | 市場代碼（台股/美股） |
-| condition | String/JSON | 觸發條件（價格門檻、均線、KD 等） |
+| alertType | String | 條件類型：`PRICE_ABOVE` / `PRICE_BELOW` / `MA_ABOVE_PCT` / `MA_BELOW_PCT` / `KD_ABOVE` / `KD_BELOW` / `KD_D_ABOVE` / `KD_D_BELOW` |
+| maPeriod | Integer | 均線天數（僅 `MA_*_PCT` 類型使用，可選 20 / 60 / 240；其他類型為 null） |
+| threshold | BigDecimal | 條件門檻：價位類為價格，均線類為百分比偏離，KD 類為 0–100 門檻 |
 | active | Boolean | 是否啟用 |
 | displayOrder | Integer | 拖曳排序 |
 | lastTriggeredAt | LocalDateTime | 最近一次觸發時間 |
 | lastTriggeredPrice | BigDecimal | 觸發時股價 |
-| lastTriggeredMa | BigDecimal | 觸發時均線值 |
+| lastTriggeredMa | BigDecimal | 觸發時均線值（對應 `maPeriod` 的 MA） |
 | lastTriggeredKd | BigDecimal | 觸發時 KD 值 |
+
+> **均線通用化**：原本以 `QUARTERLY_MA_*` / `ANNUAL_MA_*` 兩組字串表達兩種均線，改為通用的 `MA_ABOVE_PCT` / `MA_BELOW_PCT` + `ma_period` 數字欄位。未來新增任何天數的均線警示（5、10、20、120…）皆不需新增 enum-like 字串，前端下拉只增加 `maPeriod` 選項即可。Liquibase 遷移 `v1.24.0` 將舊資料一次轉換（QUARTERLY → 60、ANNUAL → 240）。
 
 #### StockAlertTrigger（觸發歷史，新增）
 
