@@ -110,16 +110,16 @@ public class BackupService {
 
         // 儲存設定當下立即套用新 retention，讓使用者下調保留代數時不必等到下一次排程備份才生效。
         // 任何單一資料夾失敗只記 log、不影響其他資料夾與 PUT 200 OK。
-        rotateQuietly("manual", MANUAL_PREFIX, saved.getManualRetention());
-        rotateQuietly("daily", "asset_daily_", saved.getDailyRetention());
-        rotateQuietly("weekly", WEEKLY_PREFIX, saved.getWeeklyRetention());
+        rotateQuietly("manual", saved.getManualRetention());
+        rotateQuietly("daily", saved.getDailyRetention());
+        rotateQuietly("weekly", saved.getWeeklyRetention());
 
         return saved;
     }
 
-    private void rotateQuietly(String folder, String prefix, int retention) {
+    private void rotateQuietly(String folder, int retention) {
         try {
-            rotateFolder(folder, prefix, retention);
+            rotateFolder(folder, retention);
         } catch (RuntimeException e) {
             log.warn("更新保留代數後輪替 {} 失敗: {}", folder, e.getMessage(), e);
         }
@@ -164,7 +164,7 @@ public class BackupService {
         String prefix = autoPreRestore ? AUTO_PRE_RESTORE_PREFIX : MANUAL_PREFIX;
         BackupDto.CreateResponse resp = doBackup("manual", prefix, autoPreRestore);
         if (!autoPreRestore) {
-            rotateFolder("manual", MANUAL_PREFIX, getSetting().getManualRetention());
+            rotateFolder("manual", getSetting().getManualRetention());
         }
         return resp;
     }
@@ -230,7 +230,7 @@ public class BackupService {
         }
         try {
             doBackup("daily", DAILY_TW_PREFIX, false);
-            rotateFolder("daily", "asset_daily_", getSetting().getDailyRetention());
+            rotateFolder("daily", getSetting().getDailyRetention());
         } catch (RuntimeException e) {
             log.error("台股每日備份失敗: {}", e.getMessage(), e);
         }
@@ -250,7 +250,7 @@ public class BackupService {
         }
         try {
             doBackup("daily", DAILY_US_PREFIX, false);
-            rotateFolder("daily", "asset_daily_", getSetting().getDailyRetention());
+            rotateFolder("daily", getSetting().getDailyRetention());
         } catch (RuntimeException e) {
             log.error("美股每日備份失敗: {}", e.getMessage(), e);
         }
@@ -265,7 +265,7 @@ public class BackupService {
         }
         try {
             doBackup("weekly", WEEKLY_PREFIX, false);
-            rotateFolder("weekly", WEEKLY_PREFIX, getSetting().getWeeklyRetention());
+            rotateFolder("weekly", getSetting().getWeeklyRetention());
         } catch (RuntimeException e) {
             log.error("每周備份失敗: {}", e.getMessage(), e);
         }
@@ -510,33 +510,32 @@ public class BackupService {
     // ===== 輔助 =====
 
     /**
-     * 保留指定資料夾下、檔名前綴匹配的最新 retention 份備份；超過者刪除最舊。
-     * 其他前綴的檔案（例如 manual/ 內的自救點）不受影響。
+     * 以 DB `backup_record` 為單一事實來源輪替：取指定資料夾下、排除自救點後依 modifiedAt 排序，
+     * 保留前 retention 筆，其餘對 Google Drive + DB 兩邊一併刪除。
+     *
+     * 改採 DB-driven 而非 rclone lsjson 過濾檔名前綴，原因：
+     *  - 歷史檔名前綴可能變動（例如舊版 `asset_*.dump`、新版 `asset_weekly_*.dump`），
+     *    前綴過濾會漏掉 legacy 檔案造成資料夾檔數超過 retention
+     *  - DB 已記錄每筆備份的歸屬（folder + autoPreRestore flag），是更穩定的事實來源
+     *
+     * 自救點（auto_pre_restore=true）永遠不輪替，仍需保留以供還原失敗時手動回復。
+     * 若 Google Drive 上有 DB 沒記錄的檔案，本 method 不會誤刪（DB 沒記錄就不動）。
      */
-    private void rotateFolder(String folder, String prefix, int retention) {
-        String json = rcloneLsJson(REMOTE_BASE + "/" + folder + "/");
-        if (json == null || json.isBlank()) return;
-
-        List<Map.Entry<String, LocalDateTime>> files = new ArrayList<>();
-        try {
-            JsonNode arr = mapper.readTree(json);
-            for (JsonNode node : arr) {
-                if (node.path("IsDir").asBoolean(false)) continue;
-                String name = node.path("Name").asText();
-                if (!name.startsWith(prefix) || !name.endsWith(".dump")) continue;
-                files.add(Map.entry(name, parseRcloneTime(node.path("ModTime").asText())));
-            }
-        } catch (IOException e) {
-            throw new RuntimeException("輪替時解析 rclone lsjson 失敗 (" + folder + "): " + e.getMessage(), e);
-        }
-
-        if (files.size() <= retention) return;
-        files.sort(Map.Entry.<String, LocalDateTime>comparingByValue().reversed());
-        for (int i = retention; i < files.size(); i++) {
-            String name = files.get(i).getKey();
+    private void rotateFolder(String folder, int retention) {
+        List<BackupRecord> records = recordRepo.findByFolderAndAutoPreRestoreFalseOrderByModifiedAtDesc(folder);
+        if (records.size() <= retention) return;
+        for (int i = retention; i < records.size(); i++) {
+            BackupRecord r = records.get(i);
+            String name = r.getFilename();
             log.info("Rotate: deleting old backup {}/{}", folder, name);
-            rcloneDelete(REMOTE_BASE + "/" + folder + "/" + name);
-            recordRepo.findByFolderAndFilename(folder, name).ifPresent(recordRepo::delete);
+            try {
+                rcloneDelete(REMOTE_BASE + "/" + folder + "/" + name);
+            } catch (RuntimeException e) {
+                // rclone 刪除失敗（檔案已不存在或網路異常）不應卡住 DB 清理：
+                // 留一筆 warn log，仍把 DB 記錄刪掉避免下次重複嘗試
+                log.warn("rclone deletefile 失敗 {}/{}: {}", folder, name, e.getMessage());
+            }
+            recordRepo.delete(r);
         }
     }
 

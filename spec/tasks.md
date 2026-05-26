@@ -2001,3 +2001,35 @@ fingerprint 偵測（與既有 `fetchUsStockName` 同一模式）。
         SGOV / BIL / SCHD / JEPI / JEPQ / TLT 也都應有殖利率
 - [ ] 69.5 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
 
+### Task 70: Backup rotation 改以 DB `backup_record` 為單一事實來源
+
+對應 Requirements: Requirement 19（備份保留代數一致性）
+
+#### 背景
+
+`BackupService.rotateFolder(folder, prefix, retention)` 原本透過 `rclone lsjson` 列出 Google Drive
+資料夾下 `startsWith(prefix)` 的檔案，挑出最舊的刪掉。問題：歷史檔名前綴有更動（早期 `asset_*`，
+現在 `asset_weekly_*`），前綴過濾會放過 legacy 檔，導致 weekly 設定 retention=3 但資料夾實際有 4 份。
+
+修法：rotation 改為 DB-driven。`backup_record` 表已記錄每筆備份的 folder 與 `auto_pre_restore` flag，
+是穩定的事實來源。新版 `rotateFolder(folder, retention)`：
+1. `findByFolderAndAutoPreRestoreFalseOrderByModifiedAtDesc(folder)` 取出該資料夾下所有非自救點記錄
+2. 保留前 retention 筆，其餘對 rclone + DB 兩邊一併刪除
+3. rclone 刪除失敗（檔案已不存在或網路異常）只 log warn，DB 記錄仍刪掉避免下次重複嘗試
+
+副作用 / trade-off：
+- 自救點（`auto_pre_restore=true`）永遠不輪替（仍維持原設計）
+- rclone 上有但 DB 沒記錄的檔案不會被刪（DB 沒記錄就不動）—— 較安全，誤刪風險低
+- 廢除 prefix 過濾參數，所有 caller 簡化為 `rotateFolder(folder, retention)`
+
+#### Steps:
+
+- [x] 70.1 `BackupRecordRepository` 新增 `findByFolderAndAutoPreRestoreFalseOrderByModifiedAtDesc(String folder)`
+- [x] 70.2 `BackupService.rotateFolder` 改為 DB-driven：取 DB 記錄、按 modifiedAt 排序、保留 retention 筆、
+        其餘 rclone delete + DB delete；rclone 刪除失敗只 warn log
+- [x] 70.3 全部 caller 改為新簽名（`updateSetting` 內 3 個 rotateQuietly、`runBackup` / `daily` x2 / `weekly` 各 1 個 rotateFolder）
+- [x] 70.4 編譯驗證（`mvn -q -DskipTests compile`）
+- [ ] 70.5 服務重啟，至「保留設定」把 weeklyRetention 從 3 暫調為 2 → 儲存 → 應立即刪除最舊一份；
+        再調回 3 不會自動新增（因新檔由排程產生）
+- [ ] 70.6 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+
