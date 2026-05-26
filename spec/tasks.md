@@ -2033,3 +2033,19 @@ fingerprint 偵測（與既有 `fetchUsStockName` 同一模式）。
         再調回 3 不會自動新增（因新檔由排程產生）
 - [ ] 70.6 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
 
+### Task 71: BackupRestoreView 儲存保留設定後 reload 備份列表
+
+對應 Requirements: Requirement 19（備份保留代數一致性 — UI 即時反映）
+
+#### 背景
+
+後端 `BackupService.updateSetting()` 儲存設定時會立即跑 rotate 三個資料夾（Task 63 + Task 70），
+但前端 `BackupRestoreView.saveSettings()` 只更新 `settings`，沒重新撈備份列表，使用者看不到
+被輪替掉的舊備份消失，必須手動 reload 或按「同步」。
+
+#### Steps:
+
+- [x] 71.1 `BackupRestoreView.vue` `saveSettings()` 成功後 `await loadList()` 重新撈備份列表
+- [ ] 71.2 服務重啟，把 weeklyRetention 暫調為 2 → 儲存 → 列表應立即少一筆（不需手動 reload）
+- [ ] 71.3 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+

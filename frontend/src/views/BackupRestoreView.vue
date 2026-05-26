@@ -198,6 +198,8 @@ async function saveSettings() {
     settings.weeklyRetention = s.weeklyRetention
     settings.backupEnabled   = s.backupEnabled !== false
     ElMessage.success('保留設定已更新')
+    // 後端在 updateSetting 時會立即套用新 retention（rotate 三個資料夾），需 reload 列表反映被刪掉的舊備份
+    await loadList()
   } finally {
     savingSettings.value = false
   }
