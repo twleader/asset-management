@@ -29,8 +29,10 @@ import java.util.stream.Collectors;
  *
  * 操作語意（與警示條件表共用 stock_alert 為唯一資料源）：
  *  - findAll  : SELECT stockCode, market, MIN(displayOrder) FROM stock_alert GROUP BY (stockCode, market)
- *  - delete   : 刪除該 (stockCode, market) 所有 alert（DB FK ON DELETE CASCADE 連帶刪除 trigger 歷史）
  *  - reorder  : 把每個股票所有 alert 的 displayOrder 整組依新順序重新指派區段
+ *
+ * 移除觀察一律由「警示條件」頁刪掉該股票最後一筆 alert（StockAlertService.delete），
+ * 觀察清單不再提供獨立的 delete 入口。
  */
 @Service
 @RequiredArgsConstructor
@@ -60,13 +62,6 @@ public class WatchStockService {
             String market = (String) row[1];
             return toResponse(code, market);
         }).toList();
-    }
-
-    /** 刪除觀察 = 刪除該股票所有 alert（trigger 歷史經 FK CASCADE 一併消失）。 */
-    @Transactional
-    public void delete(String stockCode, String market) {
-        if (stockCode == null || market == null) return;
-        alertRepo.deleteByStockCodeAndMarket(stockCode.trim().toUpperCase(), market);
     }
 
     /**

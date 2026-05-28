@@ -13,6 +13,9 @@ public interface StockRepository extends JpaRepository<Stock, StockId> {
 
     Optional<Stock> findByCodeAndMarket(String code, String market);
 
+    /** 反向查找：依股名精確匹配回傳第一筆（理論上 (name, market) 應唯一，極端撞名取 code 升冪第一筆）。 */
+    Optional<Stock> findFirstByNameAndMarketOrderByCodeAsc(String name, String market);
+
     /** UPSERT：存在則更新名稱，不存在則新增 */
     @Transactional
     @Modifying

@@ -23,6 +23,4 @@ public interface StockAlertRepository extends JpaRepository<StockAlert, Long> {
     @Query("SELECT MIN(a.displayOrder) FROM StockAlert a " +
             "WHERE a.stockCode = :code AND a.market = :market")
     Integer findMinDisplayOrderFor(String code, String market);
-
-    void deleteByStockCodeAndMarket(String stockCode, String market);
 }

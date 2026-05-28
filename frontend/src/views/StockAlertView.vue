@@ -108,10 +108,12 @@
         <el-form-item label="股票代號" required>
           <el-input v-model="form.stockCode" placeholder="例：2330 或 AAPL"
             style="width:140px;margin-right:8px"
+            :suffix-icon="lookingUpCode ? Loading : undefined"
             @blur="fetchStockName" />
-          <el-input v-model="form.stockName" placeholder="（離開欄位自動帶入）"
+          <el-input v-model="form.stockName" placeholder="或輸入股名自動帶代號"
             style="width:200px"
-            :suffix-icon="lookingUpName ? Loading : undefined" />
+            :suffix-icon="lookingUpName ? Loading : undefined"
+            @blur="fetchStockCode" />
         </el-form-item>
 
         <el-divider content-position="left">警示條件</el-divider>
@@ -212,6 +214,7 @@ const currentAlerts = computed(() => marketTab.value === '台股' ? twAlerts.val
 const loading = ref(false)
 const saving = ref(false)
 const lookingUpName = ref(false)
+const lookingUpCode = ref(false)
 const dialogVisible = ref(false)
 const editId = ref(null)
 const tableRef = ref(null)
@@ -343,6 +346,26 @@ async function fetchStockName() {
     ElMessage.error('查詢失敗：' + (e.message || ''))
   } finally {
     lookingUpName.value = false
+  }
+}
+
+// 反向：輸入股名 → 自動帶代號（只查本地 stock 主檔，精確匹配）
+async function fetchStockCode() {
+  if (form.stockCode || !form.stockName || !form.market) return
+  lookingUpCode.value = true
+  try {
+    const res = await bffApi.stockAlert.lookupCode({
+      name: form.stockName.trim(), market: form.market
+    })
+    if (res.stockCode) {
+      form.stockCode = res.stockCode
+    } else {
+      ElMessage.warning('本地查無此股名，請改輸入股票代號')
+    }
+  } catch (e) {
+    ElMessage.error('查詢失敗：' + (e.message || ''))
+  } finally {
+    lookingUpCode.value = false
   }
 }
 

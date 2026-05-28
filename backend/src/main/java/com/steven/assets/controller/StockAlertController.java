@@ -76,6 +76,11 @@ public class StockAlertController {
         if ("0000".equals(upperCode) && "台股".equals(market)) {
             return ResponseEntity.ok(Map.of("stockName", "台股大盤"));
         }
+        // 美股無「0000」這個代號；過去若放行會被 Yahoo fuzzy match 回隨機公司（例：Shenzhen 7Road Tech Co Ltd）
+        // 然後自動寫入 stock 主檔。直接拒絕，避免污染。
+        if ("0000".equals(upperCode) && "美股".equals(market)) {
+            return ResponseEntity.ok(Map.of("stockName", ""));
+        }
 
         // 1. 查本地 stock 主檔
         String name = stockMasterRepo.findByCodeAndMarket(upperCode, market)
@@ -96,5 +101,31 @@ public class StockAlertController {
         }
 
         return ResponseEntity.ok(Map.of("stockName", name));
+    }
+
+    /**
+     * 反向查找：依股名查股票代號（只查本地 stock 主檔，精確匹配）。
+     *  - 0000 / 「台股大盤」特例：直接回 0000
+     *  - 主檔找不到時回空字串，由前端提示使用者改輸入代號
+     *
+     * 不打外部 API：FinMind / Yahoo 原本就是 code → name 設計，反向查可靠度不足。
+     */
+    @GetMapping("/lookup-code")
+    public ResponseEntity<Map<String, String>> lookupCode(
+            @RequestParam String name,
+            @RequestParam String market) {
+        String trimmed = name.trim();
+        if (trimmed.isEmpty()) {
+            return ResponseEntity.ok(Map.of("stockCode", ""));
+        }
+
+        if ("台股大盤".equals(trimmed) && "台股".equals(market)) {
+            return ResponseEntity.ok(Map.of("stockCode", "0000"));
+        }
+
+        String code = stockMasterRepo.findFirstByNameAndMarketOrderByCodeAsc(trimmed, market)
+                .map(s -> s.getCode())
+                .orElse("");
+        return ResponseEntity.ok(Map.of("stockCode", code));
     }
 }
