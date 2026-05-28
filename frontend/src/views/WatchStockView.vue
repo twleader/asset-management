@@ -110,11 +110,6 @@
             <span v-else style="font-size:12px;color:#94a3b8">尚未觸發</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="70" align="center" fixed="right">
-          <template #default="{ row }">
-            <el-button size="small" type="danger" :icon="Delete" circle @click="remove(row)" />
-          </template>
-        </el-table-column>
       </el-table>
     </el-card>
 
@@ -123,8 +118,8 @@
 </template>
 
 <script setup>
-import { Plus, Delete, Operation } from '@element-plus/icons-vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus, Operation } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import Sortable from 'sortablejs'
 import dayjs from 'dayjs'
 import { bffApi } from '@/api/index.js'
@@ -190,16 +185,6 @@ onMounted(async () => {
   await load()
   nextTick(initSortable)
 })
-
-async function remove(row) {
-  await ElMessageBox.confirm(
-    `將 ${row.stockCode} ${row.stockName || ''} 從觀察清單移除，會同時刪除該股票的所有警示條件與觸發歷史。確定？`,
-    '移除觀察', { type: 'warning' }
-  )
-  await bffApi.watchStock.delete(row.stockCode, row.market)
-  ElMessage.success('已移除')
-  await load()
-}
 
 // 父層在警示條件儲存後會呼叫此 reload，讓觀察清單重新載入
 defineExpose({ reload: async () => { await load(); nextTick(initSortable) } })

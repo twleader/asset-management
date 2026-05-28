@@ -74,9 +74,8 @@ com.steven.assets/
 - 其他 settings/passthrough（每頁一支 Spring Cloud Gateway route 配置，rewrite `/api/bff/{page}/**` → `/api/{resource}/**`）：BankSettings、BrokerSettings、DepositTypeSettings、MarketTypeSettings、TransitFundTypeSettings、StockAlert（`/api/bff/stock-alert/**`）、BackupRestore（`/api/bff/backup-restore/**`）
 - `WatchStockBffController`（WatchStockView 專屬，`/api/bff/watch-stock/**`）：觀察清單已改為「`stock_alert` 衍生 view」，BFF 提供：
   - `GET /api/bff/watch-stock`：呼叫 `business-services` 衍生端點 → 對每筆 (stockCode, market) 補上 live 報價、技術指標、最近觸發資訊
-  - `DELETE /api/bff/watch-stock/{stockCode}/{market}`：刪除該股票所有 alert（級聯 trigger 歷史）
   - `PUT /api/bff/watch-stock/order`：拖曳排序時把該股票所有 alert 的 displayOrder 整組重排
-  - 新增觀察則由前端直接呼叫 `/api/bff/stock-alert/**` 建立警示條件，不再有 watch-stock 級的 create 端點
+  - 新增觀察由前端直接呼叫 `/api/bff/stock-alert/**` 建立警示條件；移除觀察由前端在「警示條件」頁刪除該股票所有 alert 達成，因此 BFF **不提供** watch-stock 級的 create / delete 端點
 - `SnapshotFormBffController`（SnapshotFormView 專屬）：把表單頁的多步協調邏輯（價格批次查 + backfill fallback + 配息率補抓 + 名稱補齊 + 匯率智慧 fallback）集中於此
   - `GET /api/bff/snapshot-form/{id}`：編輯模式 bootstrap，回傳 enriched detail + mergedStocks
   - `POST /api/bff/snapshot-form/prices?date=YYYY-MM-DD`：批次取得每筆股票的歷史收盤價 + 漲跌 + 名稱 + 配息率（DB 缺資料時自動 backfill 重試）
@@ -224,7 +223,7 @@ src/
   - 輪替策略：`daily/` 保留 50 份、`weekly/` 保留 5 份、`manual/` 保留 5 份（自救點不計入）
   - 輪替觸發點：(a) 每次排程／手動備份成功上傳後對該資料夾跑一次；(b) `updateSetting()` 儲存後對三個資料夾各跑一次（讓使用者調降保留代數時立即套用，不需等到下一次排程）。rotate 失敗以 `try/catch` 包住只記 log，不讓設定儲存 API 失敗
   - 交易日判定委派至 `MarketDataService.getTwHolidays(year)` / `getUsHolidays(year)`，並排除週末
-- `WatchStockService`: 觀察清單 view 服務（不再對應實體表）。`findAll()` 由 `StockAlertRepository.findDistinctStockCodeMarket()` 取得去重 (stockCode, market) 清單後，整合 Redis live 報價（透過 `PriceQueryService`）、技術指標（`TechnicalIndicatorService`）與該股票最近一次 StockAlert 觸發資訊；`delete(stockCode, market)` 級聯刪除該股票所有 alert；`reorder(orderedStockKeys)` 拖曳重排時把每個股票所有 alert 的 `displayOrder` 整組依新順序重新指派
+- `WatchStockService`: 觀察清單 view 服務（不再對應實體表）。`findAll()` 由 `StockAlertRepository.findDistinctStockCodeMarket()` 取得去重 (stockCode, market) 清單後，整合 Redis live 報價（透過 `PriceQueryService`）、技術指標（`TechnicalIndicatorService`）與該股票最近一次 StockAlert 觸發資訊；`reorder(orderedStockKeys)` 拖曳重排時把每個股票所有 alert 的 `displayOrder` 整組依新順序重新指派；不提供 delete 入口（移除觀察一律由 `StockAlertService.delete` 在「警示條件」頁逐筆刪除）
 - `StockAlertService`: 到價警示 CRUD、條件評估、排序、最近觸發資訊回寫；`create` 對 `0000`（台股大盤）跳過 `stockMasterRepo.upsert`
 - `ExcelExportService`: Apache POI 產生快照與已實現損益的 .xlsx 匯出檔
 
@@ -636,13 +635,12 @@ PUT    /api/settings/deposit-types/{id}        # 更新存款類型
 PATCH  /api/settings/deposit-types/{id}/active # 啟用/停用存款類型
 ```
 
-#### Watch Stocks（新增）
+#### Watch Stocks（v1.22 起為 stock_alert 衍生 view，無實體表）
 ```
-GET    /api/watch-stocks                       # 列出所有觀察股票（含對應的最新報價、警示彙總）
-POST   /api/watch-stocks                       # 新增觀察股票（市場 + 代號 + 名稱）
-DELETE /api/watch-stocks/{id}                  # 刪除觀察股票
-PUT    /api/watch-stocks/reorder               # body: ordered ids 陣列
+GET    /api/watch-stocks                       # 列出所有觀察股票（去重後含最新報價、警示彙總）
+PUT    /api/watch-stocks/order                 # body: [{stockCode, market}] 陣列；把每個股票所有 alert 的 displayOrder 整組重排
 ```
+新增 / 移除觀察一律透過 `/api/stock-alerts` 操作對應 alert：建立第一筆 alert 即出現於觀察清單，刪除最後一筆 alert 即從觀察清單消失。
 
 #### Settings - Market Types（新增）
 ```
@@ -687,6 +685,7 @@ PATCH  /api/stock-alerts/{id}/active      # 啟用/停用
 PUT    /api/stock-alerts/reorder          # 拖曳排序（body: ordered ids）
 POST   /api/stock-alerts/check            # 手動觸發檢查
 GET    /api/stock-alerts/lookup-name      # 以股票代號查名稱（前端共用）
+GET    /api/stock-alerts/lookup-code      # 反向：以股名查代號（只查本地 stock 主檔，精確匹配）
 ```
 
 #### Exchange Rate History（新增）

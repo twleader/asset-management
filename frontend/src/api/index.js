@@ -161,6 +161,7 @@ export const bffApi = {
     getAll:    () => api.get('/bff/stock-alert'),
     reorder:   (ids) => api.put('/bff/stock-alert/reorder', ids),
     lookupName:(params) => api.get('/bff/stock-alert/lookup-name', { params }),
+    lookupCode:(params) => api.get('/bff/stock-alert/lookup-code', { params }),
     create:    (data) => api.post('/bff/stock-alert', data),
     update:    (id, data) => api.put(`/bff/stock-alert/${id}`, data),
     toggleActive: (id) => api.patch(`/bff/stock-alert/${id}/active`),
@@ -168,10 +169,9 @@ export const bffApi = {
   },
 
   // WatchStock — v1.22 起改為 stock_alert 衍生 view，操作以 (stockCode, market) tuple
+  // 移除觀察一律在「警示條件」頁刪掉該股票最後一筆 alert，不再有觀察清單級的 delete
   watchStock: {
     getAll:  () => api.get('/bff/watch-stock'),
-    delete:  (stockCode, market) => api.delete(
-        `/bff/watch-stock/${encodeURIComponent(stockCode)}/${encodeURIComponent(market)}`),
     reorder: (orderedKeys) => api.put('/bff/watch-stock/order', orderedKeys)
   },
 

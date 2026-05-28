@@ -1803,7 +1803,7 @@ Task 59 移除 `shouldApplyLive` 的「市場開盤」閘門時，`getRealtimePr
 - [ ] 61.18 commit + 服務重啟驗證：
         - 新增警示條件 → 觀察清單自動出現該股票
         - 同股票多筆警示 → 觀察清單只一列
-        - 刪除觀察清單某列 → 該股票所有 alert 與 trigger 歷史皆消失
+        - 在「警示條件」頁刪除某股票全部 alert → 觀察清單該列消失（觀察清單頁本身無刪除列入口）
         - 觀察清單拖曳 → 警示條件頁的該股票條件群組整體位置改變、群組內順序不變
         - 0000 加入觀察 → 季線/年線/KD 皆有值（不再是 dash）
         - 0000 可設 KD 警示且觸發後 lastTriggered* 顯示
@@ -2075,4 +2075,64 @@ fingerprint 偵測（與既有 `fetchUsStockName` 同一模式）。
 - [ ] 72.5 前端 `StockAlertView.vue`：下拉條件類型新增「月線偏離（20 日均線）」；form 新增 `maPeriod` 欄位；`buildAlertType` 對 MA 一律回 `MA_${dir}_PCT`，payload 帶 `maPeriod`；`parseAlertType` 依 alertType + maPeriod 還原 conditionGroup
 - [ ] 72.6 編譯與重啟驗證（`mvn -q -DskipTests compile`、啟動 backend / frontend）
 - [ ] 72.7 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+
+### Task 73: 觀察清單拿掉「操作」欄（移除觀察改走警示條件頁）
+
+對應 Requirements: Requirement 14（觀察股票清單 — 由警示條件衍生）
+
+#### 背景
+
+觀察清單本來就是 `stock_alert` 群組去重的衍生 view，列上的「操作」欄（紅色刪除鈕）會
+連帶把該股票所有 alert 級聯刪除，等同在兩個頁面提供「等價但措辭不同」的刪除入口，
+容易誤觸（使用者以為只是把列從觀察清單拿掉，實際上把多筆警示一起刪了）。
+正確操作模式是：要把股票從觀察清單移除，就去「警示條件」頁逐筆刪掉該股票的 alert，
+最後一筆刪掉時觀察清單該列自然消失，與「新增觀察 = 新增第一筆警示條件」對稱。
+
+#### Steps:
+
+- [x] 73.1 `WatchStockView.vue` 移除「操作」`el-table-column`、`remove()` 函式、`Delete` / `ElMessageBox` import
+- [x] 73.2 `frontend/src/api/index.js` 移除 `watchStock.delete`
+- [x] 73.3 `WatchStockController` 移除 `@DeleteMapping("/{stockCode}/{market}")`；`WatchStockService.delete()` 連同 `StockAlertRepository.deleteByStockCodeAndMarket()`（已無 caller）一併刪除
+- [x] 73.4 spec：`requirements.md` Requirement 14 將「刪除觀察 = 刪除該股票所有 alert」改為「移除觀察的入口 = 警示條件頁刪除」；`design.md` `WatchStockBffController` / `WatchStockService` / Watch Stocks API 段落同步移除 DELETE 端點；`tasks.md` 61.18 驗證項調整
+- [ ] 73.5 服務重啟驗證：觀察清單列無「操作」欄；在警示條件頁刪除某股票最後一筆 alert 後，觀察清單該列消失；拖曳排序仍可運作
+- [ ] 73.6 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+
+### Task 74: 新增警示 dialog 支援「股名 → 代號」反向自動帶入
+
+對應 Requirements: Requirement 16（到價警示 — 新增表單 UX）
+
+#### 背景
+
+`StockAlertView` 的新增警示 dialog 目前只支援「打代號→自動帶名稱」（`lookup-name` blur），
+但很多使用者習慣打名字而非記得每檔代號（特別是台股金控股、ETF）。打入「富邦金」應該自動填入
+「2881」，與正向流程對稱。
+
+採「只查本地 stock 主檔（精確匹配）」策略：FinMind / Yahoo 原本就是 code → name 設計，反向
+查 API 不可靠。本地 stock 主檔涵蓋所有曾經持有 / 觀察 / 警示過的股票，命中率對主用例足夠；
+查不到時提示使用者改輸入代號。「台股大盤」+ 台股 → 0000 列為特例（與 `lookup-name` 對稱）。
+
+#### Steps:
+
+- [x] 74.1 `StockRepository` 新增 `findFirstByNameAndMarketOrderByCodeAsc(name, market)`（極端撞名取 code 升冪第一筆）
+- [x] 74.2 `StockAlertController` 新增 `@GetMapping("/lookup-code")`：`{name, market}` → `{stockCode}`；空白 / 查無回空字串，`「台股大盤」+ 台股 → 0000` 特例。不打外部 API
+- [x] 74.3 `frontend/src/api/index.js` `stockAlert.lookupCode = (params) => api.get('/bff/stock-alert/lookup-code', { params })`（沿用 stock-alert wildcard BFF route，無需 BFF 新增配置）
+- [x] 74.4 `StockAlertView.vue` 股名 `el-input` 加 `@blur="fetchStockCode"` 與 loading suffix-icon；新增 `fetchStockCode()`：只在 `stockCode` 為空且 `stockName` 有值時觸發，避免覆蓋已填代號；查無時 `ElMessage.warning('本地查無此股名，請改輸入股票代號')`
+- [x] 74.5 spec：`requirements.md` Requirement 16 增加 `lookup-code` AC；`design.md` `/api/stock-alerts/lookup-code` 列入端點列表
+- [ ] 74.6 服務重啟驗證：富邦金（已存在於主檔者）打入名字 → blur → 代號自動填入；隨意打不存在名字 → 顯示警告且不蓋掉代號；打「台股大盤」→ 帶入 0000
+- [ ] 74.7 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+
+### Task 75: `lookup-name` 對「美股 + 0000」加守門（防 Yahoo fuzzy match 污染主檔）
+
+對應 Requirements: Requirement 16（到價警示 — lookup-name 守門）
+
+#### 背景
+
+`StockAlertController.lookupName` 原本只對「台股 + 0000」做特例攔截（回「台股大盤」），「美股 + 0000」會 fall through 到 `historicalDataService.fetchUsStockName("0000")`，Yahoo Finance 對非標準 ticker 會做 fuzzy match 回傳隨機公司（曾觀察到回 `Shenzhen 7Road Tech Co Ltd`），接著被自動 upsert 進 `stock` 主檔，污染後續 dropdown / 反查。實際 dev DB 已發現一筆此類髒資料並手動刪除（`DELETE FROM stock WHERE code='0000' AND market='美股'`）。
+
+#### Steps:
+
+- [x] 75.1 `StockAlertController.lookupName` 在台股守門之後加「美股 + 0000 → 回空字串」分支；comment 說明歷史 bug 與防護意圖
+- [x] 75.2 spec：`requirements.md` Requirement 16 `lookup-name` AC 補上守門描述
+- [ ] 75.3 服務重啟驗證：警示新增表單市場選「美股」、代號打 `0000` → blur 不再自動帶入名稱（停留空白）；`stock` 主檔不再新增 `(0000, 美股)` 列
+- [ ] 75.4 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
 
