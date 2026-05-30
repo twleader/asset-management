@@ -708,6 +708,14 @@
 
 - [x] 21.3 前端：警示頁面整併進 `StockMonitorView.vue`「警示條件」頁籤（路徑 `/stocks?tab=alerts`，舊路徑 `/stock-alerts` 自動 redirect）
 
+- [x] 21.5 後端：警示建立／更新加入「代號↔股名」守門
+  - `StockAlertService` 新增 `assertNameMatchesCode(code, market, userName)` 私有方法
+  - `create` / `update` 在 `stockMasterRepo.upsert` 之前呼叫；以 `historicalDataService.fetchTwStockName / fetchUsStockName` 取得 canonical name
+  - canonical 非空且與 user-supplied stockName 不一致 → throw `IllegalArgumentException("代號 X 與股名「Y」不符，外部來源為「Z」")`（GlobalExceptionHandler → 400）
+  - canonical 空 → fall through，外部 API 異常時不阻擋
+  - `0000` + `台股` 跳過；`0000` + `美股` 直接拒絕
+  - 目的：阻止使用者把錯誤代號（如把 2500 標成「台積電」）寫入 `stock` 主檔造成觀察清單顯示「2500 台積電」但所有報價欄位皆為 —
+
 - [ ] 21.4 觸發歷史紀錄（對應 Requirement 16 新增條目）
   - Liquibase `v1.11.0-stock-alert-trigger.sql`：建立 `stock_alert_trigger` 表，欄位 `id` / `alert_id` (FK CASCADE) / `stock_code` / `market` / `triggered_at` / `price` / `monthly_ma` / `quarterly_ma` / `annual_ma` / `k_value` / `d_value` / `created_at`，以 `(alert_id, triggered_at DESC)` 與 `(created_at)` 各一個索引
   - 後端：新增 `StockAlertTrigger` 實體 + Repository
@@ -2135,4 +2143,19 @@ fingerprint 偵測（與既有 `fetchUsStockName` 同一模式）。
 - [x] 75.2 spec：`requirements.md` Requirement 16 `lookup-name` AC 補上守門描述
 - [ ] 75.3 服務重啟驗證：警示新增表單市場選「美股」、代號打 `0000` → blur 不再自動帶入名稱（停留空白）；`stock` 主檔不再新增 `(0000, 美股)` 列
 - [ ] 75.4 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+
+### Task 76: 已實現損益明細列雙擊開啟股票分析圖
+
+對應 Requirements: Requirement 13（股票走勢圖延伸資訊）
+
+#### 背景
+
+`StockAnalysisDialog` 原本已被 Dashboard / SnapshotForm / WatchStock / StockAlert 四個 view 共用，使用者習慣在持股／觀察列雙擊查 K 線與股利歷史。已實現損益（`RealizedGainView`）每筆都是具體股票成交，但原先不支援雙擊，使用者得切回觀察清單再開分析圖，多繞一步。
+
+#### Steps:
+
+- [x] 76.1 `RealizedGainView.vue` 在 `<el-table>` 加 `@row-dblclick="onRowDblClick"`，import `StockAnalysisDialog`，新增 `analysisVisible` / `analysisStock` state 與 `onRowDblClick(row)` 函式：以 `row.assetCode → stockCode`、`row.assetName → stockName`、`row.market` 構造 dialog 入參
+- [x] 76.2 spec：`design.md` `StockAnalysisBffRoutes` 段落把 `RealizedGain` 加進使用此對話框的 view 清單（四 → 五）
+- [ ] 76.3 服務重啟驗證：在已實現損益列上雙擊 2330 / AVGO 等 → 跳出對應股票的走勢圖 popup，標題顯示「{code} {name}　股票分析」
+- [ ] 76.4 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
 

@@ -54,6 +54,7 @@ public class StockAlertService {
                 .mapToInt(a -> a.getDisplayOrder() != null ? a.getDisplayOrder() : 0)
                 .max().orElse(0);
         String code = req.getStockCode().trim().toUpperCase();
+        assertNameMatchesCode(code, req.getMarket(), req.getStockName());
         StockAlert alert = StockAlert.builder()
                 .stockCode(code)
                 .market(req.getMarket())
@@ -87,6 +88,7 @@ public class StockAlertService {
         StockAlert alert = alertRepo.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Alert not found: " + id));
         String code = req.getStockCode().trim().toUpperCase();
+        assertNameMatchesCode(code, req.getMarket(), req.getStockName());
         alert.setStockCode(code);
         alert.setMarket(req.getMarket());
         boolean isTaiex = "0000".equals(code) && "台股".equals(req.getMarket());
@@ -103,6 +105,29 @@ public class StockAlertService {
     @Transactional
     public void delete(Long id) {
         alertRepo.deleteById(id);
+    }
+
+    /**
+     * 守門：建立／更新警示時，以外部權威來源（ext-materials-service /internal/stock-name）
+     * 比對 user-supplied stockName。canonical 非空且不一致 → 400，避免使用者把錯誤代號
+     * （如把 2500 標成「台積電」）寫入 stock 主檔造成觀察清單顯示名稱對但無報價的列。
+     * canonical 為空（外部 API 失敗 / 查無）則信任使用者，外部異常不阻擋合法建立。
+     * 0000 + 台股：跳過（大盤特例）。0000 + 美股：直接拒絕（無此代號）。
+     */
+    private void assertNameMatchesCode(String code, String market, String userName) {
+        if ("0000".equals(code) && "台股".equals(market)) return;
+        if ("0000".equals(code) && "美股".equals(market)) {
+            throw new IllegalArgumentException("美股無 0000 代號");
+        }
+        if (userName == null || userName.isBlank()) return;
+        String canonical = "台股".equals(market)
+                ? historicalDataService.fetchTwStockName(code)
+                : historicalDataService.fetchUsStockName(code);
+        if (canonical == null || canonical.isBlank()) return;
+        if (!userName.trim().equalsIgnoreCase(canonical.trim())) {
+            throw new IllegalArgumentException(
+                    "代號 %s 與股名「%s」不符，外部來源為「%s」".formatted(code, userName.trim(), canonical.trim()));
+        }
     }
 
     @Transactional
