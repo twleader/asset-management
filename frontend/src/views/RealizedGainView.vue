@@ -52,7 +52,8 @@
         <el-tab-pane label="美股" name="美股" />
       </el-tabs>
 
-      <el-table :data="filteredRecords" size="small" stripe class="gain-table">
+      <el-table :data="filteredRecords" size="small" stripe class="gain-table"
+        @row-dblclick="onRowDblClick">
         <el-table-column prop="broker" label="券商" width="90">
           <template #default="{ row }">
             <span class="broker-text">{{ row.broker || '-' }}</span>
@@ -137,6 +138,8 @@
       </el-table>
       </template>
     </el-card>
+
+    <StockAnalysisDialog v-model="analysisVisible" :stock="analysisStock" />
 
     <!-- Add/Edit Dialog -->
     <el-dialog v-model="dialogVisible" :title="editingId ? '編輯損益記錄' : '新增損益記錄'" width="760px"
@@ -236,6 +239,7 @@ import { Plus, Edit, Delete, Download } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
 import { bffApi } from '@/api'
+import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
 
 const realizedGains = ref([])
 const brokerOptions = ref([])
@@ -444,6 +448,15 @@ const handleDelete = async (id) => {
   await bffApi.realizedGain.delete(id)
   await reload()
   ElMessage.success('已刪除')
+}
+
+// ===== 雙擊開啟股票走勢分析 =====
+const analysisVisible = ref(false)
+const analysisStock = ref(null)
+function onRowDblClick(row) {
+  if (!row?.assetCode || !row?.market) return
+  analysisStock.value = { stockCode: row.assetCode, stockName: row.assetName, market: row.market }
+  analysisVisible.value = true
 }
 </script>
 

@@ -82,7 +82,7 @@ com.steven.assets/
   - `GET /api/bff/snapshot-form/realtime`：2 分鐘輪詢用，先 trigger 後端刷新行情再回傳 stockPrices + marketStatus
   - `GET /api/bff/snapshot-form/exchange-rate?date=YYYY-MM-DD`：取指定日期 USD 匯率（今天會先 refresh，假日往前 fallback）
   - `GET /api/bff/snapshot-form/lookups`：表單下拉一次取齊（banks / brokers / depositTypes / transitFundTypes，皆已過濾 active）
-- `StockAnalysisBffRoutes`（StockAnalysisDialog 跨 view 共用元件專屬）：對話框被 Dashboard / SnapshotForm / WatchStock / StockAlert 四個 view 同時使用，依「同義欄位、同一 business service API」原則拆為獨立 BFF route，避免在四個父 view 的 BFF 各自重複代理。提供：
+- `StockAnalysisBffRoutes`（StockAnalysisDialog 跨 view 共用元件專屬）：對話框被 Dashboard / SnapshotForm / WatchStock / StockAlert / RealizedGain 五個 view 同時使用（已實現損益明細列雙擊開啟），依「同義欄位、同一 business service API」原則拆為獨立 BFF route，避免在五個父 view 的 BFF 各自重複代理。提供：
   - `GET /api/bff/stock-analysis/history/stock` → `/api/market-data/history/stock`
   - `GET /api/bff/stock-analysis/dividends` → `/api/market-data/dividends`
   - `GET /api/bff/stock-analysis/etf-holdings` → `/api/market-data/etf-holdings`
@@ -224,7 +224,7 @@ src/
   - 輪替觸發點：(a) 每次排程／手動備份成功上傳後對該資料夾跑一次；(b) `updateSetting()` 儲存後對三個資料夾各跑一次（讓使用者調降保留代數時立即套用，不需等到下一次排程）。rotate 失敗以 `try/catch` 包住只記 log，不讓設定儲存 API 失敗
   - 交易日判定委派至 `MarketDataService.getTwHolidays(year)` / `getUsHolidays(year)`，並排除週末
 - `WatchStockService`: 觀察清單 view 服務（不再對應實體表）。`findAll()` 由 `StockAlertRepository.findDistinctStockCodeMarket()` 取得去重 (stockCode, market) 清單後，整合 Redis live 報價（透過 `PriceQueryService`）、技術指標（`TechnicalIndicatorService`）與該股票最近一次 StockAlert 觸發資訊；`reorder(orderedStockKeys)` 拖曳重排時把每個股票所有 alert 的 `displayOrder` 整組依新順序重新指派；不提供 delete 入口（移除觀察一律由 `StockAlertService.delete` 在「警示條件」頁逐筆刪除）
-- `StockAlertService`: 到價警示 CRUD、條件評估、排序、最近觸發資訊回寫；`create` 對 `0000`（台股大盤）跳過 `stockMasterRepo.upsert`
+- `StockAlertService`: 到價警示 CRUD、條件評估、排序、最近觸發資訊回寫；`create` 對 `0000`（台股大盤）跳過 `stockMasterRepo.upsert`。`create` / `update` 在 `stockMasterRepo.upsert` 之前以 `assertNameMatchesCode(code, market, userName)` 守門：以 `historicalDataService.fetchTwStockName / fetchUsStockName` 取得 canonical name（權威來源 ext-materials-service `/internal/stock-name`），canonical 非空且與 user-supplied `stockName` 不一致即 throw `IllegalArgumentException`（由 `GlobalExceptionHandler` 映射為 `400`）。canonical 空則 fall through（外部 API 異常時不阻擋）。`0000` + `台股` 跳過守門；`0000` + `美股` 直接拒絕。設計目的：阻止使用者把錯誤代號（如把 2500 標成「台積電」）寫入 `stock` 主檔導致觀察清單出現名稱對但完全無報價的列
 - `ExcelExportService`: Apache POI 產生快照與已實現損益的 .xlsx 匯出檔
 
 **State Management (Pinia)**
