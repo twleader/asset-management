@@ -2178,6 +2178,7 @@ fingerprint 偵測（與既有 `fetchUsStockName` 同一模式）。
 - [x] 77.7 `SnapshotFormView.vue`：新增 `depositInterestTwd(d)` helper 與 `depositInterestTotal` computed；`summaryDividend` 加進去；台幣 tab 底部彙總列新增「預估年利息」一欄
 - [ ] 77.8 服務重啟驗證：在台幣存款列輸入 1.5（年利率），預估利息欄即時顯示金額；底部彙總「預估年利息」與頂部 KPI「預估年配息」皆變動；儲存後重新打開該快照，年利率值仍在
 - [ ] 77.9 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+- [x] 77.10 `DashboardView.vue` 殖利率分母同步納入存款：`yieldBase = totalStockValue + totalFundValue + totalDeposit`（原本不含存款）。理由：分子 `estimatedAnnualDividend` 已含存款預估年利息，分母也須含存款本金口徑才一致
 
 ### Task 78: 警示存檔守門放寬：本地 stock 主檔也算合法 canonical
 

@@ -594,9 +594,10 @@ const kpiCards = computed(() => {
     {
       label: '預估年配息', emoji: '💵',
       value: formatCurrency(s.estimatedAnnualDividend), bg: '#fdf4ff', color: '#9333ea',
-      // 殖利率分母用「會生配息的資產」（股票 + 基金現值），不含存款，避免被現金稀釋
+      // 殖利率分母用「會生配息／利息的資產」（股票 + 基金現值 + 存款本金）。
+      // 分子 estimatedAnnualDividend 已含存款預估年利息（Task 77），分母同步納入存款本金才口徑一致。
       sub: (() => {
-        const yieldBase = Number(s.totalStockValue || 0) + Number(s.totalFundValue || 0)
+        const yieldBase = Number(s.totalStockValue || 0) + Number(s.totalFundValue || 0) + Number(s.totalDeposit || 0)
         const rate = yieldBase > 0 ? (Number(s.estimatedAnnualDividend || 0) / yieldBase * 100) : 0
         return `殖利率 ${rate.toFixed(2)}%`
       })(),
