@@ -2159,3 +2159,23 @@ fingerprint 偵測（與既有 `fetchUsStockName` 同一模式）。
 - [ ] 76.3 服務重啟驗證：在已實現損益列上雙擊 2330 / AVGO 等 → 跳出對應股票的走勢圖 popup，標題顯示「{code} {name}　股票分析」
 - [ ] 76.4 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
 
+### Task 77: 存款新增「年利率／預估利息」欄位並併入預估年配息
+
+對應 Requirements: Requirement 2（銀行存款追蹤）
+
+#### 背景
+
+`SnapshotFormView` 存款明細目前只記錄銀行、類型、金額、備註。使用者要求新增「年利率」（可輸入百分比）與「預估利息」（自動 = `amount × rate / 100`），且加總後併入快照層級的「預估年配息」與各頁面 KPI。`預估利息` 是 derived value（同列其他欄位即可算出），依正規化規則不存 DB；只新增 `bank_deposit.annual_interest_rate` 欄位儲存利率本身。
+
+#### Steps:
+
+- [x] 77.1 Liquibase changelog `v1.25.0-deposit-annual-interest-rate.sql`：`ALTER TABLE bank_deposit ADD COLUMN annual_interest_rate NUMERIC(7,4)`，並掛到 `db.changelog-master.yaml`
+- [x] 77.2 `BankDeposit.java` 新增 `annualInterestRate` 欄位（`@Column(precision=7, scale=4)`，nullable）
+- [x] 77.3 `AssetSnapshotDto.DepositRequest` / `DepositResponse` 加 `annualInterestRate` 欄位
+- [x] 77.4 `AssetService.createSnapshot` / `updateSnapshot` 寫入 `annualInterestRate`；`toDetailResponse` 回傳；`recalcTotals` 在算 `estimatedAnnualDividend` 時加上 `Σ(amount × rate / 100)`
+- [x] 77.5 `AssetService.autoEnrichDividendRates` / `enrichAllSnapshotDividendRates` / `recalcAllDividends` / `updateSnapshotDividendRates` 統一抽出 `sumDepositInterest(snapshot)` helper，重算 `estimatedAnnualDividend` 時一律包含
+- [x] 77.6 `SnapshotFormView.vue`：台幣 + 美元 tab 各加「年利率」「預估利息」兩欄；`mapDepositFromApi` 映射 `annualInterestRate`；`addDeposit` 預設 `null`；submit payload 帶 `annualInterestRate`
+- [x] 77.7 `SnapshotFormView.vue`：新增 `depositInterestTwd(d)` helper 與 `depositInterestTotal` computed；`summaryDividend` 加進去；台幣 tab 底部彙總列新增「預估年利息」一欄
+- [ ] 77.8 服務重啟驗證：在台幣存款列輸入 1.5（年利率），預估利息欄即時顯示金額；底部彙總「預估年利息」與頂部 KPI「預估年配息」皆變動；儲存後重新打開該快照，年利率值仍在
+- [ ] 77.9 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+

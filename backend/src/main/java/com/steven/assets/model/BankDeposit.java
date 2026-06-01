@@ -50,6 +50,10 @@ public class BankDeposit {
     @Builder.Default
     private String currency = "TWD";
 
+    /** 年利率（百分比，1.5 表示 1.5%；TRANSIT_* 一律 null） */
+    @Column(name = "annual_interest_rate", precision = 7, scale = 4)
+    private BigDecimal annualInterestRate;
+
     /** 備註 (例如定存到期日、利率等) */
     @Column(length = 200)
     private String notes;
