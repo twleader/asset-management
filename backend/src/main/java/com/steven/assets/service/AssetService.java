@@ -97,12 +97,17 @@ public class AssetService {
             }
         }
         if (updated) {
-            // 重算快照合計
-            BigDecimal totalDividend = snapshot.getStocks().stream()
+            // 重算快照合計（stocks + funds + deposit interest）
+            BigDecimal totalStockDiv = snapshot.getStocks().stream()
                     .filter(st -> st.getEstimatedDividend() != null)
                     .map(StockHolding::getEstimatedDividend)
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
-            snapshot.setEstimatedAnnualDividend(totalDividend);
+            BigDecimal totalFundDiv = snapshot.getFunds().stream()
+                    .filter(fh -> fh.getEstimatedDividend() != null)
+                    .map(FundHolding::getEstimatedDividend)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            snapshot.setEstimatedAnnualDividend(
+                    totalStockDiv.add(totalFundDiv).add(sumDepositInterest(snapshot)));
             snapshotRepo.save(snapshot);
         }
     }
@@ -130,6 +135,7 @@ public class AssetService {
                         .amount(normalizeDepositAmount(d, req.usdExchangeRate()))
                         .originalAmount(d.originalAmount())
                         .currency(d.currency() != null ? d.currency() : "TWD")
+                        .annualInterestRate(sanitizeInterestRate(d))
                         .notes(d.notes())
                         .build();
                 snapshot.getDeposits().add(deposit);
@@ -221,6 +227,33 @@ public class AssetService {
         return twd;
     }
 
+    /** TRANSIT_* 不適用年利率欄位；其餘原樣回傳 */
+    private BigDecimal sanitizeInterestRate(AssetSnapshotDto.DepositRequest d) {
+        String currency = d.currency() != null ? d.currency() : "TWD";
+        if ("TRANSIT_TWD".equals(currency) || "TRANSIT_USD".equals(currency)) return null;
+        return d.annualInterestRate();
+    }
+
+    /**
+     * 該筆存款的預估年利息（TWD）。`amount` 已是台幣等值，無論幣別都得到 TWD。
+     * rate null / 非正 → 0；TRANSIT_* 即使誤帶 rate 也不計入。
+     */
+    private BigDecimal depositEstimatedInterest(BankDeposit d) {
+        BigDecimal rate = d.getAnnualInterestRate();
+        if (rate == null || rate.compareTo(BigDecimal.ZERO) <= 0) return BigDecimal.ZERO;
+        String cur = d.getCurrency();
+        if ("TRANSIT_TWD".equals(cur) || "TRANSIT_USD".equals(cur)) return BigDecimal.ZERO;
+        BigDecimal amt = d.getAmount() != null ? d.getAmount() : BigDecimal.ZERO;
+        return amt.multiply(rate).divide(BigDecimal.valueOf(100), 0, RoundingMode.HALF_UP);
+    }
+
+    /** 快照存款預估年利息合計 */
+    private BigDecimal sumDepositInterest(AssetSnapshot snapshot) {
+        return snapshot.getDeposits().stream()
+                .map(this::depositEstimatedInterest)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
     private boolean isTransitPayable(String depositType) {
         if (depositType == null) return false;
         return transitFundTypeRepo.findByCode(depositType)
@@ -268,7 +301,9 @@ public class AssetService {
                     .snapshot(snapshot).bank(bank).depositType(d.depositType())
                     .amount(normalizeDepositAmount(d, req.usdExchangeRate()))
                     .originalAmount(d.originalAmount())
-                    .currency(d.currency() != null ? d.currency() : "TWD").notes(d.notes()).build());
+                    .currency(d.currency() != null ? d.currency() : "TWD")
+                    .annualInterestRate(sanitizeInterestRate(d))
+                    .notes(d.notes()).build());
             });
         }
         if (req.funds() != null) {
@@ -526,11 +561,16 @@ public class AssetService {
                 }
             }
             if (updated) {
-                BigDecimal totalDiv = snapshot.getStocks().stream()
+                BigDecimal totalStockDiv = snapshot.getStocks().stream()
                         .filter(st -> st.getEstimatedDividend() != null)
                         .map(StockHolding::getEstimatedDividend)
                         .reduce(BigDecimal.ZERO, BigDecimal::add);
-                snapshot.setEstimatedAnnualDividend(totalDiv);
+                BigDecimal totalFundDiv = snapshot.getFunds().stream()
+                        .filter(fh -> fh.getEstimatedDividend() != null)
+                        .map(FundHolding::getEstimatedDividend)
+                        .reduce(BigDecimal.ZERO, BigDecimal::add);
+                snapshot.setEstimatedAnnualDividend(
+                        totalStockDiv.add(totalFundDiv).add(sumDepositInterest(snapshot)));
                 snapshotRepo.save(snapshot);
                 log.info("快照 {} {} 配息率補齊完成", snapshot.getId(), snapshot.getSnapshotDate());
             }
@@ -592,13 +632,14 @@ public class AssetService {
                     .filter(fh -> fh.getEstimatedDividend() != null)
                     .map(FundHolding::getEstimatedDividend)
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
-            BigDecimal totalDiv = totalStockDiv.add(totalFundDiv);
+            BigDecimal totalDepositInterest = sumDepositInterest(snapshot);
+            BigDecimal totalDiv = totalStockDiv.add(totalFundDiv).add(totalDepositInterest);
             if (changed || !totalDiv.equals(snapshot.getEstimatedAnnualDividend())) {
                 snapshot.setEstimatedAnnualDividend(totalDiv);
                 snapshotRepo.save(snapshot);
                 updatedCount++;
-                log.info("重算配息完成: 快照 {} {} estimatedAnnualDividend={} (stock={}, fund={})",
-                        snapshot.getId(), snapshot.getSnapshotDate(), totalDiv, totalStockDiv, totalFundDiv);
+                log.info("重算配息完成: 快照 {} {} estimatedAnnualDividend={} (stock={}, fund={}, depositInterest={})",
+                        snapshot.getId(), snapshot.getSnapshotDate(), totalDiv, totalStockDiv, totalFundDiv, totalDepositInterest);
             }
         }
         return updatedCount;
@@ -639,7 +680,7 @@ public class AssetService {
             }
         }
 
-        // 重算快照層級的 estimatedAnnualDividend（stocks + funds，與 recalcAllDividends 行為一致）
+        // 重算快照層級的 estimatedAnnualDividend（stocks + funds + deposit interest，與 recalcAllDividends 行為一致）
         BigDecimal totalStockDiv = snapshot.getStocks().stream()
                 .filter(st -> st.getEstimatedDividend() != null)
                 .map(StockHolding::getEstimatedDividend)
@@ -648,7 +689,8 @@ public class AssetService {
                 .filter(fh -> fh.getEstimatedDividend() != null)
                 .map(FundHolding::getEstimatedDividend)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
-        snapshot.setEstimatedAnnualDividend(totalStockDiv.add(totalFundDiv));
+        snapshot.setEstimatedAnnualDividend(
+                totalStockDiv.add(totalFundDiv).add(sumDepositInterest(snapshot)));
 
         snapshotRepo.save(snapshot);
     }
@@ -684,7 +726,8 @@ public class AssetService {
                 .filter(fh -> fh.getEstimatedDividend() != null)
                 .map(FundHolding::getEstimatedDividend)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal totalDividend = totalStockDividend.add(totalFundDividend);
+        BigDecimal totalDepositInterest = sumDepositInterest(s);
+        BigDecimal totalDividend = totalStockDividend.add(totalFundDividend).add(totalDepositInterest);
 
         s.setTotalDeposit(totalDeposit);
         s.setTotalFundValue(totalFundValue);
@@ -712,13 +755,19 @@ public class AssetService {
 
     private AssetSnapshotDto.SnapshotDetailResponse toDetailResponse(AssetSnapshot s) {
         List<AssetSnapshotDto.DepositResponse> deposits = s.getDeposits().stream()
-                .map(d -> new AssetSnapshotDto.DepositResponse(
-                    d.getId(),
-                    d.getBank() != null ? d.getBank().getId() : null,
-                    d.getBank() != null ? d.getBank().getDisplayName() : null,
-                    d.getDepositType(), d.getDepositType(),
-                    d.getAmount(), d.getOriginalAmount(), d.getCurrency(), d.getNotes()
-                )).toList();
+                .map(d -> {
+                    BigDecimal interest = depositEstimatedInterest(d);
+                    BigDecimal interestOut = interest.compareTo(BigDecimal.ZERO) > 0 ? interest : null;
+                    return new AssetSnapshotDto.DepositResponse(
+                        d.getId(),
+                        d.getBank() != null ? d.getBank().getId() : null,
+                        d.getBank() != null ? d.getBank().getDisplayName() : null,
+                        d.getDepositType(), d.getDepositType(),
+                        d.getAmount(), d.getOriginalAmount(), d.getCurrency(),
+                        d.getAnnualInterestRate(), interestOut,
+                        d.getNotes()
+                    );
+                }).toList();
 
         List<AssetSnapshotDto.FundResponse> funds = s.getFunds().stream()
                 .map(f -> {

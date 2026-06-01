@@ -138,6 +138,18 @@
                     @blur="row.amount = numParse(row.amountStr, 0); row.amountStr = numFmt(row.amount)" />
                 </template>
               </el-table-column>
+              <el-table-column label="年利率(%)" align="right" width="110">
+                <template #default="{ row }">
+                  <el-input v-model="row.annualInterestRateStr" size="small" style="width:100%"
+                    :input-style="{ textAlign: 'right' }" placeholder="0"
+                    @blur="row.annualInterestRate = numParse(row.annualInterestRateStr, 4); row.annualInterestRateStr = row.annualInterestRate ? numFmt(row.annualInterestRate, 4) : ''" />
+                </template>
+              </el-table-column>
+              <el-table-column label="預估利息" align="right" width="120">
+                <template #default="{ row }">
+                  <span style="font-size:13px;color:#64748b">{{ depositInterestTwd(row) > 0 ? fmt(depositInterestTwd(row)) : '-' }}</span>
+                </template>
+              </el-table-column>
               <el-table-column label="備註">
                 <template #default="{ row }">
                   <el-input v-model="row.notes" size="small" />
@@ -184,9 +196,21 @@
                     @blur="row.amount = numParse(row.amountStr, 2); row.amountStr = numFmt(row.amount)" />
                 </template>
               </el-table-column>
-              <el-table-column label="台幣等值" align="right" width="130">
+              <el-table-column label="台幣等值" align="right" width="120">
                 <template #default="{ row }">
                   <span style="font-size:13px;color:#64748b">{{ fmt(depositTwd(row)) }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="年利率(%)" align="right" width="110">
+                <template #default="{ row }">
+                  <el-input v-model="row.annualInterestRateStr" size="small" style="width:100%"
+                    :input-style="{ textAlign: 'right' }" placeholder="0"
+                    @blur="row.annualInterestRate = numParse(row.annualInterestRateStr, 4); row.annualInterestRateStr = row.annualInterestRate ? numFmt(row.annualInterestRate, 4) : ''" />
+                </template>
+              </el-table-column>
+              <el-table-column label="預估利息(TWD)" align="right" width="130">
+                <template #default="{ row }">
+                  <span style="font-size:13px;color:#64748b">{{ depositInterestTwd(row) > 0 ? fmt(depositInterestTwd(row)) : '-' }}</span>
                 </template>
               </el-table-column>
               <el-table-column label="備註">
@@ -402,6 +426,11 @@
               </span>
             </div>
           </template>
+          <div class="ds-sep" />
+          <div class="ds-item">
+            <span class="ds-label">預估年利息</span>
+            <span class="ds-val sb-dividend">{{ fmt(depositInterestTotal) }}</span>
+          </div>
         </div>
       </el-card>
 
@@ -1556,6 +1585,18 @@ const depositTwd = (d) => {
   }
   return amt
 }
+// 該筆存款的預估年利息（TWD）— amount 已是台幣等值，rate 為百分比（1.5 = 1.5%）
+// TRANSIT_* 不適用，rate null / 非正回 0
+const depositInterestTwd = (d) => {
+  if (!d) return 0
+  if (d.currency === 'TRANSIT_TWD' || d.currency === 'TRANSIT_USD') return 0
+  const rate = Number(d.annualInterestRate || 0)
+  if (rate <= 0) return 0
+  return Math.round(depositTwd(d) * rate / 100)
+}
+const depositInterestTotal = computed(() =>
+  form.deposits.reduce((sum, d) => sum + depositInterestTwd(d), 0)
+)
 const depositTotal = computed(() =>
   form.deposits.reduce((sum, d) => sum + depositTwd(d), 0)
 )
@@ -1636,8 +1677,8 @@ const summaryFundProfit = computed(() => summaryFundValue.value - summaryFundCos
 const summaryTotalAssets = computed(() =>
   Number(summaryDeposit.value) + Number(summaryFundValue.value)
   + Number(twSummary.value.value) + Number(usSummary.value.value))
-// 預估年配息合計 = 股票 + 基金（即時計算；不用 pickStored 因為基金部分使用者改 units 時要即時反應）
-const summaryDividend = computed(() => allSummary.value.dividend + fundTotalDividend.value)
+// 預估年配息合計 = 股票 + 基金 + 存款預估年利息（即時計算；不用 pickStored 因為基金部分使用者改 units 時要即時反應）
+const summaryDividend = computed(() => allSummary.value.dividend + fundTotalDividend.value + depositInterestTotal.value)
 
 // ===== Deposit helpers =====
 const transitTypeOptions = ref([])
@@ -1664,7 +1705,18 @@ const mapDepositFromApi = (d, rate = 1) => {
   } else {
     displayAmt = d.amount
   }
-  return { _rowId: `dep_${_idSeq++}`, bankId: d.bankId || null, depositType: d.depositType, currency, amount: displayAmt, amountStr: numFmt(displayAmt), notes: d.notes }
+  const interestRate = d.annualInterestRate != null ? Number(d.annualInterestRate) : null
+  return {
+    _rowId: `dep_${_idSeq++}`,
+    bankId: d.bankId || null,
+    depositType: d.depositType,
+    currency,
+    amount: displayAmt,
+    amountStr: numFmt(displayAmt),
+    annualInterestRate: interestRate,
+    annualInterestRateStr: interestRate != null ? numFmt(interestRate) : '',
+    notes: d.notes
+  }
 }
 
 // ===== Deposit Tabs =====
@@ -1693,11 +1745,11 @@ const addDeposit = (outerTab = 'TWD') => {
   if (outerTab === 'TRANSIT') {
     const currency = transitTab.value === 'USD' ? 'TRANSIT_USD' : 'TRANSIT_TWD'
     const defaultType = transitTypeOptions.value[0]?.value ?? '信用卡待付款'
-    form.deposits.push({ _rowId: `dep_${_idSeq++}`, bankId: null, depositType: defaultType, currency, amount: 0, amountStr: '0' })
+    form.deposits.push({ _rowId: `dep_${_idSeq++}`, bankId: null, depositType: defaultType, currency, amount: 0, amountStr: '0', annualInterestRate: null, annualInterestRateStr: '' })
     return
   }
   const typeMap = { USD: '美元活存', TWD: '活存' }
-  form.deposits.push({ _rowId: `dep_${_idSeq++}`, bankId: null, depositType: typeMap[outerTab] ?? '活存', currency: outerTab, amount: 0, amountStr: '0' })
+  form.deposits.push({ _rowId: `dep_${_idSeq++}`, bankId: null, depositType: typeMap[outerTab] ?? '活存', currency: outerTab, amount: 0, amountStr: '0', annualInterestRate: null, annualInterestRateStr: '' })
 }
 
 const addFund = () =>
@@ -2251,15 +2303,19 @@ const submit = async () => {
     await formRef.value.validate()
     const deposits = form.deposits.map(d => {
       const isUs = d.currency === 'USD' || d.currency === 'TRANSIT_USD'
+      const isTransit = d.currency === 'TRANSIT_TWD' || d.currency === 'TRANSIT_USD'
       // 後端負責：(1) USD/TRANSIT_USD 用 snapshot 匯率算 amount；(2) TRANSIT_* 依 deposit_type 自動處理正負號
       // 前端只送原始輸入：amount 一律送正數，USD 類另外送 originalAmount
       const absAmt = Math.abs(Number(d.amount || 0))
+      const rate = !isTransit && d.annualInterestRate != null && Number(d.annualInterestRate) > 0
+        ? Number(d.annualInterestRate) : null
       return {
         bankId: d.bankId || null,
         depositType: d.depositType,
         currency: d.currency,
         amount: isUs ? null : absAmt,
         originalAmount: isUs ? absAmt : null,
+        annualInterestRate: rate,
         notes: d.notes || null
       }
     })

@@ -24,6 +24,7 @@ public class AssetSnapshotDto {
             @NotNull BigDecimal amount,
             BigDecimal originalAmount,
             String currency,
+            BigDecimal annualInterestRate, // 年利率（百分比，1.5 = 1.5%）
             String notes
     ) {}
 
@@ -99,6 +100,8 @@ public class AssetSnapshotDto {
             BigDecimal amount,
             BigDecimal originalAmount,
             String currency,
+            BigDecimal annualInterestRate,    // 年利率（百分比；nullable）
+            BigDecimal estimatedAnnualInterest, // 預估年利息（TWD，amount × rate / 100；rate null 時為 null）
             String notes
     ) {}
 

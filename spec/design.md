@@ -339,7 +339,10 @@ BackupSetting         (備份保留代數設定，單列資料表，id = 1)
 | originalAmount | BigDecimal | 原始幣別金額 |
 | amount | BigDecimal | 台幣換算金額 |
 | currency | String | 幣別（TWD/USD） |
-| notes | String | 備註（如「行存」、「綜存」等標記） |
+| annualInterestRate | BigDecimal | 年利率（百分比，1.5 表示 1.5%；scale 4，最多 0.0001% 精度）；nullable，僅 TWD / USD 適用，TRANSIT_* 一律 null |
+| notes | String | 備註（如「定存到期日」等標記） |
+
+> **預估年利息為衍生值不存 DB**：`estimatedAnnualInterest = amount × annualInterestRate / 100`（amount 已是台幣等值，無論幣別都得到 TWD 結果），由 DTO / 前端即時計算後回傳。各筆加總後併入 `asset_snapshot.estimated_annual_dividend`（與股票、基金的預估配息一起）。
 
 #### StockHolding
 | 欄位 | 型別 | 說明 |
@@ -775,6 +778,12 @@ totalStock   = Σ(twStock.currentValue)
 totalAssets  = totalDeposit + totalFund + totalStock
 totalCost    = Σ(stock.investmentCost)         # 儲存總投資成本，非每股成本
 totalProfit  = totalStock - totalCost
+
+# 預估年配息合計（asset_snapshot.estimated_annual_dividend）
+estimatedAnnualDividend
+  = Σ(stockHolding.estimatedDividend)
+  + Σ(fundHolding.estimatedDividend)
+  + Σ(bankDeposit.amount × bankDeposit.annualInterestRate / 100)  # 存款預估年利息（amount 已是台幣等值）
 ```
 
 ### Excel 匯入流程

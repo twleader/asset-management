@@ -126,7 +126,7 @@ public class ExcelImportService {
                             originalAmount = twdAmount.divide(usdRate, 2, RoundingMode.HALF_UP);
                         }
                         deposits.add(new AssetSnapshotDto.DepositRequest(
-                            bankId, depositType, twdAmount, originalAmount, currency, null
+                            bankId, depositType, twdAmount, originalAmount, currency, null, null
                         ));
                     }
                 }
