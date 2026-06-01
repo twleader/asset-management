@@ -2179,3 +2179,18 @@ fingerprint 偵測（與既有 `fetchUsStockName` 同一模式）。
 - [ ] 77.8 服務重啟驗證：在台幣存款列輸入 1.5（年利率），預估利息欄即時顯示金額；底部彙總「預估年利息」與頂部 KPI「預估年配息」皆變動；儲存後重新打開該快照，年利率值仍在
 - [ ] 77.9 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
 
+### Task 78: 警示存檔守門放寬：本地 stock 主檔也算合法 canonical
+
+對應 Requirements: Requirement 14（觀察清單 / 警示）
+
+#### 背景
+
+`StockAlertService.assertNameMatchesCode` 直接打外部來源（ext-materials-service `/internal/stock-name` → Yahoo `shortName`）取得 canonical name 與使用者送來的 `stockName` 比對。但 lookupName 帶名是「本地 `stock` 主檔優先 → 外部 fallback」，當外部來源在不同時間回不同字串（例如美股 NVDA：Yahoo `shortName` 「NVIDIA Corporation」vs 主檔過去寫入的 「NVIDIA Corporation Common Stock」），UI 自動帶名後 save 時會被守門擋下，跳出「代號 NVDA 與股名「NVIDIA Corporation Common Stock」不符，外部來源為「NVIDIA Corporation」」400。既然 lookupName 帶出的值來自主檔，主檔本身應算合法 canonical。
+
+#### Steps:
+
+- [ ] 78.1 `StockAlertService.assertNameMatchesCode`：取得外部 canonical 後若與 user-supplied `stockName` 不一致，再 fallback 對照 `stockMasterRepo.findByCodeAndMarket(code, market).name`；任一相符即通過，兩者皆不相符才 throw。錯誤訊息維持「代號 X 與股名「Y」不符，外部來源為「Z」」（仍以外部 canonical 為錯誤訊息中的對照值，避免訊息誤導）
+- [ ] 78.2 spec：`requirements.md` 與 `design.md` 對應段落已同步更新（本 task 同 commit）
+- [ ] 78.3 服務重啟驗證：以原案例重現 — 美股 NVDA + lookupName 自動帶名 → 新增「月線偏離 5%」警示能順利存檔
+- [ ] 78.4 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+

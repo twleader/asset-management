@@ -109,8 +109,10 @@ public class StockAlertService {
 
     /**
      * 守門：建立／更新警示時，以外部權威來源（ext-materials-service /internal/stock-name）
-     * 比對 user-supplied stockName。canonical 非空且不一致 → 400，避免使用者把錯誤代號
-     * （如把 2500 標成「台積電」）寫入 stock 主檔造成觀察清單顯示名稱對但無報價的列。
+     * 比對 user-supplied stockName。canonical 非空且不一致時，再 fallback 對照本地 stock 主檔
+     * （lookupName 是「主檔優先 → 外部 fallback」，UI 帶出的值就來自主檔，主檔本身亦視為合法 canonical，
+     * 避免外部來源版本差異—例如 Yahoo shortName 「NVIDIA Corporation」vs 主檔的 「NVIDIA Corporation Common Stock」—
+     * 造成 UI 自動帶名後 save 被自己擋下）。兩者皆不相符才回 400。
      * canonical 為空（外部 API 失敗 / 查無）則信任使用者，外部異常不阻擋合法建立。
      * 0000 + 台股：跳過（大盤特例）。0000 + 美股：直接拒絕（無此代號）。
      */
@@ -124,10 +126,14 @@ public class StockAlertService {
                 ? historicalDataService.fetchTwStockName(code)
                 : historicalDataService.fetchUsStockName(code);
         if (canonical == null || canonical.isBlank()) return;
-        if (!userName.trim().equalsIgnoreCase(canonical.trim())) {
-            throw new IllegalArgumentException(
-                    "代號 %s 與股名「%s」不符，外部來源為「%s」".formatted(code, userName.trim(), canonical.trim()));
-        }
+        String trimmedUser = userName.trim();
+        if (trimmedUser.equalsIgnoreCase(canonical.trim())) return;
+        String masterName = stockMasterRepo.findByCodeAndMarket(code, market)
+                .map(s -> s.getName())
+                .orElse(null);
+        if (masterName != null && trimmedUser.equalsIgnoreCase(masterName.trim())) return;
+        throw new IllegalArgumentException(
+                "代號 %s 與股名「%s」不符，外部來源為「%s」".formatted(code, trimmedUser, canonical.trim()));
     }
 
     @Transactional
