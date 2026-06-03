@@ -135,7 +135,7 @@ cd frontend
 
 ### 5.2 Live 行情走 Redis + SSE
 
-- **Cache：** `price:{market}:{code}`（JSON，TTL 600s），由 `external-materials-service` 每 2 分鐘 cron 寫入。
+- **Cache：** `price:{market}:{code}`（JSON，TTL 24h — 確保「今日撈到過真實 z 後就持續活著直到被覆寫」），由 `external-materials-service` 每 2 分鐘 cron 寫入。
 - **Pub/Sub：** Redis channel `price-update`；business-services 透過 `RedisMessageListenerContainer` 訂閱 → fan-out 到 `Sinks.Many<String>` → SSE endpoint `/api/market-data/prices/stream`。
 - **前端：** `EventSource('/api/bff/market-data/stream')`，初始 GET 一次後改走 SSE，不再 polling。
 - **Fallback：** Redis miss → `stock_price_history` 最近一筆收盤。
