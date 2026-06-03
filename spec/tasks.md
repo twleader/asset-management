@@ -2212,3 +2212,22 @@ Dashboard「持股明細 (現值)」bar chart、KPI「股票現值」、即時�
 - [x] 79.5 重 build external-materials-service image、`docker compose up -d --build external-materials-service` 套用；盤中（09:00–13:30 Asia/Taipei，平日）觀察 `GET /api/market-data/prices`：所有台股 source 應該都是 `TWSE`（含真實成交價）而非 `TWSE(前收)`；若某輪某檔 z='-'，下輪 polling 後該檔 `price` 與 `updatedAt` 都更新但中間維持上輪值不變。Dashboard「持股明細」chart 各 bar 不再出現「整批同步跳回昨收」的瞬間。
 - [x] 79.6 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
 
+### Task 80: cold-start fallback — `z='-'` 補上「今日開盤價」候選
+
+對應 Requirements: Requirement 7（市場資料整合）
+
+#### 背景
+
+Task 79 把 `z='-'` 改成 skip write 後解決了「整批跳回昨收」的核心 bug，但暴露出 cold-start 弱點：若某檔股票 Redis cache 還沒被填過（首次部署、剛清過 cache、TTL 過期），而當下 polling 又連續撞到 `z='-'`，Redis 永遠寫不進去，`PriceQueryService.getLive` 自動 fallback 到 `stock_price_history` 最近一筆收盤 — 又變回顯示昨收。盤中 verify 觀察到 6 檔（0050、00878、00679B、2891、009804、00882）卡在這個狀態：例如 2891 中信金實際盤中 bid/ask 68.8/68.9，Redis absent → 圖表顯示昨收 64.1，落差 -7%。
+
+TWSE mis 在這些情境通常仍有今日開盤價 `o`（今日第一筆真實成交），可作 cold-start 候選；但若 Redis 已有今日真實 intraday tick，cold-start 必須讓位（避免用較早的 `o` 蓋掉較新的成交價）。
+
+#### Steps:
+
+- [ ] 80.1 `PriceFetchClient.getTwseRealTimePrice`：`z='-'` 分支拆兩段 — 有 `o` → `Optional.of(PriceResult(price=o, source="TWSE(開盤)"))`；無 `o` → 維持 `Optional.empty()`。`changePercent` 以 `o − y` 計算（仍為真實漲跌）
+- [ ] 80.2 `PriceCacheWriter.write`：判斷 incoming `source.contains("(")`（cold-start fallback）→ 先呼叫 `hasFreshRealtimeCache(key)`；若既有 cache `source` 不含 `(` 且 `tradingDate` == 該市場今日，則 skip write 不覆寫。helper `hasFreshRealtimeCache` 私有，封裝 Redis 讀 + JSON parse + 今日對比邏輯
+- [ ] 80.3 spec：`requirements.md` Requirement 7、`design.md`「TWSE `z='-'` 時改採兩段式 fallback」段、`steering/tech.md` TWSE 列已同步更新（本 task 同 commit）
+- [ ] 80.4 重 build external-materials-service image、`docker compose up -d --build external-materials-service`；盤中清空指定股票的 Redis cache（`redis-cli DEL price:台股:2891`）並 trigger refresh，驗證該檔 Redis 重新寫入 `source="TWSE(開盤)"`、price 為今日 open（非昨日 close）；接著 trigger 第二次 refresh，若 TWSE 已回真 z 應覆寫成 `TWSE`，若仍 z='-' 則保留 `TWSE(開盤)` 不變
+- [ ] 80.5 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+
+

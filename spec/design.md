@@ -149,7 +149,24 @@ NASDAQ info API 自 2026/04 起對 ETF 的 `keyStats` 為 null（無 dayrange �
 
 **美股盤中 `openPrice` 補強（2026/05）：** NASDAQ `/info` endpoint 自 2026/04 起不再回傳 `OpenPrice`，`PriceFetchClient.getNasdaqPrice` 在主呼叫之後額外打 `https://api.nasdaq.com/api/quote/{code}/historical?assetclass=...&fromdate=YYYY-MM-DD&todate=YYYY-MM-DD&limit=1`（日期皆為美東今日），由 `data.tradesTable.rows[0].open` 取得今日開盤價。失敗或無今日列時保留 null，由 `WatchStockService` 的 `stock_price_history` fallback 接手（顯示昨日 open；不接受時可在 UI 端忽略）。HTTP 呼叫在 `PricePoller.updatePrices` 的 virtual-thread pool 中與其他 stock 並行執行，不會延長 cron 週期。
 
-**TWSE `z='-'` 時改採 skip write（2026/06，修正盤中股價跳回昨收的 bug）：** TWSE mis API 的 `z`（最近一筆成交價）以每 5 秒 tick 為單位，這一輪 cron polling 撞到「兩 tick 之間沒有新成交」的視窗時會回 `z='-'`，但同一檔股票今日通常仍在持續成交（`h`/`l`/`v`/`o`/買賣盤深度都有值）。舊邏輯將 `z='-'` 視為「整天無成交」並退回 `y`（昨日收盤）寫 Redis（`source = "TWSE(前收)"`），盤中只要任一輪 polling 命中就會把 Dashboard 持股圖、即時資產估算的所有現值瞬間替換成昨收，造成「盤中股價與實際明顯偏差」。改採：`getTwseRealTimePrice` 在 `z='-'` 時回 `Optional.empty()`，`PricePoller` 略過寫 Redis，**保留上一輪成功 poll 寫入的當日 intraday 成交價**；下一輪有新成交即覆寫為真實成交價。`getStockPrice` 改回 `Optional<PriceResult>`，`PricePoller` 改判 `Optional.empty()` 略過寫入（同時也涵蓋 NASDAQ 查無資料的 fail-soft）。首輪 polling 即無成交且無既有 Redis cache 時，`PriceQueryService.getLive` 自然 fallback 至 `stock_price_history` 最近一筆收盤（與一般 Redis miss 同行為）。`source` 欄不再出現 `"TWSE(前收)"`；走勢圖今日格的 `source.contains("(")` 守門條件仍適用於 `(history)` 等其他非實際成交來源。
+**TWSE `z='-'` 時改採兩段式 fallback（2026/06，修正盤中股價跳回昨收的 bug）：** TWSE mis API 的 `z`（最近一筆成交價）以每 5 秒 tick 為單位，這一輪 cron polling 撞到「兩 tick 之間沒有新成交」的視窗時會回 `z='-'`，但同一檔股票今日通常仍在持續成交（`h`/`l`/`v`/`o`/買賣盤深度都有值）。舊邏輯將 `z='-'` 視為「整天無成交」並退回 `y`（昨日收盤）寫 Redis（`source = "TWSE(前收)"`），盤中只要任一輪 polling 命中就會把 Dashboard 持股圖、即時資產估算的所有現值瞬間替換成昨收，造成「盤中股價與實際明顯偏差」。
+
+改採兩段式 fallback：
+
+1. **`getTwseRealTimePrice` 端**：
+    - `z` 有值 → 正常回 `source="TWSE"`。
+    - `z='-'` 但今日開盤價 `o` 有值 → 回 `source="TWSE(開盤)"`、`price=o`、`previousClose=y`、`changePercent` 以 `o-y` 計算。`o` 是今日第一筆真實成交，仍符合「股價一律是成交價」規則。
+    - `z='-'` 且 `o` 也無（盤前或今日從未成交）→ `Optional.empty()`。
+2. **`PriceCacheWriter.write` 端**：判斷 incoming `source` 是否含 `(`（cold-start fallback 來源）；若是，先檢查 Redis 既有 cache — 若既有 source 不含 `(` 且 `tradingDate` == 該市場今日（即「已有今日真實成交」），則 **skip write 不覆寫**，避免用較早的 open 蓋掉較新的 intraday tick。`hasFreshRealtimeCache(key)` 私有 helper 封裝此判斷。
+3. **`PricePoller` 端**：`getStockPrice` 改回 `Optional<PriceResult>`；empty 直接 return 不寫 Redis、不更新 stock 主檔名稱、不視為錯誤（同時涵蓋 NASDAQ 查無資料的 fail-soft）。
+
+合併效果：
+- 盤中有成交的 5 秒 tick → 寫真實 `z`（`TWSE`）。
+- 盤中沒成交的 5 秒 tick + 之前已有今日 tick cache → cold-start 候選被守門擋下，保留前一筆真實 intraday 價。
+- 首輪 polling 即 `z='-'`（盤剛開或剛清過 cache）+ 有 `o` → 寫入今日開盤價作 cold-start，比直接 fallback 到昨收（stock_price_history）貼近現況。
+- 連 `o` 都沒有 → 完全 skip，`PriceQueryService.getLive` 自然 fallback 至 `stock_price_history` 最近一筆收盤。
+
+`source` 欄不再出現 `"TWSE(前收)"`；走勢圖今日格的 `source.contains("(")` 守門條件仍適用於 `(開盤)`、`(history)` 等非「今日真實收盤」來源（開盤是當天第一筆成交、非今日 closePrice，不能拼入今日格的 closePrice）。
 
 **對外介面：**
 - `POST /internal/refresh`（僅 docker network 內 `business-services` 呼叫）：同步抓所有持股一次、寫 Redis、回 200。供使用者按「刷新」時用

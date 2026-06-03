@@ -109,7 +109,7 @@ cd frontend
 
 | 來源 | 用途 | 認證 | 備註 |
 |------|------|------|------|
-| **TWSE mis API** | 台股盤中 live | 無 | `o`/`z` 欄位；`z=-` 時 skip write（保留上輪 Redis cache，禁退回 `y` 昨收） |
+| **TWSE mis API** | 台股盤中 live | 無 | `o`/`z` 欄位；`z=-` 時兩段式 fallback：有 `o` → cold-start `TWSE(開盤)`（受 PriceCacheWriter 守門不覆寫今日真實 cache）、無 `o` → skip；禁退回 `y` 昨收 |
 | **TWSE FMTQIK** | 台股大盤月報 + 假日表 | 無 | 用於 GDP-TWSE 圖、交易日曆 |
 | **TWSE BWIBBU** | 台股股利率 | 無 | 取代 Yahoo Finance（已停用） |
 | **FinMind** | 台股盤後收盤、TaiwanStockDividend、TaiwanETFHoldings | `FINMIND_TOKEN`（Bearer） | 未設 token 仍可匿名（限流） |
