@@ -60,7 +60,6 @@ public class SnapshotFormBffController {
     @PostMapping("/prices")
     public Mono<ResponseEntity<List<Map<String, Object>>>> batchPrices(
             @RequestParam String date,
-            @RequestParam(defaultValue = "false") boolean historicalOnly,
             @RequestBody List<Map<String, String>> stocks) {
         if (stocks == null || stocks.isEmpty()) {
             return Mono.just(ResponseEntity.ok(Collections.emptyList()));
@@ -72,7 +71,7 @@ public class SnapshotFormBffController {
                     }
                     return Mono.just(historical);
                 })
-                .flatMap(historical -> enrichBatch(date, historical, stocks, historicalOnly))
+                .flatMap(historical -> enrichBatch(date, historical, stocks))
                 .map(ResponseEntity::ok);
     }
 
@@ -262,11 +261,10 @@ public class SnapshotFormBffController {
      *  - basedate == 該市場時區的今日 → 用即時 price + priceChange（會持續變動）
      *  - 否則 → 用基準日的收盤價（hist.price），priceChange 留空（snapshot 已凍結在那一天）
      *
-     * Dashboard 也套同一規則，兩頁顯示一致。
+     * Dashboard、SnapshotForm（新增 / 編輯）皆套同一規則，三頁顯示一致。
      */
     private Mono<List<Map<String, Object>>> enrichBatch(
-            String date, List<Map<String, Object>> historical, List<Map<String, String>> stocks,
-            boolean historicalOnly) {
+            String date, List<Map<String, Object>> historical, List<Map<String, String>> stocks) {
 
         LocalDate basedate = LocalDate.parse(date);
 
@@ -323,11 +321,10 @@ public class SnapshotFormBffController {
                 // 在那之前 prices-on-date 會 fallback 到前一交易日，造成「基準日 4/28 卻顯示 4/27」。
                 boolean isToday = SnapshotEnricher.isCurrentBasedate(basedate, market);
                 boolean preferLive = isToday && live.get("price") != null;
-                boolean showLiveDelta = !historicalOnly && preferLive;
                 row.put("price", preferLive ? live.get("price") : hist.get("price"));
                 row.put("tradingDate", preferLive ? live.get("tradingDate") : hist.get("tradingDate"));
-                row.put("priceChange", showLiveDelta ? live.get("priceChange") : null);
-                row.put("changePercent", showLiveDelta ? live.get("changePercent") : null);
+                row.put("priceChange", preferLive ? live.get("priceChange") : null);
+                row.put("changePercent", preferLive ? live.get("changePercent") : null);
                 row.put("stockName", firstNonNull(div.get("stockName"), live.get("stockName")));
                 BigDecimal dr = SnapshotEnricher.toBigDecimal(div.get("dividendRate"));
                 row.put("dividendRate", dr);
