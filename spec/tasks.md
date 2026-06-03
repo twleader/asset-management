@@ -2269,9 +2269,9 @@ Task 79+81 定案的兩條規則：(1) 每天開盤抓不到最新值 → 顯示
 
 #### Steps:
 
-- [ ] 82.1 `PriceCacheWriter.LIVE_TTL`：`Duration.ofSeconds(600)` → `Duration.ofHours(24)`，註解寫明動機（避免低流動性股票 z='-' 過久 TTL 過期退回昨收）
-- [ ] 82.2 spec：`requirements.md` Requirement 7、`design.md` Redis key schema 表 + 一致性段落、`steering/tech.md`、`steering/structure.md` 同步「24h」TTL（本 task 同 commit）
-- [ ] 82.3 重 build external-materials-service image、`docker compose up -d --build external-materials-service`；盤中觸發 refresh 並等待真 z 寫入 006208 / 00919 等之前退回昨收的標的；觀察 `redis-cli ttl price:台股:006208` 約等於 24h 起點往下倒數，且 5-10 分鐘內不再退回昨收
-- [ ] 82.4 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+- [x] 82.1 `PriceCacheWriter.LIVE_TTL`：`Duration.ofSeconds(600)` → `Duration.ofHours(24)`，註解寫明動機（避免低流動性股票 z='-' 過久 TTL 過期退回昨收）
+- [x] 82.2 spec：`requirements.md` Requirement 7、`design.md` Redis key schema 表 + 一致性段落、`steering/tech.md`、`steering/structure.md` 同步「24h」TTL（本 task 同 commit）
+- [x] 82.3 重 build external-materials-service image、`docker compose up -d --build external-materials-service`；盤中觸發 refresh 並等待真 z 寫入 006208 / 00919 等之前退回昨收的標的；觀察 `redis-cli ttl price:台股:006208` 約等於 24h 起點往下倒數，且 5-10 分鐘內不再退回昨收
+- [x] 82.4 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
 
 
