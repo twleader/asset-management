@@ -2230,4 +2230,29 @@ TWSE mis 在這些情境通常仍有今日開盤價 `o`（今日第一筆真實�
 - [x] 80.4 重 build external-materials-service image、`docker compose up -d --build external-materials-service`；盤中清空指定股票的 Redis cache（`redis-cli DEL price:台股:2891`）並 trigger refresh，驗證該檔 Redis 重新寫入 `source="TWSE(開盤)"`、price 為今日 open（非昨日 close）；接著 trigger 第二次 refresh，若 TWSE 已回真 z 應覆寫成 `TWSE`，若仍 z='-' 則保留 `TWSE(開盤)` 不變
 - [x] 80.5 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
 
+### Task 81: 回退 Task 80 cold-start — Redis 只能由真實 z tick 推進
+
+對應 Requirements: Requirement 7（市場資料整合）
+
+#### 背景
+
+Task 80 引入「`z='-'` 但今日 `o` 有值 → 寫入 `TWSE(開盤)` cold-start」候選，並由 `PriceCacheWriter` 守門以避免覆蓋今日真實 cache。雖然驗證流程成功（Dashboard 0050、2891 等 cold-started 股票從昨收 → 今日開盤、落差縮小），但規格擁有者指示：**Redis 內的值應該只反映「最近一次真實成交價」，而非「最接近現況的推估」**。理由如下：
+
+- `o`（今日開盤）也是真實成交，但「open 不等於 latest」，把它寫進 Redis 容易讓使用者誤以為這是當下成交價（chart updatedAt 也會跟著跳成 cold-start 寫入時間）。
+- 系統內已有更便宜的「沒有 Redis 就回昨收」路徑（`PriceQueryService.fallbackToHistory` 讀 `stock_price_history`），完全足以涵蓋盤前/cold-start 情境，且語意明確（source="history"）。
+- Cold-start fallback 寫 Redis 本質上在「為了畫面好看而塞推估值」，違反「股價一律是成交價」的更上層原則 — 這條原則的精神是「盤中圖表不會動 ≠ bug」。
+
+#### 規則最終定案（兩條）
+
+1. **每天開盤抓不到最新值 → 顯示昨日收盤**：`z='-'` 時不寫 Redis；前端透過 `PriceQueryService.fallbackToHistory` 看到昨收。
+2. **每次 tick 抓不到值 → 不要更新 Redis**：`PricePoller` skip write，保留上一輪成功 poll 的真實 z。
+
+#### Steps:
+
+- [x] 81.1 `PriceFetchClient.getTwseRealTimePrice`：移除 Task 80 加入的「`o` cold-start」分支；`z='-'` 一律 `Optional.empty()`，註解改寫成「兩條規則」說明
+- [x] 81.2 `PriceCacheWriter.write`：移除 Task 80 加入的「source 含 `(` 守門」分支與 `hasFreshRealtimeCache` 私有 helper；回到「拿到 `PriceResult` 一律寫」的簡化形式（client 端已保證不會送推估值）
+- [x] 81.3 spec：`requirements.md` Requirement 7 改寫成「規則僅兩條」、`design.md`「TWSE `z='-'` 時 skip write」段重寫覆蓋 Task 80 兩段式 fallback、`steering/tech.md` TWSE 列同步
+- [x] 81.4 重 build external-materials-service image、`docker compose up -d --build external-materials-service`；盤中觀察 `/api/market-data/prices` 不再出現 `TWSE(開盤)`；殘留的 `TWSE(開盤)` 會隨 600s TTL 自然過期，或被真實 z 覆寫
+- [x] 81.5 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+
 

@@ -292,27 +292,14 @@ public class PriceFetchClient {
                 Long volumeLots = parseLong(item.path("v").asText(""));
 
                 if (priceStr.isEmpty() || priceStr.startsWith("-")) {
-                    // `z='-'` 表示本輪 polling 撞到「兩 tick 之間沒有新成交」的 5 秒視窗，
-                    // 同檔股票今日通常仍持續成交（h/l/v/o/買賣盤都有值）。退回 y（昨日收盤）寫 Redis
-                    // 會讓盤中圖表整批跳回昨收 — spec Requirement 7、Task 79。
-                    //  - 有今日開盤價 `o` → 視為 cold-start fallback：標 source="TWSE(開盤)" 寫候選；
-                    //    `PriceCacheWriter` 會在 Redis 已有今日真實 intraday cache 時自動 skip 不覆寫，
-                    //    確保不會用較早的 open 蓋掉較新的 tick。但若 Redis 完全空（首輪 polling 即 z='-'），
-                    //    就用 `o`（今日真實成交）寫入，避免前端 fallback 至 stock_price_history 昨收。
-                    //  - 連 `o` 都沒有（盤前或今日從未成交）→ Optional.empty()，poller skip。
-                    if (openPrice == null) {
-                        log.debug("台股 {} z='-' 且無開盤價，本輪略過寫入", stockCode);
-                        return Optional.empty();
-                    }
-                    BigDecimal change = prevClose != null ? openPrice.subtract(prevClose) : BigDecimal.ZERO;
-                    BigDecimal changePct = (prevClose != null && prevClose.compareTo(BigDecimal.ZERO) != 0)
-                            ? change.multiply(BigDecimal.valueOf(100)).divide(prevClose, 6, RoundingMode.HALF_UP)
-                            : BigDecimal.ZERO;
-                    log.debug("台股 {} z='-'，以今日開盤價 {} 作 cold-start fallback", stockCode, openPrice);
-                    return Optional.of(new PriceResult(
-                            stockCode, "台股", openPrice, change, changePct, "TWSE(開盤)",
-                            name.isEmpty() ? null : name,
-                            buyPrice, sellPrice, openPrice, prevClose, highPrice, lowPrice, volumeLots));
+                    // `z='-'` = 本輪 polling 撞到「兩 tick 之間沒有新成交」的 5 秒視窗 → 本輪不更新股價。
+                    // PricePoller 收到 empty 即略過寫入，保留上一輪成功 poll 寫入的 Redis 值；
+                    // 若 Redis 完全空（首輪、剛清過 cache、TTL 過期），`PriceQueryService.getLive` 自然 fallback
+                    // 至 `stock_price_history` 最近一筆收盤（=昨日收盤）— 規格 Requirement 7、Task 79+81。
+                    // 不得用 `o`（今日開盤）或 `y`（昨日收盤）回寫 Redis：盤中 Redis 內的值只能由真實 z tick
+                    // 推進，避免「圖表看起來在動但其實是推估值」的不誠實顯示。
+                    log.debug("台股 {} z='-'，本輪 polling 略過寫入（保留上輪 cache，無 cache 則由 PriceQueryService fallback 昨收）", stockCode);
+                    return Optional.empty();
                 }
 
                 BigDecimal price = new BigDecimal(priceStr);

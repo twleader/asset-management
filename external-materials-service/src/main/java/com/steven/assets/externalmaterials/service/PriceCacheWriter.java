@@ -47,14 +47,6 @@ public class PriceCacheWriter {
         String key = "price:" + market + ":" + code;
         String indexKey = "price:index:" + market;
 
-        // Cold-start fallback（source 含 `(`，例如 "TWSE(開盤)"）：若 Redis 已有今日真實成交價，
-        // 保留不覆寫 — 避免用較早的開盤蓋掉較新的 intraday tick（Task 79 cold-start refinement）。
-        String incomingSource = result.source();
-        if (incomingSource != null && incomingSource.contains("(") && hasFreshRealtimeCache(key)) {
-            log.debug("{} {} 已有今日真實成交 cache，cold-start ({}) 略過寫入", market, code, incomingSource);
-            return;
-        }
-
         LocalDate tradingDate = resolveTradingDate(code, market);
 
         // 盤中聚合 high / low：以本輪成交價更新當日累計，再與外部 API 給的 high/low 取 max/min。
@@ -94,27 +86,6 @@ public class PriceCacheWriter {
             redis.convertAndSend("price-update", json);
         } catch (Exception e) {
             log.warn("寫入 Redis 失敗 {} {}: {}", market, code, e.getMessage());
-        }
-    }
-
-    /**
-     * 既有 Redis cache 是否為「今日真實成交價」(source 不含 `(`、tradingDate == 該市場今日)。
-     * 用於 cold-start fallback 的覆寫守門：避免用 cold-start 蓋掉較新的 intraday tick。
-     */
-    private boolean hasFreshRealtimeCache(String key) {
-        try {
-            String existing = redis.opsForValue().get(key);
-            if (existing == null) return false;
-            com.fasterxml.jackson.databind.JsonNode n = MAPPER.readTree(existing);
-            String src = n.path("source").asText("");
-            if (src.isEmpty() || src.contains("(")) return false;
-            String tradingDate = n.path("tradingDate").asText("");
-            String market = n.path("market").asText("");
-            String today = LocalDate.now("美股".equals(market) ? MarketClock.US_ZONE : MarketClock.TW_ZONE)
-                    .toString();
-            return today.equals(tradingDate);
-        } catch (Exception e) {
-            return false;
         }
     }
 
