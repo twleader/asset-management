@@ -227,7 +227,7 @@
                 <span v-else style="color:#94a3b8">-</span>
               </template>
             </el-table-column>
-            <el-table-column label="股數" width="110" align="right">
+            <el-table-column label="股數" width="95" align="right">
               <template #default="{ row }">
                 {{ formatShares(row.shares, row.market) }}
               </template>
@@ -247,7 +247,7 @@
                 <span style="font-weight:600">{{ formatCurrency(row.currentValue) }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="損益" align="right" width="160">
+            <el-table-column label="損益" align="right" width="175">
               <template #default="{ row }">
                 <span :class="row.profit >= 0 ? 'profit' : 'loss'" style="font-weight:600">
                   {{ formatCurrency(row.profit) }}
