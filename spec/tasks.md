@@ -2195,3 +2195,20 @@ fingerprint 偵測（與既有 `fetchUsStockName` 同一模式）。
 - [ ] 78.3 服務重啟驗證：以原案例重現 — 美股 NVDA + lookupName 自動帶名 → 新增「月線偏離 5%」警示能順利存檔
 - [ ] 78.4 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
 
+### Task 79: 修復盤中股價跳回昨收（TWSE `z='-'` 改採 skip write）
+
+對應 Requirements: Requirement 7（市場資料整合）
+
+#### 背景
+
+Dashboard「持股明細 (現值)」bar chart、KPI「股票現值」、即時資產估算等盤中即時數值，最終都源自 Redis `price:台股:{code}` JSON 的 `price` 欄。`PriceFetchClient.getTwseRealTimePrice` 在 TWSE mis API 回 `z='-'`（這一輪 polling 撞到「兩 tick 之間沒有新成交」的 5 秒視窗）時，**會把 `y`（昨日收盤）當作現價寫進 Redis**，source 標記 `TWSE(前收)`，changePct 強制 0。Task 58.8 把此設計寫進規格（"唯一合理 fallback 是退回前收"），但實務上 TWSE mis 的 `z='-'` 並不代表「整天沒成交」— 同一檔今日通常仍在持續成交（`h`/`l`/`v`/`o`/買賣盤深度都有值），只是這 5 秒視窗剛好沒撮合。盤中每 2 分鐘 polling 命中機率很高，現場 23 檔台股中曾觀察到 11 檔 source 同時為 `TWSE(前收)`，所有現值瞬間跳回昨收，造成「盤中股價與實際明顯偏差」的使用者抱怨。
+
+#### Steps:
+
+- [ ] 79.1 `PriceFetchClient.getTwseRealTimePrice`：移除 `z='-'` 時退回 `prevClose` 寫 Redis 的分支；改回 `Optional.empty()`，並 `log.debug` 紀錄「{code} z='-'，本輪 polling 略過寫入」。同檔股票上不再嘗試另一交易所（`tse`/`otc` for-loop 直接 return empty — codeCheck 已對上）
+- [ ] 79.2 `PriceFetchClient.getStockPrice` 簽名改為 `Optional<PriceResult>`（含台股 / 美股兩條路徑），讓 `getTwseRealTimePrice` 的 empty 與 `getNasdaqPrice` 的 empty 都能語意一致地往上傳遞，不再以 `RuntimeException("查無股價")` 攔截。
+- [ ] 79.3 `PricePoller.updatePrices` 改判 `client.getStockPrice(...).orElse(null)`：null 或 `r.price() == null` → 不寫 Redis、不更新 stock 主檔名稱、不視為錯誤（move on 至下一檔）。原本的 try-catch 仍保留以接住 HTTP 例外。
+- [ ] 79.4 spec：`requirements.md` Requirement 7、`design.md`「TWSE `z='-'` 時改採 skip write」段、`steering/tech.md` TWSE 列已同步更新（本 task 同 commit）
+- [ ] 79.5 重 build external-materials-service image、`docker compose up -d --build external-materials-service` 套用；盤中（09:00–13:30 Asia/Taipei，平日）觀察 `GET /api/market-data/prices`：所有台股 source 應該都是 `TWSE`（含真實成交價）而非 `TWSE(前收)`；若某輪某檔 z='-'，下輪 polling 後該檔 `price` 與 `updatedAt` 都更新但中間維持上輪值不變。Dashboard「持股明細」chart 各 bar 不再出現「整批同步跳回昨收」的瞬間。
+- [ ] 79.6 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+
