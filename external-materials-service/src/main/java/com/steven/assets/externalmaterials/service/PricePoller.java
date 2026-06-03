@@ -10,6 +10,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.util.LinkedHashSet;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -89,7 +90,11 @@ public class PricePoller {
             for (String code : codes) {
                 pool.submit(() -> {
                     try {
-                        PriceResult r = client.getStockPrice(code, market);
+                        // empty 代表「本輪不更新」：台股 z='-'（兩 tick 之間無成交）或外部 API 查無資料；
+                        // 略過寫入 Redis 以保留上一輪成功 poll 的當日 intraday 成交價（spec Task 79）。
+                        Optional<PriceResult> opt = client.getStockPrice(code, market);
+                        if (opt.isEmpty()) return;
+                        PriceResult r = opt.get();
                         if (r.price() == null) return;
                         writer.write(r, markClosed);
                         if (r.stockName() != null && !r.stockName().isBlank()) {

@@ -69,13 +69,18 @@ public class PriceFetchClient {
             Long volume
     ) {}
 
-    public PriceResult getStockPrice(String stockCode, String market) {
+    /**
+     * 取得 live 股價。回傳 empty 代表「這一輪不更新」：
+     *  - 台股 z='-'（本輪 polling 撞到兩 tick 之間沒有新成交的 5 秒視窗）→ 略過寫 Redis，
+     *    保留上一輪成功 poll 的當日 intraday 成交價。**不得退回 y（昨日收盤）覆寫 Redis**，
+     *    否則盤中圖表會整批跳回昨收（spec Requirement 7、Task 79）。
+     *  - 台股 / 美股 API 查無資料、HTTP 錯誤等也回 empty。
+     */
+    public Optional<PriceResult> getStockPrice(String stockCode, String market) {
         if ("台股".equals(market)) {
-            return getTwseRealTimePrice(stockCode)
-                    .orElseThrow(() -> new RuntimeException("查無股價：" + stockCode));
+            return getTwseRealTimePrice(stockCode);
         }
-        return getNasdaqPrice(stockCode)
-                .orElseThrow(() -> new RuntimeException("查無股價：" + stockCode));
+        return getNasdaqPrice(stockCode);
     }
 
     /**
@@ -287,14 +292,13 @@ public class PriceFetchClient {
                 Long volumeLots = parseLong(item.path("v").asText(""));
 
                 if (priceStr.isEmpty() || priceStr.startsWith("-")) {
-                    // 系統一律以「成交價」呈現股價。`z` 為 `-` 表示兩 tick 之間無新成交，
-                    // 不得用買賣中價推估（中價非真實成交價、且可能落在非合法 tick）。
-                    // 唯一合理 fallback 是退回前收（昨日真實成交價），change% 自然為 0。
-                    if (prevClose == null) continue;
-                    return Optional.of(new PriceResult(
-                            stockCode, "台股", prevClose, BigDecimal.ZERO, BigDecimal.ZERO, "TWSE(前收)",
-                            name.isEmpty() ? null : name,
-                            buyPrice, sellPrice, openPrice, prevClose, highPrice, lowPrice, volumeLots));
+                    // `z='-'` 表示本輪 polling 撞到「兩 tick 之間沒有新成交」的 5 秒視窗，
+                    // 同檔股票今日通常仍持續成交（h/l/v/o/買賣盤都有值）。退回 y（昨日收盤）寫 Redis
+                    // 會讓盤中圖表整批跳回昨收 — 改採 skip write：本輪不覆寫 Redis，保留上一輪成功 poll
+                    // 的當日 intraday 成交價（spec Requirement 7、Task 79）。codeCheck 已對上，
+                    // 不必再試另一交易所，直接 return empty。
+                    log.debug("台股 {} z='-'，本輪 polling 略過寫入（保留上輪 cache）", stockCode);
+                    return Optional.empty();
                 }
 
                 BigDecimal price = new BigDecimal(priceStr);

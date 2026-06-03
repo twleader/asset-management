@@ -101,7 +101,7 @@
 
 **Acceptance Criteria:**
 
-- [ ] **股價一律是成交價**：系統內所有顯示的股價（盤中、收盤、走勢圖、Dashboard、管理資產、即時資產估算等所有功能）必須是真實成交過的價格，不得使用買賣中價、買價、賣價或任何衍生估算值。TWSE `z` 為 `-`（兩 tick 之間無新成交）時，唯一合理 fallback 是退回前收（昨日真實成交價，change% = 0）；走勢圖今日格 `getStockHistory` 也只在 `LivePrice.source` 不含括號（=真實成交來源 "TWSE" / "NASDAQ"）時才拼入
+- [ ] **股價一律是成交價**：系統內所有顯示的股價（盤中、收盤、走勢圖、Dashboard、管理資產、即時資產估算等所有功能）必須是真實成交過的價格，不得使用買賣中價、買價、賣價或任何衍生估算值。TWSE `z` 為 `-`（本輪 polling 撞到兩 tick 之間沒有新成交）時，**不得退回 `y`（昨日收盤）覆寫 Redis**：盤中只要某輪 polling 命中 `z='-'`，整支 Dashboard 圖表就會跳回昨收，造成「盤中股價與實際明顯偏差」的 bug。改採「skip write」：本輪不寫 Redis，保留上一輪成功 poll 寫入的當日 intraday 成交價；首輪 polling 即撞到 `z='-'` 且無既有 cache 時，由 `PriceQueryService` 自然 fallback 至 `stock_price_history` 最近一筆收盤（行為與一般 Redis miss 相同），下一輪有新成交即被覆寫為當日真實成交價。走勢圖今日格 `getStockHistory` 仍在 `LivePrice.source` 含括號（如 `(history)`）時略過，避免把非當日成交價拼入今日格
 - [ ] 從 NASDAQ API 取得美股即時股價；台股股利率改由 FinMind / TWSE BWIBBU 取得（Yahoo Finance 已停用）
 - [ ] 自動偵測股票市場（先嘗試 .TW，失敗則嘗試 .TWO）
 - [ ] 股價資料快取以減少外部 API 呼叫次數
