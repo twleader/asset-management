@@ -1150,30 +1150,26 @@ fallback 到 `row.stockPrice`（基準日收盤）→ Dashboard 顯示前一交�
 - [x] 44.3 `StockAlertView.vue` 把 `row.quarterlyMa / kValue / dValue` 改為 `row.lastTriggeredMaValue / KdValue / DValue`
 - [x] 44.4 PRICE_ABOVE/BELOW 等不算 MA/KD 的 alert 觸發後該欄位為 null，前端顯示 `—`（保持現有 fallback）
 
-### Task 45: 管理資產（SnapshotForm 編輯模式）股價一律基準日收盤
+### Task 45: 管理資產（SnapshotForm 編輯模式）股價/漲跌與新增模式一致
 
 對應 Requirements: Requirement 1（資產快照管理）
 
 #### 背景
 
-SnapshotFormView 編輯模式（`/snapshots/:id/edit`，標題「管理資產」）股票表格的「股價」欄
-目前共用 `/api/bff/snapshot-form/prices` 並套 per-market `isCurrentBasedate` 規則：
-若所選快照的 basedate == 今日（市場時區），會回傳即時 price + priceChange。
-但管理資產為純歷史檢視/編輯，價格隨盤中跳動會干擾使用者；應一律以基準日收盤為準（與 SnapshotDetail 一致）。
-
-新增模式（`/snapshots/new`，標題「新增快照」，basedate=今日）保留即時價，使用者建檔時看活價。
+原 Task 45 規劃編輯模式（`/snapshots/:id/edit`，標題「管理資產」）股票表格一律顯示基準日歷史收盤、
+不顯示漲跌、不輪詢。實際使用後決定改為與新增模式一致（per-market basedate 規則）：
+基準日 = 該市場時區的今日 → 即時價＋漲跌＋輪詢；非今日 → 歷史收盤、無漲跌。
+理由：使用者多在當日盤後建檔／微調快照，看得到漲跌幫助判讀；非今日的舊快照本來就沒 live cache，
+fallback 為歷史收盤即可。
 
 #### Steps:
 
-- [ ] 45.1 `SnapshotFormBffController.batchPrices` 加可選 query `historicalOnly`（預設 false），
-        傳入 `enrichBatch`；true 時強制 `useLive=false`、`priceChange/changePercent=null`
-- [ ] 45.2 `frontend/src/api/index.js` `snapshotForm.prices(date, stocks, historicalOnly=false)`
-        新增第三參數，true 時帶 `historicalOnly=true` query
-- [ ] 45.3 `SnapshotFormView.vue` 所有 `bffApi.snapshotForm.prices(...)` 呼叫處改帶 `isEdit.value`
-        （`fetchPriceForRow` / `fetchPrice` / `loadHistoricalPrices` / 複製前一版股票補價 / `loadPricesForExistingStocks`）
-- [ ] 45.4 `enrichBatch` 當 basedate==今日（市場時區）時改優先用 live cache 的價（盤後 = 當日收盤），
-        不再依賴 `stock_price_history` 是否已匯入當日。修正「basedate 4/28 但顯示 4/27 收盤」的問題：
-        live cache 在盤後即有 4/28 收盤，歷史表通常要再過幾小時才匯入。`historicalOnly=true` 時仍不回傳漲跌
+- [x] 45.1 `SnapshotFormBffController.batchPrices` 移除 `historicalOnly` query 參數，
+        `enrichBatch` 直接以 `preferLive`（basedate==市場今日 && live 有價）決定 price / priceChange / changePercent
+- [x] 45.2 `frontend/src/api/index.js` `snapshotForm.prices(date, stocks)` 移除第三參數
+- [x] 45.3 `SnapshotFormView.vue` 所有 `bffApi.snapshotForm.prices(...)` 呼叫處移除 `isEdit.value` 參數
+        （`fetchPriceForRow` / `fetchPrice` / 複製前一版股票補價 / `loadAllPrices`）
+- [x] 45.4 `SnapshotFormView.vue` `onMounted` 移除 `if (!isEdit.value)` gate，編輯模式也啟動 `startPriceAutoRefresh()`
 
 ### Task 46: 美股漲跌幅錯誤 — `previous_close` 改用歷史表權威值
 
