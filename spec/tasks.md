@@ -2205,10 +2205,10 @@ Dashboard「持股明細 (現值)」bar chart、KPI「股票現值」、即時�
 
 #### Steps:
 
-- [ ] 79.1 `PriceFetchClient.getTwseRealTimePrice`：移除 `z='-'` 時退回 `prevClose` 寫 Redis 的分支；改回 `Optional.empty()`，並 `log.debug` 紀錄「{code} z='-'，本輪 polling 略過寫入」。同檔股票上不再嘗試另一交易所（`tse`/`otc` for-loop 直接 return empty — codeCheck 已對上）
-- [ ] 79.2 `PriceFetchClient.getStockPrice` 簽名改為 `Optional<PriceResult>`（含台股 / 美股兩條路徑），讓 `getTwseRealTimePrice` 的 empty 與 `getNasdaqPrice` 的 empty 都能語意一致地往上傳遞，不再以 `RuntimeException("查無股價")` 攔截。
-- [ ] 79.3 `PricePoller.updatePrices` 改判 `client.getStockPrice(...).orElse(null)`：null 或 `r.price() == null` → 不寫 Redis、不更新 stock 主檔名稱、不視為錯誤（move on 至下一檔）。原本的 try-catch 仍保留以接住 HTTP 例外。
-- [ ] 79.4 spec：`requirements.md` Requirement 7、`design.md`「TWSE `z='-'` 時改採 skip write」段、`steering/tech.md` TWSE 列已同步更新（本 task 同 commit）
-- [ ] 79.5 重 build external-materials-service image、`docker compose up -d --build external-materials-service` 套用；盤中（09:00–13:30 Asia/Taipei，平日）觀察 `GET /api/market-data/prices`：所有台股 source 應該都是 `TWSE`（含真實成交價）而非 `TWSE(前收)`；若某輪某檔 z='-'，下輪 polling 後該檔 `price` 與 `updatedAt` 都更新但中間維持上輪值不變。Dashboard「持股明細」chart 各 bar 不再出現「整批同步跳回昨收」的瞬間。
-- [ ] 79.6 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+- [x] 79.1 `PriceFetchClient.getTwseRealTimePrice`：移除 `z='-'` 時退回 `prevClose` 寫 Redis 的分支；改回 `Optional.empty()`，並 `log.debug` 紀錄「{code} z='-'，本輪 polling 略過寫入」。同檔股票上不再嘗試另一交易所（`tse`/`otc` for-loop 直接 return empty — codeCheck 已對上）
+- [x] 79.2 `PriceFetchClient.getStockPrice` 簽名改為 `Optional<PriceResult>`（含台股 / 美股兩條路徑），讓 `getTwseRealTimePrice` 的 empty 與 `getNasdaqPrice` 的 empty 都能語意一致地往上傳遞，不再以 `RuntimeException("查無股價")` 攔截。
+- [x] 79.3 `PricePoller.updatePrices` 改判 `client.getStockPrice(...).orElse(null)`：null 或 `r.price() == null` → 不寫 Redis、不更新 stock 主檔名稱、不視為錯誤（move on 至下一檔）。原本的 try-catch 仍保留以接住 HTTP 例外。
+- [x] 79.4 spec：`requirements.md` Requirement 7、`design.md`「TWSE `z='-'` 時改採 skip write」段、`steering/tech.md` TWSE 列已同步更新（本 task 同 commit）
+- [x] 79.5 重 build external-materials-service image、`docker compose up -d --build external-materials-service` 套用；盤中（09:00–13:30 Asia/Taipei，平日）觀察 `GET /api/market-data/prices`：所有台股 source 應該都是 `TWSE`（含真實成交價）而非 `TWSE(前收)`；若某輪某檔 z='-'，下輪 polling 後該檔 `price` 與 `updatedAt` 都更新但中間維持上輪值不變。Dashboard「持股明細」chart 各 bar 不再出現「整批同步跳回昨收」的瞬間。
+- [x] 79.6 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
 
