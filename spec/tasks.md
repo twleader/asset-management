@@ -2224,10 +2224,10 @@ TWSE mis 在這些情境通常仍有今日開盤價 `o`（今日第一筆真實�
 
 #### Steps:
 
-- [ ] 80.1 `PriceFetchClient.getTwseRealTimePrice`：`z='-'` 分支拆兩段 — 有 `o` → `Optional.of(PriceResult(price=o, source="TWSE(開盤)"))`；無 `o` → 維持 `Optional.empty()`。`changePercent` 以 `o − y` 計算（仍為真實漲跌）
-- [ ] 80.2 `PriceCacheWriter.write`：判斷 incoming `source.contains("(")`（cold-start fallback）→ 先呼叫 `hasFreshRealtimeCache(key)`；若既有 cache `source` 不含 `(` 且 `tradingDate` == 該市場今日，則 skip write 不覆寫。helper `hasFreshRealtimeCache` 私有，封裝 Redis 讀 + JSON parse + 今日對比邏輯
-- [ ] 80.3 spec：`requirements.md` Requirement 7、`design.md`「TWSE `z='-'` 時改採兩段式 fallback」段、`steering/tech.md` TWSE 列已同步更新（本 task 同 commit）
-- [ ] 80.4 重 build external-materials-service image、`docker compose up -d --build external-materials-service`；盤中清空指定股票的 Redis cache（`redis-cli DEL price:台股:2891`）並 trigger refresh，驗證該檔 Redis 重新寫入 `source="TWSE(開盤)"`、price 為今日 open（非昨日 close）；接著 trigger 第二次 refresh，若 TWSE 已回真 z 應覆寫成 `TWSE`，若仍 z='-' 則保留 `TWSE(開盤)` 不變
-- [ ] 80.5 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+- [x] 80.1 `PriceFetchClient.getTwseRealTimePrice`：`z='-'` 分支拆兩段 — 有 `o` → `Optional.of(PriceResult(price=o, source="TWSE(開盤)"))`；無 `o` → 維持 `Optional.empty()`。`changePercent` 以 `o − y` 計算（仍為真實漲跌）
+- [x] 80.2 `PriceCacheWriter.write`：判斷 incoming `source.contains("(")`（cold-start fallback）→ 先呼叫 `hasFreshRealtimeCache(key)`；若既有 cache `source` 不含 `(` 且 `tradingDate` == 該市場今日，則 skip write 不覆寫。helper `hasFreshRealtimeCache` 私有，封裝 Redis 讀 + JSON parse + 今日對比邏輯
+- [x] 80.3 spec：`requirements.md` Requirement 7、`design.md`「TWSE `z='-'` 時改採兩段式 fallback」段、`steering/tech.md` TWSE 列已同步更新（本 task 同 commit）
+- [x] 80.4 重 build external-materials-service image、`docker compose up -d --build external-materials-service`；盤中清空指定股票的 Redis cache（`redis-cli DEL price:台股:2891`）並 trigger refresh，驗證該檔 Redis 重新寫入 `source="TWSE(開盤)"`、price 為今日 open（非昨日 close）；接著 trigger 第二次 refresh，若 TWSE 已回真 z 應覆寫成 `TWSE`，若仍 z='-' 則保留 `TWSE(開盤)` 不變
+- [x] 80.5 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
 
 
