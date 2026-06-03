@@ -187,8 +187,8 @@ external-materials-service/src/main/java/com/steven/assets/externalmaterials/
 
 | Key | 內容 | TTL | 寫入者 |
 |-----|------|-----|--------|
-| `price:{market}:{code}` | live JSON | 600s | `PriceCacheWriter` |
-| `price:index:{market}` | Set，紀錄該市場所有有 cache 的 code | 600s | 同上 |
+| `price:{market}:{code}` | live JSON | 24h | `PriceCacheWriter` |
+| `price:index:{market}` | Set，紀錄該市場所有有 cache 的 code | 24h | 同上 |
 | `price:dayhl:{market}:{code}:{tradingDate}` | 該日最高/最低聚合 | 36h | `IntradayHighLowTracker` |
 | `market:status` | 市場開收盤 JSON | 90s | `MarketClock` |
 | Channel `price-update` | Pub/Sub 推播 | — | `PriceCacheWriter` |

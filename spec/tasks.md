@@ -2255,4 +2255,23 @@ Task 80 引入「`z='-'` 但今日 `o` 有值 → 寫入 `TWSE(開盤)` cold-sta
 - [x] 81.4 重 build external-materials-service image、`docker compose up -d --build external-materials-service`；盤中觀察 `/api/market-data/prices` 不再出現 `TWSE(開盤)`；殘留的 `TWSE(開盤)` 會隨 600s TTL 自然過期，或被真實 z 覆寫
 - [x] 81.5 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
 
+### Task 82: Redis 股價 TTL 拉長至 24h（修「股價退回昨收」的退化）
+
+對應 Requirements: Requirement 7（市場資料整合）
+
+#### 背景
+
+Task 79+81 定案的兩條規則：(1) 每天開盤抓不到最新值 → 顯示昨收；(2) 每次 tick 抓不到值 → 不更新。但實作上規則 (2) 依賴 Redis 內仍有上一輪 cache，而舊版 `PriceCacheWriter.LIVE_TTL = 600s`（10 分鐘）對流動性低的 ETF / 個股（盤中可連續 5+ 輪 polling 皆 z='-'，例如 006208 富邦台50、00919 群益台灣精選高息）撐不夠長 — 一旦 TTL 過期，`PriceQueryService.getLive` 自動 fallback 至 `stock_price_history` 退回昨收，**使用者看到的就是「明明開盤有真實成交、過了 10 分鐘股價突然退回昨收」**。例如盤中觀察 006208：09:00 撈到真實 z=248.7，09:02-09:11 連續 5 輪 z='-' → 09:11 TTL 過期 → 圖表顯示昨收 244.55；09:13 下一輪若有真 z 又跳回 248.x。
+
+#### 修正
+
+`LIVE_TTL` 改成 24 小時：服務正常運作下，TW 9:00-13:30 / US 9:30-16:00 cron 持續刷新 TTL；當日撈到過真實 z 一次後，該值就在 Redis 內持續活著直到被下一個真實 z 覆寫，不會 TTL 過期被退回昨收。盤後到次日開盤之間（最長約 19.5 小時對 TW），24h TTL 仍有餘裕。真的 24h 都沒新成交才會自然 fallback 至 `stock_price_history` — 這是合理的 cold-start 場景。
+
+#### Steps:
+
+- [ ] 82.1 `PriceCacheWriter.LIVE_TTL`：`Duration.ofSeconds(600)` → `Duration.ofHours(24)`，註解寫明動機（避免低流動性股票 z='-' 過久 TTL 過期退回昨收）
+- [ ] 82.2 spec：`requirements.md` Requirement 7、`design.md` Redis key schema 表 + 一致性段落、`steering/tech.md`、`steering/structure.md` 同步「24h」TTL（本 task 同 commit）
+- [ ] 82.3 重 build external-materials-service image、`docker compose up -d --build external-materials-service`；盤中觸發 refresh 並等待真 z 寫入 006208 / 00919 等之前退回昨收的標的；觀察 `redis-cli ttl price:台股:006208` 約等於 24h 起點往下倒數，且 5-10 分鐘內不再退回昨收
+- [ ] 82.4 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+
 

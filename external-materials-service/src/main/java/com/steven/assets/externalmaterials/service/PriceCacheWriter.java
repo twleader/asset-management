@@ -39,7 +39,12 @@ public class PriceCacheWriter {
     private static final ObjectMapper MAPPER = new ObjectMapper()
             .setSerializationInclusion(JsonInclude.Include.NON_NULL);
 
-    private static final Duration LIVE_TTL = Duration.ofSeconds(600);
+    // TTL = 24 小時：確保「今日撈到過真實 z 一次後，該值就在 Redis 內持續活著」直到被下一個真實 z 覆寫。
+    // 舊值 600s（10 分鐘）對流動性低的 ETF / 個股（盤中可連續 10+ 分鐘 z='-'）撐不夠長 — TTL 過期就退回
+    // `stock_price_history` 的昨收，使用者看到「股價退回昨收」的退化（規格 Requirement 7、Task 82）。
+    // 服務正常運作下，每天交易時段（9:00-13:30 TW / 9:30-16:00 ET）的 cron 都會持續刷新 TTL；
+    // 真的 24h 無新成交 → 才會自然 fallback 至 stock_price_history 最近一筆收盤（cold-start case，預期行為）。
+    private static final Duration LIVE_TTL = Duration.ofHours(24);
 
     public void write(PriceResult result, boolean markClosed) {
         String market = result.market();

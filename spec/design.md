@@ -132,8 +132,8 @@ com.steven.assets.externalmaterials/
 **Redis key schema：**
 | Key | 內容 | TTL | 寫入者 |
 |-----|------|-----|--------|
-| `price:{market}:{code}` | JSON `{ price, prevClose, changePercent, open, high, low, volume, tradingDate, source, updatedAt }` | 600s（盤後自然過期） | `PriceCacheWriter` 每 2 分鐘 |
-| `price:index:{market}` | Set，紀錄該市場所有有 cache 的 stockCode | 600s | 同上 |
+| `price:{market}:{code}` | JSON `{ price, prevClose, changePercent, open, high, low, volume, tradingDate, source, updatedAt }` | 24 小時（涵蓋整個交易日 + 跨夜，避免低流動性股票長時間 z='-' 後 TTL 過期退回昨收） | `PriceCacheWriter` 每 2 分鐘 |
+| `price:index:{market}` | Set，紀錄該市場所有有 cache 的 stockCode | 24 小時 | 同上 |
 | `price:dayhl:{market}:{code}:{tradingDate}` | JSON `{ high, low }` 該交易日累積觀察到的最高 / 最低成交價 | 36 小時（跨日 dump 後仍可佐證） | `IntradayHighLowTracker` 每次 cron tick |
 | `market:status` | JSON `{ twMarketOpen, usMarketOpen, twTime, usTime }` | 90s（短於輪詢） | `MarketClock` 每分鐘 |
 
@@ -624,7 +624,7 @@ GET    /api/bff/dashboard/realtime                  # 2 分鐘輪詢用：最新
 > - 否則（basedate 為過去日期、或該市場非當日）顯示快照保存的當日 `stockPrice`（即 `latestSnapshotDetail.stocks[].stockPrice`），不顯示漲跌%、不參與 polling 切換。
 > - **per-market 判斷一律由 BFF 完成**（`SnapshotEnricher.mergePerMarketPrices`），前端禁止重做 basedate / 市場開盤判斷。BFF 把判斷結果編碼在 response：`stockPrices[].priceChange != null` 即代表該檔為 live；`priceChange == null` 即為 frozen 快照價。前端 `getRealtimePrice()` 只能依此 flag 決定 render，避免「同義欄位、不同邏輯」造成 Dashboard 與 SnapshotForm 兩頁顯示不一致。
 >
-> KPI「資產總計」一致性：Dashboard `liveLatest.totalAssets` 一律優先採用 `liveAssets.liveTotalAssets`（來自 `/api/market-data/live-assets`），與「歷年資產管理」今日列共用同一支 business-service API。即使收盤後 Redis cache 過期（10 分鐘 TTL），`PriceQueryService.getLive()` 會 fallback 至 `stock_price_history` 最近一筆收盤價，確保兩頁永遠顯示同一個總資產數字。**禁止前端再加「市場開盤」閘門**；basedate 是否==今日由 BFF 與 `liveAssets.snapshotDate` 比對結果決定即可。
+> KPI「資產總計」一致性：Dashboard `liveLatest.totalAssets` 一律優先採用 `liveAssets.liveTotalAssets`（來自 `/api/market-data/live-assets`），與「歷年資產管理」今日列共用同一支 business-service API。即使盤後 Redis cache 最終過期（24 小時 TTL），`PriceQueryService.getLive()` 會 fallback 至 `stock_price_history` 最近一筆收盤價，確保兩頁永遠顯示同一個總資產數字。**禁止前端再加「市場開盤」閘門**；basedate 是否==今日由 BFF 與 `liveAssets.snapshotDate` 比對結果決定即可。
 >
 > 儀表板基準日切換行為：
 > - 2 分鐘輪詢 `refreshPricesAndStatus()` 只刷新 `stockPrices` / `marketStatus` / `liveAssets`（呼叫 `bffApi.dashboard.realtime()`），**不得重抓 dashboard summary** 以免覆蓋使用者選擇的快照。
