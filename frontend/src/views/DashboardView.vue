@@ -210,13 +210,14 @@
                 <span style="color:#475569">{{ row.stockName }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="股價" width="140" align="right">
+            <el-table-column label="股價/漲跌(%)" width="190" align="right">
               <template #default="{ row }">
                 <span v-if="getRealtimePrice(row)">
                   <span style="font-weight:600">{{ formatPrice(getRealtimePrice(row).price) }}</span>
-                  <span v-if="getRealtimePrice(row).changePercent != null"
-                    :style="{ color: getRealtimePrice(row).changePercent >= 0 ? '#16a34a' : '#dc2626', fontSize: '11px' }">
-                    {{ getRealtimePrice(row).changePercent >= 0 ? '▲' : '▼' }}{{ Math.abs(getRealtimePrice(row).changePercent).toFixed(2) }}%
+                  <span v-if="getRealtimePrice(row).priceChange != null"
+                    :style="{ color: getRealtimePrice(row).priceChange >= 0 ? '#16a34a' : '#dc2626', fontSize: '11px', marginLeft: '4px' }">
+                    {{ getRealtimePrice(row).priceChange >= 0 ? '▲' : '▼' }}${{ Math.abs(getRealtimePrice(row).priceChange).toFixed(2) }}
+                    ({{ Math.abs(getRealtimePrice(row).changePercent ?? 0).toFixed(2) }}%)
                   </span>
                 </span>
                 <span v-else-if="row.stockPrice != null"
@@ -519,7 +520,11 @@ function getRealtimePrice(row) {
   const p = stockPrices.value[key]
   if (!p || p.price == null) return null
   if (p.priceChange == null) return null
-  return { price: Number(p.price), changePercent: p.changePercent != null ? Number(p.changePercent) : null }
+  return {
+    price: Number(p.price),
+    priceChange: Number(p.priceChange),
+    changePercent: p.changePercent != null ? Number(p.changePercent) : null
+  }
 }
 
 const formatShares = (v, market) => {
