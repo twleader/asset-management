@@ -1,6 +1,7 @@
 package com.steven.assets.externalmaterials.service;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.steven.assets.externalmaterials.client.PriceFetchClient.PriceResult;
 import lombok.RequiredArgsConstructor;
@@ -91,6 +92,69 @@ public class PriceCacheWriter {
             redis.convertAndSend("price-update", json);
         } catch (Exception e) {
             log.warn("寫入 Redis 失敗 {} {}: {}", market, code, e.getMessage());
+        }
+    }
+
+    /**
+     * 盤後 FinMind 校正用：直接以 FinMind 權威收盤價覆寫 Redis live cache。
+     *
+     * 動機：盤中最後一次 cron 通常落在 13:28 / 15:58（盤前 2 分鐘），抓到的是 last tick 而非
+     * 集合競價產生的官方收盤。FinMind 在盤後 1-2 小時發佈官方收盤後，DB 已被覆寫，但 Redis
+     * 仍停在 last tick → 前端讀 Redis 看到的「股價」與「歷年資產管理」(讀 DB) 對不起來。
+     * 本方法把 FinMind 結果寫回 Redis，並 PUBLISH `price-update`，讓 SSE 訂閱者立即拿到。
+     *
+     * US FinMind 不回 previousClose / stockName，從現有 Redis JSON 保留以維持 priceChange 顯示。
+     */
+    public void writeVerifiedClose(PriceResult result) {
+        String market = result.market();
+        String code = result.stockCode();
+        String key = "price:" + market + ":" + code;
+        String indexKey = "price:index:" + market;
+
+        BigDecimal previousClose = result.previousClose();
+        String stockName = result.stockName();
+        // 沿用既有 Redis JSON 內的 previousClose / stockName（FinMind 美股不回這兩欄）
+        String existing = redis.opsForValue().get(key);
+        if (existing != null) {
+            try {
+                JsonNode node = MAPPER.readTree(existing);
+                if (previousClose == null && node.hasNonNull("previousClose")) {
+                    previousClose = new BigDecimal(node.get("previousClose").asText());
+                }
+                if ((stockName == null || stockName.isBlank()) && node.hasNonNull("stockName")) {
+                    stockName = node.get("stockName").asText();
+                }
+            } catch (Exception ignore) { /* fallback to FinMind-only values */ }
+        }
+
+        LocalDate tradingDate = LocalDate.now(
+                "美股".equals(market) ? MarketClock.US_ZONE : MarketClock.TW_ZONE);
+
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("stockCode", code);
+        payload.put("market", market);
+        payload.put("price", result.price());
+        payload.put("previousClose", previousClose);
+        payload.put("priceChange", changeOrNull(result.price(), previousClose, result.change()));
+        payload.put("changePercent", changePctOrNull(result.price(), previousClose, result.changePct()));
+        payload.put("openPrice", result.openPrice());
+        payload.put("highPrice", result.highPrice());
+        payload.put("lowPrice", result.lowPrice());
+        payload.put("volume", result.volume());
+        payload.put("stockName", stockName);
+        payload.put("source", "FinMind");
+        payload.put("tradingDate", tradingDate.toString());
+        payload.put("updatedAt", LocalDateTime.now().toString());
+        payload.put("closed", true);
+
+        try {
+            String json = MAPPER.writeValueAsString(payload);
+            redis.opsForValue().set(key, json, LIVE_TTL);
+            redis.opsForSet().add(indexKey, code);
+            redis.expire(indexKey, LIVE_TTL);
+            redis.convertAndSend("price-update", json);
+        } catch (Exception e) {
+            log.warn("寫入 Redis FinMind 驗證收盤失敗 {} {}: {}", market, code, e.getMessage());
         }
     }
 

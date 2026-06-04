@@ -187,9 +187,20 @@ NASDAQ info API 自 2026/04 起對 ETF 的 `keyStats` 為 null（無 dayrange �
 
 **Sequence（盤後收盤）：**
 ```
-[external-materials-service @Scheduled 13:35/16:05] → FinMind/NASDAQ
-   → ClosePersister → [DB stock_price_history INSERT]
+[external-materials-service @Scheduled 13:32/16:02] → Redis last tick
+   → ClosePersister.dump*CloseFromRedis → [DB stock_price_history UPSERT]
+
+[external-materials-service @Scheduled 16:00 TW / 18:00 ET] → FinMind
+   → ClosePersister.verify*CloseWithFinMind
+     ├→ [DB stock_price_history UPSERT]                  // 權威收盤值
+     └→ PriceCacheWriter.writeVerifiedClose
+         ├→ [Redis SET price:{market}:{code}]            // 覆寫盤中 last tick
+         └→ Redis PUBLISH price-update                   // SSE 推送
 ```
+
+> 為什麼 FinMind 校正後也要覆寫 Redis：盤中最後一輪 cron 通常落在 13:28 / 15:58（集合競價開始前 2 分鐘），
+> 抓到的是盤中 last tick 而非 13:30 / 16:00 集合競價產生的官方收盤。若只更新 DB，Dashboard / SnapshotForm
+> 在 `basedate == 今日` 時讀 Redis 就會看到 last tick，與「歷年資產管理」（讀 DB）對不起來。
 
 **Live price push（Redis pub/sub + SSE，取代輪詢）：**
 
