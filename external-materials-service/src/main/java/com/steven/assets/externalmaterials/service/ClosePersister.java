@@ -25,10 +25,11 @@ import java.util.Set;
  * - 13:32 TW {@link #dumpTwCloseFromRedis()}：盤中最後一輪 cron（13:30）寫進 Redis 的價即為當日收盤
  *   （TWSE mis 的最後一筆成交），秒到資料庫，不依賴 FinMind 即時性
  * - 16:00 TW {@link #verifyTwCloseWithFinMind()}：FinMind TaiwanStockPrice 盤後 1-2 小時才發佈，
- *   此時呼叫驗證／覆寫；FinMind 有回值就以 FinMind 為權威
+ *   此時呼叫驗證／覆寫；FinMind 有回值就以 FinMind 為權威。**同時覆寫 Redis** 以避免 Dashboard /
+ *   SnapshotForm 讀 Redis 仍看到盤中 last tick（13:28 那輪）。
  *
  * 美股：16:02 ET {@link #dumpUsCloseFromRedis()} dump Redis（盤中最後一輪 cron 16:00 寫的 NASDAQ 收盤），
- *   無等價的 FinMind 二段驗證來源，單段即可。
+ *   18:00 ET {@link #verifyUsCloseWithFinMind()} 以 FinMind USStockPrice 校正並同步覆寫 Redis。
  */
 @Slf4j
 @Service
@@ -38,6 +39,7 @@ public class ClosePersister {
     private final PriceFetchClient client;
     private final StockSourceQuery source;
     private final StringRedisTemplate redis;
+    private final PriceCacheWriter cacheWriter;
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
@@ -123,6 +125,9 @@ public class ClosePersister {
                 source.upsertHistory(code, "台股", today,
                         pr.openPrice(), pr.highPrice(), pr.lowPrice(),
                         pr.price(), pr.volume());
+                // FinMind 為權威收盤，同步覆寫 Redis live cache 以與 DB 一致
+                // （避免 Dashboard / SnapshotForm 讀 Redis 仍看到盤中 last tick）
+                cacheWriter.writeVerifiedClose(pr);
                 ok++;
                 Thread.sleep(300);
             } catch (Exception e) {
@@ -163,6 +168,8 @@ public class ClosePersister {
                 source.upsertHistory(code, "美股", today,
                         pr.openPrice(), pr.highPrice(), pr.lowPrice(),
                         pr.price(), pr.volume());
+                // FinMind 為權威收盤，同步覆寫 Redis live cache 以與 DB 一致
+                cacheWriter.writeVerifiedClose(pr);
                 ok++;
                 Thread.sleep(300);
             } catch (Exception e) {
