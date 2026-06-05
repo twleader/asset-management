@@ -2270,4 +2270,43 @@ Task 79+81 定案的兩條規則：(1) 每天開盤抓不到最新值 → 顯示
 - [x] 82.3 重 build external-materials-service image、`docker compose up -d --build external-materials-service`；盤中觸發 refresh 並等待真 z 寫入 006208 / 00919 等之前退回昨收的標的；觀察 `redis-cli ttl price:台股:006208` 約等於 24h 起點往下倒數，且 5-10 分鐘內不再退回昨收
 - [x] 82.4 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
 
+### Task 83: 警示觸發 Email 通知
+
+對應 Requirements: Requirement 23（警示觸發 Email 通知）
+
+#### 背景
+
+股票觀察清單 / 警示條件頁的警示觸發後，使用者必須開頁面才看得到（觀察清單「警示」欄）。需求是觸發當下主動寄 email 通知，使用者不必盯盤。`StockAlertService` 已有 24h cooldown、`StockAlertTrigger` 完整觸發紀錄（時間、股價、MA、K、D），是天然的通知掛勾點。
+
+收件人不寫死，遵循專案「禁止 enum 寫死、設定走 DB」原則，做成 `/notification-settings` 設定頁。SMTP 走 Gmail App Password，帳密從環境變數讀，不入 git。
+
+#### 設計
+
+- in-memory queue + 排程 60s flush 合併 digest（避免每筆觸發一封）；`StockAlertService.recordTrigger()` 末端 enqueue，dispatcher 失敗一律 log.warn 不回拋（觸發判斷與通知解耦）
+- 新 Entity `NotificationRecipient`（id, email, active, createdAt, updatedAt），unique email 正規化
+- `EmailService` 包 JavaMailSender，`MAIL_USERNAME`/`MAIL_PASSWORD` 未設定時 skip 寄信
+- BFF passthrough `/api/bff/notification-settings/recipients/**` → `/api/notification-recipients/**`
+- 前端 `NotificationSettingsView` 收件人新增 / 刪除 / 啟停
+
+#### Steps:
+
+- [ ] 83.1 Liquibase migration `v1.26.0-notification-recipient.sql`：建 `notification_recipient` 表（id PK, email VARCHAR UNIQUE NOT NULL, active BOOLEAN DEFAULT TRUE, created_at TIMESTAMP, updated_at TIMESTAMP）；註冊到 `db.changelog-master.yaml`
+- [ ] 83.2 `backend/pom.xml` 加 `spring-boot-starter-mail`；`backend/src/main/resources/application.yml` 加 `spring.mail.*`（host smtp.gmail.com、port 587、`username=${MAIL_USERNAME:}`、`password=${MAIL_PASSWORD:}`、STARTTLS）；`docker-compose.yml` business-services service 加環境變數 placeholder（讀取自 host env）
+- [ ] 83.3 後端 `NotificationRecipient` Entity / Repo / DTO / Service / Controller：
+  - `model/NotificationRecipient.java`（Lombok + JPA + `@PreUpdate` 更新 updatedAt）
+  - `repository/NotificationRecipientRepository.java`（含 `findByActiveTrue()`、`findByEmailIgnoreCase()`）
+  - `dto/NotificationRecipientDto.java`（Request / Response）
+  - `service/NotificationRecipientService.java`（CRUD + email normalize trim+toLowerCase + duplicate 檢查 + toggleActive）
+  - `controller/NotificationRecipientController.java`（`/api/notification-recipients` + `PATCH .../{id}/active`）
+- [ ] 83.4 `service/EmailService.java`：包 JavaMailSender；`isEnabled()` 檢查 `MAIL_USERNAME` 非空；`send(toList, subject, body)` SMTP 失敗 `log.warn` 不拋例外；寄件人優先用 `${NOTIFICATION_FROM:${spring.mail.username}}`
+- [ ] 83.5 `service/AlertNotificationDispatcher.java`：
+  - `ConcurrentLinkedQueue<PendingTrigger>` 收 `enqueue(alert, triggeredAt, price, ind)`
+  - `@Scheduled(fixedDelay = 60_000)` `flush()`：drain queue、組 digest subject + body、讀 active recipients、呼叫 EmailService
+  - 收件人空 / EmailService disabled → skip 寄信但仍清空 queue（避免 queue 無限長大）
+- [ ] 83.6 `StockAlertService.recordTrigger()` 末端注入 `dispatcher.enqueue(...)`；包 try/catch 確保通知失敗不影響觸發紀錄落地
+- [ ] 83.7 BFF `NotificationSettingsBffRoutes`：rewrite `/api/bff/notification-settings/recipients(?<seg>/?.*)` → `/api/notification-recipients${seg}` → `business-services.url`
+- [ ] 83.8 前端 `views/NotificationSettingsView.vue`：表格顯示收件人 + email 輸入框新增 + 啟停 switch + 刪除按鈕；走 `/api/bff/notification-settings/recipients`；加路由 `/notification-settings`；在主選單「系統設定」群組加入口
+- [ ] 83.9 部署文件：CLAUDE.md / README 補一段「Gmail App Password 取得步驟」（兩步驗證 → 應用程式密碼 → 16 碼貼到 `MAIL_PASSWORD`），docker-compose env 範例；本機 build 跑通、手動建一筆假觸發或調整 cooldown 驗證 digest 收信
+- [ ] 83.10 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+
 

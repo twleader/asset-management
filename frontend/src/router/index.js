@@ -136,6 +136,12 @@ const router = createRouter({
       component: () => import('@/views/BackupRestoreView.vue'),
       meta: { title: '備份/還原 資料', icon: 'Setting' }
     },
+    {
+      path: '/settings/notifications',
+      name: 'NotificationSettings',
+      component: () => import('@/views/NotificationSettingsView.vue'),
+      meta: { title: '警示通知設定', icon: 'Bell' }
+    },
   ]
 })
 

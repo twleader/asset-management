@@ -233,6 +233,15 @@ export const bffApi = {
     createAccount:     (data) => api.post('/bff/payment-account-settings/accounts', data),
     updateAccount:     (id, data) => api.put(`/bff/payment-account-settings/accounts/${id}`, data),
     deleteAccount:     (id) => api.delete(`/bff/payment-account-settings/accounts/${id}`)
+  },
+
+  // 警示觸發 Email 通知收件人（Requirement 23）
+  notificationSettings: {
+    getRecipients:    () => api.get('/bff/notification-settings/recipients'),
+    createRecipient:  (data) => api.post('/bff/notification-settings/recipients', data),
+    updateRecipient:  (id, data) => api.put(`/bff/notification-settings/recipients/${id}`, data),
+    toggleActive:     (id) => api.patch(`/bff/notification-settings/recipients/${id}/active`),
+    deleteRecipient:  (id) => api.delete(`/bff/notification-settings/recipients/${id}`)
   }
 }
 
