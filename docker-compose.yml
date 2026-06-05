@@ -58,6 +58,12 @@ services:
       DB_PASSWORD: ${POSTGRES_PASSWORD}
       # 讓 rclone 從固定路徑讀取設定，避免依賴 USER/HOME
       RCLONE_CONFIG: /etc/rclone/rclone.conf
+      # 警示觸發 email 通知（Requirement 23）：從 .env / host env 透傳
+      # MAIL_USERNAME = Gmail 帳號；MAIL_PASSWORD = 16 碼 App Password（非登入密碼）
+      # 未設定時 EmailService.isEnabled() 為 false，dispatcher skip 寄信不報錯
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      NOTIFICATION_FROM: ${NOTIFICATION_FROM:-}
     volumes:
       # rclone 設定檔以 read-only 從 host 掛入
       - ${HOME}/.config/rclone/rclone.conf:/etc/rclone/rclone.conf:ro

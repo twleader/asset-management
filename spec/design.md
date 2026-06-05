@@ -71,7 +71,7 @@ com.steven.assets/
 - `ExchangeRateBffController`（ExchangeRateView 專屬）：`GET /api/bff/exchange-rate`（先 refresh 再回 5 年歷史）、`POST /api/bff/exchange-rate/backfill`
 - `TradingCalendarBffController`（TradingCalendarView 專屬）：`GET /api/bff/trading-calendar?year=Y`（`holidays` 為 `{tw: {date→name}, us: {date→name}}` 物件 + `marketStatus`）、`GET /api/bff/trading-calendar/market-status`
 - `SnapshotListBffController`（SnapshotListView 專屬）：`GET /api/bff/snapshot-list`、`DELETE /{id}`、`GET /export`
-- 其他 settings/passthrough（每頁一支 Spring Cloud Gateway route 配置，rewrite `/api/bff/{page}/**` → `/api/{resource}/**`）：BankSettings、BrokerSettings、DepositTypeSettings、MarketTypeSettings、TransitFundTypeSettings、StockAlert（`/api/bff/stock-alert/**`）、BackupRestore（`/api/bff/backup-restore/**`）
+- 其他 settings/passthrough（每頁一支 Spring Cloud Gateway route 配置，rewrite `/api/bff/{page}/**` → `/api/{resource}/**`）：BankSettings、BrokerSettings、DepositTypeSettings、MarketTypeSettings、TransitFundTypeSettings、StockAlert（`/api/bff/stock-alert/**`）、BackupRestore（`/api/bff/backup-restore/**`）、NotificationSettings（`/api/bff/notification-settings/recipients/**` → `/api/notification-recipients/**`）
 - `WatchStockBffController`（WatchStockView 專屬，`/api/bff/watch-stock/**`）：觀察清單已改為「`stock_alert` 衍生 view」，BFF 提供：
   - `GET /api/bff/watch-stock`：呼叫 `business-services` 衍生端點 → 對每筆 (stockCode, market) 補上 live 報價、技術指標、最近觸發資訊
   - `PUT /api/bff/watch-stock/order`：拖曳排序時把該股票所有 alert 的 displayOrder 整組重排
@@ -556,6 +556,17 @@ BackupSetting         (備份保留代數設定，單列資料表，id = 1)
 
 > **設計理由（不關聯資產表）：** 代繳記錄屬於「個人資料記錄簿」，目的是替代手工 Excel/便利貼，不參與任何資產計算。`paymentAccount` 刻意採純字串而非 FK：使用者可能輸入「momo 信用卡」這類不在 `bank` 表中的卡別，硬綁 FK 反而綁手綁腳；停用銀行也不應影響舊代繳紀錄的可讀性。
 
+#### NotificationRecipient（Requirement 23 新增）
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| id | Long | PK |
+| email | String | 收件人 email；存入前 trim + 轉小寫；unique |
+| active | Boolean | 是否啟用（false 不寄信，但保留設定） |
+| createdAt | LocalDateTime | 建立時間 |
+| updatedAt | LocalDateTime | 最近一次更新時間 |
+
+> **設計理由（獨立表 + 不寫死 enum）：** 收件人屬「使用者可變設定」，未來可能多人接收（家人 / 副信箱），需 DB 持久化並透過設定頁維護，遵循專案「禁止 enum 寫死」原則。目前僅支援 email 通道，未來如要擴充 LINE / Telegram 再新增 `notification_channel` 表，不為假設需求預留欄位。
+
 ## API Design
 
 ### Base URL
@@ -717,6 +728,17 @@ PUT    /api/stock-alerts/reorder          # 拖曳排序（body: ordered ids）
 POST   /api/stock-alerts/check            # 手動觸發檢查
 GET    /api/stock-alerts/lookup-name      # 以股票代號查名稱（前端共用）
 GET    /api/stock-alerts/lookup-code      # 反向：以股名查代號（只查本地 stock 主檔，精確匹配）
+```
+
+#### Notification Recipients（Requirement 23 新增）
+```
+GET    /api/notification-recipients                  # 列出所有收件人（含啟停狀態）
+POST   /api/notification-recipients                  # 新增收件人
+PUT    /api/notification-recipients/{id}             # 更新 email
+DELETE /api/notification-recipients/{id}             # 刪除
+PATCH  /api/notification-recipients/{id}/active      # 切換啟用/停用
+
+# 前端 view 經 BFF：rewrite /api/bff/notification-settings/recipients/** → /api/notification-recipients/**
 ```
 
 #### Exchange Rate History（新增）
@@ -934,6 +956,48 @@ FinMind 自 2025 年起對匿名呼叫額度收緊，超量會回 `402 Payment R
 - 新建 / 編輯快照存檔時亦會寫入
 
 > **歷史背景**：早期 BFF 在 response 動態組裝 estimatedAnnualDividend，導致同一張快照在 AssetHistory 與 Dashboard 顯示不同值（一邊用即時股價、一邊用快照當日股價）。改為「snapshot 欄位即真相」後三邊一致，並符合 CLAUDE.md「同義欄位、同一 business service API」原則。
+
+### 警示觸發 Email 通知（Requirement 23）
+
+**目標**：警示條件觸發時自動寄 email，避免使用者盯盤。
+
+**架構**：
+
+```
+StockAlertService.evaluate()
+  ├─ 24h cooldown 通過 + 條件命中
+  ├─ alertRepo.save(凍結 K/D/MA)
+  ├─ recordTrigger() → 寫 StockAlertTrigger（必落地，無論寄信成敗）
+  └─ alertNotificationDispatcher.enqueue(alert, triggeredAt, price, ind)
+                                  │
+                                  ▼
+                       in-memory ConcurrentLinkedQueue
+                                  │
+                                  ▼   @Scheduled fixedDelay = 60s
+                       AlertNotificationDispatcher.flush()
+                                  │
+                                  ├─ queue 為空 → return
+                                  ├─ 一次 drain 全部、組 digest body
+                                  ├─ 讀 NotificationRecipientRepository.findByActiveTrue
+                                  └─ EmailService.send(toList, subject, body)
+                                                ├─ MAIL_USERNAME 未設 → log.warn skip
+                                                └─ SMTP 失敗 → log.warn 不重試
+```
+
+**為何走「queue + 60s flush」而非 event-driven 即時寄**：
+- 同一輪 PricePoller（每 2 分鐘）可能在 1–2 秒內連續 fire 多支股票的 `checkAlertsFor`，立即寄信會產生多封；queue 自然 batch 成單封 digest
+- 60 秒 flush 是「使用者人類感受可接受的延遲」與「合併效益」的折衷
+- in-memory queue 不持久化是刻意的：若服務重啟未及寄出，`StockAlertTrigger` 已落地、24h cooldown 也會啟動，下次觀察清單頁仍看得到觸發狀態；遺漏一封通知優於發兩封或卡住觸發流程
+
+**邊界處理**：
+- 收件人空 / `MAIL_USERNAME` 空 / SMTP 例外：一律 `log.warn` 後返回，**絕不**拋例外回到 `StockAlertService` —— 警示判斷必須與通知解耦
+- digest 主旨：`[資產管理] 股票警示觸發 N 筆`
+- digest 內容每筆一行：`{stockName} ({stockCode} {market}) {conditionLabel} | 觸發時間 {time} | 股價 {price} | MA {ma} | K {k} D {d}`（無對應指標時欄位省略）
+
+**設定面**：
+- `application.yml` 內 `spring.mail.host=smtp.gmail.com:587 STARTTLS`，username / password 走 `${MAIL_USERNAME}` / `${MAIL_PASSWORD}` 環境變數（Gmail App Password，非登入密碼）
+- 寄件人預設 = `MAIL_USERNAME`；可以 `NOTIFICATION_FROM` 覆寫
+- 收件人於 `/notification-settings` 頁面維護，存 `notification_recipient` 表
 
 ## Infrastructure
 

@@ -1,0 +1,45 @@
+package com.steven.assets.controller;
+
+import com.steven.assets.dto.NotificationRecipientDto;
+import com.steven.assets.service.NotificationRecipientService;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+
+@RestController
+@RequestMapping("/api/notification-recipients")
+@RequiredArgsConstructor
+public class NotificationRecipientController {
+
+    private final NotificationRecipientService service;
+
+    @GetMapping
+    public List<NotificationRecipientDto.Response> findAll() {
+        return service.findAll();
+    }
+
+    @PostMapping
+    public NotificationRecipientDto.Response create(@Valid @RequestBody NotificationRecipientDto.CreateRequest req) {
+        return service.create(req);
+    }
+
+    @PutMapping("/{id}")
+    public NotificationRecipientDto.Response update(@PathVariable Long id,
+                                                    @Valid @RequestBody NotificationRecipientDto.UpdateRequest req) {
+        return service.update(id, req);
+    }
+
+    @PatchMapping("/{id}/active")
+    public NotificationRecipientDto.Response toggleActive(@PathVariable Long id) {
+        return service.toggleActive(id);
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> delete(@PathVariable Long id) {
+        service.delete(id);
+        return ResponseEntity.noContent().build();
+    }
+}

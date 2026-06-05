@@ -40,6 +40,7 @@ public class StockAlertService {
     private final StockRepository stockMasterRepo;
     private final HistoricalDataService historicalDataService;
     private final TechnicalIndicatorService indicatorService;
+    private final AlertNotificationDispatcher notificationDispatcher;
 
     // ===== CRUD =====
 
@@ -665,9 +666,9 @@ public class StockAlertService {
      * 便於事後追蹤觸發當下的完整技術面狀態。保留 30 天。
      */
     private void recordTrigger(StockAlert alert, LocalDateTime triggeredAt, BigDecimal price) {
+        TechnicalIndicatorService.FullIndicators ind = TechnicalIndicatorService.FullIndicators.EMPTY;
         try {
-            TechnicalIndicatorService.FullIndicators ind = indicatorService.computeAll(
-                    alert.getStockCode(), alert.getMarket());
+            ind = indicatorService.computeAll(alert.getStockCode(), alert.getMarket());
             triggerRepo.save(StockAlertTrigger.builder()
                     .alertId(alert.getId())
                     .stockCode(alert.getStockCode())
@@ -682,6 +683,13 @@ public class StockAlertService {
                     .build());
         } catch (Exception e) {
             log.warn("recordTrigger failed for alert {}: {}", alert.getId(), e.getMessage());
+        }
+        // Requirement 23：enqueue email 通知（dispatcher 自身已包 try/catch，不會回拋）
+        try {
+            BigDecimal ma = pickMaForAlert(alert.getAlertType(), alert.getMaPeriod(), ind);
+            notificationDispatcher.enqueue(alert, triggeredAt, price, ma, ind.k(), ind.d());
+        } catch (Exception e) {
+            log.warn("enqueue email 通知失敗 alert {}: {}", alert.getId(), e.getMessage());
         }
     }
 
