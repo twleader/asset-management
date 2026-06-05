@@ -2310,3 +2310,30 @@ Task 79+81 定案的兩條規則：(1) 每天開盤抓不到最新值 → 顯示
 - [ ] 83.10 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
 
 
+### Task 84: HistoricalBackfillService 禁止寫入「今日列」（避免 Yahoo intraday bar 汙染 DB 收盤）
+
+對應 Requirements: Requirement 7（市場資料整合 — 「今日列」獨佔規則）
+
+#### 背景
+
+VOO 股票走勢圖在 2026-06-05 NY 盤中（15:16，未到 16:00 收盤）顯示「收盤 689.70」，但 Redis live tick 同時為 $677.20，兩者脫鉤。DB 現況：2026-06-05 row 已有完整 `open_price=691.71`、`high=692.18`、`low=687.96`、`close=689.70`，是該檔表中**唯一有 open_price 的近期紀錄**（6/4、6/3 都沒 open，因 FinMind 收盤校正不回 open）。
+
+根因：`HistoricalBackfillService.backfillUsStock` 走 `PriceFetchClient.fetchUsHistoricalRange` → Yahoo Finance `chart?interval=1d`。Yahoo 此 endpoint 在「市場仍開盤」時，會把「今日 partial bar」（open=今日開盤、high/low=至此刻區間、close=此刻 last trade）也包成一筆 `HistoricalBar` 回傳。`backfillUsStock` 的 for-loop 只用 `existsHistory` 去重，沒有「今日盤中不寫」的守門，所以該 partial bar 直接被 upsert 進 `stock_price_history`，前端走勢圖 / SnapshotForm 讀 DB 就看到一個假收盤。
+
+觸發來源任一即可（不必查具體誰）：(1) `startupBackfill` 條件 stale；(2) `SnapshotFormBffController.triggerBackfillThenRefetch`（使用者開今日 SnapshotForm，缺今日歷史價即觸發 `until=today+5d` backfill）；(3) `/api/market-data/history/backfill-stock` / `/internal/backfill/all` 手動觸發。
+
+修正方向：將「今日列」獨佔給 `ClosePersister`（13:32 / 16:02 dump、16:00 / 18:00 verify、`selfHealMissedClose` 過收盤時點），`HistoricalBackfillService` 只負責歷史 row。
+
+#### Steps:
+
+- [ ] 84.1 `HistoricalBackfillService.backfillTwStock`：
+  - `LocalDate today = LocalDate.now(MarketClock.TW_ZONE)`
+  - `LocalDate end = (until != null) ? until : today`（改用 TW_ZONE，不用 JVM 預設 TZ）
+  - for-loop 內：`if (bar.tradingDate().equals(today)) continue;` 並於該分支 `log.debug` 記錄
+- [ ] 84.2 `HistoricalBackfillService.backfillUsStock`：同 84.1，但用 `MarketClock.US_ZONE`
+- [ ] 84.3 spec：`requirements.md` Requirement 7 加「今日列獨佔」acceptance criterion；`design.md` 在 ClosePersister sequence 後補一段「今日列獨佔規則」說明
+- [ ] 84.4 清除已被汙染的 6/5 VOO row（DELETE WHERE stock_code='VOO' AND market='美股' AND trading_date='2026-06-05'）；等 16:02 ET ClosePersister 寫入正確的收盤
+- [ ] 84.5 Docker 重 build external-materials-service image + 容器重建（`docker compose build external-materials-service && docker compose up -d external-materials-service`）
+- [ ] 84.6 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+
+
