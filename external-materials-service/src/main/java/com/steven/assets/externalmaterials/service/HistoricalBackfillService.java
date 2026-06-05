@@ -89,20 +89,29 @@ public class HistoricalBackfillService {
 
     /**
      * 回補單一台股歷史收盤。若 since 早於目前最早紀錄（向前缺漏）就從 since 抓；否則從 maxDate+1 增量。
+     *
+     * 「今日列」獨佔規則（Requirement 7 / Task 84）：本路徑遇到市場時區當日 bar 一律 skip，
+     * 由 ClosePersister 在收盤後寫入。理由：Yahoo / FinMind 盤中也會回一根「今日 partial bar」
+     * （open/high/low + 此刻 last trade 當 close），若直接 upsert 就會在 DB 充當「收盤」與 Redis 脫鉤。
      */
     public int backfillTwStock(String stockCode, LocalDate since, LocalDate until) {
+        LocalDate today = LocalDate.now(MarketClock.TW_ZONE);
         LocalDate maxDate = store.findMaxTradingDate(stockCode, "台股").orElse(null);
         LocalDate minDate = store.findMinTradingDate(stockCode, "台股").orElse(null);
         LocalDate start;
         if (maxDate == null) start = since;
         else if (minDate != null && since.isBefore(minDate)) start = since;
         else start = maxDate.plusDays(1);
-        LocalDate end = (until != null) ? until : LocalDate.now();
+        LocalDate end = (until != null) ? until : today;
         if (!start.isBefore(end)) return 0;
 
         log.info("回補台股 {} 歷史價格: {} ~ {}", stockCode, start, end);
         int count = 0;
         for (HistoricalBar bar : priceFetch.fetchTwHistoricalRange(stockCode, start, end)) {
+            if (bar.tradingDate().equals(today)) {
+                log.debug("跳過台股 {} 今日 ({}) bar — 今日列獨佔給 ClosePersister", stockCode, today);
+                continue;
+            }
             // 以使用者輸入的原始代號存入（FinMind 後綴版只用於 fetch，不汙染主鍵）
             if (store.existsHistory(stockCode, "台股", bar.tradingDate())) continue;
             store.upsertHistory(stockCode, "台股", bar.tradingDate(),
@@ -114,18 +123,23 @@ public class HistoricalBackfillService {
     }
 
     public int backfillUsStock(String stockCode, LocalDate since, LocalDate until) {
+        LocalDate today = LocalDate.now(MarketClock.US_ZONE);
         LocalDate maxDate = store.findMaxTradingDate(stockCode, "美股").orElse(null);
         LocalDate minDate = store.findMinTradingDate(stockCode, "美股").orElse(null);
         LocalDate start;
         if (maxDate == null) start = since;
         else if (minDate != null && since.isBefore(minDate)) start = since;
         else start = maxDate.plusDays(1);
-        LocalDate end = (until != null) ? until : LocalDate.now();
+        LocalDate end = (until != null) ? until : today;
         if (!start.isBefore(end)) return 0;
 
         log.info("回補美股 {} 歷史價格: {} ~ {}", stockCode, start, end);
         int count = 0;
         for (HistoricalBar bar : priceFetch.fetchUsHistoricalRange(stockCode, start, end)) {
+            if (bar.tradingDate().equals(today)) {
+                log.debug("跳過美股 {} 今日 ({}) bar — 今日列獨佔給 ClosePersister", stockCode, today);
+                continue;
+            }
             if (store.existsHistory(stockCode, "美股", bar.tradingDate())) continue;
             store.upsertHistory(stockCode, "美股", bar.tradingDate(),
                     bar.open(), bar.high(), bar.low(), bar.close(), bar.volume());
