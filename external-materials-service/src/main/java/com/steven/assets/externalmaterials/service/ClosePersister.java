@@ -88,6 +88,24 @@ public class ClosePersister {
                         dumpUsCloseFromRedis();
                     }
                 }
+                ZonedDateTime nowUk = ZonedDateTime.now(MarketClock.LON_ZONE);
+                LocalDate todayUk = nowUk.toLocalDate();
+                if (isWeekday(nowUk)) {
+                    if (nowUk.toLocalTime().isAfter(LocalTime.of(17, 0))) {
+                        if (!hasAnyHistoryFor(todayUk, "英股")) {
+                            log.info("self-heal: 英股今日 ({}) DB 無資料，跑 Yahoo 校正", todayUk);
+                            int yahooOk = verifyUkCloseWithYahoo();
+                            if (yahooOk == 0) {
+                                log.info("self-heal: 英股 Yahoo 全空，改用 Redis dump");
+                                dumpUkCloseFromRedis();
+                            }
+                        }
+                    } else if (nowUk.toLocalTime().isAfter(LocalTime.of(16, 32))
+                            && !hasAnyHistoryFor(todayUk, "英股")) {
+                        log.info("self-heal: 英股今日 ({}) DB 無資料，dump Redis 補一次", todayUk);
+                        dumpUkCloseFromRedis();
+                    }
+                }
             } catch (Exception e) {
                 log.warn("close self-heal 失敗: {}", e.getMessage());
             }
@@ -113,8 +131,8 @@ public class ClosePersister {
     @Scheduled(cron = "0 0 16 * * MON-FRI", zone = "Asia/Taipei")
     public int verifyTwCloseWithFinMind() {
         log.info("排程：FinMind 校正台股當日收盤價");
-        Set<String> tw = new LinkedHashSet<>(), us = new LinkedHashSet<>();
-        source.collectHeldStockCodes(tw, us);
+        Set<String> tw = new LinkedHashSet<>(), us = new LinkedHashSet<>(), uk = new LinkedHashSet<>();
+        source.collectHeldStockCodes(tw, us, uk);
         LocalDate today = LocalDate.now(MarketClock.TW_ZONE);
         int ok = 0, miss = 0;
         for (String code : tw) {
@@ -156,8 +174,8 @@ public class ClosePersister {
     @Scheduled(cron = "0 0 18 * * MON-FRI", zone = "America/New_York")
     public int verifyUsCloseWithFinMind() {
         log.info("排程：FinMind 校正美股當日收盤價");
-        Set<String> tw = new LinkedHashSet<>(), us = new LinkedHashSet<>();
-        source.collectHeldStockCodes(tw, us);
+        Set<String> tw = new LinkedHashSet<>(), us = new LinkedHashSet<>(), uk = new LinkedHashSet<>();
+        source.collectHeldStockCodes(tw, us, uk);
         LocalDate today = LocalDate.now(MarketClock.US_ZONE);
         int ok = 0, miss = 0;
         for (String code : us) {
@@ -178,6 +196,53 @@ public class ClosePersister {
             }
         }
         log.info("FinMind 校正美股收盤完成：成功覆寫 {} 檔，缺漏 {} 檔", ok, miss);
+        return ok;
+    }
+
+    /**
+     * 16:32 LON：dump 英股 Redis 收盤價（16:30 LON 那輪 cron 已寫好）到 DB。
+     */
+    @Scheduled(cron = "0 32 16 * * MON-FRI", zone = "Europe/London")
+    public void dumpUkCloseFromRedis() {
+        LocalDate today = LocalDate.now(MarketClock.LON_ZONE);
+        log.info("排程：dump 英股 Redis 收盤價到 DB ({})", today);
+        int n = dumpRedisToDb("英股", today);
+        log.info("英股 Redis dump 完成：{} 檔", n);
+    }
+
+    /**
+     * 17:00 LON：用 Yahoo Finance 校正英股當日收盤價。英股無 FinMind 對應 dataset，
+     * 改走 Yahoo chart historical（單日 range = today~today）作為權威。
+     */
+    @Scheduled(cron = "0 0 17 * * MON-FRI", zone = "Europe/London")
+    public int verifyUkCloseWithYahoo() {
+        log.info("排程：Yahoo 校正英股當日收盤價");
+        Set<String> tw = new LinkedHashSet<>(), us = new LinkedHashSet<>(), uk = new LinkedHashSet<>();
+        source.collectHeldStockCodes(tw, us, uk);
+        LocalDate today = LocalDate.now(MarketClock.LON_ZONE);
+        int ok = 0, miss = 0;
+        for (String code : uk) {
+            try {
+                java.util.List<PriceFetchClient.HistoricalBar> bars =
+                        client.fetchUkHistoricalRange(code, today, today);
+                if (bars.isEmpty()) { miss++; continue; }
+                PriceFetchClient.HistoricalBar bar = bars.get(bars.size() - 1);
+                if (!bar.tradingDate().equals(today)) { miss++; continue; }
+                source.upsertHistory(code, "英股", today,
+                        bar.open(), bar.high(), bar.low(), bar.close(), bar.volume());
+                // 同步覆寫 Redis live cache 以與 DB 一致
+                PriceResult pr = new PriceResult(code, "英股", bar.close(), null, null, "Yahoo",
+                        null, null, null,
+                        bar.open(), null, bar.high(), bar.low(), bar.volume());
+                cacheWriter.writeVerifiedClose(pr);
+                ok++;
+                Thread.sleep(500);
+            } catch (Exception e) {
+                log.warn("Yahoo 校正英股 {} 收盤失敗: {}", code, e.getMessage());
+                miss++;
+            }
+        }
+        log.info("Yahoo 校正英股收盤完成：成功覆寫 {} 檔，缺漏 {} 檔", ok, miss);
         return ok;
     }
 
@@ -220,9 +285,12 @@ public class ClosePersister {
     }
 
     private boolean hasAnyHistoryFor(LocalDate date, String market) {
-        Set<String> tw = new LinkedHashSet<>(), us = new LinkedHashSet<>();
-        source.collectHeldStockCodes(tw, us);
-        Set<String> codes = "美股".equals(market) ? us : tw;
+        Set<String> tw = new LinkedHashSet<>(), us = new LinkedHashSet<>(), uk = new LinkedHashSet<>();
+        source.collectHeldStockCodes(tw, us, uk);
+        Set<String> codes;
+        if ("美股".equals(market)) codes = us;
+        else if ("英股".equals(market)) codes = uk;
+        else codes = tw;
         for (String code : codes) {
             if (source.findMaxTradingDate(code, market).filter(d -> !d.isBefore(date)).isPresent()) {
                 return true;

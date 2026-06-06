@@ -76,9 +76,9 @@ public class StockAlertController {
         if ("0000".equals(upperCode) && "台股".equals(market)) {
             return ResponseEntity.ok(Map.of("stockName", "台股大盤"));
         }
-        // 美股無「0000」這個代號；過去若放行會被 Yahoo fuzzy match 回隨機公司（例：Shenzhen 7Road Tech Co Ltd）
+        // 美股 / 英股 無「0000」這個代號；過去若放行會被 Yahoo fuzzy match 回隨機公司（例：Shenzhen 7Road Tech Co Ltd）
         // 然後自動寫入 stock 主檔。直接拒絕，避免污染。
-        if ("0000".equals(upperCode) && "美股".equals(market)) {
+        if ("0000".equals(upperCode) && ("美股".equals(market) || "英股".equals(market))) {
             return ResponseEntity.ok(Map.of("stockName", ""));
         }
 
@@ -89,11 +89,9 @@ public class StockAlertController {
 
         // 2. 若本地找不到，呼叫外部 API
         if (name.isEmpty()) {
-            if ("台股".equals(market)) {
-                name = historicalDataService.fetchTwStockName(upperCode);
-            } else {
-                name = historicalDataService.fetchUsStockName(upperCode);
-            }
+            if ("台股".equals(market)) name = historicalDataService.fetchTwStockName(upperCode);
+            else if ("英股".equals(market)) name = historicalDataService.fetchUkStockName(upperCode);
+            else name = historicalDataService.fetchUsStockName(upperCode);
             // 3. 查到後存入主檔，下次直接用本地
             if (!name.isEmpty()) {
                 stockMasterRepo.upsert(upperCode, market, name);

@@ -122,10 +122,14 @@ public class StockAlertService {
         if ("0000".equals(code) && "美股".equals(market)) {
             throw new IllegalArgumentException("美股無 0000 代號");
         }
+        if ("0000".equals(code) && "英股".equals(market)) {
+            throw new IllegalArgumentException("英股無 0000 代號");
+        }
         if (userName == null || userName.isBlank()) return;
-        String canonical = "台股".equals(market)
-                ? historicalDataService.fetchTwStockName(code)
-                : historicalDataService.fetchUsStockName(code);
+        String canonical;
+        if ("台股".equals(market)) canonical = historicalDataService.fetchTwStockName(code);
+        else if ("英股".equals(market)) canonical = historicalDataService.fetchUkStockName(code);
+        else canonical = historicalDataService.fetchUsStockName(code);
         if (canonical == null || canonical.isBlank()) return;
         String trimmedUser = userName.trim();
         if (trimmedUser.equalsIgnoreCase(canonical.trim())) return;
@@ -395,8 +399,10 @@ public class StockAlertService {
     private Optional<IntradayMatch> matchInDailyOhlc(
             List<StockPriceHistory> asc, LocalDate cutoff,
             String market, String type, Integer maPeriod, double threshold) {
-        java.time.LocalTime closeTime = "美股".equals(market)
-                ? java.time.LocalTime.of(16, 0) : java.time.LocalTime.of(13, 30);
+        java.time.LocalTime closeTime;
+        if ("美股".equals(market)) closeTime = java.time.LocalTime.of(16, 0);
+        else if ("英股".equals(market)) closeTime = java.time.LocalTime.of(16, 30);
+        else closeTime = java.time.LocalTime.of(13, 30);
         IntradayMatch last = null;
 
         if ("PRICE_ABOVE".equals(type) || "PRICE_BELOW".equals(type)) {
@@ -642,10 +648,12 @@ public class StockAlertService {
      * 直接用 now() 會顯示 13:35 / 16:05 等盤外時間，與「到價」語意不符。
      */
     private LocalDateTime computeTriggeredAt(StockAlert alert) {
-        boolean isUs = "美股".equals(alert.getMarket());
-        ZoneId zone = isUs ? ZoneId.of("America/New_York") : ZoneId.of("Asia/Taipei");
-        LocalTime open = isUs ? LocalTime.of(9, 30) : LocalTime.of(9, 0);
-        LocalTime close = isUs ? LocalTime.of(16, 0) : LocalTime.of(13, 30);
+        String market = alert.getMarket();
+        ZoneId zone = com.steven.assets.util.MarketZones.resolve(market);
+        LocalTime open, close;
+        if ("美股".equals(market)) { open = LocalTime.of(9, 30); close = LocalTime.of(16, 0); }
+        else if ("英股".equals(market)) { open = LocalTime.of(8, 0); close = LocalTime.of(16, 30); }
+        else { open = LocalTime.of(9, 0); close = LocalTime.of(13, 30); }
 
         ZonedDateTime nowZ = ZonedDateTime.now(zone);
         DayOfWeek dow = nowZ.getDayOfWeek();

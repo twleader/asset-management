@@ -13,7 +13,7 @@
 
       <el-alert type="info" :closable="false" style="margin-bottom:16px">
         <template #title>
-          盤中（台股 09:00–13:30、美股 09:30–16:00 ET）每次股價更新（每 2 分鐘）即時檢查，條件符合時記錄觸發時間與股價（同一條件 24 小時內不重複觸發）。
+          盤中（台股 09:00–13:30、美股 09:30–16:00 ET、英股 08:00–16:30 LON）每次股價更新（每 2 分鐘）即時檢查，條件符合時記錄觸發時間與股價（同一條件 24 小時內不重複觸發）。
         </template>
       </el-alert>
 
@@ -31,6 +31,14 @@
             <span style="display:inline-flex;align-items:center;gap:6px">
               <UsFlag :size="22" />
               美股 <el-tag size="small" style="margin-left:2px">{{ usAlerts.length }}</el-tag>
+            </span>
+          </template>
+        </el-tab-pane>
+        <el-tab-pane name="英股">
+          <template #label>
+            <span style="display:inline-flex;align-items:center;gap:6px">
+              <span style="font-size:18px">🇬🇧</span>
+              英股 <el-tag size="small" style="margin-left:2px">{{ ukAlerts.length }}</el-tag>
             </span>
           </template>
         </el-tab-pane>
@@ -103,6 +111,7 @@
           <el-radio-group v-model="form.market">
             <el-radio value="台股">台股</el-radio>
             <el-radio value="美股">美股</el-radio>
+            <el-radio value="英股">英股</el-radio>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="股票代號" required>
@@ -210,7 +219,12 @@ const emit = defineEmits(['alert-saved'])
 const marketTab = ref('台股')
 const twAlerts  = ref([])
 const usAlerts  = ref([])
-const currentAlerts = computed(() => marketTab.value === '台股' ? twAlerts.value : usAlerts.value)
+const ukAlerts  = ref([])
+const currentAlerts = computed(() => {
+  if (marketTab.value === '美股') return usAlerts.value
+  if (marketTab.value === '英股') return ukAlerts.value
+  return twAlerts.value
+})
 const loading = ref(false)
 const saving = ref(false)
 const lookingUpName = ref(false)
@@ -248,6 +262,7 @@ async function loadAlerts() {
     const res = await bffApi.stockAlert.getAll()
     twAlerts.value = res.filter(a => a.market === '台股')
     usAlerts.value = res.filter(a => a.market === '美股')
+    ukAlerts.value = res.filter(a => a.market === '英股')
   } finally {
     loading.value = false
   }
@@ -268,10 +283,12 @@ function initSortable() {
       from.removeChild(item)
       if (oldIndex >= from.children.length) from.appendChild(item)
       else from.insertBefore(item, from.children[oldIndex])
-      const arr = marketTab.value === '台股' ? twAlerts.value : usAlerts.value
+      const arr = marketTab.value === '美股' ? usAlerts.value
+        : marketTab.value === '英股' ? ukAlerts.value
+        : twAlerts.value
       const moved = arr.splice(oldIndex, 1)[0]
       arr.splice(newIndex, 0, moved)
-      bffApi.stockAlert.reorder( [...twAlerts.value, ...usAlerts.value].map(a => a.id))
+      bffApi.stockAlert.reorder( [...twAlerts.value, ...usAlerts.value, ...ukAlerts.value].map(a => a.id))
         .catch(() => ElMessage.error('排序儲存失敗'))
     }
   })
@@ -424,7 +441,9 @@ async function remove(row) {
 const fmtDt = (dt, market) => {
   if (!dt) return ''
   const base = dayjs(dt).format('MM/DD HH:mm')
-  return market ? `${base} ${market === '美股' ? 'NY' : 'TW'}` : base
+  if (!market) return base
+  const tz = market === '美股' ? 'NY' : market === '英股' ? 'LON' : 'TW'
+  return `${base} ${tz}`
 }
 
 // ===== 股價走勢分析 =====

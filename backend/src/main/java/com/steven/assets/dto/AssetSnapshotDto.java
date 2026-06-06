@@ -159,6 +159,7 @@ public class AssetSnapshotDto {
             BigDecimal totalFundValue,
             BigDecimal totalTwStockValue,
             BigDecimal totalUsStockValue,
+            BigDecimal totalUkStockValue,
             BigDecimal totalStockValue,
             BigDecimal totalAssets,
             BigDecimal increase,

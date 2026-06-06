@@ -33,8 +33,10 @@ public class DividendPersister {
     @EventListener(ApplicationReadyEvent.class)
     public void warmupOnStartup() {
         new Thread(() -> {
-            Set<String> tw = new LinkedHashSet<>(), us = new LinkedHashSet<>();
-            source.collectAllStockCodes(tw, us);
+            Set<String> tw = new LinkedHashSet<>(), us = new LinkedHashSet<>(), uk = new LinkedHashSet<>();
+            source.collectAllStockCodes(tw, us, uk);
+            // 英股 UCITS ETF 配息由 MarketDataFetchService.getDividendRate 即時走 Yahoo chart?events=div，
+            // 不在這裡寫 stock_dividend_history（Yahoo TTM 計算每次查詢都精確，無需快取）
             int count = 0;
             for (String code : tw) {
                 try { syncOne(code, "台股"); count++; Thread.sleep(300); }
@@ -51,8 +53,8 @@ public class DividendPersister {
     @Scheduled(cron = "0 0 17 * * MON-FRI", zone = "Asia/Taipei")
     public void scheduledSyncAll() {
         log.info("排程：同步股利歷史");
-        Set<String> tw = new LinkedHashSet<>(), us = new LinkedHashSet<>();
-        source.collectAllStockCodes(tw, us);
+        Set<String> tw = new LinkedHashSet<>(), us = new LinkedHashSet<>(), uk = new LinkedHashSet<>();
+        source.collectAllStockCodes(tw, us, uk);
         int ok = 0, fail = 0;
         for (String code : tw) {
             try { syncOne(code, "台股"); ok++; Thread.sleep(300); }

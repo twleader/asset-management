@@ -70,6 +70,7 @@
             <el-radio-button value="">全部</el-radio-button>
             <el-radio-button value="台股">台股</el-radio-button>
             <el-radio-button value="美股">美股</el-radio-button>
+            <el-radio-button value="英股">英股</el-radio-button>
           </el-radio-group>
         </template>
 
@@ -84,7 +85,7 @@
               <div class="broker-expand">
                 <!-- Editable broker sub-table -->
                 <el-table :data="row.brokerRows" size="small" border
-                  :style="row.market === '美股' ? 'width:940px' : 'width:760px'">
+                  :style="(row.market === '美股' || row.market === '英股') ? 'width:940px' : 'width:760px'">
                   <!-- 券商 -->
                   <el-table-column label="券商" width="130">
                     <template #default="{ row: br }">
@@ -100,11 +101,11 @@
                       <el-input
                         :model-value="numFmt(br.shares)"
                         size="small" style="width:100%; text-align:right"
-                        @change="(v) => { br.shares = numParseF(v, row.market === '美股' ? 5 : 0); markDirty(); syncFromShares(br, row) }" />
+                        @change="(v) => { br.shares = numParseF(v, (row.market === '美股' || row.market === '英股') ? 5 : 0); markDirty(); syncFromShares(br, row) }" />
                     </template>
                   </el-table-column>
-                  <!-- 幣別（美股才顯示） -->
-                  <el-table-column v-if="row.market === '美股'" label="幣別" width="100">
+                  <!-- 幣別（美股 / 英股才顯示） -->
+                  <el-table-column v-if="row.market === '美股' || row.market === '英股'" label="幣別" width="100">
                     <template #default="{ row: br }">
                       <el-select v-model="br.currency" size="small" style="width:100%" @change="markDirty">
                         <el-option value="TWD" label="台幣" />
@@ -118,7 +119,7 @@
                       <el-input
                         :model-value="numFmt(br.avgCost)"
                         size="small" style="width:100%; text-align:right"
-                        @change="(v) => { br.avgCost = numParseF(v, row.market === '美股' ? 4 : 2); markDirty(); syncFromAvg(br) }" />
+                        @change="(v) => { br.avgCost = numParseF(v, (row.market === '美股' || row.market === '英股') ? 4 : 2); markDirty(); syncFromAvg(br) }" />
                     </template>
                   </el-table-column>
                   <!-- 持股成本（總額，台幣）→ 輸入後自動算均價 -->
@@ -130,8 +131,8 @@
                         @change="(v) => { br.investmentCost = numParseF(v, 0); markDirty(); syncFromCost(br) }" />
                     </template>
                   </el-table-column>
-                  <!-- 均價(USD)（美股，選原幣時才啟用） -->
-                  <el-table-column v-if="row.market === '美股'" label="買入均價(USD)" width="130" align="right">
+                  <!-- 均價(USD)（美股 / 英股，選原幣時才啟用） -->
+                  <el-table-column v-if="row.market === '美股' || row.market === '英股'" label="買入均價(USD)" width="130" align="right">
                     <template #default="{ row: br }">
                       <el-input
                         :model-value="br.currency === 'USD' ? numFmt(br.originalCurrencyValue) : ''"
@@ -481,7 +482,7 @@ const pct = (v) => v != null ? `${(Number(v) * 100).toFixed(2)}%` : '-'
 const fmtShares = (v, market) => {
   if (v == null) return '-'
   const n = Number(v)
-  if (market === '美股') return n.toLocaleString('en-US', { minimumFractionDigits: 5, maximumFractionDigits: 5 })
+  if (market === '美股' || market === '英股') return n.toLocaleString('en-US', { minimumFractionDigits: 5, maximumFractionDigits: 5 })
   return n.toLocaleString('zh-TW', { maximumFractionDigits: 0 })
 }
 const fmtPrice = (v) => {

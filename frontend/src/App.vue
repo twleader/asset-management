@@ -80,6 +80,9 @@
             <span class="clock-tag clock-nyc">
               <span class="clock-label">NYC</span> <span class="clock-time">{{ nycNow }}</span>
             </span>
+            <span class="clock-tag clock-lon">
+              <span class="clock-label">LON</span> <span class="clock-time">{{ lonNow }}</span>
+            </span>
           </div>
         </el-header>
 
@@ -105,6 +108,7 @@ const store = useAssetStore()
 // 雙時區即時時鐘（每秒更新）
 const tpeNow = ref('')
 const nycNow = ref('')
+const lonNow = ref('')
 let clockTimer = null
 function fmtNow(tz) {
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -117,6 +121,7 @@ function fmtNow(tz) {
 function tickClock() {
   tpeNow.value = fmtNow('Asia/Taipei')
   nycNow.value = fmtNow('America/New_York')
+  lonNow.value = fmtNow('Europe/London')
 }
 tickClock()
 
@@ -239,6 +244,7 @@ body {
 }
 .clock-tpe { background: #16a34a; box-shadow: 0 1px 2px rgba(22,163,74,0.3); }
 .clock-nyc { background: #d97706; box-shadow: 0 1px 2px rgba(217,119,6,0.3); }
+.clock-lon { background: #0ea5e9; box-shadow: 0 1px 2px rgba(14,165,233,0.3); }
 .clock-label { font-weight: 700; font-size: 12px; opacity: 0.9; }
 .clock-time { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
 

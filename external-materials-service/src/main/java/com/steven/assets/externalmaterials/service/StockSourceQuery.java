@@ -27,12 +27,9 @@ public class StockSourceQuery {
      * - 加上觀察清單
      * 三者聯集後依 market 拆兩個 set。
      */
-    public void collectAllStockCodes(Set<String> twCodes, Set<String> usCodes) {
-        jdbc.query("SELECT code, market FROM stock", rs -> {
-            String code = rs.getString("code");
-            String market = rs.getString("market");
-            if ("美股".equals(market)) usCodes.add(code);
-            else twCodes.add(code);
+    public void collectAllStockCodes(Set<String> twCodes, Set<String> usCodes, Set<String> ukCodes) {
+        jdbc.query("SELECT code, market FROM stock", (java.sql.ResultSet rs) -> {
+            classify(rs.getString("code"), rs.getString("market"), twCodes, usCodes, ukCodes);
         });
         // 最新快照的持股
         Long latestSnapshotId = jdbc.query(
@@ -41,48 +38,49 @@ public class StockSourceQuery {
         if (latestSnapshotId != null) {
             jdbc.query("SELECT stock_code, market FROM stock_holding WHERE snapshot_id = ?",
                     ps -> ps.setLong(1, latestSnapshotId),
-                    rs -> {
-                        String code = rs.getString("stock_code");
-                        String market = rs.getString("market");
-                        if ("美股".equals(market)) usCodes.add(code);
-                        else twCodes.add(code);
+                    (java.sql.ResultSet rs) -> {
+                        classify(rs.getString("stock_code"), rs.getString("market"),
+                                twCodes, usCodes, ukCodes);
                     });
         }
         // watch_stock 表已廢止（v1.22）；觀察清單由 stock_alert 衍生
         // 排除 0000（台股大盤）— 走 twse_index_daily_history，不打 TWSE mis API
         jdbc.query("SELECT DISTINCT stock_code, market FROM stock_alert " +
-                "WHERE NOT (stock_code = '0000' AND market = '台股')", rs -> {
-            String code = rs.getString("stock_code");
-            String market = rs.getString("market");
-            if ("美股".equals(market)) usCodes.add(code);
-            else twCodes.add(code);
-        });
+                "WHERE NOT (stock_code = '0000' AND market = '台股')",
+                (java.sql.ResultSet rs) -> {
+                    classify(rs.getString("stock_code"), rs.getString("market"),
+                            twCodes, usCodes, ukCodes);
+                });
     }
 
     /** 取最新快照所有持股代號（盤中 / 盤後皆用同一份）。 */
-    public void collectHeldStockCodes(Set<String> twCodes, Set<String> usCodes) {
+    public void collectHeldStockCodes(Set<String> twCodes, Set<String> usCodes, Set<String> ukCodes) {
         Long latestSnapshotId = jdbc.query(
                 "SELECT id FROM asset_snapshot ORDER BY snapshot_date DESC LIMIT 1",
                 rs -> rs.next() ? rs.getLong(1) : null);
         if (latestSnapshotId != null) {
             jdbc.query("SELECT stock_code, market FROM stock_holding WHERE snapshot_id = ?",
                     ps -> ps.setLong(1, latestSnapshotId),
-                    rs -> {
-                        String code = rs.getString("stock_code");
-                        String market = rs.getString("market");
-                        if ("美股".equals(market)) usCodes.add(code);
-                        else twCodes.add(code);
+                    (java.sql.ResultSet rs) -> {
+                        classify(rs.getString("stock_code"), rs.getString("market"),
+                                twCodes, usCodes, ukCodes);
                     });
         }
         // watch_stock 表已廢止（v1.22）；觀察清單由 stock_alert 衍生
         // 排除 0000（台股大盤）— 走 twse_index_daily_history，不打 TWSE mis API
         jdbc.query("SELECT DISTINCT stock_code, market FROM stock_alert " +
-                "WHERE NOT (stock_code = '0000' AND market = '台股')", rs -> {
-            String code = rs.getString("stock_code");
-            String market = rs.getString("market");
-            if ("美股".equals(market)) usCodes.add(code);
-            else twCodes.add(code);
-        });
+                "WHERE NOT (stock_code = '0000' AND market = '台股')",
+                (java.sql.ResultSet rs) -> {
+                    classify(rs.getString("stock_code"), rs.getString("market"),
+                            twCodes, usCodes, ukCodes);
+                });
+    }
+
+    private static void classify(String code, String market,
+                                 Set<String> twCodes, Set<String> usCodes, Set<String> ukCodes) {
+        if ("美股".equals(market)) usCodes.add(code);
+        else if ("英股".equals(market)) ukCodes.add(code);
+        else twCodes.add(code);
     }
 
     /** 取該股票歷史表中最近一筆 trading_date（用於 resolveTradingDate fallback）。 */
@@ -216,18 +214,12 @@ public class StockSourceQuery {
      * 收集所有需要回補歷史價格的股票代號：stock 主檔 ∪ 歷史所有 snapshot 的持股
      * （與 collectAllStockCodes 不同：後者只看最新 snapshot；這個版本要涵蓋曾經持有的）。
      */
-    public void collectAllHeldCodes(Set<String> twCodes, Set<String> usCodes) {
-        jdbc.query("SELECT code, market FROM stock", rs -> {
-            String code = rs.getString("code");
-            String market = rs.getString("market");
-            if ("美股".equals(market)) usCodes.add(code);
-            else twCodes.add(code);
+    public void collectAllHeldCodes(Set<String> twCodes, Set<String> usCodes, Set<String> ukCodes) {
+        jdbc.query("SELECT code, market FROM stock", (java.sql.ResultSet rs) -> {
+            classify(rs.getString("code"), rs.getString("market"), twCodes, usCodes, ukCodes);
         });
-        jdbc.query("SELECT DISTINCT stock_code, market FROM stock_holding", rs -> {
-            String code = rs.getString("stock_code");
-            String market = rs.getString("market");
-            if ("美股".equals(market)) usCodes.add(code);
-            else twCodes.add(code);
+        jdbc.query("SELECT DISTINCT stock_code, market FROM stock_holding", (java.sql.ResultSet rs) -> {
+            classify(rs.getString("stock_code"), rs.getString("market"), twCodes, usCodes, ukCodes);
         });
     }
 

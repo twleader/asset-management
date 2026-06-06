@@ -196,12 +196,14 @@ public class InternalPriceController {
         return marketData.getTwHolidays(year);
     }
 
-    /** 股票名稱查詢（台股 FinMind / 美股 Yahoo）。 */
+    /** 股票名稱查詢（台股 FinMind / 美股 Yahoo / 英股 Yahoo `.L`）。 */
     @GetMapping("/stock-name")
     public Map<String, String> stockName(
             @RequestParam String code, @RequestParam String market) {
-        String name = "台股".equals(market) ? marketData.fetchTwStockName(code)
-                : marketData.fetchUsStockName(code);
+        String name;
+        if ("台股".equals(market)) name = marketData.fetchTwStockName(code);
+        else if ("英股".equals(market)) name = marketData.fetchUkStockName(code);
+        else name = marketData.fetchUsStockName(code);
         return Map.of("name", name == null ? "" : name);
     }
 

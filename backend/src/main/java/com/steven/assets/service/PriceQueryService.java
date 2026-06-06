@@ -89,7 +89,7 @@ public class PriceQueryService {
 
     public List<LivePrice> getAll() {
         List<LivePrice> all = new ArrayList<>();
-        for (String market : new String[]{"台股", "美股"}) {
+        for (String market : new String[]{"台股", "美股", "英股"}) {
             String indexKey = "price:index:" + market;
             Set<String> codes = redis.opsForSet().members(indexKey);
             if (codes == null || codes.isEmpty()) continue;

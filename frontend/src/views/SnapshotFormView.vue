@@ -74,6 +74,19 @@
             </div>
           </div>
           <div class="sb-sep" />
+          <!-- 英股 -->
+          <div class="sb-item">
+            <div class="sb-label">🇬🇧 英股現值</div>
+            <div class="sb-val">{{ fmt(ukSummary.value) }}</div>
+          </div>
+          <div class="sb-item">
+            <div class="sb-label">英股損益</div>
+            <div class="sb-val" :class="ukSummary.profit >= 0 ? 'profit' : 'loss'">
+              {{ fmt(ukSummary.profit) }}
+              <small style="font-weight:400"> ({{ pct(ukSummary.profitRate) }})</small>
+            </div>
+          </div>
+          <div class="sb-sep" />
           <!-- 共同基金 -->
           <div class="sb-item">
             <div class="sb-label">📊 共同基金現值</div>
@@ -980,6 +993,279 @@
               </div>
             </div>
           </el-tab-pane>
+
+          <!-- 英股 Tab（LSE UCITS ETF，USD 計價，欄位結構同美股） -->
+          <el-tab-pane name="uk">
+            <template #label>
+              <span style="display:inline-flex;align-items:center;gap:4px">
+                <span style="font-size:18px">🇬🇧</span> 英股
+              </span>
+              <el-badge :value="ukStocks.length" type="info" style="margin-left:4px" />
+            </template>
+
+            <div style="text-align:right;margin-bottom:8px">
+              <el-button size="small" :icon="Plus" @click="addStock('英股')">新增英股</el-button>
+            </div>
+
+            <el-table ref="ukStockTableRef" :data="ukStocks" size="small" row-key="_rowId" stripe
+              @row-dblclick="onStockDblClick">
+              <el-table-column width="36" align="center">
+                <template #default>
+                  <el-icon class="stock-drag-handle" style="cursor:grab;color:#94a3b8"><Operation /></el-icon>
+                </template>
+              </el-table-column>
+              <el-table-column type="expand" width="40">
+                <template #default="{ row }">
+                  <div class="broker-expand">
+                    <el-table :data="row.brokerRows" size="small" border style="width:100%">
+                      <el-table-column label="券商" width="140">
+                        <template #default="{ row: br }">
+                          <el-select v-model="br.brokerId" size="small" style="width:100%" clearable>
+                            <el-option v-for="b in brokerOptions" :key="b.value" :label="b.label" :value="b.value" />
+                          </el-select>
+                        </template>
+                      </el-table-column>
+                      <el-table-column label="買/賣" width="80">
+                        <template #default="{ row: br }">
+                          <el-select v-model="br.transactionType" size="small" style="width:100%">
+                            <el-option value="買" label="買" />
+                            <el-option value="賣" label="賣" />
+                          </el-select>
+                        </template>
+                      </el-table-column>
+                      <el-table-column label="交易日期" width="155">
+                        <template #default="{ row: br }">
+                          <el-date-picker v-model="br.transactionDate" type="date" size="small"
+                            style="width:100%" value-format="YYYY-MM-DD" placeholder="選擇日期"
+                            @change="(d) => onUsTransactionDateChange(br, d)" />
+                        </template>
+                      </el-table-column>
+                      <el-table-column label="股數" width="130">
+                        <template #default="{ row: br }">
+                          <el-input v-model="br.sharesStr" size="small"
+                            style="width:100%" :input-style="{ textAlign: 'right' }"
+                            @blur="() => {
+                              br.shares = numParse(br.sharesStr, 5); br.sharesStr = numFmt(br.shares)
+                              if (br.avgCost) {
+                                const usd = numParse(((br.avgCost||0)*(br.shares||0)).toFixed(6), 6)
+                                br.investmentCost = usd
+                                if (br.currency === 'TWD') br.investmentCostTwd = Math.round(usd * effectiveRate(br))
+                                syncBrCostStr(br)
+                              }
+                            }" />
+                        </template>
+                      </el-table-column>
+                      <el-table-column label="成本幣別" width="110">
+                        <template #default="{ row: br }">
+                          <el-select v-model="br.currency" size="small" style="width:100%"
+                            @change="() => {
+                              if (br.avgCost && br.shares) {
+                                const usd = numParse(((br.avgCost||0)*(br.shares||0)).toFixed(6), 6)
+                                br.investmentCost = usd
+                                br.investmentCostTwd = br.currency === 'TWD' ? Math.round(usd * effectiveRate(br)) : null
+                              }
+                              syncBrCostStr(br)
+                            }">
+                            <el-option value="TWD" label="TWD" />
+                            <el-option value="USD" label="USD" />
+                          </el-select>
+                        </template>
+                      </el-table-column>
+                      <el-table-column label="買入均價(USD)" width="140">
+                        <template #default="{ row: br }">
+                          <el-input v-model="br.avgCostStr" size="small"
+                            style="width:100%" :input-style="{ textAlign: 'right' }"
+                            @blur="() => {
+                              br.avgCost = numParse(br.avgCostStr, 6)
+                              br.avgCostStr = numFmt(br.avgCost)
+                              br.originalCurrencyValue = br.avgCost
+                              const usd = numParse(((br.avgCost||0)*(br.shares||0)).toFixed(6), 6)
+                              br.investmentCost = usd
+                              br.investmentCostTwd = br.currency === 'TWD' ? Math.round(usd * effectiveRate(br)) : null
+                              syncBrCostStr(br)
+                            }" />
+                        </template>
+                      </el-table-column>
+                      <el-table-column label="持股成本" width="145">
+                        <template #default="{ row: br }">
+                          <el-input v-model="br.investmentCostStr" size="small"
+                            style="width:100%" :input-style="{ textAlign: 'right' }"
+                            :placeholder="br.currency"
+                            @blur="() => {
+                              const decimals = br.currency === 'USD' ? 6 : 0
+                              const parsed = numParse(br.investmentCostStr, decimals)
+                              if (br.currency === 'TWD') {
+                                br.investmentCostTwd = Math.round(parsed)
+                                br.investmentCost = effectiveRate(br) > 0
+                                  ? Number((parsed / effectiveRate(br)).toFixed(6)) : 0
+                              } else {
+                                br.investmentCost = parsed
+                                br.investmentCostTwd = null
+                              }
+                              syncBrCostStr(br)
+                              if (br.shares > 0) {
+                                br.avgCost = parseFloat((br.investmentCost / br.shares).toFixed(6))
+                                br.avgCostStr = numFmt(br.avgCost)
+                                br.originalCurrencyValue = br.avgCost
+                              }
+                            }" />
+                        </template>
+                      </el-table-column>
+                      <el-table-column label="現值(USD)" width="110" align="right">
+                        <template #default="{ row: br }">
+                          <span style="font-size:13px">${{ numFmt(calcBrOriginalValue(br, row).toFixed(2)) }}</span>
+                        </template>
+                      </el-table-column>
+                      <el-table-column label="現值(台幣)" width="120" align="right">
+                        <template #default="{ row: br }">
+                          <span style="font-size:13px">{{ fmt(calcBrTwdValue(br, row)) }}</span>
+                        </template>
+                      </el-table-column>
+                      <el-table-column label="交易日匯率" width="115" align="right">
+                        <template #default="{ row: br }">
+                          <span style="font-size:13px; color: #606266;">
+                            {{ Number(effectiveRate(br)).toFixed(4) }}
+                          </span>
+                        </template>
+                      </el-table-column>
+                      <el-table-column width="40">
+                        <template #default="{ $index }">
+                          <el-popconfirm title="確定刪除此筆券商持股？" width="240" confirm-button-text="刪除" cancel-button-text="取消" confirm-button-type="danger"
+                            @confirm="removeBrokerRow(row, $index)">
+                            <template #reference>
+                              <el-button type="danger" size="small" :icon="Delete" circle />
+                            </template>
+                          </el-popconfirm>
+                        </template>
+                      </el-table-column>
+                    </el-table>
+                    <div style="display:flex;gap:8px;margin-top:8px">
+                      <el-button size="small" :icon="Plus" @click="addBrokerRow(row, '英股')">新增券商持股</el-button>
+                      <el-button size="small" type="primary" @click="submit" :loading="saving">存檔</el-button>
+                    </div>
+                  </div>
+                </template>
+              </el-table-column>
+
+              <el-table-column label="股號/股名" min-width="220">
+                <template #default="{ row }">
+                  <div style="display:flex;gap:4px">
+                    <el-input v-model="row.stockCode" size="small" placeholder="代號 (如 CSPX)"
+                      style="width:100px;flex-shrink:0"
+                      @input="row.stockCode = row.stockCode.toUpperCase()"
+                      @blur="fetchPriceForRow(row)" />
+                    <el-input v-model="row.stockName" size="small" placeholder="股票名稱" />
+                  </div>
+                </template>
+              </el-table-column>
+
+              <el-table-column label="股價/漲跌(%)" width="200" align="right">
+                <template #default="{ row }">
+                  <div class="price-cell">
+                    <span v-if="row.latestPrice" class="price-num">{{ fmtPriceUs(row.latestPrice) }}</span>
+                    <span v-else class="price-empty">-</span>
+                    <div v-if="row.priceChange !== null && row.latestPrice"
+                      :class="Number(row.priceChange) >= 0 ? 'price-up' : 'price-down'"
+                      class="price-change">
+                      {{ Number(row.priceChange) >= 0 ? '▲' : '▼' }}
+                      ${{ Math.abs(Number(row.priceChange)).toFixed(2) }}
+                      ({{ Number(row.priceChangePct).toFixed(2) }}%)
+                    </div>
+                  </div>
+                </template>
+              </el-table-column>
+
+              <el-table-column label="股數" width="110" align="right">
+                <template #default="{ row }">
+                  <span style="font-size:13px">{{ fmtShares(stockShares(row), '英股') }}</span>
+                </template>
+              </el-table-column>
+
+              <el-table-column label="買入均價(USD)" width="130" align="right">
+                <template #default="{ row }">
+                  <span style="font-size:13px">{{
+                    (() => {
+                      const totalShares  = row.brokerRows.reduce((s, br) => s + Number(br.shares || 0), 0)
+                      const totalUsdCost = row.brokerRows.reduce((s, br) =>
+                        s + Number(br.originalCurrencyValue || br.avgCost || 0) * Number(br.shares || 0), 0)
+                      return totalShares > 0 ? '$' + numFmt(Number((totalUsdCost / totalShares).toFixed(4))) : '-'
+                    })()
+                  }}</span>
+                </template>
+              </el-table-column>
+
+              <el-table-column label="持股成本" width="110" align="right">
+                <template #default="{ row }">
+                  <span style="font-size:13px">{{ fmt(stockCost(row)) }}</span>
+                </template>
+              </el-table-column>
+
+              <el-table-column label="總現值(台幣)" width="120" align="right">
+                <template #default="{ row }">{{ fmt(stockValue(row)) }}</template>
+              </el-table-column>
+
+              <el-table-column label="損益" width="170" align="right">
+                <template #default="{ row }">
+                  <span :class="stockProfit(row)>=0?'profit':'loss'">{{ fmt(stockProfit(row)) }}</span>
+                  <small :class="stockProfit(row)>=0?'profit':'loss'" style="font-weight:400;margin-left:4px">
+                    ({{ pct(stockProfitRate(row)) }})
+                  </small>
+                </template>
+              </el-table-column>
+
+              <el-table-column label="配息率" width="90" align="right">
+                <template #default="{ row }">
+                  <span style="font-size:13px">{{ row.dividendRate != null ? (Number(row.dividendRate) * 100).toFixed(2) + '%' : '-' }}</span>
+                </template>
+              </el-table-column>
+
+              <el-table-column label="預估配息" width="100" align="right">
+                <template #default="{ row }">{{ fmt(stockDividend(row)) }}</template>
+              </el-table-column>
+
+              <el-table-column width="40" fixed="right">
+                <template #default="{ row }">
+                  <el-popconfirm title="確定刪除此檔股票（含所有券商持股）？" width="280" confirm-button-text="刪除" cancel-button-text="取消" confirm-button-type="danger"
+                    @confirm="removeStock(row)">
+                    <template #reference>
+                      <el-button type="danger" size="small" :icon="Delete" circle />
+                    </template>
+                  </el-popconfirm>
+                </template>
+              </el-table-column>
+            </el-table>
+
+            <!-- 英股小計 -->
+            <div class="sec-summary">
+              <div class="ds-item">
+                <span class="ds-label">目前總值</span>
+                <span class="ds-val">{{ fmt(ukSummary.value) }}</span>
+              </div>
+              <div class="ds-sep" />
+              <div class="ds-item">
+                <span class="ds-label">投資成本</span>
+                <span class="ds-val">{{ fmt(ukSummary.cost) }}</span>
+              </div>
+              <div class="ds-sep" />
+              <div class="ds-item">
+                <span class="ds-label">損益</span>
+                <span class="ds-val" :class="ukSummary.profit >= 0 ? 'profit' : 'loss'">
+                  {{ fmt(ukSummary.profit) }}
+                  <small style="font-weight:400"> ({{ pct(ukSummary.profitRate) }})</small>
+                </span>
+              </div>
+              <div class="ds-sep" />
+              <div class="ds-item">
+                <span class="ds-label">預估配息</span>
+                <span class="ds-val ds-dividend">{{ fmt(ukSummary.dividend) }}</span>
+              </div>
+              <div class="ds-sep" />
+              <div class="ds-item">
+                <span class="ds-label">持股數</span>
+                <span class="ds-val">{{ ukStocks.length }} 檔</span>
+              </div>
+            </div>
+          </el-tab-pane>
         </el-tabs>
 
       </el-card>
@@ -1155,13 +1441,16 @@ const reorderStockByMarket = (market, oldIndex, newIndex) => {
 // ===== Stock 拖拉排序（與 DashboardView 相同模式） =====
 const twStockTableRef = ref(null)
 const usStockTableRef = ref(null)
+const ukStockTableRef = ref(null)
 let twStockSortable = null
 let usStockSortable = null
+let ukStockSortable = null
 
 function initStockSortable(market) {
-  const isTw = market === '台股'
-  const tableRef = isTw ? twStockTableRef : usStockTableRef
-  const existing = isTw ? twStockSortable : usStockSortable
+  const tableRef = market === '台股' ? twStockTableRef
+    : market === '英股' ? ukStockTableRef : usStockTableRef
+  const existing = market === '台股' ? twStockSortable
+    : market === '英股' ? ukStockSortable : usStockSortable
   if (existing) { existing.destroy() }
   const el = tableRef.value?.$el
   if (!el) return null
@@ -1182,8 +1471,9 @@ function initStockSortable(market) {
       reorderStockByMarket(market, oldIndex, newIndex)
     }
   })
-  if (isTw) twStockSortable = sortable
-  else      usStockSortable = sortable
+  if (market === '台股') twStockSortable = sortable
+  else if (market === '英股') ukStockSortable = sortable
+  else usStockSortable = sortable
   return sortable
 }
 
@@ -1191,6 +1481,7 @@ function refreshStockSortables() {
   nextTick(() => {
     initStockSortable('台股')
     initStockSortable('美股')
+    initStockSortable('英股')
   })
 }
 
@@ -1464,18 +1755,18 @@ const pct = (v) => v != null ? `${(Number(v) * 100).toFixed(2)}%` : '-'
 const fmtShares = (v, market) => {
   if (v == null) return '-'
   const n = Number(v)
-  if (market === '美股') return n.toLocaleString('en-US', { minimumFractionDigits: 5, maximumFractionDigits: 5 })
+  if (market === '美股' || market === '英股') return n.toLocaleString('en-US', { minimumFractionDigits: 5, maximumFractionDigits: 5 })
   return n.toLocaleString('zh-TW', { maximumFractionDigits: 0 })
 }
 
 // ===== Computed: stock group helpers =====
 const stockShares = (s) => s.brokerRows.reduce((a, r) => a + Number(r.shares || 0), 0)
 
-/** 單一 brokerRow 的原幣現值（美股永遠是 USD；台股永遠是 TWD） */
+/** 單一 brokerRow 的原幣現值（美股 / 英股 UCITS 為 USD；台股為 TWD） */
 const calcBrOriginalValue = (br, stock) => {
   if (stock.latestPrice != null) return Number(br.shares || 0) * Number(stock.latestPrice)
   // fallback：無最新股價時用存檔值
-  if (stock.market === '美股') {
+  if (stock.market === '美股' || stock.market === '英股') {
     // currentValueOriginal 為 USD；若無則由台幣存檔值反推
     if (br.currentValueOriginal) return Number(br.currentValueOriginal)
     return Number(br.currentValue || 0) / (form.usdExchangeRate || 1)
@@ -1532,10 +1823,10 @@ function recalcCostByRate(br) {
   br.investmentCostStr = numFmt(br.investmentCost)
 }
 
-/** 單一 brokerRow 的台幣現值（美股原幣 × 快照匯率；台股直接為 TWD） */
+/** 單一 brokerRow 的台幣現值（美股 / 英股 UCITS 原幣 × 快照匯率；台股直接為 TWD） */
 const calcBrTwdValue = (br, stock) => {
   const orig = calcBrOriginalValue(br, stock)
-  if (stock.market === '美股') return Math.round(orig * (form.usdExchangeRate || 1))
+  if (stock.market === '美股' || stock.market === '英股') return Math.round(orig * (form.usdExchangeRate || 1))
   return Math.round(orig)
 }
 
@@ -1617,6 +1908,7 @@ const fundTotalDividend = computed(() => form.funds.reduce((s, f) => s + Number(
 // ===== Computed: filtered stock groups =====
 const twStocks = computed(() => form.stocks.filter(s => s.market === '台股'))
 const usStocks = computed(() => form.stocks.filter(s => s.market === '美股'))
+const ukStocks = computed(() => form.stocks.filter(s => s.market === '英股'))
 
 // 雙擊持股 → 開啟股票分析 dialog
 const analysisVisible = ref(false)
@@ -1647,6 +1939,7 @@ const calcGroupedSummary = (stocks) => {
 
 const twSummary  = computed(() => calcGroupedSummary(twStocks.value))
 const usSummary  = computed(() => calcGroupedSummary(usStocks.value))
+const ukSummary  = computed(() => calcGroupedSummary(ukStocks.value))
 const allSummary = computed(() => calcGroupedSummary(form.stocks))
 
 /**
@@ -1676,7 +1969,7 @@ const summaryFundProfit = computed(() => summaryFundValue.value - summaryFundCos
 // 與分項顯示值不同步時 bar 算不平（例：stored 抓自 BFF 的快照值，但分項是 reactive 即時值）。
 const summaryTotalAssets = computed(() =>
   Number(summaryDeposit.value) + Number(summaryFundValue.value)
-  + Number(twSummary.value.value) + Number(usSummary.value.value))
+  + Number(twSummary.value.value) + Number(usSummary.value.value) + Number(ukSummary.value.value))
 // 預估年配息合計 = 股票 + 基金 + 存款預估年利息（即時計算；不用 pickStored 因為基金部分使用者改 units 時要即時反應）
 const summaryDividend = computed(() => allSummary.value.dividend + fundTotalDividend.value + depositInterestTotal.value)
 
@@ -1760,12 +2053,13 @@ const addFund = () =>
     estimatedDividend: null })
 
 let _idSeq = 1
-const newBrokerRow = (_market) => ({
+const newBrokerRow = (market) => ({
   _id: _idSeq++,
   brokerId: null,
   shares: 0,
   sharesStr: '0',
-  currency: 'TWD',
+  // 英股 UCITS（CSPX.L 等）為 USD 計價，預設 USD；美股 / 台股維持 TWD 預設（使用者可手動切換）
+  currency: market === '英股' ? 'USD' : 'TWD',
   investmentCost: 0,
   investmentCostStr: '0',
   investmentCostTwd: null,

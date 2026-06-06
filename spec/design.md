@@ -354,10 +354,12 @@ BackupSetting         (備份保留代數設定，單列資料表，id = 1)
 | 欄位 | 型別 | 說明 |
 |------|------|------|
 | id | Long | PK |
-| code | String | 識別代碼，同時作為存入 StockHolding.market 的值（如 `台股`） |
+| code | String | 識別代碼，同時作為存入 StockHolding.market 的值（如 `台股`、`美股`、`英股`） |
 | displayName | String | 顯示名稱（如 `台灣股市`） |
 | sortOrder | Integer | 顯示排序 |
 | active | Boolean | 是否啟用（軟刪除用） |
+
+> Seed 由 `DataInitializer.seedMarketTypes()` 提供 3 筆：`台股` / `美股` / `英股`（sortOrder 1/2/3）。`英股` 為 Requirement 24 加入，承載透過複委託投資的 LSE 掛牌 UCITS ETF（CSPX、VWRA 等）。
 
 #### BankDeposit
 | 欄位 | 型別 | 說明 |
@@ -1169,3 +1171,51 @@ volumes:
 - 使用 BigDecimal 處理所有金融數值，避免浮點數精度問題
 - 財務計算精度：20 位數，2-4 位小數
 - 備份／還原 API 僅執行白名單指令，命令參數不接受使用者拼接
+
+---
+
+## Requirement 24 擴充：英股市場類型（LSE UCITS ETF）
+
+### external-materials-service 抓價
+
+- `MarketClock` 加 `LON_ZONE = ZoneId.of("Europe/London")`、`isUkMarketOpen()`（週一～五 08:00–16:30，BST/GMT 由 JVM 處理）、`isUkMarketJustClosed()`（16:30–16:50）
+- `PriceFetchClient`：
+  - `getStockPrice(code, market)` 加 `英股` 分支 → `getYahooLsePrice(code)`：打 `https://query2.finance.yahoo.com/v8/finance/chart/{code}.L?interval=1d&range=1d`，透過 `curlGetWithRetry` 避開 Yahoo Java HTTP fingerprint 偵測；`meta.regularMarketPrice` 為 live、`meta.chartPreviousClose` 為昨收，回 `PriceResult(market="英股", source="Yahoo")`
+  - `fetchUkHistoricalRange(code, start, end)`：對 `{code}.L` 打 Yahoo `chart` API，timezone `Europe/London`
+- `PricePoller.scheduledUkIntradayUpdate`：cron `0 0/2 8-16 * * MON-FRI` zone `Europe/London`；`warmCacheOnStartup` / `refreshAll` 加英股一輪；`RefreshSummary` 加 `ukUpdated` / `ukMarketOpen`
+- `StockSourceQuery` 的 `collectAllStockCodes` / `collectHeldStockCodes` / `collectAllHeldCodes` signature 由 `(twCodes, usCodes)` 改為 `(twCodes, usCodes, ukCodes)`；分流邏輯改用 if-else if-else（依市場字串）
+- `ClosePersister`：
+  - `dumpUkCloseFromRedis()` cron `0 32 16 * * MON-FRI` zone `Europe/London`，仿台股 13:32 / 美股 16:02 dump pattern
+  - `verifyUkCloseWithYahoo()` cron `0 0 17 * * MON-FRI` zone `Europe/London`，逐檔呼叫 `priceFetch.fetchUkHistoricalRange(code, today, today)` 取單日收盤覆寫 DB 與 Redis（英股無 FinMind 對應，校正改用 Yahoo historical）
+  - `selfHealMissedClose()` 加倫敦時區分支
+- `HistoricalBackfillService.backfillUkStock(code, since, until)`：仿 `backfillUsStock` 走 Yahoo `chart`；今日 bar 一律 skip（沿用 Task 84「今日列獨佔給 ClosePersister」）；`startupBackfill` / `backfillAll` / `backfillSingleStock` 加英股分支
+
+### business-services
+
+- `DataInitializer.seedMarketTypes()` 加 `("英股", "英國股市", 3)`
+- `StockPriceService`：
+  - 加 `LON_ZONE`、`isUkMarketOpen()`
+  - `getLiveAssets()` 對 `market="英股"` 持倉套用 `usdExchangeRate` 換算台幣（與美股同 path；CSPX.L USD 計價）
+  - `getMarketStatus()` 多回 `ukMarketOpen` / `ukTime`；`manualRefresh()` 多回 `ukMarketOpen`；`LiveAssetsResponse` 多 `ukMarketOpen`
+- 新增共用 helper `com.steven.assets.util.MarketZones.resolve(market)`：`美股 → America/New_York`、`英股 → Europe/London`、其餘（含 `台股`、`0000`）→ `Asia/Taipei`。`TechnicalIndicatorService` / `WatchStockService` / `StockAlertService` / `HistoricalDataService` 共用
+- `StockAlertController.lookupName`：`0000 + 英股` 直接回空字串（同 `0000 + 美股`）
+- `StockAlertService.assertNameMatchesCode`：英股 canonical name 走 `MarketDataFetchService.fetchUkStockName(code)`（Yahoo `chart meta.shortName` for `{code}.L`）
+- `MarketDataService` / `MarketDataFetchService`：`getDividendRate("英股", code)` 走 Yahoo `chart?events=div` 對 `{code}.L`；`getEtfHoldings("英股", code)` 呼叫 Yahoo `quoteSummary?modules=topHoldings` 對 `{code}.L`；`isEtf("英股", code)` 採白名單 `[CSPX, VWRA, VUSA, EIMI, IWDA]`
+
+### 前端
+
+- `StockAnalysisDialog.vue`：`isEtf` / `etfExternalLinks` 加英股分支（iShares 官網）
+- `DashboardView.vue`：頂部資產彙整列加「英股現值」欄；資產配置圓餅圖 5 區擴為 6 區（加「英股」）；KPI / 即時資產估算對英股套 USD 匯率
+- `AssetHistoryView.vue`：歷年資產表格加「英股」欄；今日列以 live-assets 覆寫的邏輯涵蓋英股
+- `SnapshotDetailView.vue`：英股小數位 5 位、currency `USD`（與美股同）
+- `SnapshotFormView.vue`：股票區塊加英股區，預設 `currency='USD'`
+- `WatchStockView.vue` / `StockAlertView.vue`：tab 加「英股」、觸發時間時區後綴 `LON`
+- `TradingCalendarView.vue`：英股開收盤狀態（讀 `getMarketStatus()` 的 `ukMarketOpen` / `ukTime`）
+- `RealizedGainView.vue`：market 篩選 / 新增表單加「英股」
+
+### 不在本次範圍
+
+- GBP 匯率體系（CSP1.L 等 GBP-denominated UCITS 才需要）
+- LSE holiday calendar（用週末 + 時段判斷已足夠）
+- Excel 匯入英股欄位
+- iShares 官方 ETF 持股 scrape（先依靠 Yahoo `topHoldings`）

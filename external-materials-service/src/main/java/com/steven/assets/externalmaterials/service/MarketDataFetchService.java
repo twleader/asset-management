@@ -102,6 +102,11 @@ public class MarketDataFetchService {
             Optional<DividendRateResult> twse = getTwseDividendRate(stockCode);
             if (twse.isPresent()) return twse.get();
             return new DividendRateResult(stockCode, market, null, "N/A", "查無配息資料", null);
+        } else if ("英股".equals(market)) {
+            // 英股 UCITS ETF：Yahoo chart?events=div 對 {code}.L 取 TTM 殖利率
+            Optional<DividendRateResult> yahoo = getYahooDividendRateForTicker(stockCode, stockCode + ".L", "英股");
+            if (yahoo.isPresent()) return yahoo.get();
+            return new DividendRateResult(stockCode, market, null, "N/A", "查無配息資料", null);
         } else {
             Optional<DividendRateResult> nasdaq = getNasdaqDividendRateAny(stockCode);
             if (nasdaq.isPresent()) return nasdaq.get();
@@ -274,9 +279,19 @@ public class MarketDataFetchService {
      * 走 curl 子程序避免 Yahoo 的 fingerprint 偵測（與 fetchUsStockName 同一個模式）。
      */
     private Optional<DividendRateResult> getYahooDividendRate(String stockCode) {
+        return getYahooDividendRateForTicker(stockCode, stockCode.trim().toUpperCase(), "美股");
+    }
+
+    /**
+     * Yahoo chart events=div 取 TTM 殖利率（US / UK 共用）。
+     * @param stockCode 存入 result 的代號（不含後綴，如 CSPX）
+     * @param yahooTicker 對 Yahoo 查的完整 ticker（如 CSPX.L、JEPI）
+     * @param market 存入 result 的市場字串（`美股` / `英股`）
+     */
+    private Optional<DividendRateResult> getYahooDividendRateForTicker(String stockCode, String yahooTicker, String market) {
         try {
             String url = "https://query2.finance.yahoo.com/v8/finance/chart/"
-                    + stockCode.trim().toUpperCase() + "?interval=1d&range=1y&events=div";
+                    + yahooTicker + "?interval=1d&range=1y&events=div";
             ProcessBuilder pb = new ProcessBuilder("curl", "-s",
                     "-H", "User-Agent: Mozilla/5.0", url);
             pb.redirectErrorStream(true);
@@ -298,11 +313,11 @@ public class MarketDataFetchService {
             BigDecimal rate = BigDecimal.valueOf(ttm / price).setScale(6, RoundingMode.HALF_UP);
             BigDecimal pct = BigDecimal.valueOf(ttm / price * 100).setScale(2, RoundingMode.HALF_UP);
             return Optional.of(new DividendRateResult(
-                    stockCode, "美股", rate, "Yahoo Finance",
+                    stockCode, market, rate, "Yahoo Finance",
                     "TTM %d 筆配息合計 $%.4f，殖利率 %s%%".formatted(n, ttm, pct.toPlainString()),
                     null));
         } catch (Exception e) {
-            log.warn("Yahoo dividend 查詢失敗 {}: {}", stockCode, e.getMessage());
+            log.warn("Yahoo dividend 查詢失敗 {}: {}", yahooTicker, e.getMessage());
             return Optional.empty();
         }
     }
@@ -336,10 +351,14 @@ public class MarketDataFetchService {
             "VOO", "VT", "VTI", "VGT", "VYM", "VNQ", "VXUS",
             "SPY", "QQQ", "DIA", "IVV", "IWM", "AVGO", "SCHD", "JEPI", "JEPQ");
 
+    private static final java.util.Set<String> UK_ETF_WHITELIST = java.util.Set.of(
+            "CSPX", "VWRA", "VUSA", "EIMI", "IWDA");
+
     public boolean isEtf(String stockCode, String market) {
         if (stockCode == null) return false;
         if ("台股".equals(market)) return stockCode.startsWith("00");
         if ("美股".equals(market)) return US_ETF_WHITELIST.contains(stockCode.toUpperCase());
+        if ("英股".equals(market)) return UK_ETF_WHITELIST.contains(stockCode.toUpperCase());
         return false;
     }
 
@@ -397,7 +416,10 @@ public class MarketDataFetchService {
 
     private EtfHoldingsResult getYahooEtfHoldings(String stockCode, String market) {
         try {
-            String symbol = "台股".equals(market) ? stockCode + ".TW" : stockCode;
+            String symbol;
+            if ("台股".equals(market)) symbol = stockCode + ".TW";
+            else if ("英股".equals(market)) symbol = stockCode + ".L";
+            else symbol = stockCode;
             String crumb = getYahooCrumb();
             String url = "https://query2.finance.yahoo.com/v10/finance/quoteSummary/" + symbol
                     + "?modules=topHoldings&crumb=" + URLEncoder.encode(crumb, StandardCharsets.UTF_8);
@@ -442,7 +464,52 @@ public class MarketDataFetchService {
         int n = Math.max(1, Math.min(years, 20));
         if ("台股".equals(market)) return getTwDividendHistory(stockCode, n);
         if ("美股".equals(market)) return getUsDividendHistory(stockCode, n);
+        if ("英股".equals(market)) return getYahooDividendHistory(stockCode, stockCode + ".L", "英股", n);
         return new DividendHistoryResult(stockCode, market, null, "不支援的市場", List.of());
+    }
+
+    /**
+     * Yahoo chart events=div 取近 N 年股利歷史（英股 UCITS ETF 用；無 NASDAQ 對應 dataset）。
+     */
+    private DividendHistoryResult getYahooDividendHistory(String stockCode, String yahooTicker, String market, int years) {
+        try {
+            int range = Math.max(1, Math.min(years, 20));
+            String url = "https://query2.finance.yahoo.com/v8/finance/chart/"
+                    + yahooTicker + "?interval=1d&range=" + range + "y&events=div";
+            ProcessBuilder pb = new ProcessBuilder("curl", "-s",
+                    "-H", "User-Agent: Mozilla/5.0", url);
+            pb.redirectErrorStream(true);
+            Process proc = pb.start();
+            String body = new String(proc.getInputStream().readAllBytes());
+            proc.waitFor();
+            JsonNode divs = mapper.readTree(body)
+                    .path("chart").path("result").path(0).path("events").path("dividends");
+            if (!divs.isObject() || divs.isEmpty()) {
+                return new DividendHistoryResult(stockCode, market, "Yahoo Finance", "查無股利資料", List.of());
+            }
+            List<DividendRow> rows = new ArrayList<>();
+            for (JsonNode d : divs) {
+                long ts = d.path("date").asLong(0);
+                double amt = d.path("amount").asDouble(0);
+                if (ts <= 0 || amt <= 0) continue;
+                LocalDate exDate = java.time.Instant.ofEpochSecond(ts)
+                        .atZone(java.time.ZoneId.of("Europe/London")).toLocalDate();
+                rows.add(new DividendRow(exDate.getYear(),
+                        BigDecimal.valueOf(amt).setScale(4, RoundingMode.HALF_UP),
+                        BigDecimal.ZERO, exDate.toString(), null, null, null,
+                        null, null));
+            }
+            rows.sort((a, b) -> {
+                String ea = a.exDividendDate() != null ? a.exDividendDate() : "";
+                String eb = b.exDividendDate() != null ? b.exDividendDate() : "";
+                return eb.compareTo(ea);
+            });
+            return new DividendHistoryResult(stockCode, market, "Yahoo Finance", null, rows);
+        } catch (Exception e) {
+            log.warn("Yahoo 英股股利歷史查詢失敗 {}: {}", yahooTicker, e.getMessage());
+            return new DividendHistoryResult(stockCode, market, "Yahoo Finance",
+                    "查詢失敗：" + e.getMessage(), List.of());
+        }
     }
 
     private DividendHistoryResult getTwDividendHistory(String stockCode, int years) {
@@ -621,8 +688,17 @@ public class MarketDataFetchService {
 
     /** 美股名稱：Yahoo Finance chart meta（用 curl 子程序避免 fingerprint 偵測）。 */
     public String fetchUsStockName(String code) {
+        return fetchYahooStockName(code, code.trim().toUpperCase());
+    }
+
+    /** 英股 UCITS ETF 名稱：Yahoo Finance chart meta，ticker = {code}.L。 */
+    public String fetchUkStockName(String code) {
+        return fetchYahooStockName(code, code.trim().toUpperCase() + ".L");
+    }
+
+    private String fetchYahooStockName(String code, String yahooTicker) {
         try {
-            String url = "https://query2.finance.yahoo.com/v8/finance/chart/" + code.trim().toUpperCase()
+            String url = "https://query2.finance.yahoo.com/v8/finance/chart/" + yahooTicker
                     + "?interval=1d&range=1d";
             ProcessBuilder pb = new ProcessBuilder("curl", "-s",
                     "-H", "User-Agent: Mozilla/5.0", url);
@@ -636,7 +712,7 @@ public class MarketDataFetchService {
             if (name.isEmpty()) name = meta.path("longName").asText("").trim();
             if (!name.isEmpty() && !name.equalsIgnoreCase(code)) return name;
         } catch (Exception e) {
-            log.warn("Yahoo 查詢美股名稱失敗 {}: {}", code, e.getMessage());
+            log.warn("Yahoo 查詢股票名稱失敗 {}: {}", yahooTicker, e.getMessage());
         }
         return "";
     }

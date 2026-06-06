@@ -38,6 +38,7 @@ public class SnapshotEnricher {
 
     private static final ZoneId TW_ZONE = ZoneId.of("Asia/Taipei");
     private static final ZoneId US_ZONE = ZoneId.of("America/New_York");
+    private static final ZoneId LON_ZONE = ZoneId.of("Europe/London");
 
     /**
      * 「股價基準日規則」（per-market）：當基準日 == 該市場時區的今日，才回傳即時價格（會持續變動）；
@@ -50,7 +51,10 @@ public class SnapshotEnricher {
      */
     public static boolean isCurrentBasedate(LocalDate basedate, String market) {
         if (basedate == null) return false;
-        ZoneId zone = "美股".equals(market) ? US_ZONE : TW_ZONE;
+        ZoneId zone;
+        if ("美股".equals(market)) zone = US_ZONE;
+        else if ("英股".equals(market)) zone = LON_ZONE;
+        else zone = TW_ZONE;
         return basedate.equals(LocalDate.now(zone));
     }
 
@@ -133,7 +137,8 @@ public class SnapshotEnricher {
             BigDecimal rate = toBigDecimal(stock.get("transactionExchangeRate"));
 
             BigDecimal original = cost;
-            if ("美股".equals(market) && !"USD".equals(currency)
+            // 美股 / 英股（USD 計價 UCITS）：若 cost 是 TWD（rate > 0），反算原幣 USD
+            if (("美股".equals(market) || "英股".equals(market)) && !"USD".equals(currency)
                     && rate != null && rate.compareTo(BigDecimal.ZERO) > 0) {
                 original = cost.divide(rate, 6, RoundingMode.HALF_UP);
             }
