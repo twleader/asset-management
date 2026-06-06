@@ -290,7 +290,7 @@ const etfExternalLinks = computed(() => {
   if (s.market === '台股') {
     return [
       { label: `MoneyDJ 成分股（${code}）`, url: `https://www.moneydj.com/etf/x/basic/basic0007A.xdjhtm?etfid=${code}.TW` },
-      { label: `Goodinfo 成分股（${code}）`, url: `https://goodinfo.tw/tw/ETFControlBasicInfo.asp?STOCK_ID=${code}` },
+      { label: `玩股網 成分股（${code}）`, url: `https://www.wantgoo.com/stock/etf/${code.toLowerCase()}/constituent` },
       { label: `Yahoo 奇摩股市（${code}）`, url: `https://tw.stock.yahoo.com/quote/${code}.TW/holding` },
     ]
   }
