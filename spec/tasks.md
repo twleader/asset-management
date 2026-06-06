@@ -2337,3 +2337,47 @@ VOO 股票走勢圖在 2026-06-05 NY 盤中（15:16，未到 16:00 收盤）顯�
 - [ ] 84.6 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
 
 
+
+---
+
+### Task 85: 新增「英股」市場類型（CSPX 等 LSE UCITS ETF）
+
+對應 Requirements: Requirement 24（英股市場類型擴充）
+
+#### 背景
+
+使用者要透過複委託投資 LSE 掛牌的 USD-denominated UCITS ETF（CSPX、VWRA、VUSA、EIMI、IWDA 等）。現有系統只有「台股 / 美股」兩個市場類型，需新增第三類「英股」並在所有相關頁面與後端服務支援。
+
+設計決策：
+- 計價幣別沿用既有 USD 體系（CSPX.L USD-denominated），`StockHolding.currency='USD'`，市值換算與美股同 path；不引入 GBP 匯率體系
+- 即時股價走 Yahoo Finance `.L` suffix（無 NASDAQ / FinMind 對應）
+- ETF 成分股外部連結用 iShares 官網
+
+#### Steps:
+
+- [ ] 85.1 spec：requirements.md Req 12 seed 改 3 種；新增 Req 24；design.md 加 MarketType seed 註解 + Req 24 設計章節
+- [ ] 85.2 backend `DataInitializer.seedMarketTypes()` 加 `("英股", "英國股市", 3)`
+- [ ] 85.3 external-materials `MarketClock`：加 `LON_ZONE` + `isUkMarketOpen` + `isUkMarketJustClosed`
+- [ ] 85.4 external-materials `PriceFetchClient`：加 `getYahooLsePrice` + `fetchUkHistoricalRange`；`getStockPrice` 加英股分支
+- [ ] 85.5 external-materials `StockSourceQuery`：三組 collect 方法 signature 改三路（加 ukCodes）
+- [ ] 85.6 external-materials `PricePoller`：加 `scheduledUkIntradayUpdate` cron、`warmCacheOnStartup` / `refreshAll` 涵蓋英股、`RefreshSummary` 加 ukUpdated/ukMarketOpen
+- [ ] 85.7 external-materials `ClosePersister`：加 `dumpUkCloseFromRedis` cron 16:32 LON、`verifyUkCloseWithYahoo` cron 17:00 LON、`selfHealMissedClose` 倫敦時區分支
+- [ ] 85.8 external-materials `HistoricalBackfillService.backfillUkStock`；`startupBackfill` / `backfillAll` / `backfillSingleStock` 加英股分支
+- [ ] 85.9 external-materials `MarketDataFetchService`：加 `fetchUkStockName`；`getDividendRate` / `getEtfHoldings` / `getDividendHistory` 加英股分支
+- [ ] 85.10 backend 新增 `com.steven.assets.util.MarketZones.resolve(market)` helper
+- [ ] 85.11 backend `StockPriceService`：加 LON_ZONE / isUkMarketOpen；`getLiveAssets` 英股套 USD 匯率；`getMarketStatus` / `manualRefresh` / `LiveAssetsResponse` 加 ukMarketOpen
+- [ ] 85.12 backend `TechnicalIndicatorService` / `WatchStockService` / `StockAlertService` / `HistoricalDataService` 改用 `MarketZones.resolve`
+- [ ] 85.13 backend `StockAlertController.lookupName`：`0000 + 英股` 拒絕
+- [ ] 85.14 backend `StockAlertService.assertNameMatchesCode` 加英股分支
+- [ ] 85.15 backend `MarketDataService.getDividendRate / getEtfHoldings / getDividendHistory / isEtf` 加英股分支
+- [ ] 85.16 frontend `StockAnalysisDialog.vue` 加英股 ETF 白名單 + iShares 連結
+- [ ] 85.17 frontend `DashboardView.vue` 頂部彙整列加英股欄、資產配置圓餅 6 區、KPI 計算
+- [ ] 85.18 frontend `AssetHistoryView.vue` 加英股欄
+- [ ] 85.19 frontend `SnapshotDetailView.vue` 英股 USD 顯示
+- [ ] 85.20 frontend `SnapshotFormView.vue` 股票區塊加英股區
+- [ ] 85.21 frontend `WatchStockView.vue` / `StockAlertView.vue` 加英股 tab + LON 時區後綴
+- [ ] 85.22 frontend `TradingCalendarView.vue` 顯示英股市場狀態
+- [ ] 85.23 frontend `RealizedGainView.vue` market 選項加英股
+- [ ] 85.24 Docker 重 build：`docker compose build backend external-materials-service frontend && docker compose up -d backend external-materials-service frontend`
+- [ ] 85.25 手動驗證：新增 CSPX/英股 持股、watch、alert，dashboard 顯示英股欄、historical backfill 觸發、倫敦時區排程啟動
+

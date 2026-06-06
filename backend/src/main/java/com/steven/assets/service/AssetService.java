@@ -389,16 +389,15 @@ public class AssetService {
             BigDecimal investRate = total.compareTo(BigDecimal.ZERO) != 0
                     ? investAmount.divide(total, 6, RoundingMode.HALF_UP) : BigDecimal.ZERO;
 
-            // 計算台股/美股分項現值
+            // 計算台股/美股/英股分項現值
             BigDecimal twStockValue = BigDecimal.ZERO;
             BigDecimal usStockValue = BigDecimal.ZERO;
+            BigDecimal ukStockValue = BigDecimal.ZERO;
             for (StockHolding st : s.getStocks()) {
                 BigDecimal val = st.getCurrentValue() != null ? st.getCurrentValue() : BigDecimal.ZERO;
-                if ("美股".equals(st.getMarket())) {
-                    usStockValue = usStockValue.add(val);
-                } else {
-                    twStockValue = twStockValue.add(val);
-                }
+                if ("美股".equals(st.getMarket())) usStockValue = usStockValue.add(val);
+                else if ("英股".equals(st.getMarket())) ukStockValue = ukStockValue.add(val);
+                else twStockValue = twStockValue.add(val);
             }
 
             // 計算台幣 / 美元存款分項（與前端 bankSummary 同邏輯：TRANSIT_TWD/TRANSIT_USD 各歸對應幣別，
@@ -425,7 +424,7 @@ public class AssetService {
                 s.getId(), s.getSnapshotDate(), s.getTotalDeposit(),
                 twdDeposit, usdDeposit,
                 s.getTotalFundValue(),
-                twStockValue, usStockValue,
+                twStockValue, usStockValue, ukStockValue,
                 s.getTotalStockValue(), total, increase, increaseRate, investRate,
                 estimatedDividend, realizedGain
             ));
@@ -465,7 +464,8 @@ public class AssetService {
     public RealizedGainDto.RealizedGainResponse createRealizedGain(RealizedGainDto.CreateRealizedGainRequest req) {
         String currency = req.currency();
         if (currency == null || currency.isBlank()) {
-            currency = "美股".equals(req.market()) ? "USD" : "TWD";
+            // 英股 UCITS ETF（CSPX.L 等）同樣 USD 計價，與美股共用 USD 匯率
+            currency = ("美股".equals(req.market()) || "英股".equals(req.market())) ? "USD" : "TWD";
         }
 
         // USD 計價時自動查交易日匯率
@@ -498,7 +498,8 @@ public class AssetService {
 
         String currency = req.currency();
         if (currency == null || currency.isBlank()) {
-            currency = "美股".equals(req.market()) ? "USD" : "TWD";
+            // 英股 UCITS ETF（CSPX.L 等）同樣 USD 計價，與美股共用 USD 匯率
+            currency = ("美股".equals(req.market()) || "英股".equals(req.market())) ? "USD" : "TWD";
         }
 
         // USD 計價時自動查交易日匯率
@@ -852,7 +853,8 @@ public class AssetService {
     }
 
     private RealizedGainDto.RealizedGainResponse toGainResponse(RealizedGain g) {
-        String currency = g.getCurrency() != null ? g.getCurrency() : ("美股".equals(g.getMarket()) ? "USD" : "TWD");
+        String currency = g.getCurrency() != null ? g.getCurrency()
+                : (("美股".equals(g.getMarket()) || "英股".equals(g.getMarket())) ? "USD" : "TWD");
         BigDecimal rate = g.getExchangeRate();
 
         // 若 USD 計價但沒有匯率，嘗試查詢

@@ -19,6 +19,7 @@
         <el-table-column label="信託基金" align="right" :formatter="(r) => fmt(r.totalFundValue)" />
         <el-table-column label="台股" align="right" :formatter="(r) => fmt(r.totalTwStockValue)" />
         <el-table-column label="美股" align="right" :formatter="(r) => fmt(r.totalUsStockValue)" />
+        <el-table-column label="英股" align="right" :formatter="(r) => fmt(r.totalUkStockValue)" />
         <el-table-column label="資產總計" align="right" min-width="120">
           <template #default="{ row }">
             <strong>{{ fmt(row.totalAssets) }}</strong>
@@ -194,6 +195,7 @@ const trendLegendItems = computed(() => {
     { name: '美元存款', value: Number(r.totalUsdDeposit || 0),   pct: pctOf(Number(r.totalUsdDeposit || 0)),   color: '#60a5fa' },
     { name: '台股',     value: Number(r.totalTwStockValue || 0), pct: pctOf(Number(r.totalTwStockValue || 0)), color: '#f59e0b' },
     { name: '美股',     value: Number(r.totalUsStockValue || 0), pct: pctOf(Number(r.totalUsStockValue || 0)), color: '#ef4444' },
+    { name: '英股',     value: Number(r.totalUkStockValue || 0), pct: pctOf(Number(r.totalUkStockValue || 0)), color: '#0ea5e9' },
     { name: '基金',     value: Number(r.totalFundValue || 0),    pct: pctOf(Number(r.totalFundValue || 0)),    color: '#10b981' }
   ]
 })
@@ -251,13 +253,19 @@ const totalTrendOption = computed(() => ({
       data: history.value.map(h => Number(h.totalUsStockValue || 0)),
       itemStyle: { color: '#ef4444' },
       lineStyle: { width: 2 }
+    },
+    {
+      name: '英股', type: 'line', smooth: true,
+      data: history.value.map(h => Number(h.totalUkStockValue || 0)),
+      itemStyle: { color: '#0ea5e9' },
+      lineStyle: { width: 2 }
     }
   ]
 }))
 
 const stackedOption = computed(() => ({
   tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-  legend: { data: ['台幣存款', '美元存款', '基金', '台股', '美股'] },
+  legend: { data: ['台幣存款', '美元存款', '基金', '台股', '美股', '英股'] },
   grid: { left: 70, right: 20, top: 40, bottom: 50 },
   xAxis: { type: 'category', data: dates.value, axisLabel: { rotate: 30, fontSize: 11 } },
   yAxis: { type: 'value', axisLabel: { formatter: v => `$${(v/1e4).toFixed(0)}萬` } },
@@ -266,10 +274,11 @@ const stackedOption = computed(() => ({
     { name: '美元存款', type: 'bar', stack: 'total', data: history.value.map(h => Number(h.totalUsdDeposit||0)), itemStyle: { color: '#60a5fa' } },
     { name: '基金', type: 'bar', stack: 'total', data: history.value.map(h => Number(h.totalFundValue||0)), itemStyle: { color: '#10b981' } },
     { name: '台股', type: 'bar', stack: 'total', data: history.value.map(h => Number(h.totalTwStockValue||0)), itemStyle: { color: '#f59e0b' } },
+    { name: '美股', type: 'bar', stack: 'total', data: history.value.map(h => Number(h.totalUsStockValue||0)), itemStyle: { color: '#ef4444' } },
     {
-      name: '美股', type: 'bar', stack: 'total',
-      data: history.value.map(h => Number(h.totalUsStockValue||0)),
-      itemStyle: { color: '#ef4444' },
+      name: '英股', type: 'bar', stack: 'total',
+      data: history.value.map(h => Number(h.totalUkStockValue||0)),
+      itemStyle: { color: '#0ea5e9' },
       label: {
         show: true,
         position: 'top',

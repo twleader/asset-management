@@ -2,7 +2,7 @@
   <div>
     <!-- Market Status -->
     <el-row :gutter="20" style="margin-bottom:20px">
-      <el-col :span="12">
+      <el-col :span="8">
         <el-card>
           <template #header><span class="section-title" style="display:inline-flex;align-items:center;gap:6px"><TaiwanMap :size="14" /> 台股</span></template>
           <div class="market-info">
@@ -25,7 +25,7 @@
           </div>
         </el-card>
       </el-col>
-      <el-col :span="12">
+      <el-col :span="8">
         <el-card>
           <template #header><span class="section-title" style="display:inline-flex;align-items:center;gap:6px"><UsFlag :size="22" /> 美股</span></template>
           <div class="market-info">
@@ -55,6 +55,29 @@
           </div>
         </el-card>
       </el-col>
+      <el-col :span="8">
+        <el-card>
+          <template #header><span class="section-title" style="display:inline-flex;align-items:center;gap:6px"><span style="font-size:18px">🇬🇧</span> 英股</span></template>
+          <div class="market-info">
+            <div class="status-row">
+              <span class="status-dot" :class="status.ukMarketOpen ? 'open' : 'closed'" />
+              <span class="status-text">{{ status.ukMarketOpen ? '開盤中' : '休市' }}</span>
+            </div>
+            <div class="info-item">
+              <span class="label">倫敦時間</span>
+              <span class="value">{{ ukTimeDisplay }}</span>
+            </div>
+            <div class="info-item">
+              <span class="label">交易時間</span>
+              <span class="value">週一～五 08:00 ~ 16:30</span>
+            </div>
+            <div class="info-item">
+              <span class="label">交易所</span>
+              <span class="value">LSE 倫敦證券交易所</span>
+            </div>
+          </div>
+        </el-card>
+      </el-col>
     </el-row>
 
     <!-- Calendar -->
@@ -74,11 +97,12 @@
       <div class="legend" style="margin-bottom:12px">
         <span class="legend-item"><TaiwanMap :size="16" /> 台股交易日</span>
         <span class="legend-item"><UsFlag :size="20" /> 美股交易日</span>
+        <span class="legend-item"><span style="font-size:18px;line-height:1;display:inline-flex;align-items:center">🇬🇧</span> 英股交易日</span>
         <span class="legend-item">
           <span style="display:inline-flex;align-items:center;gap:3px">
-            <TaiwanMap :size="16" /><UsFlag :size="20" />
+            <TaiwanMap :size="16" /><UsFlag :size="20" /><span style="font-size:18px;line-height:1;display:inline-flex;align-items:center">🇬🇧</span>
           </span>
-          兩市同交易
+          三市同交易
         </span>
         <span class="legend-item"><span class="legend-dot holiday" /> 假日/休市</span>
       </div>
@@ -98,10 +122,12 @@
                 <div class="cal-tags">
                   <TaiwanMap v-if="day.tw" :size="12" />
                   <UsFlag v-if="day.us" :size="14" />
+                  <span v-if="day.uk" style="font-size:14px;line-height:1;display:inline-flex;align-items:center">🇬🇧</span>
                 </div>
-                <div v-if="day.twHoliday || day.usHoliday" class="cal-holiday">
+                <div v-if="day.twHoliday || day.usHoliday || day.ukHoliday" class="cal-holiday">
                   <small v-if="day.twHoliday" style="color:#ef4444">{{ day.twHoliday }}</small>
                   <small v-if="day.usHoliday" style="color:#3b82f6">{{ day.usHoliday }}</small>
+                  <small v-if="day.ukHoliday" style="color:#0ea5e9">{{ day.ukHoliday }}</small>
                 </div>
               </div>
             </td>
@@ -129,7 +155,7 @@ import dayjs from 'dayjs'
 import TaiwanMap from '@/components/TaiwanMap.vue'
 import UsFlag from '@/components/UsFlag.vue'
 
-const status = ref({ twMarketOpen: false, usMarketOpen: false, twTime: '', usTime: '' })
+const status = ref({ twMarketOpen: false, usMarketOpen: false, ukMarketOpen: false, twTime: '', usTime: '', ukTime: '' })
 const calendarYear = ref(dayjs().year())
 const calendarMonth = ref(dayjs().month() + 1)
 const selectedDate = ref(null)
@@ -144,10 +170,10 @@ async function loadHolidays(year) {
   try {
     // BFF 一支端點：holidays + marketStatus
     const res = await bffApi.tradingCalendar.get(year)
-    holidayCache.value = { ...holidayCache.value, [year]: res.holidays ?? { tw: {}, us: {} } }
+    holidayCache.value = { ...holidayCache.value, [year]: res.holidays ?? { tw: {}, us: {}, uk: {} } }
     if (res.marketStatus) status.value = res.marketStatus
   } catch (e) {
-    holidayCache.value = { ...holidayCache.value, [year]: { tw: {}, us: {} } }
+    holidayCache.value = { ...holidayCache.value, [year]: { tw: {}, us: {}, uk: {} } }
   } finally {
     holidaysLoading.value = false
   }
@@ -170,6 +196,11 @@ const twTimeDisplay = computed(() => {
 const usTimeDisplay = computed(() => {
   if (!status.value.usTime) return '-'
   return dayjs(status.value.usTime).format('YYYY/MM/DD (dd) HH:mm:ss')
+})
+
+const ukTimeDisplay = computed(() => {
+  if (!status.value.ukTime) return '-'
+  return dayjs(status.value.ukTime).format('YYYY/MM/DD (dd) HH:mm:ss')
 })
 
 // US DST calculation
@@ -221,9 +252,10 @@ const calendarWeeks = computed(() => {
   const daysInMonth = firstDay.daysInMonth()
   const startDow = firstDay.day() // 0=Sun
 
-  const cached = holidayCache.value[y] || { tw: {}, us: {} }
+  const cached = holidayCache.value[y] || { tw: {}, us: {}, uk: {} }
   const twHolidays = cached.tw
   const usHolidays = cached.us
+  const ukHolidays = cached.uk || {}
   const today = dayjs().format('YYYY-MM-DD')
 
   const weeks = []
@@ -244,6 +276,8 @@ const calendarWeeks = computed(() => {
     const tw = !isWeekend && !twHolidays[dateStr]
     // 美股交易日: 週一～五，非美國假日
     const us = !isWeekend && !usHolidays[dateStr]
+    // 英股交易日: 週一～五，非英國銀行假日（LSE）
+    const uk = !isWeekend && !ukHolidays[dateStr]
 
     week.push({
       day: d,
@@ -252,9 +286,11 @@ const calendarWeeks = computed(() => {
       isToday: dateStr === today,
       tw,
       us,
+      uk,
       isWeekend,
       twHoliday: twHolidays[dateStr] || null,
-      usHoliday: usHolidays[dateStr] || null
+      usHoliday: usHolidays[dateStr] || null,
+      ukHoliday: ukHolidays[dateStr] || null
     })
 
     if (week.length === 7) {
@@ -275,8 +311,8 @@ const calendarWeeks = computed(() => {
 function dayClass(day) {
   if (!day.day) return 'empty'
   if (day.isWeekend) return 'weekend'
-  if (day.tw && day.us) return 'both'
-  if (!day.tw && !day.us) return 'holiday'
+  if (day.tw && day.us && day.uk) return 'both'
+  if (!day.tw && !day.us && !day.uk) return 'holiday'
   return ''
 }
 
@@ -342,7 +378,7 @@ function goToday() {
 .cal-day { font-size: 14px; font-weight: 600; color: #1e293b; }
 .cal-day.today { background: #3b82f6; color: white; border-radius: 50%; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; }
 
-.cal-tags { display: flex; gap: 3px; }
+.cal-tags { display: flex; gap: 3px; align-items: center; line-height: 1; }
 .cal-tags .dot { width: 8px; height: 8px; border-radius: 50%; }
 .cal-tags .dot.tw { background: #ef4444; }
 .cal-tags .dot.us { background: #3b82f6; }

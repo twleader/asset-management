@@ -131,6 +131,7 @@
               <el-tabs v-model="chartMarketTab" class="chart-market-tabs" style="margin:0">
                 <el-tab-pane label="台股" name="台股" />
                 <el-tab-pane label="美股" name="美股" />
+                <el-tab-pane label="英股" name="英股" />
               </el-tabs>
             </div>
           </template>
@@ -175,6 +176,10 @@
                   美股 <span :style="{ color: marketStatus.usMarketOpen ? '#16a34a' : '#94a3b8' }">●</span>
                   {{ marketStatus.usMarketOpen ? '開盤中' : '休市' }}
                 </span>
+                <span style="font-size:12px">
+                  英股 <span :style="{ color: marketStatus.ukMarketOpen ? '#16a34a' : '#94a3b8' }">●</span>
+                  {{ marketStatus.ukMarketOpen ? '開盤中' : '休市' }}
+                </span>
                 <el-button type="primary" size="small" :icon="ArrowRight"
                   @click="$router.push('/snapshots/' + latest?.id + '/edit')">
                   管理資產
@@ -185,6 +190,7 @@
           <el-tabs v-model="stockMarketTab" class="stock-tabs">
             <el-tab-pane label="台股" name="台股" />
             <el-tab-pane label="美股" name="美股" />
+            <el-tab-pane label="英股" name="英股" />
           </el-tabs>
           <el-table
             ref="stockTableRef"
@@ -482,7 +488,7 @@ function isBaselineToday(market) {
   // 例：台灣已 4/30 凌晨，但美東仍是 4/29 下午盤中 → 對美股而言 basedate=4/29 仍視為今天。
   const d = latest.value?.snapshotDate
   if (!d) return false
-  const tz = market === '美股' ? 'America/New_York' : 'Asia/Taipei'
+  const tz = market === '美股' ? 'America/New_York' : market === '英股' ? 'Europe/London' : 'Asia/Taipei'
   const today = new Date().toLocaleDateString('en-CA', { timeZone: tz }) // YYYY-MM-DD
   return d === today
 }
@@ -530,7 +536,7 @@ function getRealtimePrice(row) {
 const formatShares = (v, market) => {
   if (v == null) return '-'
   const n = Number(v)
-  if (market === '美股') {
+  if (market === '美股' || market === '英股') {
     return n.toLocaleString('en-US', { minimumFractionDigits: 5, maximumFractionDigits: 5 })
   }
   return n.toLocaleString('zh-TW', { maximumFractionDigits: 0 })
@@ -661,18 +667,21 @@ const pieOption = computed(() => {
   const targetDate = hoveredHistoryDate.value ?? latest.value?.snapshotDate
   const r = filteredHistory.value.find(x => x.snapshotDate === targetDate)
   if (!r) return {}
-  // 若顯示的是「最新／選中快照 + 該快照=最新」且盤中即時跳動：用 liveLatest 的台股/美股值覆蓋（hover 時不覆蓋）
+  // 若顯示的是「最新／選中快照 + 該快照=最新」且盤中即時跳動：用 liveLatest 的台股/美股/英股值覆蓋（hover 時不覆蓋）
   const useLive = !hoveredHistoryDate.value && liveLatest.value
         && targetDate === liveLatest.value.snapshotDate
   const twStock = useLive ? Number(liveLatest.value.totalTwStockValue ?? r.totalTwStockValue ?? 0)
                           : Number(r.totalTwStockValue || 0)
   const usStock = useLive ? Number(liveLatest.value.totalUsStockValue ?? r.totalUsStockValue ?? 0)
                           : Number(r.totalUsStockValue || 0)
+  const ukStock = useLive ? Number(liveLatest.value.totalUkStockValue ?? r.totalUkStockValue ?? 0)
+                          : Number(r.totalUkStockValue || 0)
   const segments = [
     { value: Math.round(Number(r.totalTwdDeposit || 0)),    name: '台幣存款',  color: '#3b82f6' },
     { value: Math.round(Number(r.totalUsdDeposit || 0)),    name: '美元存款',  color: '#60a5fa' },
     { value: Math.round(twStock),                           name: '台股',      color: '#f59e0b' },
     { value: Math.round(usStock),                           name: '美股',      color: '#ef4444' },
+    { value: Math.round(ukStock),                           name: '英股',      color: '#0ea5e9' },
     { value: Math.round(Number(r.totalFundValue || 0)),     name: '信託基金',  color: '#10b981' }
   ]
   const data = segments.filter(d => d.value > 0)
@@ -846,7 +855,7 @@ const mergedStocks = computed(() =>
 const stockMarketTab = ref('台股')
 
 // 保留使用者自訂排序；若股票清單相同只更新數值，若清單變動才重置順序
-const customTableData = reactive({ '台股': [], '美股': [] })
+const customTableData = reactive({ '台股': [], '美股': [], '英股': [] })
 
 watch(stockMarketTab, () => nextTick(initStockSortable))
 
@@ -854,7 +863,7 @@ watch(stockMarketTab, () => nextTick(initStockSortable))
 watch(() => customTableData[stockMarketTab.value], () => nextTick(initStockSortable), { deep: false })
 
 watch(mergedStocks, (stocks) => {
-  for (const market of ['台股', '美股']) {
+  for (const market of ['台股', '美股', '英股']) {
     const incoming = stocks.filter(s => s.market === market)
     const existing = customTableData[market]
     const incomingKeys = incoming.map(s => s.stockCode).sort().join(',')
@@ -887,7 +896,8 @@ function overlayLivePrice(row) {
     const live = getRealtimePrice(row)
     if (!live) return row
     const fx = Number(detail.value?.usdExchangeRate ?? 0)
-    const livePriceTwd = row.market === '美股' ? Number(live.price) * fx : Number(live.price)
+    // 美股 / 英股 UCITS（USD 計價）：live price 為原幣 USD，乘 fx 換算台幣
+    const livePriceTwd = (row.market === '美股' || row.market === '英股') ? Number(live.price) * fx : Number(live.price)
     cv = shares * livePriceTwd
   }
   const cost = Number(row.investmentCost ?? 0)
@@ -912,10 +922,12 @@ const liveLatest = computed(() => {
   if (!s) return null
   const twLive = shouldApplyLive('台股')
   const usLive = shouldApplyLive('美股')
-  if (!twLive && !usLive) return s
+  const ukLive = shouldApplyLive('英股')
+  if (!twLive && !usLive && !ukLive) return s
 
   const tw = customTableData['台股'] ?? []
   const us = customTableData['美股'] ?? []
+  const uk = customTableData['英股'] ?? []
   const sumOf = (rows, applyLive) => rows.reduce((a, row) => {
     const r = applyLive ? overlayLivePrice(row) : row
     a.value += Number(r.currentValue || 0)
@@ -925,8 +937,9 @@ const liveLatest = computed(() => {
 
   const t = sumOf(tw, twLive)
   const u = sumOf(us, usLive)
-  const totalStockValue = t.value + u.value
-  const totalStockCost = t.cost + u.cost
+  const k = sumOf(uk, ukLive)
+  const totalStockValue = t.value + u.value + k.value
+  const totalStockCost = t.cost + u.cost + k.cost
   const stockProfit = totalStockValue - totalStockCost
   const totalDeposit = Number(s.totalDeposit || 0)
   const totalFundValue = Number(s.totalFundValue || 0)
@@ -939,11 +952,12 @@ const liveLatest = computed(() => {
         : totalDeposit + totalFundValue + totalStockValue
   const totalTwStockValue = t.value
   const totalUsStockValue = u.value
+  const totalUkStockValue = k.value
 
   return {
     ...s,
     totalStockValue, totalStockCost, stockProfit,
-    totalAssets, totalTwStockValue, totalUsStockValue
+    totalAssets, totalTwStockValue, totalUsStockValue, totalUkStockValue
   }
 })
 

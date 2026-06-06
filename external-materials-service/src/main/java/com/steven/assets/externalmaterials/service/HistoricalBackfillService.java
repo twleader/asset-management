@@ -50,7 +50,8 @@ public class HistoricalBackfillService {
 
                 Set<String> twCodes = new LinkedHashSet<>();
                 Set<String> usCodes = new LinkedHashSet<>();
-                store.collectAllHeldCodes(twCodes, usCodes);
+                Set<String> ukCodes = new LinkedHashSet<>();
+                store.collectAllHeldCodes(twCodes, usCodes, ukCodes);
 
                 for (String code : twCodes) {
                     LocalDate maxDate = store.findMaxTradingDate(code, "台股").orElse(null);
@@ -69,6 +70,16 @@ public class HistoricalBackfillService {
                             || (minDate != null && since.isBefore(minDate))) {
                         log.info("啟動補齊美股 {} (maxDate={}, minDate={})", code, maxDate, minDate);
                         backfillUsStock(code, since, null);
+                        sleep(2000);
+                    }
+                }
+                for (String code : ukCodes) {
+                    LocalDate maxDate = store.findMaxTradingDate(code, "英股").orElse(null);
+                    LocalDate minDate = store.findMinTradingDate(code, "英股").orElse(null);
+                    if (maxDate == null || maxDate.isBefore(staleThreshold)
+                            || (minDate != null && since.isBefore(minDate))) {
+                        log.info("啟動補齊英股 {} (maxDate={}, minDate={})", code, maxDate, minDate);
+                        backfillUkStock(code, since, null);
                         sleep(2000);
                     }
                 }
@@ -149,6 +160,33 @@ public class HistoricalBackfillService {
         return count;
     }
 
+    public int backfillUkStock(String stockCode, LocalDate since, LocalDate until) {
+        LocalDate today = LocalDate.now(MarketClock.LON_ZONE);
+        LocalDate maxDate = store.findMaxTradingDate(stockCode, "英股").orElse(null);
+        LocalDate minDate = store.findMinTradingDate(stockCode, "英股").orElse(null);
+        LocalDate start;
+        if (maxDate == null) start = since;
+        else if (minDate != null && since.isBefore(minDate)) start = since;
+        else start = maxDate.plusDays(1);
+        LocalDate end = (until != null) ? until : today;
+        if (!start.isBefore(end)) return 0;
+
+        log.info("回補英股 {} 歷史價格: {} ~ {}", stockCode, start, end);
+        int count = 0;
+        for (HistoricalBar bar : priceFetch.fetchUkHistoricalRange(stockCode, start, end)) {
+            if (bar.tradingDate().equals(today)) {
+                log.debug("跳過英股 {} 今日 ({}) bar — 今日列獨佔給 ClosePersister", stockCode, today);
+                continue;
+            }
+            if (store.existsHistory(stockCode, "英股", bar.tradingDate())) continue;
+            store.upsertHistory(stockCode, "英股", bar.tradingDate(),
+                    bar.open(), bar.high(), bar.low(), bar.close(), bar.volume());
+            count++;
+        }
+        if (count > 0) log.info("英股 {} 匯入 {} 筆", stockCode, count);
+        return count;
+    }
+
     /** 強制從 since 抓（忽略 maxDate），用於補中間缺漏。 */
     public int backfillExchangeRateFrom(String currency, LocalDate since) {
         if (!since.isBefore(LocalDate.now())) return 0;
@@ -176,9 +214,10 @@ public class HistoricalBackfillService {
     }
 
     public Map<String, Object> backfillSingleStock(String stockCode, String market, LocalDate since, LocalDate until) {
-        int count = "台股".equals(market)
-                ? backfillTwStock(stockCode, since, until)
-                : backfillUsStock(stockCode, since, until);
+        int count;
+        if ("台股".equals(market)) count = backfillTwStock(stockCode, since, until);
+        else if ("英股".equals(market)) count = backfillUkStock(stockCode, since, until);
+        else count = backfillUsStock(stockCode, since, until);
         return Map.of("stockCode", stockCode, "market", market, "records", count, "since", since.toString());
     }
 
@@ -187,9 +226,10 @@ public class HistoricalBackfillService {
         LocalDate tenYearsAgo = LocalDate.now().minusYears(10);
         Set<String> twCodes = new LinkedHashSet<>();
         Set<String> usCodes = new LinkedHashSet<>();
-        store.collectAllHeldCodes(twCodes, usCodes);
+        Set<String> ukCodes = new LinkedHashSet<>();
+        store.collectAllHeldCodes(twCodes, usCodes, ukCodes);
 
-        int twTotal = 0, usTotal = 0;
+        int twTotal = 0, usTotal = 0, ukTotal = 0;
         for (String code : twCodes) {
             twTotal += backfillTwStock(code, tenYearsAgo, null);
             sleep(600);
@@ -198,11 +238,15 @@ public class HistoricalBackfillService {
             usTotal += backfillUsStock(code, tenYearsAgo, null);
             sleep(2000);
         }
+        for (String code : ukCodes) {
+            ukTotal += backfillUkStock(code, tenYearsAgo, null);
+            sleep(2000);
+        }
         int rateTotal = backfillExchangeRate("USD", tenYearsAgo);
         return Map.of(
-                "twRecords", twTotal, "usRecords", usTotal,
+                "twRecords", twTotal, "usRecords", usTotal, "ukRecords", ukTotal,
                 "exchangeRateRecords", rateTotal,
-                "twStocks", twCodes.size(), "usStocks", usCodes.size());
+                "twStocks", twCodes.size(), "usStocks", usCodes.size(), "ukStocks", ukCodes.size());
     }
 
     private static void sleep(long ms) {

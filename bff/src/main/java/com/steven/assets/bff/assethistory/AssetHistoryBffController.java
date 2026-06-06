@@ -91,6 +91,7 @@ public class AssetHistoryBffController {
         // 與 Dashboard liveLatest 行為一致；不另外做 market open 檢查。
         BigDecimal twStock = BigDecimal.ZERO;
         BigDecimal usStock = BigDecimal.ZERO;
+        BigDecimal ukStock = BigDecimal.ZERO;
         Object stocksObj = live.get("stocks");
         if (stocksObj instanceof List<?> stocksList) {
             for (Object o : stocksList) {
@@ -100,9 +101,10 @@ public class AssetHistoryBffController {
                 if (v == null) continue;
                 if ("台股".equals(s.get("market"))) twStock = twStock.add(v);
                 else if ("美股".equals(s.get("market"))) usStock = usStock.add(v);
+                else if ("英股".equals(s.get("market"))) ukStock = ukStock.add(v);
             }
         }
-        BigDecimal liveStockValue = toBdOr(live.get("liveStockValue"), twStock.add(usStock));
+        BigDecimal liveStockValue = toBdOr(live.get("liveStockValue"), twStock.add(usStock).add(ukStock));
         BigDecimal liveTotalAssets = toBdOr(live.get("liveTotalAssets"),
                 toBdOr(latest.get("totalDeposit"), BigDecimal.ZERO)
                         .add(toBdOr(latest.get("totalFundValue"), BigDecimal.ZERO))
@@ -110,6 +112,7 @@ public class AssetHistoryBffController {
 
         latest.put("totalTwStockValue", twStock);
         latest.put("totalUsStockValue", usStock);
+        latest.put("totalUkStockValue", ukStock);
         latest.put("totalStockValue", liveStockValue);
         latest.put("totalAssets", liveTotalAssets);
 

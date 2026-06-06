@@ -132,7 +132,8 @@ public class DataInitializer implements ApplicationRunner {
 
         List<MarketTypeSeed> seeds = List.of(
             new MarketTypeSeed("台股", "台灣股市", 1),
-            new MarketTypeSeed("美股", "美國股市", 2)
+            new MarketTypeSeed("美股", "美國股市", 2),
+            new MarketTypeSeed("英股", "英國股市", 3)
         );
 
         for (MarketTypeSeed s : seeds) {

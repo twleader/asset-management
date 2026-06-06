@@ -280,6 +280,10 @@ const isEtf = computed(() => {
     const white = ['VOO','VT','VTI','VGT','VYM','VNQ','VXUS','SPY','QQQ','DIA','IVV','IWM','AVGO','SCHD','JEPI','JEPQ']
     return white.includes((s.stockCode || '').toUpperCase())
   }
+  if (s.market === '英股') {
+    const white = ['CSPX','VWRA','VUSA','EIMI','IWDA']
+    return white.includes((s.stockCode || '').toUpperCase())
+  }
   return false
 })
 
@@ -299,6 +303,11 @@ const etfExternalLinks = computed(() => {
       { label: `ETFdb 成分股（${code}）`, url: `https://etfdb.com/etf/${code}/#holdings` },
       { label: `Morningstar 成分股（${code}）`, url: `https://www.morningstar.com/etfs/arcx/${code}/portfolio` },
       { label: `Yahoo Finance（${code}）`, url: `https://finance.yahoo.com/quote/${code}/holdings` },
+    ]
+  }
+  if (s.market === '英股') {
+    return [
+      { label: `iShares 官網（${code}）`, url: `https://www.ishares.com/uk/individual/en/products/search?keyword=${code}` },
     ]
   }
   return []
@@ -346,7 +355,7 @@ const chartOption = computed(() => {
   // 成本均價：若提供 shares + investmentCost 才畫
   const costTwd = s.shares > 0 && s.investmentCost ? s.investmentCost / s.shares : null
   const usd = props.usdRate ? Number(props.usdRate) : null
-  const cost = costTwd != null && s.market === '美股' && usd ? costTwd / usd : costTwd
+  const cost = costTwd != null && (s.market === '美股' || s.market === '英股') && usd ? costTwd / usd : costTwd
 
   return {
     backgroundColor: '#fff',

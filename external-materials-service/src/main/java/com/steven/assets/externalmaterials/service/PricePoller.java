@@ -37,20 +37,23 @@ public class PricePoller {
     public void warmCacheOnStartup() {
         Set<String> twCodes = new LinkedHashSet<>();
         Set<String> usCodes = new LinkedHashSet<>();
-        source.collectAllStockCodes(twCodes, usCodes);
-        if (twCodes.isEmpty() && usCodes.isEmpty()) return;
-        log.info("price-service 啟動，背景補抓 cold cache：台股 {} 檔，美股 {} 檔", twCodes.size(), usCodes.size());
+        Set<String> ukCodes = new LinkedHashSet<>();
+        source.collectAllStockCodes(twCodes, usCodes, ukCodes);
+        if (twCodes.isEmpty() && usCodes.isEmpty() && ukCodes.isEmpty()) return;
+        log.info("price-service 啟動，背景補抓 cold cache：台股 {} 檔，美股 {} 檔，英股 {} 檔",
+                twCodes.size(), usCodes.size(), ukCodes.size());
         new Thread(() -> {
             updatePrices(twCodes, "台股", !clock.isTwMarketOpen());
             updatePrices(usCodes, "美股", !clock.isUsMarketOpen());
+            updatePrices(ukCodes, "英股", !clock.isUkMarketOpen());
         }, "price-cache-warmup").start();
     }
 
     @Scheduled(cron = "0 0/2 9-13 * * MON-FRI", zone = "Asia/Taipei")
     public void scheduledTwIntradayUpdate() {
         if (!clock.isTwMarketOpen()) return;
-        Set<String> tw = new LinkedHashSet<>(), us = new LinkedHashSet<>();
-        source.collectHeldStockCodes(tw, us);
+        Set<String> tw = new LinkedHashSet<>(), us = new LinkedHashSet<>(), uk = new LinkedHashSet<>();
+        source.collectHeldStockCodes(tw, us, uk);
         if (tw.isEmpty()) return;
         log.info("更新台股即時價格 ({} 檔)", tw.size());
         updatePrices(tw, "台股", false);
@@ -59,25 +62,38 @@ public class PricePoller {
     @Scheduled(cron = "0 0/2 9-16 * * MON-FRI", zone = "America/New_York")
     public void scheduledUsIntradayUpdate() {
         if (!clock.isUsMarketOpen()) return;
-        Set<String> tw = new LinkedHashSet<>(), us = new LinkedHashSet<>();
-        source.collectHeldStockCodes(tw, us);
+        Set<String> tw = new LinkedHashSet<>(), us = new LinkedHashSet<>(), uk = new LinkedHashSet<>();
+        source.collectHeldStockCodes(tw, us, uk);
         if (us.isEmpty()) return;
         log.info("更新美股即時價格 ({} 檔)", us.size());
         updatePrices(us, "美股", false);
+    }
+
+    @Scheduled(cron = "0 0/2 8-16 * * MON-FRI", zone = "Europe/London")
+    public void scheduledUkIntradayUpdate() {
+        if (!clock.isUkMarketOpen()) return;
+        Set<String> tw = new LinkedHashSet<>(), us = new LinkedHashSet<>(), uk = new LinkedHashSet<>();
+        source.collectHeldStockCodes(tw, us, uk);
+        if (uk.isEmpty()) return;
+        log.info("更新英股即時價格 ({} 檔)", uk.size());
+        updatePrices(uk, "英股", false);
     }
 
     /**
      * 同步抓所有持股價格寫 Redis（不限交易時段）。供 /internal/refresh 端點使用。
      */
     public RefreshSummary refreshAll() {
-        Set<String> tw = new LinkedHashSet<>(), us = new LinkedHashSet<>();
-        source.collectHeldStockCodes(tw, us);
+        Set<String> tw = new LinkedHashSet<>(), us = new LinkedHashSet<>(), uk = new LinkedHashSet<>();
+        source.collectHeldStockCodes(tw, us, uk);
         updatePrices(tw, "台股", false);
         updatePrices(us, "美股", false);
-        return new RefreshSummary(tw.size(), us.size(), clock.isTwMarketOpen(), clock.isUsMarketOpen());
+        updatePrices(uk, "英股", false);
+        return new RefreshSummary(tw.size(), us.size(), uk.size(),
+                clock.isTwMarketOpen(), clock.isUsMarketOpen(), clock.isUkMarketOpen());
     }
 
-    public record RefreshSummary(int twUpdated, int usUpdated, boolean twMarketOpen, boolean usMarketOpen) {}
+    public record RefreshSummary(int twUpdated, int usUpdated, int ukUpdated,
+                                 boolean twMarketOpen, boolean usMarketOpen, boolean ukMarketOpen) {}
 
     /**
      * 並行抓價：每檔一個 virtual thread。

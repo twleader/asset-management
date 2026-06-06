@@ -39,7 +39,8 @@ public class MarketDataController {
     public Map<String, Object> getHolidays(@RequestParam int year) {
         return Map.of(
             "tw", marketDataService.getTwHolidays(year),
-            "us", marketDataService.getUsHolidays(year)
+            "us", marketDataService.getUsHolidays(year),
+            "uk", marketDataService.getUkHolidays(year)
         );
     }
 

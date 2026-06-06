@@ -80,7 +80,45 @@ public class PriceFetchClient {
         if ("台股".equals(market)) {
             return getTwseRealTimePrice(stockCode);
         }
+        if ("英股".equals(market)) {
+            return getYahooLsePrice(stockCode);
+        }
         return getNasdaqPrice(stockCode);
+    }
+
+    /**
+     * 英股（LSE 掛牌 UCITS ETF，如 CSPX.L）即時報價：Yahoo Finance chart endpoint。
+     * 走 curl 子程序避開 Yahoo 對 Java HTTP/2 fingerprint 的偵測（與 fetchUsHistoricalRange 同 pattern）。
+     * 收盤後 meta.regularMarketPrice 維持當日最後成交價，符合 Requirement 7「抓不到最新值→保留上一筆」精神。
+     */
+    private Optional<PriceResult> getYahooLsePrice(String stockCode) {
+        try {
+            String url = "https://query2.finance.yahoo.com/v8/finance/chart/" + stockCode + ".L?interval=1d&range=1d";
+            String body = curlGetWithRetry(url, 2);
+            JsonNode meta = mapper.readTree(body).path("chart").path("result").path(0).path("meta");
+            if (meta.isMissingNode() || meta.isEmpty()) return Optional.empty();
+            BigDecimal price = jsonDecimal(meta.path("regularMarketPrice"));
+            if (price == null) return Optional.empty();
+            BigDecimal prevClose = jsonDecimal(meta.path("chartPreviousClose"));
+            if (prevClose == null) prevClose = jsonDecimal(meta.path("previousClose"));
+            BigDecimal change = prevClose != null ? price.subtract(prevClose) : null;
+            BigDecimal changePct = (prevClose != null && prevClose.signum() > 0)
+                    ? change.multiply(BigDecimal.valueOf(100)).divide(prevClose, 6, RoundingMode.HALF_UP)
+                    : null;
+            BigDecimal open = jsonDecimal(meta.path("regularMarketOpen"));
+            BigDecimal high = jsonDecimal(meta.path("regularMarketDayHigh"));
+            BigDecimal low = jsonDecimal(meta.path("regularMarketDayLow"));
+            Long volume = meta.hasNonNull("regularMarketVolume") ? meta.get("regularMarketVolume").asLong() : null;
+            String name = meta.path("shortName").asText("");
+            if (name.isBlank()) name = meta.path("longName").asText("");
+            return Optional.of(new PriceResult(
+                    stockCode, "英股", price, change, changePct, "Yahoo",
+                    name.isBlank() ? null : name,
+                    null, null, open, prevClose, high, low, volume));
+        } catch (Exception e) {
+            log.warn("Yahoo LSE 即時報價失敗 {}: {}", stockCode, e.getMessage());
+            return Optional.empty();
+        }
     }
 
     /**
@@ -482,6 +520,50 @@ public class PriceFetchClient {
         }
     }
 
+    /**
+     * Yahoo Finance chart API 拉英股（LSE 掛牌 UCITS ETF，如 CSPX.L）指定日期區間。
+     * 時區為 Europe/London；其餘行為與 fetchUsHistoricalRange 一致。
+     */
+    public List<HistoricalBar> fetchUkHistoricalRange(String stockCode, LocalDate start, LocalDate end) {
+        try {
+            java.time.ZoneId zone = java.time.ZoneId.of("Europe/London");
+            long period1 = start.atStartOfDay(zone).toEpochSecond();
+            long period2 = end.plusDays(1).atStartOfDay(zone).toEpochSecond();
+            String url = "https://query2.finance.yahoo.com/v8/finance/chart/" + stockCode + ".L"
+                    + "?period1=" + period1 + "&period2=" + period2 + "&interval=1d";
+            String body = curlGetWithRetry(url, 2);
+            JsonNode root = mapper.readTree(body);
+            JsonNode chart = root.path("chart").path("result").path(0);
+            JsonNode timestamps = chart.path("timestamp");
+            JsonNode quotes = chart.path("indicators").path("quote").path(0);
+            if (!timestamps.isArray()) {
+                String err = root.path("chart").path("error").path("description").asText("");
+                log.warn("Yahoo Finance {}.L 無資料: {}", stockCode, err.isEmpty() ? "no timestamps" : err);
+                return List.of();
+            }
+            List<HistoricalBar> bars = new java.util.ArrayList<>();
+            for (int i = 0; i < timestamps.size(); i++) {
+                long ts = timestamps.get(i).asLong();
+                LocalDate date = java.time.Instant.ofEpochSecond(ts).atZone(zone).toLocalDate();
+                if (date.isBefore(start)) continue;
+                JsonNode close = quotes.path("close").path(i);
+                if (close.isNull() || close.isMissingNode()) continue;
+                bars.add(new HistoricalBar(
+                        date,
+                        jsonDecimal(quotes.path("open").path(i)),
+                        jsonDecimal(quotes.path("high").path(i)),
+                        jsonDecimal(quotes.path("low").path(i)),
+                        jsonDecimal(close),
+                        quotes.path("volume").path(i).asLong(0),
+                        stockCode));
+            }
+            return bars;
+        } catch (Exception e) {
+            log.warn("Yahoo Finance {}.L 區間抓取失敗: {}", stockCode, e.getMessage());
+            return List.of();
+        }
+    }
+
     /** 盤中 5 分鐘 K 線：Yahoo Finance chart API range=Nd / interval=5m，用於警示觸發補抓精確時點。 */
     public record IntradayBar(
             String time,        // ISO LocalDateTime（exchangeTimezone 當地時區）
@@ -493,7 +575,10 @@ public class PriceFetchClient {
 
     public List<IntradayBar> fetchIntraday5m(String stockCode, String market, int daysBack) {
         try {
-            String ticker = "美股".equals(market) ? stockCode : stockCode + ".TW";
+            String ticker;
+            if ("美股".equals(market)) ticker = stockCode;
+            else if ("英股".equals(market)) ticker = stockCode + ".L";
+            else ticker = stockCode + ".TW";
             String range = Math.max(1, daysBack) + "d";
             String url = "https://query2.finance.yahoo.com/v8/finance/chart/" + ticker
                     + "?interval=5m&range=" + range;

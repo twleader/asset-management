@@ -241,7 +241,7 @@ public class HistoricalDataService {
         // 若查詢範圍包含今天，從 StockPrice 快取補上今日即時價。
         // 「股價」線必須是實際成交價，因此 source 含括號（如 "TWSE(買賣中價)"、"TWSE(前收)"）
         // 之估算值不予拼入，避免今日這格出現非實際成交價（例：台積電 2262.5 違反 5 元 tick）。
-        ZoneId tz = "美股".equals(market) ? ZoneId.of("America/New_York") : ZoneId.of("Asia/Taipei");
+        ZoneId tz = com.steven.assets.util.MarketZones.resolve(market);
         LocalDate today = LocalDate.now(tz);
         if (!end.isBefore(today) && !today.isBefore(start)) {
             boolean alreadyHasToday = history.stream().anyMatch(h -> h.getTradingDate().equals(today));
@@ -317,6 +317,10 @@ public class HistoricalDataService {
 
     public String fetchUsStockName(String code) {
         return fetchStockName(code, "美股");
+    }
+
+    public String fetchUkStockName(String code) {
+        return fetchStockName(code, "英股");
     }
 
     private String fetchStockName(String code, String market) {

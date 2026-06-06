@@ -200,6 +200,31 @@ public class MarketDataService {
         return h;
     }
 
+    /**
+     * LSE 公定假日（英國銀行假日 + LSE 額外休市日）。
+     * 與美股不同處：UK 銀行假日落在週末一律 forward（下個非已佔用工作日），
+     * Christmas + Boxing Day 並列時兩者都會 forward 並避免互撞。
+     */
+    public Map<String, String> getUkHolidays(int year) {
+        Map<String, String> h = new LinkedHashMap<>();
+        // 元旦：周末 → 下個週一
+        addUkObserved(h, LocalDate.of(year, 1, 1), "New Year's Day");
+        // 復活節：Good Friday + Easter Monday
+        LocalDate goodFri = LocalDate.parse(goodFriday(year));
+        h.put(goodFri.toString(), "Good Friday");
+        h.put(goodFri.plusDays(3).toString(), "Easter Monday");
+        // 5 月第一個週一 = Early May Bank Holiday
+        h.put(nthWeekday(year, 5, DayOfWeek.MONDAY, 1), "Early May Bank Holiday");
+        // 5 月最後一個週一 = Spring Bank Holiday
+        h.put(lastWeekday(year, 5, DayOfWeek.MONDAY), "Spring Bank Holiday");
+        // 8 月最後一個週一 = Summer Bank Holiday
+        h.put(lastWeekday(year, 8, DayOfWeek.MONDAY), "Summer Bank Holiday");
+        // Christmas + Boxing Day：周末時需相互避撞
+        addUkObserved(h, LocalDate.of(year, 12, 25), "Christmas Day");
+        addUkObserved(h, LocalDate.of(year, 12, 26), "Boxing Day");
+        return h;
+    }
+
     public boolean isTwTradingDay(LocalDate date) {
         DayOfWeek dow = date.getDayOfWeek();
         if (dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY) return false;
@@ -210,6 +235,26 @@ public class MarketDataService {
         DayOfWeek dow = date.getDayOfWeek();
         if (dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY) return false;
         return !getUsHolidays(date.getYear()).containsKey(date.toString());
+    }
+
+    public boolean isUkTradingDay(LocalDate date) {
+        DayOfWeek dow = date.getDayOfWeek();
+        if (dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY) return false;
+        return !getUkHolidays(date.getYear()).containsKey(date.toString());
+    }
+
+    /**
+     * UK 銀行假日「下個工作日」順移：周末或已被其他假日佔用，往後推到非週末且未佔用的日子。
+     * 適用 Christmas + Boxing Day 連續落在週末的情形：兩者依序順移到 Mon + Tue。
+     */
+    private void addUkObserved(Map<String, String> h, LocalDate date, String name) {
+        LocalDate observed = date;
+        while (observed.getDayOfWeek() == DayOfWeek.SATURDAY
+                || observed.getDayOfWeek() == DayOfWeek.SUNDAY
+                || h.containsKey(observed.toString())) {
+            observed = observed.plusDays(1);
+        }
+        h.put(observed.toString(), name);
     }
 
     private void addObserved(Map<String, String> h, int year, int month, int day, String name) {
@@ -254,10 +299,14 @@ public class MarketDataService {
             "SPY", "QQQ", "DIA", "IVV", "IWM",
             "AVGO", "SCHD", "JEPI", "JEPQ");
 
+    private static final java.util.Set<String> UK_ETF_WHITELIST = java.util.Set.of(
+            "CSPX", "VWRA", "VUSA", "EIMI", "IWDA");
+
     public boolean isEtf(String stockCode, String market) {
         if (stockCode == null) return false;
         if ("台股".equals(market)) return stockCode.startsWith("00");
         if ("美股".equals(market)) return US_ETF_WHITELIST.contains(stockCode.toUpperCase());
+        if ("英股".equals(market)) return UK_ETF_WHITELIST.contains(stockCode.toUpperCase());
         return false;
     }
 }

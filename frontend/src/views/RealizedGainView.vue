@@ -50,6 +50,7 @@
         <el-tab-pane label="全部" name="" />
         <el-tab-pane label="台股" name="台股" />
         <el-tab-pane label="美股" name="美股" />
+        <el-tab-pane label="英股" name="英股" />
       </el-tabs>
 
       <el-table :data="filteredRecords" size="small" stripe class="gain-table"
@@ -163,6 +164,7 @@
               <el-select v-model="gainForm.market" style="width:100%">
                 <el-option value="台股" label="台股" />
                 <el-option value="美股" label="美股" />
+                <el-option value="英股" label="英股" />
               </el-select>
             </el-form-item>
           </el-col>
@@ -257,7 +259,7 @@ const gainForm = reactive({
 
 // 當市場改變時自動切換預設幣別
 watch(() => gainForm.market, (m) => {
-  gainForm.currency = m === '美股' ? 'USD' : 'TWD'
+  gainForm.currency = (m === '美股' || m === '英股') ? 'USD' : 'TWD'
 })
 
 // Parse helpers
@@ -356,7 +358,7 @@ const fmtCurrency = (v, currency) => {
 const fmtShares = (v, market) => {
   if (v == null) return '-'
   const n = Number(v)
-  if (market === '美股') {
+  if (market === '美股' || market === '英股') {
     // 最多 5 位小數，去掉尾端零
     return n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 5 })
   }
@@ -400,11 +402,11 @@ const openEditDialog = (row) => {
   gainForm.assetName = row.assetName || ''
   gainForm.assetCode = row.assetCode || ''
   gainForm.market = row.market || '台股'
-  gainForm.currency = row.currency || (row.market === '美股' ? 'USD' : 'TWD')
+  gainForm.currency = row.currency || ((row.market === '美股' || row.market === '英股') ? 'USD' : 'TWD')
   gainForm.broker = row.broker || ''
   gainForm.tradeDate = row.tradeDate || ''
   const isUsd = gainForm.currency === 'USD'
-  gainForm.sharesStr = fmtNum(row.shares, row.market === '美股' ? 5 : 0)
+  gainForm.sharesStr = fmtNum(row.shares, (row.market === '美股' || row.market === '英股') ? 5 : 0)
   gainForm.salePriceStr = fmtNum(row.salePrice, 4)
   gainForm.proceedsStr = fmtNum(row.proceeds, isUsd ? 2 : 0)
   gainForm.investmentCostStr = fmtNum(row.investmentCost, isUsd ? 2 : 0)

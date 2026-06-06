@@ -25,6 +25,14 @@
             </span>
           </template>
         </el-tab-pane>
+        <el-tab-pane name="英股">
+          <template #label>
+            <span style="display:inline-flex;align-items:center;gap:6px">
+              <span style="font-size:18px">🇬🇧</span>
+              英股 <el-tag size="small" style="margin-left:2px">{{ ukList.length }}</el-tag>
+            </span>
+          </template>
+        </el-tab-pane>
       </el-tabs>
 
       <el-table ref="tableRef" :data="currentList" v-loading="loading" border stripe
@@ -135,11 +143,17 @@ const marketTab = ref('台股')
 const list = ref([])
 const twList = computed(() => list.value.filter(w => w.market === '台股'))
 const usList = computed(() => list.value.filter(w => w.market === '美股'))
-const currentList = computed(() => marketTab.value === '台股' ? twList.value : usList.value)
+const ukList = computed(() => list.value.filter(w => w.market === '英股'))
+const currentList = computed(() => {
+  if (marketTab.value === '美股') return usList.value
+  if (marketTab.value === '英股') return ukList.value
+  return twList.value
+})
 const loading = ref(false)
 const tableRef = ref(null)
 
 const volumeLabel = computed(() => marketTab.value === '台股' ? '成交量(張)' : '成交量(股)')
+// 台股單位為「張」(=1000 股)；美股 / 英股單位為「股」
 
 // ===== Load =====
 async function load() {
@@ -166,7 +180,9 @@ function initSortable() {
       if (oldIndex >= from.children.length) from.appendChild(item)
       else from.insertBefore(item, from.children[oldIndex])
 
-      const arr = marketTab.value === '台股' ? twList.value : usList.value
+      const arr = marketTab.value === '美股' ? usList.value
+        : marketTab.value === '英股' ? ukList.value
+        : twList.value
       const moved = arr[oldIndex]
       const otherMarket = list.value.filter(w => w.market !== marketTab.value)
       const reordered = [...arr]
@@ -192,7 +208,7 @@ defineExpose({ reload: async () => { await load(); nextTick(initSortable) } })
 // ===== Formatters =====
 const fmtDt = (dt, market) => {
   if (!dt) return ''
-  const tz = market === '美股' ? 'NY' : 'TW'
+  const tz = market === '美股' ? 'NY' : market === '英股' ? 'LON' : 'TW'
   return `${dayjs(dt).format('MM/DD HH:mm')} ${tz}`
 }
 

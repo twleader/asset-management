@@ -39,6 +39,7 @@ public class StockPriceService {
 
     private static final ZoneId TW_ZONE = ZoneId.of("Asia/Taipei");
     private static final ZoneId US_ZONE = ZoneId.of("America/New_York");
+    private static final ZoneId LON_ZONE = ZoneId.of("Europe/London");
 
     public boolean isTwMarketOpen() {
         ZonedDateTime now = ZonedDateTime.now(TW_ZONE);
@@ -54,6 +55,14 @@ public class StockPriceService {
         if (dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY) return false;
         LocalTime t = now.toLocalTime();
         return !t.isBefore(LocalTime.of(9, 30)) && !t.isAfter(LocalTime.of(16, 0));
+    }
+
+    public boolean isUkMarketOpen() {
+        ZonedDateTime now = ZonedDateTime.now(LON_ZONE);
+        DayOfWeek dow = now.getDayOfWeek();
+        if (dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY) return false;
+        LocalTime t = now.toLocalTime();
+        return !t.isBefore(LocalTime.of(8, 0)) && !t.isAfter(LocalTime.of(16, 30));
     }
 
     @Transactional(readOnly = true)
@@ -75,6 +84,7 @@ public class StockPriceService {
         Map<String, Object> r = new HashMap<>(priceQuery.triggerRefresh());
         r.putIfAbsent("twMarketOpen", isTwMarketOpen());
         r.putIfAbsent("usMarketOpen", isUsMarketOpen());
+        r.putIfAbsent("ukMarketOpen", isUkMarketOpen());
         return r;
     }
 
@@ -82,8 +92,10 @@ public class StockPriceService {
         return Map.of(
             "twMarketOpen", isTwMarketOpen(),
             "usMarketOpen", isUsMarketOpen(),
+            "ukMarketOpen", isUkMarketOpen(),
             "twTime", ZonedDateTime.now(TW_ZONE).toLocalDateTime().toString(),
-            "usTime", ZonedDateTime.now(US_ZONE).toLocalDateTime().toString()
+            "usTime", ZonedDateTime.now(US_ZONE).toLocalDateTime().toString(),
+            "ukTime", ZonedDateTime.now(LON_ZONE).toLocalDateTime().toString()
         );
     }
 
@@ -129,7 +141,8 @@ public class StockPriceService {
 
             BigDecimal liveValue = null;
             if (price != null && sh.getShares() != null) {
-                if ("美股".equals(sh.getMarket())) {
+                // 英股 UCITS ETF（CSPX.L 等）為 USD 計價，與美股共用 USD 匯率
+                if ("美股".equals(sh.getMarket()) || "英股".equals(sh.getMarket())) {
                     liveValue = sh.getShares().multiply(price).multiply(exchangeRate)
                             .setScale(0, RoundingMode.HALF_UP);
                 } else {
@@ -159,7 +172,7 @@ public class StockPriceService {
             snapshot.getSnapshotDate().toString(),
             exchangeRate, totalDeposit, totalFundValue, liveStockValue, liveTotalAssets,
             stockItems,
-            isTwMarketOpen(), isUsMarketOpen(),
+            isTwMarketOpen(), isUsMarketOpen(), isUkMarketOpen(),
             latestUpdate != null ? latestUpdate.toString() : null
         );
     }
@@ -192,7 +205,7 @@ public class StockPriceService {
         BigDecimal totalDeposit, BigDecimal totalFundValue,
         BigDecimal liveStockValue, BigDecimal liveTotalAssets,
         List<LiveStockItem> stocks,
-        boolean twMarketOpen, boolean usMarketOpen,
+        boolean twMarketOpen, boolean usMarketOpen, boolean ukMarketOpen,
         String priceUpdatedAt
     ) {}
 }
