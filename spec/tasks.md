@@ -2410,5 +2410,10 @@ VOO 股票走勢圖在 2026-06-05 NY 盤中（15:16，未到 16:00 收盤）顯�
   - 前端圓餅圖：環標籤/圖例只顯示股名 + 佔比；tooltip 顯示「代號 股名 + 金額 + 佔比」；ETF 依權重正規化完全穿透（不殘留 ETF 自身 slice）
   - 同步更新 Req 9 / Req 13 / design.md 資料來源描述
 - [ ] 86.6 手動驗證：curl endpoint 檢查 items.length ≤ 10、percent 加總 ≈ 100、ETF 確實穿透（出現 2330/2317 等成分股而非 ETF 代號）；前端切換 tab 與 snapshot 行為正確
+- [ ] 86.7 「台股個股」tab hover 連動：對齊 tab 1「資產類別」既有 hover 行為，hover 趨勢圖某節點時 tab 2 圓餅圖切到該節點對應 snapshot 的穿透結果。實作要點：
+  - 新增 `effectiveSnapshotId` computed：`hoveredHistoryDate` → 從 `store.history` 找對應 row.id；無 hover 時 fallback 到 `selectedSnapshotId`
+  - watch source 從 `[allocationTab, selectedSnapshotId]` 改為 `[allocationTab, effectiveSnapshotId]`；cache hit 同步切換、miss 走 `loadTwStockLookthrough` lazy fetch
+  - `loadTwStockLookthrough` race 防護判斷由 `selectedSnapshotId.value === snapshotId` 改為 `effectiveSnapshotId.value === snapshotId`（hover 快速移動時不寫入過期 fetch 結果）
+  - `selectedSnapshotId` 語義保持不變（仍是下拉選的快照），不影響 KPI 卡 / 持股表等其他面板
 
 

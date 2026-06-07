@@ -658,6 +658,16 @@ function onTrendLeave() { hoveredHistoryDate.value = null }
 
 const pieDate = computed(() => hoveredHistoryDate.value ?? latest.value?.snapshotDate ?? null)
 
+// 「資產配置分佈」面板實際展示的 snapshot id：hover 時跟著 hover 的歷史節點變，
+// 沒 hover 時回到下拉選的 selectedSnapshotId。台股個股 tab 的 lazy fetch 與 cache key 用此值。
+const effectiveSnapshotId = computed(() => {
+  if (hoveredHistoryDate.value) {
+    const row = filteredHistory.value.find(x => x.snapshotDate === hoveredHistoryDate.value)
+    if (row?.id != null) return row.id
+  }
+  return selectedSnapshotId.value
+})
+
 // 趨勢圖下方自訂 legend：跟著 pieDate（hover 或選中快照）顯示金額與佔比
 const trendLegendItems = computed(() => {
   const baseRow = filteredHistory.value.find(x => x.snapshotDate === pieDate.value)
@@ -786,8 +796,8 @@ async function loadTwStockLookthrough(snapshotId) {
   try {
     const data = await bffApi.dashboard.twStockLookthrough(snapshotId)
     twLookthroughCache.set(snapshotId, data)
-    // 防止 race：抓回來時若使用者已切到別張快照，不覆寫
-    if (selectedSnapshotId.value === snapshotId) {
+    // 防止 race：抓回來時若 effective snapshot 已切走（hover 移動或下拉換快照），不覆寫畫面
+    if (effectiveSnapshotId.value === snapshotId) {
       twLookthrough.value = data
     }
   } catch (e) {
@@ -798,7 +808,7 @@ async function loadTwStockLookthrough(snapshotId) {
   }
 }
 
-watch([allocationTab, selectedSnapshotId], ([tab, sid]) => {
+watch([allocationTab, effectiveSnapshotId], ([tab, sid]) => {
   if (tab !== 'twStock' || sid == null) return
   if (twLookthroughCache.has(sid)) {
     twLookthrough.value = twLookthroughCache.get(sid)
