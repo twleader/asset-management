@@ -61,6 +61,7 @@ com.steven.assets/
   - `GET /api/bff/dashboard/realtime`：2 分鐘輪詢用，回傳 stockPrices + marketStatus
   - `POST /api/bff/dashboard/enrich-dividend-rates`：背景補齊所有快照缺漏的配息率
   - `PATCH /api/bff/dashboard/snapshot/{id}/stock-order`：拖曳排序持股後寫回
+  - `GET /api/bff/dashboard/tw-stock-lookthrough/{snapshotId}`：「資產配置分佈」第 2 tab「台股個股」用。沿用 `SnapshotEnricher.buildMergedStocks` 取得快照基準日的台股部位，對每檔 ETF（`stockCode` 以 `00` 開頭）並行（concurrency 4）呼叫既有 `/api/market-data/etf-holdings?market=台股&code=...` 取得成分股權重（MoneyDJ 完整成分股優先、Yahoo `topHoldings` 前 10 fallback），依成分股權重**正規化**分配整筆 ETF 市值（`cv × weight / Σweight`，使 ETF 完全穿透不殘留 ETF 自身 slice）後依**股名**加總（MoneyDJ 只給股名無代號；直接持股不拆，與 ETF 內含部位的同股名合併），排序取前 10 名 + 「其它」聚合。ETF 抓取失敗時該 ETF 整筆退回以代號自身計入並記錄於 `degradedEtfs`。回傳 `TwStockLookthroughDto { snapshotDate, totalTwStockValue, items[], others, degradedEtfs[] }`。lazy fetch — 前端只在使用者切到第 2 tab 才呼叫
 - `SnapshotDetailBffController`（SnapshotDetailView 專屬）：
   - `GET /api/bff/snapshot-detail/{id}`：回傳 enriched detail + mergedStocks（含 brokerRows 子陣列，供編輯頁直接使用）
   - `GET /api/bff/snapshot-detail/brokers`：編輯券商欄位用，回傳 active brokers
@@ -626,7 +627,7 @@ GET    /api/market-data/exchange-rate/on-date?currency=USD&date= # 指定日期�
 POST   /api/market-data/exchange-rate/refresh?currency=USD     # 刷新最新匯率
 POST   /api/market-data/exchange-rate/backfill-history?currency=USD&since= # 補齊指定日期起歷史匯率
 GET    /api/market-data/live-assets                            # 以最新快照持倉 × 當前快取股價，即時計算總資產估值
-GET    /api/market-data/etf-holdings?code=0050&market=台股     # ETF 成分持股（台股 FinMind TaiwanETFHoldings；美股尚未支援）
+GET    /api/market-data/etf-holdings?code=0050&market=台股     # ETF 成分持股（台股優先 MoneyDJ 完整成分股→Yahoo前10 fallback；FinMind dataset 已移除；含 12h cache；美股走 Yahoo）
 GET    /api/market-data/dividends?code=0050&market=台股&years=10 # 最近 N 年股利（台股 FinMind；美股 NASDAQ）
 ```
 

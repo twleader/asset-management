@@ -2381,3 +2381,34 @@ VOO 股票走勢圖在 2026-06-05 NY 盤中（15:16，未到 16:00 收盤）顯�
 - [ ] 85.24 Docker 重 build：`docker compose build backend external-materials-service frontend && docker compose up -d backend external-materials-service frontend`
 - [ ] 85.25 手動驗證：新增 CSPX/英股 持股、watch、alert，dashboard 顯示英股欄、historical backfill 觸發、倫敦時區排程啟動
 
+---
+
+### Task 86: Dashboard 資產配置面板加「台股個股穿透前 10 大」tab
+
+對應 Requirements: Requirement 9（[requirements.md:162-170](spec/requirements.md)）
+
+#### 背景
+
+「資產配置分佈」目前只顯示 6 大資產類別，看不出台股部位實際集中在哪幾檔個股。使用者多檔台股 ETF（0050、0056、00878…）內含的成分股才是真正的曝險，應穿透拆解後與直接持股合併計算前 10 大個股。FinMind `TaiwanETFHoldings` API 已透過 `MarketDataFetchService.getEtfHoldings` 提供全成分股 + weight%，不需新接外部資料源。
+
+設計決策：
+- BFF 新加 lazy endpoint，前端切到 tab 才 fetch，避免拖慢 `/summary` 首屏
+- 計算口徑：ETF 穿透 + 直接持股一律依 `stockCode` 加總（單一事實）
+- ETF 抓取失敗的 fallback：整筆退回以代號自身計入，並回傳 `degradedEtfs` 讓前端顯示降級註記（避免漏算總金額）
+
+#### Steps:
+
+- [ ] 86.1 新增 `bff/.../dashboard/dto/TwStockLookthroughDto.java`（含 `Item` / `Others` / `DegradedEtf` 內部 record）
+- [ ] 86.2 `DashboardBffController.getTwStockLookthrough(snapshotId)`：抓 snapshot detail + closePrices → mergedStocks → 篩台股 → 並行（concurrency 4，Yahoo quoteSummary 對單 IP 有 rate limit）呼叫 `/api/market-data/etf-holdings?market=台股&code=...` → 拆解 + 加總 → top10 + others
+- [ ] 86.3 前端 `DashboardView.vue`：「資產配置分佈」card header 加 el-tabs（`category` / `twStock`），新 `twStockPieOption` computed，watch `allocationTab` + `selectedSnapshotId` lazy fetch，前端 Map cache（key = snapshotId）
+- [ ] 86.4 ETF 抓取失敗的 degradedEtfs 註記顯示（淡灰小字於 panel 底部）
+- [ ] 86.5 ETF 成分股資料來源（FinMind `TaiwanETFHoldings` 已被移除回 422）：
+  - 台股主來源改 **MoneyDJ** `Basic0007a.xdjhtm?etfid={code}.TW`（`getMoneyDjEtfHoldings` + `parseMoneyDjHoldings`，完整成分股、解析「股票名稱/持股(千股)/比例」表）；Yahoo `topHoldings` 前 10 退為 fallback
+  - MoneyDJ / Yahoo 一律走 `curl` 子程序（`runCurl`）：站方 WAF 依 TLS 指紋對 Java HttpClient 回 429（同容器 curl 卻 200）；沿用本檔既有 `ProcessBuilder("curl"...)` 先例
+  - `getEtfHoldings` 加 12h in-memory cache（成分股每日至多變動一次）
+  - MoneyDJ 只給股名無代號 → BFF lookthrough 聚合鍵用**股名**；ext-materials 以記憶體「股名→代號」字典（TWSE `STOCK_DAY_ALL` + TPEX，24h cache，`twNameToCodeMap()`）補代號供 tooltip 顯示，**不**寫入 stock 主檔（避免污染 `StockSourceQuery` 抓價清單）
+  - 前端圓餅圖：環標籤/圖例只顯示股名 + 佔比；tooltip 顯示「代號 股名 + 金額 + 佔比」；ETF 依權重正規化完全穿透（不殘留 ETF 自身 slice）
+  - 同步更新 Req 9 / Req 13 / design.md 資料來源描述
+- [ ] 86.6 手動驗證：curl endpoint 檢查 items.length ≤ 10、percent 加總 ≈ 100、ETF 確實穿透（出現 2330/2317 等成分股而非 ETF 代號）；前端切換 tab 與 snapshot 行為正確
+
+
