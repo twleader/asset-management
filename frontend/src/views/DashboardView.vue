@@ -39,10 +39,31 @@
       <el-col :span="10">
         <el-card>
           <template #header>
-            <span class="card-title">資產配置分佈</span>
-            <span class="card-sub">{{ pieDate }}</span>
+            <div style="display:flex;align-items:center;justify-content:space-between">
+              <div>
+                <span class="card-title">資產配置分佈</span>
+                <span class="card-sub">{{ pieDate }}</span>
+              </div>
+              <el-tabs v-model="allocationTab" class="chart-market-tabs" style="margin:0">
+                <el-tab-pane label="資產類別" name="category" />
+                <el-tab-pane label="台股個股" name="twStock" />
+              </el-tabs>
+            </div>
           </template>
-          <v-chart :option="pieOption" style="height: 320px" autoresize />
+          <v-chart v-if="allocationTab === 'category'" :option="pieOption" style="height: 320px" autoresize />
+          <div v-else>
+            <div v-if="twLookthroughLoading" style="height:320px;display:flex;align-items:center;justify-content:center;color:#94a3b8">
+              <el-icon class="is-loading" style="margin-right:6px"><Loading /></el-icon>
+              載入台股個股穿透中…
+            </div>
+            <div v-else-if="!twLookthroughHasData" style="height:320px;display:flex;align-items:center;justify-content:center;color:#94a3b8">
+              此快照無台股部位
+            </div>
+            <v-chart v-else :option="twStockPieOption" style="height: 320px" autoresize />
+            <div v-if="twLookthroughDegraded.length" class="lookthrough-degraded-note">
+              以下 ETF 查無成分股資料，已以代號自身計入：{{ twLookthroughDegraded.map(d => d.code).join('、') }}
+            </div>
+          </div>
         </el-card>
       </el-col>
 
@@ -382,6 +403,12 @@ const marketStatus = ref({ twMarketOpen: false, usMarketOpen: false })
 const liveAssets = ref(null)
 const selectedSnapshotId = ref(null)
 
+// 「資產配置分佈」面板 tab 與台股個股穿透資料（lazy fetch + per-snapshot cache）
+const allocationTab = ref('category')
+const twLookthrough = ref(null)
+const twLookthroughLoading = ref(false)
+const twLookthroughCache = new Map() // snapshotId -> payload
+
 let priceStream = null
 let statusTimer = null
 
@@ -695,6 +722,88 @@ const pieOption = computed(() => {
       label: { formatter: '{b}\n{d}%' },
       itemStyle: { borderRadius: 6 }
     }]
+  }
+})
+
+// 台股個股穿透前 10 大圓餅圖
+const TW_PIE_COLORS = [
+  '#2563eb', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6',
+  '#06b6d4', '#f97316', '#84cc16', '#ec4899', '#0ea5e9',
+  '#94a3b8'  // 「其它」灰色
+]
+const twLookthroughHasData = computed(() => {
+  const lt = twLookthrough.value
+  return !!(lt && Array.isArray(lt.items) && (lt.items.length > 0 || Number(lt.others?.value || 0) > 0))
+})
+const twLookthroughDegraded = computed(() => twLookthrough.value?.degradedEtfs || [])
+const twStockPieOption = computed(() => {
+  const lt = twLookthrough.value
+  if (!lt) return {}
+  const segs = []
+  ;(lt.items || []).forEach((it, i) => {
+    // 圖例/標籤只顯示股名；代號帶在 data 上供 tooltip 顯示
+    const label = it.stockName || it.stockCode || ''
+    segs.push({
+      value: Number(it.value || 0),
+      name: label,
+      code: it.stockCode || '',
+      color: TW_PIE_COLORS[i % (TW_PIE_COLORS.length - 1)]
+    })
+  })
+  const othersVal = Number(lt.others?.value || 0)
+  if (othersVal > 0) {
+    segs.push({ value: othersVal, name: '其它', code: '', color: TW_PIE_COLORS[TW_PIE_COLORS.length - 1] })
+  }
+  const data = segs.filter(d => d.value > 0)
+  return {
+    tooltip: {
+      trigger: 'item',
+      // hover 細節：有代號則顯示「代號 股名」，否則只顯示股名
+      formatter: p => {
+        const code = p.data && p.data.code ? `${p.data.code} ` : ''
+        return `${code}${p.name}<br/>$${Number(p.value).toLocaleString(undefined, {maximumFractionDigits: 0})} (${p.percent}%)`
+      }
+    },
+    legend: { show: false },
+    series: [{
+      type: 'pie',
+      radius: ['40%', '70%'],
+      center: ['50%', '50%'],
+      data: data.map(d => ({ value: d.value, name: d.name, code: d.code, itemStyle: { color: d.color } })),
+      label: { formatter: '{b}\n{d}%', fontSize: 11 },
+      itemStyle: { borderRadius: 6 }
+    }]
+  }
+})
+
+async function loadTwStockLookthrough(snapshotId) {
+  if (!snapshotId) return
+  if (twLookthroughCache.has(snapshotId)) {
+    twLookthrough.value = twLookthroughCache.get(snapshotId)
+    return
+  }
+  twLookthroughLoading.value = true
+  try {
+    const data = await bffApi.dashboard.twStockLookthrough(snapshotId)
+    twLookthroughCache.set(snapshotId, data)
+    // 防止 race：抓回來時若使用者已切到別張快照，不覆寫
+    if (selectedSnapshotId.value === snapshotId) {
+      twLookthrough.value = data
+    }
+  } catch (e) {
+    console.warn('台股個股穿透載入失敗:', e)
+    twLookthrough.value = null
+  } finally {
+    twLookthroughLoading.value = false
+  }
+}
+
+watch([allocationTab, selectedSnapshotId], ([tab, sid]) => {
+  if (tab !== 'twStock' || sid == null) return
+  if (twLookthroughCache.has(sid)) {
+    twLookthrough.value = twLookthroughCache.get(sid)
+  } else {
+    loadTwStockLookthrough(sid)
   }
 })
 
@@ -1200,6 +1309,9 @@ function onBarDblClick(params) {
 .stock-tabs :deep(.el-tabs__header) { margin-bottom: 8px; }
 .chart-market-tabs :deep(.el-tabs__header) { margin-bottom: 0; }
 .chart-market-tabs :deep(.el-tabs__nav-wrap::after) { display: none; }
+.lookthrough-degraded-note {
+  margin-top: 6px; font-size: 11px; color: #94a3b8; text-align: center;
+}
 
 .chart-summary-bar {
   display: flex; align-items: center; gap: 0;

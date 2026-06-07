@@ -72,7 +72,9 @@ export const bffApi = {
     realtime: () => api.get('/bff/dashboard/realtime'),
     enrichDividendRates: () => api.post('/bff/dashboard/enrich-dividend-rates'),
     updateStockOrder: (snapshotId, orders) =>
-      api.patch(`/bff/dashboard/snapshot/${snapshotId}/stock-order`, orders)
+      api.patch(`/bff/dashboard/snapshot/${snapshotId}/stock-order`, orders),
+    twStockLookthrough: (snapshotId) =>
+      api.get(`/bff/dashboard/tw-stock-lookthrough/${snapshotId}`)
   },
 
   // SnapshotDetail

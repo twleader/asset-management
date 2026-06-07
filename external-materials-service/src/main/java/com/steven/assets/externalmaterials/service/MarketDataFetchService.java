@@ -4,12 +4,12 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.net.CookieManager;
-import java.net.CookiePolicy;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -20,6 +20,7 @@ import java.time.DayOfWeek;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -56,7 +57,20 @@ public class MarketDataFetchService {
     private volatile String yahooCrumb = null;
     private volatile long yahooCrumbBlockedUntil = 0L;
     private static final long YAHOO_CRUMB_BLOCK_MS = 5 * 60 * 1000L;
-    private static final Pattern CRUMB_PATTERN = Pattern.compile("\"crumb\":\"([^\"]{5,30})\"");
+
+    // Yahoo crumb / quoteSummary 改走 curl 子程序（見 getYahooCrumb），cookie 暫存於此檔。
+    private static final String YAHOO_COOKIE_FILE = "/tmp/yahoo-cookies.txt";
+
+    // ETF 成分股 12h cache（成分股每日至多變動一次，避免重複打 Yahoo 觸發 429）
+    private record CachedEtfHoldings(EtfHoldingsResult result, long expiresAt) {}
+    private final Map<String, CachedEtfHoldings> etfHoldingsCache = new ConcurrentHashMap<>();
+    private static final long ETF_HOLDINGS_TTL_MS = 12 * 60 * 60 * 1000L;
+
+    // 台股「股名→代號」字典 24h cache：MoneyDJ 成分股只給股名無代號，用此補上代號。
+    // 來源 TWSE STOCK_DAY_ALL（上市）+ TPEX（上櫃）；放記憶體而非 stock 主檔，避免污染抓價排程清單。
+    private volatile Map<String, String> twNameToCode = java.util.Collections.emptyMap();
+    private volatile long twNameToCodeExpiresAt = 0L;
+    private static final long TW_NAME_MAP_TTL_MS = 24 * 60 * 60 * 1000L;
 
     private final Map<Integer, Map<String, String>> twHolidayCache = new ConcurrentHashMap<>();
 
@@ -64,11 +78,9 @@ public class MarketDataFetchService {
                                   @Value("${finmind.token:${FINMIND_TOKEN:}}") String finmindToken) {
         this.store = store;
         this.finmindToken = finmindToken == null ? "" : finmindToken.trim();
-        CookieManager cm = new CookieManager(null, CookiePolicy.ACCEPT_ALL);
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
                 .followRedirects(HttpClient.Redirect.NORMAL)
-                .cookieHandler(cm)
                 .build();
     }
 
@@ -362,10 +374,34 @@ public class MarketDataFetchService {
         return false;
     }
 
+    /**
+     * 取得 ETF 成分股（含 12h in-memory cache）。成分股每日至多變動一次，加上 Yahoo 對短時間大量
+     * quoteSummary 會 rate limit（429），故快取成功結果可避免 dashboard 每次切 tab 都重打 Yahoo。
+     * 僅快取「有成分股」的成功結果；失敗（429 / 查無）不快取，以便稍後重試。
+     */
     public EtfHoldingsResult getEtfHoldings(String stockCode, String market) {
+        String key = market + "_" + stockCode;
+        long now = System.currentTimeMillis();
+        CachedEtfHoldings cached = etfHoldingsCache.get(key);
+        if (cached != null && cached.expiresAt > now) return cached.result;
+        EtfHoldingsResult result = fetchEtfHoldingsUncached(stockCode, market);
+        if (result != null && result.holdings() != null && !result.holdings().isEmpty()) {
+            etfHoldingsCache.put(key, new CachedEtfHoldings(result, now + ETF_HOLDINGS_TTL_MS));
+        }
+        return result;
+    }
+
+    private EtfHoldingsResult fetchEtfHoldingsUncached(String stockCode, String market) {
         if (!isEtf(stockCode, market)) {
             return new EtfHoldingsResult(stockCode, market, false, null, null,
                     "此股票非 ETF 或未在支援清單", List.of());
+        }
+        // 台股優先 MoneyDJ（完整成分股、單一來源、不像 Yahoo 會限流；FinMind dataset 已移除）
+        if ("台股".equals(market)) {
+            try {
+                EtfHoldingsResult m = getMoneyDjEtfHoldings(stockCode, market);
+                if (m != null && !m.holdings().isEmpty()) return m;
+            } catch (Exception ignore) {}
         }
         try {
             EtfHoldingsResult y = getYahooEtfHoldings(stockCode, market);
@@ -414,6 +450,123 @@ public class MarketDataFetchService {
         }
     }
 
+    private static final Pattern MDJ_DATE = Pattern.compile("資料日期：([0-9/]+)");
+    private static final Pattern MDJ_TR = Pattern.compile("<tr[^>]*>(.*?)</tr>", Pattern.DOTALL);
+    private static final Pattern MDJ_TD = Pattern.compile("<td[^>]*>(.*?)</td>", Pattern.DOTALL);
+
+    /**
+     * MoneyDJ ETF 持股明細（台股主來源）：完整成分股（非僅前 10），單一來源、不需 crumb、不易限流。
+     * 頁面 https://www.moneydj.com/ETF/X/Basic/Basic0007a.xdjhtm?etfid={code}.TW
+     * 持股明細表欄位：股票名稱 / 持股(千股) / 比例(%) / 增減。MoneyDJ 只揭露名稱（無代號），
+     * 故 EtfHolding.stockCode 留空，由下游（BFF lookthrough）以 stockName 為聚合鍵。
+     * 以 curl 子程序抓取（與 Yahoo 同理，避開部分站點對 Java HttpClient 的封鎖）。
+     */
+    private EtfHoldingsResult getMoneyDjEtfHoldings(String stockCode, String market) {
+        for (String suffix : new String[]{".TW", ".TWO"}) {
+            try {
+                String url = "https://www.moneydj.com/ETF/X/Basic/Basic0007a.xdjhtm?etfid="
+                        + stockCode + suffix;
+                String html = runCurl("-s", "-m", "20", "-A", UA, url);
+                EtfHoldingsResult r = parseMoneyDjHoldings(stockCode, market, html);
+                if (r != null && !r.holdings().isEmpty()) return r;
+            } catch (Exception e) {
+                log.warn("MoneyDJ ETF 持股查詢失敗 {}{}: {}", stockCode, suffix, e.getMessage());
+            }
+        }
+        return null;
+    }
+
+    /** 啟動後背景預熱「股名→代號」字典，避免重啟後第一筆 ETF 請求同步載入而逾時。 */
+    @EventListener(ApplicationReadyEvent.class)
+    public void warmTwNameToCodeOnStartup() {
+        Thread t = new Thread(() -> {
+            try {
+                int n = twNameToCodeMap().size();
+                log.info("股名→代號字典預熱完成：{} 檔", n);
+            } catch (Exception e) {
+                log.warn("股名→代號字典預熱失敗: {}", e.getMessage());
+            }
+        }, "namemap-warmup");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /**
+     * 台股「股名→代號」字典（24h cache）：TWSE STOCK_DAY_ALL（上市）+ TPEX（上櫃）。
+     * 放記憶體而非 stock 主檔 — stock 表是抓價排程的股票清單（StockSourceQuery.collectAllStockCodes
+     * 會 SELECT * FROM stock 去抓價），灌入全市場會造成排程爆量。
+     */
+    private synchronized Map<String, String> twNameToCodeMap() {
+        long now = System.currentTimeMillis();
+        if (!twNameToCode.isEmpty() && now < twNameToCodeExpiresAt) return twNameToCode;
+        Map<String, String> map = new HashMap<>();
+        // 上櫃先載、上市後載（同名時上市優先覆蓋）
+        try {
+            String body = runCurl("-s", "-m", "25", "-A", UA,
+                    "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes");
+            for (JsonNode n : mapper.readTree(body)) {
+                String code = n.path("SecuritiesCompanyCode").asText("").trim();
+                String name = n.path("CompanyName").asText("").trim();
+                if (!code.isEmpty() && !name.isEmpty()) map.put(name, code);
+            }
+        } catch (Exception e) { log.warn("TPEX 股名清單載入失敗: {}", e.getMessage()); }
+        try {
+            String body = runCurl("-s", "-m", "25", "-A", UA,
+                    "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL");
+            for (JsonNode n : mapper.readTree(body)) {
+                String code = n.path("Code").asText("").trim();
+                String name = n.path("Name").asText("").trim();
+                if (!code.isEmpty() && !name.isEmpty()) map.put(name, code);
+            }
+        } catch (Exception e) { log.warn("TWSE 股名清單載入失敗: {}", e.getMessage()); }
+        if (!map.isEmpty()) {
+            twNameToCode = map;
+            twNameToCodeExpiresAt = now + TW_NAME_MAP_TTL_MS;
+        }
+        return twNameToCode;
+    }
+
+    private EtfHoldingsResult parseMoneyDjHoldings(String stockCode, String market, String html) {
+        if (html == null || html.isEmpty()) return null;
+        int idx = html.indexOf("股票名稱");
+        if (idx < 0) return null;
+        Map<String, String> nameToCode = twNameToCodeMap();
+        String asOf = null;
+        Matcher dm = MDJ_DATE.matcher(html);
+        if (dm.find()) asOf = dm.group(1);
+        // 持股明細表：從「股票名稱」表頭到該表結束
+        String seg = html.substring(idx);
+        int end = seg.indexOf("</table>");
+        if (end > 0) seg = seg.substring(0, end);
+        List<EtfHolding> holdings = new ArrayList<>();
+        Matcher rm = MDJ_TR.matcher(seg);
+        while (rm.find()) {
+            List<String> cells = new ArrayList<>();
+            Matcher cm = MDJ_TD.matcher(rm.group(1));
+            while (cm.find()) {
+                cells.add(cm.group(1).replaceAll("<[^>]+>", "").replace("&nbsp;", "").trim());
+            }
+            if (cells.size() < 3) continue;
+            String name = cells.get(0);
+            if (name.isEmpty() || name.equals("股票名稱")) continue;
+            try {
+                BigDecimal weight = new BigDecimal(cells.get(2).replace(",", ""))
+                        .setScale(4, RoundingMode.HALF_UP);
+                if (weight.compareTo(BigDecimal.ZERO) <= 0) continue;
+                BigDecimal shares = null;
+                try {
+                    shares = new BigDecimal(cells.get(1).replace(",", ""))
+                            .multiply(BigDecimal.valueOf(1000));
+                } catch (NumberFormatException ignore) {}
+                String code = nameToCode.getOrDefault(name, "");
+                holdings.add(new EtfHolding(code, name, weight, shares));
+            } catch (NumberFormatException ignore) {}
+        }
+        if (holdings.isEmpty()) return null;
+        holdings.sort((a, b) -> b.weight().compareTo(a.weight()));
+        return new EtfHoldingsResult(stockCode, market, true, "MoneyDJ", asOf, null, holdings);
+    }
+
     private EtfHoldingsResult getYahooEtfHoldings(String stockCode, String market) {
         try {
             String symbol;
@@ -423,7 +576,7 @@ public class MarketDataFetchService {
             String crumb = getYahooCrumb();
             String url = "https://query2.finance.yahoo.com/v10/finance/quoteSummary/" + symbol
                     + "?modules=topHoldings&crumb=" + URLEncoder.encode(crumb, StandardCharsets.UTF_8);
-            String body = get(url);
+            String body = yahooApiGet(url);
             JsonNode root = mapper.readTree(body);
             JsonNode result = root.path("quoteSummary").path("result");
             if (!result.isArray() || result.isEmpty()) return null;
@@ -432,7 +585,7 @@ public class MarketDataFetchService {
                 symbol = stockCode + ".TWO";
                 url = "https://query2.finance.yahoo.com/v10/finance/quoteSummary/" + symbol
                         + "?modules=topHoldings&crumb=" + URLEncoder.encode(crumb, StandardCharsets.UTF_8);
-                body = get(url);
+                body = yahooApiGet(url);
                 root = mapper.readTree(body);
                 arr = root.path("quoteSummary").path("result").get(0)
                         .path("topHoldings").path("holdings");
@@ -719,34 +872,45 @@ public class MarketDataFetchService {
 
     // ─── HTTP helpers / Yahoo crumb ───────────────────────────────────────────
 
+    /**
+     * 取得 Yahoo crumb。改用 curl 子程序（而非 Java HttpClient）：Yahoo 的反 bot WAF 會依 TLS/HTTP
+     * 指紋辨識 Java HttpClient 並對 getcrumb / quoteSummary 一律回 429（同容器、同 IP 的 curl 卻正常）。
+     * 流程：fc.yahoo.com prime A1/A3 cookie 到 cookie 檔（回 404 但 Set-Cookie）→ /v1/test/getcrumb 取 crumb。
+     */
     private synchronized String getYahooCrumb() throws Exception {
         if (yahooCrumb != null) return yahooCrumb;
         if (System.currentTimeMillis() < yahooCrumbBlockedUntil) {
             throw new RuntimeException("Yahoo Finance crumb negative cache 中");
         }
-        HttpResponse<String> resp = httpClient.send(buildRequest("https://finance.yahoo.com"),
-                HttpResponse.BodyHandlers.ofString());
-        if (resp.statusCode() != 200) throw new RuntimeException("Yahoo 首頁 HTTP " + resp.statusCode());
-        Matcher m = CRUMB_PATTERN.matcher(resp.body());
-        if (m.find()) { yahooCrumb = m.group(1); return yahooCrumb; }
-        for (String url : new String[]{"https://query1.finance.yahoo.com/v1/test/getcrumb",
-                                        "https://query2.finance.yahoo.com/v1/test/getcrumb"}) {
-            for (int attempt = 0; attempt < 3; attempt++) {
-                if (attempt > 0) Thread.sleep(2000L * attempt);
-                HttpResponse<String> r = httpClient.send(buildRequest(url),
-                        HttpResponse.BodyHandlers.ofString());
-                if (r.statusCode() == 200) {
-                    String c = r.body().trim();
-                    if (!c.isBlank() && !c.contains(" ") && c.length() <= 50) {
-                        yahooCrumb = c;
-                        return yahooCrumb;
-                    }
-                }
-                if (r.statusCode() != 429) break;
-            }
+        // prime cookie 到檔案（fc.yahoo.com 回 404 但帶 Set-Cookie: A1/A3）
+        runCurl("-s", "-c", YAHOO_COOKIE_FILE, "-A", UA, "https://fc.yahoo.com");
+        String crumb = runCurl("-s", "-b", YAHOO_COOKIE_FILE, "-A", UA,
+                "https://query2.finance.yahoo.com/v1/test/getcrumb").trim();
+        if (!crumb.isBlank() && !crumb.contains(" ") && crumb.length() <= 50
+                && !crumb.startsWith("{") && !crumb.contains("Too Many")) {
+            yahooCrumb = crumb;
+            return yahooCrumb;
         }
         yahooCrumbBlockedUntil = System.currentTimeMillis() + YAHOO_CRUMB_BLOCK_MS;
         throw new RuntimeException("無法取得 Yahoo Finance crumb");
+    }
+
+    /** 以 curl 子程序抓 Yahoo（帶 prime 過的 cookie 檔）；回傳 response body。 */
+    private String yahooApiGet(String url) throws Exception {
+        return runCurl("-s", "-b", YAHOO_COOKIE_FILE, "-A", UA, url);
+    }
+
+    /** 執行 curl 並回傳 stdout（合併 stderr）。 */
+    private String runCurl(String... args) throws Exception {
+        List<String> cmd = new ArrayList<>(args.length + 1);
+        cmd.add("curl");
+        for (String a : args) cmd.add(a);
+        ProcessBuilder pb = new ProcessBuilder(cmd);
+        pb.redirectErrorStream(true);
+        Process proc = pb.start();
+        String out = new String(proc.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        proc.waitFor();
+        return out;
     }
 
     private String get(String url) throws Exception {
@@ -756,14 +920,14 @@ public class MarketDataFetchService {
     }
 
     private HttpRequest buildRequest(String url) {
-        return HttpRequest.newBuilder().uri(URI.create(url))
+        HttpRequest.Builder b = HttpRequest.newBuilder().uri(URI.create(url))
                 .timeout(Duration.ofSeconds(20))
                 .header("User-Agent", UA)
                 .header("Accept", "application/json, text/html, */*")
                 .header("Accept-Language", "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7")
                 .header("Accept-Encoding", "identity")
-                .header("Referer", "https://finance.yahoo.com/")
-                .GET().build();
+                .header("Referer", "https://finance.yahoo.com/");
+        return b.GET().build();
     }
 
     private HttpRequest finmindRequest(String url, int timeoutSec) {
