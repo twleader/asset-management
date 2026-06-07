@@ -2417,3 +2417,66 @@ VOO 股票走勢圖在 2026-06-05 NY 盤中（15:16，未到 16:00 收盤）顯�
   - `selectedSnapshotId` 語義保持不變（仍是下拉選的快照），不影響 KPI 卡 / 持股表等其他面板
 
 
+### Task 87: 股票走勢圖期間按鈕加「當日」（最後一交易日分時 5m K 線）
+
+對應 Requirements: Requirement 13（[requirements.md:225-226](spec/requirements.md)）
+
+#### 背景
+
+走勢圖期間按鈕目前最短為「1個月」（21 個交易日），看不到當天盤中走勢；使用者想在收盤後快速看「今天股價怎麼走」。external-materials-service 已有 `PriceFetchClient.fetchIntraday5m` + `/internal/intraday-5m` endpoint（原為 `StockAlertService` 警示觸發補抓用），business-services 也已有 `HistoricalDataService.fetchIntraday5m` proxy。直接把這份既有資料源接通到 StockAnalysisDialog 即可，不需另外累計 ticks。
+
+設計決策：
+- 「當日」模式抓「最近 1 個交易日」的 5m K 線（Yahoo `chart?interval=5m&range=1d`），盤後即可看當天完整走勢
+- 月線 / 季線 / 年線 / KD 仍要在 legend 顯示，但 intraday tick 數無法支撐日線級 MA20/60/240、KD(9) 重算 → 改畫「該檔最近一個交易日收盤後的日線最新值」水平參考線，與其他期間 legend 數值口徑一致（避免使用者切回 1個月時看到不同 MA 值產生誤會）
+- 一次抓 10 年的歷史資料保留，「當日」模式只額外抓一支 intraday API；切換期間時前端只重組 chartOption，不再 roundtrip
+
+#### Steps:
+
+- [ ] 87.1 backend `MarketDataController.getIntraday5m`：`GET /api/market-data/intraday-5m?code=&market=&daysBack=1`，直接代理 `HistoricalDataService.fetchIntraday5m`，回 `List<IntradayBar>`（time / open / high / low / close）
+- [ ] 87.2 bff `StockAnalysisBffRoutes`：加 `stock-analysis-intraday-5m` route `GET /api/bff/stock-analysis/intraday-5m` → `/api/market-data/intraday-5m`
+- [ ] 87.3 frontend `api/index.js`：`bffApi.stockAnalysis.getIntraday5m(code, market, daysBack=1)`
+- [ ] 87.4 frontend `StockAnalysisDialog.vue`：
+  - `rangeOptions` 第一項插入 `{ label: '當日', months: 0 }`，預設仍為 12（1年）
+  - `months === 0` 時改抓 `getIntraday5m`，存到 `intradayBars` ref；資料截止顯示為 intradayBars 最後一筆的 date 部分
+  - 切到當日模式時 chartOption 改以 `intradayBars` 為 x 軸（time 顯示為 HH:mm），price 序列為 close；月線 / 季線 / 年線 / KD 改畫水平線（值取自日線資料 last MA20/60/240 / last K / last D）
+  - tooltip / legend 末值顯示維持與其他期間一致格式
+- [ ] 87.5 Docker 重 build：`docker compose build backend external-materials-service bff frontend && docker compose up -d backend external-materials-service bff frontend`
+- [ ] 87.6 手動驗證：開啟任一持股的股票分析 → 切到「當日」→ 確認分時走勢圖出現、月/季/年線為水平線、KD 副圖顯示最新值水平線；切回「1年」回到日線正常顯示
+
+
+### Task 88: 「當日」走勢兩階段資料源（盤中 polling 累積 + 盤後外部源覆寫）
+
+對應 Requirements: Requirement 13（[requirements.md:226-227](spec/requirements.md)）
+
+#### 背景
+
+Task 87 以 Yahoo `interval=5m` 作為「當日」走勢資料源，但 Yahoo 對台股盤中有延遲、且不是我們最權威的來源。改採兩階段：
+- **盤中**：`external-materials-service` 既有 `PricePoller` 每 2 分鐘輪詢真實成交價，原本只覆寫 Redis live key `price:{m}:{c}`。本任務在 `PriceCacheWriter.write` 多寫一筆「tick」到 Redis LIST `price:ticks:{market}:{code}:{tradingDate}`，前端切到「當日」即可看到當下累積的分時走勢（不依賴外部 API、無延遲）。
+- **盤後**：抓 FinMind / Yahoo 全天完整資料 `DEL` + `RPUSH` 覆寫該日 LIST。理由：盤中 polling 是 2 分鐘輪詢，遇 z='-'（兩 tick 之間無成交）會 skip，原始 LIST 可能跳號；盤後用權威完整資料覆寫，補回所有時間點，前端看到的就是「正確的曲線圖」。
+
+設計決策：
+- **Tick element** 格式：JSON `{"t":"2026-06-05T13:25:00","p":"104.50"}`（time = ISO LocalDateTime，與既有 `IntradayBar.time` 同格式；price = BigDecimal 字串避免精度漂移）
+- **覆寫時機**：在 `ClosePersister.dumpXxxCloseFromRedis` 之後再 3 分鐘觸發，避免與 dump 競爭 Redis IO；cron 與 `ClosePersister` 同 zone
+- **資料源**：台股 FinMind `TaiwanStockKBar` 5m K（用 close 作為 tick.p；FinMind sponsor token 在 application.yml 既有 `finmind.token`），美/英股 Yahoo `chart?interval=5m`（沿用 `fetchIntraday5m`）
+- **舊 endpoint `/intraday-5m` 保留**：StockAlertService 警示觸發補抓仍用該 endpoint（不同用途、不同資料源語意），不動
+
+#### Steps:
+
+- [ ] 88.1 ext-materials 新 `IntradayTickStore`（同 `IntradayHighLowTracker` pattern）：`appendTick(code, market, date, time, price)` `RPUSH` + `EXPIRE` 36h；`replaceTicks(code, market, date, ticks)` `DEL` + `RPUSH`；`getTicks(code, market, date)` `LRANGE 0 -1` 解 JSON 回傳 `List<TickPoint>`（time, price）
+- [ ] 88.2 `PriceCacheWriter.write` 在 `redis.opsForValue().set(key, json, LIVE_TTL)` 之後加 tick append：`source` 不含 `(` 視為真實成交（與 `HistoricalDataService.getStockHistory` 對「今日格」的守門條件一致），呼叫 `tickStore.appendTick(code, market, tradingDate, LocalDateTime.now(marketZone), price)`
+- [ ] 88.3 ext-materials `PriceFetchClient.fetchTwKBar5m(code, date)`：打 FinMind `dataset=TaiwanStockKBar&data_id={code}&start_date={date}&end_date={date}`，回 `List<TickBar>`，每筆 = (date + "T" + minute, close)。FinMind row 欄位：`date`、`minute`、`close`。FinMind `TaiwanStockKBar` 為 sponsor 付費 dataset，無 token 時回 400 → `IntradayTickRefresher.refreshTwOne` 偵測到空 list 後 fallback 到 Yahoo 5m（與美/英股同源）
+- [ ] 88.4 ext-materials 新 `IntradayTickRefresher`：
+  - `@Scheduled(cron = "0 35 13 * * MON-FRI", zone = "Asia/Taipei") refreshTwTicks()`：對所有持股（`StockSourceQuery.collectHeldStockCodes` 台股部分）並行 fetch FinMind 5m K 線 → `tickStore.replaceTicks`
+  - `@Scheduled(cron = "0 5 16 * * MON-FRI", zone = "America/New_York") refreshUsTicks()`：美股用 `PriceFetchClient.fetchIntraday5m(code, "美股", 1)` → tick + close → replaceTicks
+  - `@Scheduled(cron = "0 35 16 * * MON-FRI", zone = "Europe/London") refreshUkTicks()`：英股同上但 market="英股"
+  - 啟動時若市場已收盤但今日 ticks LIST 空，補一次 cold-start refresh
+- [ ] 88.5 ext-materials `InternalPriceController.intradayTicks(code, market, date)`：`GET /internal/intraday-ticks`，預設 date = 該市場時區的「最近一個交易日」（用 `MarketClock` / `findMaxTradingDate`），回 `List<TickPoint>`
+- [ ] 88.6 business-services `HistoricalDataService.fetchIntradayTicks(code, market, date)`：proxy 至 `/internal/intraday-ticks`
+- [ ] 88.7 business-services `MarketDataController.getIntradayTicks`：`GET /api/market-data/intraday-ticks?code=&market=&date=`（date 可選）
+- [ ] 88.8 bff `StockAnalysisBffRoutes` 加 `stock-analysis-intraday-ticks` route `/api/bff/stock-analysis/intraday-ticks` → `/api/market-data/intraday-ticks`
+- [ ] 88.9 frontend `api/index.js` `bffApi.stockAnalysis.getIntradayTicks(code, market, date?)`
+- [ ] 88.10 frontend `StockAnalysisDialog.vue`：`intradayBars`→`intradayTicks` 結構改 `{time, price}`；prices = ticks.map(t => t.price)；移除 close/open/high/low 解讀
+- [ ] 88.11 Docker 重 build + recreate：`backend bff external-materials-service frontend`
+- [ ] 88.12 手動驗證：(a) `docker exec asset-redis redis-cli LRANGE 'price:ticks:台股:0050:2026-06-05' 0 -1` 確認 LIST 存在且有資料；(b) 直接 curl `/api/bff/stock-analysis/intraday-ticks?code=0050&market=台股` 看走勢資料回傳；(c) 等下個 polling 週期，LIST 多一筆 tick；(d) 開啟股票分析切「當日」確認走勢與 Task 87 行為一致
+
+

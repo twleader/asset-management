@@ -44,6 +44,9 @@ public class InternalPriceController {
     private final com.steven.assets.externalmaterials.client.PriceFetchClient priceFetch;
     private final MarketDataFetchService marketData;
     private final com.steven.assets.externalmaterials.client.MacroDataFetchClient macro;
+    private final com.steven.assets.externalmaterials.service.IntradayTickStore tickStore;
+    private final com.steven.assets.externalmaterials.service.IntradayTickRefresher tickRefresher;
+    private final com.steven.assets.externalmaterials.service.StockSourceQuery stockSource;
 
     /**
      * 同步抓所有持股報價、寫 Redis 後回傳統計。
@@ -214,6 +217,29 @@ public class InternalPriceController {
             @RequestParam String market,
             @RequestParam(defaultValue = "5") int daysBack) {
         return priceFetch.fetchIntraday5m(code, market, daysBack);
+    }
+
+    /**
+     * 「當日」走勢圖分時 tick 序列（盤中 polling 累積 + 盤後外部源覆寫）。
+     * date 未指定時取該市場最近一個有資料的交易日（沿用 stock_price_history 的 maxTradingDate）。
+     * Redis LIST 空且服務側已有完整資料源 → 同步觸發一次 refreshOne 作為 cold-start，回填後再回傳。
+     */
+    @GetMapping("/intraday-ticks")
+    public java.util.List<com.steven.assets.externalmaterials.service.IntradayTickStore.TickPoint> intradayTicks(
+            @RequestParam String code,
+            @RequestParam String market,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        LocalDate target = (date != null) ? date
+                : stockSource.findMaxTradingDate(code, market).orElseGet(() -> LocalDate.now(
+                        "美股".equals(market) ? com.steven.assets.externalmaterials.service.MarketClock.US_ZONE
+                                : "英股".equals(market) ? com.steven.assets.externalmaterials.service.MarketClock.LON_ZONE
+                                : com.steven.assets.externalmaterials.service.MarketClock.TW_ZONE));
+        var ticks = tickStore.getTicks(code, market, target);
+        if (ticks.isEmpty()) {
+            tickRefresher.refreshOne(code, market, target);
+            ticks = tickStore.getTicks(code, market, target);
+        }
+        return ticks;
     }
 
     /** 手動觸發 BOT 即期匯率抓取（同盤中 5 分鐘排程）。 */

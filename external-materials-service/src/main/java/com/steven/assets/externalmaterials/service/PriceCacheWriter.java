@@ -36,6 +36,7 @@ public class PriceCacheWriter {
     private final MarketClock clock;
     private final StockSourceQuery source;
     private final IntradayHighLowTracker hlTracker;
+    private final IntradayTickStore tickStore;
 
     private static final ObjectMapper MAPPER = new ObjectMapper()
             .setSerializationInclusion(JsonInclude.Include.NON_NULL);
@@ -92,6 +93,22 @@ public class PriceCacheWriter {
             redis.convertAndSend("price-update", json);
         } catch (Exception e) {
             log.warn("寫入 Redis 失敗 {} {}: {}", market, code, e.getMessage());
+        }
+
+        // 盤中 tick 累積：只 append 真實成交（source 不含括號）且當下為交易時段，供「當日」走勢圖讀取。
+        // 守門條件：
+        //  (a) source.contains('(') → 排除 (history) / (前收) / (買賣中價) 等非實際成交值（與
+        //      HistoricalDataService.getStockHistory 對今日格的守門一致）
+        //  (b) !markClosed → 排除 cache warming 對盤外時段抓到的「最新可得值」（其實是前一日
+        //      收盤），此時 tick wall time 會落在非交易時段（如週日 23:58），不應入分時序列
+        String src = result.source();
+        boolean isActualTrade = src != null && !src.contains("(");
+        if (isActualTrade && !markClosed && result.price() != null) {
+            java.time.ZoneId zone = "美股".equals(market) ? MarketClock.US_ZONE
+                    : "英股".equals(market) ? MarketClock.LON_ZONE
+                    : MarketClock.TW_ZONE;
+            LocalDateTime tickTime = LocalDateTime.now(zone).withNano(0);
+            tickStore.appendTick(code, market, tradingDate, tickTime, result.price());
         }
     }
 

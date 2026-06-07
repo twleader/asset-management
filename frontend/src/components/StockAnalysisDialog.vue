@@ -42,7 +42,14 @@
               <span style="color:#64748b;font-size:12px;margin-left:8px">滾輪縮放 / 拖曳平移</span>
             </div>
           </div>
-          <v-chart :option="chartOption" style="height:580px" autoresize />
+          <div v-if="isIntraday && intradayLoading" class="analysis-loading" style="height:580px">
+            <el-icon class="is-loading" size="36"><Loading /></el-icon>
+            <div>載入當日分時資料中…</div>
+          </div>
+          <div v-else-if="isIntraday && !intradayTicks.length" class="analysis-empty" style="height:580px">
+            無當日分時資料
+          </div>
+          <v-chart v-else :option="chartOption" style="height:580px" autoresize />
         </template>
       </el-tab-pane>
 
@@ -160,16 +167,25 @@ const activeTab = ref('chart')
 const loading = ref(false)
 const history = ref([])
 const months = ref(12)
+const intradayTicks = ref([])
+const intradayLoading = ref(false)
 const dividendHistory = ref({ rows: [] })
 const dividendsLoading = ref(false)
 
+const isIntraday = computed(() => months.value === 0)
+
 const latestTradingDate = computed(() => {
+  if (isIntraday.value && intradayTicks.value.length) {
+    const t = intradayTicks.value[intradayTicks.value.length - 1]?.time
+    return t ? String(t).substring(0, 10) : null
+  }
   const h = history.value
   if (!h || !h.length) return null
   return h[h.length - 1]?.tradingDate ?? null
 })
 
 const rangeOptions = [
+  { label: '當日',   months: 0 },
   { label: '1個月', months: 1 },
   { label: '3個月', months: 3 },
   { label: '1年',   months: 12 },
@@ -198,9 +214,30 @@ async function fetchHistory() {
   }
 }
 
+async function fetchIntraday() {
+  if (!props.stock) return
+  intradayLoading.value = true
+  intradayTicks.value = []
+  try {
+    const data = await bffApi.stockAnalysis.getIntradayTicks(props.stock.stockCode, props.stock.market)
+    intradayTicks.value = Array.isArray(data) ? data : []
+  } catch (e) {
+    console.warn('無法取得當日分時資料:', e)
+  } finally {
+    intradayLoading.value = false
+  }
+}
+
+watch(months, (m) => {
+  if (m === 0 && !intradayTicks.value.length && !intradayLoading.value) {
+    fetchIntraday()
+  }
+})
+
 function onOpen() {
   activeTab.value = 'chart'
   months.value = 12
+  intradayTicks.value = []
   dividendHistory.value = { rows: [] }
   fetchHistory()
 }
@@ -345,12 +382,44 @@ const chartOption = computed(() => {
   const hist = history.value
   if (!hist.length) return {}
   const s = props.stock || {}
-  const dates  = hist.map(d => d.tradingDate)
-  const prices = hist.map(d => parseFloat(Number(d.closePrice || 0).toFixed(2)))
-  const ma20  = calcMA(prices, 20)
-  const ma60  = calcMA(prices, 60)
-  const ma240 = calcMA(prices, 240)
-  const { K, D } = calcKD(hist)
+
+  // 日線基礎：所有期間（含「當日」的 MA/KD 水平參考線）都從這份算
+  const dailyDates  = hist.map(d => d.tradingDate)
+  const dailyPrices = hist.map(d => parseFloat(Number(d.closePrice || 0).toFixed(2)))
+  const dailyMa20   = calcMA(dailyPrices, 20)
+  const dailyMa60   = calcMA(dailyPrices, 60)
+  const dailyMa240  = calcMA(dailyPrices, 240)
+  const dailyKD     = calcKD(hist)
+  const lastOf = arr => arr.length ? arr[arr.length - 1] : null
+
+  const intraday = isIntraday.value
+  // intraday 模式但 tick 序列還沒抓到 → 暫時不畫，由外層 v-if 的 loading 處理
+  if (intraday && !intradayTicks.value.length) return {}
+
+  let dates, prices, ma20, ma60, ma240, K, D, xLabelFormatter
+  if (intraday) {
+    const ticks = intradayTicks.value
+    // time 為 ISO LocalDateTime（如 "2026-06-05T13:25:00"）→ x 軸用 HH:mm
+    dates  = ticks.map(t => String(t.time).substring(11, 16))
+    prices = ticks.map(t => t.price != null ? parseFloat(Number(t.price).toFixed(2)) : null)
+    // intraday tick 數不足以重算日線 MA / KD → 取日線最新值畫成水平參考線
+    const fill = v => ticks.map(() => v)
+    ma20  = fill(lastOf(dailyMa20))
+    ma60  = fill(lastOf(dailyMa60))
+    ma240 = fill(lastOf(dailyMa240))
+    K     = fill(lastOf(dailyKD.K))
+    D     = fill(lastOf(dailyKD.D))
+    xLabelFormatter = v => v
+  } else {
+    dates  = dailyDates
+    prices = dailyPrices
+    ma20   = dailyMa20
+    ma60   = dailyMa60
+    ma240  = dailyMa240
+    K      = dailyKD.K
+    D      = dailyKD.D
+    xLabelFormatter = v => v.substring(0, 7)
+  }
 
   // 成本均價：若提供 shares + investmentCost 才畫
   const costTwd = s.shares > 0 && s.investmentCost ? s.investmentCost / s.shares : null
@@ -424,10 +493,14 @@ const chartOption = computed(() => {
       { left: 64, right: 96, top: 'auto', height: 90, bottom: 60 }
     ],
     dataZoom: (() => {
-      // 抓 10 年資料，期間按鈕只調 dataZoom 的 start% 而非重新打 API
-      const total = dates.length
-      const want = Math.max(20, Math.round(months.value * 21))  // ~21 trading days/month
-      const startPct = total > 0 ? Math.max(0, 100 * (total - want) / total) : 0
+      // 日線：抓 10 年資料，期間按鈕只調 dataZoom start% 不再 roundtrip
+      // intraday：只有 ~78 個 5m bar，整段全顯示
+      let startPct = 0
+      if (!intraday) {
+        const total = dates.length
+        const want = Math.max(20, Math.round(months.value * 21))  // ~21 trading days/month
+        startPct = total > 0 ? Math.max(0, 100 * (total - want) / total) : 0
+      }
       return [
         { type: 'inside', xAxisIndex: [0, 1], start: startPct, end: 100 },
         { type: 'slider', xAxisIndex: [0, 1], start: startPct, end: 100, height: 20, bottom: 8 }
@@ -435,7 +508,7 @@ const chartOption = computed(() => {
     })(),
     xAxis: [
       { gridIndex: 0, type: 'category', data: dates, boundaryGap: false, axisLabel: { show: false }, axisLine: { onZero: false } },
-      { gridIndex: 1, type: 'category', data: dates, boundaryGap: false, axisLabel: { rotate: 30, fontSize: 10, formatter: v => v.substring(0, 7) } }
+      { gridIndex: 1, type: 'category', data: dates, boundaryGap: false, axisLabel: { rotate: 30, fontSize: 10, formatter: xLabelFormatter } }
     ],
     yAxis: [
       { gridIndex: 0, type: 'value', scale: true, axisLabel: { formatter: v => v.toFixed(0) }, splitLine: { lineStyle: { color: '#f0f0f0' } } },

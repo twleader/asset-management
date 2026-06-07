@@ -612,6 +612,47 @@ public class PriceFetchClient {
     }
 
     /**
+     * FinMind TaiwanStockKBar 5 分鐘 K 線：盤後抓當日完整資料覆寫 Redis tick LIST 用。
+     * 回傳 (time, close)；time 為 ISO LocalDateTime（"YYYY-MM-DDTHH:mm:ss"，UTC+8 wall clock）。
+     * 用 close 而非 OHLC 是因為「當日」分時走勢 series 只畫一條 price 線。
+     */
+    public record TickBar(String time, BigDecimal price) {}
+
+    public List<TickBar> fetchTwKBar5m(String stockCode, LocalDate date) {
+        try {
+            String url = "https://api.finmindtrade.com/api/v4/data"
+                    + "?dataset=TaiwanStockKBar"
+                    + "&data_id=" + stockCode
+                    + "&start_date=" + date
+                    + "&end_date=" + date;
+            HttpResponse<String> resp = httpClient.send(
+                    finmindRequest(url, 20), HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() != 200) {
+                log.warn("FinMind TaiwanStockKBar {} {} 回應 {}（token {}）",
+                        stockCode, date, resp.statusCode(),
+                        finmindToken.isEmpty() ? "未設定" : "已設定");
+                return List.of();
+            }
+            JsonNode data = mapper.readTree(resp.body()).path("data");
+            if (!data.isArray() || data.isEmpty()) return List.of();
+            List<TickBar> ticks = new java.util.ArrayList<>();
+            for (JsonNode row : data) {
+                BigDecimal close = finmindDecimal(row, "close");
+                if (close == null) continue;
+                String d = row.path("date").asText("");          // YYYY-MM-DD
+                String t = row.path("minute").asText("");         // HH:mm or HH:mm:ss
+                if (d.isBlank() || t.isBlank()) continue;
+                if (t.length() == 5) t = t + ":00";               // 補秒
+                ticks.add(new TickBar(d + "T" + t, close));
+            }
+            return ticks;
+        } catch (Exception e) {
+            log.warn("FinMind TaiwanStockKBar {} {} 失敗: {}", stockCode, date, e.getMessage());
+            return List.of();
+        }
+    }
+
+    /**
      * curl 子程序 + 重試（Yahoo Finance 對 Java HTTP client 友善度差，且偶發 429）。
      * 回應非 JSON 視為被擋，等 10s/20s/30s... 後重試，最多 maxRetries 次。
      */

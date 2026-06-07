@@ -104,7 +104,9 @@ export const bffApi = {
     getDividendHistory: (code, market, years = 10) =>
       api.get('/bff/stock-analysis/dividends', { params: { code, market, years } }),
     getEtfHoldings: (code, market) =>
-      api.get('/bff/stock-analysis/etf-holdings', { params: { code, market } })
+      api.get('/bff/stock-analysis/etf-holdings', { params: { code, market } }),
+    getIntradayTicks: (code, market, date) =>
+      api.get('/bff/stock-analysis/intraday-ticks', { params: { code, market, ...(date && { date }) } })
   },
 
   // AssetHistory
