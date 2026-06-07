@@ -173,6 +173,20 @@ public class MarketDataController {
     }
 
     /**
+     * 「當日」走勢圖分時 tick 序列（StockAnalysisDialog 走勢圖「當日」期間用）。
+     * GET /api/market-data/intraday-ticks?code=0050&market=台股&date=2026-06-05
+     * Proxy 至 external-materials-service /internal/intraday-ticks。
+     * Redis LIST `price:ticks:{market}:{code}:{date}`，盤中 polling 累積 + 盤後外部源覆寫。
+     */
+    @GetMapping("/intraday-ticks")
+    public List<HistoricalDataService.IntradayTick> getIntradayTicks(
+            @RequestParam String code,
+            @RequestParam String market,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        return historicalDataService.fetchIntradayTicks(code, market, date);
+    }
+
+    /**
      * 批次查詢多支股票在指定快照日期的收盤價
      * POST /api/market-data/history/prices-on-date?date=2026-04-09
      * Body: [{"code":"0050","market":"台股"}, ...]

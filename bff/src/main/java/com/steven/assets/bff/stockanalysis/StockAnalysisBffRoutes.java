@@ -41,6 +41,12 @@ public class StockAnalysisBffRoutes {
                                 "/api/bff/stock-analysis/etf-holdings",
                                 "/api/market-data/etf-holdings"))
                         .uri(businessServicesUrl))
+                .route("stock-analysis-intraday-ticks", r -> r
+                        .path("/api/bff/stock-analysis/intraday-ticks")
+                        .filters(f -> f.rewritePath(
+                                "/api/bff/stock-analysis/intraday-ticks",
+                                "/api/market-data/intraday-ticks"))
+                        .uri(businessServicesUrl))
                 .build();
     }
 }

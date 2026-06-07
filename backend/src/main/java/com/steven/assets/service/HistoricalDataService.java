@@ -57,10 +57,47 @@ public class HistoricalDataService {
     private record IntradayBarDto(String time, BigDecimal open, BigDecimal high,
                                    BigDecimal low, BigDecimal close) {}
 
+    /** 「當日」走勢圖分時 tick：盤中 polling 累積 / 盤後外部源覆寫，前端透明讀取。 */
+    public record IntradayTick(String time, BigDecimal price) {}
+
+    private record IntradayTickDto(String time, BigDecimal price) {}
+
     /**
      * 警示盤中觸發補抓專用：5 分鐘 K 線。
      * 對外呼叫已搬到 ext-materials-service /internal/intraday-5m（FinMind/Yahoo 集中）。
      */
+    /**
+     * 「當日」走勢圖分時 tick 序列。
+     * 對應 ext-materials-service /internal/intraday-ticks（讀 Redis tick LIST）。
+     * date 可空 → ext-materials 自取該市場最近一個交易日。
+     */
+    public List<IntradayTick> fetchIntradayTicks(String stockCode, String market, java.time.LocalDate date) {
+        try {
+            IntradayTickDto[] resp = priceServiceClient.get()
+                    .uri(uriBuilder -> {
+                        uriBuilder.path("/internal/intraday-ticks")
+                                .queryParam("code", stockCode)
+                                .queryParam("market", market);
+                        if (date != null) uriBuilder.queryParam("date", date.toString());
+                        return uriBuilder.build();
+                    })
+                    .retrieve()
+                    .bodyToMono(IntradayTickDto[].class)
+                    .block();
+            if (resp == null) return List.of();
+            List<IntradayTick> out = new ArrayList<>(resp.length);
+            for (IntradayTickDto d : resp) {
+                if (d.price() == null) continue;
+                out.add(new IntradayTick(d.time(), d.price()));
+            }
+            return out;
+        } catch (Exception e) {
+            log.warn("呼叫 ext-materials-service /internal/intraday-ticks 失敗 ({} {}): {}",
+                    market, stockCode, e.getMessage());
+            return List.of();
+        }
+    }
+
     public List<IntradayBar> fetchIntraday5m(String stockCode, String market, int daysBack) {
         try {
             IntradayBarDto[] resp = priceServiceClient.get()
