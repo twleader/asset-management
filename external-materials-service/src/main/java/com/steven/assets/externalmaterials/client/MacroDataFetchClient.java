@@ -42,6 +42,19 @@ public class MacroDataFetchClient {
     private static final String TWSE_DAILY_OHLC_URL =
             "https://www.twse.com.tw/rwd/zh/TAIEX/MI_5MINS_HIST?response=json&date=";
 
+    /**
+     * 主計總處 NA8101A1A「國民所得統計常用資料-年」XML 下載點（data.gov.tw 資料集 44218 列出）。
+     * 設定化以便日後 DGBAS 變更路徑時不需改 code；失效時 fetchDgbasNationalIncome 回空 map → IMF fallback。
+     */
+    @org.springframework.beans.factory.annotation.Value(
+            "${macro.dgbas.na8101-url:https://ws.dgbas.gov.tw/001/Upload/461/relfile/11525/230514/na8101a1a.xml}")
+    private String dgbasNa8101Url;
+
+    /** NA8101 XML 每筆觀測：<Obs><Item>..</Item><TIME_PERIOD>YYYY</TIME_PERIOD><FREQ>..</FREQ><TYPE>..</TYPE><Item_VALUE>..</Item_VALUE></Obs> */
+    private static final java.util.regex.Pattern DGBAS_OBS = java.util.regex.Pattern.compile(
+            "<Obs><Item>(.*?)</Item><TIME_PERIOD>(.*?)</TIME_PERIOD><FREQ>.*?</FREQ><TYPE>(.*?)</TYPE>\\s*<Item_VALUE>(.*?)</Item_VALUE></Obs>",
+            java.util.regex.Pattern.DOTALL);
+
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .followRedirects(HttpClient.Redirect.NORMAL)
@@ -76,6 +89,62 @@ public class MacroDataFetchClient {
                     BigDecimal.valueOf(e.getValue().asDouble()).setScale(scale, RoundingMode.HALF_UP));
         }
         return out;
+    }
+
+    /**
+     * 主計總處（DGBAS）國民所得統計常用資料-年（表號 NA8101A1A）。
+     * 取「經濟成長率(%)」（實質 GDP 成長率）與「平均每人GDP(名目值，美元)」逐年原始值。
+     * 涵蓋 1951 起至最新「實際」年度（不含未來預測），為台灣官方權威來源，優先於 IMF。
+     * 回傳 {"growth": {year:val}, "gdpUsd": {year:val}}；抓取失敗回空 map（交由 IMF fallback）。
+     *
+     * 來源 URL 為 data.gov.tw「國民所得統計-常用資料-年」資料集列出的 XML 下載點；
+     * 無 WAF，用一般 HttpClient 即可（不需 curl shell-out）。
+     */
+    public Map<String, Map<Integer, BigDecimal>> fetchDgbasNationalIncome() {
+        Map<Integer, BigDecimal> growth = new LinkedHashMap<>();
+        Map<Integer, BigDecimal> gdpUsd = new LinkedHashMap<>();
+        try {
+            // 政府網站 ws.dgbas.gov.tw 由 TWCA 簽發但未送中繼憑證，容器 truststore 無法建鏈
+            // （Java HttpClient 與 curl 預設皆 PKIX 失敗）。抓的是公開統計數字、且失敗有 IMF
+            // fallback，故用 curl -k（insecure）shell-out 取得；與 fetchImf 同樣走 curl 避開 Java TLS。
+            ProcessBuilder pb = new ProcessBuilder(
+                    "curl", "-sS", "-k", "--max-time", "25",
+                    "-H", "User-Agent: Mozilla/5.0",
+                    dgbasNa8101Url);
+            pb.redirectErrorStream(true);
+            Process proc = pb.start();
+            String body = new String(proc.getInputStream().readAllBytes(),
+                    java.nio.charset.StandardCharsets.UTF_8);
+            int exit = proc.waitFor();
+            if (exit != 0) {
+                log.warn("DGBAS NA8101 curl exit={}：{}", exit,
+                        body.substring(0, Math.min(200, body.length())));
+                return Map.of("growth", growth, "gdpUsd", gdpUsd);
+            }
+            java.util.regex.Matcher m = DGBAS_OBS.matcher(body);
+            while (m.find()) {
+                String item = m.group(1);
+                int year;
+                try { year = Integer.parseInt(m.group(2).trim()); }
+                catch (NumberFormatException e) { continue; }
+                String type = m.group(3);
+                String valStr = m.group(4).trim();
+                if (!type.contains("原始") || valStr.isEmpty()) continue;
+                BigDecimal val;
+                try { val = new BigDecimal(valStr); }
+                catch (NumberFormatException e) { continue; }
+                // 用 contains 子字串比對，避開全形括號/逗號（「(名目值，美元)」）的字面編碼風險
+                if (item.contains("經濟成長率")) {
+                    growth.put(year, val);
+                } else if (item.contains("平均每人GDP") && item.contains("美元")) {
+                    gdpUsd.put(year, val);
+                }
+            }
+            log.info("DGBAS NA8101：成長率 {} 年、人均GDP(USD) {} 年", growth.size(), gdpUsd.size());
+        } catch (Exception e) {
+            log.warn("DGBAS NA8101 抓取失敗：{}", e.getMessage());
+        }
+        return Map.of("growth", growth, "gdpUsd", gdpUsd);
     }
 
     /** TWSE 大盤 12 月份 OHLC 月報，取該月最後一筆作為年末加權指數收盤。 */

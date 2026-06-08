@@ -56,25 +56,48 @@ public class MacroHistoryService {
         this.priceServiceClient = WebClient.builder().baseUrl(externalUrl).build();
     }
 
+    /**
+     * 台灣人均 GDP + 實質 GDP 成長率回補：主計總處（DGBAS）為主、IMF 為備援。
+     * DGBAS NA8101A1A 提供官方逐年實際值（1951 起、無未來預測），優先採用；
+     * DGBAS 缺的年份（未來預測年 2026+、或抓取失敗時）以 IMF NGDPDPC/NGDP_RPCH 補。
+     * 韓國無 DGBAS 對應來源，仍走純 IMF（{@link #refreshKoreaGdpFromImf()}）。
+     */
     @Transactional
     public Map<String, Object> refreshGdpFromImf() throws Exception {
-        Map<Integer, BigDecimal> gdp = fetchImfProxy(IMF_GDP_INDICATOR, "TWN", 2);
-        Map<Integer, BigDecimal> growth = fetchImfProxy(IMF_GROWTH_INDICATOR, "TWN", 4);
-        for (var e : gdp.entrySet()) {
-            int year = e.getKey();
-            TaiwanGdpPerCapitaHistory row = gdpRepo.findById(year)
+        Map<Integer, BigDecimal> imfGdp = fetchImfProxy(IMF_GDP_INDICATOR, "TWN", 2);
+        Map<Integer, BigDecimal> imfGrowth = fetchImfProxy(IMF_GROWTH_INDICATOR, "TWN", 4);
+        DgbasData dgbas = fetchDgbasProxy();   // 台灣官方，優先
+
+        java.util.TreeSet<Integer> years = new java.util.TreeSet<>();
+        years.addAll(imfGdp.keySet());
+        years.addAll(imfGrowth.keySet());
+        years.addAll(dgbas.gdpUsd().keySet());
+        years.addAll(dgbas.growth().keySet());
+
+        int dgbasGdpHits = 0, dgbasGrowthHits = 0;
+        for (int year : years) {
+            BigDecimal gdpUsd = dgbas.gdpUsd().get(year);
+            if (gdpUsd != null) dgbasGdpHits++; else gdpUsd = imfGdp.get(year);
+            BigDecimal growth = dgbas.growth().get(year);
+            if (growth != null) dgbasGrowthHits++; else growth = imfGrowth.get(year);
+            if (gdpUsd == null && growth == null) continue;
+
+            final int y = year;
+            TaiwanGdpPerCapitaHistory row = gdpRepo.findById(y)
                     .orElseGet(() -> {
                         TaiwanGdpPerCapitaHistory r = new TaiwanGdpPerCapitaHistory();
-                        r.setYear(year);
+                        r.setYear(y);
                         return r;
                     });
-            row.setGdpUsd(e.getValue());
-            row.setRealGdpGrowthRate(growth.get(year));
+            row.setGdpUsd(gdpUsd);
+            row.setRealGdpGrowthRate(growth);
             gdpRepo.save(row);
         }
-        log.info("IMF refresh (TWN): {} 年 GDP, {} 年 growth", gdp.size(), growth.size());
-        return Map.of("upserted", gdp.size(), "growthUpserted", growth.size(),
-                "source", "IMF NGDPDPC+NGDP_RPCH/TWN");
+        log.info("TWN GDP refresh: {} 年（DGBAS 人均 {} 年 / 成長率 {} 年，其餘 IMF fallback）",
+                years.size(), dgbasGdpHits, dgbasGrowthHits);
+        return Map.of("upserted", years.size(),
+                "dgbasGdpYears", dgbasGdpHits, "dgbasGrowthYears", dgbasGrowthHits,
+                "source", "DGBAS NA8101A1A (primary) + IMF NGDPDPC/NGDP_RPCH (fallback)");
     }
 
     @Transactional
@@ -120,6 +143,38 @@ public class MacroHistoryService {
             log.warn("呼叫 /internal/macro/imf 失敗 {} {}: {}", indicator, country, e.getMessage());
             return Map.of();
         }
+    }
+
+    /** DGBAS 國民所得：實質 GDP 成長率 + 人均 GDP(USD) 逐年值。 */
+    private record DgbasData(Map<Integer, BigDecimal> growth, Map<Integer, BigDecimal> gdpUsd) {}
+
+    /**
+     * 呼叫 ext-materials-service 取主計總處 NA8101A1A。
+     * 回 {"growth":{year:val}, "gdpUsd":{year:val}}（JSON key 為 String，轉 Integer）。
+     * 抓取失敗 → 空 DgbasData，呼叫端全部 fallback IMF。
+     */
+    private DgbasData fetchDgbasProxy() {
+        try {
+            Map<String, Map<String, BigDecimal>> raw = priceServiceClient.get()
+                    .uri("/internal/macro/dgbas")
+                    .retrieve()
+                    .bodyToMono(new ParameterizedTypeReference<Map<String, Map<String, BigDecimal>>>() {})
+                    .block();
+            if (raw == null) return new DgbasData(Map.of(), Map.of());
+            return new DgbasData(toIntKey(raw.get("growth")), toIntKey(raw.get("gdpUsd")));
+        } catch (Exception e) {
+            log.warn("呼叫 /internal/macro/dgbas 失敗: {}", e.getMessage());
+            return new DgbasData(Map.of(), Map.of());
+        }
+    }
+
+    private Map<Integer, BigDecimal> toIntKey(Map<String, BigDecimal> m) {
+        if (m == null) return Map.of();
+        Map<Integer, BigDecimal> out = new java.util.LinkedHashMap<>();
+        m.forEach((k, v) -> {
+            try { out.put(Integer.parseInt(k), v); } catch (NumberFormatException ignore) {}
+        });
+        return out;
     }
 
     @Transactional

@@ -154,6 +154,12 @@ public class InternalPriceController {
         return macro.fetchImf(indicator, country, scale);
     }
 
+    /** 主計總處 DGBAS 國民所得常用資料（台灣官方）：經濟成長率 + 平均每人GDP(美元)，優先於 IMF。 */
+    @GetMapping("/macro/dgbas")
+    public Map<String, Map<Integer, java.math.BigDecimal>> dgbas() {
+        return macro.fetchDgbasNationalIncome();
+    }
+
     /** TWSE 加權指數年末收盤點位。 */
     @GetMapping("/macro/twse-year-end")
     public Map<String, Object> twseYearEnd(@RequestParam int year) {
