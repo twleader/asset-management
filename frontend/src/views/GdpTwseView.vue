@@ -69,6 +69,9 @@ const twse = ref([])
 const twGrowth = ref([])
 const krGrowth = ref([])
 const refreshing = ref(false)
+// 當年若無 12/31 收盤，由 BFF 以「最後一個交易日」回填；前端用此日期在 tooltip 標註「截至 YYYY-MM-DD」
+const currentYearLastTradingDate = ref(null)
+const currentYear = new Date().getFullYear()
 
 // 大盤日線（近 10 年）
 const dailyDates = ref([])
@@ -93,6 +96,7 @@ async function fetchData() {
     twse.value = (res.twseYearEndClose ?? []).map(num)
     twGrowth.value = (res.taiwanGdpGrowthRate ?? []).map(num)
     krGrowth.value = (res.koreaGdpGrowthRate ?? []).map(num)
+    currentYearLastTradingDate.value = res.currentYearLastTradingDate ?? null
   } catch {}
 }
 
@@ -242,10 +246,22 @@ const dailyChartOption = computed(() => ({
   ]
 }))
 
-// 人均 GDP 年增率（USD 基礎）：以前一年值反推 ((curr - prev) / prev × 100)；首個年無 prev → null
-const gdpYoy = computed(() => gdp.value.map((v, i) => {
-  if (i === 0 || v == null || gdp.value[i - 1] == null || gdp.value[i - 1] === 0) return null
-  return Number(((v - gdp.value[i - 1]) / gdp.value[i - 1] * 100).toFixed(2))
+// 成長率改用 IMF NGDP_RPCH（實質 GDP 成長率，twGrowth），不再以人均 GDP（USD）相減推算
+// ——USD 相減會被匯率波動扭曲（如 2022 台幣貶值會被算成負成長，但實質仍為 +2.7%）
+
+// 「台股大盤年末收盤」series 的 data：當年（尚未到 12/31）改用 object 型態套用空心圓 symbol，
+// 視覺上區隔出「截至最後交易日」的代替值，而非真正的 12/31 年末收盤
+const twseSeriesData = computed(() => twse.value.map((v, i) => {
+  const y = Number(years.value[i])
+  if (y === currentYear && currentYearLastTradingDate.value) {
+    return {
+      value: v,
+      symbol: 'emptyCircle',
+      symbolSize: 9,
+      itemStyle: { color: '#dc2626', borderColor: '#dc2626', borderWidth: 2 }
+    }
+  }
+  return v
 }))
 
 const chartOption = computed(() => ({
@@ -261,12 +277,18 @@ const chartOption = computed(() => ({
         else if (p.seriesName.includes('成長率')) txt = `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`
         else if (p.seriesName.includes('GDP')) txt = `US$ ${Number(v).toLocaleString()}`
         else txt = Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-        s += `${p.marker}${p.seriesName}: ${txt}<br/>`
+        let suffix = ''
+        if (p.seriesName === '台股大盤年末收盤'
+            && Number(year) === currentYear
+            && currentYearLastTradingDate.value) {
+          suffix = `<span style="color:#94a3b8">（截至 ${currentYearLastTradingDate.value}）</span>`
+        }
+        s += `${p.marker}${p.seriesName}: ${txt}${suffix}<br/>`
       })
       return s
     }
   },
-  legend: { data: ['人均 GDP (USD)', '台股大盤年末收盤', '人均 GDP 成長率'], top: 0 },
+  legend: { data: ['人均 GDP (USD)', '台股大盤年末收盤', '實質 GDP 成長率'], top: 0 },
   grid: { left: 130, right: 70, top: 50, bottom: 60 },
   xAxis: {
     type: 'category',
@@ -318,7 +340,7 @@ const chartOption = computed(() => ({
       name: '台股大盤年末收盤',
       type: 'line',
       yAxisIndex: 1,
-      data: twse.value,
+      data: twseSeriesData.value,
       smooth: true,
       symbol: 'circle',
       symbolSize: 6,
@@ -326,10 +348,10 @@ const chartOption = computed(() => ({
       itemStyle: { color: '#dc2626' }
     },
     {
-      name: '人均 GDP 成長率',
+      name: '實質 GDP 成長率',
       type: 'bar',
       yAxisIndex: 2,
-      data: gdpYoy.value,
+      data: twGrowth.value,
       barWidth: '40%',
       itemStyle: {
         color: p => (p.value == null ? '#94a3b8' : (p.value >= 0 ? '#10b98155' : '#ef444455')),

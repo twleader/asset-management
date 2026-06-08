@@ -1407,6 +1407,31 @@ NASDAQ info API 自 2026/04 起對 ETF 的 `keyStats` 為 null，VOO/VT 等 ETF 
           + el-radio-group 區間切換（1m / 3m / 6m / 1y / 2y / 5y）；切區間僅調整 dataZoom
           start/end，不重新打 API
         - `api/index.js` `bffApi.gdpTwse` 增 `getTwseDaily(years=10)` / `refreshTwseDaily(years=10)`
+- [ ] 53.11 「當年尚未到 12/31」以最後一個交易日大盤收盤代替：
+        - business 新增 `GET /api/twse-daily-index/latest`（`MacroHistoryController`，list 長度 0 或 1）
+        - BFF `GdpTwseBffController.get()` 並行多打 `/api/twse-daily-index/latest`；若 `twse_index_year_end_history`
+          無當年紀錄，且最新一筆 daily 落在當年，則把該 `closePoint` 補進 `twseYearEndClose` 末元素，
+          並回傳 `currentYearLastTradingDate`
+        - 前端 `GdpTwseView.vue`：當年點以空心圓繪製（`symbol:'emptyCircle', symbolSize:9`），
+          tooltip 對「台股大盤年末收盤」series 在當年加註「（截至 YYYY-MM-DD）」
+- [ ] 53.12 修正第一張圖成長率柱狀（bug fix，對齊 Requirement 18 / requirements.md 既有規範）：
+        - 原本第一張「GDP vs 台股大盤」圖的成長率柱狀誤用前端 `gdpYoy`（人均 GDP USD 相減推算），
+          會被匯率波動扭曲（如 2022 台幣貶值被算成負成長，實質為 +2.7%）
+        - 改用 BFF 既有回傳的 `taiwanGdpGrowthRate`（IMF `NGDP_RPCH` 實質 GDP 成長率，`twGrowth`），
+          與第二張「台韓比較」圖同一資料源；移除 `gdpYoy` computed
+        - series / legend 名稱由「人均 GDP 成長率」改為「實質 GDP 成長率」以正確反映指標意義
+- [ ] 53.13 台灣 GDP / 成長率改用主計總處（DGBAS）為主、IMF 為備援：
+        - ext-materials-service `MacroDataFetchClient.fetchDgbasNationalIncome()`：HttpClient 抓
+          主計總處 NA8101A1A XML（`macro.dgbas.na8101-url` 設定，預設 data.gov.tw 資料集 44218 下載點），
+          regex 解析「經濟成長率(%)」與「平均每人GDP(名目值，美元)」逐年原始值（用 contains 比對避全形標點），
+          回 `{growth, gdpUsd}`；失敗回空 map
+        - ext controller `InternalPriceController` 新增 `GET /internal/macro/dgbas`
+        - backend `MacroHistoryService.refreshGdpFromImf()`（TWN）改為合併：DGBAS 逐年優先、缺值 fallback IMF
+          （`NGDPDPC`/`NGDP_RPCH`），union 年份 upsert；回傳 `dgbasGdpYears` / `dgbasGrowthYears` 統計
+        - 韓國 `refreshKoreaGdpFromImf()` 不變（DGBAS 無韓國資料）
+        - DB schema 不變（`taiwan_gdp_per_capita_history` 既有欄位，存合併後單一值）；前端與 BFF 不變
+        - 背景：DGBAS 為台灣官方權威來源（成長率精度 2 位小數、人均 GDP 與 IMF 幾近一致），
+          且涵蓋 1951 起完整；唯無未來預測年（2026+）與韓國，故保留 IMF 補位
 
 ### Task 54: 信託基金最新淨值自動估值
 

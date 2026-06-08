@@ -761,6 +761,8 @@ GET    /api/twse-year-end-index                # 全部年度大盤年末收盤�
 GET    /api/twse-year-end-index?since=1996
 GET    /api/twse-daily-index?from=YYYY-MM-DD&to=YYYY-MM-DD
                                                # 大盤每日收盤（10 年回補後使用）
+GET    /api/twse-daily-index/latest            # 最新一個交易日（list 長度 0 或 1）
+                                               # 供 BFF 在「當年尚未到 12/31」時回填當年年末收盤
 POST   /api/twse-daily-index/refresh?years=10  # 逐月呼叫 TWSE FMTQIK 抓所有交易日 upsert
 
 GET    /api/bff/gdp-twse?years=30              # 前端 view 專用，回傳近 N 年彙整資料
@@ -771,11 +773,13 @@ POST   /api/bff/gdp-twse/refresh-twse-daily?years=10  # 觸發日線 10 年回�
 回傳格式（BFF `/api/bff/gdp-twse`）：
 ```json
 {
-  "years": [1996, 1997, ..., 2025],
+  "years": [1996, 1997, ..., 2025, 2026],
   "gdpPerCapitaUsd": [13571, 13888, ...],
-  "twseYearEndClose": [6933.94, 8187.27, ...]
+  "twseYearEndClose": [6933.94, 8187.27, ..., 28912.45],
+  "currentYearLastTradingDate": "2026-06-06"
 }
 ```
+（`currentYearLastTradingDate` 非 null 時，代表 `twseYearEndClose` 末元素是「當年最後一個交易日收盤」而非真正年末收盤；前端據此把該點以空心圓繪製、tooltip 加註「截至 YYYY-MM-DD」。當年若年末紀錄已存在或日線無當年資料，此欄位為 null）
 
 回傳格式（BFF `/api/bff/gdp-twse/twse-daily`）：
 ```json
@@ -789,9 +793,23 @@ POST   /api/bff/gdp-twse/refresh-twse-daily?years=10  # 觸發日線 10 年回�
 ```
 （`null` 代表移動平均尚未滿視窗的早期資料點）
 
+台灣人均 GDP / 實質成長率資料來源（**DGBAS 優先、IMF 備援**）：
+- ext-materials-service `MacroDataFetchClient.fetchDgbasNationalIncome()` 抓主計總處 NA8101A1A
+  XML（表號＝國民所得統計常用資料-年；URL 由 `macro.dgbas.na8101-url` 設定，預設指向 data.gov.tw
+  資料集 44218 列出之下載點），解析「經濟成長率(%)」與「平均每人GDP(名目值，美元)」逐年原始值，
+  經 `/internal/macro/dgbas` 回 `{growth:{year:val}, gdpUsd:{year:val}}`
+- backend `MacroHistoryService.refreshGdpFromImf()`（TWN）合併：以 DGBAS 為主，逐年缺值才用
+  IMF `NGDPDPC/NGDP_RPCH` 補（DGBAS 僅至最新實際年度、無 2026+ 預測，預測年由 IMF 提供）；
+  DB 存單一最終值，不分來源欄位（符合正規化）。回傳統計 `dgbasGdpYears` / `dgbasGrowthYears`
+- 韓國無 DGBAS 對應來源，`refreshKoreaGdpFromImf()` 維持純 IMF
+- DGBAS 抓取失敗時 `/internal/macro/dgbas` 回空 map → 全部年份 fallback IMF（安全降級）
+- 憑證：ws.dgbas.gov.tw 由 TWCA 簽發但未送中繼憑證，容器 truststore 無法建鏈，故用
+  `curl -k` shell-out 取得（與 `fetchImf` 同走 curl 避開 Java TLS）；抓的是公開統計、且有 IMF
+  fallback，故 insecure 取捨可接受
+
 對應資料表：
-- `taiwan_gdp_per_capita_history` (year PK, gdp_usd, real_gdp_growth_rate)
-- `korea_gdp_per_capita_history`  (year PK, gdp_usd, real_gdp_growth_rate)
+- `taiwan_gdp_per_capita_history` (year PK, gdp_usd, real_gdp_growth_rate) — 值＝DGBAS 優先、IMF 備援
+- `korea_gdp_per_capita_history`  (year PK, gdp_usd, real_gdp_growth_rate) — 值＝IMF
 - `twse_index_year_end_history`   (year PK, close_point NUMERIC(12,2))
 - `twse_index_daily_history`      (trading_date PK, open_point / high_point / low_point / close_point 皆 NUMERIC(12,2))
   - OHLC 同時供 Requirement 18 大盤日線圖、Requirement 14 觀察清單 0000 KD 計算使用

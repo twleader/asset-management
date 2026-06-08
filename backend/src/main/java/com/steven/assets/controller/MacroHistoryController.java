@@ -97,4 +97,13 @@ public class MacroHistoryController {
             @RequestParam(defaultValue = "10") int years) {
         return macroHistoryService.refreshTwseDaily(years);
     }
+
+    /**
+     * 最新一個交易日的大盤點位（list 長度 0 或 1）。
+     * 供 BFF 在「當年尚未到 12/31」時，把最後一個交易日的 close 當作年末收盤代替值。
+     */
+    @GetMapping("/twse-daily-index/latest")
+    public List<TwseIndexDailyHistory> getTwseDailyLatest() {
+        return twseDailyRepo.findTopNByOrderByTradingDateDesc(1);
+    }
 }

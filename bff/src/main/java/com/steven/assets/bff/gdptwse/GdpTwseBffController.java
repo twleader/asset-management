@@ -48,13 +48,33 @@ public class GdpTwseBffController {
         Mono<List<Map<String, Object>>> gdp = fetchSeries("/api/taiwan-gdp", since);
         Mono<List<Map<String, Object>>> kor = fetchSeries("/api/korea-gdp", since);
         Mono<List<Map<String, Object>>> twse = fetchSeries("/api/twse-year-end-index", since);
+        // 當年（尚未到 12/31）以「最後一個交易日大盤收盤」代替年末收盤
+        Mono<List<Map<String, Object>>> twseLatest = businessServicesClient.get()
+                .uri("/api/twse-daily-index/latest")
+                .retrieve().bodyToMono(LIST_MAP)
+                .onErrorReturn(Collections.emptyList());
 
-        return Mono.zip(gdp, kor, twse).map(t -> {
+        return Mono.zip(gdp, kor, twse, twseLatest).map(t -> {
             TreeMap<Integer, BigDecimal> twGdpAll = toMap(t.getT1(), "gdpUsd");
             TreeMap<Integer, BigDecimal> krGdpAll = toMap(t.getT2(), "gdpUsd");
             TreeMap<Integer, BigDecimal> twGrowthAll = toMap(t.getT1(), "realGdpGrowthRate");
             TreeMap<Integer, BigDecimal> krGrowthAll = toMap(t.getT2(), "realGdpGrowthRate");
             TreeMap<Integer, BigDecimal> twseClose = toMap(t.getT3(), "closePoint");
+
+            // 當年若無 12/31 收盤，從最近一筆 daily index（必須落在當年）回填
+            String currentYearLastTradingDate = null;
+            if (!twseClose.containsKey(currentYear) && !t.getT4().isEmpty()) {
+                Map<String, Object> latest = t.getT4().get(0);
+                Object d = latest.get("tradingDate");
+                Object c = latest.get("closePoint");
+                if (d != null && c != null) {
+                    String ds = d.toString();
+                    if (ds.length() >= 4 && Integer.parseInt(ds.substring(0, 4)) == currentYear) {
+                        twseClose.put(currentYear, new BigDecimal(c.toString()));
+                        currentYearLastTradingDate = ds;
+                    }
+                }
+            }
 
             // X 軸：since..currentYear 取所有 series 的聯集
             TreeMap<Integer, Boolean> yset = new TreeMap<>();
@@ -83,6 +103,7 @@ public class GdpTwseBffController {
             body.put("twseYearEndClose", twseList);
             body.put("taiwanGdpGrowthRate", twGrowth);
             body.put("koreaGdpGrowthRate", krGrowth);
+            body.put("currentYearLastTradingDate", currentYearLastTradingDate);
             return ResponseEntity.ok(body);
         });
     }
