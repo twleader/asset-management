@@ -2504,4 +2504,26 @@ Task 87 以 Yahoo `interval=5m` 作為「當日」走勢資料源，但 Yahoo �
 - [ ] 88.11 Docker 重 build + recreate：`backend bff external-materials-service frontend`
 - [ ] 88.12 手動驗證：(a) `docker exec asset-redis redis-cli LRANGE 'price:ticks:台股:0050:2026-06-05' 0 -1` 確認 LIST 存在且有資料；(b) 直接 curl `/api/bff/stock-analysis/intraday-ticks?code=0050&market=台股` 看走勢資料回傳；(c) 等下個 polling 週期，LIST 多一筆 tick；(d) 開啟股票分析切「當日」確認走勢與 Task 87 行為一致
 
+### Task 89: 走勢圖「成本均價」改用 BFF avgCostOriginal（修跨頁買入均價不一致）
+
+對應 Requirements: Requirement 13（股票走勢圖延伸資訊）
+
+#### 問題
+
+Dashboard 美股表格「買入均價(USD)」（如 SGOV 100.6707）與雙擊開啟的走勢圖「成本均價」（100.19）對不上，且走勢圖值偏低。
+根因：兩者算法不同口徑 ——
+- 表格 `row.avgCostOriginal` = `investmentCostOriginal ÷ shares`，`investmentCostOriginal` 由 `SnapshotEnricher.enrichInvestmentCostOriginal` 用**交易當下匯率 `transactionExchangeRate`** 還原原幣（鎖定買入時刻，買進後固定）。
+- 走勢圖 `StockAnalysisDialog.vue` 卻自行 `costTwd = investmentCost ÷ shares`，再 `cost = costTwd ÷ props.usdRate`，**用的是今日即時匯率 `detail.usdExchangeRate`**（每日浮動）。
+
+今日台幣較買入時貶值（匯率變大），固定台幣成本除以較大匯率 → USD 數字偏小，故走勢圖 100.19 < 表格 100.6707。
+此違反 `design.md` 已明訂的「前端買入均價直接使用 `avgCostOriginal` 同欄位」與 BFF「同義欄位、同一來源」原則。
+（註：走勢圖此線實際只在「從 Dashboard 列雙擊」時繪製 —— 唯一帶有 `shares + investmentCost + avgCostOriginal` 的入口；WatchStock / StockAlert / RealizedGain 只傳 `{stockCode, stockName, market}`，SnapshotForm grouped row 頂層無 `shares/investmentCost`，皆不畫此線。）
+
+#### Steps:
+
+- [x] 89.1 frontend `StockAnalysisDialog.vue` `chartOption`：成本均價改為一律優先取 `s.avgCostOriginal`（其次 `s.investmentCostOriginal ÷ shares`），與表格買入均價同義同源；移除「`investmentCost ÷ shares ÷ 今日 usdRate`」反推為主路徑。僅在完全無原幣成本欄位時 fallback（台股 `investmentCost` 即原幣 TWD；美/英股才用匯率反推），確保未帶 BFF 欄位的呼叫端不致畫出台幣值到 USD 軸
+- [x] 89.2 spec：`requirements.md` Requirement 13 加驗收條件；`design.md` BFF Enrichment 註記補「成本均價／買入均價一律用 `avgCostOriginal`，禁止用今日匯率反推」
+- [ ] 89.3 Docker 重 build + recreate：`frontend`
+- [ ] 89.4 手動驗證：Dashboard 美股雙擊 SGOV → 走勢圖「成本均價」應顯示與表格「買入均價(USD)」相同的 100.6707（不再是 100.19）；切換不同持股再次確認兩處數字一致
+
 

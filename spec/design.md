@@ -642,7 +642,7 @@ GET    /api/bff/dashboard/summary                  # 並行聚合儀表板所需
 GET    /api/bff/dashboard/realtime                  # 2 分鐘輪詢用：最新 prices + market-status + live-assets，不重抓 summary
 ```
 
-> BFF Enrichment：`latestSnapshotDetail.stocks[]` 由 BFF 補上 `investmentCostOriginal`（美股 USD、台股 TWD），legacy 美股 `currency='TWD'` 記錄會用 `transactionExchangeRate` 換回 USD，前端買入均價直接使用此欄位以避免各頁面重複正規化。
+> BFF Enrichment：`latestSnapshotDetail.stocks[]` 由 BFF 補上 `investmentCostOriginal`（美股 USD、台股 TWD），legacy 美股 `currency='TWD'` 記錄會用 `transactionExchangeRate` 換回 USD，前端買入均價直接使用此欄位以避免各頁面重複正規化。`SnapshotEnricher.buildMergedStocks` 進一步算出 `avgCostOriginal = investmentCostOriginal ÷ shares`（4 位小數）。**凡顯示「買入均價／成本均價」一律使用此 `avgCostOriginal`**：Dashboard 表格欄位、以及從 Dashboard 列雙擊開啟的 `StockAnalysisDialog` 走勢圖「成本均價」水平參考線都讀同一欄位（同義同源）。禁止前端用「台幣 `investmentCost` ÷ 今日即時匯率 `usdExchangeRate`」反推買入均價 —— 今日匯率每日浮動，會與表格鎖定交易匯率的買入均價對不上。
 
 > 儀表板「股票持股」股價顯示規則（與「觀察股票」共用同一 Redis live cache，由 `external-materials-service` 兩支獨立 cron 各自每 2 分鐘更新）：
 > - 規則 **per-market 判斷**：對每一檔股票，依其市場各自決定是否顯示即時價。

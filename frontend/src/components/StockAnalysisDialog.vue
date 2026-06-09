@@ -421,10 +421,20 @@ const chartOption = computed(() => {
     xLabelFormatter = v => v.substring(0, 7)
   }
 
-  // 成本均價：若提供 shares + investmentCost 才畫
-  const costTwd = s.shares > 0 && s.investmentCost ? s.investmentCost / s.shares : null
-  const usd = props.usdRate ? Number(props.usdRate) : null
-  const cost = costTwd != null && (s.market === '美股' || s.market === '英股') && usd ? costTwd / usd : costTwd
+  // 成本均價 = 買入均價（原幣，交易當下匯率鎖定）。一律取 BFF 已算好的 avgCostOriginal，
+  // 與 Dashboard 表格「買入均價」同義同源；禁止用「台幣成本 ÷ 今日即時匯率」反推（今日匯率每日
+  // 浮動，會與表格對不上且非真實買入成本）。詳見 spec/design.md BFF Enrichment 註記。
+  let cost = null
+  if (s.avgCostOriginal != null) {
+    cost = Number(s.avgCostOriginal)
+  } else if (s.shares > 0 && s.investmentCostOriginal != null) {
+    cost = Number(s.investmentCostOriginal) / s.shares
+  } else if (s.shares > 0 && s.investmentCost) {
+    // fallback（呼叫端未帶原幣成本欄位時）：台股 investmentCost 即原幣 TWD；美/英股才用匯率反推
+    const costTwd = s.investmentCost / s.shares
+    const usd = props.usdRate ? Number(props.usdRate) : null
+    cost = (s.market === '美股' || s.market === '英股') && usd ? costTwd / usd : costTwd
+  }
 
   return {
     backgroundColor: '#fff',
