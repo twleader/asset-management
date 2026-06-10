@@ -344,24 +344,22 @@
 
 ---
 
-### Requirement 18: 台灣人均 GDP 與台股大盤年度走勢比較
+### Requirement 18: 股市分析（指數日線/當日 + 台韓人均 GDP 比較）
 
-**User Story:** 作為使用者，我希望能在同一張圖上比較近 30 年「台灣人均 GDP」與「台股大盤 12/31 收盤點位」的年度變化，以理解總體經濟成長與股市表現的關聯。
+**User Story:** 作為使用者，我希望在「股市分析」頁查看台股大盤與美股四大指數的近 10 年日線（含當日分時），並比較近 30 年台韓人均 GDP 與其實質成長率，以理解股市表現與總體經濟。
+
+> 註：原「台灣人均 GDP vs 台股大盤年末收盤」雙 Y 軸圖已於 Task 97 移除（見下方刪除線條目）。
 
 **Acceptance Criteria:**
 
-- [ ] 左側選單新增「GDP + 台美股大盤」項目，路徑 `/gdp-twse`
-- [ ] 頁面以雙 Y 軸折線圖呈現：左 Y 軸為人均 GDP（USD），右 Y 軸為台股大盤年末收盤點位
+- [ ] 左側選單新增「股市分析」項目，路徑 `/gdp-twse`
+- [x] ~~頁面以雙 Y 軸折線圖呈現「台灣人均 GDP vs 台股大盤年末收盤」~~ **（Task 97 移除）**：此卡連同 `/api/twse-year-end-index`(GET/refresh)、`/api/twse-daily-index/latest`、`/internal/macro/twse-year-end`、`MacroHistoryService.refreshTwseYearEnd`、`MacroDataFetchClient.fetchTwseDecemberClose`、`TwseIndexYearEndHistory` entity/repo 一併移除；BFF `get` 不再回 `twseYearEndClose`/`currentYearLastTradingDate`、`refresh` 不再觸發大盤年末/日線。`twse_index_year_end_history` 資料表保留（不刪資料）
 - [ ] 預設顯示近 30 年（含當年度若已有資料）
-- [ ] 兩種年度資料各自存於資料庫獨立資料表（`taiwan_gdp_per_capita_history`、`twse_index_year_end_history`），由 Liquibase changelog seed
-- [ ] 後端提供獨立資源端點 `/api/taiwan-gdp` 與 `/api/twse-year-end-index`
-- [ ] BFF 端點 `/api/bff/gdp-twse`，前端只呼叫 BFF
-- [ ] 滑鼠移到任一年份時，tooltip 同時顯示該年人均 GDP 與大盤收盤點位
-- [ ] 「回補 GDP」按鈕回補台灣人均 GDP 與實質成長率，採**主計總處（DGBAS）優先、IMF 備援**：以 DGBAS NA8101A1A（國民所得統計常用資料-年，1951 起官方實際值）為主，DGBAS 缺的年份（未來預測年 2026+、或抓取失敗）才用 IMF DataMapper（`NGDPDPC/TWN` 人均 GDP、`NGDP_RPCH/TWN` 實質成長率）補；合併後 upsert 至 `taiwan_gdp_per_capita_history`（DB 存單一最終值，不分來源欄位）
-- [ ] 「回補大盤」按鈕呼叫 TWSE FMTQIK 月報，逐年抓 12 月最後一筆收盤 upsert 至 DB
+- [ ] 台/韓年度 GDP 各自存於 `taiwan_gdp_per_capita_history`、`korea_gdp_per_capita_history`，由 Liquibase changelog seed
+- [ ] 後端提供獨立資源端點 `/api/taiwan-gdp`、`/api/korea-gdp`；BFF 端點 `/api/bff/gdp-twse`（get 回 TW/KR 人均 GDP + 實質成長率），前端只呼叫 BFF
+- [ ] 「回補 GDP（IMF）」按鈕（位於「台韓人均 GDP 比較」卡）回補 TWN + KOR 人均 GDP 與實質成長率，台灣採**主計總處（DGBAS）優先、IMF 備援**（DGBAS NA8101A1A 為主、缺年份用 IMF `NGDPDPC/NGDP_RPCH`），韓國純 IMF；合併後 upsert（DB 存單一最終值）
 - [ ] BFF 在組裝 X 軸年份時過濾 `> 當年`（IMF 含未來預測，不顯示）
-- [ ] 當年（尚未到 12/31）若 `twse_index_year_end_history` 無紀錄，BFF 以「最後一個交易日大盤收盤」（取自 `twse_index_daily_history` 最新一筆）回填當年值；前端在該點用空心圓區隔、tooltip 標註「截至 YYYY-MM-DD」
-- [ ] 同頁下方加第二張「台韓人均 GDP 比較」圖：左 Y 軸為 TW/KR 人均 GDP（折線），右 Y 軸為各自年增率（柱狀）
+- [ ] 「台韓人均 GDP 比較」圖：左 Y 軸為 TW/KR 人均 GDP（折線），右 Y 軸為各自年增率（柱狀）
 - [ ] 韓國資料同樣由 IMF DataMapper API（`NGDPDPC/KOR`）回補，存於 `korea_gdp_per_capita_history`（DGBAS 無韓國資料，故韓國維持純 IMF）
 - [ ] 「回補資料」按鈕同步觸發 TWN + KOR 兩國 GDP 回補
 - [ ] 經濟成長率取**實質 GDP 成長率**（台灣優先 DGBAS NA8101A1A「經濟成長率(%)」、缺則 IMF `NGDP_RPCH`；韓國 IMF `NGDP_RPCH`），不再由前後端用人均 GDP（USD）相減推算（因含匯率波動會失真）；存於 `*_gdp_per_capita_history.real_gdp_growth_rate`。兩張圖的成長率柱狀皆讀此欄位（同一資料源）
@@ -381,6 +379,12 @@
   - business service 新增 `GET /api/us-daily-index?code=&from=&to=` 與 `POST /api/us-daily-index/refresh?code=`（單一指數；Yahoo `range=10y` 一次呼叫即取得近 10 年，不需逐月迴圈）
   - BFF 將原 `.../twse-daily`、`.../refresh-twse-daily` **一般化**為 `GET /api/bff/gdp-twse/index-daily?market=&years=10` 與 `POST /api/bff/gdp-twse/refresh-index-daily?market=&years=10`（`market=TWSE` 走台股大盤、其餘走對應美股指數）；回傳格式（dates/closes/ma20/ma60/ma240）與 MA 計算對兩市場完全相同，由同一支 BFF 服務（同義欄位同一來源），確保版面一致
   - 「回補日線（10 年）」按鈕回補「當前選取」的指數
+- [ ] 區間切換鈕新增「**當日**」（置於最前）：切到當日顯示該指數「盤中即時 / 盤後最後交易日」的分時走勢線（5 分 K 收盤連線，x 軸為該市場當地時區 HH:mm）；月線/季線/年線改畫成**水平參考線**（取日線最新 MA20/60/240 值，與其他期間同口徑，比照股票分析「當日」Task 87）
+  - 當日資料即時向 **Yahoo v8 chart**（`interval=5m&range=5d`，取最新交易日的 bar）抓取、不寫 DB（指數不在 Redis tick 輪詢名單，故採即時抓取而非 Task 88 兩階段 tick store）。盤中回最新交易日當天部分 bar＝即時、盤後回最後完整交易日，自動滿足「盤中即時／盤後最後交易日」
+  - market→Yahoo symbol：TWSE→`^TWII`、DJI→`^DJI`、SPX→`^GSPC`、IXIC→`^IXIC`、SOX→`^SOX`
+  - 當日模式 Y 軸**鎖定當日價格區間**（min/max 取分時收盤上下界 +10% padding），不可用 `scale:true` 全 series 自動範圍——否則遠離當日價位的均線水平線（如強趨勢指數的年線在下、月線在上）會把 Y 軸跨距撐到數千點，當日數百點的起伏被壓成平線。均線水平線落在區間外時由 series clip 裁切，數值仍保留在 legend
+  - X 軸固定延伸到**收盤時間**而非「現在時間」：ext-materials 補滿整個交易時段的 5 分格（美股 09:30–16:00 ET、台股 09:00–13:30），盤中尚未到的時段 `close` 留 null（前端畫成空白、線只到最新一筆）。Yahoo 最後一筆「現價」bar（非整 5 分，如 14:16）floor 對齊到 5 分格
+  - business 新增 `GET /api/index-intraday?market=`、BFF 新增 `GET /api/bff/gdp-twse/index-intraday?market=`（回 `tradingDate` + `times`(HH:mm) + `closes`）；ext-materials `MacroDataFetchClient.fetchIndexIntraday(market)` 經 `/internal/macro/index-intraday` 提供
 
 ---
 

@@ -3,12 +3,10 @@ package com.steven.assets.service;
 import com.steven.assets.model.KoreaGdpPerCapitaHistory;
 import com.steven.assets.model.TaiwanGdpPerCapitaHistory;
 import com.steven.assets.model.TwseIndexDailyHistory;
-import com.steven.assets.model.TwseIndexYearEndHistory;
 import com.steven.assets.model.UsIndexDailyHistory;
 import com.steven.assets.repository.KoreaGdpPerCapitaHistoryRepository;
 import com.steven.assets.repository.TaiwanGdpPerCapitaHistoryRepository;
 import com.steven.assets.repository.TwseIndexDailyHistoryRepository;
-import com.steven.assets.repository.TwseIndexYearEndHistoryRepository;
 import com.steven.assets.repository.UsIndexDailyHistoryRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -41,7 +39,6 @@ public class MacroHistoryService {
 
     private final TaiwanGdpPerCapitaHistoryRepository gdpRepo;
     private final KoreaGdpPerCapitaHistoryRepository koreaGdpRepo;
-    private final TwseIndexYearEndHistoryRepository twseRepo;
     private final TwseIndexDailyHistoryRepository twseDailyRepo;
     private final UsIndexDailyHistoryRepository usDailyRepo;
     private final WebClient priceServiceClient;
@@ -49,13 +46,11 @@ public class MacroHistoryService {
     public MacroHistoryService(
             TaiwanGdpPerCapitaHistoryRepository gdpRepo,
             KoreaGdpPerCapitaHistoryRepository koreaGdpRepo,
-            TwseIndexYearEndHistoryRepository twseRepo,
             TwseIndexDailyHistoryRepository twseDailyRepo,
             UsIndexDailyHistoryRepository usDailyRepo,
             @Value("${external-materials.base-url:http://external-materials-service:8080}") String externalUrl) {
         this.gdpRepo = gdpRepo;
         this.koreaGdpRepo = koreaGdpRepo;
-        this.twseRepo = twseRepo;
         this.twseDailyRepo = twseDailyRepo;
         this.usDailyRepo = usDailyRepo;
         this.priceServiceClient = WebClient.builder().baseUrl(externalUrl).build();
@@ -183,49 +178,6 @@ public class MacroHistoryService {
     }
 
     @Transactional
-    public Map<String, Object> refreshTwseYearEnd(int from, int to) {
-        int upserted = 0;
-        int skipped = 0;
-        for (int year = from; year <= to; year++) {
-            BigDecimal close = fetchTwseDecemberCloseProxy(year);
-            if (close == null) { skipped++; continue; }
-            final int y = year;
-            TwseIndexYearEndHistory row = twseRepo.findById(year)
-                    .orElseGet(() -> {
-                        TwseIndexYearEndHistory r = new TwseIndexYearEndHistory();
-                        r.setYear(y);
-                        return r;
-                    });
-            row.setClosePoint(close);
-            twseRepo.save(row);
-            upserted++;
-            try { Thread.sleep(800); } catch (InterruptedException ignore) {}
-        }
-        log.info("TWSE year-end refresh {}~{}: upserted={}, skipped={}", from, to, upserted, skipped);
-        return Map.of("upserted", upserted, "skipped", skipped, "from", from, "to", to);
-    }
-
-    private BigDecimal fetchTwseDecemberCloseProxy(int year) {
-        try {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> resp = priceServiceClient.get()
-                    .uri(uriBuilder -> uriBuilder.path("/internal/macro/twse-year-end")
-                            .queryParam("year", year).build())
-                    .retrieve()
-                    .bodyToMono(Map.class)
-                    .block();
-            if (resp == null) return null;
-            Object cp = resp.get("closePoint");
-            if (cp == null) return null;
-            if (cp instanceof Number n) return BigDecimal.valueOf(n.doubleValue()).setScale(2, java.math.RoundingMode.HALF_UP);
-            return new BigDecimal(cp.toString());
-        } catch (Exception e) {
-            log.warn("呼叫 /internal/macro/twse-year-end {} 失敗: {}", year, e.getMessage());
-            return null;
-        }
-    }
-
-    @Transactional
     public Map<String, Object> refreshTwseDaily(int years) {
         LocalDate today = LocalDate.now();
         YearMonth start = YearMonth.from(today).minusYears(years).plusMonths(1);
@@ -314,6 +266,28 @@ public class MacroHistoryService {
             return out;
         } catch (Exception e) {
             log.warn("呼叫 /internal/macro/us-index {} 失敗: {}", code, e.getMessage());
+            return List.of();
+        }
+    }
+
+    /** 指數「當日」分時一點：time 為當地時區 ISO LocalDateTime、close 為 5 分 K 收盤。 */
+    public record IntradayPoint(String time, BigDecimal close) {}
+
+    /**
+     * 指數「當日」分時走勢 proxy（transient，不寫 DB）。
+     * market ∈ {TWSE,DJI,SPX,IXIC,SOX}；回最新交易日整天的 5 分 K 收盤序列。
+     */
+    public List<IntradayPoint> fetchIndexIntraday(String market) {
+        try {
+            IntradayPoint[] arr = priceServiceClient.get()
+                    .uri(uriBuilder -> uriBuilder.path("/internal/macro/index-intraday")
+                            .queryParam("market", market).build())
+                    .retrieve()
+                    .bodyToMono(IntradayPoint[].class)
+                    .block();
+            return arr == null ? List.of() : java.util.Arrays.asList(arr);
+        } catch (Exception e) {
+            log.warn("呼叫 /internal/macro/index-intraday {} 失敗: {}", market, e.getMessage());
             return List.of();
         }
     }

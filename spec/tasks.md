@@ -2641,3 +2641,42 @@ digest / 補發信原本每個觸發（trigger）印一個區塊，同一股票�
 - [ ] 95.8 Docker 重 build + recreate（backend / external-materials-service / bff / frontend）後驗證：台股維持原樣；切到四個美股指數各自顯示近 10 年日線 + 三均線；按「回補日線」對美股指數成功 upsert
 
 
+### Task 96: 指數日線圖新增「當日」分時走勢（盤中即時 / 盤後最後交易日）
+
+對應 Requirements: Requirement 18（[requirements.md:368-390](spec/requirements.md)）
+
+#### 背景
+
+承 Task 95，第三張卡的指數圖區間鈕最前面再加「當日」：切到當日顯示該指數的分時走勢線。比照股票分析 Task 87/88 版型（x 軸 HH:mm、收盤單線、月/季/年線改水平參考線取日線最新值）。差異：指數（大盤＋美股四大）不在 Redis tick 輪詢名單，故不走 Task 88 的 tick store，改即時向 Yahoo v8 chart（`interval=5m&range=5d`，取最新交易日）抓取、transient 不寫 DB——盤中回今日部分 bar＝即時、盤後回最後完整交易日，自動滿足需求。
+
+#### Steps:
+
+- [ ] 96.1 ext-materials `MacroDataFetchClient.fetchIndexIntraday(market)`：market→Yahoo symbol（含 TWSE→^TWII），curl 取 5m/5d，依 exchangeTimezoneName 轉當地時區、group by 當地日期取最新交易日，回 `List<IndexIntradayPoint(time ISO, close)>`；`InternalPriceController` 加 `GET /internal/macro/index-intraday?market=`
+- [ ] 96.2 backend `MacroHistoryService.fetchIndexIntraday(market)` proxy + 公開 record `IntradayPoint(time, close)`；`MacroHistoryController` 加 `GET /api/index-intraday?market=`
+- [ ] 96.3 BFF `GdpTwseBffController` 加 `GET /api/bff/gdp-twse/index-intraday?market=`：回 `tradingDate` + `times`(HH:mm) + `closes`
+- [ ] 96.4 frontend `api/index.js` 加 `gdpTwse.getIndexIntraday(market)`
+- [ ] 96.5 frontend `GdpTwseView.vue`：區間鈕最前加「當日」；isIntraday 時 x 軸 HH:mm、收盤＝分時 closes、月/季/年線＝水平線（取日線最新 MA）、不用 dataZoom；標題改「{指數} 當日走勢（YYYY-MM-DD）」；切當日 / 切市場時重抓分時
+- [ ] 96.7 修正當日走勢被壓平：Y 軸鎖定當日價格區間（分時收盤 min/max +10% padding），不用 `scale:true`（否則遠離當日價位的均線水平線把跨距撐成數千點，當日數百點起伏變平線）；均線水平線落區間外由 clip 裁切、數值仍留 legend
+- [ ] 96.8 X 軸延伸到收盤時間（非現在時間）：ext-materials `fetchIndexIntraday` 補滿交易時段完整 5 分格（美股 09:30–16:00 ET、台股 09:00–13:30），盤中未到時段 close 留 null；最後一筆現價 bar floor 對齊 5 分格；BFF 保留 null close（時間照常輸出）
+
+
+### Task 97: 移除「台灣人均 GDP vs 台股大盤年末收盤」卡 + 清後端死碼
+
+對應 Requirements: Requirement 18（[requirements.md:347-368](spec/requirements.md)）
+
+#### 背景
+
+頁面改名「股市分析」後，使用者要求移除第②張「台灣人均 GDP vs 台股大盤年末收盤（近 30 年）」雙 Y 軸圖。保留第①指數圖（日線/當日）與第③「台韓人均 GDP 比較」。盤點確認年末相關端點/entity 只被此鏈使用（無 dashboard 等其他消費者），故一併清除死碼；**DB 資料表 `twse_index_year_end_history` 保留不刪**（非破壞性）。第②卡的「回補資料」鈕同時餵第③卡 GDP 資料，故改為「回補 GDP（IMF）」鈕移至第③卡。
+
+#### Steps:
+
+- [x] 97.1 frontend `GdpTwseView.vue`：移除第②卡 template + `chartOption`/`twseSeriesData` computed + `twse`/`currentYearLastTradingDate`/`currentYear` state；`fetchData` 去掉 twse/年末欄位；「回補 GDP（IMF）」鈕移到第③卡、`onRefresh` 簡化為只回補 TWN+KOR GDP
+- [x] 97.2 BFF `GdpTwseBffController`：`get` 移除 twse-year-end-index + twse-daily-index/latest 取值與 `twseYearEndClose`/`currentYearLastTradingDate` 欄位（Mono.zip 4→2）；`refresh` 移除大盤年末 + 大盤日線觸發（只留 TWN+KOR GDP）
+- [x] 97.3 business `MacroHistoryController`：移除 `GET /api/twse-year-end-index`、`POST /api/twse-year-end-index/refresh`、`GET /api/twse-daily-index/latest` + `twseRepo` 欄位/import
+- [x] 97.4 business `MacroHistoryService`：移除 `refreshTwseYearEnd` + `fetchTwseDecemberCloseProxy` + `twseRepo` 欄位/建構子參數/import
+- [x] 97.5 ext-materials：移除 `InternalPriceController` `GET /internal/macro/twse-year-end` + `MacroDataFetchClient.fetchTwseDecemberClose`（`fetchTwseMonthlyDaily` 仍供日線回補，保留）
+- [x] 97.6 移除 `TwseIndexYearEndHistory` entity + repository（`twse_index_year_end_history` 表保留不刪）
+- [ ] 97.7 Docker 重 build + recreate（frontend / bff / business-services / external-materials-service）後驗證：股市分析頁只剩指數圖 + 台韓 GDP 比較；第②卡消失；台韓 GDP「回補 GDP（IMF）」可運作；其餘頁面（dashboard 等）不受影響
+- [ ] 96.6 Docker 重 build + recreate（external-materials-service / backend / bff / frontend）後驗證：台股大盤切「當日」顯示分時（盤後為最後交易日、末點＝當日收盤）；美股指數盤中顯示即時分時；月/季/年線為水平線
+
+

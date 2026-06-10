@@ -142,7 +142,9 @@ export const bffApi = {
     getIndexDaily: (market = 'TWSE', years = 10) =>
       api.get('/bff/gdp-twse/index-daily', { params: { market, years } }),
     refreshIndexDaily: (market = 'TWSE', years = 10) =>
-      api.post('/bff/gdp-twse/refresh-index-daily', null, { params: { market, years }, timeout: 180000 })
+      api.post('/bff/gdp-twse/refresh-index-daily', null, { params: { market, years }, timeout: 180000 }),
+    getIndexIntraday: (market = 'TWSE') =>
+      api.get('/bff/gdp-twse/index-intraday', { params: { market } })
   },
 
   // TradingCalendar

@@ -65,7 +65,7 @@ const router = createRouter({
       path: '/gdp-twse',
       name: 'GdpTwse',
       component: () => import('@/views/GdpTwseView.vue'),
-      meta: { title: 'GDP + 台美股大盤', icon: 'TrendCharts' }
+      meta: { title: '股市分析', icon: 'TrendCharts' }
     },
     {
       path: '/stocks',
