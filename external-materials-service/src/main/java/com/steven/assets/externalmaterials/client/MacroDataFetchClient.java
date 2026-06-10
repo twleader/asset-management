@@ -213,4 +213,86 @@ public class MacroDataFetchClient {
         try { return new BigDecimal(s).setScale(2, RoundingMode.HALF_UP); }
         catch (NumberFormatException e) { return null; }
     }
+
+    /** 美股四大指數代碼 → Yahoo symbol（道瓊 / 標普500 / 那斯達克綜合 / 費城半導體）。 */
+    private static final Map<String, String> US_INDEX_YAHOO = Map.of(
+            "DJI", "^DJI",
+            "SPX", "^GSPC",
+            "IXIC", "^IXIC",
+            "SOX", "^SOX");
+
+    /**
+     * 美股四大指數近 10 年每日 OHLC（Yahoo Finance v8 chart API，range=10y&interval=1d）。
+     * 用 curl 子程序避開 Yahoo 對 Java HTTP/2 fingerprint 的封鎖（與 PriceFetchClient.fetchUsHistoricalRange 同 pattern）。
+     * timestamp 以 America/New_York 轉交易日；無資料 / 不認得 code 回空 list（呼叫端略過）。
+     */
+    public List<DailyOhlc> fetchUsIndexDaily(String indexCode) {
+        String symbol = US_INDEX_YAHOO.get(indexCode);
+        if (symbol == null) {
+            log.warn("未知美股指數代碼: {}", indexCode);
+            return Collections.emptyList();
+        }
+        try {
+            // caret 需 URL-encode 為 %5E（實測 raw '^' 在部分環境會被 Yahoo 視為無效）
+            String url = "https://query2.finance.yahoo.com/v8/finance/chart/"
+                    + symbol.replace("^", "%5E") + "?range=10y&interval=1d";
+            String body = curlGetWithRetry(url, 2);
+            JsonNode root = mapper.readTree(body);
+            JsonNode chart = root.path("chart").path("result").path(0);
+            JsonNode timestamps = chart.path("timestamp");
+            JsonNode quotes = chart.path("indicators").path("quote").path(0);
+            if (!timestamps.isArray()) {
+                String err = root.path("chart").path("error").path("description").asText("");
+                log.warn("Yahoo 指數 {} 無資料: {}", symbol, err.isEmpty() ? "no timestamps" : err);
+                return Collections.emptyList();
+            }
+            java.time.ZoneId zone = java.time.ZoneId.of("America/New_York");
+            List<DailyOhlc> out = new ArrayList<>();
+            for (int i = 0; i < timestamps.size(); i++) {
+                JsonNode close = quotes.path("close").path(i);
+                if (close.isNull() || close.isMissingNode()) continue;
+                LocalDate d = java.time.Instant.ofEpochSecond(timestamps.get(i).asLong())
+                        .atZone(zone).toLocalDate();
+                out.add(new DailyOhlc(d,
+                        jsonDecimal4(quotes.path("open").path(i)),
+                        jsonDecimal4(quotes.path("high").path(i)),
+                        jsonDecimal4(quotes.path("low").path(i)),
+                        jsonDecimal4(close)));
+            }
+            return out;
+        } catch (Exception e) {
+            log.warn("Yahoo 指數 {} 抓取失敗: {}", indexCode, e.getMessage());
+            return Collections.emptyList();
+        }
+    }
+
+    private static BigDecimal jsonDecimal4(JsonNode v) {
+        if (v == null || v.isNull() || v.isMissingNode()) return null;
+        return BigDecimal.valueOf(v.asDouble()).setScale(4, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * curl 子程序 + 重試（Yahoo Finance 對 Java HTTP client 友善度差，偶發 429）。
+     * 回應非 JSON 視為被擋，等 10s/20s/... 後重試，最多 maxRetries 次。
+     */
+    private String curlGetWithRetry(String url, int maxRetries) throws Exception {
+        for (int attempt = 0; attempt <= maxRetries; attempt++) {
+            ProcessBuilder pb = new ProcessBuilder("curl", "-s",
+                    "-H", "User-Agent: Mozilla/5.0", url);
+            pb.redirectErrorStream(true);
+            Process proc = pb.start();
+            String body = new String(proc.getInputStream().readAllBytes());
+            proc.waitFor();
+            String trimmed = body.trim();
+            if (trimmed.startsWith("{") || trimmed.startsWith("[")) return body;
+            if (attempt < maxRetries) {
+                try { Thread.sleep((attempt + 1) * 10000L); }
+                catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException("中斷", e);
+                }
+            }
+        }
+        throw new RuntimeException("Yahoo Finance 重試 " + maxRetries + " 次仍失敗");
+    }
 }

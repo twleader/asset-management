@@ -764,10 +764,13 @@ GET    /api/twse-daily-index?from=YYYY-MM-DD&to=YYYY-MM-DD
 GET    /api/twse-daily-index/latest            # 最新一個交易日（list 長度 0 或 1）
                                                # 供 BFF 在「當年尚未到 12/31」時回填當年年末收盤
 POST   /api/twse-daily-index/refresh?years=10  # 逐月呼叫 TWSE FMTQIK 抓所有交易日 upsert
+GET    /api/us-daily-index?code=SPX&from=&to=  # 美股四大指數每日 OHLC（code ∈ DJI/SPX/IXIC/SOX）
+POST   /api/us-daily-index/refresh?code=SPX    # Yahoo v8 chart range=10y 抓單一指數 upsert（一次呼叫）
 
 GET    /api/bff/gdp-twse?years=30              # 前端 view 專用，回傳近 N 年彙整資料
-GET    /api/bff/gdp-twse/twse-daily?years=10   # 大盤日線 + MA20/60/240（一次載入，前端 dataZoom 切區間）
-POST   /api/bff/gdp-twse/refresh-twse-daily?years=10  # 觸發日線 10 年回補（耗時 1~2 分鐘）
+GET    /api/bff/gdp-twse/index-daily?market=TWSE&years=10
+                                               # 指數日線 + MA20/60/240（market=TWSE 或 DJI/SPX/IXIC/SOX；一次載入，前端 dataZoom 切區間）
+POST   /api/bff/gdp-twse/refresh-index-daily?market=TWSE&years=10  # 觸發「當前選取」指數日線回補
 ```
 
 回傳格式（BFF `/api/bff/gdp-twse`）：
@@ -781,7 +784,7 @@ POST   /api/bff/gdp-twse/refresh-twse-daily?years=10  # 觸發日線 10 年回�
 ```
 （`currentYearLastTradingDate` 非 null 時，代表 `twseYearEndClose` 末元素是「當年最後一個交易日收盤」而非真正年末收盤；前端據此把該點以空心圓繪製、tooltip 加註「截至 YYYY-MM-DD」。當年若年末紀錄已存在或日線無當年資料，此欄位為 null）
 
-回傳格式（BFF `/api/bff/gdp-twse/twse-daily`）：
+回傳格式（BFF `/api/bff/gdp-twse/index-daily`，`market=TWSE` 或 DJI/SPX/IXIC/SOX 皆同一格式）：
 ```json
 {
   "dates":  ["2016-05-05", ..., "2026-05-05"],
@@ -814,6 +817,11 @@ POST   /api/bff/gdp-twse/refresh-twse-daily?years=10  # 觸發日線 10 年回�
 - `twse_index_daily_history`      (trading_date PK, open_point / high_point / low_point / close_point 皆 NUMERIC(12,2))
   - OHLC 同時供 Requirement 18 大盤日線圖、Requirement 14 觀察清單 0000 KD 計算使用
   - `MacroHistoryService.refreshTwseDaily` 從 TWSE FMTQIK 月報抓取四欄（`OpeningIndex` / `HighestIndex` / `LowestIndex` / `ClosingIndex`），同步 upsert
+- `us_index_daily_history`        ((index_code, trading_date) PK, open_point / high_point / low_point / close_point 皆 NUMERIC(14,4))
+  - 美股四大指數（道瓊 DJI / 標普500 SPX / 那斯達克綜合 IXIC / 費城半導體 SOX）每日 OHLC，供 Requirement 18 日線圖「市場切換」
+  - 來源 Yahoo Finance v8 chart API（`^DJI`/`^GSPC`/`^IXIC`/`^SOX`，`range=10y&interval=1d`），ext-materials-service `MacroDataFetchClient.fetchUsIndexDaily(code)` 以 curl 子程序抓取（避 Yahoo Java fingerprint 封鎖）；`MacroHistoryService.refreshUsIndexDaily(code)` 經 `/internal/macro/us-index` proxy 後 upsert
+  - **與 `twse_index_daily_history` 分表**的理由：台股大盤為單一指數（無 code 欄）、且已與 Requirement 14 觀察清單 0000 報價/KD 與當年年末回填邏輯耦合，分表可完全不動既有台股流程；兩表由 `GdpTwseBffController` 以**同一套 MA 計算**服務（同義欄位同一來源），確保兩市場版面一致
+  - Stooq CSV 為原評估來源但實測在部署環境被擋（連 `aapl.us` 都回通用錯誤頁），故改採 Yahoo；來源封裝於單一 fetch 方法，可一處替換
 
 GDP 與年末收盤兩表 seed data 直接寫入 Liquibase changelog（歷史值不變）。
 日線表（10 年 ~2400 筆）改由使用者按「回補資料」觸發 TWSE FMTQIK 月報抓取（changelog 僅建表不 seed），原因：

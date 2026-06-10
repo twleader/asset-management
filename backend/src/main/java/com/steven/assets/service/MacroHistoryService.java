@@ -4,10 +4,12 @@ import com.steven.assets.model.KoreaGdpPerCapitaHistory;
 import com.steven.assets.model.TaiwanGdpPerCapitaHistory;
 import com.steven.assets.model.TwseIndexDailyHistory;
 import com.steven.assets.model.TwseIndexYearEndHistory;
+import com.steven.assets.model.UsIndexDailyHistory;
 import com.steven.assets.repository.KoreaGdpPerCapitaHistoryRepository;
 import com.steven.assets.repository.TaiwanGdpPerCapitaHistoryRepository;
 import com.steven.assets.repository.TwseIndexDailyHistoryRepository;
 import com.steven.assets.repository.TwseIndexYearEndHistoryRepository;
+import com.steven.assets.repository.UsIndexDailyHistoryRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
@@ -41,6 +43,7 @@ public class MacroHistoryService {
     private final KoreaGdpPerCapitaHistoryRepository koreaGdpRepo;
     private final TwseIndexYearEndHistoryRepository twseRepo;
     private final TwseIndexDailyHistoryRepository twseDailyRepo;
+    private final UsIndexDailyHistoryRepository usDailyRepo;
     private final WebClient priceServiceClient;
 
     public MacroHistoryService(
@@ -48,11 +51,13 @@ public class MacroHistoryService {
             KoreaGdpPerCapitaHistoryRepository koreaGdpRepo,
             TwseIndexYearEndHistoryRepository twseRepo,
             TwseIndexDailyHistoryRepository twseDailyRepo,
+            UsIndexDailyHistoryRepository usDailyRepo,
             @Value("${external-materials.base-url:http://external-materials-service:8080}") String externalUrl) {
         this.gdpRepo = gdpRepo;
         this.koreaGdpRepo = koreaGdpRepo;
         this.twseRepo = twseRepo;
         this.twseDailyRepo = twseDailyRepo;
+        this.usDailyRepo = usDailyRepo;
         this.priceServiceClient = WebClient.builder().baseUrl(externalUrl).build();
     }
 
@@ -273,6 +278,42 @@ public class MacroHistoryService {
             return out;
         } catch (Exception e) {
             log.warn("呼叫 /internal/macro/twse-monthly {} 失敗: {}", ym, e.getMessage());
+            return List.of();
+        }
+    }
+
+    /**
+     * 美股單一指數（DJI/SPX/IXIC/SOX）近 10 年日線回補。
+     * 經 /internal/macro/us-index proxy 取 Yahoo v8 chart（range=10y，一次呼叫即整段），upsert 至 us_index_daily_history。
+     */
+    @Transactional
+    public Map<String, Object> refreshUsIndexDaily(String code) {
+        List<UsIndexDailyHistory> rows = fetchUsIndexDailyProxy(code);
+        if (!rows.isEmpty()) usDailyRepo.saveAll(rows);
+        String from = rows.isEmpty() ? "" : rows.get(0).getTradingDate().toString();
+        String to = rows.isEmpty() ? "" : rows.get(rows.size() - 1).getTradingDate().toString();
+        log.info("US index {} daily refresh: upserted={} rows ({}~{})", code, rows.size(), from, to);
+        return Map.of("code", code, "upserted", rows.size(), "from", from, "to", to);
+    }
+
+    private List<UsIndexDailyHistory> fetchUsIndexDailyProxy(String code) {
+        try {
+            DailyOhlcDto[] arr = priceServiceClient.get()
+                    .uri(uriBuilder -> uriBuilder.path("/internal/macro/us-index")
+                            .queryParam("code", code).build())
+                    .retrieve()
+                    .bodyToMono(DailyOhlcDto[].class)
+                    .block();
+            if (arr == null) return List.of();
+            List<UsIndexDailyHistory> out = new ArrayList<>();
+            for (DailyOhlcDto d : arr) {
+                if (d.tradingDate() == null || d.close() == null) continue;
+                out.add(new UsIndexDailyHistory(code, LocalDate.parse(d.tradingDate()),
+                        d.open(), d.high(), d.low(), d.close()));
+            }
+            return out;
+        } catch (Exception e) {
+            log.warn("呼叫 /internal/macro/us-index {} 失敗: {}", code, e.getMessage());
             return List.of();
         }
     }

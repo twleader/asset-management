@@ -4,10 +4,12 @@ import com.steven.assets.model.KoreaGdpPerCapitaHistory;
 import com.steven.assets.model.TaiwanGdpPerCapitaHistory;
 import com.steven.assets.model.TwseIndexDailyHistory;
 import com.steven.assets.model.TwseIndexYearEndHistory;
+import com.steven.assets.model.UsIndexDailyHistory;
 import com.steven.assets.repository.KoreaGdpPerCapitaHistoryRepository;
 import com.steven.assets.repository.TaiwanGdpPerCapitaHistoryRepository;
 import com.steven.assets.repository.TwseIndexDailyHistoryRepository;
 import com.steven.assets.repository.TwseIndexYearEndHistoryRepository;
+import com.steven.assets.repository.UsIndexDailyHistoryRepository;
 import com.steven.assets.service.MacroHistoryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,6 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 總體經濟年度時間序列：人均 GDP / 大盤年末收盤。
@@ -29,10 +32,14 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class MacroHistoryController {
 
+    /** 美股四大指數合法代碼（道瓊 / 標普500 / 那斯達克綜合 / 費城半導體）。 */
+    private static final Set<String> US_INDEX_CODES = Set.of("DJI", "SPX", "IXIC", "SOX");
+
     private final TaiwanGdpPerCapitaHistoryRepository gdpRepo;
     private final KoreaGdpPerCapitaHistoryRepository koreaGdpRepo;
     private final TwseIndexYearEndHistoryRepository twseRepo;
     private final TwseIndexDailyHistoryRepository twseDailyRepo;
+    private final UsIndexDailyHistoryRepository usDailyRepo;
     private final MacroHistoryService macroHistoryService;
 
     @GetMapping("/taiwan-gdp")
@@ -105,5 +112,28 @@ public class MacroHistoryController {
     @GetMapping("/twse-daily-index/latest")
     public List<TwseIndexDailyHistory> getTwseDailyLatest() {
         return twseDailyRepo.findTopNByOrderByTradingDateDesc(1);
+    }
+
+    /** 美股四大指數每日 OHLC（Requirement 18：日線圖市場切換）。code ∈ {DJI,SPX,IXIC,SOX}。 */
+    @GetMapping("/us-daily-index")
+    public List<UsIndexDailyHistory> getUsDaily(
+            @RequestParam String code,
+            @RequestParam(required = false) LocalDate from,
+            @RequestParam(required = false) LocalDate to) {
+        if (from != null && to != null) {
+            return usDailyRepo.findByIndexCodeAndTradingDateBetweenOrderByTradingDateAsc(code, from, to);
+        }
+        if (from != null) {
+            return usDailyRepo.findByIndexCodeAndTradingDateGreaterThanEqualOrderByTradingDateAsc(code, from);
+        }
+        return usDailyRepo.findByIndexCodeOrderByTradingDateAsc(code);
+    }
+
+    @PostMapping("/us-daily-index/refresh")
+    public Map<String, Object> refreshUsDaily(@RequestParam String code) {
+        if (!US_INDEX_CODES.contains(code)) {
+            return Map.of("error", "未知指數代碼: " + code, "upserted", 0);
+        }
+        return macroHistoryService.refreshUsIndexDaily(code);
     }
 }

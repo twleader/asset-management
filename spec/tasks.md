@@ -2621,3 +2621,23 @@ digest / 補發信原本每個觸發（trigger）印一個區塊，同一股票�
 - [ ] 94.8 端對端：實寄確認 email 文字只剩標題+觸發時間+觸發股價、圖含 KD（需實寄，待授權 / 自行按補發）
 
 
+### Task 95: GDP+大盤頁日線圖支援「台股 / 美股四大指數」切換
+
+對應 Requirements: Requirement 18（[requirements.md:368-386](spec/requirements.md)）
+
+#### 背景
+
+第三張卡原本固定顯示台股大盤（TAIEX）近 10 年日線 + 三均線。需求改為可在頂部下拉切換「台股大盤 / 道瓊工業 / 標普500 / 那斯達克綜合 / 費城半導體」五者，一次顯示一個指數，沿用同一套四線版型。美股四大指數＝DJI(`^DJI`)、SPX(`^GSPC`)、IXIC(`^IXIC`)、SOX(`^SOX`)。資料來源原評估 Stooq CSV 但實測在部署環境被擋（連 `aapl.us` 都回錯誤頁），改用 **Yahoo Finance v8 chart API**（`range=10y`，curl 子程序，與 `fetchUsHistoricalRange` 同 pattern）。台股流程完全不動，美股另建 `us_index_daily_history` 表，由同一支 BFF 以同一套 MA 計算服務兩市場。
+
+#### Steps:
+
+- [ ] 95.1 Liquibase `v1.27.0-us-index-daily.sql` 建 `us_index_daily_history`（複合主鍵 `(index_code, trading_date)`、OHLC NUMERIC(14,4)）+ master include
+- [ ] 95.2 backend `UsIndexDailyHistory`（`@IdClass`）+ `UsIndexDailyHistoryRepository`（依 `indexCode` + 日期區間查詢）
+- [ ] 95.3 ext-materials-service `MacroDataFetchClient.fetchUsIndexDaily(code)`：code→Yahoo symbol，curl 取 `range=10y&interval=1d`，解析 timestamp(America/New_York)+OHLC → `List<DailyOhlc>`；`InternalPriceController` 加 `GET /internal/macro/us-index?code=`
+- [ ] 95.4 backend `MacroHistoryService.refreshUsIndexDaily(code)` 經 proxy upsert；`MacroHistoryController` 加 `GET /api/us-daily-index`、`POST /api/us-daily-index/refresh?code=`（code 白名單守門）
+- [ ] 95.5 BFF `GdpTwseBffController`：`twse-daily`/`refresh-twse-daily` 一般化為 `index-daily?market=`/`refresh-index-daily?market=`（TWSE→台股、其餘→美股 `code`）；MA 計算共用
+- [ ] 95.6 frontend `api/index.js` `gdpTwse`：`getTwseDaily`/`refreshTwseDaily` → `getIndexDaily(market, years)`/`refreshIndexDaily(market, years)`
+- [ ] 95.7 frontend `GdpTwseView.vue`：第三張卡加市場下拉（5 選 1），標題/空狀態/回補訊息隨選取指數動態；切換即重抓 BFF
+- [ ] 95.8 Docker 重 build + recreate（backend / external-materials-service / bff / frontend）後驗證：台股維持原樣；切到四個美股指數各自顯示近 10 年日線 + 三均線；按「回補日線」對美股指數成功 upsert
+
+

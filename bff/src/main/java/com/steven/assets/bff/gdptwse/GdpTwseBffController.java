@@ -176,20 +176,32 @@ public class GdpTwseBffController {
     }
 
     /**
-     * 大盤日線（近 N 年）+ MA20 / MA60 / MA240。
-     * 一次回傳完整資料；前端切換區間僅用 dataZoom 不重打 API。
+     * 指數日線（近 N 年）+ MA20 / MA60 / MA240。一次回傳完整資料；前端切換區間僅用 dataZoom 不重打 API。
+     * market=TWSE 走台股大盤（/api/twse-daily-index），其餘（DJI/SPX/IXIC/SOX）走美股指數（/api/us-daily-index）。
+     * 兩市場回傳格式與 MA 計算完全相同（同義欄位同一來源），確保版面一致。
      */
-    @GetMapping("/twse-daily")
-    public Mono<ResponseEntity<Map<String, Object>>> getTwseDaily(
+    @GetMapping("/index-daily")
+    public Mono<ResponseEntity<Map<String, Object>>> getIndexDaily(
+            @RequestParam(defaultValue = "TWSE") String market,
             @RequestParam(defaultValue = "10") int years) {
         LocalDate today = LocalDate.now();
         LocalDate fromDate = today.minusYears(years);
+        boolean tw = "TWSE".equalsIgnoreCase(market);
 
         return businessServicesClient.get()
-                .uri(uri -> uri.path("/api/twse-daily-index")
-                        .queryParam("from", fromDate.toString())
-                        .queryParam("to", today.toString())
-                        .build())
+                .uri(uri -> {
+                    if (tw) {
+                        return uri.path("/api/twse-daily-index")
+                                .queryParam("from", fromDate.toString())
+                                .queryParam("to", today.toString())
+                                .build();
+                    }
+                    return uri.path("/api/us-daily-index")
+                            .queryParam("code", market)
+                            .queryParam("from", fromDate.toString())
+                            .queryParam("to", today.toString())
+                            .build();
+                })
                 .retrieve().bodyToMono(LIST_MAP)
                 .onErrorReturn(Collections.emptyList())
                 .map(rows -> {
@@ -214,15 +226,19 @@ public class GdpTwseBffController {
     }
 
     /**
-     * 觸發 10 年大盤日線單獨回補（不含 GDP / 年末），耗時 1~2 分鐘。
+     * 觸發「當前選取」指數的日線回補。market=TWSE → 台股逐月 TWSE 月報（耗時 1~2 分鐘）；
+     * 其餘 → 美股 Yahoo v8 chart（range=10y，一次呼叫即整段）。
      */
-    @PostMapping("/refresh-twse-daily")
-    public Mono<ResponseEntity<Map<String, Object>>> refreshTwseDaily(
+    @PostMapping("/refresh-index-daily")
+    public Mono<ResponseEntity<Map<String, Object>>> refreshIndexDaily(
+            @RequestParam(defaultValue = "TWSE") String market,
             @RequestParam(defaultValue = "10") int years) {
         ParameterizedTypeReference<Map<String, Object>> mapRef = new ParameterizedTypeReference<>() {};
+        boolean tw = "TWSE".equalsIgnoreCase(market);
         return businessServicesClient.post()
-                .uri(uri -> uri.path("/api/twse-daily-index/refresh")
-                        .queryParam("years", years).build())
+                .uri(uri -> tw
+                        ? uri.path("/api/twse-daily-index/refresh").queryParam("years", years).build()
+                        : uri.path("/api/us-daily-index/refresh").queryParam("code", market).build())
                 .retrieve().bodyToMono(mapRef)
                 .timeout(Duration.ofSeconds(180))
                 .onErrorResume(e -> Mono.just(Map.of("error", e.getMessage())))
