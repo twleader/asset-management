@@ -1,8 +1,11 @@
 package com.steven.assets.controller;
 
 import com.steven.assets.dto.WatchStockDto;
+import com.steven.assets.service.AlertChartRenderer;
+import com.steven.assets.service.AlertNotificationDispatcher;
 import com.steven.assets.service.WatchStockService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -24,6 +27,8 @@ import java.util.List;
 public class WatchStockController {
 
     private final WatchStockService service;
+    private final AlertNotificationDispatcher notificationDispatcher;
+    private final AlertChartRenderer chartRenderer;
 
     @GetMapping
     public List<WatchStockDto.Response> findAll() {
@@ -34,5 +39,35 @@ public class WatchStockController {
     public ResponseEntity<Void> reorder(@RequestBody List<WatchStockDto.Key> orderedKeys) {
         service.reorder(orderedKeys);
         return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * 「補發」按鈕：把各市場最後交易日當天觸發的事件彙整成單封 email 重寄（Requirement 23）。
+     * 屬本頁動作，走本頁 BFF（/api/bff/watch-stock/resend-digest passthrough）。
+     */
+    @PostMapping("/resend-digest")
+    public ResendDigestResponse resendDigest() {
+        AlertNotificationDispatcher.ResendResult r = notificationDispatcher.resendLastTradingDay();
+        String message = switch (r.status()) {
+            case SENT -> String.format("已補發 %d 檔股票的觸發事件", r.count());
+            case NO_EVENTS -> "各市場最後交易日皆無觸發事件，無可補發";
+            case NO_RECIPIENTS -> "無啟用中的通知收件人，請先到通知設定新增";
+            case EMAIL_DISABLED -> "Email 服務未啟用（未設定 MAIL_USERNAME），無法補發";
+        };
+        return new ResendDigestResponse(
+                r.status() == AlertNotificationDispatcher.ResendStatus.SENT, r.count(), message);
+    }
+
+    public record ResendDigestResponse(boolean sent, int count, String message) {}
+
+    /**
+     * 走勢圖 PNG 預覽：與警示 email 內嵌的同一張圖（近一年 股價 + 月/季/年線）。
+     * 供前端預覽 / 驗證用；資料不足或繪圖失敗回 204。
+     */
+    @GetMapping(value = "/chart.png", produces = MediaType.IMAGE_PNG_VALUE)
+    public ResponseEntity<byte[]> chartPng(@RequestParam String code, @RequestParam String market) {
+        return chartRenderer.renderPriceMaPng(code, market)
+                .map(png -> ResponseEntity.ok().contentType(MediaType.IMAGE_PNG).body(png))
+                .orElseGet(() -> ResponseEntity.noContent().build());
     }
 }

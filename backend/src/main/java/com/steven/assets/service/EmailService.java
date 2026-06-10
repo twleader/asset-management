@@ -1,14 +1,18 @@
 package com.steven.assets.service;
 
 import jakarta.annotation.PostConstruct;
+import jakarta.mail.internet.MimeMessage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 警示觸發 Email 寄送（Requirement 23）。
@@ -60,6 +64,44 @@ public class EmailService {
             log.info("寄出警示通知 email：{} 收件人 {} 位", subject, recipients.size());
         } catch (Exception e) {
             log.warn("寄送警示 email 失敗（subject={}, recipients={}）：{}",
+                    subject, recipients.size(), e.getMessage());
+        }
+    }
+
+    /**
+     * 寄送 HTML email，並把 inlineImages（cid → PNG bytes）以 inline 附件嵌入（供 &lt;img src="cid:..."&gt; 使用）。
+     * 失敗策略同 {@link #send}：一律 log.warn 不拋例外。
+     */
+    public void sendHtml(List<String> recipients, String subject, String html, Map<String, byte[]> inlineImages) {
+        if (!isEnabled()) {
+            log.warn("EmailService disabled，skip 寄信：{}", subject);
+            return;
+        }
+        if (recipients == null || recipients.isEmpty()) {
+            log.warn("收件人為空，skip 寄信：{}", subject);
+            return;
+        }
+        try {
+            MimeMessage msg = mailSender.createMimeMessage();
+            // multipart=true：才能同時帶 HTML 本文與 inline 圖片
+            MimeMessageHelper helper = new MimeMessageHelper(msg, true, "UTF-8");
+            helper.setFrom(resolveFrom());
+            helper.setTo(recipients.toArray(new String[0]));
+            helper.setSubject(subject);
+            helper.setText(html, true);   // 必須先 setText，再 addInline
+            if (inlineImages != null) {
+                for (Map.Entry<String, byte[]> e : inlineImages.entrySet()) {
+                    helper.addInline(e.getKey(), new ByteArrayResource(e.getValue()), "image/png");
+                }
+            }
+            mailSender.send(msg);
+            long imgBytes = inlineImages == null ? 0
+                    : inlineImages.values().stream().filter(b -> b != null).mapToLong(b -> b.length).sum();
+            log.info("寄出警示通知 email（HTML）：{} 收件人 {} 位，附圖 {} 張 / {} KB",
+                    subject, recipients.size(),
+                    inlineImages == null ? 0 : inlineImages.size(), imgBytes / 1024);
+        } catch (Exception e) {
+            log.warn("寄送 HTML 警示 email 失敗（subject={}, recipients={}）：{}",
                     subject, recipients.size(), e.getMessage());
         }
     }

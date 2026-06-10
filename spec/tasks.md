@@ -2527,3 +2527,97 @@ Dashboard 美股表格「買入均價(USD)」（如 SGOV 100.6707）與雙擊開
 - [ ] 89.4 手動驗證：Dashboard 美股雙擊 SGOV → 走勢圖「成本均價」應顯示與表格「買入均價(USD)」相同的 100.6707（不再是 100.19）；切換不同持股再次確認兩處數字一致
 
 
+### Task 90: 警示觸發 Email 改列月線／季線／年線三條均線
+
+對應 Requirements: Requirement 23（[requirements.md:475](spec/requirements.md)）
+
+#### 問題
+
+警示觸發 email 目前每筆只印一行「均線：{ma}」，`ma` 取自 `pickMaForAlert(alertType, maPeriod, ind)`，亦即「觸發條件對應的那一條均線」（低於季線→只印 MA60）。使用者想在信中一次看到月線（MA20）、季線（MA60）、年線（MA240）三條值，掌握完整技術面，而非只看觸發的那一條。`TechnicalIndicatorService.FullIndicators` 本就同時算出三條，資料已具備，只是 dispatcher 沒帶過去。
+
+#### Steps:
+
+- [x] 90.1 `AlertNotificationDispatcher`：`enqueue` 與 `PendingTrigger` 的單一 `maValue` 改為 `monthlyMa / quarterlyMa / annualMa` 三欄；`buildDigestBody` 由單行「均線」改為依序印「月線 / 季線 / 年線」三行，各自於非 null 時才印（歷史不足以撐滿某視窗時該行省略）
+- [x] 90.2 `StockAlertService.recordTrigger` enqueue 呼叫改傳 `ind.monthlyMa(), ind.quarterlyMa(), ind.annualMa()`（不再用 `pickMaForAlert` 縮成單值）；`pickMaForAlert` 保留供 line 208 凍結 `lastTriggeredMaValue`（UI 顯示對應觸發條件的單一均線）使用
+- [x] 90.3 spec：`requirements.md` Requirement 23、`design.md` digest 內容格式與 enqueue 簽名同步更新
+- [ ] 90.4 Docker 重 build + recreate：`backend`
+- [ ] 90.5 手動驗證：觸發任一均線警示 → 收到的 email 該筆同時列出「月線 / 季線 / 年線」三行 + KD；歷史不足 240 日者年線行省略
+
+
+### Task 91: 觀察清單「補發」按鈕（各市場最後交易日觸發事件，單封 email 重寄）
+
+對應 Requirements: Requirement 23（[requirements.md:477](spec/requirements.md)）
+
+#### 背景
+
+警示觸發 email 是自動寄送（dispatcher 60s flush），但使用者可能漏看或想重看當天整批。需求：在觀察清單「新增觀察」左側加「補發」鈕，按一下把**各市場「最後交易日」當天觸發的事件**（盤中則為當日盤中至今）彙整成**單一** digest email 重寄。跨時區關鍵：`stock_alert_trigger.triggered_at` 以各市場 wall time 儲存，所以「當天」需各市場各自以其時區判定「最後交易日」，台北深夜按下時仍能涵蓋 US 當日盤的觸發。重用 `AlertNotificationDispatcher.buildDigestBody` 確保與自動信同格式（月/季/年線 + KD 同源）。
+
+#### Steps:
+
+- [x] 91.1 `StockAlertTriggerRepository`：加 `findDistinctMarkets()` 與「某 market + triggered_at 落在某日窗 [start, end)」查詢（依 triggeredAt asc）
+- [x] 91.2 `AlertNotificationDispatcher`：`resolveStockName` 改吃 `(code, market)`（沿用 0000→台股大盤、否則查 stock master）；新增 `resendLastTradingDay()`：對 `findDistinctMarkets` 每個 market 算 `lastTradingDate`（平日已過開盤＝當日、盤前/週末回溯最近平日，不考慮假日；開盤時刻沿用 `StockAlertService.computeTriggeredAt` 同口徑：台 09:00 / 美 09:30 / 英 08:00）→ 取當日觸發列 → 回查 `StockAlert` 用 `buildLabel` 還原條件（孤兒觸發 fallback「警示觸發」）→ 合併用 `buildDigestBody` 組單封 `[資產管理] 股票警示補發 N 筆` 寄 active 收件人；回傳 `ResendResult{status, count}`（SENT/NO_EVENTS/NO_RECIPIENTS/EMAIL_DISABLED）
+- [x] 91.3 `WatchStockController`：注入 dispatcher，加 `POST /api/watch-stocks/resend-digest` → 委派 `resendLastTradingDay()`，map 成 `{sent, count, message}` 回傳（四態各給中文訊息）
+- [x] 91.4 BFF：watch-stock passthrough（`/api/bff/watch-stock/**`→`/api/watch-stocks/**`）已涵蓋 POST，無需改 route
+- [x] 91.5 frontend `api/index.js`：`bffApi.watchStock.resendDigest()` = `api.post('/bff/watch-stock/resend-digest')`
+- [x] 91.6 frontend `WatchStockView.vue`：header「新增觀察」左側加「補發」鈕（`Promotion` icon + loading），`resendDigest()` 呼叫後依 `sent` 以 `ElMessage.success` / `.warning` 提示 `message`
+- [ ] 91.7 Docker 重 build + recreate：`backend frontend`
+- [ ] 91.8 手動驗證：觀察頁點「補發」→ 收到單封含各市場最後交易日全部觸發的 email；無觸發 / 無收件人時前端顯示對應提示且不寄空信
+
+
+### Task 92: 警示 / 補發 email 同一股票多條件合併成一筆
+
+對應 Requirements: Requirement 23（[requirements.md:476](spec/requirements.md)）
+
+#### 背景
+
+digest / 補發信原本每個觸發（trigger）印一個區塊，同一股票若有多個條件觸發（如同時「低於季線」「低於年線」），會出現多個重複的股票區塊、技術指標也重複。需求：同一張股票匯成一筆，標題列出該股全部觸發條件，技術快照只顯示一次。改動集中在 `buildDigestBody`，自動 digest 與手動補發共用，故兩者一起生效。
+
+#### Steps:
+
+- [x] 92.1 `AlertNotificationDispatcher.buildDigestBody`：先 `groupByStock`（LinkedHashMap，key=stockCode+market，保留首次出現順序）；每組標題 `{name} ({code} {market}) — {labels 去重串接「、」}`，技術快照（觸發時間/股價/月季年線/KD）取該組 max `triggeredAt` 的那筆；編號 N 改數「組（股票）」
+- [x] 92.2 主旨與補發回傳筆數改用 `groupByStock(batch).size()`（去重股票檔數）；`flush()` / `resendLastTradingDay()` 同步；`WatchStockController` 成功訊息改「已補發 N 檔股票的觸發事件」
+- [ ] 92.3 Docker 重 build + recreate：`backend`
+- [ ] 92.4 手動驗證：一檔股票同時觸發兩條件 → email 只出現一個區塊，標題含兩條件 label，技術指標一份；主旨 N = 股票檔數
+
+
+### Task 93: 警示 / 補發 email 內嵌「股票分析走勢圖」PNG
+
+對應 Requirements: Requirement 23（[requirements.md:478](spec/requirements.md)）
+
+#### 背景
+
+使用者希望 email 不只有文字技術快照，還能看到走勢圖。email 無法跑 JS（不能嵌 ECharts），故改由後端 server-side 渲染 PNG 內嵌。為與畫面 `StockAnalysisDialog` 一致，沿用同一資料源與同一 MA 算法。純 Java（XChart）繪圖、無外部服務依賴（符合系統自足原則）。
+
+#### Steps:
+
+- [x] 93.1 `pom.xml` 加 `org.knowm.xchart:xchart:3.8.8`（純 Java 繪圖）
+- [x] 93.2 新 `AlertChartRenderer.renderPriceMaPng(code, market)`：走 `HistoricalDataService.getStockHistory(code, market, end-24M, end)`（0000 自動讀指數表、併今日即時價）→ 與前端 `calcMA` 相同的簡單平均四捨五入 2 位算 MA20/60/240 → XChart 畫近 252 日 股價 + 月/季/年線（藍/橘/紫/紅）→ PNG bytes；資料不足 / 失敗回 `Optional.empty()`
+- [x] 93.3 `EmailService.sendHtml(recipients, subject, html, inlineImages)`：`MimeMessage` + `MimeMessageHelper(multipart)`，`setText(html,true)` 後 `addInline(cid, ByteArrayResource, image/png)`；失敗一律 log.warn
+- [x] 93.4 `AlertNotificationDispatcher`：`buildDigestBody`(純文字) 改 `buildDigest`→`DigestMail{html, inlineImages, stockCount}`，每檔股票文字下內嵌 `<img src="cid:chart{i}">`；`flush()` / `resendLastTradingDay()` 改呼叫 `sendHtml`
+- [x] 93.5 backend `Dockerfile`：runtime（alpine slim JRE 無字型）apk 增裝 `fontconfig ttf-dejavu`，ENTRYPOINT 加 `-Djava.awt.headless=true`（否則 AWT 繪文字拋例外）
+- [x] 93.6 `WatchStockController` 加 `GET /api/watch-stocks/chart.png?code=&market=` 預覽端點（資料不足回 204），供前端 / 驗證用
+- [x] 93.7 Docker 重 build + recreate：`backend`（含字型層；pom 改動會觸發 go-offline 重抓 xchart）— 已完成，容器 healthy
+- [x] 93.8 驗證：curl `/api/bff/watch-stock/chart.png?code=2330&market=台股` 回 700×320 PNG，圖與畫面 `StockAnalysisDialog` 數值一致（股價≈2305、季線≈2112、年線≈1589），字型正常渲染（已於 alpine 容器確認）
+- [ ] 93.9 端對端：實際觸發 / 按補發 → 收到的 HTML email 每檔股票下顯示走勢圖（需實寄，外向動作待使用者授權或自行點按）
+
+
+### Task 94: email 走勢圖升級為 Price+MA / KD 雙 pane、數值入圖、文字精簡
+
+對應 Requirements: Requirement 23（[requirements.md:479-482](spec/requirements.md)）
+
+#### 背景
+
+使用者要 email 內的圖完全比照畫面 `StockAnalysisDialog`：加 KD 副圖、所有數值寫進圖內 legend，並把這些數值從 email 文字移除（直接看圖）。以 workflow 平行研究 + 對抗式審查釘死兩大風險：(1) 容器 CJK 字型——`.ttc` face 0 是日文變體，須用 `Font.createFonts` 挑 TC face；(2) KD/MA 與畫面逐位一致——須同 120 月範圍、MA 改逐點重算。
+
+#### Steps:
+
+- [x] 94.1 `AlertChartRenderer` 重寫：上 pane 股價+月/季/年線、下 pane K/D（0~100、80/20 虛線）兩張 XChart 用 Graphics2D 合成；資料抓 120 月；`calcMa` 改逐點重算+HALF_UP；新增 `calcKd`（period 9，與前端/`TechnicalIndicatorService` 同遞迴，high/low 缺值 fallback close）；legend 帶最新值（`%,.2f`、白底）；顏色對齊畫面
+- [x] 94.2 CJK 字型：`loadCjkFont` 用 `Font.createFonts` 取 TC face（多候選路徑 + 遞迴掃 `/usr/share/fonts` 後備），失敗 fallback SANS_SERIF
+- [x] 94.3 `Dockerfile`：apk 加 `font-noto-cjk freetype`、`RUN fc-cache -f`（`-Djava.awt.headless=true` 已於 Task 93 加）
+- [x] 94.4 `AlertNotificationDispatcher.buildDigest`：移除月/季/年線/KD 文字列；保留標題 + 觸發時間 + 觸發股價；`<img>` 寬度 700→900；刪 dead `appendMa`（`formatNumber` 仍給觸發股價用，保留）；每封內嵌圖數設上限、超過僅文字
+- [x] 94.5 `EmailService.sendHtml`：log 內嵌圖總位元組（觀察 digest 大小）
+- [x] 94.6 Docker 重 build + recreate：`backend`（含 CJK 字型層）— 已完成，容器 healthy；啟動 log 確認字型 `Noto Sans CJK TC`（檔 /usr/share/fonts/noto/NotoSansCJK-Regular.ttc）
+- [x] 94.7 容器內視覺驗證：00881 與 2330 PNG 皆 (a) 上 pane 股價+3 均線、下 pane KD + 80/20 ✓ (b) legend 繁中正常（Noto Sans CJK TC、非日系、非方框）且帶數值 ✓ (c) 00881 數值與畫面一致（股價 54.35 / 季線MA60 45.53 / K 60.15 / D 67.07，後續因即時資料更新而微動）✓ (d) 上下 pane 左軸右對齊等寬 gutter → plot 對齊（2330 四位數價也對齊）✓
+- [ ] 94.8 端對端：實寄確認 email 文字只剩標題+觸發時間+觸發股價、圖含 KD（需實寄，待授權 / 自行按補發）
+
+
