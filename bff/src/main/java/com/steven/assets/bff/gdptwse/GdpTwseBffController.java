@@ -22,11 +22,10 @@ import java.util.Map;
 import java.util.TreeMap;
 
 /**
- * GdpTwseView 專屬 BFF（Requirement 18）。
- * 回傳近 N 年（預設 30）對齊好的：
+ * GdpTwseView（股市分析頁）專屬 BFF（Requirement 18）。
+ * 指數日線/當日分時走 index-daily / index-intraday；本 get/refresh 服務「台韓人均 GDP 比較」圖：
  *   - years
  *   - gdpPerCapitaUsd（台灣）/ koreaGdpPerCapitaUsd（韓國）
- *   - twseYearEndClose
  *   - taiwanGdpGrowthRate / koreaGdpGrowthRate（年增率 %）
  */
 @RestController
@@ -47,51 +46,26 @@ public class GdpTwseBffController {
 
         Mono<List<Map<String, Object>>> gdp = fetchSeries("/api/taiwan-gdp", since);
         Mono<List<Map<String, Object>>> kor = fetchSeries("/api/korea-gdp", since);
-        Mono<List<Map<String, Object>>> twse = fetchSeries("/api/twse-year-end-index", since);
-        // 當年（尚未到 12/31）以「最後一個交易日大盤收盤」代替年末收盤
-        Mono<List<Map<String, Object>>> twseLatest = businessServicesClient.get()
-                .uri("/api/twse-daily-index/latest")
-                .retrieve().bodyToMono(LIST_MAP)
-                .onErrorReturn(Collections.emptyList());
 
-        return Mono.zip(gdp, kor, twse, twseLatest).map(t -> {
+        return Mono.zip(gdp, kor).map(t -> {
             TreeMap<Integer, BigDecimal> twGdpAll = toMap(t.getT1(), "gdpUsd");
             TreeMap<Integer, BigDecimal> krGdpAll = toMap(t.getT2(), "gdpUsd");
             TreeMap<Integer, BigDecimal> twGrowthAll = toMap(t.getT1(), "realGdpGrowthRate");
             TreeMap<Integer, BigDecimal> krGrowthAll = toMap(t.getT2(), "realGdpGrowthRate");
-            TreeMap<Integer, BigDecimal> twseClose = toMap(t.getT3(), "closePoint");
 
-            // 當年若無 12/31 收盤，從最近一筆 daily index（必須落在當年）回填
-            String currentYearLastTradingDate = null;
-            if (!twseClose.containsKey(currentYear) && !t.getT4().isEmpty()) {
-                Map<String, Object> latest = t.getT4().get(0);
-                Object d = latest.get("tradingDate");
-                Object c = latest.get("closePoint");
-                if (d != null && c != null) {
-                    String ds = d.toString();
-                    if (ds.length() >= 4 && Integer.parseInt(ds.substring(0, 4)) == currentYear) {
-                        twseClose.put(currentYear, new BigDecimal(c.toString()));
-                        currentYearLastTradingDate = ds;
-                    }
-                }
-            }
-
-            // X 軸：since..currentYear 取所有 series 的聯集
+            // X 軸：since..currentYear 取 TW/KR GDP 的聯集
             TreeMap<Integer, Boolean> yset = new TreeMap<>();
             twGdpAll.keySet().forEach(y -> { if (y >= since && y <= currentYear) yset.put(y, true); });
             krGdpAll.keySet().forEach(y -> { if (y >= since && y <= currentYear) yset.put(y, true); });
-            twseClose.keySet().forEach(y -> { if (y >= since && y <= currentYear) yset.put(y, true); });
 
             List<Integer> yearsList = new ArrayList<>(yset.keySet());
             List<Object> twGdp = new ArrayList<>();
             List<Object> krGdp = new ArrayList<>();
-            List<Object> twseList = new ArrayList<>();
             List<Object> twGrowth = new ArrayList<>();
             List<Object> krGrowth = new ArrayList<>();
             for (Integer y : yearsList) {
                 twGdp.add(twGdpAll.get(y));
                 krGdp.add(krGdpAll.get(y));
-                twseList.add(twseClose.get(y));
                 twGrowth.add(twGrowthAll.get(y));
                 krGrowth.add(krGrowthAll.get(y));
             }
@@ -100,10 +74,8 @@ public class GdpTwseBffController {
             body.put("years", yearsList);
             body.put("gdpPerCapitaUsd", twGdp);
             body.put("koreaGdpPerCapitaUsd", krGdp);
-            body.put("twseYearEndClose", twseList);
             body.put("taiwanGdpGrowthRate", twGrowth);
             body.put("koreaGdpGrowthRate", krGrowth);
-            body.put("currentYearLastTradingDate", currentYearLastTradingDate);
             return ResponseEntity.ok(body);
         });
     }
@@ -127,14 +99,11 @@ public class GdpTwseBffController {
     }
 
     /**
-     * 並行觸發 TWN/KOR GDP（IMF）+ 大盤年末收盤 + 大盤日線（TWSE FMTQIK）四項回補。
+     * 並行觸發 TWN/KOR 人均 GDP（IMF / DGBAS）回補，供「台韓人均 GDP 比較」圖使用。
      */
     @PostMapping("/refresh")
     public Mono<ResponseEntity<Map<String, Object>>> refresh(
             @RequestParam(defaultValue = "30") int years) {
-        int currentYear = LocalDate.now().getYear();
-        int from = currentYear - years + 1;
-
         ParameterizedTypeReference<Map<String, Object>> mapRef = new ParameterizedTypeReference<>() {};
 
         Mono<Map<String, Object>> gdp = businessServicesClient.post()
@@ -149,28 +118,10 @@ public class GdpTwseBffController {
                 .timeout(Duration.ofSeconds(30))
                 .onErrorResume(e -> Mono.just(Map.of("error", e.getMessage())));
 
-        // 30 年 × ~0.8s sleep + http roundtrip → 預計 30~60s
-        Mono<Map<String, Object>> twse = businessServicesClient.post()
-                .uri(uri -> uri.path("/api/twse-year-end-index/refresh")
-                        .queryParam("from", from).queryParam("to", currentYear).build())
-                .retrieve().bodyToMono(mapRef)
-                .timeout(Duration.ofSeconds(120))
-                .onErrorResume(e -> Mono.just(Map.of("error", e.getMessage())));
-
-        // 10 年 × 12 個月 × 0.8s sleep ≈ 100s
-        Mono<Map<String, Object>> twseDaily = businessServicesClient.post()
-                .uri(uri -> uri.path("/api/twse-daily-index/refresh")
-                        .queryParam("years", 10).build())
-                .retrieve().bodyToMono(mapRef)
-                .timeout(Duration.ofSeconds(180))
-                .onErrorResume(e -> Mono.just(Map.of("error", e.getMessage())));
-
-        return Mono.zip(gdp, kor, twse, twseDaily).map(tuple -> {
+        return Mono.zip(gdp, kor).map(tuple -> {
             Map<String, Object> body = new HashMap<>();
             body.put("gdp", tuple.getT1());
             body.put("korea", tuple.getT2());
-            body.put("twse", tuple.getT3());
-            body.put("twseDaily", tuple.getT4());
             return ResponseEntity.ok(body);
         });
     }
@@ -243,6 +194,39 @@ public class GdpTwseBffController {
                 .timeout(Duration.ofSeconds(180))
                 .onErrorResume(e -> Mono.just(Map.of("error", e.getMessage())))
                 .map(ResponseEntity::ok);
+    }
+
+    /**
+     * 指數「當日」分時走勢。market=TWSE→^TWII、其餘→對應美股指數；回最新交易日整天 5 分 K 收盤。
+     * 回 tradingDate（YYYY-MM-DD）+ times（HH:mm）+ closes；前端「當日」模式用。
+     */
+    @GetMapping("/index-intraday")
+    public Mono<ResponseEntity<Map<String, Object>>> getIndexIntraday(
+            @RequestParam(defaultValue = "TWSE") String market) {
+        return businessServicesClient.get()
+                .uri(uri -> uri.path("/api/index-intraday").queryParam("market", market).build())
+                .retrieve().bodyToMono(LIST_MAP)
+                .onErrorReturn(Collections.emptyList())
+                .map(rows -> {
+                    int n = rows.size();
+                    List<String> times = new ArrayList<>(n);
+                    List<BigDecimal> closes = new ArrayList<>(n);
+                    String tradingDate = null;
+                    for (Map<String, Object> r : rows) {
+                        Object t = r.get("time");
+                        if (t == null) continue;
+                        Object c = r.get("close");          // 盤中尚未到的時段為 null，保留時間、close 留 null（x 軸延伸到收盤時間）
+                        String ts = t.toString();            // "2026-06-10T13:30:00"
+                        if (tradingDate == null && ts.length() >= 10) tradingDate = ts.substring(0, 10);
+                        times.add(ts.length() >= 16 ? ts.substring(11, 16) : ts);  // HH:mm
+                        closes.add(c == null ? null : new BigDecimal(c.toString()));
+                    }
+                    Map<String, Object> body = new HashMap<>();
+                    body.put("tradingDate", tradingDate);
+                    body.put("times", times);
+                    body.put("closes", closes);
+                    return ResponseEntity.ok(body);
+                });
     }
 
     /**

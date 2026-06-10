@@ -147,13 +147,6 @@ public class MacroDataFetchClient {
         return Map.of("growth", growth, "gdpUsd", gdpUsd);
     }
 
-    /** TWSE 大盤 12 月份 OHLC 月報，取該月最後一筆作為年末加權指數收盤。 */
-    public BigDecimal fetchTwseDecemberClose(int year) {
-        List<DailyOhlc> rows = fetchTwseMonthlyDaily(year, 12);
-        if (rows.isEmpty()) return null;
-        return rows.get(rows.size() - 1).close();
-    }
-
     /** 大盤每日 OHLC（從 MI_5MINS_HIST 月報拆出）。 */
     public record DailyOhlc(LocalDate tradingDate,
                              BigDecimal open, BigDecimal high, BigDecimal low, BigDecimal close) {}
@@ -269,6 +262,82 @@ public class MacroDataFetchClient {
     private static BigDecimal jsonDecimal4(JsonNode v) {
         if (v == null || v.isNull() || v.isMissingNode()) return null;
         return BigDecimal.valueOf(v.asDouble()).setScale(4, RoundingMode.HALF_UP);
+    }
+
+    /** 指數市場代碼 → Yahoo symbol（含台股大盤 ^TWII，供「當日」分時）。 */
+    private static final Map<String, String> INDEX_INTRADAY_YAHOO = Map.of(
+            "TWSE", "^TWII",
+            "DJI", "^DJI",
+            "SPX", "^GSPC",
+            "IXIC", "^IXIC",
+            "SOX", "^SOX");
+
+    /** 指數「當日」分時一點：time 為當地時區 ISO LocalDateTime（"YYYY-MM-DDTHH:mm:ss"），close 為 5 分 K 收盤。 */
+    public record IndexIntradayPoint(String time, BigDecimal close) {}
+
+    /**
+     * 指數「當日」分時走勢（Yahoo v8 chart，interval=5m&range=5d）。
+     * 依 exchangeTimezoneName 轉當地時區、group by 當地日期，回「最新交易日」整天的 5 分 K 收盤序列。
+     * 盤中＝今日部分 bar（即時）、盤後＝最後完整交易日，自動滿足「盤中即時／盤後最後交易日」。
+     * transient（不寫 DB）；指數不在 Redis tick 輪詢名單，故不走 Task 88 tick store。
+     */
+    public List<IndexIntradayPoint> fetchIndexIntraday(String market) {
+        String symbol = INDEX_INTRADAY_YAHOO.get(market);
+        if (symbol == null) {
+            log.warn("未知指數市場: {}", market);
+            return Collections.emptyList();
+        }
+        try {
+            String url = "https://query2.finance.yahoo.com/v8/finance/chart/"
+                    + symbol.replace("^", "%5E") + "?interval=5m&range=5d";
+            String body = curlGetWithRetry(url, 2);
+            JsonNode root = mapper.readTree(body);
+            JsonNode chart = root.path("chart").path("result").path(0);
+            JsonNode timestamps = chart.path("timestamp");
+            JsonNode quotes = chart.path("indicators").path("quote").path(0);
+            if (!timestamps.isArray()) {
+                String err = root.path("chart").path("error").path("description").asText("");
+                log.warn("Yahoo 指數 {} 分時無資料: {}", symbol, err.isEmpty() ? "no timestamps" : err);
+                return Collections.emptyList();
+            }
+            java.time.ZoneId zone = java.time.ZoneId.of(
+                    chart.path("meta").path("exchangeTimezoneName").asText("Asia/Taipei"));
+            // group by 當地日期 → 取最新交易日
+            java.util.TreeMap<java.time.LocalDate, List<IndexIntradayPoint>> byDate = new java.util.TreeMap<>();
+            for (int i = 0; i < timestamps.size(); i++) {
+                JsonNode close = quotes.path("close").path(i);
+                if (close.isNull() || close.isMissingNode()) continue;
+                java.time.LocalDateTime ldt = java.time.Instant.ofEpochSecond(timestamps.get(i).asLong())
+                        .atZone(zone).toLocalDateTime();
+                byDate.computeIfAbsent(ldt.toLocalDate(), k -> new ArrayList<>())
+                        .add(new IndexIntradayPoint(ldt.toString(), jsonDecimal4(close)));
+            }
+            if (byDate.isEmpty()) return Collections.emptyList();
+            java.time.LocalDate day = byDate.lastKey();
+            // 交易時段 open/close（美股四指數 09:30–16:00 ET、台股 09:00–13:30）：
+            // 補滿整個時段的 5 分格，盤中尚未到的時段 close 留 null → x 軸固定延伸到「收盤時間」而非「現在時間」
+            java.time.LocalTime open = "TWSE".equals(market)
+                    ? java.time.LocalTime.of(9, 0) : java.time.LocalTime.of(9, 30);
+            java.time.LocalTime close = "TWSE".equals(market)
+                    ? java.time.LocalTime.of(13, 30) : java.time.LocalTime.of(16, 0);
+            // 實際 bar 對到 5 分格（floor）；最後一筆「現價」bar（非整 5 分，如 14:16）也歸入對應格
+            java.util.Map<java.time.LocalDateTime, BigDecimal> bySlot = new java.util.HashMap<>();
+            for (IndexIntradayPoint p : byDate.get(day)) {
+                java.time.LocalDateTime t = java.time.LocalDateTime.parse(p.time());
+                java.time.LocalDateTime slot = t.withSecond(0).withNano(0)
+                        .withMinute((t.getMinute() / 5) * 5);
+                bySlot.put(slot, p.close());
+            }
+            List<IndexIntradayPoint> out = new ArrayList<>();
+            for (java.time.LocalDateTime cur = day.atTime(open), endT = day.atTime(close);
+                 !cur.isAfter(endT); cur = cur.plusMinutes(5)) {
+                out.add(new IndexIntradayPoint(cur.toString(), bySlot.get(cur)));
+            }
+            return out;
+        } catch (Exception e) {
+            log.warn("Yahoo 指數 {} 分時抓取失敗: {}", market, e.getMessage());
+            return Collections.emptyList();
+        }
     }
 
     /**

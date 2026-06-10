@@ -160,16 +160,6 @@ public class InternalPriceController {
         return macro.fetchDgbasNationalIncome();
     }
 
-    /** TWSE 加權指數年末收盤點位。 */
-    @GetMapping("/macro/twse-year-end")
-    public Map<String, Object> twseYearEnd(@RequestParam int year) {
-        java.math.BigDecimal close = macro.fetchTwseDecemberClose(year);
-        java.util.Map<String, Object> m = new java.util.HashMap<>();
-        m.put("year", year);
-        m.put("closePoint", close);
-        return m;
-    }
-
     /** TWSE 加權指數月線 OHLC（月報整月）。 */
     @GetMapping("/macro/twse-monthly")
     public java.util.List<com.steven.assets.externalmaterials.client.MacroDataFetchClient.DailyOhlc>
@@ -182,6 +172,13 @@ public class InternalPriceController {
     public java.util.List<com.steven.assets.externalmaterials.client.MacroDataFetchClient.DailyOhlc>
         usIndex(@RequestParam String code) {
         return macro.fetchUsIndexDaily(code);
+    }
+
+    /** 指數「當日」分時（Yahoo 5m，最新交易日）。market ∈ {TWSE,DJI,SPX,IXIC,SOX}。 */
+    @GetMapping("/macro/index-intraday")
+    public java.util.List<com.steven.assets.externalmaterials.client.MacroDataFetchClient.IndexIntradayPoint>
+        indexIntraday(@RequestParam String market) {
+        return macro.fetchIndexIntraday(market);
     }
 
     /** 殖利率（TWSE / FinMind / NASDAQ 級聯）。 */

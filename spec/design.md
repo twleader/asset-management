@@ -753,36 +753,42 @@ POST   /api/market-data/exchange-rate/backfill-history?currency=USD&since=2021-0
                                                # 強制補齊指定日期起的歷史匯率（忽略現有 maxDate）
 ```
 
-#### Macro History（Requirement 18：GDP + 台股大盤）
+#### Macro History（Requirement 18：股市分析）
 ```
 GET    /api/taiwan-gdp                         # 全部年度人均 GDP（USD）
 GET    /api/taiwan-gdp?since=1996              # 起始年（含）以後
-GET    /api/twse-year-end-index                # 全部年度大盤年末收盤點位
-GET    /api/twse-year-end-index?since=1996
+GET    /api/korea-gdp / ?since=1996            # 韓國人均 GDP（USD）+ 實質成長率
 GET    /api/twse-daily-index?from=YYYY-MM-DD&to=YYYY-MM-DD
-                                               # 大盤每日收盤（10 年回補後使用）
-GET    /api/twse-daily-index/latest            # 最新一個交易日（list 長度 0 或 1）
-                                               # 供 BFF 在「當年尚未到 12/31」時回填當年年末收盤
-POST   /api/twse-daily-index/refresh?years=10  # 逐月呼叫 TWSE FMTQIK 抓所有交易日 upsert
+                                               # 台股大盤每日收盤（10 年回補後使用）
+POST   /api/twse-daily-index/refresh?years=10  # 逐月呼叫 TWSE MI_5MINS_HIST 抓所有交易日 upsert
+# 已移除（Task 97）：/api/twse-year-end-index(GET/refresh)、/api/twse-daily-index/latest（年末走勢圖卡移除）
 GET    /api/us-daily-index?code=SPX&from=&to=  # 美股四大指數每日 OHLC（code ∈ DJI/SPX/IXIC/SOX）
 POST   /api/us-daily-index/refresh?code=SPX    # Yahoo v8 chart range=10y 抓單一指數 upsert（一次呼叫）
+GET    /api/index-intraday?market=TWSE         # 指數「當日」分時（Yahoo 5m，取最新交易日；transient，不寫 DB）
 
 GET    /api/bff/gdp-twse?years=30              # 前端 view 專用，回傳近 N 年彙整資料
 GET    /api/bff/gdp-twse/index-daily?market=TWSE&years=10
                                                # 指數日線 + MA20/60/240（market=TWSE 或 DJI/SPX/IXIC/SOX；一次載入，前端 dataZoom 切區間）
 POST   /api/bff/gdp-twse/refresh-index-daily?market=TWSE&years=10  # 觸發「當前選取」指數日線回補
+GET    /api/bff/gdp-twse/index-intraday?market=TWSE   # 「當日」分時：回 tradingDate + times(HH:mm) + closes
 ```
 
-回傳格式（BFF `/api/bff/gdp-twse`）：
+「當日」分時資料源（Requirement 18，比照股票分析 Task 87/88 版型但不走 tick store）：
+- 指數（大盤＋美股四大）不在 Redis tick 輪詢名單，故 ext-materials `MacroDataFetchClient.fetchIndexIntraday(market)` 即時向 Yahoo v8 chart（`interval=5m&range=5d`）抓取，依 `exchangeTimezoneName` 轉當地時區、group by 當地日期取「最新交易日」回傳；盤中＝今日部分 bar（即時）、盤後＝最後完整交易日 → 自動滿足需求。transient 不寫 DB
+- market→Yahoo symbol：TWSE→`^TWII`、DJI→`^DJI`、SPX→`^GSPC`、IXIC→`^IXIC`、SOX→`^SOX`
+- 前端「當日」模式 x 軸改 HH:mm、收盤單線；月/季/年線改畫水平參考線（取日線最新 MA20/60/240），與其他期間同口徑
+
+回傳格式（BFF `/api/bff/gdp-twse`，服務「台韓人均 GDP 比較」圖）：
 ```json
 {
   "years": [1996, 1997, ..., 2025, 2026],
   "gdpPerCapitaUsd": [13571, 13888, ...],
-  "twseYearEndClose": [6933.94, 8187.27, ..., 28912.45],
-  "currentYearLastTradingDate": "2026-06-06"
+  "koreaGdpPerCapitaUsd": [12000, 12500, ...],
+  "taiwanGdpGrowthRate": [6.05, 4.2, ...],
+  "koreaGdpGrowthRate": [7.1, 5.9, ...]
 }
 ```
-（`currentYearLastTradingDate` 非 null 時，代表 `twseYearEndClose` 末元素是「當年最後一個交易日收盤」而非真正年末收盤；前端據此把該點以空心圓繪製、tooltip 加註「截至 YYYY-MM-DD」。當年若年末紀錄已存在或日線無當年資料，此欄位為 null）
+（Task 97 起不再回 `twseYearEndClose` / `currentYearLastTradingDate`——「人均 GDP vs 台股大盤年末收盤」卡已移除。`POST /api/bff/gdp-twse/refresh` 亦簡化為只觸發 TWN+KOR GDP 回補）
 
 回傳格式（BFF `/api/bff/gdp-twse/index-daily`，`market=TWSE` 或 DJI/SPX/IXIC/SOX 皆同一格式）：
 ```json
@@ -813,7 +819,7 @@ POST   /api/bff/gdp-twse/refresh-index-daily?market=TWSE&years=10  # 觸發「�
 對應資料表：
 - `taiwan_gdp_per_capita_history` (year PK, gdp_usd, real_gdp_growth_rate) — 值＝DGBAS 優先、IMF 備援
 - `korea_gdp_per_capita_history`  (year PK, gdp_usd, real_gdp_growth_rate) — 值＝IMF
-- `twse_index_year_end_history`   (year PK, close_point NUMERIC(12,2))
+- `twse_index_year_end_history`   (year PK, close_point NUMERIC(12,2)) — **Task 97 起已不使用**（年末走勢圖卡移除）；資料表保留不刪，entity/repo/endpoint 已移除
 - `twse_index_daily_history`      (trading_date PK, open_point / high_point / low_point / close_point 皆 NUMERIC(12,2))
   - OHLC 同時供 Requirement 18 大盤日線圖、Requirement 14 觀察清單 0000 KD 計算使用
   - `MacroHistoryService.refreshTwseDaily` 從 TWSE FMTQIK 月報抓取四欄（`OpeningIndex` / `HighestIndex` / `LowestIndex` / `ClosingIndex`），同步 upsert
@@ -823,10 +829,8 @@ POST   /api/bff/gdp-twse/refresh-index-daily?market=TWSE&years=10  # 觸發「�
   - **與 `twse_index_daily_history` 分表**的理由：台股大盤為單一指數（無 code 欄）、且已與 Requirement 14 觀察清單 0000 報價/KD 與當年年末回填邏輯耦合，分表可完全不動既有台股流程；兩表由 `GdpTwseBffController` 以**同一套 MA 計算**服務（同義欄位同一來源），確保兩市場版面一致
   - Stooq CSV 為原評估來源但實測在部署環境被擋（連 `aapl.us` 都回通用錯誤頁），故改採 Yahoo；來源封裝於單一 fetch 方法，可一處替換
 
-GDP 與年末收盤兩表 seed data 直接寫入 Liquibase changelog（歷史值不變）。
-日線表（10 年 ~2400 筆）改由使用者按「回補資料」觸發 TWSE FMTQIK 月報抓取（changelog 僅建表不 seed），原因：
-- 資料量大、會隨時間遞增，不適合寫死於 changelog
-- 與既有 `MacroHistoryService.refreshTwseYearEnd` 同走 FMTQIK，邏輯共用
+GDP 兩表 seed data 直接寫入 Liquibase changelog（歷史值不變）。
+日線表（10 年 ~2400 筆）改由使用者按「回補日線」觸發 TWSE MI_5MINS_HIST 月報抓取（changelog 僅建表不 seed），原因：資料量大、會隨時間遞增，不適合寫死於 changelog。
 
 ### Response Format
 

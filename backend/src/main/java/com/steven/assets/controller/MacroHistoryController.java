@@ -3,12 +3,10 @@ package com.steven.assets.controller;
 import com.steven.assets.model.KoreaGdpPerCapitaHistory;
 import com.steven.assets.model.TaiwanGdpPerCapitaHistory;
 import com.steven.assets.model.TwseIndexDailyHistory;
-import com.steven.assets.model.TwseIndexYearEndHistory;
 import com.steven.assets.model.UsIndexDailyHistory;
 import com.steven.assets.repository.KoreaGdpPerCapitaHistoryRepository;
 import com.steven.assets.repository.TaiwanGdpPerCapitaHistoryRepository;
 import com.steven.assets.repository.TwseIndexDailyHistoryRepository;
-import com.steven.assets.repository.TwseIndexYearEndHistoryRepository;
 import com.steven.assets.repository.UsIndexDailyHistoryRepository;
 import com.steven.assets.service.MacroHistoryService;
 import lombok.RequiredArgsConstructor;
@@ -24,8 +22,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * 總體經濟年度時間序列：人均 GDP / 大盤年末收盤。
- * Requirement 18：「GDP + 台股大盤」頁面之資料來源。
+ * 股市分析頁（Requirement 18）資料來源：台/韓人均 GDP、台股大盤日線、美股四大指數日線、指數當日分時。
  */
 @RestController
 @RequestMapping("/api")
@@ -37,7 +34,6 @@ public class MacroHistoryController {
 
     private final TaiwanGdpPerCapitaHistoryRepository gdpRepo;
     private final KoreaGdpPerCapitaHistoryRepository koreaGdpRepo;
-    private final TwseIndexYearEndHistoryRepository twseRepo;
     private final TwseIndexDailyHistoryRepository twseDailyRepo;
     private final UsIndexDailyHistoryRepository usDailyRepo;
     private final MacroHistoryService macroHistoryService;
@@ -48,14 +44,6 @@ public class MacroHistoryController {
         return since == null
                 ? gdpRepo.findAllByOrderByYearAsc()
                 : gdpRepo.findByYearGreaterThanEqualOrderByYearAsc(since);
-    }
-
-    @GetMapping("/twse-year-end-index")
-    public List<TwseIndexYearEndHistory> getTwseYearEndIndex(
-            @RequestParam(required = false) Integer since) {
-        return since == null
-                ? twseRepo.findAllByOrderByYearAsc()
-                : twseRepo.findByYearGreaterThanEqualOrderByYearAsc(since);
     }
 
     @PostMapping("/taiwan-gdp/refresh-from-imf")
@@ -76,16 +64,6 @@ public class MacroHistoryController {
         return macroHistoryService.refreshKoreaGdpFromImf();
     }
 
-    @PostMapping("/twse-year-end-index/refresh")
-    public Map<String, Object> refreshTwse(
-            @RequestParam(required = false) Integer from,
-            @RequestParam(required = false) Integer to) throws Exception {
-        int currentYear = LocalDate.now().getYear();
-        int f = from == null ? currentYear - 29 : from;
-        int t = to == null ? currentYear : to;
-        return macroHistoryService.refreshTwseYearEnd(f, t);
-    }
-
     @GetMapping("/twse-daily-index")
     public List<TwseIndexDailyHistory> getTwseDaily(
             @RequestParam(required = false) LocalDate from,
@@ -103,15 +81,6 @@ public class MacroHistoryController {
     public Map<String, Object> refreshTwseDaily(
             @RequestParam(defaultValue = "10") int years) {
         return macroHistoryService.refreshTwseDaily(years);
-    }
-
-    /**
-     * 最新一個交易日的大盤點位（list 長度 0 或 1）。
-     * 供 BFF 在「當年尚未到 12/31」時，把最後一個交易日的 close 當作年末收盤代替值。
-     */
-    @GetMapping("/twse-daily-index/latest")
-    public List<TwseIndexDailyHistory> getTwseDailyLatest() {
-        return twseDailyRepo.findTopNByOrderByTradingDateDesc(1);
     }
 
     /** 美股四大指數每日 OHLC（Requirement 18：日線圖市場切換）。code ∈ {DJI,SPX,IXIC,SOX}。 */
@@ -135,5 +104,11 @@ public class MacroHistoryController {
             return Map.of("error", "未知指數代碼: " + code, "upserted", 0);
         }
         return macroHistoryService.refreshUsIndexDaily(code);
+    }
+
+    /** 指數「當日」分時走勢（Yahoo 5m，最新交易日；transient）。market ∈ {TWSE,DJI,SPX,IXIC,SOX}。 */
+    @GetMapping("/index-intraday")
+    public List<MacroHistoryService.IntradayPoint> getIndexIntraday(@RequestParam String market) {
+        return macroHistoryService.fetchIndexIntraday(market);
     }
 }
