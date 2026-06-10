@@ -144,7 +144,7 @@ const mainMenuItems = computed(() => [
   { path: '/stocks', title: '股票觀察', icon: 'View' },
   { path: '/trading-calendar', title: '交易日曆', icon: 'AlarmClock' },
   { path: '/exchange-rate', title: '台幣兌美元', icon: 'Money' },
-  { path: '/gdp-twse', title: 'GDP + 台股大盤', icon: 'TrendCharts' },
+  { path: '/gdp-twse', title: 'GDP + 台美股大盤', icon: 'TrendCharts' },
   { path: '/payment-accounts', title: '自動代繳', icon: 'Tickets' }
 ])
 </script>

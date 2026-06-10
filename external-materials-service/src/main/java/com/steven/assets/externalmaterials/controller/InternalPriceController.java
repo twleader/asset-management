@@ -177,6 +177,13 @@ public class InternalPriceController {
         return macro.fetchTwseMonthlyDaily(year, month);
     }
 
+    /** 美股四大指數近 10 年每日 OHLC（Yahoo v8 chart，range=10y）。code ∈ {DJI,SPX,IXIC,SOX}。 */
+    @GetMapping("/macro/us-index")
+    public java.util.List<com.steven.assets.externalmaterials.client.MacroDataFetchClient.DailyOhlc>
+        usIndex(@RequestParam String code) {
+        return macro.fetchUsIndexDaily(code);
+    }
+
     /** 殖利率（TWSE / FinMind / NASDAQ 級聯）。 */
     @GetMapping("/dividend-rate")
     public MarketDataFetchService.DividendRateResult dividendRate(

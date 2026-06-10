@@ -3,8 +3,11 @@
     <el-card>
       <template #header>
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
-          <span class="section-title">台股大盤每日收盤（近 10 年，含月線/季線/年線）</span>
-          <div style="display:flex;align-items:center;gap:12px">
+          <span class="section-title">{{ marketLabel }}每日收盤（近 10 年，含月線/季線/年線）</span>
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+            <el-select v-model="market" size="small" style="width:150px" @change="onMarketChange">
+              <el-option v-for="m in MARKETS" :key="m.value" :label="m.label" :value="m.value" />
+            </el-select>
             <el-radio-group v-model="dailyRange" size="small">
               <el-radio-button label="1m">1 個月</el-radio-button>
               <el-radio-button label="3m">3 個月</el-radio-button>
@@ -21,7 +24,7 @@
         </div>
       </template>
       <v-chart v-if="hasDailyData" :option="dailyChartOption" style="height:480px" autoresize />
-      <el-empty v-else description="尚無日線資料，請先按「回補日線（10 年）」" />
+      <el-empty v-else :description="`尚無${marketLabel}日線資料，請先按「回補日線（10 年）」`" />
     </el-card>
 
     <el-card style="margin-top:20px">
@@ -73,7 +76,16 @@ const refreshing = ref(false)
 const currentYearLastTradingDate = ref(null)
 const currentYear = new Date().getFullYear()
 
-// 大盤日線（近 10 年）
+// 指數日線（近 10 年）— 可切換台股大盤與美股四大指數
+const MARKETS = [
+  { value: 'TWSE', label: '台股大盤' },
+  { value: 'DJI',  label: '道瓊工業' },
+  { value: 'SPX',  label: '標普 500' },
+  { value: 'IXIC', label: '那斯達克綜合' },
+  { value: 'SOX',  label: '費城半導體' }
+]
+const market = ref('TWSE')
+const marketLabel = computed(() => MARKETS.find(m => m.value === market.value)?.label ?? '台股大盤')
 const dailyDates = ref([])
 const dailyCloses = ref([])
 const dailyMa20 = ref([])
@@ -102,13 +114,17 @@ async function fetchData() {
 
 async function fetchDailyData() {
   try {
-    const res = await bffApi.gdpTwse.getTwseDaily(10)
+    const res = await bffApi.gdpTwse.getIndexDaily(market.value, 10)
     dailyDates.value = res.dates ?? []
     dailyCloses.value = (res.closes ?? []).map(num)
     dailyMa20.value = (res.ma20 ?? []).map(num)
     dailyMa60.value = (res.ma60 ?? []).map(num)
     dailyMa240.value = (res.ma240 ?? []).map(num)
   } catch {}
+}
+
+function onMarketChange() {
+  fetchDailyData()
 }
 
 onMounted(() => {
@@ -133,8 +149,8 @@ async function onRefresh() {
 async function onRefreshDaily() {
   dailyRefreshing.value = true
   try {
-    const r = await bffApi.gdpTwse.refreshTwseDaily(10)
-    ElMessage.success(`大盤日線回補完成：${r.upserted ?? 0} 筆（${r.from} ~ ${r.to}）`)
+    const r = await bffApi.gdpTwse.refreshIndexDaily(market.value, 10)
+    ElMessage.success(`${marketLabel.value}日線回補完成：${r.upserted ?? 0} 筆（${r.from} ~ ${r.to}）`)
     await fetchDailyData()
   } catch {} finally {
     dailyRefreshing.value = false
