@@ -693,9 +693,10 @@ public class StockAlertService {
             log.warn("recordTrigger failed for alert {}: {}", alert.getId(), e.getMessage());
         }
         // Requirement 23：enqueue email 通知（dispatcher 自身已包 try/catch，不會回拋）
+        // 三條均線（月線/季線/年線）一併帶過去，email 完整列出而非只印觸發條件對應的單一均線
         try {
-            BigDecimal ma = pickMaForAlert(alert.getAlertType(), alert.getMaPeriod(), ind);
-            notificationDispatcher.enqueue(alert, triggeredAt, price, ma, ind.k(), ind.d());
+            notificationDispatcher.enqueue(alert, triggeredAt, price,
+                    ind.monthlyMa(), ind.quarterlyMa(), ind.annualMa(), ind.k(), ind.d());
         } catch (Exception e) {
             log.warn("enqueue email 通知失敗 alert {}: {}", alert.getId(), e.getMessage());
         }

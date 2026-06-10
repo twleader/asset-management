@@ -174,7 +174,8 @@ export const bffApi = {
   // 移除觀察一律在「警示條件」頁刪掉該股票最後一筆 alert，不再有觀察清單級的 delete
   watchStock: {
     getAll:  () => api.get('/bff/watch-stock'),
-    reorder: (orderedKeys) => api.put('/bff/watch-stock/order', orderedKeys)
+    reorder: (orderedKeys) => api.put('/bff/watch-stock/order', orderedKeys),
+    resendDigest: () => api.post('/bff/watch-stock/resend-digest')
   },
 
   // BackupRestore

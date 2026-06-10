@@ -992,7 +992,8 @@ StockAlertService.evaluate()
   ├─ 24h cooldown 通過 + 條件命中
   ├─ alertRepo.save(凍結 K/D/MA)
   ├─ recordTrigger() → 寫 StockAlertTrigger（必落地，無論寄信成敗）
-  └─ alertNotificationDispatcher.enqueue(alert, triggeredAt, price, ind)
+  └─ alertNotificationDispatcher.enqueue(alert, triggeredAt, price,
+                                         ind.monthlyMa, ind.quarterlyMa, ind.annualMa, ind.k, ind.d)
                                   │
                                   ▼
                        in-memory ConcurrentLinkedQueue
@@ -1015,8 +1016,31 @@ StockAlertService.evaluate()
 
 **邊界處理**：
 - 收件人空 / `MAIL_USERNAME` 空 / SMTP 例外：一律 `log.warn` 後返回，**絕不**拋例外回到 `StockAlertService` —— 警示判斷必須與通知解耦
-- digest 主旨：`[資產管理] 股票警示觸發 N 筆`
-- digest 內容每筆一行：`{stockName} ({stockCode} {market}) {conditionLabel} | 觸發時間 {time} | 股價 {price} | MA {ma} | K {k} D {d}`（無對應指標時欄位省略）
+- digest 主旨：`[資產管理] 股票警示觸發 N 筆`，N = **去重後的股票檔數**（非觸發筆數）
+- **同一股票（stockCode+market）多條件觸發合併成一筆**（`groupByStock`，保留首次出現順序）：標題 `{stockName} ({stockCode} {market}) — {label1、label2…}`（該股所有觸發條件 label 去重串接），其下依序 `觸發時間`、`股價`、三條均線 `月線 {monthlyMa}`／`季線 {quarterlyMa}`／`年線 {annualMa}`、`KD：K {k} / D {d}`。技術快照（時間/股價/MA/KD）取該股**最近一筆觸發**（max `triggeredAt`）——同股各條件的 MA/KD 本即同源、僅時間略異（某條均線因歷史不足為 null 時該行省略；K/D 皆 null 時整行省略）。三條均線值取自 `recordTrigger` 當下 `TechnicalIndicatorService.computeAll()` 的 `FullIndicators`，與 `stock_alert_trigger` 落地的 `monthly_ma/quarterly_ma/annual_ma` 同源
+
+**手動補發（觀察清單「補發」按鈕）**：
+- 前端 `WatchStockView` 「新增觀察」左側「補發」鈕 → `POST /api/bff/watch-stock/resend-digest`（watch-stock BFF passthrough → `/api/watch-stocks/resend-digest`，守「一頁一支 BFF」）
+- `WatchStockController.resendDigest()` 委派 `AlertNotificationDispatcher.resendLastTradingDay()`：
+  - 對 `stock_alert_trigger` 內出現過的每個 market，依市場時區算「最後交易日」（`lastTradingDate`：平日已過開盤＝當日、盤前 / 週末回溯最近平日；不考慮假日），取該日 `triggered_at ∈ [當地 00:00, 翌日 00:00)` 的所有觸發
+  - 把各市場結果合併、用**與自動 digest 相同的** `buildDigestBody()` 組單封信（重用同一格式 → 月線/季線/年線 + KD 同源），主旨 `[資產管理] 股票警示補發 N 筆`，寄給所有 active 收件人
+  - 觸發列回查 `StockAlert`（`alertId`）以 `buildLabel` 還原條件文案；alert 已刪除的孤兒觸發以「警示觸發」當 fallback label，不靜默丟棄
+  - 回傳 `{sent, count, message}`：`SENT` / `NO_EVENTS`（各市場最後交易日皆無觸發）/ `NO_RECIPIENTS` / `EMAIL_DISABLED` 四態，後三者不寄信，前端據以提示
+  - 補發為手動全量重寄，與自動 digest 的 24h cooldown / queue 互不影響（不寫 cooldown、不入 queue）
+
+**HTML 信 + 內嵌走勢圖（Task 93）**：
+- digest / 補發信改以 HTML 寄送：`EmailService.sendHtml(recipients, subject, html, inlineImages)` 用 `MimeMessage` + `MimeMessageHelper(multipart)`，`setText(html, true)` 後逐一 `addInline(cid, ByteArrayResource(png), "image/png")`
+- `AlertNotificationDispatcher.buildDigest()` 回 `DigestMail{html, inlineImages(cid→png), stockCount}`：每檔股票區塊組好文字後，呼叫 `AlertChartRenderer.renderPriceMaPng(code, market)` 取圖，成功則 `images.put("chart{i}", png)` 並插入 `<img src="cid:chart{i}">`
+- `AlertChartRenderer`：純 Java（XChart）server-side 繪圖，**上下雙 pane 合成一張 PNG**（Graphics2D 垂直拼接）：
+  - 資料一律走 `HistoricalDataService.getStockHistory(code, market, end-120M, end)`（與畫面 `StockAnalysisDialog` **同 120 個月範圍**、0000 自動讀 `twse_index_daily_history` 含 OHLC、併今日即時價）
+  - MA：與前端 `calcMA` 相同——**每點對 window 重新加總**（非滑動扣減，避免長序列累積誤差）+ `BigDecimal HALF_UP` 2 位
+  - KD：與前端 `calcKD` / `TechnicalIndicatorService` 同一遞迴（period 9、RSV=(close-ll)/(hh-ll)*100、hh==ll→50、K=prevK*2/3+RSV/3、D=prevD*2/3+K/3、seed 50/50、high/low 缺值 fallback close、續算用未捨入值）。整段歷史算完再切尾 252（≈1年），尾值與畫面逐位一致
+  - 上 pane：股價(藍) + 月線MA20(橘) + 季線MA60(紫) + 年線MA240(紅)，隱藏 x 軸（日期只畫在下 pane）；下 pane：K(橘) / D(綠)，Y 0~100，80/20 灰虛線（`setShowInLegend(false)` 不進圖例）
+  - legend 文字 = 中文名稱 + 空白 + 最新值（`%,.2f`），白底，與畫面同
+  - 失敗回 empty → 略過該圖、文字照寄。每封信內嵌圖數設上限（超過則該檔僅文字），`sendHtml` log 內嵌總位元組
+- `AlertNotificationDispatcher.buildDigest`：數值入圖後文字精簡——保留「標題 + 觸發時間 + **觸發股價**」，移除月/季/年線/KD 文字列（圖內已有）。`<img width:900px>`
+- **字型依賴**：runtime image 為 `eclipse-temurin:21-jre-alpine`（slim、無 CJK 字型）→ backend `Dockerfile` apk 裝 `fontconfig ttf-dejavu font-noto-cjk freetype` 並 `fc-cache -f`，ENTRYPOINT 加 `-Djava.awt.headless=true`。`AlertChartRenderer.loadCjkFont` 用 **`Font.createFonts`（複數）挑 TC face**（`.ttc` 的 face 0 為 JP 變體，`createFont` 單數會選到日系字形）；找不到則 fallback SANS_SERIF
+- 預覽 / 驗證端點：`GET /api/watch-stocks/chart.png?code=&market=`（BFF passthrough `/api/bff/watch-stock/chart.png`）回同一張 PNG，資料不足回 204
 
 **設定面**：
 - `application.yml` 內 `spring.mail.host=smtp.gmail.com:587 STARTTLS`，username / password 走 `${MAIL_USERNAME}` / `${MAIL_PASSWORD}` 環境變數（Gmail App Password，非登入密碼）

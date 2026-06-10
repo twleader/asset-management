@@ -4,7 +4,10 @@
       <template #header>
         <div style="display:flex;align-items:center;justify-content:space-between">
           <span class="section-title">👁️ 觀察股票</span>
-          <el-button type="primary" :icon="Plus" @click="emit('request-new-alert', marketTab)">新增觀察</el-button>
+          <div style="display:flex;align-items:center;gap:8px">
+            <el-button :icon="Promotion" :loading="resending" @click="resendDigest">補發</el-button>
+            <el-button type="primary" :icon="Plus" @click="emit('request-new-alert', marketTab)">新增觀察</el-button>
+          </div>
         </div>
       </template>
 
@@ -126,7 +129,7 @@
 </template>
 
 <script setup>
-import { Plus, Operation } from '@element-plus/icons-vue'
+import { Plus, Operation, Promotion } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import Sortable from 'sortablejs'
 import dayjs from 'dayjs'
@@ -162,6 +165,21 @@ async function load() {
     list.value = await bffApi.watchStock.getAll()
   } finally {
     loading.value = false
+  }
+}
+
+// ===== 補發：各市場最後交易日的觸發事件彙整成單封 email 重寄 =====
+const resending = ref(false)
+async function resendDigest() {
+  resending.value = true
+  try {
+    const res = await bffApi.watchStock.resendDigest()
+    if (res.sent) ElMessage.success(res.message)
+    else ElMessage.warning(res.message)
+  } catch {
+    // 錯誤訊息已由 axios 攔截器統一提示
+  } finally {
+    resending.value = false
   }
 }
 
