@@ -1,7 +1,9 @@
 package com.steven.assets.util;
 
+import java.time.DayOfWeek;
 import java.time.LocalTime;
 import java.time.ZoneId;
+import java.time.ZonedDateTime;
 
 /**
  * 市場字串 → 對應市場時區與交易時段的解析（單一事實來源）。
@@ -39,5 +41,17 @@ public final class MarketZones {
         if ("美股".equals(market)) return LocalTime.of(16, 0);
         if ("英股".equals(market)) return LocalTime.of(16, 30);
         return LocalTime.of(13, 30);
+    }
+
+    /**
+     * 市場是否「開盤中」：市場時區、平日（一～五）、且 open ≤ now ≤ close（含端點）。
+     * 純開收盤判斷，無寬限分鐘（與警示寄送的 +10 分寬限窗語意不同，勿混用）。
+     */
+    public static boolean isMarketOpen(String market) {
+        ZonedDateTime now = ZonedDateTime.now(resolve(market));
+        DayOfWeek dow = now.getDayOfWeek();
+        if (dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY) return false;
+        LocalTime t = now.toLocalTime();
+        return !t.isBefore(openTime(market)) && !t.isAfter(closeTime(market));
     }
 }

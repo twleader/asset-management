@@ -6,6 +6,7 @@ import com.steven.assets.model.StockHolding;
 import com.steven.assets.repository.AssetSnapshotRepository;
 import com.steven.assets.repository.ExchangeRateHistoryRepository;
 import com.steven.assets.repository.StockRepository;
+import com.steven.assets.util.MarketZones;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -37,32 +38,18 @@ public class StockPriceService {
     private final StockRepository stockMasterRepo;
     private final PriceQueryService priceQuery;
 
-    private static final ZoneId TW_ZONE = ZoneId.of("Asia/Taipei");
-    private static final ZoneId US_ZONE = ZoneId.of("America/New_York");
-    private static final ZoneId LON_ZONE = ZoneId.of("Europe/London");
-
+    // 開收盤時刻與時區的單一來源為 MarketZones（CLAUDE.md「相同的資料只能存一份」）。
+    // 以下三個「市場是否開盤」純判斷委派 MarketZones.isMarketOpen（市場時區平日、無寬限分鐘）。
     public boolean isTwMarketOpen() {
-        ZonedDateTime now = ZonedDateTime.now(TW_ZONE);
-        DayOfWeek dow = now.getDayOfWeek();
-        if (dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY) return false;
-        LocalTime t = now.toLocalTime();
-        return !t.isBefore(LocalTime.of(9, 0)) && !t.isAfter(LocalTime.of(13, 30));
+        return MarketZones.isMarketOpen("台股");
     }
 
     public boolean isUsMarketOpen() {
-        ZonedDateTime now = ZonedDateTime.now(US_ZONE);
-        DayOfWeek dow = now.getDayOfWeek();
-        if (dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY) return false;
-        LocalTime t = now.toLocalTime();
-        return !t.isBefore(LocalTime.of(9, 30)) && !t.isAfter(LocalTime.of(16, 0));
+        return MarketZones.isMarketOpen("美股");
     }
 
     public boolean isUkMarketOpen() {
-        ZonedDateTime now = ZonedDateTime.now(LON_ZONE);
-        DayOfWeek dow = now.getDayOfWeek();
-        if (dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY) return false;
-        LocalTime t = now.toLocalTime();
-        return !t.isBefore(LocalTime.of(8, 0)) && !t.isAfter(LocalTime.of(16, 30));
+        return MarketZones.isMarketOpen("英股");
     }
 
     @Transactional(readOnly = true)
@@ -93,9 +80,9 @@ public class StockPriceService {
             "twMarketOpen", isTwMarketOpen(),
             "usMarketOpen", isUsMarketOpen(),
             "ukMarketOpen", isUkMarketOpen(),
-            "twTime", ZonedDateTime.now(TW_ZONE).toLocalDateTime().toString(),
-            "usTime", ZonedDateTime.now(US_ZONE).toLocalDateTime().toString(),
-            "ukTime", ZonedDateTime.now(LON_ZONE).toLocalDateTime().toString()
+            "twTime", ZonedDateTime.now(MarketZones.TW_ZONE).toLocalDateTime().toString(),
+            "usTime", ZonedDateTime.now(MarketZones.US_ZONE).toLocalDateTime().toString(),
+            "ukTime", ZonedDateTime.now(MarketZones.LON_ZONE).toLocalDateTime().toString()
         );
     }
 

@@ -2729,4 +2729,20 @@ VOO（Vanguard S&P 500 ETF，NYSEARCA 上市）股利歷史顯示「查無資料
 - [x] 100.5 部署 + 邏輯驗證：Docker 重 build + recreate（business-services，healthy、BFF `/actuator/health` UP、啟動無錯）。以實際市場時鐘驗證閘門判定＝預期：台股 23:20（盤外）丟棄、美股 11:20 ET / 英股 16:20 London（盤中）寄出
 - [ ] 100.6 端對端待觀察：實際於台股盤外時段發生台股觸發時，確認 log 出現「盤外時段略過 N 筆警示 email」、且該輪 email 不含台股（強制觸發會實寄信給設定收件人，故待自然觸發或使用者授權後驗證）
 
+### Task 101: StockPriceService 開盤判斷委派 MarketZones（去重）
+
+對應 Requirements: Requirement 23（[requirements.md:485](spec/requirements.md)）
+
+#### 背景
+
+Task 100.1 已把開收盤時刻集中進 `MarketZones`（`openTime/closeTime`），並讓 `StockAlertService` / `AlertNotificationDispatcher` 改吃單一來源；但 `StockPriceService` 仍自帶 `TW_ZONE/US_ZONE/LON_ZONE` 三個 `ZoneId` 常數，且 `isTwMarketOpen/isUsMarketOpen/isUkMarketOpen` 各自硬編開收盤時刻（台 09:00–13:30、美 09:30–16:00、英 08:00–16:30）＋平日判斷 —— 與 `MarketZones` 重複，違反 CLAUDE.md「相同的資料只能存一份」。本任務把這份「市場是否開盤」判斷也收斂進 `MarketZones`。純去重重構，判斷邏輯（`!t.isBefore(open) && !t.isAfter(close)`、週末關閉、含端點、無寬限分鐘）完全不變；注意與 Requirement 23 寄送閘門的 +10 分寬限窗語意不同，未把寬限帶進來。
+
+#### Steps:
+
+- [x] 101.1 `MarketZones` 新增 `isMarketOpen(market)`（市場時區、平日一～五、`!t.isBefore(openTime) && !t.isAfter(closeTime)`，含端點、無寬限分鐘）
+- [x] 101.2 `StockPriceService` 三個 `isXxMarketOpen()` 改委派 `MarketZones.isMarketOpen("台股"/"美股"/"英股")`；移除自帶的 `TW_ZONE/US_ZONE/LON_ZONE` 常數；`getMarketStatus()` 的 `twTime/usTime/ukTime` 改引用 `MarketZones.*_ZONE`（`manualRefresh()` / `getLiveAssets()` 沿用這三個方法，無需改）
+- [x] 101.3 spec：`design.md` MarketZones helper 說明補 `openTime/closeTime/isMarketOpen` 與 StockPriceService 委派；`tasks.md` 本任務
+- [x] 101.4 `mvn compile` 通過（BUILD SUCCESS）
+- [x] 101.5 Docker 重 build + recreate（business-services，healthy）後驗證 `/api/market-data/market-status` 三旗標行為不變：當下 TW 00:07（盤前）=false、US 12:07 ET（盤中）=true、UK 17:07 London（盤後）=false，與委派前硬編邏輯一致（開收盤值、平日判斷、含端點比較皆未變）
+
 

@@ -1290,7 +1290,7 @@ volumes:
   - 加 `LON_ZONE`、`isUkMarketOpen()`
   - `getLiveAssets()` 對 `market="英股"` 持倉套用 `usdExchangeRate` 換算台幣（與美股同 path；CSPX.L USD 計價）
   - `getMarketStatus()` 多回 `ukMarketOpen` / `ukTime`；`manualRefresh()` 多回 `ukMarketOpen`；`LiveAssetsResponse` 多 `ukMarketOpen`
-- 新增共用 helper `com.steven.assets.util.MarketZones.resolve(market)`：`美股 → America/New_York`、`英股 → Europe/London`、其餘（含 `台股`、`0000`）→ `Asia/Taipei`。`TechnicalIndicatorService` / `WatchStockService` / `StockAlertService` / `HistoricalDataService` 共用
+- 新增共用 helper `com.steven.assets.util.MarketZones.resolve(market)`：`美股 → America/New_York`、`英股 → Europe/London`、其餘（含 `台股`、`0000`）→ `Asia/Taipei`。`TechnicalIndicatorService` / `WatchStockService` / `StockAlertService` / `HistoricalDataService` 共用。後續再把開收盤時刻與「是否開盤」判斷也收斂進 `MarketZones`：`openTime/closeTime`（供 `StockAlertService.computeTriggeredAt/matchInDailyOhlc`、`AlertNotificationDispatcher` 寄送時段閘門共用）與 `isMarketOpen(market)`（市場時區、平日、`open ≤ now ≤ close`，無寬限分鐘）；`StockPriceService` 三個 `isXxMarketOpen()` 改委派 `MarketZones.isMarketOpen`、`getMarketStatus()` 時區改引用 `MarketZones.*_ZONE`，移除自帶的 `TW_ZONE/US_ZONE/LON_ZONE` 與硬編開收盤（純去重、行為不變）
 - `StockAlertController.lookupName`：`0000 + 英股` 直接回空字串（同 `0000 + 美股`）
 - `StockAlertService.assertNameMatchesCode`：英股 canonical name 走 `MarketDataFetchService.fetchUkStockName(code)`（Yahoo `chart meta.shortName` for `{code}.L`）
 - `MarketDataService` / `MarketDataFetchService`：`getDividendRate("英股", code)` 走 Yahoo `chart?events=div` 對 `{code}.L`；`getEtfHoldings("英股", code)` 呼叫 Yahoo `quoteSummary?modules=topHoldings` 對 `{code}.L`；`isEtf("英股", code)` 採白名單 `[CSPX, VWRA, VUSA, EIMI, IWDA]`
