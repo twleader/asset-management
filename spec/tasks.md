@@ -2680,3 +2680,36 @@ digest / 補發信原本每個觸發（trigger）印一個區塊，同一股票�
 - [ ] 96.6 Docker 重 build + recreate（external-materials-service / backend / bff / frontend）後驗證：台股大盤切「當日」顯示分時（盤後為最後交易日、末點＝當日收盤）；美股指數盤中顯示即時分時；月/季/年線為水平線
 
 
+### Task 98: 債券 ETF / 收益分配型 ETF 股利歷史 fallback（TaiwanStockDividendResult）
+
+對應 Requirements: Requirement 13（[requirements.md:240](spec/requirements.md)）
+
+#### 背景
+
+使用者開啟 00751B（元大AAA至A公司債）股票分析 → 股利歷史頁籤顯示「查無資料」，但該檔實為季配息債券 ETF（每季約 0.35~0.38 元）。根因：`DividendFetchClient.fetchTw` 只打 FinMind `TaiwanStockDividend`（上市櫃公司盈餘分配表），ETF 的「利息 / 收益分配」不在此表 → 回空陣列 → cold-cache fallback 重抓仍空 → 查無。實測 FinMind：`TaiwanStockDividend` 對 00751B 回 `[]`，但 `TaiwanStockDividendResult`（除權息結果表）每季除息事件齊全。
+
+#### Steps:
+
+- [x] 98.1 ext-materials `DividendFetchClient`：抽出 `finmindData(dataset, code, years)` 共用 HTTP helper（帶 token、UA、identity encoding）；`fetchTw` 改用之
+- [x] 98.2 `fetchTw`：`TaiwanStockDividend` 解析後若 `out` 為空 → fallback 呼叫新增 `fetchTwDividendResult(code, years)`：以 `date`=除息日、`stock_and_cache_dividend`=配息金額組 `DividendEvent`；`stock_or_cache_dividend` 含「權」且不含「息」→ 股票股利，其餘 → 現金股利；發放日留 null；金額 0 跳過
+- [x] 98.3 Docker 重 build + recreate（external-materials-service）後驗證：開啟 00751B 股利歷史顯示近 10 年季配息列（含除息日昨收價、現金殖利率、年度小計）；既有個股（2330）與股票型 ETF（0056）股利歷史不變
+      （驗證：`/internal/dividend/sync` 00751B written=28、2330 written=32、0056 written=19、9999 written=0；BFF `/api/bff/stock-analysis/dividends?code=00751B` 回 28 列、source=FinMind）
+
+
+### Task 99: 美股非 NASDAQ ETF 股利歷史 fallback（Yahoo chart events=div）
+
+對應 Requirements: Requirement 13（[requirements.md:240](spec/requirements.md)）
+
+#### 背景
+
+VOO（Vanguard S&P 500 ETF，NYSEARCA 上市）股利歷史顯示「查無資料」。根因：`DividendFetchClient.fetchUs` 只走 NASDAQ `/api/quote/{code}/dividends`，該 API 僅服務 NASDAQ 自家上市標的，對 NYSE / NYSEARCA（VOO、SGOV、SCHD、JEPI…）一律回 N/A → 空。Task 69 已為「殖利率」加 Yahoo fallback，但「股利歷史」未補。實測：NASDAQ VOO stocks=Symbol not exists、etf=全 N/A；Yahoo `chart?events=div` VOO 有完整 10 年除息事件。
+
+#### Steps:
+
+- [x] 99.1 `DividendFetchClient`：新增 `DividendFetchResult(source, events)` record，`fetch()` 改回傳之，逐筆 source 由實際資料源決定（FinMind / NASDAQ / Yahoo Finance），移除以市場別硬編的 `source(market)`
+- [x] 99.2 `fetchUs`：NASDAQ 兩個 assetclass 都無 rows 時 → fallback 新增 `fetchUsYahoo(code, years)`：curl 取 Yahoo `chart?range={years}y&events=div`，解析 `events.dividends`（amount=現金配息、date=epoch 秒以 America/New_York 轉除息日），組 `DividendEvent`（無發放日）；NASDAQ 命中回 source=NASDAQ、Yahoo 命中回 source=Yahoo Finance
+- [x] 99.3 `DividendPersister.syncOne` 改用 `fetched.events()` 與 `fetched.source()`（取代 `client.source(market)`）
+- [x] 99.4 Docker 重 build + recreate（external-materials-service）後驗證：VOO 股利歷史顯示近年季配息列（source=Yahoo Finance）；NASDAQ 上市標的（如 QQQ）仍走 NASDAQ；台股不受影響
+      （驗證：VOO→Yahoo Finance 37 列、SGOV→Yahoo Finance 71 列、QQQ→NASDAQ 38 列、00751B/2330/0056→FinMind 28/32/19 列。踩雷修正：Yahoo curl 必須用短 UA `Mozilla/5.0`，長 Chrome UA 被 Yahoo WAF 回 429 Too Many Requests）
+
+

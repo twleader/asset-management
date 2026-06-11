@@ -13,7 +13,9 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -43,6 +45,8 @@ public class DividendFetchClient {
                 .build();
     }
 
+    private static final ZoneId ET = ZoneId.of("America/New_York");
+
     public record DividendEvent(
             Integer year,
             BigDecimal cashDividend,
@@ -52,35 +56,22 @@ public class DividendFetchClient {
             String stockPaymentDate       // ISO or null
     ) {}
 
-    public List<DividendEvent> fetch(String stockCode, String market, int years) {
+    /** 抓取結果含實際採用的資料源（寫入 stock_dividend_history.source）。 */
+    public record DividendFetchResult(String source, List<DividendEvent> events) {}
+
+    private static final DividendFetchResult EMPTY = new DividendFetchResult(null, Collections.emptyList());
+
+    public DividendFetchResult fetch(String stockCode, String market, int years) {
         if ("台股".equals(market)) return fetchTw(stockCode, years);
         if ("美股".equals(market)) return fetchUs(stockCode, years);
-        return Collections.emptyList();
+        return EMPTY;
     }
 
-    private List<DividendEvent> fetchTw(String stockCode, int years) {
+    private DividendFetchResult fetchTw(String stockCode, int years) {
         List<DividendEvent> out = new ArrayList<>();
         try {
-            String startDate = LocalDate.now().minusYears(years).toString();
-            String url = "https://api.finmindtrade.com/api/v4/data"
-                    + "?dataset=TaiwanStockDividend"
-                    + "&data_id=" + stockCode
-                    + "&start_date=" + startDate;
-            HttpRequest.Builder b = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .timeout(Duration.ofSeconds(15))
-                    .header("User-Agent", UA)
-                    .header("Accept", "application/json")
-                    .header("Accept-Encoding", "identity");
-            if (!finmindToken.isEmpty()) b.header("Authorization", "Bearer " + finmindToken);
-            HttpResponse<String> resp = httpClient.send(b.GET().build(), HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() != 200) {
-                log.warn("FinMind TaiwanStockDividend {} 回應 {}", stockCode, resp.statusCode());
-                return out;
-            }
-            JsonNode data = mapper.readTree(resp.body()).path("data");
-            if (!data.isArray()) return out;
-            for (JsonNode item : data) {
+            JsonNode data = finmindData("TaiwanStockDividend", stockCode, years);
+            if (data != null) for (JsonNode item : data) {
                 double cash = item.path("CashEarningsDistribution").asDouble(0)
                             + item.path("CashStatutorySurplus").asDouble(0);
                 double stock = item.path("StockEarningsDistribution").asDouble(0)
@@ -109,10 +100,69 @@ public class DividendFetchClient {
         } catch (Exception e) {
             log.warn("台股股利歷史查詢失敗 {}: {}", stockCode, e.getMessage());
         }
+        // TaiwanStockDividend 是上市櫃「公司」盈餘分配表，債券 ETF / 收益分配型 ETF（如 00751B）
+        // 配的是利息收益分配，不在此表 → 回空。改打 TaiwanStockDividendResult（除權息結果表）補抓。
+        if (out.isEmpty()) out = fetchTwDividendResult(stockCode, years);
+        return new DividendFetchResult("FinMind", out);
+    }
+
+    /**
+     * Fallback：FinMind TaiwanStockDividendResult（除權息結果表）。
+     * 僅 date（除息日）+ stock_and_cache_dividend（合併配息金額），無發放日、無現金/配股拆分。
+     * ETF 收益分配皆為「除息」，stock_or_cache_dividend 含「權」且不含「息」才當配股，其餘當現金配息。
+     */
+    private List<DividendEvent> fetchTwDividendResult(String stockCode, int years) {
+        List<DividendEvent> out = new ArrayList<>();
+        try {
+            JsonNode data = finmindData("TaiwanStockDividendResult", stockCode, years);
+            if (data == null) return out;
+            for (JsonNode item : data) {
+                double amount = item.path("stock_and_cache_dividend").asDouble(0);
+                if (amount == 0) continue;
+                String exDate = item.path("date").asText("");
+                Integer year = parseYear(exDate);
+                if (year == null) continue;
+                String type = item.path("stock_or_cache_dividend").asText("");
+                boolean isStock = type.contains("權") && !type.contains("息");
+                BigDecimal amt = BigDecimal.valueOf(amount).setScale(4, RoundingMode.HALF_UP);
+                out.add(new DividendEvent(
+                        year,
+                        isStock ? BigDecimal.ZERO : amt,
+                        isStock ? amt : BigDecimal.ZERO,
+                        nullIfEmpty(exDate),
+                        null, null
+                ));
+            }
+        } catch (Exception e) {
+            log.warn("台股除權息結果表查詢失敗 {}: {}", stockCode, e.getMessage());
+        }
         return out;
     }
 
-    private List<DividendEvent> fetchUs(String stockCode, int years) {
+    /** FinMind data API 共用呼叫，回傳 data 陣列節點；非 200 或非陣列回 null。 */
+    private JsonNode finmindData(String dataset, String stockCode, int years) throws Exception {
+        String startDate = LocalDate.now().minusYears(years).toString();
+        String url = "https://api.finmindtrade.com/api/v4/data"
+                + "?dataset=" + dataset
+                + "&data_id=" + stockCode
+                + "&start_date=" + startDate;
+        HttpRequest.Builder b = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .timeout(Duration.ofSeconds(15))
+                .header("User-Agent", UA)
+                .header("Accept", "application/json")
+                .header("Accept-Encoding", "identity");
+        if (!finmindToken.isEmpty()) b.header("Authorization", "Bearer " + finmindToken);
+        HttpResponse<String> resp = httpClient.send(b.GET().build(), HttpResponse.BodyHandlers.ofString());
+        if (resp.statusCode() != 200) {
+            log.warn("FinMind {} {} 回應 {}", dataset, stockCode, resp.statusCode());
+            return null;
+        }
+        JsonNode data = mapper.readTree(resp.body()).path("data");
+        return data.isArray() ? data : null;
+    }
+
+    private DividendFetchResult fetchUs(String stockCode, int years) {
         int fromYear = LocalDate.now().getYear() - years + 1;
         for (String assetClass : new String[]{"stocks", "etf"}) {
             try {
@@ -165,12 +215,56 @@ public class DividendFetchClient {
                             payIso, null
                     ));
                 }
-                if (!rows.isEmpty()) return rows;
+                if (!rows.isEmpty()) return new DividendFetchResult("NASDAQ", rows);
             } catch (Exception e) {
                 log.warn("美股股利歷史查詢失敗 {} ({}): {}", stockCode, assetClass, e.getMessage());
             }
         }
-        return Collections.emptyList();
+        // NASDAQ /dividends 對非 NASDAQ 上市（NYSE / NYSEARCA，如 VOO、SGOV、SCHD）回 N/A。
+        // 改打 Yahoo chart events=div 補抓（與 MarketDataFetchService.getYahooDividendRate 同一資料源）。
+        List<DividendEvent> yahoo = fetchUsYahoo(stockCode, years);
+        if (!yahoo.isEmpty()) return new DividendFetchResult("Yahoo Finance", yahoo);
+        return EMPTY;
+    }
+
+    /**
+     * Fallback：Yahoo chart events=div（curl 子程序，避開 Java HttpClient 被 WAF 擋）。
+     * events.dividends 每筆含 amount（每股現金配息）與 date（除息日 epoch 秒）。Yahoo 僅有現金配息、無發放日。
+     */
+    private List<DividendEvent> fetchUsYahoo(String stockCode, int years) {
+        List<DividendEvent> out = new ArrayList<>();
+        int fromYear = LocalDate.now().getYear() - years + 1;
+        try {
+            String url = "https://query2.finance.yahoo.com/v8/finance/chart/"
+                    + stockCode.trim().toUpperCase() + "?interval=1d&range=" + years + "y&events=div";
+            // Yahoo WAF 對長 Chrome UA + curl TLS 指紋判為 bot 回 429；短 "Mozilla/5.0" 才放行
+            // （與 MarketDataFetchService.getYahooDividendRateForTicker 一致）。
+            ProcessBuilder pb = new ProcessBuilder("curl", "-s", "-H", "User-Agent: Mozilla/5.0", url);
+            pb.redirectErrorStream(true);
+            Process proc = pb.start();
+            String body = new String(proc.getInputStream().readAllBytes());
+            proc.waitFor();
+            JsonNode divs = mapper.readTree(body).path("chart").path("result").path(0)
+                    .path("events").path("dividends");
+            if (!divs.isObject()) return out;
+            for (JsonNode d : divs) {
+                double amt = d.path("amount").asDouble(0);
+                long ts = d.path("date").asLong(0);
+                if (amt <= 0 || ts <= 0) continue;
+                LocalDate exDate = Instant.ofEpochSecond(ts).atZone(ET).toLocalDate();
+                if (exDate.getYear() < fromYear) continue;
+                out.add(new DividendEvent(
+                        exDate.getYear(),
+                        BigDecimal.valueOf(amt).setScale(4, RoundingMode.HALF_UP),
+                        BigDecimal.ZERO,
+                        exDate.toString(),
+                        null, null
+                ));
+            }
+        } catch (Exception e) {
+            log.warn("Yahoo 美股股利歷史查詢失敗 {}: {}", stockCode, e.getMessage());
+        }
+        return out;
     }
 
     private static Integer parseYear(String s) {
@@ -182,9 +276,5 @@ public class DividendFetchClient {
         if (s == null) return null;
         String t = s.trim();
         return t.isEmpty() ? null : t;
-    }
-
-    public String source(String market) {
-        return "美股".equals(market) ? "NASDAQ" : "FinMind";
     }
 }

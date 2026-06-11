@@ -968,6 +968,39 @@ FinMind 自 2025 年起對匿名呼叫額度收緊，超量會回 `402 Payment R
 
 > **設計決策**：分母固定使用「當前股價」而非「3 年平均股價」。早期版本曾改為 3 年均價想與分子時間窗對齊，但與 Yahoo / Goodinfo 等公開資料源差距反而拉大；最終決定回到「現價分母」貼近市場慣用口徑。
 
+#### 股利歷史資料來源（stock_dividend_history）
+
+`external-materials-service` 的 `DividendFetchClient.fetchTw` 抓台股股利歷史，台股採兩段資料源：
+
+```
+1. FinMind TaiwanStockDividend（盈餘分配表）
+     ├─ 個股 / 股票型 ETF（如 2330、0056）：有資料 → 直接採用
+     └─ 債券 ETF / 收益分配型 ETF（如 00751B）：回空陣列 []
+                                                  ↓ fallback
+2. FinMind TaiwanStockDividendResult（除權息結果表）
+     以 date=除息日、stock_and_cache_dividend=配息金額組成 DividendEvent
+     stock_or_cache_dividend 含「權」且不含「息」→ 股票股利；其餘 → 現金股利
+     此表無發放日 → cashPaymentDate / stockPaymentDate = null
+```
+
+> **為何需要 fallback**：`TaiwanStockDividend` 是上市櫃**公司**的盈餘分配政策表（盈餘分配、法定公積、員工股利），ETF 的配息屬「收益分配」性質，債券 ETF 配的是成分債券利息，根本不在此表 → 查無。但 ETF 每季除息事件都會落在 `TaiwanStockDividendResult`，故以此為 fallback。`fetchTw` 先打盈餘分配表，**只有回空時**才打結果表，避免影響既有個股 / 股票型 ETF（兩表欄位語意不同，個股仍以盈餘分配表的現金 / 配股拆分為準）。
+
+美股 `DividendFetchClient.fetchUs` 同採兩段資料源：
+
+```
+1. NASDAQ /api/quote/{code}/dividends（assetclass=stocks→etf）
+     └─ NASDAQ 上市（如 AAPL、QQQ）：有 rows → 直接採用，source=NASDAQ
+     └─ NYSE / NYSEARCA 上市（如 VOO、SGOV、SCHD、JEPI）：rows 全 N/A
+                                                  ↓ fallback
+2. Yahoo chart?range={years}y&events=div（curl 子程序）
+     events.dividends 每筆 amount=現金配息、date=除息日(epoch 秒，以 America/New_York 轉日期)
+     Yahoo 僅現金配息、無發放日 → cashPaymentDate = null，source=Yahoo Finance
+```
+
+> NASDAQ 的 `/dividends` 只服務 NASDAQ 自家上市標的，對 NYSEARCA ETF 一律回 N/A（與 Task 69 殖利率遇到的限制同源）。Yahoo chart events=div 對全美股 / ETF 都有完整除息歷史，且與 `MarketDataFetchService.getYahooDividendRate`（殖利率）走同一資料源，符合「同義欄位、同一資料來源」原則。Yahoo 一律以 curl 子程序呼叫，避開 Java HttpClient 被 WAF 擋（同 ETF 持股 / 殖利率既有做法）。**curl 的 User-Agent 必須用短字串 `Mozilla/5.0`**：實測 Yahoo WAF 對「長 Chrome UA + curl TLS 指紋」判為 bot 回 `Too Many Requests`(429)，短 UA 才放行（與 `getYahooDividendRateForTicker` 一致）。
+
+下游 `DividendPersister.syncOne` 對所有來源的 `DividendEvent` 一視同仁：用 `calcDividendBasis` 由除息日回查 `stock_price_history` 算昨收價、填息天數、現金殖利率後 upsert。`source` 不再以市場別硬編，改由 `fetch()` 回傳的 `DividendFetchResult.source`（FinMind / NASDAQ / Yahoo Finance）逐筆寫入，確保 `stock_dividend_history.source` 與實際採用的資料源一致。
+
 ### 預估配息資料來源（estimatedAnnualDividend）
 
 **單一資料來源原則**：所有 view 顯示的「預估年配息」一律讀自 `asset_snapshot.estimated_annual_dividend` 欄位，**不再於 BFF / 前端即時重算**。
