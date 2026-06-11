@@ -399,10 +399,7 @@ public class StockAlertService {
     private Optional<IntradayMatch> matchInDailyOhlc(
             List<StockPriceHistory> asc, LocalDate cutoff,
             String market, String type, Integer maPeriod, double threshold) {
-        java.time.LocalTime closeTime;
-        if ("美股".equals(market)) closeTime = java.time.LocalTime.of(16, 0);
-        else if ("英股".equals(market)) closeTime = java.time.LocalTime.of(16, 30);
-        else closeTime = java.time.LocalTime.of(13, 30);
+        LocalTime closeTime = com.steven.assets.util.MarketZones.closeTime(market);
         IntradayMatch last = null;
 
         if ("PRICE_ABOVE".equals(type) || "PRICE_BELOW".equals(type)) {
@@ -650,10 +647,8 @@ public class StockAlertService {
     private LocalDateTime computeTriggeredAt(StockAlert alert) {
         String market = alert.getMarket();
         ZoneId zone = com.steven.assets.util.MarketZones.resolve(market);
-        LocalTime open, close;
-        if ("美股".equals(market)) { open = LocalTime.of(9, 30); close = LocalTime.of(16, 0); }
-        else if ("英股".equals(market)) { open = LocalTime.of(8, 0); close = LocalTime.of(16, 30); }
-        else { open = LocalTime.of(9, 0); close = LocalTime.of(13, 30); }
+        LocalTime open = com.steven.assets.util.MarketZones.openTime(market);
+        LocalTime close = com.steven.assets.util.MarketZones.closeTime(market);
 
         ZonedDateTime nowZ = ZonedDateTime.now(zone);
         DayOfWeek dow = nowZ.getDayOfWeek();

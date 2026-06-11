@@ -2712,4 +2712,21 @@ VOO（Vanguard S&P 500 ETF，NYSEARCA 上市）股利歷史顯示「查無資料
 - [x] 99.4 Docker 重 build + recreate（external-materials-service）後驗證：VOO 股利歷史顯示近年季配息列（source=Yahoo Finance）；NASDAQ 上市標的（如 QQQ）仍走 NASDAQ；台股不受影響
       （驗證：VOO→Yahoo Finance 37 列、SGOV→Yahoo Finance 71 列、QQQ→NASDAQ 38 列、00751B/2330/0056→FinMind 28/32/19 列。踩雷修正：Yahoo curl 必須用短 UA `Mozilla/5.0`，長 Chrome UA 被 Yahoo WAF 回 429 Too Many Requests）
 
+### Task 100: 警示 email 寄送時段閘門（盤外市場不寄）
+
+對應 Requirements: Requirement 23（[requirements.md:485](spec/requirements.md)）
+
+#### 背景
+
+警示觸發 email 由 `AlertNotificationDispatcher.flush()`（每 60s）寄出，原本只要 queue 非空就寄，不看當下時間。症狀：台股收盤超過 9 小時（深夜）仍可能因盤外 price-update 觸發而寄出台股警示信，與「到價盯盤」語意不符。需求：警示 email 只在各市場「開盤 ~ 收盤後 10 分鐘」寄；多市場混批時逐筆判定，台股盤外時只寄仍盤中的美股 / 英股。手動「補發」為使用者明確動作，不受此閘門限制。
+
+#### Steps:
+
+- [x] 100.1 `MarketZones`：開收盤時刻集中為單一來源，新增 `openTime(market)` / `closeTime(market)`（台 09:00/13:30、美 09:30/16:00、英 08:00/16:30）；`StockAlertService.computeTriggeredAt` / `matchInDailyOhlc`、`AlertNotificationDispatcher.lastTradingDate` 原本各自硬編的開收盤改吃此來源（行為不變，消除三處重複）
+- [x] 100.2 `AlertNotificationDispatcher`：新增 `SEND_GRACE_MINUTES=10` 與 `withinSendWindow(market)`（市場時區平日、`open ≤ now ≤ close+10`；不考慮假日，與既有時間判定同口徑）
+- [x] 100.3 `flush()`：drain 後以 `withinSendWindow` 逐筆過濾，盤外市場本輪丟棄（queue 不回填、`StockAlertTrigger` 歷史已落地）；全部盤外則 return 不寄；過濾掉幾筆時 `log.info`。`resendLastTradingDay()`（補發）不經此閘門
+- [x] 100.4 spec：`requirements.md` Requirement 23 加「寄送時段閘門」AC、`design.md` flush 流程圖與邊界處理同步更新
+- [x] 100.5 部署 + 邏輯驗證：Docker 重 build + recreate（business-services，healthy、BFF `/actuator/health` UP、啟動無錯）。以實際市場時鐘驗證閘門判定＝預期：台股 23:20（盤外）丟棄、美股 11:20 ET / 英股 16:20 London（盤中）寄出
+- [ ] 100.6 端對端待觀察：實際於台股盤外時段發生台股觸發時，確認 log 出現「盤外時段略過 N 筆警示 email」、且該輪 email 不含台股（強制觸發會實寄信給設定收件人，故待自然觸發或使用者授權後驗證）
+
 
