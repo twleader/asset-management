@@ -1047,7 +1047,10 @@ StockAlertService.evaluate()
                        AlertNotificationDispatcher.flush()
                                   │
                                   ├─ queue 為空 → return
-                                  ├─ 一次 drain 全部、組 digest body
+                                  ├─ 一次 drain 全部
+                                  ├─ 依市場時區過濾「開盤 ~ 收盤+10 分」時段（withinSendWindow）
+                                  │     盤外市場本輪丟棄；全部盤外 → return
+                                  ├─ 組 digest body
                                   ├─ 讀 NotificationRecipientRepository.findByActiveTrue
                                   └─ EmailService.send(toList, subject, body)
                                                 ├─ MAIL_USERNAME 未設 → log.warn skip
@@ -1060,6 +1063,7 @@ StockAlertService.evaluate()
 - in-memory queue 不持久化是刻意的：若服務重啟未及寄出，`StockAlertTrigger` 已落地、24h cooldown 也會啟動，下次觀察清單頁仍看得到觸發狀態；遺漏一封通知優於發兩封或卡住觸發流程
 
 **邊界處理**：
+- **寄送時段閘門（盤外不寄，`withinSendWindow`）**：flush 對 drain 出的每筆觸發依其市場時區判定是否在 `[開盤, 收盤+10 分]` 平日時段（台 09:00–13:40 / 美 09:30–16:10 / 英 08:00–16:40；開收盤時刻取自 `MarketZones.openTime/closeTime` 單一來源，`SEND_GRACE_MINUTES=10` 容納 60s flush 延遲與 cron 採樣落後；不考慮假日，與 `computeTriggeredAt` / `lastTradingDate` 同口徑——假日本就無 price-update 觸發，放行亦無信可寄）。盤外市場的觸發本輪 **丟棄不寄**（queue 一律 drain 不回填，避免無限長大；`StockAlertTrigger` 歷史已落地，使用者可按「補發」重寄）。多市場混批逐筆判定，僅寄出仍在盤中的市場（例：深夜台股已收盤、美股盤中 → 只寄美股）。動機：避免在該市場盤外時段收到當日早已收盤的警示信。手動 `resendLastTradingDay()` **不經此閘門**（明確的使用者重寄動作）
 - 收件人空 / `MAIL_USERNAME` 空 / SMTP 例外：一律 `log.warn` 後返回，**絕不**拋例外回到 `StockAlertService` —— 警示判斷必須與通知解耦
 - digest 主旨：`[資產管理] 股票警示觸發 N 筆`，N = **去重後的股票檔數**（非觸發筆數）
 - **同一股票（stockCode+market）多條件觸發合併成一筆**（`groupByStock`，保留首次出現順序）：標題 `{stockName} ({stockCode} {market}) — {label1、label2…}`（該股所有觸發條件 label 去重串接），其下依序 `觸發時間`、`股價`、三條均線 `月線 {monthlyMa}`／`季線 {quarterlyMa}`／`年線 {annualMa}`、`KD：K {k} / D {d}`。技術快照（時間/股價/MA/KD）取該股**最近一筆觸發**（max `triggeredAt`）——同股各條件的 MA/KD 本即同源、僅時間略異（某條均線因歷史不足為 null 時該行省略；K/D 皆 null 時整行省略）。三條均線值取自 `recordTrigger` 當下 `TechnicalIndicatorService.computeAll()` 的 `FullIndicators`，與 `stock_alert_trigger` 落地的 `monthly_ma/quarterly_ma/annual_ma` 同源

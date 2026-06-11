@@ -44,6 +44,8 @@ public class AlertNotificationDispatcher {
     private static final DateTimeFormatter TS_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
     /** 單封 digest 內嵌走勢圖張數上限（超過僅文字，避免信件過大）。 */
     private static final int MAX_CHARTS = 20;
+    /** 收盤後仍允許寄送警示 email 的寬限分鐘數（容納 60s flush 延遲與 cron 採樣落後）。 */
+    private static final int SEND_GRACE_MINUTES = 10;
 
     private final NotificationRecipientRepository recipientRepo;
     private final EmailService emailService;
@@ -82,19 +84,31 @@ public class AlertNotificationDispatcher {
         List<PendingTrigger> batch = drain();
         if (batch.isEmpty()) return;
 
+        // 寄送時段閘門：警示 email 僅於各市場「開盤 ~ 收盤後 10 分鐘」寄出。
+        // 逐筆依其市場時區判定，盤外市場的觸發本輪丟棄（queue 已 drain 不回填；StockAlertTrigger
+        // 歷史已落地，使用者可按「補發」重寄）。多市場混批時只寄仍在盤中的市場 —— 例：台股已收盤
+        // 9 小時、美股 / 英股仍盤中時，本輪只寄美股 / 英股，台股丟棄。
+        List<PendingTrigger> sendable = batch.stream()
+                .filter(t -> withinSendWindow(t.market))
+                .toList();
+        if (sendable.size() < batch.size()) {
+            log.info("盤外時段略過 {} 筆警示 email，本輪寄出 {} 筆", batch.size() - sendable.size(), sendable.size());
+        }
+        if (sendable.isEmpty()) return;
+
         if (!emailService.isEnabled()) {
-            log.warn("EmailService disabled，丟棄 {} 筆警示通知", batch.size());
+            log.warn("EmailService disabled，丟棄 {} 筆警示通知", sendable.size());
             return;
         }
 
         List<String> recipients = recipientRepo.findByActiveTrueOrderByCreatedAtAsc()
                 .stream().map(NotificationRecipient::getEmail).toList();
         if (recipients.isEmpty()) {
-            log.warn("無啟用中的通知收件人，丟棄 {} 筆警示通知", batch.size());
+            log.warn("無啟用中的通知收件人，丟棄 {} 筆警示通知", sendable.size());
             return;
         }
 
-        DigestMail mail = buildDigest(batch);   // 同股票多條件合併成一筆，內嵌走勢圖
+        DigestMail mail = buildDigest(sendable);   // 同股票多條件合併成一筆，內嵌走勢圖
         String subject = String.format("[資產管理] 股票警示觸發 %d 筆", mail.stockCount());
         emailService.sendHtml(recipients, subject, mail.html(), mail.inlineImages());
     }
@@ -144,11 +158,7 @@ public class AlertNotificationDispatcher {
      */
     private static LocalDate lastTradingDate(String market) {
         ZoneId zone = MarketZones.resolve(market);
-        LocalTime open = switch (market) {
-            case "美股" -> LocalTime.of(9, 30);
-            case "英股" -> LocalTime.of(8, 0);
-            default -> LocalTime.of(9, 0);
-        };
+        LocalTime open = MarketZones.openTime(market);
         ZonedDateTime nowZ = ZonedDateTime.now(zone);
         LocalDate day = nowZ.toLocalDate();
         if (nowZ.toLocalTime().isBefore(open)) day = day.minusDays(1); // 盤前 → 前一交易日
@@ -156,6 +166,22 @@ public class AlertNotificationDispatcher {
             day = day.minusDays(1);
         }
         return day;
+    }
+
+    /**
+     * 該市場此刻是否在「可寄送警示 email」時段：市場時區平日，且 open ≤ now ≤ close + {@link #SEND_GRACE_MINUTES} 分。
+     * 開收盤時刻取自 {@link MarketZones}（單一來源）。不考慮假日 —— 與 computeTriggeredAt / lastTradingDate
+     * 同口徑；假日本就無 price-update 觸發，放行亦無信可寄，無害。
+     */
+    private static boolean withinSendWindow(String market) {
+        ZoneId zone = MarketZones.resolve(market);
+        ZonedDateTime nowZ = ZonedDateTime.now(zone);
+        DayOfWeek dow = nowZ.getDayOfWeek();
+        if (dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY) return false;
+        LocalTime nowT = nowZ.toLocalTime();
+        LocalTime open = MarketZones.openTime(market);
+        LocalTime close = MarketZones.closeTime(market).plusMinutes(SEND_GRACE_MINUTES);
+        return !nowT.isBefore(open) && !nowT.isAfter(close);
     }
 
     public enum ResendStatus { SENT, NO_EVENTS, NO_RECIPIENTS, EMAIL_DISABLED }
