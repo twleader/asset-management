@@ -69,7 +69,8 @@ public class DividendPersister {
 
     /** 抓單檔 + 寫 DB。supply by InternalDividendController for backend cold-cache fallback。 */
     public int syncOne(String code, String market) {
-        List<DividendEvent> events = client.fetch(code, market, RETAIN_YEARS);
+        DividendFetchClient.DividendFetchResult fetched = client.fetch(code, market, RETAIN_YEARS);
+        List<DividendEvent> events = fetched.events();
         int written = 0;
         for (DividendEvent e : events) {
             LocalDate exDate = parseDate(e.exDividendDate());
@@ -90,7 +91,7 @@ public class DividendPersister {
                     exDate,
                     parseDate(e.cashPaymentDate()), parseDate(e.stockPaymentDate()),
                     yieldPct, fillDays, previousClose,
-                    client.source(market));
+                    fetched.source());
             written++;
         }
         return written;
