@@ -1,5 +1,7 @@
 # 開發規範 — 資產管理系統
 
+## 所有回覆，盡量用台灣繁體中文，非不得已才用英文，不得使用其它文字。
+
 ## 核心原則：嚴格遵守 AWS KIRO SDD 方法
 
 本專案採用 **AWS KIRO SDD（Spec-Driven Development）** 方法開發。
