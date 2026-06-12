@@ -198,35 +198,101 @@ public class GdpTwseBffController {
 
     /**
      * 指數「當日」分時走勢。market=TWSE→^TWII、其餘→對應美股指數；回最新交易日整天 5 分 K 收盤。
-     * 回 tradingDate（YYYY-MM-DD）+ times（HH:mm）+ closes；前端「當日」模式用。
+     * 回 tradingDate（YYYY-MM-DD）+ times（HH:mm）+ closes；另回昨收/漲跌/漲跌%供標題列顯示。
+     *
+     * 昨收（previousClose）＝該指數日線表中「tradingDate 之前最後一個交易日」收盤——與觀察清單 0000
+     * 報價 WatchStockService 讀同一張日線表（同義欄位同一事實來源、值一致）。以 Mono.zip 並行抓
+     * intraday 與近 40 日日線 tail（同 index-daily 的 business API），避免序列等待；計算放 BFF，前端只 render。
+     * 漲跌＝分時最新點位（closes 末筆非 null＝盤中即時 / 盤後收盤）− 昨收。
      */
     @GetMapping("/index-intraday")
     public Mono<ResponseEntity<Map<String, Object>>> getIndexIntraday(
             @RequestParam(defaultValue = "TWSE") String market) {
-        return businessServicesClient.get()
+        boolean tw = "TWSE".equalsIgnoreCase(market);
+        LocalDate today = LocalDate.now();
+        LocalDate from = today.minusDays(40);   // 40 日涵蓋最長連假，確保 tail 含前一交易日
+
+        Mono<List<Map<String, Object>>> intradayMono = businessServicesClient.get()
                 .uri(uri -> uri.path("/api/index-intraday").queryParam("market", market).build())
                 .retrieve().bodyToMono(LIST_MAP)
-                .onErrorReturn(Collections.emptyList())
-                .map(rows -> {
-                    int n = rows.size();
-                    List<String> times = new ArrayList<>(n);
-                    List<BigDecimal> closes = new ArrayList<>(n);
-                    String tradingDate = null;
-                    for (Map<String, Object> r : rows) {
-                        Object t = r.get("time");
-                        if (t == null) continue;
-                        Object c = r.get("close");          // 盤中尚未到的時段為 null，保留時間、close 留 null（x 軸延伸到收盤時間）
-                        String ts = t.toString();            // "2026-06-10T13:30:00"
-                        if (tradingDate == null && ts.length() >= 10) tradingDate = ts.substring(0, 10);
-                        times.add(ts.length() >= 16 ? ts.substring(11, 16) : ts);  // HH:mm
-                        closes.add(c == null ? null : new BigDecimal(c.toString()));
-                    }
-                    Map<String, Object> body = new HashMap<>();
-                    body.put("tradingDate", tradingDate);
-                    body.put("times", times);
-                    body.put("closes", closes);
-                    return ResponseEntity.ok(body);
-                });
+                .onErrorReturn(Collections.emptyList());
+
+        Mono<List<Map<String, Object>>> dailyMono = businessServicesClient.get()
+                .uri(uri -> tw
+                        ? uri.path("/api/twse-daily-index")
+                                .queryParam("from", from.toString())
+                                .queryParam("to", today.toString())
+                                .build()
+                        : uri.path("/api/us-daily-index")
+                                .queryParam("code", market)
+                                .queryParam("from", from.toString())
+                                .queryParam("to", today.toString())
+                                .build())
+                .retrieve().bodyToMono(LIST_MAP)
+                .onErrorReturn(Collections.emptyList());
+
+        return Mono.zip(intradayMono, dailyMono).map(tuple -> {
+            List<Map<String, Object>> rows = tuple.getT1();
+            List<Map<String, Object>> daily = tuple.getT2();
+
+            int n = rows.size();
+            List<String> times = new ArrayList<>(n);
+            List<BigDecimal> closes = new ArrayList<>(n);
+            String tradingDate = null;
+            BigDecimal lastClose = null;
+            for (Map<String, Object> r : rows) {
+                Object t = r.get("time");
+                if (t == null) continue;
+                Object c = r.get("close");          // 盤中尚未到的時段為 null，保留時間、close 留 null（x 軸延伸到收盤時間）
+                String ts = t.toString();            // "2026-06-10T13:30:00"
+                if (tradingDate == null && ts.length() >= 10) tradingDate = ts.substring(0, 10);
+                times.add(ts.length() >= 16 ? ts.substring(11, 16) : ts);  // HH:mm
+                BigDecimal cv = (c == null) ? null : new BigDecimal(c.toString());
+                closes.add(cv);
+                if (cv != null) lastClose = cv;     // 末筆非 null＝當前/最新點位（盤中即時、盤後收盤）
+            }
+
+            BigDecimal previousClose = previousCloseBefore(daily, tradingDate);
+            BigDecimal change = null;
+            BigDecimal changePercent = null;
+            if (lastClose != null && previousClose != null && previousClose.signum() != 0) {
+                change = lastClose.subtract(previousClose).setScale(2, java.math.RoundingMode.HALF_UP);
+                changePercent = lastClose.subtract(previousClose)
+                        .divide(previousClose, 6, java.math.RoundingMode.HALF_UP)
+                        .multiply(BigDecimal.valueOf(100))
+                        .setScale(2, java.math.RoundingMode.HALF_UP);
+            }
+
+            Map<String, Object> body = new HashMap<>();
+            body.put("tradingDate", tradingDate);
+            body.put("times", times);
+            body.put("closes", closes);
+            body.put("previousClose", previousClose);
+            body.put("lastClose", lastClose);
+            body.put("change", change);
+            body.put("changePercent", changePercent);
+            return ResponseEntity.ok(body);
+        });
+    }
+
+    /**
+     * 日線（tradingDate asc）中「tradingDate 嚴格早於 beforeDate」的最後一筆收盤；找不到回 null。
+     * 以 ISO 日期字串字典序＝時間序比較，無需轉 LocalDate。
+     */
+    private BigDecimal previousCloseBefore(List<Map<String, Object>> daily, String beforeDate) {
+        if (beforeDate == null) return null;
+        BigDecimal prev = null;
+        for (Map<String, Object> r : daily) {
+            Object d = r.get("tradingDate");
+            Object c = r.get("closePoint");
+            if (d == null || c == null) continue;
+            if (d.toString().compareTo(beforeDate) < 0) {
+                prev = new BigDecimal(c.toString());   // asc：持續覆寫到最後一筆 < beforeDate
+            } else {
+                break;                                  // 已達 >= beforeDate，後續更大，停
+            }
+        }
+        return prev;
     }
 
     /**

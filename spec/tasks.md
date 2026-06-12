@@ -2745,4 +2745,27 @@ Task 100.1 已把開收盤時刻集中進 `MarketZones`（`openTime/closeTime`�
 - [x] 101.4 `mvn compile` 通過（BUILD SUCCESS）
 - [x] 101.5 Docker 重 build + recreate（business-services，healthy）後驗證 `/api/market-data/market-status` 三旗標行為不變：當下 TW 00:07（盤前）=false、US 12:07 ET（盤中）=true、UK 17:07 London（盤後）=false，與委派前硬編邏輯一致（開收盤值、平日判斷、含端點比較皆未變）
 
+---
+
+### Task 102: 指數「當日」走勢圖顯示昨日收盤 / 漲跌 / 漲跌%
+
+對應 Requirements: Requirement 18（[requirements.md:347](spec/requirements.md)）
+
+#### 背景
+
+Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參考線，缺最關鍵的「相對昨收的當日漲跌」。需求：切到「當日」時，於卡片標題列顯示**昨日收盤、漲跌、漲跌%**（紅漲綠跌）。
+
+關鍵設計：
+- **昨收同一事實來源**：系統別處（觀察清單 0000 報價 `WatchStockService.toIndexResponse`）已從 `twse_index_daily_history` 取「倒數第二個交易日」當昨收。本任務昨收同樣讀日線表（台股 `twse_index_daily_history`、美股 `us_index_daily_history`），確保兩頁同義欄位值一致（CLAUDE.md「同義欄位同一來源」）。但 `WatchStockService` 只支援台股大盤 0000、且「現價」為 DB 日收盤（盤中不動），不適用本圖（5 市場、現價需用 intraday 即時點位），故不直接複用其 endpoint，改在 BFF 以同一張日線表計算。
+- **計算放 BFF**（前端只 render）：`index-intraday` BFF endpoint 回傳增加 `previousClose` / `lastClose` / `change` / `changePercent`。
+- **昨收對齊 intraday tradingDate**：以分時的 `tradingDate` 為基準，取日線表中「嚴格早於該日」的最後一筆收盤，不受「日線表是否已含當日 row」影響（盤中通常尚無今日、盤後已回補今日皆正確）。漲跌＝分時最新點位（`closes` 末筆非 null）− 昨收。
+
+#### Steps:
+
+- [ ] 102.1 BFF `GdpTwseBffController.getIndexIntraday`：改以 `Mono.zip` 並行抓 intraday（原 `/api/index-intraday`）＋近 40 日日線 tail（台股 `/api/twse-daily-index?from=today-40&to=today`、美股 `/api/us-daily-index?code=&from=&to=`）；新增 `previousCloseBefore(daily, tradingDate)`（日線 asc，取 `tradingDate` 嚴格小於當日的最後一筆 `closePoint`）；body 增加 `previousClose` / `lastClose`（分時末筆非 null）/ `change` / `changePercent`（HALF_UP 2 位；昨收為 0 或缺值回 null）
+- [ ] 102.2 frontend `GdpTwseView.vue`：`fetchIntraday` 接 `previousClose/change/changePercent` 存 state；卡片標題列（`isIntraday` 且昨收非 null 時）顯示「昨收 X｜▲/▼漲跌｜+漲跌%」，紅漲(#dc2626)綠跌(#16a34a) 比照 `WatchStockView.priceColor`；指數點位格式千分位 2 位（不帶 $）
+- [ ] 102.3 spec：`requirements.md` Requirement 18 加 AC、`design.md` index-intraday 回傳格式 + 昨收計算說明、`tasks.md` 本任務
+- [ ] 102.4 `mvn -q compile`（bff module）通過
+- [ ] 102.5 Docker 重 build + recreate（bff / frontend）後驗證：台股大盤切「當日」標題列顯示昨收 + 漲跌 + 漲跌%、紅漲綠跌；切美股四大指數同樣顯示；漲跌 = 走勢圖末點 − 昨收
+
 

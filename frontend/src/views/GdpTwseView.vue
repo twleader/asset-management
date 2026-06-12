@@ -3,7 +3,15 @@
     <el-card>
       <template #header>
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
-          <span class="section-title">{{ cardTitle }}</span>
+          <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap">
+            <span class="section-title">{{ cardTitle }}</span>
+            <span v-if="isIntraday && intradayPrevClose != null"
+                  style="display:flex;align-items:baseline;gap:12px;font-size:13px">
+              <span style="color:#64748b">昨收 {{ fmtPoint(intradayPrevClose) }}</span>
+              <span :style="{ color: priceColor(intradayChange), fontWeight: 600 }">{{ fmtChange(intradayChange) }}</span>
+              <span :style="{ color: priceColor(intradayChange), fontWeight: 600 }">{{ fmtPct(intradayChangePct) }}</span>
+            </span>
+          </div>
           <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
             <el-select v-model="market" size="small" style="width:150px" @change="onMarketChange">
               <el-option v-for="m in MARKETS" :key="m.value" :label="m.label" :value="m.value" />
@@ -87,6 +95,9 @@ const dailyRefreshing = ref(false)
 const intradayTimes = ref([])
 const intradayCloses = ref([])
 const intradayDate = ref(null)
+const intradayPrevClose = ref(null)   // 昨日收盤（BFF 由日線表算，與觀察清單同一事實來源）
+const intradayChange = ref(null)      // 漲跌＝最新點位 − 昨收
+const intradayChangePct = ref(null)   // 漲跌%
 const isIntraday = computed(() => dailyRange.value === 'd')
 
 const hasData = computed(() => years.value.length > 0)
@@ -104,6 +115,16 @@ const emptyDesc = computed(() =>
 
 function num(v) { return v == null ? null : Number(v) }
 function lastOf(arr) { for (let i = arr.length - 1; i >= 0; i--) { if (arr[i] != null) return arr[i] } return null }
+
+// 當日昨收/漲跌顯示（指數為點位、不帶 $；紅漲綠跌比照觀察清單 priceColor）
+function fmtPoint(v) { return v == null ? '—' : Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }
+function fmtChange(v) {
+  if (v == null) return '—'
+  const n = Number(v), sign = n > 0 ? '▲' : n < 0 ? '▼' : ''
+  return `${sign}${Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+function fmtPct(v) { if (v == null) return '—'; const n = Number(v); return `${n > 0 ? '+' : ''}${n.toFixed(2)}%` }
+function priceColor(v) { if (v == null) return '#475569'; const n = Number(v); return n > 0 ? '#dc2626' : n < 0 ? '#16a34a' : '#475569' }
 
 async function fetchData() {
   try {
@@ -133,6 +154,9 @@ async function fetchIntraday() {
     intradayTimes.value = res.times ?? []
     intradayCloses.value = (res.closes ?? []).map(num)
     intradayDate.value = res.tradingDate ?? null
+    intradayPrevClose.value = num(res.previousClose)
+    intradayChange.value = num(res.change)
+    intradayChangePct.value = num(res.changePercent)
   } catch {}
 }
 

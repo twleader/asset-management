@@ -770,13 +770,14 @@ GET    /api/bff/gdp-twse?years=30              # 前端 view 專用，回傳近 
 GET    /api/bff/gdp-twse/index-daily?market=TWSE&years=10
                                                # 指數日線 + MA20/60/240（market=TWSE 或 DJI/SPX/IXIC/SOX；一次載入，前端 dataZoom 切區間）
 POST   /api/bff/gdp-twse/refresh-index-daily?market=TWSE&years=10  # 觸發「當前選取」指數日線回補
-GET    /api/bff/gdp-twse/index-intraday?market=TWSE   # 「當日」分時：回 tradingDate + times(HH:mm) + closes
+GET    /api/bff/gdp-twse/index-intraday?market=TWSE   # 「當日」分時：回 tradingDate + times(HH:mm) + closes + previousClose/lastClose/change/changePercent
 ```
 
 「當日」分時資料源（Requirement 18，比照股票分析 Task 87/88 版型但不走 tick store）：
 - 指數（大盤＋美股四大）不在 Redis tick 輪詢名單，故 ext-materials `MacroDataFetchClient.fetchIndexIntraday(market)` 即時向 Yahoo v8 chart（`interval=5m&range=5d`）抓取，依 `exchangeTimezoneName` 轉當地時區、group by 當地日期取「最新交易日」回傳；盤中＝今日部分 bar（即時）、盤後＝最後完整交易日 → 自動滿足需求。transient 不寫 DB
 - market→Yahoo symbol：TWSE→`^TWII`、DJI→`^DJI`、SPX→`^GSPC`、IXIC→`^IXIC`、SOX→`^SOX`
 - 前端「當日」模式 x 軸改 HH:mm、收盤單線；月/季/年線改畫水平參考線（取日線最新 MA20/60/240），與其他期間同口徑
+- 「當日」卡片標題列另顯示**昨收 / 漲跌 / 漲跌%**，由 BFF 計算（前端只 render，符合「計算放 BFF」）：`previousClose` ＝該指數日線表（`twse_index_daily_history` / `us_index_daily_history`）中 `tradingDate` **之前**最後一筆收盤——與觀察清單 0000 報價 `WatchStockService.toIndexResponse` 讀**同一張日線表**，昨收為同一事實來源、值一致；`lastClose` ＝分時 `closes` 末筆非 null（盤中即時 / 盤後收盤）；`change = lastClose − previousClose`、`changePercent = change / previousClose ×100`（HALF_UP 2 位）。BFF 以 `Mono.zip` 並行抓 intraday 與「近 40 日日線 tail」（台股 `/api/twse-daily-index`、美股 `/api/us-daily-index`，與 `index-daily` 同一支 business API，同義欄位同一來源；40 日涵蓋最長連假確保含前一交易日）；日線 asc，取「`tradingDate` 嚴格小於當日」的最後一筆。日線未回補導致昨收缺值時 `change/changePercent` 回 null，前端整段不顯示
 
 回傳格式（BFF `/api/bff/gdp-twse`，服務「台韓人均 GDP 比較」圖）：
 ```json
