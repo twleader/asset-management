@@ -2769,3 +2769,29 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [ ] 102.5 Docker 重 build + recreate（bff / frontend）後驗證：台股大盤切「當日」標題列顯示昨收 + 漲跌 + 漲跌%、紅漲綠跌；切美股四大指數同樣顯示；漲跌 = 走勢圖末點 − 昨收
 
 
+### Task 103: Dashboard 資產配置面板加「美股個股穿透前 10 大」tab
+
+對應 Requirements: Requirement 9（[requirements.md:172-176](spec/requirements.md)）
+
+#### 背景
+
+承 Task 86「台股個股」穿透，使用者要平行的「美股個股」tab：把美股 ETF（VOO/QQQ/SPY…）穿透成成分股後與直接持股合併計算前 10 大個股。關鍵限制：美股 ETF 成分股只有 Yahoo `topHoldings`（前 10 大，權重總和常 30~50%），不像台股 MoneyDJ 給完整成分股，故穿透演算法必須與台股不同。
+
+設計決策（與 Task 86 台股的差異）：
+- **不正規化**：台股 MoneyDJ 給完整成分股，故 `cv × weight/Σweight` 正規化完全穿透；美股 Yahoo 只給前 10 大，若正規化會把未揭露的 50~70% 也按前 10 大比例攤入、嚴重高估 AAPL/NVDA 等權值股，故改依**真實權重** `cv × weight/100` 分配，未揭露尾段 `cv × (1 − Σweight/100)` 全數歸「其它」（使用者拍板：誠實優先，接受「其它」偏大）
+- **代號聚合**：Yahoo 成分股有 `symbol`，且英文全名與持股中文名難對齊，故美股以 `stockCode` 聚合（台股 MoneyDJ 無代號故用股名）
+- **ETF 判斷不在 BFF 重複維護白名單**：BFF 對每檔美股呼叫 etf-holdings，以「回傳 holdings 是否非空」區分 ETF / 個股；external `isEtf()`（`US_ETF_WHITELIST`）對非 ETF 代號短路回空、不打 Yahoo，個股呼叫成本低，白名單維持單一事實來源
+- 不做 `degradedEtfs` 動態清單（白名單 ETF Yahoo 幾乎都有；改以 `lookthroughEtfCount > 0` 觸發固定註記涵蓋語意）
+
+#### Steps:
+
+- [ ] 103.1 新增 `bff/.../dashboard/dto/UsStockLookthroughDto.java`（含 `Item` / `Others` 內部 class；欄位 snapshotDate / totalUsStockValue / items[] / others / lookthroughEtfCount）
+- [ ] 103.2 `DashboardBffController`：`fetchEtfHoldings` 加 `market` 參數（取代硬編「台股」，台股呼叫端傳「台股」零行為變更）；新增 `getUsStockLookthrough(snapshotId)` + `buildUsLookthrough`（篩美股 → 並行 concurrency 4 抓 etf-holdings → ETF 依真實權重分配、未揭露歸其它、個股整筆計入 → 以代號聚合 → top10 + others；`lookthroughEtfCount` 計成功穿透檔數）
+- [ ] 103.3 前端 `api/index.js`：`bffApi.dashboard.usStockLookthrough(snapshotId)`
+- [ ] 103.4 前端 `DashboardView.vue`：card header el-tabs 加 `usStock`；新 state `usLookthrough/usLookthroughLoading/usLookthroughCache`、`loadUsStockLookthrough`（race 防護沿用 `effectiveSnapshotId`）、watch 擴充、computed `usLookthroughHasData/usStockPieOption`（色盤沿用 `TW_PIE_COLORS`）；底部 `lookthroughEtfCount > 0` 時顯示固定註記
+- [ ] 103.5 spec：`requirements.md` Req 9 加 tab 3 AC、`design.md` 新增 `us-stock-lookthrough` endpoint、`tasks.md` 本任務
+- [ ] 103.6 `mvn -q compile`（bff module）通過
+- [ ] 103.7 Docker 重 build + recreate（bff / frontend）後驗證：切「美股個股」tab → 圓餅顯示前 10 大個股（VOO/QQQ 拆成 AAPL/MSFT/NVDA… 而非 ETF 代號）+ 「其它」；有 ETF 時底部出現註記；hover 趨勢圖節點連動；無美股部位顯示空狀態
+- [ ] 103.8 bug fix（external-materials-service）：實作驗證時發現 `MarketDataFetchService` 取 Yahoo crumb / quoteSummary（topHoldings）沿用長 Chrome UA，被 Yahoo 反 bot WAF 回 429（Too Many Requests），導致**所有**美股 ETF 成分股查無、穿透失效（同 IP 短 UA `Mozilla/5.0` 卻回 200）。新增 `YAHOO_UA = "Mozilla/5.0"` 常數，crumb prime（`fc.yahoo.com`）/ `getcrumb` / `yahooApiGet`（quoteSummary）三處 curl 改用之；`v8/chart` 端點維持長 UA（仍正常）。重建 external-materials-service 後 VOO/VT 正常回前 10 大成分股
+
+

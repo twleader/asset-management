@@ -74,7 +74,9 @@ export const bffApi = {
     updateStockOrder: (snapshotId, orders) =>
       api.patch(`/bff/dashboard/snapshot/${snapshotId}/stock-order`, orders),
     twStockLookthrough: (snapshotId) =>
-      api.get(`/bff/dashboard/tw-stock-lookthrough/${snapshotId}`)
+      api.get(`/bff/dashboard/tw-stock-lookthrough/${snapshotId}`),
+    usStockLookthrough: (snapshotId) =>
+      api.get(`/bff/dashboard/us-stock-lookthrough/${snapshotId}`)
   },
 
   // SnapshotDetail

@@ -3,6 +3,7 @@ package com.steven.assets.bff.dashboard;
 import com.steven.assets.bff.common.SnapshotEnricher;
 import com.steven.assets.bff.dashboard.dto.DashboardSummaryDto;
 import com.steven.assets.bff.dashboard.dto.TwStockLookthroughDto;
+import com.steven.assets.bff.dashboard.dto.UsStockLookthroughDto;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.ParameterizedTypeReference;
@@ -259,7 +260,7 @@ public class DashboardBffController {
         Mono<List<EtfHoldingsFetched>> etfMono = twEtfs.isEmpty()
                 ? Mono.just(Collections.emptyList())
                 : Flux.fromIterable(twEtfs)
-                        .flatMap(this::fetchEtfHoldings, 4)
+                        .flatMap(row -> fetchEtfHoldings(row, "台股"), 4)
                         .collectList();
 
         return etfMono.map(fetched -> {
@@ -350,6 +351,118 @@ public class DashboardBffController {
         });
     }
 
+    // ===== 美股個股穿透（「資產配置分佈」第 3 tab）=====
+    // 與台股 getTwStockLookthrough 鏡像，但穿透演算法不同：美股成分股來源 Yahoo topHoldings 僅前 10 大，
+    // 故依「真實權重」分配（不正規化）、未揭露尾段歸「其它」、以代號聚合。詳見 Requirement 9 / Task 103。
+    @GetMapping("/us-stock-lookthrough/{snapshotId}")
+    public Mono<ResponseEntity<UsStockLookthroughDto>> getUsStockLookthrough(
+            @PathVariable Long snapshotId) {
+        return businessServicesClient.get()
+                .uri("/api/snapshots/{id}", snapshotId)
+                .retrieve()
+                .bodyToMono(MAP)
+                .onErrorReturn(Collections.emptyMap())
+                .flatMap(detail -> {
+                    enricher.enrichInvestmentCostOriginal(detail);
+                    return enricher.fetchSnapshotClosePrices(detail).flatMap(closeMap -> {
+                        List<Map<String, Object>> merged =
+                                enricher.buildMergedStocks(detail, closeMap, false);
+                        return buildUsLookthrough(detail, merged);
+                    });
+                });
+    }
+
+    private Mono<ResponseEntity<UsStockLookthroughDto>> buildUsLookthrough(
+            Map<String, Object> detail, List<Map<String, Object>> merged) {
+        List<Map<String, Object>> usRows = new ArrayList<>();
+        BigDecimal totalUsValue = BigDecimal.ZERO;
+        for (Map<String, Object> r : merged) {
+            if (!"美股".equals(SnapshotEnricher.asString(r.get("market")))) continue;
+            BigDecimal cv = SnapshotEnricher.toBigDecimal(r.get("currentValue"));
+            if (cv == null) cv = BigDecimal.ZERO;
+            totalUsValue = totalUsValue.add(cv);
+            usRows.add(r);
+        }
+        final BigDecimal totalFinal = totalUsValue;
+
+        // 對每檔美股並行抓 etf-holdings（concurrency 4，Yahoo quoteSummary 對單 IP 有 rate limit）。
+        // external isEtf() 白名單對非 ETF（個股）短路直接回空、不打 Yahoo，故個股呼叫成本低，
+        // 不需在 BFF 重複維護美股 ETF 白名單（單一事實來源）。
+        Mono<List<EtfHoldingsFetched>> fetchMono = usRows.isEmpty()
+                ? Mono.just(Collections.emptyList())
+                : Flux.fromIterable(usRows)
+                        .flatMap(row -> fetchEtfHoldings(row, "美股"), 4)
+                        .collectList();
+
+        return fetchMono.map(fetched -> {
+            Map<String, Aggregate> agg = new LinkedHashMap<>();
+            BigDecimal etfUndisclosed = BigDecimal.ZERO;  // 各 ETF 未揭露尾段加總，最後歸「其它」
+            int etfCount = 0;
+
+            for (EtfHoldingsFetched ef : fetched) {
+                BigDecimal cv = ef.currentValue() == null ? BigDecimal.ZERO : ef.currentValue();
+                List<Map<String, Object>> holdings = ef.holdings();
+                if (holdings == null || holdings.isEmpty()) {
+                    // 非 ETF（個股）或查無成分股的 ETF：整筆計入該代號（不拆解）
+                    mergeByCode(agg, ef.etfCode(), ef.etfName(), cv);
+                    continue;
+                }
+                // ETF 穿透：依「真實權重」分配，不正規化。美股 Yahoo topHoldings 僅前 10 大
+                // （Σweight 常 30~50%），若正規化會把未揭露的 50~70% 也當前 10 大、嚴重高估權值股，
+                // 故 share = cv × weight/100，殘留 cv × (1 − Σweight/100) 歸「其它」（使用者拍板：誠實優先）。
+                etfCount++;
+                BigDecimal disclosedRatio = BigDecimal.ZERO;  // Σ(weight/100)
+                for (Map<String, Object> h : holdings) {
+                    String code = SnapshotEnricher.asString(h.get("stockCode"));
+                    String name = SnapshotEnricher.asString(h.get("stockName"));
+                    BigDecimal w = SnapshotEnricher.toBigDecimal(h.get("weight"));
+                    if (w == null || w.compareTo(BigDecimal.ZERO) <= 0) continue;
+                    BigDecimal frac = w.divide(BigDecimal.valueOf(100), 6, RoundingMode.HALF_UP);
+                    if (frac.compareTo(BigDecimal.ONE) > 0) frac = BigDecimal.ONE;  // 防呆：單檔權重 > 100%
+                    disclosedRatio = disclosedRatio.add(frac);
+                    mergeByCode(agg, code, name, cv.multiply(frac));
+                }
+                BigDecimal undisclosed = BigDecimal.ONE.subtract(disclosedRatio);  // 未揭露尾段
+                if (undisclosed.compareTo(BigDecimal.ZERO) > 0) {
+                    etfUndisclosed = etfUndisclosed.add(cv.multiply(undisclosed));
+                }
+            }
+
+            // 排序取 top10；「其它」= 第 11 名以後個股 + 所有 ETF 未揭露尾段
+            List<Aggregate> sorted = new ArrayList<>(agg.values());
+            sorted.sort(Comparator.comparing((Aggregate a) -> a.value).reversed());
+            List<UsStockLookthroughDto.Item> items = new ArrayList<>();
+            BigDecimal othersValue = etfUndisclosed;
+            int othersCount = 0;
+            for (int i = 0; i < sorted.size(); i++) {
+                Aggregate a = sorted.get(i);
+                if (i < 10) {
+                    UsStockLookthroughDto.Item item = new UsStockLookthroughDto.Item();
+                    item.setStockCode(a.code);
+                    item.setStockName(a.name);
+                    item.setValue(a.value.setScale(2, RoundingMode.HALF_UP));
+                    item.setPercent(pct(a.value, totalFinal));
+                    items.add(item);
+                } else {
+                    othersValue = othersValue.add(a.value);
+                    othersCount++;
+                }
+            }
+            UsStockLookthroughDto.Others othersDto = new UsStockLookthroughDto.Others();
+            othersDto.setValue(othersValue.setScale(2, RoundingMode.HALF_UP));
+            othersDto.setPercent(pct(othersValue, totalFinal));
+            othersDto.setConstituentCount(othersCount);
+
+            UsStockLookthroughDto dto = new UsStockLookthroughDto();
+            dto.setSnapshotDate(SnapshotEnricher.asString(detail.get("snapshotDate")));
+            dto.setTotalUsStockValue(totalFinal.setScale(2, RoundingMode.HALF_UP));
+            dto.setItems(items);
+            dto.setOthers(othersDto);
+            dto.setLookthroughEtfCount(etfCount);
+            return ResponseEntity.ok(dto);
+        });
+    }
+
     private static BigDecimal pct(BigDecimal value, BigDecimal total) {
         if (total == null || total.compareTo(BigDecimal.ZERO) <= 0) return BigDecimal.ZERO;
         return value.multiply(BigDecimal.valueOf(100))
@@ -357,14 +470,14 @@ public class DashboardBffController {
     }
 
     @SuppressWarnings("unchecked")
-    private Mono<EtfHoldingsFetched> fetchEtfHoldings(Map<String, Object> etfRow) {
+    private Mono<EtfHoldingsFetched> fetchEtfHoldings(Map<String, Object> etfRow, String market) {
         String code = SnapshotEnricher.asString(etfRow.get("stockCode"));
         String name = SnapshotEnricher.asString(etfRow.get("stockName"));
         BigDecimal cv = SnapshotEnricher.toBigDecimal(etfRow.get("currentValue"));
         return businessServicesClient.get()
                 .uri(uriBuilder -> uriBuilder.path("/api/market-data/etf-holdings")
                         .queryParam("code", code)
-                        .queryParam("market", "台股")
+                        .queryParam("market", market)
                         .build())
                 .retrieve()
                 .bodyToMono(MAP)
@@ -391,6 +504,23 @@ public class DashboardBffController {
     private static void mergeInto(Map<String, Aggregate> agg, String name, String code, BigDecimal v) {
         if (name == null || name.isBlank() || v == null) return;
         Aggregate a = agg.computeIfAbsent(name, Aggregate::new);
+        if ((a.code == null || a.code.isBlank()) && code != null && !code.isBlank()) {
+            a.code = code;
+        }
+        a.value = a.value.add(v);
+    }
+
+    /**
+     * 以代號為聚合鍵（美股 Yahoo 成分股有 symbol；台股 mergeInto 則以股名為鍵）。
+     * key 取 code，缺代號時 fallback 用 name；displayName / code 取首見非空值。
+     */
+    private static void mergeByCode(Map<String, Aggregate> agg, String code, String name, BigDecimal v) {
+        if (v == null) return;
+        String key = (code != null && !code.isBlank()) ? code
+                : (name != null && !name.isBlank() ? name : null);
+        if (key == null) return;
+        String displayName = (name != null && !name.isBlank()) ? name : code;
+        Aggregate a = agg.computeIfAbsent(key, k -> new Aggregate(displayName));
         if ((a.code == null || a.code.isBlank()) && code != null && !code.isBlank()) {
             a.code = code;
         }

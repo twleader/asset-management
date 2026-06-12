@@ -49,6 +49,10 @@ public class MarketDataFetchService {
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
             + "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
+    // Yahoo crumb / quoteSummary（topHoldings）的反 bot WAF 對長 Chrome UA 一律回 429（Too Many Requests），
+    // 僅短 UA "Mozilla/5.0" 放行（v8/chart 端點則長 UA 可用）。故獨立常數只用於 crumb + quoteSummary。
+    private static final String YAHOO_UA = "Mozilla/5.0";
+
     private final HttpClient httpClient;
     private final ObjectMapper mapper = new ObjectMapper();
     private final String finmindToken;
@@ -883,8 +887,8 @@ public class MarketDataFetchService {
             throw new RuntimeException("Yahoo Finance crumb negative cache 中");
         }
         // prime cookie 到檔案（fc.yahoo.com 回 404 但帶 Set-Cookie: A1/A3）
-        runCurl("-s", "-c", YAHOO_COOKIE_FILE, "-A", UA, "https://fc.yahoo.com");
-        String crumb = runCurl("-s", "-b", YAHOO_COOKIE_FILE, "-A", UA,
+        runCurl("-s", "-c", YAHOO_COOKIE_FILE, "-A", YAHOO_UA, "https://fc.yahoo.com");
+        String crumb = runCurl("-s", "-b", YAHOO_COOKIE_FILE, "-A", YAHOO_UA,
                 "https://query2.finance.yahoo.com/v1/test/getcrumb").trim();
         if (!crumb.isBlank() && !crumb.contains(" ") && crumb.length() <= 50
                 && !crumb.startsWith("{") && !crumb.contains("Too Many")) {
@@ -895,9 +899,9 @@ public class MarketDataFetchService {
         throw new RuntimeException("無法取得 Yahoo Finance crumb");
     }
 
-    /** 以 curl 子程序抓 Yahoo（帶 prime 過的 cookie 檔）；回傳 response body。 */
+    /** 以 curl 子程序抓 Yahoo quoteSummary（帶 prime 過的 cookie 檔 + 短 UA）；回傳 response body。 */
     private String yahooApiGet(String url) throws Exception {
-        return runCurl("-s", "-b", YAHOO_COOKIE_FILE, "-A", UA, url);
+        return runCurl("-s", "-b", YAHOO_COOKIE_FILE, "-A", YAHOO_UA, url);
     }
 
     /** 執行 curl 並回傳 stdout（合併 stderr）。 */

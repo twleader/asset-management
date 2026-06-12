@@ -47,11 +47,12 @@
               <el-tabs v-model="allocationTab" class="chart-market-tabs" style="margin:0">
                 <el-tab-pane label="資產類別" name="category" />
                 <el-tab-pane label="台股個股" name="twStock" />
+                <el-tab-pane label="美股個股" name="usStock" />
               </el-tabs>
             </div>
           </template>
           <v-chart v-if="allocationTab === 'category'" :option="pieOption" style="height: 320px" autoresize />
-          <div v-else>
+          <div v-else-if="allocationTab === 'twStock'">
             <div v-if="twLookthroughLoading" style="height:320px;display:flex;align-items:center;justify-content:center;color:#94a3b8">
               <el-icon class="is-loading" style="margin-right:6px"><Loading /></el-icon>
               載入台股個股穿透中…
@@ -62,6 +63,19 @@
             <v-chart v-else :option="twStockPieOption" style="height: 320px" autoresize />
             <div v-if="twLookthroughDegraded.length" class="lookthrough-degraded-note">
               以下 ETF 查無成分股資料，已以代號自身計入：{{ twLookthroughDegraded.map(d => d.code).join('、') }}
+            </div>
+          </div>
+          <div v-else>
+            <div v-if="usLookthroughLoading" style="height:320px;display:flex;align-items:center;justify-content:center;color:#94a3b8">
+              <el-icon class="is-loading" style="margin-right:6px"><Loading /></el-icon>
+              載入美股個股穿透中…
+            </div>
+            <div v-else-if="!usLookthroughHasData" style="height:320px;display:flex;align-items:center;justify-content:center;color:#94a3b8">
+              此快照無美股部位
+            </div>
+            <v-chart v-else :option="usStockPieOption" style="height: 320px" autoresize />
+            <div v-if="usLookthroughEtfCount > 0" class="lookthrough-degraded-note">
+              美股 ETF 僅揭露前 10 大成份股，其餘已計入「其它」
             </div>
           </div>
         </el-card>
@@ -408,6 +422,9 @@ const allocationTab = ref('category')
 const twLookthrough = ref(null)
 const twLookthroughLoading = ref(false)
 const twLookthroughCache = new Map() // snapshotId -> payload
+const usLookthrough = ref(null)
+const usLookthroughLoading = ref(false)
+const usLookthroughCache = new Map() // snapshotId -> payload
 
 let priceStream = null
 let statusTimer = null
@@ -808,12 +825,82 @@ async function loadTwStockLookthrough(snapshotId) {
   }
 }
 
+// 美股個股穿透（鏡像台股；穿透演算法差異在 BFF /us-stock-lookthrough：依真實權重、未揭露歸其它、代號聚合）
+const usLookthroughHasData = computed(() => {
+  const lt = usLookthrough.value
+  return !!(lt && Array.isArray(lt.items) && (lt.items.length > 0 || Number(lt.others?.value || 0) > 0))
+})
+const usLookthroughEtfCount = computed(() => Number(usLookthrough.value?.lookthroughEtfCount || 0))
+const usStockPieOption = computed(() => {
+  const lt = usLookthrough.value
+  if (!lt) return {}
+  const segs = []
+  ;(lt.items || []).forEach((it, i) => {
+    // 美股圖例/標籤顯示代號（Yahoo 成分股英文全名過長）；全名帶在 data 上供 tooltip
+    const label = it.stockCode || it.stockName || ''
+    segs.push({
+      value: Number(it.value || 0),
+      name: label,
+      fullName: it.stockName || '',
+      color: TW_PIE_COLORS[i % (TW_PIE_COLORS.length - 1)]
+    })
+  })
+  const othersVal = Number(lt.others?.value || 0)
+  if (othersVal > 0) {
+    segs.push({ value: othersVal, name: '其它', fullName: '', color: TW_PIE_COLORS[TW_PIE_COLORS.length - 1] })
+  }
+  const data = segs.filter(d => d.value > 0)
+  return {
+    tooltip: {
+      trigger: 'item',
+      // hover 細節：顯示「代號 英文全名」+ 金額（台幣）+ 佔比
+      formatter: p => {
+        const fn = p.data && p.data.fullName ? ` ${p.data.fullName}` : ''
+        return `${p.name}${fn}<br/>$${Number(p.value).toLocaleString(undefined, {maximumFractionDigits: 0})} (${p.percent}%)`
+      }
+    },
+    legend: { show: false },
+    series: [{
+      type: 'pie',
+      radius: ['40%', '70%'],
+      center: ['50%', '50%'],
+      data: data.map(d => ({ value: d.value, name: d.name, fullName: d.fullName, itemStyle: { color: d.color } })),
+      label: { formatter: '{b}\n{d}%', fontSize: 11 },
+      itemStyle: { borderRadius: 6 }
+    }]
+  }
+})
+
+async function loadUsStockLookthrough(snapshotId) {
+  if (!snapshotId) return
+  if (usLookthroughCache.has(snapshotId)) {
+    usLookthrough.value = usLookthroughCache.get(snapshotId)
+    return
+  }
+  usLookthroughLoading.value = true
+  try {
+    const data = await bffApi.dashboard.usStockLookthrough(snapshotId)
+    usLookthroughCache.set(snapshotId, data)
+    // race 防護：抓回來時若 effective snapshot 已切走（hover 移動或下拉換快照），不覆寫畫面
+    if (effectiveSnapshotId.value === snapshotId) {
+      usLookthrough.value = data
+    }
+  } catch (e) {
+    console.warn('美股個股穿透載入失敗:', e)
+    usLookthrough.value = null
+  } finally {
+    usLookthroughLoading.value = false
+  }
+}
+
 watch([allocationTab, effectiveSnapshotId], ([tab, sid]) => {
-  if (tab !== 'twStock' || sid == null) return
-  if (twLookthroughCache.has(sid)) {
-    twLookthrough.value = twLookthroughCache.get(sid)
-  } else {
-    loadTwStockLookthrough(sid)
+  if (sid == null) return
+  if (tab === 'twStock') {
+    if (twLookthroughCache.has(sid)) twLookthrough.value = twLookthroughCache.get(sid)
+    else loadTwStockLookthrough(sid)
+  } else if (tab === 'usStock') {
+    if (usLookthroughCache.has(sid)) usLookthrough.value = usLookthroughCache.get(sid)
+    else loadUsStockLookthrough(sid)
   }
 })
 
