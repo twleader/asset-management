@@ -2820,3 +2820,35 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [ ] 104.7 bug fix（external-materials-service）：實機驗證 N225「當日」走勢時發現後場最後半小時（15:00–15:30）被截掉、線在 15:00 就停——`INDEX_TRADING_HOURS` 的 N225 收盤誤設 15:00（舊制）；東京證交所 2024-11-05 起收盤延至 15:30（新增收盤競價），Yahoo 5m 確有 15:05–15:30 之 bar。改 N225 close 為 15:30 後線延伸至 15:30、收盤點位/漲跌取到真正收盤值。重建 external-materials-service 驗證
 
 
+### Task 105: 海外指數日線自動回補排程（修當日走勢「昨收」過時 → 漲跌% 失真）
+
+對應 Requirements: Requirement 18（[requirements.md:379-392](spec/requirements.md)）
+
+#### 背景
+
+實機回報：費城半導體「當日」走勢顯示「昨收 12,330.30 ▲1,711.47 **+13.88%**」，但盤中只在 13,894~14,041（實際約 +5%）。
+
+根因（兩個來源新鮮度不一致）：
+- 「當日走勢」的**現在點位**由 BFF 即時抓 Yahoo（`/api/index-intraday`，最新交易日）；**昨收**則由 `GdpTwseBffController.previousCloseBefore()` 從日線表 `us_index_daily_history` 取「嚴格早於當日的最後一筆」（Task 102 設計）。當日線表最新只到數日前，昨收就退回那筆舊收盤，與即時點位相減 → 漲跌% 爆量。
+- **真正缺口**：`us_index_daily_history` 原本**只靠前端「回補日線（10 年）」按鈕手動觸發、無排程**。Task 104 新增的 FTSE/DAX/KOSPI/N225 是開發時剛手動 backfill 才最新；原有 DJI/SPX/IXIC/SOX 自上次手動回補日（實機 2026-06-10）後就停滯，缺 06-11/06-12/06-15。台股大盤日線由 external-materials `TwseIndexPoller` 排程顧著故一直最新，海外 8 指數缺對應排程。
+- Task 102 原假設「日線未回補導致昨收**缺值**→ 回 null 不顯示」，但實際失效模式是「日線**過時**→ 昨收非 null 但是錯的舊值」，故當時的 null 守門擋不住。
+- 觀察清單 0000（`WatchStockService.toIndexResponse`）用「同表相鄰兩筆」算漲跌，過時只會整體偏舊、不會爆 %；故此 bug 為「當日走勢圖」獨有（混即時 + 過時兩來源）。
+
+設計決策：
+- **不改昨收的事實來源**（維持 Task 102「昨收讀日線表、與觀察清單同義同源」），改為**讓日線表恆保最新**——新增排程自動回補海外 8 指數日線，比照台股 `TwseIndexPoller` 的角色。
+- **重用既有路徑**：排程呼叫 `MacroHistoryService.refreshUsIndexDaily(code)`（＝手動按鈕同一條 Yahoo `range=10y` idempotent upsert），不另寫抓取 / 寫入邏輯（避免重複）。
+- 代碼清單收斂為單一來源 `MacroHistoryService.OVERSEAS_INDEX_CODES`，`MacroHistoryController` 的 refresh 守門白名單改引用之（去除重複硬編）。
+- 排程放 business-services（`backend`，已 `@EnableScheduling`），因回補與 upsert 邏輯在此服務；每日 07:00 Asia/Taipei（TUE-SAT，美股 16:00 ET 收盤後足夠緩衝，亞/歐/美最新交易日皆已收）+ 開機 self-heal（任一指數最新日期 > 4 日即補，處理服務於排程時點未運行）。
+
+#### Steps:
+
+- [x] 105.0 一次性修復：對停滯的 DJI/IXIC/SOX/SPX 觸發 `POST /api/bff/gdp-twse/refresh-index-daily`，8 指數日線補到最新交易日（畫面數字即時恢復正確）
+- [x] 105.1 backend `MacroHistoryService`：新增 `public static final List<String> OVERSEAS_INDEX_CODES`（單一清單）
+- [x] 105.2 backend `MacroHistoryController`：refresh 守門白名單改引用 `MacroHistoryService.OVERSEAS_INDEX_CODES`（去重）
+- [x] 105.3 backend `UsIndexDailyHistoryRepository`：新增 `findTopByIndexCodeOrderByTradingDateDesc`（self-heal 取各指數最新日期）
+- [x] 105.4 backend 新增 `IndexDailyRefreshScheduler`：`@Scheduled(0 0 7 * * TUE-SAT, Asia/Taipei)` 逐一回補 8 指數 + `@EventListener(ApplicationReadyEvent)` self-heal（過時 > 4 日才補；500ms Yahoo 間隔）
+- [ ] 105.5 spec：`requirements.md` Req 18 加「海外指數日線自動回補」AC + 昨收 AC 補註過時失效、`design.md` 海外指數日線排程說明、`tasks.md` 本任務
+- [ ] 105.6 `mvn -q compile`（backend）通過
+- [ ] 105.7 Docker 重 build + recreate（business-services）後驗證：費城半導體「當日」標題列昨收 ≈ 前一交易日收盤、漲跌% 回到合理區間（非 +13.88%）；business-services log 出現 self-heal「皆為最新，略過」或回補完成訊息
+
+

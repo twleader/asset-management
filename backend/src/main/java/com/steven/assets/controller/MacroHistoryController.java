@@ -29,12 +29,8 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class MacroHistoryController {
 
-    /**
-     * 海外指數合法代碼（refresh 守門）。
-     * 美股四大：道瓊 / 標普500 / 那斯達克綜合 / 費城半導體；海外主要：英國富時100 / 德國DAX / 韓國KOSPI / 日經225。
-     */
-    private static final Set<String> US_INDEX_CODES =
-            Set.of("DJI", "SPX", "IXIC", "SOX", "FTSE", "DAX", "KOSPI", "N225");
+    /** 海外指數合法代碼（refresh 守門）；單一清單由 {@link MacroHistoryService#OVERSEAS_INDEX_CODES} 提供（與自動回補排程共用）。 */
+    private static final Set<String> US_INDEX_CODES = Set.copyOf(MacroHistoryService.OVERSEAS_INDEX_CODES);
 
     private final TaiwanGdpPerCapitaHistoryRepository gdpRepo;
     private final KoreaGdpPerCapitaHistoryRepository koreaGdpRepo;
