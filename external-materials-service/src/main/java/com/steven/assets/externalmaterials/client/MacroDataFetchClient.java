@@ -299,7 +299,8 @@ public class MacroDataFetchClient {
             "FTSE",  new TradingHours(java.time.LocalTime.of(8, 0),  java.time.LocalTime.of(16, 30)),
             "DAX",   new TradingHours(java.time.LocalTime.of(9, 0),  java.time.LocalTime.of(17, 30)),
             "KOSPI", new TradingHours(java.time.LocalTime.of(9, 0),  java.time.LocalTime.of(15, 30)),
-            "N225",  new TradingHours(java.time.LocalTime.of(9, 0),  java.time.LocalTime.of(15, 0)));
+            // 日經 225：東京證交所 2024-11-05 起收盤由 15:00 延後至 15:30（新增收盤競價）；午休 11:30–12:30 無 bar→留 null
+            "N225",  new TradingHours(java.time.LocalTime.of(9, 0),  java.time.LocalTime.of(15, 30)));
 
     /** 指數「當日」分時一點：time 為當地時區 ISO LocalDateTime（"YYYY-MM-DDTHH:mm:ss"），close 為 5 分 K 收盤。 */
     public record IndexIntradayPoint(String time, BigDecimal close) {}

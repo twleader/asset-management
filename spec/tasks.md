@@ -2806,7 +2806,7 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 設計決策：
 - **沿用 `us_index_daily_history` 同一條管線**（依 `index_code` 通用化），不另建表、不改 entity/repo/changelog → **零遷移**。表名與 `/api/us-daily-index` endpoint 名沿用（語意一般化為「海外指數」，避免大規模 rename 風險）。
 - 日線 timestamp → 交易日改讀 Yahoo meta `exchangeTimezoneName`（取代 `fetchUsIndexDaily` 寫死的 `America/New_York`）：美股 daily bar timestamp 在開盤時刻（09:30 ET），轉 NY 與轉交易所時區同結果；但亞洲/歐洲指數 daily bar timestamp 在 UTC 午夜（＝當地開盤），用 NY 會把日期回退一日（東京 6/15→6/14）。改讀交易所時區後全市場一致正確（intraday 早已這樣處理）。
-- 當日分時補格的交易時段改用 `INDEX_TRADING_HOURS` map（取代寫死的「TWSE 09:00–13:30 / else 09:30–16:00」）：FTSE 08:00–16:30、DAX 09:00–17:30、KOSPI 09:00–15:30、N225 09:00–15:00（午休 11:30–12:30 Yahoo 無 bar→留 null，屬預期）。
+- 當日分時補格的交易時段改用 `INDEX_TRADING_HOURS` map（取代寫死的「TWSE 09:00–13:30 / else 09:30–16:00」）：FTSE 08:00–16:30、DAX 09:00–17:30、KOSPI 09:00–15:30、N225 09:00–15:30（東京證交所 2024-11-05 起收盤由 15:00 延至 15:30；午休 11:30–12:30 Yahoo 無 bar→留 null，屬預期）。
 - BFF / business service / InternalPriceController 對非 TWSE 市場本就以 `code`/`market` 字串通用 passthrough，僅 `MacroHistoryController` 的 refresh 白名單需加新 code；其餘多為註解更新。
 
 #### Steps:
@@ -2817,5 +2817,6 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [ ] 104.4 註解一般化（BFF `GdpTwseBffController`、`MacroHistoryService`、`UsIndexDailyHistory`、`InternalPriceController`）：將「美股四大指數 / {DJI,SPX,IXIC,SOX}」字樣補上新增的海外指數，避免誤導
 - [ ] 104.5 `mvn -q compile`（backend + bff + external-materials-service）通過
 - [ ] 104.6 Docker 重 build + recreate（frontend / bff / backend / external-materials-service）後驗證：下拉出現英德韓日四項；各市場按「回補日線（10 年）」後日線圖正常（日期不偏移）；切「當日」顯示當地時區分時走勢線與昨收/漲跌/漲跌%
+- [ ] 104.7 bug fix（external-materials-service）：實機驗證 N225「當日」走勢時發現後場最後半小時（15:00–15:30）被截掉、線在 15:00 就停——`INDEX_TRADING_HOURS` 的 N225 收盤誤設 15:00（舊制）；東京證交所 2024-11-05 起收盤延至 15:30（新增收盤競價），Yahoo 5m 確有 15:05–15:30 之 bar。改 N225 close 為 15:30 後線延伸至 15:30、收盤點位/漲跌取到真正收盤值。重建 external-materials-service 驗證
 
 
