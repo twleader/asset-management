@@ -37,6 +37,13 @@ public class MacroHistoryService {
     private static final String IMF_GDP_INDICATOR = "NGDPDPC";
     private static final String IMF_GROWTH_INDICATOR = "NGDP_RPCH";
 
+    /**
+     * 海外指數合法代碼（日線回補 refresh 守門 + 自動回補排程共用單一清單）。
+     * 美股四大：道瓊 / 標普500 / 那斯達克綜合 / 費城半導體；海外主要：英國富時100 / 德國DAX / 韓國KOSPI / 日經225。
+     */
+    public static final List<String> OVERSEAS_INDEX_CODES =
+            List.of("DJI", "SPX", "IXIC", "SOX", "FTSE", "DAX", "KOSPI", "N225");
+
     private final TaiwanGdpPerCapitaHistoryRepository gdpRepo;
     private final KoreaGdpPerCapitaHistoryRepository koreaGdpRepo;
     private final TwseIndexDailyHistoryRepository twseDailyRepo;
