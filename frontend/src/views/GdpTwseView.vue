@@ -73,13 +73,17 @@ const twGrowth = ref([])
 const krGrowth = ref([])
 const refreshing = ref(false)
 
-// 指數日線（近 10 年）— 可切換台股大盤與美股四大指數
+// 指數日線（近 10 年）— 可切換台股大盤、美股四大指數與海外主要指數（英德韓日）
 const MARKETS = [
-  { value: 'TWSE', label: '台股大盤' },
-  { value: 'DJI',  label: '道瓊工業' },
-  { value: 'SPX',  label: '標普 500' },
-  { value: 'IXIC', label: '那斯達克綜合' },
-  { value: 'SOX',  label: '費城半導體' }
+  { value: 'TWSE',  label: '台股大盤' },
+  { value: 'DJI',   label: '道瓊工業' },
+  { value: 'SPX',   label: '標普 500' },
+  { value: 'IXIC',  label: '那斯達克綜合' },
+  { value: 'SOX',   label: '費城半導體' },
+  { value: 'FTSE',  label: '英國富時 100' },
+  { value: 'DAX',   label: '德國 DAX' },
+  { value: 'KOSPI', label: '韓國 KOSPI' },
+  { value: 'N225',  label: '日經 225' }
 ]
 const market = ref('TWSE')
 const marketLabel = computed(() => MARKETS.find(m => m.value === market.value)?.label ?? '台股大盤')

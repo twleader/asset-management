@@ -167,14 +167,14 @@ public class InternalPriceController {
         return macro.fetchTwseMonthlyDaily(year, month);
     }
 
-    /** 美股四大指數近 10 年每日 OHLC（Yahoo v8 chart，range=10y）。code ∈ {DJI,SPX,IXIC,SOX}。 */
+    /** 海外指數近 10 年每日 OHLC（Yahoo v8 chart，range=10y）。code ∈ {DJI,SPX,IXIC,SOX,FTSE,DAX,KOSPI,N225}。 */
     @GetMapping("/macro/us-index")
     public java.util.List<com.steven.assets.externalmaterials.client.MacroDataFetchClient.DailyOhlc>
         usIndex(@RequestParam String code) {
         return macro.fetchUsIndexDaily(code);
     }
 
-    /** 指數「當日」分時（Yahoo 5m，最新交易日）。market ∈ {TWSE,DJI,SPX,IXIC,SOX}。 */
+    /** 指數「當日」分時（Yahoo 5m，最新交易日）。market ∈ {TWSE,DJI,SPX,IXIC,SOX,FTSE,DAX,KOSPI,N225}。 */
     @GetMapping("/macro/index-intraday")
     public java.util.List<com.steven.assets.externalmaterials.client.MacroDataFetchClient.IndexIntradayPoint>
         indexIntraday(@RequestParam String market) {

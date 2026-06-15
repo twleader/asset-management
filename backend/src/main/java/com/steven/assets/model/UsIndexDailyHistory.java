@@ -10,10 +10,11 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 
 /**
- * 美股四大指數每日 OHLC。
- * Requirement 18：「GDP + 台股大盤」頁面之日線圖支援「台股 / 美股四大指數」切換。
- * index_code ∈ {DJI 道瓊, SPX 標普500, IXIC 那斯達克綜合, SOX 費城半導體}。
- * 來源：Yahoo Finance v8 chart API（^DJI / ^GSPC / ^IXIC / ^SOX，range=10y&interval=1d）。
+ * 海外指數每日 OHLC（美股四大 + 英德韓日）。表名沿用 us_index_daily_history，語意已一般化為「海外指數日線」。
+ * Requirement 18：「GDP + 台股大盤」頁面之日線圖支援「台股 / 海外指數」切換。
+ * index_code ∈ {DJI 道瓊, SPX 標普500, IXIC 那斯達克綜合, SOX 費城半導體,
+ *               FTSE 英國富時100, DAX 德國DAX, KOSPI 韓國KOSPI, N225 日經225}。
+ * 來源：Yahoo Finance v8 chart API（^DJI / ^GSPC / ^IXIC / ^SOX / ^FTSE / ^GDAXI / ^KS11 / ^N225，range=10y&interval=1d）。
  * 與 {@link TwseIndexDailyHistory} 分表：台股大盤為單一指數（無 code 欄）且已與觀察清單 0000 耦合。
  */
 @Entity

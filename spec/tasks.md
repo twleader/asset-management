@@ -2795,3 +2795,27 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [ ] 103.8 bug fix（external-materials-service）：實作驗證時發現 `MarketDataFetchService` 取 Yahoo crumb / quoteSummary（topHoldings）沿用長 Chrome UA，被 Yahoo 反 bot WAF 回 429（Too Many Requests），導致**所有**美股 ETF 成分股查無、穿透失效（同 IP 短 UA `Mozilla/5.0` 卻回 200）。新增 `YAHOO_UA = "Mozilla/5.0"` 常數，crumb prime（`fc.yahoo.com`）/ `getcrumb` / `yahooApiGet`（quoteSummary）三處 curl 改用之；`v8/chart` 端點維持長 UA（仍正常）。重建 external-materials-service 後 VOO/VT 正常回前 10 大成分股
 
 
+### Task 104: 股市分析指數下拉新增海外四指數（英國 / 德國 / 韓國 / 日本）
+
+對應 Requirements: Requirement 18（[requirements.md:379-392](spec/requirements.md)）
+
+#### 背景
+
+承 Task 95 / 96，指數日線 + 當日分時的市場下拉原為「台股大盤 + 美股四大指數」五項。使用者要再加入英、德、韓、日四個主要海外指數：英國富時 100（FTSE / `^FTSE`）、德國 DAX（DAX / `^GDAXI`）、韓國 KOSPI（KOSPI / `^KS11`）、日經 225（N225 / `^N225`）。
+
+設計決策：
+- **沿用 `us_index_daily_history` 同一條管線**（依 `index_code` 通用化），不另建表、不改 entity/repo/changelog → **零遷移**。表名與 `/api/us-daily-index` endpoint 名沿用（語意一般化為「海外指數」，避免大規模 rename 風險）。
+- 日線 timestamp → 交易日改讀 Yahoo meta `exchangeTimezoneName`（取代 `fetchUsIndexDaily` 寫死的 `America/New_York`）：美股 daily bar timestamp 在開盤時刻（09:30 ET），轉 NY 與轉交易所時區同結果；但亞洲/歐洲指數 daily bar timestamp 在 UTC 午夜（＝當地開盤），用 NY 會把日期回退一日（東京 6/15→6/14）。改讀交易所時區後全市場一致正確（intraday 早已這樣處理）。
+- 當日分時補格的交易時段改用 `INDEX_TRADING_HOURS` map（取代寫死的「TWSE 09:00–13:30 / else 09:30–16:00」）：FTSE 08:00–16:30、DAX 09:00–17:30、KOSPI 09:00–15:30、N225 09:00–15:00（午休 11:30–12:30 Yahoo 無 bar→留 null，屬預期）。
+- BFF / business service / InternalPriceController 對非 TWSE 市場本就以 `code`/`market` 字串通用 passthrough，僅 `MacroHistoryController` 的 refresh 白名單需加新 code；其餘多為註解更新。
+
+#### Steps:
+
+- [ ] 104.1 frontend `GdpTwseView.vue`：`MARKETS` 陣列加 4 項（FTSE「英國富時 100」/ DAX「德國 DAX」/ KOSPI「韓國 KOSPI」/ N225「日經 225」）
+- [ ] 104.2 ext-materials `MacroDataFetchClient`：`US_INDEX_YAHOO` 與 `INDEX_INTRADAY_YAHOO` 各加 4 個 symbol；`fetchUsIndexDaily` 改依 meta `exchangeTimezoneName` 轉交易日（default NY）；當日時段抽成 `INDEX_TRADING_HOURS` map（含 4 市場，未知 fallback 09:30–16:00）
+- [ ] 104.3 backend `MacroHistoryController`：refresh 白名單 `US_INDEX_CODES` 加 `FTSE/DAX/KOSPI/N225`；相關註解一般化為「海外指數」
+- [ ] 104.4 註解一般化（BFF `GdpTwseBffController`、`MacroHistoryService`、`UsIndexDailyHistory`、`InternalPriceController`）：將「美股四大指數 / {DJI,SPX,IXIC,SOX}」字樣補上新增的海外指數，避免誤導
+- [ ] 104.5 `mvn -q compile`（backend + bff + external-materials-service）通過
+- [ ] 104.6 Docker 重 build + recreate（frontend / bff / backend / external-materials-service）後驗證：下拉出現英德韓日四項；各市場按「回補日線（10 年）」後日線圖正常（日期不偏移）；切「當日」顯示當地時區分時走勢線與昨收/漲跌/漲跌%
+
+
