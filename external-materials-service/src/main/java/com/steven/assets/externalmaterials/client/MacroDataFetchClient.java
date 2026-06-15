@@ -207,22 +207,32 @@ public class MacroDataFetchClient {
         catch (NumberFormatException e) { return null; }
     }
 
-    /** 美股四大指數代碼 → Yahoo symbol（道瓊 / 標普500 / 那斯達克綜合 / 費城半導體）。 */
+    /**
+     * 海外指數代碼 → Yahoo symbol。
+     * 美股四大：道瓊 / 標普500 / 那斯達克綜合 / 費城半導體；
+     * 海外主要：英國富時100 / 德國DAX / 韓國KOSPI / 日經225。
+     */
     private static final Map<String, String> US_INDEX_YAHOO = Map.of(
             "DJI", "^DJI",
             "SPX", "^GSPC",
             "IXIC", "^IXIC",
-            "SOX", "^SOX");
+            "SOX", "^SOX",
+            "FTSE", "^FTSE",
+            "DAX", "^GDAXI",
+            "KOSPI", "^KS11",
+            "N225", "^N225");
 
     /**
-     * 美股四大指數近 10 年每日 OHLC（Yahoo Finance v8 chart API，range=10y&interval=1d）。
+     * 海外指數（美股四大 + 英德韓日）近 10 年每日 OHLC（Yahoo Finance v8 chart API，range=10y&interval=1d）。
      * 用 curl 子程序避開 Yahoo 對 Java HTTP/2 fingerprint 的封鎖（與 PriceFetchClient.fetchUsHistoricalRange 同 pattern）。
-     * timestamp 以 America/New_York 轉交易日；無資料 / 不認得 code 回空 list（呼叫端略過）。
+     * timestamp → 交易日依 Yahoo meta exchangeTimezoneName 轉當地時區（美股 daily bar 在開盤時刻，轉 NY 與交易所
+     * 時區同結果；但亞洲/歐洲指數 daily bar 在 UTC 午夜＝當地開盤，用 NY 會把日期回退一日，故一律讀交易所時區）。
+     * 無資料 / 不認得 code 回空 list（呼叫端略過）。
      */
     public List<DailyOhlc> fetchUsIndexDaily(String indexCode) {
         String symbol = US_INDEX_YAHOO.get(indexCode);
         if (symbol == null) {
-            log.warn("未知美股指數代碼: {}", indexCode);
+            log.warn("未知海外指數代碼: {}", indexCode);
             return Collections.emptyList();
         }
         try {
@@ -239,7 +249,9 @@ public class MacroDataFetchClient {
                 log.warn("Yahoo 指數 {} 無資料: {}", symbol, err.isEmpty() ? "no timestamps" : err);
                 return Collections.emptyList();
             }
-            java.time.ZoneId zone = java.time.ZoneId.of("America/New_York");
+            // 依交易所時區轉交易日（美股＝America/New_York、海外指數＝各自時區）；缺值 fallback NY
+            java.time.ZoneId zone = java.time.ZoneId.of(
+                    chart.path("meta").path("exchangeTimezoneName").asText("America/New_York"));
             List<DailyOhlc> out = new ArrayList<>();
             for (int i = 0; i < timestamps.size(); i++) {
                 JsonNode close = quotes.path("close").path(i);
@@ -264,13 +276,30 @@ public class MacroDataFetchClient {
         return BigDecimal.valueOf(v.asDouble()).setScale(4, RoundingMode.HALF_UP);
     }
 
-    /** 指數市場代碼 → Yahoo symbol（含台股大盤 ^TWII，供「當日」分時）。 */
+    /** 指數市場代碼 → Yahoo symbol（含台股大盤 ^TWII 與海外指數，供「當日」分時）。 */
     private static final Map<String, String> INDEX_INTRADAY_YAHOO = Map.of(
             "TWSE", "^TWII",
             "DJI", "^DJI",
             "SPX", "^GSPC",
             "IXIC", "^IXIC",
-            "SOX", "^SOX");
+            "SOX", "^SOX",
+            "FTSE", "^FTSE",
+            "DAX", "^GDAXI",
+            "KOSPI", "^KS11",
+            "N225", "^N225");
+
+    /** 各指數市場交易時段（當地時區；補滿「當日」分時 5 分格用）。未列市場 fallback 09:30–16:00。 */
+    private record TradingHours(java.time.LocalTime open, java.time.LocalTime close) {}
+    private static final Map<String, TradingHours> INDEX_TRADING_HOURS = Map.of(
+            "TWSE",  new TradingHours(java.time.LocalTime.of(9, 0),  java.time.LocalTime.of(13, 30)),
+            "DJI",   new TradingHours(java.time.LocalTime.of(9, 30), java.time.LocalTime.of(16, 0)),
+            "SPX",   new TradingHours(java.time.LocalTime.of(9, 30), java.time.LocalTime.of(16, 0)),
+            "IXIC",  new TradingHours(java.time.LocalTime.of(9, 30), java.time.LocalTime.of(16, 0)),
+            "SOX",   new TradingHours(java.time.LocalTime.of(9, 30), java.time.LocalTime.of(16, 0)),
+            "FTSE",  new TradingHours(java.time.LocalTime.of(8, 0),  java.time.LocalTime.of(16, 30)),
+            "DAX",   new TradingHours(java.time.LocalTime.of(9, 0),  java.time.LocalTime.of(17, 30)),
+            "KOSPI", new TradingHours(java.time.LocalTime.of(9, 0),  java.time.LocalTime.of(15, 30)),
+            "N225",  new TradingHours(java.time.LocalTime.of(9, 0),  java.time.LocalTime.of(15, 0)));
 
     /** 指數「當日」分時一點：time 為當地時區 ISO LocalDateTime（"YYYY-MM-DDTHH:mm:ss"），close 為 5 分 K 收盤。 */
     public record IndexIntradayPoint(String time, BigDecimal close) {}
@@ -314,12 +343,12 @@ public class MacroDataFetchClient {
             }
             if (byDate.isEmpty()) return Collections.emptyList();
             java.time.LocalDate day = byDate.lastKey();
-            // 交易時段 open/close（美股四指數 09:30–16:00 ET、台股 09:00–13:30）：
+            // 交易時段 open/close（各市場當地時區，見 INDEX_TRADING_HOURS）：
             // 補滿整個時段的 5 分格，盤中尚未到的時段 close 留 null → x 軸固定延伸到「收盤時間」而非「現在時間」
-            java.time.LocalTime open = "TWSE".equals(market)
-                    ? java.time.LocalTime.of(9, 0) : java.time.LocalTime.of(9, 30);
-            java.time.LocalTime close = "TWSE".equals(market)
-                    ? java.time.LocalTime.of(13, 30) : java.time.LocalTime.of(16, 0);
+            TradingHours hours = INDEX_TRADING_HOURS.getOrDefault(
+                    market, new TradingHours(java.time.LocalTime.of(9, 30), java.time.LocalTime.of(16, 0)));
+            java.time.LocalTime open = hours.open();
+            java.time.LocalTime close = hours.close();
             // 實際 bar 對到 5 分格（floor）；最後一筆「現價」bar（非整 5 分，如 14:16）也歸入對應格
             java.util.Map<java.time.LocalDateTime, BigDecimal> bySlot = new java.util.HashMap<>();
             for (IndexIntradayPoint p : byDate.get(day)) {

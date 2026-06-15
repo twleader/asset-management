@@ -235,7 +235,7 @@ public class MacroHistoryService {
     }
 
     /**
-     * 美股單一指數（DJI/SPX/IXIC/SOX）近 10 年日線回補。
+     * 海外單一指數（DJI/SPX/IXIC/SOX/FTSE/DAX/KOSPI/N225）近 10 年日線回補。
      * 經 /internal/macro/us-index proxy 取 Yahoo v8 chart（range=10y，一次呼叫即整段），upsert 至 us_index_daily_history。
      */
     @Transactional
@@ -275,7 +275,7 @@ public class MacroHistoryService {
 
     /**
      * 指數「當日」分時走勢 proxy（transient，不寫 DB）。
-     * market ∈ {TWSE,DJI,SPX,IXIC,SOX}；回最新交易日整天的 5 分 K 收盤序列。
+     * market ∈ {TWSE,DJI,SPX,IXIC,SOX,FTSE,DAX,KOSPI,N225}；回最新交易日整天的 5 分 K 收盤序列。
      */
     public List<IntradayPoint> fetchIndexIntraday(String market) {
         try {

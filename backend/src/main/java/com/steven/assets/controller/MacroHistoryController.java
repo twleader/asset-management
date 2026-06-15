@@ -22,15 +22,19 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * 股市分析頁（Requirement 18）資料來源：台/韓人均 GDP、台股大盤日線、美股四大指數日線、指數當日分時。
+ * 股市分析頁（Requirement 18）資料來源：台/韓人均 GDP、台股大盤日線、海外指數日線、指數當日分時。
  */
 @RestController
 @RequestMapping("/api")
 @RequiredArgsConstructor
 public class MacroHistoryController {
 
-    /** 美股四大指數合法代碼（道瓊 / 標普500 / 那斯達克綜合 / 費城半導體）。 */
-    private static final Set<String> US_INDEX_CODES = Set.of("DJI", "SPX", "IXIC", "SOX");
+    /**
+     * 海外指數合法代碼（refresh 守門）。
+     * 美股四大：道瓊 / 標普500 / 那斯達克綜合 / 費城半導體；海外主要：英國富時100 / 德國DAX / 韓國KOSPI / 日經225。
+     */
+    private static final Set<String> US_INDEX_CODES =
+            Set.of("DJI", "SPX", "IXIC", "SOX", "FTSE", "DAX", "KOSPI", "N225");
 
     private final TaiwanGdpPerCapitaHistoryRepository gdpRepo;
     private final KoreaGdpPerCapitaHistoryRepository koreaGdpRepo;
@@ -83,7 +87,7 @@ public class MacroHistoryController {
         return macroHistoryService.refreshTwseDaily(years);
     }
 
-    /** 美股四大指數每日 OHLC（Requirement 18：日線圖市場切換）。code ∈ {DJI,SPX,IXIC,SOX}。 */
+    /** 海外指數每日 OHLC（Requirement 18：日線圖市場切換）。code ∈ {DJI,SPX,IXIC,SOX,FTSE,DAX,KOSPI,N225}。 */
     @GetMapping("/us-daily-index")
     public List<UsIndexDailyHistory> getUsDaily(
             @RequestParam String code,
@@ -106,7 +110,7 @@ public class MacroHistoryController {
         return macroHistoryService.refreshUsIndexDaily(code);
     }
 
-    /** 指數「當日」分時走勢（Yahoo 5m，最新交易日；transient）。market ∈ {TWSE,DJI,SPX,IXIC,SOX}。 */
+    /** 指數「當日」分時走勢（Yahoo 5m，最新交易日；transient）。market ∈ {TWSE,DJI,SPX,IXIC,SOX,FTSE,DAX,KOSPI,N225}。 */
     @GetMapping("/index-intraday")
     public List<MacroHistoryService.IntradayPoint> getIndexIntraday(@RequestParam String market) {
         return macroHistoryService.fetchIndexIntraday(market);

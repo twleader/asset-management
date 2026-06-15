@@ -128,7 +128,7 @@ public class GdpTwseBffController {
 
     /**
      * 指數日線（近 N 年）+ MA20 / MA60 / MA240。一次回傳完整資料；前端切換區間僅用 dataZoom 不重打 API。
-     * market=TWSE 走台股大盤（/api/twse-daily-index），其餘（DJI/SPX/IXIC/SOX）走美股指數（/api/us-daily-index）。
+     * market=TWSE 走台股大盤（/api/twse-daily-index），其餘（DJI/SPX/IXIC/SOX/FTSE/DAX/KOSPI/N225）走海外指數（/api/us-daily-index）。
      * 兩市場回傳格式與 MA 計算完全相同（同義欄位同一來源），確保版面一致。
      */
     @GetMapping("/index-daily")
@@ -178,7 +178,7 @@ public class GdpTwseBffController {
 
     /**
      * 觸發「當前選取」指數的日線回補。market=TWSE → 台股逐月 TWSE 月報（耗時 1~2 分鐘）；
-     * 其餘 → 美股 Yahoo v8 chart（range=10y，一次呼叫即整段）。
+     * 其餘 → 海外指數 Yahoo v8 chart（range=10y，一次呼叫即整段）。
      */
     @PostMapping("/refresh-index-daily")
     public Mono<ResponseEntity<Map<String, Object>>> refreshIndexDaily(
@@ -197,7 +197,7 @@ public class GdpTwseBffController {
     }
 
     /**
-     * 指數「當日」分時走勢。market=TWSE→^TWII、其餘→對應美股指數；回最新交易日整天 5 分 K 收盤。
+     * 指數「當日」分時走勢。market=TWSE→^TWII、其餘→對應海外指數；回最新交易日整天 5 分 K 收盤。
      * 回 tradingDate（YYYY-MM-DD）+ times（HH:mm）+ closes；另回昨收/漲跌/漲跌%供標題列顯示。
      *
      * 昨收（previousClose）＝該指數日線表中「tradingDate 之前最後一個交易日」收盤——與觀察清單 0000
