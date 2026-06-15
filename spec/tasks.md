@@ -2847,8 +2847,8 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 105.2 backend `MacroHistoryController`：refresh 守門白名單改引用 `MacroHistoryService.OVERSEAS_INDEX_CODES`（去重）
 - [x] 105.3 backend `UsIndexDailyHistoryRepository`：新增 `findTopByIndexCodeOrderByTradingDateDesc`（self-heal 取各指數最新日期）
 - [x] 105.4 backend 新增 `IndexDailyRefreshScheduler`：`@Scheduled(0 0 7 * * TUE-SAT, Asia/Taipei)` 逐一回補 8 指數 + `@EventListener(ApplicationReadyEvent)` self-heal（過時 > 4 日才補；500ms Yahoo 間隔）
-- [ ] 105.5 spec：`requirements.md` Req 18 加「海外指數日線自動回補」AC + 昨收 AC 補註過時失效、`design.md` 海外指數日線排程說明、`tasks.md` 本任務
-- [ ] 105.6 `mvn -q compile`（backend）通過
-- [ ] 105.7 Docker 重 build + recreate（business-services）後驗證：費城半導體「當日」標題列昨收 ≈ 前一交易日收盤、漲跌% 回到合理區間（非 +13.88%）；business-services log 出現 self-heal「皆為最新，略過」或回補完成訊息
+- [x] 105.5 spec：`requirements.md` Req 18 加「海外指數日線自動回補」AC + 昨收 AC 補註過時失效、`design.md` 海外指數日線排程說明、`tasks.md` 本任務
+- [x] 105.6 `mvn -q compile`（backend）通過
+- [x] 105.7 Docker 重 build + recreate（business-services）後驗證：SOX「當日」昨收 13,371.47（取代過時 12,330.30）、漲跌% +4.96%（取代 +13.88%）；business-services 啟動 log 出現 `IndexDailyRefreshScheduler：self-heal：海外指數日線皆為最新，略過`
 
 
