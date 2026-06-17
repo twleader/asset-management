@@ -19,7 +19,7 @@ public class WatchStockDto {
     public static class Condition {
         private String label;
         private Boolean active;
-        /** 該條件最近 3 個交易日內已觸發（與「警示」欄使用同一份 cutoff），前端以紅字顯示。 */
+        /** 該條件在最後一個交易日（或交易當日）及前一日內已觸發（與「警示」欄使用同一份 cutoff），前端以紅字顯示。 */
         private Boolean triggered;
     }
 

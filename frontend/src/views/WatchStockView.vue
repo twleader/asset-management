@@ -257,7 +257,7 @@ const fmtVolume = (v) => {
 
 const conditionColor = (c) => {
   if (!c.active) return '#94a3b8'   // 停用：淺色
-  if (c.triggered) return '#dc2626' // 已觸發（最近 3 個交易日內）：紅
+  if (c.triggered) return '#dc2626' // 已觸發（最後交易日及前一日內）：紅
   return '#0f172a'                  // 啟用未觸發：深色
 }
 

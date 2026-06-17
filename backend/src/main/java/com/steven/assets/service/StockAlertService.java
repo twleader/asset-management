@@ -615,8 +615,8 @@ public class StockAlertService {
         r.setMaPeriod(a.getMaPeriod());
         r.setThreshold(a.getThreshold());
         r.setActive(a.getActive());
-        // 觸發時間 / 股價 / MA / K / D：全部用觸發時凍結值，最近 3 個交易日內的才傳；超過就視為過期不傳
-        java.time.LocalDateTime cutoff = recentTradingDayCutoff(a.getMarket(), 3);
+        // 觸發時間 / 股價 / MA / K / D：全部用觸發時凍結值，只傳「最後一個交易日（或交易當日）及前一日」內的；超過視為過期不傳
+        java.time.LocalDateTime cutoff = recentTradingDayCutoff(a.getMarket(), FRESHNESS_TRADING_DAYS);
         if (a.getLastTriggeredAt() != null
                 && (cutoff == null || !a.getLastTriggeredAt().isBefore(cutoff))) {
             r.setLastTriggeredAt(a.getLastTriggeredAt());
@@ -629,6 +629,14 @@ public class StockAlertService {
         r.setConditionLabel(buildLabel(a));
         return r;
     }
+
+    /**
+     * 「警示最近觸發」顯示窗：最後一個交易日（或交易當日）及前一交易日，共 2 個交易日。
+     * 觀察頁（{@link WatchStockService}）與警示頁（本類 {@code toResponse}）共用此單一來源，
+     * 確保兩頁「警示」欄口徑一致（同義欄位同一來源）。超過此窗的觸發視為過期、不於 UI 顯示。
+     * 注意：這與 {@code stock_alert_trigger} 歷史保留 30 天（供補發 / 稽核）是兩回事。
+     */
+    public static final int FRESHNESS_TRADING_DAYS = 2;
 
     private java.time.LocalDateTime recentTradingDayCutoff(String market, int n) {
         List<java.time.LocalDate> dates = historyRepo.findDistinctTradingDatesByMarket(

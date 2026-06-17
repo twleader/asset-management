@@ -2851,4 +2851,23 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 105.6 `mvn -q compile`（backend）通過
 - [x] 105.7 Docker 重 build + recreate（business-services）後驗證：SOX「當日」昨收 13,371.47（取代過時 12,330.30）、漲跌% +4.96%（取代 +13.88%）；business-services 啟動 log 出現 `IndexDailyRefreshScheduler：self-heal：海外指數日線皆為最新，略過`
 
+---
+
+### Task 106: 「警示」顯示窗由近 3 個交易日收斂為「最後交易日＋前一日」
+
+**需求**：觀察頁／警示頁「警示（觸發時間／股價／季線／KD）」欄與「警示條件」紅字，原本顯示最近 **3** 個交易日內的觸發，導致收盤後數日仍殘留舊觸發（實機 6/17 仍顯示 6/12 09:30 NY 的觸發）。改為只保留「**最後一個交易日（或交易當日）及前一日**」，共 **2** 個交易日。
+
+- 純調窗 + 去魔術數字，演算法（`recentTradingDayCutoff` 取最近 N 個 distinct `trading_date` 之較早一天午夜為下界、`triggeredAt >= cutoff` 才顯示）不變，僅 N 由 3 改 2。
+- 顯示窗以 `stock_price_history` 的 `trading_date` 為準，故「交易當日」在收盤列寫入後即納入；今日盤中觸發（`lastTriggeredAt` = 今日）一律 ≥ cutoff，必顯示。
+- 與 `stock_alert_trigger` 30 天歷史保留（補發／稽核）為**兩個獨立概念**，不更動。
+- `StockAlertService` 另有一處「最近 3 個交易日」是 cron 漏抓時的盤中 5 分 K 回補 lookback（`scanIntradayForTrigger`），語意不同，**保留不動**。
+
+#### Steps:
+
+- [x] 106.1 backend `StockAlertService`：新增單一常數 `public static final int FRESHNESS_TRADING_DAYS = 2`（含 javadoc 說明顯示窗語意），`toResponse` 改用之
+- [x] 106.2 backend `WatchStockService`：個股與 `0000` 大盤兩分支的 `recentTradingDayCutoff(market, 3)` 改 `(market, StockAlertService.FRESHNESS_TRADING_DAYS)`，兩頁共用單一來源（同義欄位同一來源）
+- [x] 106.3 同步註解：`WatchStockDto.Condition.triggered`、`WatchStockView.vue conditionColor`
+- [x] 106.4 spec：`requirements.md` Req 16 新增顯示窗 AC、`design.md` `WatchStockService` 補述、`tasks.md` 本任務
+- [x] 106.5 `mvn -q compile`（backend）通過
+- [x] 106.6 Docker 重 build + recreate（business-services + frontend）後驗證：美股分頁警示僅留最後交易日及前一日，6/12 等更早觸發消失
 

@@ -149,11 +149,11 @@ public class WatchStockService {
 
         // 警示條件：列出該股票所有 alert 條件 label（依 displayOrder 升冪）
         List<StockAlert> alerts = alertRepo.findByStockCodeAndMarket(code, market);
-        // 「警示條件」欄與「警示」欄共用同一份 cutoff：最近 3 個交易日內觸發者套紅字
-        java.time.LocalDateTime cutoff = recentTradingDayCutoff(market, 3);
+        // 「警示條件」欄與「警示」欄共用同一份 cutoff：最後交易日（或當日）及前一日內觸發者套紅字
+        java.time.LocalDateTime cutoff = recentTradingDayCutoff(market, StockAlertService.FRESHNESS_TRADING_DAYS);
         r.setConditions(buildConditions(alerts, cutoff));
 
-        // 警示彙總：取該股最近一筆 lastTriggeredAt，且只顯示最近 3 個交易日內的觸發
+        // 警示彙總：取該股最近一筆 lastTriggeredAt，且只顯示最後交易日（或當日）及前一日內的觸發
         alerts.stream()
                 .filter(a -> a.getLastTriggeredAt() != null)
                 .filter(a -> cutoff == null || !a.getLastTriggeredAt().isBefore(cutoff))
@@ -210,7 +210,7 @@ public class WatchStockService {
 
         // 警示條件：列出該股票所有 alert 條件 label
         List<StockAlert> alerts = alertRepo.findByStockCodeAndMarket(code, market);
-        java.time.LocalDateTime cutoff = recentTradingDayCutoff(market, 3);
+        java.time.LocalDateTime cutoff = recentTradingDayCutoff(market, StockAlertService.FRESHNESS_TRADING_DAYS);
         r.setConditions(buildConditions(alerts, cutoff));
         alerts.stream()
                 .filter(a -> a.getLastTriggeredAt() != null)
@@ -231,7 +231,7 @@ public class WatchStockService {
 
     /**
      * 把該股票所有 alert 排序成 condition list，含 label / active / triggered 旗標。
-     * triggered = `alert.lastTriggeredAt` 落在 cutoff（最近 3 個交易日）之內，前端據此套紅字。
+     * triggered = `alert.lastTriggeredAt` 落在 cutoff（最後交易日及前一日，共 2 個交易日）之內，前端據此套紅字。
      */
     private static List<WatchStockDto.Condition> buildConditions(List<StockAlert> alerts, LocalDateTime cutoff) {
         return alerts.stream()
