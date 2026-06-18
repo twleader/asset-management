@@ -17,7 +17,7 @@
         <el-table-column label="台幣存款" align="right" :formatter="(r) => fmt(r.totalTwdDeposit)" />
         <el-table-column label="美元存款" align="right" :formatter="(r) => fmt(r.totalUsdDeposit)" />
         <el-table-column label="信託基金" align="right" :formatter="(r) => fmt(r.totalFundValue)" />
-        <el-table-column label="台股" align="right" :formatter="(r) => fmt(r.totalTwStockValue)" />
+        <el-table-column label="台股" align="right" min-width="100" :formatter="(r) => fmt(r.totalTwStockValue)" />
         <el-table-column label="美股" align="right" :formatter="(r) => fmt(r.totalUsStockValue)" />
         <el-table-column label="英股" align="right" :formatter="(r) => fmt(r.totalUkStockValue)" />
         <el-table-column label="資產總計" align="right" min-width="120">
@@ -33,7 +33,7 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column label="增幅" align="right" width="90">
+        <el-table-column label="增幅" align="right" width="80">
           <template #default="{ row }">
             <span v-if="row.increaseRate != null" :class="row.increaseRate >= 0 ? 'profit' : 'loss'">
               {{ pct(row.increaseRate) }}
