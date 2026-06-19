@@ -37,19 +37,21 @@ public class StockPriceService {
     private final ExchangeRateHistoryRepository rateHistRepo;
     private final StockRepository stockMasterRepo;
     private final PriceQueryService priceQuery;
+    private final MarketDataService marketDataService;
 
-    // 開收盤時刻與時區的單一來源為 MarketZones（CLAUDE.md「相同的資料只能存一份」）。
-    // 以下三個「市場是否開盤」純判斷委派 MarketZones.isMarketOpen（市場時區平日、無寬限分鐘）。
+    // 「市場是否開盤」單一入口：MarketDataService.isMarketOpenNow（MarketZones 時段 + 交易日含國定假日），
+    // 使 getMarketStatus / 交易日曆 / Dashboard 在國定假日顯示「休市」而非「開盤中」。
+    // 開收盤時刻與時區的單一來源仍為 MarketZones（CLAUDE.md「相同的資料只能存一份」）。
     public boolean isTwMarketOpen() {
-        return MarketZones.isMarketOpen("台股");
+        return marketDataService.isMarketOpenNow("台股");
     }
 
     public boolean isUsMarketOpen() {
-        return MarketZones.isMarketOpen("美股");
+        return marketDataService.isMarketOpenNow("美股");
     }
 
     public boolean isUkMarketOpen() {
-        return MarketZones.isMarketOpen("英股");
+        return marketDataService.isMarketOpenNow("英股");
     }
 
     @Transactional(readOnly = true)

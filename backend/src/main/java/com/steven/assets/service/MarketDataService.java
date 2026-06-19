@@ -1,6 +1,7 @@
 package com.steven.assets.service;
 
 import com.steven.assets.repository.StockRepository;
+import com.steven.assets.util.MarketZones;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
@@ -10,6 +11,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import java.math.BigDecimal;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
+import java.time.ZonedDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -241,6 +243,26 @@ public class MarketDataService {
         DayOfWeek dow = date.getDayOfWeek();
         if (dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY) return false;
         return !getUkHolidays(date.getYear()).containsKey(date.toString());
+    }
+
+    /**
+     * 該市場該日是否為交易日（平日且非該市場國定假日）—— 警示觸發 / email / 市場狀態的單一入口。
+     * 市場字串 → {@code isTw/isUs/isUkTradingDay}；其餘（含 {@code 0000} 台股大盤）視為台股。
+     */
+    public boolean isTradingDay(String market, LocalDate date) {
+        if ("美股".equals(market)) return isUsTradingDay(date);
+        if ("英股".equals(market)) return isUkTradingDay(date);
+        return isTwTradingDay(date);
+    }
+
+    /**
+     * 該市場此刻是否開盤中：交易時段（{@link MarketZones#isMarketOpen}）且當日為交易日（含國定假日判斷）。
+     * 供 {@code StockPriceService.getMarketStatus} / 交易日曆 / Dashboard 使用，使假日顯示「休市」。
+     */
+    public boolean isMarketOpenNow(String market) {
+        if (!MarketZones.isMarketOpen(market)) return false;
+        LocalDate today = ZonedDateTime.now(MarketZones.resolve(market)).toLocalDate();
+        return isTradingDay(market, today);
     }
 
     /**

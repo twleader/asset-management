@@ -85,11 +85,14 @@ public class PricePoller {
     public RefreshSummary refreshAll() {
         Set<String> tw = new LinkedHashSet<>(), us = new LinkedHashSet<>(), uk = new LinkedHashSet<>();
         source.collectHeldStockCodes(tw, us, uk);
-        updatePrices(tw, "台股", false);
-        updatePrices(us, "美股", false);
-        updatePrices(uk, "英股", false);
-        return new RefreshSummary(tw.size(), us.size(), uk.size(),
-                clock.isTwMarketOpen(), clock.isUsMarketOpen(), clock.isUkMarketOpen());
+        boolean twOpen = clock.isTwMarketOpen();
+        boolean usOpen = clock.isUsMarketOpen();
+        boolean ukOpen = clock.isUkMarketOpen();
+        // 盤外 / 國定假日手動刷新：markClosed=true，不 append 假 tick（與 warmCacheOnStartup 一致）
+        updatePrices(tw, "台股", !twOpen);
+        updatePrices(us, "美股", !usOpen);
+        updatePrices(uk, "英股", !ukOpen);
+        return new RefreshSummary(tw.size(), us.size(), uk.size(), twOpen, usOpen, ukOpen);
     }
 
     public record RefreshSummary(int twUpdated, int usUpdated, int ukUpdated,

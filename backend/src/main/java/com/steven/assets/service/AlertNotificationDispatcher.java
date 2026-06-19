@@ -14,7 +14,6 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
-import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -53,6 +52,7 @@ public class AlertNotificationDispatcher {
     private final StockAlertTriggerRepository triggerRepo;
     private final StockAlertRepository alertRepo;
     private final AlertChartRenderer chartRenderer;
+    private final MarketDataService marketDataService;
 
     private final ConcurrentLinkedQueue<PendingTrigger> queue = new ConcurrentLinkedQueue<>();
 
@@ -153,31 +153,31 @@ public class AlertNotificationDispatcher {
     }
 
     /**
-     * 各市場「最後交易日」：平日且已過開盤＝當日；盤前 / 週末則回溯至最近平日。
-     * 不考慮假日（與 StockAlertService.computeTriggeredAt 同口徑；開盤時刻 台 09:00 / 美 09:30 / 英 08:00）。
+     * 各市場「最後交易日」：交易日且已過開盤＝當日；盤前 / 週末 / 國定假日則回溯至最近交易日。
+     * 交易日判定委派 {@link MarketDataService#isTradingDay}（與抓價 / 觸發共用同一假日表；
+     * 開盤時刻 台 09:00 / 美 09:30 / 英 08:00）。
      */
-    private static LocalDate lastTradingDate(String market) {
+    private LocalDate lastTradingDate(String market) {
         ZoneId zone = MarketZones.resolve(market);
         LocalTime open = MarketZones.openTime(market);
         ZonedDateTime nowZ = ZonedDateTime.now(zone);
         LocalDate day = nowZ.toLocalDate();
         if (nowZ.toLocalTime().isBefore(open)) day = day.minusDays(1); // 盤前 → 前一交易日
-        while (day.getDayOfWeek() == DayOfWeek.SATURDAY || day.getDayOfWeek() == DayOfWeek.SUNDAY) {
+        while (!marketDataService.isTradingDay(market, day)) {          // 跳過週末與國定假日
             day = day.minusDays(1);
         }
         return day;
     }
 
     /**
-     * 該市場此刻是否在「可寄送警示 email」時段：市場時區平日，且 open ≤ now ≤ close + {@link #SEND_GRACE_MINUTES} 分。
-     * 開收盤時刻取自 {@link MarketZones}（單一來源）。不考慮假日 —— 與 computeTriggeredAt / lastTradingDate
-     * 同口徑；假日本就無 price-update 觸發，放行亦無信可寄，無害。
+     * 該市場此刻是否在「可寄送警示 email」時段：市場時區交易日，且 open ≤ now ≤ close + {@link #SEND_GRACE_MINUTES} 分。
+     * 開收盤時刻取自 {@link MarketZones}（單一來源）；交易日（含國定假日判定）委派
+     * {@link MarketDataService#isTradingDay}，與 computeTriggeredAt / lastTradingDate / 抓價排程共用同一假日表。
      */
-    private static boolean withinSendWindow(String market) {
+    private boolean withinSendWindow(String market) {
         ZoneId zone = MarketZones.resolve(market);
         ZonedDateTime nowZ = ZonedDateTime.now(zone);
-        DayOfWeek dow = nowZ.getDayOfWeek();
-        if (dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY) return false;
+        if (!marketDataService.isTradingDay(market, nowZ.toLocalDate())) return false; // 週末 / 國定假日不寄
         LocalTime nowT = nowZ.toLocalTime();
         LocalTime open = MarketZones.openTime(market);
         LocalTime close = MarketZones.closeTime(market).plusMinutes(SEND_GRACE_MINUTES);

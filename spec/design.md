@@ -127,7 +127,8 @@ com.steven.assets.externalmaterials/
 ├── service/
 │   ├── PricePoller     # 兩段獨立 cron（搬自原 StockPriceService.scheduledTw/UsIntradayUpdate）
 │   ├── ClosePersister  # 盤後收盤 cron（搬自 recordTw/UsClosingPrice），寫 stock_price_history
-│   ├── MarketClock     # isTwMarketOpen / isUsMarketOpen（搬出後集中此處）
+│   ├── MarketClock     # isTwMarketOpen / isUsMarketOpen（平日 + 時段 + 假日；委派 MarketCalendar 判假日）
+│   ├── MarketCalendar  # 交易日 / 國定假日判定（台股→TWSE holidaySchedule；美/英→NYSE/LSE 純函式）
 │   ├── PriceCacheWriter # 寫入 Redis（封裝 key schema）
 │   ├── FundNavPoller   # 信託基金 NAV 每日 cron（Requirement 19）
 │   └── FundNavPersister # 寫 fund_nav 表
@@ -175,6 +176,15 @@ NASDAQ info API 自 2026/04 起對 ETF 的 `keyStats` 為 null（無 dayrange �
 - 設計意圖：**Redis 內的值反映「最近一次真實成交」，updatedAt 反映「最近一次成功 poll 到真實成交的時間」**。盤中可能「看起來價格沒變」，但那是真實狀態（無新成交），不是 bug。
 
 `source` 欄不再出現 `"TWSE(前收)"`、也不會出現實驗階段曾用過的 `"TWSE(開盤)"`；走勢圖今日格的 `source.contains("(")` 守門條件仍適用於 `(history)` 等非「今日真實成交」來源（保留，避免未來其他來源被誤拼入今日格）。
+
+**國定假日整段休市（2026/06，修 Juneteenth 仍抓價 / 觸發 bug）：** cron 以 `MON-FRI` 觸發只能濾週末，平日仍可能是國定假日（美股 6/19 Juneteenth 為週五）。原 `MarketClock` 只有 `isWeekend` 判斷 → `isUsMarketOpen()` 在假日回 `true` → `PricePoller` 照抓（NASDAQ 回前一交易日收盤）、`PriceCacheWriter.resolveTradingDate` 把假日當「live session」→ tradingDate = 假日當天 → 污染 intraday tick；`ClosePersister` 同樣於假日把 Redis 最後價 dump 成假日當日收盤寫進 DB。
+
+修正：新增 `MarketCalendar`（ext-materials 內的交易日 / 假日權威）：
+- `isTwTradingDay/isUsTradingDay/isUkTradingDay(date)` = `非週末 && 非該市場假日`。
+- 台股假日委派既有 `MarketDataFetchService.getTwHolidays(year)`（TWSE holidaySchedule，已是台股唯一來源；抓不到時保守視為交易日，與 business-services 既有退化一致）。
+- 美股 / 英股假日為 NYSE / LSE 法定規則純函式（與 `business-services` `MarketDataService.getUsHolidays/getUkHolidays` 同一套；因兩服務無共用 module、且 ext-materials 不可反向依賴 business-services（避免循環），故各持一份並以交叉註解鎖定「修改須同步」，per-year 快取）。
+
+`MarketClock.isXxxMarketOpen / isXxxMarketJustClosed` 全部改為「`MarketCalendar.isXxxTradingDay(當日)` && 時段」。連帶效果：`PricePoller` 各 scheduled 抓價（gated on `isXxxMarketOpen`）假日自動 skip；`PriceCacheWriter.resolveTradingDate`（依 `isXxxMarketOpen/isXxxMarketJustClosed` 判 live session）假日自動退回 DB 最近交易日。`ClosePersister` 各 dump / verify / `selfHealMissedClose` 另加 `MarketCalendar.isXxxTradingDay` 早退守門（`PricePoller` 假日不抓，但 Redis 仍有前一交易日值且 TTL 24h，若不守門 dump 會把它標成假日當日寫 DB）。`PricePoller.refreshAll`（手動 `/internal/refresh`）的 `markClosed` 亦由 `false` 改為 `!isXxxMarketOpen()`，與 `warmCacheOnStartup` 一致，避免手動刷新在假日 append 假 tick。
 
 **對外介面：**
 - `POST /internal/refresh`（僅 docker network 內 `business-services` 呼叫）：同步抓所有持股一次、寫 Redis、回 200。供使用者按「刷新」時用
@@ -265,6 +275,7 @@ src/
   - 交易日判定委派至 `MarketDataService.getTwHolidays(year)` / `getUsHolidays(year)`，並排除週末
 - `WatchStockService`: 觀察清單 view 服務（不再對應實體表）。`findAll()` 由 `StockAlertRepository.findDistinctStockCodeMarket()` 取得去重 (stockCode, market) 清單後，整合 Redis live 報價（透過 `PriceQueryService`）、技術指標（`TechnicalIndicatorService`）與該股票最近一次 StockAlert 觸發資訊；`reorder(orderedStockKeys)` 拖曳重排時把每個股票所有 alert 的 `displayOrder` 整組依新順序重新指派；不提供 delete 入口（移除觀察一律由 `StockAlertService.delete` 在「警示條件」頁逐筆刪除）。**「警示」欄顯示窗**：最近觸發（時間／股價／季線／KD）與「警示條件」紅字只顯示落在 `StockAlertService.FRESHNESS_TRADING_DAYS`（= 2，最後交易日及前一日）內的觸發，cutoff 由 `recentTradingDayCutoff(market, 2)` 取 `stock_price_history` 最近 2 個 distinct `trading_date` 之較早一天午夜；與警示頁 `StockAlertService.toResponse` 共用同一常數確保兩頁口徑一致（同義欄位同一來源）。此 UI 顯示窗與 `stock_alert_trigger` 保留 30 天為兩個獨立概念
 - `StockAlertService`: 到價警示 CRUD、條件評估、排序、最近觸發資訊回寫；`create` 對 `0000`（台股大盤）跳過 `stockMasterRepo.upsert`。`create` / `update` 在 `stockMasterRepo.upsert` 之前以 `assertNameMatchesCode(code, market, userName)` 守門：以 `historicalDataService.fetchTwStockName / fetchUsStockName` 取得外部 canonical name（權威來源 ext-materials-service `/internal/stock-name`），canonical 非空且與 user-supplied `stockName` 不一致時，**再對照 `stockMasterRepo.findByCodeAndMarket(code, market).name`（本地主檔亦視為合法 canonical）**；兩者皆不相符才 throw `IllegalArgumentException`（由 `GlobalExceptionHandler` 映射為 `400`）。canonical 空則 fall through（外部 API 異常時不阻擋）。`0000` + `台股` 跳過守門；`0000` + `美股` 直接拒絕。設計目的：阻止使用者把錯誤代號（如把 2500 標成「台積電」）寫入 `stock` 主檔導致觀察清單出現名稱對但完全無報價的列；同時避免「外部來源回應與本地主檔不一致」（例 Yahoo `shortName` 「NVIDIA Corporation」vs 主檔過去寫入的 「NVIDIA Corporation Common Stock」）造成 lookupName 自動帶名後 save 被自己擋下
+- **交易日 / 國定假日判定（單一事實來源）**：`business-services` 側以 `MarketDataService.isTradingDay(market, date)`（dispatch 至 `isTwTradingDay/isUsTradingDay/isUkTradingDay`）與 `isMarketOpenNow(market)`（`MarketZones` 時段 + `isTradingDay` 假日）為唯一入口。`StockAlertService.evaluate`（live 觸發閘門）/ `computeTriggeredAt`（交易時段判斷）、`AlertNotificationDispatcher.withinSendWindow / lastTradingDate`、`StockPriceService.getMarketStatus`（→ `isXxxMarketOpen`）全部委派之，不再各自只判週末。`external-materials-service` 側對應為 `MarketCalendar` + `MarketClock`（抓價 / 收盤排程閘門）。台股假日權威 = TWSE holidaySchedule（business-services 經 `/internal/tw-holidays` proxy、ext-materials 直接 fetch，同一份）；美 / 英假日為 NYSE / LSE 法定規則純函式，因兩服務無共用 module 而各持一份（交叉註解鎖定，修改須同步）。Requirement 7 / 16 / 23
 - `ExcelExportService`: Apache POI 產生快照與已實現損益的 .xlsx 匯出檔
 
 **State Management (Pinia)**

@@ -15,7 +15,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -41,6 +40,7 @@ public class StockAlertService {
     private final HistoricalDataService historicalDataService;
     private final TechnicalIndicatorService indicatorService;
     private final AlertNotificationDispatcher notificationDispatcher;
+    private final MarketDataService marketDataService;
 
     // ===== CRUD =====
 
@@ -197,7 +197,15 @@ public class StockAlertService {
                 default -> false;
             };
 
-            if (triggered) {
+            // 國定假日 / 非交易日不產生「當日」觸發：休市時 Redis 可能仍持有前一交易日的即時快取價
+            // （TTL 24h），但市場未開盤，不應視為新觸發（Requirement 16）。假日時 triggered 不算數，
+            // 落到下方「補抓最近交易日盤中觸發」分支——該分支只掃 stock_price_history 真實交易日，
+            // 假日無資料故不會誤觸發，且仍能補回前一交易日盤中發生的真實觸發。
+            ZoneId marketZone = com.steven.assets.util.MarketZones.resolve(alert.getMarket());
+            boolean tradingDayNow = marketDataService.isTradingDay(
+                    alert.getMarket(), ZonedDateTime.now(marketZone).toLocalDate());
+
+            if (triggered && tradingDayNow) {
                 LocalDateTime triggeredAt = computeTriggeredAt(alert);
                 alert.setLastTriggeredAt(triggeredAt);
                 alert.setLastTriggeredPrice(BigDecimal.valueOf(currentPrice));
@@ -659,11 +667,10 @@ public class StockAlertService {
         LocalTime close = com.steven.assets.util.MarketZones.closeTime(market);
 
         ZonedDateTime nowZ = ZonedDateTime.now(zone);
-        DayOfWeek dow = nowZ.getDayOfWeek();
-        boolean isWeekday = dow != DayOfWeek.SATURDAY && dow != DayOfWeek.SUNDAY;
         LocalTime nowT = nowZ.toLocalTime();
-        if (isWeekday && !nowT.isBefore(open) && !nowT.isAfter(close)) {
-            // 用市場時區的 wall time，與其他路徑（Yahoo intraday bar, tradingDate.atTime）一致
+        boolean tradingDay = marketDataService.isTradingDay(market, nowZ.toLocalDate());
+        if (tradingDay && !nowT.isBefore(open) && !nowT.isAfter(close)) {
+            // 交易日且在時段內：用市場時區 wall time，與其他路徑（Yahoo intraday bar, tradingDate.atTime）一致
             return nowZ.toLocalDateTime();
         }
 
