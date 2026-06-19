@@ -153,6 +153,7 @@
   - 台股：`基準日 == LocalDate.now(Asia/Taipei)` → 顯示即時股價＋漲跌金額＋漲跌%（格式：`▲$X.XX (Y.YY%)`），每 2 分鐘自動更新，資料來源與「觀察股票」一致
   - 美股：`基準日 == LocalDate.now(America/New_York)` → 顯示即時股價＋漲跌金額＋漲跌%（EST/EDT 由 JVM `ZoneId` 自動處理）。設計目的：使用者多在 TW 收盤後建快照，TW 過午夜後若以 TW 今日比對會把美股盤中（TW 凌晨）誤判為非交易時間
   - 其他情形：顯示該快照保存的收盤價（`snapshotStockHolding.stockPrice`），不顯示漲跌金額/百分比、不參與輪詢更新
+- [ ] 非該市場交易日今日（frozen）時，持股表的「現值 / 損益 / 預估配息」與下方市場小計（含台股「目前總值」）**必須與同列「股價」欄同源**：兩者皆取自 `stock_price_history` 該快照基準日收盤價（BFF `SnapshotEnricher.fetchSnapshotClosePrices` 的 `closeMap`），由 BFF 在 `buildMergedStocks(revalueFromClose=true)` 以 `currentValue = 股數 × 收盤價 ×（美股/英股）匯率` 重算，使「現值 = 股價 × 股數」自洽。**禁止**現值沿用快照建檔當下的暫定價（`snapshotStockHolding.currentValue` 凍結值）而股價欄改讀較新收盤 —— 兩者不同源會使台股總值偏差。此重算僅套用於唯讀的 Dashboard；會存檔的編輯頁（SnapshotForm / SnapshotDetail，以 `unitPriceTwd` 反推 broker `currentValue` 存檔）維持快照凍結值，不被覆寫
 - [ ] 切換基準日後，KPI 卡片、資產配置圓餅圖、銀行存款圖、持股圖與股票持股表格都需跟著基準日（所選快照）變動；不可被 2 分鐘的價格輪詢覆蓋回「最新快照」
 - [ ] 資產歷史趨勢圖需以基準日為終點：只顯示 `snapshotDate <= 基準日` 的歷史點；KPI「較上次」變化率亦以此篩選後的前一筆比較
 - [ ] 股票持股表格下方顯示該市場小計：目前總值、投資成本、損益（含 %）、預估配息、持股數，與管理資產（SnapshotForm）的市場小計欄位一致
