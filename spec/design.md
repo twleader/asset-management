@@ -90,7 +90,7 @@ com.steven.assets/
   - `GET /api/bff/stock-analysis/etf-holdings` → `/api/market-data/etf-holdings`
   - `GET /api/bff/stock-analysis/intraday-ticks` → `/api/market-data/intraday-ticks`（走勢圖「當日」期間用；business-services proxy 至 `external-materials-service /internal/intraday-ticks`，後者讀 Redis LIST `price:ticks:{market}:{code}:{tradingDate}`。盤中由 `PricePoller` 每 2 分鐘累積 / 盤後由 `IntradayTickRefresher` 用台股 FinMind `TaiwanStockKBar` + 美/英股 Yahoo 5m 完整覆寫）
 
-**Repository 層**（Spring Data JPA，共 16 個）
+**Repository 層**（Spring Data JPA，共 28 個）
 - `AssetSnapshotRepository`
 - `StockHoldingRepository`
 - `FundHoldingRepository`
@@ -107,6 +107,13 @@ com.steven.assets/
 - `StockAlertRepository`（含衍生 query：`findDistinctStockCodeMarket()` 提供觀察清單去重結果）
 - `StockAlertTriggerRepository`（警示觸發歷史，30 天輪替）
 - `BackupSettingRepository`（備份保留代數設定，單列資料表）
+- `BackupRecordRepository`（備份紀錄，單一事實來源；Requirement 15）
+- `StockDividendHistoryRepository`（股利歷史，Requirement 13）
+- `FundMasterRepository` / `FundNavRepository` / `FundDividendHistoryRepository`（信託基金主檔／淨值／配息；Requirement 19–21）
+- `PaymentCategoryRepository` / `PaymentAccountRepository`（代繳分類／記錄；Requirement 22）
+- `NotificationRecipientRepository`（警示通知收件人；Requirement 23）
+- `TwseIndexDailyHistoryRepository` / `UsIndexDailyHistoryRepository`（台股大盤／海外指數日線；Requirement 18，亦供 Requirement 14 觀察清單 `0000` KD）
+- `TaiwanGdpPerCapitaHistoryRepository` / `KoreaGdpPerCapitaHistoryRepository`（台／韓人均 GDP；Requirement 18）
 
 ### External Materials Service Architecture（獨立微服務 / image：`asset-external-materials-service`）
 
@@ -241,11 +248,11 @@ NASDAQ info API 自 2026/04 起對 ETF 的 `keyStats` 為 null（無 dayrange �
 src/
 ├── App.vue              # Root layout: sidebar navigation + router-view
 ├── main.js              # App bootstrap, plugin registration
-├── router/index.js      # Route definitions (14 routes)
+├── router/index.js      # Route definitions (24 routes，含 redirect)
 ├── stores/assetStore.js # Pinia global state
 ├── api/index.js         # Axios instance, API methods
 ├── components/          # Reusable components (TaiwanMap, UsaMap)
-└── views/               # Page-level components (12 views)
+└── views/               # Page-level components (21 views)
 ```
 
 **Service 層補充**
@@ -277,12 +284,15 @@ src/
 | `/realized-gains` | RealizedGainView | 已實現損益 |
 | `/exchange-rate` | ExchangeRateView | 匯率走勢 |
 | `/trading-calendar` | TradingCalendarView | 交易日曆 |
+| `/gdp-twse` | GdpTwseView | 股市分析（指數日線／當日＋台韓人均 GDP；Requirement 18） |
 | `/settings/banks` | BankSettingsView | 銀行設定管理 |
 | `/settings/brokers` | BrokerSettingsView | 券商設定管理 |
 | `/settings/deposit-types` | DepositTypeSettingsView | 存款類型設定管理 |
 | `/settings/market-types` | MarketTypeSettingsView | 市場類型設定管理 |
 | `/settings/transit-fund-types` | TransitFundTypeSettingsView | 待轉入資金類型設定管理 |
+| `/settings/funds` | FundSettingsView | 信託基金主檔設定管理（Requirement 19） |
 | `/settings/backup-restore` | BackupRestoreView | 資料庫備份／還原 |
+| `/settings/notifications` | NotificationSettingsView | 警示通知收件人設定（Requirement 23） |
 | `/payment-accounts` | PaymentAccountSettingsView | 代繳帳戶記錄管理（Requirement 22）；舊路徑 `/settings/payment-accounts` 自動 redirect |
 | `/stocks` | StockMonitorView | 股票觀察（含「觀察清單」、「警示條件」兩個頁籤；舊路徑 `/watch-stocks`、`/stock-alerts` 自動 redirect 並帶 `tab` query） |
 
@@ -614,8 +624,9 @@ GET    /api/realized-gains/export                # Excel 匯出（單獨損益 s
 #### Market Data
 ```
 GET    /api/market-data/dividend-rate?code=0050&market=台股    # 取得股利率
-GET    /api/market-data/price?code=2330&market=台股            # 取得即時股價（含漲跌、股名）
-GET    /api/market-data/prices                                 # 列出所有快取股價
+GET    /api/market-data/prices                                 # 列出所有快取股價（live 即時股價統一走此端點，無單數 /price）
+GET    /api/market-data/prices/stream                          # SSE 即時推價（text/event-stream，取代輪詢）
+GET    /api/market-data/intraday-ticks?code=&market=&date=     # 走勢圖「當日」分時 tick（proxy 至 external-materials Redis LIST）
 POST   /api/market-data/prices/refresh                         # 刷新所有持股現價
 GET    /api/market-data/market-status                          # 開盤狀態（台股/美股）
 GET    /api/market-data/holidays?year=2026                     # 台股與美股假日清單
@@ -688,6 +699,8 @@ PATCH  /api/settings/deposit-types/{id}/active # 啟用/停用存款類型
 ```
 GET    /api/watch-stocks                       # 列出所有觀察股票（去重後含最新報價、警示彙總）
 PUT    /api/watch-stocks/order                 # body: [{stockCode, market}] 陣列；把每個股票所有 alert 的 displayOrder 整組重排
+POST   /api/watch-stocks/resend-digest         # 補發：各市場最後交易日觸發事件彙整為單封 digest email 重寄（Requirement 23）
+GET    /api/watch-stocks/chart.png             # 警示 email 內嵌的股票分析走勢圖 PNG（XChart server-side 渲染）
 ```
 新增 / 移除觀察一律透過 `/api/stock-alerts` 操作對應 alert：建立第一筆 alert 即出現於觀察清單，刪除最後一筆 alert 即從觀察清單消失。
 
@@ -758,7 +771,9 @@ POST   /api/market-data/exchange-rate/backfill-history?currency=USD&since=2021-0
 ```
 GET    /api/taiwan-gdp                         # 全部年度人均 GDP（USD）
 GET    /api/taiwan-gdp?since=1996              # 起始年（含）以後
+POST   /api/taiwan-gdp/refresh-from-imf        # 回補台灣人均 GDP / 實質成長率（DGBAS 優先、IMF 備援）
 GET    /api/korea-gdp / ?since=1996            # 韓國人均 GDP（USD）+ 實質成長率
+POST   /api/korea-gdp/refresh-from-imf         # 回補韓國人均 GDP / 實質成長率（純 IMF）
 GET    /api/twse-daily-index?from=YYYY-MM-DD&to=YYYY-MM-DD
                                                # 台股大盤每日收盤（10 年回補後使用）
 POST   /api/twse-daily-index/refresh?years=10  # 逐月呼叫 TWSE MI_5MINS_HIST 抓所有交易日 upsert

@@ -1047,13 +1047,13 @@ TW 已過午夜後 `basedate（昨天）== TW 今日（今天）` 必失敗 → 
 
 #### Steps:
 
-- [ ] 39.1 `SnapshotEnricher` 新增 `isCurrentBasedate(LocalDate basedate, String market)` per-market 多載：
+- [x] 39.1 `SnapshotEnricher` 新增 `isCurrentBasedate(LocalDate basedate, String market)` per-market 多載：
         台股比對 `Asia/Taipei`、美股比對 `America/New_York`（EST/EDT 由 JVM `ZoneId` 自動處理）；
         舊單參數版本移除（呼叫端全部改為帶 market 的新版）
-- [ ] 39.2 `DashboardBffController` 不再對整批 stockPrices 做 all-or-nothing 替換；改為 **per-stock**：
+- [x] 39.2 `DashboardBffController` 不再對整批 stockPrices 做 all-or-nothing 替換；改為 **per-stock**：
         每筆 price 依其 market 套 `isCurrentBasedate(basedate, market)` 決定保留 live 或換成 basedate 收盤
-- [ ] 39.3 `SnapshotFormBffController.enrichBatch` 同樣 per-stock：每 row 依 market 各自決定 useLive
-- [ ] 39.4 `closeMapToPriceList` 改為依需求 build 單筆 / 單市場版本（或在呼叫端按 market 篩選 closeMap）
+- [x] 39.3 `SnapshotFormBffController.enrichBatch` 同樣 per-stock：每 row 依 market 各自決定 useLive
+- [x] 39.4 `closeMapToPriceList` 改為依需求 build 單筆 / 單市場版本（或在呼叫端按 market 篩選 closeMap）
 
 ### Task 40: SnapshotForm BFF 配息率批次抓取避免 30s timeout
 
@@ -1186,7 +1186,7 @@ fallback 為歷史收盤即可。
 
 #### Steps:
 
-- [ ] 46.1 `StockPriceService.persistPrice` 改用 `historyRepo.findClosestPrice(code, market, tradingDate.minusDays(1))`
+- [x] 46.1 `StockPriceService.persistPrice` 改用 `historyRepo.findClosestPrice(code, market, tradingDate.minusDays(1))`
         覆寫 `previousClose`；找不到歷史時才退回資料源提供的值；都沒有就維持 null
 
 ### Task 47: 抓股價拆出獨立微服務（external-materials-service + Redis live cache）
@@ -1202,26 +1202,26 @@ live 行情先讀 Redis，miss fallback 到 `stock_price_history` 最近一筆�
 
 #### Steps:
 
-- [ ] 47.1 新增 Maven module `external-materials-service/`：pom（spring-boot-starter-web + data-redis + jpa
+- [x] 47.1 新增 Maven module `external-materials-service/`：pom（spring-boot-starter-web + data-redis + jpa
         + lettuce-core + 共享 model jar），自己的 `Application.java`
-- [ ] 47.2 從 `backend/` 搬 `MarketDataService` 抓價相關（TWSE mis、NASDAQ info、FinMind close）、
+- [x] 47.2 從 `backend/` 搬 `MarketDataService` 抓價相關（TWSE mis、NASDAQ info、FinMind close）、
         `StockPriceService.scheduledTw/UsIntradayUpdate`、`recordTw/UsClosingPrice`、
         `isTwMarketOpen/isUsMarketOpen`、`resolveTradingDate` 至 external-materials-service
-- [ ] 47.3 新增 `PriceCacheWriter`：序列化 price JSON 寫入 Redis key `price:{market}:{code}`
+- [x] 47.3 新增 `PriceCacheWriter`：序列化 price JSON 寫入 Redis key `price:{market}:{code}`
         TTL 600s；同步寫入 `price:index:{market}` set；`market:status` key TTL 90s
-- [ ] 47.4 新增 `ClosePersister`：盤後 cron 觸發，對 stock 主檔每筆呼叫 close 來源、寫 `stock_price_history`
-- [ ] 47.5 新增 `InternalPriceController`：`POST /internal/refresh` 同步抓價並寫 Redis 後回 200
-- [ ] 47.6 `backend/` 端：加 spring-boot-starter-data-redis 依賴；新增 `PriceQueryService`：
+- [x] 47.4 新增 `ClosePersister`：盤後 cron 觸發，對 stock 主檔每筆呼叫 close 來源、寫 `stock_price_history`
+- [x] 47.5 新增 `InternalPriceController`：`POST /internal/refresh` 同步抓價並寫 Redis 後回 200
+- [x] 47.6 `backend/` 端：加 spring-boot-starter-data-redis 依賴；新增 `PriceQueryService`：
         `getLive(market, code)` 先讀 Redis，miss fallback `stock_price_history` 最近一筆收盤；
         `getAll()` 透過 `price:index:*` 列舉
-- [ ] 47.7 `MarketDataController` 的 `/api/market-data/prices`、`/live-assets`、`/market-status`、
+- [x] 47.7 `MarketDataController` 的 `/api/market-data/prices`、`/live-assets`、`/market-status`、
         `/prices/refresh` 改打 `PriceQueryService`；`/prices/refresh` 走 WebClient 呼叫
         `http://external-materials-service:8080/internal/refresh` 後再從 Redis 回讀
-- [ ] 47.8 `Dockerfile` for external-materials-service（同 backend multi-stage）；docker-compose 新增
+- [x] 47.8 `Dockerfile` for external-materials-service（同 backend multi-stage）；docker-compose 新增
         `external-materials-service` container，depends_on postgres + redis；business-services depends_on redis
-- [ ] 47.9 Liquibase changelog `1.x.x` drop `stock_price` 表；移除 `StockPrice` Entity、
+- [x] 47.9 Liquibase changelog `1.x.x` drop `stock_price` 表；移除 `StockPrice` Entity、
         `StockPriceRepository`；其他引用點改用 `PriceQueryService` 回傳的 DTO
-- [ ] 47.10 build 全套 image、docker compose up，smoke test：
+- [x] 47.10 build 全套 image、docker compose up，smoke test：
         - `redis-cli KEYS 'price:*'` 應有資料
         - `GET /api/market-data/prices` 仍正常回傳
         - `POST /api/market-data/prices/refresh` 觸發後 Redis 內容更新
@@ -1239,18 +1239,18 @@ live 行情先讀 Redis，miss fallback 到 `stock_price_history` 最近一筆�
 
 #### Steps:
 
-- [ ] 48.1 external-materials-service `PriceCacheWriter.write()` 寫完 Redis SET 後，
+- [x] 48.1 external-materials-service `PriceCacheWriter.write()` 寫完 Redis SET 後，
         `redis.convertAndSend("price-update", json)` 發布同一份 payload
-- [ ] 48.2 backend 新增 `PriceStreamService`：`Sinks.Many<String>` fan-out sink；
+- [x] 48.2 backend 新增 `PriceStreamService`：`Sinks.Many<String>` fan-out sink；
         新增 `RedisSubscriberConfig` 啟動 `RedisMessageListenerContainer` 訂閱 `price-update`
         channel，把 message body 餵給 sink
-- [ ] 48.3 backend `MarketDataController` 新增 `GET /api/market-data/prices/stream`
+- [x] 48.3 backend `MarketDataController` 新增 `GET /api/market-data/prices/stream`
         回 `Flux<ServerSentEvent<String>>`，從 sink 即時串流
-- [ ] 48.4 bff 新增 passthrough route `/api/bff/market-data/stream` →
+- [x] 48.4 bff 新增 passthrough route `/api/bff/market-data/stream` →
         `/api/market-data/prices/stream`
-- [ ] 48.5 frontend nginx config：`location /api/bff/market-data/stream { proxy_buffering off; ... }`
+- [x] 48.5 frontend nginx config：`location /api/bff/market-data/stream { proxy_buffering off; ... }`
         避免 SSE 被 buffer 卡住
-- [ ] 48.6 `DashboardView.vue`：把 setInterval 改成 `new EventSource(...)`；onmessage 解析
+- [x] 48.6 `DashboardView.vue`：把 setInterval 改成 `new EventSource(...)`；onmessage 解析
         JSON 並更新 stockPrices reactive map；onerror 自動 reconnect。初始載入仍走
         `/api/bff/dashboard/summary`，後續增量更新走 SSE
 
@@ -1265,15 +1265,15 @@ live 行情先讀 Redis，miss fallback 到 `stock_price_history` 最近一筆�
 
 #### Steps:
 
-- [ ] 49.1 Liquibase changelog `v1.13.0`：新增 `stock_dividend_history` 表
+- [x] 49.1 Liquibase changelog `v1.13.0`：新增 `stock_dividend_history` 表
        （PK id，唯一鍵 (stockCode, market, year, COALESCE(exDividendDate, epoch))）
-- [ ] 49.2 新增 `StockDividendHistory` Entity + `StockDividendHistoryRepository`
-- [ ] 49.3 新增 `DividendHistoryService`：
+- [x] 49.2 新增 `StockDividendHistory` Entity + `StockDividendHistoryRepository`
+- [x] 49.3 新增 `DividendHistoryService`：
         - `@Scheduled cron "0 0 17 * * MON-FRI"`：iterate `stock` 主檔，呼叫
           `MarketDataService.getDividendHistory(10)` 後 upsert
         - `findFromDb(code, market, years)`：DB 查詢，DB 空一次性 fallback 抓+寫
         - `@EventListener(ApplicationReadyEvent)`：背景補齊主檔中尚無資料的股票
-- [ ] 49.4 `MarketDataController /dividends` 改呼叫 `DividendHistoryService.findFromDb`
+- [x] 49.4 `MarketDataController /dividends` 改呼叫 `DividendHistoryService.findFromDb`
 
 ### Task 50: 盤中 high / low 自行聚合（修 NASDAQ ETF 無 dayrange）
 
@@ -1288,17 +1288,17 @@ NASDAQ info API 自 2026/04 起對 ETF 的 `keyStats` 為 null，VOO/VT 等 ETF 
 
 #### Steps:
 
-- [ ] 50.1 新增 `IntradayHighLowTracker`（`external-materials-service`）：
+- [x] 50.1 新增 `IntradayHighLowTracker`（`external-materials-service`）：
         - Redis key `price:dayhl:{market}:{code}:{tradingDate}`，TTL 36h
         - `observe(code, market, tradingDate, price) → (high, low)`：以新價更新 Redis
           中的 high / low（max / min），回傳更新後的值
-- [ ] 50.2 `PriceCacheWriter.write()` 寫 `price:{market}:{code}` 前先呼叫 tracker：
+- [x] 50.2 `PriceCacheWriter.write()` 寫 `price:{market}:{code}` 前先呼叫 tracker：
         - external API 已給 high/low → 取 `max(extHigh, aggHigh)` / `min(extLow, aggLow)`
         - external API 未給 → 直接用聚合值
-- [ ] 50.3 `StockSourceQuery.upsertHistory` 移除 open / high 上的 `nz(...)` 包裝
+- [x] 50.3 `StockSourceQuery.upsertHistory` 移除 open / high 上的 `nz(...)` 包裝
         （與 low 一致改為直接寫入，保留 null 表「無資料」），避免 history 假裝有 0；
         close 仍套 nz 作雙保險（上游已用 price 過濾 null）
-- [ ] 50.4 Liquibase changelog `v1.14.0`：`stock_price_history.open_price` /
+- [x] 50.4 Liquibase changelog `v1.14.0`：`stock_price_history.open_price` /
         `high_price` 改為可 null（原本 NOT NULL 是 50.3 用 0 偽裝的根因）
 
 ### Task 51: 儀表板新增「信託基金」長條圖
@@ -1312,12 +1312,12 @@ NASDAQ info API 自 2026/04 起對 ETF 的 `keyStats` 為 null，VOO/VT 等 ETF 
 
 #### Steps:
 
-- [ ] 51.1 `DashboardView.vue` 在第二排（銀行 / 持股）下方新增第三排卡片「信託基金」
+- [x] 51.1 `DashboardView.vue` 在第二排（銀行 / 持股）下方新增第三排卡片「信託基金」
         - 橫向 bar 圖，y 軸基金名稱、x 軸現值（升冪排序）
         - 顏色：profit >= 0 → 綠 (#16a34a)，否則紅 (#dc2626)；與 `stockBarOption` 同調
         - tooltip 顯示現值 / 成本 / 損益（含 %）
-- [ ] 51.2 卡片下方 `chart-summary-bar` 顯示總值 / 成本 / 損益（含 %）小計
-- [ ] 51.3 資料來源直接讀 `detail.value.funds`（不需新 BFF endpoint，基金不參與盤中輪詢）
+- [x] 51.2 卡片下方 `chart-summary-bar` 顯示總值 / 成本 / 損益（含 %）小計
+- [x] 51.3 資料來源直接讀 `detail.value.funds`（不需新 BFF endpoint，基金不參與盤中輪詢）
 
 ### Task 52: 備份開關 + 紀錄改存 DB
 
@@ -1331,22 +1331,22 @@ NASDAQ info API 自 2026/04 起對 ETF 的 `keyStats` 為 null，VOO/VT 等 ETF 
 
 #### Steps:
 
-- [ ] 52.1 Liquibase changelog `v1.15.0`：
+- [x] 52.1 Liquibase changelog `v1.15.0`：
         - `backup_setting` 加 `backup_enabled BOOLEAN NOT NULL DEFAULT TRUE`
         - 新增 `backup_record` (id PK, folder, filename UNIQUE, size_bytes, modified_at,
           auto_pre_restore, created_at)
-- [ ] 52.2 `BackupSetting` entity 加 `backupEnabled`；新增 `BackupRecord` entity + repository
-- [ ] 52.3 `BackupService`：
+- [x] 52.2 `BackupSetting` entity 加 `backupEnabled`；新增 `BackupRecord` entity + repository
+- [x] 52.3 `BackupService`：
         - `runBackup` / 三個 `@Scheduled` 進入流程前檢查 `backupEnabled`，false 直接 skip / 拋
           錯（自救點 `autoPreRestore=true` 不受開關影響，避免還原無自救）
         - 每次 `doBackup` 成功 upload → insert `backup_record`
         - `rotateFolder` 刪除舊檔時連帶 `delete by folder+filename`
         - `listBackups()` 改成 `repo.findAllByOrderByModifiedAtDesc()`
         - 新增 `syncFromRemote()`：列 rclone → upsert / 清孤兒列
-- [ ] 52.4 `BackupController` + DTO 補 `backupEnabled`；新增 `POST /api/backups/sync` 對應
+- [x] 52.4 `BackupController` + DTO 補 `backupEnabled`；新增 `POST /api/backups/sync` 對應
         `syncFromRemote`
-- [ ] 52.5 BFF passthrough route 補 `/api/bff/backup-restore/sync`
-- [ ] 52.6 `BackupRestoreView.vue` 「保留設定」加 `el-switch`「啟用備份」；「還原資料」加
+- [x] 52.5 BFF passthrough route 補 `/api/bff/backup-restore/sync`
+- [x] 52.6 `BackupRestoreView.vue` 「保留設定」加 `el-switch`「啟用備份」；「還原資料」加
         「從 Google Drive 同步」按鈕；「立即備份」按鈕在開關 off 時 disabled
 
 ### Task 53: GDP + 台股大盤年度走勢頁
@@ -1360,25 +1360,25 @@ NASDAQ info API 自 2026/04 起對 ETF 的 `keyStats` 為 null，VOO/VT 等 ETF 
 
 #### Steps:
 
-- [ ] 53.1 Liquibase changelog `v1.16.0`：建立 `taiwan_gdp_per_capita_history` 與
+- [x] 53.1 Liquibase changelog `v1.16.0`：建立 `taiwan_gdp_per_capita_history` 與
         `twse_index_year_end_history`，並 INSERT 1996–2025 共 30 年資料
-- [ ] 53.2 後端 entities：`TaiwanGdpPerCapitaHistory`、`TwseIndexYearEndHistory`；對應 repository
-- [ ] 53.3 後端 controller：`MacroHistoryController` 提供 `/api/taiwan-gdp` 與
+- [x] 53.2 後端 entities：`TaiwanGdpPerCapitaHistory`、`TwseIndexYearEndHistory`；對應 repository
+- [x] 53.3 後端 controller：`MacroHistoryController` 提供 `/api/taiwan-gdp` 與
         `/api/twse-year-end-index`
-- [ ] 53.4 BFF：`bff/gdptwse/GdpTwseBffController`，路徑 `/api/bff/gdp-twse`，aggregate 兩支
+- [x] 53.4 BFF：`bff/gdptwse/GdpTwseBffController`，路徑 `/api/bff/gdp-twse`，aggregate 兩支
         business API 回傳 `{ years, gdpPerCapitaUsd, twseYearEndClose }`
-- [ ] 53.5 前端：`GdpTwseView.vue` 雙 Y 軸折線圖（左 GDP / 右 大盤點位），`router/index.js` 加
+- [x] 53.5 前端：`GdpTwseView.vue` 雙 Y 軸折線圖（左 GDP / 右 大盤點位），`router/index.js` 加
         `/gdp-twse` route，`App.vue` 左側選單 push 一項，`api/index.js` 加 `bffApi.gdpTwse`
-- [ ] 53.6 後端 `MacroHistoryService` + `POST /api/taiwan-gdp/refresh-from-imf`、
+- [x] 53.6 後端 `MacroHistoryService` + `POST /api/taiwan-gdp/refresh-from-imf`、
         `POST /api/twse-year-end-index/refresh?from=YYYY&to=YYYY`：分別呼叫 IMF DataMapper
         (NGDPDPC/TWN) 與 TWSE FMTQIK 月報 upsert 至 DB
-- [ ] 53.7 BFF `POST /api/bff/gdp-twse/refresh`（並行觸發兩支 refresh），前端按鈕串接
-- [ ] 53.8 加入韓國比較：v1.17.0 changelog 建 `korea_gdp_per_capita_history`；後端
+- [x] 53.7 BFF `POST /api/bff/gdp-twse/refresh`（並行觸發兩支 refresh），前端按鈕串接
+- [x] 53.8 加入韓國比較：v1.17.0 changelog 建 `korea_gdp_per_capita_history`；後端
         `KoreaGdpPerCapitaHistory` entity/repo + `MacroHistoryService.refreshKoreaGdpFromImf`；
         controller 新增 `GET /api/korea-gdp` 與 `POST /api/korea-gdp/refresh-from-imf`；
         BFF 擴充回傳 `koreaGdpPerCapitaUsd` 與 `taiwanGdpGrowthRate` / `koreaGdpGrowthRate`；
         前端在原圖下加第二張卡（左 Y 折線雙國 GDP，右 Y 柱狀雙國年增率）
-- [ ] 53.10 觀察清單支援代號 `0000`（= 台股大盤 / TAIEX）：
+- [x] 53.10 觀察清單支援代號 `0000`（= 台股大盤 / TAIEX）：
         - `StockAlertController.lookupName`：`code=0000` + `market=台股` 短路回傳
           `{"stockName":"台股大盤"}`，不打外部、不寫 stock 主檔
         - `WatchStockService.create`：偵測 `0000` 時跳過 `stockMasterRepo.upsert`（避免被
@@ -1388,7 +1388,7 @@ NASDAQ info API 自 2026/04 起對 ETF 的 `keyStats` 為 null，VOO/VT 等 ETF 
           季線從近 60 筆收盤平均；KD / buy / sell / open / high / low / volume 為 null
         - `TwseIndexDailyHistoryRepository` 補 `findTop2ByOrderByTradingDateDesc()` /
           `findTopNByOrderByTradingDateDesc(int n)` 取最新 N 筆
-- [ ] 53.9 加入大盤日線（近 10 年 + MA20/60/240）：
+- [x] 53.9 加入大盤日線（近 10 年 + MA20/60/240）：
         - Liquibase `v1.21.0-twse-daily-history.sql` 建 `twse_index_daily_history`（trading_date PK,
           close_point NUMERIC(12,2)），不 seed 歷史值
         - 後端 `TwseIndexDailyHistory` entity / `TwseIndexDailyHistoryRepository`
@@ -1407,20 +1407,20 @@ NASDAQ info API 自 2026/04 起對 ETF 的 `keyStats` 為 null，VOO/VT 等 ETF 
           + el-radio-group 區間切換（1m / 3m / 6m / 1y / 2y / 5y）；切區間僅調整 dataZoom
           start/end，不重新打 API
         - `api/index.js` `bffApi.gdpTwse` 增 `getTwseDaily(years=10)` / `refreshTwseDaily(years=10)`
-- [ ] 53.11 「當年尚未到 12/31」以最後一個交易日大盤收盤代替：
+- [x] 53.11 「當年尚未到 12/31」以最後一個交易日大盤收盤代替：
         - business 新增 `GET /api/twse-daily-index/latest`（`MacroHistoryController`，list 長度 0 或 1）
         - BFF `GdpTwseBffController.get()` 並行多打 `/api/twse-daily-index/latest`；若 `twse_index_year_end_history`
           無當年紀錄，且最新一筆 daily 落在當年，則把該 `closePoint` 補進 `twseYearEndClose` 末元素，
           並回傳 `currentYearLastTradingDate`
         - 前端 `GdpTwseView.vue`：當年點以空心圓繪製（`symbol:'emptyCircle', symbolSize:9`），
           tooltip 對「台股大盤年末收盤」series 在當年加註「（截至 YYYY-MM-DD）」
-- [ ] 53.12 修正第一張圖成長率柱狀（bug fix，對齊 Requirement 18 / requirements.md 既有規範）：
+- [x] 53.12 修正第一張圖成長率柱狀（bug fix，對齊 Requirement 18 / requirements.md 既有規範）：
         - 原本第一張「GDP vs 台股大盤」圖的成長率柱狀誤用前端 `gdpYoy`（人均 GDP USD 相減推算），
           會被匯率波動扭曲（如 2022 台幣貶值被算成負成長，實質為 +2.7%）
         - 改用 BFF 既有回傳的 `taiwanGdpGrowthRate`（IMF `NGDP_RPCH` 實質 GDP 成長率，`twGrowth`），
           與第二張「台韓比較」圖同一資料源；移除 `gdpYoy` computed
         - series / legend 名稱由「人均 GDP 成長率」改為「實質 GDP 成長率」以正確反映指標意義
-- [ ] 53.13 台灣 GDP / 成長率改用主計總處（DGBAS）為主、IMF 為備援：
+- [x] 53.13 台灣 GDP / 成長率改用主計總處（DGBAS）為主、IMF 為備援：
         - ext-materials-service `MacroDataFetchClient.fetchDgbasNationalIncome()`：HttpClient 抓
           主計總處 NA8101A1A XML（`macro.dgbas.na8101-url` 設定，預設 data.gov.tw 資料集 44218 下載點），
           regex 解析「經濟成長率(%)」與「平均每人GDP(名目值，美元)」逐年原始值（用 contains 比對避全形標點），
@@ -1451,43 +1451,43 @@ NASDAQ info API 自 2026/04 起對 ETF 的 `keyStats` 為 null，VOO/VT 等 ETF 
 
 #### Steps:
 
-- [ ] 54.1 Liquibase changelog `v1.19.0`：建立 `fund_master`、`fund_nav` 兩表（含 `site` /
+- [x] 54.1 Liquibase changelog `v1.19.0`：建立 `fund_master`、`fund_nav` 兩表（含 `site` /
         `fundclear_org_code` / `fundclear_fund_code` / `fundclear_class_code` 欄位）；
         alter `fund_holding` 新增 `units NUMERIC(20,4) NULL`；seed `fund_master` 7 筆 —
         6 支華南 offshore（02A8/02B9/01C2 USD、1680/24B2 ZAR、1616 USD）+ 1 支元大
         onshore（93100953A TWD）
-- [ ] 54.2 backend entities + repos：`FundMaster`（含 site / fundclear 三段代碼）、`FundNav`；
+- [x] 54.2 backend entities + repos：`FundMaster`（含 site / fundclear 三段代碼）、`FundNav`；
         `FundHolding` 加 `units` 欄位（nullable）；`FundMasterRepository`、
         `FundNavRepository`（後者提供 `findTopByFundCodeOrderByNavDateDesc`）
-- [ ] 54.3 backend `HistoricalDataService.dailyExchangeRateUpdate` 與 `fetchBotExchangeRate`
+- [x] 54.3 backend `HistoricalDataService.dailyExchangeRateUpdate` 與 `fetchBotExchangeRate`
         擴充：原本只抓 USD，改為遍歷 `fund_master` 出現的所有非 TWD currency 集合（ZAR 等）
-- [ ] 54.4 external-materials-service `FundNavFetchClient`：純 `java.net.http.HttpClient` +
+- [x] 54.4 external-materials-service `FundNavFetchClient`：純 `java.net.http.HttpClient` +
         UA / Referer / Origin，依 `fund_master.site` 分流 — offshore 打
         `POST /api/offshore/nav-profit/query-history`（DTO 用 `organizeCode`/`fundCode`/
         `fundClassCode`），onshore 打 `POST /api/onshore/nav-profit/query-history`（DTO 用
         `orgId`/`fundNo`/`fundClassCode`）；日期格式 `YYYY/MM/DD`；回傳取 `tableList[0]` 最新
         `navValue`
-- [ ] 54.5 external-materials-service `FundNavPoller`：`@Scheduled(cron="0 0 9 * * *",
+- [x] 54.5 external-materials-service `FundNavPoller`：`@Scheduled(cron="0 0 9 * * *",
         zone="Asia/Taipei")` 全抓啟用基金；`FundNavPersister` upsert 至 `fund_nav`
-- [ ] 54.6 external-materials-service `InternalPriceController` 新增
+- [x] 54.6 external-materials-service `InternalPriceController` 新增
         `POST /internal/fund-nav/refresh`，同步呼叫 `FundNavPoller.refreshAll()`
-- [ ] 54.7 backend `FundNavService`：`getLatestNavTwd(fundCode)` 回傳
+- [x] 54.7 backend `FundNavService`：`getLatestNavTwd(fundCode)` 回傳
         `{ nav, navDate, fxRate, fxDate, currency, twdPerUnit }`；TWD 計價基金 fxRate=1；
         找不到 NAV 時回 Optional.empty
-- [ ] 54.8 backend `AssetService.createSnapshot` / `updateSnapshot`：對每筆 FundHolding，
+- [x] 54.8 backend `AssetService.createSnapshot` / `updateSnapshot`：對每筆 FundHolding，
         若 `units` 非 null 且能查到 NAV+FX → 自動算 `currentValue = units × nav × fxRate`；
         否則保留使用者手填值（向後相容）
-- [ ] 54.9 backend `FundNavController`：`POST /api/fund-nav/refresh`（proxy 至 external
+- [x] 54.9 backend `FundNavController`：`POST /api/fund-nav/refresh`（proxy 至 external
         `/internal/fund-nav/refresh`）；`GET /api/funds`（fund_master 列表，給前端 dropdown 用）
-- [ ] 54.10 BFF `SnapshotFormBffController` 預載 fund_master + 最新 NAV，回傳每支基金的
+- [x] 54.10 BFF `SnapshotFormBffController` 預載 fund_master + 最新 NAV，回傳每支基金的
         `latestNav / latestFxRate / latestNavDate / currency`，前端可即時預覽 currentValue
-- [ ] 54.11 frontend `SnapshotFormView.vue` 信託基金區塊：基金代號改為 dropdown（從
+- [x] 54.11 frontend `SnapshotFormView.vue` 信託基金區塊：基金代號改為 dropdown（從
         `/api/funds`）、新增 `units` 欄位、現值欄位改唯讀（顯示
         `units × NAV × FX` 即時計算）、加「刷新最新淨值」按鈕（呼叫
         `/api/fund-nav/refresh` 後重載 BFF）；NAV 日期早於今日 N 天時加警示 badge
-- [ ] 54.12 既有 6 筆 FundHolding 維持原 `currentValue` 凍結值（units 為 NULL，計算邏輯
+- [x] 54.12 既有 6 筆 FundHolding 維持原 `currentValue` 凍結值（units 為 NULL，計算邏輯
         fallback 走手填路徑）；驗證歷史 snapshot 顯示不變
-- [ ] 54.13 commit + spec 同步
+- [x] 54.13 commit + spec 同步
 
 ### Task 55: 信託基金主檔設定頁 + SnapshotForm 欄位合併
 
@@ -1499,18 +1499,18 @@ Task 54 把 fund_master 7 筆寫死在 DataInitializer，使用者沒有 UI 可�
 
 #### Steps:
 
-- [ ] 55.1 backend `FundNavController` 擴充 CRUD：`POST /api/funds`、`PUT /api/funds/{fundCode}`、
+- [x] 55.1 backend `FundNavController` 擴充 CRUD：`POST /api/funds`、`PUT /api/funds/{fundCode}`、
         `PATCH /api/funds/{fundCode}/active`；DTO `CreateFundRequest` / `UpdateFundRequest`
         （PK fundCode 僅 create 可填，update 不可改）
-- [ ] 55.2 BFF `FundBffRoutes` 既有 `/api/funds/**` passthrough 涵蓋新 CRUD，無需改動
-- [ ] 55.3 frontend `bffApi.fundSettings`：`getAll`、`create`、`update`、`setActive`
-- [ ] 55.4 frontend `FundSettingsView.vue` + `router/index.js` 加 `/settings/funds` route + `App.vue` 左側選單
+- [x] 55.2 BFF `FundBffRoutes` 既有 `/api/funds/**` passthrough 涵蓋新 CRUD，無需改動
+- [x] 55.3 frontend `bffApi.fundSettings`：`getAll`、`create`、`update`、`setActive`
+- [x] 55.4 frontend `FundSettingsView.vue` + `router/index.js` 加 `/settings/funds` route + `App.vue` 左側選單
         新增「💰 信託基金設定」項；表單欄位：fundCode（新增時可編輯）/ fundName / bank dropdown /
         currency / site / FundClear 三段代碼
-- [ ] 55.5 frontend `SnapshotFormView.vue` 信託基金區塊：移除「基金名稱」欄，dropdown 加寬；
+- [x] 55.5 frontend `SnapshotFormView.vue` 信託基金區塊：移除「基金名稱」欄，dropdown 加寬；
         onFundCodeChange 仍會把 fundName 寫進 row（送出 payload 用），UI 不再顯示
-- [ ] 55.6 DataInitializer.seedFundMasters 確認為 idempotent（只插入不存在的 code）
-- [ ] 55.7 commit + spec 同步
+- [x] 55.6 DataInitializer.seedFundMasters 確認為 idempotent（只插入不存在的 code）
+- [x] 55.7 commit + spec 同步
 
 ### Task 56: 信託基金預估年配息
 
@@ -1522,39 +1522,39 @@ Task 54 把 fund_master 7 筆寫死在 DataInitializer，使用者沒有 UI 可�
 
 #### Steps:
 
-- [ ] 56.1 Liquibase changelog `v1.20.0`：建立 `fund_dividend_history` (id PK, fund_code, base_date,
+- [x] 56.1 Liquibase changelog `v1.20.0`：建立 `fund_dividend_history` (id PK, fund_code, base_date,
         amount NUMERIC(20,6), currency, frequency, fetched_at)；唯一鍵 `(fund_code, base_date)`；
         index `(fund_code, base_date DESC)`。`fund_holding` 新增 `estimated_dividend NUMERIC(20,2) NULL`
-- [ ] 56.2 backend entity `FundDividendHistory` + `FundDividendHistoryRepository`；`FundHolding` 加
+- [x] 56.2 backend entity `FundDividendHistory` + `FundDividendHistoryRepository`；`FundHolding` 加
         `estimatedDividend` 欄位（nullable）
-- [ ] 56.3 external-materials-service `FundDividendFetchClient`：offshore POST
+- [x] 56.3 external-materials-service `FundDividendFetchClient`：offshore POST
         `/api/offshore/fund-info/info-dividend/query`（`queryType:"1"`、`organizeCode`、`fundCode`、
         `fundClassCode`、`baseBeginDate/baseEndDate` YYYY/MM、`asiFreqList:[]`、`_pageNum:1`、
         `_pageSize:50`），onshore POST `/api/onshore/fund-info/info-dividend/query-dividend`；
         回應解析 `list[].asiBaseDate`（YYYY/MM/DD）與 `asiAmt`
-- [ ] 56.4 external-materials-service `FundDividendSourceQuery`：upsert `fund_dividend_history`
+- [x] 56.4 external-materials-service `FundDividendSourceQuery`：upsert `fund_dividend_history`
         （`(fund_code, base_date)` 視為覆寫）；讀取現有 fund_master active 清單沿用
         `FundNavSourceQuery.findActiveFunds()`
-- [ ] 56.5 external-materials-service `FundDividendPoller`：`@Scheduled(cron="0 5 9 * * *",
+- [x] 56.5 external-materials-service `FundDividendPoller`：`@Scheduled(cron="0 5 9 * * *",
         zone="Asia/Taipei")`（NAV 排程後 5 分鐘）；每支 active 基金抓近 13 個月
-- [ ] 56.6 external-materials-service `InternalPriceController` 加
+- [x] 56.6 external-materials-service `InternalPriceController` 加
         `POST /internal/fund-dividend/refresh`
-- [ ] 56.7 backend `FundDividendService.getAnnualEstimateTwd(fundCode)`：
+- [x] 56.7 backend `FundDividendService.getAnnualEstimateTwd(fundCode)`：
         `fund_dividend_history` 近 12 個月 amount 加總 × FX；找不到資料回 Optional.empty；
         TWD 計價基金 fxRate=1
-- [ ] 56.8 backend `FundNavController` 加 `POST /api/fund-dividend/refresh`（proxy 至 external）；
+- [x] 56.8 backend `FundNavController` 加 `POST /api/fund-dividend/refresh`（proxy 至 external）；
         `GET /api/fund-dividend/latest?fundCode=...` 給 BFF 預載用
-- [ ] 56.9 backend `AssetService.createSnapshot` / `updateSnapshot`：對每筆 FundHolding，
+- [x] 56.9 backend `AssetService.createSnapshot` / `updateSnapshot`：對每筆 FundHolding，
         若 `units` 非 null 且 `FundDividendService` 回傳 estimate，
         `fund.estimatedDividend = units × annualPerUnitTwd`，否則保留前端送進來的值（向後相容）
-- [ ] 56.10 backend `AssetService.recalcTotals`：`estimatedAnnualDividend` 合計加入 fund.estimatedDividend
+- [x] 56.10 backend `AssetService.recalcTotals`：`estimatedAnnualDividend` 合計加入 fund.estimatedDividend
         （目前只算 stock）；確認 SnapshotEnricher / Dashboard / AssetHistory 抓的是 snapshot 層級欄位
-- [ ] 56.11 backend `AssetSnapshotDto.FundResponse` + `FundRequest` 加 `estimatedDividend`、`dividendRate`
-- [ ] 56.12 BFF `SnapshotFormBffController.listFunds()` 回傳 fund_master 時併回 `annualDividendPerUnitTwd`
+- [x] 56.11 backend `AssetSnapshotDto.FundResponse` + `FundRequest` 加 `estimatedDividend`、`dividendRate`
+- [x] 56.12 BFF `SnapshotFormBffController.listFunds()` 回傳 fund_master 時併回 `annualDividendPerUnitTwd`
         欄位，前端用以即時預覽（同 NAV 預覽路徑）
-- [ ] 56.13 frontend `SnapshotFormView.vue` 信託基金 row 加「預估年配息」column（read-only），
+- [x] 56.13 frontend `SnapshotFormView.vue` 信託基金 row 加「預估年配息」column（read-only），
         units 變更時即時算；底部 sec-summary 加「預估年配息」彙總
-- [ ] 56.14 commit + spec 同步
+- [x] 56.14 commit + spec 同步
 
 ### Task 57: 信託基金歷史 NAV / 配息 / FX 回補 + 基準日估值
 
@@ -1566,16 +1566,16 @@ Task 54 把 fund_master 7 筆寫死在 DataInitializer，使用者沒有 UI 可�
 
 #### Steps:
 
-- [ ] 57.1 external-materials-service `FundNavBackfillService`：對每支 active 基金分段（每段一年）抓 10 年 NAV，呼叫既有 `FundNavSourceQuery.upsertNav`；`InternalPriceController` 加 `POST /internal/fund-nav/backfill?years=10`
-- [ ] 57.2 external-materials-service `FundDividendBackfillService`：同 57.1 模式，10 年配息
-- [ ] 57.3 backend `HistoricalDataService.startupBackfill` 擴充：對 `fund_master` 中所有非 TWD currency 補 10 年（`backfillExchangeRateFrom(currency, 10y)`）
-- [ ] 57.4 backend `FundNavService.getNavTwdOnDate(fundCode, basedate)`：closest-on-or-before NAV + 該日 closest FX；TWD fxRate=1
-- [ ] 57.5 backend `FundDividendService.getAnnualEstimateOnDate(fundCode, basedate)`：取 `[basedate-12m, basedate]` 區間 amount 加總 × 該日 FX
-- [ ] 57.6 backend `AssetService` snapshot create / update 把 basedate 傳進 `resolveFundCurrentValue` / `resolveFundEstimatedDividend`；helper 改 signature
-- [ ] 57.7 backend `FundNavController` `POST /api/fund-nav/backfill?years=10`、`POST /api/fund-dividend/backfill?years=10` proxy；`FundDto` 加 `?date=YYYY-MM-DD` 支援基準日值
-- [ ] 57.8 BFF `SnapshotFormBffController.listFunds` 接 `?date=YYYY-MM-DD` 參數透傳到 backend
-- [ ] 57.9 frontend `bffApi.snapshotForm.getFunds(date)` 加 date 參數；`loadFundMasters` 帶 `form.snapshotDate`；改 snapshotDate 時重抓
-- [ ] 57.10 commit + spec 同步
+- [x] 57.1 external-materials-service `FundNavBackfillService`：對每支 active 基金分段（每段一年）抓 10 年 NAV，呼叫既有 `FundNavSourceQuery.upsertNav`；`InternalPriceController` 加 `POST /internal/fund-nav/backfill?years=10`
+- [x] 57.2 external-materials-service `FundDividendBackfillService`：同 57.1 模式，10 年配息
+- [x] 57.3 backend `HistoricalDataService.startupBackfill` 擴充：對 `fund_master` 中所有非 TWD currency 補 10 年（`backfillExchangeRateFrom(currency, 10y)`）
+- [x] 57.4 backend `FundNavService.getNavTwdOnDate(fundCode, basedate)`：closest-on-or-before NAV + 該日 closest FX；TWD fxRate=1
+- [x] 57.5 backend `FundDividendService.getAnnualEstimateOnDate(fundCode, basedate)`：取 `[basedate-12m, basedate]` 區間 amount 加總 × 該日 FX
+- [x] 57.6 backend `AssetService` snapshot create / update 把 basedate 傳進 `resolveFundCurrentValue` / `resolveFundEstimatedDividend`；helper 改 signature
+- [x] 57.7 backend `FundNavController` `POST /api/fund-nav/backfill?years=10`、`POST /api/fund-dividend/backfill?years=10` proxy；`FundDto` 加 `?date=YYYY-MM-DD` 支援基準日值
+- [x] 57.8 BFF `SnapshotFormBffController.listFunds` 接 `?date=YYYY-MM-DD` 參數透傳到 backend
+- [x] 57.9 frontend `bffApi.snapshotForm.getFunds(date)` 加 date 參數；`loadFundMasters` 帶 `form.snapshotDate`；改 snapshotDate 時重抓
+- [x] 57.10 commit + spec 同步
 
 ### Task 58: 走勢圖「股價」線只取實際成交價
 
@@ -1595,7 +1595,7 @@ Task 54 把 fund_master 7 筆寫死在 DataInitializer，使用者沒有 UI 可�
 - [x] 58.6 external-materials-service `PriceFetchClient.snapToTwTick` 加入 stockCode 參數：ETF（代碼以 "00" 開頭）tick = 0.01，個股仍依價格分級。先前 ETF 中價估算被 snap 到 0.5 元 tick，造成 006208 等寫入 219.0000（實為 219.20）。
 - [x] 58.7 external-materials-service `InternalPriceController` 新增 `POST /internal/close/verify-tw` / `verify-us`，手動觸發 FinMind 校正當日收盤（同 16:00 / 18:00 排程），用以修復 ETF tick 修正前已寫錯的 row
 - [x] 58.8 確立全域規則「股價一律是成交價」：移除 `PriceFetchClient.getTwseRealTimePrice` 的買賣中價估算分支與 `snapToTwTick` helper；`z` 為 `-` 時直接退回 prevClose（real 昨日成交價）。Dashboard / 管理資產 / 走勢圖等所有消費者都不再可能拿到中價估算
-- [ ] 58.9 commit + spec 同步
+- [x] 58.9 commit + spec 同步
 
 ### Task 59: Dashboard KPI「資產總計」與「歷年資產管理」對齊
 
@@ -1610,7 +1610,7 @@ Dashboard 頂部 KPI「資產總計」走前端 `liveLatest` 計算，且加上�
 - [x] 59.1 BFF `DashboardSummaryDto` 加 `liveAssets` 欄位；`DashboardBffController` `/summary` 與 `/realtime` 並行呼叫 `/api/market-data/live-assets` 並回傳，與「歷年資產管理」共用同一支 API
 - [x] 59.2 frontend `DashboardView.vue` 新增 `liveAssets` state（由 summary / realtime 寫入）；`shouldApplyLive` 移除「市場開盤」閘門僅留 `isBaselineToday`；`overlayLivePrice` 優先使用 `liveAssets.stocks[].liveValue` 重算 row 現值；`liveLatest.totalAssets` 優先採用 `liveAssets.liveTotalAssets`
 - [x] 59.3 spec 同步 — Requirement 9「市場開盤」閘門條款移除；design.md 加註 KPI 一致性規則與 BFF Aggregation 端點清單
-- [ ] 59.4 commit + 服務重啟驗證
+- [x] 59.4 commit + 服務重啟驗證
 
 ### Task 60b: 將股票歷史回補 + 啟動 10 年回補 + FX FinMind 回補搬到 external-materials-service
 
@@ -1635,7 +1635,7 @@ Dashboard 頂部 KPI「資產總計」走前端 `liveLatest` 計算，且加上�
 - [x] 60b.5 `InternalPriceController` 新增 `/internal/backfill/stock`、`/internal/backfill/all`、`/internal/backfill/exchange-rate`、`/internal/backfill/exchange-rate-from`
 - [x] 60b.6 business-services `HistoricalDataService`：刪除 startupBackfill / backfillTw/UsStock / backfillExchangeRate(From) / collectAllHeldCodes / 不再用的 imports；`backfillSingleStock` / `backfillAll` / `backfillExchangeRate` / `backfillExchangeRateFrom` 改 WebClient proxy 至 ext-materials；`dailyExchangeRateUpdate` 仍在本地排程但內部走 proxy
 - [x] 60b.7 編譯驗證（business-services + external-materials-service 均通過）
-- [ ] 60b.8 commit + 服務重啟驗證（觀察 ext-materials-service 啟動時 8s 後執行 startupBackfill；business-services 啟動 log 無 "啟動補齊"；前端按「回補資料」仍可運作）
+- [x] 60b.8 commit + 服務重啟驗證（觀察 ext-materials-service 啟動時 8s 後執行 startupBackfill；business-services 啟動 log 無 "啟動補齊"；前端按「回補資料」仍可運作）
 
 ### Task 60c: 匯率排程（BOT 5 分鐘 + FinMind 17:00）搬到 external-materials-service
 
@@ -1657,7 +1657,7 @@ business-services `HistoricalDataService` 仍持有：
 - [x] 60c.3 `InternalPriceController` 加 `POST /internal/exchange-rate/refresh-bot`
 - [x] 60c.4 business-services `HistoricalDataService`：刪除原 BOT 抓 / 排程 / `currenciesToTrack` / `parseBotDecimal`；`fetchBotExchangeRate` 改為 WebClient proxy；新增 `purgeOldHistory` `@Scheduled(17:30)` 收斂本地清理
 - [x] 60c.5 編譯驗證（business-services + ext-materials-service 皆通過）
-- [ ] 60c.6 commit + 服務重啟驗證（觀察 ext-materials-service 9-15 點 5 分鐘 log、business-services 不再有 BOT log）
+- [x] 60c.6 commit + 服務重啟驗證（觀察 ext-materials-service 9-15 點 5 分鐘 log、business-services 不再有 BOT log）
 
 ### Task 60h: 修台股大盤日線抓取（舊 URL 失效 + 加每日排程）
 
@@ -1681,7 +1681,7 @@ business-services `HistoricalDataService` 仍持有：
 - [x] 60h.3 `StockSourceQuery` 新增 `upsertTwseIndexDaily(date, closePoint)`
 - [x] 60h.4 `fetchTwseDecemberClose` 改 reuse `fetchTwseMonthlyDaily(year, 12).last`，避免重複維護
 - [x] 60h.5 編譯驗證
-- [ ] 60h.6 commit + 服務重啟驗證（隔日 08:30 cron 跑後 5/6 應寫入 DB；openapi 此刻還沒上 5/6）
+- [x] 60h.6 commit + 服務重啟驗證（隔日 08:30 cron 跑後 5/6 應寫入 DB；openapi 此刻還沒上 5/6）
 
 ### Task 60g: 警示頁文案校正（沒有基準日，盤中每 2 分鐘隨股價更新檢查）
 
@@ -1694,7 +1694,7 @@ business-services `HistoricalDataService` 仍持有：
 #### Steps:
 
 - [x] 60g.1 `StockAlertView.vue` 改為「盤中（台股 09:00–13:30、美股 09:30–16:00 ET）每次股價更新（每 2 分鐘）即時檢查」
-- [ ] 60g.2 commit + 前端重建驗證
+- [x] 60g.2 commit + 前端重建驗證
 
 ### Task 60d: 警示盤中 5 分鐘 K 線抓取搬到 external-materials-service
 
@@ -1710,7 +1710,7 @@ business-services `HistoricalDataService` 仍持有：
 - [x] 60d.2 `InternalPriceController` 加 `GET /internal/intraday-5m?code=&market=&daysBack=`
 - [x] 60d.3 business-services `HistoricalDataService.fetchIntraday5m` 改為 WebClient proxy；`IntradayBar(LocalDateTime, OHLC)` 對外型別保持不變（`StockAlertService` 不需動）；內部用 `IntradayBarDto(String time)` 解 JSON
 - [x] 60d.4 編譯驗證（兩個 service 通過）
-- [ ] 60d.5 commit + 服務重啟驗證
+- [x] 60d.5 commit + 服務重啟驗證
 
 ### Task 60e: MarketDataService 配息率 / ETF / 股利歷史 / TWSE 假日 / 股票名稱搬到 external-materials-service
 
@@ -1728,7 +1728,7 @@ business-services `HistoricalDataService` 仍持有：
 - [x] 60e.4 business-services `MarketDataService`：刪除 ~1300 行 HTTP 邏輯；保留公開 record 類型 + 1 小時 dividend rate 快取 + per-year holiday 快取 + NYSE 假日純計算 + ETF 白名單；其餘全改 WebClient proxy
 - [x] 60e.5 business-services `HistoricalDataService.fetchTwStockName/fetchUsStockName` 改 proxy 至 `/internal/stock-name`；移除 `curlGetWithRetry` / `httpGet` / 不再用的 imports（JsonNode / ObjectMapper / HttpClient / 等）
 - [x] 60e.6 編譯驗證（business-services + ext-materials-service 皆通過）
-- [ ] 60e.7 commit + 服務重啟驗證（前端配息率 / ETF 持股 / 假日 / 股票名稱查詢仍正常）
+- [x] 60e.7 commit + 服務重啟驗證（前端配息率 / ETF 持股 / 假日 / 股票名稱查詢仍正常）
 
 ### Task 60f: MacroHistoryService IMF / TWSE FMTQIK 搬到 external-materials-service
 
@@ -1745,7 +1745,7 @@ business-services `HistoricalDataService` 仍持有：
 - [x] 60f.3 business-services `MacroHistoryService`：HTTP / curl 全部刪除；refresh* 方法保留 `@Transactional` + JPA 寫入；新增 `fetchImfProxy` / `fetchTwseDecemberCloseProxy` / `fetchTwseMonthlyDailyProxy` 走 WebClient
 - [x] 60f.4 全 codebase 確認 backend / bff 無 twse / nasdaq / finmind / yahoo / bot / imf 等對外行情 URL（v1.21.0 changelog 註解一行除外）
 - [x] 60f.5 編譯驗證
-- [ ] 60f.6 commit + 服務重啟驗證
+- [x] 60f.6 commit + 服務重啟驗證
 
 ### Task 60a: 移除 business-services 重複的每日股價收盤排程
 
@@ -1761,7 +1761,7 @@ business-services `HistoricalDataService` 仍持有：
 
 - [x] 60a.1 刪除 `HistoricalDataService.dailyTwStockUpdate()` 與 `dailyUsStockUpdate()` 兩支 `@Scheduled`，並在原位置加註解說明已交給 ClosePersister
 - [x] 60a.2 編譯驗證（`mvn -q -DskipTests compile` 通過）
-- [ ] 60a.3 commit + 服務重啟驗證（觀察台股 13:32–16:00 / 美股 16:02–18:00 ClosePersister 寫入 `stock_price_history`，business-services 不再有 14:00 / 06:00 抓價 log）
+- [x] 60a.3 commit + 服務重啟驗證（觀察台股 13:32–16:00 / 美股 16:02–18:00 ClosePersister 寫入 `stock_price_history`，business-services 不再有 14:00 / 06:00 抓價 log）
 
 ### Task 60: 修復 SSE 推送讓「股價」欄滲入非基準日的 live 價（Task 29 回歸）
 
@@ -1776,7 +1776,7 @@ Task 59 移除 `shouldApplyLive` 的「市場開盤」閘門時，`getRealtimePr
 #### Steps:
 
 - [x] 60.1 `DashboardView.vue` `getRealtimePrice(row)` 開頭加 `if (!shouldApplyLive(row.market)) return null`，與 `overlayLivePrice` 共用同一個 per-market 基準日閘門
-- [ ] 60.2 commit + 服務重啟驗證（切到歷史快照、台股盤中重整，股價欄應穩定顯示快照 stockPrice、無漲跌%、不被 SSE 覆蓋）
+- [x] 60.2 commit + 服務重啟驗證（切到歷史快照、台股盤中重整，股價欄應穩定顯示快照 stockPrice、無漲跌%、不被 SSE 覆蓋）
 
 ### Task 61: 觀察清單由 stock_alert 衍生（廢止 watch_stock 表 + 大盤 0000 KD）
 
@@ -1792,44 +1792,44 @@ Task 59 移除 `shouldApplyLive` 的「市場開盤」閘門時，`getRealtimePr
 
 **A. Schema 變更**
 
-- [ ] 61.1 Liquibase changelog `v1.x.x-twse-index-daily-ohlc.sql`：`twse_index_daily_history` 加 `open_point` / `high_point` / `low_point`（皆 NUMERIC(12,2), nullable，舊資料未抓 OHLC 維持 null，由下次 refresh 補完）
-- [ ] 61.2 Liquibase changelog `v1.x.x-drop-watch-stock.sql`：`DROP TABLE watch_stock`（資料完全由 stock_alert 衍生，無需資料移轉；既有觀察清單若有純觀察、無 alert 的股票，必須在 release notes 中提示使用者重新建立 alert，否則這些股票不再出現於觀察清單）
+- [x] 61.1 Liquibase changelog `v1.x.x-twse-index-daily-ohlc.sql`：`twse_index_daily_history` 加 `open_point` / `high_point` / `low_point`（皆 NUMERIC(12,2), nullable，舊資料未抓 OHLC 維持 null，由下次 refresh 補完）
+- [x] 61.2 Liquibase changelog `v1.x.x-drop-watch-stock.sql`：`DROP TABLE watch_stock`（資料完全由 stock_alert 衍生，無需資料移轉；既有觀察清單若有純觀察、無 alert 的股票，必須在 release notes 中提示使用者重新建立 alert，否則這些股票不再出現於觀察清單）
 
 **B. ext-materials-service**
 
-- [ ] 61.3 `MacroDataFetchClient.fetchTwseMonthlyDaily` 回傳結構從 `DailyClose(date, close)` 擴為 `DailyOhlc(date, open, high, low, close)`；對應 internal endpoint 的 JSON
-- [ ] 61.4 `StockSourceQuery.upsertTwseIndexDaily` 簽名擴 OHLC 四欄
+- [x] 61.3 `MacroDataFetchClient.fetchTwseMonthlyDaily` 回傳結構從 `DailyClose(date, close)` 擴為 `DailyOhlc(date, open, high, low, close)`；對應 internal endpoint 的 JSON
+- [x] 61.4 `StockSourceQuery.upsertTwseIndexDaily` 簽名擴 OHLC 四欄
 
 **C. business-services Backend**
 
-- [ ] 61.5 `TwseIndexDailyHistory` entity 加 `openPoint` / `highPoint` / `lowPoint` 欄位
-- [ ] 61.6 `MacroHistoryService.refreshTwseDaily` 解析 FMTQIK `OpeningIndex` / `HighestIndex` / `LowestIndex` / `ClosingIndex` 同步 upsert
-- [ ] 61.7 `TechnicalIndicatorService` 對 `code=0000 & market=台股` 改讀 `twse_index_daily_history` 計算 MA20 / MA60 / MA240 / KD（與一般股票同算法，high/low 來自 OHLC 欄位）
-- [ ] 61.8 刪除 `WatchStock` entity / `WatchStockRepository` / `WatchStockController` / `WatchStockService`（service 邏輯移至 BFF/衍生 view）
-- [ ] 61.9 `StockAlertRepository` 新增：
+- [x] 61.5 `TwseIndexDailyHistory` entity 加 `openPoint` / `highPoint` / `lowPoint` 欄位
+- [x] 61.6 `MacroHistoryService.refreshTwseDaily` 解析 FMTQIK `OpeningIndex` / `HighestIndex` / `LowestIndex` / `ClosingIndex` 同步 upsert
+- [x] 61.7 `TechnicalIndicatorService` 對 `code=0000 & market=台股` 改讀 `twse_index_daily_history` 計算 MA20 / MA60 / MA240 / KD（與一般股票同算法，high/low 來自 OHLC 欄位）
+- [x] 61.8 刪除 `WatchStock` entity / `WatchStockRepository` / `WatchStockController` / `WatchStockService`（service 邏輯移至 BFF/衍生 view）
+- [x] 61.9 `StockAlertRepository` 新增：
         - `findDistinctStockCodeMarket()`：回傳所有 (stockCode, market) 去重對 + 該對最小 displayOrder
         - `findByStockCodeAndMarket(code, market)`：取該股票全部 alert（用於拖曳重排與級聯刪除）
-- [ ] 61.10 `StockAlertService.create` 對 `0000 & 台股` 跳過 `stockMasterRepo.upsert`（避免被排程當真股票抓價）；`lookupName` 對 `0000` 短路回 `台股大盤`
-- [ ] 61.11 新增 `WatchListService`（取代舊 `WatchStockService`）：
+- [x] 61.10 `StockAlertService.create` 對 `0000 & 台股` 跳過 `stockMasterRepo.upsert`（避免被排程當真股票抓價）；`lookupName` 對 `0000` 短路回 `台股大盤`
+- [x] 61.11 新增 `WatchListService`（取代舊 `WatchStockService`）：
         - `findAll()`：呼叫 `StockAlertRepository.findDistinctStockCodeMarket()` → 對每筆組裝 live 報價（`PriceQueryService`，0000 走 `twse_index_daily_history`）+ 技術指標 + 該股票最近觸發資訊
         - `delete(stockCode, market)`：刪除該 (code, market) 所有 alert（FK 級聯 trigger 歷史）
         - `reorder(orderedKeys)`：依 orderedKeys 順序，把每個股票所有 alert 的 `displayOrder` 整組區段重排（保持條件之間的相對順序）
-- [ ] 61.12 `WatchStockController` 改為 `WatchListController`，路徑 `/api/watch-list`：`GET`、`DELETE /{stockCode}/{market}`、`PUT /order`（接 `[{stockCode, market}]` 陣列）；不再有 POST（建立由 `/api/stock-alerts` 接手）
+- [x] 61.12 `WatchStockController` 改為 `WatchListController`，路徑 `/api/watch-list`：`GET`、`DELETE /{stockCode}/{market}`、`PUT /order`（接 `[{stockCode, market}]` 陣列）；不再有 POST（建立由 `/api/stock-alerts` 接手）
 
 **D. BFF**
 
-- [ ] 61.13 `WatchStockBffController` 改名 `WatchListBffController`：rewrite `/api/bff/watch-stock/**` → `/api/watch-list/**`（路徑可保留 `watch-stock` 不動以維持前端 URL 穩定，僅內部 rewrite 目標改變）
+- [x] 61.13 `WatchStockBffController` 改名 `WatchListBffController`：rewrite `/api/bff/watch-stock/**` → `/api/watch-list/**`（路徑可保留 `watch-stock` 不動以維持前端 URL 穩定，僅內部 rewrite 目標改變）
 
 **E. Frontend**
 
-- [ ] 61.14 `WatchStockView.vue` 新增按鈕改為直接開啟「警示條件」新增 dialog（reuse `StockAlertView` 既有 dialog component）；建立成功後回到觀察清單自動 reload
-- [ ] 61.15 `WatchStockView.vue` 刪除按鈕的二次確認文字改為「將同時刪除 N 筆警示條件，確定？」N 從 BFF 回傳資料計算
-- [ ] 61.16 `WatchStockView.vue` 拖曳排序 callback 改呼叫 `PUT /api/bff/watch-stock/order`（payload 為 `[{stockCode, market}]` 陣列），不再傳 watch_stock id
+- [x] 61.14 `WatchStockView.vue` 新增按鈕改為直接開啟「警示條件」新增 dialog（reuse `StockAlertView` 既有 dialog component）；建立成功後回到觀察清單自動 reload
+- [x] 61.15 `WatchStockView.vue` 刪除按鈕的二次確認文字改為「將同時刪除 N 筆警示條件，確定？」N 從 BFF 回傳資料計算
+- [x] 61.16 `WatchStockView.vue` 拖曳排序 callback 改呼叫 `PUT /api/bff/watch-stock/order`（payload 為 `[{stockCode, market}]` 陣列），不再傳 watch_stock id
 
 **F. 編譯與驗證**
 
-- [ ] 61.17 編譯驗證（business-services + bff + ext-materials-service）
-- [ ] 61.18 commit + 服務重啟驗證：
+- [x] 61.17 編譯驗證（business-services + bff + ext-materials-service）
+- [x] 61.18 commit + 服務重啟驗證：
         - 新增警示條件 → 觀察清單自動出現該股票
         - 同股票多筆警示 → 觀察清單只一列
         - 在「警示條件」頁刪除某股票全部 alert → 觀察清單該列消失（觀察清單頁本身無刪除列入口）
@@ -1852,7 +1852,7 @@ Task 59 移除 `shouldApplyLive` 的「市場開盤」閘門時，`getRealtimePr
 - [x] 62.3 `WatchStockService.toResponse` / `toIndexResponse` 填入 conditions（`alertRepo.findByStockCodeAndMarket` 排序後 map 成 `{label, active}`）
 - [x] 62.4 前端 `WatchStockView.vue` 移除買進、賣出兩個 column；在「警示」欄前面加「警示條件」欄，每條換行顯示，停用條件淺色 + 「(停用)」
 - [x] 62.5 commit + 服務重啟驗證
-- [ ] 62.6 已觸發條件以紅字顯示：`Condition` DTO 加 `triggered` 欄位，由 `WatchStockService` 比對 alert.lastTriggeredAt 與最近 3 個交易日 cutoff（與「警示」欄共用同一份 cutoff）填入；前端依此 flag 套紅色字
+- [x] 62.6 已觸發條件以紅字顯示：`Condition` DTO 加 `triggered` 欄位，由 `WatchStockService` 比對 alert.lastTriggeredAt 與最近 3 個交易日 cutoff（與「警示」欄共用同一份 cutoff）填入；前端依此 flag 套紅色字
 
 ### Task 63: 保留設定儲存時立即套用 retention
 
@@ -1864,12 +1864,12 @@ Task 59 移除 `shouldApplyLive` 的「市場開盤」閘門時，`getRealtimePr
 
 #### Steps:
 
-- [ ] 63.1 `BackupService.updateSetting()` 在 `settingRepo.save(s)` 之後依新的 retention 值對三個資料夾各跑一次 `rotateFolder`：
+- [x] 63.1 `BackupService.updateSetting()` 在 `settingRepo.save(s)` 之後依新的 retention 值對三個資料夾各跑一次 `rotateFolder`：
         - `rotateFolder("manual", MANUAL_PREFIX, manual)`
         - `rotateFolder("daily", "asset_daily_", daily)`
         - `rotateFolder("weekly", WEEKLY_PREFIX, weekly)`
         每支獨立 try/catch RuntimeException 包住，失敗只 `log.warn`，不讓 PUT `/api/backups/settings` 整支 fail（設定值仍要存進去）
-- [ ] 63.2 重啟後端，於前端「保留設定」把 `dailyRetention` 從原值下調到一個小於目前 daily 檔案數的值並儲存，確認：
+- [x] 63.2 重啟後端，於前端「保留設定」把 `dailyRetention` 從原值下調到一個小於目前 daily 檔案數的值並儲存，確認：
         - PUT 200 OK、UI 顯示「儲存成功」
         - Google Drive `daily/` 內 `asset_daily_*` 只剩新上限份數（最舊的被刪）
         - `backup_record` 表對應 daily folder 的 row 也同步減少
@@ -1885,13 +1885,13 @@ NASDAQ `/info` endpoint 自 2026/04 起不再回傳 `OpenPrice`，`PriceFetchCli
 
 #### Steps:
 
-- [ ] 64.1 `PriceFetchClient` 新增 `getNasdaqOpenPrice(stockCode, assetClass)`：
+- [x] 64.1 `PriceFetchClient` 新增 `getNasdaqOpenPrice(stockCode, assetClass)`：
         - URL `https://api.nasdaq.com/api/quote/{code}/historical?assetclass={class}&fromdate={今日(ET)}&todate={今日(ET)}&limit=1`
         - 解析 `data.tradesTable.rows[0].open`（格式 `$XXX.XX`），用 `parseDollar` 轉 `BigDecimal`
         - 任何例外或無 row 回 `Optional.empty()`，僅以 `log.debug` 記錄，不噴 warn（盤前無資料屬正常）
-- [ ] 64.2 `PriceFetchClient.getNasdaqPrice` 把 `BigDecimal openPrice = null` 替換為 `BigDecimal openPrice = getNasdaqOpenPrice(stockCode, assetClass).orElse(null);`，原註解一併更新
-- [ ] 64.3 編譯驗證（`mvn -q -DskipTests compile`）
-- [ ] 64.4 服務重啟，於美股盤中（NYSE 09:30–16:00 ET）開「股票觀察 → 美股」頁，VOO / QQQ / VT 「開盤」欄應顯示今日真實開盤價（非昨日、非「—」）；盤前則 fallback 為 `stock_price_history` 最近一筆 open（與台股相同行為）
+- [x] 64.2 `PriceFetchClient.getNasdaqPrice` 把 `BigDecimal openPrice = null` 替換為 `BigDecimal openPrice = getNasdaqOpenPrice(stockCode, assetClass).orElse(null);`，原註解一併更新
+- [x] 64.3 編譯驗證（`mvn -q -DskipTests compile`）
+- [x] 64.4 服務重啟，於美股盤中（NYSE 09:30–16:00 ET）開「股票觀察 → 美股」頁，VOO / QQQ / VT 「開盤」欄應顯示今日真實開盤價（非昨日、非「—」）；盤前則 fallback 為 `stock_price_history` 最近一筆 open（與台股相同行為）
 
 ### Task 65: 代繳帳戶記錄管理（Requirement 22）
 
@@ -1903,26 +1903,26 @@ NASDAQ `/info` endpoint 自 2026/04 起不再回傳 `OpenPrice`，`PriceFetchCli
 
 #### Steps:
 
-- [ ] 65.1 Liquibase changeset `v1.23.0-payment-account.sql` 建立兩張表：
+- [x] 65.1 Liquibase changeset `v1.23.0-payment-account.sql` 建立兩張表：
         - `payment_category(id BIGINT IDENTITY PK, code VARCHAR(30) UNIQUE NOT NULL, display_name VARCHAR(50) NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, active BOOLEAN NOT NULL DEFAULT TRUE)`
         - `payment_account(id BIGINT IDENTITY PK, category_id BIGINT NOT NULL REFERENCES payment_category(id), item_name VARCHAR(100) NOT NULL, payment_account VARCHAR(100), note VARCHAR(255), sort_order INTEGER NOT NULL DEFAULT 0)`
         - 加 `INDEX idx_payment_account_category ON payment_account(category_id)`
-- [ ] 65.2 在 `db.changelog-master.yaml` 末尾 `include` 該 changeset
-- [ ] 65.3 新增 Entity：`PaymentCategory`（仿 `DepositTypeEntity` 樣式）、`PaymentAccount`（含 `@ManyToOne PaymentCategory category`）
-- [ ] 65.4 新增 Repository：`PaymentCategoryRepository`（`findByCode`、`findAllByOrderBySortOrderAscDisplayNameAsc`、`findByActiveTrueOrderBySortOrderAscDisplayNameAsc`）、`PaymentAccountRepository`（`findAllByOrderByCategorySortOrderAscSortOrderAscIdAsc` 或 service 端排序）
-- [ ] 65.5 新增 DTO `PaymentDto`：`CategoryResponse` / `CreateCategoryRequest` / `UpdateCategoryRequest` / `AccountResponse`（含 categoryId + categoryDisplayName） / `CreateAccountRequest`（含 categoryId） / `UpdateAccountRequest`
-- [ ] 65.6 在 `InstitutionService` 加入 `PaymentCategory` 區段（5 個方法：getAll/getActive/create/update/setActive），與 Bank/Broker 同檔；另新增 `PaymentAccountService`（getAll/create/update/delete）
-- [ ] 65.7 在 `InstitutionController` 加入 `/api/settings/payment-categories` 路由（GET/POST/PUT/PATCH active）；新增 `PaymentAccountController` 提供 `/api/payment-accounts` GET/POST/PUT/DELETE
-- [ ] 65.8 `DataInitializer.seedPaymentCategories()` seed 三筆預設分類：`bill / 繳費 / 1`、`tax / 繳稅 / 2`、`service / 服務 / 3`（findByCode 檢查避免重複）；代繳記錄本身不 seed
-- [ ] 65.9 新增 BFF `PaymentAccountSettingsBffRoutes`（路徑 `/api/bff/payment-account-settings/categories/**` rewrite 至 `/api/settings/payment-categories/**`；`/api/bff/payment-account-settings/accounts/**` rewrite 至 `/api/payment-accounts/**`）
-- [ ] 65.10 前端 `frontend/src/api/index.js` 新增 `bffApi.paymentAccountSettings`：`getCategories` / `createCategory` / `updateCategory` / `setCategoryActive` / `getAccounts` / `createAccount` / `updateAccount` / `deleteAccount`
-- [ ] 65.11 前端 `views/PaymentAccountSettingsView.vue`：上半段「分類維護」（小表格 + 新增/編輯/啟用-停用 dialog）、下半段「代繳記錄」主表格（欄位：分類 tag、項目、帳戶、備註、操作（編輯/刪除））；新增 dialog 含分類下拉（僅啟用中）、項目、帳戶、備註、排序
-- [ ] 65.12 `frontend/src/router/index.js` 新增 route `/settings/payment-accounts` → `PaymentAccountSettings`；`App.vue` 系統設定 submenu 加一個 `el-menu-item index="/settings/payment-accounts"`，icon `Document` 或 `Tickets`
-- [ ] 65.13 編譯驗證（`mvn -q -DskipTests compile` 對 backend 與 bff 兩個 module）
-- [ ] 65.14 服務重啟，前端進入主選單「自動代繳」：
+- [x] 65.2 在 `db.changelog-master.yaml` 末尾 `include` 該 changeset
+- [x] 65.3 新增 Entity：`PaymentCategory`（仿 `DepositTypeEntity` 樣式）、`PaymentAccount`（含 `@ManyToOne PaymentCategory category`）
+- [x] 65.4 新增 Repository：`PaymentCategoryRepository`（`findByCode`、`findAllByOrderBySortOrderAscDisplayNameAsc`、`findByActiveTrueOrderBySortOrderAscDisplayNameAsc`）、`PaymentAccountRepository`（`findAllByOrderByCategorySortOrderAscSortOrderAscIdAsc` 或 service 端排序）
+- [x] 65.5 新增 DTO `PaymentDto`：`CategoryResponse` / `CreateCategoryRequest` / `UpdateCategoryRequest` / `AccountResponse`（含 categoryId + categoryDisplayName） / `CreateAccountRequest`（含 categoryId） / `UpdateAccountRequest`
+- [x] 65.6 在 `InstitutionService` 加入 `PaymentCategory` 區段（5 個方法：getAll/getActive/create/update/setActive），與 Bank/Broker 同檔；另新增 `PaymentAccountService`（getAll/create/update/delete）
+- [x] 65.7 在 `InstitutionController` 加入 `/api/settings/payment-categories` 路由（GET/POST/PUT/PATCH active）；新增 `PaymentAccountController` 提供 `/api/payment-accounts` GET/POST/PUT/DELETE
+- [x] 65.8 `DataInitializer.seedPaymentCategories()` seed 三筆預設分類：`bill / 繳費 / 1`、`tax / 繳稅 / 2`、`service / 服務 / 3`（findByCode 檢查避免重複）；代繳記錄本身不 seed
+- [x] 65.9 新增 BFF `PaymentAccountSettingsBffRoutes`（路徑 `/api/bff/payment-account-settings/categories/**` rewrite 至 `/api/settings/payment-categories/**`；`/api/bff/payment-account-settings/accounts/**` rewrite 至 `/api/payment-accounts/**`）
+- [x] 65.10 前端 `frontend/src/api/index.js` 新增 `bffApi.paymentAccountSettings`：`getCategories` / `createCategory` / `updateCategory` / `setCategoryActive` / `getAccounts` / `createAccount` / `updateAccount` / `deleteAccount`
+- [x] 65.11 前端 `views/PaymentAccountSettingsView.vue`：上半段「分類維護」（小表格 + 新增/編輯/啟用-停用 dialog）、下半段「代繳記錄」主表格（欄位：分類 tag、項目、帳戶、備註、操作（編輯/刪除））；新增 dialog 含分類下拉（僅啟用中）、項目、帳戶、備註、排序
+- [x] 65.12 `frontend/src/router/index.js` 新增 route `/settings/payment-accounts` → `PaymentAccountSettings`；`App.vue` 系統設定 submenu 加一個 `el-menu-item index="/settings/payment-accounts"`，icon `Document` 或 `Tickets`
+- [x] 65.13 編譯驗證（`mvn -q -DskipTests compile` 對 backend 與 bff 兩個 module）
+- [x] 65.14 服務重啟，前端進入主選單「自動代繳」：
         - 預設出現三個分類；新增一筆「市話 + MOD / momo 信用卡 / 2626-2305 (用戶號碼: Y046509)」於「繳費」分類
         - 編輯、刪除、停用分類、按分類過濾皆正常
-- [ ] 65.15 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+- [x] 65.15 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
 
 ### Task 66: SnapshotForm 台股 broker 列修改股數時自動重算持股成本
 
@@ -1940,8 +1940,8 @@ NASDAQ `/info` endpoint 自 2026/04 起不再回傳 `OpenPrice`，`PriceFetchCli
 - [x] 66.1 `frontend/src/views/SnapshotFormView.vue` 台股 broker 列「股數」`@blur` 加上：
         `br.investmentCost = numParse(((br.avgCost||0) * (br.shares||0)).toFixed(2), 2); br.investmentCostStr = numFmt(br.investmentCost)`
         保持均價不變、以「均價 × 新股數」重算總成本（與美股欄位、`SnapshotDetailView.syncFromShares` 一致）
-- [ ] 66.2 服務重啟，於 SnapshotForm 編輯既有台股 broker row（例如 元大證券 1478→1000 股），確認「持股成本」自動更新為 37,210；「均價」維持 37.21；「現值／損益」隨之刷新
-- [ ] 66.3 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+- [x] 66.2 服務重啟，於 SnapshotForm 編輯既有台股 broker row（例如 元大證券 1478→1000 股），確認「持股成本」自動更新為 37,210；「均價」維持 37.21；「現值／損益」隨之刷新
+- [x] 66.3 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
 
 ### Task 67: SnapshotForm 編輯模式下使用者改動後 KPI 改用 live 計算
 
@@ -1964,11 +1964,11 @@ NASDAQ `/info` endpoint 自 2026/04 起不再回傳 `OpenPrice`，`PriceFetchCli
 - [x] 67.2 `onMounted` 末段（所有 sortable refresh 之後）`await nextTick()` 後註冊
         `watch(() => [form.deposits, form.funds, form.stocks, form.usdExchangeRate], ..., { deep: true })`
         將 `userEdited` 設為 true
-- [ ] 67.3 服務重啟，於編輯既有 snapshot：
+- [x] 67.3 服務重啟，於編輯既有 snapshot：
         - 改在途款項任一筆金額 → blur → 上方 `總資產` / `存款` 即時更新（含 transitNetTwd）
         - 改基金 units / currentValue → 上方 `共同基金現值` 即時更新
         - 初始載入時 KPI 應仍等於 stored 值（沒有抖動）
-- [ ] 67.4 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+- [x] 67.4 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
 
 ### Task 68: MarketDataService.getDividendRate 無配息資料時用 stock 主檔補 stockName
 
@@ -1995,9 +1995,9 @@ StockAnalysis BFF / WatchStock 等）自動受惠，stockName 變成「殖利率
         如果 `result.stockName()` 為 null/blank，從 `stockMasterRepo.findByCodeAndMarket(code, market)`
         取 name，補回 DividendRateResult 再 cache
 - [x] 68.3 編譯驗證（`mvn -q -DskipTests compile`）
-- [ ] 68.4 服務重啟後在 SnapshotForm 編輯模式打開含 SGOV 的快照：「股票名稱」欄位應立即顯示
+- [x] 68.4 服務重啟後在 SnapshotForm 編輯模式打開含 SGOV 的快照：「股票名稱」欄位應立即顯示
         「iShares 0-3 Month Treasury Bond ETF」（即使 live cache 尚未 warm-up）
-- [ ] 68.5 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+- [x] 68.5 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
 
 ### Task 69: 美股殖利率新增 Yahoo Finance fallback（覆蓋 NYSE / NYSEARCA）
 
@@ -2025,10 +2025,10 @@ fingerprint 偵測（與既有 `fetchUsStockName` 同一模式）。
         （source="Yahoo Finance"，description 含「TTM N 筆配息合計 $X.XX，殖利率 X.XX%」）
 - [x] 69.2 `getDividendRate("美股", ...)` 鏈調整為 NASDAQ → Yahoo → KNOWN_US_ETF_YIELDS → N/A
 - [x] 69.3 編譯驗證（`mvn -q -DskipTests compile`）
-- [ ] 69.4 重啟 external-materials-service + business-services（清掉 1 小時 dividend cache），
+- [x] 69.4 重啟 external-materials-service + business-services（清掉 1 小時 dividend cache），
         於 SnapshotForm 編輯模式含 SGOV 的快照：「預估配息」應出現 ~4% 的數字；
         SGOV / BIL / SCHD / JEPI / JEPQ / TLT 也都應有殖利率
-- [ ] 69.5 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+- [x] 69.5 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
 
 ### Task 70: Backup rotation 改以 DB `backup_record` 為單一事實來源
 
@@ -2058,9 +2058,9 @@ fingerprint 偵測（與既有 `fetchUsStockName` 同一模式）。
         其餘 rclone delete + DB delete；rclone 刪除失敗只 warn log
 - [x] 70.3 全部 caller 改為新簽名（`updateSetting` 內 3 個 rotateQuietly、`runBackup` / `daily` x2 / `weekly` 各 1 個 rotateFolder）
 - [x] 70.4 編譯驗證（`mvn -q -DskipTests compile`）
-- [ ] 70.5 服務重啟，至「保留設定」把 weeklyRetention 從 3 暫調為 2 → 儲存 → 應立即刪除最舊一份；
+- [x] 70.5 服務重啟，至「保留設定」把 weeklyRetention 從 3 暫調為 2 → 儲存 → 應立即刪除最舊一份；
         再調回 3 不會自動新增（因新檔由排程產生）
-- [ ] 70.6 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+- [x] 70.6 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
 
 ### Task 71: BackupRestoreView 儲存保留設定後 reload 備份列表
 
@@ -2075,8 +2075,8 @@ fingerprint 偵測（與既有 `fetchUsStockName` 同一模式）。
 #### Steps:
 
 - [x] 71.1 `BackupRestoreView.vue` `saveSettings()` 成功後 `await loadList()` 重新撈備份列表
-- [ ] 71.2 服務重啟，把 weeklyRetention 暫調為 2 → 儲存 → 列表應立即少一筆（不需手動 reload）
-- [ ] 71.3 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+- [x] 71.2 服務重啟，把 weeklyRetention 暫調為 2 → 儲存 → 列表應立即少一筆（不需手動 reload）
+- [x] 71.3 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
 
 ### Task 72: 均線警示通用化（新增月線 MA20、改為 `MA_*_PCT` + `ma_period`）
 
@@ -2094,16 +2094,16 @@ fingerprint 偵測（與既有 `fetchUsStockName` 同一模式）。
 
 #### Steps:
 
-- [ ] 72.1 Liquibase `v1.24.0-stock-alert-ma-period.sql`：
+- [x] 72.1 Liquibase `v1.24.0-stock-alert-ma-period.sql`：
   - `ALTER TABLE stock_alert ADD COLUMN ma_period INTEGER`
   - `UPDATE stock_alert SET ma_period = 60, alert_type = REPLACE(alert_type, 'QUARTERLY_MA_', 'MA_') WHERE alert_type LIKE 'QUARTERLY_MA_%'`
   - `UPDATE stock_alert SET ma_period = 240, alert_type = REPLACE(alert_type, 'ANNUAL_MA_', 'MA_') WHERE alert_type LIKE 'ANNUAL_MA_%'`
-- [ ] 72.2 `StockAlert` model 新增 `maPeriod` 欄位（Integer，nullable）；`StockAlertDto.Request/Response` 同步
-- [ ] 72.3 `StockAlertService.evaluate` switch 改為通用 `MA_ABOVE_PCT` / `MA_BELOW_PCT` 走 `checkMaDeviation(alert, currentPrice, alert.getMaPeriod(), above)`，刪除 `QUARTERLY_MA_*` / `ANNUAL_MA_*` 分支
-- [ ] 72.4 `StockAlertService.pickMaForAlert` 改為依 `maPeriod` 從 `FullIndicators` 取對應 MA（20→monthlyMa、60→quarterlyMa、240→annualMa）；`buildLabel` 用 `maPeriod` 動態組「高於月線/季線/年線 X%」；`matchInIntradayBars` / `matchInDailyOhlc` 內 MA 分支用 `alert.getMaPeriod()` 取代寫死的 60/240
-- [ ] 72.5 前端 `StockAlertView.vue`：下拉條件類型新增「月線偏離（20 日均線）」；form 新增 `maPeriod` 欄位；`buildAlertType` 對 MA 一律回 `MA_${dir}_PCT`，payload 帶 `maPeriod`；`parseAlertType` 依 alertType + maPeriod 還原 conditionGroup
-- [ ] 72.6 編譯與重啟驗證（`mvn -q -DskipTests compile`、啟動 backend / frontend）
-- [ ] 72.7 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+- [x] 72.2 `StockAlert` model 新增 `maPeriod` 欄位（Integer，nullable）；`StockAlertDto.Request/Response` 同步
+- [x] 72.3 `StockAlertService.evaluate` switch 改為通用 `MA_ABOVE_PCT` / `MA_BELOW_PCT` 走 `checkMaDeviation(alert, currentPrice, alert.getMaPeriod(), above)`，刪除 `QUARTERLY_MA_*` / `ANNUAL_MA_*` 分支
+- [x] 72.4 `StockAlertService.pickMaForAlert` 改為依 `maPeriod` 從 `FullIndicators` 取對應 MA（20→monthlyMa、60→quarterlyMa、240→annualMa）；`buildLabel` 用 `maPeriod` 動態組「高於月線/季線/年線 X%」；`matchInIntradayBars` / `matchInDailyOhlc` 內 MA 分支用 `alert.getMaPeriod()` 取代寫死的 60/240
+- [x] 72.5 前端 `StockAlertView.vue`：下拉條件類型新增「月線偏離（20 日均線）」；form 新增 `maPeriod` 欄位；`buildAlertType` 對 MA 一律回 `MA_${dir}_PCT`，payload 帶 `maPeriod`；`parseAlertType` 依 alertType + maPeriod 還原 conditionGroup
+- [x] 72.6 編譯與重啟驗證（`mvn -q -DskipTests compile`、啟動 backend / frontend）
+- [x] 72.7 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
 
 ### Task 73: 觀察清單拿掉「操作」欄（移除觀察改走警示條件頁）
 
@@ -2123,8 +2123,8 @@ fingerprint 偵測（與既有 `fetchUsStockName` 同一模式）。
 - [x] 73.2 `frontend/src/api/index.js` 移除 `watchStock.delete`
 - [x] 73.3 `WatchStockController` 移除 `@DeleteMapping("/{stockCode}/{market}")`；`WatchStockService.delete()` 連同 `StockAlertRepository.deleteByStockCodeAndMarket()`（已無 caller）一併刪除
 - [x] 73.4 spec：`requirements.md` Requirement 14 將「刪除觀察 = 刪除該股票所有 alert」改為「移除觀察的入口 = 警示條件頁刪除」；`design.md` `WatchStockBffController` / `WatchStockService` / Watch Stocks API 段落同步移除 DELETE 端點；`tasks.md` 61.18 驗證項調整
-- [ ] 73.5 服務重啟驗證：觀察清單列無「操作」欄；在警示條件頁刪除某股票最後一筆 alert 後，觀察清單該列消失；拖曳排序仍可運作
-- [ ] 73.6 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+- [x] 73.5 服務重啟驗證：觀察清單列無「操作」欄；在警示條件頁刪除某股票最後一筆 alert 後，觀察清單該列消失；拖曳排序仍可運作
+- [x] 73.6 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
 
 ### Task 74: 新增警示 dialog 支援「股名 → 代號」反向自動帶入
 
@@ -2147,8 +2147,8 @@ fingerprint 偵測（與既有 `fetchUsStockName` 同一模式）。
 - [x] 74.3 `frontend/src/api/index.js` `stockAlert.lookupCode = (params) => api.get('/bff/stock-alert/lookup-code', { params })`（沿用 stock-alert wildcard BFF route，無需 BFF 新增配置）
 - [x] 74.4 `StockAlertView.vue` 股名 `el-input` 加 `@blur="fetchStockCode"` 與 loading suffix-icon；新增 `fetchStockCode()`：只在 `stockCode` 為空且 `stockName` 有值時觸發，避免覆蓋已填代號；查無時 `ElMessage.warning('本地查無此股名，請改輸入股票代號')`
 - [x] 74.5 spec：`requirements.md` Requirement 16 增加 `lookup-code` AC；`design.md` `/api/stock-alerts/lookup-code` 列入端點列表
-- [ ] 74.6 服務重啟驗證：富邦金（已存在於主檔者）打入名字 → blur → 代號自動填入；隨意打不存在名字 → 顯示警告且不蓋掉代號；打「台股大盤」→ 帶入 0000
-- [ ] 74.7 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+- [x] 74.6 服務重啟驗證：富邦金（已存在於主檔者）打入名字 → blur → 代號自動填入；隨意打不存在名字 → 顯示警告且不蓋掉代號；打「台股大盤」→ 帶入 0000
+- [x] 74.7 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
 
 ### Task 75: `lookup-name` 對「美股 + 0000」加守門（防 Yahoo fuzzy match 污染主檔）
 
@@ -2162,8 +2162,8 @@ fingerprint 偵測（與既有 `fetchUsStockName` 同一模式）。
 
 - [x] 75.1 `StockAlertController.lookupName` 在台股守門之後加「美股 + 0000 → 回空字串」分支；comment 說明歷史 bug 與防護意圖
 - [x] 75.2 spec：`requirements.md` Requirement 16 `lookup-name` AC 補上守門描述
-- [ ] 75.3 服務重啟驗證：警示新增表單市場選「美股」、代號打 `0000` → blur 不再自動帶入名稱（停留空白）；`stock` 主檔不再新增 `(0000, 美股)` 列
-- [ ] 75.4 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+- [x] 75.3 服務重啟驗證：警示新增表單市場選「美股」、代號打 `0000` → blur 不再自動帶入名稱（停留空白）；`stock` 主檔不再新增 `(0000, 美股)` 列
+- [x] 75.4 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
 
 ### Task 76: 已實現損益明細列雙擊開啟股票分析圖
 
@@ -2177,8 +2177,8 @@ fingerprint 偵測（與既有 `fetchUsStockName` 同一模式）。
 
 - [x] 76.1 `RealizedGainView.vue` 在 `<el-table>` 加 `@row-dblclick="onRowDblClick"`，import `StockAnalysisDialog`，新增 `analysisVisible` / `analysisStock` state 與 `onRowDblClick(row)` 函式：以 `row.assetCode → stockCode`、`row.assetName → stockName`、`row.market` 構造 dialog 入參
 - [x] 76.2 spec：`design.md` `StockAnalysisBffRoutes` 段落把 `RealizedGain` 加進使用此對話框的 view 清單（四 → 五）
-- [ ] 76.3 服務重啟驗證：在已實現損益列上雙擊 2330 / AVGO 等 → 跳出對應股票的走勢圖 popup，標題顯示「{code} {name}　股票分析」
-- [ ] 76.4 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+- [x] 76.3 服務重啟驗證：在已實現損益列上雙擊 2330 / AVGO 等 → 跳出對應股票的走勢圖 popup，標題顯示「{code} {name}　股票分析」
+- [x] 76.4 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
 
 ### Task 77: 存款新增「年利率／預估利息」欄位並併入預估年配息
 
@@ -2197,8 +2197,8 @@ fingerprint 偵測（與既有 `fetchUsStockName` 同一模式）。
 - [x] 77.5 `AssetService.autoEnrichDividendRates` / `enrichAllSnapshotDividendRates` / `recalcAllDividends` / `updateSnapshotDividendRates` 統一抽出 `sumDepositInterest(snapshot)` helper，重算 `estimatedAnnualDividend` 時一律包含
 - [x] 77.6 `SnapshotFormView.vue`：台幣 + 美元 tab 各加「年利率」「預估利息」兩欄；`mapDepositFromApi` 映射 `annualInterestRate`；`addDeposit` 預設 `null`；submit payload 帶 `annualInterestRate`
 - [x] 77.7 `SnapshotFormView.vue`：新增 `depositInterestTwd(d)` helper 與 `depositInterestTotal` computed；`summaryDividend` 加進去；台幣 tab 底部彙總列新增「預估年利息」一欄
-- [ ] 77.8 服務重啟驗證：在台幣存款列輸入 1.5（年利率），預估利息欄即時顯示金額；底部彙總「預估年利息」與頂部 KPI「預估年配息」皆變動；儲存後重新打開該快照，年利率值仍在
-- [ ] 77.9 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+- [x] 77.8 服務重啟驗證：在台幣存款列輸入 1.5（年利率），預估利息欄即時顯示金額；底部彙總「預估年利息」與頂部 KPI「預估年配息」皆變動；儲存後重新打開該快照，年利率值仍在
+- [x] 77.9 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
 - [x] 77.10 `DashboardView.vue` 殖利率分母同步納入存款：`yieldBase = totalStockValue + totalFundValue + totalDeposit`（原本不含存款）。理由：分子 `estimatedAnnualDividend` 已含存款預估年利息，分母也須含存款本金口徑才一致
 
 ### Task 78: 警示存檔守門放寬：本地 stock 主檔也算合法 canonical
@@ -2211,10 +2211,10 @@ fingerprint 偵測（與既有 `fetchUsStockName` 同一模式）。
 
 #### Steps:
 
-- [ ] 78.1 `StockAlertService.assertNameMatchesCode`：取得外部 canonical 後若與 user-supplied `stockName` 不一致，再 fallback 對照 `stockMasterRepo.findByCodeAndMarket(code, market).name`；任一相符即通過，兩者皆不相符才 throw。錯誤訊息維持「代號 X 與股名「Y」不符，外部來源為「Z」」（仍以外部 canonical 為錯誤訊息中的對照值，避免訊息誤導）
-- [ ] 78.2 spec：`requirements.md` 與 `design.md` 對應段落已同步更新（本 task 同 commit）
-- [ ] 78.3 服務重啟驗證：以原案例重現 — 美股 NVDA + lookupName 自動帶名 → 新增「月線偏離 5%」警示能順利存檔
-- [ ] 78.4 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+- [x] 78.1 `StockAlertService.assertNameMatchesCode`：取得外部 canonical 後若與 user-supplied `stockName` 不一致，再 fallback 對照 `stockMasterRepo.findByCodeAndMarket(code, market).name`；任一相符即通過，兩者皆不相符才 throw。錯誤訊息維持「代號 X 與股名「Y」不符，外部來源為「Z」」（仍以外部 canonical 為錯誤訊息中的對照值，避免訊息誤導）
+- [x] 78.2 spec：`requirements.md` 與 `design.md` 對應段落已同步更新（本 task 同 commit）
+- [x] 78.3 服務重啟驗證：以原案例重現 — 美股 NVDA + lookupName 自動帶名 → 新增「月線偏離 5%」警示能順利存檔
+- [x] 78.4 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
 
 ### Task 79: 修復盤中股價跳回昨收（TWSE `z='-'` 改採 skip write）
 
@@ -2315,24 +2315,24 @@ Task 79+81 定案的兩條規則：(1) 每天開盤抓不到最新值 → 顯示
 
 #### Steps:
 
-- [ ] 83.1 Liquibase migration `v1.26.0-notification-recipient.sql`：建 `notification_recipient` 表（id PK, email VARCHAR UNIQUE NOT NULL, active BOOLEAN DEFAULT TRUE, created_at TIMESTAMP, updated_at TIMESTAMP）；註冊到 `db.changelog-master.yaml`
-- [ ] 83.2 `backend/pom.xml` 加 `spring-boot-starter-mail`；`backend/src/main/resources/application.yml` 加 `spring.mail.*`（host smtp.gmail.com、port 587、`username=${MAIL_USERNAME:}`、`password=${MAIL_PASSWORD:}`、STARTTLS）；`docker-compose.yml` business-services service 加環境變數 placeholder（讀取自 host env）
-- [ ] 83.3 後端 `NotificationRecipient` Entity / Repo / DTO / Service / Controller：
+- [x] 83.1 Liquibase migration `v1.26.0-notification-recipient.sql`：建 `notification_recipient` 表（id PK, email VARCHAR UNIQUE NOT NULL, active BOOLEAN DEFAULT TRUE, created_at TIMESTAMP, updated_at TIMESTAMP）；註冊到 `db.changelog-master.yaml`
+- [x] 83.2 `backend/pom.xml` 加 `spring-boot-starter-mail`；`backend/src/main/resources/application.yml` 加 `spring.mail.*`（host smtp.gmail.com、port 587、`username=${MAIL_USERNAME:}`、`password=${MAIL_PASSWORD:}`、STARTTLS）；`docker-compose.yml` business-services service 加環境變數 placeholder（讀取自 host env）
+- [x] 83.3 後端 `NotificationRecipient` Entity / Repo / DTO / Service / Controller：
   - `model/NotificationRecipient.java`（Lombok + JPA + `@PreUpdate` 更新 updatedAt）
   - `repository/NotificationRecipientRepository.java`（含 `findByActiveTrue()`、`findByEmailIgnoreCase()`）
   - `dto/NotificationRecipientDto.java`（Request / Response）
   - `service/NotificationRecipientService.java`（CRUD + email normalize trim+toLowerCase + duplicate 檢查 + toggleActive）
   - `controller/NotificationRecipientController.java`（`/api/notification-recipients` + `PATCH .../{id}/active`）
-- [ ] 83.4 `service/EmailService.java`：包 JavaMailSender；`isEnabled()` 檢查 `MAIL_USERNAME` 非空；`send(toList, subject, body)` SMTP 失敗 `log.warn` 不拋例外；寄件人優先用 `${NOTIFICATION_FROM:${spring.mail.username}}`
-- [ ] 83.5 `service/AlertNotificationDispatcher.java`：
+- [x] 83.4 `service/EmailService.java`：包 JavaMailSender；`isEnabled()` 檢查 `MAIL_USERNAME` 非空；`send(toList, subject, body)` SMTP 失敗 `log.warn` 不拋例外；寄件人優先用 `${NOTIFICATION_FROM:${spring.mail.username}}`
+- [x] 83.5 `service/AlertNotificationDispatcher.java`：
   - `ConcurrentLinkedQueue<PendingTrigger>` 收 `enqueue(alert, triggeredAt, price, ind)`
   - `@Scheduled(fixedDelay = 60_000)` `flush()`：drain queue、組 digest subject + body、讀 active recipients、呼叫 EmailService
   - 收件人空 / EmailService disabled → skip 寄信但仍清空 queue（避免 queue 無限長大）
-- [ ] 83.6 `StockAlertService.recordTrigger()` 末端注入 `dispatcher.enqueue(...)`；包 try/catch 確保通知失敗不影響觸發紀錄落地
-- [ ] 83.7 BFF `NotificationSettingsBffRoutes`：rewrite `/api/bff/notification-settings/recipients(?<seg>/?.*)` → `/api/notification-recipients${seg}` → `business-services.url`
-- [ ] 83.8 前端 `views/NotificationSettingsView.vue`：表格顯示收件人 + email 輸入框新增 + 啟停 switch + 刪除按鈕；走 `/api/bff/notification-settings/recipients`；加路由 `/notification-settings`；在主選單「系統設定」群組加入口
-- [ ] 83.9 部署文件：CLAUDE.md / README 補一段「Gmail App Password 取得步驟」（兩步驗證 → 應用程式密碼 → 16 碼貼到 `MAIL_PASSWORD`），docker-compose env 範例；本機 build 跑通、手動建一筆假觸發或調整 cooldown 驗證 digest 收信
-- [ ] 83.10 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+- [x] 83.6 `StockAlertService.recordTrigger()` 末端注入 `dispatcher.enqueue(...)`；包 try/catch 確保通知失敗不影響觸發紀錄落地
+- [x] 83.7 BFF `NotificationSettingsBffRoutes`：rewrite `/api/bff/notification-settings/recipients(?<seg>/?.*)` → `/api/notification-recipients${seg}` → `business-services.url`
+- [x] 83.8 前端 `views/NotificationSettingsView.vue`：表格顯示收件人 + email 輸入框新增 + 啟停 switch + 刪除按鈕；走 `/api/bff/notification-settings/recipients`；加路由 `/notification-settings`；在主選單「系統設定」群組加入口
+- [x] 83.9 部署文件：CLAUDE.md / README 補一段「Gmail App Password 取得步驟」（兩步驗證 → 應用程式密碼 → 16 碼貼到 `MAIL_PASSWORD`），docker-compose env 範例；本機 build 跑通、手動建一筆假觸發或調整 cooldown 驗證 digest 收信
+- [x] 83.10 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
 
 
 ### Task 84: HistoricalBackfillService 禁止寫入「今日列」（避免 Yahoo intraday bar 汙染 DB 收盤）
@@ -2351,15 +2351,15 @@ VOO 股票走勢圖在 2026-06-05 NY 盤中（15:16，未到 16:00 收盤）顯�
 
 #### Steps:
 
-- [ ] 84.1 `HistoricalBackfillService.backfillTwStock`：
+- [x] 84.1 `HistoricalBackfillService.backfillTwStock`：
   - `LocalDate today = LocalDate.now(MarketClock.TW_ZONE)`
   - `LocalDate end = (until != null) ? until : today`（改用 TW_ZONE，不用 JVM 預設 TZ）
   - for-loop 內：`if (bar.tradingDate().equals(today)) continue;` 並於該分支 `log.debug` 記錄
-- [ ] 84.2 `HistoricalBackfillService.backfillUsStock`：同 84.1，但用 `MarketClock.US_ZONE`
-- [ ] 84.3 spec：`requirements.md` Requirement 7 加「今日列獨佔」acceptance criterion；`design.md` 在 ClosePersister sequence 後補一段「今日列獨佔規則」說明
-- [ ] 84.4 清除已被汙染的 6/5 VOO row（DELETE WHERE stock_code='VOO' AND market='美股' AND trading_date='2026-06-05'）；等 16:02 ET ClosePersister 寫入正確的收盤
-- [ ] 84.5 Docker 重 build external-materials-service image + 容器重建（`docker compose build external-materials-service && docker compose up -d external-materials-service`）
-- [ ] 84.6 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
+- [x] 84.2 `HistoricalBackfillService.backfillUsStock`：同 84.1，但用 `MarketClock.US_ZONE`
+- [x] 84.3 spec：`requirements.md` Requirement 7 加「今日列獨佔」acceptance criterion；`design.md` 在 ClosePersister sequence 後補一段「今日列獨佔規則」說明
+- [x] 84.4 清除已被汙染的 6/5 VOO row（DELETE WHERE stock_code='VOO' AND market='美股' AND trading_date='2026-06-05'）；等 16:02 ET ClosePersister 寫入正確的收盤
+- [x] 84.5 Docker 重 build external-materials-service image + 容器重建（`docker compose build external-materials-service && docker compose up -d external-materials-service`）
+- [x] 84.6 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
 
 
 
@@ -2380,31 +2380,31 @@ VOO 股票走勢圖在 2026-06-05 NY 盤中（15:16，未到 16:00 收盤）顯�
 
 #### Steps:
 
-- [ ] 85.1 spec：requirements.md Req 12 seed 改 3 種；新增 Req 24；design.md 加 MarketType seed 註解 + Req 24 設計章節
-- [ ] 85.2 backend `DataInitializer.seedMarketTypes()` 加 `("英股", "英國股市", 3)`
-- [ ] 85.3 external-materials `MarketClock`：加 `LON_ZONE` + `isUkMarketOpen` + `isUkMarketJustClosed`
-- [ ] 85.4 external-materials `PriceFetchClient`：加 `getYahooLsePrice` + `fetchUkHistoricalRange`；`getStockPrice` 加英股分支
-- [ ] 85.5 external-materials `StockSourceQuery`：三組 collect 方法 signature 改三路（加 ukCodes）
-- [ ] 85.6 external-materials `PricePoller`：加 `scheduledUkIntradayUpdate` cron、`warmCacheOnStartup` / `refreshAll` 涵蓋英股、`RefreshSummary` 加 ukUpdated/ukMarketOpen
-- [ ] 85.7 external-materials `ClosePersister`：加 `dumpUkCloseFromRedis` cron 16:32 LON、`verifyUkCloseWithYahoo` cron 17:00 LON、`selfHealMissedClose` 倫敦時區分支
-- [ ] 85.8 external-materials `HistoricalBackfillService.backfillUkStock`；`startupBackfill` / `backfillAll` / `backfillSingleStock` 加英股分支
-- [ ] 85.9 external-materials `MarketDataFetchService`：加 `fetchUkStockName`；`getDividendRate` / `getEtfHoldings` / `getDividendHistory` 加英股分支
-- [ ] 85.10 backend 新增 `com.steven.assets.util.MarketZones.resolve(market)` helper
-- [ ] 85.11 backend `StockPriceService`：加 LON_ZONE / isUkMarketOpen；`getLiveAssets` 英股套 USD 匯率；`getMarketStatus` / `manualRefresh` / `LiveAssetsResponse` 加 ukMarketOpen
-- [ ] 85.12 backend `TechnicalIndicatorService` / `WatchStockService` / `StockAlertService` / `HistoricalDataService` 改用 `MarketZones.resolve`
-- [ ] 85.13 backend `StockAlertController.lookupName`：`0000 + 英股` 拒絕
-- [ ] 85.14 backend `StockAlertService.assertNameMatchesCode` 加英股分支
-- [ ] 85.15 backend `MarketDataService.getDividendRate / getEtfHoldings / getDividendHistory / isEtf` 加英股分支
-- [ ] 85.16 frontend `StockAnalysisDialog.vue` 加英股 ETF 白名單 + iShares 連結
-- [ ] 85.17 frontend `DashboardView.vue` 頂部彙整列加英股欄、資產配置圓餅 6 區、KPI 計算
-- [ ] 85.18 frontend `AssetHistoryView.vue` 加英股欄
-- [ ] 85.19 frontend `SnapshotDetailView.vue` 英股 USD 顯示
-- [ ] 85.20 frontend `SnapshotFormView.vue` 股票區塊加英股區
-- [ ] 85.21 frontend `WatchStockView.vue` / `StockAlertView.vue` 加英股 tab + LON 時區後綴
-- [ ] 85.22 frontend `TradingCalendarView.vue` 顯示英股市場狀態
-- [ ] 85.23 frontend `RealizedGainView.vue` market 選項加英股
-- [ ] 85.24 Docker 重 build：`docker compose build backend external-materials-service frontend && docker compose up -d backend external-materials-service frontend`
-- [ ] 85.25 手動驗證：新增 CSPX/英股 持股、watch、alert，dashboard 顯示英股欄、historical backfill 觸發、倫敦時區排程啟動
+- [x] 85.1 spec：requirements.md Req 12 seed 改 3 種；新增 Req 24；design.md 加 MarketType seed 註解 + Req 24 設計章節
+- [x] 85.2 backend `DataInitializer.seedMarketTypes()` 加 `("英股", "英國股市", 3)`
+- [x] 85.3 external-materials `MarketClock`：加 `LON_ZONE` + `isUkMarketOpen` + `isUkMarketJustClosed`
+- [x] 85.4 external-materials `PriceFetchClient`：加 `getYahooLsePrice` + `fetchUkHistoricalRange`；`getStockPrice` 加英股分支
+- [x] 85.5 external-materials `StockSourceQuery`：三組 collect 方法 signature 改三路（加 ukCodes）
+- [x] 85.6 external-materials `PricePoller`：加 `scheduledUkIntradayUpdate` cron、`warmCacheOnStartup` / `refreshAll` 涵蓋英股、`RefreshSummary` 加 ukUpdated/ukMarketOpen
+- [x] 85.7 external-materials `ClosePersister`：加 `dumpUkCloseFromRedis` cron 16:32 LON、`verifyUkCloseWithYahoo` cron 17:00 LON、`selfHealMissedClose` 倫敦時區分支
+- [x] 85.8 external-materials `HistoricalBackfillService.backfillUkStock`；`startupBackfill` / `backfillAll` / `backfillSingleStock` 加英股分支
+- [x] 85.9 external-materials `MarketDataFetchService`：加 `fetchUkStockName`；`getDividendRate` / `getEtfHoldings` / `getDividendHistory` 加英股分支
+- [x] 85.10 backend 新增 `com.steven.assets.util.MarketZones.resolve(market)` helper
+- [x] 85.11 backend `StockPriceService`：加 LON_ZONE / isUkMarketOpen；`getLiveAssets` 英股套 USD 匯率；`getMarketStatus` / `manualRefresh` / `LiveAssetsResponse` 加 ukMarketOpen
+- [x] 85.12 backend `TechnicalIndicatorService` / `WatchStockService` / `StockAlertService` / `HistoricalDataService` 改用 `MarketZones.resolve`
+- [x] 85.13 backend `StockAlertController.lookupName`：`0000 + 英股` 拒絕
+- [x] 85.14 backend `StockAlertService.assertNameMatchesCode` 加英股分支
+- [x] 85.15 backend `MarketDataService.getDividendRate / getEtfHoldings / getDividendHistory / isEtf` 加英股分支
+- [x] 85.16 frontend `StockAnalysisDialog.vue` 加英股 ETF 白名單 + iShares 連結
+- [x] 85.17 frontend `DashboardView.vue` 頂部彙整列加英股欄、資產配置圓餅 6 區、KPI 計算
+- [x] 85.18 frontend `AssetHistoryView.vue` 加英股欄
+- [x] 85.19 frontend `SnapshotDetailView.vue` 英股 USD 顯示
+- [x] 85.20 frontend `SnapshotFormView.vue` 股票區塊加英股區
+- [x] 85.21 frontend `WatchStockView.vue` / `StockAlertView.vue` 加英股 tab + LON 時區後綴
+- [x] 85.22 frontend `TradingCalendarView.vue` 顯示英股市場狀態
+- [x] 85.23 frontend `RealizedGainView.vue` market 選項加英股
+- [x] 85.24 Docker 重 build：`docker compose build backend external-materials-service frontend && docker compose up -d backend external-materials-service frontend`
+- [x] 85.25 手動驗證：新增 CSPX/英股 持股、watch、alert，dashboard 顯示英股欄、historical backfill 觸發、倫敦時區排程啟動
 
 ---
 
@@ -2423,19 +2423,19 @@ VOO 股票走勢圖在 2026-06-05 NY 盤中（15:16，未到 16:00 收盤）顯�
 
 #### Steps:
 
-- [ ] 86.1 新增 `bff/.../dashboard/dto/TwStockLookthroughDto.java`（含 `Item` / `Others` / `DegradedEtf` 內部 record）
-- [ ] 86.2 `DashboardBffController.getTwStockLookthrough(snapshotId)`：抓 snapshot detail + closePrices → mergedStocks → 篩台股 → 並行（concurrency 4，Yahoo quoteSummary 對單 IP 有 rate limit）呼叫 `/api/market-data/etf-holdings?market=台股&code=...` → 拆解 + 加總 → top10 + others
-- [ ] 86.3 前端 `DashboardView.vue`：「資產配置分佈」card header 加 el-tabs（`category` / `twStock`），新 `twStockPieOption` computed，watch `allocationTab` + `selectedSnapshotId` lazy fetch，前端 Map cache（key = snapshotId）
-- [ ] 86.4 ETF 抓取失敗的 degradedEtfs 註記顯示（淡灰小字於 panel 底部）
-- [ ] 86.5 ETF 成分股資料來源（FinMind `TaiwanETFHoldings` 已被移除回 422）：
+- [x] 86.1 新增 `bff/.../dashboard/dto/TwStockLookthroughDto.java`（含 `Item` / `Others` / `DegradedEtf` 內部 record）
+- [x] 86.2 `DashboardBffController.getTwStockLookthrough(snapshotId)`：抓 snapshot detail + closePrices → mergedStocks → 篩台股 → 並行（concurrency 4，Yahoo quoteSummary 對單 IP 有 rate limit）呼叫 `/api/market-data/etf-holdings?market=台股&code=...` → 拆解 + 加總 → top10 + others
+- [x] 86.3 前端 `DashboardView.vue`：「資產配置分佈」card header 加 el-tabs（`category` / `twStock`），新 `twStockPieOption` computed，watch `allocationTab` + `selectedSnapshotId` lazy fetch，前端 Map cache（key = snapshotId）
+- [x] 86.4 ETF 抓取失敗的 degradedEtfs 註記顯示（淡灰小字於 panel 底部）
+- [x] 86.5 ETF 成分股資料來源（FinMind `TaiwanETFHoldings` 已被移除回 422）：
   - 台股主來源改 **MoneyDJ** `Basic0007a.xdjhtm?etfid={code}.TW`（`getMoneyDjEtfHoldings` + `parseMoneyDjHoldings`，完整成分股、解析「股票名稱/持股(千股)/比例」表）；Yahoo `topHoldings` 前 10 退為 fallback
   - MoneyDJ / Yahoo 一律走 `curl` 子程序（`runCurl`）：站方 WAF 依 TLS 指紋對 Java HttpClient 回 429（同容器 curl 卻 200）；沿用本檔既有 `ProcessBuilder("curl"...)` 先例
   - `getEtfHoldings` 加 12h in-memory cache（成分股每日至多變動一次）
   - MoneyDJ 只給股名無代號 → BFF lookthrough 聚合鍵用**股名**；ext-materials 以記憶體「股名→代號」字典（TWSE `STOCK_DAY_ALL` + TPEX，24h cache，`twNameToCodeMap()`）補代號供 tooltip 顯示，**不**寫入 stock 主檔（避免污染 `StockSourceQuery` 抓價清單）
   - 前端圓餅圖：環標籤/圖例只顯示股名 + 佔比；tooltip 顯示「代號 股名 + 金額 + 佔比」；ETF 依權重正規化完全穿透（不殘留 ETF 自身 slice）
   - 同步更新 Req 9 / Req 13 / design.md 資料來源描述
-- [ ] 86.6 手動驗證：curl endpoint 檢查 items.length ≤ 10、percent 加總 ≈ 100、ETF 確實穿透（出現 2330/2317 等成分股而非 ETF 代號）；前端切換 tab 與 snapshot 行為正確
-- [ ] 86.7 「台股個股」tab hover 連動：對齊 tab 1「資產類別」既有 hover 行為，hover 趨勢圖某節點時 tab 2 圓餅圖切到該節點對應 snapshot 的穿透結果。實作要點：
+- [x] 86.6 手動驗證：curl endpoint 檢查 items.length ≤ 10、percent 加總 ≈ 100、ETF 確實穿透（出現 2330/2317 等成分股而非 ETF 代號）；前端切換 tab 與 snapshot 行為正確
+- [x] 86.7 「台股個股」tab hover 連動：對齊 tab 1「資產類別」既有 hover 行為，hover 趨勢圖某節點時 tab 2 圓餅圖切到該節點對應 snapshot 的穿透結果。實作要點：
   - 新增 `effectiveSnapshotId` computed：`hoveredHistoryDate` → 從 `store.history` 找對應 row.id；無 hover 時 fallback 到 `selectedSnapshotId`
   - watch source 從 `[allocationTab, selectedSnapshotId]` 改為 `[allocationTab, effectiveSnapshotId]`；cache hit 同步切換、miss 走 `loadTwStockLookthrough` lazy fetch
   - `loadTwStockLookthrough` race 防護判斷由 `selectedSnapshotId.value === snapshotId` 改為 `effectiveSnapshotId.value === snapshotId`（hover 快速移動時不寫入過期 fetch 結果）
@@ -2457,16 +2457,16 @@ VOO 股票走勢圖在 2026-06-05 NY 盤中（15:16，未到 16:00 收盤）顯�
 
 #### Steps:
 
-- [ ] 87.1 backend `MarketDataController.getIntraday5m`：`GET /api/market-data/intraday-5m?code=&market=&daysBack=1`，直接代理 `HistoricalDataService.fetchIntraday5m`，回 `List<IntradayBar>`（time / open / high / low / close）
-- [ ] 87.2 bff `StockAnalysisBffRoutes`：加 `stock-analysis-intraday-5m` route `GET /api/bff/stock-analysis/intraday-5m` → `/api/market-data/intraday-5m`
-- [ ] 87.3 frontend `api/index.js`：`bffApi.stockAnalysis.getIntraday5m(code, market, daysBack=1)`
-- [ ] 87.4 frontend `StockAnalysisDialog.vue`：
+- [x] 87.1 backend `MarketDataController.getIntraday5m`：`GET /api/market-data/intraday-5m?code=&market=&daysBack=1`，直接代理 `HistoricalDataService.fetchIntraday5m`，回 `List<IntradayBar>`（time / open / high / low / close）
+- [x] 87.2 bff `StockAnalysisBffRoutes`：加 `stock-analysis-intraday-5m` route `GET /api/bff/stock-analysis/intraday-5m` → `/api/market-data/intraday-5m`
+- [x] 87.3 frontend `api/index.js`：`bffApi.stockAnalysis.getIntraday5m(code, market, daysBack=1)`
+- [x] 87.4 frontend `StockAnalysisDialog.vue`：
   - `rangeOptions` 第一項插入 `{ label: '當日', months: 0 }`，預設仍為 12（1年）
   - `months === 0` 時改抓 `getIntraday5m`，存到 `intradayBars` ref；資料截止顯示為 intradayBars 最後一筆的 date 部分
   - 切到當日模式時 chartOption 改以 `intradayBars` 為 x 軸（time 顯示為 HH:mm），price 序列為 close；月線 / 季線 / 年線 / KD 改畫水平線（值取自日線資料 last MA20/60/240 / last K / last D）
   - tooltip / legend 末值顯示維持與其他期間一致格式
-- [ ] 87.5 Docker 重 build：`docker compose build backend external-materials-service bff frontend && docker compose up -d backend external-materials-service bff frontend`
-- [ ] 87.6 手動驗證：開啟任一持股的股票分析 → 切到「當日」→ 確認分時走勢圖出現、月/季/年線為水平線、KD 副圖顯示最新值水平線；切回「1年」回到日線正常顯示
+- [x] 87.5 Docker 重 build：`docker compose build backend external-materials-service bff frontend && docker compose up -d backend external-materials-service bff frontend`
+- [x] 87.6 手動驗證：開啟任一持股的股票分析 → 切到「當日」→ 確認分時走勢圖出現、月/季/年線為水平線、KD 副圖顯示最新值水平線；切回「1年」回到日線正常顯示
 
 
 ### Task 88: 「當日」走勢兩階段資料源（盤中 polling 累積 + 盤後外部源覆寫）
@@ -2487,22 +2487,22 @@ Task 87 以 Yahoo `interval=5m` 作為「當日」走勢資料源，但 Yahoo �
 
 #### Steps:
 
-- [ ] 88.1 ext-materials 新 `IntradayTickStore`（同 `IntradayHighLowTracker` pattern）：`appendTick(code, market, date, time, price)` `RPUSH` + `EXPIRE` 36h；`replaceTicks(code, market, date, ticks)` `DEL` + `RPUSH`；`getTicks(code, market, date)` `LRANGE 0 -1` 解 JSON 回傳 `List<TickPoint>`（time, price）
-- [ ] 88.2 `PriceCacheWriter.write` 在 `redis.opsForValue().set(key, json, LIVE_TTL)` 之後加 tick append：`source` 不含 `(` 視為真實成交（與 `HistoricalDataService.getStockHistory` 對「今日格」的守門條件一致），呼叫 `tickStore.appendTick(code, market, tradingDate, LocalDateTime.now(marketZone), price)`
-- [ ] 88.3 ext-materials `PriceFetchClient.fetchTwKBar5m(code, date)`：打 FinMind `dataset=TaiwanStockKBar&data_id={code}&start_date={date}&end_date={date}`，回 `List<TickBar>`，每筆 = (date + "T" + minute, close)。FinMind row 欄位：`date`、`minute`、`close`。FinMind `TaiwanStockKBar` 為 sponsor 付費 dataset，無 token 時回 400 → `IntradayTickRefresher.refreshTwOne` 偵測到空 list 後 fallback 到 Yahoo 5m（與美/英股同源）
-- [ ] 88.4 ext-materials 新 `IntradayTickRefresher`：
+- [x] 88.1 ext-materials 新 `IntradayTickStore`（同 `IntradayHighLowTracker` pattern）：`appendTick(code, market, date, time, price)` `RPUSH` + `EXPIRE` 36h；`replaceTicks(code, market, date, ticks)` `DEL` + `RPUSH`；`getTicks(code, market, date)` `LRANGE 0 -1` 解 JSON 回傳 `List<TickPoint>`（time, price）
+- [x] 88.2 `PriceCacheWriter.write` 在 `redis.opsForValue().set(key, json, LIVE_TTL)` 之後加 tick append：`source` 不含 `(` 視為真實成交（與 `HistoricalDataService.getStockHistory` 對「今日格」的守門條件一致），呼叫 `tickStore.appendTick(code, market, tradingDate, LocalDateTime.now(marketZone), price)`
+- [x] 88.3 ext-materials `PriceFetchClient.fetchTwKBar5m(code, date)`：打 FinMind `dataset=TaiwanStockKBar&data_id={code}&start_date={date}&end_date={date}`，回 `List<TickBar>`，每筆 = (date + "T" + minute, close)。FinMind row 欄位：`date`、`minute`、`close`。FinMind `TaiwanStockKBar` 為 sponsor 付費 dataset，無 token 時回 400 → `IntradayTickRefresher.refreshTwOne` 偵測到空 list 後 fallback 到 Yahoo 5m（與美/英股同源）
+- [x] 88.4 ext-materials 新 `IntradayTickRefresher`：
   - `@Scheduled(cron = "0 35 13 * * MON-FRI", zone = "Asia/Taipei") refreshTwTicks()`：對所有持股（`StockSourceQuery.collectHeldStockCodes` 台股部分）並行 fetch FinMind 5m K 線 → `tickStore.replaceTicks`
   - `@Scheduled(cron = "0 5 16 * * MON-FRI", zone = "America/New_York") refreshUsTicks()`：美股用 `PriceFetchClient.fetchIntraday5m(code, "美股", 1)` → tick + close → replaceTicks
   - `@Scheduled(cron = "0 35 16 * * MON-FRI", zone = "Europe/London") refreshUkTicks()`：英股同上但 market="英股"
   - 啟動時若市場已收盤但今日 ticks LIST 空，補一次 cold-start refresh
-- [ ] 88.5 ext-materials `InternalPriceController.intradayTicks(code, market, date)`：`GET /internal/intraday-ticks`，預設 date = 該市場時區的「最近一個交易日」（用 `MarketClock` / `findMaxTradingDate`），回 `List<TickPoint>`
-- [ ] 88.6 business-services `HistoricalDataService.fetchIntradayTicks(code, market, date)`：proxy 至 `/internal/intraday-ticks`
-- [ ] 88.7 business-services `MarketDataController.getIntradayTicks`：`GET /api/market-data/intraday-ticks?code=&market=&date=`（date 可選）
-- [ ] 88.8 bff `StockAnalysisBffRoutes` 加 `stock-analysis-intraday-ticks` route `/api/bff/stock-analysis/intraday-ticks` → `/api/market-data/intraday-ticks`
-- [ ] 88.9 frontend `api/index.js` `bffApi.stockAnalysis.getIntradayTicks(code, market, date?)`
-- [ ] 88.10 frontend `StockAnalysisDialog.vue`：`intradayBars`→`intradayTicks` 結構改 `{time, price}`；prices = ticks.map(t => t.price)；移除 close/open/high/low 解讀
-- [ ] 88.11 Docker 重 build + recreate：`backend bff external-materials-service frontend`
-- [ ] 88.12 手動驗證：(a) `docker exec asset-redis redis-cli LRANGE 'price:ticks:台股:0050:2026-06-05' 0 -1` 確認 LIST 存在且有資料；(b) 直接 curl `/api/bff/stock-analysis/intraday-ticks?code=0050&market=台股` 看走勢資料回傳；(c) 等下個 polling 週期，LIST 多一筆 tick；(d) 開啟股票分析切「當日」確認走勢與 Task 87 行為一致
+- [x] 88.5 ext-materials `InternalPriceController.intradayTicks(code, market, date)`：`GET /internal/intraday-ticks`，預設 date = 該市場時區的「最近一個交易日」（用 `MarketClock` / `findMaxTradingDate`），回 `List<TickPoint>`
+- [x] 88.6 business-services `HistoricalDataService.fetchIntradayTicks(code, market, date)`：proxy 至 `/internal/intraday-ticks`
+- [x] 88.7 business-services `MarketDataController.getIntradayTicks`：`GET /api/market-data/intraday-ticks?code=&market=&date=`（date 可選）
+- [x] 88.8 bff `StockAnalysisBffRoutes` 加 `stock-analysis-intraday-ticks` route `/api/bff/stock-analysis/intraday-ticks` → `/api/market-data/intraday-ticks`
+- [x] 88.9 frontend `api/index.js` `bffApi.stockAnalysis.getIntradayTicks(code, market, date?)`
+- [x] 88.10 frontend `StockAnalysisDialog.vue`：`intradayBars`→`intradayTicks` 結構改 `{time, price}`；prices = ticks.map(t => t.price)；移除 close/open/high/low 解讀
+- [x] 88.11 Docker 重 build + recreate：`backend bff external-materials-service frontend`
+- [x] 88.12 手動驗證：(a) `docker exec asset-redis redis-cli LRANGE 'price:ticks:台股:0050:2026-06-05' 0 -1` 確認 LIST 存在且有資料；(b) 直接 curl `/api/bff/stock-analysis/intraday-ticks?code=0050&market=台股` 看走勢資料回傳；(c) 等下個 polling 週期，LIST 多一筆 tick；(d) 開啟股票分析切「當日」確認走勢與 Task 87 行為一致
 
 ### Task 89: 走勢圖「成本均價」改用 BFF avgCostOriginal（修跨頁買入均價不一致）
 
@@ -2523,8 +2523,8 @@ Dashboard 美股表格「買入均價(USD)」（如 SGOV 100.6707）與雙擊開
 
 - [x] 89.1 frontend `StockAnalysisDialog.vue` `chartOption`：成本均價改為一律優先取 `s.avgCostOriginal`（其次 `s.investmentCostOriginal ÷ shares`），與表格買入均價同義同源；移除「`investmentCost ÷ shares ÷ 今日 usdRate`」反推為主路徑。僅在完全無原幣成本欄位時 fallback（台股 `investmentCost` 即原幣 TWD；美/英股才用匯率反推），確保未帶 BFF 欄位的呼叫端不致畫出台幣值到 USD 軸
 - [x] 89.2 spec：`requirements.md` Requirement 13 加驗收條件；`design.md` BFF Enrichment 註記補「成本均價／買入均價一律用 `avgCostOriginal`，禁止用今日匯率反推」
-- [ ] 89.3 Docker 重 build + recreate：`frontend`
-- [ ] 89.4 手動驗證：Dashboard 美股雙擊 SGOV → 走勢圖「成本均價」應顯示與表格「買入均價(USD)」相同的 100.6707（不再是 100.19）；切換不同持股再次確認兩處數字一致
+- [x] 89.3 Docker 重 build + recreate：`frontend`
+- [x] 89.4 手動驗證：Dashboard 美股雙擊 SGOV → 走勢圖「成本均價」應顯示與表格「買入均價(USD)」相同的 100.6707（不再是 100.19）；切換不同持股再次確認兩處數字一致
 
 
 ### Task 90: 警示觸發 Email 改列月線／季線／年線三條均線
@@ -2540,8 +2540,8 @@ Dashboard 美股表格「買入均價(USD)」（如 SGOV 100.6707）與雙擊開
 - [x] 90.1 `AlertNotificationDispatcher`：`enqueue` 與 `PendingTrigger` 的單一 `maValue` 改為 `monthlyMa / quarterlyMa / annualMa` 三欄；`buildDigestBody` 由單行「均線」改為依序印「月線 / 季線 / 年線」三行，各自於非 null 時才印（歷史不足以撐滿某視窗時該行省略）
 - [x] 90.2 `StockAlertService.recordTrigger` enqueue 呼叫改傳 `ind.monthlyMa(), ind.quarterlyMa(), ind.annualMa()`（不再用 `pickMaForAlert` 縮成單值）；`pickMaForAlert` 保留供 line 208 凍結 `lastTriggeredMaValue`（UI 顯示對應觸發條件的單一均線）使用
 - [x] 90.3 spec：`requirements.md` Requirement 23、`design.md` digest 內容格式與 enqueue 簽名同步更新
-- [ ] 90.4 Docker 重 build + recreate：`backend`
-- [ ] 90.5 手動驗證：觸發任一均線警示 → 收到的 email 該筆同時列出「月線 / 季線 / 年線」三行 + KD；歷史不足 240 日者年線行省略
+- [x] 90.4 Docker 重 build + recreate：`backend`
+- [x] 90.5 手動驗證：觸發任一均線警示 → 收到的 email 該筆同時列出「月線 / 季線 / 年線」三行 + KD；歷史不足 240 日者年線行省略
 
 
 ### Task 91: 觀察清單「補發」按鈕（各市場最後交易日觸發事件，單封 email 重寄）
@@ -2560,8 +2560,8 @@ Dashboard 美股表格「買入均價(USD)」（如 SGOV 100.6707）與雙擊開
 - [x] 91.4 BFF：watch-stock passthrough（`/api/bff/watch-stock/**`→`/api/watch-stocks/**`）已涵蓋 POST，無需改 route
 - [x] 91.5 frontend `api/index.js`：`bffApi.watchStock.resendDigest()` = `api.post('/bff/watch-stock/resend-digest')`
 - [x] 91.6 frontend `WatchStockView.vue`：header「新增觀察」左側加「補發」鈕（`Promotion` icon + loading），`resendDigest()` 呼叫後依 `sent` 以 `ElMessage.success` / `.warning` 提示 `message`
-- [ ] 91.7 Docker 重 build + recreate：`backend frontend`
-- [ ] 91.8 手動驗證：觀察頁點「補發」→ 收到單封含各市場最後交易日全部觸發的 email；無觸發 / 無收件人時前端顯示對應提示且不寄空信
+- [x] 91.7 Docker 重 build + recreate：`backend frontend`
+- [x] 91.8 手動驗證：觀察頁點「補發」→ 收到單封含各市場最後交易日全部觸發的 email；無觸發 / 無收件人時前端顯示對應提示且不寄空信
 
 
 ### Task 92: 警示 / 補發 email 同一股票多條件合併成一筆
@@ -2576,8 +2576,8 @@ digest / 補發信原本每個觸發（trigger）印一個區塊，同一股票�
 
 - [x] 92.1 `AlertNotificationDispatcher.buildDigestBody`：先 `groupByStock`（LinkedHashMap，key=stockCode+market，保留首次出現順序）；每組標題 `{name} ({code} {market}) — {labels 去重串接「、」}`，技術快照（觸發時間/股價/月季年線/KD）取該組 max `triggeredAt` 的那筆；編號 N 改數「組（股票）」
 - [x] 92.2 主旨與補發回傳筆數改用 `groupByStock(batch).size()`（去重股票檔數）；`flush()` / `resendLastTradingDay()` 同步；`WatchStockController` 成功訊息改「已補發 N 檔股票的觸發事件」
-- [ ] 92.3 Docker 重 build + recreate：`backend`
-- [ ] 92.4 手動驗證：一檔股票同時觸發兩條件 → email 只出現一個區塊，標題含兩條件 label，技術指標一份；主旨 N = 股票檔數
+- [x] 92.3 Docker 重 build + recreate：`backend`
+- [x] 92.4 手動驗證：一檔股票同時觸發兩條件 → email 只出現一個區塊，標題含兩條件 label，技術指標一份；主旨 N = 股票檔數
 
 
 ### Task 93: 警示 / 補發 email 內嵌「股票分析走勢圖」PNG
@@ -2631,14 +2631,14 @@ digest / 補發信原本每個觸發（trigger）印一個區塊，同一股票�
 
 #### Steps:
 
-- [ ] 95.1 Liquibase `v1.27.0-us-index-daily.sql` 建 `us_index_daily_history`（複合主鍵 `(index_code, trading_date)`、OHLC NUMERIC(14,4)）+ master include
-- [ ] 95.2 backend `UsIndexDailyHistory`（`@IdClass`）+ `UsIndexDailyHistoryRepository`（依 `indexCode` + 日期區間查詢）
-- [ ] 95.3 ext-materials-service `MacroDataFetchClient.fetchUsIndexDaily(code)`：code→Yahoo symbol，curl 取 `range=10y&interval=1d`，解析 timestamp(America/New_York)+OHLC → `List<DailyOhlc>`；`InternalPriceController` 加 `GET /internal/macro/us-index?code=`
-- [ ] 95.4 backend `MacroHistoryService.refreshUsIndexDaily(code)` 經 proxy upsert；`MacroHistoryController` 加 `GET /api/us-daily-index`、`POST /api/us-daily-index/refresh?code=`（code 白名單守門）
-- [ ] 95.5 BFF `GdpTwseBffController`：`twse-daily`/`refresh-twse-daily` 一般化為 `index-daily?market=`/`refresh-index-daily?market=`（TWSE→台股、其餘→美股 `code`）；MA 計算共用
-- [ ] 95.6 frontend `api/index.js` `gdpTwse`：`getTwseDaily`/`refreshTwseDaily` → `getIndexDaily(market, years)`/`refreshIndexDaily(market, years)`
-- [ ] 95.7 frontend `GdpTwseView.vue`：第三張卡加市場下拉（5 選 1），標題/空狀態/回補訊息隨選取指數動態；切換即重抓 BFF
-- [ ] 95.8 Docker 重 build + recreate（backend / external-materials-service / bff / frontend）後驗證：台股維持原樣；切到四個美股指數各自顯示近 10 年日線 + 三均線；按「回補日線」對美股指數成功 upsert
+- [x] 95.1 Liquibase `v1.27.0-us-index-daily.sql` 建 `us_index_daily_history`（複合主鍵 `(index_code, trading_date)`、OHLC NUMERIC(14,4)）+ master include
+- [x] 95.2 backend `UsIndexDailyHistory`（`@IdClass`）+ `UsIndexDailyHistoryRepository`（依 `indexCode` + 日期區間查詢）
+- [x] 95.3 ext-materials-service `MacroDataFetchClient.fetchUsIndexDaily(code)`：code→Yahoo symbol，curl 取 `range=10y&interval=1d`，解析 timestamp(America/New_York)+OHLC → `List<DailyOhlc>`；`InternalPriceController` 加 `GET /internal/macro/us-index?code=`
+- [x] 95.4 backend `MacroHistoryService.refreshUsIndexDaily(code)` 經 proxy upsert；`MacroHistoryController` 加 `GET /api/us-daily-index`、`POST /api/us-daily-index/refresh?code=`（code 白名單守門）
+- [x] 95.5 BFF `GdpTwseBffController`：`twse-daily`/`refresh-twse-daily` 一般化為 `index-daily?market=`/`refresh-index-daily?market=`（TWSE→台股、其餘→美股 `code`）；MA 計算共用
+- [x] 95.6 frontend `api/index.js` `gdpTwse`：`getTwseDaily`/`refreshTwseDaily` → `getIndexDaily(market, years)`/`refreshIndexDaily(market, years)`
+- [x] 95.7 frontend `GdpTwseView.vue`：第三張卡加市場下拉（5 選 1），標題/空狀態/回補訊息隨選取指數動態；切換即重抓 BFF
+- [x] 95.8 Docker 重 build + recreate（backend / external-materials-service / bff / frontend）後驗證：台股維持原樣；切到四個美股指數各自顯示近 10 年日線 + 三均線；按「回補日線」對美股指數成功 upsert
 
 
 ### Task 96: 指數日線圖新增「當日」分時走勢（盤中即時 / 盤後最後交易日）
@@ -2651,13 +2651,13 @@ digest / 補發信原本每個觸發（trigger）印一個區塊，同一股票�
 
 #### Steps:
 
-- [ ] 96.1 ext-materials `MacroDataFetchClient.fetchIndexIntraday(market)`：market→Yahoo symbol（含 TWSE→^TWII），curl 取 5m/5d，依 exchangeTimezoneName 轉當地時區、group by 當地日期取最新交易日，回 `List<IndexIntradayPoint(time ISO, close)>`；`InternalPriceController` 加 `GET /internal/macro/index-intraday?market=`
-- [ ] 96.2 backend `MacroHistoryService.fetchIndexIntraday(market)` proxy + 公開 record `IntradayPoint(time, close)`；`MacroHistoryController` 加 `GET /api/index-intraday?market=`
-- [ ] 96.3 BFF `GdpTwseBffController` 加 `GET /api/bff/gdp-twse/index-intraday?market=`：回 `tradingDate` + `times`(HH:mm) + `closes`
-- [ ] 96.4 frontend `api/index.js` 加 `gdpTwse.getIndexIntraday(market)`
-- [ ] 96.5 frontend `GdpTwseView.vue`：區間鈕最前加「當日」；isIntraday 時 x 軸 HH:mm、收盤＝分時 closes、月/季/年線＝水平線（取日線最新 MA）、不用 dataZoom；標題改「{指數} 當日走勢（YYYY-MM-DD）」；切當日 / 切市場時重抓分時
-- [ ] 96.7 修正當日走勢被壓平：Y 軸鎖定當日價格區間（分時收盤 min/max +10% padding），不用 `scale:true`（否則遠離當日價位的均線水平線把跨距撐成數千點，當日數百點起伏變平線）；均線水平線落區間外由 clip 裁切、數值仍留 legend
-- [ ] 96.8 X 軸延伸到收盤時間（非現在時間）：ext-materials `fetchIndexIntraday` 補滿交易時段完整 5 分格（美股 09:30–16:00 ET、台股 09:00–13:30），盤中未到時段 close 留 null；最後一筆現價 bar floor 對齊 5 分格；BFF 保留 null close（時間照常輸出）
+- [x] 96.1 ext-materials `MacroDataFetchClient.fetchIndexIntraday(market)`：market→Yahoo symbol（含 TWSE→^TWII），curl 取 5m/5d，依 exchangeTimezoneName 轉當地時區、group by 當地日期取最新交易日，回 `List<IndexIntradayPoint(time ISO, close)>`；`InternalPriceController` 加 `GET /internal/macro/index-intraday?market=`
+- [x] 96.2 backend `MacroHistoryService.fetchIndexIntraday(market)` proxy + 公開 record `IntradayPoint(time, close)`；`MacroHistoryController` 加 `GET /api/index-intraday?market=`
+- [x] 96.3 BFF `GdpTwseBffController` 加 `GET /api/bff/gdp-twse/index-intraday?market=`：回 `tradingDate` + `times`(HH:mm) + `closes`
+- [x] 96.4 frontend `api/index.js` 加 `gdpTwse.getIndexIntraday(market)`
+- [x] 96.5 frontend `GdpTwseView.vue`：區間鈕最前加「當日」；isIntraday 時 x 軸 HH:mm、收盤＝分時 closes、月/季/年線＝水平線（取日線最新 MA）、不用 dataZoom；標題改「{指數} 當日走勢（YYYY-MM-DD）」；切當日 / 切市場時重抓分時
+- [x] 96.7 修正當日走勢被壓平：Y 軸鎖定當日價格區間（分時收盤 min/max +10% padding），不用 `scale:true`（否則遠離當日價位的均線水平線把跨距撐成數千點，當日數百點起伏變平線）；均線水平線落區間外由 clip 裁切、數值仍留 legend
+- [x] 96.8 X 軸延伸到收盤時間（非現在時間）：ext-materials `fetchIndexIntraday` 補滿交易時段完整 5 分格（美股 09:30–16:00 ET、台股 09:00–13:30），盤中未到時段 close 留 null；最後一筆現價 bar floor 對齊 5 分格；BFF 保留 null close（時間照常輸出）
 
 
 ### Task 97: 移除「台灣人均 GDP vs 台股大盤年末收盤」卡 + 清後端死碼
@@ -2676,8 +2676,8 @@ digest / 補發信原本每個觸發（trigger）印一個區塊，同一股票�
 - [x] 97.4 business `MacroHistoryService`：移除 `refreshTwseYearEnd` + `fetchTwseDecemberCloseProxy` + `twseRepo` 欄位/建構子參數/import
 - [x] 97.5 ext-materials：移除 `InternalPriceController` `GET /internal/macro/twse-year-end` + `MacroDataFetchClient.fetchTwseDecemberClose`（`fetchTwseMonthlyDaily` 仍供日線回補，保留）
 - [x] 97.6 移除 `TwseIndexYearEndHistory` entity + repository（`twse_index_year_end_history` 表保留不刪）
-- [ ] 97.7 Docker 重 build + recreate（frontend / bff / business-services / external-materials-service）後驗證：股市分析頁只剩指數圖 + 台韓 GDP 比較；第②卡消失；台韓 GDP「回補 GDP（IMF）」可運作；其餘頁面（dashboard 等）不受影響
-- [ ] 96.6 Docker 重 build + recreate（external-materials-service / backend / bff / frontend）後驗證：台股大盤切「當日」顯示分時（盤後為最後交易日、末點＝當日收盤）；美股指數盤中顯示即時分時；月/季/年線為水平線
+- [x] 97.7 Docker 重 build + recreate（frontend / bff / business-services / external-materials-service）後驗證：股市分析頁只剩指數圖 + 台韓 GDP 比較；第②卡消失；台韓 GDP「回補 GDP（IMF）」可運作；其餘頁面（dashboard 等）不受影響
+- [x] 96.6 Docker 重 build + recreate（external-materials-service / backend / bff / frontend）後驗證：台股大盤切「當日」顯示分時（盤後為最後交易日、末點＝當日收盤）；美股指數盤中顯示即時分時；月/季/年線為水平線
 
 
 ### Task 98: 債券 ETF / 收益分配型 ETF 股利歷史 fallback（TaiwanStockDividendResult）
@@ -2762,11 +2762,11 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 
 #### Steps:
 
-- [ ] 102.1 BFF `GdpTwseBffController.getIndexIntraday`：改以 `Mono.zip` 並行抓 intraday（原 `/api/index-intraday`）＋近 40 日日線 tail（台股 `/api/twse-daily-index?from=today-40&to=today`、美股 `/api/us-daily-index?code=&from=&to=`）；新增 `previousCloseBefore(daily, tradingDate)`（日線 asc，取 `tradingDate` 嚴格小於當日的最後一筆 `closePoint`）；body 增加 `previousClose` / `lastClose`（分時末筆非 null）/ `change` / `changePercent`（HALF_UP 2 位；昨收為 0 或缺值回 null）
-- [ ] 102.2 frontend `GdpTwseView.vue`：`fetchIntraday` 接 `previousClose/change/changePercent` 存 state；卡片標題列（`isIntraday` 且昨收非 null 時）顯示「昨收 X｜▲/▼漲跌｜+漲跌%」，紅漲(#dc2626)綠跌(#16a34a) 比照 `WatchStockView.priceColor`；指數點位格式千分位 2 位（不帶 $）
-- [ ] 102.3 spec：`requirements.md` Requirement 18 加 AC、`design.md` index-intraday 回傳格式 + 昨收計算說明、`tasks.md` 本任務
-- [ ] 102.4 `mvn -q compile`（bff module）通過
-- [ ] 102.5 Docker 重 build + recreate（bff / frontend）後驗證：台股大盤切「當日」標題列顯示昨收 + 漲跌 + 漲跌%、紅漲綠跌；切美股四大指數同樣顯示；漲跌 = 走勢圖末點 − 昨收
+- [x] 102.1 BFF `GdpTwseBffController.getIndexIntraday`：改以 `Mono.zip` 並行抓 intraday（原 `/api/index-intraday`）＋近 40 日日線 tail（台股 `/api/twse-daily-index?from=today-40&to=today`、美股 `/api/us-daily-index?code=&from=&to=`）；新增 `previousCloseBefore(daily, tradingDate)`（日線 asc，取 `tradingDate` 嚴格小於當日的最後一筆 `closePoint`）；body 增加 `previousClose` / `lastClose`（分時末筆非 null）/ `change` / `changePercent`（HALF_UP 2 位；昨收為 0 或缺值回 null）
+- [x] 102.2 frontend `GdpTwseView.vue`：`fetchIntraday` 接 `previousClose/change/changePercent` 存 state；卡片標題列（`isIntraday` 且昨收非 null 時）顯示「昨收 X｜▲/▼漲跌｜+漲跌%」，紅漲(#dc2626)綠跌(#16a34a) 比照 `WatchStockView.priceColor`；指數點位格式千分位 2 位（不帶 $）
+- [x] 102.3 spec：`requirements.md` Requirement 18 加 AC、`design.md` index-intraday 回傳格式 + 昨收計算說明、`tasks.md` 本任務
+- [x] 102.4 `mvn -q compile`（bff module）通過
+- [x] 102.5 Docker 重 build + recreate（bff / frontend）後驗證：台股大盤切「當日」標題列顯示昨收 + 漲跌 + 漲跌%、紅漲綠跌；切美股四大指數同樣顯示；漲跌 = 走勢圖末點 − 昨收
 
 
 ### Task 103: Dashboard 資產配置面板加「美股個股穿透前 10 大」tab
@@ -2785,14 +2785,14 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 
 #### Steps:
 
-- [ ] 103.1 新增 `bff/.../dashboard/dto/UsStockLookthroughDto.java`（含 `Item` / `Others` 內部 class；欄位 snapshotDate / totalUsStockValue / items[] / others / lookthroughEtfCount）
-- [ ] 103.2 `DashboardBffController`：`fetchEtfHoldings` 加 `market` 參數（取代硬編「台股」，台股呼叫端傳「台股」零行為變更）；新增 `getUsStockLookthrough(snapshotId)` + `buildUsLookthrough`（篩美股 → 並行 concurrency 4 抓 etf-holdings → ETF 依真實權重分配、未揭露歸其它、個股整筆計入 → 以代號聚合 → top10 + others；`lookthroughEtfCount` 計成功穿透檔數）
-- [ ] 103.3 前端 `api/index.js`：`bffApi.dashboard.usStockLookthrough(snapshotId)`
-- [ ] 103.4 前端 `DashboardView.vue`：card header el-tabs 加 `usStock`；新 state `usLookthrough/usLookthroughLoading/usLookthroughCache`、`loadUsStockLookthrough`（race 防護沿用 `effectiveSnapshotId`）、watch 擴充、computed `usLookthroughHasData/usStockPieOption`（色盤沿用 `TW_PIE_COLORS`）；底部 `lookthroughEtfCount > 0` 時顯示固定註記
-- [ ] 103.5 spec：`requirements.md` Req 9 加 tab 3 AC、`design.md` 新增 `us-stock-lookthrough` endpoint、`tasks.md` 本任務
-- [ ] 103.6 `mvn -q compile`（bff module）通過
-- [ ] 103.7 Docker 重 build + recreate（bff / frontend）後驗證：切「美股個股」tab → 圓餅顯示前 10 大個股（VOO/QQQ 拆成 AAPL/MSFT/NVDA… 而非 ETF 代號）+ 「其它」；有 ETF 時底部出現註記；hover 趨勢圖節點連動；無美股部位顯示空狀態
-- [ ] 103.8 bug fix（external-materials-service）：實作驗證時發現 `MarketDataFetchService` 取 Yahoo crumb / quoteSummary（topHoldings）沿用長 Chrome UA，被 Yahoo 反 bot WAF 回 429（Too Many Requests），導致**所有**美股 ETF 成分股查無、穿透失效（同 IP 短 UA `Mozilla/5.0` 卻回 200）。新增 `YAHOO_UA = "Mozilla/5.0"` 常數，crumb prime（`fc.yahoo.com`）/ `getcrumb` / `yahooApiGet`（quoteSummary）三處 curl 改用之；`v8/chart` 端點維持長 UA（仍正常）。重建 external-materials-service 後 VOO/VT 正常回前 10 大成分股
+- [x] 103.1 新增 `bff/.../dashboard/dto/UsStockLookthroughDto.java`（含 `Item` / `Others` 內部 class；欄位 snapshotDate / totalUsStockValue / items[] / others / lookthroughEtfCount）
+- [x] 103.2 `DashboardBffController`：`fetchEtfHoldings` 加 `market` 參數（取代硬編「台股」，台股呼叫端傳「台股」零行為變更）；新增 `getUsStockLookthrough(snapshotId)` + `buildUsLookthrough`（篩美股 → 並行 concurrency 4 抓 etf-holdings → ETF 依真實權重分配、未揭露歸其它、個股整筆計入 → 以代號聚合 → top10 + others；`lookthroughEtfCount` 計成功穿透檔數）
+- [x] 103.3 前端 `api/index.js`：`bffApi.dashboard.usStockLookthrough(snapshotId)`
+- [x] 103.4 前端 `DashboardView.vue`：card header el-tabs 加 `usStock`；新 state `usLookthrough/usLookthroughLoading/usLookthroughCache`、`loadUsStockLookthrough`（race 防護沿用 `effectiveSnapshotId`）、watch 擴充、computed `usLookthroughHasData/usStockPieOption`（色盤沿用 `TW_PIE_COLORS`）；底部 `lookthroughEtfCount > 0` 時顯示固定註記
+- [x] 103.5 spec：`requirements.md` Req 9 加 tab 3 AC、`design.md` 新增 `us-stock-lookthrough` endpoint、`tasks.md` 本任務
+- [x] 103.6 `mvn -q compile`（bff module）通過
+- [x] 103.7 Docker 重 build + recreate（bff / frontend）後驗證：切「美股個股」tab → 圓餅顯示前 10 大個股（VOO/QQQ 拆成 AAPL/MSFT/NVDA… 而非 ETF 代號）+ 「其它」；有 ETF 時底部出現註記；hover 趨勢圖節點連動；無美股部位顯示空狀態
+- [x] 103.8 bug fix（external-materials-service）：實作驗證時發現 `MarketDataFetchService` 取 Yahoo crumb / quoteSummary（topHoldings）沿用長 Chrome UA，被 Yahoo 反 bot WAF 回 429（Too Many Requests），導致**所有**美股 ETF 成分股查無、穿透失效（同 IP 短 UA `Mozilla/5.0` 卻回 200）。新增 `YAHOO_UA = "Mozilla/5.0"` 常數，crumb prime（`fc.yahoo.com`）/ `getcrumb` / `yahooApiGet`（quoteSummary）三處 curl 改用之；`v8/chart` 端點維持長 UA（仍正常）。重建 external-materials-service 後 VOO/VT 正常回前 10 大成分股
 
 
 ### Task 104: 股市分析指數下拉新增海外四指數（英國 / 德國 / 韓國 / 日本）
@@ -2811,13 +2811,13 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 
 #### Steps:
 
-- [ ] 104.1 frontend `GdpTwseView.vue`：`MARKETS` 陣列加 4 項（FTSE「英國富時 100」/ DAX「德國 DAX」/ KOSPI「韓國 KOSPI」/ N225「日經 225」）
-- [ ] 104.2 ext-materials `MacroDataFetchClient`：`US_INDEX_YAHOO` 與 `INDEX_INTRADAY_YAHOO` 各加 4 個 symbol；`fetchUsIndexDaily` 改依 meta `exchangeTimezoneName` 轉交易日（default NY）；當日時段抽成 `INDEX_TRADING_HOURS` map（含 4 市場，未知 fallback 09:30–16:00）
-- [ ] 104.3 backend `MacroHistoryController`：refresh 白名單 `US_INDEX_CODES` 加 `FTSE/DAX/KOSPI/N225`；相關註解一般化為「海外指數」
-- [ ] 104.4 註解一般化（BFF `GdpTwseBffController`、`MacroHistoryService`、`UsIndexDailyHistory`、`InternalPriceController`）：將「美股四大指數 / {DJI,SPX,IXIC,SOX}」字樣補上新增的海外指數，避免誤導
-- [ ] 104.5 `mvn -q compile`（backend + bff + external-materials-service）通過
-- [ ] 104.6 Docker 重 build + recreate（frontend / bff / backend / external-materials-service）後驗證：下拉出現英德韓日四項；各市場按「回補日線（10 年）」後日線圖正常（日期不偏移）；切「當日」顯示當地時區分時走勢線與昨收/漲跌/漲跌%
-- [ ] 104.7 bug fix（external-materials-service）：實機驗證 N225「當日」走勢時發現後場最後半小時（15:00–15:30）被截掉、線在 15:00 就停——`INDEX_TRADING_HOURS` 的 N225 收盤誤設 15:00（舊制）；東京證交所 2024-11-05 起收盤延至 15:30（新增收盤競價），Yahoo 5m 確有 15:05–15:30 之 bar。改 N225 close 為 15:30 後線延伸至 15:30、收盤點位/漲跌取到真正收盤值。重建 external-materials-service 驗證
+- [x] 104.1 frontend `GdpTwseView.vue`：`MARKETS` 陣列加 4 項（FTSE「英國富時 100」/ DAX「德國 DAX」/ KOSPI「韓國 KOSPI」/ N225「日經 225」）
+- [x] 104.2 ext-materials `MacroDataFetchClient`：`US_INDEX_YAHOO` 與 `INDEX_INTRADAY_YAHOO` 各加 4 個 symbol；`fetchUsIndexDaily` 改依 meta `exchangeTimezoneName` 轉交易日（default NY）；當日時段抽成 `INDEX_TRADING_HOURS` map（含 4 市場，未知 fallback 09:30–16:00）
+- [x] 104.3 backend `MacroHistoryController`：refresh 白名單 `US_INDEX_CODES` 加 `FTSE/DAX/KOSPI/N225`；相關註解一般化為「海外指數」
+- [x] 104.4 註解一般化（BFF `GdpTwseBffController`、`MacroHistoryService`、`UsIndexDailyHistory`、`InternalPriceController`）：將「美股四大指數 / {DJI,SPX,IXIC,SOX}」字樣補上新增的海外指數，避免誤導
+- [x] 104.5 `mvn -q compile`（backend + bff + external-materials-service）通過
+- [x] 104.6 Docker 重 build + recreate（frontend / bff / backend / external-materials-service）後驗證：下拉出現英德韓日四項；各市場按「回補日線（10 年）」後日線圖正常（日期不偏移）；切「當日」顯示當地時區分時走勢線與昨收/漲跌/漲跌%
+- [x] 104.7 bug fix（external-materials-service）：實機驗證 N225「當日」走勢時發現後場最後半小時（15:00–15:30）被截掉、線在 15:00 就停——`INDEX_TRADING_HOURS` 的 N225 收盤誤設 15:00（舊制）；東京證交所 2024-11-05 起收盤延至 15:30（新增收盤競價），Yahoo 5m 確有 15:05–15:30 之 bar。改 N225 close 為 15:30 後線延伸至 15:30、收盤點位/漲跌取到真正收盤值。重建 external-materials-service 驗證
 
 
 ### Task 105: 海外指數日線自動回補排程（修當日走勢「昨收」過時 → 漲跌% 失真）
