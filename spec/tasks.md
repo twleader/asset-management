@@ -2871,3 +2871,23 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 106.5 `mvn -q compile`（backend）通過
 - [x] 106.6 Docker 重 build + recreate（business-services + frontend）後驗證：美股分頁警示僅留最後交易日及前一日，6/12 等更早觸發消失
 
+### Task 107: 國定假日休市仍抓價／觸發警示的全面修正（含 Juneteenth）
+
+**需求**：實機 2026-06-19（美股 Juneteenth，週五）休市，但觀察頁／警示頁仍把 AMZN/MSFT 等條件標成「06/19 09:30 NY」觸發。根因：系統有三套各自獨立的「市場是否開盤」判斷，其中兩套（ext-materials `MarketClock`、business-services `StockAlertService.computeTriggeredAt` / `AlertNotificationDispatcher`）**只判週末、不查國定假日**；而完整含 Juneteenth 的假日表（`MarketDataService.getUsHolidays`）只被備份排程使用。週五 = 平日 → `isUsMarketOpen()` 在假日回 `true` → 照抓價寫 Redis、照觸發並用 `now()` 蓋上「09:30」。
+
+**設計**：把三套判斷全部收斂到「交易日（平日 && 非假日）」單一入口。詳見 `design.md`「國定假日整段休市」與「交易日 / 國定假日判定（單一事實來源）」。台股假日 = TWSE holidaySchedule（唯一來源）；美 / 英假日 = NYSE / LSE 純函式，因兩服務無共用 library 且不可循環依賴而各持一份（交叉註解鎖定）。
+
+#### Steps:
+
+- [x] 107.1 ext-materials 新增 `MarketCalendar`：`isTwTradingDay/isUsTradingDay/isUkTradingDay`；台股委派 `MarketDataFetchService.getTwHolidays`，美 / 英為 NYSE / LSE 純函式（per-year 快取，交叉註解指向 backend `MarketDataService`）
+- [x] 107.2 ext-materials `MarketClock`：注入 `MarketCalendar`，`isXxxMarketOpen` / `isXxxMarketJustClosed` 改為「`isXxxTradingDay(當日)` && 時段」，移除只判週末的 `isWeekend`
+- [x] 107.3 ext-materials `ClosePersister`：注入 `MarketCalendar`，`selfHealMissedClose` 的 `isWeekday` 改 `isXxxTradingDay`；各 dump / verify 排程方法加假日早退守門
+- [x] 107.4 ext-materials `PricePoller.refreshAll`：`markClosed` 由 `false` 改 `!clock.isXxxMarketOpen()`（與 `warmCacheOnStartup` 一致，假日手動刷新不 append 假 tick）
+- [x] 107.5 backend `MarketDataService`：新增 `isTradingDay(market, date)` dispatcher 與 `isMarketOpenNow(market)`（`MarketZones` 時段 + `isTradingDay`）
+- [x] 107.6 backend `StockAlertService`：注入 `MarketDataService`，`evaluate` live 觸發分支加 `isTradingDay(market, 市場時區今日)` 閘門（假日落到補抓分支）；`computeTriggeredAt` 由 `isWeekday` 改 `isTradingDay`
+- [x] 107.7 backend `AlertNotificationDispatcher`：注入 `MarketDataService`，`withinSendWindow` 加假日回 false；`lastTradingDate` 迴圈以 `isTradingDay` 跳週末 + 假日；更新「不考慮假日」註解
+- [x] 107.8 backend `StockPriceService`：注入 `MarketDataService`，`isXxxMarketOpen` 改委派 `isMarketOpenNow`，使 `getMarketStatus` / 交易日曆 / Dashboard 假日顯示「休市」
+- [x] 107.9 spec：`requirements.md` Req 7 / 16 / 23、`design.md`、`tasks.md` 本任務
+- [x] 107.10 `mvn -q compile` 兩服務皆通過
+- [x] 107.11 Docker 重 build + recreate（business-services + external-materials-service）後驗證：假日不抓價、警示不觸發、市場狀態顯示休市
+

@@ -40,6 +40,7 @@ public class ClosePersister {
     private final StockSourceQuery source;
     private final StringRedisTemplate redis;
     private final PriceCacheWriter cacheWriter;
+    private final MarketCalendar calendar;
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
@@ -53,7 +54,7 @@ public class ClosePersister {
             try {
                 ZonedDateTime nowTw = ZonedDateTime.now(MarketClock.TW_ZONE);
                 LocalDate today = nowTw.toLocalDate();
-                if (isWeekday(nowTw)) {
+                if (calendar.isTwTradingDay(today)) {
                     if (nowTw.toLocalTime().isAfter(LocalTime.of(16, 0))) {
                         // 16:00 後：若 DB 無當日資料，先試 FinMind；FinMind 失敗 fallback Redis dump
                         if (!hasAnyHistoryFor(today, "台股")) {
@@ -72,7 +73,7 @@ public class ClosePersister {
                 }
                 ZonedDateTime nowUs = ZonedDateTime.now(MarketClock.US_ZONE);
                 LocalDate todayUs = nowUs.toLocalDate();
-                if (isWeekday(nowUs)) {
+                if (calendar.isUsTradingDay(todayUs)) {
                     if (nowUs.toLocalTime().isAfter(LocalTime.of(18, 0))) {
                         if (!hasAnyHistoryFor(todayUs, "美股")) {
                             log.info("self-heal: 美股今日 ({}) DB 無資料，跑 FinMind 校正", todayUs);
@@ -90,7 +91,7 @@ public class ClosePersister {
                 }
                 ZonedDateTime nowUk = ZonedDateTime.now(MarketClock.LON_ZONE);
                 LocalDate todayUk = nowUk.toLocalDate();
-                if (isWeekday(nowUk)) {
+                if (calendar.isUkTradingDay(todayUk)) {
                     if (nowUk.toLocalTime().isAfter(LocalTime.of(17, 0))) {
                         if (!hasAnyHistoryFor(todayUk, "英股")) {
                             log.info("self-heal: 英股今日 ({}) DB 無資料，跑 Yahoo 校正", todayUk);
@@ -119,6 +120,10 @@ public class ClosePersister {
     @Scheduled(cron = "0 32 13 * * MON-FRI", zone = "Asia/Taipei")
     public void dumpTwCloseFromRedis() {
         LocalDate today = LocalDate.now(MarketClock.TW_ZONE);
+        if (!calendar.isTwTradingDay(today)) {
+            log.info("假日休市，略過台股 Redis 收盤 dump ({})", today);
+            return;
+        }
         log.info("排程：dump 台股 Redis 收盤價到 DB ({})", today);
         int n = dumpRedisToDb("台股", today);
         log.info("台股 Redis dump 完成：{} 檔", n);
@@ -130,10 +135,14 @@ public class ClosePersister {
      */
     @Scheduled(cron = "0 0 16 * * MON-FRI", zone = "Asia/Taipei")
     public int verifyTwCloseWithFinMind() {
+        LocalDate today = LocalDate.now(MarketClock.TW_ZONE);
+        if (!calendar.isTwTradingDay(today)) {
+            log.info("假日休市，略過台股 FinMind 收盤校正 ({})", today);
+            return 0;
+        }
         log.info("排程：FinMind 校正台股當日收盤價");
         Set<String> tw = new LinkedHashSet<>(), us = new LinkedHashSet<>(), uk = new LinkedHashSet<>();
         source.collectHeldStockCodes(tw, us, uk);
-        LocalDate today = LocalDate.now(MarketClock.TW_ZONE);
         int ok = 0, miss = 0;
         for (String code : tw) {
             try {
@@ -163,6 +172,10 @@ public class ClosePersister {
     @Scheduled(cron = "0 2 16 * * MON-FRI", zone = "America/New_York")
     public void dumpUsCloseFromRedis() {
         LocalDate today = LocalDate.now(MarketClock.US_ZONE);
+        if (!calendar.isUsTradingDay(today)) {
+            log.info("假日休市，略過美股 Redis 收盤 dump ({})", today);
+            return;
+        }
         log.info("排程：dump 美股 Redis 收盤價到 DB ({})", today);
         int n = dumpRedisToDb("美股", today);
         log.info("美股 Redis dump 完成：{} 檔", n);
@@ -173,10 +186,14 @@ public class ClosePersister {
      */
     @Scheduled(cron = "0 0 18 * * MON-FRI", zone = "America/New_York")
     public int verifyUsCloseWithFinMind() {
+        LocalDate today = LocalDate.now(MarketClock.US_ZONE);
+        if (!calendar.isUsTradingDay(today)) {
+            log.info("假日休市，略過美股 FinMind 收盤校正 ({})", today);
+            return 0;
+        }
         log.info("排程：FinMind 校正美股當日收盤價");
         Set<String> tw = new LinkedHashSet<>(), us = new LinkedHashSet<>(), uk = new LinkedHashSet<>();
         source.collectHeldStockCodes(tw, us, uk);
-        LocalDate today = LocalDate.now(MarketClock.US_ZONE);
         int ok = 0, miss = 0;
         for (String code : us) {
             try {
@@ -205,6 +222,10 @@ public class ClosePersister {
     @Scheduled(cron = "0 32 16 * * MON-FRI", zone = "Europe/London")
     public void dumpUkCloseFromRedis() {
         LocalDate today = LocalDate.now(MarketClock.LON_ZONE);
+        if (!calendar.isUkTradingDay(today)) {
+            log.info("假日休市，略過英股 Redis 收盤 dump ({})", today);
+            return;
+        }
         log.info("排程：dump 英股 Redis 收盤價到 DB ({})", today);
         int n = dumpRedisToDb("英股", today);
         log.info("英股 Redis dump 完成：{} 檔", n);
@@ -216,10 +237,14 @@ public class ClosePersister {
      */
     @Scheduled(cron = "0 0 17 * * MON-FRI", zone = "Europe/London")
     public int verifyUkCloseWithYahoo() {
+        LocalDate today = LocalDate.now(MarketClock.LON_ZONE);
+        if (!calendar.isUkTradingDay(today)) {
+            log.info("假日休市，略過英股 Yahoo 收盤校正 ({})", today);
+            return 0;
+        }
         log.info("排程：Yahoo 校正英股當日收盤價");
         Set<String> tw = new LinkedHashSet<>(), us = new LinkedHashSet<>(), uk = new LinkedHashSet<>();
         source.collectHeldStockCodes(tw, us, uk);
-        LocalDate today = LocalDate.now(MarketClock.LON_ZONE);
         int ok = 0, miss = 0;
         for (String code : uk) {
             try {
@@ -277,11 +302,6 @@ public class ClosePersister {
         JsonNode v = n.get(f);
         if (v == null || v.isNull()) return null;
         try { return new BigDecimal(v.asText()); } catch (Exception e) { return null; }
-    }
-
-    private boolean isWeekday(ZonedDateTime t) {
-        var d = t.getDayOfWeek();
-        return d != java.time.DayOfWeek.SATURDAY && d != java.time.DayOfWeek.SUNDAY;
     }
 
     private boolean hasAnyHistoryFor(LocalDate date, String market) {
