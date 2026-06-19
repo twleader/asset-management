@@ -2891,3 +2891,19 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 107.10 `mvn -q compile` 兩服務皆通過
 - [x] 107.11 Docker 重 build + recreate（business-services + external-materials-service）後驗證：假日不抓價、警示不觸發、市場狀態顯示休市
 
+### Task 108: Dashboard 台股總值偏差修正（現值與「股價」欄不同源）
+
+**需求**：總覽儀表板台股 tab 底部「目前總值」與各列「股價 × 股數」對不上、總值偏低。實機快照 2026-06-19，每列「股價」欄顯示 `stock_price_history` 收盤（如 0050 = 107.30，基準日查無 06-19 → 回退 06-18），但「現值 / 總值」沿用快照建檔當下凍結的 `currentValue`（隱含 06-17 的 106.00），15 檔台股總值 10,051,967 vs 用收盤重算的 10,176,102，差約 12.4 萬。`liveAssets` 早已用最新收盤算出 10,176,102（KPI 資產總計亦採用），唯獨表格 footer 與配置圖讀凍結值。
+
+**根因**：BFF `SnapshotEnricher.buildMergedStocks` 中 `stockPrice` 取自 `closeMap`（stock_price_history），`currentValue` 卻沿用快照凍結值 —— 同義欄位不同源、不同日。違反 CLAUDE.md「股價一律從 stock_price_history 抓、禁存可計算的衍生值」。
+
+**設計**：`buildMergedStocks` 新增 `revalueFromClose` 旗標；唯讀 Dashboard 傳 `true`，以 `closeMap` 重算 `currentValue = 股數 × 收盤價 ×（美股/英股）匯率`，連動 `estimatedDividend / profit / unitPriceTwd`，使「現值 = 股價 × 股數」自洽。前端 `liveLatest` 的 `sumOf(台股, twLive=false)` 會自動讀到重算後的 row.currentValue，故 KPI 股票現值 / 配置 donut / 市場小計同步對齊（closeMap 台股 == liveAssets 台股）。會存檔的編輯頁（SnapshotForm / SnapshotDetail，以 `unitPriceTwd` 反推 broker `currentValue` 存檔）維持 3-arg 預設 `false`，不被覆寫以免改寫歷史快照。
+
+#### Steps:
+
+- [x] 108.1 `SnapshotEnricher.buildMergedStocks`：新增 4-arg overload（`revalueFromClose`）；3-arg 委派預設 `false`。`revalueFromClose=true` 時依 `closeMap` 重算 `currentValue`（美股/英股乘 `usdExchangeRate`）與 `estimatedDividend`，`profit / profitRate / unitPriceTwd` 自然跟著新值
+- [x] 108.2 `DashboardBffController`：4 個 call site（summary / snapshot / tw-stock-lookthrough / us-stock-lookthrough）改傳 `revalueFromClose=true`
+- [x] 108.3 `SnapshotDetailBffController` / `SnapshotFormBffController`：維持 3-arg（`false`），編輯頁不重算
+- [x] 108.4 spec：`requirements.md` Req 2/9、`design.md` SnapshotEnricher、`tasks.md` 本任務
+- [x] 108.5 Docker 重 build + recreate（bff）後驗證：台股 footer 總值 10,051,967 → 10,176,102 == Σ(股價 × 股數) == liveAssets 台股；15 檔每列「現值 = 股價 × 股數」diff 全 0；美股 fx 換算正確；snapshot-detail 編輯頁仍回凍結值（unitPriceTwd 106.00 未被覆寫）
+

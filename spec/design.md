@@ -55,6 +55,7 @@ com.steven.assets/
 - Spring Cloud Gateway：所有 `/api/*` 路由至 Backend
 - 設計原則：**一個前端頁面對應一個 BFF controller**；前端只 render，aggregation 與計算（profit / profitRate / 買入均價 / 收盤價對齊等）一律由 BFF 預先處理
 - `SnapshotEnricher`（共用工具，`bff/.../common`）：注入 investmentCostOriginal、抓快照基準日歷史收盤價、依 stockCode + market 合併 broker rows 為 mergedStocks（含 stockPrice、unitPriceTwd、profit、profitRate、avgCostOriginal）。各 BFF controller 一律走此工具，確保「同義欄位 = 同一邏輯」
+  - `buildMergedStocks(..., revalueFromClose)`：`revalueFromClose=true` 時以 `closeMap`（與 `stockPrice` 欄同源的 `stock_price_history` 收盤價）重算 `currentValue = 股數 × 收盤價 ×（美股/英股）匯率` 並連動 `estimatedDividend / profit / profitRate / unitPriceTwd`，使「現值 = 股價 × 股數」自洽。**唯讀的 Dashboard 一律傳 true**（4 個 call site：summary / snapshot / tw-stock-lookthrough / us-stock-lookthrough），避免現值沿用快照建檔暫定價、股價欄改讀較新收盤造成台股總值偏差。**會存檔的編輯頁（SnapshotForm / SnapshotDetail）傳 false（3-arg overload 預設）**，維持快照凍結值供 broker row 以 `unitPriceTwd` 反推 `currentValue` 存檔，避免一存檔就把歷史快照改寫成收盤價
 - `DashboardBffController`（DashboardView 專屬）：
   - `GET /api/bff/dashboard/summary`：並行聚合 snapshots / history / prices / marketStatus / latestSnapshotDetail + mergedStocks
   - `GET /api/bff/dashboard/snapshot/{id}`：切換快照時用

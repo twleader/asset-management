@@ -122,7 +122,7 @@ public class DashboardBffController {
                                             dto.setStockPrices(SnapshotEnricher.mergePerMarketPrices(
                                                     basedate, prices, closeMap));
                                             dto.setMergedStocks(
-                                                    enricher.buildMergedStocks(detail, closeMap, false));
+                                                    enricher.buildMergedStocks(detail, closeMap, false, true));
                                             return ResponseEntity.ok(dto);
                                         });
                             });
@@ -198,7 +198,7 @@ public class DashboardBffController {
                     return enricher.fetchSnapshotClosePrices(detail).map(closeMap -> {
                         Map<String, Object> body = new HashMap<>(detail);
                         body.put("mergedStocks",
-                                enricher.buildMergedStocks(detail, closeMap, false));
+                                enricher.buildMergedStocks(detail, closeMap, false, true));
                         return ResponseEntity.ok(body);
                     });
                 });
@@ -233,7 +233,7 @@ public class DashboardBffController {
                     enricher.enrichInvestmentCostOriginal(detail);
                     return enricher.fetchSnapshotClosePrices(detail).flatMap(closeMap -> {
                         List<Map<String, Object>> merged =
-                                enricher.buildMergedStocks(detail, closeMap, false);
+                                enricher.buildMergedStocks(detail, closeMap, false, true);
                         return buildLookthrough(detail, merged);
                     });
                 });
@@ -366,7 +366,7 @@ public class DashboardBffController {
                     enricher.enrichInvestmentCostOriginal(detail);
                     return enricher.fetchSnapshotClosePrices(detail).flatMap(closeMap -> {
                         List<Map<String, Object>> merged =
-                                enricher.buildMergedStocks(detail, closeMap, false);
+                                enricher.buildMergedStocks(detail, closeMap, false, true);
                         return buildUsLookthrough(detail, merged);
                     });
                 });

@@ -196,13 +196,30 @@ public class SnapshotEnricher {
 
     /**
      * 依 stockCode + market 合併多筆 broker rows，預先計算前端表格所需欄位。
-     * @param includeBrokerRows true 時保留 brokerRows 陣列（供 SnapshotDetail 編輯頁使用）
+     * 預設不依收盤價重算現值（維持快照儲存值），供會「存檔」的編輯頁
+     * （SnapshotDetail / SnapshotForm，以 unitPriceTwd 反推 broker currentValue）使用。
+     * @param includeBrokerRows true 時保留 brokerRows 陣列（供編輯頁使用）
+     */
+    public List<Map<String, Object>> buildMergedStocks(
+            Map<String, Object> detail,
+            Map<String, BigDecimal> closeMap,
+            boolean includeBrokerRows) {
+        return buildMergedStocks(detail, closeMap, includeBrokerRows, false);
+    }
+
+    /**
+     * 依 stockCode + market 合併多筆 broker rows，預先計算前端表格所需欄位。
+     * @param includeBrokerRows true 時保留 brokerRows 陣列（供編輯頁使用）
+     * @param revalueFromClose  true 時以 closeMap（stock_price_history 收盤價，與「股價」欄同源）
+     *                          重算 currentValue / estimatedDividend，使「現值 = 股價 × 股數」自洽。
+     *                          僅唯讀頁（Dashboard）使用；會存檔的編輯頁須傳 false 以免覆寫快照凍結值。
      */
     @SuppressWarnings("unchecked")
     public List<Map<String, Object>> buildMergedStocks(
             Map<String, Object> detail,
             Map<String, BigDecimal> closeMap,
-            boolean includeBrokerRows) {
+            boolean includeBrokerRows,
+            boolean revalueFromClose) {
         Object stocksObj = detail.get("stocks");
         if (!(stocksObj instanceof List<?> list) || list.isEmpty()) {
             return Collections.emptyList();
@@ -272,15 +289,37 @@ public class SnapshotEnricher {
             }
         }
 
+        BigDecimal fxRate = toBigDecimal(detail.get("usdExchangeRate"));
         List<Map<String, Object>> result = new ArrayList<>(grouped.values());
         for (Map<String, Object> g : result) {
-            String key = g.get("market") + "_" + g.get("stockCode");
+            String market = asString(g.get("market"));
+            String key = market + "_" + g.get("stockCode");
             BigDecimal closePrice = closeMap.get(key);
             g.put("stockPrice", closePrice);
 
+            BigDecimal sh = (BigDecimal) g.get("shares");
+
+            // 依 stock_price_history 收盤價（closeMap，與「股價」欄同源）重算現值，使「現值 = 股價 × 股數」
+            // 自洽；否則快照凍結的 currentValue（建檔當下暫定價）會與較新的收盤價脫鉤，導致台股總值偏差。
+            // 美股／英股收盤價為原幣（USD），乘快照匯率換算台幣，與前端 overlayLivePrice 同一套換算。
+            // revalueFromClose=false（編輯頁）時略過，維持儲存值供 broker row 以 unitPriceTwd 反推存檔。
+            if (revalueFromClose && closePrice != null && sh != null && sh.signum() > 0) {
+                BigDecimal priceTwd = ("美股".equals(market) || "英股".equals(market))
+                        ? (fxRate != null ? closePrice.multiply(fxRate) : null)
+                        : closePrice;
+                if (priceTwd != null) {
+                    BigDecimal revaluedCv = sh.multiply(priceTwd).setScale(4, RoundingMode.HALF_UP);
+                    g.put("currentValue", revaluedCv);
+                    BigDecimal dr = toBigDecimal(g.get("dividendRate"));
+                    if (dr != null && dr.signum() > 0) {
+                        g.put("estimatedDividend",
+                                revaluedCv.multiply(dr).setScale(4, RoundingMode.HALF_UP));
+                    }
+                }
+            }
+
             BigDecimal cv = (BigDecimal) g.get("currentValue");
             BigDecimal ic = (BigDecimal) g.get("investmentCost");
-            BigDecimal sh = (BigDecimal) g.get("shares");
             BigDecimal icOrig = (BigDecimal) g.get("investmentCostOriginal");
             BigDecimal profit = cv.subtract(ic);
             g.put("profit", profit);
