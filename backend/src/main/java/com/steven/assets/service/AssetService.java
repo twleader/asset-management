@@ -35,6 +35,8 @@ public class AssetService {
     private final TransitFundTypeRepository transitFundTypeRepo;
     private final FundNavService fundNavService;
     private final FundDividendService fundDividendService;
+    private final AssetClassifier assetClassifier;
+    private final StockStyleRepository stockStyleRepo;
 
     /**
      * 算 FundHolding currentValue：若 units 非空 → 嘗試 NAV(basedate) × FX(basedate) 自動算
@@ -376,6 +378,28 @@ public class AssetService {
             realizedByYear.put(year, total);
         }
 
+        // Requirement 25/26/27：一次載入 stock 主檔的 override 與名稱，建 Map<market|code, ...>
+        java.util.Map<String, String> stockClassOverride = new java.util.HashMap<>();
+        java.util.Map<String, String> stockStyleOverride = new java.util.HashMap<>();
+        java.util.Map<String, String> bondTermOverride = new java.util.HashMap<>();
+        java.util.Map<String, String> stockNameMap = new java.util.HashMap<>();
+        for (Stock sm : stockMasterRepo.findAll()) {
+            String key = sm.getMarket() + "|" + sm.getCode();
+            stockNameMap.put(key, sm.getName());
+            if (sm.getAssetClass() != null && !sm.getAssetClass().isBlank()) {
+                stockClassOverride.put(key, sm.getAssetClass());
+            }
+            if (sm.getStockStyle() != null && !sm.getStockStyle().isBlank()) {
+                stockStyleOverride.put(key, sm.getStockStyle());
+            }
+            if (sm.getBondTerm() != null && !sm.getBondTerm().isBlank()) {
+                bondTermOverride.put(key, sm.getBondTerm());
+            }
+        }
+        // Requirement 26：收益型殖利率門檻（stock_style INCOME 列，可設定；缺則 classifier 內 fallback 4%）
+        BigDecimal incomeThreshold = stockStyleRepo.findByCode(AssetClassifier.INCOME)
+                .map(StockStyle::getDividendThreshold).orElse(null);
+
         for (AssetSnapshot s : snapshots) {
             BigDecimal total = s.getTotalAssets() != null ? s.getTotalAssets() : BigDecimal.ZERO;
             BigDecimal increase = prevTotal != null ? total.subtract(prevTotal) : null;
@@ -393,11 +417,56 @@ public class AssetService {
             BigDecimal twStockValue = BigDecimal.ZERO;
             BigDecimal usStockValue = BigDecimal.ZERO;
             BigDecimal ukStockValue = BigDecimal.ZERO;
+            // Requirement 25：同一迴圈順便按「現金/債券/股票」分類加總
+            BigDecimal bondValue = BigDecimal.ZERO;
+            BigDecimal stockEquityValue = BigDecimal.ZERO;
+            // Requirement 26：股票再依「成長/收益」風格細分（growthValue + incomeValue == stockEquityValue）
+            BigDecimal growthValue = BigDecimal.ZERO;
+            BigDecimal incomeValue = BigDecimal.ZERO;
+            // Requirement 27：債券再依「短/中/長期」細分（bondShort + bondMid + bondLong == bondValue）
+            BigDecimal bondShortValue = BigDecimal.ZERO;
+            BigDecimal bondMidValue = BigDecimal.ZERO;
+            BigDecimal bondLongValue = BigDecimal.ZERO;
             for (StockHolding st : s.getStocks()) {
                 BigDecimal val = st.getCurrentValue() != null ? st.getCurrentValue() : BigDecimal.ZERO;
                 if ("美股".equals(st.getMarket())) usStockValue = usStockValue.add(val);
                 else if ("英股".equals(st.getMarket())) ukStockValue = ukStockValue.add(val);
                 else twStockValue = twStockValue.add(val);
+
+                String key = st.getMarket() + "|" + st.getStockCode();
+                if (AssetClassifier.BOND.equals(
+                        assetClassifier.classifyStock(st.getStockCode(), st.getMarket(), stockClassOverride.get(key)))) {
+                    bondValue = bondValue.add(val);
+                    // 僅債券類再分期別：依名稱年期 + override
+                    String term = assetClassifier.classifyBondTerm(
+                            st.getStockCode(), st.getMarket(), stockNameMap.get(key), bondTermOverride.get(key));
+                    if (AssetClassifier.SHORT.equals(term)) bondShortValue = bondShortValue.add(val);
+                    else if (AssetClassifier.LONG.equals(term)) bondLongValue = bondLongValue.add(val);
+                    else bondMidValue = bondMidValue.add(val);
+                } else {
+                    stockEquityValue = stockEquityValue.add(val);
+                    // 僅股票類再分風格：用該快照該持股殖利率 + override + 門檻
+                    String style = assetClassifier.classifyStockStyle(
+                            st.getStockCode(), st.getMarket(), stockStyleOverride.get(key),
+                            st.getDividendRate(), incomeThreshold);
+                    if (AssetClassifier.INCOME.equals(style)) incomeValue = incomeValue.add(val);
+                    else growthValue = growthValue.add(val);
+                }
+            }
+            // 基金：依名稱規則分類（v1 無逐檔 override）；債券基金再依名稱分期別，非債券基金一律歸成長型
+            for (FundHolding fh : s.getFunds()) {
+                BigDecimal val = fh.getCurrentValue() != null ? fh.getCurrentValue() : BigDecimal.ZERO;
+                if (AssetClassifier.BOND.equals(assetClassifier.classifyFund(fh.getFundName(), null))) {
+                    bondValue = bondValue.add(val);
+                    String term = assetClassifier.classifyBondTerm(
+                            fh.getFundCode(), null, fh.getFundName(), null);
+                    if (AssetClassifier.SHORT.equals(term)) bondShortValue = bondShortValue.add(val);
+                    else if (AssetClassifier.LONG.equals(term)) bondLongValue = bondLongValue.add(val);
+                    else bondMidValue = bondMidValue.add(val);
+                } else {
+                    stockEquityValue = stockEquityValue.add(val);
+                    growthValue = growthValue.add(val);
+                }
             }
 
             // 計算台幣 / 美元存款分項（與前端 bankSummary 同邏輯：TRANSIT_TWD/TRANSIT_USD 各歸對應幣別，
@@ -414,6 +483,9 @@ public class AssetService {
                 }
             }
 
+            // Requirement 25：現金 = 台幣存款 + 美元存款（口徑同上方分項，含 TRANSIT_*）
+            BigDecimal cashValue = twdDeposit.add(usdDeposit);
+
             // 直接使用 DB 已存的 estimatedAnnualDividend（由 autoEnrichDividendRates 維護）
             BigDecimal estimatedDividend = s.getEstimatedAnnualDividend() != null
                     ? s.getEstimatedAnnualDividend() : BigDecimal.ZERO;
@@ -426,9 +498,64 @@ public class AssetService {
                 s.getTotalFundValue(),
                 twStockValue, usStockValue, ukStockValue,
                 s.getTotalStockValue(), total, increase, increaseRate, investRate,
-                estimatedDividend, realizedGain
+                estimatedDividend, realizedGain,
+                cashValue, bondValue, stockEquityValue,
+                growthValue, incomeValue,
+                bondShortValue, bondMidValue, bondLongValue
             ));
             prevTotal = total;
+        }
+        return result;
+    }
+
+    /**
+     * 單一快照逐持股分類（Requirement 25/26/27）：供圓餅圖外圈 hover 列出該分類底下的個別持股與金額。
+     * 與 getAssetHistory 同一套 classifier / override / 門檻，確保桶的歸屬與圓餅圖加總一致。
+     */
+    @Transactional(readOnly = true)
+    public List<AssetSnapshotDto.HoldingClassifiedResponse> getHoldingsClassified(Long snapshotId) {
+        AssetSnapshot s = snapshotRepo.findById(snapshotId)
+                .orElseThrow(() -> new NoSuchElementException("找不到快照 ID: " + snapshotId));
+
+        java.util.Map<String, String> classOv = new java.util.HashMap<>();
+        java.util.Map<String, String> styleOv = new java.util.HashMap<>();
+        java.util.Map<String, String> termOv = new java.util.HashMap<>();
+        java.util.Map<String, String> nameMap = new java.util.HashMap<>();
+        for (Stock sm : stockMasterRepo.findAll()) {
+            String key = sm.getMarket() + "|" + sm.getCode();
+            nameMap.put(key, sm.getName());
+            if (sm.getAssetClass() != null && !sm.getAssetClass().isBlank()) classOv.put(key, sm.getAssetClass());
+            if (sm.getStockStyle() != null && !sm.getStockStyle().isBlank()) styleOv.put(key, sm.getStockStyle());
+            if (sm.getBondTerm() != null && !sm.getBondTerm().isBlank()) termOv.put(key, sm.getBondTerm());
+        }
+        BigDecimal incomeThreshold = stockStyleRepo.findByCode(AssetClassifier.INCOME)
+                .map(StockStyle::getDividendThreshold).orElse(null);
+
+        var result = new java.util.ArrayList<AssetSnapshotDto.HoldingClassifiedResponse>();
+        for (StockHolding st : s.getStocks()) {
+            String key = st.getMarket() + "|" + st.getStockCode();
+            String cls = assetClassifier.classifyStock(st.getStockCode(), st.getMarket(), classOv.get(key));
+            String style = null, term = null;
+            if (AssetClassifier.BOND.equals(cls)) {
+                term = assetClassifier.classifyBondTerm(st.getStockCode(), st.getMarket(), nameMap.get(key), termOv.get(key));
+            } else {
+                style = assetClassifier.classifyStockStyle(st.getStockCode(), st.getMarket(),
+                        styleOv.get(key), st.getDividendRate(), incomeThreshold);
+            }
+            result.add(new AssetSnapshotDto.HoldingClassifiedResponse(
+                    st.getStockCode(), nameMap.getOrDefault(key, st.getStockCode()), st.getMarket(),
+                    st.getCurrentValue(), cls, style, term));
+        }
+        for (FundHolding fh : s.getFunds()) {
+            String cls = assetClassifier.classifyFund(fh.getFundName(), null);
+            String style = null, term = null;
+            if (AssetClassifier.BOND.equals(cls)) {
+                term = assetClassifier.classifyBondTerm(fh.getFundCode(), null, fh.getFundName(), null);
+            } else {
+                style = AssetClassifier.GROWTH;  // 非債券基金一律歸成長型（同 getAssetHistory）
+            }
+            result.add(new AssetSnapshotDto.HoldingClassifiedResponse(
+                    fh.getFundCode(), fh.getFundName(), "基金", fh.getCurrentValue(), cls, style, term));
         }
         return result;
     }

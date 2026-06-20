@@ -43,6 +43,10 @@
               <el-icon><Connection /></el-icon>
               <template #title>市場類型設定</template>
             </el-menu-item>
+            <el-menu-item index="/settings/asset-classes">
+              <el-icon><PieChart /></el-icon>
+              <template #title>資產類別歸類</template>
+            </el-menu-item>
             <el-menu-item index="/settings/transit-fund-types">
               <el-icon><Timer /></el-icon>
               <template #title>在途款項類型設定</template>

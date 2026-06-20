@@ -129,6 +129,115 @@ public class InstitutionController {
         return ResponseEntity.ok(institutionService.setMarketTypeActive(id, active));
     }
 
+    // ===================== AssetClasses（Requirement 25）=====================
+
+    @GetMapping("/asset-classes")
+    public List<InstitutionDto.AssetClassResponse> getAllAssetClasses() {
+        return institutionService.getAllAssetClasses();
+    }
+
+    @PostMapping("/asset-classes")
+    public ResponseEntity<InstitutionDto.AssetClassResponse> createAssetClass(
+            @Valid @RequestBody InstitutionDto.CreateAssetClassRequest req) {
+        return ResponseEntity.ok(institutionService.createAssetClass(req));
+    }
+
+    @PutMapping("/asset-classes/{id}")
+    public ResponseEntity<InstitutionDto.AssetClassResponse> updateAssetClass(
+            @PathVariable Long id,
+            @Valid @RequestBody InstitutionDto.UpdateAssetClassRequest req) {
+        return ResponseEntity.ok(institutionService.updateAssetClass(id, req));
+    }
+
+    @PatchMapping("/asset-classes/{id}/active")
+    public ResponseEntity<InstitutionDto.AssetClassResponse> setAssetClassActive(
+            @PathVariable Long id,
+            @RequestBody Map<String, Boolean> body) {
+        boolean active = Boolean.TRUE.equals(body.get("active"));
+        return ResponseEntity.ok(institutionService.setAssetClassActive(id, active));
+    }
+
+    // ===================== Securities 資產類別歸類（Requirement 25）=====================
+
+    @GetMapping("/securities")
+    public List<InstitutionDto.SecurityResponse> getAllSecurities() {
+        return institutionService.getAllSecurities();
+    }
+
+    @PutMapping("/securities/asset-class")
+    public ResponseEntity<InstitutionDto.SecurityResponse> setSecurityAssetClass(
+            @Valid @RequestBody InstitutionDto.SetSecurityAssetClassRequest req) {
+        return ResponseEntity.ok(institutionService.setSecurityAssetClass(req));
+    }
+
+    @PutMapping("/securities/stock-style")
+    public ResponseEntity<InstitutionDto.SecurityResponse> setSecurityStockStyle(
+            @Valid @RequestBody InstitutionDto.SetSecurityStockStyleRequest req) {
+        return ResponseEntity.ok(institutionService.setSecurityStockStyle(req));
+    }
+
+    @PutMapping("/securities/bond-term")
+    public ResponseEntity<InstitutionDto.SecurityResponse> setSecurityBondTerm(
+            @Valid @RequestBody InstitutionDto.SetSecurityBondTermRequest req) {
+        return ResponseEntity.ok(institutionService.setSecurityBondTerm(req));
+    }
+
+    // ===================== BondTerms（Requirement 27）=====================
+
+    @GetMapping("/bond-terms")
+    public List<InstitutionDto.BondTermResponse> getAllBondTerms() {
+        return institutionService.getAllBondTerms();
+    }
+
+    @PostMapping("/bond-terms")
+    public ResponseEntity<InstitutionDto.BondTermResponse> createBondTerm(
+            @Valid @RequestBody InstitutionDto.CreateBondTermRequest req) {
+        return ResponseEntity.ok(institutionService.createBondTerm(req));
+    }
+
+    @PutMapping("/bond-terms/{id}")
+    public ResponseEntity<InstitutionDto.BondTermResponse> updateBondTerm(
+            @PathVariable Long id,
+            @Valid @RequestBody InstitutionDto.UpdateBondTermRequest req) {
+        return ResponseEntity.ok(institutionService.updateBondTerm(id, req));
+    }
+
+    @PatchMapping("/bond-terms/{id}/active")
+    public ResponseEntity<InstitutionDto.BondTermResponse> setBondTermActive(
+            @PathVariable Long id,
+            @RequestBody Map<String, Boolean> body) {
+        boolean active = Boolean.TRUE.equals(body.get("active"));
+        return ResponseEntity.ok(institutionService.setBondTermActive(id, active));
+    }
+
+    // ===================== StockStyles（Requirement 26）=====================
+
+    @GetMapping("/stock-styles")
+    public List<InstitutionDto.StockStyleResponse> getAllStockStyles() {
+        return institutionService.getAllStockStyles();
+    }
+
+    @PostMapping("/stock-styles")
+    public ResponseEntity<InstitutionDto.StockStyleResponse> createStockStyle(
+            @Valid @RequestBody InstitutionDto.CreateStockStyleRequest req) {
+        return ResponseEntity.ok(institutionService.createStockStyle(req));
+    }
+
+    @PutMapping("/stock-styles/{id}")
+    public ResponseEntity<InstitutionDto.StockStyleResponse> updateStockStyle(
+            @PathVariable Long id,
+            @Valid @RequestBody InstitutionDto.UpdateStockStyleRequest req) {
+        return ResponseEntity.ok(institutionService.updateStockStyle(id, req));
+    }
+
+    @PatchMapping("/stock-styles/{id}/active")
+    public ResponseEntity<InstitutionDto.StockStyleResponse> setStockStyleActive(
+            @PathVariable Long id,
+            @RequestBody Map<String, Boolean> body) {
+        boolean active = Boolean.TRUE.equals(body.get("active"));
+        return ResponseEntity.ok(institutionService.setStockStyleActive(id, active));
+    }
+
     // ===================== TransitFundTypes =====================
 
     @GetMapping("/transit-fund-types")

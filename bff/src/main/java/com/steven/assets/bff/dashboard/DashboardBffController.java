@@ -191,6 +191,21 @@ public class DashboardBffController {
                 .then(Mono.just(ResponseEntity.ok().<Void>build()));
     }
 
+    /**
+     * GET /api/bff/dashboard/holdings-classified/{id}
+     * 「現金/債券/股票」雙層圓餅外圈 hover 用：回傳該快照逐持股的分類（assetClass/stockStyle/bondTerm）
+     * + currentValue，前端據此列出某子分類底下的個別持股與金額。passthrough business-services 分類結果。
+     */
+    @GetMapping("/holdings-classified/{id}")
+    public Mono<ResponseEntity<List<Map<String, Object>>>> getHoldingsClassified(@PathVariable Long id) {
+        return businessServicesClient.get()
+                .uri("/api/snapshots/{id}/holdings-classified", id)
+                .retrieve()
+                .bodyToMono(LIST_MAP)
+                .onErrorReturn(Collections.emptyList())
+                .map(ResponseEntity::ok);
+    }
+
     @GetMapping("/snapshot/{id}")
     public Mono<ResponseEntity<Map<String, Object>>> getSnapshot(@PathVariable Long id) {
         return businessServicesClient.get()

@@ -119,3 +119,12 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/v1.27.0-us-index-daily.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.28.0-asset-class.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.29.0-stock-style.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.30.0-bond-term.sql
+      relativeToChangelogFile: false

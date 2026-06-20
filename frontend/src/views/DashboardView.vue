@@ -34,7 +34,7 @@
     </div>
 
     <!-- Charts Row -->
-    <el-row :gutter="20" class="chart-row">
+    <el-row :gutter="20" class="chart-row chart-row-main">
       <!-- Asset Distribution Pie Chart -->
       <el-col :span="10">
         <el-card>
@@ -48,35 +48,33 @@
                 <el-tab-pane label="資產類別" name="category" />
                 <el-tab-pane label="台股個股" name="twStock" />
                 <el-tab-pane label="美股個股" name="usStock" />
+                <el-tab-pane label="現金/債券/股票" name="assetClass" />
               </el-tabs>
             </div>
           </template>
-          <v-chart v-if="allocationTab === 'category'" :option="pieOption" style="height: 320px" autoresize />
+          <v-chart v-if="allocationTab === 'category'" :option="pieOption" style="height: 400px" autoresize />
           <div v-else-if="allocationTab === 'twStock'">
-            <div v-if="twLookthroughLoading" style="height:320px;display:flex;align-items:center;justify-content:center;color:#94a3b8">
+            <div v-if="twLookthroughLoading" style="height:400px;display:flex;align-items:center;justify-content:center;color:#94a3b8">
               <el-icon class="is-loading" style="margin-right:6px"><Loading /></el-icon>
               載入台股個股穿透中…
             </div>
-            <div v-else-if="!twLookthroughHasData" style="height:320px;display:flex;align-items:center;justify-content:center;color:#94a3b8">
+            <div v-else-if="!twLookthroughHasData" style="height:400px;display:flex;align-items:center;justify-content:center;color:#94a3b8">
               此快照無台股部位
             </div>
-            <v-chart v-else :option="twStockPieOption" style="height: 320px" autoresize />
-            <div v-if="twLookthroughDegraded.length" class="lookthrough-degraded-note">
-              以下 ETF 查無成分股資料，已以代號自身計入：{{ twLookthroughDegraded.map(d => d.code).join('、') }}
-            </div>
+            <v-chart v-else :option="twStockPieOption" style="height: 400px" autoresize />
           </div>
-          <div v-else>
-            <div v-if="usLookthroughLoading" style="height:320px;display:flex;align-items:center;justify-content:center;color:#94a3b8">
+          <div v-else-if="allocationTab === 'usStock'">
+            <div v-if="usLookthroughLoading" style="height:400px;display:flex;align-items:center;justify-content:center;color:#94a3b8">
               <el-icon class="is-loading" style="margin-right:6px"><Loading /></el-icon>
               載入美股個股穿透中…
             </div>
-            <div v-else-if="!usLookthroughHasData" style="height:320px;display:flex;align-items:center;justify-content:center;color:#94a3b8">
+            <div v-else-if="!usLookthroughHasData" style="height:400px;display:flex;align-items:center;justify-content:center;color:#94a3b8">
               此快照無美股部位
             </div>
-            <v-chart v-else :option="usStockPieOption" style="height: 320px" autoresize />
-            <div v-if="usLookthroughEtfCount > 0" class="lookthrough-degraded-note">
-              美股 ETF 僅揭露前 10 大成份股，其餘已計入「其它」
-            </div>
+            <v-chart v-else :option="usStockPieOption" style="height: 400px" autoresize />
+          </div>
+          <div v-else>
+            <v-chart :option="assetClassPieOption" style="height: 400px" autoresize />
           </div>
         </el-card>
       </el-col>
@@ -98,9 +96,9 @@
               </div>
             </div>
           </div>
-          <v-chart :option="trendOption" style="height: 260px" autoresize
+          <v-chart :option="trendOption" style="height: 318px; cursor: pointer" autoresize
             @updateAxisPointer="onTrendAxisPointer"
-            @globalout="onTrendLeave" />
+            @click="onTrendClick" />
         </el-card>
       </el-col>
     </el-row>
@@ -606,6 +604,8 @@ const filteredHistory = computed(() => {
 })
 
 const kpiCards = computed(() => {
+  // 整個 dashboard（含 KPI）由 selectedSnapshotId 驅動；liveLatest = 選中快照（含盤中 live overlay）。
+  // 點趨勢圖某點＝onSnapshotChange 換 selectedSnapshotId，與右上下拉同一路徑、一次切換全部。
   const s = liveLatest.value
   if (!s) return []
   const total = Number(s.totalAssets || 0)
@@ -661,17 +661,26 @@ const kpiCards = computed(() => {
   ]
 })
 
-// 趨勢圖 hover 狀態：指向 history row 的 snapshotDate；null 表示沒 hover → 顯示最新
-const hoveredHistoryDate = ref(null)
+// 趨勢圖維持完整全圖、不收合；hover 只記住游標所在的點 index，點擊才正式選取（= 右上下拉，整個 dashboard 切換）。
+const hoveredHistoryDate = ref(null)   // 保留供其它 computed 的 ?? fallback；已不由趨勢圖 hover 驅動
+const trendHoverIdx = ref(null)
 function onTrendAxisPointer(e) {
   const ai = e?.axesInfo?.[0]
-  // value 在 category xAxis 是 dataIndex（number），label 是 snapshotDate string
-  const idx = typeof ai?.value === 'number' ? ai.value : null
-  if (idx == null) return
-  const row = filteredHistory.value[idx]
-  hoveredHistoryDate.value = row?.snapshotDate ?? null
+  // value 在 category xAxis 是 dataIndex（number）
+  trendHoverIdx.value = typeof ai?.value === 'number' ? ai.value : null
 }
-function onTrendLeave() { hoveredHistoryDate.value = null }
+// 點趨勢圖某點 = 選那天：走 onSnapshotChange（與右上下拉同一支 BFF），整個 dashboard 一次切到該快照。
+// 趨勢圖用完整 history（store.history）顯示、不以基準日收合，可連續點不同日期。
+function onTrendClick(params) {
+  // 點在線/點上：params.dataIndex；點在格線空白處：用 hover 追蹤的 index
+  const idx = (params && typeof params.dataIndex === 'number') ? params.dataIndex : trendHoverIdx.value
+  if (idx == null) return
+  const row = store.history[idx]
+  if (row?.id != null && row.id !== selectedSnapshotId.value) {
+    selectedSnapshotId.value = row.id     // 同步反映到下拉，避免閃動
+    onSnapshotChange(row.id)              // 載入該快照明細，KPI/圓餅/銀行/持股一次切換
+  }
+}
 
 const pieDate = computed(() => hoveredHistoryDate.value ?? latest.value?.snapshotDate ?? null)
 
@@ -741,14 +750,123 @@ const pieOption = computed(() => {
   const data = segments.filter(d => d.value > 0)
   return {
     tooltip: { trigger: 'item', formatter: p => `${p.name}: $${Number(p.value).toLocaleString()} (${p.percent}%)` },
-    legend: { bottom: 0, textStyle: { fontSize: 12 } },
+    legend: { show: false },
     series: [{
-      type: 'pie', radius: ['40%', '70%'],
-      center: ['50%', '45%'],
+      type: 'pie', radius: ['46%', '78%'],
+      center: ['50%', '50%'],
       data: data.map(d => ({ value: d.value, name: d.name, itemStyle: { color: d.color } })),
-      label: { formatter: '{b}\n{d}%' },
+      label: { formatter: '{b}\n{d}%', fontSize: 11 },
+      labelLayout: { hideOverlap: true },
       itemStyle: { borderRadius: 6 }
     }]
+  }
+})
+
+// 現金/債券/股票 三分類圓餅圖（Requirement 25）：與「資產類別」tab 同源，讀 history 的
+// cashValue/bondValue/stockValue（business-services 算好），hover/換快照即時反應、不另抓。
+// 雙層圓餅外圈 hover 用：載入該快照逐持股分類，群組成 { 成長型/收益型/短期/中期/長期: [{name,value}] }
+const classifiedHoldings = ref([])
+const classifiedCache = new Map()
+async function loadHoldingsClassified(snapshotId) {
+  if (!snapshotId) return
+  if (classifiedCache.has(snapshotId)) { classifiedHoldings.value = classifiedCache.get(snapshotId); return }
+  try {
+    const data = await bffApi.dashboard.holdingsClassified(snapshotId)
+    classifiedCache.set(snapshotId, data)
+    if (effectiveSnapshotId.value === snapshotId) classifiedHoldings.value = data
+  } catch (e) {
+    console.warn('逐持股分類載入失敗:', e)
+  }
+}
+const holdingsByBucket = computed(() => {
+  // 以代號合併同一標的的多筆 broker 持股，避免 tooltip 同名重複多列
+  const buckets = { 成長型: {}, 收益型: {}, 短期: {}, 中期: {}, 長期: {} }
+  for (const h of classifiedHoldings.value || []) {
+    const v = Number(h.currentValue || 0)
+    if (v <= 0) continue
+    let b = null
+    if (h.assetClass === 'STOCK') b = h.stockStyle === 'INCOME' ? '收益型' : '成長型'
+    else if (h.assetClass === 'BOND') b = h.bondTerm === 'SHORT' ? '短期' : h.bondTerm === 'LONG' ? '長期' : '中期'
+    if (!b) continue
+    const key = h.code || h.name
+    const cur = buckets[b][key] || { name: h.name || h.code, value: 0 }
+    cur.value += v
+    buckets[b][key] = cur
+  }
+  const out = {}
+  for (const k in buckets) out[k] = Object.values(buckets[k]).sort((a, b) => b.value - a.value)
+  return out
+})
+
+// 現金/債券/股票 雙層圓餅（Requirement 25/26/27）：內外層相接成同一個環、各佔一半。
+// 內層 = 現金/債券/股票（總覽，家族底色）；外層把各類展開成同色系深淺不同的子分類：
+//   現金→台幣/美元（藍系）、債券→短/中/長期（綠系）、股票→成長型/收益型（琥珀系）。
+// 因 台幣+美元=現金、短+中+長=債券、成長+收益=股票，外層逐區與內層角度對齊。
+// 資料同源（history 的 totalTwd/UsdDeposit + cash/bond/stock + bondShort/Mid/Long + growth/income）。
+const assetClassPieOption = computed(() => {
+  const targetDate = hoveredHistoryDate.value ?? latest.value?.snapshotDate
+  const r = filteredHistory.value.find(x => x.snapshotDate === targetDate)
+  if (!r) return {}
+  const num = k => Math.round(Number(r[k] || 0))
+  const twd = num('totalTwdDeposit'), usd = num('totalUsdDeposit')
+  const cash = num('cashValue'), bond = num('bondValue'), stock = num('stockValue')
+  const bShort = num('bondShortValue'), bMid = num('bondMidValue'), bLong = num('bondLongValue')
+  const growth = num('growthValue'), income = num('incomeValue')
+  const C = {
+    現金: '#3b82f6', 台幣: '#2563eb', 美元: '#93c5fd',                 // 藍系
+    債券: '#14b8a6', 短期: '#5eead4', 中期: '#2dd4bf', 長期: '#0f766e', // 綠/teal 系
+    股票: '#f59e0b', 成長型: '#fcd34d', 收益型: '#d97706'              // 琥珀系
+  }
+  const seg = (name, value) => ({ value, name, itemStyle: { color: C[name] } })
+  const inner = [seg('現金', cash), seg('債券', bond), seg('股票', stock)].filter(d => d.value > 0)
+  const outer = [
+    seg('台幣', twd), seg('美元', usd),
+    seg('短期', bShort), seg('中期', bMid), seg('長期', bLong),
+    seg('成長型', growth), seg('收益型', income)
+  ].filter(d => d.value > 0)
+  const base = { type: 'pie', center: ['50%', '50%'], itemStyle: { borderColor: '#fff', borderWidth: 2 } }
+  // tooltip：外圈股票/債券子分類列出底下個別持股與金額（前 10 大 + 其餘彙總，股名過長省略）；其餘只顯示金額與佔比
+  const money = v => `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+  const fmtRow = (name, val, color) =>
+    `<div style="display:flex;justify-content:space-between;gap:16px;line-height:1.6;${color ? `color:${color};` : ''}">
+       <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:188px">${name}</span>
+       <span>${money(val)}</span>
+     </div>`
+  const fmtTooltip = p => {
+    const head = `${p.name}：$${Number(p.value).toLocaleString()}（${p.percent}%）`
+    const list = holdingsByBucket.value[p.name]
+    if (p.seriesName === '細分' && Array.isArray(list) && list.length) {
+      const TOPN = 10
+      let rows = list.slice(0, TOPN).map(h => fmtRow(h.name, h.value)).join('')
+      const rest = list.slice(TOPN)
+      if (rest.length) {
+        rows += fmtRow(`…其餘 ${rest.length} 檔`, rest.reduce((s, h) => s + h.value, 0), '#94a3b8')
+      }
+      return `<b>${head}</b><div style="margin-top:4px;border-top:1px solid #eee;padding-top:4px">${rows}</div>`
+    }
+    return head
+  }
+  return {
+    tooltip: { trigger: 'item', confine: true, extraCssText: 'max-width:300px;', formatter: fmtTooltip },
+    legend: { show: false },
+    series: [
+      // 內圈標籤 host：半徑放大且與內環同角度 → 各標籤落到對應扇形方向、靠近內環，朝外引線指向該扇形。
+      //   扇形必須透明：host data 去掉每筆的 itemStyle.color，才不會被當成第三個實心環。
+      { type: 'pie', center: ['50%', '50%'], radius: ['0%', '30%'],
+        silent: true, tooltip: { show: false }, emphasis: { disabled: true },
+        avoidLabelOverlap: true, itemStyle: { color: 'transparent', borderColor: 'transparent', borderWidth: 0 },
+        label: { show: true, position: 'outside', alignTo: 'none',
+          formatter: '{b}\n{d}%', fontSize: 11, lineHeight: 15 },
+        labelLine: { show: true, length: 6, length2: 10, lineStyle: { width: 1 } },
+        data: inner.map(d => ({ name: d.name, value: d.value })) },
+      // 內圈環（薄）：自身不出 label，標籤交給上面的 host
+      { ...base, name: '總覽', radius: ['41%', '53%'],
+        label: { show: false }, labelLine: { show: false }, data: inner },
+      // 外圈環（薄）：label 往外、引線朝外
+      { ...base, name: '細分', radius: ['53%', '65%'],
+        label: { position: 'outside', formatter: '{b}\n{d}%', fontSize: 11 },
+        labelLine: { length: 12, length2: 10 }, labelLayout: { hideOverlap: true }, data: outer }
+    ]
   }
 })
 
@@ -794,10 +912,11 @@ const twStockPieOption = computed(() => {
     legend: { show: false },
     series: [{
       type: 'pie',
-      radius: ['40%', '70%'],
+      radius: ['46%', '78%'],
       center: ['50%', '50%'],
       data: data.map(d => ({ value: d.value, name: d.name, code: d.code, itemStyle: { color: d.color } })),
       label: { formatter: '{b}\n{d}%', fontSize: 11 },
+      labelLayout: { hideOverlap: true },
       itemStyle: { borderRadius: 6 }
     }]
   }
@@ -862,10 +981,11 @@ const usStockPieOption = computed(() => {
     legend: { show: false },
     series: [{
       type: 'pie',
-      radius: ['40%', '70%'],
+      radius: ['46%', '78%'],
       center: ['50%', '50%'],
       data: data.map(d => ({ value: d.value, name: d.name, fullName: d.fullName, itemStyle: { color: d.color } })),
       label: { formatter: '{b}\n{d}%', fontSize: 11 },
+      labelLayout: { hideOverlap: true },
       itemStyle: { borderRadius: 6 }
     }]
   }
@@ -901,11 +1021,15 @@ watch([allocationTab, effectiveSnapshotId], ([tab, sid]) => {
   } else if (tab === 'usStock') {
     if (usLookthroughCache.has(sid)) usLookthrough.value = usLookthroughCache.get(sid)
     else loadUsStockLookthrough(sid)
+  } else if (tab === 'assetClass') {
+    if (classifiedCache.has(sid)) classifiedHoldings.value = classifiedCache.get(sid)
+    else loadHoldingsClassified(sid)
   }
 })
 
 const trendOption = computed(() => {
-  const baseH = filteredHistory.value
+  // 趨勢圖一律顯示完整歷史（不以基準日收合），點選某日只切換 dashboard、不改變此圖範圍
+  const baseH = store.history
   if (!baseH.length) return {}
   // 若選中快照=該市場當地今日且市場開盤，把該日 history row 的對應欄位用 liveLatest 覆蓋，
   // 讓趨勢線最後一點隨輪詢同步跳動。
@@ -929,7 +1053,15 @@ const trendOption = computed(() => {
     xAxis: { type: 'category', data: h.map(r => r.snapshotDate), axisLabel: { rotate: 30, fontSize: 11 } },
     yAxis: { type: 'value', axisLabel: { formatter: v => `$${(v / 1e4).toFixed(0)}萬` } },
     series: [
-      { name: '總資產', type: 'line', smooth: true, lineStyle: { width: 3 }, data: h.map(r => Number(r.totalAssets || 0)), itemStyle: { color: '#8b5cf6' } },
+      { name: '總資產', type: 'line', smooth: true, lineStyle: { width: 3 }, data: h.map(r => Number(r.totalAssets || 0)), itemStyle: { color: '#8b5cf6' },
+        // 在目前選中快照的日期畫一條虛線，標示整個 dashboard 目前顯示的時間點
+        markLine: {
+          silent: true, symbol: 'none',
+          lineStyle: { color: '#a78bfa', type: 'dashed', width: 1.5 },
+          label: { show: false },
+          data: latest.value?.snapshotDate ? [{ xAxis: latest.value.snapshotDate }] : []
+        }
+      },
       { name: '存款', type: 'line', smooth: true, data: h.map(r => Number(r.totalDeposit || 0)), itemStyle: { color: '#3b82f6' } },
       // 投資 = 信託基金 + 股票（與資產配置圓餅圖中「投資類」一致）
       { name: '投資', type: 'line', smooth: true, data: h.map(r => Number(r.totalFundValue || 0) + Number(r.totalStockValue || 0)), itemStyle: { color: '#f59e0b' } }
@@ -1414,6 +1546,10 @@ function onBarDblClick(params) {
 }
 .dashboard-title { font-size: 18px; font-weight: 700; color: #1e293b; margin: 0; }
 .kpi-row, .chart-row { margin: 0 !important; }
+/* 左右兩個 panel 等高：整列 flex 拉伸，兩張卡片同高 */
+.chart-row-main { display: flex; align-items: stretch; }
+.chart-row-main > .el-col { display: flex; flex-direction: column; }
+.chart-row-main :deep(.el-card) { height: 100%; }
 .kpi-flex { display: flex; gap: 20px; flex-wrap: nowrap; }
 .kpi-flex-item { flex: 1 1 0; min-width: 0; }
 

@@ -2986,3 +2986,47 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 112.4 spec：`requirements.md` Req 19/21、`tasks.md` 本任務
 - [ ] 112.5 Docker 重 build + recreate（business-services）後驗證：24B2 現值 61,184 → ≈ 59,746（== units × NAV × 即期買入 1.8700）；navHint 顯示之匯率與現值同源；TWD 基金不變
 
+### Task 113: 現金／債券／股票 資產類別三分類（Requirement 25）
+
+**需求**：「資產配置分佈」既有六分類（存款/台股/美股/基金）是按「持有形式」分；使用者要再多一個按「經濟性質」分的「現金/債券/股票」維度，讓債券 ETF（台股 `00679B`、美股 `TLT`/`BND`）能歸入債券而非混在股票。規則自動判定 + 可逐檔人工微調。
+
+**設計**：見 `design.md`「AssetClass 實體」「Settings - Asset Classes / Securities 端點」「現金／債券／股票 三分類計算」。三分類值與既有六分類同源（`/api/snapshots/history`），新 tab 直接 render、hover/換快照即時反應。
+
+- [x] 113.1 DB：`v1.28.0-asset-class.sql` 建 `asset_class` 表 + seed 現金/債券/股票 + `stock` 加 `asset_class VARCHAR(20)` nullable；掛 master changelog
+- [x] 113.2 後端 entity/repo：`AssetClass` + `AssetClassRepository`；`Stock` 加 `assetClass` 欄位
+- [x] 113.3 後端 `AssetClassifier`：台股 `00…B` / 美股債券 ETF 清單 / 基金名稱含「債」→ 債券；override 優先
+- [x] 113.4 後端 `AssetService.getAssetHistory()`：計算 `cashValue`/`bondValue`/`stockValue`（注入 `StockRepository`+`AssetClassifier`）；`AssetSnapshotDto.AssetHistoryResponse` 加三欄
+- [x] 113.5 後端設定 API：`InstitutionController`/`InstitutionService` 加 asset-classes CRUD + `/api/settings/securities`（list + set override）；`DataInitializer.seedAssetClasses()`
+- [x] 113.6 BFF：`AssetClassSettingsBffRoutes` passthrough（categories + securities）
+- [x] 113.7 前端：`DashboardView` 加第 4 tab「現金/債券/股票」圓餅圖；`AssetClassSettingsView` 設定頁；`api/index.js` + `router` + `App.vue` 選單
+- [x] 113.8 Docker 重 build + recreate（business-services + bff + frontend）後驗證（API 層）：所有凍結快照「三分類加總 == `totalAssets`」diff 全 0（最新列受 live overlay 預期略差 ~1.5k，巨觀配置可接受、已列不在範圍）；台股 5 檔 `…B`（00679B/00695B/00697B/00719B/00751B）+ 美股 SGOV 共 6 檔自動落「債券」；個股 override 設 BOND→effective=BOND/source=OVERRIDE、清除→回 RULE 跨快照生效；`asset_class` seed 3 筆、`v1.28.0` Liquibase 成功。**待使用者瀏覽器目視**：新 tab 圓餅圖渲染與 hover、設定頁下拉操作
+
+### Task 114: 股票「成長型／收益型」風格細分（Requirement 26）
+
+**需求**：在「股票」之上再加正交子維度，依殖利率把股票分成成長型/收益型。使用者拍板：門檻 **4%**（落在 0050 3.59% 與高股息群 ≥4.82% 的自然缺口）、且門檻**設定頁可調存 DB**。規則 override > 高股息 ETF 清單 > 殖利率門檻 > 缺值歸成長。
+
+**設計**：見 `design.md`「StockStyle 實體」「Settings - stock-styles / securities/stock-style 端點」「成長型／收益型 風格細分」。完全沿用三分類同源 pattern（seed 表 + 主檔 nullable override + classifier 擴充 + getAssetHistory 加欄 + 同設定頁多一欄 + Dashboard 多一 tab）。殖利率來源在 `StockHolding.dividendRate`（逐快照），故自動判定在 `getAssetHistory()` 逐快照算。
+
+- [x] 114.1 DB：`v1.29.0-stock-style.sql` 建 `stock_style` 表（含 `dividend_threshold`）+ seed 成長型/收益型（INCOME threshold 0.0400）+ `stock` 加 `stock_style VARCHAR(20)`；掛 master changelog
+- [x] 114.2 後端 entity/repo：`StockStyle` + `StockStyleRepository`；`Stock` 加 `stockStyle` 欄位
+- [x] 114.3 後端 `AssetClassifier.classifyStockStyle`：override > 高股息 ETF 清單（台股/美股）> 殖利率門檻 > 缺值 GROWTH；常數 GROWTH/INCOME + 清單（對抗式 review 後移除誤含的 `00725B` 債券碼與特別股 ETF `PFF`/`PFFD`）
+- [x] 114.4 後端 `AssetService.getAssetHistory()`：STOCK 分支再依 style 細分 `growthValue`/`incomeValue`（讀該快照 `dividendRate` + INCOME 門檻）；`AssetHistoryResponse` 加兩欄；基金歸成長
+- [x] 114.5 後端設定 API：`stock-styles` CRUD（含改門檻）+ `/api/settings/securities/stock-style` set override；`SecurityResponse` 加 `stockStyle`/`effectiveStockStyle`/`styleSource`（用最新快照殖利率算 effective）；`DataInitializer.seedStockStyles()`
+- [x] 114.6 BFF：`AssetClassSettingsBffRoutes` 加 `stock-styles` passthrough（securities/** 已涵蓋 /stock-style）
+- [x] 114.7 前端：`DashboardView`「現金/債券/股票」tab 改為**雙環 drill-down donut**（內圈現金/債券/股票、外圈股票拆成長/收益，`assetClassPieOption`），**不另開 tab**（使用者明確要求細分既有圖、非新分頁）；`AssetClassSettingsView` 加「股票風格」欄（僅 STOCK 列可編）+ 收益型門檻可調控制項；`api/index.js` 加端點
+- [x] 114.8 Docker 重 build + recreate（business-services + bff + frontend）後驗證（API 層）：`growthValue + incomeValue == stockValue` 全凍結快照 diff 全 0；4% 門檻最新快照收益型 15.6%（00919/00713/0056/00882/00878/00929）、成長型 84.4%（含 0050）；門檻改 3% → 0050 翻收益、還原 4% 復原；2330 style override 設 INCOME→OVERRIDE、清除→RULE 無殘留；債券/現金列 `effectiveStockStyle=null`；`v1.29.0` Liquibase 成功、`stock_style` seed 2 筆 threshold 0.04。對抗式 review（28 agents/25 findings→6 confirmed）後修掉 PFF/PFFD 誤分類。**待使用者瀏覽器目視**：雙環圓餅內外圈對齊、外圈股票拆成長/收益、設定頁「股票風格」欄與門檻控制項
+
+### Task 115: 債券短/中/長期細分 + 雙層圓餅同色系配色（Requirement 27）
+
+**需求**：使用者要求 ① 雙層圓餅外層子分類採「與母分類同色系、深淺略不同」（成長/收益改回琥珀系，不用靛藍）；② 債券再細分短/中/長期。沿用 asset_class/stock_style 同模式（seed 表 + 主檔 nullable override + classifier + getAssetHistory 加欄 + 同設定頁同一列「指定細分」欄 + 雙層圓餅外層多三段）。期別由標的名稱年期判定（無 dividendRate 依賴），故設定頁 effective 直接用主檔名稱算、不需最新快照。
+
+- [x] 115.1 DB：`v1.30.0-bond-term.sql` 建 `bond_term` 表 + seed 短/中/長期 + `stock` 加 `bond_term VARCHAR(20)`；掛 master changelog
+- [x] 115.2 後端 entity/repo：`BondTerm` + `BondTermRepository`；`Stock` 加 `bondTerm` 欄位
+- [x] 115.3 後端 `AssetClassifier.classifyBondTerm`：依名稱年期字樣（1-3/0-3/month→短、20/長→長、7-10/中→中、預設中）；override 優先；常數 SHORT/MID/LONG
+- [x] 115.4 後端 `AssetService.getAssetHistory()`：BOND 分支再依期別細分 `bondShortValue`/`bondMidValue`/`bondLongValue`（用主檔名稱 + override）；`AssetHistoryResponse` 加三欄；債券基金依名稱分期
+- [x] 115.5 後端設定 API：`bond-terms` CRUD + `/api/settings/securities/bond-term` set override；`SecurityResponse` 加 `bondTerm`/`effectiveBondTerm`/`termSource`；`DataInitializer.seedBondTerms()`
+- [x] 115.6 BFF：`AssetClassSettingsBffRoutes` 加 `bond-terms` passthrough
+- [x] 115.7 前端：`DashboardView` 雙層圓餅外層加債券短/中/長三段、改同色系配色（藍/teal/琥珀各三階）；`AssetClassSettingsView`「指定細分」欄債券列顯示短/中/長期下拉；`api/index.js` 加端點
+- [x] 115.9 移除雙層圓餅 legend；外圈股票/債券子分類 hover 列出底下個別持股與金額：新增 `GET /api/snapshots/{id}/holdings-classified`（業務層逐持股分類）+ BFF `holdings-classified/{id}` passthrough + 前端 lazy 載入群組桶 + tooltip formatter
+- [ ] 115.8 Docker 重 build + recreate（business-services + bff + frontend）後驗證：`bondShort+bondMid+bondLong == bondValue`（凍結快照）；00679B→長、00695B/00697B→中、00719B→短、SGOV→短、00751B→中（可 override）；bond-term override round-trip；`v1.30.0` Liquibase 成功、`bond_term` seed 3 筆。**待使用者瀏覽器目視**：外層三色系深淺、債券拆短中長三段、設定頁債券列期別下拉
+
