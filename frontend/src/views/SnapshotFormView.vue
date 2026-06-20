@@ -2142,6 +2142,22 @@ function applyEnrichedPrices(prices, rows) {
   }
 }
 
+/** 進編輯頁時，用 BFF detail 已附帶的 mergedStocks 收盤價（與 loadAllPrices 同一 closeMap 來源）
+ *  先填 latestPrice，使首次 paint 的 KPI 總額就用「收盤價 × 股數」。
+ *  否則 latestPrice 初值為 null → calcBrOriginalValue fallback 用快照凍結的 currentValue（舊暫定價），
+ *  待 loadAllPrices 回來才跳成正解，造成總資產「先舊值、過幾秒才更新」的閃動。 */
+function applyMergedClosePrices(mergedStocks) {
+  if (!Array.isArray(mergedStocks)) return
+  const map = {}
+  for (const m of mergedStocks) {
+    if (m?.stockPrice != null) map[`${m.market}_${m.stockCode}`] = Number(m.stockPrice)
+  }
+  for (const row of form.stocks) {
+    const cp = map[`${row.market}_${row.stockCode}`]
+    if (cp != null) row.latestPrice = cp
+  }
+}
+
 // ===== Data fetching: price =====
 const fetchPrice = async (row) => {
   if (!row.stockCode) {
@@ -2540,6 +2556,9 @@ onMounted(async () => {
         transactionExchangeRate: s.transactionExchangeRate
       })))
     })
+    // 用 detail 已附帶的收盤價先填 latestPrice，首次 paint 的總額即為「收盤價 × 股數」，
+    // 避免先顯示快照凍結舊值、待 loadAllPrices 回來才跳成正解的閃動（與 loadAllPrices 同源不二跳）。
+    applyMergedClosePrices(detail.mergedStocks)
     loading.value = false
     // 舊快照若未存匯率，補抓
     if (!form.usdExchangeRate) {

@@ -65,7 +65,9 @@ public class FundNavService {
                 log.warn("找不到 {} 匯率（basedate={}），無法計算 {} 台幣現值", cur, basedate, fundCode);
                 return Optional.empty();
             }
-            fxRate = fx.getMidRate();
+            // 外幣基金台幣現值用「即期買入」(銀行買入外幣價)，與銀行對帳單「參考現值」口徑一致；
+            // 中間價會高估（贖回時銀行以買入價向你買回外幣）。見 spec Task 112。
+            fxRate = fx.getFundValuationRate();
             fxDate = fx.getRateDate();
         }
         return Optional.of(new LatestNav(

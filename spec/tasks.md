@@ -2907,3 +2907,82 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 108.4 spec：`requirements.md` Req 2/9、`design.md` SnapshotEnricher、`tasks.md` 本任務
 - [x] 108.5 Docker 重 build + recreate（bff）後驗證：台股 footer 總值 10,051,967 → 10,176,102 == Σ(股價 × 股數) == liveAssets 台股；15 檔每列「現值 = 股價 × 股數」diff 全 0；美股 fx 換算正確；snapshot-detail 編輯頁仍回凍結值（unitPriceTwd 106.00 未被覆寫）
 
+### Task 109: Dashboard 資產總計與「歷年資產管理」不一致（休市時繞過 liveAssets）
+
+**需求**：總覽儀表板 KPI「資產總計」顯示 20,004,057（+29.1%），但「歷年資產管理」同一筆快照（2026-06-19）顯示 20,125,204（+29.9%）。同義欄位兩頁值不同。歷年頁正確（台股 10,176,102 + 美股 1,361,031 + 存款 8,526,983 + 基金 61,088 = 20,125,204 == `liveAssets.liveTotalAssets`），儀表板錯誤（用快照凍結的聚合 `asset_snapshot.totalStockValue` 11,415,986）。
+
+**根因**：Task 108 修了表格 footer（`buildMergedStocks(revalueFromClose=true)`），但其設計假設「前端 `liveLatest` 的 `sumOf` 會自動讀到重算值」有盲點——`liveLatest` 在**全市場皆非該市場交易日今日**（週末／隔日）時，line `if (!twLive && !usLive && !ukLive) return s` **提早返回快照凍結值**，根本到不了 `sumOf`，也跳過了後段「優先採用 `liveAssets.liveTotalAssets`」的邏輯。於是 Task 108 只在「快照當天」生效，「隔天／週末」KPI 仍吐凍結聚合值。同理 `DashboardBffController.summary` 回的 `history` 最新列亦未套 live overlay（歷年頁 BFF 有套），導致趨勢線最後一點、`history.totalAssets` 也偏差。違反 CLAUDE.md「同義欄位 = 同一 business service」。
+
+**設計**：
+- 共用邏輯抽到 `bff/common/LiveAssetsOverlay.applyToLatest(history, live)`（自 `AssetHistoryBffController` 移出），`DashboardBffController.summary` 與 `AssetHistoryBffController` 兩支 BFF 皆呼叫 → `history` 最新列同源同值（台股/美股/總股值/總資產/增幅）。
+- 前端 `DashboardView.liveLatest` 的「全市場休市」分支不再 `return s`，改 `overlayLatestFromLiveAssets(s)`：以 `liveAssets`（同一支 `/api/market-data/live-assets`）覆蓋 `totalTwStockValue / totalUsStockValue / totalUkStockValue / totalStockValue / stockProfit / totalAssets`，使 KPI 卡片、趨勢線最後一點、趨勢圖例與歷年頁逐欄一致。`liveAssets` 缺漏或非同筆快照時 fallback 回快照值。
+
+#### Steps:
+
+- [x] 109.1 新增 `bff/common/LiveAssetsOverlay.java`（`applyToLatest`），`AssetHistoryBffController` 改用共用版、移除私有 `applyLiveOverlay` 與 `toBd/toBdOr`
+- [x] 109.2 `DashboardBffController.getSummary`：取得 history + liveAssets 後呼叫 `LiveAssetsOverlay.applyToLatest(history, liveAssets)`
+- [x] 109.3 前端 `DashboardView`：新增 `overlayLatestFromLiveAssets(s)`；`liveLatest` 全市場休市分支改呼叫之
+- [x] 109.4 spec：`requirements.md` Req 9（KPI 同源）、`design.md`（LiveAssetsOverlay 共用工具）、`tasks.md` 本任務
+- [ ] 109.5 Docker 重 build + recreate（bff + frontend）後驗證：儀表板 KPI 資產總計 == 歷年頁 == 20,125,204、增幅 29.9%；趨勢線最後一點同值；`/api/bff/dashboard/summary` 的 `history` 最新列 totalAssets == `/api/bff/asset-history` 最新列
+
+### Task 110: 管理資產（SnapshotForm）總資產進頁閃動修正（先舊值、幾秒後才更新）
+
+**需求**：編輯既有快照頁（`/snapshots/{id}/edit`，標題「基本資訊」）一進去時，上方 KPI「總資產」先顯示一個舊值，過幾秒才更新成正確值。使用者體感「常常是錯的」。
+
+**根因**：KPI 總額的股票部分由 `calcGroupedSummary → stockValue → calcBrTwdValue → calcBrOriginalValue` 計算，其規則為 `latestPrice != null ? 股數 × latestPrice : 快照凍結 currentValue`。`onMounted` 兩階段載入：
+1. `bffApi.snapshotForm.get(id)` 回 detail → `form.stocks` 各列 `latestPrice` 初值 `null` → 總額 fallback 用**快照凍結的 currentValue**（建檔當下暫定價＝舊值）；
+2. 隨後 `await loadAllPrices()`（另一支 BFF 往返）→ `applyEnrichedPrices` 填入 `latestPrice` → 總額改用「收盤價 × 股數」（正解）。
+
+兩段 await 之間 Vue 已 paint，故先顯示舊值、幾秒（網路往返）後才跳成正解。**而 `get` 回應其實早已附帶收盤價**（`mergedStocks[].stockPrice`，來源 `SnapshotEnricher.fetchSnapshotClosePrices` 的 `closeMap`，與 `loadAllPrices` 走的 `/api/market-data/history/prices-on-date` 同源），onMounted 卻只用 `detail.stocks`、丟掉了現成收盤價。
+
+**設計**：純前端。`onMounted` 建好 `form.stocks` 後、`loadAllPrices` 前，新增 `applyMergedClosePrices(detail.mergedStocks)`：以 `mergedStocks[].stockPrice` 設各列 `latestPrice`。與 Object.assign 同一同步區塊內完成 → 首次 paint 即為「收盤價 × 股數」；與 `loadAllPrices` 同源，休市時無二次跳動（盤中才會由收盤→即時，屬預期）。`stockPrice` 缺漏時 latestPrice 維持 null、fallback 凍結值（行為不變）。不動存檔路徑（`flattenStocks` 仍以 `calcBrTwdValue` 計算，與載入前一致）。
+
+#### Steps:
+
+- [x] 110.1 前端 `SnapshotFormView`：新增 `applyMergedClosePrices(mergedStocks)`，`onMounted` 載入 detail 後立即呼叫
+- [x] 110.2 spec：`requirements.md`（編輯頁 KPI 首次 paint 即正解）、`tasks.md` 本任務
+- [ ] 110.3 Docker 重 build + recreate（frontend）後驗證：進編輯頁 KPI 總資產首次 paint 即為收盤價口徑、不再先舊值後跳；盤後重整無閃動；存檔結果不變
+
+### Task 111: 同一快照「資產總計」跨頁不一致根因（休市刷新把 FinMind 收盤蓋成 last-tick）
+
+**需求**：管理資產（SnapshotForm）總資產（20,126,776）與儀表板 / 歷年（20,125,300）對同一快照不同。依「同義欄位來自相同 business service、值應相同」原則必須一致。
+
+**根因（Redis↔DB 不同步）**：差異來自**美股價源**——
+- SnapshotForm / Dashboard 表格走 `closeMap`（`/api/market-data/history/prices-on-date` → `stock_price_history`）：VOO **689.20**（FinMind 校正之官方收盤）。
+- Dashboard KPI / 歷年走 `liveAssets` → `PriceQueryService.getLive` → **Redis**：VOO **688.11**。
+
+兩者本應相等（FinMind 校正 `writeVerifiedClose` 已把官方收盤寫進 Redis），但 **`PriceCacheWriter.write` 無條件覆寫 Redis**，而 `PricePoller.refreshAll`（前端 `/realtime` 輪詢觸發的 `/internal/refresh`）與 `warmCacheOnStartup` 在**市場休市時仍對外重抓 last-tick 並寫入**。實機：美股 06-19 Juneteenth 休市，前端刷新觸發 refreshAll，把 06-18 的盤前 last-tick 688.11 寫回 Redis，蓋掉 FinMind 的 689.20。`scheduled*IntradayUpdate` 因 `isMarketOpen` 守門已會跳休市，故唯二污染路徑為 refreshAll 與 warmup。違反 Requirement 114「FinMind 校正須同步 Redis 且不得被盤外重抓蓋回」。權威值＝DB 官方收盤（689.20）。
+
+**設計**：休市時 Redis 一律「從 DB 收盤同步」而非「對外重抓覆寫」：
+- 新增 `PriceCacheWriter.syncClosedFromDb(code, market, dbClose)`：以 `stock_price_history` 最近收盤覆寫 Redis（`closed=true`、`source=DB-close`），沿用既有 JSON 的 previousClose / stockName / ohlc / volume 維持顯示。
+- 新增 `PricePoller.syncClosedFromDb(codes, market)`（讀 `StockSourceQuery.findRecentClose`）。
+- `refreshAll` 與 `warmCacheOnStartup`：市場開盤→外部抓即時價；休市→改呼叫 `syncClosedFromDb`。
+- 容器重啟時 warmup 即會把現有被污染的 Redis 修回 DB 收盤；之後盤外刷新不再蓋回。
+
+#### Steps:
+
+- [x] 111.1 `PriceCacheWriter.syncClosedFromDb`：DB 收盤 → Redis（保留既有顯示欄位）
+- [x] 111.2 `PricePoller`：新增 `syncClosedFromDb(codes, market)`；`refreshAll` / `warmCacheOnStartup` 休市改走 DB 同步（不再 `updatePrices(markClosed=true)` 覆寫）
+- [x] 111.3 spec：`requirements.md` Req 114 強化、`tasks.md` 本任務
+- [ ] 111.4 Docker 重 build + recreate（external-materials-service）後驗證：Redis `price:美股:VOO` == DB 收盤 689.20；`live-assets` 美股 == `closeMap` 美股；Dashboard KPI / 歷年 / SnapshotForm 三頁「資產總計」同值；盤外觸發 `/internal/refresh` 不再把收盤蓋成 last-tick
+
+### Task 112: 外幣基金台幣現值改用「即期買入」匯率，與銀行對帳單一致
+
+**需求**：管理資產信託基金的「現值」與華南銀行對帳單不同。實機 24B2（施羅德環球收息債券 南非幣避險，ZAR 計價）：系統現值 61,184，銀行 ≈ 59,746。
+
+**根因**：外幣基金台幣現值 = `units × NAV(外幣) × fxRate`，而 `fxRate` 取**中間價**（`ExchangeRateHistory.getMidRate`）。實機 ZAR 06-19 即期買入 1.8700 / 即期賣出 1.9600 → 中間價 1.915；系統用 1.915。但銀行對帳單「參考現值」用**即期買入**（贖回時銀行向你買回外幣的價）= 1.8700 → 24.57 × 1300.3575 × 1.8700 ≈ 59,746。中間價高估。NAV 1300.3575（06-17）為境外基金 FUNDCLEAR 可得最新（2-3 天 lag，非 bug）。經使用者確認銀行值 = 即期買入口徑。
+
+**設計**：外幣基金台幣估值（現值 + 預估年配息）一律改用**即期買入**而非中間價，與銀行對帳單同口徑：
+- `ExchangeRateHistory` 新增 `getFundValuationRate()` = `buyRate`（缺漏 fallback `getMidRate`）。
+- `FundNavService.getNavTwdOnDate`：`fxRate = fx.getFundValuationRate()`（原 `getMidRate`）。
+- `FundDividendService`：年配息台幣估算同步改用 `getFundValuationRate()`，與現值同口徑。
+- 套用所有外幣基金（USD/EUR/ZAR…）；TWD 基金 fxRate=1 不受影響。USD 股票仍用 snapshot `usdExchangeRate`（券商口徑，非本任務範圍）。
+
+#### Steps:
+
+- [x] 112.1 `ExchangeRateHistory.getFundValuationRate()`（即期買入，fallback mid）
+- [x] 112.2 `FundNavService` 現值改 `getFundValuationRate()`
+- [x] 112.3 `FundDividendService` 配息估算改 `getFundValuationRate()`
+- [x] 112.4 spec：`requirements.md` Req 19/21、`tasks.md` 本任務
+- [ ] 112.5 Docker 重 build + recreate（business-services）後驗證：24B2 現值 61,184 → ≈ 59,746（== units × NAV × 即期買入 1.8700）；navHint 顯示之匯率與現值同源；TWD 基金不變
+
