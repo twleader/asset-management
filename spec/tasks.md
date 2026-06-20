@@ -716,7 +716,7 @@
   - `0000` + `台股` 跳過；`0000` + `美股` 直接拒絕
   - 目的：阻止使用者把錯誤代號（如把 2500 標成「台積電」）寫入 `stock` 主檔造成觀察清單顯示「2500 台積電」但所有報價欄位皆為 —
 
-- [ ] 21.4 觸發歷史紀錄（對應 Requirement 16 新增條目）
+- [x] 21.4 觸發歷史紀錄（對應 Requirement 16 新增條目）（已隨 Task 83/93 系列整合落地：`stock_alert_trigger` 表、`StockAlertTrigger` entity/repo、`StockAlertService.recordTrigger()` 實際 INSERT）
   - Liquibase `v1.11.0-stock-alert-trigger.sql`：建立 `stock_alert_trigger` 表，欄位 `id` / `alert_id` (FK CASCADE) / `stock_code` / `market` / `triggered_at` / `price` / `monthly_ma` / `quarterly_ma` / `annual_ma` / `k_value` / `d_value` / `created_at`，以 `(alert_id, triggered_at DESC)` 與 `(created_at)` 各一個索引
   - 後端：新增 `StockAlertTrigger` 實體 + Repository
   - `TechnicalIndicatorService` 擴充：新增 `computeAll(code, market)` 一次回 MA20 / MA60 / MA240 / K / D（保留舊 `compute()` 簽名以相容 WatchStockService）
