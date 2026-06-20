@@ -56,6 +56,7 @@ com.steven.assets/
 - 設計原則：**一個前端頁面對應一個 BFF controller**；前端只 render，aggregation 與計算（profit / profitRate / 買入均價 / 收盤價對齊等）一律由 BFF 預先處理
 - `SnapshotEnricher`（共用工具，`bff/.../common`）：注入 investmentCostOriginal、抓快照基準日歷史收盤價、依 stockCode + market 合併 broker rows 為 mergedStocks（含 stockPrice、unitPriceTwd、profit、profitRate、avgCostOriginal）。各 BFF controller 一律走此工具，確保「同義欄位 = 同一邏輯」
   - `buildMergedStocks(..., revalueFromClose)`：`revalueFromClose=true` 時以 `closeMap`（與 `stockPrice` 欄同源的 `stock_price_history` 收盤價）重算 `currentValue = 股數 × 收盤價 ×（美股/英股）匯率` 並連動 `estimatedDividend / profit / profitRate / unitPriceTwd`，使「現值 = 股價 × 股數」自洽。**唯讀的 Dashboard 一律傳 true**（4 個 call site：summary / snapshot / tw-stock-lookthrough / us-stock-lookthrough），避免現值沿用快照建檔暫定價、股價欄改讀較新收盤造成台股總值偏差。**會存檔的編輯頁（SnapshotForm / SnapshotDetail）傳 false（3-arg overload 預設）**，維持快照凍結值供 broker row 以 `unitPriceTwd` 反推 `currentValue` 存檔，避免一存檔就把歷史快照改寫成收盤價
+- `LiveAssetsOverlay`（共用工具，`bff/.../common`）：`applyToLatest(history, live)` —— 若資產歷史最新一筆 `snapshotDate == live.snapshotDate`，就以 `/api/market-data/live-assets`（休市時 fallback 至 Redis 最後收盤價）就地覆蓋該筆的 `totalTwStockValue / totalUsStockValue / totalUkStockValue / totalStockValue / totalAssets` 並連動 `investmentRate / increase / increaseRate`。`DashboardBffController.summary` 與 `AssetHistoryBffController` 兩支 BFF 皆呼叫此工具，確保兩頁 `history` 最新列「同義欄位 = 同一 business service 同一算法 = 同值」。**禁止任一頁直接吐快照凍結的聚合 `asset_snapshot.total_*`** —— 該聚合會與較新收盤脫鉤（見 Task 109）
 - `DashboardBffController`（DashboardView 專屬）：
   - `GET /api/bff/dashboard/summary`：並行聚合 snapshots / history / prices / marketStatus / latestSnapshotDetail + mergedStocks
   - `GET /api/bff/dashboard/snapshot/{id}`：切換快照時用
@@ -677,6 +678,8 @@ GET    /api/bff/dashboard/realtime                  # 2 分鐘輪詢用：最新
 > - **per-market 判斷一律由 BFF 完成**（`SnapshotEnricher.mergePerMarketPrices`），前端禁止重做 basedate / 市場開盤判斷。BFF 把判斷結果編碼在 response：`stockPrices[].priceChange != null` 即代表該檔為 live；`priceChange == null` 即為 frozen 快照價。前端 `getRealtimePrice()` 只能依此 flag 決定 render，避免「同義欄位、不同邏輯」造成 Dashboard 與 SnapshotForm 兩頁顯示不一致。
 >
 > KPI「資產總計」一致性：Dashboard `liveLatest.totalAssets` 一律優先採用 `liveAssets.liveTotalAssets`（來自 `/api/market-data/live-assets`），與「歷年資產管理」今日列共用同一支 business-service API。即使盤後 Redis cache 最終過期（24 小時 TTL），`PriceQueryService.getLive()` 會 fallback 至 `stock_price_history` 最近一筆收盤價，確保兩頁永遠顯示同一個總資產數字。**禁止前端再加「市場開盤」閘門**；basedate 是否==今日由 BFF 與 `liveAssets.snapshotDate` 比對結果決定即可。
+>
+> **此一致性必須涵蓋「全市場皆非交易日今日」（週末／隔日／歷史快照）**：`liveLatest` 在 `!twLive && !usLive && !ukLive` 分支**不得直接 `return s`（快照凍結值）**，須改走 `overlayLatestFromLiveAssets(s)` 以 `liveAssets` 覆蓋股票現值與資產總計，與盤中分支同一口徑。否則 Task 108 的 `revalueFromClose` 在快照當天有效、隔天即被凍結聚合值蓋回（Task 109 修正）。同理 `DashboardBffController.summary` 回的 `history` 最新列亦透過共用 `LiveAssetsOverlay.applyToLatest` 套 overlay，與 `/api/bff/asset-history` 最新列同值。
 >
 > 儀表板基準日切換行為：
 > - 2 分鐘輪詢 `refreshPricesAndStatus()` 只刷新 `stockPrices` / `marketStatus` / `liveAssets`（呼叫 `bffApi.dashboard.realtime()`），**不得重抓 dashboard summary** 以免覆蓋使用者選擇的快照。

@@ -1123,13 +1123,44 @@ function overlayLivePrice(row) {
  * 台股 / 美股 小計以 customTableData × overlay 重算。
  * 「預估配息」一律讀 snapshot 凍結值 s.estimatedAnnualDividend（含基金），不前端重算 — 與歷年資產管理同源。
  */
+/** 全市場非交易日今日（含週末／隔日）時：以 liveAssets（= /api/market-data/live-assets，
+ *  與「歷年資產管理」同一支 business service）覆蓋最新快照的股票現值與資產總計，確保兩頁
+ *  「同義欄位同源」。休市時後端會 fallback 至 Redis 最後一筆收盤價；liveAssets 不存在或非
+ *  同一筆快照時 fallback 回快照儲存值（避免無資料時顯示 0）。
+ *  ── 不可直接 return 快照凍結的 totalAssets：asset_snapshot 的聚合 total 會與較新收盤脫鉤而偏差。 */
+function overlayLatestFromLiveAssets(s) {
+  const live = liveAssets.value
+  if (!live || live.snapshotDate !== s.snapshotDate || live.liveTotalAssets == null) return s
+  let tw = 0, us = 0, uk = 0
+  for (const x of (live.stocks ?? [])) {
+    const v = Number(x.liveValue || 0)
+    if (x.market === '台股') tw += v
+    else if (x.market === '美股') us += v
+    else if (x.market === '英股') uk += v
+  }
+  const totalStockValue = live.liveStockValue != null ? Number(live.liveStockValue) : tw + us + uk
+  const totalStockCost = Number(s.totalStockCost || 0)
+  return {
+    ...s,
+    totalTwStockValue: tw,
+    totalUsStockValue: us,
+    totalUkStockValue: uk,
+    totalStockValue,
+    totalStockCost,
+    stockProfit: totalStockValue - totalStockCost,
+    totalAssets: Number(live.liveTotalAssets)
+  }
+}
+
 const liveLatest = computed(() => {
   const s = latest.value
   if (!s) return null
   const twLive = shouldApplyLive('台股')
   const usLive = shouldApplyLive('美股')
   const ukLive = shouldApplyLive('英股')
-  if (!twLive && !usLive && !ukLive) return s
+  // 全市場非交易日今日：改用 liveAssets 覆蓋（與「歷年資產管理」同一支 business service），
+  // 不再直接吐快照凍結的聚合值，避免台股總值偏差、兩頁不一致。
+  if (!twLive && !usLive && !ukLive) return overlayLatestFromLiveAssets(s)
 
   const tw = customTableData['台股'] ?? []
   const us = customTableData['美股'] ?? []

@@ -1,5 +1,6 @@
 package com.steven.assets.bff.dashboard;
 
+import com.steven.assets.bff.common.LiveAssetsOverlay;
 import com.steven.assets.bff.common.SnapshotEnricher;
 import com.steven.assets.bff.dashboard.dto.DashboardSummaryDto;
 import com.steven.assets.bff.dashboard.dto.TwStockLookthroughDto;
@@ -89,6 +90,10 @@ public class DashboardBffController {
                     List<Map<String, Object>> prices = tuple.getT3();
                     Map<String, Object> marketStatus = tuple.getT4();
                     Map<String, Object> liveAssets = tuple.getT5();
+
+                    // 最新一筆 history 以 live-assets（休市時為最後收盤價）覆蓋股票現值與資產總計，
+                    // 與「歷年資產管理」共用同一支 LiveAssetsOverlay → 兩頁 history 同義欄位同值。
+                    LiveAssetsOverlay.applyToLatest(history, liveAssets);
 
                     DashboardSummaryDto dto = new DashboardSummaryDto();
                     dto.setSnapshots(snapshots);

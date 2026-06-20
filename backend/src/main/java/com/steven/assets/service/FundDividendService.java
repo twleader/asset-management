@@ -69,7 +69,8 @@ public class FundDividendService {
                 log.warn("找不到 {} 匯率（basedate={}），無法計算 {} 年配息估算", cur, basedate, fundCode);
                 return Optional.empty();
             }
-            fxRate = fx.getMidRate();
+            // 配息台幣估算同樣用「即期買入」，與現值同口徑、與銀行對帳單一致（spec Task 112）。
+            fxRate = fx.getFundValuationRate();
         }
         BigDecimal annualPerUnitTwd = annualPerUnit.multiply(fxRate);
         return Optional.of(new AnnualDividendEstimate(

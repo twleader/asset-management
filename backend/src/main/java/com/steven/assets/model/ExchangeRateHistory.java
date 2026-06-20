@@ -51,4 +51,14 @@ public class ExchangeRateHistory {
         if (buyRate != null) return buyRate;
         return sellRate;
     }
+
+    /**
+     * 外幣基金台幣估值匯率 = 即期買入（銀行買入外幣的價）。
+     * 與銀行對帳單的「參考現值 / 配息」口徑一致：贖回 / 領息時銀行向你買回外幣，套用買入價。
+     * 不可用中間價（會高估）。buyRate 缺漏才 fallback midRate（雙保險）。
+     */
+    @Transient
+    public BigDecimal getFundValuationRate() {
+        return buyRate != null ? buyRate : getMidRate();
+    }
 }

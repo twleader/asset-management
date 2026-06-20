@@ -175,6 +175,73 @@ public class PriceCacheWriter {
         }
     }
 
+    /**
+     * 休市同步：以 DB（stock_price_history）最近一筆收盤覆寫 Redis live cache，確保
+     * 「Redis 收盤 == DB 收盤」（FinMind 權威值），不被盤外 / 國定假日的手動刷新（refreshAll）
+     * 或啟動 warmup 重抓到的 last-tick 蓋掉。
+     *
+     * 背景：FinMind 盤後校正（{@code writeVerifiedClose}）已把官方收盤寫進 Redis，但隨後若有
+     * closed-market 的外部重抓走 {@link #write}（無條件 set），會把權威收盤蓋成 last-tick
+     *（例：美股 Juneteenth 06-19 休市，前端 /realtime 觸發 refreshAll 把 06-18 的 688.11 寫回，
+     * 蓋掉 FinMind 的 689.20）。本方法改以 DB 收盤回寫，根治 Redis↔DB 不同步。
+     *
+     * 沿用既有 Redis JSON 的 previousClose / stockName / ohlc / volume 以維持顯示；無既有值則寫最小 payload。
+     */
+    public void syncClosedFromDb(String code, String market, BigDecimal dbClose) {
+        if (dbClose == null) return;
+        String key = "price:" + market + ":" + code;
+        String indexKey = "price:index:" + market;
+
+        BigDecimal previousClose = null, openPrice = null, highPrice = null, lowPrice = null;
+        Long volume = null;
+        String stockName = null;
+        String existing = redis.opsForValue().get(key);
+        if (existing != null) {
+            try {
+                JsonNode node = MAPPER.readTree(existing);
+                if (node.hasNonNull("previousClose")) previousClose = new BigDecimal(node.get("previousClose").asText());
+                if (node.hasNonNull("openPrice"))     openPrice     = new BigDecimal(node.get("openPrice").asText());
+                if (node.hasNonNull("highPrice"))     highPrice     = new BigDecimal(node.get("highPrice").asText());
+                if (node.hasNonNull("lowPrice"))      lowPrice      = new BigDecimal(node.get("lowPrice").asText());
+                if (node.hasNonNull("volume"))        volume        = node.get("volume").asLong();
+                if (node.hasNonNull("stockName"))     stockName     = node.get("stockName").asText();
+            } catch (Exception ignore) { /* 既有值壞掉就只寫 DB close */ }
+        }
+
+        LocalDate tradingDate = source.findMaxTradingDate(code, market)
+                .orElseGet(() -> LocalDate.now(
+                        "美股".equals(market) ? MarketClock.US_ZONE
+                        : "英股".equals(market) ? MarketClock.LON_ZONE
+                        : MarketClock.TW_ZONE));
+
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("stockCode", code);
+        payload.put("market", market);
+        payload.put("price", dbClose);
+        payload.put("previousClose", previousClose);
+        payload.put("priceChange", changeOrNull(dbClose, previousClose, null));
+        payload.put("changePercent", changePctOrNull(dbClose, previousClose, null));
+        payload.put("openPrice", openPrice);
+        payload.put("highPrice", highPrice);
+        payload.put("lowPrice", lowPrice);
+        payload.put("volume", volume);
+        payload.put("stockName", stockName);
+        payload.put("source", "DB-close");
+        payload.put("tradingDate", tradingDate.toString());
+        payload.put("updatedAt", LocalDateTime.now().toString());
+        payload.put("closed", true);
+
+        try {
+            String json = MAPPER.writeValueAsString(payload);
+            redis.opsForValue().set(key, json, LIVE_TTL);
+            redis.opsForSet().add(indexKey, code);
+            redis.expire(indexKey, LIVE_TTL);
+            redis.convertAndSend("price-update", json);
+        } catch (Exception e) {
+            log.warn("休市 DB→Redis 同步失敗 {} {}: {}", market, code, e.getMessage());
+        }
+    }
+
     private static BigDecimal mergeHigh(BigDecimal ext, BigDecimal agg) {
         if (ext == null) return agg;
         if (agg == null) return ext;
