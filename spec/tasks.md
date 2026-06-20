@@ -3030,3 +3030,31 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 115.9 移除雙層圓餅 legend；外圈股票/債券子分類 hover 列出底下個別持股與金額：新增 `GET /api/snapshots/{id}/holdings-classified`（業務層逐持股分類）+ BFF `holdings-classified/{id}` passthrough + 前端 lazy 載入群組桶 + tooltip formatter
 - [ ] 115.8 Docker 重 build + recreate（business-services + bff + frontend）後驗證：`bondShort+bondMid+bondLong == bondValue`（凍結快照）；00679B→長、00695B/00697B→中、00719B→短、SGOV→短、00751B→中（可 override）；bond-term override round-trip；`v1.30.0` Liquibase 成功、`bond_term` seed 3 筆。**待使用者瀏覽器目視**：外層三色系深淺、債券拆短中長三段、設定頁債券列期別下拉
 
+### Task 116: 高收益/收益債基金分類修正 + 基金 asset_class 人工微調（Requirement 25）
+
+**需求**：使用者回報「現金/債券/股票」圖中高收益債基金（如「富達亞洲高收益(月配)」「聯博美國收益基金AA級別」）被誤歸股票（成長型）。根因：`classifyFund` 只認名稱含「債/bond」，高收益債／收益型債券基金名稱多不帶「債」字。使用者拍板：① 債券關鍵字加「高收益」「收益」（**不含**「入息」「股息」——那是高股息股票型基金）；② 補上基金 `asset_class` 逐檔 override（與個股一致，沿用同一設定頁與 `securities/asset-class` 端點），讓規則漏網的邊界基金可人工修正。基金 `stock_style`／`bond_term` 子分類仍依規則、不在本次範圍。
+
+**設計**：見 `design.md`「AssetClass 實體」「Settings - securities 端點」「現金／債券／股票 三分類計算（classifyFund override + 關鍵字）」。
+
+- [x] 116.1 後端 `AssetClassifier.classifyFund`：bond 關鍵字加「收益」（涵蓋「高收益」）；保留 override 優先（已具參數，原呼叫端寫死 null）
+- [x] 116.2 DB：`v1.31.0-fund-asset-class.sql` — 建 `fund_class_override(fund_name PK, asset_class)` 表（基金 `fund_code` 多為 NULL、以名稱識別，不掛 `fund_master`）；掛 master changelog
+- [x] 116.3 後端 entity/repo：`FundClassOverride`（fundName PK）+ `FundClassOverrideRepository`；`FundHoldingRepository.findDistinctFundNames()`
+- [x] 116.4 後端 `AssetService`：注入 `FundClassOverrideRepository`；`getAssetHistory()` 與 `getHoldingsClassified()` 一次查 `fundClassOverrideRepo.findAll()` 建 `Map<fundName, assetClass>`，兩處 `classifyFund` 改傳該 override（key=fundName）
+- [x] 116.5 後端 `InstitutionService`：注入 `FundHoldingRepository`+`FundClassOverrideRepository`；`getAllSecurities()` 合併基金列（fund_holding 去重名稱，市場=基金、code=名稱，effective 由 classifyFund/規則算、子分類唯讀）；`setSecurityAssetClass()` 依 `market==基金` 分流 upsert/刪 `fund_class_override`；新增 `toFundSecurityResponse(name, override)`
+- [x] 116.6 前端 `AssetClassSettingsView`：基金列（`market==='基金'`）「指定細分」改唯讀「依規則」、僅「指定類別」可編；alert 文案補基金規則
+- [x] 116.7 Docker 重 build + recreate（business-services + frontend）後驗證（API 層）：securities 列出實際持有 14 檔基金；富達亞洲高收益/聯博美國收益基金 → 債券（中期）、入息/股息/成長/增長基金維持股票（成長型）；override round-trip（富達歐洲入息設 BOND→OVERRIDE、清除→回 STOCK/RULE）；`v1.31.0-fund-class-override` Liquibase 成功（rows affected 1）、business-services healthy；8 筆快照三分類/風格/期別加總不變式 7 筆全 0、最新列三分類 diff 1571 為既有 live-overlay 漂移（風格/期別仍 0）；2020-05-20 bond 693,621（含兩檔高收益債）。**待使用者瀏覽器目視**：圖中高收益債歸債券、設定頁基金列（實際持股）可改類別
+
+### Task 117: 基金 stock_style／bond_term 逐檔 override（成長/收益型、短/中/長期）（Requirement 26/27）
+
+**需求**：使用者要求基金也能像個股一樣逐檔指定「成長型／收益型」（並對稱補上 BOND 基金「短/中/長期」），達成基金細分與個股完全 parity。延伸 Task 116 的 `fund_class_override`：擴成三個 nullable override 欄（asset_class/stock_style/bond_term，key=fund_name），與 `stock` 主檔三欄結構平行。基金無 `dividendRate`，故 STOCK 風格自動成長型、override 可改收益型；BOND 期別自動依名稱、override 可改。
+
+**設計**：見 `design.md`「AssetClass 實體（fund_class_override 三欄）」「Settings - securities/{stock-style,bond-term} 端點」「三分類計算（基金沿用 classifyStockStyle/classifyBondTerm）」。
+
+- [x] 117.1 DB：`v1.32.0-fund-override-style-term.sql` — `fund_class_override.asset_class` 改 nullable + 加 `stock_style`/`bond_term VARCHAR(20)`；掛 master changelog（不改既跑的 v1.31.0）
+- [x] 117.2 後端 entity：`FundClassOverride` `assetClass` 改 nullable + 加 `stockStyle`/`bondTerm` 欄
+- [x] 117.3 後端 `AssetService`（`getAssetHistory`+`getHoldingsClassified`）：fund override 三 Map（class/style/term）；STOCK 基金風格用 `classifyStockStyle(null,null,styleOv,null,門檻)`、BOND 基金期別 `classifyBondTerm(null,null,name,termOv)`
+- [x] 117.4 後端 `InstitutionService`：三個 `setSecurity*` 皆 validate-first 再依 `market==基金` 分流 load-or-new + set 欄 + prune-if-empty（全清則 deleteById）；`getAllSecurities` 建 `Map<name,FundClassOverride>`；`toFundSecurityResponse(name, class, style, term)` 回 effective/source（與 stock 一致）
+- [x] 117.5 前端 `AssetClassSettingsView`：移除基金列「指定細分」唯讀特例，基金與個股共用 style/term 下拉（基金 style「自動」標示為「自動（成長型）」）；alert 文案更新
+- [x] 117.6 Docker 重 build + recreate（business-services + frontend）後驗證（API 層）：基金 stock_style round-trip（霸菱亞洲增長 設 INCOME→OVERRIDE/收益型、清除→回 GROWTH/RULE）；bond_term round-trip（富達亞洲高收益 設 LONG→OVERRIDE、清除→回 MID/RULE）；套 override 後 `growthValue+incomeValue==stockValue`、`bondShort+Mid+Long==bondValue` 8/8 全 0；prune-if-empty 正確（每次還原後 `fund_class_override` 列數回 0）；`v1.32.0-fund-override-style-term` Liquibase 成功、business-services healthy、前端 chunk 更新。**待使用者瀏覽器目視**：設定頁基金列可選成長/收益型（與債券基金可選短中長）、圖外圈反映
+- [x] 117.7 對抗式審查 workflow（10 agents：migration/backend/frontend/spec 四面向 + 對抗式驗證）：6 findings→3 confirmed 全為 spec/註解文件不一致（無功能性 bug；CASH override 誤導、migration 冪等、checksum drift 三項被駁回）。已修：requirements.md 第 569/571 行（移除「指定細分唯讀/不在本次範圍」舊敘述、單欄 schema 更正為三欄）、design.md classifyFund 虛擬碼與 AssetClassifier javadoc 的 `fund_master.asset_class`→`fund_class_override.asset_class`
+

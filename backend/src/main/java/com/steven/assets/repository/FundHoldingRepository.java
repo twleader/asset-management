@@ -13,6 +13,10 @@ public interface FundHoldingRepository extends JpaRepository<FundHolding, Long> 
 
     List<FundHolding> findBySnapshotId(Long snapshotId);
 
+    /** 所有持有過的基金名稱（去重、排序）——供「資產類別歸類」設定頁列出可 override 的基金。 */
+    @Query("SELECT DISTINCT f.fundName FROM FundHolding f WHERE f.fundName IS NOT NULL ORDER BY f.fundName")
+    List<String> findDistinctFundNames();
+
     @Query("SELECT SUM(f.currentValue) FROM FundHolding f WHERE f.snapshot.id = :snapshotId")
     BigDecimal sumCurrentValueBySnapshotId(Long snapshotId);
 

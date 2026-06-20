@@ -37,6 +37,7 @@ public class AssetService {
     private final FundDividendService fundDividendService;
     private final AssetClassifier assetClassifier;
     private final StockStyleRepository stockStyleRepo;
+    private final FundClassOverrideRepository fundClassOverrideRepo;
 
     /**
      * 算 FundHolding currentValue：若 units 非空 → 嘗試 NAV(basedate) × FX(basedate) 自動算
@@ -396,6 +397,11 @@ public class AssetService {
                 bondTermOverride.put(key, sm.getBondTerm());
             }
         }
+        // Requirement 25/26/27：一次載入基金分類 override（以名稱為 key），建 Map<fundName, FundClassOverride>
+        java.util.Map<String, FundClassOverride> fundOverride = new java.util.HashMap<>();
+        for (FundClassOverride fo : fundClassOverrideRepo.findAll()) {
+            fundOverride.put(fo.getFundName(), fo);
+        }
         // Requirement 26：收益型殖利率門檻（stock_style INCOME 列，可設定；缺則 classifier 內 fallback 4%）
         BigDecimal incomeThreshold = stockStyleRepo.findByCode(AssetClassifier.INCOME)
                 .map(StockStyle::getDividendThreshold).orElse(null);
@@ -453,19 +459,26 @@ public class AssetService {
                     else growthValue = growthValue.add(val);
                 }
             }
-            // 基金：依名稱規則分類（v1 無逐檔 override）；債券基金再依名稱分期別，非債券基金一律歸成長型
+            // 基金：override 優先（asset_class/stock_style/bond_term 皆可逐檔指定，key=名稱），否則依規則。
+            // 基金無 dividendRate，故 STOCK 風格自動成長型、override 可改收益型；BOND 期別自動依名稱、override 可改。
             for (FundHolding fh : s.getFunds()) {
                 BigDecimal val = fh.getCurrentValue() != null ? fh.getCurrentValue() : BigDecimal.ZERO;
-                if (AssetClassifier.BOND.equals(assetClassifier.classifyFund(fh.getFundName(), null))) {
+                String fname = fh.getFundName();
+                FundClassOverride ov = fundOverride.get(fname);
+                if (AssetClassifier.BOND.equals(
+                        assetClassifier.classifyFund(fname, ov != null ? ov.getAssetClass() : null))) {
                     bondValue = bondValue.add(val);
                     String term = assetClassifier.classifyBondTerm(
-                            fh.getFundCode(), null, fh.getFundName(), null);
+                            null, null, fname, ov != null ? ov.getBondTerm() : null);
                     if (AssetClassifier.SHORT.equals(term)) bondShortValue = bondShortValue.add(val);
                     else if (AssetClassifier.LONG.equals(term)) bondLongValue = bondLongValue.add(val);
                     else bondMidValue = bondMidValue.add(val);
                 } else {
                     stockEquityValue = stockEquityValue.add(val);
-                    growthValue = growthValue.add(val);
+                    String style = assetClassifier.classifyStockStyle(
+                            null, null, ov != null ? ov.getStockStyle() : null, null, incomeThreshold);
+                    if (AssetClassifier.INCOME.equals(style)) incomeValue = incomeValue.add(val);
+                    else growthValue = growthValue.add(val);
                 }
             }
 
@@ -528,6 +541,11 @@ public class AssetService {
             if (sm.getStockStyle() != null && !sm.getStockStyle().isBlank()) styleOv.put(key, sm.getStockStyle());
             if (sm.getBondTerm() != null && !sm.getBondTerm().isBlank()) termOv.put(key, sm.getBondTerm());
         }
+        // Requirement 25/26/27：基金分類 override（以名稱為 key，Map<fundName, FundClassOverride>）
+        java.util.Map<String, FundClassOverride> fundOv = new java.util.HashMap<>();
+        for (FundClassOverride fo : fundClassOverrideRepo.findAll()) {
+            fundOv.put(fo.getFundName(), fo);
+        }
         BigDecimal incomeThreshold = stockStyleRepo.findByCode(AssetClassifier.INCOME)
                 .map(StockStyle::getDividendThreshold).orElse(null);
 
@@ -547,15 +565,19 @@ public class AssetService {
                     st.getCurrentValue(), cls, style, term));
         }
         for (FundHolding fh : s.getFunds()) {
-            String cls = assetClassifier.classifyFund(fh.getFundName(), null);
+            String fname = fh.getFundName();
+            FundClassOverride ov = fundOv.get(fname);
+            String cls = assetClassifier.classifyFund(fname, ov != null ? ov.getAssetClass() : null);
             String style = null, term = null;
             if (AssetClassifier.BOND.equals(cls)) {
-                term = assetClassifier.classifyBondTerm(fh.getFundCode(), null, fh.getFundName(), null);
+                term = assetClassifier.classifyBondTerm(null, null, fname, ov != null ? ov.getBondTerm() : null);
             } else {
-                style = AssetClassifier.GROWTH;  // 非債券基金一律歸成長型（同 getAssetHistory）
+                // 基金無 dividendRate：override 或成長型（與 getAssetHistory 一致）
+                style = assetClassifier.classifyStockStyle(
+                        null, null, ov != null ? ov.getStockStyle() : null, null, incomeThreshold);
             }
             result.add(new AssetSnapshotDto.HoldingClassifiedResponse(
-                    fh.getFundCode(), fh.getFundName(), "基金", fh.getCurrentValue(), cls, style, term));
+                    fh.getFundCode(), fname, "基金", fh.getCurrentValue(), cls, style, term));
         }
         return result;
     }
