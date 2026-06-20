@@ -1340,17 +1340,26 @@ const stockBarOption = computed(() => {
   return {
     tooltip: {
       trigger: 'axis',
+      confine: true,
       formatter: (p) => {
         const s = p[0]?.data?.stock
         if (!s) return ''
         const value = Number(s.currentValue || 0)
         const cost = Number(s.investmentCost || 0)
+        const shares = Number(s.shares || 0)
+        const price = Number(s.stockPrice || 0)
+        const avgCost = Number(s.avgCostOriginal || 0)
         const profit = value - cost
         const rate = cost > 0 ? (profit / cost * 100).toFixed(2) : '0.00'
         const color = profit >= 0 ? '#16a34a' : '#dc2626'
         const fmt = n => `$${Math.round(n).toLocaleString()}`
+        const fmtShares = n => n.toLocaleString('zh-TW', { maximumFractionDigits: 4 })
+        const fmtPrice = n => `$${n.toLocaleString('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
         const title = s.stockName ? `${s.stockCode} ${s.stockName}` : s.stockCode
         return `<b>${title}</b><br/>`
+          + `持股：${fmtShares(shares)}<br/>`
+          + `股價：${fmtPrice(price)}<br/>`
+          + `均價：${fmtPrice(avgCost)}<br/>`
           + `現值：${fmt(value)}<br/>`
           + `成本：${fmt(cost)}<br/>`
           + `損益：<span style="color:${color}">${fmt(profit)} (${rate}%)</span>`
