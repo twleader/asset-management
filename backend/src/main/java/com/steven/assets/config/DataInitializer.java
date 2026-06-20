@@ -1,5 +1,8 @@
 package com.steven.assets.config;
 
+import com.steven.assets.model.AssetClass;
+import com.steven.assets.model.StockStyle;
+import com.steven.assets.model.BondTerm;
 import com.steven.assets.model.Bank;
 import com.steven.assets.model.BrokerEntity;
 import com.steven.assets.model.DepositTypeEntity;
@@ -7,6 +10,9 @@ import com.steven.assets.model.FundMaster;
 import com.steven.assets.model.MarketType;
 import com.steven.assets.model.PaymentCategory;
 import com.steven.assets.model.TransitFundType;
+import com.steven.assets.repository.AssetClassRepository;
+import com.steven.assets.repository.StockStyleRepository;
+import com.steven.assets.repository.BondTermRepository;
 import com.steven.assets.repository.BankRepository;
 import com.steven.assets.repository.BrokerRepository;
 import com.steven.assets.repository.DepositTypeRepository;
@@ -39,6 +45,9 @@ public class DataInitializer implements ApplicationRunner {
     private final TransitFundTypeRepository transitFundTypeRepo;
     private final FundMasterRepository fundMasterRepo;
     private final PaymentCategoryRepository paymentCategoryRepo;
+    private final AssetClassRepository assetClassRepo;
+    private final StockStyleRepository stockStyleRepo;
+    private final BondTermRepository bondTermRepo;
 
     @Override
     @Transactional
@@ -50,6 +59,75 @@ public class DataInitializer implements ApplicationRunner {
         seedTransitFundTypes();
         seedFundMasters();
         seedPaymentCategories();
+        seedAssetClasses();
+        seedStockStyles();
+        seedBondTerms();
+    }
+
+    private void seedBondTerms() {
+        record BondTermSeed(String code, String displayName, int sortOrder) {}
+
+        List<BondTermSeed> seeds = List.of(
+            new BondTermSeed("SHORT", "短期", 1),
+            new BondTermSeed("MID",   "中期", 2),
+            new BondTermSeed("LONG",  "長期", 3)
+        );
+
+        for (BondTermSeed s : seeds) {
+            if (bondTermRepo.findByCode(s.code()).isEmpty()) {
+                bondTermRepo.save(BondTerm.builder()
+                        .code(s.code())
+                        .displayName(s.displayName())
+                        .sortOrder(s.sortOrder())
+                        .active(true)
+                        .build());
+                log.info("初始化債券期別: {}", s.displayName());
+            }
+        }
+    }
+
+    private void seedStockStyles() {
+        record StockStyleSeed(String code, String displayName, int sortOrder, java.math.BigDecimal threshold) {}
+
+        List<StockStyleSeed> seeds = List.of(
+            new StockStyleSeed("GROWTH", "成長型", 1, null),
+            new StockStyleSeed("INCOME", "收益型", 2, new java.math.BigDecimal("0.0400"))
+        );
+
+        for (StockStyleSeed s : seeds) {
+            if (stockStyleRepo.findByCode(s.code()).isEmpty()) {
+                stockStyleRepo.save(StockStyle.builder()
+                        .code(s.code())
+                        .displayName(s.displayName())
+                        .sortOrder(s.sortOrder())
+                        .active(true)
+                        .dividendThreshold(s.threshold())
+                        .build());
+                log.info("初始化股票風格: {}", s.displayName());
+            }
+        }
+    }
+
+    private void seedAssetClasses() {
+        record AssetClassSeed(String code, String displayName, int sortOrder) {}
+
+        List<AssetClassSeed> seeds = List.of(
+            new AssetClassSeed("CASH",  "現金", 1),
+            new AssetClassSeed("BOND",  "債券", 2),
+            new AssetClassSeed("STOCK", "股票", 3)
+        );
+
+        for (AssetClassSeed s : seeds) {
+            if (assetClassRepo.findByCode(s.code()).isEmpty()) {
+                assetClassRepo.save(AssetClass.builder()
+                        .code(s.code())
+                        .displayName(s.displayName())
+                        .sortOrder(s.sortOrder())
+                        .active(true)
+                        .build());
+                log.info("初始化資產類別: {}", s.displayName());
+            }
+        }
     }
 
     private void seedBanks() {

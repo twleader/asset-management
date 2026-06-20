@@ -76,7 +76,9 @@ export const bffApi = {
     twStockLookthrough: (snapshotId) =>
       api.get(`/bff/dashboard/tw-stock-lookthrough/${snapshotId}`),
     usStockLookthrough: (snapshotId) =>
-      api.get(`/bff/dashboard/us-stock-lookthrough/${snapshotId}`)
+      api.get(`/bff/dashboard/us-stock-lookthrough/${snapshotId}`),
+    holdingsClassified: (snapshotId) =>
+      api.get(`/bff/dashboard/holdings-classified/${snapshotId}`)
   },
 
   // SnapshotDetail
@@ -223,6 +225,17 @@ export const bffApi = {
     create:    (data) => api.post('/bff/transit-fund-type-settings', data),
     update:    (id, data) => api.put(`/bff/transit-fund-type-settings/${id}`, data),
     setActive: (id, active) => api.patch(`/bff/transit-fund-type-settings/${id}/active`, { active })
+  },
+  // 資產類別歸類（Requirement 25/26/27）— 三分類 + 股票風格 + 債券期別下拉 + stock 主檔逐檔歸類
+  assetClassSettings: {
+    getCategories:         () => api.get('/bff/asset-class-settings/categories'),
+    getStockStyles:        () => api.get('/bff/asset-class-settings/stock-styles'),
+    updateStockStyle:      (id, data) => api.put(`/bff/asset-class-settings/stock-styles/${id}`, data),
+    getBondTerms:          () => api.get('/bff/asset-class-settings/bond-terms'),
+    getSecurities:         () => api.get('/bff/asset-class-settings/securities'),
+    setSecurityAssetClass: (data) => api.put('/bff/asset-class-settings/securities/asset-class', data),
+    setSecurityStockStyle: (data) => api.put('/bff/asset-class-settings/securities/stock-style', data),
+    setSecurityBondTerm:   (data) => api.put('/bff/asset-class-settings/securities/bond-term', data)
   },
   // 信託基金主檔（Requirement 19）— 走 FundBffRoutes 既有的 /api/funds/** passthrough
   fundSettings: {

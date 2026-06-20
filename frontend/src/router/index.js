@@ -108,6 +108,12 @@ const router = createRouter({
       meta: { title: '市場類型設定', icon: 'Setting' }
     },
     {
+      path: '/settings/asset-classes',
+      name: 'AssetClassSettings',
+      component: () => import('@/views/AssetClassSettingsView.vue'),
+      meta: { title: '資產類別歸類', icon: 'Setting' }
+    },
+    {
       path: '/settings/transit-fund-types',
       name: 'TransitFundTypeSettings',
       component: () => import('@/views/TransitFundTypeSettingsView.vue'),

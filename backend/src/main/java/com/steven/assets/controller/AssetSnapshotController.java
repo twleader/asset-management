@@ -59,6 +59,11 @@ public class AssetSnapshotController {
         return assetService.getAssetHistory();
     }
 
+    @GetMapping("/{id}/holdings-classified")
+    public List<AssetSnapshotDto.HoldingClassifiedResponse> getHoldingsClassified(@PathVariable Long id) {
+        return assetService.getHoldingsClassified(id);
+    }
+
     /**
      * PATCH /api/snapshots/{id}/stock-order
      * Body: [{"stockCode":"0050","market":"台股","displayOrder":0}, ...]

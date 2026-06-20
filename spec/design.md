@@ -394,6 +394,46 @@ BackupSetting         (備份保留代數設定，單列資料表，id = 1)
 
 > Seed 由 `DataInitializer.seedMarketTypes()` 提供 3 筆：`台股` / `美股` / `英股`（sortOrder 1/2/3）。`英股` 為 Requirement 24 加入，承載透過複委託投資的 LSE 掛牌 UCITS ETF（CSPX、VWRA 等）。
 
+#### AssetClass（Requirement 25 新增）
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| id | Long | PK |
+| code | String | 識別代碼（唯一，存入 `stock.asset_class` 與分類運算用）：`CASH` / `BOND` / `STOCK` |
+| displayName | String | 顯示名稱：`現金` / `債券` / `股票` |
+| sortOrder | Integer | 顯示排序（1/2/3） |
+| active | Boolean | 是否啟用（軟刪除用） |
+
+> Seed 由 `DataInitializer.seedAssetClasses()` 提供 3 筆。此表是「現金/債券/股票」三分類的單一事實來源（取代寫死 enum），供圓餅圖第 4 tab legend 與「資產類別歸類」設定頁下拉使用。`Stock` 主檔（`code`+`market` PK）新增 nullable 欄位 `asset_class`（值對應本表 `code`）：非空 = 人工指定、覆蓋規則；`null` = 依 `AssetClassifier` 規則自動判定。標一次即跨所有快照生效，符合正規化（per 代號存一份）。
+
+#### StockStyle（Requirement 26 新增）
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| id | Long | PK |
+| code | String | 識別代碼（唯一）：`GROWTH` / `INCOME`，存入 `stock.stock_style` |
+| displayName | String | 顯示名稱：`成長型` / `收益型` |
+| sortOrder | Integer | 顯示排序（1/2） |
+| active | Boolean | 是否啟用 |
+| dividendThreshold | BigDecimal | 殖利率門檻（DECIMAL(6,4)，nullable）：僅「收益型(INCOME)」列有值，預設 `0.0400`（= 4%）。`dividendRate >= 此值` → 收益型 |
+
+> 「成長/收益」是套在 `asset_class = STOCK` 之上的**正交第二維度**，與三分類獨立並存（一檔股票同時有 `asset_class=STOCK` 與 `stock_style=GROWTH/INCOME`）。`Stock` 主檔新增 nullable 欄位 `stock_style`（值對應本表 `code`）作為逐檔 override。門檻可調故存於 INCOME 列（不寫死），由 `/api/settings/stock-styles` 管理。
+>
+#### BondTerm（Requirement 27 新增）
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| id | Long | PK |
+| code | String | 識別代碼（唯一）：`SHORT` / `MID` / `LONG`，存入 `stock.bond_term` |
+| displayName | String | 顯示名稱：`短期` / `中期` / `長期` |
+| sortOrder | Integer | 顯示排序（1/2/3） |
+| active | Boolean | 是否啟用 |
+
+> 「短/中/長期」是套在 `asset_class = BOND` 之上的子維度。`Stock` 主檔新增 nullable 欄位 `bond_term`（值對應本表 `code`）作為逐檔 override；自動判定（`AssetClassifier.classifyBondTerm`）依標的名稱年期字樣（`20年`→長、`7-10`→中、`1-3`/`0-3 Month`→短、無資訊→中），override 優先。
+
+> **呈現（不另開 tab）**：既有「現金/債券/股票」圓餅圖（第 4 tab）為**雙層 donut**——兩個 pie series 同 `center`、半徑相接（內層 `['36%','53%']`、外層 `['53%','70%']`，各佔一半、白邊 `borderWidth:2`）。
+> - 內層（總覽，家族底色）= 現金 / 債券 / 股票。
+> - 外層（細分，同色系深淺不同）= 台幣 / 美元 ｜ 短期 / 中期 / 長期 ｜ 成長型 / 收益型：`現金 → 台幣 + 美元`（藍系）、`債券 → 短 + 中 + 長`（teal 系）、`股票 → 成長型 + 收益型`（琥珀系）。
+> - 因 `台幣+美元=現金`、`短+中+長=債券`、`成長+收益=股票`，外層與內層逐區角度對齊。資料皆來自 history（`totalTwdDeposit`/`totalUsdDeposit`/`cashValue`/`bondValue`/`stockValue`/`bondShortValue`/`bondMidValue`/`bondLongValue`/`growthValue`/`incomeValue`）。
+> - **無 legend**；外圈 hover 列持股：`GET /api/snapshots/{id}/holdings-classified`（business-services，回逐持股 `{code,name,market,currentValue,assetClass,stockStyle,bondTerm}`，與 `getAssetHistory` 同一 classifier/override/門檻）→ BFF `GET /api/bff/dashboard/holdings-classified/{id}` passthrough。前端依 effectiveSnapshotId lazy 載入、群組成桶（成長型/收益型/短/中/長期），tooltip 列出該桶持股名稱與金額。
+
 #### BankDeposit
 | 欄位 | 型別 | 說明 |
 |------|------|------|
@@ -743,6 +783,37 @@ PUT    /api/settings/transit-fund-types/{id}         # 更新
 PATCH  /api/settings/transit-fund-types/{id}/active  # 啟用/停用
 ```
 
+#### Settings - Asset Classes / Securities（Requirement 25 新增）
+```
+GET    /api/settings/asset-classes               # 列出三分類（現金/債券/股票，含停用）
+POST   /api/settings/asset-classes               # 新增資產類別
+PUT    /api/settings/asset-classes/{id}          # 更新資產類別
+PATCH  /api/settings/asset-classes/{id}/active   # 啟用/停用
+
+GET    /api/settings/securities                  # 列出 stock 主檔每檔的 {code, market, name,
+                                                 #   assetClass(override), effectiveAssetClass, source,
+                                                 #   stockStyle(override), effectiveStockStyle, styleSource}
+PUT    /api/settings/securities/asset-class      # body {code, market, assetClass|null}：設定/清除個股 asset_class override
+PUT    /api/settings/securities/stock-style      # body {code, market, stockStyle|null}：設定/清除個股 stock_style override
+PUT    /api/settings/securities/bond-term        # body {code, market, bondTerm|null}：設定/清除個股 bond_term override
+
+GET    /api/settings/stock-styles                # 列出風格（成長/收益，含 dividendThreshold）
+POST   /api/settings/stock-styles                # 新增
+PUT    /api/settings/stock-styles/{id}           # 更新（含調整收益型門檻 dividendThreshold）
+PATCH  /api/settings/stock-styles/{id}/active    # 啟用/停用
+
+GET    /api/settings/bond-terms                  # 列出債券期別（短/中/長期）
+POST   /api/settings/bond-terms                  # 新增
+PUT    /api/settings/bond-terms/{id}             # 更新
+PATCH  /api/settings/bond-terms/{id}/active      # 啟用/停用
+```
+> 前端「資產類別歸類」頁透過 BFF `AssetClassSettingsBffRoutes` passthrough：
+> `/api/bff/asset-class-settings/categories/**` → `/api/settings/asset-classes/**`、
+> `/api/bff/asset-class-settings/stock-styles/**` → `/api/settings/stock-styles/**`、
+> `/api/bff/asset-class-settings/bond-terms/**` → `/api/settings/bond-terms/**`、
+> `/api/bff/asset-class-settings/securities/**` → `/api/settings/securities/**`。
+> `effectiveStockStyle` 以**最新快照**的逐持股 `dividendRate` 套規則算出（僅 `STOCK` 者有值）；`effectiveBondTerm` 以標的名稱年期套規則算出（僅 `BOND` 者有值），override 皆優先。
+
 #### Payment Accounts / Categories（Requirement 22 新增）
 ```
 GET    /api/settings/payment-categories               # 列出所有分類（含停用）
@@ -914,6 +985,51 @@ estimatedAnnualDividend
   = Σ(stockHolding.estimatedDividend)
   + Σ(fundHolding.estimatedDividend)
   + Σ(bankDeposit.amount × bankDeposit.annualInterestRate / 100)  # 存款預估年利息（amount 已是台幣等值）
+```
+
+### 現金／債券／股票 三分類計算（Requirement 25）
+
+由 `AssetService.getAssetHistory()` 在既有逐快照迴圈內一併算出，隨 `/api/snapshots/history` 回傳（`cashValue`/`bondValue`/`stockValue`）。`AssetClassifier` 提供分類規則，個股 override 由 `stock.asset_class` 提供（一次查 `stockRepo.findAll()` 建 `Map<market|code, assetClass>`）。
+
+```
+classifyStock(code, market, override):
+  override != null            → override                       # 人工指定優先
+  market=台股 且 code 00…B     → BOND                           # 櫃買債券 ETF
+  code ∈ US_BOND_ETFS         → BOND                           # 美股/英股債券 ETF 清單
+  其餘                         → STOCK
+classifyFund(name): name 含「債」或 bond → BOND，否則 STOCK
+
+cashValue  = twdDeposit + usdDeposit                            # == 既有「台幣存款 + 美元存款」
+bondValue  = Σ(stock.currentValue  where classify=BOND)
+           + Σ(fund.currentValue   where classifyFund=BOND)
+stockValue = Σ(stock.currentValue  where classify=STOCK)
+           + Σ(fund.currentValue   where classifyFund=STOCK)
+# 不變式：cashValue + bondValue + stockValue == totalAssets（與六分類同源同總）
+```
+
+採快照凍結之逐筆 `currentValue`（不套盤中 live），巨觀資產配置毋須 intraday 精度。
+
+### 成長型／收益型 風格細分（Requirement 26）
+
+套在 `asset_class = STOCK` 之上的正交子維度，與三分類同在 `getAssetHistory()` 迴圈內算（隨 `/api/snapshots/history` 回傳 `growthValue`/`incomeValue`）。`stock_style` override 由 `stock.stock_style` 提供（一次查 `stockRepo.findAll()`）；門檻由 `stock_style` INCOME 列 `dividend_threshold` 提供（預設 0.04）。
+
+```
+classifyStockStyle(code, market, styleOverride, dividendRate, threshold):
+  styleOverride != null                       → styleOverride          # 人工指定優先
+  code ∈ HIGH_DIVIDEND_ETFS                    → INCOME                 # 高股息 ETF 清單（不受殖利率波動影響）
+  dividendRate != null 且 dividendRate ≥ threshold → INCOME
+  其餘（含 dividendRate null/0）                → GROWTH                 # 缺值 fallback 成長
+
+# 僅對「該股票經 classifyStock 判為 STOCK（非 BOND）」者再細分：
+growthValue = Σ(stock.currentValue where assetClass=STOCK 且 style=GROWTH) + Σ(非債券 fund.currentValue)
+incomeValue = Σ(stock.currentValue where assetClass=STOCK 且 style=INCOME)
+# 不變式：growthValue + incomeValue == stockValue（基金一律歸成長：無 dividendRate 欄、v1 不細分）
+
+# Requirement 27：債券再依名稱年期細分短/中/長期（classifyBondTerm，override 優先；用股票主檔名稱判定）
+bondShortValue = Σ(bond.currentValue where term=SHORT)
+bondMidValue   = Σ(bond.currentValue where term=MID)
+bondLongValue  = Σ(bond.currentValue where term=LONG)
+# 不變式：bondShortValue + bondMidValue + bondLongValue == bondValue
 ```
 
 ### Excel 匯入流程

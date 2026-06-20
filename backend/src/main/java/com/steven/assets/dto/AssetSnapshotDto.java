@@ -166,6 +166,31 @@ public class AssetSnapshotDto {
             BigDecimal increaseRate,
             BigDecimal investmentRate,
             BigDecimal estimatedAnnualDividend,
-            BigDecimal realizedGain
+            BigDecimal realizedGain,
+            // Requirement 25：現金／債券／股票 三分類（與六分類同源、加總相等）
+            BigDecimal cashValue,
+            BigDecimal bondValue,
+            BigDecimal stockValue,
+            // Requirement 26：股票細分成長型／收益型（growthValue + incomeValue == stockValue）
+            BigDecimal growthValue,
+            BigDecimal incomeValue,
+            // Requirement 27：債券細分短/中/長期（bondShortValue + bondMidValue + bondLongValue == bondValue）
+            BigDecimal bondShortValue,
+            BigDecimal bondMidValue,
+            BigDecimal bondLongValue
+    ) {}
+
+    /**
+     * 單一快照逐持股分類（供圓餅圖外圈 hover 列出該分類底下持股；Requirement 25/26/27）。
+     * stockStyle 僅 assetClass=STOCK 時有值；bondTerm 僅 assetClass=BOND 時有值。
+     */
+    public record HoldingClassifiedResponse(
+            String code,
+            String name,
+            String market,
+            BigDecimal currentValue,
+            String assetClass,
+            String stockStyle,
+            String bondTerm
     ) {}
 }
