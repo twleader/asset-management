@@ -112,12 +112,19 @@ public class AssetClassifier {
         return MID;  // 無年期資訊（如一般公司債）預設中期，可 override
     }
 
-    /** 基金有效資產類別：override 優先；否則名稱含「債」或 bond → 債券，其餘 → 股票。 */
+    /**
+     * 基金有效資產類別：override 優先；否則依名稱關鍵字判定。
+     * 名稱含「債」「bond」「收益」（涵蓋「高收益」）→ 債券——高收益債／收益型債券基金名稱
+     * 多不帶「債」字（如「富達亞洲高收益」「聯博美國收益基金」）。
+     * 「入息」「股息」屬高股息股票型基金，刻意不列為債券關鍵字，仍歸股票。
+     * 規則只是合理預設，漏網的邊界基金可在「資產類別歸類」頁逐檔 override（fund_class_override.asset_class，key=fund_name）。
+     */
     public String classifyFund(String fundName, String override) {
         if (override != null && !override.isBlank()) return override.trim().toUpperCase();
         if (fundName != null) {
             String lower = fundName.toLowerCase();
-            if (fundName.contains("債") || lower.contains("bond")) return BOND;
+            if (fundName.contains("債") || lower.contains("bond")
+                    || fundName.contains("收益")) return BOND;
         }
         return STOCK;
     }

@@ -403,7 +403,7 @@ BackupSetting         (備份保留代數設定，單列資料表，id = 1)
 | sortOrder | Integer | 顯示排序（1/2/3） |
 | active | Boolean | 是否啟用（軟刪除用） |
 
-> Seed 由 `DataInitializer.seedAssetClasses()` 提供 3 筆。此表是「現金/債券/股票」三分類的單一事實來源（取代寫死 enum），供圓餅圖第 4 tab legend 與「資產類別歸類」設定頁下拉使用。`Stock` 主檔（`code`+`market` PK）新增 nullable 欄位 `asset_class`（值對應本表 `code`）：非空 = 人工指定、覆蓋規則；`null` = 依 `AssetClassifier` 規則自動判定。標一次即跨所有快照生效，符合正規化（per 代號存一份）。
+> Seed 由 `DataInitializer.seedAssetClasses()` 提供 3 筆。此表是「現金/債券/股票」三分類的單一事實來源（取代寫死 enum），供圓餅圖第 4 tab legend 與「資產類別歸類」設定頁下拉使用。`Stock` 主檔（`code`+`market` PK）新增 nullable 欄位 `asset_class`（值對應本表 `code`）：非空 = 人工指定、覆蓋規則；`null` = 依 `AssetClassifier` 規則自動判定。基金因 `fund_holding.fund_code` 多為 NULL、以「名稱」為穩定識別，故 override 改存 `fund_class_override(fund_name PK, asset_class, stock_style, bond_term — 三欄皆 nullable)` 表（任一欄非空即建列、全清則刪列；某欄有值 = 該維度人工指定、無值 = 依規則），與 `stock` 主檔的三個 nullable override 欄結構平行。標一次即跨所有快照生效，符合正規化（per 標的/名稱存一份）。設定頁的 securities 清單合併 `stock` 主檔（市場 `台股/美股/英股`）與 `fund_holding` 去重名稱（市場標記為 `基金`、`code` 欄即名稱）；`PUT /api/settings/securities/{asset-class|stock-style|bond-term}` 皆依 `market==基金` 分流 upsert/prune `fund_class_override` 對應欄，否則改 `stock` 對應欄。基金無 `dividendRate`，STOCK 基金風格自動為成長型（override 可改收益型）、BOND 基金期別自動依名稱（override 可改）。
 
 #### StockStyle（Requirement 26 新增）
 | 欄位 | 型別 | 說明 |
@@ -790,12 +790,12 @@ POST   /api/settings/asset-classes               # 新增資產類別
 PUT    /api/settings/asset-classes/{id}          # 更新資產類別
 PATCH  /api/settings/asset-classes/{id}/active   # 啟用/停用
 
-GET    /api/settings/securities                  # 列出 stock 主檔每檔的 {code, market, name,
+GET    /api/settings/securities                  # 列出 stock 主檔 + fund_holding 去重名稱（市場=基金，code=名稱）每檔的 {code, market, name,
                                                  #   assetClass(override), effectiveAssetClass, source,
-                                                 #   stockStyle(override), effectiveStockStyle, styleSource}
-PUT    /api/settings/securities/asset-class      # body {code, market, assetClass|null}：設定/清除個股 asset_class override
-PUT    /api/settings/securities/stock-style      # body {code, market, stockStyle|null}：設定/清除個股 stock_style override
-PUT    /api/settings/securities/bond-term        # body {code, market, bondTerm|null}：設定/清除個股 bond_term override
+                                                 #   stockStyle(override), effectiveStockStyle, styleSource, ...}
+PUT    /api/settings/securities/asset-class      # body {code, market, assetClass|null}：market==基金 upsert/刪 fund_class_override（key=名稱），否則改 stock.asset_class
+PUT    /api/settings/securities/stock-style      # body {code, market, stockStyle|null}：market==基金 upsert/prune fund_class_override.stock_style，否則改 stock.stock_style
+PUT    /api/settings/securities/bond-term        # body {code, market, bondTerm|null}：market==基金 upsert/prune fund_class_override.bond_term，否則改 stock.bond_term
 
 GET    /api/settings/stock-styles                # 列出風格（成長/收益，含 dividendThreshold）
 POST   /api/settings/stock-styles                # 新增
@@ -989,7 +989,7 @@ estimatedAnnualDividend
 
 ### 現金／債券／股票 三分類計算（Requirement 25）
 
-由 `AssetService.getAssetHistory()` 在既有逐快照迴圈內一併算出，隨 `/api/snapshots/history` 回傳（`cashValue`/`bondValue`/`stockValue`）。`AssetClassifier` 提供分類規則，個股 override 由 `stock.asset_class` 提供（一次查 `stockRepo.findAll()` 建 `Map<market|code, assetClass>`）。
+由 `AssetService.getAssetHistory()` 在既有逐快照迴圈內一併算出，隨 `/api/snapshots/history` 回傳（`cashValue`/`bondValue`/`stockValue`）。`AssetClassifier` 提供分類規則，個股 override 由 `stock.asset_class` 提供（一次查 `stockRepo.findAll()` 建 `Map<market|code, assetClass>`）、基金 override 由 `fund_class_override` 表提供（以名稱為 key，一次查 `fundClassOverrideRepo.findAll()` 建 `Map<fundName, {assetClass, stockStyle, bondTerm}>`；基金 `fund_code` 多為 NULL 故以名稱識別）。基金 STOCK 風格沿用 `classifyStockStyle(code=null, dividendRate=null, override)`（無殖利率 → override 或成長型）、BOND 期別沿用 `classifyBondTerm(name, override)`。
 
 ```
 classifyStock(code, market, override):
@@ -997,7 +997,10 @@ classifyStock(code, market, override):
   market=台股 且 code 00…B     → BOND                           # 櫃買債券 ETF
   code ∈ US_BOND_ETFS         → BOND                           # 美股/英股債券 ETF 清單
   其餘                         → STOCK
-classifyFund(name): name 含「債」或 bond → BOND，否則 STOCK
+classifyFund(name, override):
+  override != null                       → override            # 基金人工指定優先（fund_class_override.asset_class，key=fund_name）
+  name 含 債/bond/高收益/收益（不分大小寫）  → BOND               # 高收益債、收益型債券基金名稱多不帶「債」字
+  其餘（含 入息/股息 高股息股票型基金）       → STOCK
 
 cashValue  = twdDeposit + usdDeposit                            # == 既有「台幣存款 + 美元存款」
 bondValue  = Σ(stock.currentValue  where classify=BOND)

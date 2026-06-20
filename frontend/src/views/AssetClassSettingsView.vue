@@ -12,8 +12,8 @@
 
     <el-alert type="info" :closable="false" show-icon style="margin-bottom: 16px">
       <template #title>
-        預設依規則自動判定。<b>資產類別</b>：台股 <b>00…B</b>、美股債券 ETF → 債券，其餘 → 股票。
-        <b>細分</b>：股票依殖利率分成長／收益型；債券依名稱年期分短／中／長期。判定不符可逐檔指定，設定一次即套用到所有快照與圓餅圖。
+        預設依規則自動判定。<b>資產類別</b>：台股 <b>00…B</b>、美股債券 ETF → 債券；基金名稱含「債／高收益／收益」→ 債券（「入息／股息」屬高股息股票型，仍歸股票），其餘 → 股票。
+        <b>細分</b>：股票依殖利率分成長／收益型；債券依名稱年期分短／中／長期（基金無殖利率，自動為成長型）。資產類別與細分皆可逐檔指定（含基金），設定一次即套用到所有快照與圓餅圖。
       </template>
     </el-alert>
 
@@ -71,16 +71,16 @@
         </el-table-column>
         <el-table-column label="指定細分" width="150" align="center">
           <template #default="{ row }">
-            <!-- 股票 → 成長/收益型 -->
+            <!-- 股票 / 股票型基金 → 成長/收益型（基金無殖利率，自動 = 成長型） -->
             <el-select
               v-if="row.effectiveAssetClass === 'STOCK'"
               :model-value="row.stockStyle ?? ''"
               size="small" style="width: 128px"
               @change="(v) => setStyle(row, v)">
-              <el-option label="自動（殖利率）" value="" />
+              <el-option :label="row.market === '基金' ? '自動（成長型）' : '自動（殖利率）'" value="" />
               <el-option v-for="s in stockStyles" :key="s.code" :label="s.displayName" :value="s.code" />
             </el-select>
-            <!-- 債券 → 短/中/長期 -->
+            <!-- 債券 / 債券型基金 → 短/中/長期 -->
             <el-select
               v-else-if="row.effectiveAssetClass === 'BOND'"
               :model-value="row.bondTerm ?? ''"

@@ -7,6 +7,7 @@ import com.steven.assets.model.BondTerm;
 import com.steven.assets.model.Bank;
 import com.steven.assets.model.BrokerEntity;
 import com.steven.assets.model.DepositTypeEntity;
+import com.steven.assets.model.FundClassOverride;
 import com.steven.assets.model.MarketType;
 import com.steven.assets.model.Stock;
 import com.steven.assets.model.StockHolding;
@@ -18,6 +19,8 @@ import com.steven.assets.repository.BondTermRepository;
 import com.steven.assets.repository.BankRepository;
 import com.steven.assets.repository.BrokerRepository;
 import com.steven.assets.repository.DepositTypeRepository;
+import com.steven.assets.repository.FundClassOverrideRepository;
+import com.steven.assets.repository.FundHoldingRepository;
 import com.steven.assets.repository.MarketTypeRepository;
 import com.steven.assets.repository.StockRepository;
 import com.steven.assets.repository.StockStyleRepository;
@@ -49,6 +52,11 @@ public class InstitutionService {
     private final StockStyleRepository stockStyleRepo;
     private final BondTermRepository bondTermRepo;
     private final AssetSnapshotRepository snapshotRepo;
+    private final FundHoldingRepository fundHoldingRepo;
+    private final FundClassOverrideRepository fundClassOverrideRepo;
+
+    /** securities 清單中基金列的市場標記（與 holdings-classified 一致） */
+    private static final String FUND_MARKET = "基金";
 
     // ===================== Bank =====================
 
@@ -374,60 +382,97 @@ public class InstitutionService {
 
     // ===================== Securities 資產類別 + 股票風格歸類（Requirement 25/26）=====================
 
-    /** 列出 stock 主檔每檔的生效資產類別、股票風格與來源（規則／人工）。 */
+    /** 列出 stock 主檔 + 持有過的基金（市場=基金）每檔的生效資產類別、子分類與來源（規則／人工）。 */
     @Transactional(readOnly = true)
     public List<InstitutionDto.SecurityResponse> getAllSecurities() {
         Map<String, BigDecimal> yieldMap = buildLatestYieldMap();
         BigDecimal threshold = loadIncomeThreshold();
-        return stockRepo.findAll().stream()
+        List<InstitutionDto.SecurityResponse> stocks = stockRepo.findAll().stream()
                 .sorted(Comparator.comparing(Stock::getMarket).thenComparing(Stock::getCode))
                 .map(s -> toSecurityResponse(s, yieldMap, threshold))
                 .toList();
+        // 基金以名稱為識別（fund_holding.fund_code 多為 NULL），override 存於 fund_class_override（三欄）
+        Map<String, FundClassOverride> fundOverride = new HashMap<>();
+        fundClassOverrideRepo.findAll().forEach(fo -> fundOverride.put(fo.getFundName(), fo));
+        List<InstitutionDto.SecurityResponse> funds = fundHoldingRepo.findDistinctFundNames().stream()
+                .map(name -> {
+                    FundClassOverride o = fundOverride.get(name);
+                    return toFundSecurityResponse(name,
+                            o != null ? o.getAssetClass() : null,
+                            o != null ? o.getStockStyle() : null,
+                            o != null ? o.getBondTerm() : null);
+                })
+                .toList();
+        // 股票群（台股/美股/英股）在前、基金群在後
+        List<InstitutionDto.SecurityResponse> all = new java.util.ArrayList<>(stocks);
+        all.addAll(funds);
+        return all;
     }
 
-    /** 設定／清除個股的資產類別 override（assetClass 為 null/空白 = 還原為規則）。 */
+    /**
+     * 設定／清除資產類別 override（assetClass 為 null/空白 = 還原為規則）。
+     * market == 基金 → 改 fund_class_override.asset_class（key=fund_name）；否則 → 改 stock.asset_class。
+     */
     @Transactional
     public InstitutionDto.SecurityResponse setSecurityAssetClass(InstitutionDto.SetSecurityAssetClassRequest req) {
-        Stock stock = stockRepo.findByCodeAndMarket(req.code(), req.market())
-                .orElseThrow(() -> new java.util.NoSuchElementException(
-                        "找不到標的: " + req.code() + " / " + req.market()));
-        String override = (req.assetClass() == null || req.assetClass().isBlank())
-                ? null : req.assetClass().trim().toUpperCase();
+        String override = blankToNull(req.assetClass());
         if (override != null && assetClassRepo.findByCode(override).isEmpty()) {
             throw new IllegalArgumentException("資產類別代碼不存在: " + override);
         }
+        if (FUND_MARKET.equals(req.market())) {
+            FundClassOverride o = fundOverrideRow(req.code());
+            o.setAssetClass(override);
+            return persistFundOverride(o);
+        }
+        Stock stock = stockRepo.findByCodeAndMarket(req.code(), req.market())
+                .orElseThrow(() -> new java.util.NoSuchElementException(
+                        "找不到標的: " + req.code() + " / " + req.market()));
         stock.setAssetClass(override);
         Stock saved = stockRepo.save(stock);
         return toSecurityResponse(saved, buildLatestYieldMap(), loadIncomeThreshold());
     }
 
-    /** 設定／清除個股的股票風格 override（stockStyle 為 null/空白 = 還原為規則）。 */
+    /**
+     * 設定／清除股票風格 override（stockStyle 為 null/空白 = 還原為規則）。
+     * market == 基金 → 改 fund_class_override.stock_style；否則 → 改 stock.stock_style。
+     */
     @Transactional
     public InstitutionDto.SecurityResponse setSecurityStockStyle(InstitutionDto.SetSecurityStockStyleRequest req) {
-        Stock stock = stockRepo.findByCodeAndMarket(req.code(), req.market())
-                .orElseThrow(() -> new java.util.NoSuchElementException(
-                        "找不到標的: " + req.code() + " / " + req.market()));
-        String override = (req.stockStyle() == null || req.stockStyle().isBlank())
-                ? null : req.stockStyle().trim().toUpperCase();
+        String override = blankToNull(req.stockStyle());
         if (override != null && stockStyleRepo.findByCode(override).isEmpty()) {
             throw new IllegalArgumentException("股票風格代碼不存在: " + override);
         }
+        if (FUND_MARKET.equals(req.market())) {
+            FundClassOverride o = fundOverrideRow(req.code());
+            o.setStockStyle(override);
+            return persistFundOverride(o);
+        }
+        Stock stock = stockRepo.findByCodeAndMarket(req.code(), req.market())
+                .orElseThrow(() -> new java.util.NoSuchElementException(
+                        "找不到標的: " + req.code() + " / " + req.market()));
         stock.setStockStyle(override);
         Stock saved = stockRepo.save(stock);
         return toSecurityResponse(saved, buildLatestYieldMap(), loadIncomeThreshold());
     }
 
-    /** 設定／清除個股（債券）的期別 override（bondTerm 為 null/空白 = 還原為規則）。 */
+    /**
+     * 設定／清除（債券）期別 override（bondTerm 為 null/空白 = 還原為規則）。
+     * market == 基金 → 改 fund_class_override.bond_term；否則 → 改 stock.bond_term。
+     */
     @Transactional
     public InstitutionDto.SecurityResponse setSecurityBondTerm(InstitutionDto.SetSecurityBondTermRequest req) {
-        Stock stock = stockRepo.findByCodeAndMarket(req.code(), req.market())
-                .orElseThrow(() -> new java.util.NoSuchElementException(
-                        "找不到標的: " + req.code() + " / " + req.market()));
-        String override = (req.bondTerm() == null || req.bondTerm().isBlank())
-                ? null : req.bondTerm().trim().toUpperCase();
+        String override = blankToNull(req.bondTerm());
         if (override != null && bondTermRepo.findByCode(override).isEmpty()) {
             throw new IllegalArgumentException("債券期別代碼不存在: " + override);
         }
+        if (FUND_MARKET.equals(req.market())) {
+            FundClassOverride o = fundOverrideRow(req.code());
+            o.setBondTerm(override);
+            return persistFundOverride(o);
+        }
+        Stock stock = stockRepo.findByCodeAndMarket(req.code(), req.market())
+                .orElseThrow(() -> new java.util.NoSuchElementException(
+                        "找不到標的: " + req.code() + " / " + req.market()));
         stock.setBondTerm(override);
         Stock saved = stockRepo.save(stock);
         return toSecurityResponse(saved, buildLatestYieldMap(), loadIncomeThreshold());
@@ -611,5 +656,63 @@ public class InstitutionService {
                 hasTermOverride ? termOverride : null,
                 effectiveTerm,
                 termSource);
+    }
+
+    private static boolean isBlank(String s) { return s == null || s.isBlank(); }
+
+    /** 空白/null → null；否則 trim + 轉大寫（override 代碼一律大寫存）。 */
+    private static String blankToNull(String s) {
+        return isBlank(s) ? null : s.trim().toUpperCase();
+    }
+
+    /** 取得（或新建）某基金名稱的 override 列。 */
+    private FundClassOverride fundOverrideRow(String fundName) {
+        return fundClassOverrideRepo.findById(fundName)
+                .orElseGet(() -> FundClassOverride.builder().fundName(fundName).build());
+    }
+
+    /** 三欄全空 → 刪列（還原全規則）；否則 upsert。回傳該基金最新 securities 列。 */
+    private InstitutionDto.SecurityResponse persistFundOverride(FundClassOverride o) {
+        if (isBlank(o.getAssetClass()) && isBlank(o.getStockStyle()) && isBlank(o.getBondTerm())) {
+            if (fundClassOverrideRepo.existsById(o.getFundName())) {
+                fundClassOverrideRepo.deleteById(o.getFundName());
+            }
+            return toFundSecurityResponse(o.getFundName(), null, null, null);
+        }
+        FundClassOverride saved = fundClassOverrideRepo.save(o);
+        return toFundSecurityResponse(saved.getFundName(),
+                saved.getAssetClass(), saved.getStockStyle(), saved.getBondTerm());
+    }
+
+    /**
+     * 基金列（市場=基金）的 securities 回應：asset_class／stock_style／bond_term 皆可逐檔 override（key=fund_name），
+     * 與個股一致。基金無 dividendRate：STOCK 風格自動成長型（override 可改收益型）、BOND 期別自動依名稱（override 可改）。
+     * code 欄即 fund_name（基金無穩定 code）。
+     */
+    private InstitutionDto.SecurityResponse toFundSecurityResponse(
+            String fundName, String classOverride, String styleOverride, String termOverride) {
+        boolean hasClassOv = !isBlank(classOverride);
+        boolean hasStyleOv = !isBlank(styleOverride);
+        boolean hasTermOv = !isBlank(termOverride);
+        String effectiveClass = assetClassifier.classifyFund(fundName, classOverride);
+
+        String effectiveStyle = null, styleSource = null;
+        String effectiveTerm = null, termSource = null;
+        if (AssetClassifier.STOCK.equals(effectiveClass)) {
+            // 基金無殖利率：classifyStockStyle 退化為「override 或 GROWTH」
+            effectiveStyle = assetClassifier.classifyStockStyle(null, null, styleOverride, null, null);
+            styleSource = hasStyleOv ? "OVERRIDE" : "RULE";
+        } else if (AssetClassifier.BOND.equals(effectiveClass)) {
+            effectiveTerm = assetClassifier.classifyBondTerm(null, null, fundName, termOverride);
+            termSource = hasTermOv ? "OVERRIDE" : "RULE";
+        }
+
+        return new InstitutionDto.SecurityResponse(
+                fundName, FUND_MARKET, fundName,
+                hasClassOv ? classOverride.trim().toUpperCase() : null,
+                effectiveClass,
+                hasClassOv ? "OVERRIDE" : "RULE",
+                hasStyleOv ? styleOverride.trim().toUpperCase() : null, effectiveStyle, styleSource,
+                hasTermOv ? termOverride.trim().toUpperCase() : null, effectiveTerm, termSource);
     }
 }
