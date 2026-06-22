@@ -117,7 +117,7 @@
               </el-tabs>
             </div>
           </template>
-          <v-chart :option="bankOption" style="height: 280px" autoresize />
+          <v-chart :option="bankOption" style="height: 440px" autoresize />
           <div class="chart-summary-bar">
             <template v-if="bankCurrencyTab === 'TWD'">
               <div class="csb-item">
@@ -168,7 +168,7 @@
               </el-tabs>
             </div>
           </template>
-          <v-chart :option="stockBarOption" style="height: 280px" autoresize
+          <v-chart :option="stockBarOption" style="height: 440px" autoresize
             @dblclick="onBarDblClick" />
           <div class="chart-summary-bar">
             <div class="csb-item">
@@ -1229,9 +1229,10 @@ function overlayLivePrice(row) {
   const shares = Number(row.shares ?? 0)
   if (shares <= 0) return row
 
+  // 即時原幣股價（與表格「股價」欄同源 getRealtimePrice），供 tooltip 顯示，避免顯示快照舊收盤價
+  const live = getRealtimePrice(row)
   let cv = getLiveValueFromAssets(row)
   if (cv == null) {
-    const live = getRealtimePrice(row)
     if (!live) return row
     const fx = Number(detail.value?.usdExchangeRate ?? 0)
     // 美股 / 英股 UCITS（USD 計價）：live price 為原幣 USD，乘 fx 換算台幣
@@ -1243,7 +1244,15 @@ function overlayLivePrice(row) {
   const profitRate = cost > 0 ? profit / cost : 0
   const dr = Number(row.dividendRate ?? 0)
   const estimatedDividend = dr > 0 ? cv * dr : Number(row.estimatedDividend ?? 0)
-  return { ...row, currentValue: cv, profit, profitRate, estimatedDividend }
+  return {
+    ...row,
+    currentValue: cv,
+    profit,
+    profitRate,
+    estimatedDividend,
+    // 即時價可用時覆寫股價欄，與現值 / 表格股價一致；不可用則保留快照收盤價
+    ...(live ? { stockPrice: Number(live.price) } : {})
+  }
 }
 
 /**
