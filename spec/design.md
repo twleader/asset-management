@@ -459,7 +459,7 @@ BackupSetting         (備份保留代數設定，單列資料表，id = 1)
 | market | String | 市場代碼（對應 MarketType.code，不建立 FK 以保持靈活性） |
 | broker | BrokerEntity | FK（取代原 Broker enum） |
 | shares | BigDecimal | 持股數量 |
-| investmentCost | BigDecimal | 總投資成本（= shares × 成本均價） |
+| investmentCost | BigDecimal | 總投資成本（= shares × 成本均價）。**幣別依 currency**：台股 / 美股 TWD 計價 = 台幣；美股 USD 計價 = 美元。彙總台幣須經 transactionExchangeRate（無則快照匯率）換算 |
 | currentValue | BigDecimal | 當前市值 |
 | dividendRate | BigDecimal | 現金股利率 |
 | estimatedDividend | BigDecimal | 預估年配息 |
@@ -665,6 +665,7 @@ PATCH  /api/snapshots/{id}/dividend-rates          # 回寫指定快照配息率
 PATCH  /api/snapshots/{id}/stock-order             # 更新持倉顯示排序
 POST   /api/snapshots/enrich-all-dividend-rates    # 批次補齊所有快照缺漏配息率
 POST   /api/snapshots/recalc-dividends             # 重算所有快照預估配息（依現值×配息率）
+POST   /api/snapshots/recalc-totals                # 重算所有快照彙總（修正美股 USD 成本未換匯造成的 total_stock_cost 偏差）
 
 # Excel 批次匯入端點（POST /api/snapshots/import）已停用
 ```
@@ -977,8 +978,14 @@ totalFund    = Σ(fundHolding.currentValue)
 totalStock   = Σ(twStock.currentValue)
              + Σ(usStock.originalCurrencyValue × usdToTwd)
 totalAssets  = totalDeposit + totalFund + totalStock
-totalCost    = Σ(stock.investmentCost)         # 儲存總投資成本，非每股成本
+# total_stock_cost 一律台幣：美股 USD 計價列須先換匯再加總，禁止把美元與台幣混加（修正前的 bug）
+totalCost    = Σ(twStock.investmentCost)                          # 台股：台幣原值
+             + Σ(usStock[TWD].investmentCost)                     # 美股 TWD 計價：台幣原值
+             + Σ(usStock[USD].investmentCost × (txRate ?: 快照匯率))  # 美股 USD 計價：交易日匯率優先，否則快照匯率
 totalProfit  = totalStock - totalCost
+# recalcTotals（彙總）與 toDetailResponse（逐筆 investmentCostTwd）共用 AssetService.stockInvestmentCostTwd，
+# 確保 total_stock_cost == Σ 各列 investmentCostTwd；逐筆股票損益亦以「台幣現值 − 台幣成本」計算（美股不可拿美元成本直接相減）。
+# total_* 為歷史快照的 denormalized 欄位，僅在建立/更新時重算；修正舊資料用 POST /api/snapshots/recalc-totals 一次重算。
 
 # 預估年配息合計（asset_snapshot.estimated_annual_dividend）
 estimatedAnnualDividend

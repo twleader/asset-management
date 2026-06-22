@@ -145,7 +145,14 @@ public class ExcelExportService {
                     .map(Stock::getName).orElse(sk.getStockCode());
             cell(row, 3, stName, null);
             cell(row, 4, sk.getShares(), st.num4);
-            cell(row, 5, sk.getInvestmentCost(), st.money);
+            // 投資成本一律輸出台幣：美股 USD 計價列依交易日匯率（無則快照匯率）換算，避免把美元當台幣匯出
+            BigDecimal stockCostTwd = "USD".equals(sk.getCurrency()) && sk.getInvestmentCost() != null
+                    ? sk.getInvestmentCost().multiply(
+                            sk.getTransactionExchangeRate() != null ? sk.getTransactionExchangeRate()
+                                    : (s.getUsdExchangeRate() != null ? s.getUsdExchangeRate() : BigDecimal.ONE))
+                        .setScale(0, java.math.RoundingMode.HALF_UP)
+                    : sk.getInvestmentCost();
+            cell(row, 5, stockCostTwd, st.money);
             cell(row, 6, sk.getCurrentValue(), st.money);
             cell(row, 7, sk.getEstimatedDividend(), st.money);
             cell(row, 8, sk.getTransactionType(), null);

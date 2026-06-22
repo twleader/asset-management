@@ -47,7 +47,11 @@ public class StockHolding {
     @Column(nullable = false, precision = 15, scale = 5)
     private BigDecimal shares;
 
-    /** 投資成本 (台幣換算後) */
+    /**
+     * 投資成本（依 currency 而定）：台股 / 美股 TWD 計價 = 台幣；美股 USD 計價 = 美元。
+     * 彙總台幣成本（total_stock_cost / investmentCostTwd）一律經 transactionExchangeRate（無則快照匯率）換算，
+     * 不可直接相加（見 AssetService.stockInvestmentCostTwd）。
+     */
     @Column(nullable = false, precision = 20, scale = 2)
     private BigDecimal investmentCost;
 
