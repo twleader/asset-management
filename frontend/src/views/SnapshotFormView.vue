@@ -2662,9 +2662,18 @@ const submit = async () => {
       }
     }
   } catch (e) {
-    const msg = e.response?.data?.detail || e.response?.data?.message || e.message || '未知錯誤'
     console.error('存檔失敗', e)
-    ElMessage.error('儲存失敗：' + msg)
+    const detail = e.response?.data?.detail || ''
+    // 日期唯一鍵衝突：給明確、可行動的提示（常見於「新增 → 複製前一版 → 選到已存在日期」）
+    if (e.response?.status === 400 && detail.includes('該日期的快照已存在')) {
+      ElMessage.error({
+        message: `此日期（${form.snapshotDate}）已有快照，無法重複建立。請改選其他日期後再儲存；若要修改該日資料，請改用編輯。`,
+        duration: 6000
+      })
+    } else {
+      const msg = detail || e.response?.data?.message || e.message || '未知錯誤'
+      ElMessage.error('儲存失敗：' + msg)
+    }
   } finally {
     saving.value = false
   }
