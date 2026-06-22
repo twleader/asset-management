@@ -852,6 +852,39 @@ public class AssetService {
                 .orElseThrow(() -> new NoSuchElementException("找不到快照 ID: " + id));
     }
 
+    /**
+     * 單筆股票投資成本換算為台幣。
+     * - 台股 / 美股 TWD 計價：investmentCost 本身即台幣，直接回傳（四捨五入至整數）。
+     * - 美股 USD 計價：investmentCost 為美元，乘有效匯率（交易日匯率優先，否則快照匯率）換算台幣。
+     * recalcTotals（彙總）與 toDetailResponse（逐筆 investmentCostTwd）共用，
+     * 確保「total_stock_cost == Σ 各列 investmentCostTwd」（同義欄位同一邏輯）。
+     */
+    private BigDecimal stockInvestmentCostTwd(StockHolding st, BigDecimal snapshotRate) {
+        BigDecimal cost = st.getInvestmentCost() != null ? st.getInvestmentCost() : BigDecimal.ZERO;
+        if ("USD".equals(st.getCurrency())) {
+            BigDecimal rate = st.getTransactionExchangeRate() != null
+                    ? st.getTransactionExchangeRate()
+                    : (snapshotRate != null ? snapshotRate : BigDecimal.ONE);
+            return cost.multiply(rate).setScale(0, RoundingMode.HALF_UP);
+        }
+        return cost.setScale(0, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * 重算所有快照的彙總欄位（total_*），修正歷史快照因舊邏輯造成的偏差
+     * （例：美股 USD 計價成本未換匯，導致 total_stock_cost 低估、股票損益虛高）。
+     * 由 POST /api/snapshots/recalc-totals 觸發。
+     */
+    @Transactional
+    public int recalcAllTotals() {
+        List<AssetSnapshot> all = snapshotRepo.findAll();
+        for (AssetSnapshot s : all) {
+            recalcTotals(s);
+            snapshotRepo.save(s);
+        }
+        return all.size();
+    }
+
     private void recalcTotals(AssetSnapshot s) {
         BigDecimal totalDeposit = s.getDeposits().stream()
                 .map(BankDeposit::getAmount)
@@ -865,8 +898,9 @@ public class AssetService {
         BigDecimal totalStockValue = s.getStocks().stream()
                 .map(StockHolding::getCurrentValue)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal snapshotRate = s.getUsdExchangeRate() != null ? s.getUsdExchangeRate() : BigDecimal.ONE;
         BigDecimal totalStockCost = s.getStocks().stream()
-                .map(StockHolding::getInvestmentCost)
+                .map(st -> stockInvestmentCostTwd(st, snapshotRate))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
         BigDecimal totalStockDividend = s.getStocks().stream()
                 .filter(st -> st.getEstimatedDividend() != null)
@@ -943,16 +977,14 @@ public class AssetService {
                 .sorted(java.util.Comparator.comparing(
                     st -> st.getDisplayOrder() != null ? st.getDisplayOrder() : Integer.MAX_VALUE))
                 .map(st -> {
-                    // investmentCostTwd：USD 幣別須乘有效匯率換算台幣，供匯總顯示用
+                    // investmentCostTwd：USD 幣別須乘有效匯率換算台幣，供匯總顯示用（與 recalcTotals 同一 helper）
                     BigDecimal rawCost = st.getInvestmentCost() != null ? st.getInvestmentCost() : BigDecimal.ZERO;
-                    BigDecimal investmentCostTwd;
-                    if ("USD".equals(st.getCurrency())) {
-                        BigDecimal rate = st.getTransactionExchangeRate() != null
-                                ? st.getTransactionExchangeRate() : snapshotUsdRate;
-                        investmentCostTwd = rawCost.multiply(rate).setScale(0, RoundingMode.HALF_UP);
-                    } else {
-                        investmentCostTwd = rawCost.setScale(0, RoundingMode.HALF_UP);
-                    }
+                    BigDecimal investmentCostTwd = stockInvestmentCostTwd(st, snapshotUsdRate);
+                    // 損益 / 損益率一律以「台幣現值 − 台幣成本」計算；美股 rawCost 為美元，不可直接相減
+                    BigDecimal cvTwd = st.getCurrentValue() != null ? st.getCurrentValue() : BigDecimal.ZERO;
+                    BigDecimal profitTwd = cvTwd.subtract(investmentCostTwd);
+                    BigDecimal profitRateTwd = investmentCostTwd.compareTo(BigDecimal.ZERO) != 0
+                            ? profitTwd.divide(investmentCostTwd, 6, RoundingMode.HALF_UP) : BigDecimal.ZERO;
                     String stName = stockMasterRepo.findByCodeAndMarket(st.getStockCode(), st.getMarket())
                             .map(Stock::getName).orElse(st.getStockCode());
                     return new AssetSnapshotDto.StockResponse(
@@ -960,7 +992,7 @@ public class AssetService {
                         st.getBroker() != null ? st.getBroker().getId() : null,
                         st.getBroker() != null ? st.getBroker().getDisplayName() : null,
                         st.getShares(), rawCost, investmentCostTwd, st.getCurrentValue(),
-                        st.getProfit(), st.getProfitRate(),
+                        profitTwd, profitRateTwd,
                         st.getEstimatedDividend(), st.getDividendRate(),
                         st.getCurrency(), st.getOriginalCurrencyValue(),
                         st.getTransactionType(), st.getTransactionDate(), st.getTransactionExchangeRate(),

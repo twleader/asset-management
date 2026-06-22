@@ -109,6 +109,16 @@ public class AssetSnapshotController {
         return ResponseEntity.ok(Map.of("updated", updated));
     }
 
+    /**
+     * POST /api/snapshots/recalc-totals
+     * 重算所有快照的彙總欄位（修正美股 USD 計價成本未換匯造成的 total_stock_cost 偏差）
+     */
+    @PostMapping("/recalc-totals")
+    public ResponseEntity<Map<String, Object>> recalcTotals() {
+        int updated = assetService.recalcAllTotals();
+        return ResponseEntity.ok(Map.of("updated", updated));
+    }
+
     @GetMapping("/export")
     public ResponseEntity<ByteArrayResource> exportExcel() throws IOException {
         byte[] data = excelExportService.exportFull();

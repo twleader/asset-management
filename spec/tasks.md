@@ -3058,3 +3058,16 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 117.6 Docker 重 build + recreate（business-services + frontend）後驗證（API 層）：基金 stock_style round-trip（霸菱亞洲增長 設 INCOME→OVERRIDE/收益型、清除→回 GROWTH/RULE）；bond_term round-trip（富達亞洲高收益 設 LONG→OVERRIDE、清除→回 MID/RULE）；套 override 後 `growthValue+incomeValue==stockValue`、`bondShort+Mid+Long==bondValue` 8/8 全 0；prune-if-empty 正確（每次還原後 `fund_class_override` 列數回 0）；`v1.32.0-fund-override-style-term` Liquibase 成功、business-services healthy、前端 chunk 更新。**待使用者瀏覽器目視**：設定頁基金列可選成長/收益型（與債券基金可選短中長）、圖外圈反映
 - [x] 117.7 對抗式審查 workflow（10 agents：migration/backend/frontend/spec 四面向 + 對抗式驗證）：6 findings→3 confirmed 全為 spec/註解文件不一致（無功能性 bug；CASH override 誤導、migration 冪等、checksum drift 三項被駁回）。已修：requirements.md 第 569/571 行（移除「指定細分唯讀/不在本次範圍」舊敘述、單欄 schema 更正為三欄）、design.md classifyFund 虛擬碼與 AssetClassifier javadoc 的 `fund_master.asset_class`→`fund_class_override.asset_class`
 
+### Task 118: 修正美股 USD 計價成本未換匯 → total_stock_cost 低估（Requirement 3 bug fix）
+
+**問題**：`AssetService.recalcTotals` 把所有 `StockHolding.investmentCost` 直接相加當台幣，但美股 USD 計價列的 `investmentCost` 存的是「美元」（台股 / 美股 TWD 計價才是台幣）。導致 `total_stock_cost` 嚴重低估、`stockProfit` 虛高（實測 snapshot id=9：total_stock_cost=4,858,363、stockProfit≈+147%）。逐筆 `StockResponse.profit/profitRate`（用 entity `getProfit()`＝台幣現值 − 美元成本）對美股同樣錯誤。違反 requirements.md Requirement 3「美股依交易日匯率換算台幣成本」既有條款。
+
+**設計**：見 `design.md`「資產總額計算」（total_stock_cost 換匯公式）、StockHolding `investmentCost` 欄位幣別說明、`POST /api/snapshots/recalc-totals` 端點。
+
+- [x] 118.1 後端 `AssetService`：抽共用 helper `stockInvestmentCostTwd(st, snapshotRate)`（USD 列乘 transactionExchangeRate，無則快照匯率；其餘原值），`recalcTotals` 的 `total_stock_cost` 改用 helper 加總
+- [x] 118.2 後端 `AssetService.toDetailResponse`：逐筆 `investmentCostTwd` 改用同一 helper；`profit/profitRate` 改以「台幣現值 − 台幣成本」計算（取代 entity `getProfit()`），美股逐檔損益正確
+- [x] 118.3 後端 `AssetService.recalcAllTotals()` + `AssetSnapshotController` `POST /api/snapshots/recalc-totals`：一次重算所有既有快照彙總，修正歷史偏差
+- [x] 118.4 後端 `ExcelExportService`：股票 sheet「投資成本」欄輸出台幣（USD 列換匯），避免把美元當台幣匯出
+- [x] 118.5 後端 `StockHolding.investmentCost` 註解更正（原誤標「台幣換算後」）
+- [x] 118.6 Docker 重 build（worktree backend）+ recreate（business-services，healthy）後驗證：`POST /api/snapshots/recalc-totals` 回 `{updated:9}`；snapshot id=9 `total_stock_cost` 4,858,363→**5,683,635**（+825k 美元成本換匯）、`stockProfit` 7,155,412→**6,330,141**；自洽檢查 `total_stock_cost == Σ 各列 investmentCostTwd`（5,683,635）通過、8 筆美股逐筆 `investmentCostTwd == 美元成本 × transactionExchangeRate` 全對、逐列 profit 加總 == totalStockValue−totalStockCost
+
