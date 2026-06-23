@@ -3071,3 +3071,21 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 118.5 後端 `StockHolding.investmentCost` 註解更正（原誤標「台幣換算後」）
 - [x] 118.6 Docker 重 build（worktree backend）+ recreate（business-services，healthy）後驗證：`POST /api/snapshots/recalc-totals` 回 `{updated:9}`；snapshot id=9 `total_stock_cost` 4,858,363→**5,683,635**（+825k 美元成本換匯）、`stockProfit` 7,155,412→**6,330,141**；自洽檢查 `total_stock_cost == Σ 各列 investmentCostTwd`（5,683,635）通過、8 筆美股逐筆 `investmentCostTwd == 美元成本 × transactionExchangeRate` 全對、逐列 profit 加總 == totalStockValue−totalStockCost
 
+### Task 119: 修正上櫃台股（債券 ETF 00xxxB）「當日」分時恆空（Requirement 13 bug fix）
+
+**問題**：股票分析「走勢圖／當日」對 **00697B 元大美債7-10**（上櫃債券 ETF）顯示「無當日分時資料」，且 2026-06-23 為交易日、非休市。根因：`PriceFetchClient.fetchIntraday5m` 對台股一律組 `{code}.TW`（[L581](external-materials-service/src/main/java/com/steven/assets/externalmaterials/client/PriceFetchClient.java)），但**上櫃（TPEx）證券在 Yahoo 的後綴是 `.TWO`**——`00697B.TW` 回 `No data, may be delisted`、`00697B.TWO` 才有 55 筆 5m bar（price 35.41，與 Redis 即時價一致）。FinMind `TaiwanStockKBar` 為 sponsor dataset、`FINMIND_TOKEN` 為空恆回 400 → 永遠 fallback 到 Yahoo，使此後綴缺陷完全暴露。即時價／日高低正常是因 `getTwseRealTimePrice` 走 TWSE mis、同時試 `tse_`/`otc_`；唯獨分時走 Yahoo 漏掉 `.TWO`。實測持股 3 檔債券 ETF（00679B/00697B/00751B）`.TW=0、.TWO=55` 全中，一般上市股（0050/009804/006205）`.TW` 正常。資料確實存在、只是抓錯 symbol，故修抓取後綴而非改空狀態文案。
+
+**設計**：見 `requirements.md` Requirement 13「當日分時資料源優先序」與 `design.md` `/api/bff/stock-analysis/intraday-ticks` 管線說明（台股 Yahoo 5m fallback 先 `.TW` 空再 `.TWO`，沿用 Requirement 7 / Task 6.3 殖利率 + `getYahooEtfHoldings` 既有 `.TW → .TWO` 慣例）。
+
+- [x] 119.1 ext-materials `PriceFetchClient.fetchIntraday5m`：抽 `fetchIntraday5mYahoo(ticker, daysBack)` 私有方法；台股先試 `{code}.TW`，回傳空再 fallback `{code}.TWO`；美股 `{code}`、英股 `{code}.L` 行為不變。修正同時惠及盤後 `IntradayTickRefresher` cron、cold-start `refreshOne`、與 Task 87 舊 `/internal/intraday-5m`（StockAlertService）三條呼叫路徑
+- [x] 119.2 Docker 重 build + recreate（external-materials-service，healthy）後驗證：cold-start 觸發前 `LLEN price:ticks:台股:00697B:2026-06-23` = 0；打 `GET /api/bff/stock-analysis/intraday-ticks?code=00697B&market=台股` 回 **40 筆**（09:00 35.42 → 13:30 35.41，末筆同 Redis 即時價）、Redis LLEN 同步變 40；另 2 檔債券 ETF 00679B=54、00751B=54 筆亦補回；上市對照 0050（`.TW`）51 筆不受影響。log 顯示 FinMind KBar 回 400（token 未設定，預期）→ fallback Yahoo `.TW` 空 → `.TWO` 命中，無錯誤
+
+### Task 120: 修正美股「開盤」欄恆空（NASDAQ /historical 同日區間 400）（Requirement 14 bug fix）
+
+**問題**：觀察清單美股分頁「開盤」欄對所有股票（VOO/QQQ/VT…）恆顯示「—」。根因：`PriceFetchClient.getNasdaqOpenPrice` 用 `fromdate == todate == 美東今日` 打 NASDAQ `/historical`，但 NASDAQ 對同日區間一律回 **400「Provided date is less than from date」**；改給日期區間盤中又不含今日列（回上一交易日）。故該方法**恆回 null** → Redis live 美股 JSON 無 `openPrice`（實測 `price:美股:VOO` 等無此欄；對照 `price:台股:*` 有）→ 盤後 dump 連帶使 `stock_price_history` 美股列亦無 open → `WatchStockService` 的 `stock_price_history` fallback 也接不到 → 「開盤」恆「—」。美股專屬：台股走 TWSE mis `o`、英股走 Yahoo `regularMarketOpen` 皆正常（實測台股 0000/2330/0050 open 有值）。
+
+**設計**：見 `requirements.md` Requirement 14「美股 openPrice 來源」與 `design.md`「美股盤中 openPrice 補強」段落（改用 Yahoo chart `interval=1d&range=1d` 的 `indicators.quote[0].open[0]`）。
+
+- [x] 120.1 ext-materials `PriceFetchClient`：移除失效的 `getNasdaqOpenPrice`（NASDAQ /historical 同日 400），改 `fetchUsTodayOpenFromYahoo(code)` 打 Yahoo chart `interval=1d&range=1d` 取 `indicators.quote[0].open[0]`；`getNasdaqPrice` 呼叫點改用此方法。只取 open 不碰 close（不違反 Task 84）；遇 429 fail-fast 不重試（`curlGetWithRetry(url, 0)`）避免拖慢 cron；失敗回 null 由 `WatchStockService` fallback
+- [x] 120.2 Docker 重 build + recreate（external-materials-service，healthy）後驗證：Yahoo daily bar open VOO=676.35 / QQQ=715.74 / VT=154.42 可取得；等一輪 polling 後 `price:美股:VOO` JSON 出現 `openPrice`；`GET /api/bff/watch-stock` 美股列 `openPrice` 非 null、台股列不受影響
+
