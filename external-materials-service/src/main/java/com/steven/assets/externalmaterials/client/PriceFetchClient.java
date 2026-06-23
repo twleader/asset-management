@@ -245,13 +245,13 @@ public class PriceFetchClient {
                 if (companyName.isBlank()) companyName = null;
 
                 // NASDAQ API 現況（2026/04 起）：keyStats 對 ETF 為 null，對 stocks 只剩 dayrange + 52 週區間，
-                // 不再提供 OpenPrice / PreviousClose / Volume。改從 primaryData 取，OpenPrice 改打 /historical 補。
+                // 不再提供 OpenPrice / PreviousClose / Volume。改從 primaryData 取，OpenPrice 改由 Yahoo daily bar 補。
                 JsonNode keyStats = root.path("data").path("keyStats");
                 BigDecimal[] hl = parseRange(keyStats.path("dayrange").path("value").asText(""));
                 if (hl[0] == null && hl[1] == null) {
                     hl = parseRange(keyStats.path("Dayrange").path("value").asText(""));
                 }
-                BigDecimal openPrice = getNasdaqOpenPrice(stockCode, assetClass).orElse(null);
+                BigDecimal openPrice = fetchUsTodayOpenFromYahoo(stockCode).orElse(null);
 
                 // previousClose = price − netChange（API 拿不到實際昨收，用即時計算）
                 BigDecimal previousClose = price.subtract(change);
@@ -270,23 +270,27 @@ public class PriceFetchClient {
     }
 
     /**
-     * NASDAQ `/info` endpoint 自 2026/04 不再提供 OpenPrice；改打 `/historical` 取今日 open。
-     * 盤前 historical 無今日列，回 Optional.empty()，下游 fallback 至 stock_price_history。
+     * 美股今日開盤價：NASDAQ `/info` 自 2026/04 不再回 OpenPrice，`/historical`「fromdate==todate」回 400
+     * （Provided date is less than from date）、給日期區間盤中又不含今日列，皆無法取得今日 open。
+     * 改由 Yahoo chart `interval=1d&range=1d` 的當日 daily bar `indicators.quote[0].open[0]` 取得
+     * （盤中＝今日部分 bar 的 open、盤後＝當日完整 bar 的 open；只取 open 欄，不碰 close，不違反 Task 84
+     * 「禁寫今日列收盤」）。走 curl 子程序避開 Yahoo 對 Java HTTP/2 fingerprint 偵測。為盤中輪詢的補強
+     * 欄位，遇 429 fail-fast 不重試（maxRetries=0）避免拖慢 cron 週期；取不到回 empty，下游
+     * `WatchStockService` fallback 至 stock_price_history。
      */
-    private Optional<BigDecimal> getNasdaqOpenPrice(String stockCode, String assetClass) {
+    private Optional<BigDecimal> fetchUsTodayOpenFromYahoo(String stockCode) {
         try {
-            LocalDate today = LocalDate.now(java.time.ZoneId.of("America/New_York"));
-            String url = "https://api.nasdaq.com/api/quote/" + stockCode
-                    + "/historical?assetclass=" + assetClass
-                    + "&fromdate=" + today + "&todate=" + today + "&limit=1";
-            String body = httpGet(url);
-            JsonNode rows = mapper.readTree(body)
-                    .path("data").path("tradesTable").path("rows");
-            if (!rows.isArray() || rows.isEmpty()) return Optional.empty();
-            return Optional.ofNullable(parseDollar(rows.get(0).path("open").asText("")));
+            String url = "https://query2.finance.yahoo.com/v8/finance/chart/" + stockCode
+                    + "?interval=1d&range=1d";
+            String body = curlGetWithRetry(url, 0);
+            JsonNode open = mapper.readTree(body)
+                    .path("chart").path("result").path(0)
+                    .path("indicators").path("quote").path(0)
+                    .path("open");
+            if (!open.isArray() || open.isEmpty()) return Optional.empty();
+            return Optional.ofNullable(jsonDecimal(open.path(0)));
         } catch (Exception e) {
-            log.debug("NASDAQ historical open 查詢失敗 {} ({}): {}",
-                    stockCode, assetClass, e.getMessage());
+            log.debug("Yahoo 今日 open 查詢失敗 {}: {}", stockCode, e.getMessage());
             return Optional.empty();
         }
     }
@@ -574,11 +578,20 @@ public class PriceFetchClient {
     ) {}
 
     public List<IntradayBar> fetchIntraday5m(String stockCode, String market, int daysBack) {
+        if ("台股".equals(market)) {
+            // 台股 Yahoo ticker 後綴依掛牌市場：上市（TSE）`.TW`、上櫃（TPEx，含債券 ETF 00xxxB）`.TWO`。
+            // 先試 `.TW`，回傳空再 fallback `.TWO`（同 getYahooEtfHoldings / 殖利率查詢既有慣例）。
+            // 否則上櫃股的「當日」分時恆空，前端顯示「無當日分時資料」（spec Task 119）。
+            List<IntradayBar> bars = fetchIntraday5mYahoo(stockCode + ".TW", daysBack);
+            if (bars.isEmpty()) bars = fetchIntraday5mYahoo(stockCode + ".TWO", daysBack);
+            return bars;
+        }
+        String ticker = "英股".equals(market) ? stockCode + ".L" : stockCode;
+        return fetchIntraday5mYahoo(ticker, daysBack);
+    }
+
+    private List<IntradayBar> fetchIntraday5mYahoo(String ticker, int daysBack) {
         try {
-            String ticker;
-            if ("美股".equals(market)) ticker = stockCode;
-            else if ("英股".equals(market)) ticker = stockCode + ".L";
-            else ticker = stockCode + ".TW";
             String range = Math.max(1, daysBack) + "d";
             String url = "https://query2.finance.yahoo.com/v8/finance/chart/" + ticker
                     + "?interval=5m&range=" + range;
@@ -606,7 +619,7 @@ public class PriceFetchClient {
             }
             return bars;
         } catch (Exception e) {
-            log.warn("抓取 {} {} 盤中 5m 失敗: {}", market, stockCode, e.getMessage());
+            log.warn("抓取 {} 盤中 5m 失敗: {}", ticker, e.getMessage());
             return List.of();
         }
     }

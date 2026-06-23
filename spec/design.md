@@ -91,7 +91,7 @@ com.steven.assets/
   - `GET /api/bff/stock-analysis/history/stock` → `/api/market-data/history/stock`
   - `GET /api/bff/stock-analysis/dividends` → `/api/market-data/dividends`
   - `GET /api/bff/stock-analysis/etf-holdings` → `/api/market-data/etf-holdings`
-  - `GET /api/bff/stock-analysis/intraday-ticks` → `/api/market-data/intraday-ticks`（走勢圖「當日」期間用；business-services proxy 至 `external-materials-service /internal/intraday-ticks`，後者讀 Redis LIST `price:ticks:{market}:{code}:{tradingDate}`。盤中由 `PricePoller` 每 2 分鐘累積 / 盤後由 `IntradayTickRefresher` 用台股 FinMind `TaiwanStockKBar` + 美/英股 Yahoo 5m 完整覆寫）
+  - `GET /api/bff/stock-analysis/intraday-ticks` → `/api/market-data/intraday-ticks`（走勢圖「當日」期間用；business-services proxy 至 `external-materials-service /internal/intraday-ticks`，後者讀 Redis LIST `price:ticks:{market}:{code}:{tradingDate}`。盤中由 `PricePoller` 每 2 分鐘累積 / 盤後由 `IntradayTickRefresher` 用台股 FinMind `TaiwanStockKBar` + 美/英股 Yahoo 5m 完整覆寫。台股 Yahoo 5m fallback 的 ticker 後綴依掛牌市場：上市 `.TW`、上櫃（TPEx，含債券 ETF 00xxxB）`.TWO`，`PriceFetchClient.fetchIntraday5m` 先試 `.TW` 空再 fallback `.TWO`，否則上櫃股當日分時恆空，見 Task 119）
 
 - **共享 / 跨頁 passthrough routes**（非單一頁面專屬，由 Spring Cloud Gateway 直接轉發至 business-services，服務跨頁共用的 store CRUD、下拉 lookups、SSE 與基金主檔；皆為刻意的共享資源，不另立 `/api/bff/{page}/**`）：
   - `SnapshotBffRoutes`：`/api/snapshots/**` → business-services（Pinia store 共用快照 CRUD；單頁資料仍走各自的 `/api/bff/{page}/**`）
@@ -167,7 +167,7 @@ NASDAQ info API 自 2026/04 起對 ETF 的 `keyStats` 為 null（無 dayrange �
 
 **抓價來源同舊**：TWSE mis API（台股 live）、NASDAQ info API（美股 live）、FinMind TaiwanStockPrice（台股盤後收盤）。
 
-**美股盤中 `openPrice` 補強（2026/05）：** NASDAQ `/info` endpoint 自 2026/04 起不再回傳 `OpenPrice`，`PriceFetchClient.getNasdaqPrice` 在主呼叫之後額外打 `https://api.nasdaq.com/api/quote/{code}/historical?assetclass=...&fromdate=YYYY-MM-DD&todate=YYYY-MM-DD&limit=1`（日期皆為美東今日），由 `data.tradesTable.rows[0].open` 取得今日開盤價。失敗或無今日列時保留 null，由 `WatchStockService` 的 `stock_price_history` fallback 接手（顯示昨日 open；不接受時可在 UI 端忽略）。HTTP 呼叫在 `PricePoller.updatePrices` 的 virtual-thread pool 中與其他 stock 並行執行，不會延長 cron 週期。
+**美股盤中 `openPrice` 補強（2026/05 初版用 NASDAQ /historical；2026/06 Task 120 改 Yahoo daily bar）：** NASDAQ `/info` endpoint 自 2026/04 起不再回傳 `OpenPrice`。初版改打 `https://api.nasdaq.com/api/quote/{code}/historical?...&fromdate==todate==美東今日`，但 NASDAQ 對「`fromdate == todate`」一律回 **400（`Provided date is less than from date`）**、給日期區間盤中又**不含今日列**，故該法恆失敗 → `openPrice` 永遠 null → Redis live 無 open → 盤後 dump 進 `stock_price_history` 亦無 open → 觀察清單「開盤」欄對所有美股恆顯示「—」。**現行作法**：`PriceFetchClient.fetchUsTodayOpenFromYahoo(code)` 打 `https://query2.finance.yahoo.com/v8/finance/chart/{code}?interval=1d&range=1d`，取 `chart.result[0].indicators.quote[0].open[0]`（盤中＝今日部分 bar 的 open、盤後＝完整 bar 的 open；只取 open 欄、不碰 close，不違反 Task 84「禁寫今日列收盤」）。走 curl 子程序避開 Yahoo HTTP/2 fingerprint 偵測；為補強欄位遇 429 fail-fast 不重試（`curlGetWithRetry(url, 0)`），取不到回 null 由 `WatchStockService` 的 `stock_price_history` fallback 接手。HTTP 呼叫在 `PricePoller.updatePrices` 的 virtual-thread pool 中與其他 stock 並行執行，不會延長 cron 週期。台股 open 走 TWSE mis `o`、英股走 Yahoo `regularMarketOpen`。
 
 **TWSE `z='-'` 時 skip write — Redis 只能由真實 z tick 推進（2026/06，修正盤中股價跳回昨收的 bug）：** TWSE mis API 的 `z`（最近一筆成交價）以每 5 秒 tick 為單位，這一輪 cron polling 撞到「兩 tick 之間沒有新成交」的視窗時會回 `z='-'`。舊邏輯將 `z='-'` 視為「整天無成交」並退回 `y`（昨日收盤）寫 Redis（`source = "TWSE(前收)"`），盤中只要任一輪 polling 命中就會把 Dashboard 持股圖、即時資產估算的所有現值瞬間替換成昨收，造成「盤中股價與實際明顯偏差」。
 
