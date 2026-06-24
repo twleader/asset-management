@@ -3089,3 +3089,39 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 120.1 ext-materials `PriceFetchClient`：移除失效的 `getNasdaqOpenPrice`（NASDAQ /historical 同日 400），改 `fetchUsTodayOpenFromYahoo(code)` 打 Yahoo chart `interval=1d&range=1d` 取 `indicators.quote[0].open[0]`；`getNasdaqPrice` 呼叫點改用此方法。只取 open 不碰 close（不違反 Task 84）；遇 429 fail-fast 不重試（`curlGetWithRetry(url, 0)`）避免拖慢 cron；失敗回 null 由 `WatchStockService` fallback
 - [x] 120.2 Docker 重 build + recreate（external-materials-service，healthy）後驗證：Yahoo daily bar open VOO=676.35 / QQQ=715.74 / VT=154.42 可取得；等一輪 polling 後 `price:美股:VOO` JSON 出現 `openPrice`；`GET /api/bff/watch-stock` 美股列 `openPrice` 非 null、台股列不受影響
 
+### Task 121: 修正「最新一筆為過去日期」時被較新交易日收盤汙染（LiveAssetsOverlay per-market 閘門）（Requirement 1/9 bug fix；Req 7 Redis 收盤語意為依賴）
+
+**問題**：在「歷年資產管理」與 Dashboard，當**最新一筆快照是過去日期**（昨日快照、今日尚未建檔、或刪除今日快照後最新退回昨日）時，最新列的台股 / 美股 / 資產總計被顯示成**較新交易日的收盤**，而非該基準日的收盤。實測：最新快照 6/23、刪掉 6/24 快照後，「歷年資產管理」6/23 列台股由 $10,567,772（= 6/23 收盤）跳成 $10,320,009（= 6/24 收盤），美元同步偏移、資產總計與增幅一起錯。
+
+**根因**：`LiveAssetsOverlay.applyToLatest` 的閘門只判斷 `latest.snapshotDate == live.snapshotDate`，而 `live-assets`（`StockPriceService.getLiveAssets`）是用 `findLatestWithStocks()` 取「最新快照」、回傳的 `snapshotDate` 即該快照日 —— 兩者**永遠相等**，等於**無條件**用 live 覆蓋最新列。但 `getLiveAssets` 的股價來自 Redis（最新一筆 tick / 收盤），當最新快照日 < 今日且已有更新交易日收盤時，就把較新交易日收盤洩漏到過去基準日上。requirements.md 原本即要求「snapshotDate == 今日才覆蓋」，但實作從未真正比對今日（Task 109.5 驗證也從未完成）。前端 `DashboardView.liveLatest` 有同款 bug：`!twLive && !usLive && !ukLive` 分支走 `overlayLatestFromLiveAssets(s)`、一律用 `liveAssets` 覆蓋。
+
+**佐證**：6/23 快照每檔 `stock_holding.current_value` == `shares × 6/23 收盤`（diff 全 0）→ 快照凍結值對已定案的過去日期本來就 == 該日收盤，過去日期保留凍結值即正解，無需也不應 overlay。
+
+**設計**：見 `requirements.md` Req 1（line 26，歷年最新列 per-market 閘門）+ Req 9（line 167，KPI / 趨勢線最後一點同值）、`design.md`「`LiveAssetsOverlay`」與「KPI 資產總計一致性」段落（反轉舊「全市場非今日仍 overlay」設計為 per-market 閘門）。
+
+- [x] 121.1 BFF `LiveAssetsOverlay.applyToLatest`：改 **per-market 基準日閘門**（`SnapshotEnricher.isCurrentBasedate(basedate, market)`），台股 / 美股 / 英股各自「basedate == 該市場時區今日」才用 `liveValue` 覆蓋，非今日市場保留 history 凍結收盤值；三市場皆非今日 → 完全不覆蓋。覆蓋後 `totalStockValue / totalAssets` 由 per-market 混合值重算（不再讀 `live.liveStockValue / liveTotalAssets`，因其為全 live 口徑、混合情境會偏差）。新增 `bff/src/test/.../LiveAssetsOverlayTest`（過去日期不覆蓋 / 今日覆蓋 / 空值 noop，4 測試全綠）
+- [x] 121.2 前端 `DashboardView.liveLatest`：移除 `!twLive && !usLive && !ukLive → overlayLatestFromLiveAssets(s)` 早退分支，一律走 per-market `sumOf`（非今日市場用快照凍結 row）；`totalAssets` 僅在 `twLive && usLive && ukLive` 時才採 `liveAssets.liveTotalAssets`，否則 per-market 加總。刪除已成 dead code 的 `overlayLatestFromLiveAssets`
+- [x] 121.3 spec：`requirements.md` Req 1（line 26）+ Req 9（line 167 反轉舊敘述）、`design.md`（`LiveAssetsOverlay` + KPI 一致性段落反轉）、`tasks.md` 本任務
+- [x] 121.4 Docker 重 build + recreate（bff + frontend）後驗證：`GET /api/bff/asset-history` 與 `GET /api/bff/dashboard/summary` 6/23 列 totalTwStockValue == 10,567,772（= 6/23 收盤），6/24（今日＝最新）列 == 10,320,009（live 今日收盤）、兩 endpoint 最新列同值；`LiveAssetsOverlayTest` 確定性驗證「最新一筆為過去日期 → 不覆蓋、保留凍結收盤」（pastLatest_keepsFrozenCloseValues 綠）
+- [x] 121.5 （follow-up）非今日市場凍結值跨頁同源 → **由 Task 122 解決**：規格擁有者決策「過去日期一律以 stored 為單一事實來源」，`buildMergedStocks` 重算加 per-market 基準日閘門
+
+### Task 122: 統一「過去日期股票現值」跨頁口徑為 stored（buildMergedStocks 重算加 per-market 基準日閘門）（Requirement 9 bug fix）
+
+**問題**（Task 121 暴露、對抗式審查 confirmed）：對「過去日期、非今日市場」的股票現值，兩頁取值不同源：
+- **歷年資產管理頁**（`AssetService.getAssetHistory`）：raw `StockHolding.getCurrentValue()`（快照儲存值）。
+- **Dashboard**（`SnapshotEnricher.buildMergedStocks(revalueFromClose=true)`）：`shares × 基準日 stock_price_history 收盤 ×（美股/英股）快照匯率` 重算（**無條件**，不分今日/過去）。
+
+兩者僅在 `currentValue == shares × 基準日收盤` 時相等。
+
+**資料佐證 / 決策依據**：
+- 台股所有過去快照 stored `currentValue` == `shares × 基準日收盤`（diff 全 0）→ 改用 stored 對台股零影響；Task 108 當初的台股偏差（10,051,967→10,176,102）實為**今日列**建檔暫定價，今日仍 revalue 不受影響。
+- 舊快照（2024-05-20 / 2024-12-31）`usd_exchange_rate` 為 NULL → `buildMergedStocks` revalue 本就 skip（保留 stored）→ revalue 對舊資料不可靠。
+- 唯一實際分歧：2026-06-23 美股 stored 1,360,337 vs revalue 1,345,048（~1%，建檔價/匯率與定案收盤時間差）。
+
+**決策（規格擁有者）**：過去日期一律以 **stored** 為單一事實來源（兩頁同源）；`revalueFromClose` 僅在「基準日 == 該市場時區今日」時套用（保留 Task 108 今日列修正）。接受過去快照美股列「現值 vs 股價×股數」~1% 落差。**反轉** requirements.md 原 line 161「frozen 也 revalue」AC。
+
+**設計**：見 `requirements.md` Req 9（持股表重算 per-market 閘門）、`design.md`「`SnapshotEnricher`」段。
+
+- [x] 122.1 `SnapshotEnricher.buildMergedStocks`：revalue 區塊條件加 `isCurrentBasedate(basedate, market)`（basedate ← `detail.snapshotDate`）。僅今日市場 revalue，過去日期保留 stored。單一改點涵蓋 Dashboard 4 個 call site；編輯頁（`revalueFromClose=false`）不受影響；前端 `overlayLivePrice` 已 gate on `shouldApplyLive`（今日），無需改
+- [x] 122.2 spec：`requirements.md` line 161（反轉為 per-market 閘門）、`design.md` `buildMergedStocks` 段、`tasks.md` 本任務（含 Task 121.5 結案）
+- [x] 122.3 Docker 重 build + recreate（bff）後驗證：`GET /api/bff/dashboard/snapshot/11`（6/23）美股現值加總 == 1,360,337（stored）== `GET /api/bff/asset-history` 6/23 totalUsStockValue；今日快照（id=14, 6/24）台股 revalue == 10,320,009（非 stored 10,567,772）、美股 revalue == 1,350,361，Task 108 今日列重算保留

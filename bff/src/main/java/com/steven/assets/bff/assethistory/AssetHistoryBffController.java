@@ -37,9 +37,10 @@ public class AssetHistoryBffController {
     /**
      * GET /api/bff/asset-history
      * 回傳資產歷史，並為每筆預先標註 isLastOfYear（每年最後一筆）。
-     * 若最新一筆 snapshotDate == 今日（市場時區）且 live-assets 也指向同一筆 snapshot，
-     * 用 live 計算覆蓋最新列的 totalTwStockValue / totalUsStockValue / totalStockValue
-     * / totalAssets / increase / increaseRate / investmentRate，使本頁與 Dashboard 顯示一致。
+     * 最新一筆套 {@link LiveAssetsOverlay#applyToLatest} 的 per-market 基準日閘門：snapshotDate ==
+     * 該市場時區今日的市場才用 live 覆蓋（totalTwStockValue / totalUsStockValue / totalUkStockValue
+     * / totalStockValue / totalAssets / increase / increaseRate / investmentRate）；最新一筆為過去
+     * 日期（三市場皆非今日）則保留快照凍結收盤值，使本頁與 Dashboard 顯示一致。
      */
     @GetMapping
     public Mono<ResponseEntity<List<Map<String, Object>>>> getHistory() {
@@ -72,7 +73,7 @@ public class AssetHistoryBffController {
                 r.put("isLastOfYear", lastOfYearIds.contains(id));
             }
 
-            // 最新一筆以 live-assets（休市時為最後收盤價）覆蓋股票現值與資產總計。
+            // 最新一筆套 per-market 基準日閘門覆蓋（僅「該市場今日」的市場用 live，過去日期保留凍結收盤）。
             // 共用 LiveAssetsOverlay，與 Dashboard summary 同一算法 → 兩頁同義欄位同值。
             LiveAssetsOverlay.applyToLatest(history, live);
             return ResponseEntity.ok(history);

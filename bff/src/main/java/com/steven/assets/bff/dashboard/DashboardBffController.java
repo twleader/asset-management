@@ -91,8 +91,8 @@ public class DashboardBffController {
                     Map<String, Object> marketStatus = tuple.getT4();
                     Map<String, Object> liveAssets = tuple.getT5();
 
-                    // 最新一筆 history 以 live-assets（休市時為最後收盤價）覆蓋股票現值與資產總計，
-                    // 與「歷年資產管理」共用同一支 LiveAssetsOverlay → 兩頁 history 同義欄位同值。
+                    // 最新一筆 history 套 per-market 基準日閘門覆蓋（僅「該市場今日」用 live，過去日期保留
+                    // 凍結收盤），與「歷年資產管理」共用同一支 LiveAssetsOverlay → 兩頁 history 同義欄位同值。
                     LiveAssetsOverlay.applyToLatest(history, liveAssets);
 
                     DashboardSummaryDto dto = new DashboardSummaryDto();
