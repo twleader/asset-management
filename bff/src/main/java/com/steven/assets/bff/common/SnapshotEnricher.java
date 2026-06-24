@@ -290,6 +290,14 @@ public class SnapshotEnricher {
         }
 
         BigDecimal fxRate = toBigDecimal(detail.get("usdExchangeRate"));
+        // 收盤價重算只在「基準日 == 該市場時區今日」時套用（per-market）。過去日期的快照其儲存
+        // currentValue 已是該日定案收盤值（且 revalue 在缺收盤/匯率時不可靠），一律保留 stored，
+        // 與「歷年資產管理」（讀 stored）逐欄同源（Task 122）。
+        LocalDate basedate = null;
+        Object basedateObj = detail.get("snapshotDate");
+        if (basedateObj != null) {
+            try { basedate = LocalDate.parse(basedateObj.toString()); } catch (Exception ignored) {}
+        }
         List<Map<String, Object>> result = new ArrayList<>(grouped.values());
         for (Map<String, Object> g : result) {
             String market = asString(g.get("market"));
@@ -300,10 +308,13 @@ public class SnapshotEnricher {
             BigDecimal sh = (BigDecimal) g.get("shares");
 
             // 依 stock_price_history 收盤價（closeMap，與「股價」欄同源）重算現值，使「現值 = 股價 × 股數」
-            // 自洽；否則快照凍結的 currentValue（建檔當下暫定價）會與較新的收盤價脫鉤，導致台股總值偏差。
+            // 自洽；否則快照當天建檔的 currentValue（盤中暫定價）會與當日收盤脫鉤，導致台股總值偏差。
             // 美股／英股收盤價為原幣（USD），乘快照匯率換算台幣，與前端 overlayLivePrice 同一套換算。
+            // 僅在「基準日 == 該市場時區今日」時重算（per-market 閘門，Task 122）：過去日期的快照
+            // currentValue 已是定案收盤值，保留 stored 與「歷年資產管理」同源。
             // revalueFromClose=false（編輯頁）時略過，維持儲存值供 broker row 以 unitPriceTwd 反推存檔。
-            if (revalueFromClose && closePrice != null && sh != null && sh.signum() > 0) {
+            if (revalueFromClose && isCurrentBasedate(basedate, market)
+                    && closePrice != null && sh != null && sh.signum() > 0) {
                 BigDecimal priceTwd = ("美股".equals(market) || "英股".equals(market))
                         ? (fxRate != null ? closePrice.multiply(fxRate) : null)
                         : closePrice;

@@ -1256,52 +1256,23 @@ function overlayLivePrice(row) {
 }
 
 /**
- * 將 latest snapshot 的總額（totalStockValue / stockProfit / totalAssets）
- * 用 live 行情重算。basedate==該市場當地今日才套 live（不再加「市場開盤」閘門）；
- * 另一個市場仍維持快照凍結值。讓 KPI 卡 / 配置 donut / 趨勢線最後一點隨 2 分鐘輪詢更新。
+ * 將 latest snapshot 的總額（totalStockValue / stockProfit / totalAssets）依 per-market 基準日閘門重算。
+ * basedate==該市場當地今日的市場才套 live（customTableData × overlayLivePrice，隨 2 分鐘輪詢更新）；
+ * 非今日市場（含昨日快照、今日尚未建檔、跨午夜）維持快照凍結收盤值（= 該基準日收盤）。
  *
- * 「資產總計」優先採用 liveAssets.liveTotalAssets（與「歷年資產管理」共用同一支 API），
- * 台股 / 美股 小計以 customTableData × overlay 重算。
+ * 「資產總計」僅在三市場皆為今日時採 liveAssets.liveTotalAssets（與「歷年資產管理」最新列同值），
+ * 否則一律 per-market 加總，避免把較新交易日收盤洩漏進一個過去基準日的估值。
  * 「預估配息」一律讀 snapshot 凍結值 s.estimatedAnnualDividend（含基金），不前端重算 — 與歷年資產管理同源。
  */
-/** 全市場非交易日今日（含週末／隔日）時：以 liveAssets（= /api/market-data/live-assets，
- *  與「歷年資產管理」同一支 business service）覆蓋最新快照的股票現值與資產總計，確保兩頁
- *  「同義欄位同源」。休市時後端會 fallback 至 Redis 最後一筆收盤價；liveAssets 不存在或非
- *  同一筆快照時 fallback 回快照儲存值（避免無資料時顯示 0）。
- *  ── 不可直接 return 快照凍結的 totalAssets：asset_snapshot 的聚合 total 會與較新收盤脫鉤而偏差。 */
-function overlayLatestFromLiveAssets(s) {
-  const live = liveAssets.value
-  if (!live || live.snapshotDate !== s.snapshotDate || live.liveTotalAssets == null) return s
-  let tw = 0, us = 0, uk = 0
-  for (const x of (live.stocks ?? [])) {
-    const v = Number(x.liveValue || 0)
-    if (x.market === '台股') tw += v
-    else if (x.market === '美股') us += v
-    else if (x.market === '英股') uk += v
-  }
-  const totalStockValue = live.liveStockValue != null ? Number(live.liveStockValue) : tw + us + uk
-  const totalStockCost = Number(s.totalStockCost || 0)
-  return {
-    ...s,
-    totalTwStockValue: tw,
-    totalUsStockValue: us,
-    totalUkStockValue: uk,
-    totalStockValue,
-    totalStockCost,
-    stockProfit: totalStockValue - totalStockCost,
-    totalAssets: Number(live.liveTotalAssets)
-  }
-}
-
 const liveLatest = computed(() => {
   const s = latest.value
   if (!s) return null
+  // per-market 基準日閘門：basedate == 該市場當地今日才套 live；非今日市場（含昨日快照、今日尚未
+  // 建檔、週末）一律維持快照凍結收盤值（= 該基準日收盤）。三市場皆非今日 → 走下方 sumOf 全 frozen 分支，
+  // 顯示基準日收盤，與「歷年資產管理」per-market overlay 同源同值。
   const twLive = shouldApplyLive('台股')
   const usLive = shouldApplyLive('美股')
   const ukLive = shouldApplyLive('英股')
-  // 全市場非交易日今日：改用 liveAssets 覆蓋（與「歷年資產管理」同一支 business service），
-  // 不再直接吐快照凍結的聚合值，避免台股總值偏差、兩頁不一致。
-  if (!twLive && !usLive && !ukLive) return overlayLatestFromLiveAssets(s)
 
   const tw = customTableData['台股'] ?? []
   const us = customTableData['美股'] ?? []
@@ -1321,11 +1292,13 @@ const liveLatest = computed(() => {
   const stockProfit = totalStockValue - totalStockCost
   const totalDeposit = Number(s.totalDeposit || 0)
   const totalFundValue = Number(s.totalFundValue || 0)
-  // 「資產總計」優先採用 liveAssets.liveTotalAssets（與「歷年資產管理」共用同一支 API），
-  // 確保兩頁顯示同一個數字；liveAssets 不存在或非同一筆快照才 fallback 至前端加總。
+  // 「資產總計」：唯有三市場皆為「基準日==當地今日」時，liveAssets.liveTotalAssets（全 live 口徑）才與
+  // per-market 加總相等，可採用以與「歷年資產管理」最新列同值；只要有任一市場非今日（昨日快照、今日尚未
+  // 建檔、跨午夜），一律用 per-market 加總（非今日市場為基準日凍結收盤），避免把較新收盤洩漏進基準日估值。
+  const allLive = twLive && usLive && ukLive
   const live = liveAssets.value
   const liveMatchesLatest = live && live.snapshotDate === s.snapshotDate
-  const totalAssets = liveMatchesLatest && live.liveTotalAssets != null
+  const totalAssets = allLive && liveMatchesLatest && live.liveTotalAssets != null
         ? Number(live.liveTotalAssets)
         : totalDeposit + totalFundValue + totalStockValue
   const totalTwStockValue = t.value
