@@ -87,6 +87,8 @@ com.steven.assets/
   - `GET /api/bff/snapshot-form/realtime`：2 分鐘輪詢用，先 trigger 後端刷新行情再回傳 stockPrices + marketStatus
   - `GET /api/bff/snapshot-form/exchange-rate?date=YYYY-MM-DD`：取指定日期 USD 匯率（今天會先 refresh，假日往前 fallback）
   - `GET /api/bff/snapshot-form/lookups`：表單下拉一次取齊（banks / brokers / depositTypes / transitFundTypes，皆已過濾 active）
+  - `GET /api/bff/snapshot-form/funds`：信託基金主檔（passthrough 至 `/api/funds`），每筆已含 latestNav / latestFxRate / twdPerUnit；`?date=` 時改用該基準日（Requirement 19/21）
+  - `POST /api/bff/snapshot-form/fund-nav/refresh`：觸發後端 → external-materials-service 立即刷新所有基金 NAV，回 `{ success, failed, total }`
 - `StockAnalysisBffRoutes`（StockAnalysisDialog 跨 view 共用元件專屬）：對話框被 Dashboard / SnapshotForm / WatchStock / StockAlert / RealizedGain 五個 view 同時使用（已實現損益明細列雙擊開啟），依「同義欄位、同一 business service API」原則拆為獨立 BFF route，避免在五個父 view 的 BFF 各自重複代理。提供：
   - `GET /api/bff/stock-analysis/history/stock` → `/api/market-data/history/stock`
   - `GET /api/bff/stock-analysis/dividends` → `/api/market-data/dividends`
@@ -96,7 +98,8 @@ com.steven.assets/
 - **共享 / 跨頁 passthrough routes**（非單一頁面專屬，由 Spring Cloud Gateway 直接轉發至 business-services，服務跨頁共用的 store CRUD、下拉 lookups、SSE 與基金主檔；皆為刻意的共享資源，不另立 `/api/bff/{page}/**`）：
   - `SnapshotBffRoutes`：`/api/snapshots/**` → business-services（Pinia store 共用快照 CRUD；單頁資料仍走各自的 `/api/bff/{page}/**`）
   - `SettingsBffRoutes`：`/api/settings/**` → business-services（銀行 / 券商 / 存款類型 / 市場類型 / 待轉入資金類型的下拉 lookups，被多個表單頁共用；各設定頁的 CRUD 仍走 `/api/bff/{page}-settings/**`）
-  - `FundBffRoutes`：`/api/funds`、`/api/fund-nav/**`、`/api/fund-dividend/**` → business-services（FundSettingsView 基金主檔 CRUD 與 NAV / 配息回補，Requirement 19/20/21）。**慣例例外**：基金主檔頁直接沿用 `/api/funds` 資源 passthrough，未另設 `/api/bff/fund-settings/**`（基金主檔為跨頁共享資源，SnapshotForm 亦讀同一份）
+  - `FundBffRoutes`：`/api/funds`、`/api/fund-nav/**`、`/api/fund-dividend/**` → business-services（FundSettingsView 基金主檔 CRUD 與 NAV / 配息回補，Requirement 19/20/21）。**慣例例外**：基金主檔頁直接沿用 `/api/funds` 資源 passthrough，未另設 `/api/bff/fund-settings/**`（基金主檔為跨頁共享資源）。SnapshotForm 讀同一份基金主檔，但走自己頁面專屬的 `/api/bff/snapshot-form/funds`（同樣 passthrough 至 `/api/funds`，符合「一頁一 BFF」）
+  - `RealizedGainBffRoutes`：`/api/realized-gains/**` → business-services（RealizedGainView 的 Pinia store `gainApi` 共用已實現損益 CRUD；該頁另有 `RealizedGainBffController` 提供 `/api/bff/realized-gain` 聚合端點，passthrough 僅供 store 直接 CRUD 用，與 `SnapshotBffRoutes` 同屬「store 共用」例外）
   - `MarketDataBffRoutes`：`/api/market-data/**` → business-services（SSE 行情串流 `prices/stream` 等直接市場資料取用；`StockAnalysisBffRoutes` 另以 `/api/bff/stock-analysis/**` rewrite 至同一組端點）
 
 **Repository 層**（Spring Data JPA，共 28 個）
@@ -328,14 +331,40 @@ AssetSnapshot (1) ──── (N) BankDeposit
 AssetSnapshot (1) ──── (N) StockHolding
 AssetSnapshot (1) ──── (N) FundHolding
 RealizedGain          (獨立，不關聯快照)
-StockPriceHistory     (歷史股價紀錄；live 行情改由 Redis 提供)
-ExchangeRateHistory   (歷史匯率紀錄)
+
+# 主檔 / 設定類（不寫死 enum，由 DataInitializer seed）
+Stock                 (個股主檔，PK = code + market；nullable override 欄 asset_class / stock_style / bond_term)
 DepositTypeEntity     (存款類型主檔，code 值存入 BankDeposit.depositType)
 MarketType            (市場類型主檔，code 值存入 StockHolding.market)
 TransitFundType       (待轉入資金類型主檔)
+AssetClass            (現金/債券/股票 三分類主檔，code 值存入 stock.asset_class)
+StockStyle            (成長型/收益型 風格主檔，code 值存入 stock.stock_style)
+BondTerm              (短/中/長期 債券期別主檔，code 值存入 stock.bond_term)
+FundClassOverride     (基金分類人工指定，PK = fund_name；asset_class / stock_style / bond_term 三欄皆 nullable)
+PaymentCategory(1) ── (N) PaymentAccount   (代繳記錄分類 + 記錄，Requirement 22)
+NotificationRecipient (警示通知收件人，Requirement 23)
+
+# 基金（Requirement 19–21）
+FundMaster            (信託基金主檔，PK = fund_code)
+FundNav               (基金 NAV 歷史)
+FundDividendHistory   (基金配息歷史)
+
+# 行情 / 歷史
+StockPriceHistory     (歷史股價紀錄；live 行情改由 Redis 提供)
+StockDividendHistory  (個股配息歷史，殖利率 / 填息天數計算用)
+ExchangeRateHistory   (歷史匯率紀錄)
+
+# 警示
 StockAlert            (到價警示，獨立資料表；觀察清單由此表 GROUP BY (stockCode, market) 衍生)
 StockAlertTrigger     (警示觸發歷史，FK→stock_alert，保留 30 天)
+
+# 總經 / 指數（Requirement 18）
+TaiwanGdpPerCapitaHistory / KoreaGdpPerCapitaHistory   (人均 GDP + 實質成長率)
+TwseIndexDailyHistory / UsIndexDailyHistory            (大盤 / 海外指數每日 OHLC)
+
+# 備份（Requirement 15）
 BackupSetting         (備份保留代數設定，單列資料表，id = 1)
+BackupRecord          (Google Drive 備份檔本地索引，UNIQUE(folder, filename))
 ```
 
 ### Core Entities
@@ -551,6 +580,26 @@ BackupSetting         (備份保留代數設定，單列資料表，id = 1)
 > - `exchange_rate_history.mid_rate`：可由 `(buyRate + sellRate) / 2` 即時計算，改為 `@Transient`。
 > - `realized_gain.trade_year`：可由 `YEAR(tradeDate)` 即時計算，改為 `@Transient`，相關 query 改以日期區間替代。
 
+#### StockDividendHistory（個股配息歷史）
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| id | Long | PK |
+| stockCode | String | 股票代號 |
+| market | String | 市場代碼 |
+| year | Integer | 配息年度 |
+| cashDividend | BigDecimal | 現金股利 |
+| stockDividend | BigDecimal | 股票股利 |
+| exDividendDate | LocalDate | 除息日 |
+| yieldPct | BigDecimal | 當年殖利率 |
+| cashPaymentDate | LocalDate | 現金股利發放日 |
+| stockPaymentDate | LocalDate | 股票股利發放日 |
+| fillDays | Integer | 填息天數 |
+| previousClose | BigDecimal | 除息前一日收盤（殖利率 / 填息計算基準） |
+| source | String | 資料來源（如 FinMind / NASDAQ） |
+| updatedAt | LocalDateTime | 最近一次更新時間 |
+
+> 資料來源與抓取流程見 `#### 股利歷史資料來源（stock_dividend_history）`（本文件後段）。供 StockAnalysisDialog 殖利率 / 填息天數圖與配息率計算使用。
+
 #### Live 行情（Redis）
 
 `StockPrice` Entity 與 `stock_price` 表已廢除，盤中即時行情改存 Redis（schema 見上方 External Materials Service Architecture）。`PriceQueryService` 從 Redis 取值並組裝成原 `StockPriceDto` 形狀，對 BFF / 前端介面不變。
@@ -564,17 +613,19 @@ BackupSetting         (備份保留代數設定，單列資料表，id = 1)
 |------|------|------|
 | id | Long | PK |
 | stockCode | String | 股票代號 |
-| stockName | String | 股票名稱 |
-| market | String | 市場代碼（台股/美股） |
+| market | String | 市場代碼（台股/美股；股名由 `stock` 主檔 join 補上，v1.9.4 起不存冗餘 `stock_name`） |
 | alertType | String | 條件類型：`PRICE_ABOVE` / `PRICE_BELOW` / `MA_ABOVE_PCT` / `MA_BELOW_PCT` / `KD_ABOVE` / `KD_BELOW` / `KD_D_ABOVE` / `KD_D_BELOW` |
-| maPeriod | Integer | 均線天數（僅 `MA_*_PCT` 類型使用，可選 20 / 60 / 240；其他類型為 null） |
+| maPeriod | Integer | 均線天數（僅 `MA_*_PCT` 類型使用，目前前端下拉提供 20 / 60 / 240；其他類型為 null。欄位本身為任意整數，新增天數不需 migration，見下方「均線通用化」） |
 | threshold | BigDecimal | 條件門檻：價位類為價格，均線類為百分比偏離，KD 類為 0–100 門檻 |
 | active | Boolean | 是否啟用 |
 | displayOrder | Integer | 拖曳排序 |
 | lastTriggeredAt | LocalDateTime | 最近一次觸發時間 |
 | lastTriggeredPrice | BigDecimal | 觸發時股價 |
-| lastTriggeredMa | BigDecimal | 觸發時均線值（對應 `maPeriod` 的 MA） |
-| lastTriggeredKd | BigDecimal | 觸發時 KD 值 |
+| lastTriggeredMaValue | BigDecimal | 觸發時均線值（對應 `maPeriod` 的 MA；MA 條件才有） |
+| lastTriggeredKdValue | BigDecimal | 觸發時 K 值（KD 條件才有） |
+| lastTriggeredDValue | BigDecimal | 觸發時 D 值（KD 條件才有；v1.7.5 新增 `last_triggered_d_value`） |
+| createdAt | LocalDateTime | 建立時間（不可更新） |
+| updatedAt | LocalDateTime | 最近一次更新時間（`@PreUpdate` 自動維護） |
 
 > **均線通用化**：原本以 `QUARTERLY_MA_*` / `ANNUAL_MA_*` 兩組字串表達兩種均線，改為通用的 `MA_ABOVE_PCT` / `MA_BELOW_PCT` + `ma_period` 數字欄位。未來新增任何天數的均線警示（5、10、20、120…）皆不需新增 enum-like 字串，前端下拉只增加 `maPeriod` 選項即可。Liquibase 遷移 `v1.24.0` 將舊資料一次轉換（QUARTERLY → 60、ANNUAL → 240）。
 
@@ -644,6 +695,28 @@ BackupSetting         (備份保留代數設定，單列資料表，id = 1)
 
 > **設計理由（獨立表 + 不寫死 enum）：** 收件人屬「使用者可變設定」，未來可能多人接收（家人 / 副信箱），需 DB 持久化並透過設定頁維護，遵循專案「禁止 enum 寫死」原則。目前僅支援 email 通道，未來如要擴充 LINE / Telegram 再新增 `notification_channel` 表，不為假設需求預留欄位。
 
+#### BackupSetting（Requirement 15）
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| id | Long | PK，固定為 1（單列資料表） |
+| manualRetention | Integer | 手動備份保留份數 |
+| dailyRetention | Integer | 每日備份保留份數 |
+| weeklyRetention | Integer | 每週備份保留份數 |
+| backupEnabled | Boolean | 排程備份總開關 |
+
+#### BackupRecord（Requirement 15）
+Google Drive 上每一份備份檔的本地索引；UI 列表 / 還原選單一律從本表讀，避免每次都連 rclone。真正的備份檔仍存於 Google Drive，本表只是 metadata 快取。
+
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| id | Long | PK |
+| folder | String | `manual` / `daily` / `weekly` / `monthly` |
+| filename | String | 備份檔名（與 `folder` 組成 UNIQUE） |
+| sizeBytes | Long | 檔案大小 |
+| modifiedAt | LocalDateTime | 備份完成時間（= rclone ModTime，轉 Asia/Taipei） |
+| autoPreRestore | Boolean | 是否為還原前自動自救點（不計入 5 份輪替） |
+| createdAt | LocalDateTime | row 寫入時間 |
+
 ## API Design
 
 ### Base URL
@@ -660,6 +733,7 @@ GET    /api/snapshots/{id}                         # 取得快照明細
 PUT    /api/snapshots/{id}                         # 更新快照
 DELETE /api/snapshots/{id}                         # 刪除快照
 GET    /api/snapshots/history                      # 資產歷史趨勢
+GET    /api/snapshots/{id}/holdings-classified      # 該快照持股依現金/債券/股票三分類（雙層 donut 用，Requirement 25）
 GET    /api/snapshots/export                       # Excel 批次匯出
 PATCH  /api/snapshots/{id}/dividend-rates          # 回寫指定快照配息率
 PATCH  /api/snapshots/{id}/stock-order             # 更新持倉顯示排序
@@ -681,6 +755,20 @@ GET    /api/realized-gains/export                # Excel 匯出（單獨損益 s
 
 # Excel 批次匯入端點（POST /api/realized-gains/import）已停用
 ```
+
+#### Funds / Fund NAV / Fund Dividend（信託基金，Requirement 19–21）
+```
+GET    /api/funds                                # 列出全部 fund_master（含 inactive）；?date=YYYY-MM-DD 時 NAV/FX/配息估算改用該基準日（Req 21）
+POST   /api/funds                                # 新增基金主檔
+PUT    /api/funds/{fundCode}                     # 更新基金主檔
+PATCH  /api/funds/{fundCode}/active              # 啟用/停用基金
+GET    /api/fund-nav/latest?fundCode=            # 取單檔最新 NAV
+POST   /api/fund-nav/refresh                     # 立即刷新所有基金 NAV（proxy 至 external-materials-service），回 { success, failed, total }
+POST   /api/fund-nav/backfill?years=10           # 基金 NAV 歷史回補（Req 21，proxy 至 external-materials-service）
+POST   /api/fund-dividend/refresh                # 同步全抓基金配息歷史（Req 20）
+POST   /api/fund-dividend/backfill?years=10      # 基金配息歷史回補（Req 21）
+```
+> 由 `FundNavController`（`@RequestMapping("/api")`）提供。前端：FundSettingsView 透過 `FundBffRoutes` passthrough；SnapshotFormView 另經自己的 `SnapshotFormBffController`（`/api/bff/snapshot-form/funds`、`/api/bff/snapshot-form/fund-nav/refresh`）讀同一份基金主檔。
 
 #### Market Data
 ```
@@ -818,6 +906,7 @@ PATCH  /api/settings/bond-terms/{id}/active      # 啟用/停用
 #### Payment Accounts / Categories（Requirement 22 新增）
 ```
 GET    /api/settings/payment-categories               # 列出所有分類（含停用）
+GET    /api/settings/payment-categories/active        # 僅列出啟用中（新增 dialog 下拉用）
 POST   /api/settings/payment-categories               # 新增分類
 PUT    /api/settings/payment-categories/{id}          # 更新分類
 PATCH  /api/settings/payment-categories/{id}/active   # 啟用/停用分類
@@ -877,6 +966,7 @@ POST   /api/us-daily-index/refresh?code=SPX    # Yahoo v8 chart range=10y 抓單
 GET    /api/index-intraday?market=TWSE         # 指數「當日」分時（Yahoo 5m，取最新交易日；transient，不寫 DB）
 
 GET    /api/bff/gdp-twse?years=30              # 前端 view 專用，回傳近 N 年彙整資料
+POST   /api/bff/gdp-twse/refresh?years=30      # 並行觸發 TWN+KOR 人均 GDP 回補（見下方說明）
 GET    /api/bff/gdp-twse/index-daily?market=TWSE&years=10
                                                # 指數日線 + MA20/60/240（market=TWSE 或 DJI/SPX/IXIC/SOX/FTSE/DAX/KOSPI/N225；一次載入，前端 dataZoom 切區間）
 POST   /api/bff/gdp-twse/refresh-index-daily?market=TWSE&years=10  # 觸發「當前選取」指數日線回補
@@ -1376,6 +1466,9 @@ volumes:
 | `POST` | `/api/backups` | 觸發手動備份 | （無 body） | `{ filename, sizeBytes, uploadedAt }` |
 | `GET`  | `/api/backups` | 列出所有遠端備份 | （無） | `BackupItem[]` |
 | `POST` | `/api/backups/restore` | 從指定備份還原 | `{ folder, filename, confirmation: "確認還原" }` | `{ status, preRestoreBackup }` |
+| `GET`  | `/api/backups/settings` | 取得保留代數設定（含排程開關） | （無） | `{ manualRetention, dailyRetention, weeklyRetention, backupEnabled }` |
+| `PUT`  | `/api/backups/settings` | 更新保留代數設定（含排程開關） | `{ manualRetention, dailyRetention, weeklyRetention, backupEnabled }` | 同上 |
+| `POST` | `/api/backups/sync` | 從 Google Drive 同步本地索引：upsert 缺漏 / 清孤兒 | （無） | `SyncResponse` |
 
 `BackupItem` 結構：
 ```json
