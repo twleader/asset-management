@@ -32,7 +32,7 @@
           </div>
         </div>
       </template>
-      <v-chart v-if="hasDailyData" :option="dailyChartOption" style="height:480px" autoresize />
+      <v-chart v-if="hasDailyData" ref="dailyChartRef" :option="dailyChartOption" style="height:480px" autoresize @datazoom="onDailyZoom" />
       <el-empty v-else :description="emptyDesc" />
     </el-card>
 
@@ -94,6 +94,9 @@ const dailyMa60 = ref([])
 const dailyMa240 = ref([])
 const dailyRange = ref('1y')
 const dailyRefreshing = ref(false)
+const dailyChartRef = ref(null)
+// 使用者手動拖曳縮放後的 [start,end]%；null＝跟隨區間按鈕預設（最高/最低標記只在可視區間內計算）
+const dailyZoomPct = ref(null)
 
 // 「當日」分時（盤中即時 / 盤後最後交易日）
 const intradayTimes = ref([])
@@ -119,6 +122,23 @@ const emptyDesc = computed(() =>
 
 function num(v) { return v == null ? null : Number(v) }
 function lastOf(arr) { for (let i = arr.length - 1; i >= 0; i--) { if (arr[i] != null) return arr[i] } return null }
+
+// 在可視索引區間 [lo, hi] 內找收盤「最高 / 最低」點，回傳 ECharts markPoint data（紅最高、綠最低，符合紅漲綠跌）
+// coord 以類別字串（labels[i]）定位，避免 dataZoom filterMode:'filter' 重新索引後絕對索引對不準
+function maxMinMarkPoints(data, labels, lo, hi) {
+  let maxI = -1, minI = -1, maxV = -Infinity, minV = Infinity
+  for (let i = lo; i <= hi; i++) {
+    const v = data[i]
+    if (v == null) continue
+    if (v > maxV) { maxV = v; maxI = i }
+    if (v < minV) { minV = v; minI = i }
+  }
+  if (maxI < 0) return []
+  const fmt = v => Math.round(v).toLocaleString()
+  const pts = [{ name: '最高', coord: [labels[maxI], maxV], value: fmt(maxV), itemStyle: { color: '#dc2626' } }]
+  if (minI !== maxI) pts.push({ name: '最低', coord: [labels[minI], minV], value: fmt(minV), itemStyle: { color: '#16a34a' } })
+  return pts
+}
 
 // 當日昨收/漲跌顯示（指數為點位、不帶 $；紅漲綠跌比照觀察清單 priceColor）
 function fmtPoint(v) { return v == null ? '—' : Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }
@@ -166,12 +186,13 @@ async function fetchIntraday() {
 
 function onMarketChange() {
   // 日線（含 MA 水平線值）必抓；當日模式同時重抓分時
+  dailyZoomPct.value = null
   fetchDailyData()
   if (isIntraday.value) fetchIntraday()
 }
 
-// 切到「當日」即時抓分時（每次切入都重抓以反映最新）
-watch(dailyRange, v => { if (v === 'd') fetchIntraday() })
+// 切換區間：清掉手動縮放，最高/最低標記回到該區間預設窗；切到「當日」即時抓分時（每次切入都重抓以反映最新）
+watch(dailyRange, v => { dailyZoomPct.value = null; if (v === 'd') fetchIntraday() })
 
 onMounted(() => {
   Promise.allSettled([fetchData(), fetchDailyData()])
@@ -213,6 +234,20 @@ const dailyZoomRange = computed(() => {
   return { start: (startIdx / total) * 100, end: 100 }
 })
 
+// 目前實際可視窗（手動拖曳優先，否則跟隨區間按鈕；當日模式恆為整段）— 最高/最低標記依此計算
+const effectiveDailyZoom = computed(() =>
+  isIntraday.value ? { start: 0, end: 100 } : (dailyZoomPct.value ?? dailyZoomRange.value))
+
+// 使用者拖曳 dataZoom 後，讀回圖表目前 start/end%，讓最高/最低標記跟著可視區間更新
+function onDailyZoom() {
+  const opt = dailyChartRef.value?.getOption?.()
+  const dz = opt?.dataZoom?.[0]
+  if (!dz || dz.start == null || dz.end == null) return
+  const cur = dailyZoomPct.value
+  if (cur && Math.abs(cur.start - dz.start) < 1e-6 && Math.abs(cur.end - dz.end) < 1e-6) return
+  dailyZoomPct.value = { start: dz.start, end: dz.end }
+}
+
 const dailyChartOption = computed(() => {
   const intraday = isIntraday.value
   // 當日模式：x 軸為分時 HH:mm、收盤＝分時 closes、月/季/年線改畫水平參考線（取日線最新 MA 值，同口徑）
@@ -221,12 +256,21 @@ const dailyChartOption = computed(() => {
   const ma20Data = intraday ? xData.map(() => lastOf(dailyMa20.value)) : dailyMa20.value
   const ma60Data = intraday ? xData.map(() => lastOf(dailyMa60.value)) : dailyMa60.value
   const ma240Data = intraday ? xData.map(() => lastOf(dailyMa240.value)) : dailyMa240.value
+  const ez = effectiveDailyZoom.value
   const dataZoom = intraday
     ? [{ type: 'inside', start: 0, end: 100 }, { type: 'slider', start: 0, end: 100, height: 20, bottom: 10 }]
     : [
-        { type: 'inside', start: dailyZoomRange.value.start, end: dailyZoomRange.value.end },
-        { type: 'slider', start: dailyZoomRange.value.start, end: dailyZoomRange.value.end, height: 20, bottom: 10 }
+        { type: 'inside', start: ez.start, end: ez.end },
+        { type: 'slider', start: ez.start, end: ez.end, height: 20, bottom: 10 }
       ]
+  // 最高 / 最低點：只在目前可視區間內找（資料為完整 10 年、區間按鈕只調縮放，不可用 ECharts 原生 max/min）
+  let markData = []
+  const totalPts = closeData.length
+  if (totalPts > 0) {
+    const loIdx = Math.max(0, Math.floor((ez.start / 100) * (totalPts - 1)))
+    const hiIdx = Math.min(totalPts - 1, Math.ceil((ez.end / 100) * (totalPts - 1)))
+    markData = maxMinMarkPoints(closeData, xData, loIdx, hiIdx)
+  }
   // 當日模式 Y 軸鎖定「當日價格區間」(+10% padding)，避免被遠離當日價位的均線水平線撐平走勢；
   // 日線模式維持 scale:true。均線水平線落在區間外時由 series clip 自動裁切，數值仍保留在 legend。
   let yAxis = { type: 'value', name: '收盤點位', scale: true, axisLabel: { formatter: v => v.toLocaleString() } }
@@ -295,7 +339,20 @@ const dailyChartOption = computed(() => {
         showSymbol: false,
         sampling: 'lttb',
         lineStyle: { width: 1.5, color: '#1f2937' },
-        itemStyle: { color: '#1f2937' }
+        itemStyle: { color: '#1f2937' },
+        markPoint: {
+          symbol: 'pin',
+          symbolSize: 58,
+          data: markData,
+          label: {
+            show: true,
+            color: '#fff',
+            fontSize: 10,
+            fontWeight: 'bold',
+            lineHeight: 12,
+            formatter: p => `${p.name}\n${p.value}`
+          }
+        }
       },
       {
         name: '月線 (MA20)',
