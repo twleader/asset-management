@@ -125,6 +125,7 @@ function lastOf(arr) { for (let i = arr.length - 1; i >= 0; i--) { if (arr[i] !=
 
 // 在可視索引區間 [lo, hi] 內找收盤「最高 / 最低」點，回傳 ECharts markPoint data（紅最高、綠最低，符合紅漲綠跌）
 // coord 以類別字串（labels[i]）定位，避免 dataZoom filterMode:'filter' 重新索引後絕對索引對不準
+// xlabel = labels[i]＝日線模式為日期、當日模式為 HH:mm 時間（標籤第二行直接顯示，不必分支）
 function maxMinMarkPoints(data, labels, lo, hi) {
   let maxI = -1, minI = -1, maxV = -Infinity, minV = Infinity
   for (let i = lo; i <= hi; i++) {
@@ -135,8 +136,24 @@ function maxMinMarkPoints(data, labels, lo, hi) {
   }
   if (maxI < 0) return []
   const fmt = v => Math.round(v).toLocaleString()
-  const pts = [{ name: '最高', coord: [labels[maxI], maxV], value: fmt(maxV), itemStyle: { color: '#dc2626' } }]
-  if (minI !== maxI) pts.push({ name: '最低', coord: [labels[minI], minV], value: fmt(minV), itemStyle: { color: '#16a34a' } })
+  const span = Math.max(1, hi - lo)
+  // 標籤色塊位置依該點在可視窗的水平位置避邊：靠右→放左、靠左→放右、其餘上下（最高在下、最低在上，避免撞到頂部 legend / 底部縮放軸）
+  const pos = (i, isMax) => {
+    const fx = (i - lo) / span
+    if (fx > 0.82) return 'left'
+    if (fx < 0.18) return 'right'
+    return isMax ? 'bottom' : 'top'
+  }
+  const mk = (i, v, isMax) => ({
+    name: isMax ? '最高' : '最低',
+    coord: [labels[i], v],
+    value: fmt(v),
+    xlabel: labels[i],
+    itemStyle: { color: isMax ? '#dc2626' : '#16a34a' },
+    label: { position: pos(i, isMax), backgroundColor: isMax ? '#dc2626' : '#16a34a' }
+  })
+  const pts = [mk(maxI, maxV, true)]
+  if (minI !== maxI) pts.push(mk(minI, minV, false))
   return pts
 }
 
@@ -341,16 +358,21 @@ const dailyChartOption = computed(() => {
         lineStyle: { width: 1.5, color: '#1f2937' },
         itemStyle: { color: '#1f2937' },
         markPoint: {
-          symbol: 'pin',
-          symbolSize: 58,
+          symbol: 'circle',
+          symbolSize: 9,
           data: markData,
+          // 第一行「最高/最低 + 點位」、第二行日期（當日模式為時間）；色塊（紅/綠底白字）置於 pin 外，位置由各點自適應避邊
           label: {
             show: true,
             color: '#fff',
-            fontSize: 10,
+            fontSize: 11,
             fontWeight: 'bold',
-            lineHeight: 12,
-            formatter: p => `${p.name}\n${p.value}`
+            lineHeight: 15,
+            align: 'center',
+            padding: [3, 6],
+            borderRadius: 4,
+            distance: 7,
+            formatter: p => `${p.name} ${p.value}\n${p.data.xlabel}`
           }
         }
       },
