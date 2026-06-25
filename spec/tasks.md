@@ -3125,3 +3125,23 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 122.1 `SnapshotEnricher.buildMergedStocks`：revalue 區塊條件加 `isCurrentBasedate(basedate, market)`（basedate ← `detail.snapshotDate`）。僅今日市場 revalue，過去日期保留 stored。單一改點涵蓋 Dashboard 4 個 call site；編輯頁（`revalueFromClose=false`）不受影響；前端 `overlayLivePrice` 已 gate on `shouldApplyLive`（今日），無需改
 - [x] 122.2 spec：`requirements.md` line 161（反轉為 per-market 閘門）、`design.md` `buildMergedStocks` 段、`tasks.md` 本任務（含 Task 121.5 結案）
 - [x] 122.3 Docker 重 build + recreate（bff）後驗證：`GET /api/bff/dashboard/snapshot/11`（6/23）美股現值加總 == 1,360,337（stored）== `GET /api/bff/asset-history` 6/23 totalUsStockValue；今日快照（id=14, 6/24）台股 revalue == 10,320,009（非 stored 10,567,772）、美股 revalue == 1,350,361，Task 108 今日列重算保留
+
+---
+
+### Task 123: 指數日線圖標出可視區間最高 / 最低點（Requirement 18）
+
+**需求**：「股市分析」頁第三張卡（指數每日收盤日線圖）的「收盤」線要標出最高點與最低點。
+
+**關鍵設計**（`GdpTwseView.vue`）：
+- 日線資料為完整 10 年一次載入、區間鈕（1 個月～10 年）僅調 dataZoom 縮放窗、不重抓 → **不可用 ECharts 原生 `markPoint type:'max'/'min'`**（會掃整段 10 年極值，縮到短區間時最低點落在畫面外、看似壞掉）。改在**目前可視窗**內自行找極值。
+- 新增 `effectiveDailyZoom`（= 手動拖曳 `dailyZoomPct` 優先，否則區間鈕預設 `dailyZoomRange`；當日模式恆為整段），以 start/end% 換算可視索引範圍 `[lo,hi]`，於該範圍找收盤最高 / 最低。
+- 新增 `@datazoom="onDailyZoom"`：使用者手動拖曳滑桿後讀回圖表當前 start/end%（`getOption().dataZoom[0]`）寫入 `dailyZoomPct`，標記即時跟著可視區間重算（含去抖：值未變不更新，避免迴圈）。
+- 切換市場 / 區間時清掉 `dailyZoomPct`（回該區間預設窗）。
+- markPoint `coord` 以該點**日期字串**（`labels[i]`）定位、非絕對索引 → 避免 dataZoom `filterMode:'filter'` 過濾視窗外資料後索引對不準。
+- pin 標記：紅最高、綠最低（台股紅漲綠跌），pin 內兩行顯示「最高／最低 + 點位（`Math.round` 千分位）」。「當日」分時模式同口徑標出當日最高 / 最低。
+
+**設計**：見 `requirements.md` Req 18（日線圖最高/最低 AC）。純前端顯示標記，無 API / 資料模型 / 契約變更。
+
+- [x] 123.1 `GdpTwseView.vue`：新增 `dailyChartRef` / `dailyZoomPct` / `effectiveDailyZoom` / `onDailyZoom` / `maxMinMarkPoints`；收盤 series 加 `markPoint`；template v-chart 加 `ref` 與 `@datazoom`；市場/區間切換重置手動縮放
+- [x] 123.2 spec：`requirements.md` Req 18 新增 AC、`tasks.md` 本任務
+- [ ] 123.3 Docker 重 build + recreate（frontend）後截圖驗證：1 年區間下收盤線出現紅（最高）綠（最低）pin，數值落在可視區間內
