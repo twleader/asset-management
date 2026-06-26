@@ -3145,3 +3145,23 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 123.1 `GdpTwseView.vue`：新增 `dailyChartRef` / `dailyZoomPct` / `effectiveDailyZoom` / `onDailyZoom` / `maxMinMarkPoints`；收盤 series 加 `markPoint`；template v-chart 加 `ref` 與 `@datazoom`；市場/區間切換重置手動縮放
 - [x] 123.2 spec：`requirements.md` Req 18 新增 AC、`tasks.md` 本任務
 - [ ] 123.3 Docker 重 build + recreate（frontend）後截圖驗證：1 年區間下收盤線出現紅（最高）綠（最低）pin，數值落在可視區間內
+
+---
+
+### Task 124: 股票分析走勢圖標出可視區間最高 / 最低點（Requirement 13）
+
+**需求**：雙擊股票開啟的「股票分析」走勢圖（`StockAnalysisDialog`），「股價」線要標出最高點與最低點，含日期 / 價位；「當日」分時模式第二行改顯示時間（HH:mm）。與指數圖 Task 123 同設計，套用到個股走勢圖。
+
+**關鍵設計**（`StockAnalysisDialog.vue`）：
+- 日線資料為一次載 10 年、期間鈕（當日 ~ 10 年）僅調 dataZoom 縮放窗、不重抓 → **不可用 ECharts 原生 `markPoint type:'max'/'min'`**（會掃整段極值、縮到短區間時極值落在畫面外）。改在**目前可視窗**內自行找極值。
+- 抽出 `defaultZoomRange`（原寫死在 dataZoom IIFE 內的 startPct 邏輯：日線以 `months × ~21 交易日` 換算、當日恆整段），新增 `zoomPct`（手動拖曳）+ `effectiveZoom`（拖曳優先、否則期間預設）。dataZoom 與最高/最低標記同走 `effectiveZoom`，以 start/end% 換算可視索引 `[lo,hi]` 找股價極值。
+- 新增 `@datazoom="onZoom"`：手動拖曳後讀回 `chartRef.getOption().dataZoom[0]` 寫入 `zoomPct`（去抖避免迴圈），標記即時跟著可視窗重算。
+- 切換股票（`onOpen`）/ 區間（`watch(months)`）時清掉 `zoomPct`（回該區間預設窗）。
+- markPoint `coord` 以該點**類別字串**（`dates[i]`，日線為日期、當日為 HH:mm）定位、非絕對索引。
+- 標記：小圓點 + 外置色塊標籤（紅最高、綠最低），兩行——第一行「最高／最低 + 股價（`toLocaleString` 2 位小數千分位，比照 legend 口徑，個股為小數非整數點位）」、第二行 `dates[i]`＝日線日期 / 當日時間。色塊位置 `pos(i,isMax)` 依水平比例自適應避邊。
+
+**設計**：見 `requirements.md` Req 13 新增 AC。純前端顯示標記，無 API / 資料模型 / 契約變更。
+
+- [x] 124.1 `StockAnalysisDialog.vue`：新增 `chartRef` / `zoomPct` / `defaultZoomRange` / `effectiveZoom` / `onZoom` / `maxMinMarkPoints`；dataZoom IIFE 改吃 `effectiveZoom`；股價 series 加 `markPoint`；template v-chart 加 `ref` 與 `@datazoom`；開啟/區間切換重置手動縮放
+- [x] 124.2 spec：`requirements.md` Req 13 新增 AC、`tasks.md` 本任務
+- [ ] 124.3 Docker 重 build + recreate（frontend）後截圖驗證：1 年區間下股價線出現紅（最高）綠（最低）標記，含日期/價位；切「當日」第二行顯示 HH:mm
