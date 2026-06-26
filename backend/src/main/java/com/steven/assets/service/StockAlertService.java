@@ -37,6 +37,7 @@ public class StockAlertService {
     private final PriceQueryService priceQuery;
     private final StockPriceHistoryRepository historyRepo;
     private final StockRepository stockMasterRepo;
+    private final StockMasterService stockMasterService;
     private final HistoricalDataService historicalDataService;
     private final TechnicalIndicatorService indicatorService;
     private final AlertNotificationDispatcher notificationDispatcher;
@@ -68,7 +69,7 @@ public class StockAlertService {
         // 0000 = 台股大盤：不寫入 stock 主檔（避免被排程當真股票抓價，價格走 twse_index_daily_history）
         boolean isTaiex = "0000".equals(code) && "台股".equals(req.getMarket());
         if (!isTaiex && req.getStockName() != null && !req.getStockName().isBlank()) {
-            stockMasterRepo.upsert(code, req.getMarket(), req.getStockName().trim());
+            stockMasterService.upsert(code, req.getMarket(), req.getStockName().trim());
         }
         return toResponse(alertRepo.save(alert));
     }
@@ -94,7 +95,7 @@ public class StockAlertService {
         alert.setMarket(req.getMarket());
         boolean isTaiex = "0000".equals(code) && "台股".equals(req.getMarket());
         if (!isTaiex && req.getStockName() != null && !req.getStockName().isBlank()) {
-            stockMasterRepo.upsert(code, req.getMarket(), req.getStockName().trim());
+            stockMasterService.upsert(code, req.getMarket(), req.getStockName().trim());
         }
         alert.setAlertType(req.getAlertType());
         alert.setMaPeriod(req.getMaPeriod());

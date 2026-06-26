@@ -49,6 +49,7 @@ com.steven.assets/
 - `MarketDataService`: 股利率查詢、ETF 持股查詢等不屬於即時報價的市場資料（外部抓價已搬至 `external-materials-service`）
 - `PriceQueryService`: 對 `external-materials-service` 寫入 Redis 的 live 行情做唯讀；live 一律先讀 Redis，miss 則 fallback 至 `stock_price_history` 最近一筆收盤；歷史收盤直接讀 DB。`MarketDataController` 等對外 endpoint 皆透過此 service 取值，介面對 BFF / 前端不變
 - `HistoricalDataService`: 歷史股價與匯率資料管理；歷史回補範圍以 `stock` 主檔（含曾持有 / 觀察清單 / 警示）為主，並聯集歷史快照中的持股代號
+- `StockMasterService`: `stock` 主檔（被觀察 / 持有 / 警示標的的聯集）的唯一寫入入口。原本各路徑各自呼叫 `StockRepository.upsert(code, market, name)`，現統一改走 `StockMasterService.upsert(...)`：先以 `existsByCodeAndMarket` 判定是否為「新標的」（先前不存在），upsert 後若為新標的（且非台股大盤 0000）即以**單執行緒佇列**（serialize，避免大量匯入時並發打爆 Yahoo）背景呼叫 `HistoricalDataService.backfillSingleStock(code, market, now−10y)` 觸發 10 年歷史回補。動機：`HistoricalBackfillService.startupBackfill` 只在「服務啟動」掃描主檔回補，兩次重啟之間新增的標的（例 2026-06 新增英股 IB01）會落入「即時價有、走勢圖歷史只有今日一格」的空窗。呼叫端：`StockAlertService.create/update`、`AssetService.createSnapshot/updateSnapshot`、`StockAlertController.lookupName`（皆原 upsert 點）。既有標的的名稱更新 → `isNew=false` → 不重複回補；回補本身 idempotent（skip 已存在日期、今日列獨佔給 `ClosePersister`），失敗則由下次重啟 `startupBackfill` 的 stale/missing 條件補救
 - `InstitutionService`: 銀行、券商、存款類型、市場類型的 CRUD、停用管理、關鍵字比對邏輯
 
 **BFF 層**（`bff/` 模組）
