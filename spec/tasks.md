@@ -3166,14 +3166,40 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 124.2 spec：`requirements.md` Req 13 新增 AC、`tasks.md` 本任務
 - [ ] 124.3 Docker 重 build + recreate（frontend）後截圖驗證：1 年區間下股價線出現紅（最高）綠（最低）標記，含日期/價位；切「當日」第二行顯示 HH:mm
 
+---
+
+### Task 125: 每條警示挑選通知收件人（Requirement 23）
+
+對應 Requirements: Requirement 23（警示觸發 Email 通知）
+
+**需求**：原本警示觸發時一律寄給「所有 `active=true` 收件人」。需求是**每條警示能各自挑選要寄到哪幾個 email**（例：台股大盤警示寄給本人、某美股警示只寄給家人）。
+
+**關鍵設計**：
+- 警示 ↔ 收件人多對多，新增 join 表 `stock_alert_recipient(alert_id, recipient_id)`（組合 unique），不在 `stock_alert` 存逗號分隔 email（正規化、避免與 `notification_recipient` 重複儲存同一事實）。沿用本專案「以 Long id 顯式關聯」慣例（同 `StockAlertTrigger.alertId`），不映射 JPA `@ManyToMany`，避免 lazy-init 與 dispatcher 取值複雜化。
+- dispatcher 由「全部觸發一封、寄所有 active 收件人」改為 **per-recipient**：逐筆觸發以 `alert_id` 查選定收件人、交集 `active=true`，反轉成 `Map<email, List<觸發>>`，每位收件人各組一封僅含其訂閱觸發的 digest，`sendHtml(List.of(email), …)` 單一收件人寄出（順帶保護彼此 email 隱私）。`recipientsFor(alertId)` 與走勢圖 PNG 皆於該輪 flush 內快取，避免重查 / 重 render。補發 `resendLastTradingDay()` 同樣改 per-recipient。
+- 升級相容：Liquibase 把現有警示 × 現有收件人全配對回填（`CROSS JOIN`），維持升級前「全部都收」行為，不造成寄信回歸。
+- 前端警示對話框加「通知對象」多選（全部收件人、可全選/全不選），新警示預設全選；可選清單走同頁 BFF `GET /api/bff/stock-alert/recipients`（passthrough → `/api/stock-alerts/recipients`，後端委派 `NotificationRecipientService`，與通知設定頁同源）。
+
+**設計**：見 `requirements.md` Req 23 新增 AC（「每條警示挑選收件人」）、`design.md`（`StockAlertRecipient` 資料模型、`GET /api/stock-alerts/recipients`、dispatcher per-recipient flow）。
+
+- [x] 125.1 DB：`v1.33.0-stock-alert-recipient.sql`（建表 + `CROSS JOIN` 回填）、掛入 `db.changelog-master.yaml`
+- [x] 125.2 後端 model/repo：`StockAlertRecipient` Entity + `StockAlertRecipientRepository`（`findRecipientIdsByAlertId`、`findActiveEmailsByAlertId` join 查詢、`deleteByAlertId`/`deleteByRecipientId` 用 **bulk `@Modifying @Query`**——避免衍生刪除的 entity-remove 被 Hibernate 排在 insert 之後而撞 unique）
+- [x] 125.3 後端 DTO：`StockAlertDto.Request` / `Response` 新增 `recipientIds`（`List<Long>`）
+- [x] 125.4 後端 service：`StockAlertService.create/update` 覆寫 join 列（先刪後插）、`toResponse` 回填 `recipientIds`、`delete` 連帶刪 join；新增 `listRecipients()` 委派 `NotificationRecipientService`；`NotificationRecipientService.delete` 連帶刪 join
+- [x] 125.5 後端 controller：`GET /api/stock-alerts/recipients`
+- [x] 125.6 後端 dispatcher：`PendingTrigger` 加 `alertId`；`flush` / `resendLastTradingDay` 改 per-recipient（`recipientsFor` 快取、走勢圖 PNG 快取）；`ResendResult` 加 `recipientCount`，補發提示「N 檔股票給 M 位收件人」
+- [x] 125.7 前端：`api/index.js` `stockAlert.getRecipients`；`StockAlertView.vue` 對話框「通知對象」多選（載入收件人、預設全選、儲存帶 `recipientIds`、編輯回填）
+- [x] 125.8 spec：`requirements.md` Req 23 新增 AC、`design.md`、`tasks.md` 本任務
+- [x] 125.9 Docker 重 build + recreate（backend + frontend）+ 端到端驗證（後端 API 全綠）：升級 backfill 令現有 74 條警示皆 `[1,2]`；`GET /recipients` OK；update 覆寫 `[1]`→`[]`→還原皆持久化正確；create 不帶 → 預設全選、帶 `[2]` → `[2]`；delete 連帶清 join 無 FK 錯。實機測試抓出並修掉「先刪後插 unique 違反」bug。前端 bundle 已含「通知對象」+ `getRecipients`，待使用者於瀏覽器最後目視確認對話框
+
 ### Task 126: 新增追蹤標的時即時觸發 10 年歷史回補（Requirement 7 bug fix）
 
 對應 Requirements: Requirement 7（市場資料整合 — 「凡列入 `stock` 主檔的股票皆自動納入 10 年歷史回補」AC）
 
-**問題**（實機 2026-06 暴露）：使用者新增英股 IB01 後，走勢圖只有今日一格（120.82），無歷史線、MA / KD / 最高最低標記皆失效。根因：`stock_price_history` 中 IB01 僅 1 筆。即時價輪詢（`PricePoller`「更新英股即時價格 N 檔」）有抓到它、`ClosePersister` 也寫了當日收盤，但 **10 年歷史從未被回補** —— `HistoricalBackfillService.startupBackfill` 只在「服務啟動」掃描 `stock` 主檔回補歷史，而 IB01 是上次 ext-materials 重啟（2026-06-23）之後才新增（啟動時英股清單只有 VUAA / VWRA），於是落入「兩次重啟之間新增 → 即時價有、歷史空」的空窗。新增標的的任何路徑都不會觸發歷史回補（`backfillSingleStock` 原本只由手動端點 `/api/market-data/history/backfill-stock` 呼叫）。
+**問題**（實機 2026-06 暴露）：使用者新增英股 IB01 後，走勢圖只有今日一格（120.82），無歷史線、MA / KD / 最高最低標記皆失效。根因：`stock_price_history` 中 IB01 僅 1 筆。即時價輪詢（`PricePoller`「更新英股即時價格 N 檔」）有抓到它、`ClosePersister` 也寫了當日收盤，但 **10 年歷史從未被回補** —— `HistoricalBackfillService.startupBackfill` 只在「服務啟動」掃描 `stock` 主檔回補，而 IB01 是上次 ext-materials 重啟（2026-06-23）之後才新增（啟動時英股清單只有 VUAA / VWRA），於是落入「兩次重啟之間新增 → 即時價有、歷史空」的空窗。新增標的的任何路徑都不會觸發歷史回補（`backfillSingleStock` 原本只由手動端點 `/api/market-data/history/backfill-stock` 呼叫）。
 
 **關鍵設計**：
-- 新增 `StockMasterService` 作為 `stock` 主檔唯一寫入入口，包住原 `StockRepository.upsert`。`upsert(code, market, name)` 先 `existsByCodeAndMarket` 判 `isNew`，upsert 後若 `isNew` 且非台股大盤 0000 → 以**單執行緒 daemon 佇列**（serialize 避免大量匯入時並發打爆 Yahoo 429）背景呼叫 `HistoricalDataService.backfillSingleStock(code, market, now−10y)`（proxy 至 ext-materials `/internal/backfill/stock`）。
+- 新增 `StockMasterService` 作為 `stock` 主檔唯一寫入入口，包住原 `StockRepository.upsert`。`upsert(code, market, name)` 先 `existsByCodeAndMarket` 判 `isNew`，upsert 後若 `isNew` 且非台股大盤 0000 → 以**單執行緒 daemon 佇列**（serialize 避免大量匯入並發打爆 Yahoo 429）背景呼叫 `HistoricalDataService.backfillSingleStock(code, market, now−10y)`（proxy 至 ext-materials `/internal/backfill/stock`）。
 - 所有原 upsert 呼叫點改注入 `StockMasterService` 並改走 `stockMasterService.upsert(...)`：`StockAlertService.create/update`、`AssetService.createSnapshot/updateSnapshot`、`StockAlertController.lookupName`。既有標的名稱更新 → `isNew=false` → 不重複回補。
 - 回補 idempotent：ext-materials `backfillUkStock/backfillUsStock/backfillTwStock` skip 已存在日期、且**今日列獨佔給 `ClosePersister`**（Req 7，不寫今日 partial bar）；失敗則由下次重啟 `startupBackfill` 的 stale/missing 條件補救。
 - 台股大盤 0000 不在此列（歷史走 `twse_index_daily_history`，且 `StockAlertService` 原本就不對 0000 寫主檔）。
@@ -3185,4 +3211,4 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 126.3 後端 service：新增 `StockMasterService`（單執行緒佇列背景回補、isNew 判定、0000 排除）
 - [x] 126.4 後端改呼叫點：`StockAlertService`(×2)、`AssetService`(×2)、`StockAlertController`(×1) 改走 `StockMasterService.upsert`
 - [x] 126.5 spec：`requirements.md` Req 7、`design.md`、`tasks.md` 本任務
-- [ ] 126.6 Docker 重 build + recreate（business-services）後驗證：新增一檔未追蹤過的標的，背景 log 出現「新增標的 … 自動回補 … 筆」，`stock_price_history` 出現多年資料、走勢圖完整
+- [ ] 126.6 Docker 重 build + recreate（business-services）後驗證：新增一檔未追蹤過的標的，背景 log 出現「新增標的 … 自動回補 … 筆」，`stock_price_history` 出現多年資料、走勢圖完整（**待辦：與並行的 Task 125 同時在工作目錄，須先協調再 build/commit**）

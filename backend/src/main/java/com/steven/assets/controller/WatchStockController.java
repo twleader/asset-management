@@ -49,9 +49,9 @@ public class WatchStockController {
     public ResendDigestResponse resendDigest() {
         AlertNotificationDispatcher.ResendResult r = notificationDispatcher.resendLastTradingDay();
         String message = switch (r.status()) {
-            case SENT -> String.format("已補發 %d 檔股票的觸發事件", r.count());
+            case SENT -> String.format("已補發 %d 檔股票給 %d 位收件人", r.count(), r.recipientCount());
             case NO_EVENTS -> "各市場最後交易日皆無觸發事件，無可補發";
-            case NO_RECIPIENTS -> "無啟用中的通知收件人，請先到通知設定新增";
+            case NO_RECIPIENTS -> "這些補發事件無任何啟用收件人訂閱（請確認警示已勾選收件人且收件人為啟用）";
             case EMAIL_DISABLED -> "Email 服務未啟用（未設定 MAIL_USERNAME），無法補發";
         };
         return new ResendDigestResponse(

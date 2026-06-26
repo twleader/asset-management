@@ -3,6 +3,7 @@ package com.steven.assets.service;
 import com.steven.assets.dto.NotificationRecipientDto;
 import com.steven.assets.model.NotificationRecipient;
 import com.steven.assets.repository.NotificationRecipientRepository;
+import com.steven.assets.repository.StockAlertRecipientRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -14,6 +15,7 @@ import java.util.List;
 public class NotificationRecipientService {
 
     private final NotificationRecipientRepository repo;
+    private final StockAlertRecipientRepository alertRecipientRepo;
 
     public List<NotificationRecipientDto.Response> findAll() {
         return repo.findAllByOrderByCreatedAtAsc().stream().map(this::toResponse).toList();
@@ -56,6 +58,7 @@ public class NotificationRecipientService {
 
     @Transactional
     public void delete(Long id) {
+        alertRecipientRepo.deleteByRecipientId(id);   // Task 125：連帶刪除其在警示 join 表的列（DB 亦有 ON DELETE CASCADE 雙保險）
         repo.deleteById(id);
     }
 
