@@ -3165,3 +3165,24 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 124.1 `StockAnalysisDialog.vue`：新增 `chartRef` / `zoomPct` / `defaultZoomRange` / `effectiveZoom` / `onZoom` / `maxMinMarkPoints`；dataZoom IIFE 改吃 `effectiveZoom`；股價 series 加 `markPoint`；template v-chart 加 `ref` 與 `@datazoom`；開啟/區間切換重置手動縮放
 - [x] 124.2 spec：`requirements.md` Req 13 新增 AC、`tasks.md` 本任務
 - [ ] 124.3 Docker 重 build + recreate（frontend）後截圖驗證：1 年區間下股價線出現紅（最高）綠（最低）標記，含日期/價位；切「當日」第二行顯示 HH:mm
+
+### Task 126: 新增追蹤標的時即時觸發 10 年歷史回補（Requirement 7 bug fix）
+
+對應 Requirements: Requirement 7（市場資料整合 — 「凡列入 `stock` 主檔的股票皆自動納入 10 年歷史回補」AC）
+
+**問題**（實機 2026-06 暴露）：使用者新增英股 IB01 後，走勢圖只有今日一格（120.82），無歷史線、MA / KD / 最高最低標記皆失效。根因：`stock_price_history` 中 IB01 僅 1 筆。即時價輪詢（`PricePoller`「更新英股即時價格 N 檔」）有抓到它、`ClosePersister` 也寫了當日收盤，但 **10 年歷史從未被回補** —— `HistoricalBackfillService.startupBackfill` 只在「服務啟動」掃描 `stock` 主檔回補歷史，而 IB01 是上次 ext-materials 重啟（2026-06-23）之後才新增（啟動時英股清單只有 VUAA / VWRA），於是落入「兩次重啟之間新增 → 即時價有、歷史空」的空窗。新增標的的任何路徑都不會觸發歷史回補（`backfillSingleStock` 原本只由手動端點 `/api/market-data/history/backfill-stock` 呼叫）。
+
+**關鍵設計**：
+- 新增 `StockMasterService` 作為 `stock` 主檔唯一寫入入口，包住原 `StockRepository.upsert`。`upsert(code, market, name)` 先 `existsByCodeAndMarket` 判 `isNew`，upsert 後若 `isNew` 且非台股大盤 0000 → 以**單執行緒 daemon 佇列**（serialize 避免大量匯入時並發打爆 Yahoo 429）背景呼叫 `HistoricalDataService.backfillSingleStock(code, market, now−10y)`（proxy 至 ext-materials `/internal/backfill/stock`）。
+- 所有原 upsert 呼叫點改注入 `StockMasterService` 並改走 `stockMasterService.upsert(...)`：`StockAlertService.create/update`、`AssetService.createSnapshot/updateSnapshot`、`StockAlertController.lookupName`。既有標的名稱更新 → `isNew=false` → 不重複回補。
+- 回補 idempotent：ext-materials `backfillUkStock/backfillUsStock/backfillTwStock` skip 已存在日期、且**今日列獨佔給 `ClosePersister`**（Req 7，不寫今日 partial bar）；失敗則由下次重啟 `startupBackfill` 的 stale/missing 條件補救。
+- 台股大盤 0000 不在此列（歷史走 `twse_index_daily_history`，且 `StockAlertService` 原本就不對 0000 寫主檔）。
+
+**設計**：見 `requirements.md` Req 7 新增 AC（「新標的首次寫入主檔即時觸發回補」）、`design.md` `StockMasterService` 段。
+
+- [x] 126.1 立即補資料：手動觸發 IB01 10 年回補（`/internal/backfill/stock?code=IB01&market=英股&since=…`），補入 1854 筆（2019-02-20～2026-06-25）
+- [x] 126.2 後端 repo：`StockRepository` 加 `existsByCodeAndMarket(code, market)`
+- [x] 126.3 後端 service：新增 `StockMasterService`（單執行緒佇列背景回補、isNew 判定、0000 排除）
+- [x] 126.4 後端改呼叫點：`StockAlertService`(×2)、`AssetService`(×2)、`StockAlertController`(×1) 改走 `StockMasterService.upsert`
+- [x] 126.5 spec：`requirements.md` Req 7、`design.md`、`tasks.md` 本任務
+- [ ] 126.6 Docker 重 build + recreate（business-services）後驗證：新增一檔未追蹤過的標的，背景 log 出現「新增標的 … 自動回補 … 筆」，`stock_price_history` 出現多年資料、走勢圖完整

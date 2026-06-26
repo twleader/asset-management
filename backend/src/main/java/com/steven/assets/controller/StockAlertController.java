@@ -4,6 +4,7 @@ import com.steven.assets.dto.StockAlertDto;
 import com.steven.assets.repository.StockRepository;
 import com.steven.assets.service.HistoricalDataService;
 import com.steven.assets.service.StockAlertService;
+import com.steven.assets.service.StockMasterService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -18,6 +19,7 @@ public class StockAlertController {
 
     private final StockAlertService service;
     private final StockRepository stockMasterRepo;
+    private final StockMasterService stockMasterService;
     private final HistoricalDataService historicalDataService;
 
     @GetMapping
@@ -92,9 +94,9 @@ public class StockAlertController {
             if ("台股".equals(market)) name = historicalDataService.fetchTwStockName(upperCode);
             else if ("英股".equals(market)) name = historicalDataService.fetchUkStockName(upperCode);
             else name = historicalDataService.fetchUsStockName(upperCode);
-            // 3. 查到後存入主檔，下次直接用本地
+            // 3. 查到後存入主檔，下次直接用本地（新標的順帶背景觸發 10 年歷史回補）
             if (!name.isEmpty()) {
-                stockMasterRepo.upsert(upperCode, market, name);
+                stockMasterService.upsert(upperCode, market, name);
             }
         }
 

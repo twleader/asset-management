@@ -32,6 +32,7 @@ public class AssetService {
     private final BankRepository bankRepo;
     private final BrokerRepository brokerRepo;
     private final StockRepository stockMasterRepo;
+    private final StockMasterService stockMasterService;
     private final TransitFundTypeRepository transitFundTypeRepo;
     private final FundNavService fundNavService;
     private final FundDividendService fundDividendService;
@@ -192,7 +193,7 @@ public class AssetService {
                 if (st.stockCode() != null && st.stockName() != null
                         && !st.stockName().isBlank()
                         && !st.stockName().equalsIgnoreCase(st.stockCode())) {
-                    stockMasterRepo.upsert(st.stockCode(), st.market(), st.stockName());
+                    stockMasterService.upsert(st.stockCode(), st.market(), st.stockName());
                 }
             });
         }
@@ -339,7 +340,7 @@ public class AssetService {
                 if (st.stockCode() != null && st.stockName() != null
                         && !st.stockName().isBlank()
                         && !st.stockName().equalsIgnoreCase(st.stockCode())) {
-                    stockMasterRepo.upsert(st.stockCode(), st.market(), st.stockName());
+                    stockMasterService.upsert(st.stockCode(), st.market(), st.stockName());
                 }
             });
         }
