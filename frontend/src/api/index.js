@@ -167,6 +167,7 @@ export const bffApi = {
   // StockAlert
   stockAlert: {
     getAll:    () => api.get('/bff/stock-alert'),
+    getRecipients: () => api.get('/bff/stock-alert/recipients'),   // 警示對話框「通知對象」可挑選清單（Task 125）
     reorder:   (ids) => api.put('/bff/stock-alert/reorder', ids),
     lookupName:(params) => api.get('/bff/stock-alert/lookup-name', { params }),
     lookupCode:(params) => api.get('/bff/stock-alert/lookup-code', { params }),

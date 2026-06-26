@@ -189,6 +189,28 @@
           </el-form-item>
         </template>
 
+        <el-divider content-position="left">通知對象</el-divider>
+
+        <el-form-item label="收件人">
+          <div v-if="recipients.length === 0" style="color:#94a3b8;font-size:13px;line-height:1.6">
+            尚未設定任何收件人，請先到「警示通知設定」新增 email；此警示觸發時不會寄信。
+          </div>
+          <div v-else style="width:100%">
+            <el-checkbox
+              v-model="recipientAllChecked"
+              :indeterminate="recipientIndeterminate"
+              style="margin-bottom:2px">全選</el-checkbox>
+            <el-checkbox-group v-model="form.recipientIds" style="display:flex;flex-direction:column">
+              <el-checkbox v-for="r in recipients" :key="r.id" :value="r.id">
+                {{ r.email }}<span v-if="!r.active" style="color:#f56c6c;margin-left:4px">(停用)</span>
+              </el-checkbox>
+            </el-checkbox-group>
+            <div style="color:#94a3b8;font-size:12px;margin-top:2px;line-height:1.5">
+              觸發時只寄給有勾選且「啟用」中的收件人；未勾選任何人則此警示不寄信。
+            </div>
+          </div>
+        </el-form-item>
+
         <el-form-item label="啟用">
           <el-switch v-model="form.active" />
         </el-form-item>
@@ -233,6 +255,21 @@ const dialogVisible = ref(false)
 const editId = ref(null)
 const tableRef = ref(null)
 
+// ===== 通知收件人（Task 125）=====
+const recipients = ref([])               // 可挑選的全部收件人 [{id,email,active}]
+const allRecipientIds = computed(() => recipients.value.map(r => r.id))
+const recipientAllChecked = computed({
+  get: () => recipients.value.length > 0 && form.recipientIds.length === recipients.value.length,
+  set: (val) => { form.recipientIds = val ? allRecipientIds.value.slice() : [] }
+})
+const recipientIndeterminate = computed(() =>
+  form.recipientIds.length > 0 && form.recipientIds.length < recipients.value.length)
+
+async function loadRecipients() {
+  try { recipients.value = await bffApi.stockAlert.getRecipients() }
+  catch { recipients.value = [] }
+}
+
 const defaultForm = () => ({
   market: '台股',
   stockCode: '',
@@ -243,6 +280,7 @@ const defaultForm = () => ({
   threshold: 5,
   priceThreshold: 0,
   active: true,
+  recipientIds: [],
 })
 const form = reactive(defaultForm())
 
@@ -295,7 +333,7 @@ function initSortable() {
 }
 
 onMounted(async () => {
-  await loadAlerts()
+  await Promise.allSettled([loadAlerts(), loadRecipients()])
   nextTick(initSortable)
 })
 
@@ -311,7 +349,11 @@ function openDialog(row = null) {
     form.stockCode = row.stockCode
     form.stockName = row.stockName || ''
     form.active = row.active
+    // 編輯：回填該警示已選收件人（Task 125）；舊資料若無則視為未選
+    form.recipientIds = Array.isArray(row.recipientIds) ? [...row.recipientIds] : []
     parseAlertType(row.alertType, row.threshold, row.maPeriod)
+  } else {
+    form.recipientIds = allRecipientIds.value.slice()   // 新警示預設全選
   }
   dialogVisible.value = true
 }
@@ -401,6 +443,7 @@ async function save() {
       maPeriod: isMaGroup.value ? MA_GROUPS[form.conditionGroup] : null,
       threshold: form.conditionGroup === 'PRICE' ? form.priceThreshold : form.threshold,
       active: form.active,
+      recipientIds: form.recipientIds,   // Task 125：此警示的通知收件人
     }
     if (editId.value) {
       await bffApi.stockAlert.update(editId.value, payload)

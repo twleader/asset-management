@@ -4,6 +4,7 @@ import lombok.Data;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 
 public class StockAlertDto {
 
@@ -17,6 +18,11 @@ public class StockAlertDto {
         private Integer maPeriod;
         private BigDecimal threshold;
         private Boolean active = true;
+        /**
+         * 此警示要寄送的通知收件人 id 清單（Task 125）。create / update 以此覆寫 join 列。
+         * null 視為「沿用未變更」（update 時不動 join）；空 list 代表「不寄給任何人」。
+         */
+        private List<Long> recipientIds;
     }
 
     @Data
@@ -29,6 +35,8 @@ public class StockAlertDto {
         private Integer maPeriod;
         private BigDecimal threshold;
         private Boolean active;
+        /** 此警示目前選定的通知收件人 id 清單（Task 125；供前端對話框預勾）。 */
+        private List<Long> recipientIds;
         private LocalDateTime lastTriggeredAt;
         private BigDecimal lastTriggeredPrice;
         // 觸發當下的技術指標（凍結值，由 checkMaDeviation/checkKdValue 觸發時寫入 model）；

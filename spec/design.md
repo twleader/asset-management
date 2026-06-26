@@ -125,6 +125,7 @@ com.steven.assets/
 - `FundMasterRepository` / `FundNavRepository` / `FundDividendHistoryRepository`（信託基金主檔／淨值／配息；Requirement 19–21）
 - `PaymentCategoryRepository` / `PaymentAccountRepository`（代繳分類／記錄；Requirement 22）
 - `NotificationRecipientRepository`（警示通知收件人；Requirement 23）
+- `StockAlertRecipientRepository`（警示 ↔ 收件人多對多 join；每條警示挑選收件人；Requirement 23 / Task 125）
 - `TwseIndexDailyHistoryRepository` / `UsIndexDailyHistoryRepository`（台股大盤／海外指數日線；Requirement 18，亦供 Requirement 14 觀察清單 `0000` KD）
 - `TaiwanGdpPerCapitaHistoryRepository` / `KoreaGdpPerCapitaHistoryRepository`（台／韓人均 GDP；Requirement 18）
 
@@ -344,6 +345,7 @@ BondTerm              (短/中/長期 債券期別主檔，code 值存入 stock.
 FundClassOverride     (基金分類人工指定，PK = fund_name；asset_class / stock_style / bond_term 三欄皆 nullable)
 PaymentCategory(1) ── (N) PaymentAccount   (代繳記錄分類 + 記錄，Requirement 22)
 NotificationRecipient (警示通知收件人，Requirement 23)
+StockAlert (N) ──< stock_alert_recipient >── (N) NotificationRecipient  (每條警示挑選收件人；Task 125)
 
 # 基金（Requirement 19–21）
 FundMaster            (信託基金主檔，PK = fund_code)
@@ -696,6 +698,15 @@ BackupRecord          (Google Drive 備份檔本地索引，UNIQUE(folder, filen
 
 > **設計理由（獨立表 + 不寫死 enum）：** 收件人屬「使用者可變設定」，未來可能多人接收（家人 / 副信箱），需 DB 持久化並透過設定頁維護，遵循專案「禁止 enum 寫死」原則。目前僅支援 email 通道，未來如要擴充 LINE / Telegram 再新增 `notification_channel` 表，不為假設需求預留欄位。
 
+#### StockAlertRecipient（Requirement 23 / Task 125 新增；警示 ↔ 收件人多對多 join）
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| id | Long | PK |
+| alertId | Long | FK → `stock_alert.id`（不映射 JPA 關聯，沿用本專案「以 Long id 顯式關聯」慣例，同 `StockAlertTrigger.alertId`） |
+| recipientId | Long | FK → `notification_recipient.id` |
+
+> **設計理由（join 表而非冗餘欄位）：** 每條警示要能各自挑選「寄給哪幾位收件人」，是典型多對多，遵循正規化原則以 join 表表達，不在 `stock_alert` 存逗號分隔 email（會與 `notification_recipient` 重複儲存同一事實、且 email 改名需多表同步）。`(alert_id, recipient_id)` 組合 unique。dispatcher 寄信時以 `alert_id` 查出 `recipient_id`，再交集 `notification_recipient.active=true` 得實際收件 email。升級時 Liquibase 把現有警示 × 現有收件人全配對回填，維持升級前「全部都收」行為。刪除警示 / 刪除收件人時連帶清除對應 join 列。
+
 #### BackupSetting（Requirement 15）
 | 欄位 | 型別 | 說明 |
 |------|------|------|
@@ -932,7 +943,10 @@ PUT    /api/stock-alerts/reorder          # 拖曳排序（body: ordered ids）
 POST   /api/stock-alerts/check            # 手動觸發檢查
 GET    /api/stock-alerts/lookup-name      # 以股票代號查名稱（前端共用）
 GET    /api/stock-alerts/lookup-code      # 反向：以股名查代號（只查本地 stock 主檔，精確匹配）
+GET    /api/stock-alerts/recipients       # 列出可挑選收件人 [{id,email,active}]（委派 NotificationRecipientService；供警示對話框「通知對象」多選；Task 125）
 ```
+
+> **每條警示挑選收件人（Task 125）：** `StockAlertDto.Request` / `Response` 新增 `recipientIds`（`List<Long>`）。`create` / `update` 以 `recipientIds` 覆寫 `stock_alert_recipient`（先 `deleteByAlertId` 再批次 insert）；`Response` 回填該警示目前的 `recipientIds`。對話框「通知對象」多選的可選清單走同頁 BFF `GET /api/bff/stock-alert/recipients`（passthrough → `/api/stock-alerts/recipients`，後端委派 `NotificationRecipientService.findAll()`，與通知設定頁同一份資料源）。新增警示預設全選；選 0 位代表觸發不寄信。
 
 #### Notification Recipients（Requirement 23 新增）
 ```
@@ -1311,9 +1325,10 @@ StockAlertService.evaluate()
                                   ├─ 一次 drain 全部
                                   ├─ 依市場時區過濾「開盤 ~ 收盤+10 分」時段（withinSendWindow）
                                   │     盤外市場本輪丟棄；全部盤外 → return
-                                  ├─ 組 digest body
-                                  ├─ 讀 NotificationRecipientRepository.findByActiveTrue
-                                  └─ EmailService.send(toList, subject, body)
+                                  ├─ 逐筆觸發查其警示選定且 active 的收件人 email（recipientsFor(alertId)）
+                                  ├─ 反轉分組 → Map<email, List<觸發>>（每位收件人只含其訂閱的觸發）
+                                  └─ 對每位收件人各組一封 digest（走勢圖 PNG 以 stock 為 key 跨收件人快取）
+                                       └─ EmailService.sendHtml([email], subject, html, images)
                                                 ├─ MAIL_USERNAME 未設 → log.warn skip
                                                 └─ SMTP 失敗 → log.warn 不重試
 ```
@@ -1326,14 +1341,15 @@ StockAlertService.evaluate()
 **邊界處理**：
 - **寄送時段閘門（盤外不寄，`withinSendWindow`）**：flush 對 drain 出的每筆觸發依其市場時區判定是否在 `[開盤, 收盤+10 分]` 平日時段（台 09:00–13:40 / 美 09:30–16:10 / 英 08:00–16:40；開收盤時刻取自 `MarketZones.openTime/closeTime` 單一來源，`SEND_GRACE_MINUTES=10` 容納 60s flush 延遲與 cron 採樣落後；不考慮假日，與 `computeTriggeredAt` / `lastTradingDate` 同口徑——假日本就無 price-update 觸發，放行亦無信可寄）。盤外市場的觸發本輪 **丟棄不寄**（queue 一律 drain 不回填，避免無限長大；`StockAlertTrigger` 歷史已落地，使用者可按「補發」重寄）。多市場混批逐筆判定，僅寄出仍在盤中的市場（例：深夜台股已收盤、美股盤中 → 只寄美股）。動機：避免在該市場盤外時段收到當日早已收盤的警示信。手動 `resendLastTradingDay()` **不經此閘門**（明確的使用者重寄動作）
 - 收件人空 / `MAIL_USERNAME` 空 / SMTP 例外：一律 `log.warn` 後返回，**絕不**拋例外回到 `StockAlertService` —— 警示判斷必須與通知解耦
-- digest 主旨：`[資產管理] 股票警示觸發 N 筆`，N = **去重後的股票檔數**（非觸發筆數）
+- **每條警示挑選收件人（Task 125）**：flush 不再「全部觸發一封、寄給所有 active 收件人」，而是逐筆觸發以 `alert_id` 經 `stock_alert_recipient` 查出選定收件人、交集 `active=true`，反轉成 `Map<email, List<觸發>>`；每位收件人各組一封僅含「其訂閱觸發」的 digest，`sendHtml(List.of(email), …)` 單一收件人寄出。`recipientsFor(alertId)` 結果於該輪 flush 內以 `Map<Long,List<String>>` 快取（同 alert 多筆觸發不重查）；走勢圖 PNG 以 `stockCode+market` 為 key 跨收件人快取，避免同一檔重複 render。為此 `PendingTrigger` record 增帶 `alertId` 欄位（`enqueue` 時填 `alert.getId()`、補發 `toPending` 時填 `StockAlertTrigger.alertId`），作為 `groupByRecipient` 查收件人與快取的 key。`resendLastTradingDay()` 回傳 `ResendResult{status, count（去重股票檔數）, recipientCount（實際寄達人數）}`，前端補發提示顯示「已補發 N 檔股票給 M 位收件人」
+- digest 主旨：`[資產管理] 股票警示觸發 N 筆`，N = **該收件人這封信**去重後的股票檔數（非觸發筆數）；同輪不同收件人各自的 N 可能不同
 - **同一股票（stockCode+market）多條件觸發合併成一筆**（`groupByStock`，保留首次出現順序）：標題 `{stockName} ({stockCode} {market}) — {label1、label2…}`（該股所有觸發條件 label 去重串接），其下依序 `觸發時間`、`股價`、三條均線 `月線 {monthlyMa}`／`季線 {quarterlyMa}`／`年線 {annualMa}`、`KD：K {k} / D {d}`。技術快照（時間/股價/MA/KD）取該股**最近一筆觸發**（max `triggeredAt`）——同股各條件的 MA/KD 本即同源、僅時間略異（某條均線因歷史不足為 null 時該行省略；K/D 皆 null 時整行省略）。三條均線值取自 `recordTrigger` 當下 `TechnicalIndicatorService.computeAll()` 的 `FullIndicators`，與 `stock_alert_trigger` 落地的 `monthly_ma/quarterly_ma/annual_ma` 同源
 
 **手動補發（觀察清單「補發」按鈕）**：
 - 前端 `WatchStockView` 「新增觀察」左側「補發」鈕 → `POST /api/bff/watch-stock/resend-digest`（watch-stock BFF passthrough → `/api/watch-stocks/resend-digest`，守「一頁一支 BFF」）
 - `WatchStockController.resendDigest()` 委派 `AlertNotificationDispatcher.resendLastTradingDay()`：
   - 對 `stock_alert_trigger` 內出現過的每個 market，依市場時區算「最後交易日」（`lastTradingDate`：平日已過開盤＝當日、盤前 / 週末回溯最近平日；不考慮假日），取該日 `triggered_at ∈ [當地 00:00, 翌日 00:00)` 的所有觸發
-  - 把各市場結果合併、用**與自動 digest 相同的** `buildDigestBody()` 組單封信（重用同一格式 → 月線/季線/年線 + KD 同源），主旨 `[資產管理] 股票警示補發 N 筆`，寄給所有 active 收件人
+  - 把各市場結果合併後**以收件人為單位**各組一封（重用同一 `buildDigest` → 月線/季線/年線 + KD 同源），主旨 `[資產管理] 股票警示補發 N 筆`，每位收件人只含其所訂閱警示的觸發、單一收件人寄出（同自動 flush 的 per-recipient 分組；Task 125）
   - 觸發列回查 `StockAlert`（`alertId`）以 `buildLabel` 還原條件文案；alert 已刪除的孤兒觸發以「警示觸發」當 fallback label，不靜默丟棄
   - 回傳 `{sent, count, message}`：`SENT` / `NO_EVENTS`（各市場最後交易日皆無觸發）/ `NO_RECIPIENTS` / `EMAIL_DISABLED` 四態，後三者不寄信，前端據以提示
   - 補發為手動全量重寄，與自動 digest 的 24h cooldown / queue 互不影響（不寫 cooldown、不入 queue）

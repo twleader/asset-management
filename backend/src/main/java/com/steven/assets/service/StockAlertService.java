@@ -1,9 +1,12 @@
 package com.steven.assets.service;
 
+import com.steven.assets.dto.NotificationRecipientDto;
 import com.steven.assets.dto.StockAlertDto;
 import com.steven.assets.model.StockAlert;
+import com.steven.assets.model.StockAlertRecipient;
 import com.steven.assets.model.StockAlertTrigger;
 import com.steven.assets.model.StockPriceHistory;
+import com.steven.assets.repository.StockAlertRecipientRepository;
 import com.steven.assets.repository.StockAlertRepository;
 import com.steven.assets.repository.StockAlertTriggerRepository;
 import com.steven.assets.repository.StockPriceHistoryRepository;
@@ -22,6 +25,7 @@ import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -42,11 +46,18 @@ public class StockAlertService {
     private final TechnicalIndicatorService indicatorService;
     private final AlertNotificationDispatcher notificationDispatcher;
     private final MarketDataService marketDataService;
+    private final StockAlertRecipientRepository recipientLinkRepo;
+    private final NotificationRecipientService notificationRecipientService;
 
     // ===== CRUD =====
 
     public List<StockAlertDto.Response> findAll() {
         return alertRepo.findAllByOrderByDisplayOrderAsc().stream().map(this::toResponse).toList();
+    }
+
+    /** 可挑選的通知收件人清單（Task 125）：委派 {@link NotificationRecipientService}，與通知設定頁同一份資料源。 */
+    public List<NotificationRecipientDto.Response> listRecipients() {
+        return notificationRecipientService.findAll();
     }
 
     @Transactional
@@ -71,7 +82,26 @@ public class StockAlertService {
         if (!isTaiex && req.getStockName() != null && !req.getStockName().isBlank()) {
             stockMasterService.upsert(code, req.getMarket(), req.getStockName().trim());
         }
-        return toResponse(alertRepo.save(alert));
+        StockAlert saved = alertRepo.save(alert);
+        // 通知收件人（Task 125）：null 視為「未指定」→ 預設全部收件人（沿用既有「全部都收」直覺）；
+        // 空 list 則代表「不寄給任何人」。
+        List<Long> recipientIds = req.getRecipientIds() != null
+                ? req.getRecipientIds()
+                : notificationRecipientService.findAll().stream()
+                        .map(NotificationRecipientDto.Response::id).toList();
+        replaceRecipients(saved.getId(), recipientIds);
+        return toResponse(saved);
+    }
+
+    /** 以 recipientIds 覆寫某警示的 join 列（先刪後插，去重）。 */
+    private void replaceRecipients(Long alertId, List<Long> recipientIds) {
+        recipientLinkRepo.deleteByAlertId(alertId);
+        if (recipientIds == null || recipientIds.isEmpty()) return;
+        for (Long rid : new LinkedHashSet<>(recipientIds)) {
+            if (rid == null) continue;
+            recipientLinkRepo.save(StockAlertRecipient.builder()
+                    .alertId(alertId).recipientId(rid).build());
+        }
     }
 
     @Transactional
@@ -101,11 +131,17 @@ public class StockAlertService {
         alert.setMaPeriod(req.getMaPeriod());
         alert.setThreshold(req.getThreshold());
         if (req.getActive() != null) alert.setActive(req.getActive());
-        return toResponse(alertRepo.save(alert));
+        StockAlert saved = alertRepo.save(alert);
+        // 通知收件人（Task 125）：非 null 才覆寫；null 視為「本次未更動收件人」，保留既有 join。
+        if (req.getRecipientIds() != null) {
+            replaceRecipients(saved.getId(), req.getRecipientIds());
+        }
+        return toResponse(saved);
     }
 
     @Transactional
     public void delete(Long id) {
+        recipientLinkRepo.deleteByAlertId(id);   // 連帶刪除 join 列（DB 亦有 ON DELETE CASCADE 雙保險）
         alertRepo.deleteById(id);
     }
 
@@ -624,6 +660,7 @@ public class StockAlertService {
         r.setMaPeriod(a.getMaPeriod());
         r.setThreshold(a.getThreshold());
         r.setActive(a.getActive());
+        r.setRecipientIds(recipientLinkRepo.findRecipientIdsByAlertId(a.getId()));   // Task 125：回填選定收件人
         // 觸發時間 / 股價 / MA / K / D：全部用觸發時凍結值，只傳「最後一個交易日（或交易當日）及前一日」內的；超過視為過期不傳
         java.time.LocalDateTime cutoff = recentTradingDayCutoff(a.getMarket(), FRESHNESS_TRADING_DAYS);
         if (a.getLastTriggeredAt() != null

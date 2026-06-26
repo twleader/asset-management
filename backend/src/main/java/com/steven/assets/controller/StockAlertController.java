@@ -1,5 +1,6 @@
 package com.steven.assets.controller;
 
+import com.steven.assets.dto.NotificationRecipientDto;
 import com.steven.assets.dto.StockAlertDto;
 import com.steven.assets.repository.StockRepository;
 import com.steven.assets.service.HistoricalDataService;
@@ -25,6 +26,12 @@ public class StockAlertController {
     @GetMapping
     public List<StockAlertDto.Response> findAll() {
         return service.findAll();
+    }
+
+    /** 警示對話框「通知對象」可挑選的收件人清單（Task 125）；委派 NotificationRecipientService，與通知設定頁同源。 */
+    @GetMapping("/recipients")
+    public List<NotificationRecipientDto.Response> recipients() {
+        return service.listRecipients();
     }
 
     @PostMapping

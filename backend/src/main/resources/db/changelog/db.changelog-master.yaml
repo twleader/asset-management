@@ -134,3 +134,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/v1.32.0-fund-override-style-term.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.33.0-stock-alert-recipient.sql
+      relativeToChangelogFile: false
