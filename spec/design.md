@@ -64,6 +64,7 @@ com.steven.assets/
   - `GET /api/bff/dashboard/realtime`：2 分鐘輪詢用，回傳 stockPrices + marketStatus
   - `POST /api/bff/dashboard/enrich-dividend-rates`：背景補齊所有快照缺漏的配息率
   - `PATCH /api/bff/dashboard/snapshot/{id}/stock-order`：拖曳排序持股後寫回
+  - `GET /api/bff/dashboard/holdings-classified/{snapshotId}`：「資產配置分佈」雙層 donut（資產類別 → 個股）用，passthrough 至 `/api/snapshots/{id}/holdings-classified`（Requirement 25）
   - `GET /api/bff/dashboard/tw-stock-lookthrough/{snapshotId}`：「資產配置分佈」第 2 tab「台股個股」用。沿用 `SnapshotEnricher.buildMergedStocks` 取得快照基準日的台股部位，對每檔 ETF（`stockCode` 以 `00` 開頭）並行（concurrency 4）呼叫既有 `/api/market-data/etf-holdings?market=台股&code=...` 取得成分股權重（MoneyDJ 完整成分股優先、Yahoo `topHoldings` 前 10 fallback），依成分股權重**正規化**分配整筆 ETF 市值（`cv × weight / Σweight`，使 ETF 完全穿透不殘留 ETF 自身 slice）後依**股名**加總（MoneyDJ 只給股名無代號；直接持股不拆，與 ETF 內含部位的同股名合併），排序取前 10 名 + 「其它」聚合。ETF 抓取失敗時該 ETF 整筆退回以代號自身計入並記錄於 `degradedEtfs`。回傳 `TwStockLookthroughDto { snapshotDate, totalTwStockValue, items[], others, degradedEtfs[] }`。lazy fetch — 前端只在使用者切到第 2 tab 才呼叫；前端 hover 趨勢圖節點時改以該節點對應的 `snapshotId` 取 cache，cache miss 則 lazy fetch（race 防護：fetch 回來時若使用者目前的 effective snapshot 已切走則不覆寫畫面）
   - `GET /api/bff/dashboard/us-stock-lookthrough/{snapshotId}`：「資產配置分佈」第 3 tab「美股個股」用。流程鏡像台股版（`buildMergedStocks` → 篩 `market=美股` → 並行 concurrency 4 呼叫既有 `/api/market-data/etf-holdings?market=美股&code=...`），但**穿透演算法與台股不同**：美股成分股來源 Yahoo `topHoldings` 僅揭露前 10 大（權重總和常 30~50%），故依**真實權重**分配 `cv × weight/100`（**不正規化**），未揭露尾段 `cv × (1 − Σweight/100)` 全數計入「其它」（台股則 `cv × weight/Σweight` 正規化完全穿透）。聚合鍵用**代號**（Yahoo 成分股有 `symbol`；台股用股名）。ETF 判斷：BFF 對每檔美股 row 呼叫 etf-holdings，以「回傳 holdings 是否非空」區分 ETF / 個股 —— external `isEtf()`（`US_ETF_WHITELIST`）會對非 ETF 代號短路直接回空、不打 Yahoo，故個股呼叫成本低。注意：external 取 Yahoo crumb / quoteSummary（topHoldings）須用短 UA `Mozilla/5.0`（`YAHOO_UA` 常數），長 Chrome UA 會被 Yahoo WAF 回 429 致 topHoldings 全查無（`v8/chart` 端點不受影響）。回傳 `UsStockLookthroughDto { snapshotDate, totalUsStockValue, items[], others, lookthroughEtfCount }`；`lookthroughEtfCount > 0` 時前端顯示「美股 ETF 僅揭露前 10 大成份股，其餘計入『其它』」固定註記（美股不做 `degradedEtfs` 動態清單）。lazy fetch / hover 趨勢圖連動 / per-snapshot cache 與台股一致
 - `SnapshotDetailBffController`（SnapshotDetailView 專屬）：
@@ -76,7 +77,13 @@ com.steven.assets/
 - `ExchangeRateBffController`（ExchangeRateView 專屬）：`GET /api/bff/exchange-rate`（先 refresh 再回 5 年歷史）、`POST /api/bff/exchange-rate/backfill`
 - `TradingCalendarBffController`（TradingCalendarView 專屬）：`GET /api/bff/trading-calendar?year=Y`（`holidays` 為 `{tw: {date→name}, us: {date→name}}` 物件 + `marketStatus`）、`GET /api/bff/trading-calendar/market-status`
 - `SnapshotListBffController`（SnapshotListView 專屬）：`GET /api/bff/snapshot-list`、`DELETE /{id}`、`GET /export`
-- 其他 settings/passthrough（每頁一支 Spring Cloud Gateway route 配置，rewrite `/api/bff/{page}/**` → `/api/{resource}/**`）：BankSettings、BrokerSettings、DepositTypeSettings、MarketTypeSettings、TransitFundTypeSettings、StockAlert（`/api/bff/stock-alert/**`）、BackupRestore（`/api/bff/backup-restore/**`）、NotificationSettings（`/api/bff/notification-settings/recipients/**` → `/api/notification-recipients/**`）
+- `GdpTwseBffController`（GdpTwseView 專屬，`@RequestMapping("/api/bff/gdp-twse")`）：股市分析頁的指數日線／當日＋台韓人均 GDP 聚合（Requirement 18）：
+  - `GET /api/bff/gdp-twse`：台／韓人均 GDP + 實質成長率歷史
+  - `POST /api/bff/gdp-twse/refresh`：自 IMF 刷新人均 GDP
+  - `GET /api/bff/gdp-twse/index-daily`：台股大盤／海外指數每日 OHLC
+  - `POST /api/bff/gdp-twse/refresh-index-daily`：刷新指數日線
+  - `GET /api/bff/gdp-twse/index-intraday`：指數當日分時
+- 其他 settings/passthrough（每頁一支 Spring Cloud Gateway route 配置，rewrite `/api/bff/{page}/**` → `/api/{resource}/**`）：BankSettings、BrokerSettings、DepositTypeSettings、MarketTypeSettings、AssetClassSettings（`/api/bff/asset-class-settings/**`）、TransitFundTypeSettings、StockAlert（`/api/bff/stock-alert/**`）、BackupRestore（`/api/bff/backup-restore/**`）、NotificationSettings（`/api/bff/notification-settings/recipients/**` → `/api/notification-recipients/**`）
 - `WatchStockBffRoutes`（WatchStockView 專屬，`/api/bff/watch-stock/**`）：純 Spring Cloud Gateway passthrough route，rewrite `/api/bff/watch-stock(/**)` → `/api/watch-stocks(/**)` 轉至 business-services。觀察清單已改為「`stock_alert` 衍生 view」，**衍生與 enrichment 一律在 business-services（`WatchStockController` / `WatchStockService`）完成，BFF 僅轉發不重算**：
   - `GET /api/bff/watch-stock` → `GET /api/watch-stocks`：business-services 由 `stock_alert` 群組去重衍生清單，對每筆 (stockCode, market) 補上 live 報價、技術指標、最近觸發資訊
   - `PUT /api/bff/watch-stock/order` → `PUT /api/watch-stocks/order`：拖曳排序時把該股票所有 alert 的 displayOrder 整組重排
@@ -103,7 +110,7 @@ com.steven.assets/
   - `RealizedGainBffRoutes`：`/api/realized-gains/**` → business-services（RealizedGainView 的 Pinia store `gainApi` 共用已實現損益 CRUD；該頁另有 `RealizedGainBffController` 提供 `/api/bff/realized-gain` 聚合端點，passthrough 僅供 store 直接 CRUD 用，與 `SnapshotBffRoutes` 同屬「store 共用」例外）
   - `MarketDataBffRoutes`：`/api/market-data/**` → business-services（SSE 行情串流 `prices/stream` 等直接市場資料取用；`StockAnalysisBffRoutes` 另以 `/api/bff/stock-analysis/**` rewrite 至同一組端點）
 
-**Repository 層**（Spring Data JPA，共 28 個）
+**Repository 層**（Spring Data JPA，共 33 個）
 - `AssetSnapshotRepository`
 - `StockHoldingRepository`
 - `FundHoldingRepository`
@@ -128,6 +135,8 @@ com.steven.assets/
 - `StockAlertRecipientRepository`（警示 ↔ 收件人多對多 join；每條警示挑選收件人；Requirement 23 / Task 125）
 - `TwseIndexDailyHistoryRepository` / `UsIndexDailyHistoryRepository`（台股大盤／海外指數日線；Requirement 18，亦供 Requirement 14 觀察清單 `0000` KD）
 - `TaiwanGdpPerCapitaHistoryRepository` / `KoreaGdpPerCapitaHistoryRepository`（台／韓人均 GDP；Requirement 18）
+- `AssetClassRepository` / `StockStyleRepository` / `BondTermRepository`（資產類別／股票風格／債券期別分類主檔；Requirement 25–27）
+- `FundClassOverrideRepository`（基金分類人工指定，PK = fund_name；Requirement 27）
 
 ### External Materials Service Architecture（獨立微服務 / image：`asset-external-materials-service`）
 
@@ -272,11 +281,11 @@ NASDAQ info API 自 2026/04 起對 ETF 的 `keyStats` 為 null（無 dayrange �
 src/
 ├── App.vue              # Root layout: sidebar navigation + router-view
 ├── main.js              # App bootstrap, plugin registration
-├── router/index.js      # Route definitions (24 routes，含 redirect)
+├── router/index.js      # Route definitions (25 routes，含 4 條 redirect)
 ├── stores/assetStore.js # Pinia global state
 ├── api/index.js         # Axios instance, API methods
 ├── components/          # Reusable components (TaiwanMap, UsaMap)
-└── views/               # Page-level components (21 views)
+└── views/               # Page-level components (22 views；含 StockMonitorView 內嵌的 WatchStockView / StockAlertView 兩個未掛路由的子 view)
 ```
 
 **Service 層補充**
@@ -314,6 +323,7 @@ src/
 | `/settings/brokers` | BrokerSettingsView | 券商設定管理 |
 | `/settings/deposit-types` | DepositTypeSettingsView | 存款類型設定管理 |
 | `/settings/market-types` | MarketTypeSettingsView | 市場類型設定管理 |
+| `/settings/asset-classes` | AssetClassSettingsView | 資產類別／風格／債券期別歸類管理（Requirement 25–27） |
 | `/settings/transit-fund-types` | TransitFundTypeSettingsView | 待轉入資金類型設定管理 |
 | `/settings/funds` | FundSettingsView | 信託基金主檔設定管理（Requirement 19） |
 | `/settings/backup-restore` | BackupRestoreView | 資料庫備份／還原 |
