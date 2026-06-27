@@ -3401,3 +3401,24 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 135.4 `App.vue`（登入者資訊/登出/切換下拉/選單依角色）
 - [x] 135.5 `views/PendingApprovalView.vue` + `views/UserManagementView.vue`
 - [ ] 135.6 Docker 重 build + recreate（frontend）後端到端驗證：管理者登入看全量、切換代看他人、新使用者 PENDING 被擋於 `/pending`、核准後只看自己、非管理者無備份選單
+
+### Task 136: 股票分析對話框無歷史時 lazy 回補（Requirement 9 / Requirement 7 bug fix）
+
+對應 Requirements: Requirement 9（透視成份股可點擊分析）+ Requirement 7（市場資料回補涵蓋的即時補強）
+
+**問題**（實機暴露）：點擊 ETF 透視圓餅圖成份股 `2383` 台光電 開啟 `StockAnalysisDialog`，走勢圖顯示「無歷史資料，請先執行股價補齊」。根因：`2383` 是純 ETF 透視成份股（不在 `stock` 主檔 / `stock_holding`），其 10 年歷史本由 Task 129 回補，但 Task 129 只有 `startupBackfill` / 手動 `backfillAll` / 每日 18:30 cron 三個觸發點，**缺「開啟即補」的即時觸發** —— 成份股新進 top10 或在兩次 cron 之間被點開，就落入「即時價有、走勢圖空白」空窗（與 Task 126 為主檔修的空窗同型，但主檔走 `StockMasterService` 即時佇列補、成份股刻意不入主檔故不經該路徑）。
+
+**使用者決策**：自動背景補齊後重載（非按鈕）；範圍只在開啟分析對話框時補（lazy，涵蓋所有「無歷史」情況）。
+
+**關鍵設計**（前端 + BFF route；business / ext / `stock` 主檔皆不動，沿用既有 `/api/market-data/history/backfill-stock`）：
+- BFF `StockAnalysisBffRoutes`：新增 `POST /api/bff/stock-analysis/backfill-stock` passthrough → business `/api/market-data/history/backfill-stock`（與 `SnapshotFormBffController.triggerBackfillThenRefetch` 同一支 business API；`since` 省略後端預設 `now−10y`）。
+- 前端 `StockAnalysisDialog.fetchHistory()`：首抓空陣列 → `backfilling=true` → `await backfillStock(code, market)` → 重抓一次 `getStockHistory`；loading 文案於 `backfilling` 時切「首次載入，補齊 10 年歷史中…（約需數秒）」。台股 `0000` 不觸發；回補失敗只 warn 不阻斷既有空狀態。
+- 前端 `api/index.js`：`bffApi.stockAnalysis.backfillStock(code, market)`。
+- 不變量：只寫 `stock_price_history` 不入主檔（端點本就不碰主檔）、今日列獨佔給 `ClosePersister`（Task 84）、`existsHistory` idempotent。
+
+**設計**：見 `requirements.md` Req 9 新增 AC、`design.md`「Task 136」段 + `StockAnalysisBffRoutes` route 清單。
+
+- [x] 136.1 BFF `StockAnalysisBffRoutes`：新增 `stock-analysis-backfill` route（POST passthrough 至 `/api/market-data/history/backfill-stock`）
+- [x] 136.2 前端 `api/index.js`：`stockAnalysis.backfillStock(code, market)`
+- [x] 136.3 前端 `StockAnalysisDialog.vue`：`fetchHistory` 無歷史時 lazy 回補後重載 + `backfilling` loading 文案 + `0000` 守門
+- [x] 136.4 Docker 重 build + recreate（bff + frontend）後驗證：點開未補過的透視成份股 `3044` 健鼎 → 走勢圖先顯示「補齊 10 年歷史中…」→ 自動補齊後畫出完整走勢（瀏覽器實測通過）。後端機制以 `2383` 台光電實測：`stock_price_history` 0 → 2438 筆（2016-06-27～2026-06-26，**今日列未寫入**）、`stock` 主檔仍 0 筆（不入主檔）。**注意（已記錄至 memory）：JVM service（bff）從 worktree 跑 cached `compose build` 會產生 stale jar（route 沒進去 → gateway 404），須 `--no-cache` 重 build；驗證方式為 unzip running jar 內 `StockAnalysisBffRoutes.class` 確認 route 字串**

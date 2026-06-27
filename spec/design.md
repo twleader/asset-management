@@ -101,6 +101,7 @@ com.steven.assets/
   - `GET /api/bff/stock-analysis/history/stock` → `/api/market-data/history/stock`
   - `GET /api/bff/stock-analysis/dividends` → `/api/market-data/dividends`
   - `GET /api/bff/stock-analysis/etf-holdings` → `/api/market-data/etf-holdings`
+  - `POST /api/bff/stock-analysis/backfill-stock` → `/api/market-data/history/backfill-stock`（Task 136 lazy 回補：走勢圖無歷史時即時觸發單檔 10 年回補後重載；只寫 `stock_price_history` 不入主檔、今日列獨佔給 `ClosePersister`）
   - `GET /api/bff/stock-analysis/intraday-ticks` → `/api/market-data/intraday-ticks`（走勢圖「當日」期間用；business-services proxy 至 `external-materials-service /internal/intraday-ticks`，後者讀 Redis LIST `price:ticks:{market}:{code}:{tradingDate}`。盤中由 `PricePoller` 每 2 分鐘累積 / 盤後由 `IntradayTickRefresher` 用台股 FinMind `TaiwanStockKBar` + 美/英股 Yahoo 5m 完整覆寫。台股 Yahoo 5m fallback 的 ticker 後綴依掛牌市場：上市 `.TW`、上櫃（TPEx，含債券 ETF 00xxxB）`.TWO`，`PriceFetchClient.fetchIntraday5m` 先試 `.TW` 空再 fallback `.TWO`，否則上櫃股當日分時恆空，見 Task 119）
 
 - **共享 / 跨頁 passthrough routes**（非單一頁面專屬，由 Spring Cloud Gateway 直接轉發至 business-services，服務跨頁共用的 store CRUD、下拉 lookups、SSE 與基金主檔；皆為刻意的共享資源，不另立 `/api/bff/{page}/**`）：
@@ -1735,3 +1736,33 @@ volumes:
 ### 不處理
 
 既有歷史重複列不自動刪除（資料異動需使用者意圖；清單已有刪除鈕）。
+
+---
+
+## Task 136：股票分析對話框無歷史時 lazy 回補（Requirement 9 / Requirement 7）
+
+### 問題
+
+Task 129 把「ETF 透視 top10 成份股」（如 `2383` 台光電，使用者只持有含它的 ETF，未直接持有）納入 10 年歷史回補，但觸發點只有三個：`startupBackfill`（服務啟動）、手動 `backfillAll`、每日 `dailyLookthroughBackfill` cron（18:30 Asia/Taipei）。**缺「開啟分析即補」的即時觸發** —— 當成份股新進 top10（ETF 成份變動 / 使用者新買含它的 ETF / 切換快照），或使用者在兩次 cron 之間就點開該成份股的 `StockAnalysisDialog`，`stock_price_history` 尚無資料 → `history.length === 0` → 走勢圖空白、顯示「無歷史資料，請先執行股價補齊」（即本需求實機情境）。
+
+這與 Task 126 為 `stock` 主檔標的修的「兩次重啟間新增 → 即時價有、歷史空」空窗同型，但主檔走 `StockMasterService.upsert` 的即時背景佇列補；成份股**刻意不入主檔**故不經該路徑，需在 **viewing 時**補。
+
+### 設計（lazy backfill：viewing 時觸發，不入主檔）
+
+使用者決策：**自動背景補齊後重載**（非按鈕）、範圍**只在開啟分析對話框時**（lazy，涵蓋所有「無歷史」情況，非只 top10 成份股）。
+
+- **BFF**（`StockAnalysisBffRoutes`）：新增 passthrough route `stock-analysis-backfill` —— `POST /api/bff/stock-analysis/backfill-stock` rewrite 至 business `/api/market-data/history/backfill-stock`（沿用既有端點，`since` 省略時後端預設 `now−10y`）。RouteLocator 純轉發，保留 method（POST）與 query string。**不**新增 business 端點 —— 與 `SnapshotFormBffController.triggerBackfillThenRefetch` 走同一支 business API（同義同源）。
+- **前端**（`StockAnalysisDialog.vue` `fetchHistory()`）：第一次 `getStockHistory` 回空陣列時，設 `backfilling=true`、`await bffApi.stockAnalysis.backfillStock(code, market)`，完成後**重抓一次** `getStockHistory` 填入 `history`。`loading` 全程維持 true，loading 文案於 `backfilling` 時切為「首次載入，補齊 10 年歷史中…（約需數秒）」。補完仍空才落到既有「無歷史資料」空狀態。
+  - **守門**：台股大盤 `0000`（`stockCode==='0000' && market==='台股'`）不觸發回補（歷史走 `twse_index_daily_history`，比照 `StockMasterService.isTaiex`）；回補呼叫失敗只 `console.warn`、不阻斷既有空狀態顯示。
+- **api**（`api/index.js` `bffApi.stockAnalysis`）：新增 `backfillStock(code, market)` → `api.post('/bff/stock-analysis/backfill-stock', null, { params:{ code, market } })`。
+
+### 不變量（沿用 Task 129 / Task 84）
+
+- **不入主檔**：`/api/market-data/history/backfill-stock` → `HistoricalDataService.backfillSingleStock` → ext `HistoricalBackfillService.backfillSingleStock` → `backfillTw/Us/UkStock` → `StockSourceQuery.upsertHistory`，全程**只寫 `stock_price_history`**，從不呼叫 `StockMasterService.upsert` / `StockRepository.upsert`，故成份股不會被灌進主檔即時抓價清單（`collectAllStockCodes`）。
+- **今日列獨佔**：回補 for-loop 仍 skip `bar.tradingDate()==today`（Task 84），今日列由 `ClosePersister` 寫入。
+- **idempotent**：`existsHistory` skip 已存在日期，重複開啟對話框安全（已補過則第二次 `getStockHistory` 即有資料、不再觸發回補分支）。
+
+### 不處理
+
+- 不做 eager 觸發（Dashboard 透視圓餅圖算出 top10 時背景補）—— 使用者選 lazy；steady-state 仍由每日 18:30 cron 維護。
+- 股利 tab 維持 best-effort cold fetch（Task 129 限制不變）。
