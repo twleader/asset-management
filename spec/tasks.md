@@ -3219,3 +3219,47 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 126.4 後端改呼叫點：`StockAlertService`(×2)、`AssetService`(×2)、`StockAlertController`(×1) 改走 `StockMasterService.upsert`
 - [x] 126.5 spec：`requirements.md` Req 7、`design.md`、`tasks.md` 本任務
 - [ ] 126.6 Docker 重 build + recreate（business-services）後驗證：新增一檔未追蹤過的標的，背景 log 出現「新增標的 … 自動回補 … 筆」，`stock_price_history` 出現多年資料、走勢圖完整（**待辦：與並行的 Task 125 同時在工作目錄，須先協調再 build/commit**）
+
+---
+
+### Task 127: 警示 email 走勢圖標出最高 / 最低點（Requirement 23）
+
+對應 Requirements: Requirement 23（警示觸發 Email 通知）
+
+**需求**：警示 / 補發 email 內嵌的走勢圖 PNG，股價線也要像畫面 `StockAnalysisDialog`（Task 124）一樣標出最高 / 最低點，含日期與價位。原本 email 圖只有線 + legend，無最高 / 最低標記。
+
+**關鍵設計**（`AlertChartRenderer.java`）：
+- email 圖為 server-side 靜態 PNG（XChart）、無 dataZoom，故最高 / 最低固定在**顯示窗 ≈252 日（1年）整段**內找（`addHiLoMarkers` 掃 `price` list 極值）。最高 / 最低同點（區間平盤）只標最高。
+- 新增 `HiLoMarker`（自訂 `org.knowm.xchart.internal.chartpart.Annotation` 子類）：`paint` 內用 `getXAxisScreenValue/getYAxisScreenValue` 把（日期 millis、價位）換成像素 → 畫圓點（落在線上、白邊浮出藍線）+ 圓角色塊兩行（第一行「最高/最低 + 價位 `%,.2f`」、第二行日期 `yyyy/MM/dd`）。
+- 紅最高(#dc2626) / 綠最低(#16a34a)（對齊畫面 markPoint、紅漲綠跌）。色塊位置：最高放點下方、最低放點上方（避免撞左上角 legend），水平用 `getXAxisScreenValueForMin/Max` 夾在 plot 內避免出界。
+- **不用 `AnnotationText`**：其字色由 styler `AnnotationTextFontColor` 全域共用、無法逐點分紅綠；自繪 `Annotation` 子類才能雙色塊。
+- 日期格式以 UTC 還原（`Instant.atZone(UTC)`），與 xs 的 `atStartOfDay(UTC)` 同基準避免時區偏移。
+
+**設計**：見 `requirements.md` Req 23 新增 AC、`design.md`（`AlertChartRenderer` 段 `addHiLoMarkers` / `HiLoMarker`）。純 PNG 繪圖變更，無 API / 資料模型 / 契約變更。
+
+- [x] 127.1 `AlertChartRenderer`：新增 `addHiLoMarkers`（找顯示窗股價極值）+ `HiLoMarker` Annotation 子類（圓點 + 雙色塊兩行）；`renderTopPane` 畫完 4 條線後呼叫；新增 `C_HIGH`/`C_LOW`/`MARK_DATE` 常數
+- [x] 127.2 spec：`requirements.md` Req 23 新增 AC、`design.md` `AlertChartRenderer` 段、`tasks.md` 本任務
+- [x] 127.3 Docker 重 build + recreate（backend）後驗證：`curl /api/bff/watch-stock/chart.png?code=2330&market=台股` 回 PNG，上 pane 股價線出現紅（最高）綠（最低）圓點 + 色塊（含日期 / 價位），位置落在線上、不出界。2330（最高 2,510.00 / 2026-06-22、最低 1,020.00 / 2025-06-23）與 00881（最高 57.35、最低 22.93，小數 `%,.2f`）皆驗證；最低色塊靠左已正確夾在 plot 內不出界。標記與畫面 `StockAnalysisDialog`（Task 124）逐值一致
+- [ ] 127.4 端對端：實寄 / 補發確認 email 圖含最高 / 最低標記（需實寄，待授權 / 自行按補發）
+
+---
+
+### Task 128: 「補發」按鈕只補發當前市場 tab（Requirement 23）
+
+對應 Requirements: Requirement 23（警示觸發 Email 通知）
+
+**需求**：觀察頁「補發」原本一次補發**所有市場**最後交易日的觸發。使用者要改成**只補發當前所在的市場子 tab**——例如停在「美股」tab 按補發，就只補美股，不要連台股 / 英股一起重寄。
+
+**關鍵設計**：
+- 前端 `marketTab`（值 `台股`/`美股`/`英股`）已是現成的當前 tab 狀態。`resendDigest()` 改帶 `marketTab.value` 給 api；`api/index.js` 的 `resendDigest(market)` 以 query param `market` POST；BFF passthrough 已原樣帶 query string，**BFF 免改**。
+- 後端 `resendLastTradingDay()` 加 nullable `market` 參數：原 `for (m : triggerRepo.findDistinctMarkets())` 的市場來源改為 `markets = (market 空) ? findDistinctMarkets() : List.of(market)`，指定時只跑該單一市場。null/空 fallback 全市場 → 向後相容（直接打 API 仍可全補）。其餘 per-recipient 分組 / digest / 走勢圖完全不動。
+- `WatchStockController.resendDigest(@RequestParam(required=false) String market)`：把 market 嵌進回傳訊息（SENT「已補發 美股 N 檔股票給 M 位收件人」、NO_EVENTS「美股最後交易日無觸發事件，無可補發」；market 空時退回原「各市場」文案）。
+- 按鈕文字改 `補發{{ marketTab }}`（補發台股 / 補發美股 / 補發英股），讓「只補當前市場」對使用者明示。
+
+**設計**：見 `requirements.md` Req 23 補發 AC（已更新）、`design.md` 補發流程段 + API 端點 + BFF route。純參數化既有流程，無資料模型 / 新表 / 新端點。
+
+- [x] 128.1 後端 `AlertNotificationDispatcher.resendLastTradingDay(String market)`：市場來源改 `(market 空) ? findDistinctMarkets() : List.of(market)`
+- [x] 128.2 後端 `WatchStockController.resendDigest(@RequestParam(required=false) String market)`：傳 market、訊息嵌市場名
+- [x] 128.3 前端 `api/index.js`：`resendDigest(market)` 帶 query param；`WatchStockView.vue`：`resendDigest()` 傳 `marketTab.value`、按鈕文字 `補發{{ marketTab }}`
+- [x] 128.4 Docker 重 build + recreate（backend + frontend）後驗證：經 **BFF**（port 8080）POST `/api/bff/watch-stock/resend-digest?market=...` 端到端回應正確——指定市場走單一市場分支、NO_EVENTS 文案隨市場字串變（「{市場}最後交易日無觸發事件」而非「各市場」），證明 param 綁定 + BFF query passthrough + 單一市場限定。為避免誤寄真實信，用不存在市場字串（「驗證測試」「火星股」）測 NO_EVENTS 零寄信；前端建置產物確認 `{params:{market:e}}` 與按鈕動態文字 `"補發"+toDisplayString(marketTab)`
+- [ ] 128.5 端對端：實寄確認只收到該市場的補發信（會真的寄信到收件人，待授權 / 自行於該市場 tab 按補發）
