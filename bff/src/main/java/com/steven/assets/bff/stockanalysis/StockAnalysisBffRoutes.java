@@ -47,6 +47,15 @@ public class StockAnalysisBffRoutes {
                                 "/api/bff/stock-analysis/intraday-ticks",
                                 "/api/market-data/intraday-ticks"))
                         .uri(businessServicesUrl))
+                // Task 136 lazy 回補：走勢圖無歷史時即時觸發單檔 10 年回補後重載。
+                // 只寫 stock_price_history、不入 stock 主檔（端點本就不碰主檔），今日列獨佔給 ClosePersister。
+                // 與 SnapshotFormBffController.triggerBackfillThenRefetch 走同一支 business API（同義同源）。
+                .route("stock-analysis-backfill", r -> r
+                        .path("/api/bff/stock-analysis/backfill-stock")
+                        .filters(f -> f.rewritePath(
+                                "/api/bff/stock-analysis/backfill-stock",
+                                "/api/market-data/history/backfill-stock"))
+                        .uri(businessServicesUrl))
                 .build();
     }
 }

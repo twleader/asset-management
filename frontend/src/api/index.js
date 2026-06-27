@@ -150,7 +150,10 @@ export const bffApi = {
     getEtfHoldings: (code, market) =>
       api.get('/bff/stock-analysis/etf-holdings', { params: { code, market } }),
     getIntradayTicks: (code, market, date) =>
-      api.get('/bff/stock-analysis/intraday-ticks', { params: { code, market, ...(date && { date }) } })
+      api.get('/bff/stock-analysis/intraday-ticks', { params: { code, market, ...(date && { date }) } }),
+    // Task 136：走勢圖無歷史時即時觸發單檔 10 年回補（since 省略→後端預設 now−10y）。只補 stock_price_history，不入主檔。
+    backfillStock: (code, market) =>
+      api.post('/bff/stock-analysis/backfill-stock', null, { params: { code, market } })
   },
 
   // AssetHistory
