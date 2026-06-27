@@ -2441,6 +2441,12 @@ VOO 股票走勢圖在 2026-06-05 NY 盤中（15:16，未到 16:00 收盤）顯�
   - `loadTwStockLookthrough` race 防護判斷由 `selectedSnapshotId.value === snapshotId` 改為 `effectiveSnapshotId.value === snapshotId`（hover 快速移動時不寫入過期 fetch 結果）
   - `selectedSnapshotId` 語義保持不變（仍是下拉選的快照），不影響 KPI 卡 / 持股表等其他面板
 
+- [x] 86.8 tab 2/3 圓餅圖個股 segment 點擊開 `StockAnalysisDialog`：對應 [requirements.md:186](spec/requirements.md)。兩張 `<v-chart>`（twStock / usStock）加 `cursor:pointer` 與 `@click`，呼叫 `onLookthroughPieClick(params, market)`：
+  - 還原代號/股名 —— 台股段 `code`=代號、`name`=股名；美股段 `name`=代號、`fullName`=股名
+  - 無代號（「其它」聚合段）直接 return 不開
+  - 命中當前快照 `mergedStocks` 同 `stockCode`+`market` 的直接持股 → 沿用完整列（保留 `avgCostOriginal`，走勢圖可畫成本均價線）；否則僅帶 `{stockCode, stockName, market}`（純 ETF 穿透成分股無成本基礎、不畫成本線）
+  - 重用 Dashboard 既有 `analysisVisible` / `analysisStock` state 與 `<StockAnalysisDialog>`，與表格列雙擊、bar 圖雙擊同元件同行為
+
 
 ### Task 87: 股票走勢圖期間按鈕加「當日」（最後一交易日分時 5m K 線）
 
