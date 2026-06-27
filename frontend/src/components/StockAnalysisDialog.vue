@@ -149,12 +149,14 @@
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { LineChart } from 'echarts/charts'
-import { TitleComponent, TooltipComponent, LegendComponent, GridComponent, DataZoomComponent, MarkLineComponent } from 'echarts/components'
+import { TitleComponent, TooltipComponent, LegendComponent, GridComponent, DataZoomComponent, MarkLineComponent, MarkPointComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
 import { Loading } from '@element-plus/icons-vue'
 import { bffApi } from '@/api/index.js'
 
-use([CanvasRenderer, LineChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent, DataZoomComponent, MarkLineComponent])
+// 注意：tree-shaking 版 echarts 必須顯式註冊元件才生效。MarkPointComponent 漏註冊時，
+// 收盤線的 markPoint（最高/最低標記）會被 ECharts 靜默忽略、完全不畫（markLine 有註冊故 KD 80/20 正常）。
+use([CanvasRenderer, LineChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent, DataZoomComponent, MarkLineComponent, MarkPointComponent])
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
