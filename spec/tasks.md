@@ -3170,7 +3170,8 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 
 - [x] 124.1 `StockAnalysisDialog.vue`：新增 `chartRef` / `zoomPct` / `defaultZoomRange` / `effectiveZoom` / `onZoom` / `maxMinMarkPoints`；dataZoom IIFE 改吃 `effectiveZoom`；股價 series 加 `markPoint`；template v-chart 加 `ref` 與 `@datazoom`；開啟/區間切換重置手動縮放
 - [x] 124.2 spec：`requirements.md` Req 13 新增 AC、`tasks.md` 本任務
-- [ ] 124.3 Docker 重 build + recreate（frontend）後截圖驗證：1 年區間下股價線出現紅（最高）綠（最低）標記，含日期/價位；切「當日」第二行顯示 HH:mm
+- [x] 124.3 Docker 重 build + recreate（frontend）後截圖驗證：1 年區間下股價線出現紅（最高）綠（最低）標記，含日期/價位；切「當日」第二行顯示 HH:mm
+- [x] 124.4 **bugfix：標記實作後完全不顯示**。真因＝`StockAnalysisDialog.vue` 用 tree-shaking 版 echarts，`use([...])` 漏註冊 `MarkPointComponent`（只註冊了 `MarkLineComponent`，故 KD 80/20 markLine 正常、收盤線 markPoint 被 ECharts 靜默忽略不畫）。對照指數圖 `GdpTwseView.vue` 有註冊 `MarkPointComponent` 故正常。修法：`import` 並 `use()` 補上 `MarkPointComponent`。以 Preview 導入實機容器、雙擊 2330 驗證紅（最高 2,510 / 6-22）綠（最低 1,020 / 2025-6-23）皆顯示
 
 ---
 
