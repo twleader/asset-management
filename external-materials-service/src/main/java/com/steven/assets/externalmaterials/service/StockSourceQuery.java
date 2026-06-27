@@ -223,6 +223,30 @@ public class StockSourceQuery {
         });
     }
 
+    /** 最新快照單一持股（含市值），供 ETF 透視 top10 成份股回補加權（Task 129）。 */
+    public record HeldValueRow(String stockCode, String market, BigDecimal currentValue) {}
+
+    /**
+     * 讀最新快照 `stock_holding` 的 (stock_code, market, current_value)。
+     * 供 {@code HistoricalBackfillService.collectLookthroughTopConstituents} 重算透視 top10 成份股（Task 129）。
+     */
+    public java.util.List<HeldValueRow> collectLatestSnapshotHoldingsWithValue() {
+        java.util.List<HeldValueRow> rows = new java.util.ArrayList<>();
+        Long latestSnapshotId = jdbc.query(
+                "SELECT id FROM asset_snapshot ORDER BY snapshot_date DESC LIMIT 1",
+                rs -> rs.next() ? rs.getLong(1) : null);
+        if (latestSnapshotId == null) return rows;
+        jdbc.query("SELECT stock_code, market, current_value FROM stock_holding WHERE snapshot_id = ?",
+                ps -> ps.setLong(1, latestSnapshotId),
+                (java.sql.ResultSet rs) -> {
+                    rows.add(new HeldValueRow(
+                            rs.getString("stock_code"),
+                            rs.getString("market"),
+                            rs.getBigDecimal("current_value")));
+                });
+        return rows;
+    }
+
     /**
      * 寫入或更新 stock_price_history（同一 trading_date 視為覆寫）。
      */
