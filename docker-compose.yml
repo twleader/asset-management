@@ -124,6 +124,9 @@ services:
     restart: unless-stopped
     environment:
       BUSINESS_SERVICES_URL: http://business-services:8080
+      # Gmail OAuth2 登入（Requirement 28）：值由專案 .env 注入；未填時用 placeholder 讓 BFF 仍能啟動
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-placeholder-client-id}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-placeholder-secret}
     ports:
       - "8080:8080"
     depends_on:

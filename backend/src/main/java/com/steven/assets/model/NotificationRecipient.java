@@ -5,15 +5,21 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.Filter;
 
 import java.time.LocalDateTime;
 
 /**
  * 警示觸發 Email 通知收件人（Requirement 23）。
- * email 寫入前正規化（trim + toLowerCase），DB 層 UNIQUE。
+ * email 寫入前正規化（trim + toLowerCase）。
+ *
+ * <p>Requirement 28（多租戶）：以 {@code ownerUserId} 隔離；唯一性改為每使用者唯一
+ * 複合 {@code (owner_user_id, email)}。
  */
 @Entity
-@Table(name = "notification_recipient")
+@Table(name = "notification_recipient", uniqueConstraints = @UniqueConstraint(
+        name = "uq_recipient_owner_email", columnNames = {"owner_user_id", "email"}))
+@Filter(name = "ownerFilter", condition = "owner_user_id = :ownerId")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -24,7 +30,11 @@ public class NotificationRecipient {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false, unique = true, length = 255)
+    /** 擁有者（Requirement 28） */
+    @Column(name = "owner_user_id", nullable = false)
+    private Long ownerUserId;
+
+    @Column(nullable = false, length = 255)
     private String email;
 
     @Column(nullable = false)

@@ -48,6 +48,7 @@ public class StockAlertService {
     private final MarketDataService marketDataService;
     private final StockAlertRecipientRepository recipientLinkRepo;
     private final NotificationRecipientService notificationRecipientService;
+    private final com.steven.assets.security.TenantGuard tenantGuard;
 
     // ===== CRUD =====
 
@@ -71,6 +72,7 @@ public class StockAlertService {
         assertNoDuplicate(code, req.getMarket(), req.getAlertType(),
                 req.getMaPeriod(), req.getThreshold(), null, req.getStockName());
         StockAlert alert = StockAlert.builder()
+                .ownerUserId(tenantGuard.requireCurrentUserId())
                 .stockCode(code)
                 .market(req.getMarket())
                 .alertType(req.getAlertType())
@@ -111,6 +113,7 @@ public class StockAlertService {
         for (int i = 0; i < orderedIds.size(); i++) {
             Long id = orderedIds.get(i);
             alertRepo.findById(id).ifPresent(a -> {
+                tenantGuard.assertOwned(a.getOwnerUserId());
                 a.setDisplayOrder(orderedIds.indexOf(id));
                 alertRepo.save(a);
             });
@@ -121,6 +124,7 @@ public class StockAlertService {
     public StockAlertDto.Response update(Long id, StockAlertDto.Request req) {
         StockAlert alert = alertRepo.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Alert not found: " + id));
+        tenantGuard.assertOwned(alert.getOwnerUserId());
         String code = req.getStockCode().trim().toUpperCase();
         assertNameMatchesCode(code, req.getMarket(), req.getStockName());
         assertNoDuplicate(code, req.getMarket(), req.getAlertType(),
@@ -145,8 +149,11 @@ public class StockAlertService {
 
     @Transactional
     public void delete(Long id) {
+        StockAlert alert = alertRepo.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Alert not found: " + id));
+        tenantGuard.assertOwned(alert.getOwnerUserId());
         recipientLinkRepo.deleteByAlertId(id);   // 連帶刪除 join 列（DB 亦有 ON DELETE CASCADE 雙保險）
-        alertRepo.deleteById(id);
+        alertRepo.delete(alert);
     }
 
     /**
@@ -213,6 +220,7 @@ public class StockAlertService {
     public StockAlertDto.Response toggleActive(Long id) {
         StockAlert alert = alertRepo.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Alert not found: " + id));
+        tenantGuard.assertOwned(alert.getOwnerUserId());
         alert.setActive(!alert.getActive());
         return toResponse(alertRepo.save(alert));
     }

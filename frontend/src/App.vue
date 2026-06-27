@@ -59,9 +59,14 @@
               <el-icon><Bell /></el-icon>
               <template #title>警示通知設定</template>
             </el-menu-item>
-            <el-menu-item index="/settings/backup-restore">
+            <!-- Requirement 28：備份/還原與使用者管理僅管理者可見 -->
+            <el-menu-item v-if="auth.isAdmin" index="/settings/backup-restore">
               <el-icon><FolderOpened /></el-icon>
               <template #title>備份/還原 資料</template>
+            </el-menu-item>
+            <el-menu-item v-if="auth.isAdmin" index="/settings/users">
+              <el-icon><User /></el-icon>
+              <template #title>使用者管理</template>
             </el-menu-item>
           </el-sub-menu>
         </el-menu>
@@ -87,6 +92,42 @@
             <span class="clock-tag clock-lon">
               <span class="clock-label">LON</span> <span class="clock-time">{{ lonNow }}</span>
             </span>
+
+            <!-- Requirement 28：管理者使用者切換（代看） -->
+            <el-select
+              v-if="auth.isAdmin"
+              :model-value="auth.effectiveUserId"
+              size="small"
+              class="impersonate-select"
+              :class="{ 'is-impersonating': auth.isImpersonating }"
+              placeholder="切換使用者"
+              @change="onImpersonate"
+            >
+              <el-option
+                v-for="u in auth.switchableUsers"
+                :key="u.id"
+                :label="impersonateLabel(u)"
+                :value="u.id"
+              />
+            </el-select>
+
+            <!-- Requirement 28：登入者資訊 + 登出 -->
+            <el-dropdown v-if="auth.isLoggedIn" trigger="click" @command="onUserCommand">
+              <span class="user-chip">
+                <el-avatar :size="26" :src="auth.me?.picture">{{ userInitial }}</el-avatar>
+                <span class="user-chip-name">{{ auth.me?.name || auth.me?.email }}</span>
+                <el-icon><ArrowDown /></el-icon>
+              </span>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item disabled>{{ auth.me?.email }}</el-dropdown-item>
+                  <el-dropdown-item v-if="auth.isImpersonating" command="stopImpersonate" divided>
+                    結束代看（{{ auth.effectiveUserName }}）
+                  </el-dropdown-item>
+                  <el-dropdown-item command="logout" divided>登出</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </div>
         </el-header>
 
@@ -105,9 +146,35 @@
 <script setup>
 import zhTw from 'element-plus/dist/locale/zh-tw.mjs'
 import { useAssetStore } from '@/stores/assetStore'
+import { useAuthStore } from '@/stores/authStore'
 
 const collapsed = ref(false)
 const store = useAssetStore()
+const auth = useAuthStore()
+
+// Requirement 28：登入者顯示與管理者代看
+const userInitial = computed(() => {
+  const s = auth.me?.name || auth.me?.email || '?'
+  return s.trim().charAt(0).toUpperCase()
+})
+function impersonateLabel(u) {
+  const role = u.role === 'ADMIN' ? '（管理者）' : ''
+  const pending = u.status !== 'ACTIVE' ? '〔待核准〕' : ''
+  return `${u.name || u.email}${role}${pending}`
+}
+async function onImpersonate(userId) {
+  // 切換代看對象後整頁重載，確保所有頁面資料以新視角重新取得
+  await auth.impersonate(userId)
+  window.location.reload()
+}
+async function onUserCommand(cmd) {
+  if (cmd === 'logout') {
+    await auth.logout()
+  } else if (cmd === 'stopImpersonate') {
+    await auth.impersonate(null)
+    window.location.reload()
+  }
+}
 
 // 雙時區即時時鐘（每秒更新）
 const tpeNow = ref('')
@@ -251,6 +318,25 @@ body {
 .clock-lon { background: #0ea5e9; box-shadow: 0 1px 2px rgba(14,165,233,0.3); }
 .clock-label { font-weight: 700; font-size: 12px; opacity: 0.9; }
 .clock-time { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+
+/* Requirement 28：使用者切換 + 登入者資訊 */
+.impersonate-select { width: 180px; margin-left: 4px; }
+.impersonate-select.is-impersonating :deep(.el-select__wrapper) {
+  box-shadow: 0 0 0 1px #d97706 inset;
+  background: #fffbeb;
+}
+.user-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 8px;
+  color: #1e293b;
+  transition: background 0.2s;
+}
+.user-chip:hover { background: #f1f5f9; }
+.user-chip-name { font-size: 13px; font-weight: 500; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Global card style */
 .el-card { border-radius: 12px !important; border: none !important; box-shadow: 0 1px 8px rgba(0,0,0,0.08) !important; }

@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { useAuthStore } from '@/stores/authStore'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -140,7 +141,15 @@ const router = createRouter({
       path: '/settings/backup-restore',
       name: 'BackupRestore',
       component: () => import('@/views/BackupRestoreView.vue'),
-      meta: { title: '備份/還原 資料', icon: 'Setting' }
+      // Requirement 28：備份/還原僅管理者
+      meta: { title: '備份/還原 資料', icon: 'Setting', requiresAdmin: true }
+    },
+    {
+      path: '/settings/users',
+      name: 'UserManagement',
+      component: () => import('@/views/UserManagementView.vue'),
+      // Requirement 28：使用者管理僅管理者
+      meta: { title: '使用者管理', icon: 'User', requiresAdmin: true }
     },
     {
       path: '/settings/notifications',
@@ -148,11 +157,36 @@ const router = createRouter({
       component: () => import('@/views/NotificationSettingsView.vue'),
       meta: { title: '警示通知設定', icon: 'Bell' }
     },
+    {
+      path: '/pending',
+      name: 'PendingApproval',
+      component: () => import('@/views/PendingApprovalView.vue'),
+      meta: { title: '等待核准', hidden: true }
+    },
   ]
 })
 
-router.beforeEach((to) => {
+// Requirement 28：登入 / 待核准 / ADMIN-only 守門
+router.beforeEach(async (to) => {
   document.title = `${to.meta.title || '資產管理'} | 資產管理系統`
+  const auth = useAuthStore()
+  if (!auth.loaded) {
+    await auth.fetchMe()
+  }
+  if (!auth.isLoggedIn) {
+    auth.login()
+    return false
+  }
+  if (auth.isPending) {
+    return to.path === '/pending' ? true : '/pending'
+  }
+  if (to.path === '/pending') {
+    return '/dashboard'
+  }
+  if (to.meta.requiresAdmin && !auth.isAdmin) {
+    return '/dashboard'
+  }
+  return true
 })
 
 export default router

@@ -2,12 +2,20 @@ package com.steven.assets.model;
 
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.Filter;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
+/**
+ * 到價警示（Requirement 16）。
+ *
+ * <p>Requirement 28（多租戶）：以 {@code ownerUserId} 隔離；觀察清單、trigger、recipient join 皆繼承。
+ * 背景偵測 cron 不啟用 owner filter，掃全體 active 警示、寄信給各警示自選的收件人。
+ */
 @Entity
 @Table(name = "stock_alert")
+@Filter(name = "ownerFilter", condition = "owner_user_id = :ownerId")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -17,6 +25,10 @@ public class StockAlert {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
+    /** 擁有者（Requirement 28） */
+    @Column(name = "owner_user_id", nullable = false)
+    private Long ownerUserId;
 
     @Column(nullable = false, length = 20)
     private String stockCode;

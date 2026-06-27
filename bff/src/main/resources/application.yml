@@ -1,9 +1,29 @@
 server:
   port: ${SERVER_PORT:8080}
+  # Requirement 28：prod 經 Nginx 終止 TLS，採信 X-Forwarded-Proto/Host，OAuth2 redirect-uri 才會產生正確的 https + 主機
+  forward-headers-strategy: framework
+  reactive:
+    session:
+      # session cookie 安全性（Requirement 28）：HttpOnly 防 XSS 竊取；SameSite=Lax 提供 CSRF 基礎防護
+      cookie:
+        http-only: true
+        same-site: lax
 
 spring:
   application:
     name: asset-management-bff
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            # placeholder 預設讓 BFF 在未填憑證時仍能啟動（登入需填真實值）；空字串會讓 registration 建構失敗
+            client-id: ${GOOGLE_CLIENT_ID:placeholder-client-id}
+            client-secret: ${GOOGLE_CLIENT_SECRET:placeholder-secret}
+            scope:
+              - openid
+              - email
+              - profile
   cloud:
     gateway:
       globalcors:
@@ -21,7 +41,8 @@ spring:
               - PATCH
               - OPTIONS
             allowedHeaders: "*"
-            allowCredentials: false
+            # cookie session 需帶 credentials（Requirement 28）；origin 已具名，非萬用
+            allowCredentials: true
             maxAge: 3600
       # 停用預設的 metrics-based circuit breaker，保持輕量
       default-filters: []

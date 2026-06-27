@@ -39,6 +39,7 @@ public class AssetService {
     private final AssetClassifier assetClassifier;
     private final StockStyleRepository stockStyleRepo;
     private final FundClassOverrideRepository fundClassOverrideRepo;
+    private final com.steven.assets.security.TenantGuard tenantGuard;
 
     /**
      * 算 FundHolding currentValue：若 units 非空 → 嘗試 NAV(basedate) × FX(basedate) 自動算
@@ -123,6 +124,7 @@ public class AssetService {
         }
 
         AssetSnapshot snapshot = AssetSnapshot.builder()
+                .ownerUserId(tenantGuard.requireCurrentUserId())
                 .snapshotDate(req.snapshotDate())
                 .usdExchangeRate(req.usdExchangeRate())
                 .notes(req.notes())
@@ -351,7 +353,7 @@ public class AssetService {
 
     @Transactional
     public void deleteSnapshot(Long id) {
-        snapshotRepo.deleteById(id);
+        snapshotRepo.delete(findSnapshot(id)); // findSnapshot 已驗證歸屬
     }
 
     // ===================== Asset History =====================
@@ -530,6 +532,7 @@ public class AssetService {
     public List<AssetSnapshotDto.HoldingClassifiedResponse> getHoldingsClassified(Long snapshotId) {
         AssetSnapshot s = snapshotRepo.findById(snapshotId)
                 .orElseThrow(() -> new NoSuchElementException("找不到快照 ID: " + snapshotId));
+        tenantGuard.assertOwned(s.getOwnerUserId());
 
         java.util.Map<String, String> classOv = new java.util.HashMap<>();
         java.util.Map<String, String> styleOv = new java.util.HashMap<>();
@@ -625,6 +628,7 @@ public class AssetService {
         }
 
         RealizedGain gain = RealizedGain.builder()
+                .ownerUserId(tenantGuard.requireCurrentUserId())
                 .assetName(req.assetName())
                 .assetCode(req.assetCode())
                 .market(req.market())
@@ -645,6 +649,7 @@ public class AssetService {
     public RealizedGainDto.RealizedGainResponse updateRealizedGain(Long id, RealizedGainDto.CreateRealizedGainRequest req) {
         RealizedGain gain = gainRepo.findById(id)
                 .orElseThrow(() -> new RuntimeException("RealizedGain not found: " + id));
+        tenantGuard.assertOwned(gain.getOwnerUserId());
 
         String currency = req.currency();
         if (currency == null || currency.isBlank()) {
@@ -675,7 +680,10 @@ public class AssetService {
 
     @Transactional
     public void deleteRealizedGain(Long id) {
-        gainRepo.deleteById(id);
+        RealizedGain gain = gainRepo.findById(id)
+                .orElseThrow(() -> new NoSuchElementException("RealizedGain not found: " + id));
+        tenantGuard.assertOwned(gain.getOwnerUserId());
+        gainRepo.delete(gain);
     }
 
     // ===================== Dividend Rate Enrich =====================
@@ -849,8 +857,10 @@ public class AssetService {
     // ===================== Private Helpers =====================
 
     private AssetSnapshot findSnapshot(Long id) {
-        return snapshotRepo.findById(id)
+        AssetSnapshot s = snapshotRepo.findById(id)
                 .orElseThrow(() -> new NoSuchElementException("找不到快照 ID: " + id));
+        tenantGuard.assertOwned(s.getOwnerUserId()); // by-id 載入不受 @Filter 約束，需手動驗證歸屬
+        return s;
     }
 
     /**

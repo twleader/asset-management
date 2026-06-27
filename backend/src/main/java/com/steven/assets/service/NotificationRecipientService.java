@@ -16,6 +16,7 @@ public class NotificationRecipientService {
 
     private final NotificationRecipientRepository repo;
     private final StockAlertRecipientRepository alertRecipientRepo;
+    private final com.steven.assets.security.TenantGuard tenantGuard;
 
     public List<NotificationRecipientDto.Response> findAll() {
         return repo.findAllByOrderByCreatedAtAsc().stream().map(this::toResponse).toList();
@@ -28,6 +29,7 @@ public class NotificationRecipientService {
             throw new IllegalArgumentException("收件人 " + email + " 已存在");
         });
         NotificationRecipient saved = repo.save(NotificationRecipient.builder()
+                .ownerUserId(tenantGuard.requireCurrentUserId())
                 .email(email)
                 .active(req.active() == null ? Boolean.TRUE : req.active())
                 .build());
@@ -38,6 +40,7 @@ public class NotificationRecipientService {
     public NotificationRecipientDto.Response update(Long id, NotificationRecipientDto.UpdateRequest req) {
         NotificationRecipient r = repo.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Recipient not found: " + id));
+        tenantGuard.assertOwned(r.getOwnerUserId());
         String email = normalize(req.email());
         if (!email.equals(r.getEmail())) {
             repo.findByEmail(email).ifPresent(other -> {
@@ -52,14 +55,18 @@ public class NotificationRecipientService {
     public NotificationRecipientDto.Response toggleActive(Long id) {
         NotificationRecipient r = repo.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Recipient not found: " + id));
+        tenantGuard.assertOwned(r.getOwnerUserId());
         r.setActive(!r.getActive());
         return toResponse(repo.save(r));
     }
 
     @Transactional
     public void delete(Long id) {
+        NotificationRecipient r = repo.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Recipient not found: " + id));
+        tenantGuard.assertOwned(r.getOwnerUserId());
         alertRecipientRepo.deleteByRecipientId(id);   // Task 125：連帶刪除其在警示 join 表的列（DB 亦有 ON DELETE CASCADE 雙保險）
-        repo.deleteById(id);
+        repo.delete(r);
     }
 
     private static String normalize(String email) {

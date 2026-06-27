@@ -24,10 +24,12 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': {
-        target: 'http://localhost:8080',
-        changeOrigin: true
-      }
+      // Requirement 28：OAuth2 重導鏈與 API 全部走 BFF。dev 的 Google redirect-uri 應登記為
+      // http://localhost:5173/login/oauth2/code/google，讓整鏈留在 5173、session cookie domain 一致。
+      '/api': { target: 'http://localhost:8080', changeOrigin: true },
+      '/oauth2': { target: 'http://localhost:8080', changeOrigin: true },
+      '/login': { target: 'http://localhost:8080', changeOrigin: true },
+      '/logout': { target: 'http://localhost:8080', changeOrigin: true }
     }
   }
 })

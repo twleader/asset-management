@@ -22,6 +22,7 @@ public class PaymentAccountService {
 
     private final PaymentCategoryRepository categoryRepo;
     private final PaymentAccountRepository accountRepo;
+    private final com.steven.assets.security.TenantGuard tenantGuard;
 
     // ===================== Category =====================
 
@@ -84,6 +85,7 @@ public class PaymentAccountService {
         PaymentCategory category = categoryRepo.findById(req.categoryId())
                 .orElseThrow(() -> new NoSuchElementException("找不到代繳分類 ID: " + req.categoryId()));
         PaymentAccount entity = PaymentAccount.builder()
+                .ownerUserId(tenantGuard.requireCurrentUserId())
                 .category(category)
                 .itemName(req.itemName())
                 .paymentAccount(req.paymentAccount())
@@ -97,6 +99,7 @@ public class PaymentAccountService {
     public PaymentDto.AccountResponse updateAccount(Long id, PaymentDto.UpdateAccountRequest req) {
         PaymentAccount entity = accountRepo.findById(id)
                 .orElseThrow(() -> new NoSuchElementException("找不到代繳記錄 ID: " + id));
+        tenantGuard.assertOwned(entity.getOwnerUserId());
         if (!entity.getCategory().getId().equals(req.categoryId())) {
             PaymentCategory category = categoryRepo.findById(req.categoryId())
                     .orElseThrow(() -> new NoSuchElementException("找不到代繳分類 ID: " + req.categoryId()));
@@ -111,10 +114,10 @@ public class PaymentAccountService {
 
     @Transactional
     public void deleteAccount(Long id) {
-        if (!accountRepo.existsById(id)) {
-            throw new NoSuchElementException("找不到代繳記錄 ID: " + id);
-        }
-        accountRepo.deleteById(id);
+        PaymentAccount entity = accountRepo.findById(id)
+                .orElseThrow(() -> new NoSuchElementException("找不到代繳記錄 ID: " + id));
+        tenantGuard.assertOwned(entity.getOwnerUserId());
+        accountRepo.delete(entity);
     }
 
     // ===================== Helpers =====================

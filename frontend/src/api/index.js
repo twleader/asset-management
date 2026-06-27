@@ -4,12 +4,30 @@ import { ElMessage } from 'element-plus'
 const api = axios.create({
   baseURL: '/api',
   timeout: 30000,
-  headers: { 'Content-Type': 'application/json' }
+  headers: { 'Content-Type': 'application/json' },
+  // Requirement 28：cookie session 需隨請求帶上
+  withCredentials: true
 })
 
 api.interceptors.response.use(
   res => res.data,
   err => {
+    const status = err.response?.status
+    const code = err.response?.data?.code
+
+    // Requirement 28：未登入 → 整頁跳轉 Google 登入（/api/me 等可設 skipAuthRedirect 自行處理）
+    if (status === 401 && !err.config?.skipAuthRedirect) {
+      window.location.href = '/oauth2/authorization/google'
+      return Promise.reject(err)
+    }
+    // Requirement 28：帳號待核准 / 停用 → 導向等待頁
+    if (status === 403 && code === 'ACCOUNT_PENDING') {
+      if (window.location.pathname !== '/pending') {
+        window.location.href = '/pending'
+      }
+      return Promise.reject(err)
+    }
+
     // 呼叫端可設 config.skipErrorToast 自行處理錯誤呈現（例：警示存檔改用 dialog 顯示而非頂部 toast）
     if (!err.config?.skipErrorToast) {
       const msg = err.response?.data?.detail || err.response?.data?.message || err.message || '請求失敗'
@@ -18,6 +36,20 @@ api.interceptors.response.use(
     return Promise.reject(err)
   }
 )
+
+// ===== 認證 / 使用者管理（Requirement 28） =====
+export const authApi = {
+  me: () => api.get('/me', { skipAuthRedirect: true, skipErrorToast: true }),
+  // /logout 不在 /api 之下，故覆寫 baseURL
+  logout: () => api.post('/logout', null, { baseURL: '' }),
+  impersonate: (userId) => api.post('/impersonate', { userId })
+}
+
+export const userManagementApi = {
+  list: () => api.get('/bff/user-management'),
+  updateStatus: (id, status) => api.patch(`/bff/user-management/${id}/status`, { status }),
+  updateRole: (id, role) => api.patch(`/bff/user-management/${id}/role`, { role })
+}
 
 /** 從 axios error 取後端訊息（ProblemDetail.detail 優先），供呼叫端自訂呈現。 */
 export function apiErrorMessage(err, fallback = '操作失敗') {
