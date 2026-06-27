@@ -7,6 +7,7 @@ import org.knowm.xchart.BitmapEncoder;
 import org.knowm.xchart.XYChart;
 import org.knowm.xchart.XYChartBuilder;
 import org.knowm.xchart.XYSeries;
+import org.knowm.xchart.internal.chartpart.Annotation;
 import org.knowm.xchart.style.Styler;
 import org.knowm.xchart.style.XYStyler;
 import org.knowm.xchart.style.markers.SeriesMarkers;
@@ -16,7 +17,10 @@ import javax.imageio.ImageIO;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Font;
+import java.awt.FontMetrics;
 import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.awt.geom.RoundRectangle2D;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -26,8 +30,10 @@ import java.text.DecimalFormat;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
@@ -83,6 +89,11 @@ public class AlertChartRenderer {
     private static final Color C_D     = new Color(0x15, 0x80, 0x3d); // D 綠
     private static final Color C_REF   = new Color(0x94, 0xa3, 0xb8); // 80/20 參考線 灰
     private static final Color C_GRID  = new Color(0xF0, 0xF0, 0xF0);
+    private static final Color C_HIGH  = new Color(0xdc, 0x26, 0x26); // 最高 紅（紅漲，對齊畫面 markPoint）
+    private static final Color C_LOW   = new Color(0x16, 0xa3, 0x4a); // 最低 綠（綠跌，對齊畫面 markPoint）
+
+    /** 最高 / 最低標記色塊第二行日期格式（UTC，與 xs 的 atStartOfDay(UTC) 同基準避免時區偏移）。 */
+    private static final DateTimeFormatter MARK_DATE = DateTimeFormatter.ofPattern("yyyy/MM/dd");
 
     /** Alpine font-noto-cjk 的繁中字型（TC face）；deriveFont 後共用於兩個 chart。 */
     private static final Font CJK_FONT = loadCjkFont(13f);
@@ -156,6 +167,8 @@ public class AlertChartRenderer {
         addLine(chart, "季線MA60 "  + fmt(last(s60)),   xs, s60,   C_MA60,  1.4f);
         addLine(chart, "年線MA240 " + fmt(last(s240)),  xs, s240,  C_MA240, 1.4f);
 
+        addHiLoMarkers(chart, xs, price);
+
         return BitmapEncoder.getBufferedImage(chart);
     }
 
@@ -220,6 +233,91 @@ public class AlertChartRenderer {
         s.setLineStyle(new BasicStroke(1f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_BEVEL,
                 1f, new float[]{4f, 4f}, 0f));   // 虛線
         s.setShowInLegend(false);
+    }
+
+    /**
+     * 在股價線標出顯示區間內的「最高 / 最低」收盤點（紅最高、綠最低，比照畫面 StockAnalysisDialog 的 markPoint）。
+     * 各以一個 {@link HiLoMarker} annotation 畫出：圓點落在線上 + 色塊兩行（第一行「最高/最低 + 價位」、第二行日期）。
+     * 最高 / 最低同點（區間內平盤）時只畫最高。價位 / 日期入圖，與畫面互動圖一致。
+     */
+    private static void addHiLoMarkers(XYChart chart, List<Date> xs, List<Double> price) {
+        if (xs.isEmpty()) return;
+        int maxI = -1, minI = -1;
+        double maxV = Double.NEGATIVE_INFINITY, minV = Double.POSITIVE_INFINITY;
+        for (int i = 0; i < price.size(); i++) {
+            Double v = price.get(i);
+            if (v == null) continue;
+            if (v > maxV) { maxV = v; maxI = i; }
+            if (v < minV) { minV = v; minI = i; }
+        }
+        if (maxI < 0) return;
+        chart.addAnnotation(new HiLoMarker(xs.get(maxI), maxV, true));
+        if (minI != maxI) chart.addAnnotation(new HiLoMarker(xs.get(minI), minV, false));
+    }
+
+    /**
+     * 股價線上的「最高 / 最低」標記：自繪圓點 + 圓角色塊（兩行：最高/最低+價位、日期）。
+     * 用 {@link Annotation} 的軸→螢幕座標換算（paint 時 chart 已完成軸範圍計算），故點精準落在線上。
+     * AnnotationText 的字色由 styler 全域共用、無法逐點分紅綠，故自繪以對齊畫面紅漲綠跌的雙色塊。
+     */
+    private static final class HiLoMarker extends Annotation {
+        private final double xMillis;
+        private final double yVal;
+        private final boolean isHigh;
+        private final String line1;   // 最高/最低 + 價位
+        private final String line2;   // 日期
+
+        private HiLoMarker(Date x, double y, boolean isHigh) {
+            super(false);             // 座標為資料值（非螢幕像素）
+            this.xMillis = x.getTime();
+            this.yVal = y;
+            this.isHigh = isHigh;
+            this.line1 = (isHigh ? "最高 " : "最低 ") + fmt(y);
+            this.line2 = Instant.ofEpochMilli(x.getTime()).atZone(UTC).toLocalDate().format(MARK_DATE);
+        }
+
+        @Override
+        public void paint(Graphics2D g) {
+            if (!isVisible) return;
+            Object aa = g.getRenderingHint(RenderingHints.KEY_ANTIALIASING);
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+
+            int px = getXAxisScreenValue(xMillis);
+            int py = getYAxisScreenValue(yVal);
+            Color color = isHigh ? C_HIGH : C_LOW;
+
+            // 線上的圓點（白邊讓它從藍線浮出）
+            g.setColor(color);
+            g.fillOval(px - 4, py - 4, 8, 8);
+            g.setStroke(new BasicStroke(1.5f));
+            g.setColor(Color.WHITE);
+            g.drawOval(px - 4, py - 4, 8, 8);
+
+            // 兩行色塊
+            g.setFont(CJK_FONT.deriveFont(Font.BOLD, 11f));
+            FontMetrics fm = g.getFontMetrics();
+            int lh = fm.getHeight();
+            int padX = 6, padY = 3, gap = 8;
+            int boxW = Math.max(fm.stringWidth(line1), fm.stringWidth(line2)) + padX * 2;
+            int boxH = lh * 2 + padY * 2;
+
+            // 最高色塊放點下方、最低放上方（對齊畫面，避免撞 legend / 縮放軸）；水平夾在 plot 內避免出界
+            int boxX = px - boxW / 2;
+            int boxY = isHigh ? py + gap : py - gap - boxH;
+            int left = getXAxisScreenValueForMin();
+            int right = getXAxisScreenValueForMax();
+            if (boxX < left) boxX = left;
+            if (boxX + boxW > right) boxX = right - boxW;
+
+            g.setColor(color);
+            g.fill(new RoundRectangle2D.Float(boxX, boxY, boxW, boxH, 6, 6));
+            g.setColor(Color.WHITE);
+            int ty = boxY + padY + fm.getAscent();
+            g.drawString(line1, boxX + (boxW - fm.stringWidth(line1)) / 2, ty);
+            g.drawString(line2, boxX + (boxW - fm.stringWidth(line2)) / 2, ty + lh);
+
+            if (aa != null) g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, aa);
+        }
     }
 
     /** 與前端 calcMA 一致：每點對 window 重新加總（非滑動扣減）、四捨五入 2 位；不足 window 回 null。 */

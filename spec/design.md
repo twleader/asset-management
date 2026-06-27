@@ -87,7 +87,7 @@ com.steven.assets/
 - `WatchStockBffRoutes`（WatchStockView 專屬，`/api/bff/watch-stock/**`）：純 Spring Cloud Gateway passthrough route，rewrite `/api/bff/watch-stock(/**)` → `/api/watch-stocks(/**)` 轉至 business-services。觀察清單已改為「`stock_alert` 衍生 view」，**衍生與 enrichment 一律在 business-services（`WatchStockController` / `WatchStockService`）完成，BFF 僅轉發不重算**：
   - `GET /api/bff/watch-stock` → `GET /api/watch-stocks`：business-services 由 `stock_alert` 群組去重衍生清單，對每筆 (stockCode, market) 補上 live 報價、技術指標、最近觸發資訊
   - `PUT /api/bff/watch-stock/order` → `PUT /api/watch-stocks/order`：拖曳排序時把該股票所有 alert 的 displayOrder 整組重排
-  - `POST /api/bff/watch-stock/resend-digest` → `POST /api/watch-stocks/resend-digest`：手動補發最後交易日警示 digest 信（passthrough 也涵蓋 `GET /api/watch-stocks/chart.png`）
+  - `POST /api/bff/watch-stock/resend-digest?market=` → `POST /api/watch-stocks/resend-digest`：手動補發最後交易日警示 digest 信，`market` query（台股/美股/英股）限定只補發當前市場 tab、原樣帶過（passthrough 也涵蓋 `GET /api/watch-stocks/chart.png`）
   - 新增觀察由前端直接呼叫 `/api/bff/stock-alert/**` 建立警示條件；移除觀察由前端在「警示條件」頁刪除該股票所有 alert 達成，因此不提供 watch-stock 級的 create / delete 端點
 - `SnapshotFormBffController`（SnapshotFormView 專屬）：把表單頁的多步協調邏輯（價格批次查 + backfill fallback + 配息率補抓 + 名稱補齊 + 匯率智慧 fallback）集中於此
   - `GET /api/bff/snapshot-form/{id}`：編輯模式 bootstrap，回傳 enriched detail + mergedStocks
@@ -872,7 +872,7 @@ PATCH  /api/settings/deposit-types/{id}/active # 啟用/停用存款類型
 ```
 GET    /api/watch-stocks                       # 列出所有觀察股票（去重後含最新報價、警示彙總）
 PUT    /api/watch-stocks/order                 # body: [{stockCode, market}] 陣列；把每個股票所有 alert 的 displayOrder 整組重排
-POST   /api/watch-stocks/resend-digest         # 補發：各市場最後交易日觸發事件彙整為單封 digest email 重寄（Requirement 23）
+POST   /api/watch-stocks/resend-digest?market= # 補發：指定市場（台股/美股/英股）最後交易日觸發事件彙整為單封 digest email 重寄；market 省略則全市場（Requirement 23、Task 128）
 GET    /api/watch-stocks/chart.png             # 警示 email 內嵌的股票分析走勢圖 PNG（XChart server-side 渲染）
 ```
 新增 / 移除觀察一律透過 `/api/stock-alerts` 操作對應 alert：建立第一筆 alert 即出現於觀察清單，刪除最後一筆 alert 即從觀察清單消失。
@@ -1355,13 +1355,14 @@ StockAlertService.evaluate()
 - digest 主旨：`[資產管理] 股票警示觸發 N 筆`，N = **該收件人這封信**去重後的股票檔數（非觸發筆數）；同輪不同收件人各自的 N 可能不同
 - **同一股票（stockCode+market）多條件觸發合併成一筆**（`groupByStock`，保留首次出現順序）：標題 `{stockName} ({stockCode} {market}) — {label1、label2…}`（該股所有觸發條件 label 去重串接），其下依序 `觸發時間`、`股價`、三條均線 `月線 {monthlyMa}`／`季線 {quarterlyMa}`／`年線 {annualMa}`、`KD：K {k} / D {d}`。技術快照（時間/股價/MA/KD）取該股**最近一筆觸發**（max `triggeredAt`）——同股各條件的 MA/KD 本即同源、僅時間略異（某條均線因歷史不足為 null 時該行省略；K/D 皆 null 時整行省略）。三條均線值取自 `recordTrigger` 當下 `TechnicalIndicatorService.computeAll()` 的 `FullIndicators`，與 `stock_alert_trigger` 落地的 `monthly_ma/quarterly_ma/annual_ma` 同源
 
-**手動補發（觀察清單「補發」按鈕）**：
-- 前端 `WatchStockView` 「新增觀察」左側「補發」鈕 → `POST /api/bff/watch-stock/resend-digest`（watch-stock BFF passthrough → `/api/watch-stocks/resend-digest`，守「一頁一支 BFF」）
-- `WatchStockController.resendDigest()` 委派 `AlertNotificationDispatcher.resendLastTradingDay()`：
-  - 對 `stock_alert_trigger` 內出現過的每個 market，依市場時區算「最後交易日」（`lastTradingDate`：平日已過開盤＝當日、盤前 / 週末回溯最近平日；不考慮假日），取該日 `triggered_at ∈ [當地 00:00, 翌日 00:00)` 的所有觸發
-  - 把各市場結果合併後**以收件人為單位**各組一封（重用同一 `buildDigest` → 月線/季線/年線 + KD 同源），主旨 `[資產管理] 股票警示補發 N 筆`，每位收件人只含其所訂閱警示的觸發、單一收件人寄出（同自動 flush 的 per-recipient 分組；Task 125）
+**手動補發（觀察清單「補發」按鈕，限當前市場 tab；Task 128）**：
+- 前端 `WatchStockView` 「新增觀察」左側「補發」鈕 → `POST /api/bff/watch-stock/resend-digest?market={marketTab}`（watch-stock BFF passthrough → `/api/watch-stocks/resend-digest`，query 原樣帶過，守「一頁一支 BFF」）。按鈕文字隨 `marketTab` 顯示「補發台股 / 補發美股 / 補發英股」，使「只補發當前市場」對使用者明示
+- `WatchStockController.resendDigest(@RequestParam(required=false) market)` 委派 `AlertNotificationDispatcher.resendLastTradingDay(market)`：
+  - **市場範圍**：`market` 有值（前端必帶）→ 只處理該單一市場；`market` 為 null / 空 → fallback `triggerRepo.findDistinctMarkets()` 全市場（向後相容、直接打 API 仍可全補）。實作上把原 `for (market : findDistinctMarkets())` 的來源換成 `markets = (market 空) ? findDistinctMarkets() : List.of(market)`
+  - 對每個 market，依市場時區算「最後交易日」（`lastTradingDate`：平日已過開盤＝當日、盤前 / 週末回溯最近平日；不考慮假日），取該日 `triggered_at ∈ [當地 00:00, 翌日 00:00)` 的所有觸發
+  - 把結果**以收件人為單位**各組一封（重用同一 `buildDigest` → 月線/季線/年線 + KD 同源），主旨 `[資產管理] 股票警示補發 N 筆`，每位收件人只含其所訂閱警示的觸發、單一收件人寄出（同自動 flush 的 per-recipient 分組；Task 125）
   - 觸發列回查 `StockAlert`（`alertId`）以 `buildLabel` 還原條件文案；alert 已刪除的孤兒觸發以「警示觸發」當 fallback label，不靜默丟棄
-  - 回傳 `{sent, count, message}`：`SENT` / `NO_EVENTS`（各市場最後交易日皆無觸發）/ `NO_RECIPIENTS` / `EMAIL_DISABLED` 四態，後三者不寄信，前端據以提示
+  - 回傳 `{sent, count, message}`：`SENT` / `NO_EVENTS`（該市場最後交易日無觸發）/ `NO_RECIPIENTS` / `EMAIL_DISABLED` 四態，後三者不寄信，前端據以提示；controller 組訊息時把市場名嵌入（如「已補發 美股 N 檔股票給 M 位收件人」「美股最後交易日無觸發事件，無可補發」）
   - 補發為手動全量重寄，與自動 digest 的 24h cooldown / queue 互不影響（不寫 cooldown、不入 queue）
 
 **HTML 信 + 內嵌走勢圖（Task 93）**：
@@ -1372,6 +1373,7 @@ StockAlertService.evaluate()
   - MA：與前端 `calcMA` 相同——**每點對 window 重新加總**（非滑動扣減，避免長序列累積誤差）+ `BigDecimal HALF_UP` 2 位
   - KD：與前端 `calcKD` / `TechnicalIndicatorService` 同一遞迴（period 9、RSV=(close-ll)/(hh-ll)*100、hh==ll→50、K=prevK*2/3+RSV/3、D=prevD*2/3+K/3、seed 50/50、high/low 缺值 fallback close、續算用未捨入值）。整段歷史算完再切尾 252（≈1年），尾值與畫面逐位一致
   - 上 pane：股價(藍) + 月線MA20(橘) + 季線MA60(紫) + 年線MA240(紅)，隱藏 x 軸（日期只畫在下 pane）；下 pane：K(橘) / D(綠)，Y 0~100，80/20 灰虛線（`setShowInLegend(false)` 不進圖例）
+  - **股價線標最高 / 最低點**（比照畫面 `StockAnalysisDialog` 的 markPoint）：`addHiLoMarkers` 找顯示窗（≈252 日）內股價最高 / 最低收盤，各以 `HiLoMarker`（自訂 `Annotation` 子類）畫出——圓點落在線上 + 圓角色塊兩行（第一行「最高/最低 + 價位 `%,.2f`」、第二行日期 `yyyy/MM/dd`），紅最高(#dc2626) / 綠最低(#16a34a)（紅漲綠跌）。色塊位置：最高放點下方、最低放點上方，水平夾在 plot 內避免出界。最高 / 最低同點（區間平盤）只畫最高。座標用 `Annotation.getXAxisScreenValue/getYAxisScreenValue`（paint 時軸範圍已算妥）→ 點精準落線上；不用 `AnnotationText`（其字色由 styler 全域共用、無法逐點分紅綠）
   - legend 文字 = 中文名稱 + 空白 + 最新值（`%,.2f`），白底，與畫面同
   - 失敗回 empty → 略過該圖、文字照寄。每封信內嵌圖數設上限（超過則該檔僅文字），`sendHtml` log 內嵌總位元組
 - `AlertNotificationDispatcher.buildDigest`：數值入圖後文字精簡——保留「標題 + 觸發時間 + **觸發股價**」，移除月/季/年線/KD 文字列（圖內已有）。`<img width:900px>`

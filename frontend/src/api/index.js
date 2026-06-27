@@ -182,7 +182,7 @@ export const bffApi = {
   watchStock: {
     getAll:  () => api.get('/bff/watch-stock'),
     reorder: (orderedKeys) => api.put('/bff/watch-stock/order', orderedKeys),
-    resendDigest: () => api.post('/bff/watch-stock/resend-digest')
+    resendDigest: (market) => api.post('/bff/watch-stock/resend-digest', null, { params: { market } })
   },
 
   // BackupRestore

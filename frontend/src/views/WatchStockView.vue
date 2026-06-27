@@ -5,13 +5,13 @@
         <div style="display:flex;align-items:center;justify-content:space-between">
           <span class="section-title">👁️ 觀察股票</span>
           <div style="display:flex;align-items:center;gap:8px">
-            <el-button :icon="Promotion" :loading="resending" @click="resendDigest">補發</el-button>
+            <el-button :icon="Promotion" :loading="resending" @click="resendDigest">補發{{ marketTab }}</el-button>
             <el-button type="primary" :icon="Plus" @click="emit('request-new-alert', marketTab)">新增觀察</el-button>
           </div>
         </div>
       </template>
 
-      <el-tabs v-model="marketTab" style="margin-bottom:12px" @tab-change="() => nextTick(initSortable)">
+      <el-tabs v-model="marketTab" style="margin-bottom:12px" @tab-change="onMarketTabChange">
         <el-tab-pane name="台股">
           <template #label>
             <span style="display:inline-flex;align-items:center;gap:6px">
@@ -168,12 +168,17 @@ async function load() {
   }
 }
 
-// ===== 補發：各市場最後交易日的觸發事件彙整成單封 email 重寄 =====
+// ===== 補發：當前市場 tab 最後交易日的觸發事件彙整成單封 email 重寄（Task 128：只補當前市場）=====
 const resending = ref(false)
+// 切市場 tab：清掉上一個市場補發殘留的 loading（補發進行中切 tab → spinner 不會視覺上黏到新 tab），並重綁拖曳排序
+function onMarketTabChange() {
+  resending.value = false
+  nextTick(initSortable)
+}
 async function resendDigest() {
   resending.value = true
   try {
-    const res = await bffApi.watchStock.resendDigest()
+    const res = await bffApi.watchStock.resendDigest(marketTab.value)
     if (res.sent) ElMessage.success(res.message)
     else ElMessage.warning(res.message)
   } catch {

@@ -147,17 +147,23 @@ public class AlertNotificationDispatcher {
     }
 
     /**
-     * 手動補發（觀察清單「補發」按鈕）：把各市場「最後交易日」當天觸發的事件彙整成單封 digest 重寄。
-     * 與自動 flush 共用 buildDigestBody（同格式），但不入 queue、不寫 cooldown —— 純手動全量重寄。
+     * 手動補發（觀察清單「補發」按鈕）：把指定市場「最後交易日」當天觸發的事件彙整成單封 digest 重寄（Task 128）。
+     * 與自動 flush 共用 buildDigest（同格式），但不入 queue、不寫 cooldown —— 純手動全量重寄。
+     *
+     * @param market 限定補發的單一市場（台股 / 美股 / 英股，由觀察頁當前 tab 帶入）；null / 空白則 fallback
+     *               全市場（`triggerRepo.findDistinctMarkets()`），向後相容直接打 API 全補的用法。
      */
-    public ResendResult resendLastTradingDay() {
+    public ResendResult resendLastTradingDay(String market) {
         if (!emailService.isEnabled()) return new ResendResult(ResendStatus.EMAIL_DISABLED, 0, 0);
 
+        List<String> markets = (market == null || market.isBlank())
+                ? triggerRepo.findDistinctMarkets()
+                : List.of(market);
         List<PendingTrigger> batch = new ArrayList<>();
-        for (String market : triggerRepo.findDistinctMarkets()) {
-            LocalDate day = lastTradingDate(market);
+        for (String m : markets) {
+            LocalDate day = lastTradingDate(m);
             List<StockAlertTrigger> rows = triggerRepo.findByMarketAndTriggeredAtInDay(
-                    market, day.atStartOfDay(), day.plusDays(1).atStartOfDay());
+                    m, day.atStartOfDay(), day.plusDays(1).atStartOfDay());
             for (StockAlertTrigger t : rows) batch.add(toPending(t));
         }
         if (batch.isEmpty()) return new ResendResult(ResendStatus.NO_EVENTS, 0, 0);

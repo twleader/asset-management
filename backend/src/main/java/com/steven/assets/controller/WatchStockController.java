@@ -42,15 +42,20 @@ public class WatchStockController {
     }
 
     /**
-     * 「補發」按鈕：把各市場最後交易日當天觸發的事件彙整成單封 email 重寄（Requirement 23）。
+     * 「補發」按鈕：把指定市場最後交易日當天觸發的事件彙整成單封 email 重寄（Requirement 23、Task 128）。
      * 屬本頁動作，走本頁 BFF（/api/bff/watch-stock/resend-digest passthrough）。
+     *
+     * @param market 觀察頁當前市場 tab（台股 / 美股 / 英股），只補發該市場；省略則全市場（向後相容）。
      */
     @PostMapping("/resend-digest")
-    public ResendDigestResponse resendDigest() {
-        AlertNotificationDispatcher.ResendResult r = notificationDispatcher.resendLastTradingDay();
+    public ResendDigestResponse resendDigest(@RequestParam(required = false) String market) {
+        AlertNotificationDispatcher.ResendResult r = notificationDispatcher.resendLastTradingDay(market);
+        boolean scoped = market != null && !market.isBlank();
+        String sentScope = scoped ? market + " " : "";
+        String noEventsScope = scoped ? market + "最後交易日無觸發事件" : "各市場最後交易日皆無觸發事件";
         String message = switch (r.status()) {
-            case SENT -> String.format("已補發 %d 檔股票給 %d 位收件人", r.count(), r.recipientCount());
-            case NO_EVENTS -> "各市場最後交易日皆無觸發事件，無可補發";
+            case SENT -> String.format("已補發 %s%d 檔股票給 %d 位收件人", sentScope, r.count(), r.recipientCount());
+            case NO_EVENTS -> noEventsScope + "，無可補發";
             case NO_RECIPIENTS -> "這些補發事件無任何啟用收件人訂閱（請確認警示已勾選收件人且收件人為啟用）";
             case EMAIL_DISABLED -> "Email 服務未啟用（未設定 MAIL_USERNAME），無法補發";
         };
