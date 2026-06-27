@@ -68,6 +68,8 @@ public class StockAlertService {
                 .max().orElse(0);
         String code = req.getStockCode().trim().toUpperCase();
         assertNameMatchesCode(code, req.getMarket(), req.getStockName());
+        assertNoDuplicate(code, req.getMarket(), req.getAlertType(),
+                req.getMaPeriod(), req.getThreshold(), null, req.getStockName());
         StockAlert alert = StockAlert.builder()
                 .stockCode(code)
                 .market(req.getMarket())
@@ -121,6 +123,8 @@ public class StockAlertService {
                 .orElseThrow(() -> new IllegalArgumentException("Alert not found: " + id));
         String code = req.getStockCode().trim().toUpperCase();
         assertNameMatchesCode(code, req.getMarket(), req.getStockName());
+        assertNoDuplicate(code, req.getMarket(), req.getAlertType(),
+                req.getMaPeriod(), req.getThreshold(), id, req.getStockName());
         alert.setStockCode(code);
         alert.setMarket(req.getMarket());
         boolean isTaiex = "0000".equals(code) && "台股".equals(req.getMarket());
@@ -176,6 +180,33 @@ public class StockAlertService {
         if (masterName != null && trimmedUser.equalsIgnoreCase(masterName.trim())) return;
         throw new IllegalArgumentException(
                 "代號 %s 與股名「%s」不符，外部來源為「%s」".formatted(code, trimmedUser, canonical.trim()));
+    }
+
+    /**
+     * 防止重複條件（Task 130）：同一 (stockCode, market, alertType, maPeriod, threshold) 視為「完全相同的警示條件」。
+     * 已存在另一筆相同條件時丟 IllegalArgumentException（→ 400 ProblemDetail，前端攔截器顯示訊息）、不寫入。
+     * active / recipientIds 不納入唯一鍵（重複僅以觸發規則判定）。
+     * threshold 用 compareTo 比較（避免 0 vs 0.0000 scale 差異）；maPeriod 用 Objects.equals 容許 null。
+     * @param excludeId update 時排除自身（create 傳 null）
+     */
+    private void assertNoDuplicate(String code, String market, String alertType,
+                                   Integer maPeriod, BigDecimal threshold,
+                                   Long excludeId, String stockName) {
+        for (StockAlert a : alertRepo.findByStockCodeAndMarket(code, market)) {
+            if (excludeId != null && excludeId.equals(a.getId())) continue;
+            boolean sameType = alertType != null && alertType.equals(a.getAlertType());
+            boolean samePeriod = java.util.Objects.equals(maPeriod, a.getMaPeriod());
+            boolean sameThreshold = threshold != null && a.getThreshold() != null
+                    && threshold.compareTo(a.getThreshold()) == 0;
+            if (sameType && samePeriod && sameThreshold) {
+                String name = (stockName != null && !stockName.isBlank())
+                        ? stockName.trim()
+                        : stockMasterRepo.findByCodeAndMarket(code, market)
+                                .map(s -> s.getName()).orElse(code);
+                throw new IllegalArgumentException(
+                        "已存在相同的警示條件（%s %s），未重複新增".formatted(name, buildLabel(a)));
+            }
+        }
     }
 
     @Transactional

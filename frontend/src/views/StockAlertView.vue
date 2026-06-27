@@ -229,7 +229,7 @@ import { Plus, Edit, Delete, Loading, Operation, Refresh } from '@element-plus/i
 import { ElMessage, ElMessageBox } from 'element-plus'
 import Sortable from 'sortablejs'
 import dayjs from 'dayjs'
-import { bffApi } from '@/api/index.js'
+import { bffApi, apiErrorMessage } from '@/api/index.js'
 import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
 import TaiwanMap from '@/components/TaiwanMap.vue'
 import UsFlag from '@/components/UsFlag.vue'
@@ -455,7 +455,12 @@ async function save() {
     loadAlerts()
     emit('alert-saved')
   } catch (e) {
-    ElMessage.error('儲存失敗')
+    // 存檔錯誤（如重複條件「已存在相同的警示條件…」、名稱不符）以 dialog 呈現，
+    // 不走頂部 toast（stockAlert.create/update 已帶 skipErrorToast 抑制全域攔截器）。
+    ElMessageBox.alert(apiErrorMessage(e, '儲存失敗'), '無法儲存警示', {
+      type: 'warning',
+      confirmButtonText: '我知道了',
+    }).catch(() => {})
   } finally {
     saving.value = false
   }

@@ -7,10 +7,15 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -34,6 +39,10 @@ public class HistoricalBackfillService {
     private final PriceFetchClient priceFetch;
     private final ExchangeRateFetchClient rateFetch;
     private final StockSourceQuery store;
+    private final MarketDataFetchService etfFetch;
+
+    /** 資產配置圓餅圖「台股個股 / 美股個股」顯示的個股數（與 BFF top10 對齊）。 */
+    private static final int LOOKTHROUGH_TOP_N = 10;
 
     /**
      * 啟動時自動補齊：app ready 後在背景執行（延遲 8s 等 DB / 連線就緒）。
@@ -52,6 +61,13 @@ public class HistoricalBackfillService {
                 Set<String> usCodes = new LinkedHashSet<>();
                 Set<String> ukCodes = new LinkedHashSet<>();
                 store.collectAllHeldCodes(twCodes, usCodes, ukCodes);
+                // 併入「ETF 透視 top10 成份股」（Task 129）：純穿透成份股（如 2317 鴻海）不在主檔 / 持股，
+                // 否則點圓餅圖成份段時走勢圖空白。失敗不影響主清單。
+                try {
+                    collectLookthroughTopConstituents(twCodes, usCodes);
+                } catch (Exception e) {
+                    log.warn("透視成份股清單收集失敗（啟動補齊）: {}", e.getMessage());
+                }
 
                 for (String code : twCodes) {
                     LocalDate maxDate = store.findMaxTradingDate(code, "台股").orElse(null);
@@ -228,6 +244,11 @@ public class HistoricalBackfillService {
         Set<String> usCodes = new LinkedHashSet<>();
         Set<String> ukCodes = new LinkedHashSet<>();
         store.collectAllHeldCodes(twCodes, usCodes, ukCodes);
+        try {
+            collectLookthroughTopConstituents(twCodes, usCodes);
+        } catch (Exception e) {
+            log.warn("透視成份股清單收集失敗（backfillAll）: {}", e.getMessage());
+        }
 
         int twTotal = 0, usTotal = 0, ukTotal = 0;
         for (String code : twCodes) {
@@ -247,6 +268,107 @@ public class HistoricalBackfillService {
                 "twRecords", twTotal, "usRecords", usTotal, "ukRecords", ukTotal,
                 "exchangeRateRecords", rateTotal,
                 "twStocks", twCodes.size(), "usStocks", usCodes.size(), "ukStocks", ukCodes.size());
+    }
+
+    // ===== ETF 透視 top10 成份股回補（Task 129）=====
+
+    /**
+     * 每日重算 ETF 透視 top10 成份股並增量補齊歷史收盤（Task 129）。
+     * 成份股不在即時抓價集合（collectAllStockCodes），靠此 cron 跟上每日收盤；既有列走 maxDate+1 增量、
+     * 全新進榜成份股補滿 10 年（今日列仍獨佔給 ClosePersister）。18:30 TW：TW 已收盤、前夜美股收盤已可得。
+     */
+    @Scheduled(cron = "0 30 18 * * *", zone = "Asia/Taipei")
+    public void dailyLookthroughBackfill() {
+        Thread.ofVirtual().name("lookthrough-backfill").start(() -> {
+            try {
+                LocalDate since = LocalDate.now().minusYears(10);
+                Set<String> twCodes = new LinkedHashSet<>();
+                Set<String> usCodes = new LinkedHashSet<>();
+                collectLookthroughTopConstituents(twCodes, usCodes);
+                log.info("每日透視成份股回補：台股 {} 檔、美股 {} 檔", twCodes.size(), usCodes.size());
+                for (String code : twCodes) { backfillTwStock(code, since, null); sleep(600); }
+                for (String code : usCodes) { backfillUsStock(code, since, null); sleep(2000); }
+                log.info("每日透視成份股回補完成");
+            } catch (Exception e) {
+                log.warn("每日透視成份股回補失敗: {}", e.getMessage());
+            }
+        });
+    }
+
+    /**
+     * 重算「資產配置圓餅圖」台股 / 美股透視 top10 成份股代號，併入 twCodes / usCodes。
+     * 演算法鏡像 BFF buildLookthrough / buildUsLookthrough（成份股同樣讀 MarketDataFetchService.getEtfHoldings，
+     * 12h cache，與圓餅圖同一份資料）：
+     *  - 台股：ETF（00 開頭）依權重正規化 cv×w/Σw；直接持股整筆；以代號加總；取前 10
+     *  - 美股：ETF 依真實權重 cv×w/100（不正規化）；非 ETF 整筆；以代號加總；取前 10
+     * 無代號成份股（MoneyDJ 名稱補不到代號）略過 —— 無法回補也不開放點擊。
+     * 落入 top10 的直接持股 / ETF 自身代號已在主檔，後續回補會被 existsHistory / maxDate 條件自然 skip。
+     */
+    void collectLookthroughTopConstituents(Set<String> twCodes, Set<String> usCodes) {
+        List<StockSourceQuery.HeldValueRow> holdings = store.collectLatestSnapshotHoldingsWithValue();
+        if (holdings.isEmpty()) return;
+        Map<String, BigDecimal> twAgg = new HashMap<>();
+        Map<String, BigDecimal> usAgg = new HashMap<>();
+        for (StockSourceQuery.HeldValueRow h : holdings) {
+            String code = h.stockCode();
+            if (code == null || code.isBlank()) continue;
+            BigDecimal cv = h.currentValue() == null ? BigDecimal.ZERO : h.currentValue();
+            String market = h.market();
+            if ("台股".equals(market)) {
+                if (code.startsWith("00")) addTwEtfConstituents(twAgg, code, cv);
+                else twAgg.merge(code, cv, BigDecimal::add);
+            } else if ("美股".equals(market)) {
+                addUsConstituents(usAgg, code, cv);
+            }
+            // 英股無透視 tab，略過
+        }
+        addTopN(twAgg, twCodes, LOOKTHROUGH_TOP_N);
+        addTopN(usAgg, usCodes, LOOKTHROUGH_TOP_N);
+    }
+
+    /** 台股 ETF：依成分股權重正規化分配 cv（cv×w/Σw），以代號加總（無代號者略過）。 */
+    private void addTwEtfConstituents(Map<String, BigDecimal> agg, String etfCode, BigDecimal cv) {
+        MarketDataFetchService.EtfHoldingsResult r = etfFetch.getEtfHoldings(etfCode, "台股");
+        if (r == null || r.holdings() == null || r.holdings().isEmpty()) return;
+        BigDecimal weightSum = BigDecimal.ZERO;
+        for (MarketDataFetchService.EtfHolding h : r.holdings()) {
+            if (h.weight() != null && h.weight().compareTo(BigDecimal.ZERO) > 0) {
+                weightSum = weightSum.add(h.weight());
+            }
+        }
+        if (weightSum.compareTo(BigDecimal.ZERO) <= 0) return;
+        for (MarketDataFetchService.EtfHolding h : r.holdings()) {
+            String code = h.stockCode();
+            if (code == null || code.isBlank()) continue;
+            if (h.weight() == null || h.weight().compareTo(BigDecimal.ZERO) <= 0) continue;
+            BigDecimal share = cv.multiply(h.weight()).divide(weightSum, 4, RoundingMode.HALF_UP);
+            agg.merge(code, share, BigDecimal::add);
+        }
+    }
+
+    /** 美股：ETF 依真實權重 cv×w/100（不正規化）；非 ETF（holdings 空）整筆計入該代號。 */
+    private void addUsConstituents(Map<String, BigDecimal> agg, String code, BigDecimal cv) {
+        MarketDataFetchService.EtfHoldingsResult r = etfFetch.getEtfHoldings(code, "美股");
+        if (r == null || r.holdings() == null || r.holdings().isEmpty()) {
+            agg.merge(code, cv, BigDecimal::add);  // 個股整筆計入
+            return;
+        }
+        for (MarketDataFetchService.EtfHolding h : r.holdings()) {
+            String hc = h.stockCode();
+            if (hc == null || hc.isBlank()) continue;
+            if (h.weight() == null || h.weight().compareTo(BigDecimal.ZERO) <= 0) continue;
+            BigDecimal frac = h.weight().divide(BigDecimal.valueOf(100), 6, RoundingMode.HALF_UP);
+            if (frac.compareTo(BigDecimal.ONE) > 0) frac = BigDecimal.ONE;  // 防呆：單檔權重 > 100%
+            agg.merge(hc, cv.multiply(frac), BigDecimal::add);
+        }
+    }
+
+    /** 取 agg 中市值前 n 大的代號加入 out。 */
+    private static void addTopN(Map<String, BigDecimal> agg, Set<String> out, int n) {
+        agg.entrySet().stream()
+                .sorted(Map.Entry.<String, BigDecimal>comparingByValue().reversed())
+                .limit(n)
+                .forEach(e -> out.add(e.getKey()));
     }
 
     private static void sleep(long ms) {

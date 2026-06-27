@@ -1604,3 +1604,70 @@ volumes:
 - LSE holiday calendar（用週末 + 時段判斷已足夠）
 - Excel 匯入英股欄位
 - iShares 官方 ETF 持股 scrape（先依靠 Yahoo `topHoldings`）
+
+---
+
+## Task 129：ETF 透視 top10 成份股歷史回補（Requirement 9 / Requirement 7）
+
+### 問題
+
+資產配置圓餅圖「台股個股 / 美股個股」tab 把持有的 ETF 穿透成個股並開放點擊看走勢（Requirement 9）。但純穿透成份股（如 `2317` 鴻海，使用者只持有 0050 而非直接持有 2317）**同時缺席於全部歷史價格寫入觸發點**：
+- 不在 `stock` 主檔（主檔僅由 `StockMasterService.upsert` 寫入：直接持股 / 觀察 / 警示）
+- 不在 `stock_holding`（使用者持有的是 ETF，非成份股）
+- 多數不在 `stock_alert`
+
+`StockSourceQuery.collectAllStockCodes`（即時抓價）、`collectHeldStockCodes`（盤中）、`collectAllHeldCodes`（10 年歷史回補）三條收集路徑都查不到它 → `stock_price_history` 無資料 → `StockAnalysisDialog` `history.length === 0` → 顯示「無歷史資料，請先執行股價補齊」。
+
+### 設計（全部落在 external-materials-service，不動 BFF / business / `stock` 主檔）
+
+新增第 4 條回補來源「ETF 透視 top10 成份股」，與圓餅圖顯示的 segment 對齊：
+
+- `StockSourceQuery.collectLatestSnapshotHoldingsWithValue()`：讀最新快照 `stock_holding` 的 `(stock_code, market, current_value)`（透視加權用市值）。
+- `HistoricalBackfillService.collectLookthroughTopConstituents(twCodes, usCodes)`：以上述持股重算台股 / 美股透視 top10，演算法**鏡像 BFF `buildLookthrough` / `buildUsLookthrough`**（單一事實原則 — 成份股來源同樣是 ext-materials `MarketDataFetchService.getEtfHoldings`，12h cache，與 BFF 經 business 代理打的是同一份資料）：
+  - 台股：ETF（`code` 以 `00` 開頭）→ `getEtfHoldings(code,"台股")` → `share = cv × weight / Σweight`（正規化）；直接持股整筆計入；**以代號加總**（成份股代號由 MoneyDJ 名稱經「股名→代號」字典補齊，`twNameToCodeMap()` 首次呼叫同步載入，故啟動時也有代號）；取前 10 → `twCodes`。無代號的成份股略過（無法回補）。
+  - 美股：每檔美股 row → `getEtfHoldings(code,"美股")`；回 holdings（ETF）→ `share = cv × weight/100`（不正規化）以代號加總；回空（個股，`isEtf` 白名單短路）→ 整筆計入該代號；取前 10 → `usCodes`。未揭露尾段（「其它」）非可點擊代號，不回補。
+  - 英股無透視 tab，略過。
+- 併入既有回補：`startupBackfill()` 與 `backfillAll()` 在 `collectAllHeldCodes(...)` 後呼叫 `collectLookthroughTopConstituents(twCodes, usCodes)`（try/catch 包覆，失敗不影響主流程），後續 for-loop 沿用既有 `backfillTwStock` / `backfillUsStock`（`maxDate==null` → 補滿 10 年；今日列仍獨佔給 `ClosePersister`）。已在主檔 / 持股的代號（直接持股、ETF 自身）落入 top10 時被 `existsHistory` / `maxDate` 條件自然 skip，無重複。
+- 每日新鮮度：`@Scheduled(cron="0 30 18 * * *", zone="Asia/Taipei") dailyLookthroughBackfill()`（virtual thread）重算 top10 並**增量**補（`maxDate+1 → today`）。成份股**不**納入即時抓價集合 `collectAllStockCodes`（避免 Redis 盤中輪詢爆量 — 使用者點成份股看的是長期走勢非當下 tick），故靠此 cron 跟上每日收盤；新進榜成份股（ETF 成份變動）`maxDate==null` 補滿 10 年。
+
+### 為何不寫入 `stock` 主檔 / 不另建表
+
+- 使用者要求「`stock` 主檔盡可能小，只含系統各功能畫面會看到的股票」。主檔是 `collectAllStockCodes` 的即時抓價清單，灌入幾十～上百檔成份股會造成盤中抓價爆量（沿用 line 178 既有原則）。
+- 不另建 `analyzable_stock` 表：top10 透視集合可由「最新快照持股 + getEtfHoldings(12h cache)」即時重算，量小（≤ 約 20 檔）、無需持久化清單；回補結果本就落在 `stock_price_history`，查詢路徑（`/api/market-data/history/stock`）零改動。
+
+### 限制
+
+- 僅收 top10（畫面上可點擊的 segment）；第 11 名以後（圓餅「其它」）不可點擊故不回補。
+- 台股成份股若 MoneyDJ 名稱補不到代號 → 不回補也不開放點擊（圓餅圖該段本就無 `code`）。
+- 股利 tab（`getDividendHistory`）對成份股維持 best-effort cold fetch，不納入強制回補。
+
+---
+
+## Task 130：警示防重複條件（Requirement 23）
+
+### 問題
+
+警示清單可出現兩筆「完全相同」的警示（如 NVDA「低於年線」），重複寄信、佔版面。使用者要求：存檔時若已存在相同條件，跳通知訊息表示「已經有了」、不再存一份。
+
+### 唯一鍵
+
+「完全相同的警示條件」= `(stockCode, market, alertType, maPeriod, threshold)`。`active` / `recipientIds` 不納入（重複僅以觸發規則判定）。比較細節：`stockCode` 正規化 `trim().toUpperCase()`；`threshold` 以 `BigDecimal.compareTo` 比較（避免 `0` vs `0.0000` scale 差異）；`maPeriod` 以 `Objects.equals` 容許 null（PRICE_/KD_ 類型 maPeriod 為 null）。
+
+### 後端（`StockAlertService`）
+
+- 新增 `assertNoDuplicate(code, market, alertType, maPeriod, threshold, excludeId, stockName)`：以既有 `alertRepo.findByStockCodeAndMarket(code, market)` 取同股同市場警示，逐筆比對唯一鍵（`excludeId` 用於 `update` 排除自身），命中則丟 `IllegalArgumentException`「已存在相同的警示條件（{股名} {buildLabel(既有筆)}），未重複新增」。
+- `create()`：在 `assertNameMatchesCode` 後、`save` 前呼叫（`excludeId=null`）。
+- `update()`：在 `assertNameMatchesCode` 後呼叫（`excludeId=id`）—— 把某筆改成與另一筆相同也擋。
+- 不加 DB unique constraint：現存已有重複列（升級時 Liquibase 加 constraint 會失敗），且 app 層丟出的是友善訊息（400），DB constraint 會是 500 DataIntegrityViolation。app 層檢查即足。
+
+### 前端：錯誤改用 dialog 呈現（使用者要求，非頂部 toast）
+
+使用者反映頂部滑出的 `ElMessage` toast「看起來像系統錯誤」，要求存檔錯誤改用 dialog。但全域 axios 攔截器（`api/index.js`）對**所有**被 reject 的回應一律 `ElMessage.error`，且早於 view 的 catch 執行 → 不抑制就會「toast + dialog」雙重顯示。
+
+- `api/index.js`：攔截器加 `if (!err.config?.skipErrorToast)` 條件 —— 呼叫端在 axios config 帶 `skipErrorToast:true` 即可自行處理錯誤呈現；並匯出 helper `apiErrorMessage(err, fallback)`（取 `ProblemDetail.detail` 優先）。
+- `bffApi.stockAlert.create` / `update`：第三參數帶 `{ skipErrorToast: true }`，使存檔錯誤不走全域 toast。
+- `StockAlertView.save()` 的 `catch`：改用 `ElMessageBox.alert(apiErrorMessage(e, '儲存失敗'), '無法儲存警示', { type:'warning', confirmButtonText:'我知道了' })` 顯示 dialog（涵蓋重複條件、名稱不符等所有存檔錯誤）；`.catch(()=>{})` 吞掉關閉 reject。`dialogVisible` 維持開啟讓使用者修改。
+
+### 不處理
+
+既有歷史重複列不自動刪除（資料異動需使用者意圖；清單已有刪除鈕）。
