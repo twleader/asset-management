@@ -61,7 +61,8 @@
             <div v-else-if="!twLookthroughHasData" style="height:400px;display:flex;align-items:center;justify-content:center;color:#94a3b8">
               此快照無台股部位
             </div>
-            <v-chart v-else :option="twStockPieOption" style="height: 400px" autoresize />
+            <v-chart v-else :option="twStockPieOption" style="height: 400px; cursor: pointer" autoresize
+              @click="p => onLookthroughPieClick(p, '台股')" />
           </div>
           <div v-else-if="allocationTab === 'usStock'">
             <div v-if="usLookthroughLoading" style="height:400px;display:flex;align-items:center;justify-content:center;color:#94a3b8">
@@ -71,7 +72,8 @@
             <div v-else-if="!usLookthroughHasData" style="height:400px;display:flex;align-items:center;justify-content:center;color:#94a3b8">
               此快照無美股部位
             </div>
-            <v-chart v-else :option="usStockPieOption" style="height: 400px" autoresize />
+            <v-chart v-else :option="usStockPieOption" style="height: 400px; cursor: pointer" autoresize
+              @click="p => onLookthroughPieClick(p, '美股')" />
           </div>
           <div v-else>
             <v-chart :option="assetClassPieOption" style="height: 400px" autoresize />
@@ -1515,6 +1517,20 @@ function onBarDblClick(params) {
   const s = params?.data?.stock
   if (!s) return
   analysisStock.value = s
+  analysisVisible.value = true
+}
+
+// 個股穿透圓餅圖點擊 → 開股票分析 dialog
+// 台股段 data: { name=股名, code=代號 }；美股段 data: { name=代號, fullName=股名 }
+function onLookthroughPieClick(params, market) {
+  const d = params?.data
+  if (!d) return
+  const code = market === '美股' ? d.name : d.code
+  const stockName = market === '美股' ? d.fullName : d.name
+  if (!code) return // 「其它」聚合段無代號，不開
+  // 若為直接持有的個股，沿用完整列（含成本，可畫成本均價線）；否則只帶代號/股名/市場
+  const full = mergedStocks.value.find(s => s.stockCode === code && s.market === market)
+  analysisStock.value = full || { stockCode: code, stockName, market }
   analysisVisible.value = true
 }
 

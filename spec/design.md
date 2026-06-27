@@ -97,7 +97,7 @@ com.steven.assets/
   - `GET /api/bff/snapshot-form/lookups`：表單下拉一次取齊（banks / brokers / depositTypes / transitFundTypes，皆已過濾 active）
   - `GET /api/bff/snapshot-form/funds`：信託基金主檔（passthrough 至 `/api/funds`），每筆已含 latestNav / latestFxRate / twdPerUnit；`?date=` 時改用該基準日（Requirement 19/21）
   - `POST /api/bff/snapshot-form/fund-nav/refresh`：觸發後端 → external-materials-service 立即刷新所有基金 NAV，回 `{ success, failed, total }`
-- `StockAnalysisBffRoutes`（StockAnalysisDialog 跨 view 共用元件專屬）：對話框被 Dashboard / SnapshotForm / WatchStock / StockAlert / RealizedGain 五個 view 同時使用（已實現損益明細列雙擊開啟），依「同義欄位、同一 business service API」原則拆為獨立 BFF route，避免在五個父 view 的 BFF 各自重複代理。提供：
+- `StockAnalysisBffRoutes`（StockAnalysisDialog 跨 view 共用元件專屬）：對話框被 Dashboard / SnapshotForm / WatchStock / StockAlert / RealizedGain 五個 view 同時使用（已實現損益明細列雙擊開啟），依「同義欄位、同一 business service API」原則拆為獨立 BFF route，避免在五個父 view 的 BFF 各自重複代理。Dashboard 開啟此 dialog 的觸發點有三：持股表格列雙擊（`onStockDblClick`）、個股 bar 圖雙擊（`onBarDblClick`）、以及「資產配置分佈」tab 2/3 個股穿透圓餅圖 segment 單擊（`onLookthroughPieClick(params, market)`，「其它」聚合段無代號不開；命中當前快照 `mergedStocks` 同 `stockCode`+`market` 的直接持股則沿用完整列以保留 `avgCostOriginal` 成本欄位、否則僅帶 `{stockCode, stockName, market}`）。提供：
   - `GET /api/bff/stock-analysis/history/stock` → `/api/market-data/history/stock`
   - `GET /api/bff/stock-analysis/dividends` → `/api/market-data/dividends`
   - `GET /api/bff/stock-analysis/etf-holdings` → `/api/market-data/etf-holdings`
