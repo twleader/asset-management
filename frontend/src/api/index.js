@@ -10,11 +10,19 @@ const api = axios.create({
 api.interceptors.response.use(
   res => res.data,
   err => {
-    const msg = err.response?.data?.detail || err.response?.data?.message || err.message || '請求失敗'
-    ElMessage.error(msg)
+    // 呼叫端可設 config.skipErrorToast 自行處理錯誤呈現（例：警示存檔改用 dialog 顯示而非頂部 toast）
+    if (!err.config?.skipErrorToast) {
+      const msg = err.response?.data?.detail || err.response?.data?.message || err.message || '請求失敗'
+      ElMessage.error(msg)
+    }
     return Promise.reject(err)
   }
 )
+
+/** 從 axios error 取後端訊息（ProblemDetail.detail 優先），供呼叫端自訂呈現。 */
+export function apiErrorMessage(err, fallback = '操作失敗') {
+  return err?.response?.data?.detail || err?.response?.data?.message || err?.message || fallback
+}
 
 // ===== Snapshots（共享 CRUD，給 store 使用；單一頁面的資料請走對應 bffApi.<page>） =====
 export const snapshotApi = {
@@ -171,8 +179,9 @@ export const bffApi = {
     reorder:   (ids) => api.put('/bff/stock-alert/reorder', ids),
     lookupName:(params) => api.get('/bff/stock-alert/lookup-name', { params }),
     lookupCode:(params) => api.get('/bff/stock-alert/lookup-code', { params }),
-    create:    (data) => api.post('/bff/stock-alert', data),
-    update:    (id, data) => api.put(`/bff/stock-alert/${id}`, data),
+    // skipErrorToast：存檔錯誤（如重複條件）改由 StockAlertView.save() 以 dialog 呈現，不走頂部 toast
+    create:    (data) => api.post('/bff/stock-alert', data, { skipErrorToast: true }),
+    update:    (id, data) => api.put(`/bff/stock-alert/${id}`, data, { skipErrorToast: true }),
     toggleActive: (id) => api.patch(`/bff/stock-alert/${id}/active`),
     delete:    (id) => api.delete(`/bff/stock-alert/${id}`)
   },

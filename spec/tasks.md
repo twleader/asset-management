@@ -3263,3 +3263,41 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 128.3 前端 `api/index.js`：`resendDigest(market)` 帶 query param；`WatchStockView.vue`：`resendDigest()` 傳 `marketTab.value`、按鈕文字 `補發{{ marketTab }}`
 - [x] 128.4 Docker 重 build + recreate（backend + frontend）後驗證：經 **BFF**（port 8080）POST `/api/bff/watch-stock/resend-digest?market=...` 端到端回應正確——指定市場走單一市場分支、NO_EVENTS 文案隨市場字串變（「{市場}最後交易日無觸發事件」而非「各市場」），證明 param 綁定 + BFF query passthrough + 單一市場限定。為避免誤寄真實信，用不存在市場字串（「驗證測試」「火星股」）測 NO_EVENTS 零寄信；前端建置產物確認 `{params:{market:e}}` 與按鈕動態文字 `"補發"+toDisplayString(marketTab)`
 - [ ] 128.5 端對端：實寄確認只收到該市場的補發信（會真的寄信到收件人，待授權 / 自行於該市場 tab 按補發）
+
+### Task 129: ETF 透視 top10 成份股歷史回補（Requirement 9 / Requirement 7）
+
+對應 Requirements: Requirement 9（儀表板透視圓餅圖個股可點擊分析）+ Requirement 7（市場資料回補涵蓋範圍）
+
+**需求**：使用者持有許多 ETF，資產配置圓餅圖「台股個股 / 美股個股」tab 把 ETF 穿透成個股（如 `2317` 鴻海）並開放點擊看走勢。但純穿透成份股不在 `stock` 主檔、不在 `stock_holding`、（多數）不在 `stock_alert`，三條收集路徑都漏掉它 → `stock_price_history` 無資料 → 點擊後走勢圖空白、顯示「無歷史資料，請先執行股價補齊」。使用者要求：(a) 這些「畫面上會出現的」成份股要能點進去看走勢；(b) `stock` 主檔保持精簡，**不要**把成份股灌進主檔。
+
+**關鍵設計**（全部落在 external-materials-service；BFF / business / `stock` 主檔 / 前端皆不動）：
+- 新增第 4 條回補來源「ETF 透視 top10 成份股」，與圓餅圖顯示的 segment 對齊。
+- 演算法鏡像 BFF `buildLookthrough` / `buildUsLookthrough`，成份股同樣讀 ext-materials `MarketDataFetchService.getEtfHoldings`（12h cache，與 BFF 同一份）。
+- **僅收 top10**（畫面可點擊的 segment）控制資料量；**不寫入 `stock` 主檔**、**不另建表**（top10 集合由「最新快照持股 + getEtfHoldings」即時重算，量 ≤ 約 20 檔，回補結果落 `stock_price_history`，查詢路徑零改動）。
+- 成份股**不**納入即時抓價集合（`collectAllStockCodes`），僅補歷史日線；每日新鮮度靠專屬 cron 增量補。
+
+**設計**：見 `requirements.md` Req 9（穿透 segment 可點擊 AC 後新增的 top10 回補 AC）+ Req 7（回補清單來源 AC）、`design.md`「Task 129」段。
+
+- [ ] 129.1 `StockSourceQuery.collectLatestSnapshotHoldingsWithValue()`：讀最新快照 `stock_holding` 的 `(stock_code, market, current_value)`，回 `List<HeldValueRow>`
+- [ ] 129.2 `HistoricalBackfillService.collectLookthroughTopConstituents(twCodes, usCodes)`：注入 `MarketDataFetchService`；台股 ETF（`00` 開頭）`cv×w/Σw` 正規化、直接持股整筆、以代號加總取 top10；美股 ETF `cv×w/100` 不正規化、非 ETF 整筆、以代號加總取 top10。無代號成份股略過
+- [ ] 129.3 併入既有回補：`startupBackfill()` 與 `backfillAll()` 在 `collectAllHeldCodes(...)` 後呼叫 `collectLookthroughTopConstituents(...)`（try/catch 包覆）；後續 for-loop 沿用 `backfillTwStock` / `backfillUsStock`（`maxDate==null` 補 10 年、今日列獨佔給 ClosePersister）
+- [ ] 129.4 每日 cron `@Scheduled(cron="0 30 18 * * *", zone="Asia/Taipei") dailyLookthroughBackfill()`（virtual thread）：重算 top10 並增量補（`maxDate+1 → today`）
+- [ ] 129.5 Docker 重 build + recreate（external-materials-service）後驗證：啟動補齊 log 出現「透視成份股」收集、`stock_price_history` 出現 `2317`(鴻海)/`2454`(聯發科)/`2308`(台達電) 等多年資料；前端點圓餅圖鴻海 segment → 走勢圖完整顯示（非「無歷史資料」）；確認 `stock` 主檔未新增成份股列（仍精簡）
+
+### Task 130: 警示防重複條件（Requirement 23）
+
+對應 Requirements: Requirement 23（警示觸發 Email 通知）
+
+**需求**：警示清單可出現兩筆完全相同的警示（如 NVDA「低於年線」）。使用者要求存檔時若已存在相同條件，跳通知訊息表示「已經有了」、不要再存一份。
+
+**關鍵設計**：
+- 唯一鍵 = `(stockCode, market, alertType, maPeriod, threshold)`；`active` / `recipientIds` 不納入。`stockCode` 正規化大寫、`threshold` 用 `compareTo`、`maPeriod` 用 `Objects.equals`（容許 null）。
+- 後端 `StockAlertService.assertNoDuplicate(...)`：以既有 `findByStockCodeAndMarket` 比對，命中丟 `IllegalArgumentException`「已存在相同的警示條件（{股名} {條件文案}），未重複新增」（→ 400 ProblemDetail）。`create`（excludeId=null）/ `update`（excludeId=id）皆呼叫。
+- 不加 DB unique constraint（現存已有重複列，且要友善 400 訊息而非 500）。
+- 前端 `StockAlertView.save()` catch 不再對 API 錯誤覆蓋通用「儲存失敗」（axios 攔截器已顯示後端 detail），僅 `!e.response` 才補通用提示。
+
+**設計**：見 `requirements.md` Req 23 防重複 AC、`design.md`「Task 130」段。純新增守門邏輯，無資料模型 / 新表 / 新端點。
+
+- [ ] 130.1 後端 `StockAlertService.assertNoDuplicate(...)` + `create` / `update` 呼叫（update 排除自身 id）
+- [ ] 130.2 前端錯誤改 dialog（非頂部 toast，使用者要求）：`api/index.js` 攔截器加 `skipErrorToast` 旗標 + 匯出 `apiErrorMessage` helper；`stockAlert.create/update` 帶 `{skipErrorToast:true}`；`StockAlertView.save()` catch 改用 `ElMessageBox.alert(apiErrorMessage(e),'無法儲存警示',{type:'warning'})`
+- [ ] 130.3 Docker 重 build + recreate（business-services + frontend）後驗證：對已存在「NVDA 低於年線」再存一筆相同條件 → 後端回 400「已存在相同的警示條件（NVDA NVIDIA… 低於年線），未重複新增」、清單未新增；改不同條件（如 threshold 不同 / 改高於年線）仍可正常新增；編輯既有筆不誤判自身為重複。前端驗證：重複存檔時跳 **dialog**（`ElMessageBox`，標題「無法儲存警示」）顯示該訊息，**不再**從頂部滑出 toast（瀏覽器確認）
