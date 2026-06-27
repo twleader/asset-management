@@ -5,6 +5,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
+import org.hibernate.annotations.Filter;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -13,9 +14,14 @@ import java.util.List;
 
 /**
  * 資產快照 - 記錄某一日期的完整資產狀況
+ *
+ * <p>Requirement 28（多租戶）：以 {@code ownerUserId} 隔離；同一使用者同一日期僅一筆，
+ * 唯一性改為複合 {@code (owner_user_id, snapshot_date)}（不同使用者同一天各可有一筆）。
  */
 @Entity
-@Table(name = "asset_snapshot")
+@Table(name = "asset_snapshot", uniqueConstraints = @UniqueConstraint(
+        name = "uq_snapshot_owner_date", columnNames = {"owner_user_id", "snapshot_date"}))
+@Filter(name = "ownerFilter", condition = "owner_user_id = :ownerId")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -26,7 +32,11 @@ public class AssetSnapshot {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false, unique = true)
+    /** 擁有者（Requirement 28），子表 deposits/funds/stocks 經本快照繼承 owner */
+    @Column(name = "owner_user_id", nullable = false)
+    private Long ownerUserId;
+
+    @Column(name = "snapshot_date", nullable = false)
     private LocalDate snapshotDate;
 
     /** 美元匯率 (台幣/美元) */

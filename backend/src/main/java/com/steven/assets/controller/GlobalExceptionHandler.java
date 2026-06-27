@@ -1,5 +1,7 @@
 package com.steven.assets.controller;
 
+import com.steven.assets.security.AdminRequiredException;
+import com.steven.assets.security.TenantAccessException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -13,6 +15,16 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(NoSuchElementException.class)
     public ProblemDetail handleNotFound(NoSuchElementException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    @ExceptionHandler(TenantAccessException.class)
+    public ProblemDetail handleTenantAccess(TenantAccessException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    @ExceptionHandler(AdminRequiredException.class)
+    public ProblemDetail handleAdminRequired(AdminRequiredException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, ex.getMessage());
     }
 
     @ExceptionHandler(IllegalArgumentException.class)

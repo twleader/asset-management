@@ -3301,3 +3301,103 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [ ] 130.1 後端 `StockAlertService.assertNoDuplicate(...)` + `create` / `update` 呼叫（update 排除自身 id）
 - [ ] 130.2 前端錯誤改 dialog（非頂部 toast，使用者要求）：`api/index.js` 攔截器加 `skipErrorToast` 旗標 + 匯出 `apiErrorMessage` helper；`stockAlert.create/update` 帶 `{skipErrorToast:true}`；`StockAlertView.save()` catch 改用 `ElMessageBox.alert(apiErrorMessage(e),'無法儲存警示',{type:'warning'})`
 - [ ] 130.3 Docker 重 build + recreate（business-services + frontend）後驗證：對已存在「NVDA 低於年線」再存一筆相同條件 → 後端回 400「已存在相同的警示條件（NVDA NVIDIA… 低於年線），未重複新增」、清單未新增；改不同條件（如 threshold 不同 / 改高於年線）仍可正常新增；編輯既有筆不誤判自身為重複。前端驗證：重複存檔時跳 **dialog**（`ElMessageBox`，標題「無法儲存警示」）顯示該訊息，**不再**從頂部滑出 toast（瀏覽器確認）
+
+### Task 131: 多租戶資料層 — AppUser + owner 欄位 + Liquibase 遷移（Requirement 28）
+
+對應 Requirements: Requirement 28（Gmail OAuth2 登入與多租戶資料隔離）
+
+**需求**：系統由單一使用者變多租戶。需新增使用者主檔、為「資產類」表加 `owner_user_id`、把現有資料全歸管理者，並把原本全域唯一的欄位改成每使用者唯一。
+
+**關鍵設計**：
+- 新增 `AppUser`（email UNIQUE、role ADMIN/USER、status PENDING/ACTIVE/DISABLED）+ `AppUserRepository`。
+- 5 個受隔離 entity 加 `Long ownerUserId` + `@FilterDef("ownerFilter")`/`@Filter("owner_user_id = :ownerId")`：`AssetSnapshot`、`RealizedGain`、`PaymentAccount`、`StockAlert`、`NotificationRecipient`。子表（bank/stock/fund holding、alert trigger/recipient）經父表繼承，不各自加欄位。
+- `AssetSnapshot` 移除 `snapshotDate` 全域 `unique=true` → `@Table` 複合唯一 `(owner_user_id, snapshot_date)`；`NotificationRecipient.email` → `(owner_user_id, email)`。
+- Liquibase `v1.34.0-multi-tenant.sql`，順序：建 `app_user` → **先 seed 管理者**（`ON CONFLICT(email) DO NOTHING`）→ 5 表加 `owner_user_id` → backfill 給管理者 → `NOT NULL`+FK+index → drop 既有全域 unique（先查實際約束名）+ 建複合 unique。`ddl-auto:none`，全靠 changeset。
+
+**設計**：見 `requirements.md` Req 28、`design.md`「認證與多租戶」段、ERD `app_user` 區塊。
+
+- [x] 131.1 `model/AppUser.java` + `repository/AppUserRepository.java`（findByEmail / findByStatus / findAllByOrderByCreatedAtDesc）
+- [x] 131.2 5 個 entity 加 `ownerUserId` + `@FilterDef`/`@Filter`；`AssetSnapshot`、`NotificationRecipient` 改複合唯一
+- [x] 131.3 Liquibase `changes/v1.34.0-multi-tenant.sql` + master include（建表/seed admin/加欄位/backfill/NOT NULL+FK+index/改 unique）
+- [x] 131.4 Docker 重 build + recreate（business-services）後驗證：乾淨 DB 啟動跑完 changeset 無錯；既有資料 DB 升級後所有資產列 `owner_user_id` = 管理者 id、`app_user` 含管理者列（ADMIN/ACTIVE）
+- [x] 131.5 **bug fix（實機暴露）**：既有 DB 的 `asset_snapshot.snapshot_date` 全域唯一是 Hibernate 自動命名（`uk543...`），v1.34.0 以標準名 `DROP IF EXISTS` 未命中 → 殘留 → 第二個使用者無法建「管理者已用過日期」的快照（23505）。新增 `changes/v1.34.1-drop-legacy-global-uniques.sql`：用 PL/pgSQL DO block 依「欄位組合」（`att.attname::text` 轉型，避免 `name[]`≠`text[]`）動態找出並刪除殘留的單欄全域唯一（snapshot_date / email），`splitStatements:false`，跨環境可靠
+
+### Task 132: business-services 身分情境與 owner 過濾（Requirement 28）
+
+對應 Requirements: Requirement 28
+
+**需求**：business-services 不接觸瀏覽器，需從 BFF 傳來的 header 取得目前使用者並過濾資料；同時提供使用者管理內部端點與備份/管理端點的 ADMIN 守門。
+
+**關鍵設計**：
+- request-scoped `CurrentUserContext` + `CurrentUserFilter`（`OncePerRequestFilter` 讀 `X-User-Id`/`X-User-Role`/`X-User-Status`）。
+- `TenantFilterAspect`（`@Before` repository 層執行）啟用 `ownerFilter`——選 repository 層是因其已位於 service `@Transactional`/OSIV 綁定的 session 內，不依賴 interceptor/OSIV 順序，過濾必定生效；各 service create 流程 set owner（`AssetService`、`PaymentAccountService`、`StockAlertService`、`NotificationRecipientService`）。
+- by-id 存取以 `TenantGuard.assertOwned` 驗證歸屬（`@Filter` 不套用於 findById）。
+- **背景 cron 不啟用 filter**（aspect 以 `RequestContextHolder` 判斷無 request context）→ 警示偵測/寄信維持掃全體。
+- `UserAdminController`（`/internal/users/**`：login-upsert、list、approve/disable、setRole）。
+- ADMIN gate `HandlerInterceptor`（`/api/backups/**`、`/internal/users/**` 管理端點）讀 `X-User-Role`，非 ADMIN 回 403。
+
+**設計**：見 `requirements.md` Req 28、`design.md`「business-services 身分與過濾」段。
+
+- [x] 132.1 `CurrentUserContext`（request-scoped）+ `CurrentUserFilter`
+- [x] 132.2 `TenantFilterAspect`（repository 層 `@Before` 啟用 `ownerFilter`）+ `TenantGuard`（by-id 守門）+ create 設 owner（5 個 service）
+- [x] 132.3 `UserAdminController` + DTO（login-upsert / list / status / role）
+- [x] 132.4 ADMIN gate interceptor 註冊（WebConfig）
+- [x] 132.5 Docker 重 build + recreate（business-services）後驗證：帶不同 `X-User-Id` 打 `/api/snapshots` 只回該 user 資料；無 header（背景）查得全體；非 ADMIN header 打 `/api/backups` 回 403；cron 警示掃描不受 filter 影響
+
+### Task 133: BFF reactive 安全層 + Gmail OAuth2（Requirement 28）
+
+對應 Requirements: Requirement 28
+
+**需求**：在唯一對外的 BFF 加 Google OAuth2 登入、session、授權與身分 header 注入。
+
+**關鍵設計**：
+- `bff/pom.xml` 加 `spring-boot-starter-security` + `spring-boot-starter-oauth2-client`；`application.yml` google registration（env client-id/secret）+ `forward-headers-strategy: framework`。
+- `SecurityConfig`（`SecurityWebFilterChain`）：路徑授權 + 自訂 OIDC user service（呼 `/internal/users/login-upsert` 灌 role/status）+ SPA success handler（302→`/`）+ 401 entrypoint + CSRF cookie。
+- `MeController`（`/api/me`，status 即時查 DB）、`ImpersonationController`（`/api/impersonate`，ADMIN 寫 session 目標）。
+- header 注入：Gateway `GlobalFilter`（passthrough route 全覆蓋）+ `WebClientConfig` `ExchangeFilterFunction`（aggregation controller）。
+- PENDING/DISABLED 攔截 `WebFilter`；`UserManagementBffRoutes`（`/api/bff/user-management/**` ADMIN）；CORS `allowCredentials=true`。
+
+**設計**：見 `requirements.md` Req 28、`design.md`「BFF 安全層」段 + API 端點表。
+
+- [x] 133.1 pom + application.yml（security/oauth2-client/google registration/forward-headers）
+- [x] 133.2 `SecurityConfig` + 自訂 OIDC user service + success handler + 401 entrypoint + CSRF
+- [x] 133.3 `MeController` + `ImpersonationController`
+- [x] 133.4 header 注入（GlobalFilter + WebClientConfig ExchangeFilterFunction）
+- [x] 133.5 PENDING WebFilter + `UserManagementBffRoutes` + CORS allowCredentials
+- [x] 133.6 Docker 重 build + recreate（bff）後驗證：未登入 `/api/me` 回 401；OAuth 重導 Google；登入後 `/api/me` 回身分；下游收到正確 `X-User-*`
+
+### Task 134: 部署設定 — Nginx / vite / compose / env（Requirement 28）
+
+對應 Requirements: Requirement 28
+
+**關鍵設計**：
+- `frontend/nginx.conf` 加 `/oauth2/`、`/login/oauth2/`、`/logout` location → `bff:8080`，全部（含既有 `/api/`）透傳 `X-Forwarded-Proto $scheme`、`Host`、`X-Forwarded-Host`。
+- `frontend/vite.config.js` proxy 加 `/oauth2`、`/login`、`/logout`；dev Google redirect-uri 走 5173。
+- `docker-compose.yml` bff 注入 `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`；`.env.example` 補欄位。Google Console 登記 dev + prod redirect-uri。
+
+**設計**：見 `design.md`「部署」相關 + Req 28 部署 AC。
+
+- [x] 134.1 nginx.conf location + X-Forwarded-Proto
+- [x] 134.2 vite.config.js proxy
+- [x] 134.3 docker-compose env + .env.example
+- [x] 134.4 Docker 重 build + recreate（frontend + bff）後驗證：經 Nginx 走完整 OAuth 重導鏈、callback 正常建立 session
+
+### Task 135: 前端登入、選單與使用者管理（Requirement 28）
+
+對應 Requirements: Requirement 28
+
+**關鍵設計**：
+- `stores/authStore.js`：`me`/`fetchMe`/`login`/`logout`/`impersonate`/`switchableUsers`/`isAdmin`/`isPending`。
+- `api/index.js`：`withCredentials:true`；攔截器 401→`/oauth2/authorization/google`、403 `ACCOUNT_PENDING`→`/pending`；`authApi`、`userManagementApi`。
+- `router/index.js`：全域 `beforeEach`（未登入→登入、PENDING→`/pending`、ADMIN-only 路由擋）；新增 `/pending`、`/settings/users`。
+- `App.vue`：header 加登入者資訊 + 登出 +（僅 ADMIN）使用者切換下拉；設定子選單依 `isAdmin` 隱藏「備份/還原 資料」「使用者管理」；切換 onChange → `impersonate()` → 重載資料。
+- 新增 `views/PendingApprovalView.vue`、`views/UserManagementView.vue`。
+
+**設計**：見 `requirements.md` Req 28、`design.md`「BFF 安全層」+ API 端點表。
+
+- [x] 135.1 `stores/authStore.js`
+- [x] 135.2 `api/index.js`（withCredentials + 401/PENDING 攔截 + authApi/userManagementApi）
+- [x] 135.3 `router/index.js`（guard + 新路由）
+- [x] 135.4 `App.vue`（登入者資訊/登出/切換下拉/選單依角色）
+- [x] 135.5 `views/PendingApprovalView.vue` + `views/UserManagementView.vue`
+- [ ] 135.6 Docker 重 build + recreate（frontend）後端到端驗證：管理者登入看全量、切換代看他人、新使用者 PENDING 被擋於 `/pending`、核准後只看自己、非管理者無備份選單

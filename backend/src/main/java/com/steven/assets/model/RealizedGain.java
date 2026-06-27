@@ -5,6 +5,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
+import org.hibernate.annotations.Filter;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -12,9 +13,12 @@ import java.time.LocalDate;
 /**
  * 已實現損益紀錄
  * 記錄每一筆股票/基金賣出的損益
+ *
+ * <p>Requirement 28（多租戶）：以 {@code ownerUserId} 隔離。
  */
 @Entity
 @Table(name = "realized_gain")
+@Filter(name = "ownerFilter", condition = "owner_user_id = :ownerId")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -24,6 +28,10 @@ public class RealizedGain {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
+    /** 擁有者（Requirement 28） */
+    @Column(name = "owner_user_id", nullable = false)
+    private Long ownerUserId;
 
     /** 股票/基金名稱 */
     @Column(nullable = false, length = 50)

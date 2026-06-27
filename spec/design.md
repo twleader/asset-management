@@ -344,6 +344,17 @@ AssetSnapshot (1) ──── (N) StockHolding
 AssetSnapshot (1) ──── (N) FundHolding
 RealizedGain          (獨立，不關聯快照)
 
+# 多租戶 / 認證（Requirement 28）
+AppUser               (使用者主檔，PK = id；email UNIQUE；role ADMIN/USER；status PENDING/ACTIVE/DISABLED）
+AppUser (1) ──── (N) AssetSnapshot          (owner_user_id；子表 bank/stock/fund holding 經 snapshot 繼承 owner)
+AppUser (1) ──── (N) RealizedGain           (owner_user_id)
+AppUser (1) ──── (N) PaymentAccount         (owner_user_id)
+AppUser (1) ──── (N) StockAlert             (owner_user_id；trigger/recipient join、watch_stock 衍生皆繼承)
+AppUser (1) ──── (N) NotificationRecipient  (owner_user_id)
+# 受隔離表唯一性多租戶化：asset_snapshot UNIQUE(owner_user_id, snapshot_date)；
+#                          notification_recipient UNIQUE(owner_user_id, email)
+# 參考/行情/設定主檔（Bank, BrokerEntity, Stock, *_History, MarketType, AssetClass, FundMaster...）為全系統共用，不加 owner
+
 # 主檔 / 設定類（不寫死 enum，由 DataInitializer seed）
 Stock                 (個股主檔，PK = code + market；nullable override 欄 asset_class / stock_style / bond_term)
 DepositTypeEntity     (存款類型主檔，code 值存入 BankDeposit.depositType)
@@ -1548,6 +1559,56 @@ volumes:
 - `api/index.js` 新增 `backupApi.list() / create() / restore()`
 - 還原成功後 `setTimeout(() => location.reload(), 1500)`，避免 stale store 殘留
 
+## 認證與多租戶（Requirement 28）
+
+### 拓樸（OAuth 落點在 BFF，非 backend）
+
+```
+瀏覽器 → frontend(Nginx) → bff(Spring Cloud Gateway / WebFlux reactive，唯一對外:8080)
+                                → business-services(Spring MVC，內網不對外，靠 X-User-* header 取得身分)
+                                → postgres / redis / external-materials-service
+```
+
+- 因 BFF 是唯一對外入口且 business-services 不接觸瀏覽器，**OAuth2 Login（Google 重導、session cookie）必須放在 BFF 的 reactive Security（`SecurityWebFilterChain` / `ServerHttpSecurity`）**。
+- BFF 在呼叫下游時，把目前登入者（或管理者代看的目標）以 header `X-User-Id` / `X-User-Role` / `X-User-Status` 傳給 business-services。
+
+### BFF 安全層
+
+- `spring-boot-starter-security` + `spring-boot-starter-oauth2-client`；`application.yml` 設 `spring.security.oauth2.client.registration.google`（client-id/secret 走環境變數）+ `server.forward-headers-strategy: framework`。
+- `SecurityWebFilterChain`：`/oauth2/**`、`/login/**`、health → permitAll；`/api/bff/backup-restore/**`、`/api/bff/user-management/**`、`/api/impersonate` → `hasAuthority("ROLE_ADMIN")`；其餘 `authenticated()`。未登入回 **401**（自訂 `authenticationEntryPoint`）而非 302。
+- 自訂 reactive OIDC user service：登入取得 Google email 後呼叫 business-services `POST /internal/users/login-upsert`（upsert 並回 role/status），把 `ROLE_ADMIN`/`ROLE_USER` 灌成 authorities。
+- 登入成功 `ServerAuthenticationSuccessHandler` 固定 302 → 前端 `/`。
+- CSRF：`CookieServerCsrfTokenRepository.withHttpOnlyFalse()`，前端從 `XSRF-TOKEN` cookie 取值放進 `X-XSRF-TOKEN`（axios 自動）。
+- PENDING/DISABLED 攔截：`WebFilter` 對業務 `/api/**`（除 `/api/me`、`/logout`、`/api/impersonate`）若 `status != ACTIVE` 回 `403 {code:"ACCOUNT_PENDING"}`。
+- header 注入：Gateway `GlobalFilter`（覆蓋所有 passthrough route）+ `WebClientConfig` 的 `businessServicesClient` 加 `ExchangeFilterFunction`（aggregation controller），從 session / Reactor context 取 effectiveUserId/role/status 寫入 `X-User-*`。
+
+### business-services 身分與過濾
+
+- `CurrentUserFilter`（`OncePerRequestFilter`）讀 `X-User-*` 填 request-scoped `CurrentUserContext`。
+- 受隔離 entity 加 `@FilterDef(name="ownerFilter")`（定義於 `model/package-info.java`）+ `@Filter(condition="owner_user_id = :ownerId")`。create 流程以 `ctx.effectiveUserId()` set owner。
+- **啟用點 `TenantFilterAspect`**：`@Before("execution(* com.steven.assets.repository..*(..))")` 在每次 repository 呼叫前，於目前 Hibernate session `enableFilter("ownerFilter")`。選 repository 層而非請求進入點，是因為此時已位於 service `@Transactional`（或 OSIV）綁定的 session 內，**不依賴 interceptor 與 OSIV 註冊順序**，過濾必定套用到實際執行的查詢（經實機驗證：帶 `X-User-Id` 不同值查 `/api/snapshots` 各自隔離）。
+- **filter 僅在有 request context 時啟用**（aspect 以 `RequestContextHolder` 判斷）；背景 cron（`AlertNotificationDispatcher` / `StockAlertService.checkAlerts`）無 request context 故不啟用，照舊掃全體 alert、寄信給各 alert 自己挑的收件人。
+- Hibernate `@Filter` 不套用於 `EntityManager.find()`（findById），by-id 存取另以 `TenantGuard.assertOwned(ownerUserId)` 驗證歸屬。
+- ADMIN gate：輕量 `HandlerInterceptor` 讀 `X-User-Role`，對 `/api/backups/**`、`/internal/users/**`（管理）限 ADMIN（不引入整套 backend Security）。
+
+### 管理者代看（effectiveUserId）
+
+- effectiveUserId 由 BFF 決定：一般使用者 = 自己；管理者 = session 內選定目標（預設自己）。
+- `POST /api/impersonate {userId}` 僅 ADMIN session 可寫 session 目標；business-services 只信任 header（對外那層已把關）。
+
+### API 端點（新增）
+
+| 端點 | 提供者 | 權限 | 說明 |
+|------|--------|------|------|
+| `GET /oauth2/authorization/google` | BFF | 公開 | 觸發 Google 登入 |
+| `GET /login/oauth2/code/google` | BFF | 公開 | Google callback |
+| `GET /api/me` | BFF | 已登入 | 目前使用者 + 角色 + 狀態 + 可切換清單 |
+| `POST /api/impersonate {userId}` | BFF | ADMIN | 管理者代看切換 |
+| `POST /logout` | BFF | 已登入 | 清 session |
+| `GET /api/bff/user-management/users` 等 | BFF→business | ADMIN | 使用者管理 passthrough |
+| `POST /internal/users/login-upsert` | business | 內部 | 登入 upsert + 回 role/status |
+| `GET /internal/users` / `PATCH /internal/users/{id}/status` / `PATCH /internal/users/{id}/role` | business | ADMIN | 列出 / 核准·停用 / 設角色 |
+
 ## Security Considerations
 
 - CORS 設定於 `WebConfig.java`，限制允許的來源與方法
@@ -1556,6 +1617,9 @@ volumes:
 - 使用 BigDecimal 處理所有金融數值，避免浮點數精度問題
 - 財務計算精度：20 位數，2-4 位小數
 - 備份／還原 API 僅執行白名單指令，命令參數不接受使用者拼接
+- 認證在 BFF（Gmail OAuth2），session cookie `HttpOnly`+`SameSite=Lax`+prod `Secure`；CSRF 以 cookie token 防護（Requirement 28）
+- business-services 不對外，`X-User-*` header 信任建立於「compose 內網、BFF 為唯一入口」；business-services 暴露於外網即會被繞過（部署層保證）
+- 多租戶：受隔離 entity 一律經 `ownerFilter` 過濾，管理者代看僅 ADMIN session 可變更 effectiveUserId，避免越權讀取他人資產
 
 ---
 
