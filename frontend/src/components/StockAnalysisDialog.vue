@@ -20,7 +20,7 @@
       <el-tab-pane label="走勢圖" name="chart">
         <div v-if="loading" class="analysis-loading">
           <el-icon class="is-loading" size="36"><Loading /></el-icon>
-          <div>載入歷史股價中…</div>
+          <div>{{ backfilling ? '首次載入，補齊 10 年歷史中…（約需數秒）' : '載入歷史股價中…' }}</div>
         </div>
         <div v-else-if="!history.length" class="analysis-empty">
           無歷史資料，請先執行股價補齊
@@ -167,6 +167,7 @@ defineEmits(['update:modelValue'])
 
 const activeTab = ref('chart')
 const loading = ref(false)
+const backfilling = ref(false)  // Task 136：首次無歷史 → 即時補齊 10 年中
 const history = ref([])
 const months = ref(12)
 const intradayTicks = ref([])
@@ -225,6 +226,7 @@ const rangeOptions = [
 async function fetchHistory() {
   if (!props.stock) return
   loading.value = true
+  backfilling.value = false
   history.value = []
   try {
     // 一次抓 10 年（DB 查詢 < 100ms），之後切期間只調 dataZoom，不再 roundtrip
@@ -232,7 +234,24 @@ async function fetchHistory() {
     const startDate = new Date()
     startDate.setMonth(startDate.getMonth() - 120)
     const start = startDate.toISOString().split('T')[0]
-    const data = await bffApi.stockAnalysis.getStockHistory(props.stock.stockCode, props.stock.market, start, end)
+    const code = props.stock.stockCode
+    const market = props.stock.market
+    let data = await bffApi.stockAnalysis.getStockHistory(code, market, start, end)
+    // Task 136：無歷史（多為 ETF 透視成份股尚未被 startup / 每日 cron 補到）→ 即時觸發單檔 10 年回補後重載一次。
+    // 只寫 stock_price_history、不入主檔（backfill-stock 端點本就不碰主檔）；今日列獨佔給 ClosePersister。
+    // 台股大盤 0000 不觸發（歷史走 twse_index_daily_history）。
+    const isTaiex = code === '0000' && market === '台股'
+    if ((!Array.isArray(data) || data.length === 0) && !isTaiex) {
+      backfilling.value = true
+      try {
+        await bffApi.stockAnalysis.backfillStock(code, market)
+        data = await bffApi.stockAnalysis.getStockHistory(code, market, start, end)
+      } catch (e) {
+        console.warn('歷史回補失敗:', e)
+      } finally {
+        backfilling.value = false
+      }
+    }
     history.value = Array.isArray(data) ? data : []
   } catch (e) {
     console.warn('無法取得歷史股價:', e)

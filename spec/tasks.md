@@ -3402,6 +3402,27 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 135.5 `views/PendingApprovalView.vue` + `views/UserManagementView.vue`
 - [ ] 135.6 Docker 重 build + recreate（frontend）後端到端驗證：管理者登入看全量、切換代看他人、新使用者 PENDING 被擋於 `/pending`、核准後只看自己、非管理者無備份選單
 
+### Task 136: 股票分析對話框無歷史時 lazy 回補（Requirement 9 / Requirement 7 bug fix）
+
+對應 Requirements: Requirement 9（透視成份股可點擊分析）+ Requirement 7（市場資料回補涵蓋的即時補強）
+
+**問題**（實機暴露）：點擊 ETF 透視圓餅圖成份股 `2383` 台光電 開啟 `StockAnalysisDialog`，走勢圖顯示「無歷史資料，請先執行股價補齊」。根因：`2383` 是純 ETF 透視成份股（不在 `stock` 主檔 / `stock_holding`），其 10 年歷史本由 Task 129 回補，但 Task 129 只有 `startupBackfill` / 手動 `backfillAll` / 每日 18:30 cron 三個觸發點，**缺「開啟即補」的即時觸發** —— 成份股新進 top10 或在兩次 cron 之間被點開，就落入「即時價有、走勢圖空白」空窗（與 Task 126 為主檔修的空窗同型，但主檔走 `StockMasterService` 即時佇列補、成份股刻意不入主檔故不經該路徑）。
+
+**使用者決策**：自動背景補齊後重載（非按鈕）；範圍只在開啟分析對話框時補（lazy，涵蓋所有「無歷史」情況）。
+
+**關鍵設計**（前端 + BFF route；business / ext / `stock` 主檔皆不動，沿用既有 `/api/market-data/history/backfill-stock`）：
+- BFF `StockAnalysisBffRoutes`：新增 `POST /api/bff/stock-analysis/backfill-stock` passthrough → business `/api/market-data/history/backfill-stock`（與 `SnapshotFormBffController.triggerBackfillThenRefetch` 同一支 business API；`since` 省略後端預設 `now−10y`）。
+- 前端 `StockAnalysisDialog.fetchHistory()`：首抓空陣列 → `backfilling=true` → `await backfillStock(code, market)` → 重抓一次 `getStockHistory`；loading 文案於 `backfilling` 時切「首次載入，補齊 10 年歷史中…（約需數秒）」。台股 `0000` 不觸發；回補失敗只 warn 不阻斷既有空狀態。
+- 前端 `api/index.js`：`bffApi.stockAnalysis.backfillStock(code, market)`。
+- 不變量：只寫 `stock_price_history` 不入主檔（端點本就不碰主檔）、今日列獨佔給 `ClosePersister`（Task 84）、`existsHistory` idempotent。
+
+**設計**：見 `requirements.md` Req 9 新增 AC、`design.md`「Task 136」段 + `StockAnalysisBffRoutes` route 清單。
+
+- [x] 136.1 BFF `StockAnalysisBffRoutes`：新增 `stock-analysis-backfill` route（POST passthrough 至 `/api/market-data/history/backfill-stock`）
+- [x] 136.2 前端 `api/index.js`：`stockAnalysis.backfillStock(code, market)`
+- [x] 136.3 前端 `StockAnalysisDialog.vue`：`fetchHistory` 無歷史時 lazy 回補後重載 + `backfilling` loading 文案 + `0000` 守門
+- [x] 136.4 Docker 重 build + recreate（bff + frontend）後驗證：點開未補過的透視成份股 `3044` 健鼎 → 走勢圖先顯示「補齊 10 年歷史中…」→ 自動補齊後畫出完整走勢（瀏覽器實測通過）。後端機制以 `2383` 台光電實測：`stock_price_history` 0 → 2438 筆（2016-06-27～2026-06-26，**今日列未寫入**）、`stock` 主檔仍 0 筆（不入主檔）。**注意（已記錄至 memory）：JVM service（bff）從 worktree 跑 cached `compose build` 會產生 stale jar（route 沒進去 → gateway 404），須 `--no-cache` 重 build；驗證方式為 unzip running jar 內 `StockAnalysisBffRoutes.class` 確認 route 字串**
+
 ### Task 137: BFF 身分情境收斂與代看 cookie 修正（Requirement 28）
 
 對應 Requirements: Requirement 28
@@ -3413,6 +3434,7 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - `TenantWebFilter` 單次 `exchange.mutate()` 以 `set` 寫 `X-User-*`（覆蓋 client 偽造值）並寫進 Reactor context；未登入則單次 mutate 剝除偽造 header。`MeController` 列使用者清單顯式帶管理者 header（不依賴 context 傳遞），effectiveUserId 讀 `X-User-Id` header（不可讀 mutated request 的 cookie）。
 - 代看以 stateless `IMPERSONATE_UID` cookie 表示目標；`TenantWebFilter` 僅 `role=ADMIN` 採信。
 - **bug fix（實機暴露）**：`IMPERSONATE_UID` cookie 跨登出／登入殘留 → 管理者重新登入誤帶上次代看目標、看到他人資料。`SecurityConfig` 登入成功 handler 與登出成功 handler 各寫 `maxAge=0`（屬性與寫入一致）Set-Cookie 清除，使每次新登入都從「看自己」開始。
+- **bug fix（二次訂閱）**：原 `filter()` 寫成 `flatMap(me -> applyIdentity(...)).switchIfEmpty(chain.filter(...))`，但 `applyIdentity` 末端的 `chain.filter(...)` 是 `Mono<Void>`（只 onComplete、不 onNext），整條 `flatMap` 被 `switchIfEmpty` 誤判為 empty 而觸發，使**每個已登入請求的過濾鏈被第二次訂閱**：第一趟把回應 commit（200/204），第二趟在 response 已凍結後重跑 → result handler `setContentLength` 撞唯讀 header 拋 `UnsupportedOperationException`（`/api/impersonate` 第二趟 → `ResourceWebHandler` 404；proxied SSE → `Rejecting additional inbound receiver`），刷滿 ERROR log。**前次以「單次 mutate」為修法是誤判方向（巢狀 decorate 非主因）**。改為 `map(BffUser.fromPrincipal).defaultIfEmpty(ANONYMOUS).flatMap(applyIdentity)`：未登入以 id=null 哨兵表示，後續只有一個 `flatMap` 呼叫 `chain.filter`，整條鏈恰好訂閱一次，例外消失。
 
 **設計**：見 `requirements.md` Req 28、`design.md`「BFF 安全層」+「管理者代看」段。
 
@@ -3420,8 +3442,7 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 137.2 `TenantWebFilter` 單次 mutate / fail-closed；`MeController` effectiveUserId 讀 header；`BusinessUserClient` 配合
 - [x] 137.3 `TenantFilterAspect`（business 端）有請求但無身分時 fail-closed（ownerId=-1 回空）
 - [x] 137.4 **bug fix**：登入／登出清 `IMPERSONATE_UID` cookie
-- [x] 137.5 **bug fix（實機暴露，兩層真因）**：代看切換 `POST /api/impersonate` 回 **500**。
-  - **真因 1**：本 BFF 是 Spring Cloud Gateway，`@RestController` handler 執行時 response 已 commit、`getHeaders()` 唯讀 → controller 內任何寫 Set-Cookie 的做法（`addCookie`／`ResponseEntity<Void>`／`getHeaders().add`）都丟 `UnsupportedOperationException`。→ 把代看處理移出 controller、改由 `TenantWebFilter` 在 `chain.filter` 前（response 尚可寫、與登入/登出清 cookie 同視窗）寫 cookie+`204` short-circuit；移除 `ImpersonationController`；前端 `api/index.js` 的 `impersonate` 改傳 query param。
-  - **真因 2（更深層，原 filter 既有）**：`TenantWebFilter` 用 `.flatMap(…回 Mono<Void>).switchIfEmpty(chain.filter)` —— `Mono<Void>` 必然「空」完成 → `switchIfEmpty` 誤判未認證 → **再跑一次 `chain.filter`（雙重 filter）**。對有 body 的 GET 只是第二趟撞 already-committed 的「良性雜訊」（即先前 log 一直出現的 `UnsupportedOperationException ... already committed` 之真正來源）；但 impersonate short-circuit 成 204 後，第二趟落到 `ResourceWebHandler`→`NoResourceFoundException 404`→撞已 commit 的 204→**500**。→ 改用 `.map(→Optional).defaultIfEmpty(empty).flatMap(…)` 單趟結束、移除尾端 `switchIfEmpty`，根除雙重 filter（一併消除良性雜訊）
-- [x] 137.6 Docker 重 build --no-cache + recreate（bff）+ build frontend 後驗證：fail-closed（無 header 回 0 筆）、隔離（不同 X-User-Id 回各自資料）、管理者重新登入回到看自己、**管理者代看切換 hi.steven 正常切換不再 500、切回自己亦正常（瀏覽器實測通過：impersonate 兩向皆回 204；雙重 filter 修正後 `already committed` 良性雜訊歸零）**
-  - **部署陷阱（實機暴露，已記憶）**：`--no-cache build bff` 仍可能編出 stale jar（`ImpersonationController` 沒刪、`TenantWebFilter` 缺 `handleImpersonate`），運行中容器跑舊碼 → 代看回舊 200/飄忽，誤導成邏輯 bug 追了好幾輪。**鐵則**：JVM service 改完一律 `--force-recreate`，並 `docker exec` 進**運行中容器** unzip `app.jar` 內 `.class` grep 預期字串，驗不符就重 build 重驗到一致為止
+- [x] 137.5 **bug fix（二次訂閱）**：`TenantWebFilter.filter()` 改 `map(BffUser.fromPrincipal).defaultIfEmpty(ANONYMOUS).flatMap(…)` 哨兵結構，根治 `flatMap(回 Mono<Void>).switchIfEmpty(chain.filter)` 對 `Mono<Void>`（永遠空完成）的**二次訂閱**：第一趟已 commit 回應，第二趟在 response 已凍結後重跑 → `setContentLength` 撞唯讀 header 拋 `UnsupportedOperationException`（有 body 的 GET 是良性雜訊；`/api/impersonate` 第二趟落到 `ResourceWebHandler` 404→撞 204→500；proxied SSE 為 `Rejecting additional inbound receiver`）。附 `TenantWebFilterTest` 回歸測試（數 `chain.filter` 訂閱次數＝1）
+- [x] 137.6 **bug fix**：代看切換 `POST /api/impersonate` 回 500／飄忽。真因：本 BFF 是 Spring Cloud Gateway，`@RestController` handler 執行時 response 已 commit、`getHeaders()` 唯讀 → controller 內任何寫 Set-Cookie 的做法（`addCookie`／`ResponseEntity<Void>`／`getHeaders().add`）都丟 `UnsupportedOperationException`。改由 `TenantWebFilter` 在 `chain.filter` 前（response 尚可寫、與登入/登出清 cookie 同視窗）攔 `POST /api/impersonate?userId=` 寫 cookie+`204` short-circuit；移除 `ImpersonationController`；前端 `api/index.js` 的 `impersonate` 改傳 query param。（與 137.5 相依：二次訂閱與此修正皆落地後，切換才穩定不 500）
+- [x] 137.7 Docker 重 build --no-cache + recreate（bff）+ build frontend 後驗證：fail-closed（無 header 回 0 筆）、隔離（不同 X-User-Id 回各自資料）、管理者重新登入回到看自己、**管理者代看切換 hi.steven 正常、切回自己正常、BFF log 不再出現 `UnsupportedOperationException`（瀏覽器實測通過：impersonate 兩向皆回 204、`already committed` 雜訊歸零）**
+  - **部署陷阱（實機暴露，已記憶）**：`--no-cache build bff` 仍可能編出 stale jar（運行中容器跑舊碼 → 代看回舊 200/飄忽），誤導成邏輯 bug 追了好幾輪。**鐵則**：JVM service 改完一律 `--force-recreate`，並 `docker exec` 進**運行中容器** unzip `app.jar` 內 `.class` grep 預期字串，驗不符就重 build 重驗到一致為止
