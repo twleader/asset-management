@@ -3434,6 +3434,7 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - `TenantWebFilter` 單次 `exchange.mutate()` 以 `set` 寫 `X-User-*`（覆蓋 client 偽造值）並寫進 Reactor context；未登入則單次 mutate 剝除偽造 header。`MeController` 列使用者清單顯式帶管理者 header（不依賴 context 傳遞），effectiveUserId 讀 `X-User-Id` header（不可讀 mutated request 的 cookie）。
 - 代看以 stateless `IMPERSONATE_UID` cookie 表示目標；`TenantWebFilter` 僅 `role=ADMIN` 採信。
 - **bug fix（實機暴露）**：`IMPERSONATE_UID` cookie 跨登出／登入殘留 → 管理者重新登入誤帶上次代看目標、看到他人資料。`SecurityConfig` 登入成功 handler 與登出成功 handler 各寫 `maxAge=0`（屬性與寫入一致）Set-Cookie 清除，使每次新登入都從「看自己」開始。
+- **bug fix（二次訂閱）**：原 `filter()` 寫成 `flatMap(me -> applyIdentity(...)).switchIfEmpty(chain.filter(...))`，但 `applyIdentity` 末端的 `chain.filter(...)` 是 `Mono<Void>`（只 onComplete、不 onNext），整條 `flatMap` 被 `switchIfEmpty` 誤判為 empty 而觸發，使**每個已登入請求的過濾鏈被第二次訂閱**：第一趟把回應 commit（200/204），第二趟在 response 已凍結後重跑 → result handler `setContentLength` 撞唯讀 header 拋 `UnsupportedOperationException`（`/api/impersonate` 第二趟 → `ResourceWebHandler` 404；proxied SSE → `Rejecting additional inbound receiver`），刷滿 ERROR log。**前次以「單次 mutate」為修法是誤判方向（巢狀 decorate 非主因）**。改為 `map(BffUser.fromPrincipal).defaultIfEmpty(ANONYMOUS).flatMap(applyIdentity)`：未登入以 id=null 哨兵表示，後續只有一個 `flatMap` 呼叫 `chain.filter`，整條鏈恰好訂閱一次，例外消失。
 
 **設計**：見 `requirements.md` Req 28、`design.md`「BFF 安全層」+「管理者代看」段。
 
@@ -3441,4 +3442,5 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 137.2 `TenantWebFilter` 單次 mutate / fail-closed；`MeController` effectiveUserId 讀 header；`BusinessUserClient`/`ImpersonationController` 配合
 - [x] 137.3 `TenantFilterAspect`（business 端）有請求但無身分時 fail-closed（ownerId=-1 回空）
 - [x] 137.4 **bug fix**：登入／登出清 `IMPERSONATE_UID` cookie
-- [ ] 137.5 Docker 重 build --no-cache + recreate（bff）後驗證：fail-closed（無 header 回 0 筆）、隔離（不同 X-User-Id 回各自資料）、管理者重新登入回到看自己
+- [x] 137.6 **bug fix**：`TenantWebFilter.filter()` 改 `defaultIfEmpty(ANONYMOUS)` 哨兵，根治 `switchIfEmpty(chain.filter)` 對 `Mono<Void>` 的二次訂閱（已登入請求 response committed 後拋 `UnsupportedOperationException`）
+- [ ] 137.5 Docker 重 build --no-cache + recreate（bff）後驗證：fail-closed（無 header 回 0 筆）、隔離（不同 X-User-Id 回各自資料）、管理者重新登入回到看自己、**BFF log 不再出現 `UnsupportedOperationException`**

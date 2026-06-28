@@ -28,12 +28,25 @@ import java.nio.charset.StandardCharsets;
  *   <li>單次 {@code mutate}：以 {@code set} 寫入 {@code X-User-*}（覆蓋 client 任何偽造值），並寫入 Reactor
  *       context 供 aggregation WebClient 取用。未登入則單次 {@code mutate} 剝除偽造 header 後放行。</li>
  * </ol>
- * 注意：只做「單次 mutate」——避免 exchange 被巢狀 decorate 兩層，導致 controller 回應編碼時
- * {@code setContentLength} 撞上已凍結的 response header（UnsupportedOperationException）。
+ * 注意（二次訂閱陷阱）：{@code chain.filter(...)} 回傳 {@code Mono<Void>}，永遠只發 onComplete、不發 onNext。
+ * 故「{@code ...flatMap(me -> chain.filter(...)).switchIfEmpty(chain.filter(...))}」的整條 {@code flatMap}
+ * 會被 {@code switchIfEmpty} 誤判為 empty 而觸發，使同一 exchange 的過濾鏈被「第二次訂閱」：第一趟（已登入）
+ * 已把 controller 回應 commit（200/204），第二趟在 response 已凍結後重跑，result handler 對唯讀 header 呼叫
+ * {@code setContentLength} 即拋 {@code UnsupportedOperationException}（{@code /api/impersonate} 第二趟落到
+ * {@code ResourceWebHandler} → 404；proxied SSE 則為 {@code Rejecting additional inbound receiver}）。
+ * 因此本類別把「未登入」轉成 {@code defaultIfEmpty(ANONYMOUS)} 的哨兵 onNext，後續只有「一個」{@code flatMap}
+ * 呼叫 {@code chain.filter}，保證整條鏈恰好訂閱一次。（巢狀 mutate 並非主因。）
  */
 @Component
 @Order(0)
 public class TenantWebFilter implements WebFilter {
+
+    /**
+     * 未登入哨兵：{@code id == null}，{@link #applyIdentity} 會走「剝除偽造 header 後放行」分支。
+     * 用它把「未登入」表成一個 onNext，避免以 {@code switchIfEmpty} 包覆 {@code chain.filter}
+     * （{@code Mono<Void>}）而造成過濾鏈被二次訂閱（見 class doc）。
+     */
+    private static final BffUser ANONYMOUS = new BffUser(null, null, null, null, null, null);
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
@@ -42,10 +55,11 @@ public class TenantWebFilter implements WebFilter {
                 .filter(auth -> auth != null && auth.isAuthenticated()
                         && auth.getPrincipal() instanceof OidcUser)
                 // 身分直接取自登入 principal（authorities 已含 id/role/status），不再每請求查 business
-                .flatMap(auth -> applyIdentity(exchange, chain,
-                        BffUser.fromPrincipal((OidcUser) auth.getPrincipal())))
-                // 未登入 / 非 OIDC：剝除偽造 header 後放行（受保護路徑已由 SecurityConfig 擋下）
-                .switchIfEmpty(Mono.defer(() -> chain.filter(stripForgedHeaders(exchange))));
+                .map(auth -> BffUser.fromPrincipal((OidcUser) auth.getPrincipal()))
+                // 未登入 / 非 OIDC → 補 ANONYMOUS 哨兵：保證下面恰好一個 flatMap 呼叫 chain.filter、整條鏈只訂閱一次。
+                // 不可改回 switchIfEmpty(chain.filter(...))：chain.filter 是 Mono<Void> 永遠 complete-empty，會誤觸而二次訂閱。
+                .defaultIfEmpty(ANONYMOUS)
+                .flatMap(me -> applyIdentity(exchange, chain, me));
     }
 
     private Mono<Void> applyIdentity(ServerWebExchange exchange, WebFilterChain chain, BffUser me) {
