@@ -3446,3 +3446,54 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 137.6 **bug fix**：代看切換 `POST /api/impersonate` 回 500／飄忽。真因：本 BFF 是 Spring Cloud Gateway，`@RestController` handler 執行時 response 已 commit、`getHeaders()` 唯讀 → controller 內任何寫 Set-Cookie 的做法（`addCookie`／`ResponseEntity<Void>`／`getHeaders().add`）都丟 `UnsupportedOperationException`。改由 `TenantWebFilter` 在 `chain.filter` 前（response 尚可寫、與登入/登出清 cookie 同視窗）攔 `POST /api/impersonate?userId=` 寫 cookie+`204` short-circuit；移除 `ImpersonationController`；前端 `api/index.js` 的 `impersonate` 改傳 query param。（與 137.5 相依：二次訂閱與此修正皆落地後，切換才穩定不 500）
 - [x] 137.7 Docker 重 build --no-cache + recreate（bff）+ build frontend 後驗證：fail-closed（無 header 回 0 筆）、隔離（不同 X-User-Id 回各自資料）、管理者重新登入回到看自己、**管理者代看切換 hi.steven 正常、切回自己正常、BFF log 不再出現 `UnsupportedOperationException`（瀏覽器實測通過：impersonate 兩向皆回 204、`already committed` 雜訊歸零）**
   - **部署陷阱（實機暴露，已記憶）**：`--no-cache build bff` 仍可能編出 stale jar（運行中容器跑舊碼 → 代看回舊 200/飄忽），誤導成邏輯 bug 追了好幾輪。**鐵則**：JVM service 改完一律 `--force-recreate`，並 `docker exec` 進**運行中容器** unzip `app.jar` 內 `.class` grep 預期字串，驗不符就重 build 重驗到一致為止
+
+### Task 138: 「台日韓人均 GDP 比較」圖新增日本（Requirement 18）
+
+對應 Requirements: Requirement 18
+
+**需求**：原「台韓人均 GDP 比較」圖只比台、韓兩國，新增**日本**，改為台、日、韓三國比較。日本資料源比照韓國——DGBAS 無日本資料，故純走 IMF DataMapper API（`NGDPDPC/JPN` 人均 GDP、`NGDP_RPCH/JPN` 實質成長率）。
+
+**關鍵設計**（比照韓國既有管線，最小擴充；ext-materials 的 `fetchImf` 本就 country 參數化，無需改動）：
+- DB：新增 `japan_gdp_per_capita_history`（`year` PK、`gdp_usd NUMERIC(12,2) NOT NULL`、`real_gdp_growth_rate NUMERIC(8,4)`），Liquibase `v1.35.0-japan-gdp.sql` 建立、不 seed 歷史值（靠回補按鈕從 IMF 取得，與韓國一致）。
+- Entity / Repository：`JapanGdpPerCapitaHistory` + `JapanGdpPerCapitaHistoryRepository`（鏡像韓國）。
+- business-services：`MacroHistoryService.refreshJapanGdpFromImf()`（純 IMF `JPN`，與 `refreshKoreaGdpFromImf` 同型）；`MacroHistoryController` 新增 `GET /api/japan-gdp`、`POST /api/japan-gdp/refresh-from-imf`。
+- BFF `GdpTwseBffController`：`get` 並行 fetch `/api/japan-gdp`，X 軸年份聯集納入日本，回 `japanGdpPerCapitaUsd` / `japanGdpGrowthRate`；`refresh` 並行觸發 `/api/japan-gdp/refresh-from-imf`，回傳 body 加 `japan`。
+- 前端 `GdpTwseView.vue`：卡片標題改「台日韓人均 GDP 比較（近 30 年）」；新增 `japanGdp` / `jpGrowth` ref 與 fetchData 對應；ECharts 圖例與系列加「日本 GDP」（折線，綠）+「日本成長率」（柱狀，綠）；`onRefresh` 訊息加「日本 N 筆」。圖例順序依「台日韓」：台灣 / 日本 / 韓國。
+
+**不變量**：同義欄位同一 business API（圖只讀 `*_gdp_per_capita_history.real_gdp_growth_rate`，不前端重算）；BFF 仍過濾 `> 當年`（IMF 含未來預測）。
+
+**設計**：見 `requirements.md` Req 18（台日韓）、`design.md` Macro History 端點 + BFF 回傳格式。
+
+- [x] 138.1 DB `v1.35.0-japan-gdp.sql` 建表 + master changelog 註冊
+- [x] 138.2 `JapanGdpPerCapitaHistory` entity + `JapanGdpPerCapitaHistoryRepository`
+- [x] 138.3 `MacroHistoryService.refreshJapanGdpFromImf()`（純 IMF JPN）+ 注入 japanGdpRepo
+- [x] 138.4 `MacroHistoryController` 新增 `/api/japan-gdp` GET + `/refresh-from-imf` POST
+- [x] 138.5 BFF `GdpTwseBffController` get/refresh 納入日本（三國聯集 + japan 回傳欄位）
+- [x] 138.6 前端 `GdpTwseView.vue` 標題 / state / fetchData / 圖例 / 系列 / 回補訊息加日本
+- [x] 138.7 Docker 重 build --no-cache + recreate（backend + bff + frontend）後驗證：Liquibase `v1.35.0` 套用、`japan_gdp_per_capita_history` 建表；運行中 bff jar 含 `/api/japan-gdp`+`japanGdpPerCapitaUsd`（非 stale）；`POST /api/japan-gdp/refresh-from-imf` 回 `{upserted:52, source:"IMF NGDPDPC+NGDP_RPCH/JPN"}`，三表皆有資料（台 81 / 日 52 / 韓 52 年，日本 2020 -4.3%、人均 ~$33–41k 符合 IMF 實值）；frontend bundle 含「台日韓人均 GDP 比較」。**圖三條 GDP 折線 + 三組成長率柱狀待瀏覽器重載確認**
+
+### Task 139: 「台日韓人均 GDP 比較」圖區間由近 30 年改為近 40 年（Requirement 18）
+
+對應 Requirements: Requirement 18
+
+**需求**：使用者要求 GDP 比較圖預設區間由「近 30 年」擴大為「近 40 年」（since=當年−40+1=1987）。純參數調整，無新資料模型 / 端點 / 欄位。
+
+**資料可用性（已驗證）**：三國表 [1987,2026] 逐年皆有資料（TW 自 1951、JP/KR 自 1980，IMF NGDPDPC 自 1980 起），40 年區間完整覆蓋、無缺漏；DB 含至 2031 預估列但 BFF 以 `year>當年` 過濾，X 軸右端仍止於當年，無阻斷風險。
+
+**渲染（已評估，無須改版）**：40 個 4 位年份在 ~1000px 繪圖寬下每格 ~25px（偏擠但可容納），ECharts category 軸 `axisLabel` auto-interval 自動隱藏重疊標籤（丟棄非疊印）保證不破版；成長率柱每格 3 根變細至 ~6–7px 仍可辨識、`barGap:0` 分組行為與年份數無關不變；`dataZoom` 預設全顯（0–100）與「完整歷史一覽＋可縮放」UX 一致。grid 邊距（bottom:60／left,right:70／top:50）皆足夠，**沿用現有版型，零版面調整**。
+
+**關鍵設計**（8 個位置，純 `30→40`；經 workflow 多角度稽核 + 對抗式完整性驗證，無遺漏、無誤含）：
+- 前端 `GdpTwseView.vue`：卡片標題「（近 30 年）」→「（近 40 年）」、`bffApi.gdpTwse.get(30)`→`get(40)`、`refresh(30)`→`refresh(40)`。
+- 前端 `api/index.js`：`gdpTwse.get`／`refresh` 預設 `years = 30`→`40`（權威預設來源，與顯式傳參一致）。
+- BFF `GdpTwseBffController`：`get`／`refresh` 兩個 `@RequestParam(defaultValue="30")`→`"40"`（避免「前端 40、直打 API 預設 30」不一致；refresh 的 years 實為 inert——轉發 `/refresh-from-imf` 不帶 years、IMF 抓全年份——改 40 僅維持契約對稱）。
+- 活文件同步：`requirements.md`（User Story + AC 預設顯示近 40 年）、`design.md`（`?years=40` 兩處 API 範例）。
+- **不動**：`tasks.md` 既有 Task（138/53/97 等）「30 年」字面為 append-only 歷史紀錄；ECharts `itemGap:30`／`rotate:30`／`grid right:30`、`Duration.ofSeconds(30)` timeout、指數日線圖（`get` years=10、`RANGE_TRADING_DAYS`）皆與 GDP 區間無關（false positive）。
+
+**設計**：見 `requirements.md` Req 18、`design.md` Macro History BFF 端點。
+
+- [x] 139.1 前端 `GdpTwseView.vue` 標題 + get/refresh 呼叫值 30→40
+- [x] 139.2 前端 `api/index.js` `gdpTwse.get`/`refresh` 預設 years 30→40
+- [x] 139.3 BFF `GdpTwseBffController` get/refresh 兩個 `@RequestParam` defaultValue 30→40
+- [x] 139.4 活文件 `requirements.md`(370/378) + `design.md`(1007/1008) 同步 40
+- [x] 139.5 Docker 重 build --no-cache + recreate（bff + frontend）後驗證：運行中 bff jar `GdpTwseBffController.class` 僅含 `40`、不含 `30`（defaultValue 已更新、非 stale）；frontend bundle hash 更新（`GdpTwseView-vbwZSIL8.js`）且含「近 40 年」；資料可用性已驗證 [1987,2026] 三國逐年完整覆蓋（since=2026−40+1=1987）。
+- [x] 139.6 **bug fix（實機暴露：日本資料缺）**：改 40 年後實機圖只見台、韓兩條線，日本（綠）legend 有但無資料點。逐層診斷：DB japan 表 [1987,2026] 有 40 筆（資料在），但 business `GET /api/japan-gdp?since=1987` 回 500 `"No static resource api/japan-gdp"`（請求 fall-through 到靜態資源處理器＝**端點未註冊**）。`unzip` 運行中 `business-services` 的 `MacroHistoryController.class` → 建構子只注入 Taiwan/Korea/Twse/UsDaily repo、只有 `/korea-gdp` 無 `/japan-gdp` → **運行容器是無日本的舊碼**。根因：Task 138 完成後，`asset-business-services` 被某外部 process（別的 worktree／main 建構）以舊 image 重建（容器 Created 13:09:34），覆蓋掉含日本的 image；Task 139 我只重建 bff+frontend、未碰 business → 沒發現它已被換成 stale。修法：從**本 worktree**（有日本原始碼）`--no-cache` 重 build + `--force-recreate` business-services。驗證：新 jar `MacroHistoryController.class` 建構子已含 `JapanGdpPerCapitaHistoryRepository`、有 `getJapanGdp`/`refreshJapanGdpFromImf`；`GET /api/japan-gdp?since=1987` 回 45 筆陣列（1987 $21,631 成長 4.6% → 2031，BFF 濾 >2026）；postgres japan 資料未失（recreate 不動 volume）。**教訓**：改動鏈上「本回未碰」的 JVM service 也可能已被別的 worktree 換成 stale → 「功能又壞」先 `unzip` 運行 jar 驗該功能 built code 是否在，別假設上次部署的 image 還在跑。**圖三國折線/柱狀延伸至 1987 待瀏覽器重載確認**

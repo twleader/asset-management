@@ -365,9 +365,9 @@
 
 ---
 
-### Requirement 18: 股市分析（指數日線/當日 + 台韓人均 GDP 比較）
+### Requirement 18: 股市分析（指數日線/當日 + 台日韓人均 GDP 比較）
 
-**User Story:** 作為使用者，我希望在「股市分析」頁查看台股大盤、美股四大指數與主要海外指數（英、德、韓、日）的近 10 年日線（含當日分時），並比較近 30 年台韓人均 GDP 與其實質成長率，以理解股市表現與總體經濟。
+**User Story:** 作為使用者，我希望在「股市分析」頁查看台股大盤、美股四大指數與主要海外指數（英、德、韓、日）的近 10 年日線（含當日分時），並比較近 40 年台、日、韓人均 GDP 與其實質成長率，以理解股市表現與總體經濟。
 
 > 註：原「台灣人均 GDP vs 台股大盤年末收盤」雙 Y 軸圖已於 Task 97 移除（見下方刪除線條目）。
 
@@ -375,15 +375,15 @@
 
 - [ ] 左側選單新增「股市分析」項目，路徑 `/gdp-twse`
 - [x] ~~頁面以雙 Y 軸折線圖呈現「台灣人均 GDP vs 台股大盤年末收盤」~~ **（Task 97 移除）**：此卡連同 `/api/twse-year-end-index`(GET/refresh)、`/api/twse-daily-index/latest`、`/internal/macro/twse-year-end`、`MacroHistoryService.refreshTwseYearEnd`、`MacroDataFetchClient.fetchTwseDecemberClose`、`TwseIndexYearEndHistory` entity/repo 一併移除；BFF `get` 不再回 `twseYearEndClose`/`currentYearLastTradingDate`、`refresh` 不再觸發大盤年末/日線。`twse_index_year_end_history` 資料表保留（不刪資料）
-- [ ] 預設顯示近 30 年（含當年度若已有資料）
-- [ ] 台/韓年度 GDP 各自存於 `taiwan_gdp_per_capita_history`、`korea_gdp_per_capita_history`，由 Liquibase changelog seed
-- [ ] 後端提供獨立資源端點 `/api/taiwan-gdp`、`/api/korea-gdp`；BFF 端點 `/api/bff/gdp-twse`（get 回 TW/KR 人均 GDP + 實質成長率），前端只呼叫 BFF
-- [ ] 「回補 GDP（IMF）」按鈕（位於「台韓人均 GDP 比較」卡）回補 TWN + KOR 人均 GDP 與實質成長率，台灣採**主計總處（DGBAS）優先、IMF 備援**（DGBAS NA8101A1A 為主、缺年份用 IMF `NGDPDPC/NGDP_RPCH`），韓國純 IMF；合併後 upsert（DB 存單一最終值）
+- [ ] 預設顯示近 40 年（含當年度若已有資料）
+- [ ] 台/日/韓年度 GDP 各自存於 `taiwan_gdp_per_capita_history`、`japan_gdp_per_capita_history`、`korea_gdp_per_capita_history`，由 Liquibase changelog 建立（日、韓不 seed 歷史值，靠回補按鈕從 IMF 取得）
+- [ ] 後端提供獨立資源端點 `/api/taiwan-gdp`、`/api/japan-gdp`、`/api/korea-gdp`；BFF 端點 `/api/bff/gdp-twse`（get 回 TW/JP/KR 人均 GDP + 實質成長率），前端只呼叫 BFF
+- [ ] 「回補 GDP（IMF）」按鈕（位於「台日韓人均 GDP 比較」卡）回補 TWN + JPN + KOR 人均 GDP 與實質成長率，台灣採**主計總處（DGBAS）優先、IMF 備援**（DGBAS NA8101A1A 為主、缺年份用 IMF `NGDPDPC/NGDP_RPCH`），日本、韓國純 IMF；合併後 upsert（DB 存單一最終值）
 - [ ] BFF 在組裝 X 軸年份時過濾 `> 當年`（IMF 含未來預測，不顯示）
-- [ ] 「台韓人均 GDP 比較」圖：左 Y 軸為 TW/KR 人均 GDP（折線），右 Y 軸為各自年增率（柱狀）
-- [ ] 韓國資料同樣由 IMF DataMapper API（`NGDPDPC/KOR`）回補，存於 `korea_gdp_per_capita_history`（DGBAS 無韓國資料，故韓國維持純 IMF）
-- [ ] 「回補資料」按鈕同步觸發 TWN + KOR 兩國 GDP 回補
-- [ ] 經濟成長率取**實質 GDP 成長率**（台灣優先 DGBAS NA8101A1A「經濟成長率(%)」、缺則 IMF `NGDP_RPCH`；韓國 IMF `NGDP_RPCH`），不再由前後端用人均 GDP（USD）相減推算（因含匯率波動會失真）；存於 `*_gdp_per_capita_history.real_gdp_growth_rate`。兩張圖的成長率柱狀皆讀此欄位（同一資料源）
+- [ ] 「台日韓人均 GDP 比較」圖：左 Y 軸為 TW/JP/KR 人均 GDP（折線），右 Y 軸為各自年增率（柱狀）
+- [ ] 日本、韓國資料同樣由 IMF DataMapper API（`NGDPDPC/JPN`、`NGDPDPC/KOR`）回補，分別存於 `japan_gdp_per_capita_history`、`korea_gdp_per_capita_history`（DGBAS 無日、韓資料，故日、韓維持純 IMF）
+- [ ] 「回補資料」按鈕同步觸發 TWN + JPN + KOR 三國 GDP 回補
+- [ ] 經濟成長率取**實質 GDP 成長率**（台灣優先 DGBAS NA8101A1A「經濟成長率(%)」、缺則 IMF `NGDP_RPCH`；日本、韓國 IMF `NGDP_RPCH`），不再由前後端用人均 GDP（USD）相減推算（因含匯率波動會失真）；存於 `*_gdp_per_capita_history.real_gdp_growth_rate`。圖的成長率柱狀皆讀此欄位（同一資料源）
 - [ ] 同頁「最上方」加第三張卡：台股大盤（TAIEX）每日收盤近 10 年走勢圖
   - 顯示每日收盤點位（`close_point`）+ 月線（MA20）+ 季線（MA60）+ 年線（MA240）四條曲線
   - 區間切換按鈕：1 個月 / 3 個月 / 半年 / 1 年 / 2 年 / 5 年（透過 dataZoom 對齊 X 軸末端，前段 240 個交易日仍保留以利 MA240 完整顯示）

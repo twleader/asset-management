@@ -185,8 +185,8 @@ export const bffApi = {
 
   // GdpTwse (GDP + 台股大盤年度走勢)
   gdpTwse: {
-    get: (years = 30) => api.get('/bff/gdp-twse', { params: { years } }),
-    refresh: (years = 30) =>
+    get: (years = 40) => api.get('/bff/gdp-twse', { params: { years } }),
+    refresh: (years = 40) =>
       api.post('/bff/gdp-twse/refresh', null, { params: { years }, timeout: 240000 }),
     getIndexDaily: (market = 'TWSE', years = 10) =>
       api.get('/bff/gdp-twse/index-daily', { params: { market, years } }),
