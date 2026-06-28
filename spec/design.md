@@ -1596,7 +1596,7 @@ volumes:
 ### 管理者代看（effectiveUserId）
 
 - effectiveUserId 由 BFF 決定：一般使用者 = 自己；管理者 = `IMPERSONATE_UID` cookie 指定目標（預設自己）。
-- `POST /api/impersonate {userId}` 僅 ADMIN（SecurityConfig 限 `ROLE_ADMIN`）；以 `ResponseEntity` 的 `Set-Cookie` 寫 `IMPERSONATE_UID`（stateless，不碰 WebSession，避免 cookie/session 在回應 committed 後才寫的 `IllegalStateException`）。`TenantWebFilter` 只在 `role=ADMIN` 時採信此 cookie，故非管理者自設無效、無需簽章。business-services 只信任 `X-User-*` header（對外那層已把關）。
+- `POST /api/impersonate?userId={id}` 僅 ADMIN（SecurityConfig 限 `ROLE_ADMIN`）；**由 `TenantWebFilter` 攔截處理、不進 `@RestController`**：在 WebFilter 內（`chain.filter` 之前、response 尚可寫的視窗，與登入／登出清 cookie 同一視窗）`response.getHeaders().add(Set-Cookie, IMPERSONATE_UID)`+`setStatusCode(204)`+`setComplete()`，stateless 不碰 WebSession；省略 `userId` 或等於自己 → 清除 cookie（回到看自己）。**為何不放在 controller**：本 BFF 是 Spring Cloud Gateway，`@RestController` handler 執行時 response 已 commit、`getHeaders()` 唯讀，任何在 controller 內寫 Set-Cookie 的做法（`addCookie` / `ResponseEntity` / 直接 `getHeaders().add`）都會丟 `UnsupportedOperationException`，且因無 body 可降級 chunked、回應無法 start → **500**（回 body 的 GET controller 如 `MeController` 才能在 commit 後仍把 body 以 chunked 寫出、僅留良性雜訊）。`userId` 改走 query param 以便在 filter 直接讀取（不需在 filter 解析 JSON body）。`TenantWebFilter` 只在 `role=ADMIN` 時採信此 cookie，故非管理者自設無效、無需簽章。business-services 只信任 `X-User-*` header（對外那層已把關）。
 - **每次登入／登出都清除 `IMPERSONATE_UID` cookie**：`SecurityConfig` 的登入成功 handler（302→`/` 前）與登出成功 handler 各寫一個 `maxAge=0`、屬性與寫入時一致（`path=/`、`HttpOnly`、`SameSite=Lax`）的 Set-Cookie。否則 cookie 會跨登出／登入殘留，管理者重新登入時誤帶上次代看目標、看到他人資料；清除後每次新登入都從「看自己」開始。
 
 ### API 端點（新增）
@@ -1606,7 +1606,7 @@ volumes:
 | `GET /oauth2/authorization/google` | BFF | 公開 | 觸發 Google 登入 |
 | `GET /login/oauth2/code/google` | BFF | 公開 | Google callback |
 | `GET /api/me` | BFF | 已登入 | 目前使用者 + 角色 + 狀態 + 可切換清單 |
-| `POST /api/impersonate {userId}` | BFF | ADMIN | 管理者代看切換 |
+| `POST /api/impersonate?userId={id}` | BFF（`TenantWebFilter` 攔截，非 controller） | ADMIN | 管理者代看切換（寫/清 `IMPERSONATE_UID` cookie） |
 | `POST /logout` | BFF | 已登入 | 清 session |
 | `GET /api/bff/user-management/users` 等 | BFF→business | ADMIN | 使用者管理 passthrough |
 | `POST /internal/users/login-upsert` | business | 內部 | 登入 upsert + 回 role/status |

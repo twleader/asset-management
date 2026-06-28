@@ -3439,8 +3439,10 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 **設計**：見 `requirements.md` Req 28、`design.md`「BFF 安全層」+「管理者代看」段。
 
 - [x] 137.1 身分編進 authorities（`SecurityConfig` OIDC user service + `AuthConstants` 前綴常數）+ `BffUser.fromPrincipal`
-- [x] 137.2 `TenantWebFilter` 單次 mutate / fail-closed；`MeController` effectiveUserId 讀 header；`BusinessUserClient`/`ImpersonationController` 配合
+- [x] 137.2 `TenantWebFilter` 單次 mutate / fail-closed；`MeController` effectiveUserId 讀 header；`BusinessUserClient` 配合
 - [x] 137.3 `TenantFilterAspect`（business 端）有請求但無身分時 fail-closed（ownerId=-1 回空）
 - [x] 137.4 **bug fix**：登入／登出清 `IMPERSONATE_UID` cookie
-- [x] 137.6 **bug fix**：`TenantWebFilter.filter()` 改 `defaultIfEmpty(ANONYMOUS)` 哨兵，根治 `switchIfEmpty(chain.filter)` 對 `Mono<Void>` 的二次訂閱（已登入請求 response committed 後拋 `UnsupportedOperationException`）
-- [ ] 137.5 Docker 重 build --no-cache + recreate（bff）後驗證：fail-closed（無 header 回 0 筆）、隔離（不同 X-User-Id 回各自資料）、管理者重新登入回到看自己、**BFF log 不再出現 `UnsupportedOperationException`**
+- [x] 137.5 **bug fix（二次訂閱）**：`TenantWebFilter.filter()` 改 `map(BffUser.fromPrincipal).defaultIfEmpty(ANONYMOUS).flatMap(…)` 哨兵結構，根治 `flatMap(回 Mono<Void>).switchIfEmpty(chain.filter)` 對 `Mono<Void>`（永遠空完成）的**二次訂閱**：第一趟已 commit 回應，第二趟在 response 已凍結後重跑 → `setContentLength` 撞唯讀 header 拋 `UnsupportedOperationException`（有 body 的 GET 是良性雜訊；`/api/impersonate` 第二趟落到 `ResourceWebHandler` 404→撞 204→500；proxied SSE 為 `Rejecting additional inbound receiver`）。附 `TenantWebFilterTest` 回歸測試（數 `chain.filter` 訂閱次數＝1）
+- [x] 137.6 **bug fix**：代看切換 `POST /api/impersonate` 回 500／飄忽。真因：本 BFF 是 Spring Cloud Gateway，`@RestController` handler 執行時 response 已 commit、`getHeaders()` 唯讀 → controller 內任何寫 Set-Cookie 的做法（`addCookie`／`ResponseEntity<Void>`／`getHeaders().add`）都丟 `UnsupportedOperationException`。改由 `TenantWebFilter` 在 `chain.filter` 前（response 尚可寫、與登入/登出清 cookie 同視窗）攔 `POST /api/impersonate?userId=` 寫 cookie+`204` short-circuit；移除 `ImpersonationController`；前端 `api/index.js` 的 `impersonate` 改傳 query param。（與 137.5 相依：二次訂閱與此修正皆落地後，切換才穩定不 500）
+- [x] 137.7 Docker 重 build --no-cache + recreate（bff）+ build frontend 後驗證：fail-closed（無 header 回 0 筆）、隔離（不同 X-User-Id 回各自資料）、管理者重新登入回到看自己、**管理者代看切換 hi.steven 正常、切回自己正常、BFF log 不再出現 `UnsupportedOperationException`（瀏覽器實測通過：impersonate 兩向皆回 204、`already committed` 雜訊歸零）**
+  - **部署陷阱（實機暴露，已記憶）**：`--no-cache build bff` 仍可能編出 stale jar（運行中容器跑舊碼 → 代看回舊 200/飄忽），誤導成邏輯 bug 追了好幾輪。**鐵則**：JVM service 改完一律 `--force-recreate`，並 `docker exec` 進**運行中容器** unzip `app.jar` 內 `.class` grep 預期字串，驗不符就重 build 重驗到一致為止
