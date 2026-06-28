@@ -1576,11 +1576,11 @@ volumes:
 
 - `spring-boot-starter-security` + `spring-boot-starter-oauth2-client`；`application.yml` 設 `spring.security.oauth2.client.registration.google`（client-id/secret 走環境變數）+ `server.forward-headers-strategy: framework`。
 - `SecurityWebFilterChain`：`/oauth2/**`、`/login/**`、health → permitAll；`/api/bff/backup-restore/**`、`/api/bff/user-management/**`、`/api/impersonate` → `hasAuthority("ROLE_ADMIN")`；其餘 `authenticated()`。未登入回 **401**（自訂 `authenticationEntryPoint`）而非 302。
-- 自訂 reactive OIDC user service：登入取得 Google email 後呼叫 business-services `POST /internal/users/login-upsert`（upsert 並回 role/status），把 `ROLE_ADMIN`/`ROLE_USER` 灌成 authorities。
+- 自訂 reactive OIDC user service：登入取得 Google email 後呼叫 business-services `POST /internal/users/login-upsert`（upsert 並回 id/role/status），把 `ROLE_ADMIN`/`ROLE_USER` 與 `APP_UID_{id}`、`APP_STATUS_{status}` 一併灌成 authorities。**之後每個請求的身分（id/role/status）直接從登入 principal 還原（`BffUser.fromPrincipal`），不再每請求 round-trip business `by-email`**——避免延遲與「WebClient 完成執行緒接手寫回應」造成的 `setContentLength` on committed-response 問題。代價：role/status 為登入時快照，核准（PENDING→ACTIVE）後使用者需「重新登入」刷新（`/pending` 頁提供按鈕）。
 - 登入成功 `ServerAuthenticationSuccessHandler` 固定 302 → 前端 `/`。
 - CSRF：`CookieServerCsrfTokenRepository.withHttpOnlyFalse()`，前端從 `XSRF-TOKEN` cookie 取值放進 `X-XSRF-TOKEN`（axios 自動）。
 - PENDING/DISABLED 攔截：`WebFilter` 對業務 `/api/**`（除 `/api/me`、`/logout`、`/api/impersonate`）若 `status != ACTIVE` 回 `403 {code:"ACCOUNT_PENDING"}`。
-- header 注入：Gateway `GlobalFilter`（覆蓋所有 passthrough route）+ `WebClientConfig` 的 `businessServicesClient` 加 `ExchangeFilterFunction`（aggregation controller），從 session / Reactor context 取 effectiveUserId/role/status 寫入 `X-User-*`。
+- header 注入：`TenantWebFilter` 從 principal 解析身分後，單次 `exchange.mutate()` 以 `set` 寫入 `X-User-*`（覆蓋 client 偽造值）並寫進 Reactor context；passthrough route 由 gateway 轉發該 request header，aggregation controller 的 `businessServicesClient` 由 `ExchangeFilterFunction` 從 context 取 `TenantIdentity` 補上 header。`MeController` 列使用者清單時則顯式帶管理者 header（不依賴 context 傳遞）。
 
 ### business-services 身分與過濾
 
@@ -1593,8 +1593,9 @@ volumes:
 
 ### 管理者代看（effectiveUserId）
 
-- effectiveUserId 由 BFF 決定：一般使用者 = 自己；管理者 = session 內選定目標（預設自己）。
-- `POST /api/impersonate {userId}` 僅 ADMIN session 可寫 session 目標；business-services 只信任 header（對外那層已把關）。
+- effectiveUserId 由 BFF 決定：一般使用者 = 自己；管理者 = `IMPERSONATE_UID` cookie 指定目標（預設自己）。
+- `POST /api/impersonate {userId}` 僅 ADMIN（SecurityConfig 限 `ROLE_ADMIN`）；以 `ResponseEntity` 的 `Set-Cookie` 寫 `IMPERSONATE_UID`（stateless，不碰 WebSession，避免 cookie/session 在回應 committed 後才寫的 `IllegalStateException`）。`TenantWebFilter` 只在 `role=ADMIN` 時採信此 cookie，故非管理者自設無效、無需簽章。business-services 只信任 `X-User-*` header（對外那層已把關）。
+- **每次登入／登出都清除 `IMPERSONATE_UID` cookie**：`SecurityConfig` 的登入成功 handler（302→`/` 前）與登出成功 handler 各寫一個 `maxAge=0`、屬性與寫入時一致（`path=/`、`HttpOnly`、`SameSite=Lax`）的 Set-Cookie。否則 cookie 會跨登出／登入殘留，管理者重新登入時誤帶上次代看目標、看到他人資料；清除後每次新登入都從「看自己」開始。
 
 ### API 端點（新增）
 

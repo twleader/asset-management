@@ -2,7 +2,6 @@ package com.steven.assets.bff.security;
 
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Component;
-// AuthConstants 不再於此引用（header 由 WebClient tenant filter 注入）
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
@@ -52,12 +51,15 @@ public class BusinessUserClient {
     }
 
     /**
-     * 管理者：列出全部使用者。{@code X-User-*}（含 ADMIN role）由 WebClient 的 tenant filter 從 Reactor context
-     * 自動注入（呼叫端為管理者請求情境），business 端 ADMIN 守門才會放行。
+     * 管理者：列出全部使用者。{@code X-User-*} header 由呼叫端（{@link MeController}）以已解析的管理者身分
+     * <b>顯式帶入</b>——不依賴 Reactor context 傳遞，確保 business 端 ADMIN 守門必定放行。
      */
-    public Mono<List<BffUser>> listAll() {
+    public Mono<List<BffUser>> listAll(BffUser admin) {
         return businessServicesClient.get()
                 .uri("/internal/users")
+                .header(AuthConstants.HDR_USER_ID, String.valueOf(admin.id()))
+                .header(AuthConstants.HDR_USER_ROLE, admin.role())
+                .header(AuthConstants.HDR_USER_STATUS, admin.status())
                 .retrieve()
                 .bodyToMono(LIST_MAP)
                 .map(list -> list.stream().map(BusinessUserClient::toUser).toList());

@@ -5,10 +5,10 @@
         <template #extra>
           <p v-if="auth.me" class="pending-email">登入帳號：{{ auth.me.email }}</p>
           <div class="pending-actions">
-            <el-button type="primary" :loading="checking" @click="recheck">重新檢查</el-button>
+            <el-button type="primary" @click="auth.login()">已獲核准，重新登入</el-button>
             <el-button @click="auth.logout()">登出</el-button>
           </div>
-          <p class="pending-hint">核准後此頁會自動進入系統（每 15 秒自動檢查一次）。</p>
+          <p class="pending-hint">請管理者於「使用者管理」核准後，按「已獲核准，重新登入」即可進入系統。</p>
         </template>
       </el-result>
     </el-card>
@@ -17,35 +17,8 @@
 
 <script setup>
 import { useAuthStore } from '@/stores/authStore'
-import { useRouter } from 'vue-router'
 
 const auth = useAuthStore()
-const router = useRouter()
-const checking = ref(false)
-let timer = null
-
-async function recheck() {
-  checking.value = true
-  try {
-    await auth.fetchMe()
-    if (!auth.isLoggedIn) {
-      auth.login()
-      return
-    }
-    if (auth.isActive) {
-      router.replace('/dashboard')
-    }
-  } finally {
-    checking.value = false
-  }
-}
-
-onMounted(() => {
-  timer = setInterval(recheck, 15000)
-})
-onUnmounted(() => {
-  if (timer) clearInterval(timer)
-})
 </script>
 
 <style scoped>

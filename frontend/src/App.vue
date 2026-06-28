@@ -145,6 +145,7 @@
 
 <script setup>
 import zhTw from 'element-plus/dist/locale/zh-tw.mjs'
+import { ElLoading } from 'element-plus'
 import { useAssetStore } from '@/stores/assetStore'
 import { useAuthStore } from '@/stores/authStore'
 
@@ -162,17 +163,24 @@ function impersonateLabel(u) {
   const pending = u.status !== 'ACTIVE' ? '〔待核准〕' : ''
   return `${u.name || u.email}${role}${pending}`
 }
-async function onImpersonate(userId) {
-  // 切換代看對象後整頁重載，確保所有頁面資料以新視角重新取得
-  await auth.impersonate(userId)
-  window.location.reload()
+async function switchAndReload(userId) {
+  // 切換代看對象後整頁重載，確保所有頁面資料以新視角重新取得；過程顯示全屏 loading
+  const loading = ElLoading.service({ fullscreen: true, lock: true, text: '切換使用者中，載入資料…' })
+  try {
+    await auth.impersonate(userId)
+    window.location.reload()   // reload 後 loading 隨頁面卸載自然消失
+  } catch (e) {
+    loading.close()
+  }
+}
+function onImpersonate(userId) {
+  switchAndReload(userId)
 }
 async function onUserCommand(cmd) {
   if (cmd === 'logout') {
     await auth.logout()
   } else if (cmd === 'stopImpersonate') {
-    await auth.impersonate(null)
-    window.location.reload()
+    switchAndReload(null)
   }
 }
 

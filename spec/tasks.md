@@ -3401,3 +3401,23 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 135.4 `App.vue`（登入者資訊/登出/切換下拉/選單依角色）
 - [x] 135.5 `views/PendingApprovalView.vue` + `views/UserManagementView.vue`
 - [ ] 135.6 Docker 重 build + recreate（frontend）後端到端驗證：管理者登入看全量、切換代看他人、新使用者 PENDING 被擋於 `/pending`、核准後只看自己、非管理者無備份選單
+
+### Task 137: BFF 身分情境收斂與代看 cookie 修正（Requirement 28）
+
+對應 Requirements: Requirement 28
+
+**需求**：第一版（Task 133）每請求 round-trip business `by-email` 取身分，遇「WebClient 完成執行緒接手寫回應」造成 `setContentLength` on committed-response 例外；且代看以 session/cookie 殘留跨登入。本輪收斂身分解析並修正代看 cookie 生命週期。
+
+**關鍵設計**：
+- 身分改為登入時把 `id/role/status` 編進 authorities（`APP_UID_*`/`APP_STATUS_*`/`ROLE_*`），之後每請求由 `BffUser.fromPrincipal(oidc)` 從 principal 還原，不再 round-trip business。
+- `TenantWebFilter` 單次 `exchange.mutate()` 以 `set` 寫 `X-User-*`（覆蓋 client 偽造值）並寫進 Reactor context；未登入則單次 mutate 剝除偽造 header。`MeController` 列使用者清單顯式帶管理者 header（不依賴 context 傳遞），effectiveUserId 讀 `X-User-Id` header（不可讀 mutated request 的 cookie）。
+- 代看以 stateless `IMPERSONATE_UID` cookie 表示目標；`TenantWebFilter` 僅 `role=ADMIN` 採信。
+- **bug fix（實機暴露）**：`IMPERSONATE_UID` cookie 跨登出／登入殘留 → 管理者重新登入誤帶上次代看目標、看到他人資料。`SecurityConfig` 登入成功 handler 與登出成功 handler 各寫 `maxAge=0`（屬性與寫入一致）Set-Cookie 清除，使每次新登入都從「看自己」開始。
+
+**設計**：見 `requirements.md` Req 28、`design.md`「BFF 安全層」+「管理者代看」段。
+
+- [x] 137.1 身分編進 authorities（`SecurityConfig` OIDC user service + `AuthConstants` 前綴常數）+ `BffUser.fromPrincipal`
+- [x] 137.2 `TenantWebFilter` 單次 mutate / fail-closed；`MeController` effectiveUserId 讀 header；`BusinessUserClient`/`ImpersonationController` 配合
+- [x] 137.3 `TenantFilterAspect`（business 端）有請求但無身分時 fail-closed（ownerId=-1 回空）
+- [x] 137.4 **bug fix**：登入／登出清 `IMPERSONATE_UID` cookie
+- [ ] 137.5 Docker 重 build --no-cache + recreate（bff）後驗證：fail-closed（無 header 回 0 筆）、隔離（不同 X-User-Id 回各自資料）、管理者重新登入回到看自己

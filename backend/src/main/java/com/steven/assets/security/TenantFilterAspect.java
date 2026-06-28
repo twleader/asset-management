@@ -18,7 +18,9 @@ import org.springframework.web.context.request.RequestContextHolder;
  *
  * <ul>
  *   <li>背景執行緒（cron / Redis 訂閱）沒有 request context → 不啟用，維持掃全體資料的既有行為。</li>
- *   <li>引導端點（login-upsert / by-email，無 {@code X-User-*}）context 無身分 → 不啟用。</li>
+ *   <li>HTTP 請求但無身分（{@code X-User-*} 未帶到，理應只發生於 login-upsert / by-email 這類引導端點，
+ *       它們查的是非隔離的 app_user）→ <b>fail-closed</b>：以不可能的 ownerId 啟用 filter，讓受隔離 entity 回空，
+ *       避免「BFF 漏帶 header」退化成洩漏他人資料。非隔離 entity 不受 {@code @Filter} 影響、照常運作。</li>
  * </ul>
  *
  * 注意：Hibernate {@code @Filter} 不套用於 {@code EntityManager.find()}（findById），by-id 存取另以
@@ -27,6 +29,9 @@ import org.springframework.web.context.request.RequestContextHolder;
 @Aspect
 @Component
 public class TenantFilterAspect {
+
+    /** fail-closed 用的不可能 ownerId（IDENTITY 由 1 起算，永不為負）。 */
+    private static final long FAIL_CLOSED_OWNER_ID = -1L;
 
     private final ObjectProvider<CurrentUserContext> currentUserProvider;
 
@@ -40,14 +45,13 @@ public class TenantFilterAspect {
     @Before("execution(* com.steven.assets.repository..*(..))")
     public void enableOwnerFilter() {
         if (RequestContextHolder.getRequestAttributes() == null) {
-            return; // 背景執行緒：不啟用
+            return; // 背景執行緒：不啟用，維持掃全體
         }
         CurrentUserContext ctx = currentUserProvider.getObject();
-        if (!ctx.hasUser()) {
-            return; // 無身分情境
-        }
+        // 有 HTTP 請求但無身分 → fail-closed（受隔離 entity 回空），絕不退化成回全體
+        long ownerId = ctx.hasUser() ? ctx.getEffectiveUserId() : FAIL_CLOSED_OWNER_ID;
         entityManager.unwrap(Session.class)
                 .enableFilter("ownerFilter")
-                .setParameter("ownerId", ctx.getEffectiveUserId());
+                .setParameter("ownerId", ownerId);
     }
 }
