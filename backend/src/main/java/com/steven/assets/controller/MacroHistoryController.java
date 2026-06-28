@@ -1,9 +1,11 @@
 package com.steven.assets.controller;
 
+import com.steven.assets.model.JapanGdpPerCapitaHistory;
 import com.steven.assets.model.KoreaGdpPerCapitaHistory;
 import com.steven.assets.model.TaiwanGdpPerCapitaHistory;
 import com.steven.assets.model.TwseIndexDailyHistory;
 import com.steven.assets.model.UsIndexDailyHistory;
+import com.steven.assets.repository.JapanGdpPerCapitaHistoryRepository;
 import com.steven.assets.repository.KoreaGdpPerCapitaHistoryRepository;
 import com.steven.assets.repository.TaiwanGdpPerCapitaHistoryRepository;
 import com.steven.assets.repository.TwseIndexDailyHistoryRepository;
@@ -22,7 +24,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * 股市分析頁（Requirement 18）資料來源：台/韓人均 GDP、台股大盤日線、海外指數日線、指數當日分時。
+ * 股市分析頁（Requirement 18）資料來源：台/日/韓人均 GDP、台股大盤日線、海外指數日線、指數當日分時。
  */
 @RestController
 @RequestMapping("/api")
@@ -33,6 +35,7 @@ public class MacroHistoryController {
     private static final Set<String> US_INDEX_CODES = Set.copyOf(MacroHistoryService.OVERSEAS_INDEX_CODES);
 
     private final TaiwanGdpPerCapitaHistoryRepository gdpRepo;
+    private final JapanGdpPerCapitaHistoryRepository japanGdpRepo;
     private final KoreaGdpPerCapitaHistoryRepository koreaGdpRepo;
     private final TwseIndexDailyHistoryRepository twseDailyRepo;
     private final UsIndexDailyHistoryRepository usDailyRepo;
@@ -49,6 +52,19 @@ public class MacroHistoryController {
     @PostMapping("/taiwan-gdp/refresh-from-imf")
     public Map<String, Object> refreshGdpFromImf() throws Exception {
         return macroHistoryService.refreshGdpFromImf();
+    }
+
+    @GetMapping("/japan-gdp")
+    public List<JapanGdpPerCapitaHistory> getJapanGdp(
+            @RequestParam(required = false) Integer since) {
+        return since == null
+                ? japanGdpRepo.findAllByOrderByYearAsc()
+                : japanGdpRepo.findByYearGreaterThanEqualOrderByYearAsc(since);
+    }
+
+    @PostMapping("/japan-gdp/refresh-from-imf")
+    public Map<String, Object> refreshJapanGdpFromImf() throws Exception {
+        return macroHistoryService.refreshJapanGdpFromImf();
     }
 
     @GetMapping("/korea-gdp")

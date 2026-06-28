@@ -23,10 +23,10 @@ import java.util.TreeMap;
 
 /**
  * GdpTwseView（股市分析頁）專屬 BFF（Requirement 18）。
- * 指數日線/當日分時走 index-daily / index-intraday；本 get/refresh 服務「台韓人均 GDP 比較」圖：
+ * 指數日線/當日分時走 index-daily / index-intraday；本 get/refresh 服務「台日韓人均 GDP 比較」圖：
  *   - years
- *   - gdpPerCapitaUsd（台灣）/ koreaGdpPerCapitaUsd（韓國）
- *   - taiwanGdpGrowthRate / koreaGdpGrowthRate（年增率 %）
+ *   - gdpPerCapitaUsd（台灣）/ japanGdpPerCapitaUsd（日本）/ koreaGdpPerCapitaUsd（韓國）
+ *   - taiwanGdpGrowthRate / japanGdpGrowthRate / koreaGdpGrowthRate（年增率 %）
  */
 @RestController
 @RequestMapping("/api/bff/gdp-twse")
@@ -40,41 +40,51 @@ public class GdpTwseBffController {
 
     @GetMapping
     public Mono<ResponseEntity<Map<String, Object>>> get(
-            @RequestParam(defaultValue = "30") int years) {
+            @RequestParam(defaultValue = "40") int years) {
         int currentYear = LocalDate.now().getYear();
         int since = currentYear - years + 1;
 
         Mono<List<Map<String, Object>>> gdp = fetchSeries("/api/taiwan-gdp", since);
+        Mono<List<Map<String, Object>>> jpn = fetchSeries("/api/japan-gdp", since);
         Mono<List<Map<String, Object>>> kor = fetchSeries("/api/korea-gdp", since);
 
-        return Mono.zip(gdp, kor).map(t -> {
+        return Mono.zip(gdp, jpn, kor).map(t -> {
             TreeMap<Integer, BigDecimal> twGdpAll = toMap(t.getT1(), "gdpUsd");
-            TreeMap<Integer, BigDecimal> krGdpAll = toMap(t.getT2(), "gdpUsd");
+            TreeMap<Integer, BigDecimal> jpGdpAll = toMap(t.getT2(), "gdpUsd");
+            TreeMap<Integer, BigDecimal> krGdpAll = toMap(t.getT3(), "gdpUsd");
             TreeMap<Integer, BigDecimal> twGrowthAll = toMap(t.getT1(), "realGdpGrowthRate");
-            TreeMap<Integer, BigDecimal> krGrowthAll = toMap(t.getT2(), "realGdpGrowthRate");
+            TreeMap<Integer, BigDecimal> jpGrowthAll = toMap(t.getT2(), "realGdpGrowthRate");
+            TreeMap<Integer, BigDecimal> krGrowthAll = toMap(t.getT3(), "realGdpGrowthRate");
 
-            // X 軸：since..currentYear 取 TW/KR GDP 的聯集
+            // X 軸：since..currentYear 取 TW/JP/KR GDP 的聯集
             TreeMap<Integer, Boolean> yset = new TreeMap<>();
             twGdpAll.keySet().forEach(y -> { if (y >= since && y <= currentYear) yset.put(y, true); });
+            jpGdpAll.keySet().forEach(y -> { if (y >= since && y <= currentYear) yset.put(y, true); });
             krGdpAll.keySet().forEach(y -> { if (y >= since && y <= currentYear) yset.put(y, true); });
 
             List<Integer> yearsList = new ArrayList<>(yset.keySet());
             List<Object> twGdp = new ArrayList<>();
+            List<Object> jpGdp = new ArrayList<>();
             List<Object> krGdp = new ArrayList<>();
             List<Object> twGrowth = new ArrayList<>();
+            List<Object> jpGrowth = new ArrayList<>();
             List<Object> krGrowth = new ArrayList<>();
             for (Integer y : yearsList) {
                 twGdp.add(twGdpAll.get(y));
+                jpGdp.add(jpGdpAll.get(y));
                 krGdp.add(krGdpAll.get(y));
                 twGrowth.add(twGrowthAll.get(y));
+                jpGrowth.add(jpGrowthAll.get(y));
                 krGrowth.add(krGrowthAll.get(y));
             }
 
             Map<String, Object> body = new HashMap<>();
             body.put("years", yearsList);
             body.put("gdpPerCapitaUsd", twGdp);
+            body.put("japanGdpPerCapitaUsd", jpGdp);
             body.put("koreaGdpPerCapitaUsd", krGdp);
             body.put("taiwanGdpGrowthRate", twGrowth);
+            body.put("japanGdpGrowthRate", jpGrowth);
             body.put("koreaGdpGrowthRate", krGrowth);
             return ResponseEntity.ok(body);
         });
@@ -99,15 +109,21 @@ public class GdpTwseBffController {
     }
 
     /**
-     * 並行觸發 TWN/KOR 人均 GDP（IMF / DGBAS）回補，供「台韓人均 GDP 比較」圖使用。
+     * 並行觸發 TWN/JPN/KOR 人均 GDP（IMF / DGBAS）回補，供「台日韓人均 GDP 比較」圖使用。
      */
     @PostMapping("/refresh")
     public Mono<ResponseEntity<Map<String, Object>>> refresh(
-            @RequestParam(defaultValue = "30") int years) {
+            @RequestParam(defaultValue = "40") int years) {
         ParameterizedTypeReference<Map<String, Object>> mapRef = new ParameterizedTypeReference<>() {};
 
         Mono<Map<String, Object>> gdp = businessServicesClient.post()
                 .uri("/api/taiwan-gdp/refresh-from-imf")
+                .retrieve().bodyToMono(mapRef)
+                .timeout(Duration.ofSeconds(30))
+                .onErrorResume(e -> Mono.just(Map.of("error", e.getMessage())));
+
+        Mono<Map<String, Object>> jpn = businessServicesClient.post()
+                .uri("/api/japan-gdp/refresh-from-imf")
                 .retrieve().bodyToMono(mapRef)
                 .timeout(Duration.ofSeconds(30))
                 .onErrorResume(e -> Mono.just(Map.of("error", e.getMessage())));
@@ -118,10 +134,11 @@ public class GdpTwseBffController {
                 .timeout(Duration.ofSeconds(30))
                 .onErrorResume(e -> Mono.just(Map.of("error", e.getMessage())));
 
-        return Mono.zip(gdp, kor).map(tuple -> {
+        return Mono.zip(gdp, jpn, kor).map(tuple -> {
             Map<String, Object> body = new HashMap<>();
             body.put("gdp", tuple.getT1());
-            body.put("korea", tuple.getT2());
+            body.put("japan", tuple.getT2());
+            body.put("korea", tuple.getT3());
             return ResponseEntity.ok(body);
         });
     }

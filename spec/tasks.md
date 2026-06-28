@@ -2334,7 +2334,6 @@ Task 79+81 定案的兩條規則：(1) 每天開盤抓不到最新值 → 顯示
 - [x] 83.9 部署文件：CLAUDE.md / README 補一段「Gmail App Password 取得步驟」（兩步驗證 → 應用程式密碼 → 16 碼貼到 `MAIL_PASSWORD`），docker-compose env 範例；本機 build 跑通、手動建一筆假觸發或調整 cooldown 驗證 digest 收信
 - [x] 83.10 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
 
-
 ### Task 84: HistoricalBackfillService 禁止寫入「今日列」（避免 Yahoo intraday bar 汙染 DB 收盤）
 
 對應 Requirements: Requirement 7（市場資料整合 — 「今日列」獨佔規則）
@@ -2360,8 +2359,6 @@ VOO 股票走勢圖在 2026-06-05 NY 盤中（15:16，未到 16:00 收盤）顯�
 - [x] 84.4 清除已被汙染的 6/5 VOO row（DELETE WHERE stock_code='VOO' AND market='美股' AND trading_date='2026-06-05'）；等 16:02 ET ClosePersister 寫入正確的收盤
 - [x] 84.5 Docker 重 build external-materials-service image + 容器重建（`docker compose build external-materials-service && docker compose up -d external-materials-service`）
 - [x] 84.6 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）
-
-
 
 ---
 
@@ -2447,7 +2444,6 @@ VOO 股票走勢圖在 2026-06-05 NY 盤中（15:16，未到 16:00 收盤）顯�
   - 命中當前快照 `mergedStocks` 同 `stockCode`+`market` 的直接持股 → 沿用完整列（保留 `avgCostOriginal`，走勢圖可畫成本均價線）；否則僅帶 `{stockCode, stockName, market}`（純 ETF 穿透成分股無成本基礎、不畫成本線）
   - 重用 Dashboard 既有 `analysisVisible` / `analysisStock` state 與 `<StockAnalysisDialog>`，與表格列雙擊、bar 圖雙擊同元件同行為
 
-
 ### Task 87: 股票走勢圖期間按鈕加「當日」（最後一交易日分時 5m K 線）
 
 對應 Requirements: Requirement 13（[requirements.md:225-226](spec/requirements.md)）
@@ -2473,7 +2469,6 @@ VOO 股票走勢圖在 2026-06-05 NY 盤中（15:16，未到 16:00 收盤）顯�
   - tooltip / legend 末值顯示維持與其他期間一致格式
 - [x] 87.5 Docker 重 build：`docker compose build backend external-materials-service bff frontend && docker compose up -d backend external-materials-service bff frontend`
 - [x] 87.6 手動驗證：開啟任一持股的股票分析 → 切到「當日」→ 確認分時走勢圖出現、月/季/年線為水平線、KD 副圖顯示最新值水平線；切回「1年」回到日線正常顯示
-
 
 ### Task 88: 「當日」走勢兩階段資料源（盤中 polling 累積 + 盤後外部源覆寫）
 
@@ -2532,7 +2527,6 @@ Dashboard 美股表格「買入均價(USD)」（如 SGOV 100.6707）與雙擊開
 - [x] 89.3 Docker 重 build + recreate：`frontend`
 - [x] 89.4 手動驗證：Dashboard 美股雙擊 SGOV → 走勢圖「成本均價」應顯示與表格「買入均價(USD)」相同的 100.6707（不再是 100.19）；切換不同持股再次確認兩處數字一致
 
-
 ### Task 90: 警示觸發 Email 改列月線／季線／年線三條均線
 
 對應 Requirements: Requirement 23（[requirements.md:475](spec/requirements.md)）
@@ -2548,7 +2542,6 @@ Dashboard 美股表格「買入均價(USD)」（如 SGOV 100.6707）與雙擊開
 - [x] 90.3 spec：`requirements.md` Requirement 23、`design.md` digest 內容格式與 enqueue 簽名同步更新
 - [x] 90.4 Docker 重 build + recreate：`backend`
 - [x] 90.5 手動驗證：觸發任一均線警示 → 收到的 email 該筆同時列出「月線 / 季線 / 年線」三行 + KD；歷史不足 240 日者年線行省略
-
 
 ### Task 91: 觀察清單「補發」按鈕（各市場最後交易日觸發事件，單封 email 重寄）
 
@@ -2569,7 +2562,6 @@ Dashboard 美股表格「買入均價(USD)」（如 SGOV 100.6707）與雙擊開
 - [x] 91.7 Docker 重 build + recreate：`backend frontend`
 - [x] 91.8 手動驗證：觀察頁點「補發」→ 收到單封含各市場最後交易日全部觸發的 email；無觸發 / 無收件人時前端顯示對應提示且不寄空信
 
-
 ### Task 92: 警示 / 補發 email 同一股票多條件合併成一筆
 
 對應 Requirements: Requirement 23（[requirements.md:476](spec/requirements.md)）
@@ -2584,7 +2576,6 @@ digest / 補發信原本每個觸發（trigger）印一個區塊，同一股票�
 - [x] 92.2 主旨與補發回傳筆數改用 `groupByStock(batch).size()`（去重股票檔數）；`flush()` / `resendLastTradingDay()` 同步；`WatchStockController` 成功訊息改「已補發 N 檔股票的觸發事件」
 - [x] 92.3 Docker 重 build + recreate：`backend`
 - [x] 92.4 手動驗證：一檔股票同時觸發兩條件 → email 只出現一個區塊，標題含兩條件 label，技術指標一份；主旨 N = 股票檔數
-
 
 ### Task 93: 警示 / 補發 email 內嵌「股票分析走勢圖」PNG
 
@@ -2606,7 +2597,6 @@ digest / 補發信原本每個觸發（trigger）印一個區塊，同一股票�
 - [x] 93.8 驗證：curl `/api/bff/watch-stock/chart.png?code=2330&market=台股` 回 700×320 PNG，圖與畫面 `StockAnalysisDialog` 數值一致（股價≈2305、季線≈2112、年線≈1589），字型正常渲染（已於 alpine 容器確認）
 - [ ] 93.9 端對端：實際觸發 / 按補發 → 收到的 HTML email 每檔股票下顯示走勢圖（需實寄，外向動作待使用者授權或自行點按）
 
-
 ### Task 94: email 走勢圖升級為 Price+MA / KD 雙 pane、數值入圖、文字精簡
 
 對應 Requirements: Requirement 23（[requirements.md:479-482](spec/requirements.md)）
@@ -2625,7 +2615,6 @@ digest / 補發信原本每個觸發（trigger）印一個區塊，同一股票�
 - [x] 94.6 Docker 重 build + recreate：`backend`（含 CJK 字型層）— 已完成，容器 healthy；啟動 log 確認字型 `Noto Sans CJK TC`（檔 /usr/share/fonts/noto/NotoSansCJK-Regular.ttc）
 - [x] 94.7 容器內視覺驗證：00881 與 2330 PNG 皆 (a) 上 pane 股價+3 均線、下 pane KD + 80/20 ✓ (b) legend 繁中正常（Noto Sans CJK TC、非日系、非方框）且帶數值 ✓ (c) 00881 數值與畫面一致（股價 54.35 / 季線MA60 45.53 / K 60.15 / D 67.07，後續因即時資料更新而微動）✓ (d) 上下 pane 左軸右對齊等寬 gutter → plot 對齊（2330 四位數價也對齊）✓
 - [ ] 94.8 端對端：實寄確認 email 文字只剩標題+觸發時間+觸發股價、圖含 KD（需實寄，待授權 / 自行按補發）
-
 
 ### Task 95: GDP+大盤頁日線圖支援「台股 / 美股四大指數」切換
 
@@ -2646,7 +2635,6 @@ digest / 補發信原本每個觸發（trigger）印一個區塊，同一股票�
 - [x] 95.7 frontend `GdpTwseView.vue`：第三張卡加市場下拉（5 選 1），標題/空狀態/回補訊息隨選取指數動態；切換即重抓 BFF
 - [x] 95.8 Docker 重 build + recreate（backend / external-materials-service / bff / frontend）後驗證：台股維持原樣；切到四個美股指數各自顯示近 10 年日線 + 三均線；按「回補日線」對美股指數成功 upsert
 
-
 ### Task 96: 指數日線圖新增「當日」分時走勢（盤中即時 / 盤後最後交易日）
 
 對應 Requirements: Requirement 18（[requirements.md:368-390](spec/requirements.md)）
@@ -2664,7 +2652,6 @@ digest / 補發信原本每個觸發（trigger）印一個區塊，同一股票�
 - [x] 96.5 frontend `GdpTwseView.vue`：區間鈕最前加「當日」；isIntraday 時 x 軸 HH:mm、收盤＝分時 closes、月/季/年線＝水平線（取日線最新 MA）、不用 dataZoom；標題改「{指數} 當日走勢（YYYY-MM-DD）」；切當日 / 切市場時重抓分時
 - [x] 96.7 修正當日走勢被壓平：Y 軸鎖定當日價格區間（分時收盤 min/max +10% padding），不用 `scale:true`（否則遠離當日價位的均線水平線把跨距撐成數千點，當日數百點起伏變平線）；均線水平線落區間外由 clip 裁切、數值仍留 legend
 - [x] 96.8 X 軸延伸到收盤時間（非現在時間）：ext-materials `fetchIndexIntraday` 補滿交易時段完整 5 分格（美股 09:30–16:00 ET、台股 09:00–13:30），盤中未到時段 close 留 null；最後一筆現價 bar floor 對齊 5 分格；BFF 保留 null close（時間照常輸出）
-
 
 ### Task 97: 移除「台灣人均 GDP vs 台股大盤年末收盤」卡 + 清後端死碼
 
@@ -2685,7 +2672,6 @@ digest / 補發信原本每個觸發（trigger）印一個區塊，同一股票�
 - [x] 97.7 Docker 重 build + recreate（frontend / bff / business-services / external-materials-service）後驗證：股市分析頁只剩指數圖 + 台韓 GDP 比較；第②卡消失；台韓 GDP「回補 GDP（IMF）」可運作；其餘頁面（dashboard 等）不受影響
 - [x] 96.6 Docker 重 build + recreate（external-materials-service / backend / bff / frontend）後驗證：台股大盤切「當日」顯示分時（盤後為最後交易日、末點＝當日收盤）；美股指數盤中顯示即時分時；月/季/年線為水平線
 
-
 ### Task 98: 債券 ETF / 收益分配型 ETF 股利歷史 fallback（TaiwanStockDividendResult）
 
 對應 Requirements: Requirement 13（[requirements.md:240](spec/requirements.md)）
@@ -2700,7 +2686,6 @@ digest / 補發信原本每個觸發（trigger）印一個區塊，同一股票�
 - [x] 98.2 `fetchTw`：`TaiwanStockDividend` 解析後若 `out` 為空 → fallback 呼叫新增 `fetchTwDividendResult(code, years)`：以 `date`=除息日、`stock_and_cache_dividend`=配息金額組 `DividendEvent`；`stock_or_cache_dividend` 含「權」且不含「息」→ 股票股利，其餘 → 現金股利；發放日留 null；金額 0 跳過
 - [x] 98.3 Docker 重 build + recreate（external-materials-service）後驗證：開啟 00751B 股利歷史顯示近 10 年季配息列（含除息日昨收價、現金殖利率、年度小計）；既有個股（2330）與股票型 ETF（0056）股利歷史不變
       （驗證：`/internal/dividend/sync` 00751B written=28、2330 written=32、0056 written=19、9999 written=0；BFF `/api/bff/stock-analysis/dividends?code=00751B` 回 28 列、source=FinMind）
-
 
 ### Task 99: 美股非 NASDAQ ETF 股利歷史 fallback（Yahoo chart events=div）
 
@@ -2774,7 +2759,6 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 102.4 `mvn -q compile`（bff module）通過
 - [x] 102.5 Docker 重 build + recreate（bff / frontend）後驗證：台股大盤切「當日」標題列顯示昨收 + 漲跌 + 漲跌%、紅漲綠跌；切美股四大指數同樣顯示；漲跌 = 走勢圖末點 − 昨收
 
-
 ### Task 103: Dashboard 資產配置面板加「美股個股穿透前 10 大」tab
 
 對應 Requirements: Requirement 9（[requirements.md:172-176](spec/requirements.md)）
@@ -2800,7 +2784,6 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 103.7 Docker 重 build + recreate（bff / frontend）後驗證：切「美股個股」tab → 圓餅顯示前 10 大個股（VOO/QQQ 拆成 AAPL/MSFT/NVDA… 而非 ETF 代號）+ 「其它」；有 ETF 時底部出現註記；hover 趨勢圖節點連動；無美股部位顯示空狀態
 - [x] 103.8 bug fix（external-materials-service）：實作驗證時發現 `MarketDataFetchService` 取 Yahoo crumb / quoteSummary（topHoldings）沿用長 Chrome UA，被 Yahoo 反 bot WAF 回 429（Too Many Requests），導致**所有**美股 ETF 成分股查無、穿透失效（同 IP 短 UA `Mozilla/5.0` 卻回 200）。新增 `YAHOO_UA = "Mozilla/5.0"` 常數，crumb prime（`fc.yahoo.com`）/ `getcrumb` / `yahooApiGet`（quoteSummary）三處 curl 改用之；`v8/chart` 端點維持長 UA（仍正常）。重建 external-materials-service 後 VOO/VT 正常回前 10 大成分股
 
-
 ### Task 104: 股市分析指數下拉新增海外四指數（英國 / 德國 / 韓國 / 日本）
 
 對應 Requirements: Requirement 18（[requirements.md:379-392](spec/requirements.md)）
@@ -2824,7 +2807,6 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 104.5 `mvn -q compile`（backend + bff + external-materials-service）通過
 - [x] 104.6 Docker 重 build + recreate（frontend / bff / backend / external-materials-service）後驗證：下拉出現英德韓日四項；各市場按「回補日線（10 年）」後日線圖正常（日期不偏移）；切「當日」顯示當地時區分時走勢線與昨收/漲跌/漲跌%
 - [x] 104.7 bug fix（external-materials-service）：實機驗證 N225「當日」走勢時發現後場最後半小時（15:00–15:30）被截掉、線在 15:00 就停——`INDEX_TRADING_HOURS` 的 N225 收盤誤設 15:00（舊制）；東京證交所 2024-11-05 起收盤延至 15:30（新增收盤競價），Yahoo 5m 確有 15:05–15:30 之 bar。改 N225 close 為 15:30 後線延伸至 15:30、收盤點位/漲跌取到真正收盤值。重建 external-materials-service 驗證
-
 
 ### Task 105: 海外指數日線自動回補排程（修當日走勢「昨收」過時 → 漲跌% 失真）
 
@@ -3466,3 +3448,54 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [ ] 138.3 `WatchStockService`：`toResponse` / `toIndexResponse` 改用 `computeAll()` 填三均線 + KD
 - [ ] 138.4 前端 `WatchStockView.vue`：欄標題與觸發區塊加月線 / 年線兩行
 - [ ] 138.5 Docker 重 build + recreate（business + frontend）後驗證：觀察清單已觸發列同時顯示月線 / 季線 / 年線 / KD
+
+### Task 139: 「台日韓人均 GDP 比較」圖新增日本（Requirement 18）
+
+對應 Requirements: Requirement 18
+
+**需求**：原「台韓人均 GDP 比較」圖只比台、韓兩國，新增**日本**，改為台、日、韓三國比較。日本資料源比照韓國——DGBAS 無日本資料，故純走 IMF DataMapper API（`NGDPDPC/JPN` 人均 GDP、`NGDP_RPCH/JPN` 實質成長率）。
+
+**關鍵設計**（比照韓國既有管線，最小擴充；ext-materials 的 `fetchImf` 本就 country 參數化，無需改動）：
+- DB：新增 `japan_gdp_per_capita_history`（`year` PK、`gdp_usd NUMERIC(12,2) NOT NULL`、`real_gdp_growth_rate NUMERIC(8,4)`），Liquibase `v1.35.0-japan-gdp.sql` 建立、不 seed 歷史值（靠回補按鈕從 IMF 取得，與韓國一致）。
+- Entity / Repository：`JapanGdpPerCapitaHistory` + `JapanGdpPerCapitaHistoryRepository`（鏡像韓國）。
+- business-services：`MacroHistoryService.refreshJapanGdpFromImf()`（純 IMF `JPN`，與 `refreshKoreaGdpFromImf` 同型）；`MacroHistoryController` 新增 `GET /api/japan-gdp`、`POST /api/japan-gdp/refresh-from-imf`。
+- BFF `GdpTwseBffController`：`get` 並行 fetch `/api/japan-gdp`，X 軸年份聯集納入日本，回 `japanGdpPerCapitaUsd` / `japanGdpGrowthRate`；`refresh` 並行觸發 `/api/japan-gdp/refresh-from-imf`，回傳 body 加 `japan`。
+- 前端 `GdpTwseView.vue`：卡片標題改「台日韓人均 GDP 比較（近 30 年）」；新增 `japanGdp` / `jpGrowth` ref 與 fetchData 對應；ECharts 圖例與系列加「日本 GDP」（折線，綠）+「日本成長率」（柱狀，綠）；`onRefresh` 訊息加「日本 N 筆」。圖例順序依「台日韓」：台灣 / 日本 / 韓國。
+
+**不變量**：同義欄位同一 business API（圖只讀 `*_gdp_per_capita_history.real_gdp_growth_rate`，不前端重算）；BFF 仍過濾 `> 當年`（IMF 含未來預測）。
+
+**設計**：見 `requirements.md` Req 18（台日韓）、`design.md` Macro History 端點 + BFF 回傳格式。
+
+- [x] 139.1 DB `v1.35.0-japan-gdp.sql` 建表 + master changelog 註冊
+- [x] 139.2 `JapanGdpPerCapitaHistory` entity + `JapanGdpPerCapitaHistoryRepository`
+- [x] 139.3 `MacroHistoryService.refreshJapanGdpFromImf()`（純 IMF JPN）+ 注入 japanGdpRepo
+- [x] 139.4 `MacroHistoryController` 新增 `/api/japan-gdp` GET + `/refresh-from-imf` POST
+- [x] 139.5 BFF `GdpTwseBffController` get/refresh 納入日本（三國聯集 + japan 回傳欄位）
+- [x] 139.6 前端 `GdpTwseView.vue` 標題 / state / fetchData / 圖例 / 系列 / 回補訊息加日本
+- [x] 139.7 Docker 重 build --no-cache + recreate（backend + bff + frontend）後驗證：Liquibase `v1.35.0` 套用、`japan_gdp_per_capita_history` 建表；運行中 bff jar 含 `/api/japan-gdp`+`japanGdpPerCapitaUsd`（非 stale）；`POST /api/japan-gdp/refresh-from-imf` 回 `{upserted:52, source:"IMF NGDPDPC+NGDP_RPCH/JPN"}`，三表皆有資料（台 81 / 日 52 / 韓 52 年，日本 2020 -4.3%、人均 ~$33–41k 符合 IMF 實值）；frontend bundle 含「台日韓人均 GDP 比較」。**圖三條 GDP 折線 + 三組成長率柱狀待瀏覽器重載確認**
+
+### Task 140: 「台日韓人均 GDP 比較」圖區間由近 30 年改為近 40 年（Requirement 18）
+
+對應 Requirements: Requirement 18
+
+**需求**：使用者要求 GDP 比較圖預設區間由「近 30 年」擴大為「近 40 年」（since=當年−40+1=1987）。純參數調整，無新資料模型 / 端點 / 欄位。
+
+**資料可用性（已驗證）**：三國表 [1987,2026] 逐年皆有資料（TW 自 1951、JP/KR 自 1980，IMF NGDPDPC 自 1980 起），40 年區間完整覆蓋、無缺漏；DB 含至 2031 預估列但 BFF 以 `year>當年` 過濾，X 軸右端仍止於當年，無阻斷風險。
+
+**渲染（已評估，無須改版）**：40 個 4 位年份在 ~1000px 繪圖寬下每格 ~25px（偏擠但可容納），ECharts category 軸 `axisLabel` auto-interval 自動隱藏重疊標籤（丟棄非疊印）保證不破版；成長率柱每格 3 根變細至 ~6–7px 仍可辨識、`barGap:0` 分組行為與年份數無關不變；`dataZoom` 預設全顯（0–100）與「完整歷史一覽＋可縮放」UX 一致。grid 邊距（bottom:60／left,right:70／top:50）皆足夠，**沿用現有版型，零版面調整**。
+
+**關鍵設計**（8 個位置，純 `30→40`；經 workflow 多角度稽核 + 對抗式完整性驗證，無遺漏、無誤含）：
+- 前端 `GdpTwseView.vue`：卡片標題「（近 30 年）」→「（近 40 年）」、`bffApi.gdpTwse.get(30)`→`get(40)`、`refresh(30)`→`refresh(40)`。
+- 前端 `api/index.js`：`gdpTwse.get`／`refresh` 預設 `years = 30`→`40`（權威預設來源，與顯式傳參一致）。
+- BFF `GdpTwseBffController`：`get`／`refresh` 兩個 `@RequestParam(defaultValue="30")`→`"40"`（避免「前端 40、直打 API 預設 30」不一致；refresh 的 years 實為 inert——轉發 `/refresh-from-imf` 不帶 years、IMF 抓全年份——改 40 僅維持契約對稱）。
+- 活文件同步：`requirements.md`（User Story + AC 預設顯示近 40 年）、`design.md`（`?years=40` 兩處 API 範例）。
+- **不動**：`tasks.md` 既有 Task（139/53/97 等）「30 年」字面為 append-only 歷史紀錄；ECharts `itemGap:30`／`rotate:30`／`grid right:30`、`Duration.ofSeconds(30)` timeout、指數日線圖（`get` years=10、`RANGE_TRADING_DAYS`）皆與 GDP 區間無關（false positive）。
+
+**設計**：見 `requirements.md` Req 18、`design.md` Macro History BFF 端點。
+
+- [x] 140.1 前端 `GdpTwseView.vue` 標題 + get/refresh 呼叫值 30→40
+- [x] 140.2 前端 `api/index.js` `gdpTwse.get`/`refresh` 預設 years 30→40
+- [x] 140.3 BFF `GdpTwseBffController` get/refresh 兩個 `@RequestParam` defaultValue 30→40
+- [x] 140.4 活文件 `requirements.md`(370/378) + `design.md`(1007/1008) 同步 40
+- [x] 140.5 Docker 重 build --no-cache + recreate（bff + frontend）後驗證：運行中 bff jar `GdpTwseBffController.class` 僅含 `40`、不含 `30`（defaultValue 已更新、非 stale）；frontend bundle hash 更新（`GdpTwseView-vbwZSIL8.js`）且含「近 40 年」；資料可用性已驗證 [1987,2026] 三國逐年完整覆蓋（since=2026−40+1=1987）。
+- [x] 140.6 **bug fix（實機暴露：日本資料缺）**：改 40 年後實機圖只見台、韓兩條線，日本（綠）legend 有但無資料點。逐層診斷：DB japan 表 [1987,2026] 有 40 筆（資料在），但 business `GET /api/japan-gdp?since=1987` 回 500 `"No static resource api/japan-gdp"`（請求 fall-through 到靜態資源處理器＝**端點未註冊**）。`unzip` 運行中 `business-services` 的 `MacroHistoryController.class` → 建構子只注入 Taiwan/Korea/Twse/UsDaily repo、只有 `/korea-gdp` 無 `/japan-gdp` → **運行容器是無日本的舊碼**。根因：Task 139 完成後，`asset-business-services` 被某外部 process（別的 worktree／main 建構）以舊 image 重建（容器 Created 13:09:34），覆蓋掉含日本的 image；Task 140 我只重建 bff+frontend、未碰 business → 沒發現它已被換成 stale。修法：從**本 worktree**（有日本原始碼）`--no-cache` 重 build + `--force-recreate` business-services。驗證：新 jar `MacroHistoryController.class` 建構子已含 `JapanGdpPerCapitaHistoryRepository`、有 `getJapanGdp`/`refreshJapanGdpFromImf`；`GET /api/japan-gdp?since=1987` 回 45 筆陣列（1987 $21,631 成長 4.6% → 2031，BFF 濾 >2026）；postgres japan 資料未失（recreate 不動 volume）。**教訓**：改動鏈上「本回未碰」的 JVM service 也可能已被別的 worktree 換成 stale → 「功能又壞」先 `unzip` 運行 jar 驗該功能 built code 是否在，別假設上次部署的 image 還在跑。**圖三國折線/柱狀延伸至 1987 待瀏覽器重載確認**

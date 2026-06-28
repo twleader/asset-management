@@ -1,9 +1,11 @@
 package com.steven.assets.service;
 
+import com.steven.assets.model.JapanGdpPerCapitaHistory;
 import com.steven.assets.model.KoreaGdpPerCapitaHistory;
 import com.steven.assets.model.TaiwanGdpPerCapitaHistory;
 import com.steven.assets.model.TwseIndexDailyHistory;
 import com.steven.assets.model.UsIndexDailyHistory;
+import com.steven.assets.repository.JapanGdpPerCapitaHistoryRepository;
 import com.steven.assets.repository.KoreaGdpPerCapitaHistoryRepository;
 import com.steven.assets.repository.TaiwanGdpPerCapitaHistoryRepository;
 import com.steven.assets.repository.TwseIndexDailyHistoryRepository;
@@ -45,6 +47,7 @@ public class MacroHistoryService {
             List.of("DJI", "SPX", "IXIC", "SOX", "FTSE", "DAX", "KOSPI", "N225");
 
     private final TaiwanGdpPerCapitaHistoryRepository gdpRepo;
+    private final JapanGdpPerCapitaHistoryRepository japanGdpRepo;
     private final KoreaGdpPerCapitaHistoryRepository koreaGdpRepo;
     private final TwseIndexDailyHistoryRepository twseDailyRepo;
     private final UsIndexDailyHistoryRepository usDailyRepo;
@@ -52,11 +55,13 @@ public class MacroHistoryService {
 
     public MacroHistoryService(
             TaiwanGdpPerCapitaHistoryRepository gdpRepo,
+            JapanGdpPerCapitaHistoryRepository japanGdpRepo,
             KoreaGdpPerCapitaHistoryRepository koreaGdpRepo,
             TwseIndexDailyHistoryRepository twseDailyRepo,
             UsIndexDailyHistoryRepository usDailyRepo,
             @Value("${external-materials.base-url:http://external-materials-service:8080}") String externalUrl) {
         this.gdpRepo = gdpRepo;
+        this.japanGdpRepo = japanGdpRepo;
         this.koreaGdpRepo = koreaGdpRepo;
         this.twseDailyRepo = twseDailyRepo;
         this.usDailyRepo = usDailyRepo;
@@ -126,6 +131,28 @@ public class MacroHistoryService {
         log.info("IMF refresh (KOR): {} 年 GDP, {} 年 growth", gdp.size(), growth.size());
         return Map.of("upserted", gdp.size(), "growthUpserted", growth.size(),
                 "source", "IMF NGDPDPC+NGDP_RPCH/KOR");
+    }
+
+    /** 日本人均 GDP + 實質成長率回補（純 IMF，DGBAS 無日本資料，比照韓國）。 */
+    @Transactional
+    public Map<String, Object> refreshJapanGdpFromImf() throws Exception {
+        Map<Integer, BigDecimal> gdp = fetchImfProxy(IMF_GDP_INDICATOR, "JPN", 2);
+        Map<Integer, BigDecimal> growth = fetchImfProxy(IMF_GROWTH_INDICATOR, "JPN", 4);
+        for (var e : gdp.entrySet()) {
+            int year = e.getKey();
+            JapanGdpPerCapitaHistory row = japanGdpRepo.findById(year)
+                    .orElseGet(() -> {
+                        JapanGdpPerCapitaHistory r = new JapanGdpPerCapitaHistory();
+                        r.setYear(year);
+                        return r;
+                    });
+            row.setGdpUsd(e.getValue());
+            row.setRealGdpGrowthRate(growth.get(year));
+            japanGdpRepo.save(row);
+        }
+        log.info("IMF refresh (JPN): {} 年 GDP, {} 年 growth", gdp.size(), growth.size());
+        return Map.of("upserted", gdp.size(), "growthUpserted", growth.size(),
+                "source", "IMF NGDPDPC+NGDP_RPCH/JPN");
     }
 
     private Map<Integer, BigDecimal> fetchImfProxy(String indicator, String country, int scale) {

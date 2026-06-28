@@ -135,7 +135,7 @@ com.steven.assets/
 - `NotificationRecipientRepository`（警示通知收件人；Requirement 23）
 - `StockAlertRecipientRepository`（警示 ↔ 收件人多對多 join；每條警示挑選收件人；Requirement 23 / Task 125）
 - `TwseIndexDailyHistoryRepository` / `UsIndexDailyHistoryRepository`（台股大盤／海外指數日線；Requirement 18，亦供 Requirement 14 觀察清單 `0000` KD）
-- `TaiwanGdpPerCapitaHistoryRepository` / `KoreaGdpPerCapitaHistoryRepository`（台／韓人均 GDP；Requirement 18）
+- `TaiwanGdpPerCapitaHistoryRepository` / `JapanGdpPerCapitaHistoryRepository` / `KoreaGdpPerCapitaHistoryRepository`（台／日／韓人均 GDP；Requirement 18）
 - `AssetClassRepository` / `StockStyleRepository` / `BondTermRepository`（資產類別／股票風格／債券期別分類主檔；Requirement 25–27）
 - `FundClassOverrideRepository`（基金分類人工指定，PK = fund_name；Requirement 27）
 
@@ -992,6 +992,8 @@ POST   /api/market-data/exchange-rate/backfill-history?currency=USD&since=2021-0
 GET    /api/taiwan-gdp                         # 全部年度人均 GDP（USD）
 GET    /api/taiwan-gdp?since=1996              # 起始年（含）以後
 POST   /api/taiwan-gdp/refresh-from-imf        # 回補台灣人均 GDP / 實質成長率（DGBAS 優先、IMF 備援）
+GET    /api/japan-gdp / ?since=1996            # 日本人均 GDP（USD）+ 實質成長率
+POST   /api/japan-gdp/refresh-from-imf         # 回補日本人均 GDP / 實質成長率（純 IMF）
 GET    /api/korea-gdp / ?since=1996            # 韓國人均 GDP（USD）+ 實質成長率
 POST   /api/korea-gdp/refresh-from-imf         # 回補韓國人均 GDP / 實質成長率（純 IMF）
 GET    /api/twse-daily-index?from=YYYY-MM-DD&to=YYYY-MM-DD
@@ -1002,8 +1004,8 @@ GET    /api/us-daily-index?code=SPX&from=&to=  # 海外指數每日 OHLC（code 
 POST   /api/us-daily-index/refresh?code=SPX    # Yahoo v8 chart range=10y 抓單一指數 upsert（一次呼叫）
 GET    /api/index-intraday?market=TWSE         # 指數「當日」分時（Yahoo 5m，取最新交易日；transient，不寫 DB）
 
-GET    /api/bff/gdp-twse?years=30              # 前端 view 專用，回傳近 N 年彙整資料
-POST   /api/bff/gdp-twse/refresh?years=30      # 並行觸發 TWN+KOR 人均 GDP 回補（見下方說明）
+GET    /api/bff/gdp-twse?years=40              # 前端 view 專用，回傳近 N 年彙整資料
+POST   /api/bff/gdp-twse/refresh?years=40      # 並行觸發 TWN+JPN+KOR 人均 GDP 回補（見下方說明）
 GET    /api/bff/gdp-twse/index-daily?market=TWSE&years=10
                                                # 指數日線 + MA20/60/240（market=TWSE 或 DJI/SPX/IXIC/SOX/FTSE/DAX/KOSPI/N225；一次載入，前端 dataZoom 切區間）
 POST   /api/bff/gdp-twse/refresh-index-daily?market=TWSE&years=10  # 觸發「當前選取」指數日線回補
@@ -1021,17 +1023,19 @@ GET    /api/bff/gdp-twse/index-intraday?market=TWSE   # 「當日」分時：回
   - `@EventListener(ApplicationReadyEvent)` self-heal：開機延遲 30s（待 external-materials 就緒）後，任一指數最新日期過時（> 4 日，容忍週末+1 假日）即補一次，處理「服務於排程時點未運行（restart/crash）」
   - 8 指數代碼收斂為單一來源 `MacroHistoryService.OVERSEAS_INDEX_CODES`，`MacroHistoryController` refresh 守門白名單改引用之（去重）；新增 repo `findTopByIndexCodeOrderByTradingDateDesc` 供 self-heal 取各指數最新日期
 
-回傳格式（BFF `/api/bff/gdp-twse`，服務「台韓人均 GDP 比較」圖）：
+回傳格式（BFF `/api/bff/gdp-twse`，服務「台日韓人均 GDP 比較」圖）：
 ```json
 {
   "years": [1996, 1997, ..., 2025, 2026],
   "gdpPerCapitaUsd": [13571, 13888, ...],
+  "japanGdpPerCapitaUsd": [37000, 35000, ...],
   "koreaGdpPerCapitaUsd": [12000, 12500, ...],
   "taiwanGdpGrowthRate": [6.05, 4.2, ...],
+  "japanGdpGrowthRate": [1.6, -1.0, ...],
   "koreaGdpGrowthRate": [7.1, 5.9, ...]
 }
 ```
-（Task 97 起不再回 `twseYearEndClose` / `currentYearLastTradingDate`——「人均 GDP vs 台股大盤年末收盤」卡已移除。`POST /api/bff/gdp-twse/refresh` 亦簡化為只觸發 TWN+KOR GDP 回補）
+（X 軸年份取 TW/JP/KR 三國 GDP 的聯集並過濾 `> 當年`。Task 97 起不再回 `twseYearEndClose` / `currentYearLastTradingDate`——「人均 GDP vs 台股大盤年末收盤」卡已移除。`POST /api/bff/gdp-twse/refresh` 亦簡化為只觸發 TWN+JPN+KOR GDP 回補，回 `{gdp, japan, korea}` 三國回補結果）
 
 回傳格式（BFF `/api/bff/gdp-twse/index-daily`，`market=TWSE` 或 DJI/SPX/IXIC/SOX/FTSE/DAX/KOSPI/N225 皆同一格式）：
 ```json

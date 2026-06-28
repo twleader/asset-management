@@ -39,7 +39,7 @@
     <el-card style="margin-top:20px">
       <template #header>
         <div style="display:flex;align-items:center;justify-content:space-between">
-          <span class="section-title">台韓人均 GDP 比較（近 30 年）</span>
+          <span class="section-title">台日韓人均 GDP 比較（近 40 年）</span>
           <el-button size="small" @click="onRefresh" :loading="refreshing">
             回補 GDP（IMF）
           </el-button>
@@ -68,8 +68,10 @@ use([CanvasRenderer, LineChart, BarChart, TitleComponent, TooltipComponent, Lege
 
 const years = ref([])
 const gdp = ref([])
+const japanGdp = ref([])
 const koreaGdp = ref([])
 const twGrowth = ref([])
+const jpGrowth = ref([])
 const krGrowth = ref([])
 const refreshing = ref(false)
 
@@ -169,11 +171,13 @@ function priceColor(v) { if (v == null) return '#475569'; const n = Number(v); r
 
 async function fetchData() {
   try {
-    const res = await bffApi.gdpTwse.get(30)
+    const res = await bffApi.gdpTwse.get(40)
     years.value = res.years ?? []
     gdp.value = (res.gdpPerCapitaUsd ?? []).map(num)
+    japanGdp.value = (res.japanGdpPerCapitaUsd ?? []).map(num)
     koreaGdp.value = (res.koreaGdpPerCapitaUsd ?? []).map(num)
     twGrowth.value = (res.taiwanGdpGrowthRate ?? []).map(num)
+    jpGrowth.value = (res.japanGdpGrowthRate ?? []).map(num)
     krGrowth.value = (res.koreaGdpGrowthRate ?? []).map(num)
   } catch {}
 }
@@ -218,10 +222,11 @@ onMounted(() => {
 async function onRefresh() {
   refreshing.value = true
   try {
-    const r = await bffApi.gdpTwse.refresh(30)
+    const r = await bffApi.gdpTwse.refresh(40)
     const g = r.gdp?.upserted ?? 0
+    const j = r.japan?.upserted ?? 0
     const k = r.korea?.upserted ?? 0
-    ElMessage.success(`GDP 回補完成：台灣 ${g} 筆、韓國 ${k} 筆`)
+    ElMessage.success(`GDP 回補完成：台灣 ${g} 筆、日本 ${j} 筆、韓國 ${k} 筆`)
     await fetchData()
   } catch {} finally {
     refreshing.value = false
@@ -428,7 +433,7 @@ const compareChartOption = computed(() => ({
       return s
     }
   },
-  legend: { data: ['台灣 GDP', '韓國 GDP', '台灣成長率', '韓國成長率'], top: 0 },
+  legend: { data: ['台灣 GDP', '日本 GDP', '韓國 GDP', '台灣成長率', '日本成長率', '韓國成長率'], top: 0 },
   grid: { left: 70, right: 70, top: 50, bottom: 60 },
   xAxis: {
     type: 'category',
@@ -465,6 +470,13 @@ const compareChartOption = computed(() => ({
       barGap: 0
     },
     {
+      name: '日本成長率',
+      type: 'bar',
+      yAxisIndex: 1,
+      data: jpGrowth.value,
+      itemStyle: { color: 'rgba(34,197,94,0.5)' }
+    },
+    {
       name: '韓國成長率',
       type: 'bar',
       yAxisIndex: 1,
@@ -481,6 +493,18 @@ const compareChartOption = computed(() => ({
       symbolSize: 6,
       lineStyle: { width: 2.5, color: '#1d4ed8' },
       itemStyle: { color: '#1d4ed8' },
+      z: 5
+    },
+    {
+      name: '日本 GDP',
+      type: 'line',
+      yAxisIndex: 0,
+      data: japanGdp.value,
+      smooth: true,
+      symbol: 'circle',
+      symbolSize: 6,
+      lineStyle: { width: 2.5, color: '#15803d' },
+      itemStyle: { color: '#15803d' },
       z: 5
     },
     {
