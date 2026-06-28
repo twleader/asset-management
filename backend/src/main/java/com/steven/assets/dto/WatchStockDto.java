@@ -60,8 +60,10 @@ public class WatchStockDto {
         private LocalDateTime lastTriggeredAt;
         private BigDecimal lastTriggeredPrice;
         private String lastTriggeredAlertType;
-        // 即時技術指標（不論是否觸發警示，皆計算最新值）
+        // 即時技術指標（不論是否觸發警示，皆計算最新值；同義欄位同一來源 TechnicalIndicatorService.computeAll）
+        private BigDecimal monthlyMa;     // 月線 MA20
         private BigDecimal quarterlyMa;   // 季線 MA60
+        private BigDecimal annualMa;      // 年線 MA240
         @JsonProperty("kValue")
         private BigDecimal kValue;        // KD 之 K
         @JsonProperty("dValue")

@@ -103,7 +103,7 @@
             <span v-else style="font-size:12px;color:#94a3b8">—</span>
           </template>
         </el-table-column>
-        <el-table-column label="警示（觸發時間／股價／季線／KD）" min-width="210">
+        <el-table-column label="警示（觸發時間／股價／月線／季線／年線／KD）" min-width="210">
           <template #default="{ row }">
             <template v-if="row.lastTriggeredAt">
               <div style="font-size:12px;color:#64748b">{{ fmtDt(row.lastTriggeredAt, row.market) }}</div>
@@ -111,7 +111,13 @@
                 股價 <strong>{{ row.lastTriggeredPrice != null ? '$' + Number(row.lastTriggeredPrice).toLocaleString() : '—' }}</strong>
               </div>
               <div style="font-size:12px;color:#0f172a">
+                月線 <strong>{{ row.monthlyMa != null ? '$' + Number(row.monthlyMa).toLocaleString() : '—' }}</strong>
+              </div>
+              <div style="font-size:12px;color:#0f172a">
                 季線 <strong>{{ row.quarterlyMa != null ? '$' + Number(row.quarterlyMa).toLocaleString() : '—' }}</strong>
+              </div>
+              <div style="font-size:12px;color:#0f172a">
+                年線 <strong>{{ row.annualMa != null ? '$' + Number(row.annualMa).toLocaleString() : '—' }}</strong>
               </div>
               <div style="font-size:12px;color:#2563eb">
                 <span>K {{ row.kValue != null ? Number(row.kValue).toFixed(1) : '—' }}</span>
