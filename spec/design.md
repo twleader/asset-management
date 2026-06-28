@@ -1582,6 +1582,7 @@ volumes:
 - CSRF：`CookieServerCsrfTokenRepository.withHttpOnlyFalse()`，前端從 `XSRF-TOKEN` cookie 取值放進 `X-XSRF-TOKEN`（axios 自動）。
 - PENDING/DISABLED 攔截：`WebFilter` 對業務 `/api/**`（除 `/api/me`、`/logout`、`/api/impersonate`）若 `status != ACTIVE` 回 `403 {code:"ACCOUNT_PENDING"}`。
 - header 注入：`TenantWebFilter` 從 principal 解析身分後，單次 `exchange.mutate()` 以 `set` 寫入 `X-User-*`（覆蓋 client 偽造值）並寫進 Reactor context；passthrough route 由 gateway 轉發該 request header，aggregation controller 的 `businessServicesClient` 由 `ExchangeFilterFunction` 從 context 取 `TenantIdentity` 補上 header。`MeController` 列使用者清單時則顯式帶管理者 header（不依賴 context 傳遞）。
+- **過濾鏈只能訂閱一次（二次訂閱陷阱）**：`chain.filter(...)` 為 `Mono<Void>`，只發 onComplete 不發 onNext。若寫成 `flatMap(me -> chain.filter(...)).switchIfEmpty(chain.filter(...))`，整條 `flatMap` 會被 `switchIfEmpty` 誤判為 empty 而觸發，使同一 exchange 的過濾鏈被**第二次訂閱**——第一趟（已登入）已把回應 commit（200/204），第二趟在 response 已凍結後重跑，result handler 對唯讀 header 呼叫 `setContentLength` 即拋 `UnsupportedOperationException`（`/api/impersonate` 第二趟落到 `ResourceWebHandler` → 404；proxied SSE 則為 `Rejecting additional inbound receiver`）。修法：把「未登入」轉成 `defaultIfEmpty(ANONYMOUS)`（id=null 的哨兵）的 onNext，後續只有**一個** `flatMap` 呼叫 `chain.filter`，保證恰好訂閱一次。注意這與「巢狀 mutate」無關。
 
 ### business-services 身分與過濾
 
