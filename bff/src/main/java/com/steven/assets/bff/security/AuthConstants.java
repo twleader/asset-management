@@ -12,13 +12,23 @@ public final class AuthConstants {
     public static final String HDR_USER_ROLE = "X-User-Role";
     public static final String HDR_USER_STATUS = "X-User-Status";
 
-    /** 管理者代看：選定目標 user id 存於 WebSession 此屬性。 */
-    public static final String SESSION_IMPERSONATE = "IMPERSONATE_USER_ID";
+    /**
+     * 管理者代看：選定目標 user id 存於此 cookie（stateless，不碰 WebSession）。
+     * 只有 ADMIN 的請求才會被 {@code TenantWebFilter} 採信；非 ADMIN 即使自設此 cookie 也無效，故無需簽章。
+     */
+    public static final String COOKIE_IMPERSONATE = "IMPERSONATE_UID";
 
     public static final String ROLE_ADMIN = "ADMIN";
     public static final String ROLE_USER = "USER";
     public static final String AUTHORITY_ADMIN = "ROLE_ADMIN";
     public static final String AUTHORITY_USER = "ROLE_USER";
+
+    /**
+     * 登入時把 appUserId / status 編進 authorities，讓每個請求可直接從 principal 取得身分，
+     * 不必每次都 round-trip business {@code by-email}（避免延遲與 WebClient 執行緒跳轉導致的回應問題）。
+     */
+    public static final String AUTHORITY_UID_PREFIX = "APP_UID_";
+    public static final String AUTHORITY_STATUS_PREFIX = "APP_STATUS_";
 
     public static final String STATUS_ACTIVE = "ACTIVE";
 

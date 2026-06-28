@@ -4,7 +4,9 @@ import com.steven.assets.bff.security.AuthConstants;
 import com.steven.assets.bff.security.BusinessUserClient;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseCookie;
 import org.springframework.security.config.annotation.web.reactive.EnableWebFluxSecurity;
 import org.springframework.security.config.web.server.ServerHttpSecurity;
 import org.springframework.security.core.GrantedAuthority;
@@ -70,6 +72,15 @@ public class SecurityConfig {
                                     me != null && me.isAdmin()
                                             ? AuthConstants.AUTHORITY_ADMIN
                                             : AuthConstants.AUTHORITY_USER));
+                            // 把 appUserId / status 編進 authorities，後續請求直接從 principal 取得，不再每次查 business
+                            if (me != null && me.id() != null) {
+                                authorities.add(new SimpleGrantedAuthority(
+                                        AuthConstants.AUTHORITY_UID_PREFIX + me.id()));
+                            }
+                            if (me != null && me.status() != null) {
+                                authorities.add(new SimpleGrantedAuthority(
+                                        AuthConstants.AUTHORITY_STATUS_PREFIX + me.status()));
+                            }
                             return (OidcUser) new DefaultOidcUser(authorities,
                                     oidcUser.getIdToken(), oidcUser.getUserInfo());
                         }));
@@ -81,6 +92,9 @@ public class SecurityConfig {
             var resp = webFilterExchange.getExchange().getResponse();
             resp.setStatusCode(HttpStatus.FOUND);
             resp.getHeaders().setLocation(URI.create("/"));
+            // 每次新登入都從「看自己」開始：清掉上次 session 殘留的代看 cookie，
+            // 否則管理者重新登入會誤帶上次代看目標（看到別人的資料）。
+            resp.getHeaders().add(HttpHeaders.SET_COOKIE, clearImpersonateCookie());
             return resp.setComplete();
         };
     }
@@ -96,8 +110,21 @@ public class SecurityConfig {
     /** 登出成功回 200（前端再 /api/me → 401 → 顯示登入）。 */
     private ServerLogoutSuccessHandler status200LogoutHandler() {
         return (exchange, authentication) -> {
-            exchange.getExchange().getResponse().setStatusCode(HttpStatus.OK);
-            return exchange.getExchange().getResponse().setComplete();
+            var resp = exchange.getExchange().getResponse();
+            resp.setStatusCode(HttpStatus.OK);
+            // 登出一併清代看 cookie，避免殘留到下次登入。
+            resp.getHeaders().add(HttpHeaders.SET_COOKIE, clearImpersonateCookie());
+            return resp.setComplete();
         };
+    }
+
+    /**
+     * 產生「清除代看 cookie」的 Set-Cookie 值。屬性（path/httpOnly/sameSite）需與
+     * {@link com.steven.assets.bff.security.ImpersonationController} 寫入時一致，瀏覽器才會覆蓋／刪除。
+     */
+    private String clearImpersonateCookie() {
+        return ResponseCookie.from(AuthConstants.COOKIE_IMPERSONATE, "")
+                .path("/").httpOnly(true).sameSite("Lax").maxAge(0).build()
+                .toString();
     }
 }

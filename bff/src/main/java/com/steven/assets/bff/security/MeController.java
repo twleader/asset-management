@@ -32,41 +32,55 @@ public class MeController {
         if (oidc == null) {
             return Mono.just(Map.of());
         }
-        return businessUserClient.byEmail(oidc.getEmail()).flatMap(me ->
-                exchange.getSession().flatMap(session -> {
-                    Long impersonate = (session.getAttribute(AuthConstants.SESSION_IMPERSONATE) instanceof Number n)
-                            ? n.longValue() : null;
-                    boolean isAdmin = me != null && me.isAdmin();
-                    Long selfId = me == null ? null : me.id();
-                    Long effectiveUserId = (isAdmin && impersonate != null) ? impersonate : selfId;
-                    boolean isImpersonating = isAdmin && impersonate != null && !impersonate.equals(selfId);
+        // 身分取自登入 principal（不再每請求查 business）
+        BffUser me = BffUser.fromPrincipal(oidc);
+        boolean isAdmin = me != null && me.isAdmin();
+        Long selfId = me == null ? null : me.id();
+        // effectiveUserId 取 TenantWebFilter 已寫入的 X-User-Id header（權威值）。
+        // 不可直接讀 cookie：TenantWebFilter 已 mutate 過 request，mutated request 的 cookie 不保證可重新解析。
+        Long effectiveUserId = parseLongOr(exchange.getRequest().getHeaders()
+                .getFirst(AuthConstants.HDR_USER_ID), selfId);
+        boolean isImpersonating = isAdmin && effectiveUserId != null && !effectiveUserId.equals(selfId);
 
-                    Mono<List<BffUser>> usersMono = isAdmin ? businessUserClient.listAll() : Mono.just(List.of());
-                    return usersMono.map(users -> {
-                        Map<String, Object> body = new LinkedHashMap<>();
-                        body.put("email", oidc.getEmail());
-                        body.put("name", me != null && me.name() != null ? me.name() : oidc.getFullName());
-                        body.put("picture", me != null && me.picture() != null ? me.picture() : oidc.getPicture());
-                        body.put("role", me == null ? AuthConstants.ROLE_USER : me.role());
-                        body.put("status", me == null ? null : me.status());
-                        body.put("effectiveUserId", effectiveUserId);
-                        body.put("isImpersonating", isImpersonating);
-                        body.put("effectiveUserName", resolveEffectiveName(users, effectiveUserId, me, oidc));
+        // 管理者額外列出可代看的使用者；任何失敗都回空清單，絕不讓 /api/me 整個壞掉
+        Mono<List<BffUser>> usersMono = (isAdmin && me != null)
+                ? businessUserClient.listAll(me).onErrorReturn(List.of())
+                : Mono.just(List.of());
+        return usersMono.map(users -> {
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("email", oidc.getEmail());
+            body.put("name", me != null && me.name() != null ? me.name() : oidc.getFullName());
+            body.put("picture", me != null && me.picture() != null ? me.picture() : oidc.getPicture());
+            body.put("role", me == null ? AuthConstants.ROLE_USER : me.role());
+            body.put("status", me == null ? null : me.status());
+            body.put("effectiveUserId", effectiveUserId);
+            body.put("isImpersonating", isImpersonating);
+            body.put("effectiveUserName", resolveEffectiveName(users, effectiveUserId, me, oidc));
 
-                        List<Map<String, Object>> switchable = new ArrayList<>();
-                        for (BffUser u : users) {
-                            Map<String, Object> um = new LinkedHashMap<>();
-                            um.put("id", u.id());
-                            um.put("email", u.email());
-                            um.put("name", u.name());
-                            um.put("role", u.role());
-                            um.put("status", u.status());
-                            switchable.add(um);
-                        }
-                        body.put("switchableUsers", switchable);
-                        return body;
-                    });
-                }));
+            List<Map<String, Object>> switchable = new ArrayList<>();
+            for (BffUser u : users) {
+                Map<String, Object> um = new LinkedHashMap<>();
+                um.put("id", u.id());
+                um.put("email", u.email());
+                um.put("name", u.name());
+                um.put("role", u.role());
+                um.put("status", u.status());
+                switchable.add(um);
+            }
+            body.put("switchableUsers", switchable);
+            return body;
+        });
+    }
+
+    private Long parseLongOr(String s, Long fallback) {
+        if (s != null && !s.isBlank()) {
+            try {
+                return Long.valueOf(s.trim());
+            } catch (NumberFormatException ignored) {
+                // 壞值 → fallback
+            }
+        }
+        return fallback;
     }
 
     private String resolveEffectiveName(List<BffUser> users, Long effectiveUserId, BffUser me, OidcUser oidc) {
