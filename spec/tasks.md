@@ -3446,3 +3446,23 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 137.6 **bug fix**：代看切換 `POST /api/impersonate` 回 500／飄忽。真因：本 BFF 是 Spring Cloud Gateway，`@RestController` handler 執行時 response 已 commit、`getHeaders()` 唯讀 → controller 內任何寫 Set-Cookie 的做法（`addCookie`／`ResponseEntity<Void>`／`getHeaders().add`）都丟 `UnsupportedOperationException`。改由 `TenantWebFilter` 在 `chain.filter` 前（response 尚可寫、與登入/登出清 cookie 同視窗）攔 `POST /api/impersonate?userId=` 寫 cookie+`204` short-circuit；移除 `ImpersonationController`；前端 `api/index.js` 的 `impersonate` 改傳 query param。（與 137.5 相依：二次訂閱與此修正皆落地後，切換才穩定不 500）
 - [x] 137.7 Docker 重 build --no-cache + recreate（bff）+ build frontend 後驗證：fail-closed（無 header 回 0 筆）、隔離（不同 X-User-Id 回各自資料）、管理者重新登入回到看自己、**管理者代看切換 hi.steven 正常、切回自己正常、BFF log 不再出現 `UnsupportedOperationException`（瀏覽器實測通過：impersonate 兩向皆回 204、`already committed` 雜訊歸零）**
   - **部署陷阱（實機暴露，已記憶）**：`--no-cache build bff` 仍可能編出 stale jar（運行中容器跑舊碼 → 代看回舊 200/飄忽），誤導成邏輯 bug 追了好幾輪。**鐵則**：JVM service 改完一律 `--force-recreate`，並 `docker exec` 進**運行中容器** unzip `app.jar` 內 `.class` grep 預期字串，驗不符就重 build 重驗到一致為止
+
+### Task 138: 觀察清單「警示」欄補上月線、年線（Requirement 14）
+
+對應 Requirements: Requirement 14（觀察清單「警示」欄顯示均線）
+
+**需求（使用者實機反映）**：觀察清單「警示」欄觸發後只列「股價／季線／KD」，季線是趨勢判讀的一條而已，使用者要同時看到**月線（MA20）、季線（MA60）、年線（MA240）三條**才能一眼判斷多空排列。
+
+**關鍵設計**（純擴充欄位，無新表 / 無新端點 / 無 DB 遷移）：
+- `TechnicalIndicatorService`：`WatchStockService` 既有兩處改呼叫已存在的 `computeAll()`（回 `FullIndicators`：月/季/年線 + KD）。`compute()` 內部本就先呼叫 `computeAll()` 再丟棄 MA20/MA240，故換用零額外計算成本。`compute()` 與 `Indicators` record 改後即無任何呼叫者 → 一併移除避免死碼。
+- `WatchStockDto.Response`：新增 `monthlyMa`（月線 MA20）、`annualMa`（年線 MA240）兩欄，與既有 `quarterlyMa` 並列。
+- `WatchStockService`：`toResponse` / `toIndexResponse`（0000 大盤分支）填入三條均線 + KD（同義欄位同一來源 `computeAll()`）。
+- 前端 `WatchStockView.vue`：欄標題改「警示（觸發時間／股價／月線／季線／年線／KD）」；觸發區塊在「股價」下、「季線」上插「月線」行，「季線」下插「年線」行；各均線為 null 時顯示「—」（比照既有季線）。
+
+**設計**：見 `requirements.md` Req 14 AC（「警示」欄三均線）、`design.md`「`WatchStockService`」段 + `WatchStockDto` 欄位。
+
+- [ ] 138.1 `TechnicalIndicatorService`：移除 `compute()` / `Indicators`（無呼叫者），保留 `computeAll()` / `FullIndicators`
+- [ ] 138.2 `WatchStockDto.Response`：新增 `monthlyMa` / `annualMa`
+- [ ] 138.3 `WatchStockService`：`toResponse` / `toIndexResponse` 改用 `computeAll()` 填三均線 + KD
+- [ ] 138.4 前端 `WatchStockView.vue`：欄標題與觸發區塊加月線 / 年線兩行
+- [ ] 138.5 Docker 重 build + recreate（business + frontend）後驗證：觀察清單已觸發列同時顯示月線 / 季線 / 年線 / KD

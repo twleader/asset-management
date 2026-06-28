@@ -34,12 +34,7 @@ public class TechnicalIndicatorService {
         return "0000".equals(code) && "台股".equals(market);
     }
 
-    /** 季線 + KD（保留舊簽名供 WatchStock 等列表頁使用，避免不必要的 MA240 計算成本） */
-    public record Indicators(BigDecimal quarterlyMa, BigDecimal k, BigDecimal d) {
-        public static final Indicators EMPTY = new Indicators(null, null, null);
-    }
-
-    /** 完整 5 指標：警示觸發紀錄使用 */
+    /** 完整 5 指標：警示觸發紀錄、觀察清單列皆使用 */
     public record FullIndicators(
             BigDecimal monthlyMa,
             BigDecimal quarterlyMa,
@@ -47,12 +42,6 @@ public class TechnicalIndicatorService {
             BigDecimal k,
             BigDecimal d) {
         public static final FullIndicators EMPTY = new FullIndicators(null, null, null, null, null);
-    }
-
-    @Transactional(readOnly = true)
-    public Indicators compute(String stockCode, String market) {
-        FullIndicators f = computeAll(stockCode, market);
-        return new Indicators(f.quarterlyMa, f.k, f.d);
     }
 
     /**

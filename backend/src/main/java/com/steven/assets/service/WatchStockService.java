@@ -164,9 +164,11 @@ public class WatchStockService {
                     r.setLastTriggeredAlertType(a.getAlertType());
                 });
 
-        // 不論警示是否設定／觸發，皆計算當前的季線(MA60)、KD
-        TechnicalIndicatorService.Indicators ind = indicatorService.compute(code, market);
+        // 不論警示是否設定／觸發，皆計算當前的月線(MA20)、季線(MA60)、年線(MA240)、KD
+        TechnicalIndicatorService.FullIndicators ind = indicatorService.computeAll(code, market);
+        r.setMonthlyMa(ind.monthlyMa());
         r.setQuarterlyMa(ind.quarterlyMa());
+        r.setAnnualMa(ind.annualMa());
         r.setKValue(ind.k());
         r.setDValue(ind.d());
 
@@ -222,8 +224,10 @@ public class WatchStockService {
                     r.setLastTriggeredAlertType(a.getAlertType());
                 });
 
-        TechnicalIndicatorService.Indicators ind = indicatorService.compute(code, market);
+        TechnicalIndicatorService.FullIndicators ind = indicatorService.computeAll(code, market);
+        r.setMonthlyMa(ind.monthlyMa());
         r.setQuarterlyMa(ind.quarterlyMa());
+        r.setAnnualMa(ind.annualMa());
         r.setKValue(ind.k());
         r.setDValue(ind.d());
         return r;
