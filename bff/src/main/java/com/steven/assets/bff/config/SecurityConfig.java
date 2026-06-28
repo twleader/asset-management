@@ -120,7 +120,7 @@ public class SecurityConfig {
 
     /**
      * 產生「清除代看 cookie」的 Set-Cookie 值。屬性（path/httpOnly/sameSite）需與
-     * {@link com.steven.assets.bff.security.ImpersonationController} 寫入時一致，瀏覽器才會覆蓋／刪除。
+     * {@link com.steven.assets.bff.security.TenantWebFilter} 寫入代看 cookie 時一致，瀏覽器才會覆蓋／刪除。
      */
     private String clearImpersonateCookie() {
         return ResponseCookie.from(AuthConstants.COOKIE_IMPERSONATE, "")

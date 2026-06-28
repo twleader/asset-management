@@ -42,7 +42,9 @@ export const authApi = {
   me: () => api.get('/me', { skipAuthRedirect: true, skipErrorToast: true }),
   // /logout 不在 /api 之下，故覆寫 baseURL
   logout: () => api.post('/logout', null, { baseURL: '' }),
-  impersonate: (userId) => api.post('/impersonate', { userId })
+  // 代看切換：userId 走 query param（BFF 在 TenantWebFilter 攔截寫 cookie，不進 controller）；
+  // 省略 userId（或等於自己）= 清除代看、回到看自己
+  impersonate: (userId) => api.post('/impersonate', null, { params: userId == null ? {} : { userId } })
 }
 
 export const userManagementApi = {

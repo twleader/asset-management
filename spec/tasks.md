@@ -3417,7 +3417,11 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 **設計**：見 `requirements.md` Req 28、`design.md`「BFF 安全層」+「管理者代看」段。
 
 - [x] 137.1 身分編進 authorities（`SecurityConfig` OIDC user service + `AuthConstants` 前綴常數）+ `BffUser.fromPrincipal`
-- [x] 137.2 `TenantWebFilter` 單次 mutate / fail-closed；`MeController` effectiveUserId 讀 header；`BusinessUserClient`/`ImpersonationController` 配合
+- [x] 137.2 `TenantWebFilter` 單次 mutate / fail-closed；`MeController` effectiveUserId 讀 header；`BusinessUserClient` 配合
 - [x] 137.3 `TenantFilterAspect`（business 端）有請求但無身分時 fail-closed（ownerId=-1 回空）
 - [x] 137.4 **bug fix**：登入／登出清 `IMPERSONATE_UID` cookie
-- [ ] 137.5 Docker 重 build --no-cache + recreate（bff）後驗證：fail-closed（無 header 回 0 筆）、隔離（不同 X-User-Id 回各自資料）、管理者重新登入回到看自己
+- [x] 137.5 **bug fix（實機暴露，兩層真因）**：代看切換 `POST /api/impersonate` 回 **500**。
+  - **真因 1**：本 BFF 是 Spring Cloud Gateway，`@RestController` handler 執行時 response 已 commit、`getHeaders()` 唯讀 → controller 內任何寫 Set-Cookie 的做法（`addCookie`／`ResponseEntity<Void>`／`getHeaders().add`）都丟 `UnsupportedOperationException`。→ 把代看處理移出 controller、改由 `TenantWebFilter` 在 `chain.filter` 前（response 尚可寫、與登入/登出清 cookie 同視窗）寫 cookie+`204` short-circuit；移除 `ImpersonationController`；前端 `api/index.js` 的 `impersonate` 改傳 query param。
+  - **真因 2（更深層，原 filter 既有）**：`TenantWebFilter` 用 `.flatMap(…回 Mono<Void>).switchIfEmpty(chain.filter)` —— `Mono<Void>` 必然「空」完成 → `switchIfEmpty` 誤判未認證 → **再跑一次 `chain.filter`（雙重 filter）**。對有 body 的 GET 只是第二趟撞 already-committed 的「良性雜訊」（即先前 log 一直出現的 `UnsupportedOperationException ... already committed` 之真正來源）；但 impersonate short-circuit 成 204 後，第二趟落到 `ResourceWebHandler`→`NoResourceFoundException 404`→撞已 commit 的 204→**500**。→ 改用 `.map(→Optional).defaultIfEmpty(empty).flatMap(…)` 單趟結束、移除尾端 `switchIfEmpty`，根除雙重 filter（一併消除良性雜訊）
+- [x] 137.6 Docker 重 build --no-cache + recreate（bff）+ build frontend 後驗證：fail-closed（無 header 回 0 筆）、隔離（不同 X-User-Id 回各自資料）、管理者重新登入回到看自己、**管理者代看切換 hi.steven 正常切換不再 500、切回自己亦正常（瀏覽器實測通過：impersonate 兩向皆回 204；雙重 filter 修正後 `already committed` 良性雜訊歸零）**
+  - **部署陷阱（實機暴露，已記憶）**：`--no-cache build bff` 仍可能編出 stale jar（`ImpersonationController` 沒刪、`TenantWebFilter` 缺 `handleImpersonate`），運行中容器跑舊碼 → 代看回舊 200/飄忽，誤導成邏輯 bug 追了好幾輪。**鐵則**：JVM service 改完一律 `--force-recreate`，並 `docker exec` 進**運行中容器** unzip `app.jar` 內 `.class` grep 預期字串，驗不符就重 build 重驗到一致為止
