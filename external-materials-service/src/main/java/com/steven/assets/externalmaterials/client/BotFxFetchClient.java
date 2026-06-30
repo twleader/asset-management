@@ -35,6 +35,13 @@ public class BotFxFetchClient {
                 return Optional.empty();
             }
             csvBody = csvBody.replace("﻿", "");
+            // 2026/06 起台銀全站套 Akamai SEC-CPT 反爬挑戰：HTTP 200 但 body 是 HTML 挑戰頁而非 CSV。
+            // 明確辨識以免誤報為「找不到 USD」，並交由上游（ExchangeRatePoller）改用 Yahoo 備援。
+            if (csvBody.stripLeading().startsWith("<")) {
+                log.warn("台灣銀行 {} 牌告回傳非 CSV（疑似 WAF 反爬挑戰頁，len={}），改由備援來源處理",
+                        currency, csvBody.length());
+                return Optional.empty();
+            }
             for (String line : csvBody.split("\\r?\\n")) {
                 String trimmed = line.trim();
                 if (!trimmed.startsWith(currency + ",")) continue;

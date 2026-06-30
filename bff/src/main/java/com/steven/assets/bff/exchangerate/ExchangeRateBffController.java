@@ -31,7 +31,7 @@ public class ExchangeRateBffController {
 
     /**
      * GET /api/bff/exchange-rate?currency=USD
-     * 先 trigger refresh 取得最新；再回傳近 5 年的歷史。
+     * 先 trigger refresh 取得最新；再回傳近 10 年的歷史。
      */
     @GetMapping
     public Mono<ResponseEntity<Map<String, Object>>> getHistory(
@@ -44,12 +44,12 @@ public class ExchangeRateBffController {
                 .onErrorResume(e -> Mono.empty());
 
         String today = LocalDate.now().toString();
-        String fiveYearsAgo = LocalDate.now().minusYears(5).toString();
+        String tenYearsAgo = LocalDate.now().minusYears(10).toString();
 
         return refresh.then(businessServicesClient.get()
                 .uri(uri -> uri.path("/api/market-data/exchange-rate")
                         .queryParam("currency", currency)
-                        .queryParam("start", fiveYearsAgo)
+                        .queryParam("start", tenYearsAgo)
                         .queryParam("end", today).build())
                 .retrieve()
                 .bodyToMono(LIST_MAP)

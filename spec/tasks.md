@@ -3499,3 +3499,55 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 140.4 活文件 `requirements.md`(370/378) + `design.md`(1007/1008) 同步 40
 - [x] 140.5 Docker 重 build --no-cache + recreate（bff + frontend）後驗證：運行中 bff jar `GdpTwseBffController.class` 僅含 `40`、不含 `30`（defaultValue 已更新、非 stale）；frontend bundle hash 更新（`GdpTwseView-vbwZSIL8.js`）且含「近 40 年」；資料可用性已驗證 [1987,2026] 三國逐年完整覆蓋（since=2026−40+1=1987）。
 - [x] 140.6 **bug fix（實機暴露：日本資料缺）**：改 40 年後實機圖只見台、韓兩條線，日本（綠）legend 有但無資料點。逐層診斷：DB japan 表 [1987,2026] 有 40 筆（資料在），但 business `GET /api/japan-gdp?since=1987` 回 500 `"No static resource api/japan-gdp"`（請求 fall-through 到靜態資源處理器＝**端點未註冊**）。`unzip` 運行中 `business-services` 的 `MacroHistoryController.class` → 建構子只注入 Taiwan/Korea/Twse/UsDaily repo、只有 `/korea-gdp` 無 `/japan-gdp` → **運行容器是無日本的舊碼**。根因：Task 139 完成後，`asset-business-services` 被某外部 process（別的 worktree／main 建構）以舊 image 重建（容器 Created 13:09:34），覆蓋掉含日本的 image；Task 140 我只重建 bff+frontend、未碰 business → 沒發現它已被換成 stale。修法：從**本 worktree**（有日本原始碼）`--no-cache` 重 build + `--force-recreate` business-services。驗證：新 jar `MacroHistoryController.class` 建構子已含 `JapanGdpPerCapitaHistoryRepository`、有 `getJapanGdp`/`refreshJapanGdpFromImf`；`GET /api/japan-gdp?since=1987` 回 45 筆陣列（1987 $21,631 成長 4.6% → 2031，BFF 濾 >2026）；postgres japan 資料未失（recreate 不動 volume）。**教訓**：改動鏈上「本回未碰」的 JVM service 也可能已被別的 worktree 換成 stale → 「功能又壞」先 `unzip` 運行 jar 驗該功能 built code 是否在，別假設上次部署的 image 還在跑。**圖三國折線/柱狀延伸至 1987 待瀏覽器重載確認**
+
+---
+
+### Task 141: 匯率走勢圖區間由 5 年擴為 10 年、新增「3年」「5年」按鈕（Requirement 10）
+
+對應 Requirements: Requirement 10
+
+**需求**：使用者要求 ExchangeRateView「台幣兌美元走勢」圖：(1) 顯示資料區間由近 5 年拉長到近 10 年；(2) 區間切換按鈕在「2年」後新增「3年」「5年」。純參數 / 選項調整，無新資料模型 / 端點 / 欄位。
+
+**資料可用性（已驗證）**：`HistoricalBackfillService.startupBackfill` 啟動時即以 `LocalDate.now().minusYears(10)` 回補 USD 匯率（`backfillExchangeRateFrom`），DB 本就保有近 10 年資料；唯一限制 5 年的是 BFF 查詢窗 `minusYears(5)`。business `GET /api/market-data/exchange-rate?start=&end=` 接受任意區間，改 start 即可。
+
+**關鍵設計**（3 個位置）：
+- 前端 `ExchangeRateView.vue`：`rangeOptions` 於 `2y` 後、`all` 前插入 `{key:'3y',label:'3年'}`、`{key:'5y',label:'5年'}`；`filteredData` 月份對照表加 `'3y':36`、`'5y':60`；`fetchData` 註解「回傳 5 年歷史」→「10 年」。
+- BFF `ExchangeRateBffController.getHistory`：`minusYears(5)`→`minusYears(10)`（變數 `fiveYearsAgo`→`tenYearsAgo`），javadoc「近 5 年」→「近 10 年」。
+- **不動**：business / external-materials（回補已是 10 年）、`ExchangeRateHistory` 資料表、backfill 端點。
+
+**設計**：見 `requirements.md` Req 10、`design.md` `ExchangeRateBffController` 端點。
+
+- [x] 141.1 前端 `ExchangeRateView.vue` rangeOptions 加 3年/5年、月份對照加 36/60、註解 5→10 年
+- [x] 141.2 BFF `ExchangeRateBffController` 查詢窗 minusYears(5)→(10) + javadoc 同步
+- [x] 141.3 活文件 `requirements.md` Req 10 AC + `design.md` BFF 端點同步 10 年
+- [x] 141.4 Docker 重 build（bff --no-cache + frontend）+ recreate 後驗證：運行中 bff `app.jar` 的 `ExchangeRateBffController.class` bytecode 為 `ldc2_w long 10l → LocalDate.minusYears`（確認查 10 年、非 stale 的 5）；frontend chunk `ExchangeRateView-C4QsU7C7.js` 含「2年/3年/5年/全部」按鈕與月份對照 `"3y":36`/`"5y":60`；business `GET /api/market-data/exchange-rate?start=2016-06-30` 回 2481 筆、區間 2016-06-30 ~ 2026-06-29（完整近 10 年資料源已就緒）。bff + frontend 容器 recreate 後 healthy。瀏覽器實圖（401 curl 僅因無登入 session）待使用者於前端確認「全部」延伸至 2016。
+
+---
+
+### Task 142: 匯率當日（T-0）缺失修復 — 台銀 WAF 失效改 Yahoo 中間價備援（Requirement 10）
+
+對應 Requirements: Requirement 10
+
+**症狀**：今天 6/30（週二，非假日）匯率頁「最新匯率」卻停在 6/29。
+
+**根因（workflow 多源實測 + 對抗式覆驗，confirmed）**：兩條來源同時於 T-0 失效——
+- 盤中每 5 分鐘的台銀牌告 CSV `rate.bot.com.tw/xrt/flcsv/0/day` 已被**整站 Akamai SEC-CPT 主動式 JS PoW 反爬挑戰**封死：HTTP 200 但 body 為 "Challenge Validation" HTML（1842 bytes）+ `set-cookie: sec_cpt`，curl 子程序無 JS runtime 解不了題。實測 9 種 curl 變體（UA / Accept / cookie-jar 兩段 / Referer / http1.1 / fltxt / 單一幣別 / HTML / 根路徑）全敗，且非 IP 封鎖（容器 egress 為台灣 IP 118.167.131.245）。→ `BotFxFetchClient.fetchSpot` 對所有幣別回 empty，`upsert` 從未被呼叫；日誌整天 `台灣銀行 CSV 找不到 USD`（誤導，實為被 WAF 擋）。
+- 唯一還活的 17:00 FinMind `TaiwanExchangeRate` 本質只到 **T-1**：實測 `start_date=2026-06-30` 回空陣列，最新就是 6/29。→ DB 天花板釘在 6/29。
+
+**替代源實測（容器內）**：Yahoo `query1.finance.yahoo.com/v8/finance/chart/TWD=X`（短 UA）✅ 給到 6/30 當日 intraday（≈31.849，僅 mid 無買賣價、免 key）；open.er-api.com / fawazahmed currency-api 亦可（皆 mid-only，每日一更）；exchangerate.host（改付費）、frankfurter（不含 TWD）、TWSE openapi（無 FX）皆不適用。
+
+**決策（使用者拍板）**：方向＝Yahoo 當日中間價備援；買賣價處理＝`buy=sell=mid` 不動 DB（無 migration）。
+
+**關鍵設計**：
+- 新增 `YahooFxFetchClient`（curl 子程序 + 短 UA，避 Yahoo HTTP/2 fingerprint 封鎖；解析 `chart.result[0].meta.regularMarketPrice` 取 USD/TWD 當日中間價）。
+- `ExchangeRatePoller`：抽出 `updateOne(currency, today)` —— BOT `fetchSpot` 成功照舊；BOT 失敗且為 USD 時 fallback Yahoo，`upsertExchangeRate(USD, today, mid, mid)`（買=賣=中間價）。`intradayExchangeRateUpdate` 與 `refreshBotNow` 皆改走 `updateOne`。隔日 17:00 FinMind `backfillExchangeRate` 以真實即期買賣價覆寫同一 `(currency, rate_date)`（upsert 覆寫鍵）。
+- `BotFxFetchClient`：偵測 body 為 HTML（`<` 開頭）時改 log「牌告回傳非 CSV（疑似 WAF 挑戰頁）」，修正誤導訊息。
+- **不動**：DB schema（沿用 buy/sell，`buy==sell` 隱含標記中間價）、前端（KPI 即期買/賣當日列會暫顯同值，隔日 FinMind 覆寫後恢復價差，屬可接受的 1 日近似）、business-services（仍不直連外部源）。
+
+**設計**：見 `requirements.md` Req 10、`design.md`「匯率來源鏈」。
+
+- [x] 142.1 新增 `external-materials-service .../client/YahooFxFetchClient.java`（curl + 短 UA 取 TWD=X 當日中間價）
+- [x] 142.2 `ExchangeRatePoller`：注入 YahooFxFetchClient、抽 `updateOne` 加 USD Yahoo fallback（`buy=sell=mid`）、改寫 intraday + refreshBotNow、更新 class javadoc
+- [x] 142.3 `BotFxFetchClient`：HTML 挑戰頁偵測 + 修正誤導 log
+- [x] 142.4 活文件 `requirements.md` Req 10 + `design.md` 匯率來源鏈同步
+- [x] 142.5 Docker `--no-cache` 重 build + recreate external-materials-service 後驗證（皆通過）：運行 jar 含 `YahooFxFetchClient.class` + 重編 `ExchangeRatePoller.class`（06-30 13:55，非 stale）；`POST /internal/exchange-rate/refresh-bot?currency=USD` 回 `{"refreshed":true}`；日誌出現「台灣銀行 USD 牌告回傳非 CSV（疑似 WAF 反爬挑戰頁，len=1842）」+「Yahoo 備援 USD 當日中間價…: 31.8490 (2026-06-30)」；DB 出現 2026-06-30 列（buy=sell=31.8490=Yahoo mid）；end-to-end：business `POST /exchange-rate/refresh` 回 `botFetched:true`、`GET /exchange-rate/latest` 回 `rateDate:2026-06-30, mid 31.8490`。前端重載即顯示 6/30。
