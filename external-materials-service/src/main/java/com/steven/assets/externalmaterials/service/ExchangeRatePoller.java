@@ -2,19 +2,26 @@ package com.steven.assets.externalmaterials.service;
 
 import com.steven.assets.externalmaterials.client.BotFxFetchClient;
 import com.steven.assets.externalmaterials.client.BotFxFetchClient.SpotQuote;
+import com.steven.assets.externalmaterials.client.YahooFxFetchClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
+import java.util.Optional;
 
 /**
- * 匯率排程：盤中每 5 分鐘 BOT、收盤後 17:00 FinMind。
+ * 匯率排程：盤中每 5 分鐘 BOT（失敗時 USD fallback Yahoo 當日中間價）、收盤後 17:00 FinMind（T-1 對帳回補）。
  *
  * 從 business-services HistoricalDataService 搬遷至此。所有對外行情 API 集中在 external-materials-service。
+ *
+ * 來源鏈（見 design.md「匯率來源鏈」、Task 142）：台銀牌告 {@link BotFxFetchClient} 為當日主來源（真實即期買賣）；
+ * 台銀 2026/06 起被 Akamai WAF 封鎖而抓不到時，USD 改用 {@link YahooFxFetchClient} 當日中間價暫定（buy=sell=mid），
+ * 隔日由 17:00 FinMind 以真實買賣價覆寫同一 (currency, rate_date) 列。
  */
 @Slf4j
 @Service
@@ -22,6 +29,7 @@ import java.time.ZonedDateTime;
 public class ExchangeRatePoller {
 
     private final BotFxFetchClient botFx;
+    private final YahooFxFetchClient yahooFx;
     private final HistoricalBackfillService backfill;
     private final StockSourceQuery store;
 
@@ -37,8 +45,7 @@ public class ExchangeRatePoller {
                 String.format("%02d", now.getMinute()));
         LocalDate today = now.toLocalDate();
         for (String currency : store.collectTrackedCurrencies()) {
-            botFx.fetchSpot(currency).ifPresent(q ->
-                    upsertSpot(currency, today, q));
+            updateOne(currency, today);
         }
     }
 
@@ -56,12 +63,33 @@ public class ExchangeRatePoller {
 
     /** 手動觸發（business-services /api/market-data/exchange-rate/refresh proxy）。 */
     public boolean refreshBotNow(String currency) {
-        return botFx.fetchSpot(currency)
-                .map(q -> {
-                    upsertSpot(currency, LocalDate.now(ZoneId.of("Asia/Taipei")), q);
-                    return true;
-                })
-                .orElse(false);
+        return updateOne(currency, LocalDate.now(ZoneId.of("Asia/Taipei")));
+    }
+
+    /**
+     * 抓單一幣別當日即期匯率寫入今日列。
+     * 優先台銀牌告（含真實即期買入/賣出）；台銀被 WAF 擋而失敗時，USD 改用 Yahoo 當日中間價暫定
+     * （buy=sell=mid），隔日 17:00 FinMind 會以真實買賣價覆寫同一 (currency, rate_date) 列。
+     * USD 以外幣別當日缺值不另尋備援，接受沿用 FinMind 的 T-1 值。
+     *
+     * @return 是否成功寫入今日列（台銀或 Yahoo 任一）
+     */
+    private boolean updateOne(String currency, LocalDate today) {
+        Optional<SpotQuote> bot = botFx.fetchSpot(currency);
+        if (bot.isPresent()) {
+            upsertSpot(currency, today, bot.get());
+            return true;
+        }
+        if ("USD".equals(currency)) {
+            Optional<BigDecimal> mid = yahooFx.fetchUsdTwdMid();
+            if (mid.isPresent()) {
+                store.upsertExchangeRate(currency, today, mid.get(), mid.get());
+                log.info("Yahoo 備援 {} 當日中間價（買=賣=中間價，待 FinMind 隔日覆寫）: {} ({})",
+                        currency, mid.get(), today);
+                return true;
+            }
+        }
+        return false;
     }
 
     private void upsertSpot(String currency, LocalDate today, SpotQuote q) {

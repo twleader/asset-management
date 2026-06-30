@@ -74,7 +74,7 @@ com.steven.assets/
 - 存款 amount 換算規則（後端 `AssetService.normalizeDepositAmount`）：原幣值（`originalAmount` USD）由前端輸入直接傳入，**台幣 amount 一律由後端用 snapshot 匯率算出**（`amount = originalAmount × usdExchangeRate`），TRANSIT_* 的正負號也由後端依 `TransitFundType.payable` 決定。前端不做這部份計算，避免 snapshot 匯率為 null 時誤把 USD 數字寫進 TWD 欄位。
 - `AssetHistoryBffController`（AssetHistoryView 專屬）：`GET /api/bff/asset-history`（history + isLastOfYear flag）、`POST /api/bff/asset-history/recalc-dividends`、`DELETE /api/bff/asset-history/{id}`、`GET /api/bff/asset-history/export`
 - `RealizedGainBffController`（RealizedGainView 專屬）：`GET /api/bff/realized-gain`（gains + active brokers 一起回傳）、CRUD、export
-- `ExchangeRateBffController`（ExchangeRateView 專屬）：`GET /api/bff/exchange-rate`（先 refresh 再回 5 年歷史）、`POST /api/bff/exchange-rate/backfill`
+- `ExchangeRateBffController`（ExchangeRateView 專屬）：`GET /api/bff/exchange-rate`（先 refresh 再回 10 年歷史）、`POST /api/bff/exchange-rate/backfill`
 - `TradingCalendarBffController`（TradingCalendarView 專屬）：`GET /api/bff/trading-calendar?year=Y`（`holidays` 為 `{tw: {date→name}, us: {date→name}}` 物件 + `marketStatus`）、`GET /api/bff/trading-calendar/market-status`
 - `SnapshotListBffController`（SnapshotListView 專屬）：`GET /api/bff/snapshot-list`、`DELETE /{id}`、`GET /export`
 - `GdpTwseBffController`（GdpTwseView 專屬，`@RequestMapping("/api/bff/gdp-twse")`）：股市分析頁的指數日線／當日＋台韓人均 GDP 聚合（Requirement 18）：
@@ -163,6 +163,17 @@ com.steven.assets.externalmaterials/
 └── controller/
     └── InternalPriceController # POST /internal/refresh、POST /internal/fund-nav/refresh
 ```
+
+**匯率來源鏈（`ExchangeRatePoller` + `BotFxFetchClient` / `YahooFxFetchClient` / `ExchangeRateFetchClient`）：**
+匯率寫入 `exchange_rate_history`（僅 `buy_rate` / `sell_rate` 兩欄，`mid_rate = (buy+sell)/2` 為 `@Transient` 衍生）。`(currency, rate_date)` 為 upsert 覆寫鍵。三層來源依「當日新鮮度 / 是否含真實買賣價」分工：
+
+| 來源 | client | 角色 | 買賣價 | 觸發 |
+|------|--------|------|--------|------|
+| 台灣銀行牌告 CSV | `BotFxFetchClient`（curl 子程序 + 短 UA `Mozilla/5.0`） | **當日主來源**，真實即期買入/賣出 | ✅ 即期買/賣 | 盤中每 5 分鐘 cron（`0 0/5 9-15 MON-FRI` Asia/Taipei）+ 手動 `refreshBotNow` |
+| Yahoo Finance `TWD=X` | `YahooFxFetchClient`（curl 子程序 + 短 UA） | **當日備援（僅 USD）**：BOT 抓不到時取當日中間價，`buy=sell=mid` 暫定寫入今日列 | ❌ 僅 mid | 同上路徑，BOT `fetchSpot` 回 empty 時 fallback |
+| FinMind `TaiwanExchangeRate` | `ExchangeRateFetchClient` | **T-1 對帳回補**：以真實即期買/賣覆寫近期列（含 Yahoo 暫定的當日中間價，隔日升級為正式買賣盤） | ✅ spot 買/賣（ZAR cash 恆 0 須改用 spot） | 收盤後 17:00 cron + 手動 refresh 的 `backfillExchangeRate(近 10 日)` |
+
+> **2026/06 台銀 WAF 失效背景**：`rate.bot.com.tw` 全站套上 Akamai SEC-CPT 主動式 JS PoW 挑戰（HTTP 200 但 body 為 "Challenge Validation" HTML + `set-cookie: sec_cpt`），curl 子程序無 JS runtime 無法解題，所有牌告路徑（flcsv / fltxt / 單一幣別 / HTML）皆抓不到 → `BotFxFetchClient.fetchSpot` 對所有幣別回 empty，盤中即時匯率靜默失效，僅 17:00 FinMind 補到 T-1，導致「當日 6/30 缺、最新停 6/29」。故引入 Yahoo `TWD=X` 當日中間價作為 USD 備援（Task 142）。**口徑代價（刻意接受）**：Yahoo 只給中間價，當日列 `buy=sell=mid` 會抹平買賣價差（買入價較真實值高約半個價差 ~0.03），且下游基金贖回現值（`getFundValuationRate` 採 `buyRate`）當日略為高估；此暫定值隔日即被 FinMind 真實買賣價覆寫，屬 1 日內的近似。`buy == sell` 隱含標記該列為中間價來源（未另加 `source` 欄位）。
 
 **Redis key schema：**
 | Key | 內容 | TTL | 寫入者 |

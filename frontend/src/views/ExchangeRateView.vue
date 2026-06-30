@@ -97,6 +97,8 @@ const rangeOptions = [
   { key: '6m', label: '6月' },
   { key: '1y', label: '1年' },
   { key: '2y', label: '2年' },
+  { key: '3y', label: '3年' },
+  { key: '5y', label: '5年' },
   { key: 'all', label: '全部' },
 ]
 
@@ -104,7 +106,7 @@ onMounted(fetchData)
 
 async function fetchData() {
   try {
-    // BFF 一支端點：自動 refresh + 回傳 5 年歷史
+    // BFF 一支端點：自動 refresh + 回傳 10 年歷史
     const res = await bffApi.exchangeRate.getHistory('USD')
     rateData.value = (res.rates ?? []).map(d => ({
       ...d,
@@ -136,7 +138,7 @@ const filteredData = computed(() => {
   if (selectedRange.value === 'all') return rateData.value
 
   const now = dayjs()
-  const map = { '1m': 1, '3m': 3, '6m': 6, '1y': 12, '2y': 24 }
+  const map = { '1m': 1, '3m': 3, '6m': 6, '1y': 12, '2y': 24, '3y': 36, '5y': 60 }
   const months = map[selectedRange.value] || 999
   const cutoff = now.subtract(months, 'month').format('YYYY-MM-DD')
   return rateData.value.filter(d => d.rateDate >= cutoff)
