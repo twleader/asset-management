@@ -8,6 +8,9 @@ server:
       cookie:
         http-only: true
         same-site: lax
+        # Secure（Requirement 30）：由 SESSION_COOKIE_SECURE 控制，預設 false。
+        # 上 TLS（https）的正式環境設 true 才帶 Secure；dev/純 http 若盲目 true 會讓瀏覽器不回送登入 cookie → 壞掉登入。
+        secure: ${SESSION_COOKIE_SECURE:false}
 
 spring:
   application:

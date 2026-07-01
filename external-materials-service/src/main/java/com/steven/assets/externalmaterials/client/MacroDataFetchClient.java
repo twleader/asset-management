@@ -59,6 +59,11 @@ public class MacroDataFetchClient {
             .connectTimeout(Duration.ofSeconds(10))
             .followRedirects(HttpClient.Redirect.NORMAL)
             .build();
+    /**
+     * DGBAS 專屬 HttpClient（Requirement 30）：ws.dgbas.gov.tw 伺服器漏送中繼憑證，
+     * 以打包的 TWCA 中繼憑證為信任錨建鏈、主機名驗證維持啟用；僅此 client 使用，不影響其他抓取。
+     */
+    private final HttpClient dgbasHttp = buildDgbasHttpClient();
     private final ObjectMapper mapper = new ObjectMapper();
 
     /**
@@ -92,6 +97,46 @@ public class MacroDataFetchClient {
     }
 
     /**
+     * DGBAS 專屬 HttpClient（Requirement 30）：以打包的 TWCA 中繼憑證為信任錨建立 SSLContext，
+     * 解決伺服器漏送中繼導致的 PKIX 建鏈失敗；建構失敗則退回預設 client（維持既有「失敗→IMF fallback」行為）。
+     */
+    private static HttpClient buildDgbasHttpClient() {
+        HttpClient.Builder b = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(10))
+                .followRedirects(HttpClient.Redirect.NORMAL);
+        try {
+            b.sslContext(buildDgbasSslContext());
+        } catch (Exception e) {
+            log.warn("建立 DGBAS 專屬 SSLContext 失敗，退回預設（可能 PKIX 失敗→IMF fallback）：{}", e.getMessage());
+        }
+        return b.build();
+    }
+
+    /**
+     * 專屬 SSLContext：把 classpath 內的 TWCA 中繼憑證（{@code /certs/twca-secure-ssl-ca.pem}，
+     * 由公信根 TWCA Global Root CA 簽發）作為信任錨載入。ws.dgbas.gov.tw 只送 leaf，故以中繼為 anchor
+     * 建鏈成立（leaf → 中繼-anchor），且主機名驗證維持啟用（leaf SAN 含 ws.dgbas.gov.tw），較 curl -k 安全。
+     */
+    private static javax.net.ssl.SSLContext buildDgbasSslContext() throws Exception {
+        java.security.cert.CertificateFactory cf = java.security.cert.CertificateFactory.getInstance("X.509");
+        java.security.KeyStore ks = java.security.KeyStore.getInstance(java.security.KeyStore.getDefaultType());
+        ks.load(null, null);
+        try (java.io.InputStream in = MacroDataFetchClient.class.getResourceAsStream("/certs/twca-secure-ssl-ca.pem")) {
+            if (in == null) throw new IllegalStateException("找不到 TWCA 中繼憑證 /certs/twca-secure-ssl-ca.pem");
+            int i = 0;
+            for (java.security.cert.Certificate c : cf.generateCertificates(in)) {
+                ks.setCertificateEntry("twca-" + (i++), c);
+            }
+        }
+        javax.net.ssl.TrustManagerFactory tmf = javax.net.ssl.TrustManagerFactory.getInstance(
+                javax.net.ssl.TrustManagerFactory.getDefaultAlgorithm());
+        tmf.init(ks);
+        javax.net.ssl.SSLContext ctx = javax.net.ssl.SSLContext.getInstance("TLS");
+        ctx.init(null, tmf.getTrustManagers(), null);
+        return ctx;
+    }
+
+    /**
      * 主計總處（DGBAS）國民所得統計常用資料-年（表號 NA8101A1A）。
      * 取「經濟成長率(%)」（實質 GDP 成長率）與「平均每人GDP(名目值，美元)」逐年原始值。
      * 涵蓋 1951 起至最新「實際」年度（不含未來預測），為台灣官方權威來源，優先於 IMF。
@@ -104,23 +149,21 @@ public class MacroDataFetchClient {
         Map<Integer, BigDecimal> growth = new LinkedHashMap<>();
         Map<Integer, BigDecimal> gdpUsd = new LinkedHashMap<>();
         try {
-            // 政府網站 ws.dgbas.gov.tw 由 TWCA 簽發但未送中繼憑證，容器 truststore 無法建鏈
-            // （Java HttpClient 與 curl 預設皆 PKIX 失敗）。抓的是公開統計數字、且失敗有 IMF
-            // fallback，故用 curl -k（insecure）shell-out 取得；與 fetchImf 同樣走 curl 避開 Java TLS。
-            ProcessBuilder pb = new ProcessBuilder(
-                    "curl", "-sS", "-k", "--max-time", "25",
-                    "-H", "User-Agent: Mozilla/5.0",
-                    dgbasNa8101Url);
-            pb.redirectErrorStream(true);
-            Process proc = pb.start();
-            String body = new String(proc.getInputStream().readAllBytes(),
-                    java.nio.charset.StandardCharsets.UTF_8);
-            int exit = proc.waitFor();
-            if (exit != 0) {
-                log.warn("DGBAS NA8101 curl exit={}：{}", exit,
-                        body.substring(0, Math.min(200, body.length())));
+            // ws.dgbas.gov.tw 由 TWCA 簽發，但伺服器漏送中繼憑證（伺服器端設定錯誤，非用戶端缺根），
+            // 預設 truststore 無法建鏈。改用內建 TWCA 中繼憑證為信任錨的專屬 HttpClient（見
+            // buildDgbasSslContext），完整驗證憑證鏈與主機名，取代原本 curl -k（--insecure 連主機名都不驗）。
+            // Requirement 30。失敗維持回空 map → IMF fallback。
+            HttpRequest req = HttpRequest.newBuilder(URI.create(dgbasNa8101Url))
+                    .header("User-Agent", "Mozilla/5.0")
+                    .timeout(Duration.ofSeconds(25))
+                    .GET().build();
+            HttpResponse<String> res = dgbasHttp.send(req,
+                    HttpResponse.BodyHandlers.ofString(java.nio.charset.StandardCharsets.UTF_8));
+            if (res.statusCode() / 100 != 2) {
+                log.warn("DGBAS NA8101 HTTP {}", res.statusCode());
                 return Map.of("growth", growth, "gdpUsd", gdpUsd);
             }
+            String body = res.body();
             java.util.regex.Matcher m = DGBAS_OBS.matcher(body);
             while (m.find()) {
                 String item = m.group(1);

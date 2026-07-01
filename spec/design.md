@@ -1652,6 +1652,18 @@ volumes:
 
 ---
 
+### 延後低風險資安項修補（Requirement 30）
+
+Requirement 29 高風險項上線後，處理當時評估為低風險而延後的五項：
+
+1. **通知收件人跨租戶綁定（IDOR）**：`stock_alert_recipient` 為「以 Long id 顯式關聯」的 join entity，無 `owner_user_id`、無 `@Filter`，故 `recipientLinkRepo.save()` 是純 insert、不受 `TenantFilterAspect` 的 `ownerFilter` 覆蓋。`StockAlertService.replaceRecipients()` 原本把前端 `recipientIds` 當純數字直插，繞過多租戶兩道防線（`@Filter` 查詢過濾 + `TenantGuard.assertOwned` by-id 補驗）。修法：在 `replaceRecipients` 寫入前，用 `NotificationRecipientRepository.findByIdIn(ids)`（`NotificationRecipient` 掛 `@Filter`，此派生查詢在 HTTP 請求執行緒下必被 `ownerFilter` 限縮成只回當前租戶）取得合法 id 白名單，只寫入交集；他人 id 自然查不到而被濾除。收斂在 `replaceRecipients` 內、涵蓋 create/update；保留「`null`＝全部自己的收件人、空 list＝不寄」語意。dispatcher 端 `findActiveEmailsByAlertId` 因寫入端已把關不會再有跨租戶 join 列（其自身加 owner 條件屬 defense-in-depth，列為後續）。
+2. **Session／代看 cookie 可條件化 `Secure`**：BFF 為 WebFlux，cookie 以 `ResponseCookie` 產生。三處建構點——`application.yml` 的 `server.reactive.session.cookie.secure`（承載登入態的 `SESSION` cookie）、`TenantWebFilter` 寫入／清除 `IMPERSONATE_UID`、`SecurityConfig.clearImpersonateCookie()`——統一由環境變數 `SESSION_COOKIE_SECURE`（預設 `false`）控制 `.secure(...)`。設計取捨：專案現況零 Spring profile、`docker-compose` 未傳 `SPRING_PROFILES_ACTIVE`，故用單一 env 開關（改動最小、預設安全）而非新增 profile。目前 prod 的 `frontend/nginx.conf` 仍只 listen 80（純 http），因此 compose 預設 `SESSION_COOKIE_SECURE=false`；待外層上 TLS（`forward-headers-strategy: framework` + `X-Forwarded-Proto: https` 已就緒）後把該 env 設 `true` 即帶 `Secure`。三處務必同源同值，否則 `clearImpersonateCookie` 因屬性不符清不掉殘留代看 cookie（`SecurityConfig` 既有註解已警示）。
+3. **PostgreSQL 不對外網暴露**：`docker-compose.yml` postgres port `"5432:5432"`（`0.0.0.0`）收斂為 `"127.0.0.1:5432:5432"`，僅本機 loopback 可連、外部網卡不再暴露。容器間仍以 service name `postgres:5432` 走 `asset-net`（`DB_HOST=postgres` 由 compose 注入），不依賴 host port mapping。命名 volume `asset-postgres-data` 不受 recreate 影響。
+4. **DGBAS 抓取恢復 TLS 驗證**：`ws.dgbas.gov.tw` 的 leaf 由 `TWCA Secure SSL Certification Authority` 簽發，但伺服器**漏送該中繼憑證**，容器 truststore 無法建鏈（Java／curl 預設皆 PKIX 失敗）——這是伺服器端設定錯誤，非用戶端缺根。原以 `curl -k` 全域停用驗證（連主機名都不驗）規避。修法：把公開可得（AIA `http://sslserver.twca.com.tw/cacert/secure_sha2_2023G3.crt`、由公信根 `TWCA Global Root CA` 簽發）的中繼憑證打包為 `external-materials-service/src/main/resources/certs/twca-secure-ssl-ca.pem`，以它為信任錨建一個**專屬 `SSLContext`／`HttpClient`**（`TrustManagerFactory` PKIX，leaf → 中繼-anchor 建鏈成立，`openssl verify -partial_chain` 已驗證等效），`fetchDgbasNationalIncome` 改用此 `HttpClient` 抓取、移除 `curl -k`；主機名驗證維持啟用（leaf SAN 含 `ws.dgbas.gov.tw`）。此 `SSLContext` 只用於 DGBAS，不影響 IMF/Yahoo/TWSE 等其他抓取（後者續用 curl 短 UA 規避 WAF，本就無 `-k`）。失敗維持回空 map → IMF fallback。中繼憑證效期至 2030-10，換版需更新此檔。
+5. **Excel 匯入清空 owner-scoped**：`ExcelImportService.importRealizedGains()` 匯入前 `gainRepo.deleteAll()` 改為 `gainRepo.deleteByOwnerUserId(tenantGuard.requireCurrentUserId())`（`RealizedGainRepository` 新增衍生刪除方法），只清當前使用者、不依賴 `ownerFilter` 對 `deleteAll()` 的隱性副作用；無身分時跳過清空避免誤刪。此 service 目前無 controller 呼叫（不可達），屬防禦性修補。
+
+---
+
 ## Requirement 24 擴充：英股市場類型（LSE UCITS ETF）
 
 ### external-materials-service 抓價

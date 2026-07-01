@@ -2,9 +2,11 @@ package com.steven.assets.repository;
 
 import com.steven.assets.model.RealizedGain;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -30,4 +32,13 @@ public interface RealizedGainRepository extends JpaRepository<RealizedGain, Long
 
     @Query("SELECT SUM(r.proceeds) FROM RealizedGain r WHERE YEAR(r.tradeDate) = :year")
     BigDecimal sumProceedsByYear(@Param("year") Integer year);
+
+    /**
+     * owner-scoped 批次刪除（Requirement 30）：明確以 owner_user_id 為條件的 bulk DELETE，
+     * 不依賴 {@code ownerFilter} 對 {@code deleteAll()} 的隱性副作用。供 Excel 覆蓋式匯入前只清當前使用者資料。
+     */
+    @Modifying
+    @Transactional
+    @Query("DELETE FROM RealizedGain r WHERE r.ownerUserId = :ownerUserId")
+    void deleteByOwnerUserId(@Param("ownerUserId") Long ownerUserId);
 }

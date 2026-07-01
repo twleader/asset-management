@@ -48,6 +48,7 @@ public class StockAlertService {
     private final MarketDataService marketDataService;
     private final StockAlertRecipientRepository recipientLinkRepo;
     private final NotificationRecipientService notificationRecipientService;
+    private final com.steven.assets.repository.NotificationRecipientRepository recipientRepo;
     private final com.steven.assets.security.TenantGuard tenantGuard;
 
     // ===== CRUD =====
@@ -97,12 +98,25 @@ public class StockAlertService {
         return toResponse(saved);
     }
 
-    /** 以 recipientIds 覆寫某警示的 join 列（先刪後插，去重）。 */
+    /**
+     * 以 recipientIds 覆寫某警示的 join 列（先刪後插，去重）。
+     *
+     * <p>多租戶（Requirement 30）：join entity {@code stock_alert_recipient} 無 owner 欄位、無 {@code @Filter}，
+     * save 為純 insert 不受 ownerFilter 保護。故寫入前先用 owner-filtered 的 {@code recipientRepo.findByIdIn}
+     * （{@code NotificationRecipient} 掛 {@code @Filter}，HTTP 請求下必被 ownerFilter 限縮成只回當前租戶）取得
+     * 合法白名單，只寫入交集；他人 recipientId 查不到而被濾除，防止把他人 email 掛成自己警示的收件人。
+     */
     private void replaceRecipients(Long alertId, List<Long> recipientIds) {
         recipientLinkRepo.deleteByAlertId(alertId);
         if (recipientIds == null || recipientIds.isEmpty()) return;
-        for (Long rid : new LinkedHashSet<>(recipientIds)) {
-            if (rid == null) continue;
+        java.util.LinkedHashSet<Long> distinct = new LinkedHashSet<>(recipientIds);
+        distinct.remove(null);
+        if (distinct.isEmpty()) return;
+        java.util.Set<Long> allowed = recipientRepo.findByIdIn(distinct).stream()
+                .map(com.steven.assets.model.NotificationRecipient::getId)
+                .collect(java.util.stream.Collectors.toSet());
+        for (Long rid : distinct) {
+            if (!allowed.contains(rid)) continue;   // 非當前租戶擁有的收件人：略過不綁定
             recipientLinkRepo.save(StockAlertRecipient.builder()
                     .alertId(alertId).recipientId(rid).build());
         }

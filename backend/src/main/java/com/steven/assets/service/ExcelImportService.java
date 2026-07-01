@@ -28,6 +28,7 @@ public class ExcelImportService {
     private final InstitutionService institutionService;
     private final RealizedGainRepository gainRepo;
     private final AssetSnapshotRepository snapshotRepo;
+    private final com.steven.assets.security.TenantGuard tenantGuard;
 
     private static final Pattern DATE_SHEET = Pattern.compile("^\\d{8}$");
 
@@ -233,9 +234,14 @@ public class ExcelImportService {
     }
 
     private int importRealizedGains(Sheet sheet) {
-        // 匯入前先清空所有已實現損益，避免重複匯入產生雙倍資料
-        gainRepo.deleteAll();
-        gainRepo.flush();
+        // 匯入前先清空「當前使用者」的已實現損益，避免重複匯入產生雙倍資料（Requirement 30：
+        // owner-scoped 刪除，不依賴 ownerFilter 對 deleteAll() 的隱性副作用；無身分（背景無 request）時
+        // 跳過清空以免以 null owner 誤刪或影響全體）。
+        Long ownerId = tenantGuard.requireCurrentUserId();
+        if (ownerId != null) {
+            gainRepo.deleteByOwnerUserId(ownerId);
+            gainRepo.flush();
+        }
 
         int count = 0;
         for (int r = 1; r <= sheet.getLastRowNum(); r++) {
