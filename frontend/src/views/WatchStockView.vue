@@ -46,7 +46,7 @@
             <el-icon class="drag-handle" style="cursor:grab;color:#94a3b8"><Operation /></el-icon>
           </template>
         </el-table-column>
-        <el-table-column label="股名／股號" min-width="170">
+        <el-table-column label="股名／股號" min-width="150">
           <template #default="{ row }">
             <div style="font-weight:600">{{ row.stockCode }}</div>
             <div style="color:#475569;font-size:12px">{{ row.stockName || '—' }}</div>
@@ -73,18 +73,18 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="開盤" width="80" align="right">
+        <el-table-column label="開盤" width="90" align="right">
           <template #default="{ row }">{{ fmtNum(row.openPrice) }}</template>
         </el-table-column>
-        <el-table-column label="昨收" width="80" align="right">
+        <el-table-column label="昨收" width="90" align="right">
           <template #default="{ row }">{{ fmtNum(row.previousClose) }}</template>
         </el-table-column>
-        <el-table-column label="最高" width="80" align="right">
+        <el-table-column label="最高" width="90" align="right">
           <template #default="{ row }">
             <span style="color:#dc2626">{{ fmtNum(row.highPrice) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="最低" width="80" align="right">
+        <el-table-column label="最低" width="90" align="right">
           <template #default="{ row }">
             <span style="color:#16a34a">{{ fmtNum(row.lowPrice) }}</span>
           </template>
@@ -92,7 +92,7 @@
         <el-table-column :label="volumeLabel" width="100" align="right">
           <template #default="{ row }">{{ fmtVolume(row.volume) }}</template>
         </el-table-column>
-        <el-table-column label="警示條件" min-width="170">
+        <el-table-column label="警示條件" min-width="140">
           <template #default="{ row }">
             <template v-if="row.conditions && row.conditions.length">
               <div v-for="(c, i) in row.conditions" :key="i"
@@ -103,7 +103,7 @@
             <span v-else style="font-size:12px;color:#94a3b8">—</span>
           </template>
         </el-table-column>
-        <el-table-column label="警示（觸發時間／股價／月線／季線／年線／KD）" min-width="210">
+        <el-table-column label="警示（觸發時間／股價／月線／季線／年線／KD）" min-width="230">
           <template #default="{ row }">
             <template v-if="row.lastTriggeredAt">
               <div style="font-size:12px;color:#64748b">{{ fmtDt(row.lastTriggeredAt, row.market) }}</div>
