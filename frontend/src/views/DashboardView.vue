@@ -400,6 +400,7 @@ import Sortable from 'sortablejs'
 import { useAssetStore } from '@/stores/assetStore'
 import { bffApi } from '@/api'
 import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
+import { escapeHtml } from '@/utils/escapeHtml'
 
 let orderSaveTimer = null
 let stockSortable = null
@@ -831,11 +832,11 @@ const assetClassPieOption = computed(() => {
   const money = v => `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`
   const fmtRow = (name, val, color) =>
     `<div style="display:flex;justify-content:space-between;gap:16px;line-height:1.6;${color ? `color:${color};` : ''}">
-       <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:188px">${name}</span>
+       <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:188px">${escapeHtml(name)}</span>
        <span>${money(val)}</span>
      </div>`
   const fmtTooltip = p => {
-    const head = `${p.name}：$${Number(p.value).toLocaleString()}（${p.percent}%）`
+    const head = `${escapeHtml(p.name)}：$${Number(p.value).toLocaleString()}（${p.percent}%）`
     const list = holdingsByBucket.value[p.name]
     if (p.seriesName === '細分' && Array.isArray(list) && list.length) {
       const TOPN = 10
@@ -907,8 +908,8 @@ const twStockPieOption = computed(() => {
       trigger: 'item',
       // hover 細節：有代號則顯示「代號 股名」，否則只顯示股名
       formatter: p => {
-        const code = p.data && p.data.code ? `${p.data.code} ` : ''
-        return `${code}${p.name}<br/>$${Number(p.value).toLocaleString(undefined, {maximumFractionDigits: 0})} (${p.percent}%)`
+        const code = p.data && p.data.code ? `${escapeHtml(p.data.code)} ` : ''
+        return `${code}${escapeHtml(p.name)}<br/>$${Number(p.value).toLocaleString(undefined, {maximumFractionDigits: 0})} (${p.percent}%)`
       }
     },
     legend: { show: false },
@@ -976,8 +977,8 @@ const usStockPieOption = computed(() => {
       trigger: 'item',
       // hover 細節：顯示「代號 英文全名」+ 金額（台幣）+ 佔比
       formatter: p => {
-        const fn = p.data && p.data.fullName ? ` ${p.data.fullName}` : ''
-        return `${p.name}${fn}<br/>$${Number(p.value).toLocaleString(undefined, {maximumFractionDigits: 0})} (${p.percent}%)`
+        const fn = p.data && p.data.fullName ? ` ${escapeHtml(p.data.fullName)}` : ''
+        return `${escapeHtml(p.name)}${fn}<br/>$${Number(p.value).toLocaleString(undefined, {maximumFractionDigits: 0})} (${p.percent}%)`
       }
     },
     legend: { show: false },
@@ -1126,7 +1127,7 @@ const bankOption = computed(() => {
     tooltip: {
       trigger: 'axis',
       formatter: (params) => {
-        let s = `<strong>${params[0].name}</strong><br/>`
+        let s = `<strong>${escapeHtml(params[0].name)}</strong><br/>`
         let total = 0
         params.forEach(p => {
           if (p.value > 0) {
@@ -1403,7 +1404,7 @@ const fundBarOption = computed(() => {
         const rate = cost > 0 ? (profit / cost * 100).toFixed(2) : '0.00'
         const color = profit >= 0 ? profitColor : lossColor
         const fmt = n => `$${Math.round(n).toLocaleString()}`
-        return `<b>${f.fundName || f.fundCode || ''}</b><br/>`
+        return `<b>${escapeHtml(f.fundName || f.fundCode || '')}</b><br/>`
           + `現值：${fmt(value)}<br/>`
           + `成本：${fmt(cost)}<br/>`
           + `損益：<span style="color:${color}">${fmt(profit)} (${rate}%)</span>`
@@ -1471,7 +1472,7 @@ const stockBarOption = computed(() => {
         const fmt = n => `$${Math.round(n).toLocaleString()}`
         const fmtShares = n => n.toLocaleString('zh-TW', { maximumFractionDigits: 4 })
         const fmtPrice = n => `$${n.toLocaleString('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-        const title = s.stockName ? `${s.stockCode} ${s.stockName}` : s.stockCode
+        const title = s.stockName ? `${escapeHtml(s.stockCode)} ${escapeHtml(s.stockName)}` : escapeHtml(s.stockCode)
         return `<b>${title}</b><br/>`
           + `持股：${fmtShares(shares)}<br/>`
           + `股價：${fmtPrice(price)}<br/>`

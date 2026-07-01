@@ -7,11 +7,13 @@ import com.steven.assets.service.HistoricalDataService;
 import com.steven.assets.service.MarketDataService;
 import com.steven.assets.service.PriceStreamService;
 import com.steven.assets.service.StockPriceService;
+import jakarta.validation.constraints.Pattern;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.codec.ServerSentEvent;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
 
@@ -23,7 +25,15 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/market-data")
 @RequiredArgsConstructor
+@Validated
 public class MarketDataController {
+
+    // 資安（Requirement 29）：code / market / currency 會被外部行情 client 串進外部 API 的 URL query / path。
+    // 以白名單格式驗證，阻擋以 & ? # / % 等 metacharacter 注入外部請求參數（污染共用行情資料）。
+    // 違規由 GlobalExceptionHandler 的 ConstraintViolationException 對映為 400。
+    private static final String CODE_PATTERN = "^[A-Za-z0-9.\\-]{1,12}$";     // 台股數字 / 美股 ticker（含 . -）
+    private static final String MARKET_PATTERN = "^[\\p{L}0-9]{1,10}$";        // 台股 / 美股…（允許 Unicode 文字，禁 URL metachar）
+    private static final String CURRENCY_PATTERN = "^[A-Za-z]{3,4}$";          // ISO 4217（USD/JPY…）
 
     private final MarketDataService marketDataService;
     private final StockPriceService stockPriceService;
@@ -50,8 +60,8 @@ public class MarketDataController {
      */
     @GetMapping("/dividend-rate")
     public ResponseEntity<MarketDataService.DividendRateResult> getDividendRate(
-            @RequestParam String code,
-            @RequestParam String market) {
+            @RequestParam @Pattern(regexp = CODE_PATTERN, message = "股票代號格式不合法") String code,
+            @RequestParam @Pattern(regexp = MARKET_PATTERN, message = "市場別格式不合法") String market) {
         return ResponseEntity.ok(marketDataService.getDividendRate(code, market));
     }
 
@@ -117,8 +127,8 @@ public class MarketDataController {
      */
     @GetMapping("/etf-holdings")
     public ResponseEntity<MarketDataService.EtfHoldingsResult> getEtfHoldings(
-            @RequestParam String code,
-            @RequestParam String market) {
+            @RequestParam @Pattern(regexp = CODE_PATTERN, message = "股票代號格式不合法") String code,
+            @RequestParam @Pattern(regexp = MARKET_PATTERN, message = "市場別格式不合法") String market) {
         return ResponseEntity.ok(marketDataService.getEtfHoldings(code, market));
     }
 
@@ -128,8 +138,8 @@ public class MarketDataController {
      */
     @GetMapping("/dividends")
     public ResponseEntity<MarketDataService.DividendHistoryResult> getDividendHistory(
-            @RequestParam String code,
-            @RequestParam String market,
+            @RequestParam @Pattern(regexp = CODE_PATTERN, message = "股票代號格式不合法") String code,
+            @RequestParam @Pattern(regexp = MARKET_PATTERN, message = "市場別格式不合法") String market,
             @RequestParam(defaultValue = "10") int years) {
         return ResponseEntity.ok(dividendHistoryService.findFromDb(code, market, years));
     }
@@ -151,8 +161,8 @@ public class MarketDataController {
      */
     @PostMapping("/history/backfill-stock")
     public Map<String, Object> backfillSingleStock(
-            @RequestParam String code,
-            @RequestParam String market,
+            @RequestParam @Pattern(regexp = CODE_PATTERN, message = "股票代號格式不合法") String code,
+            @RequestParam @Pattern(regexp = MARKET_PATTERN, message = "市場別格式不合法") String market,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate since,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate until) {
         if (since == null) since = LocalDate.now().minusYears(10);
@@ -165,8 +175,8 @@ public class MarketDataController {
      */
     @GetMapping("/history/stock")
     public List<StockPriceHistory> getStockHistory(
-            @RequestParam String code,
-            @RequestParam String market,
+            @RequestParam @Pattern(regexp = CODE_PATTERN, message = "股票代號格式不合法") String code,
+            @RequestParam @Pattern(regexp = MARKET_PATTERN, message = "市場別格式不合法") String market,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end) {
         return historicalDataService.getStockHistory(code, market, start, end);
@@ -180,8 +190,8 @@ public class MarketDataController {
      */
     @GetMapping("/intraday-ticks")
     public List<HistoricalDataService.IntradayTick> getIntradayTicks(
-            @RequestParam String code,
-            @RequestParam String market,
+            @RequestParam @Pattern(regexp = CODE_PATTERN, message = "股票代號格式不合法") String code,
+            @RequestParam @Pattern(regexp = MARKET_PATTERN, message = "市場別格式不合法") String market,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
         return historicalDataService.fetchIntradayTicks(code, market, date);
     }
@@ -206,7 +216,7 @@ public class MarketDataController {
      */
     @GetMapping("/exchange-rate")
     public List<ExchangeRateHistory> getExchangeRateHistory(
-            @RequestParam(defaultValue = "USD") String currency,
+            @RequestParam(defaultValue = "USD") @Pattern(regexp = CURRENCY_PATTERN, message = "幣別格式不合法") String currency,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end) {
         if (start == null && end == null) {
@@ -223,7 +233,7 @@ public class MarketDataController {
      */
     @GetMapping("/exchange-rate/on-date")
     public ResponseEntity<ExchangeRateHistory> getExchangeRateOnDate(
-            @RequestParam(defaultValue = "USD") String currency,
+            @RequestParam(defaultValue = "USD") @Pattern(regexp = CURRENCY_PATTERN, message = "幣別格式不合法") String currency,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
         return historicalDataService.getExchangeRateOnDate(currency, date)
                 .map(ResponseEntity::ok)
@@ -236,7 +246,7 @@ public class MarketDataController {
      */
     @GetMapping("/exchange-rate/latest")
     public ResponseEntity<ExchangeRateHistory> getLatestExchangeRate(
-            @RequestParam(defaultValue = "USD") String currency) {
+            @RequestParam(defaultValue = "USD") @Pattern(regexp = CURRENCY_PATTERN, message = "幣別格式不合法") String currency) {
         return historicalDataService.getLatestExchangeRate(currency)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
@@ -248,7 +258,7 @@ public class MarketDataController {
      */
     @PostMapping("/exchange-rate/refresh")
     public Map<String, Object> refreshExchangeRate(
-            @RequestParam(defaultValue = "USD") String currency) {
+            @RequestParam(defaultValue = "USD") @Pattern(regexp = CURRENCY_PATTERN, message = "幣別格式不合法") String currency) {
         int backfilled = historicalDataService.backfillExchangeRate(currency, LocalDate.now().minusDays(10));
         historicalDataService.fetchBotExchangeRate(currency);
         // 每次刷新時順便清理超過 10 年的舊資料
@@ -262,7 +272,7 @@ public class MarketDataController {
      */
     @PostMapping("/exchange-rate/backfill-history")
     public Map<String, Object> backfillExchangeRateHistory(
-            @RequestParam(defaultValue = "USD") String currency,
+            @RequestParam(defaultValue = "USD") @Pattern(regexp = CURRENCY_PATTERN, message = "幣別格式不合法") String currency,
             @RequestParam(required = false) LocalDate since) {
         if (since == null) since = LocalDate.now().minusYears(10);
         int count = historicalDataService.backfillExchangeRateFrom(currency, since);

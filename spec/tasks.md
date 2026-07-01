@@ -3551,3 +3551,25 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 142.3 `BotFxFetchClient`：HTML 挑戰頁偵測 + 修正誤導 log
 - [x] 142.4 活文件 `requirements.md` Req 10 + `design.md` 匯率來源鏈同步
 - [x] 142.5 Docker `--no-cache` 重 build + recreate external-materials-service 後驗證（皆通過）：運行 jar 含 `YahooFxFetchClient.class` + 重編 `ExchangeRatePoller.class`（06-30 13:55，非 stale）；`POST /internal/exchange-rate/refresh-bot?currency=USD` 回 `{"refreshed":true}`；日誌出現「台灣銀行 USD 牌告回傳非 CSV（疑似 WAF 反爬挑戰頁，len=1842）」+「Yahoo 備援 USD 當日中間價…: 31.8490 (2026-06-30)」；DB 出現 2026-06-30 列（buy=sell=31.8490=Yahoo mid）；end-to-end：business `POST /exchange-rate/refresh` 回 `botFetched:true`、`GET /exchange-rate/latest` 回 `rateDate:2026-06-30, mid 31.8490`。前端重載即顯示 6/30。
+
+---
+
+### Task 143: 資安弱點修補 — Stored XSS／設定授權／行情參數注入／個資入版控（Requirement 29）
+
+對應 Requirements: Requirement 29
+
+**背景**：一次全系統資安審查（多 agent 平行 + 對抗式覆驗）結論為核心設計紮實（無 SQL injection／任意 SSRF／命令注入／mass-assignment；by-id IDOR 全經 `TenantGuard`），但發現 2 High + 2 Medium 需修補。優先序：XSS → 個資入版控 → 設定授權 → 行情參數白名單。
+
+**發現與修法**：
+- **[High] Stored XSS**：`DashboardView.vue` ECharts tooltip 未轉義持股股名（使用者自由輸入）。管理者代看時於 admin session 觸發，可提權。→ 新增 `escapeHtml` util，三處 tooltip 轉義。
+- **[High] 個資入版控**：`db/init/01_dump.sql`（真實 dump）、`*.mv.db` 等被追蹤。→ `git rm --cached` + `.gitignore`。
+- **[Medium] 設定授權缺失**：`/api/settings/**` 共用參考資料寫入無 ADMIN 限制，任何 ACTIVE 使用者可竄改全體。→ BFF `SecurityConfig` + backend `AdminGateInterceptor` 雙層限 ADMIN（GET 放行）。
+- **[Medium] 行情參數注入**：`MarketDataController` 的 `code`/`market`/`currency` 未驗證即串入外部 URL。→ `@Validated`+`@Pattern` 白名單 + `GlobalExceptionHandler` 400。
+
+- [x] 143.1 前端：新增 `frontend/src/utils/escapeHtml.js`；`DashboardView.vue` 匯入並於**六處** tooltip formatter（細分圓餅 `fmtRow`/`fmtTooltip`、台股穿透、美股穿透、股票橫條 `stockBarOption`、基金橫條 `fundBarOption`、銀行存款橫條 `bankOption`）對股名／代號／全名／基金名／銀行名 `escapeHtml()` 轉義。（後三處為對抗式覆驗補抓的同頁遺漏 sink。）
+- [x] 143.2 版控：`.gitignore` 增列 `*.mv.db`/`*.trace.db`/`/data/`/`backend/data/`/`db/init/*.sql`/`stock_alert_data.sql`/`.claude.bak/`；`git rm --cached` 移出上述追蹤檔（含 `.claude.bak/settings.local.json`，磁碟保留）
+- [x] 143.3 授權：backend `AdminGateInterceptor` 對 `/api/settings/**` 與 `/api/funds(/**)`（fund_master 主檔）非 GET 限 ADMIN（GET/HEAD/OPTIONS 放行）+ `WebConfig` 註冊；BFF `SecurityConfig` `GLOBAL_SETTINGS_PATHS`（含 `/api/funds`、各 `/api/bff/*-settings`，排除 per-user accounts/recipients）寫入方法限 ADMIN。（fund_master 為對抗式覆驗補抓的同類遺漏端點。）
+- [x] 143.4 參數驗證：`MarketDataController` `@Validated`+`@Pattern`（code/market/currency）；`StockAlertController.lookup-name` 同規則 `@Pattern`；`MacroHistoryController.index-intraday` market 白名單；`GlobalExceptionHandler` 處理 `ConstraintViolationException` → 400。（後兩者為覆驗補抓的其它外部路徑。）
+- [x] 143.5 活文件 `requirements.md`（新增 Requirement 29）+ `design.md`（Security Considerations 增資安修補節）同步
+- [x] 143.6 對抗式覆驗（5-agent read-only workflow）：抓出並補齊 3 個同頁遺漏 XSS bar sink、fund_master 授權遺漏、2 條其它外部參數路徑、`.claude.bak` 遺留；backend/bff `mvn compile` 通過（frontend 因本機無 node_modules 改於 Docker build 驗證，vite `@` alias 已確認）
+- [ ] 143.7 Docker 重 build（frontend + business-services + bff）+ recreate 後驗證：非 admin 寫 `/api/settings/banks`、`/api/funds` 回 403、`GET` 仍 200；`code=2330%26x=1`、`market=x/../y` 之類回 400；Dashboard 圓餅/橫條 tooltip 對惡意股名/基金名顯示轉義文字（非執行）

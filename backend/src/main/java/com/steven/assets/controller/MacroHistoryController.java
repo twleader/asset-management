@@ -125,6 +125,10 @@ public class MacroHistoryController {
     /** 指數「當日」分時走勢（Yahoo 5m，最新交易日；transient）。market ∈ {TWSE,DJI,SPX,IXIC,SOX,FTSE,DAX,KOSPI,N225}。 */
     @GetMapping("/index-intraday")
     public List<MacroHistoryService.IntradayPoint> getIndexIntraday(@RequestParam String market) {
+        // 資安（Requirement 29）：market 會流入 external-materials-service 打 Yahoo；以已知指數白名單擋參數注入
+        if (!"TWSE".equals(market) && !US_INDEX_CODES.contains(market)) {
+            throw new IllegalArgumentException("未知指數代碼: " + market);
+        }
         return macroHistoryService.fetchIndexIntraday(market);
     }
 }

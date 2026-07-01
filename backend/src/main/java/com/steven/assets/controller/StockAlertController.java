@@ -6,8 +6,10 @@ import com.steven.assets.repository.StockRepository;
 import com.steven.assets.service.HistoricalDataService;
 import com.steven.assets.service.StockAlertService;
 import com.steven.assets.service.StockMasterService;
+import jakarta.validation.constraints.Pattern;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -16,7 +18,12 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/stock-alerts")
 @RequiredArgsConstructor
+@Validated
 public class StockAlertController {
+
+    // 資安（Requirement 29）：lookup-name 的 code/market 會流入外部行情 client；白名單格式驗證（規則同 MarketDataController）
+    private static final String CODE_PATTERN = "^[A-Za-z0-9.\\-]{1,12}$";
+    private static final String MARKET_PATTERN = "^[\\p{L}0-9]{1,10}$";
 
     private final StockAlertService service;
     private final StockRepository stockMasterRepo;
@@ -77,8 +84,8 @@ public class StockAlertController {
      */
     @GetMapping("/lookup-name")
     public ResponseEntity<Map<String, String>> lookupName(
-            @RequestParam String code,
-            @RequestParam String market) {
+            @RequestParam @Pattern(regexp = CODE_PATTERN, message = "股票代號格式不合法") String code,
+            @RequestParam @Pattern(regexp = MARKET_PATTERN, message = "市場別格式不合法") String market) {
         String upperCode = code.trim().toUpperCase();
 
         // 0000 = 台股大盤（TAIEX）特殊代號：直接回傳，不打外部、不寫 stock 主檔
