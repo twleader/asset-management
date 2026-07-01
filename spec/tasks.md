@@ -3578,3 +3578,32 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
   - 參數白名單：`dividend-rate code=2330&x=1`=400、`code=../v1/x`=400、正當 `code=2330`=非400；`index-intraday market=BADCODE!`=400、`market=TWSE`=非400；`stock-alerts/lookup-name code=x&y=1`=400。
   - 服務：business/bff `(healthy)`、`GET /`=200、未登入經 BFF `/api/*`=401。
   - 待人工：Dashboard 圓餅/橫條 tooltip 對含 `<img onerror>` 的惡意股名/基金名，需登入後 hover 目視確認顯示為轉義文字（chunk 已含 escape，行為預期）。
+
+---
+
+### Task 144: 延後低風險資安項修補 — 收件人跨租戶綁定／Cookie Secure 條件化／DB port 綁定／DGBAS TLS 驗證／匯入 owner-scoped 刪除（Requirement 30）
+
+對應 Requirements: Requirement 30
+
+**背景**：Requirement 29 高風險項（Stored XSS／設定授權／行情參數注入／個資入版控）上線後，處理當時評估為低風險而延後的 5 項。決策題已與擁有者確認：DB port 綁 `127.0.0.1`（保留本機工具連線）；Cookie Secure 因 prod 目前仍純 http，只加「可條件化開啟」機制並預設關閉；DGBAS 現在就以 Java HttpClient + 內建中繼憑證修（中繼公開可得，不需私有憑證）。
+
+**發現與修法**：
+- **[偏中] 通知收件人跨租戶綁定（IDOR）**：`StockAlertService.replaceRecipients()` 把前端 `recipientIds` 直插 `stock_alert_recipient` join（該 entity 無 `owner_user_id`／無 `@Filter`，繞過多租戶兩道防線）→ 可把他人 email 掛成自己警示收件人。→ 寫入前用 owner-filtered `findByIdIn` 過濾成只留當前租戶擁有的收件人。
+- **[偏低] Session／代看 cookie 缺 Secure**：三處 `ResponseCookie` 只有 HttpOnly+SameSite=Lax。→ 單一 env 開關 `SESSION_COOKIE_SECURE`（預設 false）條件化，dev/純 http 不帶、上 TLS 設 true 即帶。
+- **[決策] PostgreSQL 對 host 暴露 5432**：`0.0.0.0:5432` → 收斂為 `127.0.0.1:5432`（僅本機）。
+- **[偏低] DGBAS `curl -k`**：全域停用 TLS 驗證。→ 改 Java HttpClient + 內建 TWCA 中繼憑證（伺服器漏送中繼）為信任錨，移除 `-k`、維持主機名驗證。
+- **[潛在] `ExcelImportService.gainRepo.deleteAll()`**：目前不可達，但接上 controller 後會刪全體使用者損益。→ 改 `deleteByOwnerUserId(requireCurrentUserId())`。
+
+- [x] 144.1 收件人過濾：`NotificationRecipientRepository` 新增 `findByIdIn(Collection<Long>)`（受 `ownerFilter` 覆蓋的派生查詢）；`StockAlertService.replaceRecipients()` 寫入前以其過濾 `recipientIds`，只保留當前租戶擁有的收件人，涵蓋 create/update。
+- [x] 144.2 Cookie Secure 條件化：`bff/application.yml` `server.reactive.session.cookie.secure: ${SESSION_COOKIE_SECURE:false}`；`TenantWebFilter`（set/clear 代看 cookie）與 `SecurityConfig.clearImpersonateCookie()` 注入 `@Value("${SESSION_COOKIE_SECURE:false}")` 布林、三處 `.secure(cookieSecure)` 同源；`docker-compose.yml` bff `environment` 加 `SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}`（附「上 TLS 後設 true」註解）。
+- [x] 144.3 DB port：`docker-compose.yml` postgres `ports` 由 `"5432:5432"` 改 `"127.0.0.1:5432:5432"`。
+- [x] 144.4 DGBAS TLS：新增 `external-materials-service/src/main/resources/certs/twca-secure-ssl-ca.pem`（TWCA 中繼，由公信根 TWCA Global Root CA 簽發、效期至 2030-10）；`MacroDataFetchClient` 加專屬 `SSLContext`／`HttpClient`（以中繼為信任錨），`fetchDgbasNationalIncome` 改用之並移除 `curl -k`。
+- [x] 144.5 匯入 owner-scoped 刪除：`RealizedGainRepository` 新增 `deleteByOwnerUserId(Long)`；`ExcelImportService` 注入 `TenantGuard`，`importRealizedGains()` 的 `gainRepo.deleteAll()` 改 `deleteByOwnerUserId(requireCurrentUserId())`，無身分時跳過清空。
+- [x] 144.6 活文件 `requirements.md`（新增 Requirement 30）+ `design.md`（Security Considerations 增「延後低風險資安項修補」節）同步
+- [x] 144.7 Docker 重 build（business-services、bff、external-materials-service 皆 `--no-cache`）+ `--force-recreate` 三 JVM 容器 + recreate postgres（`-p asset-management`）後驗證（皆通過）：
+  - 非 stale（`docker cp` 運行 jar 解壓驗）：business jar `NotificationRecipientRepository`/`StockAlertService` 含 `findByIdIn`、`RealizedGainRepository`/`ExcelImportService` 含 `deleteByOwnerUserId`；external jar 含 `BOOT-INF/classes/certs/twca-secure-ssl-ca.pem`（2061 bytes）+ `MacroDataFetchClient` 含 `buildDgbasSslContext`；bff `SecurityConfig`/`TenantWebFilter` 含 `SESSION_COOKIE_SECURE`、`application.yml` 含 `secure: ${SESSION_COOKIE_SECURE:false}`。
+  - DGBAS（項目4）：容器內 `GET /internal/macro/dgbas` 回真實資料——成長率 74 年、人均GDP(USD) 75 年（1951–2025），日誌 `DGBAS NA8101：成長率 74 年…` 無 PKIX/SSLHandshake 錯誤，證實移除 `-k` 後以 TWCA 中繼憑證建鏈+主機名驗證成功。
+  - Cookie（項目2）：bff `SESSION_COOKIE_SECURE=false`；SESSION cookie 為 `HTTPOnly; SameSite=Lax`（無 Secure）→ 純 http 登入不壞；上 TLS 設 true 三處同帶。
+  - DB port（項目3）：`docker port asset-postgres`=`127.0.0.1:5432`、host `lsof` 僅 `127.0.0.1:5432` LISTEN（不再 `0.0.0.0`）。
+  - 服務：4 容器 `(healthy)`、`GET /`=200、未登入經 BFF `/api/bff/dashboard/summary`=401。
+  - 待人工（項目1/5 屬 login-gated 寫入路徑）：登入後於警示頁勾選收件人建立/更新警示，確認只能綁自己的收件人（他人 id 被靜默濾除）；Excel 匯入已實現損益確認只清當前使用者資料。（程式已編譯+部署，邏輯經 owner-filtered `findByIdIn`／`deleteByOwnerUserId` 保證。）

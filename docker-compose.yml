@@ -14,7 +14,9 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./db/init:/docker-entrypoint-initdb.d
     ports:
-      - "5432:5432"
+      # Requirement 30：只綁 127.0.0.1（本機工具如 DBeaver/psql 仍可連），不對外部網卡暴露。
+      # 容器間走 asset-net 內部網路以 service name postgres:5432 連線，不依賴此 mapping。
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
@@ -127,6 +129,9 @@ services:
       # Gmail OAuth2 登入（Requirement 28）：值由專案 .env 注入；未填時用 placeholder 讓 BFF 仍能啟動
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-placeholder-client-id}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-placeholder-secret}
+      # Session／代看 cookie Secure 開關（Requirement 30）：目前 nginx 為純 http，維持 false 以免瀏覽器不回送登入 cookie；
+      # 正式環境於 Nginx 終止 TLS（https）後設 SESSION_COOKIE_SECURE=true 才帶 Secure。
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
     ports:
       - "8080:8080"
     depends_on:

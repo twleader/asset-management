@@ -59,6 +59,15 @@ public class TenantWebFilter implements WebFilter {
      */
     private static final BffUser ANONYMOUS = new BffUser(null, null, null, null, null, null);
 
+    /**
+     * 代看 cookie 的 {@code Secure} 屬性開關（Requirement 30）：由 {@code SESSION_COOKIE_SECURE} 控制，預設 false。
+     * 正式環境上 TLS（https）後設 true 才帶 Secure；dev/純 http 維持 false，否則瀏覽器不回送 cookie。
+     * 必須與 {@link com.steven.assets.bff.config.SecurityConfig#clearImpersonateCookie()} 用同一值，
+     * 否則清除代看 cookie 時屬性不符而清不掉。
+     */
+    @org.springframework.beans.factory.annotation.Value("${SESSION_COOKIE_SECURE:false}")
+    private boolean cookieSecure;
+
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
         return ReactiveSecurityContextHolder.getContext()
@@ -99,9 +108,9 @@ public class TenantWebFilter implements WebFilter {
         boolean clear = target == null || (me.id() != null && target.equals(me.id()));
         ResponseCookie cookie = clear
                 ? ResponseCookie.from(AuthConstants.COOKIE_IMPERSONATE, "")
-                        .path("/").httpOnly(true).sameSite("Lax").maxAge(0).build()
+                        .path("/").httpOnly(true).secure(cookieSecure).sameSite("Lax").maxAge(0).build()
                 : ResponseCookie.from(AuthConstants.COOKIE_IMPERSONATE, String.valueOf(target))
-                        .path("/").httpOnly(true).sameSite("Lax").build();
+                        .path("/").httpOnly(true).secure(cookieSecure).sameSite("Lax").build();
         resp.getHeaders().add(HttpHeaders.SET_COOKIE, cookie.toString());
         resp.setStatusCode(HttpStatus.NO_CONTENT);
         return resp.setComplete();

@@ -41,6 +41,13 @@ import java.util.Set;
 public class SecurityConfig {
 
     /**
+     * 代看 cookie 的 {@code Secure} 屬性開關（Requirement 30）：由 {@code SESSION_COOKIE_SECURE} 控制，預設 false。
+     * 必須與 {@link com.steven.assets.bff.security.TenantWebFilter} 寫入代看 cookie 時同值，否則清除時屬性不符而清不掉。
+     */
+    @org.springframework.beans.factory.annotation.Value("${SESSION_COOKIE_SECURE:false}")
+    private boolean cookieSecure;
+
+    /**
      * 全域共用參考資料的「前端可觸及路徑」（Requirement 29）：這些路徑的寫入（POST/PUT/PATCH/DELETE）限 ADMIN，
      * GET 開放給已登入者（下拉選單需讀取）。backend {@code AdminGateInterceptor} 對 rewrite 後的
      * {@code /api/settings/**} 再擋一次（縱深防禦）。
@@ -146,12 +153,12 @@ public class SecurityConfig {
     }
 
     /**
-     * 產生「清除代看 cookie」的 Set-Cookie 值。屬性（path/httpOnly/sameSite）需與
+     * 產生「清除代看 cookie」的 Set-Cookie 值。屬性（path/httpOnly/secure/sameSite）需與
      * {@link com.steven.assets.bff.security.TenantWebFilter} 寫入代看 cookie 時一致，瀏覽器才會覆蓋／刪除。
      */
     private String clearImpersonateCookie() {
         return ResponseCookie.from(AuthConstants.COOKIE_IMPERSONATE, "")
-                .path("/").httpOnly(true).sameSite("Lax").maxAge(0).build()
+                .path("/").httpOnly(true).secure(cookieSecure).sameSite("Lax").maxAge(0).build()
                 .toString();
     }
 }
