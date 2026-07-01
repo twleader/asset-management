@@ -3572,4 +3572,9 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 143.4 參數驗證：`MarketDataController` `@Validated`+`@Pattern`（code/market/currency）；`StockAlertController.lookup-name` 同規則 `@Pattern`；`MacroHistoryController.index-intraday` market 白名單；`GlobalExceptionHandler` 處理 `ConstraintViolationException` → 400。（後兩者為覆驗補抓的其它外部路徑。）
 - [x] 143.5 活文件 `requirements.md`（新增 Requirement 29）+ `design.md`（Security Considerations 增資安修補節）同步
 - [x] 143.6 對抗式覆驗（5-agent read-only workflow）：抓出並補齊 3 個同頁遺漏 XSS bar sink、fund_master 授權遺漏、2 條其它外部參數路徑、`.claude.bak` 遺留；backend/bff `mvn compile` 通過（frontend 因本機無 node_modules 改於 Docker build 驗證，vite `@` alias 已確認）
-- [ ] 143.7 Docker 重 build（frontend + business-services + bff）+ recreate 後驗證：非 admin 寫 `/api/settings/banks`、`/api/funds` 回 403、`GET` 仍 200；`code=2330%26x=1`、`market=x/../y` 之類回 400；Dashboard 圓餅/橫條 tooltip 對惡意股名/基金名顯示轉義文字（非執行）
+- [x] 143.7 Docker 重 build（business-services+bff `--no-cache`、frontend）+ `--force-recreate` 三容器（`-p asset-management`，從主 repo build 覆蓋共用 `:latest` tag）後驗證（皆通過）：
+  - 非 stale：運行 jar 內 `AdminGateInterceptor.class` 含 `isGlobalReferenceDataPath`/`/api/funds`、`MarketDataController.class` 含 `^[A-Za-z0-9.\-]{1,12}$`+`@Pattern`、bff `SecurityConfig.class` 含 `/api/funds(/**)`；前端 `DashboardView-*.js` 含 `&#39;`/`&lt;`/`&quot;`（escape 邏輯）。
+  - 授權（直打 business 帶 `X-User-*`）：`GET /api/settings/banks`(USER)=200、`POST`(USER)=403、`POST`(ADMIN)=500（通過 gate、僅因空 body 缺 `code`）；`/api/funds` 同（GET USER 200 / POST USER 403 / POST ADMIN 非403）；`PATCH /api/settings/banks/1/active`(USER)=403。
+  - 參數白名單：`dividend-rate code=2330&x=1`=400、`code=../v1/x`=400、正當 `code=2330`=非400；`index-intraday market=BADCODE!`=400、`market=TWSE`=非400；`stock-alerts/lookup-name code=x&y=1`=400。
+  - 服務：business/bff `(healthy)`、`GET /`=200、未登入經 BFF `/api/*`=401。
+  - 待人工：Dashboard 圓餅/橫條 tooltip 對含 `<img onerror>` 的惡意股名/基金名，需登入後 hover 目視確認顯示為轉義文字（chunk 已含 escape，行為預期）。
