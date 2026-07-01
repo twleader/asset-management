@@ -17,3 +17,15 @@ frontend/dist/
 .idea/
 *.iml
 .vscode/
+
+# Claude Code 本機設定備份（含本機路徑 / 允許查詢清單，勿上傳）
+.claude.bak/
+
+# 資料庫檔與資料 dump（含真實個人財務資料，勿上傳 — 資安 Requirement 29）
+# 生產環境的 seed / 個資改由部署方本機提供；如需保留「不含真實資料」的種子檔，請用 git add -f
+*.mv.db
+*.trace.db
+/data/
+backend/data/
+db/init/*.sql
+stock_alert_data.sql

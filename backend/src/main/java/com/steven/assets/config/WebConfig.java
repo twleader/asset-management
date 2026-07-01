@@ -18,9 +18,11 @@ public class WebConfig implements WebMvcConfigurer {
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         // 多租戶 owner 過濾改由 TenantFilterAspect 在 repository 層啟用（不依賴 interceptor / OSIV 註冊順序）。
-        // ADMIN 守門：備份/還原與使用者管理端點
+        // ADMIN 守門：備份/還原、使用者管理，以及全域共用參考資料（/api/settings + /api/funds 基金主檔 的寫入）。
+        // /api/settings/** 與 /api/funds(/**) 的 GET 由 interceptor 內部放行（見 AdminGateInterceptor），僅寫入限 ADMIN（Requirement 29）。
         registry.addInterceptor(adminGateInterceptor)
-                .addPathPatterns("/api/backups/**", "/internal/users/**");
+                .addPathPatterns("/api/backups/**", "/internal/users/**",
+                        "/api/settings/**", "/api/funds", "/api/funds/**");
     }
 
     @Override

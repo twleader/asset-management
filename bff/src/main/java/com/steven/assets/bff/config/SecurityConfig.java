@@ -5,6 +5,7 @@ import com.steven.assets.bff.security.BusinessUserClient;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
 import org.springframework.security.config.annotation.web.reactive.EnableWebFluxSecurity;
@@ -39,6 +40,27 @@ import java.util.Set;
 @EnableWebFluxSecurity
 public class SecurityConfig {
 
+    /**
+     * 全域共用參考資料的「前端可觸及路徑」（Requirement 29）：這些路徑的寫入（POST/PUT/PATCH/DELETE）限 ADMIN，
+     * GET 開放給已登入者（下拉選單需讀取）。backend {@code AdminGateInterceptor} 對 rewrite 後的
+     * {@code /api/settings/**} 再擋一次（縱深防禦）。
+     *
+     * <p>刻意不含 per-user 路徑：{@code /api/bff/payment-account-settings/accounts/**}（代繳帳戶）與
+     * {@code /api/bff/notification-settings/recipients/**}（通知收件人），一般使用者仍可管理自己的資料。
+     */
+    private static final String[] GLOBAL_SETTINGS_PATHS = {
+            "/api/settings/**",
+            "/api/funds",            // fund_master 主檔（passthrough，GET 開放、寫入限 ADMIN）
+            "/api/funds/**",
+            "/api/bff/bank-settings/**",
+            "/api/bff/broker-settings/**",
+            "/api/bff/deposit-type-settings/**",
+            "/api/bff/market-type-settings/**",
+            "/api/bff/asset-class-settings/**",
+            "/api/bff/transit-fund-type-settings/**",
+            "/api/bff/payment-account-settings/categories/**"
+    };
+
     @Bean
     public SecurityWebFilterChain springSecurityFilterChain(ServerHttpSecurity http) {
         http
@@ -48,6 +70,11 @@ public class SecurityConfig {
                         .pathMatchers("/api/bff/backup-restore/**").hasAuthority(AuthConstants.AUTHORITY_ADMIN)
                         .pathMatchers("/api/bff/user-management/**").hasAuthority(AuthConstants.AUTHORITY_ADMIN)
                         .pathMatchers("/api/impersonate/**").hasAuthority(AuthConstants.AUTHORITY_ADMIN)
+                        // 全域共用參考資料：寫入限 ADMIN（GET 不列入 → 落到 anyExchange().authenticated()）
+                        .pathMatchers(HttpMethod.POST, GLOBAL_SETTINGS_PATHS).hasAuthority(AuthConstants.AUTHORITY_ADMIN)
+                        .pathMatchers(HttpMethod.PUT, GLOBAL_SETTINGS_PATHS).hasAuthority(AuthConstants.AUTHORITY_ADMIN)
+                        .pathMatchers(HttpMethod.PATCH, GLOBAL_SETTINGS_PATHS).hasAuthority(AuthConstants.AUTHORITY_ADMIN)
+                        .pathMatchers(HttpMethod.DELETE, GLOBAL_SETTINGS_PATHS).hasAuthority(AuthConstants.AUTHORITY_ADMIN)
                         .anyExchange().authenticated())
                 .oauth2Login(o -> o.authenticationSuccessHandler(spaSuccessHandler()))
                 .logout(l -> l.logoutUrl("/logout").logoutSuccessHandler(status200LogoutHandler()))

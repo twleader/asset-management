@@ -1639,6 +1639,17 @@ volumes:
 - business-services 不對外，`X-User-*` header 信任建立於「compose 內網、BFF 為唯一入口」；business-services 暴露於外網即會被繞過（部署層保證）
 - 多租戶：受隔離 entity 一律經 `ownerFilter` 過濾，管理者代看僅 ADMIN session 可變更 effectiveUserId，避免越權讀取他人資產
 
+### 資安弱點修補（Requirement 29）
+
+一次全系統資安審查後的修補，四項：
+
+1. **Stored XSS（Dashboard tooltip）**：ECharts tooltip `formatter` 回傳字串以 raw HTML 渲染。新增 `frontend/src/utils/escapeHtml.js`，`DashboardView.vue` **六處** tooltip（資產分類細分 `fmtRow`/`fmtTooltip`、台股穿透、美股穿透、股票橫條 `stockBarOption`、基金橫條 `fundBarOption`、銀行存款橫條 `bankOption`）對持股股名／代號／英文全名／基金名／銀行名一律 `escapeHtml()` 轉義（後三處橫條圖 sink 為對抗式覆驗於同頁補抓）。威脅模型重點：股名／基金名為使用者自由輸入，未轉義時「使用者植入 `<img onerror>` → 管理者代看該使用者 → payload 於 admin session 同源執行 → 可打 admin API」構成提權，故此為 High。`label.formatter`（`{b}` 樣板、canvas 文字非 HTML）與只插數字/硬編碼系列名的 formatter 不受影響。
+2. **全域共用設定寫入限 ADMIN**：共用參考資料（`bank`/`broker`/`deposit_type`/`market_type`/`asset_class`/`stock_style`/`bond_term`/`transit_fund_type`/`payment_category`、`stock` override，以及 `fund_master` 信託基金主檔）無 `owner_user_id`，原本任何 ACTIVE 使用者皆可 `POST/PUT/PATCH/DELETE` 竄改，影響全體。改為雙層授權：
+   - **BFF `SecurityConfig`**：對前端可觸及的共用設定路徑（`/api/settings/**`、`/api/funds(/**)` + 各 `/api/bff/*-settings/**`）之寫入方法（POST/PUT/PATCH/DELETE）限 `ROLE_ADMIN`；GET 落到 `authenticated()`。`GLOBAL_SETTINGS_PATHS` **刻意排除** per-user 的 `/api/bff/payment-account-settings/accounts/**` 與 `/api/bff/notification-settings/recipients/**`。
+   - **backend `AdminGateInterceptor`**（縱深防禦，攔截器掛 `/api/settings/**` 與 `/api/funds(/**)`）：非唯讀方法（非 GET/HEAD/OPTIONS）要求 `X-User-Role=ADMIN`，讀取放行。因 per-user 資料 base path（`/api/payment-accounts`、`/api/notification-recipients`）與操作型 `/api/fund-nav`、`/api/fund-dividend` refresh/backfill 不在受管路徑之下，故此規則精準不誤傷。`fund_master` 授權遺漏為對抗式覆驗補抓（寫入端點在 `/api/funds` 而非 `/api/settings`）。
+3. **外部行情參數白名單**：所有「使用者可控且流入外部行情 client」的參數做白名單（見 Requirement 29 AC）——`MarketDataController`（code/market/currency，`@Validated`+`@Pattern`，涵蓋 BFF stock-analysis rewrite 至 `/api/market-data/*`）、`StockAlertController.lookup-name`（code/market 同規則）、`MacroHistoryController.index-intraday`（market 以已知指數集合白名單）。阻擋 `&`/`?`/`#`/路徑穿越注入（污染共用行情表）。違規 → `ConstraintViolationException`／`IllegalArgumentException` → `GlobalExceptionHandler` 回 400。host 皆硬編碼故非任意 SSRF，此為參數注入強化；後兩條路徑為對抗式覆驗補抓。
+4. **個資／本機設定不入版控**：`db/init/*.sql`（真實 seed dump）、`*.mv.db`/`*.trace.db`、`/data/`、`backend/data/`、`stock_alert_data.sql`、`.claude.bak/` 移出版控並列入 `.gitignore`（本機檔保留、部署 seed 不受影響）。git 歷史仍含既有資料，屬遺留風險，如曾外流需另清史。
+
 ---
 
 ## Requirement 24 擴充：英股市場類型（LSE UCITS ETF）
