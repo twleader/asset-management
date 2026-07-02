@@ -3607,3 +3607,23 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
   - DB port（項目3）：`docker port asset-postgres`=`127.0.0.1:5432`、host `lsof` 僅 `127.0.0.1:5432` LISTEN（不再 `0.0.0.0`）。
   - 服務：4 容器 `(healthy)`、`GET /`=200、未登入經 BFF `/api/bff/dashboard/summary`=401。
   - 待人工（項目1/5 屬 login-gated 寫入路徑）：登入後於警示頁勾選收件人建立/更新警示，確認只能綁自己的收件人（他人 id 被靜默濾除）；Excel 匯入已實現損益確認只清當前使用者資料。（程式已編譯+部署，邏輯經 owner-filtered `findByIdIn`／`deleteByOwnerUserId` 保證。）
+
+### Task 145: 收件人寄信讀取端跨租戶 defense-in-depth（Requirement 30 延伸）
+
+對應 Requirements: Requirement 30
+
+**背景**：Task 144 修補了收件人綁定的**寫入端**（`StockAlertService.replaceRecipients()` 只寫入當前租戶的收件人），但**寄信讀取端**本身仍無 owner 條件，屬 defense-in-depth 缺口（design.md 已列為後續）。`StockAlertRecipientRepository.findActiveEmailsByAlertId()` 由 `AlertNotificationDispatcher.recipientsFor()` 在**背景寄信 cron 執行緒**呼叫——無 HTTP request context → Hibernate `ownerFilter` 不啟用；且 `stock_alert_recipient` join entity 無 `owner_user_id`／無 `@Filter`。因此若 join 表殘存修補上線前（攻擊者以 IDOR 綁入他人 `recipientId`）遺留的跨租戶配對列，寄信時仍會把觸發通知寄到他人租戶 email。
+
+**修法**：
+- **[讀取端]** 查詢額外 join `StockAlert a`、加「收件人須與警示同一擁有者」條件（`r.ownerUserId = a.ownerUserId`），從讀取端保證只寄給與警示同租戶的收件人。`StockAlert.ownerUserId`／`NotificationRecipient.ownerUserId` 皆 Requirement 28 多租戶欄位。
+- **[資料清潔]** 一次性 Liquibase changeset 刪除既存跨租戶殘列（`DELETE … USING notification_recipient, stock_alert WHERE owner 不一致`）；冪等，無殘列刪 0 列，仍保留作一次性清潔。`ddl-auto:none`，schema／資料變更一律走 Liquibase。
+
+- [x] 145.1 讀取端 owner 條件：`StockAlertRecipientRepository.findActiveEmailsByAlertId` JPQL 加 join `com.steven.assets.model.StockAlert a`、條件 `a.id = s.alertId AND r.ownerUserId = a.ownerUserId`；不改變同租戶正當收件人結果。
+- [x] 145.2 Liquibase 資料清潔：新增 `backend/.../db/changelog/changes/v1.36.0-stock-alert-recipient-cross-tenant-cleanup.sql`（`--changeset steven:v1.36.0-delete-cross-tenant-alert-recipient`），`DELETE FROM stock_alert_recipient sar USING notification_recipient nr, stock_alert sa WHERE sar.recipient_id=nr.id AND sar.alert_id=sa.id AND nr.owner_user_id<>sa.owner_user_id;`；在 `db.changelog-master.yaml` 註冊 include。
+- [x] 145.3 活文件 `requirements.md`（Requirement 30 加一條 AC）+ `design.md`（延後低風險資安項修補節 item 1 由「列為後續」更新為已實作）同步。
+- [x] 145.4 Docker 重 build（business-services `--no-cache`）+ `--force-recreate --no-deps`（`-p asset-management`）後驗證（皆通過）：
+  - 非 stale：`docker cp asset-business-services:/app/app.jar` 解壓 `BOOT-INF/classes/.../StockAlertRecipientRepository.class`，`grep -a` 含新查詢完整片段 `AND a.id = s.alertId AND r.ownerUserId = a.ownerUserId AND r.active = true`。
+  - Liquibase：啟動日誌 `Running Changeset: …v1.36.0-delete-cross-tenant-alert-recipient::steven` → `ran successfully in 8ms`（Run:1 / Previously run:57）；`DATABASECHANGELOG` 該筆 `EXECUTED`（含 md5）。啟動無 Exception → Spring Data 於 bootstrap 驗證新 `@Query` JPQL 通過。
+  - 資料清潔：`stock_alert_recipient` 跨租戶殘列數 = 0（本環境本無殘列，changeset 冪等一次性清潔）；join 列總數 144 保持不變，正當同租戶列未被誤刪。
+  - 服務：business-services `(healthy)`、前端 `GET /`=200、未登入經 BFF `/api/bff/dashboard/summary`=401。
+  - 待人工（login-gated）：登入後建立含收件人的警示、觸發寄信路徑仍正常寄給自己的收件人（查詢僅多加「同 owner」條件，對 owner-filtered 寫入端產生的正當列恆成立，不誤殺）。

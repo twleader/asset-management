@@ -23,9 +23,18 @@ public interface StockAlertRecipientRepository extends JpaRepository<StockAlertR
     /**
      * 某警示「選定 ∩ active=true」的收件人 email（dispatcher 寄信用，已正規化小寫）。
      * 直接 join notification_recipient，一次取出實際收件 email，避免兩段查詢。
+     *
+     * <p>Requirement 30 defense-in-depth（Task 145）：本查詢由背景寄信 cron
+     * （{@code AlertNotificationDispatcher}）呼叫，無 HTTP request context → Hibernate {@code ownerFilter}
+     * 不啟用；且 {@link StockAlertRecipient} join entity 無 owner 欄位／{@code @Filter}。故額外 join
+     * {@code StockAlert a} 並加「收件人須與警示同一擁有者」條件（{@code r.ownerUserId = a.ownerUserId}），
+     * 即使 join 表殘存修補前（IDOR）遺留的跨租戶列，也不會把通知寄到他人租戶 email。
+     * 與寫入端 {@code replaceRecipients} 過濾互補；同租戶正當收件人結果不變。
      */
-    @Query("SELECT r.email FROM StockAlertRecipient s, com.steven.assets.model.NotificationRecipient r " +
-            "WHERE s.alertId = :alertId AND s.recipientId = r.id AND r.active = true")
+    @Query("SELECT r.email FROM StockAlertRecipient s, com.steven.assets.model.NotificationRecipient r, " +
+            "com.steven.assets.model.StockAlert a " +
+            "WHERE s.alertId = :alertId AND s.recipientId = r.id AND a.id = s.alertId " +
+            "AND r.ownerUserId = a.ownerUserId AND r.active = true")
     List<String> findActiveEmailsByAlertId(@Param("alertId") Long alertId);
 
     // 用 bulk @Modifying delete（呼叫當下立即執行 DELETE），而非衍生刪除：
