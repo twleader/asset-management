@@ -151,7 +151,10 @@ public class WatchStockService {
         List<StockAlert> alerts = alertRepo.findByStockCodeAndMarket(code, market);
         // 「警示條件」欄與「警示」欄共用同一份 cutoff：最後交易日（或當日）及前一日內觸發者套紅字
         java.time.LocalDateTime cutoff = recentTradingDayCutoff(market, StockAlertService.FRESHNESS_TRADING_DAYS);
-        r.setConditions(buildConditions(alerts, cutoff));
+        // 不論警示是否設定／觸發，皆計算當前的月線(MA20)、季線(MA60)、年線(MA240)、KD；
+        // 「警示條件」欄 MA% 條件的觸發價換算亦共用同一份即時均線值（同義欄位同一來源）
+        TechnicalIndicatorService.FullIndicators ind = indicatorService.computeAll(code, market);
+        r.setConditions(buildConditions(alerts, cutoff, ind));
 
         // 警示彙總：取該股最近一筆 lastTriggeredAt，且只顯示最後交易日（或當日）及前一日內的觸發
         alerts.stream()
@@ -164,8 +167,6 @@ public class WatchStockService {
                     r.setLastTriggeredAlertType(a.getAlertType());
                 });
 
-        // 不論警示是否設定／觸發，皆計算當前的月線(MA20)、季線(MA60)、年線(MA240)、KD
-        TechnicalIndicatorService.FullIndicators ind = indicatorService.computeAll(code, market);
         r.setMonthlyMa(ind.monthlyMa());
         r.setQuarterlyMa(ind.quarterlyMa());
         r.setAnnualMa(ind.annualMa());
@@ -213,7 +214,9 @@ public class WatchStockService {
         // 警示條件：列出該股票所有 alert 條件 label
         List<StockAlert> alerts = alertRepo.findByStockCodeAndMarket(code, market);
         java.time.LocalDateTime cutoff = recentTradingDayCutoff(market, StockAlertService.FRESHNESS_TRADING_DAYS);
-        r.setConditions(buildConditions(alerts, cutoff));
+        // 先算指標：MA 欄與「警示條件」欄 MA% 觸發價共用同一份即時均線值（同義欄位同一來源）
+        TechnicalIndicatorService.FullIndicators ind = indicatorService.computeAll(code, market);
+        r.setConditions(buildConditions(alerts, cutoff, ind));
         alerts.stream()
                 .filter(a -> a.getLastTriggeredAt() != null)
                 .filter(a -> cutoff == null || !a.getLastTriggeredAt().isBefore(cutoff))
@@ -224,7 +227,6 @@ public class WatchStockService {
                     r.setLastTriggeredAlertType(a.getAlertType());
                 });
 
-        TechnicalIndicatorService.FullIndicators ind = indicatorService.computeAll(code, market);
         r.setMonthlyMa(ind.monthlyMa());
         r.setQuarterlyMa(ind.quarterlyMa());
         r.setAnnualMa(ind.annualMa());
@@ -237,14 +239,15 @@ public class WatchStockService {
      * 把該股票所有 alert 排序成 condition list，含 label / active / triggered 旗標。
      * triggered = `alert.lastTriggeredAt` 落在 cutoff（最後交易日及前一日，共 2 個交易日）之內，前端據此套紅字。
      */
-    private static List<WatchStockDto.Condition> buildConditions(List<StockAlert> alerts, LocalDateTime cutoff) {
+    private static List<WatchStockDto.Condition> buildConditions(List<StockAlert> alerts, LocalDateTime cutoff,
+                                                                 TechnicalIndicatorService.FullIndicators ind) {
         return alerts.stream()
                 .sorted(Comparator.comparingInt(a -> a.getDisplayOrder() != null ? a.getDisplayOrder() : 0))
                 .map(a -> {
                     boolean triggered = a.getLastTriggeredAt() != null
                             && (cutoff == null || !a.getLastTriggeredAt().isBefore(cutoff));
                     return new WatchStockDto.Condition(
-                            StockAlertService.buildLabel(a),
+                            StockAlertService.buildLabel(a, ind),
                             Boolean.TRUE.equals(a.getActive()),
                             triggered);
                 })
