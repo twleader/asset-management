@@ -725,8 +725,25 @@ public class StockAlertService {
             r.setLastTriggeredDValue(a.getLastTriggeredDValue());
         }
         r.setCreatedAt(a.getCreatedAt());
-        r.setConditionLabel(buildLabel(a));
+        r.setConditionLabel(buildLabel(a, maIndicatorsForLabel(a)));
         return r;
+    }
+
+    /**
+     * 僅「MA 百分比且 threshold≠0」的警示才需要當前均線值供 {@link #buildLabel} 換算觸發價；
+     * 其餘類型（PRICE / KD / threshold=0）不需價格，回 null 以省去 {@code computeAll} 查詢。
+     * 取指標失敗時吞例外回 null（label 退回不含價格），不影響清單載入。
+     */
+    private TechnicalIndicatorService.FullIndicators maIndicatorsForLabel(StockAlert a) {
+        boolean maPct = ("MA_ABOVE_PCT".equals(a.getAlertType()) || "MA_BELOW_PCT".equals(a.getAlertType()))
+                && a.getThreshold() != null && a.getThreshold().signum() != 0;
+        if (!maPct) return null;
+        try {
+            return indicatorService.computeAll(a.getStockCode(), a.getMarket());
+        } catch (Exception e) {
+            log.warn("警示條件觸發價取指標失敗 alert {}: {}", a.getId(), e.getMessage());
+            return null;
+        }
     }
 
     /**
@@ -816,14 +833,26 @@ public class StockAlertService {
 
     /** 公開為 static：WatchStockService 在組裝「警示條件」欄時共用同一份文案。 */
     public static String buildLabel(StockAlert a) {
+        return buildLabel(a, null);
+    }
+
+    /**
+     * 帶入當前技術指標時，MA 百分比條件（{@code MA_*_PCT} 且 threshold≠0）額外附上換算後的
+     * 觸發價，例如「高於季線 20%（360）」；觸發價 = 對應均線 × (1 ± pct/100)。
+     * {@code ind} 為 null（呼叫端不需價格）或該均線資料不足時，退回不含價格的純文字。
+     * 觀察頁 / 警示頁共用此單一來源，確保兩頁「警示條件」欄口徑一致（同義欄位同一來源）。
+     */
+    public static String buildLabel(StockAlert a, TechnicalIndicatorService.FullIndicators ind) {
         double thr = a.getThreshold().doubleValue();
         return switch (a.getAlertType()) {
             case "MA_ABOVE_PCT" -> thr == 0
                     ? String.format("高於%s", maPeriodName(a.getMaPeriod()))
-                    : String.format("高於%s %.0f%%", maPeriodName(a.getMaPeriod()), thr);
+                    : String.format("高於%s %.0f%%%s", maPeriodName(a.getMaPeriod()), thr,
+                            maTriggerPriceSuffix(a, ind, thr, true));
             case "MA_BELOW_PCT" -> thr == 0
                     ? String.format("低於%s", maPeriodName(a.getMaPeriod()))
-                    : String.format("低於%s %.0f%%", maPeriodName(a.getMaPeriod()), thr);
+                    : String.format("低於%s %.0f%%%s", maPeriodName(a.getMaPeriod()), thr,
+                            maTriggerPriceSuffix(a, ind, thr, false));
             case "KD_ABOVE"              -> String.format("K 值高於 %.0f", thr);
             case "KD_BELOW"              -> String.format("K 值低於 %.0f", thr);
             case "KD_D_ABOVE"            -> String.format("D 值高於 %.0f", thr);
@@ -832,6 +861,20 @@ public class StockAlertService {
             case "PRICE_BELOW"           -> String.format("股價低於 %s", a.getThreshold().stripTrailingZeros().toPlainString());
             default -> a.getAlertType();
         };
+    }
+
+    /**
+     * MA 百分比條件的觸發價後綴「（價格）」：價格 = 對應均線（依 maPeriod 取月/季/年線）× (1 ± pct/100)。
+     * ind 為 null 或該均線資料不足（回 null / 0）時回空字串，label 不附價格。
+     */
+    private static String maTriggerPriceSuffix(StockAlert a, TechnicalIndicatorService.FullIndicators ind,
+                                               double pct, boolean above) {
+        if (ind == null) return "";
+        BigDecimal ma = pickMaForAlert(a.getAlertType(), a.getMaPeriod(), ind);
+        if (ma == null || ma.signum() == 0) return "";
+        BigDecimal price = ma.multiply(BigDecimal.valueOf(1 + (above ? pct : -pct) / 100.0))
+                .setScale(2, java.math.RoundingMode.HALF_UP);
+        return String.format("（%s）", price.stripTrailingZeros().toPlainString());
     }
 
     /** maPeriod → 顯示名稱（20=月線、60=季線、240=年線，其他則回「MA{n}」）。 */

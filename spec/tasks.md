@@ -3627,3 +3627,20 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
   - 資料清潔：`stock_alert_recipient` 跨租戶殘列數 = 0（本環境本無殘列，changeset 冪等一次性清潔）；join 列總數 144 保持不變，正當同租戶列未被誤刪。
   - 服務：business-services `(healthy)`、前端 `GET /`=200、未登入經 BFF `/api/bff/dashboard/summary`=401。
   - 待人工（login-gated）：登入後建立含收件人的警示、觸發寄信路徑仍正常寄給自己的收件人（查詢僅多加「同 owner」條件，對 owner-filtered 寫入端產生的正當列恆成立，不誤殺）。
+
+### Task 146: MA 百分比警示條件於「警示條件」欄附換算觸發價
+
+對應 Requirements: Requirement 16（新增 AC）、Requirement 14（label 範例更新）
+
+**背景**：觀察頁（`WatchStockView`）與警示頁（`StockAlertView`）的「警示條件」欄，MA 百分比條件僅顯示「高於季線 20%」「低於季線」等文字，使用者無法直接看出該條件實際會在哪個股價觸發（需自行拿當前季線 ×1.2 心算）。需求：當條件為「高於／低於 X%」時，把該條件換算後的觸發價一併顯示。
+
+**修法**（純顯示層，不動資料模型、不需 DB migration）：
+- **[單一來源]** `StockAlertService.buildLabel` 新增多載 `buildLabel(StockAlert a, FullIndicators ind)`；`MA_ABOVE_PCT` / `MA_BELOW_PCT` 且 threshold≠0 時，於百分比後附「（觸發價）」＝ `pickMaForAlert(對應均線) × (1 ± pct/100)`，`setScale(2, HALF_UP)` 去尾零。`ind` 為 null 或該均線資料不足時退回原純文字（優雅降級）。舊單參數 `buildLabel(a)` 保留、delegate 給 `buildLabel(a, null)`（dedup 訊息等不需價格處沿用）。
+- **[觀察頁]** `WatchStockService.buildConditions` 加 `FullIndicators ind` 參數並轉傳 `buildLabel`；`toResponse` / `toIndexResponse`（含 0000 大盤）把原本較後才算的 `ind = computeAll()` 上移至 `buildConditions` 之前，MA 欄與「警示條件」欄觸發價**共用同一份即時均線值**（同義欄位同一來源），零額外查詢。
+- **[警示頁]** `StockAlertService.toResponse` 新增 `maIndicatorsForLabel(a)`：僅「MA% 且 threshold≠0」才 `computeAll()`，其餘（PRICE／KD／threshold=0）回 null 省查詢；取指標失敗吞例外回 null（label 退回不含價格），不影響清單載入。
+- **[前端]** 無需改動：label 仍為字串，`WatchStockView`（`{{ c.label }}`）與 `StockAlertView`（`{{ row.conditionLabel }}`）照樣 render。
+
+- [ ] 146.1 `StockAlertService`：`buildLabel` 多載 + `maTriggerPriceSuffix`（換算/格式化）+ `toResponse` 帶 `maIndicatorsForLabel`。
+- [ ] 146.2 `WatchStockService`：`buildConditions` 加 `ind` 參數轉傳；兩處 `toResponse`／`toIndexResponse` 上移 `ind` 計算並帶入。
+- [ ] 146.3 活文件 `requirements.md`（Requirement 16 新增 AC、Requirement 14 label 範例更新）+ `design.md`（`WatchStockService` 段補「警示條件」欄 MA% 觸發價說明）同步。
+- [ ] 146.4 Docker 重 build（business-services `--no-cache`）+ recreate 後驗證：非 stale 檢查運行 jar 含新 `buildLabel(StockAlert,FullIndicators)`／`maTriggerPriceSuffix`；登入後觀察頁「高於季線 20%」條件顯示「高於季線 20%（實際價）」，且該價 = 當前季線 ×1.2；threshold=0 條件與 PRICE／KD 條件文字不變。
