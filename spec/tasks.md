@@ -3666,3 +3666,4 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
   - 服務：frontend `GET /`=200、BFF `/actuator/health`=UP、business-services／bff `(healthy)`；未登入 `/api/bff/dashboard/summary`=401。
   - 對抗式審查（3 視角 backend／bff／frontend + 懷疑式驗證）：0 confirmed findings。
   - 待人工（login-gated）：登入後 Dashboard 週末/收盤時持股表每列顯示收盤價 + 當日漲跌，上漲紅、下跌綠。
+- [x] 147.6 「管理資產」頁（`SnapshotFormView`）比照 Dashboard 顯示 frozen 當日漲跌：`SnapshotFormBffController.enrichBatch` frozen 分支 `priceChange`／`changePercent` 由 `null` 改用 `hist.get(...)`（`prices-on-date` 已算好當日漲跌）。前端無需改動——`SnapshotFormView` 三張表（台股/美股/英股）本已綁 `row.priceChange`／`row.priceChangePct` 且 CSS `.price-up=#dc2626`（漲紅）/`.price-down=#16a34a`（跌綠）為台股慣例；且此頁直接以編輯中的 `snapshotDate` 打 `prices-on-date`，回傳漲跌恆對應該基準日，無 Dashboard 的歷史快照錯配問題。僅需重 build + recreate `bff`（前端不變）。驗證：登入後管理資產頁週末/收盤時每列顯示收盤價 + 當日漲跌、漲紅跌綠。
