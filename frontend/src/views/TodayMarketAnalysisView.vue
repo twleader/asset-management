@@ -122,6 +122,33 @@
         </el-table-column>
       </el-table>
     </el-card>
+
+    <!-- 分析結果寄送對象（Task 151）：沿用通知收件人，選擇哪些 email 每日自動收到分析 -->
+    <el-card shadow="never" style="margin-top:16px">
+      <template #header>
+        <div class="recipients-head">
+          <span class="section-title">分析結果寄送對象</span>
+          <span class="recipients-hint">每個台股交易日 07:30 分析完成後，自動寄給下方開啟「接收」的收件人</span>
+        </div>
+      </template>
+      <el-table v-if="recipients.length" :data="recipients" size="small" style="width:100%">
+        <el-table-column prop="email" label="Email" show-overflow-tooltip />
+        <el-table-column label="接收每日股市分析" width="180" align="center">
+          <template #default="{ row }">
+            <el-switch
+              v-model="row.receiveMarketAnalysis"
+              :loading="togglingId === row.id"
+              :disabled="togglingId === row.id"
+              @change="(val) => toggleRecipient(row, val)"
+            />
+          </template>
+        </el-table-column>
+      </el-table>
+      <el-empty v-else :image-size="60" description="尚無收件人，請至「系統設定 → 通知設定」新增" />
+      <div v-if="recipients.length" class="recipients-foot">
+        新增／刪除收件人請至「系統設定 → 通知設定」；此處僅選擇是否接收每日股市分析。
+      </div>
+    </el-card>
   </div>
 </template>
 
@@ -139,6 +166,8 @@ const today = ref(null)
 const history = ref([])
 const settings = ref({ model: '', availableModels: [] })
 const selectedModel = ref('')
+const recipients = ref([])
+const togglingId = ref(null)
 
 const isOk = computed(() => today.value && today.value.status === 'OK')
 const availableModels = computed(() => settings.value.availableModels || [])
@@ -204,6 +233,29 @@ async function load() {
   }
 }
 
+// 分析結果寄送對象（Task 151）：載入使用者自己的收件人（owner-scoped）。
+async function loadRecipients() {
+  try {
+    recipients.value = await bffApi.todayMarketAnalysis.getRecipients()
+  } catch (e) {
+    recipients.value = []
+  }
+}
+
+// 切換某收件人「接收每日股市分析」訂閱；後端 PATCH 翻轉，回傳權威值。失敗還原開關。
+async function toggleRecipient(row, val) {
+  togglingId.value = row.id
+  try {
+    const res = await bffApi.todayMarketAnalysis.toggleMarketAnalysis(row.id)
+    row.receiveMarketAnalysis = res.receiveMarketAnalysis
+    ElMessage.success(row.receiveMarketAnalysis ? `已訂閱：${row.email}` : `已取消訂閱：${row.email}`)
+  } catch (e) {
+    row.receiveMarketAnalysis = !val   // 還原（錯誤 toast 由 api 攔截器統一處理）
+  } finally {
+    togglingId.value = null
+  }
+}
+
 // 管理者切換分析模型 → 持久化；成功後下次分析（排程或手動）生效。失敗則還原選項。
 async function onModelChange(model) {
   savingModel.value = true
@@ -236,7 +288,8 @@ async function regenerate() {
   }
 }
 
-onMounted(load)
+// 多 panel 並行載入（分析結果 + 寄送對象收件人），互不阻塞
+onMounted(() => { Promise.allSettled([load(), loadRecipients()]) })
 </script>
 
 <style scoped>
@@ -298,4 +351,7 @@ onMounted(load)
 }
 .disclaimer { color: #cbd5e1; }
 .section-title { font-weight: 700; color: #1e293b; }
+.recipients-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.recipients-hint { font-size: 12px; color: #94a3b8; }
+.recipients-foot { margin-top: 10px; font-size: 12px; color: #94a3b8; }
 </style>

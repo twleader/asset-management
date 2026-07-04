@@ -41,6 +41,14 @@ public class NotificationRecipient {
     @Builder.Default
     private Boolean active = true;
 
+    /**
+     * 是否接收「今日股市分析」每日 Email（Requirement 31 / Task 151）。
+     * 與 {@link #active}（是否接收警示通知）各自獨立；預設訂閱（沿用既有收件人），可自行取消。
+     */
+    @Column(name = "receive_market_analysis", nullable = false)
+    @Builder.Default
+    private Boolean receiveMarketAnalysis = true;
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 

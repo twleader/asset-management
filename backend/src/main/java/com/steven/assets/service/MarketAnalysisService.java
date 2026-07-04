@@ -8,6 +8,7 @@ import com.anthropic.models.messages.MessageCreateParams;
 import com.anthropic.models.messages.ThinkingConfigAdaptive;
 import com.anthropic.models.messages.WebSearchTool20260209;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.steven.assets.dto.MarketAnalysisDto;
 import com.steven.assets.dto.MarketAnalysisResult;
 import com.steven.assets.dto.MarketAnalysisSettingsDto;
 import com.steven.assets.model.DailyMarketAnalysis;
@@ -69,6 +70,7 @@ public class MarketAnalysisService {
     private final TwseIndexDailyHistoryRepository twseRepo;
     private final UsIndexDailyHistoryRepository usRepo;
     private final ObjectMapper objectMapper;
+    private final MarketAnalysisEmailDispatcher emailDispatcher;
 
     @Value("${anthropic.api-key:}")
     private String apiKey;
@@ -153,16 +155,24 @@ public class MarketAnalysisService {
     }
 
     private DailyMarketAnalysis generateInternal(LocalDate date, String trigger, boolean skipIfAlreadyOk) {
+        DailyMarketAnalysis result;
         generateLock.lock();
         try {
             if (skipIfAlreadyOk && hasOkFor(date)) {
                 log.info("今日股市分析：{} 已有成功分析，略過（trigger={}）", date, trigger);
                 return analysisRepo.findById(date).orElse(null);
             }
-            return doGenerate(date, trigger);
+            result = doGenerate(date, trigger);
         } finally {
             generateLock.unlock();
         }
+        // 每日自動寄送（Requirement 31 / Task 151）：僅排程 / self-heal 路徑（skipIfAlreadyOk）且分析成功時寄，
+        // 管理者手動重跑（skipIfAlreadyOk=false）不寄；同一交易日已有 OK 者上方已略過 → 天然只寄一次。
+        // 於鎖外寄送（不讓 SMTP 佔用 generateLock）；dispatcher 內部一律 try/catch 不拋。
+        if (skipIfAlreadyOk && result != null && DailyMarketAnalysis.STATUS_OK.equals(result.getStatus())) {
+            emailDispatcher.dispatchDaily(MarketAnalysisDto.from(result, objectMapper));
+        }
+        return result;
     }
 
     private DailyMarketAnalysis doGenerate(LocalDate date, String trigger) {

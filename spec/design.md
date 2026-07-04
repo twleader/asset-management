@@ -1917,6 +1917,29 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
   BFF：主 `GET /api/bff/today-market-analysis` 聚合改回傳 `{ today, history, settings }`；新增 `PUT /api/bff/today-market-analysis/settings` 轉發，bff `SecurityConfig` 對該 `PUT` 限 `AUTHORITY_ADMIN`。
 - **前端**：頁首（限管理者）新增模型 `el-select`（options＝`availableModels`，值＝`settings.model`）；`change` → `bffApi.todayMarketAnalysis.updateSettings({model})` 持久化，提示「下次分析生效」；一般使用者不顯示選單。卡片 `foot-meta` 的「由 {model}」仍顯示**產生該筆分析所用**的模型（`daily_market_analysis.model`），與「下次要用的模型」語意區分。
 
+### 擴充：分析結果每日 Email 寄送 + 收件人訂閱選擇（Task 151）
+
+**目標**：每日排程產生成功分析後，自動 email 給「訂閱股市分析」的收件人；收件人沿用既有 `notification_recipient`（Requirement 23），並可 per-recipient 選擇是否接收。**僅每日自動寄**（手動重新分析不寄）。
+
+- **資料模型**（Liquibase `v1.39.0-recipient-market-analysis.sql`）：`notification_recipient` 加欄
+  ```sql
+  ALTER TABLE notification_recipient
+      ADD COLUMN receive_market_analysis BOOLEAN NOT NULL DEFAULT TRUE;
+  ```
+  `DEFAULT TRUE`——沿用既有收件人故預設訂閱、可自行取消；與「是否接收警示」`active` 各自獨立（一個收件人可只收警示、只收股市分析、或兩者皆收）。Entity `NotificationRecipient` 加 `receiveMarketAnalysis`（`@Builder.Default = true`）；`NotificationRecipientDto.Response` 加同名欄位；`create` 新增收件人依 entity 預設即 `true`。
+
+- **寄送對象查詢**：`NotificationRecipientRepository.findByActiveTrueAndReceiveMarketAnalysisTrueOrderByCreatedAtAsc()`。每日排程在**背景執行緒（無 HTTP request）**呼叫 → `TenantFilterAspect` 因 `RequestContextHolder` 無 attributes 而不啟用 `ownerFilter` → 掃全體，寄給**所有租戶**已訂閱收件人（全域分析語意，比照排程本身不套 owner 過濾）。
+
+- **寄送掛勾點**（`MarketAnalysisService.generateInternal`）：解鎖後、**僅** `skipIfAlreadyOk == true`（即排程 / self-heal 路徑，`generateIfAbsent`）**且** `status == OK` 時，呼叫 `MarketAnalysisEmailDispatcher.dispatchDaily(MarketAnalysisDto)`（以 `MarketAnalysisDto.from(row, objectMapper)` 帶已解析的 keyFactors / newsHighlights）。管理者手動 `generate`（`skipIfAlreadyOk == false`）**不寄**；同一交易日 `generateIfAbsent` 已有 OK 即略過、不重複產生 → 天然只寄一次。dispatch 包 try/catch，失敗 `log.warn` 不拋（不中斷排程契約）。
+
+- **`MarketAnalysisEmailDispatcher`**（business-services `service/`）：`isEnabled()`（`EmailService`）為否或無訂閱收件人 → log 略過。組 subject `[今日股市分析] {date} 台股{偏多/偏空/中性}（信心 N）` 與 HTML 本文（方向色塊：偏多紅 `#c0392b`／偏空綠 `#27ae60`／中性灰、信心、總結、關鍵因素、台美走勢摘要、參考新聞連結）。**逐一收件人各寄一封**（`emailService.sendHtml(List.of(email), ...)`，保護彼此隱私，比照 `AlertNotificationDispatcher`）。新聞連結寄送前再過濾 http(s)（縱深）。
+
+- **BFF（一頁一支 passthrough）**：新增 `TodayMarketAnalysisRecipientsBffRoutes`（比照 `NotificationSettingsBffRoutes`）：rewrite `/api/bff/today-market-analysis/recipients(?<seg>/?.*)` → `/api/notification-recipients${seg}` → `business-services.url`。前端只透過此頁自己的 BFF 讀 / 切換收件人訂閱，與通知設定頁**共用同一 business API**（`/api/notification-recipients`）確保同一事實來源。business 端新增 `PATCH /api/notification-recipients/{id}/market-analysis`（`toggleMarketAnalysis`，`TenantGuard.assertOwned` 縱深）。
+
+- **授權**：此 passthrough 不在 `GLOBAL_SETTINGS_PATHS`、也不匹配 `today-market-analysis/generate|settings` 兩條 ADMIN 規則 → 落 `anyExchange().authenticated()`，為 per-user（owner-scoped）自管，與 `notification-settings/recipients/**` 一致（刻意不 admin-gate）。
+
+- **前端**（`TodayMarketAnalysisView.vue`）：新增「分析結果寄送對象」`el-card`（已登入者可見），`el-table` 列出自己的收件人（email / 是否啟用 / `接收每日股市分析` 開關），開關 `change` → `bffApi.todayMarketAnalysis.toggleMarketAnalysis(id)`；空清單提示「請至 系統設定 → 通知設定 新增收件人」。`api/index.js` 的 `todayMarketAnalysis` 加 `getRecipients` / `toggleMarketAnalysis`。SMTP 重用既有設定，無新增環境變數。
+
 ### 不處理
 
 - 不自建新聞抓取／`financial_news` 表（使用者選 Claude web_search）。
