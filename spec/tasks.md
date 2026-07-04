@@ -3640,9 +3640,9 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - **[警示頁]** `StockAlertService.toResponse` 新增 `maIndicatorsForLabel(a)`：僅「MA% 且 threshold≠0」才 `computeAll()`，其餘（PRICE／KD／threshold=0）回 null 省查詢；取指標失敗吞例外回 null（label 退回不含價格），不影響清單載入。
 - **[前端]** 無需改動：label 仍為字串，`WatchStockView`（`{{ c.label }}`）與 `StockAlertView`（`{{ row.conditionLabel }}`）照樣 render。
 
-- [ ] 146.1 `StockAlertService`：`buildLabel` 多載 + `maTriggerPriceSuffix`（換算/格式化）+ `toResponse` 帶 `maIndicatorsForLabel`。
-- [ ] 146.2 `WatchStockService`：`buildConditions` 加 `ind` 參數轉傳；兩處 `toResponse`／`toIndexResponse` 上移 `ind` 計算並帶入。
-- [ ] 146.3 活文件 `requirements.md`（Requirement 16 新增 AC、Requirement 14 label 範例更新）+ `design.md`（`WatchStockService` 段補「警示條件」欄 MA% 觸發價說明）同步。
+- [x] 146.1 `StockAlertService`：`buildLabel` 多載 + `maTriggerPriceSuffix`（換算/格式化）+ `toResponse` 帶 `maIndicatorsForLabel`。
+- [x] 146.2 `WatchStockService`：`buildConditions` 加 `ind` 參數轉傳；兩處 `toResponse`／`toIndexResponse` 上移 `ind` 計算並帶入。
+- [x] 146.3 活文件 `requirements.md`（Requirement 16 新增 AC、Requirement 14 label 範例更新）+ `design.md`（`WatchStockService` 段補「警示條件」欄 MA% 觸發價說明）同步。
 - [ ] 146.4 Docker 重 build（business-services `--no-cache`）+ recreate 後驗證：非 stale 檢查運行 jar 含新 `buildLabel(StockAlert,FullIndicators)`／`maTriggerPriceSuffix`；登入後觀察頁「高於季線 20%」條件顯示「高於季線 20%（實際價）」，且該價 = 當前季線 ×1.2；threshold=0 條件與 PRICE／KD 條件文字不變。
 
 ### Task 147: Dashboard 持股表「股價/漲跌(%)」欄 — 收盤/週末亦顯示當日漲跌 + 台股漲紅跌綠配色

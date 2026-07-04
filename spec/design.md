@@ -297,7 +297,7 @@ src/
 ├── stores/assetStore.js # Pinia global state
 ├── api/index.js         # Axios instance, API methods
 ├── components/          # Reusable components (TaiwanMap, UsaMap)
-└── views/               # Page-level components (22 views；含 StockMonitorView 內嵌的 WatchStockView / StockAlertView 兩個未掛路由的子 view)
+└── views/               # Page-level components (24 views；含 StockMonitorView 內嵌的 WatchStockView / StockAlertView 兩個未掛路由的子 view)
 ```
 
 **Service 層補充**
@@ -395,7 +395,7 @@ StockAlert            (到價警示，獨立資料表；觀察清單由此表 GR
 StockAlertTrigger     (警示觸發歷史，FK→stock_alert，保留 30 天)
 
 # 總經 / 指數（Requirement 18）
-TaiwanGdpPerCapitaHistory / KoreaGdpPerCapitaHistory   (人均 GDP + 實質成長率)
+TaiwanGdpPerCapitaHistory / JapanGdpPerCapitaHistory / KoreaGdpPerCapitaHistory   (人均 GDP + 實質成長率)
 TwseIndexDailyHistory / UsIndexDailyHistory            (大盤 / 海外指數每日 OHLC)
 
 # 備份（Requirement 15）
@@ -694,6 +694,7 @@ BackupRecord          (Google Drive 備份檔本地索引，UNIQUE(folder, filen
 | id | Long | PK |
 | code | String | 識別代碼（唯一） |
 | displayName | String | 顯示名稱 |
+| payable | Boolean | 是否為「待付」（true＝待付/金額為負，false＝待收/金額為正）；`NOT NULL`，預設 true。驅動 TRANSIT_* 金額正負號（見上「存款 amount 換算規則」） |
 | sortOrder | Integer | 顯示排序 |
 | active | Boolean | 是否啟用（軟刪除用） |
 
@@ -1077,6 +1078,7 @@ GET    /api/bff/gdp-twse/index-intraday?market=TWSE   # 「當日」分時：回
 
 對應資料表：
 - `taiwan_gdp_per_capita_history` (year PK, gdp_usd, real_gdp_growth_rate) — 值＝DGBAS 優先、IMF 備援
+- `japan_gdp_per_capita_history`  (year PK, gdp_usd, real_gdp_growth_rate) — 值＝純 IMF（`refreshJapanGdpFromImf`）
 - `korea_gdp_per_capita_history`  (year PK, gdp_usd, real_gdp_growth_rate) — 值＝IMF
 - `twse_index_year_end_history`   (year PK, close_point NUMERIC(12,2)) — **Task 97 起已不使用**（年末走勢圖卡移除）；資料表保留不刪，entity/repo/endpoint 已移除
 - `twse_index_daily_history`      (trading_date PK, open_point / high_point / low_point / close_point 皆 NUMERIC(12,2))
@@ -1624,9 +1626,10 @@ volumes:
 | `GET /api/me` | BFF | 已登入 | 目前使用者 + 角色 + 狀態 + 可切換清單 |
 | `POST /api/impersonate?userId={id}` | BFF（`TenantWebFilter` 攔截，非 controller） | ADMIN | 管理者代看切換（寫/清 `IMPERSONATE_UID` cookie） |
 | `POST /logout` | BFF | 已登入 | 清 session |
-| `GET /api/bff/user-management/users` 等 | BFF→business | ADMIN | 使用者管理 passthrough |
+| `GET /api/bff/user-management` 等 | BFF→business | ADMIN | 使用者管理 passthrough（rewrite → `/internal/users`） |
 | `POST /internal/users/login-upsert` | business | 內部 | 登入 upsert + 回 role/status |
 | `GET /internal/users` / `PATCH /internal/users/{id}/status` / `PATCH /internal/users/{id}/role` | business | ADMIN | 列出 / 核准·停用 / 設角色 |
+| `GET /internal/users/by-email?email={email}` | business | 內部 | 依 email 即時查 id/role/status（登入 principal 為快照，核准後即時查詢備援；見上 L1595 設計說明） |
 
 ## Security Considerations
 
