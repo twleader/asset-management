@@ -3644,3 +3644,25 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [ ] 146.2 `WatchStockService`：`buildConditions` 加 `ind` 參數轉傳；兩處 `toResponse`／`toIndexResponse` 上移 `ind` 計算並帶入。
 - [ ] 146.3 活文件 `requirements.md`（Requirement 16 新增 AC、Requirement 14 label 範例更新）+ `design.md`（`WatchStockService` 段補「警示條件」欄 MA% 觸發價說明）同步。
 - [ ] 146.4 Docker 重 build（business-services `--no-cache`）+ recreate 後驗證：非 stale 檢查運行 jar 含新 `buildLabel(StockAlert,FullIndicators)`／`maTriggerPriceSuffix`；登入後觀察頁「高於季線 20%」條件顯示「高於季線 20%（實際價）」，且該價 = 當前季線 ×1.2；threshold=0 條件與 PRICE／KD 條件文字不變。
+
+### Task 147: Dashboard 持股表「股價/漲跌(%)」欄 — 收盤/週末亦顯示當日漲跌 + 台股漲紅跌綠配色
+
+對應 Requirements: Requirement 22（「股價/漲跌(%)」欄 per-market 規則新增「frozen 亦顯示當日漲跌」＋配色 AC）
+
+**背景**：Dashboard 持股表的「股價/漲跌(%)」欄只在 `basedate == 該市場當日`（live）時顯示漲跌；收盤 / 週末 / 選歷史快照（frozen）時後端把 `priceChange`／`changePercent` 設 null，前端只顯示收盤價、看不到當日漲跌。且 live 分支的漲跌配色是「漲綠跌紅」（西方慣例），與使用者預期的台股「漲紅跌綠」相反。需求：frozen 時也顯示「該收盤日 vs 前一交易日」的當日漲跌，且漲跌一律台股慣例（漲紅、跌綠、平盤灰）。
+
+**修法**（純顯示層資料補齊，不動資料模型、不需 DB migration）：
+- **[後端]** `HistoricalDataService.SnapshotPriceDto` 加 `priceChange`／`changePercent`；`getPricesOnDate` 每檔以 `findClosestPrice(date)` 取收盤 `h`，再 `findClosestPrice(h.tradingDate − 1)` 取前一交易日收盤，算 `priceChange = close − prevClose`、`changePercent = priceChange / prevClose ×100`（HALF_UP 2 位）；前一交易日缺資料則留 null。`prices-on-date` 端點回傳新欄位（backward-compatible，其他 caller 忽略即可）。
+- **[BFF]** `SnapshotEnricher`：抽出私有 `fetchSnapshotPriceRows`（原始 `prices-on-date` list）；`fetchSnapshotClosePrices` 改 delegate（簽章不變，5 caller 不受影響）；新增 `fetchSnapshotCloseData` 一次 HTTP 回 `SnapshotCloseData{closeMap, changeMap}`。`mergePerMarketPrices` 加 `changeMap` 多載、`buildSnapshotPrice` 加 change 多載，把 frozen entry 的 `priceChange`／`changePercent` 填入。`DashboardBffController.getSummary` 改用 `fetchSnapshotCloseData`（無額外 HTTP）。
+- **[前端]** `DashboardView.vue`：新增 `changeColor`（漲紅 `#dc2626`／跌綠 `#16a34a`／平盤灰 `#94a3b8`）、`changeArrow`、`getPriceCell`（live → `getRealtimePrice`；否則 `row.stockPrice` + `stockPrices[key]` frozen 漲跌，僅在 `stockPrices.tradingDate == 該列 snapshotDate` 時採用，選歷史快照不套）、`priceNumberColor`。改寫「股價/漲跌(%)」欄模板統一走 `getPriceCell`，live 與 frozen 兩情形皆顯示漲跌並套台股配色。損益 / KPI 卡配色不動。
+
+- [x] 147.1 後端 `HistoricalDataService`：`SnapshotPriceDto` 加 `priceChange`／`changePercent`、`getPricesOnDate` 算當日漲跌（前一交易日收盤）；`import RoundingMode`。
+- [x] 147.2 BFF `SnapshotEnricher`：`fetchSnapshotPriceRows`／`fetchSnapshotCloseData`／`SnapshotCloseData` + `mergePerMarketPrices`／`buildSnapshotPrice` change 多載；`DashboardBffController.getSummary` 改用 `fetchSnapshotCloseData`。
+- [x] 147.3 前端 `DashboardView.vue`：`changeColor`／`changeArrow`／`getPriceCell`／`priceNumberColor` + 欄位模板改寫（台股漲紅跌綠、frozen 顯示當日漲跌）。
+- [x] 147.4 活文件 `requirements.md`（Requirement 22「股價/漲跌(%)」欄規則）+ `design.md`（儀表板股價顯示規則段）同步。
+- [x] 147.5 Docker 重 build（business-services + bff + frontend）+ `--force-recreate --no-deps`（`-p asset-management`）後驗證（皆通過）：
+  - 非 stale：bff jar `SnapshotEnricher.class` 含 `fetchSnapshotCloseData`／`fetchSnapshotPriceRows` 與 `SnapshotEnricher$SnapshotCloseData.class`；business-services `HistoricalDataService$SnapshotPriceDto.class` 含 `priceChange`／`changePercent` accessor；前端 chunk hash 由 `DashboardView-B4hCQaFO.js` → `DashboardView-C-w07fXK.js`（bundle 已含 `getPriceCell`）。
+  - 後端運算：`POST /api/market-data/history/prices-on-date?date=2026-07-03`（台股 0050／006208）回 `priceChange`／`changePercent`：0050 收 108.35、前一交易日（07-02）108.80 → priceChange −0.45、changePercent −0.41（=−0.45/108.80）；與 DB 對照吻合。今日 07-04 週六、最新交易日 07-03 → frozen 情境成立，兩檔皆下跌 → 前端顯示綠色。
+  - 服務：frontend `GET /`=200、BFF `/actuator/health`=UP、business-services／bff `(healthy)`；未登入 `/api/bff/dashboard/summary`=401。
+  - 對抗式審查（3 視角 backend／bff／frontend + 懷疑式驗證）：0 confirmed findings。
+  - 待人工（login-gated）：登入後 Dashboard 週末/收盤時持股表每列顯示收盤價 + 當日漲跌，上漲紅、下跌綠。

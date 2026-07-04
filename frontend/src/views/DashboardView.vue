@@ -253,17 +253,13 @@
             </el-table-column>
             <el-table-column label="股價/漲跌(%)" width="190" align="right">
               <template #default="{ row }">
-                <span v-if="getRealtimePrice(row)">
-                  <span style="font-weight:600">{{ formatPrice(getRealtimePrice(row).price) }}</span>
-                  <span v-if="getRealtimePrice(row).priceChange != null"
-                    :style="{ color: getRealtimePrice(row).priceChange >= 0 ? '#16a34a' : '#dc2626', fontSize: '11px', marginLeft: '4px' }">
-                    {{ getRealtimePrice(row).priceChange >= 0 ? '▲' : '▼' }}${{ Math.abs(getRealtimePrice(row).priceChange).toFixed(2) }}
-                    ({{ Math.abs(getRealtimePrice(row).changePercent ?? 0).toFixed(2) }}%)
+                <span v-if="getPriceCell(row)">
+                  <span :style="{ fontWeight: 600, color: priceNumberColor(row) }">{{ formatPrice(getPriceCell(row).price) }}</span>
+                  <span v-if="getPriceCell(row).priceChange != null"
+                    :style="{ color: changeColor(getPriceCell(row).priceChange), fontSize: '11px', marginLeft: '4px' }">
+                    {{ changeArrow(getPriceCell(row).priceChange) }}${{ Math.abs(getPriceCell(row).priceChange).toFixed(2) }}
+                    ({{ Math.abs(getPriceCell(row).changePercent ?? 0).toFixed(2) }}%)
                   </span>
-                </span>
-                <span v-else-if="row.stockPrice != null"
-                  :style="{ fontWeight: 600, color: isBaselineToday(row.market) ? '#94a3b8' : '#1e293b' }">
-                  {{ formatPrice(row.stockPrice) }}
                 </span>
                 <span v-else style="color:#94a3b8">-</span>
               </template>
@@ -576,6 +572,39 @@ function getRealtimePrice(row) {
     priceChange: Number(p.priceChange),
     changePercent: p.changePercent != null ? Number(p.changePercent) : null
   }
+}
+
+// 台股慣例配色：漲紅、跌綠、平盤灰（與股票走勢圖 markPoint「紅漲綠跌」一致）。
+// 註：損益 / KPI 卡沿用另一套「綠獲利、紅虧損」慣例，語意不同、刻意不統一。
+function changeColor(v) {
+  if (v == null || v === 0) return '#94a3b8' // 平盤 / 無資料：灰
+  return v > 0 ? '#dc2626' : '#16a34a'       // 漲：紅；跌：綠
+}
+function changeArrow(v) {
+  if (v == null || v === 0) return ''
+  return v > 0 ? '▲' : '▼'
+}
+// 「股價/漲跌(%)」欄顯示資料：basedate == 該市場當日 → 即時價（getRealtimePrice）；
+// 否則 → 快照收盤價 + 該收盤日「vs 前一交易日」的當日漲跌（BFF 已算入 stockPrices，收盤/週末亦可顯示）。
+function getPriceCell(row) {
+  const live = getRealtimePrice(row)
+  if (live) {
+    return { price: live.price, priceChange: live.priceChange, changePercent: live.changePercent }
+  }
+  if (row.stockPrice == null) return null
+  const p = stockPrices.value[`${row.market}_${row.stockCode}`]
+  // stockPrices map 對應「最新快照」的 basedate；選了歷史快照時其漲跌不對應該列收盤價 → 只顯示收盤價。
+  const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
+  return {
+    price: Number(row.stockPrice),
+    priceChange: belongsToRow && p.priceChange != null ? Number(p.priceChange) : null,
+    changePercent: belongsToRow && p.changePercent != null ? Number(p.changePercent) : null
+  }
+}
+// 股價數字本身顏色：live 或非基準日快照 → 深色；基準日今日但尚無 live → 灰。
+function priceNumberColor(row) {
+  if (getRealtimePrice(row)) return '#1e293b'
+  return isBaselineToday(row.market) ? '#94a3b8' : '#1e293b'
 }
 
 const formatShares = (v, market) => {
