@@ -91,7 +91,7 @@ com.steven.assets/
   - 新增觀察由前端直接呼叫 `/api/bff/stock-alert/**` 建立警示條件；移除觀察由前端在「警示條件」頁刪除該股票所有 alert 達成，因此不提供 watch-stock 級的 create / delete 端點
 - `SnapshotFormBffController`（SnapshotFormView 專屬）：把表單頁的多步協調邏輯（價格批次查 + backfill fallback + 配息率補抓 + 名稱補齊 + 匯率智慧 fallback）集中於此
   - `GET /api/bff/snapshot-form/{id}`：編輯模式 bootstrap，回傳 enriched detail + mergedStocks
-  - `POST /api/bff/snapshot-form/prices?date=YYYY-MM-DD`：批次取得每筆股票的歷史收盤價 + 漲跌 + 名稱 + 配息率（DB 缺資料時自動 backfill 重試）
+  - `POST /api/bff/snapshot-form/prices?date=YYYY-MM-DD`：批次取得每筆股票的歷史收盤價 + 漲跌 + 名稱 + 配息率（DB 缺資料時自動 backfill 重試）。`enrichBatch` per-market 基準日規則：basedate==該市場今日→用 live 即時漲跌；否則（frozen）改用 `hist`（`prices-on-date`）已算好的「當日漲跌」（該收盤日 vs 前一交易日），不再留空——收盤/週末頁也顯示漲跌，與 Dashboard 同源。前端 `SnapshotFormView` `.price-up=#dc2626`（漲紅）/`.price-down=#16a34a`（跌綠），台股慣例
   - `GET /api/bff/snapshot-form/realtime`：2 分鐘輪詢用，先 trigger 後端刷新行情再回傳 stockPrices + marketStatus
   - `GET /api/bff/snapshot-form/exchange-rate?date=YYYY-MM-DD`：取指定日期 USD 匯率（今天會先 refresh，假日往前 fallback）
   - `GET /api/bff/snapshot-form/lookups`：表單下拉一次取齊（banks / brokers / depositTypes / transitFundTypes，皆已過濾 active）

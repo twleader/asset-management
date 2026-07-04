@@ -323,8 +323,10 @@ public class SnapshotFormBffController {
                 boolean preferLive = isToday && live.get("price") != null;
                 row.put("price", preferLive ? live.get("price") : hist.get("price"));
                 row.put("tradingDate", preferLive ? live.get("tradingDate") : hist.get("tradingDate"));
-                row.put("priceChange", preferLive ? live.get("priceChange") : null);
-                row.put("changePercent", preferLive ? live.get("changePercent") : null);
+                // frozen（非該市場當日）改用 hist 的「當日漲跌」（prices-on-date 已算好：該收盤日 vs 前一交易日），
+                // 與 Dashboard 一致，讓收盤/週末頁也顯示漲跌；live 時仍用即時漲跌。
+                row.put("priceChange", preferLive ? live.get("priceChange") : hist.get("priceChange"));
+                row.put("changePercent", preferLive ? live.get("changePercent") : hist.get("changePercent"));
                 row.put("stockName", firstNonNull(div.get("stockName"), live.get("stockName")));
                 BigDecimal dr = SnapshotEnricher.toBigDecimal(div.get("dividendRate"));
                 row.put("dividendRate", dr);
