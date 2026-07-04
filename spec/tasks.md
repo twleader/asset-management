@@ -3683,3 +3683,26 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 148.2 `design.md`：ERD 後新增「Schema 基準線與 DB 層唯一鍵」澄清段（dump 為基準線、Liquibase 僅增量、兩表 DB 層約束＋位數明細、稽核只讀 changelog 的誤判提醒）。
 - [x] 148.3 `ExchangeRateHistory` 免改：Entity `buy_rate/sell_rate precision=10,scale=4` 已對齊 DB `NUMERIC(10,4)`、`@UniqueConstraint(currency,rateDate)` 已對齊 DB。
 - 148.4 部署：本次為 `@Column` 註解對齊（`ddl-auto: none` 下**零 runtime 行為變更**），不影響運行 stack 行為；如需運行 jar 位元碼與源碼一致可另行重 build business-services，但非功能必要。
+
+### Task 149: 今日股市分析 — 每交易日 07:30 由 Claude Opus 4.8 判斷當天台股走向（Requirement 31）
+
+對應 Requirements: Requirement 31
+
+**背景**：新增左側選單「今日股市分析」。每個台股交易日 07:30（Asia/Taipei）以 Claude Opus 4.8（adaptive thinking + `web_search` server tool）綜合「台股大盤＋美股主要指數近一年日線走勢（本地 DB）」與「模型即時搜尋的近期國內外財經新聞」，判斷當天台股多空走向並存 `daily_market_analysis`。使用者決策：**模型＝Opus 4.8**、**新聞＝Claude 內建 web_search（不自建抓取管線）**、**保留每日歷史可回看**。全域參考資料（不分租戶）。
+
+- [x] 149.1 spec：`requirements.md` 新增 Requirement 31；`design.md` 新增「Requirement 31：今日股市分析」設計段（架構／資料模型／API／關鍵邏輯）；本 Task。
+- [x] 149.2 資料層：Liquibase `v1.37.0-daily-market-analysis.sql`（建 `daily_market_analysis` 表）＋ master include；Entity `DailyMarketAnalysis`（無 owner）＋ `DailyMarketAnalysisRepository`（`findTopByOrderByAnalysisDateDesc`、`findRecent(PageRequest)`）。
+- [x] 149.3 Anthropic 整合：`backend/pom.xml` 加 `com.anthropic:anthropic-java`；`application.yml` 加 `anthropic.api-key`/`anthropic.model`；`MarketAnalysisService`（讀近一年指數日線 → 組近期加權 prompt → 呼叫 Opus 4.8 + web_search → 取 text 區塊解析首尾 `{}` JSON → upsert）；DTO `MarketAnalysisResult`（Jackson，忽略未知欄位）。金鑰空 → `NOT_CONFIGURED`；例外 → `FAILED` + `raw_response`，不中斷。
+- [x] 149.4 排程：`MarketAnalysisScheduler` — `@Scheduled(cron="0 30 7 * * MON-FRI", zone="Asia/Taipei")` + `marketDataService.isTwTradingDay` 閘門；`@EventListener(ApplicationReadyEvent)` 開機 self-heal（交易日且過 07:30 且今日無 OK 筆 → 補跑）。
+- [x] 149.5 Controller：`MarketAnalysisController` — `GET /today`、`GET /history`、`POST /generate`（`CurrentUserContext.isAdmin()` 縱深防禦）。
+- [x] 149.6 BFF：`TodayMarketAnalysisBffController`（`/api/bff/today-market-analysis`）聚合 today + history；`POST /generate` 轉發（timeout 180s）；bff `SecurityConfig` 對該 POST 限 `AUTHORITY_ADMIN`。
+- [x] 149.7 前端：`api/index.js` 加 `bffApi.todayMarketAnalysis`；`TodayMarketAnalysisView.vue`（方向配色台股漲紅跌綠、信心、總結、關鍵因素、新聞連結、台美走勢摘要、歷史表、管理者「重新分析」鈕）；`router/index.js` 加路由（title「今日股市分析」、icon `Sunrise`）；`App.vue` `mainMenuItems` 加項。
+- [x] 149.8 部署設定：`docker-compose.yml` business-services 透傳 `ANTHROPIC_API_KEY`（＋ `ANTHROPIC_MODEL`）；`.env.example` 補金鑰取得說明（不入版控）。
+- [x] 149.9 部署驗證：`--no-cache` 重 build business-services + bff + frontend、recreate；驗證表建立（Liquibase v1.37.0 ran）、bff route 掛載（401 非 404）、前端 chunk 產出、live 觸發一次真實分析回 `status=OK`（bias=BEARISH、引用本地美股走勢 + web_search 真新聞）並落庫、`/today`/`/history` 讀取正常、非交易日（週六）排程正確略過。
+- [x] 149.10 上線後對抗式審查修正（`/code-review` 風格 workflow：5 維度 find → skeptic verify，8 項確認）：
+  - **非 OK 重跑清空舊內容**：`doGenerate` 於載入 row 後、呼叫 LLM 前 `clearContent(row)`，確保 `FAILED`/`NOT_CONFIGURED` 不帶出上一次成功的 bias/summary/keyFactors/新聞（避免「失敗」列顯示過期多空判斷）。
+  - **並行競態**：`generate` 以 `ReentrantLock` 序列化；排程／self-heal 改走 `generateIfAbsent`（鎖內再判 `hasOkFor` 則略過），避免 cron 與 self-heal 同時對同一交易日重複昂貴 LLM 呼叫＋lost update；管理者手動仍強制重跑但受同鎖保護。
+  - **新聞連結 XSS 防護（縱深）**：後端 `sanitizeNews`／`safeHttpUrl` 僅保留 http(s) URL（web_search 為不可信來源），前端 `safeUrl()` 再擋一層，防 `javascript:`/`data:` scheme 注入 `<a href>`。
+  - **落庫不拋出**：最終 `save()` 包 try/catch；`model` 寫入前 truncate 至 64，維持「不中斷排程／手動觸發」契約。
+  - **client 資源重用**：`AnthropicClient` 改為 lazy 單例重用（OkHttp 執行緒安全），`@PreDestroy` 關閉，不再每次 `generate` new 而不釋放。
+- [x] 149.11 模型頁面可調（成本控管）：Liquibase `v1.38.0-market-analysis-setting.sql`（單列 `market_analysis_setting`，`id=1`、`model` 預設 opus-4-8、seed 一列）＋ Entity/Repo；`MarketAnalysisService` 加 `resolveModel()`（設定 → 環境預設）、`AVAILABLE_MODELS` 白名單、`getSettings()`/`updateModel()`；`doGenerate` 改用 `resolveModel()`；`MarketAnalysisController` 加 `GET/PUT /settings`（PUT 限 admin + 白名單驗證）；BFF 主 GET 聚合加 `settings`、加 `PUT /settings` 轉發、`SecurityConfig` PUT 限 ADMIN；前端頁首管理者模型 `el-select`（change → 持久化、下次生效）＋ `bffApi.todayMarketAnalysis.updateSettings`。重 build business-services+bff+frontend、recreate、驗證切換 Sonnet 5 後 `daily_market_analysis.model` 隨之改變。

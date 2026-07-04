@@ -69,6 +69,12 @@ const router = createRouter({
       meta: { title: '股市分析', icon: 'TrendCharts' }
     },
     {
+      path: '/today-market-analysis',
+      name: 'TodayMarketAnalysis',
+      component: () => import('@/views/TodayMarketAnalysisView.vue'),
+      meta: { title: '今日股市分析', icon: 'Sunrise' }
+    },
+    {
       path: '/stocks',
       name: 'StockMonitor',
       component: () => import('@/views/StockMonitorView.vue'),

@@ -196,6 +196,18 @@ export const bffApi = {
       api.get('/bff/gdp-twse/index-intraday', { params: { market } })
   },
 
+  // TodayMarketAnalysis（今日股市分析，Requirement 31）
+  todayMarketAnalysis: {
+    get: (historyLimit = 30) =>
+      api.get('/bff/today-market-analysis', { params: { historyLimit } }),
+    // 手動重新分析（限管理者）；web search + thinking 可能耗數十秒
+    generate: () =>
+      api.post('/bff/today-market-analysis/generate', null, { timeout: 200000 }),
+    // 更新分析模型（限管理者），下次分析生效
+    updateSettings: (model) =>
+      api.put('/bff/today-market-analysis/settings', { model })
+  },
+
   // TradingCalendar
   tradingCalendar: {
     get:           (year) => api.get('/bff/trading-calendar', { params: year ? { year } : {} }),
