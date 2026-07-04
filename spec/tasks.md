@@ -3706,3 +3706,12 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
   - **落庫不拋出**：最終 `save()` 包 try/catch；`model` 寫入前 truncate 至 64，維持「不中斷排程／手動觸發」契約。
   - **client 資源重用**：`AnthropicClient` 改為 lazy 單例重用（OkHttp 執行緒安全），`@PreDestroy` 關閉，不再每次 `generate` new 而不釋放。
 - [x] 149.11 模型頁面可調（成本控管）：Liquibase `v1.38.0-market-analysis-setting.sql`（單列 `market_analysis_setting`，`id=1`、`model` 預設 opus-4-8、seed 一列）＋ Entity/Repo；`MarketAnalysisService` 加 `resolveModel()`（設定 → 環境預設）、`AVAILABLE_MODELS` 白名單、`getSettings()`/`updateModel()`；`doGenerate` 改用 `resolveModel()`；`MarketAnalysisController` 加 `GET/PUT /settings`（PUT 限 admin + 白名單驗證）；BFF 主 GET 聚合加 `settings`、加 `PUT /settings` 轉發、`SecurityConfig` PUT 限 ADMIN；前端頁首管理者模型 `el-select`（change → 持久化、下次生效）＋ `bffApi.todayMarketAnalysis.updateSettings`。重 build business-services+bff+frontend、recreate、驗證切換 Sonnet 5 後 `daily_market_analysis.model` 隨之改變。
+
+### Task 150: `/gdp-twse` 頁面選單／標題「股市分析」更名為「股市大盤查詢」
+
+對應 Requirements: Requirement 18
+
+**背景**：`/gdp-twse` 頁原顯示名稱「股市分析」與新功能「今日股市分析」（`/today-market-analysis`，Requirement 31）語意混淆，改名為「股市大盤查詢」以明確區分。純顯示字串更名，路徑 `/gdp-twse`、API、資料模型與圖表邏輯皆不變；「今日股市分析」不受影響。
+
+- [x] 150.1 spec：`requirements.md` Requirement 18 標題／User Story／驗收條目「股市分析」→「股市大盤查詢」；`design.md` 3 處（BFF 說明、路由對照表、Macro History 段標題）同步更名。tasks.md 歷史任務描述保留原名不改寫。
+- [x] 150.2 前端：`App.vue` `mainMenuItems` 該項 `title`、`router/index.js` `/gdp-twse` route `meta.title`「股市分析」→「股市大盤查詢」（未動「今日股市分析」項）。
