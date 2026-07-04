@@ -1854,12 +1854,14 @@ CREATE TABLE daily_market_analysis (
     news_highlights  TEXT,                           -- JSON array 字串：[{title,source,url,publishedAt}]
     tw_context       TEXT,                           -- 台股近期走勢摘要
     us_context       TEXT,                           -- 美股近期走勢摘要
-    model            VARCHAR(64),                    -- claude-opus-4-8
-    status           VARCHAR(16)   NOT NULL,         -- OK / FAILED / NOT_CONFIGURED
+    model            VARCHAR(64),                    -- claude-opus-4-8（或設定切換之模型）
+    status           VARCHAR(16)   NOT NULL,         -- OK / FAILED / NOT_CONFIGURED / PROCESSING
     error_message    TEXT,                           -- status=FAILED 時的錯誤摘要
     raw_response     TEXT,                           -- 模型原始回覆（除錯用）
-    generated_at     TIMESTAMPTZ   NOT NULL
+    generated_at     TIMESTAMPTZ   NOT NULL          -- PROCESSING 期間＝批次送出時間（供 poller 逾時判斷）
 );
+-- v1.42.0：改用 Batch API（非同步）新增 batch_id（在製批次 id，收尾後清 null）
+ALTER TABLE daily_market_analysis ADD COLUMN batch_id VARCHAR(64);
 ```
 
 - Entity `DailyMarketAnalysis`（無 owner 欄位、無 `@Filter`，不受 `TenantFilterAspect` owner 過濾）；`key_factors`／`news_highlights` 以 JSON 字串存，Controller 回前端時解析回陣列。
@@ -1873,7 +1875,7 @@ business-services（`MarketAnalysisController`，`/api/market-analysis`）：
 |---|---|---|
 | GET | `/api/market-analysis/today` | 最近一筆分析（DTO：含解析後的 keyFactors / newsHighlights 陣列）；無資料回 `{status:"NONE"}`。已登入者皆可讀。 |
 | GET | `/api/market-analysis/history?limit=30` | 近 N 筆（`analysis_date` 降序）。 |
-| POST | `/api/market-analysis/generate` | 立即重跑當日分析並回傳結果。縱深防禦：`CurrentUserContext.isAdmin()` 否則 `AdminRequiredException`。 |
+| POST | `/api/market-analysis/generate` | 送出當日批次分析並**立即回傳 `PROCESSING` 列**（Batch API 非同步；結果由 poller 收尾）。縱深防禦：`CurrentUserContext.isAdmin()` 否則 `AdminRequiredException`。 |
 
 BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）：
 
@@ -1886,16 +1888,18 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
 
 - **排程**（`MarketAnalysisScheduler`）：`@Scheduled(cron="0 30 7 * * MON-FRI", zone="Asia/Taipei")` → `today=LocalDate.now(TW_ZONE)`；`marketDataService.isTwTradingDay(today)` 為假則 log skip return。**開機 self-heal**：`@EventListener(ApplicationReadyEvent.class)` 延遲後，若 today 為交易日、現在已過 07:30、且今日尚無 OK 筆 → 補跑一次（背景執行緒，比照 `IndexDailyRefreshScheduler`）。背景 cron 無 HTTP request → `CurrentUserContext`（`@RequestScope`）取不到，不套 owner 過濾（本就全域）。
 - **提示詞與近期加權**（`MarketAnalysisService.buildUserPrompt`）：TAIEX 近一年日線（date,close，由舊到新）＋近 20 日另附；美股 `DJI/SPX/IXIC/SOX` 近一年日線同格。system prompt 指派「資深台股策略分析師」角色、要求先 `web_search` 近 1～2 週財經新聞、**越近期的走勢與新聞權重越高**、最後**只輸出 JSON**（schema：`bias/confidence/summary/keyFactors[]/newsHighlights[]/twContext/usContext`）、全程繁體中文。
-- **模型呼叫**：`claude-opus-4-8`、`ThinkingConfigAdaptive`、`WebSearchTool20260209`（`maxUses` 上限）、`maxTokens≈8000`、非串流（Java SDK 非串流逾時上限 ~10 分足夠背景 job）。收集回覆中所有 `text` 區塊（忽略 `server_tool_use`/`web_search_tool_result`），取首個 `{` 至末個 `}` 以 Jackson 解析（`@JsonIgnoreProperties(ignoreUnknown=true)`）。
-- **優雅降級**：`ANTHROPIC_API_KEY` 空 → 不建 client、upsert `status=NOT_CONFIGURED`；呼叫／解析例外 → `status=FAILED` + `error_message` + `raw_response`，不拋出中斷排程。`OK` 筆才視為有效分析。
+- **模型呼叫（改用 Batch API，非同步）**：`claude-opus-4-8`（或設定切換之模型）、`ThinkingConfigAdaptive`、`OutputConfig.effort`（思考深度）、`WebSearchTool20260209`（`maxUses` 可調，`0` 則不加此 tool＝關閉新聞搜尋）——後三者皆見「模型頁面可調」、`maxTokens≈8000`。請求以 **Message Batches API**（`client.messages().batches()`）送出，省 50% token 成本（同 prompt／同工具，準確度不變）。收結果時收集回覆中所有 `text` 區塊（忽略 `server_tool_use`/`web_search_tool_result`），取首個 `{` 至末個 `}` 以 Jackson 解析（`@JsonIgnoreProperties(ignoreUnknown=true)`）。
+- **Batch 非同步流程**（`MarketAnalysisService.submitBatch` / `pollPendingBatches`）：`generateInternal` 於鎖內先查當日列——已 `PROCESSING` 即不重複送出（排程與手動皆然，避免重複花費）；否則 `submitBatch`：組 `BatchCreateParams.Request.Params`（1 request，`customId="ma-"+date`）→ `batches().create` → 落 `status=PROCESSING`＋`batch_id`＋`generated_at=now`（送出時間）→ 立即返回。**背景 poller** `MarketAnalysisScheduler.pollBatches`（`@Scheduled(fixedDelay=90s, initialDelay=60s)`，**不受 `enabled` 限**）→ `pollPendingBatches()` 撈 `findByStatus(PROCESSING)`；逐列 `batches().retrieve`：非 `ENDED` 則等下輪（超過 `BATCH_MAX_AGE=12h` 判 FAILED 逾時保護）；`ENDED` 則 `resultsStreaming` 以 `customId` 取本列結果，`isSucceeded()` → `asSucceeded().message()` 解析落 `OK`、其餘（errored/canceled/expired）落 `FAILED`，並清 `batch_id`。retrieve/results 暫時性例外不改狀態、下輪重試（逾時才判 FAILED）。
+- **優雅降級**：`ANTHROPIC_API_KEY` 空 → 不建 client、upsert `status=NOT_CONFIGURED`；送出批次例外 → `status=FAILED` + `error_message`；批次結果 errored/expired/解析失敗 → `status=FAILED`（保留 `raw_response` 供除錯）。皆不拋出中斷排程／poller。`OK` 筆才視為有效分析。
 - **設定**：`application.yml` 新增 `anthropic.api-key: ${ANTHROPIC_API_KEY:}`、`anthropic.model: ${ANTHROPIC_MODEL:claude-opus-4-8}`；`docker-compose.yml` business-services 透傳 `ANTHROPIC_API_KEY`；`.env.example` 補金鑰取得說明；金鑰不入版控。
 - **前端配色**：偏多（BULLISH）紅、偏空（BEARISH）綠、中性（NEUTRAL）灰——遵循台股「漲紅跌綠」慣例（與 Dashboard Task 147 一致）。
+- **前端 PROCESSING 狀態**（Batch 非同步）：`today.status==='PROCESSING'` 顯示 info alert「分析中（批次處理中）」，並 `watch` 狀態每 30 秒自動 `load()` 直到改變（`onUnmounted` 清 timer）；手動「重新分析」送出後提示「已送出分析（批次處理中，完成後自動更新）」。歷史表 `statusLabel` 加 `PROCESSING → （分析中）`。
 
 ### 模型頁面可調（成本控管）
 
-分析模型改為可由管理者在頁面切換（Opus 4.8 / Sonnet 5 / Haiku 4.5），持久化、下次分析生效、免改環境變數或重啟。
+分析**模型**、**思考深度（effort）**、**新聞搜尋次數（web search）**皆可由管理者在頁面切換（模型：Opus 4.8 / Sonnet 5 / Haiku 4.5；effort：low / medium / high；web search：0＝關閉 / 3 / 4 / 6），另有**每日自動分析開關（enabled）**可停用 07:30 排程（省整筆花費），皆持久化、下次分析生效、免改環境變數或重啟。
 
-- **資料模型**（Liquibase `v1.38.0-market-analysis-setting.sql`，單列設定表，比照 `backup_setting`）：
+- **資料模型**（Liquibase `v1.38.0-market-analysis-setting.sql` 建表；`v1.39.0` 增 `effort`、`v1.40.0` 增 `web_search_max_uses`、`v1.41.0` 增 `enabled`。單列設定表，比照 `backup_setting`）：
   ```sql
   CREATE TABLE market_analysis_setting (
       id          INTEGER PRIMARY KEY DEFAULT 1,
@@ -1904,18 +1908,25 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
       CONSTRAINT market_analysis_setting_single_row CHECK (id = 1)
   );
   INSERT INTO market_analysis_setting (id) VALUES (1);
+  -- v1.39.0：思考深度（成本控管），既有單列以 DEFAULT 補值
+  ALTER TABLE market_analysis_setting ADD COLUMN effort VARCHAR(16) NOT NULL DEFAULT 'medium';
+  -- v1.40.0：新聞搜尋次數（成本控管），0=關閉；既有單列以 DEFAULT 補值
+  ALTER TABLE market_analysis_setting ADD COLUMN web_search_max_uses INTEGER NOT NULL DEFAULT 6;
+  -- v1.41.0：每日自動分析開關（成本控管），false=停用 07:30 排程；既有單列以 DEFAULT 補值
+  ALTER TABLE market_analysis_setting ADD COLUMN enabled BOOLEAN NOT NULL DEFAULT true;
   ```
-  Entity `MarketAnalysisSetting`（`@Id Integer id`）＋ `MarketAnalysisSettingRepository`。
-- **模型解析**：`MarketAnalysisService.resolveModel()` = 設定表 `model`（非空）→ 否則 `@Value("${anthropic.model:claude-opus-4-8}")` 環境預設。`doGenerate` 每次呼叫前 `resolveModel()`，故切換即時生效。
-- **可選模型白名單**：後端 curated 常數 `AVAILABLE_MODELS`（`{id,label}`：Opus 4.8 最佳品質／Sonnet 5 品質接近較省／Haiku 4.5 最省較粗略）。這是「有效 Claude model id 的技術白名單」而非使用者可自訂的業務分類（銀行/券商/類型…），故**不**套用「Enum 必須入庫由 `/api/settings/*` 管理」規範。`updateModel` 僅接受白名單內 id，否則 400。回傳 `availableModels` 時若目前設定值不在白名單則補入（確保下拉恆含現值）。
+  Entity `MarketAnalysisSetting`（`@Id Integer id`、`model`、`effort`、`webSearchMaxUses`、`enabled`）＋ `MarketAnalysisSettingRepository`。
+- **解析**：`resolveModel()` = 設定表 `model`（非空）→ 否則 `@Value("${anthropic.model:claude-opus-4-8}")` 環境預設；`resolveEffort()` = `effort`（白名單內）→ 否則 `medium`；`resolveWebSearchMaxUses()` = `web_search_max_uses`（白名單內）→ 否則 `6`；`isEnabled()` = `enabled` → 否則 `true`。`doGenerate` 每次呼叫前各取一次（故切換即時生效）；effort 以 `OutputConfig.builder().effort(...)`；web search 以 `WebSearchTool20260209.maxUses(N)`，且 **`N=0` 時不 `addTool`**（純技術面）、並將 system/user prompt 切為「不得杜撰新聞、`newsHighlights` 回空」。`isEnabled()` 則由 **`MarketAnalysisScheduler`** 於 07:30 cron 與開機 self-heal 開頭檢查：`false` 即 return 略過（不呼叫 LLM），手動 `generate()` 不檢查此旗標。
+- **可選白名單／開關**：後端 curated 常數 `AVAILABLE_MODELS`（Opus 4.8／Sonnet 5／Haiku 4.5）、`AVAILABLE_EFFORTS`（`low`／`medium`／`high`）、`AVAILABLE_WEB_SEARCHES`（`0` 關閉／`3`／`4`／`6`）皆為「技術白名單」而非使用者可自訂的業務分類，故**不**套用「Enum 必須入庫由 `/api/settings/*` 管理」規範；`enabled` 為布林開關（非白名單）。`effort` 不列 `xhigh`／`max`（更貴、與省錢目的相反）。`updateSettings(model, effort, webSearchMaxUses, enabled)` 對有帶的白名單欄各自驗證（非法 → 400），`enabled` 直接設值，未帶之欄不變；至少須一項；回傳清單時若現值不在白名單則補入（下拉恆含現值）。
+  - **成本觀點**：`enabled` 是最粗的槓桿——停用即當天完全不跑、零花費；`effort` 是主要槓桿（thinking 按 output token 計價，Opus $25/1M 最貴，`medium` 較隱含 `high` 省且對方向判斷足夠）；web search 為次要槓桿（搜尋費本身約 $10/1000 次很小，省的是「每輪重複處理灌回 context 的搜尋結果」；因直接影響新聞廣度，預設維持 `6` 不下修）。
 - **API**：
   | Method | Path | 說明 |
   |---|---|---|
-  | GET | `/api/market-analysis/settings` | `{ model, availableModels:[{id,label}] }`；已登入者可讀。 |
-  | PUT | `/api/market-analysis/settings` `{model}` | 更新模型；`CurrentUserContext.isAdmin()` 否則 `AdminRequiredException`；白名單驗證。 |
+  | GET | `/api/market-analysis/settings` | `{ model, effort, webSearchMaxUses, enabled, availableModels:[{id,label}], availableEfforts:[{id,label}], availableWebSearches:[{value,label}] }`；已登入者可讀。 |
+  | PUT | `/api/market-analysis/settings` `{model?, effort?, webSearchMaxUses?, enabled?}` | 更新模型／思考深度／新聞搜尋次數／每日自動分析開關（至少一項；未帶之欄不變）；`CurrentUserContext.isAdmin()` 否則 `AdminRequiredException`；白名單欄驗證。body 型別 `Map<String,Object>`（`webSearchMaxUses` 收 JSON number、`enabled` 收 JSON boolean）。 |
 
-  BFF：主 `GET /api/bff/today-market-analysis` 聚合改回傳 `{ today, history, settings }`；新增 `PUT /api/bff/today-market-analysis/settings` 轉發，bff `SecurityConfig` 對該 `PUT` 限 `AUTHORITY_ADMIN`。
-- **前端**：頁首（限管理者）新增模型 `el-select`（options＝`availableModels`，值＝`settings.model`）；`change` → `bffApi.todayMarketAnalysis.updateSettings({model})` 持久化，提示「下次分析生效」；一般使用者不顯示選單。卡片 `foot-meta` 的「由 {model}」仍顯示**產生該筆分析所用**的模型（`daily_market_analysis.model`），與「下次要用的模型」語意區分。
+  BFF：主 `GET /api/bff/today-market-analysis` 聚合回傳 `{ today, history, settings }`；`PUT /api/bff/today-market-analysis/settings` 為**泛型 Map 轉發**（body 原封轉給 business，故新增 `effort`／`web_search`／`enabled` 欄皆無需改 BFF），bff `SecurityConfig` 對該 `PUT` 限 `AUTHORITY_ADMIN`。
+- **前端**：頁首（限管理者）並列「每日自動分析」`el-switch`（v-model 布林）＋三個 `el-select`——模型（`availableModels`）、思考深度（`availableEfforts`）、新聞搜尋（`availableWebSearches`，值為整數）；各自 `change` → `updateSettings({model})` / `{effort}` / `{webSearchMaxUses}` / `{enabled}` 持久化，提示訊息，失敗還原；`busy` computed（任一儲存中或分析中）停用全部控制項避免併發覆蓋；`.header-actions` 加 `flex-wrap` 讓開關＋三下拉＋按鈕在窄寬度優雅換行；停用時「尚無資料」`el-empty` 說明改為「已停用、由管理者手動產生」；一般使用者不顯示這些控制項。卡片 `foot-meta` 的「由 {model}」仍顯示**產生該筆分析所用**的模型（`daily_market_analysis.model`），與「下次要用的設定」語意區分（effort／web search／enabled 屬設定層、不逐筆記錄於 `daily_market_analysis`）。
 
 ### 不處理
 

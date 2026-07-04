@@ -18,6 +18,9 @@ public interface DailyMarketAnalysisRepository
     /** 最近一筆分析（供頁面「今日」卡片）。 */
     Optional<DailyMarketAnalysis> findTopByOrderByAnalysisDateDesc();
 
+    /** 指定狀態的所有列（供批次 poller 撈 PROCESSING）。 */
+    List<DailyMarketAnalysis> findByStatus(String status);
+
     @Query("SELECT a FROM DailyMarketAnalysis a ORDER BY a.analysisDate DESC")
     List<DailyMarketAnalysis> findRecent(PageRequest page);
 

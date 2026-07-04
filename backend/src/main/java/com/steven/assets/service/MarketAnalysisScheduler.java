@@ -38,6 +38,10 @@ public class MarketAnalysisScheduler {
     /** 每交易日 07:30 Asia/Taipei（MON-FRI，另判台股假日）。 */
     @Scheduled(cron = "0 30 7 * * MON-FRI", zone = "Asia/Taipei")
     public void scheduledAnalysis() {
+        if (!analysisService.isEnabled()) {
+            log.info("今日股市分析排程：每日自動分析已停用（enabled=false），略過（可由管理者手動觸發）");
+            return;
+        }
         LocalDate today = LocalDate.now(MarketZones.TW_ZONE);
         if (!marketDataService.isTwTradingDay(today)) {
             log.info("今日股市分析排程：{} 非台股交易日，略過", today);
@@ -46,12 +50,29 @@ public class MarketAnalysisScheduler {
         analysisService.generateIfAbsent(today, "scheduled");
     }
 
+    /**
+     * Batch API 收尾 poller：每 90 秒撈在製批次（status=PROCESSING），批次 ENDED 後取結果落庫。
+     * 不受 {@code enabled} 影響（只收尾已送出的批次，不新送）。啟動後延遲 60 秒待依賴就緒。
+     */
+    @Scheduled(fixedDelayString = "90000", initialDelayString = "60000")
+    public void pollBatches() {
+        try {
+            analysisService.pollPendingBatches();
+        } catch (Exception e) {
+            log.warn("今日股市分析：批次 poller 例外: {}", e.getMessage());
+        }
+    }
+
     /** 開機自我修復：服務於 07:30 排程時點未運行時補跑。 */
     @EventListener(ApplicationReadyEvent.class)
     public void selfHealOnStartup() {
         new Thread(() -> {
             try {
                 Thread.sleep(30_000);   // 等 DB / Liquibase 等依賴就緒
+                if (!analysisService.isEnabled()) {
+                    log.info("今日股市分析 self-heal：每日自動分析已停用（enabled=false），略過");
+                    return;
+                }
                 ZonedDateTime now = ZonedDateTime.now(MarketZones.TW_ZONE);
                 LocalDate today = now.toLocalDate();
                 boolean tradingDay = marketDataService.isTwTradingDay(today);

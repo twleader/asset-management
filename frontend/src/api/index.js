@@ -203,9 +203,9 @@ export const bffApi = {
     // 手動重新分析（限管理者）；web search + thinking 可能耗數十秒
     generate: () =>
       api.post('/bff/today-market-analysis/generate', null, { timeout: 200000 }),
-    // 更新分析模型（限管理者），下次分析生效
-    updateSettings: (model) =>
-      api.put('/bff/today-market-analysis/settings', { model })
+    // 更新分析設定（模型／思考深度 effort，限管理者），下次分析生效。payload 例：{ model } 或 { effort }
+    updateSettings: (payload) =>
+      api.put('/bff/today-market-analysis/settings', payload)
   },
 
   // TradingCalendar
