@@ -80,6 +80,18 @@ public class SnapshotEnricher {
             LocalDate basedate,
             List<Map<String, Object>> livePrices,
             Map<String, BigDecimal> closeMap) {
+        return mergePerMarketPrices(basedate, livePrices, closeMap, Collections.emptyMap());
+    }
+
+    /**
+     * 同上，但 frozen（非該市場當日）的收盤價 entry 額外帶入 changeMap 中「該收盤日 vs 前一交易日收盤」
+     * 的當日漲跌（priceChange / changePercent），使收盤 / 週末頁的「股價/漲跌(%)」欄仍能顯示漲跌。
+     */
+    public static List<Map<String, Object>> mergePerMarketPrices(
+            LocalDate basedate,
+            List<Map<String, Object>> livePrices,
+            Map<String, BigDecimal> closeMap,
+            Map<String, Map<String, Object>> changeMap) {
         List<Map<String, Object>> out = new ArrayList<>();
         Set<String> seen = new HashSet<>();
         for (Map<String, Object> p : livePrices) {
@@ -94,7 +106,7 @@ public class SnapshotEnricher {
             }
             BigDecimal close = closeMap.get(key);
             if (close != null) {
-                out.add(buildSnapshotPrice(market, code, close, basedate));
+                out.add(buildSnapshotPrice(market, code, close, basedate, changeMap.get(key)));
             } else {
                 out.add(p);
             }
@@ -104,19 +116,25 @@ public class SnapshotEnricher {
             String[] mc = e.getKey().split("_", 2);
             if (mc.length != 2) continue;
             if (isCurrentBasedate(basedate, mc[0])) continue;
-            out.add(buildSnapshotPrice(mc[0], mc[1], e.getValue(), basedate));
+            out.add(buildSnapshotPrice(mc[0], mc[1], e.getValue(), basedate, changeMap.get(e.getKey())));
         }
         return out;
     }
 
     private static Map<String, Object> buildSnapshotPrice(
             String market, String code, BigDecimal price, LocalDate basedate) {
+        return buildSnapshotPrice(market, code, price, basedate, null);
+    }
+
+    private static Map<String, Object> buildSnapshotPrice(
+            String market, String code, BigDecimal price, LocalDate basedate,
+            Map<String, Object> change) {
         Map<String, Object> p = new HashMap<>();
         p.put("market", market);
         p.put("stockCode", code);
         p.put("price", price);
-        p.put("priceChange", null);
-        p.put("changePercent", null);
+        p.put("priceChange", change != null ? change.get("priceChange") : null);
+        p.put("changePercent", change != null ? change.get("changePercent") : null);
         p.put("tradingDate", basedate != null ? basedate.toString() : null);
         p.put("closed", true);
         return p;
@@ -150,12 +168,59 @@ public class SnapshotEnricher {
      * 以快照日期向 business-services 取得每檔股票的歷史收盤價（USD/TWD 原幣別）。
      * 回傳 map: "市場_代號" -> price。
      */
-    @SuppressWarnings("unchecked")
     public Mono<Map<String, BigDecimal>> fetchSnapshotClosePrices(Map<String, Object> detail) {
+        return fetchSnapshotPriceRows(detail).map(prices -> {
+            Map<String, BigDecimal> map = new HashMap<>();
+            for (Map<String, Object> p : prices) {
+                String code = asString(p.get("stockCode"));
+                String market = asString(p.get("market"));
+                BigDecimal price = toBigDecimal(p.get("price"));
+                if (code != null && market != null && price != null) {
+                    map.put(market + "_" + code, price);
+                }
+            }
+            return map;
+        });
+    }
+
+    /** closeMap + per-key 當日漲跌一次取回（key -> {priceChange, changePercent}）。
+     *  與 {@link #fetchSnapshotClosePrices} 同一支 business API、同一次 HTTP，供 Dashboard 摘要
+     *  在收盤 / 週末（frozen）時「股價/漲跌(%)」欄仍顯示漲跌，避免另發一次查詢。 */
+    public Mono<SnapshotCloseData> fetchSnapshotCloseData(Map<String, Object> detail) {
+        return fetchSnapshotPriceRows(detail).map(prices -> {
+            Map<String, BigDecimal> closeMap = new HashMap<>();
+            Map<String, Map<String, Object>> changeMap = new HashMap<>();
+            for (Map<String, Object> p : prices) {
+                String code = asString(p.get("stockCode"));
+                String market = asString(p.get("market"));
+                BigDecimal price = toBigDecimal(p.get("price"));
+                if (code == null || market == null || price == null) continue;
+                String key = market + "_" + code;
+                closeMap.put(key, price);
+                BigDecimal pc = toBigDecimal(p.get("priceChange"));
+                BigDecimal cp = toBigDecimal(p.get("changePercent"));
+                if (pc != null && cp != null) {
+                    Map<String, Object> ch = new HashMap<>();
+                    ch.put("priceChange", pc);
+                    ch.put("changePercent", cp);
+                    changeMap.put(key, ch);
+                }
+            }
+            return new SnapshotCloseData(closeMap, changeMap);
+        });
+    }
+
+    /** {@link #fetchSnapshotCloseData} 回傳結構：收盤價 map + 當日漲跌 map。 */
+    public record SnapshotCloseData(Map<String, BigDecimal> closeMap,
+                                    Map<String, Map<String, Object>> changeMap) {}
+
+    /** 內部：POST /history/prices-on-date 取回原始 price rows（含 price / priceChange / changePercent / tradingDate）。 */
+    @SuppressWarnings("unchecked")
+    private Mono<List<Map<String, Object>>> fetchSnapshotPriceRows(Map<String, Object> detail) {
         Object stocksObj = detail.get("stocks");
         Object dateObj = detail.get("snapshotDate");
         if (!(stocksObj instanceof List<?> list) || dateObj == null || list.isEmpty()) {
-            return Mono.just(Collections.emptyMap());
+            return Mono.just(Collections.emptyList());
         }
         List<Map<String, String>> body = new ArrayList<>();
         Set<String> seen = new HashSet<>();
@@ -169,7 +234,7 @@ public class SnapshotEnricher {
             if (!seen.add(key)) continue;
             body.add(Map.of("code", code, "market", market));
         }
-        if (body.isEmpty()) return Mono.just(Collections.emptyMap());
+        if (body.isEmpty()) return Mono.just(Collections.emptyList());
 
         return businessServicesClient.post()
                 .uri(uriBuilder -> uriBuilder
@@ -179,19 +244,7 @@ public class SnapshotEnricher {
                 .bodyValue(body)
                 .retrieve()
                 .bodyToMono(LIST_MAP)
-                .onErrorReturn(Collections.emptyList())
-                .map(prices -> {
-                    Map<String, BigDecimal> map = new HashMap<>();
-                    for (Map<String, Object> p : prices) {
-                        String code = asString(p.get("stockCode"));
-                        String market = asString(p.get("market"));
-                        BigDecimal price = toBigDecimal(p.get("price"));
-                        if (code != null && market != null && price != null) {
-                            map.put(market + "_" + code, price);
-                        }
-                    }
-                    return map;
-                });
+                .onErrorReturn(Collections.emptyList());
     }
 
     /**

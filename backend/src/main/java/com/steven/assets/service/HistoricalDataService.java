@@ -14,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.*;
 import java.util.*;
 
@@ -303,10 +304,12 @@ public class HistoricalDataService {
     }
 
     /**
-     * 批次查詢多支股票在指定日期（或最近之前）的收盤價
-     * 回傳 Map: "市場_代號" -> 收盤價
+     * 批次查詢多支股票在指定日期（或最近之前）的收盤價 + 當日漲跌。
+     * priceChange / changePercent ＝該收盤日 vs「前一交易日收盤」之差（收盤/週末頁亦可顯示漲跌）；
+     * 無前一交易日資料時留 null（前端優雅降級為只顯示收盤價）。
      */
-    public record SnapshotPriceDto(String stockCode, String market, BigDecimal price, String tradingDate) {}
+    public record SnapshotPriceDto(String stockCode, String market, BigDecimal price, String tradingDate,
+                                   BigDecimal priceChange, BigDecimal changePercent) {}
 
     @Transactional(readOnly = true)
     public List<SnapshotPriceDto> getPricesOnDate(List<Map<String, String>> stocks, LocalDate date) {
@@ -314,13 +317,27 @@ public class HistoricalDataService {
         for (Map<String, String> s : stocks) {
             String code = s.get("code");
             String mktStr = s.get("market");
-            priceHistRepo.findClosestPrice(code, mktStr, date).ifPresent(h ->
+            priceHistRepo.findClosestPrice(code, mktStr, date).ifPresent(h -> {
+                BigDecimal close = h.getClosePrice();
+                BigDecimal priceChange = null;
+                BigDecimal changePercent = null;
+                // 前一交易日收盤：h.tradingDate 之前最後一筆（closest-on-or-before tradingDate - 1）
+                var prev = priceHistRepo.findClosestPrice(code, mktStr, h.getTradingDate().minusDays(1));
+                if (close != null && prev.isPresent()) {
+                    BigDecimal prevClose = prev.get().getClosePrice();
+                    if (prevClose != null && prevClose.compareTo(BigDecimal.ZERO) != 0) {
+                        priceChange = close.subtract(prevClose);
+                        changePercent = priceChange.multiply(BigDecimal.valueOf(100))
+                                .divide(prevClose, 2, RoundingMode.HALF_UP);
+                    }
+                }
                 result.add(new SnapshotPriceDto(
                     code, mktStr,
-                    h.getClosePrice(),
-                    h.getTradingDate().toString()
-                ))
-            );
+                    close,
+                    h.getTradingDate().toString(),
+                    priceChange, changePercent
+                ));
+            });
         }
         return result;
     }
