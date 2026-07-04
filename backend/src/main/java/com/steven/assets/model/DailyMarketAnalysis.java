@@ -90,4 +90,11 @@ public class DailyMarketAnalysis {
     /** 產生時間。 */
     @Column(name = "generated_at", nullable = false)
     private Instant generatedAt;
+
+    /**
+     * 每日 Email 寄送冪等記號（Requirement 31 / Task 151）：批次收尾首次落 OK 並寄出後戳記；
+     * 非 null 表示已寄過該交易日結果，之後（含手動重跑同日）不重寄。
+     */
+    @Column(name = "email_sent_at")
+    private Instant emailSentAt;
 }

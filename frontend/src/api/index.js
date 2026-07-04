@@ -203,9 +203,13 @@ export const bffApi = {
     // 手動重新分析（限管理者）；web search + thinking 可能耗數十秒
     generate: () =>
       api.post('/bff/today-market-analysis/generate', null, { timeout: 200000 }),
-    // 更新分析設定（模型／思考深度 effort，限管理者），下次分析生效。payload 例：{ model } 或 { effort }
+    // 更新分析設定（模型／思考深度 effort／新聞搜尋／停用，限管理者），下次分析生效。payload 例：{ model } 或 { effort }
     updateSettings: (payload) =>
-      api.put('/bff/today-market-analysis/settings', payload)
+      api.put('/bff/today-market-analysis/settings', payload),
+    // 分析結果寄送對象（Task 151）：沿用通知收件人，切換 per-recipient「接收每日股市分析」訂閱
+    getRecipients: () => api.get('/bff/today-market-analysis/recipients'),
+    toggleMarketAnalysis: (id) =>
+      api.patch(`/bff/today-market-analysis/recipients/${id}/market-analysis`)
   },
 
   // TradingCalendar

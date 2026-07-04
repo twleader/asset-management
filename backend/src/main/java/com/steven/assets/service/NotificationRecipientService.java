@@ -60,6 +60,16 @@ public class NotificationRecipientService {
         return toResponse(repo.save(r));
     }
 
+    /** 切換「是否接收今日股市分析每日 Email」訂閱（Requirement 31 / Task 151），owner-scoped 縱深保護。 */
+    @Transactional
+    public NotificationRecipientDto.Response toggleMarketAnalysis(Long id) {
+        NotificationRecipient r = repo.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Recipient not found: " + id));
+        tenantGuard.assertOwned(r.getOwnerUserId());
+        r.setReceiveMarketAnalysis(!Boolean.TRUE.equals(r.getReceiveMarketAnalysis()));
+        return toResponse(repo.save(r));
+    }
+
     @Transactional
     public void delete(Long id) {
         NotificationRecipient r = repo.findById(id)
@@ -75,6 +85,7 @@ public class NotificationRecipientService {
 
     private NotificationRecipientDto.Response toResponse(NotificationRecipient r) {
         return new NotificationRecipientDto.Response(
-                r.getId(), r.getEmail(), r.getActive(), r.getCreatedAt(), r.getUpdatedAt());
+                r.getId(), r.getEmail(), r.getActive(), r.getReceiveMarketAnalysis(),
+                r.getCreatedAt(), r.getUpdatedAt());
     }
 }

@@ -37,6 +37,12 @@ public class NotificationRecipientController {
         return service.toggleActive(id);
     }
 
+    /** 切換「是否接收今日股市分析每日 Email」訂閱（Requirement 31 / Task 151）。 */
+    @PatchMapping("/{id}/market-analysis")
+    public NotificationRecipientDto.Response toggleMarketAnalysis(@PathVariable Long id) {
+        return service.toggleMarketAnalysis(id);
+    }
+
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable Long id) {
         service.delete(id);

@@ -14,6 +14,7 @@ import com.anthropic.models.messages.batches.MessageBatch;
 import com.anthropic.models.messages.batches.MessageBatchIndividualResponse;
 import com.anthropic.models.messages.batches.MessageBatchResult;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.steven.assets.dto.MarketAnalysisDto;
 import com.steven.assets.dto.MarketAnalysisResult;
 import com.steven.assets.dto.MarketAnalysisSettingsDto;
 import com.steven.assets.model.DailyMarketAnalysis;
@@ -106,6 +107,7 @@ public class MarketAnalysisService {
     private final TwseIndexDailyHistoryRepository twseRepo;
     private final UsIndexDailyHistoryRepository usRepo;
     private final ObjectMapper objectMapper;
+    private final MarketAnalysisEmailDispatcher emailDispatcher;
 
     @Value("${anthropic.api-key:}")
     private String apiKey;
@@ -455,6 +457,17 @@ public class MarketAnalysisService {
             row.setRawResponse(rawKept);
             row.setStatus(DailyMarketAnalysis.STATUS_FAILED);
             row.setErrorMessage(truncate(e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage(), 1000));
+        }
+        // 每日自動寄送（Requirement 31 / Task 151）：批次收尾首次落 OK 即寄一次；以 email_sent_at 為冪等記號，
+        // 已寄過（含同一交易日手動重跑）不重寄 → 滿足「僅每日自動寄、不重複打擾」。dispatcher 內部 try/catch 不拋。
+        if (DailyMarketAnalysis.STATUS_OK.equals(row.getStatus()) && row.getEmailSentAt() == null) {
+            try {
+                if (emailDispatcher.dispatchDaily(MarketAnalysisDto.from(row, objectMapper))) {
+                    row.setEmailSentAt(Instant.now());
+                }
+            } catch (Exception e) {
+                log.warn("今日股市分析：寄送每日 email 失敗（date={}）: {}", date, e.getMessage());
+            }
         }
         save(row, date);
     }

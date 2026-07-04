@@ -18,6 +18,13 @@ public interface NotificationRecipientRepository extends JpaRepository<Notificat
     List<NotificationRecipient> findByActiveTrueOrderByCreatedAtAsc();
 
     /**
+     * 今日股市分析每日 Email 寄送對象（Requirement 31 / Task 151）：啟用且訂閱股市分析者。
+     * 每日排程於背景執行緒（無 request context）呼叫 → {@code TenantFilterAspect} 不啟用 {@code ownerFilter}
+     * → 掃全體，寄給所有租戶已訂閱收件人（全域分析）。
+     */
+    List<NotificationRecipient> findByActiveTrueAndReceiveMarketAnalysisTrueOrderByCreatedAtAsc();
+
+    /**
      * 依 id 批次查詢（Requirement 30）：受 {@code ownerFilter} 覆蓋的派生查詢，
      * 在 HTTP 請求執行緒下必被限縮成只回當前租戶擁有的收件人。
      * 供 {@code StockAlertService.replaceRecipients} 過濾使用者傳入的 recipientIds，

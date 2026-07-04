@@ -3719,3 +3719,23 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 
 - [x] 150.1 spec：`requirements.md` Requirement 18 標題／User Story／驗收條目「股市分析」→「股市大盤查詢」；`design.md` 3 處（BFF 說明、路由對照表、Macro History 段標題）同步更名。tasks.md 歷史任務描述保留原名不改寫。
 - [x] 150.2 前端：`App.vue` `mainMenuItems` 該項 `title`、`router/index.js` `/gdp-twse` route `meta.title`「股市分析」→「股市大盤查詢」（未動「今日股市分析」項）。
+
+### Task 151: 今日股市分析結果每日自動 Email 寄送（沿用通知收件人，per-recipient 訂閱選擇）（Requirement 31）
+
+對應 Requirements: Requirement 31
+
+**背景**：今日股市分析（Task 149）每交易日 07:30 產出走向研判，但使用者須主動開頁面才看得到。需求是「可以選擇把結果寄給哪些 email」。決策：**沿用既有通知收件人**（Requirement 23 之 `notification_recipient`，不另建名單）、**僅每日自動寄**（不放頁面手動寄送鈕）。因「選擇」故收件人加 per-recipient 訂閱旗標，警示與股市分析各自獨立訂閱。SMTP 重用既有設定，未設定則安全略過。**注意**：Task 149.15 已將分析改為 **Batch API 非同步流程**，OK 結果由背景 poller `finalizeIfReady` 產生（非 `generate` 同步回傳），故寄送掛勾落在收尾成功處，並以 `daily_market_analysis.email_sent_at` 冪等記號確保一交易日恰一封。
+
+**設計**：見 `design.md`「Requirement 31 擴充：分析結果每日 Email 寄送 + 收件人訂閱選擇」段。寄送掛勾於 `MarketAnalysisService.finalizeIfReady` 落 `status=OK` 後、`save` 前，`email_sent_at` 為空且 dispatcher 回報實際寄出才戳記；手動重新分析重跑收尾不重寄。逐一收件人各寄一封（保護 email 隱私）。
+
+#### Steps:
+
+- [x] 151.1 spec：`requirements.md` Requirement 31 新增兩條驗收條目（每日自動寄 + per-recipient 訂閱）；`design.md` 新增擴充設計段；本 Task。
+- [x] 151.2 資料層：Liquibase `v1.43.0-market-analysis-email.sql`（兩 changeset）——`notification_recipient` 加 `receive_market_analysis BOOLEAN NOT NULL DEFAULT TRUE`、`daily_market_analysis` 加 `email_sent_at TIMESTAMPTZ`（冪等記號）；註冊到 `db.changelog-master.yaml`。Entity `NotificationRecipient` 加 `receiveMarketAnalysis`（`@Builder.Default = true`）、`DailyMarketAnalysis` 加 `emailSentAt`（`Instant`）；`NotificationRecipientRepository` 加 `findByActiveTrueAndReceiveMarketAnalysisTrueOrderByCreatedAtAsc()`。
+- [x] 151.3 收件人訂閱切換：`NotificationRecipientDto.Response` 加 `receiveMarketAnalysis`；`NotificationRecipientService.toResponse` 帶入、新增 `toggleMarketAnalysis(id)`（`TenantGuard.assertOwned` 縱深）；`NotificationRecipientController` 加 `PATCH /{id}/market-analysis`。
+- [x] 151.4 寄送 dispatcher：新增 `service/MarketAnalysisEmailDispatcher.dispatchDaily(MarketAnalysisDto)`——`EmailService.isEnabled()` 否 / 無訂閱收件人則略過並回 `false`；組 subject + HTML（方向台股漲紅跌綠、信心、總結、關鍵因素、台美走勢、參考新聞 http(s) 白名單）；逐一收件人各寄一封；實際寄出回 `true`；全程 try/catch log 不拋。
+- [x] 151.5 掛勾（非同步收尾）：`MarketAnalysisService` 注入 dispatcher，`finalizeIfReady` 落 `status=OK` 後、`save` 前，若 `getEmailSentAt()==null` 以 `MarketAnalysisDto.from(row, objectMapper)` 呼叫 `dispatchDaily`，回 `true` 才 `setEmailSentAt(now)`（`save` 持久化）；包 try/catch。
+- [x] 151.6 BFF：新增 `TodayMarketAnalysisRecipientsBffRoutes`（passthrough `/api/bff/today-market-analysis/recipients/**` → `/api/notification-recipients/**`）；SecurityConfig 無需改（落 `authenticated()`，per-user owner-scoped）。
+- [x] 151.7 前端：`api/index.js` 的 `todayMarketAnalysis` 加 `getRecipients` / `toggleMarketAnalysis`；`TodayMarketAnalysisView.vue` 新增「分析結果寄送對象」`el-card`（收件人表 + `接收每日股市分析` 開關 + 空清單導引至通知設定）。
+- [ ] 151.8 整合 main（Task 149.12–149.15 Batch API/effort/web-search/enabled 已 landed）：merge origin/main、解 7 檔衝突（service 掛勾改 finalize、view/api 併存、migration 改 v1.43.0）；`--no-cache` 重 build business-services + bff + frontend、recreate；驗證 Liquibase v1.43.0 ran、兩欄位建立、bff route 掛載、切換訂閱開關持久化、既有功能（思考深度/新聞搜尋/停用/PROCESSING）未回退。
+- [ ] 151.9 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）。

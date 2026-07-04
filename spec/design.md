@@ -1928,6 +1928,33 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
   BFF：主 `GET /api/bff/today-market-analysis` 聚合回傳 `{ today, history, settings }`；`PUT /api/bff/today-market-analysis/settings` 為**泛型 Map 轉發**（body 原封轉給 business，故新增 `effort`／`web_search`／`enabled` 欄皆無需改 BFF），bff `SecurityConfig` 對該 `PUT` 限 `AUTHORITY_ADMIN`。
 - **前端**：頁首（限管理者）並列「每日自動分析」`el-switch`（v-model 布林）＋三個 `el-select`——模型（`availableModels`）、思考深度（`availableEfforts`）、新聞搜尋（`availableWebSearches`，值為整數）；各自 `change` → `updateSettings({model})` / `{effort}` / `{webSearchMaxUses}` / `{enabled}` 持久化，提示訊息，失敗還原；`busy` computed（任一儲存中或分析中）停用全部控制項避免併發覆蓋；`.header-actions` 加 `flex-wrap` 讓開關＋三下拉＋按鈕在窄寬度優雅換行；停用時「尚無資料」`el-empty` 說明改為「已停用、由管理者手動產生」；一般使用者不顯示這些控制項。卡片 `foot-meta` 的「由 {model}」仍顯示**產生該筆分析所用**的模型（`daily_market_analysis.model`），與「下次要用的設定」語意區分（effort／web search／enabled 屬設定層、不逐筆記錄於 `daily_market_analysis`）。
 
+### 擴充：分析結果每日 Email 寄送 + 收件人訂閱選擇（Task 151）
+
+**目標**：分析成功後自動 email 給「訂閱股市分析」的收件人；收件人沿用既有 `notification_recipient`（Requirement 23），並可 per-recipient 選擇是否接收。因 main 已改 **Batch API 非同步流程**（送出即 `PROCESSING`、由背景 poller `finalizeIfReady` 落 OK），寄送掛勾在收尾成功處；**一交易日恰一封**——以 `daily_market_analysis.email_sent_at` 冪等記號確保只寄一次（手動「重新分析」重跑收尾不重寄）。
+
+- **資料模型**（Liquibase `v1.43.0-market-analysis-email.sql`，兩個 changeset）：
+  ```sql
+  -- 收件人訂閱旗標
+  ALTER TABLE notification_recipient
+      ADD COLUMN receive_market_analysis BOOLEAN NOT NULL DEFAULT TRUE;
+  -- 每日寄送冪等記號（對齊 generated_at 為 timestamptz）
+  ALTER TABLE daily_market_analysis
+      ADD COLUMN email_sent_at TIMESTAMP WITH TIME ZONE;
+  ```
+  `receive_market_analysis DEFAULT TRUE`——沿用既有收件人故預設訂閱、可自行取消；與「是否接收警示」`active` 各自獨立（一個收件人可只收警示、只收股市分析、或兩者皆收）。Entity `NotificationRecipient` 加 `receiveMarketAnalysis`（`@Builder.Default = true`）、`NotificationRecipientDto.Response` 加同名欄位、`create` 依 entity 預設即 `true`；Entity `DailyMarketAnalysis` 加 `emailSentAt`（`Instant`，nullable）。
+
+- **寄送對象查詢**：`NotificationRecipientRepository.findByActiveTrueAndReceiveMarketAnalysisTrueOrderByCreatedAtAsc()`。批次收尾 poller 在**背景執行緒（無 HTTP request）**呼叫 → `TenantFilterAspect` 因 `RequestContextHolder` 無 attributes 而不啟用 `ownerFilter` → 掃全體，寄給**所有租戶**已訂閱收件人（全域分析語意，比照排程／poller 本身不套 owner 過濾）。
+
+- **寄送掛勾點**（`MarketAnalysisService.finalizeIfReady`）：批次收尾成功分支落 `status = OK` 後、`save` 前，若 `row.getEmailSentAt() == null` → 以 `MarketAnalysisDto.from(row, objectMapper)`（帶已解析 keyFactors / newsHighlights）呼叫 `emailDispatcher.dispatchDaily(dto)`；**回傳 `true`（實際寄出）才 `row.setEmailSentAt(now)`**（`save` 一併持久化記號）。故：非 OK（`PROCESSING`／`FAILED`／`NOT_CONFIGURED`）不寄；同一交易日收尾一次即寄一次，手動「重新分析」再次收尾時 `email_sent_at` 已非空 → 不重寄；未設 SMTP／無收件人時回 `false`、不戳記，留待（下次收尾或使用者補設後重跑）重試。dispatch 以 try/catch 包覆，失敗 `log.warn` 不拋（不中斷收尾契約）。
+
+- **`MarketAnalysisEmailDispatcher`**（business-services `service/`）：`isEnabled()`（`EmailService`）為否或無訂閱收件人 → log 略過。組 subject `[今日股市分析] {date} 台股{偏多/偏空/中性}（信心 N）` 與 HTML 本文（方向色塊：偏多紅 `#c0392b`／偏空綠 `#27ae60`／中性灰、信心、總結、關鍵因素、台美走勢摘要、參考新聞連結）。**逐一收件人各寄一封**（`emailService.sendHtml(List.of(email), ...)`，保護彼此隱私，比照 `AlertNotificationDispatcher`）。新聞連結寄送前再過濾 http(s)（縱深）。
+
+- **BFF（一頁一支 passthrough）**：新增 `TodayMarketAnalysisRecipientsBffRoutes`（比照 `NotificationSettingsBffRoutes`）：rewrite `/api/bff/today-market-analysis/recipients(?<seg>/?.*)` → `/api/notification-recipients${seg}` → `business-services.url`。前端只透過此頁自己的 BFF 讀 / 切換收件人訂閱，與通知設定頁**共用同一 business API**（`/api/notification-recipients`）確保同一事實來源。business 端新增 `PATCH /api/notification-recipients/{id}/market-analysis`（`toggleMarketAnalysis`，`TenantGuard.assertOwned` 縱深）。
+
+- **授權**：此 passthrough 不在 `GLOBAL_SETTINGS_PATHS`、也不匹配 `today-market-analysis/generate|settings` 兩條 ADMIN 規則 → 落 `anyExchange().authenticated()`，為 per-user（owner-scoped）自管，與 `notification-settings/recipients/**` 一致（刻意不 admin-gate）。
+
+- **前端**（`TodayMarketAnalysisView.vue`）：新增「分析結果寄送對象」`el-card`（已登入者可見），`el-table` 列出自己的收件人（email / 是否啟用 / `接收每日股市分析` 開關），開關 `change` → `bffApi.todayMarketAnalysis.toggleMarketAnalysis(id)`；空清單提示「請至 系統設定 → 通知設定 新增收件人」。`api/index.js` 的 `todayMarketAnalysis` 加 `getRecipients` / `toggleMarketAnalysis`。SMTP 重用既有設定，無新增環境變數。
+
 ### 不處理
 
 - 不自建新聞抓取／`financial_news` 表（使用者選 Claude web_search）。
