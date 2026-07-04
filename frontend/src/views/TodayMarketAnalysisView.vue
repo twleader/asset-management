@@ -1,5 +1,5 @@
 <template>
-  <div v-loading="loading" :element-loading-text="generating ? 'AI 分析中（搜尋新聞 + 研判走勢，約需數十秒）…' : '載入中…'">
+  <div v-loading="loading" :element-loading-text="generating ? '送出批次分析中…' : '載入中…'">
     <!-- 頂列：標題 + 重新分析 -->
     <div class="header-row">
       <div>
@@ -7,12 +7,22 @@
         <span class="page-sub">每個台股交易日 07:30 由 AI 綜合台股/美股走勢與近期財經新聞判斷當日走向</span>
       </div>
       <div v-if="auth.isAdmin" class="header-actions">
+        <span class="model-label">每日自動分析</span>
+        <el-switch
+          v-model="enabledFlag"
+          :disabled="busy"
+          inline-prompt
+          active-text="開"
+          inactive-text="關"
+          title="停用後每日 07:30 不自動分析（零花費）；仍可手動按「重新分析」"
+          @change="onEnabledChange"
+        />
         <span class="model-label">分析模型</span>
         <el-select
           v-model="selectedModel"
           size="default"
           style="width: 210px"
-          :disabled="generating || savingModel"
+          :disabled="busy"
           title="切換分析模型（下次分析生效）"
           @change="onModelChange"
         >
@@ -21,6 +31,38 @@
             :key="m.id"
             :label="m.label"
             :value="m.id"
+          />
+        </el-select>
+        <span class="model-label">思考深度</span>
+        <el-select
+          v-model="selectedEffort"
+          size="default"
+          style="width: 170px"
+          :disabled="busy"
+          title="切換思考深度 effort（越低越省，下次分析生效）"
+          @change="onEffortChange"
+        >
+          <el-option
+            v-for="e in availableEfforts"
+            :key="e.id"
+            :label="e.label"
+            :value="e.id"
+          />
+        </el-select>
+        <span class="model-label">新聞搜尋</span>
+        <el-select
+          v-model="selectedWebSearch"
+          size="default"
+          style="width: 190px"
+          :disabled="busy"
+          title="切換新聞搜尋次數（越少越省，0＝關閉純技術面，下次分析生效）"
+          @change="onWebSearchChange"
+        >
+          <el-option
+            v-for="w in availableWebSearches"
+            :key="w.value"
+            :label="w.label"
+            :value="w.value"
           />
         </el-select>
         <el-button
@@ -46,10 +88,17 @@
       title="今日分析產生失敗"
       :description="today.errorMessage || '請稍後重試，或由管理者按「重新分析」。'"
     />
+    <!-- 批次處理中（Batch API 非同步；poller 完成後自動更新） -->
+    <el-alert
+      v-else-if="today && today.status === 'PROCESSING'"
+      type="info" show-icon :closable="false" style="margin-bottom:16px"
+      title="分析中（批次處理中）"
+      description="已透過 Batch API 送出分析（省 50% 成本），完成後畫面會自動更新——通常數分鐘，最長不超過數十分鐘。"
+    />
     <!-- 尚無資料 -->
     <el-empty
       v-else-if="!today || today.status === 'NONE'"
-      description="尚無分析結果（等待下一個交易日 07:30 排程，或由管理者手動觸發）"
+      :description="emptyDesc"
     />
 
     <!-- 今日判斷卡片 -->
@@ -162,15 +211,29 @@ const auth = useAuthStore()
 const loading = ref(false)
 const generating = ref(false)
 const savingModel = ref(false)
+const savingEffort = ref(false)
+const savingWebSearch = ref(false)
+const savingEnabled = ref(false)
 const today = ref(null)
 const history = ref([])
-const settings = ref({ model: '', availableModels: [] })
+const settings = ref({ model: '', effort: '', webSearchMaxUses: null, enabled: true, availableModels: [], availableEfforts: [], availableWebSearches: [] })
 const selectedModel = ref('')
+const selectedEffort = ref('')
+const selectedWebSearch = ref(null)
+const enabledFlag = ref(true)
 const recipients = ref([])
 const togglingId = ref(null)
 
 const isOk = computed(() => today.value && today.value.status === 'OK')
 const availableModels = computed(() => settings.value.availableModels || [])
+const availableEfforts = computed(() => settings.value.availableEfforts || [])
+const availableWebSearches = computed(() => settings.value.availableWebSearches || [])
+// 任一設定儲存中或分析中 → 所有控制項停用，避免併發覆蓋
+const busy = computed(() => generating.value || savingModel.value || savingEffort.value || savingWebSearch.value || savingEnabled.value)
+// 尚無資料時的說明文字：停用中則點明「已停用、需手動」
+const emptyDesc = computed(() => settings.value.enabled === false
+  ? '每日自動分析已停用；由管理者按「重新分析」手動產生'
+  : '尚無分析結果（等待下一個交易日 07:30 排程，或由管理者手動觸發）')
 
 const biasText = computed(() => biasLabel(today.value?.bias))
 const biasColor = computed(() => biasHex(today.value?.bias))
@@ -204,6 +267,7 @@ function tagType(bias) {
 function statusLabel(status) {
   if (status === 'NOT_CONFIGURED') return '（未設定金鑰）'
   if (status === 'FAILED') return '（產生失敗）'
+  if (status === 'PROCESSING') return '（分析中）'
   return '—'
 }
 // 新聞連結來自 web_search（不可信）；只允許 http(s)，擋 javascript:/data: 等 scheme（防 XSS）。後端另有一層過濾。
@@ -226,8 +290,11 @@ async function load() {
     history.value = data.history || []
     settings.value = data.settings && data.settings.availableModels
       ? data.settings
-      : { model: '', availableModels: [] }
+      : { model: '', effort: '', webSearchMaxUses: null, enabled: true, availableModels: [], availableEfforts: [], availableWebSearches: [] }
     selectedModel.value = settings.value.model || ''
+    selectedEffort.value = settings.value.effort || ''
+    selectedWebSearch.value = settings.value.webSearchMaxUses ?? null
+    enabledFlag.value = settings.value.enabled !== false
   } finally {
     loading.value = false
   }
@@ -260,10 +327,12 @@ async function toggleRecipient(row, val) {
 async function onModelChange(model) {
   savingModel.value = true
   try {
-    const res = await bffApi.todayMarketAnalysis.updateSettings(model)
+    const res = await bffApi.todayMarketAnalysis.updateSettings({ model })
     if (res && res.model) {
       settings.value = res
       selectedModel.value = res.model
+      selectedEffort.value = res.effort || ''
+      selectedWebSearch.value = res.webSearchMaxUses ?? null
     }
     ElMessage.success('已切換分析模型，下次分析生效')
   } catch (e) {
@@ -273,12 +342,67 @@ async function onModelChange(model) {
   }
 }
 
+// 管理者切換思考深度 effort（成本控管）→ 持久化；成功後下次分析生效。失敗則還原選項。
+async function onEffortChange(effort) {
+  savingEffort.value = true
+  try {
+    const res = await bffApi.todayMarketAnalysis.updateSettings({ effort })
+    if (res && res.effort) {
+      settings.value = res
+      selectedModel.value = res.model || ''
+      selectedEffort.value = res.effort
+      selectedWebSearch.value = res.webSearchMaxUses ?? null
+    }
+    ElMessage.success('已切換思考深度，下次分析生效')
+  } catch (e) {
+    selectedEffort.value = settings.value.effort || ''  // 還原
+  } finally {
+    savingEffort.value = false
+  }
+}
+
+// 管理者切換新聞搜尋次數（成本控管；0＝關閉）→ 持久化；成功後下次分析生效。失敗則還原選項。
+async function onWebSearchChange(webSearchMaxUses) {
+  savingWebSearch.value = true
+  try {
+    const res = await bffApi.todayMarketAnalysis.updateSettings({ webSearchMaxUses })
+    if (res && res.webSearchMaxUses != null) {
+      settings.value = res
+      selectedModel.value = res.model || ''
+      selectedEffort.value = res.effort || ''
+      selectedWebSearch.value = res.webSearchMaxUses
+    }
+    ElMessage.success('已切換新聞搜尋次數，下次分析生效')
+  } catch (e) {
+    selectedWebSearch.value = settings.value.webSearchMaxUses ?? null  // 還原
+  } finally {
+    savingWebSearch.value = false
+  }
+}
+
+// 管理者切換「每日自動分析」開關 → 持久化。停用＝07:30 cron 跳過（零花費）；手動仍可跑。失敗則還原。
+async function onEnabledChange(enabled) {
+  savingEnabled.value = true
+  try {
+    const res = await bffApi.todayMarketAnalysis.updateSettings({ enabled })
+    if (res && res.enabled != null) {
+      settings.value = res
+      enabledFlag.value = res.enabled
+    }
+    ElMessage.success(enabled ? '已啟用每日自動分析' : '已停用每日自動分析（仍可手動重新分析）')
+  } catch (e) {
+    enabledFlag.value = settings.value.enabled !== false  // 還原
+  } finally {
+    savingEnabled.value = false
+  }
+}
+
 async function regenerate() {
   generating.value = true
   loading.value = true
   try {
     await bffApi.todayMarketAnalysis.generate()
-    ElMessage.success('分析已更新')
+    ElMessage.success('已送出分析（批次處理中，完成後自動更新）')
     await load()
   } catch (e) {
     // 錯誤 toast 由 api 攔截器統一處理
@@ -288,8 +412,22 @@ async function regenerate() {
   }
 }
 
+// PROCESSING（批次在製）時每 30 秒自動 reload，直到狀態改變；離開頁面時清除。
+let pollTimer = null
+function stopPoll() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+}
+watch(() => today.value && today.value.status, (status) => {
+  if (status === 'PROCESSING') {
+    if (!pollTimer) pollTimer = setInterval(load, 30000)
+  } else {
+    stopPoll()
+  }
+})
+
 // 多 panel 並行載入（分析結果 + 寄送對象收件人），互不阻塞
 onMounted(() => { Promise.allSettled([load(), loadRecipients()]) })
+onUnmounted(stopPoll)
 </script>
 
 <style scoped>
@@ -302,7 +440,7 @@ onMounted(() => { Promise.allSettled([load(), loadRecipients()]) })
 }
 .page-heading { font-size: 20px; font-weight: 700; color: #1e293b; }
 .page-sub { display: block; font-size: 13px; color: #94a3b8; margin-top: 4px; }
-.header-actions { display: flex; align-items: center; gap: 10px; white-space: nowrap; }
+.header-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
 .model-label { font-size: 13px; color: #64748b; }
 .main-card { overflow: hidden; }
 .bias-banner {

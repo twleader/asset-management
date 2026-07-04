@@ -156,5 +156,17 @@ databaseChangeLog:
       file: db/changelog/changes/v1.38.0-market-analysis-setting.sql
       relativeToChangelogFile: false
   - include:
+      file: db/changelog/changes/v1.39.0-market-analysis-effort.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.40.0-market-analysis-web-search.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.41.0-market-analysis-enabled.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.42.0-market-analysis-batch.sql
+      relativeToChangelogFile: false
+  - include:
       file: db/changelog/changes/v1.43.0-market-analysis-email.sql
       relativeToChangelogFile: false

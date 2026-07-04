@@ -31,6 +31,8 @@ public class DailyMarketAnalysis {
     public static final String STATUS_FAILED = "FAILED";
     /** 未設定 ANTHROPIC_API_KEY，跳過分析。 */
     public static final String STATUS_NOT_CONFIGURED = "NOT_CONFIGURED";
+    /** 已送出 Batch API 批次、等待結果中（非同步）；由背景 poller 收尾為 OK/FAILED。 */
+    public static final String STATUS_PROCESSING = "PROCESSING";
 
     /** 被分析的交易日（＝產生當日，Asia/Taipei）。 */
     @Id
@@ -69,9 +71,13 @@ public class DailyMarketAnalysis {
     @Column(name = "model", length = 64)
     private String model;
 
-    /** OK / FAILED / NOT_CONFIGURED。 */
+    /** OK / FAILED / NOT_CONFIGURED / PROCESSING。 */
     @Column(name = "status", length = 16, nullable = false)
     private String status;
+
+    /** 在製中 Anthropic Batch id（status=PROCESSING 時非空；收尾後清為 null）。 */
+    @Column(name = "batch_id", length = 64)
+    private String batchId;
 
     /** status=FAILED 時的錯誤摘要。 */
     @Column(name = "error_message", columnDefinition = "TEXT")
@@ -84,4 +90,11 @@ public class DailyMarketAnalysis {
     /** 產生時間。 */
     @Column(name = "generated_at", nullable = false)
     private Instant generatedAt;
+
+    /**
+     * 每日 Email 寄送冪等記號（Requirement 31 / Task 151）：批次收尾首次落 OK 並寄出後戳記；
+     * 非 null 表示已寄過該交易日結果，之後（含手動重跑同日）不重寄。
+     */
+    @Column(name = "email_sent_at")
+    private Instant emailSentAt;
 }

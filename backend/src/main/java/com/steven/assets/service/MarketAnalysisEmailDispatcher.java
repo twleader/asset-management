@@ -37,22 +37,25 @@ public class MarketAnalysisEmailDispatcher {
 
     /**
      * 寄送當日成功分析給訂閱收件人。僅接受 {@code status = OK} 的 DTO（呼叫端已保證，此處再防禦）。
-     * 於背景排程執行緒呼叫 → {@code TenantFilterAspect} 不啟用 ownerFilter → 讀全體訂閱收件人（全域分析）。
+     * 於背景排程執行緒（poller）呼叫 → {@code TenantFilterAspect} 不啟用 ownerFilter → 讀全體訂閱收件人（全域分析）。
+     *
+     * @return {@code true} 表示實際寄給了至少一位收件人（呼叫端據以戳記 {@code email_sent_at} 冪等記號）；
+     *         {@code false} 表示略過（非 OK / EmailService 未設定 / 無訂閱收件人 / 例外），不戳記、留待下次收尾重試。
      */
-    public void dispatchDaily(MarketAnalysisDto dto) {
+    public boolean dispatchDaily(MarketAnalysisDto dto) {
         try {
             if (dto == null || !DailyMarketAnalysis.STATUS_OK.equals(dto.status())) {
-                return;
+                return false;
             }
             if (!emailService.isEnabled()) {
                 log.info("今日股市分析 Email：EmailService 未設定，略過寄送（{}）", dto.analysisDate());
-                return;
+                return false;
             }
             List<NotificationRecipient> recipients =
                     recipientRepo.findByActiveTrueAndReceiveMarketAnalysisTrueOrderByCreatedAtAsc();
             if (recipients.isEmpty()) {
                 log.info("今日股市分析 Email：無訂閱收件人，略過寄送（{}）", dto.analysisDate());
-                return;
+                return false;
             }
 
             String subject = buildSubject(dto);
@@ -63,9 +66,11 @@ public class MarketAnalysisEmailDispatcher {
             }
             log.info("今日股市分析 Email：已寄送 {} 位訂閱收件人（{}, bias={}）",
                     recipients.size(), dto.analysisDate(), dto.bias());
+            return true;
         } catch (Exception e) {
             log.warn("今日股市分析 Email 寄送失敗（{}）：{}",
                     dto == null ? "?" : dto.analysisDate(), e.getMessage());
+            return false;
         }
     }
 

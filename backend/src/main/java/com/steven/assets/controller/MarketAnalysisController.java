@@ -60,18 +60,55 @@ public class MarketAnalysisController {
         return MarketAnalysisDto.from(row, objectMapper);
     }
 
-    /** 目前模型設定 + 可選模型清單。已登入者可讀。 */
+    /** 目前設定（模型 + 思考深度）+ 各自可選清單。已登入者可讀。 */
     @GetMapping("/settings")
     public MarketAnalysisSettingsDto getSettings() {
         return analysisService.getSettings();
     }
 
-    /** 更新分析模型（限管理者；白名單驗證於 service，非法值 → 400）。 */
+    /** 更新分析模型／思考深度／新聞搜尋次數／每日自動分析開關（限管理者；白名單驗證於 service，非法值 → 400）。body 可含 model、effort、webSearchMaxUses、enabled 之任意組合。 */
     @PutMapping("/settings")
-    public MarketAnalysisSettingsDto updateSettings(@RequestBody Map<String, String> body) {
+    public MarketAnalysisSettingsDto updateSettings(@RequestBody Map<String, Object> body) {
         if (!currentUser.isAdmin()) {
             throw new AdminRequiredException();
         }
-        return analysisService.updateModel(body == null ? null : body.get("model"));
+        return analysisService.updateSettings(
+                str(body, "model"),
+                str(body, "effort"),
+                intOrNull(body, "webSearchMaxUses"),
+                boolOrNull(body, "enabled"));
+    }
+
+    private static String str(Map<String, Object> body, String key) {
+        Object v = body == null ? null : body.get(key);
+        return v == null ? null : v.toString();
+    }
+
+    /** body 值 → Integer（JSON number 或字串皆可）；不可解析 → IllegalArgumentException（400）。 */
+    private static Integer intOrNull(Map<String, Object> body, String key) {
+        Object v = body == null ? null : body.get(key);
+        if (v == null) {
+            return null;
+        }
+        if (v instanceof Number n) {
+            return n.intValue();
+        }
+        try {
+            return Integer.valueOf(v.toString().trim());
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("新聞搜尋次數格式錯誤：" + v);
+        }
+    }
+
+    /** body 值 → Boolean（JSON boolean 或字串 "true"/"false" 皆可）。 */
+    private static Boolean boolOrNull(Map<String, Object> body, String key) {
+        Object v = body == null ? null : body.get(key);
+        if (v == null) {
+            return null;
+        }
+        if (v instanceof Boolean b) {
+            return b;
+        }
+        return Boolean.valueOf(v.toString().trim());
     }
 }
