@@ -77,7 +77,7 @@ com.steven.assets/
 - `ExchangeRateBffController`（ExchangeRateView 專屬）：`GET /api/bff/exchange-rate`（先 refresh 再回 10 年歷史）、`POST /api/bff/exchange-rate/backfill`
 - `TradingCalendarBffController`（TradingCalendarView 專屬）：`GET /api/bff/trading-calendar?year=Y`（`holidays` 為 `{tw: {date→name}, us: {date→name}}` 物件 + `marketStatus`）、`GET /api/bff/trading-calendar/market-status`
 - `SnapshotListBffController`（SnapshotListView 專屬）：`GET /api/bff/snapshot-list`、`DELETE /{id}`、`GET /export`
-- `GdpTwseBffController`（GdpTwseView 專屬，`@RequestMapping("/api/bff/gdp-twse")`）：股市分析頁的指數日線／當日＋台韓人均 GDP 聚合（Requirement 18）：
+- `GdpTwseBffController`（GdpTwseView 專屬，`@RequestMapping("/api/bff/gdp-twse")`）：股市大盤查詢頁的指數日線／當日＋台韓人均 GDP 聚合（Requirement 18）：
   - `GET /api/bff/gdp-twse`：台／韓人均 GDP + 實質成長率歷史
   - `POST /api/bff/gdp-twse/refresh`：自 IMF 刷新人均 GDP
   - `GET /api/bff/gdp-twse/index-daily`：台股大盤／海外指數每日 OHLC
@@ -330,7 +330,7 @@ src/
 | `/realized-gains` | RealizedGainView | 已實現損益 |
 | `/exchange-rate` | ExchangeRateView | 匯率走勢 |
 | `/trading-calendar` | TradingCalendarView | 交易日曆 |
-| `/gdp-twse` | GdpTwseView | 股市分析（指數日線／當日＋台韓人均 GDP；Requirement 18） |
+| `/gdp-twse` | GdpTwseView | 股市大盤查詢（指數日線／當日＋台韓人均 GDP；Requirement 18） |
 | `/settings/banks` | BankSettingsView | 銀行設定管理 |
 | `/settings/brokers` | BrokerSettingsView | 券商設定管理 |
 | `/settings/deposit-types` | DepositTypeSettingsView | 存款類型設定管理 |
@@ -1006,7 +1006,7 @@ POST   /api/market-data/exchange-rate/backfill-history?currency=USD&since=2021-0
                                                # 強制補齊指定日期起的歷史匯率（忽略現有 maxDate）
 ```
 
-#### Macro History（Requirement 18：股市分析）
+#### Macro History（Requirement 18：股市大盤查詢）
 ```
 GET    /api/taiwan-gdp                         # 全部年度人均 GDP（USD）
 GET    /api/taiwan-gdp?since=1996              # 起始年（含）以後

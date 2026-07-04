@@ -219,7 +219,7 @@ onUnmounted(() => {
 const mainMenuItems = computed(() => [
   { path: '/dashboard', title: '總覽儀表板', icon: 'DataLine' },
   { path: '/history', title: '歷年資產管理', icon: 'TrendCharts' },
-  { path: '/gdp-twse', title: '股市分析', icon: 'TrendCharts' },
+  { path: '/gdp-twse', title: '股市大盤查詢', icon: 'TrendCharts' },
   { path: '/today-market-analysis', title: '今日股市分析', icon: 'Sunrise' },
   { path: '/stocks', title: '股票觀察', icon: 'View' },
   { path: '/realized-gains', title: '已實現損益', icon: 'Money' },
