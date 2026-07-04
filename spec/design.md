@@ -403,6 +403,12 @@ BackupSetting         (備份保留代數設定，單列資料表，id = 1)
 BackupRecord          (Google Drive 備份檔本地索引，UNIQUE(folder, filename))
 ```
 
+> **Schema 基準線與 DB 層唯一鍵（重要澄清）：** 本專案的資料表基準線由 `db/init/01_dump.sql`（完整 `pg_dump` 快照，掛載進 `docker-entrypoint-initdb.d`）提供，**非** Liquibase 的 `v1.0.0-initial-schema` changeset；Liquibase 僅在此基準線之上做**增量**變更（dump 已含 `databasechangelog` 歷史，過往 changeset 視為 already-ran）。因此下列 Hibernate 早期建立、已固化進 dump 的 DB 層約束**不會出現在 Liquibase changelog**，但每個環境（運行中＋全新以 dump 初始化）皆已存在，`ddl-auto: none` 亦不會重建：
+> - `stock_price_history`：`UNIQUE (stock_code, market, trading_date)`（Hibernate 名 `ukgoyp…`）＋ `INDEX idx_sph_code_date (stock_code, trading_date)`；OHLC 皆 `NUMERIC(20,4)`（`open/high/low` nullable、`close` NOT NULL，見 v1.14.0）、`volume BIGINT NOT NULL`。Entity `@Column` 註解已對齊此位數/nullable（Task 148）。
+> - `exchange_rate_history`：`UNIQUE (currency, rate_date)`（Hibernate 名 `uk977p…`）＝ upsert 覆寫鍵；`buy_rate/sell_rate NUMERIC(10,4)`。
+>
+> 稽核提醒：只讀 Liquibase changelog 會誤判「DB 無唯一鍵、無去重保護」；實際 DB 已有上述約束（重複列數為 0），故**不需**再補 `ADD CONSTRAINT` changeset（會產生重複約束）。
+
 ### Core Entities
 
 #### AssetSnapshot

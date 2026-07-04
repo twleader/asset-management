@@ -3667,3 +3667,19 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
   - 對抗式審查（3 視角 backend／bff／frontend + 懷疑式驗證）：0 confirmed findings。
   - 待人工（login-gated）：登入後 Dashboard 週末/收盤時持股表每列顯示收盤價 + 當日漲跌，上漲紅、下跌綠。
 - [x] 147.6 「管理資產」頁（`SnapshotFormView`）比照 Dashboard 顯示 frozen 當日漲跌：`SnapshotFormBffController.enrichBatch` frozen 分支 `priceChange`／`changePercent` 由 `null` 改用 `hist.get(...)`（`prices-on-date` 已算好當日漲跌）。前端無需改動——`SnapshotFormView` 三張表（台股/美股/英股）本已綁 `row.priceChange`／`row.priceChangePct` 且 CSS `.price-up=#dc2626`（漲紅）/`.price-down=#16a34a`（跌綠）為台股慣例；且此頁直接以編輯中的 `snapshotDate` 打 `prices-on-date`，回傳漲跌恆對應該基準日，無 Dashboard 的歷史快照錯配問題。僅需重 build + recreate `bff`（前端不變）。驗證：登入後管理資產頁週末/收盤時每列顯示收盤價 + 當日漲跌、漲紅跌綠。
+
+### Task 148: spec×code 一致性維護 — Entity 位數/nullable 對齊實際 DB + schema 基準線澄清
+
+對應 Requirements: 無（排程稽核 `spec-code-consistency-check` 發現的一致性項，非新功能）
+
+**背景**：排程稽核比對出 `StockPriceHistory` Entity 的 `@Column` 註解與運行中 DB 不符，且審視 Liquibase changelog 誤判「`stock_price_history`／`exchange_rate_history` 的 UNIQUE 只在 Entity 宣告、DB 無去重保護」。經對運行 DB 與 `db/init/01_dump.sql` 查證，**premise 不成立**：
+
+- **schema 基準線是 `db/init/01_dump.sql`（完整 `pg_dump`），非 Liquibase `v1.0.0-initial-schema`。** dump 已含 Hibernate 早期建立的 `stock_price_history UNIQUE(stock_code,market,trading_date)`（`ukgoyp…`）＋`idx_sph_code_date`、`exchange_rate_history UNIQUE(currency,rate_date)`（`uk977p…`），也含 `databasechangelog` 歷史。每個環境（運行中＋全新以 dump 初始化）皆已存在這些約束，`ddl-auto: none` 不重建。
+- 運行 DB 這兩鍵的重複列數皆為 **0**。→ **不需**再補 `ADD CONSTRAINT` Liquibase changeset（會產生重複約束、且對已存在約束的 DB 有失敗風險）。
+
+**唯一真實不一致＝Entity 註解對不上實際 DB**（`ddl-auto: none` 下註解不影響 runtime，純文件正確性；若未來啟用 `validate` 會誤 fail）：
+
+- [x] 148.1 `StockPriceHistory.java`：`openPrice`／`highPrice`／`lowPrice`／`closePrice` 位數 `precision=15` → `20`（對齊 DB `NUMERIC(20,4)`）；`volume` 補 `@Column(nullable = false)`（對齊 DB `BIGINT NOT NULL`）。`@UniqueConstraint`／`@Index` 註解本已正確反映 DB，維持不動。
+- [x] 148.2 `design.md`：ERD 後新增「Schema 基準線與 DB 層唯一鍵」澄清段（dump 為基準線、Liquibase 僅增量、兩表 DB 層約束＋位數明細、稽核只讀 changelog 的誤判提醒）。
+- [x] 148.3 `ExchangeRateHistory` 免改：Entity `buy_rate/sell_rate precision=10,scale=4` 已對齊 DB `NUMERIC(10,4)`、`@UniqueConstraint(currency,rateDate)` 已對齊 DB。
+- 148.4 部署：本次為 `@Column` 註解對齊（`ddl-auto: none` 下**零 runtime 行為變更**），不影響運行 stack 行為；如需運行 jar 位元碼與源碼一致可另行重 build business-services，但非功能必要。
