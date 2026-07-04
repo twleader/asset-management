@@ -77,6 +77,11 @@ public class SecurityConfig {
                         .pathMatchers("/api/bff/backup-restore/**").hasAuthority(AuthConstants.AUTHORITY_ADMIN)
                         .pathMatchers("/api/bff/user-management/**").hasAuthority(AuthConstants.AUTHORITY_ADMIN)
                         .pathMatchers("/api/impersonate/**").hasAuthority(AuthConstants.AUTHORITY_ADMIN)
+                        // 今日股市分析（Requirement 31）：GET 開放已登入者；重新分析 / 改模型限 ADMIN（涉 LLM 成本）
+                        .pathMatchers(HttpMethod.POST, "/api/bff/today-market-analysis/generate")
+                            .hasAuthority(AuthConstants.AUTHORITY_ADMIN)
+                        .pathMatchers(HttpMethod.PUT, "/api/bff/today-market-analysis/settings")
+                            .hasAuthority(AuthConstants.AUTHORITY_ADMIN)
                         // 全域共用參考資料：寫入限 ADMIN（GET 不列入 → 落到 anyExchange().authenticated()）
                         .pathMatchers(HttpMethod.POST, GLOBAL_SETTINGS_PATHS).hasAuthority(AuthConstants.AUTHORITY_ADMIN)
                         .pathMatchers(HttpMethod.PUT, GLOBAL_SETTINGS_PATHS).hasAuthority(AuthConstants.AUTHORITY_ADMIN)

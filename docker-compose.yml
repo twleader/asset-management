@@ -66,6 +66,10 @@ services:
       MAIL_USERNAME: ${MAIL_USERNAME:-}
       MAIL_PASSWORD: ${MAIL_PASSWORD:-}
       NOTIFICATION_FROM: ${NOTIFICATION_FROM:-}
+      # 今日股市分析（Requirement 31）：Claude Opus 4.8 + web_search。
+      # 未設定 ANTHROPIC_API_KEY 時 MarketAnalysisService 安全跳過（status=NOT_CONFIGURED），不報錯。
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-4-8}
     volumes:
       # rclone 設定檔以 read-only 從 host 掛入
       - ${HOME}/.config/rclone/rclone.conf:/etc/rclone/rclone.conf:ro

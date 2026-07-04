@@ -1816,3 +1816,109 @@ Task 129 把「ETF 透視 top10 成份股」（如 `2383` 台光電，使用者�
 
 - 不做 eager 觸發（Dashboard 透視圓餅圖算出 top10 時背景補）—— 使用者選 lazy；steady-state 仍由每日 18:30 cron 維護。
 - 股利 tab 維持 best-effort cold fetch（Task 129 限制不變）。
+
+## Requirement 31：今日股市分析（每交易日 07:30 AI 判斷台股走向）
+
+### 概觀
+
+每個台股交易日開盤前（07:30 Asia/Taipei），business-services 呼叫 Claude Opus 4.8 一次，綜合「台股大盤＋美股主要指數近一年日線走勢」（本地 DB）與「近期國內外財經新聞」（模型 `web_search` server tool 即時搜尋），對當天台股走向做多空判斷並存入 `daily_market_analysis`。前端「今日股市分析」頁顯示當日判斷＋歷史。此為**全域參考資料**（不分租戶、無 `owner_user_id`，比照指數日線／交易日曆）。
+
+### 架構與模組落點
+
+- **唯一新增的對外 LLM 呼叫在 business-services**：`market-analysis` 模組直接呼叫 `api.anthropic.com`（Anthropic Java SDK `com.anthropic:anthropic-java`）。此非「行情／報價外部 API」，不違反「即時股價走 Redis、收盤價走 DB、business-services 不直連外部行情 API」之規範（該規範針對 price/quote 資料）；business-services 本就有對外 egress（Gmail SMTP、rclone 備份）。
+- **新聞不自建抓取管線**：使用者決策採 Claude 內建 `web_search`，故 `external-materials-service` 不變、不新增 `financial_news` 表。走勢量化輸入沿用既有 `twse_index_daily_history` / `us_index_daily_history`（同一事實來源）。
+- **BFF 一頁一支**：新增 `TodayMarketAnalysisBffController`（`/api/bff/today-market-analysis/**`），聚合「當日 + 歷史」單次回傳，前端只 render。
+
+```
+Scheduler(07:30 MON-FRI, Asia/Taipei) ──isTwTradingDay?──▶ MarketAnalysisService.generate(today)
+                                                                │  讀 twse_index_daily_history / us_index_daily_history（近一年）
+                                                                │  組 prompt（近期加權）
+                                                                ▼
+                                                     Anthropic Messages API（Opus 4.8 + adaptive thinking + web_search）
+                                                                │  模型上網搜尋近期財經新聞 → 產生 JSON 判斷
+                                                                ▼
+                                                     解析 JSON → upsert daily_market_analysis
+前端 TodayMarketAnalysisView ──▶ /api/bff/today-market-analysis ──▶ business /api/market-analysis/{today,history}
+（管理者）重新分析 ──▶ POST /api/bff/today-market-analysis/generate（限 ADMIN）──▶ business POST /api/market-analysis/generate
+```
+
+### 資料模型（Liquibase `v1.37.0-daily-market-analysis.sql`）
+
+```sql
+CREATE TABLE daily_market_analysis (
+    analysis_date    DATE          PRIMARY KEY,      -- 被分析的交易日（= 產生當日）
+    bias             VARCHAR(16),                    -- BULLISH / BEARISH / NEUTRAL / UNKNOWN
+    confidence       INTEGER,                        -- 0..100，可為 null
+    summary          TEXT,                           -- 當日走向總結（繁中一段）
+    key_factors      TEXT,                           -- JSON array 字串
+    news_highlights  TEXT,                           -- JSON array 字串：[{title,source,url,publishedAt}]
+    tw_context       TEXT,                           -- 台股近期走勢摘要
+    us_context       TEXT,                           -- 美股近期走勢摘要
+    model            VARCHAR(64),                    -- claude-opus-4-8
+    status           VARCHAR(16)   NOT NULL,         -- OK / FAILED / NOT_CONFIGURED
+    error_message    TEXT,                           -- status=FAILED 時的錯誤摘要
+    raw_response     TEXT,                           -- 模型原始回覆（除錯用）
+    generated_at     TIMESTAMPTZ   NOT NULL
+);
+```
+
+- Entity `DailyMarketAnalysis`（無 owner 欄位、無 `@Filter`，不受 `TenantFilterAspect` owner 過濾）；`key_factors`／`news_highlights` 以 JSON 字串存，Controller 回前端時解析回陣列。
+- **schema 基準線**：新表走 Liquibase 增量（比照 `v1.35.0-japan-gdp`）；`db/init/01_dump.sql` 為既有表基準線、不含此新表，由 Liquibase 於 business-services 啟動時建立（`ddl-auto: none` + Liquibase）。
+
+### API 設計
+
+business-services（`MarketAnalysisController`，`/api/market-analysis`）：
+
+| Method | Path | 說明 |
+|---|---|---|
+| GET | `/api/market-analysis/today` | 最近一筆分析（DTO：含解析後的 keyFactors / newsHighlights 陣列）；無資料回 `{status:"NONE"}`。已登入者皆可讀。 |
+| GET | `/api/market-analysis/history?limit=30` | 近 N 筆（`analysis_date` 降序）。 |
+| POST | `/api/market-analysis/generate` | 立即重跑當日分析並回傳結果。縱深防禦：`CurrentUserContext.isAdmin()` 否則 `AdminRequiredException`。 |
+
+BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）：
+
+| Method | Path | 說明 |
+|---|---|---|
+| GET | `/api/bff/today-market-analysis?historyLimit=30` | `Mono.zip` 聚合 business `today` + `history`，單次回 `{today, history}`。 |
+| POST | `/api/bff/today-market-analysis/generate` | 轉發 business `generate`；bff `SecurityConfig` 對此 POST 限 `AUTHORITY_ADMIN`。timeout 180s（web search + thinking 可能耗時）。 |
+
+### 關鍵業務邏輯
+
+- **排程**（`MarketAnalysisScheduler`）：`@Scheduled(cron="0 30 7 * * MON-FRI", zone="Asia/Taipei")` → `today=LocalDate.now(TW_ZONE)`；`marketDataService.isTwTradingDay(today)` 為假則 log skip return。**開機 self-heal**：`@EventListener(ApplicationReadyEvent.class)` 延遲後，若 today 為交易日、現在已過 07:30、且今日尚無 OK 筆 → 補跑一次（背景執行緒，比照 `IndexDailyRefreshScheduler`）。背景 cron 無 HTTP request → `CurrentUserContext`（`@RequestScope`）取不到，不套 owner 過濾（本就全域）。
+- **提示詞與近期加權**（`MarketAnalysisService.buildUserPrompt`）：TAIEX 近一年日線（date,close，由舊到新）＋近 20 日另附；美股 `DJI/SPX/IXIC/SOX` 近一年日線同格。system prompt 指派「資深台股策略分析師」角色、要求先 `web_search` 近 1～2 週財經新聞、**越近期的走勢與新聞權重越高**、最後**只輸出 JSON**（schema：`bias/confidence/summary/keyFactors[]/newsHighlights[]/twContext/usContext`）、全程繁體中文。
+- **模型呼叫**：`claude-opus-4-8`、`ThinkingConfigAdaptive`、`WebSearchTool20260209`（`maxUses` 上限）、`maxTokens≈8000`、非串流（Java SDK 非串流逾時上限 ~10 分足夠背景 job）。收集回覆中所有 `text` 區塊（忽略 `server_tool_use`/`web_search_tool_result`），取首個 `{` 至末個 `}` 以 Jackson 解析（`@JsonIgnoreProperties(ignoreUnknown=true)`）。
+- **優雅降級**：`ANTHROPIC_API_KEY` 空 → 不建 client、upsert `status=NOT_CONFIGURED`；呼叫／解析例外 → `status=FAILED` + `error_message` + `raw_response`，不拋出中斷排程。`OK` 筆才視為有效分析。
+- **設定**：`application.yml` 新增 `anthropic.api-key: ${ANTHROPIC_API_KEY:}`、`anthropic.model: ${ANTHROPIC_MODEL:claude-opus-4-8}`；`docker-compose.yml` business-services 透傳 `ANTHROPIC_API_KEY`；`.env.example` 補金鑰取得說明；金鑰不入版控。
+- **前端配色**：偏多（BULLISH）紅、偏空（BEARISH）綠、中性（NEUTRAL）灰——遵循台股「漲紅跌綠」慣例（與 Dashboard Task 147 一致）。
+
+### 模型頁面可調（成本控管）
+
+分析模型改為可由管理者在頁面切換（Opus 4.8 / Sonnet 5 / Haiku 4.5），持久化、下次分析生效、免改環境變數或重啟。
+
+- **資料模型**（Liquibase `v1.38.0-market-analysis-setting.sql`，單列設定表，比照 `backup_setting`）：
+  ```sql
+  CREATE TABLE market_analysis_setting (
+      id          INTEGER PRIMARY KEY DEFAULT 1,
+      model       VARCHAR(64) NOT NULL DEFAULT 'claude-opus-4-8',
+      updated_at  TIMESTAMP   NOT NULL DEFAULT NOW(),
+      CONSTRAINT market_analysis_setting_single_row CHECK (id = 1)
+  );
+  INSERT INTO market_analysis_setting (id) VALUES (1);
+  ```
+  Entity `MarketAnalysisSetting`（`@Id Integer id`）＋ `MarketAnalysisSettingRepository`。
+- **模型解析**：`MarketAnalysisService.resolveModel()` = 設定表 `model`（非空）→ 否則 `@Value("${anthropic.model:claude-opus-4-8}")` 環境預設。`doGenerate` 每次呼叫前 `resolveModel()`，故切換即時生效。
+- **可選模型白名單**：後端 curated 常數 `AVAILABLE_MODELS`（`{id,label}`：Opus 4.8 最佳品質／Sonnet 5 品質接近較省／Haiku 4.5 最省較粗略）。這是「有效 Claude model id 的技術白名單」而非使用者可自訂的業務分類（銀行/券商/類型…），故**不**套用「Enum 必須入庫由 `/api/settings/*` 管理」規範。`updateModel` 僅接受白名單內 id，否則 400。回傳 `availableModels` 時若目前設定值不在白名單則補入（確保下拉恆含現值）。
+- **API**：
+  | Method | Path | 說明 |
+  |---|---|---|
+  | GET | `/api/market-analysis/settings` | `{ model, availableModels:[{id,label}] }`；已登入者可讀。 |
+  | PUT | `/api/market-analysis/settings` `{model}` | 更新模型；`CurrentUserContext.isAdmin()` 否則 `AdminRequiredException`；白名單驗證。 |
+
+  BFF：主 `GET /api/bff/today-market-analysis` 聚合改回傳 `{ today, history, settings }`；新增 `PUT /api/bff/today-market-analysis/settings` 轉發，bff `SecurityConfig` 對該 `PUT` 限 `AUTHORITY_ADMIN`。
+- **前端**：頁首（限管理者）新增模型 `el-select`（options＝`availableModels`，值＝`settings.model`）；`change` → `bffApi.todayMarketAnalysis.updateSettings({model})` 持久化，提示「下次分析生效」；一般使用者不顯示選單。卡片 `foot-meta` 的「由 {model}」仍顯示**產生該筆分析所用**的模型（`daily_market_analysis.model`），與「下次要用的模型」語意區分。
+
+### 不處理
+
+- 不自建新聞抓取／`financial_news` 表（使用者選 Claude web_search）。
+- 不做盤中即時重評（僅每日開盤前一次 + 管理者手動重跑）。
+- 不對非台股市場（美股／英股）產生獨立判斷頁（美股走勢僅作為台股判斷的輸入）。

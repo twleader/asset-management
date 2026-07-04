@@ -59,6 +59,12 @@ notification:
 external-materials:
   base-url: ${EXTERNAL_MATERIALS_URL:http://external-materials-service:8080}
 
+# 今日股市分析（Requirement 31）：Claude Opus 4.8 + web_search。
+# api-key 未設定時 MarketAnalysisService 安全跳過（status=NOT_CONFIGURED），不報錯。
+anthropic:
+  api-key: ${ANTHROPIC_API_KEY:}
+  model: ${ANTHROPIC_MODEL:claude-opus-4-8}
+
 server:
   port: ${SERVER_PORT:8080}
 
