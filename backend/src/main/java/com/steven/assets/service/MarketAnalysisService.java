@@ -401,7 +401,10 @@ public class MarketAnalysisService {
             return;
         }
 
-        if (batch.processingStatus() != MessageBatch.ProcessingStatus.ENDED) {
+        // 注意：MessageBatch.ProcessingStatus 是 SDK 的 enum-like 值類別（非 Java enum、有覆寫 equals），
+        // retrieve() 反序列化回來的實例與靜態常數 ENDED 是不同物件參考，用 !=/== 會恆為「不相等」而永遠認不出
+        // ENDED（批次早已完成卻被誤判為在製，直到逾時才落 FAILED）。故一律以 value()（其巢狀 Value 才是真 Java enum）比較。
+        if (batch.processingStatus().value() != MessageBatch.ProcessingStatus.Value.ENDED) {
             if (stale) {
                 markBatchFailed(row, date, "批次逾時未完成（status=" + batch.processingStatus() + "）");
             }
