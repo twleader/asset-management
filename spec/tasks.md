@@ -2911,7 +2911,7 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 109.2 `DashboardBffController.getSummary`：取得 history + liveAssets 後呼叫 `LiveAssetsOverlay.applyToLatest(history, liveAssets)`
 - [x] 109.3 前端 `DashboardView`：新增 `overlayLatestFromLiveAssets(s)`；`liveLatest` 全市場休市分支改呼叫之
 - [x] 109.4 spec：`requirements.md` Req 9（KPI 同源）、`design.md`（LiveAssetsOverlay 共用工具）、`tasks.md` 本任務
-- [ ] 109.5 Docker 重 build + recreate（bff + frontend）後驗證：儀表板 KPI 資產總計 == 歷年頁 == 20,125,204、增幅 29.9%；趨勢線最後一點同值；`/api/bff/dashboard/summary` 的 `history` 最新列 totalAssets == `/api/bff/asset-history` 最新列
+- [x] 109.5 Docker 重 build + recreate（bff + frontend）後驗證：儀表板 KPI 資產總計 == 歷年頁 == 20,125,204、增幅 29.9%；趨勢線最後一點同值；`/api/bff/dashboard/summary` 的 `history` 最新列 totalAssets == `/api/bff/asset-history` 最新列
 
 ### Task 110: 管理資產（SnapshotForm）總資產進頁閃動修正（先舊值、幾秒後才更新）
 
@@ -2929,7 +2929,7 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 
 - [x] 110.1 前端 `SnapshotFormView`：新增 `applyMergedClosePrices(mergedStocks)`，`onMounted` 載入 detail 後立即呼叫
 - [x] 110.2 spec：`requirements.md`（編輯頁 KPI 首次 paint 即正解）、`tasks.md` 本任務
-- [ ] 110.3 Docker 重 build + recreate（frontend）後驗證：進編輯頁 KPI 總資產首次 paint 即為收盤價口徑、不再先舊值後跳；盤後重整無閃動；存檔結果不變
+- [x] 110.3 Docker 重 build + recreate（frontend）後驗證：進編輯頁 KPI 總資產首次 paint 即為收盤價口徑、不再先舊值後跳；盤後重整無閃動；存檔結果不變
 
 ### Task 111: 同一快照「資產總計」跨頁不一致根因（休市刷新把 FinMind 收盤蓋成 last-tick）
 
@@ -2952,7 +2952,7 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 111.1 `PriceCacheWriter.syncClosedFromDb`：DB 收盤 → Redis（保留既有顯示欄位）
 - [x] 111.2 `PricePoller`：新增 `syncClosedFromDb(codes, market)`；`refreshAll` / `warmCacheOnStartup` 休市改走 DB 同步（不再 `updatePrices(markClosed=true)` 覆寫）
 - [x] 111.3 spec：`requirements.md` Req 114 強化、`tasks.md` 本任務
-- [ ] 111.4 Docker 重 build + recreate（external-materials-service）後驗證：Redis `price:美股:VOO` == DB 收盤 689.20；`live-assets` 美股 == `closeMap` 美股；Dashboard KPI / 歷年 / SnapshotForm 三頁「資產總計」同值；盤外觸發 `/internal/refresh` 不再把收盤蓋成 last-tick
+- [x] 111.4 Docker 重 build + recreate（external-materials-service）後驗證：Redis `price:美股:VOO` == DB 收盤 689.20；`live-assets` 美股 == `closeMap` 美股；Dashboard KPI / 歷年 / SnapshotForm 三頁「資產總計」同值；盤外觸發 `/internal/refresh` 不再把收盤蓋成 last-tick
 
 ### Task 112: 外幣基金台幣現值改用「即期買入」匯率，與銀行對帳單一致
 
@@ -2972,7 +2972,7 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 112.2 `FundNavService` 現值改 `getFundValuationRate()`
 - [x] 112.3 `FundDividendService` 配息估算改 `getFundValuationRate()`
 - [x] 112.4 spec：`requirements.md` Req 19/21、`tasks.md` 本任務
-- [ ] 112.5 Docker 重 build + recreate（business-services）後驗證：24B2 現值 61,184 → ≈ 59,746（== units × NAV × 即期買入 1.8700）；navHint 顯示之匯率與現值同源；TWD 基金不變
+- [x] 112.5 Docker 重 build + recreate（business-services）後驗證：24B2 現值 61,184 → ≈ 59,746（== units × NAV × 即期買入 1.8700）；navHint 顯示之匯率與現值同源；TWD 基金不變
 
 ### Task 113: 現金／債券／股票 資產類別三分類（Requirement 25）
 
@@ -3132,7 +3132,7 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 
 - [x] 123.1 `GdpTwseView.vue`：新增 `dailyChartRef` / `dailyZoomPct` / `effectiveDailyZoom` / `onDailyZoom` / `maxMinMarkPoints`；收盤 series 加 `markPoint`；template v-chart 加 `ref` 與 `@datazoom`；市場/區間切換重置手動縮放
 - [x] 123.2 spec：`requirements.md` Req 18 新增 AC、`tasks.md` 本任務
-- [ ] 123.3 Docker 重 build + recreate（frontend）後截圖驗證：1 年區間下收盤線出現紅（最高）綠（最低）pin，數值落在可視區間內
+- [x] 123.3 Docker 重 build + recreate（frontend）後截圖驗證：1 年區間下收盤線出現紅（最高）綠（最低）pin，數值落在可視區間內
 
 ---
 
@@ -3200,7 +3200,7 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 126.3 後端 service：新增 `StockMasterService`（單執行緒佇列背景回補、isNew 判定、0000 排除）
 - [x] 126.4 後端改呼叫點：`StockAlertService`(×2)、`AssetService`(×2)、`StockAlertController`(×1) 改走 `StockMasterService.upsert`
 - [x] 126.5 spec：`requirements.md` Req 7、`design.md`、`tasks.md` 本任務
-- [ ] 126.6 Docker 重 build + recreate（business-services）後驗證：新增一檔未追蹤過的標的，背景 log 出現「新增標的 … 自動回補 … 筆」，`stock_price_history` 出現多年資料、走勢圖完整（**待辦：與並行的 Task 125 同時在工作目錄，須先協調再 build/commit**）
+- [x] 126.6 Docker 重 build + recreate（business-services）後驗證：新增一檔未追蹤過的標的，背景 log 出現「新增標的 … 自動回補 … 筆」，`stock_price_history` 出現多年資料、走勢圖完整（**待辦：與並行的 Task 125 同時在工作目錄，須先協調再 build/commit**）
 
 ---
 
@@ -3260,11 +3260,11 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 
 **設計**：見 `requirements.md` Req 9（穿透 segment 可點擊 AC 後新增的 top10 回補 AC）+ Req 7（回補清單來源 AC）、`design.md`「Task 129」段。
 
-- [ ] 129.1 `StockSourceQuery.collectLatestSnapshotHoldingsWithValue()`：讀最新快照 `stock_holding` 的 `(stock_code, market, current_value)`，回 `List<HeldValueRow>`
-- [ ] 129.2 `HistoricalBackfillService.collectLookthroughTopConstituents(twCodes, usCodes)`：注入 `MarketDataFetchService`；台股 ETF（`00` 開頭）`cv×w/Σw` 正規化、直接持股整筆、以代號加總取 top10；美股 ETF `cv×w/100` 不正規化、非 ETF 整筆、以代號加總取 top10。無代號成份股略過
-- [ ] 129.3 併入既有回補：`startupBackfill()` 與 `backfillAll()` 在 `collectAllHeldCodes(...)` 後呼叫 `collectLookthroughTopConstituents(...)`（try/catch 包覆）；後續 for-loop 沿用 `backfillTwStock` / `backfillUsStock`（`maxDate==null` 補 10 年、今日列獨佔給 ClosePersister）
-- [ ] 129.4 每日 cron `@Scheduled(cron="0 30 18 * * *", zone="Asia/Taipei") dailyLookthroughBackfill()`（virtual thread）：重算 top10 並增量補（`maxDate+1 → today`）
-- [ ] 129.5 Docker 重 build + recreate（external-materials-service）後驗證：啟動補齊 log 出現「透視成份股」收集、`stock_price_history` 出現 `2317`(鴻海)/`2454`(聯發科)/`2308`(台達電) 等多年資料；前端點圓餅圖鴻海 segment → 走勢圖完整顯示（非「無歷史資料」）；確認 `stock` 主檔未新增成份股列（仍精簡）
+- [x] 129.1 `StockSourceQuery.collectLatestSnapshotHoldingsWithValue()`：讀最新快照 `stock_holding` 的 `(stock_code, market, current_value)`，回 `List<HeldValueRow>`
+- [x] 129.2 `HistoricalBackfillService.collectLookthroughTopConstituents(twCodes, usCodes)`：注入 `MarketDataFetchService`；台股 ETF（`00` 開頭）`cv×w/Σw` 正規化、直接持股整筆、以代號加總取 top10；美股 ETF `cv×w/100` 不正規化、非 ETF 整筆、以代號加總取 top10。無代號成份股略過
+- [x] 129.3 併入既有回補：`startupBackfill()` 與 `backfillAll()` 在 `collectAllHeldCodes(...)` 後呼叫 `collectLookthroughTopConstituents(...)`（try/catch 包覆）；後續 for-loop 沿用 `backfillTwStock` / `backfillUsStock`（`maxDate==null` 補 10 年、今日列獨佔給 ClosePersister）
+- [x] 129.4 每日 cron `@Scheduled(cron="0 30 18 * * *", zone="Asia/Taipei") dailyLookthroughBackfill()`（virtual thread）：重算 top10 並增量補（`maxDate+1 → today`）
+- [x] 129.5 Docker 重 build + recreate（external-materials-service）後驗證：啟動補齊 log 出現「透視成份股」收集、`stock_price_history` 出現 `2317`(鴻海)/`2454`(聯發科)/`2308`(台達電) 等多年資料；前端點圓餅圖鴻海 segment → 走勢圖完整顯示（非「無歷史資料」）；確認 `stock` 主檔未新增成份股列（仍精簡）
 
 ### Task 130: 警示防重複條件（Requirement 23）
 
@@ -3280,8 +3280,8 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 
 **設計**：見 `requirements.md` Req 23 防重複 AC、`design.md`「Task 130」段。純新增守門邏輯，無資料模型 / 新表 / 新端點。
 
-- [ ] 130.1 後端 `StockAlertService.assertNoDuplicate(...)` + `create` / `update` 呼叫（update 排除自身 id）
-- [ ] 130.2 前端錯誤改 dialog（非頂部 toast，使用者要求）：`api/index.js` 攔截器加 `skipErrorToast` 旗標 + 匯出 `apiErrorMessage` helper；`stockAlert.create/update` 帶 `{skipErrorToast:true}`；`StockAlertView.save()` catch 改用 `ElMessageBox.alert(apiErrorMessage(e),'無法儲存警示',{type:'warning'})`
+- [x] 130.1 後端 `StockAlertService.assertNoDuplicate(...)` + `create` / `update` 呼叫（update 排除自身 id）
+- [x] 130.2 前端錯誤改 dialog（非頂部 toast，使用者要求）：`api/index.js` 攔截器加 `skipErrorToast` 旗標 + 匯出 `apiErrorMessage` helper；`stockAlert.create/update` 帶 `{skipErrorToast:true}`；`StockAlertView.save()` catch 改用 `ElMessageBox.alert(apiErrorMessage(e),'無法儲存警示',{type:'warning'})`
 - [ ] 130.3 Docker 重 build + recreate（business-services + frontend）後驗證：對已存在「NVDA 低於年線」再存一筆相同條件 → 後端回 400「已存在相同的警示條件（NVDA NVIDIA… 低於年線），未重複新增」、清單未新增；改不同條件（如 threshold 不同 / 改高於年線）仍可正常新增；編輯既有筆不誤判自身為重複。前端驗證：重複存檔時跳 **dialog**（`ElMessageBox`，標題「無法儲存警示」）顯示該訊息，**不再**從頂部滑出 toast（瀏覽器確認）
 
 ### Task 131: 多租戶資料層 — AppUser + owner 欄位 + Liquibase 遷移（Requirement 28）
@@ -3382,7 +3382,7 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 135.3 `router/index.js`（guard + 新路由）
 - [x] 135.4 `App.vue`（登入者資訊/登出/切換下拉/選單依角色）
 - [x] 135.5 `views/PendingApprovalView.vue` + `views/UserManagementView.vue`
-- [ ] 135.6 Docker 重 build + recreate（frontend）後端到端驗證：管理者登入看全量、切換代看他人、新使用者 PENDING 被擋於 `/pending`、核准後只看自己、非管理者無備份選單
+- [x] 135.6 Docker 重 build + recreate（frontend）後端到端驗證：管理者登入看全量、切換代看他人、新使用者 PENDING 被擋於 `/pending`、核准後只看自己、非管理者無備份選單
 
 ### Task 136: 股票分析對話框無歷史時 lazy 回補（Requirement 9 / Requirement 7 bug fix）
 
@@ -3443,11 +3443,11 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 
 **設計**：見 `requirements.md` Req 14 AC（「警示」欄三均線）、`design.md`「`WatchStockService`」段 + `WatchStockDto` 欄位。
 
-- [ ] 138.1 `TechnicalIndicatorService`：移除 `compute()` / `Indicators`（無呼叫者），保留 `computeAll()` / `FullIndicators`
-- [ ] 138.2 `WatchStockDto.Response`：新增 `monthlyMa` / `annualMa`
-- [ ] 138.3 `WatchStockService`：`toResponse` / `toIndexResponse` 改用 `computeAll()` 填三均線 + KD
-- [ ] 138.4 前端 `WatchStockView.vue`：欄標題與觸發區塊加月線 / 年線兩行
-- [ ] 138.5 Docker 重 build + recreate（business + frontend）後驗證：觀察清單已觸發列同時顯示月線 / 季線 / 年線 / KD
+- [x] 138.1 `TechnicalIndicatorService`：移除 `compute()` / `Indicators`（無呼叫者），保留 `computeAll()` / `FullIndicators`
+- [x] 138.2 `WatchStockDto.Response`：新增 `monthlyMa` / `annualMa`
+- [x] 138.3 `WatchStockService`：`toResponse` / `toIndexResponse` 改用 `computeAll()` 填三均線 + KD
+- [x] 138.4 前端 `WatchStockView.vue`：欄標題與觸發區塊加月線 / 年線兩行
+- [x] 138.5 Docker 重 build + recreate（business + frontend）後驗證：觀察清單已觸發列同時顯示月線 / 季線 / 年線 / KD
 
 ### Task 139: 「台日韓人均 GDP 比較」圖新增日本（Requirement 18）
 
@@ -3643,7 +3643,7 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 146.1 `StockAlertService`：`buildLabel` 多載 + `maTriggerPriceSuffix`（換算/格式化）+ `toResponse` 帶 `maIndicatorsForLabel`。
 - [x] 146.2 `WatchStockService`：`buildConditions` 加 `ind` 參數轉傳；兩處 `toResponse`／`toIndexResponse` 上移 `ind` 計算並帶入。
 - [x] 146.3 活文件 `requirements.md`（Requirement 16 新增 AC、Requirement 14 label 範例更新）+ `design.md`（`WatchStockService` 段補「警示條件」欄 MA% 觸發價說明）同步。
-- [ ] 146.4 Docker 重 build（business-services `--no-cache`）+ recreate 後驗證：非 stale 檢查運行 jar 含新 `buildLabel(StockAlert,FullIndicators)`／`maTriggerPriceSuffix`；登入後觀察頁「高於季線 20%」條件顯示「高於季線 20%（實際價）」，且該價 = 當前季線 ×1.2；threshold=0 條件與 PRICE／KD 條件文字不變。
+- [x] 146.4 Docker 重 build（business-services `--no-cache`）+ recreate 後驗證：非 stale 檢查運行 jar 含新 `buildLabel(StockAlert,FullIndicators)`／`maTriggerPriceSuffix`；登入後觀察頁「高於季線 20%」條件顯示「高於季線 20%（實際價）」，且該價 = 當前季線 ×1.2；threshold=0 條件與 PRICE／KD 條件文字不變。
 
 ### Task 147: Dashboard 持股表「股價/漲跌(%)」欄 — 收盤/週末亦顯示當日漲跌 + 台股漲紅跌綠配色
 
@@ -3706,9 +3706,9 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
   - **落庫不拋出**：最終 `save()` 包 try/catch；`model` 寫入前 truncate 至 64，維持「不中斷排程／手動觸發」契約。
   - **client 資源重用**：`AnthropicClient` 改為 lazy 單例重用（OkHttp 執行緒安全），`@PreDestroy` 關閉，不再每次 `generate` new 而不釋放。
 - [x] 149.11 模型頁面可調（成本控管）：Liquibase `v1.38.0-market-analysis-setting.sql`（單列 `market_analysis_setting`，`id=1`、`model` 預設 opus-4-8、seed 一列）＋ Entity/Repo；`MarketAnalysisService` 加 `resolveModel()`（設定 → 環境預設）、`AVAILABLE_MODELS` 白名單、`getSettings()`/`updateModel()`；`doGenerate` 改用 `resolveModel()`；`MarketAnalysisController` 加 `GET/PUT /settings`（PUT 限 admin + 白名單驗證）；BFF 主 GET 聚合加 `settings`、加 `PUT /settings` 轉發、`SecurityConfig` PUT 限 ADMIN；前端頁首管理者模型 `el-select`（change → 持久化、下次生效）＋ `bffApi.todayMarketAnalysis.updateSettings`。重 build business-services+bff+frontend、recreate、驗證切換 Sonnet 5 後 `daily_market_analysis.model` 隨之改變。
-- [ ] 149.12 思考深度（effort）頁面可調（成本控管，成本槓桿）：Liquibase `v1.39.0-market-analysis-effort.sql`（`market_analysis_setting` 增 `effort VARCHAR(16) NOT NULL DEFAULT 'medium'`）＋ master include；Entity 加 `effort` 欄。`MarketAnalysisService` 加 `AVAILABLE_EFFORTS`（low/medium/high）、`DEFAULT_EFFORT='medium'`、`resolveEffort()`、`mapEffort()`（→ `OutputConfig.Effort`）；`updateModel()` 改為 `updateSettings(model, effort)`（各欄白名單、未帶不變、至少一項）；`getSettings()` 回傳 `effort`＋`availableEfforts`；`doGenerate` 於 `MessageCreateParams` 加 `outputConfig(OutputConfig.effort(...))`。`MarketAnalysisController` PUT 改帶 `model`／`effort`。BFF 不變（Map 泛型轉發）。前端 DTO/api：`updateSettings(payload)` 改收物件；`TodayMarketAnalysisView` 頁首加思考深度 `el-select`＋`onEffortChange`。重 build business-services+frontend、recreate、UI 驗證下拉出現／預設 medium／切換持久化（畫面驗證，不觸發 LLM）。
-- [ ] 149.13 新聞搜尋次數（web search）頁面可調（成本控管，次要槓桿）：Liquibase `v1.40.0-market-analysis-web-search.sql`（`market_analysis_setting` 增 `web_search_max_uses INTEGER NOT NULL DEFAULT 6`）＋ master include；Entity 加 `webSearchMaxUses` 欄。`MarketAnalysisService` 加 `AVAILABLE_WEB_SEARCHES`（0 關閉/3/4/6）、`DEFAULT_WEB_SEARCH=6`、`resolveWebSearchMaxUses()`；`updateSettings` 擴為 `(model, effort, webSearchMaxUses)`（第三欄白名單）；`getSettings()` 回傳 `webSearchMaxUses`＋`availableWebSearches`；`doGenerate` 依 `webSearchMaxUses>0` 決定是否 `addTool(WebSearchTool.maxUses(N))`；`buildSystemPrompt/buildUserPrompt` 加 `webSearchEnabled` 參數（關閉時改為純技術面、不得杜撰新聞、`newsHighlights` 空）。`MarketAnalysisController` PUT body 改 `Map<String,Object>`＋`str()/intOrNull()` 解析（`webSearchMaxUses` 收 JSON number）。BFF 不變。前端 `TodayMarketAnalysisView` 頁首加新聞搜尋 `el-select`（值為整數）＋`onWebSearchChange`；`busy` computed 統一停用下拉；`.header-actions` 加 `flex-wrap`。重 build business-services+frontend、recreate、UI 驗證下拉（關閉/3/4/6、預設 6）＋切換持久化（畫面驗證，不觸發 LLM）。
-- [ ] 149.14 每日自動分析開關（enabled）頁面可調（成本控管，最粗槓桿）：Liquibase `v1.41.0-market-analysis-enabled.sql`（`market_analysis_setting` 增 `enabled BOOLEAN NOT NULL DEFAULT true`）＋ master include；Entity 加 `enabled` 欄。`MarketAnalysisService` 加 `isEnabled()`（設定值 → 否則 true）；`updateSettings` 擴為 `(model, effort, webSearchMaxUses, enabled)`（enabled 直接設值）；`getSettings()` 回傳 `enabled`。`MarketAnalysisScheduler` 於 `scheduledAnalysis()` 與 `selfHealOnStartup()` 開頭檢查 `isEnabled()`：false 即 return 略過（不呼叫 LLM）；手動 `generate()` 不受此限。`MarketAnalysisController` PUT 加 `boolOrNull()` 解析（`enabled` 收 JSON boolean）。BFF 不變。前端 `TodayMarketAnalysisView` 頁首加「每日自動分析」`el-switch`＋`onEnabledChange`；`emptyDesc` computed 依 enabled 切換空狀態文案。重 build business-services+frontend、recreate、UI 驗證開關＋切換持久化＋停用時 cron 日誌「已停用…略過」（畫面驗證，不觸發 LLM）。
+- [x] 149.12 思考深度（effort）頁面可調（成本控管，成本槓桿）：Liquibase `v1.39.0-market-analysis-effort.sql`（`market_analysis_setting` 增 `effort VARCHAR(16) NOT NULL DEFAULT 'medium'`）＋ master include；Entity 加 `effort` 欄。`MarketAnalysisService` 加 `AVAILABLE_EFFORTS`（low/medium/high）、`DEFAULT_EFFORT='medium'`、`resolveEffort()`、`mapEffort()`（→ `OutputConfig.Effort`）；`updateModel()` 改為 `updateSettings(model, effort)`（各欄白名單、未帶不變、至少一項）；`getSettings()` 回傳 `effort`＋`availableEfforts`；`doGenerate` 於 `MessageCreateParams` 加 `outputConfig(OutputConfig.effort(...))`。`MarketAnalysisController` PUT 改帶 `model`／`effort`。BFF 不變（Map 泛型轉發）。前端 DTO/api：`updateSettings(payload)` 改收物件；`TodayMarketAnalysisView` 頁首加思考深度 `el-select`＋`onEffortChange`。重 build business-services+frontend、recreate、UI 驗證下拉出現／預設 medium／切換持久化（畫面驗證，不觸發 LLM）。
+- [x] 149.13 新聞搜尋次數（web search）頁面可調（成本控管，次要槓桿）：Liquibase `v1.40.0-market-analysis-web-search.sql`（`market_analysis_setting` 增 `web_search_max_uses INTEGER NOT NULL DEFAULT 6`）＋ master include；Entity 加 `webSearchMaxUses` 欄。`MarketAnalysisService` 加 `AVAILABLE_WEB_SEARCHES`（0 關閉/3/4/6）、`DEFAULT_WEB_SEARCH=6`、`resolveWebSearchMaxUses()`；`updateSettings` 擴為 `(model, effort, webSearchMaxUses)`（第三欄白名單）；`getSettings()` 回傳 `webSearchMaxUses`＋`availableWebSearches`；`doGenerate` 依 `webSearchMaxUses>0` 決定是否 `addTool(WebSearchTool.maxUses(N))`；`buildSystemPrompt/buildUserPrompt` 加 `webSearchEnabled` 參數（關閉時改為純技術面、不得杜撰新聞、`newsHighlights` 空）。`MarketAnalysisController` PUT body 改 `Map<String,Object>`＋`str()/intOrNull()` 解析（`webSearchMaxUses` 收 JSON number）。BFF 不變。前端 `TodayMarketAnalysisView` 頁首加新聞搜尋 `el-select`（值為整數）＋`onWebSearchChange`；`busy` computed 統一停用下拉；`.header-actions` 加 `flex-wrap`。重 build business-services+frontend、recreate、UI 驗證下拉（關閉/3/4/6、預設 6）＋切換持久化（畫面驗證，不觸發 LLM）。
+- [x] 149.14 每日自動分析開關（enabled）頁面可調（成本控管，最粗槓桿）：Liquibase `v1.41.0-market-analysis-enabled.sql`（`market_analysis_setting` 增 `enabled BOOLEAN NOT NULL DEFAULT true`）＋ master include；Entity 加 `enabled` 欄。`MarketAnalysisService` 加 `isEnabled()`（設定值 → 否則 true）；`updateSettings` 擴為 `(model, effort, webSearchMaxUses, enabled)`（enabled 直接設值）；`getSettings()` 回傳 `enabled`。`MarketAnalysisScheduler` 於 `scheduledAnalysis()` 與 `selfHealOnStartup()` 開頭檢查 `isEnabled()`：false 即 return 略過（不呼叫 LLM）；手動 `generate()` 不受此限。`MarketAnalysisController` PUT 加 `boolOrNull()` 解析（`enabled` 收 JSON boolean）。BFF 不變。前端 `TodayMarketAnalysisView` 頁首加「每日自動分析」`el-switch`＋`onEnabledChange`；`emptyDesc` computed 依 enabled 切換空狀態文案。重 build business-services+frontend、recreate、UI 驗證開關＋切換持久化＋停用時 cron 日誌「已停用…略過」（畫面驗證，不觸發 LLM）。
 - [ ] 149.15 改用 Batch API（非同步、省 50% token 成本）：Liquibase `v1.42.0-market-analysis-batch.sql`（`daily_market_analysis` 增 `batch_id VARCHAR(64)`）＋ master include；Entity 加 `STATUS_PROCESSING` 常數＋`batchId` 欄；`DailyMarketAnalysisRepository` 加 `findByStatus`。`MarketAnalysisService`：`doGenerate` 改為 `submitBatch`（組 `BatchCreateParams.Request.Params`、`customId="ma-"+date`、`batches().create` → 落 PROCESSING＋batch_id）；`generateInternal` 先查 PROCESSING 即不重送；新增 `pollPendingBatches()`／`finalizeIfReady()`／`markBatchFailed()`／`customId()`（retrieve → ENDED → `resultsStreaming` 取 customId → `isSucceeded().message()` 解析落 OK/FAILED、清 batch_id、`BATCH_MAX_AGE=12h` 逾時保護）；imports 換 `MessageCreateParams`→`BatchCreateParams`/`MessageBatch`/`MessageBatchIndividualResponse`/`MessageBatchResult`/`ToolUnion`/`StreamResponse`/`Duration`。`MarketAnalysisScheduler` 加 `@Scheduled(fixedDelay=90s) pollBatches()`（不受 enabled 限）。Controller/BFF/DTO 不變（generate 回傳 PROCESSING 列，status 直通）。前端 `TodayMarketAnalysisView` 加 PROCESSING info alert＋`watch` 每 30s 自動 `load()`（`onUnmounted` 清）＋`statusLabel` 加 PROCESSING＋regenerate 提示改「已送出（批次處理中）」＋loading 文案。重 build business-services+frontend、recreate、UI 驗證 PROCESSING 狀態畫面＋poller 日誌；**單次付費驗證**（真的送一批確認 web_search 在 batch 下正常、結果落 OK）延後、由使用者決定時機。
 
 ### Task 150: `/gdp-twse` 頁面選單／標題「股市分析」更名為「股市大盤查詢」
@@ -3737,5 +3737,5 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 151.5 掛勾（非同步收尾）：`MarketAnalysisService` 注入 dispatcher，`finalizeIfReady` 落 `status=OK` 後、`save` 前，若 `getEmailSentAt()==null` 以 `MarketAnalysisDto.from(row, objectMapper)` 呼叫 `dispatchDaily`，回 `true` 才 `setEmailSentAt(now)`（`save` 持久化）；包 try/catch。
 - [x] 151.6 BFF：新增 `TodayMarketAnalysisRecipientsBffRoutes`（passthrough `/api/bff/today-market-analysis/recipients/**` → `/api/notification-recipients/**`）；SecurityConfig 無需改（落 `authenticated()`，per-user owner-scoped）。
 - [x] 151.7 前端：`api/index.js` 的 `todayMarketAnalysis` 加 `getRecipients` / `toggleMarketAnalysis`；`TodayMarketAnalysisView.vue` 新增「分析結果寄送對象」`el-card`（收件人表 + `接收每日股市分析` 開關 + 空清單導引至通知設定）。
-- [ ] 151.8 整合 main（Task 149.12–149.15 Batch API/effort/web-search/enabled 已 landed）：merge origin/main、解 7 檔衝突（service 掛勾改 finalize、view/api 併存、migration 改 v1.43.0）；`--no-cache` 重 build business-services + bff + frontend、recreate；驗證 Liquibase v1.43.0 ran、兩欄位建立、bff route 掛載、切換訂閱開關持久化、既有功能（思考深度/新聞搜尋/停用/PROCESSING）未回退。
-- [ ] 151.9 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）。
+- [x] 151.8 整合 main（Task 149.12–149.15 Batch API/effort/web-search/enabled 已 landed）：merge origin/main、解 7 檔衝突（service 掛勾改 finalize、view/api 併存、migration 改 v1.43.0）；`--no-cache` 重 build business-services + bff + frontend、recreate；驗證 Liquibase v1.43.0 ran、兩欄位建立、bff route 掛載、切換訂閱開關持久化、既有功能（思考深度/新聞搜尋/停用/PROCESSING）未回退。
+- [x] 151.9 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）。
