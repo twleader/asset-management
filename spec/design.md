@@ -331,6 +331,8 @@ src/
 | `/exchange-rate` | ExchangeRateView | 匯率走勢 |
 | `/trading-calendar` | TradingCalendarView | 交易日曆 |
 | `/gdp-twse` | GdpTwseView | 股市大盤查詢（指數日線／當日＋台韓人均 GDP；Requirement 18） |
+| `/today-market-analysis` | TodayMarketAnalysisView | 今日股市分析（AI 判斷當日台股走向；Requirement 31） |
+| `/asset-allocation-advice` | AssetAllocationAdviceView | 資產配置建議（依個人條件＋持有資產由 AI 給配置建議；Requirement 32） |
 | `/settings/banks` | BankSettingsView | 銀行設定管理 |
 | `/settings/brokers` | BrokerSettingsView | 券商設定管理 |
 | `/settings/deposit-types` | DepositTypeSettingsView | 存款類型設定管理 |
@@ -1960,3 +1962,72 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
 - 不自建新聞抓取／`financial_news` 表（使用者選 Claude web_search）。
 - 不做盤中即時重評（僅每日開盤前一次 + 管理者手動重跑）。
 - 不對非台股市場（美股／英股）產生獨立判斷頁（美股走勢僅作為台股判斷的輸入）。
+
+## Requirement 32：資產配置建議（依個人條件＋持有資產由 AI 給個人化配置建議）
+
+**目標**：使用者先設定理財條件（年齡／投資年限／每月可投入／理財目標（複選）／可忍受風險／獲利預期），系統結合其**最新 `asset_snapshot`** 的現況配置與持有明細，由 Claude 產出個人化資產配置建議（整體評析／現況風險評估／建議目標配置／具體調整動作／風險提醒／參考來源），並保存歷次供回顧。以 Requirement 31 為藍本，差異：**互動式即時 → 走同步 Messages API**（非 Batch），同步在 request 執行緒 owner context 已綁定，`@Filter`／`TenantGuard` 正常運作。
+
+- **資料模型**（Liquibase `v1.44.0-portfolio-advice.sql`，三個 changeset）：
+  ```sql
+  -- 理財條件（一使用者一列，記住免重填；owner-scoped）
+  CREATE TABLE investment_profile (
+      id BIGSERIAL PRIMARY KEY, owner_user_id BIGINT NOT NULL,
+      age INTEGER, investment_horizon_years INTEGER, monthly_investment NUMERIC(20,2),
+      retirement_date DATE, -- 預計退休年月（v1.44.1 addColumn，存該月一號；退休後每月投入歸零）
+      goals VARCHAR(300), risk_tolerance VARCHAR(20), expected_annual_return VARCHAR(20),
+      updated_at TIMESTAMPTZ NOT NULL, CONSTRAINT uq_investment_profile_owner UNIQUE (owner_user_id));
+  -- 歷次建議（owner-scoped；條件快照 + based_on_* 歷史快照 + result_json 解析建議）
+  CREATE TABLE portfolio_advice (
+      id BIGSERIAL PRIMARY KEY, owner_user_id BIGINT NOT NULL, status VARCHAR(20) NOT NULL,
+      model VARCHAR(64), created_at TIMESTAMPTZ NOT NULL, completed_at TIMESTAMPTZ, error_message VARCHAR(1000),
+      age INTEGER, investment_horizon_years INTEGER, monthly_investment NUMERIC(20,2),
+      goals VARCHAR(300), risk_tolerance VARCHAR(20), expected_annual_return VARCHAR(20),
+      based_on_snapshot_id BIGINT, based_on_snapshot_date DATE, based_on_total_assets NUMERIC(20,2),
+      raw_response TEXT, result_json TEXT);
+  CREATE INDEX idx_portfolio_advice_owner_created ON portfolio_advice (owner_user_id, created_at DESC);
+  -- 成本控管設定（單列 id=1，全域，比照 market_analysis_setting）
+  CREATE TABLE portfolio_advice_setting (
+      id INTEGER PRIMARY KEY, model VARCHAR(64) NOT NULL, effort VARCHAR(16) NOT NULL,
+      web_search_max_uses INTEGER NOT NULL, updated_at TIMESTAMPTZ NOT NULL);
+  INSERT INTO portfolio_advice_setting VALUES (1, 'claude-opus-4-8', 'medium', 4, now());
+  ```
+  Entity `InvestmentProfile`／`PortfolioAdvice`（皆 `@Filter(name="ownerFilter")`，多租戶 Requirement 28）／`PortfolioAdviceSetting`。`goals` 為理財目標複選 code 逗號分隔；`based_on_snapshot_id` 正規化參照 asset_snapshot，`based_on_snapshot_date`／`based_on_total_assets` 為歷史快照（回顧不失真，比照 `realized_gain` 名稱字串例外）。
+
+- **正規化說明**：`investment_profile` 不存衍生值（退休日期以 `retirement_date` 存原始年月；累積年數／退休後年數由 service `retirementSpan()` 依退休日期與今天現算、不入庫，每月投入僅計入累積期、退休後歸零）。`portfolio_advice` 的條件快照與 `based_on_*` 為**刻意 denormalize 的歷史快照**（產生當下的條件與資產依據），符合「歷史交易記錄名稱字串」例外；`result_json` 為 LLM 解析結果的凍結內容（比照 `daily_market_analysis`）。
+
+- **Service `PortfolioAdviceService`**：
+  - profile：`getProfile()`／`saveProfile(...)`（`TenantGuard.requireCurrentUserId()` 綁 owner；risk/return/goals 白名單驗證，goals 過濾去重逗號串接）。
+  - 現況：`getCurrentAllocation()` 讀最新快照 `totalDeposit/totalFundValue/totalStockValue/totalAssets` 算占比（存款／基金／股票）。
+  - `generate(...)`（**非同步**）：upsert 條件 → 讀最新快照＋子表明細（`bankDeposit/fundHolding/stockHolding` `findBySnapshotId`，皆由 owner-filtered 快照 id 帶出，安全）→ **在 request 執行緒組好 system/user prompt**（條件＋現況＋明細；`web_search` 開則要求納入當前市場、references 附來源，關則要求不得杜撰、references 回空）→ 落一筆 `PortfolioAdvice`（`status=PROCESSING`＋條件快照＋based_on）並**立即回傳** → 提交背景執行緒 `runGeneration`。`runGeneration`（daemon 固定小池）：依 setting `resolveModel/resolveEffort/resolveWebSearchMaxUses` 呼叫 `client.messages().create(MessageCreateParams...)`（adaptive thinking + `OutputConfig.effort` + 可選 `WebSearchTool20260209.maxUses`）→ 取首個 `{` 至末個 `}` 解析為 `PortfolioAdviceResult` → sanitize references（http(s) 白名單）→ **以 `adviceId` by-id 更新該列** OK／FAILED（全程 try/catch 不拋）。金鑰未設時 request 執行緒直接落 `NOT_CONFIGURED`、不提交背景。`latest()` 對 PROCESSING 逾 10 分鐘（背景中斷／重啟）自癒判 FAILED。
+  - 設定：`getSettings()`／`updateSettings(model, effort, webSearchMaxUses)` 白名單驗證（比照 `MarketAnalysisService`）。
+  - 免 enum 寫死：`GOAL_OPTIONS`／`RISK_OPTIONS`／`RETURN_OPTIONS`／`AVAILABLE_MODELS`／`AVAILABLE_EFFORTS`／`AVAILABLE_WEB_SEARCHES` 皆服務層白名單常數。
+
+- **非同步（in-process 背景執行緒）而非同步阻塞或 Batch**：單次 Claude 呼叫含 thinking + web_search 常達數十秒（實測 ~90s），**超過 nginx `location /api/` 的 `proxy_read_timeout 60s`**——若同步阻塞，長連線會被 proxy 在 60s 切斷（前端 504、且同步版「跑完才落庫」導致完全無結果、無歷史）。故改：`POST /generate` 立即落 `PROCESSING` 並回、由 business-services **背景執行緒池**（`Executors.newFixedThreadPool(3)`，daemon）跑 Claude、完成 by-id 更新，前端輪詢。與 Requirement 31 差異：R31 用 **Batch API**（每日排程、可等、省 50%）；本功能用 **in-process 背景執行緒**（互動式、要快回饋、單筆即時）。**多租戶正確性關鍵**：owner-scoped 的快照／明細讀取與 prompt 組裝**全在 request 執行緒**（`TenantFilterAspect` 啟用 ownerFilter）；背景執行緒只 Claude 呼叫 + `adviceRepo.findById(adviceId)`（`@Filter` 本就不套 by-id）+ `save`，**不做任何 owner-scoped 查詢**，故不受背景執行緒無 request context、ownerFilter 不啟用之影響（見 `feedback_hibernate_filter_aspect`）。狀態：PROCESSING → OK／FAILED；NOT_CONFIGURED 於 request 執行緒直接落。
+
+- **API**（business `/api/portfolio-advice`）：
+  | Method | Path | 說明 |
+  |---|---|---|
+  | GET | `/latest` | 最新一筆建議（`PortfolioAdviceDto`）；無則 `{status:"NONE"}` |
+  | GET | `/history?limit=20` | 近 N 筆（owner-scoped，created_at 降序） |
+  | GET | `/profile` | 理財條件（含 goal/risk/return 可選清單） |
+  | PUT | `/profile` | 儲存理財條件 |
+  | GET | `/current-allocation` | 最新快照現況配置（`CurrentAllocationDto`） |
+  | POST | `/generate` | 同步產生建議（body 帶條件、一併儲存 profile） |
+  | GET | `/settings` | 成本設定 + 可選清單 |
+  | PUT | `/settings` `{model?, effort?, webSearchMaxUses?}` | 更新成本設定（`isAdmin()` 縱深，白名單驗證） |
+
+- **BFF 一頁一支**：`PortfolioAdviceBffController`（`/api/bff/portfolio-advice`）：`GET` `Mono.zip` 聚合 `{ latest, history, profile, settings, currentAllocation }`；`POST /generate`（timeout 180s）、`PUT /profile`、`PUT /settings` 泛型 Map 轉發。WebClient 帶 `X-User-*` 租戶身分，business 端 owner-scoped。`SecurityConfig` 加 `PUT /api/bff/portfolio-advice/settings` 限 `AUTHORITY_ADMIN`；`/generate`／`/profile` 為 per-user → 落 `authenticated()`。
+
+  ```text
+  前端 AssetAllocationAdviceView ──▶ GET /api/bff/portfolio-advice ──▶ business /api/portfolio-advice/{latest,history,profile,settings,current-allocation}
+  產生建議 ──▶ POST /api/bff/portfolio-advice/generate ──▶ business 落 PROCESSING 即回、背景執行緒呼叫 Claude；前端每 5s 輪詢 GET 聚合至非 PROCESSING
+  （管理者）成本設定 ──▶ PUT /api/bff/portfolio-advice/settings（限 ADMIN）──▶ business PUT /api/portfolio-advice/settings
+  ```
+
+- **前端**（`views/AssetAllocationAdviceView.vue`）：條件表單（年齡／年限／月投入 `el-input-number`、理財目標 `el-select multiple`、風險 `el-radio-group`、獲利預期 `el-select`）＋「儲存條件」「產生建議」；現況配置與建議目標配置以純 CSS bar 呈現（避免 echarts tree-shaking 漏註冊風險）；建議卡片顯示 summary／風險評估／目標配置（比例＋理由）／調整動作（優先度 tag）／風險提醒／參考來源（`safeUrl` 擋非 http(s)）；免責聲明；歷次建議 `el-table` 可展開回顧當時條件與建議；管理者頁首成本設定（模型／思考深度／web 搜尋 `el-select`，`change` 即持久化）。`api/index.js` 加 `bffApi.portfolioAdvice`（generate 覆寫 200s timeout）。左選單 icon `Compass`。
+
+### 不處理
+
+- 不做定期／排程自動產生（互動式即時，使用者按鈕觸發；不像 Requirement 31 有每日 cron）。
+- 不接第三方投顧／下單（純建議，不執行任何交易）。
+- 不做多份 profile／情境比較（一使用者一份條件；要比較可各自產生後於歷次建議回顧）。

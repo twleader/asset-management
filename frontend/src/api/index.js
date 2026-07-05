@@ -212,6 +212,22 @@ export const bffApi = {
       api.patch(`/bff/today-market-analysis/recipients/${id}/market-analysis`)
   },
 
+  // AssetAllocationAdvice（資產配置建議，Requirement 32）
+  portfolioAdvice: {
+    // 一次聚合：{ latest, history, profile, settings, currentAllocation }
+    get: (historyLimit = 20) =>
+      api.get('/bff/portfolio-advice', { params: { historyLimit } }),
+    // 儲存理財條件（免重填）；payload：{ age, investmentHorizonYears, monthlyInvestment, goals[], riskTolerance, expectedAnnualReturn }
+    saveProfile: (payload) =>
+      api.put('/bff/portfolio-advice/profile', payload),
+    // 產生建議（非同步）：立即回一筆 PROCESSING，背景跑 Claude，前端輪詢至完成；payload 同 saveProfile，會一併儲存為 profile
+    generate: (payload) =>
+      api.post('/bff/portfolio-advice/generate', payload, { timeout: 60000 }),
+    // 更新成本控管設定（模型／思考深度／web 搜尋，限管理者）；payload 例：{ model } 或 { effort } 或 { webSearchMaxUses }
+    updateSettings: (payload) =>
+      api.put('/bff/portfolio-advice/settings', payload)
+  },
+
   // TradingCalendar
   tradingCalendar: {
     get:           (year) => api.get('/bff/trading-calendar', { params: year ? { year } : {} }),

@@ -82,6 +82,10 @@ public class SecurityConfig {
                             .hasAuthority(AuthConstants.AUTHORITY_ADMIN)
                         .pathMatchers(HttpMethod.PUT, "/api/bff/today-market-analysis/settings")
                             .hasAuthority(AuthConstants.AUTHORITY_ADMIN)
+                        // 資產配置建議（Requirement 32）：成本控管設定（模型／思考深度／web 搜尋）為全域，改設定限 ADMIN；
+                        // 產生建議 /generate 與儲存條件 /profile 為 per-user（owner-scoped）→ 落 anyExchange().authenticated()
+                        .pathMatchers(HttpMethod.PUT, "/api/bff/portfolio-advice/settings")
+                            .hasAuthority(AuthConstants.AUTHORITY_ADMIN)
                         // 全域共用參考資料：寫入限 ADMIN（GET 不列入 → 落到 anyExchange().authenticated()）
                         .pathMatchers(HttpMethod.POST, GLOBAL_SETTINGS_PATHS).hasAuthority(AuthConstants.AUTHORITY_ADMIN)
                         .pathMatchers(HttpMethod.PUT, GLOBAL_SETTINGS_PATHS).hasAuthority(AuthConstants.AUTHORITY_ADMIN)
