@@ -75,6 +75,12 @@ const router = createRouter({
       meta: { title: '今日股市分析', icon: 'Sunrise' }
     },
     {
+      path: '/asset-allocation-advice',
+      name: 'AssetAllocationAdvice',
+      component: () => import('@/views/AssetAllocationAdviceView.vue'),
+      meta: { title: '資產配置建議', icon: 'Compass' }
+    },
+    {
       path: '/stocks',
       name: 'StockMonitor',
       component: () => import('@/views/StockMonitorView.vue'),

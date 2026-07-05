@@ -1,0 +1,573 @@
+<template>
+  <div v-loading="loading" :element-loading-text="generating ? 'AI 產生配置建議中（可能需數十秒）…' : '載入中…'">
+    <!-- 頂列：標題 + （管理者）成本設定 -->
+    <div class="header-row">
+      <div>
+        <span class="page-heading">資產配置建議</span>
+        <span class="page-sub">填好你的理財條件，AI 會結合你目前持有的資產給出個人化的資產配置建議</span>
+      </div>
+      <div v-if="auth.isAdmin" class="header-actions">
+        <span class="model-label">分析模型</span>
+        <el-select v-model="selectedModel" size="default" style="width: 200px" :disabled="busy"
+          title="切換分析模型（下次產生生效）" @change="onModelChange">
+          <el-option v-for="m in availableModels" :key="m.id" :label="m.label" :value="m.id" />
+        </el-select>
+        <span class="model-label">思考深度</span>
+        <el-select v-model="selectedEffort" size="default" style="width: 160px" :disabled="busy"
+          title="切換思考深度（越低越省，下次產生生效）" @change="onEffortChange">
+          <el-option v-for="e in availableEfforts" :key="e.id" :label="e.label" :value="e.id" />
+        </el-select>
+        <span class="model-label">市場搜尋</span>
+        <el-select v-model="selectedWebSearch" size="default" style="width: 200px" :disabled="busy"
+          title="切換 web 搜尋次數（0＝僅依個人資產與條件，下次產生生效）" @change="onWebSearchChange">
+          <el-option v-for="w in availableWebSearches" :key="w.value" :label="w.label" :value="w.value" />
+        </el-select>
+      </div>
+    </div>
+
+    <!-- 條件設定表單 -->
+    <el-card shadow="never" class="section-card">
+      <template #header><span class="section-title">① 我的理財條件</span></template>
+      <el-form label-width="120px" label-position="right" :disabled="busy">
+        <el-row :gutter="16">
+          <el-col :xs="24" :sm="6">
+            <el-form-item label="目前年齡">
+              <el-input-number v-model="form.age" :min="0" :max="120" :step="1" controls-position="right"
+                style="width: 100%" placeholder="歲" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="6">
+            <el-form-item label="投資年限">
+              <el-input-number v-model="form.investmentHorizonYears" :min="0" :max="80" :step="1"
+                controls-position="right" style="width: 100%" placeholder="年" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="6">
+            <el-form-item label="每月可投入">
+              <el-input-number v-model="form.monthlyInvestment" :min="0" :step="5000" controls-position="right"
+                style="width: 100%" placeholder="新台幣" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="6">
+            <el-form-item label="退休日期">
+              <el-date-picker v-model="form.retirementDate" type="month" value-format="YYYY-MM"
+                format="YYYY年MM月" placeholder="預計退休年月" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-row v-if="retirementHint" :gutter="16">
+          <el-col :span="24">
+            <div class="retire-derived" :class="{ 'is-warn': retirementHint.warn }">{{ retirementHint.text }}</div>
+          </el-col>
+        </el-row>
+        <el-row :gutter="16">
+          <el-col :xs="24" :sm="12">
+            <el-form-item label="理財目標">
+              <el-select v-model="form.goals" multiple collapse-tags collapse-tags-tooltip
+                placeholder="可複選" style="width: 100%">
+                <el-option v-for="o in goalOptions" :key="o.id" :label="o.label" :value="o.id" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="12">
+            <el-form-item label="獲利預期">
+              <el-select v-model="form.expectedAnnualReturn" placeholder="年化報酬期望" style="width: 100%" clearable>
+                <el-option v-for="o in returnOptions" :key="o.id" :label="o.label" :value="o.id" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-form-item label="可忍受風險">
+          <el-radio-group v-model="form.riskTolerance">
+            <el-radio v-for="o in riskOptions" :key="o.id" :value="o.id" border>{{ o.label }}</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item>
+          <el-button :loading="savingProfile" @click="saveProfile">儲存條件</el-button>
+          <el-button type="primary" :icon="MagicStick" :loading="generating || isProcessing" @click="generate">
+            {{ isProcessing ? '產生中…' : '產生建議' }}
+          </el-button>
+          <span class="form-hint">條件會被記住，下次進來免重填；「產生建議」會一併儲存目前條件。</span>
+        </el-form-item>
+      </el-form>
+    </el-card>
+
+    <!-- 目前資產配置 -->
+    <el-card shadow="never" class="section-card">
+      <template #header>
+        <div class="card-head">
+          <span class="section-title">② 我目前的資產配置</span>
+          <span v-if="allocation.snapshotDate" class="head-meta">
+            快照日 {{ allocation.snapshotDate }}　資產總額 {{ money(allocation.totalAssets) }} 元
+          </span>
+        </div>
+      </template>
+      <div v-if="allocationItems.length && Number(allocation.totalAssets) > 0" class="alloc-list">
+        <div v-for="it in allocationItems" :key="it.assetClass" class="alloc-row">
+          <span class="alloc-name">{{ it.assetClass }}</span>
+          <div class="bar-wrap">
+            <div class="bar cur" :style="{ width: barWidth(it.pct) }"></div>
+          </div>
+          <span class="alloc-val">{{ fmtPct(it.pct) }}<span class="alloc-amt">（{{ money(it.value) }} 元）</span></span>
+        </div>
+      </div>
+      <el-empty v-else :image-size="70" description="尚無資產快照——請先於「總覽儀表板／管理資產」建立快照，建議會更貼合你的實際持有" />
+    </el-card>
+
+    <!-- 建議結果 -->
+    <el-card shadow="never" class="section-card">
+      <template #header>
+        <div class="card-head">
+          <span class="section-title">③ AI 資產配置建議</span>
+          <span v-if="isOk" class="head-meta">
+            由 {{ latest.model || 'Claude' }} 產生於 {{ formatTime(latest.createdAt) }}
+          </span>
+        </div>
+      </template>
+
+      <el-alert v-if="latest && latest.status === 'NOT_CONFIGURED'" type="warning" show-icon :closable="false"
+        title="尚未設定 Anthropic API 金鑰"
+        description="請於部署環境設定 ANTHROPIC_API_KEY 後再產生建議。" />
+      <el-alert v-else-if="latest && latest.status === 'FAILED'" type="error" show-icon :closable="false"
+        title="建議產生失敗" :description="latest.errorMessage || '請稍後再按一次「產生建議」。'" />
+      <el-alert v-else-if="isProcessing" type="info" show-icon :closable="false"
+        title="AI 產生配置建議中…"
+        description="已送出，完成後畫面會自動更新（通常數十秒；含當前市場搜尋時可能久一點）。" />
+      <el-empty v-else-if="!isOk" :image-size="80"
+        description="尚無建議——填好上方條件後，按「產生建議」" />
+
+      <div v-else>
+        <div class="disclaimer-top">
+          ⚠️ 本建議由 AI 依你提供的條件與資產產生，僅供參考，不構成投資建議；投資有風險，請自行評估。
+        </div>
+
+        <div v-if="latest.summary" class="summary">{{ latest.summary }}</div>
+        <div v-if="latest.riskAssessment" class="risk-assess">
+          <div class="block-title">現況與風險評估</div>
+          <div class="context-text">{{ latest.riskAssessment }}</div>
+        </div>
+
+        <div class="block-title">建議目標配置</div>
+        <div v-if="latest.targetAllocation && latest.targetAllocation.length" class="alloc-list target">
+          <div v-for="(t, i) in latest.targetAllocation" :key="i" class="alloc-block">
+            <div class="alloc-row">
+              <span class="alloc-name">{{ t.assetClass }}</span>
+              <div class="bar-wrap">
+                <div class="bar tgt" :style="{ width: barWidth(t.targetPct) }"></div>
+              </div>
+              <span class="alloc-val">{{ fmtPct(t.targetPct) }}</span>
+            </div>
+            <div v-if="t.rationale" class="alloc-rationale">{{ t.rationale }}</div>
+          </div>
+        </div>
+        <div v-else class="muted">—</div>
+
+        <div class="block-title">具體調整動作</div>
+        <ul v-if="latest.actions && latest.actions.length" class="action-list">
+          <li v-for="(a, i) in latest.actions" :key="i">
+            <el-tag :type="priorityType(a.priority)" size="small" effect="dark" class="prio-tag">
+              {{ priorityLabel(a.priority) }}
+            </el-tag>
+            <span class="action-title">{{ a.title }}</span>
+            <div v-if="a.detail" class="action-detail">{{ a.detail }}</div>
+          </li>
+        </ul>
+        <div v-else class="muted">—</div>
+
+        <el-row :gutter="16" style="margin-top: 6px">
+          <el-col :xs="24" :md="12" v-if="latest.warnings && latest.warnings.length">
+            <div class="block-title">風險提醒</div>
+            <ul class="factor-list">
+              <li v-for="(w, i) in latest.warnings" :key="i">{{ w }}</li>
+            </ul>
+          </el-col>
+          <el-col :xs="24" :md="12" v-if="latest.references && latest.references.length">
+            <div class="block-title">參考來源</div>
+            <ul class="news-list">
+              <li v-for="(r, i) in latest.references" :key="i">
+                <a v-if="safeUrl(r.url)" :href="safeUrl(r.url)" target="_blank" rel="noopener noreferrer">{{ r.title || r.url }}</a>
+                <span v-else>{{ r.title }}</span>
+              </li>
+            </ul>
+          </el-col>
+        </el-row>
+      </div>
+    </el-card>
+
+    <!-- 歷次建議 -->
+    <el-card shadow="never" class="section-card" v-if="history.length">
+      <template #header><span class="section-title">歷次建議</span></template>
+      <el-table :data="history" size="small" style="width: 100%">
+        <el-table-column type="expand">
+          <template #default="{ row }">
+            <div class="hist-expand">
+              <div class="hist-cond">
+                條件：{{ row.age != null ? row.age + ' 歲' : '—' }}／投資 {{ row.investmentHorizonYears != null ? row.investmentHorizonYears + ' 年' : '—' }}／
+                風險 {{ labelOf(riskOptions, row.riskTolerance) }}／獲利預期 {{ labelOf(returnOptions, row.expectedAnnualReturn) }}
+                <span v-if="row.goals && row.goals.length">／目標 {{ row.goals.map(g => labelOf(goalOptions, g)).join('、') }}</span>
+              </div>
+              <div v-if="row.summary" class="hist-summary">{{ row.summary }}</div>
+              <div v-if="row.targetAllocation && row.targetAllocation.length" class="hist-target">
+                建議：{{ row.targetAllocation.map(t => `${t.assetClass} ${fmtPct(t.targetPct)}`).join('、') }}
+              </div>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="產生時間" width="180">
+          <template #default="{ row }">{{ formatTime(row.createdAt) }}</template>
+        </el-table-column>
+        <el-table-column label="狀態" width="100">
+          <template #default="{ row }">
+            <el-tag :type="row.status === 'OK' ? 'success' : 'info'" size="small">{{ statusLabel(row.status) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="summary" label="重點" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.status === 'OK' ? row.summary : (row.errorMessage || statusLabel(row.status)) }}</template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+  </div>
+</template>
+
+<script setup>
+import { MagicStick } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
+import { bffApi } from '@/api'
+import { useAuthStore } from '@/stores/authStore'
+
+const auth = useAuthStore()
+const loading = ref(false)
+const generating = ref(false)
+const savingProfile = ref(false)
+const savingModel = ref(false)
+const savingEffort = ref(false)
+const savingWebSearch = ref(false)
+
+const form = ref({
+  age: null,
+  investmentHorizonYears: null,
+  monthlyInvestment: null,
+  retirementDate: null,
+  goals: [],
+  riskTolerance: '',
+  expectedAnnualReturn: ''
+})
+const goalOptions = ref([])
+const riskOptions = ref([])
+const returnOptions = ref([])
+
+const latest = ref(null)
+const history = ref([])
+const allocation = ref({ snapshotId: null, snapshotDate: null, totalAssets: null, items: [] })
+const settings = ref({ model: '', effort: '', webSearchMaxUses: null, availableModels: [], availableEfforts: [], availableWebSearches: [] })
+const selectedModel = ref('')
+const selectedEffort = ref('')
+const selectedWebSearch = ref(null)
+
+const isOk = computed(() => latest.value && latest.value.status === 'OK')
+const isProcessing = computed(() => latest.value && latest.value.status === 'PROCESSING')
+
+// 退休日期衍生（唯讀，只用於提示；真正計算在後端 service，不入庫）
+// accumulationYears：今天 → 退休年月的整年數（無條件捨去，滿一年才算一年）
+// retirementYears：投資年限 − accumulationYears（<0 代表退休晚於投資終點，夾為 0，且 accumulationYears 夾為投資年限）
+const retirementDerived = computed(() => {
+  const rd = form.value.retirementDate
+  const horizon = form.value.investmentHorizonYears
+  if (!rd) return null
+  const m = /^(\d{4})-(\d{2})$/.exec(rd)
+  if (!m) return null
+  const now = new Date()
+  const nowMonths = now.getFullYear() * 12 + now.getMonth()
+  const retireMonths = Number(m[1]) * 12 + (Number(m[2]) - 1)
+  const monthsToRetire = retireMonths - nowMonths
+  const past = monthsToRetire < 0
+  let accumulationYears = Math.max(0, Math.floor(monthsToRetire / 12))
+  let retirementYears = null
+  if (horizon != null) {
+    accumulationYears = Math.min(accumulationYears, horizon)
+    retirementYears = Math.max(0, horizon - accumulationYears)
+  }
+  return { accumulationYears, retirementYears, past, horizon }
+})
+
+const retirementHint = computed(() => {
+  const d = retirementDerived.value
+  if (!d) return null
+  if (d.past) {
+    return { warn: true, text: '退休日期早於今天，請確認；系統會將累積期視為 0，全期以退休後守成處理。' }
+  }
+  if (d.horizon == null) {
+    return { warn: false, text: `距退休約 ${d.accumulationYears} 年（累積期）；請一併填「投資年限」以推算退休後期間。` }
+  }
+  if (d.retirementYears === 0) {
+    return { warn: true, text: `退休日期落在投資年限終點之後（或等於）：全期 ${d.horizon} 年皆為累積期，無退休後階段。` }
+  }
+  return { warn: false, text: `累積期 ${d.accumulationYears} 年（退休前，每月投入）／退休後守成期 ${d.retirementYears} 年（每月投入視為 0）。` }
+})
+const allocationItems = computed(() => allocation.value.items || [])
+const availableModels = computed(() => settings.value.availableModels || [])
+const availableEfforts = computed(() => settings.value.availableEfforts || [])
+const availableWebSearches = computed(() => settings.value.availableWebSearches || [])
+const busy = computed(() => generating.value || isProcessing.value || savingProfile.value || savingModel.value || savingEffort.value || savingWebSearch.value)
+
+function money(v) {
+  const n = Number(v)
+  return isNaN(n) ? '0' : Math.round(n).toLocaleString('en-US')
+}
+function fmtPct(v) {
+  const n = Number(v)
+  return isNaN(n) ? '—' : `${n}%`
+}
+function barWidth(v) {
+  const n = Number(v)
+  return `${Math.max(0, Math.min(100, isNaN(n) ? 0 : n))}%`
+}
+function priorityType(p) {
+  switch ((p || '').toUpperCase()) {
+    case 'HIGH': return 'danger'
+    case 'MEDIUM': return 'warning'
+    case 'LOW': return 'info'
+    default: return 'info'
+  }
+}
+function priorityLabel(p) {
+  switch ((p || '').toUpperCase()) {
+    case 'HIGH': return '高'
+    case 'MEDIUM': return '中'
+    case 'LOW': return '低'
+    default: return '—'
+  }
+}
+function statusLabel(status) {
+  if (status === 'OK') return '完成'
+  if (status === 'FAILED') return '失敗'
+  if (status === 'NOT_CONFIGURED') return '未設定'
+  return status || '—'
+}
+function labelOf(options, id) {
+  if (!id) return '—'
+  const o = (options || []).find(x => x.id === id)
+  return o ? o.label : id
+}
+// references 連結來自 web_search（不可信），只允許 http(s)，擋 javascript:/data:（防 XSS）。後端另有一層。
+function safeUrl(url) {
+  if (typeof url !== 'string') return null
+  const u = url.trim()
+  return /^https?:\/\//i.test(u) ? u : null
+}
+function formatTime(ts) {
+  if (!ts) return ''
+  const d = new Date(ts)
+  return isNaN(d.getTime()) ? ts : d.toLocaleString('zh-TW', { hour12: false })
+}
+
+async function load(silent = false) {
+  if (!silent) loading.value = true
+  try {
+    const data = await bffApi.portfolioAdvice.get(20)
+    // profile → 表單 + 可選清單
+    const p = data.profile || {}
+    goalOptions.value = p.goalOptions || []
+    riskOptions.value = p.riskOptions || []
+    returnOptions.value = p.returnOptions || []
+    form.value = {
+      age: p.age ?? null,
+      investmentHorizonYears: p.investmentHorizonYears ?? null,
+      monthlyInvestment: p.monthlyInvestment ?? null,
+      retirementDate: p.retirementDate ?? null,
+      goals: p.goals || [],
+      riskTolerance: p.riskTolerance || '',
+      expectedAnnualReturn: p.expectedAnnualReturn || ''
+    }
+    // latest / history / allocation
+    latest.value = data.latest && data.latest.status && data.latest.status !== 'NONE' ? data.latest : (data.latest || null)
+    history.value = (data.history || []).filter(h => h && h.status)
+    allocation.value = data.currentAllocation && data.currentAllocation.items
+      ? data.currentAllocation
+      : { snapshotId: null, snapshotDate: null, totalAssets: null, items: [] }
+    // settings
+    settings.value = data.settings && data.settings.availableModels
+      ? data.settings
+      : { model: '', effort: '', webSearchMaxUses: null, availableModels: [], availableEfforts: [], availableWebSearches: [] }
+    selectedModel.value = settings.value.model || ''
+    selectedEffort.value = settings.value.effort || ''
+    selectedWebSearch.value = settings.value.webSearchMaxUses ?? null
+  } finally {
+    loading.value = false
+  }
+}
+
+function profilePayload() {
+  return {
+    age: form.value.age,
+    investmentHorizonYears: form.value.investmentHorizonYears,
+    monthlyInvestment: form.value.monthlyInvestment,
+    retirementDate: form.value.retirementDate,
+    goals: form.value.goals,
+    riskTolerance: form.value.riskTolerance,
+    expectedAnnualReturn: form.value.expectedAnnualReturn
+  }
+}
+
+async function saveProfile() {
+  savingProfile.value = true
+  try {
+    await bffApi.portfolioAdvice.saveProfile(profilePayload())
+    ElMessage.success('已儲存理財條件')
+  } catch (e) {
+    // 錯誤 toast 由 api 攔截器統一處理
+  } finally {
+    savingProfile.value = false
+  }
+}
+
+async function generate() {
+  if (!form.value.riskTolerance) {
+    ElMessage.warning('請先選擇「可忍受風險」')
+    return
+  }
+  if (retirementDerived.value && retirementDerived.value.past) {
+    ElMessage.warning('退休日期須晚於今天，請重新選擇')
+    return
+  }
+  generating.value = true
+  try {
+    const res = await bffApi.portfolioAdvice.generate(profilePayload())
+    if (res && res.status === 'PROCESSING') {
+      ElMessage.success('已送出，AI 產生中，完成後自動更新')
+    } else if (res && res.status === 'NOT_CONFIGURED') {
+      ElMessage.warning('尚未設定 Anthropic API 金鑰')
+    } else if (res && res.status === 'FAILED') {
+      ElMessage.error(res.errorMessage || '建議產生失敗，請再試一次')
+    }
+    // 重載聚合 → latest 變 PROCESSING → watch 啟動輪詢，完成後自動更新
+    await load()
+  } catch (e) {
+    // 錯誤 toast 由 api 攔截器統一處理；仍重載一次以反映可能已落的 PROCESSING 列
+    try { await load() } catch (_) { /* ignore */ }
+  } finally {
+    generating.value = false
+  }
+}
+
+// PROCESSING（背景產生中）時每 5 秒自動 reload，直到狀態改變；離開頁面時清除。
+let pollTimer = null
+function stopPoll() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+}
+watch(() => latest.value && latest.value.status, (status) => {
+  if (status === 'PROCESSING') {
+    if (!pollTimer) pollTimer = setInterval(() => load(true), 5000)
+  } else {
+    stopPoll()
+  }
+})
+
+// 管理者切換模型 / 思考深度 / web 搜尋（成本控管）→ 持久化，下次產生生效。失敗還原。
+async function onModelChange(model) {
+  savingModel.value = true
+  try {
+    const res = await bffApi.portfolioAdvice.updateSettings({ model })
+    if (res && res.model) { settings.value = res; syncSettingSelects(res) }
+    ElMessage.success('已切換分析模型，下次產生生效')
+  } catch (e) {
+    selectedModel.value = settings.value.model || ''
+  } finally {
+    savingModel.value = false
+  }
+}
+async function onEffortChange(effort) {
+  savingEffort.value = true
+  try {
+    const res = await bffApi.portfolioAdvice.updateSettings({ effort })
+    if (res && res.effort) { settings.value = res; syncSettingSelects(res) }
+    ElMessage.success('已切換思考深度，下次產生生效')
+  } catch (e) {
+    selectedEffort.value = settings.value.effort || ''
+  } finally {
+    savingEffort.value = false
+  }
+}
+async function onWebSearchChange(webSearchMaxUses) {
+  savingWebSearch.value = true
+  try {
+    const res = await bffApi.portfolioAdvice.updateSettings({ webSearchMaxUses })
+    if (res && res.webSearchMaxUses != null) { settings.value = res; syncSettingSelects(res) }
+    ElMessage.success('已切換市場搜尋次數，下次產生生效')
+  } catch (e) {
+    selectedWebSearch.value = settings.value.webSearchMaxUses ?? null
+  } finally {
+    savingWebSearch.value = false
+  }
+}
+function syncSettingSelects(res) {
+  selectedModel.value = res.model || ''
+  selectedEffort.value = res.effort || ''
+  selectedWebSearch.value = res.webSearchMaxUses ?? null
+}
+
+onMounted(() => load())
+onUnmounted(stopPoll)
+</script>
+
+<style scoped>
+.header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  gap: 12px;
+}
+.page-heading { font-size: 20px; font-weight: 700; color: #1e293b; }
+.page-sub { display: block; font-size: 13px; color: #94a3b8; margin-top: 4px; }
+.header-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
+.model-label { font-size: 13px; color: #64748b; }
+.section-card { margin-bottom: 16px; }
+.section-title { font-weight: 700; color: #1e293b; }
+.card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.head-meta { font-size: 12px; color: #94a3b8; }
+.form-hint { font-size: 12px; color: #94a3b8; margin-left: 10px; }
+.retire-derived { font-size: 12px; color: #64748b; margin: -4px 0 8px 120px; }
+.retire-derived.is-warn { color: #b45309; }
+
+.alloc-list { display: flex; flex-direction: column; gap: 12px; }
+.alloc-block { display: flex; flex-direction: column; gap: 2px; }
+.alloc-row { display: flex; align-items: center; gap: 12px; }
+.alloc-name { width: 150px; flex-shrink: 0; font-size: 14px; color: #334155; font-weight: 600; }
+.bar-wrap { flex: 1; background: #f1f5f9; border-radius: 6px; height: 18px; overflow: hidden; }
+.bar { height: 100%; border-radius: 6px; transition: width 0.4s; }
+.bar.cur { background: linear-gradient(90deg, #60a5fa, #2563eb); }
+.bar.tgt { background: linear-gradient(90deg, #34d399, #059669); }
+.alloc-val { width: 170px; flex-shrink: 0; text-align: right; font-size: 14px; color: #1e293b; font-variant-numeric: tabular-nums; }
+.alloc-amt { color: #94a3b8; font-size: 12px; }
+.alloc-rationale { margin-left: 162px; font-size: 13px; color: #64748b; line-height: 1.6; }
+
+.disclaimer-top {
+  background: #fffbeb; border: 1px solid #fde68a; color: #92400e;
+  font-size: 13px; padding: 8px 12px; border-radius: 8px; margin-bottom: 14px;
+}
+.summary { font-size: 15px; line-height: 1.9; color: #334155; margin-bottom: 12px; }
+.risk-assess { margin-bottom: 8px; }
+.block-title {
+  font-weight: 700; color: #1e293b; margin: 14px 0 8px;
+  border-left: 3px solid #cbd5e1; padding-left: 8px;
+}
+.context-text { font-size: 14px; line-height: 1.8; color: #475569; }
+.action-list { list-style: none; padding-left: 0; margin: 0; }
+.action-list li { padding: 8px 0; border-bottom: 1px dashed #f1f5f9; }
+.prio-tag { margin-right: 8px; }
+.action-title { font-weight: 600; color: #1e293b; }
+.action-detail { margin-top: 4px; margin-left: 2px; font-size: 13px; color: #475569; line-height: 1.7; }
+.factor-list { margin: 0; padding-left: 18px; }
+.factor-list li { line-height: 1.9; color: #334155; }
+.news-list { list-style: none; padding-left: 0; margin: 0; }
+.news-list li { line-height: 1.7; margin-bottom: 6px; }
+.news-list a { color: #2563eb; text-decoration: none; }
+.news-list a:hover { text-decoration: underline; }
+.muted { color: #94a3b8; }
+
+.hist-expand { padding: 6px 12px; }
+.hist-cond { font-size: 13px; color: #64748b; margin-bottom: 6px; }
+.hist-summary { font-size: 14px; color: #334155; line-height: 1.7; margin-bottom: 4px; }
+.hist-target { font-size: 13px; color: #059669; }
+</style>
