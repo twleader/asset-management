@@ -3761,3 +3761,22 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [ ] 152.8 build 驗證：`.env` 複製進 worktree；`--no-cache` 重 build business-services + bff + frontend、recreate；驗證 Liquibase v1.44.0 ran、3 表建立、singleton seed、選單/路由、條件持久化、產生建議落 OK、現況配置與 dashboard 一致、owner 隔離、ADMIN 才能改設定。
 - [ ] 152.10 退休兩階段（每月投入退休後歸零）：`investment_profile` 加 `retirement_date DATE`（`v1.44.1-retirement-date.sql` addColumn，`YearMonthDateConverter` 存該月一號）；`InvestmentProfileDto` 加 `retirementDate`（String `"YYYY-MM"` 往返，對齊前端 `value-format`）；`PortfolioAdviceService.saveProfile/generate` 帶退休日期、`buildUserPrompt` 切「累積期／退休後守成期」兩段、月投入僅乘累積年數（`projectedContribution`）、`buildSystemPrompt` 加退休保守規則（1a）；`retirementSpan()` 現算累積／退休後年數（不入庫）；Controller 加 `yearMonthOrNull` parser；BFF `Map` passthrough 無需改；前端 `AssetAllocationAdviceView` 加 `el-date-picker type="month"` 欄位＋唯讀衍生提示（累積／退休後年數、退休早於今天或晚於終點警示）。
 - [ ] 152.9 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）。
+
+### Task 153: 修正「當日」分時走勢盤中誤判「無當日分時資料」（bug fix）
+
+對應 Requirements: Requirement 13（[requirements.md:246](spec/requirements.md)、249-253）
+
+#### 問題
+
+盤中開啟股票分析 → 走勢圖「當日」，即使 Redis 已有今日分時 tick（如 00865B 台股，`price:ticks:台股:00865B:2026-07-06` 有 11 筆），前端仍顯示「無當日分時資料」。
+
+根因在 Task 88.5 的預設日期邏輯：`InternalPriceController.intradayTicks` 於 `date` 省略時用 `stockSource.findMaxTradingDate(code, market)` 當預設 bucket。但盤中 tick 都寫在「今天」bucket（`price:ticks:{market}:{code}:{今天}`），而**今日收盤價要收盤後才進 `stock_price_history`**，故盤中 `findMaxTradingDate` 只會回到「前一交易日」（07-03），拿去讀 tick LIST 落在空 bucket → 回 `[]` → 前端顯示「無當日分時資料」。實測：不帶 date 回 `[]`、帶 `date=2026-07-06` 正常回 11 筆，確認為預設日期選錯 bucket，非抓取或前端問題。
+
+#### 修正
+
+- [x] 153.1 `MarketClock`：加 `static ZoneId zoneOf(String market)`（市場別 → 時區）與 `boolean isTradingDay(String market, LocalDate date)`（委派 `MarketCalendar.isXxxTradingDay`，非週末且非該市場國定假日）；import `java.time.LocalDate`。
+- [x] 153.2 `InternalPriceController.intradayTicks`：`date` 省略時，改為「今天（`MarketClock.zoneOf(market)`）若為交易日且 `tickStore.getTicks(今天)` 非空 → 用今天；否則退回 `findMaxTradingDate().orElse(今天)`」。cold-start（LIST 空 → `refreshOne` 後再讀）抽成 `ticksWithColdStart` 私有方法共用；今日已有 tick 的 happy path 直接回傳、不重複觸發 refresh。
+- [x] 153.3 spec：`requirements.md` Requirement 13 驗收條件釐清「當日」預設日期解析（優先今天、禁用 `findMaxTradingDate` 當唯一依據）；`design.md` BFF route 與 API 端點列補預設 bucket 說明。
+- [ ] 153.4 Docker：`--no-cache` 重 build external-materials-service + recreate（JVM service，避免 stale jar）；驗證運行 jar 內 `InternalPriceController` 含新邏輯。
+- [ ] 153.5 手動驗證：容器內 curl `/internal/intraday-ticks?code=00865B&market=台股`（URL-encode 市場）不帶 date 回今日 11 筆（原本 `[]`）；前端開 00865B 股票分析「當日」出現分時走勢。
+- [ ] 153.6 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）。
