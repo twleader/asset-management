@@ -33,13 +33,21 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * 今日股市分析（Requirement 31）。
@@ -102,6 +110,20 @@ public class MarketAnalysisService {
     /** 設定表未設或後備時使用的新聞搜尋次數。6＝維持既有行為（新聞面最完整）。 */
     private static final int DEFAULT_WEB_SEARCH = 6;
 
+    // ===== 參考新聞時效驗證（Task 149.17）=====
+    /** 自報 / 原文日期的精確 YYYY-MM-DD 前綴（錨定開頭；"2026-06"／"2026" 因缺日不匹配 → 剔除）。 */
+    private static final Pattern ISO_DATE_PREFIX = Pattern.compile("^\\s*(\\d{4}-\\d{2}-\\d{2})");
+    /** 原文 JSON-LD 的 datePublished（值多為 2025-09-18T03:20:31+08:00，取前綴日期）。 */
+    private static final Pattern JSONLD_DATE_PUBLISHED =
+            Pattern.compile("\"datePublished\"\\s*:\\s*\"([^\"]+)\"", Pattern.CASE_INSENSITIVE);
+    /** 原文 &lt;time datetime="..."&gt;。 */
+    private static final Pattern TIME_DATETIME =
+            Pattern.compile("<time\\b[^>]*?datetime\\s*=\\s*[\"']([^\"']+)[\"']", Pattern.CASE_INSENSITIVE);
+    /** 回抓原文時，僅掃前段（發布日 meta / JSON-LD 通常落在 &lt;head&gt;），限記憶體。 */
+    private static final int MAX_ARTICLE_SCAN = 300_000;
+    /** 回抓原文的連線／讀取逾時（抓不到即降級保留模型日期，故取短值不拖慢 poller）。 */
+    private static final Duration NEWS_FETCH_TIMEOUT = Duration.ofSeconds(6);
+
     private final DailyMarketAnalysisRepository analysisRepo;
     private final MarketAnalysisSettingRepository settingRepo;
     private final TwseIndexDailyHistoryRepository twseRepo;
@@ -116,11 +138,22 @@ public class MarketAnalysisService {
     @Value("${anthropic.model:claude-opus-4-8}")
     private String defaultModel;
 
+    /** 參考新聞時效上限（天）：publishedAt 早於「分析日 − 此值」即剔除（Task 149.17）。預設 30。 */
+    @Value("${market-analysis.news-max-age-days:30}")
+    private int newsMaxAgeDays;
+
+    /** 是否回抓原文真實發布日驗證（治本層，可關）；關閉則僅依模型自報日期的格式＋時效過濾。 */
+    @Value("${market-analysis.news-verify-published-date:true}")
+    private boolean newsVerifyPublishedDate;
+
     /** 序列化 generate()：避免 cron 排程 / 開機 self-heal / 管理者手動 同時對同一交易日重複昂貴呼叫＋覆蓋。 */
     private final ReentrantLock generateLock = new ReentrantLock();
 
     /** 長生命週期共用 client（OkHttp 設計為可共享、執行緒安全）；lazy 建立，容器關閉時 close。 */
     private volatile AnthropicClient anthropicClient;
+
+    /** 回抓新聞原文發布日用的共用 HttpClient（JDK，執行緒安全）；lazy 建立，JVM 關閉自動回收、無需顯式 close。 */
+    private volatile HttpClient httpClient;
 
     // ===== 對外查詢 =====
 
@@ -545,7 +578,10 @@ public class MarketAnalysisService {
     private String buildSystemPrompt(boolean webSearchEnabled) {
         // 新聞來源原則隨「新聞搜尋次數」設定切換：開啟 → 指示先 web_search；關閉 → 純技術面、不得杜撰新聞
         String newsPrinciple = webSearchEnabled
-                ? "2. 先使用 web_search 搜尋近 1～2 週的財經新聞（台股、美股、Fed 與利率、匯率、地緣政治、外資與法人動向、重要企業財報等），越近期的新聞越重要。"
+                ? ("2. 先使用 web_search 搜尋近 1～2 週的財經新聞（台股、美股、Fed 與利率、匯率、地緣政治、外資與法人動向、重要企業財報等），越近期的新聞越重要。"
+                    + "newsHighlights 只納入你確實透過 web_search 查到、且發布日在最近 " + newsMaxAgeDays + " 天內的新聞；"
+                    + "每則 publishedAt 必須是該篇原文的實際發布日、精確到日（YYYY-MM-DD）；若無法確認精確且近期的發布日，寧可不列入，"
+                    + "切勿用舊聞或臆測的日期充數，也不要依賴你既有記憶中的舊事件（過時新聞會誤導當日研判）。")
                 : "2. 本次不提供網路新聞搜尋（web_search 已停用）：請勿杜撰或臆測新聞，僅依下方台股與美股走勢數據做技術面研判，newsHighlights 一律回空陣列 []。";
         return """
             你是一位資深台股策略分析師。你的任務：綜合「量化的台股大盤與美股指數近一年走勢」與「近期國內外財經新聞」，
@@ -564,7 +600,7 @@ public class MarketAnalysisService {
               "summary": "一段話總結今天台股可能走向與主要理由（繁體中文）",
               "keyFactors": ["影響今天走向的關鍵因素（3~6 點）", "..."],
               "newsHighlights": [
-                {"title": "新聞標題", "source": "來源媒體", "url": "連結", "publishedAt": "YYYY-MM-DD"}
+                {"title": "新聞標題", "source": "來源媒體", "url": "連結", "publishedAt": "YYYY-MM-DD（原文實際發布日、須為近期、精確到日）"}
               ],
               "twContext": "台股近期走勢摘要（技術面）",
               "usContext": "美股近期走勢摘要（技術面）"
@@ -597,7 +633,9 @@ public class MarketAnalysisService {
         }
 
         if (webSearchEnabled) {
-            sb.append("請先 web_search 近期財經新聞，再結合上述走勢做判斷。切記越近期的走勢與新聞越重要。");
+            sb.append("請先 web_search 近期財經新聞，再結合上述走勢做判斷。切記越近期的走勢與新聞越重要；")
+              .append("newsHighlights 僅列最近 ").append(newsMaxAgeDays)
+              .append(" 天內、且能明確標出實際發布日（YYYY-MM-DD）的新聞，不確定發布日或非近期者一律不要列入。");
         } else {
             sb.append("本次不進行新聞搜尋，請僅依上述台股與美股走勢做技術面判斷，newsHighlights 回空陣列。切記越近期的走勢越重要。");
         }
@@ -709,21 +747,55 @@ public class MarketAnalysisService {
         row.setUsContext(r.usContext());
         row.setKeyFactors(objectMapper.writeValueAsString(
                 r.keyFactors() != null ? r.keyFactors() : List.of()));
-        row.setNewsHighlights(objectMapper.writeValueAsString(sanitizeNews(r.newsHighlights())));
+        row.setNewsHighlights(objectMapper.writeValueAsString(
+                sanitizeNews(r.newsHighlights(), row.getAnalysisDate())));
     }
 
     /**
-     * 過濾模型回傳的新聞連結：只保留 http(s) URL（新聞來自 web_search 為不可信來源，
-     * 防止 javascript: / data: 等 scheme 在前端 href 造成 XSS／危險導頁）。前端另有一層防護。
+     * 過濾模型回傳的參考新聞（Task 149.17）：三層把關，避免把過時／不可信新聞當「近期重點」顯示。
+     * <ol>
+     *   <li>只保留 http(s) URL（web_search 為不可信來源，防 {@code javascript:}／{@code data:} 於前端
+     *       {@code <a href>} 造成 XSS；前端另有一層 {@code safeUrl()}）。</li>
+     *   <li>{@code publishedAt} 須為精確 {@code YYYY-MM-DD} 且落在
+     *       {@code [analysisDate - newsMaxAgeDays, analysisDate + 1d]}；否則剔除。
+     *       （模型自報日期不可信——實測把 2025-09-18 舊聞標成「2026-06」，故硬性要求精確到日＋時效。）</li>
+     *   <li>對通過者若開啟 {@link #newsVerifyPublishedDate} 且有連結，回抓原文真實發布日：抓到即以真日期
+     *       覆寫顯示並複驗時效（治本、擋「謊報精確近期日期」）；抓不到則保留第 2 層驗證後的模型日期。</li>
+     * </ol>
+     * 全部剔除則回空陣列（前端既有空狀態）——寧缺勿濫，當日多空判斷仍以走勢量化數據成立。
      */
     private List<MarketAnalysisResult.NewsHighlight> sanitizeNews(
-            List<MarketAnalysisResult.NewsHighlight> news) {
+            List<MarketAnalysisResult.NewsHighlight> news, LocalDate analysisDate) {
         List<MarketAnalysisResult.NewsHighlight> out = new ArrayList<>();
         if (news == null) return out;
+        LocalDate refDate = analysisDate != null ? analysisDate : LocalDate.now();
+        LocalDate oldest = refDate.minusDays(Math.max(1, newsMaxAgeDays));
+        LocalDate newest = refDate.plusDays(1);   // 容忍時區落差（原文可能標成分析日隔天）
         for (MarketAnalysisResult.NewsHighlight n : news) {
             if (n == null) continue;
+            String url = safeHttpUrl(n.url());
+
+            // 第 1 層：自報日期須精確到日（"2026-06"／null／雜訊 → 剔除）
+            LocalDate date = parseIsoDatePrefix(n.publishedAt());
+            if (date == null) {
+                log.info("今日股市分析：剔除新聞（publishedAt 非精確日期 '{}'）：{}", n.publishedAt(), n.title());
+                continue;
+            }
+            // 第 2 層：回抓原文真實發布日（可關）——抓到即以真日期為準並覆寫顯示
+            if (newsVerifyPublishedDate && url != null) {
+                LocalDate real = fetchPublishedDate(url);
+                if (real != null && !real.equals(date)) {
+                    log.info("今日股市分析：新聞發布日以原文校正 {} → {}：{}", date, real, n.title());
+                    date = real;
+                }
+            }
+            // 第 3 層：時效區間（用第 2 層校正後的日期）
+            if (date.isBefore(oldest) || date.isAfter(newest)) {
+                log.info("今日股市分析：剔除過時／異常日期新聞（{}，窗 {}~{}）：{}", date, oldest, newest, n.title());
+                continue;
+            }
             out.add(new MarketAnalysisResult.NewsHighlight(
-                    n.title(), n.source(), safeHttpUrl(n.url()), n.publishedAt()));
+                    n.title(), n.source(), url, date.toString()));
         }
         return out;
     }
@@ -733,6 +805,97 @@ public class MarketAnalysisService {
         if (url == null) return null;
         String u = url.trim().toLowerCase();
         return (u.startsWith("http://") || u.startsWith("https://")) ? url.trim() : null;
+    }
+
+    /** 解析精確 {@code YYYY-MM-DD} 前綴為 {@link LocalDate}；缺日（"2026-06"）／非日曆日（"2026-13-40"）／null 皆回 null。 */
+    private LocalDate parseIsoDatePrefix(String s) {
+        if (s == null) return null;
+        Matcher m = ISO_DATE_PREFIX.matcher(s.trim());
+        if (!m.find()) return null;
+        try {
+            return LocalDate.parse(m.group(1));
+        } catch (DateTimeParseException e) {
+            return null;
+        }
+    }
+
+    /**
+     * 回抓新聞原文、擷取其真實發布日；任何失敗（逾時／非 2xx／解析不到）一律回 null（由呼叫端降級保留模型日期）。
+     * 短 UA {@code Mozilla/5.0}（長 Chrome UA 易被 WAF 擋）、短逾時、跟隨轉址。
+     */
+    private LocalDate fetchPublishedDate(String url) {
+        try {
+            HttpRequest req = HttpRequest.newBuilder(URI.create(url))
+                    .timeout(NEWS_FETCH_TIMEOUT)
+                    .header("User-Agent", "Mozilla/5.0")
+                    .header("Accept", "text/html,application/xhtml+xml")
+                    .GET()
+                    .build();
+            HttpResponse<String> resp = httpClient().send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (resp.statusCode() / 100 != 2) return null;
+            String body = resp.body();
+            if (body != null && body.length() > MAX_ARTICLE_SCAN) {
+                body = body.substring(0, MAX_ARTICLE_SCAN);
+            }
+            return extractPublishedDate(body);
+        } catch (Exception e) {
+            log.debug("今日股市分析：回抓新聞發布日失敗（url={}）: {}", url, e.getMessage());
+            return null;
+        }
+    }
+
+    /** 依序試 JSON-LD {@code datePublished} → {@code meta[article:published_time]} → {@code meta[datePublished]} → {@code meta[name=date]} → {@code <time datetime>}，取首個可解析為精確日期者。 */
+    private LocalDate extractPublishedDate(String html) {
+        if (html == null || html.isBlank()) return null;
+        String[] candidates = {
+                firstGroup(html, JSONLD_DATE_PUBLISHED),
+                metaContentByKey(html, "article:published_time"),
+                metaContentByKey(html, "datePublished"),
+                metaContentByKey(html, "date"),
+                firstGroup(html, TIME_DATETIME),
+        };
+        for (String c : candidates) {
+            LocalDate d = parseIsoDatePrefix(c);
+            if (d != null) return d;
+        }
+        return null;
+    }
+
+    private String firstGroup(String html, Pattern p) {
+        Matcher m = p.matcher(html);
+        return m.find() ? m.group(1) : null;
+    }
+
+    /** 抓 {@code <meta>} 之 content：屬性（property／name／itemprop）值為 key，容忍 key／content 屬性任一順序。 */
+    private String metaContentByKey(String html, String key) {
+        String q = Pattern.quote(key);
+        Matcher keyFirst = Pattern.compile(
+                "<meta\\b[^>]*?(?:property|name|itemprop)\\s*=\\s*[\"']" + q + "[\"'][^>]*?content\\s*=\\s*[\"']([^\"']+)[\"']",
+                Pattern.CASE_INSENSITIVE).matcher(html);
+        if (keyFirst.find()) return keyFirst.group(1);
+        Matcher contentFirst = Pattern.compile(
+                "<meta\\b[^>]*?content\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?(?:property|name|itemprop)\\s*=\\s*[\"']" + q + "[\"']",
+                Pattern.CASE_INSENSITIVE).matcher(html);
+        if (contentFirst.find()) return contentFirst.group(1);
+        return null;
+    }
+
+    /** lazy 建立並重用單一 JDK HttpClient（跟隨轉址、短連線逾時）。 */
+    private HttpClient httpClient() {
+        HttpClient c = httpClient;
+        if (c == null) {
+            synchronized (this) {
+                c = httpClient;
+                if (c == null) {
+                    c = HttpClient.newBuilder()
+                            .connectTimeout(NEWS_FETCH_TIMEOUT)
+                            .followRedirects(HttpClient.Redirect.NORMAL)
+                            .build();
+                    httpClient = c;
+                }
+            }
+        }
+        return c;
     }
 
     private String normalizeBias(String bias) {
