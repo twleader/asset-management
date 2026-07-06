@@ -45,6 +45,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -124,6 +125,44 @@ public class MarketAnalysisService {
     /** 回抓原文的連線／讀取逾時（抓不到即降級保留模型日期，故取短值不拖慢 poller）。 */
     private static final Duration NEWS_FETCH_TIMEOUT = Duration.ofSeconds(6);
 
+    // ===== 新聞來源地區封鎖：只留台/美/星，剔除中港澳（Task 149.18）=====
+    // 下列三份清單為後端 curated 技術白名單（封鎖政策，非使用者可自訂之業務分類，
+    // 比照 AVAILABLE_MODELS，不套用「Enum 必須入庫由 /api/settings 管理」規範）。
+    // 經 workflow 對抗驗證：只做「完整結尾後綴／整段網域相等或子網域」比對，嚴禁 contains("cn") 子字串，
+    // 故 cnyes.com（台灣鉅亨網）／cna.com.tw（台灣中央社）／cnbc.com／cnn.com 等「含 cn 但非中國」零誤殺。
+
+    /** 中港澳地區 ccTLD host 結尾（{@code host.endsWith(suffix)}）。含前導點；{@code .cn} 亦涵蓋 {@code x.com.cn}。 */
+    private static final Set<String> BLOCKED_HOST_SUFFIXES = Set.of(
+            ".cn", ".com.cn", ".net.cn", ".org.cn", ".gov.cn", ".edu.cn", ".ac.cn",
+            ".hk", ".com.hk", ".net.hk", ".org.hk", ".gov.hk", ".edu.hk", ".idv.hk",
+            ".mo", ".com.mo", ".net.mo", ".org.mo", ".gov.mo", ".edu.mo");
+
+    /** 中港澳媒體但用 .com/.cc/.net 等非地區 TLD 的具名網域（{@code host==domain} 或 {@code host.endsWith("."+domain)}）。 */
+    private static final Set<String> BLOCKED_DOMAINS = Set.of(
+            // 中國大陸
+            "sfccn.com", "eastmoney.com", "eastmoneysec.com", "caixin.com", "caixinglobal.com",
+            "yicai.com", "wallstreetcn.com", "cnstock.com", "stcn.com", "jrj.com", "hexun.com",
+            "jiemian.com", "cgtn.com", "sina.com.cn", "qq.com", "163.com", "21jingji.com",
+            "gelonghui.com", "futunn.com", "cnfin.com", "yuncaijing.com",
+            // 香港
+            "scmp.com", "hket.com", "mingpao.com", "hkej.com", "on.cc", "hk01.com",
+            "stheadline.com", "wenweipo.com", "takungpao.com", "stnn.cc",
+            // 澳門
+            "macaodaily.com", "macaupostdaily.com", "todaymacao.com", "exmoo.com",
+            "houkongdaily.com", "shimindaily.net", "aamacau.com");
+
+    /** 中港澳來源顯示名關鍵詞（{@code source.contains}，繁簡兩式）。僅收絕不誤中台/美/星媒體者。 */
+    private static final Set<String> BLOCKED_SOURCE_TOKENS = Set.of(
+            "新浪財經", "新浪财经", "南方財經", "南方财经", "東方財富", "东方财富", "財新", "财新",
+            "第一財經", "第一财经", "華爾街見聞", "华尔街见闻", "上海證券報", "上海证券报",
+            "證券時報", "证券时报", "金融界", "和訊", "和讯", "澎湃", "界面新聞", "界面新闻",
+            "環球時報", "环球时报", "新華社", "新华社", "新華網", "新华网", "人民日報", "人民日报",
+            "央視", "央视", "中國證券報", "中国证券报", "每日經濟新聞", "每日经济新闻",
+            "經濟觀察報", "经济观察报", "券商中國", "券商中国", "觀察者網", "观察者网",
+            "南華早報", "南华早报", "香港經濟日報", "香港经济日报", "信報", "香港01",
+            "東方日報", "东方日报", "星島", "星岛", "文匯報", "文汇报", "大公報", "大公报",
+            "明報", "明报", "澳門日報", "澳门日报");
+
     private final DailyMarketAnalysisRepository analysisRepo;
     private final MarketAnalysisSettingRepository settingRepo;
     private final TwseIndexDailyHistoryRepository twseRepo;
@@ -138,13 +177,17 @@ public class MarketAnalysisService {
     @Value("${anthropic.model:claude-opus-4-8}")
     private String defaultModel;
 
-    /** 參考新聞時效上限（天）：publishedAt 早於「分析日 − 此值」即剔除（Task 149.17）。預設 30。 */
-    @Value("${market-analysis.news-max-age-days:30}")
+    /** 參考新聞時效上限（天）：publishedAt 早於「分析日 − 此值」即剔除。預設 5（Task 149.18 由 30 收斂——只要這幾天的新聞、越近越重要）。 */
+    @Value("${market-analysis.news-max-age-days:5}")
     private int newsMaxAgeDays;
 
     /** 是否回抓原文真實發布日驗證（治本層，可關）；關閉則僅依模型自報日期的格式＋時效過濾。 */
     @Value("${market-analysis.news-verify-published-date:true}")
     private boolean newsVerifyPublishedDate;
+
+    /** 是否封鎖中港澳新聞來源（只留台/美/星，Task 149.18）；設 false 可整體關閉地區封鎖以快速回退。 */
+    @Value("${market-analysis.news-region-block-enabled:true}")
+    private boolean newsRegionBlockEnabled;
 
     /** 序列化 generate()：避免 cron 排程 / 開機 self-heal / 管理者手動 同時對同一交易日重複昂貴呼叫＋覆蓋。 */
     private final ReentrantLock generateLock = new ReentrantLock();
@@ -578,10 +621,11 @@ public class MarketAnalysisService {
     private String buildSystemPrompt(boolean webSearchEnabled) {
         // 新聞來源原則隨「新聞搜尋次數」設定切換：開啟 → 指示先 web_search；關閉 → 純技術面、不得杜撰新聞
         String newsPrinciple = webSearchEnabled
-                ? ("2. 先使用 web_search 搜尋近 1～2 週的財經新聞（台股、美股、Fed 與利率、匯率、地緣政治、外資與法人動向、重要企業財報等），越近期的新聞越重要。"
-                    + "newsHighlights 只納入你確實透過 web_search 查到、且發布日在最近 " + newsMaxAgeDays + " 天內的新聞；"
-                    + "每則 publishedAt 必須是該篇原文的實際發布日、精確到日（YYYY-MM-DD）；若無法確認精確且近期的發布日，寧可不列入，"
-                    + "切勿用舊聞或臆測的日期充數，也不要依賴你既有記憶中的舊事件（過時新聞會誤導當日研判）。")
+                ? ("2. 先使用 web_search 搜尋最近幾日的財經新聞（台股、美股、Fed 與利率、匯率、地緣政治、外資與法人動向、重要企業財報等），越近期的新聞權重越高、越舊越不重要。"
+                    + "【新聞來源地區限制】只採用台灣、美國、新加坡的新聞來源；嚴禁納入中國大陸、香港、澳門的媒體或報導（例如新浪財經、東方財富、南方財經、第一財經、財新、華爾街見聞、南華早報、香港經濟日報等一律不可），即使其內容與台股／美股相關也不得列入。"
+                    + "newsHighlights 只納入你確實透過 web_search 查到、發布日在最近 " + newsMaxAgeDays + " 天內、且來源屬台/美/星的新聞；"
+                    + "每則 publishedAt 必須是該篇原文的實際發布日、精確到日（YYYY-MM-DD）；若無法確認精確且近期的發布日、或來源屬中港澳，寧可不列入，"
+                    + "切勿用舊聞或臆測的日期充數，也不要依賴你既有記憶中的舊事件（過時或中港澳新聞會誤導當日研判）。")
                 : "2. 本次不提供網路新聞搜尋（web_search 已停用）：請勿杜撰或臆測新聞，僅依下方台股與美股走勢數據做技術面研判，newsHighlights 一律回空陣列 []。";
         return """
             你是一位資深台股策略分析師。你的任務：綜合「量化的台股大盤與美股指數近一年走勢」與「近期國內外財經新聞」，
@@ -633,9 +677,9 @@ public class MarketAnalysisService {
         }
 
         if (webSearchEnabled) {
-            sb.append("請先 web_search 近期財經新聞，再結合上述走勢做判斷。切記越近期的走勢與新聞越重要；")
+            sb.append("請先 web_search 最近幾日的財經新聞，再結合上述走勢做判斷。切記越近期的走勢與新聞越重要（越舊權重越低）；")
               .append("newsHighlights 僅列最近 ").append(newsMaxAgeDays)
-              .append(" 天內、且能明確標出實際發布日（YYYY-MM-DD）的新聞，不確定發布日或非近期者一律不要列入。");
+              .append(" 天內、來源屬台灣/美國/新加坡、且能明確標出實際發布日（YYYY-MM-DD）的新聞；嚴禁納入中國大陸/香港/澳門來源，不確定發布日或非近期者一律不要列入。");
         } else {
             sb.append("本次不進行新聞搜尋，請僅依上述台股與美股走勢做技術面判斷，newsHighlights 回空陣列。切記越近期的走勢越重要。");
         }
@@ -752,15 +796,16 @@ public class MarketAnalysisService {
     }
 
     /**
-     * 過濾模型回傳的參考新聞（Task 149.17）：三層把關，避免把過時／不可信新聞當「近期重點」顯示。
+     * 過濾模型回傳的參考新聞（Task 149.17／149.18）：多層把關，避免把過時／不可信／中港澳新聞當「近期重點」顯示。
      * <ol>
      *   <li>只保留 http(s) URL（web_search 為不可信來源，防 {@code javascript:}／{@code data:} 於前端
      *       {@code <a href>} 造成 XSS；前端另有一層 {@code safeUrl()}）。</li>
+     *   <li><b>地區封鎖（149.18）</b>：只留台/美/星，剔除中港澳來源（{@link #isRegionBlocked}）。置於日期解析與昂貴回抓之前，命中即最早剔除。</li>
      *   <li>{@code publishedAt} 須為精確 {@code YYYY-MM-DD} 且落在
-     *       {@code [analysisDate - newsMaxAgeDays, analysisDate + 1d]}；否則剔除。
+     *       {@code [analysisDate - newsMaxAgeDays, analysisDate + 1d]}（149.18 起 newsMaxAgeDays 預設 5 天）；否則剔除。
      *       （模型自報日期不可信——實測把 2025-09-18 舊聞標成「2026-06」，故硬性要求精確到日＋時效。）</li>
      *   <li>對通過者若開啟 {@link #newsVerifyPublishedDate} 且有連結，回抓原文真實發布日：抓到即以真日期
-     *       覆寫顯示並複驗時效（治本、擋「謊報精確近期日期」）；抓不到則保留第 2 層驗證後的模型日期。</li>
+     *       覆寫顯示並複驗時效（治本、擋「謊報精確近期日期」）；抓不到則保留驗證後的模型日期。</li>
      * </ol>
      * 全部剔除則回空陣列（前端既有空狀態）——寧缺勿濫，當日多空判斷仍以走勢量化數據成立。
      */
@@ -774,6 +819,12 @@ public class MarketAnalysisService {
         for (MarketAnalysisResult.NewsHighlight n : news) {
             if (n == null) continue;
             String url = safeHttpUrl(n.url());
+
+            // 地區封鎖（Task 149.18）：只留台/美/星，剔除中港澳來源。置於日期解析與昂貴回抓之前，命中即最早剔除、省 HTTP 成本。
+            if (newsRegionBlockEnabled && isRegionBlocked(url, n.source())) {
+                log.info("今日股市分析：剔除中港澳來源新聞（source={}, url={}）：{}", n.source(), url, n.title());
+                continue;
+            }
 
             // 第 1 層：自報日期須精確到日（"2026-06"／null／雜訊 → 剔除）
             LocalDate date = parseIsoDatePrefix(n.publishedAt());
@@ -805,6 +856,40 @@ public class MarketAnalysisService {
         if (url == null) return null;
         String u = url.trim().toLowerCase();
         return (u.startsWith("http://") || u.startsWith("https://")) ? url.trim() : null;
+    }
+
+    /**
+     * 判斷該新聞是否為中港澳來源（Task 149.18）：依 url 的 host 與 source 顯示名比對三份封鎖清單。
+     * 只做「完整結尾後綴 / 整段網域相等或子網域 / 來源名子字串」比對，故 cnyes.com（台灣鉅亨網）、
+     * cna.com.tw（台灣中央社）、cnbc.com、cnn.com 等「含 cn 但非中國」不會被誤判。
+     */
+    private boolean isRegionBlocked(String url, String source) {
+        String host = extractHost(url);
+        if (host != null) {
+            for (String suffix : BLOCKED_HOST_SUFFIXES) {
+                if (host.endsWith(suffix)) return true;
+            }
+            for (String domain : BLOCKED_DOMAINS) {
+                if (host.equals(domain) || host.endsWith("." + domain)) return true;
+            }
+        }
+        if (source != null) {
+            for (String token : BLOCKED_SOURCE_TOKENS) {
+                if (source.contains(token)) return true;
+            }
+        }
+        return false;
+    }
+
+    /** 從 http(s) URL 取小寫 host；失敗（含 null／無 host）回 null。 */
+    private String extractHost(String url) {
+        if (url == null) return null;
+        try {
+            String host = URI.create(url).getHost();
+            return host == null ? null : host.toLowerCase();
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /** 解析精確 {@code YYYY-MM-DD} 前綴為 {@link LocalDate}；缺日（"2026-06"）／非日曆日（"2026-13-40"）／null 皆回 null。 */

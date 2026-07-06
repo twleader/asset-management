@@ -65,12 +65,14 @@ anthropic:
   api-key: ${ANTHROPIC_API_KEY:}
   model: ${ANTHROPIC_MODEL:claude-opus-4-8}
 
-# 參考新聞時效驗證（Task 149.17）：避免把過時新聞當「近期重點」顯示。
-# news-max-age-days：publishedAt 早於「分析日 − 此值」即剔除；
-# news-verify-published-date：是否回抓原文真實發布日覆寫並複驗（治本層，可關）。皆有預設、非必設。
+# 參考新聞政策（Task 149.17 / 149.18）：避免過時、不可信、中港澳新聞當「近期重點」顯示。
+# news-max-age-days：publishedAt 早於「分析日 − 此值」即剔除（149.18 由 30 收斂為 5，只看這幾天、越近越重要）；
+# news-verify-published-date：是否回抓原文真實發布日覆寫並複驗（治本層，可關）；
+# news-region-block-enabled：是否封鎖中港澳來源（只留台/美/星，可整體關閉回退）。皆有預設、非必設。
 market-analysis:
-  news-max-age-days: ${MARKET_ANALYSIS_NEWS_MAX_AGE_DAYS:30}
+  news-max-age-days: ${MARKET_ANALYSIS_NEWS_MAX_AGE_DAYS:5}
   news-verify-published-date: ${MARKET_ANALYSIS_NEWS_VERIFY_PUBLISHED_DATE:true}
+  news-region-block-enabled: ${MARKET_ANALYSIS_NEWS_REGION_BLOCK_ENABLED:true}
 
 server:
   port: ${SERVER_PORT:8080}
