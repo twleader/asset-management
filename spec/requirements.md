@@ -692,6 +692,11 @@
 - [x] **開機自我修復（self-heal）**：服務於 07:30 排程時點未運行（重啟／crash／部署）時，啟動後若「今天為台股交易日且現在時間已過 07:30 且 `daily_market_analysis` 尚無今日該筆」，補跑一次，避免當日分析漏產。比照 `IndexDailyRefreshScheduler` 的 self-heal 慣例。
 - [x] **分析輸入（走勢一律讀本地 DB、不即時抓外部行情）**：以「台股大盤（TAIEX）近一年日線收盤」（`twse_index_daily_history`）＋「美股主要指數近一年日線收盤」（`us_index_daily_history` 之 `DJI`／`SPX`／`IXIC`／`SOX`）為量化輸入，餵給模型時明確標註「越近期越重要」（近 20 日另附細節、資料由舊到新排列並在提示詞要求對近期加權）。此為既有指數日線的唯一來源，符合「同義欄位、同一 business service API／同一事實來源」原則，不另建行情抓取。
 - [x] **財經新聞由 Claude 內建網路搜尋取得**：近期國內外財經新聞由模型的 `web_search` server tool 於分析當下即時搜尋（不自建新聞抓取管線與資料表）；提示詞要求優先採用近 1～2 週、且越近期權重越高的財經新聞（台股、美股、Fed／利率、匯率、地緣、法人動向等）。
+- [x] **參考新聞時效性驗證（不得顯示過時新聞，Task 149.17 bug fix）**：模型自報的 `publishedAt` 不可信（實測曾把 2025-09 的舊聞標成「2026-06」的近期日期），故 `newsHighlights` 入庫前於 `MarketAnalysisService.sanitizeNews` 做**三層時效把關**，避免頁面把舊聞當「近期重點」呈現：
+    1. **格式＋自報時效硬過濾**：`publishedAt` 必須是精確到日的 `YYYY-MM-DD`（`2026-06`／`null`／無法解析一律剔除）；且須落在「分析日往前 `news-max-age-days`（預設 30 天）內、且不晚於分析日+1 天」的區間，否則剔除。
+    2. **回抓原文實際發布日驗證（治本，可關）**：對通過第 1 層且有 http(s) 連結者，後端以短逾時（短 UA `Mozilla/5.0`）抓該連結原始頁面，擷取其真實發布日（JSON-LD `datePublished`／`article:published_time`／`meta[name=date]`／`<time datetime>`）；抓到真日期則以真日期覆寫 `publishedAt`（頁面顯示正確日期），且真日期超出時效區間即剔除（可擋「模型謊報精確近期日期」）；抓不到或抓取失敗則保留第 1 層驗證後的模型日期（不因對方站台擋抓而誤刪合法新聞）。以 `market-analysis.news-verify-published-date`（預設 `true`）可關閉此層。
+    3. **提示詞強化（防禦縱深）**：system/user prompt 明確要求「只納入你經 web_search 實際查到、且發布日在最近 N 天內的新聞；`publishedAt` 必須為原文實際發布日（`YYYY-MM-DD` 精確到日）；無法確認精確近期日期就不要列入，不得用舊聞或臆測日期充數、不得依賴既有記憶」。
+    - 全部剔除後 `newsHighlights` 得為空陣列（頁面既有空狀態處理）——寧可不顯示新聞，也不顯示過時／不可信新聞；當日多空判斷仍以走勢量化數據成立。與既有 http(s) 白名單（XSS 縱深）併存於 `sanitizeNews`。
 - [x] **模型與輸出**：使用 Claude Opus 4.8（`claude-opus-4-8`，adaptive thinking + `web_search_20260209` server tool）產生結構化判斷：方向（偏多 `BULLISH`／偏空 `BEARISH`／中性 `NEUTRAL`）、信心度（0–100）、當日走向總結（繁體中文一段）、關鍵因素清單、參考新聞摘要（標題／來源／連結）、台股與美股近期走勢摘要。輸出以 JSON 交還後端解析入庫；解析採「取首個 `{` 至末個 `}`」容錯，並忽略未知欄位。全程使用台灣繁體中文。
 - [x] **歷史保存**：結果存入 `daily_market_analysis`，每個交易日一筆（`analysis_date` 主鍵）；同日重跑覆蓋當日該筆（upsert）。此為全域參考資料（不分租戶、無 `owner_user_id` 欄位，比照 `twse_index_daily_history`／`us_index_daily_history`／交易日曆假日）。
 - [x] **前端頁面「今日股市分析」**：左側選單新增「今日股市分析」項；頁面顯示當日（或最近一筆）判斷——方向以配色標示（**台股漲紅跌綠**：偏多紅、偏空綠、中性灰）、信心度、走向總結、關鍵因素、參考新聞（可點連結）、台股／美股走勢摘要、產生時間與所用模型；下方可回看過去每日的判斷歷史。多 panel 資料以單一 BFF 聚合回傳。
