@@ -102,7 +102,7 @@ com.steven.assets/
   - `GET /api/bff/stock-analysis/dividends` → `/api/market-data/dividends`
   - `GET /api/bff/stock-analysis/etf-holdings` → `/api/market-data/etf-holdings`
   - `POST /api/bff/stock-analysis/backfill-stock` → `/api/market-data/history/backfill-stock`（Task 136 lazy 回補：走勢圖無歷史時即時觸發單檔 10 年回補後重載；只寫 `stock_price_history` 不入主檔、今日列獨佔給 `ClosePersister`）
-  - `GET /api/bff/stock-analysis/intraday-ticks` → `/api/market-data/intraday-ticks`（走勢圖「當日」期間用；business-services proxy 至 `external-materials-service /internal/intraday-ticks`，後者讀 Redis LIST `price:ticks:{market}:{code}:{tradingDate}`。盤中由 `PricePoller` 每 2 分鐘累積 / 盤後由 `IntradayTickRefresher` 用台股 FinMind `TaiwanStockKBar` + 美/英股 Yahoo 5m 完整覆寫。台股 Yahoo 5m fallback 的 ticker 後綴依掛牌市場：上市 `.TW`、上櫃（TPEx，含債券 ETF 00xxxB）`.TWO`，`PriceFetchClient.fetchIntraday5m` 先試 `.TW` 空再 fallback `.TWO`，否則上櫃股當日分時恆空，見 Task 119）
+  - `GET /api/bff/stock-analysis/intraday-ticks` → `/api/market-data/intraday-ticks`（走勢圖「當日」期間用；business-services proxy 至 `external-materials-service /internal/intraday-ticks`，後者讀 Redis LIST `price:ticks:{market}:{code}:{tradingDate}`。**date 省略時的預設 bucket**：今天（該市場時區）若為交易日且今日 tick LIST 已有資料就用今天，否則退回 `findMaxTradingDate`（最近有收盤的交易日）——不可直接用 `findMaxTradingDate`，否則盤中今日收盤價尚未入庫、預設日期會停在前一交易日、讀到空 bucket（見 Task 153）。盤中由 `PricePoller` 每 2 分鐘累積 / 盤後由 `IntradayTickRefresher` 用台股 FinMind `TaiwanStockKBar` + 美/英股 Yahoo 5m 完整覆寫。台股 Yahoo 5m fallback 的 ticker 後綴依掛牌市場：上市 `.TW`、上櫃（TPEx，含債券 ETF 00xxxB）`.TWO`，`PriceFetchClient.fetchIntraday5m` 先試 `.TW` 空再 fallback `.TWO`，否則上櫃股當日分時恆空，見 Task 119）
 
 - **共享 / 跨頁 passthrough routes**（非單一頁面專屬，由 Spring Cloud Gateway 直接轉發至 business-services，服務跨頁共用的 store CRUD、下拉 lookups、SSE 與基金主檔；皆為刻意的共享資源，不另立 `/api/bff/{page}/**`）：
   - `SnapshotBffRoutes`：`/api/snapshots/**` → business-services（Pinia store 共用快照 CRUD；單頁資料仍走各自的 `/api/bff/{page}/**`）
@@ -829,7 +829,7 @@ POST   /api/fund-dividend/backfill?years=10      # 基金配息歷史回補（Re
 GET    /api/market-data/dividend-rate?code=0050&market=台股    # 取得股利率
 GET    /api/market-data/prices                                 # 列出所有快取股價（live 即時股價統一走此端點，無單數 /price）
 GET    /api/market-data/prices/stream                          # SSE 即時推價（text/event-stream，取代輪詢）
-GET    /api/market-data/intraday-ticks?code=&market=&date=     # 走勢圖「當日」分時 tick（proxy 至 external-materials Redis LIST）
+GET    /api/market-data/intraday-ticks?code=&market=&date=     # 走勢圖「當日」分時 tick（proxy 至 external-materials Redis LIST；date 省略時預設今天（該市場時區）若為交易日且今日 tick 已有資料，否則退回最近有收盤的交易日 — 見 Task 153）
 POST   /api/market-data/prices/refresh                         # 刷新所有持股現價
 GET    /api/market-data/market-status                          # 開盤狀態（台股/美股）
 GET    /api/market-data/holidays?year=2026                     # 台股與美股假日清單

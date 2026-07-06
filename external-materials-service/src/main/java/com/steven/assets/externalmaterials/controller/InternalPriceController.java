@@ -231,7 +231,11 @@ public class InternalPriceController {
 
     /**
      * 「當日」走勢圖分時 tick 序列（盤中 polling 累積 + 盤後外部源覆寫）。
-     * date 未指定時取該市場最近一個有資料的交易日（沿用 stock_price_history 的 maxTradingDate）。
+     * date 未指定 → 預設當日交易日：盤中 / 盤後 tick 都寫在「今天」bucket
+     * （key {@code price:ticks:{market}:{code}:{今天}}），但今日收盤價要收盤後才進
+     * stock_price_history，故盤中直接用 {@code findMaxTradingDate} 會停在前一交易日、
+     * 落在空 bucket（前端顯示「無當日分時資料」）。→ 今天是該市場交易日且今日 tick 已有資料
+     * 就用今天；否則（週末 / 假日 / 盤前尚無資料）退回最近一個有收盤的交易日。
      * Redis LIST 空且服務側已有完整資料源 → 同步觸發一次 refreshOne 作為 cold-start，回填後再回傳。
      */
     @GetMapping("/intraday-ticks")
@@ -239,11 +243,22 @@ public class InternalPriceController {
             @RequestParam String code,
             @RequestParam String market,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
-        LocalDate target = (date != null) ? date
-                : stockSource.findMaxTradingDate(code, market).orElseGet(() -> LocalDate.now(
-                        "美股".equals(market) ? com.steven.assets.externalmaterials.service.MarketClock.US_ZONE
-                                : "英股".equals(market) ? com.steven.assets.externalmaterials.service.MarketClock.LON_ZONE
-                                : com.steven.assets.externalmaterials.service.MarketClock.TW_ZONE));
+        if (date != null) {
+            return ticksWithColdStart(code, market, date);
+        }
+        LocalDate today = LocalDate.now(
+                com.steven.assets.externalmaterials.service.MarketClock.zoneOf(market));
+        if (clock.isTradingDay(market, today)) {
+            var todayTicks = tickStore.getTicks(code, market, today);
+            if (!todayTicks.isEmpty()) return todayTicks;
+        }
+        return ticksWithColdStart(code, market,
+                stockSource.findMaxTradingDate(code, market).orElse(today));
+    }
+
+    /** 讀當日 tick LIST；空且服務側有完整資料源時同步 cold-start refresh 一次後再讀。 */
+    private java.util.List<com.steven.assets.externalmaterials.service.IntradayTickStore.TickPoint>
+            ticksWithColdStart(String code, String market, LocalDate target) {
         var ticks = tickStore.getTicks(code, market, target);
         if (ticks.isEmpty()) {
             tickRefresher.refreshOne(code, market, target);

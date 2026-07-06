@@ -3,6 +3,7 @@ package com.steven.assets.externalmaterials.service;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
@@ -25,6 +26,22 @@ public class MarketClock {
     public static final ZoneId LON_ZONE = ZoneId.of("Europe/London");
 
     private final MarketCalendar calendar;
+
+    /** 市場別 → 該市場時區。 */
+    public static ZoneId zoneOf(String market) {
+        return "美股".equals(market) ? US_ZONE
+                : "英股".equals(market) ? LON_ZONE
+                : TW_ZONE;
+    }
+
+    /** 指定市場、指定日期是否為交易日（非週末且非該市場國定假日）。 */
+    public boolean isTradingDay(String market, LocalDate date) {
+        return switch (market) {
+            case "美股" -> calendar.isUsTradingDay(date);
+            case "英股" -> calendar.isUkTradingDay(date);
+            default -> calendar.isTwTradingDay(date);
+        };
+    }
 
     public boolean isTwMarketOpen() {
         ZonedDateTime now = ZonedDateTime.now(TW_ZONE);
