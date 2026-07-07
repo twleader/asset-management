@@ -3724,6 +3724,33 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
   - **部署＋端到端驗證**：`--no-cache` 重 build + recreate business-services（healthy、jar 含 `news-region-block-enabled`／`sfccn.com`／`剔除中港澳來源新聞` 等字串、`/today` 200）。手動重跑一次批次（`msgbatch_…VVxe`，Sonnet5／low／ws3）→ 約 6.5h 後 `OK`（Anthropic Batch 端排隊久，非我方 poller 問題，已直接查證 `in_progress`）：舊聞與中國來源全部消失（原 30 元關卡／sina／sfccn 皆無）。
   - **prompt 積極列出微調**：上述重跑模型原始輸出即 `"newsHighlights": []`（過濾器未觸發、是模型自身在收緊條件下過度保守）。因後端過濾器才是硬關卡，`buildSystemPrompt`／`buildUserPrompt` 改為積極要求多次搜尋並列 3～6 則符合條件之台/美/星近期新聞、唯確實找不到才回空。已部署；由明天 07:30 自動分析驗證新聞是否穩定產出（不再即時付費重送）。
 
+- [ ] 149.19 **允許來源新增日本＋提示可靠來源清單**（需求：某日分析仍搜不到合格新聞回空，放寬納入日本並引導可靠來源）。只改 `MarketAnalysisService` 提示詞層，封鎖清單／Controller／BFF／DTO／前端皆不動：
+  - **地區放寬 台/美/星 → 台/美/日/星**：`buildSystemPrompt`／`buildUserPrompt` 地區限制由「台灣、美國、新加坡」改「台灣、美國、日本、新加坡」（`台/美/星`→`台/美/日/星`、`台灣/美國/新加坡`→`台灣/美國/日本/新加坡`）；嚴禁中港澳不變。
+  - **`isRegionBlocked` 不需改**：日本來源本就不在三份封鎖清單（只擋中港澳）；封鎖用 `host.endsWith` 後綴／整段網域比對，日經中文網 `zh.cn.nikkei.com`（host 以 `.com` 結尾）不會被 `.cn` 後綴誤殺——沿用 Task 149.18「零誤殺、嚴禁 `contains("cn")`」設計。`application.yml` 註解「只留台/美/星」同步改「台/美/日/星」。
+  - **提示可靠來源（引導、非硬白名單）**：prompt 加「可優先參考」例示——台灣證券交易所 `twse.com.tw`（三大法人買賣超、大盤成交統計）、公開資訊觀測站 `mops.twse.com.tw`（上市櫃重大訊息與財報）、日經中文網 `zh.cn.nikkei.com`、自由時報 `ec.ltn.com.tw`、經濟日報 `money.udn.com`、華爾街日報中文網 `cn.wsj.com`、紐約時報中文網 `cn.nytimes.com`，並註「不限於此、含 Reuters／Bloomberg／鉅亨網 cnyes 等其他台/美/日/星主流財經媒體」。
+  - **刻意不用 `web_search` 的 `allowed_domains`**：`allowed_domains` 是硬白名單，只列少數網域會把搜尋限死、反縮小涵蓋、加劇搜不到的問題；故仍只設 `maxUses`，來源引導全走提示詞。prompt 另加「多次、換多組中英文關鍵字積極搜尋、不要只搜一次就放棄」。
+  - **驗證**：worktree `mvn compile` 通過；`--no-cache` 重 build + recreate business-services（jar 含日本／`nikkei`／`twse`／`台/美/日/星` 等字串）；由自動分析或管理者手動重跑觀察新聞是否穩定產出（付費 LLM，不即時重送）。
+
+- [ ] 149.20 **批次 web_search 修復：動態過濾版 `web_search_20260209` → 基本版 `web_search_20250305`**（重大 bug fix：頁面「參考新聞」永遠空白）。動因與根因（實測）：
+  - **症狀**：加日本／來源提示後 `newsHighlights` 仍持續回空。動因排查發現**非提示詞、非後端過濾器**：DB 該日 `raw_response` 模型原文自述「工具配額已用盡、多次嘗試皆無法成功呼叫新聞搜尋…回傳空陣列」；`sanitizeNews` 日誌零筆過濾；以同模型（Sonnet 5）+ 同 web_search 設定**非批次直呼**則正常回 10 則真實新聞（鉅亨網／Yahoo）。
+  - **根因**：`WebSearchTool20260209`（動態過濾版）底層以 `code_execution` 沙箱過濾結果，而 code_execution 在 **Message Batches API** 下 `detection_timeout`（實測 `{"status":"detection_timeout","error":"Detection timed out after 90.0s"}`、`return_code=1`）→ 搜尋鏈斷 → 模型放棄 → 空陣列。
+  - **對抗驗證**：送「動態 vs 基本」雙請求診斷批次（`msgbatch_…3pJo`，Sonnet 5，同 query）→ 動態版 code_execution `detection_timeout`／`max_tokens`；基本版 `web_search_20250305` `end_turn` 乾淨完成、2 次搜尋回 20 則真實新聞（台股7/3、特斯拉Robotaxi、博通-蘋果、微軟裁員、美國非農…）。
+  - **修法**：`MarketAnalysisService.submitBatch` web_search tool 由 `ToolUnion.ofWebSearchTool20260209`／`WebSearchTool20260209` 改 `ofWebSearchTool20250305`／`WebSearchTool20250305`（import 同步改）；基本版不走 code_execution、結果直接進 context、批次可用，保留 Batch API 50% 省本。回覆解析（收 text、忽略 `web_search_tool_result`）不變。**`PortfolioAdviceService`（同步呼叫）動態版正常、不同動**。
+  - **驗證**：worktree `mvn compile`；`--no-cache` 重 build + recreate business-services（jar 含 `WebSearchTool20250305`／`detection_timeout` 註解字串）；管理者手動重跑一次批次，確認 `newsHighlights` 實際填入近期台/美/日/星新聞（本次值得付費端到端驗一次）。
+
+- [ ] 149.21 **本地財經新聞爬蟲（external-materials-service）＋餵入市場分析，降低/可關閉付費 web_search**。producer(ext)/consumer(backend) 共用 postgres 模式：
+  - **backend schema**：`db/changelog/changes/v1.45.0-news-headline.sql` 建 `news_headline`（欄位/索引見 design.md）＋ `db.changelog-master.yaml` 末加 include（現行末筆 v1.44.1）。changeset id `steven:v1.45.0-news-headline`。**基準線是 `db/init/01_dump.sql`（pg_dump）＋ Liquibase 增量，此為增量。**
+  - **backend entity/repo**：`News`（`@Entity @Table(name="news_headline")`，全域參考、無 `@Filter`）＋ `NewsHeadlineRepository extends JpaRepository`，`findByPublishedAtGreaterThanEqualOrderByPublishedAtDesc(OffsetDateTime)`。
+  - **ext 抓取**：`NewsFetchClient`（cnyes JSON `api.cnyes.com/media/api/v1/newslist/category/tw_stock`、ltn RSS `news.ltn.com.tw/rss/business.xml`、udn RSS `money.udn.com/rssfeed/news/1001/5591`；UA `Mozilla/5.0`；RSS 用 regex/內建 XML 解 `<item>` title(CDATA)/link/pubDate(RFC-1123 +0800)；cnyes 讀 `items.data[].{title,summary,newsId,publishAt(epoch)}`、url=`news.cnyes.com/news/id/{newsId}`）＋ `TwseInfoFetchClient`（BFI82U `www.twse.com.tw/rwd/zh/fund/BFI82U?response=json&date=YYYYMMDD` 三大法人買賣差額、FMTQIK `openapi.twse.com.tw/v1/exchangeReport/FMTQIK` 最新成交統計）。皆 graceful（單一來源失敗只 warn）。
+  - **ext 寫入/清理**：`StockSourceQuery.upsertNews(...)`（`INSERT ... ON CONFLICT(dedupe_key) DO UPDATE`）＋ `deleteNewsOlderThan(cutoff)`。`NewsPoller`：cron `0 0 6,12,18 * * *` Asia/Taipei（**06:00 早於 07:30 分析**）＋ `@EventListener(ApplicationReadyEvent)` warmup thread ＋末尾保留清理。ext `application.yml` 加 `news-scraper.{retention-days:30,enabled:true}`。
+  - **backend 注入**：`MarketAnalysisService` 加 `NewsHeadlineRepository`；`buildSystemPrompt`/`buildUserPrompt` 加 `List<News> recentNews` 參數、注入「近期新聞（本地抓取）」區塊（繞過 sanitizeNews）；`submitBatch` 撈近 `newsMaxAgeDays` 天本地新聞傳入。web_search 三態：`webSearchMaxUses==0`＝純本地（不加 tool、prompt 用本地新聞）、`>0`＝本地+web_search 補充。撈不到本地新聞時 graceful 退回現行行為。
+  - **驗證**：兩服務 `mvn compile`；workflow 對抗式審查；`--no-cache` 重 build ext ＋ business-services（JVM stale jar 防呆）；驗 `news_headline` 有列、分析 prompt 實含本地新聞區塊、`newsHighlights` 產出。Controller/BFF/前端不變（本期只後端管線；設定 UI 沿用既有新聞搜尋次數）。
+
+- [ ] 149.22 **調整本地新聞來源：移除鉅亨網 cnyes（觀點偏頗）、納入玩股網 WantGoo ＋ MoneyDJ**（使用者要求）。
+  - **ext `NewsFetchClient`**：移除 `fetchCnyes`；新增 `fetchWantgoo`（JSON `wantgoo.com/news/all-headlines-by-category?v=20250924` → `news[]` 之 `{id,headline,summary,time(epoch ms)}`、url=`wantgoo.com/news/{id}`）＋ `fetchMoneydj`（HTML `moneydj.com/kmdj/news/newsreallist.aspx?a=MB010000`，regex 解 `<td>MM/DD HH:MM</td><td><a href='..newsviewer.aspx?a=..' title="全標題">`、無年份以 Asia/Taipei 當年＋跨年回推）。MoneyDJ RSS 2026 已停（302→404），故走即時新聞列 HTML。graceful 不變。
+  - **backend `MarketAnalysisService`**：`TRUSTED_LOCAL_NEWS_HOSTS` 移 `cnyes.com`、加 `wantgoo.com`/`moneydj.com`；prompt「可優先參考」來源改列玩股網/MoneyDJ、移除鉅亨網；prompt 加「排除來源：勿採用鉅亨網 cnyes」；新增 `isExcludedSource(url,source)`（`EXCLUDED_NEWS_HOSTS=cnyes.com`＋`EXCLUDED_SOURCE_TOKENS=鉅亨/cnyes/Anue`）於 `sanitizeNews` 地區封鎖後硬過濾——即使 web_search 搜到 cnyes 也不列入。**區塊封鎖『零誤殺』comment（134/961）不動**：那是保證 region-block 不誤殺台灣 cnyes.com（中港澳層），使用者排除是另一層。
+  - **部署**：`--no-cache` 重 build ext＋business-services；`DELETE FROM news_headline WHERE source='cnyes'` 清既有 cnyes 列；驗 `news_headline` 出現 wantgoo/moneydj、無 cnyes。
+
 ### Task 150: `/gdp-twse` 頁面選單／標題「股市分析」更名為「股市大盤查詢」
 
 對應 Requirements: Requirement 18

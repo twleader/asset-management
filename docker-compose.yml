@@ -112,6 +112,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      # 本地新聞爬蟲（Task 149.21）寫入的 news_headline 由 business-services 的 Liquibase 建立；
+      # 等其 healthy（healthcheck 需 DB／Liquibase 就緒）後再啟動，避免冷啟時 ext 早於建表寫入。
+      business-services:
+        condition: service_healthy
     networks:
       - asset-net
     healthcheck:
