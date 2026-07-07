@@ -8,7 +8,7 @@ import com.anthropic.models.messages.Message;
 import com.anthropic.models.messages.OutputConfig;
 import com.anthropic.models.messages.ThinkingConfigAdaptive;
 import com.anthropic.models.messages.ToolUnion;
-import com.anthropic.models.messages.WebSearchTool20260209;
+import com.anthropic.models.messages.WebSearchTool20250305;
 import com.anthropic.models.messages.batches.BatchCreateParams;
 import com.anthropic.models.messages.batches.MessageBatch;
 import com.anthropic.models.messages.batches.MessageBatchIndividualResponse;
@@ -19,10 +19,12 @@ import com.steven.assets.dto.MarketAnalysisResult;
 import com.steven.assets.dto.MarketAnalysisSettingsDto;
 import com.steven.assets.model.DailyMarketAnalysis;
 import com.steven.assets.model.MarketAnalysisSetting;
+import com.steven.assets.model.News;
 import com.steven.assets.model.TwseIndexDailyHistory;
 import com.steven.assets.model.UsIndexDailyHistory;
 import com.steven.assets.repository.DailyMarketAnalysisRepository;
 import com.steven.assets.repository.MarketAnalysisSettingRepository;
+import com.steven.assets.repository.NewsHeadlineRepository;
 import com.steven.assets.repository.TwseIndexDailyHistoryRepository;
 import com.steven.assets.repository.UsIndexDailyHistoryRepository;
 import jakarta.annotation.PreDestroy;
@@ -125,7 +127,7 @@ public class MarketAnalysisService {
     /** 回抓原文的連線／讀取逾時（抓不到即降級保留模型日期，故取短值不拖慢 poller）。 */
     private static final Duration NEWS_FETCH_TIMEOUT = Duration.ofSeconds(6);
 
-    // ===== 新聞來源地區封鎖：只留台/美/星，剔除中港澳（Task 149.18）=====
+    // ===== 新聞來源地區封鎖：只留台/美/日/星，剔除中港澳（Task 149.18 建立、149.19 納入日本）=====
     // 下列三份清單為後端 curated 技術白名單（封鎖政策，非使用者可自訂之業務分類，
     // 比照 AVAILABLE_MODELS，不套用「Enum 必須入庫由 /api/settings 管理」規範）。
     // 經 workflow 對抗驗證：只做「完整結尾後綴／整段網域相等或子網域」比對，嚴禁 contains("cn") 子字串，
@@ -151,7 +153,7 @@ public class MarketAnalysisService {
             "macaodaily.com", "macaupostdaily.com", "todaymacao.com", "exmoo.com",
             "houkongdaily.com", "shimindaily.net", "aamacau.com");
 
-    /** 中港澳來源顯示名關鍵詞（{@code source.contains}，繁簡兩式）。僅收絕不誤中台/美/星媒體者。 */
+    /** 中港澳來源顯示名關鍵詞（{@code source.contains}，繁簡兩式）。僅收絕不誤中台/美/日/星媒體者。 */
     private static final Set<String> BLOCKED_SOURCE_TOKENS = Set.of(
             "新浪財經", "新浪财经", "南方財經", "南方财经", "東方財富", "东方财富", "財新", "财新",
             "第一財經", "第一财经", "華爾街見聞", "华尔街见闻", "上海證券報", "上海证券报",
@@ -167,6 +169,7 @@ public class MarketAnalysisService {
     private final MarketAnalysisSettingRepository settingRepo;
     private final TwseIndexDailyHistoryRepository twseRepo;
     private final UsIndexDailyHistoryRepository usRepo;
+    private final NewsHeadlineRepository newsRepo;
     private final ObjectMapper objectMapper;
     private final MarketAnalysisEmailDispatcher emailDispatcher;
 
@@ -185,7 +188,7 @@ public class MarketAnalysisService {
     @Value("${market-analysis.news-verify-published-date:true}")
     private boolean newsVerifyPublishedDate;
 
-    /** 是否封鎖中港澳新聞來源（只留台/美/星，Task 149.18）；設 false 可整體關閉地區封鎖以快速回退。 */
+    /** 是否封鎖中港澳新聞來源（只留台/美/日/星，Task 149.18／149.19）；設 false 可整體關閉地區封鎖以快速回退。 */
     @Value("${market-analysis.news-region-block-enabled:true}")
     private boolean newsRegionBlockEnabled;
 
@@ -379,8 +382,11 @@ public class MarketAnalysisService {
         String effort = resolveEffort();
         int webSearchMaxUses = resolveWebSearchMaxUses();
         boolean webSearchOn = webSearchMaxUses > 0;
-        log.info("今日股市分析：送出批次（date={}, trigger={}, model={}, effort={}, webSearchMaxUses={}）",
-                date, trigger, model, effort, webSearchMaxUses);
+        // 本地抓取新聞（Task 149.21）：由 external-materials-service 寫入 news_headline，此處讀近 N 天餵入 prompt。
+        // 有本地新聞時：webSearchOn → 本地新聞＋web_search 補；webSearchOff → 純本地新聞（省付費 web_search 且不再空白）。
+        List<News> recentNews = fetchRecentLocalNews(date);
+        log.info("今日股市分析：送出批次（date={}, trigger={}, model={}, effort={}, webSearchMaxUses={}, localNews={}）",
+                date, trigger, model, effort, webSearchMaxUses, recentNews.size());
 
         DailyMarketAnalysis row = existing != null ? existing : new DailyMarketAnalysis();
         row.setAnalysisDate(date);
@@ -403,14 +409,20 @@ public class MarketAnalysisService {
                     .maxTokens((long) MAX_TOKENS)
                     .thinking(ThinkingConfigAdaptive.builder().build())
                     .outputConfig(OutputConfig.builder().effort(mapEffort(effort)).build());
-            // webSearchMaxUses=0 → 不加 web_search tool（純技術面）；>0 → 加上並設 maxUses 上限
+            // webSearchMaxUses=0 → 不加 web_search tool（純技術面）；>0 → 加上並設 maxUses 上限。
+            // 【Task 149.20 修正】用「基本版」web_search_20250305，不可用「動態過濾版」web_search_20260209：
+            // 20260209 底層以 code_execution 做動態過濾，而 code_execution 沙箱在 Message Batches API 下會
+            // detection_timeout（實測回 {"status":"detection_timeout","error":"Detection timed out after 90.0s"},
+            // return_code=1），導致模型多次搜尋皆失敗、放棄後 newsHighlights 回空（頁面「參考新聞」永遠空白）。
+            // 基本版不走 code_execution、搜尋結果直接進 context，實測同批次同模型可穩定回 20 則真實新聞。
+            // 本服務走 Batch API 才踩到此坑；PortfolioAdviceService 為「同步」呼叫、動態版正常，故不同動。
             if (webSearchOn) {
-                pb.addTool(ToolUnion.ofWebSearchTool20260209(
-                        WebSearchTool20260209.builder().maxUses((long) webSearchMaxUses).build()));
+                pb.addTool(ToolUnion.ofWebSearchTool20250305(
+                        WebSearchTool20250305.builder().maxUses((long) webSearchMaxUses).build()));
             }
             BatchCreateParams.Request.Params params = pb
-                    .system(buildSystemPrompt(webSearchOn))
-                    .addUserMessage(buildUserPrompt(date, webSearchOn))
+                    .system(buildSystemPrompt(webSearchOn, recentNews))
+                    .addUserMessage(buildUserPrompt(date, webSearchOn, recentNews))
                     .build();
 
             MessageBatch batch = client().messages().batches().create(BatchCreateParams.builder()
@@ -618,14 +630,29 @@ public class MarketAnalysisService {
 
     // ===== Prompt =====
 
-    private String buildSystemPrompt(boolean webSearchEnabled) {
-        // 新聞來源原則隨「新聞搜尋次數」設定切換：開啟 → 指示先 web_search；關閉 → 純技術面、不得杜撰新聞
-        String newsPrinciple = webSearchEnabled
-                ? ("2. 先使用 web_search 搜尋最近幾日的財經新聞（台股、美股、Fed 與利率、匯率、地緣政治、外資與法人動向、重要企業財報等），越近期的新聞權重越高、越舊越不重要。務必實際進行多次搜尋、積極找出近期新聞。"
-                    + "【新聞來源地區限制】只採用台灣、美國、新加坡的新聞來源；嚴禁納入中國大陸、香港、澳門的媒體或報導（例如新浪財經、東方財富、南方財經、第一財經、財新、華爾街見聞、南華早報、香港經濟日報等一律不可），即使其內容與台股／美股相關也不得列入。"
-                    + "請在 newsHighlights 積極列出 3～6 則符合條件（來源屬台/美/星、發布日在最近 " + newsMaxAgeDays + " 天內）的新聞；每則 publishedAt 必須是該篇原文的實際發布日、精確到日（YYYY-MM-DD）。"
-                    + "個別新聞若無法確認精確且近期的發布日、或來源屬中港澳，就略過該則（不要用舊聞或臆測日期充數、不要依賴既有記憶）；唯有確實搜尋後仍找不到任何符合條件的新聞時，才回空陣列 []。")
-                : "2. 本次不提供網路新聞搜尋（web_search 已停用）：請勿杜撰或臆測新聞，僅依下方台股與美股走勢數據做技術面研判，newsHighlights 一律回空陣列 []。";
+    private String buildSystemPrompt(boolean webSearchEnabled, List<News> recentNews) {
+        // 新聞來源原則隨「本地新聞是否存在」×「web_search 是否開啟」四態切換（Task 149.21）。
+        boolean hasLocal = recentNews != null && !recentNews.isEmpty();
+        String newsPrinciple;
+        if (hasLocal && webSearchEnabled) {
+            newsPrinciple = "2. 下方已附【近期新聞（本地抓取）】清單（來源為台灣權威媒體與證交所公開資訊，已驗證來源與真實發布日），"
+                    + "請以此清單為主要新聞面依據、優先採用；如需補「今日最新」動態，可再多次 web_search（換多組中英文關鍵字），"
+                    + "但一律只採台灣/美國/日本/新加坡來源，嚴禁中國大陸/香港/澳門（新浪財經/東方財富/南方財經/財新/南華早報… 一律不可）。"
+                    + "請在 newsHighlights 積極列出 3～6 則最相關、發布日在最近 " + newsMaxAgeDays + " 天內的新聞（優先取自本地清單）；每則 publishedAt 為原文實際發布日、精確到日（YYYY-MM-DD）。";
+        } else if (hasLocal) {
+            newsPrinciple = "2. 本次不進行網路搜尋（web_search 已停用）；請以下方【近期新聞（本地抓取）】清單為唯一新聞面依據"
+                    + "（來源為台灣權威媒體與證交所公開資訊，已驗證來源與真實發布日），**不得杜撰清單以外的新聞或臆測日期**。"
+                    + "請從清單中挑出 3～6 則對今日台股走向最相關者列入 newsHighlights，title/source/url/publishedAt 一律照清單原樣填。";
+        } else if (webSearchEnabled) {
+            newsPrinciple = "2. 先使用 web_search 搜尋最近幾日的財經新聞（台股、美股、日股、Fed 與利率、匯率、地緣政治、外資與法人動向、重要企業財報等），越近期的新聞權重越高、越舊越不重要。務必實際進行多次搜尋、換多組中英文關鍵字積極找出近期新聞，不要只搜一次就放棄。"
+                    + "【新聞來源地區限制】只採用台灣、美國、日本、新加坡的新聞來源；嚴禁納入中國大陸、香港、澳門的媒體或報導（例如新浪財經、東方財富、南方財經、第一財經、財新、華爾街見聞、南華早報、香港經濟日報等一律不可），即使其內容與台股／美股相關也不得列入。"
+                    + "可優先參考下列可靠來源（不限於此）：台灣證券交易所（twse.com.tw，三大法人買賣超、大盤成交統計）、公開資訊觀測站（mops.twse.com.tw，上市櫃重大訊息與財報）、玩股網（wantgoo.com）、MoneyDJ 理財網（moneydj.com）、日經中文網（zh.cn.nikkei.com）、自由時報財經（ec.ltn.com.tw）、經濟日報（money.udn.com）、華爾街日報中文網（cn.wsj.com）、紐約時報中文網（cn.nytimes.com），以及 Reuters、Bloomberg 等其他台/美/日/星主流財經媒體。"
+                    + "【排除來源】請勿採用鉅亨網（cnyes.com）的報導（觀點偏頗），即使搜到也不要列入 newsHighlights。"
+                    + "請在 newsHighlights 積極列出 3～6 則符合條件（來源屬台/美/日/星、發布日在最近 " + newsMaxAgeDays + " 天內）的新聞；每則 publishedAt 必須是該篇原文的實際發布日、精確到日（YYYY-MM-DD）。"
+                    + "個別新聞若無法確認精確且近期的發布日、或來源屬中港澳，就略過該則（不要用舊聞或臆測日期充數、不要依賴既有記憶）；唯有確實搜尋後仍找不到任何符合條件的新聞時，才回空陣列 []。";
+        } else {
+            newsPrinciple = "2. 本次不提供網路新聞搜尋（web_search 已停用）且無本地新聞：請勿杜撰或臆測新聞，僅依下方台股與美股走勢數據做技術面研判，newsHighlights 一律回空陣列 []。";
+        }
         return """
             你是一位資深台股策略分析師。你的任務：綜合「量化的台股大盤與美股指數近一年走勢」與「近期國內外財經新聞」，
             對「今天」台股（加權指數 TAIEX）當日可能的走向做出多空判斷。
@@ -651,7 +678,7 @@ public class MarketAnalysisService {
             """.formatted(newsPrinciple);
     }
 
-    private String buildUserPrompt(LocalDate date, boolean webSearchEnabled) {
+    private String buildUserPrompt(LocalDate date, boolean webSearchEnabled, List<News> recentNews) {
         StringBuilder sb = new StringBuilder();
         sb.append("今天日期：").append(date).append("（Asia/Taipei）。請判斷今天台股（加權指數）的走向。\n\n");
 
@@ -675,14 +702,84 @@ public class MarketAnalysisService {
             sb.append(recentCloses(series, 60)).append("\n\n");
         }
 
-        if (webSearchEnabled) {
-            sb.append("請先多次 web_search 最近幾日的財經新聞，再結合上述走勢做判斷。切記越近期的走勢與新聞越重要（越舊權重越低）；")
+        // 本地抓取新聞（Task 149.21）：來源可信、發布日精準，直接餵入（不經 sanitizeNews；那層只處理模型輸出）。
+        boolean hasLocal = recentNews != null && !recentNews.isEmpty();
+        if (hasLocal) {
+            sb.append(buildLocalNewsBlock(recentNews));
+        }
+
+        if (webSearchEnabled && hasLocal) {
+            sb.append("上方已附【近期新聞（本地抓取）】，請以此為主要新聞面依據、優先採用；如需補今日最新動態，可再多次 web_search（只採台/美/日/星、嚴禁中港澳）。")
+              .append("請在 newsHighlights 積極列出 3～6 則最相關、最近 ").append(newsMaxAgeDays)
+              .append(" 天內的新聞（優先取自本地清單），每則標出實際發布日（YYYY-MM-DD）。");
+        } else if (hasLocal) {
+            sb.append("本次不進行網路搜尋，請以上方【近期新聞（本地抓取）】為唯一新聞面依據，從中挑出 3～6 則對今日台股走向最相關者列入 newsHighlights（title/source/url/publishedAt 照清單原樣），")
+              .append("不得杜撰清單以外的新聞。切記越近期的走勢與新聞越重要。");
+        } else if (webSearchEnabled) {
+            sb.append("請先多次 web_search（換多組中英文關鍵字、積極嘗試、勿只搜一次）最近幾日的財經新聞，再結合上述走勢做判斷。切記越近期的走勢與新聞越重要（越舊權重越低）；")
               .append("請在 newsHighlights 積極列出 3～6 則最近 ").append(newsMaxAgeDays)
-              .append(" 天內、來源屬台灣/美國/新加坡、且能明確標出實際發布日（YYYY-MM-DD）的新聞；嚴禁納入中國大陸/香港/澳門來源。個別不確定發布日或非近期者略過該則，唯有確實找不到任何符合者才回空陣列。");
+              .append(" 天內、來源屬台灣/美國/日本/新加坡（可優先參考台灣證券交易所 twse.com.tw／公開資訊觀測站 mops.twse.com.tw、日經中文網、自由時報、經濟日報、華爾街日報中文網、紐約時報中文網等）、且能明確標出實際發布日（YYYY-MM-DD）的新聞；嚴禁納入中國大陸/香港/澳門來源。個別不確定發布日或非近期者略過該則，唯有確實找不到任何符合者才回空陣列。");
         } else {
-            sb.append("本次不進行新聞搜尋，請僅依上述台股與美股走勢做技術面判斷，newsHighlights 回空陣列。切記越近期的走勢越重要。");
+            sb.append("本次不進行新聞搜尋、亦無本地新聞，請僅依上述台股與美股走勢做技術面判斷，newsHighlights 回空陣列。切記越近期的走勢越重要。");
         }
         return sb.toString();
+    }
+
+    private static final java.time.ZoneId TW_ZONE = java.time.ZoneId.of("Asia/Taipei");
+    /** 餵入 prompt 的本地新聞最多筆數（避免灌爆 context；已依發布日新→舊排序）。 */
+    private static final int LOCAL_NEWS_MAX = 40;
+
+    /**
+     * 讀近 {@code newsMaxAgeDays} 天的本地抓取新聞（news_headline，由 external-materials-service 寫入）。
+     * 讀取失敗（表不存在/DB 例外）不影響分析——回空清單、退回既有 web_search / 純技術面行為。
+     */
+    private List<News> fetchRecentLocalNews(LocalDate date) {
+        try {
+            java.time.Instant cutoff = date.minusDays(Math.max(1, newsMaxAgeDays))
+                    .atStartOfDay(TW_ZONE).toInstant();
+            return newsRepo.findByPublishedAtGreaterThanEqualOrderByPublishedAtDesc(cutoff);
+        } catch (Exception e) {
+            log.warn("今日股市分析：讀本地新聞失敗（改不注入本地新聞）：{}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    /**
+     * 組「近期新聞（本地抓取）」prompt 區塊：每則 `YYYY-MM-DD [source] title — url` ＋（有摘要則）縮排摘要。
+     * 先列 TWSE 量化資訊（三大法人/成交量——數量少但訊號最強，且 published_at=當日 00:00 排序在後、
+     * 易被一般新聞的 cap 擠掉），再列一般新聞（僅一般新聞受 {@link #LOCAL_NEWS_MAX} 上限）。
+     */
+    private String buildLocalNewsBlock(List<News> news) {
+        List<News> twse = new ArrayList<>();
+        List<News> articles = new ArrayList<>();
+        for (News x : news) {
+            if (x.getCategory() != null && !News.CATEGORY_NEWS.equals(x.getCategory())) twse.add(x);
+            else articles.add(x);
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("== 近期新聞（本地抓取，來源可信、發布日精準，請優先採用）==\n");
+        for (News x : twse) appendLocalNews(sb, x);          // TWSE 量化資訊全列（數量有限）
+        int n = 0;
+        for (News x : articles) {                            // 一般新聞受上限
+            if (n++ >= LOCAL_NEWS_MAX) break;
+            appendLocalNews(sb, x);
+        }
+        sb.append("\n");
+        return sb.toString();
+    }
+
+    private void appendLocalNews(StringBuilder sb, News x) {
+        java.time.LocalDate d = x.getPublishedAt() == null ? null
+                : x.getPublishedAt().atZone(TW_ZONE).toLocalDate();
+        sb.append(d == null ? "????-??-??" : d.toString())
+          .append(" [").append(x.getSource() == null ? "" : x.getSource()).append("] ")
+          .append(x.getTitle() == null ? "" : x.getTitle().strip());
+        if (x.getUrl() != null && !x.getUrl().isBlank()) sb.append(" — ").append(x.getUrl().strip());
+        sb.append("\n");
+        String summary = x.getSummary();
+        if (summary != null && !summary.isBlank()) {
+            sb.append("    ").append(summary.strip()).append("\n");
+        }
     }
 
     /** 台股大盤（tradingDate → double[]{epochDay, close}）由舊到新。 */
@@ -799,7 +896,7 @@ public class MarketAnalysisService {
      * <ol>
      *   <li>只保留 http(s) URL（web_search 為不可信來源，防 {@code javascript:}／{@code data:} 於前端
      *       {@code <a href>} 造成 XSS；前端另有一層 {@code safeUrl()}）。</li>
-     *   <li><b>地區封鎖（149.18）</b>：只留台/美/星，剔除中港澳來源（{@link #isRegionBlocked}）。置於日期解析與昂貴回抓之前，命中即最早剔除。</li>
+     *   <li><b>地區封鎖（149.18／149.19）</b>：只留台/美/日/星，剔除中港澳來源（{@link #isRegionBlocked}）。置於日期解析與昂貴回抓之前，命中即最早剔除。</li>
      *   <li>{@code publishedAt} 須為精確 {@code YYYY-MM-DD} 且落在
      *       {@code [analysisDate - newsMaxAgeDays, analysisDate + 1d]}（149.18 起 newsMaxAgeDays 預設 5 天）；否則剔除。
      *       （模型自報日期不可信——實測把 2025-09-18 舊聞標成「2026-06」，故硬性要求精確到日＋時效。）</li>
@@ -819,9 +916,14 @@ public class MarketAnalysisService {
             if (n == null) continue;
             String url = safeHttpUrl(n.url());
 
-            // 地區封鎖（Task 149.18）：只留台/美/星，剔除中港澳來源。置於日期解析與昂貴回抓之前，命中即最早剔除、省 HTTP 成本。
+            // 地區封鎖（Task 149.18／149.19）：只留台/美/日/星，剔除中港澳來源。置於日期解析與昂貴回抓之前，命中即最早剔除、省 HTTP 成本。
             if (newsRegionBlockEnabled && isRegionBlocked(url, n.source())) {
                 log.info("今日股市分析：剔除中港澳來源新聞（source={}, url={}）：{}", n.source(), url, n.title());
+                continue;
+            }
+            // 使用者排除來源（Task 149.22）：鉅亨網 cnyes 觀點偏頗，即使 web_search 搜到也不列入。
+            if (isExcludedSource(url, n.source())) {
+                log.info("今日股市分析：剔除使用者排除來源新聞（source={}, url={}）：{}", n.source(), url, n.title());
                 continue;
             }
 
@@ -831,8 +933,11 @@ public class MarketAnalysisService {
                 log.info("今日股市分析：剔除新聞（publishedAt 非精確日期 '{}'）：{}", n.publishedAt(), n.title());
                 continue;
             }
-            // 第 2 層：回抓原文真實發布日（可關）——抓到即以真日期為準並覆寫顯示
-            if (newsVerifyPublishedDate && url != null) {
+            // 第 2 層：回抓原文真實發布日（可關）——抓到即以真日期為準並覆寫顯示。
+            // 本地抓取來源（twse/wantgoo/moneydj/ltn/udn）發布日已由 producer 直接讀 time/pubDate 驗證過，
+            // 且列表/AMP/轉址頁的 og:date 常誤導，故不對這些可信來源回抓覆寫（Task 149.21 review #3），
+            // 僅套第 1 層格式與第 3 層時窗。web_search 來源（模型自報日期不可信）仍照舊回抓校正。
+            if (newsVerifyPublishedDate && url != null && !isTrustedLocalNewsHost(url)) {
                 LocalDate real = fetchPublishedDate(url);
                 if (real != null && !real.equals(date)) {
                     log.info("今日股市分析：新聞發布日以原文校正 {} → {}：{}", date, real, n.title());
@@ -875,6 +980,41 @@ public class MarketAnalysisService {
         if (source != null) {
             for (String token : BLOCKED_SOURCE_TOKENS) {
                 if (source.contains(token)) return true;
+            }
+        }
+        return false;
+    }
+
+    /** 本地抓取來源網域（Task 149.21／149.22）：發布日已由 producer 驗證，sanitizeNews 不再回抓覆寫其日期。 */
+    private static final Set<String> TRUSTED_LOCAL_NEWS_HOSTS = Set.of(
+            "twse.com.tw", "wantgoo.com", "moneydj.com", "ltn.com.tw", "udn.com");
+
+    /** url 是否屬本地抓取的可信來源（host 相等或子網域）。 */
+    private boolean isTrustedLocalNewsHost(String url) {
+        String host = extractHost(url);
+        if (host == null) return false;
+        for (String s : TRUSTED_LOCAL_NEWS_HOSTS) {
+            if (host.equals(s) || host.endsWith("." + s)) return true;
+        }
+        return false;
+    }
+
+    /** 使用者排除的來源網域（Task 149.22）：鉅亨網 cnyes 觀點偏頗，一律不採用（含 web_search 搜到者）。 */
+    private static final Set<String> EXCLUDED_NEWS_HOSTS = Set.of("cnyes.com");
+    /** 使用者排除的來源顯示名關鍵詞（source.contains）。 */
+    private static final Set<String> EXCLUDED_SOURCE_TOKENS = Set.of("鉅亨", "cnyes", "Anue");
+
+    /** url/source 是否屬使用者排除來源（host 相等或子網域 / 來源名子字串）。 */
+    private boolean isExcludedSource(String url, String source) {
+        String host = extractHost(url);
+        if (host != null) {
+            for (String s : EXCLUDED_NEWS_HOSTS) {
+                if (host.equals(s) || host.endsWith("." + s)) return true;
+            }
+        }
+        if (source != null) {
+            for (String t : EXCLUDED_SOURCE_TOKENS) {
+                if (source.contains(t)) return true;
             }
         }
         return false;

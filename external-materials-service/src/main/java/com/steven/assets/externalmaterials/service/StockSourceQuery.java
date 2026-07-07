@@ -370,5 +370,32 @@ public class StockSourceQuery {
         return v == null ? BigDecimal.ZERO : v;
     }
 
+    // ===== 本地財經新聞 news_headline（Task 149.21）：ext 直寫、backend JPA 讀 =====
+
+    /**
+     * Upsert 一則新聞/公開資訊至 news_headline，以 {@code dedupe_key} 去重
+     * （同 key 更新 title/summary/published_at＋刷新 fetched_at）。
+     * published_at 以 OffsetDateTime(UTC) 綁定 TIMESTAMPTZ，避免 java.sql.Timestamp 的時區歧義。
+     */
+    public void upsertNews(String title, String source, String url, String category,
+                           String region, String summary,
+                           java.time.Instant publishedAt, String dedupeKey) {
+        jdbc.update(
+                "INSERT INTO news_headline " +
+                        "(title, source, url, category, region, summary, published_at, fetched_at, dedupe_key) " +
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), ?) " +
+                        "ON CONFLICT (dedupe_key) DO UPDATE SET " +
+                        "  title = EXCLUDED.title, summary = EXCLUDED.summary, " +
+                        "  published_at = EXCLUDED.published_at, fetched_at = NOW()",
+                title, source, url, category, region, summary,
+                publishedAt.atOffset(java.time.ZoneOffset.UTC), dedupeKey);
+    }
+
+    /** 刪除 published_at 早於 cutoff 的舊新聞（保留期清理）。回刪除筆數。 */
+    public int deleteNewsOlderThan(java.time.Instant cutoff) {
+        return jdbc.update("DELETE FROM news_headline WHERE published_at < ?",
+                cutoff.atOffset(java.time.ZoneOffset.UTC));
+    }
+
     public Set<String> emptyCodeSet() { return new LinkedHashSet<>(); }
 }

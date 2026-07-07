@@ -24,6 +24,12 @@ server:
 finmind:
   token: ${FINMIND_TOKEN:}
 
+# 本地財經新聞爬蟲（Task 149.21）：每日 06/12/18（Asia/Taipei）抓權威來源＋證交所公開資訊寫入 news_headline，
+# 供 business-services 今日股市分析餵入 prompt。retention-days=保留天數（清理更舊者）；enabled=false 可整體停用。
+news-scraper:
+  enabled: ${NEWS_SCRAPER_ENABLED:true}
+  retention-days: ${NEWS_SCRAPER_RETENTION_DAYS:30}
+
 logging:
   level:
     com.steven.assets.externalmaterials: INFO
