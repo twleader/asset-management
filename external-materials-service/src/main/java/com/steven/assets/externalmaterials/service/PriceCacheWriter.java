@@ -273,14 +273,20 @@ public class PriceCacheWriter {
      * 盤外取資料時會回傳「最近一個有資料的交易日」，避免污染技術指標。
      */
     private LocalDate resolveTradingDate(String stockCode, String market) {
-        boolean isUs = "美股".equals(market);
-        boolean liveSession = isUs
-                ? (clock.isUsMarketOpen() || clock.isUsMarketJustClosed())
-                : (clock.isTwMarketOpen() || clock.isTwMarketJustClosed());
+        // 各市場一律用「自己時區」的開盤 / 剛收盤窗口判定 live session。
+        // （英股原本漏分支、被歸到 else 誤用台股時段：倫敦盤中〔台北 15:00–23:30〕台股早已收盤
+        //  → liveSession 恆 false → tradingDate 退回 findMaxTradingDate＝昨天，今日倫敦即時 tick
+        //  全被 appendTick 貼進「昨天」bucket，與盤後 refresh 的昨日資料混桶 → 「當日」分時跨兩天。
+        //  見 Task 154。美股走 isUsMarketOpen 判斷正確，故不受影響。）
+        boolean liveSession = switch (market) {
+            case "美股" -> clock.isUsMarketOpen() || clock.isUsMarketJustClosed();
+            case "英股" -> clock.isUkMarketOpen() || clock.isUkMarketJustClosed();
+            default     -> clock.isTwMarketOpen() || clock.isTwMarketJustClosed();
+        };
         if (liveSession) {
-            return LocalDate.now(isUs ? MarketClock.US_ZONE : MarketClock.TW_ZONE);
+            return LocalDate.now(MarketClock.zoneOf(market));
         }
         Optional<LocalDate> latest = source.findMaxTradingDate(stockCode, market);
-        return latest.orElseGet(() -> LocalDate.now(isUs ? MarketClock.US_ZONE : MarketClock.TW_ZONE));
+        return latest.orElseGet(() -> LocalDate.now(MarketClock.zoneOf(market)));
     }
 }

@@ -54,14 +54,29 @@ public class IntradayTickStore {
         }
     }
 
-    /** 盤後外部資料源全覆寫：DEL + RPUSH all。 */
+    /**
+     * 盤後外部資料源覆寫：DEL + RPUSH all，但採「防截斷（never-shrink）」語義。
+     *
+     * 若傳入資料為空、或其「末刻（分鐘級）」早於既有 LIST 末刻，視為外部源尚未追上收盤，
+     * 保留既有較完整資料、不覆寫。動機：Yahoo 對 TWSE(~25min)/LSE(~15min) 的 5m feed 有延遲，
+     * 收盤後過早的 refresh 只抓到收盤前數根，若無條件 DEL+全覆寫，會把盤中 polling 已累積到收盤的
+     * tick 蓋成截斷版且永不還原（前端「當日」缺收盤前尾段，如台股停在 13:10 而非 13:30）。
+     * 空資料檢查移到 DEL 之前（原本先 DEL 再 return 會把既有清空）。
+     */
     public void replaceTicks(String code, String market, LocalDate tradingDate,
                              List<TickPoint> ticks) {
-        if (ticks == null) return;
+        if (ticks == null || ticks.isEmpty()) return;   // 空：保留既有，不動（勿先 DEL）
         String key = key(code, market, tradingDate);
         try {
+            // never-shrink：新資料末刻早於既有末刻 → 來源尚未追上收盤，保留既有不覆寫
+            String newLast = lastMinute(ticks);
+            String oldLast = lastMinute(getTicks(code, market, tradingDate));
+            if (oldLast != null && newLast != null && newLast.compareTo(oldLast) < 0) {
+                log.info("replaceTicks skip {} {} {}：新末刻 {} 早於既有 {}（來源截斷），保留既有",
+                        market, code, tradingDate, newLast, oldLast);
+                return;
+            }
             redis.delete(key);
-            if (ticks.isEmpty()) return;
             for (TickPoint t : ticks) {
                 if (t.price() == null || t.price().signum() <= 0) continue;
                 String json = MAPPER.writeValueAsString(java.util.Map.of(
@@ -73,6 +88,14 @@ public class IntradayTickStore {
         } catch (Exception e) {
             log.warn("replaceTicks {} {} {}: {}", market, code, tradingDate, e.getMessage());
         }
+    }
+
+    /** 取 tick 序列最後一筆的「分鐘級」時間字串（YYYY-MM-DDTHH:mm）；序列依時間升冪，末筆即最晚。空回 null。 */
+    private static String lastMinute(List<TickPoint> ticks) {
+        if (ticks == null || ticks.isEmpty()) return null;
+        String t = ticks.get(ticks.size() - 1).time();
+        if (t == null) return null;
+        return t.length() >= 16 ? t.substring(0, 16) : t;
     }
 
     /** 唯讀：取當日完整 tick 序列（依 push 順序，即時間升冪）。 */

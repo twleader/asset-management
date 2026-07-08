@@ -529,6 +529,25 @@ const chartOption = computed(() => {
     markData = maxMinMarkPoints(prices, dates, loIdx, hiIdx)
   }
 
+  // 「當日」模式 Y 軸鎖定當日股價區間（+10% padding），避免被遠離現價的均線水平線（尤其年線 MA240
+  // 常在多頭時遠低於現價）撐平走勢、日內波動被壓成一條平線；日線模式維持 scale:true。均線 / 成本均價
+  // 落在區間外時由 series clip 自動裁切，數值仍保留在 legend（比照指數圖 GdpTwseView Task 96.7 同一修法）。
+  let priceYAxis = {
+    gridIndex: 0, type: 'value', scale: true,
+    axisLabel: { formatter: v => v.toFixed(0) }, splitLine: { lineStyle: { color: '#f0f0f0' } }
+  }
+  if (intraday) {
+    const vals = prices.filter(v => v != null)
+    if (vals.length) {
+      const lo = Math.min(...vals), hi = Math.max(...vals)
+      const pad = (hi - lo) * 0.1 || hi * 0.001 || 1
+      priceYAxis = {
+        gridIndex: 0, type: 'value', min: lo - pad, max: hi + pad,
+        axisLabel: { formatter: v => v.toFixed(2) }, splitLine: { lineStyle: { color: '#f0f0f0' } }
+      }
+    }
+  }
+
   return {
     backgroundColor: '#fff',
     tooltip: {
@@ -605,7 +624,7 @@ const chartOption = computed(() => {
       { gridIndex: 1, type: 'category', data: dates, boundaryGap: false, axisLabel: { rotate: 30, fontSize: 10, formatter: xLabelFormatter } }
     ],
     yAxis: [
-      { gridIndex: 0, type: 'value', scale: true, axisLabel: { formatter: v => v.toFixed(0) }, splitLine: { lineStyle: { color: '#f0f0f0' } } },
+      priceYAxis,
       { gridIndex: 1, type: 'value', min: 0, max: 100, splitNumber: 2, axisLabel: { fontSize: 10 }, splitLine: { lineStyle: { color: '#f0f0f0' } } }
     ],
     series: [
