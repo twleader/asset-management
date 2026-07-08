@@ -102,7 +102,7 @@ com.steven.assets/
   - `GET /api/bff/stock-analysis/dividends` → `/api/market-data/dividends`
   - `GET /api/bff/stock-analysis/etf-holdings` → `/api/market-data/etf-holdings`
   - `POST /api/bff/stock-analysis/backfill-stock` → `/api/market-data/history/backfill-stock`（Task 136 lazy 回補：走勢圖無歷史時即時觸發單檔 10 年回補後重載；只寫 `stock_price_history` 不入主檔、今日列獨佔給 `ClosePersister`）
-  - `GET /api/bff/stock-analysis/intraday-ticks` → `/api/market-data/intraday-ticks`（走勢圖「當日」期間用；business-services proxy 至 `external-materials-service /internal/intraday-ticks`，後者讀 Redis LIST `price:ticks:{market}:{code}:{tradingDate}`。**date 省略時的預設 bucket**：今天（該市場時區）若為交易日且今日 tick LIST 已有資料就用今天，否則退回 `findMaxTradingDate`（最近有收盤的交易日）——不可直接用 `findMaxTradingDate`，否則盤中今日收盤價尚未入庫、預設日期會停在前一交易日、讀到空 bucket（見 Task 153）。盤中由 `PricePoller` 每 2 分鐘累積 / 盤後由 `IntradayTickRefresher` 用台股 FinMind `TaiwanStockKBar` + 美/英股 Yahoo 5m 完整覆寫。台股 Yahoo 5m fallback 的 ticker 後綴依掛牌市場：上市 `.TW`、上櫃（TPEx，含債券 ETF 00xxxB）`.TWO`，`PriceFetchClient.fetchIntraday5m` 先試 `.TW` 空再 fallback `.TWO`，否則上櫃股當日分時恆空，見 Task 119）
+  - `GET /api/bff/stock-analysis/intraday-ticks` → `/api/market-data/intraday-ticks`（走勢圖「當日」期間用；business-services proxy 至 `external-materials-service /internal/intraday-ticks`，後者讀 Redis LIST `price:ticks:{market}:{code}:{tradingDate}`。**date 省略時的預設 bucket**：今天（該市場時區）若為交易日且今日 tick LIST 已有資料就用今天，否則退回 `findMaxTradingDate`（最近有收盤的交易日）——不可直接用 `findMaxTradingDate`，否則盤中今日收盤價尚未入庫、預設日期會停在前一交易日、讀到空 bucket（見 Task 153）。盤中由 `PricePoller` 每 2 分鐘累積 / 盤後由 `IntradayTickRefresher` 用台股 FinMind `TaiwanStockKBar` + 美/英股 Yahoo 5m 完整覆寫。**盤後 refresh cron：台股 14:00 TW、美股 16:05 ET、英股 17:00 LON**；台股/英股排在收盤後 ~30 分而非 5 分，因 Yahoo 對 TWSE(~25min)/LSE(~15min) 的 5m feed 有延遲，收盤後 5 分抓會截斷（台股停 13:10、英股停 ~16:20），美股 Yahoo 無延遲故 16:05 即完整。另 `IntradayTickStore.replaceTicks` 採 **never-shrink** 防截斷：新抓資料末刻早於既有 LIST 末刻（或為空）就保留既有不覆寫，避免截斷版蓋掉 polling 已到收盤的 tick（Task 156）。台股 Yahoo 5m fallback 的 ticker 後綴依掛牌市場：上市 `.TW`、上櫃（TPEx，含債券 ETF 00xxxB）`.TWO`，`PriceFetchClient.fetchIntraday5m` 先試 `.TW` 空再 fallback `.TWO`，否則上櫃股當日分時恆空，見 Task 119）
 
 - **共享 / 跨頁 passthrough routes**（非單一頁面專屬，由 Spring Cloud Gateway 直接轉發至 business-services，服務跨頁共用的 store CRUD、下拉 lookups、SSE 與基金主檔；皆為刻意的共享資源，不另立 `/api/bff/{page}/**`）：
   - `SnapshotBffRoutes`：`/api/snapshots/**` → business-services（Pinia store 共用快照 CRUD；單頁資料仍走各自的 `/api/bff/{page}/**`）
@@ -1222,18 +1222,21 @@ Redis 中 `price:{market}:{code}` 的 `tradingDate` 欄位代表**這筆價格�
 **規則**（`external-materials-service` 的 `PriceCacheWriter.resolveTradingDate`）：
 
 ```
-isLiveSession = (該市場 isOpen) || (剛收盤 20 分鐘窗口)
-                 // 台股：09:00–13:30 + 13:30–13:50
-                 // 美股：09:30–16:00 ET + 16:00–16:20 ET
+isLiveSession = (該市場 isOpen) || (該市場剛收盤 20 分鐘窗口)   // 一律用「該市場自己時區」判定
+                 // 台股：09:00–13:30 + 13:30–13:50 TW
+                 // 美股：09:30–16:00 + 16:00–16:20 ET
+                 // 英股：08:00–16:30 + 16:30–16:50 LON
 
 if isLiveSession:
-    trading_date = LocalDate.now(market timezone)   // 資料確實來自今天
+    trading_date = LocalDate.now(MarketClock.zoneOf(market))   // 資料確實來自今天（該市場時區）
 else:
     trading_date = max(stock_price_history.trading_date for this code+market)
-                    fallback today                  // 上一個有真實資料的交易日
+                    fallback LocalDate.now(zoneOf(market))      // 上一個有真實資料的交易日
 ```
 
 > 此規則 fix 過去歷史 bug：盤外刷新會把所有 cache 的 `trading_date` 蓋成今天，導致 KD9 把上一交易日的 OHLC 當成今天的 K 棒。
+>
+> **三市場一致（2026/07，Task 154 修英股「當日」分時跨兩天）：** 舊版 `liveSession` 以 `isUs ? US窗口 : TW窗口` 二分，**英股被歸入 else 誤用台股時段**。倫敦盤中（台北 15:00–23:30）台股早已收盤 → `liveSession` 恆 false → `trading_date` 退回 `findMaxTradingDate`＝昨天；於是今日倫敦即時 tick 被 `appendTick` 寫進「昨天」bucket（`price:ticks:英股:{code}:{昨天}`），與盤後 `IntradayTickRefresher` 覆寫的昨日資料混桶，前端「當日」讀到跨兩天序列（07-07 全日 + 07-08 盤中）→ 時間軸倒退、假高低點。改為 `switch(market)` 三分支各用自身時區窗口 + `zoneOf(market)`，英股即正確分桶。美股原走 `isUsMarketOpen` 判斷正確、Redis 一向乾淨，不受此 bug 影響。連帶修正英股 `price:dayhl:*`（`IntradayHighLowTracker` 亦以此 `tradingDate` 為 key）跨日混算的最高／最低。
 
 ### 即時資產估算（Live Assets）
 

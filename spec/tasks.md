@@ -3819,3 +3819,58 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [ ] 153.4 Docker：`--no-cache` 重 build external-materials-service + recreate（JVM service，避免 stale jar）；驗證運行 jar 內 `InternalPriceController` 含新邏輯。
 - [ ] 153.5 手動驗證：容器內 curl `/internal/intraday-ticks?code=00865B&market=台股`（URL-encode 市場）不帶 date 回今日 11 筆（原本 `[]`）；前端開 00865B 股票分析「當日」出現分時走勢。
 - [ ] 153.6 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）。
+
+### Task 154: 修正英股「當日」分時走勢跨兩天串接（bug fix）
+
+對應 Requirements: Requirement 13（[requirements.md:249-250](spec/requirements.md)）
+
+#### 問題
+
+股票分析 → 走勢圖「當日」，**英股（VWRA / CSPX / VUAA / IB01 等 LSE 掛牌）** 的分時 X 軸出現「兩天串接」：前段 08:00→16:30（昨日完整）後直接跳回 08:16→14:52（今日盤中），時間軸倒退、日內最高／最低跨兩天算成假值。實測 `price:ticks:英股:VWRA:2026-07-07` LIST 內含 07-07（100 筆）+ 07-08（213 筆）兩天，全英股 bucket 皆污染；台股 / 美股 bucket 皆單一日期乾淨。
+
+根因在寫入端 `PriceCacheWriter.resolveTradingDate`：`liveSession` 舊以 `isUs ? US窗口 : TW窗口` 二分，**英股被歸入 else 誤用台股時段**。倫敦盤中（台北 15:00–23:30）台股早收盤 → `liveSession` 恆 false → `tradingDate` 退回 `findMaxTradingDate`＝昨天，今日倫敦即時 tick（`appendTick`）全被貼進「昨天」bucket，與盤後 `IntradayTickRefresher` 覆寫的昨日資料混桶。且今日缺乏「今天」bucket → `InternalPriceController.intradayTicks` 的預設日期（Task 153）退回 `findMaxTradingDate`＝昨天，正好讀到那個被污染的昨日桶 → 前端跨兩天。美股走 `isUsMarketOpen` 判斷正確，一向乾淨、不受影響。
+
+#### 修正
+
+- [x] 154.1 `PriceCacheWriter.resolveTradingDate`：`liveSession` 改 `switch(market)` 三分支，各市場用**自身時區**窗口判定（美股 `isUsMarketOpen/JustClosed`、英股 `isUkMarketOpen/JustClosed`、其餘台股）；live 時取 `LocalDate.now(MarketClock.zoneOf(market))`，else 分支 fallback 亦用 `zoneOf(market)`。複用既有 `MarketClock.isUkMarketOpen/isUkMarketJustClosed/zoneOf`，無新增外部相依。連帶修正英股 `price:dayhl:*`（`IntradayHighLowTracker` 同以此 `tradingDate` 為 key）跨日混算的最高／最低。
+- [x] 154.2 spec：`design.md`「Live 行情 tradingDate 語意」規則補英股窗口 + 三市場一致說明；`requirements.md` Requirement 13 新增「tick bucket 時區須同市場」驗收條件。
+- [x] 154.3 Docker：`--no-cache` 重 build external-materials-service + recreate（JVM service，避免 stale jar）；unzip 運行 jar 驗證 `PriceCacheWriter.class` 引用 `isUkMarketOpen`/`isUkMarketJustClosed`/`zoneOf`（含 `switch(market)` 新邏輯）。
+- [x] 154.4 清污染資料：`DEL` 既有 `price:ticks:英股:*` 與 `price:dayhl:英股:*`（跨日混桶），交由盤中 polling（修正後）與 cold-start `refreshOne`（Yahoo range=1d 經 `refreshYahooOne` 日期過濾）重建乾淨的今日 bucket。
+- [x] 154.5 手動驗證：容器內 curl `/internal/intraday-ticks?code=VWRA&market=英股`（URL-encode）回單一日期序列（VWRA/CSPX/VUAA/IB01 皆 87 筆、僅今日 07-08、時間軸單調遞增）；美股對照 VOO 維持乾淨單日並持續增長。前端瀏覽器由使用者確認。
+- [ ] 154.6 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）。
+
+### Task 155: 修正股票分析「當日」走勢被均線壓成平線（bug fix）
+
+對應 Requirements: Requirement 13（[requirements.md:246-247](spec/requirements.md)）
+
+#### 問題
+
+股票分析 →「當日」走勢圖對**三市場**（0050 台股、VOO 美股、VWRA 英股皆然）價格線被壓成一條貼頂平線，看似資料錯誤。實測 0050 tick 資料乾淨（51 筆單日、09:00→13:10、與畫面收 106.10 吻合），非資料問題。
+
+根因在前端 `StockAnalysisDialog.vue` 的價格 Y 軸用 `scale: true` 且無 min/max：`scale:true` 會涵蓋該軸上**所有** series，含畫成水平參考線的月/季/年線與成本均價。多頭時年線 MA240 常遠低於現價（0050 MA240=72.71 vs 當日 105–106.5；VOO 630.53 vs 683；VWRA 171.6 vs 187），Y 軸下限被撐到 ~MA240，當日日內波動（0050 僅 1.3 點）被壓成貼頂平線。指數圖 `GdpTwseView.vue` 已於 Task 96.7 用「當日鎖定價格區間」修過同一坑，股票分析對話框未比照。
+
+#### 修正
+
+- [x] 155.1 `StockAnalysisDialog.vue` chartOption：新增 `priceYAxis`——`intraday` 時取當日 `prices` 的 min/max ±10% padding（`pad = (hi-lo)*0.1 || hi*0.001 || 1`）設 `min/max`、label `toFixed(2)`；日線模式維持 `scale:true`、label `toFixed(0)`。`yAxis[0]` 改用 `priceYAxis`。均線 / 成本水平線落在區間外由 series clip 自動裁切，數值仍留 legend。比照 `GdpTwseView.vue` Task 96.7 同一作法。
+- [x] 155.2 spec：`requirements.md` Requirement 13 新增「當日 Y 軸鎖定當日股價區間、不用 scale:true」驗收條件；本 Task。
+- [x] 155.3 Docker：重 build frontend + recreate；驗證運行 bundle（`StockAnalysisDialog-*.js`）含新邏輯——`toFixed(2)` 與 padding 標記 `*.1`（`(hi-lo)*0.1`）/ `*.001`（`hi*0.001` fallback）皆在。
+- [ ] 155.4 手動驗證（瀏覽器）：0050 / VOO / VWRA 開「當日」，價格線填滿圖高、看得出日內起伏，MA60/MA240 超出區間被裁切、legend 數值仍在；切回「1個月」等日線期間 Y 軸回 scale:true 正常。
+- [ ] 155.5 commit + 兩段式 merge（併入 Task 154 同批或獨立，feature 分支 commit + main 用 `--no-ff` merge）。
+
+### Task 156: 修正台股 / 英股「當日」分時缺收盤前尾段（Yahoo 延遲截斷）（bug fix）
+
+對應 Requirements: Requirement 13（[requirements.md:251-252](spec/requirements.md)）
+
+#### 問題
+
+台股「當日」分時停在 13:10（收盤 13:30，缺 13:15/13:20/13:25/13:30）。實測 Yahoo `0050.TW` 5m 現在（盤後 8h）回完整 55 根到 13:30，但 Redis `price:ticks:台股:0050:2026-07-08` 只有 51 根到 13:10；所有台股桶皆然。根因：盤後 refresh cron 排在 **13:35**（收盤後 5 分），FinMind token 為空 → fallback Yahoo，而 **Yahoo 對 TWSE 的 5m feed 有 ~25 分延遲**，13:35 當下只到 ~13:10；`replaceTicks` 無條件 `DEL + RPUSH` 把盤中 polling 已到 13:30 的資料蓋成截斷版，之後永不重抓（cold-start 因 LIST 非空不觸發）。**英股同構**：Yahoo LSE 延遲 ~15 分，16:35 refresh（收盤 16:30 後 5 分）只到 ~16:20，會丟 16:25/16:30。美股 Yahoo 5m 無延遲，16:05 抓到完整 09:30-16:00，不受影響（workflow 三市場平行驗證確認）。
+
+#### 修正
+
+- [x] 156.1 `IntradayTickStore.replaceTicks`：改「防截斷（never-shrink）」語義——傳入為空、或新資料末刻（分鐘級，取 `time` 前 16 字）**早於**既有 LIST 末刻時，保留既有、不覆寫；空資料檢查移到 `redis.delete` 之前（原本先 DEL 再 return 會把既有清空）。新增私有 `lastMinute(List<TickPoint>)` helper（序列升冪，末筆即最晚）。
+- [x] 156.2 `IntradayTickRefresher`：台股 cron `0 35 13`→`0 0 14`（14:00 TW）、英股 cron `0 35 16`→`0 0 17`（17:00 LON），讓 Yahoo feed 追上收盤；美股 16:05 不動。更新 class Javadoc 說明延遲與 never-shrink 雙保險。
+- [x] 156.3 spec：`requirements.md` Requirement 13 更新盤後 cron 時點 + 新增 never-shrink 驗收條件；`design.md` intraday-ticks 管線補 cron 時點與 never-shrink；本 Task。
+- [x] 156.4 Docker：`--no-cache` 重 build external-materials-service + recreate；unzip 運行 jar 驗證 `IntradayTickStore.class` 含 `lastMinute`、`IntradayTickRefresher` cron 常數池為 `0 0 14`（台股）/ `0 0 17`（英股）/ `0 5 16`（美股不變）。
+- [x] 156.5 補救今日資料：用 scan 到的精確 key `DEL` 全部今日台股桶 + 不帶 date 的 `/internal/intraday-ticks` cold-start 重抓（FinMind 400→Yahoo fallback，Yahoo 現已完整）；驗證 18 檔台股（0050/2330/00878…）今日桶末端皆到 `13:30`（多數 54 根，債券 ETF 較稀疏但同樣到 13:30）。
+- [ ] 156.6 手動驗證（瀏覽器）：0050「當日」畫到 13:30。
+- [ ] 156.7 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）。

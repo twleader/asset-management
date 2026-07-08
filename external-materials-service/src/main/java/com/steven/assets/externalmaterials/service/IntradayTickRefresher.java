@@ -23,10 +23,15 @@ import java.util.concurrent.Executors;
  * 無新成交的 5 秒視窗）會 skip，原始累積 LIST 可能跳號。盤後抓 FinMind / Yahoo 全天完整 K 線
  * 覆寫，補回所有時間點，前端「當日」走勢圖即顯示權威來源的完整曲線。
  *
- * Cron 時點安排（較 {@link ClosePersister} dump 晚 3 分鐘，避免與 dump 競爭 Redis IO）：
- *  - 台股 13:35 TW（dump 13:32 之後）→ FinMind TaiwanStockKBar 5m
+ * Cron 時點安排：
+ *  - 台股 14:00 TW → FinMind TaiwanStockKBar 5m（FinMind 無 token 時 fallback Yahoo）
  *  - 美股 16:05 ET（dump 16:02 之後）→ Yahoo chart interval=5m
- *  - 英股 16:35 LON（dump 16:32 之後）→ Yahoo chart interval=5m
+ *  - 英股 17:00 LON → Yahoo chart interval=5m
+ *
+ * 台股 / 英股排在收盤後 ~30 分（非收盤後 5 分）：Yahoo 對 TWSE(~25min) / LSE(~15min) 的 5m feed
+ * 有延遲，收盤後 5 分抓會截斷（缺收盤前數根，如台股停在 13:10 而非 13:30、英股停在 ~16:20）。
+ * 後延讓 feed 追上收盤取得完整全日；另搭配 {@link IntradayTickStore#replaceTicks} 的 never-shrink
+ * 防截斷 guard（新資料末刻早於既有就不覆寫）雙保險。美股 Yahoo 5m 無延遲，16:05 即抓到完整 09:30-16:00。
  */
 @Slf4j
 @Service
@@ -37,7 +42,7 @@ public class IntradayTickRefresher {
     private final IntradayTickStore tickStore;
     private final StockSourceQuery source;
 
-    @Scheduled(cron = "0 35 13 * * MON-FRI", zone = "Asia/Taipei")
+    @Scheduled(cron = "0 0 14 * * MON-FRI", zone = "Asia/Taipei")
     public void refreshTwTicks() {
         LocalDate today = LocalDate.now(MarketClock.TW_ZONE);
         Set<String> tw = new LinkedHashSet<>(), us = new LinkedHashSet<>(), uk = new LinkedHashSet<>();
@@ -57,7 +62,7 @@ public class IntradayTickRefresher {
         refreshYahoo(us, "美股", today);
     }
 
-    @Scheduled(cron = "0 35 16 * * MON-FRI", zone = "Europe/London")
+    @Scheduled(cron = "0 0 17 * * MON-FRI", zone = "Europe/London")
     public void refreshUkTicks() {
         LocalDate today = LocalDate.now(MarketClock.LON_ZONE);
         Set<String> tw = new LinkedHashSet<>(), us = new LinkedHashSet<>(), uk = new LinkedHashSet<>();
