@@ -427,6 +427,21 @@ function calcKD(hist, period = 9) {
   return { K, D }
 }
 
+// 各市場交易時段 [開盤, 收盤] HH:mm（市場當地時區、DST 不變）。鏡射後端 MarketZones（單一事實來源）：
+// 美股 09:30–16:00 / 英股 08:00–16:30 / 其餘（台股、大盤 0000）09:00–13:30。
+// 供「當日」走勢 X 軸建「開盤→收盤」整段網格、固定延伸到收盤時間（非現在時間）。
+function sessionHours(market) {
+  if (market === '美股') return ['09:30', '16:00']
+  if (market === '英股') return ['08:00', '16:30']
+  return ['09:00', '13:30']
+}
+
+// 陣列最後一筆非 null 值（當日網格末段恆為未來 null，legend / 成本漲跌色須取此而非末格）
+const lastNonNull = arr => {
+  for (let i = arr.length - 1; i >= 0; i--) if (arr[i] != null) return arr[i]
+  return null
+}
+
 // 在可視索引區間 [lo, hi] 內找股價「最高 / 最低」點，回傳 ECharts markPoint data（紅最高、綠最低，符合紅漲綠跌）
 // coord 以 x 軸類別字串（labels[i]）定位，避免 dataZoom filterMode 重新索引後絕對索引對不準
 // labels[i]＝日線模式為日期、當日模式為 HH:mm 時間（標籤第二行直接顯示，不必分支）
@@ -482,16 +497,35 @@ const chartOption = computed(() => {
   let dates, prices, ma20, ma60, ma240, K, D, xLabelFormatter
   if (intraday) {
     const ticks = intradayTicks.value
-    // time 為 ISO LocalDateTime（如 "2026-06-05T13:25:00"）→ x 軸用 HH:mm
-    dates  = ticks.map(t => String(t.time).substring(11, 16))
-    prices = ticks.map(t => t.price != null ? parseFloat(Number(t.price).toFixed(2)) : null)
-    // intraday tick 數不足以重算日線 MA / KD → 取日線最新值畫成水平參考線
-    const fill = v => ticks.map(() => v)
+    // 當日 X 軸固定延伸到「收盤時間」而非「現在時間」（與指數當日圖 Requirement 18 同設計、同視覺行為）：
+    // 以該市場交易時段建整段「開盤→收盤」每分鐘 category 網格，真實 tick 依 HH:mm 落格、
+    // 盤中尚未到達的時段留 null（畫空白、股價線只到最新一筆，靠 connectNulls 讓稀疏 tick 連續）。
+    // time 為 ISO LocalDateTime（市場當地時區，如 "2026-06-05T13:25:00"）→ 取 HH:mm。
+    const [openHHmm, closeHHmm] = sessionHours(s.market)
+    const toMin = hhmm => { const [h, m] = hhmm.split(':').map(Number); return h * 60 + m }
+    const openMin = toMin(openHHmm), closeMin = toMin(closeHHmm)
+    const slots = Math.max(1, closeMin - openMin + 1)
+    dates = Array.from({ length: slots }, (_, i) => {
+      const mm = openMin + i
+      return `${String(Math.floor(mm / 60)).padStart(2, '0')}:${String(mm % 60).padStart(2, '0')}`
+    })
+    const priceGrid = new Array(slots).fill(null)
+    for (const t of ticks) {
+      const hhmm = String(t.time).substring(11, 16)
+      if (!/^\d\d:\d\d$/.test(hhmm) || t.price == null) continue
+      // 邊界外（開盤前 / 剛收盤寬限窗）夾到端點避免遺漏最新一筆；同一分鐘後到者覆蓋＝取該分鐘最後成交
+      const idx = Math.max(0, Math.min(slots - 1, toMin(hhmm) - openMin))
+      priceGrid[idx] = parseFloat(Number(t.price).toFixed(2))
+    }
+    prices = priceGrid
+    // intraday tick 數不足以重算日線 MA / KD → 取日線最新值、以整段網格常數填滿畫成水平參考線（畫到收盤）
+    const fill = v => dates.map(() => v)
     ma20  = fill(lastOf(dailyMa20))
     ma60  = fill(lastOf(dailyMa60))
     ma240 = fill(lastOf(dailyMa240))
     K     = fill(lastOf(dailyKD.K))
     D     = fill(lastOf(dailyKD.D))
+    // 整段分鐘網格：軸標籤只在整點 / 半點顯示，避免數百格 HH:mm 全擠上
     xLabelFormatter = v => v
   } else {
     dates  = dailyDates
@@ -565,7 +599,8 @@ const chartOption = computed(() => {
         minimumFractionDigits: 2, maximumFractionDigits: 2
       }))
       const map = {
-        '股價':       fmt(last(prices)),
+        // 當日網格末格恆為未來 null → 取最後一筆非 null 分時價（日線模式 == 末格，行為不變）
+        '股價':       fmt(lastNonNull(prices)),
         '月線MA20':   fmt(last(ma20)),
         '季線MA60':   fmt(last(ma60)),
         '年線MA240':  fmt(last(ma240)),
@@ -621,7 +656,9 @@ const chartOption = computed(() => {
     ],
     xAxis: [
       { gridIndex: 0, type: 'category', data: dates, boundaryGap: false, axisLabel: { show: false }, axisLine: { onZero: false } },
-      { gridIndex: 1, type: 'category', data: dates, boundaryGap: false, axisLabel: { rotate: 30, fontSize: 10, formatter: xLabelFormatter } }
+      { gridIndex: 1, type: 'category', data: dates, boundaryGap: false, axisLabel: { rotate: 30, fontSize: 10, formatter: xLabelFormatter,
+        // 當日為整段分鐘網格（數百格）→ 只在整點 / 半點顯示標籤；日線維持自動疏密
+        interval: intraday ? ((idx, val) => typeof val === 'string' && (val.endsWith(':00') || val.endsWith(':30'))) : 'auto' } }
     ],
     yAxis: [
       priceYAxis,
@@ -629,6 +666,9 @@ const chartOption = computed(() => {
     ],
     series: [
       { name: '股價', type: 'line', xAxisIndex: 0, yAxisIndex: 0, data: prices,
+        // 當日：稀疏 tick 落在整段分鐘網格上，connectNulls 讓 2 分輪詢 / 5 分 K 之間連成連續線；
+        // 末端未來時段的 trailing null 無後續點不會被橋接，故線正確止於最新一筆
+        connectNulls: intraday,
         lineStyle: { width: 2, color: '#3b82f6' }, itemStyle: { color: '#3b82f6' }, showSymbol: false,
         endLabel: { show: true, formatter: '{c}', fontSize: 11, color: '#3b82f6', fontWeight: 700 },
         areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
@@ -661,7 +701,7 @@ const chartOption = computed(() => {
         itemStyle: { color: '#64748b' }, showSymbol: false,
         endLabel: {
           show: true, formatter: '成本 {c}', fontSize: 11,
-          color: prices[prices.length - 1] >= cost ? '#16a34a' : '#ef4444'
+          color: lastNonNull(prices) >= cost ? '#16a34a' : '#ef4444'
         }
       }] : []),
       { name: 'K', type: 'line', xAxisIndex: 1, yAxisIndex: 1, data: K,

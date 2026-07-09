@@ -829,7 +829,7 @@ POST   /api/fund-dividend/backfill?years=10      # 基金配息歷史回補（Re
 GET    /api/market-data/dividend-rate?code=0050&market=台股    # 取得股利率
 GET    /api/market-data/prices                                 # 列出所有快取股價（live 即時股價統一走此端點，無單數 /price）
 GET    /api/market-data/prices/stream                          # SSE 即時推價（text/event-stream，取代輪詢）
-GET    /api/market-data/intraday-ticks?code=&market=&date=     # 走勢圖「當日」分時 tick（proxy 至 external-materials Redis LIST；date 省略時預設今天（該市場時區）若為交易日且今日 tick 已有資料，否則退回最近有收盤的交易日 — 見 Task 153）
+GET    /api/market-data/intraday-ticks?code=&market=&date=     # 走勢圖「當日」分時 tick（proxy 至 external-materials Redis LIST；date 省略時預設今天（該市場時區）若為交易日且今日 tick 已有資料，否則退回最近有收盤的交易日 — 見 Task 153）。回傳恆為「真實成交 tick 原始序列（升冪、不含未來 padding）」；前端 `StockAnalysisDialog.vue`「當日」模式再以該市場交易時段（鏡射 MarketZones）建「開盤→收盤」每分鐘網格對齊、未來留 null、股價線 connectNulls，使 X 軸延伸到收盤（與指數當日圖 Task 96 同視覺行為，Task 157）
 POST   /api/market-data/prices/refresh                         # 刷新所有持股現價
 GET    /api/market-data/market-status                          # 開盤狀態（台股/美股）
 GET    /api/market-data/holidays?year=2026                     # 台股與美股假日清單

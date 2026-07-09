@@ -3874,3 +3874,20 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 156.5 補救今日資料：用 scan 到的精確 key `DEL` 全部今日台股桶 + 不帶 date 的 `/internal/intraday-ticks` cold-start 重抓（FinMind 400→Yahoo fallback，Yahoo 現已完整）；驗證 18 檔台股（0050/2330/00878…）今日桶末端皆到 `13:30`（多數 54 根，債券 ETF 較稀疏但同樣到 13:30）。
 - [ ] 156.6 手動驗證（瀏覽器）：0050「當日」畫到 13:30。
 - [ ] 156.7 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）。
+
+### Task 157: 股票分析「當日」X 軸固定延伸到收盤時間（非現在時間）（Requirement 13）
+
+對應 Requirements: Requirement 13（[requirements.md:247](spec/requirements.md)）
+
+#### 問題
+
+股票分析 →「當日」走勢圖的 X 時間軸只到「最後一筆 tick（＝現在時間）」，而非「開盤→收盤」。因前端 `StockAnalysisDialog.vue` 當日模式的 category 軸 `data` 直接由實際 ticks 的 `HH:mm` 組成（`dates = ticks.map(...)`），盤中只累積到現在故軸就停在現在（例 VOO 09:36 開盤沒多久，軸只到 09:36，右側大片本應到 16:00 的時段消失）。月線/季線/年線/成本/KD 水平線也用 `ticks.map` 等長填充，故一併只畫到現在。指數當日圖（Task 96）早已「X 軸延伸到收盤、未來留 null」，股票分析未比照。
+
+#### 修正
+
+- [x] 157.1 `StockAnalysisDialog.vue`：新增 module 級 `sessionHours(market)`（美股 `['09:30','16:00']`、英股 `['08:00','16:30']`、其餘台股 `['09:00','13:30']`，鏡射後端 `MarketZones`）。當日分支改以交易時段建「開盤→收盤」每分鐘 `dates` 網格；真實 tick 依 `HH:mm` 落格（`substring(11,16)`、同分鐘後到覆蓋、邊界外夾端點），未到時段 `prices` 留 `null`。MA/成本/KD 水平線改用 `dates.map(() => v)`（整段網格常數）畫到收盤。股價 series 加 `connectNulls: intraday` 讓稀疏 tick 連續。當日 xAxis[1] `axisLabel.interval` 只在 `:00`/`:30` 顯示（避免整段分鐘標籤過密）。
+- [x] 157.2 `StockAnalysisDialog.vue`：新增 `lastNonNull(arr)`；legend「股價」值與成本線 endLabel 漲跌配色改取 `lastNonNull(prices)`（網格末格恆為未來 `null`，直接取末格會使盤中 legend 股價空白、成本漲跌色反轉）。日線模式 `lastNonNull` == 末格，行為不變。
+- [x] 157.3 spec：`requirements.md` Requirement 13 新增「當日 X 軸延伸到收盤」驗收條件；`design.md` intraday-ticks 端點註記「原始 tick 序列、前端建網格」；本 Task。
+- [x] 157.4 Docker：重 build frontend + recreate；驗證運行 bundle（`StockAnalysisDialog-DHyaPL0m.js`）含交易時段字串（`09:30`/`16:30`/`13:30`）與 `connectNulls`（函式名 minify）。frontend 容器 recreate 後 `curl -I http://localhost/` → 200。
+- [ ] 157.5 手動驗證（瀏覽器）：VOO（美股）開「當日」，X 軸自 09:30 延伸到 16:00，股價線只到最新一筆、右側留白，MA/成本/KD 水平線畫到 16:00；台股 0050 軸到 13:30、英股到 16:30；legend 股價與盤中相符。
+- [ ] 157.6 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）。
