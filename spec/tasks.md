@@ -3891,3 +3891,26 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 157.4 Docker：重 build frontend + recreate；驗證運行 bundle（`StockAnalysisDialog-DHyaPL0m.js`）含交易時段字串（`09:30`/`16:30`/`13:30`）與 `connectNulls`（函式名 minify）。frontend 容器 recreate 後 `curl -I http://localhost/` → 200。
 - [ ] 157.5 手動驗證（瀏覽器）：VOO（美股）開「當日」，X 軸自 09:30 延伸到 16:00，股價線只到最新一筆、右側留白，MA/成本/KD 水平線畫到 16:00；台股 0050 軸到 13:30、英股到 16:30；legend 股價與盤中相符。
 - [ ] 157.6 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）。
+
+### Task 158: 股票分析「當日」顯示昨收與今日漲跌（Requirement 13）
+
+對應 Requirements: Requirement 13（[requirements.md:249](spec/requirements.md)）
+
+#### 需求
+
+「當日」分時走勢圖上方要顯示「昨收」價格與「今日漲跌」（金額 + %），比照券商看盤慣例，讓使用者一眼判讀當日強弱。其他期間（日線）不顯示。
+
+#### 設計決策
+
+- **昨收來源＝日線 `history`，非 Redis `LivePrice.previousClose`**：對話框「當日」已載入完整日線 `history`（`/api/bff/stock-analysis/history/stock` → `stock_price_history` 收盤）。昨收取「該分時交易日之前最後一筆日線收盤」——與 Dashboard／管理資產「當日漲跌」同一 business API、同一「vs 前一交易日**原始**收盤」口徑。刻意不採 `LivePrice.previousClose`：TWSE `y` 於除息日回的是**除息參考價**而非原始昨收，會與全站慣例不一致。
+- **今日漲跌由前端以畫面現價自算**：現價取 legend「股價」的同一值（`lastNonNull(prices)`＝最後一筆非 `null` 分時成交），漲跌 =（現價 − 昨收）、漲跌% =（現價 − 昨收）÷ 昨收 × 100。以顯示中的現價自算（非另抓 live）確保「股價 − 昨收 = 今日漲跌」三值一致，不會出現「現價與 live change 對不上」的矛盾。
+- **不改 tick API 契約**：純前端 view 變更；`List<IntradayTick>{time,price}` 不新增欄位、後端三服務不動。
+
+#### 修正
+
+- [x] 158.1 `StockAnalysisDialog.vue`：新增 computed `intradayQuote`（僅 `isIntraday` 且有 tick 時回值）：現價取最後一筆非 null tick 成交、當日交易日取首筆 tick `time` 前 10 碼、昨收取 `history` 中 `tradingDate < sessionDate` 的最後一筆 `closePrice`；回 `{ price, previousClose, change, changePct }`，無前一交易日收盤時 `previousClose/change/changePct` 為 `null`（優雅降級）。
+- [x] 158.2 `StockAnalysisDialog.vue`：template 在 `analysis-meta` 與圖表之間新增「當日」專屬資訊列（`v-if="isIntraday && intradayQuote"`），顯示「昨收 {值}」與「今日漲跌 {▲/▼金額 (±%)}」；漲跌配色台股慣例（漲紅 `#dc2626`／跌綠 `#16a34a`／平灰 `#94a3b8`）；昨收缺值顯示「—」、漲跌整段隱藏。數值格式沿用 legend 的 `toLocaleString('en-US', 2 位小數)`。
+- [x] 158.3 spec：`requirements.md` Requirement 13 新增本 AC；`design.md` intraday-ticks 端點註記「昨收/漲跌前端從 history 同源推導、不改契約」；本 Task。
+- [x] 158.4 Docker：重 build frontend（vite build ✓）+ recreate `asset-frontend`；`curl -I http://localhost/` → 200；運行 bundle `StockAnalysisDialog-*.js` 含 `今日漲跌`／`intraday-quote`。以真實資料驗證邏輯：2330 當日 sessionDate=2026-07-09、現價 2415、history 末筆為今日列（close 2415）→ `tradingDate < sessionDate` 正確跳過今日、取 2026-07-08 收盤 2465 為昨收、漲跌 −50.00（−2.03%，跌綠）。
+- [ ] 158.5 手動驗證（瀏覽器）：台積電 2330 開「當日」，上方顯示昨收與今日漲跌，現價 − 昨收 = 漲跌金額、色彩正確（漲紅跌綠）；切到「1個月」等日線期間資訊列隱藏。
+- [ ] 158.6 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）。
