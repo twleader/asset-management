@@ -42,6 +42,17 @@
               <span style="color:#64748b;font-size:12px;margin-left:8px">滾輪縮放 / 拖曳平移</span>
             </div>
           </div>
+          <div v-if="isIntraday && intradayQuote" class="intraday-quote">
+            <span class="iq-label">昨收</span>
+            <span class="iq-val">{{ fmtQuote(intradayQuote.previousClose) }}</span>
+            <template v-if="intradayQuote.change != null">
+              <span class="iq-label">今日漲跌</span>
+              <span class="iq-val" :style="{ color: quoteColor(intradayQuote.change) }">
+                {{ intradayQuote.change > 0 ? '▲' : intradayQuote.change < 0 ? '▼' : '' }}{{ fmtQuote(Math.abs(intradayQuote.change)) }}
+                （{{ intradayQuote.changePct > 0 ? '+' : intradayQuote.changePct < 0 ? '-' : '' }}{{ Math.abs(intradayQuote.changePct).toFixed(2) }}%）
+              </span>
+            </template>
+          </div>
           <div v-if="isIntraday && intradayLoading" class="analysis-loading" style="height:580px">
             <el-icon class="is-loading" size="36"><Loading /></el-icon>
             <div>載入當日分時資料中…</div>
@@ -211,6 +222,40 @@ const latestTradingDate = computed(() => {
   if (!h || !h.length) return null
   return h[h.length - 1]?.tradingDate ?? null
 })
+
+// 「當日」報價摘要：昨收、現價、今日漲跌（僅當日模式且已有分時 tick 時回值）。
+// 昨收＝該分時交易日「前一交易日」的日線收盤，取自已載入的 history（＝stock_price_history 收盤，
+// 與 Dashboard／管理資產「當日漲跌」同一 business API、同一「vs 前一交易日原始收盤」口徑；
+// 刻意不採 Redis LivePrice.previousClose，因 TWSE `y` 於除息日為除息參考價、與全站慣例不一致）。
+// 現價＝最後一筆非 null 分時成交（＝ legend「股價」的 lastNonNull）。今日漲跌由畫面現價自算，
+// 確保「股價 − 昨收 = 今日漲跌」三值一致（不另抓 live，免與現價對不上）。
+const intradayQuote = computed(() => {
+  if (!isIntraday.value) return null
+  const ticks = intradayTicks.value
+  if (!ticks.length) return null
+  let price = null
+  for (let i = ticks.length - 1; i >= 0; i--) {
+    if (ticks[i]?.price != null) { price = Number(ticks[i].price); break }
+  }
+  if (price == null) return null
+  const sessionDate = String(ticks[0]?.time || '').substring(0, 10)  // 分時序列所屬交易日（YYYY-MM-DD）
+  // 昨收：history（升冪）中 tradingDate 嚴格早於當日交易日的最後一筆收盤
+  let previousClose = null
+  const hist = history.value
+  for (let i = hist.length - 1; i >= 0; i--) {
+    const d = hist[i]?.tradingDate
+    if (d && d < sessionDate && hist[i]?.closePrice != null) {
+      previousClose = Number(hist[i].closePrice); break
+    }
+  }
+  if (!(previousClose > 0)) return { price, previousClose: null, change: null, changePct: null }
+  const change = price - previousClose
+  return { price, previousClose, change, changePct: (change / previousClose) * 100 }
+})
+// 漲跌配色（台股慣例：漲紅、跌綠、平灰），與 markPoint／Dashboard 同義同色
+const quoteColor = v => (v == null ? '#94a3b8' : v > 0 ? '#dc2626' : v < 0 ? '#16a34a' : '#94a3b8')
+// 千分位 2 位小數（與 legend fmt 同口徑）；null → 「—」
+const fmtQuote = v => (v == null ? '—' : Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
 
 const rangeOptions = [
   { label: '當日',   months: 0 },
@@ -728,6 +773,10 @@ const chartOption = computed(() => {
 /* 右邊保留的空間要對齊 echarts grid.right (96px)，這樣 period selector / 資料截止 才會
    和 chart 內容（endLabels 落點）的右緣切齊，不會越界到圖外。 */
 .analysis-meta    { display:flex;align-items:center;margin-bottom:8px;padding-right:96px }
+/* 「當日」昨收 / 今日漲跌資訊列（僅當日期間顯示） */
+.intraday-quote   { display:flex;align-items:baseline;gap:8px;margin:0 0 4px 2px;font-size:13px;line-height:1.4 }
+.intraday-quote .iq-label { color:#64748b }
+.intraday-quote .iq-val   { color:#1e293b;font-weight:700;margin-right:8px }
 .tabs-wrap        { position: relative; }
 .tabs-trailing    {
   position: absolute;
