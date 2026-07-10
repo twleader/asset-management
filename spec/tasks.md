@@ -3939,3 +3939,48 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 159.5 Docker：從本 worktree `--no-cache` 重 build `business-services` + recreate `asset-business-services`（(healthy)）；容器內 unzip `/app/app.jar` 取 `AlertChartRenderer.class` = 28606 bytes（與本地編譯逐位元組相同）、grep `renderIntradayPng`=2，確認部署非 stale。
 - [x] 159.6 手動驗證：`curl /api/watch-stocks/intraday.png` 回 200 PNG——2330（16KB，dev 資料當日平盤 2415）、英股 CSPX（25KB，倫敦盤中真實起伏）肉眼確認分時線＋昨收灰虛線＋紅漲色＋X 軸延伸到收盤（線止於最新 tick 08:54、軸到 16:30）。實際寄信：以 owner 1 租戶 header 觸發美股補發（只寄 `shi.chihung@gmail.com` 一人），`EmailService` log「附圖 6 張」＝3 檔 ×（年圖＋當日圖），零 DB 變更。
 - [x] 159.7 commit + 兩段式 merge（feature `a90c61f` → main `b0912eb`，`--no-ff`，已 push origin）。
+
+---
+
+### Task 160：台股颱風假 / 臨時休市自動偵測（DGPA 停班公告 → 交易日曆一體休市）
+
+對應 Requirements: Requirement 7（[requirements.md:100](spec/requirements.md)）
+
+#### 需求
+
+颱風假等臨時停班停課不在 TWSE 年度 holidaySchedule 中，導致台股實際休市當日 market-status 仍顯示「開盤中」、抓價 / 收盤排程照跑。須每早偵測「臺北市是否停止上班」（證交所颱風休市認定基準），命中即把台股交易日曆改為休市。
+
+#### 設計決策
+
+- **權威來源＝DGPA 停班公告**（非新聞關鍵字）：`https://www.dgpa.gov.tw/typh/daily/nds.html`，解析臺北市「今天」狀態；僅晚間 / 收盤（13:30）後起停班不算休市（未涵蓋 09:00–13:30 交易時段）。
+- **單一注入點**＝`MarketDataFetchService.getTwHolidays` read-time union `tw_market_closure`：台股所有下游（market-status / 抓價 / 收盤 / 警示 / 備份 / 07:30 分析 / 交易日曆）與國定假日同一 cascade 一體 skip，**前端零改動**（`TradingCalendarView` 既有 `day.twHoliday` + market-status）。
+- **持久化**至 `tw_market_closure`（全域參考、無 owner）：臨時休市成為可回溯的交易日曆一部分（TWSE 年度表永遠不會補上）。
+- **兩服務快取傳播**：ext 端 read-time union（即時）；business 端 per-year 快取於開盤前時窗 evict。
+
+#### 實作
+
+- [ ] 160.1 Liquibase `v1.46.0-tw-market-closure.sql`：建 `tw_market_closure(closure_date PK, reason, source, raw_status, detected_at)`；master include。
+- [ ] 160.2 ext-materials `TwMarketClosureQuery`（JdbcTemplate）：`findAll()` / `upsert(date, reason, source, raw)`（ON CONFLICT 覆蓋）。
+- [ ] 160.3 ext-materials `TwTyphoonClosureService`：DGPA 爬取 + 臺北市「今天」解析（`parseTaipeiTodayClause` / `closedForTrading`）+ upsert + in-memory 快取（`closuresForYear`）+ `ApplicationReadyEvent` 載入。
+- [ ] 160.4 ext-materials `TwClosurePoller`：`0 0/15 5-8 * * MON-FRI`（Asia/Taipei）+ 開機 self-heal。
+- [ ] 160.5 ext-materials `MarketDataFetchService.getTwHolidays`：union `closuresForYear`（read-time 合併、不改 TWSE 快取）；`InternalPriceController` 加 `POST /internal/tw-closure/detect`。
+- [ ] 160.6 business-services `MarketDataService.getTwHolidays`：當年度改採短 TTL（10 分鐘）快取 `twHolidayCurrentYearCache`（過去 / 未來年度仍永久快取），確保同日任何時刻偵測到的休市於 ≤10 分鐘傳播；`fetchTwHolidaysFromExt` 回空表時不寫入快取（不毒化）。
+- [ ] 160.7 spec：requirements.md Requirement 7 新增 AC、design.md 新增本設計、本 Task。
+- [ ] 160.8 Docker：`--no-cache` 重 build ext-materials + business，recreate；驗證 `tw_market_closure` 建表、`/internal/tw-closure/detect` 偵測、market-status `twMarketOpen=false`、交易日曆顯示颱風假。
+- [ ] 160.9 commit + 兩段式 merge。
+
+#### 解析規則單元驗證（`closedForTrading`）
+
+- 「今天停止上班、停止上課。」→ true（休市）
+- 「今天照常上班、照常上課。」→ false
+- 「今天晚上06:00起停止上班、停止上課。」→ false（僅晚間，不影響 09:00–13:30）
+- 「今天晚間停止上班、停止上課。」→ false（DGPA 作業辦法正式用詞「晚間」，須與「晚上」並列排除）
+- 「今天下午02:00起停止上班。」→ false（14:00 ≥ 13:30，收盤後）
+- 「今天上午停止上班，下午照常上班。」→ true（上午覆蓋交易時段）
+
+#### 對抗式 code review 修正（Task 160 部署後）
+
+多 agent 審查發現並修正 3 類缺陷：
+- [ ] 160.10（A）business 端 `twHolidayCache` 原僅早晨時窗 evict、無 TTL → 08:45 後（盤中部署 self-heal / 手動 detect / 08:45 tick race）偵測到的休市整日無法傳播。改為當年度短 TTL（見 160.6）。
+- [ ] 160.11（B）`fetchTwHolidaysFromExt` 逾時回 `Map.of()` 被 `computeIfAbsent` 當有效值快取整年 → 一次瞬斷毒化整年假日（連國定假日一起漏）。**當年度與過去/未來年度兩條路徑**皆改為空表不寫快取、沿用前值（第二輪審查補上非當年度路徑的一致性）。
+- [ ] 160.12（C）`closedForTrading` 排除清單漏 DGPA 正式用詞「晚間」→ 純晚間停班誤判為全日休市（false positive）。補上「晚間」。

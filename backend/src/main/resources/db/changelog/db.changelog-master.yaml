@@ -179,3 +179,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/v1.45.0-news-headline.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.46.0-tw-market-closure.sql
+      relativeToChangelogFile: false

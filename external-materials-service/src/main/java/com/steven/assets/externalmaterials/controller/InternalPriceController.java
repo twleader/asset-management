@@ -47,6 +47,7 @@ public class InternalPriceController {
     private final com.steven.assets.externalmaterials.service.IntradayTickStore tickStore;
     private final com.steven.assets.externalmaterials.service.IntradayTickRefresher tickRefresher;
     private final com.steven.assets.externalmaterials.service.StockSourceQuery stockSource;
+    private final com.steven.assets.externalmaterials.service.TwTyphoonClosureService typhoonClosure;
 
     /**
      * 同步抓所有持股報價、寫 Redis 後回傳統計。
@@ -203,10 +204,17 @@ public class InternalPriceController {
         return marketData.getDividendHistory(code, market, years);
     }
 
-    /** TWSE 假日表（依年份快取）。 */
+    /** TWSE 假日表（依年份快取，已 union 颱風假 / 臨時休市）。 */
     @GetMapping("/tw-holidays")
     public Map<String, String> twHolidays(@RequestParam int year) {
         return marketData.getTwHolidays(year);
+    }
+
+    /** 手動 / 驗證即時偵測台股颱風假（DGPA 停班公告），命中即寫入 tw_market_closure。回傳今日是否休市。 */
+    @PostMapping("/tw-closure/detect")
+    public Map<String, Object> detectTwClosure() {
+        boolean closed = typhoonClosure.detectAndPersistToday();
+        return Map.of("closedToday", closed);
     }
 
     /** 股票名稱查詢（台股 FinMind / 美股 Yahoo / 英股 Yahoo `.L`）。 */
