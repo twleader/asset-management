@@ -57,6 +57,8 @@ public class MarketDataFetchService {
     private final ObjectMapper mapper = new ObjectMapper();
     private final String finmindToken;
     private final StockSourceQuery store;
+    // 颱風假 / 台股臨時休市 override（Task 160）：getTwHolidays 於回傳前 union 進台股假日唯一入口。
+    private final TwTyphoonClosureService typhoonClosure;
 
     private volatile String yahooCrumb = null;
     private volatile long yahooCrumbBlockedUntil = 0L;
@@ -79,8 +81,10 @@ public class MarketDataFetchService {
     private final Map<Integer, Map<String, String>> twHolidayCache = new ConcurrentHashMap<>();
 
     public MarketDataFetchService(StockSourceQuery store,
+                                  TwTyphoonClosureService typhoonClosure,
                                   @Value("${finmind.token:${FINMIND_TOKEN:}}") String finmindToken) {
         this.store = store;
+        this.typhoonClosure = typhoonClosure;
         this.finmindToken = finmindToken == null ? "" : finmindToken.trim();
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
@@ -790,7 +794,13 @@ public class MarketDataFetchService {
     // ─── TWSE 假日 ─────────────────────────────────────────────────────────────
 
     public Map<String, String> getTwHolidays(int year) {
-        return twHolidayCache.computeIfAbsent(year, this::fetchTwHolidaysFromTwse);
+        Map<String, String> base = twHolidayCache.computeIfAbsent(year, this::fetchTwHolidaysFromTwse);
+        // union 颱風假 / 臨時休市（不在 TWSE 年度 holidaySchedule 中）：read-time 合併、不污染 TWSE per-year 快取。
+        Map<String, String> closures = typhoonClosure.closuresForYear(year);
+        if (closures.isEmpty()) return base;
+        Map<String, String> merged = new LinkedHashMap<>(base);
+        merged.putAll(closures);
+        return merged;
     }
 
     private Map<String, String> fetchTwHolidaysFromTwse(int year) {

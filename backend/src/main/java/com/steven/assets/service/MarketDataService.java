@@ -166,10 +166,38 @@ public class MarketDataService {
 
     // ─── 假日 / 交易日（TWSE 從 ext-materials proxy；NYSE 純計算） ─────────────
 
+    // 過去 / 未來年度：固定假日、無臨時休市傳播需求 → 永久快取。
     private final Map<Integer, Map<String, String>> twHolidayCache = new ConcurrentHashMap<>();
+    // 當年度：颱風假 / 臨時休市可能於「任何時刻」由 ext-materials 偵測寫入（早盤排程 / 開機 self-heal /
+    // 手動 detect），故不能永久快取；改以短 TTL，確保同日新偵測到的休市在 TTL 內傳播至 business 側
+    // （market-status / 07:30 分析 / 警示 / 備份 / 交易日曆），不受限於任何固定時窗。
+    private record TimedHolidays(Map<String, String> value, long expiresAt) {}
+    private final Map<Integer, TimedHolidays> twHolidayCurrentYearCache = new ConcurrentHashMap<>();
+    private static final long CURRENT_YEAR_TTL_MS = 10 * 60 * 1000L;
 
     public Map<String, String> getTwHolidays(int year) {
-        return twHolidayCache.computeIfAbsent(year, this::fetchTwHolidaysFromExt);
+        int currentYear = ZonedDateTime.now(MarketZones.TW_ZONE).getYear();
+        if (year != currentYear) {
+            Map<String, String> cached = twHolidayCache.get(year);
+            if (cached != null) return cached;
+            // 同樣不以空表毒化永久快取：ext 一次瞬斷（如切到他年度日曆時）不得讓該年度整年假日
+            // 被鎖成零筆（連國定假日一起漏）；只快取成功值，失敗此次降級、下次重抓。
+            Map<String, String> fresh = fetchTwHolidaysFromExt(year);
+            if (!fresh.isEmpty()) twHolidayCache.put(year, fresh);
+            return fresh;
+        }
+        long now = System.currentTimeMillis();
+        TimedHolidays cached = twHolidayCurrentYearCache.get(year);
+        if (cached != null && now < cached.expiresAt() && !cached.value().isEmpty()) {
+            return cached.value();
+        }
+        Map<String, String> fresh = fetchTwHolidaysFromExt(year);
+        // 抓取失敗（空 map）不得毒化快取：沿用前一次成功值（若有），僅此次降級回空。
+        if (fresh.isEmpty()) {
+            return cached != null ? cached.value() : fresh;
+        }
+        twHolidayCurrentYearCache.put(year, new TimedHolidays(fresh, now + CURRENT_YEAR_TTL_MS));
+        return fresh;
     }
 
     private Map<String, String> fetchTwHolidaysFromExt(int year) {
