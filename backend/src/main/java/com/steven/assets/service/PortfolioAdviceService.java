@@ -12,11 +12,13 @@ import com.anthropic.models.messages.WebSearchTool20260209;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.steven.assets.dto.CurrentAllocationDto;
 import com.steven.assets.dto.InvestmentProfileDto;
+import com.steven.assets.dto.InvestmentProfileInput;
 import com.steven.assets.dto.PortfolioAdviceResult;
 import com.steven.assets.dto.PortfolioAdviceSettingsDto;
 import com.steven.assets.model.AssetSnapshot;
 import com.steven.assets.model.BankDeposit;
 import com.steven.assets.model.FundHolding;
+import com.steven.assets.model.InvestmentPlannedExpense;
 import com.steven.assets.model.InvestmentProfile;
 import com.steven.assets.model.PortfolioAdvice;
 import com.steven.assets.model.PortfolioAdviceSetting;
@@ -24,6 +26,7 @@ import com.steven.assets.model.StockHolding;
 import com.steven.assets.repository.AssetSnapshotRepository;
 import com.steven.assets.repository.BankDepositRepository;
 import com.steven.assets.repository.FundHoldingRepository;
+import com.steven.assets.repository.InvestmentPlannedExpenseRepository;
 import com.steven.assets.repository.InvestmentProfileRepository;
 import com.steven.assets.repository.PortfolioAdviceRepository;
 import com.steven.assets.repository.PortfolioAdviceSettingRepository;
@@ -35,12 +38,15 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.MathContext;
 import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.YearMonth;
+import java.time.LocalDate;
+import java.time.Period;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -99,6 +105,9 @@ public class PortfolioAdviceService {
 
     private static final int DEFAULT_WEB_SEARCH = 4;
 
+    /** 假設年通膨率預設值（%）：使用者未填時，大筆花費「今日幣值 → 未來名目值」以此換算（台灣長期 CPI 目標約 2%）。 */
+    private static final BigDecimal DEFAULT_INFLATION_RATE = new BigDecimal("2");
+
     // ===== 表單詞彙白名單（理財目標／風險／獲利預期；本頁表單選項，非跨域分類）=====
 
     private static final List<InvestmentProfileDto.Option> GOAL_OPTIONS = List.of(
@@ -125,6 +134,7 @@ public class PortfolioAdviceService {
     );
 
     private final InvestmentProfileRepository profileRepo;
+    private final InvestmentPlannedExpenseRepository expenseRepo;
     private final PortfolioAdviceRepository adviceRepo;
     private final PortfolioAdviceSettingRepository settingRepo;
     private final AssetSnapshotRepository snapshotRepo;
@@ -154,35 +164,68 @@ public class PortfolioAdviceService {
 
     // ===== Profile（理財條件）=====
 
-    /** 目前使用者的理財條件（含各欄位可選清單供表單 render）；無則回空 profile（僅帶清單）。 */
+    /** 目前使用者的理財條件（含各欄位可選清單與大筆花費清單供表單 render）；無則回空 profile（僅帶清單）。 */
     public InvestmentProfileDto getProfile() {
         Long ownerId = tenantGuard.requireCurrentUserId();
         InvestmentProfile p = ownerId == null ? null : profileRepo.findByOwnerUserId(ownerId).orElse(null);
-        return InvestmentProfileDto.from(p, GOAL_OPTIONS, RISK_OPTIONS, RETURN_OPTIONS);
+        List<InvestmentPlannedExpense> expenses = ownerId == null
+                ? List.of() : expenseRepo.findByOwnerUserIdOrderByExpenseDate(ownerId);
+        return InvestmentProfileDto.from(p, expenses, GOAL_OPTIONS, RISK_OPTIONS, RETURN_OPTIONS);
     }
 
-    /** upsert 目前使用者的理財條件（白名單驗證；無效 goals 略過），回更新後 DTO。 */
-    public InvestmentProfileDto saveProfile(Integer age, Integer horizonYears, BigDecimal monthlyInvestment,
-                                            YearMonth retirementDate,
-                                            List<String> goals, String riskTolerance, String expectedReturn) {
+    /**
+     * upsert 目前使用者的理財條件（白名單驗證；無效 goals 略過），回更新後 DTO。
+     * 大筆花費清單以「先刪 owner 全部再插入提交清單」replace（清單小、簡單穩健）；整段以 @Transactional 保原子性。
+     */
+    @Transactional
+    public InvestmentProfileDto saveProfile(InvestmentProfileInput in) {
         Long ownerId = tenantGuard.requireCurrentUserId();
         if (ownerId == null) {
             throw new IllegalStateException("無使用者情境，無法儲存理財條件");
         }
-        validateRisk(riskTolerance);
-        validateReturn(expectedReturn);
+        validateRisk(in.riskTolerance());
+        validateReturn(in.expectedAnnualReturn());
         InvestmentProfile p = profileRepo.findByOwnerUserId(ownerId).orElseGet(InvestmentProfile::new);
         p.setOwnerUserId(ownerId);
-        p.setAge(age);
-        p.setInvestmentHorizonYears(horizonYears);
-        p.setMonthlyInvestment(monthlyInvestment);
-        p.setRetirementDate(retirementDate);
-        p.setGoals(joinGoals(goals));
-        p.setRiskTolerance(blankToNull(riskTolerance));
-        p.setExpectedAnnualReturn(blankToNull(expectedReturn));
+        p.setBirthDate(in.birthDate());
+        p.setInvestmentHorizonYears(in.investmentHorizonYears());
+        p.setMonthlyInvestment(in.monthlyInvestment());
+        p.setRetirementDate(in.retirementDate());
+        p.setLaborInsuranceMonthly(in.laborInsuranceMonthly());
+        p.setLaborInsuranceStartDate(in.laborInsuranceStartDate());
+        p.setLaborPensionLumpSum(in.laborPensionLumpSum());
+        p.setLaborPensionClaimDate(in.laborPensionClaimDate());
+        p.setAssumedAnnualInflationRate(in.assumedAnnualInflationRate());
+        p.setGoals(joinGoals(in.goals()));
+        p.setRiskTolerance(blankToNull(in.riskTolerance()));
+        p.setExpectedAnnualReturn(blankToNull(in.expectedAnnualReturn()));
         p.setUpdatedAt(Instant.now());
         InvestmentProfile saved = profileRepo.save(p);
-        return InvestmentProfileDto.from(saved, GOAL_OPTIONS, RISK_OPTIONS, RETURN_OPTIONS);
+
+        List<InvestmentPlannedExpense> expenses = replaceExpenses(ownerId, in.plannedExpenses());
+        return InvestmentProfileDto.from(saved, expenses, GOAL_OPTIONS, RISK_OPTIONS, RETURN_OPTIONS);
+    }
+
+    /** 以提交清單覆寫某使用者的大筆花費（先刪全部再插入有效列：需有日期與金額）。回排序後結果。 */
+    private List<InvestmentPlannedExpense> replaceExpenses(Long ownerId, List<InvestmentProfileInput.PlannedExpenseInput> items) {
+        expenseRepo.deleteByOwnerUserId(ownerId);
+        if (items == null || items.isEmpty()) {
+            return List.of();
+        }
+        Instant now = Instant.now();
+        for (InvestmentProfileInput.PlannedExpenseInput it : items) {
+            if (it == null || it.expenseDate() == null || it.amount() == null) {
+                continue; // 略過不完整列（缺日期或金額）
+            }
+            InvestmentPlannedExpense e = new InvestmentPlannedExpense();
+            e.setOwnerUserId(ownerId);
+            e.setExpenseDate(it.expenseDate());
+            e.setName(blankToNull(it.name()));
+            e.setAmount(it.amount());
+            e.setUpdatedAt(now);
+            expenseRepo.save(e);
+        }
+        return expenseRepo.findByOwnerUserIdOrderByExpenseDate(ownerId);
     }
 
     // ===== 現況配置 =====
@@ -327,16 +370,15 @@ public class PortfolioAdviceService {
      * 背景執行緒只做 Claude 呼叫並以 {@code adviceId} by-id 更新（不觸及 owner-scoped 查詢），
      * 避開背景執行緒 {@code TenantFilterAspect} 不啟用的坑。不拋出。
      */
-    public PortfolioAdvice generate(Integer age, Integer horizonYears, BigDecimal monthlyInvestment,
-                                    YearMonth retirementDate,
-                                    List<String> goals, String riskTolerance, String expectedReturn) {
+    public PortfolioAdvice generate(InvestmentProfileInput in) {
         Long ownerId = tenantGuard.requireCurrentUserId();
         if (ownerId == null) {
             throw new IllegalStateException("無使用者情境，無法產生資產配置建議");
         }
         // 先儲存條件（記住免重填、且作為本次建議的條件快照來源）
-        saveProfile(age, horizonYears, monthlyInvestment, retirementDate, goals, riskTolerance, expectedReturn);
+        saveProfile(in);
         InvestmentProfile profile = profileRepo.findByOwnerUserId(ownerId).orElseThrow();
+        List<InvestmentPlannedExpense> expenses = expenseRepo.findByOwnerUserIdOrderByExpenseDate(ownerId);
 
         String model = resolveModel();
         int webSearchMaxUses = resolveWebSearchMaxUses();
@@ -349,8 +391,8 @@ public class PortfolioAdviceService {
         row.setOwnerUserId(ownerId);
         row.setCreatedAt(Instant.now());
         row.setModel(truncate(model, 64));
-        // 條件快照
-        row.setAge(profile.getAge());
+        // 條件快照（age 由生日衍生後凍結為歷史值）
+        row.setAge(deriveAge(profile.getBirthDate()));
         row.setInvestmentHorizonYears(profile.getInvestmentHorizonYears());
         row.setMonthlyInvestment(profile.getMonthlyInvestment());
         row.setGoals(profile.getGoals());
@@ -373,7 +415,7 @@ public class PortfolioAdviceService {
 
         // 在 request 執行緒組 prompt（owner filter 生效 → 取到正確的自己快照與持有明細）
         String systemPrompt = buildSystemPrompt(webSearchOn);
-        String userPrompt = buildUserPrompt(profile, snapshot, webSearchOn);
+        String userPrompt = buildUserPrompt(profile, expenses, snapshot, webSearchOn);
 
         row.setStatus(PortfolioAdvice.STATUS_PROCESSING);
         PortfolioAdvice saved = save(row);   // 立即落 PROCESSING，前端據以顯示「產生中」並輪詢
@@ -469,6 +511,7 @@ public class PortfolioAdviceService {
             重要原則：
             1. 建議必須同時貼合使用者的年齡、投資年限、每月可投入金額、理財目標、風險承受度與獲利預期——風險承受度與投資年限是決定股債／現金比重的關鍵。
             1a. 退休兩階段：「每月可投入」僅在退休前（累積期）有效；退休後（退休日期之後）薪水停止、定期投入為 0，只能靠既有資產與其報酬支應。估算未來可累積金額時，每月投入只計算累積期的年數，切勿假設退休後仍持續投入。越接近或進入退休，配置應越保守（提高現金／固定收益、降低高波動部位）；退休後不可用「之後還會定期投入」來合理化承受更高風險或攤平短期虧損。若退休日期落在投資年限終點之後（無退休後階段），才可視為全期皆在累積。
+            1b. 退休後現金流與未來大筆支出：若使用者提供「勞保年金月領／勞退一次領」，視為退休後的固定收入來源，可部分抵減退休後的資產提領壓力、據此評估既有資產能否支應退休生活（勞保勞退金額為未來實際給付，勿再做通膨調整）。若使用者提供「特定日期大筆花費」（如購車、購屋），金額已換算為該日期的未來名目值——這是未來一次性現金流出，配置上需為其預留足夠流動性、並在越接近該支出日時越保守（避免屆時被迫在低點變現），於 warnings 明確提醒。
             2. 先評估使用者「目前」的配置與風險（過度集中、現金過多／過少、與其風險屬性是否相稱），再提出「目標配置比例」與具體「調整動作」。targetAllocation 各類別的 targetPct 加總應約等於 100。
             %s
             4. 建議要具體且務實（可含定期定額、再平衡、緊急預備金、分散標的等），但**不得**推薦個股買賣時點或保證報酬。
@@ -496,10 +539,12 @@ public class PortfolioAdviceService {
             """.formatted(marketPrinciple);
     }
 
-    private String buildUserPrompt(InvestmentProfile p, AssetSnapshot snapshot, boolean webSearchEnabled) {
+    private String buildUserPrompt(InvestmentProfile p, List<InvestmentPlannedExpense> expenses,
+                                   AssetSnapshot snapshot, boolean webSearchEnabled) {
         StringBuilder sb = new StringBuilder();
         sb.append("== 使用者理財條件 ==\n");
-        sb.append("目前年齡：").append(p.getAge() != null ? p.getAge() + " 歲" : "未提供").append("\n");
+        Integer age = deriveAge(p.getBirthDate());
+        sb.append("目前年齡：").append(age != null ? age + " 歲（生日 " + p.getBirthDate() + "）" : "未提供").append("\n");
         sb.append("預計投資年限：").append(p.getInvestmentHorizonYears() != null ? p.getInvestmentHorizonYears() + " 年" : "未提供").append("\n");
         RetirementSpan span = retirementSpan(p.getRetirementDate(), p.getInvestmentHorizonYears());
         sb.append("預計退休日期：").append(p.getRetirementDate() != null ? p.getRetirementDate().toString() : "未提供").append("\n");
@@ -517,7 +562,9 @@ public class PortfolioAdviceService {
         }
         sb.append("理財目標：").append(goalLabels(p.getGoals())).append("\n");
         sb.append("風險承受度：").append(labelOf(RISK_OPTIONS, p.getRiskTolerance())).append("\n");
-        sb.append("獲利預期：").append(labelOf(RETURN_OPTIONS, p.getExpectedAnnualReturn())).append("\n\n");
+        sb.append("獲利預期：").append(labelOf(RETURN_OPTIONS, p.getExpectedAnnualReturn())).append("\n");
+        appendRetirementCashFlow(sb, p, expenses);
+        sb.append("\n");
 
         if (snapshot == null) {
             sb.append("== 使用者目前資產 ==\n（尚無任何資產快照）——請針對其條件，給一般性的「起始配置」建議。\n\n");
@@ -605,11 +652,11 @@ public class PortfolioAdviceService {
      * 退休晚於投資終點時：accumulationYears 夾為投資年限、retirementYears = 0（無退休後階段）。
      * 退休已過（≤今天）：accumulationYears = 0（累積期已結束）。
      */
-    private RetirementSpan retirementSpan(YearMonth retirementDate, Integer horizonYears) {
+    private RetirementSpan retirementSpan(LocalDate retirementDate, Integer horizonYears) {
         if (retirementDate == null) {
             return new RetirementSpan(null, null);
         }
-        YearMonth now = YearMonth.now();
+        LocalDate now = LocalDate.now();
         long monthsToRetire = ChronoUnit.MONTHS.between(now, retirementDate);
         int accumulationYears = (int) Math.max(0, monthsToRetire / 12); // 整數除法即無條件捨去
         if (horizonYears == null) {
@@ -634,6 +681,74 @@ public class PortfolioAdviceService {
         return monthlyInvestment
                 .multiply(BigDecimal.valueOf(12L))
                 .multiply(BigDecimal.valueOf(accumulationYears));
+    }
+
+    // ===== 退休後現金流／未來大筆支出（衍生，不入庫）=====
+
+    /** 由生日推導目前年齡（整年數）；null 生日回 null，未來生日夾為 0。 */
+    private Integer deriveAge(LocalDate birthDate) {
+        if (birthDate == null) {
+            return null;
+        }
+        return Math.max(0, Period.between(birthDate, LocalDate.now()).getYears());
+    }
+
+    /** 假設年通膨率（%）；未填或負值回預設 2%（0% 表示使用者明示不計通膨，予以尊重）。 */
+    private BigDecimal resolveInflationRate(BigDecimal rate) {
+        return (rate == null || rate.signum() < 0) ? DEFAULT_INFLATION_RATE : rate;
+    }
+
+    /**
+     * 今日幣值 → 指定日期的未來名目值：{@code amount × (1 + rate%)^年數}，年數＝今天到該日期的天數 ÷ 365.25（可為小數）。
+     * amount／date 為 null 時原值回傳；過去日期（年數為負）factor &lt; 1（合理退化）。四捨五入到元。
+     */
+    private BigDecimal inflate(BigDecimal amount, BigDecimal ratePct, LocalDate date) {
+        if (amount == null || date == null) {
+            return amount;
+        }
+        double r = ratePct.doubleValue() / 100.0;
+        double years = ChronoUnit.DAYS.between(LocalDate.now(), date) / 365.25;
+        double factor = Math.pow(1.0 + r, years);
+        return amount.multiply(BigDecimal.valueOf(factor), MathContext.DECIMAL64).setScale(0, RoundingMode.HALF_UP);
+    }
+
+    /** 追加「退休後現金流／未來大筆支出」段：勞保月領／勞退一次領（照填、不調通膨）、大筆花費（今日幣值→未來名目值）。 */
+    private void appendRetirementCashFlow(StringBuilder sb, InvestmentProfile p, List<InvestmentPlannedExpense> expenses) {
+        boolean hasLaborInsurance = p.getLaborInsuranceMonthly() != null && p.getLaborInsuranceMonthly().signum() > 0;
+        boolean hasLaborPension = p.getLaborPensionLumpSum() != null && p.getLaborPensionLumpSum().signum() > 0;
+        boolean hasExpenses = expenses != null && !expenses.isEmpty();
+        if (!hasLaborInsurance && !hasLaborPension && !hasExpenses) {
+            return;
+        }
+        sb.append("退休後現金流與未來大筆支出：\n");
+        if (hasLaborInsurance) {
+            sb.append("  - 勞保年金：月領 ").append(money(p.getLaborInsuranceMonthly())).append(" 元");
+            if (p.getLaborInsuranceStartDate() != null) {
+                sb.append("（自 ").append(p.getLaborInsuranceStartDate()).append(" 起領）");
+            }
+            sb.append("（使用者填入之未來實際給付，未做通膨調整）\n");
+        }
+        if (hasLaborPension) {
+            sb.append("  - 勞退：一次領 ").append(money(p.getLaborPensionLumpSum())).append(" 元");
+            if (p.getLaborPensionClaimDate() != null) {
+                sb.append("（於 ").append(p.getLaborPensionClaimDate()).append(" 領取）");
+            }
+            sb.append("（使用者填入之未來實際給付，未做通膨調整）\n");
+        }
+        if (hasExpenses) {
+            BigDecimal rate = resolveInflationRate(p.getAssumedAnnualInflationRate());
+            sb.append("  特定日期大筆花費（金額已由今日幣值依假設年通膨率 ").append(rate.toPlainString())
+                    .append("% 換算為該日期之未來名目值）：\n");
+            for (InvestmentPlannedExpense e : expenses) {
+                BigDecimal future = inflate(e.getAmount(), rate, e.getExpenseDate());
+                sb.append("    - ").append(e.getExpenseDate());
+                if (e.getName() != null && !e.getName().isBlank()) {
+                    sb.append(" ").append(e.getName());
+                }
+                sb.append("：今日幣值 ").append(money(e.getAmount())).append(" 元 → 未來約 ")
+                        .append(money(future)).append(" 元\n");
+            }
+        }
     }
 
     // ===== 回覆解析 =====

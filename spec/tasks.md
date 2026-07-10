@@ -4067,3 +4067,35 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - [ ] 163.3 spec：requirements.md Requirement 7 新增 AC、本 Task。
 - [ ] 163.4 Docker：`--no-cache` 重 build business-services，recreate；驗證啟動時 self-heal 前置偵測 log、颱風假日不送批次。
 - [ ] 163.5 commit + 兩段式 merge。
+
+### Task 164：理財條件強化 — 生日/退休全日期、勞保勞退退休後現金流、通膨大筆花費（餵入 AI）
+
+對應 Requirements: Requirement 32（[requirements.md:747](spec/requirements.md)）
+
+#### 需求
+
+「資產配置建議」條件表單原本只填「目前年齡」（整數）與「退休日期（年月）」，且未納入退休後的固定收入與未來大筆支出，AI 建議缺乏退休現金流縱深。強化：
+
+1. **生日取代年齡、退休日期精確到日**：改填生日（整日）與退休日期（整日），年齡由生日衍生（不冗存 `age`，正規化）。
+2. **退休後現金流**：可填勞保年金（月領＋起領年月）、勞退（一次領＋領取年月）；金額為使用者填入的**未來實際給付**，不做通膨換算。
+3. **未來大筆支出**：可填多筆特定日期大筆花費（日期＋用途＋今日幣值金額）；金額為**今日幣值**，由 service 依「假設年通膨率」（表單可調、預設 2%）換算為未來名目金額。
+4. 三者於 request 執行緒組 prompt 時整理成「退休後現金流／未來支出」段餵給 Claude，AI 於 `targetAllocation`／`actions`／`warnings` 一併考量，**不另做數值化試算表**（沿用現有結構化輸出）。
+
+#### 設計決策
+
+- **正規化**：年齡衍生自 `birth_date`、不入庫；大筆花費未來名目值＝`今日金額 × (1+r)^距花費日年數`，衍生不入庫；勞保勞退金額照填（未來實際給付，不換算）。`retirement_date` 由 `YearMonth` 改 `LocalDate`（欄位仍 DATE，**零遷移**；移除 `YearMonthDateConverter`，僅此處使用）；移除 `age` 欄，新增 `birth_date`。
+- **子表**：大筆花費一使用者多筆 → 子表 `investment_planned_expense`（owner-scoped `@Filter ownerFilter`，獨立 repository）；saveProfile 以「先刪 owner 全部再插入」replace。
+- **輸入物件**：欄位變多，Controller 改組 `InvestmentProfileInput` record 傳入 service（取代長參數列）。
+- **歷史快照**：`portfolio_advice.age` 保留，產生時寫入當下由生日衍生之年齡（歷次回顧不受影響）。新現金流／花費**不進歷史快照**（沿用核心條件快照範圍）。
+- **BFF／前端 api 免動**：BFF `generate`／`saveProfile` 與 GET 聚合皆泛型 `Map` 轉發、`api/index.js` 送泛型 payload，新欄位自動穿過；僅 business 與 `AssetAllocationAdviceView.vue` 變更。
+
+#### 實作
+
+- [ ] 164.1 spec：requirements.md Requirement 32 新增 AC、design.md 資料模型／正規化／service 段、本 Task。
+- [ ] 164.2 資料層：Liquibase `v1.47.0-financial-planning-fields.sql`（`investment_profile` addColumn `birth_date`/勞保勞退四欄/`assumed_annual_inflation_rate`、dropColumn `age`；新表 `investment_planned_expense` ＋索引）；註冊 master。Entity `InvestmentProfile`（`age`→`birthDate`、`retirementDate` `LocalDate`、勞保勞退/通膨欄）、新 `InvestmentPlannedExpense`（`@Filter ownerFilter`）；Repository `InvestmentPlannedExpenseRepository`（`findByOwnerUserIdOrderByExpenseDate`／`deleteByOwnerUserId`）。移除 `YearMonthDateConverter`。
+- [ ] 164.3 DTO：`InvestmentProfileDto` 加 `birthDate`/勞保勞退/通膨率/`plannedExpenses` 清單、移除 `age`；新 `InvestmentProfileInput`（Controller→Service 命令物件）與 `PlannedExpenseDto`。
+- [ ] 164.4 Service：`saveProfile(InvestmentProfileInput)`／`generate(InvestmentProfileInput)`（大筆花費 replace）；`retirementSpan(LocalDate)`；`deriveAge(birthDate)`；buildUserPrompt 加「退休後現金流／未來支出」段（勞保月領/勞退一次領照填、大筆花費含通膨換算 `inflate(amount, rate, expenseDate)`）；buildSystemPrompt 加原則；產生時 `portfolio_advice.age` 寫衍生年齡。
+- [ ] 164.5 Controller：`PortfolioAdviceController` `PUT /profile`／`POST /generate` 解析新欄位與 `plannedExpenses` 清單、生日/退休/勞保勞退日期，組 `InvestmentProfileInput`。
+- [ ] 164.6 前端：`AssetAllocationAdviceView.vue`——生日／退休 `type="date"`、衍生年齡提示、假設年通膨率、勞保（月領＋起領年月）／勞退（一次領＋領取年月）區塊、大筆花費動態清單（新增/刪除列，日期＋用途＋今日金額），payload 帶新欄位；退休日期須晚於今天驗證沿用。
+- [ ] 164.7 Docker：`--no-cache` 重 build business-services、build frontend，recreate；端到端驗證（X-User headers）新欄位存取／產生建議 prompt 納入現金流。
+- [ ] 164.8 commit + 兩段式 merge。

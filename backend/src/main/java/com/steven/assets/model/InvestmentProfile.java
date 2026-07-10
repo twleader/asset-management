@@ -9,7 +9,7 @@ import org.hibernate.annotations.Filter;
 
 import java.math.BigDecimal;
 import java.time.Instant;
-import java.time.YearMonth;
+import java.time.LocalDate;
 
 /**
  * 資產配置建議（Requirement 32）——使用者理財條件 profile。
@@ -40,9 +40,9 @@ public class InvestmentProfile {
     @Column(name = "owner_user_id", nullable = false)
     private Long ownerUserId;
 
-    /** 目前年齡。 */
-    @Column(name = "age")
-    private Integer age;
+    /** 生日。年齡＝生日與今天相距整年數，為衍生值，不入庫（正規化）；由前端／service 現算。 */
+    @Column(name = "birth_date")
+    private LocalDate birthDate;
 
     /** 預計投資年限（年）。 */
     @Column(name = "investment_horizon_years")
@@ -53,13 +53,31 @@ public class InvestmentProfile {
     private BigDecimal monthlyInvestment;
 
     /**
-     * 預計退休年月。退休前為「累積期」（每月投入有效），退休後為「守成／提領期」（每月投入歸零）。
-     * 以 {@link YearMonthDateConverter} 轉為 DB {@code DATE}（該月 1 號）落地。
-     * 累積年數／退休後年數為衍生值，不入庫，由 service 依此欄位與今天現算。
+     * 預計退休日期（整日）。退休前為「累積期」（每月投入有效），退休後為「守成／提領期」（每月投入歸零）。
+     * 存為 DB {@code DATE}。累積年數／退休後年數為衍生值，不入庫，由 service 依此欄位與今天現算。
      */
-    @Convert(converter = YearMonthDateConverter.class)
     @Column(name = "retirement_date")
-    private YearMonth retirementDate;
+    private LocalDate retirementDate;
+
+    /** 勞保年金月領金額（台幣）。為使用者填入之未來實際給付，不做通膨換算。 */
+    @Column(name = "labor_insurance_monthly", precision = 20, scale = 2)
+    private BigDecimal laborInsuranceMonthly;
+
+    /** 勞保年金起領日期（整日；退休後現金流之起點）。 */
+    @Column(name = "labor_insurance_start_date")
+    private LocalDate laborInsuranceStartDate;
+
+    /** 勞退一次領金額（台幣）。為使用者填入之未來實際給付，不做通膨換算。 */
+    @Column(name = "labor_pension_lump_sum", precision = 20, scale = 2)
+    private BigDecimal laborPensionLumpSum;
+
+    /** 勞退領取日期（整日）。 */
+    @Column(name = "labor_pension_claim_date")
+    private LocalDate laborPensionClaimDate;
+
+    /** 假設年通膨率（%）。供未來大筆花費「今日幣值 → 未來名目值」換算；null 時 service 以預設 2% 計。 */
+    @Column(name = "assumed_annual_inflation_rate", precision = 5, scale = 2)
+    private BigDecimal assumedAnnualInflationRate;
 
     /** 理財目標（複選 code，逗號分隔）。 */
     @Column(name = "goals", length = 300)
