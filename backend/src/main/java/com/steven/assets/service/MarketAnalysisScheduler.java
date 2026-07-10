@@ -43,8 +43,11 @@ public class MarketAnalysisScheduler {
             return;
         }
         LocalDate today = LocalDate.now(MarketZones.TW_ZONE);
-        if (!marketDataService.isTwTradingDay(today)) {
-            log.info("今日股市分析排程：{} 非台股交易日，略過", today);
+        // 花錢（送 LLM 批次）前先做一次權威即時颱風假偵測（爬 DGPA 免費、分析昂貴）：直接採 detect 回傳的
+        // closedToday 短路，不賭 05:00–08:45 poller 是否已在 07:30 前偵測+傳播完成 → 颱風假不白花錢送批次。
+        boolean closedToday = marketDataService.refreshTwClosureToday();
+        if (closedToday || !marketDataService.isTwTradingDay(today)) {
+            log.info("今日股市分析排程：{} 非台股交易日（颱風假 / 假日），略過", today);
             return;
         }
         analysisService.generateIfAbsent(today, "scheduled");
@@ -75,14 +78,22 @@ public class MarketAnalysisScheduler {
                 }
                 ZonedDateTime now = ZonedDateTime.now(MarketZones.TW_ZONE);
                 LocalDate today = now.toLocalDate();
-                boolean tradingDay = marketDataService.isTwTradingDay(today);
+                // 先做便宜的本地判斷：未過 07:30 或今日已有成功分析 → 無需補跑，連 DGPA 前置偵測都省。
                 boolean afterRunTime = !now.toLocalTime().isBefore(RUN_AT);
-                if (tradingDay && afterRunTime && !analysisService.hasOkFor(today)) {
+                boolean hasOk = analysisService.hasOkFor(today);
+                if (!afterRunTime || hasOk) {
+                    log.info("今日股市分析 self-heal：無需補跑（afterRunTime={}, hasOk={}）", afterRunTime, hasOk);
+                    return;
+                }
+                // 可能要花錢補跑 → 才做前置權威即時颱風假偵測（爬蟲免費、分析昂貴）：直接採 closedToday 短路
+                // （不動快取）；偵測失敗則退回 isTwTradingDay（既有快取，含 poller 先前偵測到的休市）。
+                boolean closedToday = marketDataService.refreshTwClosureToday();
+                boolean tradingDay = !closedToday && marketDataService.isTwTradingDay(today);
+                if (tradingDay) {
                     log.info("今日股市分析 self-heal：偵測到 {} 交易日已過 07:30 但尚無成功分析，補跑", today);
                     analysisService.generateIfAbsent(today, "self-heal");
                 } else {
-                    log.info("今日股市分析 self-heal：無需補跑（tradingDay={}, afterRunTime={}）",
-                            tradingDay, afterRunTime);
+                    log.info("今日股市分析 self-heal：{} 非台股交易日（颱風假 / 假日），不補跑", today);
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
