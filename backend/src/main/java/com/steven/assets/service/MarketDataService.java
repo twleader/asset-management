@@ -11,6 +11,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import java.math.BigDecimal;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
+import java.time.Duration;
 import java.time.ZonedDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -198,6 +199,36 @@ public class MarketDataService {
         }
         twHolidayCurrentYearCache.put(year, new TimedHolidays(fresh, now + CURRENT_YEAR_TTL_MS));
         return fresh;
+    }
+
+    /**
+     * 花錢前先做一次「權威即時颱風假偵測」（Task 163），回傳今日台股是否休市（true＝颱風假 / 臨時休市）。
+     * 主動觸發 ext 立刻爬 DGPA 停班公告並 upsert {@code tw_market_closure}，**直接採用 ext 回傳的權威
+     * {@code closedToday}** 作短路依據，呼叫端據此不送 LLM 批次。
+     *
+     * <p>動機：07:30「今日股市分析」等下游在 submit 前會花費 LLM（昂貴）；DGPA 爬取免費。故不賭
+     * 05:00–08:45 {@code TwClosurePoller} 是否已在此刻前偵測並傳播完成，而是在花錢前主動確認一次。
+     *
+     * <p>刻意**不動假日快取**：偵測結果以回傳值直接短路，不改讀 {@code twHolidayCurrentYearCache}——
+     * 避免「evict 後重抓瞬斷→抗毒化 fallback 失效→整年假日（含國定假日）丟空→反把假日誤判交易日」。
+     * best-effort：ext / DGPA 失敗 → 回 {@code false}（不主張休市），交由 {@link #isTwTradingDay}（既有快取，
+     * 含 poller 先前偵測到的休市）判斷，保守維持交易日，與 {@link #getTwHolidays} 既有退化一致。
+     */
+    public boolean refreshTwClosureToday() {
+        try {
+            Boolean closed = priceServiceClient.post()
+                    .uri("/internal/tw-closure/detect")
+                    .retrieve()
+                    .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                    .map(m -> Boolean.TRUE.equals(m.get("closedToday")))
+                    .block(Duration.ofSeconds(20));
+            boolean closedToday = Boolean.TRUE.equals(closed);
+            log.info("花費前置：即時偵測台股颱風假 closedToday={}", closedToday);
+            return closedToday;
+        } catch (Exception e) {
+            log.warn("即時偵測台股颱風假失敗（改由既有假日快取判斷，保守維持交易日）：{}", e.getMessage());
+            return false;
+        }
     }
 
     private Map<String, String> fetchTwHolidaysFromExt(int year) {

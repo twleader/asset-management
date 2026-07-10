@@ -4041,3 +4041,29 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - [ ] 162.2 spec：requirements.md Requirement 7 新增 AC、本 Task。
 - [ ] 162.3 Docker：`--no-cache` 重 build business-services，recreate；驗證颱風假日（如 7/10）收尾不寄、分析仍可查。
 - [ ] 162.4 commit + 兩段式 merge。
+
+### Task 163：花錢前先做權威即時颱風假偵測 — 避免颱風假仍白花 LLM 費用送出分析批次
+
+對應 Requirements: Requirement 7（[requirements.md:100](spec/requirements.md)）、Requirement 31（今日股市分析）
+
+#### 需求
+
+「今日股市分析」送出 Anthropic Batch API 才是花錢點（`MarketAnalysisService.submitBatch` → `batches().create`）。送出前的交易日守門（`MarketAnalysisScheduler.scheduledAnalysis:46` 的 `isTwTradingDay`）雖在花錢前，但讀的是 business 假日快取（當年度 10 分 TTL），其正確性依賴 05:00–08:45 `TwClosurePoller` 已在 07:30 前偵測到颱風假並傳播。若 poller 尚未偵測 / 傳播（如 Task 160 部署晚於當日盤中、DGPA 晚公告、或快取 stale），07:30 守門會誤把颱風日當交易日 → 白花 LLM 費用送出批次（Task 162 的收尾守門只擋 email、擋不住已花的錢）。
+
+#### 設計決策
+
+- **花錢前主動確認，不賭快取**：DGPA 停班公告爬取免費、LLM 分析昂貴，成本極不對稱。故在送批次前主動觸發一次權威即時偵測，而非被動依賴 poller 時序。
+- **`MarketDataService.refreshTwClosureToday()` 回傳 `closedToday`**：POST ext `/internal/tw-closure/detect`（爬 DGPA + upsert `tw_market_closure` + reload ext closures；命中亦連帶 Task 161 purge），**直接採 ext 回傳的權威 `closedToday` 作短路依據**。best-effort：ext / DGPA 失敗 → 回 `false`（不主張休市），退回 `isTwTradingDay` 判斷（保守維持交易日）。
+- **刻意不動假日快取**（對抗式審查修正）：不 evict `twHolidayCurrentYearCache`。原設計 evict + 賭第二支 `tw-holidays` 重抓，會在「detect 成功但緊接的重抓瞬斷回空表」時，因 `remove()` 破壞 `getTwHolidays` 的抗毒化 fallback（沿用前一次成功值），使整年假日（含國定假日）丟空 → 反把颱風假 / 假日誤判為交易日、白送批次（正是本功能要防的）。改以回傳值短路後，颱風日抑制**不依賴任何快取重抓**，且假日快取完全不受污染。
+- **短路判斷**：`if (closedToday || !isTwTradingDay(today)) 略過`（cron）／`tradingDay = !closedToday && isTwTradingDay(today)`（self-heal）。`closedToday` 直接來自本次 detect（不賭傳播），`isTwTradingDay` 覆蓋週末 / 國定假日 / poller 先前偵測到的休市。
+- **僅前置於自動花費路徑**：`scheduledAnalysis`（07:30 cron）與 `selfHealOnStartup`（重啟補跑）呼叫；手動 `/generate`（admin）不前置（人為明示、可接受，且 Task 162 仍會擋其 email）。
+- **已知取捨**：`refreshTwClosureToday` 的 `block(20s)` 落在預設單執行緒 @Scheduled 排程池上，07:30 最壞延後同池其它排程任務約 20s（DGPA 慢時）——屬既有單池阻塞特性（`generateIfAbsent` 送批次本就阻塞），一日一次、有界，不另擴排程池。DGPA 逾時（>20s）→ `closedToday=false` 退回既有快取（與部署前行為一致）。
+- **與既有守門層次**：本前置＝把「花錢點的交易日判斷」升級為權威即時；Task 162＝email 送出點縱深守門。兩者互補，涵蓋「偵測落後於批次送出」的整段時序。
+
+#### 實作
+
+- [ ] 163.1 backend `MarketDataService.refreshTwClosureToday()`：POST ext `/internal/tw-closure/detect`（20s timeout、best-effort try/catch）→ 回傳權威 `closedToday`；**不動假日快取**（對抗式審查修正，見設計決策）。
+- [ ] 163.2 backend `MarketAnalysisScheduler`：`scheduledAnalysis`（`closedToday || !isTwTradingDay`）與 `selfHealOnStartup`（`!closedToday && isTwTradingDay`）短路。
+- [ ] 163.3 spec：requirements.md Requirement 7 新增 AC、本 Task。
+- [ ] 163.4 Docker：`--no-cache` 重 build business-services，recreate；驗證啟動時 self-heal 前置偵測 log、颱風假日不送批次。
+- [ ] 163.5 commit + 兩段式 merge。
