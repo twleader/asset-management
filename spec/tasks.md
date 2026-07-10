@@ -3984,3 +3984,32 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [ ] 160.10（A）business 端 `twHolidayCache` 原僅早晨時窗 evict、無 TTL → 08:45 後（盤中部署 self-heal / 手動 detect / 08:45 tick race）偵測到的休市整日無法傳播。改為當年度短 TTL（見 160.6）。
 - [ ] 160.11（B）`fetchTwHolidaysFromExt` 逾時回 `Map.of()` 被 `computeIfAbsent` 當有效值快取整年 → 一次瞬斷毒化整年假日（連國定假日一起漏）。**當年度與過去/未來年度兩條路徑**皆改為空表不寫快取、沿用前值（第二輪審查補上非當年度路徑的一致性）。
 - [ ] 160.12（C）`closedForTrading` 排除清單漏 DGPA 正式用詞「晚間」→ 純晚間停班誤判為全日休市（false positive）。補上「晚間」。
+
+### Task 161：颱風假「當日」分時圖顯示昨收平盤線 — 資料層一體休市（偵測落後補清）（bug fix）
+
+對應 Requirements: Requirement 7（[requirements.md:100](spec/requirements.md)）
+
+#### 需求
+
+颱風假當天（2026-07-10 臺北市停班、台股休市）股票分析「當日」分時走勢圖仍顯示 7/10、一條昨收 2,415 的平盤線（今日漲跌 0.00），未如預期回退到最近交易日 7/9。
+
+#### 根因
+
+Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）才 merge + 部署，早盤 `0 0/15 5-8` 排程根本沒有偵測程式可跑；颱風假 16:19 才由開機 self-heal 偵測寫入 `tw_market_closure`。但在偵測之前的交易時段，`isTwTradingDay(7/10)` 仍回 true → 盤中 polling 把昨收 tick 寫進 Redis `price:ticks:台股:*:2026-07-10`（2330 計 135 筆）、`ClosePersister.dumpTwCloseFromRedis`（13:32）把昨收平盤 dump 進 `stock_price_history` 當日列（19 檔台股，close 全 = 各自 7/9 昨收）。事後颱風假雖已進交易日曆，但**污染資料已在**：`InternalPriceController.intraday-ticks` 預設日期經 `findMaxTradingDate` 落回 7/10（因 7/10 已有 stock_price_history 列）→ 讀 7/10 那 135 筆平盤 tick；且該假日列同時污染 1M/3M/1Y 日線與 MA。（大盤 `twse_index_daily_history` / 0000 因抓取本就有交易日守門、未受污染；英股 7/10 照常交易、bucket 合法不得動。）
+
+#### 設計決策
+
+- **資料層一體休市**：偵測到台股休市時，清除該休市日誤寫的台股市場資料，令「休市日無當日資料」成為與交易日曆一致的不變量。清除後 `findMaxTradingDate` 回休市前一交易日，「當日」端點自然回退（前端零改動）。
+- **兩觸發路徑涵蓋各種偵測時序**：(1) 偵測命中即清（`detectAndPersistToday` upsert 後）—— 涵蓋盤中 / 收盤後才公告；(2) 開機 self-heal 掃本年度已持久化休市日（`selfHealClosureMarketData`）—— 涵蓋部署晚於當日盤中（本次情境），redeploy 重啟即自動補清，不依賴 DGPA 傍晚是否仍掛颱風、不需手動 SQL。
+- **嚴格限台股、不誤傷**：`deleteTwHistoryOn` / `purgeTwTicksOn` 皆硬編市場字串 `台股`；英股 / 美股同日照常交易的 bucket 與日線不動；即時價 live cache `price:{market}:{code}` 不動（休市日 last price = 昨收，本就是正確現價）。
+- **持久性**：真休市日外部日線源本無該日 bar、`backfillTwStock` 亦 skip 今日列 → 清除後不被回補重灌。
+
+#### 實作
+
+- [ ] 161.1 ext-materials `StockSourceQuery.deleteTwHistoryOn(date)`：`DELETE FROM stock_price_history WHERE market='台股' AND trading_date=?`，回刪除筆數。
+- [ ] 161.2 ext-materials `IntradayTickStore.purgeTwTicksOn(date)`：刪 `price:ticks:台股:*:date` 全部 key，回刪除 key 數。
+- [ ] 161.3 ext-materials `TwTyphoonClosureService`：注入 `StockSourceQuery` / `IntradayTickStore`；新增 `purgeClosureMarketData(date)`；`detectAndPersistToday` 命中後呼叫；`@EventListener(ApplicationReadyEvent)` 改 `onApplicationReady`（`loadFromDb` + `selfHealClosureMarketData` 掃本年度 `closuresForYear` 逐日清）。
+- [ ] 161.3b ext-materials `InternalPriceController.ticksWithColdStart`：target 非交易日（`!clock.isTradingDay`）時不 cold-start `refreshOne`——堵住「該檔無歷史 → `findMaxTradingDate` 空 → `.orElse(today)` 落在颱風日 → 抓 Yahoo 5m 昨收幻影再度污染」邊角；退回空序列（前端顯示「無當日分時資料」）。
+- [ ] 161.4 spec：requirements.md Requirement 7 新增 AC、design.md 颱風假段補資料層一體休市、本 Task。
+- [ ] 161.5 Docker：`--no-cache` 重 build ext-materials，recreate；開機 self-heal 自動清 7/10；驗證 `stock_price_history` 無 7/10 台股列、Redis 無 `price:ticks:台股:*:2026-07-10`、`intraday-ticks` 回 7/9、前端「當日」顯示 7/9（英股 7/10 bucket 與大盤不受影響）。
+- [ ] 161.6 commit + 兩段式 merge。

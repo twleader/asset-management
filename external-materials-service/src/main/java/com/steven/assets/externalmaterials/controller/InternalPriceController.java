@@ -264,11 +264,16 @@ public class InternalPriceController {
                 stockSource.findMaxTradingDate(code, market).orElse(today));
     }
 
-    /** 讀當日 tick LIST；空且服務側有完整資料源時同步 cold-start refresh 一次後再讀。 */
+    /**
+     * 讀當日 tick LIST；空且服務側有完整資料源時同步 cold-start refresh 一次後再讀。
+     * target 非交易日（週末 / 國定假日 / 颱風假）時**不** cold-start——該日本無盤，refresh 只會抓到
+     * 昨收平盤幻影再度污染（颱風假一體休市，Task 161）；此時退回空序列（前端顯示「無當日分時資料」）。
+     * 保護 {@code findMaxTradingDate} 空（該檔無任何歷史）→ {@code .orElse(today)} 落在颱風日的邊角。
+     */
     private java.util.List<com.steven.assets.externalmaterials.service.IntradayTickStore.TickPoint>
             ticksWithColdStart(String code, String market, LocalDate target) {
         var ticks = tickStore.getTicks(code, market, target);
-        if (ticks.isEmpty()) {
+        if (ticks.isEmpty() && clock.isTradingDay(market, target)) {
             tickRefresher.refreshOne(code, market, target);
             ticks = tickStore.getTicks(code, market, target);
         }

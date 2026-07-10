@@ -120,6 +120,24 @@ public class IntradayTickStore {
         return out;
     }
 
+    /**
+     * 颱風假一體休市：刪除台股某休市日全部分時 tick bucket（{@code price:ticks:台股:*:date}）。
+     * 嚴格限「台股」——英股 / 美股同日照常交易，其 bucket（{@code price:ticks:英股/美股:...}）不受影響。
+     * 回刪除的 key 數。
+     */
+    public int purgeTwTicksOn(LocalDate tradingDate) {
+        String pattern = "price:ticks:台股:*:" + tradingDate;
+        try {
+            java.util.Set<String> keys = redis.keys(pattern);
+            if (keys == null || keys.isEmpty()) return 0;
+            Long n = redis.delete(keys);
+            return n == null ? 0 : n.intValue();
+        } catch (Exception e) {
+            log.warn("purgeTwTicksOn {}: {}", tradingDate, e.getMessage());
+            return 0;
+        }
+    }
+
     private static String key(String code, String market, LocalDate tradingDate) {
         return "price:ticks:" + market + ":" + code + ":" + tradingDate;
     }
