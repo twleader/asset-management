@@ -272,6 +272,17 @@ public class StockSourceQuery {
         }
     }
 
+    /**
+     * 颱風假一體休市：刪除台股某休市日的 stock_price_history（偵測落後於盤中時，13:32 收盤 dump
+     * 已把昨收平盤誤寫成當日收盤）。嚴格限「台股」——颱風假僅台股休市，英股 / 美股同日照常交易、不得動。
+     * 回刪除筆數。
+     */
+    public int deleteTwHistoryOn(LocalDate tradingDate) {
+        return jdbc.update(
+                "DELETE FROM stock_price_history WHERE market = '台股' AND trading_date = ?",
+                ps -> ps.setObject(1, tradingDate));
+    }
+
     /** 更新 stock 主檔的 name（若有差異）。upsert：若不存在則插入。 */
     public void upsertStockName(String code, String market, String name) {
         if (name == null || name.isBlank() || name.equalsIgnoreCase(code)) return;

@@ -45,6 +45,8 @@ public class TwTyphoonClosureService {
     private static final int TW_CLOSE_MINUTES = 13 * 60 + 30;
 
     private final TwMarketClosureQuery store;
+    private final StockSourceQuery stockSource;
+    private final IntradayTickStore tickStore;
 
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
@@ -55,6 +57,11 @@ public class TwTyphoonClosureService {
     private volatile Map<String, String> closures = Map.of();
 
     @EventListener(ApplicationReadyEvent.class)
+    void onApplicationReady() {
+        loadFromDb();
+        selfHealClosureMarketData();
+    }
+
     void loadFromDb() {
         try {
             closures = store.findAll();
@@ -62,6 +69,41 @@ public class TwTyphoonClosureService {
         } catch (Exception e) {
             // 冷啟時 backend Liquibase 可能尚未建表 → 保持空集合，poller / self-heal 之後會 reload
             log.warn("載入 tw_market_closure 失敗（保持空集合）：{}", e.getMessage());
+        }
+    }
+
+    /**
+     * 開機 self-heal：清除本年度已持久化休市日於「偵測落後」時誤寫的台股市場資料。
+     *
+     * <p>颱風假可能在盤中（甚至收盤後）才由 DGPA 公告 / 本服務偵測到（例：部署晚於當日盤中）。在偵測寫入
+     * {@code tw_market_closure} 之前，{@code isTwTradingDay} 仍回 true → 13:32 {@code ClosePersister}
+     * 收盤 dump 與盤中 polling 已把「昨收平盤」誤塞進 {@code stock_price_history} 當日列與 Redis
+     * {@code price:ticks:台股:*:date} bucket，令「當日」分時圖顯示一條昨收平盤線、且該日列污染日線 / 均線。
+     * 重啟即補清，令休市日回到「無當日資料」不變量（配合偵測命中時的即時清除，涵蓋各種偵測時序）。
+     */
+    private void selfHealClosureMarketData() {
+        int year = LocalDate.now(TW_ZONE).getYear();
+        closuresForYear(year).keySet().forEach(d -> {
+            try {
+                purgeClosureMarketData(LocalDate.parse(d));
+            } catch (Exception e) {
+                log.warn("self-heal 清除休市日 {} 誤寫資料失敗：{}", d, e.getMessage());
+            }
+        });
+    }
+
+    /**
+     * 颱風假「一體休市」的資料層落實：清除該休市日誤寫的台股市場資料（{@code stock_price_history}
+     * 當日列 + Redis {@code price:ticks:台股:*:date} 分時 bucket）。
+     * 嚴格限「台股」——颱風假僅台股休市，英股 / 美股同日照常交易、不得清；亦不動即時價 live cache
+     * （{@code price:{market}:{code}}）——休市日 last price = 昨收，本就是正確的「現價」。
+     */
+    private void purgeClosureMarketData(LocalDate date) {
+        int rows = stockSource.deleteTwHistoryOn(date);
+        int keys = tickStore.purgeTwTicksOn(date);
+        if (rows > 0 || keys > 0) {
+            log.warn("颱風假 {} 一體休市：清除誤寫台股資料（stock_price_history {} 列、Redis tick bucket {} 個）",
+                    date, rows, keys);
         }
     }
 
@@ -90,6 +132,8 @@ public class TwTyphoonClosureService {
             if (closed) {
                 store.upsert(today, "颱風假（臺北市停止上班）", "DGPA", trunc(raw, 500));
                 loadFromDb();
+                // 一體休市：清除偵測前（早盤排程尚未命中 / 盤中才公告）誤寫的當日台股資料
+                purgeClosureMarketData(today);
                 log.warn("偵測到台股颱風假休市 {}：臺北市「{}」→ 已寫入 tw_market_closure", today, raw);
             } else {
                 log.info("DGPA：臺北市今日「{}」→ 台股照常交易（{}）", raw, today);
