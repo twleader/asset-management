@@ -172,6 +172,7 @@ public class MarketAnalysisService {
     private final NewsHeadlineRepository newsRepo;
     private final ObjectMapper objectMapper;
     private final MarketAnalysisEmailDispatcher emailDispatcher;
+    private final MarketDataService marketDataService;
 
     @Value("${anthropic.api-key:}")
     private String apiKey;
@@ -552,12 +553,20 @@ public class MarketAnalysisService {
         // 每日自動寄送（Requirement 31 / Task 151）：批次收尾首次落 OK 即寄一次；以 email_sent_at 為冪等記號，
         // 已寄過（含同一交易日手動重跑）不重寄 → 滿足「僅每日自動寄、不重複打擾」。dispatcher 內部 try/catch 不拋。
         if (DailyMarketAnalysis.STATUS_OK.equals(row.getStatus()) && row.getEmailSentAt() == null) {
-            try {
-                if (emailDispatcher.dispatchDaily(MarketAnalysisDto.from(row, objectMapper))) {
-                    row.setEmailSentAt(Instant.now());
+            // 縱深守門（Task 162）：批次於 07:30 交易日守門通過後才送出，但颱風假 / 臨時休市可能於送出後、
+            // 收尾前才被偵測到（DGPA 公告晚 / business 假日快取 10 分 TTL 尚未刷新）。email 為不可逆的對外動作，
+            // 於送出前對 analysisDate 再驗一次交易日：非台股交易日（含 tw_market_closure union）則不寄
+            // （分析仍落 OK 供頁面查閱，email_sent_at 保持 null＝未寄；OK 列不再被 poller 撈，不會重試）。
+            if (!marketDataService.isTwTradingDay(date)) {
+                log.info("今日股市分析：{} 非台股交易日（颱風假 / 臨時休市），批次收尾不寄每日 email（分析仍保留供查閱）", date);
+            } else {
+                try {
+                    if (emailDispatcher.dispatchDaily(MarketAnalysisDto.from(row, objectMapper))) {
+                        row.setEmailSentAt(Instant.now());
+                    }
+                } catch (Exception e) {
+                    log.warn("今日股市分析：寄送每日 email 失敗（date={}）: {}", date, e.getMessage());
                 }
-            } catch (Exception e) {
-                log.warn("今日股市分析：寄送每日 email 失敗（date={}）: {}", date, e.getMessage());
             }
         }
         save(row, date);
