@@ -3,6 +3,7 @@ package com.steven.assets.controller;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.steven.assets.dto.CurrentAllocationDto;
 import com.steven.assets.dto.InvestmentProfileDto;
+import com.steven.assets.dto.InvestmentProfileInput;
 import com.steven.assets.dto.PortfolioAdviceDto;
 import com.steven.assets.dto.PortfolioAdviceSettingsDto;
 import com.steven.assets.model.PortfolioAdvice;
@@ -19,6 +20,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -63,14 +66,7 @@ public class PortfolioAdviceController {
     /** 儲存理財條件。 */
     @PutMapping("/profile")
     public InvestmentProfileDto saveProfile(@RequestBody Map<String, Object> body) {
-        return adviceService.saveProfile(
-                intOrNull(body, "age"),
-                intOrNull(body, "investmentHorizonYears"),
-                bigDecimalOrNull(body, "monthlyInvestment"),
-                yearMonthOrNull(body, "retirementDate"),
-                stringList(body, "goals"),
-                str(body, "riskTolerance"),
-                str(body, "expectedAnnualReturn"));
+        return adviceService.saveProfile(toInput(body));
     }
 
     /** 目前使用者最新快照的資產配置概覽。 */
@@ -82,15 +78,7 @@ public class PortfolioAdviceController {
     /** 產生建議（同步；thinking + web_search 可能耗數十秒）。body 帶入理財條件，會一併儲存為 profile。 */
     @PostMapping("/generate")
     public PortfolioAdviceDto generate(@RequestBody(required = false) Map<String, Object> body) {
-        Map<String, Object> b = body == null ? Map.of() : body;
-        PortfolioAdvice row = adviceService.generate(
-                intOrNull(b, "age"),
-                intOrNull(b, "investmentHorizonYears"),
-                bigDecimalOrNull(b, "monthlyInvestment"),
-                yearMonthOrNull(b, "retirementDate"),
-                stringList(b, "goals"),
-                str(b, "riskTolerance"),
-                str(b, "expectedAnnualReturn"));
+        PortfolioAdvice row = adviceService.generate(toInput(body == null ? Map.of() : body));
         return PortfolioAdviceDto.from(row, objectMapper);
     }
 
@@ -114,13 +102,52 @@ public class PortfolioAdviceController {
 
     // ===== body 解析小工具 =====
 
+    /** body → 理財條件命令物件（生日／退休／勞保勞退日期為整日 YYYY-MM-DD；plannedExpenses 為大筆花費清單）。 */
+    private static InvestmentProfileInput toInput(Map<String, Object> body) {
+        return new InvestmentProfileInput(
+                localDateOrNull(body, "birthDate"),
+                intOrNull(body, "investmentHorizonYears"),
+                bigDecimalOrNull(body, "monthlyInvestment"),
+                localDateOrNull(body, "retirementDate"),
+                bigDecimalOrNull(body, "laborInsuranceMonthly"),
+                localDateOrNull(body, "laborInsuranceStartDate"),
+                bigDecimalOrNull(body, "laborPensionLumpSum"),
+                localDateOrNull(body, "laborPensionClaimDate"),
+                bigDecimalOrNull(body, "assumedAnnualInflationRate"),
+                stringList(body, "goals"),
+                str(body, "riskTolerance"),
+                str(body, "expectedAnnualReturn"),
+                expenseList(body, "plannedExpenses"));
+    }
+
+    /** body 的 plannedExpenses（JSON 陣列，每項 {expenseDate,name,amount}）→ 命令物件清單。 */
+    private static List<InvestmentProfileInput.PlannedExpenseInput> expenseList(Map<String, Object> body, String key) {
+        Object v = body == null ? null : body.get(key);
+        if (!(v instanceof List<?> list)) {
+            return List.of();
+        }
+        List<InvestmentProfileInput.PlannedExpenseInput> out = new ArrayList<>();
+        for (Object item : list) {
+            if (!(item instanceof Map<?, ?> m)) {
+                continue;
+            }
+            @SuppressWarnings("unchecked")
+            Map<String, Object> row = (Map<String, Object>) m;
+            out.add(new InvestmentProfileInput.PlannedExpenseInput(
+                    localDateOrNull(row, "expenseDate"),
+                    str(row, "name"),
+                    bigDecimalOrNull(row, "amount")));
+        }
+        return out;
+    }
+
     private static String str(Map<String, Object> body, String key) {
         Object v = body == null ? null : body.get(key);
         return v == null ? null : v.toString();
     }
 
-    /** 解析 "YYYY-MM" 退休年月；空字串／缺值回 null，格式錯拋 IllegalArgument。 */
-    private static java.time.YearMonth yearMonthOrNull(Map<String, Object> body, String key) {
+    /** 解析 "YYYY-MM-DD" 整日；空字串／缺值回 null，格式錯拋 IllegalArgument。 */
+    private static LocalDate localDateOrNull(Map<String, Object> body, String key) {
         Object v = body == null ? null : body.get(key);
         if (v == null) {
             return null;
@@ -130,9 +157,9 @@ public class PortfolioAdviceController {
             return null;
         }
         try {
-            return java.time.YearMonth.parse(s); // 接受 ISO "2040-06"
+            return LocalDate.parse(s); // 接受 ISO "2040-06-15"
         } catch (java.time.format.DateTimeParseException e) {
-            throw new IllegalArgumentException("退休日期格式錯誤（" + key + "，需 YYYY-MM）：" + v);
+            throw new IllegalArgumentException("日期格式錯誤（" + key + "，需 YYYY-MM-DD）：" + v);
         }
     }
 

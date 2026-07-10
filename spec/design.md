@@ -2000,15 +2000,25 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
 
 **目標**：使用者先設定理財條件（年齡／投資年限／每月可投入／理財目標（複選）／可忍受風險／獲利預期），系統結合其**最新 `asset_snapshot`** 的現況配置與持有明細，由 Claude 產出個人化資產配置建議（整體評析／現況風險評估／建議目標配置／具體調整動作／風險提醒／參考來源），並保存歷次供回顧。以 Requirement 31 為藍本，差異：**互動式即時 → 走同步 Messages API**（非 Batch），同步在 request 執行緒 owner context 已綁定，`@Filter`／`TenantGuard` 正常運作。
 
-- **資料模型**（Liquibase `v1.44.0-portfolio-advice.sql`，三個 changeset）：
+- **資料模型**（Liquibase `v1.44.0-portfolio-advice.sql` 三 changeset ＋ `v1.44.1-retirement-date.sql` ＋ `v1.47.0-financial-planning-fields.sql` 生日/勞保勞退/通膨/大筆花費）：
   ```sql
   -- 理財條件（一使用者一列，記住免重填；owner-scoped）
   CREATE TABLE investment_profile (
       id BIGSERIAL PRIMARY KEY, owner_user_id BIGINT NOT NULL,
-      age INTEGER, investment_horizon_years INTEGER, monthly_investment NUMERIC(20,2),
-      retirement_date DATE, -- 預計退休年月（v1.44.1 addColumn，存該月一號；退休後每月投入歸零）
+      investment_horizon_years INTEGER, monthly_investment NUMERIC(20,2),
+      retirement_date DATE, -- 預計退休日期（v1.47.0 起存整日；退休後每月投入歸零。原 v1.44.1 存該月一號、YearMonth）
+      birth_date DATE,      -- v1.47.0：生日（取代 age；年齡由生日衍生，不入庫）
+      labor_insurance_monthly NUMERIC(20,2), labor_insurance_start_date DATE,  -- v1.47.0：勞保年金月領＋起領年月
+      labor_pension_lump_sum  NUMERIC(20,2), labor_pension_claim_date  DATE,  -- v1.47.0：勞退一次領＋領取年月
+      assumed_annual_inflation_rate NUMERIC(5,2),  -- v1.47.0：假設年通膨率%（預設 2，供大筆花費換算）
       goals VARCHAR(300), risk_tolerance VARCHAR(20), expected_annual_return VARCHAR(20),
       updated_at TIMESTAMPTZ NOT NULL, CONSTRAINT uq_investment_profile_owner UNIQUE (owner_user_id));
+  -- v1.47.0：特定日期大筆花費（一使用者多筆；金額為今日幣值，未來名目值由 service 依通膨衍生、不入庫）
+  CREATE TABLE investment_planned_expense (
+      id BIGSERIAL PRIMARY KEY, owner_user_id BIGINT NOT NULL,
+      expense_date DATE NOT NULL, name VARCHAR(100), amount NUMERIC(20,2) NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL);
+  CREATE INDEX idx_planned_expense_owner ON investment_planned_expense (owner_user_id, expense_date);
   -- 歷次建議（owner-scoped；條件快照 + based_on_* 歷史快照 + result_json 解析建議）
   CREATE TABLE portfolio_advice (
       id BIGSERIAL PRIMARY KEY, owner_user_id BIGINT NOT NULL, status VARCHAR(20) NOT NULL,
@@ -2026,12 +2036,12 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
   ```
   Entity `InvestmentProfile`／`PortfolioAdvice`（皆 `@Filter(name="ownerFilter")`，多租戶 Requirement 28）／`PortfolioAdviceSetting`。`goals` 為理財目標複選 code 逗號分隔；`based_on_snapshot_id` 正規化參照 asset_snapshot，`based_on_snapshot_date`／`based_on_total_assets` 為歷史快照（回顧不失真，比照 `realized_gain` 名稱字串例外）。
 
-- **正規化說明**：`investment_profile` 不存衍生值（退休日期以 `retirement_date` 存原始年月；累積年數／退休後年數由 service `retirementSpan()` 依退休日期與今天現算、不入庫，每月投入僅計入累積期、退休後歸零）。`portfolio_advice` 的條件快照與 `based_on_*` 為**刻意 denormalize 的歷史快照**（產生當下的條件與資產依據），符合「歷史交易記錄名稱字串」例外；`result_json` 為 LLM 解析結果的凍結內容（比照 `daily_market_analysis`）。
+- **正規化說明**：`investment_profile` 不存衍生值——**年齡由 `birth_date` 與今天衍生**（不冗存 `age`，v1.47.0 移除 age 欄）；退休日期以 `retirement_date` 存原始整日；累積年數／退休後年數由 service `retirementSpan()` 依退休日期與今天現算、不入庫（每月投入僅計入累積期、退休後歸零）；**大筆花費以「今日幣值」`amount` 存，未來名目金額 `amount × (1+r)^年數` 由 service 依 `assumed_annual_inflation_rate` 現算、不入庫**。勞保／勞退金額為使用者填入的**未來實際給付**（不做通膨換算）。`portfolio_advice` 的條件快照（含產生當下由生日衍生的 `age`）與 `based_on_*` 為**刻意 denormalize 的歷史快照**（產生當下的條件與資產依據），符合「歷史交易記錄名稱字串」例外；`result_json` 為 LLM 解析結果的凍結內容（比照 `daily_market_analysis`）。
 
 - **Service `PortfolioAdviceService`**：
-  - profile：`getProfile()`／`saveProfile(...)`（`TenantGuard.requireCurrentUserId()` 綁 owner；risk/return/goals 白名單驗證，goals 過濾去重逗號串接）。
+  - profile：`getProfile()`／`saveProfile(InvestmentProfileInput)`（`TenantGuard.requireCurrentUserId()` 綁 owner；risk/return/goals 白名單驗證，goals 過濾去重逗號串接）。輸入含生日／退休日（`LocalDate`）／勞保勞退現金流／通膨率／大筆花費清單；大筆花費以「先刪 owner 全部再插入提交清單」replace（清單小、簡單穩健）。年齡不入庫，由生日衍生。
   - 現況：`getCurrentAllocation()` 讀最新快照 `totalDeposit/totalFundValue/totalStockValue/totalAssets` 算占比（存款／基金／股票）。
-  - `generate(...)`（**非同步**）：upsert 條件 → 讀最新快照＋子表明細（`bankDeposit/fundHolding/stockHolding` `findBySnapshotId`，皆由 owner-filtered 快照 id 帶出，安全）→ **在 request 執行緒組好 system/user prompt**（條件＋現況＋明細；`web_search` 開則要求納入當前市場、references 附來源，關則要求不得杜撰、references 回空）→ 落一筆 `PortfolioAdvice`（`status=PROCESSING`＋條件快照＋based_on）並**立即回傳** → 提交背景執行緒 `runGeneration`。`runGeneration`（daemon 固定小池）：依 setting `resolveModel/resolveEffort/resolveWebSearchMaxUses` 呼叫 `client.messages().create(MessageCreateParams...)`（adaptive thinking + `OutputConfig.effort` + 可選 `WebSearchTool20260209.maxUses`）→ 取首個 `{` 至末個 `}` 解析為 `PortfolioAdviceResult` → sanitize references（http(s) 白名單）→ **以 `adviceId` by-id 更新該列** OK／FAILED（全程 try/catch 不拋）。金鑰未設時 request 執行緒直接落 `NOT_CONFIGURED`、不提交背景。`latest()` 對 PROCESSING 逾 10 分鐘（背景中斷／重啟）自癒判 FAILED。
+  - `generate(...)`（**非同步**）：upsert 條件 → 讀最新快照＋子表明細（`bankDeposit/fundHolding/stockHolding` `findBySnapshotId`，皆由 owner-filtered 快照 id 帶出，安全）→ **在 request 執行緒組好 system/user prompt**（條件＋現況＋明細＋**退休後現金流／未來支出段**：勞保月領（自起領年月，照填）、勞退一次領（於領取年月，照填）、大筆花費（每筆今日金額＋依通膨率換算之未來名目值）；`web_search` 開則要求納入當前市場、references 附來源，關則要求不得杜撰、references 回空）→ 落一筆 `PortfolioAdvice`（`status=PROCESSING`＋條件快照＋based_on）並**立即回傳** → 提交背景執行緒 `runGeneration`。`runGeneration`（daemon 固定小池）：依 setting `resolveModel/resolveEffort/resolveWebSearchMaxUses` 呼叫 `client.messages().create(MessageCreateParams...)`（adaptive thinking + `OutputConfig.effort` + 可選 `WebSearchTool20260209.maxUses`）→ 取首個 `{` 至末個 `}` 解析為 `PortfolioAdviceResult` → sanitize references（http(s) 白名單）→ **以 `adviceId` by-id 更新該列** OK／FAILED（全程 try/catch 不拋）。金鑰未設時 request 執行緒直接落 `NOT_CONFIGURED`、不提交背景。`latest()` 對 PROCESSING 逾 10 分鐘（背景中斷／重啟）自癒判 FAILED。
   - 設定：`getSettings()`／`updateSettings(model, effort, webSearchMaxUses)` 白名單驗證（比照 `MarketAnalysisService`）。
   - 免 enum 寫死：`GOAL_OPTIONS`／`RISK_OPTIONS`／`RETURN_OPTIONS`／`AVAILABLE_MODELS`／`AVAILABLE_EFFORTS`／`AVAILABLE_WEB_SEARCHES` 皆服務層白名單常數。
 

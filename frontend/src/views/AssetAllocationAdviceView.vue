@@ -31,9 +31,9 @@
       <el-form label-width="120px" label-position="right" :disabled="busy">
         <el-row :gutter="16">
           <el-col :xs="24" :sm="6">
-            <el-form-item label="目前年齡">
-              <el-input-number v-model="form.age" :min="0" :max="120" :step="1" controls-position="right"
-                style="width: 100%" placeholder="歲" />
+            <el-form-item label="生日">
+              <el-date-picker v-model="form.birthDate" type="date" value-format="YYYY-MM-DD"
+                format="YYYY年MM月DD日" placeholder="出生年月日" style="width: 100%" />
             </el-form-item>
           </el-col>
           <el-col :xs="24" :sm="6">
@@ -50,14 +50,15 @@
           </el-col>
           <el-col :xs="24" :sm="6">
             <el-form-item label="退休日期">
-              <el-date-picker v-model="form.retirementDate" type="month" value-format="YYYY-MM"
-                format="YYYY年MM月" placeholder="預計退休年月" style="width: 100%" />
+              <el-date-picker v-model="form.retirementDate" type="date" value-format="YYYY-MM-DD"
+                format="YYYY年MM月DD日" placeholder="預計退休日" style="width: 100%" />
             </el-form-item>
           </el-col>
         </el-row>
-        <el-row v-if="retirementHint" :gutter="16">
+        <el-row :gutter="16">
           <el-col :span="24">
-            <div class="retire-derived" :class="{ 'is-warn': retirementHint.warn }">{{ retirementHint.text }}</div>
+            <div v-if="ageHint" class="retire-derived">{{ ageHint }}</div>
+            <div v-if="retirementHint" class="retire-derived" :class="{ 'is-warn': retirementHint.warn }">{{ retirementHint.text }}</div>
           </el-col>
         </el-row>
         <el-row :gutter="16">
@@ -82,7 +83,66 @@
             <el-radio v-for="o in riskOptions" :key="o.id" :value="o.id" border>{{ o.label }}</el-radio>
           </el-radio-group>
         </el-form-item>
-        <el-form-item>
+
+        <!-- 退休後現金流（選填）：勞保年金月領、勞退一次領 -->
+        <el-divider content-position="left"><span class="sub-divider">退休後現金流（選填）</span></el-divider>
+        <el-row :gutter="16">
+          <el-col :xs="24" :sm="6">
+            <el-form-item label="勞保月領">
+              <el-input-number v-model="form.laborInsuranceMonthly" :min="0" :step="1000" controls-position="right"
+                style="width: 100%" placeholder="每月金額" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="6">
+            <el-form-item label="勞保起領日">
+              <el-date-picker v-model="form.laborInsuranceStartDate" type="date" value-format="YYYY-MM-DD"
+                format="YYYY年MM月DD日" placeholder="開始領取日" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="6">
+            <el-form-item label="勞退一次領">
+              <el-input-number v-model="form.laborPensionLumpSum" :min="0" :step="10000" controls-position="right"
+                style="width: 100%" placeholder="一次領金額" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="6">
+            <el-form-item label="勞退領取日">
+              <el-date-picker v-model="form.laborPensionClaimDate" type="date" value-format="YYYY-MM-DD"
+                format="YYYY年MM月DD日" placeholder="領取日" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <div class="field-note">勞保、勞退請填「未來實際可領」金額（照勞保局試算填入即可，系統不再乘通膨）。</div>
+
+        <!-- 特定日期大筆花費（選填）：今日幣值，系統依通膨換算 -->
+        <el-divider content-position="left"><span class="sub-divider">特定日期大筆花費（選填）</span></el-divider>
+        <el-row :gutter="16" style="margin-bottom: 4px">
+          <el-col :xs="24" :sm="8">
+            <el-form-item label="假設年通膨率">
+              <el-input-number v-model="form.assumedAnnualInflationRate" :min="0" :max="20" :step="0.5" :precision="1"
+                controls-position="right" style="width: 100%" placeholder="%" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="16">
+            <div class="field-note" style="margin-top: 8px">
+              大筆花費請填「今日幣值」，系統會依此通膨率換算成花費當日的未來金額再交給 AI。
+            </div>
+          </el-col>
+        </el-row>
+        <div class="expense-list">
+          <div v-for="(ex, idx) in form.plannedExpenses" :key="idx" class="expense-row">
+            <el-date-picker v-model="ex.expenseDate" type="date" value-format="YYYY-MM-DD" format="YYYY年MM月DD日"
+              placeholder="花費日期" style="width: 160px" />
+            <el-input v-model="ex.name" placeholder="用途（如：買車）" style="width: 170px" maxlength="100" />
+            <el-input-number v-model="ex.amount" :min="0" :step="10000" controls-position="right"
+              style="width: 160px" placeholder="今日幣值" />
+            <span class="expense-hint">{{ expenseFutureHint(ex) }}</span>
+            <el-button link type="danger" :icon="Delete" @click="removeExpense(idx)">刪除</el-button>
+          </div>
+          <el-button text :icon="Plus" @click="addExpense">新增一筆大筆花費</el-button>
+        </div>
+
+        <el-form-item style="margin-top: 14px">
           <el-button :loading="savingProfile" @click="saveProfile">儲存條件</el-button>
           <el-button type="primary" :icon="MagicStick" :loading="generating || isProcessing" @click="generate">
             {{ isProcessing ? '產生中…' : '產生建議' }}
@@ -230,7 +290,7 @@
 </template>
 
 <script setup>
-import { MagicStick } from '@element-plus/icons-vue'
+import { MagicStick, Plus, Delete } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { bffApi } from '@/api'
 import { useAuthStore } from '@/stores/authStore'
@@ -243,14 +303,22 @@ const savingModel = ref(false)
 const savingEffort = ref(false)
 const savingWebSearch = ref(false)
 
+const DEFAULT_INFLATION_RATE = 2
+
 const form = ref({
-  age: null,
+  birthDate: null,
   investmentHorizonYears: null,
   monthlyInvestment: null,
   retirementDate: null,
+  laborInsuranceMonthly: null,
+  laborInsuranceStartDate: null,
+  laborPensionLumpSum: null,
+  laborPensionClaimDate: null,
+  assumedAnnualInflationRate: DEFAULT_INFLATION_RATE,
   goals: [],
   riskTolerance: '',
-  expectedAnnualReturn: ''
+  expectedAnnualReturn: '',
+  plannedExpenses: []
 })
 const goalOptions = ref([])
 const riskOptions = ref([])
@@ -274,7 +342,7 @@ const retirementDerived = computed(() => {
   const rd = form.value.retirementDate
   const horizon = form.value.investmentHorizonYears
   if (!rd) return null
-  const m = /^(\d{4})-(\d{2})$/.exec(rd)
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(rd)
   if (!m) return null
   const now = new Date()
   const nowMonths = now.getFullYear() * 12 + now.getMonth()
@@ -304,6 +372,21 @@ const retirementHint = computed(() => {
   }
   return { warn: false, text: `累積期 ${d.accumulationYears} 年（退休前，每月投入）／退休後守成期 ${d.retirementYears} 年（每月投入視為 0）。` }
 })
+// 由生日衍生目前年齡（唯讀提示，不入庫；後端另有 deriveAge 為權威）
+const ageHint = computed(() => {
+  const b = form.value.birthDate
+  if (!b) return null
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(b)
+  if (!m) return null
+  const birth = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+  const now = new Date()
+  let age = now.getFullYear() - birth.getFullYear()
+  const md = now.getMonth() - birth.getMonth() || now.getDate() - birth.getDate()
+  if (md < 0) age -= 1
+  if (age < 0) return null
+  return `目前年齡約 ${age} 歲（由生日推算）。`
+})
+
 const allocationItems = computed(() => allocation.value.items || [])
 const availableModels = computed(() => settings.value.availableModels || [])
 const availableEfforts = computed(() => settings.value.availableEfforts || [])
@@ -313,6 +396,25 @@ const busy = computed(() => generating.value || isProcessing.value || savingProf
 function money(v) {
   const n = Number(v)
   return isNaN(n) ? '0' : Math.round(n).toLocaleString('en-US')
+}
+function addExpense() {
+  form.value.plannedExpenses.push({ expenseDate: null, name: '', amount: null })
+}
+function removeExpense(idx) {
+  form.value.plannedExpenses.splice(idx, 1)
+}
+// 今日幣值 × (1+通膨)^年數 的未來名目值提示（唯讀；後端組 prompt 時以權威值換算）
+function expenseFutureHint(ex) {
+  if (!ex || !ex.expenseDate || ex.amount == null || ex.amount === '') return ''
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ex.expenseDate)
+  const amt = Number(ex.amount)
+  if (!m || isNaN(amt) || amt <= 0) return ''
+  const rateRaw = Number(form.value.assumedAnnualInflationRate)
+  const r = (isNaN(rateRaw) || rateRaw < 0) ? DEFAULT_INFLATION_RATE : rateRaw
+  const date = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+  const years = (date.getTime() - Date.now()) / (365.25 * 24 * 3600 * 1000)
+  const future = amt * Math.pow(1 + r / 100, years)
+  return `≈ 未來 ${money(future)} 元`
 }
 function fmtPct(v) {
   const n = Number(v)
@@ -371,13 +473,23 @@ async function load(silent = false) {
     riskOptions.value = p.riskOptions || []
     returnOptions.value = p.returnOptions || []
     form.value = {
-      age: p.age ?? null,
+      birthDate: p.birthDate ?? null,
       investmentHorizonYears: p.investmentHorizonYears ?? null,
       monthlyInvestment: p.monthlyInvestment ?? null,
       retirementDate: p.retirementDate ?? null,
+      laborInsuranceMonthly: p.laborInsuranceMonthly ?? null,
+      laborInsuranceStartDate: p.laborInsuranceStartDate ?? null,
+      laborPensionLumpSum: p.laborPensionLumpSum ?? null,
+      laborPensionClaimDate: p.laborPensionClaimDate ?? null,
+      assumedAnnualInflationRate: p.assumedAnnualInflationRate ?? DEFAULT_INFLATION_RATE,
       goals: p.goals || [],
       riskTolerance: p.riskTolerance || '',
-      expectedAnnualReturn: p.expectedAnnualReturn || ''
+      expectedAnnualReturn: p.expectedAnnualReturn || '',
+      plannedExpenses: (p.plannedExpenses || []).map(e => ({
+        expenseDate: e.expenseDate ?? null,
+        name: e.name ?? '',
+        amount: e.amount ?? null
+      }))
     }
     // latest / history / allocation
     latest.value = data.latest && data.latest.status && data.latest.status !== 'NONE' ? data.latest : (data.latest || null)
@@ -399,13 +511,22 @@ async function load(silent = false) {
 
 function profilePayload() {
   return {
-    age: form.value.age,
+    birthDate: form.value.birthDate,
     investmentHorizonYears: form.value.investmentHorizonYears,
     monthlyInvestment: form.value.monthlyInvestment,
     retirementDate: form.value.retirementDate,
+    laborInsuranceMonthly: form.value.laborInsuranceMonthly,
+    laborInsuranceStartDate: form.value.laborInsuranceStartDate,
+    laborPensionLumpSum: form.value.laborPensionLumpSum,
+    laborPensionClaimDate: form.value.laborPensionClaimDate,
+    assumedAnnualInflationRate: form.value.assumedAnnualInflationRate,
     goals: form.value.goals,
     riskTolerance: form.value.riskTolerance,
-    expectedAnnualReturn: form.value.expectedAnnualReturn
+    expectedAnnualReturn: form.value.expectedAnnualReturn,
+    // 只送完整的花費列（有日期＋金額），過濾未填完的空列
+    plannedExpenses: (form.value.plannedExpenses || [])
+      .filter(e => e && e.expenseDate && e.amount != null && e.amount !== '')
+      .map(e => ({ expenseDate: e.expenseDate, name: e.name || null, amount: e.amount }))
   }
 }
 
@@ -529,6 +650,14 @@ onUnmounted(stopPoll)
 .form-hint { font-size: 12px; color: #94a3b8; margin-left: 10px; }
 .retire-derived { font-size: 12px; color: #64748b; margin: -4px 0 8px 120px; }
 .retire-derived.is-warn { color: #b45309; }
+.sub-divider { font-size: 13px; font-weight: 600; color: #475569; }
+.field-note { font-size: 12px; color: #94a3b8; margin: 0 0 10px 120px; }
+.expense-list { margin-left: 120px; }
+.expense-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.expense-hint { font-size: 12px; color: #059669; min-width: 120px; }
+@media (max-width: 768px) {
+  .retire-derived, .field-note, .expense-list { margin-left: 0; }
+}
 
 .alloc-list { display: flex; flex-direction: column; gap: 12px; }
 .alloc-block { display: flex; flex-direction: column; gap: 2px; }
