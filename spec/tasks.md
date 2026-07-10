@@ -3914,3 +3914,28 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 158.4 Docker：重 build frontend（vite build ✓）+ recreate `asset-frontend`；`curl -I http://localhost/` → 200；運行 bundle `StockAnalysisDialog-*.js` 含 `今日漲跌`／`intraday-quote`。以真實資料驗證邏輯：2330 當日 sessionDate=2026-07-09、現價 2415、history 末筆為今日列（close 2415）→ `tradingDate < sessionDate` 正確跳過今日、取 2026-07-08 收盤 2465 為昨收、漲跌 −50.00（−2.03%，跌綠）。
 - [ ] 158.5 手動驗證（瀏覽器）：台積電 2330 開「當日」，上方顯示昨收與今日漲跌，現價 − 昨收 = 漲跌金額、色彩正確（漲紅跌綠）；切到「1個月」等日線期間資訊列隱藏。
 - [ ] 158.6 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）。
+
+### Task 159: 警示 email 每檔股票多嵌一張「當日分時走勢圖」（Requirement 23）
+
+對應 Requirements: Requirement 23（[requirements.md:527](spec/requirements.md)）
+
+#### 需求
+
+警示通知 email（`AlertNotificationDispatcher` 寄的 digest）現有每檔一張「近一年」走勢圖（`renderPriceMaPng`）。需求是每檔股票**再多嵌一張「當日分時走勢圖」**：分時價格線 + 昨收基準線 + 漲跌色，X 軸從開盤延伸到收盤。故單檔觸發之 digest 應內嵌 **2 張圖**（年圖 + 當日圖）。
+
+#### 設計決策
+
+- **沿用畫面「當日」同資料源、同口徑**（Requirement 13 / Task 158），避免同義值跨頁不一致：分時 tick 走 `HistoricalDataService.fetchIntradayTicks(code, market, null)`（讀 Redis tick LIST，`date` 省略 → ext-materials 取最近有資料交易日）；昨收 = 前一交易日**日線收盤**（`stock_price_history`，`tradingDate` 嚴格早於分時交易日的最後一筆），與「當日漲跌」同「vs 前一交易日原始收盤」口徑，**不採 Redis `previousClose`**。
+- **加進既有 `AlertChartRenderer`、不動 dispatcher 建構子**：新增 `renderIntradayPng(code, market): Optional<byte[]>`，`buildDigest` 在年圖後多插一張。`chartCache` 以 `"price "` / `"intraday "` 前綴命名空間分隔兩圖 key。
+- **X 軸開盤→收盤**：以 `MarketZones.openTime/closeTime`（單一事實來源）之當日分鐘數為數值 X、`setXAxisMin/Max` 鎖定開收盤、`setCustomXAxisTickLabelsFormatter` 轉 `HH:mm`。稀疏 tick 以 `TreeMap`「每分鐘最後成交」落點連續線（XChart 無 `connectNulls`，僅畫真實 tick 點）。Y 軸涵蓋分時區間 + 昨收（各 +10% padding）。
+- **漲跌色**：最新分時價 ≥ 昨收 → 紅(#dc2626 漲) / 否則綠(#16a34a 跌)；查無昨收則中性藍。任一圖 render 失敗只略過該圖、另一圖與文字照寄。
+
+#### 實作
+
+- [x] 159.1 `AlertChartRenderer`：新增 `renderIntradayPng(code, market)` 及 helper（`parseTickDate` / `parseTickMinute` / `minToHHmm` / `previousDailyClose` / `applyIntradayYRange` / `addNumericRefLine` / `changeSuffix`）；新增常數 `INTRADAY_H=420`、`C_FLAT`（中性藍）；import `MarketZones` / `LocalTime` / `Map` / `TreeMap`。
+- [x] 159.2 `AlertNotificationDispatcher.buildDigest`：年圖後多取 `renderIntradayPng` 以 `cid:intraday{i}` 內嵌；`chartCache` key 改前綴命名空間（`"price "` / `"intraday "`）；更新 `MAX_CHARTS` 註解為「每檔最多 2 張」。
+- [x] 159.3 `WatchStockController`：新增預覽端點 `GET /api/watch-stocks/intraday.png?code=&market=`（比照 `chart.png`，無 tick / 繪圖失敗回 204）。
+- [x] 159.4 spec：`requirements.md` Requirement 23 新增本 AC；`design.md`（endpoint 清單 + 警示 email 章節 + `AlertChartRenderer` 段）補 `renderIntradayPng` 說明；本 Task。
+- [ ] 159.5 Docker：從本 worktree `--no-cache` 重 build `business-services` image + recreate `asset-business-services`；unzip `/app/app.jar` 取 `AlertChartRenderer.class`、grep `renderIntradayPng` 確認部署非 stale。
+- [ ] 159.6 手動驗證：`curl /api/watch-stocks/intraday.png?code=&market=` 回 200 PNG（有當日 tick 之標的）；實際寄信驗證改由既有觸發 / 補發，確認 `EmailService` log「附圖 2 張」（年圖＋當日圖）。
+- [ ] 159.7 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）。

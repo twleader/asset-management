@@ -524,6 +524,12 @@
 - [ ] **email 內嵌「股票分析走勢圖」PNG**：每檔股票區塊下附一張走勢圖，與畫面 `StockAnalysisDialog` 同資料源（`HistoricalDataService.getStockHistory`，抓 120 個月與畫面同範圍、0000 大盤自動改讀指數表）、同 MA / KD 算法，確保 email 圖與畫面數值一致。圖由後端純 Java（XChart）server-side 渲染，無外部服務依賴；email 改以 HTML（MimeMessage + inline CID 圖片）寄送；任一檔圖渲染失敗則略過該圖、文字內容照寄
 - [ ] **走勢圖須比照畫面：上 pane 股價 + 月線MA20 + 季線MA60 + 年線MA240，下 pane KD（K/D 兩線、0~100、80/20 虛線參考線）**；所有數值寫進圖內 legend（中文名稱 + 最新值，2 位小數含千分位，如「股價 54.35」「季線MA60 45.53」「K 60.15」「D 67.07」）。KD 用與前端 `calcKD` / `TechnicalIndicatorService` 完全相同的算法（period 9、RSV、K=2/3+RSV/3、D=2/3+K/3、seed 50/50、high/low 缺值 fallback close）
 - [ ] **email 走勢圖股價線須標出顯示窗（≈1 年）內的最高 / 最低點**，比照畫面 `StockAnalysisDialog` 的最高 / 最低 markPoint：在最高 / 最低收盤點畫圓點（落在線上）+ 色塊標籤，色塊含**價位（2 位小數含千分位）與日期（`yyyy/MM/dd`）**；紅最高、綠最低（紅漲綠跌）；最高色塊放點下方、最低放點上方並水平夾在圖內避免出界；最高 / 最低同點（區間平盤）只標最高
+- [ ] **email 每檔股票再多嵌一張「當日分時走勢圖」PNG**（Task 159）：年圖下方並列第二張圖，與畫面 `StockAnalysisDialog`「當日」走勢同資料源、同口徑，由 `AlertChartRenderer.renderIntradayPng(code, market)` server-side 渲染（同樣純 Java / XChart，無外部服務依賴）；以第二個 CID inline 內嵌（`cid:intradayN`），故單檔觸發之 digest 應內嵌 **2 張圖**（年圖 + 當日圖）。無當日 tick / 繪圖失敗時**僅略過此圖**，年圖與文字照寄。內容：
+  - **分時價格線**：分時 tick 走 `HistoricalDataService.fetchIntradayTicks(code, market, null)`（date 省略 → ext-materials 取最近有資料的交易日；讀 Redis tick LIST，與畫面「當日」同一支 business API、非直連外部行情）。稀疏 tick（2 分輪詢 / 5 分 K）以「每分鐘最後成交」落點連成連續線
+  - **昨收基準線**：灰虛線水平參考線 + legend「昨收 X.XX」；昨收＝該分時交易日「**前一交易日**」的日線收盤（`stock_price_history`，`tradingDate` 嚴格早於分時交易日的最後一筆），與畫面「當日漲跌」同「vs 前一交易日**原始**收盤」口徑，**不採 Redis `previousClose`**。查無（如新標的僅今日一格）則不畫基準線、線用中性藍
+  - **漲跌色**：最新分時價 ≥ 昨收 → 紅（漲）、否則綠（跌），對齊 `quoteColor` / markPoint「紅漲綠跌」（漲 `#dc2626`、跌 `#16a34a`）；legend 股價值附「▲/▼ 金額（±%）」今日漲跌
+  - **X 軸開盤延伸到收盤**：以該市場交易時段（`MarketZones.openTime/closeTime` 單一事實來源，鏡射畫面 `sessionHours`：台 09:00–13:30 / 美 09:30–16:00 / 英 08:00–16:30）之當日分鐘數為數值 X、min/max 鎖定開收盤，故軸固定延伸到收盤時間而非最後一筆 tick（與畫面 Requirement 13「X 軸延伸到收盤」同視覺行為）。Y 軸鎖定分時區間 + 昨收（各 +10% padding），避免基準線落框外
+  - 另提供 `GET /api/watch-stocks/intraday.png?code=&market=` 預覽端點（比照既有 `chart.png`），供前端預覽 / 驗證；無 tick / 繪圖失敗回 204
 - [ ] **數值入圖後，email 文字精簡**：移除月線/季線/年線/KD 數值文字（已在圖內 legend）；**保留標題（股名/代號/市場 + 觸發條件）、觸發時間、觸發股價**（觸發當下價，與圖內「最新收盤」語意不同，不可省略）
 - [ ] **CJK 字型**：legend 含繁中，runtime image（alpine slim JRE）須裝 `font-noto-cjk`，且須用 `Font.createFonts` 挑出 **TC face**（`.ttc` 的 face 0 為日文變體，直接 `createFont` 會顯示日系字形）
 - [ ] 提供「通知收件人」設定頁（`/notification-settings`，主選單「系統設定」群組內），使用者可新增 / 刪除 / 啟停 email 收件人，至少支援 0 ~ N 筆收件人

@@ -42,7 +42,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 public class AlertNotificationDispatcher {
 
     private static final DateTimeFormatter TS_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
-    /** 單封 digest 內嵌走勢圖張數上限（超過僅文字，避免信件過大）。 */
+    /** 單封 digest 內嵌圖片張數上限（每檔最多 2 張：年圖＋當日分時圖）；達上限後其餘檔僅文字，避免信件過大。 */
     private static final int MAX_CHARTS = 20;
     /** 收盤後仍允許寄送警示 email 的寬限分鐘數（容納 60s flush 延遲與 cron 採樣落後）。 */
     private static final int SEND_GRACE_MINUTES = 10;
@@ -111,9 +111,9 @@ public class AlertNotificationDispatcher {
             return;
         }
 
-        Map<String, Optional<byte[]>> chartCache = new LinkedHashMap<>();   // stockKey → PNG，跨收件人共用避免重複 render
+        Map<String, Optional<byte[]>> chartCache = new LinkedHashMap<>();   // "price|intraday "+stockKey → PNG，跨收件人共用避免重複 render
         for (Map.Entry<String, List<PendingTrigger>> e : byRecipient.entrySet()) {
-            DigestMail mail = buildDigest(e.getValue(), chartCache);   // 同股票多條件合併成一筆，內嵌走勢圖
+            DigestMail mail = buildDigest(e.getValue(), chartCache);   // 同股票多條件合併成一筆，內嵌年圖＋當日分時圖
             String subject = String.format("[資產管理] 股票警示觸發 %d 筆", mail.stockCount());
             emailService.sendHtml(List.of(e.getKey()), subject, mail.html(), mail.inlineImages());
         }
@@ -246,8 +246,8 @@ public class AlertNotificationDispatcher {
     private record DigestMail(String html, Map<String, byte[]> inlineImages, int stockCount) {}
 
     /**
-     * 組單封 digest（給單一收件人）。{@code chartCache}（stockKey → PNG）跨收件人共用，
-     * 同一檔股票的走勢圖只 render 一次；empty 代表已試過但渲染失敗 / 無資料，不重試。
+     * 組單封 digest（給單一收件人）。{@code chartCache}（前綴命名空間 + stockKey → PNG）跨收件人共用，
+     * 同一檔股票的年圖與當日分時圖各只 render 一次；empty 代表已試過但渲染失敗 / 無資料，不重試。
      */
     private DigestMail buildDigest(List<PendingTrigger> batch, Map<String, Optional<byte[]>> chartCache) {
         LinkedHashMap<String, List<PendingTrigger>> grouped = groupByStock(batch);
@@ -279,16 +279,28 @@ public class AlertNotificationDispatcher {
             // 月線 / 季線 / 年線 / KD 數值已全部入圖（PNG legend），文字不再重複列出。
             sb.append(row("觸發股價", formatNumber(latest.price)));
             // 內嵌走勢圖（失敗則略過圖、文字照寄）；每封信內嵌圖數設上限，超過僅文字避免信過大。
-            // 以 stockKey 快取 PNG，跨收件人 / 同封內同股不重複 render。
+            // 每檔最多兩張：年圖（近一年 股價+MA+KD）＋當日分時圖（分時價格線+昨收基準線+漲跌色）。
+            // 以 stockKey（各自前綴命名空間）快取 PNG，跨收件人 / 同封內同股不重複 render。
             if (images.size() < MAX_CHARTS) {
                 String code = latest.stockCode;
                 String market = latest.market;
+                // 年圖
                 Optional<byte[]> png = chartCache.computeIfAbsent(
-                        code + " " + market, k -> chartRenderer.renderPriceMaPng(code, market));
+                        "price " + code + " " + market, k -> chartRenderer.renderPriceMaPng(code, market));
                 if (png.isPresent()) {
                     String cid = "chart" + i;
                     images.put(cid, png.get());
                     sb.append("<img src=\"cid:").append(cid).append("\" alt=\"走勢圖\" ")
+                      .append("style=\"display:block;margin-top:10px;max-width:100%;width:900px;height:auto;")
+                      .append("border:1px solid #eee;border-radius:6px\"/>");
+                }
+                // 當日分時圖（無當日 tick / 繪圖失敗則略過此圖，年圖與文字照寄）
+                Optional<byte[]> intraday = chartCache.computeIfAbsent(
+                        "intraday " + code + " " + market, k -> chartRenderer.renderIntradayPng(code, market));
+                if (intraday.isPresent()) {
+                    String cid = "intraday" + i;
+                    images.put(cid, intraday.get());
+                    sb.append("<img src=\"cid:").append(cid).append("\" alt=\"當日分時走勢圖\" ")
                       .append("style=\"display:block;margin-top:10px;max-width:100%;width:900px;height:auto;")
                       .append("border:1px solid #eee;border-radius:6px\"/>");
                 }
