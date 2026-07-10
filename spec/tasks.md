@@ -4013,3 +4013,31 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - [ ] 161.4 spec：requirements.md Requirement 7 新增 AC、design.md 颱風假段補資料層一體休市、本 Task。
 - [ ] 161.5 Docker：`--no-cache` 重 build ext-materials，recreate；開機 self-heal 自動清 7/10；驗證 `stock_price_history` 無 7/10 台股列、Redis 無 `price:ticks:台股:*:2026-07-10`、`intraday-ticks` 回 7/9、前端「當日」顯示 7/9（英股 7/10 bucket 與大盤不受影響）。
 - [ ] 161.6 commit + 兩段式 merge。
+
+### Task 162：颱風假不寄「今日股市分析」每日 email — 收尾寄信前重驗交易日（縱深守門）
+
+對應 Requirements: Requirement 7（[requirements.md:100](spec/requirements.md)）、Requirement 31（今日股市分析）
+
+#### 需求
+
+颱風假（台股臨時休市）當天不應寄出當日「今日股市分析」每日 email；判斷須走既有共用交易日 API（`MarketDataService.isTwTradingDay`，內部 union `tw_market_closure`）。
+
+#### 稽核結論（多 agent workflow）
+
+稽核 backend + ext 全部 30 個 @Scheduled 與所有寄信/台股寫入路徑，**無 REAL_GAP**：所有會對台股使用者寄 email 的路徑（今日股市分析、股票警示 `StockAlertService` evaluate@295 + flush 送信窗、每日備份）皆已以共用交易日 API 守門。分析 email 的兩個「送出批次」入口（07:30 cron `scheduledAnalysis`@46、開機 self-heal@78）都正確 gate 在 `isTwTradingDay(today)`。三個對抗式驗證視角（批次收尾競態 / 快取傳播延遲 / 繞過入口）在「颱風假已於 07:30 前偵測並傳播」前提下**均無法反駁**「不會誤寄」。
+
+唯一殘留為 **TIMING_ONLY** 窗口：email 真正送出點 `MarketAnalysisService.finalizeIfReady`（[MarketAnalysisService.java:554](backend/src/main/java/com/steven/assets/service/MarketAnalysisService.java)）只收尾「已送出批次」、本身不重驗交易日。若颱風假於 07:30 送出批次**之後**才偵測到（DGPA 晚公告 / business 假日快取 10 分 TTL / 部署晚於盤中，如本次 Task 160 於 16:42 才部署 → 今早 07:33 分析照常產生並於 07:34 寄出），收尾寄信會漏掉 07:30 守門。
+
+#### 設計決策
+
+- **在唯一 email 送出點加縱深守門**：`finalizeIfReady` 於 `emailDispatcher.dispatchDaily` 前對 `analysisDate` 再驗一次 `isTwTradingDay`；非交易日則不寄。email 是不可逆對外動作，於送出前對最新交易日狀態複驗，把殘留時序窗口收成硬 gate。
+- **分析仍落 OK、保持可查閱**：只抑制 email，不清內容；`email_sent_at` 保持 null（語意＝未寄）。OK 列不再被 `pollPendingBatches`（只撈 PROCESSING）撈到，故不會每 90s 重試迴圈。
+- **手動 generate 同受此 gate**：admin 手動重跑亦走此收尾路徑 → 颱風假手動重跑不自動群發，僅供查閱（符合「颱風假不寄台股分析」意圖；admin 仍可頁面檢視）。
+- **不改既有 07:30 排程守門**：主要守門仍在送出批次前（省 API 花費，颱風假根本不送批次）；本 gate 為第二道。
+
+#### 實作
+
+- [ ] 162.1 backend `MarketAnalysisService`：注入 `MarketDataService`；`finalizeIfReady` 於 `dispatchDaily` 前加 `if (!marketDataService.isTwTradingDay(date))` → log 並略過寄信（分析仍 `save` 為 OK）。
+- [ ] 162.2 spec：requirements.md Requirement 7 新增 AC、本 Task。
+- [ ] 162.3 Docker：`--no-cache` 重 build business-services，recreate；驗證颱風假日（如 7/10）收尾不寄、分析仍可查。
+- [ ] 162.4 commit + 兩段式 merge。
