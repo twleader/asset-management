@@ -1,6 +1,7 @@
 package com.steven.assets.service;
 
 import com.steven.assets.model.StockPriceHistory;
+import com.steven.assets.util.MarketZones;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.knowm.xchart.BitmapEncoder;
@@ -32,6 +33,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -39,8 +41,10 @@ import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.TreeMap;
 import java.util.stream.Stream;
 
 /**
@@ -79,6 +83,8 @@ public class AlertChartRenderer {
     private static final int WIDTH = 900;
     private static final int TOP_H = 380;
     private static final int BOT_H = 170;
+    /** 「當日」分時走勢單圖高度（單一 pane、無 KD 副圖）。 */
+    private static final int INTRADAY_H = 420;
 
     // 顏色對齊畫面
     private static final Color C_PRICE = new Color(0x4a, 0x90, 0xe2); // 股價 藍
@@ -91,6 +97,7 @@ public class AlertChartRenderer {
     private static final Color C_GRID  = new Color(0xF0, 0xF0, 0xF0);
     private static final Color C_HIGH  = new Color(0xdc, 0x26, 0x26); // 最高 紅（紅漲，對齊畫面 markPoint）
     private static final Color C_LOW   = new Color(0x16, 0xa3, 0x4a); // 最低 綠（綠跌，對齊畫面 markPoint）
+    private static final Color C_FLAT  = new Color(0x4a, 0x90, 0xe2); // 平盤 / 無昨收可比 中性藍
 
     /** 最高 / 最低標記色塊第二行日期格式（UTC，與 xs 的 atStartOfDay(UTC) 同基準避免時區偏移）。 */
     private static final DateTimeFormatter MARK_DATE = DateTimeFormatter.ofPattern("yyyy/MM/dd");
@@ -150,6 +157,177 @@ public class AlertChartRenderer {
             log.warn("走勢圖 PNG 生成失敗 {} {}: {}", code, market, e.getMessage());
             return Optional.empty();
         }
+    }
+
+    /**
+     * 警示 / 補發 email 內嵌的「當日分時走勢圖」PNG（與年圖並列，同一封信第二張圖）。
+     *
+     * 與畫面 StockAnalysisDialog「當日」走勢同資料源、同版面語意：
+     *  - 分時 tick 走 {@link HistoricalDataService#fetchIntradayTicks}（date=null → ext-materials 取最近有資料的
+     *    交易日；讀 Redis tick LIST，與畫面「當日」同一支 business API，非直連外部行情）。
+     *  - 昨收基準線 = 該分時交易日「前一交易日」的日線收盤（stock_price_history，{@code tradingDate} 嚴格早於
+     *    分時交易日的最後一筆），與畫面「當日漲跌」同「vs 前一交易日原始收盤」口徑；<b>不採 Redis previousClose</b>。
+     *  - 漲跌色：最新分時價 ≥ 昨收 → 紅（漲）、否則綠（跌），對齊 quoteColor / markPoint「紅漲綠跌」；無昨收可比中性藍。
+     *  - X 軸固定「開盤 → 收盤」（{@link MarketZones} 單一事實來源），以當日分鐘數為數值 X、min/max 鎖定開收盤，
+     *    故軸延伸到收盤時間而非最後一筆 tick（與畫面 Requirement 13「X 軸延伸到收盤」同視覺行為）。
+     *
+     * 稀疏 tick（2 分輪詢 / 5 分 K）以「每分鐘最後成交」落點連成連續線（XChart 無 connectNulls，故只畫真實
+     * tick 點、不鋪整段分鐘網格的 null）。Y 軸鎖定分時區間 + 昨收（各 +10% padding），避免基準線落在框外。
+     * 任何失敗（無 tick / 繪圖例外）回 empty，由呼叫端省略此圖但仍寄文字與年圖。
+     */
+    public Optional<byte[]> renderIntradayPng(String code, String market) {
+        try {
+            List<HistoricalDataService.IntradayTick> ticks =
+                    historicalDataService.fetchIntradayTicks(code, market, null);
+            if (ticks == null || ticks.isEmpty()) return Optional.empty();
+
+            // 分時交易日 = 首筆 tick 的 ISO 時間前 10 碼（與畫面 intradayQuote 判定同口徑）
+            LocalDate intradayDate = parseTickDate(ticks.get(0).time());
+            if (intradayDate == null) return Optional.empty();
+
+            // 交易時段 open→close → 當日分鐘數 X 軸範圍（MarketZones 單一事實來源，鏡射畫面 sessionHours）
+            LocalTime open = MarketZones.openTime(market);
+            LocalTime close = MarketZones.closeTime(market);
+            int openMin = open.getHour() * 60 + open.getMinute();
+            int closeMin = close.getHour() * 60 + close.getMinute();
+            if (closeMin <= openMin) return Optional.empty();
+
+            // 每分鐘取最後成交（後到覆寫）、邊界外（開盤前 / 收盤寬限窗）夾到端點；TreeMap 保時間升冪
+            TreeMap<Integer, Double> byMinute = new TreeMap<>();
+            for (HistoricalDataService.IntradayTick t : ticks) {
+                Integer mm = parseTickMinute(t.time());
+                if (mm == null || t.price() == null) continue;
+                int clamped = Math.max(openMin, Math.min(closeMin, mm));
+                byMinute.put(clamped, t.price().doubleValue());
+            }
+            if (byMinute.isEmpty()) return Optional.empty();
+
+            List<Double> xs = new ArrayList<>(), ys = new ArrayList<>();
+            for (Map.Entry<Integer, Double> e : byMinute.entrySet()) {
+                xs.add((double) e.getKey());
+                ys.add(e.getValue());
+            }
+
+            // 昨收：前一交易日日線收盤（與畫面「當日漲跌」同口徑）；查無則不畫基準線、線用中性藍
+            Double prevClose = previousDailyClose(code, market, intradayDate);
+            double lastPrice = ys.get(ys.size() - 1);
+            Color lineColor = (prevClose == null) ? C_FLAT
+                    : (lastPrice >= prevClose ? C_HIGH : C_LOW);   // 紅漲綠跌
+
+            XYChart chart = new XYChartBuilder().width(WIDTH).height(INTRADAY_H).build();
+            XYStyler styler = chart.getStyler();
+            applyCommonStyle(styler);
+            styler.setXAxisMin((double) openMin);
+            styler.setXAxisMax((double) closeMin);   // X 軸固定延伸到收盤（非最後一筆 tick）
+            chart.setCustomXAxisTickLabelsFormatter(v -> minToHHmm((int) Math.round(v)));
+            DecimalFormat nf = new DecimalFormat("#,##0.00");
+            chart.setCustomYAxisTickLabelsFormatter(nf::format);
+            applyIntradayYRange(styler, ys, prevClose);
+
+            // 昨收基準線（先加 → 畫在股價線底下；顯示於 legend 供對照）
+            if (prevClose != null) {
+                addNumericRefLine(chart, "昨收 " + fmt(prevClose), openMin, closeMin, prevClose);
+            }
+
+            // 分時股價線（legend 帶最新價 + 今日漲跌；線色即漲跌色）
+            XYSeries s = chart.addSeries("股價 " + fmt(lastPrice) + changeSuffix(lastPrice, prevClose), xs, ys);
+            s.setMarker(SeriesMarkers.NONE);
+            s.setLineColor(lineColor);
+            s.setLineStyle(new BasicStroke(2.0f));
+
+            BufferedImage img = BitmapEncoder.getBufferedImage(chart);
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            ImageIO.write(img, "png", baos);
+            return Optional.of(baos.toByteArray());
+        } catch (Exception e) {
+            log.warn("當日分時圖 PNG 生成失敗 {} {}: {}", code, market, e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    /** 分時 tick ISO 時間字串 "yyyy-MM-ddTHH:mm:ss" 前 10 碼 → 交易日；格式不符回 null。 */
+    private static LocalDate parseTickDate(String time) {
+        if (time == null || time.length() < 10) return null;
+        try {
+            return LocalDate.parse(time.substring(0, 10));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** 分時 tick 時間字串的 "HH:mm"（第 11–15 碼）→ 當日分鐘數（0..1439）；格式不符回 null。 */
+    private static Integer parseTickMinute(String time) {
+        if (time == null || time.length() < 16) return null;
+        String hhmm = time.substring(11, 16);
+        if (!hhmm.matches("\\d\\d:\\d\\d")) return null;
+        int h = Integer.parseInt(hhmm.substring(0, 2));
+        int m = Integer.parseInt(hhmm.substring(3, 5));
+        return h * 60 + m;
+    }
+
+    /** 當日分鐘數 → "HH:mm"（X 軸刻度標籤）。 */
+    private static String minToHHmm(int minuteOfDay) {
+        int m = Math.max(0, minuteOfDay);
+        return String.format("%02d:%02d", (m / 60) % 24, m % 60);
+    }
+
+    /**
+     * 昨收 = 分時交易日「前一交易日」日線收盤：讀 {@link HistoricalDataService#getStockHistory}（升冪），
+     * 取 {@code tradingDate} 嚴格早於分時交易日的最後一筆收盤。查無（如新標的僅今日一格）回 null。
+     * 併入的今日即時價其 {@code tradingDate} == 分時交易日，因嚴格早於條件自動排除，不會誤取。
+     */
+    private Double previousDailyClose(String code, String market, LocalDate intradayDate) {
+        try {
+            List<StockPriceHistory> hist = historicalDataService.getStockHistory(
+                    code, market, intradayDate.minusMonths(2), intradayDate);
+            if (hist == null) return null;
+            Double prev = null;
+            for (StockPriceHistory h : hist) {
+                if (h.getTradingDate() != null && h.getTradingDate().isBefore(intradayDate)
+                        && h.getClosePrice() != null) {
+                    prev = h.getClosePrice().doubleValue();
+                }
+            }
+            return prev;
+        } catch (Exception e) {
+            log.warn("昨收查詢失敗 {} {}: {}", code, market, e.getMessage());
+            return null;
+        }
+    }
+
+    /** 分時 Y 軸：涵蓋分時區間與昨收基準線，上下各 +10% padding（比照畫面當日鎖定區間，基準線不落框外）。 */
+    private static void applyIntradayYRange(XYStyler styler, List<Double> ys, Double prevClose) {
+        double lo = Double.POSITIVE_INFINITY, hi = Double.NEGATIVE_INFINITY;
+        for (Double y : ys) {
+            if (y == null) continue;
+            lo = Math.min(lo, y);
+            hi = Math.max(hi, y);
+        }
+        if (prevClose != null) { lo = Math.min(lo, prevClose); hi = Math.max(hi, prevClose); }
+        if (lo == Double.POSITIVE_INFINITY) return;
+        double pad = (hi - lo) * 0.1;
+        if (pad == 0) pad = Math.abs(hi) * 0.001;   // 平盤 / 單點：給極小 padding 避免 min==max
+        if (pad == 0) pad = 1;
+        styler.setYAxisMin(lo - pad);
+        styler.setYAxisMax(hi + pad);
+    }
+
+    /** 數值 X 軸的水平參考線（昨收）：兩端點灰虛線；顯示於 legend（與 K/D 隱藏式參考線不同）。 */
+    private static void addNumericRefLine(XYChart chart, String name, int xFrom, int xTo, double y) {
+        XYSeries s = chart.addSeries(name, List.of((double) xFrom, (double) xTo), List.of(y, y));
+        s.setMarker(SeriesMarkers.NONE);
+        s.setLineColor(C_REF);
+        s.setLineStyle(new BasicStroke(1.2f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_BEVEL,
+                1f, new float[]{5f, 4f}, 0f));   // 虛線
+    }
+
+    /** 今日漲跌後綴「▲/▼金額 (±%)」，供 legend 股價值附註；無昨收回空字串。漲跌方向由線色（紅漲綠跌）表達。 */
+    private static String changeSuffix(double lastPrice, Double prevClose) {
+        if (prevClose == null || prevClose == 0) return "";
+        double chg = lastPrice - prevClose;
+        double pct = chg / prevClose * 100;
+        String arrow = chg > 0 ? "▲" : chg < 0 ? "▼" : "";
+        return String.format(" %s%,.2f (%+.2f%%)", arrow, Math.abs(chg), pct);
     }
 
     // ── 上 pane：股價 + 3 條 MA ────────────────────────────────

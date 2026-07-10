@@ -75,4 +75,15 @@ public class WatchStockController {
                 .map(png -> ResponseEntity.ok().contentType(MediaType.IMAGE_PNG).body(png))
                 .orElseGet(() -> ResponseEntity.noContent().build());
     }
+
+    /**
+     * 當日分時走勢圖 PNG 預覽：與警示 email 內嵌的同一張「當日分時圖」（分時價格線 + 昨收基準線 + 漲跌色，
+     * X 軸開盤→收盤）。供前端預覽 / 驗證用；無當日 tick 或繪圖失敗回 204。
+     */
+    @GetMapping(value = "/intraday.png", produces = MediaType.IMAGE_PNG_VALUE)
+    public ResponseEntity<byte[]> intradayPng(@RequestParam String code, @RequestParam String market) {
+        return chartRenderer.renderIntradayPng(code, market)
+                .map(png -> ResponseEntity.ok().contentType(MediaType.IMAGE_PNG).body(png))
+                .orElseGet(() -> ResponseEntity.noContent().build());
+    }
 }

@@ -906,7 +906,8 @@ PATCH  /api/settings/deposit-types/{id}/active # 啟用/停用存款類型
 GET    /api/watch-stocks                       # 列出所有觀察股票（去重後含最新報價、警示彙總）
 PUT    /api/watch-stocks/order                 # body: [{stockCode, market}] 陣列；把每個股票所有 alert 的 displayOrder 整組重排
 POST   /api/watch-stocks/resend-digest?market= # 補發：指定市場（台股/美股/英股）最後交易日觸發事件彙整為單封 digest email 重寄；market 省略則全市場（Requirement 23、Task 128）
-GET    /api/watch-stocks/chart.png             # 警示 email 內嵌的股票分析走勢圖 PNG（XChart server-side 渲染）
+GET    /api/watch-stocks/chart.png             # 警示 email 內嵌的股票分析「近一年」走勢圖 PNG（XChart server-side 渲染）
+GET    /api/watch-stocks/intraday.png          # 警示 email 內嵌的「當日分時」走勢圖 PNG（分時價格線 + 昨收基準線 + 漲跌色、X 軸開盤→收盤；Task 159）
 ```
 新增 / 移除觀察一律透過 `/api/stock-alerts` 操作對應 alert：建立第一筆 alert 即出現於觀察清單，刪除最後一筆 alert 即從觀察清單消失。
 
@@ -1378,7 +1379,7 @@ StockAlertService.evaluate()
                                   │     盤外市場本輪丟棄；全部盤外 → return
                                   ├─ 逐筆觸發查其警示選定且 active 的收件人 email（recipientsFor(alertId)）
                                   ├─ 反轉分組 → Map<email, List<觸發>>（每位收件人只含其訂閱的觸發）
-                                  └─ 對每位收件人各組一封 digest（走勢圖 PNG 以 stock 為 key 跨收件人快取）
+                                  └─ 對每位收件人各組一封 digest（每檔年圖＋當日分時圖 2 張 PNG，以 stock 為 key 跨收件人快取）
                                        └─ EmailService.sendHtml([email], subject, html, images)
                                                 ├─ MAIL_USERNAME 未設 → log.warn skip
                                                 └─ SMTP 失敗 → log.warn 不重試
@@ -1408,7 +1409,7 @@ StockAlertService.evaluate()
 
 **HTML 信 + 內嵌走勢圖（Task 93）**：
 - digest / 補發信改以 HTML 寄送：`EmailService.sendHtml(recipients, subject, html, inlineImages)` 用 `MimeMessage` + `MimeMessageHelper(multipart)`，`setText(html, true)` 後逐一 `addInline(cid, ByteArrayResource(png), "image/png")`
-- `AlertNotificationDispatcher.buildDigest()` 回 `DigestMail{html, inlineImages(cid→png), stockCount}`：每檔股票區塊組好文字後，呼叫 `AlertChartRenderer.renderPriceMaPng(code, market)` 取圖，成功則 `images.put("chart{i}", png)` 並插入 `<img src="cid:chart{i}">`
+- `AlertNotificationDispatcher.buildDigest()` 回 `DigestMail{html, inlineImages(cid→png), stockCount}`：每檔股票區塊組好文字後，**依序取兩張圖各以獨立 CID 內嵌**——(1) 年圖 `renderPriceMaPng(code, market)` → `images.put("chart{i}", png)` + `<img src="cid:chart{i}">`；(2) 當日分時圖 `renderIntradayPng(code, market)` → `images.put("intraday{i}", png)` + `<img src="cid:intraday{i}">`。兩者各自 `Optional`：任一 empty 只略過該圖、另一圖與文字照寄。`chartCache` 以 `"price "` / `"intraday "` 前綴命名空間 + `stockCode+market` 為 key 跨收件人共用，同檔兩圖各只 render 一次（單檔觸發之 digest 內嵌 2 張圖）
 - `AlertChartRenderer`：純 Java（XChart）server-side 繪圖，**上下雙 pane 合成一張 PNG**（Graphics2D 垂直拼接）：
   - 資料一律走 `HistoricalDataService.getStockHistory(code, market, end-120M, end)`（與畫面 `StockAnalysisDialog` **同 120 個月範圍**、0000 自動讀 `twse_index_daily_history` 含 OHLC、併今日即時價）
   - MA：與前端 `calcMA` 相同——**每點對 window 重新加總**（非滑動扣減，避免長序列累積誤差）+ `BigDecimal HALF_UP` 2 位
@@ -1417,6 +1418,12 @@ StockAlertService.evaluate()
   - **股價線標最高 / 最低點**（比照畫面 `StockAnalysisDialog` 的 markPoint）：`addHiLoMarkers` 找顯示窗（≈252 日）內股價最高 / 最低收盤，各以 `HiLoMarker`（自訂 `Annotation` 子類）畫出——圓點落在線上 + 圓角色塊兩行（第一行「最高/最低 + 價位 `%,.2f`」、第二行日期 `yyyy/MM/dd`），紅最高(#dc2626) / 綠最低(#16a34a)（紅漲綠跌）。色塊位置：最高放點下方、最低放點上方，水平夾在 plot 內避免出界。最高 / 最低同點（區間平盤）只畫最高。座標用 `Annotation.getXAxisScreenValue/getYAxisScreenValue`（paint 時軸範圍已算妥）→ 點精準落線上；不用 `AnnotationText`（其字色由 styler 全域共用、無法逐點分紅綠）
   - legend 文字 = 中文名稱 + 空白 + 最新值（`%,.2f`），白底，與畫面同
   - 失敗回 empty → 略過該圖、文字照寄。每封信內嵌圖數設上限（超過則該檔僅文字），`sendHtml` log 內嵌總位元組
+- `AlertChartRenderer.renderIntradayPng(code, market)`（Task 159）：警示 email 第二張圖「當日分時走勢」，**單一 pane**（無 KD 副圖），與畫面 `StockAnalysisDialog`「當日」同資料源、同口徑：
+  - 分時 tick 走 `HistoricalDataService.fetchIntradayTicks(code, market, null)`（date 省略 → ext-materials 取最近有資料交易日、讀 Redis tick LIST，與畫面「當日」同一支 business API）；分時交易日 = 首筆 tick `time` 前 10 碼
+  - **昨收基準線**：`previousDailyClose` 讀 `getStockHistory(code, market, 分時日-2M, 分時日)`（升冪），取 `tradingDate` **嚴格早於**分時交易日的最後一筆收盤（併入的今日即時價其 `tradingDate==分時日`，因嚴格早於自動排除）；與畫面「當日漲跌」同「vs 前一交易日原始收盤」口徑，**不採 Redis previousClose**。灰虛線 + legend「昨收 X.XX」；查無則不畫、線用中性藍
+  - **漲跌色**：最新分時價 ≥ 昨收 → 紅(#dc2626 漲) / 否則綠(#16a34a 跌)（紅漲綠跌，對齊 `quoteColor`）；legend 股價值附「▲/▼ 金額（±%）」
+  - **X 軸開盤→收盤**：以 `MarketZones.openTime/closeTime`（單一事實來源）之當日分鐘數為**數值 X**、`setXAxisMin/Max` 鎖定開收盤，`setCustomXAxisTickLabelsFormatter` 轉 `HH:mm`；故軸固定延伸到收盤而非最後一筆 tick。稀疏 tick 以 `TreeMap<分鐘,價>`「每分鐘最後成交」落點連續線（XChart 無 `connectNulls`，故只畫真實 tick 點、不鋪 null 網格）。Y 軸涵蓋分時區間 + 昨收（各 +10% padding），基準線不落框外
+  - 失敗（無 tick / 繪圖例外）回 empty → 僅略過此圖。CJK 字型與年圖共用同一 `CJK_FONT`。另有預覽端點 `GET /api/watch-stocks/intraday.png`（比照 `chart.png`，無 tick 回 204）
 - `AlertNotificationDispatcher.buildDigest`：數值入圖後文字精簡——保留「標題 + 觸發時間 + **觸發股價**」，移除月/季/年線/KD 文字列（圖內已有）。`<img width:900px>`
 - **字型依賴**：runtime image 為 `eclipse-temurin:21-jre-alpine`（slim、無 CJK 字型）→ backend `Dockerfile` apk 裝 `fontconfig ttf-dejavu font-noto-cjk freetype` 並 `fc-cache -f`，ENTRYPOINT 加 `-Djava.awt.headless=true`。`AlertChartRenderer.loadCjkFont` 用 **`Font.createFonts`（複數）挑 TC face**（`.ttc` 的 face 0 為 JP 變體，`createFont` 單數會選到日系字形）；找不到則 fallback SANS_SERIF
 - 預覽 / 驗證端點：`GET /api/watch-stocks/chart.png?code=&market=`（BFF passthrough `/api/bff/watch-stock/chart.png`）回同一張 PNG，資料不足回 204
