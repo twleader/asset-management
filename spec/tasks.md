@@ -3936,6 +3936,6 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 159.2 `AlertNotificationDispatcher.buildDigest`：年圖後多取 `renderIntradayPng` 以 `cid:intraday{i}` 內嵌；`chartCache` key 改前綴命名空間（`"price "` / `"intraday "`）；更新 `MAX_CHARTS` 註解為「每檔最多 2 張」。
 - [x] 159.3 `WatchStockController`：新增預覽端點 `GET /api/watch-stocks/intraday.png?code=&market=`（比照 `chart.png`，無 tick / 繪圖失敗回 204）。
 - [x] 159.4 spec：`requirements.md` Requirement 23 新增本 AC；`design.md`（endpoint 清單 + 警示 email 章節 + `AlertChartRenderer` 段）補 `renderIntradayPng` 說明；本 Task。
-- [ ] 159.5 Docker：從本 worktree `--no-cache` 重 build `business-services` image + recreate `asset-business-services`；unzip `/app/app.jar` 取 `AlertChartRenderer.class`、grep `renderIntradayPng` 確認部署非 stale。
-- [ ] 159.6 手動驗證：`curl /api/watch-stocks/intraday.png?code=&market=` 回 200 PNG（有當日 tick 之標的）；實際寄信驗證改由既有觸發 / 補發，確認 `EmailService` log「附圖 2 張」（年圖＋當日圖）。
-- [ ] 159.7 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）。
+- [x] 159.5 Docker：從本 worktree `--no-cache` 重 build `business-services` + recreate `asset-business-services`（(healthy)）；容器內 unzip `/app/app.jar` 取 `AlertChartRenderer.class` = 28606 bytes（與本地編譯逐位元組相同）、grep `renderIntradayPng`=2，確認部署非 stale。
+- [x] 159.6 手動驗證：`curl /api/watch-stocks/intraday.png` 回 200 PNG——2330（16KB，dev 資料當日平盤 2415）、英股 CSPX（25KB，倫敦盤中真實起伏）肉眼確認分時線＋昨收灰虛線＋紅漲色＋X 軸延伸到收盤（線止於最新 tick 08:54、軸到 16:30）。實際寄信：以 owner 1 租戶 header 觸發美股補發（只寄 `shi.chihung@gmail.com` 一人），`EmailService` log「附圖 6 張」＝3 檔 ×（年圖＋當日圖），零 DB 變更。
+- [x] 159.7 commit + 兩段式 merge（feature `a90c61f` → main `b0912eb`，`--no-ff`，已 push origin）。
