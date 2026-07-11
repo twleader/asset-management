@@ -648,11 +648,13 @@ const kpiCards = computed(() => {
   const prevTotal = prev ? Number(prev.totalAssets || 0) : 0
   const change = prevTotal > 0 ? ((total - prevTotal) / prevTotal * 100).toFixed(1) : null
 
-  // 第 4 張「信託基金」卡改為「債券」：顯示資產類別歸類（Requirement 25）的 bondValue
-  // （債券型：債券 ETF ＋ 債券型基金），與「現金/債券/股票」圓餅圖同源（history row），
-  // 採快照凍結逐筆 currentValue、不套盤中 live（同 Req 25，與圓餅圖同值）。
-  // 註：「股票現值」卡維持原樣（全股票即時值，本就含債券 ETF），故與「債券」卡刻意重疊、五卡不再嚴格加總。
+  // 「股票現值」「債券現值」兩卡皆用「現金/債券/股票」圓餅圖同邏輯（Requirement 25）：
+  //   股票現值 = stockValue（股票型：一般股票/ETF ＋ 股票型基金，不含債券 ETF）
+  //   債券現值 = bondValue（債券型：債券 ETF ＋ 債券型基金）
+  // 與圓餅圖同源（history row）、同值：兩卡佔比 == 圓餅圖股票／債券；存款+股票現值+債券現值 == 資產總計。
+  // 採快照凍結逐筆 currentValue、不套盤中 live（同 Req 25，與圓餅圖一致）。
   const classRow = store.history.find(r => r.id === s.id)
+  const stockClassified = Number(classRow?.stockValue || 0)
   const bondClassified = Number(classRow?.bondValue || 0)
   const pctOfTotal = v => total > 0 ? (v / total * 100).toFixed(1) : '0.0'
 
@@ -671,12 +673,12 @@ const kpiCards = computed(() => {
     },
     {
       label: '股票現值', icon: 'TrendCharts',
-      value: formatCurrency(s.totalStockValue), bg: '#fef3c7', color: '#d97706',
-      sub: `損益 ${formatCurrency(s.stockProfit)}`,
-      valueColor: Number(s.stockProfit) >= 0 ? '#16a34a' : '#dc2626'
+      value: formatCurrency(stockClassified), bg: '#fef3c7', color: '#d97706',
+      sub: `佔比 ${pctOfTotal(stockClassified)}%`,
+      valueColor: '#1e293b'
     },
     {
-      label: '債券', emoji: '📜',
+      label: '債券現值', emoji: '📜',
       value: formatCurrency(bondClassified), bg: '#f0fdfa', color: '#0d9488',
       sub: `佔比 ${pctOfTotal(bondClassified)}%`,
       valueColor: '#1e293b'
