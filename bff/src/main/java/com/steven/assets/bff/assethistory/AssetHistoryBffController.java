@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
@@ -144,6 +145,17 @@ public class AssetHistoryBffController {
     public Mono<ResponseEntity<Map<String, Object>>> runExportNow() {
         return businessServicesClient.post()
                 .uri("/api/export-schedule/run-now")
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .map(ResponseEntity::ok);
+    }
+
+    // 唯讀資料夾瀏覽（檔案總管式選擇器逐層懶載入）；subpath 由 WebClient 展開並 URL-encode。
+    @GetMapping("/export-schedule/browse")
+    public Mono<ResponseEntity<Map<String, Object>>> browseExportDir(
+            @RequestParam(value = "subpath", required = false, defaultValue = "") String subpath) {
+        return businessServicesClient.get()
+                .uri("/api/export-schedule/browse?subpath={subpath}", subpath)
                 .retrieve()
                 .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
                 .map(ResponseEntity::ok);

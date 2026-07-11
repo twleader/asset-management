@@ -166,7 +166,8 @@ export const bffApi = {
     exportExcel:       () => api.get('/bff/asset-history/export', { responseType: 'blob' }),
     getExportSchedule:    () => api.get('/bff/asset-history/export-schedule', { skipErrorToast: true }),
     updateExportSchedule: (data) => api.put('/bff/asset-history/export-schedule', data, { skipErrorToast: true }),
-    runExportNow:         () => api.post('/bff/asset-history/export-schedule/run-now', null, { timeout: 60000, skipErrorToast: true })
+    runExportNow:         () => api.post('/bff/asset-history/export-schedule/run-now', null, { timeout: 60000, skipErrorToast: true }),
+    browseExportDir:      (subpath = '') => api.get('/bff/asset-history/export-schedule/browse', { params: { subpath }, skipErrorToast: true })
   },
 
   // RealizedGain

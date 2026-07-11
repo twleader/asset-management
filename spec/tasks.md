@@ -4287,7 +4287,19 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - [x] 171.7 前端：`AssetHistoryView.vue` 新增「排程自動匯出」設定卡（開關／時間／子路徑／立即匯出／上次執行）；`api/index.js` `bffApi.assetHistory` 加 `getExportSchedule`／`updateExportSchedule`／`runExportNow`；手動匯出檔名維持。
 - [x] 171.8 Docker：`docker-compose.yml` business-services 加 volume `${EXPORT_OUTPUT_DIR_HOST:-/Users/steven/Project/SRPP/data}:/data/export-output` ＋ env `EXPORT_OUTPUT_DIR=/data/export-output`；`.env.example` 加 `EXPORT_OUTPUT_DIR_HOST`。
 - [x] 171.9 Docker 驗證：`--no-cache` 重 build business-services、bff，build frontend，recreate；端到端驗證（手動下載含彙總表、run-now 後 host 目錄出現 xlsx、設定存取 owner-scoped、時間到點自動產檔）。
-- [ ] 171.10 commit + 兩段式 merge。
+- [x] 171.10 commit + 兩段式 merge。
+
+#### 本次增修：排程改匯出「當前即時資產」＋家目錄為根＋檔案總管式資料夾選擇
+
+- [ ] 171.11 ExcelExportService：新增 `exportLiveAssets()`／`exportLiveAssetsForOwner(ownerId)`／`buildLiveWorkbook()`／`writeLiveAssetsSheet()`（資料源 `StockPriceService.getLiveAssets()` ＋最新快照 deposits/funds 明細）；抽出 `stockCostTwd()` 供 snapshot／live 兩處共用。注入 `StockPriceService`（無循環依賴）。
+- [ ] 171.12 ExportScheduleService：`EXPORT_OUTPUT_DIR` 預設改 `/home/steven`；`runNowForCurrentUser()`→`exportLiveAssets()`、`runScheduled()`→`exportLiveAssetsForOwner()`；新增唯讀 `browse(subpath)`（`startsWith(base)` 驗證、`Files.list` 僅子目錄、隱藏 dotfiles、依名排序）。
+- [ ] 171.13 Controller＋DTO：`ExportScheduleController` 加 `GET /browse`；`ExportScheduleDto` 加 `BrowseResponse`／`DirEntry`。
+- [ ] 171.14 BFF：`AssetHistoryBffController` 加 `GET /export-schedule/browse`（passthrough，帶 `subpath` query）。
+- [ ] 171.15 前端 API：`api/index.js` `bffApi.assetHistory` 加 `browseExportDir(subpath)`。
+- [ ] 171.16 前端 UI：`AssetHistoryView.vue` 標題改「排程自動匯出最新資產」；輸出資料夾改 `el-tree` 懶載入樹狀選擇對話框 ＋可選填「新增子資料夾名稱」；更新提示文字（家目錄根 `/home/steven` → host `/Users/steven`、匯出當前即時資產）。
+- [ ] 171.17 Docker：`docker-compose.yml` `EXPORT_OUTPUT_DIR=/home/steven`、volume `${EXPORT_OUTPUT_DIR_HOST:-/Users/steven}:/home/steven`；`.env.example` `EXPORT_OUTPUT_DIR_HOST=/Users/steven`。
+- [ ] 171.18 建置驗證：`--no-cache` 重 build business-services、bff，build frontend，recreate；驗證資料夾樹瀏覽、run-now 產「當前即時資產」xlsx（股票即時價）、標題正確。
+- [ ] 171.19 commit + 兩段式 merge。
 
 ---
 

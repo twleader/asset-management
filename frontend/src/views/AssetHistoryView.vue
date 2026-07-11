@@ -68,7 +68,7 @@
     <el-card style="margin-bottom:20px">
       <template #header>
         <div style="display:flex;align-items:center;justify-content:space-between">
-          <span class="section-title">⏱️ 排程自動匯出</span>
+          <span class="section-title">⏱️ 排程自動匯出最新資產</span>
           <div style="display:flex;gap:8px">
             <el-button size="small" :icon="Download" :loading="runningNow" @click="handleRunNow">立即匯出到目錄</el-button>
             <el-button size="small" type="primary" :loading="savingSchedule" @click="saveSchedule">儲存設定</el-button>
@@ -83,19 +83,51 @@
           <el-time-picker v-model="scheduleTime" format="HH:mm" value-format="HH:mm"
             placeholder="時:分" style="width:130px" />
         </el-form-item>
-        <el-form-item label="輸出子資料夾">
-          <el-input v-model="schedule.outputSubpath" placeholder="input" style="width:180px" />
+        <el-form-item label="輸出資料夾">
+          <el-input v-model="schedule.outputSubpath" readonly placeholder="（家目錄根）" style="width:240px">
+            <template #append>
+              <el-button :icon="FolderOpened" @click="openDirPicker">選擇</el-button>
+            </template>
+          </el-input>
         </el-form-item>
       </el-form>
       <div class="schedule-hint">
-        檔案寫入容器基底目錄 <code>{{ schedule.baseDir || '/data/export-output' }}</code> 下的子資料夾（對映主機
-        <code>/Users/steven/Project/SRPP/data</code>）。例如子資料夾填 <code>input</code> →
-        主機 <code>/Users/steven/Project/SRPP/data/input</code>；每日產生 <code>資產總覽_{使用者ID}_YYYYMMDD.xlsx</code>。
+        以主機家目錄 <code>{{ schedule.baseDir || '/home/steven' }}</code> 為根（對映主機
+        <code>/Users/steven</code>）。按上方「選擇」開啟檔案總管式選擇器挑選子資料夾；例如選 <code>input</code> →
+        主機 <code>/Users/steven/input</code>。每日於指定時間匯出「當前即時資產」為
+        <code>資產總覽_{使用者ID}_YYYYMMDD.xlsx</code>（股票以即時股價估值，存款／基金取最新快照）。
       </div>
       <div v-if="schedule.lastRunAt || schedule.lastRunStatus" class="schedule-status">
         上次執行：{{ schedule.lastRunAt || '—' }}　{{ schedule.lastRunStatus || '' }}
       </div>
     </el-card>
+
+    <!-- 輸出資料夾選擇器（檔案總管式樹狀，Requirement 34 增修） -->
+    <el-dialog v-model="dirPicker.visible" title="選擇輸出資料夾" width="560px">
+      <div class="dir-picker-path">
+        目前選擇：<code>{{ dirPicker.baseDir || '/home/steven' }}{{ dirPicker.picked ? '/' + dirPicker.picked : '' }}{{ dirPicker.newSub.trim() ? '/' + dirPicker.newSub.trim() : '' }}</code>
+      </div>
+      <el-tree
+        :key="dirPicker.treeKey"
+        lazy
+        :load="loadDirNode"
+        :props="dirTreeProps"
+        node-key="key"
+        highlight-current
+        :expand-on-click-node="false"
+        :default-expanded-keys="['__root__']"
+        class="dir-tree"
+        @node-click="onDirNodeClick" />
+      <div class="dir-new-sub">
+        <span class="dns-label">新增子資料夾</span>
+        <el-input v-model="dirPicker.newSub" placeholder="（選填）在所選資料夾下新增，寫檔時自動建立"
+          style="width:340px" clearable />
+      </div>
+      <template #footer>
+        <el-button @click="dirPicker.visible = false">取消</el-button>
+        <el-button type="primary" @click="confirmDirPick">確定</el-button>
+      </template>
+    </el-dialog>
 
     <!-- Charts -->
     <el-row :gutter="20">
@@ -145,7 +177,7 @@ import { CanvasRenderer } from 'echarts/renderers'
 import { LineChart, BarChart } from 'echarts/charts'
 import { TitleComponent, TooltipComponent, LegendComponent, GridComponent, MarkLineComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
-import { Plus, Download, Edit, Delete, Refresh } from '@element-plus/icons-vue'
+import { Plus, Download, Edit, Delete, Refresh, FolderOpened } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
 import { bffApi } from '@/api'
@@ -161,6 +193,10 @@ const schedule = reactive({ enabled: false, runHour: 8, runMinute: 0, outputSubp
 const scheduleTime = ref('08:00')
 const savingSchedule = ref(false)
 const runningNow = ref(false)
+
+// 輸出資料夾選擇器（檔案總管式樹狀，Requirement 34 增修）
+const dirPicker = reactive({ visible: false, baseDir: '', picked: '', newSub: '', treeKey: 0 })
+const dirTreeProps = { label: 'name', isLeaf: 'leaf' }
 
 const reload = async () => { history.value = await bffApi.assetHistory.getHistory() }
 
@@ -248,6 +284,39 @@ async function handleRunNow() {
     runningNow.value = false
   }
   loadSchedule().catch(() => {}) // 刷新上次執行資訊，失敗不影響匯出結果
+}
+
+function openDirPicker() {
+  dirPicker.picked = schedule.outputSubpath || ''
+  dirPicker.newSub = ''
+  dirPicker.treeKey++            // 強制 el-tree 重新懶載入 root
+  dirPicker.visible = true
+}
+
+// el-tree 懶載入：level 0 以家目錄為單一 root；其餘列該節點子目錄
+async function loadDirNode(node, resolve) {
+  try {
+    if (node.level === 0) {
+      const res = await bffApi.assetHistory.browseExportDir('')
+      dirPicker.baseDir = res.baseDir || ''
+      resolve([{ name: res.baseDir || '/', path: '', key: '__root__', leaf: false }])
+      return
+    }
+    const res = await bffApi.assetHistory.browseExportDir(node.data.path || '')
+    resolve((res.directories || []).map(d => ({ name: d.name, path: d.path, key: d.path, leaf: false })))
+  } catch (e) {
+    resolve([])
+  }
+}
+
+const onDirNodeClick = (data) => { dirPicker.picked = data.path || '' }
+
+function confirmDirPick() {
+  let p = dirPicker.picked || ''
+  const sub = (dirPicker.newSub || '').trim().replace(/^\/+|\/+$/g, '')
+  if (sub) p = p ? `${p}/${sub}` : sub
+  schedule.outputSubpath = p
+  dirPicker.visible = false
 }
 
 const fmt = (v) => {
@@ -432,4 +501,9 @@ const increaseOption = computed(() => {
 .schedule-hint { font-size: 12px; color: #94a3b8; line-height: 1.6; }
 .schedule-hint code { background: #f1f5f9; color: #475569; padding: 1px 5px; border-radius: 4px; font-size: 11px; }
 .schedule-status { margin-top: 8px; font-size: 12px; color: #64748b; }
+.dir-picker-path { font-size: 13px; color: #475569; margin-bottom: 10px; }
+.dir-picker-path code { background: #f1f5f9; color: #0f172a; padding: 2px 6px; border-radius: 4px; word-break: break-all; }
+.dir-tree { max-height: 340px; overflow: auto; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px; }
+.dir-new-sub { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+.dir-new-sub .dns-label { font-size: 13px; color: #475569; white-space: nowrap; }
 </style>
