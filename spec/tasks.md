@@ -4258,3 +4258,33 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - [x] 170.7 資料回補：跑 `refresh-tr`（TWSE 報酬指數 ~10 年）＋ `refreshUsIndexDaily("SP500TR")`，驗 DB `close_point_tr`／`SP500TR` 列數與範圍。
 - [x] 170.8 Docker：`--no-cache` 重 build business-services、external-materials-service、bff、build frontend，recreate；端到端驗證（含息 vs 純價格切換、個股再投入 > 純價格、TWSE/SPX 含息線、DJI/IXIC/SOX priceOnly 標示、英股不誤標、無股利個股降級不 500）。
 - [ ] 170.9 commit + 兩段式 merge。
+
+---
+
+### Task 171：歷年資產 Excel 匯出增強（當前彙總表）＋ per-user 每日排程自動匯出
+
+對應 Requirements: Requirement 34（[requirements.md](spec/requirements.md)）
+
+#### 需求
+
+歷年資產頁既有「匯出 Excel」按鈕增強為「完整匯出 ＋ 第一張『當前彙總』總表」；並新增 per-user 每日排程，於使用者設定的時:分把完整匯出寫到指定目錄（容器基底 `EXPORT_OUTPUT_DIR` ＋ 使用者相對子路徑，volume 對映到 host `/Users/steven/Project/SRPP/data`）。
+
+#### 設計決策
+
+- **內容單一來源**：手動與排程共用 `ExcelExportService`；`exportFull()`（HTTP、aspect owner-scoped）與 `exportFullForOwner(ownerId)`（背景、手動 `enableFilter`）皆走同一 `buildWorkbook()`，僅 owner 縮限方式不同。
+- **可調時間排程**：`@Scheduled` cron 啟動期固定，改「每分鐘 poll ＋ 當日 guard ＋ 開機自癒補跑」讓時間 DB 可調（比照 `MarketAnalysisScheduler`）。
+- **per-user 設定**：`export_schedule_setting` 每 owner 一列、`@Filter(ownerFilter)`；HTTP 走 BFF→business 自動 scope 本人；背景 cron 讀全部列、逐列對該 owner `enableFilter` 產檔。
+- **路徑安全**：UI 只填相對子路徑，後端 `base.resolve(sub).normalize().startsWith(base)` 驗證，拒 `..`／絕對路徑跳脫；不讓 UI 指定任意檔案系統路徑。
+
+#### 實作
+
+- [x] 171.1 spec：requirements.md Requirement 34、design.md `## Requirement 34`、本 Task。
+- [x] 171.2 DB＋entity：Liquibase `v1.53.0-export-schedule-setting.sql`（建 `export_schedule_setting`，`owner_user_id` UNIQUE、`enabled`／`run_hour`／`run_minute`／`output_subpath`／`last_run_date`／`last_run_at`／`last_run_status`／`updated_at`）＋ master include；`ExportScheduleSetting` entity（`@Filter(ownerFilter)`）＋ `ExportScheduleSettingRepository`。
+- [x] 171.3 ExcelExportService：`writeCurrentSummarySheet()`（讀最新快照彙總）＋重構 `exportFull()` 先寫彙總表；新增 `exportFullForOwner(Long ownerId)`（`@Transactional` 內 `enableFilter` 後共用 `buildWorkbook()`）。
+- [x] 171.4 排程 service：`ExportScheduleService`（`@Scheduled(cron="0 * * * * *", zone="Asia/Taipei")` 每分鐘檢查 enabled＋時分＋當日未跑 → 逐 owner 產檔寫 `EXPORT_OUTPUT_DIR/<subpath>`；`ApplicationReadyEvent` 補跑；路徑驗證；`runNow(ownerId)`）。
+- [x] 171.5 controller＋DTO：`ExportScheduleController`（`/api/export-schedule` GET/PUT `/settings`、`POST /run-now`，owner-scoped、非 admin）＋ `ExportScheduleDto`。
+- [x] 171.6 BFF：`AssetHistoryBffController` 加 `GET/PUT /export-schedule`、`POST /export-schedule/run-now`（沿用 `businessServicesClient` 自動帶身分）。
+- [x] 171.7 前端：`AssetHistoryView.vue` 新增「排程自動匯出」設定卡（開關／時間／子路徑／立即匯出／上次執行）；`api/index.js` `bffApi.assetHistory` 加 `getExportSchedule`／`updateExportSchedule`／`runExportNow`；手動匯出檔名維持。
+- [x] 171.8 Docker：`docker-compose.yml` business-services 加 volume `${EXPORT_OUTPUT_DIR_HOST:-/Users/steven/Project/SRPP/data}:/data/export-output` ＋ env `EXPORT_OUTPUT_DIR=/data/export-output`；`.env.example` 加 `EXPORT_OUTPUT_DIR_HOST`。
+- [x] 171.9 Docker 驗證：`--no-cache` 重 build business-services、bff，build frontend，recreate；端到端驗證（手動下載含彙總表、run-now 後 host 目錄出現 xlsx、設定存取 owner-scoped、時間到點自動產檔）。
+- [ ] 171.10 commit + 兩段式 merge。

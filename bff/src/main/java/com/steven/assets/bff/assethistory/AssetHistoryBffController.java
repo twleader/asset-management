@@ -9,6 +9,8 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -114,5 +116,36 @@ public class AssetHistoryBffController {
                     e.getHeaders().forEach((k, v) -> v.forEach(val -> b.header(k, val)));
                     return b.body(e.getBody());
                 });
+    }
+
+    // ===== 排程自動匯出設定（Requirement 34 / Task 171，per-user owner-scoped）=====
+    // 沿用 businessServicesClient（WebClientConfig.tenantHeaderFilter 自動帶 X-User-* → 後端 ownerFilter 縮到本人）。
+
+    @GetMapping("/export-schedule")
+    public Mono<ResponseEntity<Map<String, Object>>> getExportSchedule() {
+        return businessServicesClient.get()
+                .uri("/api/export-schedule/settings")
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .map(ResponseEntity::ok);
+    }
+
+    @PutMapping("/export-schedule")
+    public Mono<ResponseEntity<Map<String, Object>>> updateExportSchedule(@RequestBody Map<String, Object> body) {
+        return businessServicesClient.put()
+                .uri("/api/export-schedule/settings")
+                .bodyValue(body)
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .map(ResponseEntity::ok);
+    }
+
+    @PostMapping("/export-schedule/run-now")
+    public Mono<ResponseEntity<Map<String, Object>>> runExportNow() {
+        return businessServicesClient.post()
+                .uri("/api/export-schedule/run-now")
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .map(ResponseEntity::ok);
     }
 }

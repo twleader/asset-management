@@ -163,7 +163,10 @@ export const bffApi = {
     getHistory:        () => api.get('/bff/asset-history'),
     recalcDividends:   () => api.post('/bff/asset-history/recalc-dividends'),
     deleteSnapshot:    (id) => api.delete(`/bff/asset-history/${id}`),
-    exportExcel:       () => api.get('/bff/asset-history/export', { responseType: 'blob' })
+    exportExcel:       () => api.get('/bff/asset-history/export', { responseType: 'blob' }),
+    getExportSchedule:    () => api.get('/bff/asset-history/export-schedule', { skipErrorToast: true }),
+    updateExportSchedule: (data) => api.put('/bff/asset-history/export-schedule', data, { skipErrorToast: true }),
+    runExportNow:         () => api.post('/bff/asset-history/export-schedule/run-now', null, { timeout: 60000, skipErrorToast: true })
   },
 
   // RealizedGain
