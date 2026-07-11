@@ -2187,3 +2187,82 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
 - 不在 compare 呼叫 lookup-name（避免外部 API 副作用與寫主檔）。
 - **含息不處理**：DJI/IXIC/SOX 免費來源無報酬指數 → 含息時降級為價格報酬（標示，不另尋付費源）；個股原始價之股票分割（split）不還原（沿用既有價格序列既有行為，含息與純價格同樣受影響，屬既有限制）；股利再投入以除息日收盤價近似（非實際發放日），為 total-return index 標準作法。
 - compare 不對股價／指數做 owner 過濾（全域公開行情）。
+
+## Requirement 34（Task 171）：歷年資產 Excel 匯出增強與每日排程自動匯出
+
+「歷年資產」頁既有「匯出 Excel」按鈕（`/api/bff/asset-history/export` → `/api/snapshots/export` → `ExcelExportService.exportFull()`）增強為「完整匯出 ＋ 第一張『當前彙總』總表」；並新增每個使用者可各自設定的每日排程，於指定時間把完整匯出寫檔到指定目錄（容器基底目錄 ＋ 使用者相對子路徑，經 docker volume 對映到 host）。
+
+### 架構與資料流
+
+```
+[歷年資產頁 AssetHistoryView.vue]
+  ├─ 手動匯出鈕 → bffApi.assetHistory.exportExcel() (blob)
+  │     → BFF GET /api/bff/asset-history/export → business GET /api/snapshots/export
+  │       → ExcelExportService.exportFull()  (HTTP：TenantFilterAspect 自動 owner-scoped)
+  └─ 排程設定卡 → bffApi.assetHistory.{getExportSchedule,updateExportSchedule,runExportNow}
+        → BFF GET/PUT /api/bff/asset-history/export-schedule、POST .../run-now
+          → business GET/PUT /api/export-schedule/settings、POST /api/export-schedule/run-now
+            → ExportScheduleService（owner-scoped：HTTP 帶 X-User-* → ownerFilter）
+
+[背景排程] business ExportScheduleService
+  @Scheduled(cron="0 * * * * *", zone=Asia/Taipei)  每分鐘 poll
+    for each export_schedule_setting（背景無 request → 讀全部列）:
+      if enabled && last_run_date != today && now >= (run_hour:run_minute):  // >= 到點，非分鐘精確相等
+        byte[] = ExcelExportService.exportFullForOwner(ownerUserId)   // 手動 enableFilter 縮到該 owner
+        Files.write( resolveDir(EXPORT_OUTPUT_DIR, output_subpath) / 資產總覽_{ownerUserId}_YYYYMMDD.xlsx )
+        update last_run_date/last_run_at/last_run_status
+  @EventListener(ApplicationReadyEvent) 開機自癒：補跑「今日已到點但 last_run_date != today」者
+```
+
+### 資料模型
+
+`export_schedule_setting`（Liquibase `v1.53.0-export-schedule-setting.sql`；每 owner 一列、`@Filter(ownerFilter)` 隔離）：
+
+```
+id              BIGSERIAL PK
+owner_user_id   BIGINT      NOT NULL UNIQUE   -- 每使用者一列；@Filter(ownerFilter)
+enabled         BOOLEAN     NOT NULL DEFAULT FALSE
+run_hour        INT         NOT NULL DEFAULT 8    -- 0..23
+run_minute      INT         NOT NULL DEFAULT 0    -- 0..59
+output_subpath  VARCHAR(255) NOT NULL DEFAULT 'input'  -- 相對基底目錄的子路徑
+last_run_date   DATE                            -- 當日 guard（成功或失敗都設，避免每分鐘重試）
+last_run_at     TIMESTAMP
+last_run_status VARCHAR(500)                    -- 「成功：/path」或「失敗：訊息」
+updated_at      TIMESTAMP
+```
+
+- `output_subpath` 只存相對子路徑；實際寫入目錄 = `EXPORT_OUTPUT_DIR`(容器內基底) resolve 子路徑。
+- 背景 cron 無 request context → `ownerFilter` 不自動生效，`ExportScheduleSettingRepository.findAll()` 讀全部列（跨所有 owner）即為所需；產檔時才對「該列 owner」手動 `enableFilter`。
+
+### API 端點
+
+```
+# business-services（新）
+GET  /api/export-schedule/settings     # 取當前使用者排程設定（無則回預設，不寫入）
+PUT  /api/export-schedule/settings     # upsert 當前使用者設定（enabled/runHour/runMinute/outputSubpath）
+POST /api/export-schedule/run-now      # 立即以當前使用者身分產檔寫入其設定目錄（回 path/sizeBytes）
+GET  /api/snapshots/export             # 既有；exportFull() 現含「當前彙總」總表（owner-scoped）
+
+# BFF（AssetHistoryBffController，沿用 businessServicesClient 自動帶 X-User-*）
+GET  /api/bff/asset-history/export-schedule          → GET  /api/export-schedule/settings
+PUT  /api/bff/asset-history/export-schedule          → PUT  /api/export-schedule/settings
+POST /api/bff/asset-history/export-schedule/run-now  → POST /api/export-schedule/run-now
+GET  /api/bff/asset-history/export                    → GET  /api/snapshots/export（既有，內容增強）
+```
+
+> 排程設定為 per-user（owner-scoped），非 admin-only：路徑落 BFF `SecurityConfig` 的 `.anyExchange().authenticated()`，一般登入者可設定自己的排程；後端 `ownerFilter` 縮到本人。
+
+### 關鍵業務邏輯
+
+- **匯出內容單一來源**：`ExcelExportService.buildWorkbook()` 產出活頁簿＝`writeCurrentSummarySheet()`（第一張，讀最新快照彙總）＋每快照一張 `writeSnapshotSheet()`＋`writeRealizedGainsSheet()`。
+  - `exportFull()`：`@Transactional(readOnly=true)`，HTTP 情境靠 `TenantFilterAspect` 自動 owner-scoped，呼叫 `buildWorkbook()`。
+  - `exportFullForOwner(Long ownerId)`：`@Transactional(readOnly=true)`，於 session 手動 `entityManager.unwrap(Session.class).enableFilter("ownerFilter").setParameter("ownerId", ownerId)` 後呼叫同一 `buildWorkbook()`（背景排程用；aspect 於背景不啟用、不覆寫）。
+- **當前彙總總表**：讀最新一筆 `asset_snapshot`，欄位：匯出時間、最新快照日期、美元匯率、資產總計、存款總計、股票現值／成本／未實現損益、基金現值／成本／未實現損益、預估年配息、當年度已實現損益。無快照時寫「尚無快照」提示列。
+- **路徑安全**：`resolveDir(sub)` = `base = Path.of(EXPORT_OUTPUT_DIR).toAbsolutePath().normalize()`；`target = base.resolve(sub).normalize()`；若 `!target.startsWith(base)` 則拒（防 `..`／絕對路徑跳脫）。`PUT /settings` 亦驗 `run_hour∈[0,23]`、`run_minute∈[0,59]`、子路徑非空且不含跳脫。
+- **觸發判斷（>= 到點，非精確相等）**：tick 與開機自癒共用同一判斷 `enabled && last_run_date != today && now >= 排程時間`。用 `>=` 而非「分鐘精確相等」，因 Spring 預設排程池僅 1 條執行緒且與其他 `@Scheduled` 共用，長工作可能把某分鐘的 tick 延後跨越目標分鐘；`>=` ＋ `last_run_date` guard 讓任何被延後／跳過的分鐘都能在後續 tick 自動補跑，直到當日成功為止（避免整日靜默漏跑）。
+- **當日 guard 與自癒**：成功或失敗都設 `last_run_date=today`，避免到點後每分鐘重試；重啟以 `ApplicationReadyEvent` 補跑「今日排程時間已到但 `last_run_date != today`」者。`run-now` 不動 `last_run_date`（不影響排程 guard），只更新 `last_run_at/last_run_status`。
+- **失敗隔離**：單一使用者產檔／寫檔失敗記 `last_run_status` ＋ `log.warn`，不影響其他使用者、不中斷 poll。
+
+### Infrastructure
+
+- `docker-compose.yml` business-services 新增 volume `${EXPORT_OUTPUT_DIR_HOST:-/Users/steven/Project/SRPP/data}:/data/export-output` 與環境變數 `EXPORT_OUTPUT_DIR=/data/export-output`；`.env.example` 加 `EXPORT_OUTPUT_DIR_HOST`。使用者設定 `output_subpath=input` 時，檔案落於 host `/Users/steven/Project/SRPP/data/input`。

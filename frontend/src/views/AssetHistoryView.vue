@@ -64,6 +64,39 @@
       </el-table>
     </el-card>
 
+    <!-- 排程自動匯出設定（Requirement 34 / Task 171） -->
+    <el-card style="margin-bottom:20px">
+      <template #header>
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <span class="section-title">⏱️ 排程自動匯出</span>
+          <div style="display:flex;gap:8px">
+            <el-button size="small" :icon="Download" :loading="runningNow" @click="handleRunNow">立即匯出到目錄</el-button>
+            <el-button size="small" type="primary" :loading="savingSchedule" @click="saveSchedule">儲存設定</el-button>
+          </div>
+        </div>
+      </template>
+      <el-form :inline="true" label-width="100px" class="schedule-form">
+        <el-form-item label="啟用每日排程">
+          <el-switch v-model="schedule.enabled" />
+        </el-form-item>
+        <el-form-item label="每日執行時間">
+          <el-time-picker v-model="scheduleTime" format="HH:mm" value-format="HH:mm"
+            placeholder="時:分" style="width:130px" />
+        </el-form-item>
+        <el-form-item label="輸出子資料夾">
+          <el-input v-model="schedule.outputSubpath" placeholder="input" style="width:180px" />
+        </el-form-item>
+      </el-form>
+      <div class="schedule-hint">
+        檔案寫入容器基底目錄 <code>{{ schedule.baseDir || '/data/export-output' }}</code> 下的子資料夾（對映主機
+        <code>/Users/steven/Project/SRPP/data</code>）。例如子資料夾填 <code>input</code> →
+        主機 <code>/Users/steven/Project/SRPP/data/input</code>；每日產生 <code>資產總覽_{使用者ID}_YYYYMMDD.xlsx</code>。
+      </div>
+      <div v-if="schedule.lastRunAt || schedule.lastRunStatus" class="schedule-status">
+        上次執行：{{ schedule.lastRunAt || '—' }}　{{ schedule.lastRunStatus || '' }}
+      </div>
+    </el-card>
+
     <!-- Charts -->
     <el-row :gutter="20">
       <el-col :span="24">
@@ -123,8 +156,27 @@ const history = ref([])
 const exporting = ref(false)
 const recalculating = ref(false)
 
+// 排程自動匯出設定（Requirement 34 / Task 171）
+const schedule = reactive({ enabled: false, runHour: 8, runMinute: 0, outputSubpath: 'input', lastRunAt: null, lastRunStatus: null, baseDir: '' })
+const scheduleTime = ref('08:00')
+const savingSchedule = ref(false)
+const runningNow = ref(false)
+
 const reload = async () => { history.value = await bffApi.assetHistory.getHistory() }
-onMounted(reload)
+
+async function loadSchedule() {
+  const s = await bffApi.assetHistory.getExportSchedule()
+  schedule.enabled = !!s.enabled
+  schedule.runHour = s.runHour ?? 8
+  schedule.runMinute = s.runMinute ?? 0
+  schedule.outputSubpath = s.outputSubpath ?? 'input'
+  schedule.lastRunAt = s.lastRunAt ?? null
+  schedule.lastRunStatus = s.lastRunStatus ?? null
+  schedule.baseDir = s.baseDir ?? ''
+  scheduleTime.value = `${String(schedule.runHour).padStart(2, '0')}:${String(schedule.runMinute).padStart(2, '0')}`
+}
+
+onMounted(() => { reload(); loadSchedule().catch(() => {}) })
 
 const handleRecalcDividends = async () => {
   recalculating.value = true
@@ -161,6 +213,41 @@ async function handleExport() {
   } finally {
     exporting.value = false
   }
+}
+
+async function saveSchedule() {
+  savingSchedule.value = true
+  try {
+    const [h, m] = (scheduleTime.value || '08:00').split(':').map(Number)
+    const s = await bffApi.assetHistory.updateExportSchedule({
+      enabled: schedule.enabled,
+      runHour: h,
+      runMinute: m,
+      outputSubpath: (schedule.outputSubpath || 'input').trim()
+    })
+    schedule.runHour = s.runHour ?? h
+    schedule.runMinute = s.runMinute ?? m
+    schedule.outputSubpath = s.outputSubpath ?? schedule.outputSubpath
+    schedule.baseDir = s.baseDir ?? schedule.baseDir
+    ElMessage.success('排程設定已儲存')
+  } catch (e) {
+    ElMessage.error('儲存失敗，請稍後再試')
+  } finally {
+    savingSchedule.value = false
+  }
+}
+
+async function handleRunNow() {
+  runningNow.value = true
+  try {
+    const r = await bffApi.assetHistory.runExportNow()
+    ElMessage.success(`已匯出到：${r.path}`)
+  } catch (e) {
+    ElMessage.error('立即匯出失敗，請確認目錄與權限')
+  } finally {
+    runningNow.value = false
+  }
+  loadSchedule().catch(() => {}) // 刷新上次執行資訊，失敗不影響匯出結果
 }
 
 const fmt = (v) => {
@@ -339,4 +426,10 @@ const increaseOption = computed(() => {
 .tl-name   { font-size: 12px; color: #64748b; }
 .tl-amount { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .tl-pct    { font-size: 11px; font-weight: 600; }
+
+/* 排程自動匯出設定 */
+.schedule-form { margin-bottom: 4px; }
+.schedule-hint { font-size: 12px; color: #94a3b8; line-height: 1.6; }
+.schedule-hint code { background: #f1f5f9; color: #475569; padding: 1px 5px; border-radius: 4px; font-size: 11px; }
+.schedule-status { margin-top: 8px; font-size: 12px; color: #64748b; }
 </style>

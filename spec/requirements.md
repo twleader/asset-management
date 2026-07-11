@@ -792,3 +792,18 @@
   - **DJI／IXIC／SOX（道瓊／那斯達克綜合／費半）**：免費來源無穩定報酬指數 → 含息模式仍用價格指數 `closePoint`，該 series 標 `priceOnly`，UI 標示「價格報酬」。
   - **純價格模式**：所有指數與個股一律用原始價格／價格指數（即現行行為）。
 - [ ] **資料模型變更（需 Liquibase changeset `v1.52.0`）**：`twse_index_daily_history` 新增 nullable 欄位 `close_point_tr`（發行量加權股價報酬指數收盤，與同日價格指數 `close_point` 同列共存、由 TWSE poller 一併抓寫，屬同交易日不同指數之量測事實、非衍生值）；`us_index_daily_history` 不改結構，以新增 `index_code='SP500TR'` 資料列承載 S&P500 報酬指數。個股與 DJI/IXIC/SOX 不需結構變更。
+
+### Requirement 34: 歷年資產 Excel 匯出增強（當前彙總表）與每日排程自動匯出
+
+**User Story:** 作為使用者，我希望在「歷年資產」頁一鍵把我的所有資產匯出成一份 Excel（含一張「當前全資產彙總」總表），並且能設定每日自動匯出到指定目錄，讓我不必每次手動下載也能定期留存資產快照。
+
+**Acceptance Criteria:**
+
+- [ ] **匯出內容含「當前彙總」總表**：既有「匯出 Excel」按鈕（`GET /api/snapshots/export` → `ExcelExportService.exportFull()`）產出的活頁簿，第一張 sheet 改為「當前彙總」——讀該使用者最新一筆 `asset_snapshot`，列出匯出時間、最新快照日期、美元匯率、資產總計、存款總計、股票現值／成本／未實現損益、基金現值／成本／未實現損益、預估年配息、當年度已實現損益；其後沿用既有「每快照一張 sheet（YYYYMMDD）＋已實現損益」。
+- [ ] **手動匯出（瀏覽器下載）**：歷年資產頁「匯出 Excel」按鈕維持瀏覽器直接下載 `.xlsx`；owner-scoped（只含自己的資產，經 BFF 帶 `X-User-*` → `ownerFilter`）。
+- [ ] **每日排程自動匯出（per-user）**：每個使用者可在歷年資產頁「排程自動匯出」設定卡開啟每日排程，設定每日執行時間（時:分）與輸出子路徑，系統於該時間把該使用者的完整匯出（同上內容）寫成 `.xlsx` 到指定目錄。
+- [ ] **輸出路徑（基底目錄＋相對子路徑）**：容器內固定基底目錄由環境變數 `EXPORT_OUTPUT_DIR`（預設 `/data/export-output`）指定，經 docker volume 對映到 host 目錄（預設 `/Users/steven/Project/SRPP/data`）。使用者設定的是「相對子路徑」（預設 `input`，即 host `/Users/steven/Project/SRPP/data/input`）。後端一律以「基底 resolve 子路徑後 normalize 必須仍在基底內」驗證，拒絕 `..` 跳脫與絕對路徑。
+- [ ] **可調時間、可手動立即匯出**：設定卡提供啟用開關、每日時間（`el-time-picker` 時:分）、相對子路徑輸入、「立即匯出到目錄」按鈕（`POST run-now` 立即產檔到設定目錄，供驗證），並顯示上次執行時間與結果。
+- [ ] **每使用者各自設定（owner-scoped 設定表）**：排程設定存於 `export_schedule_setting`（每 `owner_user_id` 一列、`@Filter(ownerFilter)` 隔離）；GET/PUT/run-now 走 HTTP（BFF→business）自動 scope 到本人；非管理者亦可設定自己的排程（不限 admin）。
+- [ ] **排程執行機制與租戶隔離**：以每分鐘 `@Scheduled` poll（`zone=Asia/Taipei`）比對各設定列的時:分與「當日是否已執行」旗標；命中則對該列 owner 手動 `enableFilter("ownerFilter")` 產出只含該 owner 資產的活頁簿再寫檔（背景 cron 無 request context、`ownerFilter` 不自動生效，故明確逐列指定 owner）。服務重啟以 `ApplicationReadyEvent` 補跑當日已到點但未執行者。單一使用者失敗只記 `last_run_status` 與 log、不影響其他使用者。
+- [ ] **檔名**：`資產總覽_{使用者ID}_{YYYYMMDD}.xlsx`（檔名含 owner id，避免多使用者共用同一 subpath 時同名互相覆蓋；同一使用者同日覆寫）。

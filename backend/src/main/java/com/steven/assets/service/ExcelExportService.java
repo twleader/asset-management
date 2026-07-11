@@ -4,16 +4,21 @@ import com.steven.assets.model.*;
 import com.steven.assets.repository.AssetSnapshotRepository;
 import com.steven.assets.repository.RealizedGainRepository;
 import com.steven.assets.repository.StockRepository;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.hibernate.Session;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 
@@ -31,21 +36,110 @@ public class ExcelExportService {
     private final RealizedGainRepository gainRepo;
     private final StockRepository stockMasterRepo;
 
+    @PersistenceContext
+    private EntityManager entityManager;
+
     private static final DateTimeFormatter SHEET_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
     private static final DateTimeFormatter ISO = DateTimeFormatter.ISO_LOCAL_DATE;
+    private static final DateTimeFormatter TS_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final ZoneId TW_ZONE = ZoneId.of("Asia/Taipei");
 
-    /** 完整匯出：所有快照 + 已實現損益 */
+    /**
+     * 完整匯出：當前彙總 + 所有快照 + 已實現損益。
+     * HTTP 情境下由 {@link com.steven.assets.security.TenantFilterAspect} 自動 owner-scoped（只含當前使用者資產）。
+     */
     @Transactional(readOnly = true)
     public byte[] exportFull() throws IOException {
+        return buildWorkbook();
+    }
+
+    /**
+     * 背景排程用：指定 owner 的完整匯出（Requirement 34 / Task 171）。
+     * 背景執行緒無 request context，{@code TenantFilterAspect} 不啟用，故在本 session 手動啟用
+     * {@code ownerFilter} 縮到該 owner，確保只匯出該使用者自己的資產。
+     */
+    @Transactional(readOnly = true)
+    public byte[] exportFullForOwner(Long ownerId) throws IOException {
+        entityManager.unwrap(Session.class)
+                .enableFilter("ownerFilter")
+                .setParameter("ownerId", ownerId);
+        return buildWorkbook();
+    }
+
+    /** 共用活頁簿建構：第一張「當前彙總」總表 + 每快照一張 sheet + 已實現損益。 */
+    private byte[] buildWorkbook() throws IOException {
         try (Workbook wb = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             Styles st = new Styles(wb);
-            for (AssetSnapshot s : snapshotRepo.findAllByOrderBySnapshotDateAsc()) {
+            List<AssetSnapshot> snapshots = snapshotRepo.findAllByOrderBySnapshotDateAsc();
+            writeCurrentSummarySheet(wb, st, snapshots);
+            for (AssetSnapshot s : snapshots) {
                 writeSnapshotSheet(wb, st, s);
             }
             writeRealizedGainsSheet(wb, st);
             wb.write(out);
             return out.toByteArray();
         }
+    }
+
+    /** 只匯出當前彙總（讀最新一筆快照）。snapshots 需已依 snapshotDate 升冪。 */
+    private void writeCurrentSummarySheet(Workbook wb, Styles st, List<AssetSnapshot> snapshots) {
+        Sheet sheet = wb.createSheet("當前彙總");
+        int r = 0;
+
+        Row title = sheet.createRow(r++);
+        cell(title, 0, "當前全資產彙總", st.section);
+
+        Row exp = sheet.createRow(r++);
+        cell(exp, 0, "匯出時間", st.head);
+        cell(exp, 1, LocalDateTime.now(TW_ZONE).format(TS_FMT), null);
+
+        if (snapshots.isEmpty()) {
+            Row none = sheet.createRow(r++);
+            cell(none, 0, "尚無資產快照", null);
+            for (int i = 0; i < 4; i++) sheet.autoSizeColumn(i);
+            return;
+        }
+
+        AssetSnapshot s = snapshots.get(snapshots.size() - 1); // 最新一筆（已依日期升冪）
+
+        Row d = sheet.createRow(r++);
+        cell(d, 0, "最新快照日期", st.head);
+        cell(d, 1, ISO.format(s.getSnapshotDate()), null);
+        cell(d, 2, "美元匯率", st.head);
+        cell(d, 3, s.getUsdExchangeRate(), st.num4);
+
+        r++; // 空行
+
+        Row secHead = sheet.createRow(r++);
+        cell(secHead, 0, "項目", st.head);
+        cell(secHead, 1, "金額 (台幣)", st.head);
+
+        r = summaryRow(sheet, st, r, "資產總計", s.getTotalAssets());
+        r = summaryRow(sheet, st, r, "存款總計", s.getTotalDeposit());
+        r = summaryRow(sheet, st, r, "股票現值", s.getTotalStockValue());
+        r = summaryRow(sheet, st, r, "股票成本", s.getTotalStockCost());
+        r = summaryRow(sheet, st, r, "股票未實現損益", diff(s.getTotalStockValue(), s.getTotalStockCost()));
+        r = summaryRow(sheet, st, r, "基金現值", s.getTotalFundValue());
+        r = summaryRow(sheet, st, r, "基金成本", s.getTotalFundCost());
+        r = summaryRow(sheet, st, r, "基金未實現損益", diff(s.getTotalFundValue(), s.getTotalFundCost()));
+        r = summaryRow(sheet, st, r, "預估年配息", s.getEstimatedAnnualDividend());
+        r = summaryRow(sheet, st, r, "當年度已實現損益", s.getRealizedGain());
+
+        for (int i = 0; i < 4; i++) sheet.autoSizeColumn(i);
+    }
+
+    private int summaryRow(Sheet sheet, Styles st, int r, String label, BigDecimal value) {
+        Row row = sheet.createRow(r);
+        cell(row, 0, label, st.head);
+        cell(row, 1, value, st.money);
+        return r + 1;
+    }
+
+    private static BigDecimal diff(BigDecimal a, BigDecimal b) {
+        if (a == null && b == null) return null;
+        BigDecimal x = a != null ? a : BigDecimal.ZERO;
+        BigDecimal y = b != null ? b : BigDecimal.ZERO;
+        return x.subtract(y);
     }
 
     /** 只匯出已實現損益 */
