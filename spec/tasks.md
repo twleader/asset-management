@@ -4099,3 +4099,81 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - [ ] 164.6 前端：`AssetAllocationAdviceView.vue`——生日／退休 `type="date"`、衍生年齡提示、假設年通膨率、勞保（月領＋起領年月）／勞退（一次領＋領取年月）區塊、大筆花費動態清單（新增/刪除列，日期＋用途＋今日金額），payload 帶新欄位；退休日期須晚於今天驗證沿用。
 - [ ] 164.7 Docker：`--no-cache` 重 build business-services、build frontend，recreate；端到端驗證（X-User headers）新欄位存取／產生建議 prompt 納入現金流。
 - [ ] 164.8 commit + 兩段式 merge。
+
+### Task 165：退休配置建議深化 — 退休現金流試算、建議金額化、餵入更完整持有明細（Requirement 32）
+
+對應 Requirements: Requirement 32（[requirements.md:747](spec/requirements.md)）
+
+#### 需求
+
+原「資產配置建議」雖已餵逐檔資產給 AI，但輸出偏空泛：只有類別百分比、沒有「退休後錢夠不夠用／能撐幾年」，也沒有「這一檔要加減碼多少錢」。三項深化：
+
+1. **退休現金流試算（決定性逐年，非預測）**：以現有資產＋每月投入＋勞保勞退＋退休後生活費（依通膨）＋大筆花費，逐年推到 100 歲，回答「撐到幾歲／哪一年缺口／退休首年結餘」，前端折線圖 ＋ 白話結論，並餵進 AI prompt。
+2. **建議金額化**：`targetAllocation` 加「目前→目標→增減碼金額」（後端決定性回填）；新增 `rebalancePlan` 逐標的增減碼（AI 出金額）。
+3. **持有明細更完整**：股票補股數/成本/損益、基金補代號/成本/損益、存款補銀行名稱。
+
+#### 設計決策
+
+- **試算報酬率假設由使用者掌握**：新增三欄 `retirement_monthly_expense`／`accumulation_annual_return_rate`／`retirement_annual_return_rate`；報酬率留空則依「獲利預期」區間帶入（退休後較保守），使用者可覆寫。試算是「把使用者自訂假設做複利算術」的計算機，非系統對報酬的預測（避免變成投資建議）。
+- **金額算術由後端做，不交 LLM**：`targetAmount＝資產總額 × targetPct`、`deltaAmount＝targetAmount − currentValue` 由 `enrich()` 回填；LLM 只負責分類（currentValue）與逐標的操作（rebalancePlan）。
+- **單一真實來源**：`RetirementProjectionService` 一份試算同時供「前端折線圖」與「AI prompt 摘要」，避免各算各的。
+- **試算輸出不入庫**：`investment_profile` 只存三個試算輸入假設；逐年 points／結論為衍生、on-demand（`GET /projection`）。
+
+#### 實作
+
+- [x] 165.1 spec：requirements.md Req 32 新增 AC（試算／金額化／明細；推翻「不另產生數值化試算表」）、design.md 資料模型 v1.48 三欄／`RetirementProjectionService`／enrich／API `/projection`／前端 ECharts、本 Task。
+- [x] 165.2 資料層：Liquibase `v1.48.0-retirement-projection-fields.sql`（`investment_profile` addColumn 三欄）＋註冊 master；Entity `InvestmentProfile` 加三欄。
+- [x] 165.3 DTO：`InvestmentProfileInput`／`InvestmentProfileDto` 加三欄；新 `RetirementProjectionDto`；`PortfolioAdviceResult` 加 `rebalancePlan`、`TargetAllocation` 加 `currentValue`／`targetAmount`／`deltaAmount`；`PortfolioAdviceDto` 加 `rebalancePlan`。
+- [x] 165.4 Service：新 `RetirementProjectionService.project()`（逐年試算＋報酬率帶入預設）；`PortfolioAdviceService` 注入、加 `getProjection()`、`appendProjection()`（prompt 摘要）、`enrich()`（回填金額）、`appendHoldings` 補股數/成本/損益/代號/銀行名稱、`buildSystemPrompt` 更新輸出結構、`saveProfile` 存三欄；`BankDepositRepository.findWithBankBySnapshotId`（join fetch）。
+- [x] 165.5 Controller/BFF：`PortfolioAdviceController` `GET /projection` ＋ `toInput` 解析三欄；`PortfolioAdviceBffController` 聚合多帶 `projection`。
+- [x] 165.6 前端：`AssetAllocationAdviceView.vue`——退休試算三假設欄、③ 退休現金流試算卡（ECharts 折線圖＋結論）、targetAllocation 金額行、rebalancePlan 操作表、載入 projection、payload 帶三欄；ECharts per-view 註冊。
+- [ ] 165.7 Docker：`--no-cache` 重 build business-services、bff、build frontend，recreate；端到端驗證（X-User headers）試算端點／產生建議 prompt 納入試算與金額化。
+- [ ] 165.8 commit + 兩段式 merge。
+
+### Task 166：移除多餘的「投資年限」欄位（Requirement 32）
+
+對應 Requirements: Requirement 32（[requirements.md:747](spec/requirements.md)）
+
+#### 需求
+
+有了生日（→年齡）＋退休日期（→退休時點）＋退休現金流試算固定推到 100 歲後，「投資年限」欄位已多餘且易誤導（例：投資年限 34 → 守成 33 年，反而比「退休到 100 歲」少算一截）。移除之。
+
+#### 設計決策
+
+- **累積/守成年數改由生日＋退休日衍生**：累積期＝今天→退休日（整年無條件捨去）；退休後守成期＝100 − 退休年齡（退休年齡＝生日→退休日整年）。`retirementSpan(birthDate, retirementDate)`。
+- **investment_profile 移除該欄**（Liquibase v1.49 DROP COLUMN）；`portfolio_advice.investment_horizon_years`（歷史條件快照）**保留**、新紀錄不再寫入（歷次回顧舊紀錄仍顯示當時填的年限）。
+- **零風險於試算**：`RetirementProjectionService` 本就不使用投資年限（以 100 歲為終點），不受影響。
+
+#### 實作
+
+- [x] 166.1 spec：requirements.md（表單移除投資年限、兩階段建模改生日＋退休日）、design.md（資料模型移除欄、retirementSpan）、本 Task。
+- [x] 166.2 資料層：Liquibase `v1.49.0-drop-investment-horizon.sql`（DROP COLUMN）＋註冊 master；Entity `InvestmentProfile` 移除欄（`PortfolioAdvice` 歷史欄保留）。
+- [x] 166.3 DTO/Controller：`InvestmentProfileInput`／`InvestmentProfileDto` 移除欄；`PortfolioAdviceController.toInput` 移除解析。
+- [x] 166.4 Service：`saveProfile`／`generate` 移除設定；`retirementSpan` 改 `(birthDate, retirementDate)`（守成到 100 歲）；`buildUserPrompt` 移除投資年限行、守成期改「退休→100 歲」。
+- [x] 166.5 前端：`AssetAllocationAdviceView.vue` 移除投資年限欄、`retirementDerived`／`retirementHint` 改生日＋退休日衍生；歷史顯示投資年限改條件顯示（保留舊紀錄）；api 註解更新。
+- [ ] 166.6 Docker：`--no-cache` 重 build business-services、build frontend，recreate；驗證 profile 存取與試算不受影響。
+- [ ] 166.7 commit + 兩段式 merge。
+
+### Task 167：退休後拆長照前／長照後兩階段、生活費由月改年（Requirement 32）
+
+對應 Requirements: Requirement 32（[requirements.md:747](spec/requirements.md)）
+
+#### 需求
+
+退休後支出並非一條線：長照（照護）期通常花費明顯較高。將退休現金流試算的退休後期間拆成兩階段——(1) 長照前（一般退休生活）(2) 長照後（照護期），並把生活費由「每月」改為「每年」輸入。
+
+#### 設計決策
+
+- **三欄取代原退休後月生活費**：`retirement_annual_expense`（長照前年生活費，今日幣值／年，必填才試算）、`long_term_care_annual_expense`（長照後年生活費，選填、通常較高）、`long_term_care_start_age`（長照起始年齡，選填、預設 80、夾在 [退休年齡, 100]）。Liquibase v1.50 DROP `retirement_monthly_expense`（v1.48 新增）＋ADD 三欄。
+- **兩階段提領**：退休後每年提領＝該階段年生活費 ×(1+通膨)^距今年數；`age < 長照起始年齡` 用長照前、否則長照後。`Point.phase` 增 `CARE`。長照階段僅在有填長照後年生活費（>0）時啟用。
+- **報酬率不分長照**：使用者只要求拆支出，退休後報酬率仍單一（不過度設計）。
+
+#### 實作
+
+- [x] 167.1 spec：requirements.md（退休試算 AC 改年支出兩階段）、design.md（資料模型 v1.50、projection 兩階段）、本 Task。
+- [x] 167.2 資料層：Liquibase `v1.50.0-long-term-care-stages.sql`（DROP monthly＋ADD 三欄）＋註冊 master；Entity `InvestmentProfile` 換三欄。
+- [x] 167.3 DTO/Controller：`InvestmentProfileInput`／`InvestmentProfileDto` 換三欄；`RetirementProjectionDto.Assumptions` 換兩階段年支出＋長照起始年齡；`toInput` 解析。
+- [x] 167.4 Service：`RetirementProjectionService.project` 兩階段年支出（`phaseOf`／`CARE`／`DEFAULT_LTC_START_AGE=80`）；`saveProfile` 存三欄；`appendProjection` 摘要含兩階段。單元測試更新＋加長照兩階段/預設 80 案例（8 過）。
+- [x] 167.5 前端：`AssetAllocationAdviceView.vue` 假設區換長照前/長照後年生活費＋長照起始年齡（月→年）、proj-assume 顯示兩階段、chart 加長照 markLine；form/load/payload/api 註解更新。
+- [ ] 167.6 Docker：`--no-cache` 重 build business-services、build frontend，recreate；端到端驗證試算兩階段。
+- [ ] 167.7 commit + 兩段式 merge。

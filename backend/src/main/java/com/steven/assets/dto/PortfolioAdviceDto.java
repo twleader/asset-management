@@ -35,6 +35,7 @@ public record PortfolioAdviceDto(
         String summary,
         String riskAssessment,
         List<PortfolioAdviceResult.TargetAllocation> targetAllocation,
+        List<PortfolioAdviceResult.Rebalance> rebalancePlan,
         List<PortfolioAdviceResult.Action> actions,
         List<String> warnings,
         List<PortfolioAdviceResult.Reference> references
@@ -64,6 +65,7 @@ public record PortfolioAdviceDto(
                 r == null ? null : r.summary(),
                 r == null ? null : r.riskAssessment(),
                 r == null || r.targetAllocation() == null ? List.of() : r.targetAllocation(),
+                r == null || r.rebalancePlan() == null ? List.of() : r.rebalancePlan(),
                 r == null || r.actions() == null ? List.of() : r.actions(),
                 r == null || r.warnings() == null ? List.of() : r.warnings(),
                 r == null || r.references() == null ? List.of() : r.references());
@@ -74,7 +76,7 @@ public record PortfolioAdviceDto(
         return new PortfolioAdviceDto(null, "NONE", null, null, null, null,
                 null, null, null, List.of(), null, null,
                 null, null, null,
-                null, null, List.of(), List.of(), List.of(), List.of());
+                null, null, List.of(), List.of(), List.of(), List.of(), List.of());
     }
 
     private static PortfolioAdviceResult parse(String json, ObjectMapper mapper) {

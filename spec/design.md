@@ -2000,17 +2000,23 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
 
 **目標**：使用者先設定理財條件（年齡／投資年限／每月可投入／理財目標（複選）／可忍受風險／獲利預期），系統結合其**最新 `asset_snapshot`** 的現況配置與持有明細，由 Claude 產出個人化資產配置建議（整體評析／現況風險評估／建議目標配置／具體調整動作／風險提醒／參考來源），並保存歷次供回顧。以 Requirement 31 為藍本，差異：**互動式即時 → 走同步 Messages API**（非 Batch），同步在 request 執行緒 owner context 已綁定，`@Filter`／`TenantGuard` 正常運作。
 
-- **資料模型**（Liquibase `v1.44.0-portfolio-advice.sql` 三 changeset ＋ `v1.44.1-retirement-date.sql` ＋ `v1.47.0-financial-planning-fields.sql` 生日/勞保勞退/通膨/大筆花費）：
+- **資料模型**（Liquibase `v1.44.0-portfolio-advice.sql` 三 changeset ＋ `v1.44.1-retirement-date.sql` ＋ `v1.47.0-financial-planning-fields.sql` 生日/勞保勞退/通膨/大筆花費 ＋ `v1.48.0-retirement-projection-fields.sql` 退休試算三欄 ＋ `v1.49.0-drop-investment-horizon.sql` 移除投資年限）：
   ```sql
   -- 理財條件（一使用者一列，記住免重填；owner-scoped）
   CREATE TABLE investment_profile (
       id BIGSERIAL PRIMARY KEY, owner_user_id BIGINT NOT NULL,
-      investment_horizon_years INTEGER, monthly_investment NUMERIC(20,2),
+      monthly_investment NUMERIC(20,2),  -- v1.49.0：移除 investment_horizon_years（改由生日＋退休日衍生累積/守成年數，試算固定推到 100 歲）
       retirement_date DATE, -- 預計退休日期（v1.47.0 起存整日；退休後每月投入歸零。原 v1.44.1 存該月一號、YearMonth）
       birth_date DATE,      -- v1.47.0：生日（取代 age；年齡由生日衍生，不入庫）
       labor_insurance_monthly NUMERIC(20,2), labor_insurance_start_date DATE,  -- v1.47.0：勞保年金月領＋起領年月
       labor_pension_lump_sum  NUMERIC(20,2), labor_pension_claim_date  DATE,  -- v1.47.0：勞退一次領＋領取年月
       assumed_annual_inflation_rate NUMERIC(5,2),  -- v1.47.0：假設年通膨率%（預設 2，供大筆花費換算）
+      -- v1.48.0 曾加 retirement_monthly_expense；v1.50.0 移除、改年支出兩階段（見下三欄）
+      retirement_annual_expense NUMERIC(20,2),      -- v1.50.0：長照前年生活費（今日幣值／年；退休後第一階段提領）
+      long_term_care_annual_expense NUMERIC(20,2),  -- v1.50.0：長照後年生活費（今日幣值／年，通常較高；null=不分長照階段）
+      long_term_care_start_age INTEGER,             -- v1.50.0：長照起始年齡（null 且有填長照後年費時 service 預設 80）
+      accumulation_annual_return_rate NUMERIC(5,2), -- v1.48.0：累積期試算用年報酬率%（試算假設，null→依獲利預期帶入）
+      retirement_annual_return_rate   NUMERIC(5,2), -- v1.48.0：退休後試算用年報酬率%（試算假設，退休後預設較保守）
       goals VARCHAR(300), risk_tolerance VARCHAR(20), expected_annual_return VARCHAR(20),
       updated_at TIMESTAMPTZ NOT NULL, CONSTRAINT uq_investment_profile_owner UNIQUE (owner_user_id));
   -- v1.47.0：特定日期大筆花費（一使用者多筆；金額為今日幣值，未來名目值由 service 依通膨衍生、不入庫）
@@ -2044,6 +2050,8 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
   - `generate(...)`（**非同步**）：upsert 條件 → 讀最新快照＋子表明細（`bankDeposit/fundHolding/stockHolding` `findBySnapshotId`，皆由 owner-filtered 快照 id 帶出，安全）→ **在 request 執行緒組好 system/user prompt**（條件＋現況＋明細＋**退休後現金流／未來支出段**：勞保月領（自起領年月，照填）、勞退一次領（於領取年月，照填）、大筆花費（每筆今日金額＋依通膨率換算之未來名目值）；`web_search` 開則要求納入當前市場、references 附來源，關則要求不得杜撰、references 回空）→ 落一筆 `PortfolioAdvice`（`status=PROCESSING`＋條件快照＋based_on）並**立即回傳** → 提交背景執行緒 `runGeneration`。`runGeneration`（daemon 固定小池）：依 setting `resolveModel/resolveEffort/resolveWebSearchMaxUses` 呼叫 `client.messages().create(MessageCreateParams...)`（adaptive thinking + `OutputConfig.effort` + 可選 `WebSearchTool20260209.maxUses`）→ 取首個 `{` 至末個 `}` 解析為 `PortfolioAdviceResult` → sanitize references（http(s) 白名單）→ **以 `adviceId` by-id 更新該列** OK／FAILED（全程 try/catch 不拋）。金鑰未設時 request 執行緒直接落 `NOT_CONFIGURED`、不提交背景。`latest()` 對 PROCESSING 逾 10 分鐘（背景中斷／重啟）自癒判 FAILED。
   - 設定：`getSettings()`／`updateSettings(model, effort, webSearchMaxUses)` 白名單驗證（比照 `MarketAnalysisService`）。
   - 免 enum 寫死：`GOAL_OPTIONS`／`RISK_OPTIONS`／`RETURN_OPTIONS`／`AVAILABLE_MODELS`／`AVAILABLE_EFFORTS`／`AVAILABLE_WEB_SEARCHES` 皆服務層白名單常數。
+  - **退休現金流試算（Task 165，退休後兩階段 Task 167，`RetirementProjectionService`）**：`project(profile, startAssets, expenses)` 對最新快照資產總額做**決定性逐年試算**（非預測）。每年順序：期初餘額 × (1+當期報酬率) → 累積期加「月投入×12」、退休後扣年生活費 ×(1+通膨)^距今年數（**退休後兩階段**：`age < 長照起始年齡` 用 `retirement_annual_expense`＝長照前、否則用 `long_term_care_annual_expense`＝長照後；`phase` 為 `RETIRE`／`CARE`）→ 加勞保年金（自起領年，每年）＋勞退一次領（領取當年）→ 扣當年到期大筆花費（`inflate` 名目值），推到 `END_AGE=100` 或餘額 ≤ 0（缺口）。長照階段僅在有填長照後年生活費（>0）時啟用；長照起始年齡預設 `DEFAULT_LTC_START_AGE=80`、夾在 [退休年齡, 100]。試算報酬率：`accumulation_annual_return_rate`／`retirement_annual_return_rate` 有值用之，否則由 `expected_annual_return` 區間 `returnDefault(band)` 帶入（退休後較保守）；`Assumptions.*FromBand` 標記是否為帶入預設。回 `RetirementProjectionDto`（逐年 `points`、`retirementStartBalance`、`depletionAge`／`lastsToEndAge`／`endBalance`）；缺生日／無快照／有退休日但未填長照前年生活費 → `available=false` ＋ `unavailableReason`。內部以 `double` 運算、輸出四捨五入 `BigDecimal`（元）。`getProjection()` owner-scoped 讀 profile／快照／花費後委派；`GET /api/portfolio-advice/projection` 曝露；BFF 聚合多帶 `projection`。組 prompt 時 `appendProjection()` 把同一份試算摘要餵給 AI（單一真實來源）。**試算輸出為衍生、on-demand，不入庫**（`investment_profile` 只存試算輸入假設）。
+  - **建議輸出金額化（Task 165）**：`buildSystemPrompt` 要求 AI 於 `targetAllocation` 估 `currentValue`（分類歸屬金額）、另輸出 `rebalancePlan`（逐標的 `BUY`／`SELL`／`HOLD` ＋ `estimatedAmount`）；`runGeneration` 解析後 `enrich(result, totalAssets)` 以「資產總額 × targetPct」**決定性回填** `targetAmount`／`deltaAmount`（金額算術不交 LLM）。`appendHoldings` 補股票股數／成本／損益、基金代號／成本／損益、存款銀行名稱（`findWithBankBySnapshotId` join fetch 避免 lazy／N+1）。`PortfolioAdviceResult`／`PortfolioAdviceDto` 新增 `rebalancePlan`、`TargetAllocation` 加 `currentValue`／`targetAmount`／`deltaAmount`。
 
 - **非同步（in-process 背景執行緒）而非同步阻塞或 Batch**：單次 Claude 呼叫含 thinking + web_search 常達數十秒（實測 ~90s），**超過 nginx `location /api/` 的 `proxy_read_timeout 60s`**——若同步阻塞，長連線會被 proxy 在 60s 切斷（前端 504、且同步版「跑完才落庫」導致完全無結果、無歷史）。故改：`POST /generate` 立即落 `PROCESSING` 並回、由 business-services **背景執行緒池**（`Executors.newFixedThreadPool(3)`，daemon）跑 Claude、完成 by-id 更新，前端輪詢。與 Requirement 31 差異：R31 用 **Batch API**（每日排程、可等、省 50%）；本功能用 **in-process 背景執行緒**（互動式、要快回饋、單筆即時）。**多租戶正確性關鍵**：owner-scoped 的快照／明細讀取與 prompt 組裝**全在 request 執行緒**（`TenantFilterAspect` 啟用 ownerFilter）；背景執行緒只 Claude 呼叫 + `adviceRepo.findById(adviceId)`（`@Filter` 本就不套 by-id）+ `save`，**不做任何 owner-scoped 查詢**，故不受背景執行緒無 request context、ownerFilter 不啟用之影響（見 `feedback_hibernate_filter_aspect`）。狀態：PROCESSING → OK／FAILED；NOT_CONFIGURED 於 request 執行緒直接落。
 
@@ -2055,11 +2063,12 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
   | GET | `/profile` | 理財條件（含 goal/risk/return 可選清單） |
   | PUT | `/profile` | 儲存理財條件 |
   | GET | `/current-allocation` | 最新快照現況配置（`CurrentAllocationDto`） |
+  | GET | `/projection` | 退休現金流逐年試算（`RetirementProjectionDto`；決定性、非預測） |
   | POST | `/generate` | 同步產生建議（body 帶條件、一併儲存 profile） |
   | GET | `/settings` | 成本設定 + 可選清單 |
   | PUT | `/settings` `{model?, effort?, webSearchMaxUses?}` | 更新成本設定（`isAdmin()` 縱深，白名單驗證） |
 
-- **BFF 一頁一支**：`PortfolioAdviceBffController`（`/api/bff/portfolio-advice`）：`GET` `Mono.zip` 聚合 `{ latest, history, profile, settings, currentAllocation }`；`POST /generate`（timeout 180s）、`PUT /profile`、`PUT /settings` 泛型 Map 轉發。WebClient 帶 `X-User-*` 租戶身分，business 端 owner-scoped。`SecurityConfig` 加 `PUT /api/bff/portfolio-advice/settings` 限 `AUTHORITY_ADMIN`；`/generate`／`/profile` 為 per-user → 落 `authenticated()`。
+- **BFF 一頁一支**：`PortfolioAdviceBffController`（`/api/bff/portfolio-advice`）：`GET` `Mono.zip` 聚合 `{ latest, history, profile, settings, currentAllocation, projection }`（Task 165 多帶退休試算）；`POST /generate`（timeout 180s）、`PUT /profile`、`PUT /settings` 泛型 Map 轉發。WebClient 帶 `X-User-*` 租戶身分，business 端 owner-scoped。`SecurityConfig` 加 `PUT /api/bff/portfolio-advice/settings` 限 `AUTHORITY_ADMIN`；`/generate`／`/profile` 為 per-user → 落 `authenticated()`。
 
   ```text
   前端 AssetAllocationAdviceView ──▶ GET /api/bff/portfolio-advice ──▶ business /api/portfolio-advice/{latest,history,profile,settings,current-allocation}
@@ -2067,7 +2076,7 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
   （管理者）成本設定 ──▶ PUT /api/bff/portfolio-advice/settings（限 ADMIN）──▶ business PUT /api/portfolio-advice/settings
   ```
 
-- **前端**（`views/AssetAllocationAdviceView.vue`）：條件表單（年齡／年限／月投入 `el-input-number`、理財目標 `el-select multiple`、風險 `el-radio-group`、獲利預期 `el-select`）＋「儲存條件」「產生建議」；現況配置與建議目標配置以純 CSS bar 呈現（避免 echarts tree-shaking 漏註冊風險）；建議卡片顯示 summary／風險評估／目標配置（比例＋理由）／調整動作（優先度 tag）／風險提醒／參考來源（`safeUrl` 擋非 http(s)）；免責聲明；歷次建議 `el-table` 可展開回顧當時條件與建議；管理者頁首成本設定（模型／思考深度／web 搜尋 `el-select`，`change` 即持久化）。`api/index.js` 加 `bffApi.portfolioAdvice`（generate 覆寫 200s timeout）。左選單 icon `Compass`。
+- **前端**（`views/AssetAllocationAdviceView.vue`）：條件表單（年齡／年限／月投入 `el-input-number`、理財目標 `el-select multiple`、風險 `el-radio-group`、獲利預期 `el-select`）＋「儲存條件」「產生建議」；現況配置與建議目標配置以純 CSS bar 呈現（避免 echarts tree-shaking 漏註冊風險）；建議卡片顯示 summary／風險評估／目標配置（比例＋理由，Task 165 加「目前→目標→增減碼金額」）／再平衡操作明細 `rebalancePlan`（紅減碼綠增碼＋估計金額）／調整動作（優先度 tag）／風險提醒／參考來源（`safeUrl` 擋非 http(s)）；免責聲明；歷次建議 `el-table` 可展開回顧當時條件與建議；管理者頁首成本設定（模型／思考深度／web 搜尋 `el-select`，`change` 即持久化）。**退休現金流試算卡（Task 165、退休後兩階段 Task 167）**：白話結論（撐到 100 歲剩餘／缺口年齡）＋假設列＋**ECharts 逐年資產餘額折線圖**（`use([CanvasRenderer, LineChart, Title/Tooltip/Legend/Grid/MarkLine/MarkPointComponent])` per-view 註冊，退休 markLine／長照起始 markLine／缺口 markPoint／0 軸 dashed）；退休試算假設欄（長照前年生活費、長照後年生活費、長照起始年齡、累積期／退休後年報酬率，報酬率留空 placeholder 顯示帶入預設）。現況與目標配置比例仍以純 CSS bar 呈現。`api/index.js` 加 `bffApi.portfolioAdvice`（generate 覆寫 200s timeout）。左選單 icon `Compass`。
 
 ### 不處理
 

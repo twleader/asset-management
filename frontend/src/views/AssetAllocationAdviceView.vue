@@ -37,12 +37,6 @@
             </el-form-item>
           </el-col>
           <el-col :xs="24" :sm="6">
-            <el-form-item label="投資年限">
-              <el-input-number v-model="form.investmentHorizonYears" :min="0" :max="80" :step="1"
-                controls-position="right" style="width: 100%" placeholder="年" />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="6">
             <el-form-item label="每月可投入">
               <el-input-number v-model="form.monthlyInvestment" :min="0" :step="5000" controls-position="right"
                 style="width: 100%" placeholder="新台幣" />
@@ -114,6 +108,46 @@
         </el-row>
         <div class="field-note">勞保、勞退請填「未來實際可領」金額（照勞保局試算填入即可，系統不再乘通膨）。</div>
 
+        <!-- 退休現金流試算假設（選填）：長照前年生活費為必填才會試算；退休後分長照前/長照後兩階段；兩階段報酬率可自訂 -->
+        <el-divider content-position="left"><span class="sub-divider">退休現金流試算假設</span></el-divider>
+        <el-row :gutter="16">
+          <el-col :xs="24" :sm="8">
+            <el-form-item label="長照前年生活費">
+              <el-input-number v-model="form.retirementAnnualExpense" :min="0" :step="50000" controls-position="right"
+                style="width: 100%" placeholder="今日幣值／年" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="8">
+            <el-form-item label="長照後年生活費">
+              <el-input-number v-model="form.longTermCareAnnualExpense" :min="0" :step="50000" controls-position="right"
+                style="width: 100%" placeholder="今日幣值／年（通常較高）" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="8">
+            <el-form-item label="長照起始年齡">
+              <el-input-number v-model="form.longTermCareStartAge" :min="50" :max="100" :step="1" controls-position="right"
+                style="width: 100%" placeholder="預設 80 歲" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-row :gutter="16">
+          <el-col :xs="24" :sm="8">
+            <el-form-item label="累積期年報酬率">
+              <el-input-number v-model="form.accumulationAnnualReturnRate" :min="0" :max="30" :step="0.5" :precision="1"
+                controls-position="right" style="width: 100%" :placeholder="accumReturnPlaceholder" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="8">
+            <el-form-item label="退休後年報酬率">
+              <el-input-number v-model="form.retirementAnnualReturnRate" :min="0" :max="30" :step="0.5" :precision="1"
+                controls-position="right" style="width: 100%" :placeholder="retireReturnPlaceholder" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <div class="field-note">
+          退休後分兩階段：<strong>長照前</strong>（一般退休生活）與<strong>長照後</strong>（照護期，年支出通常較高）。年生活費填「今日幣值／年」，系統依通膨逐年膨脹。長照後年生活費留空＝不分長照階段；長照起始年齡留空預設 80 歲。兩階段報酬率為<strong>試算假設</strong>（非預測）：留空則依「獲利預期」帶入（退休後預設較保守）。此區用於下方「退休現金流試算」。
+        </div>
+
         <!-- 特定日期大筆花費（選填）：今日幣值，系統依通膨換算 -->
         <el-divider content-position="left"><span class="sub-divider">特定日期大筆花費（選填）</span></el-divider>
         <el-row :gutter="16" style="margin-bottom: 4px">
@@ -174,11 +208,53 @@
       <el-empty v-else :image-size="70" description="尚無資產快照——請先於「總覽儀表板／管理資產」建立快照，建議會更貼合你的實際持有" />
     </el-card>
 
+    <!-- 退休現金流試算（決定性逐年試算，非預測） -->
+    <el-card shadow="never" class="section-card">
+      <template #header>
+        <div class="card-head">
+          <span class="section-title">③ 退休現金流試算</span>
+          <span class="head-meta">依你填的假設，把現有資產＋投入＋勞保勞退＋生活費逐年推到 100 歲</span>
+        </div>
+      </template>
+
+      <el-alert v-if="projection && !projection.available" type="info" show-icon :closable="false"
+        title="尚無法試算" :description="projection.unavailableReason || '請補齊生日、資產快照與退休後每月生活費。'" />
+      <div v-else-if="projection && projection.available">
+        <div class="proj-summary" :class="{ 'is-warn': !projection.lastsToEndAge }">
+          <template v-if="projection.lastsToEndAge">
+            ✅ 依此假設，資產可支應到 <strong>{{ projection.endAge }} 歲</strong>，屆時約剩
+            <strong>{{ money(projection.endBalance) }} 元</strong>（未見缺口）。
+          </template>
+          <template v-else>
+            ⚠️ 依此假設，資產預計在約 <strong>{{ projection.depletionAge }} 歲（{{ projection.depletionYear }} 年）</strong>
+            出現資金缺口，退休提領需更保守。
+          </template>
+        </div>
+        <div class="proj-assume">
+          假設：累積期年報酬 {{ pctText(projection.assumptions.accumulationReturnPct) }}{{ projection.assumptions.accumReturnFromBand ? '（帶入）' : '（自訂）' }}、
+          退休後年報酬 {{ pctText(projection.assumptions.retirementReturnPct) }}{{ projection.assumptions.retireReturnFromBand ? '（帶入）' : '（自訂）' }}、
+          年通膨 {{ pctText(projection.assumptions.inflationPct) }}
+          <template v-if="projection.assumptions.retirementAnnualExpense">
+            、長照前年生活費（今日幣值）{{ money(projection.assumptions.retirementAnnualExpense) }} 元
+          </template>
+          <template v-if="projection.assumptions.longTermCareAnnualExpense">
+            、長照後年生活費 {{ money(projection.assumptions.longTermCareAnnualExpense) }} 元（自 {{ projection.assumptions.longTermCareStartAge }} 歲起）
+          </template>
+          <span v-if="projection.retirementAge != null">
+            ；預計退休約 {{ projection.retirementAge }} 歲<template v-if="projection.retirementStartBalance">、退休首年結餘約 {{ money(projection.retirementStartBalance) }} 元</template>
+          </span>
+        </div>
+        <v-chart :option="projectionChartOption" style="height: 340px" autoresize />
+        <div class="proj-note">此為依你自訂假設所做的決定性試算，非投資報酬預測；改上方假設並重新載入即會更新。</div>
+      </div>
+      <el-empty v-else :image-size="70" description="填好生日、退休日期與退休後每月生活費後即可試算" />
+    </el-card>
+
     <!-- 建議結果 -->
     <el-card shadow="never" class="section-card">
       <template #header>
         <div class="card-head">
-          <span class="section-title">③ AI 資產配置建議</span>
+          <span class="section-title">④ AI 資產配置建議</span>
           <span v-if="isOk" class="head-meta">
             由 {{ latest.model || 'Claude' }} 產生於 {{ formatTime(latest.createdAt) }}
           </span>
@@ -217,10 +293,27 @@
               </div>
               <span class="alloc-val">{{ fmtPct(t.targetPct) }}</span>
             </div>
+            <div v-if="t.targetAmount != null" class="alloc-amounts">
+              目前約 {{ money(t.currentValue) }} 元 → 目標約 {{ money(t.targetAmount) }} 元
+              <span v-if="t.deltaAmount != null" class="delta" :class="deltaClass(t.deltaAmount)">（{{ deltaText(t.deltaAmount) }}）</span>
+            </div>
             <div v-if="t.rationale" class="alloc-rationale">{{ t.rationale }}</div>
           </div>
         </div>
         <div v-else class="muted">—</div>
+
+        <template v-if="latest.rebalancePlan && latest.rebalancePlan.length">
+          <div class="block-title">再平衡操作明細（估計新台幣金額）</div>
+          <ul class="action-list rebalance-list">
+            <li v-for="(r, i) in latest.rebalancePlan" :key="i">
+              <el-tag :type="rebalanceType(r.action)" size="small" effect="dark" class="prio-tag">{{ rebalanceLabel(r.action) }}</el-tag>
+              <span class="action-title">{{ r.holding || r.assetClass }}</span>
+              <span v-if="r.holding && r.assetClass" class="reb-class">（{{ r.assetClass }}）</span>
+              <span v-if="r.estimatedAmount != null" class="reb-amount" :class="rebalanceAmountClass(r.action)">約 {{ money(r.estimatedAmount) }} 元</span>
+              <div v-if="r.rationale" class="action-detail">{{ r.rationale }}</div>
+            </li>
+          </ul>
+        </template>
 
         <div class="block-title">具體調整動作</div>
         <ul v-if="latest.actions && latest.actions.length" class="action-list">
@@ -262,7 +355,7 @@
           <template #default="{ row }">
             <div class="hist-expand">
               <div class="hist-cond">
-                條件：{{ row.age != null ? row.age + ' 歲' : '—' }}／投資 {{ row.investmentHorizonYears != null ? row.investmentHorizonYears + ' 年' : '—' }}／
+                條件：{{ row.age != null ? row.age + ' 歲' : '—' }}<span v-if="row.investmentHorizonYears != null">／投資年限 {{ row.investmentHorizonYears }} 年</span>／
                 風險 {{ labelOf(riskOptions, row.riskTolerance) }}／獲利預期 {{ labelOf(returnOptions, row.expectedAnnualReturn) }}
                 <span v-if="row.goals && row.goals.length">／目標 {{ row.goals.map(g => labelOf(goalOptions, g)).join('、') }}</span>
               </div>
@@ -294,6 +387,13 @@ import { MagicStick, Plus, Delete } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { bffApi } from '@/api'
 import { useAuthStore } from '@/stores/authStore'
+import { use } from 'echarts/core'
+import { CanvasRenderer } from 'echarts/renderers'
+import { LineChart } from 'echarts/charts'
+import { TitleComponent, TooltipComponent, LegendComponent, GridComponent, MarkLineComponent, MarkPointComponent } from 'echarts/components'
+import VChart from 'vue-echarts'
+
+use([CanvasRenderer, LineChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent, MarkLineComponent, MarkPointComponent])
 
 const auth = useAuthStore()
 const loading = ref(false)
@@ -307,7 +407,6 @@ const DEFAULT_INFLATION_RATE = 2
 
 const form = ref({
   birthDate: null,
-  investmentHorizonYears: null,
   monthlyInvestment: null,
   retirementDate: null,
   laborInsuranceMonthly: null,
@@ -315,6 +414,11 @@ const form = ref({
   laborPensionLumpSum: null,
   laborPensionClaimDate: null,
   assumedAnnualInflationRate: DEFAULT_INFLATION_RATE,
+  retirementAnnualExpense: null,
+  longTermCareAnnualExpense: null,
+  longTermCareStartAge: null,
+  accumulationAnnualReturnRate: null,
+  retirementAnnualReturnRate: null,
   goals: [],
   riskTolerance: '',
   expectedAnnualReturn: '',
@@ -327,6 +431,7 @@ const returnOptions = ref([])
 const latest = ref(null)
 const history = ref([])
 const allocation = ref({ snapshotId: null, snapshotDate: null, totalAssets: null, items: [] })
+const projection = ref(null)
 const settings = ref({ model: '', effort: '', webSearchMaxUses: null, availableModels: [], availableEfforts: [], availableWebSearches: [] })
 const selectedModel = ref('')
 const selectedEffort = ref('')
@@ -335,12 +440,12 @@ const selectedWebSearch = ref(null)
 const isOk = computed(() => latest.value && latest.value.status === 'OK')
 const isProcessing = computed(() => latest.value && latest.value.status === 'PROCESSING')
 
-// 退休日期衍生（唯讀，只用於提示；真正計算在後端 service，不入庫）
-// accumulationYears：今天 → 退休年月的整年數（無條件捨去，滿一年才算一年）
-// retirementYears：投資年限 − accumulationYears（<0 代表退休晚於投資終點，夾為 0，且 accumulationYears 夾為投資年限）
+// 退休日期衍生（唯讀，只用於提示；真正計算在後端 service，不入庫）——不再需要「投資年限」
+// accumulationYears：今天 → 退休日的整年數（無條件捨去，滿一年才算一年）
+// retirementAge：生日 → 退休日的整年（退休當下年齡）；retirementYears：退休 → 100 歲的守成年數
 const retirementDerived = computed(() => {
   const rd = form.value.retirementDate
-  const horizon = form.value.investmentHorizonYears
+  const bd = form.value.birthDate
   if (!rd) return null
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(rd)
   if (!m) return null
@@ -349,13 +454,17 @@ const retirementDerived = computed(() => {
   const retireMonths = Number(m[1]) * 12 + (Number(m[2]) - 1)
   const monthsToRetire = retireMonths - nowMonths
   const past = monthsToRetire < 0
-  let accumulationYears = Math.max(0, Math.floor(monthsToRetire / 12))
+  const accumulationYears = Math.max(0, Math.floor(monthsToRetire / 12))
+  let retirementAge = null
   let retirementYears = null
-  if (horizon != null) {
-    accumulationYears = Math.min(accumulationYears, horizon)
-    retirementYears = Math.max(0, horizon - accumulationYears)
+  const bm = bd ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(bd) : null
+  if (bm) {
+    const beforeBirthday = (Number(m[2]) < Number(bm[2])) ||
+      (Number(m[2]) === Number(bm[2]) && Number(m[3]) < Number(bm[3]))
+    retirementAge = Math.max(0, Number(m[1]) - Number(bm[1]) - (beforeBirthday ? 1 : 0))
+    retirementYears = Math.max(0, 100 - retirementAge)
   }
-  return { accumulationYears, retirementYears, past, horizon }
+  return { accumulationYears, retirementAge, retirementYears, past }
 })
 
 const retirementHint = computed(() => {
@@ -364,13 +473,10 @@ const retirementHint = computed(() => {
   if (d.past) {
     return { warn: true, text: '退休日期早於今天，請確認；系統會將累積期視為 0，全期以退休後守成處理。' }
   }
-  if (d.horizon == null) {
-    return { warn: false, text: `距退休約 ${d.accumulationYears} 年（累積期）；請一併填「投資年限」以推算退休後期間。` }
+  if (d.retirementYears == null) {
+    return { warn: false, text: `距退休約 ${d.accumulationYears} 年（累積期，每月投入）；填「生日」後可推算退休後守成年數。` }
   }
-  if (d.retirementYears === 0) {
-    return { warn: true, text: `退休日期落在投資年限終點之後（或等於）：全期 ${d.horizon} 年皆為累積期，無退休後階段。` }
-  }
-  return { warn: false, text: `累積期 ${d.accumulationYears} 年（退休前，每月投入）／退休後守成期 ${d.retirementYears} 年（每月投入視為 0）。` }
+  return { warn: false, text: `累積期 ${d.accumulationYears} 年（退休前，每月投入）／退休後守成期約 ${d.retirementYears} 年（退休約 ${d.retirementAge} 歲至 100 歲，每月投入視為 0）。` }
 })
 // 由生日衍生目前年齡（唯讀提示，不入庫；後端另有 deriveAge 為權威）
 const ageHint = computed(() => {
@@ -392,6 +498,89 @@ const availableModels = computed(() => settings.value.availableModels || [])
 const availableEfforts = computed(() => settings.value.availableEfforts || [])
 const availableWebSearches = computed(() => settings.value.availableWebSearches || [])
 const busy = computed(() => generating.value || isProcessing.value || savingProfile.value || savingModel.value || savingEffort.value || savingWebSearch.value)
+
+// 報酬率預設（與後端 RetirementProjectionService.returnDefault 對齊）——留空時 placeholder 顯示帶入值
+const RETURN_DEFAULTS = {
+  LT3: { accum: 2.5, retire: 2.0 },
+  R3_6: { accum: 4.5, retire: 3.0 },
+  R6_10: { accum: 8.0, retire: 4.5 },
+  GT10: { accum: 12.0, retire: 6.0 },
+  '': { accum: 5.0, retire: 3.0 }
+}
+function returnDefault(band) { return RETURN_DEFAULTS[band] || RETURN_DEFAULTS[''] }
+const accumReturnPlaceholder = computed(() => `預設 ${returnDefault(form.value.expectedAnnualReturn).accum}%（依獲利預期）`)
+const retireReturnPlaceholder = computed(() => `預設 ${returnDefault(form.value.expectedAnnualReturn).retire}%（較保守）`)
+
+const projectionChartOption = computed(() => {
+  const p = projection.value
+  if (!p || !p.available || !p.points || !p.points.length) return {}
+  const data = p.points.map(pt => [pt.age, Number(pt.balance)])
+  const marks = []
+  if (p.retirementAge != null) {
+    marks.push({ xAxis: p.retirementAge, label: { formatter: `退休 ${p.retirementAge}歲`, position: 'insideEndTop' }, lineStyle: { color: '#f59e0b' } })
+  }
+  const ltcAge = p.assumptions && p.assumptions.longTermCareStartAge
+  if (ltcAge != null && p.assumptions.longTermCareAnnualExpense != null) {
+    marks.push({ xAxis: ltcAge, label: { formatter: `長照 ${ltcAge}歲`, position: 'insideEndBottom' }, lineStyle: { color: '#a855f7' } })
+  }
+  const markPoints = []
+  if (!p.lastsToEndAge && p.depletionAge != null) {
+    markPoints.push({ coord: [p.depletionAge, 0], value: `缺口 ${p.depletionAge}歲`, itemStyle: { color: '#ef4444' } })
+  }
+  return {
+    grid: { left: 66, right: 24, top: 24, bottom: 42 },
+    tooltip: {
+      trigger: 'axis',
+      formatter: (ps) => { const a = ps[0]; return `${a.value[0]} 歲<br/>資產約 ${money(a.value[1])} 元` }
+    },
+    xAxis: { type: 'value', name: '年齡', min: p.currentAge, max: p.endAge, minInterval: 1, axisLabel: { formatter: '{value}' } },
+    yAxis: { type: 'value', name: '資產（萬元）', axisLabel: { formatter: (v) => Math.round(v / 10000).toLocaleString('en-US') } },
+    series: [{
+      type: 'line', smooth: true, showSymbol: false, data,
+      areaStyle: { opacity: 0.12 },
+      lineStyle: { width: 2 },
+      itemStyle: { color: p.lastsToEndAge ? '#059669' : '#ef4444' },
+      markLine: { silent: true, symbol: 'none', data: [{ yAxis: 0, lineStyle: { color: '#94a3b8', type: 'dashed' } }, ...marks] },
+      markPoint: { data: markPoints, symbolSize: 46, label: { fontSize: 11 } }
+    }]
+  }
+})
+
+function pctText(v) {
+  const n = Number(v)
+  return isNaN(n) ? '—' : `${n}%`
+}
+function deltaClass(d) {
+  const n = Number(d)
+  if (isNaN(n) || n === 0) return 'flat'
+  return n > 0 ? 'up' : 'down'
+}
+function deltaText(d) {
+  const n = Number(d)
+  if (isNaN(n)) return ''
+  if (n === 0) return '維持'
+  return n > 0 ? `增碼 ${money(n)} 元` : `減碼 ${money(-n)} 元`
+}
+function rebalanceType(a) {
+  switch ((a || '').toUpperCase()) {
+    case 'BUY': return 'success'
+    case 'SELL': return 'danger'
+    case 'HOLD': return 'info'
+    default: return 'info'
+  }
+}
+function rebalanceLabel(a) {
+  switch ((a || '').toUpperCase()) {
+    case 'BUY': return '增碼'
+    case 'SELL': return '減碼'
+    case 'HOLD': return '維持'
+    default: return a || '—'
+  }
+}
+function rebalanceAmountClass(a) {
+  const t = rebalanceType(a)
+  return t === 'success' ? 'buy' : (t === 'danger' ? 'sell' : '')
+}
 
 function money(v) {
   const n = Number(v)
@@ -474,7 +663,6 @@ async function load(silent = false) {
     returnOptions.value = p.returnOptions || []
     form.value = {
       birthDate: p.birthDate ?? null,
-      investmentHorizonYears: p.investmentHorizonYears ?? null,
       monthlyInvestment: p.monthlyInvestment ?? null,
       retirementDate: p.retirementDate ?? null,
       laborInsuranceMonthly: p.laborInsuranceMonthly ?? null,
@@ -482,6 +670,11 @@ async function load(silent = false) {
       laborPensionLumpSum: p.laborPensionLumpSum ?? null,
       laborPensionClaimDate: p.laborPensionClaimDate ?? null,
       assumedAnnualInflationRate: p.assumedAnnualInflationRate ?? DEFAULT_INFLATION_RATE,
+      retirementAnnualExpense: p.retirementAnnualExpense ?? null,
+      longTermCareAnnualExpense: p.longTermCareAnnualExpense ?? null,
+      longTermCareStartAge: p.longTermCareStartAge ?? null,
+      accumulationAnnualReturnRate: p.accumulationAnnualReturnRate ?? null,
+      retirementAnnualReturnRate: p.retirementAnnualReturnRate ?? null,
       goals: p.goals || [],
       riskTolerance: p.riskTolerance || '',
       expectedAnnualReturn: p.expectedAnnualReturn || '',
@@ -497,6 +690,9 @@ async function load(silent = false) {
     allocation.value = data.currentAllocation && data.currentAllocation.items
       ? data.currentAllocation
       : { snapshotId: null, snapshotDate: null, totalAssets: null, items: [] }
+    projection.value = data.projection && typeof data.projection.available === 'boolean'
+      ? data.projection
+      : null
     // settings
     settings.value = data.settings && data.settings.availableModels
       ? data.settings
@@ -512,7 +708,6 @@ async function load(silent = false) {
 function profilePayload() {
   return {
     birthDate: form.value.birthDate,
-    investmentHorizonYears: form.value.investmentHorizonYears,
     monthlyInvestment: form.value.monthlyInvestment,
     retirementDate: form.value.retirementDate,
     laborInsuranceMonthly: form.value.laborInsuranceMonthly,
@@ -520,6 +715,11 @@ function profilePayload() {
     laborPensionLumpSum: form.value.laborPensionLumpSum,
     laborPensionClaimDate: form.value.laborPensionClaimDate,
     assumedAnnualInflationRate: form.value.assumedAnnualInflationRate,
+    retirementAnnualExpense: form.value.retirementAnnualExpense,
+    longTermCareAnnualExpense: form.value.longTermCareAnnualExpense,
+    longTermCareStartAge: form.value.longTermCareStartAge,
+    accumulationAnnualReturnRate: form.value.accumulationAnnualReturnRate,
+    retirementAnnualReturnRate: form.value.retirementAnnualReturnRate,
     goals: form.value.goals,
     riskTolerance: form.value.riskTolerance,
     expectedAnnualReturn: form.value.expectedAnnualReturn,
@@ -670,6 +870,29 @@ onUnmounted(stopPoll)
 .alloc-val { width: 170px; flex-shrink: 0; text-align: right; font-size: 14px; color: #1e293b; font-variant-numeric: tabular-nums; }
 .alloc-amt { color: #94a3b8; font-size: 12px; }
 .alloc-rationale { margin-left: 162px; font-size: 13px; color: #64748b; line-height: 1.6; }
+.alloc-amounts { margin-left: 162px; font-size: 13px; color: #475569; font-variant-numeric: tabular-nums; }
+.alloc-amounts .delta { font-weight: 600; }
+.alloc-amounts .delta.up { color: #059669; }
+.alloc-amounts .delta.down { color: #dc2626; }
+.alloc-amounts .delta.flat { color: #94a3b8; }
+@media (max-width: 768px) {
+  .alloc-rationale, .alloc-amounts { margin-left: 0; }
+}
+
+/* 退休現金流試算 */
+.proj-summary {
+  font-size: 15px; line-height: 1.8; color: #065f46; background: #ecfdf5;
+  border: 1px solid #a7f3d0; border-radius: 8px; padding: 10px 14px; margin-bottom: 10px;
+}
+.proj-summary.is-warn { color: #92400e; background: #fffbeb; border-color: #fde68a; }
+.proj-assume { font-size: 13px; color: #64748b; line-height: 1.7; margin-bottom: 10px; }
+.proj-note { font-size: 12px; color: #94a3b8; margin-top: 6px; }
+
+/* 再平衡操作明細 */
+.rebalance-list .reb-class { font-size: 12px; color: #94a3b8; margin-left: 4px; }
+.rebalance-list .reb-amount { margin-left: 8px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.rebalance-list .reb-amount.buy { color: #059669; }
+.rebalance-list .reb-amount.sell { color: #dc2626; }
 
 .disclaimer-top {
   background: #fffbeb; border: 1px solid #fde68a; color: #92400e;

@@ -15,6 +15,7 @@ import com.steven.assets.dto.InvestmentProfileDto;
 import com.steven.assets.dto.InvestmentProfileInput;
 import com.steven.assets.dto.PortfolioAdviceResult;
 import com.steven.assets.dto.PortfolioAdviceSettingsDto;
+import com.steven.assets.dto.RetirementProjectionDto;
 import com.steven.assets.model.AssetSnapshot;
 import com.steven.assets.model.BankDeposit;
 import com.steven.assets.model.FundHolding;
@@ -141,6 +142,7 @@ public class PortfolioAdviceService {
     private final BankDepositRepository depositRepo;
     private final FundHoldingRepository fundRepo;
     private final StockHoldingRepository stockRepo;
+    private final RetirementProjectionService projectionService;
     private final ObjectMapper objectMapper;
     private final TenantGuard tenantGuard;
 
@@ -188,7 +190,6 @@ public class PortfolioAdviceService {
         InvestmentProfile p = profileRepo.findByOwnerUserId(ownerId).orElseGet(InvestmentProfile::new);
         p.setOwnerUserId(ownerId);
         p.setBirthDate(in.birthDate());
-        p.setInvestmentHorizonYears(in.investmentHorizonYears());
         p.setMonthlyInvestment(in.monthlyInvestment());
         p.setRetirementDate(in.retirementDate());
         p.setLaborInsuranceMonthly(in.laborInsuranceMonthly());
@@ -196,6 +197,11 @@ public class PortfolioAdviceService {
         p.setLaborPensionLumpSum(in.laborPensionLumpSum());
         p.setLaborPensionClaimDate(in.laborPensionClaimDate());
         p.setAssumedAnnualInflationRate(in.assumedAnnualInflationRate());
+        p.setRetirementAnnualExpense(in.retirementAnnualExpense());
+        p.setLongTermCareAnnualExpense(in.longTermCareAnnualExpense());
+        p.setLongTermCareStartAge(in.longTermCareStartAge());
+        p.setAccumulationAnnualReturnRate(in.accumulationAnnualReturnRate());
+        p.setRetirementAnnualReturnRate(in.retirementAnnualReturnRate());
         p.setGoals(joinGoals(in.goals()));
         p.setRiskTolerance(blankToNull(in.riskTolerance()));
         p.setExpectedAnnualReturn(blankToNull(in.expectedAnnualReturn()));
@@ -245,6 +251,30 @@ public class PortfolioAdviceService {
         items.add(new CurrentAllocationDto.Item("信託基金", fund, pct(fund, total)));
         items.add(new CurrentAllocationDto.Item("股票", stock, pct(stock, total)));
         return new CurrentAllocationDto(s.getId(), s.getSnapshotDate(), total, items);
+    }
+
+    // ===== 退休現金流試算 =====
+
+    /**
+     * 目前使用者的退休現金流逐年試算（Requirement 32 / Task 165）。
+     * 讀該使用者最新快照的資產總額為起點，結合其理財條件與大筆花費，交 {@link RetirementProjectionService} 決定性試算。
+     * owner context 由 request 執行緒綁定（{@code @Filter} 生效），僅取到自己的 profile／快照／花費。
+     */
+    public RetirementProjectionDto getProjection() {
+        Long ownerId = tenantGuard.requireCurrentUserId();
+        if (ownerId == null) {
+            return RetirementProjectionDto.unavailable("無使用者情境。", null, null);
+        }
+        InvestmentProfile p = profileRepo.findByOwnerUserId(ownerId).orElse(null);
+        List<InvestmentPlannedExpense> expenses = expenseRepo.findByOwnerUserIdOrderByExpenseDate(ownerId);
+        AssetSnapshot snapshot = snapshotRepo.findLatest().orElse(null);
+        BigDecimal startAssets = snapshot == null ? null
+                : (snapshot.getTotalAssets() != null ? snapshot.getTotalAssets()
+                : nz(snapshot.getTotalDeposit()).add(nz(snapshot.getTotalFundValue())).add(nz(snapshot.getTotalStockValue())));
+        if (p == null) {
+            return RetirementProjectionDto.unavailable("請先填理財條件（至少生日）。", null, startAssets);
+        }
+        return projectionService.project(p, startAssets, expenses);
     }
 
     // ===== 建議查詢 =====
@@ -393,16 +423,18 @@ public class PortfolioAdviceService {
         row.setModel(truncate(model, 64));
         // 條件快照（age 由生日衍生後凍結為歷史值）
         row.setAge(deriveAge(profile.getBirthDate()));
-        row.setInvestmentHorizonYears(profile.getInvestmentHorizonYears());
         row.setMonthlyInvestment(profile.getMonthlyInvestment());
         row.setGoals(profile.getGoals());
         row.setRiskTolerance(profile.getRiskTolerance());
         row.setExpectedAnnualReturn(profile.getExpectedAnnualReturn());
         // 資產依據
+        BigDecimal totalAssets = null;
         if (snapshot != null) {
+            totalAssets = snapshot.getTotalAssets() != null ? snapshot.getTotalAssets()
+                    : nz(snapshot.getTotalDeposit()).add(nz(snapshot.getTotalFundValue())).add(nz(snapshot.getTotalStockValue()));
             row.setBasedOnSnapshotId(snapshot.getId());
             row.setBasedOnSnapshotDate(snapshot.getSnapshotDate());
-            row.setBasedOnTotalAssets(snapshot.getTotalAssets());
+            row.setBasedOnTotalAssets(totalAssets);
         }
 
         if (apiKey == null || apiKey.isBlank()) {
@@ -423,9 +455,10 @@ public class PortfolioAdviceService {
 
         log.info("資產配置建議：送出（owner={}, adviceId={}, model={}, effort={}, webSearchMaxUses={}, snapshot={}）",
                 ownerId, adviceId, model, effort, webSearchMaxUses, snapshot == null ? "none" : snapshot.getId());
+        final BigDecimal totalForEnrich = totalAssets;
         try {
             generationExecutor.submit(() ->
-                    runGeneration(adviceId, ownerId, model, effort, webSearchMaxUses, webSearchOn, systemPrompt, userPrompt));
+                    runGeneration(adviceId, ownerId, model, effort, webSearchMaxUses, webSearchOn, systemPrompt, userPrompt, totalForEnrich));
         } catch (Exception e) {
             // 提交失敗（如關機中）→ 直接落 FAILED，避免卡 PROCESSING
             log.warn("資產配置建議：背景任務提交失敗（adviceId={}）: {}", adviceId, e.getMessage());
@@ -442,7 +475,7 @@ public class PortfolioAdviceService {
      * 不觸及 owner-scoped 查詢（prompt 已於 request 執行緒組好）；{@code findById} 不受 {@code @Filter} 影響。不拋出。
      */
     private void runGeneration(Long adviceId, Long ownerId, String model, String effort, int webSearchMaxUses,
-                               boolean webSearchOn, String systemPrompt, String userPrompt) {
+                               boolean webSearchOn, String systemPrompt, String userPrompt, BigDecimal totalAssets) {
         String rawText = null;
         String resultJson = null;
         String status;
@@ -462,10 +495,12 @@ public class PortfolioAdviceService {
             Message resp = client().messages().create(params);
             rawText = extractText(resp);
             PortfolioAdviceResult result = parseResult(rawText);
-            resultJson = objectMapper.writeValueAsString(sanitize(result));
+            resultJson = objectMapper.writeValueAsString(enrich(sanitize(result), totalAssets));
             status = PortfolioAdvice.STATUS_OK;
-            log.info("資產配置建議：完成（owner={}, adviceId={}, actions={}）",
-                    ownerId, adviceId, result.actions() == null ? 0 : result.actions().size());
+            log.info("資產配置建議：完成（owner={}, adviceId={}, actions={}, rebalance={}）",
+                    ownerId, adviceId,
+                    result.actions() == null ? 0 : result.actions().size(),
+                    result.rebalancePlan() == null ? 0 : result.rebalancePlan().size());
         } catch (Exception e) {
             log.warn("資產配置建議：產生失敗（owner={}, adviceId={}）: {}", ownerId, adviceId, e.getMessage(), e);
             status = PortfolioAdvice.STATUS_FAILED;
@@ -513,23 +548,30 @@ public class PortfolioAdviceService {
             1a. 退休兩階段：「每月可投入」僅在退休前（累積期）有效；退休後（退休日期之後）薪水停止、定期投入為 0，只能靠既有資產與其報酬支應。估算未來可累積金額時，每月投入只計算累積期的年數，切勿假設退休後仍持續投入。越接近或進入退休，配置應越保守（提高現金／固定收益、降低高波動部位）；退休後不可用「之後還會定期投入」來合理化承受更高風險或攤平短期虧損。若退休日期落在投資年限終點之後（無退休後階段），才可視為全期皆在累積。
             1b. 退休後現金流與未來大筆支出：若使用者提供「勞保年金月領／勞退一次領」，視為退休後的固定收入來源，可部分抵減退休後的資產提領壓力、據此評估既有資產能否支應退休生活（勞保勞退金額為未來實際給付，勿再做通膨調整）。若使用者提供「特定日期大筆花費」（如購車、購屋），金額已換算為該日期的未來名目值——這是未來一次性現金流出，配置上需為其預留足夠流動性、並在越接近該支出日時越保守（避免屆時被迫在低點變現），於 warnings 明確提醒。
             2. 先評估使用者「目前」的配置與風險（過度集中、現金過多／過少、與其風險屬性是否相稱），再提出「目標配置比例」與具體「調整動作」。targetAllocation 各類別的 targetPct 加總應約等於 100。
+            2a. targetAllocation 每一類請一併估算 currentValue＝「使用者目前持有的資產中，歸屬於該類別的金額合計」（把每一檔股票／基金／存款分類到最貼近的類別後加總，單位為新台幣元的純數字，不要逗號或文字）。系統會用「資產總額 × targetPct」自動算出各類目標金額與差額，你不需輸出 targetAmount／deltaAmount。
+            2b. rebalancePlan：把「怎麼從現況調到目標」落到**逐標的的具體新台幣金額**。針對使用者實際持有的標的（用其代號／名稱）與需要新增的類別，列出要 BUY（增碼/買進）、SELL（減碼/賣出）或 HOLD（維持）約多少錢（estimatedAmount 為正數純數字，單位元）。各項增減碼金額應與各類別的目標差額大致相符（賣出總額 ≈ 買進總額，除非有淨增／淨提領）。這是使用者最想要的「可執行操作清單」，務必具體、可對照其持股。
+            2c. 系統已附「退休現金流試算」（依使用者自訂假設做的決定性逐年試算）。請據此在 riskAssessment／warnings 具體點出「退休後資產是否足以支應提領、能撐到幾歲或哪一年可能出現缺口」，並讓 targetAllocation 與提領策略與該試算相容（例如若試算顯示會提早耗盡，就要更強調固定收益／降低提領或延後大額支出）。
             %s
-            4. 建議要具體且務實（可含定期定額、再平衡、緊急預備金、分散標的等），但**不得**推薦個股買賣時點或保證報酬。
-            5. 全程使用台灣繁體中文；金額以新台幣（TWD）為單位。
+            4. 建議要具體且務實（可含定期定額、再平衡、緊急預備金、分散標的等），但**不得**推薦個股買賣時點或保證報酬。actions 放「非金額類的做法步驟」（如再平衡節奏、緊急預備金、定期檢視），金額類的加減碼放 rebalancePlan。
+            5. 全程使用台灣繁體中文；金額以新台幣（TWD）為單位。JSON 內所有金額欄位一律為純數字（不含千分位逗號、貨幣符號或文字）。
 
             完成後，你的最後輸出「只包含一個 JSON 物件」，不要有任何多餘文字、不要用 markdown 反引號包裹，格式如下：
             {
               "summary": "一段話總結整體評析與核心建議方向（繁體中文）",
-              "riskAssessment": "對使用者目前配置與風險的評估（繁體中文）",
+              "riskAssessment": "對使用者目前配置與風險的評估，含退休現金流是否足夠（繁體中文）",
               "targetAllocation": [
-                {"assetClass": "現金/存款", "targetPct": 20, "rationale": "理由"},
-                {"assetClass": "債券/固定收益", "targetPct": 15, "rationale": "理由"},
-                {"assetClass": "台股", "targetPct": 30, "rationale": "理由"},
-                {"assetClass": "海外股票", "targetPct": 25, "rationale": "理由"},
-                {"assetClass": "其他（基金/REITs等）", "targetPct": 10, "rationale": "理由"}
+                {"assetClass": "現金/存款", "targetPct": 20, "currentValue": 8170000, "rationale": "理由"},
+                {"assetClass": "債券/固定收益", "targetPct": 15, "currentValue": 0, "rationale": "理由"},
+                {"assetClass": "台股", "targetPct": 30, "currentValue": 6000000, "rationale": "理由"},
+                {"assetClass": "海外股票", "targetPct": 25, "currentValue": 5000000, "rationale": "理由"},
+                {"assetClass": "其他（基金/REITs等）", "targetPct": 10, "currentValue": 60000, "rationale": "理由"}
+              ],
+              "rebalancePlan": [
+                {"assetClass": "現金/存款", "holding": "定存", "action": "SELL", "estimatedAmount": 5000000, "rationale": "現金過多，轉入固定收益"},
+                {"assetClass": "債券/固定收益", "holding": "00751B", "action": "BUY", "estimatedAmount": 3000000, "rationale": "建立債券部位作為退休提領緩衝"}
               ],
               "actions": [
-                {"title": "調整動作標題", "detail": "具體怎麼做（繁體中文）", "priority": "HIGH | MEDIUM | LOW"}
+                {"title": "調整動作標題", "detail": "非金額類的做法步驟（繁體中文）", "priority": "HIGH | MEDIUM | LOW"}
               ],
               "warnings": ["需提醒使用者注意的風險或前提（繁體中文）"],
               "references": [
@@ -545,20 +587,19 @@ public class PortfolioAdviceService {
         sb.append("== 使用者理財條件 ==\n");
         Integer age = deriveAge(p.getBirthDate());
         sb.append("目前年齡：").append(age != null ? age + " 歲（生日 " + p.getBirthDate() + "）" : "未提供").append("\n");
-        sb.append("預計投資年限：").append(p.getInvestmentHorizonYears() != null ? p.getInvestmentHorizonYears() + " 年" : "未提供").append("\n");
-        RetirementSpan span = retirementSpan(p.getRetirementDate(), p.getInvestmentHorizonYears());
+        RetirementSpan span = retirementSpan(p.getBirthDate(), p.getRetirementDate());
         sb.append("預計退休日期：").append(p.getRetirementDate() != null ? p.getRetirementDate().toString() : "未提供").append("\n");
         if (p.getRetirementDate() != null && span.accumulationYears() != null) {
             String monthly = p.getMonthlyInvestment() != null ? money(p.getMonthlyInvestment()) + " 元" : "0 元";
-            sb.append("累積期：").append(span.accumulationYears()).append(" 年（退休前，每月可投入 ").append(monthly).append("）\n");
+            sb.append("累積期（今天→退休日）：").append(span.accumulationYears()).append(" 年（退休前，每月可投入 ").append(monthly).append("）\n");
             if (span.retirementYears() != null) {
-                sb.append("退休後守成／提領期：").append(span.retirementYears())
+                sb.append("退休後守成／提領期（退休→100 歲）：約 ").append(span.retirementYears())
                         .append(" 年（退休後薪水停止，每月投入為 0，僅靠既有資產與其報酬）\n");
             }
             BigDecimal projected = projectedContribution(p.getMonthlyInvestment(), span.accumulationYears());
             sb.append("退休前預估可再投入本金合計（僅累積期，退休後不計）：約 ").append(money(projected)).append(" 元\n");
         } else {
-            sb.append("每月可投入金額：").append(p.getMonthlyInvestment() != null ? money(p.getMonthlyInvestment()) + " 元" : "未提供").append("（未提供退休日期，視為整段投資年限皆可投入）\n");
+            sb.append("每月可投入金額：").append(p.getMonthlyInvestment() != null ? money(p.getMonthlyInvestment()) + " 元" : "未提供").append("（未提供退休日期）\n");
         }
         sb.append("理財目標：").append(goalLabels(p.getGoals())).append("\n");
         sb.append("風險承受度：").append(labelOf(RISK_OPTIONS, p.getRiskTolerance())).append("\n");
@@ -584,6 +625,7 @@ public class PortfolioAdviceService {
             }
             sb.append("\n");
             appendHoldings(sb, snapshot.getId());
+            appendProjection(sb, p, expenses, total);
         }
 
         if (webSearchEnabled) {
@@ -594,15 +636,19 @@ public class PortfolioAdviceService {
         return sb.toString();
     }
 
-    /** 追加各類持有明細（存款／基金／股票），每類至多 {@link #MAX_HOLDINGS_PER_CLASS} 檔。 */
+    /** 追加各類持有明細（存款／基金／股票），每類至多 {@link #MAX_HOLDINGS_PER_CLASS} 檔。含股數／成本／損益／銀行名稱，供 AI 判斷套牢 vs 獲利可調節部位。 */
     private void appendHoldings(StringBuilder sb, Long snapshotId) {
-        List<BankDeposit> deposits = depositRepo.findBySnapshotId(snapshotId);
+        List<BankDeposit> deposits = depositRepo.findWithBankBySnapshotId(snapshotId);
         if (!deposits.isEmpty()) {
             sb.append("存款明細：\n");
             int n = 0;
             for (BankDeposit d : deposits) {
                 if (n++ >= MAX_HOLDINGS_PER_CLASS) { sb.append("  …（其餘略）\n"); break; }
-                sb.append("  - ").append(safe(d.getDepositType())).append("：").append(money(d.getAmount())).append(" 元");
+                sb.append("  - ");
+                if (d.getBank() != null && d.getBank().getDisplayName() != null) {
+                    sb.append(d.getBank().getDisplayName()).append(" ");
+                }
+                sb.append(safe(d.getDepositType())).append("：").append(money(d.getAmount())).append(" 元");
                 if (d.getAnnualInterestRate() != null) {
                     sb.append("（年利率 ").append(d.getAnnualInterestRate().toPlainString()).append("%）");
                 }
@@ -618,7 +664,15 @@ public class PortfolioAdviceService {
             int n = 0;
             for (FundHolding f : funds) {
                 if (n++ >= MAX_HOLDINGS_PER_CLASS) { sb.append("  …（其餘略）\n"); break; }
-                sb.append("  - ").append(safe(f.getFundName())).append("：現值 ").append(money(f.getCurrentValue())).append(" 元");
+                sb.append("  - ").append(safe(f.getFundName()));
+                if (f.getFundCode() != null && !f.getFundCode().isBlank()) {
+                    sb.append("（").append(f.getFundCode()).append("）");
+                }
+                sb.append("：現值 ").append(money(f.getCurrentValue())).append(" 元");
+                if (f.getInvestmentAmount() != null) {
+                    sb.append("、成本 ").append(money(f.getInvestmentAmount())).append(" 元、損益 ")
+                            .append(signedMoney(f.getProfit())).append(" 元");
+                }
                 if (f.getEstimatedDividend() != null && f.getEstimatedDividend().signum() > 0) {
                     sb.append("（預估年配息 ").append(money(f.getEstimatedDividend())).append(" 元）");
                 }
@@ -634,6 +688,13 @@ public class PortfolioAdviceService {
                 sb.append("  - ").append(safe(s.getStockCode()));
                 if (s.getMarket() != null) sb.append("（").append(s.getMarket()).append("）");
                 sb.append("：現值 ").append(money(s.getCurrentValue())).append(" 元");
+                if (s.getShares() != null) {
+                    sb.append("、股數 ").append(s.getShares().stripTrailingZeros().toPlainString());
+                }
+                if (s.getInvestmentCost() != null) {
+                    sb.append("、成本 ").append(money(s.getInvestmentCost())).append(" 元、損益 ")
+                            .append(signedMoney(s.getProfit())).append(" 元");
+                }
                 if (s.getDividendRate() != null && s.getDividendRate().signum() > 0) {
                     sb.append("（配息率 ").append(s.getDividendRate().multiply(BigDecimal.valueOf(100))
                             .setScale(2, RoundingMode.HALF_UP).toPlainString()).append("%）");
@@ -644,26 +705,71 @@ public class PortfolioAdviceService {
         sb.append("\n");
     }
 
+    /**
+     * 追加「退休現金流試算」段：把 {@link RetirementProjectionService} 的決定性逐年試算摘要餵給 AI，
+     * 讓文字建議建立在同一組數字上（單一真實來源，與前端折線圖一致）。試算 unavailable 時附提示、要求 AI 提醒補資料。
+     */
+    private void appendProjection(StringBuilder sb, InvestmentProfile p, List<InvestmentPlannedExpense> expenses, BigDecimal total) {
+        RetirementProjectionDto proj = projectionService.project(p, total, expenses);
+        sb.append("== 退休現金流試算（系統依你的假設做的決定性逐年試算，非預測）==\n");
+        if (!proj.available()) {
+            sb.append("（無法試算：").append(safe(proj.unavailableReason()))
+                    .append("）請在 warnings 提醒使用者補齊該資料以取得退休現金流試算。\n\n");
+            return;
+        }
+        RetirementProjectionDto.Assumptions a = proj.assumptions();
+        sb.append("起始資產：").append(money(total)).append(" 元\n");
+        sb.append("假設：累積期年報酬 ").append(a.accumulationReturnPct().toPlainString()).append("%")
+                .append(a.accumReturnFromBand() ? "（依獲利預期帶入）" : "（自訂）")
+                .append("、退休後年報酬 ").append(a.retirementReturnPct().toPlainString()).append("%")
+                .append(a.retireReturnFromBand() ? "（依獲利預期帶入）" : "（自訂）")
+                .append("、年通膨 ").append(a.inflationPct().toPlainString()).append("%");
+        if (a.retirementAnnualExpense() != null) {
+            sb.append("、長照前年生活費（今日幣值）").append(money(a.retirementAnnualExpense())).append(" 元");
+        }
+        if (a.longTermCareAnnualExpense() != null) {
+            sb.append("、長照後年生活費（今日幣值）").append(money(a.longTermCareAnnualExpense())).append(" 元")
+                    .append("（自 ").append(a.longTermCareStartAge()).append(" 歲起）");
+        }
+        sb.append("\n");
+        sb.append("退休後分兩階段：長照前（一般退休生活）與長照後（照護期，年支出通常較高）；每年提領依通膨逐年膨脹。\n");
+        if (proj.retirementAge() != null) {
+            sb.append("預計退休年齡：約 ").append(proj.retirementAge()).append(" 歲");
+            if (proj.retirementStartBalance() != null) {
+                sb.append("，退休首年年末預估結餘約 ").append(money(proj.retirementStartBalance())).append(" 元");
+            }
+            sb.append("\n");
+        }
+        if (proj.lastsToEndAge()) {
+            sb.append("結論：依此假設，資產可支應至 ").append(proj.endAge()).append(" 歲，屆時約剩 ")
+                    .append(money(proj.endBalance())).append(" 元（未見缺口）。\n");
+        } else {
+            sb.append("結論：依此假設，資產預計在約 ").append(proj.depletionAge()).append(" 歲（")
+                    .append(proj.depletionYear()).append(" 年）出現資金缺口（提前耗盡）。請據此在建議中強化提領安全性。\n");
+        }
+        sb.append("\n");
+    }
+
     // ===== 退休兩階段（衍生，不入庫）=====
 
     /**
-     * 依退休年月與投資年限推導兩階段年數（衍生值，不入庫）。
-     * accumulationYears：今天 → 退休年月的整月數 / 12「無條件捨去」（滿一年才算一年，避免高估退休前可投入期間）。
-     * 退休晚於投資終點時：accumulationYears 夾為投資年限、retirementYears = 0（無退休後階段）。
+     * 依生日與退休日推導兩階段年數（衍生值，不入庫）——不再需要「投資年限」。
+     * accumulationYears：今天 → 退休日的整月數 / 12「無條件捨去」（滿一年才算一年，避免高估退休前可投入期間）。
+     * retirementYears：退休 → {@link RetirementProjectionService#END_AGE} 歲的守成年數（＝100 − 退休年齡；生日缺時回 null）。
      * 退休已過（≤今天）：accumulationYears = 0（累積期已結束）。
      */
-    private RetirementSpan retirementSpan(LocalDate retirementDate, Integer horizonYears) {
+    private RetirementSpan retirementSpan(LocalDate birthDate, LocalDate retirementDate) {
         if (retirementDate == null) {
             return new RetirementSpan(null, null);
         }
         LocalDate now = LocalDate.now();
         long monthsToRetire = ChronoUnit.MONTHS.between(now, retirementDate);
         int accumulationYears = (int) Math.max(0, monthsToRetire / 12); // 整數除法即無條件捨去
-        if (horizonYears == null) {
-            return new RetirementSpan(accumulationYears, null);
+        Integer retirementYears = null;
+        if (birthDate != null) {
+            int retirementAge = Math.max(0, Period.between(birthDate, retirementDate).getYears());
+            retirementYears = Math.max(0, RetirementProjectionService.END_AGE - retirementAge);
         }
-        accumulationYears = Math.min(accumulationYears, horizonYears);
-        int retirementYears = Math.max(0, horizonYears - accumulationYears);
         return new RetirementSpan(accumulationYears, retirementYears);
     }
 
@@ -783,7 +889,31 @@ public class PortfolioAdviceService {
             }
         }
         return new PortfolioAdviceResult(
-                r.summary(), r.riskAssessment(), r.targetAllocation(), r.actions(), r.warnings(), refs);
+                r.summary(), r.riskAssessment(), r.targetAllocation(), r.rebalancePlan(), r.actions(), r.warnings(), refs);
+    }
+
+    /**
+     * 回填 targetAllocation 的「目標金額／差額」——決定性算術由後端做，不交給 LLM：
+     * targetAmount = 資產總額 × targetPct%（四捨五入到元）；deltaAmount = targetAmount − currentValue（LLM 分類的目前金額，可 null）。
+     * 總額未知（無快照）時只保留 LLM 的比例與分類，不回填金額。
+     */
+    private PortfolioAdviceResult enrich(PortfolioAdviceResult r, BigDecimal totalAssets) {
+        if (r.targetAllocation() == null || totalAssets == null || totalAssets.signum() <= 0) {
+            return r;
+        }
+        List<PortfolioAdviceResult.TargetAllocation> out = new ArrayList<>();
+        for (PortfolioAdviceResult.TargetAllocation t : r.targetAllocation()) {
+            if (t == null) continue;
+            BigDecimal targetAmount = t.targetPct() == null ? null
+                    : totalAssets.multiply(t.targetPct()).divide(BigDecimal.valueOf(100), 0, RoundingMode.HALF_UP);
+            BigDecimal delta = (targetAmount != null && t.currentValue() != null)
+                    ? targetAmount.subtract(t.currentValue()).setScale(0, RoundingMode.HALF_UP)
+                    : null;
+            out.add(new PortfolioAdviceResult.TargetAllocation(
+                    t.assetClass(), t.targetPct(), t.currentValue(), targetAmount, delta, t.rationale()));
+        }
+        return new PortfolioAdviceResult(
+                r.summary(), r.riskAssessment(), out, r.rebalancePlan(), r.actions(), r.warnings(), r.references());
     }
 
     private String safeHttpUrl(String url) {
@@ -894,6 +1024,13 @@ public class PortfolioAdviceService {
     private static String money(BigDecimal v) {
         if (v == null) return "0";
         return String.format("%,.0f", v.setScale(0, RoundingMode.HALF_UP));
+    }
+
+    /** 帶正負號的金額（損益用）：正數前綴 +，負數自帶 −。 */
+    private static String signedMoney(BigDecimal v) {
+        if (v == null) return "0";
+        BigDecimal r = v.setScale(0, RoundingMode.HALF_UP);
+        return (r.signum() > 0 ? "+" : "") + String.format("%,.0f", r);
     }
 
     private static String safe(String s) {
