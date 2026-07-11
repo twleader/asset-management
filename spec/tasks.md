@@ -4303,24 +4303,26 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 
 ---
 
-### Task 172：Dashboard KPI 第 4 張「信託基金」卡改為「債券」（顯示債券現值；Requirement 9 / 25）
+### Task 172：Dashboard KPI「股票現值／債券現值」兩卡改用圓餅圖同邏輯的資產類別歸類值（Requirement 9 / 25）
 
 對應 Requirements: Requirement 9、Requirement 25（[requirements.md](spec/requirements.md)）
 
 #### 需求
 
-信託基金不是獨立資產類別、且債券 ETF 應正確歸入債券。Dashboard 上方 KPI 卡把第 4 張「信託基金」改為「債券」，顯示依「資產類別歸類」的 `bondValue`（債券型：債券 ETF ＋ 債券型基金）。**「股票現值」卡（第 3 張）維持原樣**（全股票即時值、盤中 live、損益）。範圍限 KPI 卡；下方「信託基金」橫條圖、「資產類別」產品別圓餅圖、「現金/債券/股票」圓餅圖 tab 均不動。
+信託基金不是獨立資產類別、且債券 ETF 應正確歸入債券。Dashboard 上方 KPI 卡第 3、4 張改為與「現金/債券/股票」圓餅圖 tab **同邏輯**的資產類別歸類值：**股票現值** = `stockValue`（股票型：一般股票/ETF ＋ 股票型基金，不含債券 ETF）、**債券現值** = `bondValue`（債券型：債券 ETF ＋ 債券型基金）。兩卡佔比 == 圓餅圖股票／債券佔比。範圍限 KPI 卡；下方「信託基金」橫條圖、「資產類別」產品別圓餅圖、「現金/債券/股票」圓餅圖 tab 均不動。
+
+> 迭代註：初版曾「兩卡都改（股票/債券）」→ 改「只改信託基金→債券、保留股票現值(totalStockValue)」→ 因股票現值(含債券ETF, 58.9%)與圓餅圖股票(54.29%)不一致，最終定為「兩卡皆用圓餅圖邏輯」（本版）。
 
 #### 設計決策
 
-- **同一 business-service 來源**：債券金額直接取 `GET /api/snapshots/history` 已回傳、由 `AssetService.getAssetHistory()` 計算的 `bondValue`（債券型：債券 ETF ＋ 債券型基金），與「現金/債券/股票」圓餅圖 tab 完全同源同值。前端不重算分類、不新增後端端點/DTO 欄位。
-- **快照凍結、不套 live**：債券卡沿用 Requirement 25 口徑（逐筆凍結 `currentValue`，巨觀資產配置毋須 intraday 精度），與圓餅圖一致。「股票現值」卡仍走原 `liveLatest` 盤中 live。
-- **sub 用佔比**：債券分類值無逐筆成本口徑，`sub` 顯示「佔比 X.X%」（佔總資產）。
-- **刻意取捨——五卡不再嚴格加總**：使用者選擇保留「股票現值」（含全部股票部位、含債券 ETF）並另設「債券」卡（含同一批債券 ETF），兩卡視角刻意重疊，故五卡不再嚴格加總 == `totalAssets`（有別於原「存款 + 股票現值 + 信託基金 == totalAssets」）；嚴格分割維度在「現金/債券/股票」圓餅圖 tab。
+- **同一 business-service 來源**：股票現值/債券現值直接取 `GET /api/snapshots/history` 已回傳、由 `AssetService.getAssetHistory()` 計算的 `stockValue`／`bondValue`，與「現金/債券/股票」圓餅圖 tab 完全同源同值。前端不重算分類、不新增後端端點/DTO 欄位。
+- **快照凍結、不套 live**：兩卡沿用 Requirement 25 口徑（逐筆凍結 `currentValue`，巨觀資產配置毋須 intraday 精度），與圓餅圖一致。原 `liveLatest` 的 live 股票加總仍保留、併入「資產總計」live 口徑（股票現值卡本身不再盤中跳動）。
+- **sub 用佔比**：分類值無逐筆成本口徑，兩卡 `sub` 皆顯示「佔比 X.X%」（佔總資產）。
+- **回復嚴格加總**：存款 + 股票現值 + 債券現值 == `totalAssets`（債券 ETF 只計入債券現值、不再重複計入股票現值），與初版「保留 totalStockValue」造成的重疊相比更正確。
 
 #### 實作
 
-- [x] 172.1 spec：requirements.md Requirement 9（第 4 張改「債券」、保留「股票現值」、標註刻意重疊）、design.md Dashboard KPI 段、本 Task。
-- [x] 172.2 前端：`DashboardView.vue` `kpiCards` computed——依 `liveLatest.id` 於 `store.history` 找對應 row 取 `bondValue`；第 4 張「信託基金」改「債券」（值 = `bondValue`、teal 色、`sub` 佔比）；「股票現值」及資產總計 / 存款總計 / 預估年配息四卡維持原樣。
-- [x] 172.3 驗證：Docker 重 build frontend、recreate；部署 chunk 服務新版（KPI 標籤「債券」、值 == 圓餅圖 `bondValue`）；含債券 ETF 的持股正確計入債券卡（owner=1 2026-07-10：債券 = 973,702）。
+- [x] 172.1 spec：requirements.md Requirement 9（兩卡改圓餅圖邏輯、去除股票現值 live 描述、回復嚴格加總）、design.md Dashboard KPI 段、本 Task。
+- [x] 172.2 前端：`DashboardView.vue` `kpiCards` computed——依 `liveLatest.id` 於 `store.history` 找對應 row 取 `stockValue`／`bondValue`；第 3 張「股票現值」值改 `stockValue`（琥珀、`sub` 佔比）、第 4 張改「債券現值」值 `bondValue`（teal、`sub` 佔比）；資產總計 / 存款總計 / 預估年配息三卡不變。
+- [x] 172.3 驗證：Docker 重 build frontend、recreate；部署 chunk 服務新版，兩卡佔比 == 圓餅圖（owner=1 2026-07-10：股票現值 10,848,763=54.29%、債券現值 973,702=4.87%）；存款+股票現值+債券現值 == totalAssets。
 - [ ] 172.4 commit + 兩段式 merge。
