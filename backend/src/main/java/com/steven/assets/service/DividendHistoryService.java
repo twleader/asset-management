@@ -80,4 +80,36 @@ public class DividendHistoryService {
         String source = rows.get(0).getSource();
         return new DividendHistoryResult(code, market, source, null, out);
     }
+
+    /**
+     * 純讀股利歷史（績效比較頁 Requirement 33）：與 {@link #findFromDb} 同樣讀 stock_dividend_history、
+     * 產出同樣的 DividendRow 清單，但**移除 cold-cache sync 副作用**——DB 沒資料就回空清單，
+     * 絕不觸發 external-materials-service /internal/dividend/sync 寫入。故意不加 @Transactional / readOnly。
+     */
+    public DividendHistoryResult findFromDbReadOnly(String code, String market, int years) {
+        int sinceYear = Year.now().getValue() - years;
+        List<StockDividendHistory> rows = repo.findByStockSinceYear(code, market, sinceYear);
+        if (rows.isEmpty()) {
+            return new DividendHistoryResult(code, market, null, "查無資料", List.of());
+        }
+        List<DividendRow> out = new ArrayList<>(rows.size());
+        for (StockDividendHistory h : rows) {
+            out.add(new DividendRow(
+                    h.getYear(),
+                    h.getCashDividend(),
+                    h.getStockDividend(),
+                    h.getExDividendDate() != null ? h.getExDividendDate().toString() : null,
+                    h.getYieldPct(),
+                    h.getCashPaymentDate() != null ? h.getCashPaymentDate().toString() : null,
+                    h.getStockPaymentDate() != null ? h.getStockPaymentDate().toString() : null,
+                    h.getFillDays(),
+                    h.getPreviousClose()
+            ));
+        }
+        out.sort(Comparator
+                .comparing(DividendRow::year, Comparator.reverseOrder())
+                .thenComparing(r -> r.exDividendDate() == null ? "" : r.exDividendDate(), Comparator.reverseOrder()));
+        String source = rows.get(0).getSource();
+        return new DividendHistoryResult(code, market, source, null, out);
+    }
 }

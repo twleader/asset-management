@@ -201,10 +201,11 @@ export const bffApi = {
     // 我的股票下拉清單（owner-scoped）：{ code, market, name }
     myStocks: () => api.get('/bff/performance-comparison/my-stocks'),
     // 報酬率疊圖：keys=['2330:台股',...]（≤3）、codes=['TWSE','SPX',...]（白名單）、range∈{3m,6m,1y,2y,5y}
+    // dividend：報酬口徑，true=含息報酬（股利再投入）／false=純價格報酬，預設 true
     // 前端 join、後端 split，避開 axios 陣列序列化成 stocks[]= 讓 Spring @RequestParam String 收不到
-    compare: (keys = [], codes = [], range = '1y') =>
+    compare: (keys = [], codes = [], range = '1y', dividend = true) =>
       api.get('/bff/performance-comparison/compare', {
-        params: { stocks: keys.join(','), benchmarks: codes.join(','), range }
+        params: { stocks: keys.join(','), benchmarks: codes.join(','), range, dividend: String(dividend) }
       })
   },
 

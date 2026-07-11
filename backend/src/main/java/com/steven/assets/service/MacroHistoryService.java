@@ -46,6 +46,17 @@ public class MacroHistoryService {
     public static final List<String> OVERSEAS_INDEX_CODES =
             List.of("DJI", "SPX", "IXIC", "SOX", "FTSE", "DAX", "KOSPI", "N225");
 
+    /**
+     * 「含息報酬指數」型海外指數代碼（績效比較頁 Requirement 33）。
+     * SP500TR＝S&P 500 Total Return（含股息再投入），走 Yahoo ^SP500TR，與純價格 SPX 對照。
+     * refresh 守門與每日自動回補排程共用。
+     */
+    public static final List<String> TOTAL_RETURN_US_INDEX_CODES = List.of("SP500TR");
+
+    /** TWSE 報酬指數回補重入防護：避免連點 refresh-tr 同時 spawn 多條背景執行緒。 */
+    private final java.util.concurrent.atomic.AtomicBoolean twseTrBackfillRunning =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
+
     private final TaiwanGdpPerCapitaHistoryRepository gdpRepo;
     private final JapanGdpPerCapitaHistoryRepository japanGdpRepo;
     private final KoreaGdpPerCapitaHistoryRepository koreaGdpRepo;
@@ -226,6 +237,12 @@ public class MacroHistoryService {
             if (rows.isEmpty()) {
                 skippedMonths++;
             } else {
+                // 保留既有 close_point_tr（報酬指數）：fetchTwseMonthlyDailyProxy 只帶價格 OHLC，
+                // 直接 saveAll（JPA merge）會把已回補的 close_point_tr 洗成 null（含息 TWSE 線靜默退化）。
+                for (TwseIndexDailyHistory row : rows) {
+                    twseDailyRepo.findById(row.getTradingDate())
+                            .ifPresent(ex -> row.setClosePointTr(ex.getClosePointTr()));
+                }
                 twseDailyRepo.saveAll(rows);
                 upserted += rows.size();
             }
@@ -259,13 +276,117 @@ public class MacroHistoryService {
                 if (d.tradingDate() == null || d.close() == null) continue;
                 out.add(new TwseIndexDailyHistory(
                         LocalDate.parse(d.tradingDate()),
-                        d.open(), d.high(), d.low(), d.close()));
+                        d.open(), d.high(), d.low(), d.close(),
+                        null));   // closePointTr 由 refresh-tr / 每日排程另行回補
             }
             return out;
         } catch (Exception e) {
             log.warn("呼叫 /internal/macro/twse-monthly {} 失敗: {}", ym, e.getMessage());
             return List.of();
         }
+    }
+
+    /** TWSE 發行量加權股價「報酬指數」（含息）某交易日收盤 proxy 回傳。 */
+    private record TwseReturnIndexDto(String tradingDate, BigDecimal close) {}
+
+    /**
+     * 抓「單日」TWSE 報酬指數收盤（含息）。
+     * 經 /internal/macro/twse-return-index proxy 打 ext-materials（非交易日/查無回 204）；
+     * 回 BigDecimal close，204 或例外回 null。
+     */
+    private BigDecimal fetchTwseReturnIndexProxy(LocalDate date) {
+        try {
+            TwseReturnIndexDto dto = priceServiceClient.get()
+                    .uri(uriBuilder -> uriBuilder.path("/internal/macro/twse-return-index")
+                            .queryParam("date", date.toString()).build())
+                    .retrieve()
+                    .bodyToMono(TwseReturnIndexDto.class)
+                    .block();
+            return dto == null ? null : dto.close();
+        } catch (Exception e) {
+            log.warn("呼叫 /internal/macro/twse-return-index {} 失敗: {}", date, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * TWSE 報酬指數（含息）近 N 年回補：**背景執行**、立即回 {"started":true,"pending":&lt;n&gt;}。
+     * 取 twse_index_daily_history 近 N 年 close_point_tr 為 null 的列，逐日抓報酬指數收盤補上；
+     * 逐筆各自 save（resumable），每筆 350ms 禮貌間隔，單筆失敗 try/catch 續跑，結束 log 統計。
+     */
+    public Map<String, Object> refreshTwseReturnIndex(int years) {
+        if (!twseTrBackfillRunning.compareAndSet(false, true)) {
+            return Map.of("started", false, "reason", "in-progress");   // 重入防護
+        }
+        List<TwseIndexDailyHistory> pending = pendingTwseReturnIndexRows(LocalDate.now().minusYears(years));
+        int pendingCount = pending.size();
+        new Thread(() -> {
+            try {
+                fillTwseReturnIndex(pending, "backfill-" + years + "y");
+            } finally {
+                twseTrBackfillRunning.set(false);
+            }
+        }, "twse-return-index-backfill").start();
+        return Map.of("started", true, "pending", pendingCount);
+    }
+
+    /**
+     * 每日增量 / self-heal：補近 {@code lookbackDays} 天內仍為 null 的 close_point_tr
+     * （涵蓋最近交易日、排程時點今日列尚未寫入、以及回補時的單日 miss 缺口）。同步執行、回補上筆數。
+     */
+    public int fillRecentTwseReturnIndexGaps(int lookbackDays) {
+        List<TwseIndexDailyHistory> pending = pendingTwseReturnIndexRows(LocalDate.now().minusDays(lookbackDays));
+        fillTwseReturnIndex(pending, "daily-gap");
+        return pending.size();
+    }
+
+    /**
+     * TWSE 報酬指數合理性檢查：報酬指數/價格指數比值歷史約 1.5–2.1（隨配息複利緩升），
+     * 落在 [1.3, 3.5] 外視為 TWSE 單次 transient 異常值（如實測 2021-12-23 曾回 104241／比值 5.8），拒存以免整條含息線爆尖刺。
+     * 無同日價格可比時放行（無從判定）。
+     */
+    private static boolean isPlausibleTr(BigDecimal tr, BigDecimal price) {
+        if (tr == null || tr.signum() <= 0) return false;
+        if (price == null || price.signum() <= 0) return true;
+        double ratio = tr.doubleValue() / price.doubleValue();
+        return ratio >= 1.3 && ratio <= 3.5;
+    }
+
+    /** 取指定日起、close_point_tr 仍為 null 的交易日列（升冪）。 */
+    private List<TwseIndexDailyHistory> pendingTwseReturnIndexRows(LocalDate since) {
+        return twseDailyRepo.findByTradingDateGreaterThanEqualOrderByTradingDateAsc(since)
+                .stream()
+                .filter(r -> r.getClosePointTr() == null)
+                .toList();
+    }
+
+    /** 逐日抓報酬指數收盤補上 close_point_tr；逐筆各自 save（resumable），每筆 350ms 禮貌間隔，單筆失敗續跑。 */
+    private void fillTwseReturnIndex(List<TwseIndexDailyHistory> pending, String tag) {
+        int ok = 0, miss = 0, fail = 0;
+        for (TwseIndexDailyHistory row : pending) {
+            try {
+                BigDecimal tr = fetchTwseReturnIndexProxy(row.getTradingDate());
+                if (tr != null && isPlausibleTr(tr, row.getClosePoint())) {
+                    row.setClosePointTr(tr);
+                    twseDailyRepo.save(row);   // 逐筆各自存，resumable
+                    ok++;
+                } else {
+                    if (tr != null) {   // 抓到但值不合理（TWSE 單次 transient 異常）→ 拒存，留 null 待下次重試
+                        log.warn("TWSE 報酬指數 {} 值不合理（TR={}, price={}）→ 略過不存", row.getTradingDate(), tr, row.getClosePoint());
+                    }
+                    miss++;
+                }
+                Thread.sleep(350);   // 禮貌間隔
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            } catch (Exception e) {
+                fail++;
+                log.warn("回補 TWSE 報酬指數 {} 失敗: {}", row.getTradingDate(), e.getMessage());
+            }
+        }
+        log.info("TWSE 報酬指數回補 [{}]（pending {}）：補上 {} 筆、查無 {} 筆、失敗 {} 筆",
+                tag, pending.size(), ok, miss, fail);
     }
 
     /**

@@ -4207,7 +4207,7 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 
 #### 需求
 
-新增「績效比較」頁：使用者從自己的股票下拉最多選 3 檔，並可勾選 5 個大盤指數（台股大盤 TWSE、道瓊 DJI、標普500 SPX、那斯達克 IXIC、費半 SOX），在同一張折線圖上以「同起點正規化累積報酬率(%)」疊圖比較，可切換觀察區間（3m/6m/1y/2y/5y，預設 1y）。骨架比照「股市大盤查詢」頁。
+新增「績效比較」頁：使用者從自己的股票下拉最多選 3 檔，並可勾選 5 個大盤指數（台股大盤 TWSE、道瓊 DJI、標普500 SPX、那斯達克 IXIC、費半 SOX），在同一張折線圖上以「同起點正規化累積報酬率(%)」疊圖比較，可切換觀察區間（1m/3m/6m/1y/2y/5y/10y，預設 1y）。骨架比照「股市大盤查詢」頁。
 
 #### 設計決策
 
@@ -4229,3 +4229,32 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - [ ] 169.5 前端：`PerformanceComparisonView.vue`（股票 `el-select multiple :multiple-limit=3`、基準 `el-checkbox-button` ×5、區間 `el-radio-group`、疊圖 `v-chart` + 0% markLine + 報酬率摘要表）；`api/index.js` 加 `performanceComparison`（myStocks／compare）；`router` 加 `/performance-comparison`；`App.vue` `mainMenuItems` 加「績效比較」（icon `Histogram`）。
 - [ ] 169.6 Docker：`--no-cache` 重 build business-services、build frontend，recreate；端到端驗證（兩組 X-User headers 驗 owner 隔離、跨市場對齊、0% 線畫出、降級不 500）。
 - [ ] 169.7 commit + 兩段式 merge。
+- [x] 169.8 觀察區間新增「1 個月（1m）」與「10 年（10y）」：前端 `el-radio-group` 加兩顆按鈕（1m 置最前、10y 置最後）、BFF `rangeStart()` 加 `1m→minusMonths(1)`／`10y→minusYears(10)`。
+
+### Task 170：績效比較 — 含息（total return）報酬 ＋ 純價格/含息切換
+
+對應 Requirements: Requirement 33（含息 AC，[requirements.md](spec/requirements.md)）
+
+#### 需求
+
+績效比較改支援「含息報酬（股利再投入）」，並提供「含息／純價格」切換（預設含息）。個股以既有 `stock_dividend_history` 做股利再投入還原；大盤指數「能含息的就含息」：TWSE 接發行量加權股價報酬指數、SPX 接 `^SP500TR`，DJI/IXIC/SOX 無報酬指數來源則維持價格報酬並標示。
+
+#### 設計決策
+
+- **口徑對稱**：股票含息時，指數盡量也含息，避免「股票總報酬 vs 大盤價格報酬」失真；無法含息者（DJI/IXIC/SOX、個股無股利資料）以價格報酬降級並回 `priceOnly` 供前端標示。
+- **個股含息＝股利再投入（BFF 算）**：`shares` 起始 1，除息日 `shares *= (1+stockDividend/10) + cashDividend/close(d)`；`tr(t)=shares(t)*close(t)` 再套既有 `pct()` 正規化。禁存衍生值、計算集中 BFF、股利走同一 business API。
+- **英股**：無股利來源但為累積型 UCITS ETF（價已內含配息）→ 直接用原始價、`priceOnly=false`。
+- **指數含息資料源**：TWSE RWD `MI_INDEX?type=IND` 之「發行量加權股價報酬指數」落 `twse_index_daily_history.close_point_tr`（新欄，`v1.52.0`）；SPX Yahoo `^SP500TR` 落 `us_index_daily_history(index_code='SP500TR')`（免結構變更）。
+- **純讀股利端點**：新增 `GET /api/market-data/dividends-readonly`（不觸發 cold-cache 寫副作用），供 BFF GET 聚合，避免既有 `/api/market-data/dividends` 的 `@Transactional`＋同步寫。
+
+#### 實作
+
+- [x] 170.1 spec：requirements.md Requirement 33 含息 AC、design.md `## Requirement 33`「含息演算法與資料管線」段、本 Task。
+- [x] 170.2 DB＋entity：Liquibase `v1.52.0-perf-comparison-total-return.sql`（`twse_index_daily_history` 加 nullable `close_point_tr`）＋ master include；`TwseIndexDailyHistory.closePointTr`（BigDecimal）。
+- [x] 170.3 ext-materials：`MacroDataFetchClient.fetchTwseReturnIndexDaily(date)`（RWD `MI_INDEX?type=IND` 解析報酬指數表）＋ `US_INDEX_YAHOO` 加 `SP500TR→^SP500TR`；`/internal/macro/twse-return-index?date=` 端點。
+- [x] 170.4 business：`MacroHistoryService.refreshTwseReturnIndex(years)`（逐交易日回補 `close_point_tr`，rate-limit＋idempotent＋resumable）＋ `refreshUsIndexDaily("SP500TR")`；`IndexDailyRefreshScheduler` 每日名單加 `SP500TR`＋TWSE TR 增量；`MacroHistoryController` `/twse-daily-index` 回 `closePointTr`、`POST /twse-daily-index/refresh-tr`；`MarketDataController` 加 `GET /dividends-readonly`（純讀）。
+- [x] 170.5 BFF：`/compare` 加 `dividend` 參數；`type=stock` 含息並行抓 `/dividends-readonly` 做股利再投入；指數含息改讀 `closePointTr`／`SP500TR`／`priceOnly`；series 多回 `priceOnly`。
+- [x] 170.6 前端：報酬口徑 `el-radio-group`（含息/純價格，預設含息）＋ `compare(...,dividend)`＋watch；`priceOnly` series 標「價格報酬」`el-tag`；標題/說明含息文案；`api/index.js` `compare` 加參數。
+- [x] 170.7 資料回補：跑 `refresh-tr`（TWSE 報酬指數 ~10 年）＋ `refreshUsIndexDaily("SP500TR")`，驗 DB `close_point_tr`／`SP500TR` 列數與範圍。
+- [x] 170.8 Docker：`--no-cache` 重 build business-services、external-materials-service、bff、build frontend，recreate；端到端驗證（含息 vs 純價格切換、個股再投入 > 純價格、TWSE/SPX 含息線、DJI/IXIC/SOX priceOnly 標示、英股不誤標、無股利個股降級不 500）。
+- [ ] 170.9 commit + 兩段式 merge。
