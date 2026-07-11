@@ -37,9 +37,15 @@
             </el-form-item>
           </el-col>
           <el-col :xs="24" :sm="6">
-            <el-form-item label="每月可投入">
-              <el-input-number v-model="form.monthlyInvestment" :min="0" :step="5000" controls-position="right"
-                style="width: 100%" placeholder="新台幣" />
+            <el-form-item label="退休前年薪">
+              <el-input-number v-model="form.preRetirementAnnualSalary" :min="0" :step="50000" controls-position="right"
+                style="width: 100%" placeholder="今日幣值／年" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="6">
+            <el-form-item label="退休前年支出">
+              <el-input-number v-model="form.preRetirementAnnualExpense" :min="0" :step="50000" controls-position="right"
+                style="width: 100%" placeholder="今日幣值／年（生活費）" />
             </el-form-item>
           </el-col>
           <el-col :xs="24" :sm="6">
@@ -47,6 +53,11 @@
               <el-date-picker v-model="form.retirementDate" type="date" value-format="YYYY-MM-DD"
                 format="YYYY年MM月DD日" placeholder="預計退休日" style="width: 100%" />
             </el-form-item>
+          </el-col>
+        </el-row>
+        <el-row :gutter="16">
+          <el-col :span="24">
+            <div class="field-note" style="margin-left: 0">退休前每年淨投入＝年薪 − 年支出（皆今日幣值、依通膨逐年膨脹），退休後薪水停止歸零。與退休後（收入勞保勞退、支出生活費）對稱。</div>
           </el-col>
         </el-row>
         <el-row :gutter="16">
@@ -407,7 +418,8 @@ const DEFAULT_INFLATION_RATE = 2
 
 const form = ref({
   birthDate: null,
-  monthlyInvestment: null,
+  preRetirementAnnualSalary: null,
+  preRetirementAnnualExpense: null,
   retirementDate: null,
   laborInsuranceMonthly: null,
   laborInsuranceStartDate: null,
@@ -474,9 +486,9 @@ const retirementHint = computed(() => {
     return { warn: true, text: '退休日期早於今天，請確認；系統會將累積期視為 0，全期以退休後守成處理。' }
   }
   if (d.retirementYears == null) {
-    return { warn: false, text: `距退休約 ${d.accumulationYears} 年（累積期，每月投入）；填「生日」後可推算退休後守成年數。` }
+    return { warn: false, text: `距退休約 ${d.accumulationYears} 年（累積期，每年淨投入＝年薪−年支出）；填「生日」後可推算退休後守成年數。` }
   }
-  return { warn: false, text: `累積期 ${d.accumulationYears} 年（退休前，每月投入）／退休後守成期約 ${d.retirementYears} 年（退休約 ${d.retirementAge} 歲至 100 歲，每月投入視為 0）。` }
+  return { warn: false, text: `累積期 ${d.accumulationYears} 年（退休前，每年淨投入＝年薪−年支出）／退休後守成期約 ${d.retirementYears} 年（退休約 ${d.retirementAge} 歲至 100 歲，淨投入視為 0）。` }
 })
 // 由生日衍生目前年齡（唯讀提示，不入庫；後端另有 deriveAge 為權威）
 const ageHint = computed(() => {
@@ -663,7 +675,8 @@ async function load(silent = false) {
     returnOptions.value = p.returnOptions || []
     form.value = {
       birthDate: p.birthDate ?? null,
-      monthlyInvestment: p.monthlyInvestment ?? null,
+      preRetirementAnnualSalary: p.preRetirementAnnualSalary ?? null,
+      preRetirementAnnualExpense: p.preRetirementAnnualExpense ?? null,
       retirementDate: p.retirementDate ?? null,
       laborInsuranceMonthly: p.laborInsuranceMonthly ?? null,
       laborInsuranceStartDate: p.laborInsuranceStartDate ?? null,
@@ -708,7 +721,8 @@ async function load(silent = false) {
 function profilePayload() {
   return {
     birthDate: form.value.birthDate,
-    monthlyInvestment: form.value.monthlyInvestment,
+    preRetirementAnnualSalary: form.value.preRetirementAnnualSalary,
+    preRetirementAnnualExpense: form.value.preRetirementAnnualExpense,
     retirementDate: form.value.retirementDate,
     laborInsuranceMonthly: form.value.laborInsuranceMonthly,
     laborInsuranceStartDate: form.value.laborInsuranceStartDate,

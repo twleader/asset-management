@@ -60,7 +60,7 @@ import java.util.concurrent.TimeUnit;
 /**
  * 資產配置建議（Requirement 32）。
  *
- * <p>使用者先在頁面填理財條件（年齡／投資年限／每月可投入／理財目標／風險承受度／獲利預期，存於
+ * <p>使用者先在頁面填理財條件（生日／退休前年薪與年支出／退休日期／理財目標／風險承受度／獲利預期／退休後現金流與試算假設，存於
  * {@code investment_profile}），再按「產生建議」：本服務讀該使用者最新 {@code asset_snapshot} 的現況配置與持有明細，
  * 結合條件組提示詞，**同步**呼叫 Claude（adaptive thinking + 可選 {@code web_search} 納入當前市場）產出結構化建議
  * （整體評析／風險評估／建議目標配置／調整動作／風險提醒／參考來源），解析後存 {@code portfolio_advice}（歷次保存）。
@@ -190,7 +190,8 @@ public class PortfolioAdviceService {
         InvestmentProfile p = profileRepo.findByOwnerUserId(ownerId).orElseGet(InvestmentProfile::new);
         p.setOwnerUserId(ownerId);
         p.setBirthDate(in.birthDate());
-        p.setMonthlyInvestment(in.monthlyInvestment());
+        p.setPreRetirementAnnualSalary(in.preRetirementAnnualSalary());
+        p.setPreRetirementAnnualExpense(in.preRetirementAnnualExpense());
         p.setRetirementDate(in.retirementDate());
         p.setLaborInsuranceMonthly(in.laborInsuranceMonthly());
         p.setLaborInsuranceStartDate(in.laborInsuranceStartDate());
@@ -423,7 +424,6 @@ public class PortfolioAdviceService {
         row.setModel(truncate(model, 64));
         // 條件快照（age 由生日衍生後凍結為歷史值）
         row.setAge(deriveAge(profile.getBirthDate()));
-        row.setMonthlyInvestment(profile.getMonthlyInvestment());
         row.setGoals(profile.getGoals());
         row.setRiskTolerance(profile.getRiskTolerance());
         row.setExpectedAnnualReturn(profile.getExpectedAnnualReturn());
@@ -544,8 +544,8 @@ public class PortfolioAdviceService {
             給出個人化、可執行的資產配置建議。
 
             重要原則：
-            1. 建議必須同時貼合使用者的年齡、投資年限、每月可投入金額、理財目標、風險承受度與獲利預期——風險承受度與投資年限是決定股債／現金比重的關鍵。
-            1a. 退休兩階段：「每月可投入」僅在退休前（累積期）有效；退休後（退休日期之後）薪水停止、定期投入為 0，只能靠既有資產與其報酬支應。估算未來可累積金額時，每月投入只計算累積期的年數，切勿假設退休後仍持續投入。越接近或進入退休，配置應越保守（提高現金／固定收益、降低高波動部位）；退休後不可用「之後還會定期投入」來合理化承受更高風險或攤平短期虧損。若退休日期落在投資年限終點之後（無退休後階段），才可視為全期皆在累積。
+            1. 建議必須同時貼合使用者的年齡、距退休年數、退休前每年淨投入（年薪 − 退休前年生活費）、理財目標、風險承受度與獲利預期——風險承受度與距退休年數是決定股債／現金比重的關鍵。
+            1a. 退休兩階段：退休前（累積期）每年淨投入＝年薪 − 退休前年生活費；退休後（退休日期之後）薪水停止、淨投入為 0，只能靠既有資產與其報酬、勞保勞退支應。估算未來可累積金額時，淨投入只計算累積期的年數，切勿假設退休後仍持續投入。越接近或進入退休，配置應越保守（提高現金／固定收益、降低高波動部位）；退休後不可用「之後還會定期投入」來合理化承受更高風險或攤平短期虧損。
             1b. 退休後現金流與未來大筆支出：若使用者提供「勞保年金月領／勞退一次領」，視為退休後的固定收入來源，可部分抵減退休後的資產提領壓力、據此評估既有資產能否支應退休生活（勞保勞退金額為未來實際給付，勿再做通膨調整）。若使用者提供「特定日期大筆花費」（如購車、購屋），金額已換算為該日期的未來名目值——這是未來一次性現金流出，配置上需為其預留足夠流動性、並在越接近該支出日時越保守（避免屆時被迫在低點變現），於 warnings 明確提醒。
             2. 先評估使用者「目前」的配置與風險（過度集中、現金過多／過少、與其風險屬性是否相稱），再提出「目標配置比例」與具體「調整動作」。targetAllocation 各類別的 targetPct 加總應約等於 100。
             2a. targetAllocation 每一類請一併估算 currentValue＝「使用者目前持有的資產中，歸屬於該類別的金額合計」（把每一檔股票／基金／存款分類到最貼近的類別後加總，單位為新台幣元的純數字，不要逗號或文字）。系統會用「資產總額 × targetPct」自動算出各類目標金額與差額，你不需輸出 targetAmount／deltaAmount。
@@ -590,16 +590,21 @@ public class PortfolioAdviceService {
         RetirementSpan span = retirementSpan(p.getBirthDate(), p.getRetirementDate());
         sb.append("預計退休日期：").append(p.getRetirementDate() != null ? p.getRetirementDate().toString() : "未提供").append("\n");
         if (p.getRetirementDate() != null && span.accumulationYears() != null) {
-            String monthly = p.getMonthlyInvestment() != null ? money(p.getMonthlyInvestment()) + " 元" : "0 元";
-            sb.append("累積期（今天→退休日）：").append(span.accumulationYears()).append(" 年（退休前，每月可投入 ").append(monthly).append("）\n");
+            String salary = p.getPreRetirementAnnualSalary() != null ? money(p.getPreRetirementAnnualSalary()) + " 元" : "未提供";
+            String preExp = p.getPreRetirementAnnualExpense() != null ? money(p.getPreRetirementAnnualExpense()) + " 元" : "0 元";
+            sb.append("累積期（今天→退休日）：").append(span.accumulationYears())
+                    .append(" 年（退休前每年淨投入＝年薪 ").append(salary).append(" − 退休前年生活費 ").append(preExp)
+                    .append("，皆今日幣值、依通膨逐年膨脹）\n");
             if (span.retirementYears() != null) {
                 sb.append("退休後守成／提領期（退休→100 歲）：約 ").append(span.retirementYears())
-                        .append(" 年（退休後薪水停止，每月投入為 0，僅靠既有資產與其報酬）\n");
+                        .append(" 年（退休後薪水停止，退休前淨投入為 0，僅靠既有資產、其報酬與勞保勞退）\n");
             }
-            BigDecimal projected = projectedContribution(p.getMonthlyInvestment(), span.accumulationYears());
-            sb.append("退休前預估可再投入本金合計（僅累積期，退休後不計）：約 ").append(money(projected)).append(" 元\n");
+            BigDecimal projected = projectedContribution(p.getPreRetirementAnnualSalary(), p.getPreRetirementAnnualExpense(), span.accumulationYears());
+            sb.append("退休前預估淨投入合計（僅累積期，退休後不計；未計通膨與報酬）：約 ").append(money(projected)).append(" 元\n");
         } else {
-            sb.append("每月可投入金額：").append(p.getMonthlyInvestment() != null ? money(p.getMonthlyInvestment()) + " 元" : "未提供").append("（未提供退休日期）\n");
+            sb.append("退休前年薪：").append(p.getPreRetirementAnnualSalary() != null ? money(p.getPreRetirementAnnualSalary()) + " 元" : "未提供")
+                    .append("、退休前年生活費：").append(p.getPreRetirementAnnualExpense() != null ? money(p.getPreRetirementAnnualExpense()) + " 元" : "未提供")
+                    .append("（未提供退休日期）\n");
         }
         sb.append("理財目標：").append(goalLabels(p.getGoals())).append("\n");
         sb.append("風險承受度：").append(labelOf(RISK_OPTIONS, p.getRiskTolerance())).append("\n");
@@ -777,16 +782,15 @@ public class PortfolioAdviceService {
     private record RetirementSpan(Integer accumulationYears, Integer retirementYears) {}
 
     /**
-     * 估算「未來可投入的定期投入總額」——月投入只在累積期（退休前）有效，退休後每月投入視為 0。
-     * 用 accumulationYears（而非 investmentHorizonYears）當乘數。
+     * 估算「退休前預估淨投入合計」＝（年薪 − 退休前年生活費）× 累積年數（今日幣值、未計通膨與報酬，僅供 prompt 概覽）。
+     * 退休後每年淨投入視為 0。淨額可為負（退休前即淨提領）。
      */
-    private BigDecimal projectedContribution(BigDecimal monthlyInvestment, Integer accumulationYears) {
-        if (monthlyInvestment == null || accumulationYears == null || accumulationYears <= 0) {
+    private BigDecimal projectedContribution(BigDecimal annualSalary, BigDecimal preRetireExpense, Integer accumulationYears) {
+        if (accumulationYears == null || accumulationYears <= 0) {
             return BigDecimal.ZERO;
         }
-        return monthlyInvestment
-                .multiply(BigDecimal.valueOf(12L))
-                .multiply(BigDecimal.valueOf(accumulationYears));
+        BigDecimal net = nz(annualSalary).subtract(nz(preRetireExpense));
+        return net.multiply(BigDecimal.valueOf(accumulationYears));
     }
 
     // ===== 退休後現金流／未來大筆支出（衍生，不入庫）=====

@@ -4177,3 +4177,27 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - [x] 167.5 前端：`AssetAllocationAdviceView.vue` 假設區換長照前/長照後年生活費＋長照起始年齡（月→年）、proj-assume 顯示兩階段、chart 加長照 markLine；form/load/payload/api 註解更新。
 - [ ] 167.6 Docker：`--no-cache` 重 build business-services、build frontend，recreate；端到端驗證試算兩階段。
 - [ ] 167.7 commit + 兩段式 merge。
+
+### Task 168：退休前收入以年薪計算（年薪 − 年支出 = 每年淨投入）（Requirement 32）
+
+對應 Requirements: Requirement 32（[requirements.md:747](spec/requirements.md)）
+
+#### 需求
+
+退休前仍有薪水收入，應以年薪計。原「每月可投入」僅代表淨儲蓄；改為輸入退休前年薪與退休前年生活費，退休前每年淨投入＝年薪 − 年支出，與退休後（收入勞保勞退、支出生活費）對稱、更真實。
+
+#### 設計決策
+
+- **兩欄取代 monthly_investment**：`pre_retirement_annual_salary`（退休前年薪，今日幣值/年）＋`pre_retirement_annual_expense`（退休前年生活費，今日幣值/年）。Liquibase v1.51 DROP `monthly_investment`＋ADD 兩欄。`portfolio_advice.monthly_investment`（歷史快照）保留、新紀錄不再寫入。
+- **累積期現金流**：退休前每年 income＝年薪×(1+通膨)^距今年數、expense＝退休前年生活費×(1+通膨)^距今年數，balance += income − expense（淨投入可為負）。與退休後（income＝勞保勞退、expense＝生活費）用同一組 `Point{income, expense}` 表達（移除舊 `contribution` 欄）。
+- **通膨處理**：退休前年薪與年支出皆「今日幣值」、依通膨逐年膨脹，與退休後年生活費、大筆花費一致。
+
+#### 實作
+
+- [x] 168.1 spec：requirements.md（表單／兩階段建模／試算 AC 改年薪−年支出）、design.md（資料模型 v1.51、projection 累積期、前端表單）、本 Task。
+- [x] 168.2 資料層：Liquibase `v1.51.0-pre-retirement-salary.sql`（DROP monthly_investment＋ADD 兩欄）＋註冊 master；Entity `InvestmentProfile` 換兩欄。
+- [x] 168.3 DTO/Controller：`InvestmentProfileInput`／`InvestmentProfileDto` 換兩欄；`RetirementProjectionDto.Point` 移除 `contribution`（改 income/expense 通用）；`toInput` 解析。
+- [x] 168.4 Service：`RetirementProjectionService` 累積期年薪−年支出淨投入（依通膨）；`saveProfile` 存兩欄、`generate` 不再寫 monthly 歷史欄；`buildUserPrompt`／`projectedContribution` 改年薪−年支出；system prompt 原則清掉投資年限/每月可投入用語。單元測試更新＋加累積期年薪−年支出案例（9 過）。
+- [x] 168.5 前端：`AssetAllocationAdviceView.vue` 頂列「每月可投入」換退休前年薪＋年支出、衍生提示改「年薪−年支出淨投入」；form/load/payload/api 註解更新。
+- [ ] 168.6 Docker：`--no-cache` 重 build business-services、build frontend，recreate；端到端驗證。
+- [ ] 168.7 commit + 兩段式 merge。

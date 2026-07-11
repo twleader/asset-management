@@ -21,7 +21,8 @@ import java.util.List;
  * <p>對使用者現有資產做**決定性逐年試算**（非預測、非投資建議）：以使用者自訂（或依「獲利預期」帶入）的試算報酬率、
  * 通膨率與退休後每月生活費，從今天逐年推到 {@link #END_AGE} 歲或資金耗盡，回答「退休後資產能撐到幾歲／哪一年出現缺口」。
  *
- * <p>每一年的順序：期初餘額先以當期報酬率複利成長 → 累積期加「每月投入×12」、退休後扣「生活費×12×(1+通膨)^距今年數」→
+ * <p>每一年的順序：期初餘額先以當期報酬率複利成長 → 累積期加「年薪 − 退休前年生活費」淨投入（皆依通膨逐年膨脹）、
+ * 退休後扣年生活費（長照前／長照後兩階段，×(1+通膨)^距今年數）→
  * 加勞保年金（自起領年起，每年）與勞退一次領（領取當年）→ 扣當年到期的特定大筆花費（依通膨換算為名目值）→ 記錄年末餘額。
  * 皆為年granularity 近似，供規劃用折線圖與白話結論，不追求精算精度。
  *
@@ -89,7 +90,8 @@ public class RetirementProjectionService {
         double ra = accumPct.doubleValue() / 100.0;
         double rr = retirePct.doubleValue() / 100.0;
         double infl = inflationPct.doubleValue() / 100.0;
-        double monthlyInvest = dbl(p.getMonthlyInvestment());
+        double annualSalary = dbl(p.getPreRetirementAnnualSalary());
+        double preRetireExpense = dbl(p.getPreRetirementAnnualExpense());
         double annualExpensePreCare = dbl(p.getRetirementAnnualExpense());
         // 長照後階段：僅在使用者有填長照後年生活費（>0）時啟用；起始年齡預設 80，夾在 [退休年齡, 100]
         boolean careActive = p.getLongTermCareAnnualExpense() != null && p.getLongTermCareAnnualExpense().signum() > 0;
@@ -110,7 +112,7 @@ public class RetirementProjectionService {
         // 基準點（age = currentAge，今年，尚未套用當年流量）
         points.add(new RetirementProjectionDto.Point(startYear, currentAge,
                 phaseOf(hasRetirement, currentAge, retirementAge, ltcResolved),
-                round(balance), BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO));
+                round(balance), BigDecimal.ZERO, BigDecimal.ZERO));
 
         Integer depletionAge = null, depletionYear = null;
         BigDecimal retirementStartBalance = null;
@@ -123,17 +125,15 @@ public class RetirementProjectionService {
             double rate = retire ? rr : ra;
 
             balance *= (1.0 + rate);
-            double contribution = 0, expense = 0, income = 0;
-            if (!retire && monthlyInvest > 0) {
-                contribution = monthlyInvest * 12.0;
-                balance += contribution;
-            }
-            if (retire) {
+            double expense = 0, income = 0;
+            double inflFactor = Math.pow(1.0 + infl, yearsFromNow);
+            if (!retire) {
+                // 累積期：年薪流入、退休前年生活費流出（皆依通膨逐年膨脹）；淨投入可為負
+                if (annualSalary > 0) income += annualSalary * inflFactor;
+                if (preRetireExpense > 0) expense += preRetireExpense * inflFactor;
+            } else {
                 double baseAnnual = care ? annualExpenseCare : annualExpensePreCare;
-                if (baseAnnual > 0) {
-                    expense = baseAnnual * Math.pow(1.0 + infl, yearsFromNow);
-                    balance -= expense;
-                }
+                if (baseAnnual > 0) expense += baseAnnual * inflFactor;
             }
             if (laborMonthly > 0 && laborStartYear != null && year >= laborStartYear) {
                 income += laborMonthly * 12.0;
@@ -141,21 +141,19 @@ public class RetirementProjectionService {
             if (pensionLump > 0 && pensionYear != null && year == pensionYear) {
                 income += pensionLump;
             }
-            balance += income;
             if (expenses != null) {
                 for (InvestmentPlannedExpense e : expenses) {
                     if (e == null || e.getExpenseDate() == null || e.getAmount() == null) continue;
                     if (e.getExpenseDate().getYear() == year) {
-                        double fut = inflate(e.getAmount(), inflationPct, e.getExpenseDate());
-                        balance -= fut;
-                        expense += fut;
+                        expense += inflate(e.getAmount(), inflationPct, e.getExpenseDate());
                     }
                 }
             }
+            balance += income - expense;
 
             points.add(new RetirementProjectionDto.Point(year, age,
                     care ? "CARE" : (retire ? "RETIRE" : "ACCUM"),
-                    round(balance), round(contribution), round(expense), round(income)));
+                    round(balance), round(income), round(expense)));
 
             if (retire && retirementStartBalance == null) {
                 retirementStartBalance = round(balance);

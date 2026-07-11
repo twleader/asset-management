@@ -44,12 +44,19 @@ public class InvestmentProfile {
     @Column(name = "birth_date")
     private LocalDate birthDate;
 
-    /** 每月可投入金額（台幣）。退休後（{@code retirementDate} 之後）此定期投入視為 0。 */
-    @Column(name = "monthly_investment", precision = 20, scale = 2)
-    private BigDecimal monthlyInvestment;
+    /**
+     * 退休前年薪（台幣，今日幣值）。退休現金流試算（Task 168）之累積期收入來源：退休前每年淨投入＝年薪 − 退休前年生活費，
+     * 兩者皆依通膨逐年膨脹。退休後（{@code retirementDate} 之後）薪水停止、此收入視為 0。
+     */
+    @Column(name = "pre_retirement_annual_salary", precision = 20, scale = 2)
+    private BigDecimal preRetirementAnnualSalary;
+
+    /** 退休前年生活費（台幣，今日幣值）。退休前每年支出；淨投入＝年薪 − 此值（可為負＝退休前即淨提領）。 */
+    @Column(name = "pre_retirement_annual_expense", precision = 20, scale = 2)
+    private BigDecimal preRetirementAnnualExpense;
 
     /**
-     * 預計退休日期（整日）。退休前為「累積期」（每月投入有效），退休後為「守成／提領期」（每月投入歸零）。
+     * 預計退休日期（整日）。退休前為「累積期」（年薪−年支出淨投入有效），退休後為「守成／提領期」（薪水停止、淨投入歸零）。
      * 存為 DB {@code DATE}。累積年數／退休後年數為衍生值，不入庫，由 service 依此欄位與今天現算。
      */
     @Column(name = "retirement_date")

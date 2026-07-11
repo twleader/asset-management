@@ -217,7 +217,7 @@ export const bffApi = {
     // 一次聚合：{ latest, history, profile, settings, currentAllocation, projection }
     get: (historyLimit = 20) =>
       api.get('/bff/portfolio-advice', { params: { historyLimit } }),
-    // 儲存理財條件（免重填）；payload：{ birthDate, monthlyInvestment, retirementDate, retirementAnnualExpense, longTermCareAnnualExpense, longTermCareStartAge, 報酬率/通膨/勞保勞退/大筆花費, goals[], riskTolerance, expectedAnnualReturn }
+    // 儲存理財條件（免重填）；payload：{ birthDate, preRetirementAnnualSalary, preRetirementAnnualExpense, retirementDate, retirementAnnualExpense, longTermCareAnnualExpense, longTermCareStartAge, 報酬率/通膨/勞保勞退/大筆花費, goals[], riskTolerance, expectedAnnualReturn }
     saveProfile: (payload) =>
       api.put('/bff/portfolio-advice/profile', payload),
     // 產生建議（非同步）：立即回一筆 PROCESSING，背景跑 Claude，前端輪詢至完成；payload 同 saveProfile，會一併儲存為 profile
