@@ -4099,3 +4099,32 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - [ ] 164.6 前端：`AssetAllocationAdviceView.vue`——生日／退休 `type="date"`、衍生年齡提示、假設年通膨率、勞保（月領＋起領年月）／勞退（一次領＋領取年月）區塊、大筆花費動態清單（新增/刪除列，日期＋用途＋今日金額），payload 帶新欄位；退休日期須晚於今天驗證沿用。
 - [ ] 164.7 Docker：`--no-cache` 重 build business-services、build frontend，recreate；端到端驗證（X-User headers）新欄位存取／產生建議 prompt 納入現金流。
 - [ ] 164.8 commit + 兩段式 merge。
+
+### Task 165：績效比較 — 最多三檔我的股票與五大指數同圖比報酬率
+
+對應 Requirements: Requirement 33（[requirements.md:764](spec/requirements.md)）
+
+#### 需求
+
+新增「績效比較」頁：使用者從自己的股票下拉最多選 3 檔，並可勾選 5 個大盤指數（台股大盤 TWSE、道瓊 DJI、標普500 SPX、那斯達克 IXIC、費半 SOX），在同一張折線圖上以「同起點正規化累積報酬率(%)」疊圖比較，可切換觀察區間（3m/6m/1y/2y/5y，預設 1y）。骨架比照「股市大盤查詢」頁。
+
+#### 設計決策
+
+- **零 DB 變更**：完全重用 `stock_price_history`（個股 `closePrice`）＋ `twse_index_daily_history`（TWSE `closePoint`）＋ `us_index_daily_history`（其餘指數 `closePoint`），無新表、無 Liquibase。
+- **我的股票（owner-scoped）**：持股（`AssetSnapshot`→`stock_holding`）∪ 觀察（`stock_alert` 衍生）去重 `(code,market)`，排除 `0000/台股`，過濾無 price history 者，股名由 `stock` 主檔補。持股 distinct 查詢 root 必須是帶 `@Filter(ownerFilter)` 的 `AssetSnapshot`（JPQL JOIN `s.stocks`），**絕不直查無 `@Filter` 的 `StockHolding`**（跨租戶洩漏）。
+- **計算放 BFF**：報酬率正規化（union 交易日軸 + forward-fill，`(close/base−1)×100`）集中於該頁專屬 BFF `/compare`，前端只 render；business 只出「我的股票清單」。
+- **reactive fan-out**：`Flux.fromIterable().flatMap(逐標的 timeout+onErrorReturn).collectList()` 再依輸入索引重排，單一標的失敗只讓該線消失。
+- **參數傳遞**：前端 join、後端 split（`stocks`＝`code:market` 逗號串、`benchmarks`＝代碼逗號串），避開 axios `stocks[]=` 序列化坑；benchmarks BFF 白名單守門（`us-daily-index` GET 不驗 code）。
+- **不呼叫 lookup-name**（有外部 API + upsert 副作用）；label 前端用 my-stocks map（股票）＋固定常數（基準）組。
+- **echarts**：0% 基準線用 `MarkLineComponent`（非 `MarkPointComponent`），tree-shaking 完整註冊避免靜默不畫。
+- **不支援「當日」**（跨市場跨時區當日報酬無比較意義）。
+
+#### 實作
+
+- [ ] 165.1 spec：requirements.md Requirement 33、design.md `## Requirement 33` 段、本 Task。
+- [ ] 165.2 後端資料層：`AssetSnapshotRepository.findDistinctOwnedStocks()`（JPQL root=AssetSnapshot JOIN s.stocks）。
+- [ ] 165.3 後端 service/controller：`PerformanceComparisonService`（持股 ∪ 觀察、排除 0000/台股、count>0 過濾、stock 主檔補名、穩定排序）＋ `PerformanceComparisonController` `GET /api/performance-comparison/my-stocks`（record `StockItem{code,market,name}`）。
+- [ ] 165.4 BFF：`PerformanceComparisonBffController`（`/api/bff/performance-comparison`）——`GET /my-stocks` 代理；`GET /compare?stocks=&benchmarks=&range=` 解析/白名單/封頂、`Flux` 並行抓日線（股票 closePrice／指數 closePoint）、union 軸 forward-fill 正規化，回 `{dates, series[{key,type,code,market,returns,totalReturn,asOfDate}]}`。
+- [ ] 165.5 前端：`PerformanceComparisonView.vue`（股票 `el-select multiple :multiple-limit=3`、基準 `el-checkbox-button` ×5、區間 `el-radio-group`、疊圖 `v-chart` + 0% markLine + 報酬率摘要表）；`api/index.js` 加 `performanceComparison`（myStocks／compare）；`router` 加 `/performance-comparison`；`App.vue` `mainMenuItems` 加「績效比較」（icon `Histogram`）。
+- [ ] 165.6 Docker：`--no-cache` 重 build business-services、build frontend，recreate；端到端驗證（兩組 X-User headers 驗 owner 隔離、跨市場對齊、0% 線畫出、降級不 500）。
+- [ ] 165.7 commit + 兩段式 merge。

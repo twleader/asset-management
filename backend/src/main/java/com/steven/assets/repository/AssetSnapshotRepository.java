@@ -36,4 +36,12 @@ public interface AssetSnapshotRepository extends JpaRepository<AssetSnapshot, Lo
      */
     @Query("SELECT DISTINCT s FROM AssetSnapshot s LEFT JOIN FETCH s.stocks ORDER BY s.snapshotDate ASC")
     List<AssetSnapshot> findAllWithStocksOrderByDateAsc();
+
+    /**
+     * 績效比較（Requirement 33）：使用者跨全部快照持有過的 distinct (stockCode, market)。
+     * 查詢 root 為帶 {@code @Filter(ownerFilter)} 的 AssetSnapshot（JOIN s.stocks），owner 隔離於 repository 層
+     * 自動生效——不可改為直查無 @Filter 的 StockHolding，否則會跨租戶洩漏。結果欄位 [stockCode, market]。
+     */
+    @Query("SELECT DISTINCT sh.stockCode, sh.market FROM AssetSnapshot s JOIN s.stocks sh")
+    List<Object[]> findDistinctOwnedStocks();
 }

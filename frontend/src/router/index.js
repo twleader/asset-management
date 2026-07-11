@@ -69,6 +69,12 @@ const router = createRouter({
       meta: { title: '股市大盤查詢', icon: 'TrendCharts' }
     },
     {
+      path: '/performance-comparison',
+      name: 'PerformanceComparison',
+      component: () => import('@/views/PerformanceComparisonView.vue'),
+      meta: { title: '績效比較', icon: 'Histogram' }
+    },
+    {
       path: '/today-market-analysis',
       name: 'TodayMarketAnalysis',
       component: () => import('@/views/TodayMarketAnalysisView.vue'),
