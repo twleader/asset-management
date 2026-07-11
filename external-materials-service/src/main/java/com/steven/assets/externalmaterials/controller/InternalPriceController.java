@@ -168,11 +168,22 @@ public class InternalPriceController {
         return macro.fetchTwseMonthlyDaily(year, month);
     }
 
-    /** 海外指數近 10 年每日 OHLC（Yahoo v8 chart，range=10y）。code ∈ {DJI,SPX,IXIC,SOX,FTSE,DAX,KOSPI,N225}。 */
+    /** 海外指數近 10 年每日 OHLC（Yahoo v8 chart，range=10y）。code ∈ {DJI,SPX,SP500TR,IXIC,SOX,FTSE,DAX,KOSPI,N225}。 */
     @GetMapping("/macro/us-index")
     public java.util.List<com.steven.assets.externalmaterials.client.MacroDataFetchClient.DailyOhlc>
         usIndex(@RequestParam String code) {
         return macro.fetchUsIndexDaily(code);
+    }
+
+    /** TWSE 發行量加權股價報酬指數（含息）單日收盤；非交易日 / 查無回 204。 */
+    @GetMapping("/macro/twse-return-index")
+    public org.springframework.http.ResponseEntity<com.steven.assets.externalmaterials.client.MacroDataFetchClient.TwseReturnIndexPoint>
+        twseReturnIndex(@RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        com.steven.assets.externalmaterials.client.MacroDataFetchClient.TwseReturnIndexPoint point =
+                macro.fetchTwseReturnIndexDaily(date);
+        return point == null
+                ? org.springframework.http.ResponseEntity.noContent().build()
+                : org.springframework.http.ResponseEntity.ok(point);
     }
 
     /** 指數「當日」分時（Yahoo 5m，最新交易日）。market ∈ {TWSE,DJI,SPX,IXIC,SOX,FTSE,DAX,KOSPI,N225}。 */

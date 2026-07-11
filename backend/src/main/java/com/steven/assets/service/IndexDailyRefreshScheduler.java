@@ -89,6 +89,30 @@ public class IndexDailyRefreshScheduler {
             }
         }
         log.info("海外指數日線回補完成 [{}]：成功 {}/{} 檔", tag, ok, total);
+        if (Thread.currentThread().isInterrupted()) return;   // 已被中斷（服務關閉中）就不再續做 TR
+
+        // 含息報酬指數（績效比較頁 Requirement 33）：SP500TR 走 Yahoo ^SP500TR 日線回補
+        for (String code : MacroHistoryService.TOTAL_RETURN_US_INDEX_CODES) {
+            try {
+                macroHistoryService.refreshUsIndexDaily(code);
+                Thread.sleep(500);   // Yahoo 禮貌間隔
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            } catch (Exception e) {
+                log.warn("回補含息報酬指數日線 {} 失敗 [{}]: {}", code, tag, e.getMessage());
+            }
+        }
+
+        // TWSE 報酬指數增量：補近 14 天內仍為 null 的 close_point_tr。
+        // 不可只補「今日」——排程 07:00 時今日交易列尚未寫入（poller 盤後才寫），findById 必落空、增量形同無效；
+        // 改補最近數日缺口，涵蓋前一交易日、週末順延與回補時的單日 miss。
+        try {
+            int filled = macroHistoryService.fillRecentTwseReturnIndexGaps(14);
+            if (filled > 0) log.info("TWSE 報酬指數增量 [{}]：處理近 14 日 {} 個缺口", tag, filled);
+        } catch (Exception e) {
+            log.warn("TWSE 報酬指數增量失敗 [{}]: {}", tag, e.getMessage());
+        }
     }
 
     private Optional<LocalDate> latestTradingDate(String code) {

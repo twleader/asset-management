@@ -37,4 +37,11 @@ public class TwseIndexDailyHistory {
 
     @Column(name = "close_point", nullable = false, precision = 12, scale = 2)
     private BigDecimal closePoint;
+
+    /**
+     * 同日「發行量加權股價報酬指數」（含息）收盤，供績效比較頁含息 vs 純價格報酬率比較（Requirement 33）。
+     * nullable：舊列與尚未回補的日期為 null，由 /api/twse-daily-index/refresh-tr 回補、每日排程增量更新。
+     */
+    @Column(name = "close_point_tr", precision = 12, scale = 2)
+    private BigDecimal closePointTr;
 }

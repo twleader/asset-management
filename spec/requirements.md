@@ -771,11 +771,24 @@
 
 **Acceptance Criteria:**
 
-- [ ] **新增「績效比較」頁**：左側主選單新增「績效比較」項（`/performance-comparison`）；頁面提供三組控制項——股票下拉（最多 3 檔）、大盤基準勾選（5 個）、觀察區間切換（3 個月／半年／1 年／2 年／5 年，預設 1 年）；主體為單一疊圖折線圖 ＋ 下方報酬率摘要表。**不支援「當日」分時比較**（跨市場、跨時區的當日報酬無比較意義，僅提供日線區間）。
+- [ ] **新增「績效比較」頁**：左側主選單新增「績效比較」項（`/performance-comparison`）；頁面提供三組控制項——股票下拉（最多 3 檔）、大盤基準勾選（5 個）、觀察區間切換（1 個月／3 個月／半年／1 年／2 年／5 年／10 年，預設 1 年）；主體為單一疊圖折線圖 ＋ 下方報酬率摘要表。**不支援「當日」分時比較**（跨市場、跨時區的當日報酬無比較意義，僅提供日線區間）。
 - [ ] **股票只能選「我的股票」（owner-scoped 下拉）**：股票下拉選項由後端提供該登入使用者自己的股票清單——來源為「歷年資產快照的持股（`stock_holding`，經 `asset_snapshot` owner 過濾）」∪「觀察清單（`stock_alert` 衍生，owner 過濾）」去重 `(code, market)`，並**排除台股大盤特殊代號 `0000/台股`**（與 TWSE 基準重複、且無個股歷史）、**過濾掉 `stock_price_history` 尚無資料而無法比較者**，股名一律由 `stock` 主檔（`(code, market)`）補齊（明細與觀察表皆不冗存股名，正規化）。清單為 per-user：使用者只會看到自己名下的股票（`TenantFilterAspect` 於 repository 層以帶 `@Filter(ownerFilter)` 的 `AssetSnapshot`／`StockAlert` 為查詢 root 自動隔離；持股 distinct 查詢**絕不直查無 `@Filter` 的 `StockHolding`**，避免跨租戶洩漏）。`el-select` 以 `multiple filterable :multiple-limit="3"` 限制最多 3 檔。
 - [ ] **大盤基準（5 個，資料庫既有）**：可勾選的大盤/指數固定為台股大盤（TWSE）、道瓊工業（DJI）、標普500（SPX）、那斯達克綜合（IXIC）、費城半導體（SOX）；資料重用既有 `twse_index_daily_history`（TWSE）與 `us_index_daily_history`（其餘四者，`indexCode`）兩張表，與「股市大盤查詢」頁**同一事實來源**。BFF 端以白名單限定這 5 個代碼（`us-daily-index` GET 不驗 code，由 BFF 守門）。
 - [ ] **報酬率正規化疊圖（同起點 = 0%）**：因個股數百元與指數數萬點無法直接同軸比較，圖表 y 軸為「累積報酬率(%)」，各標的一律**正規化到觀察區間起點 = 0%**：`base = 該標的區間內第一筆非空收盤`，某交易日值 `= (該日或之前最近一筆收盤 / base − 1) × 100`。個股取 `stock_price_history.closePrice`、指數取日線表 `closePoint`（同義計算、同一口徑）。此正規化計算集中於**該頁專屬 BFF**（`/api/bff/performance-comparison/compare`），前端只 render（比照「聚合／計算放 BFF」原則）。圖上另畫一條 0% 水平基準線。
 - [ ] **跨市場交易日對齊與缺日處理**：台股與美股交易日／時區不同，BFF 以「所有選取標的在區間內交易日的 union 排序軸」為 x 軸，各標的用「該日或之前最近一筆收盤」forward-fill（前端 `connectNulls` 讓缺日不斷線）；某標的第一筆資料日之前留 null（如新上市股，線從中段開始）。今日這格可能個股已有即時成交價、指數尚未回補而不對齊——各標的以「自己最後一個非空報酬」計期間報酬並標示「截至日」（`asOfDate`）。
-- [ ] **報酬率摘要表**：圖下方列出每個已選標的的「期間報酬率(%)」與「截至日」，報酬率以紅漲綠跌上色（沿用 `priceColor` 慣例）。
+- [ ] **報酬率摘要表**：圖下方列出每個已選標的的「期間報酬率(%)」與「截至日」，報酬率以紅漲綠跌上色（沿用 `priceColor` 慣例）。含息模式下，凡以「價格報酬」降級的標的（見下）於摘要與圖例標示「價格報酬」小標籤。
 - [ ] **優雅降級**：某標的在區間內無資料（指數表尚未回補、或個股剛加入）→ 該線不畫、圖例仍列出、摘要顯示「無資料」，不回 500；`base` 為 0 或 null 時該標的整條 null（除零防呆）。單一標的抓取逾時／失敗只讓該線消失，不影響其餘（BFF 逐標的 `timeout` + 降級）。全空選取（未選任何股票與基準）則清空圖表、不呼叫下游。
-- [ ] **零 DB 變更**：本功能不新增任何資料表或欄位，完全重用 `stock_price_history` ＋ `twse_index_daily_history` ＋ `us_index_daily_history`，故無 Liquibase changelog。
+
+**含息（total return）比較（Task 170）：**
+
+- [ ] **「含息／純價格」切換（預設含息）**：頁面新增報酬口徑切換 `el-radio-group`（`含息報酬` / `純價格報酬`，預設含息）；選擇連動送至 BFF `GET /compare?...&dividend=true|false`，watch 變動重抓。含息模式圖表標題與說明文字改為「含息報酬（股利再投入）」。此為使用者要求「績效比較應含息」的核心：股票高配息者（如金融股、債券 ETF）純看價格會被低估，含息才是公平的累積報酬比較。
+- [ ] **個股含息＝股利再投入還原（BFF 計算）**：以既有 `stock_price_history.closePrice`（原始收盤）為價格序列，套 `stock_dividend_history`（既有表，逐筆 `exDividendDate`＋`cashDividend`＋台股 `stockDividend` 配股）做「除息日再投入」重建總報酬序列：維持每股份數 `shares`（起始 1），每逢區間內除息日 `d`，`shares ×= (1 + stockDividend/10)` 後 `shares += shares × cashDividend / close(d)`（台股配股以面額 10 元換算股數乘數；美股僅現金股利）；某日含息值＝`shares(t) × close(t)`，再依既有「同起點=0%」正規化 `(值/base − 1)×100`。股利一律經 business `GET /api/market-data/dividends`（純讀變體，見 design）取得，符合「同義資料走同一 business API、計算集中於 BFF、禁存衍生值」。`exDividendDate` 為 null 的年度彙總列、或除息日晚於今日者略過。
+- [ ] **個股含息的資料缺口與降級**：
+  - **英股**：`stock_dividend_history` 無英股資料（抓取端未實作），且無法自動辨別累積型（`CSPX.L`，價已內含息）與配息型（`VUSA.L`，價不含息）→ 不臆測，含息模式一律採原始價序列並標 `priceOnly`（顯示「價格報酬」），避免把配息型英股當含息而低估、誤標。
+  - **台股／美股查無股利資料者**（資料缺口或本就不配息，如 `AMZN`）：含息模式退化為價格報酬，該 series 標 `priceOnly`，摘要／圖例顯示「價格報酬」小標籤，不誤植 0 息。
+- [ ] **指數含息（能含息的就含息）**：大盤基準含息模式的口徑：
+  - **TWSE（台股大盤）**：改讀「發行量加權股價報酬指數」。資料來源 TWSE RWD `afterTrading/MI_INDEX?date=YYYYMMDD&type=IND` 之「報酬指數(臺灣證券交易所)」表列，落庫至 `twse_index_daily_history.close_point_tr`（新欄位），涵蓋約 10 年逐交易日（一次性回補＋每日增量補近 14 日缺口）。含息模式**只用 `closePointTr`**（null 列略過、由前值 forward-fill，**禁止退回價格指數 `closePoint` 混量級**——兩者差約 1.6 倍會造成台階跳空）；TR 覆蓋率 < 90%（尚未回補完成）→ 整段退回價格指數並標 `priceOnly`。價格指數回補（`refreshTwseDaily`）須保留既有 `close_point_tr`，不得覆寫成 null。
+  - **SPX（標普500）**：改讀 Yahoo `^SP500TR`（S&P 500 Total Return），比照既有 `fetchUsIndexDaily`（`range=10y` 一次抓）落庫至 `us_index_daily_history`（`indexCode='SP500TR'`）。含息模式讀該序列。
+  - **DJI／IXIC／SOX（道瓊／那斯達克綜合／費半）**：免費來源無穩定報酬指數 → 含息模式仍用價格指數 `closePoint`，該 series 標 `priceOnly`，UI 標示「價格報酬」。
+  - **純價格模式**：所有指數與個股一律用原始價格／價格指數（即現行行為）。
+- [ ] **資料模型變更（需 Liquibase changeset `v1.52.0`）**：`twse_index_daily_history` 新增 nullable 欄位 `close_point_tr`（發行量加權股價報酬指數收盤，與同日價格指數 `close_point` 同列共存、由 TWSE poller 一併抓寫，屬同交易日不同指數之量測事實、非衍生值）；`us_index_daily_history` 不改結構，以新增 `index_code='SP500TR'` 資料列承載 S&P500 報酬指數。個股與 DJI/IXIC/SOX 不需結構變更。

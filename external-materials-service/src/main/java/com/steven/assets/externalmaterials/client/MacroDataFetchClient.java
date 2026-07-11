@@ -250,6 +250,46 @@ public class MacroDataFetchClient {
         catch (NumberFormatException e) { return null; }
     }
 
+    /** TWSE 發行量加權股價報酬指數（含息）單日收盤點：tradingDate 為 ISO 日期字串。 */
+    public record TwseReturnIndexPoint(String tradingDate, BigDecimal close) {}
+
+    /**
+     * TWSE 發行量加權股價報酬指數（含息，MI_INDEX type=IND 日報）。
+     * 打 MI_INDEX?date=YYYYMMDD&type=IND，於 tables[] 找 fields[0]=="報酬指數" 的表，
+     * 於其 data[] 找第一欄=="發行量加權股價報酬指數" 的列，取「收盤指數」欄（第 2 欄，去逗號 → BigDecimal）。
+     * stat!="OK" 或找不到（非交易日 / 查無資料）→ 回 null（呼叫端回 204）。
+     */
+    public TwseReturnIndexPoint fetchTwseReturnIndexDaily(LocalDate date) {
+        try {
+            String url = "https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?date="
+                    + date.format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
+                    + "&type=IND&response=json";
+            String body = curlGetWithRetry(url, 2);
+            JsonNode root = mapper.readTree(body);
+            if (!"OK".equals(root.path("stat").asText())) return null;
+            JsonNode tables = root.path("tables");
+            if (!tables.isArray()) return null;
+            for (JsonNode table : tables) {
+                JsonNode fields = table.path("fields");
+                if (!fields.isArray() || fields.isEmpty()) continue;
+                if (!"報酬指數".equals(fields.get(0).asText())) continue;
+                JsonNode data = table.path("data");
+                if (!data.isArray()) continue;
+                for (JsonNode row : data) {
+                    if (!row.isArray() || row.size() < 2) continue;
+                    if (!"發行量加權股價報酬指數".equals(row.get(0).asText())) continue;
+                    BigDecimal close = parseIndex(row.get(1).asText(""));
+                    if (close == null) return null;
+                    return new TwseReturnIndexPoint(date.toString(), close);
+                }
+            }
+            return null;
+        } catch (Exception e) {
+            log.warn("TWSE 報酬指數 {} 抓取失敗：{}", date, e.getMessage());
+            return null;
+        }
+    }
+
     /**
      * 海外指數代碼 → Yahoo symbol。
      * 美股四大：道瓊 / 標普500 / 那斯達克綜合 / 費城半導體；
@@ -258,6 +298,7 @@ public class MacroDataFetchClient {
     private static final Map<String, String> US_INDEX_YAHOO = Map.of(
             "DJI", "^DJI",
             "SPX", "^GSPC",
+            "SP500TR", "^SP500TR",
             "IXIC", "^IXIC",
             "SOX", "^SOX",
             "FTSE", "^FTSE",

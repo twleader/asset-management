@@ -3,14 +3,22 @@
     <el-card>
       <template #header>
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
-          <span class="section-title">績效比較（報酬率 %，同起點正規化）</span>
-          <el-radio-group v-model="range" size="small">
-            <el-radio-button label="3m">3 個月</el-radio-button>
-            <el-radio-button label="6m">半年</el-radio-button>
-            <el-radio-button label="1y">1 年</el-radio-button>
-            <el-radio-button label="2y">2 年</el-radio-button>
-            <el-radio-button label="5y">5 年</el-radio-button>
-          </el-radio-group>
+          <span class="section-title">{{ cardTitle }}</span>
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+            <el-radio-group v-model="dividend" size="small">
+              <el-radio-button :label="true">含息報酬</el-radio-button>
+              <el-radio-button :label="false">純價格報酬</el-radio-button>
+            </el-radio-group>
+            <el-radio-group v-model="range" size="small">
+              <el-radio-button label="1m">1 個月</el-radio-button>
+              <el-radio-button label="3m">3 個月</el-radio-button>
+              <el-radio-button label="6m">半年</el-radio-button>
+              <el-radio-button label="1y">1 年</el-radio-button>
+              <el-radio-button label="2y">2 年</el-radio-button>
+              <el-radio-button label="5y">5 年</el-radio-button>
+              <el-radio-button label="10y">10 年</el-radio-button>
+            </el-radio-group>
+          </div>
         </div>
       </template>
 
@@ -59,6 +67,7 @@
             <span :style="{ display:'inline-block', width:'10px', height:'10px', borderRadius:'2px', marginRight:'8px', background: row.color }"></span>
             <span>{{ row.label }}</span>
             <el-tag v-if="row.type === 'index'" size="small" type="info" effect="plain" style="margin-left:6px">指數</el-tag>
+            <el-tag v-if="row.priceOnly" size="small" type="info" effect="plain" style="margin-left:6px">價格報酬</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="期間報酬率" min-width="140">
@@ -73,7 +82,7 @@
           </template>
         </el-table-column>
       </el-table>
-      <div class="hint">報酬率＝(當日收盤 ÷ 區間起點收盤 − 1)×100%；各標的一律以所選區間起點為 0% 對齊。跨市場交易日不同時以缺日前值延伸，故各標的「截至日」可能不同。</div>
+      <div class="hint">{{ hintText }}</div>
     </el-card>
   </div>
 </template>
@@ -111,8 +120,19 @@ const stocksLoading = ref(false)
 const selectedStocks = ref([])        // ['2330:台股', ...]
 const selectedBenchmarks = ref(['TWSE'])
 const range = ref('1y')
+const dividend = ref(true)             // 報酬口徑：true=含息報酬（股利再投入）／false=純價格報酬
 const chartData = ref({ dates: [], series: [] })
 const loading = ref(false)
+
+// 卡片標題與底部說明依報酬口徑動態
+const cardTitle = computed(() =>
+  dividend.value
+    ? '績效比較（含息報酬 %，股利再投入，同起點正規化）'
+    : '績效比較（報酬率 %，同起點正規化）')
+const hintText = computed(() =>
+  dividend.value
+    ? '含息報酬＝股利以除息日收盤再投入還原後之累積報酬；各標的一律以所選區間起點為 0% 對齊。跨市場交易日不同時以缺日前值延伸，故各標的「截至日」可能不同。'
+    : '報酬率＝(當日收盤 ÷ 區間起點收盤 − 1)×100%；各標的一律以所選區間起點為 0% 對齊。跨市場交易日不同時以缺日前值延伸，故各標的「截至日」可能不同。')
 
 function num(v) { return v == null ? null : Number(v) }
 function fmtPct(v) { if (v == null) return '—'; const n = Number(v); return `${n > 0 ? '+' : ''}${n.toFixed(2)}%` }
@@ -145,6 +165,7 @@ const summaryRows = computed(() =>
   chartData.value.series.map((s, i) => ({
     label: seriesLabel(s),
     type: s.type,
+    priceOnly: s.priceOnly,
     color: PALETTE[i % PALETTE.length],
     totalReturn: num(s.totalReturn),
     asOfDate: s.asOfDate
@@ -168,7 +189,7 @@ async function fetchCompare() {
   }
   loading.value = true
   try {
-    const res = await bffApi.performanceComparison.compare(keys, codes, range.value)
+    const res = await bffApi.performanceComparison.compare(keys, codes, range.value, dividend.value)
     chartData.value = { dates: res.dates ?? [], series: res.series ?? [] }
   } catch {
     chartData.value = { dates: [], series: [] }
@@ -182,7 +203,7 @@ onMounted(() => {
   fetchCompare()   // 預設勾選 TWSE，進頁即畫大盤基準
 })
 
-watch([selectedStocks, selectedBenchmarks, range], fetchCompare, { deep: true })
+watch([selectedStocks, selectedBenchmarks, range, dividend], fetchCompare, { deep: true })
 
 const chartOption = computed(() => {
   const dates = chartData.value.dates

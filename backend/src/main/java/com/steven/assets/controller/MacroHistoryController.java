@@ -31,8 +31,17 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class MacroHistoryController {
 
-    /** 海外指數合法代碼（refresh 守門）；單一清單由 {@link MacroHistoryService#OVERSEAS_INDEX_CODES} 提供（與自動回補排程共用）。 */
+    /** 海外指數合法代碼（當日分時 refresh 守門）；單一清單由 {@link MacroHistoryService#OVERSEAS_INDEX_CODES} 提供（與自動回補排程共用）。 */
     private static final Set<String> US_INDEX_CODES = Set.copyOf(MacroHistoryService.OVERSEAS_INDEX_CODES);
+
+    /**
+     * 日線回補 refresh 守門集合：純價格海外指數 ∪ 含息報酬指數（SP500TR）。
+     * 讓績效比較頁（Requirement 33）的 SP500TR 也能經 /us-daily-index/refresh 觸發 Yahoo ^SP500TR 回補。
+     */
+    private static final Set<String> US_INDEX_REFRESH_CODES = java.util.stream.Stream
+            .concat(MacroHistoryService.OVERSEAS_INDEX_CODES.stream(),
+                    MacroHistoryService.TOTAL_RETURN_US_INDEX_CODES.stream())
+            .collect(java.util.stream.Collectors.toUnmodifiableSet());
 
     private final TaiwanGdpPerCapitaHistoryRepository gdpRepo;
     private final JapanGdpPerCapitaHistoryRepository japanGdpRepo;
@@ -116,10 +125,21 @@ public class MacroHistoryController {
 
     @PostMapping("/us-daily-index/refresh")
     public Map<String, Object> refreshUsDaily(@RequestParam String code) {
-        if (!US_INDEX_CODES.contains(code)) {
+        if (!US_INDEX_REFRESH_CODES.contains(code)) {
             return Map.of("error", "未知指數代碼: " + code, "upserted", 0);
         }
         return macroHistoryService.refreshUsIndexDaily(code);
+    }
+
+    /**
+     * TWSE 發行量加權股價「報酬指數」（含息）近 N 年背景回補（績效比較頁 Requirement 33）。
+     * 立即回 {"started":true,"pending":&lt;n&gt;}，實際抓取在背景執行。
+     * POST /api/twse-daily-index/refresh-tr?years=10
+     */
+    @PostMapping("/twse-daily-index/refresh-tr")
+    public Map<String, Object> refreshTwseReturnIndex(
+            @RequestParam(defaultValue = "10") int years) {
+        return macroHistoryService.refreshTwseReturnIndex(years);
     }
 
     /** 指數「當日」分時走勢（Yahoo 5m，最新交易日；transient）。market ∈ {TWSE,DJI,SPX,IXIC,SOX,FTSE,DAX,KOSPI,N225}。 */

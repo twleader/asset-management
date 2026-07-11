@@ -2090,12 +2090,16 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
 
 「績效比較」頁讓使用者最多選 3 檔自己的股票，並可勾選 5 個大盤指數（TWSE／DJI／SPX／IXIC／SOX），在同一張圖上以「同起點正規化報酬率(%)」疊圖比較。骨架與資料流比照「股市大盤查詢」頁（`GdpTwseView.vue` + `GdpTwseBffController`）。
 
-### 資料模型（零新增、零遷移）
+### 資料模型
 
-- **不新增任何資料表或欄位、無 Liquibase changelog**。完全重用：
+- **價格報酬（原始版）零新增**，重用：
   - `stock_price_history`（個股每日收盤，欄位 `stockCode/market/tradingDate/closePrice`；全域非隔離表）。
   - `twse_index_daily_history`（台股大盤，PK `tradingDate`，欄位 `closePoint`）。
   - `us_index_daily_history`（海外指數，複合 PK `(indexCode, tradingDate)`，`indexCode ∈ {DJI,SPX,IXIC,SOX,...}`，欄位 `closePoint`）。
+  - `stock_dividend_history`（既有股利事件表，`stockCode/market/year/cashDividend/stockDividend/exDividendDate/previousClose/...`；全域非隔離）。
+- **含息（total return）新增（Task 170，Liquibase `v1.52.0`）**：
+  - `twse_index_daily_history` 新增 nullable 欄位 `close_point_tr`（發行量加權股價報酬指數收盤）。與同日 `close_point`（價格指數）同列共存——兩者為「同一交易日、不同指數」的獨立量測事實（非由彼此計算得出的衍生值），由 TWSE poller 同次抓寫，屬刻意 co-location（比照 open/close 同列）。
+  - `us_index_daily_history` **不改結構**，以新增 `index_code='SP500TR'` 資料列承載 S&P 500 Total Return（Yahoo `^SP500TR`），沿用既有實體／refresh／`/api/us-daily-index` 端點。
 - 「我的股票清單」不落任何新資料，即時由既有 owner-scoped 表衍生：`asset_snapshot`→`stock_holding`（持股）∪ `stock_alert`（觀察清單衍生），股名由 `stock` 主檔補。
 
 ### API 設計
@@ -2115,21 +2119,24 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
 | Method | Path | 說明 |
 | --- | --- | --- |
 | GET | `/my-stocks` | 代理 business `/api/performance-comparison/my-stocks`（WebClient 自動帶 `X-User-Id` → owner 生效）。 |
-| GET | `/compare?stocks=&benchmarks=&range=` | 回 `{ dates:[union 交易日], series:[{key,type,code,market,returns[],totalReturn,asOfDate}] }`。 |
+| GET | `/compare?stocks=&benchmarks=&range=&dividend=` | 回 `{ dates:[union 交易日], series:[{key,type,code,market,returns[],totalReturn,asOfDate,priceOnly}] }`。 |
 
 - `stocks`＝逗號分隔 `code:market`（`split(",")`→trim→去空→distinct→`limit(3)`；各項 `split(":",2)`，code pattern 不含 `:`、market 中文也不含 `:`，安全）。
 - `benchmarks`＝逗號分隔代碼（trim→**白名單過濾 `{TWSE,DJI,SPX,IXIC,SOX}`**→`limit(5)`）。
-- `range ∈ {3m,6m,1y,2y,5y}`（`3m/6m`→`minusMonths`、其餘→`minusYears`，預設 `1y`）。
+- `range ∈ {1m,3m,6m,1y,2y,5y,10y}`（`1m/3m/6m`→`minusMonths`、其餘→`minusYears`，預設 `1y`）。
+- `dividend`＝`true|false`（預設 `true`＝含息）。`true` 時股票走股利再投入、指數改讀報酬指數（見「含息演算法」）；無法含息者以價格報酬降級並回 `priceOnly:true`。`false` 時全部走原始價格／價格指數（`priceOnly` 一律 false）。
+- 每個 series 多回 `priceOnly`（boolean）：含息模式下該標的實際以價格報酬呈現（DJI/IXIC/SOX 無報酬指數、或台股/美股個股查無股利資料），供前端標「價格報酬」。英股累積型 ETF 以原始價視為已含息，`priceOnly:false`。
 - 全空選取直接回 `{dates:[],series:[]}`，不打下游。
 - 前端 join、後端 split：避開 axios 陣列序列化成 `stocks[]=` 讓 Spring `@RequestParam String` 收不到的坑。
 
 ```text
 前端 PerformanceComparisonView
   ├─ GET /api/bff/performance-comparison/my-stocks ─▶ business /api/performance-comparison/my-stocks（owner-scoped）
-  └─ GET /api/bff/performance-comparison/compare ──▶ 並行 business /api/market-data/history/stock（closePrice）
-                                                            + /api/twse-daily-index（TWSE，closePoint）
-                                                            + /api/us-daily-index?code=（其餘，closePoint）
-                                                   ──▶ BFF 做 union 軸 + forward-fill + 正規化(%)，回 render-ready
+  └─ GET /api/bff/performance-comparison/compare?dividend= ─▶ 並行 business /api/market-data/history/stock（closePrice）
+                                                            + /api/market-data/dividends-readonly（含息時：股票除息事件）
+                                                            + /api/twse-daily-index（TWSE，closePoint／含息 closePointTr）
+                                                            + /api/us-daily-index?code=（其餘；SPX 含息改 code=SP500TR）
+                                                   ──▶ BFF union 軸 + forward-fill +（含息時股利再投入）+ 正規化(%)，回 render-ready（含 priceOnly 旗標）
 ```
 
 ### 關鍵業務邏輯
@@ -2139,9 +2146,37 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
 - **不呼叫 `/api/stock-alerts/lookup-name`**：該端點對未知 code 會打外部 API 並 upsert 寫 `stock` 主檔，屬寫副作用，不放進 GET 聚合；label 由前端用 my-stocks 清單（股票）＋固定中文常數（基準）自行組合。
 - **compare 不做 owner 過濾**：`stock_price_history` 與指數表為全域公開行情（非個資），任意 code 讀取不洩漏任何人持倉；下拉限「我的股票」僅為 UX。
 
+### 含息（total return）演算法與資料管線（Task 170）
+
+**個股含息（BFF 計算，股利再投入還原）**
+
+- BFF 對 `type=stock` 標的，除既有 `/api/market-data/history/stock` 收盤序列外，並行加抓 **`GET /api/market-data/dividends-readonly?code=&market=&years=`**（純讀變體，見下），取 `{exDividendDate, cashDividend, stockDividend}` 逐筆除息事件。
+- 演算法（等效 total-return index）：以除息日排序，維持每股份數 `shares`（起始 1）；每逢區間內除息日 `d`（`exDividendDate` 非 null 且 ≤ 今日，落在或 forward 對齊到交易日軸）：
+  - 台股配股：`shares *= (1 + stockDividend / 10)`（面額 10 元換算股數乘數；美股 `stockDividend=0`）。
+  - 現金再投入：`shares += shares * cashDividend / close(d)`（以除息日收盤價再投入）。
+  - 合併：`shares *= (1 + stockDividend/10) + cashDividend/close(d)`。
+  - `close(d)` 取該股在 `d`（或之前最近交易日）之原始收盤。
+- 含息值序列 `tr(t) = shares(t) * close(t)`（`shares(t)` 為到 `t` 為止累積份數，階梯狀）；再套既有 `pct(tr(t), tr(base))`＝`(tr/base − 1)×100`，正規化到區間起點 0%。`base` 為 tr 序列第一筆非空。
+- **降級**：英股（無股利來源，且無法辨別累積/配息型）→ 用原始 close 序列、`priceOnly=true`（不臆測為已含息，避免配息型 `VUSA.L` 被低估誤標）；台股/美股查無任何股利列 → `shares≡1`＝價格報酬、`priceOnly=true`。`exDividendDate=null` 的年度彙總列、除息日 > 今日者略過。
+
+**指數含息**
+
+- 含息模式下 `fetchCloses` 對指數的取數改為：
+  - `TWSE` → **只取** `twse_index_daily_history.close_point_tr`（`/api/twse-daily-index` 的 `closePointTr` 欄）；null 列略過、由前值 forward-fill（floorEntry），**禁止退回 `closePoint`**（價格/報酬指數量級差 ~1.6 倍，混填會在回補前緣與缺口造成台階跳空）。TR 覆蓋率（有值列 ÷ 交易日數）< 90% → 整段退回價格指數並標 `priceOnly=true`；否則 `priceOnly=false`。
+  - `SPX` → 改抓 `/api/us-daily-index?code=SP500TR` 的 `closePoint`，`priceOnly=false`。
+  - `DJI/IXIC/SOX` → 仍讀價格指數 `closePoint`，`priceOnly=true`。
+- 純價格模式：全部讀 `closePoint`（現行行為），`priceOnly=false`。
+
+**資料管線（business 抓寫，一次性回補＋每日增量）**
+
+- **TWSE 報酬指數**：ext-materials `MacroDataFetchClient.fetchTwseReturnIndexDaily(date)` 打 RWD `https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?date=YYYYMMDD&type=IND&response=json`，於 `fields[0]=="報酬指數"` 的表中找 `發行量加權股價報酬指數` 列取「收盤指數」（千分位字串→`BigDecimal`）。經 business `/internal/macro/twse-return-index?date=` proxy；`MacroHistoryService.refreshTwseReturnIndex(years)` **背景執行緒**逐一對既有 `twse_index_daily_history` 交易日回補 `close_point_tr`（350ms rate-limit、逐筆 `findById`＋`save` 只動該欄、resumable；`AtomicBoolean` 重入防護，連點回 `{started:false,reason:"in-progress"}`）。寫入前經 `isPlausibleTr`（報酬指數/價格指數比值須落在 [1.3, 3.5]，歷史約 1.5–2.1）過濾——TWSE 單次 transient 異常值（實測 2021-12-23 曾回 104241／比值 5.8）拒存、留 null 待重試，避免整條含息線爆單日尖刺。每日增量 `fillRecentTwseReturnIndexGaps(14)`（排程 07:00 呼叫）補近 14 交易日仍為 null 者——**不可只補 `now()`**（07:00 時今日列尚未由 poller 寫入，findById 必落空、增量無效）。價格指數回補 `refreshTwseDaily` 寫入前先 `findById` 保留既有 `close_point_tr`，避免整列 merge 覆寫成 null。
+- **SP500TR**：`MacroDataFetchClient` 的 `US_INDEX_YAHOO` 加映射 `SP500TR → ^SP500TR`；`refreshUsIndexDaily("SP500TR")` 沿用既有 Yahoo `range=10y&interval=1d` 一次抓，upsert 至 `us_index_daily_history(index_code='SP500TR')`。`IndexDailyRefreshScheduler` 的每日回補名單加入 `SP500TR`。
+- **`/api/market-data/dividends-readonly`**（新，business）：純讀 `stock_dividend_history`（`StockDividendHistoryRepository.findByStockSinceYear`），**不觸發 cold-cache `/internal/dividend/sync` 寫副作用**，供本頁 BFF 的 GET 聚合使用（既有 `/api/market-data/dividends` 為 `@Transactional`＋冷快取寫，違反「BFF GET 聚合不放寫副作用」原則，故另立純讀端點）。
+
 ### 前端（`views/PerformanceComparisonView.vue`）
 
-- 控制列：股票 `el-select multiple filterable :multiple-limit="3"`（options 來自 my-stocks，`value="code:market"`）、基準 `el-checkbox-button` ×5、區間 `el-radio-group`（預設 1y）。
+- 控制列：股票 `el-select multiple filterable :multiple-limit="3"`（options 來自 my-stocks，`value="code:market"`）、基準 `el-checkbox-button` ×5、區間 `el-radio-group`（預設 1y）、**報酬口徑 `el-radio-group`（`含息報酬`／`純價格報酬`，預設含息）**。含息選擇連動 `bffApi...compare(keys, codes, range, dividend)`，watch 一併監看。
+- 含息模式：卡片標題／說明改「含息報酬（股利再投入）」；`priceOnly:true` 的 series 於圖例／摘要表標「價格報酬」小標籤（`el-tag` info），提示口徑差異。
 - 單一 `<v-chart>`：y 軸「報酬率(%)」，各標的 `type:'line' + connectNulls:true`，`markLine` 一條 0% 基準水平線；下方報酬率摘要表（標的｜期間報酬率｜截至日，紅漲綠跌）。
 - **ECharts tree-shaking 註冊**：`use([CanvasRenderer, LineChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent, DataZoomComponent, MarkLineComponent])`——0% 線用 **`MarkLineComponent`**（非 GdpTwseView 的 `MarkPointComponent`），漏註冊會靜默不畫。
 - `api/index.js` 加 `bffApi.performanceComparison`（`myStocks`／`compare`）；`router` 加 `/performance-comparison`、`App.vue` `mainMenuItems` 加「績效比較」（icon `Histogram`），置於「股市大盤查詢」之後。
@@ -2149,6 +2184,6 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
 ### 不處理
 
 - 不支援「當日」分時比較（僅日線區間）。
-- 不新增資料表／欄位／Liquibase（重用既有三表）。
 - 不在 compare 呼叫 lookup-name（避免外部 API 副作用與寫主檔）。
+- **含息不處理**：DJI/IXIC/SOX 免費來源無報酬指數 → 含息時降級為價格報酬（標示，不另尋付費源）；個股原始價之股票分割（split）不還原（沿用既有價格序列既有行為，含息與純價格同樣受影響，屬既有限制）；股利再投入以除息日收盤價近似（非實際發放日），為 total-return index 標準作法。
 - compare 不對股價／指數做 owner 過濾（全域公開行情）。

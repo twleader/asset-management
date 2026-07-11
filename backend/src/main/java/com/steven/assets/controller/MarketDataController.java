@@ -144,6 +144,19 @@ public class MarketDataController {
         return ResponseEntity.ok(dividendHistoryService.findFromDb(code, market, years));
     }
 
+    /**
+     * 純讀最近 N 年股利（績效比較頁 Requirement 33）：只讀 stock_dividend_history、回「裸陣列」，
+     * DB 空即回 []，**絕不觸發 cold-cache 抓取寫入**（與 /dividends 的差別）。
+     * GET /api/market-data/dividends-readonly?code=0050&market=台股&years=10
+     */
+    @GetMapping("/dividends-readonly")
+    public List<MarketDataService.DividendRow> getDividendHistoryReadOnly(
+            @RequestParam @Pattern(regexp = CODE_PATTERN, message = "股票代號格式不合法") String code,
+            @RequestParam @Pattern(regexp = MARKET_PATTERN, message = "市場別格式不合法") String market,
+            @RequestParam(defaultValue = "10") int years) {
+        return dividendHistoryService.findFromDbReadOnly(code, market, years).rows();
+    }
+
     // ===== 歷史收盤價 =====
 
     /**
