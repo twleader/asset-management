@@ -7,8 +7,8 @@ import java.util.List;
  * 退休現金流試算結果（Requirement 32 / Task 165）。
  *
  * <p>由 {@code RetirementProjectionService} 以「使用者自訂的試算假設」對現有資產做**決定性逐年試算**
- * （非預測、非投資建議）：起始資產每年複利成長，累積期加每月投入，退休後扣生活費（依通膨逐年膨脹）、
- * 加勞保年金／勞退一次領，並在對應年份扣特定大筆花費，逐年推到 100 歲或資金耗盡。
+ * （非預測、非投資建議）：起始資產每年複利成長，累積期加「年薪 − 退休前年生活費」淨投入，退休後扣年生活費
+ * （長照前／長照後兩階段，依通膨逐年膨脹）、加勞保年金／勞退一次領，並在對應年份扣特定大筆花費，逐年推到 100 歲或資金耗盡。
  *
  * <p>{@code available=false} 時（缺生日／無資產快照／退休後每月生活費未填）不試算，帶 {@code unavailableReason}。
  */
@@ -49,9 +49,8 @@ public record RetirementProjectionDto(
             int age,
             String phase,          // ACCUM（累積期）/ RETIRE（退休後-長照前）/ CARE（退休後-長照後）
             BigDecimal balance,    // 年末資產餘額
-            BigDecimal contribution, // 當年投入（累積期，每月投入×12）
-            BigDecimal expense,      // 當年支出（年生活費＋大筆花費，名目）
-            BigDecimal income        // 當年被動收入（勞保年金＋當年勞退一次領）
+            BigDecimal income,     // 當年流入（累積期＝年薪；退休後＝勞保年金＋當年勞退一次領）
+            BigDecimal expense     // 當年流出（累積期＝退休前年生活費；退休後＝年生活費＋大筆花費）
     ) {}
 
     public static RetirementProjectionDto unavailable(String reason, Integer currentAge, BigDecimal startAssets) {

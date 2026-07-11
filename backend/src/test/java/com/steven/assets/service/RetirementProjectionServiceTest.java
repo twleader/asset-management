@@ -58,7 +58,8 @@ class RetirementProjectionServiceTest {
         InvestmentProfile p = base();
         p.setBirthDate(LocalDate.now().minusYears(40));      // 現齡 40
         p.setRetirementDate(LocalDate.now().plusYears(25));  // 退休 65
-        p.setMonthlyInvestment(new BigDecimal("50000"));
+        p.setPreRetirementAnnualSalary(new BigDecimal("1200000"));  // 退休前年薪 120 萬
+        p.setPreRetirementAnnualExpense(new BigDecimal("600000"));  // 退休前年支出 60 萬 → 淨投入 60 萬/年
         p.setRetirementAnnualExpense(new BigDecimal("360000"));
         p.setAccumulationAnnualReturnRate(new BigDecimal("6"));
         p.setRetirementAnnualReturnRate(new BigDecimal("5"));
@@ -150,6 +151,28 @@ class RetirementProjectionServiceTest {
         assertEquals(80, r.assumptions().longTermCareStartAge());
         assertEquals("RETIRE", pointAtAge(r, 79).phase());
         assertEquals("CARE", pointAtAge(r, 80).phase());
+    }
+
+    @Test
+    void accumulation_usesSalaryAndPreRetirementExpense() {
+        InvestmentProfile p = base();
+        p.setBirthDate(LocalDate.now().minusYears(50));      // 現齡 50
+        p.setRetirementDate(LocalDate.now().plusYears(10));  // 退休 60（累積期 10 年）
+        p.setPreRetirementAnnualSalary(new BigDecimal("1000000"));   // 年薪 100 萬
+        p.setPreRetirementAnnualExpense(new BigDecimal("400000"));   // 退休前年支出 40 萬 → 淨投入 60 萬/年
+        p.setRetirementAnnualExpense(new BigDecimal("300000"));
+        p.setAccumulationAnnualReturnRate(new BigDecimal("0"));      // 無報酬，隔離淨投入效果
+        p.setRetirementAnnualReturnRate(new BigDecimal("0"));
+
+        RetirementProjectionDto r = svc.project(p, new BigDecimal("10000000"), List.of());
+        assertTrue(r.available());
+        // 第 1 年（age 51）累積期：income≈年薪×通膨、expense≈退休前年支出×通膨（通膨 2%、yearsFromNow=1）
+        RetirementProjectionDto.Point y1 = pointAtAge(r, 51);
+        assertEquals("ACCUM", y1.phase());
+        assertTrue(y1.income().doubleValue() > 1_000_000 && y1.income().doubleValue() < 1_050_000,
+                "累積期流入應約等於年薪（依通膨微升），實際=" + y1.income());
+        assertTrue(y1.expense().doubleValue() > 400_000 && y1.expense().doubleValue() < 430_000,
+                "累積期流出應約等於退休前年支出，實際=" + y1.expense());
     }
 
     private RetirementProjectionDto.Point pointAtAge(RetirementProjectionDto r, int age) {

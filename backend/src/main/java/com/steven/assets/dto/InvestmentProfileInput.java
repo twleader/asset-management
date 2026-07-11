@@ -12,7 +12,8 @@ import java.util.List;
  */
 public record InvestmentProfileInput(
         LocalDate birthDate,
-        BigDecimal monthlyInvestment,
+        BigDecimal preRetirementAnnualSalary,
+        BigDecimal preRetirementAnnualExpense,
         LocalDate retirementDate,
         BigDecimal laborInsuranceMonthly,
         LocalDate laborInsuranceStartDate,

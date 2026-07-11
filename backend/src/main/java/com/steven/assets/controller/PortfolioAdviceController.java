@@ -75,7 +75,7 @@ public class PortfolioAdviceController {
         return adviceService.getCurrentAllocation();
     }
 
-    /** 退休現金流試算（決定性逐年試算：現有資產＋每月投入＋勞保勞退＋生活費提領＋大筆花費，能否撐到 100 歲）。 */
+    /** 退休現金流試算（決定性逐年試算：現有資產＋退休前淨投入（年薪−年支出）＋勞保勞退＋生活費提領＋大筆花費，能否撐到 100 歲）。 */
     @GetMapping("/projection")
     public com.steven.assets.dto.RetirementProjectionDto projection() {
         return adviceService.getProjection();
@@ -112,7 +112,8 @@ public class PortfolioAdviceController {
     private static InvestmentProfileInput toInput(Map<String, Object> body) {
         return new InvestmentProfileInput(
                 localDateOrNull(body, "birthDate"),
-                bigDecimalOrNull(body, "monthlyInvestment"),
+                bigDecimalOrNull(body, "preRetirementAnnualSalary"),
+                bigDecimalOrNull(body, "preRetirementAnnualExpense"),
                 localDateOrNull(body, "retirementDate"),
                 bigDecimalOrNull(body, "laborInsuranceMonthly"),
                 localDateOrNull(body, "laborInsuranceStartDate"),

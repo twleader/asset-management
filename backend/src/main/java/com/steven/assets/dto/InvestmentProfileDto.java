@@ -14,7 +14,8 @@ import java.util.List;
  */
 public record InvestmentProfileDto(
         String birthDate,
-        BigDecimal monthlyInvestment,
+        BigDecimal preRetirementAnnualSalary,
+        BigDecimal preRetirementAnnualExpense,
         String retirementDate,
         BigDecimal laborInsuranceMonthly,
         String laborInsuranceStartDate,
@@ -59,7 +60,8 @@ public record InvestmentProfileDto(
                 .toList();
         return new InvestmentProfileDto(
                 (e == null || e.getBirthDate() == null) ? null : e.getBirthDate().toString(),
-                e == null ? null : e.getMonthlyInvestment(),
+                e == null ? null : e.getPreRetirementAnnualSalary(),
+                e == null ? null : e.getPreRetirementAnnualExpense(),
                 (e == null || e.getRetirementDate() == null) ? null : e.getRetirementDate().toString(),
                 e == null ? null : e.getLaborInsuranceMonthly(),
                 (e == null || e.getLaborInsuranceStartDate() == null) ? null : e.getLaborInsuranceStartDate().toString(),
