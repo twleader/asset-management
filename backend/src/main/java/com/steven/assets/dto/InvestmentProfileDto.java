@@ -14,7 +14,6 @@ import java.util.List;
  */
 public record InvestmentProfileDto(
         String birthDate,
-        Integer investmentHorizonYears,
         BigDecimal monthlyInvestment,
         String retirementDate,
         BigDecimal laborInsuranceMonthly,
@@ -22,6 +21,11 @@ public record InvestmentProfileDto(
         BigDecimal laborPensionLumpSum,
         String laborPensionClaimDate,
         BigDecimal assumedAnnualInflationRate,
+        BigDecimal retirementAnnualExpense,
+        BigDecimal longTermCareAnnualExpense,
+        Integer longTermCareStartAge,
+        BigDecimal accumulationAnnualReturnRate,
+        BigDecimal retirementAnnualReturnRate,
         List<String> goals,
         String riskTolerance,
         String expectedAnnualReturn,
@@ -55,7 +59,6 @@ public record InvestmentProfileDto(
                 .toList();
         return new InvestmentProfileDto(
                 (e == null || e.getBirthDate() == null) ? null : e.getBirthDate().toString(),
-                e == null ? null : e.getInvestmentHorizonYears(),
                 e == null ? null : e.getMonthlyInvestment(),
                 (e == null || e.getRetirementDate() == null) ? null : e.getRetirementDate().toString(),
                 e == null ? null : e.getLaborInsuranceMonthly(),
@@ -63,6 +66,11 @@ public record InvestmentProfileDto(
                 e == null ? null : e.getLaborPensionLumpSum(),
                 (e == null || e.getLaborPensionClaimDate() == null) ? null : e.getLaborPensionClaimDate().toString(),
                 e == null ? null : e.getAssumedAnnualInflationRate(),
+                e == null ? null : e.getRetirementAnnualExpense(),
+                e == null ? null : e.getLongTermCareAnnualExpense(),
+                e == null ? null : e.getLongTermCareStartAge(),
+                e == null ? null : e.getAccumulationAnnualReturnRate(),
+                e == null ? null : e.getRetirementAnnualReturnRate(),
                 goals,
                 e == null ? null : e.getRiskTolerance(),
                 e == null ? null : e.getExpectedAnnualReturn(),

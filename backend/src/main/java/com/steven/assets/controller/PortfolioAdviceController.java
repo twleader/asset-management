@@ -75,6 +75,12 @@ public class PortfolioAdviceController {
         return adviceService.getCurrentAllocation();
     }
 
+    /** 退休現金流試算（決定性逐年試算：現有資產＋每月投入＋勞保勞退＋生活費提領＋大筆花費，能否撐到 100 歲）。 */
+    @GetMapping("/projection")
+    public com.steven.assets.dto.RetirementProjectionDto projection() {
+        return adviceService.getProjection();
+    }
+
     /** 產生建議（同步；thinking + web_search 可能耗數十秒）。body 帶入理財條件，會一併儲存為 profile。 */
     @PostMapping("/generate")
     public PortfolioAdviceDto generate(@RequestBody(required = false) Map<String, Object> body) {
@@ -106,7 +112,6 @@ public class PortfolioAdviceController {
     private static InvestmentProfileInput toInput(Map<String, Object> body) {
         return new InvestmentProfileInput(
                 localDateOrNull(body, "birthDate"),
-                intOrNull(body, "investmentHorizonYears"),
                 bigDecimalOrNull(body, "monthlyInvestment"),
                 localDateOrNull(body, "retirementDate"),
                 bigDecimalOrNull(body, "laborInsuranceMonthly"),
@@ -114,6 +119,11 @@ public class PortfolioAdviceController {
                 bigDecimalOrNull(body, "laborPensionLumpSum"),
                 localDateOrNull(body, "laborPensionClaimDate"),
                 bigDecimalOrNull(body, "assumedAnnualInflationRate"),
+                bigDecimalOrNull(body, "retirementAnnualExpense"),
+                bigDecimalOrNull(body, "longTermCareAnnualExpense"),
+                intOrNull(body, "longTermCareStartAge"),
+                bigDecimalOrNull(body, "accumulationAnnualReturnRate"),
+                bigDecimalOrNull(body, "retirementAnnualReturnRate"),
                 stringList(body, "goals"),
                 str(body, "riskTolerance"),
                 str(body, "expectedAnnualReturn"),

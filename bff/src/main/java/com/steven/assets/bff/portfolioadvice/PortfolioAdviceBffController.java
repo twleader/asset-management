@@ -69,13 +69,19 @@ public class PortfolioAdviceBffController {
                 .retrieve().bodyToMono(MAP)
                 .onErrorReturn(Collections.emptyMap());
 
-        return Mono.zip(latestMono, historyMono, profileMono, settingsMono, allocationMono).map(t -> {
+        Mono<Map<String, Object>> projectionMono = businessServicesClient.get()
+                .uri("/api/portfolio-advice/projection")
+                .retrieve().bodyToMono(MAP)
+                .onErrorReturn(Collections.emptyMap());
+
+        return Mono.zip(latestMono, historyMono, profileMono, settingsMono, allocationMono, projectionMono).map(t -> {
             Map<String, Object> body = new HashMap<>();
             body.put("latest", t.getT1());
             body.put("history", t.getT2());
             body.put("profile", t.getT3());
             body.put("settings", t.getT4());
             body.put("currentAllocation", t.getT5());
+            body.put("projection", t.getT6());
             return ResponseEntity.ok(body);
         });
     }

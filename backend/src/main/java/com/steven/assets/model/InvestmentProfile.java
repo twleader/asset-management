@@ -44,10 +44,6 @@ public class InvestmentProfile {
     @Column(name = "birth_date")
     private LocalDate birthDate;
 
-    /** 預計投資年限（年）。 */
-    @Column(name = "investment_horizon_years")
-    private Integer investmentHorizonYears;
-
     /** 每月可投入金額（台幣）。退休後（{@code retirementDate} 之後）此定期投入視為 0。 */
     @Column(name = "monthly_investment", precision = 20, scale = 2)
     private BigDecimal monthlyInvestment;
@@ -78,6 +74,42 @@ public class InvestmentProfile {
     /** 假設年通膨率（%）。供未來大筆花費「今日幣值 → 未來名目值」換算；null 時 service 以預設 2% 計。 */
     @Column(name = "assumed_annual_inflation_rate", precision = 5, scale = 2)
     private BigDecimal assumedAnnualInflationRate;
+
+    /**
+     * 長照前年生活費（台幣，今日幣值）。退休現金流試算（Requirement 32 / Task 167）之提領來源（退休後第一階段）：
+     * 每年名目提領＝{@code retirementAnnualExpense × (1+通膨)^距今年數}（衍生、不入庫）。
+     * null 表示未填，退休提領試算無法進行（試算標記 unavailable）。
+     */
+    @Column(name = "retirement_annual_expense", precision = 20, scale = 2)
+    private BigDecimal retirementAnnualExpense;
+
+    /**
+     * 長照後年生活費（台幣，今日幣值）。退休後第二階段（長照期，通常花費較高，如照護／醫療）之年提領。
+     * null 表示不區分長照階段（全退休期沿用長照前年生活費）。
+     */
+    @Column(name = "long_term_care_annual_expense", precision = 20, scale = 2)
+    private BigDecimal longTermCareAnnualExpense;
+
+    /**
+     * 長照起始年齡（歲）。自此歲起退休後年生活費改用 {@code longTermCareAnnualExpense}。
+     * null 且有填長照後年生活費時，service 以預設 80 歲計；夾在 [退休年齡, 100] 區間。
+     */
+    @Column(name = "long_term_care_start_age")
+    private Integer longTermCareStartAge;
+
+    /**
+     * 累積期（退休前）試算用年報酬率（%）。退休現金流逐年試算之複利假設；null 時由 service 依「獲利預期」區間帶入預設。
+     * 這是使用者可自訂的試算假設（非系統對報酬的預測），握在使用者手上。
+     */
+    @Column(name = "accumulation_annual_return_rate", precision = 5, scale = 2)
+    private BigDecimal accumulationAnnualReturnRate;
+
+    /**
+     * 退休後試算用年報酬率（%）。退休後配置通常較保守、報酬較低；null 時由 service 依「獲利預期」區間帶入較保守預設。
+     * 同為使用者可自訂的試算假設。
+     */
+    @Column(name = "retirement_annual_return_rate", precision = 5, scale = 2)
+    private BigDecimal retirementAnnualReturnRate;
 
     /** 理財目標（複選 code，逗號分隔）。 */
     @Column(name = "goals", length = 300)
