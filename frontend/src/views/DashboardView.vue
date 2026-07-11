@@ -648,6 +648,15 @@ const kpiCards = computed(() => {
   const prevTotal = prev ? Number(prev.totalAssets || 0) : 0
   const change = prevTotal > 0 ? ((total - prevTotal) / prevTotal * 100).toFixed(1) : null
 
+  // 「股票」「債券」兩卡以資產類別歸類（Requirement 25）呈現，取代原「股票現值／信託基金」產品別兩卡：
+  // 信託基金非獨立資產類別，依歸類拆入——取「現金/債券/股票」圓餅圖同源的 history row：
+  //   stockValue（股票型：一般股票/ETF ＋ 股票型基金）、bondValue（債券型：債券 ETF ＋ 債券型基金）。
+  // 採快照凍結逐筆 currentValue、不套盤中 live（同 Req 25「巨觀資產配置毋須 intraday 精度」，與圓餅圖同值）。
+  const classRow = store.history.find(r => r.id === s.id)
+  const stockClassified = Number(classRow?.stockValue || 0)
+  const bondClassified = Number(classRow?.bondValue || 0)
+  const pctOfTotal = v => total > 0 ? (v / total * 100).toFixed(1) : '0.0'
+
   return [
     {
       label: '資產總計', img: '/icons/gold-coins-v2.svg',
@@ -662,20 +671,15 @@ const kpiCards = computed(() => {
       valueColor: '#1e293b'
     },
     {
-      label: '股票現值', icon: 'TrendCharts',
-      value: formatCurrency(s.totalStockValue), bg: '#fef3c7', color: '#d97706',
-      sub: `損益 ${formatCurrency(s.stockProfit)}`,
-      valueColor: Number(s.stockProfit) >= 0 ? '#16a34a' : '#dc2626'
+      label: '股票', icon: 'TrendCharts',
+      value: formatCurrency(stockClassified), bg: '#fef3c7', color: '#d97706',
+      sub: `佔比 ${pctOfTotal(stockClassified)}%`,
+      valueColor: '#1e293b'
     },
     {
-      label: '信託基金', emoji: '📊',
-      value: formatCurrency(s.totalFundValue), bg: '#ecfdf5', color: '#10b981',
-      sub: (() => {
-        const cost = Number(s.totalFundCost || 0)
-        const profit = Number(s.totalFundValue || 0) - cost
-        return `損益 ${formatCurrency(profit)}`
-      })(),
-      subColor: (Number(s.totalFundValue || 0) - Number(s.totalFundCost || 0)) >= 0 ? '#16a34a' : '#dc2626',
+      label: '債券', emoji: '📜',
+      value: formatCurrency(bondClassified), bg: '#f0fdfa', color: '#0d9488',
+      sub: `佔比 ${pctOfTotal(bondClassified)}%`,
       valueColor: '#1e293b'
     },
     {

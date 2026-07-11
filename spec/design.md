@@ -877,6 +877,8 @@ GET    /api/bff/dashboard/realtime                  # 2 分鐘輪詢用：最新
 >
 > KPI「資產總計」一致性（**per-market 基準日閘門**，見 Task 121）：Dashboard `liveLatest` 對台股 / 美股 / 英股各自判斷 `basedate == 該市場當地今日`（`isBaselineToday`），今日市場用 `customTableData × overlayLivePrice` 的 live 值、非今日市場維持快照凍結收盤；`totalAssets` **僅在三市場皆為今日時**才採用 `liveAssets.liveTotalAssets`（全 live 口徑，與「歷年資產管理」今日列共用同一支 business-service API、同值），否則一律 per-market 加總（`totalDeposit + totalFundValue + per-market totalStockValue`）。**禁止前端再加「市場開盤」閘門**；是否套 live 純由 `basedate == 該市場今日` 決定。
 >
+> KPI 五卡（資產總計 / 存款總計 / **股票** / **債券** / 預估年配息）：「股票」「債券」兩卡以資產類別歸類（Requirement 25）呈現，**取代**原「股票現值 / 信託基金」產品別兩卡。信託基金非獨立資產類別，一律依歸類拆入——股票 = `stockValue`（股票型：一般股票/ETF ＋ 股票型基金）、債券 = `bondValue`（債券型：債券 ETF ＋ 債券型基金），與「現金/債券/股票」圓餅圖 tab **同一 business-service 來源**（`kpiCards` 依 `liveLatest.id` 於 `store.history` 找對應 row 取 `stockValue` / `bondValue`），採快照凍結逐筆 `currentValue`、不套盤中 live（同 Requirement 25「巨觀資產配置毋須 intraday 精度」，與圓餅圖同值）。`sub` 顯示佔總資產比例「佔比 X.X%」。原 `liveLatest` 的 live 股票加總仍保留（併入「資產總計」live 口徑），僅不再以獨立卡呈現。
+>
 > **「全市場皆非交易日今日」（昨日快照／今日尚未建檔／週末／刪除今日快照後最新退回昨日）時，`liveLatest` 一律維持快照凍結收盤值（= 基準日收盤），不得用 `liveAssets` 覆蓋**。理由：`live-assets` 讀 Redis = 最新一筆 tick / 收盤，當最新快照日 < 今日且已有更新交易日收盤時，覆蓋會把較新交易日收盤洩漏到一個過去基準日上（Task 121 修正前 bug：最新快照 6/23、刪掉 6/24 後 6/23 列被 6/24 收盤蓋掉）。快照凍結的 `stock_holding.currentValue` 對已定案的過去日期本來就 == 該日收盤，保留即正解。`DashboardBffController.summary` 回的 `history` 最新列亦透過共用 `LiveAssetsOverlay.applyToLatest`（同一 per-market 閘門）套 overlay，與 `/api/bff/asset-history` 最新列同值。（前一版設計曾要求此分支改走 `overlayLatestFromLiveAssets(s)` 一律覆蓋，導致過去基準日被較新收盤汙染 → Task 121 反轉為 per-market 閘門，並移除 `overlayLatestFromLiveAssets`）
 >
 > 儀表板基準日切換行為：

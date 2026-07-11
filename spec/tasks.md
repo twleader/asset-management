@@ -4288,3 +4288,26 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - [x] 171.8 Docker：`docker-compose.yml` business-services 加 volume `${EXPORT_OUTPUT_DIR_HOST:-/Users/steven/Project/SRPP/data}:/data/export-output` ＋ env `EXPORT_OUTPUT_DIR=/data/export-output`；`.env.example` 加 `EXPORT_OUTPUT_DIR_HOST`。
 - [x] 171.9 Docker 驗證：`--no-cache` 重 build business-services、bff，build frontend，recreate；端到端驗證（手動下載含彙總表、run-now 後 host 目錄出現 xlsx、設定存取 owner-scoped、時間到點自動產檔）。
 - [ ] 171.10 commit + 兩段式 merge。
+
+---
+
+### Task 172：Dashboard KPI 卡改用資產類別歸類——「股票現值／信託基金」取代為「股票／債券」（Requirement 9 / 25）
+
+對應 Requirements: Requirement 9、Requirement 25（[requirements.md](spec/requirements.md)）
+
+#### 需求
+
+信託基金不是獨立資產類別（債券型基金屬債券、股票型基金屬股票）。Dashboard 上方 KPI 卡原以產品別呈現「股票現值」「信託基金」兩卡，改為依「資產類別歸類」拆分的「股票」「債券」兩卡：債券 ETF ＋ 債券型基金 → 債券；一般股票/ETF ＋ 股票型基金 → 股票。範圍限 KPI 卡（採「取代」）；下方「信託基金」橫條圖、「資產類別」產品別圓餅圖、「現金/債券/股票」圓餅圖 tab 均不動。
+
+#### 設計決策
+
+- **同一 business-service 來源**：股票/債券金額直接取 `GET /api/snapshots/history` 已回傳、由 `AssetService.getAssetHistory()` 計算的 `stockValue`（股票型：一般股票/ETF ＋ 股票型基金）與 `bondValue`（債券型：債券 ETF ＋ 債券型基金），與「現金/債券/股票」圓餅圖 tab 完全同源同值。前端不重算分類、不新增後端端點/DTO 欄位。
+- **快照凍結、不套 live**：沿用 Requirement 25 口徑（採逐筆凍結 `currentValue`，巨觀資產配置毋須 intraday 精度），與圓餅圖一致。原 `liveLatest` 的 live 股票加總仍保留以驅動「資產總計」，僅不再以獨立卡呈現。
+- **sub 改佔比**：分類值無逐筆成本口徑，`sub` 由「損益」改為「佔比 X.X%」（佔總資產）。
+
+#### 實作
+
+- [x] 172.1 spec：requirements.md Requirement 9（KPI 五卡定義、兩處 live 描述去除「股票現值」卡）、design.md Dashboard KPI 段、本 Task。
+- [ ] 172.2 前端：`DashboardView.vue` `kpiCards` computed——依 `liveLatest.id` 於 `store.history` 找對應 row 取 `stockValue`／`bondValue`；「股票現值」卡改「股票」（值 = `stockValue`、琥珀色、`sub` 佔比）、「信託基金」卡改「債券」（值 = `bondValue`、teal 色、`sub` 佔比）；資產總計 / 存款總計 / 預估年配息三卡不變。
+- [ ] 172.3 驗證：Docker 重 build frontend、recreate；比對 KPI「股票＋債券」加總 == 「現金/債券/股票」圓餅圖股票＋債券、== `totalAssets − 存款`；含債券 ETF 的持股正確歸入債券卡。
+- [ ] 172.4 commit + 兩段式 merge。
