@@ -2208,8 +2208,8 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
   @Scheduled(cron="0 * * * * *", zone=Asia/Taipei)  每分鐘 poll
     for each export_schedule_setting（背景無 request → 讀全部列）:
       if enabled && last_run_date != today && now >= (run_hour:run_minute):  // >= 到點，非分鐘精確相等
-        byte[] = ExcelExportService.exportFullForOwner(ownerUserId)   // 手動 enableFilter 縮到該 owner
-        Files.write( resolveDir(EXPORT_OUTPUT_DIR, output_subpath) / 資產總覽_{ownerUserId}_YYYYMMDD.xlsx )
+        byte[] = ExcelExportService.exportLiveAssetsForOwner(ownerUserId)  // 當前即時資產；手動 enableFilter 縮到該 owner
+        Files.write( resolveDir(EXPORT_OUTPUT_DIR=/home/steven, output_subpath) / 資產總覽_{ownerUserId}_YYYYMMDD.xlsx )
         update last_run_date/last_run_at/last_run_status
   @EventListener(ApplicationReadyEvent) 開機自癒：補跑「今日已到點但 last_run_date != today」者
 ```
@@ -2240,14 +2240,16 @@ updated_at      TIMESTAMP
 # business-services（新）
 GET  /api/export-schedule/settings     # 取當前使用者排程設定（無則回預設，不寫入）
 PUT  /api/export-schedule/settings     # upsert 當前使用者設定（enabled/runHour/runMinute/outputSubpath）
-POST /api/export-schedule/run-now      # 立即以當前使用者身分產檔寫入其設定目錄（回 path/sizeBytes）
-GET  /api/snapshots/export             # 既有；exportFull() 現含「當前彙總」總表（owner-scoped）
+POST /api/export-schedule/run-now      # 立即以當前使用者身分產「當前即時資產」檔寫入其設定目錄（回 path/sizeBytes）
+GET  /api/export-schedule/browse       # 唯讀：列基底（家目錄）下 ?subpath= 的子目錄清單（樹狀選擇器懶載入）
+GET  /api/snapshots/export             # 既有；exportFull() 多分頁歷次匯出（含「當前彙總」總表，owner-scoped）
 
 # BFF（AssetHistoryBffController，沿用 businessServicesClient 自動帶 X-User-*）
 GET  /api/bff/asset-history/export-schedule          → GET  /api/export-schedule/settings
 PUT  /api/bff/asset-history/export-schedule          → PUT  /api/export-schedule/settings
 POST /api/bff/asset-history/export-schedule/run-now  → POST /api/export-schedule/run-now
-GET  /api/bff/asset-history/export                    → GET  /api/snapshots/export（既有，內容增強）
+GET  /api/bff/asset-history/export-schedule/browse   → GET  /api/export-schedule/browse（唯讀列子目錄）
+GET  /api/bff/asset-history/export                    → GET  /api/snapshots/export（既有，多分頁歷次匯出）
 ```
 
 > 排程設定為 per-user（owner-scoped），非 admin-only：路徑落 BFF `SecurityConfig` 的 `.anyExchange().authenticated()`，一般登入者可設定自己的排程；後端 `ownerFilter` 縮到本人。
@@ -2265,4 +2267,10 @@ GET  /api/bff/asset-history/export                    → GET  /api/snapshots/ex
 
 ### Infrastructure
 
-- `docker-compose.yml` business-services 新增 volume `${EXPORT_OUTPUT_DIR_HOST:-/Users/steven/Project/SRPP/data}:/data/export-output` 與環境變數 `EXPORT_OUTPUT_DIR=/data/export-output`；`.env.example` 加 `EXPORT_OUTPUT_DIR_HOST`。使用者設定 `output_subpath=input` 時，檔案落於 host `/Users/steven/Project/SRPP/data/input`。
+- `docker-compose.yml` business-services volume `${EXPORT_OUTPUT_DIR_HOST:-/Users/steven}:/home/steven` 與環境變數 `EXPORT_OUTPUT_DIR=/home/steven`；`.env.example` 的 `EXPORT_OUTPUT_DIR_HOST` 預設 `/Users/steven`。使用者設定 `output_subpath=input` 時，檔案落於 host `/Users/steven/input`；子路徑空＝家目錄根。
+
+### 本次增修（排程改匯出「當前即時資產」＋家目錄為根＋檔案總管式資料夾選擇）
+
+- **排程／run-now 改匯出「當前即時資產」**：`ExcelExportService` 新增 `exportLiveAssets()`（HTTP，aspect owner-scoped）與 `exportLiveAssetsForOwner(Long ownerId)`（背景，手動 `enableFilter`），皆走 `buildLiveWorkbook()`。內容單一來源＝`StockPriceService.getLiveAssets()`（最新快照持股 × Redis 即時股價，與 Dashboard 首頁「當前資產」同一數字；存款／基金沿用最新快照凍結值），股票逐檔以 `(code, market)` 對映即時價與即時現值；deposits／funds 明細讀最新快照（`AssetSnapshotRepository.findLatest()` 後於同交易 lazy load）。排版比照 `writeSnapshotSheet`（銀行存款／基金／股票分區，股票加「即時價」欄、現值用即時值，投資成本共用抽出的 `stockCostTwd()` 換匯），末段列即時彙總（存款總計／基金現值／即時股票現值／即時總資產）。`ExportScheduleService.runNowForCurrentUser()` 改呼叫 `exportLiveAssets()`、`runScheduled()` 改呼叫 `exportLiveAssetsForOwner()`。手動「匯出 Excel」（`/api/snapshots/export` → `exportFull()` 多分頁歷次）維持不變。
+- **家目錄為根**：`EXPORT_OUTPUT_DIR` 預設由 `/data/export-output` 改為 `/home/steven`；volume host 端由 `/Users/steven/Project/SRPP/data` 改為 `/Users/steven`。`output_subpath` 仍為相對子路徑（相對家目錄根），路徑安全驗證邏輯不變。
+- **檔案總管式資料夾選擇（唯讀 browse）**：`ExportScheduleService.browse(subpath)` 以 `startsWith(base)` 驗證後 `Files.list` 僅取子目錄（隱藏 dotfiles、依名稱排序），回 `BrowseResponse{baseDir, subpath, absolutePath, directories:[{name, path}]}`；`ExportScheduleController` 加 `GET /browse`，BFF passthrough。前端 `AssetHistoryView.vue` 標題改「排程自動匯出最新資產」，輸出資料夾改 `el-tree` 懶載入樹狀選擇對話框（`load` 呼叫 browse 逐層展開，點選節點取相對子路徑）＋可選填「新增子資料夾名稱」（寫檔時 `Files.createDirectories` 自動建立，故 browse 保持唯讀、無需新增變更檔案系統的端點）。

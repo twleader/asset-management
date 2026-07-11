@@ -20,6 +20,9 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -56,7 +59,7 @@ public class ExportScheduleService {
     public ExportScheduleService(ExportScheduleSettingRepository settingRepo,
                                  ExcelExportService excelExportService,
                                  ObjectProvider<CurrentUserContext> currentUserProvider,
-                                 @Value("${EXPORT_OUTPUT_DIR:/data/export-output}") String baseDir) {
+                                 @Value("${EXPORT_OUTPUT_DIR:/home/steven}") String baseDir) {
         this.settingRepo = settingRepo;
         this.excelExportService = excelExportService;
         this.currentUserProvider = currentUserProvider;
@@ -101,8 +104,8 @@ public class ExportScheduleService {
                 ExportScheduleSetting.builder().ownerUserId(ownerId).build());
         String subpath = normalizeSubpath(s.getOutputSubpath());
         try {
-            // HTTP 情境：exportFull() 由 TenantFilterAspect 自動 owner-scoped 到當前使用者。
-            byte[] data = excelExportService.exportFull();
+            // HTTP 情境：exportLiveAssets() 由 TenantFilterAspect 自動 owner-scoped 到當前使用者。
+            byte[] data = excelExportService.exportLiveAssets();
             Path file = writeToDir(ownerId, subpath, data);
             s.setOwnerUserId(ownerId);
             s.setLastRunAt(LocalDateTime.now(TW_ZONE));
@@ -119,6 +122,47 @@ public class ExportScheduleService {
             settingRepo.save(s);
             throw new RuntimeException("立即匯出失敗：" + e.getMessage(), e);
         }
+    }
+
+    /**
+     * 唯讀列出基底（家目錄）下指定相對子路徑的「子目錄」清單（Requirement 34 增修）。
+     * 供前端檔案總管式樹狀選擇器逐層懶載入；僅列目錄名稱、隱藏 dotfiles、依名稱排序，
+     * 不讀檔案內容、不變更檔案系統。以 normalize {@code startsWith(base)} 驗證防跳脫。
+     */
+    public ExportScheduleDto.BrowseResponse browse(String subpath) {
+        requireOwnerId(); // 需登入
+        String sub = subpath == null ? "" : subpath.trim();
+        while (sub.startsWith("/")) sub = sub.substring(1);
+        while (sub.endsWith("/")) sub = sub.substring(0, sub.length() - 1);
+
+        Path base = Path.of(baseDir).toAbsolutePath().normalize();
+        Path target = base.resolve(sub).normalize();
+        if (!target.startsWith(base)) {
+            throw new IllegalArgumentException("瀏覽路徑不可跳脫基底目錄：" + subpath);
+        }
+
+        final String parent = sub;
+        List<ExportScheduleDto.DirEntry> dirs = new ArrayList<>();
+        if (Files.isDirectory(target)) {
+            try (var stream = Files.list(target)) {
+                stream.filter(Files::isDirectory)
+                        .filter(p -> !p.getFileName().toString().startsWith(".")) // 隱藏 dotfiles
+                        .sorted(Comparator.comparing((Path p) -> p.getFileName().toString().toLowerCase()))
+                        .forEach(p -> {
+                            String name = p.getFileName().toString();
+                            String childPath = parent.isEmpty() ? name : parent + "/" + name;
+                            dirs.add(ExportScheduleDto.DirEntry.builder().name(name).path(childPath).build());
+                        });
+            } catch (IOException e) {
+                throw new RuntimeException("讀取目錄失敗：" + e.getMessage(), e);
+            }
+        }
+        return ExportScheduleDto.BrowseResponse.builder()
+                .baseDir(baseDir)
+                .subpath(sub)
+                .absolutePath(target.toString())
+                .directories(dirs)
+                .build();
     }
 
     // ===== 背景排程 =====
@@ -171,7 +215,7 @@ public class ExportScheduleService {
     /** 背景：對指定 owner 產檔並更新 guard／狀態。單一使用者失敗只記錄、不影響其他人。 */
     private void runScheduled(ExportScheduleSetting s, LocalDate today) {
         try {
-            byte[] data = excelExportService.exportFullForOwner(s.getOwnerUserId());
+            byte[] data = excelExportService.exportLiveAssetsForOwner(s.getOwnerUserId());
             Path file = writeToDir(s.getOwnerUserId(), normalizeSubpath(s.getOutputSubpath()), data);
             s.setLastRunStatus("成功：" + file);
             log.info("排程匯出成功 owner={} → {}（{} bytes）", s.getOwnerUserId(), file, data.length);

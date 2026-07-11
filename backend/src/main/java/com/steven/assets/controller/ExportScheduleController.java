@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -36,5 +37,12 @@ public class ExportScheduleController {
     @PostMapping("/run-now")
     public ExportScheduleDto.RunNowResponse runNow() {
         return service.runNowForCurrentUser();
+    }
+
+    /** 唯讀列出基底（家目錄）下 {@code subpath} 的子目錄，供前端檔案總管式選擇器逐層懶載入。 */
+    @GetMapping("/browse")
+    public ExportScheduleDto.BrowseResponse browse(
+            @RequestParam(value = "subpath", required = false, defaultValue = "") String subpath) {
+        return service.browse(subpath);
     }
 }

@@ -801,9 +801,10 @@
 
 - [ ] **匯出內容含「當前彙總」總表**：既有「匯出 Excel」按鈕（`GET /api/snapshots/export` → `ExcelExportService.exportFull()`）產出的活頁簿，第一張 sheet 改為「當前彙總」——讀該使用者最新一筆 `asset_snapshot`，列出匯出時間、最新快照日期、美元匯率、資產總計、存款總計、股票現值／成本／未實現損益、基金現值／成本／未實現損益、預估年配息、當年度已實現損益；其後沿用既有「每快照一張 sheet（YYYYMMDD）＋已實現損益」。
 - [ ] **手動匯出（瀏覽器下載）**：歷年資產頁「匯出 Excel」按鈕維持瀏覽器直接下載 `.xlsx`；owner-scoped（只含自己的資產，經 BFF 帶 `X-User-*` → `ownerFilter`）。
-- [ ] **每日排程自動匯出（per-user）**：每個使用者可在歷年資產頁「排程自動匯出」設定卡開啟每日排程，設定每日執行時間（時:分）與輸出子路徑，系統於該時間把該使用者的完整匯出（同上內容）寫成 `.xlsx` 到指定目錄。
-- [ ] **輸出路徑（基底目錄＋相對子路徑）**：容器內固定基底目錄由環境變數 `EXPORT_OUTPUT_DIR`（預設 `/data/export-output`）指定，經 docker volume 對映到 host 目錄（預設 `/Users/steven/Project/SRPP/data`）。使用者設定的是「相對子路徑」（預設 `input`，即 host `/Users/steven/Project/SRPP/data/input`）。後端一律以「基底 resolve 子路徑後 normalize 必須仍在基底內」驗證，拒絕 `..` 跳脫與絕對路徑。
-- [ ] **可調時間、可手動立即匯出**：設定卡提供啟用開關、每日時間（`el-time-picker` 時:分）、相對子路徑輸入、「立即匯出到目錄」按鈕（`POST run-now` 立即產檔到設定目錄，供驗證），並顯示上次執行時間與結果。
+- [ ] **每日排程自動匯出最新資產（per-user）**：每個使用者可在歷年資產頁「排程自動匯出最新資產」設定卡開啟每日排程，設定每日執行時間（時:分）與輸出資料夾，系統於該時間把該使用者的**當前即時資產**匯出成 `.xlsx` 到指定目錄。匯出內容＝最新一筆快照的持股／存款／基金，但**股票以 Redis 即時股價重估**（與 Dashboard 首頁「當前資產」同一權威來源 `StockPriceService.getLiveAssets()`；存款／基金沿用最新快照凍結值），排版比照歷次快照分頁（銀行存款／基金／股票，股票含即時價與美股 USD→TWD 換算、預估配息，末列即時總資產彙總）。`run-now`「立即匯出到目錄」同此內容。手動「匯出 Excel」按鈕（多分頁歷次匯出）維持不變。
+- [ ] **輸出路徑（家目錄為根＋相對子路徑）**：容器內基底目錄由環境變數 `EXPORT_OUTPUT_DIR`（預設 `/home/steven`）指定，經 docker volume 對映到 host 家目錄（預設 `/Users/steven`）。使用者設定的是「相對子路徑」（相對家目錄根，例如 `input` → host `/Users/steven/input`；空字串＝家目錄根）。後端一律以「基底 resolve 子路徑後 normalize 必須仍在基底內」驗證，拒絕 `..` 跳脫與絕對路徑。
+- [ ] **可調時間、檔案總管式資料夾選擇、可手動立即匯出**：設定卡標題「排程自動匯出最新資產」，提供啟用開關、每日時間（`el-time-picker` 時:分）、**輸出資料夾選擇器**（檔案總管式 `el-tree` 懶載入樹狀瀏覽，自家目錄根逐層展開後點選；可另填「新增子資料夾名稱」，寫檔時 `Files.createDirectories` 自動建立）、「立即匯出到目錄」按鈕（`POST run-now` 立即產檔到設定目錄，供驗證），並顯示上次執行時間與結果。
 - [ ] **每使用者各自設定（owner-scoped 設定表）**：排程設定存於 `export_schedule_setting`（每 `owner_user_id` 一列、`@Filter(ownerFilter)` 隔離）；GET/PUT/run-now 走 HTTP（BFF→business）自動 scope 到本人；非管理者亦可設定自己的排程（不限 admin）。
 - [ ] **排程執行機制與租戶隔離**：以每分鐘 `@Scheduled` poll（`zone=Asia/Taipei`）比對各設定列的時:分與「當日是否已執行」旗標；命中則對該列 owner 手動 `enableFilter("ownerFilter")` 產出只含該 owner 資產的活頁簿再寫檔（背景 cron 無 request context、`ownerFilter` 不自動生效，故明確逐列指定 owner）。服務重啟以 `ApplicationReadyEvent` 補跑當日已到點但未執行者。單一使用者失敗只記 `last_run_status` 與 log、不影響其他使用者。
 - [ ] **檔名**：`資產總覽_{使用者ID}_{YYYYMMDD}.xlsx`（檔名含 owner id，避免多使用者共用同一 subpath 時同名互相覆蓋；同一使用者同日覆寫）。
+- [ ] **資料夾瀏覽端點（唯讀）**：新增 `GET /api/export-schedule/browse?subpath=` 列出基底（家目錄）下指定子路徑的「子目錄」清單（僅目錄、隱藏 dotfiles、依名稱排序），供前端樹狀選擇器逐層懶載入。同樣以 normalize `startsWith(base)` 驗證防跳脫；此端點僅列目錄名稱、不讀檔案內容、不變更檔案系統，需登入。BFF 對應 `GET /api/bff/asset-history/export-schedule/browse`。

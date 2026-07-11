@@ -70,15 +70,15 @@ services:
       # 未設定 ANTHROPIC_API_KEY 時 MarketAnalysisService 安全跳過（status=NOT_CONFIGURED），不報錯。
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-4-8}
-      # 歷年資產每日排程自動匯出（Requirement 34 / Task 171）：容器內基底輸出目錄，
-      # 對映到下方 volume 的 host 目錄；使用者設定的相對子路徑（預設 input）落於其下。
-      EXPORT_OUTPUT_DIR: /data/export-output
+      # 歷年資產每日排程自動匯出（Requirement 34 / Task 171）：容器內基底輸出目錄＝主機家目錄根，
+      # 對映到下方 volume 的 host 家目錄；使用者於前端檔案總管式選擇器挑選的相對子路徑落於其下。
+      EXPORT_OUTPUT_DIR: /home/steven
     volumes:
       # rclone 設定檔以 read-only 從 host 掛入
       - ${HOME}/.config/rclone/rclone.conf:/etc/rclone/rclone.conf:ro
-      # 排程匯出輸出目錄：host 目錄掛入容器 /data/export-output（可寫）。
-      # 預設對映主機 /Users/steven/Project/SRPP/data；子資料夾 input → .../SRPP/data/input。
-      - ${EXPORT_OUTPUT_DIR_HOST:-/Users/steven/Project/SRPP/data}:/data/export-output
+      # 排程匯出根目錄：host 家目錄掛入容器 /home/steven（可寫）。
+      # 預設對映主機 /Users/steven；子資料夾 input → /Users/steven/input。
+      - ${EXPORT_OUTPUT_DIR_HOST:-/Users/steven}:/home/steven
     depends_on:
       postgres:
         condition: service_healthy
