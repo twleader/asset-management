@@ -764,3 +764,18 @@
 - [ ] **多租戶隔離**：`investment_profile` 與 `portfolio_advice` 皆以 `owner_user_id` 隔離，使用者僅能存取自己的條件與建議（`TenantFilterAspect` + `TenantGuard`）；建議依據的資產快照亦為 owner-scoped，不會拿到他人資產。
 - [ ] **金鑰未設定與失敗的優雅降級**：`ANTHROPIC_API_KEY` 未設定時安全跳過並落 `status = NOT_CONFIGURED`，頁面提示未設定金鑰；LLM 呼叫或 JSON 解析失敗落 `status = FAILED` ＋錯誤訊息、保留 `raw_response` 供除錯，不拋出，頁面顯示失敗且可重試。`references` 連結僅保留 http(s)（web_search 為不可信來源，後端過濾 + 前端 `safeUrl()` 擋 `javascript:`／`data:`，縱深防禦 XSS）。
 - [ ] **免責聲明**：頁面明顯標示「本建議由 AI 依你提供的條件與資產產生，僅供參考，不構成投資建議；投資有風險，請自行評估」。
+
+### Requirement 33: 股票與大盤績效比較——最多三檔股票與五大指數同圖比報酬率
+
+**User Story:** 作為投資人，我希望能把自己關心的股票（最多三檔）放在同一張圖上互相比較，也能把它們和台股大盤、美國道瓊、標普500、那斯達克、費半等大盤指數一起比，用「同一起點正規化後的累積報酬率」看誰在這段期間漲得多、誰抗跌，並可切換不同觀察區間。
+
+**Acceptance Criteria:**
+
+- [ ] **新增「績效比較」頁**：左側主選單新增「績效比較」項（`/performance-comparison`）；頁面提供三組控制項——股票下拉（最多 3 檔）、大盤基準勾選（5 個）、觀察區間切換（3 個月／半年／1 年／2 年／5 年，預設 1 年）；主體為單一疊圖折線圖 ＋ 下方報酬率摘要表。**不支援「當日」分時比較**（跨市場、跨時區的當日報酬無比較意義，僅提供日線區間）。
+- [ ] **股票只能選「我的股票」（owner-scoped 下拉）**：股票下拉選項由後端提供該登入使用者自己的股票清單——來源為「歷年資產快照的持股（`stock_holding`，經 `asset_snapshot` owner 過濾）」∪「觀察清單（`stock_alert` 衍生，owner 過濾）」去重 `(code, market)`，並**排除台股大盤特殊代號 `0000/台股`**（與 TWSE 基準重複、且無個股歷史）、**過濾掉 `stock_price_history` 尚無資料而無法比較者**，股名一律由 `stock` 主檔（`(code, market)`）補齊（明細與觀察表皆不冗存股名，正規化）。清單為 per-user：使用者只會看到自己名下的股票（`TenantFilterAspect` 於 repository 層以帶 `@Filter(ownerFilter)` 的 `AssetSnapshot`／`StockAlert` 為查詢 root 自動隔離；持股 distinct 查詢**絕不直查無 `@Filter` 的 `StockHolding`**，避免跨租戶洩漏）。`el-select` 以 `multiple filterable :multiple-limit="3"` 限制最多 3 檔。
+- [ ] **大盤基準（5 個，資料庫既有）**：可勾選的大盤/指數固定為台股大盤（TWSE）、道瓊工業（DJI）、標普500（SPX）、那斯達克綜合（IXIC）、費城半導體（SOX）；資料重用既有 `twse_index_daily_history`（TWSE）與 `us_index_daily_history`（其餘四者，`indexCode`）兩張表，與「股市大盤查詢」頁**同一事實來源**。BFF 端以白名單限定這 5 個代碼（`us-daily-index` GET 不驗 code，由 BFF 守門）。
+- [ ] **報酬率正規化疊圖（同起點 = 0%）**：因個股數百元與指數數萬點無法直接同軸比較，圖表 y 軸為「累積報酬率(%)」，各標的一律**正規化到觀察區間起點 = 0%**：`base = 該標的區間內第一筆非空收盤`，某交易日值 `= (該日或之前最近一筆收盤 / base − 1) × 100`。個股取 `stock_price_history.closePrice`、指數取日線表 `closePoint`（同義計算、同一口徑）。此正規化計算集中於**該頁專屬 BFF**（`/api/bff/performance-comparison/compare`），前端只 render（比照「聚合／計算放 BFF」原則）。圖上另畫一條 0% 水平基準線。
+- [ ] **跨市場交易日對齊與缺日處理**：台股與美股交易日／時區不同，BFF 以「所有選取標的在區間內交易日的 union 排序軸」為 x 軸，各標的用「該日或之前最近一筆收盤」forward-fill（前端 `connectNulls` 讓缺日不斷線）；某標的第一筆資料日之前留 null（如新上市股，線從中段開始）。今日這格可能個股已有即時成交價、指數尚未回補而不對齊——各標的以「自己最後一個非空報酬」計期間報酬並標示「截至日」（`asOfDate`）。
+- [ ] **報酬率摘要表**：圖下方列出每個已選標的的「期間報酬率(%)」與「截至日」，報酬率以紅漲綠跌上色（沿用 `priceColor` 慣例）。
+- [ ] **優雅降級**：某標的在區間內無資料（指數表尚未回補、或個股剛加入）→ 該線不畫、圖例仍列出、摘要顯示「無資料」，不回 500；`base` 為 0 或 null 時該標的整條 null（除零防呆）。單一標的抓取逾時／失敗只讓該線消失，不影響其餘（BFF 逐標的 `timeout` + 降級）。全空選取（未選任何股票與基準）則清空圖表、不呼叫下游。
+- [ ] **零 DB 變更**：本功能不新增任何資料表或欄位，完全重用 `stock_price_history` ＋ `twse_index_daily_history` ＋ `us_index_daily_history`，故無 Liquibase changelog。

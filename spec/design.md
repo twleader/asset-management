@@ -2085,3 +2085,70 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
 - 不做定期／排程自動產生（互動式即時，使用者按鈕觸發；不像 Requirement 31 有每日 cron）。
 - 不接第三方投顧／下單（純建議，不執行任何交易）。
 - 不做多份 profile／情境比較（一使用者一份條件；要比較可各自產生後於歷次建議回顧）。
+
+## Requirement 33：股票與大盤績效比較（Task 169）
+
+「績效比較」頁讓使用者最多選 3 檔自己的股票，並可勾選 5 個大盤指數（TWSE／DJI／SPX／IXIC／SOX），在同一張圖上以「同起點正規化報酬率(%)」疊圖比較。骨架與資料流比照「股市大盤查詢」頁（`GdpTwseView.vue` + `GdpTwseBffController`）。
+
+### 資料模型（零新增、零遷移）
+
+- **不新增任何資料表或欄位、無 Liquibase changelog**。完全重用：
+  - `stock_price_history`（個股每日收盤，欄位 `stockCode/market/tradingDate/closePrice`；全域非隔離表）。
+  - `twse_index_daily_history`（台股大盤，PK `tradingDate`，欄位 `closePoint`）。
+  - `us_index_daily_history`（海外指數，複合 PK `(indexCode, tradingDate)`，`indexCode ∈ {DJI,SPX,IXIC,SOX,...}`，欄位 `closePoint`）。
+- 「我的股票清單」不落任何新資料，即時由既有 owner-scoped 表衍生：`asset_snapshot`→`stock_holding`（持股）∪ `stock_alert`（觀察清單衍生），股名由 `stock` 主檔補。
+
+### API 設計
+
+**business-services**（只負責 owner-scoped 清單，不算報酬率）
+
+| Method | Path | 說明 |
+| --- | --- | --- |
+| GET | `/api/performance-comparison/my-stocks` | 回該登入使用者的股票清單 `List<{code, market, name}>`（持股 ∪ 觀察，去重 `(code,market)`，排除 `0000/台股`，過濾無 price history 者，股名由 `stock` 主檔補，穩定排序）。 |
+
+- 新增 `AssetSnapshotRepository.findDistinctOwnedStocks()`：JPQL `SELECT DISTINCT sh.stockCode, sh.market FROM AssetSnapshot s JOIN s.stocks sh`——**查詢 root 是帶 `@Filter(ownerFilter)` 的 `AssetSnapshot`，owner 隔離自動生效**；不可直查無 `@Filter` 的 `StockHolding`（會跨租戶洩漏）。
+- 觀察清單重用 `StockAlertRepository.findDistinctStockCodeMarket()`（root=`StockAlert`@Filter，比照 `WatchStockService.findAll()`）。
+- 過濾用 `StockPriceHistoryRepository.countByStockCodeAndMarket(code, market) > 0`。
+
+**BFF（一頁一支聚合器 `PerformanceComparisonBffController`，`/api/bff/performance-comparison`）**
+
+| Method | Path | 說明 |
+| --- | --- | --- |
+| GET | `/my-stocks` | 代理 business `/api/performance-comparison/my-stocks`（WebClient 自動帶 `X-User-Id` → owner 生效）。 |
+| GET | `/compare?stocks=&benchmarks=&range=` | 回 `{ dates:[union 交易日], series:[{key,type,code,market,returns[],totalReturn,asOfDate}] }`。 |
+
+- `stocks`＝逗號分隔 `code:market`（`split(",")`→trim→去空→distinct→`limit(3)`；各項 `split(":",2)`，code pattern 不含 `:`、market 中文也不含 `:`，安全）。
+- `benchmarks`＝逗號分隔代碼（trim→**白名單過濾 `{TWSE,DJI,SPX,IXIC,SOX}`**→`limit(5)`）。
+- `range ∈ {3m,6m,1y,2y,5y}`（`3m/6m`→`minusMonths`、其餘→`minusYears`，預設 `1y`）。
+- 全空選取直接回 `{dates:[],series:[]}`，不打下游。
+- 前端 join、後端 split：避開 axios 陣列序列化成 `stocks[]=` 讓 Spring `@RequestParam String` 收不到的坑。
+
+```text
+前端 PerformanceComparisonView
+  ├─ GET /api/bff/performance-comparison/my-stocks ─▶ business /api/performance-comparison/my-stocks（owner-scoped）
+  └─ GET /api/bff/performance-comparison/compare ──▶ 並行 business /api/market-data/history/stock（closePrice）
+                                                            + /api/twse-daily-index（TWSE，closePoint）
+                                                            + /api/us-daily-index?code=（其餘，closePoint）
+                                                   ──▶ BFF 做 union 軸 + forward-fill + 正規化(%)，回 render-ready
+```
+
+### 關鍵業務邏輯
+
+- **報酬率正規化（BFF）**：`from = today.minus(range)`、`to = today`。各標的抓 `{date, close}`（股票 `closePrice`／指數 `closePoint`）；建立所有標的區間內交易日的 union 排序軸（ISO 日期字串字典序＝時間序，比照 `GdpTwseBffController.previousCloseBefore`）；各 series `base = 區間內第一筆非空 close`，某日值 `= (該日或之前最近一筆 close / base − 1) × 100`（forward-fill），首資料日前留 null；`totalReturn = 最後一個非空報酬`、`asOfDate = 該最後非空日`。`base == null || base.signum()==0` → 整條 null（除零防呆）。
+- **reactive fan-out（動態 N 標的）**：`Flux.fromIterable(targets).flatMap(t -> fetchCloses(t).timeout(8s).onErrorReturn(empty)...).collectList()`，再依輸入索引重排（flatMap 亂序），確保 series 順序穩定；單一標的失敗只讓該線消失。
+- **不呼叫 `/api/stock-alerts/lookup-name`**：該端點對未知 code 會打外部 API 並 upsert 寫 `stock` 主檔，屬寫副作用，不放進 GET 聚合；label 由前端用 my-stocks 清單（股票）＋固定中文常數（基準）自行組合。
+- **compare 不做 owner 過濾**：`stock_price_history` 與指數表為全域公開行情（非個資），任意 code 讀取不洩漏任何人持倉；下拉限「我的股票」僅為 UX。
+
+### 前端（`views/PerformanceComparisonView.vue`）
+
+- 控制列：股票 `el-select multiple filterable :multiple-limit="3"`（options 來自 my-stocks，`value="code:market"`）、基準 `el-checkbox-button` ×5、區間 `el-radio-group`（預設 1y）。
+- 單一 `<v-chart>`：y 軸「報酬率(%)」，各標的 `type:'line' + connectNulls:true`，`markLine` 一條 0% 基準水平線；下方報酬率摘要表（標的｜期間報酬率｜截至日，紅漲綠跌）。
+- **ECharts tree-shaking 註冊**：`use([CanvasRenderer, LineChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent, DataZoomComponent, MarkLineComponent])`——0% 線用 **`MarkLineComponent`**（非 GdpTwseView 的 `MarkPointComponent`），漏註冊會靜默不畫。
+- `api/index.js` 加 `bffApi.performanceComparison`（`myStocks`／`compare`）；`router` 加 `/performance-comparison`、`App.vue` `mainMenuItems` 加「績效比較」（icon `Histogram`），置於「股市大盤查詢」之後。
+
+### 不處理
+
+- 不支援「當日」分時比較（僅日線區間）。
+- 不新增資料表／欄位／Liquibase（重用既有三表）。
+- 不在 compare 呼叫 lookup-name（避免外部 API 副作用與寫主檔）。
+- compare 不對股價／指數做 owner 過濾（全域公開行情）。

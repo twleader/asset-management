@@ -196,6 +196,18 @@ export const bffApi = {
       api.get('/bff/gdp-twse/index-intraday', { params: { market } })
   },
 
+  // PerformanceComparison（績效比較，Requirement 33）
+  performanceComparison: {
+    // 我的股票下拉清單（owner-scoped）：{ code, market, name }
+    myStocks: () => api.get('/bff/performance-comparison/my-stocks'),
+    // 報酬率疊圖：keys=['2330:台股',...]（≤3）、codes=['TWSE','SPX',...]（白名單）、range∈{3m,6m,1y,2y,5y}
+    // 前端 join、後端 split，避開 axios 陣列序列化成 stocks[]= 讓 Spring @RequestParam String 收不到
+    compare: (keys = [], codes = [], range = '1y') =>
+      api.get('/bff/performance-comparison/compare', {
+        params: { stocks: keys.join(','), benchmarks: codes.join(','), range }
+      })
+  },
+
   // TodayMarketAnalysis（今日股市分析，Requirement 31）
   todayMarketAnalysis: {
     get: (historyLimit = 30) =>
