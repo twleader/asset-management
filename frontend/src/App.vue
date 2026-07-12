@@ -17,10 +17,22 @@
           text-color="#94a3b8"
           active-text-color="#60a5fa"
         >
-            <el-menu-item v-for="item in mainMenuItems" :key="item.path" :index="item.path">
-            <el-icon><component :is="item.icon" /></el-icon>
-            <template #title>{{ item.title }}</template>
-          </el-menu-item>
+          <template v-for="item in mainMenuItems" :key="item.path || item.index">
+            <el-sub-menu v-if="item.children" :index="item.index">
+              <template #title>
+                <el-icon><component :is="item.icon" /></el-icon>
+                <span>{{ item.title }}</span>
+              </template>
+              <el-menu-item v-for="child in item.children" :key="child.path" :index="child.path">
+                <el-icon><component :is="child.icon" /></el-icon>
+                <template #title>{{ child.title }}</template>
+              </el-menu-item>
+            </el-sub-menu>
+            <el-menu-item v-else :index="item.path">
+              <el-icon><component :is="item.icon" /></el-icon>
+              <template #title>{{ item.title }}</template>
+            </el-menu-item>
+          </template>
 
           <el-sub-menu index="settings">
             <template #title>
@@ -218,13 +230,23 @@ onUnmounted(() => {
 
 const mainMenuItems = computed(() => [
   { path: '/dashboard', title: '總覽儀表板', icon: 'DataLine' },
-  { path: '/history', title: '歷年資產管理', icon: 'TrendCharts' },
-  { path: '/gdp-twse', title: '股市大盤查詢', icon: 'TrendCharts' },
-  { path: '/performance-comparison', title: '績效比較', icon: 'Histogram' },
-  { path: '/today-market-analysis', title: '今日股市分析', icon: 'Sunrise' },
-  { path: '/asset-allocation-advice', title: '資產配置建議', icon: 'Compass' },
-  { path: '/stocks', title: '股票觀察', icon: 'View' },
-  { path: '/realized-gains', title: '已實現損益', icon: 'Money' },
+  {
+    index: 'asset-management', title: '資產管理', icon: 'Wallet',
+    children: [
+      { path: '/history', title: '歷年資產管理', icon: 'TrendCharts' },
+      { path: '/realized-gains', title: '已實現損益', icon: 'Money' },
+      { path: '/asset-allocation-advice', title: '資產配置建議', icon: 'Compass' }
+    ]
+  },
+  {
+    index: 'stock-analysis', title: '股市綜合分析', icon: 'DataAnalysis',
+    children: [
+      { path: '/gdp-twse', title: '股市大盤查詢', icon: 'TrendCharts' },
+      { path: '/performance-comparison', title: '績效比較', icon: 'Histogram' },
+      { path: '/today-market-analysis', title: '今日股市分析', icon: 'Sunrise' },
+      { path: '/stocks', title: '股票觀察', icon: 'View' }
+    ]
+  },
   { path: '/trading-calendar', title: '交易日曆', icon: 'AlarmClock' },
   { path: '/exchange-rate', title: '台幣兌美元', icon: 'Money' },
   { path: '/payment-accounts', title: '自動代繳', icon: 'Tickets' }
