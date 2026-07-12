@@ -808,3 +808,19 @@
 - [ ] **排程執行機制與租戶隔離**：以每分鐘 `@Scheduled` poll（`zone=Asia/Taipei`）比對各設定列的時:分與「當日是否已執行」旗標；命中則對該列 owner 手動 `enableFilter("ownerFilter")` 產出只含該 owner 資產的活頁簿再寫檔（背景 cron 無 request context、`ownerFilter` 不自動生效，故明確逐列指定 owner）。服務重啟以 `ApplicationReadyEvent` 補跑當日已到點但未執行者。單一使用者失敗只記 `last_run_status` 與 log、不影響其他使用者。
 - [ ] **檔名**：`資產總覽_{使用者ID}_{YYYYMMDD}.xlsx`（檔名含 owner id，避免多使用者共用同一 subpath 時同名互相覆蓋；同一使用者同日覆寫）。
 - [ ] **資料夾瀏覽端點（唯讀）**：新增 `GET /api/export-schedule/browse?subpath=` 列出基底（家目錄）下指定子路徑的「子目錄」清單（僅目錄、隱藏 dotfiles、依名稱排序），供前端樹狀選擇器逐層懶載入。同樣以 normalize `startsWith(base)` 驗證防跳脫；此端點僅列目錄名稱、不讀檔案內容、不變更檔案系統，需登入。BFF 對應 `GET /api/bff/asset-history/export-schedule/browse`。
+
+---
+
+### Requirement 35: 每日自動釘定「最新快照」日期為當日並重算資產（讓即時價覆蓋生效）
+
+**User Story:** 作為資產擁有者，即使我一段時間沒有手動新增快照，我也希望「歷年資產」與 Dashboard 的「最新一筆」持續反映今日最新即時股價，而不是停在數日前的凍結收盤。
+
+**背景：** BFF 的 `LiveAssetsOverlay.applyToLatest` 以 Redis 即時價覆蓋歷史「最新一筆」的股票現值，但有 **per-market 基準日閘門**——僅當「最新快照 `snapshotDate` == 該市場時區今日」的市場才覆蓋。若最新快照停在過去日期（久未建檔），三市場皆非今日 → 完全不覆蓋 → 顯示過去日期的凍結收盤、資產失真。故需每日把最新快照日期釘成當日，打開閘門。
+
+**Acceptance Criteria:**
+
+- [ ] **每日排程釘定當日**：每天 00:05（`Asia/Taipei`）系統對**每個使用者（owner）各自的最新一筆 `asset_snapshot`**，若其 `snapshotDate` < 當日，則更新為當日並重算該筆匯總欄位（`total_*`、`estimated_annual_dividend`）。
+- [ ] **冪等與唯一鍵防護合一**：最新快照 `snapshotDate` 已 == 當日或為未來日期者一律不動（no-op）；「`snapshotDate` < 當日才更新」同時作為 `(owner_user_id, snapshot_date)` 唯一鍵防護——最新快照為該 owner 日期最大值，改為當日必不與既有列相撞，且不把未來快照往回搬。
+- [ ] **只重算被釘定的最新一筆**：僅對被推進日期的最新快照呼叫 `recalcTotals`（用快照凍結的 `currentValue`，與手動 `POST /api/snapshots/recalc-totals` 對同一筆結果逐欄一致），**不重算歷史快照**（歷史為 point-in-time 凍結紀錄；且 `recalcAllDividends` 會重抓 NAV／配息屬外部副作用，不適合每日排程）。
+- [ ] **多租戶隔離**：背景排程無 request context、`ownerFilter` 不自動生效，故以帶 `owner_user_id` 條件的 query 逐 owner 取其最新快照處理；單一 owner 失敗只記 log、不影響其他 owner（比照 Requirement 34 排程自動匯出）。
+- [ ] **重啟自癒**：服務重啟以 `ApplicationReadyEvent` 補跑當日（roll 冪等，多跑無害）；純後端排程，前端／BFF／DB schema 皆不需變更（僅 UPDATE 既有列）。

@@ -4349,3 +4349,31 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - [x] 173.3 測試：`RetirementProjectionServiceTest` 加「每 3 年依實際累計漲幅跳階（240000→254690→270279）」與「通膨 0 永不調整」兩案例（11 過）。
 - [x] 173.4 Docker：`--no-cache` 重 build business-services、recreate（image 內 `.class` 已含 `laborAnnuityMultiplier`，非 stale）；端到端驗證 `GET /api/portfolio-advice/projection`（owner=1）勞保年金逐年階梯調升（62→95 歲：240,204→254,906→…→461,728，每 3 年 ×1.02³）、缺口年齡延後。
 - [ ] 173.5 commit + 兩段式 merge。
+
+---
+
+### Task 174：每日自動釘定「最新快照」日期為當日並重算資產（Requirement 35）
+
+對應 Requirements: Requirement 35（[requirements.md](spec/requirements.md)）
+
+#### 需求
+
+「歷年資產」與 Dashboard 的「最新一筆」由 BFF `LiveAssetsOverlay.applyToLatest` 以 Redis 即時價覆蓋股票現值，但 per-market 基準日閘門僅在「最新快照 `snapshotDate` == 該市場時區今日」時覆蓋。使用者若久未建檔，最新快照停在過去日期 → 三市場皆非今日 → 完全不覆蓋 → 資產顯示過去凍結收盤而非今日即時價。需每日把每個 owner 最新快照日期釘成當日，打開閘門。
+
+#### 設計決策
+
+- **範圍＝逐 owner 各自最新快照**：背景排程無 request context、`@Filter(ownerFilter)` 不啟用；不可用無 owner 的 `findLatest()`（只會拿到全體最大日期那一筆、漏掉其他 owner）。新增帶 owner 條件的 query 逐 owner 處理，比照 `ExportScheduleService`。
+- **只重算被釘定的最新一筆**：復用既有 private `AssetService.recalcTotals(s)`；不呼叫 `recalcAllTotals()／recalcAllDividends()`（歷史不覆寫、避免每日對全 owner 全歷史打外部 NAV／配息源）。
+- **唯一鍵防護合一**：`if (!latest.getSnapshotDate().isBefore(today)) return false;` 同時是正確性閘門與 `(owner_user_id, snapshot_date)` 防撞（最新快照為日期最大值，< today 改為 today 必不相撞；== today／未來日期 skip）。
+- **迴圈放 scheduler bean**：逐 owner 呼叫 `AssetService` public `@Transactional` 方法（每 owner 獨立交易），避免 self-invocation 繞過 Spring proxy 使整批落同一交易連坐 rollback。
+- **無 DB schema 變更**：僅 UPDATE 既有列的 `snapshot_date` 與 `total_*`；無新增 changeset。
+
+#### 實作
+
+- [x] 174.1 spec：requirements.md（Requirement 35）、design.md（`SnapshotDateRollScheduler` 排程說明）、本 Task。
+- [x] 174.2 Repository：`AssetSnapshotRepository` 加 `findDistinctOwnerUserIds()` 與 `findFirstByOwnerUserIdOrderBySnapshotDateDesc(Long)`。
+- [x] 174.3 Service：`AssetService.rollLatestSnapshotToTodayForOwner(ownerId, today)`（public `@Transactional`，復用 `recalcTotals`，回傳是否有 roll）。
+- [x] 174.4 Scheduler：新增 `SnapshotDateRollScheduler`——`@Scheduled(cron="0 5 0 * * *", zone="Asia/Taipei")` + `@EventListener(ApplicationReadyEvent)` self-heal（另 thread + sleep 30s）+ `volatile LocalDate` 當日 guard；`findDistinctOwnerUserIds()` 逐 owner try/catch，統計 rolled／skipped／failed。
+- [x] 174.5 測試：`AssetServiceTest` 加 roll 四案例（過去→roll、當日→skip、未來→skip、無快照→false）；新增 `SnapshotDateRollSchedulerTest`（逐 owner 呼叫、單一失敗不中斷、統計）。
+- [x] 174.6 Docker：`--no-cache` 重 build business-services、recreate；查 log「roll 最新快照 … → 當日」＋歷年資產頁最後一列日期由過去日期變當日、股票改用即時價。
+- [ ] 174.7 commit + 兩段式 merge。

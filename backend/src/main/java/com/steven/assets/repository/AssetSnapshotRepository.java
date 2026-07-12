@@ -25,6 +25,22 @@ public interface AssetSnapshotRepository extends JpaRepository<AssetSnapshot, Lo
     Optional<AssetSnapshot> findLatest();
 
     /**
+     * 背景排程專用（Requirement 35 / Task 174）：所有擁有快照的 owner id。
+     * 背景無 request context → {@code @Filter(ownerFilter)} 不啟用 → 此查詢跨全部租戶，
+     * 供 {@code SnapshotDateRollScheduler} 逐 owner 各自處理其最新快照。
+     */
+    @Query("SELECT DISTINCT s.ownerUserId FROM AssetSnapshot s")
+    List<Long> findDistinctOwnerUserIds();
+
+    /**
+     * 指定 owner 的最新一筆快照（Requirement 35 / Task 174）。
+     * 帶 {@code ownerUserId} 條件 → 即使背景排程 {@code @Filter} 未啟用亦 owner-scoped 安全；
+     * 不可改用無 owner 的 {@link #findLatest()}（背景會拿到全體最大日期那一筆、漏掉其他 owner）。
+     * derived name 等同 {@code ORDER BY snapshot_date DESC LIMIT 1}。
+     */
+    Optional<AssetSnapshot> findFirstByOwnerUserIdOrderBySnapshotDateDesc(Long ownerUserId);
+
+    /**
      * 用 JOIN FETCH 載入最新快照及其持股，避免 LazyInitializationException
      * 使用子查詢取得最新快照 ID，再用 JOIN FETCH 載入
      */

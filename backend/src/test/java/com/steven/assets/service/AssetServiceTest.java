@@ -165,4 +165,62 @@ class AssetServiceTest {
         assertThat(result.get(1).increase()).isEqualByComparingTo("1000000");
         assertThat(result.get(1).increaseRate()).isEqualByComparingTo("0.250000");
     }
+
+    // ---- rollLatestSnapshotToTodayForOwner (Requirement 35 / Task 174) ----
+
+    @Test
+    void roll_最新快照為過去日期_釘成當日並save回true() {
+        LocalDate today = LocalDate.of(2026, 7, 12);
+        snapshot.setSnapshotDate(LocalDate.of(2026, 7, 10));
+        when(snapshotRepo.findFirstByOwnerUserIdOrderBySnapshotDateDesc(1L))
+                .thenReturn(Optional.of(snapshot));
+        when(snapshotRepo.save(any())).thenReturn(snapshot);
+
+        boolean rolled = service.rollLatestSnapshotToTodayForOwner(1L, today);
+
+        assertThat(rolled).isTrue();
+        assertThat(snapshot.getSnapshotDate()).isEqualTo(today);
+        verify(snapshotRepo).save(snapshot);
+    }
+
+    @Test
+    void roll_最新快照已是當日_skip不save() {
+        LocalDate today = LocalDate.of(2026, 7, 12);
+        snapshot.setSnapshotDate(today);
+        when(snapshotRepo.findFirstByOwnerUserIdOrderBySnapshotDateDesc(1L))
+                .thenReturn(Optional.of(snapshot));
+
+        boolean rolled = service.rollLatestSnapshotToTodayForOwner(1L, today);
+
+        assertThat(rolled).isFalse();
+        assertThat(snapshot.getSnapshotDate()).isEqualTo(today);
+        verify(snapshotRepo, never()).save(any());
+    }
+
+    @Test
+    void roll_最新快照為未來日期_skip不往回搬() {
+        LocalDate today = LocalDate.of(2026, 7, 12);
+        LocalDate future = today.plusDays(1);
+        snapshot.setSnapshotDate(future);
+        when(snapshotRepo.findFirstByOwnerUserIdOrderBySnapshotDateDesc(1L))
+                .thenReturn(Optional.of(snapshot));
+
+        boolean rolled = service.rollLatestSnapshotToTodayForOwner(1L, today);
+
+        assertThat(rolled).isFalse();
+        assertThat(snapshot.getSnapshotDate()).isEqualTo(future);
+        verify(snapshotRepo, never()).save(any());
+    }
+
+    @Test
+    void roll_owner無快照_回false() {
+        LocalDate today = LocalDate.of(2026, 7, 12);
+        when(snapshotRepo.findFirstByOwnerUserIdOrderBySnapshotDateDesc(99L))
+                .thenReturn(Optional.empty());
+
+        boolean rolled = service.rollLatestSnapshotToTodayForOwner(99L, today);
+
+        assertThat(rolled).isFalse();
+        verify(snapshotRepo, never()).save(any());
+    }
 }
