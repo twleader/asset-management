@@ -14,7 +14,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 公開資訊個股過濾（Task 177）：只保留 {@code stock} 主檔個股＋總體/國際新聞，濾除「明確指向的個股全部不在主檔」者。
+ * 公開資訊個股過濾（Task 178）：只保留 {@code stock} 主檔個股＋總體/國際新聞，濾除「明確指向的個股全部不在主檔」者。
  *
  * <p>判定只採<b>高可信訊號</b>以免誤傷總經新聞（原型實測裸 4 位數字會把年份 2024/2030 誤當代號、短公司名
  * 子字串比對會誤命中）：
@@ -37,7 +37,7 @@ public class PublicInfoStockFilter {
     /**
      * 明確代號格式：<b>必須帶 {@code -TW} 後綴</b>（可含括號），如 {@code (6967-TW)}／{@code 6967-TW}／{@code （2330-TW）}。
      * 刻意不認裸數字或括號內裸年份（如 {@code (2023)}／{@code (2030)}）——2020～2031 等年份正好是真實上市鋼鐵股代號，
-     * 若採信會把含年份的總經新聞誤當個股濾掉（Task 177 review 修正）。
+     * 若採信會把含年份的總經新聞誤當個股濾掉（Task 178 review 修正）。
      */
     private static final Pattern EXPLICIT_CODE = Pattern.compile(
             "[\\(（]?\\s*(\\d{4,6}[A-Z]?)\\s*-TW\\s*[\\)）]?");

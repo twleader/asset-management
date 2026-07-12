@@ -31,10 +31,10 @@ import java.util.Map;
  * 本地財經新聞抓取排程（Task 149.21）：每日 08:00 / 12:00 / 18:00（Asia/Taipei）抓權威新聞
  * （鉅亨網 / 自由時報 / 經濟日報）＋證交所公開資訊（三大法人、大盤成交），去重後 upsert 至 news_headline，
  * 供 business-services 的今日股市分析餵入 prompt。**08:00 那次早於 08:30 分析**，確保當日有料
- * （原 06:00 於 Task 176 調整為 08:00）。
+ * （原 06:00 於 Task 177 調整為 08:00）。
  *
  * <p>每輪抓取（含開機 warmup）<b>先 upsert news_headline，再由 DB 查詢「當日公開資訊」</b>輸出一份 JSON 至
- * SRPP 退休規劃專案輸入目錄（Task 176，DB 為單一來源；容器內 {@code news-scraper.export-dir}，docker volume
+ * SRPP 退休規劃專案輸入目錄（Task 177，DB 為單一來源；容器內 {@code news-scraper.export-dir}，docker volume
  * 對映 host），供其量化分析取用；寫檔失敗 graceful，不影響落庫。
  *
  * <p>開機 warmup（{@link ApplicationReadyEvent}）先跑一次，部署後立即有資料。每次末尾清理保留期外舊聞。
@@ -60,11 +60,11 @@ public class NewsPoller {
     @Value("${news-scraper.retention-days:30}")
     private int retentionDays;
 
-    /** 公開資訊 JSON 輸出目錄（容器內基底，docker volume 對映到 host SRPP/data/input，Task 176）。 */
+    /** 公開資訊 JSON 輸出目錄（容器內基底，docker volume 對映到 host SRPP/data/input，Task 177）。 */
     @Value("${news-scraper.export-dir:/srpp-input}")
     private String exportDir;
 
-    /** 公開資訊 JSON 輸出開關（Task 176）。 */
+    /** 公開資訊 JSON 輸出開關（Task 177）。 */
     @Value("${news-scraper.export-enabled:true}")
     private boolean exportEnabled;
 
@@ -86,7 +86,7 @@ public class NewsPoller {
         }, "news-warmup").start();
     }
 
-    /** 每日 08:00 / 12:00 / 18:00（Asia/Taipei）。08:00 早於 08:30 分析（原 06:00，Task 176 調整）。 */
+    /** 每日 08:00 / 12:00 / 18:00（Asia/Taipei）。08:00 早於 08:30 分析（原 06:00，Task 177 調整）。 */
     @Scheduled(cron = "0 0 8,12,18 * * *", zone = "Asia/Taipei")
     public void scheduled() {
         if (!enabled) return;
@@ -98,7 +98,7 @@ public class NewsPoller {
         rows.addAll(newsClient.fetchAll());
         rows.addAll(twseClient.fetchAll());
 
-        // 個股過濾（Task 177）：只留 stock 主檔個股＋總體新聞，其餘個股濾除（DB 落庫與 JSON 輸出前套用）。
+        // 個股過濾（Task 178）：只留 stock 主檔個股＋總體新聞，其餘個股濾除（DB 落庫與 JSON 輸出前套用）。
         rows = stockFilter.retain(rows);
 
         int ok = 0, fail = 0;
@@ -127,7 +127,7 @@ public class NewsPoller {
     }
 
     /**
-     * 由 news_headline 產生一份「當日公開資訊」JSON 至 SRPP 退休規劃專案輸入目錄（Task 176，DB 為單一來源）。
+     * 由 news_headline 產生一份「當日公開資訊」JSON 至 SRPP 退休規劃專案輸入目錄（Task 177，DB 為單一來源）。
      * 範圍＝今天(Asia/Taipei)這批爬蟲抓進來的（{@code fetched_at} 為今天）、且資料日期 {@code published_at}
      * 不早於「上一交易日」的列；上一交易日＝news_headline 中 twse 總體資料的最新資料日（TWSE 權威，無則以
      * {@link MarketCalendar} 最近交易日 fallback）。如此三大法人／大盤成交（日期＝上一交易日）保留，今天抓到
@@ -153,7 +153,7 @@ public class NewsPoller {
             payload.put("items", items);
 
             // 先寫唯一暫存檔再原子 rename：避免 warmup 執行緒與 cron 併發寫同一檔造成截斷／交錯毀損，
-            // 也讓 SRPP 不會讀到寫到一半的檔（Task 176 review 修正）。暫存檔與目標同目錄以確保同一檔案系統可原子搬移。
+            // 也讓 SRPP 不會讀到寫到一半的檔（Task 177 review 修正）。暫存檔與目標同目錄以確保同一檔案系統可原子搬移。
             Path tmp = Files.createTempFile(dir, "public_info_", ".json.tmp");
             try {
                 objectMapper.writerWithDefaultPrettyPrinter().writeValue(tmp.toFile(), payload);

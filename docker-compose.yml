@@ -114,7 +114,7 @@ services:
       REDIS_PORT: 6379
       FINMIND_TOKEN: ${FINMIND_TOKEN:-}
     volumes:
-      # 公開資訊每輪輸出 JSON（Task 176）：host SRPP 退休規劃專案輸入目錄掛入容器 /srpp-input（可寫）。
+      # 公開資訊每輪輸出 JSON（Task 177）：host SRPP 退休規劃專案輸入目錄掛入容器 /srpp-input（可寫）。
       # NewsPoller 以 news-scraper.export-dir（預設 /srpp-input）為基底寫 public_info_<date>.json。
       - ${SRPP_INPUT_DIR_HOST:-/Users/steven/Project/SRPP/data/input}:/srpp-input
     depends_on:

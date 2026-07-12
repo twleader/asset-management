@@ -90,7 +90,7 @@ public class NewsFetchClient {
         JsonNode news = root.path("news");
         List<NewsRow> out = new ArrayList<>();
         if (!news.isArray()) return out;
-        // newsTags 為獨立陣列 [{newsId,name}]，先依 newsId 分組供個股過濾（Task 177）。
+        // newsTags 為獨立陣列 [{newsId,name}]，先依 newsId 分組供個股過濾（Task 178）。
         Map<Long, List<String>> tagsById = new HashMap<>();
         for (JsonNode t : root.path("newsTags")) {
             long nid = t.path("newsId").asLong(0);

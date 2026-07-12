@@ -22,7 +22,7 @@ public class StockSourceQuery {
 
     private final JdbcTemplate jdbc;
 
-    /** stock 主檔全部代號（不分市場）集合，供公開資訊個股過濾（Task 177）。 */
+    /** stock 主檔全部代號（不分市場）集合，供公開資訊個股過濾（Task 178）。 */
     public Set<String> allStockCodes() {
         Set<String> codes = new LinkedHashSet<>();
         jdbc.query("SELECT code FROM stock", (java.sql.ResultSet rs) -> {
@@ -422,7 +422,7 @@ public class StockSourceQuery {
     /**
      * 「上一交易日」＝ news_headline 中 twse 總體資料（category twse-*）的最新資料日（Asia/Taipei）。
      * twse 資料日期為 TWSE 權威（BFI82U 遇假日回最近交易日），即為 SRPP JSON 當日範圍的 published_at 下界；
-     * 取自身日期而非日曆，可保證三大法人／大盤成交（其日期＝上一交易日）不被濾掉（Task 176）。
+     * 取自身日期而非日曆，可保證三大法人／大盤成交（其日期＝上一交易日）不被濾掉（Task 177）。
      * 無 twse 資料時回 null（由呼叫端以日曆 fallback）。
      */
     public LocalDate lastTwseTradingDate() {
@@ -435,7 +435,7 @@ public class StockSourceQuery {
 
     /**
      * 「當日公開資訊」＝今天(Asia/Taipei)這批爬蟲抓進來的（fetched_at 為今天）、且資料日期 published_at
-     * 不早於 cutoff（上一交易日）的列，供 SRPP JSON 輸出（Task 176，DB 為單一來源）。個股過濾已於 upsert 前
+     * 不早於 cutoff（上一交易日）的列，供 SRPP JSON 輸出（Task 177，DB 為單一來源）。個股過濾已於 upsert 前
      * 套用，故 DB／此查詢自然只含過濾後資料。tags 為 @JsonIgnore、DB 不存，回 NewsRow 時為空。
      */
     public List<NewsRow> loadTodayPublicInfoForExport(LocalDate todayTw, LocalDate cutoff) {

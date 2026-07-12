@@ -15,9 +15,9 @@ import java.util.List;
  * @param category    news / twse-institutional / twse-turnover
  * @param region      TW / US / JP / SG（本地權威來源固定 TW）
  * @param summary     摘要/數據明細（可為 null）
- * @param publishedAt 原文/資料真實發布時間。輸出 SRPP JSON 時以 Asia/Taipei（+08:00）序列化（Task 176），
+ * @param publishedAt 原文/資料真實發布時間。輸出 SRPP JSON 時以 Asia/Taipei（+08:00）序列化（Task 177），
  *                    使日期與交易日／{@code tradingDayCutoff} 一致（避免 UTC 使 TW 凌晨/整點資料的日期倒退一天）。
- * @param tags        來源提供的結構化相關實體標籤（目前僅 wantgoo {@code newsTags}），供個股過濾用（Task 177）。
+ * @param tags        來源提供的結構化相關實體標籤（目前僅 wantgoo {@code newsTags}），供個股過濾用（Task 178）。
  *                    {@code @JsonIgnore}：僅供過濾判定，不入 {@code news_headline}、不寫入 SRPP JSON。其他來源為空 list。
  */
 public record NewsRow(

@@ -3742,7 +3742,7 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
   - **backend schema**：`db/changelog/changes/v1.45.0-news-headline.sql` 建 `news_headline`（欄位/索引見 design.md）＋ `db.changelog-master.yaml` 末加 include（現行末筆 v1.44.1）。changeset id `steven:v1.45.0-news-headline`。**基準線是 `db/init/01_dump.sql`（pg_dump）＋ Liquibase 增量，此為增量。**
   - **backend entity/repo**：`News`（`@Entity @Table(name="news_headline")`，全域參考、無 `@Filter`）＋ `NewsHeadlineRepository extends JpaRepository`，`findByPublishedAtGreaterThanEqualOrderByPublishedAtDesc(OffsetDateTime)`。
   - **ext 抓取**：`NewsFetchClient`（cnyes JSON `api.cnyes.com/media/api/v1/newslist/category/tw_stock`、ltn RSS `news.ltn.com.tw/rss/business.xml`、udn RSS `money.udn.com/rssfeed/news/1001/5591`；UA `Mozilla/5.0`；RSS 用 regex/內建 XML 解 `<item>` title(CDATA)/link/pubDate(RFC-1123 +0800)；cnyes 讀 `items.data[].{title,summary,newsId,publishAt(epoch)}`、url=`news.cnyes.com/news/id/{newsId}`）＋ `TwseInfoFetchClient`（BFI82U `www.twse.com.tw/rwd/zh/fund/BFI82U?response=json&date=YYYYMMDD` 三大法人買賣差額、FMTQIK `openapi.twse.com.tw/v1/exchangeReport/FMTQIK` 最新成交統計）。皆 graceful（單一來源失敗只 warn）。
-  - **ext 寫入/清理**：`StockSourceQuery.upsertNews(...)`（`INSERT ... ON CONFLICT(dedupe_key) DO UPDATE`）＋ `deleteNewsOlderThan(cutoff)`。`NewsPoller`：cron `0 0 8,12,18 * * *` Asia/Taipei（**08:00 早於 08:30 分析**；原 06/12/18 於 Task 176 調整）＋ `@EventListener(ApplicationReadyEvent)` warmup thread ＋末尾保留清理。ext `application.yml` 加 `news-scraper.{retention-days:30,enabled:true}`。
+  - **ext 寫入/清理**：`StockSourceQuery.upsertNews(...)`（`INSERT ... ON CONFLICT(dedupe_key) DO UPDATE`）＋ `deleteNewsOlderThan(cutoff)`。`NewsPoller`：cron `0 0 8,12,18 * * *` Asia/Taipei（**08:00 早於 08:30 分析**；原 06/12/18 於 Task 177 調整）＋ `@EventListener(ApplicationReadyEvent)` warmup thread ＋末尾保留清理。ext `application.yml` 加 `news-scraper.{retention-days:30,enabled:true}`。
   - **backend 注入**：`MarketAnalysisService` 加 `NewsHeadlineRepository`；`buildSystemPrompt`/`buildUserPrompt` 加 `List<News> recentNews` 參數、注入「近期新聞（本地抓取）」區塊（繞過 sanitizeNews）；`submitBatch` 撈近 `newsMaxAgeDays` 天本地新聞傳入。web_search 三態：`webSearchMaxUses==0`＝純本地（不加 tool、prompt 用本地新聞）、`>0`＝本地+web_search 補充。撈不到本地新聞時 graceful 退回現行行為。
   - **驗證**：兩服務 `mvn compile`；workflow 對抗式審查；`--no-cache` 重 build ext ＋ business-services（JVM stale jar 防呆）；驗 `news_headline` 有列、分析 prompt 實含本地新聞區塊、`newsHighlights` 產出。Controller/BFF/前端不變（本期只後端管線；設定 UI 沿用既有新聞搜尋次數）。
 
@@ -4402,7 +4402,7 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - [x] 175.5 驗證：backend `mvn compile` + `mvn test`（既有測試除 pre-existing 破損的 `AssetSnapshotControllerTest` 外全綠）、bff `mvn compile`；Docker `--no-cache` 重 build business-services / bff / frontend、recreate 後煙霧測試受影響端點。
 - [ ] 175.6 commit + 兩段式 merge。
 
-### Task 176：排程時間調整（分析 07:30→08:30、爬蟲 06:00→08:00）＋公開資訊每次輸出 JSON 供 SRPP（Requirement 31）
+### Task 177：排程時間調整（分析 07:30→08:30、爬蟲 06:00→08:00）＋公開資訊每次輸出 JSON 供 SRPP（Requirement 31）
 
 對應 Requirements: Requirement 31（今日股市分析／本地公開資訊爬蟲）
 
@@ -4419,25 +4419,25 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 
 #### 實作
 
-- [x] 176.1 spec：`requirements.md`（Requirement 31 排程時點 07:30→08:30、爬蟲 cron 06→08、新增「公開資訊輸出 JSON 供 SRPP」AC）；`design.md`（R31 排程 cron `0 30 8`、NewsPoller cron 08/12/18、新增輸出 JSON 子條目）；`tasks.md`（本任務）。retro 段（Task 160/162/163）史實時點保留。
-- [x] 176.2 backend `MarketAnalysisScheduler`：`@Scheduled(cron="0 30 8 * * MON-FRI")`、`RUN_AT=LocalTime.of(8,30)`、class/method javadoc 的 07:30 敘述同步改 08:30。
-- [x] 176.3 ext `NewsPoller`：cron `0 0 8,12,18 * * *`；`run()` 於 upsert（＋保留期清理）後呼叫 `exportPublicInfoJson(trigger)`——**由 DB 查詢產生 JSON**（非記憶體 rows）：`resolveTradingCutoff(today)` 定上一交易日、`source.loadTodayPublicInfoForExport(today, cutoff)` 撈當日列，寫 `public_info_<yyyy-MM-dd>.json`（含 `tradingDayCutoff` metadata）至 `news-scraper.export-dir`；`export-enabled` 開關、寫檔 graceful。javadoc 06/12/18→08/12/18。
-- [x] 176.4 ext `application.yml`：`news-scraper.export-dir:${NEWS_EXPORT_DIR:/srpp-input}`、`news-scraper.export-enabled:${NEWS_EXPORT_ENABLED:true}`。
-- [x] 176.5 `docker-compose.yml`：`external-materials-service` 新增 `volumes: - ${SRPP_INPUT_DIR_HOST:-/Users/steven/Project/SRPP/data/input}:/srpp-input`。
-- [x] 176.6 驗證：ext + backend `mvn compile`；`--no-cache` 重 build ext＋business-services（JVM stale jar 防呆）＋recreate；驗 `NewsPoller` warmup 於 SRPP/data/input 產出 `public_info_<今日>.json`（由 DB 查詢、含 `tradingDayCutoff`）、三大法人／大盤成交（published＝上一交易日）保留、今天抓到但發布日更舊的過期新聞排除、`news_headline` 仍落庫、`MarketAnalysisScheduler` cron 為 08:30。
-- [x] 176.9 ext `StockSourceQuery`（DB 為單一來源）：`lastTwseTradingDate()`（`MAX((published_at AT TIME ZONE 'Asia/Taipei')::date) WHERE category LIKE 'twse-%'`，即上一交易日）＋ `loadTodayPublicInfoForExport(today, cutoff)`（`WHERE fetched_at(TW)=today AND published_at(TW)≥cutoff ORDER BY published_at DESC`，map→`NewsRow`）。`NewsPoller` 注入 `MarketCalendar` 供無 twse 時 fallback（`resolveTradingCutoff`）。
-- [x] 176.10 對抗式 review 修正（workflow）：(a) 匯出改**暫存檔＋原子 rename**（`Files.createTempFile`＋`Files.move(ATOMIC_MOVE)`）——warmup 執行緒與 cron 若在 08/12/18 前 5 秒內併發 `run()` 會截斷同一 JSON；(b) `NewsRow.publishedAt` 加 `@JsonFormat(timezone="Asia/Taipei")` 以 +08:00 序列化——否則 twse「07-09」資料 UTC 顯示成 `07-08T16:00Z`、SRPP 解析日期會倒退一天、與 `tradingDayCutoff` 不一致。
-- [ ] 176.7 commit + 兩段式 merge。
+- [x] 177.1 spec：`requirements.md`（Requirement 31 排程時點 07:30→08:30、爬蟲 cron 06→08、新增「公開資訊輸出 JSON 供 SRPP」AC）；`design.md`（R31 排程 cron `0 30 8`、NewsPoller cron 08/12/18、新增輸出 JSON 子條目）；`tasks.md`（本任務）。retro 段（Task 160/162/163）史實時點保留。
+- [x] 177.2 backend `MarketAnalysisScheduler`：`@Scheduled(cron="0 30 8 * * MON-FRI")`、`RUN_AT=LocalTime.of(8,30)`、class/method javadoc 的 07:30 敘述同步改 08:30。
+- [x] 177.3 ext `NewsPoller`：cron `0 0 8,12,18 * * *`；`run()` 於 upsert（＋保留期清理）後呼叫 `exportPublicInfoJson(trigger)`——**由 DB 查詢產生 JSON**（非記憶體 rows）：`resolveTradingCutoff(today)` 定上一交易日、`source.loadTodayPublicInfoForExport(today, cutoff)` 撈當日列，寫 `public_info_<yyyy-MM-dd>.json`（含 `tradingDayCutoff` metadata）至 `news-scraper.export-dir`；`export-enabled` 開關、寫檔 graceful。javadoc 06/12/18→08/12/18。
+- [x] 177.4 ext `application.yml`：`news-scraper.export-dir:${NEWS_EXPORT_DIR:/srpp-input}`、`news-scraper.export-enabled:${NEWS_EXPORT_ENABLED:true}`。
+- [x] 177.5 `docker-compose.yml`：`external-materials-service` 新增 `volumes: - ${SRPP_INPUT_DIR_HOST:-/Users/steven/Project/SRPP/data/input}:/srpp-input`。
+- [x] 177.6 驗證：ext + backend `mvn compile`；`--no-cache` 重 build ext＋business-services（JVM stale jar 防呆）＋recreate；驗 `NewsPoller` warmup 於 SRPP/data/input 產出 `public_info_<今日>.json`（由 DB 查詢、含 `tradingDayCutoff`）、三大法人／大盤成交（published＝上一交易日）保留、今天抓到但發布日更舊的過期新聞排除、`news_headline` 仍落庫、`MarketAnalysisScheduler` cron 為 08:30。
+- [x] 177.9 ext `StockSourceQuery`（DB 為單一來源）：`lastTwseTradingDate()`（`MAX((published_at AT TIME ZONE 'Asia/Taipei')::date) WHERE category LIKE 'twse-%'`，即上一交易日）＋ `loadTodayPublicInfoForExport(today, cutoff)`（`WHERE fetched_at(TW)=today AND published_at(TW)≥cutoff ORDER BY published_at DESC`，map→`NewsRow`）。`NewsPoller` 注入 `MarketCalendar` 供無 twse 時 fallback（`resolveTradingCutoff`）。
+- [x] 177.10 對抗式 review 修正（workflow）：(a) 匯出改**暫存檔＋原子 rename**（`Files.createTempFile`＋`Files.move(ATOMIC_MOVE)`）——warmup 執行緒與 cron 若在 08/12/18 前 5 秒內併發 `run()` 會截斷同一 JSON；(b) `NewsRow.publishedAt` 加 `@JsonFormat(timezone="Asia/Taipei")` 以 +08:00 序列化——否則 twse「07-09」資料 UTC 顯示成 `07-08T16:00Z`、SRPP 解析日期會倒退一天、與 `tradingDayCutoff` 不一致。
+- [ ] 177.7 commit + 兩段式 merge。
 
-### Task 177：公開資訊只保留 stock 主檔個股＋總體新聞，其餘個股濾除（Requirement 31）
+### Task 178：公開資訊只保留 stock 主檔個股＋總體新聞，其餘個股濾除（Requirement 31）
 
 對應 Requirements: Requirement 31（本地公開資訊爬蟲）
 
-**背景**：Task 176 讓爬蟲每輪輸出公開資訊 JSON 給 SRPP；使用者要求「公開資訊中有不少個股資料，只存 stock 表有的個股、其餘不存」。公開資訊（尤其 wantgoo）含大量非投資組合個股專題新聞（汎瑋、旭源、台玻…），為雜訊。
+**背景**：Task 177 讓爬蟲每輪輸出公開資訊 JSON 給 SRPP；使用者要求「公開資訊中有不少個股資料，只存 stock 表有的個股、其餘不存」。公開資訊（尤其 wantgoo）含大量非投資組合個股專題新聞（汎瑋、旭源、台玻…），為雜訊。
 
 #### 設計決策（為何不用裸文字比對）
 
-- **裸 4 位數字誤傷嚴重**：原型實測「2024 年套利」「2030 綠色轉型」「保時捷…2020」的年份被當股票代號 → 誤濾總經新聞（57 則丟棄中過半誤傷）。故**排除裸數字**；明確代號格式**須帶 `-TW`**（如 `(6967-TW)`／`6967-TW`）——review 另發現「括號內裸年份」`(2023)` 仍會命中真實鋼鐵股代號（2020～2031 皆為上市代號），故收緊為必帶 `-TW` 才採信（見 177.10）。
+- **裸 4 位數字誤傷嚴重**：原型實測「2024 年套利」「2030 綠色轉型」「保時捷…2020」的年份被當股票代號 → 誤濾總經新聞（57 則丟棄中過半誤傷）。故**排除裸數字**；明確代號格式**須帶 `-TW`**（如 `(6967-TW)`／`6967-TW`）——review 另發現「括號內裸年份」`(2023)` 仍會命中真實鋼鐵股代號（2020～2031 皆為上市代號），故收緊為必帶 `-TW` 才採信（見 178.10）。
 - **短公司名子字串比對誤命中**：全市場 2 字名（南亞、和成…）以 `contains` 比對會誤命中普通詞。故不做全市場「名稱子字串」比對；改採 wantgoo **結構化 `newsTags`**（來源已標好的相關實體，對應全市場 `name→code`），精準且零誤傷（原型 wantgoo 150 則濾 5 則、全為真個股）。
 - **判定方向保守（寧留勿誤濾）**：只有「明確指向的個股全部不在 stock 主檔」才濾；命中主檔／總體大盤國際／`twse-*` 一律留；名冊載入失敗全留。
 - **全市場名冊重用既有基礎設施**：`MarketDataFetchService` 已有 TWSE STOCK_DAY_ALL＋TPEX 的 `name→code` 24h cache（原供 ETF 成分股名稱解析），暴露為 public 給 filter 用，不另建抓取。
@@ -4445,13 +4445,13 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 
 #### 實作
 
-- [x] 177.1 spec：requirements Requirement 31 新增個股過濾 AC；design 新增 filter 子條目；tasks 本任務。
-- [x] 177.2 ext `NewsRow` 加 `List<String> tags`（`@JsonIgnore`、不入 DB／JSON；相容舊 7-arg constructor 傳 `List.of()`）。
-- [x] 177.3 ext `NewsFetchClient.fetchWantgoo` 讀 `newsTags`（group by newsId）附至該則 NewsRow.tags；其他來源不帶 tags。
-- [x] 177.4 ext `MarketDataFetchService` 暴露 `public Map<String,String> twMarketNameToCode()`（回既有 24h cache 字典）。
-- [x] 177.5 ext `StockSourceQuery.allStockCodes()`：`SELECT code FROM stock` 全代號集合。
-- [x] 177.6 ext 新增 `PublicInfoStockFilter.retain(List<NewsRow>)`：以 tags＋嚴格代號格式判定，濾除「明確個股且全不在主檔」者；`twse-*` 與名冊空時全留。
-- [x] 177.7 ext `NewsPoller.run()`：抓取後、upsert＋export 前套用 filter；log 濾除筆數。
-- [x] 177.8 驗證：ext `mvn compile`；`--no-cache` 重 build ext＋recreate；驗 warmup log「個股過濾 N→保留 X 丟棄 Y」、SRPP JSON 與 news_headline 均為過濾後、總經/年份新聞未被誤濾。
-- [x] 177.10 對抗式 review 修正（workflow）：`PublicInfoStockFilter.EXPLICIT_CODE` 由 `[(（]…(?:-TW)?…[)）]|…-TW` 收緊為**必帶 `-TW`** `[(（]?\s*(\d{4,6}[A-Z]?)\s*-TW\s*[)）]?`——原式括號內裸年份 `(2023)` 會命中真實鋼鐵股代號而誤濾含年份的總經新聞。
-- [ ] 177.9 commit + 兩段式 merge。
+- [x] 178.1 spec：requirements Requirement 31 新增個股過濾 AC；design 新增 filter 子條目；tasks 本任務。
+- [x] 178.2 ext `NewsRow` 加 `List<String> tags`（`@JsonIgnore`、不入 DB／JSON；相容舊 7-arg constructor 傳 `List.of()`）。
+- [x] 178.3 ext `NewsFetchClient.fetchWantgoo` 讀 `newsTags`（group by newsId）附至該則 NewsRow.tags；其他來源不帶 tags。
+- [x] 178.4 ext `MarketDataFetchService` 暴露 `public Map<String,String> twMarketNameToCode()`（回既有 24h cache 字典）。
+- [x] 178.5 ext `StockSourceQuery.allStockCodes()`：`SELECT code FROM stock` 全代號集合。
+- [x] 178.6 ext 新增 `PublicInfoStockFilter.retain(List<NewsRow>)`：以 tags＋嚴格代號格式判定，濾除「明確個股且全不在主檔」者；`twse-*` 與名冊空時全留。
+- [x] 178.7 ext `NewsPoller.run()`：抓取後、upsert＋export 前套用 filter；log 濾除筆數。
+- [x] 178.8 驗證：ext `mvn compile`；`--no-cache` 重 build ext＋recreate；驗 warmup log「個股過濾 N→保留 X 丟棄 Y」、SRPP JSON 與 news_headline 均為過濾後、總經/年份新聞未被誤濾。
+- [x] 178.10 對抗式 review 修正（workflow）：`PublicInfoStockFilter.EXPLICIT_CODE` 由 `[(（]…(?:-TW)?…[)）]|…-TW` 收緊為**必帶 `-TW`** `[(（]?\s*(\d{4,6}[A-Z]?)\s*-TW\s*[)）]?`——原式括號內裸年份 `(2023)` 會命中真實鋼鐵股代號而誤濾含年份的總經新聞。
+- [ ] 178.9 commit + 兩段式 merge。

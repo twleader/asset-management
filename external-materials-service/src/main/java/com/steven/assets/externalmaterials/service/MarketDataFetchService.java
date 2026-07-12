@@ -534,7 +534,7 @@ public class MarketDataFetchService {
         return twNameToCode;
     }
 
-    /** 台股全市場「股名→代號」字典（24h cache），暴露供公開資訊個股過濾（Task 177）。 */
+    /** 台股全市場「股名→代號」字典（24h cache），暴露供公開資訊個股過濾（Task 178）。 */
     public Map<String, String> twMarketNameToCode() {
         return twNameToCodeMap();
     }
