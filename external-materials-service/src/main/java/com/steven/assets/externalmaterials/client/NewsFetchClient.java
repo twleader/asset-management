@@ -14,7 +14,9 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -84,9 +86,17 @@ public class NewsFetchClient {
 
     private List<NewsRow> fetchWantgoo() throws Exception {
         String body = get(WANTGOO_URL);
-        JsonNode news = mapper.readTree(body).path("news");
+        JsonNode root = mapper.readTree(body);
+        JsonNode news = root.path("news");
         List<NewsRow> out = new ArrayList<>();
         if (!news.isArray()) return out;
+        // newsTags 為獨立陣列 [{newsId,name}]，先依 newsId 分組供個股過濾（Task 177）。
+        Map<Long, List<String>> tagsById = new HashMap<>();
+        for (JsonNode t : root.path("newsTags")) {
+            long nid = t.path("newsId").asLong(0);
+            String name = t.path("name").asText("").trim();
+            if (nid > 0 && !name.isEmpty()) tagsById.computeIfAbsent(nid, k -> new ArrayList<>()).add(name);
+        }
         for (JsonNode n : news) {
             long id = n.path("id").asLong(0);
             String title = n.path("headline").asText("").trim();
@@ -98,7 +108,8 @@ public class NewsFetchClient {
                     "https://www.wantgoo.com/news/" + id,
                     "news", "TW",
                     summary.isEmpty() ? null : summary,
-                    Instant.ofEpochMilli(timeMs)));
+                    Instant.ofEpochMilli(timeMs),
+                    tagsById.getOrDefault(id, List.of())));
         }
         return out;
     }

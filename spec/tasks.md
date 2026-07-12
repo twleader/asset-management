@@ -3684,16 +3684,16 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 148.3 `ExchangeRateHistory` 免改：Entity `buy_rate/sell_rate precision=10,scale=4` 已對齊 DB `NUMERIC(10,4)`、`@UniqueConstraint(currency,rateDate)` 已對齊 DB。
 - 148.4 部署：本次為 `@Column` 註解對齊（`ddl-auto: none` 下**零 runtime 行為變更**），不影響運行 stack 行為；如需運行 jar 位元碼與源碼一致可另行重 build business-services，但非功能必要。
 
-### Task 149: 今日股市分析 — 每交易日 07:30 由 Claude Opus 4.8 判斷當天台股走向（Requirement 31）
+### Task 149: 今日股市分析 — 每交易日 08:30 由 Claude Opus 4.8 判斷當天台股走向（Requirement 31）
 
 對應 Requirements: Requirement 31
 
-**背景**：新增左側選單「今日股市分析」。每個台股交易日 07:30（Asia/Taipei）以 Claude Opus 4.8（adaptive thinking + `web_search` server tool）綜合「台股大盤＋美股主要指數近一年日線走勢（本地 DB）」與「模型即時搜尋的近期國內外財經新聞」，判斷當天台股多空走向並存 `daily_market_analysis`。使用者決策：**模型＝Opus 4.8**、**新聞＝Claude 內建 web_search（不自建抓取管線）**、**保留每日歷史可回看**。全域參考資料（不分租戶）。
+**背景**：新增左側選單「今日股市分析」。每個台股交易日 08:30（Asia/Taipei）以 Claude Opus 4.8（adaptive thinking + `web_search` server tool）綜合「台股大盤＋美股主要指數近一年日線走勢（本地 DB）」與「模型即時搜尋的近期國內外財經新聞」，判斷當天台股多空走向並存 `daily_market_analysis`。使用者決策：**模型＝Opus 4.8**、**新聞＝Claude 內建 web_search（不自建抓取管線）**、**保留每日歷史可回看**。全域參考資料（不分租戶）。
 
 - [x] 149.1 spec：`requirements.md` 新增 Requirement 31；`design.md` 新增「Requirement 31：今日股市分析」設計段（架構／資料模型／API／關鍵邏輯）；本 Task。
 - [x] 149.2 資料層：Liquibase `v1.37.0-daily-market-analysis.sql`（建 `daily_market_analysis` 表）＋ master include；Entity `DailyMarketAnalysis`（無 owner）＋ `DailyMarketAnalysisRepository`（`findTopByOrderByAnalysisDateDesc`、`findRecent(PageRequest)`）。
 - [x] 149.3 Anthropic 整合：`backend/pom.xml` 加 `com.anthropic:anthropic-java`；`application.yml` 加 `anthropic.api-key`/`anthropic.model`；`MarketAnalysisService`（讀近一年指數日線 → 組近期加權 prompt → 呼叫 Opus 4.8 + web_search → 取 text 區塊解析首尾 `{}` JSON → upsert）；DTO `MarketAnalysisResult`（Jackson，忽略未知欄位）。金鑰空 → `NOT_CONFIGURED`；例外 → `FAILED` + `raw_response`，不中斷。
-- [x] 149.4 排程：`MarketAnalysisScheduler` — `@Scheduled(cron="0 30 7 * * MON-FRI", zone="Asia/Taipei")` + `marketDataService.isTwTradingDay` 閘門；`@EventListener(ApplicationReadyEvent)` 開機 self-heal（交易日且過 07:30 且今日無 OK 筆 → 補跑）。
+- [x] 149.4 排程：`MarketAnalysisScheduler` — `@Scheduled(cron="0 30 8 * * MON-FRI", zone="Asia/Taipei")` + `marketDataService.isTwTradingDay` 閘門；`@EventListener(ApplicationReadyEvent)` 開機 self-heal（交易日且過 08:30 且今日無 OK 筆 → 補跑）。
 - [x] 149.5 Controller：`MarketAnalysisController` — `GET /today`、`GET /history`、`POST /generate`（`CurrentUserContext.isAdmin()` 縱深防禦）。
 - [x] 149.6 BFF：`TodayMarketAnalysisBffController`（`/api/bff/today-market-analysis`）聚合 today + history；`POST /generate` 轉發（timeout 180s）；bff `SecurityConfig` 對該 POST 限 `AUTHORITY_ADMIN`。
 - [x] 149.7 前端：`api/index.js` 加 `bffApi.todayMarketAnalysis`；`TodayMarketAnalysisView.vue`（方向配色台股漲紅跌綠、信心、總結、關鍵因素、新聞連結、台美走勢摘要、歷史表、管理者「重新分析」鈕）；`router/index.js` 加路由（title「今日股市分析」、icon `Sunrise`）；`App.vue` `mainMenuItems` 加項。
@@ -3742,7 +3742,7 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
   - **backend schema**：`db/changelog/changes/v1.45.0-news-headline.sql` 建 `news_headline`（欄位/索引見 design.md）＋ `db.changelog-master.yaml` 末加 include（現行末筆 v1.44.1）。changeset id `steven:v1.45.0-news-headline`。**基準線是 `db/init/01_dump.sql`（pg_dump）＋ Liquibase 增量，此為增量。**
   - **backend entity/repo**：`News`（`@Entity @Table(name="news_headline")`，全域參考、無 `@Filter`）＋ `NewsHeadlineRepository extends JpaRepository`，`findByPublishedAtGreaterThanEqualOrderByPublishedAtDesc(OffsetDateTime)`。
   - **ext 抓取**：`NewsFetchClient`（cnyes JSON `api.cnyes.com/media/api/v1/newslist/category/tw_stock`、ltn RSS `news.ltn.com.tw/rss/business.xml`、udn RSS `money.udn.com/rssfeed/news/1001/5591`；UA `Mozilla/5.0`；RSS 用 regex/內建 XML 解 `<item>` title(CDATA)/link/pubDate(RFC-1123 +0800)；cnyes 讀 `items.data[].{title,summary,newsId,publishAt(epoch)}`、url=`news.cnyes.com/news/id/{newsId}`）＋ `TwseInfoFetchClient`（BFI82U `www.twse.com.tw/rwd/zh/fund/BFI82U?response=json&date=YYYYMMDD` 三大法人買賣差額、FMTQIK `openapi.twse.com.tw/v1/exchangeReport/FMTQIK` 最新成交統計）。皆 graceful（單一來源失敗只 warn）。
-  - **ext 寫入/清理**：`StockSourceQuery.upsertNews(...)`（`INSERT ... ON CONFLICT(dedupe_key) DO UPDATE`）＋ `deleteNewsOlderThan(cutoff)`。`NewsPoller`：cron `0 0 6,12,18 * * *` Asia/Taipei（**06:00 早於 07:30 分析**）＋ `@EventListener(ApplicationReadyEvent)` warmup thread ＋末尾保留清理。ext `application.yml` 加 `news-scraper.{retention-days:30,enabled:true}`。
+  - **ext 寫入/清理**：`StockSourceQuery.upsertNews(...)`（`INSERT ... ON CONFLICT(dedupe_key) DO UPDATE`）＋ `deleteNewsOlderThan(cutoff)`。`NewsPoller`：cron `0 0 8,12,18 * * *` Asia/Taipei（**08:00 早於 08:30 分析**；原 06/12/18 於 Task 176 調整）＋ `@EventListener(ApplicationReadyEvent)` warmup thread ＋末尾保留清理。ext `application.yml` 加 `news-scraper.{retention-days:30,enabled:true}`。
   - **backend 注入**：`MarketAnalysisService` 加 `NewsHeadlineRepository`；`buildSystemPrompt`/`buildUserPrompt` 加 `List<News> recentNews` 參數、注入「近期新聞（本地抓取）」區塊（繞過 sanitizeNews）；`submitBatch` 撈近 `newsMaxAgeDays` 天本地新聞傳入。web_search 三態：`webSearchMaxUses==0`＝純本地（不加 tool、prompt 用本地新聞）、`>0`＝本地+web_search 補充。撈不到本地新聞時 graceful 退回現行行為。
   - **驗證**：兩服務 `mvn compile`；workflow 對抗式審查；`--no-cache` 重 build ext ＋ business-services（JVM stale jar 防呆）；驗 `news_headline` 有列、分析 prompt 實含本地新聞區塊、`newsHighlights` 產出。Controller/BFF/前端不變（本期只後端管線；設定 UI 沿用既有新聞搜尋次數）。
 
@@ -3764,7 +3764,7 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 
 對應 Requirements: Requirement 31
 
-**背景**：今日股市分析（Task 149）每交易日 07:30 產出走向研判，但使用者須主動開頁面才看得到。需求是「可以選擇把結果寄給哪些 email」。決策：**沿用既有通知收件人**（Requirement 23 之 `notification_recipient`，不另建名單）、**僅每日自動寄**（不放頁面手動寄送鈕）。因「選擇」故收件人加 per-recipient 訂閱旗標，警示與股市分析各自獨立訂閱。SMTP 重用既有設定，未設定則安全略過。**注意**：Task 149.15 已將分析改為 **Batch API 非同步流程**，OK 結果由背景 poller `finalizeIfReady` 產生（非 `generate` 同步回傳），故寄送掛勾落在收尾成功處，並以 `daily_market_analysis.email_sent_at` 冪等記號確保一交易日恰一封。
+**背景**：今日股市分析（Task 149）每交易日 08:30 產出走向研判，但使用者須主動開頁面才看得到。需求是「可以選擇把結果寄給哪些 email」。決策：**沿用既有通知收件人**（Requirement 23 之 `notification_recipient`，不另建名單）、**僅每日自動寄**（不放頁面手動寄送鈕）。因「選擇」故收件人加 per-recipient 訂閱旗標，警示與股市分析各自獨立訂閱。SMTP 重用既有設定，未設定則安全略過。**注意**：Task 149.15 已將分析改為 **Batch API 非同步流程**，OK 結果由背景 poller `finalizeIfReady` 產生（非 `generate` 同步回傳），故寄送掛勾落在收尾成功處，並以 `daily_market_analysis.email_sent_at` 冪等記號確保一交易日恰一封。
 
 **設計**：見 `design.md`「Requirement 31 擴充：分析結果每日 Email 寄送 + 收件人訂閱選擇」段。寄送掛勾於 `MarketAnalysisService.finalizeIfReady` 落 `status=OK` 後、`save` 前，`email_sent_at` 為空且 dispatcher 回報實際寄出才戳記；手動重新分析重跑收尾不重寄。逐一收件人各寄一封（保護 email 隱私）。
 
@@ -3953,7 +3953,7 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 #### 設計決策
 
 - **權威來源＝DGPA 停班公告**（非新聞關鍵字）：`https://www.dgpa.gov.tw/typh/daily/nds.html`，解析臺北市「今天」狀態；僅晚間 / 收盤（13:30）後起停班不算休市（未涵蓋 09:00–13:30 交易時段）。
-- **單一注入點**＝`MarketDataFetchService.getTwHolidays` read-time union `tw_market_closure`：台股所有下游（market-status / 抓價 / 收盤 / 警示 / 備份 / 07:30 分析 / 交易日曆）與國定假日同一 cascade 一體 skip，**前端零改動**（`TradingCalendarView` 既有 `day.twHoliday` + market-status）。
+- **單一注入點**＝`MarketDataFetchService.getTwHolidays` read-time union `tw_market_closure`：台股所有下游（market-status / 抓價 / 收盤 / 警示 / 備份 / 08:30 分析 / 交易日曆）與國定假日同一 cascade 一體 skip，**前端零改動**（`TradingCalendarView` 既有 `day.twHoliday` + market-status）。
 - **持久化**至 `tw_market_closure`（全域參考、無 owner）：臨時休市成為可回溯的交易日曆一部分（TWSE 年度表永遠不會補上）。
 - **兩服務快取傳播**：ext 端 read-time union（即時）；business 端 per-year 快取於開盤前時窗 evict。
 
@@ -4401,3 +4401,57 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - [x] 175.4 #4 一頁一 BFF：新增 `FundSettingsBffController`（`GET /api/bff/fund-settings/bank-options`，過濾 active）；`api/index.js` 加 `fundSettings.getBankOptions`；`FundSettingsView` 改呼叫自己頁的 BFF，不再跨頁打 `bffApi.snapshotForm.getLookups()`。
 - [x] 175.5 驗證：backend `mvn compile` + `mvn test`（既有測試除 pre-existing 破損的 `AssetSnapshotControllerTest` 外全綠）、bff `mvn compile`；Docker `--no-cache` 重 build business-services / bff / frontend、recreate 後煙霧測試受影響端點。
 - [ ] 175.6 commit + 兩段式 merge。
+
+### Task 176：排程時間調整（分析 07:30→08:30、爬蟲 06:00→08:00）＋公開資訊每次輸出 JSON 供 SRPP（Requirement 31）
+
+對應 Requirements: Requirement 31（今日股市分析／本地公開資訊爬蟲）
+
+**背景**：使用者要求（1）今日股市分析排程由每交易日 07:30 延後至 08:30；（2）本地公開資訊爬蟲 `NewsPoller` 由每日 06:00/12:00/18:00 調整為 08:00/12:00/18:00；（3）爬蟲抓到的公開資訊除既有 upsert `news_headline` 外，**每次抓取**另輸出一份 JSON 檔至 SRPP 退休規劃專案輸入目錄（`/Users/steven/Project/SRPP/data/input`）供其量化分析取用。08:00 抓取仍早於 08:30 分析，時序不變。
+
+#### 設計決策
+
+- **時點沿用單一定義點**：分析時點只改 `MarketAnalysisScheduler`（cron `0 30 8`＋`RUN_AT=08:30` self-heal 判斷點）；爬蟲時點只改 `NewsPoller` cron（`0 0 8,12,18`）。兩者互不耦合、改動點最小。
+- **輸出內容＝公開資訊全部**：使用者決定輸出「權威財經新聞＋證交所三大法人／大盤成交」全部（非僅 TWSE 公開資訊），即 `NewsPoller` 本輪 `List<NewsRow>` 全量。格式 JSON＋日期檔名、每次抓取都產生（08:00／12:00／18:00 各更新一份，SRPP 隨時拿到當日最新）。
+- **容器寫 host 走 volume**（比照 Requirement 34 每日排程匯出）：`external-materials-service` 原無任何 host mount，新增一個 volume 把 host `${SRPP_INPUT_DIR_HOST:-/Users/steven/Project/SRPP/data/input}` 掛入容器 `/srpp-input`；`NewsPoller` 只寫容器內基底 `news-scraper.export-dir`（預設 `/srpp-input`），不硬編 host 路徑。
+- **JSON 由 DB 產生、非記憶體 rows（使用者要求，設計於對話中修正）**：`NewsPoller` 先 upsert `news_headline`、再由 DB 查詢產生 JSON（DB 為單一事實來源，JSON＝DB 當日快照，自然含去重＋個股過濾）。**當日範圍**＝`fetched_at`（Asia/Taipei）為今天（upsert ON CONFLICT 會刷新 `fetched_at=NOW()`，故涵蓋今天各輪碰到的列）、且 `published_at`（Asia/Taipei）不早於 `cutoff`。**cutoff＝上一交易日＝twse 資料自帶日期**（`MAX(twse published_at)`）——**不用日曆算**，因日曆得 7/10 而 twse 實際 7/09，用 7/10 會反把三大法人／大盤成交（7/09）濾掉；取 twse 自身日期保證總體資料保留、且排除今天抓到但發布日更舊的過期新聞。無 twse 時以 `MarketCalendar` 往回找最近交易日 fallback。`news_headline` 本身維持 30 天保留（供分析讀近 N 天），不受此當日範圍影響。
+- **graceful**：輸出寫檔失敗只 log warn、不影響 `news_headline` 落庫與其他排程（沿用逐來源 graceful 慣例）；`news-scraper.export-enabled`（預設 true）可整體關閉輸出。
+- **retro 史實不追溯**：先前 Task 160/162/163 retro 段落中的「07:30」為當時分析時點之史實記錄，不改寫（保留 retro 快照真實性）；自本任務起現行時點為 08:30。
+
+#### 實作
+
+- [x] 176.1 spec：`requirements.md`（Requirement 31 排程時點 07:30→08:30、爬蟲 cron 06→08、新增「公開資訊輸出 JSON 供 SRPP」AC）；`design.md`（R31 排程 cron `0 30 8`、NewsPoller cron 08/12/18、新增輸出 JSON 子條目）；`tasks.md`（本任務）。retro 段（Task 160/162/163）史實時點保留。
+- [x] 176.2 backend `MarketAnalysisScheduler`：`@Scheduled(cron="0 30 8 * * MON-FRI")`、`RUN_AT=LocalTime.of(8,30)`、class/method javadoc 的 07:30 敘述同步改 08:30。
+- [x] 176.3 ext `NewsPoller`：cron `0 0 8,12,18 * * *`；`run()` 於 upsert（＋保留期清理）後呼叫 `exportPublicInfoJson(trigger)`——**由 DB 查詢產生 JSON**（非記憶體 rows）：`resolveTradingCutoff(today)` 定上一交易日、`source.loadTodayPublicInfoForExport(today, cutoff)` 撈當日列，寫 `public_info_<yyyy-MM-dd>.json`（含 `tradingDayCutoff` metadata）至 `news-scraper.export-dir`；`export-enabled` 開關、寫檔 graceful。javadoc 06/12/18→08/12/18。
+- [x] 176.4 ext `application.yml`：`news-scraper.export-dir:${NEWS_EXPORT_DIR:/srpp-input}`、`news-scraper.export-enabled:${NEWS_EXPORT_ENABLED:true}`。
+- [x] 176.5 `docker-compose.yml`：`external-materials-service` 新增 `volumes: - ${SRPP_INPUT_DIR_HOST:-/Users/steven/Project/SRPP/data/input}:/srpp-input`。
+- [x] 176.6 驗證：ext + backend `mvn compile`；`--no-cache` 重 build ext＋business-services（JVM stale jar 防呆）＋recreate；驗 `NewsPoller` warmup 於 SRPP/data/input 產出 `public_info_<今日>.json`（由 DB 查詢、含 `tradingDayCutoff`）、三大法人／大盤成交（published＝上一交易日）保留、今天抓到但發布日更舊的過期新聞排除、`news_headline` 仍落庫、`MarketAnalysisScheduler` cron 為 08:30。
+- [x] 176.9 ext `StockSourceQuery`（DB 為單一來源）：`lastTwseTradingDate()`（`MAX((published_at AT TIME ZONE 'Asia/Taipei')::date) WHERE category LIKE 'twse-%'`，即上一交易日）＋ `loadTodayPublicInfoForExport(today, cutoff)`（`WHERE fetched_at(TW)=today AND published_at(TW)≥cutoff ORDER BY published_at DESC`，map→`NewsRow`）。`NewsPoller` 注入 `MarketCalendar` 供無 twse 時 fallback（`resolveTradingCutoff`）。
+- [x] 176.10 對抗式 review 修正（workflow）：(a) 匯出改**暫存檔＋原子 rename**（`Files.createTempFile`＋`Files.move(ATOMIC_MOVE)`）——warmup 執行緒與 cron 若在 08/12/18 前 5 秒內併發 `run()` 會截斷同一 JSON；(b) `NewsRow.publishedAt` 加 `@JsonFormat(timezone="Asia/Taipei")` 以 +08:00 序列化——否則 twse「07-09」資料 UTC 顯示成 `07-08T16:00Z`、SRPP 解析日期會倒退一天、與 `tradingDayCutoff` 不一致。
+- [ ] 176.7 commit + 兩段式 merge。
+
+### Task 177：公開資訊只保留 stock 主檔個股＋總體新聞，其餘個股濾除（Requirement 31）
+
+對應 Requirements: Requirement 31（本地公開資訊爬蟲）
+
+**背景**：Task 176 讓爬蟲每輪輸出公開資訊 JSON 給 SRPP；使用者要求「公開資訊中有不少個股資料，只存 stock 表有的個股、其餘不存」。公開資訊（尤其 wantgoo）含大量非投資組合個股專題新聞（汎瑋、旭源、台玻…），為雜訊。
+
+#### 設計決策（為何不用裸文字比對）
+
+- **裸 4 位數字誤傷嚴重**：原型實測「2024 年套利」「2030 綠色轉型」「保時捷…2020」的年份被當股票代號 → 誤濾總經新聞（57 則丟棄中過半誤傷）。故**排除裸數字**；明確代號格式**須帶 `-TW`**（如 `(6967-TW)`／`6967-TW`）——review 另發現「括號內裸年份」`(2023)` 仍會命中真實鋼鐵股代號（2020～2031 皆為上市代號），故收緊為必帶 `-TW` 才採信（見 177.10）。
+- **短公司名子字串比對誤命中**：全市場 2 字名（南亞、和成…）以 `contains` 比對會誤命中普通詞。故不做全市場「名稱子字串」比對；改採 wantgoo **結構化 `newsTags`**（來源已標好的相關實體，對應全市場 `name→code`），精準且零誤傷（原型 wantgoo 150 則濾 5 則、全為真個股）。
+- **判定方向保守（寧留勿誤濾）**：只有「明確指向的個股全部不在 stock 主檔」才濾；命中主檔／總體大盤國際／`twse-*` 一律留；名冊載入失敗全留。
+- **全市場名冊重用既有基礎設施**：`MarketDataFetchService` 已有 TWSE STOCK_DAY_ALL＋TPEX 的 `name→code` 24h cache（原供 ETF 成分股名稱解析），暴露為 public 給 filter 用，不另建抓取。
+- **套用範圍＝DB＋JSON**（使用者選）：過濾在 upsert 與 export 之前，兩者一致。
+
+#### 實作
+
+- [x] 177.1 spec：requirements Requirement 31 新增個股過濾 AC；design 新增 filter 子條目；tasks 本任務。
+- [x] 177.2 ext `NewsRow` 加 `List<String> tags`（`@JsonIgnore`、不入 DB／JSON；相容舊 7-arg constructor 傳 `List.of()`）。
+- [x] 177.3 ext `NewsFetchClient.fetchWantgoo` 讀 `newsTags`（group by newsId）附至該則 NewsRow.tags；其他來源不帶 tags。
+- [x] 177.4 ext `MarketDataFetchService` 暴露 `public Map<String,String> twMarketNameToCode()`（回既有 24h cache 字典）。
+- [x] 177.5 ext `StockSourceQuery.allStockCodes()`：`SELECT code FROM stock` 全代號集合。
+- [x] 177.6 ext 新增 `PublicInfoStockFilter.retain(List<NewsRow>)`：以 tags＋嚴格代號格式判定，濾除「明確個股且全不在主檔」者；`twse-*` 與名冊空時全留。
+- [x] 177.7 ext `NewsPoller.run()`：抓取後、upsert＋export 前套用 filter；log 濾除筆數。
+- [x] 177.8 驗證：ext `mvn compile`；`--no-cache` 重 build ext＋recreate；驗 warmup log「個股過濾 N→保留 X 丟棄 Y」、SRPP JSON 與 news_headline 均為過濾後、總經/年份新聞未被誤濾。
+- [x] 177.10 對抗式 review 修正（workflow）：`PublicInfoStockFilter.EXPLICIT_CODE` 由 `[(（]…(?:-TW)?…[)）]|…-TW` 收緊為**必帶 `-TW`** `[(（]?\s*(\d{4,6}[A-Z]?)\s*-TW\s*[)）]?`——原式括號內裸年份 `(2023)` 會命中真實鋼鐵股代號而誤濾含年份的總經新聞。
+- [ ] 177.9 commit + 兩段式 merge。

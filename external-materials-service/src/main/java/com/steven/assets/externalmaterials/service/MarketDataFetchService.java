@@ -534,6 +534,11 @@ public class MarketDataFetchService {
         return twNameToCode;
     }
 
+    /** 台股全市場「股名→代號」字典（24h cache），暴露供公開資訊個股過濾（Task 177）。 */
+    public Map<String, String> twMarketNameToCode() {
+        return twNameToCodeMap();
+    }
+
     private EtfHoldingsResult parseMoneyDjHoldings(String stockCode, String market, String html) {
         if (html == null || html.isEmpty()) return null;
         int idx = html.indexOf("股票名稱");

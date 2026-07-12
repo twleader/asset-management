@@ -1,5 +1,6 @@
 package com.steven.assets.externalmaterials.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.steven.assets.externalmaterials.client.NewsFetchClient;
 import com.steven.assets.externalmaterials.client.NewsRow;
 import com.steven.assets.externalmaterials.client.TwseInfoFetchClient;
@@ -12,16 +13,29 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
- * 本地財經新聞抓取排程（Task 149.21）：每日 06:00 / 12:00 / 18:00（Asia/Taipei）抓權威新聞
+ * 本地財經新聞抓取排程（Task 149.21）：每日 08:00 / 12:00 / 18:00（Asia/Taipei）抓權威新聞
  * （鉅亨網 / 自由時報 / 經濟日報）＋證交所公開資訊（三大法人、大盤成交），去重後 upsert 至 news_headline，
- * 供 business-services 的今日股市分析餵入 prompt。**06:00 那次早於 07:30 分析**，確保當日有料。
+ * 供 business-services 的今日股市分析餵入 prompt。**08:00 那次早於 08:30 分析**，確保當日有料
+ * （原 06:00 於 Task 176 調整為 08:00）。
+ *
+ * <p>每輪抓取（含開機 warmup）<b>先 upsert news_headline，再由 DB 查詢「當日公開資訊」</b>輸出一份 JSON 至
+ * SRPP 退休規劃專案輸入目錄（Task 176，DB 為單一來源；容器內 {@code news-scraper.export-dir}，docker volume
+ * 對映 host），供其量化分析取用；寫檔失敗 graceful，不影響落庫。
  *
  * <p>開機 warmup（{@link ApplicationReadyEvent}）先跑一次，部署後立即有資料。每次末尾清理保留期外舊聞。
  * 逐來源／逐則 graceful：任一失敗只 log warn、不影響其他，比照既有 producer 慣例。
@@ -31,15 +45,28 @@ import java.util.List;
 @RequiredArgsConstructor
 public class NewsPoller {
 
+    private static final ZoneId TW_ZONE = ZoneId.of("Asia/Taipei");
+
     private final NewsFetchClient newsClient;
     private final TwseInfoFetchClient twseClient;
     private final StockSourceQuery source;
+    private final PublicInfoStockFilter stockFilter;
+    private final MarketCalendar calendar;
+    private final ObjectMapper objectMapper;
 
     @Value("${news-scraper.enabled:true}")
     private boolean enabled;
 
     @Value("${news-scraper.retention-days:30}")
     private int retentionDays;
+
+    /** 公開資訊 JSON 輸出目錄（容器內基底，docker volume 對映到 host SRPP/data/input，Task 176）。 */
+    @Value("${news-scraper.export-dir:/srpp-input}")
+    private String exportDir;
+
+    /** 公開資訊 JSON 輸出開關（Task 176）。 */
+    @Value("${news-scraper.export-enabled:true}")
+    private boolean exportEnabled;
 
     @EventListener(ApplicationReadyEvent.class)
     public void warmupOnStartup() {
@@ -59,8 +86,8 @@ public class NewsPoller {
         }, "news-warmup").start();
     }
 
-    /** 每日 06:00 / 12:00 / 18:00（Asia/Taipei）。06:00 早於 07:30 分析。 */
-    @Scheduled(cron = "0 0 6,12,18 * * *", zone = "Asia/Taipei")
+    /** 每日 08:00 / 12:00 / 18:00（Asia/Taipei）。08:00 早於 08:30 分析（原 06:00，Task 176 調整）。 */
+    @Scheduled(cron = "0 0 8,12,18 * * *", zone = "Asia/Taipei")
     public void scheduled() {
         if (!enabled) return;
         run("scheduled");
@@ -70,6 +97,9 @@ public class NewsPoller {
         List<NewsRow> rows = new ArrayList<>();
         rows.addAll(newsClient.fetchAll());
         rows.addAll(twseClient.fetchAll());
+
+        // 個股過濾（Task 177）：只留 stock 主檔個股＋總體新聞，其餘個股濾除（DB 落庫與 JSON 輸出前套用）。
+        rows = stockFilter.retain(rows);
 
         int ok = 0, fail = 0;
         for (NewsRow r : rows) {
@@ -92,6 +122,67 @@ public class NewsPoller {
             log.warn("本地新聞保留期清理失敗：{}", e.getMessage());
         }
         log.info("本地新聞抓取（{}）：upsert {} 則、失敗 {}、清理過期 {} 則", trigger, ok, fail, deleted);
+
+        exportPublicInfoJson(trigger);
+    }
+
+    /**
+     * 由 news_headline 產生一份「當日公開資訊」JSON 至 SRPP 退休規劃專案輸入目錄（Task 176，DB 為單一來源）。
+     * 範圍＝今天(Asia/Taipei)這批爬蟲抓進來的（{@code fetched_at} 為今天）、且資料日期 {@code published_at}
+     * 不早於「上一交易日」的列；上一交易日＝news_headline 中 twse 總體資料的最新資料日（TWSE 權威，無則以
+     * {@link MarketCalendar} 最近交易日 fallback）。如此三大法人／大盤成交（日期＝上一交易日）保留，今天抓到
+     * 但發布日更舊的過期新聞則排除。檔名 {@code public_info_<yyyy-MM-dd>.json}（同日多輪覆寫＝當日最新、跨日
+     * 新檔）；內容含 metadata（generatedAt／trigger／tradingDayCutoff／count）與逐則明細。寫檔失敗一律 graceful。
+     */
+    private void exportPublicInfoJson(String trigger) {
+        if (!exportEnabled) return;
+        try {
+            LocalDate today = LocalDate.now(TW_ZONE);
+            LocalDate cutoff = resolveTradingCutoff(today);
+            List<NewsRow> items = source.loadTodayPublicInfoForExport(today, cutoff);
+
+            Path dir = Path.of(exportDir);
+            Files.createDirectories(dir);
+            Path file = dir.resolve("public_info_" + today + ".json");
+
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("generatedAt", ZonedDateTime.now(TW_ZONE).toString());
+            payload.put("trigger", trigger);
+            payload.put("tradingDayCutoff", cutoff.toString());
+            payload.put("count", items.size());
+            payload.put("items", items);
+
+            // 先寫唯一暫存檔再原子 rename：避免 warmup 執行緒與 cron 併發寫同一檔造成截斷／交錯毀損，
+            // 也讓 SRPP 不會讀到寫到一半的檔（Task 176 review 修正）。暫存檔與目標同目錄以確保同一檔案系統可原子搬移。
+            Path tmp = Files.createTempFile(dir, "public_info_", ".json.tmp");
+            try {
+                objectMapper.writerWithDefaultPrettyPrinter().writeValue(tmp.toFile(), payload);
+                try {
+                    Files.move(tmp, file, StandardCopyOption.ATOMIC_MOVE);
+                } catch (java.nio.file.AtomicMoveNotSupportedException amse) {
+                    Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING);
+                }
+            } finally {
+                Files.deleteIfExists(tmp);   // move 成功後為 no-op；writeValue 失敗時清掉殘留暫存檔
+            }
+            log.info("公開資訊輸出 JSON（{}）：{} 筆（當日 fetched、published≥{}）→ {}",
+                    trigger, items.size(), cutoff, file);
+        } catch (Exception e) {
+            log.warn("公開資訊輸出 JSON 失敗（{}）：{}", trigger, e.getMessage());
+        }
+    }
+
+    /**
+     * 上一交易日 cutoff：優先取 news_headline 中 twse 資料的最新日期（TWSE 權威——遇假日 BFI82U 回最近交易日，
+     * 故此日期即上一交易日，且保證 twse 總體資料不被自己的 cutoff 濾掉）；無 twse 資料時才以日曆往回找最近交易日。
+     */
+    private LocalDate resolveTradingCutoff(LocalDate today) {
+        LocalDate cutoff = source.lastTwseTradingDate();
+        if (cutoff != null) return cutoff;
+        LocalDate d = today;
+        for (int i = 0; i < 10 && !calendar.isTwTradingDay(d); i++) d = d.minusDays(1);
+        log.warn("公開資訊輸出：news_headline 無 twse 資料，以日曆最近交易日 {} 為 cutoff", d);
+        return d;
     }
 
     /** 去重鍵：sha256(source|url|category)。TWSE URL 帶交易日 → 每日唯一；新聞 URL 每篇唯一。 */

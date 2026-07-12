@@ -1,5 +1,6 @@
 package com.steven.assets.externalmaterials.service;
 
+import com.steven.assets.externalmaterials.client.NewsRow;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -7,6 +8,7 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
@@ -19,6 +21,15 @@ import java.util.Set;
 public class StockSourceQuery {
 
     private final JdbcTemplate jdbc;
+
+    /** stock 主檔全部代號（不分市場）集合，供公開資訊個股過濾（Task 177）。 */
+    public Set<String> allStockCodes() {
+        Set<String> codes = new LinkedHashSet<>();
+        jdbc.query("SELECT code FROM stock", (java.sql.ResultSet rs) -> {
+            codes.add(rs.getString("code"));
+        });
+        return codes;
+    }
 
     /**
      * 收集「需要抓報價」的股票代號：
@@ -406,6 +417,39 @@ public class StockSourceQuery {
     public int deleteNewsOlderThan(java.time.Instant cutoff) {
         return jdbc.update("DELETE FROM news_headline WHERE published_at < ?",
                 cutoff.atOffset(java.time.ZoneOffset.UTC));
+    }
+
+    /**
+     * 「上一交易日」＝ news_headline 中 twse 總體資料（category twse-*）的最新資料日（Asia/Taipei）。
+     * twse 資料日期為 TWSE 權威（BFI82U 遇假日回最近交易日），即為 SRPP JSON 當日範圍的 published_at 下界；
+     * 取自身日期而非日曆，可保證三大法人／大盤成交（其日期＝上一交易日）不被濾掉（Task 176）。
+     * 無 twse 資料時回 null（由呼叫端以日曆 fallback）。
+     */
+    public LocalDate lastTwseTradingDate() {
+        java.sql.Date d = jdbc.queryForObject(
+                "SELECT MAX((published_at AT TIME ZONE 'Asia/Taipei')::date) " +
+                        "FROM news_headline WHERE category LIKE 'twse-%'",
+                java.sql.Date.class);
+        return d == null ? null : d.toLocalDate();
+    }
+
+    /**
+     * 「當日公開資訊」＝今天(Asia/Taipei)這批爬蟲抓進來的（fetched_at 為今天）、且資料日期 published_at
+     * 不早於 cutoff（上一交易日）的列，供 SRPP JSON 輸出（Task 176，DB 為單一來源）。個股過濾已於 upsert 前
+     * 套用，故 DB／此查詢自然只含過濾後資料。tags 為 @JsonIgnore、DB 不存，回 NewsRow 時為空。
+     */
+    public List<NewsRow> loadTodayPublicInfoForExport(LocalDate todayTw, LocalDate cutoff) {
+        return jdbc.query(
+                "SELECT title, source, url, category, region, summary, published_at " +
+                        "FROM news_headline " +
+                        "WHERE (fetched_at AT TIME ZONE 'Asia/Taipei')::date = ? " +
+                        "  AND (published_at AT TIME ZONE 'Asia/Taipei')::date >= ? " +
+                        "ORDER BY published_at DESC, category, source",
+                (rs, i) -> new NewsRow(
+                        rs.getString("title"), rs.getString("source"), rs.getString("url"),
+                        rs.getString("category"), rs.getString("region"), rs.getString("summary"),
+                        rs.getObject("published_at", java.time.OffsetDateTime.class).toInstant()),
+                java.sql.Date.valueOf(todayTw), java.sql.Date.valueOf(cutoff));
     }
 
     public Set<String> emptyCodeSet() { return new LinkedHashSet<>(); }
