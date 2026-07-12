@@ -4,7 +4,7 @@
     <div class="header-row">
       <div>
         <span class="page-heading">今日股市分析</span>
-        <span class="page-sub">每個台股交易日 07:30 由 AI 綜合台股/美股走勢與近期財經新聞判斷當日走向</span>
+        <span class="page-sub">每個台股交易日 08:30 由 AI 綜合台股/美股走勢與近期財經新聞判斷當日走向</span>
       </div>
       <div v-if="auth.isAdmin" class="header-actions">
         <span class="model-label">每日自動分析</span>
@@ -14,7 +14,7 @@
           inline-prompt
           active-text="開"
           inactive-text="關"
-          title="停用後每日 07:30 不自動分析（零花費）；仍可手動按「重新分析」"
+          title="停用後每日 08:30 不自動分析（零花費）；仍可手動按「重新分析」"
           @change="onEnabledChange"
         />
         <span class="model-label">分析模型</span>
@@ -47,22 +47,6 @@
             :key="e.id"
             :label="e.label"
             :value="e.id"
-          />
-        </el-select>
-        <span class="model-label">新聞搜尋</span>
-        <el-select
-          v-model="selectedWebSearch"
-          size="default"
-          style="width: 190px"
-          :disabled="busy"
-          title="切換新聞搜尋次數（越少越省，0＝關閉純技術面，下次分析生效）"
-          @change="onWebSearchChange"
-        >
-          <el-option
-            v-for="w in availableWebSearches"
-            :key="w.value"
-            :label="w.label"
-            :value="w.value"
           />
         </el-select>
         <el-button
@@ -177,7 +161,7 @@
       <template #header>
         <div class="recipients-head">
           <span class="section-title">分析結果寄送對象</span>
-          <span class="recipients-hint">每個台股交易日 07:30 分析完成後，自動寄給下方開啟「接收」的收件人</span>
+          <span class="recipients-hint">每個台股交易日 08:30 分析完成後，自動寄給下方開啟「接收」的收件人</span>
         </div>
       </template>
       <el-table v-if="recipients.length" :data="recipients" size="small" style="width:100%">
@@ -212,14 +196,12 @@ const loading = ref(false)
 const generating = ref(false)
 const savingModel = ref(false)
 const savingEffort = ref(false)
-const savingWebSearch = ref(false)
 const savingEnabled = ref(false)
 const today = ref(null)
 const history = ref([])
-const settings = ref({ model: '', effort: '', webSearchMaxUses: null, enabled: true, availableModels: [], availableEfforts: [], availableWebSearches: [] })
+const settings = ref({ model: '', effort: '', enabled: true, availableModels: [], availableEfforts: [] })
 const selectedModel = ref('')
 const selectedEffort = ref('')
-const selectedWebSearch = ref(null)
 const enabledFlag = ref(true)
 const recipients = ref([])
 const togglingId = ref(null)
@@ -227,13 +209,12 @@ const togglingId = ref(null)
 const isOk = computed(() => today.value && today.value.status === 'OK')
 const availableModels = computed(() => settings.value.availableModels || [])
 const availableEfforts = computed(() => settings.value.availableEfforts || [])
-const availableWebSearches = computed(() => settings.value.availableWebSearches || [])
 // 任一設定儲存中或分析中 → 所有控制項停用，避免併發覆蓋
-const busy = computed(() => generating.value || savingModel.value || savingEffort.value || savingWebSearch.value || savingEnabled.value)
+const busy = computed(() => generating.value || savingModel.value || savingEffort.value || savingEnabled.value)
 // 尚無資料時的說明文字：停用中則點明「已停用、需手動」
 const emptyDesc = computed(() => settings.value.enabled === false
   ? '每日自動分析已停用；由管理者按「重新分析」手動產生'
-  : '尚無分析結果（等待下一個交易日 07:30 排程，或由管理者手動觸發）')
+  : '尚無分析結果（等待下一個交易日 08:30 排程，或由管理者手動觸發）')
 
 const biasText = computed(() => biasLabel(today.value?.bias))
 const biasColor = computed(() => biasHex(today.value?.bias))
@@ -290,10 +271,9 @@ async function load() {
     history.value = data.history || []
     settings.value = data.settings && data.settings.availableModels
       ? data.settings
-      : { model: '', effort: '', webSearchMaxUses: null, enabled: true, availableModels: [], availableEfforts: [], availableWebSearches: [] }
+      : { model: '', effort: '', enabled: true, availableModels: [], availableEfforts: [] }
     selectedModel.value = settings.value.model || ''
     selectedEffort.value = settings.value.effort || ''
-    selectedWebSearch.value = settings.value.webSearchMaxUses ?? null
     enabledFlag.value = settings.value.enabled !== false
   } finally {
     loading.value = false
@@ -332,7 +312,6 @@ async function onModelChange(model) {
       settings.value = res
       selectedModel.value = res.model
       selectedEffort.value = res.effort || ''
-      selectedWebSearch.value = res.webSearchMaxUses ?? null
     }
     ElMessage.success('已切換分析模型，下次分析生效')
   } catch (e) {
@@ -351,7 +330,6 @@ async function onEffortChange(effort) {
       settings.value = res
       selectedModel.value = res.model || ''
       selectedEffort.value = res.effort
-      selectedWebSearch.value = res.webSearchMaxUses ?? null
     }
     ElMessage.success('已切換思考深度，下次分析生效')
   } catch (e) {
@@ -361,26 +339,7 @@ async function onEffortChange(effort) {
   }
 }
 
-// 管理者切換新聞搜尋次數（成本控管；0＝關閉）→ 持久化；成功後下次分析生效。失敗則還原選項。
-async function onWebSearchChange(webSearchMaxUses) {
-  savingWebSearch.value = true
-  try {
-    const res = await bffApi.todayMarketAnalysis.updateSettings({ webSearchMaxUses })
-    if (res && res.webSearchMaxUses != null) {
-      settings.value = res
-      selectedModel.value = res.model || ''
-      selectedEffort.value = res.effort || ''
-      selectedWebSearch.value = res.webSearchMaxUses
-    }
-    ElMessage.success('已切換新聞搜尋次數，下次分析生效')
-  } catch (e) {
-    selectedWebSearch.value = settings.value.webSearchMaxUses ?? null  // 還原
-  } finally {
-    savingWebSearch.value = false
-  }
-}
-
-// 管理者切換「每日自動分析」開關 → 持久化。停用＝07:30 cron 跳過（零花費）；手動仍可跑。失敗則還原。
+// 管理者切換「每日自動分析」開關 → 持久化。停用＝08:30 cron 跳過（零花費）；手動仍可跑。失敗則還原。
 async function onEnabledChange(enabled) {
   savingEnabled.value = true
   try {

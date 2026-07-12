@@ -7,8 +7,6 @@ import com.anthropic.models.messages.ContentBlock;
 import com.anthropic.models.messages.Message;
 import com.anthropic.models.messages.OutputConfig;
 import com.anthropic.models.messages.ThinkingConfigAdaptive;
-import com.anthropic.models.messages.ToolUnion;
-import com.anthropic.models.messages.WebSearchTool20250305;
 import com.anthropic.models.messages.batches.BatchCreateParams;
 import com.anthropic.models.messages.batches.MessageBatch;
 import com.anthropic.models.messages.batches.MessageBatchIndividualResponse;
@@ -55,10 +53,10 @@ import java.util.regex.Pattern;
 /**
  * 今日股市分析（Requirement 31）。
  *
- * <p>每個台股交易日 07:30 由 {@code MarketAnalysisScheduler} 觸發（或管理者手動）：讀本地
- * 台股大盤 / 美股主要指數近一年日線走勢，組「越近期越重要」提示詞，呼叫 Claude Opus 4.8
- * （adaptive thinking + {@code web_search} server tool 即時搜近期財經新聞），解析 JSON 判斷 upsert
- * 進 {@code daily_market_analysis}。
+ * <p>每個台股交易日 08:30 由 {@code MarketAnalysisScheduler} 觸發（或管理者手動）：讀本地
+ * 台股大盤 / 美股主要指數近一年日線走勢與本地爬蟲新聞（{@code news_headline}），組「越近期越重要」
+ * 提示詞，呼叫 Claude Opus 4.8（adaptive thinking），解析 JSON 判斷 upsert 進
+ * {@code daily_market_analysis}。（Task 179 起改讀本地新聞、不再掛 {@code web_search} server tool。）
  *
  * <p>優雅降級：{@code ANTHROPIC_API_KEY} 未設定 → {@code NOT_CONFIGURED}；呼叫／解析失敗 →
  * {@code FAILED} + 錯誤摘要 + 原始回覆，皆不拋出中斷排程。
@@ -98,20 +96,6 @@ public class MarketAnalysisService {
 
     /** 設定表未設或後備時使用的思考深度。medium＝成本/品質平衡（較未指定時的 API 預設 high 省）。 */
     private static final String DEFAULT_EFFORT = "medium";
-
-    /**
-     * 可選新聞搜尋次數（web_search {@code maxUses}）白名單。次數越少，灌回 context 的搜尋結果越少、
-     * 每輪重複處理的 token 越省；{@code 0} 表示關閉（不加 web_search tool，純技術面）。同屬技術白名單。
-     */
-    private static final List<MarketAnalysisSettingsDto.WebSearchOption> AVAILABLE_WEB_SEARCHES = List.of(
-            new MarketAnalysisSettingsDto.WebSearchOption(0, "關閉（純技術面，最省）"),
-            new MarketAnalysisSettingsDto.WebSearchOption(3, "3 次（精簡）"),
-            new MarketAnalysisSettingsDto.WebSearchOption(4, "4 次（平衡）"),
-            new MarketAnalysisSettingsDto.WebSearchOption(6, "6 次（完整，預設）")
-    );
-
-    /** 設定表未設或後備時使用的新聞搜尋次數。6＝維持既有行為（新聞面最完整）。 */
-    private static final int DEFAULT_WEB_SEARCH = 6;
 
     // ===== 參考新聞時效驗證（Task 149.17）=====
     /** 自報 / 原文日期的精確 YYYY-MM-DD 前綴（錨定開頭；"2026-06"／"2026" 因缺日不匹配 → 剔除）。 */
@@ -236,14 +220,6 @@ public class MarketAnalysisService {
                 .orElse(DEFAULT_EFFORT);
     }
 
-    /** 解析要用的新聞搜尋次數：設定表 web_search_max_uses（白名單內）→ 否則 {@link #DEFAULT_WEB_SEARCH}。 */
-    public int resolveWebSearchMaxUses() {
-        return settingRepo.findById(MarketAnalysisSetting.SINGLETON_ID)
-                .map(MarketAnalysisSetting::getWebSearchMaxUses)
-                .filter(v -> v != null && AVAILABLE_WEB_SEARCHES.stream().anyMatch(o -> o.value().equals(v)))
-                .orElse(DEFAULT_WEB_SEARCH);
-    }
-
     /** 每日自動分析是否啟用：設定表 enabled → 否則預設 true（維持既有行為）。手動觸發不受此限。 */
     public boolean isEnabled() {
         return settingRepo.findById(MarketAnalysisSetting.SINGLETON_ID)
@@ -251,11 +227,10 @@ public class MarketAnalysisService {
                 .orElse(Boolean.TRUE);
     }
 
-    /** 目前設定 + 可選模型／思考深度／新聞搜尋次數清單（若現值不在白名單則補入，確保下拉恆含現值）。 */
+    /** 目前設定 + 可選模型／思考深度清單（若現值不在白名單則補入，確保下拉恆含現值）。 */
     public MarketAnalysisSettingsDto getSettings() {
         String currentModel = resolveModel();
         String currentEffort = resolveEffort();
-        int currentWebSearch = resolveWebSearchMaxUses();
         boolean currentEnabled = isEnabled();
 
         List<MarketAnalysisSettingsDto.ModelOption> models = new ArrayList<>(AVAILABLE_MODELS);
@@ -266,30 +241,22 @@ public class MarketAnalysisService {
         if (efforts.stream().noneMatch(o -> o.id().equals(currentEffort))) {
             efforts.add(0, new MarketAnalysisSettingsDto.EffortOption(currentEffort, currentEffort));
         }
-        List<MarketAnalysisSettingsDto.WebSearchOption> webSearches = new ArrayList<>(AVAILABLE_WEB_SEARCHES);
-        if (webSearches.stream().noneMatch(o -> o.value().equals(currentWebSearch))) {
-            webSearches.add(0, new MarketAnalysisSettingsDto.WebSearchOption(currentWebSearch, currentWebSearch + " 次"));
-        }
-        return new MarketAnalysisSettingsDto(
-                currentModel, currentEffort, currentWebSearch, currentEnabled, models, efforts, webSearches);
+        return new MarketAnalysisSettingsDto(currentModel, currentEffort, currentEnabled, models, efforts);
     }
 
     /**
-     * 更新分析設定（模型／思考深度／新聞搜尋次數限白名單；enabled 為開關）：null 表示該欄不變；至少須提供一項。
+     * 更新分析設定（模型／思考深度限白名單；enabled 為開關）：null 表示該欄不變；至少須提供一項。
      * 回傳更新後設定。
      */
-    public MarketAnalysisSettingsDto updateSettings(String model, String effort, Integer webSearchMaxUses, Boolean enabled) {
-        if (model == null && effort == null && webSearchMaxUses == null && enabled == null) {
-            throw new IllegalArgumentException("未提供任何可更新的設定（model / effort / webSearchMaxUses / enabled）");
+    public MarketAnalysisSettingsDto updateSettings(String model, String effort, Boolean enabled) {
+        if (model == null && effort == null && enabled == null) {
+            throw new IllegalArgumentException("未提供任何可更新的設定（model / effort / enabled）");
         }
         if (model != null && AVAILABLE_MODELS.stream().noneMatch(o -> o.id().equals(model))) {
             throw new IllegalArgumentException("不支援的分析模型：" + model);
         }
         if (effort != null && AVAILABLE_EFFORTS.stream().noneMatch(o -> o.id().equals(effort))) {
             throw new IllegalArgumentException("不支援的思考深度：" + effort);
-        }
-        if (webSearchMaxUses != null && AVAILABLE_WEB_SEARCHES.stream().noneMatch(o -> o.value().equals(webSearchMaxUses))) {
-            throw new IllegalArgumentException("不支援的新聞搜尋次數：" + webSearchMaxUses);
         }
         MarketAnalysisSetting s = settingRepo.findById(MarketAnalysisSetting.SINGLETON_ID)
                 .orElseGet(MarketAnalysisSetting::new);
@@ -301,9 +268,6 @@ public class MarketAnalysisService {
         if (s.getEffort() == null || s.getEffort().isBlank()) {
             s.setEffort(resolveEffort());
         }
-        if (s.getWebSearchMaxUses() == null) {
-            s.setWebSearchMaxUses(resolveWebSearchMaxUses());
-        }
         if (s.getEnabled() == null) {
             s.setEnabled(isEnabled());
         }
@@ -313,16 +277,13 @@ public class MarketAnalysisService {
         if (effort != null) {
             s.setEffort(effort);
         }
-        if (webSearchMaxUses != null) {
-            s.setWebSearchMaxUses(webSearchMaxUses);
-        }
         if (enabled != null) {
             s.setEnabled(enabled);
         }
         s.setUpdatedAt(LocalDateTime.now());
         settingRepo.save(s);
-        log.info("今日股市分析：設定更新（model={}, effort={}, webSearchMaxUses={}, enabled={}）",
-                s.getModel(), s.getEffort(), s.getWebSearchMaxUses(), s.getEnabled());
+        log.info("今日股市分析：設定更新（model={}, effort={}, enabled={}）",
+                s.getModel(), s.getEffort(), s.getEnabled());
         return getSettings();
     }
 
@@ -381,13 +342,11 @@ public class MarketAnalysisService {
     private DailyMarketAnalysis submitBatch(LocalDate date, String trigger, DailyMarketAnalysis existing) {
         String model = resolveModel();
         String effort = resolveEffort();
-        int webSearchMaxUses = resolveWebSearchMaxUses();
-        boolean webSearchOn = webSearchMaxUses > 0;
-        // 本地抓取新聞（Task 149.21）：由 external-materials-service 寫入 news_headline，此處讀近 N 天餵入 prompt。
-        // 有本地新聞時：webSearchOn → 本地新聞＋web_search 補；webSearchOff → 純本地新聞（省付費 web_search 且不再空白）。
+        // 新聞來源（Task 179）：一律讀本地 news_headline（由 external-materials-service 爬蟲寫入），
+        // 讀近 N 天餵入 prompt。有本地新聞→據清單列 newsHighlights；無→純技術面（不再掛 web_search）。
         List<News> recentNews = fetchRecentLocalNews(date);
-        log.info("今日股市分析：送出批次（date={}, trigger={}, model={}, effort={}, webSearchMaxUses={}, localNews={}）",
-                date, trigger, model, effort, webSearchMaxUses, recentNews.size());
+        log.info("今日股市分析：送出批次（date={}, trigger={}, model={}, effort={}, localNews={}）",
+                date, trigger, model, effort, recentNews.size());
 
         DailyMarketAnalysis row = existing != null ? existing : new DailyMarketAnalysis();
         row.setAnalysisDate(date);
@@ -405,25 +364,14 @@ public class MarketAnalysisService {
         }
 
         try {
-            BatchCreateParams.Request.Params.Builder pb = BatchCreateParams.Request.Params.builder()
+            // Task 179：新聞改讀本地 news_headline，不再掛 web_search server tool（無論本地新聞有無）。
+            BatchCreateParams.Request.Params params = BatchCreateParams.Request.Params.builder()
                     .model(model)
                     .maxTokens((long) MAX_TOKENS)
                     .thinking(ThinkingConfigAdaptive.builder().build())
-                    .outputConfig(OutputConfig.builder().effort(mapEffort(effort)).build());
-            // webSearchMaxUses=0 → 不加 web_search tool（純技術面）；>0 → 加上並設 maxUses 上限。
-            // 【Task 149.20 修正】用「基本版」web_search_20250305，不可用「動態過濾版」web_search_20260209：
-            // 20260209 底層以 code_execution 做動態過濾，而 code_execution 沙箱在 Message Batches API 下會
-            // detection_timeout（實測回 {"status":"detection_timeout","error":"Detection timed out after 90.0s"},
-            // return_code=1），導致模型多次搜尋皆失敗、放棄後 newsHighlights 回空（頁面「參考新聞」永遠空白）。
-            // 基本版不走 code_execution、搜尋結果直接進 context，實測同批次同模型可穩定回 20 則真實新聞。
-            // 本服務走 Batch API 才踩到此坑；PortfolioAdviceService 為「同步」呼叫、動態版正常，故不同動。
-            if (webSearchOn) {
-                pb.addTool(ToolUnion.ofWebSearchTool20250305(
-                        WebSearchTool20250305.builder().maxUses((long) webSearchMaxUses).build()));
-            }
-            BatchCreateParams.Request.Params params = pb
-                    .system(buildSystemPrompt(webSearchOn, recentNews))
-                    .addUserMessage(buildUserPrompt(date, webSearchOn, recentNews))
+                    .outputConfig(OutputConfig.builder().effort(mapEffort(effort)).build())
+                    .system(buildSystemPrompt(recentNews))
+                    .addUserMessage(buildUserPrompt(date, recentNews))
                     .build();
 
             MessageBatch batch = client().messages().batches().create(BatchCreateParams.builder()
@@ -639,28 +587,16 @@ public class MarketAnalysisService {
 
     // ===== Prompt =====
 
-    private String buildSystemPrompt(boolean webSearchEnabled, List<News> recentNews) {
-        // 新聞來源原則隨「本地新聞是否存在」×「web_search 是否開啟」四態切換（Task 149.21）。
+    private String buildSystemPrompt(List<News> recentNews) {
+        // 新聞來源原則隨「本地新聞是否存在」二態切換（Task 179：新聞固定讀本地 news_headline，已無 web_search）。
         boolean hasLocal = recentNews != null && !recentNews.isEmpty();
         String newsPrinciple;
-        if (hasLocal && webSearchEnabled) {
+        if (hasLocal) {
             newsPrinciple = "2. 下方已附【近期新聞（本地抓取）】清單（來源為台灣權威媒體與證交所公開資訊，已驗證來源與真實發布日），"
-                    + "請以此清單為主要新聞面依據、優先採用；如需補「今日最新」動態，可再多次 web_search（換多組中英文關鍵字），"
-                    + "但一律只採台灣/美國/日本/新加坡來源，嚴禁中國大陸/香港/澳門（新浪財經/東方財富/南方財經/財新/南華早報… 一律不可）。"
-                    + "請在 newsHighlights 積極列出 3～6 則最相關、發布日在最近 " + newsMaxAgeDays + " 天內的新聞（優先取自本地清單）；每則 publishedAt 為原文實際發布日、精確到日（YYYY-MM-DD）。";
-        } else if (hasLocal) {
-            newsPrinciple = "2. 本次不進行網路搜尋（web_search 已停用）；請以下方【近期新聞（本地抓取）】清單為唯一新聞面依據"
-                    + "（來源為台灣權威媒體與證交所公開資訊，已驗證來源與真實發布日），**不得杜撰清單以外的新聞或臆測日期**。"
+                    + "請以此清單為唯一新聞面依據，**不得杜撰清單以外的新聞或臆測日期**。"
                     + "請從清單中挑出 3～6 則對今日台股走向最相關者列入 newsHighlights，title/source/url/publishedAt 一律照清單原樣填。";
-        } else if (webSearchEnabled) {
-            newsPrinciple = "2. 先使用 web_search 搜尋最近幾日的財經新聞（台股、美股、日股、Fed 與利率、匯率、地緣政治、外資與法人動向、重要企業財報等），越近期的新聞權重越高、越舊越不重要。務必實際進行多次搜尋、換多組中英文關鍵字積極找出近期新聞，不要只搜一次就放棄。"
-                    + "【新聞來源地區限制】只採用台灣、美國、日本、新加坡的新聞來源；嚴禁納入中國大陸、香港、澳門的媒體或報導（例如新浪財經、東方財富、南方財經、第一財經、財新、華爾街見聞、南華早報、香港經濟日報等一律不可），即使其內容與台股／美股相關也不得列入。"
-                    + "可優先參考下列可靠來源（不限於此）：台灣證券交易所（twse.com.tw，三大法人買賣超、大盤成交統計）、公開資訊觀測站（mops.twse.com.tw，上市櫃重大訊息與財報）、玩股網（wantgoo.com）、MoneyDJ 理財網（moneydj.com）、日經中文網（zh.cn.nikkei.com）、自由時報財經（ec.ltn.com.tw）、經濟日報（money.udn.com）、華爾街日報中文網（cn.wsj.com）、紐約時報中文網（cn.nytimes.com），以及 Reuters、Bloomberg 等其他台/美/日/星主流財經媒體。"
-                    + "【排除來源】請勿採用鉅亨網（cnyes.com）的報導（觀點偏頗），即使搜到也不要列入 newsHighlights。"
-                    + "請在 newsHighlights 積極列出 3～6 則符合條件（來源屬台/美/日/星、發布日在最近 " + newsMaxAgeDays + " 天內）的新聞；每則 publishedAt 必須是該篇原文的實際發布日、精確到日（YYYY-MM-DD）。"
-                    + "個別新聞若無法確認精確且近期的發布日、或來源屬中港澳，就略過該則（不要用舊聞或臆測日期充數、不要依賴既有記憶）；唯有確實搜尋後仍找不到任何符合條件的新聞時，才回空陣列 []。";
         } else {
-            newsPrinciple = "2. 本次不提供網路新聞搜尋（web_search 已停用）且無本地新聞：請勿杜撰或臆測新聞，僅依下方台股與美股走勢數據做技術面研判，newsHighlights 一律回空陣列 []。";
+            newsPrinciple = "2. 本次無本地新聞：請勿杜撰或臆測新聞，僅依下方台股與美股走勢數據做技術面研判，newsHighlights 一律回空陣列 []。";
         }
         return """
             你是一位資深台股策略分析師。你的任務：綜合「量化的台股大盤與美股指數近一年走勢」與「近期國內外財經新聞」，
@@ -687,7 +623,7 @@ public class MarketAnalysisService {
             """.formatted(newsPrinciple);
     }
 
-    private String buildUserPrompt(LocalDate date, boolean webSearchEnabled, List<News> recentNews) {
+    private String buildUserPrompt(LocalDate date, List<News> recentNews) {
         StringBuilder sb = new StringBuilder();
         sb.append("今天日期：").append(date).append("（Asia/Taipei）。請判斷今天台股（加權指數）的走向。\n\n");
 
@@ -715,21 +651,10 @@ public class MarketAnalysisService {
         boolean hasLocal = recentNews != null && !recentNews.isEmpty();
         if (hasLocal) {
             sb.append(buildLocalNewsBlock(recentNews));
-        }
-
-        if (webSearchEnabled && hasLocal) {
-            sb.append("上方已附【近期新聞（本地抓取）】，請以此為主要新聞面依據、優先採用；如需補今日最新動態，可再多次 web_search（只採台/美/日/星、嚴禁中港澳）。")
-              .append("請在 newsHighlights 積極列出 3～6 則最相關、最近 ").append(newsMaxAgeDays)
-              .append(" 天內的新聞（優先取自本地清單），每則標出實際發布日（YYYY-MM-DD）。");
-        } else if (hasLocal) {
-            sb.append("本次不進行網路搜尋，請以上方【近期新聞（本地抓取）】為唯一新聞面依據，從中挑出 3～6 則對今日台股走向最相關者列入 newsHighlights（title/source/url/publishedAt 照清單原樣），")
+            sb.append("請以上方【近期新聞（本地抓取）】為唯一新聞面依據，從中挑出 3～6 則對今日台股走向最相關者列入 newsHighlights（title/source/url/publishedAt 照清單原樣），")
               .append("不得杜撰清單以外的新聞。切記越近期的走勢與新聞越重要。");
-        } else if (webSearchEnabled) {
-            sb.append("請先多次 web_search（換多組中英文關鍵字、積極嘗試、勿只搜一次）最近幾日的財經新聞，再結合上述走勢做判斷。切記越近期的走勢與新聞越重要（越舊權重越低）；")
-              .append("請在 newsHighlights 積極列出 3～6 則最近 ").append(newsMaxAgeDays)
-              .append(" 天內、來源屬台灣/美國/日本/新加坡（可優先參考台灣證券交易所 twse.com.tw／公開資訊觀測站 mops.twse.com.tw、日經中文網、自由時報、經濟日報、華爾街日報中文網、紐約時報中文網等）、且能明確標出實際發布日（YYYY-MM-DD）的新聞；嚴禁納入中國大陸/香港/澳門來源。個別不確定發布日或非近期者略過該則，唯有確實找不到任何符合者才回空陣列。");
         } else {
-            sb.append("本次不進行新聞搜尋、亦無本地新聞，請僅依上述台股與美股走勢做技術面判斷，newsHighlights 回空陣列。切記越近期的走勢越重要。");
+            sb.append("本次無本地新聞，請僅依上述台股與美股走勢做技術面判斷，newsHighlights 回空陣列。切記越近期的走勢越重要。");
         }
         return sb.toString();
     }
@@ -740,7 +665,7 @@ public class MarketAnalysisService {
 
     /**
      * 讀近 {@code newsMaxAgeDays} 天的本地抓取新聞（news_headline，由 external-materials-service 寫入）。
-     * 讀取失敗（表不存在/DB 例外）不影響分析——回空清單、退回既有 web_search / 純技術面行為。
+     * 讀取失敗（表不存在/DB 例外）不影響分析——回空清單、退回純技術面行為。
      */
     private List<News> fetchRecentLocalNews(LocalDate date) {
         try {
