@@ -62,8 +62,9 @@ public class PublicInfoStockFilter {
         List<NewsRow> out = new ArrayList<>(rows.size());
         int dropped = 0;
         for (NewsRow r : rows) {
-            // 總體資料（三大法人 / 大盤成交）一律保留
-            if (r.category() != null && r.category().startsWith("twse")) {
+            // 量化/總體公開資訊（twse-* 三大法人・成交量、fx 匯率、us-market 美股指數）一律保留，不做個股過濾；
+            // 只有 category="news" 的一般新聞才進個股過濾判定（Task 178；Task 180 擴及 fx / us-market）。
+            if (r.category() != null && !"news".equals(r.category())) {
                 out.add(r);
                 continue;
             }

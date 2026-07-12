@@ -4504,3 +4504,36 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - [x] 179.8 frontend `TodayMarketAnalysisView.vue`：移除「新聞搜尋」`el-select`＋`selectedWebSearch`／`savingWebSearch`／`availableWebSearches`／`onWebSearchChange` 與 settings 中 `webSearchMaxUses`；07:30 文案全部改 08:30。`api/index.js` updateSettings 註解去「新聞搜尋」。
 - [ ] 179.9 驗證：backend＋bff `mvn compile`；`--no-cache` 重 build business-services＋bff＋frontend＋recreate；驗頁面無「新聞搜尋」下拉、文案 08:30、`GET/PUT /settings` 正常（無 webSearchMaxUses）、排程列表顯示 08:30／08:00、Liquibase 成功 drop 欄。
 - [ ] 179.10 commit + 兩段式 merge。
+
+### Task 180：公開資訊爬蟲新增「台幣兌美元匯率」＋「美股主要指數收盤」快照、新聞擴增政治/國際來源、明確排除中港澳（Requirement 31）
+
+對應 Requirements: Requirement 31（今日股市分析／公開資訊）
+
+**背景**：使用者確認每日爬蟲的公開資訊「一定要有」台幣兌美元匯率與美股重要資訊，並要求涵蓋台灣央行 / 金管會政策、地緣政治、川普言論、Fed 政策等重點，且**中港澳網站資料不要抓**。現況盤點：(1) 匯率**有抓**（`ExchangeRatePoller` 台銀＋Yahoo＋FinMind 寫 `exchange_rate_history`）但**不在公開資訊 JSON**（該 JSON 只讀 `news_headline`）；(2) 美股指數**有抓**（Yahoo Finance→`us_index_daily_history`，今日股市分析已讀）但**同樣不在公開資訊 JSON**；(3) 新聞來源全為台灣財經（玩股/MoneyDJ/自由財經/經濟日報）＋TWSE，**無中港澳**（鉅亨網早於 149.22 移除），但政策/國際面偏薄。故本任務把匯率＋美股併入 `news_headline`（同進 SRPP JSON 與分析），並擴增政治/國際新聞來源。
+
+#### 設計決策
+
+- **DB 為單一來源、走既有 `news_headline` 管道**：匯率/美股不另建輸出路徑，而是由 `MarketSnapshotFetchClient` 讀**已抓好**的 DB 資料組 `NewsRow`，交 `NewsPoller` 與其他來源一併 upsert；如此 SRPP 公開資訊 JSON 與今日股市分析本地新聞區塊「一份資料兩處吃」，不重算、不新增排程（沿用 08/12/18＋warmup）。
+- **`publishedAt = Instant.now()` 保證恆入當日範圍**：快照型資料（非逐日新聞）以抓取當下為 `publishedAt`，恆通過 `loadTodayPublicInfoForExport` 的「當日 fetched＋published≥cutoff」；真實資料日改列於標題（如「資料日 2026-07-11」「截至 2026-07-11 收盤」）。`url` 固定 → `dedupe_key` 每輪相同 → 就地覆寫為當日最新一列（不累積冗列）。
+- **`PublicInfoStockFilter` 保留條件放寬**：由「`category` 以 `twse` 開頭保留」改為「`category != "news"` 保留」，使 `fx`／`us-market`／`twse-*` 一律不進個股過濾（僅一般新聞判定），避免匯率/美股快照被誤濾。
+- **來源明確排除中港澳**：本地爬蟲新增來源皆台灣權威媒體（自由時報 政治/國際 RSS）與美國站（Yahoo Finance 已為既有美股指數來源），無任何中國/香港/澳門網站；模型輸出端 `sanitizeNews` 既有中港澳封鎖（`BLOCKED_*`）為防禦縱深，不動。
+- **不動 `web_search`（Task 179 已移除）、不改排程數**：無新增 `@Scheduled`，`SchedulePublicBffController` 排程清單毋須更新。
+
+#### 實作
+
+- [x] 180.1 spec：`requirements.md` R31 新增 2 條 AC（公開資訊必含匯率＋美股指數並擴增政治/國際；來源不取中港澳）；`design.md` R31 更新 `NewsFetchClient` 來源列、`news_headline` category/source 列舉、新增「量化快照」bullet、`PublicInfoStockFilter` 保留條件放寬說明；`tasks.md` 本任務。
+- [x] 180.2 ext `StockSourceQuery`：新增 `loadLatestUsdRate()`（回 `UsdRate` record：rateDate/buy/sell）與 `loadLatestUsIndexClose(code)`（回 `UsIndexClose` record：最近兩筆算漲跌%）。
+- [x] 180.3 ext 新增 `MarketSnapshotFetchClient.fetchAll()`：組匯率（`category=fx`）＋美股指數（`category=us-market`）兩則 `NewsRow`，`publishedAt=now()`、逐項 graceful。
+- [x] 180.4 ext `NewsPoller.run()`：`rows.addAll(snapshotClient.fetchAll())`（twse 之後）；注入 `MarketSnapshotFetchClient`；class javadoc 同步。
+- [x] 180.5 ext `NewsFetchClient`：新增自由時報 政治（`politics.xml`）＋國際（`world.xml`）RSS 至 `fetchAll()`；class javadoc 同步。
+- [x] 180.6 ext `PublicInfoStockFilter.retain`：保留條件 `startsWith("twse")` → `!"news".equals(category)`。
+- [x] 180.7 驗證：ext `mvn compile` 通過。
+- [x] 180.10 對抗式 review 修正（workflow，1 major＋2 minor＋3 nit 全 confirmed）：
+    - **(major) 政治/國際 RSS 相關性過濾**：`NewsFetchClient` 新增 `RELEVANCE_KEYWORDS`（財經・政策・地緣中性主題詞）＋`relevantOnly()`，只套用於政治/國際二 feed——否則地方/社會/娛樂瑣聞會以「近期」灌爆今日股市分析 `LOCAL_NEWS_MAX=40` 上限、把財經頭條擠掉（反使分析訊號變少）。
+    - **(minor) 美股指數逐碼資料日**：`buildUsMarketSnapshot` 對落後於 `session` 的指數（部分回補 / 單碼抓取失敗）加註「資料日 {tradingDate}」，避免把舊 session 值掛在最新日期下。
+    - **(minor) 缺料可見度**：`buildFxSnapshot`／`buildUsMarketSnapshot` 缺料時 log 由 info 提升為 warn（使用者要求「一定要有」，缺料屬異常）。
+    - **(nit) locale**：`changePct` 用 `String.format(Locale.US, …)`，與 `comma()` 一致。
+    - **(nit) FX summary 去內部細節**：summary 只留「來源：台灣銀行牌告 USD 即期買入/賣出匯率。」，WAF/FinMind 備援細節移至程式註解（不外洩進 prompt / SRPP JSON）。
+    - **(nit) NewsRow javadoc**：`@param source`／`@param category` 補 `bot-fx`／`us-index`／`fx`／`us-market`。
+- [ ] 180.8 部署驗證：`--no-cache` 重 build external-materials-service＋recreate；驗 warmup log「個股過濾」、`news_headline` 出現 `fx`／`us-market` 列、SRPP `public_info_<date>.json` 含匯率與美股指數項、政治/國際新聞入庫（僅相關者）、無中港澳來源。
+- [ ] 180.9 commit + 兩段式 merge。

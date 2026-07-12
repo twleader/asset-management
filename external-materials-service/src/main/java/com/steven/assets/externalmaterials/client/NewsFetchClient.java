@@ -17,15 +17,17 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
  * 權威財經新聞抓取（Task 149.21）：玩股網 WantGoo（JSON API）＋ MoneyDJ 理財網（即時新聞 HTML）
- * ＋自由時報 / 經濟日報（RSS）。皆帶「真實發布時間」（WantGoo {@code time} epoch、MoneyDJ 列時間、
+ * ＋自由時報 財經 / 政治 / 國際（RSS，Task 180 增政治・國際以涵蓋央行・金管會政策、地緣政治、川普言論、Fed 政策）
+ * ＋經濟日報（RSS）。皆帶「真實發布時間」（WantGoo {@code time} epoch、MoneyDJ 列時間、
  * RSS {@code pubDate} RFC-1123），較付費 web_search 的模型自報日期精準。
  * UA 一律 {@code Mozilla/5.0}（比照既有抓取慣例）。逐來源獨立 try/catch：單一來源失敗只 log warn、
- * 回空 list，不影響其他來源。（鉅亨網 cnyes 因言論偏頗已於 Task 149.22 移除。）
+ * 回空 list，不影響其他來源。**來源皆台灣權威媒體，不抓中港澳。**（鉅亨網 cnyes 因言論偏頗已於 Task 149.22 移除。）
  */
 @Slf4j
 @Component
@@ -39,6 +41,10 @@ public class NewsFetchClient {
             "https://www.moneydj.com/kmdj/news/newsreallist.aspx?a=MB010000";
     /** 自由時報財經 RSS。 */
     private static final String LTN_BUSINESS_RSS = "https://news.ltn.com.tw/rss/business.xml";
+    /** 自由時報政治 RSS（Task 180）：涵蓋央行 / 金管會政策、兩岸・國安等政策面。 */
+    private static final String LTN_POLITICS_RSS = "https://news.ltn.com.tw/rss/politics.xml";
+    /** 自由時報國際 RSS（Task 180）：涵蓋地緣政治、川普言論、Fed 政策等國際財經政策。 */
+    private static final String LTN_WORLD_RSS = "https://news.ltn.com.tw/rss/world.xml";
     /** 經濟日報（udn money）財經 RSS。 */
     private static final String UDN_MONEY_RSS = "https://money.udn.com/rssfeed/news/1001/5591?ch=money";
 
@@ -64,7 +70,11 @@ public class NewsFetchClient {
         List<NewsRow> out = new ArrayList<>();
         out.addAll(safe("wantgoo", this::fetchWantgoo));
         out.addAll(safe("moneydj", this::fetchMoneydj));
-        out.addAll(safe("ltn", () -> fetchRss(LTN_BUSINESS_RSS, "ltn")));
+        out.addAll(safe("ltn-business", () -> fetchRss(LTN_BUSINESS_RSS, "ltn")));
+        // 政治/國際為「整個版面」的一般新聞，只留與財經・政策・地緣相關者（relevantOnly）——否則地方/社會/娛樂
+        // 瑣聞會灌爆今日股市分析的近 N 天新聞 40 則上限、把財經頭條擠掉（Task 180 review 修正）。
+        out.addAll(safe("ltn-politics", () -> relevantOnly(fetchRss(LTN_POLITICS_RSS, "ltn"))));  // 央行/金管會/兩岸/國安
+        out.addAll(safe("ltn-world", () -> relevantOnly(fetchRss(LTN_WORLD_RSS, "ltn"))));        // 地緣政治/川普/Fed
         out.addAll(safe("udn", () -> fetchRss(UDN_MONEY_RSS, "udn")));
         return out;
     }
@@ -148,6 +158,37 @@ public class NewsFetchClient {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    // ===== 政治 / 國際 RSS 的財經・政策・地緣相關性過濾（Task 180）=====
+
+    /**
+     * 政治/國際版面的一般新聞相關性關鍵詞：標題含任一者才保留，濾掉純地方/社會/娛樂/體育瑣聞。
+     * 皆為<b>中性主題詞</b>（總經・貨幣・政策・地緣・國安，含朝野兩黨），不含任何政治立場判斷；
+     * 目的是「只餵市場/政策/地緣相關新聞」，避免高頻一般新聞把財經頭條擠出今日股市分析上限。
+     */
+    private static final Set<String> RELEVANCE_KEYWORDS = Set.of(
+            // 貨幣 / 利率 / 總經 / 產業
+            "央行", "聯準會", "Fed", "升息", "降息", "利率", "通膨", "通脹", "物價", "金管會", "金融",
+            "匯率", "台幣", "新台幣", "美元", "日圓", "人民幣", "關稅", "貿易", "出口", "進口", "順差", "逆差",
+            "經濟", "景氣", "GDP", "財政", "預算", "產業", "供應鏈", "半導體", "晶片", "台積電", "科技",
+            "能源", "石油", "油價", "電價", "股市", "股票", "市場", "投資", "債", "就業", "失業", "薪資", "房市", "房價",
+            // 政治 / 地緣 / 國安（中性主題）
+            "川普", "Trump", "拜登", "白宮", "美國", "國會", "制裁", "地緣", "戰爭", "衝突", "兩岸", "中國",
+            "中共", "北京", "解放軍", "美中", "台海", "國防", "軍事", "軍售", "國安", "外交", "主權",
+            "選舉", "罷免", "立法院", "行政院", "總統", "國民黨", "民進黨", "政策",
+            "歐盟", "日本", "韓國", "烏克蘭", "俄羅斯", "以色列", "中東");
+
+    /** 只保留標題含任一相關性關鍵詞者（Task 180，僅套用於政治/國際 RSS）。 */
+    private List<NewsRow> relevantOnly(List<NewsRow> rows) {
+        List<NewsRow> out = new ArrayList<>(rows.size());
+        for (NewsRow r : rows) {
+            String t = r.title() == null ? "" : r.title();
+            for (String k : RELEVANCE_KEYWORDS) {
+                if (t.contains(k)) { out.add(r); break; }
+            }
+        }
+        return out;
     }
 
     // ===== 自由時報 / 經濟日報（RSS）=====
