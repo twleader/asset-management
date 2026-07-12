@@ -13,6 +13,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -32,9 +33,18 @@ class AssetServiceTest {
     @Mock StockHoldingRepository stockRepo;
     @Mock RealizedGainRepository gainRepo;
     @Mock ExchangeRateHistoryRepository rateHistRepo;
+    @Mock MarketDataService marketDataService;
     @Mock BankRepository bankRepo;
     @Mock BrokerRepository brokerRepo;
-    @Mock MarketDataService marketDataService;
+    @Mock StockRepository stockMasterRepo;
+    @Mock StockMasterService stockMasterService;
+    @Mock TransitFundTypeRepository transitFundTypeRepo;
+    @Mock FundNavService fundNavService;
+    @Mock FundDividendService fundDividendService;
+    @Mock AssetClassifier assetClassifier;
+    @Mock StockStyleRepository stockStyleRepo;
+    @Mock FundClassOverrideRepository fundClassOverrideRepo;
+    @Mock com.steven.assets.security.TenantGuard tenantGuard;
 
     @InjectMocks AssetService service;
 
@@ -53,18 +63,26 @@ class AssetServiceTest {
     // ---- deleteSnapshot ----
 
     @Test
-    void deleteSnapshot_呼叫deleteById() {
+    void deleteSnapshot_存在時先驗歸屬再刪除() {
+        // deleteSnapshot 先 findSnapshot（findById + tenantGuard 驗歸屬）再 delete 該實體
+        when(snapshotRepo.findById(1L)).thenReturn(Optional.of(snapshot));
+
         service.deleteSnapshot(1L);
 
-        verify(snapshotRepo).deleteById(1L);
+        verify(tenantGuard).assertOwned(snapshot.getOwnerUserId());
+        verify(snapshotRepo).delete(snapshot);
     }
 
     @Test
-    void deleteSnapshot_不存在時deleteById仍被呼叫() {
-        // deleteSnapshot 直接委派 deleteById，不預先 findById
-        service.deleteSnapshot(99L);
+    void deleteSnapshot_不存在時拋NoSuchElementException() {
+        // findSnapshot 找不到即拋例外，不呼叫 delete
+        when(snapshotRepo.findById(99L)).thenReturn(Optional.empty());
 
-        verify(snapshotRepo).deleteById(99L);
+        assertThatThrownBy(() -> service.deleteSnapshot(99L))
+                .isInstanceOf(NoSuchElementException.class)
+                .hasMessageContaining("找不到快照 ID");
+
+        verify(snapshotRepo, never()).delete(any());
     }
 
     // ---- recalcAllDividends ----
