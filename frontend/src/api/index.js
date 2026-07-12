@@ -83,7 +83,7 @@ export const institutionApi = {
   getActiveTransitFundTypes: () => api.get('/settings/transit-fund-types/active')
 }
 
-// ===== Market Data (共享 lookups for components like StockAnalysisDialog) =====
+// ===== Market Data（目前無前端消費者；股票分析已改走 bffApi.stockAnalysis） =====
 export const marketDataApi = {
   getStockHistory: (code, market, start, end) =>
     api.get('/market-data/history/stock', { params: { code, market, start, end } }),

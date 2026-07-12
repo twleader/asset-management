@@ -26,7 +26,7 @@ import java.util.Map;
 
 /**
  * 從外部來源回補總體經濟年度時間序列：
- *  - 人均 GDP / 成長率：IMF DataMapper API（NGDPDPC、NGDP_RPCH，TWN/KOR）
+ *  - 人均 GDP / 成長率：台灣以主計總處 DGBAS（NA8101A1A）為主、IMF（NGDPDPC、NGDP_RPCH）備援；韓國（KOR）、日本（JPN）走純 IMF
  *  - 大盤年末 / 月線：TWSE FMTQIK 月報
  *
  * 對外抓取已搬到 ext-materials-service `MacroDataFetchClient`，本 service 透過

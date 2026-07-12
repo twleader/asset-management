@@ -100,7 +100,7 @@ public class AssetClassifier {
     public String classifyBondTerm(String code, String market, String name, String override) {
         if (override != null && !override.isBlank()) return override.trim().toUpperCase();
         String n = name == null ? "" : name.toLowerCase();
-        // 短期：1-3 / 0-3 / 0-1 / 1年 / 短 / month（貨幣型、超短天期）
+        // 短期：1-3 / 0-3 / 0-1 / 1-5 / 短 / month / 貨幣（貨幣型、超短天期）
         if (n.contains("1-3") || n.contains("0-3") || n.contains("0-1") || n.contains("1-5")
                 || n.contains("短") || n.contains("month") || n.contains("貨幣")) return SHORT;
         // 長期：20 / 25 / 30年 / 長 / 10年以上 / 10-20 / 20+

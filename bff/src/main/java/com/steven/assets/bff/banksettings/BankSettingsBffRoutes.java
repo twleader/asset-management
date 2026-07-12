@@ -6,7 +6,7 @@ import org.springframework.cloud.gateway.route.builder.RouteLocatorBuilder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-/** BankSettingsView 專屬 BFF route：rewrite /api/bff/bank-settings/** → /api/banks/** */
+/** BankSettingsView 專屬 BFF route：rewrite /api/bff/bank-settings/** → /api/settings/banks/** */
 @Configuration
 public class BankSettingsBffRoutes {
 

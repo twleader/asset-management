@@ -26,14 +26,14 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * 歷年資產每日排程自動匯出（Requirement 34 / Task 171）。
+ * 當前即時資產每日排程自動匯出（Requirement 34 / Task 171）。
  *
  * <p>每個使用者可各自設定啟用開關、每日執行時分、輸出相對子路徑。因 {@code @Scheduled} 的 cron 於啟動期固定、
  * 無法吃 DB 可調時間，改採「每分鐘 poll ＋ 當日 guard ＋ 開機自癒補跑」（比照 {@code MarketAnalysisScheduler}）。
  *
  * <p>租戶隔離：GET/PUT/run-now 走 HTTP（BFF→business），由 {@code TenantFilterAspect} 自動 owner-scoped 到本人；
  * 背景 poll 無 request context → {@code ownerFilter} 不啟用，{@code findAll()} 讀全部 owner 列，
- * 產檔時才以 {@link ExcelExportService#exportFullForOwner(Long)} 對該列 owner 手動 {@code enableFilter}。
+ * 產檔時才以 {@link ExcelExportService#exportLiveAssetsForOwner(Long)} 對該列 owner 手動 {@code enableFilter}。
  *
  * <p>路徑安全：使用者只設定「相對子路徑」，實際寫入 = 容器基底 {@code EXPORT_OUTPUT_DIR} resolve 子路徑，
  * 並驗證 normalize 後仍在基底內（拒 {@code ..}／絕對路徑跳脫），不允許 UI 指定任意檔案系統路徑。

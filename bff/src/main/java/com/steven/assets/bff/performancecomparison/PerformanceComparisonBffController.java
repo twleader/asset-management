@@ -263,9 +263,9 @@ public class PerformanceComparisonBffController {
      * 個股取數：先抓日線收盤（date→closePrice）。
      * <ul>
      *   <li>dividend=false：用原始 closes、priceOnly=false。</li>
-     *   <li>dividend=true 且 market=="英股"：累積型 ETF、收盤已含息 → 用原始 closes、priceOnly=false。</li>
-     *   <li>dividend=true 且 market 為台股/美股：並行抓除息事件，
-     *       無股利資料 → 原始 closes、priceOnly=true；有資料 → 股利再投入調整、priceOnly=false。</li>
+     *   <li>dividend=true 且 market 為台股/美股/英股：並行抓除息事件；
+     *       無股利資料（英股目前 stock_dividend_history 皆無）→ 原始 closes、priceOnly=true；
+     *       有資料 → 股利再投入調整、priceOnly=false。</li>
      * </ul>
      */
     private Mono<SeriesRaw> fetchStockSeries(Target t, LocalDate from, LocalDate to, boolean dividend) {

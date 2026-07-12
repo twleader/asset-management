@@ -30,8 +30,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 
 /**
- * 應用程式啟動時自動寫入預設銀行與券商資料。
- * 使用 findByCode 檢查是否已存在，確保重啟不重複插入。
+ * 應用程式啟動時自動寫入各類全域參考資料（銀行、券商、存款類型、市場類型、在途款項類型、基金主檔、代繳分類、資產類別、股票風格、債券期別）。
+ * 大多以 findByCode 檢查是否已存在（基金主檔以 existsById），確保重啟不重複插入。
  */
 @Slf4j
 @Component

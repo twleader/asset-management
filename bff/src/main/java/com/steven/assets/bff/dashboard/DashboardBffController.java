@@ -160,10 +160,6 @@ public class DashboardBffController {
     }
 
     /**
-     * GET /api/bff/dashboard/snapshot/{id}
-     * 切換快照時用：取得指定快照的 enriched detail + mergedStocks。
-     */
-    /**
      * POST /api/bff/dashboard/enrich-dividend-rates
      * 背景補齊所有快照缺漏的配息率（fire-and-forget，不阻塞 UI）。
      */
@@ -231,11 +227,11 @@ public class DashboardBffController {
      *
      * 規則（見 Requirement 9 + Task 86）：
      *  - 篩 market = 台股 的 mergedStocks
-     *  - ETF（stockCode 以 00 開頭）並行（concurrency 8）呼叫 /api/market-data/etf-holdings 取得成分股權重，
+     *  - ETF（stockCode 以 00 開頭）並行（concurrency 4）呼叫 /api/market-data/etf-holdings 取得成分股權重，
      *    將 currentValue × weight% 拆解到各個成分股代號；weights 加總不足 100% 的缺口計入 ETF 自身
      *    （成分股表通常涵蓋 95–100%，剩餘是現金 / 應收款部位）
      *  - 直接持股：整筆計入該股代號（不拆解）
-     *  - 同 stockCode 加總（ETF 內含 2330 + 直接持有 2330 合併）
+     *  - 同股名加總（ETF 內含台積電 + 直接持有台積電合併；成分股來源僅提供股名無代號，故以股名為聚合鍵）
      *  - 排序取前 10 + 1 個「其它」
      *  - ETF 抓取失敗（supported=false / holdings empty / IO error）→ 該 ETF 整筆退回以代號自身計入，
      *    並記錄於 degradedEtfs 供前端顯示降級註記

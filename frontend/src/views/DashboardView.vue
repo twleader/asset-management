@@ -535,7 +535,7 @@ function isBaselineToday(market) {
 }
 
 /** 該市場 row 是否該套 live 行情（基準日==市場當地今日；不再加「市場開盤」閘門）。
- *  收盤後 Redis cache 會於 10 分鐘後過期，但 liveAssets 後端已 fallback 至最近一筆收盤價，
+ *  收盤後 Redis cache 於 24h TTL 過期後才失效，但 liveAssets 後端已 fallback 至最近一筆收盤價，
  *  故此函式只判斷 basedate；live overlay 是否真的可用由 overlayLivePrice 內部判斷。 */
 function shouldApplyLive(market) {
   return isBaselineToday(market)
@@ -1256,10 +1256,10 @@ watch(mergedStocks, (stocks) => {
 }, { immediate: true })
 
 // 基準日 == 該市場當地今日 → 用 live 估值重算 currentValue / profit / estimatedDividend，
-// 讓 2 分鐘輪詢即時反映最新行情；否則直接回傳 BFF 預先算好的快照值（凍結在基準日）。
+// 讓 SSE 推播的即時價立即反映最新行情；否則直接回傳 BFF 預先算好的快照值（凍結在基準日）。
 // 數值來源優先序：
 //  1. liveAssets.stocks[].liveValue（與「歷年資產管理」共用同一支 API，收盤後 fallback 至最近收盤價）
-//  2. stockPrices map 即時價（SSE 推播；收盤後 Redis cache 10 分鐘 TTL 過後此來源會失效）
+//  2. stockPrices map 即時價（SSE 推播；收盤後 Redis cache 24h TTL 過後此來源才會失效）
 //  3. row 原值（BFF 凍結在基準日的快照值）
 function overlayLivePrice(row) {
   if (!shouldApplyLive(row.market)) return row
@@ -1294,7 +1294,7 @@ function overlayLivePrice(row) {
 
 /**
  * 將 latest snapshot 的總額（totalStockValue / stockProfit / totalAssets）依 per-market 基準日閘門重算。
- * basedate==該市場當地今日的市場才套 live（customTableData × overlayLivePrice，隨 2 分鐘輪詢更新）；
+ * basedate==該市場當地今日的市場才套 live（customTableData × overlayLivePrice，隨 SSE 推播（及每分鐘 realtime 輪詢）更新）；
  * 非今日市場（含昨日快照、今日尚未建檔、跨午夜）維持快照凍結收盤值（= 該基準日收盤）。
  *
  * 「資產總計」僅在三市場皆為今日時採 liveAssets.liveTotalAssets（與「歷年資產管理」最新列同值），
