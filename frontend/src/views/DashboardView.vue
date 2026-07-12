@@ -108,7 +108,7 @@
     <!-- Second Charts Row -->
     <el-row :gutter="20" class="chart-row">
       <!-- Deposit by Bank -->
-      <el-col :span="12">
+      <el-col :span="10">
         <el-card>
           <template #header>
             <div style="display:flex;align-items:center;justify-content:space-between">
@@ -158,7 +158,7 @@
       </el-col>
 
       <!-- Stock Portfolio -->
-      <el-col :span="12">
+      <el-col :span="14">
         <el-card>
           <template #header>
             <div style="display:flex;align-items:center;justify-content:space-between">
@@ -1516,7 +1516,7 @@ const stockBarOption = computed(() => {
           + `損益：<span style="color:${color}">${fmt(profit)} (${rate}%)</span>`
       }
     },
-    grid: { left: 100, right: 140, top: 10, bottom: 30 },
+    grid: { left: 140, right: 140, top: 10, bottom: 30 },
     xAxis: { type: 'value', axisLabel: { formatter: v => `$${(v / 1e4).toFixed(0)}萬` } },
     // 美股股名太長（如 Vanguard S&P 500 ETF），y 軸用代號顯示；台股名稱短，沿用名稱
     yAxis: { type: 'category', data: sorted.map(s => isTw ? (s.stockName || s.stockCode) : s.stockCode) },
