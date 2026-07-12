@@ -1,0 +1,148 @@
+package com.steven.assets.bff.schedulelist;
+
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
+
+/**
+ * ScheduleListView 專屬 BFF（「公開資訊」分組，Requirement 36）。
+ *
+ * <p>回傳系統所有自動排程的**人工維護靜態清單**。排程分屬兩個服務：
+ * {@code business-services}（10 個 {@code @Scheduled}）與 {@code external-materials-service}
+ * （23 個 {@code @Scheduled}）。因 cron 皆為編譯期常數、此頁為唯讀資訊展示，故不做跨服務反射探索、
+ * 不入 DB、不設管理端點。
+ *
+ * <p><b>維護提醒：新增／調整任何 {@code @Scheduled} 時，務必同步更新下方 {@link #JOBS} 清單，避免與實際 cron 漂移。</b>
+ * 對照來源：
+ * <ul>
+ *   <li>business-services：IndexDailyRefreshScheduler、HistoricalDataService、ExportScheduleService、
+ *       SnapshotDateRollScheduler、StockAlertService、MarketAnalysisScheduler、BackupService</li>
+ *   <li>external-materials-service：TwseIndexPoller、PricePoller、TwClosurePoller、FundDividendPoller、
+ *       NewsPoller、FundNavPoller、DividendPersister、IntradayTickRefresher、HistoricalBackfillService、
+ *       ExchangeRatePoller、ClosePersister</li>
+ * </ul>
+ */
+@RestController
+@RequestMapping("/api/bff/schedule-list")
+public class SchedulePublicBffController {
+
+    private static final String BUSINESS = "業務服務";
+    private static final String EXTERNAL = "外部行情服務";
+    private static final String TPE = "Asia/Taipei";
+    private static final String NYC = "America/New_York";
+    private static final String LON = "Europe/London";
+
+    /** 全系統排程清單（33 筆）。順序刻意先業務服務、再外部行情服務，前端再依 category 分組。 */
+    private static final List<ScheduledJobDto> JOBS = List.of(
+            // ===== business-services（10）=====
+            new ScheduledJobDto(BUSINESS, "資產快照", "最新快照釘定當日",
+                    "將每位使用者的最新快照日期釘為當日並重算資產，讓即時股價覆蓋生效",
+                    "每日 00:05", "0 5 0 * * *", TPE),
+            new ScheduledJobDto(BUSINESS, "資料清理", "警示觸發紀錄清理",
+                    "清理 30 天前的股票警示觸發紀錄",
+                    "每日 04:00", "0 0 4 * * *", TPE),
+            new ScheduledJobDto(BUSINESS, "今日股市分析", "今日股市分析產生",
+                    "每交易日由 AI 判斷當日台股走向並產生分析",
+                    "交易日 07:30", "0 30 7 * * MON-FRI", TPE),
+            new ScheduledJobDto(BUSINESS, "今日股市分析", "分析批次收尾輪詢",
+                    "定期撈在製的 Batch API 批次，批次完成後把結果落庫",
+                    "每 90 秒（啟動後延遲 60 秒）", "fixedDelay=90s, initialDelay=60s", ""),
+            new ScheduledJobDto(BUSINESS, "大盤指數", "海外指數日線回補",
+                    "各國大盤指數收盤後回補日線（最新日線過時才抓）",
+                    "每日 07:00（週二~六）", "0 0 7 * * TUE-SAT", TPE),
+            new ScheduledJobDto(BUSINESS, "資產匯出", "每日匯出排程檢查",
+                    "每分鐘檢查各使用者的每日自動匯出設定，命中執行時間即產出 Excel",
+                    "每分鐘", "0 * * * * *", TPE),
+            new ScheduledJobDto(BUSINESS, "資料備份", "每日備份（台股收盤後）",
+                    "台股交易日收盤後 2 小時備份資料庫至 daily/",
+                    "交易日 15:30", "0 30 15 * * MON-FRI", TPE),
+            new ScheduledJobDto(BUSINESS, "資料備份", "每日備份（美股收盤後）",
+                    "美股收盤後 2 小時（台北 07:00）備份資料庫至 daily/",
+                    "每日 07:00（週二~六）", "0 0 7 * * TUE-SAT", TPE),
+            new ScheduledJobDto(BUSINESS, "資料備份", "每週備份",
+                    "每週日備份資料庫至 weekly/",
+                    "每週日 05:00", "0 0 5 * * SUN", TPE),
+            new ScheduledJobDto(BUSINESS, "資料清理", "歷史資料清理",
+                    "刪除 10 年前的股價與匯率歷史",
+                    "交易日 17:30", "0 30 17 * * MON-FRI", TPE),
+
+            // ===== external-materials-service（23）=====
+            new ScheduledJobDto(EXTERNAL, "即時行情", "台股即時價（盤中）",
+                    "盤中每 2 分鐘更新台股即時價至 Redis",
+                    "交易日 09:00–13:00 每 2 分鐘", "0 0/2 9-13 * * MON-FRI", TPE),
+            new ScheduledJobDto(EXTERNAL, "即時行情", "美股即時價（盤中）",
+                    "盤中每 2 分鐘更新美股即時價至 Redis",
+                    "交易日 09:00–16:00 每 2 分鐘", "0 0/2 9-16 * * MON-FRI", NYC),
+            new ScheduledJobDto(EXTERNAL, "即時行情", "英股即時價（盤中）",
+                    "盤中每 2 分鐘更新英股即時價至 Redis",
+                    "交易日 08:00–16:00 每 2 分鐘", "0 0/2 8-16 * * MON-FRI", LON),
+            new ScheduledJobDto(EXTERNAL, "即時行情", "台股分時收尾",
+                    "收盤後把台股當日分時 tick 收尾補齊",
+                    "交易日 14:00", "0 0 14 * * MON-FRI", TPE),
+            new ScheduledJobDto(EXTERNAL, "即時行情", "美股分時收尾",
+                    "收盤後把美股當日分時 tick 收尾補齊",
+                    "交易日 16:05", "0 5 16 * * MON-FRI", NYC),
+            new ScheduledJobDto(EXTERNAL, "即時行情", "英股分時收尾",
+                    "收盤後把英股當日分時 tick 收尾補齊",
+                    "交易日 17:00", "0 0 17 * * MON-FRI", LON),
+            new ScheduledJobDto(EXTERNAL, "收盤落庫", "台股收盤價落庫",
+                    "把 Redis 台股收盤價 dump 進 stock_price_history",
+                    "交易日 13:32", "0 32 13 * * MON-FRI", TPE),
+            new ScheduledJobDto(EXTERNAL, "收盤落庫", "台股收盤價校正",
+                    "用 FinMind 校正並覆寫台股當日收盤價",
+                    "交易日 16:00", "0 0 16 * * MON-FRI", TPE),
+            new ScheduledJobDto(EXTERNAL, "收盤落庫", "美股收盤價落庫",
+                    "把 Redis 美股收盤價 dump 進 DB",
+                    "交易日 16:02", "0 2 16 * * MON-FRI", NYC),
+            new ScheduledJobDto(EXTERNAL, "收盤落庫", "美股收盤價校正",
+                    "用 FinMind 校正並覆寫美股當日收盤價",
+                    "交易日 18:00", "0 0 18 * * MON-FRI", NYC),
+            new ScheduledJobDto(EXTERNAL, "收盤落庫", "英股收盤價落庫",
+                    "把 Redis 英股收盤價 dump 進 DB",
+                    "交易日 16:32", "0 32 16 * * MON-FRI", LON),
+            new ScheduledJobDto(EXTERNAL, "收盤落庫", "英股收盤價校正",
+                    "用 Yahoo Finance 校正並覆寫英股當日收盤價",
+                    "交易日 17:00", "0 0 17 * * MON-FRI", LON),
+            new ScheduledJobDto(EXTERNAL, "大盤指數", "台股加權指數刷新（午後）",
+                    "台股收盤後刷新加權指數",
+                    "交易日 14:00", "0 0 14 * * MON-FRI", TPE),
+            new ScheduledJobDto(EXTERNAL, "大盤指數", "台股加權指數刷新（傍晚）",
+                    "收盤後 3.5 小時再刷新一次，給官方 OpenAPI 更新時間",
+                    "交易日 17:00", "0 0 17 * * MON-FRI", TPE),
+            new ScheduledJobDto(EXTERNAL, "大盤指數", "台股加權指數刷新（隔日補抓）",
+                    "隔日早盤前最後一次 catch-up",
+                    "每日 08:30（週二~六）", "0 30 8 * * TUE-SAT", TPE),
+            new ScheduledJobDto(EXTERNAL, "匯率", "即期匯率（盤中）",
+                    "盤中每 5 分鐘從台銀牌告抓即期匯率",
+                    "交易日 09:00–15:55 每 5 分鐘", "0 0/5 9-15 * * MON-FRI", TPE),
+            new ScheduledJobDto(EXTERNAL, "匯率", "匯率收盤補抓",
+                    "收盤後走 FinMind 增量補匯率（涵蓋盤中漏抓）",
+                    "交易日 17:00", "0 0 17 * * MON-FRI", TPE),
+            new ScheduledJobDto(EXTERNAL, "基金", "基金淨值回補",
+                    "每日抓取所有基金淨值（NAV）",
+                    "每日 09:00", "0 0 9 * * *", TPE),
+            new ScheduledJobDto(EXTERNAL, "基金", "基金配息回補",
+                    "每日抓取所有基金配息",
+                    "每日 09:05", "0 5 9 * * *", TPE),
+            new ScheduledJobDto(EXTERNAL, "股利", "股票配息同步",
+                    "每交易日同步股票配息資料入庫",
+                    "交易日 17:00", "0 0 17 * * MON-FRI", TPE),
+            new ScheduledJobDto(EXTERNAL, "ETF 透視", "ETF 透視成份股回補",
+                    "每日重算 ETF 透視前 10 大成份股並增量補齊歷史收盤",
+                    "每日 18:30", "0 30 18 * * *", TPE),
+            new ScheduledJobDto(EXTERNAL, "財經新聞", "財經新聞抓取",
+                    "每日抓取財經新聞（06:00 早於 07:30 分析）",
+                    "每日 06:00 / 12:00 / 18:00", "0 0 6,12,18 * * *", TPE),
+            new ScheduledJobDto(EXTERNAL, "台股休市偵測", "台股臨時休市偵測",
+                    "開盤前每 15 分鐘偵測颱風／臨時休市，於 09:00 開盤前生效",
+                    "交易日 05:00–08:45 每 15 分鐘", "0 0/15 5-8 * * MON-FRI", TPE)
+    );
+
+    /** GET /api/bff/schedule-list —— 回傳全系統排程清單（33 筆靜態資料）。 */
+    @GetMapping
+    public List<ScheduledJobDto> list() {
+        return JOBS;
+    }
+}
