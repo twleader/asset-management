@@ -387,7 +387,7 @@ public class BackupService {
             log.info("Restore done: {}/{}", folder, filename);
             return BackupDto.RestoreResponse.builder()
                     .status("success")
-                    .preRestoreBackup(pre.getFilename())
+                    .preRestoreBackup(pre.filename())
                     .restoredFrom(folder + "/" + filename)
                     .build();
         } finally {

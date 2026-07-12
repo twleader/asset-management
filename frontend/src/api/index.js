@@ -338,7 +338,9 @@ export const bffApi = {
     getAll:    () => api.get('/funds'),
     create:    (data) => api.post('/funds', data),
     update:    (fundCode, data) => api.put(`/funds/${fundCode}`, data),
-    setActive: (fundCode, active) => api.patch(`/funds/${fundCode}/active`, { active })
+    setActive: (fundCode, active) => api.patch(`/funds/${fundCode}/active`, { active }),
+    // 銷售銀行下拉：走 fund-settings 自己的 BFF，與 snapshot-form 同源（business /api/settings/banks）
+    getBankOptions: () => api.get('/bff/fund-settings/bank-options')
   },
 
   // 代繳設定（Requirement 22）— 分類 + 代繳記錄走同一支 BFF

@@ -107,7 +107,8 @@ com.steven.assets/
 - **共享 / 跨頁 passthrough routes**（非單一頁面專屬，由 Spring Cloud Gateway 直接轉發至 business-services，服務跨頁共用的 store CRUD、下拉 lookups、SSE 與基金主檔；皆為刻意的共享資源，不另立 `/api/bff/{page}/**`）：
   - `SnapshotBffRoutes`：`/api/snapshots/**` → business-services（Pinia store 共用快照 CRUD；單頁資料仍走各自的 `/api/bff/{page}/**`）
   - `SettingsBffRoutes`：`/api/settings/**` → business-services（銀行 / 券商 / 存款類型 / 市場類型 / 待轉入資金類型的下拉 lookups，被多個表單頁共用；各設定頁的 CRUD 仍走 `/api/bff/{page}-settings/**`）
-  - `FundBffRoutes`：`/api/funds`、`/api/fund-nav/**`、`/api/fund-dividend/**` → business-services（FundSettingsView 基金主檔 CRUD 與 NAV / 配息回補，Requirement 19/20/21）。**慣例例外**：基金主檔頁直接沿用 `/api/funds` 資源 passthrough，未另設 `/api/bff/fund-settings/**`（基金主檔為跨頁共享資源）。SnapshotForm 讀同一份基金主檔，但走自己頁面專屬的 `/api/bff/snapshot-form/funds`（同樣 passthrough 至 `/api/funds`，符合「一頁一 BFF」）
+  - `FundBffRoutes`：`/api/funds`、`/api/fund-nav/**`、`/api/fund-dividend/**` → business-services（FundSettingsView 基金主檔 CRUD 與 NAV / 配息回補，Requirement 19/20/21）。**慣例例外**：基金主檔頁直接沿用 `/api/funds` 資源 passthrough（基金主檔為跨頁共享資源）。SnapshotForm 讀同一份基金主檔，但走自己頁面專屬的 `/api/bff/snapshot-form/funds`（同樣 passthrough 至 `/api/funds`，符合「一頁一 BFF」）
+  - `FundSettingsBffController`：`GET /api/bff/fund-settings/bank-options` → 過濾 active 後的銷售銀行下拉；與 SnapshotForm 的 lookups **同讀 business `/api/settings/banks`**（同義欄位同一來源），fund-settings 頁不再跨頁呼叫 `/api/bff/snapshot-form/lookups`（Task 175：一頁一 BFF 合規化）
   - `RealizedGainBffRoutes`：`/api/realized-gains/**` → business-services（RealizedGainView 的 Pinia store `gainApi` 共用已實現損益 CRUD；該頁另有 `RealizedGainBffController` 提供 `/api/bff/realized-gain` 聚合端點，passthrough 僅供 store 直接 CRUD 用，與 `SnapshotBffRoutes` 同屬「store 共用」例外）
   - `MarketDataBffRoutes`：`/api/market-data/**` → business-services（SSE 行情串流 `prices/stream` 等直接市場資料取用；`StockAnalysisBffRoutes` 另以 `/api/bff/stock-analysis/**` rewrite 至同一組端點）
 

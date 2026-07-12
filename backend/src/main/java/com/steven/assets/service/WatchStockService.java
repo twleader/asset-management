@@ -73,9 +73,9 @@ public class WatchStockService {
         if (orderedKeys == null || orderedKeys.isEmpty()) return;
         int cursor = 0;
         for (WatchStockDto.Key key : orderedKeys) {
-            if (key == null || key.getStockCode() == null || key.getMarket() == null) continue;
+            if (key == null || key.stockCode() == null || key.market() == null) continue;
             List<StockAlert> alerts = alertRepo.findByStockCodeAndMarket(
-                    key.getStockCode().trim().toUpperCase(), key.getMarket());
+                    key.stockCode().trim().toUpperCase(), key.market());
             alerts.sort(Comparator.comparingInt(a -> a.getDisplayOrder() != null ? a.getDisplayOrder() : 0));
             for (StockAlert a : alerts) {
                 a.setDisplayOrder(cursor++);
@@ -90,61 +90,64 @@ public class WatchStockService {
         }
         String stockName = stockMasterRepo.findByCodeAndMarket(code, market)
                 .map(s -> s.getName()).orElse(code);
-        WatchStockDto.Response r = WatchStockDto.Response.builder()
-                .stockCode(code)
-                .stockName(stockName)
-                .market(market)
-                .build();
 
-        // 報價
+        // 報價（先湊齊區域變數，最後一次 build 出不可變 record）
+        BigDecimal price = null, priceChange = null, changePercent = null,
+                buyPrice = null, sellPrice = null, openPrice = null, previousClose = null,
+                highPrice = null, lowPrice = null;
+        Long volume = null;
+        String tradingDate = null, priceUpdatedAt = null;
+        Boolean closed = null;
+
         Optional<PriceQueryService.LivePrice> priceOpt = priceQuery.getLive(code, market);
-        priceOpt.ifPresent(sp -> {
-            r.setPrice(sp.price());
-            r.setPriceChange(sp.priceChange());
-            r.setChangePercent(sp.changePercent());
-            r.setBuyPrice(sp.buyPrice());
-            r.setSellPrice(sp.sellPrice());
-            r.setOpenPrice(sp.openPrice());
-            r.setPreviousClose(sp.previousClose());
-            r.setHighPrice(sp.highPrice());
-            r.setLowPrice(sp.lowPrice());
-            r.setVolume(sp.volume());
-            r.setTradingDate(sp.tradingDate());
-            r.setPriceUpdatedAt(sp.updatedAt());
-            r.setClosed(sp.closed());
-        });
+        if (priceOpt.isPresent()) {
+            PriceQueryService.LivePrice sp = priceOpt.get();
+            price = sp.price();
+            priceChange = sp.priceChange();
+            changePercent = sp.changePercent();
+            buyPrice = sp.buyPrice();
+            sellPrice = sp.sellPrice();
+            openPrice = sp.openPrice();
+            previousClose = sp.previousClose();
+            highPrice = sp.highPrice();
+            lowPrice = sp.lowPrice();
+            volume = sp.volume();
+            tradingDate = sp.tradingDate();
+            priceUpdatedAt = sp.updatedAt();
+            closed = sp.closed();
+        }
 
         // 對於非交易時間或新加入觀察股票，買賣/開盤/昨收/最高/最低/成交量可能為 null
         // → 用最近的歷史收盤資料（StockPriceHistory）回填
-        if (r.getOpenPrice() == null || r.getHighPrice() == null || r.getLowPrice() == null
-                || r.getVolume() == null || r.getPreviousClose() == null) {
+        if (openPrice == null || highPrice == null || lowPrice == null
+                || volume == null || previousClose == null) {
             List<StockPriceHistory> recent = historyRepo.findRecentN(code, market, 2);
             if (!recent.isEmpty()) {
                 StockPriceHistory latest = recent.get(0);
-                if (r.getOpenPrice() == null) r.setOpenPrice(latest.getOpenPrice());
-                if (r.getHighPrice() == null) r.setHighPrice(latest.getHighPrice());
-                if (r.getLowPrice()  == null) r.setLowPrice(latest.getLowPrice());
-                if (r.getVolume()    == null && latest.getVolume() != null) {
-                    r.setVolume("台股".equals(market)
+                if (openPrice == null) openPrice = latest.getOpenPrice();
+                if (highPrice == null) highPrice = latest.getHighPrice();
+                if (lowPrice  == null) lowPrice = latest.getLowPrice();
+                if (volume    == null && latest.getVolume() != null) {
+                    volume = "台股".equals(market)
                             ? latest.getVolume() / 1000
-                            : latest.getVolume());
+                            : latest.getVolume();
                 }
-                if (r.getPreviousClose() == null) {
-                    if (recent.size() >= 2) r.setPreviousClose(recent.get(1).getClosePrice());
-                    else r.setPreviousClose(latest.getClosePrice());
+                if (previousClose == null) {
+                    previousClose = recent.size() >= 2
+                            ? recent.get(1).getClosePrice()
+                            : latest.getClosePrice();
                 }
             }
         }
 
-        // priceChange / changePercent 由 DTO 上的 price / previousClose 即時計算
-        if (r.getPrice() != null && r.getPreviousClose() != null
-                && r.getPreviousClose().signum() != 0) {
-            BigDecimal diff = r.getPrice().subtract(r.getPreviousClose());
-            r.setPriceChange(diff.setScale(4, RoundingMode.HALF_UP));
-            r.setChangePercent(diff
-                    .divide(r.getPreviousClose(), 6, RoundingMode.HALF_UP)
+        // priceChange / changePercent 由 price / previousClose 即時計算
+        if (price != null && previousClose != null && previousClose.signum() != 0) {
+            BigDecimal diff = price.subtract(previousClose);
+            priceChange = diff.setScale(4, RoundingMode.HALF_UP);
+            changePercent = diff
+                    .divide(previousClose, 6, RoundingMode.HALF_UP)
                     .multiply(BigDecimal.valueOf(100))
-                    .setScale(4, RoundingMode.HALF_UP));
+                    .setScale(4, RoundingMode.HALF_UP);
         }
 
         // 警示條件：列出該股票所有 alert 條件 label（依 displayOrder 升冪）
@@ -154,26 +157,50 @@ public class WatchStockService {
         // 不論警示是否設定／觸發，皆計算當前的月線(MA20)、季線(MA60)、年線(MA240)、KD；
         // 「警示條件」欄 MA% 條件的觸發價換算亦共用同一份即時均線值（同義欄位同一來源）
         TechnicalIndicatorService.FullIndicators ind = indicatorService.computeAll(code, market);
-        r.setConditions(buildConditions(alerts, cutoff, ind));
+        List<WatchStockDto.Condition> conditions = buildConditions(alerts, cutoff, ind);
 
         // 警示彙總：取該股最近一筆 lastTriggeredAt，且只顯示最後交易日（或當日）及前一日內的觸發
-        alerts.stream()
+        java.time.LocalDateTime lastTriggeredAt = null;
+        BigDecimal lastTriggeredPrice = null;
+        String lastTriggeredAlertType = null;
+        Optional<StockAlert> lastAlert = alerts.stream()
                 .filter(a -> a.getLastTriggeredAt() != null)
                 .filter(a -> cutoff == null || !a.getLastTriggeredAt().isBefore(cutoff))
-                .max(Comparator.comparing(StockAlert::getLastTriggeredAt))
-                .ifPresent(a -> {
-                    r.setLastTriggeredAt(a.getLastTriggeredAt());
-                    r.setLastTriggeredPrice(a.getLastTriggeredPrice());
-                    r.setLastTriggeredAlertType(a.getAlertType());
-                });
+                .max(Comparator.comparing(StockAlert::getLastTriggeredAt));
+        if (lastAlert.isPresent()) {
+            StockAlert a = lastAlert.get();
+            lastTriggeredAt = a.getLastTriggeredAt();
+            lastTriggeredPrice = a.getLastTriggeredPrice();
+            lastTriggeredAlertType = a.getAlertType();
+        }
 
-        r.setMonthlyMa(ind.monthlyMa());
-        r.setQuarterlyMa(ind.quarterlyMa());
-        r.setAnnualMa(ind.annualMa());
-        r.setKValue(ind.k());
-        r.setDValue(ind.d());
-
-        return r;
+        return WatchStockDto.Response.builder()
+                .stockCode(code)
+                .stockName(stockName)
+                .market(market)
+                .price(price)
+                .priceChange(priceChange)
+                .changePercent(changePercent)
+                .buyPrice(buyPrice)
+                .sellPrice(sellPrice)
+                .openPrice(openPrice)
+                .previousClose(previousClose)
+                .highPrice(highPrice)
+                .lowPrice(lowPrice)
+                .volume(volume)
+                .tradingDate(tradingDate)
+                .priceUpdatedAt(priceUpdatedAt)
+                .closed(closed)
+                .conditions(conditions)
+                .lastTriggeredAt(lastTriggeredAt)
+                .lastTriggeredPrice(lastTriggeredPrice)
+                .lastTriggeredAlertType(lastTriggeredAlertType)
+                .monthlyMa(ind.monthlyMa())
+                .quarterlyMa(ind.quarterlyMa())
+                .annualMa(ind.annualMa())
+                .kValue(ind.k())
+                .dValue(ind.d())
+                .build();
     }
 
     /**
@@ -182,32 +209,30 @@ public class WatchStockService {
      * 大盤無買賣盤口、無成交量定義 → buyPrice / sellPrice / volume 為 null。
      */
     private WatchStockDto.Response toIndexResponse(String code, String market) {
-        WatchStockDto.Response r = WatchStockDto.Response.builder()
-                .stockCode(code)
-                .stockName(TAIEX_INDEX_NAME)
-                .market(market)
-                .build();
+        BigDecimal price = null, priceChange = null, changePercent = null,
+                openPrice = null, previousClose = null, highPrice = null, lowPrice = null;
+        String tradingDate = null;
+        Boolean closed = null;
 
         List<TwseIndexDailyHistory> recent = twseDailyRepo.findTop60ByOrderByTradingDateDesc();
         if (!recent.isEmpty()) {
             TwseIndexDailyHistory latest = recent.get(0);
-            r.setPrice(latest.getClosePoint());
-            r.setOpenPrice(latest.getOpenPoint());
-            r.setHighPrice(latest.getHighPoint());
-            r.setLowPrice(latest.getLowPoint());
-            r.setTradingDate(latest.getTradingDate().toString());
-            r.setClosed(true);
+            price = latest.getClosePoint();
+            openPrice = latest.getOpenPoint();
+            highPrice = latest.getHighPoint();
+            lowPrice = latest.getLowPoint();
+            tradingDate = latest.getTradingDate().toString();
+            closed = true;
             if (recent.size() >= 2) {
-                r.setPreviousClose(recent.get(1).getClosePoint());
+                previousClose = recent.get(1).getClosePoint();
             }
-            if (r.getPrice() != null && r.getPreviousClose() != null
-                    && r.getPreviousClose().signum() != 0) {
-                BigDecimal diff = r.getPrice().subtract(r.getPreviousClose());
-                r.setPriceChange(diff.setScale(4, RoundingMode.HALF_UP));
-                r.setChangePercent(diff
-                        .divide(r.getPreviousClose(), 6, RoundingMode.HALF_UP)
+            if (price != null && previousClose != null && previousClose.signum() != 0) {
+                BigDecimal diff = price.subtract(previousClose);
+                priceChange = diff.setScale(4, RoundingMode.HALF_UP);
+                changePercent = diff
+                        .divide(previousClose, 6, RoundingMode.HALF_UP)
                         .multiply(BigDecimal.valueOf(100))
-                        .setScale(4, RoundingMode.HALF_UP));
+                        .setScale(4, RoundingMode.HALF_UP);
             }
         }
 
@@ -216,23 +241,45 @@ public class WatchStockService {
         java.time.LocalDateTime cutoff = recentTradingDayCutoff(market, StockAlertService.FRESHNESS_TRADING_DAYS);
         // 先算指標：MA 欄與「警示條件」欄 MA% 觸發價共用同一份即時均線值（同義欄位同一來源）
         TechnicalIndicatorService.FullIndicators ind = indicatorService.computeAll(code, market);
-        r.setConditions(buildConditions(alerts, cutoff, ind));
-        alerts.stream()
+        List<WatchStockDto.Condition> conditions = buildConditions(alerts, cutoff, ind);
+
+        java.time.LocalDateTime lastTriggeredAt = null;
+        BigDecimal lastTriggeredPrice = null;
+        String lastTriggeredAlertType = null;
+        Optional<StockAlert> lastAlert = alerts.stream()
                 .filter(a -> a.getLastTriggeredAt() != null)
                 .filter(a -> cutoff == null || !a.getLastTriggeredAt().isBefore(cutoff))
-                .max(Comparator.comparing(StockAlert::getLastTriggeredAt))
-                .ifPresent(a -> {
-                    r.setLastTriggeredAt(a.getLastTriggeredAt());
-                    r.setLastTriggeredPrice(a.getLastTriggeredPrice());
-                    r.setLastTriggeredAlertType(a.getAlertType());
-                });
+                .max(Comparator.comparing(StockAlert::getLastTriggeredAt));
+        if (lastAlert.isPresent()) {
+            StockAlert a = lastAlert.get();
+            lastTriggeredAt = a.getLastTriggeredAt();
+            lastTriggeredPrice = a.getLastTriggeredPrice();
+            lastTriggeredAlertType = a.getAlertType();
+        }
 
-        r.setMonthlyMa(ind.monthlyMa());
-        r.setQuarterlyMa(ind.quarterlyMa());
-        r.setAnnualMa(ind.annualMa());
-        r.setKValue(ind.k());
-        r.setDValue(ind.d());
-        return r;
+        return WatchStockDto.Response.builder()
+                .stockCode(code)
+                .stockName(TAIEX_INDEX_NAME)
+                .market(market)
+                .price(price)
+                .priceChange(priceChange)
+                .changePercent(changePercent)
+                .openPrice(openPrice)
+                .previousClose(previousClose)
+                .highPrice(highPrice)
+                .lowPrice(lowPrice)
+                .tradingDate(tradingDate)
+                .closed(closed)
+                .conditions(conditions)
+                .lastTriggeredAt(lastTriggeredAt)
+                .lastTriggeredPrice(lastTriggeredPrice)
+                .lastTriggeredAlertType(lastTriggeredAlertType)
+                .monthlyMa(ind.monthlyMa())
+                .quarterlyMa(ind.quarterlyMa())
+                .annualMa(ind.annualMa())
+                .kValue(ind.k())
+                .dValue(ind.d())
+                .build();
     }
 
     /**

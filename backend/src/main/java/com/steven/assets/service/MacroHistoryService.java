@@ -79,6 +79,56 @@ public class MacroHistoryService {
         this.priceServiceClient = WebClient.builder().baseUrl(externalUrl).build();
     }
 
+    // ========== 股市分析頁查詢（read）— 由 MacroHistoryController 委派（Controller 不直接讀 repository） ==========
+
+    /** 台灣人均 GDP 逐年序列（升冪）；since 非 null 時只回該年（含）以後。 */
+    @Transactional(readOnly = true)
+    public List<TaiwanGdpPerCapitaHistory> getTaiwanGdp(Integer since) {
+        return since == null
+                ? gdpRepo.findAllByOrderByYearAsc()
+                : gdpRepo.findByYearGreaterThanEqualOrderByYearAsc(since);
+    }
+
+    /** 日本人均 GDP 逐年序列（升冪）；since 非 null 時只回該年（含）以後。 */
+    @Transactional(readOnly = true)
+    public List<JapanGdpPerCapitaHistory> getJapanGdp(Integer since) {
+        return since == null
+                ? japanGdpRepo.findAllByOrderByYearAsc()
+                : japanGdpRepo.findByYearGreaterThanEqualOrderByYearAsc(since);
+    }
+
+    /** 韓國人均 GDP 逐年序列（升冪）；since 非 null 時只回該年（含）以後。 */
+    @Transactional(readOnly = true)
+    public List<KoreaGdpPerCapitaHistory> getKoreaGdp(Integer since) {
+        return since == null
+                ? koreaGdpRepo.findAllByOrderByYearAsc()
+                : koreaGdpRepo.findByYearGreaterThanEqualOrderByYearAsc(since);
+    }
+
+    /** 台股大盤日線（升冪）；from/to 皆有回區間、僅 from 回該日起、皆無回全部。 */
+    @Transactional(readOnly = true)
+    public List<TwseIndexDailyHistory> getTwseDaily(LocalDate from, LocalDate to) {
+        if (from != null && to != null) {
+            return twseDailyRepo.findByTradingDateBetweenOrderByTradingDateAsc(from, to);
+        }
+        if (from != null) {
+            return twseDailyRepo.findByTradingDateGreaterThanEqualOrderByTradingDateAsc(from);
+        }
+        return twseDailyRepo.findAllByOrderByTradingDateAsc();
+    }
+
+    /** 海外指數日線（升冪）；from/to 皆有回區間、僅 from 回該日起、皆無回該 code 全部。 */
+    @Transactional(readOnly = true)
+    public List<UsIndexDailyHistory> getUsDaily(String code, LocalDate from, LocalDate to) {
+        if (from != null && to != null) {
+            return usDailyRepo.findByIndexCodeAndTradingDateBetweenOrderByTradingDateAsc(code, from, to);
+        }
+        if (from != null) {
+            return usDailyRepo.findByIndexCodeAndTradingDateGreaterThanEqualOrderByTradingDateAsc(code, from);
+        }
+        return usDailyRepo.findByIndexCodeOrderByTradingDateAsc(code);
+    }
+
     /**
      * 台灣人均 GDP + 實質 GDP 成長率回補：主計總處（DGBAS）為主、IMF 為備援。
      * DGBAS NA8101A1A 提供官方逐年實際值（1951 起、無未來預測），優先採用；

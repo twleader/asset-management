@@ -37,10 +37,10 @@ public class BackupController {
     /** 還原指定備份。需於 body 內附帶 confirmation = "確認還原"。 */
     @PostMapping("/restore")
     public BackupDto.RestoreResponse restore(@RequestBody BackupDto.RestoreRequest req) {
-        if (req == null || !CONFIRMATION_PHRASE.equals(req.getConfirmation())) {
+        if (req == null || !CONFIRMATION_PHRASE.equals(req.confirmation())) {
             throw new IllegalArgumentException("請輸入「" + CONFIRMATION_PHRASE + "」以確認還原");
         }
-        return service.runRestore(req.getFolder(), req.getFilename());
+        return service.runRestore(req.folder(), req.filename());
     }
 
     /** 取得保留代數設定（含啟用開關）。 */
@@ -59,8 +59,8 @@ public class BackupController {
     @PutMapping("/settings")
     public BackupDto.SettingResponse updateSettings(@RequestBody BackupDto.SettingRequest req) {
         BackupSetting s = service.updateSetting(
-                req.getManualRetention(), req.getDailyRetention(),
-                req.getWeeklyRetention(), req.getBackupEnabled());
+                req.manualRetention(), req.dailyRetention(),
+                req.weeklyRetention(), req.backupEnabled());
         return BackupDto.SettingResponse.builder()
                 .manualRetention(s.getManualRetention())
                 .dailyRetention(s.getDailyRetention())

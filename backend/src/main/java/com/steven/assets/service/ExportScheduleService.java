@@ -79,17 +79,17 @@ public class ExportScheduleService {
     /** upsert 當前使用者設定。 */
     public ExportScheduleDto.SettingResponse updateForCurrentUser(ExportScheduleDto.SettingRequest req) {
         Long ownerId = requireOwnerId();
-        int hour = req.getRunHour() == null ? 8 : req.getRunHour();
-        int minute = req.getRunMinute() == null ? 0 : req.getRunMinute();
+        int hour = req.runHour() == null ? 8 : req.runHour();
+        int minute = req.runMinute() == null ? 0 : req.runMinute();
         if (hour < 0 || hour > 23) throw new IllegalArgumentException("執行時(hour)必須介於 0～23");
         if (minute < 0 || minute > 59) throw new IllegalArgumentException("執行分(minute)必須介於 0～59");
-        String subpath = normalizeSubpath(req.getOutputSubpath());
+        String subpath = normalizeSubpath(req.outputSubpath());
         resolveDir(subpath); // 驗證不跳脫基底（丟出即擋下）
 
         ExportScheduleSetting s = settingRepo.findByOwnerUserId(ownerId).orElseGet(() ->
                 ExportScheduleSetting.builder().ownerUserId(ownerId).build());
         s.setOwnerUserId(ownerId);
-        s.setEnabled(Boolean.TRUE.equals(req.getEnabled()));
+        s.setEnabled(Boolean.TRUE.equals(req.enabled()));
         s.setRunHour(hour);
         s.setRunMinute(minute);
         s.setOutputSubpath(subpath);

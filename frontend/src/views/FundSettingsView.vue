@@ -130,12 +130,12 @@ const rules = {
 async function load() {
   loading.value = true
   try {
-    const [list, lookups] = await Promise.all([
+    const [list, banks] = await Promise.all([
       bffApi.fundSettings.getAll(),
-      bffApi.snapshotForm.getLookups()
+      bffApi.fundSettings.getBankOptions()
     ])
     funds.value = list
-    bankOptions.value = lookups.banks.map(b => ({ value: b.id, label: b.displayName }))
+    bankOptions.value = banks.map(b => ({ value: b.id, label: b.displayName }))
   } finally { loading.value = false }
 }
 
