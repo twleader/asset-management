@@ -59,6 +59,52 @@ public class StockMasterService {
         }
     }
 
+    /**
+     * 查詢股票名稱：本地 {@code stock} 主檔優先 → 查無時打外部行情（台股 FinMind / 美股‧英股 Yahoo）
+     * → 查到即 {@link #upsert} 回主檔（首次寫入順帶背景觸發 10 年歷史回補）。回傳空字串代表查無。
+     * 0000＝台股大盤特例直接回「台股大盤」（不打外部、不寫主檔）；美股/英股無 0000 代號回空字串
+     * （避免 Yahoo fuzzy match 回隨機公司後污染主檔）。
+     *
+     * <p>刻意「不」加 {@code @Transactional}：外部 HTTP fetch 期間不佔用 DB 連線；{@link #upsert} 自帶交易。
+     */
+    public String resolveName(String code, String market) {
+        String upperCode = code.trim().toUpperCase();
+        if ("0000".equals(upperCode) && "台股".equals(market)) return "台股大盤";
+        if ("0000".equals(upperCode) && ("美股".equals(market) || "英股".equals(market))) return "";
+
+        String name = stockMasterRepo.findByCodeAndMarket(upperCode, market)
+                .map(s -> s.getName())
+                .orElse("");
+        if (name.isEmpty()) {
+            name = fetchExternalName(upperCode, market);
+            // 查到後存入主檔，下次直接用本地（新標的順帶背景觸發 10 年歷史回補）
+            if (!name.isEmpty()) {
+                upsert(upperCode, market, name);
+            }
+        }
+        return name;
+    }
+
+    /**
+     * 反向查找：依股名精確匹配回股票代號（只查本地主檔，不打外部——FinMind/Yahoo 為 code→name 設計，反查不可靠）。
+     * 空名稱回空字串；「台股大盤」＋台股特例回 0000；查無回空字串。
+     */
+    public String resolveCode(String name, String market) {
+        String trimmed = name.trim();
+        if (trimmed.isEmpty()) return "";
+        if ("台股大盤".equals(trimmed) && "台股".equals(market)) return "0000";
+        return stockMasterRepo.findFirstByNameAndMarketOrderByCodeAsc(trimmed, market)
+                .map(s -> s.getCode())
+                .orElse("");
+    }
+
+    /** market → 外部股名補齊分派（台股 FinMind、英股/美股 Yahoo）。 */
+    private String fetchExternalName(String code, String market) {
+        if ("台股".equals(market)) return historicalDataService.fetchTwStockName(code);
+        if ("英股".equals(market)) return historicalDataService.fetchUkStockName(code);
+        return historicalDataService.fetchUsStockName(code);
+    }
+
     /** 背景觸發單檔 10 年歷史回補（proxy 至 ext-materials；今日列仍獨佔給 ClosePersister）。 */
     private void scheduleBackfill(String code, String market) {
         final LocalDate since = LocalDate.now().minusYears(10);

@@ -4377,3 +4377,27 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - [x] 174.5 測試：`AssetServiceTest` 加 roll 四案例（過去→roll、當日→skip、未來→skip、無快照→false）；新增 `SnapshotDateRollSchedulerTest`（逐 owner 呼叫、單一失敗不中斷、統計）。
 - [x] 174.6 Docker：`--no-cache` 重 build business-services、recreate；查 log「roll 最新快照 … → 當日」＋歷年資產頁最後一列日期由過去日期變當日、股票改用即時價。
 - [ ] 174.7 commit + 兩段式 merge。
+
+### Task 175：全專案稽核——修正 4 項規範違反（分層 / DTO record / 一頁一 BFF）
+
+對應 Requirements: 架構規範（[CLAUDE.md](CLAUDE.md) / [structure.md](spec/steering/structure.md)）；無功能契約變更（純結構重構）
+
+#### 需求
+
+全專案稽核（註解/文件一致性後續）發現 4 處違反既有架構規範，行為不變但需依規範重構，避免規範漂移。
+
+#### 設計決策
+
+- **一律行為等價**：4 項皆為結構調整，對外 API 契約（路徑、JSON 欄位）不變；#4 僅新增一支 BFF endpoint。
+- **DTO record 保值**：`StockAlertDto.Request` 以 compact constructor 保留 `active` 預設 `true`（JSON 省略時視為啟用，等同原 `@Data` 欄位初始化）；`WatchStockDto.Response`／`StockAlertDto.Response` 的 setter 累積建構改為區域變數湊齊後單次 `builder().build()`，逐欄等價。record 反序列化走 canonical constructor、序列化欄位名不變，前端零改動。
+- **lookup 下沉放主檔 service**：股票 name↔code 查詢（含外部 fallback + upsert 副作用）搬到 `StockMasterService`（其 javadoc 原即宣告為 `stock` 主檔唯一寫入入口），`resolveName` 刻意不加 `@Transactional`（外部 HTTP 不佔 DB 連線）；`@Pattern` 白名單留在 controller web 層（Requirement 29 資安）。
+- **同義欄位同源**：fund-settings 銀行下拉與 snapshot-form lookups 同讀 business `/api/settings/banks`，於 BFF 端過濾 active（前端只 render）。
+
+#### 實作
+
+- [x] 175.1 #1 分層：`MacroHistoryController` 5 個 GET 的 repository 直讀下沉為 `MacroHistoryService.getTaiwanGdp/getJapanGdp/getKoreaGdp/getTwseDaily/getUsDaily`；controller 移除 5 個 repository 注入，只保留 service 委派。
+- [x] 175.2 #2 分層：`StockAlertController.lookupName/lookupCode` 的本地查主檔＋外部 fallback＋upsert 下沉為 `StockMasterService.resolveName/resolveCode`；controller 移除 `StockRepository`、`HistoricalDataService` 注入，僅保留 `@Pattern` 驗證後委派。
+- [x] 175.3 #3 DTO record：`BackupDto`、`ExportScheduleDto`、`StockAlertDto`、`WatchStockDto` 全部巢狀型別由 `@Data class` 改為不可變 `record`；修 `BackupController`／`BackupService`／`ExportScheduleService`／`StockAlertService`（含 `toResponse` 改寫）／`WatchStockService`（含 `toResponse`／`toIndexResponse` 改寫）呼叫端 accessor。
+- [x] 175.4 #4 一頁一 BFF：新增 `FundSettingsBffController`（`GET /api/bff/fund-settings/bank-options`，過濾 active）；`api/index.js` 加 `fundSettings.getBankOptions`；`FundSettingsView` 改呼叫自己頁的 BFF，不再跨頁打 `bffApi.snapshotForm.getLookups()`。
+- [x] 175.5 驗證：backend `mvn compile` + `mvn test`（既有測試除 pre-existing 破損的 `AssetSnapshotControllerTest` 外全綠）、bff `mvn compile`；Docker `--no-cache` 重 build business-services / bff / frontend、recreate 後煙霧測試受影響端點。
+- [ ] 175.6 commit + 兩段式 merge。

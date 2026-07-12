@@ -5,11 +5,6 @@ import com.steven.assets.model.KoreaGdpPerCapitaHistory;
 import com.steven.assets.model.TaiwanGdpPerCapitaHistory;
 import com.steven.assets.model.TwseIndexDailyHistory;
 import com.steven.assets.model.UsIndexDailyHistory;
-import com.steven.assets.repository.JapanGdpPerCapitaHistoryRepository;
-import com.steven.assets.repository.KoreaGdpPerCapitaHistoryRepository;
-import com.steven.assets.repository.TaiwanGdpPerCapitaHistoryRepository;
-import com.steven.assets.repository.TwseIndexDailyHistoryRepository;
-import com.steven.assets.repository.UsIndexDailyHistoryRepository;
 import com.steven.assets.service.MacroHistoryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -43,19 +38,12 @@ public class MacroHistoryController {
                     MacroHistoryService.TOTAL_RETURN_US_INDEX_CODES.stream())
             .collect(java.util.stream.Collectors.toUnmodifiableSet());
 
-    private final TaiwanGdpPerCapitaHistoryRepository gdpRepo;
-    private final JapanGdpPerCapitaHistoryRepository japanGdpRepo;
-    private final KoreaGdpPerCapitaHistoryRepository koreaGdpRepo;
-    private final TwseIndexDailyHistoryRepository twseDailyRepo;
-    private final UsIndexDailyHistoryRepository usDailyRepo;
     private final MacroHistoryService macroHistoryService;
 
     @GetMapping("/taiwan-gdp")
     public List<TaiwanGdpPerCapitaHistory> getTaiwanGdp(
             @RequestParam(required = false) Integer since) {
-        return since == null
-                ? gdpRepo.findAllByOrderByYearAsc()
-                : gdpRepo.findByYearGreaterThanEqualOrderByYearAsc(since);
+        return macroHistoryService.getTaiwanGdp(since);
     }
 
     @PostMapping("/taiwan-gdp/refresh-from-imf")
@@ -66,9 +54,7 @@ public class MacroHistoryController {
     @GetMapping("/japan-gdp")
     public List<JapanGdpPerCapitaHistory> getJapanGdp(
             @RequestParam(required = false) Integer since) {
-        return since == null
-                ? japanGdpRepo.findAllByOrderByYearAsc()
-                : japanGdpRepo.findByYearGreaterThanEqualOrderByYearAsc(since);
+        return macroHistoryService.getJapanGdp(since);
     }
 
     @PostMapping("/japan-gdp/refresh-from-imf")
@@ -79,9 +65,7 @@ public class MacroHistoryController {
     @GetMapping("/korea-gdp")
     public List<KoreaGdpPerCapitaHistory> getKoreaGdp(
             @RequestParam(required = false) Integer since) {
-        return since == null
-                ? koreaGdpRepo.findAllByOrderByYearAsc()
-                : koreaGdpRepo.findByYearGreaterThanEqualOrderByYearAsc(since);
+        return macroHistoryService.getKoreaGdp(since);
     }
 
     @PostMapping("/korea-gdp/refresh-from-imf")
@@ -93,13 +77,7 @@ public class MacroHistoryController {
     public List<TwseIndexDailyHistory> getTwseDaily(
             @RequestParam(required = false) LocalDate from,
             @RequestParam(required = false) LocalDate to) {
-        if (from != null && to != null) {
-            return twseDailyRepo.findByTradingDateBetweenOrderByTradingDateAsc(from, to);
-        }
-        if (from != null) {
-            return twseDailyRepo.findByTradingDateGreaterThanEqualOrderByTradingDateAsc(from);
-        }
-        return twseDailyRepo.findAllByOrderByTradingDateAsc();
+        return macroHistoryService.getTwseDaily(from, to);
     }
 
     @PostMapping("/twse-daily-index/refresh")
@@ -114,13 +92,7 @@ public class MacroHistoryController {
             @RequestParam String code,
             @RequestParam(required = false) LocalDate from,
             @RequestParam(required = false) LocalDate to) {
-        if (from != null && to != null) {
-            return usDailyRepo.findByIndexCodeAndTradingDateBetweenOrderByTradingDateAsc(code, from, to);
-        }
-        if (from != null) {
-            return usDailyRepo.findByIndexCodeAndTradingDateGreaterThanEqualOrderByTradingDateAsc(code, from);
-        }
-        return usDailyRepo.findByIndexCodeOrderByTradingDateAsc(code);
+        return macroHistoryService.getUsDaily(code, from, to);
     }
 
     @PostMapping("/us-daily-index/refresh")

@@ -68,30 +68,30 @@ public class StockAlertService {
         int maxOrder = alertRepo.findAllByOrderByDisplayOrderAsc().stream()
                 .mapToInt(a -> a.getDisplayOrder() != null ? a.getDisplayOrder() : 0)
                 .max().orElse(0);
-        String code = req.getStockCode().trim().toUpperCase();
-        assertNameMatchesCode(code, req.getMarket(), req.getStockName());
-        assertNoDuplicate(code, req.getMarket(), req.getAlertType(),
-                req.getMaPeriod(), req.getThreshold(), null, req.getStockName());
+        String code = req.stockCode().trim().toUpperCase();
+        assertNameMatchesCode(code, req.market(), req.stockName());
+        assertNoDuplicate(code, req.market(), req.alertType(),
+                req.maPeriod(), req.threshold(), null, req.stockName());
         StockAlert alert = StockAlert.builder()
                 .ownerUserId(tenantGuard.requireCurrentUserId())
                 .stockCode(code)
-                .market(req.getMarket())
-                .alertType(req.getAlertType())
-                .maPeriod(req.getMaPeriod())
-                .threshold(req.getThreshold())
-                .active(req.getActive() != null ? req.getActive() : true)
+                .market(req.market())
+                .alertType(req.alertType())
+                .maPeriod(req.maPeriod())
+                .threshold(req.threshold())
+                .active(req.active() != null ? req.active() : true)
                 .displayOrder(maxOrder + 1)
                 .build();
         // 0000 = 台股大盤：不寫入 stock 主檔（避免被排程當真股票抓價，價格走 twse_index_daily_history）
-        boolean isTaiex = "0000".equals(code) && "台股".equals(req.getMarket());
-        if (!isTaiex && req.getStockName() != null && !req.getStockName().isBlank()) {
-            stockMasterService.upsert(code, req.getMarket(), req.getStockName().trim());
+        boolean isTaiex = "0000".equals(code) && "台股".equals(req.market());
+        if (!isTaiex && req.stockName() != null && !req.stockName().isBlank()) {
+            stockMasterService.upsert(code, req.market(), req.stockName().trim());
         }
         StockAlert saved = alertRepo.save(alert);
         // 通知收件人（Task 125）：null 視為「未指定」→ 預設全部收件人（沿用既有「全部都收」直覺）；
         // 空 list 則代表「不寄給任何人」。
-        List<Long> recipientIds = req.getRecipientIds() != null
-                ? req.getRecipientIds()
+        List<Long> recipientIds = req.recipientIds() != null
+                ? req.recipientIds()
                 : notificationRecipientService.findAll().stream()
                         .map(NotificationRecipientDto.Response::id).toList();
         replaceRecipients(saved.getId(), recipientIds);
@@ -139,24 +139,24 @@ public class StockAlertService {
         StockAlert alert = alertRepo.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Alert not found: " + id));
         tenantGuard.assertOwned(alert.getOwnerUserId());
-        String code = req.getStockCode().trim().toUpperCase();
-        assertNameMatchesCode(code, req.getMarket(), req.getStockName());
-        assertNoDuplicate(code, req.getMarket(), req.getAlertType(),
-                req.getMaPeriod(), req.getThreshold(), id, req.getStockName());
+        String code = req.stockCode().trim().toUpperCase();
+        assertNameMatchesCode(code, req.market(), req.stockName());
+        assertNoDuplicate(code, req.market(), req.alertType(),
+                req.maPeriod(), req.threshold(), id, req.stockName());
         alert.setStockCode(code);
-        alert.setMarket(req.getMarket());
-        boolean isTaiex = "0000".equals(code) && "台股".equals(req.getMarket());
-        if (!isTaiex && req.getStockName() != null && !req.getStockName().isBlank()) {
-            stockMasterService.upsert(code, req.getMarket(), req.getStockName().trim());
+        alert.setMarket(req.market());
+        boolean isTaiex = "0000".equals(code) && "台股".equals(req.market());
+        if (!isTaiex && req.stockName() != null && !req.stockName().isBlank()) {
+            stockMasterService.upsert(code, req.market(), req.stockName().trim());
         }
-        alert.setAlertType(req.getAlertType());
-        alert.setMaPeriod(req.getMaPeriod());
-        alert.setThreshold(req.getThreshold());
-        if (req.getActive() != null) alert.setActive(req.getActive());
+        alert.setAlertType(req.alertType());
+        alert.setMaPeriod(req.maPeriod());
+        alert.setThreshold(req.threshold());
+        if (req.active() != null) alert.setActive(req.active());
         StockAlert saved = alertRepo.save(alert);
         // 通知收件人（Task 125）：非 null 才覆寫；null 視為「本次未更動收件人」，保留既有 join。
-        if (req.getRecipientIds() != null) {
-            replaceRecipients(saved.getId(), req.getRecipientIds());
+        if (req.recipientIds() != null) {
+            replaceRecipients(saved.getId(), req.recipientIds());
         }
         return toResponse(saved);
     }
@@ -697,9 +697,6 @@ public class StockAlertService {
     // ===== Mapping =====
 
     private StockAlertDto.Response toResponse(StockAlert a) {
-        StockAlertDto.Response r = new StockAlertDto.Response();
-        r.setId(a.getId());
-        r.setStockCode(a.getStockCode());
         String name;
         if ("0000".equals(a.getStockCode()) && "台股".equals(a.getMarket())) {
             name = "台股大盤";
@@ -707,26 +704,28 @@ public class StockAlertService {
             name = stockMasterRepo.findByCodeAndMarket(a.getStockCode(), a.getMarket())
                     .map(s -> s.getName()).orElse(a.getStockCode());
         }
-        r.setStockName(name);
-        r.setMarket(a.getMarket());
-        r.setAlertType(a.getAlertType());
-        r.setMaPeriod(a.getMaPeriod());
-        r.setThreshold(a.getThreshold());
-        r.setActive(a.getActive());
-        r.setRecipientIds(recipientLinkRepo.findRecipientIdsByAlertId(a.getId()));   // Task 125：回填選定收件人
         // 觸發時間 / 股價 / MA / K / D：全部用觸發時凍結值，只傳「最後一個交易日（或交易當日）及前一日」內的；超過視為過期不傳
         java.time.LocalDateTime cutoff = recentTradingDayCutoff(a.getMarket(), FRESHNESS_TRADING_DAYS);
-        if (a.getLastTriggeredAt() != null
-                && (cutoff == null || !a.getLastTriggeredAt().isBefore(cutoff))) {
-            r.setLastTriggeredAt(a.getLastTriggeredAt());
-            r.setLastTriggeredPrice(a.getLastTriggeredPrice());
-            r.setLastTriggeredMaValue(a.getLastTriggeredMaValue());
-            r.setLastTriggeredKdValue(a.getLastTriggeredKdValue());
-            r.setLastTriggeredDValue(a.getLastTriggeredDValue());
-        }
-        r.setCreatedAt(a.getCreatedAt());
-        r.setConditionLabel(buildLabel(a, maIndicatorsForLabel(a)));
-        return r;
+        boolean fresh = a.getLastTriggeredAt() != null
+                && (cutoff == null || !a.getLastTriggeredAt().isBefore(cutoff));
+        return StockAlertDto.Response.builder()
+                .id(a.getId())
+                .stockCode(a.getStockCode())
+                .stockName(name)
+                .market(a.getMarket())
+                .alertType(a.getAlertType())
+                .maPeriod(a.getMaPeriod())
+                .threshold(a.getThreshold())
+                .active(a.getActive())
+                .recipientIds(recipientLinkRepo.findRecipientIdsByAlertId(a.getId()))   // Task 125：回填選定收件人
+                .lastTriggeredAt(fresh ? a.getLastTriggeredAt() : null)
+                .lastTriggeredPrice(fresh ? a.getLastTriggeredPrice() : null)
+                .lastTriggeredMaValue(fresh ? a.getLastTriggeredMaValue() : null)
+                .lastTriggeredKdValue(fresh ? a.getLastTriggeredKdValue() : null)
+                .lastTriggeredDValue(fresh ? a.getLastTriggeredDValue() : null)
+                .createdAt(a.getCreatedAt())
+                .conditionLabel(buildLabel(a, maIndicatorsForLabel(a)))
+                .build();
     }
 
     /**
