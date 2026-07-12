@@ -175,6 +175,56 @@ class RetirementProjectionServiceTest {
                 "累積期流出應約等於退休前年支出，實際=" + y1.expense());
     }
 
+    @Test
+    void laborAnnuity_stepsUpByCumulativeCpiEvery5pct() {
+        // 勞保條例 §65-4：年金非逐年隨通膨，累計 CPI 達 ±5% 之年才依實際累計漲幅調整並重設基準。
+        // 通膨 2% → 每 3 年累計達 6.12% 跳一階（×1.02^3）；階內維持不變。
+        InvestmentProfile p = base();                        // 通膨 2%
+        p.setBirthDate(LocalDate.now().minusYears(60));      // 現齡 60
+        p.setRetirementDate(LocalDate.now().plusYears(1));   // 退休 61
+        p.setRetirementAnnualExpense(new BigDecimal("500000"));
+        p.setRetirementAnnualReturnRate(new BigDecimal("3"));
+        p.setLaborInsuranceMonthly(new BigDecimal("20000")); // 月領 2 萬 → 年 24 萬（起領年基準）
+        p.setLaborInsuranceStartDate(LocalDate.now().plusYears(2)); // 起領＝62 歲
+
+        RetirementProjectionDto r = svc.project(p, new BigDecimal("30000000"), List.of());
+        assertTrue(r.available());
+
+        // 起領年與其後 2 年（累計 2%、4.04% < 5%）維持基準年金 24 萬
+        assertEquals(0, new BigDecimal("240000").compareTo(pointAtAge(r, 62).income()), "起領年基準");
+        assertEquals(0, new BigDecimal("240000").compareTo(pointAtAge(r, 63).income()), "累計 2% 未調");
+        assertEquals(0, new BigDecimal("240000").compareTo(pointAtAge(r, 64).income()), "累計 4.04% 未調");
+
+        // 第 3 年（累計 6.12% ≥ 5%）依實際累計漲幅調升：240000×1.02^3 ≈ 254690（非固定 5% 的 252000）
+        BigDecimal step1 = pointAtAge(r, 65).income();
+        assertEquals(0, new BigDecimal("254690").compareTo(step1), "第3年依實際累計漲幅跳升，實際=" + step1);
+        // 階內（65~67 歲）維持不變，直到下一次累計再達 5%
+        assertEquals(0, step1.compareTo(pointAtAge(r, 66).income()), "階內不變");
+        assertEquals(0, step1.compareTo(pointAtAge(r, 67).income()), "階內不變");
+        // 第 6 年再跳一階：240000×1.02^6 ≈ 270279
+        assertEquals(0, new BigDecimal("270279").compareTo(pointAtAge(r, 68).income()),
+                "第6年再跳一階，實際=" + pointAtAge(r, 68).income());
+    }
+
+    @Test
+    void laborAnnuity_noAdjustmentWhenZeroInflation() {
+        // 通膨 0 → 累計永不達 5%，年金恆為基準（倍數恆為 1），驗證 laborAnnuityMultiplier 的 infl≈0 分支
+        InvestmentProfile p = base();
+        p.setAssumedAnnualInflationRate(BigDecimal.ZERO);
+        p.setBirthDate(LocalDate.now().minusYears(60));
+        p.setRetirementDate(LocalDate.now().plusYears(1));
+        p.setRetirementAnnualExpense(new BigDecimal("500000"));
+        p.setRetirementAnnualReturnRate(new BigDecimal("3"));
+        p.setLaborInsuranceMonthly(new BigDecimal("20000"));
+        p.setLaborInsuranceStartDate(LocalDate.now().plusYears(2));
+
+        RetirementProjectionDto r = svc.project(p, new BigDecimal("30000000"), List.of());
+        assertTrue(r.available());
+        assertEquals(0, new BigDecimal("240000").compareTo(pointAtAge(r, 62).income()));
+        assertEquals(0, new BigDecimal("240000").compareTo(pointAtAge(r, 75).income()), "通膨 0 永不調整");
+        assertEquals(0, new BigDecimal("240000").compareTo(pointAtAge(r, 90).income()), "通膨 0 永不調整");
+    }
+
     private RetirementProjectionDto.Point pointAtAge(RetirementProjectionDto r, int age) {
         return r.points().stream().filter(pt -> pt.age() == age).findFirst().orElse(null);
     }

@@ -23,7 +23,7 @@ import java.util.List;
  *
  * <p>每一年的順序：期初餘額先以當期報酬率複利成長 → 累積期加「年薪 − 退休前年生活費」淨投入（皆依通膨逐年膨脹）、
  * 退休後扣年生活費（長照前／長照後兩階段，×(1+通膨)^距今年數）→
- * 加勞保年金（自起領年起，每年）與勞退一次領（領取當年）→ 扣當年到期的特定大筆花費（依通膨換算為名目值）→ 記錄年末餘額。
+ * 加勞保年金（自起領年起，每年，依勞保條例 §65-4 CPI 累計±5% 階梯調整、見 {@link #laborAnnuityMultiplier}）與勞退一次領（領取當年）→ 扣當年到期的特定大筆花費（依通膨換算為名目值）→ 記錄年末餘額。
  * 皆為年granularity 近似，供規劃用折線圖與白話結論，不追求精算精度。
  *
  * <p>金額試算內部以 {@code double} 運算（資產量級遠小於 2^53，精度足夠），輸出前四捨五入為 {@link BigDecimal}（元）。
@@ -40,6 +40,13 @@ public class RetirementProjectionService {
 
     /** 長照起始年齡預設值（歲）：使用者有填長照後年生活費但未指定起始年齡時採用。 */
     private static final int DEFAULT_LTC_START_AGE = 80;
+
+    /**
+     * 勞保年金物價調整門檻（勞工保險條例第65條之4）：自起領年（或上次調整年）起，
+     * CPI 累計成長率達此值（±5%）之年，年金給付即依**實際累計漲幅**調整、隨後重設基準；
+     * 非逐年隨通膨、非固定 5%。定值通膨 2% 下約每 3 年跳一階（1.02^3−1≈6.12%）。
+     */
+    private static final double LABOR_ANNUITY_CPI_STEP = 0.05;
 
     /** 依「獲利預期」區間帶入之預設試算報酬率（累積期 / 退休後）；退休後預設較保守。使用者可於表單覆寫。 */
     private record ReturnDefault(BigDecimal accum, BigDecimal retire) {}
@@ -136,7 +143,8 @@ public class RetirementProjectionService {
                 if (baseAnnual > 0) expense += baseAnnual * inflFactor;
             }
             if (laborMonthly > 0 && laborStartYear != null && year >= laborStartYear) {
-                income += laborMonthly * 12.0;
+                // 勞保年金依 CPI 累計±5% 階梯調整（§65-4），非逐年隨通膨；勞退一次領不適用（見下）
+                income += laborMonthly * 12.0 * laborAnnuityMultiplier(year, laborStartYear, infl);
             }
             if (pensionLump > 0 && pensionYear != null && year == pensionYear) {
                 income += pensionLump;
@@ -203,6 +211,27 @@ public class RetirementProjectionService {
         double r = ratePct.doubleValue() / 100.0;
         double years = ChronoUnit.DAYS.between(LocalDate.now(), date) / 365.25;
         return amount.doubleValue() * Math.pow(1.0 + r, years);
+    }
+
+    /**
+     * 勞保年金物價調整倍數（勞工保險條例第65條之4）。
+     *
+     * <p>年金給付非逐年隨通膨：自起領年（{@code startYear}）起累計 CPI，於**累計成長率達 ±5%**
+     * （{@link #LABOR_ANNUITY_CPI_STEP}）之年，才依**實際累計漲幅**調升並重設基準，隨後重新累計。
+     * 定值通膨下每 {@code k} 年跨一次門檻（{@code k = ⌈ln(1.05)/ln(1+infl)⌉}，如 2% → 3 年），
+     * 每階乘 {@code (1+infl)^k}（即實際累計漲幅、非固定 5%），故第 {@code n=year−startYear} 年倍數 = {@code (1+infl)^(k·⌊n/k⌋)}。
+     *
+     * <p>本專案 {@code infl} 已由 {@link #resolveInflationRate} 夾為 ≥0（負通膨夾為預設正值），
+     * 故僅需處理上調；{@code infl≈0} 永不觸發、倍數恆為 1。倍數僅依 {@code (year−startYear)}，
+     * 自動涵蓋起領年早於試算首年（已在請領）之歷史調整。勞退（一次領）不適用，不呼叫本方法。
+     */
+    private double laborAnnuityMultiplier(int year, int startYear, double infl) {
+        if (year <= startYear || infl <= 1e-9) return 1.0;
+        // 每 stepYears 年 CPI 累計首次達門檻。−1e-9 消除 ln(1.05)/ln(1+infl) 恰為整數時
+        // ceil 的浮點刀鋒（否則首階延後一年）；對非整數比值無影響（FP 誤差 ≪ 1e-9）。
+        int stepYears = (int) Math.ceil(Math.log(1.0 + LABOR_ANNUITY_CPI_STEP) / Math.log(1.0 + infl) - 1e-9);
+        int steps = (year - startYear) / stepYears;   // 已跨門檻次數（整數除法＝⌊⌋）
+        return Math.pow(1.0 + infl, (double) stepYears * steps);
     }
 
     private static double dbl(BigDecimal v) {
