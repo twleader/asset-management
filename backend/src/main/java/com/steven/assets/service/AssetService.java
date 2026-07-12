@@ -933,6 +933,36 @@ public class AssetService {
         s.setEstimatedAnnualDividend(totalDividend);
     }
 
+    /**
+     * 每日排程（Requirement 35 / Task 174）：把指定 owner 的最新一筆快照日期釘成當日並重算其匯總。
+     *
+     * <p>動機：BFF {@code LiveAssetsOverlay} 的 per-market 基準日閘門僅覆蓋「最新快照日 == 該市場今日」
+     * 的市場即時價；最新快照停在過去日期時三市場皆不覆蓋、資產顯示過去凍結收盤。把日期釘成當日即打開閘門，
+     * 讓 Dashboard／歷年資產「最新一筆」反映今日即時價。
+     *
+     * <p>{@code snapshotDate < today} 才動——同時是唯一鍵 {@code (owner_user_id, snapshot_date)} 防護：
+     * 最新快照為該 owner 日期最大值，改為 today 必不與既有列相撞；== today／未來日期一律 skip（不把未來快照往回搬）。
+     * 只重算被 roll 的這一筆（{@link #recalcTotals}，用快照凍結的 currentValue），不動歷史快照。
+     *
+     * <p>由 {@code SnapshotDateRollScheduler} 逐 owner 呼叫（本方法 {@code @Transactional} → 每 owner 獨立交易，
+     * 單一 owner 失敗不連坐其他 owner）；不可把逐 owner 迴圈搬進本 service 呼叫本方法（self-invocation 繞過
+     * Spring proxy，會使整批落同一交易連坐 rollback）。
+     *
+     * @return true 表示有推進日期；false 表示查無快照或已是當日／未來日期（no-op）
+     */
+    @Transactional
+    public boolean rollLatestSnapshotToTodayForOwner(Long ownerId, java.time.LocalDate today) {
+        AssetSnapshot latest = snapshotRepo.findFirstByOwnerUserIdOrderBySnapshotDateDesc(ownerId).orElse(null);
+        if (latest == null) return false;
+        if (!latest.getSnapshotDate().isBefore(today)) return false; // == today／未來 → skip（兼唯一鍵防護）
+        java.time.LocalDate old = latest.getSnapshotDate();
+        latest.setSnapshotDate(today);
+        recalcTotals(latest);                 // 只用凍結 currentValue、只算這一筆
+        snapshotRepo.save(latest);
+        log.info("roll 最新快照 owner={} id={} {} → {}", ownerId, latest.getId(), old, today);
+        return true;
+    }
+
     private AssetSnapshotDto.SnapshotSummaryResponse toSummaryResponse(AssetSnapshot s) {
         BigDecimal fundProfit = s.getTotalFundValue() != null && s.getTotalFundCost() != null
                 ? s.getTotalFundValue().subtract(s.getTotalFundCost()) : BigDecimal.ZERO;
