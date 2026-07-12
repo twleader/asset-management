@@ -4326,3 +4326,26 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - [x] 172.2 前端：`DashboardView.vue` `kpiCards` computed——依 `liveLatest.id` 於 `store.history` 找對應 row 取 `stockValue`／`bondValue`；第 3 張「股票現值」值改 `stockValue`（琥珀、`sub` 佔比）、第 4 張改「債券現值」值 `bondValue`（teal、`sub` 佔比）；資產總計 / 存款總計 / 預估年配息三卡不變。
 - [x] 172.3 驗證：Docker 重 build frontend、recreate；部署 chunk 服務新版，兩卡佔比 == 圓餅圖（owner=1 2026-07-10：股票現值 10,848,763=54.29%、債券現值 973,702=4.87%）；存款+股票現值+債券現值 == totalAssets。
 - [ ] 172.4 commit + 兩段式 merge。
+
+### Task 173：退休現金流試算——勞保年金依《勞工保險條例》§65-4 CPI 累計±5% 調整（Requirement 32 bug fix）
+
+對應 Requirements: Requirement 32（[requirements.md:756](spec/requirements.md)）
+
+#### 需求
+
+退休現金流試算原將勞保年金當成「永遠固定名目」（`laborMonthly × 12` 自起領年起每年同額），與法規不符：依《勞工保險條例》第65條之4，年金給付於中央主計機關發布之 CPI「累計成長率達正負百分之五時，即依該成長率調整之」。實務呈階梯式、非逐年（如 2025 累計 4.72% 未達 5% 不調、2026 達 6.46% 才調）。原邏輯低估退休後段的勞保收入，使試算偏悲觀。此為既有商業邏輯 bug fix。
+
+#### 設計決策
+
+- **調整機制**：自起領年（或上次調整年）起累計 CPI，於累計成長率達 **±5%**（`LABOR_ANNUITY_CPI_STEP=0.05`）之年，依**實際累計漲幅**（非固定 5%）調升年金並**重設基準**，隨後重新累計。定值通膨下每 `k=⌈ln(1.05)/ln(1+infl)⌉` 年跳一階（2% → 3 年），每階乘 `(1+infl)^k`；第 `n=year−起領年` 年倍數 = `(1+infl)^(k·⌊n/k⌋)`（封閉式、O(1)，等價於逐年狀態機）。
+- **適用範圍**：僅勞保年金（老年/失能/遺屬）。**勞退不適用**——勞退屬確定提撥制（《勞工退休金條例》），與 CPI 無 ±5% 連動；本專案勞退為一次領，維持於領取年一次入帳原樣。
+- **通縮對稱性**：§65-4 為「正負 5%」對稱，惟本專案 `resolveInflationRate` 已將負通膨夾為預設正值，故 `infl≥0` 恆成立、通縮分支不觸發；`infl≈0` 倍數恆為 1（永不調整）。
+- **不改資料模型／DTO／API**：純 service 內計算，`laborMonthly` 語意仍為「起領當年名目月領」，試算輸出仍 on-demand 不入庫。
+
+#### 實作
+
+- [x] 173.1 spec：requirements.md（退休試算 AC 勞保年金加註 §65-4 累計±5% 調整）、design.md（`PortfolioAdviceService` 退休試算段勞保年金句加註 `laborAnnuityMultiplier`）、本 Task。
+- [x] 173.2 Service：`RetirementProjectionService` 加常數 `LABOR_ANNUITY_CPI_STEP`＋私有 `laborAnnuityMultiplier(year, startYear, infl)`；逐年迴圈勞保年金流入乘上倍數；class Javadoc 同步。
+- [x] 173.3 測試：`RetirementProjectionServiceTest` 加「每 3 年依實際累計漲幅跳階（240000→254690→270279）」與「通膨 0 永不調整」兩案例（11 過）。
+- [x] 173.4 Docker：`--no-cache` 重 build business-services、recreate（image 內 `.class` 已含 `laborAnnuityMultiplier`，非 stale）；端到端驗證 `GET /api/portfolio-advice/projection`（owner=1）勞保年金逐年階梯調升（62→95 歲：240,204→254,906→…→461,728，每 3 年 ×1.02³）、缺口年齡延後。
+- [ ] 173.5 commit + 兩段式 merge。
