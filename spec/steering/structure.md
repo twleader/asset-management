@@ -160,7 +160,7 @@ bff/src/main/java/com/steven/assets/bff/
 ```
 external-materials-service/src/main/java/com/steven/assets/externalmaterials/
 ├── config/             # WebClient、Redis 連線
-├── client/             # TwseClient、NasdaqClient、FinMindClient、FundNavFetchClient、FundDividendFetchClient
+├── client/             # PriceFetchClient、TwseInfoFetchClient、DividendFetchClient、ExchangeRateFetchClient、MacroDataFetchClient、NewsFetchClient、BotFxFetchClient、YahooFxFetchClient、FundNavFetchClient、FundDividendFetchClient
 ├── service/
 │   ├── PricePoller            # 2 分鐘 cron：抓 live 寫 Redis
 │   ├── ClosePersister         # 收盤 cron：寫 stock_price_history
@@ -168,7 +168,7 @@ external-materials-service/src/main/java/com/steven/assets/externalmaterials/
 │   ├── PriceCacheWriter       # 寫 Redis（封裝 key schema）
 │   ├── IntradayHighLowTracker # 盤中 high/low 聚合
 │   ├── FundNavPoller          # 每日 NAV cron
-│   ├── FundNavPersister       # 寫 fund_nav
+│   ├── FundNavSourceQuery     # fund_master 讀取 + fund_nav upsert（由 FundNavPoller / FundNavBackfillService 呼叫）
 │   ├── FundDividendPoller     # 每日配息 cron
 │   ├── FundNavBackfillService # 10 年回補
 │   └── FundDividendBackfillService
@@ -282,7 +282,7 @@ frontend/
 
 ```
 spec/
-├── requirements.md       # 21 個 Requirements（User Story + AC）
+├── requirements.md       # 35 個 Requirements（User Story + AC）
 ├── design.md             # 架構圖、ERD、Service 職責、Sequence
 ├── tasks.md              # 22+ 個 Tasks（含完成狀態 checkbox）
 └── steering/             # 長期 context（每次對話皆載入）

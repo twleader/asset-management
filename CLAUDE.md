@@ -39,7 +39,7 @@ git config core.hooksPath scripts/git-hooks
 ## 技術棧
 
 ### Backend
-- Java 25 + Spring Boot 3.4.4
+- Java 21 + Spring Boot 3.4.4（CLAUDE.md 原標「Java 25」為未來目標；pom.xml 與 Dockerfile 目前實際為 21）
 - Spring Data JPA（H2 開發 / PostgreSQL 生產）
 - Apache POI（Excel 匯入）
 - Lombok
@@ -116,6 +116,6 @@ cd frontend
 
 | 文件 | 說明 |
 |------|------|
-| `spec/requirements.md` | User Stories + Acceptance Criteria（27 個 Requirements） |
+| `spec/requirements.md` | User Stories + Acceptance Criteria（35 個 Requirements） |
 | `spec/design.md` | 架構圖、ERD、API 端點、關鍵業務邏輯 |
-| `spec/tasks.md` | 實作任務清單（Task 1–126，含完成狀態） |
+| `spec/tasks.md` | 實作任務清單（Task 1–174，含完成狀態） |

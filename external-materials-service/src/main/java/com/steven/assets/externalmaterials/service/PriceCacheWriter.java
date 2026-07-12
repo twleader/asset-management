@@ -21,11 +21,11 @@ import java.util.Optional;
  * 寫入 Redis 即時行情 cache。
  *
  * Key schema：
- *   price:{market}:{code}    JSON, TTL 600s
- *   price:index:{market}     SET of stockCode, TTL 600s（每次寫入時 refresh）
+ *   price:{market}:{code}    JSON, TTL 24h
+ *   price:index:{market}     SET of stockCode, TTL 24h（每次寫入時 refresh）
  *
- * 為什麼 TTL 600s：盤中每 2 分鐘寫一次，10 分鐘 TTL 留 5x 容錯；
- * 盤後自然過期，consumer 自動 fallback 到 stock_price_history。
+ * 為什麼 TTL 24h：盤中每 2 分鐘刷新 TTL；真的 24h 無新成交才自然 fallback 到 stock_price_history，
+ * 避免低流動性股票 TTL 過期退回昨收（與第 44-49 行 LIVE_TTL 一致）。
  */
 @Slf4j
 @Component

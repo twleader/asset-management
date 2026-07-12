@@ -115,7 +115,7 @@ public class ClosePersister {
 
     /**
      * 13:32 TW：把 13:30 那輪 cron 已寫進 Redis 的價（= TWSE mis 最後成交）dump 到 stock_price_history。
-     * Redis TTL 600s，13:32 還在窗口內。
+     * Redis TTL 24h，13:32 還在窗口內。
      */
     @Scheduled(cron = "0 32 13 * * MON-FRI", zone = "Asia/Taipei")
     public void dumpTwCloseFromRedis() {

@@ -487,7 +487,7 @@ const increaseOption = computed(() => {
 :deep(.el-table .el-table__cell) { font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', ui-monospace, monospace; }
 :deep(.el-table .el-table__cell:first-child) { font-family: inherit; }
 
-/* 趨勢圖自訂 legend：6 項集中置中、間距 32px、下方寫金額（同色） */
+/* 趨勢圖自訂 legend：7 項集中置中、間距 32px、下方寫金額（同色） */
 .trend-legend { display: flex; justify-content: center; padding: 6px 16px 12px; gap: 32px; flex-wrap: wrap; }
 .trend-legend-item { display: flex; align-items: center; gap: 8px; }
 .tl-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }

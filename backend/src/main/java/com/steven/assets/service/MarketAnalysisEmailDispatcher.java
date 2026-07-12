@@ -16,7 +16,7 @@ import java.util.List;
 /**
  * 今日股市分析結果每日 Email 寄送（Requirement 31 / Task 151）。
  *
- * <p>{@link MarketAnalysisService#generateInternal} 於「排程 / self-heal 路徑」產生成功分析後呼叫。
+ * <p>{@link MarketAnalysisService#finalizeIfReady}（Batch 收尾 poller，{@link MarketAnalysisService#pollPendingBatches} 呼叫）於批次落 OK 後呼叫；不論排程 / self-heal / 管理者手動觸發，皆於首次落 OK 寄送一次（以 email_sent_at 冪等把關，不重寄）。
  * 收件人沿用既有通知收件人（{@link NotificationRecipient}，Requirement 23），僅寄給
  * {@code active = true 且 receive_market_analysis = true} 者；逐一收件人各寄一封（保護彼此 email 隱私，
  * 比照 {@link AlertNotificationDispatcher}）。

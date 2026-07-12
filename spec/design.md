@@ -536,7 +536,7 @@ BackupRecord          (Google Drive 備份檔本地索引，UNIQUE(folder, filen
 | id | Long | PK |
 | snapshot | AssetSnapshot | FK |
 | stockCode | String | 股票代號 |
-| stockName | String | 股票名稱 |
+| stockName | String | 股票名稱（由 `stock` 主檔 join 補上，v1.9.4 起不存冗餘 `stock_name`，實體無此欄位；DTO 經 `StockRepository.findByCodeAndMarket()` 補值） |
 | market | String | 市場代碼（對應 MarketType.code，不建立 FK 以保持靈活性） |
 | broker | BrokerEntity | FK（取代原 Broker enum） |
 | shares | BigDecimal | 持股數量 |
@@ -840,7 +840,7 @@ GET    /api/market-data/prices/stream                          # SSE 即時推�
 GET    /api/market-data/intraday-ticks?code=&market=&date=     # 走勢圖「當日」分時 tick（proxy 至 external-materials Redis LIST；date 省略時預設今天（該市場時區）若為交易日且今日 tick 已有資料，否則退回最近有收盤的交易日 — 見 Task 153）。回傳恆為「真實成交 tick 原始序列（升冪、不含未來 padding）」；前端 `StockAnalysisDialog.vue`「當日」模式再以該市場交易時段（鏡射 MarketZones）建「開盤→收盤」每分鐘網格對齊、未來留 null、股價線 connectNulls，使 X 軸延伸到收盤（與指數當日圖 Task 96 同視覺行為，Task 157）
 POST   /api/market-data/prices/refresh                         # 刷新所有持股現價
 GET    /api/market-data/market-status                          # 開盤狀態（台股/美股）
-GET    /api/market-data/holidays?year=2026                     # 台股與美股假日清單
+GET    /api/market-data/holidays?year=2026                     # 台股 / 美股 / 英股假日清單
 POST   /api/market-data/history/backfill                       # 補齊所有歷史股價
 POST   /api/market-data/history/backfill-stock?code=&market=&since=&until=  # 補齊單支股票歷史股價
 GET    /api/market-data/history/stock?code=&market=            # 查詢單支股票歷史股價
@@ -1197,7 +1197,7 @@ classifyStockStyle(code, market, styleOverride, dividendRate, threshold):
 # 僅對「該股票經 classifyStock 判為 STOCK（非 BOND）」者再細分：
 growthValue = Σ(stock.currentValue where assetClass=STOCK 且 style=GROWTH) + Σ(非債券 fund.currentValue)
 incomeValue = Σ(stock.currentValue where assetClass=STOCK 且 style=INCOME)
-# 不變式：growthValue + incomeValue == stockValue（基金一律歸成長：無 dividendRate 欄、v1 不細分）
+# 不變式：growthValue + incomeValue == stockValue（基金無 dividendRate 欄故不依殖利率細分，預設歸成長型，但可由 fund_class_override.stock_style 指定為收益型而歸入 incomeValue）
 
 # Requirement 27：債券再依名稱年期細分短/中/長期（classifyBondTerm，override 優先；用股票主檔名稱判定）
 bondShortValue = Σ(bond.currentValue where term=SHORT)

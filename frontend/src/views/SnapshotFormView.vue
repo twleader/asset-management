@@ -2450,7 +2450,7 @@ async function loadAllPrices() {
   }
 }
 
-/** 啟動 5 分鐘定時刷新（盤中自動更新） */
+/** 啟動 2 分鐘定時刷新（盤中自動更新） */
 function startPriceAutoRefresh() {
   stopPriceAutoRefresh()
   priceTimer = setInterval(loadAllPrices, 2 * 60 * 1000)

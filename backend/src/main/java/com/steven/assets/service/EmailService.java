@@ -16,7 +16,7 @@ import java.util.Map;
 
 /**
  * 警示觸發 Email 寄送（Requirement 23）。
- * 環境變數 MAIL_USERNAME / MAIL_PASSWORD 未設定時 isEnabled() = false，
+ * 環境變數 MAIL_USERNAME 未設定時 isEnabled() = false，
  * 上層應先檢查再呼叫。SMTP 失敗一律 log.warn 不拋例外，避免阻斷警示判斷。
  */
 @Service

@@ -25,7 +25,7 @@ import java.util.stream.Collectors;
  * 本類僅作 BFF / 前端對外契約的 stable façade：
  * - getAllPrices / getPrice：從 PriceQueryService 讀 Redis（miss 則 fallback 至歷史表）
  * - manualRefresh：觸發 price-service 同步刷新
- * - getMarketStatus：純時區判斷（與 price-service 獨立計算，無 Redis 依賴）
+ * - getMarketStatus：時區交易時段 + 交易日判斷（含國定假日，經 MarketDataService.isMarketOpenNow；與 price-service 獨立計算，無 Redis 依賴）
  * - getLiveAssets：以最新快照持倉 × Redis live 報價即時計算總資產
  */
 @Slf4j

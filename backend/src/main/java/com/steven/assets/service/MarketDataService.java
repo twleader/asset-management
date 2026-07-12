@@ -24,7 +24,7 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * 對外 API（外部行情 API）已集中在 ext-materials-service `MarketDataFetchService`，
  * 本服務僅保留：(1) 公開 record 類型；(2) 1 小時殖利率快取；(3) per-year 假日快取；
- *            (4) 美股假日純計算（無外部 API）；(5) ETF 白名單判斷（純計算）。
+ *            (4) 美股 / 英股假日純計算（無外部 API）；(5) ETF 白名單判斷（純計算）。
  */
 @Slf4j
 @Service

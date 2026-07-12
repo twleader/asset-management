@@ -11,7 +11,7 @@ import java.util.List;
 /**
  * 使用者主檔內部端點（Requirement 28）。
  *
- * <p>路徑前綴 {@code /internal/users}（business-services 內網）。除 {@code login-upsert} 外皆由
+ * <p>路徑前綴 {@code /internal/users}（business-services 內網）。除 {@code login-upsert} 與 {@code by-email} 外皆由
  * {@code AdminGateInterceptor} 限 ADMIN。BFF 經 {@code /api/bff/user-management/**} passthrough。
  */
 @RestController
