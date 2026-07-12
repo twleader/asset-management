@@ -251,6 +251,11 @@ export const bffApi = {
     marketStatus: () => api.get('/bff/trading-calendar/market-status')
   },
 
+  // ScheduleList（排程列表，「公開資訊」分組，Requirement 36）
+  scheduleList: {
+    get: () => api.get('/bff/schedule-list')
+  },
+
   // SnapshotList
   snapshotList: {
     getAll:      () => api.get('/bff/snapshot-list'),

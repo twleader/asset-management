@@ -4401,3 +4401,26 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - [x] 175.4 #4 一頁一 BFF：新增 `FundSettingsBffController`（`GET /api/bff/fund-settings/bank-options`，過濾 active）；`api/index.js` 加 `fundSettings.getBankOptions`；`FundSettingsView` 改呼叫自己頁的 BFF，不再跨頁打 `bffApi.snapshotForm.getLookups()`。
 - [x] 175.5 驗證：backend `mvn compile` + `mvn test`（既有測試除 pre-existing 破損的 `AssetSnapshotControllerTest` 外全綠）、bff `mvn compile`；Docker `--no-cache` 重 build business-services / bff / frontend、recreate 後煙霧測試受影響端點。
 - [ ] 175.6 commit + 兩段式 merge。
+
+### Task 176：左側選單新增「公開資訊」分組 ＋ 排程列表頁（Requirement 36）
+
+對應 Requirements: 36
+
+#### 需求
+
+把市場公開性質的「交易日曆」「台幣兌美元」從選單頂層收進新的「公開資訊」`el-sub-menu`，並在其下新增「排程列表」頁，總覽 `business-services`（10 個 `@Scheduled`）＋ `external-materials-service`（23 個 `@Scheduled`）共 33 個系統自動排程。
+
+#### 設計決策
+
+- **靜態清單、非 DB**：排程 cron 為編譯期常數、此頁純唯讀展示，故排程清單以 BFF 程式碼內建（`SchedulePublicBffController`），非使用者可管理的業務分類，不入 DB、不設管理端點（有別於「禁止 Enum 寫死」針對的銀行／券商等業務分類）。**代價**：新增／改 `@Scheduled` 須同步更新清單，於本 spec 與清單交叉註記提醒。
+- **一頁一 BFF**：新頁走自己的 `GET /api/bff/schedule-list`（`ScheduledJobDto` record），無下游呼叫故不需 WebClient；GET 落 `anyExchange().authenticated()`，已登入者皆可讀。
+- **契約不變**：`/trading-calendar`、`/exchange-rate` 路由與 BFF 端點完全不動，僅選單層級調整。
+
+#### 實作
+
+- [ ] 176.1 BFF：新增 `bff/.../schedulelist/ScheduledJobDto`（record：service, category, name, description, schedule, cron, zone）與 `SchedulePublicBffController`（`GET /api/bff/schedule-list` 回傳 33 筆內建清單）。
+- [ ] 176.2 前端路由：`router/index.js` 新增 `/schedule-list` → `ScheduleListView`（meta.title 「排程列表」）。
+- [ ] 176.3 前端選單：`App.vue` `mainMenuItems` 移除頂層「交易日曆」「台幣兌美元」，新增「公開資訊」`el-sub-menu`（icon `InfoFilled`）含三子項（交易日曆 / 台幣兌美元 / 排程列表）。
+- [ ] 176.4 前端頁面：新增 `ScheduleListView.vue`——依服務／分類分組的表格，欄位含服務、名稱、說明、執行時機、cron、時區；`api/index.js` 加 `bffApi.scheduleList.get()`。
+- [ ] 176.5 驗證：bff `mvn compile`；Docker 重 build bff / frontend、recreate 後打 `GET /api/bff/schedule-list` 驗回 33 筆、開頁確認選單分組與表格。
+- [ ] 176.6 commit + 兩段式 merge。

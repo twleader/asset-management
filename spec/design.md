@@ -111,6 +111,7 @@ com.steven.assets/
   - `FundSettingsBffController`：`GET /api/bff/fund-settings/bank-options` → 過濾 active 後的銷售銀行下拉；與 SnapshotForm 的 lookups **同讀 business `/api/settings/banks`**（同義欄位同一來源），fund-settings 頁不再跨頁呼叫 `/api/bff/snapshot-form/lookups`（Task 175：一頁一 BFF 合規化）
   - `RealizedGainBffRoutes`：`/api/realized-gains/**` → business-services（RealizedGainView 的 Pinia store `gainApi` 共用已實現損益 CRUD；該頁另有 `RealizedGainBffController` 提供 `/api/bff/realized-gain` 聚合端點，passthrough 僅供 store 直接 CRUD 用，與 `SnapshotBffRoutes` 同屬「store 共用」例外）
   - `MarketDataBffRoutes`：`/api/market-data/**` → business-services（SSE 行情串流 `prices/stream` 等直接市場資料取用；`StockAnalysisBffRoutes` 另以 `/api/bff/stock-analysis/**` rewrite 至同一組端點）
+  - `SchedulePublicBffController`（ScheduleListView 專屬，「公開資訊」分組，Requirement 36）：`GET /api/bff/schedule-list` → 回傳系統所有自動排程的**人工維護靜態清單**（`ScheduledJobDto` 不可變 record：service / category / name / description / schedule 白話 / cron / zone）。排程分屬 `business-services`（10 個 `@Scheduled`）與 `external-materials-service`（23 個 `@Scheduled`）兩個服務、crons 為編譯期常數，此頁為唯讀資訊展示故不做跨服務反射探索、不入 DB、不設管理端點；**新增／調整任何 `@Scheduled` 須同步更新此清單以免漂移**。無下游呼叫（不需 WebClient），落 BFF `anyExchange().authenticated()`（已登入者皆可讀）。
 
 **Repository 層**（Spring Data JPA，共 33 個）
 - `AssetSnapshotRepository`
@@ -292,13 +293,13 @@ NASDAQ info API 自 2026/04 起對 ETF 的 `keyStats` 為 null（無 dayrange �
 
 ```
 src/
-├── App.vue              # Root layout: sidebar navigation + router-view
+├── App.vue              # Root layout: sidebar navigation + router-view（含「公開資訊」sub-menu：交易日曆 / 台幣兌美元 / 排程列表，Requirement 36）
 ├── main.js              # App bootstrap, plugin registration
-├── router/index.js      # Route definitions (25 routes，含 4 條 redirect)
+├── router/index.js      # Route definitions (26 routes，含 4 條 redirect)
 ├── stores/assetStore.js # Pinia global state
 ├── api/index.js         # Axios instance, API methods
 ├── components/          # Reusable components (TaiwanMap, UsaMap)
-└── views/               # Page-level components (24 views；含 StockMonitorView 內嵌的 WatchStockView / StockAlertView 兩個未掛路由的子 view)
+└── views/               # Page-level components (25 views；含 StockMonitorView 內嵌的 WatchStockView / StockAlertView 兩個未掛路由的子 view)
 ```
 
 **Service 層補充**

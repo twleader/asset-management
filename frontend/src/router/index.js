@@ -63,6 +63,12 @@ const router = createRouter({
       meta: { title: '台幣兌美元', icon: 'Money' }
     },
     {
+      path: '/schedule-list',
+      name: 'ScheduleList',
+      component: () => import('@/views/ScheduleListView.vue'),
+      meta: { title: '排程列表', icon: 'Clock' }
+    },
+    {
       path: '/gdp-twse',
       name: 'GdpTwse',
       component: () => import('@/views/GdpTwseView.vue'),

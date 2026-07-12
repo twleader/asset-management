@@ -247,8 +247,14 @@ const mainMenuItems = computed(() => [
       { path: '/stocks', title: '股票觀察', icon: 'View' }
     ]
   },
-  { path: '/trading-calendar', title: '交易日曆', icon: 'AlarmClock' },
-  { path: '/exchange-rate', title: '台幣兌美元', icon: 'Money' },
+  {
+    index: 'public-info', title: '公開資訊', icon: 'InfoFilled',
+    children: [
+      { path: '/trading-calendar', title: '交易日曆', icon: 'AlarmClock' },
+      { path: '/exchange-rate', title: '台幣兌美元', icon: 'Money' },
+      { path: '/schedule-list', title: '排程列表', icon: 'Clock' }
+    ]
+  },
   { path: '/payment-accounts', title: '自動代繳', icon: 'Tickets' }
 ])
 </script>
