@@ -29,9 +29,10 @@ import java.util.Map;
 
 /**
  * 本地財經新聞抓取排程（Task 149.21）：每日 08:00 / 12:00 / 18:00（Asia/Taipei）抓權威新聞
- * （鉅亨網 / 自由時報 / 經濟日報）＋證交所公開資訊（三大法人、大盤成交），去重後 upsert 至 news_headline，
+ * （玩股網 / MoneyDJ / 自由時報財經・政治・國際 / 經濟日報）＋證交所公開資訊（三大法人、大盤成交）
+ * ＋量化快照（台幣兌美元匯率、美股主要指數收盤，Task 180），去重後 upsert 至 news_headline，
  * 供 business-services 的今日股市分析餵入 prompt。**08:00 那次早於 08:30 分析**，確保當日有料
- * （原 06:00 於 Task 177 調整為 08:00）。
+ * （原 06:00 於 Task 177 調整為 08:00）。來源皆台/美權威網站，不抓中港澳。
  *
  * <p>每輪抓取（含開機 warmup）<b>先 upsert news_headline，再由 DB 查詢「當日公開資訊」</b>輸出一份 JSON 至
  * SRPP 退休規劃專案輸入目錄（Task 177，DB 為單一來源；容器內 {@code news-scraper.export-dir}，docker volume
@@ -49,6 +50,7 @@ public class NewsPoller {
 
     private final NewsFetchClient newsClient;
     private final TwseInfoFetchClient twseClient;
+    private final MarketSnapshotFetchClient snapshotClient;
     private final StockSourceQuery source;
     private final PublicInfoStockFilter stockFilter;
     private final MarketCalendar calendar;
@@ -97,6 +99,8 @@ public class NewsPoller {
         List<NewsRow> rows = new ArrayList<>();
         rows.addAll(newsClient.fetchAll());
         rows.addAll(twseClient.fetchAll());
+        // Task 180：台幣兌美元匯率＋美股主要指數收盤快照（由 DB 既有資料組裝，供 SRPP JSON 與今日股市分析）。
+        rows.addAll(snapshotClient.fetchAll());
 
         // 個股過濾（Task 178）：只留 stock 主檔個股＋總體新聞，其餘個股濾除（DB 落庫與 JSON 輸出前套用）。
         rows = stockFilter.retain(rows);

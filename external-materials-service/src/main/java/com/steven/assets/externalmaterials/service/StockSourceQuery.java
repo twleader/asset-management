@@ -453,4 +453,42 @@ public class StockSourceQuery {
     }
 
     public Set<String> emptyCodeSet() { return new LinkedHashSet<>(); }
+
+    // ===== 公開資訊快照：匯率 + 美股指數（Task 180，供 NewsPoller 組 NewsRow 併入 news_headline/SRPP JSON）=====
+
+    /** 最新一筆 USD 匯率（買/賣即期價與資料日）；無資料回 null。 */
+    public UsdRate loadLatestUsdRate() {
+        return jdbc.query(
+                "SELECT rate_date, buy_rate, sell_rate FROM exchange_rate_history " +
+                        "WHERE currency = 'USD' ORDER BY rate_date DESC LIMIT 1",
+                (java.sql.ResultSet rs) -> rs.next()
+                        ? new UsdRate(rs.getDate("rate_date").toLocalDate(),
+                                      rs.getBigDecimal("buy_rate"), rs.getBigDecimal("sell_rate"))
+                        : null);
+    }
+
+    /** USD/TWD 即期匯率快照（Task 180）。台銀被 WAF 擋時 USD 以 Yahoo 中間價暫定＝buy==sell。 */
+    public record UsdRate(LocalDate rateDate, BigDecimal buyRate, BigDecimal sellRate) {}
+
+    /**
+     * 某美股指數最近兩個交易日收盤（{@code close}＝最新、{@code prevClose}＝前一交易日，供算漲跌%）。
+     * 無資料回 null；只有一筆時 {@code prevClose} 為 null。
+     */
+    public UsIndexClose loadLatestUsIndexClose(String indexCode) {
+        List<Object[]> rows = new java.util.ArrayList<>(2);
+        jdbc.query(
+                "SELECT trading_date, close_point FROM us_index_daily_history " +
+                        "WHERE index_code = ? ORDER BY trading_date DESC LIMIT 2",
+                ps -> ps.setString(1, indexCode),
+                (java.sql.ResultSet rs) -> rows.add(new Object[]{
+                        rs.getDate("trading_date").toLocalDate(), rs.getBigDecimal("close_point")}));
+        if (rows.isEmpty()) return null;
+        return new UsIndexClose(indexCode,
+                (LocalDate) rows.get(0)[0], (BigDecimal) rows.get(0)[1],
+                rows.size() > 1 ? (BigDecimal) rows.get(1)[1] : null);
+    }
+
+    /** 美股指數收盤快照（Task 180）。 */
+    public record UsIndexClose(String indexCode, LocalDate tradingDate,
+                               BigDecimal close, BigDecimal prevClose) {}
 }
