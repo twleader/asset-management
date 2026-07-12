@@ -4477,3 +4477,30 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - [x] 178.8 驗證：ext `mvn compile`；`--no-cache` 重 build ext＋recreate；驗 warmup log「個股過濾 N→保留 X 丟棄 Y」、SRPP JSON 與 news_headline 均為過濾後、總經/年份新聞未被誤濾。
 - [x] 178.10 對抗式 review 修正（workflow）：`PublicInfoStockFilter.EXPLICIT_CODE` 由 `[(（]…(?:-TW)?…[)）]|…-TW` 收緊為**必帶 `-TW`** `[(（]?\s*(\d{4,6}[A-Z]?)\s*-TW\s*[)）]?`——原式括號內裸年份 `(2023)` 會命中真實鋼鐵股代號而誤濾含年份的總經新聞。
 - [ ] 178.9 commit + 兩段式 merge。
+
+### Task 179：移除「新聞搜尋（web_search）」，新聞固定讀本地 `news_headline`＋顯示時點對齊 08:30（Requirement 31）
+
+對應 Requirements: Requirement 31（今日股市分析）
+
+**背景**：使用者要求「排程改在 8:30，並且『新聞搜尋』功能拿掉，直接從爬蟲回來放在資料庫的資料抓」。現況：分析流程本就會讀本地 `news_headline`（Task 149.21），「新聞搜尋」下拉只是**額外**決定是否再掛付費 `web_search` server tool；且後端排程於 Task 177 已改 08:30，但前端頁面與排程列表頁的顯示文字仍停在 07:30（爬蟲列停在 06:00），屬顯示漂移。故本任務：(1) 徹底移除 `web_search`／「新聞搜尋次數」設定，新聞來源固定為 DB 爬蟲的 `news_headline`；(2) 修正 07:30／06:00 顯示漂移為 08:30／08:00，與實際 cron 一致。
+
+#### 設計決策
+
+- **移到底、不只隱藏**：使用者說「拿掉」，故連 DB 欄 `web_search_max_uses` 一併移除（新增 Liquibase `v1.54.0` `DROP COLUMN`）。因該欄 `NOT NULL DEFAULT 6`，移除 entity 欄後即使不 drop 也不會 insert 失敗，但留著＝死欄位、違反「完整正規化、禁止無用資料」，故 drop。`market_analysis_setting` 全由 Liquibase 建立（不在 `db/init/01_dump.sql`），故只需增量 changeset、無需改 dump。
+- **prompt 由四態收斂為二態**：原 `buildSystemPrompt`／`buildUserPrompt` 依「本地新聞有/無 × web_search 開/關」四態切換；移除 web_search 後只剩「有本地新聞→據清單列 `newsHighlights`」「無本地新聞→純技術面、`newsHighlights` 回空」二態。`submitBatch` 不再 `addTool(WebSearchTool…)`，移除 `WebSearchTool20250305`／`ToolUnion` import。
+- **保留 `sanitizeNews` 防禦縱深**：模型輸出的 `newsHighlights` 仍過一次 `sanitizeNews`（http(s)、地區、時效），因模型仍可能引用本地清單外內容；本地新聞來源已可信（`isTrustedLocalNewsHost` 跳過回抓），故實務上多為 pass-through。相關 `@Value`（`news-verify-published-date`／`news-region-block-enabled`）保留、不動。
+- **PortfolioAdvice（Requirement 32）不受影響**：其為同步呼叫、有自己的 `portfolio_advice_setting.web_search_max_uses` 與 DTO，本任務只動 `market_analysis_*`。
+- **顯示漂移一併修**：排程列表頁（`SchedulePublicBffController` 人工維護 JOBS）「今日股市分析」列 07:30→08:30（cron `0 30 7`→`0 30 8`）、「財經新聞抓取」列 06:00→08:00（cron `0 0 6,12,18`→`0 0 8,12,18`）對齊實際 `NewsPoller`；前端 `TodayMarketAnalysisView.vue` 硬編「07:30」文案改 08:30。
+
+#### 實作
+
+- [x] 179.1 spec：`requirements.md` R31（財經新聞來源改本地 `news_headline`、`web_search` 移除；新聞搜尋次數設定標記移除；`PUT /settings` body 移除 `webSearchMaxUses`）；`design.md` R31（概觀／架構落點／流程圖／prompt／模型呼叫／設定表 DDL 加 `v1.54.0` DROP／解析／白名單同步）；`tasks.md`（本任務）。
+- [x] 179.2 backend `MarketAnalysisService`：移除 `AVAILABLE_WEB_SEARCHES`／`DEFAULT_WEB_SEARCH`／`resolveWebSearchMaxUses()`；`getSettings`／`updateSettings` 去 `webSearchMaxUses`（signature 改 `(model, effort, enabled)`）；`submitBatch` 去 `webSearchOn`／不 `addTool`；`buildSystemPrompt`／`buildUserPrompt` 去 `webSearchEnabled` 參數、收斂二態；移除 `WebSearchTool20250305`／`ToolUnion` import；javadoc 07:30→08:30。
+- [x] 179.3 backend `MarketAnalysisSettingsDto`：移除 `webSearchMaxUses`／`availableWebSearches`／`WebSearchOption`。
+- [x] 179.4 backend `MarketAnalysisSetting`：移除 `webSearchMaxUses` 欄位映射；javadoc 同步。
+- [x] 179.5 backend `MarketAnalysisController`：`updateSettings` 去 `webSearchMaxUses` 參數；移除已無用的 `intOrNull` helper；javadoc 同步。
+- [x] 179.6 backend Liquibase `v1.54.0-market-analysis-drop-web-search.sql`：`ALTER TABLE market_analysis_setting DROP COLUMN web_search_max_uses;`＋ master changelog include。
+- [x] 179.7 bff `SchedulePublicBffController`：今日股市分析列 07:30→08:30（cron `0 30 8`）；財經新聞抓取列 06:00→08:00（cron `0 0 8,12,18`、說明「08:00 早於 08:30 分析」）。
+- [x] 179.8 frontend `TodayMarketAnalysisView.vue`：移除「新聞搜尋」`el-select`＋`selectedWebSearch`／`savingWebSearch`／`availableWebSearches`／`onWebSearchChange` 與 settings 中 `webSearchMaxUses`；07:30 文案全部改 08:30。`api/index.js` updateSettings 註解去「新聞搜尋」。
+- [ ] 179.9 驗證：backend＋bff `mvn compile`；`--no-cache` 重 build business-services＋bff＋frontend＋recreate；驗頁面無「新聞搜尋」下拉、文案 08:30、`GET/PUT /settings` 正常（無 webSearchMaxUses）、排程列表顯示 08:30／08:00、Liquibase 成功 drop 欄。
+- [ ] 179.10 commit + 兩段式 merge。

@@ -9,8 +9,9 @@ import java.time.LocalDateTime;
 
 /**
  * 今日股市分析（Requirement 31）設定：單列（{@code id=1}），存管理者於頁面選擇的分析模型、
- * 思考深度（effort）、新聞搜尋次數（web search）與每日自動分析開關（enabled，皆成本控管）。
+ * 思考深度（effort）與每日自動分析開關（enabled，皆成本控管）。
  * 比照 {@link BackupSetting} 單列慣例。全域（不分租戶）。
+ * （Task 179 起新聞固定讀本地 {@code news_headline}，已移除 {@code web_search_max_uses} 欄。）
  */
 @Entity
 @Table(name = "market_analysis_setting")
@@ -33,11 +34,7 @@ public class MarketAnalysisSetting {
     @Column(name = "effort", length = 16, nullable = false)
     private String effort;
 
-    /** 新聞搜尋次數（web_search maxUses）：0＝關閉（純技術面）。越少越省 context 重複處理。預設 6。 */
-    @Column(name = "web_search_max_uses", nullable = false)
-    private Integer webSearchMaxUses;
-
-    /** 每日自動分析開關：false＝07:30 cron／self-heal 跳過（零花費）；手動觸發不受此限。預設 true。 */
+    /** 每日自動分析開關：false＝08:30 cron／self-heal 跳過（零花費）；手動觸發不受此限。預設 true。 */
     @Column(name = "enabled", nullable = false)
     private Boolean enabled;
 
