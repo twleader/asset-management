@@ -4535,5 +4535,6 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
     - **(nit) locale**：`changePct` 用 `String.format(Locale.US, …)`，與 `comma()` 一致。
     - **(nit) FX summary 去內部細節**：summary 只留「來源：台灣銀行牌告 USD 即期買入/賣出匯率。」，WAF/FinMind 備援細節移至程式註解（不外洩進 prompt / SRPP JSON）。
     - **(nit) NewsRow javadoc**：`@param source`／`@param category` 補 `bot-fx`／`us-index`／`fx`／`us-market`。
+- [x] 180.11 部署驗證抓出的 runtime bug 修正：`StockSourceQuery.loadLatestUsIndexClose` 第三引數原為 expression lambda（`rs -> rows.add(...)` 回 boolean）被 Java 解析成 `ResultSetExtractor`（整段只呼一次、rs 停在第一列前）→ warmup 時拋「ResultSet not positioned properly」美股快照組裝失敗。改為 void 區塊 lambda `{ rows.add(...); }` 確定解析為 `RowCallbackHandler`（逐列、rs 已定位）。FX（`loadLatestUsdRate` 用正確的 ResultSetExtractor + 自呼 `rs.next()`）不受影響。
 - [ ] 180.8 部署驗證：`--no-cache` 重 build external-materials-service＋recreate；驗 warmup log「個股過濾」、`news_headline` 出現 `fx`／`us-market` 列、SRPP `public_info_<date>.json` 含匯率與美股指數項、政治/國際新聞入庫（僅相關者）、無中港澳來源。
 - [ ] 180.9 commit + 兩段式 merge。
