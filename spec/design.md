@@ -73,7 +73,7 @@ com.steven.assets/
   - `PUT /api/bff/snapshot-detail/{id}`：儲存編輯後的快照
 - 存款 amount 換算規則（後端 `AssetService.normalizeDepositAmount`）：原幣值（`originalAmount` USD）由前端輸入直接傳入，**台幣 amount 一律由後端用 snapshot 匯率算出**（`amount = originalAmount × usdExchangeRate`），TRANSIT_* 的正負號也由後端依 `TransitFundType.payable` 決定。前端不做這部份計算，避免 snapshot 匯率為 null 時誤把 USD 數字寫進 TWD 欄位。
 - `AssetHistoryBffController`（AssetHistoryView 專屬）：`GET /api/bff/asset-history`（history + isLastOfYear flag）、`POST /api/bff/asset-history/recalc-dividends`、`DELETE /api/bff/asset-history/{id}`、`GET /api/bff/asset-history/export`
-- `RealizedGainBffController`（RealizedGainView 專屬）：`GET /api/bff/realized-gain`（gains + active brokers 一起回傳）、CRUD、export
+- `RealizedGainBffController`（RealizedGainView 專屬）：`GET /api/bff/realized-gain`（gains + active brokers 一起回傳）、CRUD、export、`GET /api/bff/realized-gain/lookup-name?code=&market=`（輸入股號自動帶出股名；轉呼**同一支** business `/api/stock-alerts/lookup-name`，與 stock-alert 頁同源，符合「同義欄位、同一 business service API」——前端不再跨頁呼叫 stock-alert 的 BFF）
 - `ExchangeRateBffController`（ExchangeRateView 專屬）：`GET /api/bff/exchange-rate`（先 refresh 再回 10 年歷史）、`POST /api/bff/exchange-rate/backfill`
 - `TradingCalendarBffController`（TradingCalendarView 專屬）：`GET /api/bff/trading-calendar?year=Y`（`holidays` 為 `{tw: {date→name}, us: {date→name}}` 物件 + `marketStatus`）、`GET /api/bff/trading-calendar/market-status`
 - `SnapshotListBffController`（SnapshotListView 專屬）：`GET /api/bff/snapshot-list`、`DELETE /{id}`、`GET /export`
@@ -295,11 +295,11 @@ NASDAQ info API 自 2026/04 起對 ETF 的 `keyStats` 為 null（無 dayrange �
 src/
 ├── App.vue              # Root layout: sidebar navigation + router-view（含「公開資訊」sub-menu：交易日曆 / 台幣兌美元 / 排程列表，Requirement 36）
 ├── main.js              # App bootstrap, plugin registration
-├── router/index.js      # Route definitions (26 routes，含 4 條 redirect)
+├── router/index.js      # Route definitions (31 routes，含 4 條 redirect)
 ├── stores/assetStore.js # Pinia global state
 ├── api/index.js         # Axios instance, API methods
 ├── components/          # Reusable components (TaiwanMap, UsaMap)
-└── views/               # Page-level components (25 views；含 StockMonitorView 內嵌的 WatchStockView / StockAlertView 兩個未掛路由的子 view)
+└── views/               # Page-level components (28 views；含 StockMonitorView 內嵌的 WatchStockView / StockAlertView 兩個未掛路由的子 view)
 ```
 
 **Service 層補充**
@@ -340,7 +340,9 @@ src/
 | `/realized-gains` | RealizedGainView | 已實現損益 |
 | `/exchange-rate` | ExchangeRateView | 匯率走勢 |
 | `/trading-calendar` | TradingCalendarView | 交易日曆 |
+| `/schedule-list` | ScheduleListView | 排程列表（後端各定時任務／爬蟲時間一覽） |
 | `/gdp-twse` | GdpTwseView | 股市大盤查詢（指數日線／當日＋台韓人均 GDP；Requirement 18） |
+| `/performance-comparison` | PerformanceComparisonView | 績效比較（個股 vs benchmark 報酬率；Requirement 33） |
 | `/today-market-analysis` | TodayMarketAnalysisView | 今日股市分析（AI 判斷當日台股走向；Requirement 31） |
 | `/asset-allocation-advice` | AssetAllocationAdviceView | 資產配置建議（依個人條件＋持有資產由 AI 給配置建議；Requirement 32） |
 | `/settings/banks` | BankSettingsView | 銀行設定管理 |
@@ -350,10 +352,12 @@ src/
 | `/settings/asset-classes` | AssetClassSettingsView | 資產類別／風格／債券期別歸類管理（Requirement 25–27） |
 | `/settings/transit-fund-types` | TransitFundTypeSettingsView | 待轉入資金類型設定管理 |
 | `/settings/funds` | FundSettingsView | 信託基金主檔設定管理（Requirement 19） |
-| `/settings/backup-restore` | BackupRestoreView | 資料庫備份／還原 |
+| `/settings/backup-restore` | BackupRestoreView | 資料庫備份／還原（`requiresAdmin`） |
+| `/settings/users` | UserManagementView | 使用者管理（`requiresAdmin`；核准待審帳號、角色管理） |
 | `/settings/notifications` | NotificationSettingsView | 警示通知收件人設定（Requirement 23） |
 | `/payment-accounts` | PaymentAccountSettingsView | 代繳帳戶記錄管理（Requirement 22）；舊路徑 `/settings/payment-accounts` 自動 redirect |
 | `/stocks` | StockMonitorView | 股票觀察（含「觀察清單」、「警示條件」兩個頁籤；舊路徑 `/watch-stocks`、`/stock-alerts` 自動 redirect 並帶 `tab` query） |
+| `/pending` | PendingApprovalView | 帳號等待核准頁（`hidden`；未核准使用者登入後導向） |
 
 ## Data Model
 
@@ -413,6 +417,23 @@ TwseIndexDailyHistory / UsIndexDailyHistory            (大盤 / 海外指數每
 # 備份（Requirement 15）
 BackupSetting         (備份保留代數設定，單列資料表，id = 1)
 BackupRecord          (Google Drive 備份檔本地索引，UNIQUE(folder, filename))
+
+# AI 市場分析 / 新聞（Requirement 31、36）
+DailyMarketAnalysis      (今日股市分析結果，PK = analysis_date；bias/confidence/summary/key_factors/news_highlights/tw_context/us_context/model/status)
+MarketAnalysisSetting    (市場分析設定，單列 id = 1；model / effort / enabled；web_search 相關欄於 Task 179 移除)
+News                     (→ news_headline，爬蟲新聞標題，全域參考、無 owner；供今日分析與公開資訊 SRPP JSON)
+
+# 資產配置建議（Requirement 32）
+AppUser (1) ──── (1) InvestmentProfile           (owner_user_id UNIQUE；理財條件，記住免重填)
+AppUser (1) ──── (N) InvestmentPlannedExpense     (owner_user_id；特定日期大筆花費，一使用者多筆)
+AppUser (1) ──── (N) PortfolioAdvice              (owner_user_id；歷次建議，條件快照刻意 denormalize)
+PortfolioAdviceSetting   (配置建議設定，單列 id = 1；model / effort / web_search_max_uses)
+
+# 排程匯出（Requirement 34）
+AppUser (1) ──── (1) ExportScheduleSetting        (owner_user_id UNIQUE；歷年資產每日排程自動匯出設定)
+
+# 台股臨時休市（颱風假；Requirement 7）
+TwMarketClosure       (台股臨時休市，PK = closure_date；全域參考、無 owner、無 backend entity——ext-materials 直寫、backend 經 /internal/tw-holidays proxy 讀 union)
 ```
 
 > **Schema 基準線與 DB 層唯一鍵（重要澄清）：** 本專案的資料表基準線由 `db/init/01_dump.sql`（完整 `pg_dump` 快照，掛載進 `docker-entrypoint-initdb.d`）提供，**非** Liquibase 的 `v1.0.0-initial-schema` changeset；Liquibase 僅在此基準線之上做**增量**變更（dump 已含 `databasechangelog` 歷史，過往 changeset 視為 already-ran）。因此下列 Hibernate 早期建立、已固化進 dump 的 DB 層約束**不會出現在 Liquibase changelog**，但每個環境（運行中＋全新以 dump 初始化）皆已存在，`ddl-auto: none` 亦不會重建：
@@ -1033,6 +1054,7 @@ POST   /api/korea-gdp/refresh-from-imf         # 回補韓國人均 GDP / 實質
 GET    /api/twse-daily-index?from=YYYY-MM-DD&to=YYYY-MM-DD
                                                # 台股大盤每日收盤（10 年回補後使用）
 POST   /api/twse-daily-index/refresh?years=10  # 逐月呼叫 TWSE MI_5MINS_HIST 抓所有交易日 upsert
+POST   /api/twse-daily-index/refresh-tr?years=10 # 背景回補台股「含息報酬指數」close_point_tr（Task 170），立即回 {started, pending}
 # 已移除（Task 97）：/api/twse-year-end-index(GET/refresh)、/api/twse-daily-index/latest（年末走勢圖卡移除）
 GET    /api/us-daily-index?code=SPX&from=&to=  # 海外指數每日 OHLC（code ∈ DJI/SPX/IXIC/SOX/FTSE/DAX/KOSPI/N225）
 POST   /api/us-daily-index/refresh?code=SPX    # Yahoo v8 chart range=10y 抓單一指數 upsert（一次呼叫）
@@ -1971,11 +1993,11 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
 - **API**：
   | Method | Path | 說明 |
   |---|---|---|
-  | GET | `/api/market-analysis/settings` | `{ model, effort, webSearchMaxUses, enabled, availableModels:[{id,label}], availableEfforts:[{id,label}], availableWebSearches:[{value,label}] }`；已登入者可讀。 |
-  | PUT | `/api/market-analysis/settings` `{model?, effort?, webSearchMaxUses?, enabled?}` | 更新模型／思考深度／新聞搜尋次數／每日自動分析開關（至少一項；未帶之欄不變）；`CurrentUserContext.isAdmin()` 否則 `AdminRequiredException`；白名單欄驗證。body 型別 `Map<String,Object>`（`webSearchMaxUses` 收 JSON number、`enabled` 收 JSON boolean）。 |
+  | GET | `/api/market-analysis/settings` | `{ model, effort, enabled, availableModels:[{id,label}], availableEfforts:[{id,label}] }`；已登入者可讀。（`webSearchMaxUses`／`availableWebSearches` 於 Task 179 隨 `web_search` 一併移除。） |
+  | PUT | `/api/market-analysis/settings` `{model?, effort?, enabled?}` | 更新模型／思考深度／每日自動分析開關（至少一項；未帶之欄不變）；`CurrentUserContext.isAdmin()` 否則 `AdminRequiredException`；白名單欄驗證。body 型別 `Map<String,Object>`（`enabled` 收 JSON boolean）。 |
 
   BFF：主 `GET /api/bff/today-market-analysis` 聚合回傳 `{ today, history, settings }`；`PUT /api/bff/today-market-analysis/settings` 為**泛型 Map 轉發**（body 原封轉給 business，故新增 `effort`／`web_search`／`enabled` 欄皆無需改 BFF），bff `SecurityConfig` 對該 `PUT` 限 `AUTHORITY_ADMIN`。
-- **前端**：頁首（限管理者）並列「每日自動分析」`el-switch`（v-model 布林）＋三個 `el-select`——模型（`availableModels`）、思考深度（`availableEfforts`）、新聞搜尋（`availableWebSearches`，值為整數）；各自 `change` → `updateSettings({model})` / `{effort}` / `{webSearchMaxUses}` / `{enabled}` 持久化，提示訊息，失敗還原；`busy` computed（任一儲存中或分析中）停用全部控制項避免併發覆蓋；`.header-actions` 加 `flex-wrap` 讓開關＋三下拉＋按鈕在窄寬度優雅換行；停用時「尚無資料」`el-empty` 說明改為「已停用、由管理者手動產生」；一般使用者不顯示這些控制項。卡片 `foot-meta` 的「由 {model}」仍顯示**產生該筆分析所用**的模型（`daily_market_analysis.model`），與「下次要用的設定」語意區分（effort／web search／enabled 屬設定層、不逐筆記錄於 `daily_market_analysis`）。
+- **前端**：頁首（限管理者）並列「每日自動分析」`el-switch`（v-model 布林）＋兩個 `el-select`——模型（`availableModels`）、思考深度（`availableEfforts`）；各自 `change` → `updateSettings({model})` / `{effort}` / `{enabled}` 持久化，提示訊息，失敗還原；`busy` computed（任一儲存中或分析中）停用全部控制項避免併發覆蓋；`.header-actions` 加 `flex-wrap` 讓開關＋下拉＋按鈕在窄寬度優雅換行；停用時「尚無資料」`el-empty` 說明改為「已停用、由管理者手動產生」；一般使用者不顯示這些控制項。（「新聞搜尋次數」下拉於 Task 179 隨 `web_search` 移除。）卡片 `foot-meta` 的「由 {model}」仍顯示**產生該筆分析所用**的模型（`daily_market_analysis.model`），與「下次要用的設定」語意區分（effort／enabled 屬設定層、不逐筆記錄於 `daily_market_analysis`）。
 
 ### 擴充：分析結果每日 Email 寄送 + 收件人訂閱選擇（Task 151）
 

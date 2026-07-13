@@ -176,6 +176,7 @@ export const bffApi = {
     create:      (data) => api.post('/bff/realized-gain', data),
     update:      (id, data) => api.put(`/bff/realized-gain/${id}`, data),
     delete:      (id) => api.delete(`/bff/realized-gain/${id}`),
+    lookupName:  (params) => api.get('/bff/realized-gain/lookup-name', { params }),  // 走本頁 BFF，轉呼同一支 business /api/stock-alerts/lookup-name
     exportExcel: () => api.get('/bff/realized-gain/export', { responseType: 'blob' })
   },
 

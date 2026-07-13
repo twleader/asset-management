@@ -1007,7 +1007,7 @@ Dashboard `bankSummary` 將 `TRANSIT_TWD` 與 `TRANSIT_USD` 同一條件分支�
 - [x] 38.2 `StockPriceService.recordTwClosingPrice` 改為迭代呼叫 FinMind 方法 + `persistPrice(...closed=true)`，
        不再走 `getStockPrice` / TWSE mis；log 紀錄成功與缺漏檔數
 
-### Task 39: Dashboard 美股持股 bar 改用股票代號
+### Task 181: Dashboard 美股持股 bar 改用股票代號（原誤編為 Task 39，與下方「股價基準日規則改 per-market」重號，重編為 181）
 
 對應 Requirements: Requirement 8（資產歷史趨勢）
 
@@ -1018,10 +1018,10 @@ Dashboard `bankSummary` 將 `TRANSIT_TWD` 與 `TRANSIT_USD` 同一條件分支�
 
 #### Steps:
 
-- [x] 39.1 `DashboardView.vue` `stockBarOption.yAxis.data` 依 `chartMarketTab` 區分：台股用 `stockName`、美股改用 `stockCode`
-- [x] 39.2 tooltip 標題保留「代號 + 名稱」完整資訊，避免 y 軸僅用代號時失去名稱可讀性
+- [x] 181.1 `DashboardView.vue` `stockBarOption.yAxis.data` 依 `chartMarketTab` 區分：台股用 `stockName`、美股改用 `stockCode`
+- [x] 181.2 tooltip 標題保留「代號 + 名稱」完整資訊，避免 y 軸僅用代號時失去名稱可讀性
 
-### Task 40: Dashboard 持股 bar 依損益上色
+### Task 182: Dashboard 持股 bar 依損益上色（原誤編為 Task 40，與下方「SnapshotForm BFF 配息率批次抓取」重號，重編為 182）
 
 對應 Requirements: Requirement 8（資產歷史趨勢）
 
@@ -1031,7 +1031,7 @@ Dashboard `bankSummary` 將 `TRANSIT_TWD` 與 `TRANSIT_USD` 同一條件分支�
 
 #### Steps:
 
-- [x] 40.1 `DashboardView.vue` `stockBarOption` 移除 `barColor`（依市場著色），改為每筆 `itemStyle.color`
+- [x] 182.1 `DashboardView.vue` `stockBarOption` 移除 `barColor`（依市場著色），改為每筆 `itemStyle.color`
        依 `currentValue - investmentCost >= 0 ? 綠 : 紅`，台美股一致
 
 ### Task 39: 股價基準日規則改 per-market（修正美股盤中誤顯示前一交易日收盤）
@@ -3751,6 +3751,9 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
   - **backend `MarketAnalysisService`**：`TRUSTED_LOCAL_NEWS_HOSTS` 移 `cnyes.com`、加 `wantgoo.com`/`moneydj.com`；prompt「可優先參考」來源改列玩股網/MoneyDJ、移除鉅亨網；prompt 加「排除來源：勿採用鉅亨網 cnyes」；新增 `isExcludedSource(url,source)`（`EXCLUDED_NEWS_HOSTS=cnyes.com`＋`EXCLUDED_SOURCE_TOKENS=鉅亨/cnyes/Anue`）於 `sanitizeNews` 地區封鎖後硬過濾——即使 web_search 搜到 cnyes 也不列入。**區塊封鎖『零誤殺』comment（134/961）不動**：那是保證 region-block 不誤殺台灣 cnyes.com（中港澳層），使用者排除是另一層。
   - **部署**：`--no-cache` 重 build ext＋business-services；`DELETE FROM news_headline WHERE source='cnyes'` 清既有 cnyes 列；驗 `news_headline` 出現 wantgoo/moneydj、無 cnyes。
 
+> **149.15／149.21／149.22 標記說明（讀者勿誤判）**：這幾項的實作**均已完成並部署**（程式碼存在於 repo／運行 image，各項步驟亦已載明 build＋recreate），保留未勾選 `[ ]` 僅因各項末段所述「**單次付費 LLM 端到端驗證**」延後、待使用者決定時機，**非未實作**。
+> **149.18–149.20（web_search 時效收斂／地區封鎖／`web_search_20250305` 版本修復）已於 Task 179「web_search 全面移除、新聞改讀本地 `news_headline`」後失效並被取代**，保留為歷史脈絡，勿據以推斷現行行為（現行新聞管線見 Task 177／178／179／180）。
+
 ### Task 150: `/gdp-twse` 頁面選單／標題「股市分析」更名為「股市大盤查詢」
 
 對應 Requirements: Requirement 18
@@ -4538,3 +4541,21 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - [x] 180.11 部署驗證抓出的 runtime bug 修正：`StockSourceQuery.loadLatestUsIndexClose` 第三引數原為 expression lambda（`rs -> rows.add(...)` 回 boolean）被 Java 解析成 `ResultSetExtractor`（整段只呼一次、rs 停在第一列前）→ warmup 時拋「ResultSet not positioned properly」美股快照組裝失敗。改為 void 區塊 lambda `{ rows.add(...); }` 確定解析為 `RowCallbackHandler`（逐列、rs 已定位）。FX（`loadLatestUsdRate` 用正確的 ResultSetExtractor + 自呼 `rs.next()`）不受影響。
 - [ ] 180.8 部署驗證：`--no-cache` 重 build external-materials-service＋recreate；驗 warmup log「個股過濾」、`news_headline` 出現 `fx`／`us-market` 列、SRPP `public_info_<date>.json` 含匯率與美股指數項、政治/國際新聞入庫（僅相關者）、無中港澳來源。
 - [ ] 180.9 commit + 兩段式 merge。
+
+### Task 183: 規格與程式碼一致性對齊（spec-code consistency 稽核修正）
+
+對應 Requirements: CLAUDE.md「一頁一支 BFF」「同義欄位、同一 business service API」、Requirement 6（已實現損益）、Requirement 31（市場分析設定）、Requirement 33（TWSE 報酬指數）、Requirement 28/34/36（路由與 ERD 完整性）
+
+#### 背景
+
+spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文件落後於已上線程式碼）。除 1 項改程式碼守規則外，其餘補正 `spec/design.md`／`spec/tasks.md`，使文件與 `1ab778c8` 之程式碼一致。
+
+#### Steps:
+
+- [x] 183.1 **A3（改程式碼守「一頁一支 BFF」）**：`RealizedGainView.vue` 的股名自動帶出原直接跨頁呼叫 `bffApi.stockAlert.lookupName`（打 `/api/bff/stock-alert/lookup-name`）。改為 `RealizedGainBffController` 新增 `GET /api/bff/realized-gain/lookup-name`，WebClient 轉呼**同一支** business `/api/stock-alerts/lookup-name`（符合「同義欄位、同一 business service API」）；`api/index.js` 加 `realizedGain.lookupName`；view 改走本頁 BFF。`design.md` BFF 清單同步記載此端點。
+- [x] 183.2 **A1（補 spec）**：`design.md` Macro History 端點清單補 `POST /api/twse-daily-index/refresh-tr`（背景回補含息報酬指數 `close_point_tr`，對應 `MacroHistoryController.refreshTwseReturnIndex`／Task 170）。
+- [x] 183.3 **A5（修 spec 內部矛盾）**：`design.md` market-analysis settings API 表與前端敘述仍列 Task 179 已移除的 `webSearchMaxUses`／`availableWebSearches`／「新聞搜尋」下拉；移除之，與同節「Task 179 移除」prose 一致（`MarketAnalysisSettingsDto` 僅 model/effort/enabled）。
+- [x] 183.4 **A4（補 spec）**：`design.md` Routing 表補 4 條實際路由 `/schedule-list`、`/performance-comparison`、`/settings/users`（requiresAdmin）、`/pending`（hidden）；route 計數 26→31、views 計數 25→28。
+- [x] 183.5 **A2（補 spec）**：`design.md` ERD 圖／Core Entities 補 Requirement 31–34＋颱風假新表（`daily_market_analysis`／`market_analysis_setting`／`news_headline`／`investment_profile`／`investment_planned_expense`／`portfolio_advice`／`portfolio_advice_setting`／`export_schedule_setting`／`tw_market_closure`）。註：`news_headline`（design.md:1952）與 `export_schedule_setting`（design.md:2257）欄位級 schema 原已存在，僅 ERD 總圖漏列，故只補 ERD。
+- [x] 183.6 **A6（修 tasks.md 重號）**：Task 39／40 各出現兩次；將前一對「Dashboard bar 改用代號／依損益上色」（無數字交叉引用）重編為 Task 181／182，保留後一對「per-market／dividend-rate」為 39／40（Task 42 的 `Task 39` 引用維持正確）。
+- [x] 183.7 **A7（tasks.md 標記說明）**：Task 149.15／149.21／149.22 實作已 landed＋部署但保留 `[ ]`（待單次付費 LLM 端到端驗證）；149.18–149.20 已被 Task 179（web_search 移除）取代。加註說明避免讀者誤判為未實作，不改動 checkbox 語意。
