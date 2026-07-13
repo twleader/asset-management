@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
@@ -48,6 +49,22 @@ public class RealizedGainBffController {
                     .toList());
             return ResponseEntity.ok(body);
         });
+    }
+
+    /**
+     * 輸入股號自動帶出股名（新增/編輯損益列用）。走本頁 BFF 但轉呼「同一支」business API
+     * {@code /api/stock-alerts/lookup-name}（與 stock-alert 頁同源，符合「同義欄位同一 business service API」），
+     * 不再從前端跨頁呼叫 stock-alert 的 BFF。code/market 由 business 端白名單驗證。
+     */
+    @GetMapping("/lookup-name")
+    public Mono<ResponseEntity<Map<String, Object>>> lookupName(@RequestParam String code,
+                                                               @RequestParam String market) {
+        return businessServicesClient.get()
+                .uri(uriBuilder -> uriBuilder.path("/api/stock-alerts/lookup-name")
+                        .queryParam("code", code)
+                        .queryParam("market", market)
+                        .build())
+                .retrieve().bodyToMono(MAP).map(ResponseEntity::ok);
     }
 
     @PostMapping

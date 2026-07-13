@@ -299,7 +299,7 @@ const autoFillAssetName = async () => {
   // 已有股名就不覆寫（使用者自填的優先）
   if (gainForm.assetName && gainForm.assetName.trim()) return
   try {
-    const res = await bffApi.stockAlert.lookupName({ code, market: gainForm.market })
+    const res = await bffApi.realizedGain.lookupName({ code, market: gainForm.market })
     const name = res?.stockName || res?.name
     if (name) gainForm.assetName = name
   } catch (e) {
