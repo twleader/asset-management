@@ -476,12 +476,17 @@ public class StockSourceQuery {
      */
     public UsIndexClose loadLatestUsIndexClose(String indexCode) {
         List<Object[]> rows = new java.util.ArrayList<>(2);
+        // 第三引數用「void 區塊」lambda 才會解析為 RowCallbackHandler（逐列、rs 已定位）；
+        // 若寫成 expression lambda（rows.add(...) 回 boolean）會被解析成 ResultSetExtractor（整段只呼一次、
+        // rs 停在第一列前），rs.getDate 立即拋「ResultSet not positioned properly」。
         jdbc.query(
                 "SELECT trading_date, close_point FROM us_index_daily_history " +
                         "WHERE index_code = ? ORDER BY trading_date DESC LIMIT 2",
                 ps -> ps.setString(1, indexCode),
-                (java.sql.ResultSet rs) -> rows.add(new Object[]{
-                        rs.getDate("trading_date").toLocalDate(), rs.getBigDecimal("close_point")}));
+                (java.sql.ResultSet rs) -> {
+                    rows.add(new Object[]{
+                            rs.getDate("trading_date").toLocalDate(), rs.getBigDecimal("close_point")});
+                });
         if (rows.isEmpty()) return null;
         return new UsIndexClose(indexCode,
                 (LocalDate) rows.get(0)[0], (BigDecimal) rows.get(0)[1],
