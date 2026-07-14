@@ -34,7 +34,7 @@ public class MarketAnalysisSetting {
     @Column(name = "effort", length = 16, nullable = false)
     private String effort;
 
-    /** 每日自動分析開關：false＝08:30 cron／self-heal 跳過（零花費）；手動觸發不受此限。預設 true。 */
+    /** 每日自動分析開關：false＝08:45 cron／self-heal 跳過（零花費）；手動觸發不受此限。預設 true。 */
     @Column(name = "enabled", nullable = false)
     private Boolean enabled;
 

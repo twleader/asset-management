@@ -14,14 +14,16 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 公開資訊「量化快照」組裝（Task 180）：由共用 DB 既有資料組出兩則 {@link NewsRow} 併入每輪公開資訊——
+ * 公開資訊「量化快照」組裝（Task 180、韓股 Task 185）：由共用 DB 既有資料組出三則 {@link NewsRow} 併入每輪公開資訊——
  * <ul>
  *   <li><b>台幣兌美元匯率</b>（{@code exchange_rate_history} 最新 USD 即期買/賣/中間價，{@code ExchangeRatePoller} 已抓）；</li>
  *   <li><b>美股主要指數收盤</b>（{@code us_index_daily_history} 道瓊/標普500/那斯達克/費半最新收盤＋漲跌%，
- *       由 Yahoo Finance 抓、{@code IndexDailyRefreshScheduler} 寫入）。</li>
+ *       由 Yahoo Finance 抓、{@code IndexDailyRefreshScheduler} 寫入）；</li>
+ *   <li><b>韓國股市</b>（KOSPI 大盤讀既有 {@code us_index_daily_history} index_code=KOSPI；三星電子 005930／
+ *       SK 海力士 000660 讀 {@code foreign_stock_daily_history}，由 {@code KrStockPoller} 寫入；收盤 KRW＋漲跌%）。</li>
  * </ul>
  *
- * <p>兩者都是使用者明確要求「一定要有」的公開資訊，但原本只落在各自資料表、<b>不在 {@code news_headline}</b>，
+ * <p>三者都是使用者明確要求「一定要有」的公開資訊，但原本只落在各自資料表、<b>不在 {@code news_headline}</b>，
  * 故不會進入 SRPP 公開資訊 JSON、也不在今日股市分析的本地新聞區塊。本 client 把它們組成 NewsRow，交由
  * {@code NewsPoller} 一併 upsert，讓兩個下游（SRPP JSON／今日股市分析）都吃得到（DB 為單一來源）。
  *
@@ -39,7 +41,7 @@ public class MarketSnapshotFetchClient {
     private static final List<String> US_CODES = List.of("DJI", "SPX", "IXIC", "SOX");
 
     public List<NewsRow> fetchAll() {
-        List<NewsRow> out = new ArrayList<>(2);
+        List<NewsRow> out = new ArrayList<>(3);
         try {
             NewsRow fx = buildFxSnapshot();
             if (fx != null) out.add(fx);
@@ -51,6 +53,12 @@ public class MarketSnapshotFetchClient {
             if (us != null) out.add(us);
         } catch (Exception e) {
             log.warn("公開資訊美股指數快照組裝失敗：{}", e.getMessage());
+        }
+        try {
+            NewsRow kr = buildKrMarketSnapshot();
+            if (kr != null) out.add(kr);
+        } catch (Exception e) {
+            log.warn("公開資訊韓股快照組裝失敗：{}", e.getMessage());
         }
         return out;
     }
@@ -107,6 +115,53 @@ public class MarketSnapshotFetchClient {
         String summary = "來源：Yahoo Finance 美股指數日線收盤（道瓊 DJI／標普500 SPX／那斯達克 IXIC／費城半導體 SOX；漲跌% 對前一交易日收盤）。";
         return new NewsRow(title.toString(), "us-index", "https://finance.yahoo.com/world-indices",
                 "us-market", "US", summary, Instant.now());
+    }
+
+    // ===== 韓國股市（KOSPI 大盤 + 三星電子／SK 海力士，價格 KRW） =====
+
+    /** 韓股快照一項（大盤或個股）：顯示名、收盤、前一交易日收盤、資料日。 */
+    private record KrEntry(String name, BigDecimal close, BigDecimal prevClose, LocalDate tradingDate) {}
+
+    private NewsRow buildKrMarketSnapshot() {
+        List<KrEntry> entries = new ArrayList<>(3);
+        // KOSPI 大盤：已由既有海外指數管線抓進 us_index_daily_history（index_code=KOSPI），直接讀、不重抓。
+        StockSourceQuery.UsIndexClose kospi = source.loadLatestUsIndexClose("KOSPI");
+        if (kospi != null && kospi.close() != null) {
+            entries.add(new KrEntry("KOSPI", kospi.close(), kospi.prevClose(), kospi.tradingDate()));
+        }
+        // 三星電子／SK 海力士：由 KrStockPoller 抓進 foreign_stock_daily_history。
+        StockSourceQuery.ForeignStockClose samsung = source.loadLatestForeignStockClose("005930");
+        if (samsung != null && samsung.close() != null) {
+            entries.add(new KrEntry("三星電子", samsung.close(), samsung.prevClose(), samsung.tradingDate()));
+        }
+        StockSourceQuery.ForeignStockClose hynix = source.loadLatestForeignStockClose("000660");
+        if (hynix != null && hynix.close() != null) {
+            entries.add(new KrEntry("SK海力士", hynix.close(), hynix.prevClose(), hynix.tradingDate()));
+        }
+        if (entries.isEmpty()) {
+            // 使用者要求「一定要有」韓股資訊——缺料屬異常（僅冷啟前、指數/韓股排程尚未寫入才會發生），提高為 warn 以利察覺。
+            log.warn("公開資訊韓股快照：無 KOSPI/三星/海力士資料，本輪略過（待 IndexDailyRefreshScheduler／KrStockPoller 寫入）");
+            return null;
+        }
+        LocalDate session = entries.stream()
+                .map(KrEntry::tradingDate).filter(java.util.Objects::nonNull)
+                .max(LocalDate::compareTo).orElse(null);
+
+        StringBuilder title = new StringBuilder("韓國股市（截至 ").append(session).append(" 收盤）：");
+        for (int i = 0; i < entries.size(); i++) {
+            KrEntry e = entries.get(i);
+            if (i > 0) title.append("、");
+            title.append(e.name()).append(" ").append(comma(e.close()))
+                 .append("（").append(changePct(e.close(), e.prevClose()));
+            // 某項若落後於 session（部分回補 / 單碼抓取失敗）→ 標其自身資料日，避免把舊 session 值掛在最新日期下（比照美股快照）。
+            if (e.tradingDate() != null && !e.tradingDate().equals(session)) {
+                title.append("，資料日 ").append(e.tradingDate());
+            }
+            title.append("）");
+        }
+        String summary = "來源：Yahoo Finance（KOSPI ^KS11／三星電子 005930.KS／SK海力士 000660.KS；收盤價 KRW，漲跌% 對前一交易日收盤）。";
+        return new NewsRow(title.toString(), "kr-index", "https://finance.yahoo.com/quote/%5EKS11",
+                "kr-market", "KR", summary, Instant.now());
     }
 
     // ===== helpers =====
