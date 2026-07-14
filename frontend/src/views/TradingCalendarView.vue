@@ -88,6 +88,7 @@
             <el-tag v-if="holidaysLoading" type="info" size="small" style="margin-left:8px">載入假日中…</el-tag>
           </span>
           <div style="display:flex;gap:8px;align-items:center">
+            <el-button size="small" type="primary" :icon="Download" @click="openExportDialog">匯出</el-button>
             <el-button size="small" @click="prevMonth">上月</el-button>
             <el-button size="small" @click="goToday">今天</el-button>
             <el-button size="small" @click="nextMonth">下月</el-button>
@@ -136,6 +137,90 @@
       </table>
     </el-card>
 
+    <!-- 匯出對話框（Requirement 37）：年度 / 格式 / 輸出資料夾 -->
+    <el-dialog v-model="exportDialog.visible" title="匯出交易日曆" width="560px">
+      <el-form label-width="90px">
+        <el-form-item label="年度">
+          <el-input-number v-model="exportDialog.year" :min="1970" :max="2100" :step="1" controls-position="right" style="width:160px" />
+        </el-form-item>
+        <el-form-item label="檔案格式">
+          <el-radio-group v-model="exportDialog.format">
+            <el-radio label="json">JSON</el-radio>
+            <el-radio label="excel">Excel (.xlsx)</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="輸出資料夾">
+          <el-input v-model="exportDialog.subpath" readonly placeholder="（家目錄根）" style="width:300px">
+            <template #append>
+              <el-button :icon="FolderOpened" @click="openDirPicker">選擇</el-button>
+            </template>
+          </el-input>
+        </el-form-item>
+      </el-form>
+      <div class="export-hint">
+        以主機家目錄 <code>{{ exportDialog.baseDir || '/home/steven' }}</code> 為根（對映主機 <code>/Users/steven</code>）。
+        匯出該年度整年交易日曆（台／美／英三市每日交易日 ＋ 各市場國定假日）為
+        <code>交易日曆_{{ exportDialog.year }}.{{ exportDialog.format === 'excel' ? 'xlsx' : 'json' }}</code>。
+      </div>
+      <div v-if="exportDialog.lastResult" class="export-status">
+        ✅ 已匯出：<code>{{ exportDialog.lastResult.path }}</code>
+        （{{ exportDialog.lastResult.totalDays }} 天，{{ (exportDialog.lastResult.sizeBytes / 1024).toFixed(1) }} KB）
+      </div>
+
+      <!-- 每日排程自動匯出（Task 185）：共用上方格式／資料夾 -->
+      <el-divider content-position="left">每日排程自動匯出</el-divider>
+      <el-form label-width="90px">
+        <el-form-item label="啟用排程">
+          <el-switch v-model="exportDialog.scheduleEnabled" />
+        </el-form-item>
+        <el-form-item label="每日時間">
+          <el-time-picker v-model="exportDialog.scheduleTime" format="HH:mm" value-format="HH:mm"
+            placeholder="時:分" style="width:130px" />
+          <el-button size="small" type="primary" :loading="exportDialog.savingSchedule"
+            style="margin-left:12px" @click="saveSchedule">儲存排程</el-button>
+        </el-form-item>
+      </el-form>
+      <div class="export-hint">
+        啟用後每日於指定時間，自動以上方選定的<strong>格式與資料夾</strong>匯出「當前年度」交易日曆
+        （<code>交易日曆_{當前年}.{{ exportDialog.format === 'excel' ? 'xlsx' : 'json' }}</code>），隨年度與臨時休市更新保持最新。
+      </div>
+      <div v-if="exportDialog.scheduleLastRunAt || exportDialog.scheduleLastRunStatus" class="export-status">
+        上次排程執行：{{ exportDialog.scheduleLastRunAt || '—' }}　{{ exportDialog.scheduleLastRunStatus || '' }}
+      </div>
+
+      <template #footer>
+        <el-button @click="exportDialog.visible = false">關閉</el-button>
+        <el-button type="primary" :icon="Download" :loading="exportDialog.exporting" @click="doExport">匯出到目錄</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 輸出資料夾選擇器（檔案總管式樹狀，比照 AssetHistoryView） -->
+    <el-dialog v-model="dirPicker.visible" title="選擇輸出資料夾" width="560px">
+      <div class="dir-picker-path">
+        目前選擇：<code>{{ dirPicker.baseDir || '/home/steven' }}{{ dirPicker.picked ? '/' + dirPicker.picked : '' }}{{ dirPicker.newSub.trim() ? '/' + dirPicker.newSub.trim() : '' }}</code>
+      </div>
+      <el-tree
+        :key="dirPicker.treeKey"
+        lazy
+        :load="loadDirNode"
+        :props="dirTreeProps"
+        node-key="key"
+        highlight-current
+        :expand-on-click-node="false"
+        :default-expanded-keys="['__root__']"
+        class="dir-tree"
+        @node-click="onDirNodeClick" />
+      <div class="dir-new-sub">
+        <span class="dns-label">新增子資料夾</span>
+        <el-input v-model="dirPicker.newSub" placeholder="（選填）在所選資料夾下新增，寫檔時自動建立"
+          style="width:340px" clearable />
+      </div>
+      <template #footer>
+        <el-button @click="dirPicker.visible = false">取消</el-button>
+        <el-button type="primary" @click="confirmDirPick">確定</el-button>
+      </template>
+    </el-dialog>
+
     <!-- US DST Info -->
     <el-card style="margin-top:20px">
       <template #header><span class="section-title">美國日光節約時間說明</span></template>
@@ -152,6 +237,8 @@
 <script setup>
 import { bffApi } from '@/api'
 import dayjs from 'dayjs'
+import { ElMessage } from 'element-plus'
+import { Download, FolderOpened } from '@element-plus/icons-vue'
 import TaiwanMap from '@/components/TaiwanMap.vue'
 import UsFlag from '@/components/UsFlag.vue'
 
@@ -159,6 +246,15 @@ const status = ref({ twMarketOpen: false, usMarketOpen: false, ukMarketOpen: fal
 const calendarYear = ref(dayjs().year())
 const calendarMonth = ref(dayjs().month() + 1)
 const selectedDate = ref(null)
+
+// 匯出到指定路徑（Requirement 37）＋每日排程（Task 185）
+const exportDialog = reactive({
+  visible: false, year: dayjs().year(), format: 'json', subpath: 'input', baseDir: '', exporting: false, lastResult: null,
+  scheduleEnabled: false, scheduleTime: '08:00', savingSchedule: false, scheduleLastRunAt: null, scheduleLastRunStatus: null
+})
+// 輸出資料夾選擇器（檔案總管式樹狀，比照 AssetHistoryView）
+const dirPicker = reactive({ visible: false, baseDir: '', picked: '', newSub: '', treeKey: 0 })
+const dirTreeProps = { label: 'name', isLeaf: 'leaf' }
 
 // Holiday cache by year: { 2026: { tw: {...}, us: {...} }, ... }
 const holidayCache = ref({})
@@ -338,6 +434,99 @@ function goToday() {
   calendarYear.value = dayjs().year()
   calendarMonth.value = dayjs().month() + 1
 }
+
+// ===== 匯出到指定路徑（Requirement 37）＋每日排程（Task 185）=====
+async function openExportDialog() {
+  exportDialog.year = calendarYear.value
+  exportDialog.lastResult = null
+  exportDialog.visible = true
+  try {
+    const res = await bffApi.tradingCalendar.browseExportDir('')
+    exportDialog.baseDir = res.baseDir || ''
+  } catch { /* 顯示提示用，失敗不影響匯出 */ }
+  loadSchedule().catch(() => {})
+}
+
+// 載入排程設定：若已有設定，帶入格式／資料夾／時間／啟用狀態
+async function loadSchedule() {
+  const s = await bffApi.tradingCalendar.getExportSchedule()
+  exportDialog.scheduleEnabled = !!s.enabled
+  if (s.format) exportDialog.format = s.format
+  if (s.outputSubpath != null) exportDialog.subpath = s.outputSubpath
+  if (s.baseDir) exportDialog.baseDir = s.baseDir
+  const h = s.runHour ?? 8, m = s.runMinute ?? 0
+  exportDialog.scheduleTime = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+  exportDialog.scheduleLastRunAt = s.lastRunAt ?? null
+  exportDialog.scheduleLastRunStatus = s.lastRunStatus ?? null
+}
+
+async function saveSchedule() {
+  exportDialog.savingSchedule = true
+  try {
+    const [h, m] = (exportDialog.scheduleTime || '08:00').split(':').map(Number)
+    const s = await bffApi.tradingCalendar.updateExportSchedule({
+      enabled: exportDialog.scheduleEnabled,
+      runHour: h,
+      runMinute: m,
+      format: exportDialog.format,
+      outputSubpath: exportDialog.subpath
+    })
+    exportDialog.scheduleLastRunAt = s.lastRunAt ?? exportDialog.scheduleLastRunAt
+    exportDialog.scheduleLastRunStatus = s.lastRunStatus ?? exportDialog.scheduleLastRunStatus
+    ElMessage.success('排程設定已儲存')
+  } catch (e) {
+    ElMessage.error('排程儲存失敗，請確認格式與目錄權限')
+  } finally {
+    exportDialog.savingSchedule = false
+  }
+}
+
+function openDirPicker() {
+  dirPicker.picked = exportDialog.subpath || ''
+  dirPicker.newSub = ''
+  dirPicker.treeKey++            // 強制 el-tree 重新懶載入 root
+  dirPicker.visible = true
+}
+
+// el-tree 懶載入：level 0 以家目錄為單一 root；其餘列該節點子目錄
+async function loadDirNode(node, resolve) {
+  try {
+    if (node.level === 0) {
+      const res = await bffApi.tradingCalendar.browseExportDir('')
+      dirPicker.baseDir = res.baseDir || ''
+      exportDialog.baseDir = res.baseDir || ''
+      resolve([{ name: res.baseDir || '/', path: '', key: '__root__', leaf: false }])
+      return
+    }
+    const res = await bffApi.tradingCalendar.browseExportDir(node.data.path || '')
+    resolve((res.directories || []).map(d => ({ name: d.name, path: d.path, key: d.path, leaf: false })))
+  } catch (e) {
+    resolve([])
+  }
+}
+
+const onDirNodeClick = (data) => { dirPicker.picked = data.path || '' }
+
+function confirmDirPick() {
+  let p = dirPicker.picked || ''
+  const sub = (dirPicker.newSub || '').trim().replace(/^\/+|\/+$/g, '')
+  if (sub) p = p ? `${p}/${sub}` : sub
+  exportDialog.subpath = p
+  dirPicker.visible = false
+}
+
+async function doExport() {
+  exportDialog.exporting = true
+  try {
+    const r = await bffApi.tradingCalendar.exportToDir(exportDialog.year, exportDialog.format, exportDialog.subpath)
+    exportDialog.lastResult = r
+    ElMessage.success(`已匯出到：${r.path}`)
+  } catch (e) {
+    ElMessage.error('匯出失敗，請確認年度、格式與目錄權限')
+  } finally {
+    exportDialog.exporting = false
+  }
+}
 </script>
 
 <style scoped>
@@ -389,4 +578,15 @@ function goToday() {
 /* DST descriptions */
 .dst-desc :deep(.el-descriptions__label) { font-size: 15px; font-weight: 600; width: 200px; }
 .dst-desc :deep(.el-descriptions__content) { font-size: 15px; }
+
+/* 匯出對話框（Requirement 37） */
+.export-hint { font-size: 12px; color: #94a3b8; line-height: 1.6; }
+.export-hint code { background: #f1f5f9; color: #475569; padding: 1px 5px; border-radius: 4px; font-size: 11px; }
+.export-status { margin-top: 10px; font-size: 12px; color: #64748b; }
+.export-status code { background: #f1f5f9; color: #0f172a; padding: 2px 6px; border-radius: 4px; word-break: break-all; }
+.dir-picker-path { font-size: 13px; color: #475569; margin-bottom: 10px; }
+.dir-picker-path code { background: #f1f5f9; color: #0f172a; padding: 2px 6px; border-radius: 4px; word-break: break-all; }
+.dir-tree { max-height: 340px; overflow: auto; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px; }
+.dir-new-sub { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+.dir-new-sub .dns-label { font-size: 13px; color: #475569; white-space: nowrap; }
 </style>

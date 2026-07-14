@@ -249,7 +249,13 @@ export const bffApi = {
   // TradingCalendar
   tradingCalendar: {
     get:           (year) => api.get('/bff/trading-calendar', { params: year ? { year } : {} }),
-    marketStatus: () => api.get('/bff/trading-calendar/market-status')
+    marketStatus: () => api.get('/bff/trading-calendar/market-status'),
+    // 交易日曆匯出到指定路徑（Requirement 37）
+    exportToDir:     (year, format, subpath) => api.post('/bff/trading-calendar/export', null, { params: { year, format, subpath }, timeout: 60000, skipErrorToast: true }),
+    browseExportDir: (subpath = '') => api.get('/bff/trading-calendar/export/browse', { params: { subpath }, skipErrorToast: true }),
+    // 每日排程自動匯出（Task 185）
+    getExportSchedule:    () => api.get('/bff/trading-calendar/export/schedule', { skipErrorToast: true }),
+    updateExportSchedule: (data) => api.put('/bff/trading-calendar/export/schedule', data, { skipErrorToast: true })
   },
 
   // ScheduleList（排程列表，「公開資訊」分組，Requirement 36）
