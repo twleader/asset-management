@@ -53,7 +53,7 @@ import java.util.regex.Pattern;
 /**
  * 今日股市分析（Requirement 31）。
  *
- * <p>每個台股交易日 08:30 由 {@code MarketAnalysisScheduler} 觸發（或管理者手動）：讀本地
+ * <p>每個台股交易日 08:45 由 {@code MarketAnalysisScheduler} 觸發（或管理者手動）：讀本地
  * 台股大盤 / 美股主要指數近一年日線走勢與本地爬蟲新聞（{@code news_headline}），組「越近期越重要」
  * 提示詞，呼叫 Claude Opus 4.8（adaptive thinking），解析 JSON 判斷 upsert 進
  * {@code daily_market_analysis}。（Task 179 起改讀本地新聞、不再掛 {@code web_search} server tool。）

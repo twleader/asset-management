@@ -4559,3 +4559,94 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 - [x] 183.5 **A2（補 spec）**：`design.md` ERD 圖／Core Entities 補 Requirement 31–34＋颱風假新表（`daily_market_analysis`／`market_analysis_setting`／`news_headline`／`investment_profile`／`investment_planned_expense`／`portfolio_advice`／`portfolio_advice_setting`／`export_schedule_setting`／`tw_market_closure`）。註：`news_headline`（design.md:1952）與 `export_schedule_setting`（design.md:2257）欄位級 schema 原已存在，僅 ERD 總圖漏列，故只補 ERD。
 - [x] 183.6 **A6（修 tasks.md 重號）**：Task 39／40 各出現兩次；將前一對「Dashboard bar 改用代號／依損益上色」（無數字交叉引用）重編為 Task 181／182，保留後一對「per-market／dividend-rate」為 39／40（Task 42 的 `Task 39` 引用維持正確）。
 - [x] 183.7 **A7（tasks.md 標記說明）**：Task 149.15／149.21／149.22 實作已 landed＋部署但保留 `[ ]`（待單次付費 LLM 端到端驗證）；149.18–149.20 已被 Task 179（web_search 移除）取代。加註說明避免讀者誤判為未實作，不改動 checkbox 語意。
+
+### Task 184：公開資訊爬蟲早上那輪由 08:00 改 08:20（Requirement 31）
+
+對應 Requirements: Requirement 31（今日股市分析／公開資訊）
+
+**背景**：使用者要求把每日爬蟲早上那一輪由 08:00 改到 **08:20**（中午 12:00、晚上 18:00 不變），仍早於 08:30 今日股市分析（`MarketAnalysisScheduler` cron `0 30 8 * * MON-FRI`）。
+
+#### 設計決策
+
+- 早/午晚的「分」不同（:20 vs :00），單一 `cron = "0 0 8,12,18 * * *"` 無法表達；改用 **Spring `@Scheduled` 可重複標註**於同一 `scheduled()` 方法：`0 20 8 * * *`（早上 08:20）＋`0 0 12,18 * * *`（中午/晚上），行為與原本一致（皆呼 `run("scheduled")`）。
+- 排程沿革：06:00（Task 149.21）→08:00（Task 177）→08:20（本項）。
+
+#### 實作
+
+- [x] 184.1 ext `NewsPoller.scheduled()`：拆兩個 `@Scheduled`；class javadoc 與方法註解 08:00→08:20。
+- [x] 184.2 ext `application.yml`：`news-scraper` 註解 08→08:20。
+- [x] 184.3 spec：`requirements.md` R31 新增本 AC＋更新 Task 149.21／177／179 之排程字串；`design.md` 同步 08:20；`tasks.md` 本任務。
+- [ ] 184.4 部署驗證：`--no-cache` 重 build external-materials-service＋recreate；確認 `scheduled()` 兩個 cron 生效、早上為 08:20。
+- [ ] 184.5 commit + 兩段式 merge。
+
+### Task 185：公開資訊爬蟲新增「韓國股市」快照（KOSPI 大盤＋三星電子＋SK 海力士）（Requirement 31）
+
+對應 Requirements: Requirement 31（今日股市分析／公開資訊）
+
+**背景**：使用者要求每日公開資訊新增韓國股市大盤（KOSPI）表現，及三星電子、SK 海力士的股價與漲跌幅。現況盤點：(1) **KOSPI 已在抓**（既有海外指數管線 `IndexDailyRefreshScheduler`／`MacroDataFetchClient` `^KS11`→`us_index_daily_history` 之 `index_code=KOSPI`），直接讀即可、不重抓；(2) **三星（005930）/SK 海力士（000660）是個股、目前完全沒有**，需新增抓取。採「只餵資料給分析」最小方案（使用者確認）：韓股快照自動進 `news_headline`／SRPP JSON／今日股市分析量化桶，不新增 `krContext`／prompt 敘事／前端專屬區塊。
+
+#### 設計決策
+
+- **收斂在 external-materials-service 一個服務**：backend 只加一張共用表的 Liquibase changelog（分析端 category-agnostic，`kr-market` 自動被吃到，零程式碼改動）。
+- **三星/海力士存新表 `foreign_stock_daily_history`**，語意獨立於 `us_index_daily_history`（指數）與 `stock_price_history`（投組個股、market 分類驅動），避免污染既有兩條線；ext 以 JdbcTemplate 直寫、無 JPA entity。僅存 `close_point`（快照只需最新＋前一交易日收盤算漲跌%）。
+- **韓股個股抓價重用個股管線**：`PriceFetchClient.fetchKrHistoricalRange` 照抄 `fetchUkHistoricalRange`（Yahoo chart、curl 短 UA），時區 `Asia/Seoul`、symbol `.KS`。
+- **`publishedAt=Instant.now()`／`url` 固定 dedupe 覆寫**：比照既有 fx／us-market 快照。`kr-market` 非 `news` category → `PublicInfoStockFilter` 一律保留。
+
+#### 實作
+
+- [x] 185.1 backend Liquibase：新增 `v1.55.0-foreign-stock-daily.sql`（`foreign_stock_daily_history`：stock_code／trading_date PK、close_point NUMERIC(18,4)）＋ `db.changelog-master.yaml` 註冊。
+- [x] 185.2 ext `PriceFetchClient.fetchKrHistoricalRange(code, start, end)`：Yahoo `{code}.KS`、時區 Asia/Seoul。
+- [x] 185.3 ext `StockSourceQuery`：新增 `upsertForeignStockDaily(...)` 與 `loadLatestForeignStockClose(code)`（回 `ForeignStockClose` record，void 區塊 lambda）。
+- [x] 185.4 ext 新增 `KrStockPoller`：每日 16:00 Asia/Taipei ＋開機 warmup 抓 005930／000660 近日收盤 upsert；`kr-stock.enabled` 開關（`application.yml`）。
+- [x] 185.5 ext `MarketSnapshotFetchClient.buildKrMarketSnapshot()`：讀 KOSPI（`loadLatestUsIndexClose("KOSPI")`）＋三星/海力士（`loadLatestForeignStockClose`），組 `category=kr-market` `NewsRow` 加入 `fetchAll()`；class javadoc 同步。`NewsRow` javadoc 補 `kr-market`／`kr-index`／`KR`。
+- [x] 185.6 spec：`requirements.md` R31 新增本 AC；`design.md` ERD 加 `foreign_stock_daily_history`、量化快照段補韓股（第 3 則）、`news_headline` category/source 列舉、`KrStockPoller`；`tasks.md` 本任務。
+- [ ] 185.7 部署驗證：`--no-cache` 重 build external-materials-service＋backend（Liquibase 建表）＋recreate；驗 `foreign_stock_daily_history` 有 005930／000660 列、`news_headline` 出現 `kr-market` 列（title 含 KOSPI／三星電子／SK海力士＋漲跌%）、SRPP `public_info_<date>.json` 含韓股項。
+- [ ] 185.8 commit + 兩段式 merge。
+
+### Task 186：今日股市分析排程由 08:30 改 08:45（Requirement 31）
+
+對應 Requirements: Requirement 31（今日股市分析）
+
+**背景**：使用者要求把「今日股市分析」由每交易日 08:30 改為 **08:45**。因早盤爬蟲餵料在 08:20，改 08:45 後餵料→分析餘裕由 10 分變 25 分，時序更安全（分析另於花錢前自行 `refreshTwClosureToday()` 現爬 DGPA 判休市，不依賴颱風 poller 已跑完）。
+
+#### 實作
+
+- [x] 186.1 backend `MarketAnalysisScheduler`：`RUN_AT = LocalTime.of(8, 45)`（self-heal 判定）＋ cron `0 30 8`→`0 45 8`；javadoc／log 內 08:30→08:45（注意 L47「05:00–08:45 poller」是颱風時窗，另由 Task 187 改 05:00–07:00、「08:30 前」改 08:45 前）。
+- [x] 186.2 backend `MarketAnalysisService`／`MarketAnalysisSetting` javadoc 內 08:30→08:45。
+- [x] 186.3 前端 `TodayMarketAnalysisView.vue`：頁面說明／tooltip／收件人提示／空狀態／註解 08:30→08:45（5 處）。
+- [x] 186.4 bff `SchedulePublicBffController` 排程列表：分析 entry schedule `交易日 08:30`→`08:45`、cron `0 30 8 * * MON-FRI`→`0 45 8 * * MON-FRI`。
+- [x] 186.5 spec：`requirements.md`／`design.md` 現況敘述所有分析 08:30→08:45（含 design cron 字面 `0 30 8`→`0 45 8`）。歷史 task log（149/162/177/179 等）不追溯。
+- [ ] 186.6 部署驗證＋commit。
+
+### Task 187：台股臨時休市偵測時窗由 05:00–08:45 縮短為 05:00–07:00（Requirement 7）
+
+對應 Requirements: Requirement 7（颱風假 / 臨時休市偵測）
+
+**背景**：使用者要求颱風／臨時休市偵測「只需由 05:00 開始每 15 分鐘偵測、到 07:00 即可」。原 `0 0/15 5-8`（05:00–08:45）縮為 05:00–07:00（最後一次 07:00）。
+
+#### 設計決策
+
+- 含 07:00 整點無法單一 6 欄 cron 表達（時×分笛卡兒積會多跑 07:15/30/45）；`@Scheduled` 可重複標註，拆兩條：`0 0/15 5-6`（05:00–06:45）＋ `0 0 7`（07:00）。
+- 注意其他下游（market-status／`PricePoller`／`ClosePersister`／備份）透過 business 假日快取 10 分 TTL 傳播；07:00 後才公告的颱風假傳播窗縮短——但「今日股市分析」自身於 08:45 花錢前 `refreshTwClosureToday()` 現爬，不受影響。**惟該 08:45 現爬受 `enabled` 閘門保護（`MarketAnalysisScheduler` 於 `!isEnabled()` 先 return，早於 `refreshTwClosureToday()`）：故「每日自動分析停用（enabled=false）」時，07:00–09:00 才公告的臨時休市當日無自動 fallback 偵測，非分析下游可能漏接。可接受理由：涵蓋 09:00–13:30 交易時段的停班公告實務上多於清晨（約 06:00 前）即發布、落在 05:00–07:00 窗內（R7 亦界定僅涵蓋交易時段者才算休市），此為使用者「到 07:00 即可」的前提。**
+
+#### 實作
+
+- [x] 187.1 ext `TwClosurePoller`：cron 拆兩條（`0 0/15 5-6` ＋ `0 0 7`，MON-FRI）；class／方法 javadoc 05:00–08:45→05:00–07:00。
+- [x] 187.2 bff `SchedulePublicBffController` 排程列表：颱風 entry schedule `交易日 05:00–08:45 每 15 分鐘`→`05:00–07:00`、cron→`0 0/15 5-6 * * MON-FRI；0 0 7 * * MON-FRI`。
+- [x] 187.3 spec：`requirements.md`（R7 L114 cron／L117「依賴 05:00–08:45 poller」）、`design.md`（L320 排程）現況敘述更新。並修 `MarketAnalysisScheduler` L47 對照敘述「05:00–08:45」→「05:00–07:00」。
+- [ ] 187.4 部署驗證＋commit。
+
+### Task 188：公開資訊爬蟲中午時間由 12:00 改 11:30（Requirement 31）
+
+對應 Requirements: Requirement 31（今日股市分析／公開資訊）
+
+**背景**：使用者要求抓公開資訊的時間改為 **08:20 / 11:30 / 18:00**（早上 08:20、晚上 18:00 不變，中午 12:00→11:30）。順帶校正排程列表 registry 既有漂移（原顯示 08:00/12:00/18:00 單一 cron，實際已 08:20/兩 cron）並補登遺漏的 `KrStockPoller`（Task 185 新增未登錄）。
+
+#### 實作
+
+- [x] 188.1 ext `NewsPoller`：`scheduled()` cron 由兩條拆為三條（`0 20 8` ＋ `0 30 11` ＋ `0 0 18`，Asia/Taipei）；class／方法 javadoc 12:00→11:30、「早於 08:30」→08:45。
+- [x] 188.2 ext `application.yml`：`news-scraper` 註解 08:20/12:00/18:00→08:20/11:30/18:00。
+- [x] 188.3 bff `SchedulePublicBffController` 排程列表：財經新聞 entry schedule→`每日 08:20 / 11:30 / 18:00`、cron→三條、description「08:00 早於 08:30」→「08:20 早於 08:45」；**新增** `KrStockPoller` entry（韓股參考個股抓取，`0 0 16`）；清單筆數 33→34、external 23→24。
+- [x] 188.4 spec：`requirements.md`／`design.md` 現況爬蟲 cadence 08:20/12:00/18:00→08:20/11:30/18:00（Task 184 之 AC 為當時史實，中午 12:00 保留、由本任務接續）。
+- [ ] 188.5 部署驗證：重建 backend／external-materials／bff／frontend、重啟，驗排程列表頁顯示新 cron／時窗、jar 內 cron 正確。
+- [ ] 188.6 commit + 兩段式 merge。

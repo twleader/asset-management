@@ -4,7 +4,7 @@
     <div class="header-row">
       <div>
         <span class="page-heading">今日股市分析</span>
-        <span class="page-sub">每個台股交易日 08:30 由 AI 綜合台股/美股走勢與近期財經新聞判斷當日走向</span>
+        <span class="page-sub">每個台股交易日 08:45 由 AI 綜合台股/美股走勢與近期財經新聞判斷當日走向</span>
       </div>
       <div v-if="auth.isAdmin" class="header-actions">
         <span class="model-label">每日自動分析</span>
@@ -14,7 +14,7 @@
           inline-prompt
           active-text="開"
           inactive-text="關"
-          title="停用後每日 08:30 不自動分析（零花費）；仍可手動按「重新分析」"
+          title="停用後每日 08:45 不自動分析（零花費）；仍可手動按「重新分析」"
           @change="onEnabledChange"
         />
         <span class="model-label">分析模型</span>
@@ -161,7 +161,7 @@
       <template #header>
         <div class="recipients-head">
           <span class="section-title">分析結果寄送對象</span>
-          <span class="recipients-hint">每個台股交易日 08:30 分析完成後，自動寄給下方開啟「接收」的收件人</span>
+          <span class="recipients-hint">每個台股交易日 08:45 分析完成後，自動寄給下方開啟「接收」的收件人</span>
         </div>
       </template>
       <el-table v-if="recipients.length" :data="recipients" size="small" style="width:100%">
@@ -214,7 +214,7 @@ const busy = computed(() => generating.value || savingModel.value || savingEffor
 // 尚無資料時的說明文字：停用中則點明「已停用、需手動」
 const emptyDesc = computed(() => settings.value.enabled === false
   ? '每日自動分析已停用；由管理者按「重新分析」手動產生'
-  : '尚無分析結果（等待下一個交易日 08:30 排程，或由管理者手動觸發）')
+  : '尚無分析結果（等待下一個交易日 08:45 排程，或由管理者手動觸發）')
 
 const biasText = computed(() => biasLabel(today.value?.bias))
 const biasColor = computed(() => biasHex(today.value?.bias))
@@ -339,7 +339,7 @@ async function onEffortChange(effort) {
   }
 }
 
-// 管理者切換「每日自動分析」開關 → 持久化。停用＝08:30 cron 跳過（零花費）；手動仍可跑。失敗則還原。
+// 管理者切換「每日自動分析」開關 → 持久化。停用＝08:45 cron 跳過（零花費）；手動仍可跑。失敗則還原。
 async function onEnabledChange(enabled) {
   savingEnabled.value = true
   try {

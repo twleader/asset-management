@@ -15,7 +15,7 @@ import java.time.ZonedDateTime;
 /**
  * 台股颱風假偵測排程（Requirement 7 / Task 160）。
  *
- * <p>台股開盤前每 15 分鐘（05:00–08:45 Asia/Taipei、平日）爬 DGPA 停班公告判臺北市停班；命中即寫入
+ * <p>台股開盤前每 15 分鐘（05:00–07:00 Asia/Taipei、平日）爬 DGPA 停班公告判臺北市停班；命中即寫入
  * {@code tw_market_closure}，於 09:00 開盤前令台股一體休市。開機 {@link ApplicationReadyEvent} 亦 self-heal
  * 補跑一次（部署 / 重啟後立即修正當日狀態，含收盤後把當日休市補進日曆供回溯）。
  */
@@ -29,8 +29,13 @@ public class TwClosurePoller {
     @Value("${typhoon-closure.enabled:true}")
     private boolean enabled;
 
-    /** 平日 05:00–08:45（Asia/Taipei）每 15 分鐘偵測，於 09:00 開盤前生效。 */
-    @Scheduled(cron = "0 0/15 5-8 * * MON-FRI", zone = "Asia/Taipei")
+    /**
+     * 平日 05:00–07:00（Asia/Taipei）每 15 分鐘偵測，於 09:00 開盤前生效（Task 187 由 05:00–08:45 縮短）。
+     * 含 07:00 整點需兩條 cron（單一 6 欄 cron 的時×分為笛卡兒積，5-7 會多跑 07:15/30/45）：
+     * {@code 0 0/15 5-6} 涵蓋 05:00–06:45、{@code 0 0 7} 補 07:00。{@code @Scheduled} 可重複標註於同一方法。
+     */
+    @Scheduled(cron = "0 0/15 5-6 * * MON-FRI", zone = "Asia/Taipei")  // 05:00–06:45
+    @Scheduled(cron = "0 0 7 * * MON-FRI", zone = "Asia/Taipei")        // 07:00
     public void scheduled() {
         if (!enabled) return;
         closure.detectAndPersistToday();
