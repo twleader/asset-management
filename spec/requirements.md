@@ -842,3 +842,30 @@
 - [ ] **一頁一 BFF**：新增該頁專屬 `SchedulePublicBffController`（`GET /api/bff/schedule-list`），回傳排程清單（不可變 record DTO）。此清單為系統基礎設施資訊、非使用者可管理的業務分類，故以程式碼內建靜態清單提供（不入 DB、不設管理端點）；**新增／調整任何 `@Scheduled` 時須同步更新此清單**（避免與實際 cron 漂移）。
 - [ ] **權限**：本頁為已登入者皆可讀的公開資訊（`GET` 落 BFF `anyExchange().authenticated()`），不需 ADMIN；不因分組改動任何既有頁面的授權。
 - [ ] **契約穩定**：`/trading-calendar`、`/exchange-rate` 及其 BFF 端點完全不變，僅選單層級位置調整。
+
+---
+
+### Requirement 37: 交易日曆匯出到指定路徑（JSON／Excel）
+
+**User Story:** 作為使用者，我希望在「交易日曆」頁把某一年度的整年交易日曆（台／美／英三市每日是否為交易日、各市場國定假日）匯出成一份檔案，並能自行指定輸出資料夾與檔案格式（JSON 或 Excel），方便留存或提供給其他系統使用。
+
+**背景：** 「交易日曆」頁的資料（休市日、交易日）為市場公開資料，權威來源是 business-services 的 `MarketDataService`（台股假日經 external-materials-service proxy、美股／英股純計算）。現有「輸出到指定路徑」的安全模型已在 Requirement 34 建立（容器基底目錄 `EXPORT_OUTPUT_DIR` ＋ 使用者相對子路徑、normalize `startsWith(base)` 防跳脫、檔案總管式資料夾選擇器）；本需求沿用同一輸出路徑模型，但為**手動一次性匯出**（非排程、不落 DB 設定），且**新增格式選項**。
+
+**Acceptance Criteria:**
+
+- [ ] **匯出內容（整年交易日曆）**：使用者指定年度後，系統以 `MarketDataService` 為單一權威來源產出該年度 1/1～12/31 每一天的：日期、星期、台股／美股／英股是否為交易日（平日且非該市場國定假日，經 `isTwTradingDay`／`isUsTradingDay`／`isUkTradingDay`）、及該日台股／美股／英股國定假日名稱（無則空）；並附三市各自的假日對照表與交易日天數統計。日曆判斷邏輯與頁面日曆格（`TradingCalendarView` 的日格模型 `tw/us/uk` + `twHoliday/usHoliday/ukHoliday`）一致，不在前端重算。
+- [ ] **格式可選 JSON／Excel**：`format=json` 產出結構化 JSON（UTF-8、pretty-print），`format=excel` 產出 `.xlsx`（Apache POI，單一工作表：日期／星期／台股交易日／美股交易日／英股交易日／台股假日／美股假日／英股假日，逐日一列，標題列粗體）。格式非 `json`／`excel` 一律回 400。
+- [ ] **輸出路徑（沿用 Requirement 34 家目錄為根＋相對子路徑安全模型）**：輸出目錄 = 容器基底 `EXPORT_OUTPUT_DIR`（預設 `/home/steven`，docker volume 對映 host `/Users/steven`）resolve 使用者所選相對子路徑；後端一律以 normalize 後 `startsWith(base)` 驗證仍在基底內，拒絕 `..` 與絕對路徑跳脫。子資料夾不存在時 `Files.createDirectories` 自動建立。
+- [ ] **檔案總管式資料夾選擇器**：交易日曆頁「匯出」對話框提供年度輸入、格式選擇（JSON／Excel）、及**輸出資料夾選擇器**（`el-tree` 懶載入樹狀瀏覽，自家目錄根逐層展開後點選；可另填「新增子資料夾名稱」，寫檔時自動建立），行為比照歷年資產頁的選擇器。此資料夾瀏覽與寫檔屬檔案系統基礎設施操作，非個人化資料，不做 owner 過濾。
+- [ ] **檔名與冪等**：`交易日曆_{年度}.{json|xlsx}`；同年度重複匯出以原子 rename（先寫 `*.tmp` 再 `ATOMIC_MOVE`）就地覆寫，避免部分寫入的殘檔。回應含實際落點絕對路徑、檔案位元組數、格式、年度、天數，供前端顯示。
+- [ ] **一頁一 BFF**：交易日曆頁走自己的 BFF——`POST /api/bff/trading-calendar/export?year=&format=&subpath=`（觸發匯出）與 `GET /api/bff/trading-calendar/export/browse?subpath=`（唯讀列子目錄），分別 passthrough 至 business `POST /api/trading-calendar-export/run`、`GET /api/trading-calendar-export/browse`；不直接呼叫其他頁面的 BFF。
+- [ ] **權限**：本頁為已登入者皆可讀寫的公開資訊操作（落 BFF `anyExchange().authenticated()`），不需 ADMIN；不變更既有交易日曆查詢端點（`GET /api/bff/trading-calendar`、`/market-status`）契約。
+
+**排程自動匯出（每日指定時間，per-user；Task 185）：**
+
+- [ ] **即時產生＋每日排程並存**：既有「匯出到目錄」為即時一次性產生（保留不變）；另新增「每日排程自動匯出」——使用者可設定啟用開關與每日執行時間（時:分），系統於該時間自動以指定格式（json／excel）與資料夾匯出**當前年度**整年交易日曆，不必每次手動點按。排程與即時共用同一份格式／輸出資料夾設定（對話框上方選定值）。
+- [ ] **當前年度自動滾動**：排程每日匯出「執行當下的西元年」交易日曆（`交易日曆_{當前年}.{ext}`），使檔案隨年度更迭與台股臨時休市（颱風假）更新自動保持最新；不釘死於某固定年。
+- [ ] **每使用者各自設定（owner-scoped 設定表）**：排程設定存於 `trading_calendar_export_schedule`（每 `owner_user_id` 一列、`@Filter(ownerFilter)` 隔離），欄位含啟用／時分／格式／輸出子路徑／上次執行時間與結果；GET/PUT 走 HTTP（BFF→business）由 `TenantFilterAspect` 自動 scope 到本人；非管理者亦可設定自己的排程。
+- [ ] **排程執行機制與自癒（比照 Requirement 34）**：每分鐘 `@Scheduled` poll（`zone=Asia/Taipei`）比對各列時:分與「當日已執行」旗標，命中則產檔；服務重啟以 `ApplicationReadyEvent` 補跑當日已到點未執行者；單一使用者失敗只記 `last_run_status`＋log、不影響他人。因交易日曆為**全域資料**，背景 tick 產檔時**無需 owner 資料過濾**（與 Requirement 34 排程需 `enableFilter` 縮資產不同），僅設定表為 owner-scoped。
+- [ ] **排程設定端點與 BFF**：business `GET/PUT /api/trading-calendar-export/schedule`（取／upsert 當前使用者設定）；BFF `GET/PUT /api/bff/trading-calendar/export/schedule` passthrough。前端匯出對話框加「啟用每日排程＋每日執行時間＋儲存排程」區塊並顯示上次執行狀態。
+- [ ] **無跳脫、格式白名單**：排程設定的 `output_subpath` 與 `format` 沿用即時匯出的同一驗證（normalize `startsWith(base)` 防跳脫、format 僅 json／excel）。

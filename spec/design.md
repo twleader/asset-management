@@ -2310,3 +2310,141 @@ GET  /api/bff/asset-history/export                    → GET  /api/snapshots/ex
 - **排程／run-now 改匯出「當前即時資產」**：`ExcelExportService` 新增 `exportLiveAssets()`（HTTP，aspect owner-scoped）與 `exportLiveAssetsForOwner(Long ownerId)`（背景，手動 `enableFilter`），皆走 `buildLiveWorkbook()`。內容單一來源＝`StockPriceService.getLiveAssets()`（最新快照持股 × Redis 即時股價，與 Dashboard 首頁「當前資產」同一數字；存款／基金沿用最新快照凍結值），股票逐檔以 `(code, market)` 對映即時價與即時現值；deposits／funds 明細讀最新快照（`AssetSnapshotRepository.findLatest()` 後於同交易 lazy load）。排版比照 `writeSnapshotSheet`（銀行存款／基金／股票分區，股票加「即時價」欄、現值用即時值，投資成本共用抽出的 `stockCostTwd()` 換匯），末段列即時彙總（存款總計／基金現值／即時股票現值／即時總資產）。`ExportScheduleService.runNowForCurrentUser()` 改呼叫 `exportLiveAssets()`、`runScheduled()` 改呼叫 `exportLiveAssetsForOwner()`。手動「匯出 Excel」（`/api/snapshots/export` → `exportFull()` 多分頁歷次）維持不變。
 - **家目錄為根**：`EXPORT_OUTPUT_DIR` 預設由 `/data/export-output` 改為 `/home/steven`；volume host 端由 `/Users/steven/Project/SRPP/data` 改為 `/Users/steven`。`output_subpath` 仍為相對子路徑（相對家目錄根），路徑安全驗證邏輯不變。
 - **檔案總管式資料夾選擇（唯讀 browse）**：`ExportScheduleService.browse(subpath)` 以 `startsWith(base)` 驗證後 `Files.list` 僅取子目錄（隱藏 dotfiles、依名稱排序），回 `BrowseResponse{baseDir, subpath, absolutePath, directories:[{name, path}]}`；`ExportScheduleController` 加 `GET /browse`，BFF passthrough。前端 `AssetHistoryView.vue` 標題改「排程自動匯出最新資產」，輸出資料夾改 `el-tree` 懶載入樹狀選擇對話框（`load` 呼叫 browse 逐層展開，點選節點取相對子路徑）＋可選填「新增子資料夾名稱」（寫檔時 `Files.createDirectories` 自動建立，故 browse 保持唯讀、無需新增變更檔案系統的端點）。
+
+---
+
+## Requirement 37（Task 184）：交易日曆匯出到指定路徑（JSON／Excel）
+
+「交易日曆」頁新增「匯出」動作：把某一年度整年交易日曆（台／美／英三市每日交易日旗標＋各市場國定假日）以 JSON 或 Excel 寫檔到使用者指定目錄。輸出路徑沿用 Requirement 34 的家目錄為根＋相對子路徑安全模型；為手動一次性匯出（非排程、不落 DB）。
+
+### 架構與資料流
+
+```
+[交易日曆頁 TradingCalendarView.vue]
+  ├─ 「匯出」對話框（年度 / 格式 json|excel / 輸出資料夾樹狀選擇器）
+  │     → bffApi.tradingCalendar.exportToDir(year, format, subpath)
+  │       → BFF POST /api/bff/trading-calendar/export?year=&format=&subpath=
+  │         → business POST /api/trading-calendar-export/run?year=&format=&subpath=
+  │           → TradingCalendarExportService.exportToDir(year, format, subpath)
+  │             → MarketDataService.getTw/Us/UkHolidays(year) + isTw/Us/UkTradingDay(date)  逐日建表
+  │             → JSON: ObjectMapper pretty →  或  Excel: Apache POI XSSFWorkbook →  byte[]
+  │             → 寫 {EXPORT_OUTPUT_DIR resolve subpath}/交易日曆_{year}.{json|xlsx}（tmp + ATOMIC_MOVE）
+  └─ 資料夾選擇器 → bffApi.tradingCalendar.browseExportDir(subpath)
+        → BFF GET /api/bff/trading-calendar/export/browse?subpath=
+          → business GET /api/trading-calendar-export/browse?subpath=（唯讀列子目錄）
+```
+
+### 資料模型
+
+無新增 DB 資料表／欄位——純檔案輸出、不持久化任何設定。交易日曆資料每次即時由 `MarketDataService` 產出。
+
+**JSON 輸出結構（`交易日曆_{year}.json`，UTF-8 pretty-print）：**
+
+```json
+{
+  "year": 2026,
+  "generatedAt": "2026-07-14 23:30:00",
+  "timezone": "Asia/Taipei",
+  "tradingDayCount": { "tw": 240, "us": 250, "uk": 253 },
+  "holidays": {
+    "tw": { "2026-01-01": "元旦", "...": "..." },
+    "us": { "2026-01-01": "New Year's Day", "...": "..." },
+    "uk": { "2026-01-01": "New Year's Day", "...": "..." }
+  },
+  "days": [
+    { "date": "2026-01-01", "weekday": "四",
+      "tw": false, "us": false, "uk": false,
+      "twHoliday": "元旦", "usHoliday": "New Year's Day", "ukHoliday": "New Year's Day" }
+  ]
+}
+```
+
+- `days` 逐日一筆（整年 365／366 筆）；`tw/us/uk` 為布林交易日旗標，`twHoliday/usHoliday/ukHoliday` 無假日時為 `null`。鍵名（`tw/us/uk` + `*Holiday`）與 `TradingCalendarView` 前端日格模型一致。
+
+**Excel 輸出（`交易日曆_{year}.xlsx`，Apache POI）：** 單一工作表「交易日曆 {year}」；第一列標題（含產生時間），第二列表頭（粗體），其後逐日一列：
+
+```
+日期 | 星期 | 台股交易日 | 美股交易日 | 英股交易日 | 台股假日 | 美股假日 | 英股假日
+```
+
+- 交易日欄以「○」（交易）／「休」（非交易）表示；假日欄填該市場國定假日名稱（無則空）。欄寬 autosize。
+
+### API 端點
+
+```
+# business-services（新）— TradingCalendarExportController，全域公開資料操作、無 owner 過濾
+POST /api/trading-calendar-export/run     # ?year=&format=json|excel&subpath=  產檔寫入指定目錄，回 {path,sizeBytes,format,year,totalDays}
+GET  /api/trading-calendar-export/browse  # ?subpath=  唯讀列基底（家目錄）下子目錄清單（樹狀選擇器懶載入）
+
+# BFF（TradingCalendarBffController，沿用 businessServicesClient）
+POST /api/bff/trading-calendar/export         → POST /api/trading-calendar-export/run
+GET  /api/bff/trading-calendar/export/browse  → GET  /api/trading-calendar-export/browse
+GET  /api/bff/trading-calendar                 # 既有（休市日 + 市場狀態），不變
+GET  /api/bff/trading-calendar/market-status   # 既有，不變
+```
+
+> 本頁為已登入者皆可讀寫的公開資訊操作，落 BFF `.anyExchange().authenticated()`，不需 ADMIN。
+
+### 關鍵業務邏輯
+
+- **資料單一來源**：交易日曆判斷全走 `MarketDataService`——`getTwHolidays/getUsHolidays/getUkHolidays(year)` 取假日對照表、`isTwTradingDay/isUsTradingDay/isUkTradingDay(date)`（平日且非該市場國定假日）判交易日；與頁面日曆格、Dashboard、市場狀態同一權威來源，前端只 render 不重算。
+- **格式驗證**：`format` 僅接受 `json`／`excel`（大小寫不敏感），其餘丟 `IllegalArgumentException` → `GlobalExceptionHandler` 對映 400。
+- **路徑安全（沿用 Requirement 34）**：`resolveDir(sub)` = `base = Path.of(EXPORT_OUTPUT_DIR).toAbsolutePath().normalize()`；`target = base.resolve(sub).normalize()`；`!target.startsWith(base)` 則拒（防 `..`／絕對路徑跳脫）。`browse` 同一驗證、僅列子目錄（隱藏 dotfiles、依名稱排序）、不讀檔內容。子路徑不存在時寫檔前 `Files.createDirectories` 建立。
+- **原子寫檔**：先寫 `交易日曆_{year}.{ext}.tmp` 再 `Files.move(..., ATOMIC_MOVE, REPLACE_EXISTING)`，避免同年度覆寫時出現部分寫入殘檔（比照 external-materials `NewsPoller.exportPublicInfoJson` 範式）。
+- **非 owner-scoped**：交易日曆為市場公開資料、輸出為檔案系統操作，`TradingCalendarExportService` 不注入 `CurrentUserContext`、不做 owner 過濾（與 `MarketDataController` 假日端點一致）；存取控制僅靠 BFF 的登入驗證。
+
+### 本次增修
+
+- **business-services**：新增 `service/TradingCalendarExportService`（注入 `MarketDataService` ＋ `ObjectMapper` ＋ `@Value EXPORT_OUTPUT_DIR`）、`controller/TradingCalendarExportController`（`/run`、`/browse`）、`dto/TradingCalendarExportDto`（`RunResponse`／`BrowseResponse`／`DirEntry`）。沿用既有 Apache POI 依賴，無新增依賴、無 DB migration。
+- **BFF**：`TradingCalendarBffController` 新增 `POST /export`、`GET /export/browse` 兩個 passthrough。
+- **frontend**：`api/index.js` `tradingCalendar` 加 `exportToDir`／`browseExportDir`；`TradingCalendarView.vue` 日曆卡標題加「匯出」按鈕＋匯出對話框（年度／格式／資料夾樹狀選擇器，選擇器邏輯比照 `AssetHistoryView.vue`）。
+
+### 每日排程自動匯出（Task 185）
+
+即時匯出（`/run`）之外，新增「每日指定時間自動匯出當前年度交易日曆」的 per-user 排程，比照 Requirement 34 的排程機制，但因交易日曆為**全域資料**，背景 tick 產檔時無需 owner 資料過濾（僅設定表 owner-scoped）。
+
+```
+[匯出對話框排程區塊] 啟用開關 + 每日時間 + 儲存排程
+  → bffApi.tradingCalendar.{getExportSchedule,updateExportSchedule}
+    → BFF GET/PUT /api/bff/trading-calendar/export/schedule
+      → business GET/PUT /api/trading-calendar-export/schedule
+        → TradingCalendarExportScheduleService（owner-scoped：HTTP 帶 X-User-* → ownerFilter）
+
+[背景排程] business TradingCalendarExportScheduleService
+  @Scheduled(cron="0 * * * * *", zone=Asia/Taipei) 每分鐘 poll
+    for each trading_calendar_export_schedule（背景無 request → 讀全部列）:
+      if enabled && last_run_date != today && now >= (run_hour:run_minute):
+        TradingCalendarExportService.exportToDir(當前西元年, format, output_subpath)  // 全域資料，無需 enableFilter
+        update last_run_date/last_run_at/last_run_status
+  @EventListener(ApplicationReadyEvent) 開機自癒：補跑「今日已到點但未執行」者
+```
+
+**資料模型** `trading_calendar_export_schedule`（Liquibase `v1.55.0-trading-calendar-export-schedule.sql`；每 owner 一列、`@Filter(ownerFilter)`）：
+
+```
+id              BIGSERIAL PK
+owner_user_id   BIGINT       NOT NULL UNIQUE
+enabled         BOOLEAN      NOT NULL DEFAULT FALSE
+run_hour        INT          NOT NULL DEFAULT 8       -- 0..23
+run_minute      INT          NOT NULL DEFAULT 0       -- 0..59
+format          VARCHAR(10)  NOT NULL DEFAULT 'json'  -- json / excel（CHECK 約束）
+output_subpath  VARCHAR(255) NOT NULL DEFAULT 'input'
+last_run_date   DATE                                  -- 當日 guard
+last_run_at     TIMESTAMP
+last_run_status VARCHAR(500)                          -- 「成功：/path」或「失敗：訊息」
+updated_at      TIMESTAMP
+```
+
+**API 端點（新增）：**
+
+```
+# business-services
+GET  /api/trading-calendar-export/schedule   # 取當前使用者排程設定（無則回預設，不寫入）
+PUT  /api/trading-calendar-export/schedule   # upsert（enabled/runHour/runMinute/format/outputSubpath）
+
+# BFF
+GET  /api/bff/trading-calendar/export/schedule  → GET /api/trading-calendar-export/schedule
+PUT  /api/bff/trading-calendar/export/schedule  → PUT /api/trading-calendar-export/schedule
+```
+
+**新增檔案**：`model/TradingCalendarExportSchedule`、`repository/TradingCalendarExportScheduleRepository`、`service/TradingCalendarExportScheduleService`（CRUD＋`@Scheduled` tick＋selfHeal）、`TradingCalendarExportDto` 加 `ScheduleSettingRequest`／`ScheduleSettingResponse`、`TradingCalendarExportController` 加 `GET/PUT /schedule`；BFF 加 2 passthrough；前端匯出對話框加排程區塊（`getExportSchedule`／`updateExportSchedule`）。
