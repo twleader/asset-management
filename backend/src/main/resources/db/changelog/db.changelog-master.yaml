@@ -207,5 +207,5 @@ databaseChangeLog:
       file: db/changelog/changes/v1.54.0-market-analysis-drop-web-search.sql
       relativeToChangelogFile: false
   - include:
-      file: db/changelog/changes/v1.55.0-trading-calendar-export-schedule.sql
+      file: db/changelog/changes/v1.56.0-trading-calendar-export-schedule.sql
       relativeToChangelogFile: false

@@ -2313,7 +2313,7 @@ GET  /api/bff/asset-history/export                    → GET  /api/snapshots/ex
 
 ---
 
-## Requirement 37（Task 184）：交易日曆匯出到指定路徑（JSON／Excel）
+## Requirement 37（Task 189）：交易日曆匯出到指定路徑（JSON／Excel）
 
 「交易日曆」頁新增「匯出」動作：把某一年度整年交易日曆（台／美／英三市每日交易日旗標＋各市場國定假日）以 JSON 或 Excel 寫檔到使用者指定目錄。輸出路徑沿用 Requirement 34 的家目錄為根＋相對子路徑安全模型；為手動一次性匯出（非排程、不落 DB）。
 
@@ -2399,7 +2399,7 @@ GET  /api/bff/trading-calendar/market-status   # 既有，不變
 - **BFF**：`TradingCalendarBffController` 新增 `POST /export`、`GET /export/browse` 兩個 passthrough。
 - **frontend**：`api/index.js` `tradingCalendar` 加 `exportToDir`／`browseExportDir`；`TradingCalendarView.vue` 日曆卡標題加「匯出」按鈕＋匯出對話框（年度／格式／資料夾樹狀選擇器，選擇器邏輯比照 `AssetHistoryView.vue`）。
 
-### 每日排程自動匯出（Task 185）
+### 每日排程自動匯出（Task 190）
 
 即時匯出（`/run`）之外，新增「每日指定時間自動匯出當前年度交易日曆」的 per-user 排程，比照 Requirement 34 的排程機制，但因交易日曆為**全域資料**，背景 tick 產檔時無需 owner 資料過濾（僅設定表 owner-scoped）。
 
@@ -2419,7 +2419,7 @@ GET  /api/bff/trading-calendar/market-status   # 既有，不變
   @EventListener(ApplicationReadyEvent) 開機自癒：補跑「今日已到點但未執行」者
 ```
 
-**資料模型** `trading_calendar_export_schedule`（Liquibase `v1.55.0-trading-calendar-export-schedule.sql`；每 owner 一列、`@Filter(ownerFilter)`）：
+**資料模型** `trading_calendar_export_schedule`（Liquibase `v1.56.0-trading-calendar-export-schedule.sql`（logicalFilePath 維持 v1.55.0）；每 owner 一列、`@Filter(ownerFilter)`）：
 
 ```
 id              BIGSERIAL PK

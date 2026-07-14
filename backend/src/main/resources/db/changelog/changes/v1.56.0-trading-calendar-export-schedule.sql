@@ -1,5 +1,7 @@
---liquibase formatted sql
+--liquibase formatted sql logicalFilePath:db/changelog/changes/v1.55.0-trading-calendar-export-schedule.sql
 
+-- 注意：實體檔名為 v1.56.0（避開 main 先到的 v1.55.0-foreign-stock），但 logicalFilePath 與 changeset id
+-- 刻意維持 v1.55.0，使 DATABASECHANGELOG 追蹤鍵不變、已部署的 DB 不會誤判為新 changeset 而重跑（CREATE TABLE 撞已存在）。
 --changeset steven:v1.55.0-trading-calendar-export-schedule
 --comment Requirement 37（Task 185）：交易日曆每日排程自動匯出，per-user 設定表。每個 owner 一列（owner_user_id UNIQUE、@Filter(ownerFilter) 隔離），存啟用開關、每日執行時分、格式(json|excel)、輸出相對子路徑、上次執行時間/結果。背景 cron 讀全部列，逐列以該列 format/subpath 匯出「當前年度」交易日曆（全域資料，無需 owner 資料過濾）。
 CREATE TABLE trading_calendar_export_schedule (

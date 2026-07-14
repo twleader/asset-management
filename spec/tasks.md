@@ -4560,7 +4560,7 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 - [x] 183.6 **A6（修 tasks.md 重號）**：Task 39／40 各出現兩次；將前一對「Dashboard bar 改用代號／依損益上色」（無數字交叉引用）重編為 Task 181／182，保留後一對「per-market／dividend-rate」為 39／40（Task 42 的 `Task 39` 引用維持正確）。
 - [x] 183.7 **A7（tasks.md 標記說明）**：Task 149.15／149.21／149.22 實作已 landed＋部署但保留 `[ ]`（待單次付費 LLM 端到端驗證）；149.18–149.20 已被 Task 179（web_search 移除）取代。加註說明避免讀者誤判為未實作，不改動 checkbox 語意。
 
-### Task 184: 交易日曆匯出到指定路徑（JSON／Excel）
+### Task 189: 交易日曆匯出到指定路徑（JSON／Excel）
 
 對應 Requirements: Requirement 37（交易日曆匯出）；沿用 Requirement 34 輸出路徑安全模型、CLAUDE.md「一頁一支 BFF」「同義欄位、同一 business service API」。
 
@@ -4579,40 +4579,40 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 
 #### 實作
 
-- [x] 184.1 spec：`requirements.md` 新增 Requirement 37；`design.md` 新增「Requirement 37（Task 184）」節（架構／JSON 與 Excel 結構／API／關鍵邏輯）；`tasks.md` 本任務。
-- [x] 184.2 business `dto/TradingCalendarExportDto`：`RunResponse(path, sizeBytes, format, year, totalDays)`／`BrowseResponse(baseDir, subpath, absolutePath, directories)`／`DirEntry(name, path)`。
-- [x] 184.3 business `service/TradingCalendarExportService`：`exportToDir(year, format, subpath)` 逐日建表（`MarketDataService`）→ JSON／Excel byte[] → 原子寫檔；`browse(subpath)` 唯讀列子目錄；私有 `normalizeSubpath`／`resolveDir` 路徑安全。
-- [x] 184.4 business `controller/TradingCalendarExportController`：`POST /api/trading-calendar-export/run`、`GET /api/trading-calendar-export/browse`。
-- [x] 184.5 BFF `TradingCalendarBffController`：`POST /export`、`GET /export/browse` passthrough。
-- [x] 184.6 frontend `api/index.js`：`tradingCalendar.exportToDir`／`browseExportDir`。
-- [x] 184.7 frontend `TradingCalendarView.vue`：日曆卡標題加「匯出」按鈕＋匯出對話框（年度／格式 json|excel／資料夾樹狀選擇器，選擇器比照 `AssetHistoryView.vue`）。
-- [x] 184.8 部署驗證：`--no-cache` 重 build business-services＋bff＋frontend、recreate；於 UI 觸發匯出，驗 host 目錄出現 `交易日曆_{year}.json`／`.xlsx`、內容含整年逐日與假日、格式錯誤回 400、路徑跳脫被拒。
-- [ ] 184.9 commit + 兩段式 merge。
+- [x] 189.1 spec：`requirements.md` 新增 Requirement 37；`design.md` 新增「Requirement 37（Task 189）」節（架構／JSON 與 Excel 結構／API／關鍵邏輯）；`tasks.md` 本任務。
+- [x] 189.2 business `dto/TradingCalendarExportDto`：`RunResponse(path, sizeBytes, format, year, totalDays)`／`BrowseResponse(baseDir, subpath, absolutePath, directories)`／`DirEntry(name, path)`。
+- [x] 189.3 business `service/TradingCalendarExportService`：`exportToDir(year, format, subpath)` 逐日建表（`MarketDataService`）→ JSON／Excel byte[] → 原子寫檔；`browse(subpath)` 唯讀列子目錄；私有 `normalizeSubpath`／`resolveDir` 路徑安全。
+- [x] 189.4 business `controller/TradingCalendarExportController`：`POST /api/trading-calendar-export/run`、`GET /api/trading-calendar-export/browse`。
+- [x] 189.5 BFF `TradingCalendarBffController`：`POST /export`、`GET /export/browse` passthrough。
+- [x] 189.6 frontend `api/index.js`：`tradingCalendar.exportToDir`／`browseExportDir`。
+- [x] 189.7 frontend `TradingCalendarView.vue`：日曆卡標題加「匯出」按鈕＋匯出對話框（年度／格式 json|excel／資料夾樹狀選擇器，選擇器比照 `AssetHistoryView.vue`）。
+- [x] 189.8 部署驗證：`--no-cache` 重 build business-services＋bff＋frontend、recreate；於 UI 觸發匯出，驗 host 目錄出現 `交易日曆_{year}.json`／`.xlsx`、內容含整年逐日與假日、格式錯誤回 400、路徑跳脫被拒。
+- [ ] 189.9 commit + 兩段式 merge。
 
-### Task 185: 交易日曆匯出「每日排程自動匯出」（指定時間）
+### Task 190: 交易日曆匯出「每日排程自動匯出」（指定時間）
 
 對應 Requirements: Requirement 37（排程 AC 群）；沿用 Requirement 34 排程機制。
 
 #### 需求
 
-即時匯出（Task 184）之外，新增每日指定時間自動匯出**當前年度**交易日曆（格式／資料夾沿用對話框選定值）。per-user 設定、每分鐘 poll、重啟自癒。
+即時匯出（Task 189）之外，新增每日指定時間自動匯出**當前年度**交易日曆（格式／資料夾沿用對話框選定值）。per-user 設定、每分鐘 poll、重啟自癒。
 
 #### 設計決策
 
 - **比照 Requirement 34 排程，但背景 tick 免 owner 過濾**：交易日曆為全域資料，`TradingCalendarExportScheduleService` 背景 `findAll()` 逐列產檔時直接 `TradingCalendarExportService.exportToDir(當前年, format, subpath)`，**不需** `enableFilter`（與 `ExportScheduleService` 需縮資產不同）；僅設定表 `trading_calendar_export_schedule` 為 owner-scoped（`@Filter`）。
 - **當前年度自動滾動**：排程匯出「執行當下西元年」，隨年度／颱風假更新保持最新，不釘死固定年。
 - **即時＋排程共用格式/資料夾**：對話框上方 format/subpath 同時供即時匯出與排程；儲存排程時帶入。
-- **格式白名單 + 路徑防跳脫**：沿用 Task 184 的 `normalizeFormat`／`resolveDir` 驗證，另 DB CHECK `format IN ('json','excel')`。
+- **格式白名單 + 路徑防跳脫**：沿用 Task 189 的 `normalizeFormat`／`resolveDir` 驗證，另 DB CHECK `format IN ('json','excel')`。
 
 #### 實作
 
-- [x] 185.1 spec：`requirements.md` Requirement 37 補排程 AC 群；`design.md` Requirement 37 加「每日排程自動匯出（Task 185）」節（資料流／資料模型／API）；`tasks.md` 本任務。
-- [x] 185.2 DB：`v1.55.0-trading-calendar-export-schedule.sql` 建 `trading_calendar_export_schedule`（owner UNIQUE、hour/minute/format CHECK），master changelog include。
-- [x] 185.3 business `model/TradingCalendarExportSchedule`（`@Filter(ownerFilter)`）＋`repository/TradingCalendarExportScheduleRepository`。
-- [x] 185.4 business `dto/TradingCalendarExportDto` 加 `ScheduleSettingRequest`／`ScheduleSettingResponse`。
-- [x] 185.5 business `service/TradingCalendarExportScheduleService`：`getForCurrentUser`／`updateForCurrentUser`／`@Scheduled tick`／`selfHealOnStartup`／`runScheduled`（呼叫 `exportToDir`）。
-- [x] 185.6 business `TradingCalendarExportController` 加 `GET/PUT /schedule`。
-- [x] 185.7 BFF `TradingCalendarBffController` 加 `GET/PUT /export/schedule` passthrough。
-- [x] 185.8 frontend：`api/index.js` 加 `getExportSchedule`／`updateExportSchedule`；`TradingCalendarView.vue` 匯出對話框加排程區塊（啟用開關＋每日時間＋儲存排程＋上次執行狀態）。
-- [x] 185.9 部署驗證：重建 business+bff+frontend、recreate；驗排程 GET/PUT、`run_now` 即時仍可、設定啟用後背景 tick 到點產檔。
-- [ ] 185.10 commit + 兩段式 merge。
+- [x] 190.1 spec：`requirements.md` Requirement 37 補排程 AC 群；`design.md` Requirement 37 加「每日排程自動匯出（Task 190）」節（資料流／資料模型／API）；`tasks.md` 本任務。
+- [x] 190.2 DB：`v1.56.0-trading-calendar-export-schedule.sql` 建 `trading_calendar_export_schedule`（owner UNIQUE、hour/minute/format CHECK），master changelog include。
+- [x] 190.3 business `model/TradingCalendarExportSchedule`（`@Filter(ownerFilter)`）＋`repository/TradingCalendarExportScheduleRepository`。
+- [x] 190.4 business `dto/TradingCalendarExportDto` 加 `ScheduleSettingRequest`／`ScheduleSettingResponse`。
+- [x] 190.5 business `service/TradingCalendarExportScheduleService`：`getForCurrentUser`／`updateForCurrentUser`／`@Scheduled tick`／`selfHealOnStartup`／`runScheduled`（呼叫 `exportToDir`）。
+- [x] 190.6 business `TradingCalendarExportController` 加 `GET/PUT /schedule`。
+- [x] 190.7 BFF `TradingCalendarBffController` 加 `GET/PUT /export/schedule` passthrough。
+- [x] 190.8 frontend：`api/index.js` 加 `getExportSchedule`／`updateExportSchedule`；`TradingCalendarView.vue` 匯出對話框加排程區塊（啟用開關＋每日時間＋儲存排程＋上次執行狀態）。
+- [x] 190.9 部署驗證：重建 business+bff+frontend、recreate；驗排程 GET/PUT、`run_now` 即時仍可、設定啟用後背景 tick 到點產檔。
+- [ ] 190.10 commit + 兩段式 merge。
