@@ -2331,6 +2331,7 @@ UNIQUE (crawler_key, run_hour, run_minute)   -- 同爬蟲同時間點不重覆
 ```
 
 - Seed 預設 `('news-poller',8,20)`／`('news-poller',11,30)`／`('news-poller',18,0)`，等同改為 DB 驅動前寫死的三個 cron（Task 184／188）；全新部署行為不變。
+- **changeset 刻意冪等**（`CREATE TABLE IF NOT EXISTS`＋`INSERT ... ON CONFLICT DO NOTHING`＋清舊 seed 的 `DELETE`）：本功能開發期間曾以 changeset id `v1.55.0-crawler-schedule` 在既有開發 DB 建過同一張表並 seed 舊時點 `08:00/12:00/18:00`；為避讓 main 已佔用的 `v1.55.0`，該檔改名為 `v1.58.0-crawler-schedule`，**changeset id 隨檔名改變 → Liquibase 視為新 changeset 會重跑**，遇既有表即 `relation already exists` 而中止啟動。故建表容忍已存在、seed 走 `ON CONFLICT DO NOTHING`，並以 `DELETE` 把殘留的舊 seed（08:00／12:00）對齊為現行時點；`DELETE` 只命中與舊 seed 完全相同的列，不動使用者自行新增的時間點，於全新資料庫為 no-op。
 - 設定變更走「整批覆寫」（`PUT` 先 `deleteByCrawlerKey` 再 batch insert），非逐列 CRUD；ext `NewsPoller` 每分鐘讀已啟用列，DB 讀取例外時 fallback 至 08/12/18。
 
 爬蟲資訊查詢頁 API 端點（Requirement 38）：
