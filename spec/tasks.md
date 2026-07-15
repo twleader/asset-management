@@ -4732,9 +4732,131 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 
 ---
 
-### Task 192: 已實現損益 Excel 匯出到指定目錄與每日排程自動匯出（Requirement 38）
+### Task 192: 「公開資訊」新增「爬蟲資訊查詢」頁（依日期查爬回資料 ＋ 頁面設定多個爬蟲執行時間）
 
-對應 Requirements: Requirement 38（已實現損益 Excel 匯出到指定目錄與每日排程自動匯出）
+對應 Requirements: Requirement 38（＋ Requirement 31 `news_headline`／`NewsPoller`、Requirement 36「公開資訊」分組與排程列表）
+
+#### 背景
+
+使用者需要在「公開資訊」下有一頁能：（1）指定日期查 `NewsPoller` 那天爬回 `news_headline` 的資料（新聞／三大法人／大盤成交／台幣兌美元快照／美股指數快照），日期語意可切換 `fetched_at`／`published_at`；（2）直接在頁面設定 `NewsPoller` 的執行時間、且可設多個時間點。原 `NewsPoller` 執行時間為編譯期常數 `@Scheduled 三個 cron（0 20 8／0 30 11／0 0 18）`，本 Task 改為 DB 驅動的動態排程（新表 `crawler_schedule`）。權限：查詢／讀排程 `authenticated`，改排程 `PUT` 限 ADMIN。
+
+#### Steps:
+
+- [x] 192.1 **spec**：`requirements.md` 新增 Requirement 38；`design.md` 補路由 `/crawler-data`、`CrawlerDataBffController`、business API（`/api/news-headlines`、`/api/crawler-schedule`）、ERD `CrawlerSchedule`、`crawler_schedule` DDL、`NewsPoller` 動態排程說明、排程列表同步註記；`tasks.md` 本 Task。
+- [x] 192.2 **DB（backend Liquibase）**：新增 `changes/v1.58.0-crawler-schedule.sql`＋掛入 `db.changelog-master.yaml`。建 `crawler_schedule`（`id`／`crawler_key`／`run_hour`／`run_minute`／`enabled`／`updated_at`；UNIQUE(crawler_key,run_hour,run_minute)；CHECK hour 0–23、minute 0–59），seed `('news-poller',8:20/11:30/18:00)`（＝改 DB 驅動前寫死的 cron，Task 184／188）。
+- [x] 192.2a **changeset 冪等化（部署時實際踩到）**：本檔原名 `v1.55.0-crawler-schedule.sql`，開發期已在既有 DB 跑過（`databasechangelog` 留有該 id、表已存在且 seed 為舊時點 08:00/12:00/18:00）。因 main 已佔用 `v1.55.0`，改名為 `v1.58.0` 後 **changeset id 隨之改變、Liquibase 視為新 changeset 重跑 → `relation "crawler_schedule" already exists` → business-services 啟動失敗、crash loop、bff/frontend 連帶起不來**。修法：`CREATE TABLE IF NOT EXISTS`＋`CREATE INDEX IF NOT EXISTS`＋seed `ON CONFLICT DO NOTHING`＋`DELETE` 清舊 seed（08:00／12:00）對齊現行時點。全新資料庫為一般建表、`DELETE` no-op，行為不變。
+- [x] 192.3 **Entity＋Repository（backend）**：`model/CrawlerSchedule.java`（全域、無 `@Filter`）；`repository/CrawlerScheduleRepository.java`（`findByCrawlerKeyOrderByRunHourAscRunMinuteAsc`、`deleteByCrawlerKey`）。`NewsHeadlineRepository` 加 `findByFetchedAtGreaterThanEqualAndFetchedAtLessThanOrderByFetchedAtDesc`／`findByPublishedAtGreaterThanEqualAndPublishedAtLessThanOrderByPublishedAtDesc`。
+- [x] 192.4 **business controller — 查詢**：`NewsHeadlineController`（`GET /api/news-headlines?date=&dateField=&category=`）：以 Asia/Taipei 該日 [00:00, 翌日00:00) 轉 `Instant`，依 `dateField`（缺省 `fetched`）選欄位查詢，`category` 選填過濾，回 `NewsHeadlineDto`（含 published_at／fetched_at／category／source／region／title／url／summary）。
+- [x] 192.5 **business controller — 排程**：`CrawlerScheduleController`（`GET`／`PUT /api/crawler-schedule?crawler=`）＋ `CrawlerScheduleService`：GET 回時間清單；PUT 驗 0–23/0–59＋去重後整批覆寫（`deleteByCrawlerKey`＋batch save）。`PUT` 以 `CurrentUserContext.isAdmin()` 縱深防禦（`AdminRequiredException`→403）。
+- [x] 192.6 **ext — NewsPoller 動態排程**：移除 `@Scheduled 三個 cron（0 20 8／0 30 11／0 0 18）`，改每分鐘 ticker `@Scheduled(cron="0 * * * * *", zone="Asia/Taipei")` 讀 `crawler_schedule`（新增 `CrawlerScheduleQuery` JdbcTemplate；`crawler_key='news-poller'` 且 `enabled`）比對現在 `HH:mm` 命中即在獨立執行緒 `runGuarded("scheduled")`（`AtomicBoolean` 防重疊）；DB 例外 fallback 08/12/18；保留 warmup 與保留期清理。
+- [x] 192.7 **BFF**：`CrawlerDataBffController`（`GET /api/bff/crawler-data`、`GET/PUT /api/bff/crawler-data/schedule`），WebClient 轉呼 business；`SecurityConfig` 加 `PUT /api/bff/crawler-data/schedule` 限 ADMIN，`GET` 落 authenticated。
+- [x] 192.8 **前端**：`App.vue` 選單「公開資訊」加子項「爬蟲資訊查詢」（`/crawler-data`，icon Search）；`router/index.js` 加 route；`api/index.js` 加 `bffApi.crawlerData`（query／getSchedule／saveSchedule）；新 `views/CrawlerDataView.vue`（日期選擇＋`fetched/published` 切換＋類別過濾＋結果表格；排程時間清單增減／啟用／儲存，非 ADMIN 唯讀並提示）。
+- [x] 192.9 **排程列表同步**：`SchedulePublicBffController` 的 `JOBS` 中 NewsPoller 該筆改標「動態：依『爬蟲資訊查詢』頁設定（預設 08/12/18）」。
+- [ ] 192.10 **部署驗證**（功能已於運行 stack 逐項驗過，惟最終乾淨部署被環境問題阻斷，待重跑）：已驗證通過項目——（a）`GET /api/news-headlines` 依日期查得當日 `news_headline`，`fetched/published` 兩語意與 `category=fx` 過濾皆正確（回真實 fx／us-market／news 列）；（b）Liquibase v1.55.0 建表＋seed 08/12/18；（c）ADMIN `PUT /api/crawler-schedule` 成功整批覆寫、非 ADMIN → 403、非法時分 → 400；（d）**動態排程實測**：API 設 00:33 後 `NewsPoller` 於 TW 00:33:00 準時在 `news-scheduled` 執行緒觸發 upsert（免重啟生效）；（e）前端新頁 chunk／路由／`bff/crawler-data` 已部署、BFF 路由存在（401）。**阻斷原因**：跨 worktree 共用 `asset-management-*:latest` 映像被並行 session 反覆覆蓋（曾出現「有 NewsHeadlineController、無 CrawlerScheduleController」的他版），隨後 Docker daemon 於高並行 build 下崩潰回 500。待 Docker 恢復＋確認無其他 session 並行 build 後，於本 worktree 重跑 `docker compose build`＋`--force-recreate` 並複驗即可收尾。
+- [ ] 192.11 commit + 兩段式 merge。
+### Task 193：公開資訊爬蟲增列「韓股盤中」快照，讓分析看得到當日開盤動向（Requirement 31）
+
+對應 Requirements: Requirement 31（今日股市分析——公開資訊必含韓國股市 Task 185、爬蟲時點 Task 184／188、來源不取中港澳 Task 180）
+
+#### 背景
+
+既有韓股快照（`kr-market`，Task 185）純讀 DB，資料由 `IndexDailyRefreshScheduler`（07:00 Asia/Taipei＝08:00 KST，**韓股尚未開盤**）與 `KrStockPoller`（16:00 Asia/Taipei＝17:00 KST，**已收盤**）寫入，故 08:20 那輪爬蟲組出的韓股快照**恆為前一交易日收盤**——`KrStockPoller` javadoc 明載此為刻意設計（「確保次日早上 08:20 爬蟲已有前一交易日收盤」）。
+
+但韓股 09:00–15:30 KST **＝台北 08:00–14:30**，08:20 爬蟲執行時韓股已開盤 20 分鐘。三星電子／SK 海力士同為記憶體權值、對台股 09:00 開盤具領先參考價值，其**當日開盤動向卻完全沒進 08:45 的分析**。本任務補上這塊。
+
+#### 設計
+
+見 `design.md`「Requirement 31」關鍵業務邏輯之「韓股盤中快照（`KrIntradayFetchClient`，Task 193）」。`requirements.md` Requirement 31「公開資訊必含韓國股市『盤中』快照」AC。
+
+重點決策：
+- **不新增 `@Scheduled`**：掛 `NewsPoller` 既有輪次即可，`SchedulePublicBffController` 靜態清單無須更動。產出與否只由時段閘門決定、與爬蟲執行時點無耦合（現行 08:20／11:30 在盤中故產出、18:00 在收盤後故不產出，當日收盤已由 `kr-market` 涵蓋）。
+- **不需 Liquibase changeset**：`news_headline` 已存在，`category VARCHAR(32)` 無 CHECK constraint／無 enum 表，新 category 值不必註冊。
+- **backend 零改動**：`PublicInfoStockFilter`（`category != "news"` 放行）→ `upsertNews`（dedupe_key 含 category，與 `kr-market` 自成兩列）→ `fetchRecentLocalNews`（無 category 過濾）→ `buildLocalNewsBlock`（非 `news` 進無上限量化桶），四關皆天然放行。
+- **雙閘門免自建韓國假日曆**：時段閘門（台北 MON–FRI 08:00–14:30，可注入 `Clock`）＋資料閘門（`meta.regularMarketTime` 之 KST 日期 == 今日）。
+- **開盤價取 `indicators.quote[0].open[0]`**，`meta.regularMarketOpen` 實測不存在（詳見 design.md 警語）。
+
+#### Steps:
+
+- [x] 193.1 **spec**：`requirements.md` Requirement 31 增「公開資訊必含韓國股市『盤中』快照（當日開盤動向）」AC；`design.md` 關鍵業務邏輯增「韓股盤中快照」段（含雙閘門、Yahoo 欄位落點與 `regularMarketOpen` 不存在之警語）、ERD `source`／`category` 增列 `kr-intraday`、個股過濾與 backend 注入段同步；`tasks.md` 本任務。
+- [x] 193.2 **`PriceFetchClient`**：新增 `record KrIntradayQuote(symbol, name, price, open, prevClose, changePct, sessionDate)` 與 `fetchKrIntradayQuote(String yahooSymbol)`（`interval=1d&range=1d`；現價 `meta.regularMarketPrice`、昨收 `meta.chartPreviousClose`、**開盤價 `indicators.quote[0].open[0]`**、`sessionDate` 由 `meta.regularMarketTime` 換 `Asia/Seoul`；沿用 `curlGetWithRetry` 短 UA；吃完整 symbol 以支援 `^KS11`）。不動既有 `getStockPrice`／`getYahooLsePrice`。
+- [x] 193.3 **`KrIntradayFetchClient`（新檔）**：`@Component`，獨立於 `MarketSnapshotFetchClient`（後者契約為「不打外部 API」）。時段閘門（`Clock` 可注入）＋資料閘門；三檔（`^KS11`／`005930.KS`／`000660.KS`）逐一 graceful；組 `category=kr-intraday`／`source=kr-intraday`／`region=KR` 之單則 `NewsRow`，標題含「盤中」與 KST 時點、`summary` 標明非收盤並與 `kr-market` 消歧。
+- [x] 193.4 **`NewsPoller` 接線**：注入 `KrIntradayFetchClient`，`run()` 增第四個 `rows.addAll(...)`；class javadoc 列入第四來源。
+- [x] 193.5 **單元測試**：`KrIntradayFetchClientTest`——盤中且 sessionDate 為今日 → 產 1 列且標題含開盤價與漲跌%；時段外（18:00）→ 0 列；盤中但 sessionDate 為昨日（模擬韓國假日）→ 0 列；三檔僅 1 檔成功 → 仍產 1 列；三檔全失敗 → 0 列。
+- [x] 193.6 **部署驗證**：external-materials `--no-cache` 重建（`-p asset-management`）＋recreate，jar 內含 4 個 KrIntraday class（防 stale jar）。實測於台北 22:21（韓股收盤後）：容器 healthy、Spring context 載入正常（雙建構子＋`@Autowired` 接線無誤）、warmup upsert 269 則失敗 0、`fx`／`kr-market`／`us-market` 皆正常刷新＝其他來源無退化、`kr-intraday` 0 列＝時段閘門正確擋下。**未驗**：盤中實際產出列（須台北 08:00–14:30 平日；`ApplicationReadyEvent` warmup 會跑完整 `run()`，屆時重啟容器即可）。抓取／解析路徑另以真實 Yahoo 探針驗證：三檔皆正確取得開盤價（`^KS11` 之 `^` 正確 encode、`005930.KS` open=283500 與 curl 吻合）、`sessionDate` 正確、無效 symbol graceful 回空。
+- [ ] 193.7 **整合 main（兩段式 merge）**：feature 分支 commit → main 以 `--no-ff` merge。
+
+---
+
+### Task 194：修正英股即時報價開盤價恆為 null（`getYahooLsePrice` 誤用 `meta.regularMarketOpen`）（Requirement 7、Requirement 24）
+
+對應 Requirements: Requirement 7（`openPrice` 來源——美股 Task 120 同型 bug）、Requirement 24（英股市場類型擴充：即時股價走 Yahoo `.L`）
+
+#### 背景
+
+`PriceFetchClient.getYahooLsePrice()` 以 `meta.regularMarketOpen` 取英股開盤價，但**該欄不存在於 Yahoo chart API 的 meta**。2026-07-15 以 `interval=1d&range=1d` 實測 `CSPX.L`／`VUSA.L`／`VWRL.L` 三檔，`meta` 實際只有 `chartPreviousClose`／`regularMarketPrice`／`regularMarketDayHigh`／`regularMarketDayLow`／`regularMarketVolume`／`regularMarketTime`／`shortName`／`longName` 等欄，`regularMarketOpen` 與 `previousClose` **皆 missing**。連帶兩個後果：
+
+1. 英股 `PriceResult.openPrice` **恆為 null**。`PriceCacheWriter` 的 `ObjectMapper` 設 `JsonInclude.Include.NON_NULL`，故 Redis `price:英股:{code}` 的 `openPrice` **整個欄位缺席**（非 `"openPrice":null`）。
+2. `meta.previousClose` 不存在 → `chartPreviousClose` 取不到才 fallback `previousClose` 的那行是**死碼**（`chartPreviousClose` 本來就恆有值）。
+
+**使用者可見症狀是「靜默錯值」而非空值**（與美股 Task 120 顯示「—」不同）：`WatchStockService:122-127` 對 `openPrice == null` 會 fallback 至 `stock_price_history.findRecentN(code, market, 2)` 最近一筆，倫敦盤中今日列尚未入庫 → 觀察清單「開盤」欄顯示**前一交易日的開盤價**。16:32 LON `dumpUkCloseFromRedis` 抄 Redis 缺漏值 → DB 今日列 open 亦 null；17:00 LON `verifyUkCloseWithYahoo` 走 `fetchUkHistoricalRange`（open 取自 `indicators.quote[0].open[i]`，本來就正確）覆寫今日列後才修正。**影響窗＝倫敦交易時段至 17:00 LON、收盤後自癒**，是本 bug 長期未被發現的主因。
+
+同檔 `fetchUsTodayOpenFromYahoo`（Task 120）與 `fetchKrIntradayQuote`（Task 193）早已用正確落點，Task 193 的 design 警語甚至明文點名 `getYahooLsePrice` 為反例，但當時**刻意不動既有方法**（見 Task 193.2），故 bug 留存至今。
+
+#### 設計
+
+見 `design.md`「英股盤中 `openPrice` 修正（Task 194）」段與 Requirement 24 之 `getYahooLsePrice` 欄位落點；`requirements.md` Requirement 7「英股 `openPrice` 來源」AC 與 Requirement 24「即時股價走 Yahoo Finance `.L` suffix」AC。
+
+重點決策：
+- **開盤價改取 `indicators.quote[0].open[0]`**，與 `fetchUsTodayOpenFromYahoo`／`fetchKrIntradayQuote` 同一落點（三處自此一致）。
+- **移除 `meta.previousClose` 死碼 fallback**：留著會誤導後續維護者以為該欄可用，且與 Task 193 的 design 警語矛盾。
+- **high／low／volume 不動**：`meta.regularMarketDayHigh`／`regularMarketDayLow`／`regularMarketVolume` 實測**存在**，且與 `indicators.quote[0]` 對應值一致（CSPX.L 實測 high 816.44／low 812.91／volume 48885 兩者相同），無改動必要，避免擴大 diff。
+- **不新增 `@Scheduled`／不改 DB／不改契約**：純修正既有欄位落點，`PriceResult` record、Redis payload 欄位名、下游 `WatchStockService` fallback 行為全部不變。
+
+#### Steps:
+
+- [x] 194.1 **spec**：`requirements.md` Requirement 7 增「英股 `openPrice` 來源」AC 並修正原「英股維持 Yahoo `regularMarketOpen`」之錯述、Requirement 24 即時股價 AC 補正欄位落點；`design.md` 增「英股盤中 `openPrice` 修正（Task 194）」段、Requirement 24 `getYahooLsePrice` 欄位落點補正、Task 193 警語之 `getYahooLsePrice` 反例標註為已修正；`tasks.md` 本任務。
+- [x] 194.2 **`PriceFetchClient.getYahooLsePrice`**：`mapper.readTree(body).path("chart").path("result").path(0)` 提為 `result`，`meta` 由其取得；`open` 改讀 `result.path("indicators").path("quote").path(0).path("open").path(0)`；移除 `meta.previousClose` 死碼 fallback；Javadoc 補欄位落點警語。`fetchKrIntradayQuote` 之 Javadoc 同步（原文稱 `getYahooLsePrice`「即誤用該欄」，改標註為已由 Task 194 修正）。high／low／volume 不動。
+- [x] 194.3 **真實 Yahoo 驗證**：暫時性測試直呼 `getStockPrice(code, "英股")` 實打 Yahoo，三檔開盤價皆有值且落在當日 low／high 區間內——CSPX open=814.24（low 812.91／high 816.44）、VUSA open=106.805（low 106.558／high 107.077）、VWRL open=137.23（low 136.70／high 137.42）；`prevClose`／`change`／`changePct` 亦一致。驗畢即刪，不進 commit。
+- [x] 194.4 **部署驗證**：external-materials `--no-cache` 重建（`-p asset-management`）＋recreate。防 stale jar：以 `javap` 反組譯 image 內 jar 的 `PriceFetchClient.class`，確認 `getYahooLsePrice` 的 constant pool 已為 `chart→result→meta→regularMarketPrice→chartPreviousClose→indicators→quote→open→regularMarketDayHigh/Low→regularMarketVolume→shortName`，全檔 `regularMarketOpen` 出現 **0 次**（原為死碼的 bare `previousClose` 亦 0 次）。**端到端**：修正前 Redis `price:英股:CSPX` 無 `openPrice` 欄（NON_NULL 省略，實測 baseline）；recreate 後同 key 於倫敦 15:42（盤中、`closed:false`）已含 `"openPrice":814.2400`，與 Yahoo `indicators.quote[0].open[0]`（814.239990…）一致。
+- [ ] 194.5 **整合 main（兩段式 merge）**：feature 分支 commit → main 以 `--no-ff` merge。
+
+---
+
+### Task 195：修正排程列表與實作漂移（分析寫死 08:45、交易日曆匯出漏列）（Requirement 36）
+
+對應 Requirements: Requirement 36（排程列表頁——清單涵蓋率、動態排程標示）；牽涉 Requirement 31（Task 191）、Requirement 37（Task 190）
+
+#### 背景
+
+`SchedulePublicBffController` 的 `JOBS` 為人工維護靜態清單，其 javadoc 自載「新增／調整任何 `@Scheduled` 須同步更新此清單以免漂移」。Task 190（交易日曆匯出排程）與 Task 191（分析改多時段）皆改動了 `@Scheduled`，但**兩者的 Steps 都沒有排程列表同步項**（對照 Task 188.3、Task 192.9 皆有），故各留下一處漂移，於 2026-07-15 清點確認仍在 main：
+
+1. **今日股市分析寫死 08:45**：Task 191 已把 `MarketAnalysisScheduler` 由 `0 45 8 * * MON-FRI` 改為 `0 * * * * MON-FRI` 每分鐘 tick、比對 `market_analysis_send_time` 之多個可設定時段（seed 08:45，使用者可於「今日股市分析」頁增減），清單卻仍顯示固定 `交易日 08:45`／`0 45 8 * * MON-FRI`。
+2. **交易日曆匯出排程漏列**：Task 190 之 `TradingCalendarExportScheduleService.tick()`（`0 * * * * *`）從未登錄，清單查無「交易日曆」字串。
+
+另清點發現既有數量標示三處不實：javadoc 稱 business「10 個 `@Scheduled`」（實為 11，含漏列的交易日曆匯出）；`requirements.md`／`design.md` 仍停在「business 10／external 23、共 33 筆」——Task 188.3 已把 external 補到 24、清單 34 筆，但只改了 controller，spec 兩份文件未同步。
+
+#### 設計決策
+
+- **分析該筆比照 Task 192.9 之 NewsPoller 寫法**：同為「每分鐘 tick ＋ 比對 DB 可設定時點」，標「動態：依『今日股市分析』頁設定（預設 08:45）」／「動態（`market_analysis_send_time`）」，不寫死時間——寫死正是本次漂移成因。
+- **交易日曆匯出該筆比照既有「資產匯出」寫法**：兩者同機制（每分鐘 tick ＋ per-user 設定表 ＋ 當日 guard），且時點屬**私人設定**、非全域可設時點，故照列實際 cron `每分鐘`／`0 * * * * *`，於 description 點出係比對各使用者設定，不套「動態：依 X 頁設定」（該標示保留給全域時點）。
+- **數量以 `@Scheduled` 方法計**：external 24 筆對應 25 個標註（`TwClosurePoller` 一法兩標、併為一筆），此計數慣例於 javadoc 寫明，避免日後又因「標註 vs 方法」歧異誤判。
+- **不改前端**：`ScheduleListView` 之 `businessCount`／`externalCount`／`categoryCount` 皆由 payload 動態計算，筆數 34→35、新增「交易日曆」分類皆自動反映。
+- **不新增／不改動任何 `@Scheduled`**：本任務純修清單與文件，零行為變更。
+
+#### Steps:
+
+- [x] 195.1 **spec**：`requirements.md` Requirement 36 背景數量 10／23→11／24、移除「crons 皆為編譯期常數」失效前提，並增「清單涵蓋率」與「動態排程標示」兩條 AC；`design.md` `SchedulePublicBffController` 段數量改 35 筆＝11＋24（載明以方法計、`TwClosurePoller` 一法兩標）＋動態排程標示規則＋前端計數為動態；`tasks.md` 本任務。
+- [x] 195.2 **修漂移 1（分析寫死 08:45）**：`SchedulePublicBffController` 今日股市分析該筆 → `"動態：依「今日股市分析」頁設定（預設 08:45）"`／`"動態（market_analysis_send_time）"`，description 說明每分鐘 tick 比對啟用時點、每時段各重跑一次並各寄一封（限台股交易日）。
+- [x] 195.3 **修漂移 2（交易日曆匯出漏列）**：`JOBS` 新增 `BUSINESS`／分類「交易日曆」／「交易日曆每日匯出排程檢查」（`每分鐘`／`0 * * * * *`／`Asia/Taipei`），比照「資產匯出」該筆敘述。
+- [x] 195.4 **更正數量與對照來源**：javadoc business 10→11、總數 34→35，`對照來源` business 清單補 `TradingCalendarExportScheduleService`，並載明「以 `@Scheduled` 方法計」之計數慣例；`JOBS` 與 `list()` 註解筆數同步。
+- [x] 195.5 **驗證**：bff `mvn compile` 通過；`docker compose -p asset-management build --no-cache bff` ＋ `--force-recreate`，容器 healthy。**防 stale jar（memory 教訓）**：自 image 取出 `/app/app.jar`、`javap` 反組譯部署後的 `SchedulePublicBffController.class` 驗證——`ScheduledJobDto` 實例化 **35 次**、`業務服務` 11／`外部行情服務` 24（與 javadoc 宣稱一致）、`動態（market_analysis_send_time）` 與 `交易日曆每日匯出排程檢查` 存在、**舊寫死 cron `0 45 8 * * MON-FRI` 出現 0 次**（漂移確實移除）。另全清單 35 筆逐筆對照兩服務實際 35 個 `@Scheduled` 方法之 cron／zone，無其他漂移。`GET /api/bff/schedule-list` 自 business 容器打 bff 回 **401**＝路由存在且如 AC 落 `authenticated()`。**未驗**：登入後之頁面實際 render——`/schedule-list` 需 Google OAuth session，不代為登入；惟本清單為編譯期 `List.of` 常數、無下游呼叫，且 `list()` 與 `ScheduledJobDto` 皆未改動（頁面原即正常顯示 34 筆），bytecode 已足證所服務之內容。
+- [ ] 195.6 **整合 main（兩段式 merge）**：feature 分支 commit → main 以 `--no-ff` merge。
+
+---
+
+### Task 196: 已實現損益 Excel 匯出到指定目錄與每日排程自動匯出（Requirement 39）
+
+對應 Requirements: Requirement 39（已實現損益 Excel 匯出到指定目錄與每日排程自動匯出）
 
 #### 背景
 
@@ -4742,21 +4864,21 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 
 #### 設計
 
-見 `design.md`「Requirement 38（Task 192）」：架構與資料流、關鍵設計決策（一功能一表／目錄瀏覽複用既有 business 端點／背景排程必須逐列 `enableFilter`／三入口共用同一活頁簿）、資料模型（新表 `realized_gain_export_schedule`，Liquibase `v1.58.0`）、API 端點表、新增異動檔案清單。
+見 `design.md`「Requirement 39（Task 192）」：架構與資料流、關鍵設計決策（一功能一表／目錄瀏覽複用既有 business 端點／背景排程必須逐列 `enableFilter`／三入口共用同一活頁簿）、資料模型（新表 `realized_gain_export_schedule`，Liquibase `v1.58.0`）、API 端點表、新增異動檔案清單。
 
 #### 實作
 
-- [x] **192.1** spec：`requirements.md` 新增 Requirement 38；`design.md` 新增對應章節；`tasks.md` 新增本 Task。
-- [x] **192.2** `RealizedGainExportSchedule` entity：`@Table(name="realized_gain_export_schedule")`、`@UniqueConstraint(uq_rg_export_schedule_owner, owner_user_id)`、`@Filter(ownerFilter)`；欄位 enabled／runHour(8)／runMinute(0)／outputSubpath("input")／lastRunDate／lastRunAt／lastRunStatus／updatedAt。
-- [x] **192.3** `RealizedGainExportScheduleRepository`：`findByOwnerUserId(Long)`。
-- [x] **192.4** Liquibase `v1.58.0-realized-gain-export-schedule.sql`：CREATE TABLE ＋ hour/minute CHECK ＋ owner UNIQUE；註冊進 `db.changelog-master.yaml`。
-- [x] **192.5** `ExcelExportService`：抽出 private `buildRealizedGainsWorkbook()`；`exportRealizedGains()` 改呼叫之；新增 `exportRealizedGainsForOwner(Long ownerId)` 手動 `enableFilter("ownerFilter")`（**租戶隔離關鍵**：`RealizedGain` 帶 ownerFilter，背景 cron 不過濾會外洩他人資料）。
-- [x] **192.6** `RealizedGainExportDto`：`SettingResponse`（enabled／runHour／runMinute／outputSubpath／lastRunAt／lastRunStatus／baseDir）、`SettingRequest`、`RunNowResponse`（path／sizeBytes）。
-- [x] **192.7** `RealizedGainExportScheduleService`：`getForCurrentUser`／`updateForCurrentUser`（驗證時分 0..23／0..59、子路徑不跳脫）／`runNowForCurrentUser`（不動當日 guard）；`@Scheduled(cron="0 * * * * *", zone="Asia/Taipei") tick()` ＋ `AtomicBoolean` 防重入 ＋ `@EventListener(ApplicationReadyEvent.class)` 開機自癒；`runDueExports()` 用 `now >= 時分` ＋ `lastRunDate` 當日 guard；`writeToDir` 檔名 `已實現損益_{ownerId}_{YYYYMMDD}.xlsx`、`Files.createDirectories`、resolve+normalize `startsWith(base)` 防跳脫。
-- [x] **192.8** `RealizedGainExportController`：`@RequestMapping("/api/realized-gains/export")` ＋ `GET/PUT /schedule`、`POST /run-now`（與既有 `RealizedGainController` 的 `/api/realized-gains/export` 下載端點路徑不衝突）。
-- [x] **192.9** `RealizedGainBffController`：新增 `GET/PUT /export/schedule`、`POST /export/run-now`、`GET /export/browse`（browse 以 URI template 展開 passthrough 至 business 既有 `/api/export-schedule/browse`，**不新增第二支 business browse**）。
-- [x] **192.10** `frontend/src/api/index.js`：`realizedGain` 新增 `getExportSchedule`／`updateExportSchedule`／`runExportNow`／`browseExportDir`。
-- [x] **192.11** `RealizedGainView.vue`：新增「⏱️ 排程自動匯出」設定卡——啟用開關、`el-time-picker`（HH:mm）、資料夾 `el-tree` 懶載入選擇器（可填新增子資料夾名稱）、「儲存排程」、「立即匯出到目錄」、顯示上次執行時間與結果。
-- [x] **192.12** `SchedulePublicBffController`：`JOBS` 補「已實現損益匯出 每日匯出排程檢查」（每分鐘 `0 * * * * *`），避免排程列表頁漂移（比照 Task 188）。
-- [x] **192.13** 部署驗證：`--no-cache` rebuild backend／bff／frontend ＋ recreate；以 `X-User-*` header 於容器內 curl 驗證 GET/PUT schedule、run-now 落點與**跨租戶隔離**（另一 owner 的檔案不含他人資料）；UI 實測資料夾樹與立即匯出。
-- [ ] **192.14** commit ＋ 兩段式 merge（feature 分支單行短中文 commit、main 用 `--no-ff`）。
+- [x] **196.1** spec：`requirements.md` 新增 Requirement 39；`design.md` 新增對應章節；`tasks.md` 新增本 Task。
+- [x] **196.2** `RealizedGainExportSchedule` entity：`@Table(name="realized_gain_export_schedule")`、`@UniqueConstraint(uq_rg_export_schedule_owner, owner_user_id)`、`@Filter(ownerFilter)`；欄位 enabled／runHour(8)／runMinute(0)／outputSubpath("input")／lastRunDate／lastRunAt／lastRunStatus／updatedAt。
+- [x] **196.3** `RealizedGainExportScheduleRepository`：`findByOwnerUserId(Long)`。
+- [x] **196.4** Liquibase `v1.59.0-realized-gain-export-schedule.sql`：CREATE TABLE ＋ hour/minute CHECK ＋ owner UNIQUE；註冊進 `db.changelog-master.yaml`。
+- [x] **196.5** `ExcelExportService`：抽出 private `buildRealizedGainsWorkbook()`；`exportRealizedGains()` 改呼叫之；新增 `exportRealizedGainsForOwner(Long ownerId)` 手動 `enableFilter("ownerFilter")`（**租戶隔離關鍵**：`RealizedGain` 帶 ownerFilter，背景 cron 不過濾會外洩他人資料）。
+- [x] **196.6** `RealizedGainExportDto`：`SettingResponse`（enabled／runHour／runMinute／outputSubpath／lastRunAt／lastRunStatus／baseDir）、`SettingRequest`、`RunNowResponse`（path／sizeBytes）。
+- [x] **196.7** `RealizedGainExportScheduleService`：`getForCurrentUser`／`updateForCurrentUser`（驗證時分 0..23／0..59、子路徑不跳脫）／`runNowForCurrentUser`（不動當日 guard）；`@Scheduled(cron="0 * * * * *", zone="Asia/Taipei") tick()` ＋ `AtomicBoolean` 防重入 ＋ `@EventListener(ApplicationReadyEvent.class)` 開機自癒；`runDueExports()` 用 `now >= 時分` ＋ `lastRunDate` 當日 guard；`writeToDir` 檔名 `已實現損益_{ownerId}_{YYYYMMDD}.xlsx`、`Files.createDirectories`、resolve+normalize `startsWith(base)` 防跳脫。
+- [x] **196.8** `RealizedGainExportController`：`@RequestMapping("/api/realized-gains/export")` ＋ `GET/PUT /schedule`、`POST /run-now`（與既有 `RealizedGainController` 的 `/api/realized-gains/export` 下載端點路徑不衝突）。
+- [x] **196.9** `RealizedGainBffController`：新增 `GET/PUT /export/schedule`、`POST /export/run-now`、`GET /export/browse`（browse 以 URI template 展開 passthrough 至 business 既有 `/api/export-schedule/browse`，**不新增第二支 business browse**）。
+- [x] **196.10** `frontend/src/api/index.js`：`realizedGain` 新增 `getExportSchedule`／`updateExportSchedule`／`runExportNow`／`browseExportDir`。
+- [x] **196.11** `RealizedGainView.vue`：新增「⏱️ 排程自動匯出」設定卡——啟用開關、`el-time-picker`（HH:mm）、資料夾 `el-tree` 懶載入選擇器（可填新增子資料夾名稱）、「儲存排程」、「立即匯出到目錄」、顯示上次執行時間與結果。
+- [x] **196.12** `SchedulePublicBffController`：`JOBS` 補「已實現損益匯出 每日匯出排程檢查」（每分鐘 `0 * * * * *`），避免排程列表頁漂移（比照 Task 188）。
+- [x] **196.13** 部署驗證：`--no-cache` rebuild backend／bff／frontend ＋ recreate；以 `X-User-*` header 於容器內 curl 驗證 GET/PUT schedule、run-now 落點與**跨租戶隔離**（另一 owner 的檔案不含他人資料）；UI 實測資料夾樹與立即匯出。
+- [ ] **196.14** commit ＋ 兩段式 merge（feature 分支單行短中文 commit、main 用 `--no-ff`）。

@@ -11,7 +11,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 /**
- * 已實現損益每日排程自動匯出設定（Requirement 38 / Task 192）。
+ * 已實現損益每日排程自動匯出設定（Requirement 39 / Task 196）。
  *
  * <p>每個使用者一列（{@code owner_user_id} UNIQUE），以 {@code @Filter(ownerFilter)} 隔離設定本身。
  * HTTP 情境（BFF→business）由 {@link com.steven.assets.security.TenantFilterAspect} 自動 owner-scoped；

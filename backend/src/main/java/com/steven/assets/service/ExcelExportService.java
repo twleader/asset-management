@@ -218,7 +218,7 @@ public class ExcelExportService {
     }
 
     /**
-     * 背景排程用：指定 owner 的已實現損益匯出（Requirement 38 / Task 192）。
+     * 背景排程用：指定 owner 的已實現損益匯出（Requirement 39 / Task 196）。
      * 背景執行緒無 request context，{@code TenantFilterAspect} 不啟用 → {@code findAll} 會讀到全部使用者的損益，
      * 故在本 session 手動啟用 {@code ownerFilter} 縮到該 owner，確保各使用者檔案只含自己的資料。
      */

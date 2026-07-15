@@ -69,6 +69,12 @@ const router = createRouter({
       meta: { title: '排程列表', icon: 'Clock' }
     },
     {
+      path: '/crawler-data',
+      name: 'CrawlerData',
+      component: () => import('@/views/CrawlerDataView.vue'),
+      meta: { title: '爬蟲資訊查詢', icon: 'Search' }
+    },
+    {
       path: '/gdp-twse',
       name: 'GdpTwse',
       component: () => import('@/views/GdpTwseView.vue'),

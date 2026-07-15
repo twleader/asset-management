@@ -140,7 +140,7 @@
       </template>
     </el-card>
 
-    <!-- 排程自動匯出設定（Requirement 38 / Task 192） -->
+    <!-- 排程自動匯出設定（Requirement 39 / Task 196） -->
     <el-card style="margin-top:20px">
       <template #header>
         <div style="display:flex;align-items:center;justify-content:space-between">
@@ -178,7 +178,7 @@
       </div>
     </el-card>
 
-    <!-- 輸出資料夾選擇器（檔案總管式樹狀，Requirement 38 / Task 192） -->
+    <!-- 輸出資料夾選擇器（檔案總管式樹狀，Requirement 39 / Task 196） -->
     <el-dialog v-model="dirPicker.visible" title="選擇輸出資料夾" width="560px">
       <div class="dir-picker-path">
         目前選擇：<code>{{ dirPicker.baseDir || '/home/steven' }}{{ dirPicker.picked ? '/' + dirPicker.picked : '' }}{{ dirPicker.newSub.trim() ? '/' + dirPicker.newSub.trim() : '' }}</code>
@@ -316,7 +316,7 @@ const exporting = ref(false)
 const selectedYear = ref(null)
 const editingId = ref(null)
 
-// 排程自動匯出設定（Requirement 38 / Task 192）
+// 排程自動匯出設定（Requirement 39 / Task 196）
 const schedule = reactive({ enabled: false, runHour: 8, runMinute: 0, outputSubpath: 'input', lastRunAt: null, lastRunStatus: null, baseDir: '' })
 const scheduleTime = ref('08:00')
 const savingSchedule = ref(false)
@@ -633,7 +633,7 @@ function onRowDblClick(row) {
 .broker-text { font-size: 13px; color: #475569; }
 .gain-table :deep(.el-table__cell) { font-size: 13.5px; }
 
-/* 排程自動匯出設定（Requirement 38 / Task 192） */
+/* 排程自動匯出設定（Requirement 39 / Task 196） */
 .schedule-form { margin-bottom: 4px; }
 .schedule-hint { font-size: 12px; color: #94a3b8; line-height: 1.6; }
 .schedule-hint code { background: #f1f5f9; color: #475569; padding: 1px 5px; border-radius: 4px; font-size: 11px; }

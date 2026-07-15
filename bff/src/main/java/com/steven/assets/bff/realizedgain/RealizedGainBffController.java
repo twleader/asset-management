@@ -100,7 +100,7 @@ public class RealizedGainBffController {
                 });
     }
 
-    // ===== 排程自動匯出（Requirement 38 / Task 192）=====
+    // ===== 排程自動匯出（Requirement 39 / Task 196）=====
 
     @GetMapping("/export/schedule")
     public Mono<ResponseEntity<Map<String, Object>>> getExportSchedule() {

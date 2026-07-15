@@ -290,7 +290,8 @@
 - [ ] **移除觀察的入口 = 警示條件頁刪除**：觀察清單頁**不提供**列級的刪除操作（無「操作」欄）；要把某股票從觀察清單移除，只能在「警示條件」頁刪除該 (stockCode, market) 所有 alert，列才會消失。此設計反映「觀察清單即 stock_alert 衍生 view」單一資料源語意，避免在兩個頁面提供等價但措辭不同的刪除入口
 - [ ] **觀察清單拖曳排序 = 移動該股票所有 alert**：拖曳一列時將該股票所有 alert 的 `displayOrder` 整組重排到新位置（保持條件之間的相對順序）；警示條件頁的拖曳維持單筆 alert 級行為
 - [ ] 盤中即時 `highPrice` / `lowPrice` 由 `external-materials-service` 自行聚合：每輪 cron 觀察到的成交價與當日已記錄的高/低做 max/min，存於 Redis（key `price:dayhl:{market}:{code}:{tradingDate}`，TTL 36 小時）。寫入 `price:{market}:{code}` 時，若外部 API 有提供 high/low 則取「外部值與聚合值的 max(high)/min(low)」；若外部 API 未提供（如 NASDAQ 對 ETF 的 `keyStats` 為 null），則直接採用聚合值。盤後 `dumpRedisToDb` 沿用同一份 Redis JSON 寫入 `stock_price_history`
-- [ ] 美股 `openPrice` 來源：NASDAQ `/info` endpoint 自 2026/04 起不再回傳 `OpenPrice`；NASDAQ `/historical`「`fromdate == todate`」會回 400（`Provided date is less than from date`）、給日期區間盤中又不含今日列，兩者皆**無法**取得今日 open（原 `getNasdaqOpenPrice` 因此恆回 null → Redis live 無 `openPrice` → 連帶盤後 dump 進 `stock_price_history` 亦無 open → 觀察清單「開盤」欄恆顯示「—」）。改由 `PriceFetchClient.fetchUsTodayOpenFromYahoo` 打 Yahoo chart `interval=1d&range=1d`，取當日 daily bar `indicators.quote[0].open[0]`（盤中＝今日部分 bar 的 open、盤後＝完整 bar 的 open；只取 open 不碰 close，不違反 Task 84）；為盤中輪詢補強欄位，遇 Yahoo 429 fail-fast 不重試以免拖慢 cron。取不到時 `openPrice = null`，下游 `WatchStockService` 維持 `stock_price_history` fallback 行為。台股維持 TWSE mis API 的 `o` 欄位、英股維持 Yahoo `regularMarketOpen`
+- [ ] 美股 `openPrice` 來源：NASDAQ `/info` endpoint 自 2026/04 起不再回傳 `OpenPrice`；NASDAQ `/historical`「`fromdate == todate`」會回 400（`Provided date is less than from date`）、給日期區間盤中又不含今日列，兩者皆**無法**取得今日 open（原 `getNasdaqOpenPrice` 因此恆回 null → Redis live 無 `openPrice` → 連帶盤後 dump 進 `stock_price_history` 亦無 open → 觀察清單「開盤」欄恆顯示「—」）。改由 `PriceFetchClient.fetchUsTodayOpenFromYahoo` 打 Yahoo chart `interval=1d&range=1d`，取當日 daily bar `indicators.quote[0].open[0]`（盤中＝今日部分 bar 的 open、盤後＝完整 bar 的 open；只取 open 不碰 close，不違反 Task 84）；為盤中輪詢補強欄位，遇 Yahoo 429 fail-fast 不重試以免拖慢 cron。取不到時 `openPrice = null`，下游 `WatchStockService` 維持 `stock_price_history` fallback 行為。台股維持 TWSE mis API 的 `o` 欄位。
+- [ ] 英股 `openPrice` 來源：**同取 Yahoo chart 的 `indicators.quote[0].open[0]`**（Task 194 修正）。原 `getYahooLsePrice` 取 `meta.regularMarketOpen`，但該欄**實測不存在於 Yahoo chart meta**（2026-07-15 以 `interval=1d&range=1d` 實測 CSPX.L / VUSA.L / VWRL.L 三檔皆 missing），故英股 `PriceResult.openPrice` 恆為 null → `PriceCacheWriter` 採 `NON_NULL` 序列化 → Redis `price:英股:{code}` 的 `openPrice` **欄位恆缺**（非寫入 null，而是整個欄位不存在）。**使用者可見症狀為「靜默顯示錯誤的日期」而非空值**：`WatchStockService` 見 `openPrice == null` 會 fallback 至 `stock_price_history.findRecentN` 最近一筆，而倫敦盤中今日列尚未入庫 → 觀察清單「開盤」欄拿到**前一交易日的開盤價**，看起來有值、實則非今日（比顯示「—」更難察覺）。16:32 LON `dumpUkCloseFromRedis` 直接抄 Redis 的缺漏值 → DB 今日列 open 亦為 null；要到 17:00 LON `verifyUkCloseWithYahoo` 走 `fetchUkHistoricalRange`（其 open 取自 `indicators.quote[0].open[i]`，本來就正確）覆寫今日列後才修正。**故 bug 影響窗＝倫敦整個交易時段至 17:00 LON**，收盤校正後自然痊癒，這也是本 bug 長期未被發現的原因。症狀與美股 Task 120 修正前同型，**修法亦同**（Task 193 `fetchKrIntradayQuote` 已用正確欄位落點）。同時 `meta.previousClose` 亦不存在，原「`chartPreviousClose` 取不到才 fallback `previousClose`」的 fallback 為**死碼**，一併移除以免誤導後續維護者以為該欄可用。`meta.regularMarketDayHigh` / `regularMarketDayLow` / `regularMarketVolume` 實測**存在**且與 `indicators.quote[0]` 對應值一致，high / low / volume 續用 meta 不動
 - [ ] **觀察清單支援代號 `0000`（市場 = 台股）= 台股大盤（TAIEX）**（含 KD）：
   - 加入觀察 = 設一筆 0000 的 alert（與其他股票流程一致）
   - `lookup-name` 端點看到 `code=0000&market=台股` 直接回 `{"stockName":"台股大盤"}`，不打外部 API、不寫入 stock 主檔
@@ -566,7 +567,7 @@
 
 - [ ] `market_type` seed 包含「英股」（displayName「英國股市」、sortOrder=3），由 `DataInitializer.seedMarketTypes()` 提供
 - [ ] **計價幣別沿用既有 USD 體系**：使用者購買的標的（如 CSPX.L）為 USD-denominated UCITS ETF，`StockHolding.currency` 存 `USD`，市值換算與美股同 path（`shares × price × usdExchangeRate`），不引入 GBP 匯率體系。若未來購買 GBP-denominated UCITS（如 CSP1.L），再另外擴充 currency=GBP 體系
-- [ ] **即時股價走 Yahoo Finance `.L` suffix**：`external-materials-service` 的 `PriceFetchClient.getStockPrice(code, "英股")` 打 `https://query2.finance.yahoo.com/v8/finance/chart/{code}.L`，透過 `curlGetWithRetry` 子程序避開 Yahoo Java HTTP fingerprint 偵測，從 `meta.regularMarketPrice` 取 live 價、`previousClose` 算漲跌；source 標 `Yahoo`
+- [ ] **即時股價走 Yahoo Finance `.L` suffix**：`external-materials-service` 的 `PriceFetchClient.getStockPrice(code, "英股")` 打 `https://query2.finance.yahoo.com/v8/finance/chart/{code}.L`，透過 `curlGetWithRetry` 子程序避開 Yahoo Java HTTP fingerprint 偵測，從 `meta.regularMarketPrice` 取 live 價、`meta.chartPreviousClose` 算漲跌；source 標 `Yahoo`。**`openPrice` 取 `indicators.quote[0].open[0]`，不可用 `meta.regularMarketOpen`（實測不存在於 Yahoo chart meta）**；`meta.previousClose` 同樣不存在，昨收只有 `chartPreviousClose` 有值。`meta` 的 `regularMarketDayHigh` / `regularMarketDayLow` / `regularMarketVolume` 實測存在，high / low / volume 續用 meta（Task 194 修正，見 Requirement 7 `openPrice` 來源條目）
 - [ ] 倫敦時區（`Europe/London`，由 JVM `ZoneId` 自動處理 BST/GMT 切換）寫入 `MarketClock`：`isUkMarketOpen()` 為週一～五 08:00–16:30、`isUkMarketJustClosed()` 為 16:30–16:50；`PricePoller.scheduledUkIntradayUpdate` cron `0 0/2 8-16 * * MON-FRI` zone `Europe/London`
 - [ ] 收盤寫 `stock_price_history`：`ClosePersister.dumpUkCloseFromRedis` 於倫敦 16:32 dump Redis 收盤值至 DB（與台股 13:32、美股 16:02 同 pattern）；`verifyUkCloseWithYahoo` 於倫敦 17:00 用 Yahoo `chart` 單日查當日 OHLC 覆寫 DB 與 Redis（英股無 FinMind 對應 dataset，校正改走 Yahoo historical）
 - [ ] 歷史回補：`HistoricalBackfillService.backfillUkStock` 仿 `backfillUsStock`，呼叫 `priceFetch.fetchUkHistoricalRange(code, start, end)` 走 Yahoo `chart` API（timezone `Europe/London`）；今日 bar 一律 skip（沿用 Requirement 7「今日列獨佔給 ClosePersister」）
@@ -709,6 +710,7 @@
 - [ ] **公開資訊必含台幣兌美元匯率與美股主要指數，並擴增政策/國際新聞來源（Task 180）**：每輪爬蟲（08:20／11:30／18:00 ＋ warmup）除既有本地財經新聞＋TWSE 公開資訊外，另由 DB 既有資料組兩則「量化快照」併入 `news_headline`（同進 SRPP 公開資訊 JSON 與今日股市分析本地新聞區塊）：(1) **台幣兌美元匯率**（`exchange_rate_history` 最新 USD 即期買/賣/中間價，`category=fx`）；(2) **美股主要指數收盤**（`us_index_daily_history` 道瓊/標普500/那斯達克/費半最新收盤＋對前一交易日漲跌%，`category=us-market`）。兩則資料真實日期明列於標題、`publishedAt` 取抓取當下以保證恆落在「當日公開資訊」範圍；`fx`／`us-market` 與 `twse-*` 同屬總體/量化資訊，於 `PublicInfoStockFilter` 一律保留、不做個股過濾。新聞來源另擴增**自由時報 政治 RSS**（央行 / 金管會政策、兩岸・國安等政策面）與**自由時報 國際 RSS**（地緣政治、川普言論、Fed 政策），涵蓋使用者要求之政策與地緣重點；因此二為「整個版面」的一般新聞，**只保留標題含財經・政策・地緣中性主題詞者**（`RELEVANCE_KEYWORDS`），濾掉地方 / 社會 / 娛樂 / 體育瑣聞，避免高頻一般新聞把財經頭條擠出今日股市分析的近 N 天新聞上限（40 則）。
 - [x] **早上那輪爬蟲由 08:00 改 08:20（Task 184）**：`NewsPoller` 排程早上那次由 08:00 調整為 **08:20**（中午 12:00、晚上 18:00 不變），仍早於 08:45 今日股市分析。因早/午晚的「分」不同（:20 vs :00），`scheduled()` 拆為兩個 cron（`0 20 8 * * *` ＋ `0 0 12,18 * * *`，`@Scheduled` 可重複標註）。排程沿革：06:00（Task 149.21）→08:00（Task 177）→08:20（本項）。**（中午 12:00 與拆 cron 結構已於 Task 188 再調整為 11:30、三條 cron `0 20 8`＋`0 30 11`＋`0 0 18`。）**
 - [x] **公開資訊必含韓國股市（KOSPI 大盤＋三星電子＋SK 海力士，Task 185）**：每輪爬蟲於既有匯率、美股快照外，另由 DB 既有資料組**第三則量化快照**併入 `news_headline`（`category=kr-market`／`source=kr-index`／`region=KR`；同進 SRPP 公開資訊 JSON 與今日股市分析本地新聞區塊）：**KOSPI 大盤**（讀既有 `us_index_daily_history` 之 `index_code=KOSPI`，由既有海外指數管線抓取、**不重抓**）＋**三星電子（005930）／SK 海力士（000660）**收盤（KRW）＋對前一交易日漲跌%。三星／海力士屬海外個股，新增 `foreign_stock_daily_history` 表由 `KrStockPoller`（每日 16:00 Asia/Taipei ＋開機 warmup，Yahoo Finance `005930.KS`／`000660.KS`，時區 Asia/Seoul）抓取；快照標題明列各項資料日、`publishedAt` 取抓取當下以恆落在當日範圍；`kr-market` 與 `fx`／`us-market` 同屬非 `news` 量化資訊，於 `PublicInfoStockFilter` 一律保留。**採「只餵資料給分析」**：韓股快照自動進今日股市分析 prompt 的量化桶，**不**新增 `krContext` 輸出欄位／prompt 敘事／前端專屬區塊。資料源為 Yahoo Finance（美國站，非中港澳）。
+- [x] **公開資訊必含韓國股市「盤中」快照（當日開盤動向，Task 193）**：Task 185 之 `kr-market` 快照純讀 DB，而其資料由 `IndexDailyRefreshScheduler`（07:00 `Asia/Taipei`＝08:00 KST，韓股尚未開盤）與 `KrStockPoller`（16:00 `Asia/Taipei`＝17:00 KST，韓股已收盤）寫入，故 08:20 那輪爬蟲組出的韓股快照**恆為前一交易日收盤**。但韓股 09:00–15:30 KST **＝台北 08:00–14:30**，08:20 爬蟲執行時韓股已開盤 20 分鐘，三星／SK 海力士（記憶體權值，對台股開盤具領先參考）的**當日開盤動向完全未進分析**。故新增**第四則量化快照**（`category=kr-intraday`／`source=kr-intraday`／`region=KR`；同進 SRPP 公開資訊 JSON 與今日股市分析本地新聞區塊）：由 `KrIntradayFetchClient` 即時抓 Yahoo Finance（`^KS11`／`005930.KS`／`000660.KS`）之**開盤價＋現價＋對前一交易日收盤漲跌%**併入 `news_headline`。**不新增任何 `@Scheduled`**——掛 `NewsPoller` 既有輪次即可，排程列表頁因而無須更動。**產出與否只由韓股盤中時段閘門決定，與 `NewsPoller` 的執行時點無耦合**：現行 08:20／11:30 兩輪落在韓股盤中故產出，18:00 那輪在韓股收盤後故不產出（當日收盤已由既有 `kr-market` 快照涵蓋，不重複），日後調整爬蟲執行時點亦無須改動本功能。**雙閘門（免自建韓國假日曆）**：(1) **時段閘門**＝台北 MON–FRI 08:00–14:30（本地時鐘，`Clock` 可注入供測試）；(2) **資料閘門**＝Yahoo `meta.regularMarketTime` 換算 `Asia/Seoul` 之**日期**須等於今日 KST，否則判定韓國休市而不產出（設날／추석 為農曆，現有 `MarketCalendar` 之 `nthWeekday`／`goodFriday` 純函式算不出韓國假日，改由資料自身判定；韓國休市時 Yahoo 回前一交易日 bar，日期天然對不上）。**開盤價須取 `indicators.quote[0].open[0]`，不可用 `meta.regularMarketOpen`**（後者實測不存在於 Yahoo chart meta，誤用會使開盤價恆為 `null`、功能靜默半殘）。標題明載快照時點（KST）與「盤中」字樣、`summary` 標明為即時值而非收盤並點出同批 `kr-market` 係前一交易日收盤，供 LLM 消歧（兩則會同時出現在同一輪 prompt）。沿用 Task 185 之**「只餵資料給分析」**：自動進今日股市分析 prompt 的量化桶，**不**新增輸出欄位／prompt 敘事／前端專屬區塊。`kr-intraday` 屬非 `news` category，於 `PublicInfoStockFilter` 一律保留。資料源為 Yahoo Finance（美國站，非中港澳）。
 - [ ] **爬蟲新聞來源不得取用中港澳網站（Task 180 明確化）**：本地爬蟲來源固定為台灣權威媒體（玩股網 / MoneyDJ / 自由時報財經・政治・國際 / 經濟日報）＋證交所公開資訊＋台銀匯率＋ Yahoo Finance（美國站）美股指數，**不含任何中國大陸 / 香港 / 澳門網站**（鉅亨網 cnyes 亦因言論偏頗於 Task 149.22 移除）。模型輸出端另有 `sanitizeNews` 中港澳地區封鎖（`BLOCKED_HOST_SUFFIXES` / `BLOCKED_DOMAINS` / `BLOCKED_SOURCE_TOKENS`）作防禦縱深。
 - [x] **參考新聞時效性驗證（不得顯示過時新聞，Task 149.17 bug fix）**：模型自報的 `publishedAt` 不可信（實測曾把 2025-09 的舊聞標成「2026-06」的近期日期），故 `newsHighlights` 入庫前於 `MarketAnalysisService.sanitizeNews` 做**三層時效把關**，避免頁面把舊聞當「近期重點」呈現：
     1. **格式＋自報時效硬過濾**：`publishedAt` 必須是精確到日的 `YYYY-MM-DD`（`2026-06`／`null`／無法解析一律剔除）；且須落在「分析日往前 `news-max-age-days`（預設 5 天，見 Task 149.18）內、且不晚於分析日+1 天」的區間，否則剔除。
@@ -842,13 +844,15 @@
 
 **User Story:** 作為使用者，我希望把與個人資產無關、屬於系統共通／市場公開性質的資訊集中在一個「公開資訊」選單分組下，方便查找；並希望能在一個「排程列表」頁面總覽系統所有自動排程（何時執行、做什麼、屬哪個服務），了解資料是如何被自動更新的。
 
-**背景：** 「交易日曆」與「台幣兌美元」原本平鋪在左側選單頂層，兩者皆為市場公開資料（非個人化）。新增一個「公開資訊」`el-sub-menu` 分組把它們收納，並新增第三個子項「排程列表」。排程遍佈 `business-services`（10 個 `@Scheduled`）與 `external-materials-service`（23 個 `@Scheduled`）兩個服務，crons 皆為編譯期常數；此頁為唯讀資訊展示，資料由該頁專屬 BFF 提供一份**人工維護的排程清單**（含中文名稱、說明、白話執行時機、cron、時區、所屬服務），不做跨服務反射探索。
+**背景：** 「交易日曆」與「台幣兌美元」原本平鋪在左側選單頂層，兩者皆為市場公開資料（非個人化）。新增一個「公開資訊」`el-sub-menu` 分組把它們收納，並新增第三個子項「排程列表」。排程遍佈 `business-services`（11 個 `@Scheduled` 方法）與 `external-materials-service`（24 個 `@Scheduled` 方法；實際 25 個標註，`TwClosurePoller` 一法兩標併為一筆）兩個服務；此頁為唯讀資訊展示，資料由該頁專屬 BFF 提供一份**人工維護的排程清單**（含中文名稱、說明、白話執行時機、cron、時區、所屬服務），不做跨服務反射探索。**原「crons 皆為編譯期常數」之前提已不成立**：部分排程改為「每分鐘 tick ＋ 比對 DB 可設定時點」（`NewsPoller` 依 `crawler_schedule`、`MarketAnalysisScheduler` 依 `market_analysis_send_time`），此類於清單以「動態：依『X』頁設定」表示，不寫死時間。
 
 **Acceptance Criteria:**
 
 - [ ] **選單分組**：左側選單新增「公開資訊」`el-sub-menu`（icon `InfoFilled`），內含三個子項：「交易日曆」、「台幣兌美元」、「排程列表」；「交易日曆」「台幣兌美元」原本的頂層項目移入此分組（路由路徑 `/trading-calendar`、`/exchange-rate` 不變，既有連結不失效）。
 - [ ] **排程列表頁**：新增 `/schedule-list` 路由與 `ScheduleListView`，以表格總覽所有排程；每筆顯示所屬服務、分類、名稱、說明、執行時機（白話）、cron 表達式、時區；依服務／分類分組呈現，前端只 render、不計算。
 - [ ] **一頁一 BFF**：新增該頁專屬 `SchedulePublicBffController`（`GET /api/bff/schedule-list`），回傳排程清單（不可變 record DTO）。此清單為系統基礎設施資訊、非使用者可管理的業務分類，故以程式碼內建靜態清單提供（不入 DB、不設管理端點）；**新增／調整任何 `@Scheduled` 時須同步更新此清單**（避免與實際 cron 漂移）。
+- [ ] **清單涵蓋率（防漏列）**：`JOBS` 須涵蓋兩服務**全部** `@Scheduled` 方法，筆數與實際方法數一致（`TwClosurePoller` 一法兩標併為一筆）；清單與 javadoc 所載之服務別數量須與實際清點結果相符。
+- [ ] **動態排程標示（防寫死漂移）**：cron 為編譯期常數者照列其 cron；**已改為 DB 驅動、由使用者於頁面增減時點的動態排程，一律標「動態：依『X』頁設定（預設 …）」與「動態（表名）」，不得寫死單一時間**（寫死即漂移，如 Task 191 把分析改為每分鐘 tick 後清單仍顯示 08:45）。每分鐘 tick 但時點屬 per-user 私人設定者（`ExportScheduleService`／`TradingCalendarExportScheduleService`），照列其 `每分鐘`／`0 * * * * *` 實際 cron，並於說明點出係比對各使用者設定。
 - [ ] **權限**：本頁為已登入者皆可讀的公開資訊（`GET` 落 BFF `anyExchange().authenticated()`），不需 ADMIN；不因分組改動任何既有頁面的授權。
 - [ ] **契約穩定**：`/trading-calendar`、`/exchange-rate` 及其 BFF 端點完全不變，僅選單層級位置調整。
 
@@ -881,7 +885,26 @@
 
 ---
 
-### Requirement 38: 已實現損益 Excel 匯出到指定目錄與每日排程自動匯出
+### Requirement 38: 「公開資訊」新增「爬蟲資訊查詢」頁（依日期查爬回資料 ＋ 頁面可設定多個爬蟲執行時間）
+
+**User Story:** 作為使用者，我希望在「公開資訊」分組下有一個「爬蟲資訊查詢」頁，能指定日期查看公開資訊爬蟲（`NewsPoller`）那天爬回來的資料（新聞、三大法人、大盤成交、台幣兌美元快照、美股主要指數快照、韓股快照），以核對爬蟲是否正常運作、當天抓了哪些內容；同時我希望能直接在這個頁面上設定爬蟲的執行時間，而且可以設定多個時間點（不必改程式重新部署）。
+
+**背景：** 公開資訊爬蟲的統一輸出表是 `news_headline`（由 `external-materials-service` 的 `NewsPoller` 以 `JdbcTemplate` 直寫，全域參考、無 owner），每列同時有「資料日期」`published_at`（新聞發布日／交易日）與「爬取入庫時間」`fetched_at`。原本 `NewsPoller` 的執行時間以編譯期常數寫死（三個 cron `0 20 8`／`0 30 11`／`0 0 18`，Asia/Taipei，見 Task 184／188），每次調時間都要改程式重新部署。本需求（1）新增查詢頁讀 `news_headline`，（2）把 `NewsPoller` 的執行時間改為 DB 驅動、可於頁面增減多個時間點。
+
+**Acceptance Criteria:**
+
+- [ ] **選單與路由**：「公開資訊」`el-sub-menu` 新增第四個子項「爬蟲資訊查詢」；新增 `/crawler-data` 路由與 `CrawlerDataView`；不影響既有三個子項與其路由／BFF 契約。
+- [ ] **依日期查詢**：可選一個日期查該日爬回的 `news_headline` 資料；日期語意可切換「依爬取時間 `fetched_at`」與「依資料日期 `published_at`」兩種（皆以 Asia/Taipei 當日 00:00–翌日 00:00 為區間）；可再依 `category`（news／twse-institutional／twse-turnover／fx／us-market／kr-market）過濾；結果表格顯示資料日期、爬取時間、類別、來源、地區、標題（連結）、摘要，越新在前。前端只 render、不計算。
+- [ ] **一頁一 BFF**：新增該頁專屬 `CrawlerDataBffController`；查詢走 `GET /api/bff/crawler-data?date=&dateField=&category=` → business `GET /api/news-headlines`（同義欄位、同一 business API，讀同一份 `news_headline`，與今日股市分析同源）。
+- [ ] **爬蟲執行時間設定（多時間點）**：頁面提供 `NewsPoller` 執行時間清單（HH:mm ＋ 啟用開關），可新增／刪除多個時間點並儲存；設定存入新表 `crawler_schedule`（`crawler_key='news-poller'`，一列一時間點，全域設定無 owner）。`GET /api/bff/crawler-data/schedule`、`PUT /api/bff/crawler-data/schedule` → business `GET/PUT /api/crawler-schedule?crawler=news-poller`。
+- [ ] **動態排程生效**：`NewsPoller` 移除寫死 cron，改為每分鐘 ticker（`@Scheduled(cron = "0 * * * * *", zone = "Asia/Taipei")`）讀 `crawler_schedule` 中該爬蟲已啟用的時間點，命中當前時分即執行一次；poll 本身以 dedupe_key upsert 具冪等，重跑無害；保留開機 warmup。DB 讀取例外時 fallback 至預設 08:20／11:30／18:00，避免爬蟲靜默停擺。設定變更免重啟即生效（下一分鐘 ticker 讀到新值）。
+- [ ] **預設值不變行為**：`crawler_schedule` 由 Liquibase seed 預設 `08:20 / 11:30 / 18:00`（＝改為 DB 驅動前寫死的 cron，Task 184／188），全新部署行為與現況一致；**早上 08:20 那次仍早於 08:45 今日股市分析**，餵料時序不變。
+- [ ] **權限**：查詢與讀取排程為已登入者皆可（`authenticated`）；**修改排程 `PUT` 限 ADMIN**（屬系統設定變更）；非 ADMIN 前端隱藏／停用儲存並提示。
+- [ ] **排程清單同步**：`NewsPoller` 由固定 cron 改動態後，同步更新 `SchedulePublicBffController` 靜態清單中該筆（cron 標示為「動態：依『爬蟲資訊查詢』頁設定，預設 08:20 / 11:30 / 18:00」），避免與實際排程漂移。
+
+---
+
+### Requirement 39: 已實現損益 Excel 匯出到指定目錄與每日排程自動匯出
 
 **User Story:** 作為使用者，我希望在「已實現損益」頁除了手動下載 Excel 之外，還能指定輸出資料夾並設定每日自動匯出時間，讓我的已實現損益明細定期留存到本機目錄，不必每次手動點按下載。
 

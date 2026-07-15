@@ -3,7 +3,7 @@ package com.steven.assets.dto;
 import lombok.Builder;
 
 /**
- * 已實現損益每日排程自動匯出設定 DTO（Requirement 38 / Task 192）。
+ * 已實現損益每日排程自動匯出設定 DTO（Requirement 39 / Task 196）。
  *
  * <p>資料夾瀏覽沿用 Requirement 34 既有的 {@code GET /api/export-schedule/browse}
  * （語意相同＝列出基底家目錄下子目錄），故本 DTO 不重複定義 Browse／DirEntry。

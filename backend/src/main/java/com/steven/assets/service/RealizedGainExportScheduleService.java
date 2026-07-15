@@ -23,7 +23,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * 已實現損益每日排程自動匯出（Requirement 38 / Task 192）。
+ * 已實現損益每日排程自動匯出（Requirement 39 / Task 196）。
  *
  * <p>每個使用者可各自設定啟用開關、每日執行時分、輸出相對子路徑。因 {@code @Scheduled} 的 cron 於啟動期固定、
  * 無法吃 DB 可調時間，改採「每分鐘 poll ＋ 當日 guard ＋ 開機自癒補跑」（比照 {@link ExportScheduleService}）。

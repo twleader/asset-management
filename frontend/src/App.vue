@@ -252,7 +252,8 @@ const mainMenuItems = computed(() => [
     children: [
       { path: '/trading-calendar', title: '交易日曆', icon: 'AlarmClock' },
       { path: '/exchange-rate', title: '台幣兌美元', icon: 'Money' },
-      { path: '/schedule-list', title: '排程列表', icon: 'Clock' }
+      { path: '/schedule-list', title: '排程列表', icon: 'Clock' },
+      { path: '/crawler-data', title: '爬蟲資訊查詢', icon: 'Search' }
     ]
   },
   { path: '/payment-accounts', title: '自動代繳', icon: 'Tickets' }
