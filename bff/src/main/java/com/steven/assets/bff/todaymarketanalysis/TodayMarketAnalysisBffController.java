@@ -3,7 +3,10 @@ package com.steven.assets.bff.todaymarketanalysis;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -82,6 +85,36 @@ public class TodayMarketAnalysisBffController {
                 .uri("/api/market-analysis/settings")
                 .bodyValue(body == null ? Collections.emptyMap() : body)
                 .retrieve().bodyToMono(MAP)
+                .map(ResponseEntity::ok);
+    }
+
+    // ===== 分析寄送時間（Task 184）：清單併入上方聚合 GET 之 settings.sendTimes；下列 mutation 限 ADMIN（SecurityConfig） =====
+
+    /** POST /api/bff/today-market-analysis/send-times → 轉發 business 新增寄送時間；回更新後清單。 */
+    @PostMapping("/send-times")
+    public Mono<ResponseEntity<List<Map<String, Object>>>> addSendTime(@RequestBody Map<String, Object> body) {
+        return businessServicesClient.post()
+                .uri("/api/market-analysis/send-times")
+                .bodyValue(body == null ? Collections.emptyMap() : body)
+                .retrieve().bodyToMono(LIST_MAP)
+                .map(ResponseEntity::ok);
+    }
+
+    /** DELETE /api/bff/today-market-analysis/send-times/{id} → 轉發 business 刪除；回更新後清單。 */
+    @DeleteMapping("/send-times/{id}")
+    public Mono<ResponseEntity<List<Map<String, Object>>>> deleteSendTime(@PathVariable Long id) {
+        return businessServicesClient.delete()
+                .uri("/api/market-analysis/send-times/{id}", id)
+                .retrieve().bodyToMono(LIST_MAP)
+                .map(ResponseEntity::ok);
+    }
+
+    /** PATCH /api/bff/today-market-analysis/send-times/{id}/active → 轉發 business 切換啟用；回更新後清單。 */
+    @PatchMapping("/send-times/{id}/active")
+    public Mono<ResponseEntity<List<Map<String, Object>>>> toggleSendTime(@PathVariable Long id) {
+        return businessServicesClient.patch()
+                .uri("/api/market-analysis/send-times/{id}/active", id)
+                .retrieve().bodyToMono(LIST_MAP)
                 .map(ResponseEntity::ok);
     }
 }

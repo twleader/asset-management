@@ -157,6 +157,7 @@ public class MarketAnalysisService {
     private final ObjectMapper objectMapper;
     private final MarketAnalysisEmailDispatcher emailDispatcher;
     private final MarketDataService marketDataService;
+    private final MarketAnalysisSendTimeService sendTimeService;
 
     @Value("${anthropic.api-key:}")
     private String apiKey;
@@ -241,7 +242,8 @@ public class MarketAnalysisService {
         if (efforts.stream().noneMatch(o -> o.id().equals(currentEffort))) {
             efforts.add(0, new MarketAnalysisSettingsDto.EffortOption(currentEffort, currentEffort));
         }
-        return new MarketAnalysisSettingsDto(currentModel, currentEffort, currentEnabled, models, efforts);
+        return new MarketAnalysisSettingsDto(currentModel, currentEffort, currentEnabled, models, efforts,
+                sendTimeService.list());
     }
 
     /**
@@ -303,7 +305,7 @@ public class MarketAnalysisService {
      * 管理者手動觸發用（無論當日是否已成功，皆重跑）。
      */
     public DailyMarketAnalysis generate(LocalDate date, String trigger) {
-        return generateInternal(date, trigger, false);
+        return generateInternal(date, trigger, false, false);
     }
 
     /**
@@ -311,10 +313,20 @@ public class MarketAnalysisService {
      * 避免 cron 與 self-heal 同時對同一交易日重複昂貴呼叫＋覆蓋。
      */
     public DailyMarketAnalysis generateIfAbsent(LocalDate date, String trigger) {
-        return generateInternal(date, trigger, true);
+        return generateInternal(date, trigger, true, false);
     }
 
-    private DailyMarketAnalysis generateInternal(LocalDate date, String trigger, boolean skipIfAlreadyOk) {
+    /**
+     * 排程寄送時點（Task 184）用：**強制重跑**（即使當日已有 OK）＋送批次時重置 {@code email_sent_at=null}，
+     * 使該批次於 {@link #finalizeIfReady} 收尾時**重新寄一封**（每個啟用時段各跑一次、各寄一封）。
+     * 同日已 {@code PROCESSING} 之守門仍在（時段過近時不堆疊批次）。
+     */
+    public DailyMarketAnalysis generateForSend(LocalDate date, String trigger) {
+        return generateInternal(date, trigger, false, true);
+    }
+
+    private DailyMarketAnalysis generateInternal(LocalDate date, String trigger, boolean skipIfAlreadyOk,
+                                                 boolean resetEmailSent) {
         generateLock.lock();
         try {
             DailyMarketAnalysis existing = analysisRepo.findById(date).orElse(null);
@@ -329,7 +341,7 @@ public class MarketAnalysisService {
                 log.info("今日股市分析：{} 已有成功分析，略過（trigger={}）", date, trigger);
                 return existing;
             }
-            return submitBatch(date, trigger, existing);
+            return submitBatch(date, trigger, existing, resetEmailSent);
         } finally {
             generateLock.unlock();
         }
@@ -339,7 +351,8 @@ public class MarketAnalysisService {
      * 送出 Batch API 批次（1 request，省 50% token 成本），落 {@code PROCESSING} + {@code batch_id} 後立即回；
      * 結果由 {@link #pollPendingBatches()} 於批次 {@code ENDED} 後收尾。不拋出。
      */
-    private DailyMarketAnalysis submitBatch(LocalDate date, String trigger, DailyMarketAnalysis existing) {
+    private DailyMarketAnalysis submitBatch(LocalDate date, String trigger, DailyMarketAnalysis existing,
+                                            boolean resetEmailSent) {
         String model = resolveModel();
         String effort = resolveEffort();
         // 新聞來源（Task 179）：一律讀本地 news_headline（由 external-materials-service 爬蟲寫入），
@@ -355,6 +368,11 @@ public class MarketAnalysisService {
         row.setBatchId(null);
         // 重跑既有 OK 筆時，先清掉上一次成功內容——PROCESSING／非 OK 不得帶出過期的多空判斷／新聞
         clearContent(row);
+        // Task 184：排程寄送時點觸發＝全新一輪分析，清冪等記號 → 該批次收尾（finalizeIfReady）時重新寄一封。
+        // 手動「重新分析」（resetEmailSent=false）維持「同一交易日不自動重寄」。NOT_CONFIGURED／送出失敗路徑此重置無副作用（該狀態本就不寄信）。
+        if (resetEmailSent) {
+            row.setEmailSentAt(null);
+        }
 
         if (apiKey == null || apiKey.isBlank()) {
             log.warn("今日股市分析：未設定 ANTHROPIC_API_KEY，跳過（NOT_CONFIGURED）");

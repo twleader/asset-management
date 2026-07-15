@@ -4559,3 +4559,26 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 - [x] 183.5 **A2（補 spec）**：`design.md` ERD 圖／Core Entities 補 Requirement 31–34＋颱風假新表（`daily_market_analysis`／`market_analysis_setting`／`news_headline`／`investment_profile`／`investment_planned_expense`／`portfolio_advice`／`portfolio_advice_setting`／`export_schedule_setting`／`tw_market_closure`）。註：`news_headline`（design.md:1952）與 `export_schedule_setting`（design.md:2257）欄位級 schema 原已存在，僅 ERD 總圖漏列，故只補 ERD。
 - [x] 183.6 **A6（修 tasks.md 重號）**：Task 39／40 各出現兩次；將前一對「Dashboard bar 改用代號／依損益上色」（無數字交叉引用）重編為 Task 181／182，保留後一對「per-market／dividend-rate」為 39／40（Task 42 的 `Task 39` 引用維持正確）。
 - [x] 183.7 **A7（tasks.md 標記說明）**：Task 149.15／149.21／149.22 實作已 landed＋部署但保留 `[ ]`（待單次付費 LLM 端到端驗證）；149.18–149.20 已被 Task 179（web_search 移除）取代。加註說明避免讀者誤判為未實作，不改動 checkbox 語意。
+
+### Task 184：可設定多個「分析寄送時間」，每時段各重跑一次分析並各寄一封（限台股交易日）（Requirement 31）
+
+對應 Requirements: Requirement 31（今日股市分析——排程時點與交易日閘門、每日 Email 寄送 Task 151、颱風假縱深守門 Task 162）
+
+#### 背景
+
+原本每交易日固定 08:30 觸發一次分析並寄送。使用者要求「增加寄出 email 的時間，且限台股交易日」，並選定：(1) 寄送時間可於**畫面自行設定多個**；(2) 每個時間點**重新跑一次 AI 分析**（非重寄同一份）。故把單一 08:30 cron 升級為「可設定的多個寄送時間」，每個啟用時段於台股交易日各觸發一次全新分析並各寄一封。
+
+#### 設計
+
+見 `design.md`「Requirement 31」之資料模型（新表 `market_analysis_send_time`，Liquibase `v1.55.0`）、API 表（business `/api/market-analysis/send-times` 與 BFF passthrough）、關鍵業務邏輯（每分鐘 tick 排程、`generateForSend` 重跑＋重置 `email_sent_at`、self-heal 改依最早時點）。`requirements.md` Requirement 31「可設定多個分析寄送時間」AC。
+
+#### Steps:
+
+- [ ] 184.1 **資料層**：Liquibase `v1.55.0-market-analysis-send-time.sql` 建 `market_analysis_send_time`（`id`／`send_time TIME UNIQUE`／`active`／`created_at`）＋Seed `08:30 active`；master yaml 加 include。Entity `MarketAnalysisSendTime`（全域、無 owner）＋`MarketAnalysisSendTimeRepository`（`findAllByOrderBySendTimeAsc`／`findByActiveTrueOrderBySendTimeAsc`）。
+- [ ] 184.2 **寄送時間 CRUD service／DTO**：`MarketAnalysisSendTimeService`（`list`／`add(time)`：`LocalTime.parse` 解析 `HH:mm`＋截到分＋唯一性檢查、非法或重複拋 `IllegalArgumentException`／`delete(id)`／`toggleActive(id)`／`activeTimes()` 供排程）；回傳 `MarketAnalysisSettingsDto.SendTime{id,time,active}`。`getSettings()` 併帶 `sendTimes`。
+- [ ] 184.3 **排程改每分鐘 tick**：`MarketAnalysisScheduler` 由 `0 30 8 * * MON-FRI` 改 `0 * * * * MON-FRI`——比對現在 `HH:mm` 是否命中啟用時點，未命中零成本 return；命中才判 `enabled` → 交易日閘門（`refreshTwClosureToday` + `isTwTradingDay`）→ `generateForSend`。self-heal 改依「最早啟用時點」補跑一次（`generateIfAbsent`，不逐時段補寄）。
+- [ ] 184.4 **`generateForSend`（重跑＋重寄）**：`MarketAnalysisService` 新增 `generateForSend(date, trigger)`＝`generateInternal(date, trigger, skipIfAlreadyOk=false, resetEmailSent=true)`；`submitBatch` 送出新批次時（`resetEmailSent` 為真）`row.setEmailSentAt(null)`，使收尾 `finalizeIfReady` 重新寄一封（交易日再驗與 `email_sent_at` 冪等邏輯不變）。手動 `generate` 維持 `resetEmailSent=false`（不重寄）。
+- [ ] 184.5 **business controller 端點**：`MarketAnalysisController` 加 `GET/POST/DELETE/PATCH /api/market-analysis/send-times`（mutation 以 `CurrentUserContext.isAdmin()` 縱深防禦，非 admin 拋 `AdminRequiredException`）。
+- [ ] 184.6 **BFF passthrough**：`TodayMarketAnalysisBffController` 加 `POST/DELETE/PATCH /api/bff/today-market-analysis/send-times`；聚合 GET 已含 `settings.sendTimes`。BFF `SecurityConfig` 對此三動詞路徑限 `AUTHORITY_ADMIN`。
+- [ ] 184.7 **前端**：`api/index.js` 加 `addSendTime`／`deleteSendTime`／`toggleSendTime`；`TodayMarketAnalysisView.vue` 新增「分析寄送時間」卡（管理者可增／刪／啟用切換＋`el-time-picker`；一般使用者唯讀顯示啟用時點）。明確標註「限台股交易日（週末／颱風假／假日不寄）」與「每多一個時段即多一次 AI 費用」。更新頁面既有寫死 08:30 文案為泛用敘述。
+- [ ] 184.8 **整合 main（兩段式 merge）**：feature 分支 commit → main 以 `--no-ff` merge。
