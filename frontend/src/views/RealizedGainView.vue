@@ -140,6 +140,71 @@
       </template>
     </el-card>
 
+    <!-- 排程自動匯出設定（Requirement 39 / Task 196） -->
+    <el-card style="margin-top:20px">
+      <template #header>
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <span class="section-title">⏱️ 排程自動匯出</span>
+          <div style="display:flex;gap:8px">
+            <el-button size="small" :icon="Download" :loading="runningNow" @click="handleRunNow">立即匯出到目錄</el-button>
+            <el-button size="small" type="primary" :loading="savingSchedule" @click="saveSchedule">儲存設定</el-button>
+          </div>
+        </div>
+      </template>
+      <el-form :inline="true" label-width="100px" class="schedule-form">
+        <el-form-item label="啟用每日排程">
+          <el-switch v-model="schedule.enabled" />
+        </el-form-item>
+        <el-form-item label="每日執行時間">
+          <el-time-picker v-model="scheduleTime" format="HH:mm" value-format="HH:mm"
+            placeholder="時:分" style="width:130px" />
+        </el-form-item>
+        <el-form-item label="輸出資料夾">
+          <el-input v-model="schedule.outputSubpath" readonly placeholder="（家目錄根）" style="width:240px">
+            <template #append>
+              <el-button :icon="FolderOpened" @click="openDirPicker">選擇</el-button>
+            </template>
+          </el-input>
+        </el-form-item>
+      </el-form>
+      <div class="schedule-hint">
+        以主機家目錄 <code>{{ schedule.baseDir || '/home/steven' }}</code> 為根（對映主機
+        <code>/Users/steven</code>）。按上方「選擇」開啟檔案總管式選擇器挑選子資料夾；例如選 <code>input</code> →
+        主機 <code>/Users/steven/input</code>。每日於指定時間匯出已實現損益為
+        <code>已實現損益_{使用者ID}_YYYYMMDD.xlsx</code>（內容同上方「匯出 Excel」，涵蓋全部年度）。
+      </div>
+      <div v-if="schedule.lastRunAt || schedule.lastRunStatus" class="schedule-status">
+        上次執行：{{ schedule.lastRunAt || '—' }}　{{ schedule.lastRunStatus || '' }}
+      </div>
+    </el-card>
+
+    <!-- 輸出資料夾選擇器（檔案總管式樹狀，Requirement 39 / Task 196） -->
+    <el-dialog v-model="dirPicker.visible" title="選擇輸出資料夾" width="560px">
+      <div class="dir-picker-path">
+        目前選擇：<code>{{ dirPicker.baseDir || '/home/steven' }}{{ dirPicker.picked ? '/' + dirPicker.picked : '' }}{{ dirPicker.newSub.trim() ? '/' + dirPicker.newSub.trim() : '' }}</code>
+      </div>
+      <el-tree
+        :key="dirPicker.treeKey"
+        lazy
+        :load="loadDirNode"
+        :props="dirTreeProps"
+        node-key="key"
+        highlight-current
+        :expand-on-click-node="false"
+        :default-expanded-keys="['__root__']"
+        class="dir-tree"
+        @node-click="onDirNodeClick" />
+      <div class="dir-new-sub">
+        <span class="dns-label">新增子資料夾</span>
+        <el-input v-model="dirPicker.newSub" placeholder="（選填）在所選資料夾下新增，寫檔時自動建立"
+          style="width:340px" clearable />
+      </div>
+      <template #footer>
+        <el-button @click="dirPicker.visible = false">取消</el-button>
+        <el-button type="primary" @click="confirmDirPick">確定</el-button>
+      </template>
+    </el-dialog>
+
     <StockAnalysisDialog v-model="analysisVisible" :stock="analysisStock" />
 
     <!-- Add/Edit Dialog -->
@@ -237,7 +302,7 @@
 </template>
 
 <script setup>
-import { Plus, Edit, Delete, Download } from '@element-plus/icons-vue'
+import { Plus, Edit, Delete, Download, FolderOpened } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
 import { bffApi } from '@/api'
@@ -250,6 +315,96 @@ const saving = ref(false)
 const exporting = ref(false)
 const selectedYear = ref(null)
 const editingId = ref(null)
+
+// 排程自動匯出設定（Requirement 39 / Task 196）
+const schedule = reactive({ enabled: false, runHour: 8, runMinute: 0, outputSubpath: 'input', lastRunAt: null, lastRunStatus: null, baseDir: '' })
+const scheduleTime = ref('08:00')
+const savingSchedule = ref(false)
+const runningNow = ref(false)
+
+// 輸出資料夾選擇器（檔案總管式樹狀）
+const dirPicker = reactive({ visible: false, baseDir: '', picked: '', newSub: '', treeKey: 0 })
+const dirTreeProps = { label: 'name', isLeaf: 'leaf' }
+
+async function loadSchedule() {
+  const s = await bffApi.realizedGain.getExportSchedule()
+  schedule.enabled = !!s.enabled
+  schedule.runHour = s.runHour ?? 8
+  schedule.runMinute = s.runMinute ?? 0
+  schedule.outputSubpath = s.outputSubpath ?? 'input'
+  schedule.lastRunAt = s.lastRunAt ?? null
+  schedule.lastRunStatus = s.lastRunStatus ?? null
+  schedule.baseDir = s.baseDir ?? ''
+  scheduleTime.value = `${String(schedule.runHour).padStart(2, '0')}:${String(schedule.runMinute).padStart(2, '0')}`
+}
+
+async function saveSchedule() {
+  savingSchedule.value = true
+  try {
+    const [h, m] = (scheduleTime.value || '08:00').split(':').map(Number)
+    const s = await bffApi.realizedGain.updateExportSchedule({
+      enabled: schedule.enabled,
+      runHour: h,
+      runMinute: m,
+      outputSubpath: (schedule.outputSubpath || 'input').trim()
+    })
+    schedule.runHour = s.runHour ?? h
+    schedule.runMinute = s.runMinute ?? m
+    schedule.outputSubpath = s.outputSubpath ?? schedule.outputSubpath
+    schedule.baseDir = s.baseDir ?? schedule.baseDir
+    ElMessage.success('排程設定已儲存')
+  } catch (e) {
+    ElMessage.error('儲存失敗，請稍後再試')
+  } finally {
+    savingSchedule.value = false
+  }
+}
+
+async function handleRunNow() {
+  runningNow.value = true
+  try {
+    const r = await bffApi.realizedGain.runExportNow()
+    ElMessage.success(`已匯出到：${r.path}`)
+  } catch (e) {
+    ElMessage.error('立即匯出失敗，請確認目錄與權限')
+  } finally {
+    runningNow.value = false
+  }
+  loadSchedule().catch(() => {}) // 刷新上次執行資訊，失敗不影響匯出結果
+}
+
+function openDirPicker() {
+  dirPicker.picked = schedule.outputSubpath || ''
+  dirPicker.newSub = ''
+  dirPicker.treeKey++            // 強制 el-tree 重新懶載入 root
+  dirPicker.visible = true
+}
+
+// el-tree 懶載入：level 0 以家目錄為單一 root；其餘列該節點子目錄
+async function loadDirNode(node, resolve) {
+  try {
+    if (node.level === 0) {
+      const res = await bffApi.realizedGain.browseExportDir('')
+      dirPicker.baseDir = res.baseDir || ''
+      resolve([{ name: res.baseDir || '/', path: '', key: '__root__', leaf: false }])
+      return
+    }
+    const res = await bffApi.realizedGain.browseExportDir(node.data.path || '')
+    resolve((res.directories || []).map(d => ({ name: d.name, path: d.path, key: d.path, leaf: false })))
+  } catch (e) {
+    resolve([])
+  }
+}
+
+const onDirNodeClick = (data) => { dirPicker.picked = data.path || '' }
+
+function confirmDirPick() {
+  let p = dirPicker.picked || ''
+  const sub = (dirPicker.newSub || '').trim().replace(/^\/+|\/+$/g, '')
+  if (sub) p = p ? `${p}/${sub}` : sub
+  schedule.outputSubpath = p
+  dirPicker.visible = false
+}
 
 // ===== Form with string fields for free typing =====
 const gainForm = reactive({
@@ -317,7 +472,7 @@ const reload = async () => {
   realizedGains.value = data.gains ?? []
   brokerOptions.value = (data.brokers ?? []).map(b => b.displayName)
 }
-onMounted(reload)
+onMounted(() => { reload(); loadSchedule().catch(() => {}) })
 
 const marketFilter = ref('')
 
@@ -477,4 +632,15 @@ function onRowDblClick(row) {
 .market-tabs :deep(.el-tabs__header) { margin-bottom: 8px; }
 .broker-text { font-size: 13px; color: #475569; }
 .gain-table :deep(.el-table__cell) { font-size: 13.5px; }
+
+/* 排程自動匯出設定（Requirement 39 / Task 196） */
+.schedule-form { margin-bottom: 4px; }
+.schedule-hint { font-size: 12px; color: #94a3b8; line-height: 1.6; }
+.schedule-hint code { background: #f1f5f9; color: #475569; padding: 1px 5px; border-radius: 4px; font-size: 11px; }
+.schedule-status { margin-top: 8px; font-size: 12px; color: #64748b; }
+.dir-picker-path { font-size: 13px; color: #475569; margin-bottom: 10px; }
+.dir-picker-path code { background: #f1f5f9; color: #0f172a; padding: 2px 6px; border-radius: 4px; word-break: break-all; }
+.dir-tree { max-height: 340px; overflow: auto; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px; }
+.dir-new-sub { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+.dir-new-sub .dns-label { font-size: 13px; color: #475569; white-space: nowrap; }
 </style>

@@ -901,3 +901,23 @@
 - [ ] **預設值不變行為**：`crawler_schedule` 由 Liquibase seed 預設 `08:20 / 11:30 / 18:00`（＝改為 DB 驅動前寫死的 cron，Task 184／188），全新部署行為與現況一致；**早上 08:20 那次仍早於 08:45 今日股市分析**，餵料時序不變。
 - [ ] **權限**：查詢與讀取排程為已登入者皆可（`authenticated`）；**修改排程 `PUT` 限 ADMIN**（屬系統設定變更）；非 ADMIN 前端隱藏／停用儲存並提示。
 - [ ] **排程清單同步**：`NewsPoller` 由固定 cron 改動態後，同步更新 `SchedulePublicBffController` 靜態清單中該筆（cron 標示為「動態：依『爬蟲資訊查詢』頁設定，預設 08:20 / 11:30 / 18:00」），避免與實際排程漂移。
+
+---
+
+### Requirement 39: 已實現損益 Excel 匯出到指定目錄與每日排程自動匯出
+
+**User Story:** 作為使用者，我希望在「已實現損益」頁除了手動下載 Excel 之外，還能指定輸出資料夾並設定每日自動匯出時間，讓我的已實現損益明細定期留存到本機目錄，不必每次手動點按下載。
+
+**Acceptance Criteria:**
+
+- [ ] **手動匯出（瀏覽器下載）維持不變**：既有「匯出 Excel」按鈕（`GET /api/bff/realized-gain/export` → business `GET /api/realized-gains/export` → `ExcelExportService.exportRealizedGains()`）仍為瀏覽器直接下載 `.xlsx`，單張「已實現損益」sheet、14 欄、涵蓋**所有年度**（含 `年度` 欄），owner-scoped。本需求為新增排程能力，不改動手動下載行為與產出內容。
+- [ ] **排程／立即匯出的內容＝手動匯出的同一份活頁簿**：排程與「立即匯出到目錄」產出的檔案內容，與手動下載完全一致（同一 `writeRealizedGainsSheet()`、同樣涵蓋全部年度），不因觸發途徑而不同；避免同義資料在不同入口產生不一致（CLAUDE.md「同義欄位、同一 business service API」）。
+- [ ] **每日排程自動匯出（per-user，每日單一時間）**：使用者可在已實現損益頁「排程自動匯出」設定卡開啟每日排程，設定每日執行時間（時:分）與輸出資料夾，系統於該時間把該使用者的已實現損益匯出成 `.xlsx` 到指定目錄。每日固定一個時間（比照 Requirement 34，非多時段、不設交易日閘門——已實現損益僅於有成交時異動，每日留存即可）。
+- [ ] **輸出路徑（家目錄為根＋相對子路徑）**：沿用 Requirement 34 的路徑模型——容器內基底目錄由 `EXPORT_OUTPUT_DIR`（預設 `/home/steven`）指定，經 docker volume 對映到 host 家目錄；使用者設定的是相對子路徑（例 `input` → host `/Users/steven/input`；空字串＝家目錄根，後端正規化為預設 `input`）。後端一律以「基底 resolve 子路徑後 normalize 必須仍在基底內」驗證，拒絕 `..` 跳脫與絕對路徑；寫檔時 `Files.createDirectories` 自動建立缺少的目錄。
+- [ ] **資料夾選擇器沿用同一支 business API**：設定卡提供檔案總管式 `el-tree` 懶載入資料夾選擇器，逐層瀏覽家目錄下的子目錄。目錄列舉**不新增 business 端點**，直接沿用 Requirement 34 既有的 `GET /api/export-schedule/browse?subpath=`（語意相同＝列出基底下子目錄，依 CLAUDE.md「不同頁面顯示同樣意義的值須呼叫同一支 business service API」）；本頁僅在 BFF 新增自己的路由 `GET /api/bff/realized-gain/export/browse` passthrough 至該端點（依「一個前端頁面一個 BFF」）。
+- [ ] **可手動立即匯出（驗證用）**：設定卡提供「立即匯出到目錄」按鈕（`POST /api/bff/realized-gain/export/run-now`），立即產檔到設定目錄並回傳實際落點路徑與檔案大小，供使用者驗證路徑正確；此操作**不動當日排程 guard**（不影響當日排程仍會於設定時間執行）。
+- [ ] **每使用者各自設定（owner-scoped 設定表）**：排程設定存於新表 `realized_gain_export_schedule`（每 `owner_user_id` 一列 UNIQUE、`@Filter(ownerFilter)` 隔離），欄位含啟用／時分／輸出子路徑／上次執行日期（當日 guard）／上次執行時間與結果；GET/PUT/run-now 走 HTTP（BFF→business）由 `TenantFilterAspect` 自動 scope 到本人；非管理者亦可設定自己的排程（不限 admin）。
+- [ ] **背景排程必須逐列 `enableFilter`（租戶隔離關鍵）**：`RealizedGain` entity 帶 `@Filter(ownerFilter)`，而背景 cron 無 request context、`TenantFilterAspect` 不啟用 → `findAll()` 會讀到**全部使用者**的損益。故排程產檔一律走新增的 `ExcelExportService.exportRealizedGainsForOwner(ownerId)`，在該 session 手動 `enableFilter("ownerFilter")` 縮到該列 owner，確保各使用者檔案只含自己的資料。（此點與 Requirement 37 交易日曆不同——交易日曆為全域資料、背景產檔無需資料過濾。）
+- [ ] **排程執行機制與自癒（比照 Requirement 34／37）**：每分鐘 `@Scheduled` poll（`zone=Asia/Taipei`），以 `now >= 設定時分` ＋ `last_run_date` 當日 guard 判斷（非「分鐘精確相等」，避免排程執行緒被長工作卡住跨分鐘導致整日靜默漏跑）；服務重啟以 `ApplicationReadyEvent` 補跑當日已到點未執行者；`AtomicBoolean` 防重入；單一使用者失敗只記 `last_run_status`＋log、不影響其他使用者（成功或失敗都設當日 guard，避免整天每分鐘重試）。
+- [ ] **檔名**：`已實現損益_{使用者ID}_{YYYYMMDD}.xlsx`（檔名含 owner id，避免多使用者共用同一 subpath 時同名互相覆蓋；同一使用者同日覆寫）。
+- [ ] **排程列表頁需登錄**：新排程須在「公開資訊 → 排程列表」（Requirement 36 / `SchedulePublicBffController` 的 `JOBS`）補上對應項目，避免該頁與實際排程漂移（Task 188 即為修正此類漂移而生）。

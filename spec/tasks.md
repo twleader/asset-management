@@ -4851,3 +4851,34 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 - [x] 195.4 **更正數量與對照來源**：javadoc business 10→11、總數 34→35，`對照來源` business 清單補 `TradingCalendarExportScheduleService`，並載明「以 `@Scheduled` 方法計」之計數慣例；`JOBS` 與 `list()` 註解筆數同步。
 - [x] 195.5 **驗證**：bff `mvn compile` 通過；`docker compose -p asset-management build --no-cache bff` ＋ `--force-recreate`，容器 healthy。**防 stale jar（memory 教訓）**：自 image 取出 `/app/app.jar`、`javap` 反組譯部署後的 `SchedulePublicBffController.class` 驗證——`ScheduledJobDto` 實例化 **35 次**、`業務服務` 11／`外部行情服務` 24（與 javadoc 宣稱一致）、`動態（market_analysis_send_time）` 與 `交易日曆每日匯出排程檢查` 存在、**舊寫死 cron `0 45 8 * * MON-FRI` 出現 0 次**（漂移確實移除）。另全清單 35 筆逐筆對照兩服務實際 35 個 `@Scheduled` 方法之 cron／zone，無其他漂移。`GET /api/bff/schedule-list` 自 business 容器打 bff 回 **401**＝路由存在且如 AC 落 `authenticated()`。**未驗**：登入後之頁面實際 render——`/schedule-list` 需 Google OAuth session，不代為登入；惟本清單為編譯期 `List.of` 常數、無下游呼叫，且 `list()` 與 `ScheduledJobDto` 皆未改動（頁面原即正常顯示 34 筆），bytecode 已足證所服務之內容。
 - [ ] 195.6 **整合 main（兩段式 merge）**：feature 分支 commit → main 以 `--no-ff` merge。
+
+---
+
+### Task 196: 已實現損益 Excel 匯出到指定目錄與每日排程自動匯出（Requirement 39）
+
+對應 Requirements: Requirement 39（已實現損益 Excel 匯出到指定目錄與每日排程自動匯出）
+
+#### 背景
+
+已實現損益頁的「匯出 Excel」目前只能瀏覽器下載（Task 17.3）。使用者要求「匯出 excel 要能指定目錄及排程時間」，即比照 Requirement 34（歷年資產）已具備的「輸出資料夾 ＋ 每日排程自動匯出 ＋ 立即匯出」能力。經確認：排程為**每日單一時間**（同歷年資產，非多時段、不設交易日閘門），匯出內容為**全部年度**（同現行手動匯出，不依年度拆分）。
+
+#### 設計
+
+見 `design.md`「Requirement 39（Task 192）」：架構與資料流、關鍵設計決策（一功能一表／目錄瀏覽複用既有 business 端點／背景排程必須逐列 `enableFilter`／三入口共用同一活頁簿）、資料模型（新表 `realized_gain_export_schedule`，Liquibase `v1.58.0`）、API 端點表、新增異動檔案清單。
+
+#### 實作
+
+- [x] **196.1** spec：`requirements.md` 新增 Requirement 39；`design.md` 新增對應章節；`tasks.md` 新增本 Task。
+- [x] **196.2** `RealizedGainExportSchedule` entity：`@Table(name="realized_gain_export_schedule")`、`@UniqueConstraint(uq_rg_export_schedule_owner, owner_user_id)`、`@Filter(ownerFilter)`；欄位 enabled／runHour(8)／runMinute(0)／outputSubpath("input")／lastRunDate／lastRunAt／lastRunStatus／updatedAt。
+- [x] **196.3** `RealizedGainExportScheduleRepository`：`findByOwnerUserId(Long)`。
+- [x] **196.4** Liquibase `v1.59.0-realized-gain-export-schedule.sql`：CREATE TABLE ＋ hour/minute CHECK ＋ owner UNIQUE；註冊進 `db.changelog-master.yaml`。
+- [x] **196.5** `ExcelExportService`：抽出 private `buildRealizedGainsWorkbook()`；`exportRealizedGains()` 改呼叫之；新增 `exportRealizedGainsForOwner(Long ownerId)` 手動 `enableFilter("ownerFilter")`（**租戶隔離關鍵**：`RealizedGain` 帶 ownerFilter，背景 cron 不過濾會外洩他人資料）。
+- [x] **196.6** `RealizedGainExportDto`：`SettingResponse`（enabled／runHour／runMinute／outputSubpath／lastRunAt／lastRunStatus／baseDir）、`SettingRequest`、`RunNowResponse`（path／sizeBytes）。
+- [x] **196.7** `RealizedGainExportScheduleService`：`getForCurrentUser`／`updateForCurrentUser`（驗證時分 0..23／0..59、子路徑不跳脫）／`runNowForCurrentUser`（不動當日 guard）；`@Scheduled(cron="0 * * * * *", zone="Asia/Taipei") tick()` ＋ `AtomicBoolean` 防重入 ＋ `@EventListener(ApplicationReadyEvent.class)` 開機自癒；`runDueExports()` 用 `now >= 時分` ＋ `lastRunDate` 當日 guard；`writeToDir` 檔名 `已實現損益_{ownerId}_{YYYYMMDD}.xlsx`、`Files.createDirectories`、resolve+normalize `startsWith(base)` 防跳脫。
+- [x] **196.8** `RealizedGainExportController`：`@RequestMapping("/api/realized-gains/export")` ＋ `GET/PUT /schedule`、`POST /run-now`（與既有 `RealizedGainController` 的 `/api/realized-gains/export` 下載端點路徑不衝突）。
+- [x] **196.9** `RealizedGainBffController`：新增 `GET/PUT /export/schedule`、`POST /export/run-now`、`GET /export/browse`（browse 以 URI template 展開 passthrough 至 business 既有 `/api/export-schedule/browse`，**不新增第二支 business browse**）。
+- [x] **196.10** `frontend/src/api/index.js`：`realizedGain` 新增 `getExportSchedule`／`updateExportSchedule`／`runExportNow`／`browseExportDir`。
+- [x] **196.11** `RealizedGainView.vue`：新增「⏱️ 排程自動匯出」設定卡——啟用開關、`el-time-picker`（HH:mm）、資料夾 `el-tree` 懶載入選擇器（可填新增子資料夾名稱）、「儲存排程」、「立即匯出到目錄」、顯示上次執行時間與結果。
+- [x] **196.12** `SchedulePublicBffController`：`JOBS` 補「已實現損益匯出 每日匯出排程檢查」（每分鐘 `0 * * * * *`），避免排程列表頁漂移（比照 Task 188）。
+- [x] **196.13** 部署驗證：`--no-cache` rebuild backend／bff／frontend ＋ recreate；以 `X-User-*` header 於容器內 curl 驗證 GET/PUT schedule、run-now 落點與**跨租戶隔離**（另一 owner 的檔案不含他人資料）；UI 實測資料夾樹與立即匯出。
+- [ ] **196.14** commit ＋ 兩段式 merge（feature 分支單行短中文 commit、main 用 `--no-ff`）。

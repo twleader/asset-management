@@ -10,7 +10,7 @@ import java.util.List;
  * ScheduleListView 專屬 BFF（「公開資訊」分組，Requirement 36）。
  *
  * <p>回傳系統所有自動排程的**人工維護靜態清單**。排程分屬兩個服務：
- * {@code business-services}（11 個）與 {@code external-materials-service}（24 個）。
+ * {@code business-services}（12 個）與 {@code external-materials-service}（24 個）。
  * 此頁為唯讀資訊展示，故不做跨服務反射探索、不入 DB、不設管理端點。
  *
  * <p><b>計數慣例：以 {@code @Scheduled} 方法計，一法一筆。</b>external 24 筆對應 25 個標註
@@ -30,8 +30,9 @@ import java.util.List;
  * <p>對照來源：
  * <ul>
  *   <li>business-services：IndexDailyRefreshScheduler、HistoricalDataService、ExportScheduleService、
- *       TradingCalendarExportScheduleService、SnapshotDateRollScheduler、StockAlertService、
- *       MarketAnalysisScheduler、BackupService</li>
+ *       TradingCalendarExportScheduleService、RealizedGainExportScheduleService、SnapshotDateRollScheduler、
+ *       StockAlertService、MarketAnalysisScheduler、BackupService</li>
+
  *   <li>external-materials-service：TwseIndexPoller、PricePoller、TwClosurePoller、FundDividendPoller、
  *       NewsPoller、KrStockPoller、FundNavPoller、DividendPersister、IntradayTickRefresher、
  *       HistoricalBackfillService、ExchangeRatePoller、ClosePersister</li>
@@ -70,6 +71,9 @@ public class SchedulePublicBffController {
                     "每分鐘", "0 * * * * *", TPE),
             new ScheduledJobDto(BUSINESS, "交易日曆", "交易日曆每日匯出排程檢查",
                     "每分鐘檢查各使用者的交易日曆自動匯出設定，命中執行時間即以其格式（JSON／Excel）產出當前年度交易日曆（Requirement 37）",
+                    "每分鐘", "0 * * * * *", TPE),
+            new ScheduledJobDto(BUSINESS, "已實現損益匯出", "每日匯出排程檢查",
+                    "每分鐘檢查各使用者的已實現損益自動匯出設定，命中執行時間即產出 Excel 到指定目錄（Requirement 39）",
                     "每分鐘", "0 * * * * *", TPE),
             new ScheduledJobDto(BUSINESS, "資料備份", "每日備份（台股收盤後）",
                     "台股交易日收盤後 2 小時備份資料庫至 daily/",

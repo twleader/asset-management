@@ -99,4 +99,38 @@ public class RealizedGainBffController {
                     return b.body(e.getBody());
                 });
     }
+
+    // ===== 排程自動匯出（Requirement 39 / Task 196）=====
+
+    @GetMapping("/export/schedule")
+    public Mono<ResponseEntity<Map<String, Object>>> getExportSchedule() {
+        return businessServicesClient.get().uri("/api/realized-gains/export/schedule")
+                .retrieve().bodyToMono(MAP).map(ResponseEntity::ok);
+    }
+
+    @PutMapping("/export/schedule")
+    public Mono<ResponseEntity<Map<String, Object>>> updateExportSchedule(@RequestBody Map<String, Object> body) {
+        return businessServicesClient.put().uri("/api/realized-gains/export/schedule")
+                .bodyValue(body).retrieve().bodyToMono(MAP).map(ResponseEntity::ok);
+    }
+
+    @PostMapping("/export/run-now")
+    public Mono<ResponseEntity<Map<String, Object>>> runExportNow() {
+        return businessServicesClient.post().uri("/api/realized-gains/export/run-now")
+                .retrieve().bodyToMono(MAP).map(ResponseEntity::ok);
+    }
+
+    /**
+     * 資料夾瀏覽（唯讀）。轉呼 Requirement 34 既有的「同一支」business API {@code /api/export-schedule/browse}
+     * ——語意相同＝列出基底家目錄下的子目錄，故不在 business 端新增第二份實作
+     * （CLAUDE.md「同義欄位、同一 business service API」）；本頁仍走自己的 BFF 路由（一頁一 BFF）。
+     * 以 URI template 展開讓 subpath 自動 URL-encode。
+     */
+    @GetMapping("/export/browse")
+    public Mono<ResponseEntity<Map<String, Object>>> browseExportDir(
+            @RequestParam(value = "subpath", required = false, defaultValue = "") String subpath) {
+        return businessServicesClient.get()
+                .uri("/api/export-schedule/browse?subpath={subpath}", subpath)
+                .retrieve().bodyToMono(MAP).map(ResponseEntity::ok);
+    }
 }
