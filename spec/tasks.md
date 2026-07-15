@@ -4783,3 +4783,38 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 - [x] 193.5 **單元測試**：`KrIntradayFetchClientTest`——盤中且 sessionDate 為今日 → 產 1 列且標題含開盤價與漲跌%；時段外（18:00）→ 0 列；盤中但 sessionDate 為昨日（模擬韓國假日）→ 0 列；三檔僅 1 檔成功 → 仍產 1 列；三檔全失敗 → 0 列。
 - [x] 193.6 **部署驗證**：external-materials `--no-cache` 重建（`-p asset-management`）＋recreate，jar 內含 4 個 KrIntraday class（防 stale jar）。實測於台北 22:21（韓股收盤後）：容器 healthy、Spring context 載入正常（雙建構子＋`@Autowired` 接線無誤）、warmup upsert 269 則失敗 0、`fx`／`kr-market`／`us-market` 皆正常刷新＝其他來源無退化、`kr-intraday` 0 列＝時段閘門正確擋下。**未驗**：盤中實際產出列（須台北 08:00–14:30 平日；`ApplicationReadyEvent` warmup 會跑完整 `run()`，屆時重啟容器即可）。抓取／解析路徑另以真實 Yahoo 探針驗證：三檔皆正確取得開盤價（`^KS11` 之 `^` 正確 encode、`005930.KS` open=283500 與 curl 吻合）、`sessionDate` 正確、無效 symbol graceful 回空。
 - [ ] 193.7 **整合 main（兩段式 merge）**：feature 分支 commit → main 以 `--no-ff` merge。
+
+---
+
+### Task 194：修正英股即時報價開盤價恆為 null（`getYahooLsePrice` 誤用 `meta.regularMarketOpen`）（Requirement 7、Requirement 24）
+
+對應 Requirements: Requirement 7（`openPrice` 來源——美股 Task 120 同型 bug）、Requirement 24（英股市場類型擴充：即時股價走 Yahoo `.L`）
+
+#### 背景
+
+`PriceFetchClient.getYahooLsePrice()` 以 `meta.regularMarketOpen` 取英股開盤價，但**該欄不存在於 Yahoo chart API 的 meta**。2026-07-15 以 `interval=1d&range=1d` 實測 `CSPX.L`／`VUSA.L`／`VWRL.L` 三檔，`meta` 實際只有 `chartPreviousClose`／`regularMarketPrice`／`regularMarketDayHigh`／`regularMarketDayLow`／`regularMarketVolume`／`regularMarketTime`／`shortName`／`longName` 等欄，`regularMarketOpen` 與 `previousClose` **皆 missing**。連帶兩個後果：
+
+1. 英股 `PriceResult.openPrice` **恆為 null**。`PriceCacheWriter` 的 `ObjectMapper` 設 `JsonInclude.Include.NON_NULL`，故 Redis `price:英股:{code}` 的 `openPrice` **整個欄位缺席**（非 `"openPrice":null`）。
+2. `meta.previousClose` 不存在 → `chartPreviousClose` 取不到才 fallback `previousClose` 的那行是**死碼**（`chartPreviousClose` 本來就恆有值）。
+
+**使用者可見症狀是「靜默錯值」而非空值**（與美股 Task 120 顯示「—」不同）：`WatchStockService:122-127` 對 `openPrice == null` 會 fallback 至 `stock_price_history.findRecentN(code, market, 2)` 最近一筆，倫敦盤中今日列尚未入庫 → 觀察清單「開盤」欄顯示**前一交易日的開盤價**。16:32 LON `dumpUkCloseFromRedis` 抄 Redis 缺漏值 → DB 今日列 open 亦 null；17:00 LON `verifyUkCloseWithYahoo` 走 `fetchUkHistoricalRange`（open 取自 `indicators.quote[0].open[i]`，本來就正確）覆寫今日列後才修正。**影響窗＝倫敦交易時段至 17:00 LON、收盤後自癒**，是本 bug 長期未被發現的主因。
+
+同檔 `fetchUsTodayOpenFromYahoo`（Task 120）與 `fetchKrIntradayQuote`（Task 193）早已用正確落點，Task 193 的 design 警語甚至明文點名 `getYahooLsePrice` 為反例，但當時**刻意不動既有方法**（見 Task 193.2），故 bug 留存至今。
+
+#### 設計
+
+見 `design.md`「英股盤中 `openPrice` 修正（Task 194）」段與 Requirement 24 之 `getYahooLsePrice` 欄位落點；`requirements.md` Requirement 7「英股 `openPrice` 來源」AC 與 Requirement 24「即時股價走 Yahoo Finance `.L` suffix」AC。
+
+重點決策：
+- **開盤價改取 `indicators.quote[0].open[0]`**，與 `fetchUsTodayOpenFromYahoo`／`fetchKrIntradayQuote` 同一落點（三處自此一致）。
+- **移除 `meta.previousClose` 死碼 fallback**：留著會誤導後續維護者以為該欄可用，且與 Task 193 的 design 警語矛盾。
+- **high／low／volume 不動**：`meta.regularMarketDayHigh`／`regularMarketDayLow`／`regularMarketVolume` 實測**存在**，且與 `indicators.quote[0]` 對應值一致（CSPX.L 實測 high 816.44／low 812.91／volume 48885 兩者相同），無改動必要，避免擴大 diff。
+- **不新增 `@Scheduled`／不改 DB／不改契約**：純修正既有欄位落點，`PriceResult` record、Redis payload 欄位名、下游 `WatchStockService` fallback 行為全部不變。
+
+#### Steps:
+
+- [x] 194.1 **spec**：`requirements.md` Requirement 7 增「英股 `openPrice` 來源」AC 並修正原「英股維持 Yahoo `regularMarketOpen`」之錯述、Requirement 24 即時股價 AC 補正欄位落點；`design.md` 增「英股盤中 `openPrice` 修正（Task 194）」段、Requirement 24 `getYahooLsePrice` 欄位落點補正、Task 193 警語之 `getYahooLsePrice` 反例標註為已修正；`tasks.md` 本任務。
+- [x] 194.2 **`PriceFetchClient.getYahooLsePrice`**：`mapper.readTree(body).path("chart").path("result").path(0)` 提為 `result`，`meta` 由其取得；`open` 改讀 `result.path("indicators").path("quote").path(0).path("open").path(0)`；移除 `meta.previousClose` 死碼 fallback；Javadoc 補欄位落點警語。`fetchKrIntradayQuote` 之 Javadoc 同步（原文稱 `getYahooLsePrice`「即誤用該欄」，改標註為已由 Task 194 修正）。high／low／volume 不動。
+- [x] 194.3 **真實 Yahoo 驗證**：暫時性測試直呼 `getStockPrice(code, "英股")` 實打 Yahoo，三檔開盤價皆有值且落在當日 low／high 區間內——CSPX open=814.24（low 812.91／high 816.44）、VUSA open=106.805（low 106.558／high 107.077）、VWRL open=137.23（low 136.70／high 137.42）；`prevClose`／`change`／`changePct` 亦一致。驗畢即刪，不進 commit。
+- [x] 194.4 **部署驗證**：external-materials `--no-cache` 重建（`-p asset-management`）＋recreate。防 stale jar：以 `javap` 反組譯 image 內 jar 的 `PriceFetchClient.class`，確認 `getYahooLsePrice` 的 constant pool 已為 `chart→result→meta→regularMarketPrice→chartPreviousClose→indicators→quote→open→regularMarketDayHigh/Low→regularMarketVolume→shortName`，全檔 `regularMarketOpen` 出現 **0 次**（原為死碼的 bare `previousClose` 亦 0 次）。**端到端**：修正前 Redis `price:英股:CSPX` 無 `openPrice` 欄（NON_NULL 省略，實測 baseline）；recreate 後同 key 於倫敦 15:42（盤中、`closed:false`）已含 `"openPrice":814.2400`，與 Yahoo `indicators.quote[0].open[0]`（814.239990…）一致。
+- [ ] 194.5 **整合 main（兩段式 merge）**：feature 分支 commit → main 以 `--no-ff` merge。
