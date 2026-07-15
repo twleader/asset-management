@@ -4559,3 +4559,25 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 - [x] 183.5 **A2（補 spec）**：`design.md` ERD 圖／Core Entities 補 Requirement 31–34＋颱風假新表（`daily_market_analysis`／`market_analysis_setting`／`news_headline`／`investment_profile`／`investment_planned_expense`／`portfolio_advice`／`portfolio_advice_setting`／`export_schedule_setting`／`tw_market_closure`）。註：`news_headline`（design.md:1952）與 `export_schedule_setting`（design.md:2257）欄位級 schema 原已存在，僅 ERD 總圖漏列，故只補 ERD。
 - [x] 183.6 **A6（修 tasks.md 重號）**：Task 39／40 各出現兩次；將前一對「Dashboard bar 改用代號／依損益上色」（無數字交叉引用）重編為 Task 181／182，保留後一對「per-market／dividend-rate」為 39／40（Task 42 的 `Task 39` 引用維持正確）。
 - [x] 183.7 **A7（tasks.md 標記說明）**：Task 149.15／149.21／149.22 實作已 landed＋部署但保留 `[ ]`（待單次付費 LLM 端到端驗證）；149.18–149.20 已被 Task 179（web_search 移除）取代。加註說明避免讀者誤判為未實作，不改動 checkbox 語意。
+
+### Task 184: 「公開資訊」新增「爬蟲資訊查詢」頁（依日期查爬回資料 ＋ 頁面設定多個爬蟲執行時間）
+
+對應 Requirements: Requirement 37（＋ Requirement 31 `news_headline`／`NewsPoller`、Requirement 36「公開資訊」分組與排程列表）
+
+#### 背景
+
+使用者需要在「公開資訊」下有一頁能：（1）指定日期查 `NewsPoller` 那天爬回 `news_headline` 的資料（新聞／三大法人／大盤成交／台幣兌美元快照／美股指數快照），日期語意可切換 `fetched_at`／`published_at`；（2）直接在頁面設定 `NewsPoller` 的執行時間、且可設多個時間點。原 `NewsPoller` 執行時間為編譯期常數 `@Scheduled(cron="0 0 8,12,18")`，本 Task 改為 DB 驅動的動態排程（新表 `crawler_schedule`）。權限：查詢／讀排程 `authenticated`，改排程 `PUT` 限 ADMIN。
+
+#### Steps:
+
+- [x] 184.1 **spec**：`requirements.md` 新增 Requirement 37；`design.md` 補路由 `/crawler-data`、`CrawlerDataBffController`、business API（`/api/news-headlines`、`/api/crawler-schedule`）、ERD `CrawlerSchedule`、`crawler_schedule` DDL、`NewsPoller` 動態排程說明、排程列表同步註記；`tasks.md` 本 Task。
+- [x] 184.2 **DB（backend Liquibase）**：新增 `changes/v1.55.0-crawler-schedule.sql`＋掛入 `db.changelog-master.yaml`。建 `crawler_schedule`（`id`／`crawler_key`／`run_hour`／`run_minute`／`enabled`／`updated_at`；UNIQUE(crawler_key,run_hour,run_minute)；CHECK hour 0–23、minute 0–59），seed `('news-poller',8/12/18,0)`。
+- [x] 184.3 **Entity＋Repository（backend）**：`model/CrawlerSchedule.java`（全域、無 `@Filter`）；`repository/CrawlerScheduleRepository.java`（`findByCrawlerKeyOrderByRunHourAscRunMinuteAsc`、`deleteByCrawlerKey`）。`NewsHeadlineRepository` 加 `findByFetchedAtGreaterThanEqualAndFetchedAtLessThanOrderByFetchedAtDesc`／`findByPublishedAtGreaterThanEqualAndPublishedAtLessThanOrderByPublishedAtDesc`。
+- [x] 184.4 **business controller — 查詢**：`NewsHeadlineController`（`GET /api/news-headlines?date=&dateField=&category=`）：以 Asia/Taipei 該日 [00:00, 翌日00:00) 轉 `Instant`，依 `dateField`（缺省 `fetched`）選欄位查詢，`category` 選填過濾，回 `NewsHeadlineDto`（含 published_at／fetched_at／category／source／region／title／url／summary）。
+- [x] 184.5 **business controller — 排程**：`CrawlerScheduleController`（`GET`／`PUT /api/crawler-schedule?crawler=`）＋ `CrawlerScheduleService`：GET 回時間清單；PUT 驗 0–23/0–59＋去重後整批覆寫（`deleteByCrawlerKey`＋batch save）。`PUT` 以 `CurrentUserContext.isAdmin()` 縱深防禦（`AdminRequiredException`→403）。
+- [x] 184.6 **ext — NewsPoller 動態排程**：移除 `@Scheduled(cron="0 0 8,12,18")`，改每分鐘 ticker `@Scheduled(cron="0 * * * * *", zone="Asia/Taipei")` 讀 `crawler_schedule`（新增 `CrawlerScheduleQuery` JdbcTemplate；`crawler_key='news-poller'` 且 `enabled`）比對現在 `HH:mm` 命中即在獨立執行緒 `runGuarded("scheduled")`（`AtomicBoolean` 防重疊）；DB 例外 fallback 08/12/18；保留 warmup 與保留期清理。
+- [x] 184.7 **BFF**：`CrawlerDataBffController`（`GET /api/bff/crawler-data`、`GET/PUT /api/bff/crawler-data/schedule`），WebClient 轉呼 business；`SecurityConfig` 加 `PUT /api/bff/crawler-data/schedule` 限 ADMIN，`GET` 落 authenticated。
+- [x] 184.8 **前端**：`App.vue` 選單「公開資訊」加子項「爬蟲資訊查詢」（`/crawler-data`，icon Search）；`router/index.js` 加 route；`api/index.js` 加 `bffApi.crawlerData`（query／getSchedule／saveSchedule）；新 `views/CrawlerDataView.vue`（日期選擇＋`fetched/published` 切換＋類別過濾＋結果表格；排程時間清單增減／啟用／儲存，非 ADMIN 唯讀並提示）。
+- [x] 184.9 **排程列表同步**：`SchedulePublicBffController` 的 `JOBS` 中 NewsPoller 該筆改標「動態：依『爬蟲資訊查詢』頁設定（預設 08/12/18）」。
+- [ ] 184.10 **部署驗證**（功能已於運行 stack 逐項驗過，惟最終乾淨部署被環境問題阻斷，待重跑）：已驗證通過項目——（a）`GET /api/news-headlines` 依日期查得當日 `news_headline`，`fetched/published` 兩語意與 `category=fx` 過濾皆正確（回真實 fx／us-market／news 列）；（b）Liquibase v1.55.0 建表＋seed 08/12/18；（c）ADMIN `PUT /api/crawler-schedule` 成功整批覆寫、非 ADMIN → 403、非法時分 → 400；（d）**動態排程實測**：API 設 00:33 後 `NewsPoller` 於 TW 00:33:00 準時在 `news-scheduled` 執行緒觸發 upsert（免重啟生效）；（e）前端新頁 chunk／路由／`bff/crawler-data` 已部署、BFF 路由存在（401）。**阻斷原因**：跨 worktree 共用 `asset-management-*:latest` 映像被並行 session 反覆覆蓋（曾出現「有 NewsHeadlineController、無 CrawlerScheduleController」的他版），隨後 Docker daemon 於高並行 build 下崩潰回 500。待 Docker 恢復＋確認無其他 session 並行 build 後，於本 worktree 重跑 `docker compose build`＋`--force-recreate` 並複驗即可收尾。
+- [ ] 184.11 commit + 兩段式 merge。

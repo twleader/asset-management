@@ -14,4 +14,10 @@ public interface NewsHeadlineRepository extends JpaRepository<News, Long> {
 
     /** 取近期（published_at ≥ cutoff）新聞，越新在前。 */
     List<News> findByPublishedAtGreaterThanEqualOrderByPublishedAtDesc(Instant cutoff);
+
+    /** 依爬取入庫時間 fetched_at 落於 [from, to) 者，越新在前（爬蟲資訊查詢頁，Requirement 37）。 */
+    List<News> findByFetchedAtGreaterThanEqualAndFetchedAtLessThanOrderByFetchedAtDesc(Instant from, Instant to);
+
+    /** 依資料日期 published_at 落於 [from, to) 者，越新在前（爬蟲資訊查詢頁，Requirement 37）。 */
+    List<News> findByPublishedAtGreaterThanEqualAndPublishedAtLessThanOrderByPublishedAtDesc(Instant from, Instant to);
 }

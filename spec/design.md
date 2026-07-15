@@ -112,6 +112,11 @@ com.steven.assets/
   - `RealizedGainBffRoutes`：`/api/realized-gains/**` → business-services（RealizedGainView 的 Pinia store `gainApi` 共用已實現損益 CRUD；該頁另有 `RealizedGainBffController` 提供 `/api/bff/realized-gain` 聚合端點，passthrough 僅供 store 直接 CRUD 用，與 `SnapshotBffRoutes` 同屬「store 共用」例外）
   - `MarketDataBffRoutes`：`/api/market-data/**` → business-services（SSE 行情串流 `prices/stream` 等直接市場資料取用；`StockAnalysisBffRoutes` 另以 `/api/bff/stock-analysis/**` rewrite 至同一組端點）
   - `SchedulePublicBffController`（ScheduleListView 專屬，「公開資訊」分組，Requirement 36）：`GET /api/bff/schedule-list` → 回傳系統所有自動排程的**人工維護靜態清單**（`ScheduledJobDto` 不可變 record：service / category / name / description / schedule 白話 / cron / zone）。排程分屬 `business-services`（10 個 `@Scheduled`）與 `external-materials-service`（23 個 `@Scheduled`）兩個服務、crons 為編譯期常數，此頁為唯讀資訊展示故不做跨服務反射探索、不入 DB、不設管理端點；**新增／調整任何 `@Scheduled` 須同步更新此清單以免漂移**。無下游呼叫（不需 WebClient），落 BFF `anyExchange().authenticated()`（已登入者皆可讀）。
+  - `CrawlerDataBffController`（CrawlerDataView 專屬，「公開資訊」分組，Requirement 37）：爬蟲資訊查詢頁，一頁一 BFF、WebClient 轉呼 business：
+    - `GET /api/bff/crawler-data?date=YYYY-MM-DD&dateField=fetched|published&category=` → business `GET /api/news-headlines`：查指定日期爬回的 `news_headline`（與今日股市分析同讀一份表，符合「同義欄位、同一 business API」）。
+    - `GET /api/bff/crawler-data/schedule` → business `GET /api/crawler-schedule?crawler=news-poller`：讀 NewsPoller 已設定的執行時間清單。
+    - `PUT /api/bff/crawler-data/schedule` → business `PUT /api/crawler-schedule?crawler=news-poller`：整批覆寫執行時間清單。
+    - 權限：`GET` 落 `authenticated()`；`PUT` 限 ADMIN（`hasRole('ADMIN')`，屬系統設定變更）。
 
 **Repository 層**（Spring Data JPA，共 33 個）
 - `AssetSnapshotRepository`
@@ -341,6 +346,7 @@ src/
 | `/exchange-rate` | ExchangeRateView | 匯率走勢 |
 | `/trading-calendar` | TradingCalendarView | 交易日曆 |
 | `/schedule-list` | ScheduleListView | 排程列表（後端各定時任務／爬蟲時間一覽） |
+| `/crawler-data` | CrawlerDataView | 爬蟲資訊查詢（依日期查 `news_headline` 爬回資料 ＋ 設定 NewsPoller 多個執行時間；Requirement 37） |
 | `/gdp-twse` | GdpTwseView | 股市大盤查詢（指數日線／當日＋台韓人均 GDP；Requirement 18） |
 | `/performance-comparison` | PerformanceComparisonView | 績效比較（個股 vs benchmark 報酬率；Requirement 33） |
 | `/today-market-analysis` | TodayMarketAnalysisView | 今日股市分析（AI 判斷當日台股走向；Requirement 31） |
@@ -422,6 +428,7 @@ BackupRecord          (Google Drive 備份檔本地索引，UNIQUE(folder, filen
 DailyMarketAnalysis      (今日股市分析結果，PK = analysis_date；bias/confidence/summary/key_factors/news_highlights/tw_context/us_context/model/status)
 MarketAnalysisSetting    (市場分析設定，單列 id = 1；model / effort / enabled；web_search 相關欄於 Task 179 移除)
 News                     (→ news_headline，爬蟲新聞標題，全域參考、無 owner；供今日分析與公開資訊 SRPP JSON)
+CrawlerSchedule          (→ crawler_schedule，公開資訊爬蟲執行時間設定，全域參考、無 owner；一列一時間點〔crawler_key + run_hour + run_minute + enabled〕；由「爬蟲資訊查詢」頁維護、NewsPoller 每分鐘讀取；Requirement 37)
 
 # 資產配置建議（Requirement 32）
 AppUser (1) ──── (1) InvestmentProfile           (owner_user_id UNIQUE；理財條件，記住免重填)
@@ -1950,6 +1957,10 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
 - **本地財經新聞爬蟲 `news_headline`（Task 149.21，producer=external-materials-service／consumer=business-services）**：以「自抓權威來源＋證交所公開資訊、餵入提示詞」取代/補充付費 `web_search`。
   - **資料流**：external-materials-service（**純 producer**，`JdbcTemplate` 直寫共用 postgres、無 Liquibase/JPA，比照 `stock_price_history`／`stock_dividend_history`）抓取後 upsert 至 `news_headline`；backend（**consumer**，擁有 Liquibase schema）以 JPA `NewsHeadlineRepository` 讀近 N 天餵入分析 prompt。Redis 只放高頻即時價、不放新聞。
   - **ERD `news_headline`**（backend Liquibase `v1.45.0-news-headline.sql`；ext 直寫）：`id BIGSERIAL PK`、`title VARCHAR(500)`、`source VARCHAR(100)`（wantgoo/moneydj/ltn/udn/twse/bot-fx/us-index）、`url VARCHAR(1024)`、`category VARCHAR(32)`（`news`／`twse-institutional`／`twse-turnover`／`fx`／`us-market`〔Task 180〕）、`region VARCHAR(16)`（TW／US…）、`summary TEXT`、`published_at TIMESTAMPTZ`（原文/資料真實發布時間）、`fetched_at TIMESTAMPTZ DEFAULT now()`、`dedupe_key VARCHAR(64)`（`sha256(source|url|category)`）。索引：`uk_news_headline_dedupe`（UNIQUE，供 ext `ON CONFLICT` upsert）、`idx_news_headline_recent(published_at DESC)`、`idx_news_headline_cat(category, published_at DESC)`。全域參考資料（無 `owner_user_id`，比照 `twse_index_daily_history`）。
+  - **爬蟲資訊查詢頁 ＋ 動態執行時間（Requirement 37）**：新增「公開資訊」子頁 `/crawler-data`（`CrawlerDataView`）。
+    - **依日期查詢**：`CrawlerDataBffController` → business `NewsHeadlineController`（`GET /api/news-headlines?date=&dateField=fetched|published&category=`）讀 `news_headline`。`dateField` 決定用 `fetched_at`（爬取入庫日）或 `published_at`（資料日）當篩選欄位，區間皆為「Asia/Taipei 該日 00:00（含）～翌日 00:00（不含）」轉 `Instant`；`category` 選填。repository 加 `findByFetchedAtBetweenOrderByFetchedAtDesc`／`findByPublishedAtBetweenOrderByPublishedAtDesc`，`category` 於 service 層過濾（單日資料量小）。與 `MarketAnalysisService` 讀同一份 `news_headline`（同義欄位、同一表）。
+    - **動態執行時間（多時間點）**：`NewsPoller` 執行時間改由新表 `crawler_schedule`（`crawler_key='news-poller'`，一列一時間點）決定，可於頁面增減。`NewsPoller` **移除寫死 `@Scheduled(cron="0 0 8,12,18")`**，改為**每分鐘 ticker** `@Scheduled(cron="0 * * * * *", zone="Asia/Taipei")`：讀 `crawler_schedule` 已啟用時間點（ext 端新增 `CrawlerScheduleQuery` JdbcTemplate 讀取），命中當前 `HH:mm` 即 `run("scheduled")`。cron 每分鐘僅觸發一次故天然去重、無需額外 slot guard；`run` 以 `dedupe_key` upsert 本就冪等，重跑亦無害。**DB 讀取例外**（表缺／連線失敗）**fallback 至預設 08/12/18**，避免爬蟲靜默停擺；讀到「空清單」＝使用者刻意清空＝該分鐘不跑。開機 warmup 與保留期清理不變。設定變更免重啟、下一分鐘生效。business 端 `CrawlerScheduleController`（`GET/PUT /api/crawler-schedule?crawler=news-poller`）讀／整批覆寫（delete+insert，驗 0–23／0–59、去重）；`PUT` 限 ADMIN。
+    - **排程清單同步**：`SchedulePublicBffController` 靜態清單中 NewsPoller 該筆 cron 由 `0 0 8,12,18` 改標「動態：依『爬蟲資訊查詢』頁設定（預設 08/12/18）」，避免與實際排程漂移。
   - **ext 抓取（`NewsPoller` cron 08/12/18 Asia/Taipei ＋ `ApplicationReadyEvent` warmup ＋保留 `news-scraper.retention-days` 天）**：`NewsFetchClient`（玩股網 WantGoo JSON API＋MoneyDJ HTML＋自由時報 財經・**政治・國際**〔Task 180〕/經濟日報 RSS，讀真實 `time`/`publishAt`/`pubDate`；UA `Mozilla/5.0`；RSS 用內建 XML/regex 解析、不引第三方；**政治・國際為整版一般新聞，只留標題含財經・政策・地緣中性主題詞者〔`relevantOnly`／`RELEVANCE_KEYWORDS`〕，避免瑣聞灌爆分析新聞上限**；**鉅亨網 cnyes 已於 Task 149.22 移除**）＋`TwseInfoFetchClient`（BFI82U 三大法人買賣金額 RWD JSON、FMTQIK 大盤成交統計 openapi JSON）＋`MarketSnapshotFetchClient`（Task 180，由 DB 既有資料組**匯率**＋**美股指數**快照，見下）。逐來源 graceful（單一失敗只 warn）。`StockSourceQuery.upsertNews / deleteNewsOlderThan`。**cron 由 06/12/18 調整為 08/12/18（Task 177），使 08:00 抓取仍早於 08:30 今日股市分析。來源皆台/美權威網站，不抓中港澳。**
   - **公開資訊輸出 JSON 供 SRPP（Task 177，DB 為單一來源）**：`NewsPoller` 每輪（cron 08/12/18 ＋ warmup）**先 upsert `news_headline`，再由 DB 查詢產生 JSON**（不再用記憶體 `rows`；JSON＝DB 當日快照，自然含去重＋個股過濾）。查詢＝`StockSourceQuery.loadTodayPublicInfoForExport(today, cutoff)`：`WHERE (fetched_at AT TIME ZONE 'Asia/Taipei')::date = today AND (published_at AT TIME ZONE 'Asia/Taipei')::date >= cutoff ORDER BY published_at DESC`。`cutoff`＝上一交易日＝`StockSourceQuery.lastTwseTradingDate()`＝`MAX((published_at AT TIME ZONE 'Asia/Taipei')::date) WHERE category LIKE 'twse-%'`（twse 資料自帶日期即 TWSE 權威上一交易日；BFI82U 遇假日回最近交易日）；無 twse 時 fallback `MarketCalendar.isTwTradingDay` 往回找。**刻意不用日曆算 cutoff 為主**——原型：日曆得 7/10、twse 實際 7/09，用 7/10 反把 twse 濾掉；取 twse 自身日期保證總體資料保留、且排除更舊過期新聞。`fetched_at` 於 upsert ON CONFLICT 刷新為 NOW()，故「今天抓到」涵蓋今天各輪碰到的列。容器內 `news-scraper.export-dir`（預設 `/srpp-input`）為基底，`docker-compose.yml` 掛 host `${SRPP_INPUT_DIR_HOST:-/Users/steven/Project/SRPP/data/input}`。檔名 `public_info_<yyyy-MM-dd>.json`（同日覆寫、跨日新檔）；結構 `{ generatedAt, trigger, tradingDayCutoff, count, items:[{title,source,url,category,region,summary,publishedAt}] }`。`news_headline` 保留期（30 天）不受當日範圍影響（供分析讀近 N 天）。`publishedAt` 以 `@JsonFormat` 於 Asia/Taipei（+08:00）序列化（日期與交易日／`tradingDayCutoff` 一致，不因 UTC 倒退一天）。寫出採**暫存檔＋原子 rename**（`Files.createTempFile`＋`Files.move(ATOMIC_MOVE)`）——warmup 執行緒與 cron 可能併發寫同一檔，原子 rename 避免截斷毀損、SRPP 不讀半寫檔。`export-enabled` 可關；寫檔失敗 graceful。
   - **量化快照：匯率＋美股指數（`MarketSnapshotFetchClient`，Task 180）**：使用者要求公開資訊「一定要有」台幣兌美元匯率與美股重要資訊；此二者原本各自落在 `exchange_rate_history`／`us_index_daily_history`、**不在 `news_headline`**，故不進 SRPP 公開資訊 JSON、也不在今日股市分析本地新聞區塊。故由 `MarketSnapshotFetchClient.fetchAll()` 讀**已抓好**的 DB 資料組兩則 `NewsRow`，交 `NewsPoller` 與其他來源一併 upsert（DB 為單一來源，SRPP JSON 與今日股市分析都吃得到）：
@@ -2269,6 +2280,35 @@ updated_at      TIMESTAMP
 
 - `output_subpath` 只存相對子路徑；實際寫入目錄 = `EXPORT_OUTPUT_DIR`(容器內基底) resolve 子路徑。
 - 背景 cron 無 request context → `ownerFilter` 不自動生效，`ExportScheduleSettingRepository.findAll()` 讀全部列（跨所有 owner）即為所需；產檔時才對「該列 owner」手動 `enableFilter`。
+
+`crawler_schedule`（Liquibase `v1.55.0-crawler-schedule.sql`；公開資訊爬蟲執行時間設定，Requirement 37）—— **一列一時間點**（不是每 owner 一列，全域設定無 `owner_user_id`；`NewsPoller` 每分鐘讀取比對）：
+
+```
+id            BIGSERIAL PK
+crawler_key   VARCHAR(64)  NOT NULL          -- 目前僅 'news-poller'（保留擴充其他爬蟲）
+run_hour      INT          NOT NULL          -- 0..23（CHECK）
+run_minute    INT          NOT NULL          -- 0..59（CHECK）
+enabled       BOOLEAN      NOT NULL DEFAULT TRUE
+updated_at    TIMESTAMP
+UNIQUE (crawler_key, run_hour, run_minute)   -- 同爬蟲同時間點不重覆
+```
+
+- Seed 預設 `('news-poller',8,0)`／`('news-poller',12,0)`／`('news-poller',18,0)`，等同現行寫死行為；全新部署行為不變。
+- 設定變更走「整批覆寫」（`PUT` 先 `deleteByCrawlerKey` 再 batch insert），非逐列 CRUD；ext `NewsPoller` 每分鐘讀已啟用列，DB 讀取例外時 fallback 至 08/12/18。
+
+爬蟲資訊查詢頁 API 端點（Requirement 37）：
+
+```
+# business-services（新）
+GET  /api/news-headlines?date=YYYY-MM-DD&dateField=fetched|published&category=   # 查該日 news_headline（越新在前），dateField 缺省 fetched
+GET  /api/crawler-schedule?crawler=news-poller                                   # 取 NewsPoller 執行時間清單 [{hour,minute,enabled}]
+PUT  /api/crawler-schedule?crawler=news-poller                                   # 整批覆寫清單（限 ADMIN；驗 0..23/0..59、去重）
+
+# BFF（CrawlerDataBffController，WebClient 帶 X-User-*）
+GET  /api/bff/crawler-data?date=&dateField=&category=   → GET /api/news-headlines
+GET  /api/bff/crawler-data/schedule                     → GET /api/crawler-schedule?crawler=news-poller
+PUT  /api/bff/crawler-data/schedule                     → PUT /api/crawler-schedule?crawler=news-poller（限 ADMIN）
+```
 
 ### API 端點
 
