@@ -20,7 +20,7 @@ import java.util.List;
 
 /**
  * 本地財經新聞抓取排程（Task 149.21）：每日 06:00 / 12:00 / 18:00（Asia/Taipei）抓權威新聞
- * （鉅亨網 / 自由時報 / 經濟日報）＋證交所公開資訊（三大法人、大盤成交），去重後 upsert 至 news_headline，
+ * （玩股網 / MoneyDJ / 自由時報 / 經濟日報）＋證交所公開資訊（三大法人、大盤成交），去重後 upsert 至 news_headline，
  * 供 business-services 的今日股市分析餵入 prompt。**06:00 那次早於 07:30 分析**，確保當日有料。
  *
  * <p>開機 warmup（{@link ApplicationReadyEvent}）先跑一次，部署後立即有資料。每次末尾清理保留期外舊聞。
