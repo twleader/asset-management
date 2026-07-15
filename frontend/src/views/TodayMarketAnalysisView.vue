@@ -4,7 +4,7 @@
     <div class="header-row">
       <div>
         <span class="page-heading">今日股市分析</span>
-        <span class="page-sub">每個台股交易日 08:45 由 AI 綜合台股/美股走勢與近期財經新聞判斷當日走向</span>
+        <span class="page-sub">每個台股交易日於設定的寄送時間由 AI 綜合台股/美股走勢與近期財經新聞判斷當日走向</span>
       </div>
       <div v-if="auth.isAdmin" class="header-actions">
         <span class="model-label">每日自動分析</span>
@@ -14,7 +14,7 @@
           inline-prompt
           active-text="開"
           inactive-text="關"
-          title="停用後每日 08:45 不自動分析（零花費）；仍可手動按「重新分析」"
+          title="停用後各寄送時間皆不自動分析（零花費）；仍可手動按「重新分析」"
           @change="onEnabledChange"
         />
         <span class="model-label">分析模型</span>
@@ -156,12 +156,68 @@
       </el-table>
     </el-card>
 
+    <!-- 分析寄送時間（Task 191）：管理者可設定多個台股交易日的寄送時點，每個時點各重跑一次分析並各寄一封 -->
+    <el-card shadow="never" style="margin-top:16px">
+      <template #header>
+        <div class="recipients-head">
+          <span class="section-title">分析寄送時間</span>
+          <span class="recipients-hint">限台股交易日（週末／颱風假／假日不寄）；每個時間都會重新產生一次分析並各寄一封</span>
+        </div>
+      </template>
+
+      <!-- 管理者：可增／刪／切換啟用 -->
+      <template v-if="auth.isAdmin">
+        <el-table v-if="sendTimes.length" :data="sendTimes" size="small" style="width:100%">
+          <el-table-column label="寄送時間（限台股交易日）">
+            <template #default="{ row }"><span class="sendtime-val">{{ row.time }}</span></template>
+          </el-table-column>
+          <el-table-column label="啟用" width="110" align="center">
+            <template #default="{ row }">
+              <el-switch
+                v-model="row.active"
+                :loading="togglingSendTimeId === row.id"
+                :disabled="togglingSendTimeId === row.id"
+                @change="() => toggleSendTime(row)"
+              />
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="90" align="center">
+            <template #default="{ row }">
+              <el-button link type="danger" :disabled="savingSendTime" @click="removeSendTime(row)">刪除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <el-empty v-else :image-size="50" description="尚無寄送時間，請於下方新增" />
+
+        <div class="sendtime-add">
+          <el-time-picker
+            v-model="newTime"
+            format="HH:mm"
+            value-format="HH:mm"
+            placeholder="HH:mm"
+            clearable
+            style="width: 140px"
+          />
+          <el-button type="primary" :icon="Plus" :loading="savingSendTime" @click="addSendTime">新增時間</el-button>
+          <span class="recipients-hint">提醒：時段越多，每交易日 AI 費用越高（每個時段各跑一次分析）。</span>
+        </div>
+      </template>
+
+      <!-- 一般使用者：唯讀顯示啟用中的寄送時間 -->
+      <template v-else>
+        <div v-if="activeSendTimes.length" class="sendtime-readonly">
+          每個台股交易日於 <b>{{ activeSendTimes.join('、') }}</b> 分析完成後自動寄送（限交易日，週末／颱風假／假日不寄）。
+        </div>
+        <el-empty v-else :image-size="50" description="目前未設定寄送時間" />
+      </template>
+    </el-card>
+
     <!-- 分析結果寄送對象（Task 151）：沿用通知收件人，選擇哪些 email 每日自動收到分析 -->
     <el-card shadow="never" style="margin-top:16px">
       <template #header>
         <div class="recipients-head">
           <span class="section-title">分析結果寄送對象</span>
-          <span class="recipients-hint">每個台股交易日 08:45 分析完成後，自動寄給下方開啟「接收」的收件人</span>
+          <span class="recipients-hint">分析完成後自動寄給下方開啟「接收」的收件人（寄送時間見上方「分析寄送時間」，限台股交易日）</span>
         </div>
       </template>
       <el-table v-if="recipients.length" :data="recipients" size="small" style="width:100%">
@@ -186,8 +242,8 @@
 </template>
 
 <script setup>
-import { Refresh } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { Plus, Refresh } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { bffApi } from '@/api'
 import { useAuthStore } from '@/stores/authStore'
 
@@ -205,8 +261,15 @@ const selectedEffort = ref('')
 const enabledFlag = ref(true)
 const recipients = ref([])
 const togglingId = ref(null)
+// 分析寄送時間（Task 191）
+const sendTimes = ref([])
+const newTime = ref('')
+const togglingSendTimeId = ref(null)
+const savingSendTime = ref(false)
 
 const isOk = computed(() => today.value && today.value.status === 'OK')
+// 一般使用者唯讀顯示：啟用中的寄送時間（升序，後端已排序）
+const activeSendTimes = computed(() => sendTimes.value.filter(t => t.active).map(t => t.time))
 const availableModels = computed(() => settings.value.availableModels || [])
 const availableEfforts = computed(() => settings.value.availableEfforts || [])
 // 任一設定儲存中或分析中 → 所有控制項停用，避免併發覆蓋
@@ -214,7 +277,7 @@ const busy = computed(() => generating.value || savingModel.value || savingEffor
 // 尚無資料時的說明文字：停用中則點明「已停用、需手動」
 const emptyDesc = computed(() => settings.value.enabled === false
   ? '每日自動分析已停用；由管理者按「重新分析」手動產生'
-  : '尚無分析結果（等待下一個交易日 08:45 排程，或由管理者手動觸發）')
+  : '尚無分析結果（等待下一個交易日的寄送時間排程，或由管理者手動觸發）')
 
 const biasText = computed(() => biasLabel(today.value?.bias))
 const biasColor = computed(() => biasHex(today.value?.bias))
@@ -271,10 +334,11 @@ async function load() {
     history.value = data.history || []
     settings.value = data.settings && data.settings.availableModels
       ? data.settings
-      : { model: '', effort: '', enabled: true, availableModels: [], availableEfforts: [] }
+      : { model: '', effort: '', enabled: true, availableModels: [], availableEfforts: [], sendTimes: [] }
     selectedModel.value = settings.value.model || ''
     selectedEffort.value = settings.value.effort || ''
     enabledFlag.value = settings.value.enabled !== false
+    sendTimes.value = settings.value.sendTimes || []
   } finally {
     loading.value = false
   }
@@ -300,6 +364,60 @@ async function toggleRecipient(row, val) {
     row.receiveMarketAnalysis = !val   // 還原（錯誤 toast 由 api 攔截器統一處理）
   } finally {
     togglingId.value = null
+  }
+}
+
+// 分析寄送時間（Task 191，限管理者）：新增。驗證 HH:mm 後呼叫 BFF，回更新後清單（重複／格式錯誤由後端擋、toast 統一處理）。
+async function addSendTime() {
+  const t = (newTime.value || '').trim()
+  if (!/^\d{2}:\d{2}$/.test(t)) {
+    ElMessage.warning('請先選擇寄送時間（HH:mm）')
+    return
+  }
+  savingSendTime.value = true
+  try {
+    sendTimes.value = await bffApi.todayMarketAnalysis.addSendTime(t)
+    newTime.value = ''
+    ElMessage.success(`已新增寄送時間 ${t}（限台股交易日）`)
+  } catch (e) {
+    // 錯誤 toast（含重複／格式）由 api 攔截器統一處理
+  } finally {
+    savingSendTime.value = false
+  }
+}
+
+// 刪除某寄送時間（限管理者）；先確認避免誤刪排程。
+async function removeSendTime(row) {
+  try {
+    await ElMessageBox.confirm(`確定刪除寄送時間 ${row.time}？`, '刪除寄送時間', {
+      type: 'warning', confirmButtonText: '刪除', cancelButtonText: '取消'
+    })
+  } catch (e) {
+    return   // 使用者取消
+  }
+  savingSendTime.value = true
+  try {
+    sendTimes.value = await bffApi.todayMarketAnalysis.deleteSendTime(row.id)
+    ElMessage.success(`已刪除寄送時間 ${row.time}`)
+  } catch (e) {
+    // 錯誤 toast 由 api 攔截器統一處理
+  } finally {
+    savingSendTime.value = false
+  }
+}
+
+// 切換某寄送時間啟用／停用（限管理者）；後端回權威清單。失敗還原開關。
+async function toggleSendTime(row) {
+  togglingSendTimeId.value = row.id
+  const prev = !row.active   // @change 前 v-model 已翻轉，記錄先前值供還原
+  try {
+    sendTimes.value = await bffApi.todayMarketAnalysis.toggleSendTime(row.id)
+    const cur = sendTimes.value.find(t => t.id === row.id)
+    ElMessage.success(cur && cur.active ? `已啟用寄送時間 ${row.time}` : `已停用寄送時間 ${row.time}`)
+  } catch (e) {
+    row.active = prev   // 還原（錯誤 toast 由 api 攔截器統一處理）
+  } finally {
+    togglingSendTimeId.value = null
   }
 }
 
@@ -339,7 +457,7 @@ async function onEffortChange(effort) {
   }
 }
 
-// 管理者切換「每日自動分析」開關 → 持久化。停用＝08:45 cron 跳過（零花費）；手動仍可跑。失敗則還原。
+// 管理者切換「每日自動分析」開關 → 持久化。停用＝各寄送時點皆跳過（零花費）；手動仍可跑。失敗則還原。
 async function onEnabledChange(enabled) {
   savingEnabled.value = true
   try {
@@ -451,4 +569,7 @@ onUnmounted(stopPoll)
 .recipients-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
 .recipients-hint { font-size: 12px; color: #94a3b8; }
 .recipients-foot { margin-top: 10px; font-size: 12px; color: #94a3b8; }
+.sendtime-val { font-variant-numeric: tabular-nums; font-weight: 600; color: #334155; }
+.sendtime-add { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.sendtime-readonly { font-size: 14px; line-height: 1.8; color: #475569; }
 </style>

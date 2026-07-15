@@ -4,7 +4,7 @@ import java.util.List;
 
 /**
  * 今日股市分析（Requirement 31）設定 DTO：目前模型 + 思考深度（effort）
- * + 每日自動分析開關（enabled），及各自可選清單。
+ * + 每日自動分析開關（enabled）+ 可設定的分析寄送時間（sendTimes，Task 191），及各自可選清單。
  * （Task 179 起新聞固定讀本地 {@code news_headline}，已移除新聞搜尋次數 web search 設定。）
  */
 public record MarketAnalysisSettingsDto(
@@ -12,9 +12,13 @@ public record MarketAnalysisSettingsDto(
         String effort,
         Boolean enabled,
         List<ModelOption> availableModels,
-        List<EffortOption> availableEfforts
+        List<EffortOption> availableEfforts,
+        List<SendTime> sendTimes
 ) {
     public record ModelOption(String id, String label) {}
 
     public record EffortOption(String id, String label) {}
+
+    /** 一個分析寄送時間點（Task 191）：{@code time} 為 {@code HH:mm}（Asia/Taipei）。 */
+    public record SendTime(Long id, String time, Boolean active) {}
 }

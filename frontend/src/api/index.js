@@ -227,7 +227,14 @@ export const bffApi = {
     // 分析結果寄送對象（Task 151）：沿用通知收件人，切換 per-recipient「接收每日股市分析」訂閱
     getRecipients: () => api.get('/bff/today-market-analysis/recipients'),
     toggleMarketAnalysis: (id) =>
-      api.patch(`/bff/today-market-analysis/recipients/${id}/market-analysis`)
+      api.patch(`/bff/today-market-analysis/recipients/${id}/market-analysis`),
+    // 分析寄送時間（Task 191）：管理者可增／刪／切換啟用；清單由聚合 GET 之 settings.sendTimes 帶回，mutation 回更新後清單
+    addSendTime: (time) =>
+      api.post('/bff/today-market-analysis/send-times', { time }),
+    deleteSendTime: (id) =>
+      api.delete(`/bff/today-market-analysis/send-times/${id}`),
+    toggleSendTime: (id) =>
+      api.patch(`/bff/today-market-analysis/send-times/${id}/active`)
   },
 
   // AssetAllocationAdvice（資產配置建議，Requirement 32）
