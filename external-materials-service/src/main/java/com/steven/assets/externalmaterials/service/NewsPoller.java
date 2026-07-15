@@ -30,7 +30,8 @@ import java.util.Map;
 /**
  * 本地財經新聞抓取排程（Task 149.21）：每日 08:20 / 11:30 / 18:00（Asia/Taipei）抓權威新聞
  * （玩股網 / MoneyDJ / 自由時報財經・政治・國際 / 經濟日報）＋證交所公開資訊（三大法人、大盤成交）
- * ＋量化快照（台幣兌美元匯率、美股主要指數收盤 Task 180；韓國股市 KOSPI＋三星/海力士 Task 185），
+ * ＋量化快照（台幣兌美元匯率、美股主要指數收盤 Task 180；韓國股市 KOSPI＋三星/海力士 Task 185；
+ * 韓股**盤中**開盤動向 Task 193，僅韓股盤中時段＝台北 08:00~14:30 產出，收盤後的輪次自然為空），
  * 去重後 upsert 至 news_headline，供 business-services 的今日股市分析餵入 prompt。**08:20 那次早於 08:45 分析**，
  * 確保當日有料（早上原 06:00 於 Task 177 調整為 08:00、Task 184 再調整為 08:20；中午 12:00 於 Task 188 調整為 11:30）。
  * 來源皆台/美權威網站，不抓中港澳。
@@ -52,6 +53,7 @@ public class NewsPoller {
     private final NewsFetchClient newsClient;
     private final TwseInfoFetchClient twseClient;
     private final MarketSnapshotFetchClient snapshotClient;
+    private final KrIntradayFetchClient krIntradayClient;
     private final StockSourceQuery source;
     private final PublicInfoStockFilter stockFilter;
     private final MarketCalendar calendar;
@@ -108,6 +110,8 @@ public class NewsPoller {
         rows.addAll(twseClient.fetchAll());
         // Task 180：台幣兌美元匯率＋美股主要指數收盤快照（由 DB 既有資料組裝，供 SRPP JSON 與今日股市分析）。
         rows.addAll(snapshotClient.fetchAll());
+        // Task 193：韓股盤中快照（即時抓 Yahoo；僅韓股盤中時段＝台北 08:00~14:30 產出，收盤後的輪次自然為空）。
+        rows.addAll(krIntradayClient.fetchAll());
 
         // 個股過濾（Task 178）：只留 stock 主檔個股＋總體新聞，其餘個股濾除（DB 落庫與 JSON 輸出前套用）。
         rows = stockFilter.retain(rows);

@@ -4729,3 +4729,34 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 - [ ] 191.6 **BFF passthrough**：`TodayMarketAnalysisBffController` 加 `POST/DELETE/PATCH /api/bff/today-market-analysis/send-times`；聚合 GET 已含 `settings.sendTimes`。BFF `SecurityConfig` 對此三動詞路徑限 `AUTHORITY_ADMIN`。
 - [ ] 191.7 **前端**：`api/index.js` 加 `addSendTime`／`deleteSendTime`／`toggleSendTime`；`TodayMarketAnalysisView.vue` 新增「分析寄送時間」卡（管理者可增／刪／啟用切換＋`el-time-picker`；一般使用者唯讀顯示啟用時點）。明確標註「限台股交易日（週末／颱風假／假日不寄）」與「每多一個時段即多一次 AI 費用」。更新頁面既有寫死 08:45 文案為泛用敘述。
 - [ ] 191.8 **整合 main（兩段式 merge）**：feature 分支 commit → main 以 `--no-ff` merge。
+
+### Task 193：公開資訊爬蟲增列「韓股盤中」快照，讓分析看得到當日開盤動向（Requirement 31）
+
+對應 Requirements: Requirement 31（今日股市分析——公開資訊必含韓國股市 Task 185、爬蟲時點 Task 184／188、來源不取中港澳 Task 180）
+
+#### 背景
+
+既有韓股快照（`kr-market`，Task 185）純讀 DB，資料由 `IndexDailyRefreshScheduler`（07:00 Asia/Taipei＝08:00 KST，**韓股尚未開盤**）與 `KrStockPoller`（16:00 Asia/Taipei＝17:00 KST，**已收盤**）寫入，故 08:20 那輪爬蟲組出的韓股快照**恆為前一交易日收盤**——`KrStockPoller` javadoc 明載此為刻意設計（「確保次日早上 08:20 爬蟲已有前一交易日收盤」）。
+
+但韓股 09:00–15:30 KST **＝台北 08:00–14:30**，08:20 爬蟲執行時韓股已開盤 20 分鐘。三星電子／SK 海力士同為記憶體權值、對台股 09:00 開盤具領先參考價值，其**當日開盤動向卻完全沒進 08:45 的分析**。本任務補上這塊。
+
+#### 設計
+
+見 `design.md`「Requirement 31」關鍵業務邏輯之「韓股盤中快照（`KrIntradayFetchClient`，Task 193）」。`requirements.md` Requirement 31「公開資訊必含韓國股市『盤中』快照」AC。
+
+重點決策：
+- **不新增 `@Scheduled`**：掛 `NewsPoller` 既有輪次即可，`SchedulePublicBffController` 靜態清單無須更動。產出與否只由時段閘門決定、與爬蟲執行時點無耦合（現行 08:20／11:30 在盤中故產出、18:00 在收盤後故不產出，當日收盤已由 `kr-market` 涵蓋）。
+- **不需 Liquibase changeset**：`news_headline` 已存在，`category VARCHAR(32)` 無 CHECK constraint／無 enum 表，新 category 值不必註冊。
+- **backend 零改動**：`PublicInfoStockFilter`（`category != "news"` 放行）→ `upsertNews`（dedupe_key 含 category，與 `kr-market` 自成兩列）→ `fetchRecentLocalNews`（無 category 過濾）→ `buildLocalNewsBlock`（非 `news` 進無上限量化桶），四關皆天然放行。
+- **雙閘門免自建韓國假日曆**：時段閘門（台北 MON–FRI 08:00–14:30，可注入 `Clock`）＋資料閘門（`meta.regularMarketTime` 之 KST 日期 == 今日）。
+- **開盤價取 `indicators.quote[0].open[0]`**，`meta.regularMarketOpen` 實測不存在（詳見 design.md 警語）。
+
+#### Steps:
+
+- [x] 193.1 **spec**：`requirements.md` Requirement 31 增「公開資訊必含韓國股市『盤中』快照（當日開盤動向）」AC；`design.md` 關鍵業務邏輯增「韓股盤中快照」段（含雙閘門、Yahoo 欄位落點與 `regularMarketOpen` 不存在之警語）、ERD `source`／`category` 增列 `kr-intraday`、個股過濾與 backend 注入段同步；`tasks.md` 本任務。
+- [x] 193.2 **`PriceFetchClient`**：新增 `record KrIntradayQuote(symbol, name, price, open, prevClose, changePct, sessionDate)` 與 `fetchKrIntradayQuote(String yahooSymbol)`（`interval=1d&range=1d`；現價 `meta.regularMarketPrice`、昨收 `meta.chartPreviousClose`、**開盤價 `indicators.quote[0].open[0]`**、`sessionDate` 由 `meta.regularMarketTime` 換 `Asia/Seoul`；沿用 `curlGetWithRetry` 短 UA；吃完整 symbol 以支援 `^KS11`）。不動既有 `getStockPrice`／`getYahooLsePrice`。
+- [x] 193.3 **`KrIntradayFetchClient`（新檔）**：`@Component`，獨立於 `MarketSnapshotFetchClient`（後者契約為「不打外部 API」）。時段閘門（`Clock` 可注入）＋資料閘門；三檔（`^KS11`／`005930.KS`／`000660.KS`）逐一 graceful；組 `category=kr-intraday`／`source=kr-intraday`／`region=KR` 之單則 `NewsRow`，標題含「盤中」與 KST 時點、`summary` 標明非收盤並與 `kr-market` 消歧。
+- [x] 193.4 **`NewsPoller` 接線**：注入 `KrIntradayFetchClient`，`run()` 增第四個 `rows.addAll(...)`；class javadoc 列入第四來源。
+- [x] 193.5 **單元測試**：`KrIntradayFetchClientTest`——盤中且 sessionDate 為今日 → 產 1 列且標題含開盤價與漲跌%；時段外（18:00）→ 0 列；盤中但 sessionDate 為昨日（模擬韓國假日）→ 0 列；三檔僅 1 檔成功 → 仍產 1 列；三檔全失敗 → 0 列。
+- [x] 193.6 **部署驗證**：external-materials `--no-cache` 重建（`-p asset-management`）＋recreate，jar 內含 4 個 KrIntraday class（防 stale jar）。實測於台北 22:21（韓股收盤後）：容器 healthy、Spring context 載入正常（雙建構子＋`@Autowired` 接線無誤）、warmup upsert 269 則失敗 0、`fx`／`kr-market`／`us-market` 皆正常刷新＝其他來源無退化、`kr-intraday` 0 列＝時段閘門正確擋下。**未驗**：盤中實際產出列（須台北 08:00–14:30 平日；`ApplicationReadyEvent` warmup 會跑完整 `run()`，屆時重啟容器即可）。抓取／解析路徑另以真實 Yahoo 探針驗證：三檔皆正確取得開盤價（`^KS11` 之 `^` 正確 encode、`005930.KS` open=283500 與 curl 吻合）、`sessionDate` 正確、無效 symbol graceful 回空。
+- [ ] 193.7 **整合 main（兩段式 merge）**：feature 分支 commit → main 以 `--no-ff` merge。
