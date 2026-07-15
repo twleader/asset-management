@@ -215,3 +215,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/v1.57.0-market-analysis-send-time.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.58.0-realized-gain-export-schedule.sql
+      relativeToChangelogFile: false

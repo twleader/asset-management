@@ -2477,3 +2477,103 @@ PUT  /api/bff/trading-calendar/export/schedule  → PUT /api/trading-calendar-ex
 ```
 
 **新增檔案**：`model/TradingCalendarExportSchedule`、`repository/TradingCalendarExportScheduleRepository`、`service/TradingCalendarExportScheduleService`（CRUD＋`@Scheduled` tick＋selfHeal）、`TradingCalendarExportDto` 加 `ScheduleSettingRequest`／`ScheduleSettingResponse`、`TradingCalendarExportController` 加 `GET/PUT /schedule`；BFF 加 2 passthrough；前端匯出對話框加排程區塊（`getExportSchedule`／`updateExportSchedule`）。
+
+---
+
+## Requirement 38（Task 192）：已實現損益 Excel 匯出到指定目錄與每日排程自動匯出
+
+### 架構與資料流
+
+沿用 Requirement 34（歷年資產排程匯出）的整體形狀，差異只在「匯出哪份活頁簿」與「目錄瀏覽改為複用」。
+
+```
+【手動下載（既有，不變）】
+RealizedGainView「匯出 Excel」
+  → GET /api/bff/realized-gain/export (blob)
+    → business GET /api/realized-gains/export
+      → ExcelExportService.exportRealizedGains()        ← HTTP：TenantFilterAspect 自動 owner-scoped
+
+【立即匯出到目錄（新增）】
+RealizedGainView「立即匯出到目錄」
+  → POST /api/bff/realized-gain/export/run-now
+    → business POST /api/realized-gains/export/run-now
+      → RealizedGainExportScheduleService.runNowForCurrentUser()
+        → ExcelExportService.exportRealizedGains()      ← HTTP 情境，同上自動 owner-scoped
+        → writeToDir(ownerId, subpath, data)
+
+【每日排程（新增）】
+@Scheduled(cron="0 * * * * *", zone="Asia/Taipei") tick()
+  → runDueExports(): settingRepo.findAll()             ← 背景無 request context，讀全部 owner 列
+    → 對每個 enabled 且今日未跑且已到點的列：
+      → ExcelExportService.exportRealizedGainsForOwner(ownerId)   ← 手動 enableFilter 縮到該 owner
+      → writeToDir(ownerId, subpath, data)
+
+【資料夾瀏覽（複用既有 business 端點）】
+RealizedGainView el-tree 懶載入
+  → GET /api/bff/realized-gain/export/browse?subpath=  ← 本頁自己的 BFF 路由（一頁一 BFF）
+    → business GET /api/export-schedule/browse         ← 複用 Requirement 34 既有端點，不新增
+```
+
+### 關鍵設計決策
+
+1. **一功能一張排程表**：新增 `realized_gain_export_schedule`，比照 `trading_calendar_export_schedule`（Requirement 37）與 `export_schedule_setting`（Requirement 34）的既有慣例，不把三者合併成帶 `export_type` 判別欄的共用表。理由：各排程的欄位語意與產出內容不同（交易日曆多一個 `format`），且合併需改動既有兩個需求的 UNIQUE 約束與既有列，風險大於收益。
+
+2. **目錄瀏覽複用、不複製**：`GET /api/export-schedule/browse` 的語意是「列出基底家目錄下某子路徑的子目錄」——與頁面無關的通用能力。依 CLAUDE.md「不同頁面顯示同樣意義的值，BFF 必須呼叫同一支 business service API」，本頁 BFF 直接 passthrough 至該既有端點，**不在 business 端新增第二支 browse**。（Requirement 37 交易日曆當初自建了一份 browse，屬既有重複；本需求不再擴大該重複。）
+
+3. **背景排程的租戶隔離（與 Requirement 37 的關鍵差異）**：`RealizedGain` 帶 `@Filter(ownerFilter)`。交易日曆是全域市場資料，背景產檔不需資料過濾；已實現損益是 per-user 資料，背景 `findAll()` 若不 `enableFilter` 會把**所有使用者的損益寫進每個人的檔案**。故新增 `exportRealizedGainsForOwner(Long ownerId)`，比照既有 `exportFullForOwner` / `exportLiveAssetsForOwner` 在 session 手動啟用 filter。
+
+4. **排程與手動產出同一份**：`exportRealizedGains()` 與 `exportRealizedGainsForOwner()` 共用同一個 `buildRealizedGainsWorkbook()`，兩者只差 filter 啟用方式，確保三個入口（下載／run-now／排程）內容一致。
+
+### 資料模型
+
+新表 `realized_gain_export_schedule`（Liquibase `v1.58.0-realized-gain-export-schedule.sql`）：
+
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| `id` | BIGSERIAL PK | |
+| `owner_user_id` | BIGINT NOT NULL | 擁有者；UNIQUE `uq_rg_export_schedule_owner`（每人一列） |
+| `enabled` | BOOLEAN NOT NULL DEFAULT FALSE | 是否啟用每日排程 |
+| `run_hour` | INT NOT NULL DEFAULT 8 | 每日執行時，CHECK 0..23 |
+| `run_minute` | INT NOT NULL DEFAULT 0 | 每日執行分，CHECK 0..59 |
+| `output_subpath` | VARCHAR(255) NOT NULL DEFAULT 'input' | 相對家目錄基底的輸出子路徑 |
+| `last_run_date` | DATE | 當日已執行 guard（成功／失敗都設） |
+| `last_run_at` | TIMESTAMP | 上次執行時間 |
+| `last_run_status` | VARCHAR(500) | 「成功：/path」或「失敗：訊息」 |
+| `updated_at` | TIMESTAMP | |
+
+### API 端點
+
+| 層 | 方法 路徑 | 說明 |
+|----|-----------|------|
+| business | `GET /api/realized-gains/export` | （既有）下載 xlsx |
+| business | `GET /api/realized-gains/export/schedule` | 取當前使用者排程設定（無則回預設，不寫 DB） |
+| business | `PUT /api/realized-gains/export/schedule` | upsert 當前使用者排程設定（驗證時分範圍與子路徑不跳脫） |
+| business | `POST /api/realized-gains/export/run-now` | 立即產檔到設定目錄，回 `{path, sizeBytes}`；不動當日 guard |
+| business | `GET /api/export-schedule/browse?subpath=` | （既有，複用）列出基底下子目錄 |
+| BFF | `GET /api/bff/realized-gain/export` | （既有）passthrough 下載 |
+| BFF | `GET /api/bff/realized-gain/export/schedule` | passthrough |
+| BFF | `PUT /api/bff/realized-gain/export/schedule` | passthrough |
+| BFF | `POST /api/bff/realized-gain/export/run-now` | passthrough |
+| BFF | `GET /api/bff/realized-gain/export/browse` | passthrough 至 business `/api/export-schedule/browse`（URI template 展開，subpath 需 URL-encode） |
+
+### 新增／異動檔案
+
+**新增**
+- `backend/.../model/RealizedGainExportSchedule.java`
+- `backend/.../repository/RealizedGainExportScheduleRepository.java`
+- `backend/.../service/RealizedGainExportScheduleService.java`（tick／self-heal／run-now／設定 CRUD／路徑驗證）
+- `backend/.../controller/RealizedGainExportController.java`（`@RequestMapping("/api/realized-gains/export")`）
+- `backend/.../dto/RealizedGainExportDto.java`
+- `backend/src/main/resources/db/changelog/changes/v1.58.0-realized-gain-export-schedule.sql`
+
+**異動**
+- `ExcelExportService.java`：抽出 `buildRealizedGainsWorkbook()`，新增 `exportRealizedGainsForOwner(Long)`
+- `db.changelog-master.yaml`：註冊 v1.58.0
+- `RealizedGainBffController.java`：新增 schedule／run-now／browse 四支 passthrough
+- `frontend/src/api/index.js`：`realizedGain` 命名空間新增 4 支
+- `frontend/src/views/RealizedGainView.vue`：新增「排程自動匯出」設定卡（開關／時間／資料夾樹／立即匯出／上次結果）
+- `SchedulePublicBffController.java`：`JOBS` 補「已實現損益匯出 每日匯出排程檢查」項目
+
+### 端點路徑共存說明
+
+`RealizedGainController` 既有 `@GetMapping("/export")`（在 `@RequestMapping("/api/realized-gains")` 下）＝ `/api/realized-gains/export`；新 `RealizedGainExportController` 掛 `/api/realized-gains/export` 並以 `/schedule`、`/run-now` 為子路徑 ＝ `/api/realized-gains/export/schedule`。兩者路徑不同、無 ambiguous mapping。

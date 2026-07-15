@@ -4729,3 +4729,34 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 - [ ] 191.6 **BFF passthrough**：`TodayMarketAnalysisBffController` 加 `POST/DELETE/PATCH /api/bff/today-market-analysis/send-times`；聚合 GET 已含 `settings.sendTimes`。BFF `SecurityConfig` 對此三動詞路徑限 `AUTHORITY_ADMIN`。
 - [ ] 191.7 **前端**：`api/index.js` 加 `addSendTime`／`deleteSendTime`／`toggleSendTime`；`TodayMarketAnalysisView.vue` 新增「分析寄送時間」卡（管理者可增／刪／啟用切換＋`el-time-picker`；一般使用者唯讀顯示啟用時點）。明確標註「限台股交易日（週末／颱風假／假日不寄）」與「每多一個時段即多一次 AI 費用」。更新頁面既有寫死 08:45 文案為泛用敘述。
 - [ ] 191.8 **整合 main（兩段式 merge）**：feature 分支 commit → main 以 `--no-ff` merge。
+
+---
+
+### Task 192: 已實現損益 Excel 匯出到指定目錄與每日排程自動匯出（Requirement 38）
+
+對應 Requirements: Requirement 38（已實現損益 Excel 匯出到指定目錄與每日排程自動匯出）
+
+#### 背景
+
+已實現損益頁的「匯出 Excel」目前只能瀏覽器下載（Task 17.3）。使用者要求「匯出 excel 要能指定目錄及排程時間」，即比照 Requirement 34（歷年資產）已具備的「輸出資料夾 ＋ 每日排程自動匯出 ＋ 立即匯出」能力。經確認：排程為**每日單一時間**（同歷年資產，非多時段、不設交易日閘門），匯出內容為**全部年度**（同現行手動匯出，不依年度拆分）。
+
+#### 設計
+
+見 `design.md`「Requirement 38（Task 192）」：架構與資料流、關鍵設計決策（一功能一表／目錄瀏覽複用既有 business 端點／背景排程必須逐列 `enableFilter`／三入口共用同一活頁簿）、資料模型（新表 `realized_gain_export_schedule`，Liquibase `v1.58.0`）、API 端點表、新增異動檔案清單。
+
+#### 實作
+
+- [x] **192.1** spec：`requirements.md` 新增 Requirement 38；`design.md` 新增對應章節；`tasks.md` 新增本 Task。
+- [x] **192.2** `RealizedGainExportSchedule` entity：`@Table(name="realized_gain_export_schedule")`、`@UniqueConstraint(uq_rg_export_schedule_owner, owner_user_id)`、`@Filter(ownerFilter)`；欄位 enabled／runHour(8)／runMinute(0)／outputSubpath("input")／lastRunDate／lastRunAt／lastRunStatus／updatedAt。
+- [x] **192.3** `RealizedGainExportScheduleRepository`：`findByOwnerUserId(Long)`。
+- [x] **192.4** Liquibase `v1.58.0-realized-gain-export-schedule.sql`：CREATE TABLE ＋ hour/minute CHECK ＋ owner UNIQUE；註冊進 `db.changelog-master.yaml`。
+- [x] **192.5** `ExcelExportService`：抽出 private `buildRealizedGainsWorkbook()`；`exportRealizedGains()` 改呼叫之；新增 `exportRealizedGainsForOwner(Long ownerId)` 手動 `enableFilter("ownerFilter")`（**租戶隔離關鍵**：`RealizedGain` 帶 ownerFilter，背景 cron 不過濾會外洩他人資料）。
+- [x] **192.6** `RealizedGainExportDto`：`SettingResponse`（enabled／runHour／runMinute／outputSubpath／lastRunAt／lastRunStatus／baseDir）、`SettingRequest`、`RunNowResponse`（path／sizeBytes）。
+- [x] **192.7** `RealizedGainExportScheduleService`：`getForCurrentUser`／`updateForCurrentUser`（驗證時分 0..23／0..59、子路徑不跳脫）／`runNowForCurrentUser`（不動當日 guard）；`@Scheduled(cron="0 * * * * *", zone="Asia/Taipei") tick()` ＋ `AtomicBoolean` 防重入 ＋ `@EventListener(ApplicationReadyEvent.class)` 開機自癒；`runDueExports()` 用 `now >= 時分` ＋ `lastRunDate` 當日 guard；`writeToDir` 檔名 `已實現損益_{ownerId}_{YYYYMMDD}.xlsx`、`Files.createDirectories`、resolve+normalize `startsWith(base)` 防跳脫。
+- [x] **192.8** `RealizedGainExportController`：`@RequestMapping("/api/realized-gains/export")` ＋ `GET/PUT /schedule`、`POST /run-now`（與既有 `RealizedGainController` 的 `/api/realized-gains/export` 下載端點路徑不衝突）。
+- [x] **192.9** `RealizedGainBffController`：新增 `GET/PUT /export/schedule`、`POST /export/run-now`、`GET /export/browse`（browse 以 URI template 展開 passthrough 至 business 既有 `/api/export-schedule/browse`，**不新增第二支 business browse**）。
+- [x] **192.10** `frontend/src/api/index.js`：`realizedGain` 新增 `getExportSchedule`／`updateExportSchedule`／`runExportNow`／`browseExportDir`。
+- [x] **192.11** `RealizedGainView.vue`：新增「⏱️ 排程自動匯出」設定卡——啟用開關、`el-time-picker`（HH:mm）、資料夾 `el-tree` 懶載入選擇器（可填新增子資料夾名稱）、「儲存排程」、「立即匯出到目錄」、顯示上次執行時間與結果。
+- [x] **192.12** `SchedulePublicBffController`：`JOBS` 補「已實現損益匯出 每日匯出排程檢查」（每分鐘 `0 * * * * *`），避免排程列表頁漂移（比照 Task 188）。
+- [x] **192.13** 部署驗證：`--no-cache` rebuild backend／bff／frontend ＋ recreate；以 `X-User-*` header 於容器內 curl 驗證 GET/PUT schedule、run-now 落點與**跨租戶隔離**（另一 owner 的檔案不含他人資料）；UI 實測資料夾樹與立即匯出。
+- [ ] **192.14** commit ＋ 兩段式 merge（feature 分支單行短中文 commit、main 用 `--no-ff`）。

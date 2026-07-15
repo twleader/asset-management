@@ -177,7 +177,11 @@ export const bffApi = {
     update:      (id, data) => api.put(`/bff/realized-gain/${id}`, data),
     delete:      (id) => api.delete(`/bff/realized-gain/${id}`),
     lookupName:  (params) => api.get('/bff/realized-gain/lookup-name', { params }),  // 走本頁 BFF，轉呼同一支 business /api/stock-alerts/lookup-name
-    exportExcel: () => api.get('/bff/realized-gain/export', { responseType: 'blob' })
+    exportExcel: () => api.get('/bff/realized-gain/export', { responseType: 'blob' }),
+    getExportSchedule:    () => api.get('/bff/realized-gain/export/schedule', { skipErrorToast: true }),
+    updateExportSchedule: (data) => api.put('/bff/realized-gain/export/schedule', data, { skipErrorToast: true }),
+    runExportNow:         () => api.post('/bff/realized-gain/export/run-now', null, { timeout: 60000, skipErrorToast: true }),
+    browseExportDir:      (subpath = '') => api.get('/bff/realized-gain/export/browse', { params: { subpath }, skipErrorToast: true })
   },
 
   // ExchangeRate
