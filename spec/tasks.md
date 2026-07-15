@@ -4818,3 +4818,35 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 - [x] 194.3 **真實 Yahoo 驗證**：暫時性測試直呼 `getStockPrice(code, "英股")` 實打 Yahoo，三檔開盤價皆有值且落在當日 low／high 區間內——CSPX open=814.24（low 812.91／high 816.44）、VUSA open=106.805（low 106.558／high 107.077）、VWRL open=137.23（low 136.70／high 137.42）；`prevClose`／`change`／`changePct` 亦一致。驗畢即刪，不進 commit。
 - [x] 194.4 **部署驗證**：external-materials `--no-cache` 重建（`-p asset-management`）＋recreate。防 stale jar：以 `javap` 反組譯 image 內 jar 的 `PriceFetchClient.class`，確認 `getYahooLsePrice` 的 constant pool 已為 `chart→result→meta→regularMarketPrice→chartPreviousClose→indicators→quote→open→regularMarketDayHigh/Low→regularMarketVolume→shortName`，全檔 `regularMarketOpen` 出現 **0 次**（原為死碼的 bare `previousClose` 亦 0 次）。**端到端**：修正前 Redis `price:英股:CSPX` 無 `openPrice` 欄（NON_NULL 省略，實測 baseline）；recreate 後同 key 於倫敦 15:42（盤中、`closed:false`）已含 `"openPrice":814.2400`，與 Yahoo `indicators.quote[0].open[0]`（814.239990…）一致。
 - [ ] 194.5 **整合 main（兩段式 merge）**：feature 分支 commit → main 以 `--no-ff` merge。
+
+---
+
+### Task 195：修正排程列表與實作漂移（分析寫死 08:45、交易日曆匯出漏列）（Requirement 36）
+
+對應 Requirements: Requirement 36（排程列表頁——清單涵蓋率、動態排程標示）；牽涉 Requirement 31（Task 191）、Requirement 37（Task 190）
+
+#### 背景
+
+`SchedulePublicBffController` 的 `JOBS` 為人工維護靜態清單，其 javadoc 自載「新增／調整任何 `@Scheduled` 須同步更新此清單以免漂移」。Task 190（交易日曆匯出排程）與 Task 191（分析改多時段）皆改動了 `@Scheduled`，但**兩者的 Steps 都沒有排程列表同步項**（對照 Task 188.3、Task 192.9 皆有），故各留下一處漂移，於 2026-07-15 清點確認仍在 main：
+
+1. **今日股市分析寫死 08:45**：Task 191 已把 `MarketAnalysisScheduler` 由 `0 45 8 * * MON-FRI` 改為 `0 * * * * MON-FRI` 每分鐘 tick、比對 `market_analysis_send_time` 之多個可設定時段（seed 08:45，使用者可於「今日股市分析」頁增減），清單卻仍顯示固定 `交易日 08:45`／`0 45 8 * * MON-FRI`。
+2. **交易日曆匯出排程漏列**：Task 190 之 `TradingCalendarExportScheduleService.tick()`（`0 * * * * *`）從未登錄，清單查無「交易日曆」字串。
+
+另清點發現既有數量標示三處不實：javadoc 稱 business「10 個 `@Scheduled`」（實為 11，含漏列的交易日曆匯出）；`requirements.md`／`design.md` 仍停在「business 10／external 23、共 33 筆」——Task 188.3 已把 external 補到 24、清單 34 筆，但只改了 controller，spec 兩份文件未同步。
+
+#### 設計決策
+
+- **分析該筆比照 Task 192.9 之 NewsPoller 寫法**：同為「每分鐘 tick ＋ 比對 DB 可設定時點」，標「動態：依『今日股市分析』頁設定（預設 08:45）」／「動態（`market_analysis_send_time`）」，不寫死時間——寫死正是本次漂移成因。
+- **交易日曆匯出該筆比照既有「資產匯出」寫法**：兩者同機制（每分鐘 tick ＋ per-user 設定表 ＋ 當日 guard），且時點屬**私人設定**、非全域可設時點，故照列實際 cron `每分鐘`／`0 * * * * *`，於 description 點出係比對各使用者設定，不套「動態：依 X 頁設定」（該標示保留給全域時點）。
+- **數量以 `@Scheduled` 方法計**：external 24 筆對應 25 個標註（`TwClosurePoller` 一法兩標、併為一筆），此計數慣例於 javadoc 寫明，避免日後又因「標註 vs 方法」歧異誤判。
+- **不改前端**：`ScheduleListView` 之 `businessCount`／`externalCount`／`categoryCount` 皆由 payload 動態計算，筆數 34→35、新增「交易日曆」分類皆自動反映。
+- **不新增／不改動任何 `@Scheduled`**：本任務純修清單與文件，零行為變更。
+
+#### Steps:
+
+- [x] 195.1 **spec**：`requirements.md` Requirement 36 背景數量 10／23→11／24、移除「crons 皆為編譯期常數」失效前提，並增「清單涵蓋率」與「動態排程標示」兩條 AC；`design.md` `SchedulePublicBffController` 段數量改 35 筆＝11＋24（載明以方法計、`TwClosurePoller` 一法兩標）＋動態排程標示規則＋前端計數為動態；`tasks.md` 本任務。
+- [x] 195.2 **修漂移 1（分析寫死 08:45）**：`SchedulePublicBffController` 今日股市分析該筆 → `"動態：依「今日股市分析」頁設定（預設 08:45）"`／`"動態（market_analysis_send_time）"`，description 說明每分鐘 tick 比對啟用時點、每時段各重跑一次並各寄一封（限台股交易日）。
+- [x] 195.3 **修漂移 2（交易日曆匯出漏列）**：`JOBS` 新增 `BUSINESS`／分類「交易日曆」／「交易日曆每日匯出排程檢查」（`每分鐘`／`0 * * * * *`／`Asia/Taipei`），比照「資產匯出」該筆敘述。
+- [x] 195.4 **更正數量與對照來源**：javadoc business 10→11、總數 34→35，`對照來源` business 清單補 `TradingCalendarExportScheduleService`，並載明「以 `@Scheduled` 方法計」之計數慣例；`JOBS` 與 `list()` 註解筆數同步。
+- [x] 195.5 **驗證**：bff `mvn compile` 通過；`docker compose -p asset-management build --no-cache bff` ＋ `--force-recreate`，容器 healthy。**防 stale jar（memory 教訓）**：自 image 取出 `/app/app.jar`、`javap` 反組譯部署後的 `SchedulePublicBffController.class` 驗證——`ScheduledJobDto` 實例化 **35 次**、`業務服務` 11／`外部行情服務` 24（與 javadoc 宣稱一致）、`動態（market_analysis_send_time）` 與 `交易日曆每日匯出排程檢查` 存在、**舊寫死 cron `0 45 8 * * MON-FRI` 出現 0 次**（漂移確實移除）。另全清單 35 筆逐筆對照兩服務實際 35 個 `@Scheduled` 方法之 cron／zone，無其他漂移。`GET /api/bff/schedule-list` 自 business 容器打 bff 回 **401**＝路由存在且如 AC 落 `authenticated()`。**未驗**：登入後之頁面實際 render——`/schedule-list` 需 Google OAuth session，不代為登入；惟本清單為編譯期 `List.of` 常數、無下游呼叫，且 `list()` 與 `ScheduledJobDto` 皆未改動（頁面原即正常顯示 34 筆），bytecode 已足證所服務之內容。
+- [ ] 195.6 **整合 main（兩段式 merge）**：feature 分支 commit → main 以 `--no-ff` merge。

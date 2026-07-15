@@ -10,15 +10,28 @@ import java.util.List;
  * ScheduleListView 專屬 BFF（「公開資訊」分組，Requirement 36）。
  *
  * <p>回傳系統所有自動排程的**人工維護靜態清單**。排程分屬兩個服務：
- * {@code business-services}（10 個 {@code @Scheduled}）與 {@code external-materials-service}
- * （24 個 {@code @Scheduled}）。因 cron 皆為編譯期常數、此頁為唯讀資訊展示，故不做跨服務反射探索、
- * 不入 DB、不設管理端點。
+ * {@code business-services}（11 個）與 {@code external-materials-service}（24 個）。
+ * 此頁為唯讀資訊展示，故不做跨服務反射探索、不入 DB、不設管理端點。
+ *
+ * <p><b>計數慣例：以 {@code @Scheduled} 方法計，一法一筆。</b>external 24 筆對應 25 個標註
+ * （{@code TwClosurePoller} 一法兩標，併為一筆）。
  *
  * <p><b>維護提醒：新增／調整任何 {@code @Scheduled} 時，務必同步更新下方 {@link #JOBS} 清單，避免與實際 cron 漂移。</b>
- * 對照來源：
+ * 已非「cron 皆為編譯期常數」——部分排程改為「每分鐘 tick ＋ 比對 DB 可設定時點」，
+ * 此類**一律標「動態：依『X』頁設定」，不得寫死單一時間**（寫死即漂移：Task 191 把分析改為每分鐘 tick 後，
+ * 此清單仍顯示 08:45 直到 Task 195 修正）：
+ * <ul>
+ *   <li>{@code MarketAnalysisScheduler} → {@code market_analysis_send_time}（「今日股市分析」頁可增減）</li>
+ *   <li>{@code NewsPoller} → {@code crawler_schedule}（「爬蟲資訊查詢」頁可增減）</li>
+ * </ul>
+ * 每分鐘 tick 但時點屬 per-user 私人設定者（{@code ExportScheduleService}、
+ * {@code TradingCalendarExportScheduleService}）則照列其實際 cron {@code 0 * * * * *}。
+ *
+ * <p>對照來源：
  * <ul>
  *   <li>business-services：IndexDailyRefreshScheduler、HistoricalDataService、ExportScheduleService、
- *       SnapshotDateRollScheduler、StockAlertService、MarketAnalysisScheduler、BackupService</li>
+ *       TradingCalendarExportScheduleService、SnapshotDateRollScheduler、StockAlertService、
+ *       MarketAnalysisScheduler、BackupService</li>
  *   <li>external-materials-service：TwseIndexPoller、PricePoller、TwClosurePoller、FundDividendPoller、
  *       NewsPoller、KrStockPoller、FundNavPoller、DividendPersister、IntradayTickRefresher、
  *       HistoricalBackfillService、ExchangeRatePoller、ClosePersister</li>
@@ -34,9 +47,9 @@ public class SchedulePublicBffController {
     private static final String NYC = "America/New_York";
     private static final String LON = "Europe/London";
 
-    /** 全系統排程清單（34 筆）。順序刻意先業務服務、再外部行情服務，前端再依 category 分組。 */
+    /** 全系統排程清單（35 筆）。順序刻意先業務服務、再外部行情服務，前端再依 category 分組。 */
     private static final List<ScheduledJobDto> JOBS = List.of(
-            // ===== business-services（10）=====
+            // ===== business-services（11）=====
             new ScheduledJobDto(BUSINESS, "資產快照", "最新快照釘定當日",
                     "將每位使用者的最新快照日期釘為當日並重算資產，讓即時股價覆蓋生效",
                     "每日 00:05", "0 5 0 * * *", TPE),
@@ -44,8 +57,8 @@ public class SchedulePublicBffController {
                     "清理 30 天前的股票警示觸發紀錄",
                     "每日 04:00", "0 0 4 * * *", TPE),
             new ScheduledJobDto(BUSINESS, "今日股市分析", "今日股市分析產生",
-                    "每交易日由 AI 判斷當日台股走向並產生分析",
-                    "交易日 08:45", "0 45 8 * * MON-FRI", TPE),
+                    "每分鐘比對啟用中的寄送時間，命中即由 AI 判斷當日台股走向並產生分析；每個時段各重跑一次並各寄一封（限台股交易日，颱風假／假日不寄）；執行時間可於「今日股市分析」頁增減（Requirement 31）",
+                    "動態：依「今日股市分析」頁設定（預設 08:45）", "動態（market_analysis_send_time）", TPE),
             new ScheduledJobDto(BUSINESS, "今日股市分析", "分析批次收尾輪詢",
                     "定期撈在製的 Batch API 批次，批次完成後把結果落庫",
                     "每 90 秒（啟動後延遲 60 秒）", "fixedDelay=90s, initialDelay=60s", ""),
@@ -54,6 +67,9 @@ public class SchedulePublicBffController {
                     "每日 07:00（週二~六）", "0 0 7 * * TUE-SAT", TPE),
             new ScheduledJobDto(BUSINESS, "資產匯出", "每日匯出排程檢查",
                     "每分鐘檢查各使用者的每日自動匯出設定，命中執行時間即產出 Excel",
+                    "每分鐘", "0 * * * * *", TPE),
+            new ScheduledJobDto(BUSINESS, "交易日曆", "交易日曆每日匯出排程檢查",
+                    "每分鐘檢查各使用者的交易日曆自動匯出設定，命中執行時間即以其格式（JSON／Excel）產出當前年度交易日曆（Requirement 37）",
                     "每分鐘", "0 * * * * *", TPE),
             new ScheduledJobDto(BUSINESS, "資料備份", "每日備份（台股收盤後）",
                     "台股交易日收盤後 2 小時備份資料庫至 daily/",
@@ -143,7 +159,7 @@ public class SchedulePublicBffController {
                     "交易日 05:00–07:00 每 15 分鐘", "0 0/15 5-6 * * MON-FRI；0 0 7 * * MON-FRI", TPE)
     );
 
-    /** GET /api/bff/schedule-list —— 回傳全系統排程清單（34 筆靜態資料）。 */
+    /** GET /api/bff/schedule-list —— 回傳全系統排程清單（35 筆靜態資料）。 */
     @GetMapping
     public List<ScheduledJobDto> list() {
         return JOBS;
