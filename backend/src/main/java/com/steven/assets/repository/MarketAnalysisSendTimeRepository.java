@@ -8,7 +8,7 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * 今日股市分析（Requirement 31 / Task 184）可設定的分析寄送時間。全域參考資料、無 owner 過濾。
+ * 今日股市分析（Requirement 31 / Task 191）可設定的分析寄送時間。全域參考資料、無 owner 過濾。
  */
 public interface MarketAnalysisSendTimeRepository extends JpaRepository<MarketAnalysisSendTime, Long> {
 

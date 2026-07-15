@@ -28,11 +28,12 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 本地財經新聞抓取排程（Task 149.21）：每日 08:00 / 12:00 / 18:00（Asia/Taipei）抓權威新聞
+ * 本地財經新聞抓取排程（Task 149.21）：每日 08:20 / 11:30 / 18:00（Asia/Taipei）抓權威新聞
  * （玩股網 / MoneyDJ / 自由時報財經・政治・國際 / 經濟日報）＋證交所公開資訊（三大法人、大盤成交）
- * ＋量化快照（台幣兌美元匯率、美股主要指數收盤，Task 180），去重後 upsert 至 news_headline，
- * 供 business-services 的今日股市分析餵入 prompt。**08:00 那次早於 08:30 分析**，確保當日有料
- * （原 06:00 於 Task 177 調整為 08:00）。來源皆台/美權威網站，不抓中港澳。
+ * ＋量化快照（台幣兌美元匯率、美股主要指數收盤 Task 180；韓國股市 KOSPI＋三星/海力士 Task 185），
+ * 去重後 upsert 至 news_headline，供 business-services 的今日股市分析餵入 prompt。**08:20 那次早於 08:45 分析**，
+ * 確保當日有料（早上原 06:00 於 Task 177 調整為 08:00、Task 184 再調整為 08:20；中午 12:00 於 Task 188 調整為 11:30）。
+ * 來源皆台/美權威網站，不抓中港澳。
  *
  * <p>每輪抓取（含開機 warmup）<b>先 upsert news_headline，再由 DB 查詢「當日公開資訊」</b>輸出一份 JSON 至
  * SRPP 退休規劃專案輸入目錄（Task 177，DB 為單一來源；容器內 {@code news-scraper.export-dir}，docker volume
@@ -88,8 +89,14 @@ public class NewsPoller {
         }, "news-warmup").start();
     }
 
-    /** 每日 08:00 / 12:00 / 18:00（Asia/Taipei）。08:00 早於 08:30 分析（原 06:00，Task 177 調整）。 */
-    @Scheduled(cron = "0 0 8,12,18 * * *", zone = "Asia/Taipei")
+    /**
+     * 每日 08:20 / 11:30 / 18:00（Asia/Taipei）。早上 08:20 早於 08:45 今日股市分析（早上 06:00→08:00 Task 177、
+     * 08:00→08:20 Task 184；中午 12:00→11:30 Task 188）。三個時點的「分」各異（:20 / :30 / :00），拆三個 cron
+     * （{@code @Scheduled} 可重複標註於同一方法）。
+     */
+    @Scheduled(cron = "0 20 8 * * *", zone = "Asia/Taipei")     // 早上 08:20
+    @Scheduled(cron = "0 30 11 * * *", zone = "Asia/Taipei")    // 中午 11:30
+    @Scheduled(cron = "0 0 18 * * *", zone = "Asia/Taipei")     // 晚上 18:00
     public void scheduled() {
         if (!enabled) return;
         run("scheduled");

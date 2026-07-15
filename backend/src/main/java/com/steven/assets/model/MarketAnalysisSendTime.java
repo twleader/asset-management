@@ -9,7 +9,7 @@ import java.time.Instant;
 import java.time.LocalTime;
 
 /**
- * 今日股市分析（Requirement 31 / Task 184）可設定的「分析寄送時間」：每個 {@code active=true} 列＝一個
+ * 今日股市分析（Requirement 31 / Task 191）可設定的「分析寄送時間」：每個 {@code active=true} 列＝一個
  * 每台股交易日觸發時點，排程每分鐘 tick 比對現在 HH:mm 命中即重跑一次分析並寄一封。
  *
  * <p>全域單一排程設定——不分租戶、無 {@code owner_user_id}、無 {@code @Filter}，不受 {@code TenantFilterAspect}

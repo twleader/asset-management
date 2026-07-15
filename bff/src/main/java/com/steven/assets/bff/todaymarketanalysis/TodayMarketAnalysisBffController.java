@@ -88,7 +88,7 @@ public class TodayMarketAnalysisBffController {
                 .map(ResponseEntity::ok);
     }
 
-    // ===== 分析寄送時間（Task 184）：清單併入上方聚合 GET 之 settings.sendTimes；下列 mutation 限 ADMIN（SecurityConfig） =====
+    // ===== 分析寄送時間（Task 191）：清單併入上方聚合 GET 之 settings.sendTimes；下列 mutation 限 ADMIN（SecurityConfig） =====
 
     /** POST /api/bff/today-market-analysis/send-times → 轉發 business 新增寄送時間；回更新後清單。 */
     @PostMapping("/send-times")

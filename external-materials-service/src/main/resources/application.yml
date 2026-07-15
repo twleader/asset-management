@@ -24,9 +24,9 @@ server:
 finmind:
   token: ${FINMIND_TOKEN:}
 
-# 本地財經新聞爬蟲（Task 149.21）：每日 08/12/18（Asia/Taipei，原 06/12/18 於 Task 177 調整）抓權威來源
-# ＋證交所公開資訊寫入 news_headline，供 business-services 今日股市分析餵入 prompt。retention-days=保留天數
-# （清理更舊者）；enabled=false 可整體停用。
+# 本地財經新聞爬蟲（Task 149.21）：每日 08:20/11:30/18:00（Asia/Taipei，早上 06→08 Task 177、08→08:20 Task 184；
+# 中午 12:00→11:30 Task 188）抓權威來源＋證交所公開資訊＋量化快照（匯率/美股/韓股）寫入 news_headline，供
+# business-services 今日股市分析餵入 prompt。retention-days=保留天數（清理更舊者）；enabled=false 可整體停用。
 # export-dir/export-enabled（Task 177）：每輪抓取另輸出一份公開資訊 JSON 至此目錄（容器內基底，docker volume
 # 對映 host SRPP/data/input），供 SRPP 退休規劃專案取用；export-enabled=false 可只寫 DB、不輸出檔。
 news-scraper:
@@ -34,6 +34,12 @@ news-scraper:
   retention-days: ${NEWS_SCRAPER_RETENTION_DAYS:30}
   export-dir: ${NEWS_EXPORT_DIR:/srpp-input}
   export-enabled: ${NEWS_EXPORT_ENABLED:true}
+
+# 韓股參考個股抓取（Task 185）：每日 16:00（Asia/Taipei）＋開機 warmup 抓三星電子 005930／SK 海力士 000660
+# 收盤寫入 foreign_stock_daily_history，供公開資訊爬蟲組韓股快照（KOSPI 大盤另讀既有 us_index_daily_history）。
+# enabled=false 可停用（韓股快照則僅剩 KOSPI）。
+kr-stock:
+  enabled: ${KR_STOCK_ENABLED:true}
 
 logging:
   level:

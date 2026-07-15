@@ -156,7 +156,7 @@
       </el-table>
     </el-card>
 
-    <!-- 分析寄送時間（Task 184）：管理者可設定多個台股交易日的寄送時點，每個時點各重跑一次分析並各寄一封 -->
+    <!-- 分析寄送時間（Task 191）：管理者可設定多個台股交易日的寄送時點，每個時點各重跑一次分析並各寄一封 -->
     <el-card shadow="never" style="margin-top:16px">
       <template #header>
         <div class="recipients-head">
@@ -261,7 +261,7 @@ const selectedEffort = ref('')
 const enabledFlag = ref(true)
 const recipients = ref([])
 const togglingId = ref(null)
-// 分析寄送時間（Task 184）
+// 分析寄送時間（Task 191）
 const sendTimes = ref([])
 const newTime = ref('')
 const togglingSendTimeId = ref(null)
@@ -367,7 +367,7 @@ async function toggleRecipient(row, val) {
   }
 }
 
-// 分析寄送時間（Task 184，限管理者）：新增。驗證 HH:mm 後呼叫 BFF，回更新後清單（重複／格式錯誤由後端擋、toast 統一處理）。
+// 分析寄送時間（Task 191，限管理者）：新增。驗證 HH:mm 後呼叫 BFF，回更新後清單（重複／格式錯誤由後端擋、toast 統一處理）。
 async function addSendTime() {
   const t = (newTime.value || '').trim()
   if (!/^\d{2}:\d{2}$/.test(t)) {
@@ -457,7 +457,7 @@ async function onEffortChange(effort) {
   }
 }
 
-// 管理者切換「每日自動分析」開關 → 持久化。停用＝08:30 cron 跳過（零花費）；手動仍可跑。失敗則還原。
+// 管理者切換「每日自動分析」開關 → 持久化。停用＝各寄送時點皆跳過（零花費）；手動仍可跑。失敗則還原。
 async function onEnabledChange(enabled) {
   savingEnabled.value = true
   try {

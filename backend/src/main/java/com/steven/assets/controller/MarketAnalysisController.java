@@ -83,7 +83,7 @@ public class MarketAnalysisController {
                 boolOrNull(body, "enabled"));
     }
 
-    // ===== 分析寄送時間（Task 184）：GET 開放已登入者；新增／刪除／切換啟用限管理者（縱深防禦） =====
+    // ===== 分析寄送時間（Task 191）：GET 開放已登入者；新增／刪除／切換啟用限管理者（縱深防禦） =====
 
     /** 分析寄送時間清單（`[{id,time,active}]`，升序）。已登入者可讀。 */
     @GetMapping("/send-times")

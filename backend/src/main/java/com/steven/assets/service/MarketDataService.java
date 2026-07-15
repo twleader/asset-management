@@ -206,8 +206,8 @@ public class MarketDataService {
      * 主動觸發 ext 立刻爬 DGPA 停班公告並 upsert {@code tw_market_closure}，**直接採用 ext 回傳的權威
      * {@code closedToday}** 作短路依據，呼叫端據此不送 LLM 批次。
      *
-     * <p>動機：07:30「今日股市分析」等下游在 submit 前會花費 LLM（昂貴）；DGPA 爬取免費。故不賭
-     * 05:00–08:45 {@code TwClosurePoller} 是否已在此刻前偵測並傳播完成，而是在花錢前主動確認一次。
+     * <p>動機：08:45「今日股市分析」等下游在 submit 前會花費 LLM（昂貴）；DGPA 爬取免費。故不賭
+     * 05:00–07:00 {@code TwClosurePoller} 是否已在此刻前偵測並傳播完成，而是在花錢前主動確認一次。
      *
      * <p>刻意**不動假日快取**：偵測結果以回傳值直接短路，不改讀 {@code twHolidayCurrentYearCache}——
      * 避免「evict 後重抓瞬斷→抗毒化 fallback 失效→整年假日（含國定假日）丟空→反把假日誤判交易日」。

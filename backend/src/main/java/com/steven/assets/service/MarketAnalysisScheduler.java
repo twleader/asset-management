@@ -19,9 +19,9 @@ import java.util.Optional;
  * 今日股市分析（Requirement 31）排程。
  *
  * <ul>
- *   <li><b>每分鐘 tick（Task 184）</b>：每個台股交易日於「可設定的多個寄送時間」（{@code market_analysis_send_time}
- *       之 {@code active=true}）各觸發一次全新分析並各寄一封；cron 以 MON-FRI 每分鐘觸發，命中啟用時點後再判台股假日。
- *       未命中任何時點即零成本略過（不查 enabled、不做颱風假偵測、不呼叫 LLM）。</li>
+ *   <li><b>每分鐘 tick（Task 191）</b>：每個台股交易日於「可設定的多個寄送時間」（{@code market_analysis_send_time}
+ *       之 {@code active=true}，seed 08:45＝Task 186 之原固定時點）各觸發一次全新分析並各寄一封；cron 以 MON-FRI
+ *       每分鐘觸發，命中啟用時點後再判台股假日。未命中任何時點即零成本略過（不查 enabled、不做颱風假偵測、不呼叫 LLM）。</li>
  *   <li>開機 self-heal：服務於「最早啟用時點」未運行（重啟／crash／部署）時，若今天為交易日且現在已過該最早時點
  *       且今日尚無成功分析，補跑一次（不逐時段補寄，避免重啟洗版；比照 {@link IndexDailyRefreshScheduler}）。</li>
  * </ul>
@@ -54,7 +54,7 @@ public class MarketAnalysisScheduler {
         }
         LocalDate today = LocalDate.now(MarketZones.TW_ZONE);
         // 花錢（送 LLM 批次）前先做一次權威即時颱風假偵測（爬 DGPA 免費、分析昂貴）：直接採 detect 回傳的
-        // closedToday 短路，不賭 poller 是否已於此時點前偵測+傳播完成 → 颱風假不白花錢送批次。
+        // closedToday 短路，不賭 05:00–07:00 poller 是否已在寄送時點前偵測+傳播完成 → 颱風假不白花錢送批次。
         boolean closedToday = marketDataService.refreshTwClosureToday();
         if (closedToday || !marketDataService.isTwTradingDay(today)) {
             log.info("今日股市分析排程：{} 非台股交易日（颱風假 / 假日），略過寄送時點 {}", today, nowHm);

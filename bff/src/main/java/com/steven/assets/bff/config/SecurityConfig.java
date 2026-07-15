@@ -82,7 +82,7 @@ public class SecurityConfig {
                             .hasAuthority(AuthConstants.AUTHORITY_ADMIN)
                         .pathMatchers(HttpMethod.PUT, "/api/bff/today-market-analysis/settings")
                             .hasAuthority(AuthConstants.AUTHORITY_ADMIN)
-                        // 分析寄送時間（Task 184）：新增／刪除／切換啟用限 ADMIN（GET 併入聚合、開放已登入者）
+                        // 分析寄送時間（Task 191）：新增／刪除／切換啟用限 ADMIN（GET 併入聚合、開放已登入者）
                         .pathMatchers(HttpMethod.POST, "/api/bff/today-market-analysis/send-times")
                             .hasAuthority(AuthConstants.AUTHORITY_ADMIN)
                         .pathMatchers(HttpMethod.DELETE, "/api/bff/today-market-analysis/send-times/**")

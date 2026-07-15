@@ -53,7 +53,8 @@ import java.util.regex.Pattern;
 /**
  * 今日股市分析（Requirement 31）。
  *
- * <p>每個台股交易日 08:30 由 {@code MarketAnalysisScheduler} 觸發（或管理者手動）：讀本地
+ * <p>每個台股交易日於各「啟用中的分析寄送時間」（{@code market_analysis_send_time}，預設 08:45）由
+ * {@code MarketAnalysisScheduler} 各觸發一次（或管理者手動）：讀本地
  * 台股大盤 / 美股主要指數近一年日線走勢與本地爬蟲新聞（{@code news_headline}），組「越近期越重要」
  * 提示詞，呼叫 Claude Opus 4.8（adaptive thinking），解析 JSON 判斷 upsert 進
  * {@code daily_market_analysis}。（Task 179 起改讀本地新聞、不再掛 {@code web_search} server tool。）
@@ -317,7 +318,7 @@ public class MarketAnalysisService {
     }
 
     /**
-     * 排程寄送時點（Task 184）用：**強制重跑**（即使當日已有 OK）＋送批次時重置 {@code email_sent_at=null}，
+     * 排程寄送時點（Task 191）用：**強制重跑**（即使當日已有 OK）＋送批次時重置 {@code email_sent_at=null}，
      * 使該批次於 {@link #finalizeIfReady} 收尾時**重新寄一封**（每個啟用時段各跑一次、各寄一封）。
      * 同日已 {@code PROCESSING} 之守門仍在（時段過近時不堆疊批次）。
      */
@@ -368,7 +369,7 @@ public class MarketAnalysisService {
         row.setBatchId(null);
         // 重跑既有 OK 筆時，先清掉上一次成功內容——PROCESSING／非 OK 不得帶出過期的多空判斷／新聞
         clearContent(row);
-        // Task 184：排程寄送時點觸發＝全新一輪分析，清冪等記號 → 該批次收尾（finalizeIfReady）時重新寄一封。
+        // Task 191：排程寄送時點觸發＝全新一輪分析，清冪等記號 → 該批次收尾（finalizeIfReady）時重新寄一封。
         // 手動「重新分析」（resetEmailSent=false）維持「同一交易日不自動重寄」。NOT_CONFIGURED／送出失敗路徑此重置無副作用（該狀態本就不寄信）。
         if (resetEmailSent) {
             row.setEmailSentAt(null);

@@ -15,7 +15,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 
 /**
- * 今日股市分析（Requirement 31 / Task 184）可設定的「分析寄送時間」CRUD。
+ * 今日股市分析（Requirement 31 / Task 191）可設定的「分析寄送時間」CRUD。
  *
  * <p>每個 {@code active=true} 列＝一個每台股交易日觸發時點，{@link MarketAnalysisScheduler} 每分鐘 tick
  * 比對現在 HH:mm 命中即重跑一次分析並各寄一封。全域單一排程設定、無 owner 過濾；

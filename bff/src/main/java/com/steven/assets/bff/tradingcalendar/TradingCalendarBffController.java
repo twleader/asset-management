@@ -4,6 +4,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -58,6 +61,56 @@ public class TradingCalendarBffController {
         return businessServicesClient.get()
                 .uri("/api/market-data/market-status")
                 .retrieve().bodyToMono(MAP).onErrorReturn(Collections.emptyMap())
+                .map(ResponseEntity::ok);
+    }
+
+    // ===== 交易日曆匯出到指定路徑（Requirement 37 / Task 184）=====
+
+    /**
+     * POST /api/bff/trading-calendar/export?year=&format=json|excel&subpath=
+     * 產出整年交易日曆並寫檔到指定目錄，回 {path,sizeBytes,format,year,totalDays}。
+     */
+    @PostMapping("/export")
+    public Mono<ResponseEntity<Map<String, Object>>> export(
+            @RequestParam(required = false) Integer year,
+            @RequestParam(defaultValue = "json") String format,
+            @RequestParam(required = false, defaultValue = "") String subpath) {
+        return businessServicesClient.post()
+                .uri(uri -> uri.path("/api/trading-calendar-export/run")
+                        .queryParamIfPresent("year", java.util.Optional.ofNullable(year))
+                        .queryParam("format", format)
+                        .queryParam("subpath", subpath)
+                        .build())
+                .retrieve().bodyToMono(MAP)
+                .map(ResponseEntity::ok);
+    }
+
+    /** 唯讀資料夾瀏覽（檔案總管式選擇器逐層懶載入）；subpath 由 WebClient 展開並 URL-encode。 */
+    @GetMapping("/export/browse")
+    public Mono<ResponseEntity<Map<String, Object>>> browseExportDir(
+            @RequestParam(value = "subpath", required = false, defaultValue = "") String subpath) {
+        return businessServicesClient.get()
+                .uri("/api/trading-calendar-export/browse?subpath={subpath}", subpath)
+                .retrieve().bodyToMono(MAP)
+                .map(ResponseEntity::ok);
+    }
+
+    // ===== 每日排程自動匯出設定（Task 185，per-user owner-scoped）=====
+
+    @GetMapping("/export/schedule")
+    public Mono<ResponseEntity<Map<String, Object>>> getExportSchedule() {
+        return businessServicesClient.get()
+                .uri("/api/trading-calendar-export/schedule")
+                .retrieve().bodyToMono(MAP)
+                .map(ResponseEntity::ok);
+    }
+
+    @PutMapping("/export/schedule")
+    public Mono<ResponseEntity<Map<String, Object>>> updateExportSchedule(@RequestBody Map<String, Object> body) {
+        return businessServicesClient.put()
+                .uri("/api/trading-calendar-export/schedule")
+                .bodyValue(body)
+                .retrieve().bodyToMono(MAP)
                 .map(ResponseEntity::ok);
     }
 }
