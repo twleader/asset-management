@@ -90,22 +90,29 @@ public class PriceFetchClient {
      * 英股（LSE 掛牌 UCITS ETF，如 CSPX.L）即時報價：Yahoo Finance chart endpoint。
      * 走 curl 子程序避開 Yahoo 對 Java HTTP/2 fingerprint 的偵測（與 fetchUsHistoricalRange 同 pattern）。
      * 收盤後 meta.regularMarketPrice 維持當日最後成交價，符合 Requirement 7「抓不到最新值→保留上一筆」精神。
+     *
+     * <p><b>開盤價取自 {@code indicators.quote[0].open[0]}，不可用 {@code meta.regularMarketOpen}</b>
+     * （實測不存在於 Yahoo chart meta，Task 194 修正前誤用該欄，英股 {@code openPrice} 因而恆為 null）；
+     * 昨收同理只有 {@code chartPreviousClose} 有值（{@code meta.previousClose} 亦不存在）。
+     * high / low / volume 則實測確實存在於 meta，維持沿用。與 {@link #fetchUsTodayOpenFromYahoo}
+     * ／{@link #fetchKrIntradayQuote} 同一套欄位落點。
      */
     private Optional<PriceResult> getYahooLsePrice(String stockCode) {
         try {
             String url = "https://query2.finance.yahoo.com/v8/finance/chart/" + stockCode + ".L?interval=1d&range=1d";
             String body = curlGetWithRetry(url, 2);
-            JsonNode meta = mapper.readTree(body).path("chart").path("result").path(0).path("meta");
+            JsonNode result = mapper.readTree(body).path("chart").path("result").path(0);
+            JsonNode meta = result.path("meta");
             if (meta.isMissingNode() || meta.isEmpty()) return Optional.empty();
             BigDecimal price = jsonDecimal(meta.path("regularMarketPrice"));
             if (price == null) return Optional.empty();
             BigDecimal prevClose = jsonDecimal(meta.path("chartPreviousClose"));
-            if (prevClose == null) prevClose = jsonDecimal(meta.path("previousClose"));
             BigDecimal change = prevClose != null ? price.subtract(prevClose) : null;
             BigDecimal changePct = (prevClose != null && prevClose.signum() > 0)
                     ? change.multiply(BigDecimal.valueOf(100)).divide(prevClose, 6, RoundingMode.HALF_UP)
                     : null;
-            BigDecimal open = jsonDecimal(meta.path("regularMarketOpen"));
+            BigDecimal open = jsonDecimal(
+                    result.path("indicators").path("quote").path(0).path("open").path(0));
             BigDecimal high = jsonDecimal(meta.path("regularMarketDayHigh"));
             BigDecimal low = jsonDecimal(meta.path("regularMarketDayLow"));
             Long volume = meta.hasNonNull("regularMarketVolume") ? meta.get("regularMarketVolume").asLong() : null;
@@ -637,9 +644,9 @@ public class PriceFetchClient {
      * （長 Chrome UA 會被 Yahoo WAF 回 429）。亦不走 {@link #getStockPrice}——其 else 分支落到 NASDAQ。
      *
      * <p><b>開盤價取自 {@code indicators.quote[0].open[0]}，而非 {@code meta.regularMarketOpen}</b>：
-     * 後者實測不存在於 Yahoo chart meta（{@link #getYahooLsePrice} 即誤用該欄，英股 {@code openPrice}
-     * 因而恆為 null），照抄會使開盤價恆為 null、功能靜默半殘。昨收同理只取 {@code chartPreviousClose}
-     * （{@code meta.previousClose} 亦不存在）。
+     * 後者實測不存在於 Yahoo chart meta，誤用會使開盤價恆為 null、功能靜默半殘
+     * （{@link #getYahooLsePrice} 原即誤用該欄，英股 {@code openPrice} 恆為 null，Task 194 已修正）。
+     * 昨收同理只取 {@code chartPreviousClose}（{@code meta.previousClose} 亦不存在）。
      *
      * <p>{@code sessionDate} 由 {@code meta.regularMarketTime} 換算 {@code Asia/Seoul} 求得，供呼叫端判斷
      * 韓國是否休市（休市時 Yahoo 回前一交易日 bar，日期對不上即可判定，免自建農曆韓國假日曆）。
