@@ -227,7 +227,14 @@ export const bffApi = {
     // 分析結果寄送對象（Task 151）：沿用通知收件人，切換 per-recipient「接收每日股市分析」訂閱
     getRecipients: () => api.get('/bff/today-market-analysis/recipients'),
     toggleMarketAnalysis: (id) =>
-      api.patch(`/bff/today-market-analysis/recipients/${id}/market-analysis`)
+      api.patch(`/bff/today-market-analysis/recipients/${id}/market-analysis`),
+    // 分析寄送時間（Task 191）：管理者可增／刪／切換啟用；清單由聚合 GET 之 settings.sendTimes 帶回，mutation 回更新後清單
+    addSendTime: (time) =>
+      api.post('/bff/today-market-analysis/send-times', { time }),
+    deleteSendTime: (id) =>
+      api.delete(`/bff/today-market-analysis/send-times/${id}`),
+    toggleSendTime: (id) =>
+      api.patch(`/bff/today-market-analysis/send-times/${id}/active`)
   },
 
   // AssetAllocationAdvice（資產配置建議，Requirement 32）
@@ -249,7 +256,13 @@ export const bffApi = {
   // TradingCalendar
   tradingCalendar: {
     get:           (year) => api.get('/bff/trading-calendar', { params: year ? { year } : {} }),
-    marketStatus: () => api.get('/bff/trading-calendar/market-status')
+    marketStatus: () => api.get('/bff/trading-calendar/market-status'),
+    // 交易日曆匯出到指定路徑（Requirement 37）
+    exportToDir:     (year, format, subpath) => api.post('/bff/trading-calendar/export', null, { params: { year, format, subpath }, timeout: 60000, skipErrorToast: true }),
+    browseExportDir: (subpath = '') => api.get('/bff/trading-calendar/export/browse', { params: { subpath }, skipErrorToast: true }),
+    // 每日排程自動匯出（Task 185）
+    getExportSchedule:    () => api.get('/bff/trading-calendar/export/schedule', { skipErrorToast: true }),
+    updateExportSchedule: (data) => api.put('/bff/trading-calendar/export/schedule', data, { skipErrorToast: true })
   },
 
   // ScheduleList（排程列表，「公開資訊」分組，Requirement 36）
@@ -257,7 +270,7 @@ export const bffApi = {
     get: () => api.get('/bff/schedule-list')
   },
 
-  // CrawlerData（爬蟲資訊查詢，「公開資訊」分組，Requirement 37）
+  // CrawlerData（爬蟲資訊查詢，「公開資訊」分組，Requirement 38）
   crawlerData: {
     // 查指定日期爬回的 news_headline；dateField: 'fetched'（爬取時間）｜'published'（資料日期）；category 選填
     query: (date, dateField = 'fetched', category) =>

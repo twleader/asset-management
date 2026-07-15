@@ -568,6 +568,51 @@ public class PriceFetchClient {
         }
     }
 
+    /**
+     * Yahoo Finance chart API 拉韓股（KRX 掛牌個股，如三星電子 005930、SK 海力士 000660）指定日期區間。
+     * 時區為 Asia/Seoul、symbol 加 {@code .KS} 後綴（幣別 KRW）；其餘行為與 fetchUsHistoricalRange 一致。
+     * 供公開資訊爬蟲的韓股快照（category=kr-market）取用。
+     */
+    public List<HistoricalBar> fetchKrHistoricalRange(String stockCode, LocalDate start, LocalDate end) {
+        try {
+            java.time.ZoneId zone = java.time.ZoneId.of("Asia/Seoul");
+            long period1 = start.atStartOfDay(zone).toEpochSecond();
+            long period2 = end.plusDays(1).atStartOfDay(zone).toEpochSecond();
+            String url = "https://query2.finance.yahoo.com/v8/finance/chart/" + stockCode + ".KS"
+                    + "?period1=" + period1 + "&period2=" + period2 + "&interval=1d";
+            String body = curlGetWithRetry(url, 2);
+            JsonNode root = mapper.readTree(body);
+            JsonNode chart = root.path("chart").path("result").path(0);
+            JsonNode timestamps = chart.path("timestamp");
+            JsonNode quotes = chart.path("indicators").path("quote").path(0);
+            if (!timestamps.isArray()) {
+                String err = root.path("chart").path("error").path("description").asText("");
+                log.warn("Yahoo Finance {}.KS 無資料: {}", stockCode, err.isEmpty() ? "no timestamps" : err);
+                return List.of();
+            }
+            List<HistoricalBar> bars = new java.util.ArrayList<>();
+            for (int i = 0; i < timestamps.size(); i++) {
+                long ts = timestamps.get(i).asLong();
+                LocalDate date = java.time.Instant.ofEpochSecond(ts).atZone(zone).toLocalDate();
+                if (date.isBefore(start)) continue;
+                JsonNode close = quotes.path("close").path(i);
+                if (close.isNull() || close.isMissingNode()) continue;
+                bars.add(new HistoricalBar(
+                        date,
+                        jsonDecimal(quotes.path("open").path(i)),
+                        jsonDecimal(quotes.path("high").path(i)),
+                        jsonDecimal(quotes.path("low").path(i)),
+                        jsonDecimal(close),
+                        quotes.path("volume").path(i).asLong(0),
+                        stockCode));
+            }
+            return bars;
+        } catch (Exception e) {
+            log.warn("Yahoo Finance {}.KS 區間抓取失敗: {}", stockCode, e.getMessage());
+            return List.of();
+        }
+    }
+
     /** 盤中 5 分鐘 K 線：Yahoo Finance chart API range=Nd / interval=5m，用於警示觸發補抓精確時點。 */
     public record IntradayBar(
             String time,        // ISO LocalDateTime（exchangeTimezone 當地時區）

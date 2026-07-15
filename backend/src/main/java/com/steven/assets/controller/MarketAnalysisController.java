@@ -6,10 +6,14 @@ import com.steven.assets.dto.MarketAnalysisSettingsDto;
 import com.steven.assets.model.DailyMarketAnalysis;
 import com.steven.assets.security.AdminRequiredException;
 import com.steven.assets.security.CurrentUserContext;
+import com.steven.assets.service.MarketAnalysisSendTimeService;
 import com.steven.assets.service.MarketAnalysisService;
 import com.steven.assets.util.MarketZones;
 import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -31,6 +35,7 @@ import java.util.Map;
 public class MarketAnalysisController {
 
     private final MarketAnalysisService analysisService;
+    private final MarketAnalysisSendTimeService sendTimeService;
     private final CurrentUserContext currentUser;
     private final ObjectMapper objectMapper;
 
@@ -76,6 +81,41 @@ public class MarketAnalysisController {
                 str(body, "model"),
                 str(body, "effort"),
                 boolOrNull(body, "enabled"));
+    }
+
+    // ===== 分析寄送時間（Task 191）：GET 開放已登入者；新增／刪除／切換啟用限管理者（縱深防禦） =====
+
+    /** 分析寄送時間清單（`[{id,time,active}]`，升序）。已登入者可讀。 */
+    @GetMapping("/send-times")
+    public List<MarketAnalysisSettingsDto.SendTime> sendTimes() {
+        return sendTimeService.list();
+    }
+
+    /** 新增寄送時間（限管理者）；body `{time:"HH:mm"}`。格式／唯一性驗證於 service（非法 → 400）。回更新後清單。 */
+    @PostMapping("/send-times")
+    public List<MarketAnalysisSettingsDto.SendTime> addSendTime(@RequestBody Map<String, Object> body) {
+        if (!currentUser.isAdmin()) {
+            throw new AdminRequiredException();
+        }
+        return sendTimeService.add(str(body, "time"));
+    }
+
+    /** 刪除寄送時間（限管理者）。回更新後清單。 */
+    @DeleteMapping("/send-times/{id}")
+    public List<MarketAnalysisSettingsDto.SendTime> deleteSendTime(@PathVariable Long id) {
+        if (!currentUser.isAdmin()) {
+            throw new AdminRequiredException();
+        }
+        return sendTimeService.delete(id);
+    }
+
+    /** 切換寄送時間啟用／停用（限管理者）。回更新後清單。 */
+    @PatchMapping("/send-times/{id}/active")
+    public List<MarketAnalysisSettingsDto.SendTime> toggleSendTime(@PathVariable Long id) {
+        if (!currentUser.isAdmin()) {
+            throw new AdminRequiredException();
+        }
+        return sendTimeService.toggleActive(id);
     }
 
     private static String str(Map<String, Object> body, String key) {

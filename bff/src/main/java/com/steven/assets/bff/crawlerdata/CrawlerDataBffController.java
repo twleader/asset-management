@@ -17,7 +17,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * CrawlerDataView 專屬 BFF（「公開資訊」分組，Requirement 37 / Task 184）：
+ * CrawlerDataView 專屬 BFF（「公開資訊」分組，Requirement 38 / Task 192）：
  * 依日期查 {@code news_headline} 爬回資料，並讀／寫公開資訊爬蟲（NewsPoller）執行時間設定。
  * 一頁一 BFF，WebClient 轉呼 business（與今日股市分析同讀一份 {@code news_headline}）。
  *

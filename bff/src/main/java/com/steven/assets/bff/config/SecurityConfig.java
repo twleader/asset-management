@@ -82,11 +82,18 @@ public class SecurityConfig {
                             .hasAuthority(AuthConstants.AUTHORITY_ADMIN)
                         .pathMatchers(HttpMethod.PUT, "/api/bff/today-market-analysis/settings")
                             .hasAuthority(AuthConstants.AUTHORITY_ADMIN)
+                        // 分析寄送時間（Task 191）：新增／刪除／切換啟用限 ADMIN（GET 併入聚合、開放已登入者）
+                        .pathMatchers(HttpMethod.POST, "/api/bff/today-market-analysis/send-times")
+                            .hasAuthority(AuthConstants.AUTHORITY_ADMIN)
+                        .pathMatchers(HttpMethod.DELETE, "/api/bff/today-market-analysis/send-times/**")
+                            .hasAuthority(AuthConstants.AUTHORITY_ADMIN)
+                        .pathMatchers(HttpMethod.PATCH, "/api/bff/today-market-analysis/send-times/**")
+                            .hasAuthority(AuthConstants.AUTHORITY_ADMIN)
                         // 資產配置建議（Requirement 32）：成本控管設定（模型／思考深度／web 搜尋）為全域，改設定限 ADMIN；
                         // 產生建議 /generate 與儲存條件 /profile 為 per-user（owner-scoped）→ 落 anyExchange().authenticated()
                         .pathMatchers(HttpMethod.PUT, "/api/bff/portfolio-advice/settings")
                             .hasAuthority(AuthConstants.AUTHORITY_ADMIN)
-                        // 爬蟲資訊查詢（Requirement 37）：查詢與讀排程開放已登入者；改爬蟲執行時間限 ADMIN（系統設定變更）
+                        // 爬蟲資訊查詢（Requirement 38）：查詢與讀排程開放已登入者；改爬蟲執行時間限 ADMIN（系統設定變更）
                         .pathMatchers(HttpMethod.PUT, "/api/bff/crawler-data/schedule")
                             .hasAuthority(AuthConstants.AUTHORITY_ADMIN)
                         // 全域共用參考資料：寫入限 ADMIN（GET 不列入 → 落到 anyExchange().authenticated()）

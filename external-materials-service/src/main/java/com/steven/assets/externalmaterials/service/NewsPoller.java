@@ -31,13 +31,15 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 本地財經新聞抓取排程（Task 149.21）：抓權威新聞（玩股網 / MoneyDJ / 自由時報財經・政治・國際 / 經濟日報）
- * ＋證交所公開資訊（三大法人、大盤成交）＋量化快照（台幣兌美元匯率、美股主要指數收盤，Task 180），
- * 去重後 upsert 至 news_headline，供 business-services 的今日股市分析餵入 prompt。來源皆台/美權威網站，不抓中港澳。
+ * ＋證交所公開資訊（三大法人、大盤成交）＋量化快照（台幣兌美元匯率、美股主要指數收盤 Task 180；
+ * 韓國股市 KOSPI＋三星/海力士 Task 185），去重後 upsert 至 news_headline，供 business-services 的
+ * 今日股市分析餵入 prompt。來源皆台/美權威網站，不抓中港澳。
  *
- * <p><b>執行時間（Requirement 37 / Task 184）</b>：原寫死 {@code @Scheduled(cron="0 0 8,12,18")}，改為
- * DB 驅動——每分鐘 ticker 讀 {@code crawler_schedule}（{@code crawler_key='news-poller'}）已啟用時間點，
- * 命中當前 {@code HH:mm} 即抓取。時間點由「爬蟲資訊查詢」頁設定、可多個、免重啟生效。預設 seed 08:00 / 12:00 / 18:00
- * （等同原行為；**08:00 那次早於 08:30 今日股市分析**，確保當日有料）。DB 讀取例外時 fallback 至預設 08/12/18。
+ * <p><b>執行時間（Requirement 38 / Task 192）</b>：原寫死三個 cron（{@code 0 20 8}／{@code 0 30 11}／{@code 0 0 18}），
+ * 改為 DB 驅動——每分鐘 ticker 讀 {@code crawler_schedule}（{@code crawler_key='news-poller'}）已啟用時間點，
+ * 命中當前 {@code HH:mm} 即抓取。時間點由「爬蟲資訊查詢」頁設定、可多個、免重啟生效。預設 seed 08:20 / 11:30 / 18:00
+ * ＝原寫死行為（早上 06:00→08:00 Task 177→08:20 Task 184；中午 12:00→11:30 Task 188；**08:20 那次早於 08:45
+ * 今日股市分析**，確保當日有料）。DB 讀取例外時 fallback 至同一組預設值。
  *
  * <p>每輪抓取（含開機 warmup）<b>先 upsert news_headline，再由 DB 查詢「當日公開資訊」</b>輸出一份 JSON 至
  * SRPP 退休規劃專案輸入目錄（Task 177，DB 為單一來源；容器內 {@code news-scraper.export-dir}，docker volume
@@ -53,11 +55,11 @@ public class NewsPoller {
 
     private static final ZoneId TW_ZONE = ZoneId.of("Asia/Taipei");
 
-    /** 排程設定的爬蟲代號（Requirement 37）。 */
+    /** 排程設定的爬蟲代號（Requirement 38）。 */
     private static final String CRAWLER_KEY = "news-poller";
 
-    /** DB 讀取失敗時的 fallback 執行時間（等同原寫死 08/12/18），避免爬蟲靜默停擺（Requirement 37）。 */
-    private static final int[][] DEFAULT_TIMES = {{8, 0}, {12, 0}, {18, 0}};
+    /** DB 讀取失敗時的 fallback 執行時間（等同原寫死 08:20 / 11:30 / 18:00），避免爬蟲靜默停擺（Requirement 38）。 */
+    private static final int[][] DEFAULT_TIMES = {{8, 20}, {11, 30}, {18, 0}};
 
     private final NewsFetchClient newsClient;
     private final TwseInfoFetchClient twseClient;
@@ -104,11 +106,12 @@ public class NewsPoller {
     }
 
     /**
-     * 每分鐘 ticker（Requirement 37 / Task 184）：讀 {@code crawler_schedule} 中本爬蟲「已啟用」的執行時間點，
+     * 每分鐘 ticker（Requirement 38 / Task 192）：讀 {@code crawler_schedule} 中本爬蟲「已啟用」的執行時間點，
      * 命中當前 {@code HH:mm}（Asia/Taipei）即抓取一次。時間點由「爬蟲資訊查詢」頁設定、可多個、免重啟即生效
-     * （下一分鐘 ticker 讀到新值）。cron 每分鐘僅觸發一次故天然去重、無需額外 slot guard；抓取以 dedupe_key
-     * upsert 本就冪等、重跑無害。抓取在**獨立執行緒**進行，避免阻塞 ext 共用的單執行緒排程器（其他 poller 亦共用）。
-     * 讀到「空清單」＝使用者刻意清空＝該分鐘不跑；DB 讀取例外才 fallback 至預設 08/12/18（避免靜默停擺）。
+     * （下一分鐘 ticker 讀到新值），取代原寫死的三個 cron（08:20 / 11:30 / 18:00，Task 184／188）。cron 每分鐘
+     * 僅觸發一次故天然去重、無需額外 slot guard；抓取以 dedupe_key upsert 本就冪等、重跑無害。抓取在**獨立執行緒**
+     * 進行，避免阻塞 ext 共用的單執行緒排程器（其他 poller 亦共用）。讀到「空清單」＝使用者刻意清空＝該分鐘不跑；
+     * DB 讀取例外才 fallback 至預設 08:20 / 11:30 / 18:00（避免靜默停擺）。
      */
     @Scheduled(cron = "0 * * * * *", zone = "Asia/Taipei")
     public void tick() {
@@ -118,13 +121,13 @@ public class NewsPoller {
         new Thread(() -> runGuarded("scheduled"), "news-scheduled").start();
     }
 
-    /** 現在時分是否命中已設定（啟用）的執行時間點；DB 例外時 fallback 至預設 08/12/18。 */
+    /** 現在時分是否命中已設定（啟用）的執行時間點；DB 例外時 fallback 至預設 08:20 / 11:30 / 18:00。 */
     private boolean matchesConfiguredTime(int hour, int minute) {
         List<int[]> times;
         try {
             times = scheduleQuery.enabledTimes(CRAWLER_KEY);
         } catch (Exception e) {
-            log.warn("讀爬蟲排程設定失敗，本分鐘以預設 08/12/18 判斷：{}", e.getMessage());
+            log.warn("讀爬蟲排程設定失敗，本分鐘以預設 08:20 / 11:30 / 18:00 判斷：{}", e.getMessage());
             times = new ArrayList<>();
             for (int[] t : DEFAULT_TIMES) times.add(t);
         }

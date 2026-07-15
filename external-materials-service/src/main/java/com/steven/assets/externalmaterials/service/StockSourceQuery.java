@@ -496,4 +496,49 @@ public class StockSourceQuery {
     /** 美股指數收盤快照（Task 180）。 */
     public record UsIndexClose(String indexCode, LocalDate tradingDate,
                                BigDecimal close, BigDecimal prevClose) {}
+
+    // ===== 公開資訊快照：海外參考個股（韓股三星/海力士，供 NewsPoller 組韓股快照 kr-market）=====
+
+    /** Upsert 海外參考個股每日收盤（同一 stock_code+trading_date 視為覆寫）。 */
+    public void upsertForeignStockDaily(String stockCode, LocalDate tradingDate, BigDecimal closePoint) {
+        Long existing = jdbc.query(
+                "SELECT 1 FROM foreign_stock_daily_history WHERE stock_code=? AND trading_date=?",
+                ps -> { ps.setString(1, stockCode); ps.setObject(2, tradingDate); },
+                rs -> rs.next() ? 1L : null);
+        if (existing != null) {
+            jdbc.update("UPDATE foreign_stock_daily_history SET close_point=? " +
+                            "WHERE stock_code=? AND trading_date=?",
+                    closePoint, stockCode, tradingDate);
+        } else {
+            jdbc.update("INSERT INTO foreign_stock_daily_history " +
+                            "(stock_code, trading_date, close_point) VALUES (?, ?, ?)",
+                    stockCode, tradingDate, closePoint);
+        }
+    }
+
+    /**
+     * 某海外參考個股最近兩個交易日收盤（{@code close}＝最新、{@code prevClose}＝前一交易日，供算漲跌%）。
+     * 無資料回 null；只有一筆時 {@code prevClose} 為 null。
+     */
+    public ForeignStockClose loadLatestForeignStockClose(String stockCode) {
+        List<Object[]> rows = new java.util.ArrayList<>(2);
+        // 第三引數用「void 區塊」lambda 才會解析為 RowCallbackHandler（逐列、rs 已定位）；
+        // 寫成 expression lambda 會被解析成 ResultSetExtractor（整段只呼一次、rs 未定位）→ runtime 才炸。
+        jdbc.query(
+                "SELECT trading_date, close_point FROM foreign_stock_daily_history " +
+                        "WHERE stock_code = ? ORDER BY trading_date DESC LIMIT 2",
+                ps -> ps.setString(1, stockCode),
+                (java.sql.ResultSet rs) -> {
+                    rows.add(new Object[]{
+                            rs.getDate("trading_date").toLocalDate(), rs.getBigDecimal("close_point")});
+                });
+        if (rows.isEmpty()) return null;
+        return new ForeignStockClose(stockCode,
+                (LocalDate) rows.get(0)[0], (BigDecimal) rows.get(0)[1],
+                rows.size() > 1 ? (BigDecimal) rows.get(1)[1] : null);
+    }
+
+    /** 海外參考個股收盤快照（韓股三星/海力士）。 */
+    public record ForeignStockClose(String stockCode, LocalDate tradingDate,
+                                    BigDecimal close, BigDecimal prevClose) {}
 }

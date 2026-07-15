@@ -8,7 +8,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 讀取公開資訊爬蟲執行時間設定（Requirement 37 / Task 184）：由「爬蟲資訊查詢」頁寫入共用 postgres 的
+ * 讀取公開資訊爬蟲執行時間設定（Requirement 38 / Task 192）：由「爬蟲資訊查詢」頁寫入共用 postgres 的
  * {@code crawler_schedule}（backend 擁有 schema）。ext 純讀，直接走 JdbcTemplate（不建 entity），
  * 比照 {@link StockSourceQuery}。表缺／DB 例外時由呼叫端（{@link NewsPoller}）fallback 至預設時間。
  */

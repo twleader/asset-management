@@ -8,7 +8,7 @@ import lombok.NoArgsConstructor;
 import java.time.Instant;
 
 /**
- * 公開資訊爬蟲執行時間設定（Requirement 37 / Task 184）：一列一時間點，由「爬蟲資訊查詢」頁維護。
+ * 公開資訊爬蟲執行時間設定（Requirement 38 / Task 192）：一列一時間點，由「爬蟲資訊查詢」頁維護。
  * 目前僅 {@code crawler_key='news-poller'}（{@code external-materials-service} 的 {@code NewsPoller}），
  * 保留 {@code crawler_key} 供日後擴充其他爬蟲。{@code NewsPoller} 每分鐘讀已啟用列比對當前 {@code HH:mm} 觸發。
  *

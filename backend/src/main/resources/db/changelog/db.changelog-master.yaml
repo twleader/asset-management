@@ -207,5 +207,14 @@ databaseChangeLog:
       file: db/changelog/changes/v1.54.0-market-analysis-drop-web-search.sql
       relativeToChangelogFile: false
   - include:
-      file: db/changelog/changes/v1.55.0-crawler-schedule.sql
+      file: db/changelog/changes/v1.55.0-foreign-stock-daily.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.56.0-trading-calendar-export-schedule.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.57.0-market-analysis-send-time.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.58.0-crawler-schedule.sql
       relativeToChangelogFile: false

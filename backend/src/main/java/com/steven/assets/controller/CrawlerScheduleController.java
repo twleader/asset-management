@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 
 /**
- * 公開資訊爬蟲執行時間設定（Requirement 37 / Task 184）business API。全域設定：
+ * 公開資訊爬蟲執行時間設定（Requirement 38 / Task 192）business API。全域設定：
  * GET 開放已登入者；PUT（整批覆寫）以 {@link CurrentUserContext#isAdmin()} 縱深防禦（BFF 已對外擋一層 ADMIN）。
  */
 @RestController

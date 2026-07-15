@@ -15,7 +15,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 /**
- * 爬蟲資訊查詢（Requirement 37 / Task 184）business API：依指定日期查 {@code news_headline} 爬回的資料。
+ * 爬蟲資訊查詢（Requirement 38 / Task 192）business API：依指定日期查 {@code news_headline} 爬回的資料。
  * 全域參考資料（無租戶過濾），與 {@link com.steven.assets.service.MarketAnalysisService} 讀同一份表。
  */
 @RestController

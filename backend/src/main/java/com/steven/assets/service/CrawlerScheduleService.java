@@ -14,7 +14,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 公開資訊爬蟲執行時間設定（Requirement 37 / Task 184）。全域設定，無租戶。
+ * 公開資訊爬蟲執行時間設定（Requirement 38 / Task 192）。全域設定，無租戶。
  * 讀：某爬蟲的時間點清單（時分升序）。寫：整批覆寫（先驗證＋去重，再 delete+insert）。
  */
 @Service

@@ -10,7 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 
 /**
- * 公開資訊爬蟲執行時間設定（Requirement 37 / Task 184）。全域設定，無租戶過濾。
+ * 公開資訊爬蟲執行時間設定（Requirement 38 / Task 192）。全域設定，無租戶過濾。
  * 設定變更走「整批覆寫」：{@link #deleteByCrawlerKey} 後重新 saveAll。
  */
 public interface CrawlerScheduleRepository extends JpaRepository<CrawlerSchedule, Long> {

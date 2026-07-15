@@ -4560,24 +4560,196 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 - [x] 183.6 **A6（修 tasks.md 重號）**：Task 39／40 各出現兩次；將前一對「Dashboard bar 改用代號／依損益上色」（無數字交叉引用）重編為 Task 181／182，保留後一對「per-market／dividend-rate」為 39／40（Task 42 的 `Task 39` 引用維持正確）。
 - [x] 183.7 **A7（tasks.md 標記說明）**：Task 149.15／149.21／149.22 實作已 landed＋部署但保留 `[ ]`（待單次付費 LLM 端到端驗證）；149.18–149.20 已被 Task 179（web_search 移除）取代。加註說明避免讀者誤判為未實作，不改動 checkbox 語意。
 
-### Task 184: 「公開資訊」新增「爬蟲資訊查詢」頁（依日期查爬回資料 ＋ 頁面設定多個爬蟲執行時間）
+### Task 184：公開資訊爬蟲早上那輪由 08:00 改 08:20（Requirement 31）
 
-對應 Requirements: Requirement 37（＋ Requirement 31 `news_headline`／`NewsPoller`、Requirement 36「公開資訊」分組與排程列表）
+對應 Requirements: Requirement 31（今日股市分析／公開資訊）
+
+**背景**：使用者要求把每日爬蟲早上那一輪由 08:00 改到 **08:20**（中午 12:00、晚上 18:00 不變），仍早於 08:30 今日股市分析（`MarketAnalysisScheduler` cron `0 30 8 * * MON-FRI`）。
+
+#### 設計決策
+
+- 早/午晚的「分」不同（:20 vs :00），單一 `cron = "0 0 8,12,18 * * *"` 無法表達；改用 **Spring `@Scheduled` 可重複標註**於同一 `scheduled()` 方法：`0 20 8 * * *`（早上 08:20）＋`0 0 12,18 * * *`（中午/晚上），行為與原本一致（皆呼 `run("scheduled")`）。
+- 排程沿革：06:00（Task 149.21）→08:00（Task 177）→08:20（本項）。
+
+#### 實作
+
+- [x] 184.1 ext `NewsPoller.scheduled()`：拆兩個 `@Scheduled`；class javadoc 與方法註解 08:00→08:20。
+- [x] 184.2 ext `application.yml`：`news-scraper` 註解 08→08:20。
+- [x] 184.3 spec：`requirements.md` R31 新增本 AC＋更新 Task 149.21／177／179 之排程字串；`design.md` 同步 08:20；`tasks.md` 本任務。
+- [ ] 184.4 部署驗證：`--no-cache` 重 build external-materials-service＋recreate；確認 `scheduled()` 兩個 cron 生效、早上為 08:20。
+- [ ] 184.5 commit + 兩段式 merge。
+
+### Task 185：公開資訊爬蟲新增「韓國股市」快照（KOSPI 大盤＋三星電子＋SK 海力士）（Requirement 31）
+
+對應 Requirements: Requirement 31（今日股市分析／公開資訊）
+
+**背景**：使用者要求每日公開資訊新增韓國股市大盤（KOSPI）表現，及三星電子、SK 海力士的股價與漲跌幅。現況盤點：(1) **KOSPI 已在抓**（既有海外指數管線 `IndexDailyRefreshScheduler`／`MacroDataFetchClient` `^KS11`→`us_index_daily_history` 之 `index_code=KOSPI`），直接讀即可、不重抓；(2) **三星（005930）/SK 海力士（000660）是個股、目前完全沒有**，需新增抓取。採「只餵資料給分析」最小方案（使用者確認）：韓股快照自動進 `news_headline`／SRPP JSON／今日股市分析量化桶，不新增 `krContext`／prompt 敘事／前端專屬區塊。
+
+#### 設計決策
+
+- **收斂在 external-materials-service 一個服務**：backend 只加一張共用表的 Liquibase changelog（分析端 category-agnostic，`kr-market` 自動被吃到，零程式碼改動）。
+- **三星/海力士存新表 `foreign_stock_daily_history`**，語意獨立於 `us_index_daily_history`（指數）與 `stock_price_history`（投組個股、market 分類驅動），避免污染既有兩條線；ext 以 JdbcTemplate 直寫、無 JPA entity。僅存 `close_point`（快照只需最新＋前一交易日收盤算漲跌%）。
+- **韓股個股抓價重用個股管線**：`PriceFetchClient.fetchKrHistoricalRange` 照抄 `fetchUkHistoricalRange`（Yahoo chart、curl 短 UA），時區 `Asia/Seoul`、symbol `.KS`。
+- **`publishedAt=Instant.now()`／`url` 固定 dedupe 覆寫**：比照既有 fx／us-market 快照。`kr-market` 非 `news` category → `PublicInfoStockFilter` 一律保留。
+
+#### 實作
+
+- [x] 185.1 backend Liquibase：新增 `v1.55.0-foreign-stock-daily.sql`（`foreign_stock_daily_history`：stock_code／trading_date PK、close_point NUMERIC(18,4)）＋ `db.changelog-master.yaml` 註冊。
+- [x] 185.2 ext `PriceFetchClient.fetchKrHistoricalRange(code, start, end)`：Yahoo `{code}.KS`、時區 Asia/Seoul。
+- [x] 185.3 ext `StockSourceQuery`：新增 `upsertForeignStockDaily(...)` 與 `loadLatestForeignStockClose(code)`（回 `ForeignStockClose` record，void 區塊 lambda）。
+- [x] 185.4 ext 新增 `KrStockPoller`：每日 16:00 Asia/Taipei ＋開機 warmup 抓 005930／000660 近日收盤 upsert；`kr-stock.enabled` 開關（`application.yml`）。
+- [x] 185.5 ext `MarketSnapshotFetchClient.buildKrMarketSnapshot()`：讀 KOSPI（`loadLatestUsIndexClose("KOSPI")`）＋三星/海力士（`loadLatestForeignStockClose`），組 `category=kr-market` `NewsRow` 加入 `fetchAll()`；class javadoc 同步。`NewsRow` javadoc 補 `kr-market`／`kr-index`／`KR`。
+- [x] 185.6 spec：`requirements.md` R31 新增本 AC；`design.md` ERD 加 `foreign_stock_daily_history`、量化快照段補韓股（第 3 則）、`news_headline` category/source 列舉、`KrStockPoller`；`tasks.md` 本任務。
+- [ ] 185.7 部署驗證：`--no-cache` 重 build external-materials-service＋backend（Liquibase 建表）＋recreate；驗 `foreign_stock_daily_history` 有 005930／000660 列、`news_headline` 出現 `kr-market` 列（title 含 KOSPI／三星電子／SK海力士＋漲跌%）、SRPP `public_info_<date>.json` 含韓股項。
+- [ ] 185.8 commit + 兩段式 merge。
+
+### Task 186：今日股市分析排程由 08:30 改 08:45（Requirement 31）
+
+對應 Requirements: Requirement 31（今日股市分析）
+
+**背景**：使用者要求把「今日股市分析」由每交易日 08:30 改為 **08:45**。因早盤爬蟲餵料在 08:20，改 08:45 後餵料→分析餘裕由 10 分變 25 分，時序更安全（分析另於花錢前自行 `refreshTwClosureToday()` 現爬 DGPA 判休市，不依賴颱風 poller 已跑完）。
+
+#### 實作
+
+- [x] 186.1 backend `MarketAnalysisScheduler`：`RUN_AT = LocalTime.of(8, 45)`（self-heal 判定）＋ cron `0 30 8`→`0 45 8`；javadoc／log 內 08:30→08:45（注意 L47「05:00–08:45 poller」是颱風時窗，另由 Task 187 改 05:00–07:00、「08:30 前」改 08:45 前）。
+- [x] 186.2 backend `MarketAnalysisService`／`MarketAnalysisSetting` javadoc 內 08:30→08:45。
+- [x] 186.3 前端 `TodayMarketAnalysisView.vue`：頁面說明／tooltip／收件人提示／空狀態／註解 08:30→08:45（5 處）。
+- [x] 186.4 bff `SchedulePublicBffController` 排程列表：分析 entry schedule `交易日 08:30`→`08:45`、cron `0 30 8 * * MON-FRI`→`0 45 8 * * MON-FRI`。
+- [x] 186.5 spec：`requirements.md`／`design.md` 現況敘述所有分析 08:30→08:45（含 design cron 字面 `0 30 8`→`0 45 8`）。歷史 task log（149/162/177/179 等）不追溯。
+- [ ] 186.6 部署驗證＋commit。
+
+### Task 187：台股臨時休市偵測時窗由 05:00–08:45 縮短為 05:00–07:00（Requirement 7）
+
+對應 Requirements: Requirement 7（颱風假 / 臨時休市偵測）
+
+**背景**：使用者要求颱風／臨時休市偵測「只需由 05:00 開始每 15 分鐘偵測、到 07:00 即可」。原 `0 0/15 5-8`（05:00–08:45）縮為 05:00–07:00（最後一次 07:00）。
+
+#### 設計決策
+
+- 含 07:00 整點無法單一 6 欄 cron 表達（時×分笛卡兒積會多跑 07:15/30/45）；`@Scheduled` 可重複標註，拆兩條：`0 0/15 5-6`（05:00–06:45）＋ `0 0 7`（07:00）。
+- 注意其他下游（market-status／`PricePoller`／`ClosePersister`／備份）透過 business 假日快取 10 分 TTL 傳播；07:00 後才公告的颱風假傳播窗縮短——但「今日股市分析」自身於 08:45 花錢前 `refreshTwClosureToday()` 現爬，不受影響。**惟該 08:45 現爬受 `enabled` 閘門保護（`MarketAnalysisScheduler` 於 `!isEnabled()` 先 return，早於 `refreshTwClosureToday()`）：故「每日自動分析停用（enabled=false）」時，07:00–09:00 才公告的臨時休市當日無自動 fallback 偵測，非分析下游可能漏接。可接受理由：涵蓋 09:00–13:30 交易時段的停班公告實務上多於清晨（約 06:00 前）即發布、落在 05:00–07:00 窗內（R7 亦界定僅涵蓋交易時段者才算休市），此為使用者「到 07:00 即可」的前提。**
+
+#### 實作
+
+- [x] 187.1 ext `TwClosurePoller`：cron 拆兩條（`0 0/15 5-6` ＋ `0 0 7`，MON-FRI）；class／方法 javadoc 05:00–08:45→05:00–07:00。
+- [x] 187.2 bff `SchedulePublicBffController` 排程列表：颱風 entry schedule `交易日 05:00–08:45 每 15 分鐘`→`05:00–07:00`、cron→`0 0/15 5-6 * * MON-FRI；0 0 7 * * MON-FRI`。
+- [x] 187.3 spec：`requirements.md`（R7 L114 cron／L117「依賴 05:00–08:45 poller」）、`design.md`（L320 排程）現況敘述更新。並修 `MarketAnalysisScheduler` L47 對照敘述「05:00–08:45」→「05:00–07:00」。
+- [ ] 187.4 部署驗證＋commit。
+
+### Task 188：公開資訊爬蟲中午時間由 12:00 改 11:30（Requirement 31）
+
+對應 Requirements: Requirement 31（今日股市分析／公開資訊）
+
+**背景**：使用者要求抓公開資訊的時間改為 **08:20 / 11:30 / 18:00**（早上 08:20、晚上 18:00 不變，中午 12:00→11:30）。順帶校正排程列表 registry 既有漂移（原顯示 08:00/12:00/18:00 單一 cron，實際已 08:20/兩 cron）並補登遺漏的 `KrStockPoller`（Task 185 新增未登錄）。
+
+#### 實作
+
+- [x] 188.1 ext `NewsPoller`：`scheduled()` cron 由兩條拆為三條（`0 20 8` ＋ `0 30 11` ＋ `0 0 18`，Asia/Taipei）；class／方法 javadoc 12:00→11:30、「早於 08:30」→08:45。
+- [x] 188.2 ext `application.yml`：`news-scraper` 註解 08:20/12:00/18:00→08:20/11:30/18:00。
+- [x] 188.3 bff `SchedulePublicBffController` 排程列表：財經新聞 entry schedule→`每日 08:20 / 11:30 / 18:00`、cron→三條、description「08:00 早於 08:30」→「08:20 早於 08:45」；**新增** `KrStockPoller` entry（韓股參考個股抓取，`0 0 16`）；清單筆數 33→34、external 23→24。
+- [x] 188.4 spec：`requirements.md`／`design.md` 現況爬蟲 cadence 08:20/12:00/18:00→08:20/11:30/18:00（Task 184 之 AC 為當時史實，中午 12:00 保留、由本任務接續）。
+- [ ] 188.5 部署驗證：重建 backend／external-materials／bff／frontend、重啟，驗排程列表頁顯示新 cron／時窗、jar 內 cron 正確。
+- [ ] 188.6 commit + 兩段式 merge。
+### Task 189: 交易日曆匯出到指定路徑（JSON／Excel）
+
+對應 Requirements: Requirement 37（交易日曆匯出）；沿用 Requirement 34 輸出路徑安全模型、CLAUDE.md「一頁一支 BFF」「同義欄位、同一 business service API」。
+
+#### 需求
+
+交易日曆頁新增「匯出」動作：指定年度後，把整年交易日曆（台／美／英三市每日交易日旗標＋各市場國定假日）以 JSON 或 Excel 寫檔到使用者指定目錄（家目錄為根＋相對子路徑，附檔案總管式資料夾選擇器）。手動一次性匯出，不排程、不落 DB。
+
+#### 設計決策
+
+- **資料單一來源＝`MarketDataService`**：交易日曆的假日／交易日判斷全走既有 `getTw/Us/UkHolidays(year)` ＋ `isTw/Us/UkTradingDay(date)`（與頁面日曆格、市場狀態同源），逐日建整年表；前端只 render、不重算。
+- **沿用 Requirement 34 輸出路徑模型、但獨立自足**：新 `TradingCalendarExportService` 自帶 `EXPORT_OUTPUT_DIR` 基底 ＋ `resolveDir`／`browse` 路徑安全邏輯（normalize `startsWith(base)` 防跳脫），**刻意不改動 `ExportScheduleService`**（Requirement 34 為已上線、含租戶隔離的排程功能，零回歸風險優先）。browse 為無狀態檔案系統列目錄（非財務「同義欄位」，無跨頁值不一致風險），故重用其安全模型而不強制共用同一 business 端點；交易日曆頁走自己的 BFF（一頁一支）。
+- **格式**：`json` → `ObjectMapper` pretty-print；`excel` → Apache POI（沿用既有依賴）。格式非二者回 400。
+- **原子寫檔**：`交易日曆_{year}.{ext}` 先寫 `*.tmp` 再 `ATOMIC_MOVE + REPLACE_EXISTING`（比照 `NewsPoller.exportPublicInfoJson`），同年度覆寫不留殘檔。
+- **非 owner-scoped**：市場公開資料 ＋ 檔案系統操作，服務不注入 `CurrentUserContext`、不做 owner 過濾（與 `MarketDataController` 假日端點一致）；存取控制靠 BFF 登入驗證。
+- **無 DB migration**：純檔案輸出、不持久化設定。
+
+#### 實作
+
+- [x] 189.1 spec：`requirements.md` 新增 Requirement 37；`design.md` 新增「Requirement 37（Task 189）」節（架構／JSON 與 Excel 結構／API／關鍵邏輯）；`tasks.md` 本任務。
+- [x] 189.2 business `dto/TradingCalendarExportDto`：`RunResponse(path, sizeBytes, format, year, totalDays)`／`BrowseResponse(baseDir, subpath, absolutePath, directories)`／`DirEntry(name, path)`。
+- [x] 189.3 business `service/TradingCalendarExportService`：`exportToDir(year, format, subpath)` 逐日建表（`MarketDataService`）→ JSON／Excel byte[] → 原子寫檔；`browse(subpath)` 唯讀列子目錄；私有 `normalizeSubpath`／`resolveDir` 路徑安全。
+- [x] 189.4 business `controller/TradingCalendarExportController`：`POST /api/trading-calendar-export/run`、`GET /api/trading-calendar-export/browse`。
+- [x] 189.5 BFF `TradingCalendarBffController`：`POST /export`、`GET /export/browse` passthrough。
+- [x] 189.6 frontend `api/index.js`：`tradingCalendar.exportToDir`／`browseExportDir`。
+- [x] 189.7 frontend `TradingCalendarView.vue`：日曆卡標題加「匯出」按鈕＋匯出對話框（年度／格式 json|excel／資料夾樹狀選擇器，選擇器比照 `AssetHistoryView.vue`）。
+- [x] 189.8 部署驗證：`--no-cache` 重 build business-services＋bff＋frontend、recreate；於 UI 觸發匯出，驗 host 目錄出現 `交易日曆_{year}.json`／`.xlsx`、內容含整年逐日與假日、格式錯誤回 400、路徑跳脫被拒。
+- [ ] 189.9 commit + 兩段式 merge。
+
+### Task 190: 交易日曆匯出「每日排程自動匯出」（指定時間）
+
+對應 Requirements: Requirement 37（排程 AC 群）；沿用 Requirement 34 排程機制。
+
+#### 需求
+
+即時匯出（Task 189）之外，新增每日指定時間自動匯出**當前年度**交易日曆（格式／資料夾沿用對話框選定值）。per-user 設定、每分鐘 poll、重啟自癒。
+
+#### 設計決策
+
+- **比照 Requirement 34 排程，但背景 tick 免 owner 過濾**：交易日曆為全域資料，`TradingCalendarExportScheduleService` 背景 `findAll()` 逐列產檔時直接 `TradingCalendarExportService.exportToDir(當前年, format, subpath)`，**不需** `enableFilter`（與 `ExportScheduleService` 需縮資產不同）；僅設定表 `trading_calendar_export_schedule` 為 owner-scoped（`@Filter`）。
+- **當前年度自動滾動**：排程匯出「執行當下西元年」，隨年度／颱風假更新保持最新，不釘死固定年。
+- **即時＋排程共用格式/資料夾**：對話框上方 format/subpath 同時供即時匯出與排程；儲存排程時帶入。
+- **格式白名單 + 路徑防跳脫**：沿用 Task 189 的 `normalizeFormat`／`resolveDir` 驗證，另 DB CHECK `format IN ('json','excel')`。
+
+#### 實作
+
+- [x] 190.1 spec：`requirements.md` Requirement 37 補排程 AC 群；`design.md` Requirement 37 加「每日排程自動匯出（Task 190）」節（資料流／資料模型／API）；`tasks.md` 本任務。
+- [x] 190.2 DB：`v1.56.0-trading-calendar-export-schedule.sql` 建 `trading_calendar_export_schedule`（owner UNIQUE、hour/minute/format CHECK），master changelog include。
+- [x] 190.3 business `model/TradingCalendarExportSchedule`（`@Filter(ownerFilter)`）＋`repository/TradingCalendarExportScheduleRepository`。
+- [x] 190.4 business `dto/TradingCalendarExportDto` 加 `ScheduleSettingRequest`／`ScheduleSettingResponse`。
+- [x] 190.5 business `service/TradingCalendarExportScheduleService`：`getForCurrentUser`／`updateForCurrentUser`／`@Scheduled tick`／`selfHealOnStartup`／`runScheduled`（呼叫 `exportToDir`）。
+- [x] 190.6 business `TradingCalendarExportController` 加 `GET/PUT /schedule`。
+- [x] 190.7 BFF `TradingCalendarBffController` 加 `GET/PUT /export/schedule` passthrough。
+- [x] 190.8 frontend：`api/index.js` 加 `getExportSchedule`／`updateExportSchedule`；`TradingCalendarView.vue` 匯出對話框加排程區塊（啟用開關＋每日時間＋儲存排程＋上次執行狀態）。
+- [x] 190.9 部署驗證：重建 business+bff+frontend、recreate；驗排程 GET/PUT、`run_now` 即時仍可、設定啟用後背景 tick 到點產檔。
+- [ ] 190.10 commit + 兩段式 merge。
+
+### Task 191：可設定多個「分析寄送時間」，每時段各重跑一次分析並各寄一封（限台股交易日）（Requirement 31）
+
+對應 Requirements: Requirement 31（今日股市分析——排程時點與交易日閘門、每日 Email 寄送 Task 151、颱風假縱深守門 Task 162）
 
 #### 背景
 
-使用者需要在「公開資訊」下有一頁能：（1）指定日期查 `NewsPoller` 那天爬回 `news_headline` 的資料（新聞／三大法人／大盤成交／台幣兌美元快照／美股指數快照），日期語意可切換 `fetched_at`／`published_at`；（2）直接在頁面設定 `NewsPoller` 的執行時間、且可設多個時間點。原 `NewsPoller` 執行時間為編譯期常數 `@Scheduled(cron="0 0 8,12,18")`，本 Task 改為 DB 驅動的動態排程（新表 `crawler_schedule`）。權限：查詢／讀排程 `authenticated`，改排程 `PUT` 限 ADMIN。
+原本每交易日固定 08:45（Task 186） 觸發一次分析並寄送。使用者要求「增加寄出 email 的時間，且限台股交易日」，並選定：(1) 寄送時間可於**畫面自行設定多個**；(2) 每個時間點**重新跑一次 AI 分析**（非重寄同一份）。故把單一 08:45 cron 升級為「可設定的多個寄送時間」，每個啟用時段於台股交易日各觸發一次全新分析並各寄一封。
+
+#### 設計
+
+見 `design.md`「Requirement 31」之資料模型（新表 `market_analysis_send_time`，Liquibase `v1.57.0`）、API 表（business `/api/market-analysis/send-times` 與 BFF passthrough）、關鍵業務邏輯（每分鐘 tick 排程、`generateForSend` 重跑＋重置 `email_sent_at`、self-heal 改依最早時點）。`requirements.md` Requirement 31「可設定多個分析寄送時間」AC。
 
 #### Steps:
 
-- [x] 184.1 **spec**：`requirements.md` 新增 Requirement 37；`design.md` 補路由 `/crawler-data`、`CrawlerDataBffController`、business API（`/api/news-headlines`、`/api/crawler-schedule`）、ERD `CrawlerSchedule`、`crawler_schedule` DDL、`NewsPoller` 動態排程說明、排程列表同步註記；`tasks.md` 本 Task。
-- [x] 184.2 **DB（backend Liquibase）**：新增 `changes/v1.55.0-crawler-schedule.sql`＋掛入 `db.changelog-master.yaml`。建 `crawler_schedule`（`id`／`crawler_key`／`run_hour`／`run_minute`／`enabled`／`updated_at`；UNIQUE(crawler_key,run_hour,run_minute)；CHECK hour 0–23、minute 0–59），seed `('news-poller',8/12/18,0)`。
-- [x] 184.3 **Entity＋Repository（backend）**：`model/CrawlerSchedule.java`（全域、無 `@Filter`）；`repository/CrawlerScheduleRepository.java`（`findByCrawlerKeyOrderByRunHourAscRunMinuteAsc`、`deleteByCrawlerKey`）。`NewsHeadlineRepository` 加 `findByFetchedAtGreaterThanEqualAndFetchedAtLessThanOrderByFetchedAtDesc`／`findByPublishedAtGreaterThanEqualAndPublishedAtLessThanOrderByPublishedAtDesc`。
-- [x] 184.4 **business controller — 查詢**：`NewsHeadlineController`（`GET /api/news-headlines?date=&dateField=&category=`）：以 Asia/Taipei 該日 [00:00, 翌日00:00) 轉 `Instant`，依 `dateField`（缺省 `fetched`）選欄位查詢，`category` 選填過濾，回 `NewsHeadlineDto`（含 published_at／fetched_at／category／source／region／title／url／summary）。
-- [x] 184.5 **business controller — 排程**：`CrawlerScheduleController`（`GET`／`PUT /api/crawler-schedule?crawler=`）＋ `CrawlerScheduleService`：GET 回時間清單；PUT 驗 0–23/0–59＋去重後整批覆寫（`deleteByCrawlerKey`＋batch save）。`PUT` 以 `CurrentUserContext.isAdmin()` 縱深防禦（`AdminRequiredException`→403）。
-- [x] 184.6 **ext — NewsPoller 動態排程**：移除 `@Scheduled(cron="0 0 8,12,18")`，改每分鐘 ticker `@Scheduled(cron="0 * * * * *", zone="Asia/Taipei")` 讀 `crawler_schedule`（新增 `CrawlerScheduleQuery` JdbcTemplate；`crawler_key='news-poller'` 且 `enabled`）比對現在 `HH:mm` 命中即在獨立執行緒 `runGuarded("scheduled")`（`AtomicBoolean` 防重疊）；DB 例外 fallback 08/12/18；保留 warmup 與保留期清理。
-- [x] 184.7 **BFF**：`CrawlerDataBffController`（`GET /api/bff/crawler-data`、`GET/PUT /api/bff/crawler-data/schedule`），WebClient 轉呼 business；`SecurityConfig` 加 `PUT /api/bff/crawler-data/schedule` 限 ADMIN，`GET` 落 authenticated。
-- [x] 184.8 **前端**：`App.vue` 選單「公開資訊」加子項「爬蟲資訊查詢」（`/crawler-data`，icon Search）；`router/index.js` 加 route；`api/index.js` 加 `bffApi.crawlerData`（query／getSchedule／saveSchedule）；新 `views/CrawlerDataView.vue`（日期選擇＋`fetched/published` 切換＋類別過濾＋結果表格；排程時間清單增減／啟用／儲存，非 ADMIN 唯讀並提示）。
-- [x] 184.9 **排程列表同步**：`SchedulePublicBffController` 的 `JOBS` 中 NewsPoller 該筆改標「動態：依『爬蟲資訊查詢』頁設定（預設 08/12/18）」。
-- [ ] 184.10 **部署驗證**（功能已於運行 stack 逐項驗過，惟最終乾淨部署被環境問題阻斷，待重跑）：已驗證通過項目——（a）`GET /api/news-headlines` 依日期查得當日 `news_headline`，`fetched/published` 兩語意與 `category=fx` 過濾皆正確（回真實 fx／us-market／news 列）；（b）Liquibase v1.55.0 建表＋seed 08/12/18；（c）ADMIN `PUT /api/crawler-schedule` 成功整批覆寫、非 ADMIN → 403、非法時分 → 400；（d）**動態排程實測**：API 設 00:33 後 `NewsPoller` 於 TW 00:33:00 準時在 `news-scheduled` 執行緒觸發 upsert（免重啟生效）；（e）前端新頁 chunk／路由／`bff/crawler-data` 已部署、BFF 路由存在（401）。**阻斷原因**：跨 worktree 共用 `asset-management-*:latest` 映像被並行 session 反覆覆蓋（曾出現「有 NewsHeadlineController、無 CrawlerScheduleController」的他版），隨後 Docker daemon 於高並行 build 下崩潰回 500。待 Docker 恢復＋確認無其他 session 並行 build 後，於本 worktree 重跑 `docker compose build`＋`--force-recreate` 並複驗即可收尾。
-- [ ] 184.11 commit + 兩段式 merge。
+- [ ] 191.1 **資料層**：Liquibase `v1.57.0-market-analysis-send-time.sql` 建 `market_analysis_send_time`（`id`／`send_time TIME UNIQUE`／`active`／`created_at`）＋Seed `08:45 active`；master yaml 加 include。Entity `MarketAnalysisSendTime`（全域、無 owner）＋`MarketAnalysisSendTimeRepository`（`findAllByOrderBySendTimeAsc`／`findByActiveTrueOrderBySendTimeAsc`）。
+- [ ] 191.2 **寄送時間 CRUD service／DTO**：`MarketAnalysisSendTimeService`（`list`／`add(time)`：`LocalTime.parse` 解析 `HH:mm`＋截到分＋唯一性檢查、非法或重複拋 `IllegalArgumentException`／`delete(id)`／`toggleActive(id)`／`activeTimes()` 供排程）；回傳 `MarketAnalysisSettingsDto.SendTime{id,time,active}`。`getSettings()` 併帶 `sendTimes`。
+- [ ] 191.3 **排程改每分鐘 tick**：`MarketAnalysisScheduler` 由 `0 45 8 * * MON-FRI` 改 `0 * * * * MON-FRI`——比對現在 `HH:mm` 是否命中啟用時點，未命中零成本 return；命中才判 `enabled` → 交易日閘門（`refreshTwClosureToday` + `isTwTradingDay`）→ `generateForSend`。self-heal 改依「最早啟用時點」補跑一次（`generateIfAbsent`，不逐時段補寄）。
+- [ ] 191.4 **`generateForSend`（重跑＋重寄）**：`MarketAnalysisService` 新增 `generateForSend(date, trigger)`＝`generateInternal(date, trigger, skipIfAlreadyOk=false, resetEmailSent=true)`；`submitBatch` 送出新批次時（`resetEmailSent` 為真）`row.setEmailSentAt(null)`，使收尾 `finalizeIfReady` 重新寄一封（交易日再驗與 `email_sent_at` 冪等邏輯不變）。手動 `generate` 維持 `resetEmailSent=false`（不重寄）。
+- [ ] 191.5 **business controller 端點**：`MarketAnalysisController` 加 `GET/POST/DELETE/PATCH /api/market-analysis/send-times`（mutation 以 `CurrentUserContext.isAdmin()` 縱深防禦，非 admin 拋 `AdminRequiredException`）。
+- [ ] 191.6 **BFF passthrough**：`TodayMarketAnalysisBffController` 加 `POST/DELETE/PATCH /api/bff/today-market-analysis/send-times`；聚合 GET 已含 `settings.sendTimes`。BFF `SecurityConfig` 對此三動詞路徑限 `AUTHORITY_ADMIN`。
+- [ ] 191.7 **前端**：`api/index.js` 加 `addSendTime`／`deleteSendTime`／`toggleSendTime`；`TodayMarketAnalysisView.vue` 新增「分析寄送時間」卡（管理者可增／刪／啟用切換＋`el-time-picker`；一般使用者唯讀顯示啟用時點）。明確標註「限台股交易日（週末／颱風假／假日不寄）」與「每多一個時段即多一次 AI 費用」。更新頁面既有寫死 08:45 文案為泛用敘述。
+- [ ] 191.8 **整合 main（兩段式 merge）**：feature 分支 commit → main 以 `--no-ff` merge。
+
+---
+
+### Task 192: 「公開資訊」新增「爬蟲資訊查詢」頁（依日期查爬回資料 ＋ 頁面設定多個爬蟲執行時間）
+
+對應 Requirements: Requirement 38（＋ Requirement 31 `news_headline`／`NewsPoller`、Requirement 36「公開資訊」分組與排程列表）
+
+#### 背景
+
+使用者需要在「公開資訊」下有一頁能：（1）指定日期查 `NewsPoller` 那天爬回 `news_headline` 的資料（新聞／三大法人／大盤成交／台幣兌美元快照／美股指數快照），日期語意可切換 `fetched_at`／`published_at`；（2）直接在頁面設定 `NewsPoller` 的執行時間、且可設多個時間點。原 `NewsPoller` 執行時間為編譯期常數 `@Scheduled 三個 cron（0 20 8／0 30 11／0 0 18）`，本 Task 改為 DB 驅動的動態排程（新表 `crawler_schedule`）。權限：查詢／讀排程 `authenticated`，改排程 `PUT` 限 ADMIN。
+
+#### Steps:
+
+- [x] 192.1 **spec**：`requirements.md` 新增 Requirement 38；`design.md` 補路由 `/crawler-data`、`CrawlerDataBffController`、business API（`/api/news-headlines`、`/api/crawler-schedule`）、ERD `CrawlerSchedule`、`crawler_schedule` DDL、`NewsPoller` 動態排程說明、排程列表同步註記；`tasks.md` 本 Task。
+- [x] 192.2 **DB（backend Liquibase）**：新增 `changes/v1.58.0-crawler-schedule.sql`＋掛入 `db.changelog-master.yaml`。建 `crawler_schedule`（`id`／`crawler_key`／`run_hour`／`run_minute`／`enabled`／`updated_at`；UNIQUE(crawler_key,run_hour,run_minute)；CHECK hour 0–23、minute 0–59），seed `('news-poller',8/12/18,0)`。
+- [x] 192.3 **Entity＋Repository（backend）**：`model/CrawlerSchedule.java`（全域、無 `@Filter`）；`repository/CrawlerScheduleRepository.java`（`findByCrawlerKeyOrderByRunHourAscRunMinuteAsc`、`deleteByCrawlerKey`）。`NewsHeadlineRepository` 加 `findByFetchedAtGreaterThanEqualAndFetchedAtLessThanOrderByFetchedAtDesc`／`findByPublishedAtGreaterThanEqualAndPublishedAtLessThanOrderByPublishedAtDesc`。
+- [x] 192.4 **business controller — 查詢**：`NewsHeadlineController`（`GET /api/news-headlines?date=&dateField=&category=`）：以 Asia/Taipei 該日 [00:00, 翌日00:00) 轉 `Instant`，依 `dateField`（缺省 `fetched`）選欄位查詢，`category` 選填過濾，回 `NewsHeadlineDto`（含 published_at／fetched_at／category／source／region／title／url／summary）。
+- [x] 192.5 **business controller — 排程**：`CrawlerScheduleController`（`GET`／`PUT /api/crawler-schedule?crawler=`）＋ `CrawlerScheduleService`：GET 回時間清單；PUT 驗 0–23/0–59＋去重後整批覆寫（`deleteByCrawlerKey`＋batch save）。`PUT` 以 `CurrentUserContext.isAdmin()` 縱深防禦（`AdminRequiredException`→403）。
+- [x] 192.6 **ext — NewsPoller 動態排程**：移除 `@Scheduled 三個 cron（0 20 8／0 30 11／0 0 18）`，改每分鐘 ticker `@Scheduled(cron="0 * * * * *", zone="Asia/Taipei")` 讀 `crawler_schedule`（新增 `CrawlerScheduleQuery` JdbcTemplate；`crawler_key='news-poller'` 且 `enabled`）比對現在 `HH:mm` 命中即在獨立執行緒 `runGuarded("scheduled")`（`AtomicBoolean` 防重疊）；DB 例外 fallback 08/12/18；保留 warmup 與保留期清理。
+- [x] 192.7 **BFF**：`CrawlerDataBffController`（`GET /api/bff/crawler-data`、`GET/PUT /api/bff/crawler-data/schedule`），WebClient 轉呼 business；`SecurityConfig` 加 `PUT /api/bff/crawler-data/schedule` 限 ADMIN，`GET` 落 authenticated。
+- [x] 192.8 **前端**：`App.vue` 選單「公開資訊」加子項「爬蟲資訊查詢」（`/crawler-data`，icon Search）；`router/index.js` 加 route；`api/index.js` 加 `bffApi.crawlerData`（query／getSchedule／saveSchedule）；新 `views/CrawlerDataView.vue`（日期選擇＋`fetched/published` 切換＋類別過濾＋結果表格；排程時間清單增減／啟用／儲存，非 ADMIN 唯讀並提示）。
+- [x] 192.9 **排程列表同步**：`SchedulePublicBffController` 的 `JOBS` 中 NewsPoller 該筆改標「動態：依『爬蟲資訊查詢』頁設定（預設 08/12/18）」。
+- [ ] 192.10 **部署驗證**（功能已於運行 stack 逐項驗過，惟最終乾淨部署被環境問題阻斷，待重跑）：已驗證通過項目——（a）`GET /api/news-headlines` 依日期查得當日 `news_headline`，`fetched/published` 兩語意與 `category=fx` 過濾皆正確（回真實 fx／us-market／news 列）；（b）Liquibase v1.55.0 建表＋seed 08/12/18；（c）ADMIN `PUT /api/crawler-schedule` 成功整批覆寫、非 ADMIN → 403、非法時分 → 400；（d）**動態排程實測**：API 設 00:33 後 `NewsPoller` 於 TW 00:33:00 準時在 `news-scheduled` 執行緒觸發 upsert（免重啟生效）；（e）前端新頁 chunk／路由／`bff/crawler-data` 已部署、BFF 路由存在（401）。**阻斷原因**：跨 worktree 共用 `asset-management-*:latest` 映像被並行 session 反覆覆蓋（曾出現「有 NewsHeadlineController、無 CrawlerScheduleController」的他版），隨後 Docker daemon 於高並行 build 下崩潰回 500。待 Docker 恢復＋確認無其他 session 並行 build 後，於本 worktree 重跑 `docker compose build`＋`--force-recreate` 並複驗即可收尾。
+- [ ] 192.11 commit + 兩段式 merge。
