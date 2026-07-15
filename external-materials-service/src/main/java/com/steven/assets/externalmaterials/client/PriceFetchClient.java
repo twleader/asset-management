@@ -613,6 +613,78 @@ public class PriceFetchClient {
         }
     }
 
+    /**
+     * 韓股盤中報價（Task 193）：現價＋當日開盤價＋對前一交易日收盤漲跌%（單位為百分點），
+     * 另附資料所屬 KST 交易日供呼叫端做交易日閘門。缺料欄位為 null（逐項 graceful）。
+     */
+    public record KrIntradayQuote(
+            String symbol,
+            String name,
+            BigDecimal price,
+            BigDecimal open,
+            BigDecimal prevClose,
+            BigDecimal changePct,
+            LocalDate sessionDate
+    ) {}
+
+    /**
+     * Yahoo Finance chart API 取韓股（KRX）盤中即時報價，供公開資訊爬蟲的韓股盤中快照
+     * （{@code category=kr-intraday}，Task 193）取用。
+     *
+     * <p>參數為<b>完整 Yahoo symbol</b>（個股 {@code 005930.KS}、大盤 {@code ^KS11}）——大盤無 {@code .KS}
+     * 後綴，故不沿用 {@link #fetchKrHistoricalRange} 的後綴字串串接；{@code ^} 於此統一 URL-encode。
+     * 走 {@link #curlGetWithRetry}（短 UA {@code Mozilla/5.0}），<b>不可改用 {@code httpGet}</b>
+     * （長 Chrome UA 會被 Yahoo WAF 回 429）。亦不走 {@link #getStockPrice}——其 else 分支落到 NASDAQ。
+     *
+     * <p><b>開盤價取自 {@code indicators.quote[0].open[0]}，而非 {@code meta.regularMarketOpen}</b>：
+     * 後者實測不存在於 Yahoo chart meta（{@link #getYahooLsePrice} 即誤用該欄，英股 {@code openPrice}
+     * 因而恆為 null），照抄會使開盤價恆為 null、功能靜默半殘。昨收同理只取 {@code chartPreviousClose}
+     * （{@code meta.previousClose} 亦不存在）。
+     *
+     * <p>{@code sessionDate} 由 {@code meta.regularMarketTime} 換算 {@code Asia/Seoul} 求得，供呼叫端判斷
+     * 韓國是否休市（休市時 Yahoo 回前一交易日 bar，日期對不上即可判定，免自建農曆韓國假日曆）。
+     * ⚠️ {@code regularMarketTime} <b>只可取日期</b>——實測 KOSPI 回 18:05 KST（落在 15:30 收盤後），
+     * 拿它判「現在是否盤中」會誤判；「是否盤中」應由呼叫端以本地時鐘判定。
+     */
+    public Optional<KrIntradayQuote> fetchKrIntradayQuote(String yahooSymbol) {
+        try {
+            String url = "https://query2.finance.yahoo.com/v8/finance/chart/"
+                    + java.net.URLEncoder.encode(yahooSymbol, java.nio.charset.StandardCharsets.UTF_8)
+                    + "?interval=1d&range=1d";
+            String body = curlGetWithRetry(url, 2);
+            JsonNode result = mapper.readTree(body).path("chart").path("result").path(0);
+            JsonNode meta = result.path("meta");
+            if (meta.isMissingNode() || meta.isEmpty()) return Optional.empty();
+
+            BigDecimal price = jsonDecimal(meta.path("regularMarketPrice"));
+            if (price == null) return Optional.empty();
+
+            long marketTime = meta.path("regularMarketTime").asLong(0);
+            if (marketTime <= 0) return Optional.empty();   // 無時戳＝無法判交易日，寧可不產出
+            LocalDate sessionDate = java.time.Instant.ofEpochSecond(marketTime)
+                    .atZone(java.time.ZoneId.of("Asia/Seoul")).toLocalDate();
+
+            BigDecimal prevClose = jsonDecimal(meta.path("chartPreviousClose"));
+            BigDecimal changePct = (prevClose != null && prevClose.signum() > 0)
+                    ? price.subtract(prevClose).multiply(BigDecimal.valueOf(100))
+                            .divide(prevClose, 4, RoundingMode.HALF_UP)
+                    : null;
+
+            BigDecimal open = jsonDecimal(
+                    result.path("indicators").path("quote").path(0).path("open").path(0));
+
+            String name = meta.path("shortName").asText("");
+            if (name.isBlank()) name = meta.path("longName").asText("");
+
+            return Optional.of(new KrIntradayQuote(
+                    yahooSymbol, name.isBlank() ? null : name,
+                    price, open, prevClose, changePct, sessionDate));
+        } catch (Exception e) {
+            log.warn("Yahoo 韓股盤中報價失敗 {}: {}", yahooSymbol, e.getMessage());
+            return Optional.empty();
+        }
+    }
+
     /** 盤中 5 分鐘 K 線：Yahoo Finance chart API range=Nd / interval=5m，用於警示觸發補抓精確時點。 */
     public record IntradayBar(
             String time,        // ISO LocalDateTime（exchangeTimezone 當地時區）
