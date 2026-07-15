@@ -270,6 +270,17 @@ export const bffApi = {
     get: () => api.get('/bff/schedule-list')
   },
 
+  // CrawlerData（爬蟲資訊查詢，「公開資訊」分組，Requirement 38）
+  crawlerData: {
+    // 查指定日期爬回的 news_headline；dateField: 'fetched'（爬取時間）｜'published'（資料日期）；category 選填
+    query: (date, dateField = 'fetched', category) =>
+      api.get('/bff/crawler-data', { params: { date, dateField, ...(category ? { category } : {}) } }),
+    // 讀 NewsPoller 執行時間點清單 [{hour,minute,enabled}]
+    getSchedule: () => api.get('/bff/crawler-data/schedule'),
+    // 整批覆寫執行時間點（限管理者）
+    saveSchedule: (times) => api.put('/bff/crawler-data/schedule', times)
+  },
+
   // SnapshotList
   snapshotList: {
     getAll:      () => api.get('/bff/snapshot-list'),
