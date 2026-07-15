@@ -86,7 +86,7 @@ public class PortfolioAdviceBffController {
         });
     }
 
-    /** POST /api/bff/portfolio-advice/generate → 轉發 business（同步產生，timeout 180s）。 */
+    /** POST /api/bff/portfolio-advice/generate → 轉發 business（立即回 PROCESSING，timeout 180s）。 */
     @PostMapping("/generate")
     public Mono<ResponseEntity<Map<String, Object>>> generate(@RequestBody(required = false) Map<String, Object> body) {
         return businessServicesClient.post()

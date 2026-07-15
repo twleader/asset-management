@@ -9,7 +9,8 @@ import java.time.Instant;
 
 /**
  * 本地財經新聞（Requirement 31 / Task 149.21）：由 external-materials-service 抓取權威來源
- * （鉅亨網 / 自由時報 / 經濟日報）與證交所公開資訊（三大法人買賣超、大盤成交統計），以 JdbcTemplate
+ * （玩股網 / MoneyDJ / 自由時報 / 經濟日報）、證交所公開資訊（三大法人買賣超、大盤成交統計）
+ * 與匯率／美股／韓股量化快照，以 JdbcTemplate
  * 直寫共用 postgres 的 {@code news_headline}；本 entity 供 business-services 讀取後餵入
  * {@link com.steven.assets.service.MarketAnalysisService} 的今日股市分析 prompt。
  *
@@ -39,7 +40,7 @@ public class News {
     @Column(name = "title", length = 500, nullable = false)
     private String title;
 
-    /** 來源代號：cnyes / ltn / udn / twse。 */
+    /** 來源代號：wantgoo / moneydj / ltn / udn / twse / bot-fx / us-index / kr-index / kr-intraday。 */
     @Column(name = "source", length = 100, nullable = false)
     private String source;
 
