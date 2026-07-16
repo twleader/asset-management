@@ -4926,3 +4926,47 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 - **`v1.0.0-initial-schema.sql` 與 dump 對 `stock_price_history` 定義分歧**：目前所有環境皆以 dump 初始化、v1.0.0 恆為 already-ran 故無影響；但若對空 DB（不掛 dump，如 CI／測試容器）跑 Liquibase 會得到不同位數與約束的 schema。
 - **`InternalPriceController` 之 ETF 持股 javadoc 過時**（寫「台股 FinMind fallback」，`design.md` 已明訂 FinMind dataset 移除、改 MoneyDJ → Yahoo）。
 - **`TwTyphoonClosureService.closedForTrading` 無自動化測試**：Task 160 列了 6 個解析案例並標「單元驗證」，但全樹無 `TwTyphoonClosureServiceTest`。
+
+### Task 198：爬蟲新聞來源增列美國財經網站（CNBC / Nasdaq）（Requirement 31）
+
+**對應 Requirements:** Requirement 31（今日股市分析——財經新聞來源；牽涉 Requirement 38 爬蟲資訊查詢頁之顯示）
+**前置任務:** Task 149.21（本地新聞爬蟲 `NewsFetchClient`／`news_headline`）、Task 180（新聞來源擴增與地區規範）
+
+**背景：** 原本地爬蟲**新聞文字報導**來源全為台灣媒體（玩股網／MoneyDJ／自由時報財經・政治・國際／經濟日報），美國資訊僅有 `MarketSnapshotFetchClient` 由 DB 組出的「美股指數收盤」**量化快照**（`category=us-market`），**無美國財經新聞報導**。今日股市分析須綜合美股走向與國內外財經新聞（美股對台股具領先性、Fed／關稅／通膨等美國政策為關鍵變數），故於 `NewsFetchClient` 增列美國權威財經媒體 RSS。詳見 `requirements.md` Requirement 31「爬蟲新聞來源增列美國財經網站（CNBC / Nasdaq，Task 198）」AC 與 `design.md`「ext 抓取（`NewsFetchClient`…）」段。
+
+**設計要點：**
+- **來源**（皆 `category=news`、`region=US`；標準 RSS `<item>`＋真實 `pubDate`）：CNBC 財經專屬三分類 Economy（`www.cnbc.com/id/20910258/device/rss/rss.html`）／Finance（`id/10000664`）／Markets(Investing)（`id/15839069`），`source=cnbc`；Nasdaq Markets（`www.nasdaq.com/feed/rssoutbound?category=Markets`），`source=nasdaq`。
+- **日期解析**：CNBC 為「少秒＋GMT」（`Thu, 16 Jul 2026 14:09 GMT`）、Nasdaq 為數字時區（`+0000`），皆經既有 `parsePubDate`（`RFC_1123_DATE_TIME`，秒為 optional、GMT 於 zone map）驗證可解析（已以 jshell 實測四種樣本全 OK）。
+- **實作**：`fetchRss` 新增 `region` 參數（原 4 個台灣 RSS 呼叫續傳 `"TW"`），`fetchAll()` 增 4 條 US feed，逐來源 `safe(...)` graceful；UA 續用 `Mozilla/5.0`。**不套 `relevantOnly`**（財經專屬 feed；且關鍵詞為中文、僅用於自由時報政治／國際整版一般新聞）。
+- **下游天然相容**：`PublicInfoStockFilter` 個股判定只認台股 `-TW` 代號格式與 wantgoo `newsTags`，美股新聞 `mentioned` 恆空 → 全留；`buildLocalNewsBlock` 依 `category=="news"` 計入 `LOCAL_NEWS_MAX=40` 上限（依 `published_at` 排序，與台灣新聞共用額度）；「爬蟲資訊查詢」頁 `地區` 顯示 `US`、`類別`（仍 `news`）顯示「新聞」，**前端零改動**。
+- **不納入**：MarketWatch（feed 已 301 轉址、目的地未穩定）、Federal Reserve press RSS（Atom `<entry>`／`<updated>`，與既有 `<item>`／`<pubDate>` 解析器不相容），列後續。
+
+#### Steps:
+
+- [x] 198.1 **spec**：`requirements.md` Requirement 31 增「爬蟲新聞來源增列美國財經網站（CNBC / Nasdaq，Task 198）」AC，並於「不得取用中港澳網站」AC 補列 CNBC／Nasdaq；`design.md` `news_headline` 之 `source` 列舉補 `cnbc/nasdaq`、`NewsFetchClient` 段補美國財經新聞來源與 `fetchRss(url, source, region)`；`tasks.md` 本任務。
+- [x] 198.2 **`NewsFetchClient`**：新增 CNBC Economy／Finance／Markets、Nasdaq Markets 四條 US feed 常數；`fetchRss` 加 `region` 參數（台灣既有呼叫傳 `TW`、US feed 傳 `US`）；`fetchAll()` 併入四條 `safe(...)`；class javadoc 補來源。`NewsRow` javadoc 之 `source`／`region` 列舉補 `cnbc/nasdaq`。
+- [x] 198.3 **部署驗證**：`external-materials-service` `--no-cache` 重 build＋`--force-recreate`（healthy）；warmup 抓取日誌 `cnbc-economy 30`／`cnbc-finance 30`／`cnbc-markets 30`／`nasdaq-markets 15`、`upsert 377 則 失敗 0`；`PublicInfoStockFilter 386→保留 377`（US 新聞未誤刪，濾除 9 為非主檔台股）；DB `news_headline` 有 `cnbc 89`／`nasdaq 15`（`region='US'`／`category='news'`）；business `GET /api/news-headlines?date=&dateField=fetched`（＝「爬蟲資訊查詢」頁與今日股市分析共用端點）當日回 US 新聞 103 筆。（另發現 `source='fed'` 16 筆為別分支殘留、最後抓取 07-13，隨保留期淘汰，非本任務範圍。）
+- [ ] 198.4 commit ＋ 兩段式 merge（feature 分支單行短中文 commit、main 用 `--no-ff`）。
+
+### Task 199：台灣中文新聞編輯收錄政策過濾（`EditorialNewsFilter`）（Requirement 31）
+
+**對應 Requirements:** Requirement 31（今日股市分析——新聞收錄範圍）
+**前置任務:** Task 149.21（`NewsFetchClient`）、Task 180（`relevantOnly` 政治／國際相關性過濾）、Task 198（美國財經新聞來源）
+
+**背景：** 使用者要求收斂台灣中文一般新聞收錄範圍，濾掉與財經分析無關的雜訊：(1) 台灣地方新聞除台北／新北／高雄外不收；(2) 中國新聞主收財經與北京政權相關，政治新聞收美／日／台／歐盟＋影響市場地緣，其餘不收。詳見 `requirements.md` Requirement 31「台灣中文新聞編輯收錄政策（`EditorialNewsFilter`，Task 199）」AC 與 `design.md`「台灣中文新聞編輯收錄政策」段。
+
+**設計要點：**
+- 新增 `EditorialNewsFilter`（`external-materials-service` client 套件，純函式 static、無 DI），對台灣「混合型」feed（自由時報 財經／政治／國際、經濟日報）於 `NewsFetchClient` 逐 feed 抓取後套 `retain(rows)`。純財經來源（wantgoo／MoneyDJ）與美國 CNBC／Nasdaq **豁免**。**取代舊 `relevantOnly`／`RELEVANCE_KEYWORDS`**（一併移除，含 `NewsFetchClient` 未再用的 `java.util.Set` import）。
+- 判定＝關鍵詞優先序 cascade（8 步，詳見 spec）：財經最先且涵蓋最廣（不誤刪財經）→ 中國（政權/雙邊/台灣政黨對中→留，純社會→濾）→ 影響市場地緣（地區＋觸發詞）→ 美日台歐盟強政治（覆蓋地方地理）→ 台灣他縣市地方→濾 → 台灣政黨選舉→留 → 北北高地方→留 → 其餘→濾。
+- 關鍵詞集依 **1561 則真實爬取標題**（自運行 DB 撈 ltn+udn）＋**12 路對抗式稽核 Workflow**（每 auditor 判一 shard、synthesize 彙整誤刪/誤留與關鍵詞增刪）校準；`EditorialNewsFilterTest` 以政策五規則代表標題守護。
+- 與 `sanitizeNews`「依來源網域封鎖中港澳媒體」為兩件不同的事（主題 vs 來源網站），並存。
+
+#### Steps:
+
+- [x] 199.1 **spec**：`requirements.md` Requirement 31 增「台灣中文新聞編輯收錄政策」AC 並修正 Task 198 之 `relevantOnly` 引用；`design.md` `NewsFetchClient` 段補 `EditorialNewsFilter`、新增「台灣中文新聞編輯收錄政策」設計段；`tasks.md` 本任務。
+- [x] 199.2 **`EditorialNewsFilter`**：新增 client 套件過濾器（8 步 cascade＋關鍵詞群 FINANCE／CHINA／BEIJING_REGIME／POLITY_STRONG／TW_POLITICS_GENERIC／GEO_REGION／GEO_TRIGGER／TW_WHITELIST_CITY／TW_OTHER_COUNTY）；`trace()` 回判定＋原因供測試。
+- [x] 199.3 **`NewsFetchClient`**：ltn-business／ltn-politics／ltn-world／udn 套 `EditorialNewsFilter.retain`；移除 `relevantOnly`／`RELEVANCE_KEYWORDS`／未用 import。
+- [x] 199.4 **`EditorialNewsFilterTest`**：五規則代表標題與邊界案例（財經優先、中國政權 vs 社會、地緣、地方縣市白名單、非財經一般）。
+- [x] 199.5 **關鍵詞校準**：12 路對抗式稽核 Workflow 回報約 95 筆可信誤判（最大宗＝財經召回不足：盤勢/DRAM/載板/鋼價/囤房預售/保險/上市公司名；次為中國總經政權與地緣召回、及泛詞誤留）。依建議補財經/regime/polity/geo 關鍵詞、加 LIFESTYLE 生活消費否決層與地方公職（鎮長/市議員＋非白名單縣市）否決、縮限泛詞（移除 AI/大企業/董座/創辦人/保費 solo、新高、四川人名、北市子字串誤中竹北市、預售→預售屋）。1561 則語料 keep 78.7%，分佈：finance 1025／china-regime 93／geopolitics 36／polity 55／tw-politics 13／city 6；drop：non-finance-general 254／lifestyle 23／tw-local 25／china-nonfinance 31。`EditorialNewsFilterTest` 13 案全綠。
+- [x] 199.6 **部署驗證**：`--no-cache` 重 build ext ＋ `--force-recreate`（healthy，jar 含 `EditorialNewsFilter`）；warmup 抓取 udn 20→14、ltn 各 feed 已過濾（`safe()` 記 post-filter 數），wantgoo／cnbc／nasdaq 不過濾如設計。查 DB 本輪入庫 ltn/udn 標題：壓倒性為財經（台積電/南亞科/外資/金管會/記憶體/鋼品/青安）、台美歐盟政治（立院預算/巴紐外交/歐盟對中國）、中國政權（馬興瑞肅清/言論審查/海警）、影響市場地緣（伊朗荷姆茲航運/美伊/烏克蘭）；前一版 udn 生活軟文（Buffet新北/全聯台中/單人跟團旅行）已不再入庫。
+- [ ] 199.7 commit ＋ 兩段式 merge（含 Task 198）。
