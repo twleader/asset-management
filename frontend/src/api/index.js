@@ -73,35 +73,6 @@ export const snapshotApi = {
   exportExcel: () => api.get('/snapshots/export', { responseType: 'blob' })
 }
 
-// ===== Institution Settings（共享 lookups，下拉用；CRUD 請走 bffApi.<xxx>Settings） =====
-export const institutionApi = {
-  getAllBanks:    () => api.get('/settings/banks'),
-  getAllBrokers:    () => api.get('/settings/brokers'),
-  getAllDepositTypes:    () => api.get('/settings/deposit-types'),
-  getAllMarketTypes:    () => api.get('/settings/market-types'),
-  getAllTransitFundTypes:    () => api.get('/settings/transit-fund-types'),
-  getActiveTransitFundTypes: () => api.get('/settings/transit-fund-types/active')
-}
-
-// ===== Market Data（目前無前端消費者；股票分析已改走 bffApi.stockAnalysis） =====
-export const marketDataApi = {
-  getStockHistory: (code, market, start, end) =>
-    api.get('/market-data/history/stock', { params: { code, market, start, end } }),
-  getDividendHistory: (code, market, years = 10) =>
-    api.get('/market-data/dividends', { params: { code, market, years } }),
-  getEtfHoldings: (code, market) =>
-    api.get('/market-data/etf-holdings', { params: { code, market } })
-}
-
-// ===== Realized Gains（store 用） =====
-export const gainApi = {
-  getAll: () => api.get('/realized-gains'),
-  create: (data) => api.post('/realized-gains', data),
-  update: (id, data) => api.put(`/realized-gains/${id}`, data),
-  delete: (id) => api.delete(`/realized-gains/${id}`),
-  exportExcel: () => api.get('/realized-gains/export', { responseType: 'blob' })
-}
-
 // ============================================================
 // BFF：每個前端頁面對應一個獨立的 namespace
 // 前端 view 一律走 bffApi.<page>.<method>，不直接呼叫共享 *Api

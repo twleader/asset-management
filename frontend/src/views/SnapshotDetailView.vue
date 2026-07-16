@@ -302,7 +302,7 @@ const groupedStocks = computed(() =>
 )
 
 onMounted(async () => {
-  await Promise.all([fetchDetail(), loadBrokers()])
+  await Promise.allSettled([fetchDetail(), loadBrokers()])
 })
 
 async function fetchDetail() {

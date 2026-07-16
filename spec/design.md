@@ -105,20 +105,21 @@ com.steven.assets/
   - `GET /api/bff/stock-analysis/intraday-ticks` → `/api/market-data/intraday-ticks`（走勢圖「當日」期間用；business-services proxy 至 `external-materials-service /internal/intraday-ticks`，後者讀 Redis LIST `price:ticks:{market}:{code}:{tradingDate}`。**date 省略時的預設 bucket**：今天（該市場時區）若為交易日且今日 tick LIST 已有資料就用今天，否則退回 `findMaxTradingDate`（最近有收盤的交易日）——不可直接用 `findMaxTradingDate`，否則盤中今日收盤價尚未入庫、預設日期會停在前一交易日、讀到空 bucket（見 Task 153）。盤中由 `PricePoller` 每 2 分鐘累積 / 盤後由 `IntradayTickRefresher` 用台股 FinMind `TaiwanStockKBar` + 美/英股 Yahoo 5m 完整覆寫。**盤後 refresh cron：台股 14:00 TW、美股 16:05 ET、英股 17:00 LON**；台股/英股排在收盤後 ~30 分而非 5 分，因 Yahoo 對 TWSE(~25min)/LSE(~15min) 的 5m feed 有延遲，收盤後 5 分抓會截斷（台股停 13:10、英股停 ~16:20），美股 Yahoo 無延遲故 16:05 即完整。另 `IntradayTickStore.replaceTicks` 採 **never-shrink** 防截斷：新抓資料末刻早於既有 LIST 末刻（或為空）就保留既有不覆寫，避免截斷版蓋掉 polling 已到收盤的 tick（Task 156）。台股 Yahoo 5m fallback 的 ticker 後綴依掛牌市場：上市 `.TW`、上櫃（TPEx，含債券 ETF 00xxxB）`.TWO`，`PriceFetchClient.fetchIntraday5m` 先試 `.TW` 空再 fallback `.TWO`，否則上櫃股當日分時恆空，見 Task 119）。**「當日」上方的「昨收 / 今日漲跌」不走此端點、亦不新增欄位**：`StockAnalysisDialog.vue` 於前端 view 從已載入的日線 `history`（同對話框 `/api/bff/stock-analysis/history/stock`）取「該分時交易日之前最後一筆 `stock_price_history` 收盤」為昨收、以 legend 顯示的現價（`lastNonNull(prices)`）自算今日漲跌，維持 tick API 契約（`List<IntradayTick>` 僅 `time`+`price`）不變，且與 Dashboard／管理資產「當日漲跌」同一「vs 前一交易日原始收盤」口徑（Task 158）
 
 - **共享 / 跨頁 passthrough routes**（非單一頁面專屬，由 Spring Cloud Gateway 直接轉發至 business-services，服務跨頁共用的 store CRUD、下拉 lookups、SSE 與基金主檔；皆為刻意的共享資源，不另立 `/api/bff/{page}/**`）：
-  - `SnapshotBffRoutes`：`/api/snapshots/**` → business-services（Pinia store 共用快照 CRUD；單頁資料仍走各自的 `/api/bff/{page}/**`）
-  - `SettingsBffRoutes`：`/api/settings/**` → business-services（銀行 / 券商 / 存款類型 / 市場類型 / 待轉入資金類型的下拉 lookups，被多個表單頁共用；各設定頁的 CRUD 仍走 `/api/bff/{page}-settings/**`）
+  - `MeController`（BFF 自有 controller，非 passthrough）：`GET /api/me`、`POST /api/impersonate` → 認證端點例外，服務 `authStore` / `PendingApprovalView` / App layout 等跨頁情境，故不掛 `/api/bff/{page}/**`（Requirement 28）
+  - `SnapshotBffRoutes`：`/api/snapshots/**` → business-services（Pinia store 共用快照 CRUD；單頁資料仍走各自的 `/api/bff/{page}/**`）。**已知落差**：實際只有 SnapshotFormView 的建立／更新與 App.vue 取最新快照 ID 在用，等於以「store 共用」之名掩蓋單頁未合規；修正方向為 `SnapshotFormBffController` 補 `POST`／`PUT`／list 端點，屬功能變更須另走 SDD 循環
+  - `SettingsBffRoutes`：`/api/settings/**` → business-services。**目前無前端消費者**：原「被多個表單頁共用的下拉 lookups」說法已不成立——lookups 已分別由 `/api/bff/snapshot-form/lookups` 與 `/api/bff/fund-settings/bank-options`（Task 175）取代，前端 `institutionApi` wrapper 已於 Task 197 移除。route 本身暫留（移除需重建 BFF 服務），**屬待清理項，勿據此段落認定它是現行的共享例外**
   - `FundBffRoutes`：`/api/funds`、`/api/fund-nav/**`、`/api/fund-dividend/**` → business-services（FundSettingsView 基金主檔 CRUD 與 NAV / 配息回補，Requirement 19/20/21）。**慣例例外**：基金主檔頁直接沿用 `/api/funds` 資源 passthrough（基金主檔為跨頁共享資源）。SnapshotForm 讀同一份基金主檔，但走自己頁面專屬的 `/api/bff/snapshot-form/funds`（同樣 passthrough 至 `/api/funds`，符合「一頁一 BFF」）
   - `FundSettingsBffController`：`GET /api/bff/fund-settings/bank-options` → 過濾 active 後的銷售銀行下拉；與 SnapshotForm 的 lookups **同讀 business `/api/settings/banks`**（同義欄位同一來源），fund-settings 頁不再跨頁呼叫 `/api/bff/snapshot-form/lookups`（Task 175：一頁一 BFF 合規化）
-  - `RealizedGainBffRoutes`：`/api/realized-gains/**` → business-services（RealizedGainView 的 Pinia store `gainApi` 共用已實現損益 CRUD；該頁另有 `RealizedGainBffController` 提供 `/api/bff/realized-gain` 聚合端點，passthrough 僅供 store 直接 CRUD 用，與 `SnapshotBffRoutes` 同屬「store 共用」例外）
-  - `MarketDataBffRoutes`：`/api/market-data/**` → business-services（SSE 行情串流 `prices/stream` 等直接市場資料取用；`StockAnalysisBffRoutes` 另以 `/api/bff/stock-analysis/**` rewrite 至同一組端點）
-  - `SchedulePublicBffController`（ScheduleListView 專屬，「公開資訊」分組，Requirement 36）：`GET /api/bff/schedule-list` → 回傳系統所有自動排程的**人工維護靜態清單**（`ScheduledJobDto` 不可變 record：service / category / name / description / schedule 白話 / cron / zone），共 **35 筆** ＝ `business-services` 11 ＋ `external-materials-service` 24（**以 `@Scheduled` 方法計**；external 實際 25 個標註，`TwClosurePoller` 一法兩標併為一筆）。此頁為唯讀資訊展示故不做跨服務反射探索、不入 DB、不設管理端點；**新增／調整任何 `@Scheduled` 須同步更新此清單以免漂移**（Task 195 修正 Task 190／191 漏同步之兩處漂移）。**動態排程**（每分鐘 tick 比對 DB 可設定時點：`NewsPoller`→`crawler_schedule`、`MarketAnalysisScheduler`→`market_analysis_send_time`）於清單標「動態：依『X』頁設定（預設 …）」／「動態（表名）」，**不寫死時間**；每分鐘 tick 但時點為 per-user 私人設定者（`ExportScheduleService`／`TradingCalendarExportScheduleService`）則照列 `每分鐘`／`0 * * * * *` 實際 cron。前端 `ScheduleListView` 之服務別／分類計數由 payload 動態算出，故加減筆數無須改前端。無下游呼叫（不需 WebClient），落 BFF `anyExchange().authenticated()`（已登入者皆可讀）。
+  - `RealizedGainBffRoutes`：`/api/realized-gains/**` → business-services。**目前無前端消費者**：原「RealizedGainView 的 Pinia store `gainApi` 共用 CRUD」說法已不成立——該頁已全面走 `RealizedGainBffController` 的 `/api/bff/realized-gain` 聚合端點，前端 `gainApi` wrapper 與 `assetStore` 的三個已實現損益 action 已於 Task 197 移除。route 本身暫留（移除需重建 BFF 服務），**屬待清理項**
+  - `MarketDataBffRoutes`：`/api/market-data/**` → business-services。目前**唯一**消費者是 DashboardView 的 SSE 行情串流（`new EventSource('/api/market-data/prices/stream')`，見下方 SSE 段落之已知落差）；`marketDataApi` wrapper（歷史/配息/ETF 成分股）無呼叫端，已於 Task 197 移除，該類查詢皆走 `StockAnalysisBffRoutes` 的 `/api/bff/stock-analysis/**`
+  - `SchedulePublicBffController`（ScheduleListView 專屬，「公開資訊」分組，Requirement 36）：`GET /api/bff/schedule-list` → 回傳系統所有自動排程的**人工維護靜態清單**（`ScheduledJobDto` 不可變 record：service / category / name / description / schedule 白話 / cron / zone），共 **36 筆** ＝ `business-services` 12 ＋ `external-materials-service` 24（**以 `@Scheduled` 方法計**；external 實際 25 個標註，`TwClosurePoller` 一法兩標併為一筆）。此頁為唯讀資訊展示故不做跨服務反射探索、不入 DB、不設管理端點；**新增／調整任何 `@Scheduled` 須同步更新此清單以免漂移**（Task 195 修正 Task 190／191 漏同步之兩處漂移；Task 196.12 新增一筆 JOBS 後僅更新 javadoc 表頭、漏同步總數與本段，於 Task 197 一併修正為 36）。**動態排程**（每分鐘 tick 比對 DB 可設定時點：`NewsPoller`→`crawler_schedule`、`MarketAnalysisScheduler`→`market_analysis_send_time`）於清單標「動態：依『X』頁設定（預設 …）」／「動態（表名）」，**不寫死時間**；每分鐘 tick 但時點為 per-user 私人設定者（`ExportScheduleService`／`TradingCalendarExportScheduleService`）則照列 `每分鐘`／`0 * * * * *` 實際 cron。前端 `ScheduleListView` 之服務別／分類計數由 payload 動態算出，故加減筆數無須改前端。無下游呼叫（不需 WebClient），落 BFF `anyExchange().authenticated()`（已登入者皆可讀）。
   - `CrawlerDataBffController`（CrawlerDataView 專屬，「公開資訊」分組，Requirement 38）：爬蟲資訊查詢頁，一頁一 BFF、WebClient 轉呼 business：
     - `GET /api/bff/crawler-data?date=YYYY-MM-DD&dateField=fetched|published&category=` → business `GET /api/news-headlines`：查指定日期爬回的 `news_headline`（與今日股市分析同讀一份表，符合「同義欄位、同一 business API」）。
     - `GET /api/bff/crawler-data/schedule` → business `GET /api/crawler-schedule?crawler=news-poller`：讀 NewsPoller 已設定的執行時間清單。
     - `PUT /api/bff/crawler-data/schedule` → business `PUT /api/crawler-schedule?crawler=news-poller`：整批覆寫執行時間清單。
     - 權限：`GET` 落 `authenticated()`；`PUT` 限 ADMIN（`hasRole('ADMIN')`，屬系統設定變更）。
 
-**Repository 層**（Spring Data JPA，共 33 個）
+**Repository 層**（Spring Data JPA，共 47 個）
 - `AssetSnapshotRepository`
 - `StockHoldingRepository`
 - `FundHoldingRepository`
@@ -230,9 +231,41 @@ NASDAQ info API 自 2026/04 起對 ETF 的 `keyStats` 為 null（無 dayrange �
 
 `MarketClock.isXxxMarketOpen / isXxxMarketJustClosed` 全部改為「`MarketCalendar.isXxxTradingDay(當日)` && 時段」。連帶效果：`PricePoller` 各 scheduled 抓價（gated on `isXxxMarketOpen`）假日自動 skip；`PriceCacheWriter.resolveTradingDate`（依 `isXxxMarketOpen/isXxxMarketJustClosed` 判 live session）假日自動退回 DB 最近交易日。`ClosePersister` 各 dump / verify / `selfHealMissedClose` 另加 `MarketCalendar.isXxxTradingDay` 早退守門（`PricePoller` 假日不抓，但 Redis 仍有前一交易日值且 TTL 24h，若不守門 dump 會把它標成假日當日寫 DB）。`PricePoller.refreshAll`（手動 `/internal/refresh`）的 `markClosed` 亦由 `false` 改為 `!isXxxMarketOpen()`，與 `warmCacheOnStartup` 一致，避免手動刷新在假日 append 假 tick。
 
-**對外介面：**
-- `POST /internal/refresh`（僅 docker network 內 `business-services` 呼叫）：同步抓所有持股一次、寫 Redis、回 200。供使用者按「刷新」時用
-- 不對前端暴露 REST；前端仍打 `business-services` 的 `/api/market-data/*`，由 `PriceQueryService` 從 Redis 取值
+**對外介面（`InternalPriceController`，class-level `@RequestMapping("/internal")`，共 28 支）：**
+
+> **不對前端暴露 REST**；全部僅在 docker network 內由 `business-services` 呼叫（或維運手動觸發）。前端仍打 `business-services` 的 `/api/market-data/*`，由 `PriceQueryService` 從 Redis 取值。
+> **本表為 `/internal/*` 契約的唯一出處**——本文件他處提及個別 `/internal/*` 端點時一律引用此表，勿另寫一份（同「同義欄位、同一來源」之文件版精神）。
+
+| Method | Path | 說明 | 呼叫端 |
+|--------|------|------|--------|
+| POST | `/internal/refresh` | 同步抓所有持股一次、寫 Redis。供使用者按「刷新」時用；`markClosed` 依 `!isXxxMarketOpen()` 以免假日 append 假 tick | `MarketDataService` |
+| POST | `/internal/dividend/sync` | 單檔股利同步入庫（`code` / `market`） | `MarketDataService` |
+| POST | `/internal/fund-nav/refresh` | 基金淨值即時刷新 | `FundNavController` |
+| POST | `/internal/fund-dividend/refresh` | 基金配息即時刷新 | `FundNavController` |
+| POST | `/internal/fund-nav/backfill` | 基金淨值歷史回補 | `FundNavController` |
+| POST | `/internal/fund-dividend/backfill` | 基金配息歷史回補 | `FundNavController`（proxyBackfill） |
+| POST | `/internal/close/verify-tw` | 台股收盤資料驗證 | **無程式呼叫端**（手動維運） |
+| POST | `/internal/close/verify-us` | 美股收盤資料驗證 | **無程式呼叫端**（手動維運） |
+| POST | `/internal/backfill/stock` | 單檔股價歷史回補 | `HistoricalDataService` |
+| POST | `/internal/backfill/all` | 全持股歷史回補 | `HistoricalDataService` |
+| POST | `/internal/backfill/exchange-rate` | 匯率歷史回補 | `HistoricalDataService` |
+| POST | `/internal/backfill/exchange-rate-from` | 指定起日之匯率回補 | `HistoricalDataService` |
+| POST | `/internal/exchange-rate/refresh-bot` | 台銀（BOT）匯率即時刷新 | `HistoricalDataService` |
+| POST | `/internal/tw-closure/detect` | 觸發台股臨時休市（颱風假）偵測 | `MarketDataService`（Task 160） |
+| GET | `/internal/macro/imf` | IMF 總經資料（GDP 等） | `MacroHistoryService` |
+| GET | `/internal/macro/dgbas` | 主計總處（DGBAS）總經資料 | `MacroHistoryService` |
+| GET | `/internal/macro/twse-monthly` | 台股大盤月資料 | `MacroHistoryService` |
+| GET | `/internal/macro/us-index` | 美股指數資料 | `MacroHistoryService` |
+| GET | `/internal/macro/twse-return-index` | 台股報酬指數 | `MacroHistoryService` |
+| GET | `/internal/macro/index-intraday` | 指數當日走勢 | `MacroHistoryService` |
+| GET | `/internal/dividend-rate` | 單檔殖利率 | `MarketDataService` |
+| GET | `/internal/etf-holdings` | ETF 成分股（台股優先 MoneyDJ 完整成分股 → Yahoo 前 10 fallback） | `MarketDataService` |
+| GET | `/internal/dividend-history` | 單檔股利歷史 | `MarketDataService` |
+| GET | `/internal/tw-holidays` | 台股假日表（TWSE holidaySchedule ∪ `tw_market_closure`，read-time union） | `MarketDataService` |
+| GET | `/internal/stock-name` | 股票名稱查詢 | `MarketDataService` |
+| GET | `/internal/intraday-5m` | 5 分 K 當日走勢 | `HistoricalDataService` |
+| GET | `/internal/intraday-ticks` | 當日 tick 序列（含 cold-start；非交易日由 `clock.isTradingDay` 閘門擋下，Task 161） | `MarketDataService` |
+| GET | `/internal/health` | 健康檢查 | `docker-compose.yml` healthcheck |
 
 **`stock_price` 表廢除**：原本作為 hot cache 與 `stock_price_history` 並存，現由 Redis 取代；移除後即消除「兩處 cache 漂移」的可能。`StockPrice` Entity 與 `StockPriceRepository` 一併移除。
 
@@ -279,8 +312,8 @@ NASDAQ info API 自 2026/04 起對 ETF 的 `keyStats` 為 null（無 dayrange �
   fan-out 到 `Sinks.Many<String>`
 - business-services 暴露 `GET /api/market-data/prices/stream`（`text/event-stream`），
   從 sink 串流 SSE
-- BFF 加 passthrough route `/api/bff/market-data/stream` → backend SSE endpoint
-- 前端用 `EventSource('/api/bff/market-data/stream')` 訂閱，每筆訊息更新 stockPrices reactive state
+- BFF 以 `MarketDataBffRoutes` 的 `/api/market-data/**` passthrough 轉發至 backend SSE endpoint
+- 前端用 `EventSource('/api/market-data/prices/stream')` 訂閱，每筆訊息更新 stockPrices reactive state
 
 ```
 [external-materials-service write] → Redis SET price:*:*
@@ -293,7 +326,8 @@ NASDAQ info API 自 2026/04 起對 ETF 的 `keyStats` 為 null（無 dayrange �
                      [BFF passthrough] → [Frontend EventSource] → stockPrices state
 ```
 
-> nginx 對 `/api/bff/market-data/stream` 路徑需設 `proxy_buffering off`，否則 SSE 會被 buffering 卡住。
+> ⚠ **已知落差（一頁一 BFF 未合規，待後續任務處理）：** 本段原記載前端訂閱 `/api/bff/market-data/stream`、BFF 另設專屬 rewrite route，但該 route **從未實作**。實際鏈路為前端 `DashboardView.vue` → nginx `location = /api/market-data/prices/stream` → BFF `MarketDataBffRoutes` 的 `/api/market-data/**` passthrough → business-services，**未經 `/api/bff/dashboard/**`**，是全前端唯一繞過 axios wrapper 的裸 URL，違反「一頁一支 BFF」規範。修正方向為新增 `/api/bff/dashboard/prices/stream`（或 `/api/bff/market-data/stream`）route、前端改訂該路徑並同步改 nginx location（SSE route 需保留 `proxy_buffering off`）；屬功能變更，須另走 SDD 循環並重建 BFF 與前端映像。
+> nginx 對 `/api/market-data/prices/stream` 路徑需設 `proxy_buffering off`，否則 SSE 會被 buffering 卡住。
 > 前端仍保留初始 GET `/api/bff/dashboard/realtime` 載入第一份 snapshot；之後增量更新走 SSE，不再用 setInterval polling。
 
 ### Frontend Architecture (Vue 3)
@@ -302,11 +336,11 @@ NASDAQ info API 自 2026/04 起對 ETF 的 `keyStats` 為 null（無 dayrange �
 src/
 ├── App.vue              # Root layout: sidebar navigation + router-view（含「公開資訊」sub-menu：交易日曆 / 台幣兌美元 / 排程列表，Requirement 36）
 ├── main.js              # App bootstrap, plugin registration
-├── router/index.js      # Route definitions (31 routes，含 4 條 redirect)
+├── router/index.js      # Route definitions (32 routes，含 4 條 redirect)
 ├── stores/assetStore.js # Pinia global state
 ├── api/index.js         # Axios instance, API methods
-├── components/          # Reusable components (TaiwanMap, UsaMap)
-└── views/               # Page-level components (28 views；含 StockMonitorView 內嵌的 WatchStockView / StockAlertView 兩個未掛路由的子 view)
+├── components/          # Reusable components (TaiwanMap, UsFlag, StockAnalysisDialog)
+└── views/               # Page-level components (29 views；含 StockMonitorView 內嵌的 WatchStockView / StockAlertView 兩個未掛路由的子 view)
 ```
 
 **Service 層補充**
@@ -431,6 +465,7 @@ DailyMarketAnalysis      (今日股市分析結果，PK = analysis_date；bias/c
 MarketAnalysisSetting    (市場分析設定，單列 id = 1；model / effort / enabled；web_search 相關欄於 Task 179 移除)
 News                     (→ news_headline，爬蟲新聞標題，全域參考、無 owner；供今日分析與公開資訊 SRPP JSON)
 CrawlerSchedule          (→ crawler_schedule，公開資訊爬蟲執行時間設定，全域參考、無 owner；一列一時間點〔crawler_key + run_hour + run_minute + enabled〕；由「爬蟲資訊查詢」頁維護、NewsPoller 每分鐘讀取；Requirement 38)
+MarketAnalysisSendTime   (→ market_analysis_send_time，分析寄送時間，全域參考、無 owner；一列一時點〔send_time UNIQUE + active〕，seed 08:45；由「今日股市分析」頁維護、MarketAnalysisScheduler 每分鐘比對；Requirement 31 / Task 191)
 
 # 資產配置建議（Requirement 32）
 AppUser (1) ──── (1) InvestmentProfile           (owner_user_id UNIQUE；理財條件，記住免重填)
@@ -438,15 +473,20 @@ AppUser (1) ──── (N) InvestmentPlannedExpense     (owner_user_id；特�
 AppUser (1) ──── (N) PortfolioAdvice              (owner_user_id；歷次建議，條件快照刻意 denormalize)
 PortfolioAdviceSetting   (配置建議設定，單列 id = 1；model / effort / web_search_max_uses)
 
-# 排程匯出（Requirement 34）
-AppUser (1) ──── (1) ExportScheduleSetting        (owner_user_id UNIQUE；歷年資產每日排程自動匯出設定)
+# 排程匯出（Requirement 34 / 37 / 39）
+# 「一功能一張排程表」——刻意不合併三者，理由見本文件 Requirement 39 之關鍵設計決策
+AppUser (1) ──── (1) ExportScheduleSetting            (owner_user_id UNIQUE；歷年資產每日排程自動匯出設定；Requirement 34)
+AppUser (1) ──── (1) TradingCalendarExportSchedule    (owner_user_id UNIQUE；交易日曆每日排程匯出設定；比另兩張多一個 format 欄〔json/excel〕；Requirement 37)
+AppUser (1) ──── (1) RealizedGainExportSchedule       (owner_user_id UNIQUE；已實現損益每日排程匯出設定；Requirement 39)
 
 # 台股臨時休市（颱風假；Requirement 7）
 TwMarketClosure       (台股臨時休市，PK = closure_date；全域參考、無 owner、無 backend entity——ext-materials 直寫、backend 經 /internal/tw-holidays proxy 讀 union)
 ```
 
 > **Schema 基準線與 DB 層唯一鍵（重要澄清）：** 本專案的資料表基準線由 `db/init/01_dump.sql`（完整 `pg_dump` 快照，掛載進 `docker-entrypoint-initdb.d`）提供，**非** Liquibase 的 `v1.0.0-initial-schema` changeset；Liquibase 僅在此基準線之上做**增量**變更（dump 已含 `databasechangelog` 歷史，過往 changeset 視為 already-ran）。因此下列 Hibernate 早期建立、已固化進 dump 的 DB 層約束**不會出現在 Liquibase changelog**，但每個環境（運行中＋全新以 dump 初始化）皆已存在，`ddl-auto: none` 亦不會重建：
-> - `stock_price_history`：`UNIQUE (stock_code, market, trading_date)`（Hibernate 名 `ukgoyp…`）＋ `INDEX idx_sph_code_date (stock_code, trading_date)`；OHLC 皆 `NUMERIC(20,4)`（`open/high/low` nullable、`close` NOT NULL，見 v1.14.0）、`volume BIGINT NOT NULL`。Entity `@Column` 註解已對齊此位數/nullable（Task 148）。
+> - `stock_price_history`：`UNIQUE (stock_code, market, trading_date)`（Hibernate 名 `ukgoyp…`）＋ `INDEX idx_sph_code_date (stock_code, trading_date)`；**以 `db/init/01_dump.sql` 為準**：OHLC 皆 `NUMERIC(15,4)`（`open/high/low` nullable、`close` NOT NULL，見 v1.14.0）、`volume BIGINT`（nullable）。
+>   ⚠ `v1.0.0-initial-schema.sql` 寫的是 `NUMERIC(20,4)` ＋ `volume NOT NULL`，但該 changeset 在 dump 中已標記 already-ran、**永不執行**，故 20,4 從未套用到任何環境——查證位數/nullable 一律以 dump 為準，勿照抄 v1.0.0。
+>   Entity `StockPriceHistory` 目前仍宣告 `precision = 20` 與 `volume nullable = false`，與 DB 不符；因 `ddl-auto: none` 不做 schema 驗證故無 runtime 影響，屬已知的靜默註解漂移（Task 148 宣稱「已對齊」實為未對齊），待後續任務處理。
 > - `exchange_rate_history`：`UNIQUE (currency, rate_date)`（Hibernate 名 `uk977p…`）＝ upsert 覆寫鍵；`buy_rate/sell_rate NUMERIC(10,4)`。
 >
 > 稽核提醒：只讀 Liquibase changelog 會誤判「DB 無唯一鍵、無去重保護」；實際 DB 已有上述約束（重複列數為 0），故**不需**再補 `ADD CONSTRAINT` changeset（會產生重複約束）。
@@ -774,7 +814,8 @@ TwMarketClosure       (台股臨時休市，PK = closure_date；全域參考、�
 |------|------|------|
 | id | Long | PK |
 | email | String | 收件人 email；存入前 trim + 轉小寫；unique |
-| active | Boolean | 是否啟用（false 不寄信，但保留設定） |
+| active | Boolean | 是否啟用（false 不寄**股價警示**信，但保留設定） |
+| receiveMarketAnalysis | Boolean | 是否接收每日股市分析（預設 true；與 `active`〔接收警示〕**各自獨立**，見 Requirement 31 / Task 151） |
 | createdAt | LocalDateTime | 建立時間 |
 | updatedAt | LocalDateTime | 最近一次更新時間 |
 
@@ -792,11 +833,12 @@ TwMarketClosure       (台股臨時休市，PK = closure_date；全域參考、�
 #### BackupSetting（Requirement 15）
 | 欄位 | 型別 | 說明 |
 |------|------|------|
-| id | Long | PK，固定為 1（單列資料表） |
+| id | Integer | PK，固定為 1（單列資料表；同 `PortfolioAdviceSetting`／`MarketAnalysisSetting`，三張單列設定表型別一致） |
 | manualRetention | Integer | 手動備份保留份數 |
 | dailyRetention | Integer | 每日備份保留份數 |
 | weeklyRetention | Integer | 每週備份保留份數 |
 | backupEnabled | Boolean | 排程備份總開關 |
+| updatedAt | LocalDateTime | 最近一次更新時間 |
 
 #### BackupRecord（Requirement 15）
 Google Drive 上每一份備份檔的本地索引；UI 列表 / 還原選單一律從本表讀，避免每次都連 rclone。真正的備份檔仍存於 Google Drive，本表只是 metadata 快取。
@@ -2084,7 +2126,7 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
 
 **目標**：使用者先設定理財條件（生日／退休日期／退休前年薪與年支出／退休後現金流與試算假設／理財目標（複選）／可忍受風險／獲利預期），系統結合其**最新 `asset_snapshot`** 的現況配置與持有明細，由 Claude 產出個人化資產配置建議（整體評析／現況風險評估／建議目標配置／具體調整動作／風險提醒／參考來源），並保存歷次供回顧。以 Requirement 31 為藍本，差異：**互動式即時 → request 立即回覆、背景執行緒呼叫 Messages API**（非 Batch）；owner-scoped 查詢與 prompt 組裝在 request 執行緒完成，`@Filter`／`TenantGuard` 正常運作。
 
-- **資料模型**（Liquibase `v1.44.0-portfolio-advice.sql` 三 changeset ＋ `v1.44.1-retirement-date.sql` ＋ `v1.47.0-financial-planning-fields.sql` 生日/勞保勞退/通膨/大筆花費 ＋ `v1.48.0-retirement-projection-fields.sql` 退休試算三欄 ＋ `v1.49.0-drop-investment-horizon.sql` 移除投資年限）：
+- **資料模型**（Liquibase `v1.44.0-portfolio-advice.sql` 三 changeset ＋ `v1.44.1-retirement-date.sql` ＋ `v1.47.0-financial-planning-fields.sql` 生日/勞保勞退/通膨/大筆花費 ＋ `v1.48.0-retirement-projection-fields.sql` 退休試算三欄 ＋ `v1.49.0-drop-investment-horizon.sql` 移除投資年限 ＋ `v1.50.0-long-term-care-stages.sql` 移除 `retirement_monthly_expense`、加長照三欄 ＋ `v1.51.0-pre-retirement-salary.sql` 移除 `monthly_investment`、加退休前年薪/年支出）：
   ```sql
   -- 理財條件（一使用者一列，記住免重填；owner-scoped）
   CREATE TABLE investment_profile (
@@ -2617,7 +2659,7 @@ RealizedGainView el-tree 懶載入
 
 **異動**
 - `ExcelExportService.java`：抽出 `buildRealizedGainsWorkbook()`，新增 `exportRealizedGainsForOwner(Long)`
-- `db.changelog-master.yaml`：註冊 v1.58.0
+- `db.changelog-master.yaml`：註冊 v1.59.0
 - `RealizedGainBffController.java`：新增 schedule／run-now／browse 四支 passthrough
 - `frontend/src/api/index.js`：`realizedGain` 命名空間新增 4 支
 - `frontend/src/views/RealizedGainView.vue`：新增「排程自動匯出」設定卡（開關／時間／資料夾樹／立即匯出／上次結果）

@@ -697,7 +697,7 @@
 - [ ] **DGBAS 抓取恢復 TLS 憑證驗證**：`MacroDataFetchClient.fetchDgbasNationalIncome()` 移除 `curl -k`（`--insecure` 同時關掉憑證鏈與主機名驗證），改用 Java `HttpClient` 抓取。因 `ws.dgbas.gov.tw` 伺服器只送 leaf、未送中繼憑證，將公開可得且由公信根 `TWCA Global Root CA` 簽發的中繼憑證 `TWCA Secure SSL Certification Authority` 打包進 `external-materials-service` 專屬 truststore 作為信任錨，使 leaf → 中繼建鏈成立並完整驗證主機名（leaf SAN 含 `ws.dgbas.gov.tw`）。此專屬 `SSLContext` 只用於 DGBAS 抓取，不影響其他連線；抓取失敗維持回空 map → IMF fallback。
 - [ ] **Excel 匯入清空已實現損益 owner-scoped**：`ExcelImportService.importRealizedGains()` 匯入前的清空由 `gainRepo.deleteAll()` 改為 owner-scoped 刪除——注入 `TenantGuard`、以 `gainRepo.deleteByOwnerUserId(tenantGuard.requireCurrentUserId())` 只清當前使用者的 `realized_gain`，不再依賴 `ownerFilter` 對 `deleteAll()` 的隱性副作用；無身分（背景無 request）時不執行清空以免誤刪。此匯入路徑目前無 controller 進入點（不可達），屬防禦性修補，避免日後接上入口時退化成刪全體使用者資料。
 
-### Requirement 31: 今日股市分析（每交易日 08:45 由 AI 判斷當天台股走向）
+### Requirement 31: 今日股市分析（每交易日於可設定時點由 AI 判斷當天台股走向）
 
 **User Story:** 作為投資人，我希望每個台股交易日開盤前，系統能根據過去一年的台股與美股走勢、以及近期國內外財經新聞，自動判斷「今天台股可能的走向」並給我一段有理由的分析，讓我在開盤前就掌握多空氛圍與關鍵變數；越近期的走勢與新聞應占越高的權重。
 
@@ -844,7 +844,7 @@
 
 **User Story:** 作為使用者，我希望把與個人資產無關、屬於系統共通／市場公開性質的資訊集中在一個「公開資訊」選單分組下，方便查找；並希望能在一個「排程列表」頁面總覽系統所有自動排程（何時執行、做什麼、屬哪個服務），了解資料是如何被自動更新的。
 
-**背景：** 「交易日曆」與「台幣兌美元」原本平鋪在左側選單頂層，兩者皆為市場公開資料（非個人化）。新增一個「公開資訊」`el-sub-menu` 分組把它們收納，並新增第三個子項「排程列表」。排程遍佈 `business-services`（11 個 `@Scheduled` 方法）與 `external-materials-service`（24 個 `@Scheduled` 方法；實際 25 個標註，`TwClosurePoller` 一法兩標併為一筆）兩個服務；此頁為唯讀資訊展示，資料由該頁專屬 BFF 提供一份**人工維護的排程清單**（含中文名稱、說明、白話執行時機、cron、時區、所屬服務），不做跨服務反射探索。**原「crons 皆為編譯期常數」之前提已不成立**：部分排程改為「每分鐘 tick ＋ 比對 DB 可設定時點」（`NewsPoller` 依 `crawler_schedule`、`MarketAnalysisScheduler` 依 `market_analysis_send_time`），此類於清單以「動態：依『X』頁設定」表示，不寫死時間。
+**背景：** 「交易日曆」與「台幣兌美元」原本平鋪在左側選單頂層，兩者皆為市場公開資料（非個人化）。新增一個「公開資訊」`el-sub-menu` 分組把它們收納，並新增第三個子項「排程列表」。排程遍佈 `business-services`（12 個 `@Scheduled` 方法）與 `external-materials-service`（24 個 `@Scheduled` 方法；實際 25 個標註，`TwClosurePoller` 一法兩標併為一筆）兩個服務；此頁為唯讀資訊展示，資料由該頁專屬 BFF 提供一份**人工維護的排程清單**（含中文名稱、說明、白話執行時機、cron、時區、所屬服務），不做跨服務反射探索。**原「crons 皆為編譯期常數」之前提已不成立**：部分排程改為「每分鐘 tick ＋ 比對 DB 可設定時點」（`NewsPoller` 依 `crawler_schedule`、`MarketAnalysisScheduler` 依 `market_analysis_send_time`），此類於清單以「動態：依『X』頁設定」表示，不寫死時間。
 
 **Acceptance Criteria:**
 

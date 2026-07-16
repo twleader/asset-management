@@ -1,12 +1,11 @@
 import { defineStore } from 'pinia'
-import { snapshotApi, gainApi } from '@/api'
+import { snapshotApi } from '@/api'
 
 export const useAssetStore = defineStore('asset', {
   state: () => ({
     snapshots: [],
     currentSnapshot: null,
     history: [],
-    realizedGains: [],
     loading: false
   }),
 
@@ -26,22 +25,8 @@ export const useAssetStore = defineStore('asset', {
       }
     },
 
-    async fetchSnapshotDetail(id) {
-      this.loading = true
-      try {
-        this.currentSnapshot = await snapshotApi.getDetail(id)
-        return this.currentSnapshot
-      } finally {
-        this.loading = false
-      }
-    },
-
     async fetchHistory() {
       this.history = await snapshotApi.getHistory()
-    },
-
-    async fetchRealizedGains() {
-      this.realizedGains = await gainApi.getAll()
     },
 
     async createSnapshot(data) {
@@ -68,17 +53,6 @@ export const useAssetStore = defineStore('asset', {
       const result = await snapshotApi.recalcDividends()
       await this.fetchHistory()
       return result
-    },
-
-    async createRealizedGain(data) {
-      const result = await gainApi.create(data)
-      await Promise.all([this.fetchRealizedGains(), this.fetchHistory()])
-      return result
-    },
-
-    async deleteRealizedGain(id) {
-      await gainApi.delete(id)
-      await Promise.all([this.fetchRealizedGains(), this.fetchHistory()])
     },
 
   }
