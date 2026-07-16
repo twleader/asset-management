@@ -48,7 +48,7 @@ public class SchedulePublicBffController {
     private static final String NYC = "America/New_York";
     private static final String LON = "Europe/London";
 
-    /** 全系統排程清單（35 筆）。順序刻意先業務服務、再外部行情服務，前端再依 category 分組。 */
+    /** 全系統排程清單（36 筆）。順序刻意先業務服務、再外部行情服務，前端再依 category 分組。 */
     private static final List<ScheduledJobDto> JOBS = List.of(
             // ===== business-services（11）=====
             new ScheduledJobDto(BUSINESS, "資產快照", "最新快照釘定當日",
@@ -163,7 +163,7 @@ public class SchedulePublicBffController {
                     "交易日 05:00–07:00 每 15 分鐘", "0 0/15 5-6 * * MON-FRI；0 0 7 * * MON-FRI", TPE)
     );
 
-    /** GET /api/bff/schedule-list —— 回傳全系統排程清單（35 筆靜態資料）。 */
+    /** GET /api/bff/schedule-list —— 回傳全系統排程清單（36 筆靜態資料）。 */
     @GetMapping
     public List<ScheduledJobDto> list() {
         return JOBS;

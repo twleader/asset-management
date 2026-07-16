@@ -130,12 +130,14 @@ const rules = {
 async function load() {
   loading.value = true
   try {
-    const [list, banks] = await Promise.all([
+    const [list, banks] = await Promise.allSettled([
       bffApi.fundSettings.getAll(),
       bffApi.fundSettings.getBankOptions()
     ])
-    funds.value = list
-    bankOptions.value = banks.map(b => ({ value: b.id, label: b.displayName }))
+    if (list.status === 'fulfilled') funds.value = list.value
+    if (banks.status === 'fulfilled') {
+      bankOptions.value = banks.value.map(b => ({ value: b.id, label: b.displayName }))
+    }
   } finally { loading.value = false }
 }
 
