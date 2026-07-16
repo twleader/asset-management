@@ -17,17 +17,23 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
  * 權威財經新聞抓取（Task 149.21）：玩股網 WantGoo（JSON API）＋ MoneyDJ 理財網（即時新聞 HTML）
  * ＋自由時報 財經 / 政治 / 國際（RSS，Task 180 增政治・國際以涵蓋央行・金管會政策、地緣政治、川普言論、Fed 政策）
- * ＋經濟日報（RSS）。皆帶「真實發布時間」（WantGoo {@code time} epoch、MoneyDJ 列時間、
- * RSS {@code pubDate} RFC-1123），較付費 web_search 的模型自報日期精準。
+ * ＋經濟日報（RSS）〔以上 {@code region=TW}〕＋<b>美國財經新聞 CNBC（Economy／Finance／Markets 三個財經專屬分類 RSS）
+ * ＋Nasdaq（Markets RSS）</b>〔{@code region=US}、{@code source=cnbc}／{@code nasdaq}，Task 198〕。
+ * 皆帶「真實發布時間」（WantGoo {@code time} epoch、MoneyDJ 列時間、RSS {@code pubDate} RFC-1123；CNBC 為「少秒＋GMT」、
+ * Nasdaq 為數字時區，皆可由 {@link #parsePubDate} 之 {@code RFC_1123_DATE_TIME} 解析），較付費 web_search 的模型自報日期精準。
  * UA 一律 {@code Mozilla/5.0}（比照既有抓取慣例）。逐來源獨立 try/catch：單一來源失敗只 log warn、
- * 回空 list，不影響其他來源。**來源皆台灣權威媒體，不抓中港澳。**（鉅亨網 cnyes 因言論偏頗已於 Task 149.22 移除。）
+ * 回空 list，不影響其他來源。**來源皆台灣／美國權威媒體，不抓中港澳。**（鉅亨網 cnyes 因言論偏頗已於 Task 149.22 移除。）
+ *
+ * <p><b>美國財經新聞（Task 198）</b>：CNBC／Nasdaq 為財經專屬分類 feed，故<b>不套</b> {@link EditorialNewsFilter}
+ * 編輯政策過濾（其關鍵詞為中文、僅用於台灣混合型一般新聞 feed）。美國新聞 {@code category=news}，經
+ * {@code PublicInfoStockFilter} 天然全留（個股判定只認台股 {@code -TW} 代號與 wantgoo tags），並計入今日股市分析的
+ * 一般新聞上限（{@code LOCAL_NEWS_MAX}，依 {@code published_at} 排序，與台灣新聞共用額度）。
  */
 @Slf4j
 @Component
@@ -47,6 +53,16 @@ public class NewsFetchClient {
     private static final String LTN_WORLD_RSS = "https://news.ltn.com.tw/rss/world.xml";
     /** 經濟日報（udn money）財經 RSS。 */
     private static final String UDN_MONEY_RSS = "https://money.udn.com/rssfeed/news/1001/5591?ch=money";
+
+    // ===== 美國財經新聞 RSS（Task 198；region=US）=====
+    /** CNBC 經濟（Fed／通膨／關稅等總經）RSS。 */
+    private static final String CNBC_ECONOMY_RSS = "https://www.cnbc.com/id/20910258/device/rss/rss.html";
+    /** CNBC 金融 RSS。 */
+    private static final String CNBC_FINANCE_RSS = "https://www.cnbc.com/id/10000664/device/rss/rss.html";
+    /** CNBC 投資／市場（Investing）RSS。 */
+    private static final String CNBC_MARKETS_RSS = "https://www.cnbc.com/id/15839069/device/rss/rss.html";
+    /** Nasdaq 市場（Markets）RSS。 */
+    private static final String NASDAQ_MARKETS_RSS = "https://www.nasdaq.com/feed/rssoutbound?category=Markets";
 
     /** MoneyDJ 即時新聞列：`<td>MM/DD HH:MM</td><td><a href='...newsviewer.aspx?a=..' title="全標題">`。 */
     private static final Pattern MDJ_ROW = Pattern.compile(
@@ -68,14 +84,21 @@ public class NewsFetchClient {
     /** 抓全部權威新聞來源，逐來源 graceful，回合併後的清單。 */
     public List<NewsRow> fetchAll() {
         List<NewsRow> out = new ArrayList<>();
+        // 純財經來源（玩股網／MoneyDJ）本就財經專屬，不套編輯政策過濾。
         out.addAll(safe("wantgoo", this::fetchWantgoo));
         out.addAll(safe("moneydj", this::fetchMoneydj));
-        out.addAll(safe("ltn-business", () -> fetchRss(LTN_BUSINESS_RSS, "ltn")));
-        // 政治/國際為「整個版面」的一般新聞，只留與財經・政策・地緣相關者（relevantOnly）——否則地方/社會/娛樂
-        // 瑣聞會灌爆今日股市分析的近 N 天新聞 40 則上限、把財經頭條擠掉（Task 180 review 修正）。
-        out.addAll(safe("ltn-politics", () -> relevantOnly(fetchRss(LTN_POLITICS_RSS, "ltn"))));  // 央行/金管會/兩岸/國安
-        out.addAll(safe("ltn-world", () -> relevantOnly(fetchRss(LTN_WORLD_RSS, "ltn"))));        // 地緣政治/川普/Fed
-        out.addAll(safe("udn", () -> fetchRss(UDN_MONEY_RSS, "udn")));
+        // 自由時報 財經／政治／國際 與經濟日報為「整個版面」的一般新聞，套 EditorialNewsFilter 編輯政策（Task 199）：
+        // 財經一律留；中國新聞只留財經/北京政權；政治只留美日台歐盟＋影響市場地緣；台灣地方只留北北高；其餘濾除。
+        // 取代舊 relevantOnly（僅政治/國際、只做財經・政策・地緣關鍵詞白名單），涵蓋更完整。
+        out.addAll(safe("ltn-business", () -> EditorialNewsFilter.retain(fetchRss(LTN_BUSINESS_RSS, "ltn", "TW"))));
+        out.addAll(safe("ltn-politics", () -> EditorialNewsFilter.retain(fetchRss(LTN_POLITICS_RSS, "ltn", "TW"))));
+        out.addAll(safe("ltn-world", () -> EditorialNewsFilter.retain(fetchRss(LTN_WORLD_RSS, "ltn", "TW"))));
+        out.addAll(safe("udn", () -> EditorialNewsFilter.retain(fetchRss(UDN_MONEY_RSS, "udn", "TW"))));
+        // 美國財經新聞（Task 198）：CNBC 財經專屬三分類＋Nasdaq Markets。皆為財經 feed，故不套編輯政策過濾。
+        out.addAll(safe("cnbc-economy", () -> fetchRss(CNBC_ECONOMY_RSS, "cnbc", "US")));
+        out.addAll(safe("cnbc-finance", () -> fetchRss(CNBC_FINANCE_RSS, "cnbc", "US")));
+        out.addAll(safe("cnbc-markets", () -> fetchRss(CNBC_MARKETS_RSS, "cnbc", "US")));
+        out.addAll(safe("nasdaq-markets", () -> fetchRss(NASDAQ_MARKETS_RSS, "nasdaq", "US")));
         return out;
     }
 
@@ -160,40 +183,9 @@ public class NewsFetchClient {
         }
     }
 
-    // ===== 政治 / 國際 RSS 的財經・政策・地緣相關性過濾（Task 180）=====
-
-    /**
-     * 政治/國際版面的一般新聞相關性關鍵詞：標題含任一者才保留，濾掉純地方/社會/娛樂/體育瑣聞。
-     * 皆為<b>中性主題詞</b>（總經・貨幣・政策・地緣・國安，含朝野兩黨），不含任何政治立場判斷；
-     * 目的是「只餵市場/政策/地緣相關新聞」，避免高頻一般新聞把財經頭條擠出今日股市分析上限。
-     */
-    private static final Set<String> RELEVANCE_KEYWORDS = Set.of(
-            // 貨幣 / 利率 / 總經 / 產業
-            "央行", "聯準會", "Fed", "升息", "降息", "利率", "通膨", "通脹", "物價", "金管會", "金融",
-            "匯率", "台幣", "新台幣", "美元", "日圓", "人民幣", "關稅", "貿易", "出口", "進口", "順差", "逆差",
-            "經濟", "景氣", "GDP", "財政", "預算", "產業", "供應鏈", "半導體", "晶片", "台積電", "科技",
-            "能源", "石油", "油價", "電價", "股市", "股票", "市場", "投資", "債", "就業", "失業", "薪資", "房市", "房價",
-            // 政治 / 地緣 / 國安（中性主題）
-            "川普", "Trump", "拜登", "白宮", "美國", "國會", "制裁", "地緣", "戰爭", "衝突", "兩岸", "中國",
-            "中共", "北京", "解放軍", "美中", "台海", "國防", "軍事", "軍售", "國安", "外交", "主權",
-            "選舉", "罷免", "立法院", "行政院", "總統", "國民黨", "民進黨", "政策",
-            "歐盟", "日本", "韓國", "烏克蘭", "俄羅斯", "以色列", "中東");
-
-    /** 只保留標題含任一相關性關鍵詞者（Task 180，僅套用於政治/國際 RSS）。 */
-    private List<NewsRow> relevantOnly(List<NewsRow> rows) {
-        List<NewsRow> out = new ArrayList<>(rows.size());
-        for (NewsRow r : rows) {
-            String t = r.title() == null ? "" : r.title();
-            for (String k : RELEVANCE_KEYWORDS) {
-                if (t.contains(k)) { out.add(r); break; }
-            }
-        }
-        return out;
-    }
-
     // ===== 自由時報 / 經濟日報（RSS）=====
 
-    private List<NewsRow> fetchRss(String url, String source) throws Exception {
+    private List<NewsRow> fetchRss(String url, String source, String region) throws Exception {
         String xml = get(url);
         List<NewsRow> out = new ArrayList<>();
         Matcher im = ITEM.matcher(xml);
@@ -205,7 +197,7 @@ public class NewsFetchClient {
             if (title == null || title.isBlank() || link == null || link.isBlank()) continue;
             Instant publishedAt = parsePubDate(pub);
             if (publishedAt == null) continue;   // 無可信發布日 → 略過（本地新聞主打日期精準）
-            out.add(new NewsRow(title.trim(), source, link.trim(), "news", "TW", null, publishedAt));
+            out.add(new NewsRow(title.trim(), source, link.trim(), "news", region, null, publishedAt));
         }
         return out;
     }

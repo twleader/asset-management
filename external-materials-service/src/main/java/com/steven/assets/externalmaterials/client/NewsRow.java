@@ -10,7 +10,7 @@ import java.util.List;
  * 抓取到的一則新聞 / 公開資訊（Task 149.21），供 {@code NewsPoller} 算去重鍵後 upsert 至 news_headline。
  *
  * @param title       標題
- * @param source      來源代號：wantgoo / moneydj / ltn / udn / twse / bot-fx / us-index（Task 180 匯率・美股快照）/ kr-index（Task 185 韓股快照）
+ * @param source      來源代號：wantgoo / moneydj / ltn / udn / cnbc / nasdaq（Task 198 美國財經新聞）/ twse / bot-fx / us-index（Task 180 匯率・美股快照）/ kr-index（Task 185 韓股快照）
  * @param url         原文/查詢頁連結（TWSE 帶 date 參數使每日 URL 唯一 → 天然去重；fx/us-market/kr-market 為固定頁 URL、每輪就地覆寫）
  * @param category    news / twse-institutional / twse-turnover / fx / us-market / kr-market
  *                    （fx=台幣兌美元匯率、us-market=美股指數 Task 180；kr-market=韓國股市 KOSPI＋三星/海力士 Task 185）
