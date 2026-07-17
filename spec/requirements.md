@@ -831,6 +831,10 @@
 - [ ] **排程執行機制與租戶隔離**：以每分鐘 `@Scheduled` poll（`zone=Asia/Taipei`）比對各設定列的時:分與「當日是否已執行」旗標；命中則對該列 owner 手動 `enableFilter("ownerFilter")` 產出只含該 owner 資產的活頁簿再寫檔（背景 cron 無 request context、`ownerFilter` 不自動生效，故明確逐列指定 owner）。服務重啟以 `ApplicationReadyEvent` 補跑當日已到點但未執行者。單一使用者失敗只記 `last_run_status` 與 log、不影響其他使用者。
 - [ ] **檔名**：`資產總覽_{使用者ID}_{YYYYMMDD}.xlsx`（檔名含 owner id，避免多使用者共用同一 subpath 時同名互相覆蓋；同一使用者同日覆寫）。
 - [ ] **資料夾瀏覽端點（唯讀）**：新增 `GET /api/export-schedule/browse?subpath=` 列出基底（家目錄）下指定子路徑的「子目錄」清單（僅目錄、隱藏 dotfiles、依名稱排序），供前端樹狀選擇器逐層懶載入。同樣以 normalize `startsWith(base)` 驗證防跳脫；此端點僅列目錄名稱、不讀檔案內容、不變更檔案系統，需登入。BFF 對應 `GET /api/bff/asset-history/export-schedule/browse`。
+- [ ] **「股票（即時）」分頁增列即時報價與技術指標欄（Task 200）**：「當前即時資產」匯出的「股票（即時）」分頁，於既有欄位（券商／市場／代號／名稱／股數／投資成本／即時價／即時現值／預估配息／交易類型／交易日期）外增列 7 欄，欄序為：`券商／市場／代號／名稱／股數／投資成本／即時價／`**`昨收／漲跌／漲跌幅(%)／`**`即時現值／預估配息／交易類型／交易日期／`**`月線價／季線價／年線價／KD值`**。
+  - **昨收／漲跌／漲跌幅(%)**（緊接「即時價」後）：與即時價**同一 Redis 即時報價來源**——取自 `PriceQueryService.LivePrice.previousClose/priceChange/changePercent`，經 `StockPriceService.getLiveAssets()` 由**同一筆** `LivePrice` 帶進 `LiveStockItem`（零額外 Redis 讀取），確保「即時價 − 昨收 = 漲跌」三值同一 tick 一致；漲跌幅為已計算之百分比數值（例 1.23 = 1.23%）。查無即時報價時三欄留白。
+  - **月線價／季線價／年線價／KD值**（置於分頁末欄）：統一取自共用權威 `TechnicalIndicatorService.computeAll(code, market)` 的 `FullIndicators{monthlyMa(MA20)／quarterlyMa(MA60)／annualMa(MA240)／k／d}`，與觀察清單／警示同一計算；KD 以單一「KD值」欄呈現為 `K x.xx / D x.xx`。歷史資料不足以撐滿某視窗時該欄留白、不影響其他欄。同一 `(code, market)` 於同分頁多筆持股（不同券商）僅計算一次並以 `code|market` 於單次匯出內快取共用。
+  - 此增列同時套用於「立即匯出到目錄」（run-now）與每日排程產檔（皆走 `ExcelExportService.writeLiveAssetsSheet`）。
 
 ---
 

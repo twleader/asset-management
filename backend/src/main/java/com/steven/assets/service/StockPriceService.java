@@ -112,12 +112,19 @@ public class StockPriceService {
             Boolean closed = null;
             String tradingDate = null;
             LocalDateTime updatedAt = null;
+            // 昨收／漲跌／漲跌幅：與即時價同一筆 LivePrice 帶出（同一 tick），供匯出「股票（即時）」用（Task 200）
+            BigDecimal previousClose = null;
+            BigDecimal priceChange = null;
+            BigDecimal changePercent = null;
 
             if (liveOpt.isPresent()) {
                 PriceQueryService.LivePrice lp = liveOpt.get();
                 price = lp.price();
                 closed = lp.closed();
                 tradingDate = lp.tradingDate();
+                previousClose = lp.previousClose();
+                priceChange = lp.priceChange();
+                changePercent = lp.changePercent();
                 if (lp.updatedAt() != null) {
                     try {
                         updatedAt = LocalDateTime.parse(lp.updatedAt());
@@ -148,7 +155,8 @@ public class StockPriceService {
                     .map(s -> s.getName()).orElse(sh.getStockCode());
             stockItems.add(new LiveStockItem(
                 sh.getStockCode(), shName, sh.getMarket(), sh.getShares(),
-                price, liveValue, closed, tradingDate
+                price, liveValue, closed, tradingDate,
+                previousClose, priceChange, changePercent
             ));
         }
 
@@ -186,7 +194,9 @@ public class StockPriceService {
     public record LiveStockItem(
         String stockCode, String stockName, String market,
         BigDecimal shares, BigDecimal currentPrice, BigDecimal liveValue,
-        Boolean closed, String tradingDate
+        Boolean closed, String tradingDate,
+        // 即時報價衍生欄（Task 200）：昨收／漲跌／漲跌幅(%)，與 currentPrice 同一 LivePrice tick
+        BigDecimal previousClose, BigDecimal priceChange, BigDecimal changePercent
     ) {}
 
     public record LiveAssetsResponse(

@@ -2432,6 +2432,13 @@ GET  /api/bff/asset-history/export                    → GET  /api/snapshots/ex
 - **家目錄為根**：`EXPORT_OUTPUT_DIR` 預設由 `/data/export-output` 改為 `/home/steven`；volume host 端由 `/Users/steven/Project/SRPP/data` 改為 `/Users/steven`。`output_subpath` 仍為相對子路徑（相對家目錄根），路徑安全驗證邏輯不變。
 - **檔案總管式資料夾選擇（唯讀 browse）**：`ExportScheduleService.browse(subpath)` 以 `startsWith(base)` 驗證後 `Files.list` 僅取子目錄（隱藏 dotfiles、依名稱排序），回 `BrowseResponse{baseDir, subpath, absolutePath, directories:[{name, path}]}`；`ExportScheduleController` 加 `GET /browse`，BFF passthrough。前端 `AssetHistoryView.vue` 標題改「排程自動匯出最新資產」，輸出資料夾改 `el-tree` 懶載入樹狀選擇對話框（`load` 呼叫 browse 逐層展開，點選節點取相對子路徑）＋可選填「新增子資料夾名稱」（寫檔時 `Files.createDirectories` 自動建立，故 browse 保持唯讀、無需新增變更檔案系統的端點）。
 
+### 「股票（即時）」分頁增列即時報價與技術指標欄（Task 200）
+
+- **欄位增列**：`ExcelExportService.writeLiveAssetsSheet` 的股票分頁在「即時價」後插入 `昨收／漲跌／漲跌幅(%)`，並於分頁末增列 `月線價／季線價／年線價／KD值`。完整欄序（0–17）：`券商／市場／代號／名稱／股數／投資成本／即時價／昨收／漲跌／漲跌幅(%)／即時現值／預估配息／交易類型／交易日期／月線價／季線價／年線價／KD值`。
+- **昨收／漲跌／漲跌幅單一來源**：`StockPriceService.LiveStockItem` record 於末尾擴增 `previousClose／priceChange／changePercent` 三欄，於 `getLiveAssets()` 由**同一筆** `PriceQueryService.LivePrice` 帶出（該筆本已在迴圈內讀取，零額外 Redis 讀取），與「即時價」同一 tick，確保「即時價 − 昨收 = 漲跌」一致。此為向後相容的末尾擴欄——`GET /api/market-data/live-assets`（Dashboard）JSON 多回三欄、既有前端忽略；建構點僅 `StockPriceService` 一處、無測試以位置參數建構此 record。
+- **月／季／年線與 KD**：`ExcelExportService` 注入既有共用權威 `TechnicalIndicatorService`，逐 `(code, market)` 呼叫 `computeAll()` 取 `FullIndicators{monthlyMa, quarterlyMa, annualMa, k, d}`（資料源 `stock_price_history` 近 240 筆；與觀察清單／警示同一計算，符合「同義欄位同一 business service」）。以 `Map<code|market, FullIndicators>` 於單次匯出內快取，同股多券商列僅計算一次。KD 併為單一「KD值」欄字串 `K {k} / D {d}`（k/d 皆為 `computeAll` 已 scale 2 位之 BigDecimal，任一為 null 以 `—` 佔位）。
+- **儲存格樣式**：昨收沿用即時價 `num4`；漲跌／漲跌幅／月線／季線／年線用新增 `num2`（`#,##0.00`）；KD值為純字串。查無即時報價或歷史不足者相應欄留白（`cell()` 遇 null 不寫值）。此增列同時作用於 run-now（`exportLiveAssets`）與排程（`exportLiveAssetsForOwner`），皆共用 `writeLiveAssetsSheet`。
+
 ---
 
 ## Requirement 37（Task 189）：交易日曆匯出到指定路徑（JSON／Excel）
