@@ -4971,3 +4971,19 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 - [x] 199.6 **部署驗證**：`--no-cache` 重 build ext ＋ `--force-recreate`（healthy，jar 含 `EditorialNewsFilter`）；warmup 抓取 udn 20→14、ltn 各 feed 已過濾（`safe()` 記 post-filter 數），wantgoo／cnbc／nasdaq 不過濾如設計。查 DB 本輪入庫 ltn/udn 標題：壓倒性為財經（台積電/南亞科/外資/金管會/記憶體/鋼品/青安）、台美歐盟政治（立院預算/巴紐外交/歐盟對中國）、中國政權（馬興瑞肅清/言論審查/海警）、影響市場地緣（伊朗荷姆茲航運/美伊/烏克蘭）；前一版 udn 生活軟文（Buffet新北/全聯台中/單人跟團旅行）已不再入庫。
 - [ ] 199.7 commit ＋ 兩段式 merge（含 Task 198）。
 - [x] 199.8 **收緊生活/軟文/體育（使用者 2026-07-16 追加）**：政策改為「全世界生活、軟文、體育一律刪除，除非真的影響股市大盤」。實作：`LIFESTYLE` 否決層由 cascade 第 5 步**提前至第 2 步**（財經之後、中國/地緣/政治/城市之前），使唯一豁免＝命中財經訊號；政治人物名（碧姬馬克宏）、城市白名單（台北旅宿軟文）、中國詞（網紅五星旗）皆不再救回軟文。`LIFESTYLE` 大幅擴充：體育全項（世足/奧運/職棒/NBA/MLB/選手/教練/金牌/賽事…）＋演藝影劇（明星/藝人/演唱會/專輯/票房/金馬獎/緋聞/追劇…）＋餐飲旅宿時尚寵物消費開箱促銷。修子字串誤中：移除「出國」（誤中「退出國民黨」→改判 tw-local）。1561 語料 lifestyle 濾除 23→36、finance 保留數不變（無誤刪財經）、lifestyle 桶零強政治/財經詞誤刪；`EditorialNewsFilterTest` 增體育娛樂案共 16 案全綠。**依使用者指示本次不重啟 container（明早排程沿用現運行版本），僅程式碼＋spec＋commit/merge**。
+
+---
+
+### Task 200：「股票（即時）」匯出增列即時報價與技術指標欄（Requirement 34）
+
+**需求對應：** Requirement 34「歷年資產 Excel 匯出增強」AC「『股票（即時）』分頁增列即時報價與技術指標欄」。
+
+**背景：** 使用者要求「當前即時資產」匯出的「股票（即時）」分頁在既有欄位外，增列 `昨收／漲跌／漲跌幅／月線價／季線價／年線價／KD值` 7 欄。前三欄（即時報價）與即時價同一 Redis 來源、後四欄（技術指標）取自共用 `TechnicalIndicatorService`，以符合「同義欄位同一 business service API」。此分頁由 `writeLiveAssetsSheet` 產出、run-now 與排程共用，故一處改動即涵蓋兩情境；`exportFull()` 的歷次快照分頁（凍結值、無即時價）不在本任務範圍。
+
+**完整欄序（0–17）：** `券商／市場／代號／名稱／股數／投資成本／即時價／昨收／漲跌／漲跌幅(%)／即時現值／預估配息／交易類型／交易日期／月線價／季線價／年線價／KD值`。
+
+- [x] 200.1 **spec**：`requirements.md` Requirement 34 增 AC；`design.md` 新增「『股票（即時）』分頁增列即時報價與技術指標欄」設計段；`tasks.md` 本任務。
+- [x] 200.2 **`StockPriceService.LiveStockItem` 擴欄**：record 末尾增 `previousClose／priceChange／changePercent`；`getLiveAssets()` 於既有 `LivePrice lp` 分支帶出三值（無 `lp` 時為 null），零額外 Redis 讀取。建構點唯一（同檔），Dashboard JSON 多回三欄、向後相容。
+- [x] 200.3 **`ExcelExportService.writeLiveAssetsSheet` 增 7 欄**：注入 `TechnicalIndicatorService`；表頭與逐列依上列欄序寫入。昨收沿用即時價 `num4`，漲跌／漲跌幅／月/季/年線用新增 `num2`（`#,##0.00`），KD值為字串 `K {k} / D {d}`。技術指標以 `Map<code|market, FullIndicators>` 於單次匯出快取，同股多券商列僅算一次。`autoSizeColumn` 迴圈上界改 18。
+- [x] 200.4 **建置與部署驗證**：`--no-cache` 重 build business-services，`--force-recreate`（healthy，運行 jar 含 `formatKd`）；owner 1（ADMIN/ACTIVE，最新快照 43 筆持股）以 X-User header 觸發 run-now 產「當前即時資產」`.xlsx`。驗證：新 7 欄到位；`0050` 即時價 100.15／昨收 106.4／漲跌 −6.25（=100.15−106.4）／漲跌幅 −5.874%（=−6.25/106.4）自洽；同檔 `0050` 元大／富邦兩列昨收/漲跌/月季年線/KD 完全相同（快取生效、跨券商一致）；`VOO` 即時價 689.59／昨收 693.8／漲跌 −4.21 亦自洽；KD 呈現 `K 31.63 / D 40.18`。
+- [ ] 200.5 commit ＋ 兩段式 merge。

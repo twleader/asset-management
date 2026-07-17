@@ -38,6 +38,8 @@ public class ExcelExportService {
     private final RealizedGainRepository gainRepo;
     private final StockRepository stockMasterRepo;
     private final StockPriceService stockPriceService;
+    // 月/季/年線與 KD 的共用權威計算（與觀察清單／警示同一來源）；供「股票（即時）」分頁增列技術指標欄（Task 200）
+    private final TechnicalIndicatorService technicalIndicatorService;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -440,10 +442,19 @@ public class ExcelExportService {
         cell(sh2, 4, "股數", st.head);
         cell(sh2, 5, "投資成本", st.head);
         cell(sh2, 6, "即時價", st.head);
-        cell(sh2, 7, "即時現值", st.head);
-        cell(sh2, 8, "預估配息", st.head);
-        cell(sh2, 9, "交易類型", st.head);
-        cell(sh2, 10, "交易日期", st.head);
+        cell(sh2, 7, "昨收", st.head);
+        cell(sh2, 8, "漲跌", st.head);
+        cell(sh2, 9, "漲跌幅(%)", st.head);
+        cell(sh2, 10, "即時現值", st.head);
+        cell(sh2, 11, "預估配息", st.head);
+        cell(sh2, 12, "交易類型", st.head);
+        cell(sh2, 13, "交易日期", st.head);
+        cell(sh2, 14, "月線價", st.head);
+        cell(sh2, 15, "季線價", st.head);
+        cell(sh2, 16, "年線價", st.head);
+        cell(sh2, 17, "KD值", st.head);
+        // 技術指標（月/季/年線、KD）逐 (code|market) 快取：同股多券商列僅算一次（Task 200）
+        Map<String, TechnicalIndicatorService.FullIndicators> indicatorCache = new HashMap<>();
         for (StockHolding sk : s.getStocks()) {
             Row row = sheet.createRow(r++);
             cell(row, 0, sk.getBroker() != null ? sk.getBroker().getDisplayName() : "", null);
@@ -458,15 +469,34 @@ public class ExcelExportService {
             cell(row, 5, stockCostTwd(sk, exchangeRate), st.money);
             BigDecimal livePrice = it != null ? it.currentPrice() : null;
             cell(row, 6, livePrice, st.num4);
+            // 昨收／漲跌／漲跌幅：與即時價同一筆 LivePrice（同一 tick），故「即時價 − 昨收 = 漲跌」自洽
+            cell(row, 7, it != null ? it.previousClose() : null, st.num4);
+            cell(row, 8, it != null ? it.priceChange() : null, st.num2);
+            cell(row, 9, it != null ? it.changePercent() : null, st.num2);
             // 即時現值 per-holding：即時價 × 該列股數（美股/英股再 × 匯率），比照 getLiveAssets 每檔算法。
             // 不可直接取 LiveStockItem.liveValue：同一 code|market 多筆持股（不同券商）在 liveMap 會互相覆蓋。
-            cell(row, 7, liveStockValueTwd(sk, livePrice, exchangeRate), st.money);
-            cell(row, 8, sk.getEstimatedDividend(), st.money);
-            cell(row, 9, sk.getTransactionType(), null);
-            cell(row, 10, sk.getTransactionDate() != null ? ISO.format(sk.getTransactionDate()) : "", null);
+            cell(row, 10, liveStockValueTwd(sk, livePrice, exchangeRate), st.money);
+            cell(row, 11, sk.getEstimatedDividend(), st.money);
+            cell(row, 12, sk.getTransactionType(), null);
+            cell(row, 13, sk.getTransactionDate() != null ? ISO.format(sk.getTransactionDate()) : "", null);
+            // 月/季/年線與 KD：共用權威 TechnicalIndicatorService（與觀察清單／警示同一計算），逐 code|market 快取
+            TechnicalIndicatorService.FullIndicators ind = indicatorCache.computeIfAbsent(
+                    sk.getStockCode() + "|" + sk.getMarket(),
+                    k -> technicalIndicatorService.computeAll(sk.getStockCode(), sk.getMarket()));
+            cell(row, 14, ind.monthlyMa(), st.num2);
+            cell(row, 15, ind.quarterlyMa(), st.num2);
+            cell(row, 16, ind.annualMa(), st.num2);
+            cell(row, 17, formatKd(ind.k(), ind.d()), null);
         }
 
-        for (int i = 0; i < 11; i++) sheet.autoSizeColumn(i);
+        for (int i = 0; i < 18; i++) sheet.autoSizeColumn(i);
+    }
+
+    /** KD 併為單一「KD值」欄字串 "K {k} / D {d}"；兩者皆 null 回 null（留白），單邊 null 以「—」佔位。 */
+    private static String formatKd(BigDecimal k, BigDecimal d) {
+        if (k == null && d == null) return null;
+        return "K " + (k != null ? k.toPlainString() : "—")
+             + " / D " + (d != null ? d.toPlainString() : "—");
     }
 
     private void writeRealizedGainsSheet(Workbook wb, Styles st) {
@@ -517,6 +547,7 @@ public class ExcelExportService {
         final CellStyle section;
         final CellStyle money;
         final CellStyle num4;
+        final CellStyle num2;
 
         Styles(Workbook wb) {
             DataFormat fmt = wb.createDataFormat();
@@ -538,6 +569,10 @@ public class ExcelExportService {
 
             num4 = wb.createCellStyle();
             num4.setDataFormat(fmt.getFormat("#,##0.0000"));
+
+            // 2 位小數：漲跌／漲跌幅(%)／月線／季線／年線（Task 200）
+            num2 = wb.createCellStyle();
+            num2.setDataFormat(fmt.getFormat("#,##0.00"));
         }
     }
 }
