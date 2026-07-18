@@ -5120,7 +5120,29 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 
 ---
 
-### Task 207：修正 business-services 容器重建後 BFF 沿用舊 IP 的 stale DNS（整站 500）
+### Task 207：公開資訊新增「台股均線突破」快照（大盤／0050／00881 對季線・年線）（Requirement 31）
+
+**需求對應：** Requirement 31 新增 AC「公開資訊必含台股均線突破偵測」。
+
+**來源：** 本功能實作原存在於過時分支 `claude/morning-premarket-fetch-schedule-2f9046`（該分支原編 Task 183，與 main 既有 Task 183「規格與程式碼一致性對齊」撞號，比照 Task 202/203 之編號避讓改編為 207）。該分支其餘內容（盤前爬蟲 08:20、韓股快照、分析改 08:40）**已被 main 的 Task 184／185／186／191／192／193 獨立且更完整地實作**，且其寫死 cron 正是 Task 195 刻意根除的漂移類型，故**整支不 merge**，僅本功能以人工移植方式撿回。
+
+**移植與修正：** 原實作經四視角對抗式審查（正確性／健壯性／整合風險／慣例符合度），核心 SMA 與穿越判定正確，但有兩個 blocker 與三個 major 須先修（見下）。
+
+- [x] 207.1 **spec**：`requirements.md` R31 新增 AC；`design.md` 新增「台股均線突破快照」設計段 ＋ `news_headline` 的 source／category 列舉、`PublicInfoStockFilter` 保留清單、`MarketAnalysisService` 注入群三處補 `ma-cross`；`tasks.md` 本任務。
+- [x] 207.2 **B1 相依移植**：`StockSourceQuery` 補 `ClosePoint` record ＋ `loadRecentStockCloses()`／`loadRecentTaiexCloses()`（main 原無此三者，只搬 client 會編譯失敗）。多列查詢用 void 區塊 lambda（`RowCallbackHandler`），避免 expression lambda 被解析成 `ResultSetExtractor`。
+- [x] 207.3 **`MaCrossSnapshotClient` 移植**：偵測大盤／0050／00881 對 MA60／MA240 的漲破跌破，命中才產列；逐標的獨立 try/catch。
+- [x] 207.4 **M1 分割污染防呆（視窗層）**：原實作只比對最後兩根（擋分割當日），分割次日即失效而均線仍被舊權值污染 → 新增 `windowHasGap()`，均線取樣視窗內任一相鄰兩日變動 >15% 即略過該均線。
+- [x] 207.5 **M2 去重鍵事件化**：原實作 source／url／category 三者皆固定 → `dedupe_key` 恆定 → `ma-cross` 永遠一列、後來事件整列覆寫先前的。改為**每則事件各一列**、`url` 帶 `#代號-ma期數-資料日` fragment；同輪重跑仍冪等。
+- [x] 207.6 **M3 匯出 cutoff 例外**：`loadTodayPublicInfoForExport` 對 `category='ma-cross'` 豁免 `published_at >= cutoff`（本 category 的 `publishedAt` 刻意取事件資料日，而大盤指數表落後屬常態），避免該列被 SRPP JSON 靜默濾掉、或同日不同輪次時有時無。
+- [x] 207.7 **B2 掛載點**：只在 main 現行 `NewsPoller` 加兩行（欄位注入 ＋ `rows.addAll(maCrossClient.fetchAll())` 接在 `krIntradayClient` 之後）。**不可**沿用分支的 `NewsPoller`——該版注入 main 已移除的 `KrMarketSnapshotClient`（編不過），且缺 Task 192 的 DB 驅動排程，覆蓋等於回退可設定爬蟲時段與韓股盤中快照。
+- [x] 207.8 **M4 文件**：class javadoc 與實作對齊（原 javadoc 仍寫 `publishedAt=Instant.now()`，實作早已改為事件資料日）。
+- [x] 207.9 **單元測試**：新增 `MaCrossSnapshotClientTest`（10 例）——漲破／跌破／同側不觸發、`n=period` 與 `n=period+1` 臨界、15% 門檻兩側（14%／16%）、`publishedAt` 取資料日、null／零收盤 graceful、單一標的失敗不影響整輪，以及 **M1 與 M2 的回歸測試**。M1 該例已實測「停用 `windowHasGap` 則失敗（噴出『0050 收 48.09 漲破季線(MA60 47.80)』假訊號）、啟用則通過」，確認具鑑別力而非空測。
+- [x] 207.10 **建置與部署驗證**：`--no-cache` 重 build external-materials-service 並 `--force-recreate`；驗證爬蟲輪次正常、無突破時不產列、`ma-cross` 列可進 SRPP JSON 與分析 prompt。
+- [ ] 207.11 commit ＋ 兩段式 merge。
+
+---
+
+### Task 208：修正 business-services 容器重建後 BFF 沿用舊 IP 的 stale DNS（整站 500）
 
 **背景（實地事故）：** Task 206 部署時 `--force-recreate business-services`，該容器 IP 由 `172.19.0.4` 換成 `172.19.0.7`；
 BFF 之後持續對舊 IP 連線得 `Connection refused`，使用者點「歷年資產」等頁面一律 500。business-services 日誌**全乾淨**、
@@ -5136,19 +5158,19 @@ run-stack skill 補上保險。同時捨棄兩條看似可行的路：`-Dnetwork
 security property，直接 `-D` 讀不到——雙重靜默無效）、改用 JDK `DefaultAddressResolverGroup`（會讓 DNS 查詢變 blocking
 卡在 event loop，為修快取而動 I/O 模型不划算）。
 
-- [x] 207.1 **spec**：`design.md` Infrastructure 章新增「BFF 上游 DNS 解析策略（Task 207）」；`tasks.md` 本任務。
-- [x] 207.2 **新增 `bff/config/DnsCacheConfig`**：`MAX_TTL = 30s`（與 JDK `InetAddress` 慣用值一致；秒級設定會過度依賴
+- [x] 208.1 **spec**：`design.md` Infrastructure 章新增「BFF 上游 DNS 解析策略（Task 208）」；`tasks.md` 本任務。
+- [x] 208.2 **新增 `bff/config/DnsCacheConfig`**：`MAX_TTL = 30s`（與 JDK `InetAddress` 慣用值一致；秒級設定會過度依賴
       embedded DNS 可用性）；`applyDnsCacheLimit(HttpClient, usage)` 設 `cacheMinTimeToLive(0)` ＋ `cacheMaxTimeToLive(30s)`
       並印 `[dns-cache]` 日誌；`HttpClientCustomizer` bean 套用於 gateway。**negative TTL 刻意不設**——netty 預設 0s＝不快取
       失敗，設 1s 反而把重建瞬間的 NXDOMAIN 黏住。
-- [x] 207.3 **`WebClientConfig` 套同一設定**：`businessServicesClient` 明確 `.clientConnector(new ReactorClientHttpConnector(...))`；
+- [x] 208.3 **`WebClientConfig` 套同一設定**：`businessServicesClient` 明確 `.clientConnector(new ReactorClientHttpConnector(...))`；
       client 由注入的 `ReactorResourceFactory`（`org.springframework.http.client`，Boot 3.4.4 實際使用的那支，非 deprecated 的
       `...client.reactive`）建立以共用連線池／event loop，`ObjectProvider` 取不到時退回 `HttpClient.create()` 不讓 BFF 起不來。
       註解明示「已脫離 Boot connector 組裝管線，日後加 ssl bundle／mapper 需同步此處」。
-- [x] 207.4 **run-stack skill 保險**：`.claude/skills/run-stack/SKILL.md` 與 `.agents/` 副本新增「recreate business/ext 後
+- [x] 208.4 **run-stack skill 保險**：`.claude/skills/run-stack/SKILL.md` 與 `.agents/` 副本新增「recreate business/ext 後
       一併 restart bff」段落，含誤診特徵（business log 乾淨、錯只在 bff log、`getent` 正常）與「bff 容器無 curl、
       除 actuator 外全需登入 session 故無法用未認證 curl 自證」的提醒。
-- [x] 207.5 **建置與部署驗證**：`--no-cache` 重 build bff ＋ `--force-recreate`（healthy）；啟動日誌確認
+- [x] 208.5 **建置與部署驗證**：`--no-cache` 重 build bff ＋ `--force-recreate`（healthy）；啟動日誌確認
       `[dns-cache] webclient` 與 `[dns-cache] gateway` **各一行**（兩條路徑都套到）。
       **換 IP 對照實測**（不需任何帳號登入）：以運行中 `asset-bff` jar 內的同版本依賴（reactor-netty 1.2.4 ＋
       netty 4.1.119）編出探針 `DnsProbe`，於 `asset-network` 上同時跑兩個 `HttpClient.newConnection()`（不走連線池，
@@ -5163,7 +5185,7 @@ security property，直接 `-D` 讀不到——雙重靜默無效）、改用 JD
       stack 全數 healthy、`asset-bff` 自啟動起 `Connection refused`／`500` 計數為 0。
       註：BFF 除 `/actuator/health|info` 外全需登入 session，故未以瀏覽器代登入驗證（登入屬使用者本人操作）；
       上述探針即為不觸及帳號的等價驗證。
-- [ ] 207.6 commit ＋ 兩段式 merge。
+- [ ] 208.6 commit ＋ 兩段式 merge。
 
 ---
 

@@ -10,7 +10,7 @@ import reactor.netty.http.client.HttpClient;
 import java.time.Duration;
 
 /**
- * BFF 上游 DNS 正向快取上限（Task 207）。
+ * BFF 上游 DNS 正向快取上限（Task 208）。
  *
  * <p><b>問題：</b>{@code docker compose up -d --force-recreate business-services} 後該容器會換 IP
  * （實測 172.19.0.4 → 172.19.0.7），BFF 卻持續對舊 IP 連線得 {@code Connection refused}，

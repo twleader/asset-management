@@ -30,7 +30,7 @@ public class WebClientConfig {
                         cfg.defaultCodecs().maxInMemorySize(16 * 1024 * 1024))
                 .build();
         return builder
-                // DNS 快取上限（Task 207，理由見 DnsCacheConfig）：gateway 那條由 HttpClientCustomizer 套，
+                // DNS 快取上限（Task 208，理由見 DnsCacheConfig）：gateway 那條由 HttpClientCustomizer 套，
                 // 這條 WebClient 是另一個 HttpClient 實例，必須在此明確套用，否則 business-services
                 // 容器重建換 IP 後這條路徑仍會卡 Docker DNS 的 600s TTL。
                 // ⚠ 自建 connector＝已脫離 Boot 的 connector 組裝管線：日後若導入

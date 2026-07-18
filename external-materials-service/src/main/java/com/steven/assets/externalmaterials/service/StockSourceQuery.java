@@ -155,6 +155,42 @@ public class StockSourceQuery {
                 }));
     }
 
+    /** 一筆日收盤（交易日＋收盤價），供均線計算（Task 207）。 */
+    public record ClosePoint(LocalDate date, BigDecimal close) {}
+
+    /**
+     * 取某台股個股最近 n 筆日收盤（{@code stock_price_history}，濾除 null 收盤），<b>由舊到新</b>排序，供均線
+     * （季線 MA60／年線 MA240）計算（Task 207）。多列查詢用 void 區塊 lambda（RowCallbackHandler，逐列已定位）。
+     */
+    public List<ClosePoint> loadRecentStockCloses(String stockCode, String market, int n) {
+        List<ClosePoint> rows = new java.util.ArrayList<>();
+        jdbc.query(
+                "SELECT trading_date, close_price FROM stock_price_history " +
+                        "WHERE stock_code=? AND market=? AND close_price IS NOT NULL " +
+                        "ORDER BY trading_date DESC LIMIT ?",
+                (java.sql.ResultSet rs) -> {
+                    rows.add(new ClosePoint(rs.getObject(1, LocalDate.class), rs.getBigDecimal(2)));
+                }, stockCode, market, n);
+        java.util.Collections.reverse(rows);   // DESC 撈回後反轉為由舊到新
+        return rows;
+    }
+
+    /**
+     * 取台股大盤（0000）最近 n 筆日收盤（{@code twse_index_daily_history.close_point}，濾除 null），
+     * <b>由舊到新</b>排序，供均線計算（Task 207）。大盤走指數表、不在 stock_price_history。
+     */
+    public List<ClosePoint> loadRecentTaiexCloses(int n) {
+        List<ClosePoint> rows = new java.util.ArrayList<>();
+        jdbc.query(
+                "SELECT trading_date, close_point FROM twse_index_daily_history " +
+                        "WHERE close_point IS NOT NULL ORDER BY trading_date DESC LIMIT ?",
+                (java.sql.ResultSet rs) -> {
+                    rows.add(new ClosePoint(rs.getObject(1, LocalDate.class), rs.getBigDecimal(2)));
+                }, n);
+        java.util.Collections.reverse(rows);
+        return rows;
+    }
+
     /** 判斷該股票該日是否已有歷史紀錄（避免回補重複插入）。 */
     public boolean existsHistory(String stockCode, String market, LocalDate tradingDate) {
         org.springframework.jdbc.core.ResultSetExtractor<Boolean> ex = rs -> rs.next();
@@ -486,7 +522,11 @@ public class StockSourceQuery {
                 "SELECT title, source, url, category, region, summary, published_at " +
                         "FROM news_headline " +
                         "WHERE (fetched_at AT TIME ZONE 'Asia/Taipei')::date = ? " +
-                        "  AND (published_at AT TIME ZONE 'Asia/Taipei')::date >= ? " +
+                        // Task 207：ma-cross 的 published_at 刻意取「事件資料日」（供分析視窗自然老化），而大盤指數表
+                        // 落後數日屬常態（TwseIndexPoller 08:30 補抓晚於 NewsPoller 08:20 盤前輪），套 cutoff 會讓
+                        // 該列被 SRPP JSON 靜默濾掉、且同日不同輪次時有時無。故本 category 只受 fetched_at 當日管。
+                        "  AND (category = 'ma-cross' " +
+                        "       OR (published_at AT TIME ZONE 'Asia/Taipei')::date >= ?) " +
                         "ORDER BY published_at DESC, category, source",
                 (rs, i) -> new NewsRow(
                         rs.getString("title"), rs.getString("source"), rs.getString("url"),
