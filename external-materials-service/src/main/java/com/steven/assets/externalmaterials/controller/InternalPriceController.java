@@ -48,6 +48,7 @@ public class InternalPriceController {
     private final com.steven.assets.externalmaterials.service.IntradayTickRefresher tickRefresher;
     private final com.steven.assets.externalmaterials.service.StockSourceQuery stockSource;
     private final com.steven.assets.externalmaterials.service.TwTyphoonClosureService typhoonClosure;
+    private final com.steven.assets.externalmaterials.service.EtfNavPoller etfNavPoller;
 
     /**
      * 同步抓所有持股報價、寫 Redis 後回傳統計。
@@ -144,6 +145,15 @@ public class InternalPriceController {
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate since) {
         int n = historicalBackfill.backfillExchangeRateFrom(currency, since);
         return Map.of("currency", currency, "records", n);
+    }
+
+    /**
+     * 手動重抓 ETF 淨值／折溢價寫入 Redis（Task 209）。不限交易時段，供部署後驗證與抓取失敗時補救。
+     * 台股一次打證交所全市場彙整檔、美股逐檔問 Yahoo；個股不會有值（資料驅動判定，非白名單）。
+     */
+    @PostMapping("/etf-nav/refresh")
+    public com.steven.assets.externalmaterials.service.EtfNavPoller.RefreshSummary refreshEtfNav() {
+        return etfNavPoller.refreshAll();
     }
 
     /** 增量補油金價：從 max(price_date)+1 至今（Requirement 40）。 */

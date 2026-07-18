@@ -87,6 +87,45 @@ public class PriceQueryService {
         return fallbackToHistory(stockCode, market);
     }
 
+    /**
+     * ETF 淨值與折溢價（Task 209）。{@code premiumDiscountPct} 為百分比數值（1.2 = 溢價 1.2%）：
+     * 台股取自證交所已算好的折溢價欄、美股為 (市價−淨值)/淨值。
+     *
+     * @param navAsOf 淨值資料時點（台股 {@code yyyyMMdd HH:mm:ss}、美股 {@code yyyy-MM-dd}）
+     */
+    public record EtfNav(String stockCode, String market, BigDecimal nav,
+                         BigDecimal premiumDiscountPct, String navAsOf, String source) {}
+
+    /**
+     * 取 ETF 淨值／折溢價；查無回 {@code Optional.empty()}。
+     *
+     * <p><b>刻意不 fallback 到 DB</b>（與 {@link #getLive} 不同）：淨值不存在於 {@code stock_price_history}，
+     * 且「查無」是正常且常見的情形——個股本來就沒有淨值。呼叫端據此留白即可，不要補 0 或補字串。
+     */
+    public Optional<EtfNav> getEtfNav(String stockCode, String market) {
+        String key = "price:etfnav:" + market + ":" + stockCode;
+        try {
+            String json = redis.opsForValue().get(key);
+            if (json == null) return Optional.empty();
+            JsonNode n = mapper.readTree(json);
+            return Optional.of(new EtfNav(
+                    n.path("stockCode").asText(stockCode),
+                    n.path("market").asText(market),
+                    decimalOrNull(n, "nav"),
+                    decimalOrNull(n, "premiumDiscountPct"),
+                    n.path("navAsOf").isMissingNode() ? null : n.path("navAsOf").asText(null),
+                    n.path("source").isMissingNode() ? null : n.path("source").asText(null)));
+        } catch (Exception e) {
+            log.warn("ETF 淨值讀取失敗 {}: {}", key, e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    private static BigDecimal decimalOrNull(JsonNode node, String field) {
+        JsonNode v = node.path(field);
+        return v.isMissingNode() || v.isNull() ? null : new BigDecimal(v.asText());
+    }
+
     public List<LivePrice> getAll() {
         List<LivePrice> all = new ArrayList<>();
         for (String market : new String[]{"台股", "美股", "英股"}) {

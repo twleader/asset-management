@@ -46,6 +46,8 @@ public class ExcelExportService {
     private final com.steven.assets.repository.ExchangeRateHistoryRepository rateHistRepo;
     // 每檔持股「過去一年股價」分頁（Task 206）：收盤價權威來源，與 TechnicalIndicatorService 的 MA/KD 同源
     private final com.steven.assets.repository.StockPriceHistoryRepository priceHistRepo;
+    // ETF 淨值／折溢價（Task 209）：讀 Redis price:etfnav:{market}:{code}（由 ext 排程寫入），business 不直連外部行情
+    private final PriceQueryService priceQueryService;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -578,8 +580,14 @@ public class ExcelExportService {
         cell(sh2, 15, "季線價", st.head);
         cell(sh2, 16, "年線價", st.head);
         cell(sh2, 17, "KD值", st.head);
+        // ETF 淨值／折溢價（Task 209）：個股無淨值故留白，見 writeLiveAssetsSheet 逐列註解
+        cell(sh2, 18, "淨值", st.head);
+        cell(sh2, 19, "折溢價(%)", st.head);
+        cell(sh2, 20, "淨值時間", st.head);
         // 技術指標（月/季/年線、KD）逐 (code|market) 快取：同股多券商列僅算一次（Task 200）
         Map<String, TechnicalIndicatorService.FullIndicators> indicatorCache = new HashMap<>();
+        // ETF 淨值／折溢價逐 (code|market) 快取（Task 209）；查無者快取 null，避免同檔多列重複讀 Redis
+        Map<String, PriceQueryService.EtfNav> navCache = new HashMap<>();
         for (StockHolding sk : s.getStocks()) {
             Row row = sheet.createRow(r++);
             cell(row, 0, sk.getBroker() != null ? sk.getBroker().getDisplayName() : "", null);
@@ -612,9 +620,22 @@ public class ExcelExportService {
             cell(row, 15, ind.quarterlyMa(), st.num2);
             cell(row, 16, ind.annualMa(), st.num2);
             cell(row, 17, formatKd(ind.k(), ind.d()), null);
+            // ETF 淨值／折溢價（Task 209）：資料驅動——Redis 有值才印，個股（無淨值）與抓取失敗皆自然留白。
+            // 刻意不做 isEtf 白名單判定（既有白名單誤含個股 AVGO、又漏掉持有的 SGOV）。
+            // 同一檔多券商多列共用同一筆，比照技術指標以 code|market 快取，每檔只讀一次 Redis。
+            // 用 containsKey 而非 computeIfAbsent：後者不會快取 null 值，個股（永遠查無）會逐列重讀 Redis
+            String navKey = sk.getStockCode() + "|" + sk.getMarket();
+            if (!navCache.containsKey(navKey)) {
+                navCache.put(navKey, priceQueryService
+                        .getEtfNav(sk.getStockCode(), sk.getMarket()).orElse(null));
+            }
+            PriceQueryService.EtfNav nav = navCache.get(navKey);
+            cell(row, 18, nav == null ? null : nav.nav(), st.num4);
+            cell(row, 19, premiumDiscountPct(nav, livePrice), st.num2);
+            cell(row, 20, nav == null ? null : nav.navAsOf(), null);
         }
 
-        for (int i = 0; i < 18; i++) sheet.autoSizeColumn(i);
+        for (int i = 0; i < 21; i++) sheet.autoSizeColumn(i);
     }
 
     /**
@@ -687,6 +708,29 @@ public class ExcelExportService {
             unique = org.apache.poi.ss.util.WorkbookUtil.createSafeSheetName(withMarket + "_" + (++suffix));
         } while (wb.getSheet(unique) != null);
         return unique;
+    }
+
+    /**
+     * 折溢價%（Task 209）：來源已提供權威值就直接用，否則以<b>本列顯示的即時價</b>與淨值計算。
+     *
+     * <p>兩條路徑的理由不同，不可統一：
+     * <ul>
+     *   <li><b>台股</b>：證交所已算好折溢價，且其市價與本列「即時價」同源（皆為 TWSE mis 的成交價，實測逐檔吻合），
+     *       故直接沿用權威值。<b>不得改為自行重算</b>——證交所的淨值欄在股票型 ETF 四捨五入至小數 2 位，
+     *       重算誤差可達 0.07 個百分點。</li>
+     *   <li><b>美股</b>：Yahoo 未提供折溢價欄。若在抓取端以 Yahoo 自己的市價計算，會與本列「即時價」
+     *       （走 Redis，來源與時點皆不同）對不起來——實測 VOO 兩者相差 0.11%，使用者拿本列數字驗算會兜不攏。
+     *       故改在此以該列自己的即時價計算，保證列內自洽。</li>
+     * </ul>
+     * 淨值或即時價任一缺漏即回 null（留白），不以昨收等替代值湊數。
+     */
+    private static BigDecimal premiumDiscountPct(PriceQueryService.EtfNav nav, BigDecimal livePrice) {
+        if (nav == null) return null;
+        if (nav.premiumDiscountPct() != null) return nav.premiumDiscountPct();
+        if (livePrice == null || nav.nav() == null || nav.nav().compareTo(BigDecimal.ZERO) == 0) return null;
+        return livePrice.subtract(nav.nav())
+                .multiply(BigDecimal.valueOf(100))
+                .divide(nav.nav(), 2, java.math.RoundingMode.HALF_UP);
     }
 
     /** KD 併為單一「KD值」欄字串 "K {k} / D {d}"；兩者皆 null 回 null（留白），單邊 null 以「—」佔位。 */
