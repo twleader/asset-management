@@ -1,6 +1,6 @@
 ---
 name: commit-merge-push
-description: 在 asset-management 的 feature worktree 上一次完成「commit → merge 進 main → push」。嚴守兩段式 merge 慣例：feature 分支單行短中文 commit，main 用 --no-ff merge commit，禁止 fast-forward 直推。當使用者說「commit & push」「commit + merge + push」「merge 到 main」「上 main」「推上去」之類指令、且當前在 Codex/* feature 分支時使用。
+description: 在 asset-management 的 feature worktree 上一次完成「commit → merge 進 main → push」。嚴守兩段式 merge 慣例：feature 分支單行短中文 commit，main 用 --no-ff merge commit，禁止 fast-forward 直推。當使用者說「commit & push」「commit + merge + push」「merge 到 main」「上 main」「推上去」之類指令、且當前在 codex/* feature 分支時使用。
 ---
 
 # Commit → Merge → Push（兩段式 merge）
@@ -34,7 +34,7 @@ description: 在 asset-management 的 feature worktree 上一次完成「commit 
 
 ```bash
 WT=$(git rev-parse --show-toplevel)                 # 當前 feature worktree
-FEAT=$(git -C "$WT" branch --show-current)           # 例：Codex/beautiful-ellis-bfde40
+FEAT=$(git -C "$WT" branch --show-current)           # 例：codex/beautiful-ellis-bfde40
 echo "feature 分支：$FEAT"
 git -C "$WT" status --short
 git -C "$WT" diff --stat
@@ -53,7 +53,7 @@ echo "main worktree：$MAIN_WT"
 ## Step 1 — 在 feature 分支 commit
 
 先判斷要不要 `[skip-spec]`：看 `git diff --stat` 的路徑。
-- 只動到 `frontend/src` 樣式、`AGENTS.md`、`.Codex/skills/**`、純 typo → 加 `[skip-spec]`。
+- 只動到 `frontend/src` 樣式、`AGENTS.md`、`.agents/skills/**`、純 typo → 加 `[skip-spec]`。
 - 動到 `*/controller`、`*/model`、`*/dto`、`views`、`router`、liquibase changelog、`bff/**` → **不可** skip；確認 `spec/` 也一起改了且會被 staged。
 
 ```bash

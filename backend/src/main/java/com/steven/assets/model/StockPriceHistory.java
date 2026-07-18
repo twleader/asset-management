@@ -37,18 +37,18 @@ public class StockPriceHistory {
     @Column(nullable = false)
     private LocalDate tradingDate;
 
-    @Column(precision = 20, scale = 4)
+    @Column(precision = 15, scale = 4)
     private BigDecimal openPrice;
 
-    @Column(precision = 20, scale = 4)
+    @Column(precision = 15, scale = 4)
     private BigDecimal highPrice;
 
-    @Column(precision = 20, scale = 4)
+    @Column(precision = 15, scale = 4)
     private BigDecimal lowPrice;
 
-    @Column(nullable = false, precision = 20, scale = 4)
+    @Column(nullable = false, precision = 15, scale = 4)
     private BigDecimal closePrice;
 
-    @Column(nullable = false)
+    @Column
     private Long volume;
 }
