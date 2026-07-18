@@ -5139,3 +5139,50 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 - [x] 207.9 **單元測試**：新增 `MaCrossSnapshotClientTest`（10 例）——漲破／跌破／同側不觸發、`n=period` 與 `n=period+1` 臨界、15% 門檻兩側（14%／16%）、`publishedAt` 取資料日、null／零收盤 graceful、單一標的失敗不影響整輪，以及 **M1 與 M2 的回歸測試**。M1 該例已實測「停用 `windowHasGap` 則失敗（噴出『0050 收 48.09 漲破季線(MA60 47.80)』假訊號）、啟用則通過」，確認具鑑別力而非空測。
 - [x] 207.10 **建置與部署驗證**：`--no-cache` 重 build external-materials-service 並 `--force-recreate`；驗證爬蟲輪次正常、無突破時不產列、`ma-cross` 列可進 SRPP JSON 與分析 prompt。
 - [ ] 207.11 commit ＋ 兩段式 merge。
+
+---
+
+### Task 208：修正 business-services 容器重建後 BFF 沿用舊 IP 的 stale DNS（整站 500）
+
+**背景（實地事故）：** Task 206 部署時 `--force-recreate business-services`，該容器 IP 由 `172.19.0.4` 換成 `172.19.0.7`；
+BFF 之後持續對舊 IP 連線得 `Connection refused`，使用者點「歷年資產」等頁面一律 500。business-services 日誌**全乾淨**、
+容器內直打端點正常，錯誤只出現在 `docker logs asset-bff`——極易被誤診成功能壞掉。重啟 bff 後恢復。
+
+**根因（bytecode ＋ 原始 DNS 封包實測）：** reactor-netty 預設走 netty 非同步 DNS resolver（非 JDK `InetAddress`），
+其 `cacheMaxTimeToLive` 預設 `Integer.MAX_VALUE` 秒＝照抄回應 TTL；Docker 內建 DNS 對 container name 回 TTL **600 秒**
+（封包 TTL 欄位 `0x00000258`），故舊 IP 最久被記住 10 分鐘。`getent hosts` 正常是因為那走 glibc/NSS，與 netty 快取無關。
+
+**設計取捨：** 不採「每次重建 business 就人工 restart bff」的純流程規範作為唯一解——重建 business-services 是本專案最常見的
+部署動作，漏一次即整站 500 且症狀誤導性極強；改為程式修補（一支新檔 ＋ WebClientConfig 三處小改），流程面則另在
+run-stack skill 補上保險。同時捨棄兩條看似可行的路：`-Dnetworkaddress.cache.ttl`（對 reactor-netty 完全無效，且它是
+security property，直接 `-D` 讀不到——雙重靜默無效）、改用 JDK `DefaultAddressResolverGroup`（會讓 DNS 查詢變 blocking
+卡在 event loop，為修快取而動 I/O 模型不划算）。
+
+- [x] 208.1 **spec**：`design.md` Infrastructure 章新增「BFF 上游 DNS 解析策略（Task 208）」；`tasks.md` 本任務。
+- [x] 208.2 **新增 `bff/config/DnsCacheConfig`**：`MAX_TTL = 30s`（與 JDK `InetAddress` 慣用值一致；秒級設定會過度依賴
+      embedded DNS 可用性）；`applyDnsCacheLimit(HttpClient, usage)` 設 `cacheMinTimeToLive(0)` ＋ `cacheMaxTimeToLive(30s)`
+      並印 `[dns-cache]` 日誌；`HttpClientCustomizer` bean 套用於 gateway。**negative TTL 刻意不設**——netty 預設 0s＝不快取
+      失敗，設 1s 反而把重建瞬間的 NXDOMAIN 黏住。
+- [x] 208.3 **`WebClientConfig` 套同一設定**：`businessServicesClient` 明確 `.clientConnector(new ReactorClientHttpConnector(...))`；
+      client 由注入的 `ReactorResourceFactory`（`org.springframework.http.client`，Boot 3.4.4 實際使用的那支，非 deprecated 的
+      `...client.reactive`）建立以共用連線池／event loop，`ObjectProvider` 取不到時退回 `HttpClient.create()` 不讓 BFF 起不來。
+      註解明示「已脫離 Boot connector 組裝管線，日後加 ssl bundle／mapper 需同步此處」。
+- [x] 208.4 **run-stack skill 保險**：`.claude/skills/run-stack/SKILL.md` 與 `.agents/` 副本新增「recreate business/ext 後
+      一併 restart bff」段落，含誤診特徵（business log 乾淨、錯只在 bff log、`getent` 正常）與「bff 容器無 curl、
+      除 actuator 外全需登入 session 故無法用未認證 curl 自證」的提醒。
+- [x] 208.5 **建置與部署驗證**：`--no-cache` 重 build bff ＋ `--force-recreate`（healthy）；啟動日誌確認
+      `[dns-cache] webclient` 與 `[dns-cache] gateway` **各一行**（兩條路徑都套到）。
+      **換 IP 對照實測**（不需任何帳號登入）：以運行中 `asset-bff` jar 內的同版本依賴（reactor-netty 1.2.4 ＋
+      netty 4.1.119）編出探針 `DnsProbe`，於 `asset-network` 上同時跑兩個 `HttpClient.newConnection()`（不走連線池，
+      故每次都必須重新解析）——一個全預設、一個套本任務設定——每 5 秒印實際連到的 remote address；中途以
+      「暫時容器占住舊 IP」強制 `business-services` 由 `172.19.0.8` 換到 `172.19.0.9`。結果：
+      | 時間 | 預設（修補前行為） | 本任務設定（maxTtl=30s） |
+      |---|---|---|
+      | 13:34:38 | ← 換 IP，舊 IP 被占位容器占住 | |
+      | 13:34:49 | 仍 `Connection refused: 172.19.0.8` | **已跟上 `172.19.0.9`（11 秒）** |
+      | 13:35:59 | **80 秒後仍卡在舊 IP** | 持續正常 |
+      即修補前後為「最久 600 秒」對「≤30 秒」的量級差異，機制與設定值皆獲實證。測試容器（探針／占位）事後移除，
+      stack 全數 healthy、`asset-bff` 自啟動起 `Connection refused`／`500` 計數為 0。
+      註：BFF 除 `/actuator/health|info` 外全需登入 session，故未以瀏覽器代登入驗證（登入屬使用者本人操作）；
+      上述探針即為不觸及帳號的等價驗證。
+- [ ] 208.6 commit ＋ 兩段式 merge。
