@@ -46,7 +46,7 @@ public class ExcelExportService {
     private final com.steven.assets.repository.ExchangeRateHistoryRepository rateHistRepo;
     // 每檔持股「過去一年股價」分頁（Task 206）：收盤價權威來源，與 TechnicalIndicatorService 的 MA/KD 同源
     private final com.steven.assets.repository.StockPriceHistoryRepository priceHistRepo;
-    // 大盤指數日線匯出（Task 209）：與「股市大盤查詢」頁曲線同一張表，確保匯出值與圖表一致
+    // 大盤指數日線匯出（Task 216）：與「股市大盤查詢」頁曲線同一張表，確保匯出值與圖表一致
     private final com.steven.assets.repository.TwseIndexDailyHistoryRepository twseIndexHistRepo;
     private final com.steven.assets.repository.UsIndexDailyHistoryRepository usIndexHistRepo;
 
@@ -372,7 +372,7 @@ public class ExcelExportService {
 
     /**
      * 大盤指數匯出的顯示標籤（工作表名與兩種檔名共用同一來源，避免三處各自硬編碼中文名而漂移，
-     * 理由同 {@link #exchangeRateLabel}）（Requirement 43 / Task 209）。
+     * 理由同 {@link #exchangeRateLabel}）（Requirement 45 / Task 216）。
      *
      * <p>未知代碼直接以代碼本身為標籤，不臆造名稱——呼叫端已有白名單擋，此處只是不讓標籤說謊。
      * 前端 {@code GdpTwseView.MARKETS} 的 label 是 render 用，後端不可依賴前端字串。
@@ -393,7 +393,7 @@ public class ExcelExportService {
     }
 
     /**
-     * 大盤指數日線區間匯出（Requirement 43 / Task 209）：單張工作表、日期／開高低收五欄。
+     * 大盤指數日線區間匯出（Requirement 45 / Task 216）：單張工作表、日期／開高低收五欄。
      * 全域公開行情（兩張日線表皆無 owner 欄位、無 {@code @Filter}），故不需要 ForOwner 變體（同油價金價／匯率）。
      */
     @Transactional(readOnly = true)

@@ -82,7 +82,7 @@ public class SchedulePublicBffController {
                     "每分鐘檢查各使用者的台幣兌美元匯率自動匯出設定，命中執行時間即產出 Excel 到指定目錄（Requirement 42）",
                     "每分鐘", "0 * * * * *", TPE),
             new ScheduledJobDto(BUSINESS, "大盤指數匯出", "每日匯出排程檢查",
-                    "每分鐘檢查各使用者的大盤指數日線自動匯出設定，命中執行時間即產出所選指數的開高低收 Excel 到指定目錄（Requirement 43）",
+                    "每分鐘檢查各使用者的大盤指數日線自動匯出設定，命中執行時間即產出所選指數的開高低收 Excel 到指定目錄（Requirement 45）",
                     "每分鐘", "0 * * * * *", TPE),
             new ScheduledJobDto(BUSINESS, "資料備份", "每日備份（台股收盤後）",
                     "台股交易日收盤後 2 小時備份資料庫至 daily/",

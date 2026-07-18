@@ -194,7 +194,7 @@ export const bffApi = {
       api.post('/bff/gdp-twse/refresh-index-daily', null, { params: { market, years }, timeout: 180000 }),
     getIndexIntraday: (market = 'TWSE') =>
       api.get('/bff/gdp-twse/index-intraday', { params: { market } }),
-    // 指數日線匯出與排程自動匯出（Requirement 43 / Task 209）
+    // 指數日線匯出與排程自動匯出（Requirement 45 / Task 216）
     exportExcel: (market = 'TWSE', start, end) =>
       api.get('/bff/gdp-twse/export', {
         params: { market, ...(start && { start }), ...(end && { end }) },

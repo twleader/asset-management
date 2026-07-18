@@ -3088,7 +3088,7 @@ run-now 不動當日 guard——全部同 R41，不重述。
 
 ---
 
-## Requirement 43（Task 209）：股市大盤指數日線 Excel 匯出（開/高/低/收）與排程自動匯出
+## Requirement 45（Task 216）：股市大盤指數日線 Excel 匯出（開/高/低/收）與排程自動匯出
 
 結構比照 R41／R42（**全域公開行情 ＋ per-user 排程設定**），以下只記差異。
 
@@ -3101,7 +3101,7 @@ run-now 不動當日 guard——全部同 R41，不重述。
 | R37 交易日曆 | 全域 | 不需要 | `exportTradingCalendar(year)` |
 | R41 油價金價 | 全域 | 不需要 | `exportCommodityPrices(start, end)` |
 | R42 台幣兌美元 | 全域 | 不需要 | `exportExchangeRates(currency, start, end)` |
-| **R43 大盤指數日線** | **全域** | **不需要** | `exportIndexDaily(market, start, end)` |
+| **R45 大盤指數日線** | **全域** | **不需要** | `exportIndexDaily(market, start, end)` |
 
 `twse_index_daily_history` 與 `us_index_daily_history` 皆無 `owner_user_id`、未套 `@Filter(ownerFilter)`。
 
@@ -3135,7 +3135,7 @@ run-now 不動當日 guard——全部同 R41，不重述。
 ### 指數維度：本頁與 R42 的關鍵差異
 
 R42 刻意不設 `currency` 欄（單一幣別頁，加欄＝為不存在的需求預留）。
-**R43 相反**：本頁下拉本來就有 9 個指數，「匯出哪一個」是使用者當下的實際選擇，
+**R45 相反**：本頁下拉本來就有 9 個指數，「匯出哪一個」是使用者當下的實際選擇，
 故排程表**設 `market` 欄**（`VARCHAR(16) NOT NULL DEFAULT 'TWSE'`），設定卡提供指數下拉。
 
 標籤同 R42 走單一來源 `ExcelExportService.indexLabel(market)`（`TWSE`→`台股大盤`、`DJI`→`道瓊工業`…），
@@ -3205,7 +3205,7 @@ run-now 不動當日 guard——全部同 R41／R42，不重述。
 - `backend/.../service/IndexExportScheduleService.java`
 - `backend/.../controller/IndexExportController.java`（`@RequestMapping("/api/index-export")`）
 - `backend/.../dto/IndexExportDto.java`
-- `backend/src/main/resources/db/changelog/changes/v1.63.0-index-export-schedule.sql`
+- `backend/src/main/resources/db/changelog/changes/v1.66.0-index-export-schedule.sql`
 
 **異動**
 - `db.changelog-master.yaml`：註冊 v1.63.0

@@ -11,7 +11,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 /**
- * 股市大盤指數日線每日排程自動匯出設定（Requirement 43 / Task 209）。
+ * 股市大盤指數日線每日排程自動匯出設定（Requirement 45 / Task 216）。
  *
  * <p>每個使用者一列（{@code owner_user_id} UNIQUE），以 {@code @Filter(ownerFilter)} 隔離設定本身。
  * HTTP 情境（BFF→business）由 {@link com.steven.assets.security.TenantFilterAspect} 自動 owner-scoped；

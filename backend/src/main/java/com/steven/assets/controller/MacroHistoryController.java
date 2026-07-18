@@ -41,7 +41,7 @@ public class MacroHistoryController {
             .collect(java.util.stream.Collectors.toUnmodifiableSet());
 
     private final MacroHistoryService macroHistoryService;
-    /** 指數日線 Excel 匯出（Requirement 43 / Task 209）；與排程匯出走同一支產檔方法，確保兩途徑內容一致。 */
+    /** 指數日線 Excel 匯出（Requirement 45 / Task 216）；與排程匯出走同一支產檔方法，確保兩途徑內容一致。 */
     private final com.steven.assets.service.ExcelExportService excelExportService;
 
     @GetMapping("/taiwan-gdp")
@@ -119,7 +119,7 @@ public class MacroHistoryController {
     }
 
     /**
-     * 指數日線區間匯出成單一 .xlsx（日期／開盤／最高／最低／收盤五欄）（Requirement 43 / Task 209）。
+     * 指數日線區間匯出成單一 .xlsx（日期／開盤／最高／最低／收盤五欄）（Requirement 45 / Task 216）。
      * GET /api/index-daily/export?market=TWSE&start=2020-01-01&end=2026-07-18
      * 預設回近 10 年。全域公開行情，無 owner 過濾。
      *

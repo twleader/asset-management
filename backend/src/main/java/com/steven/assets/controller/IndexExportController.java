@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 股市大盤指數日線每日排程自動匯出設定端點（Requirement 43 / Task 209）。
+ * 股市大盤指數日線每日排程自動匯出設定端點（Requirement 45 / Task 216）。
  *
  * <p>per-user（owner-scoped）：由 BFF 帶 {@code X-User-*} → {@code CurrentUserContext} → {@code ownerFilter}，
  * 每個使用者只存取自己的排程設定。非 admin-only。

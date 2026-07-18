@@ -3,7 +3,7 @@ package com.steven.assets.dto;
 import lombok.Builder;
 
 /**
- * 股市大盤指數日線每日排程自動匯出設定 DTO（Requirement 43 / Task 209）。
+ * 股市大盤指數日線每日排程自動匯出設定 DTO（Requirement 45 / Task 216）。
  *
  * <p>資料夾瀏覽沿用 Requirement 34 既有的 {@code GET /api/export-schedule/browse}
  * （語意相同＝列出基底家目錄下子目錄），故本 DTO 不重複定義 Browse／DirEntry。

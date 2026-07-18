@@ -47,7 +47,7 @@ public class MacroHistoryService {
             List.of("DJI", "SPX", "IXIC", "SOX", "FTSE", "DAX", "KOSPI", "N225");
 
     /**
-     * 「股市大盤查詢」頁可選指數＝海外指數 ∪ 台股大盤（Requirement 43 / Task 209 匯出白名單的單一來源）。
+     * 「股市大盤查詢」頁可選指數＝海外指數 ∪ 台股大盤（Requirement 45 / Task 216 匯出白名單的單一來源）。
      *
      * <p>刻意<b>不含 {@code SP500TR}</b>：該代碼雖存在於 {@code us_index_daily_history}，
      * 但屬績效比較頁（Requirement 33）的含息報酬指數，不在本頁下拉中。

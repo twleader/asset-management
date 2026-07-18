@@ -315,7 +315,7 @@ public class GdpTwseBffController {
         return prev;
     }
 
-    // ===== Excel 匯出與排程自動匯出（Requirement 43 / Task 209）=====
+    // ===== Excel 匯出與排程自動匯出（Requirement 45 / Task 216）=====
     // 排程設定為 per-user：沿用 businessServicesClient（WebClientConfig.tenantHeaderFilter 自動帶 X-User-*
     // → 後端 ownerFilter 縮到本人）。指數日線本身是全域公開行情，匯出內容不因使用者而異。
 

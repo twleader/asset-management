@@ -57,7 +57,7 @@
       <el-empty v-else description="尚無資料" />
     </el-card>
 
-    <!-- 排程自動匯出設定（Requirement 43 / Task 209） -->
+    <!-- 排程自動匯出設定（Requirement 45 / Task 216） -->
     <el-card style="margin-top:20px">
       <template #header>
         <div style="display:flex;align-items:center;justify-content:space-between">
@@ -342,7 +342,7 @@ onMounted(() => {
   Promise.allSettled([fetchData(), fetchDailyData(), loadSchedule()])
 })
 
-// ===== Excel 匯出（Requirement 43 / Task 209）=====
+// ===== Excel 匯出（Requirement 45 / Task 216）=====
 
 const exporting = ref(false)
 const exportDialog = reactive({ visible: false, range: [] })
