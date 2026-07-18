@@ -486,10 +486,12 @@ TwMarketClosure       (台股臨時休市，PK = closure_date；全域參考、�
 ```
 
 > **Schema 基準線與 DB 層唯一鍵（重要澄清）：** 本專案的資料表基準線由 `db/init/01_dump.sql`（完整 `pg_dump` 快照，掛載進 `docker-entrypoint-initdb.d`）提供，**非** Liquibase 的 `v1.0.0-initial-schema` changeset；Liquibase 僅在此基準線之上做**增量**變更（dump 已含 `databasechangelog` 歷史，過往 changeset 視為 already-ran）。因此下列 Hibernate 早期建立、已固化進 dump 的 DB 層約束**不會出現在 Liquibase changelog**，但每個環境（運行中＋全新以 dump 初始化）皆已存在，`ddl-auto: none` 亦不會重建：
+>
+> 📌 **查證來源：`db/schema.sql`（已納入版控）。** `db/init/01_dump.sql` 含真實個人財務資料故被 `.gitignore` 排除，從 git 取得原始碼者看不到它；`db/schema.sql` 是同一份 schema「去除全部資料」後的可版控鏡像（`pg_dump --schema-only`，零 `COPY`／`INSERT`／`setval`），**欄位型別／位數／nullable 一律以它為準**。它刻意放在 `db/` 而非 `db/init/`，故不參與 DB 初始化、不會與 `01_dump.sql` 衝突；schema 變更後請依該檔標頭的指令同步重產。
 > - `stock_price_history`：`UNIQUE (stock_code, market, trading_date)`（Hibernate 名 `ukgoyp…`）＋ `INDEX idx_sph_code_date (stock_code, trading_date)`；**以 `db/init/01_dump.sql` 為準**：OHLC 皆 `NUMERIC(15,4)`（`open/high/low` nullable、`close` NOT NULL，見 v1.14.0）、`volume BIGINT`（nullable）。
 >   ⚠ `v1.0.0-initial-schema.sql` 寫的是 `NUMERIC(20,4)` ＋ `volume NOT NULL`，但該 changeset 在 dump 中已標記 already-ran、**永不執行**，故 20,4 從未套用到任何環境——查證位數/nullable 一律以 dump 為準，勿照抄 v1.0.0。
->   Entity `StockPriceHistory` 目前仍宣告 `precision = 20` 與 `volume nullable = false`，與 DB 不符；因 `ddl-auto: none` 不做 schema 驗證故無 runtime 影響，屬已知的靜默註解漂移（Task 148 宣稱「已對齊」實為未對齊），待後續任務處理。
-> - `exchange_rate_history`：`UNIQUE (currency, rate_date)`（Hibernate 名 `uk977p…`）＝ upsert 覆寫鍵；`buy_rate/sell_rate NUMERIC(10,4)`。
+>   Entity `StockPriceHistory` 目前仍宣告 `precision = 20` 與 `volume nullable = false`，與 DB 不符；因 `ddl-auto: none` 不做 schema 驗證故無 runtime 影響，屬已知的靜默註解漂移（Task 148 宣稱「已對齊」實為未對齊），待後續任務處理。**此漂移現已可自 repo 直接查證**：見 `db/schema.sql` 的 `stock_price_history`（`close_price numeric(15,4) NOT NULL`、`open/high/low_price numeric(15,4)` 可空、`volume bigint` 可空）。
+> - `exchange_rate_history`：`UNIQUE (currency, rate_date)`（Hibernate 名 `uk977p…`）＝ upsert 覆寫鍵；`buy_rate/sell_rate NUMERIC(10,4)`，**兩者皆 nullable**（`db/schema.sql` 實測；Entity 未標 `nullable=false` 屬正確，反倒是 `v1.0.0-initial-schema.sql` 寫的 `NOT NULL` 與 DB 不符——同樣因該 changeset 永不執行而未套用）。
 >
 > 稽核提醒：只讀 Liquibase changelog 會誤判「DB 無唯一鍵、無去重保護」；實際 DB 已有上述約束（重複列數為 0），故**不需**再補 `ADD CONSTRAINT` changeset（會產生重複約束）。
 
