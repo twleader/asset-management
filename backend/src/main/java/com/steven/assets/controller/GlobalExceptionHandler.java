@@ -2,6 +2,7 @@ package com.steven.assets.controller;
 
 import com.steven.assets.security.AdminRequiredException;
 import com.steven.assets.security.TenantAccessException;
+import com.steven.assets.security.UnauthenticatedException;
 import jakarta.validation.ConstraintViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
@@ -26,6 +27,12 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(AdminRequiredException.class)
     public ProblemDetail handleAdminRequired(AdminRequiredException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, ex.getMessage());
+    }
+
+    /** 請求未帶身分（Requirement 28）→ 401，避免落入下方 500 兜底而誤報為伺服器內部錯誤。 */
+    @ExceptionHandler(UnauthenticatedException.class)
+    public ProblemDetail handleUnauthenticated(UnauthenticatedException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, ex.getMessage());
     }
 
     @ExceptionHandler(IllegalArgumentException.class)

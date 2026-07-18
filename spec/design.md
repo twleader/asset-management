@@ -1728,6 +1728,15 @@ volumes:
 - **filter 僅在有 request context 時啟用**（aspect 以 `RequestContextHolder` 判斷）；背景 cron（`AlertNotificationDispatcher` / `StockAlertService.checkAlerts`）無 request context 故不啟用，照舊掃全體 alert、寄信給各 alert 自己挑的收件人。
 - Hibernate `@Filter` 不套用於 `EntityManager.find()`（findById），by-id 存取另以 `TenantGuard.assertOwned(ownerUserId)` 驗證歸屬。
 - ADMIN gate：輕量 `HandlerInterceptor` 讀 `X-User-Role`，對 `/api/backups/**`、`/internal/users/**`（管理）限 ADMIN（不引入整套 backend Security）。
+- **身分相關例外 → HTTP 狀態對映**（`GlobalExceptionHandler`，三者成套、語意互斥）：
+
+  | 例外 | 狀態 | 語意 |
+  |------|------|------|
+  | `UnauthenticatedException` | **401** | 未識別身分（請求未帶 `X-User-Id`／`CurrentUserContext.hasUser()` 為 false／`TenantGuard.requireCurrentUserId()` 回 `null`） |
+  | `AdminRequiredException` | 403 | 已識別身分但權限不足 |
+  | `TenantAccessException` | 404 | 已識別身分，資源存在但非本人所有（回 404 不洩漏他人資源是否存在） |
+
+  `UnauthenticatedException`（`security/UnauthenticatedException.java`，`RuntimeException` 子類，預設訊息「未識別使用者」，另有帶訊息建構子供各呼叫端保留原本的情境描述）取代原本各 service 直接拋 `IllegalStateException` 的寫法——`IllegalStateException` 無對應 handler，會落入 `@ExceptionHandler(Exception.class)` 的 500 兜底，使「未帶身分」被回報成伺服器內部錯誤。呼叫端涵蓋五支排程設定 service 的 `requireOwnerId()`（`ExportScheduleService`／`RealizedGainExportScheduleService`／`TradingCalendarExportScheduleService`／`CommodityExportScheduleService`／`ExchangeRateExportScheduleService`）與 `PortfolioAdviceService.saveProfile()`／`generate()`。**此為錯誤語意修正，非資安邊界變更**：business-services 未對主機開埠，公開邊界（nginx:80／bff:8080）對未登入與偽造 header 本就正確回 401（`SecurityWebFilterChain` 自訂 `authenticationEntryPoint`），且 `ProblemDetail` 回應不含 stacktrace。
 
 ### 管理者代看（effectiveUserId）
 

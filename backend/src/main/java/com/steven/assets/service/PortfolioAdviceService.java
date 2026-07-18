@@ -33,6 +33,7 @@ import com.steven.assets.repository.PortfolioAdviceRepository;
 import com.steven.assets.repository.PortfolioAdviceSettingRepository;
 import com.steven.assets.repository.StockHoldingRepository;
 import com.steven.assets.security.TenantGuard;
+import com.steven.assets.security.UnauthenticatedException;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -183,7 +184,7 @@ public class PortfolioAdviceService {
     public InvestmentProfileDto saveProfile(InvestmentProfileInput in) {
         Long ownerId = tenantGuard.requireCurrentUserId();
         if (ownerId == null) {
-            throw new IllegalStateException("無使用者情境，無法儲存理財條件");
+            throw new UnauthenticatedException("無使用者情境，無法儲存理財條件");
         }
         validateRisk(in.riskTolerance());
         validateReturn(in.expectedAnnualReturn());
@@ -404,7 +405,7 @@ public class PortfolioAdviceService {
     public PortfolioAdvice generate(InvestmentProfileInput in) {
         Long ownerId = tenantGuard.requireCurrentUserId();
         if (ownerId == null) {
-            throw new IllegalStateException("無使用者情境，無法產生資產配置建議");
+            throw new UnauthenticatedException("無使用者情境，無法產生資產配置建議");
         }
         // 先儲存條件（記住免重填、且作為本次建議的條件快照來源）
         saveProfile(in);
