@@ -2,10 +2,14 @@ package com.steven.assets.bff.exchangerate;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
@@ -29,13 +33,16 @@ public class ExchangeRateBffController {
     private static final ParameterizedTypeReference<List<Map<String, Object>>> LIST_MAP =
             new ParameterizedTypeReference<>() {};
 
+    private static final ParameterizedTypeReference<Map<String, Object>> MAP =
+            new ParameterizedTypeReference<>() {};
+
     /**
      * GET /api/bff/exchange-rate?currency=USD
      * 先 trigger refresh 取得最新；再回傳近 10 年的歷史。
      */
     @GetMapping
     public Mono<ResponseEntity<Map<String, Object>>> getHistory(
-            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "USD") String currency) {
+            @RequestParam(defaultValue = "USD") String currency) {
         Mono<Void> refresh = businessServicesClient.post()
                 .uri(uri -> uri.path("/api/market-data/exchange-rate/refresh")
                         .queryParam("currency", currency).build())
@@ -63,8 +70,8 @@ public class ExchangeRateBffController {
 
     @PostMapping("/backfill")
     public Mono<ResponseEntity<Map<String, Object>>> backfill(
-            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "USD") String currency,
-            @org.springframework.web.bind.annotation.RequestParam(required = false) String since) {
+            @RequestParam(defaultValue = "USD") String currency,
+            @RequestParam(required = false) String since) {
         return businessServicesClient.post()
                 .uri(uri -> {
                     var u = uri.path("/api/market-data/exchange-rate/backfill-history")
@@ -73,7 +80,76 @@ public class ExchangeRateBffController {
                     return u.build();
                 })
                 .retrieve()
-                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .bodyToMono(MAP)
                 .map(ResponseEntity::ok);
+    }
+
+    // ===== 排程自動匯出設定（Requirement 42 / Task 204，per-user owner-scoped）=====
+    // 沿用 businessServicesClient（WebClientConfig.tenantHeaderFilter 自動帶 X-User-* → 後端 ownerFilter 縮到本人）。
+
+    @GetMapping("/export/schedule")
+    public Mono<ResponseEntity<Map<String, Object>>> getExportSchedule() {
+        return businessServicesClient.get()
+                .uri("/api/exchange-rate-export/schedule")
+                .retrieve()
+                .bodyToMono(MAP)
+                .map(ResponseEntity::ok);
+    }
+
+    @PutMapping("/export/schedule")
+    public Mono<ResponseEntity<Map<String, Object>>> updateExportSchedule(@RequestBody Map<String, Object> body) {
+        return businessServicesClient.put()
+                .uri("/api/exchange-rate-export/schedule")
+                .bodyValue(body)
+                .retrieve()
+                .bodyToMono(MAP)
+                .map(ResponseEntity::ok);
+    }
+
+    @PostMapping("/export/run-now")
+    public Mono<ResponseEntity<Map<String, Object>>> runExportNow() {
+        return businessServicesClient.post()
+                .uri("/api/exchange-rate-export/run-now")
+                .retrieve()
+                .bodyToMono(MAP)
+                .map(ResponseEntity::ok);
+    }
+
+    /** 目錄列舉沿用 Requirement 34 既有的 business 端點（語意相同＝列出基底下子目錄），不新增第五份實作。 */
+    @GetMapping("/export/browse")
+    public Mono<ResponseEntity<Map<String, Object>>> browseExportDir(
+            @RequestParam(value = "subpath", required = false, defaultValue = "") String subpath) {
+        return businessServicesClient.get()
+                .uri("/api/export-schedule/browse?subpath={subpath}", subpath)
+                .retrieve()
+                .bodyToMono(MAP)
+                .map(ResponseEntity::ok);
+    }
+
+    /**
+     * GET /api/bff/exchange-rate/export?currency=&start=&end= — passthrough 下載 .xlsx。
+     * 連同 business 回的 Content-Disposition 一併轉出，前端才能取到預設檔名。
+     */
+    @GetMapping("/export")
+    public Mono<ResponseEntity<byte[]>> export(
+            @RequestParam(defaultValue = "USD") String currency,
+            @RequestParam(required = false) String start,
+            @RequestParam(required = false) String end) {
+        return businessServicesClient.get()
+                .uri(uri -> {
+                    var u = uri.path("/api/market-data/exchange-rate/export")
+                            .queryParam("currency", currency);
+                    if (start != null && !start.isBlank()) u.queryParam("start", start);
+                    if (end != null && !end.isBlank()) u.queryParam("end", end);
+                    return u.build();
+                })
+                .accept(MediaType.APPLICATION_OCTET_STREAM)
+                .retrieve()
+                .toEntity(byte[].class)
+                .map(e -> {
+                    ResponseEntity.BodyBuilder b = ResponseEntity.ok();
+                    e.getHeaders().forEach((k, v) -> v.forEach(val -> b.header(k, val)));
+                    return b.body(e.getBody());
+                });
     }
 }

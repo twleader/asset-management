@@ -981,3 +981,29 @@
 - [ ] **寫檔採 tmp ＋ atomic move**：比照 Requirement 37 `TradingCalendarExportService.writeAtomically`，先寫 `.tmp` 再 `ATOMIC_MOVE`（不支援時退 `REPLACE_EXISTING`），避免覆寫既有檔時因中途失敗留下半截殘檔。
 - [ ] **檔名**：`油價金價_{使用者ID}_{YYYYMMDD}.xlsx`。檔名含 owner id 的原因：資料雖為全域，但各使用者可設不同「匯出範圍」，同日產出內容不同；若多使用者設定同一 subpath，不帶 id 會互相覆蓋成非預期區間。
 - [ ] **排程列表頁需登錄**：新排程須在「公開資訊 → 排程列表」（Requirement 36 / `SchedulePublicBffController` 的 `JOBS`）補上對應項目，避免該頁與實際排程漂移。
+
+---
+
+### Requirement 42: 台幣兌美元匯率 Excel 匯出與排程自動匯出到指定目錄
+
+**User Story:** 作為使用者，我希望「台幣兌美元」頁也能像油價金價一樣，指定時間區間把匯率歷史匯出成 Excel，並可設定每日自動匯出到指定資料夾，讓匯率歷史定期留存到本機目錄。
+
+**Acceptance Criteria:**
+
+- [ ] **手動匯出（指定時間區間、瀏覽器另存）**：匯率頁圖表工具列（區間按鈕與「回補資料」旁）新增「匯出 Excel」按鈕，開啟對話框可指定起訖日期，預設帶入目前圖表所選區間。按下匯出優先開啟系統「另存新檔」對話框（`showSaveFilePicker`）供自選資料夾與檔名；瀏覽器不支援時退回一般下載。使用者按取消不顯示成功訊息。檔名 `台幣兌美元_{起}_{迄}.xlsx`（`YYYYMMDD`）。
+- [ ] **匯出內容**：單一 Excel 檔、單一工作表「台幣兌美元」，欄位為 **日期／即期買入／即期賣出／中間價**，依日期遞增排列。買入或賣出當日無牌告時該格留空，不補前值、不捏造。中間價為 `ExchangeRateHistory.getMidRate()` 的計算值（`(買入+賣出)/2`，四捨五入至小數 4 位；單邊為 null 時取另一邊）——`mid_rate` 已於 v1.9.4 移除實體欄位（完整正規化：不存可由其他欄位算出的衍生值），故匯出時由 entity 的 `@Transient` getter 計算，**不可**改回 SQL 選取或排序該欄。
+- [ ] **日期寫為文字**：比照 Requirement 40，日期欄以 ISO 文字寫入而非 Excel date cell，避免開啟端依時區重新詮釋而偏移一天。
+- [ ] **排程／立即匯出的內容＝手動匯出的同一份活頁簿**：排程與「立即匯出到目錄」產出的檔案，與手動匯出走同一支 `ExcelExportService.exportExchangeRates(currency, start, end)`，不因觸發途徑而不同（CLAUDE.md「同義欄位、同一 business service API」）。
+- [ ] **每日排程自動匯出（per-user，每日單一時間）**：匯率頁新增「排程自動匯出」設定卡，可開啟每日排程並設定執行時間（時:分）與輸出資料夾，系統於該時間匯出 `.xlsx` 到指定目錄。每日固定一個時間（比照 Requirement 34／39／41）。
+- [ ] **可設定匯出時間範圍**：排程設定含「匯出範圍」（近 1 個月／3 個月／6 個月／1 年／3 年／5 年／全部十年，預設全部十年），每次執行以「執行當日往前推該範圍」計算起訖日期，讓留存檔案隨時間滾動而非固定區間。範圍以月數存於 `range_months`，「全部十年」＝ `120`；後端另接受 `NULL` 同義為全部十年，以相容從未儲存過設定的列。前端不以 `null` 表示（Element Plus `el-select` 會把 `null` 當 empty value 而顯示 placeholder，使用者無法分辨「已選全部十年」與「尚未選擇」）。
+- [ ] **輸出路徑（家目錄為根＋相對子路徑）**：沿用 Requirement 34／37／39／41 的路徑模型——容器內基底目錄由 `EXPORT_OUTPUT_DIR`（預設 `/home/steven`）指定，經 docker volume 對映到 host 家目錄；使用者設定的是相對子路徑。後端一律以「基底 resolve 子路徑後 normalize 必須仍在基底內」驗證，拒絕 `..` 跳脫與絕對路徑；寫檔時 `Files.createDirectories` 自動建立缺少的目錄。
+- [ ] **資料夾選擇器沿用同一支 business API**：設定卡提供檔案總管式 `el-tree` 懶載入資料夾選擇器。目錄列舉**不新增 business 端點**，沿用 Requirement 34 既有的 `GET /api/export-schedule/browse?subpath=`；本頁僅在 BFF 新增自己的路由 `GET /api/bff/exchange-rate/export/browse` passthrough（依「一個前端頁面一個 BFF」）。
+- [ ] **可手動立即匯出（驗證用）**：設定卡提供「立即匯出到目錄」按鈕（`POST /api/bff/exchange-rate/export/run-now`），立即產檔到設定目錄並回傳實際落點路徑與檔案大小；此操作**不動當日排程 guard**。
+- [ ] **每使用者各自設定（owner-scoped 設定表）**：排程設定存於新表 `exchange_rate_export_schedule`（每 `owner_user_id` 一列 UNIQUE、`@Filter(ownerFilter)` 隔離），欄位含啟用／時分／輸出子路徑／匯出範圍／上次執行日期（當日 guard）／上次執行時間與結果。
+- [ ] **背景產檔不需 `enableFilter`（同 Requirement 41）**：匯率為**全域公開資料**（`exchange_rate_history` 無 `owner_user_id`、無 `@Filter`），故背景 cron 直接呼叫 `exportExchangeRates(currency, start, end)` 即可，不需要 `exportXxxForOwner(ownerId)` 變體。此點與 Requirement 39（per-user 損益，不過濾會外洩他人資料）相反，與 Requirement 37／41 相同——**排程設定 per-user，但資料本身全域**。
+- [ ] **幣別固定 USD（不新增設定欄）**：本頁為「台幣兌美元」單一幣別頁，排程表**不設 `currency` 欄**，服務層以常數 `USD` 產檔。business 匯出端點沿用其他匯率端點的慣例保留 `currency` 參數（預設 `USD`、`CURRENCY_PATTERN` 驗證），但排程不暴露該維度——避免為尚不存在的多幣別頁面預留未使用欄位。日後真的要多幣別，屆時再加欄並補 migration。
+- [ ] **顯示標籤必須跟著幣別走（不可寫死「台幣兌美元」）**：既然端點對外接受 `currency`，工作表名與檔名就必須由幣別推導，否則帶 `currency=ZAR` 會匯出 ZAR 資料卻標示為美元——實測可重現的靜默誤標。標籤由單一來源 `ExcelExportService.exchangeRateLabel(currency)` 產生（USD → `台幣兌美元`，其餘 → `台幣兌{幣別}`），工作表名、手動匯出檔名、排程檔名三處共用，避免各自硬編碼而漂移。「前端恆送 USD」是現在呼叫者的性質，不是這支 API 的契約，不足以作為寫死的理由。
+- [ ] **排程執行機制與自癒（比照 Requirement 34／37／39／41）**：每分鐘 `@Scheduled` poll（`zone=Asia/Taipei`），以 `now >= 設定時分` ＋ `last_run_date` 當日 guard 判斷（非「分鐘精確相等」，避免排程執行緒被長工作卡住跨分鐘導致整日靜默漏跑）；服務重啟以 `ApplicationReadyEvent` 補跑當日已到點未執行者；`AtomicBoolean` 防重入；單一使用者失敗只記 `last_run_status`＋log、不影響其他使用者（成功或失敗都設當日 guard）。
+- [ ] **寫檔採 tmp ＋ atomic move**：先寫 `.tmp` 再 `ATOMIC_MOVE`（不支援時退 `REPLACE_EXISTING`），避免覆寫既有檔時因中途失敗留下半截殘檔。
+- [ ] **檔名**：`台幣兌美元_{使用者ID}_{YYYYMMDD}.xlsx`。含 owner id 的原因同 Requirement 41：資料雖為全域，但各使用者可設不同匯出範圍，同日產出內容不同，不帶 id 會在共用目錄互相覆蓋。
+- [ ] **排程列表頁需登錄**：新排程須在「公開資訊 → 排程列表」（Requirement 36 / `SchedulePublicBffController` 的 `JOBS`）補上對應項目，避免該頁與實際排程漂移。

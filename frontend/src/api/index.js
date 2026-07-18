@@ -165,12 +165,22 @@ export const bffApi = {
     browseExportDir:      (subpath = '') => api.get('/bff/commodity-price/export/browse', { params: { subpath }, skipErrorToast: true })
   },
 
-  // ExchangeRate
+  // ExchangeRate（公開資訊 → 台幣兌美元）
   exchangeRate: {
     getHistory: (currency = 'USD') =>
       api.get('/bff/exchange-rate', { params: { currency } }),
     backfill:   (currency = 'USD', since) =>
-      api.post('/bff/exchange-rate/backfill', null, { params: { currency, ...(since && { since }) } })
+      api.post('/bff/exchange-rate/backfill', null, { params: { currency, ...(since && { since }) } }),
+    exportExcel: (start, end, currency = 'USD') =>
+      api.get('/bff/exchange-rate/export', {
+        params: { currency, ...(start && { start }), ...(end && { end }) },
+        responseType: 'blob',
+        timeout: 120000
+      }),
+    getExportSchedule:    () => api.get('/bff/exchange-rate/export/schedule', { skipErrorToast: true }),
+    updateExportSchedule: (data) => api.put('/bff/exchange-rate/export/schedule', data, { skipErrorToast: true }),
+    runExportNow:         () => api.post('/bff/exchange-rate/export/run-now', null, { timeout: 60000, skipErrorToast: true }),
+    browseExportDir:      (subpath = '') => api.get('/bff/exchange-rate/export/browse', { params: { subpath }, skipErrorToast: true })
   },
 
   // GdpTwse (GDP + 台股大盤年度走勢)

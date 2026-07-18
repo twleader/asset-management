@@ -294,6 +294,32 @@ public class MarketDataController {
         return Map.of("backfilled", count, "currency", currency, "since", since.toString());
     }
 
+    /**
+     * 匯率區間匯出成單一 .xlsx（日期／即期買入／即期賣出／中間價四欄）（Requirement 42 / Task 204）
+     * GET /api/market-data/exchange-rate/export?currency=USD&start=2020-01-01&end=2026-07-17
+     * 預設回近 10 年。全域公開資料，無 owner 過濾。
+     */
+    @GetMapping("/exchange-rate/export")
+    public ResponseEntity<org.springframework.core.io.ByteArrayResource> exportExchangeRates(
+            @RequestParam(defaultValue = "USD") @Pattern(regexp = CURRENCY_PATTERN, message = "幣別格式不合法") String currency,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end)
+            throws java.io.IOException {
+        LocalDate[] range = normalizeTenYearRange(start, end);
+        byte[] data = excelExportService.exportExchangeRates(currency, range[0], range[1]);
+        java.time.format.DateTimeFormatter fileFmt = java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd");
+        String filename = com.steven.assets.service.ExcelExportService.exchangeRateLabel(currency)
+                + "_" + fileFmt.format(range[0]) + "_" + fileFmt.format(range[1]) + ".xlsx";
+        org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+        headers.setContentDisposition(org.springframework.http.ContentDisposition
+                .attachment().filename(filename, java.nio.charset.StandardCharsets.UTF_8).build());
+        return ResponseEntity.ok().headers(headers)
+                .contentType(MediaType.parseMediaType(
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .contentLength(data.length)
+                .body(new org.springframework.core.io.ByteArrayResource(data));
+    }
+
     // ===== 油價金價（Requirement 40 / Task 202）=====
 
     /**
@@ -305,7 +331,7 @@ public class MarketDataController {
     public Map<String, List<CommodityPriceHistory>> getCommodityHistory(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end) {
-        LocalDate[] range = normalizeCommodityRange(start, end);
+        LocalDate[] range = normalizeTenYearRange(start, end);
         return historicalDataService.getCommodityHistory(range[0], range[1]);
     }
 
@@ -328,7 +354,7 @@ public class MarketDataController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end)
             throws java.io.IOException {
-        LocalDate[] range = normalizeCommodityRange(start, end);
+        LocalDate[] range = normalizeTenYearRange(start, end);
         byte[] data = excelExportService.exportCommodityPrices(range[0], range[1]);
         java.time.format.DateTimeFormatter fileFmt = java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd");
         String filename = "油價金價_" + fileFmt.format(range[0]) + "_" + fileFmt.format(range[1]) + ".xlsx";
@@ -343,7 +369,7 @@ public class MarketDataController {
     }
 
     /** 補預設值（近 10 年）並驗證區間；start 晚於 end 直接擋為 400。 */
-    private LocalDate[] normalizeCommodityRange(LocalDate start, LocalDate end) {
+    private LocalDate[] normalizeTenYearRange(LocalDate start, LocalDate end) {
         if (start == null) start = LocalDate.now().minusYears(10);
         if (end == null) end = LocalDate.now();
         if (start.isAfter(end)) {

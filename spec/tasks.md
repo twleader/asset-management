@@ -5052,4 +5052,28 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 - [x] 203.8 **排程列表登錄**：`SchedulePublicBffController.JOBS` 補「油價金價匯出 每日匯出排程檢查」。
 - [x] 203.9 **建置與部署驗證**：`--no-cache` 重 build business／bff／frontend 並 `--force-recreate`（皆 healthy）。Liquibase `v1.61.0-commodity-export-schedule` EXECUTED、表與 `uq_commodity_export_schedule_owner` ＋ 三個 CHECK 到位。驗證項目：**設定 CRUD** — GET 無設定回預設 `{enabled:false, runHour:8, outputSubpath:"input", rangeMonths:null, baseDir:"/home/steven"}`，PUT 正確 upsert；**輸入驗證** — `outputSubpath:"../../etc"` 回 400、`rangeMonths:999` 回 400；**run-now 實際落檔** — 回 `{path:"/home/steven/input/oilgold/油價金價_1_20260718.xlsx", sizeBytes:5569}`，主機端 `/Users/steven/input/oilgold/` 確實出現同大小檔案（volume 對映正確）、無 `.tmp` 殘留；**滾動區間正確** — `rangeMonths:3` 產出 62 筆、`2026-04-20 ~ 2026-07-17`（4/18–19 為週末故首筆落 4/20），表頭四欄與手動匯出一致；**背景排程實際觸發** — 設 07:30 且當日未跑，08:20:00 UTC 的 tick 自動補跑成功（log：`油價金價排程匯出成功 owner=1 → …`），`last_run_date=2026-07-18` guard 已設、`last_run_status` 記錄成功路徑；**前端** — `CommodityPriceView-rf12F3CP.js` 含 `rangeMonths`、`index-C3oONiK9.js` 含三支 `commodity-price/export/*` 路徑；**排程列表** — 運行中 BFF jar 的 `SchedulePublicBffController.class` 含「油價金價」兩筆登錄（回補＋匯出）。驗證後已將測試排程 `enabled` 設回 `false`，避免未經使用者要求的每日自動產檔。**設定卡 UI 與目錄樹選擇器待使用者於瀏覽器登入後目視確認**。
 - [x] 203.10 **對抗式審查修正（`el-select` 綁 null 顯示失真）**：五視角並行審查（排程正確性／租戶隔離／路徑安全／API 契約／前端行為）共 8 個發現，經每個發現 2 名獨立懷疑者對抗式驗證後 6 個被駁回、2 個成立——且為同一缺陷由 api-consistency 與 frontend-behavior 兩視角各自獨立發現：`rangeMonths` 的「全部十年」選項以 `null` 為值，而 element-plus 2.13.6 的 `DEFAULT_EMPTY_VALUES` 含 `null`，致 `hasModelValue=false`、欄位渲染灰色 placeholder 而非「全部十年」，使用者無法分辨「已選全部十年」與「尚未選擇」（值本身正確，純顯示層失真）。**修正**：前端改以哨兵值 `120`（月）表示全部十年——`end.minusMonths(120)` 與 `minusYears(10)` 等價、CHECK 允許 `1..120`，語意零變動，且不依賴 `:empty-values` 這類版本相依 prop；`loadSchedule`／`saveSchedule` 將後端 `null` 映射為 `120`，後端保留 `null` 分支相容未儲存過的舊列。同步更新 `requirements.md` 與 `design.md`。**驗證**：重 build frontend，`rangeMonths=120` 之 run-now 產出 2515 筆、`2016-07-18 ~ 2026-07-17`（76,474 bytes），與十年完全等價（近 3 個月為 62 筆／5,569 bytes）。
-- [ ] 203.11 commit ＋ 兩段式 merge。
+- [x] 203.11 commit ＋ 兩段式 merge（`3edc7577`）。
+
+---
+
+### Task 204：台幣兌美元匯率 Excel 匯出與排程自動匯出到指定目錄（Requirement 42）
+
+**需求對應：** Requirement 42「台幣兌美元匯率 Excel 匯出與排程自動匯出到指定目錄」。
+
+**背景：** 使用者於 Task 203 完成後追加要求「這個功能也要可以指定時間匯出到指定目錄」，指的是「台幣兌美元」頁。該頁原本只有區間按鈕與「回補資料」，完全沒有匯出能力，故本任務一次補齊 R40＋R41 兩層：手動指定區間另存 ＋ 每日排程寫入指定目錄。
+
+**沿用與差異：** 結構全面比照 R41（同為全域公開行情 ＋ per-user 排程設定，背景 cron 不需 `enableFilter`）。三個差異：(1) 單一序列，不需 R41 的跨標的 outer join；(2) 中間價為 `@Transient` 計算值（`mid_rate` 已於 v1.9.4 移除欄位），只能走 entity getter，不可回到 SQL 選取／排序；(3) 排程表不設 `currency` 欄，服務層固定 `USD`——本頁為單一幣別頁，加欄等於為不存在的多幣別頁預留未使用欄位。
+
+- [ ] 204.1 **spec**：`requirements.md` 新增 Requirement 42；`design.md` 新增「Requirement 42（Task 204）」設計段（五套排程定位對照／midRate 取得方式／幣別維度取捨／資料模型／端點／檔案清單）；`tasks.md` 本任務。
+- [ ] 204.2 **DB changeset**：`v1.62.0-exchange-rate-export-schedule.sql` 建 `exchange_rate_export_schedule`（owner UNIQUE ＋ 時分／range_months CHECK），冪等寫法；`db.changelog-master.yaml` 註冊。
+- [ ] 204.3 **backend model／repository／dto**：`ExchangeRateExportSchedule` entity（`@Filter(ownerFilter)`）＋ repository ＋ `ExchangeRateExportDto`。
+- [ ] 204.4 **`ExcelExportService.exportExchangeRates`**：新增 `writeExchangeRateSheet`（日期／即期買入／即期賣出／中間價；日期寫文字避免時區偏移；null 留空；midRate 走 `@Transient` getter）。
+- [ ] 204.5 **`MarketDataController`**：新增 `GET /api/market-data/exchange-rate/export`（UTF-8 檔名、`ByteArrayResource`、區間預設近十年並驗證 start ≤ end）。
+- [ ] 204.6 **`ExchangeRateExportScheduleService` ＋ `ExchangeRateExportController`**：設定 CRUD、`resolveDir` 路徑驗證、`writeAtomically`、滾動區間、每分鐘 tick ＋ 當日 guard ＋ `AtomicBoolean` 防重入、`ApplicationReadyEvent` 自癒、run-now（不動 guard）；端點 `GET/PUT /api/exchange-rate-export/schedule`、`POST /api/exchange-rate-export/run-now`。目錄列舉沿用既有 `/api/export-schedule/browse`。
+- [ ] 204.7 **BFF**：`ExchangeRateBffController` 增 export 下載 ＋ schedule GET/PUT ＋ run-now ＋ browse 五支 passthrough。
+- [ ] 204.8 **前端**：`api/index.js` `exchangeRate` 增 5 支；`ExchangeRateView.vue` 增「匯出 Excel」按鈕＋區間匯出對話框＋「排程自動匯出」設定卡＋資料夾樹選擇器。
+- [ ] 204.9 **排程列表登錄**：`SchedulePublicBffController.JOBS` 補「台幣兌美元匯出 每日匯出排程檢查」。
+- [x] 204.9b **`db/schema.sql` 基準線鏡像重產**：依該檔標頭指令重新 `pg_dump --schema-only` 並補回標頭。順帶修掉一項既有落後——Task 203 的 `commodity_export_schedule` 當時未同步進鏡像，本次一併補上。重產後 diff 為**純新增 128 行、零刪除**，內容僅 `commodity_export_schedule` 與 `exchange_rate_export_schedule` 兩張表及其 sequence／PK／UNIQUE／CHECK，證實無其他 schema 漂移混入。
+- [x] 204.9c **對抗式驗證修正（幣別標籤硬編碼）**：六面向並行端到端驗證（CRUD／run-now 落檔／Excel 內容／BFF 路由／租戶隔離／部署真實性，共 77 個檢查點）提出 4 個 FAIL，經每個 FAIL 三名獨立視角對抗式複驗後全數被駁回。但其中「檔名與工作表名寫死『台幣兌美元』」一項**經我覆核後判定駁回理由不成立**——複驗者以「前端恆送 USD 故不影響」為由駁回，然該理由描述的是當下呼叫者而非 API 契約，且已實測 `currency=ZAR` 可重現：回 200、內容確為 ZAR 資料（22 列與 DB 相符）、檔名與工作表名卻標為「台幣兌美元」。**修正**：新增單一來源 `ExcelExportService.exchangeRateLabel(currency)`，由工作表名／手動匯出檔名／排程檔名三處共用。另兩項為既有跨服務行為（無身分回 500 而非 401，五支同類服務一致，已另立追蹤）與驗證環境自身干擾（並行 agent 寫同一張表），均非本次缺陷。
+- [ ] 204.10 **建置與部署驗證**：`--no-cache` 重 build business／bff／frontend 並 `--force-recreate`；驗證 Liquibase EXECUTED、設定 CRUD、路徑跳脫與 rangeMonths 越界擋為 400、run-now 實際落檔（含主機端可見）、滾動區間筆數正確、手動匯出內容與排程一致。
+- [ ] 204.11 commit ＋ 兩段式 merge。
