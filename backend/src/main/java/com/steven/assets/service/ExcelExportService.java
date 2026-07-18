@@ -42,6 +42,8 @@ public class ExcelExportService {
     private final TechnicalIndicatorService technicalIndicatorService;
     // 油價金價匯出（Task 202）：全域公開行情，與頁面曲線同一張表，確保匯出值與圖表一致
     private final com.steven.assets.repository.CommodityPriceHistoryRepository commodityHistRepo;
+    // 台幣兌美元匯率匯出（Task 204）：同為全域公開資料，與頁面曲線同一張表
+    private final com.steven.assets.repository.ExchangeRateHistoryRepository rateHistRepo;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -295,6 +297,65 @@ public class ExcelExportService {
             for (int i = 0; i < v.length; i++) {
                 if (v[i] != null) cell(row, i + 1, v[i], st.num4);
             }
+        }
+
+        for (int i = 0; i < 4; i++) sheet.autoSizeColumn(i);
+    }
+
+    /**
+     * 匯率匯出的顯示標籤（工作表名與檔名共用同一來源，避免兩處各自硬編碼而漂移）。
+     *
+     * <p>端點對外保留 {@code currency} 參數（與同檔其他匯率端點一致），故標籤必須跟著幣別走——
+     * 若寫死「台幣兌美元」，帶 {@code currency=ZAR} 會匯出 ZAR 資料卻標成美元，是會在日後咬人的靜默誤標。
+     * 前端目前恆送 USD，但那是「現在的呼叫者」的性質，不是這支 API 的契約。
+     */
+    public static String exchangeRateLabel(String currency) {
+        return "USD".equalsIgnoreCase(currency) ? "台幣兌美元" : "台幣兌" + currency;
+    }
+
+    /**
+     * 台幣兌美元匯率區間匯出（Requirement 42 / Task 204）：單張工作表。
+     * 全域公開資料，無 owner 過濾，故不需要 ForOwner 變體（同油價金價）。
+     */
+    @Transactional(readOnly = true)
+    public byte[] exportExchangeRates(String currency, java.time.LocalDate start, java.time.LocalDate end)
+            throws IOException {
+        try (Workbook wb = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            Styles st = new Styles(wb);
+            writeExchangeRateSheet(wb, st, currency, start, end);
+            wb.write(out);
+            return out.toByteArray();
+        }
+    }
+
+    /**
+     * 「台幣兌美元」分頁：日期／即期買入／即期賣出／中間價四欄，單一序列依日期遞增。
+     *
+     * <b>中間價必須由 entity 計算</b>：{@code mid_rate} 已於 v1.9.4 移除實體欄位（完整正規化：
+     * 可由買入／賣出算出），{@link ExchangeRateHistory#getMidRate()} 為 {@code @Transient} getter。
+     * 不可改以 JPQL/SQL 選取或 {@code ORDER BY mid_rate}——欄位不存在，會在 runtime 才炸。
+     *
+     * 買入／賣出當日無牌告時該格留空，不補前值、不捏造（同油價金價）。
+     */
+    private void writeExchangeRateSheet(Workbook wb, Styles st, String currency,
+                                        java.time.LocalDate start, java.time.LocalDate end) {
+        Sheet sheet = wb.createSheet(exchangeRateLabel(currency));
+
+        Row h = sheet.createRow(0);
+        cell(h, 0, "日期", st.head);
+        cell(h, 1, "即期買入", st.head);
+        cell(h, 2, "即期賣出", st.head);
+        cell(h, 3, "中間價", st.head);
+
+        int r = 1;
+        for (ExchangeRateHistory e : rateHistRepo
+                .findByCurrencyAndRateDateBetweenOrderByRateDateAsc(currency, start, end)) {
+            Row row = sheet.createRow(r++);
+            // 日期寫成文字：避免 Excel 依開啟端時區重新詮釋 date cell 而偏移一天
+            cell(row, 0, ISO.format(e.getRateDate()), null);
+            if (e.getBuyRate() != null) cell(row, 1, e.getBuyRate(), st.num4);
+            if (e.getSellRate() != null) cell(row, 2, e.getSellRate(), st.num4);
+            if (e.getMidRate() != null) cell(row, 3, e.getMidRate(), st.num4);
         }
 
         for (int i = 0; i < 4; i++) sheet.autoSizeColumn(i);

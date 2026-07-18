@@ -2922,3 +2922,111 @@ empty value（`DEFAULT_EMPTY_VALUES` 含 `null`），綁 `null` 時 `hasModelVal
 - `frontend/src/api/index.js`：`commodityPrice` 命名空間新增 4 支
 - `frontend/src/views/CommodityPriceView.vue`：新增「排程自動匯出」設定卡（開關／時間／範圍／資料夾樹／立即匯出／上次結果）
 - `SchedulePublicBffController.java`：`JOBS` 補「油價金價匯出 每日匯出排程檢查」項目
+
+---
+
+## Requirement 42（Task 204）：台幣兌美元匯率 Excel 匯出與排程自動匯出到指定目錄
+
+結構完全比照 R41（油價金價），因兩者性質相同：**全域公開行情 ＋ per-user 排程設定**。
+以下只記與 R41 的差異；未提及處即與 R41 一致。
+
+### 與既有四套匯出排程的定位
+
+| 需求 | 資料範圍 | 背景產檔是否需 owner 過濾 | 產檔方法 |
+|---|---|---|---|
+| R34 歷年資產 | per-user | 需要 | `exportLiveAssetsForOwner(ownerId)` |
+| R39 已實現損益 | per-user | 需要 | `exportRealizedGainsForOwner(ownerId)` |
+| R37 交易日曆 | 全域 | 不需要 | `exportTradingCalendar(year)` |
+| R41 油價金價 | 全域 | 不需要 | `exportCommodityPrices(start, end)` |
+| **R42 台幣兌美元** | **全域** | **不需要** | `exportExchangeRates(currency, start, end)` |
+
+`exchange_rate_history` 無 `owner_user_id`、未套 `@Filter(ownerFilter)`，故同 R41 不需 `ForOwner` 變體。
+
+### 匯出內容與 midRate 的取得方式
+
+工作表「台幣兌美元」四欄：**日期／即期買入／即期賣出／中間價**，單一序列依日期遞增，
+不需要 R41 那種跨標的 outer join（該處三個標的分屬 NYMEX／COMEX、交易日不重疊才需要）。
+
+**中間價必須由 entity 計算，不可回填成 DB 欄位**：`mid_rate` 原為實體欄位，已於
+`v1.9.4-drop-redundant-columns.sql` 移除（完整正規化：`(buy+sell)/2` 可由其他欄位算出）。
+`ExchangeRateHistory#getMidRate()` 是 `@Transient` getter（scale 4、HALF_UP，單邊 null 時取另一邊），
+匯出走該 getter。**不可**在 JPQL/SQL 選取或 `ORDER BY mid_rate`——欄位不存在，會在 runtime 才炸。
+
+買入／賣出皆 `numeric(10,4)` 且 nullable，沿用 `Styles.num4`；null 該格留空（同 R41 不補前值）。
+日期以 ISO 文字寫入（非 date cell），避免開啟端時區偏移一天。
+
+### 幣別維度的取捨
+
+排程表**不設 `currency` 欄**，`ExchangeRateExportScheduleService` 以常數 `USD` 產檔。理由：
+本頁是「台幣兌美元」單一幣別頁，多幣別頁面目前不存在，加欄等於為不存在的需求預留未使用欄位。
+business 匯出端點仍保留 `currency` 參數（預設 `USD`、`CURRENCY_PATTERN` 驗證），與同檔其他匯率端點一致；
+差別在於「查詢端點對外可帶幣別」vs「排程設定不暴露該維度」。日後真要多幣別再加欄補 migration。
+
+**但保留參數就必須讓標籤跟著幣別走。** 初版把工作表名與檔名寫死「台幣兌美元」，端到端驗證實測
+`currency=ZAR` 會匯出正確的 ZAR 資料（22 列，與 DB 相符）卻標示為美元——資料對、標籤錯的靜默誤標。
+修正為單一來源 `ExcelExportService.exchangeRateLabel(currency)`（`USD` → `台幣兌美元`，其餘 → `台幣兌{幣別}`），
+由工作表名、手動匯出檔名、排程檔名三處共用（CLAUDE.md「同義欄位、同一來源」）。
+審查時「前端恆送 USD 所以不影響」的辯護不成立：那描述的是當下呼叫者，不是 API 契約。
+
+### 資料模型
+
+```sql
+CREATE TABLE exchange_rate_export_schedule (
+    id              BIGSERIAL PRIMARY KEY,
+    owner_user_id   BIGINT       NOT NULL,      -- @Filter(ownerFilter)，每人一列
+    enabled         BOOLEAN      NOT NULL DEFAULT FALSE,
+    run_hour        INT          NOT NULL DEFAULT 8,
+    run_minute      INT          NOT NULL DEFAULT 0,
+    output_subpath  VARCHAR(255) NOT NULL DEFAULT 'input',
+    range_months    INT,                        -- NULL ＝ 全部十年
+    last_run_date   DATE,                       -- 當日 guard
+    last_run_at     TIMESTAMP,
+    last_run_status VARCHAR(500),
+    updated_at      TIMESTAMP,
+    CONSTRAINT uq_exchange_rate_export_schedule_owner UNIQUE (owner_user_id),
+    CONSTRAINT ck_exchange_rate_export_schedule_hour   CHECK (run_hour BETWEEN 0 AND 23),
+    CONSTRAINT ck_exchange_rate_export_schedule_minute CHECK (run_minute BETWEEN 0 AND 59),
+    CONSTRAINT ck_exchange_rate_export_schedule_range  CHECK (range_months IS NULL OR range_months BETWEEN 1 AND 120)
+);
+```
+
+滾動範圍、路徑安全（`resolveDir` + `startsWith(base)`）、`writeAtomically`、
+每分鐘 poll ＋ 當日 guard ＋ `ApplicationReadyEvent` 自癒 ＋ `AtomicBoolean` 防重入、
+run-now 不動當日 guard——全部同 R41，不重述。
+檔名 `台幣兌美元_{使用者ID}_{YYYYMMDD}.xlsx`。
+
+### API 端點
+
+| 層 | 端點 | 說明 |
+|---|---|---|
+| business | `GET /api/market-data/exchange-rate/export?currency=&start=&end=` | 產出 .xlsx（UTF-8 檔名、`ByteArrayResource`） |
+| business | `GET /api/exchange-rate-export/schedule` | 讀當前使用者排程設定（無則回預設值） |
+| business | `PUT /api/exchange-rate-export/schedule` | upsert（驗證時分、range_months、子路徑不跳脫） |
+| business | `POST /api/exchange-rate-export/run-now` | 立即產檔到設定目錄，回 `{path, sizeBytes}`；不動當日 guard |
+| business | `GET /api/export-schedule/browse?subpath=` | （既有，複用）列出基底下子目錄 |
+| BFF | `GET /api/bff/exchange-rate/export?start=&end=` | passthrough 下載（原樣轉出 Content-Disposition） |
+| BFF | `GET`／`PUT /api/bff/exchange-rate/export/schedule` | passthrough |
+| BFF | `POST /api/bff/exchange-rate/export/run-now` | passthrough |
+| BFF | `GET /api/bff/exchange-rate/export/browse` | passthrough 至 business `/api/export-schedule/browse` |
+
+排程設定端點掛獨立前綴 `/api/exchange-rate-export`（同 R41 的 `/api/commodity-export`），
+不掛在 `/api/market-data/exchange-rate` 之下——後者是全域行情查詢，前者是 per-user 設定，語意不同。
+
+### 新增／異動檔案
+
+**新增**
+- `backend/.../model/ExchangeRateExportSchedule.java`
+- `backend/.../repository/ExchangeRateExportScheduleRepository.java`
+- `backend/.../service/ExchangeRateExportScheduleService.java`
+- `backend/.../controller/ExchangeRateExportController.java`（`@RequestMapping("/api/exchange-rate-export")`）
+- `backend/.../dto/ExchangeRateExportDto.java`
+- `backend/src/main/resources/db/changelog/changes/v1.62.0-exchange-rate-export-schedule.sql`
+
+**異動**
+- `db.changelog-master.yaml`：註冊 v1.62.0
+- `ExcelExportService.java`：新增 `exportExchangeRates` ＋ `writeExchangeRateSheet`
+- `MarketDataController.java`：新增 `GET /exchange-rate/export`
+- `ExchangeRateBffController.java`：新增 export／schedule／run-now／browse 五支 passthrough
+- `frontend/src/api/index.js`：`exchangeRate` 命名空間新增 5 支
+- `frontend/src/views/ExchangeRateView.vue`：新增「匯出 Excel」按鈕＋匯出對話框＋「排程自動匯出」設定卡＋資料夾選擇器
+- `SchedulePublicBffController.java`：`JOBS` 補「台幣兌美元匯出 每日匯出排程檢查」項目
