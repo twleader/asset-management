@@ -66,6 +66,7 @@ public class NewsPoller {
     private final TwseInfoFetchClient twseClient;
     private final MarketSnapshotFetchClient snapshotClient;
     private final KrIntradayFetchClient krIntradayClient;
+    private final MaCrossSnapshotClient maCrossClient;
     private final StockSourceQuery source;
     private final PublicInfoStockFilter stockFilter;
     private final MarketCalendar calendar;
@@ -160,6 +161,8 @@ public class NewsPoller {
         rows.addAll(snapshotClient.fetchAll());
         // Task 193：韓股盤中快照（即時抓 Yahoo；僅韓股盤中時段＝台北 08:00~14:30 產出，收盤後的輪次自然為空）。
         rows.addAll(krIntradayClient.fetchAll());
+        // Task 207：台股均線突破快照（由 DB 日收盤算 MA60／MA240，僅在偵測到漲破／跌破時產出，平常為空）。
+        rows.addAll(maCrossClient.fetchAll());
 
         // 個股過濾（Task 178）：只留 stock 主檔個股＋總體新聞，其餘個股濾除（DB 落庫與 JSON 輸出前套用）。
         rows = stockFilter.retain(rows);

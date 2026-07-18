@@ -5117,3 +5117,25 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 - [x] 206.5 **前端說明文字同步**：`AssetHistoryView.vue` 排程設定卡說明補「第二張起每檔持股一張過去一年股價分頁（sheet 名＝股票代號）」，讓 UI 描述與實際產檔內容一致。
 - [x] 206.6 **建置與部署驗證**：`--no-cache` 重 build business-services（運行 jar 內 `ExcelExportService.class` 確認含 `writeStockPriceHistorySheets`／`uniqueStockSheetName`，非 stale image）＋ `--force-recreate`（healthy）；frontend 亦 `--no-cache` 重 build（bundle `AssetHistoryView-B5cuz12j.js` 含新說明文字）。以 owner 1（X-User header）觸發 run-now 產出 `資產總覽_1_20260718.xlsx`（210,463 bytes），驗證：**22 張分頁＝1 張「當前即時資產」＋21 張股價分頁**，分頁名依序 `0050／VOO／006208／VT／00881／GOOGL／SGOV／009804／0056／00919／00878…` 無重複；持股去重正確（DB 最新快照 43 筆持股 → 21 個 distinct `(code, market)`，與 21 張分頁相符）；表頭 `日期／開盤價／最高價／最低價／收盤價／成交量`；列數合理（`0050`／`009804` 各 243 列＝台股一年交易日、`VOO` 252 列＝美股）；日期區間 `2025-07-18`～`2026-07-17`（今日尚無收盤，正確）；收盤價與 DB 逐筆一致（`0050` 2025-07-18 = 51.45／量 107,920,505、2026-07-17 = 100.15／量 520,545,951，與 `stock_price_history` 完全相同）；無非預期空分頁。
 - [ ] 206.7 commit ＋ 兩段式 merge。
+
+---
+
+### Task 207：公開資訊新增「台股均線突破」快照（大盤／0050／00881 對季線・年線）（Requirement 31）
+
+**需求對應：** Requirement 31 新增 AC「公開資訊必含台股均線突破偵測」。
+
+**來源：** 本功能實作原存在於過時分支 `claude/morning-premarket-fetch-schedule-2f9046`（該分支原編 Task 183，與 main 既有 Task 183「規格與程式碼一致性對齊」撞號，比照 Task 202/203 之編號避讓改編為 207）。該分支其餘內容（盤前爬蟲 08:20、韓股快照、分析改 08:40）**已被 main 的 Task 184／185／186／191／192／193 獨立且更完整地實作**，且其寫死 cron 正是 Task 195 刻意根除的漂移類型，故**整支不 merge**，僅本功能以人工移植方式撿回。
+
+**移植與修正：** 原實作經四視角對抗式審查（正確性／健壯性／整合風險／慣例符合度），核心 SMA 與穿越判定正確，但有兩個 blocker 與三個 major 須先修（見下）。
+
+- [x] 207.1 **spec**：`requirements.md` R31 新增 AC；`design.md` 新增「台股均線突破快照」設計段 ＋ `news_headline` 的 source／category 列舉、`PublicInfoStockFilter` 保留清單、`MarketAnalysisService` 注入群三處補 `ma-cross`；`tasks.md` 本任務。
+- [x] 207.2 **B1 相依移植**：`StockSourceQuery` 補 `ClosePoint` record ＋ `loadRecentStockCloses()`／`loadRecentTaiexCloses()`（main 原無此三者，只搬 client 會編譯失敗）。多列查詢用 void 區塊 lambda（`RowCallbackHandler`），避免 expression lambda 被解析成 `ResultSetExtractor`。
+- [x] 207.3 **`MaCrossSnapshotClient` 移植**：偵測大盤／0050／00881 對 MA60／MA240 的漲破跌破，命中才產列；逐標的獨立 try/catch。
+- [x] 207.4 **M1 分割污染防呆（視窗層）**：原實作只比對最後兩根（擋分割當日），分割次日即失效而均線仍被舊權值污染 → 新增 `windowHasGap()`，均線取樣視窗內任一相鄰兩日變動 >15% 即略過該均線。
+- [x] 207.5 **M2 去重鍵事件化**：原實作 source／url／category 三者皆固定 → `dedupe_key` 恆定 → `ma-cross` 永遠一列、後來事件整列覆寫先前的。改為**每則事件各一列**、`url` 帶 `#代號-ma期數-資料日` fragment；同輪重跑仍冪等。
+- [x] 207.6 **M3 匯出 cutoff 例外**：`loadTodayPublicInfoForExport` 對 `category='ma-cross'` 豁免 `published_at >= cutoff`（本 category 的 `publishedAt` 刻意取事件資料日，而大盤指數表落後屬常態），避免該列被 SRPP JSON 靜默濾掉、或同日不同輪次時有時無。
+- [x] 207.7 **B2 掛載點**：只在 main 現行 `NewsPoller` 加兩行（欄位注入 ＋ `rows.addAll(maCrossClient.fetchAll())` 接在 `krIntradayClient` 之後）。**不可**沿用分支的 `NewsPoller`——該版注入 main 已移除的 `KrMarketSnapshotClient`（編不過），且缺 Task 192 的 DB 驅動排程，覆蓋等於回退可設定爬蟲時段與韓股盤中快照。
+- [x] 207.8 **M4 文件**：class javadoc 與實作對齊（原 javadoc 仍寫 `publishedAt=Instant.now()`，實作早已改為事件資料日）。
+- [x] 207.9 **單元測試**：新增 `MaCrossSnapshotClientTest`（10 例）——漲破／跌破／同側不觸發、`n=period` 與 `n=period+1` 臨界、15% 門檻兩側（14%／16%）、`publishedAt` 取資料日、null／零收盤 graceful、單一標的失敗不影響整輪，以及 **M1 與 M2 的回歸測試**。M1 該例已實測「停用 `windowHasGap` 則失敗（噴出『0050 收 48.09 漲破季線(MA60 47.80)』假訊號）、啟用則通過」，確認具鑑別力而非空測。
+- [x] 207.10 **建置與部署驗證**：`--no-cache` 重 build external-materials-service 並 `--force-recreate`；驗證爬蟲輪次正常、無突破時不產列、`ma-cross` 列可進 SRPP JSON 與分析 prompt。
+- [ ] 207.11 commit ＋ 兩段式 merge。
