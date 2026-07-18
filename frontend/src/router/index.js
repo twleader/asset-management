@@ -63,6 +63,12 @@ const router = createRouter({
       meta: { title: '台幣兌美元', icon: 'Money' }
     },
     {
+      path: '/commodity-price',
+      name: 'CommodityPrice',
+      component: () => import('@/views/CommodityPriceView.vue'),
+      meta: { title: '油價金價', icon: 'Sunny' }
+    },
+    {
       path: '/schedule-list',
       name: 'ScheduleList',
       component: () => import('@/views/ScheduleListView.vue'),

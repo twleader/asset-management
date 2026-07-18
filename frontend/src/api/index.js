@@ -148,6 +148,23 @@ export const bffApi = {
     browseExportDir:      (subpath = '') => api.get('/bff/realized-gain/export/browse', { params: { subpath }, skipErrorToast: true })
   },
 
+  // CommodityPrice（公開資訊 → 油價金價）
+  commodityPrice: {
+    // 開頁載入：BFF 先 refresh 再回近十年三序列，故 timeout 放寬
+    getHistory: () => api.get('/bff/commodity-price', { timeout: 120000 }),
+    refresh: () => api.post('/bff/commodity-price/refresh', null, { timeout: 120000 }),
+    exportExcel: (start, end) =>
+      api.get('/bff/commodity-price/export', {
+        params: { ...(start && { start }), ...(end && { end }) },
+        responseType: 'blob',
+        timeout: 120000
+      }),
+    getExportSchedule:    () => api.get('/bff/commodity-price/export/schedule', { skipErrorToast: true }),
+    updateExportSchedule: (data) => api.put('/bff/commodity-price/export/schedule', data, { skipErrorToast: true }),
+    runExportNow:         () => api.post('/bff/commodity-price/export/run-now', null, { timeout: 60000, skipErrorToast: true }),
+    browseExportDir:      (subpath = '') => api.get('/bff/commodity-price/export/browse', { params: { subpath }, skipErrorToast: true })
+  },
+
   // ExchangeRate
   exchangeRate: {
     getHistory: (currency = 'USD') =>

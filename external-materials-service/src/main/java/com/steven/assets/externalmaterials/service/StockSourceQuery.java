@@ -208,6 +208,49 @@ public class StockSourceQuery {
         }
     }
 
+    /** 取原物料（油／金）最早日期（用於判斷是否需向前回補 10 年）。 */
+    public Optional<LocalDate> findMinCommodityDate(String code) {
+        return Optional.ofNullable(jdbc.query(
+                "SELECT MIN(price_date) FROM commodity_price_history WHERE commodity_code = ?",
+                ps -> ps.setString(1, code),
+                rs -> {
+                    if (rs.next()) {
+                        return rs.getDate(1) == null ? null : rs.getDate(1).toLocalDate();
+                    }
+                    return null;
+                }));
+    }
+
+    /** 取原物料（油／金）最近日期（增量回補時用）。 */
+    public Optional<LocalDate> findMaxCommodityDate(String code) {
+        return Optional.ofNullable(jdbc.query(
+                "SELECT MAX(price_date) FROM commodity_price_history WHERE commodity_code = ?",
+                ps -> ps.setString(1, code),
+                rs -> {
+                    if (rs.next()) {
+                        return rs.getDate(1) == null ? null : rs.getDate(1).toLocalDate();
+                    }
+                    return null;
+                }));
+    }
+
+    /** Upsert 原物料收盤價（同一 commodity_code+price_date 視為覆寫）。 */
+    public void upsertCommodityPrice(String code, LocalDate priceDate, BigDecimal closePrice) {
+        Long existing = jdbc.query(
+                "SELECT id FROM commodity_price_history WHERE commodity_code=? AND price_date=?",
+                ps -> { ps.setString(1, code); ps.setObject(2, priceDate); },
+                rs -> rs.next() ? rs.getLong(1) : null);
+        if (existing != null) {
+            jdbc.update(
+                    "UPDATE commodity_price_history SET close_price=? WHERE id=?",
+                    closePrice, existing);
+        } else {
+            jdbc.update(
+                    "INSERT INTO commodity_price_history (commodity_code, price_date, close_price) VALUES (?, ?, ?)",
+                    code, priceDate, closePrice);
+        }
+    }
+
     /** 系統需追蹤的非 TWD 計價幣別：強制含 USD（美股），加上 fund_master.active 上的非 TWD 幣別。 */
     public Set<String> collectTrackedCurrencies() {
         Set<String> set = new LinkedHashSet<>();

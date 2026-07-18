@@ -40,6 +40,8 @@ public class ExcelExportService {
     private final StockPriceService stockPriceService;
     // 月/季/年線與 KD 的共用權威計算（與觀察清單／警示同一來源）；供「股票（即時）」分頁增列技術指標欄（Task 200）
     private final TechnicalIndicatorService technicalIndicatorService;
+    // 油價金價匯出（Task 202）：全域公開行情，與頁面曲線同一張表，確保匯出值與圖表一致
+    private final com.steven.assets.repository.CommodityPriceHistoryRepository commodityHistRepo;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -240,6 +242,62 @@ public class ExcelExportService {
             wb.write(out);
             return out.toByteArray();
         }
+    }
+
+    /**
+     * 油價金價區間匯出（Requirement 40 / Task 202）：單張工作表、油金同檔。
+     * 全域公開行情，無 owner 過濾，故不需要 ForOwner 變體。
+     */
+    @Transactional(readOnly = true)
+    public byte[] exportCommodityPrices(java.time.LocalDate start, java.time.LocalDate end) throws IOException {
+        try (Workbook wb = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            Styles st = new Styles(wb);
+            writeCommoditySheet(wb, st, start, end);
+            wb.write(out);
+            return out.toByteArray();
+        }
+    }
+
+    /**
+     * 「油價金價」分頁：日期／WTI／Brent／黃金四欄。
+     *
+     * 以日期為軸對三序列做 <b>outer join</b>（TreeMap 依日期排序）——WTI/Brent/黃金分屬 NYMEX 與 COMEX，
+     * 假日與停牌日不完全重疊，若用 inner join 會漏掉「只有其中一個市場有報價」的日子。
+     * 某標的當日無報價時該格留空，不補前值、不捏造。
+     */
+    private void writeCommoditySheet(Workbook wb, Styles st,
+                                     java.time.LocalDate start, java.time.LocalDate end) {
+        Sheet sheet = wb.createSheet("油價金價");
+
+        Row h = sheet.createRow(0);
+        cell(h, 0, "日期", st.head);
+        cell(h, 1, "WTI原油(USD/桶)", st.head);
+        cell(h, 2, "布蘭特原油(USD/桶)", st.head);
+        cell(h, 3, "黃金(USD/盎司)", st.head);
+
+        // 日期 → [WTI, BRENT, GOLD]，TreeMap 保證輸出依日期遞增
+        java.util.TreeMap<java.time.LocalDate, BigDecimal[]> merged = new java.util.TreeMap<>();
+        List<String> codes = HistoricalDataService.COMMODITY_CODES;
+        for (int i = 0; i < codes.size(); i++) {
+            final int col = i;
+            for (CommodityPriceHistory p : commodityHistRepo
+                    .findByCommodityCodeAndPriceDateBetweenOrderByPriceDateAsc(codes.get(i), start, end)) {
+                merged.computeIfAbsent(p.getPriceDate(), k -> new BigDecimal[codes.size()])[col] = p.getClosePrice();
+            }
+        }
+
+        int r = 1;
+        for (Map.Entry<java.time.LocalDate, BigDecimal[]> e : merged.entrySet()) {
+            Row row = sheet.createRow(r++);
+            // 日期寫成文字：避免 Excel 依開啟端時區重新詮釋 date cell 而偏移一天
+            cell(row, 0, ISO.format(e.getKey()), null);
+            BigDecimal[] v = e.getValue();
+            for (int i = 0; i < v.length; i++) {
+                if (v[i] != null) cell(row, i + 1, v[i], st.num4);
+            }
+        }
+
+        for (int i = 0; i < 4; i++) sheet.autoSizeColumn(i);
     }
 
     // ─────────────────────────────────────────────────────────────────────────

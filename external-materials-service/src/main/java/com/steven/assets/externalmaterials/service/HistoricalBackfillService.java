@@ -1,5 +1,6 @@
 package com.steven.assets.externalmaterials.service;
 
+import com.steven.assets.externalmaterials.client.CommodityFetchClient;
 import com.steven.assets.externalmaterials.client.ExchangeRateFetchClient;
 import com.steven.assets.externalmaterials.client.PriceFetchClient;
 import com.steven.assets.externalmaterials.client.PriceFetchClient.HistoricalBar;
@@ -38,6 +39,7 @@ public class HistoricalBackfillService {
 
     private final PriceFetchClient priceFetch;
     private final ExchangeRateFetchClient rateFetch;
+    private final CommodityFetchClient commodityFetch;
     private final StockSourceQuery store;
     private final MarketDataFetchService etfFetch;
 
@@ -105,6 +107,16 @@ public class HistoricalBackfillService {
                     if (rateMinDate == null || since.isBefore(rateMinDate)) {
                         log.info("啟動補齊 {} 匯率 (minDate={}，補至 {})", currency, rateMinDate, since);
                         backfillExchangeRateFrom(currency, since);
+                    }
+                }
+
+                // 油價／金價十年每日收盤（Requirement 40）：無資料或最早日晚於 since 就補滿十年
+                for (String code : CommodityFetchClient.SYMBOLS.keySet()) {
+                    LocalDate minDate = store.findMinCommodityDate(code).orElse(null);
+                    if (minDate == null || since.isBefore(minDate)) {
+                        log.info("啟動補齊 {} 收盤價 (minDate={}，補至 {})", code, minDate, since);
+                        backfillCommodityFrom(code, since);
+                        sleep(2000);
                     }
                 }
                 log.info("啟動補齊完成");
@@ -226,6 +238,32 @@ public class HistoricalBackfillService {
             count++;
         }
         if (count > 0) log.info("{} 匯率匯入 {} 筆", currency, count);
+        return count;
+    }
+
+    /** 強制從 since 抓原物料收盤價（忽略 maxDate），用於首次補滿十年與補中間缺漏（Requirement 40）。 */
+    public int backfillCommodityFrom(String code, LocalDate since) {
+        if (!since.isBefore(LocalDate.now())) return 0;
+        log.info("強制回補 {} 收盤價: {} ~ today", code, since);
+        return upsertCommodities(code, since);
+    }
+
+    /** 增量補：從 max(price_date)+1 至今（Requirement 40）。 */
+    public int backfillCommodity(String code, LocalDate since) {
+        LocalDate maxDate = store.findMaxCommodityDate(code).orElse(null);
+        LocalDate start = maxDate != null ? maxDate.plusDays(1) : since;
+        if (!start.isBefore(LocalDate.now())) return 0;
+        log.info("增量回補 {} 收盤價: {} ~ today", code, start);
+        return upsertCommodities(code, start);
+    }
+
+    private int upsertCommodities(String code, LocalDate since) {
+        int count = 0;
+        for (CommodityFetchClient.CommodityBar b : commodityFetch.fetchRange(code, since, LocalDate.now())) {
+            store.upsertCommodityPrice(code, b.priceDate(), b.closePrice());
+            count++;
+        }
+        if (count > 0) log.info("{} 收盤價匯入 {} 筆", code, count);
         return count;
     }
 

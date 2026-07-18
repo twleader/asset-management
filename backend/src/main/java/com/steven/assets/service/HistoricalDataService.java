@@ -22,9 +22,13 @@ import java.util.*;
 @Service
 public class HistoricalDataService {
 
+    /** 油金價標的（Requirement 40）：WTI／布蘭特原油 USD/桶、COMEX 黃金 USD/盎司。 */
+    public static final List<String> COMMODITY_CODES = List.of("WTI", "BRENT", "GOLD");
+
     private final StockPriceHistoryRepository priceHistRepo;
     private final PriceQueryService priceQuery;
     private final ExchangeRateHistoryRepository rateHistRepo;
+    private final com.steven.assets.repository.CommodityPriceHistoryRepository commodityHistRepo;
     private final com.steven.assets.repository.FundMasterRepository fundMasterRepo;
     private final TwseIndexDailyHistoryRepository twseDailyRepo;
     private final WebClient priceServiceClient;
@@ -34,12 +38,14 @@ public class HistoricalDataService {
             StockPriceHistoryRepository priceHistRepo,
             PriceQueryService priceQuery,
             ExchangeRateHistoryRepository rateHistRepo,
+            com.steven.assets.repository.CommodityPriceHistoryRepository commodityHistRepo,
             com.steven.assets.repository.FundMasterRepository fundMasterRepo,
             TwseIndexDailyHistoryRepository twseDailyRepo,
             @Value("${external-materials.base-url:http://external-materials-service:8080}") String externalUrl) {
         this.priceHistRepo = priceHistRepo;
         this.priceQuery = priceQuery;
         this.rateHistRepo = rateHistRepo;
+        this.commodityHistRepo = commodityHistRepo;
         this.fundMasterRepo = fundMasterRepo;
         this.twseDailyRepo = twseDailyRepo;
         this.priceServiceClient = WebClient.builder().baseUrl(externalUrl).build();
@@ -205,6 +211,44 @@ public class HistoricalDataService {
         }
     }
 
+    /** 增量補油金價：proxy 至 ext-materials-service（Requirement 40）。 */
+    public int backfillCommodity(String code, LocalDate since) {
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> resp = priceServiceClient.post()
+                    .uri(uriBuilder -> uriBuilder.path("/internal/backfill/commodity")
+                            .queryParam("code", code)
+                            .queryParam("since", since.toString())
+                            .build())
+                    .retrieve()
+                    .bodyToMono(Map.class)
+                    .block();
+            return resp == null ? 0 : ((Number) resp.getOrDefault("records", 0)).intValue();
+        } catch (Exception e) {
+            log.warn("呼叫 ext-materials-service /internal/backfill/commodity 失敗: {}", e.getMessage());
+            return 0;
+        }
+    }
+
+    /** 強制自 since 補油金價：proxy 至 ext-materials-service（Requirement 40）。 */
+    public int backfillCommodityFrom(String code, LocalDate since) {
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> resp = priceServiceClient.post()
+                    .uri(uriBuilder -> uriBuilder.path("/internal/backfill/commodity-from")
+                            .queryParam("code", code)
+                            .queryParam("since", since.toString())
+                            .build())
+                    .retrieve()
+                    .bodyToMono(Map.class)
+                    .block();
+            return resp == null ? 0 : ((Number) resp.getOrDefault("records", 0)).intValue();
+        } catch (Exception e) {
+            log.warn("呼叫 ext-materials-service /internal/backfill/commodity-from 失敗: {}", e.getMessage());
+            return 0;
+        }
+    }
+
     // ═══════════════════════════════════════════════════════════════════════
     //  每日排程：匯率（17:00 收盤後，proxy 至 ext-materials-service + 本地清理舊資料）
     //  股票收盤價排程已搬到 external-materials-service ClosePersister：
@@ -232,6 +276,11 @@ public class HistoricalDataService {
         for (String c : currencies) {
             long n = rateHistRepo.deleteByCurrencyAndRateDateBefore(c, cutoff);
             if (n > 0) log.info("已清除 {} 筆超過 10 年的 {} 匯率資料", n, c);
+        }
+        // 油金價維持固定十年視窗（Requirement 40）
+        for (String code : COMMODITY_CODES) {
+            long n = commodityHistRepo.deleteByCommodityCodeAndPriceDateBefore(code, cutoff);
+            if (n > 0) log.info("已清除 {} 筆超過 10 年的 {} 收盤價資料", n, code);
         }
     }
 
@@ -350,6 +399,31 @@ public class HistoricalDataService {
     @Transactional(readOnly = true)
     public List<ExchangeRateHistory> getAllExchangeRates(String currency) {
         return rateHistRepo.findByCurrencyOrderByRateDateAsc(currency);
+    }
+
+    /**
+     * 三個原物料標的的區間收盤價，回 {@code {WTI:[...], BRENT:[...], GOLD:[...]}}（Requirement 40）。
+     * 前端一次拿三序列畫雙 Y 軸曲線，避免三支 round-trip。
+     */
+    @Transactional(readOnly = true)
+    public Map<String, List<com.steven.assets.model.CommodityPriceHistory>> getCommodityHistory(
+            LocalDate start, LocalDate end) {
+        Map<String, List<com.steven.assets.model.CommodityPriceHistory>> out = new java.util.LinkedHashMap<>();
+        for (String code : COMMODITY_CODES) {
+            out.put(code, commodityHistRepo
+                    .findByCommodityCodeAndPriceDateBetweenOrderByPriceDateAsc(code, start, end));
+        }
+        return out;
+    }
+
+    /** 三標的增量回補 ＋ 十年清理（手動刷新用，Requirement 40）。 */
+    public Map<String, Object> refreshCommodities() {
+        Map<String, Object> result = new java.util.LinkedHashMap<>();
+        LocalDate since = LocalDate.now().minusYears(10);
+        for (String code : COMMODITY_CODES) {
+            result.put(code, backfillCommodity(code, since));
+        }
+        return result;
     }
 
     @Transactional(readOnly = true)
