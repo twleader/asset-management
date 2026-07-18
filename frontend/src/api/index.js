@@ -273,7 +273,14 @@ export const bffApi = {
     // 讀 NewsPoller 執行時間點清單 [{hour,minute,enabled}]
     getSchedule: () => api.get('/bff/crawler-data/schedule'),
     // 整批覆寫執行時間點（限管理者）
-    saveSchedule: (times) => api.put('/bff/crawler-data/schedule', times)
+    saveSchedule: (times) => api.put('/bff/crawler-data/schedule', times),
+    // 讀公開資訊 JSON 輸出路徑設定 {crawlerKey,outputSubpath,baseDir,absolutePath,updatedAt}（Task 209）
+    getExportPath: () => api.get('/bff/crawler-data/export-path'),
+    // 更新輸出子路徑（限管理者；跳脫基底回 400）
+    saveExportPath: (outputSubpath) => api.put('/bff/crawler-data/export-path', { outputSubpath }),
+    // 資料夾樹懶載入（passthrough 至既有 /api/export-schedule/browse）
+    browseExportDir: (subpath = '') =>
+      api.get('/bff/crawler-data/export-path/browse', { params: { subpath } })
   },
 
   // SnapshotList

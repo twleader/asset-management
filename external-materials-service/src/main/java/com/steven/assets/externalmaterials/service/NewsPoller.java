@@ -43,8 +43,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * 今日股市分析**，確保當日有料）。DB 讀取例外時 fallback 至同一組預設值。
  *
  * <p>每輪抓取（含開機 warmup）<b>先 upsert news_headline，再由 DB 查詢「當日公開資訊」</b>輸出一份 JSON 至
- * SRPP 退休規劃專案輸入目錄（Task 177，DB 為單一來源；容器內 {@code news-scraper.export-dir}，docker volume
- * 對映 host），供其量化分析取用；寫檔失敗 graceful，不影響落庫。
+ * SRPP 退休規劃專案輸入目錄（Task 177，DB 為單一來源），供其量化分析取用；寫檔失敗 graceful，不影響落庫。
+ *
+ * <p><b>輸出目錄（Requirement 38 / Task 209）</b>：原寫死 {@code news-scraper.export-dir}（容器 {@code /srpp-input}，
+ * 改目的地必須改 docker volume 重新部署），改為 DB 驅動——每輪寫檔前讀 {@code crawler_export_setting}
+ * （{@code crawler_key='news-poller'}）的相對子路徑，實際目錄 = 容器基底 {@code EXPORT_OUTPUT_DIR}
+ * （預設 {@code /home/steven}，volume 對映 host 家目錄）resolve 之。目錄由「爬蟲資訊查詢」頁設定、免重啟生效
+ * （不快取於欄位，下一輪即讀到新值）。DB 例外／空值／跳脫基底時 fallback 至 {@link #DEFAULT_EXPORT_SUBPATH}
+ * ＝改為 DB 驅動前 {@code /srpp-input} 的同一個 host 目錄。
  *
  * <p>開機 warmup（{@link ApplicationReadyEvent}）先跑一次，部署後立即有資料。每次末尾清理保留期外舊聞。
  * 逐來源／逐則 graceful：任一失敗只 log warn、不影響其他，比照既有 producer 慣例。
@@ -62,6 +68,12 @@ public class NewsPoller {
     /** DB 讀取失敗時的 fallback 執行時間（等同原寫死 08:20 / 11:30 / 18:00），避免爬蟲靜默停擺（Requirement 38）。 */
     private static final int[][] DEFAULT_TIMES = {{8, 20}, {11, 30}, {18, 0}};
 
+    /**
+     * DB 未設定／讀取失敗／值跳脫基底時的 fallback 輸出子路徑（Task 209）。相對 {@code EXPORT_OUTPUT_DIR}
+     * 解析後 = host {@code /Users/steven/Project/SRPP/data/input}，即 Task 209 之前 {@code /srpp-input} 的同一個目錄。
+     */
+    private static final String DEFAULT_EXPORT_SUBPATH = "Project/SRPP/data/input";
+
     private final NewsFetchClient newsClient;
     private final TwseInfoFetchClient twseClient;
     private final MarketSnapshotFetchClient snapshotClient;
@@ -71,6 +83,7 @@ public class NewsPoller {
     private final PublicInfoStockFilter stockFilter;
     private final MarketCalendar calendar;
     private final CrawlerScheduleQuery scheduleQuery;
+    private final CrawlerExportPathQuery exportPathQuery;
     private final ObjectMapper objectMapper;
 
     /** 防止上一輪抓取尚未結束又被下一分鐘 ticker 重複觸發（抓取可能耗數十秒）。 */
@@ -82,9 +95,13 @@ public class NewsPoller {
     @Value("${news-scraper.retention-days:30}")
     private int retentionDays;
 
-    /** 公開資訊 JSON 輸出目錄（容器內基底，docker volume 對映到 host SRPP/data/input，Task 177）。 */
-    @Value("${news-scraper.export-dir:/srpp-input}")
-    private String exportDir;
+    /**
+     * 公開資訊 JSON 輸出的容器內**基底**目錄（Task 209）：docker volume 對映 host 家目錄，與 business-services
+     * 的排程匯出共用同一基底與同一份掛載——前端資料夾樹（由 business 列舉）看得到的目錄才等於爬蟲寫得到的目錄。
+     * 實際輸出目錄 = 本基底 resolve {@code crawler_export_setting} 的相對子路徑。
+     */
+    @Value("${EXPORT_OUTPUT_DIR:/home/steven}")
+    private String exportBaseDir;
 
     /** 公開資訊 JSON 輸出開關（Task 177）。 */
     @Value("${news-scraper.export-enabled:true}")
@@ -197,8 +214,10 @@ public class NewsPoller {
      * 範圍＝今天(Asia/Taipei)這批爬蟲抓進來的（{@code fetched_at} 為今天）、且資料日期 {@code published_at}
      * 不早於「上一交易日」的列；上一交易日＝news_headline 中 twse 總體資料的最新資料日（TWSE 權威，無則以
      * {@link MarketCalendar} 最近交易日 fallback）。如此三大法人／大盤成交（日期＝上一交易日）保留，今天抓到
-     * 但發布日更舊的過期新聞則排除。檔名 {@code public_info_<yyyy-MM-dd>.json}（同日多輪覆寫＝當日最新、跨日
-     * 新檔）；內容含 metadata（generatedAt／trigger／tradingDayCutoff／count）與逐則明細。寫檔失敗一律 graceful。
+     * 但發布日更舊的過期新聞則排除。輸出目錄每輪由 {@link #resolveExportDir()} 依 DB 設定決定（Task 209）；
+     * 檔名 {@code public_info_<yyyy-MM-dd>.json}（同日多輪覆寫＝當日最新、跨日新檔，**檔名不開放設定**——
+     * SRPP 依此檔名取用）；內容含 metadata（generatedAt／trigger／tradingDayCutoff／count）與逐則明細。
+     * 寫檔失敗一律 graceful。
      */
     private void exportPublicInfoJson(String trigger) {
         if (!exportEnabled) return;
@@ -207,7 +226,7 @@ public class NewsPoller {
             LocalDate cutoff = resolveTradingCutoff(today);
             List<NewsRow> items = source.loadTodayPublicInfoForExport(today, cutoff);
 
-            Path dir = Path.of(exportDir);
+            Path dir = resolveExportDir();
             Files.createDirectories(dir);
             Path file = dir.resolve("public_info_" + today + ".json");
 
@@ -236,6 +255,33 @@ public class NewsPoller {
         } catch (Exception e) {
             log.warn("公開資訊輸出 JSON 失敗（{}）：{}", trigger, e.getMessage());
         }
+    }
+
+    /**
+     * 本輪的公開資訊 JSON 輸出目錄（Requirement 38 / Task 209）：容器基底 {@code EXPORT_OUTPUT_DIR} resolve
+     * {@code crawler_export_setting} 設定的相對子路徑。**每輪即時讀取、不快取**，故頁面改設定後下一輪即生效。
+     *
+     * <p>寫檔前**再驗一次**跳脫（business 於 PUT 時已驗過一次）：ext 才是實際持有檔案系統寫入權的一方，
+     * 不能只信上游驗過——DB 值被繞過 API 直改（psql／備份還原）時仍須擋下。DB 例外／空值／跳脫一律退回
+     * {@link #DEFAULT_EXPORT_SUBPATH} 並 warn，避免爬蟲靜默把檔案寫到非預期位置或整個不寫。
+     */
+    private Path resolveExportDir() {
+        String subpath;
+        try {
+            subpath = exportPathQuery.outputSubpath(CRAWLER_KEY);
+        } catch (Exception e) {
+            log.warn("讀爬蟲輸出路徑設定失敗，本輪以預設 {} 輸出：{}", DEFAULT_EXPORT_SUBPATH, e.getMessage());
+            subpath = null;
+        }
+        if (subpath == null || subpath.isBlank()) subpath = DEFAULT_EXPORT_SUBPATH;
+
+        Path base = Path.of(exportBaseDir).toAbsolutePath().normalize();
+        Path target = base.resolve(subpath).normalize();
+        if (!target.startsWith(base)) {
+            log.warn("爬蟲輸出子路徑「{}」跳脫基底 {}，本輪改以預設 {} 輸出", subpath, base, DEFAULT_EXPORT_SUBPATH);
+            target = base.resolve(DEFAULT_EXPORT_SUBPATH).normalize();
+        }
+        return target;
     }
 
     /**

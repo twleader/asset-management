@@ -140,13 +140,106 @@
         </div>
       </div>
     </el-card>
+
+    <!-- 爬蟲輸出檔案設定 -->
+    <el-card style="margin-top:20px">
+      <template #header>
+        <div class="toolbar">
+          <span class="section-title">爬蟲輸出檔案設定</span>
+          <span class="hint">每輪抓取產生的公開資訊 JSON 要寫到哪個資料夾</span>
+        </div>
+      </template>
+
+      <el-alert
+        v-if="!auth.isAdmin"
+        type="warning"
+        :closable="false"
+        show-icon
+        style="margin-bottom:12px"
+        title="僅管理者可修改爬蟲輸出路徑，以下為唯讀顯示。"
+      />
+      <el-alert
+        v-else
+        type="info"
+        :closable="false"
+        show-icon
+        style="margin-bottom:12px"
+        title="設定後即時生效（免重啟），下一輪抓取起寫入新資料夾。目錄不存在時會自動建立。"
+      />
+
+      <div v-loading="exportPathLoading">
+        <div class="path-row">
+          <span class="field-label">輸出資料夾</span>
+          <el-input
+            v-model="exportPath.outputSubpath"
+            readonly
+            placeholder="（家目錄根）"
+            style="width:340px"
+          >
+            <template #append>
+              <el-button :disabled="!auth.isAdmin" @click="openDirPicker">選擇</el-button>
+            </template>
+          </el-input>
+          <el-button
+            v-if="auth.isAdmin"
+            type="primary"
+            :loading="savingExportPath"
+            :disabled="!exportPathLoaded"
+            @click="saveExportPath"
+          >儲存設定</el-button>
+        </div>
+
+        <div class="path-hint">
+          以主機家目錄 <code>{{ exportPath.baseDir || '/home/steven' }}</code>（對映主機
+          <code>/Users/steven</code>）為根，只能選其下的子資料夾。目前落點：
+          <code>{{ exportPath.absolutePath || '—' }}/public_info_{{ today }}.json</code>
+          <span v-if="exportPathDirty" class="path-dirty">
+            ← 尚未儲存的變更：<code>{{ exportPath.outputSubpath || '（家目錄根，儲存後將套用預設子資料夾）' }}</code>，
+            按「儲存設定」後生效
+          </span>
+          <br />
+          檔名固定為 <code>public_info_&lt;日期&gt;.json</code>（SRPP 退休規劃專案依此檔名取用，故不開放修改）；
+          同日多輪覆寫、跨日產生新檔。
+          <template v-if="exportPath.updatedAt">
+            <br />上次修改：{{ exportPath.updatedAt }}
+          </template>
+        </div>
+      </div>
+    </el-card>
+
+    <!-- 輸出資料夾選擇器 -->
+    <el-dialog v-model="dirPicker.visible" title="選擇輸出資料夾" width="560px">
+      <div class="dir-picker-path">
+        目前選擇：<code>{{ dirPicker.baseDir || exportPath.baseDir || '/home/steven' }}{{ dirPicker.picked ? '/' + dirPicker.picked : '' }}{{ dirPicker.newSub.trim() ? '/' + dirPicker.newSub.trim() : '' }}</code>
+      </div>
+      <el-tree
+        :key="dirPicker.treeKey"
+        lazy
+        :load="loadDirNode"
+        :props="dirTreeProps"
+        node-key="key"
+        highlight-current
+        :expand-on-click-node="false"
+        :default-expanded-keys="['__root__']"
+        class="dir-tree"
+        @node-click="onDirNodeClick" />
+      <div class="dir-new-sub">
+        <span class="dns-label">新增子資料夾</span>
+        <el-input v-model="dirPicker.newSub" placeholder="（選填）在所選資料夾下新增，寫檔時自動建立"
+          style="width:340px" clearable />
+      </div>
+      <template #footer>
+        <el-button @click="dirPicker.visible = false">取消</el-button>
+        <el-button type="primary" @click="confirmDirPick">確定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import dayjs from 'dayjs'
 import { ElMessage } from 'element-plus'
-import { bffApi } from '@/api'
+import { bffApi, apiErrorMessage } from '@/api'
 import { useAuthStore } from '@/stores/authStore'
 
 const auth = useAuthStore()
@@ -235,9 +328,94 @@ async function saveSchedule() {
   }
 }
 
+// --- 輸出檔案路徑設定（Task 209）---
+const exportPath = reactive({ outputSubpath: '', baseDir: '', absolutePath: '', updatedAt: null })
+const exportPathLoading = ref(false)
+const exportPathLoaded = ref(false)   // 未成功載入前停用儲存，避免以空值覆寫既有設定
+const savingExportPath = ref(false)
+const today = dayjs().format('YYYY-MM-DD')
+
+// 已儲存的子路徑；用來標示「選了新資料夾但尚未儲存」。落點字串一律沿用後端回傳的 absolutePath，
+// 不在前端重算正規化規則（空字串→預設子路徑等規則只存在後端，複製一份必然漂移）。
+const savedSubpath = ref('')
+const exportPathDirty = computed(() => exportPathLoaded.value && exportPath.outputSubpath !== savedSubpath.value)
+
+const dirPicker = reactive({ visible: false, baseDir: '', picked: '', newSub: '', treeKey: 0 })
+const dirTreeProps = { label: 'name', isLeaf: 'leaf' }
+
+async function fetchExportPath() {
+  exportPathLoading.value = true
+  try {
+    const s = (await bffApi.crawlerData.getExportPath()) || {}
+    exportPath.outputSubpath = s.outputSubpath || ''
+    exportPath.baseDir = s.baseDir || ''
+    exportPath.absolutePath = s.absolutePath || ''
+    exportPath.updatedAt = s.updatedAt || null
+    savedSubpath.value = exportPath.outputSubpath
+    exportPathLoaded.value = true
+  } catch (e) {
+    exportPathLoaded.value = false
+    ElMessage.error('讀取爬蟲輸出路徑失敗：' + apiErrorMessage(e))
+  } finally {
+    exportPathLoading.value = false
+  }
+}
+
+async function saveExportPath() {
+  savingExportPath.value = true
+  try {
+    const s = (await bffApi.crawlerData.saveExportPath(exportPath.outputSubpath || '')) || {}
+    // 以後端正規化後的值回填（空字串會被正規化為預設子路徑），避免畫面與實際落點不一致
+    exportPath.outputSubpath = s.outputSubpath || ''
+    exportPath.baseDir = s.baseDir || exportPath.baseDir
+    exportPath.absolutePath = s.absolutePath || ''
+    exportPath.updatedAt = s.updatedAt || null
+    savedSubpath.value = exportPath.outputSubpath
+    ElMessage.success('已儲存爬蟲輸出路徑，下一輪抓取起生效')
+  } catch (e) {
+    ElMessage.error('儲存失敗：' + apiErrorMessage(e))
+  } finally {
+    savingExportPath.value = false
+  }
+}
+
+function openDirPicker() {
+  dirPicker.picked = exportPath.outputSubpath || ''
+  dirPicker.newSub = ''
+  dirPicker.treeKey++            // 強制 el-tree 重新懶載入 root
+  dirPicker.visible = true
+}
+
+// el-tree 懶載入：level 0 以家目錄為單一 root；其餘列該節點子目錄
+async function loadDirNode(node, resolve) {
+  try {
+    if (node.level === 0) {
+      const res = await bffApi.crawlerData.browseExportDir('')
+      dirPicker.baseDir = res.baseDir || ''
+      resolve([{ name: res.baseDir || '/', path: '', key: '__root__', leaf: false }])
+      return
+    }
+    const res = await bffApi.crawlerData.browseExportDir(node.data.path || '')
+    resolve((res.directories || []).map(d => ({ name: d.name, path: d.path, key: d.path, leaf: false })))
+  } catch (e) {
+    resolve([])
+  }
+}
+
+const onDirNodeClick = (data) => { dirPicker.picked = data.path || '' }
+
+function confirmDirPick() {
+  let p = dirPicker.picked || ''
+  const sub = (dirPicker.newSub || '').trim().replace(/^\/+|\/+$/g, '')
+  if (sub) p = p ? `${p}/${sub}` : sub
+  exportPath.outputSubpath = p
+  dirPicker.visible = false
+}
+
 onMounted(() => {
   fetchData()
   fetchSchedule()
+  fetchExportPath()
 })
 </script>
 
@@ -257,4 +435,16 @@ onMounted(() => {
 .time-row { display: flex; align-items: center; margin-bottom: 10px; }
 .empty-schedule { color: #94a3b8; font-size: 13px; padding: 8px 0; }
 .schedule-actions { margin-top: 12px; display: flex; gap: 12px; }
+
+.path-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.path-hint { margin-top: 10px; font-size: 12px; color: #94a3b8; line-height: 1.8; }
+.path-hint code { background: #f1f5f9; color: #475569; padding: 1px 5px; border-radius: 4px; font-size: 11px; word-break: break-all; }
+.path-dirty { color: #d97706; }
+.path-dirty code { background: #fef3c7; color: #92400e; }
+
+.dir-picker-path { font-size: 13px; color: #475569; margin-bottom: 10px; }
+.dir-picker-path code { background: #f1f5f9; color: #0f172a; padding: 2px 6px; border-radius: 4px; word-break: break-all; }
+.dir-tree { max-height: 340px; overflow: auto; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px; }
+.dir-new-sub { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+.dir-new-sub .dns-label { font-size: 13px; color: #475569; white-space: nowrap; }
 </style>
