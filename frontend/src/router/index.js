@@ -21,16 +21,16 @@ const router = createRouter({
       meta: { title: '資產快照', icon: 'Calendar' }
     },
     {
-      path: '/snapshots/:id',
-      name: 'SnapshotDetail',
-      component: () => import('@/views/SnapshotDetailView.vue'),
-      meta: { title: '快照詳情', hidden: true }
-    },
-    {
       path: '/snapshots/new',
       name: 'SnapshotNew',
       component: () => import('@/views/SnapshotFormView.vue'),
       meta: { title: '新增快照', hidden: true }
+    },
+    {
+      path: '/snapshots/:id',
+      name: 'SnapshotDetail',
+      component: () => import('@/views/SnapshotDetailView.vue'),
+      meta: { title: '快照詳情', hidden: true }
     },
     {
       path: '/snapshots/:id/edit',

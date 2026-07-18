@@ -95,7 +95,9 @@ backend/
 | `FundMaster` / `FundNav` / `FundDividendHistory` | 對應 Repository | `FundNavService` / `FundDividendService` |
 | `Bank` / `BrokerEntity` / `DepositTypeEntity` / `MarketType` / `TransitFundType` | 對應 Repository | `InstitutionService` |
 | `BackupRecord` / `BackupSetting` | 對應 Repository | `BackupService` |
-| `TwseIndexDailyHistory` / `TaiwanGdpPerCapitaHistory` / `KoreaGdpPerCapitaHistory` / `TwseIndexYearEndHistory` | 對應 Repository | `MacroHistoryService` |
+| `TwseIndexDailyHistory` / `TaiwanGdpPerCapitaHistory` / `KoreaGdpPerCapitaHistory` | 對應 Repository | `MacroHistoryService` |
+
+> `TwseIndexYearEndHistory` entity / repository 已於 **Task 97 移除**（`twse_index_year_end_history` 資料表保留不刪）。
 
 ### 2.5 API 命名規則
 
