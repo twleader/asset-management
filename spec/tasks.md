@@ -648,7 +648,7 @@
   - `listBackups()`：對 manual/daily/weekly/monthly 各執行 `rclone lsjson --files-only`，合併後依 ModTime 排序
   - `runRestore(folder, filename)`：先呼叫 `runBackup(true)` 建自救點 → rclone copy 下載 → pg_restore --clean --if-exists
   - 所有指令參數白名單化，不接受使用者輸入拼接
-  - 失敗時拋 `BackupException`，由 ControllerAdvice 統一格式
+  - 失敗時拋 `IllegalArgumentException` / `IllegalStateException` / `RuntimeException`（未定義專屬 `BackupException`），錯誤訊息由 Controller 回傳前端顯示
 
 - [x] 20.5 後端：新增 `dto.BackupItem` record，欄位：folder / filename / sizeBytes / modifiedAt / isAutoPreRestore
 
@@ -687,7 +687,7 @@
     - `0 30 15 * * MON-FRI` → 台股交易日 → `daily/asset_daily_tw_*.dump`，輪替 50
     - `0 0 7 * * TUE-SAT` → 前一日為美股交易日 → `daily/asset_daily_us_*.dump`，輪替 50
     - `0 0 5 * * SUN` → `weekly/asset_weekly_*.dump`，輪替 5
-  - `Application.java` / `BackupServiceTest`：確認 `@EnableScheduling` 已啟用（既有 `HistoricalDataService` 已使用排程，無需重複啟用）
+  - 排程啟用：`AssetManagementApplication.java` 實際**未**加 `@EnableScheduling`（亦無 `BackupServiceTest`），排程仍實測可運作（沿用既有 `HistoricalDataService` 排程既已生效的 Spring Boot 機制），故不另補註解或測試
 
 ---
 
@@ -1246,10 +1246,14 @@ live 行情先讀 Redis，miss fallback 到 `stock_price_history` 最近一筆�
         channel，把 message body 餵給 sink
 - [x] 48.3 backend `MarketDataController` 新增 `GET /api/market-data/prices/stream`
         回 `Flux<ServerSentEvent<String>>`，從 sink 即時串流
-- [x] 48.4 bff 新增 passthrough route `/api/bff/market-data/stream` →
+- [ ] 48.4 bff 新增 passthrough route `/api/bff/market-data/stream` →
         `/api/market-data/prices/stream`
-- [x] 48.5 frontend nginx config：`location /api/bff/market-data/stream { proxy_buffering off; ... }`
-        避免 SSE 被 buffer 卡住
+        ⚠ **未實作**（Task 197 稽核）：`MarketDataBffRoutes` 只有 `/api/market-data/**` 一條 route，
+        查無此 passthrough。Dashboard SSE 目前直接走 `/api/market-data/prices/stream`，
+        `design.md:329` 已記為已知落差與修正方向。
+- [x] 48.5 frontend nginx config：`location = /api/market-data/prices/stream { proxy_buffering off; ... }`
+        避免 SSE 被 buffer 卡住（實際路徑指向 business service 端點而非 `/api/bff/market-data/stream`，
+        係 48.4 passthrough route 未落地的連帶結果；`proxy_buffering off` 已生效、SSE 功能正常）
 - [x] 48.6 `DashboardView.vue`：把 setInterval 改成 `new EventSource(...)`；onmessage 解析
         JSON 並更新 stockPrices reactive map；onerror 自動 reconnect。初始載入仍走
         `/api/bff/dashboard/summary`，後續增量更新走 SSE
@@ -1468,7 +1472,7 @@ NASDAQ info API 自 2026/04 起對 ETF 的 `keyStats` 為 null，VOO/VT 等 ETF 
         `orgId`/`fundNo`/`fundClassCode`）；日期格式 `YYYY/MM/DD`；回傳取 `tableList[0]` 最新
         `navValue`
 - [x] 54.5 external-materials-service `FundNavPoller`：`@Scheduled(cron="0 0 9 * * *",
-        zone="Asia/Taipei")` 全抓啟用基金；`FundNavPersister` upsert 至 `fund_nav`
+        zone="Asia/Taipei")` 全抓啟用基金；`FundNavSourceQuery.upsertNav()` upsert 至 `fund_nav`
 - [x] 54.6 external-materials-service `InternalPriceController` 新增
         `POST /internal/fund-nav/refresh`，同步呼叫 `FundNavPoller.refreshAll()`
 - [x] 54.7 backend `FundNavService`：`getLatestNavTwd(fundCode)` 回傳
@@ -2462,9 +2466,10 @@ VOO 股票走勢圖在 2026-06-05 NY 盤中（15:16，未到 16:00 收盤）顯�
 
 #### Steps:
 
-- [x] 87.1 backend `MarketDataController.getIntraday5m`：`GET /api/market-data/intraday-5m?code=&market=&daysBack=1`，直接代理 `HistoricalDataService.fetchIntraday5m`，回 `List<IntradayBar>`（time / open / high / low / close）
-- [x] 87.2 bff `StockAnalysisBffRoutes`：加 `stock-analysis-intraday-5m` route `GET /api/bff/stock-analysis/intraday-5m` → `/api/market-data/intraday-5m`
-- [x] 87.3 frontend `api/index.js`：`bffApi.stockAnalysis.getIntraday5m(code, market, daysBack=1)`
+- [x] 87.1 backend `MarketDataController.getIntraday5m`：`GET /api/market-data/intraday-5m?code=&market=&daysBack=1`，直接代理 `HistoricalDataService.fetchIntraday5m`，回 `List<IntradayBar>`（time / open / high / low / close）（⚠ 已於 Task 88 移除，REST 層現為 `/api/market-data/intraday-ticks`）
+- [x] 87.2 bff `StockAnalysisBffRoutes`：加 `stock-analysis-intraday-5m` route `GET /api/bff/stock-analysis/intraday-5m` → `/api/market-data/intraday-5m`（⚠ 已於 Task 88 移除，改為 `stock-analysis-intraday-ticks`）
+- [x] 87.3 frontend `api/index.js`：`bffApi.stockAnalysis.getIntraday5m(code, market, daysBack=1)`（⚠ 已於 Task 88 移除，改為 `getIntradayTicks`）
+        ⚠ **Task 197 稽核**：87.1–87.3 的 REST／BFF／前端三層均已於 Task 88 移除；`/intraday-5m` 現僅存於 ext 層 `InternalPriceController` 與 business service `HistoricalDataService.fetchIntraday5m`（供 `StockAlertService` 使用）。
 - [x] 87.4 frontend `StockAnalysisDialog.vue`：
   - `rangeOptions` 第一項插入 `{ label: '當日', months: 0 }`，預設仍為 12（1年）
   - `months === 0` 時改抓 `getIntraday5m`，存到 `intradayBars` ref；資料截止顯示為 intradayBars 最後一筆的 date 部分
@@ -2487,7 +2492,7 @@ Task 87 以 Yahoo `interval=5m` 作為「當日」走勢資料源，但 Yahoo �
 - **Tick element** 格式：JSON `{"t":"2026-06-05T13:25:00","p":"104.50"}`（time = ISO LocalDateTime，與既有 `IntradayBar.time` 同格式；price = BigDecimal 字串避免精度漂移）
 - **覆寫時機**：在 `ClosePersister.dumpXxxCloseFromRedis` 之後再 3 分鐘觸發，避免與 dump 競爭 Redis IO；cron 與 `ClosePersister` 同 zone
 - **資料源**：台股 FinMind `TaiwanStockKBar` 5m K（用 close 作為 tick.p；FinMind sponsor token 在 application.yml 既有 `finmind.token`），美/英股 Yahoo `chart?interval=5m`（沿用 `fetchIntraday5m`）
-- **舊 endpoint `/intraday-5m` 保留**：StockAlertService 警示觸發補抓仍用該 endpoint（不同用途、不同資料源語意），不動
+- **舊 `/intraday-5m` 僅保留 ext 層與 business service 內部方法**：ext `InternalPriceController` 的 `/internal/intraday-5m` 與 business service `HistoricalDataService.fetchIntraday5m` 保留供 `StockAlertService` 警示觸發補抓（不同用途、不同資料源語意）；REST（`/api/market-data/intraday-5m`）／BFF route／前端 api 三層則於本任務移除
 
 #### Steps:
 
@@ -3683,8 +3688,8 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 
 **唯一真實不一致＝Entity 註解對不上實際 DB**（`ddl-auto: none` 下註解不影響 runtime，純文件正確性；若未來啟用 `validate` 會誤 fail）：
 
-- [x] 148.1 `StockPriceHistory.java`：`openPrice`／`highPrice`／`lowPrice`／`closePrice` 位數 `precision=15` → `20`（對齊 DB `NUMERIC(20,4)`）；`volume` 補 `@Column(nullable = false)`（對齊 DB `BIGINT NOT NULL`）。`@UniqueConstraint`／`@Index` 註解本已正確反映 DB，維持不動。
-        ⚠ **本項的前提有誤（Task 197 稽核）**：DB 實際為 `NUMERIC(15,4)` ＋ `volume BIGINT`（nullable），見 `db/init/01_dump.sql`。`NUMERIC(20,4)` 只存在於 `v1.0.0-initial-schema.sql`，而該 changeset 在 dump 中已標記 already-ran、**永不執行**，故從未套用到任何環境。本項是照著永不執行的 changelog 改，反而把 entity 由「與 DB 一致」改成「與 DB 不一致」。因 `ddl-auto: none` 不做 schema 驗證故無 runtime 影響，屬靜默漂移，待後續任務把 entity 改回 `precision=15` 並移除 `volume` 的 `nullable=false`。
+- [ ] 148.1 `StockPriceHistory.java`：`openPrice`／`highPrice`／`lowPrice`／`closePrice` 位數 `precision=15` → `20`（對齊 DB `NUMERIC(20,4)`）；`volume` 補 `@Column(nullable = false)`（對齊 DB `BIGINT NOT NULL`）。`@UniqueConstraint`／`@Index` 註解本已正確反映 DB，維持不動。
+        ⚠ **本項的前提有誤（Task 197 稽核）**：DB 實際為 `NUMERIC(15,4)` ＋ `volume BIGINT`（nullable），見 `db/init/01_dump.sql`。`NUMERIC(20,4)` 只存在於 `v1.0.0-initial-schema.sql`，而該 changeset 在 dump 中已標記 already-ran、**永不執行**，故從未套用到任何環境。本項是照著永不執行的 changelog 改，反而把 entity 由「與 DB 一致」改成「與 DB 不一致」。因 `ddl-auto: none` 不做 schema 驗證故無 runtime 影響，屬靜默漂移，待後續任務把 entity 改回 `precision=15` 並移除 `volume` 的 `nullable=false`。故本項勾選狀態已改回 `[ ]`——結論被 Task 197.5 推翻，entity 現況仍是 `precision=20` ＋ `volume nullable=false`，與 DB 實際不一致；`design.md:489` 已記為待處理的靜默漂移。（`ddl-auto: none` 無 runtime 影響，且 dump 不在版控無法複驗，本次不改程式碼。）
 - [x] 148.2 `design.md`：ERD 後新增「Schema 基準線與 DB 層唯一鍵」澄清段（dump 為基準線、Liquibase 僅增量、兩表 DB 層約束＋位數明細、稽核只讀 changelog 的誤判提醒）。
 - [x] 148.3 `ExchangeRateHistory` 免改：Entity `buy_rate/sell_rate precision=10,scale=4` 已對齊 DB `NUMERIC(10,4)`、`@UniqueConstraint(currency,rateDate)` 已對齊 DB。
 - [x] 148.4 部署：本次為 `@Column` 註解對齊（`ddl-auto: none` 下**零 runtime 行為變更**），不影響運行 stack 行為；如需運行 jar 位元碼與源碼一致可另行重 build business-services，但非功能必要。
@@ -3714,7 +3719,7 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 149.12 思考深度（effort）頁面可調（成本控管，成本槓桿）：Liquibase `v1.39.0-market-analysis-effort.sql`（`market_analysis_setting` 增 `effort VARCHAR(16) NOT NULL DEFAULT 'medium'`）＋ master include；Entity 加 `effort` 欄。`MarketAnalysisService` 加 `AVAILABLE_EFFORTS`（low/medium/high）、`DEFAULT_EFFORT='medium'`、`resolveEffort()`、`mapEffort()`（→ `OutputConfig.Effort`）；`updateModel()` 改為 `updateSettings(model, effort)`（各欄白名單、未帶不變、至少一項）；`getSettings()` 回傳 `effort`＋`availableEfforts`；`doGenerate` 於 `MessageCreateParams` 加 `outputConfig(OutputConfig.effort(...))`。`MarketAnalysisController` PUT 改帶 `model`／`effort`。BFF 不變（Map 泛型轉發）。前端 DTO/api：`updateSettings(payload)` 改收物件；`TodayMarketAnalysisView` 頁首加思考深度 `el-select`＋`onEffortChange`。重 build business-services+frontend、recreate、UI 驗證下拉出現／預設 medium／切換持久化（畫面驗證，不觸發 LLM）。
 - [x] 149.13 新聞搜尋次數（web search）頁面可調（成本控管，次要槓桿）：Liquibase `v1.40.0-market-analysis-web-search.sql`（`market_analysis_setting` 增 `web_search_max_uses INTEGER NOT NULL DEFAULT 6`）＋ master include；Entity 加 `webSearchMaxUses` 欄。`MarketAnalysisService` 加 `AVAILABLE_WEB_SEARCHES`（0 關閉/3/4/6）、`DEFAULT_WEB_SEARCH=6`、`resolveWebSearchMaxUses()`；`updateSettings` 擴為 `(model, effort, webSearchMaxUses)`（第三欄白名單）；`getSettings()` 回傳 `webSearchMaxUses`＋`availableWebSearches`；`doGenerate` 依 `webSearchMaxUses>0` 決定是否 `addTool(WebSearchTool.maxUses(N))`；`buildSystemPrompt/buildUserPrompt` 加 `webSearchEnabled` 參數（關閉時改為純技術面、不得杜撰新聞、`newsHighlights` 空）。`MarketAnalysisController` PUT body 改 `Map<String,Object>`＋`str()/intOrNull()` 解析（`webSearchMaxUses` 收 JSON number）。BFF 不變。前端 `TodayMarketAnalysisView` 頁首加新聞搜尋 `el-select`（值為整數）＋`onWebSearchChange`；`busy` computed 統一停用下拉；`.header-actions` 加 `flex-wrap`。重 build business-services+frontend、recreate、UI 驗證下拉（關閉/3/4/6、預設 6）＋切換持久化（畫面驗證，不觸發 LLM）。
 - [x] 149.14 每日自動分析開關（enabled）頁面可調（成本控管，最粗槓桿）：Liquibase `v1.41.0-market-analysis-enabled.sql`（`market_analysis_setting` 增 `enabled BOOLEAN NOT NULL DEFAULT true`）＋ master include；Entity 加 `enabled` 欄。`MarketAnalysisService` 加 `isEnabled()`（設定值 → 否則 true）；`updateSettings` 擴為 `(model, effort, webSearchMaxUses, enabled)`（enabled 直接設值）；`getSettings()` 回傳 `enabled`。`MarketAnalysisScheduler` 於 `scheduledAnalysis()` 與 `selfHealOnStartup()` 開頭檢查 `isEnabled()`：false 即 return 略過（不呼叫 LLM）；手動 `generate()` 不受此限。`MarketAnalysisController` PUT 加 `boolOrNull()` 解析（`enabled` 收 JSON boolean）。BFF 不變。前端 `TodayMarketAnalysisView` 頁首加「每日自動分析」`el-switch`＋`onEnabledChange`；`emptyDesc` computed 依 enabled 切換空狀態文案。重 build business-services+frontend、recreate、UI 驗證開關＋切換持久化＋停用時 cron 日誌「已停用…略過」（畫面驗證，不觸發 LLM）。
-- [ ] 149.15 改用 Batch API（非同步、省 50% token 成本）：Liquibase `v1.42.0-market-analysis-batch.sql`（`daily_market_analysis` 增 `batch_id VARCHAR(64)`）＋ master include；Entity 加 `STATUS_PROCESSING` 常數＋`batchId` 欄；`DailyMarketAnalysisRepository` 加 `findByStatus`。`MarketAnalysisService`：`doGenerate` 改為 `submitBatch`（組 `BatchCreateParams.Request.Params`、`customId="ma-"+date`、`batches().create` → 落 PROCESSING＋batch_id）；`generateInternal` 先查 PROCESSING 即不重送；新增 `pollPendingBatches()`／`finalizeIfReady()`／`markBatchFailed()`／`customId()`（retrieve → ENDED → `resultsStreaming` 取 customId → `isSucceeded().message()` 解析落 OK/FAILED、清 batch_id、`BATCH_MAX_AGE=12h` 逾時保護）；imports 換 `MessageCreateParams`→`BatchCreateParams`/`MessageBatch`/`MessageBatchIndividualResponse`/`MessageBatchResult`/`ToolUnion`/`StreamResponse`/`Duration`。`MarketAnalysisScheduler` 加 `@Scheduled(fixedDelay=90s) pollBatches()`（不受 enabled 限）。Controller/BFF/DTO 不變（generate 回傳 PROCESSING 列，status 直通）。前端 `TodayMarketAnalysisView` 加 PROCESSING info alert＋`watch` 每 30s 自動 `load()`（`onUnmounted` 清）＋`statusLabel` 加 PROCESSING＋regenerate 提示改「已送出（批次處理中）」＋loading 文案。重 build business-services+frontend、recreate、UI 驗證 PROCESSING 狀態畫面＋poller 日誌；**單次付費驗證**（真的送一批確認 web_search 在 batch 下正常、結果落 OK）延後、由使用者決定時機。
+- [x] 149.15 改用 Batch API（非同步、省 50% token 成本）：Liquibase `v1.42.0-market-analysis-batch.sql`（`daily_market_analysis` 增 `batch_id VARCHAR(64)`）＋ master include；Entity 加 `STATUS_PROCESSING` 常數＋`batchId` 欄；`DailyMarketAnalysisRepository` 加 `findByStatus`。`MarketAnalysisService`：`doGenerate` 改為 `submitBatch`（組 `BatchCreateParams.Request.Params`、`customId="ma-"+date`、`batches().create` → 落 PROCESSING＋batch_id）；`generateInternal` 先查 PROCESSING 即不重送；新增 `pollPendingBatches()`／`finalizeIfReady()`／`markBatchFailed()`／`customId()`（retrieve → ENDED → `resultsStreaming` 取 customId → `isSucceeded().message()` 解析落 OK/FAILED、清 batch_id、`BATCH_MAX_AGE=12h` 逾時保護）；imports 換 `MessageCreateParams`→`BatchCreateParams`/`MessageBatch`/`MessageBatchIndividualResponse`/`MessageBatchResult`/`ToolUnion`/`StreamResponse`/`Duration`。`MarketAnalysisScheduler` 加 `@Scheduled(fixedDelay=90s) pollBatches()`（不受 enabled 限）。Controller/BFF/DTO 不變（generate 回傳 PROCESSING 列，status 直通）。前端 `TodayMarketAnalysisView` 加 PROCESSING info alert＋`watch` 每 30s 自動 `load()`（`onUnmounted` 清）＋`statusLabel` 加 PROCESSING＋regenerate 提示改「已送出（批次處理中）」＋loading 文案。重 build business-services+frontend、recreate、UI 驗證 PROCESSING 狀態畫面＋poller 日誌；**單次付費驗證**（真的送一批確認 web_search 在 batch 下正常、結果落 OK）延後、由使用者決定時機。
 - [x] 149.16 **Bug fix：批次收尾永遠認不出 ENDED → 每次分析都被誤判逾時失敗**（現場症狀：頁面顯示「今日分析產生失敗：批次逾時未完成（status=ended）」）。根因：`finalizeIfReady` 以 `batch.processingStatus() != MessageBatch.ProcessingStatus.ENDED` 判斷；但 Anthropic SDK 的 `MessageBatch.ProcessingStatus` 是 **enum-like 值類別（`implements com.anthropic.core.Enum`、非 Java `enum`、有覆寫 `equals`）**，`retrieve()` 反序列化回來的實例與靜態常數 `ENDED` 是不同物件參考，`!=` 恆為 true → poller 每 90s 撈到批次都當「仍在製」等下輪，直到 `generated_at` 超過 `BATCH_MAX_AGE=12h` 才落 FAILED（錯誤訊息裡的 `status=ended` 正是「其實早就 ENDED」的鐵證）。修正：改用其巢狀 `Value`（真 Java `enum`）比較 → `batch.processingStatus().value() != MessageBatch.ProcessingStatus.Value.ENDED`（`_UNKNOWN`／未來新狀態仍安全視為未完成）。註：Task 149.11–149.14 期間分析走**同步** Messages API 故無此問題；本 bug 隨 149.15 改 Batch API 引入。重 build（`--no-cache`）+ recreate business-services；驗證 poller 收到 ENDED 後正確落 OK（不再空轉 12h）。
 - [x] 149.17 **Bug fix：參考新聞顯示過時舊聞（把數月前的舊聞當「近期重點」）**（現場症狀：`analysis_date=2026-07-06` 的 `newsHighlights` 出現「央行力守台幣30元關卡」，該 UDN 文章實際發布日 `2025-09-18`，模型卻自報 `publishedAt="2026-06"`；現況美元兌台幣約 32，語境完全不成立）。根因：`sanitizeNews` 原本只過濾 URL scheme（XSS），**完全未驗證新聞時效**，模型自報日期不可信仍原封入庫顯示。修正 `MarketAnalysisService`：
   - `applyResult` 改呼叫 `sanitizeNews(list, row.getAnalysisDate())`；`sanitizeNews` 由「僅 http(s) 白名單」擴為**三層時效把關**（見 `design.md` 關鍵業務邏輯「參考新聞時效驗證」）：① `parseIsoDatePrefix` 硬性要求 `publishedAt` 為精確 `YYYY-MM-DD` 且落在 `[analysisDate - newsMaxAgeDays, analysisDate+1d]`；② 對通過者以 lazy `HttpClient`（短 UA `Mozilla/5.0`、逾時 ~6s、follow redirect）回抓原文，`extractPublishedDate`（JSON-LD `datePublished`／`article:published_time`／`meta[name=date]`／`<time datetime>`）取真實發布日、覆寫 `publishedAt` 並套同一時效區間（治本、擋謊報精確近期日期），抓不到則保留第 1 層驗證後模型日期；③ prompt 強化（`buildSystemPrompt`／`buildUserPrompt`）要求只納入 web_search 實查、精確到日、近 N 天內的新聞，否則不列入、不得臆測。
@@ -3826,7 +3831,7 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 153.3 spec：`requirements.md` Requirement 13 驗收條件釐清「當日」預設日期解析（優先今天、禁用 `findMaxTradingDate` 當唯一依據）；`design.md` BFF route 與 API 端點列補預設 bucket 說明。
 - [ ] 153.4 Docker：`--no-cache` 重 build external-materials-service + recreate（JVM service，避免 stale jar）；驗證運行 jar 內 `InternalPriceController` 含新邏輯。
 - [ ] 153.5 手動驗證：容器內 curl `/internal/intraday-ticks?code=00865B&market=台股`（URL-encode 市場）不帶 date 回今日 11 筆（原本 `[]`）；前端開 00865B 股票分析「當日」出現分時走勢。
-- [ ] 153.6 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）。
+- [x] 153.6 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）。
 
 ### Task 154: 修正英股「當日」分時走勢跨兩天串接（bug fix）
 
@@ -3845,7 +3850,7 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 154.3 Docker：`--no-cache` 重 build external-materials-service + recreate（JVM service，避免 stale jar）；unzip 運行 jar 驗證 `PriceCacheWriter.class` 引用 `isUkMarketOpen`/`isUkMarketJustClosed`/`zoneOf`（含 `switch(market)` 新邏輯）。
 - [x] 154.4 清污染資料：`DEL` 既有 `price:ticks:英股:*` 與 `price:dayhl:英股:*`（跨日混桶），交由盤中 polling（修正後）與 cold-start `refreshOne`（Yahoo range=1d 經 `refreshYahooOne` 日期過濾）重建乾淨的今日 bucket。
 - [x] 154.5 手動驗證：容器內 curl `/internal/intraday-ticks?code=VWRA&market=英股`（URL-encode）回單一日期序列（VWRA/CSPX/VUAA/IB01 皆 87 筆、僅今日 07-08、時間軸單調遞增）；美股對照 VOO 維持乾淨單日並持續增長。前端瀏覽器由使用者確認。
-- [ ] 154.6 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）。
+- [x] 154.6 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）。
 
 ### Task 155: 修正股票分析「當日」走勢被均線壓成平線（bug fix）
 
@@ -3863,7 +3868,7 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 155.2 spec：`requirements.md` Requirement 13 新增「當日 Y 軸鎖定當日股價區間、不用 scale:true」驗收條件；本 Task。
 - [x] 155.3 Docker：重 build frontend + recreate；驗證運行 bundle（`StockAnalysisDialog-*.js`）含新邏輯——`toFixed(2)` 與 padding 標記 `*.1`（`(hi-lo)*0.1`）/ `*.001`（`hi*0.001` fallback）皆在。
 - [ ] 155.4 手動驗證（瀏覽器）：0050 / VOO / VWRA 開「當日」，價格線填滿圖高、看得出日內起伏，MA60/MA240 超出區間被裁切、legend 數值仍在；切回「1個月」等日線期間 Y 軸回 scale:true 正常。
-- [ ] 155.5 commit + 兩段式 merge（併入 Task 154 同批或獨立，feature 分支 commit + main 用 `--no-ff` merge）。
+- [x] 155.5 commit + 兩段式 merge（併入 Task 154 同批或獨立，feature 分支 commit + main 用 `--no-ff` merge）。
 
 ### Task 156: 修正台股 / 英股「當日」分時缺收盤前尾段（Yahoo 延遲截斷）（bug fix）
 
@@ -3881,7 +3886,7 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 156.4 Docker：`--no-cache` 重 build external-materials-service + recreate；unzip 運行 jar 驗證 `IntradayTickStore.class` 含 `lastMinute`、`IntradayTickRefresher` cron 常數池為 `0 0 14`（台股）/ `0 0 17`（英股）/ `0 5 16`（美股不變）。
 - [x] 156.5 補救今日資料：用 scan 到的精確 key `DEL` 全部今日台股桶 + 不帶 date 的 `/internal/intraday-ticks` cold-start 重抓（FinMind 400→Yahoo fallback，Yahoo 現已完整）；驗證 18 檔台股（0050/2330/00878…）今日桶末端皆到 `13:30`（多數 54 根，債券 ETF 較稀疏但同樣到 13:30）。
 - [ ] 156.6 手動驗證（瀏覽器）：0050「當日」畫到 13:30。
-- [ ] 156.7 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）。
+- [x] 156.7 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）。
 
 ### Task 157: 股票分析「當日」X 軸固定延伸到收盤時間（非現在時間）（Requirement 13）
 
@@ -3898,7 +3903,7 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 157.3 spec：`requirements.md` Requirement 13 新增「當日 X 軸延伸到收盤」驗收條件；`design.md` intraday-ticks 端點註記「原始 tick 序列、前端建網格」；本 Task。
 - [x] 157.4 Docker：重 build frontend + recreate；驗證運行 bundle（`StockAnalysisDialog-DHyaPL0m.js`）含交易時段字串（`09:30`/`16:30`/`13:30`）與 `connectNulls`（函式名 minify）。frontend 容器 recreate 後 `curl -I http://localhost/` → 200。
 - [ ] 157.5 手動驗證（瀏覽器）：VOO（美股）開「當日」，X 軸自 09:30 延伸到 16:00，股價線只到最新一筆、右側留白，MA/成本/KD 水平線畫到 16:00；台股 0050 軸到 13:30、英股到 16:30；legend 股價與盤中相符。
-- [ ] 157.6 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）。
+- [x] 157.6 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）。
 
 ### Task 158: 股票分析「當日」顯示昨收與今日漲跌（Requirement 13）
 
@@ -3921,7 +3926,7 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 158.3 spec：`requirements.md` Requirement 13 新增本 AC；`design.md` intraday-ticks 端點註記「昨收/漲跌前端從 history 同源推導、不改契約」；本 Task。
 - [x] 158.4 Docker：重 build frontend（vite build ✓）+ recreate `asset-frontend`；`curl -I http://localhost/` → 200；運行 bundle `StockAnalysisDialog-*.js` 含 `今日漲跌`／`intraday-quote`。以真實資料驗證邏輯：2330 當日 sessionDate=2026-07-09、現價 2415、history 末筆為今日列（close 2415）→ `tradingDate < sessionDate` 正確跳過今日、取 2026-07-08 收盤 2465 為昨收、漲跌 −50.00（−2.03%，跌綠）。
 - [ ] 158.5 手動驗證（瀏覽器）：台積電 2330 開「當日」，上方顯示昨收與今日漲跌，現價 − 昨收 = 漲跌金額、色彩正確（漲紅跌綠）；切到「1個月」等日線期間資訊列隱藏。
-- [ ] 158.6 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）。
+- [x] 158.6 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）。
 
 ### Task 159: 警示 email 每檔股票多嵌一張「當日分時走勢圖」（Requirement 23）
 
@@ -4101,7 +4106,7 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 
 - [x] 164.1 spec：requirements.md Requirement 32 新增 AC、design.md 資料模型／正規化／service 段、本 Task。
 - [x] 164.2 資料層：Liquibase `v1.47.0-financial-planning-fields.sql`（`investment_profile` addColumn `birth_date`/勞保勞退四欄/`assumed_annual_inflation_rate`、dropColumn `age`；新表 `investment_planned_expense` ＋索引）；註冊 master。Entity `InvestmentProfile`（`age`→`birthDate`、`retirementDate` `LocalDate`、勞保勞退/通膨欄）、新 `InvestmentPlannedExpense`（`@Filter ownerFilter`）；Repository `InvestmentPlannedExpenseRepository`（`findByOwnerUserIdOrderByExpenseDate`／`deleteByOwnerUserId`）。移除 `YearMonthDateConverter`。
-- [x] 164.3 DTO：`InvestmentProfileDto` 加 `birthDate`/勞保勞退/通膨率/`plannedExpenses` 清單、移除 `age`；新 `InvestmentProfileInput`（Controller→Service 命令物件）與 `PlannedExpenseDto`。
+- [x] 164.3 DTO：`InvestmentProfileDto` 加 `birthDate`/勞保勞退/通膨率/`plannedExpenses` 清單、移除 `age`；新 `InvestmentProfileInput`（Controller→Service 命令物件）；大筆花費為巢狀 record `InvestmentProfileDto.PlannedExpense` 與 `InvestmentProfileInput.PlannedExpenseInput`（無獨立頂層 `PlannedExpenseDto`）。
 - [x] 164.4 Service：`saveProfile(InvestmentProfileInput)`／`generate(InvestmentProfileInput)`（大筆花費 replace）；`retirementSpan(LocalDate)`；`deriveAge(birthDate)`；buildUserPrompt 加「退休後現金流／未來支出」段（勞保月領/勞退一次領照填、大筆花費含通膨換算 `inflate(amount, rate, expenseDate)`）；buildSystemPrompt 加原則；產生時 `portfolio_advice.age` 寫衍生年齡。
 - [x] 164.5 Controller：`PortfolioAdviceController` `PUT /profile`／`POST /generate` 解析新欄位與 `plannedExpenses` 清單、生日/退休/勞保勞退日期，組 `InvestmentProfileInput`。
 - [x] 164.6 前端：`AssetAllocationAdviceView.vue`——生日／退休 `type="date"`、衍生年齡提示、假設年通膨率、勞保（月領＋起領年月）／勞退（一次領＋領取年月）區塊、大筆花費動態清單（新增/刪除列，日期＋用途＋今日金額），payload 帶新欄位；退休日期須晚於今天驗證沿用。
@@ -4136,7 +4141,7 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - [x] 165.5 Controller/BFF：`PortfolioAdviceController` `GET /projection` ＋ `toInput` 解析三欄；`PortfolioAdviceBffController` 聚合多帶 `projection`。
 - [x] 165.6 前端：`AssetAllocationAdviceView.vue`——退休試算三假設欄、③ 退休現金流試算卡（ECharts 折線圖＋結論）、targetAllocation 金額行、rebalancePlan 操作表、載入 projection、payload 帶三欄；ECharts per-view 註冊。
 - [ ] 165.7 Docker：`--no-cache` 重 build business-services、bff、build frontend，recreate；端到端驗證（X-User headers）試算端點／產生建議 prompt 納入試算與金額化。
-- [ ] 165.8 commit + 兩段式 merge。
+- [x] 165.8 commit + 兩段式 merge。
 
 ### Task 166：移除多餘的「投資年限」欄位（Requirement 32）
 
@@ -4160,7 +4165,7 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - [x] 166.4 Service：`saveProfile`／`generate` 移除設定；`retirementSpan` 改 `(birthDate, retirementDate)`（守成到 100 歲）；`buildUserPrompt` 移除投資年限行、守成期改「退休→100 歲」。
 - [x] 166.5 前端：`AssetAllocationAdviceView.vue` 移除投資年限欄、`retirementDerived`／`retirementHint` 改生日＋退休日衍生；歷史顯示投資年限改條件顯示（保留舊紀錄）；api 註解更新。
 - [ ] 166.6 Docker：`--no-cache` 重 build business-services、build frontend，recreate；驗證 profile 存取與試算不受影響。
-- [ ] 166.7 commit + 兩段式 merge。
+- [x] 166.7 commit + 兩段式 merge。
 
 ### Task 167：退休後拆長照前／長照後兩階段、生活費由月改年（Requirement 32）
 
@@ -4184,7 +4189,7 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - [x] 167.4 Service：`RetirementProjectionService.project` 兩階段年支出（`phaseOf`／`CARE`／`DEFAULT_LTC_START_AGE=80`）；`saveProfile` 存三欄；`appendProjection` 摘要含兩階段。單元測試更新＋加長照兩階段/預設 80 案例（8 過）。
 - [x] 167.5 前端：`AssetAllocationAdviceView.vue` 假設區換長照前/長照後年生活費＋長照起始年齡（月→年）、proj-assume 顯示兩階段、chart 加長照 markLine；form/load/payload/api 註解更新。
 - [ ] 167.6 Docker：`--no-cache` 重 build business-services、build frontend，recreate；端到端驗證試算兩階段。
-- [ ] 167.7 commit + 兩段式 merge。
+- [x] 167.7 commit + 兩段式 merge。
 
 ### Task 168：退休前收入以年薪計算（年薪 − 年支出 = 每年淨投入）（Requirement 32）
 
@@ -4208,7 +4213,7 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - [x] 168.4 Service：`RetirementProjectionService` 累積期年薪−年支出淨投入（依通膨）；`saveProfile` 存兩欄、`generate` 不再寫 monthly 歷史欄；`buildUserPrompt`／`projectedContribution` 改年薪−年支出；system prompt 原則清掉投資年限/每月可投入用語。單元測試更新＋加累積期年薪−年支出案例（9 過）。
 - [x] 168.5 前端：`AssetAllocationAdviceView.vue` 頂列「每月可投入」換退休前年薪＋年支出、衍生提示改「年薪−年支出淨投入」；form/load/payload/api 註解更新。
 - [ ] 168.6 Docker：`--no-cache` 重 build business-services、build frontend，recreate；端到端驗證。
-- [ ] 168.7 commit + 兩段式 merge。
+- [x] 168.7 commit + 兩段式 merge。
 ### Task 169：績效比較 — 最多三檔我的股票與五大指數同圖比報酬率
 
 對應 Requirements: Requirement 33（[requirements.md:764](spec/requirements.md)）
@@ -4265,7 +4270,7 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - [x] 170.6 前端：報酬口徑 `el-radio-group`（含息/純價格，預設含息）＋ `compare(...,dividend)`＋watch；`priceOnly` series 標「價格報酬」`el-tag`；標題/說明含息文案；`api/index.js` `compare` 加參數。
 - [x] 170.7 資料回補：跑 `refresh-tr`（TWSE 報酬指數 ~10 年）＋ `refreshUsIndexDaily("SP500TR")`，驗 DB `close_point_tr`／`SP500TR` 列數與範圍。
 - [x] 170.8 Docker：`--no-cache` 重 build business-services、external-materials-service、bff、build frontend，recreate；端到端驗證（含息 vs 純價格切換、個股再投入 > 純價格、TWSE/SPX 含息線、DJI/IXIC/SOX priceOnly 標示、英股不誤標、無股利個股降級不 500）。
-- [ ] 170.9 commit + 兩段式 merge。
+- [x] 170.9 commit + 兩段式 merge。
 
 ---
 
@@ -4299,15 +4304,15 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 
 #### 本次增修：排程改匯出「當前即時資產」＋家目錄為根＋檔案總管式資料夾選擇
 
-- [ ] 171.11 ExcelExportService：新增 `exportLiveAssets()`／`exportLiveAssetsForOwner(ownerId)`／`buildLiveWorkbook()`／`writeLiveAssetsSheet()`（資料源 `StockPriceService.getLiveAssets()` ＋最新快照 deposits/funds 明細）；抽出 `stockCostTwd()` 供 snapshot／live 兩處共用。注入 `StockPriceService`（無循環依賴）。
-- [ ] 171.12 ExportScheduleService：`EXPORT_OUTPUT_DIR` 預設改 `/home/steven`；`runNowForCurrentUser()`→`exportLiveAssets()`、`runScheduled()`→`exportLiveAssetsForOwner()`；新增唯讀 `browse(subpath)`（`startsWith(base)` 驗證、`Files.list` 僅子目錄、隱藏 dotfiles、依名排序）。
-- [ ] 171.13 Controller＋DTO：`ExportScheduleController` 加 `GET /browse`；`ExportScheduleDto` 加 `BrowseResponse`／`DirEntry`。
-- [ ] 171.14 BFF：`AssetHistoryBffController` 加 `GET /export-schedule/browse`（passthrough，帶 `subpath` query）。
-- [ ] 171.15 前端 API：`api/index.js` `bffApi.assetHistory` 加 `browseExportDir(subpath)`。
-- [ ] 171.16 前端 UI：`AssetHistoryView.vue` 標題改「排程自動匯出最新資產」；輸出資料夾改 `el-tree` 懶載入樹狀選擇對話框 ＋可選填「新增子資料夾名稱」；更新提示文字（家目錄根 `/home/steven` → host `/Users/steven`、匯出當前即時資產）。
-- [ ] 171.17 Docker：`docker-compose.yml` `EXPORT_OUTPUT_DIR=/home/steven`、volume `${EXPORT_OUTPUT_DIR_HOST:-/Users/steven}:/home/steven`；`.env.example` `EXPORT_OUTPUT_DIR_HOST=/Users/steven`。
+- [x] 171.11 ExcelExportService：新增 `exportLiveAssets()`／`exportLiveAssetsForOwner(ownerId)`／`buildLiveWorkbook()`／`writeLiveAssetsSheet()`（資料源 `StockPriceService.getLiveAssets()` ＋最新快照 deposits/funds 明細）；抽出 `stockCostTwd()` 供 snapshot／live 兩處共用。注入 `StockPriceService`（無循環依賴）。
+- [x] 171.12 ExportScheduleService：`EXPORT_OUTPUT_DIR` 預設改 `/home/steven`；`runNowForCurrentUser()`→`exportLiveAssets()`、`runScheduled()`→`exportLiveAssetsForOwner()`；新增唯讀 `browse(subpath)`（`startsWith(base)` 驗證、`Files.list` 僅子目錄、隱藏 dotfiles、依名排序）。
+- [x] 171.13 Controller＋DTO：`ExportScheduleController` 加 `GET /browse`；`ExportScheduleDto` 加 `BrowseResponse`／`DirEntry`。
+- [x] 171.14 BFF：`AssetHistoryBffController` 加 `GET /export-schedule/browse`（passthrough，帶 `subpath` query）。
+- [x] 171.15 前端 API：`api/index.js` `bffApi.assetHistory` 加 `browseExportDir(subpath)`。
+- [x] 171.16 前端 UI：`AssetHistoryView.vue` 標題改「排程自動匯出最新資產」；輸出資料夾改 `el-tree` 懶載入樹狀選擇對話框 ＋可選填「新增子資料夾名稱」；更新提示文字（家目錄根 `/home/steven` → host `/Users/steven`、匯出當前即時資產）。
+- [x] 171.17 Docker：`docker-compose.yml` `EXPORT_OUTPUT_DIR=/home/steven`、volume `${EXPORT_OUTPUT_DIR_HOST:-/Users/steven}:/home/steven`；`.env.example` `EXPORT_OUTPUT_DIR_HOST=/Users/steven`。
 - [ ] 171.18 建置驗證：`--no-cache` 重 build business-services、bff，build frontend，recreate；驗證資料夾樹瀏覽、run-now 產「當前即時資產」xlsx（股票即時價）、標題正確。
-- [ ] 171.19 commit + 兩段式 merge。
+- [x] 171.19 commit + 兩段式 merge。
 
 ---
 
@@ -4333,7 +4338,7 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - [x] 172.1 spec：requirements.md Requirement 9（兩卡改圓餅圖邏輯、去除股票現值 live 描述、回復嚴格加總）、design.md Dashboard KPI 段、本 Task。
 - [x] 172.2 前端：`DashboardView.vue` `kpiCards` computed——依 `liveLatest.id` 於 `store.history` 找對應 row 取 `stockValue`／`bondValue`；第 3 張「股票現值」值改 `stockValue`（琥珀、`sub` 佔比）、第 4 張改「債券現值」值 `bondValue`（teal、`sub` 佔比）；資產總計 / 存款總計 / 預估年配息三卡不變。
 - [x] 172.3 驗證：Docker 重 build frontend、recreate；部署 chunk 服務新版，兩卡佔比 == 圓餅圖（owner=1 2026-07-10：股票現值 10,848,763=54.29%、債券現值 973,702=4.87%）；存款+股票現值+債券現值 == totalAssets。
-- [ ] 172.4 commit + 兩段式 merge。
+- [x] 172.4 commit + 兩段式 merge。
 
 ### Task 173：退休現金流試算——勞保年金依《勞工保險條例》§65-4 CPI 累計±5% 調整（Requirement 32 bug fix）
 
@@ -4356,7 +4361,7 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - [x] 173.2 Service：`RetirementProjectionService` 加常數 `LABOR_ANNUITY_CPI_STEP`＋私有 `laborAnnuityMultiplier(year, startYear, infl)`；逐年迴圈勞保年金流入乘上倍數；class Javadoc 同步。
 - [x] 173.3 測試：`RetirementProjectionServiceTest` 加「每 3 年依實際累計漲幅跳階（240000→254690→270279）」與「通膨 0 永不調整」兩案例（11 過）。
 - [x] 173.4 Docker：`--no-cache` 重 build business-services、recreate（image 內 `.class` 已含 `laborAnnuityMultiplier`，非 stale）；端到端驗證 `GET /api/portfolio-advice/projection`（owner=1）勞保年金逐年階梯調升（62→95 歲：240,204→254,906→…→461,728，每 3 年 ×1.02³）、缺口年齡延後。
-- [ ] 173.5 commit + 兩段式 merge。
+- [x] 173.5 commit + 兩段式 merge。
 
 ---
 
@@ -4384,7 +4389,7 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - [x] 174.4 Scheduler：新增 `SnapshotDateRollScheduler`——`@Scheduled(cron="0 5 0 * * *", zone="Asia/Taipei")` + `@EventListener(ApplicationReadyEvent)` self-heal（另 thread + sleep 30s）+ `volatile LocalDate` 當日 guard；`findDistinctOwnerUserIds()` 逐 owner try/catch，統計 rolled／skipped／failed。
 - [x] 174.5 測試：`AssetServiceTest` 加 roll 四案例（過去→roll、當日→skip、未來→skip、無快照→false）；新增 `SnapshotDateRollSchedulerTest`（逐 owner 呼叫、單一失敗不中斷、統計）。
 - [x] 174.6 Docker：`--no-cache` 重 build business-services、recreate；查 log「roll 最新快照 … → 當日」＋歷年資產頁最後一列日期由過去日期變當日、股票改用即時價。
-- [ ] 174.7 commit + 兩段式 merge。
+- [x] 174.7 commit + 兩段式 merge。
 
 ### Task 175：全專案稽核——修正 4 項規範違反（分層 / DTO record / 一頁一 BFF）
 
@@ -4408,7 +4413,7 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - [x] 175.3 #3 DTO record：`BackupDto`、`ExportScheduleDto`、`StockAlertDto`、`WatchStockDto` 全部巢狀型別由 `@Data class` 改為不可變 `record`；修 `BackupController`／`BackupService`／`ExportScheduleService`／`StockAlertService`（含 `toResponse` 改寫）／`WatchStockService`（含 `toResponse`／`toIndexResponse` 改寫）呼叫端 accessor。
 - [x] 175.4 #4 一頁一 BFF：新增 `FundSettingsBffController`（`GET /api/bff/fund-settings/bank-options`，過濾 active）；`api/index.js` 加 `fundSettings.getBankOptions`；`FundSettingsView` 改呼叫自己頁的 BFF，不再跨頁打 `bffApi.snapshotForm.getLookups()`。
 - [x] 175.5 驗證：backend `mvn compile` + `mvn test`（既有測試除 pre-existing 破損的 `AssetSnapshotControllerTest` 外全綠）、bff `mvn compile`；Docker `--no-cache` 重 build business-services / bff / frontend、recreate 後煙霧測試受影響端點。
-- [ ] 175.6 commit + 兩段式 merge。
+- [x] 175.6 commit + 兩段式 merge。
 
 ### Task 176：左側選單新增「公開資訊」分組 ＋ 排程列表頁（Requirement 36）
 
@@ -4457,7 +4462,7 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - [x] 177.6 驗證：ext + backend `mvn compile`；`--no-cache` 重 build ext＋business-services（JVM stale jar 防呆）＋recreate；驗 `NewsPoller` warmup 於 SRPP/data/input 產出 `public_info_<今日>.json`（由 DB 查詢、含 `tradingDayCutoff`）、三大法人／大盤成交（published＝上一交易日）保留、今天抓到但發布日更舊的過期新聞排除、`news_headline` 仍落庫、`MarketAnalysisScheduler` cron 為 08:30。
 - [x] 177.9 ext `StockSourceQuery`（DB 為單一來源）：`lastTwseTradingDate()`（`MAX((published_at AT TIME ZONE 'Asia/Taipei')::date) WHERE category LIKE 'twse-%'`，即上一交易日）＋ `loadTodayPublicInfoForExport(today, cutoff)`（`WHERE fetched_at(TW)=today AND published_at(TW)≥cutoff ORDER BY published_at DESC`，map→`NewsRow`）。`NewsPoller` 注入 `MarketCalendar` 供無 twse 時 fallback（`resolveTradingCutoff`）。
 - [x] 177.10 對抗式 review 修正（workflow）：(a) 匯出改**暫存檔＋原子 rename**（`Files.createTempFile`＋`Files.move(ATOMIC_MOVE)`）——warmup 執行緒與 cron 若在 08/12/18 前 5 秒內併發 `run()` 會截斷同一 JSON；(b) `NewsRow.publishedAt` 加 `@JsonFormat(timezone="Asia/Taipei")` 以 +08:00 序列化——否則 twse「07-09」資料 UTC 顯示成 `07-08T16:00Z`、SRPP 解析日期會倒退一天、與 `tradingDayCutoff` 不一致。
-- [ ] 177.7 commit + 兩段式 merge。
+- [x] 177.7 commit + 兩段式 merge。
 
 ### Task 178：公開資訊只保留 stock 主檔個股＋總體新聞，其餘個股濾除（Requirement 31）
 
@@ -4484,7 +4489,7 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - [x] 178.7 ext `NewsPoller.run()`：抓取後、upsert＋export 前套用 filter；log 濾除筆數。
 - [x] 178.8 驗證：ext `mvn compile`；`--no-cache` 重 build ext＋recreate；驗 warmup log「個股過濾 N→保留 X 丟棄 Y」、SRPP JSON 與 news_headline 均為過濾後、總經/年份新聞未被誤濾。
 - [x] 178.10 對抗式 review 修正（workflow）：`PublicInfoStockFilter.EXPLICIT_CODE` 由 `[(（]…(?:-TW)?…[)）]|…-TW` 收緊為**必帶 `-TW`** `[(（]?\s*(\d{4,6}[A-Z]?)\s*-TW\s*[)）]?`——原式括號內裸年份 `(2023)` 會命中真實鋼鐵股代號而誤濾含年份的總經新聞。
-- [ ] 178.9 commit + 兩段式 merge。
+- [x] 178.9 commit + 兩段式 merge。
 
 ### Task 179：移除「新聞搜尋（web_search）」，新聞固定讀本地 `news_headline`＋顯示時點對齊 08:30（Requirement 31）
 
@@ -4511,7 +4516,7 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - [x] 179.7 bff `SchedulePublicBffController`：今日股市分析列 07:30→08:30（cron `0 30 8`）；財經新聞抓取列 06:00→08:00（cron `0 0 8,12,18`、說明「08:00 早於 08:30 分析」）。
 - [x] 179.8 frontend `TodayMarketAnalysisView.vue`：移除「新聞搜尋」`el-select`＋`selectedWebSearch`／`savingWebSearch`／`availableWebSearches`／`onWebSearchChange` 與 settings 中 `webSearchMaxUses`；07:30 文案全部改 08:30。`api/index.js` updateSettings 註解去「新聞搜尋」。
 - [ ] 179.9 驗證：backend＋bff `mvn compile`；`--no-cache` 重 build business-services＋bff＋frontend＋recreate；驗頁面無「新聞搜尋」下拉、文案 08:30、`GET/PUT /settings` 正常（無 webSearchMaxUses）、排程列表顯示 08:30／08:00、Liquibase 成功 drop 欄。
-- [ ] 179.10 commit + 兩段式 merge。
+- [x] 179.10 commit + 兩段式 merge。
 
 ### Task 180：公開資訊爬蟲新增「台幣兌美元匯率」＋「美股主要指數收盤」快照、新聞擴增政治/國際來源、明確排除中港澳（Requirement 31）
 
@@ -4545,7 +4550,7 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
     - **(nit) NewsRow javadoc**：`@param source`／`@param category` 補 `bot-fx`／`us-index`／`fx`／`us-market`。
 - [x] 180.11 部署驗證抓出的 runtime bug 修正：`StockSourceQuery.loadLatestUsIndexClose` 第三引數原為 expression lambda（`rs -> rows.add(...)` 回 boolean）被 Java 解析成 `ResultSetExtractor`（整段只呼一次、rs 停在第一列前）→ warmup 時拋「ResultSet not positioned properly」美股快照組裝失敗。改為 void 區塊 lambda `{ rows.add(...); }` 確定解析為 `RowCallbackHandler`（逐列、rs 已定位）。FX（`loadLatestUsdRate` 用正確的 ResultSetExtractor + 自呼 `rs.next()`）不受影響。
 - [ ] 180.8 部署驗證：`--no-cache` 重 build external-materials-service＋recreate；驗 warmup log「個股過濾」、`news_headline` 出現 `fx`／`us-market` 列、SRPP `public_info_<date>.json` 含匯率與美股指數項、政治/國際新聞入庫（僅相關者）、無中港澳來源。
-- [ ] 180.9 commit + 兩段式 merge。
+- [x] 180.9 commit + 兩段式 merge。
 
 ### Task 183: 規格與程式碼一致性對齊（spec-code consistency 稽核修正）
 
@@ -4582,7 +4587,7 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 - [x] 184.2 ext `application.yml`：`news-scraper` 註解 08→08:20。
 - [x] 184.3 spec：`requirements.md` R31 新增本 AC＋更新 Task 149.21／177／179 之排程字串；`design.md` 同步 08:20；`tasks.md` 本任務。
 - [ ] 184.4 部署驗證：`--no-cache` 重 build external-materials-service＋recreate；確認 `scheduled()` 兩個 cron 生效、早上為 08:20。
-- [ ] 184.5 commit + 兩段式 merge。
+- [x] 184.5 commit + 兩段式 merge。
 
 ### Task 185：公開資訊爬蟲新增「韓國股市」快照（KOSPI 大盤＋三星電子＋SK 海力士）（Requirement 31）
 
@@ -4606,7 +4611,7 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 - [x] 185.5 ext `MarketSnapshotFetchClient.buildKrMarketSnapshot()`：讀 KOSPI（`loadLatestUsIndexClose("KOSPI")`）＋三星/海力士（`loadLatestForeignStockClose`），組 `category=kr-market` `NewsRow` 加入 `fetchAll()`；class javadoc 同步。`NewsRow` javadoc 補 `kr-market`／`kr-index`／`KR`。
 - [x] 185.6 spec：`requirements.md` R31 新增本 AC；`design.md` ERD 加 `foreign_stock_daily_history`、量化快照段補韓股（第 3 則）、`news_headline` category/source 列舉、`KrStockPoller`；`tasks.md` 本任務。
 - [ ] 185.7 部署驗證：`--no-cache` 重 build external-materials-service＋backend（Liquibase 建表）＋recreate；驗 `foreign_stock_daily_history` 有 005930／000660 列、`news_headline` 出現 `kr-market` 列（title 含 KOSPI／三星電子／SK海力士＋漲跌%）、SRPP `public_info_<date>.json` 含韓股項。
-- [ ] 185.8 commit + 兩段式 merge。
+- [x] 185.8 commit + 兩段式 merge。
 
 ### Task 186：今日股市分析排程由 08:30 改 08:45（Requirement 31）
 
@@ -4621,7 +4626,7 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 - [x] 186.3 前端 `TodayMarketAnalysisView.vue`：頁面說明／tooltip／收件人提示／空狀態／註解 08:30→08:45（5 處）。
 - [x] 186.4 bff `SchedulePublicBffController` 排程列表：分析 entry schedule `交易日 08:30`→`08:45`、cron `0 30 8 * * MON-FRI`→`0 45 8 * * MON-FRI`。
 - [x] 186.5 spec：`requirements.md`／`design.md` 現況敘述所有分析 08:30→08:45（含 design cron 字面 `0 30 8`→`0 45 8`）。歷史 task log（149/162/177/179 等）不追溯。
-- [ ] 186.6 部署驗證＋commit。
+- [x] 186.6 部署驗證＋commit。
 
 ### Task 187：台股臨時休市偵測時窗由 05:00–08:45 縮短為 05:00–07:00（Requirement 7）
 
@@ -4639,7 +4644,7 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 - [x] 187.1 ext `TwClosurePoller`：cron 拆兩條（`0 0/15 5-6` ＋ `0 0 7`，MON-FRI）；class／方法 javadoc 05:00–08:45→05:00–07:00。
 - [x] 187.2 bff `SchedulePublicBffController` 排程列表：颱風 entry schedule `交易日 05:00–08:45 每 15 分鐘`→`05:00–07:00`、cron→`0 0/15 5-6 * * MON-FRI；0 0 7 * * MON-FRI`。
 - [x] 187.3 spec：`requirements.md`（R7 L114 cron／L117「依賴 05:00–08:45 poller」）、`design.md`（L320 排程）現況敘述更新。並修 `MarketAnalysisScheduler` L47 對照敘述「05:00–08:45」→「05:00–07:00」。
-- [ ] 187.4 部署驗證＋commit。
+- [x] 187.4 部署驗證＋commit。
 
 ### Task 188：公開資訊爬蟲中午時間由 12:00 改 11:30（Requirement 31）
 
@@ -4654,7 +4659,7 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 - [x] 188.3 bff `SchedulePublicBffController` 排程列表：財經新聞 entry schedule→`每日 08:20 / 11:30 / 18:00`、cron→三條、description「08:00 早於 08:30」→「08:20 早於 08:45」；**新增** `KrStockPoller` entry（韓股參考個股抓取，`0 0 16`）；清單筆數 33→34、external 23→24。
 - [x] 188.4 spec：`requirements.md`／`design.md` 現況爬蟲 cadence 08:20/12:00/18:00→08:20/11:30/18:00（Task 184 之 AC 為當時史實，中午 12:00 保留、由本任務接續）。
 - [ ] 188.5 部署驗證：重建 backend／external-materials／bff／frontend、重啟，驗排程列表頁顯示新 cron／時窗、jar 內 cron 正確。
-- [ ] 188.6 commit + 兩段式 merge。
+- [x] 188.6 commit + 兩段式 merge。
 ### Task 189: 交易日曆匯出到指定路徑（JSON／Excel）
 
 對應 Requirements: Requirement 37（交易日曆匯出）；沿用 Requirement 34 輸出路徑安全模型、CLAUDE.md「一頁一支 BFF」「同義欄位、同一 business service API」。
@@ -4682,7 +4687,7 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 - [x] 189.6 frontend `api/index.js`：`tradingCalendar.exportToDir`／`browseExportDir`。
 - [x] 189.7 frontend `TradingCalendarView.vue`：日曆卡標題加「匯出」按鈕＋匯出對話框（年度／格式 json|excel／資料夾樹狀選擇器，選擇器比照 `AssetHistoryView.vue`）。
 - [x] 189.8 部署驗證：`--no-cache` 重 build business-services＋bff＋frontend、recreate；於 UI 觸發匯出，驗 host 目錄出現 `交易日曆_{year}.json`／`.xlsx`、內容含整年逐日與假日、格式錯誤回 400、路徑跳脫被拒。
-- [ ] 189.9 commit + 兩段式 merge。
+- [x] 189.9 commit + 兩段式 merge。
 
 ### Task 190: 交易日曆匯出「每日排程自動匯出」（指定時間）
 
@@ -4710,7 +4715,7 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 - [x] 190.7 BFF `TradingCalendarBffController` 加 `GET/PUT /export/schedule` passthrough。
 - [x] 190.8 frontend：`api/index.js` 加 `getExportSchedule`／`updateExportSchedule`；`TradingCalendarView.vue` 匯出對話框加排程區塊（啟用開關＋每日時間＋儲存排程＋上次執行狀態）。
 - [x] 190.9 部署驗證：重建 business+bff+frontend、recreate；驗排程 GET/PUT、`run_now` 即時仍可、設定啟用後背景 tick 到點產檔。
-- [ ] 190.10 commit + 兩段式 merge。
+- [x] 190.10 commit + 兩段式 merge。
 
 ### Task 191：可設定多個「分析寄送時間」，每時段各重跑一次分析並各寄一封（限台股交易日）（Requirement 31）
 
@@ -4758,7 +4763,7 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 - [x] 192.8 **前端**：`App.vue` 選單「公開資訊」加子項「爬蟲資訊查詢」（`/crawler-data`，icon Search）；`router/index.js` 加 route；`api/index.js` 加 `bffApi.crawlerData`（query／getSchedule／saveSchedule）；新 `views/CrawlerDataView.vue`（日期選擇＋`fetched/published` 切換＋類別過濾＋結果表格；排程時間清單增減／啟用／儲存，非 ADMIN 唯讀並提示）。
 - [x] 192.9 **排程列表同步**：`SchedulePublicBffController` 的 `JOBS` 中 NewsPoller 該筆改標「動態：依『爬蟲資訊查詢』頁設定（預設 08/12/18）」。
 - [ ] 192.10 **部署驗證**（功能已於運行 stack 逐項驗過，惟最終乾淨部署被環境問題阻斷，待重跑）：已驗證通過項目——（a）`GET /api/news-headlines` 依日期查得當日 `news_headline`，`fetched/published` 兩語意與 `category=fx` 過濾皆正確（回真實 fx／us-market／news 列）；（b）Liquibase v1.58.0 建表＋seed 08:20/11:30/18:00（Task 197 稽核更正：原文記錄的 `v1.55.0` 與 seed 08/12/18 為 192.2a 改名前的舊值，`v1.55.0` 現為 `foreign-stock-daily`）；（c）ADMIN `PUT /api/crawler-schedule` 成功整批覆寫、非 ADMIN → 403、非法時分 → 400；（d）**動態排程實測**：API 設 00:33 後 `NewsPoller` 於 TW 00:33:00 準時在 `news-scheduled` 執行緒觸發 upsert（免重啟生效）；（e）前端新頁 chunk／路由／`bff/crawler-data` 已部署、BFF 路由存在（401）。**阻斷原因**：跨 worktree 共用 `asset-management-*:latest` 映像被並行 session 反覆覆蓋（曾出現「有 NewsHeadlineController、無 CrawlerScheduleController」的他版），隨後 Docker daemon 於高並行 build 下崩潰回 500。待 Docker 恢復＋確認無其他 session 並行 build 後，於本 worktree 重跑 `docker compose build`＋`--force-recreate` 並複驗即可收尾。
-- [ ] 192.11 commit + 兩段式 merge。
+- [x] 192.11 commit + 兩段式 merge。
 ### Task 193：公開資訊爬蟲增列「韓股盤中」快照，讓分析看得到當日開盤動向（Requirement 31）
 
 對應 Requirements: Requirement 31（今日股市分析——公開資訊必含韓國股市 Task 185、爬蟲時點 Task 184／188、來源不取中港澳 Task 180）
@@ -4788,7 +4793,7 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 - [x] 193.4 **`NewsPoller` 接線**：注入 `KrIntradayFetchClient`，`run()` 增第四個 `rows.addAll(...)`；class javadoc 列入第四來源。
 - [x] 193.5 **單元測試**：`KrIntradayFetchClientTest`——盤中且 sessionDate 為今日 → 產 1 列且標題含開盤價與漲跌%；時段外（18:00）→ 0 列；盤中但 sessionDate 為昨日（模擬韓國假日）→ 0 列；三檔僅 1 檔成功 → 仍產 1 列；三檔全失敗 → 0 列。
 - [x] 193.6 **部署驗證**：external-materials `--no-cache` 重建（`-p asset-management`）＋recreate，jar 內含 4 個 KrIntraday class（防 stale jar）。實測於台北 22:21（韓股收盤後）：容器 healthy、Spring context 載入正常（雙建構子＋`@Autowired` 接線無誤）、warmup upsert 269 則失敗 0、`fx`／`kr-market`／`us-market` 皆正常刷新＝其他來源無退化、`kr-intraday` 0 列＝時段閘門正確擋下。**未驗**：盤中實際產出列（須台北 08:00–14:30 平日；`ApplicationReadyEvent` warmup 會跑完整 `run()`，屆時重啟容器即可）。抓取／解析路徑另以真實 Yahoo 探針驗證：三檔皆正確取得開盤價（`^KS11` 之 `^` 正確 encode、`005930.KS` open=283500 與 curl 吻合）、`sessionDate` 正確、無效 symbol graceful 回空。
-- [ ] 193.7 **整合 main（兩段式 merge）**：feature 分支 commit → main 以 `--no-ff` merge。
+- [x] 193.7 **整合 main（兩段式 merge）**：feature 分支 commit → main 以 `--no-ff` merge。
 
 ---
 
@@ -4823,7 +4828,7 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 - [x] 194.2 **`PriceFetchClient.getYahooLsePrice`**：`mapper.readTree(body).path("chart").path("result").path(0)` 提為 `result`，`meta` 由其取得；`open` 改讀 `result.path("indicators").path("quote").path(0).path("open").path(0)`；移除 `meta.previousClose` 死碼 fallback；Javadoc 補欄位落點警語。`fetchKrIntradayQuote` 之 Javadoc 同步（原文稱 `getYahooLsePrice`「即誤用該欄」，改標註為已由 Task 194 修正）。high／low／volume 不動。
 - [x] 194.3 **真實 Yahoo 驗證**：暫時性測試直呼 `getStockPrice(code, "英股")` 實打 Yahoo，三檔開盤價皆有值且落在當日 low／high 區間內——CSPX open=814.24（low 812.91／high 816.44）、VUSA open=106.805（low 106.558／high 107.077）、VWRL open=137.23（low 136.70／high 137.42）；`prevClose`／`change`／`changePct` 亦一致。驗畢即刪，不進 commit。
 - [x] 194.4 **部署驗證**：external-materials `--no-cache` 重建（`-p asset-management`）＋recreate。防 stale jar：以 `javap` 反組譯 image 內 jar 的 `PriceFetchClient.class`，確認 `getYahooLsePrice` 的 constant pool 已為 `chart→result→meta→regularMarketPrice→chartPreviousClose→indicators→quote→open→regularMarketDayHigh/Low→regularMarketVolume→shortName`，全檔 `regularMarketOpen` 出現 **0 次**（原為死碼的 bare `previousClose` 亦 0 次）。**端到端**：修正前 Redis `price:英股:CSPX` 無 `openPrice` 欄（NON_NULL 省略，實測 baseline）；recreate 後同 key 於倫敦 15:42（盤中、`closed:false`）已含 `"openPrice":814.2400`，與 Yahoo `indicators.quote[0].open[0]`（814.239990…）一致。
-- [ ] 194.5 **整合 main（兩段式 merge）**：feature 分支 commit → main 以 `--no-ff` merge。
+- [x] 194.5 **整合 main（兩段式 merge）**：feature 分支 commit → main 以 `--no-ff` merge。
 
 ---
 
@@ -4855,7 +4860,7 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 - [x] 195.3 **修漂移 2（交易日曆匯出漏列）**：`JOBS` 新增 `BUSINESS`／分類「交易日曆」／「交易日曆每日匯出排程檢查」（`每分鐘`／`0 * * * * *`／`Asia/Taipei`），比照「資產匯出」該筆敘述。
 - [x] 195.4 **更正數量與對照來源**：javadoc business 10→11、總數 34→35，`對照來源` business 清單補 `TradingCalendarExportScheduleService`，並載明「以 `@Scheduled` 方法計」之計數慣例；`JOBS` 與 `list()` 註解筆數同步。
 - [x] 195.5 **驗證**：bff `mvn compile` 通過；`docker compose -p asset-management build --no-cache bff` ＋ `--force-recreate`，容器 healthy。**防 stale jar（memory 教訓）**：自 image 取出 `/app/app.jar`、`javap` 反組譯部署後的 `SchedulePublicBffController.class` 驗證——`ScheduledJobDto` 實例化 **35 次**、`業務服務` 11／`外部行情服務` 24（與 javadoc 宣稱一致）、`動態（market_analysis_send_time）` 與 `交易日曆每日匯出排程檢查` 存在、**舊寫死 cron `0 45 8 * * MON-FRI` 出現 0 次**（漂移確實移除）。另全清單 35 筆逐筆對照兩服務實際 35 個 `@Scheduled` 方法之 cron／zone，無其他漂移。`GET /api/bff/schedule-list` 自 business 容器打 bff 回 **401**＝路由存在且如 AC 落 `authenticated()`。**未驗**：登入後之頁面實際 render——`/schedule-list` 需 Google OAuth session，不代為登入；惟本清單為編譯期 `List.of` 常數、無下游呼叫，且 `list()` 與 `ScheduledJobDto` 皆未改動（頁面原即正常顯示 34 筆），bytecode 已足證所服務之內容。
-- [ ] 195.6 **整合 main（兩段式 merge）**：feature 分支 commit → main 以 `--no-ff` merge。
+- [x] 195.6 **整合 main（兩段式 merge）**：feature 分支 commit → main 以 `--no-ff` merge。
 
 ---
 
@@ -4912,7 +4917,7 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 - [x] 197.10 **各處數量與版號更正**：`CLAUDE.md` 35 → 39 Requirements、Task 1–174 → 1–196；`design.md` Repository 33 → 47、28 → 29 views、31 → 32 routes、components 之 `UsaMap`（不存在）改為 `UsFlag`／`StockAnalysisDialog`；`design.md:2628` 註冊版號 v1.58.0 → v1.59.0；Requirement 32 資料模型補列 `v1.50.0`／`v1.51.0`；`tasks.md` Task 196 交叉引用「Task 192／v1.58.0」→「Task 196／v1.59.0」、192.10 的 `v1.55.0`＋seed 08/12/18 → `v1.58.0`＋08:20/11:30/18:00、Task 111 之「Requirement 114」→ Requirement 7、Task 3.4 `EntityNotFoundException` → `NoSuchElementException`、Task 56.4 `FundDividendSourceQuery` → `FundNavSourceQuery`、Task 133.4 之 Gateway `GlobalFilter`（從未存在）→ `WebClientConfig.tenantHeaderFilter()` 並註明 Task 137.2 收斂至 `TenantWebFilter`、148.4 補 checkbox、Task 14b 子項由撞號的 `14.1`–`14.8` 改為 `14b.1`–`14b.8`。
 - [x] 197.11 **requirements.md**：Requirement 31 標題由「每交易日 08:45」改為「每交易日於可設定時點」（Task 191 起已改為每分鐘 tick 比對 `market_analysis_send_time`，AC 內文原本即已更新、僅標題未同步）。
 - [x] 197.12 驗證：`npm run build` 通過（前端死碼移除與 `allSettled` 改寫無破壞）；本任務不改任何 business 邏輯與 API 契約，javadoc 註解變更於 `ddl-auto: none`／純文字層面零 runtime 行為變更。
-- [ ] 197.13 commit ＋ 兩段式 merge（feature 分支單行短中文 commit、main 用 `--no-ff`）。
+- [x] 197.13 commit ＋ 兩段式 merge（feature 分支單行短中文 commit、main 用 `--no-ff`）。
 
 #### 本次稽核發現、但**刻意不在本任務處理**的項目（屬功能變更，須另走 SDD 循環並重建映像）
 
@@ -4946,7 +4951,7 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 - [x] 198.1 **spec**：`requirements.md` Requirement 31 增「爬蟲新聞來源增列美國財經網站（CNBC / Nasdaq，Task 198）」AC，並於「不得取用中港澳網站」AC 補列 CNBC／Nasdaq；`design.md` `news_headline` 之 `source` 列舉補 `cnbc/nasdaq`、`NewsFetchClient` 段補美國財經新聞來源與 `fetchRss(url, source, region)`；`tasks.md` 本任務。
 - [x] 198.2 **`NewsFetchClient`**：新增 CNBC Economy／Finance／Markets、Nasdaq Markets 四條 US feed 常數；`fetchRss` 加 `region` 參數（台灣既有呼叫傳 `TW`、US feed 傳 `US`）；`fetchAll()` 併入四條 `safe(...)`；class javadoc 補來源。`NewsRow` javadoc 之 `source`／`region` 列舉補 `cnbc/nasdaq`。
 - [x] 198.3 **部署驗證**：`external-materials-service` `--no-cache` 重 build＋`--force-recreate`（healthy）；warmup 抓取日誌 `cnbc-economy 30`／`cnbc-finance 30`／`cnbc-markets 30`／`nasdaq-markets 15`、`upsert 377 則 失敗 0`；`PublicInfoStockFilter 386→保留 377`（US 新聞未誤刪，濾除 9 為非主檔台股）；DB `news_headline` 有 `cnbc 89`／`nasdaq 15`（`region='US'`／`category='news'`）；business `GET /api/news-headlines?date=&dateField=fetched`（＝「爬蟲資訊查詢」頁與今日股市分析共用端點）當日回 US 新聞 103 筆。（另發現 `source='fed'` 16 筆為別分支殘留、最後抓取 07-13，隨保留期淘汰，非本任務範圍。）
-- [ ] 198.4 commit ＋ 兩段式 merge（feature 分支單行短中文 commit、main 用 `--no-ff`）。
+- [x] 198.4 commit ＋ 兩段式 merge（feature 分支單行短中文 commit、main 用 `--no-ff`）。
 
 ### Task 199：台灣中文新聞編輯收錄政策過濾（`EditorialNewsFilter`）（Requirement 31）
 
@@ -4969,7 +4974,7 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 - [x] 199.4 **`EditorialNewsFilterTest`**：五規則代表標題與邊界案例（財經優先、中國政權 vs 社會、地緣、地方縣市白名單、非財經一般）。
 - [x] 199.5 **關鍵詞校準**：12 路對抗式稽核 Workflow 回報約 95 筆可信誤判（最大宗＝財經召回不足：盤勢/DRAM/載板/鋼價/囤房預售/保險/上市公司名；次為中國總經政權與地緣召回、及泛詞誤留）。依建議補財經/regime/polity/geo 關鍵詞、加 LIFESTYLE 生活消費否決層與地方公職（鎮長/市議員＋非白名單縣市）否決、縮限泛詞（移除 AI/大企業/董座/創辦人/保費 solo、新高、四川人名、北市子字串誤中竹北市、預售→預售屋）。1561 則語料 keep 78.7%，分佈：finance 1025／china-regime 93／geopolitics 36／polity 55／tw-politics 13／city 6；drop：non-finance-general 254／lifestyle 23／tw-local 25／china-nonfinance 31。`EditorialNewsFilterTest` 13 案全綠。
 - [x] 199.6 **部署驗證**：`--no-cache` 重 build ext ＋ `--force-recreate`（healthy，jar 含 `EditorialNewsFilter`）；warmup 抓取 udn 20→14、ltn 各 feed 已過濾（`safe()` 記 post-filter 數），wantgoo／cnbc／nasdaq 不過濾如設計。查 DB 本輪入庫 ltn/udn 標題：壓倒性為財經（台積電/南亞科/外資/金管會/記憶體/鋼品/青安）、台美歐盟政治（立院預算/巴紐外交/歐盟對中國）、中國政權（馬興瑞肅清/言論審查/海警）、影響市場地緣（伊朗荷姆茲航運/美伊/烏克蘭）；前一版 udn 生活軟文（Buffet新北/全聯台中/單人跟團旅行）已不再入庫。
-- [ ] 199.7 commit ＋ 兩段式 merge（含 Task 198）。
+- [x] 199.7 commit ＋ 兩段式 merge（含 Task 198）。
 - [x] 199.8 **收緊生活/軟文/體育（使用者 2026-07-16 追加）**：政策改為「全世界生活、軟文、體育一律刪除，除非真的影響股市大盤」。實作：`LIFESTYLE` 否決層由 cascade 第 5 步**提前至第 2 步**（財經之後、中國/地緣/政治/城市之前），使唯一豁免＝命中財經訊號；政治人物名（碧姬馬克宏）、城市白名單（台北旅宿軟文）、中國詞（網紅五星旗）皆不再救回軟文。`LIFESTYLE` 大幅擴充：體育全項（世足/奧運/職棒/NBA/MLB/選手/教練/金牌/賽事…）＋演藝影劇（明星/藝人/演唱會/專輯/票房/金馬獎/緋聞/追劇…）＋餐飲旅宿時尚寵物消費開箱促銷。修子字串誤中：移除「出國」（誤中「退出國民黨」→改判 tw-local）。1561 語料 lifestyle 濾除 23→36、finance 保留數不變（無誤刪財經）、lifestyle 桶零強政治/財經詞誤刪；`EditorialNewsFilterTest` 增體育娛樂案共 16 案全綠。**依使用者指示本次不重啟 container（明早排程沿用現運行版本），僅程式碼＋spec＋commit/merge**。
 
 ---
@@ -4986,7 +4991,7 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 - [x] 200.2 **`StockPriceService.LiveStockItem` 擴欄**：record 末尾增 `previousClose／priceChange／changePercent`；`getLiveAssets()` 於既有 `LivePrice lp` 分支帶出三值（無 `lp` 時為 null），零額外 Redis 讀取。建構點唯一（同檔），Dashboard JSON 多回三欄、向後相容。
 - [x] 200.3 **`ExcelExportService.writeLiveAssetsSheet` 增 7 欄**：注入 `TechnicalIndicatorService`；表頭與逐列依上列欄序寫入。昨收沿用即時價 `num4`，漲跌／漲跌幅／月/季/年線用新增 `num2`（`#,##0.00`），KD值為字串 `K {k} / D {d}`。技術指標以 `Map<code|market, FullIndicators>` 於單次匯出快取，同股多券商列僅算一次。`autoSizeColumn` 迴圈上界改 18。
 - [x] 200.4 **建置與部署驗證**：`--no-cache` 重 build business-services，`--force-recreate`（healthy，運行 jar 含 `formatKd`）；owner 1（ADMIN/ACTIVE，最新快照 43 筆持股）以 X-User header 觸發 run-now 產「當前即時資產」`.xlsx`。驗證：新 7 欄到位；`0050` 即時價 100.15／昨收 106.4／漲跌 −6.25（=100.15−106.4）／漲跌幅 −5.874%（=−6.25/106.4）自洽；同檔 `0050` 元大／富邦兩列昨收/漲跌/月季年線/KD 完全相同（快取生效、跨券商一致）；`VOO` 即時價 689.59／昨收 693.8／漲跌 −4.21 亦自洽；KD 呈現 `K 31.63 / D 40.18`。
-- [ ] 200.5 commit ＋ 兩段式 merge。
+- [x] 200.5 commit ＋ 兩段式 merge。
 
 ---
 

@@ -15,7 +15,7 @@ import java.time.LocalDate;
  */
 @Entity
 @Table(name = "exchange_rate_history", uniqueConstraints = {
-    @UniqueConstraint(columnNames = {"currency", "rateDate"})
+    @UniqueConstraint(columnNames = {"currency", "rate_date"})
 })
 @Data
 @NoArgsConstructor

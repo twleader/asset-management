@@ -61,7 +61,7 @@ com.steven.assets/
 - `DashboardBffController`（DashboardView 專屬）：
   - `GET /api/bff/dashboard/summary`：並行聚合 snapshots / history / prices / marketStatus / latestSnapshotDetail + mergedStocks
   - `GET /api/bff/dashboard/snapshot/{id}`：切換快照時用
-  - `GET /api/bff/dashboard/realtime`：2 分鐘輪詢用，回傳 stockPrices + marketStatus
+  - `GET /api/bff/dashboard/realtime`：2 分鐘輪詢用，回傳 stockPrices + marketStatus + liveAssets
   - `POST /api/bff/dashboard/enrich-dividend-rates`：背景補齊所有快照缺漏的配息率
   - `PATCH /api/bff/dashboard/snapshot/{id}/stock-order`：拖曳排序持股後寫回
   - `GET /api/bff/dashboard/holdings-classified/{snapshotId}`：「資產配置分佈」雙層 donut（資產類別 → 個股）用，passthrough 至 `/api/snapshots/{id}/holdings-classified`（Requirement 25）
@@ -72,10 +72,10 @@ com.steven.assets/
   - `GET /api/bff/snapshot-detail/brokers`：編輯券商欄位用，回傳 active brokers
   - `PUT /api/bff/snapshot-detail/{id}`：儲存編輯後的快照
 - 存款 amount 換算規則（後端 `AssetService.normalizeDepositAmount`）：原幣值（`originalAmount` USD）由前端輸入直接傳入，**台幣 amount 一律由後端用 snapshot 匯率算出**（`amount = originalAmount × usdExchangeRate`），TRANSIT_* 的正負號也由後端依 `TransitFundType.payable` 決定。前端不做這部份計算，避免 snapshot 匯率為 null 時誤把 USD 數字寫進 TWD 欄位。
-- `AssetHistoryBffController`（AssetHistoryView 專屬）：`GET /api/bff/asset-history`（history + isLastOfYear flag）、`POST /api/bff/asset-history/recalc-dividends`、`DELETE /api/bff/asset-history/{id}`、`GET /api/bff/asset-history/export`
-- `RealizedGainBffController`（RealizedGainView 專屬）：`GET /api/bff/realized-gain`（gains + active brokers 一起回傳）、CRUD、export、`GET /api/bff/realized-gain/lookup-name?code=&market=`（輸入股號自動帶出股名；轉呼**同一支** business `/api/stock-alerts/lookup-name`，與 stock-alert 頁同源，符合「同義欄位、同一 business service API」——前端不再跨頁呼叫 stock-alert 的 BFF）
+- `AssetHistoryBffController`（AssetHistoryView 專屬）：`GET /api/bff/asset-history`（history + isLastOfYear flag）、`POST /api/bff/asset-history/recalc-dividends`、`DELETE /api/bff/asset-history/{id}`、`GET /api/bff/asset-history/export`；另有排程匯出端點（`export-schedule` GET/PUT、`export-schedule/run-now`、`export-schedule/browse`），詳見後段 Requirement 34 章節
+- `RealizedGainBffController`（RealizedGainView 專屬）：`GET /api/bff/realized-gain`（gains + active brokers 一起回傳）、CRUD、export、`GET /api/bff/realized-gain/lookup-name?code=&market=`（輸入股號自動帶出股名；轉呼**同一支** business `/api/stock-alerts/lookup-name`，與 stock-alert 頁同源，符合「同義欄位、同一 business service API」——前端不再跨頁呼叫 stock-alert 的 BFF）；另有排程匯出端點（`export/schedule` GET/PUT、`export/run-now`、`export/browse`），詳見後段 Requirement 39 章節
 - `ExchangeRateBffController`（ExchangeRateView 專屬）：`GET /api/bff/exchange-rate`（先 refresh 再回 10 年歷史）、`POST /api/bff/exchange-rate/backfill`
-- `TradingCalendarBffController`（TradingCalendarView 專屬）：`GET /api/bff/trading-calendar?year=Y`（`holidays` 為 `{tw: {date→name}, us: {date→name}}` 物件 + `marketStatus`）、`GET /api/bff/trading-calendar/market-status`
+- `TradingCalendarBffController`（TradingCalendarView 專屬）：`GET /api/bff/trading-calendar?year=Y`（`holidays` 為 `{tw: {date→name}, us: {date→name}}` 物件 + `marketStatus`）、`GET /api/bff/trading-calendar/market-status`；另有匯出與排程匯出端點（`POST export`、`export/browse`、`export/schedule` GET/PUT），詳見後段 Requirement 37 章節
 - `SnapshotListBffController`（SnapshotListView 專屬）：`GET /api/bff/snapshot-list`、`DELETE /{id}`、`GET /export`
 - `GdpTwseBffController`（GdpTwseView 專屬，`@RequestMapping("/api/bff/gdp-twse")`）：股市大盤查詢頁的指數日線／當日＋台韓人均 GDP 聚合（Requirement 18）：
   - `GET /api/bff/gdp-twse`：台／韓人均 GDP + 實質成長率歷史
@@ -108,7 +108,7 @@ com.steven.assets/
   - `MeController`（BFF 自有 controller，非 passthrough）：`GET /api/me`、`POST /api/impersonate` → 認證端點例外，服務 `authStore` / `PendingApprovalView` / App layout 等跨頁情境，故不掛 `/api/bff/{page}/**`（Requirement 28）
   - `SnapshotBffRoutes`：`/api/snapshots/**` → business-services（Pinia store 共用快照 CRUD；單頁資料仍走各自的 `/api/bff/{page}/**`）。**已知落差**：實際只有 SnapshotFormView 的建立／更新與 App.vue 取最新快照 ID 在用，等於以「store 共用」之名掩蓋單頁未合規；修正方向為 `SnapshotFormBffController` 補 `POST`／`PUT`／list 端點，屬功能變更須另走 SDD 循環
   - `SettingsBffRoutes`：`/api/settings/**` → business-services。**目前無前端消費者**：原「被多個表單頁共用的下拉 lookups」說法已不成立——lookups 已分別由 `/api/bff/snapshot-form/lookups` 與 `/api/bff/fund-settings/bank-options`（Task 175）取代，前端 `institutionApi` wrapper 已於 Task 197 移除。route 本身暫留（移除需重建 BFF 服務），**屬待清理項，勿據此段落認定它是現行的共享例外**
-  - `FundBffRoutes`：`/api/funds`、`/api/fund-nav/**`、`/api/fund-dividend/**` → business-services（FundSettingsView 基金主檔 CRUD 與 NAV / 配息回補，Requirement 19/20/21）。**慣例例外**：基金主檔頁直接沿用 `/api/funds` 資源 passthrough（基金主檔為跨頁共享資源）。SnapshotForm 讀同一份基金主檔，但走自己頁面專屬的 `/api/bff/snapshot-form/funds`（同樣 passthrough 至 `/api/funds`，符合「一頁一 BFF」）
+  - `FundBffRoutes`：`/api/funds`、`/api/fund-nav/**`、`/api/fund-dividend/**` → business-services（Requirement 19/20/21）。`/api/funds` 供 FundSettingsView 基金主檔 CRUD 使用；**慣例例外**：基金主檔頁直接沿用 `/api/funds` 資源 passthrough（基金主檔為跨頁共享資源）。SnapshotForm 讀同一份基金主檔，但走自己頁面專屬的 `/api/bff/snapshot-form/funds`（同樣 passthrough 至 `/api/funds`，符合「一頁一 BFF」）。**`/api/fund-nav/**` 與 `/api/fund-dividend/**` 目前無前端消費者**：原「FundSettingsView 的 NAV / 配息回補」說法已不成立——`FundSettingsView.vue` 全頁無任何 NAV／配息呼叫，前端唯一的 NAV 刷新是 `api/index.js` 的 `/bff/snapshot-form/fund-nav/refresh`（走 SnapshotForm 自己的 BFF，不經本 route）。兩條 route 暫留（移除需重建 BFF 服務），**屬待清理項，勿據此段落認定它們是現行的共享例外**
   - `FundSettingsBffController`：`GET /api/bff/fund-settings/bank-options` → 過濾 active 後的銷售銀行下拉；與 SnapshotForm 的 lookups **同讀 business `/api/settings/banks`**（同義欄位同一來源），fund-settings 頁不再跨頁呼叫 `/api/bff/snapshot-form/lookups`（Task 175：一頁一 BFF 合規化）
   - `RealizedGainBffRoutes`：`/api/realized-gains/**` → business-services。**目前無前端消費者**：原「RealizedGainView 的 Pinia store `gainApi` 共用 CRUD」說法已不成立——該頁已全面走 `RealizedGainBffController` 的 `/api/bff/realized-gain` 聚合端點，前端 `gainApi` wrapper 與 `assetStore` 的三個已實現損益 action 已於 Task 197 移除。route 本身暫留（移除需重建 BFF 服務），**屬待清理項**
   - `MarketDataBffRoutes`：`/api/market-data/**` → business-services。目前**唯一**消費者是 DashboardView 的 SSE 行情串流（`new EventSource('/api/market-data/prices/stream')`，見下方 SSE 段落之已知落差）；`marketDataApi` wrapper（歷史/配息/ETF 成分股）無呼叫端，已於 Task 197 移除，該類查詢皆走 `StockAnalysisBffRoutes` 的 `/api/bff/stock-analysis/**`
@@ -415,7 +415,7 @@ AssetSnapshot (1) ──── (N) FundHolding
 RealizedGain          (獨立，不關聯快照)
 
 # 多租戶 / 認證（Requirement 28）
-AppUser               (使用者主檔，PK = id；email UNIQUE；role ADMIN/USER；status PENDING/ACTIVE/DISABLED）
+AppUser               (使用者主檔，PK = id；email UNIQUE；name / picture〔Google 帳號顯示名稱與頭像，皆 nullable〕；role ADMIN/USER；status PENDING/ACTIVE/DISABLED；created_at / updated_at 皆 NOT NULL）
 AppUser (1) ──── (N) AssetSnapshot          (owner_user_id；子表 bank/stock/fund holding 經 snapshot 繼承 owner)
 AppUser (1) ──── (N) RealizedGain           (owner_user_id)
 AppUser (1) ──── (N) PaymentAccount         (owner_user_id)
@@ -426,7 +426,7 @@ AppUser (1) ──── (N) NotificationRecipient  (owner_user_id)
 # 參考/行情/設定主檔（Bank, BrokerEntity, Stock, *_History, MarketType, AssetClass, FundMaster...）為全系統共用，不加 owner
 
 # 主檔 / 設定類（不寫死 enum，由 DataInitializer seed）
-Stock                 (個股主檔，PK = code + market；nullable override 欄 asset_class / stock_style / bond_term)
+Stock                 (個股主檔，PK = code + market；name NOT NULL〔股名，v1.9.4 起各表不再存冗餘 stock_name、一律由本檔 join 補上〕；nullable override 欄 asset_class / stock_style / bond_term)
 DepositTypeEntity     (存款類型主檔，code 值存入 BankDeposit.depositType)
 MarketType            (市場類型主檔，code 值存入 StockHolding.market)
 TransitFundType       (待轉入資金類型主檔)
@@ -447,6 +447,7 @@ FundDividendHistory   (基金配息歷史)
 StockPriceHistory     (歷史股價紀錄；live 行情改由 Redis 提供)
 StockDividendHistory  (個股配息歷史，殖利率 / 填息天數計算用)
 ExchangeRateHistory   (歷史匯率紀錄)
+ForeignStockDailyHistory (→ foreign_stock_daily_history，海外參考個股每日收盤〔韓股 三星電子 005930 / SK 海力士 000660〕，PK = (stock_code, trading_date)、close_point NUMERIC(18,4) NOT NULL；全域參考、無 owner、無 backend entity——ext-materials 的 KrStockPoller 以 JdbcTemplate 直寫，供公開資訊韓股快照〔category=kr-market〕算漲跌%；Task 185)
 
 # 警示
 StockAlert            (到價警示，獨立資料表；觀察清單由此表 GROUP BY (stockCode, market) 衍生)
@@ -455,6 +456,7 @@ StockAlertTrigger     (警示觸發歷史，FK→stock_alert，保留 30 天)
 # 總經 / 指數（Requirement 18）
 TaiwanGdpPerCapitaHistory / JapanGdpPerCapitaHistory / KoreaGdpPerCapitaHistory   (人均 GDP + 實質成長率)
 TwseIndexDailyHistory / UsIndexDailyHistory            (大盤 / 海外指數每日 OHLC)
+twse_index_year_end_history                            (台股大盤年末收盤，PK = year、close_point NUMERIC(12,2)；v1.16.0 建表並 seed 1996–2025。**保留但已停用**——Task 97 移除「年末走勢圖卡」後 entity / repository / endpoint 皆已刪除，惟資料表未 DROP、仍存在於 DB)
 
 # 備份（Requirement 15）
 BackupSetting         (備份保留代數設定，單列資料表，id = 1)
@@ -497,7 +499,8 @@ TwMarketClosure       (台股臨時休市，PK = closure_date；全域參考、�
 | 欄位 | 型別 | 說明 |
 |------|------|------|
 | id | Long | PK |
-| snapshotDate | LocalDate | 快照日期（唯一） |
+| ownerUserId | Long | 所屬使用者；多租戶隔離欄，nullable=false |
+| snapshotDate | LocalDate | 快照日期；與 ownerUserId 複合唯一（見多租戶章節） |
 | usdExchangeRate | BigDecimal | 當日美元匯率（程式欄位名，原 spec 為 usdToTwd） |
 | totalDeposit | BigDecimal | 總存款（台幣） |
 | totalFundValue | BigDecimal | 總基金市值 |
@@ -684,6 +687,7 @@ TwMarketClosure       (台股臨時休市，PK = closure_date；全域參考、�
 | 欄位 | 型別 | 說明 |
 |------|------|------|
 | id | Long | PK |
+| ownerUserId | Long | 所屬使用者；多租戶隔離欄，nullable=false |
 | assetCode | String | 資產代號（原 spec 為 stockCode） |
 | assetName | String | 資產名稱（原 spec 為 stockName） |
 | market | String | 市場代碼（對應 MarketType.code） |
@@ -736,6 +740,7 @@ TwMarketClosure       (台股臨時休市，PK = closure_date；全域參考、�
 | 欄位 | 型別 | 說明 |
 |------|------|------|
 | id | Long | PK |
+| ownerUserId | Long | 所屬使用者；多租戶隔離欄，nullable=false |
 | stockCode | String | 股票代號 |
 | market | String | 市場代碼（台股/美股；股名由 `stock` 主檔 join 補上，v1.9.4 起不存冗餘 `stock_name`） |
 | alertType | String | 條件類型：`PRICE_ABOVE` / `PRICE_BELOW` / `MA_ABOVE_PCT` / `MA_BELOW_PCT` / `KD_ABOVE` / `KD_BELOW` / `KD_D_ABOVE` / `KD_D_BELOW` |
@@ -801,6 +806,7 @@ TwMarketClosure       (台股臨時休市，PK = closure_date；全域參考、�
 | 欄位 | 型別 | 說明 |
 |------|------|------|
 | id | Long | PK |
+| ownerUserId | Long | 所屬使用者；多租戶隔離欄，nullable=false |
 | category | PaymentCategory | FK |
 | itemName | String | 項目名稱（自由輸入，如 `市話 + MOD`、`台電電費`） |
 | paymentAccount | String | 扣款帳戶（自由輸入字串，可填銀行帳戶或信用卡名稱；**不**與 `bank` / `broker` 建立 FK） |
@@ -813,7 +819,8 @@ TwMarketClosure       (台股臨時休市，PK = closure_date；全域參考、�
 | 欄位 | 型別 | 說明 |
 |------|------|------|
 | id | Long | PK |
-| email | String | 收件人 email；存入前 trim + 轉小寫；unique |
+| ownerUserId | Long | 所屬使用者；多租戶隔離欄，nullable=false |
+| email | String | 收件人 email；存入前 trim + 轉小寫；與 ownerUserId 複合唯一（同一使用者不可重複，**不同使用者可各自使用同一 email**） |
 | active | Boolean | 是否啟用（false 不寄**股價警示**信，但保留設定） |
 | receiveMarketAnalysis | Boolean | 是否接收每日股市分析（預設 true；與 `active`〔接收警示〕**各自獨立**，見 Requirement 31 / Task 151） |
 | createdAt | LocalDateTime | 建立時間 |
@@ -927,6 +934,7 @@ POST   /api/market-data/exchange-rate/backfill-history?currency=USD&since= # 補
 GET    /api/market-data/live-assets                            # 以最新快照持倉 × 當前快取股價，即時計算總資產估值
 GET    /api/market-data/etf-holdings?code=0050&market=台股     # ETF 成分持股（台股優先 MoneyDJ 完整成分股→Yahoo前10 fallback；FinMind dataset 已移除；含 12h cache；美股走 Yahoo）
 GET    /api/market-data/dividends?code=0050&market=台股&years=10 # 最近 N 年股利（台股 FinMind；美股 NASDAQ）
+GET    /api/market-data/dividends-readonly?code=0050&market=台股&years=10 # 純讀最近 N 年股利（績效比較頁 Requirement 33）：只讀 stock_dividend_history、回「裸陣列」，DB 空即回 []，**絕不觸發 cold-cache 抓取寫入**（與 /dividends 的差別）
 ```
 
 ##### ETF 判斷規則
@@ -1082,7 +1090,8 @@ GET    /api/notification-recipients                  # 列出所有收件人（�
 POST   /api/notification-recipients                  # 新增收件人
 PUT    /api/notification-recipients/{id}             # 更新 email
 DELETE /api/notification-recipients/{id}             # 刪除
-PATCH  /api/notification-recipients/{id}/active      # 切換啟用/停用
+PATCH  /api/notification-recipients/{id}/active      # 切換啟用/停用（＝是否接收股價警示信）
+PATCH  /api/notification-recipients/{id}/market-analysis # 切換「是否接收今日股市分析每日 Email」訂閱（Requirement 31 / Task 151；與 active 各自獨立）
 
 # 前端 view 經 BFF：rewrite /api/bff/notification-settings/recipients/** → /api/notification-recipients/**
 ```
@@ -1994,6 +2003,8 @@ business-services（`MarketAnalysisController`，`/api/market-analysis`）：
 | GET | `/api/market-analysis/today` | 最近一筆分析（DTO：含解析後的 keyFactors / newsHighlights 陣列）；無資料回 `{status:"NONE"}`。已登入者皆可讀。 |
 | GET | `/api/market-analysis/history?limit=30` | 近 N 筆（`analysis_date` 降序）。 |
 | POST | `/api/market-analysis/generate` | 送出當日批次分析並**立即回傳 `PROCESSING` 列**（Batch API 非同步；結果由 poller 收尾）。縱深防禦：`CurrentUserContext.isAdmin()` 否則 `AdminRequiredException`。 |
+| GET | `/api/market-analysis/settings` | 分析設定（model / effort / enabled ＋白名單清單，另併帶 `sendTimes`）。已登入者可讀。詳見下方「模型頁面可調（成本控管）」之 API 表。 |
+| PUT | `/api/market-analysis/settings` | 更新模型／思考深度／每日自動分析開關（至少一項；未帶之欄不變）。限 ADMIN（`isAdmin()`）。詳見下方「模型頁面可調（成本控管）」之 API 表。 |
 | GET | `/api/market-analysis/send-times` | 分析寄送時間清單（`[{id,time,active}]`，`send_time` 升序）。已登入者可讀（亦併入 `/settings` 回應之 `sendTimes` 供聚合）。 |
 | POST | `/api/market-analysis/send-times` | 新增寄送時間（body `{time:"HH:mm"}`；格式／唯一性驗證於 service，非法回 400）。限 ADMIN（`isAdmin()`）。回更新後清單。 |
 | DELETE | `/api/market-analysis/send-times/{id}` | 刪除寄送時間。限 ADMIN。回更新後清單。 |
@@ -2464,7 +2475,7 @@ GET  /api/bff/asset-history/export                    → GET  /api/snapshots/ex
 
 ### 資料模型
 
-無新增 DB 資料表／欄位——純檔案輸出、不持久化任何設定。交易日曆資料每次即時由 `MarketDataService` 產出。
+**R37 初版（Task 189，即時匯出 `/run`）無新增 DB 資料表／欄位**——純檔案輸出、不持久化任何設定；交易日曆資料每次即時由 `MarketDataService` 產出。**後由 Task 190 新增 `trading_calendar_export_schedule`**（每 owner 一列的每日排程匯出設定，比另兩張排程表多一個 `format` 欄〔json/excel〕）持久化排程設定，詳見下方「每日排程自動匯出（Task 190）」；即時匯出本身仍不落 DB。
 
 **JSON 輸出結構（`交易日曆_{year}.json`，UTF-8 pretty-print）：**
 
