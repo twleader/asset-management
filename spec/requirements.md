@@ -786,6 +786,7 @@
 - [ ] **個股含息的資料缺口與降級**：
   - **英股**：`stock_dividend_history` 無英股資料（抓取端未實作），且無法自動辨別累積型（`CSPX.L`，價已內含息）與配息型（`VUSA.L`，價不含息）→ 不臆測，含息模式一律採原始價序列並標 `priceOnly`（顯示「價格報酬」），避免把配息型英股當含息而低估、誤標。
   - **台股／美股查無股利資料者**（資料缺口或本就不配息，如 `AMZN`）：含息模式退化為價格報酬，該 series 標 `priceOnly`，摘要／圖例顯示「價格報酬」小標籤，不誤植 0 息。
+  - **例外——已查證累積型台股 ETF**（`PerformanceComparisonBffController.ACCUMULATING_TW_ETFS` 白名單，現含 `00646` 元大S&P500、`006205` 富邦上證180、`00642`/`00642U` 期元大S&P石油、`00865B` 國泰US短期公債）：這些 ETF 收益不發現金、直接累積於淨值（收盤價），故**價格報酬 ≡ 含息報酬**。已查證 FinMind `TaiwanStockDividend`／`TaiwanStockDividendResult` 兩表與 Yahoo `events=div` 皆確認其「本就不配息」（非資料缺口，故無股利可補、亦不得捏造寫入 `stock_dividend_history`）。含息模式下雖查無股利，仍以原始收盤價視為已含息、標 `priceOnly=false`（比照英股累積型 UCITS ETF），**不顯示「價格報酬」小標籤**，避免使用者誤以為報酬被低估。此白名單僅供標籤判斷、由代碼層維護（比照英股 ETF 白名單、`ALLOWED_BENCHMARKS`），新增累積型標的時擴充；非白名單者維持保守標示。
 - [ ] **指數含息（能含息的就含息）**：大盤基準含息模式的口徑：
   - **TWSE（台股大盤）**：改讀「發行量加權股價報酬指數」。資料來源 TWSE RWD `afterTrading/MI_INDEX?date=YYYYMMDD&type=IND` 之「報酬指數(臺灣證券交易所)」表列，落庫至 `twse_index_daily_history.close_point_tr`（新欄位），涵蓋約 10 年逐交易日（一次性回補＋每日增量補近 14 日缺口）。含息模式**只用 `closePointTr`**（null 列略過、由前值 forward-fill，**禁止退回價格指數 `closePoint` 混量級**——兩者差約 1.6 倍會造成台階跳空）；TR 覆蓋率 < 90%（尚未回補完成）→ 整段退回價格指數並標 `priceOnly`。價格指數回補（`refreshTwseDaily`）須保留既有 `close_point_tr`，不得覆寫成 null。
   - **SPX（標普500）**：改讀 Yahoo `^SP500TR`（S&P 500 Total Return），比照既有 `fetchUsIndexDaily`（`range=10y` 一次抓）落庫至 `us_index_daily_history`（`indexCode='SP500TR'`）。含息模式讀該序列。

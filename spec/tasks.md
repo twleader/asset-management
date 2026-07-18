@@ -4244,6 +4244,7 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - **口徑對稱**：股票含息時，指數盡量也含息，避免「股票總報酬 vs 大盤價格報酬」失真；無法含息者（DJI/IXIC/SOX、個股無股利資料）以價格報酬降級並回 `priceOnly` 供前端標示。
 - **個股含息＝股利再投入（BFF 算）**：`shares` 起始 1，除息日 `shares *= (1+stockDividend/10) + cashDividend/close(d)`；`tr(t)=shares(t)*close(t)` 再套既有 `pct()` 正規化。禁存衍生值、計算集中 BFF、股利走同一 business API。
 - **英股**：無股利來源但為累積型 UCITS ETF（價已內含配息）→ 直接用原始價、`priceOnly=false`。
+- **累積型台股 ETF（查證後補正標籤）**：`00646`/`006205`/`00642`(00642U)/`00865B` 經 FinMind 兩表＋Yahoo 查證確認「本就不配息」（收益累積於淨值），故價格報酬≡含息報酬。含息模式查無股利時，此白名單（`ACCUMULATING_TW_ETFS`）內標的比照英股標 `priceOnly=false`（不顯示「價格報酬」標籤）；非白名單者維持保守 `priceOnly=true`。無股利可補、不捏造寫入 `stock_dividend_history`。
 - **指數含息資料源**：TWSE RWD `MI_INDEX?type=IND` 之「發行量加權股價報酬指數」落 `twse_index_daily_history.close_point_tr`（新欄，`v1.52.0`）；SPX Yahoo `^SP500TR` 落 `us_index_daily_history(index_code='SP500TR')`（免結構變更）。
 - **純讀股利端點**：新增 `GET /api/market-data/dividends-readonly`（不觸發 cold-cache 寫副作用），供 BFF GET 聚合，避免既有 `/api/market-data/dividends` 的 `@Transactional`＋同步寫。
 
@@ -4257,4 +4258,5 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - [x] 170.6 前端：報酬口徑 `el-radio-group`（含息/純價格，預設含息）＋ `compare(...,dividend)`＋watch；`priceOnly` series 標「價格報酬」`el-tag`；標題/說明含息文案；`api/index.js` `compare` 加參數。
 - [x] 170.7 資料回補：跑 `refresh-tr`（TWSE 報酬指數 ~10 年）＋ `refreshUsIndexDaily("SP500TR")`，驗 DB `close_point_tr`／`SP500TR` 列數與範圍。
 - [x] 170.8 Docker：`--no-cache` 重 build business-services、external-materials-service、bff、build frontend，recreate；端到端驗證（含息 vs 純價格切換、個股再投入 > 純價格、TWSE/SPX 含息線、DJI/IXIC/SOX priceOnly 標示、英股不誤標、無股利個股降級不 500）。
+- [x] 170.10 累積型台股 ETF 標籤補正：BFF `ACCUMULATING_TW_ETFS` 白名單（`00646`/`006205`/`00642`/`00642U`/`00865B`），含息模式查無股利時標 `priceOnly=false`；經 FinMind 兩表＋Yahoo 查證確認四檔本就不配息（無資料可補、不捏造）。重 build bff、recreate，驗四檔含息模式不再顯示「價格報酬」標籤。
 - [ ] 170.9 commit + 兩段式 merge。

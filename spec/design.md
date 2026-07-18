@@ -2125,7 +2125,7 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
 - `benchmarks`＝逗號分隔代碼（trim→**白名單過濾 `{TWSE,DJI,SPX,IXIC,SOX}`**→`limit(5)`）。
 - `range ∈ {1m,3m,6m,1y,2y,5y,10y}`（`1m/3m/6m`→`minusMonths`、其餘→`minusYears`，預設 `1y`）。
 - `dividend`＝`true|false`（預設 `true`＝含息）。`true` 時股票走股利再投入、指數改讀報酬指數（見「含息演算法」）；無法含息者以價格報酬降級並回 `priceOnly:true`。`false` 時全部走原始價格／價格指數（`priceOnly` 一律 false）。
-- 每個 series 多回 `priceOnly`（boolean）：含息模式下該標的實際以價格報酬呈現（DJI/IXIC/SOX 無報酬指數、或台股/美股個股查無股利資料），供前端標「價格報酬」。英股累積型 ETF 以原始價視為已含息，`priceOnly:false`。
+- 每個 series 多回 `priceOnly`（boolean）：含息模式下該標的實際以價格報酬呈現（DJI/IXIC/SOX 無報酬指數、或台股/美股個股查無股利資料），供前端標「價格報酬」。英股累積型 ETF 以原始價視為已含息，`priceOnly:false`。**已查證累積型台股 ETF**（BFF `ACCUMULATING_TW_ETFS` 白名單：`00646`/`006205`/`00642`(00642U)/`00865B`）雖含息模式查無股利，但收益累積於淨值故價=含息，同樣 `priceOnly:false`（不標「價格報酬」）；FinMind 兩表＋Yahoo 已確認四檔本就不配息，無股利可補、不捏造入庫。
 - 全空選取直接回 `{dates:[],series:[]}`，不打下游。
 - 前端 join、後端 split：避開 axios 陣列序列化成 `stocks[]=` 讓 Spring `@RequestParam String` 收不到的坑。
 
