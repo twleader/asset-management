@@ -5186,3 +5186,49 @@ security property，直接 `-D` 讀不到——雙重靜默無效）、改用 JD
       註：BFF 除 `/actuator/health|info` 外全需登入 session，故未以瀏覽器代登入驗證（登入屬使用者本人操作）；
       上述探針即為不觸及帳號的等價驗證。
 - [ ] 208.6 commit ＋ 兩段式 merge。
+
+---
+
+### Task 209：今日交易雷達——不呼叫 AI API 的台股規則式買賣決策輔助（Requirement 43）
+
+**需求對應：** 使用者要求在左側「股市綜合分析」下加入可看台股大盤與指定個股買賣建議的功能，並明確要求不要 call AI API。第一版以「最新持股 ∪ 股票觀察」作為指定標的，純讀既有 PostgreSQL／Redis，不新增外部資料呼叫、不自動下單。
+
+- [ ] 209.1 **spec**：新增 Requirement 43；`design.md` 補請求鏈、owner 隔離、DTO、兩收盤日確認、`TW_RULES_V1`、API／前端與驗證設計；`tasks.md` 本任務；`CLAUDE.md` Requirement 數同步為 43。
+- [ ] 209.2 **規則引擎與 DTO**：新增 `TradingRadarRuleEngine`（純函式、版本 `TW_RULES_V1`）與 `TradingRadarDto`；實作大盤／個股評分、clamp、兩日確認、動作映射、`RISK_OFF` 禁買與 incomplete veto。
+- [ ] 209.3 **business service/API**：新增 `TradingRadarService`／`TradingRadarController`；標的取 owner-scoped 最新持股 ∪ 觀察台股，指標共用 `TechnicalIndicatorService`，報價只讀 `PriceQueryService`，大盤／個股逐檔 graceful，不注入 AI／爬蟲服務。
+- [ ] 209.4 **一頁一 BFF**：新增 `TradingRadarBffRoutes`，rewrite `/api/bff/trading-radar` → `/api/trading-radar`；一般已登入使用者可 GET。
+- [ ] 209.5 **前端**：新增 `TradingRadarView.vue`、`bffApi.tradingRadar`、router `/trading-radar`，並在「股市綜合分析」中加入「今日交易雷達」（位於今日股市分析與股票觀察之間）；完成大盤風險卡、個股決策表、理由／風險展開、空清單與資料不足狀態。
+- [ ] 209.6 **單元測試**：新增 `TradingRadarRuleEngineTest`，覆蓋兩日確認四態、分數 clamp、買進門檻、大盤 `RISK_OFF` veto、held／未持有映射與 incomplete `NO_TRADE`。
+- [ ] 209.7 **建置與部署驗證**：backend tests/package、BFF package、frontend build；重建/recreate business、BFF、frontend 並確認 healthy；驗證實際 payload、選單與畫面，且 `/api/trading-radar` 請求不產生 AI API 呼叫。
+- [x] 209.8 **盤中 SSE 自動更新**：沿用 `/api/market-data/prices/stream`；台股事件先即時更新現價／漲跌幅／行情時間，再以 2 秒 debounce 背景重讀完整雷達以重算 MA／KD／分數／建議；避免重疊重算，離頁關閉 SSE 與 timers，斷線自動重連，不觸發行情 refresh／AI API；完成前端 build、chunk 與執行環境驗證。
+  - 驗證：frontend production build 成功；執行中 `TradingRadarView` chunk 含 SSE path／`price-update`；`/trading-radar`＝200、BFF health＝UP、雷達 API 回 19 檔完整 payload、BFF 部署後連線／500 錯誤＝0。
+- [ ] 209.9 commit ＋兩段式 merge（僅在使用者明確授權 commit／push 後執行）。
+
+---
+
+### Task 210：今日交易雷達——逆勢抄底獨立狀態（Requirement 43 / TW_RULES_V2）
+
+**需求對應：** 使用者要求在原本保守趨勢型分數／主建議之外，額外增加一套逆勢抄底狀態；跌深仍走弱先標「超跌觀察」，出現低檔黃金交叉且停止續跌才升級「逆勢試單候選」，不得把逆勢訊號偽裝成原規則買進建議。
+
+- [x] 210.1 **spec／版本契約**：Requirement 43 與 design 補 `TW_RULES_V2`、兩軌狀態、精確門檻、前一期 KD 權威來源、DTO／前端／風險文案與驗證；V1 score/action 行為保持不變。
+- [x] 210.2 **KD 與純規則引擎**：`TechnicalIndicatorService.FullIndicators` 增 `previousK/previousD`；`TradingRadarRuleEngine` 增 `CounterTrendState/Result`，實作 `NONE`／`OVERSOLD_WATCH`／`TRIAL_CANDIDATE`，不得覆寫 score/action，`RISK_OFF` 加逆勢風險提示。
+- [x] 210.3 **DTO／service**：`StockDecision` 回傳 counter-trend state／label／reasons／risks；完整與 incomplete mapping 一致，無 DB migration、無外部行情或 AI 呼叫。
+- [x] 210.4 **前端**：交易雷達新增獨立「逆勢抄底」欄與展開理由／風險；SSE 背景重算後同步更新新狀態；原「規則建議」、分數與手動重新整理保留。
+- [x] 210.5 **測試與部署**：補 009804 型超跌觀察、真／假黃金交叉、仍續跌、年線失守與 incomplete 測試；backend target test/package、BFF package、frontend build；重建 business/BFF/frontend，確認 V2 payload、頁面 chunk 與健康狀態。
+  - 驗證：規則／通知純函式測試通過；三層 production build 成功；live `TW_RULES_V2` payload 中 009804 維持 score=17、action=`EXIT_CANDIDATE`，另回 `OVERSOLD_WATCH`；business/BFF healthy、頁面 200、bundle 含逆勢欄與 SSE。
+- [ ] 210.6 commit ＋兩段式 merge（僅在使用者明確授權 commit／push 後執行）。
+
+---
+
+### Task 211：每檔交易雷達狀態 Email 通知（Requirement 44）
+
+**需求對應：** 使用者要求每檔股票後方提供按鈕，可選擇哪些交易雷達狀態出現時寄 Email，並指定收件人；通知須在背景價格事件運作，不依賴頁面開啟，且不得重複轟炸或跨租戶寄信。
+
+- [x] 211.1 **spec／契約**：新增 Requirement 44；design 定義狀態選項、逐檔 dialog、正規化三表、owner 隔離、首次 baseline、狀態轉入語意、價格事件合併、per-recipient digest、API/BFF 與驗證；`CLAUDE.md` Requirement 數同步為 44。
+- [x] 211.2 **schema／entity／repository**：新增 v1.63 Liquibase；實作 setting/state/recipient join entities 與 owner-safe repositories，含 unique/FK/index 與 active email 同 owner 查詢。
+- [x] 211.3 **設定 API**：實作 DTO、owner-scoped GET/PUT、狀態 code 驗證、recipient 白名單與 bulk replace；擴充 TradingRadarController／BFF／frontend API。
+- [x] 211.4 **背景偵測與 Email**：PriceStreamService 接入 2 秒合併評估；0000 更新全評估，個股只評該檔；explicit owner latest snapshot 判斷 held；共用 V2 決策、baseline／transition 去重與 per-recipient HTML digest，錯誤 fail-soft。
+- [x] 211.5 **前端**：每列最右新增「通知設定」按鈕與逐檔 dialog；分組勾選主狀態／逆勢狀態、收件人、active，顯示首次 baseline／不重寄說明與無收件人引導。
+- [x] 211.6 **測試與部署**：覆蓋狀態轉入去重、再進入、未選／inactive、收件人 owner 防護與 held mapping；backend target test/package、BFF package、frontend build；重建 business/BFF/frontend，確認 migration、V2 payload、notification API、bundle、health 與 logs。
+  - 驗證：通知 transition／held mapping 與雷達規則測試合計 15/15；三層 production build 成功。v1.63 changeset EXECUTED、三表存在；通知 GET 回 10 個主狀態／2 個逆勢狀態；兩位使用者只見各自收件人，跨 owner recipient PUT 回 400 且 setting 留存 0 筆；頁面 200、business/BFF healthy、bundle 含逐檔按鈕／dialog／notification endpoint，近 5 分鐘無 error／500／connection refused。
+- [ ] 211.7 commit ＋兩段式 merge（僅在使用者明確授權 commit／push 後執行）。

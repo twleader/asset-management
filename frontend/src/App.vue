@@ -244,6 +244,7 @@ const mainMenuItems = computed(() => [
       { path: '/gdp-twse', title: '股市大盤查詢', icon: 'TrendCharts' },
       { path: '/performance-comparison', title: '績效比較', icon: 'Histogram' },
       { path: '/today-market-analysis', title: '今日股市分析', icon: 'Sunrise' },
+      { path: '/trading-radar', title: '今日交易雷達', icon: 'Aim' },
       { path: '/stocks', title: '股票觀察', icon: 'View' }
     ]
   },

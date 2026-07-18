@@ -232,6 +232,15 @@ export const bffApi = {
       api.patch(`/bff/today-market-analysis/send-times/${id}/active`)
   },
 
+  // TradingRadar（今日交易雷達，Requirement 43）：純本地規則，零 AI API
+  tradingRadar: {
+    get: () => api.get('/bff/trading-radar'),
+    getNotification: (stockCode, market) =>
+      api.get(`/bff/trading-radar/notifications/${encodeURIComponent(stockCode)}`, { params: { market } }),
+    updateNotification: (stockCode, market, payload) =>
+      api.put(`/bff/trading-radar/notifications/${encodeURIComponent(stockCode)}`, payload, { params: { market } })
+  },
+
   // AssetAllocationAdvice（資產配置建議，Requirement 32）
   portfolioAdvice: {
     // 一次聚合：{ latest, history, profile, settings, currentAllocation, projection }

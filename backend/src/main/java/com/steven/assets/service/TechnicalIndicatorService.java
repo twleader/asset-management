@@ -34,14 +34,21 @@ public class TechnicalIndicatorService {
         return "0000".equals(code) && "台股".equals(market);
     }
 
-    /** 完整 5 指標：警示觸發紀錄、觀察清單列皆使用 */
+    /** 完整指標：MA20／60／240、當期 KD 與前一期 KD。 */
     public record FullIndicators(
             BigDecimal monthlyMa,
             BigDecimal quarterlyMa,
             BigDecimal annualMa,
             BigDecimal k,
-            BigDecimal d) {
-        public static final FullIndicators EMPTY = new FullIndicators(null, null, null, null, null);
+            BigDecimal d,
+            BigDecimal previousK,
+            BigDecimal previousD) {
+        public static final FullIndicators EMPTY = new FullIndicators(
+                null, null, null, null, null, null, null);
+    }
+
+    private record KdValues(BigDecimal k, BigDecimal d) {
+        private static final KdValues EMPTY = new KdValues(null, null);
     }
 
     /**
@@ -79,26 +86,14 @@ public class TechnicalIndicatorService {
             BigDecimal ma60  = simpleMa(series, 60);
             BigDecimal ma240 = simpleMa(series, 240);
 
-            BigDecimal kVal = null, dVal = null;
-            if (series.size() >= 9) {
-                List<StockPriceHistory> asc = new ArrayList<>(series).reversed();
-                double k = 50, d = 50;
-                int period = 9;
-                for (int i = period - 1; i < asc.size(); i++) {
-                    List<StockPriceHistory> window = asc.subList(i - period + 1, i + 1);
-                    double highest = window.stream().mapToDouble(h -> h.getHighPrice() != null
-                            ? h.getHighPrice().doubleValue() : h.getClosePrice().doubleValue()).max().orElse(0);
-                    double lowest  = window.stream().mapToDouble(h -> h.getLowPrice() != null
-                            ? h.getLowPrice().doubleValue() : h.getClosePrice().doubleValue()).min().orElse(0);
-                    double rsv = (highest == lowest) ? 50
-                            : (asc.get(i).getClosePrice().doubleValue() - lowest) / (highest - lowest) * 100;
-                    k = k * 2.0 / 3 + rsv / 3.0;
-                    d = d * 2.0 / 3 + k  / 3.0;
-                }
-                kVal = BigDecimal.valueOf(k).setScale(2, RoundingMode.HALF_UP);
-                dVal = BigDecimal.valueOf(d).setScale(2, RoundingMode.HALF_UP);
-            }
-            return new FullIndicators(ma20, ma60, ma240, kVal, dVal);
+            KdValues currentKd = stockKd(series);
+            KdValues previousKd = series.size() > 1
+                    ? stockKd(series.subList(1, series.size()))
+                    : KdValues.EMPTY;
+            return new FullIndicators(
+                    ma20, ma60, ma240,
+                    currentKd.k(), currentKd.d(),
+                    previousKd.k(), previousKd.d());
         } catch (Exception e) {
             log.warn("compute indicators failed for {} {}", stockCode, market, e);
             return FullIndicators.EMPTY;
@@ -111,6 +106,28 @@ public class TechnicalIndicatorService {
         double sum = 0;
         for (int i = 0; i < days; i++) sum += series.get(i).getClosePrice().doubleValue();
         return BigDecimal.valueOf(sum / days).setScale(2, RoundingMode.HALF_UP);
+    }
+
+    /** 與既有 KD9 完全同式；desc 最新在前，回傳該序列最後一期 K/D。 */
+    private static KdValues stockKd(List<StockPriceHistory> desc) {
+        if (desc.size() < 9) return KdValues.EMPTY;
+        List<StockPriceHistory> asc = new ArrayList<>(desc).reversed();
+        double k = 50, d = 50;
+        int period = 9;
+        for (int i = period - 1; i < asc.size(); i++) {
+            List<StockPriceHistory> window = asc.subList(i - period + 1, i + 1);
+            double highest = window.stream().mapToDouble(h -> h.getHighPrice() != null
+                    ? h.getHighPrice().doubleValue() : h.getClosePrice().doubleValue()).max().orElse(0);
+            double lowest = window.stream().mapToDouble(h -> h.getLowPrice() != null
+                    ? h.getLowPrice().doubleValue() : h.getClosePrice().doubleValue()).min().orElse(0);
+            double rsv = (highest == lowest) ? 50
+                    : (asc.get(i).getClosePrice().doubleValue() - lowest) / (highest - lowest) * 100;
+            k = k * 2.0 / 3 + rsv / 3.0;
+            d = d * 2.0 / 3 + k / 3.0;
+        }
+        return new KdValues(
+                BigDecimal.valueOf(k).setScale(2, RoundingMode.HALF_UP),
+                BigDecimal.valueOf(d).setScale(2, RoundingMode.HALF_UP));
     }
 
     /**
@@ -126,26 +143,14 @@ public class TechnicalIndicatorService {
             BigDecimal ma60  = taiexSimpleMa(desc, 60);
             BigDecimal ma240 = taiexSimpleMa(desc, 240);
 
-            BigDecimal kVal = null, dVal = null;
-            if (desc.size() >= 9) {
-                List<TwseIndexDailyHistory> asc = new ArrayList<>(desc).reversed();
-                double k = 50, d = 50;
-                int period = 9;
-                for (int i = period - 1; i < asc.size(); i++) {
-                    List<TwseIndexDailyHistory> window = asc.subList(i - period + 1, i + 1);
-                    double highest = window.stream().mapToDouble(h -> h.getHighPoint() != null
-                            ? h.getHighPoint().doubleValue() : h.getClosePoint().doubleValue()).max().orElse(0);
-                    double lowest  = window.stream().mapToDouble(h -> h.getLowPoint() != null
-                            ? h.getLowPoint().doubleValue() : h.getClosePoint().doubleValue()).min().orElse(0);
-                    double close = asc.get(i).getClosePoint().doubleValue();
-                    double rsv = (highest == lowest) ? 50 : (close - lowest) / (highest - lowest) * 100;
-                    k = k * 2.0 / 3 + rsv / 3.0;
-                    d = d * 2.0 / 3 + k  / 3.0;
-                }
-                kVal = BigDecimal.valueOf(k).setScale(2, RoundingMode.HALF_UP);
-                dVal = BigDecimal.valueOf(d).setScale(2, RoundingMode.HALF_UP);
-            }
-            return new FullIndicators(ma20, ma60, ma240, kVal, dVal);
+            KdValues currentKd = taiexKd(desc);
+            KdValues previousKd = desc.size() > 1
+                    ? taiexKd(desc.subList(1, desc.size()))
+                    : KdValues.EMPTY;
+            return new FullIndicators(
+                    ma20, ma60, ma240,
+                    currentKd.k(), currentKd.d(),
+                    previousKd.k(), previousKd.d());
         } catch (Exception e) {
             log.warn("compute TAIEX indicators failed", e);
             return FullIndicators.EMPTY;
@@ -157,5 +162,26 @@ public class TechnicalIndicatorService {
         double sum = 0;
         for (int i = 0; i < days; i++) sum += desc.get(i).getClosePoint().doubleValue();
         return BigDecimal.valueOf(sum / days).setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private static KdValues taiexKd(List<TwseIndexDailyHistory> desc) {
+        if (desc.size() < 9) return KdValues.EMPTY;
+        List<TwseIndexDailyHistory> asc = new ArrayList<>(desc).reversed();
+        double k = 50, d = 50;
+        int period = 9;
+        for (int i = period - 1; i < asc.size(); i++) {
+            List<TwseIndexDailyHistory> window = asc.subList(i - period + 1, i + 1);
+            double highest = window.stream().mapToDouble(h -> h.getHighPoint() != null
+                    ? h.getHighPoint().doubleValue() : h.getClosePoint().doubleValue()).max().orElse(0);
+            double lowest = window.stream().mapToDouble(h -> h.getLowPoint() != null
+                    ? h.getLowPoint().doubleValue() : h.getClosePoint().doubleValue()).min().orElse(0);
+            double close = asc.get(i).getClosePoint().doubleValue();
+            double rsv = (highest == lowest) ? 50 : (close - lowest) / (highest - lowest) * 100;
+            k = k * 2.0 / 3 + rsv / 3.0;
+            d = d * 2.0 / 3 + k / 3.0;
+        }
+        return new KdValues(
+                BigDecimal.valueOf(k).setScale(2, RoundingMode.HALF_UP),
+                BigDecimal.valueOf(d).setScale(2, RoundingMode.HALF_UP));
     }
 }

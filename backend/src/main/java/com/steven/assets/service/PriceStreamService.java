@@ -15,6 +15,7 @@ import reactor.core.publisher.Sinks;
  * - 來源：RedisSubscriberConfig 訂閱 Redis channel `price-update`，每收到一筆呼叫 {@link #onPriceUpdate}
  * - 出口 1：MarketDataController 的 SSE endpoint 透過 {@link #stream()} 廣播給所有 EventSource client
  * - 出口 2：交給 StockAlertService 即時檢查該檔股票的警示條件
+ * - 出口 3：合併後評估交易雷達逐檔狀態 Email 通知
  */
 @Slf4j
 @Service
@@ -25,6 +26,9 @@ public class PriceStreamService {
     @Autowired
     @Lazy
     private StockAlertService stockAlertService;
+    @Autowired
+    @Lazy
+    private TradingRadarNotificationService tradingRadarNotificationService;
 
     private final Sinks.Many<String> sink =
             Sinks.many().multicast().onBackpressureBuffer(256, false);
@@ -41,6 +45,7 @@ public class PriceStreamService {
             String market = n.path("market").asText(null);
             if (code != null && market != null) {
                 stockAlertService.checkAlertsFor(code, market);
+                tradingRadarNotificationService.queueEvaluation(code, market);
             }
         } catch (Exception e) {
             log.debug("alert dispatch on price-update 失敗: {}", e.getMessage());
