@@ -3085,3 +3085,138 @@ run-now 不動當日 guard——全部同 R41，不重述。
 - `frontend/src/api/index.js`：`exchangeRate` 命名空間新增 5 支
 - `frontend/src/views/ExchangeRateView.vue`：新增「匯出 Excel」按鈕＋匯出對話框＋「排程自動匯出」設定卡＋資料夾選擇器
 - `SchedulePublicBffController.java`：`JOBS` 補「台幣兌美元匯出 每日匯出排程檢查」項目
+
+---
+
+## Requirement 43：今日交易雷達（純本地規則、零 AI API）
+
+### 架構與請求鏈
+
+```text
+TradingRadarView
+  → GET /api/bff/trading-radar
+  → TradingRadarBffRoutes（純 rewrite）
+  → GET /api/trading-radar
+  → TradingRadarService
+       ├─ TwseIndexDailyHistoryRepository（大盤完成日 K）
+       ├─ TechnicalIndicatorService（MA20／60／240、KD，同義指標權威）
+       ├─ AssetSnapshotRepository.findLatestWithStocks（當前持股，owner-scoped）
+       ├─ StockAlertRepository.findDistinctStockCodeMarket（觀察，owner-scoped）
+       ├─ PriceQueryService（只讀 Redis；miss → stock_price_history）
+       └─ TradingRadarRuleEngine（TW_RULES_V2，純函式規則）
+```
+
+本請求鏈**刻意不注入** `MarketAnalysisService`、LLM SDK、新聞爬蟲或任何 refresh endpoint。頁面按「重新整理」只重讀既有資料，不對外抓行情、不送出 Batch、不產生 AI 費用。現有行情／大盤排程若在背景更新 PostgreSQL 或 Redis，雷達下次讀取自然看見新值；兩者生命週期分離。
+
+### 標的選取與 owner 隔離
+
+`TradingRadarService.loadTargets()` 取最新快照 `findLatestWithStocks()` 中 `shares > 0` 的台股，再 union `stock_alert` 衍生觀察清單中的台股，key 為 `code + '\0' + market`，保留穩定順序並排除 `0000/台股`。最新快照 root `AssetSnapshot` 與觀察 root `StockAlert` 均帶 `@Filter(ownerFilter)`，由既有 `TenantFilterAspect` 依 BFF 傳入的 `X-User-Id` 啟用；不可改為直接由無 filter 的 `StockHoldingRepository` 全表查詢。美／英股不進規則引擎，只累加 `skippedNonTwStocks` 供前端說明。
+
+### 資料模型（不入庫）
+
+新增 `TradingRadarDto` 純 response records：
+
+- `Response`：`ruleVersion`、`generatedAt`、`market`、`stocks`、`skippedNonTwStocks`。
+- `MarketSummary`：`regime`、`regimeLabel`、`score`、`dataComplete`、`asOfDate`、點位／漲跌幅、MA20／60／240、K／D、MA60／240 兩日確認、`reasons`、`risks`。
+- `StockDecision`：code／name／market、`held`、`action`／`actionLabel`、`score`、`counterTrendState`／`counterTrendLabel`、`counterTrendReasons`／`counterTrendRisks`、`dataComplete`、報價／漲跌幅／更新時間／`asOfDate`、MA20／60／240、K／D、MA20／60／240 兩日確認、`reasons`、`risks`。
+
+無新 entity／table／migration；分數與建議皆為可重算的衍生值，不持久化，符合正規化原則。
+
+### 兩收盤日確認
+
+`TradingRadarRuleEngine.confirm(closesDesc, period)` 至少需要 `period + 1` 根完成收盤：
+
+- 最新日 SMA＝`close[0..period-1]` 平均；前一日 SMA＝`close[1..period]` 平均。
+- 最新、前一收盤皆嚴格大於各自 SMA → `ABOVE`。
+- 最新、前一收盤皆嚴格小於各自 SMA → `BELOW`。
+- 一上一下或等於均線 → `MIXED`；資料不足 → `UNAVAILABLE`。
+
+最新價相對均線的分數仍使用 `TechnicalIndicatorService.computeAll()` 回傳的當前指標；若 Redis 有盤中價，該服務既有行為會把盤中價合入當前 MA。兩日確認只讀完成日 K，避免盤中假突破被當成正式確認。
+
+### 規則引擎 `TW_RULES_V2`
+
+大盤與個股的權重、clamp、regime 門檻及主動作映射以 Requirement 43 Acceptance Criteria 為唯一契約；V2 完整保留 V1 的 score/action 結果，只新增獨立 counter-trend state。`TradingRadarRuleEngine` 不碰 repository／網路／時間，輸入皆為數值與確認狀態，輸出 score/action/counterTrend/reasons/risks，確保單元測試可重現。大盤 `DATA_INCOMPLETE` 為全域 veto；個股資料不足則只 veto 該檔。`RISK_OFF` 是主建議買進閘門：即使個股高分也不可回 `BUY_CANDIDATE`／`ADD_CANDIDATE`，但不抹掉獨立的逆勢觀察狀態。
+
+### 逆勢抄底狀態（獨立第二軌）
+
+`CounterTrendState` 為 `NONE`／`OVERSOLD_WATCH`／`TRIAL_CANDIDATE`。`evaluateCounterTrend(StockInput)` 只在個股完整資料通過後執行，不對原分數加減分，也不覆寫主 `Action`：
+
+1. 長期結構仍在：`price > MA240` 且 `ma240Confirmation=ABOVE`。
+2. 短中期已明確回檔：`ma20Confirmation=BELOW` 且 `ma60Confirmation=BELOW`。
+3. `K<20`：符合 1–3 即 `OVERSOLD_WATCH`，代表跌深但尚非買點。
+4. 升級 `TRIAL_CANDIDATE`：另須 `D<20`、`previousK<=previousD && K>D`，以及 `changePercent>=0`。因此只用當期 `K>D` 不足以冒充黃金交叉，仍下跌也不升級試單。
+
+`TechnicalIndicatorService.FullIndicators` 增加 `previousK`／`previousD`：與當期 KD 使用完全相同的 KD9 遞迴；當期序列計算後，再排除最新一根（盤中 live 或最新完成日 K）計算前一期，資料不足回 null。`TradingRadarService` 將兩值只傳入純規則 `StockInput`，不新增 DB 欄位。`RISK_OFF` 時 counter-trend state 仍可產生，但 `counterTrendRisks` 必含小額分批、主建議優先；這是資訊狀態，不是自動下單授權。
+
+### API 與前端
+
+| 層 | 端點 | 說明 |
+|---|---|---|
+| business | `GET /api/trading-radar` | 組裝大盤＋當前使用者台股決策；純讀、graceful per-stock |
+| BFF | `GET /api/bff/trading-radar` | `TradingRadarBffRoutes` rewrite 至 business；一頁一 BFF |
+
+前端新增 `TradingRadarView.vue`：上方大盤 regime 卡（RISK_ON 紅、RISK_OFF 綠、NEUTRAL 灰、DATA_INCOMPLETE 黃；台股配色）、規則版本／資料日／重新整理；下方卡片表格依主動作顯示 tag，另有「逆勢抄底」獨立欄位（`NONE` 顯示 `—`、超跌觀察為 warning、逆勢試單候選為 danger），展開列呈現三條均線確認、主規則理由／風險及逆勢狀態自己的理由／風險。`api/index.js` 新增 `bffApi.tradingRadar.get()`；router 新增 `/trading-radar`；`App.vue` 於「股市綜合分析」加入「今日交易雷達」。
+
+盤中更新沿用儀表板既有 SSE `/api/market-data/prices/stream`，不另建 endpoint。`price-update` 只處理 `market=台股` 且已存在於目前雷達清單的代號：事件抵達時以 immutable row replacement 立即覆蓋 `price`／`changePercent`／`priceUpdatedAt`；同一批事件以 2 秒 trailing debounce 合併，再以不顯示 loading 的 `bffApi.tradingRadar.get()` 重讀完整 response，讓 MA、KD、score、action、reasons、risks 與最新 Redis 價格一致。背景重算若仍在執行，新事件只標記 pending，完成後再合併補算，避免重疊請求。此流程只讀既有 Redis／PostgreSQL，不呼叫 `/prices/refresh`。
+
+生命週期與儀表板一致：mount 初始載入完成後建立 `EventSource`；一般網路中斷交由瀏覽器自動 reconnect，若連線進入 `CLOSED` 則 5 秒後重建；unmount 設定 disposed 並關閉 stream、清除 reconnect／recalculate timers，避免離頁後重開連線或更新已卸載狀態。手動重新整理仍可隨時重讀完整雷達。
+
+### 驗證重點
+
+- `TradingRadarRuleEngineTest`：確認 period+1 邊界、ABOVE／BELOW／MIXED／UNAVAILABLE、分數上下界、買進門檻與 `RISK_OFF` veto、held action mapping、incomplete veto。
+- `TradingRadarRuleEngineTest` V2：以 009804 型輸入確認主分數／出場候選不變但 counter-trend=`OVERSOLD_WATCH`；確認只有真實低檔黃金交叉＋停止續跌才是 `TRIAL_CANDIDATE`，未交叉、仍下跌、年線失守、資料不足皆不可誤判。
+- 前端正式建置後確認 `TradingRadarView` chunk 含 `/api/market-data/prices/stream` 與 `price-update`；執行環境確認 SSE endpoint 可建立 `text/event-stream` 回應，且離頁清理與背景重算不觸發 refresh endpoint。
+- 建置：backend test/package、BFF package、frontend build。
+- 執行環境：重建 business／BFF／frontend 後確認 health；以已登入頁面或帶有效 user header 的容器內診斷確認 payload owner-scoped。檢查 business log 與程式依賴，證明 `/api/trading-radar` request 不進 `MarketAnalysisService`、不產生 Anthropic batch。
+
+---
+
+## Requirement 44：每檔交易雷達狀態 Email 通知
+
+### 使用者流程與 API
+
+`TradingRadarView` 表格最右側的「通知設定」按鈕開啟逐檔 dialog。GET
+`/api/bff/trading-radar/notifications/{stockCode}?market=台股` 一次聚合設定、主動作／逆勢狀態 options，以及與通知設定頁同源的 `notification_recipient`；PUT 同一路徑覆寫 `active`、`actionStates`、`counterTrendStates`、`recipientIds`。BFF 沿用 `TradingRadarBffRoutes` rewrite 到 business，不在 BFF 儲存或計算。
+
+主動作選項涵蓋 `TradingRadarRuleEngine.Action` 全部 10 態；逆勢只提供 `OVERSOLD_WATCH`、`TRIAL_CANDIDATE`，不提供無訊號的 `NONE`。選項 label 由 backend 與雷達主 response 共用 label mapper 回傳，避免 dialog 與 Email 文案各自漂移。active 設定至少需一個狀態與一位收件人；inactive 可保存空選項。
+
+### 正規化資料模型
+
+```text
+AppUser (1) ──< TradingRadarNotificationSetting >── Stock(code, market)
+                       │
+                       ├──< TradingRadarNotificationState
+                       │      UNIQUE(setting_id, state_type, state_code)
+                       └──< TradingRadarNotificationRecipient >── NotificationRecipient
+                              UNIQUE(setting_id, recipient_id)
+```
+
+- `trading_radar_notification_setting`：`id`、`owner_user_id`、`stock_code`、`market`、`active`、`initialized`、`last_action`、`last_counter_trend_state`、timestamps；`UNIQUE(owner_user_id, stock_code, market)`，entity 套 `ownerFilter`。
+- `trading_radar_notification_state`：`setting_id`、`state_type`（`ACTION`／`COUNTER_TREND`）、`state_code`；狀態是規則版本契約，不冗存 label。
+- `trading_radar_notification_recipient`：`setting_id`、`recipient_id`，兩端 FK cascade；不冗存 email。
+
+設定 PUT 先以 owner-filtered `NotificationRecipientRepository.findByIdIn()` 取得合法收件人白名單，再以 bulk delete + insert 覆寫兩個 join；setting by-id／by-stock 仍以 `TenantGuard` 與 owner filter 雙重保護。背景取 email 時 join setting 與 recipient 並強制兩者 `owner_user_id` 相同、recipient `active=true`，避免 HTTP filter 不存在時的跨租戶殘列風險。
+
+### 狀態轉入偵測與寄信
+
+```text
+Redis price-update
+  → PriceStreamService（原 SSE + StockAlert 不變）
+  → TradingRadarNotificationService.queueEvaluation(code, market)
+  → 2 秒合併同輪股票
+     ├─ 個股：只取該 code/market active settings
+     └─ 0000/台股：取全部 active 台股 settings
+  → explicit owner latest snapshot 判斷 held
+  → TradingRadarService.evaluateForNotification() 共用 TW_RULES_V2
+  → 比對 persisted last_action / last_counter_trend_state
+  → TradingRadarNotificationDispatcher（短批次 per-recipient digest）
+  → EmailService.sendHtml([single email], ...)
+```
+
+setting `initialized=false` 時，第一次評估只寫入目前 action／counter-trend 作 baseline，不 enqueue。其後，只有「目前值與 last 不同」且新值存在 selected state join 時才 enqueue；評估後無論是否選中都更新 last，使「離開 → 再進入」可重新觸發、持續同態不重寄。PUT（含收件人、狀態、active 修改）一律把 `initialized=false`，避免儲存當下狀態立即寄信。
+
+背景沒有 request context，held 必須以 `AssetSnapshotRepository.findFirstByOwnerUserIdOrderBySnapshotDateDesc(ownerId)` 顯式 owner 條件取得，並在 transaction 內檢查最新快照 `stocks`；不可用無 owner 的 `findLatestWithStocks()`。`TradingRadarService.evaluateForNotification(code, market, held)` 只抽取既有 buildMarket/buildStock 組裝，不查 owner 資料、不改分數。dispatcher 按 active recipient 反轉分組，每位收件人各一封；SMTP disabled／無收件人／例外皆 fail-soft。此鏈不依賴頁面 EventSource 是否存在，也不呼叫外部 refresh 或 AI。
+
+### 前端
+
+操作欄固定在最右側，按鈕開 dialog 後才讀設定，避免雷達初始 GET 為每列增加 N+1。dialog 用兩組 checkbox 顯示主規則狀態與逆勢狀態，另用 recipient checkbox 顯示 email／停用註記；無收件人時提供前往 `/settings/notifications` 的入口。文案明示「第一次只建立基準；只在之後進入所選狀態時寄一次，同狀態持續不重寄」。儲存成功關閉 dialog，不觸發行情 refresh。
