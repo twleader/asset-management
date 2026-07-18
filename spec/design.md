@@ -2461,6 +2461,15 @@ GET  /api/bff/asset-history/export                    → GET  /api/snapshots/ex
 - **月／季／年線與 KD**：`ExcelExportService` 注入既有共用權威 `TechnicalIndicatorService`，逐 `(code, market)` 呼叫 `computeAll()` 取 `FullIndicators{monthlyMa, quarterlyMa, annualMa, k, d}`（資料源 `stock_price_history` 近 240 筆；與觀察清單／警示同一計算，符合「同義欄位同一 business service」）。以 `Map<code|market, FullIndicators>` 於單次匯出內快取，同股多券商列僅計算一次。KD 併為單一「KD值」欄字串 `K {k} / D {d}`（k/d 皆為 `computeAll` 已 scale 2 位之 BigDecimal，任一為 null 以 `—` 佔位）。
 - **儲存格樣式**：昨收沿用即時價 `num4`；漲跌／漲跌幅／月線／季線／年線用新增 `num2`（`#,##0.00`）；KD值為純字串。查無即時報價或歷史不足者相應欄留白（`cell()` 遇 null 不寫值）。此增列同時作用於 run-now（`exportLiveAssets`）與排程（`exportLiveAssetsForOwner`），皆共用 `writeLiveAssetsSheet`。
 
+### 資產總覽活頁簿改為「總表 ＋ 每檔持股一張過去一年股價分頁」（Task 206）
+
+- **活頁簿結構**：`buildLiveWorkbook()` 在既有 `writeLiveAssetsSheet`（第一張「當前即時資產」）之後追加 `writeStockPriceHistorySheets(wb, st, latest)`，逐檔產生一張股價分頁。run-now 與每日排程共用同一 `buildLiveWorkbook()`，故兩條路徑內容一致；`exportFull()`（歷年多快照活頁簿）不受影響。
+- **持股清單與去重**：來源為第一張分頁**同一個** `AssetSnapshot latest`（同一交易內 lazy load，不另查）；以 `LinkedHashSet<code|market>` 去重並保留總表順序，同檔多券商只出一張。`latest == null`（尚無快照）時不產生任何股價分頁。
+- **資料查詢**：`StockPriceHistoryRepository.findByStockCodeAndMarketAndTradingDateBetweenOrderByTradingDateAsc(code, market, today.minusYears(1), today)`（`today` 取 `Asia/Taipei`）——沿用既有派生查詢，不新增 repository 方法。`stock_price_history` 為收盤價唯一權威來源（`HistoricalDataService.purgeOldHistory` 保留 10 年），與 `TechnicalIndicatorService` 的 MA/KD 同源，故匯出的收盤價與總表末四欄的技術指標必然自洽；匯出過程零外部行情呼叫。
+- **分頁內容**：第 0 列表頭 `日期／開盤價／最高價／最低價／收盤價／成交量`，其後每交易日一列。日期以 `ISO` 格式寫成**文字**（同油價金價／匯率分頁的既有理由：避免時區位移）；OHLC 用 `num4`、成交量為整數不套小數樣式。開高低與成交量在 DB 可空（`StockPriceHistory` 僅 `close_price NOT NULL`），該格留白不補值。**查無資料仍建立只有表頭的空分頁**，讓「持有但無資料」與「未持有」可區分。
+- **分頁命名（`uniqueStockSheetName`）**：首選 `WorkbookUtil.createSafeSheetName(code)`（收斂 Excel 的 31 字元上限與 `[]:*?/\` 禁用字元）；若已存在同名分頁（不同市場同代號，例如台美同號）則改 `代號_市場`；仍衝突再加 `_2`、`_3`… 數字後綴，比照 `writeSnapshotSheet` 的既有處理。第一張「當前即時資產」為中文名，與代號不可能撞名。
+- **規模**：以目前約 43 筆持股（去重後約 35 檔）× 一年約 250 個交易日估算，約 9 千列、單檔數百 KB，遠低於 xlsx 上限；查詢為每檔一次帶 `(stock_code, trading_date)` 索引的區間掃描。
+
 ---
 
 ## Requirement 37（Task 189）：交易日曆匯出到指定路徑（JSON／Excel）

@@ -5099,3 +5099,21 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 - [x] 205.5 **`PortfolioAdviceService`**（R33）：`saveProfile()`／`generate()` 兩處 `requireCurrentUserId()` 回 `null` 的分支改拋 `UnauthenticatedException`，訊息不變。
 - [x] 205.6 **建置與部署驗證**：`--no-cache` 重 build business 並 `--force-recreate`；於 business 容器內 curl 不帶 `X-User-*` 打五支 schedule 端點應回 **401**（原 500），帶正常 header 的既有行為（讀寫排程設定）不回歸。
 - [ ] 205.7 commit ＋ 兩段式 merge。
+
+---
+
+### Task 206：資產總覽活頁簿第二張起每檔持股一張「過去一年股價」分頁（Requirement 34）
+
+**需求對應：** Requirement 34 新增 AC「每檔持股各一張『過去一年股價』分頁」。
+
+**背景：** 使用者要求 `資產總覽_{使用者ID}_{YYYYMMDD}.xlsx` 第一張 sheet 維持全部資產總表，第二張起每一支持股一張 sheet、sheet 名稱為股票代號，內容為該股過去一年的股價。此檔由 run-now 與每日排程共用（`buildLiveWorkbook`），且會落到 SRPP 退休規劃專案的輸入目錄，故分頁採「表頭＋逐日一列」的機器可讀表格（不加標題列），與既有油價金價／匯率分頁一致。
+
+**設計要點：** 資料源固定 `stock_price_history`（與技術指標同源，匯出零外部行情呼叫）；持股清單重用第一張分頁的同一個 `AssetSnapshot`，`(code, market)` 去重；查無資料仍出空表頭分頁；分頁名以 `WorkbookUtil.createSafeSheetName` 收斂，撞名補市場／數字後綴。
+
+- [x] 206.1 **spec**：`requirements.md` Requirement 34 增 AC；`design.md` Requirement 34 章新增「資產總覽活頁簿改為『總表 ＋ 每檔持股一張過去一年股價分頁』」設計段；`tasks.md` 本任務。
+- [x] 206.2 **`ExcelExportService` 注入 `StockPriceHistoryRepository`**：與既有 `commodityHistRepo`／`rateHistRepo` 同慣例（建構子注入），不新增 repository 方法（沿用既有 `findByStockCodeAndMarketAndTradingDateBetweenOrderByTradingDateAsc` 派生查詢）。
+- [x] 206.3 **`buildLiveWorkbook()` 追加股價分頁**：`writeLiveAssetsSheet` 之後呼叫 `writeStockPriceHistorySheets(wb, st, latest)`；`latest == null` 時不產生分頁（沿用既有「尚無資產快照」行為）。
+- [x] 206.4 **`writeStockPriceHistorySheets` / `writeStockPriceHistorySheet` / `uniqueStockSheetName`**：去重（`LinkedHashSet<code|market>`，保留總表順序）、區間 `today.minusYears(1) ~ today`（Asia/Taipei）、欄序 `日期／開盤價／最高價／最低價／收盤價／成交量`、日期寫文字、OHLC 用 `num4`、空值留白、空資料出表頭分頁、分頁名撞名補 `_市場`／數字後綴。
+- [x] 206.5 **前端說明文字同步**：`AssetHistoryView.vue` 排程設定卡說明補「第二張起每檔持股一張過去一年股價分頁（sheet 名＝股票代號）」，讓 UI 描述與實際產檔內容一致。
+- [x] 206.6 **建置與部署驗證**：`--no-cache` 重 build business-services（運行 jar 內 `ExcelExportService.class` 確認含 `writeStockPriceHistorySheets`／`uniqueStockSheetName`，非 stale image）＋ `--force-recreate`（healthy）；frontend 亦 `--no-cache` 重 build（bundle `AssetHistoryView-B5cuz12j.js` 含新說明文字）。以 owner 1（X-User header）觸發 run-now 產出 `資產總覽_1_20260718.xlsx`（210,463 bytes），驗證：**22 張分頁＝1 張「當前即時資產」＋21 張股價分頁**，分頁名依序 `0050／VOO／006208／VT／00881／GOOGL／SGOV／009804／0056／00919／00878…` 無重複；持股去重正確（DB 最新快照 43 筆持股 → 21 個 distinct `(code, market)`，與 21 張分頁相符）；表頭 `日期／開盤價／最高價／最低價／收盤價／成交量`；列數合理（`0050`／`009804` 各 243 列＝台股一年交易日、`VOO` 252 列＝美股）；日期區間 `2025-07-18`～`2026-07-17`（今日尚無收盤，正確）；收盤價與 DB 逐筆一致（`0050` 2025-07-18 = 51.45／量 107,920,505、2026-07-17 = 100.15／量 520,545,951，與 `stock_price_history` 完全相同）；無非預期空分頁。
+- [ ] 206.7 commit ＋ 兩段式 merge。

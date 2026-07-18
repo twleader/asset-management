@@ -44,6 +44,8 @@ public class ExcelExportService {
     private final com.steven.assets.repository.CommodityPriceHistoryRepository commodityHistRepo;
     // 台幣兌美元匯率匯出（Task 204）：同為全域公開資料，與頁面曲線同一張表
     private final com.steven.assets.repository.ExchangeRateHistoryRepository rateHistRepo;
+    // 每檔持股「過去一年股價」分頁（Task 206）：收盤價權威來源，與 TechnicalIndicatorService 的 MA/KD 同源
+    private final com.steven.assets.repository.StockPriceHistoryRepository priceHistRepo;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -99,7 +101,10 @@ public class ExcelExportService {
         return buildLiveWorkbook();
     }
 
-    /** 當前即時資產活頁簿：單一「當前即時資產」分頁（股票即時價，存款／基金讀最新快照）。 */
+    /**
+     * 當前即時資產活頁簿：第一張「當前即時資產」總表（股票即時價，存款／基金讀最新快照），
+     * 第二張起每檔持股一張「過去一年股價」分頁（分頁名＝股票代號，Task 206）。
+     */
     private byte[] buildLiveWorkbook() throws IOException {
         try (Workbook wb = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             Styles st = new Styles(wb);
@@ -107,6 +112,7 @@ public class ExcelExportService {
             StockPriceService.LiveAssetsResponse live = stockPriceService.getLiveAssets();
             AssetSnapshot latest = snapshotRepo.findLatest().orElse(null); // deposits/funds 明細於同交易 lazy load
             writeLiveAssetsSheet(wb, st, live, latest);
+            writeStockPriceHistorySheets(wb, st, latest); // 持股清單與總表同一 latest，兩者必然一致
             wb.write(out);
             return out.toByteArray();
         }
@@ -609,6 +615,78 @@ public class ExcelExportService {
         }
 
         for (int i = 0; i < 18; i++) sheet.autoSizeColumn(i);
+    }
+
+    /**
+     * 每檔持股一張「過去一年股價」分頁（Task 206）：分頁名＝股票代號，接在「當前即時資產」總表之後。
+     *
+     * <p>持股清單取自與總表<b>同一個</b> {@code s}（同交易 lazy load，不另查），以 {@code (code|market)} 去重
+     * ——同一檔分散多家券商只出一張分頁——並保留總表由上而下的順序。{@code s} 為 null（尚無快照）時不產生分頁。
+     * owner 隔離沿用外層（HTTP 走 aspect、背景排程走手動 {@code enableFilter}），故只含使用者自己持有的股票。
+     */
+    private void writeStockPriceHistorySheets(Workbook wb, Styles st, AssetSnapshot s) {
+        if (s == null) return;
+        java.time.LocalDate end = java.time.LocalDate.now(TW_ZONE);
+        java.time.LocalDate start = end.minusYears(1);
+        java.util.Set<String> seen = new java.util.LinkedHashSet<>();
+        for (StockHolding sk : s.getStocks()) {
+            String code = sk.getStockCode();
+            if (code == null || code.isBlank()) continue;
+            if (!seen.add(code + "|" + sk.getMarket())) continue; // 同檔多券商只出一張
+            writeStockPriceHistorySheet(wb, st, code, sk.getMarket(), start, end);
+        }
+    }
+
+    /**
+     * 單一個股的「過去一年股價」分頁：表頭 ＋ 逐交易日一列（日期遞增），資料源 {@code stock_price_history}
+     * （收盤價唯一權威來源，與 {@link TechnicalIndicatorService} 的 MA／KD 同源，匯出過程零外部行情呼叫）。
+     *
+     * <p>日期寫成文字（同油價金價／匯率分頁：避免 Excel 依開啟端時區重新詮釋 date cell 而偏移一天）。
+     * 開高低與成交量在 DB 可空（僅 {@code close_price} NOT NULL），該格留白不補值。
+     * <b>區間內查無資料仍建立只有表頭的空分頁</b>，讓「持有但無資料」與「未持有」可區分，不靜默略過。
+     */
+    private void writeStockPriceHistorySheet(Workbook wb, Styles st, String code, String market,
+                                             java.time.LocalDate start, java.time.LocalDate end) {
+        Sheet sheet = wb.createSheet(uniqueStockSheetName(wb, code, market));
+
+        Row h = sheet.createRow(0);
+        cell(h, 0, "日期", st.head);
+        cell(h, 1, "開盤價", st.head);
+        cell(h, 2, "最高價", st.head);
+        cell(h, 3, "最低價", st.head);
+        cell(h, 4, "收盤價", st.head);
+        cell(h, 5, "成交量", st.head);
+
+        int r = 1;
+        for (StockPriceHistory p : priceHistRepo
+                .findByStockCodeAndMarketAndTradingDateBetweenOrderByTradingDateAsc(code, market, start, end)) {
+            Row row = sheet.createRow(r++);
+            cell(row, 0, ISO.format(p.getTradingDate()), null);
+            cell(row, 1, p.getOpenPrice(), st.num4);
+            cell(row, 2, p.getHighPrice(), st.num4);
+            cell(row, 3, p.getLowPrice(), st.num4);
+            cell(row, 4, p.getClosePrice(), st.num4);
+            cell(row, 5, p.getVolume(), null); // 整數股數／張數，不套小數樣式
+        }
+
+        for (int i = 0; i < 6; i++) sheet.autoSizeColumn(i);
+    }
+
+    /**
+     * 股價分頁名稱：首選股票代號，經 {@code createSafeSheetName} 收斂 Excel 限制（31 字元上限、禁 {@code []:*?/\}）。
+     * 不同市場出現同一代號時改 {@code 代號_市場}；仍衝突再加數字後綴（比照 {@link #writeSnapshotSheet}）。
+     */
+    private static String uniqueStockSheetName(Workbook wb, String code, String market) {
+        String base = org.apache.poi.ss.util.WorkbookUtil.createSafeSheetName(code);
+        if (wb.getSheet(base) == null) return base;
+        String withMarket = org.apache.poi.ss.util.WorkbookUtil.createSafeSheetName(code + "_" + market);
+        if (wb.getSheet(withMarket) == null) return withMarket;
+        int suffix = 1;
+        String unique;
+        do {
+            unique = org.apache.poi.ss.util.WorkbookUtil.createSafeSheetName(withMarket + "_" + (++suffix));
+        } while (wb.getSheet(unique) != null);
+        return unique;
     }
 
     /** KD 併為單一「KD值」欄字串 "K {k} / D {d}"；兩者皆 null 回 null（留白），單邊 null 以「—」佔位。 */

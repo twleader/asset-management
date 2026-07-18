@@ -96,6 +96,7 @@
         <code>/Users/steven</code>）。按上方「選擇」開啟檔案總管式選擇器挑選子資料夾；例如選 <code>input</code> →
         主機 <code>/Users/steven/input</code>。每日於指定時間匯出「當前即時資產」為
         <code>資產總覽_{使用者ID}_YYYYMMDD.xlsx</code>（股票以即時股價估值，存款／基金取最新快照）。
+        第一張分頁為全部資產總表，第二張起每檔持股一張過去一年股價分頁（分頁名＝股票代號）。
       </div>
       <div v-if="schedule.lastRunAt || schedule.lastRunStatus" class="schedule-status">
         上次執行：{{ schedule.lastRunAt || '—' }}　{{ schedule.lastRunStatus || '' }}
