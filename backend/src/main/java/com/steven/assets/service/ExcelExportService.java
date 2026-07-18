@@ -48,6 +48,9 @@ public class ExcelExportService {
     private final com.steven.assets.repository.StockPriceHistoryRepository priceHistRepo;
     // ETF 淨值／折溢價（Task 214）：讀 Redis price:etfnav:{market}:{code}（由 ext 排程寫入），business 不直連外部行情
     private final PriceQueryService priceQueryService;
+    // 大盤指數日線匯出（Task 216）：與「股市大盤查詢」頁曲線同一張表，確保匯出值與圖表一致
+    private final com.steven.assets.repository.TwseIndexDailyHistoryRepository twseIndexHistRepo;
+    private final com.steven.assets.repository.UsIndexDailyHistoryRepository usIndexHistRepo;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -367,6 +370,97 @@ public class ExcelExportService {
         }
 
         for (int i = 0; i < 4; i++) sheet.autoSizeColumn(i);
+    }
+
+    /**
+     * 大盤指數匯出的顯示標籤（工作表名與兩種檔名共用同一來源，避免三處各自硬編碼中文名而漂移，
+     * 理由同 {@link #exchangeRateLabel}）（Requirement 45 / Task 216）。
+     *
+     * <p>未知代碼直接以代碼本身為標籤，不臆造名稱——呼叫端已有白名單擋，此處只是不讓標籤說謊。
+     * 前端 {@code GdpTwseView.MARKETS} 的 label 是 render 用，後端不可依賴前端字串。
+     */
+    public static String indexLabel(String market) {
+        return switch (market == null ? "" : market.toUpperCase()) {
+            case "TWSE" -> "台股大盤";
+            case "DJI" -> "道瓊工業";
+            case "SPX" -> "標普500";
+            case "IXIC" -> "那斯達克綜合";
+            case "SOX" -> "費城半導體";
+            case "FTSE" -> "英國富時100";
+            case "DAX" -> "德國DAX";
+            case "KOSPI" -> "韓國KOSPI";
+            case "N225" -> "日經225";
+            default -> market == null ? "" : market;
+        };
+    }
+
+    /**
+     * 大盤指數日線區間匯出（Requirement 45 / Task 216）：單張工作表、日期／開高低收五欄。
+     * 全域公開行情（兩張日線表皆無 owner 欄位、無 {@code @Filter}），故不需要 ForOwner 變體（同油價金價／匯率）。
+     */
+    @Transactional(readOnly = true)
+    public byte[] exportIndexDaily(String market, java.time.LocalDate start, java.time.LocalDate end)
+            throws IOException {
+        try (Workbook wb = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            Styles st = new Styles(wb);
+            writeIndexDailySheet(wb, st, market, start, end);
+            wb.write(out);
+            return out.toByteArray();
+        }
+    }
+
+    /**
+     * 「大盤指數日線」分頁：日期／開盤／最高／最低／收盤五欄，單一序列依日期遞增。
+     *
+     * <p><b>四個價格欄直接讀 DB 既有 OHLC 欄位，不重算、不由收盤推導</b>——這與匯率分頁的中間價相反
+     * （那是 {@code @Transient} 衍生值，必須由 entity 算）。兩張表的欄位語意相同，在此正規化成同一組
+     * {@code (date, o, h, l, c)} 後共用同一段寫表邏輯，確保切換指數時版面一致。
+     *
+     * <p>{@code TWSE} 走 {@code twse_index_daily_history}、其餘走 {@code us_index_daily_history}；
+     * 兩表的 open/high/low 皆 nullable（TWSE 早期由 v1.21.0 只抓 ClosingIndex 的殘留列），
+     * null 該格留空、不補前值、不捏造（同油價金價／匯率）。日期寫成文字避免開啟端時區偏移一天。
+     */
+    private void writeIndexDailySheet(Workbook wb, Styles st, String market,
+                                      java.time.LocalDate start, java.time.LocalDate end) {
+        Sheet sheet = wb.createSheet(org.apache.poi.ss.util.WorkbookUtil
+                .createSafeSheetName(indexLabel(market)));
+
+        Row h = sheet.createRow(0);
+        cell(h, 0, "日期", st.head);
+        cell(h, 1, "開盤", st.head);
+        cell(h, 2, "最高", st.head);
+        cell(h, 3, "最低", st.head);
+        cell(h, 4, "收盤", st.head);
+
+        int r = 1;
+        for (IndexDailyRow d : findIndexDaily(market, start, end)) {
+            Row row = sheet.createRow(r++);
+            cell(row, 0, ISO.format(d.date()), null);
+            if (d.open() != null) cell(row, 1, d.open(), st.num4);
+            if (d.high() != null) cell(row, 2, d.high(), st.num4);
+            if (d.low() != null) cell(row, 3, d.low(), st.num4);
+            cell(row, 4, d.close(), st.num4);
+        }
+
+        for (int i = 0; i < 5; i++) sheet.autoSizeColumn(i);
+    }
+
+    /** 兩張日線表正規化後的單日行情（僅供匯出寫表使用，不入庫）。 */
+    private record IndexDailyRow(java.time.LocalDate date, BigDecimal open, BigDecimal high,
+                                 BigDecimal low, BigDecimal close) {}
+
+    /** 依 market 分派到對應日線表，回傳依日期遞增的正規化列。 */
+    private List<IndexDailyRow> findIndexDaily(String market, java.time.LocalDate start, java.time.LocalDate end) {
+        if ("TWSE".equalsIgnoreCase(market)) {
+            return twseIndexHistRepo.findByTradingDateBetweenOrderByTradingDateAsc(start, end).stream()
+                    .map(t -> new IndexDailyRow(t.getTradingDate(), t.getOpenPoint(), t.getHighPoint(),
+                            t.getLowPoint(), t.getClosePoint()))
+                    .toList();
+        }
+        return usIndexHistRepo.findByIndexCodeAndTradingDateBetweenOrderByTradingDateAsc(market, start, end).stream()
+                .map(u -> new IndexDailyRow(u.getTradingDate(), u.getOpenPoint(), u.getHighPoint(),
+                        u.getLowPoint(), u.getClosePoint()))
+                .toList();
     }
 
     // ─────────────────────────────────────────────────────────────────────────

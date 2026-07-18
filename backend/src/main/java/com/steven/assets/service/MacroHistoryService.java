@@ -47,6 +47,17 @@ public class MacroHistoryService {
             List.of("DJI", "SPX", "IXIC", "SOX", "FTSE", "DAX", "KOSPI", "N225");
 
     /**
+     * 「股市大盤查詢」頁可選指數＝海外指數 ∪ 台股大盤（Requirement 45 / Task 216 匯出白名單的單一來源）。
+     *
+     * <p>刻意<b>不含 {@code SP500TR}</b>：該代碼雖存在於 {@code us_index_daily_history}，
+     * 但屬績效比較頁（Requirement 33）的含息報酬指數，不在本頁下拉中。
+     * 與 {@code MacroHistoryController.US_INDEX_REFRESH_CODES}（回補守門，含 SP500TR）語意不同，不可互用。
+     */
+    public static final java.util.Set<String> DAILY_INDEX_CODES =
+            java.util.stream.Stream.concat(java.util.stream.Stream.of("TWSE"), OVERSEAS_INDEX_CODES.stream())
+                    .collect(java.util.stream.Collectors.toUnmodifiableSet());
+
+    /**
      * 「含息報酬指數」型海外指數代碼（績效比較頁 Requirement 33）。
      * SP500TR＝S&P 500 Total Return（含股息再投入），走 Yahoo ^SP500TR，與純價格 SPX 對照。
      * refresh 守門與每日自動回補排程共用。

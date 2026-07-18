@@ -7,6 +7,8 @@ import com.steven.assets.model.TwseIndexDailyHistory;
 import com.steven.assets.model.UsIndexDailyHistory;
 import com.steven.assets.service.MacroHistoryService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -39,6 +41,8 @@ public class MacroHistoryController {
             .collect(java.util.stream.Collectors.toUnmodifiableSet());
 
     private final MacroHistoryService macroHistoryService;
+    /** 指數日線 Excel 匯出（Requirement 45 / Task 216）；與排程匯出走同一支產檔方法，確保兩途徑內容一致。 */
+    private final com.steven.assets.service.ExcelExportService excelExportService;
 
     @GetMapping("/taiwan-gdp")
     public List<TaiwanGdpPerCapitaHistory> getTaiwanGdp(
@@ -112,6 +116,44 @@ public class MacroHistoryController {
     public Map<String, Object> refreshTwseReturnIndex(
             @RequestParam(defaultValue = "10") int years) {
         return macroHistoryService.refreshTwseReturnIndex(years);
+    }
+
+    /**
+     * 指數日線區間匯出成單一 .xlsx（日期／開盤／最高／最低／收盤五欄）（Requirement 45 / Task 216）。
+     * GET /api/index-daily/export?market=TWSE&start=2020-01-01&end=2026-07-18
+     * 預設回近 10 年。全域公開行情，無 owner 過濾。
+     *
+     * <p>白名單用 {@link MacroHistoryService#DAILY_INDEX_CODES}（＝頁面下拉的 9 個指數），
+     * <b>不可</b>誤用 {@link #US_INDEX_REFRESH_CODES}——那含績效比較頁的 SP500TR，不在本頁可選範圍。
+     * 資安（Requirement 29）：market 會流入查詢與產出檔名，未知代碼直接擋為 400。
+     */
+    @GetMapping("/index-daily/export")
+    public ResponseEntity<org.springframework.core.io.ByteArrayResource> exportIndexDaily(
+            @RequestParam(defaultValue = "TWSE") String market,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end)
+            throws java.io.IOException {
+        String code = market == null ? "" : market.trim().toUpperCase();
+        if (!MacroHistoryService.DAILY_INDEX_CODES.contains(code)) {
+            throw new IllegalArgumentException("未知指數代碼: " + market);
+        }
+        if (start == null) start = LocalDate.now().minusYears(10);
+        if (end == null) end = LocalDate.now();
+        if (start.isAfter(end)) {
+            throw new IllegalArgumentException("起始日不可晚於結束日");
+        }
+        byte[] data = excelExportService.exportIndexDaily(code, start, end);
+        java.time.format.DateTimeFormatter fileFmt = java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd");
+        String filename = com.steven.assets.service.ExcelExportService.indexLabel(code)
+                + "_" + fileFmt.format(start) + "_" + fileFmt.format(end) + ".xlsx";
+        org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+        headers.setContentDisposition(org.springframework.http.ContentDisposition
+                .attachment().filename(filename, java.nio.charset.StandardCharsets.UTF_8).build());
+        return ResponseEntity.ok().headers(headers)
+                .contentType(org.springframework.http.MediaType.parseMediaType(
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .contentLength(data.length)
+                .body(new org.springframework.core.io.ByteArrayResource(data));
     }
 
     /** 指數「當日」分時走勢（Yahoo 5m，最新交易日；transient）。market ∈ {TWSE,DJI,SPX,IXIC,SOX,FTSE,DAX,KOSPI,N225}。 */

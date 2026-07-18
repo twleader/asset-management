@@ -193,7 +193,19 @@ export const bffApi = {
     refreshIndexDaily: (market = 'TWSE', years = 10) =>
       api.post('/bff/gdp-twse/refresh-index-daily', null, { params: { market, years }, timeout: 180000 }),
     getIndexIntraday: (market = 'TWSE') =>
-      api.get('/bff/gdp-twse/index-intraday', { params: { market } })
+      api.get('/bff/gdp-twse/index-intraday', { params: { market } }),
+    // 指數日線匯出與排程自動匯出（Requirement 45 / Task 216）
+    exportExcel: (market = 'TWSE', start, end) =>
+      api.get('/bff/gdp-twse/export', {
+        params: { market, ...(start && { start }), ...(end && { end }) },
+        responseType: 'blob',
+        timeout: 120000
+      }),
+    getExportSchedule:    () => api.get('/bff/gdp-twse/export/schedule', { skipErrorToast: true }),
+    updateExportSchedule: (data) => api.put('/bff/gdp-twse/export/schedule', data, { skipErrorToast: true }),
+    runExportNow:         () => api.post('/bff/gdp-twse/export/run-now', null, { timeout: 60000, skipErrorToast: true }),
+    browseExportDir:      (subpath = '') =>
+      api.get('/bff/gdp-twse/export/browse', { params: { subpath }, skipErrorToast: true })
   },
 
   // PerformanceComparison（績效比較，Requirement 33）
