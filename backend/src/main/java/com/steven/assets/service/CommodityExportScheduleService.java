@@ -4,6 +4,7 @@ import com.steven.assets.dto.CommodityExportDto;
 import com.steven.assets.model.CommodityExportSchedule;
 import com.steven.assets.repository.CommodityExportScheduleRepository;
 import com.steven.assets.security.CurrentUserContext;
+import com.steven.assets.security.UnauthenticatedException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
@@ -221,7 +222,7 @@ public class CommodityExportScheduleService {
     private Long requireOwnerId() {
         CurrentUserContext ctx = currentUserProvider.getObject();
         if (!ctx.hasUser()) {
-            throw new IllegalStateException("未識別使用者，無法存取排程設定");
+            throw new UnauthenticatedException("未識別使用者，無法存取排程設定");
         }
         return ctx.getEffectiveUserId();
     }

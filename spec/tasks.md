@@ -5077,3 +5077,23 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 - [x] 204.9c **對抗式驗證修正（幣別標籤硬編碼）**：六面向並行端到端驗證（CRUD／run-now 落檔／Excel 內容／BFF 路由／租戶隔離／部署真實性，共 77 個檢查點）提出 4 個 FAIL，經每個 FAIL 三名獨立視角對抗式複驗後全數被駁回。但其中「檔名與工作表名寫死『台幣兌美元』」一項**經我覆核後判定駁回理由不成立**——複驗者以「前端恆送 USD 故不影響」為由駁回，然該理由描述的是當下呼叫者而非 API 契約，且已實測 `currency=ZAR` 可重現：回 200、內容確為 ZAR 資料（22 列與 DB 相符）、檔名與工作表名卻標為「台幣兌美元」。**修正**：新增單一來源 `ExcelExportService.exchangeRateLabel(currency)`，由工作表名／手動匯出檔名／排程檔名三處共用。另兩項為既有跨服務行為（無身分回 500 而非 401，五支同類服務一致，已另立追蹤）與驗證環境自身干擾（並行 agent 寫同一張表），均非本次缺陷。
 - [ ] 204.10 **建置與部署驗證**：`--no-cache` 重 build business／bff／frontend 並 `--force-recreate`；驗證 Liquibase EXECUTED、設定 CRUD、路徑跳脫與 rangeMonths 越界擋為 400、run-now 實際落檔（含主機端可見）、滾動區間筆數正確、手動匯出內容與排程一致。
 - [ ] 204.11 commit ＋ 兩段式 merge。
+
+---
+
+### Task 205：未識別身分的錯誤語意修正（business-services 回 401 而非 500）（Requirement 28）
+
+**需求對應：** Requirement 28 新增 AC「business-services 未識別身分回 401（錯誤語意契約）」。本任務即 Task 204.9c 驗證時記錄「無身分回 500 而非 401，五支同類服務一致，已另立追蹤」的後續。
+
+**問題：** 五支排程設定 service 的 `requireOwnerId()` 與 `PortfolioAdviceService` 的兩處身分檢查，在 `CurrentUserContext` 無使用者時拋 `IllegalStateException`。`GlobalExceptionHandler` 無對應 handler，落入 `@ExceptionHandler(Exception.class)` 的 500 兜底，使「未帶身分」被回報成伺服器內部錯誤。
+
+**嚴重度：minor（錯誤語意問題，非資安漏洞）。** business-services 未對主機開埠，公開邊界（nginx:80／bff:8080）對未登入與偽造 header 一律正確回 401，且 `ProblemDetail` 錯誤回應無 stacktrace、無資料外洩。
+
+**設計取捨：** 既有 `security/` 下只有 `TenantAccessException`（→404）與 `AdminRequiredException`（→403），**無**可沿用的未認證例外，故新增 `UnauthenticatedException` 補齊第三種語意，三者成套且互斥（未識別／權限不足／非本人所有）。保留帶訊息建構子，讓各呼叫端維持原本的情境描述（「…無法存取排程設定」／「…無法儲存理財條件」／「…無法產生資產配置建議」），避免修正錯誤碼的同時劣化錯誤訊息。
+
+- [x] 205.1 **spec**：`requirements.md` Requirement 28 新增 AC；`design.md`「認證與多租戶」段新增身分例外 → HTTP 狀態對映表；`tasks.md` 本任務。
+- [x] 205.2 **新增 `security/UnauthenticatedException.java`**：`RuntimeException` 子類，無參建構子預設訊息「未識別使用者」，另備 `String message` 建構子。
+- [x] 205.3 **`GlobalExceptionHandler`**：新增 `@ExceptionHandler(UnauthenticatedException.class)` → `HttpStatus.UNAUTHORIZED`。置於既有 `TenantAccessException`／`AdminRequiredException` handler 之後，維持身分三例外相鄰易讀。
+- [x] 205.4 **五支排程 service 的 `requireOwnerId()`**：`ExportScheduleService`（R34）／`RealizedGainExportScheduleService`（R39）／`TradingCalendarExportScheduleService`（R37）／`CommodityExportScheduleService`（R41）／`ExchangeRateExportScheduleService`（R42）改拋 `UnauthenticatedException`，訊息不變。
+- [x] 205.5 **`PortfolioAdviceService`**（R33）：`saveProfile()`／`generate()` 兩處 `requireCurrentUserId()` 回 `null` 的分支改拋 `UnauthenticatedException`，訊息不變。
+- [x] 205.6 **建置與部署驗證**：`--no-cache` 重 build business 並 `--force-recreate`；於 business 容器內 curl 不帶 `X-User-*` 打五支 schedule 端點應回 **401**（原 500），帶正常 header 的既有行為（讀寫排程設定）不回歸。
+- [ ] 205.7 commit ＋ 兩段式 merge。
