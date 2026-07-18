@@ -1597,6 +1597,38 @@ location / {
 **Backend / BFF / External Materials Service**: `maven:3.9-eclipse-temurin-21` → `eclipse-temurin:21-jre-alpine`
 **Frontend**: `node:18-alpine` (build) → `nginx:alpine` (serve)
 
+### BFF 上游 DNS 解析策略（Task 207）
+
+**問題**：`docker compose up -d --force-recreate business-services` 會讓該容器換 IP（實測 `172.19.0.4` → `172.19.0.7`），
+BFF 卻持續對舊 IP 連線得 `Connection refused`，前端每個 `/api/**` 回 **500**，且不會在數十秒內自癒（實測 3.5 分鐘後仍在報錯）。
+
+**根因（已由 bytecode ＋ 封包實測確認）**：reactor-netty 的 `HttpClient` 預設**不走 JDK `InetAddress`**，而是 netty 的非同步
+DNS resolver（`DnsAddressResolverGroup`）。`NameResolverProvider` 的 `DEFAULT_CACHE_MAX_TIME_TO_LIVE` 為
+`Integer.MAX_VALUE` 秒＝完全照抄 DNS 回應自帶 TTL；而 Docker 內建 DNS（`127.0.0.11`）對 container name 回的 A record
+TTL 實測為 **600 秒**（原始封包 TTL 欄位 `0x00000258`），故舊 IP 最久被記住 10 分鐘。容器 OS 的 `getent hosts` 正常，
+是因為那走 glibc/NSS，與 netty 自己的快取是兩套獨立機制——**不能以 `getent` 正常就排除 DNS 問題**。
+
+**對策**：`bff/config/DnsCacheConfig` 統一把 netty resolver 的正向快取上限壓到 **30 秒**（`MAX_TTL`）。
+- **JVM 旗標無效**：`-Dnetworkaddress.cache.ttl` 只作用於 JDK resolver，reactor-netty 根本不經過它；且它本質是
+  **security property** 而非 system property，直接 `-D` 讀不到（雙重無效，且是靜默無效）。
+- **negative TTL 刻意不設**：netty 預設即 0 秒＝不快取解析失敗；若設成 1 秒反而把容器重建瞬間的查無主機黏住，
+  正好黏在要加速的時間窗。
+- **30 秒而非秒級**：越短自癒越快，但也越頻繁依賴 embedded DNS 可用性（netty 查詢逾時 5 秒，DNS 抖動會變成使用者可見延遲）。
+  相對修補前的 10 分鐘已是量級改善。
+- **兩條上游路徑都要套**（各自持有獨立 `HttpClient` 實例，只修一條會漏）：
+  | 路徑 | 客製點 |
+  |---|---|
+  | gateway route（各 `*BffRoutes` 的 `.uri(businessServicesUrl)`） | `DnsCacheConfig` 的 `HttpClientCustomizer` bean（`HttpClientFactory.createInstance()` 最後一步才套 customizer，必定蓋過預設） |
+  | aggregation 的 `businessServicesClient` WebClient | `WebClientConfig` 明確 `.clientConnector(...)` 套 `applyDnsCacheLimit()` |
+  本次事故兩條同時中（gateway 的 `/api/snapshots` 與 WebClient 的 `/api/bff/dashboard/enrich-dividend-rates` 同時報錯），
+  即為「兩條路徑各自獨立」的實證。
+- **共用資源**：WebClient 側以 Boot 的 `ReactorResourceFactory`（`org.springframework.http.client`，非 deprecated 的
+  `...client.reactive` 那支）建 client，與 gateway 共用同一組連線池／event loop；該 bean 缺席時退回 `HttpClient.create()`，
+  不讓 BFF 因此起不來。**自建 connector ＝已脫離 Boot 的 connector 組裝管線**：日後若導入 `spring.http.client.ssl` bundle
+  或 `ReactorNettyHttpClientMapper` bean，對這支 WebClient 不會生效，必須同步補在 `WebClientConfig`。
+- **啟動日誌痕跡**：兩條路徑各印一行 `[dns-cache] {gateway|webclient} 上游 DNS 正向快取上限 maxTtl=30s`。
+  注意此 log 只證明「設定程式碼有執行」，真正的驗收是「重建 business-services 後 BFF 是否於 30 秒內跟上新 IP」的實測。
+
 ## Backup / Restore (Requirement 15)
 
 ### 概念

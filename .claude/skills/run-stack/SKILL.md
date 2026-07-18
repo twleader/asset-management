@@ -63,6 +63,31 @@ $DC up -d --no-deps --force-recreate <service>
 
 `--no-deps` keeps unrelated services untouched. `--force-recreate` is required because the image tag stays `asset-management-<service>:latest`; without it Compose sees "same image tag" and skips.
 
+### ⚠ Recreated `business-services` or `external-materials-service`? Restart `bff` too
+
+Recreating a container gives it a **new IP** on the compose network (observed: `172.19.0.4` → `172.19.0.7`). The BFF's JVM
+resolver keeps the **old** IP and every `/api/**` then fails with `Connection refused: business-services/<old-ip>:8080`
+→ **500 on every page**. It does *not* self-heal in 30s (measured: still broken 3 minutes later — Docker's embedded DNS
+hands out TTL 600).
+
+```bash
+docker compose -p asset-management restart bff
+```
+
+Do this **whenever** you recreated an upstream service, even if the BFF itself was untouched. Then confirm no residual failures:
+
+```bash
+docker logs asset-bff --since <bff-start-time>Z 2>&1 | grep -cE "Connection refused|500 Server Error"   # → 0
+```
+
+**Diagnosing it later (don't misread it as a broken feature):** `business-services` logs are *clean*, calling the endpoint
+from inside the business container works, and the errors appear **only** in `docker logs asset-bff`. `docker exec asset-bff
+getent hosts business-services` resolves *correctly* — the stale copy lives inside the JVM, not the container's resolver.
+Compare `docker inspect asset-business-services` current IP against the refused IP in the log to confirm.
+
+Note: `asset-bff` has **no curl**, and every BFF route except `/actuator/health|info` needs a login session — you cannot
+prove the upstream hop with an unauthenticated curl. Verify via the log check above, then have the user reload a page.
+
 Stack down (no containers running):
 
 ```bash
