@@ -155,7 +155,7 @@ public class StockSourceQuery {
                 }));
     }
 
-    /** 指定交易日的收盤價（Task 211：入庫折溢價時，與淨值配對的必須是<b>同一交易日</b>的收盤價）。 */
+    /** 指定交易日的收盤價（Task 215：入庫折溢價時，與淨值配對的必須是<b>同一交易日</b>的收盤價）。 */
     public Optional<BigDecimal> findCloseOn(String stockCode, String market, LocalDate tradingDate) {
         return Optional.ofNullable(jdbc.query(
                 "SELECT close_price FROM stock_price_history WHERE stock_code=? AND market=? AND trading_date=?",
@@ -296,7 +296,7 @@ public class StockSourceQuery {
     }
 
     /**
-     * ETF 每日淨值／折溢價入庫（Task 211）：同一 (代號, 市場, 資料日) 覆寫。
+     * ETF 每日淨值／折溢價入庫（Task 215）：同一 (代號, 市場, 資料日) 覆寫。
      *
      * <p>盤中多次抓取會反覆覆寫同一列，故每日最終值＝當日最後一次抓到的值（收盤後那次），
      * 這正是「當日收盤折溢價」的語意。

@@ -2498,7 +2498,7 @@ GET  /api/bff/asset-history/export                    → GET  /api/snapshots/ex
 - **月／季／年線與 KD**：`ExcelExportService` 注入既有共用權威 `TechnicalIndicatorService`，逐 `(code, market)` 呼叫 `computeAll()` 取 `FullIndicators{monthlyMa, quarterlyMa, annualMa, k, d}`（資料源 `stock_price_history` 近 240 筆；與觀察清單／警示同一計算，符合「同義欄位同一 business service」）。以 `Map<code|market, FullIndicators>` 於單次匯出內快取，同股多券商列僅計算一次。KD 併為單一「KD值」欄字串 `K {k} / D {d}`（k/d 皆為 `computeAll` 已 scale 2 位之 BigDecimal，任一為 null 以 `—` 佔位）。
 - **儲存格樣式**：昨收沿用即時價 `num4`；漲跌／漲跌幅／月線／季線／年線用新增 `num2`（`#,##0.00`）；KD值為純字串。查無即時報價或歷史不足者相應欄留白（`cell()` 遇 null 不寫值）。此增列同時作用於 run-now（`exportLiveAssets`）與排程（`exportLiveAssetsForOwner`），皆共用 `writeLiveAssetsSheet`。
 
-### ETF 淨值與折溢價欄（Task 210）
+### ETF 淨值與折溢價欄（Task 214）
 
 - **資料流**：`external-materials-service` 抓取 → Redis → `business-services` 讀取 → Excel 欄位。
   business 不直連外部行情 API（既有規範），故淨值比照即時股價走 Redis 中介。
@@ -2531,7 +2531,7 @@ GET  /api/bff/asset-history/export                    → GET  /api/snapshots/ex
 - **失敗處置**：抓取失敗不寫入（保留上一輪值），比照 `PriceCacheWriter` 對 `z='-'` 的處置；`etf-nav.enabled=false` 可整體停用，
   停用後匯出三欄留白、不影響其他欄位。
 
-#### 每日入庫留存（Task 211）
+#### 每日入庫留存（Task 215）
 
 - **表**：`etf_nav_history(stock_code, market, nav_date, nav, premium_discount_pct, source)`，
   `(stock_code, market, nav_date)` UNIQUE，Liquibase `v1.63.0-etf-nav-history.sql`（冪等寫法）。全域公開行情，無 `owner_user_id`。
