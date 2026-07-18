@@ -14,9 +14,9 @@ import java.time.LocalDate;
  */
 @Entity
 @Table(name = "stock_price_history", uniqueConstraints = {
-    @UniqueConstraint(columnNames = {"stockCode", "market", "tradingDate"})
+    @UniqueConstraint(columnNames = {"stock_code", "market", "trading_date"})
 }, indexes = {
-    @Index(name = "idx_sph_code_date", columnList = "stockCode, tradingDate")
+    @Index(name = "idx_sph_code_date", columnList = "stock_code, trading_date")
 })
 @Data
 @NoArgsConstructor

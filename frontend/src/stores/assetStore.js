@@ -10,9 +10,7 @@ export const useAssetStore = defineStore('asset', {
   }),
 
   getters: {
-    latestSnapshot: (state) => state.snapshots[0] ?? null,
-    totalAssets: (state) => state.snapshots[0]?.totalAssets ?? 0,
-    snapshotDates: (state) => state.snapshots.map(s => s.snapshotDate)
+    latestSnapshot: (state) => state.snapshots[0] ?? null
   },
 
   actions: {
@@ -38,20 +36,6 @@ export const useAssetStore = defineStore('asset', {
     async updateSnapshot(id, data) {
       const result = await snapshotApi.update(id, data)
       await Promise.all([this.fetchSnapshots(), this.fetchHistory()])
-      return result
-    },
-
-    async deleteSnapshot(id) {
-      await snapshotApi.delete(id)
-      await this.fetchSnapshots()
-    },
-
-    async recalcDividends() {
-      // Step 1: fetch missing dividend rates from market API
-      await snapshotApi.enrichAllDividendRates()
-      // Step 2: recompute estimatedDividend for stocks that now have rate + currentValue
-      const result = await snapshotApi.recalcDividends()
-      await this.fetchHistory()
       return result
     },
 

@@ -61,16 +61,9 @@ export function apiErrorMessage(err, fallback = '操作失敗') {
 // ===== Snapshots（共享 CRUD，給 store 使用；單一頁面的資料請走對應 bffApi.<page>） =====
 export const snapshotApi = {
   getAll: () => api.get('/snapshots'),
-  getDetail: (id) => api.get(`/snapshots/${id}`),
   create: (data) => api.post('/snapshots', data),
   update: (id, data) => api.put(`/snapshots/${id}`, data),
-  delete: (id) => api.delete(`/snapshots/${id}`),
-  getHistory: () => api.get('/snapshots/history'),
-  updateDividendRates: (id, rates) => api.patch(`/snapshots/${id}/dividend-rates`, rates),
-  updateStockOrder: (id, orders) => api.patch(`/snapshots/${id}/stock-order`, orders),
-  enrichAllDividendRates: () => api.post('/snapshots/enrich-all-dividend-rates'),
-  recalcDividends: () => api.post('/snapshots/recalc-dividends'),
-  exportExcel: () => api.get('/snapshots/export', { responseType: 'blob' })
+  getHistory: () => api.get('/snapshots/history')
 }
 
 // ============================================================
