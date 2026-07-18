@@ -72,10 +72,10 @@ com.steven.assets/
   - `GET /api/bff/snapshot-detail/brokers`：編輯券商欄位用，回傳 active brokers
   - `PUT /api/bff/snapshot-detail/{id}`：儲存編輯後的快照
 - 存款 amount 換算規則（後端 `AssetService.normalizeDepositAmount`）：原幣值（`originalAmount` USD）由前端輸入直接傳入，**台幣 amount 一律由後端用 snapshot 匯率算出**（`amount = originalAmount × usdExchangeRate`），TRANSIT_* 的正負號也由後端依 `TransitFundType.payable` 決定。前端不做這部份計算，避免 snapshot 匯率為 null 時誤把 USD 數字寫進 TWD 欄位。
-- `AssetHistoryBffController`（AssetHistoryView 專屬）：`GET /api/bff/asset-history`（history + isLastOfYear flag）、`POST /api/bff/asset-history/recalc-dividends`、`DELETE /api/bff/asset-history/{id}`、`GET /api/bff/asset-history/export`
+- `AssetHistoryBffController`（AssetHistoryView 專屬，共 8 支）：`GET /api/bff/asset-history`（history + isLastOfYear flag）、`POST /api/bff/asset-history/recalc-dividends`、`DELETE /api/bff/asset-history/{id}`、`GET /api/bff/asset-history/export`；排程匯出 4 支（詳見 Requirement 34 / Task 171）：`GET`／`PUT /api/bff/asset-history/export-schedule`、`POST /api/bff/asset-history/export-schedule/run-now`、`GET /api/bff/asset-history/export-schedule/browse`
 - `RealizedGainBffController`（RealizedGainView 專屬）：`GET /api/bff/realized-gain`（gains + active brokers 一起回傳）、CRUD、export、`GET /api/bff/realized-gain/lookup-name?code=&market=`（輸入股號自動帶出股名；轉呼**同一支** business `/api/stock-alerts/lookup-name`，與 stock-alert 頁同源，符合「同義欄位、同一 business service API」——前端不再跨頁呼叫 stock-alert 的 BFF）
 - `ExchangeRateBffController`（ExchangeRateView 專屬）：`GET /api/bff/exchange-rate`（先 refresh 再回 10 年歷史）、`POST /api/bff/exchange-rate/backfill`
-- `TradingCalendarBffController`（TradingCalendarView 專屬）：`GET /api/bff/trading-calendar?year=Y`（`holidays` 為 `{tw: {date→name}, us: {date→name}}` 物件 + `marketStatus`）、`GET /api/bff/trading-calendar/market-status`
+- `TradingCalendarBffController`（TradingCalendarView 專屬，共 8 支）：`GET /api/bff/trading-calendar?year=Y`（`holidays` 為 `{tw: {date→name}, us: {date→name}}` 物件 + `marketStatus`）、`GET /api/bff/trading-calendar/market-status`；匯出與排程 4 支（詳見 Requirement 37 / Task 189、Task 190）：`POST /api/bff/trading-calendar/export`、`GET /api/bff/trading-calendar/export/browse`、`GET`／`PUT /api/bff/trading-calendar/export/schedule`
 - `SnapshotListBffController`（SnapshotListView 專屬）：`GET /api/bff/snapshot-list`、`DELETE /{id}`、`GET /export`
 - `GdpTwseBffController`（GdpTwseView 專屬，`@RequestMapping("/api/bff/gdp-twse")`）：股市大盤查詢頁的指數日線／當日＋台韓人均 GDP 聚合（Requirement 18）：
   - `GET /api/bff/gdp-twse`：台／韓人均 GDP + 實質成長率歷史
@@ -83,7 +83,7 @@ com.steven.assets/
   - `GET /api/bff/gdp-twse/index-daily`：台股大盤／海外指數每日 OHLC
   - `POST /api/bff/gdp-twse/refresh-index-daily`：刷新指數日線
   - `GET /api/bff/gdp-twse/index-intraday`：指數當日分時
-- 其他 settings/passthrough（每頁一支 Spring Cloud Gateway route 配置，rewrite `/api/bff/{page}/**` → `/api/{resource}/**`）：BankSettings、BrokerSettings、DepositTypeSettings、MarketTypeSettings、AssetClassSettings（`/api/bff/asset-class-settings/**`）、TransitFundTypeSettings、StockAlert（`/api/bff/stock-alert/**`）、BackupRestore（`/api/bff/backup-restore/**`）、NotificationSettings（`/api/bff/notification-settings/recipients/**` → `/api/notification-recipients/**`）
+- 其他 settings/passthrough（每頁一支 Spring Cloud Gateway route 配置，rewrite `/api/bff/{page}/**` → `/api/{resource}/**`）：BankSettings、BrokerSettings、DepositTypeSettings、MarketTypeSettings、AssetClassSettings（`/api/bff/asset-class-settings/**`）、TransitFundTypeSettings、StockAlert（`/api/bff/stock-alert/**`）、BackupRestore（`/api/bff/backup-restore/**`）、NotificationSettings（`/api/bff/notification-settings/recipients/**` → `/api/notification-recipients/**`）、PaymentAccountSettings（見「Payment Accounts / Categories」段落，Requirement 22）、UserManagement（`/api/bff/user-management/**`，見 Requirement 28「API 端點（新增）」）、TodayMarketAnalysisRecipients（`/api/bff/today-market-analysis/recipients/**` → `/api/notification-recipients/{id}/market-analysis`，見 Task 151）
 - `WatchStockBffRoutes`（WatchStockView 專屬，`/api/bff/watch-stock/**`）：純 Spring Cloud Gateway passthrough route，rewrite `/api/bff/watch-stock(/**)` → `/api/watch-stocks(/**)` 轉至 business-services。觀察清單已改為「`stock_alert` 衍生 view」，**衍生與 enrichment 一律在 business-services（`WatchStockController` / `WatchStockService`）完成，BFF 僅轉發不重算**：
   - `GET /api/bff/watch-stock` → `GET /api/watch-stocks`：business-services 由 `stock_alert` 群組去重衍生清單，對每筆 (stockCode, market) 補上 live 報價、技術指標、最近觸發資訊
   - `PUT /api/bff/watch-stock/order` → `PUT /api/watch-stocks/order`：拖曳排序時把該股票所有 alert 的 displayOrder 整組重排
@@ -272,8 +272,9 @@ NASDAQ info API 自 2026/04 起對 ETF 的 `keyStats` 為 null（無 dayrange �
   fan-out 到 `Sinks.Many<String>`
 - business-services 暴露 `GET /api/market-data/prices/stream`（`text/event-stream`），
   從 sink 串流 SSE
-- BFF 加 passthrough route `/api/bff/market-data/stream` → backend SSE endpoint
-- 前端用 `EventSource('/api/bff/market-data/stream')` 訂閱，每筆訊息更新 stockPrices reactive state
+- BFF 以 `MarketDataBffRoutes` 的 passthrough route `/api/market-data/**` 轉發至 backend SSE endpoint
+  （**不** rewrite 成 `/api/bff/` 前綴，此為「共享 / 跨頁 passthrough routes」列舉的共享例外）
+- 前端用 `EventSource('/api/market-data/prices/stream')` 訂閱，每筆訊息更新 stockPrices reactive state
 
 ```
 [external-materials-service write] → Redis SET price:*:*
@@ -283,11 +284,76 @@ NASDAQ info API 自 2026/04 起對 ETF 的 `keyStats` 為 null（無 dayrange �
                                           ↓
                      [SSE /api/market-data/prices/stream]
                                           ↓
-                     [BFF passthrough] → [Frontend EventSource] → stockPrices state
+                     [BFF passthrough /api/market-data/**] → [Frontend EventSource] → stockPrices state
 ```
 
-> nginx 對 `/api/bff/market-data/stream` 路徑需設 `proxy_buffering off`，否則 SSE 會被 buffering 卡住。
+> nginx 對 `/api/market-data/prices/stream` 路徑需設 `proxy_buffering off`，否則 SSE 會被 buffering 卡住
+> （實作見 `frontend/nginx.conf` 的 `location = /api/market-data/prices/stream`）。
 > 前端仍保留初始 GET `/api/bff/dashboard/realtime` 載入第一份 snapshot；之後增量更新走 SSE，不再用 setInterval polling。
+
+#### external-materials-service Internal API（`InternalPriceController`，28 支）
+
+**這些是 service 間內部端點，不是公開 API**：不經 BFF、不對前端暴露，僅在 docker network 內由 `business-services` 以 WebClient 呼叫（class 層 `@RequestMapping("/internal")` + method 層路徑；**全部參數皆為 query string，無 request body**）。此表為 28 支端點的**完整清單**（單一事實來源）；設計理由 / 退化行為凡 design.md 已有段落記載者，「說明」欄一律以**段落標題或 Task / Requirement 編號**交叉引用（不用行號，避免引用隨增刪行漂移），不在此重述（避免同一事實兩處記載各自漂移）。
+
+> 例外：`close/verify-tw` / `close/verify-us` / `health` 三支目前**無 business-services 呼叫端**，為維運手動觸發（container 內 curl）與健康檢查用；其餘 25 支皆有 backend caller。
+
+**行情 / 收盤（`PricePoller` / `ClosePersister` / `MarketClock`）：**
+
+| Method | Path | 說明 |
+|--------|------|------|
+| POST | `/internal/refresh` | 同步抓所有持股報價、寫 Redis，回 `PricePoller.RefreshSummary`。供使用者按「刷新」（`PriceQueryService`）。見「對外介面」、「國定假日整段休市」（假日 `markClosed`）、「Live 行情 tradingDate 語意（盤外刷新防呆）」（`resolveTradingDate` 盤外守則） |
+| POST | `/internal/close/verify-tw` | 手動觸發 FinMind 校正**當日台股**收盤價（同 16:00 排程），覆寫 `stock_price_history` 並回寫 Redis，回 `{verified:n}`。見「Sequence（盤後收盤）」 |
+| POST | `/internal/close/verify-us` | 手動觸發 FinMind 校正**當日美股**收盤價（同 18:00 ET 排程），回 `{verified:n}`。見「Sequence（盤後收盤）」 |
+| GET | `/internal/health` | 回 `{status:"UP", twMarketOpen, usMarketOpen}`（`MarketClock`）；健康檢查用 |
+
+**歷史回補 / 匯率（`HistoricalBackfillService` / `ExchangeRatePoller`）：**
+
+| Method | Path | 說明 |
+|--------|------|------|
+| POST | `/internal/backfill/stock?code=&market=&since=&until=` | 回補單支股票歷史收盤價（台股 FinMind、美股 / 英股 Yahoo）。`since` 必填、`until` 選填（皆 ISO date），回 `Map` 統計。**今日列不寫入**，見 Task 84「今日列」獨佔規則 |
+| POST | `/internal/backfill/all` | 全持股 + USD 匯率 10 年回補（耗時操作），回 `Map` 統計。見 Task 84「今日列」獨佔規則 |
+| POST | `/internal/backfill/exchange-rate?currency=&since=` | 增量補匯率至今日，回 `{currency, records}`。起點取 `max(rate_date)+1`，**`since` 僅在該幣別尚無任何列時作為起點** |
+| POST | `/internal/backfill/exchange-rate-from?currency=&since=` | 強制自 `since` 補匯率至今日（補中間缺漏），回 `{currency, records}`。用於 FinMind T-1 對帳回補，見「匯率來源鏈」的 FinMind `TaiwanExchangeRate` 列 |
+| POST | `/internal/exchange-rate/refresh-bot?currency=` | 手動觸發 BOT 即期匯率抓取（同盤中 5 分鐘 cron 的 `refreshBotNow`），回 `{currency, refreshed}`。見「匯率來源鏈」的台灣銀行牌告 CSV 列 |
+
+**信託基金（Requirement 19–21）：**
+
+| Method | Path | 說明 |
+|--------|------|------|
+| POST | `/internal/fund-nav/refresh` | 同步全抓基金 NAV 寫 `fund_nav`，回 `FundNavPoller.RefreshSummary`。business 端 `POST /api/fund-nav/refresh` proxy 至此，見「Funds / Fund NAV / Fund Dividend」段落 |
+| POST | `/internal/fund-dividend/refresh` | 同步全抓基金配息歷史（Req 20），回 `FundDividendPoller.RefreshSummary`。business 端 `POST /api/fund-dividend/refresh` proxy 至此 |
+| POST | `/internal/fund-nav/backfill?years=10` | 基金 NAV 歷史回補（Req 21，`years` 預設 10），回 `BackfillSummary`。見「Funds / Fund NAV / Fund Dividend」段落 |
+| POST | `/internal/fund-dividend/backfill?years=10` | 基金配息歷史回補（Req 21，`years` 預設 10），回 `BackfillSummary` |
+
+**個股資料 / 分時（`MarketDataFetchService` / `PriceFetchClient` / `IntradayTickStore`）：**
+
+| Method | Path | 說明 |
+|--------|------|------|
+| POST | `/internal/dividend/sync?code=&market=` | Backend cold-cache fallback：抓單檔股利寫 `stock_dividend_history`，回 `{written:n}`。資料源見「股利歷史資料來源（stock_dividend_history）」段落；純讀路徑刻意不觸發此寫副作用，見 Task 170 的 `/api/market-data/dividends-readonly` |
+| GET | `/internal/dividend-rate?code=&market=` | 殖利率（TWSE / FinMind / NASDAQ 級聯），回 `DividendRateResult`。business `/api/market-data/dividend-rate` 之來源，見「Market Data」段落 |
+| GET | `/internal/dividend-history?code=&market=&years=10` | 股利歷史（`years` 預設 10），回 `DividendHistoryResult`。見「股利歷史資料來源（stock_dividend_history）」段落 |
+| GET | `/internal/etf-holdings?code=&market=` | ETF 持股（Yahoo `topHoldings` + 台股 FinMind fallback），回 `EtfHoldingsResult`。business `/api/market-data/etf-holdings` 之來源，見「Market Data」段落 |
+| GET | `/internal/stock-name?code=&market=` | 股票名稱查詢（台股 FinMind / 美股 Yahoo / 英股 Yahoo `.L`），回 `{name}`（查無回空字串）。為警示建立時的 canonical name 權威來源，見 Service 層 `StockAlertService` 的 `assertNameMatchesCode` 守門 |
+| GET | `/internal/intraday-5m?code=&market=&daysBack=5` | 盤中 5 分鐘 K 線（`daysBack` 預設 5），回 `List<IntradayBar>`。供 `StockAlertService` 警示觸發補抓 |
+| GET | `/internal/intraday-ticks?code=&market=&date=` | 「當日」走勢圖分時 tick 序列，回 `List<TickPoint>`。`date` 選填；省略時的預設 bucket 規則、cold-start refresh 與非交易日不 cold-start 的守則，見「StockAnalysisBffRoutes」的 `/api/bff/stock-analysis/intraday-ticks`（Task 153） |
+
+**交易日 / 休市：**
+
+| Method | Path | 說明 |
+|--------|------|------|
+| GET | `/internal/tw-holidays?year=` | TWSE 假日表（依年份快取，**已 union 颱風假 / 臨時休市**），回 `{date: reason}`。台股假日唯一來源，見「交易日 / 國定假日判定（單一事實來源）」與 Requirement 7 颱風假偵測的「單一注入點」 |
+| POST | `/internal/tw-closure/detect` | 手動 / 驗證即時偵測台股颱風假（DGPA 停班公告），命中即寫 `tw_market_closure`，回 `{closedToday}`。見 Requirement 7「颱風假 / 台股臨時休市偵測」 |
+
+**總經 / 指數（`MacroDataFetchClient`，供 `MacroHistoryService` proxy 後 upsert）：**
+
+| Method | Path | 說明 |
+|--------|------|------|
+| GET | `/internal/macro/imf?indicator=&country=&scale=2` | IMF DataMapper 指標（`NGDPDPC` 人均 GDP / `NGDP_RPCH` GDP 成長率；`scale` 預設 2），回 `{year: value}`。作為 DGBAS 之備援，見「台灣人均 GDP / 實質成長率資料來源（DGBAS 優先、IMF 備援）」段落 |
+| GET | `/internal/macro/dgbas` | 主計總處 DGBAS 國民所得常用資料（台灣官方，優先於 IMF），回 `{growth:{year:val}, gdpUsd:{year:val}}`；失敗回空 map 降級至 IMF。見「台灣人均 GDP / 實質成長率資料來源（DGBAS 優先、IMF 備援）」段落 |
+| GET | `/internal/macro/twse-monthly?year=&month=` | TWSE 加權指數月線 OHLC（FMTQIK 月報整月），回 `List<DailyOhlc>`。供 `refreshTwseDaily` upsert `twse_index_daily_history`，見「Macro History」對應資料表的 `twse_index_daily_history` |
+| GET | `/internal/macro/us-index?code=` | 海外指數近 10 年每日 OHLC（Yahoo v8 chart，`range=10y`）。`code ∈ {DJI, SPX, SP500TR, IXIC, SOX, FTSE, DAX, KOSPI, N225}`，回 `List<DailyOhlc>`。見「Macro History」對應資料表的 `us_index_daily_history` |
+| GET | `/internal/macro/twse-return-index?date=` | TWSE 發行量加權股價報酬指數（含息）單日收盤，回 `TwseReturnIndexPoint`；**非交易日 / 查無回 204 No Content**。見 Task 170「含息（total return）演算法與資料管線」 |
+| GET | `/internal/macro/index-intraday?market=` | 指數「當日」分時（Yahoo 5m，最新交易日；transient 不寫 DB）。`market ∈ {TWSE, DJI, SPX, IXIC, SOX, FTSE, DAX, KOSPI, N225}`，回 `List<IndexIntradayPoint>`。見「Macro History」的「當日」分時資料源段落 |
 
 ### Frontend Architecture (Vue 3)
 
@@ -298,7 +364,7 @@ src/
 ├── router/index.js      # Route definitions (31 routes，含 4 條 redirect)
 ├── stores/assetStore.js # Pinia global state
 ├── api/index.js         # Axios instance, API methods
-├── components/          # Reusable components (TaiwanMap, UsaMap)
+├── components/          # Reusable components (TaiwanMap, UsFlag, StockAnalysisDialog)
 └── views/               # Page-level components (28 views；含 StockMonitorView 內嵌的 WatchStockView / StockAlertView 兩個未掛路由的子 view)
 ```
 
@@ -431,9 +497,14 @@ PortfolioAdviceSetting   (配置建議設定，單列 id = 1；model / effort / 
 
 # 排程匯出（Requirement 34）
 AppUser (1) ──── (1) ExportScheduleSetting        (owner_user_id UNIQUE；歷年資產每日排程自動匯出設定)
+AppUser (1) ──── (1) TradingCalendarExportSchedule (owner_user_id UNIQUE、`@Filter(ownerFilter)` 隔離；交易日曆 json/excel 匯出到指定路徑＋每日排程。匯出內容為全域交易日曆，故產檔時無需 owner 資料過濾，比照 ExportScheduleSetting；見 Task 190「每日排程自動匯出」)
 
 # 台股臨時休市（颱風假；Requirement 7）
 TwMarketClosure       (台股臨時休市，PK = closure_date；全域參考、無 owner、無 backend entity——ext-materials 直寫、backend 經 /internal/tw-holidays proxy 讀 union)
+
+# 無 JPA entity 之資料表（ext-materials 以 JdbcTemplate 直寫；列此以免稽核誤判缺漏）
+foreign_stock_daily_history  (海外參考個股每日收盤；韓股三星電子 005930 / SK 海力士 000660，僅存 close_point，供公開資訊爬蟲組韓股快照 category=kr-market。與 us_index_daily_history 分表——那張語意為「指數」；與 stock_price_history 分表——那張為投組個股。見 Task 185。刻意不建 entity，由 KrStockPoller 以 JdbcTemplate 直寫，changelog v1.55.0 已註明)
+twse_index_year_end_history  (TWSE 指數年末值；Task 97 起已不使用——年末走勢圖卡移除、entity/repo/endpoint 已移除，資料表保留不刪)
 ```
 
 > **Schema 基準線與 DB 層唯一鍵（重要澄清）：** 本專案的資料表基準線由 `db/init/01_dump.sql`（完整 `pg_dump` 快照，掛載進 `docker-entrypoint-initdb.d`）提供，**非** Liquibase 的 `v1.0.0-initial-schema` changeset；Liquibase 僅在此基準線之上做**增量**變更（dump 已含 `databasechangelog` 歷史，過往 changeset 視為 already-ran）。因此下列 Hibernate 早期建立、已固化進 dump 的 DB 層約束**不會出現在 Liquibase changelog**，但每個環境（運行中＋全新以 dump 初始化）皆已存在，`ddl-auto: none` 亦不會重建：
@@ -448,7 +519,8 @@ TwMarketClosure       (台股臨時休市，PK = closure_date；全域參考、�
 | 欄位 | 型別 | 說明 |
 |------|------|------|
 | id | Long | PK |
-| snapshotDate | LocalDate | 快照日期（唯一） |
+| ownerUserId | Long | 擁有者（Requirement 28 多租戶；`@Filter(name="ownerFilter")`） |
+| snapshotDate | LocalDate | 快照日期（與 `ownerUserId` 組成複合唯一鍵 `uq_snapshot_owner_date`，見 ERD 的「受隔離表唯一性多租戶化」註記） |
 | usdExchangeRate | BigDecimal | 當日美元匯率（程式欄位名，原 spec 為 usdToTwd） |
 | totalDeposit | BigDecimal | 總存款（台幣） |
 | totalFundValue | BigDecimal | 總基金市值 |
@@ -907,7 +979,7 @@ GET    /api/bff/dashboard/realtime                  # 2 分鐘輪詢用：最新
 >
 > 儀表板基準日切換行為：
 > - 2 分鐘輪詢 `refreshPricesAndStatus()` 只刷新 `stockPrices` / `marketStatus` / `liveAssets`（呼叫 `bffApi.dashboard.realtime()`），**不得重抓 dashboard summary** 以免覆蓋使用者選擇的快照。
-> - 初次載入才呼叫 `bffApi.getDashboardSummary()` 並把 `selectedSnapshotId` 設為最新；之後使用者透過快照選擇器切換時，僅 `store.fetchSnapshotDetail(id)` 取得明細。
+> - 初次載入才呼叫 `bffApi.dashboard.summary()` 並把 `selectedSnapshotId` 設為最新；之後使用者透過快照選擇器切換時，僅 `bffApi.dashboard.snapshot(id)` 取得明細。
 > - 「資產歷史趨勢」圖與 KPI 卡「較上次」皆以 `snapshotDate <= 基準日` 過濾後計算。
 
 #### Settings - Banks
@@ -1877,7 +1949,7 @@ Task 129 把「ETF 透視 top10 成份股」（如 `2383` 台光電，使用者�
 
 - **唯一新增的對外 LLM 呼叫在 business-services**：`market-analysis` 模組直接呼叫 `api.anthropic.com`（Anthropic Java SDK `com.anthropic:anthropic-java`）。此非「行情／報價外部 API」，不違反「即時股價走 Redis、收盤價走 DB、business-services 不直連外部行情 API」之規範（該規範針對 price/quote 資料）；business-services 本就有對外 egress（Gmail SMTP、rclone 備份）。
 - **新聞來源＝本地爬蟲 `news_headline`（Task 179 起，`web_search` 已移除）**：財經新聞由 `external-materials-service` 的 `NewsPoller`（每交易日 08:20／11:30／18:00 Asia/Taipei）爬權威來源＋TWSE 公開資訊、寫入 `news_headline`（見 Requirement 31 Task 149.21／177／178）；`MarketAnalysisService` 分析時讀近 `news-max-age-days` 天注入 prompt，模型僅據此清單挑選 `newsHighlights`，**不再掛 `web_search` server tool、不上網**。走勢量化輸入沿用既有 `twse_index_daily_history` / `us_index_daily_history`（同一事實來源）。
-- **BFF 一頁一支**：新增 `TodayMarketAnalysisBffController`（`/api/bff/today-market-analysis/**`），聚合「當日 + 歷史」單次回傳，前端只 render。
+- **BFF 一頁一支**：新增 `TodayMarketAnalysisBffController`（`/api/bff/today-market-analysis/**`），以 `Mono.zip` 聚合「當日 + 歷史 + 設定（含寄送時間 `sendTimes`）」單次回傳 `{today, history, settings}`，前端只 render。
 
 ```
 Scheduler(每分鐘 tick, MON-FRI, Asia/Taipei) ──命中 market_analysis_send_time 啟用時點?──isTwTradingDay?──▶ MarketAnalysisService.generateForSend(today)  ── Task 191：預設 seed 08:45（Task 186 之時點），可設多個時段，各重跑＋各寄一封（送批次時重置 email_sent_at）
@@ -1889,7 +1961,7 @@ Scheduler(每分鐘 tick, MON-FRI, Asia/Taipei) ──命中 market_analysis_sen
                                                                 │  依走勢量化 + 本地新聞清單 → 產生 JSON 判斷
                                                                 ▼
                                                      解析 JSON → upsert daily_market_analysis
-前端 TodayMarketAnalysisView ──▶ /api/bff/today-market-analysis ──▶ business /api/market-analysis/{today,history}
+前端 TodayMarketAnalysisView ──▶ /api/bff/today-market-analysis ──▶ business /api/market-analysis/{today,history,settings}
 （管理者）重新分析 ──▶ POST /api/bff/today-market-analysis/generate（限 ADMIN）──▶ business POST /api/market-analysis/generate
 ```
 
@@ -1954,9 +2026,12 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
 |---|---|---|
 | GET | `/api/bff/today-market-analysis?historyLimit=30` | `Mono.zip` 聚合 business `today` + `history` + `settings`（`settings.sendTimes` 內含寄送時間清單），單次回 `{today, history, settings}`。 |
 | POST | `/api/bff/today-market-analysis/generate` | 轉發 business `generate`；bff `SecurityConfig` 對此 POST 限 `AUTHORITY_ADMIN`。timeout 180s（thinking 可能耗時；Batch API 非同步）。 |
+| PUT | `/api/bff/today-market-analysis/settings` | 轉發 business `PUT /api/market-analysis/settings` 更新模型／思考深度；限 `AUTHORITY_ADMIN`。 |
 | POST | `/api/bff/today-market-analysis/send-times` | 轉發 business 新增寄送時間；bff `SecurityConfig` 限 `AUTHORITY_ADMIN`。回更新後清單。 |
 | DELETE | `/api/bff/today-market-analysis/send-times/{id}` | 轉發 business 刪除寄送時間；限 `AUTHORITY_ADMIN`。 |
 | PATCH | `/api/bff/today-market-analysis/send-times/{id}/active` | 轉發 business 切換啟用；限 `AUTHORITY_ADMIN`。 |
+
+另有 `TodayMarketAnalysisRecipientsBffRoutes`（同頁的 Gateway route 配置，非上表 controller）：`/api/bff/today-market-analysis/recipients/**` → rewrite 至 business `/api/notification-recipients/**`，供本頁維護分析寄送對象（見 Task 151「擴充：分析結果每日 Email 寄送 + 收件人訂閱選擇」）。
 
 ### 關鍵業務邏輯
 
@@ -1995,7 +2070,7 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
 
 ### 模型頁面可調（成本控管）
 
-分析**模型**與**思考深度（effort）**可由管理者在頁面切換（模型：Opus 4.8 / Sonnet 5 / Haiku 4.5；effort：low / medium / high），另有**每日自動分析開關（enabled）**可停用 08:45 排程（省整筆花費），皆持久化、下次分析生效、免改環境變數或重啟。（**Task 179 起「新聞搜尋次數（web search）」下拉已移除**，新聞固定讀本地 `news_headline`。）
+分析**模型**與**思考深度（effort）**可由管理者在頁面切換（模型：Opus 4.8 / Sonnet 5 / Haiku 4.5；effort：low / medium / high），另有**每日自動分析開關（enabled）**可停用各啟用中寄送時點的自動分析（停用時所有時段皆不觸發，省整筆花費），皆持久化、下次分析生效、免改環境變數或重啟。（**Task 179 起「新聞搜尋次數（web search）」下拉已移除**，新聞固定讀本地 `news_headline`。）
 
 - **資料模型**（Liquibase `v1.38.0-market-analysis-setting.sql` 建表；`v1.39.0` 增 `effort`、`v1.40.0` 增 `web_search_max_uses`、`v1.41.0` 增 `enabled`；**`v1.54.0` `DROP` `web_search_max_uses`（Task 179）**。單列設定表，比照 `backup_setting`）：
   ```sql
@@ -2016,13 +2091,13 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
   ALTER TABLE market_analysis_setting DROP COLUMN web_search_max_uses;
   ```
   Entity `MarketAnalysisSetting`（`@Id Integer id`、`model`、`effort`、`enabled`；**`webSearchMaxUses` 於 Task 179 移除**）＋ `MarketAnalysisSettingRepository`。
-- **解析**：`resolveModel()` = 設定表 `model`（非空）→ 否則 `@Value("${anthropic.model:claude-opus-4-8}")` 環境預設；`resolveEffort()` = `effort`（白名單內）→ 否則 `medium`；`isEnabled()` = `enabled` → 否則 `true`。`submitBatch` 每次呼叫前各取一次（故切換即時生效）；effort 以 `OutputConfig.builder().effort(...)`。**新聞來源固定本地 `news_headline`：不再有 `resolveWebSearchMaxUses()`、不再 `addTool(WebSearchTool…)`**；有本地新聞則 prompt 指示據清單列 `newsHighlights`、無則切為「不得杜撰新聞、`newsHighlights` 回空」。`isEnabled()` 則由 **`MarketAnalysisScheduler`** 於 08:45 cron 與開機 self-heal 開頭檢查：`false` 即 return 略過（不呼叫 LLM），手動 `generate()` 不檢查此旗標。
+- **解析**：`resolveModel()` = 設定表 `model`（非空）→ 否則 `@Value("${anthropic.model:claude-opus-4-8}")` 環境預設；`resolveEffort()` = `effort`（白名單內）→ 否則 `medium`；`isEnabled()` = `enabled` → 否則 `true`。`submitBatch` 每次呼叫前各取一次（故切換即時生效）；effort 以 `OutputConfig.builder().effort(...)`。**新聞來源固定本地 `news_headline`：不再有 `resolveWebSearchMaxUses()`、不再 `addTool(WebSearchTool…)`**；有本地新聞則 prompt 指示據清單列 `newsHighlights`、無則切為「不得杜撰新聞、`newsHighlights` 回空」。`isEnabled()` 則由 **`MarketAnalysisScheduler`** 於**每分鐘 tick 命中啟用寄送時點之後**檢查（未命中即零成本 return、根本不查 `enabled`，見 Requirement 31「關鍵業務邏輯」的排程段落），以及開機 self-heal 開頭檢查：`false` 即 return 略過（不呼叫 LLM），手動 `generate()` 不檢查此旗標。
 - **可選白名單／開關**：後端 curated 常數 `AVAILABLE_MODELS`（Opus 4.8／Sonnet 5／Haiku 4.5）、`AVAILABLE_EFFORTS`（`low`／`medium`／`high`）皆為「技術白名單」而非使用者可自訂的業務分類，故**不**套用「Enum 必須入庫由 `/api/settings/*` 管理」規範；`enabled` 為布林開關（非白名單）。`effort` 不列 `xhigh`／`max`（更貴、與省錢目的相反）。（`AVAILABLE_WEB_SEARCHES` 白名單於 Task 179 移除。）`updateSettings(model, effort, enabled)` 對有帶的白名單欄各自驗證（非法 → 400），`enabled` 直接設值，未帶之欄不變；至少須一項；回傳清單時若現值不在白名單則補入（下拉恆含現值）。
   - **成本觀點**：`enabled` 是最粗的槓桿——停用即當天完全不跑、零花費；`effort` 是主要槓桿（thinking 按 output token 計價，Opus $25/1M 最貴，`medium` 較隱含 `high` 省且對方向判斷足夠）。（新聞改讀本地 `news_headline`，已無付費 `web_search` 成本。）
 - **API**：
   | Method | Path | 說明 |
   |---|---|---|
-  | GET | `/api/market-analysis/settings` | `{ model, effort, enabled, availableModels:[{id,label}], availableEfforts:[{id,label}] }`；已登入者可讀。（`webSearchMaxUses`／`availableWebSearches` 於 Task 179 隨 `web_search` 一併移除。） |
+  | GET | `/api/market-analysis/settings` | `{ model, effort, enabled, availableModels:[{id,label}], availableEfforts:[{id,label}], sendTimes:[{id,time,active}] }`；已登入者可讀。（`sendTimes` 於 Task 191 併入本回應供頁面聚合，清單來源見 Requirement 31「API 設計」的 `/api/market-analysis/send-times`。`webSearchMaxUses`／`availableWebSearches` 於 Task 179 隨 `web_search` 一併移除。） |
   | PUT | `/api/market-analysis/settings` `{model?, effort?, enabled?}` | 更新模型／思考深度／每日自動分析開關（至少一項；未帶之欄不變）；`CurrentUserContext.isAdmin()` 否則 `AdminRequiredException`；白名單欄驗證。body 型別 `Map<String,Object>`（`enabled` 收 JSON boolean）。 |
 
   BFF：主 `GET /api/bff/today-market-analysis` 聚合回傳 `{ today, history, settings }`；`PUT /api/bff/today-market-analysis/settings` 為**泛型 Map 轉發**（body 原封轉給 business，故新增 `effort`／`web_search`／`enabled` 欄皆無需改 BFF），bff `SecurityConfig` 對該 `PUT` 限 `AUTHORITY_ADMIN`。
@@ -2131,7 +2206,7 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
   | PUT | `/profile` | 儲存理財條件 |
   | GET | `/current-allocation` | 最新快照現況配置（`CurrentAllocationDto`） |
   | GET | `/projection` | 退休現金流逐年試算（`RetirementProjectionDto`；決定性、非預測） |
-  | POST | `/generate` | 同步產生建議（body 帶條件、一併儲存 profile） |
+  | POST | `/generate` | **非同步**產生建議：body 帶條件（一併儲存 profile）→ 送 `generationExecutor` 背景執行緒池後**立即回傳 `PROCESSING` 列**，前端輪詢收尾（見上方「非同步（in-process 背景執行緒）而非同步阻塞或 Batch」） |
   | GET | `/settings` | 成本設定 + 可選清單 |
   | PUT | `/settings` `{model?, effort?, webSearchMaxUses?}` | 更新成本設定（`isAdmin()` 縱深，白名單驗證） |
 
@@ -2143,7 +2218,7 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
   （管理者）成本設定 ──▶ PUT /api/bff/portfolio-advice/settings（限 ADMIN）──▶ business PUT /api/portfolio-advice/settings
   ```
 
-- **前端**（`views/AssetAllocationAdviceView.vue`）：條件表單（生日／退休日期 `el-date-picker`、退休前年薪／年支出 `el-input-number`、理財目標 `el-select multiple`、風險 `el-radio-group`、獲利預期 `el-select`）＋「儲存條件」「產生建議」；現況配置與建議目標配置以純 CSS bar 呈現（避免 echarts tree-shaking 漏註冊風險）；建議卡片顯示 summary／風險評估／目標配置（比例＋理由，Task 165 加「目前→目標→增減碼金額」）／再平衡操作明細 `rebalancePlan`（紅減碼綠增碼＋估計金額）／調整動作（優先度 tag）／風險提醒／參考來源（`safeUrl` 擋非 http(s)）；免責聲明；歷次建議 `el-table` 可展開回顧當時條件與建議；管理者頁首成本設定（模型／思考深度／web 搜尋 `el-select`，`change` 即持久化）。**退休現金流試算卡（Task 165、退休後兩階段 Task 167）**：白話結論（撐到 100 歲剩餘／缺口年齡）＋假設列＋**ECharts 逐年資產餘額折線圖**（`use([CanvasRenderer, LineChart, Title/Tooltip/Legend/Grid/MarkLine/MarkPointComponent])` per-view 註冊，退休 markLine／長照起始 markLine／缺口 markPoint／0 軸 dashed）；退休試算假設欄（長照前年生活費、長照後年生活費、長照起始年齡、累積期／退休後年報酬率，報酬率留空 placeholder 顯示帶入預設）。現況與目標配置比例仍以純 CSS bar 呈現。`api/index.js` 加 `bffApi.portfolioAdvice`（generate 覆寫 200s timeout）。左選單 icon `Compass`。
+- **前端**（`views/AssetAllocationAdviceView.vue`）：條件表單（生日／退休日期 `el-date-picker`、退休前年薪／年支出 `el-input-number`、理財目標 `el-select multiple`、風險 `el-radio-group`、獲利預期 `el-select`）＋「儲存條件」「產生建議」；現況配置與建議目標配置以純 CSS bar 呈現（避免 echarts tree-shaking 漏註冊風險）；建議卡片顯示 summary／風險評估／目標配置（比例＋理由，Task 165 加「目前→目標→增減碼金額」）／再平衡操作明細 `rebalancePlan`（紅減碼綠增碼＋估計金額）／調整動作（優先度 tag）／風險提醒／參考來源（`safeUrl` 擋非 http(s)）；免責聲明；歷次建議 `el-table` 可展開回顧當時條件與建議；管理者頁首成本設定（模型／思考深度／web 搜尋 `el-select`，`change` 即持久化）。**退休現金流試算卡（Task 165、退休後兩階段 Task 167）**：白話結論（撐到 100 歲剩餘／缺口年齡）＋假設列＋**ECharts 逐年資產餘額折線圖**（`use([CanvasRenderer, LineChart, Title/Tooltip/Legend/Grid/MarkLine/MarkPointComponent])` per-view 註冊，退休 markLine／長照起始 markLine／缺口 markPoint／0 軸 dashed）；退休試算假設欄（長照前年生活費、長照後年生活費、長照起始年齡、累積期／退休後年報酬率，報酬率留空 placeholder 顯示帶入預設）。現況與目標配置比例仍以純 CSS bar 呈現。`api/index.js` 加 `bffApi.portfolioAdvice`（generate 覆寫 60s timeout；`/generate` 為非同步立即回 `PROCESSING`，故毋須長 timeout，實際等待由 `PROCESSING` 輪詢承擔）。左選單 icon `Compass`。
 
 ### 不處理
 

@@ -862,7 +862,7 @@ CLAUDE.md 規定「相同的資料只能存一份；禁止同一欄位同時以 
 - [x] 29.2 修改 `getRealtimePrice(row)`：
   - 僅當「基準日 = 今日」且該市場（`row.market`）`marketStatus.{tw|us}MarketOpen === true` 時，才回傳 `stockPrices` 即時價＋漲跌%
   - 否則回 `null`，模板自動 fallback 顯示快照中保存的 `row.stockPrice`（不顯示漲跌%）
-- [x] 29.3 即時價來源（`StockPriceRepository`）已與「觀察股票」共用，無需後端調整；前端輪詢仍維持 5 分鐘
+- [x] 29.3 即時價來源（`StockPriceService` / `StockPriceHistoryRepository`）已與「觀察股票」共用，無需後端調整；前端輪詢仍維持 5 分鐘
 
 ### Task 30: 修復基準日切換後圖表未跟動
 
@@ -1532,7 +1532,7 @@ Task 54 把 fund_master 7 筆寫死在 DataInitializer，使用者沒有 UI 可�
         `fundClassCode`、`baseBeginDate/baseEndDate` YYYY/MM、`asiFreqList:[]`、`_pageNum:1`、
         `_pageSize:50`），onshore POST `/api/onshore/fund-info/info-dividend/query-dividend`；
         回應解析 `list[].asiBaseDate`（YYYY/MM/DD）與 `asiAmt`
-- [x] 56.4 external-materials-service `FundDividendSourceQuery`：upsert `fund_dividend_history`
+- [x] 56.4 external-materials-service `FundNavSourceQuery.upsertDividend(...)`：upsert `fund_dividend_history`
         （`(fund_code, base_date)` 視為覆寫）；讀取現有 fund_master active 清單沿用
         `FundNavSourceQuery.findActiveFunds()`
 - [x] 56.5 external-materials-service `FundDividendPoller`：`@Scheduled(cron="0 5 9 * * *",
@@ -1805,20 +1805,22 @@ Task 59 移除 `shouldApplyLive` 的「市場開盤」閘門時，`getRealtimePr
 - [x] 61.5 `TwseIndexDailyHistory` entity 加 `openPoint` / `highPoint` / `lowPoint` 欄位
 - [x] 61.6 `MacroHistoryService.refreshTwseDaily` 解析 FMTQIK `OpeningIndex` / `HighestIndex` / `LowestIndex` / `ClosingIndex` 同步 upsert
 - [x] 61.7 `TechnicalIndicatorService` 對 `code=0000 & market=台股` 改讀 `twse_index_daily_history` 計算 MA20 / MA60 / MA240 / KD（與一般股票同算法，high/low 來自 OHLC 欄位）
-- [x] 61.8 刪除 `WatchStock` entity / `WatchStockRepository` / `WatchStockController` / `WatchStockService`（service 邏輯移至 BFF/衍生 view）
+- [x] 61.8 刪除 `WatchStock` entity / `WatchStockRepository`（表由 61.2 之 `v1.22.1-drop-watch-stock.sql` DROP）；`WatchStockController` / `WatchStockService` 保留，改為由 `stock_alert` 衍生觀察清單（不再讀自有表）
 - [x] 61.9 `StockAlertRepository` 新增：
         - `findDistinctStockCodeMarket()`：回傳所有 (stockCode, market) 去重對 + 該對最小 displayOrder
         - `findByStockCodeAndMarket(code, market)`：取該股票全部 alert（用於拖曳重排與級聯刪除）
 - [x] 61.10 `StockAlertService.create` 對 `0000 & 台股` 跳過 `stockMasterRepo.upsert`（避免被排程當真股票抓價）；`lookupName` 對 `0000` 短路回 `台股大盤`
-- [x] 61.11 新增 `WatchListService`（取代舊 `WatchStockService`）：
+- [x] 61.11 `WatchStockService` 改寫為「`stock_alert` 衍生 view」（不再讀自有 `watch_stock` 表）：
         - `findAll()`：呼叫 `StockAlertRepository.findDistinctStockCodeMarket()` → 對每筆組裝 live 報價（`PriceQueryService`，0000 走 `twse_index_daily_history`）+ 技術指標 + 該股票最近觸發資訊
-        - `delete(stockCode, market)`：刪除該 (code, market) 所有 alert（FK 級聯 trigger 歷史）
         - `reorder(orderedKeys)`：依 orderedKeys 順序，把每個股票所有 alert 的 `displayOrder` 整組區段重排（保持條件之間的相對順序）
-- [x] 61.12 `WatchStockController` 改為 `WatchListController`，路徑 `/api/watch-list`：`GET`、`DELETE /{stockCode}/{market}`、`PUT /order`（接 `[{stockCode, market}]` 陣列）；不再有 POST（建立由 `/api/stock-alerts` 接手）
+        - 不提供 watch-stock 級的 delete：移除觀察由前端於「警示條件」頁刪除該股票所有 alert 達成
+- [x] 61.12 `WatchStockController` 維持類名與路徑 `/api/watch-stocks`：`GET`、`PUT /order`（接 `[{stockCode, market}]` 陣列）、`POST /resend-digest`、`GET /chart.png`、`GET /intraday.png`；無 POST 建立（建立由 `/api/stock-alerts` 接手）、無 DELETE（見 61.11）
 
 **D. BFF**
 
-- [x] 61.13 `WatchStockBffController` 改名 `WatchListBffController`：rewrite `/api/bff/watch-stock/**` → `/api/watch-list/**`（路徑可保留 `watch-stock` 不動以維持前端 URL 穩定，僅內部 rewrite 目標改變）
+- [x] 61.13 `WatchStockBffRoutes`（Spring Cloud Gateway 純 passthrough route）：rewrite `/api/bff/watch-stock(?<seg>/?.*)` → `/api/watch-stocks${seg}`；衍生與 enrichment 一律在 business-services 完成，BFF 僅轉發不重算
+
+> **命名註記**：61.8／61.11／61.12／61.13 原計畫將 `WatchStock` 全面改名為 `WatchList`（`WatchListService`／`WatchListController`／`/api/watch-list`），實作時決定保留既有 `WatchStock` 命名與 `/api/watch-stocks` 路徑（避免無功能收益的大範圍改名）。任務實質內容（廢除 `watch_stock` 表、改由 `stock_alert` 衍生）確實已完成，故維持 `[x]`；以上描述於 2026-07-15 稽核時對齊實況，正確架構記載見 `design.md`「`WatchStockBffRoutes`」段落。
 
 **E. Frontend**
 
@@ -3793,16 +3795,16 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 
 #### Steps:
 
-- [ ] 152.1 spec：`requirements.md` Requirement 32（條件表單／個人化建議／現況配置／歷史／成本設定／多租戶／降級／免責）；`design.md` 新增設計段 + Routing 表 `/asset-allocation-advice` 列；本 Task。
-- [ ] 152.2 資料層：Liquibase `v1.44.0-portfolio-advice.sql`（三 changeset）——`investment_profile`（`owner_user_id` UNIQUE、age/horizon/monthly/goals/risk/expected_return/updated_at）、`portfolio_advice`（owner + status/model/created_at/completed_at/error + 條件快照 + based_on_snapshot_id/date/total_assets + raw_response/result_json，索引 `(owner_user_id, created_at DESC)`）、`portfolio_advice_setting`（單列 id=1，model/effort/web_search_max_uses/updated_at，seed opus-4-8/medium/4）；註冊到 `db.changelog-master.yaml`。Entity `InvestmentProfile`／`PortfolioAdvice`（皆 `@Filter ownerFilter`）／`PortfolioAdviceSetting`；Repository 三支（`findByOwnerUserId`／`findFirstByOwnerUserIdOrderByCreatedAtDesc`＋`findRecentByOwner`／by-id）。
-- [ ] 152.3 DTO：`PortfolioAdviceResult`（Claude JSON 解析目標：summary/riskAssessment/targetAllocation/actions/warnings/references）、`InvestmentProfileDto`（含 goal/risk/return 可選清單、goals 陣列往返）、`PortfolioAdviceDto`（`from(entity, mapper)` 解析 result_json、`none()`）、`PortfolioAdviceSettingsDto`（比照 `MarketAnalysisSettingsDto`）、`CurrentAllocationDto`（現況配置）。
-- [ ] 152.4 Service：`PortfolioAdviceService`——profile 讀寫（`TenantGuard.requireCurrentUserId` 綁 owner、白名單驗證）、settings 讀寫（白名單）、`getCurrentAllocation`（最新快照存款/基金/股票占比）、`generate`（**非同步**：upsert 條件→讀最新快照＋子表明細→**在 request 執行緒組好 system/user prompt**→落 `PROCESSING` 即回→提交背景執行緒池 `runGeneration`）；`runGeneration`（背景）依 setting model/effort/web_search 呼叫 `messages().create`→解析 JSON→sanitize references（http(s) 白名單）→**by-id 更新** OK/FAILED，不拋；金鑰未設落 NOT_CONFIGURED（request 執行緒）；`latest()` 對 PROCESSING 逾 10 分鐘自癒判 FAILED。**改非同步原因**：同步阻塞撞 nginx `/api/` `proxy_read_timeout 60s`（Claude 呼叫 ~90s）→ 504、無結果。多租戶：owner-scoped 讀取全在 request 執行緒，背景只 Claude+by-id（`@Filter` 不套 by-id），避開 `feedback_hibernate_filter_aspect` 坑。免 enum 寫死（goal/risk/return/model/effort 皆服務層白名單常數）。
-- [ ] 152.5 Controller：`PortfolioAdviceController`（`/api/portfolio-advice`）——`GET /latest`、`GET /history`、`GET /profile`、`PUT /profile`、`GET /current-allocation`、`POST /generate`、`GET /settings`、`PUT /settings`（`isAdmin()` 縱深）。
-- [ ] 152.6 BFF：`PortfolioAdviceBffController`（`/api/bff/portfolio-advice`）——`GET` `Mono.zip` 聚合 latest/history/profile/settings/currentAllocation；`POST /generate`（timeout 180s）、`PUT /profile`、`PUT /settings` passthrough。`SecurityConfig` 加 `PUT /api/bff/portfolio-advice/settings` 限 ADMIN（generate/profile 落 `authenticated()`）。
-- [ ] 152.7 前端：`api/index.js` 加 `bffApi.portfolioAdvice`（get/saveProfile/generate/updateSettings）；`App.vue` 選單加「資產配置建議」（icon Compass）；`router/index.js` 加路由；新增 `views/AssetAllocationAdviceView.vue`（條件表單 + 現況配置 CSS bar + AI 建議卡片（目標配置對照/動作/風險/來源 `safeUrl`）+ **PROCESSING 狀態 alert 並每 5s 靜默輪詢 `load(true)`（避免全頁 loading 閃爍）、完成自動更新** + 歷次建議可展開 + 免責 + 管理者成本設定）。
+- [x] 152.1 spec：`requirements.md` Requirement 32（條件表單／個人化建議／現況配置／歷史／成本設定／多租戶／降級／免責）；`design.md` 新增設計段 + Routing 表 `/asset-allocation-advice` 列；本 Task。
+- [x] 152.2 資料層：Liquibase `v1.44.0-portfolio-advice.sql`（三 changeset）——`investment_profile`（`owner_user_id` UNIQUE、age/horizon/monthly/goals/risk/expected_return/updated_at）、`portfolio_advice`（owner + status/model/created_at/completed_at/error + 條件快照 + based_on_snapshot_id/date/total_assets + raw_response/result_json，索引 `(owner_user_id, created_at DESC)`）、`portfolio_advice_setting`（單列 id=1，model/effort/web_search_max_uses/updated_at，seed opus-4-8/medium/4）；註冊到 `db.changelog-master.yaml`。Entity `InvestmentProfile`／`PortfolioAdvice`（皆 `@Filter ownerFilter`）／`PortfolioAdviceSetting`；Repository 三支（`findByOwnerUserId`／`findFirstByOwnerUserIdOrderByCreatedAtDesc`＋`findRecentByOwner`／by-id）。
+- [x] 152.3 DTO：`PortfolioAdviceResult`（Claude JSON 解析目標：summary/riskAssessment/targetAllocation/actions/warnings/references）、`InvestmentProfileDto`（含 goal/risk/return 可選清單、goals 陣列往返）、`PortfolioAdviceDto`（`from(entity, mapper)` 解析 result_json、`none()`）、`PortfolioAdviceSettingsDto`（比照 `MarketAnalysisSettingsDto`）、`CurrentAllocationDto`（現況配置）。
+- [x] 152.4 Service：`PortfolioAdviceService`——profile 讀寫（`TenantGuard.requireCurrentUserId` 綁 owner、白名單驗證）、settings 讀寫（白名單）、`getCurrentAllocation`（最新快照存款/基金/股票占比）、`generate`（**非同步**：upsert 條件→讀最新快照＋子表明細→**在 request 執行緒組好 system/user prompt**→落 `PROCESSING` 即回→提交背景執行緒池 `runGeneration`）；`runGeneration`（背景）依 setting model/effort/web_search 呼叫 `messages().create`→解析 JSON→sanitize references（http(s) 白名單）→**by-id 更新** OK/FAILED，不拋；金鑰未設落 NOT_CONFIGURED（request 執行緒）；`latest()` 對 PROCESSING 逾 10 分鐘自癒判 FAILED。**改非同步原因**：同步阻塞撞 nginx `/api/` `proxy_read_timeout 60s`（Claude 呼叫 ~90s）→ 504、無結果。多租戶：owner-scoped 讀取全在 request 執行緒，背景只 Claude+by-id（`@Filter` 不套 by-id），避開 `feedback_hibernate_filter_aspect` 坑。免 enum 寫死（goal/risk/return/model/effort 皆服務層白名單常數）。
+- [x] 152.5 Controller：`PortfolioAdviceController`（`/api/portfolio-advice`）——`GET /latest`、`GET /history`、`GET /profile`、`PUT /profile`、`GET /current-allocation`、`POST /generate`、`GET /settings`、`PUT /settings`（`isAdmin()` 縱深）。
+- [x] 152.6 BFF：`PortfolioAdviceBffController`（`/api/bff/portfolio-advice`）——`GET` `Mono.zip` 聚合 latest/history/profile/settings/currentAllocation；`POST /generate`（timeout 180s）、`PUT /profile`、`PUT /settings` passthrough。`SecurityConfig` 加 `PUT /api/bff/portfolio-advice/settings` 限 ADMIN（generate/profile 落 `authenticated()`）。
+- [x] 152.7 前端：`api/index.js` 加 `bffApi.portfolioAdvice`（get/saveProfile/generate/updateSettings）；`App.vue` 選單加「資產配置建議」（icon Compass）；`router/index.js` 加路由；新增 `views/AssetAllocationAdviceView.vue`（條件表單 + 現況配置 CSS bar + AI 建議卡片（目標配置對照/動作/風險/來源 `safeUrl`）+ **PROCESSING 狀態 alert 並每 5s 靜默輪詢 `load(true)`（避免全頁 loading 閃爍）、完成自動更新** + 歷次建議可展開 + 免責 + 管理者成本設定）。
 - [ ] 152.8 build 驗證：`.env` 複製進 worktree；`--no-cache` 重 build business-services + bff + frontend、recreate；驗證 Liquibase v1.44.0 ran、3 表建立、singleton seed、選單/路由、條件持久化、產生建議落 OK、現況配置與 dashboard 一致、owner 隔離、ADMIN 才能改設定。
-- [ ] 152.10 退休兩階段（每月投入退休後歸零）：`investment_profile` 加 `retirement_date DATE`（`v1.44.1-retirement-date.sql` addColumn，`YearMonthDateConverter` 存該月一號）；`InvestmentProfileDto` 加 `retirementDate`（String `"YYYY-MM"` 往返，對齊前端 `value-format`）；`PortfolioAdviceService.saveProfile/generate` 帶退休日期、`buildUserPrompt` 切「累積期／退休後守成期」兩段、月投入僅乘累積年數（`projectedContribution`）、`buildSystemPrompt` 加退休保守規則（1a）；`retirementSpan()` 現算累積／退休後年數（不入庫）；Controller 加 `yearMonthOrNull` parser；BFF `Map` passthrough 無需改；前端 `AssetAllocationAdviceView` 加 `el-date-picker type="month"` 欄位＋唯讀衍生提示（累積／退休後年數、退休早於今天或晚於終點警示）。
-- [ ] 152.9 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）。
+- [x] 152.10 退休兩階段（每月投入退休後歸零）：`investment_profile` 加 `retirement_date DATE`（`v1.44.1-retirement-date.sql` addColumn，`YearMonthDateConverter` 存該月一號）；`InvestmentProfileDto` 加 `retirementDate`（String `"YYYY-MM"` 往返，對齊前端 `value-format`）；`PortfolioAdviceService.saveProfile/generate` 帶退休日期、`buildUserPrompt` 切「累積期／退休後守成期」兩段、月投入僅乘累積年數（`projectedContribution`）、`buildSystemPrompt` 加退休保守規則（1a）；`retirementSpan()` 現算累積／退休後年數（不入庫）；Controller 加 `yearMonthOrNull` parser；BFF `Map` passthrough 無需改；前端 `AssetAllocationAdviceView` 加 `el-date-picker type="month"` 欄位＋唯讀衍生提示（累積／退休後年數、退休早於今天或晚於終點警示）。
+- [x] 152.9 commit + 兩段式 merge（feature `e4e2db42` → main `bccf683e`，`--no-ff`）。
 
 ### Task 153: 修正「當日」分時走勢盤中誤判「無當日分時資料」（bug fix）
 
@@ -3840,7 +3842,7 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 154.3 Docker：`--no-cache` 重 build external-materials-service + recreate（JVM service，避免 stale jar）；unzip 運行 jar 驗證 `PriceCacheWriter.class` 引用 `isUkMarketOpen`/`isUkMarketJustClosed`/`zoneOf`（含 `switch(market)` 新邏輯）。
 - [x] 154.4 清污染資料：`DEL` 既有 `price:ticks:英股:*` 與 `price:dayhl:英股:*`（跨日混桶），交由盤中 polling（修正後）與 cold-start `refreshOne`（Yahoo range=1d 經 `refreshYahooOne` 日期過濾）重建乾淨的今日 bucket。
 - [x] 154.5 手動驗證：容器內 curl `/internal/intraday-ticks?code=VWRA&market=英股`（URL-encode）回單一日期序列（VWRA/CSPX/VUAA/IB01 皆 87 筆、僅今日 07-08、時間軸單調遞增）；美股對照 VOO 維持乾淨單日並持續增長。前端瀏覽器由使用者確認。
-- [ ] 154.6 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）。
+- [x] 154.6 commit + 兩段式 merge（feature `2fe05c3b` → main `bfa424e2`，`--no-ff`；與同批兩項當日走勢修正合併 merge）。
 
 ### Task 155: 修正股票分析「當日」走勢被均線壓成平線（bug fix）
 
@@ -3962,15 +3964,15 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 
 #### 實作
 
-- [ ] 160.1 Liquibase `v1.46.0-tw-market-closure.sql`：建 `tw_market_closure(closure_date PK, reason, source, raw_status, detected_at)`；master include。
-- [ ] 160.2 ext-materials `TwMarketClosureQuery`（JdbcTemplate）：`findAll()` / `upsert(date, reason, source, raw)`（ON CONFLICT 覆蓋）。
-- [ ] 160.3 ext-materials `TwTyphoonClosureService`：DGPA 爬取 + 臺北市「今天」解析（`parseTaipeiTodayClause` / `closedForTrading`）+ upsert + in-memory 快取（`closuresForYear`）+ `ApplicationReadyEvent` 載入。
-- [ ] 160.4 ext-materials `TwClosurePoller`：`0 0/15 5-8 * * MON-FRI`（Asia/Taipei）+ 開機 self-heal。
-- [ ] 160.5 ext-materials `MarketDataFetchService.getTwHolidays`：union `closuresForYear`（read-time 合併、不改 TWSE 快取）；`InternalPriceController` 加 `POST /internal/tw-closure/detect`。
-- [ ] 160.6 business-services `MarketDataService.getTwHolidays`：當年度改採短 TTL（10 分鐘）快取 `twHolidayCurrentYearCache`（過去 / 未來年度仍永久快取），確保同日任何時刻偵測到的休市於 ≤10 分鐘傳播；`fetchTwHolidaysFromExt` 回空表時不寫入快取（不毒化）。
-- [ ] 160.7 spec：requirements.md Requirement 7 新增 AC、design.md 新增本設計、本 Task。
+- [x] 160.1 Liquibase `v1.46.0-tw-market-closure.sql`：建 `tw_market_closure(closure_date PK, reason, source, raw_status, detected_at)`；master include。
+- [x] 160.2 ext-materials `TwMarketClosureQuery`（JdbcTemplate）：`findAll()` / `upsert(date, reason, source, raw)`（ON CONFLICT 覆蓋）。
+- [x] 160.3 ext-materials `TwTyphoonClosureService`：DGPA 爬取 + 臺北市「今天」解析（`parseTaipeiTodayClause` / `closedForTrading`）+ upsert + in-memory 快取（`closuresForYear`）+ `ApplicationReadyEvent` 載入。
+- [x] 160.4 ext-materials `TwClosurePoller`：`0 0/15 5-8 * * MON-FRI`（Asia/Taipei）+ 開機 self-heal。
+- [x] 160.5 ext-materials `MarketDataFetchService.getTwHolidays`：union `closuresForYear`（read-time 合併、不改 TWSE 快取）；`InternalPriceController` 加 `POST /internal/tw-closure/detect`。
+- [x] 160.6 business-services `MarketDataService.getTwHolidays`：當年度改採短 TTL（10 分鐘）快取 `twHolidayCurrentYearCache`（過去 / 未來年度仍永久快取），確保同日任何時刻偵測到的休市於 ≤10 分鐘傳播；`fetchTwHolidaysFromExt` 回空表時不寫入快取（不毒化）。
+- [x] 160.7 spec：requirements.md Requirement 7 新增 AC、design.md 新增本設計、本 Task。
 - [ ] 160.8 Docker：`--no-cache` 重 build ext-materials + business，recreate；驗證 `tw_market_closure` 建表、`/internal/tw-closure/detect` 偵測、market-status `twMarketOpen=false`、交易日曆顯示颱風假。
-- [ ] 160.9 commit + 兩段式 merge。
+- [x] 160.9 commit + 兩段式 merge（feature `0eb893af` → main `28f588df`，`--no-ff`）。
 
 #### 解析規則單元驗證（`closedForTrading`）
 
@@ -3984,9 +3986,9 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 #### 對抗式 code review 修正（Task 160 部署後）
 
 多 agent 審查發現並修正 3 類缺陷：
-- [ ] 160.10（A）business 端 `twHolidayCache` 原僅早晨時窗 evict、無 TTL → 08:45 後（盤中部署 self-heal / 手動 detect / 08:45 tick race）偵測到的休市整日無法傳播。改為當年度短 TTL（見 160.6）。
-- [ ] 160.11（B）`fetchTwHolidaysFromExt` 逾時回 `Map.of()` 被 `computeIfAbsent` 當有效值快取整年 → 一次瞬斷毒化整年假日（連國定假日一起漏）。**當年度與過去/未來年度兩條路徑**皆改為空表不寫快取、沿用前值（第二輪審查補上非當年度路徑的一致性）。
-- [ ] 160.12（C）`closedForTrading` 排除清單漏 DGPA 正式用詞「晚間」→ 純晚間停班誤判為全日休市（false positive）。補上「晚間」。
+- [x] 160.10（A）business 端 `twHolidayCache` 原僅早晨時窗 evict、無 TTL → 08:45 後（盤中部署 self-heal / 手動 detect / 08:45 tick race）偵測到的休市整日無法傳播。改為當年度短 TTL（見 160.6）。
+- [x] 160.11（B）`fetchTwHolidaysFromExt` 逾時回 `Map.of()` 被 `computeIfAbsent` 當有效值快取整年 → 一次瞬斷毒化整年假日（連國定假日一起漏）。**當年度與過去/未來年度兩條路徑**皆改為空表不寫快取、沿用前值（第二輪審查補上非當年度路徑的一致性）。
+- [x] 160.12（C）`closedForTrading` 排除清單漏 DGPA 正式用詞「晚間」→ 純晚間停班誤判為全日休市（false positive）。補上「晚間」。
 
 ### Task 161：颱風假「當日」分時圖顯示昨收平盤線 — 資料層一體休市（偵測落後補清）（bug fix）
 
@@ -4009,13 +4011,13 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 
 #### 實作
 
-- [ ] 161.1 ext-materials `StockSourceQuery.deleteTwHistoryOn(date)`：`DELETE FROM stock_price_history WHERE market='台股' AND trading_date=?`，回刪除筆數。
-- [ ] 161.2 ext-materials `IntradayTickStore.purgeTwTicksOn(date)`：刪 `price:ticks:台股:*:date` 全部 key，回刪除 key 數。
-- [ ] 161.3 ext-materials `TwTyphoonClosureService`：注入 `StockSourceQuery` / `IntradayTickStore`；新增 `purgeClosureMarketData(date)`；`detectAndPersistToday` 命中後呼叫；`@EventListener(ApplicationReadyEvent)` 改 `onApplicationReady`（`loadFromDb` + `selfHealClosureMarketData` 掃本年度 `closuresForYear` 逐日清）。
-- [ ] 161.3b ext-materials `InternalPriceController.ticksWithColdStart`：target 非交易日（`!clock.isTradingDay`）時不 cold-start `refreshOne`——堵住「該檔無歷史 → `findMaxTradingDate` 空 → `.orElse(today)` 落在颱風日 → 抓 Yahoo 5m 昨收幻影再度污染」邊角；退回空序列（前端顯示「無當日分時資料」）。
-- [ ] 161.4 spec：requirements.md Requirement 7 新增 AC、design.md 颱風假段補資料層一體休市、本 Task。
+- [x] 161.1 ext-materials `StockSourceQuery.deleteTwHistoryOn(date)`：`DELETE FROM stock_price_history WHERE market='台股' AND trading_date=?`，回刪除筆數。
+- [x] 161.2 ext-materials `IntradayTickStore.purgeTwTicksOn(date)`：刪 `price:ticks:台股:*:date` 全部 key，回刪除 key 數。
+- [x] 161.3 ext-materials `TwTyphoonClosureService`：注入 `StockSourceQuery` / `IntradayTickStore`；新增 `purgeClosureMarketData(date)`；`detectAndPersistToday` 命中後呼叫；`@EventListener(ApplicationReadyEvent)` 改 `onApplicationReady`（`loadFromDb` + `selfHealClosureMarketData` 掃本年度 `closuresForYear` 逐日清）。
+- [x] 161.3b ext-materials `InternalPriceController.ticksWithColdStart`：target 非交易日（`!clock.isTradingDay`）時不 cold-start `refreshOne`——堵住「該檔無歷史 → `findMaxTradingDate` 空 → `.orElse(today)` 落在颱風日 → 抓 Yahoo 5m 昨收幻影再度污染」邊角；退回空序列（前端顯示「無當日分時資料」）。
+- [x] 161.4 spec：requirements.md Requirement 7 新增 AC、design.md 颱風假段補資料層一體休市、本 Task。
 - [ ] 161.5 Docker：`--no-cache` 重 build ext-materials，recreate；開機 self-heal 自動清 7/10；驗證 `stock_price_history` 無 7/10 台股列、Redis 無 `price:ticks:台股:*:2026-07-10`、`intraday-ticks` 回 7/9、前端「當日」顯示 7/9（英股 7/10 bucket 與大盤不受影響）。
-- [ ] 161.6 commit + 兩段式 merge。
+- [x] 161.6 commit + 兩段式 merge（feature `c8910292` → main `0d2179c8`，`--no-ff`）。
 
 ### Task 162：颱風假不寄「今日股市分析」每日 email — 收尾寄信前重驗交易日（縱深守門）
 
@@ -4040,10 +4042,10 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 
 #### 實作
 
-- [ ] 162.1 backend `MarketAnalysisService`：注入 `MarketDataService`；`finalizeIfReady` 於 `dispatchDaily` 前加 `if (!marketDataService.isTwTradingDay(date))` → log 並略過寄信（分析仍 `save` 為 OK）。
-- [ ] 162.2 spec：requirements.md Requirement 7 新增 AC、本 Task。
+- [x] 162.1 backend `MarketAnalysisService`：注入 `MarketDataService`；`finalizeIfReady` 於 `dispatchDaily` 前加 `if (!marketDataService.isTwTradingDay(date))` → log 並略過寄信（分析仍 `save` 為 OK）。
+- [x] 162.2 spec：requirements.md Requirement 7 新增 AC、本 Task。
 - [ ] 162.3 Docker：`--no-cache` 重 build business-services，recreate；驗證颱風假日（如 7/10）收尾不寄、分析仍可查。
-- [ ] 162.4 commit + 兩段式 merge。
+- [x] 162.4 commit + 兩段式 merge（feature `dca78ffd` → main `259ebd2c`，`--no-ff`）。
 
 ### Task 163：花錢前先做權威即時颱風假偵測 — 避免颱風假仍白花 LLM 費用送出分析批次
 
@@ -4065,11 +4067,11 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 
 #### 實作
 
-- [ ] 163.1 backend `MarketDataService.refreshTwClosureToday()`：POST ext `/internal/tw-closure/detect`（20s timeout、best-effort try/catch）→ 回傳權威 `closedToday`；**不動假日快取**（對抗式審查修正，見設計決策）。
-- [ ] 163.2 backend `MarketAnalysisScheduler`：`scheduledAnalysis`（`closedToday || !isTwTradingDay`）與 `selfHealOnStartup`（`!closedToday && isTwTradingDay`）短路。
-- [ ] 163.3 spec：requirements.md Requirement 7 新增 AC、本 Task。
+- [x] 163.1 backend `MarketDataService.refreshTwClosureToday()`：POST ext `/internal/tw-closure/detect`（20s timeout、best-effort try/catch）→ 回傳權威 `closedToday`；**不動假日快取**（對抗式審查修正，見設計決策）。
+- [x] 163.2 backend `MarketAnalysisScheduler`：`scheduledAnalysis`（`closedToday || !isTwTradingDay`）與 `selfHealOnStartup`（`!closedToday && isTwTradingDay`）短路。
+- [x] 163.3 spec：requirements.md Requirement 7 新增 AC、本 Task。
 - [ ] 163.4 Docker：`--no-cache` 重 build business-services，recreate；驗證啟動時 self-heal 前置偵測 log、颱風假日不送批次。
-- [ ] 163.5 commit + 兩段式 merge。
+- [x] 163.5 commit + 兩段式 merge（feature `7e35550d` → main `a4606834`，`--no-ff`）。
 
 ### Task 164：理財條件強化 — 生日/退休全日期、勞保勞退退休後現金流、通膨大筆花費（餵入 AI）
 
@@ -4094,14 +4096,14 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 
 #### 實作
 
-- [ ] 164.1 spec：requirements.md Requirement 32 新增 AC、design.md 資料模型／正規化／service 段、本 Task。
-- [ ] 164.2 資料層：Liquibase `v1.47.0-financial-planning-fields.sql`（`investment_profile` addColumn `birth_date`/勞保勞退四欄/`assumed_annual_inflation_rate`、dropColumn `age`；新表 `investment_planned_expense` ＋索引）；註冊 master。Entity `InvestmentProfile`（`age`→`birthDate`、`retirementDate` `LocalDate`、勞保勞退/通膨欄）、新 `InvestmentPlannedExpense`（`@Filter ownerFilter`）；Repository `InvestmentPlannedExpenseRepository`（`findByOwnerUserIdOrderByExpenseDate`／`deleteByOwnerUserId`）。移除 `YearMonthDateConverter`。
-- [ ] 164.3 DTO：`InvestmentProfileDto` 加 `birthDate`/勞保勞退/通膨率/`plannedExpenses` 清單、移除 `age`；新 `InvestmentProfileInput`（Controller→Service 命令物件）與 `PlannedExpenseDto`。
-- [ ] 164.4 Service：`saveProfile(InvestmentProfileInput)`／`generate(InvestmentProfileInput)`（大筆花費 replace）；`retirementSpan(LocalDate)`；`deriveAge(birthDate)`；buildUserPrompt 加「退休後現金流／未來支出」段（勞保月領/勞退一次領照填、大筆花費含通膨換算 `inflate(amount, rate, expenseDate)`）；buildSystemPrompt 加原則；產生時 `portfolio_advice.age` 寫衍生年齡。
-- [ ] 164.5 Controller：`PortfolioAdviceController` `PUT /profile`／`POST /generate` 解析新欄位與 `plannedExpenses` 清單、生日/退休/勞保勞退日期，組 `InvestmentProfileInput`。
-- [ ] 164.6 前端：`AssetAllocationAdviceView.vue`——生日／退休 `type="date"`、衍生年齡提示、假設年通膨率、勞保（月領＋起領年月）／勞退（一次領＋領取年月）區塊、大筆花費動態清單（新增/刪除列，日期＋用途＋今日金額），payload 帶新欄位；退休日期須晚於今天驗證沿用。
+- [x] 164.1 spec：requirements.md Requirement 32 新增 AC、design.md 資料模型／正規化／service 段、本 Task。
+- [x] 164.2 資料層：Liquibase `v1.47.0-financial-planning-fields.sql`（`investment_profile` addColumn `birth_date`/勞保勞退四欄/`assumed_annual_inflation_rate`、dropColumn `age`；新表 `investment_planned_expense` ＋索引）；註冊 master。Entity `InvestmentProfile`（`age`→`birthDate`、`retirementDate` `LocalDate`、勞保勞退/通膨欄）、新 `InvestmentPlannedExpense`（`@Filter ownerFilter`）；Repository `InvestmentPlannedExpenseRepository`（`findByOwnerUserIdOrderByExpenseDate`／`deleteByOwnerUserId`）。移除 `YearMonthDateConverter`。
+- [x] 164.3 DTO：`InvestmentProfileDto` 加 `birthDate`/勞保勞退/通膨率/`plannedExpenses` 清單、移除 `age`；新 `InvestmentProfileInput`（Controller→Service 命令物件）與 `PlannedExpenseDto`。
+- [x] 164.4 Service：`saveProfile(InvestmentProfileInput)`／`generate(InvestmentProfileInput)`（大筆花費 replace）；`retirementSpan(LocalDate)`；`deriveAge(birthDate)`；buildUserPrompt 加「退休後現金流／未來支出」段（勞保月領/勞退一次領照填、大筆花費含通膨換算 `inflate(amount, rate, expenseDate)`）；buildSystemPrompt 加原則；產生時 `portfolio_advice.age` 寫衍生年齡。
+- [x] 164.5 Controller：`PortfolioAdviceController` `PUT /profile`／`POST /generate` 解析新欄位與 `plannedExpenses` 清單、生日/退休/勞保勞退日期，組 `InvestmentProfileInput`。
+- [x] 164.6 前端：`AssetAllocationAdviceView.vue`——生日／退休 `type="date"`、衍生年齡提示、假設年通膨率、勞保（月領＋起領年月）／勞退（一次領＋領取年月）區塊、大筆花費動態清單（新增/刪除列，日期＋用途＋今日金額），payload 帶新欄位；退休日期須晚於今天驗證沿用。
 - [ ] 164.7 Docker：`--no-cache` 重 build business-services、build frontend，recreate；端到端驗證（X-User headers）新欄位存取／產生建議 prompt 納入現金流。
-- [ ] 164.8 commit + 兩段式 merge。
+- [x] 164.8 commit + 兩段式 merge（feature `321c1203` → main `d739925b`，`--no-ff`）。
 
 ### Task 165：退休配置建議深化 — 退休現金流試算、建議金額化、餵入更完整持有明細（Requirement 32）
 
@@ -4225,13 +4227,13 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 
 #### 實作
 
-- [ ] 169.1 spec：requirements.md Requirement 33、design.md `## Requirement 33` 段、本 Task。
-- [ ] 169.2 後端資料層：`AssetSnapshotRepository.findDistinctOwnedStocks()`（JPQL root=AssetSnapshot JOIN s.stocks）。
-- [ ] 169.3 後端 service/controller：`PerformanceComparisonService`（持股 ∪ 觀察、排除 0000/台股、count>0 過濾、stock 主檔補名、穩定排序）＋ `PerformanceComparisonController` `GET /api/performance-comparison/my-stocks`（record `StockItem{code,market,name}`）。
-- [ ] 169.4 BFF：`PerformanceComparisonBffController`（`/api/bff/performance-comparison`）——`GET /my-stocks` 代理；`GET /compare?stocks=&benchmarks=&range=` 解析/白名單/封頂、`Flux` 並行抓日線（股票 closePrice／指數 closePoint）、union 軸 forward-fill 正規化，回 `{dates, series[{key,type,code,market,returns,totalReturn,asOfDate}]}`。
-- [ ] 169.5 前端：`PerformanceComparisonView.vue`（股票 `el-select multiple :multiple-limit=3`、基準 `el-checkbox-button` ×5、區間 `el-radio-group`、疊圖 `v-chart` + 0% markLine + 報酬率摘要表）；`api/index.js` 加 `performanceComparison`（myStocks／compare）；`router` 加 `/performance-comparison`；`App.vue` `mainMenuItems` 加「績效比較」（icon `Histogram`）。
+- [x] 169.1 spec：requirements.md Requirement 33、design.md `## Requirement 33` 段、本 Task。
+- [x] 169.2 後端資料層：`AssetSnapshotRepository.findDistinctOwnedStocks()`（JPQL root=AssetSnapshot JOIN s.stocks）。
+- [x] 169.3 後端 service/controller：`PerformanceComparisonService`（持股 ∪ 觀察、排除 0000/台股、count>0 過濾、stock 主檔補名、穩定排序）＋ `PerformanceComparisonController` `GET /api/performance-comparison/my-stocks`（record `StockItem{code,market,name}`）。
+- [x] 169.4 BFF：`PerformanceComparisonBffController`（`/api/bff/performance-comparison`）——`GET /my-stocks` 代理；`GET /compare?stocks=&benchmarks=&range=` 解析/白名單/封頂、`Flux` 並行抓日線（股票 closePrice／指數 closePoint）、union 軸 forward-fill 正規化，回 `{dates, series[{key,type,code,market,returns,totalReturn,asOfDate}]}`。
+- [x] 169.5 前端：`PerformanceComparisonView.vue`（股票 `el-select multiple :multiple-limit=3`、基準 `el-checkbox-button` ×5、區間 `el-radio-group`、疊圖 `v-chart` + 0% markLine + 報酬率摘要表）；`api/index.js` 加 `performanceComparison`（myStocks／compare）；`router` 加 `/performance-comparison`；`App.vue` `mainMenuItems` 加「績效比較」（icon `Histogram`）。
 - [ ] 169.6 Docker：`--no-cache` 重 build business-services、build frontend，recreate；端到端驗證（兩組 X-User headers 驗 owner 隔離、跨市場對齊、0% 線畫出、降級不 500）。
-- [ ] 169.7 commit + 兩段式 merge。
+- [x] 169.7 commit + 兩段式 merge（feature `4e79dd1e` → main `f5b6716f`，`--no-ff`）。
 - [x] 169.8 觀察區間新增「1 個月（1m）」與「10 年（10y）」：前端 `el-radio-group` 加兩顆按鈕（1m 置最前、10y 置最後）、BFF `rangeStart()` 加 `1m→minusMonths(1)`／`10y→minusYears(10)`。
 
 ### Task 170：績效比較 — 含息（total return）報酬 ＋ 純價格/含息切換
@@ -4260,7 +4262,7 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - [x] 170.6 前端：報酬口徑 `el-radio-group`（含息/純價格，預設含息）＋ `compare(...,dividend)`＋watch；`priceOnly` series 標「價格報酬」`el-tag`；標題/說明含息文案；`api/index.js` `compare` 加參數。
 - [x] 170.7 資料回補：跑 `refresh-tr`（TWSE 報酬指數 ~10 年）＋ `refreshUsIndexDaily("SP500TR")`，驗 DB `close_point_tr`／`SP500TR` 列數與範圍。
 - [x] 170.8 Docker：`--no-cache` 重 build business-services、external-materials-service、bff、build frontend，recreate；端到端驗證（含息 vs 純價格切換、個股再投入 > 純價格、TWSE/SPX 含息線、DJI/IXIC/SOX priceOnly 標示、英股不誤標、無股利個股降級不 500）。
-- [ ] 170.9 commit + 兩段式 merge。
+- [x] 170.9 commit + 兩段式 merge（feature `cb4c6462` → main `4e1355bd`，`--no-ff`）。
 
 ---
 
@@ -4294,15 +4296,15 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 
 #### 本次增修：排程改匯出「當前即時資產」＋家目錄為根＋檔案總管式資料夾選擇
 
-- [ ] 171.11 ExcelExportService：新增 `exportLiveAssets()`／`exportLiveAssetsForOwner(ownerId)`／`buildLiveWorkbook()`／`writeLiveAssetsSheet()`（資料源 `StockPriceService.getLiveAssets()` ＋最新快照 deposits/funds 明細）；抽出 `stockCostTwd()` 供 snapshot／live 兩處共用。注入 `StockPriceService`（無循環依賴）。
-- [ ] 171.12 ExportScheduleService：`EXPORT_OUTPUT_DIR` 預設改 `/home/steven`；`runNowForCurrentUser()`→`exportLiveAssets()`、`runScheduled()`→`exportLiveAssetsForOwner()`；新增唯讀 `browse(subpath)`（`startsWith(base)` 驗證、`Files.list` 僅子目錄、隱藏 dotfiles、依名排序）。
-- [ ] 171.13 Controller＋DTO：`ExportScheduleController` 加 `GET /browse`；`ExportScheduleDto` 加 `BrowseResponse`／`DirEntry`。
-- [ ] 171.14 BFF：`AssetHistoryBffController` 加 `GET /export-schedule/browse`（passthrough，帶 `subpath` query）。
-- [ ] 171.15 前端 API：`api/index.js` `bffApi.assetHistory` 加 `browseExportDir(subpath)`。
-- [ ] 171.16 前端 UI：`AssetHistoryView.vue` 標題改「排程自動匯出最新資產」；輸出資料夾改 `el-tree` 懶載入樹狀選擇對話框 ＋可選填「新增子資料夾名稱」；更新提示文字（家目錄根 `/home/steven` → host `/Users/steven`、匯出當前即時資產）。
-- [ ] 171.17 Docker：`docker-compose.yml` `EXPORT_OUTPUT_DIR=/home/steven`、volume `${EXPORT_OUTPUT_DIR_HOST:-/Users/steven}:/home/steven`；`.env.example` `EXPORT_OUTPUT_DIR_HOST=/Users/steven`。
+- [x] 171.11 ExcelExportService：新增 `exportLiveAssets()`／`exportLiveAssetsForOwner(ownerId)`／`buildLiveWorkbook()`／`writeLiveAssetsSheet()`（資料源 `StockPriceService.getLiveAssets()` ＋最新快照 deposits/funds 明細）；抽出 `stockCostTwd()` 供 snapshot／live 兩處共用。注入 `StockPriceService`（無循環依賴）。
+- [x] 171.12 ExportScheduleService：`EXPORT_OUTPUT_DIR` 預設改 `/home/steven`；`runNowForCurrentUser()`→`exportLiveAssets()`、`runScheduled()`→`exportLiveAssetsForOwner()`；新增唯讀 `browse(subpath)`（`startsWith(base)` 驗證、`Files.list` 僅子目錄、隱藏 dotfiles、依名排序）。
+- [x] 171.13 Controller＋DTO：`ExportScheduleController` 加 `GET /browse`；`ExportScheduleDto` 加 `BrowseResponse`／`DirEntry`。
+- [x] 171.14 BFF：`AssetHistoryBffController` 加 `GET /export-schedule/browse`（passthrough，帶 `subpath` query）。
+- [x] 171.15 前端 API：`api/index.js` `bffApi.assetHistory` 加 `browseExportDir(subpath)`。
+- [x] 171.16 前端 UI：`AssetHistoryView.vue` 標題改「排程自動匯出最新資產」；輸出資料夾改 `el-tree` 懶載入樹狀選擇對話框 ＋可選填「新增子資料夾名稱」；更新提示文字（家目錄根 `/home/steven` → host `/Users/steven`、匯出當前即時資產）。
+- [x] 171.17 Docker：`docker-compose.yml` `EXPORT_OUTPUT_DIR=/home/steven`、volume `${EXPORT_OUTPUT_DIR_HOST:-/Users/steven}:/home/steven`；`.env.example` `EXPORT_OUTPUT_DIR_HOST=/Users/steven`。
 - [ ] 171.18 建置驗證：`--no-cache` 重 build business-services、bff，build frontend，recreate；驗證資料夾樹瀏覽、run-now 產「當前即時資產」xlsx（股票即時價）、標題正確。
-- [ ] 171.19 commit + 兩段式 merge。
+- [x] 171.19 commit + 兩段式 merge（feature `7ccc438c` → main `7f118616`，`--no-ff`）。
 
 ---
 
@@ -4328,7 +4330,7 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - [x] 172.1 spec：requirements.md Requirement 9（兩卡改圓餅圖邏輯、去除股票現值 live 描述、回復嚴格加總）、design.md Dashboard KPI 段、本 Task。
 - [x] 172.2 前端：`DashboardView.vue` `kpiCards` computed——依 `liveLatest.id` 於 `store.history` 找對應 row 取 `stockValue`／`bondValue`；第 3 張「股票現值」值改 `stockValue`（琥珀、`sub` 佔比）、第 4 張改「債券現值」值 `bondValue`（teal、`sub` 佔比）；資產總計 / 存款總計 / 預估年配息三卡不變。
 - [x] 172.3 驗證：Docker 重 build frontend、recreate；部署 chunk 服務新版，兩卡佔比 == 圓餅圖（owner=1 2026-07-10：股票現值 10,848,763=54.29%、債券現值 973,702=4.87%）；存款+股票現值+債券現值 == totalAssets。
-- [ ] 172.4 commit + 兩段式 merge。
+- [x] 172.4 commit + 兩段式 merge（feature `d37a162b` → main `5c41dce6`，`--no-ff`）。
 
 ### Task 173：退休現金流試算——勞保年金依《勞工保險條例》§65-4 CPI 累計±5% 調整（Requirement 32 bug fix）
 
@@ -4351,7 +4353,7 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - [x] 173.2 Service：`RetirementProjectionService` 加常數 `LABOR_ANNUITY_CPI_STEP`＋私有 `laborAnnuityMultiplier(year, startYear, infl)`；逐年迴圈勞保年金流入乘上倍數；class Javadoc 同步。
 - [x] 173.3 測試：`RetirementProjectionServiceTest` 加「每 3 年依實際累計漲幅跳階（240000→254690→270279）」與「通膨 0 永不調整」兩案例（11 過）。
 - [x] 173.4 Docker：`--no-cache` 重 build business-services、recreate（image 內 `.class` 已含 `laborAnnuityMultiplier`，非 stale）；端到端驗證 `GET /api/portfolio-advice/projection`（owner=1）勞保年金逐年階梯調升（62→95 歲：240,204→254,906→…→461,728，每 3 年 ×1.02³）、缺口年齡延後。
-- [ ] 173.5 commit + 兩段式 merge。
+- [x] 173.5 commit + 兩段式 merge（feature `f99bec49` → main `840b1e5f`，`--no-ff`）。
 
 ---
 
@@ -4379,7 +4381,7 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - [x] 174.4 Scheduler：新增 `SnapshotDateRollScheduler`——`@Scheduled(cron="0 5 0 * * *", zone="Asia/Taipei")` + `@EventListener(ApplicationReadyEvent)` self-heal（另 thread + sleep 30s）+ `volatile LocalDate` 當日 guard；`findDistinctOwnerUserIds()` 逐 owner try/catch，統計 rolled／skipped／failed。
 - [x] 174.5 測試：`AssetServiceTest` 加 roll 四案例（過去→roll、當日→skip、未來→skip、無快照→false）；新增 `SnapshotDateRollSchedulerTest`（逐 owner 呼叫、單一失敗不中斷、統計）。
 - [x] 174.6 Docker：`--no-cache` 重 build business-services、recreate；查 log「roll 最新快照 … → 當日」＋歷年資產頁最後一列日期由過去日期變當日、股票改用即時價。
-- [ ] 174.7 commit + 兩段式 merge。
+- [x] 174.7 commit + 兩段式 merge（feature `d95f2c06` → main `63f06048`，`--no-ff`）。
 
 ### Task 175：全專案稽核——修正 4 項規範違反（分層 / DTO record / 一頁一 BFF）
 
@@ -4403,7 +4405,7 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - [x] 175.3 #3 DTO record：`BackupDto`、`ExportScheduleDto`、`StockAlertDto`、`WatchStockDto` 全部巢狀型別由 `@Data class` 改為不可變 `record`；修 `BackupController`／`BackupService`／`ExportScheduleService`／`StockAlertService`（含 `toResponse` 改寫）／`WatchStockService`（含 `toResponse`／`toIndexResponse` 改寫）呼叫端 accessor。
 - [x] 175.4 #4 一頁一 BFF：新增 `FundSettingsBffController`（`GET /api/bff/fund-settings/bank-options`，過濾 active）；`api/index.js` 加 `fundSettings.getBankOptions`；`FundSettingsView` 改呼叫自己頁的 BFF，不再跨頁打 `bffApi.snapshotForm.getLookups()`。
 - [x] 175.5 驗證：backend `mvn compile` + `mvn test`（既有測試除 pre-existing 破損的 `AssetSnapshotControllerTest` 外全綠）、bff `mvn compile`；Docker `--no-cache` 重 build business-services / bff / frontend、recreate 後煙霧測試受影響端點。
-- [ ] 175.6 commit + 兩段式 merge。
+- [x] 175.6 commit + 兩段式 merge（feature `6bc53a10` → main `e0d3a0cc`，`--no-ff`）。
 
 ### Task 176：左側選單新增「公開資訊」分組 ＋ 排程列表頁（Requirement 36）
 
@@ -4421,12 +4423,12 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 
 #### 實作
 
-- [ ] 176.1 BFF：新增 `bff/.../schedulelist/ScheduledJobDto`（record：service, category, name, description, schedule, cron, zone）與 `SchedulePublicBffController`（`GET /api/bff/schedule-list` 回傳 33 筆內建清單）。
-- [ ] 176.2 前端路由：`router/index.js` 新增 `/schedule-list` → `ScheduleListView`（meta.title 「排程列表」）。
-- [ ] 176.3 前端選單：`App.vue` `mainMenuItems` 移除頂層「交易日曆」「台幣兌美元」，新增「公開資訊」`el-sub-menu`（icon `InfoFilled`）含三子項（交易日曆 / 台幣兌美元 / 排程列表）。
-- [ ] 176.4 前端頁面：新增 `ScheduleListView.vue`——依服務／分類分組的表格，欄位含服務、名稱、說明、執行時機、cron、時區；`api/index.js` 加 `bffApi.scheduleList.get()`。
+- [x] 176.1 BFF：新增 `bff/.../schedulelist/ScheduledJobDto`（record：service, category, name, description, schedule, cron, zone）與 `SchedulePublicBffController`（`GET /api/bff/schedule-list` 回傳 33 筆內建清單）。
+- [x] 176.2 前端路由：`router/index.js` 新增 `/schedule-list` → `ScheduleListView`（meta.title 「排程列表」）。
+- [x] 176.3 前端選單：`App.vue` `mainMenuItems` 移除頂層「交易日曆」「台幣兌美元」，新增「公開資訊」`el-sub-menu`（icon `InfoFilled`）含三子項（交易日曆 / 台幣兌美元 / 排程列表）。
+- [x] 176.4 前端頁面：新增 `ScheduleListView.vue`——依服務／分類分組的表格，欄位含服務、名稱、說明、執行時機、cron、時區；`api/index.js` 加 `bffApi.scheduleList.get()`。
 - [ ] 176.5 驗證：bff `mvn compile`；Docker 重 build bff / frontend、recreate 後打 `GET /api/bff/schedule-list` 驗回 33 筆、開頁確認選單分組與表格。
-- [ ] 176.6 commit + 兩段式 merge。
+- [x] 176.6 commit + 兩段式 merge（feature `2dac4cfa` → main `c1387ffd`，`--no-ff`）。
 ### Task 177：排程時間調整（分析 07:30→08:30、爬蟲 06:00→08:00）＋公開資訊每次輸出 JSON 供 SRPP（Requirement 31）
 
 對應 Requirements: Requirement 31（今日股市分析／本地公開資訊爬蟲）
@@ -4452,7 +4454,7 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - [x] 177.6 驗證：ext + backend `mvn compile`；`--no-cache` 重 build ext＋business-services（JVM stale jar 防呆）＋recreate；驗 `NewsPoller` warmup 於 SRPP/data/input 產出 `public_info_<今日>.json`（由 DB 查詢、含 `tradingDayCutoff`）、三大法人／大盤成交（published＝上一交易日）保留、今天抓到但發布日更舊的過期新聞排除、`news_headline` 仍落庫、`MarketAnalysisScheduler` cron 為 08:30。
 - [x] 177.9 ext `StockSourceQuery`（DB 為單一來源）：`lastTwseTradingDate()`（`MAX((published_at AT TIME ZONE 'Asia/Taipei')::date) WHERE category LIKE 'twse-%'`，即上一交易日）＋ `loadTodayPublicInfoForExport(today, cutoff)`（`WHERE fetched_at(TW)=today AND published_at(TW)≥cutoff ORDER BY published_at DESC`，map→`NewsRow`）。`NewsPoller` 注入 `MarketCalendar` 供無 twse 時 fallback（`resolveTradingCutoff`）。
 - [x] 177.10 對抗式 review 修正（workflow）：(a) 匯出改**暫存檔＋原子 rename**（`Files.createTempFile`＋`Files.move(ATOMIC_MOVE)`）——warmup 執行緒與 cron 若在 08/12/18 前 5 秒內併發 `run()` 會截斷同一 JSON；(b) `NewsRow.publishedAt` 加 `@JsonFormat(timezone="Asia/Taipei")` 以 +08:00 序列化——否則 twse「07-09」資料 UTC 顯示成 `07-08T16:00Z`、SRPP 解析日期會倒退一天、與 `tradingDayCutoff` 不一致。
-- [ ] 177.7 commit + 兩段式 merge。
+- [x] 177.7 commit + 兩段式 merge（feature `57d806aa` → main `f8bbdfd9`，`--no-ff`）。
 
 ### Task 178：公開資訊只保留 stock 主檔個股＋總體新聞，其餘個股濾除（Requirement 31）
 
@@ -4479,7 +4481,7 @@ Task 160 偵測有**時序落差**：本次 Task 160 於 7/10 16:42（盤後）�
 - [x] 178.7 ext `NewsPoller.run()`：抓取後、upsert＋export 前套用 filter；log 濾除筆數。
 - [x] 178.8 驗證：ext `mvn compile`；`--no-cache` 重 build ext＋recreate；驗 warmup log「個股過濾 N→保留 X 丟棄 Y」、SRPP JSON 與 news_headline 均為過濾後、總經/年份新聞未被誤濾。
 - [x] 178.10 對抗式 review 修正（workflow）：`PublicInfoStockFilter.EXPLICIT_CODE` 由 `[(（]…(?:-TW)?…[)）]|…-TW` 收緊為**必帶 `-TW`** `[(（]?\s*(\d{4,6}[A-Z]?)\s*-TW\s*[)）]?`——原式括號內裸年份 `(2023)` 會命中真實鋼鐵股代號而誤濾含年份的總經新聞。
-- [ ] 178.9 commit + 兩段式 merge。
+- [x] 178.9 commit + 兩段式 merge（feature `57d806aa` → main `f8bbdfd9`，`--no-ff`；與 Task 177 同批）。
 
 ### Task 179：移除「新聞搜尋（web_search）」，新聞固定讀本地 `news_headline`＋顯示時點對齊 08:30（Requirement 31）
 
@@ -4677,7 +4679,7 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 - [x] 189.6 frontend `api/index.js`：`tradingCalendar.exportToDir`／`browseExportDir`。
 - [x] 189.7 frontend `TradingCalendarView.vue`：日曆卡標題加「匯出」按鈕＋匯出對話框（年度／格式 json|excel／資料夾樹狀選擇器，選擇器比照 `AssetHistoryView.vue`）。
 - [x] 189.8 部署驗證：`--no-cache` 重 build business-services＋bff＋frontend、recreate；於 UI 觸發匯出，驗 host 目錄出現 `交易日曆_{year}.json`／`.xlsx`、內容含整年逐日與假日、格式錯誤回 400、路徑跳脫被拒。
-- [ ] 189.9 commit + 兩段式 merge。
+- [x] 189.9 commit + 兩段式 merge（feature `9a928ccd` → main `6e9abf42`，`--no-ff`）。
 
 ### Task 190: 交易日曆匯出「每日排程自動匯出」（指定時間）
 
@@ -4705,7 +4707,7 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 - [x] 190.7 BFF `TradingCalendarBffController` 加 `GET/PUT /export/schedule` passthrough。
 - [x] 190.8 frontend：`api/index.js` 加 `getExportSchedule`／`updateExportSchedule`；`TradingCalendarView.vue` 匯出對話框加排程區塊（啟用開關＋每日時間＋儲存排程＋上次執行狀態）。
 - [x] 190.9 部署驗證：重建 business+bff+frontend、recreate；驗排程 GET/PUT、`run_now` 即時仍可、設定啟用後背景 tick 到點產檔。
-- [ ] 190.10 commit + 兩段式 merge。
+- [x] 190.10 commit + 兩段式 merge（feature `9a928ccd` → main `6e9abf42`，`--no-ff`；與 Task 189 同批）。
 
 ### Task 191：可設定多個「分析寄送時間」，每時段各重跑一次分析並各寄一封（限台股交易日）（Requirement 31）
 
@@ -4721,11 +4723,11 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 
 #### Steps:
 
-- [ ] 191.1 **資料層**：Liquibase `v1.57.0-market-analysis-send-time.sql` 建 `market_analysis_send_time`（`id`／`send_time TIME UNIQUE`／`active`／`created_at`）＋Seed `08:45 active`；master yaml 加 include。Entity `MarketAnalysisSendTime`（全域、無 owner）＋`MarketAnalysisSendTimeRepository`（`findAllByOrderBySendTimeAsc`／`findByActiveTrueOrderBySendTimeAsc`）。
-- [ ] 191.2 **寄送時間 CRUD service／DTO**：`MarketAnalysisSendTimeService`（`list`／`add(time)`：`LocalTime.parse` 解析 `HH:mm`＋截到分＋唯一性檢查、非法或重複拋 `IllegalArgumentException`／`delete(id)`／`toggleActive(id)`／`activeTimes()` 供排程）；回傳 `MarketAnalysisSettingsDto.SendTime{id,time,active}`。`getSettings()` 併帶 `sendTimes`。
-- [ ] 191.3 **排程改每分鐘 tick**：`MarketAnalysisScheduler` 由 `0 45 8 * * MON-FRI` 改 `0 * * * * MON-FRI`——比對現在 `HH:mm` 是否命中啟用時點，未命中零成本 return；命中才判 `enabled` → 交易日閘門（`refreshTwClosureToday` + `isTwTradingDay`）→ `generateForSend`。self-heal 改依「最早啟用時點」補跑一次（`generateIfAbsent`，不逐時段補寄）。
-- [ ] 191.4 **`generateForSend`（重跑＋重寄）**：`MarketAnalysisService` 新增 `generateForSend(date, trigger)`＝`generateInternal(date, trigger, skipIfAlreadyOk=false, resetEmailSent=true)`；`submitBatch` 送出新批次時（`resetEmailSent` 為真）`row.setEmailSentAt(null)`，使收尾 `finalizeIfReady` 重新寄一封（交易日再驗與 `email_sent_at` 冪等邏輯不變）。手動 `generate` 維持 `resetEmailSent=false`（不重寄）。
-- [ ] 191.5 **business controller 端點**：`MarketAnalysisController` 加 `GET/POST/DELETE/PATCH /api/market-analysis/send-times`（mutation 以 `CurrentUserContext.isAdmin()` 縱深防禦，非 admin 拋 `AdminRequiredException`）。
-- [ ] 191.6 **BFF passthrough**：`TodayMarketAnalysisBffController` 加 `POST/DELETE/PATCH /api/bff/today-market-analysis/send-times`；聚合 GET 已含 `settings.sendTimes`。BFF `SecurityConfig` 對此三動詞路徑限 `AUTHORITY_ADMIN`。
-- [ ] 191.7 **前端**：`api/index.js` 加 `addSendTime`／`deleteSendTime`／`toggleSendTime`；`TodayMarketAnalysisView.vue` 新增「分析寄送時間」卡（管理者可增／刪／啟用切換＋`el-time-picker`；一般使用者唯讀顯示啟用時點）。明確標註「限台股交易日（週末／颱風假／假日不寄）」與「每多一個時段即多一次 AI 費用」。更新頁面既有寫死 08:45 文案為泛用敘述。
-- [ ] 191.8 **整合 main（兩段式 merge）**：feature 分支 commit → main 以 `--no-ff` merge。
+- [x] 191.1 **資料層**：Liquibase `v1.57.0-market-analysis-send-time.sql` 建 `market_analysis_send_time`（`id`／`send_time TIME UNIQUE`／`active`／`created_at`）＋Seed `08:45 active`；master yaml 加 include。Entity `MarketAnalysisSendTime`（全域、無 owner）＋`MarketAnalysisSendTimeRepository`（`findAllByOrderBySendTimeAsc`／`findByActiveTrueOrderBySendTimeAsc`）。
+- [x] 191.2 **寄送時間 CRUD service／DTO**：`MarketAnalysisSendTimeService`（`list`／`add(time)`：`LocalTime.parse` 解析 `HH:mm`＋截到分＋唯一性檢查、非法或重複拋 `IllegalArgumentException`／`delete(id)`／`toggleActive(id)`／`activeTimes()` 供排程）；回傳 `MarketAnalysisSettingsDto.SendTime{id,time,active}`。`getSettings()` 併帶 `sendTimes`。
+- [x] 191.3 **排程改每分鐘 tick**：`MarketAnalysisScheduler` 由 `0 45 8 * * MON-FRI` 改 `0 * * * * MON-FRI`——比對現在 `HH:mm` 是否命中啟用時點，未命中零成本 return；命中才判 `enabled` → 交易日閘門（`refreshTwClosureToday` + `isTwTradingDay`）→ `generateForSend`。self-heal 改依「最早啟用時點」補跑一次（`generateIfAbsent`，不逐時段補寄）。
+- [x] 191.4 **`generateForSend`（重跑＋重寄）**：`MarketAnalysisService` 新增 `generateForSend(date, trigger)`＝`generateInternal(date, trigger, skipIfAlreadyOk=false, resetEmailSent=true)`；`submitBatch` 送出新批次時（`resetEmailSent` 為真）`row.setEmailSentAt(null)`，使收尾 `finalizeIfReady` 重新寄一封（交易日再驗與 `email_sent_at` 冪等邏輯不變）。手動 `generate` 維持 `resetEmailSent=false`（不重寄）。
+- [x] 191.5 **business controller 端點**：`MarketAnalysisController` 加 `GET/POST/DELETE/PATCH /api/market-analysis/send-times`（mutation 以 `CurrentUserContext.isAdmin()` 縱深防禦，非 admin 拋 `AdminRequiredException`）。
+- [x] 191.6 **BFF passthrough**：`TodayMarketAnalysisBffController` 加 `POST/DELETE/PATCH /api/bff/today-market-analysis/send-times`；聚合 GET 已含 `settings.sendTimes`。BFF `SecurityConfig` 對此三動詞路徑限 `AUTHORITY_ADMIN`。
+- [x] 191.7 **前端**：`api/index.js` 加 `addSendTime`／`deleteSendTime`／`toggleSendTime`；`TodayMarketAnalysisView.vue` 新增「分析寄送時間」卡（管理者可增／刪／啟用切換＋`el-time-picker`；一般使用者唯讀顯示啟用時點）。明確標註「限台股交易日（週末／颱風假／假日不寄）」與「每多一個時段即多一次 AI 費用」。更新頁面既有寫死 08:45 文案為泛用敘述。
+- [x] 191.8 **整合 main（兩段式 merge）**：feature 分支 commit → main 以 `--no-ff` merge（feature `3647dded` → main `d949924b`）。
