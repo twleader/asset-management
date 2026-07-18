@@ -5186,3 +5186,48 @@ security property，直接 `-D` 讀不到——雙重靜默無效）、改用 JD
       註：BFF 除 `/actuator/health|info` 外全需登入 session，故未以瀏覽器代登入驗證（登入屬使用者本人操作）；
       上述探針即為不觸及帳號的等價驗證。
 - [ ] 208.6 commit ＋ 兩段式 merge。
+
+---
+
+### Task 209：股市大盤指數日線 Excel 匯出（開/高/低/收）與排程自動匯出到指定目錄（Requirement 43）
+
+**背景：** 「股市大盤查詢」頁（`GdpTwseView`）只能看圖，無法取檔。R40/41（油價金價）、R42（匯率）已建立
+「手動匯出（選區間＋另存路徑）＋ 每日排程匯出（選時間＋選目錄）」的成熟模式，本任務照該模式補齊本頁，
+匯出欄位為使用者指定的**每日開盤／最高／最低／收盤**。兩張日線表本來就存 OHLC（`v1.22.0` 已補 TWSE），
+故**不需要任何行情表 DDL 或補抓**——實測 10 個指數 24,588 列 OHLC 全滿。
+
+- [x] 209.1 **spec**：`requirements.md` Requirement 43；`design.md` 對應章節（含與 R42「不設 currency 欄」相反的
+      `market` 欄取捨理由）；`tasks.md` 本任務。
+- [x] 209.2 **DB**：`v1.63.0-index-export-schedule.sql` 建 `index_export_schedule`（per-owner UNIQUE、時分／`market`／
+      子路徑／`range_months`／當日 guard 三欄）；註冊進 `db.changelog-master.yaml`。**寫成冪等**
+      （`CREATE TABLE IF NOT EXISTS`）：日後版號避讓改 changeset id 會被 Liquibase 視為新 changeset 重跑，
+      非冪等即 `already exists` → business crash loop 整站掛（Task 207 的教訓）。`market` 刻意不設 CHECK——
+      合法清單單一來源在 Java 端 `OVERSEAS_INDEX_CODES`，寫進 DDL 會變第二份而漂移。
+- [x] 209.3 **產檔**：`ExcelExportService` 新增 `indexLabel(market)`（標籤單一來源，供工作表名／兩種檔名共用）、
+      `exportIndexDaily(market, start, end)`、`writeIndexDailySheet`（日期／開盤／最高／最低／收盤五欄，
+      日期寫 ISO 文字避免時區偏移，null 留空不補前值）。`TWSE` 走 twse 表、其餘走 us 表，正規化成同一組欄位。
+- [x] 209.4 **business 端點**：`MacroHistoryController` 新增 `GET /api/index-daily/export`（白名單
+      `OVERSEAS_INDEX_CODES ∪ {TWSE}`，**不含 `SP500TR`**——那是績效比較頁的含息指數，不在本頁下拉）；
+      新增 `IndexExportController`（`/api/index-export`：schedule GET/PUT、run-now）＋ `IndexExportDto`。
+- [x] 209.5 **排程服務**：`IndexExportScheduleService` 比照 `CommodityExportScheduleService`——每分鐘 poll
+      ＋ `now >= 設定時分` ＋ `last_run_date` 當日 guard ＋ `ApplicationReadyEvent` 自癒 ＋ `AtomicBoolean` 防重入；
+      路徑 resolve 後 `startsWith(base)` 驗證拒跳脫；`.tmp` ＋ atomic move 寫檔；單一使用者失敗不影響他人。
+      背景產檔**不需** `enableFilter`（行情全域），但設定表本身 owner-scoped。
+- [x] 209.6 **BFF**：`GdpTwseBffController` 新增 export／schedule GET,PUT／run-now／browse 五支 passthrough；
+      browse 沿用既有 `/api/export-schedule/browse`（不新增第六份目錄列舉實作）。
+      `SchedulePublicBffController.JOBS` 補「大盤指數匯出」項目（否則排程列表頁與實際排程漂移）。
+- [x] 209.7 **前端**：`api/index.js` `gdpTwse` 新增 5 支；`GdpTwseView.vue` 工具列加「匯出 Excel」（開對話框選區間，
+      預設帶入目前圖表區間，`showSaveFilePicker` 另存、不支援退回下載）＋「排程自動匯出」設定卡
+      （啟用／執行時間／指數／匯出範圍／輸出資料夾＋`el-tree` 選擇器＋立即匯出）。
+      「當日」分時模式停用匯出按鈕（分時為 transient 資料，非日線 OHLC）。
+- [x] 209.8 **建置與端到端驗證**：JVM 服務一律 `--no-cache` 重 build（cached build 會出 stale jar）；
+      recreate business 後**一併 restart bff**（Task 208：換 IP 後 BFF 握舊 IP 整站 500）；
+      以容器內 `curl` 帶 `X-User-*` header 驗證匯出內容與 DB 相符（含 OHLC 欄位值逐列比對）、
+      租戶隔離、白名單擋未知代碼、路徑跳脫被拒，並實跑一次排程確認落檔。
+      **實測結果**：TWSE 2026-07-01~07-17 匯出 12 列，開高低收四欄與 `twse_index_daily_history` 逐列相符；
+      N225 排程（近 3 個月）落檔 `/Users/steven/input/index/日經225_1_20260718.xlsx` 共 60 列，與 DB 同區間筆數一致；
+      `EVIL`／`SP500TR` 皆回 400；`../../etc` 子路徑回 400；user2 讀到的是自己的預設值（未受 user1 設定影響）；
+      新 BFF 路由回 401（＝已註冊、由登入把關，非 404）；`asset-bff` 近期 `Connection refused`／500 計數為 0。
+      驗證用的排程設定事後已還原為停用（避免留下使用者未設定過的每日排程）。
+      **前端畫面（匯出按鈕／對話框／排程卡）需由使用者於瀏覽器確認**——本頁走 Google 登入，代登入屬使用者本人操作。
+- [ ] 209.9 commit ＋ 兩段式 merge。

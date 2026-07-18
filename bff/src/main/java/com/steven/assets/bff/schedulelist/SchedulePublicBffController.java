@@ -48,9 +48,9 @@ public class SchedulePublicBffController {
     private static final String NYC = "America/New_York";
     private static final String LON = "Europe/London";
 
-    /** 全系統排程清單（36 筆）。順序刻意先業務服務、再外部行情服務，前端再依 category 分組。 */
+    /** 全系統排程清單（37 筆）。順序刻意先業務服務、再外部行情服務，前端再依 category 分組。 */
     private static final List<ScheduledJobDto> JOBS = List.of(
-            // ===== business-services（11）=====
+            // ===== business-services（12）=====
             new ScheduledJobDto(BUSINESS, "資產快照", "最新快照釘定當日",
                     "將每位使用者的最新快照日期釘為當日並重算資產，讓即時股價覆蓋生效",
                     "每日 00:05", "0 5 0 * * *", TPE),
@@ -80,6 +80,9 @@ public class SchedulePublicBffController {
                     "每分鐘", "0 * * * * *", TPE),
             new ScheduledJobDto(BUSINESS, "台幣兌美元匯出", "每日匯出排程檢查",
                     "每分鐘檢查各使用者的台幣兌美元匯率自動匯出設定，命中執行時間即產出 Excel 到指定目錄（Requirement 42）",
+                    "每分鐘", "0 * * * * *", TPE),
+            new ScheduledJobDto(BUSINESS, "大盤指數匯出", "每日匯出排程檢查",
+                    "每分鐘檢查各使用者的大盤指數日線自動匯出設定，命中執行時間即產出所選指數的開高低收 Excel 到指定目錄（Requirement 43）",
                     "每分鐘", "0 * * * * *", TPE),
             new ScheduledJobDto(BUSINESS, "資料備份", "每日備份（台股收盤後）",
                     "台股交易日收盤後 2 小時備份資料庫至 daily/",
@@ -172,7 +175,7 @@ public class SchedulePublicBffController {
                     "交易日 05:00–07:00 每 15 分鐘", "0 0/15 5-6 * * MON-FRI；0 0 7 * * MON-FRI", TPE)
     );
 
-    /** GET /api/bff/schedule-list —— 回傳全系統排程清單（36 筆靜態資料）。 */
+    /** GET /api/bff/schedule-list —— 回傳全系統排程清單（37 筆靜態資料）。 */
     @GetMapping
     public List<ScheduledJobDto> list() {
         return JOBS;

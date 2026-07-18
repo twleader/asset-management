@@ -3085,3 +3085,133 @@ run-now 不動當日 guard——全部同 R41，不重述。
 - `frontend/src/api/index.js`：`exchangeRate` 命名空間新增 5 支
 - `frontend/src/views/ExchangeRateView.vue`：新增「匯出 Excel」按鈕＋匯出對話框＋「排程自動匯出」設定卡＋資料夾選擇器
 - `SchedulePublicBffController.java`：`JOBS` 補「台幣兌美元匯出 每日匯出排程檢查」項目
+
+---
+
+## Requirement 43（Task 209）：股市大盤指數日線 Excel 匯出（開/高/低/收）與排程自動匯出
+
+結構比照 R41／R42（**全域公開行情 ＋ per-user 排程設定**），以下只記差異。
+
+### 與既有五套匯出排程的定位
+
+| 需求 | 資料範圍 | 背景產檔是否需 owner 過濾 | 產檔方法 |
+|---|---|---|---|
+| R34 歷年資產 | per-user | 需要 | `exportLiveAssetsForOwner(ownerId)` |
+| R39 已實現損益 | per-user | 需要 | `exportRealizedGainsForOwner(ownerId)` |
+| R37 交易日曆 | 全域 | 不需要 | `exportTradingCalendar(year)` |
+| R41 油價金價 | 全域 | 不需要 | `exportCommodityPrices(start, end)` |
+| R42 台幣兌美元 | 全域 | 不需要 | `exportExchangeRates(currency, start, end)` |
+| **R43 大盤指數日線** | **全域** | **不需要** | `exportIndexDaily(market, start, end)` |
+
+`twse_index_daily_history` 與 `us_index_daily_history` 皆無 `owner_user_id`、未套 `@Filter(ownerFilter)`。
+
+### 匯出內容：直接取 DB 既有 OHLC 欄位
+
+工作表五欄：**日期／開盤／最高／最低／收盤**，單一序列依日期遞增。
+
+四個價格欄**直接讀 entity 既有欄位**（`openPoint`／`highPoint`／`lowPoint`／`closePoint`），
+不重算也不由收盤價推導——這與 R42 的中間價相反（那是 `@Transient` 衍生值，必須由 entity 算）。
+兩張日線表的 OHLC 皆為既存實體欄位（`twse` 為 `v1.22.0-twse-daily-ohlc.sql` 補齊、`us` 建表即有），
+故**不需要任何 DDL 變更**即可匯出開高低。
+
+`open/high/low` 為 nullable（TWSE 早期由 `v1.21.0` 只抓 `ClosingIndex` 的殘留列），null 該格留空、
+不補前值（同 R41／R42）。實測目前 10 張表 24,588 列 OHLC 全滿，但仍須保留 null 分支——
+清空重建或未來新增指數會再度出現只有收盤的中繼狀態。
+`close_point` NOT NULL。TWSE 精度 `numeric(12,2)`、海外 `numeric(14,4)`，沿用 `Styles.num4`。
+日期以 ISO 文字寫入（非 date cell），避免開啟端時區偏移一天（同 R40／R42）。
+
+### 兩張來源表的分派
+
+`exportIndexDaily(market, …)` 以 `market` 分派：`TWSE` → `TwseIndexDailyHistoryRepository`
+`.findByTradingDateBetweenOrderByTradingDateAsc`；其餘 → `UsIndexDailyHistoryRepository`
+`.findByIndexCodeAndTradingDateBetweenOrderByTradingDateAsc`。兩者欄位語意相同，
+在 service 內正規化成同一組 `(date, o, h, l, c)` 再寫表，工作表格式與畫面所見一致
+（同一支 API 供手動與排程共用，見 CLAUDE.md「同義欄位、同一 business service API」）。
+
+**`SP500TR` 不列入白名單**：該代碼雖存在於 `us_index_daily_history`，但屬績效比較頁（R33）的
+含息報酬指數，不在本頁 9 個可選指數內。白名單取 `OVERSEAS_INDEX_CODES ∪ {TWSE}`，
+與頁面下拉一致；`MacroHistoryController` 另有 `US_INDEX_REFRESH_CODES`（含 `SP500TR`）是回補守門用，語意不同，不可誤用。
+
+### 指數維度：本頁與 R42 的關鍵差異
+
+R42 刻意不設 `currency` 欄（單一幣別頁，加欄＝為不存在的需求預留）。
+**R43 相反**：本頁下拉本來就有 9 個指數，「匯出哪一個」是使用者當下的實際選擇，
+故排程表**設 `market` 欄**（`VARCHAR(16) NOT NULL DEFAULT 'TWSE'`），設定卡提供指數下拉。
+
+標籤同 R42 走單一來源 `ExcelExportService.indexLabel(market)`（`TWSE`→`台股大盤`、`DJI`→`道瓊工業`…），
+工作表名／手動匯出檔名／排程檔名三處共用。未知代碼回傳代碼本身，不臆造名稱。
+（前端 `GdpTwseView.MARKETS` 的 label 是 render 用，後端不可依賴前端字串。）
+
+### 「當日」分時模式不提供匯出
+
+頁面區間選「當日」走 `GET /api/bff/gdp-twse/index-intraday`，是 Yahoo 5 分 K 的 transient 資料
+（不入庫、無 OHLC 欄位語意）。此模式匯出按鈕停用，避免匯出一份與畫面不符的日線資料。
+
+### 資料模型
+
+```sql
+CREATE TABLE index_export_schedule (
+    id              BIGSERIAL PRIMARY KEY,
+    owner_user_id   BIGINT       NOT NULL,      -- @Filter(ownerFilter)，每人一列
+    enabled         BOOLEAN      NOT NULL DEFAULT FALSE,
+    run_hour        INT          NOT NULL DEFAULT 8,
+    run_minute      INT          NOT NULL DEFAULT 0,
+    market          VARCHAR(16)  NOT NULL DEFAULT 'TWSE',  -- 與 R42 的差異：本頁有 9 個指數可選
+    output_subpath  VARCHAR(255) NOT NULL DEFAULT 'input',
+    range_months    INT,                        -- NULL ＝ 全部十年
+    last_run_date   DATE,                       -- 當日 guard
+    last_run_at     TIMESTAMP,
+    last_run_status VARCHAR(500),
+    updated_at      TIMESTAMP,
+    CONSTRAINT uq_index_export_schedule_owner UNIQUE (owner_user_id),
+    CONSTRAINT ck_index_export_schedule_hour   CHECK (run_hour BETWEEN 0 AND 23),
+    CONSTRAINT ck_index_export_schedule_minute CHECK (run_minute BETWEEN 0 AND 59),
+    CONSTRAINT ck_index_export_schedule_range  CHECK (range_months IS NULL OR range_months BETWEEN 1 AND 120)
+);
+```
+
+`market` 不設 CHECK 約束：合法代碼清單在 `MacroHistoryService.OVERSEAS_INDEX_CODES`（Java 端單一來源），
+寫進 DDL 會變成第二份清單，日後新增指數要改兩處且漏改只在 runtime 才炸。改由 service 層白名單驗證。
+
+滾動範圍、路徑安全（`resolveDir` + `startsWith(base)`）、`writeAtomically`、
+每分鐘 poll ＋ 當日 guard ＋ `ApplicationReadyEvent` 自癒 ＋ `AtomicBoolean` 防重入、
+run-now 不動當日 guard——全部同 R41／R42，不重述。
+檔名 `{指數名}_{使用者ID}_{YYYYMMDD}.xlsx`。
+
+### API 端點
+
+| 層 | 端點 | 說明 |
+|---|---|---|
+| business | `GET /api/index-daily/export?market=&start=&end=` | 產出 .xlsx（UTF-8 檔名、`ByteArrayResource`） |
+| business | `GET /api/index-export/schedule` | 讀當前使用者排程設定（無則回預設值） |
+| business | `PUT /api/index-export/schedule` | upsert（驗證時分、market 白名單、range_months、子路徑不跳脫） |
+| business | `POST /api/index-export/run-now` | 立即產檔到設定目錄，回 `{path, sizeBytes}`；不動當日 guard |
+| business | `GET /api/export-schedule/browse?subpath=` | （既有，複用）列出基底下子目錄 |
+| BFF | `GET /api/bff/gdp-twse/export?market=&start=&end=` | passthrough 下載（原樣轉出 Content-Disposition） |
+| BFF | `GET`／`PUT /api/bff/gdp-twse/export/schedule` | passthrough |
+| BFF | `POST /api/bff/gdp-twse/export/run-now` | passthrough |
+| BFF | `GET /api/bff/gdp-twse/export/browse` | passthrough 至 business `/api/export-schedule/browse` |
+
+匯出端點掛 `/api/index-daily/export`（`MacroHistoryController`，與 `/api/twse-daily-index`、
+`/api/us-daily-index`、`/api/index-intraday` 同一支 controller），排程設定端點掛獨立前綴
+`/api/index-export`（同 R41 `/api/commodity-export`、R42 `/api/exchange-rate-export`）——
+前者是全域行情查詢，後者是 per-user 設定，語意不同。
+
+### 新增／異動檔案
+
+**新增**
+- `backend/.../model/IndexExportSchedule.java`
+- `backend/.../repository/IndexExportScheduleRepository.java`
+- `backend/.../service/IndexExportScheduleService.java`
+- `backend/.../controller/IndexExportController.java`（`@RequestMapping("/api/index-export")`）
+- `backend/.../dto/IndexExportDto.java`
+- `backend/src/main/resources/db/changelog/changes/v1.63.0-index-export-schedule.sql`
+
+**異動**
+- `db.changelog-master.yaml`：註冊 v1.63.0
+- `ExcelExportService.java`：新增 `indexLabel`／`exportIndexDaily`／`writeIndexDailySheet`
+- `MacroHistoryController.java`：新增 `GET /api/index-daily/export`
+- `GdpTwseBffController.java`：新增 export／schedule／run-now／browse 五支 passthrough
+- `frontend/src/api/index.js`：`gdpTwse` 命名空間新增 5 支
+- `frontend/src/views/GdpTwseView.vue`：新增「匯出 Excel」按鈕＋匯出對話框＋「排程自動匯出」設定卡＋資料夾選擇器
+- `SchedulePublicBffController.java`：`JOBS` 補「大盤指數匯出 每日匯出排程檢查」項目

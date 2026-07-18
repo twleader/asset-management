@@ -38,6 +38,9 @@ public class GdpTwseBffController {
     private static final ParameterizedTypeReference<List<Map<String, Object>>> LIST_MAP =
             new ParameterizedTypeReference<>() {};
 
+    private static final ParameterizedTypeReference<Map<String, Object>> MAP =
+            new ParameterizedTypeReference<>() {};
+
     @GetMapping
     public Mono<ResponseEntity<Map<String, Object>>> get(
             @RequestParam(defaultValue = "40") int years) {
@@ -310,6 +313,76 @@ public class GdpTwseBffController {
             }
         }
         return prev;
+    }
+
+    // ===== Excel 匯出與排程自動匯出（Requirement 43 / Task 209）=====
+    // 排程設定為 per-user：沿用 businessServicesClient（WebClientConfig.tenantHeaderFilter 自動帶 X-User-*
+    // → 後端 ownerFilter 縮到本人）。指數日線本身是全域公開行情，匯出內容不因使用者而異。
+
+    /**
+     * GET /api/bff/gdp-twse/export?market=&start=&end= — passthrough 下載 .xlsx。
+     * 連同 business 回的 Content-Disposition 一併轉出，前端才能取到預設檔名。
+     */
+    @GetMapping("/export")
+    public Mono<ResponseEntity<byte[]>> export(
+            @RequestParam(defaultValue = "TWSE") String market,
+            @RequestParam(required = false) String start,
+            @RequestParam(required = false) String end) {
+        return businessServicesClient.get()
+                .uri(uri -> {
+                    var u = uri.path("/api/index-daily/export").queryParam("market", market);
+                    if (start != null && !start.isBlank()) u.queryParam("start", start);
+                    if (end != null && !end.isBlank()) u.queryParam("end", end);
+                    return u.build();
+                })
+                .accept(org.springframework.http.MediaType.APPLICATION_OCTET_STREAM)
+                .retrieve()
+                .toEntity(byte[].class)
+                .map(e -> {
+                    ResponseEntity.BodyBuilder b = ResponseEntity.ok();
+                    e.getHeaders().forEach((k, v) -> v.forEach(val -> b.header(k, val)));
+                    return b.body(e.getBody());
+                });
+    }
+
+    @GetMapping("/export/schedule")
+    public Mono<ResponseEntity<Map<String, Object>>> getExportSchedule() {
+        return businessServicesClient.get()
+                .uri("/api/index-export/schedule")
+                .retrieve()
+                .bodyToMono(MAP)
+                .map(ResponseEntity::ok);
+    }
+
+    @org.springframework.web.bind.annotation.PutMapping("/export/schedule")
+    public Mono<ResponseEntity<Map<String, Object>>> updateExportSchedule(
+            @org.springframework.web.bind.annotation.RequestBody Map<String, Object> body) {
+        return businessServicesClient.put()
+                .uri("/api/index-export/schedule")
+                .bodyValue(body)
+                .retrieve()
+                .bodyToMono(MAP)
+                .map(ResponseEntity::ok);
+    }
+
+    @PostMapping("/export/run-now")
+    public Mono<ResponseEntity<Map<String, Object>>> runExportNow() {
+        return businessServicesClient.post()
+                .uri("/api/index-export/run-now")
+                .retrieve()
+                .bodyToMono(MAP)
+                .map(ResponseEntity::ok);
+    }
+
+    /** 目錄列舉沿用 Requirement 34 既有的 business 端點（語意相同＝列出基底下子目錄），不新增第六份實作。 */
+    @GetMapping("/export/browse")
+    public Mono<ResponseEntity<Map<String, Object>>> browseExportDir(
+            @RequestParam(value = "subpath", required = false, defaultValue = "") String subpath) {
+        return businessServicesClient.get()
+                .uri("/api/export-schedule/browse?subpath={subpath}", subpath)
+                .retrieve()
+                .bodyToMono(MAP)
+                .map(ResponseEntity::ok);
     }
 
     /**
