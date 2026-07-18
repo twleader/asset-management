@@ -113,10 +113,17 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       FINMIND_TOKEN: ${FINMIND_TOKEN:-}
+      # 公開資訊 JSON 輸出基底（Task 212）：**必須與 business-services 的 EXPORT_OUTPUT_DIR 相同**——
+      # 使用者在「爬蟲資訊查詢」頁挑的資料夾是由 business 的 /api/export-schedule/browse 列舉出來的，
+      # 兩者基底不一致，就會出現「前端選得到、爬蟲寫不到（或寫去別處）」的同義欄位分歧。
+      EXPORT_OUTPUT_DIR: /home/steven
     volumes:
-      # 公開資訊每輪輸出 JSON（Task 177）：host SRPP 退休規劃專案輸入目錄掛入容器 /srpp-input（可寫）。
-      # NewsPoller 以 news-scraper.export-dir（預設 /srpp-input）為基底寫 public_info_<date>.json。
-      - ${SRPP_INPUT_DIR_HOST:-/Users/steven/Project/SRPP/data/input}:/srpp-input
+      # 公開資訊每輪輸出 JSON（Task 177／212）：host 家目錄掛入容器 /home/steven（可寫），與 business-services
+      # 同一份掛載。NewsPoller 以 EXPORT_OUTPUT_DIR 為基底、resolve crawler_export_setting 的相對子路徑
+      # （seed Project/SRPP/data/input）寫 public_info_<date>.json。
+      # Task 212 前為 `${SRPP_INPUT_DIR_HOST:-/Users/steven/Project/SRPP/data/input}:/srpp-input`，
+      # 其預設目的地已被本掛載涵蓋（host 落點不變），故移除以免同一目錄有兩個容器路徑。
+      - ${EXPORT_OUTPUT_DIR_HOST:-/Users/steven}:/home/steven
     depends_on:
       postgres:
         condition: service_healthy
