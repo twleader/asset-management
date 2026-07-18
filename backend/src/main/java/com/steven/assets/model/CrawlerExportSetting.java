@@ -8,7 +8,7 @@ import lombok.NoArgsConstructor;
 import java.time.Instant;
 
 /**
- * 公開資訊爬蟲輸出檔案路徑設定（Requirement 38 / Task 209）：一爬蟲一列，由「爬蟲資訊查詢」頁維護。
+ * 公開資訊爬蟲輸出檔案路徑設定（Requirement 38 / Task 212）：一爬蟲一列，由「爬蟲資訊查詢」頁維護。
  * 目前僅 {@code crawler_key='news-poller'}（{@code external-materials-service} 的 {@code NewsPoller}
  * 每輪寫出 {@code public_info_<yyyy-MM-dd>.json} 前讀取）。
  *
@@ -27,7 +27,7 @@ import java.time.Instant;
 @AllArgsConstructor
 public class CrawlerExportSetting {
 
-    /** 尚未設定（或 DB 讀取失敗）時的預設子路徑；= Task 209 前 {@code /srpp-input} volume 的同一個 host 目錄。 */
+    /** 尚未設定（或 DB 讀取失敗）時的預設子路徑；= Task 212 前 {@code /srpp-input} volume 的同一個 host 目錄。 */
     public static final String DEFAULT_SUBPATH = "Project/SRPP/data/input";
 
     @Id

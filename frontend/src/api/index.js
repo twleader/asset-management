@@ -274,7 +274,7 @@ export const bffApi = {
     getSchedule: () => api.get('/bff/crawler-data/schedule'),
     // 整批覆寫執行時間點（限管理者）
     saveSchedule: (times) => api.put('/bff/crawler-data/schedule', times),
-    // 讀公開資訊 JSON 輸出路徑設定 {crawlerKey,outputSubpath,baseDir,absolutePath,updatedAt}（Task 209）
+    // 讀公開資訊 JSON 輸出路徑設定 {crawlerKey,outputSubpath,baseDir,absolutePath,updatedAt}（Task 212）
     getExportPath: () => api.get('/bff/crawler-data/export-path'),
     // 更新輸出子路徑（限管理者；跳脫基底回 400）
     saveExportPath: (outputSubpath) => api.put('/bff/crawler-data/export-path', { outputSubpath }),

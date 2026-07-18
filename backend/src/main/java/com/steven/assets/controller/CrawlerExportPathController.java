@@ -14,7 +14,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 公開資訊爬蟲輸出檔案路徑設定（Requirement 38 / Task 209）business API。全域設定：
+ * 公開資訊爬蟲輸出檔案路徑設定（Requirement 38 / Task 212）business API。全域設定：
  * GET 開放已登入者；PUT 以 {@link CurrentUserContext#isAdmin()} 縱深防禦（BFF 已對外擋一層 ADMIN）——
  * 此設定決定服務往主機檔案系統寫入的位置，比照排程設定限管理者。
  *

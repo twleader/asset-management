@@ -328,7 +328,7 @@ async function saveSchedule() {
   }
 }
 
-// --- 輸出檔案路徑設定（Task 209）---
+// --- 輸出檔案路徑設定（Task 212）---
 const exportPath = reactive({ outputSubpath: '', baseDir: '', absolutePath: '', updatedAt: null })
 const exportPathLoading = ref(false)
 const exportPathLoaded = ref(false)   // 未成功載入前停用儲存，避免以空值覆寫既有設定

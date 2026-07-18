@@ -28,7 +28,7 @@ finmind:
 # 中午 12:00→11:30 Task 188）抓權威來源＋證交所公開資訊＋量化快照（匯率/美股/韓股）寫入 news_headline，供
 # business-services 今日股市分析餵入 prompt。retention-days=保留天數（清理更舊者）；enabled=false 可整體停用。
 # export-enabled（Task 177）：每輪抓取另輸出一份公開資訊 JSON 供 SRPP 退休規劃專案取用；false 可只寫 DB、不輸出檔。
-# 輸出**目錄**（Task 209）已改為 DB 驅動：容器基底 EXPORT_OUTPUT_DIR（見下）resolve crawler_export_setting 的相對
+# 輸出**目錄**（Task 212）已改為 DB 驅動：容器基底 EXPORT_OUTPUT_DIR（見下）resolve crawler_export_setting 的相對
 # 子路徑，由「爬蟲資訊查詢」頁設定、免重啟生效；原寫死的 export-dir（/srpp-input）已移除。
 news-scraper:
   enabled: ${NEWS_SCRAPER_ENABLED:true}

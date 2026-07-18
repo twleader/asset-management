@@ -1,7 +1,7 @@
 package com.steven.assets.dto;
 
 /**
- * 爬蟲輸出檔案路徑設定（Requirement 38 / Task 209）。
+ * 爬蟲輸出檔案路徑設定（Requirement 38 / Task 212）。
  *
  * <p>{@code baseDir} 與 {@code absolutePath} 為**衍生顯示值**（由基底 resolve 子路徑得出），只出現在 response、
  * 不入庫；DB 只存 {@code outputSubpath}（CLAUDE.md「禁止存入可計算得出的衍生值」）。前端據此顯示完整落點，

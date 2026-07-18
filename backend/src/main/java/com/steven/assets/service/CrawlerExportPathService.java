@@ -13,7 +13,7 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 
 /**
- * 公開資訊爬蟲輸出檔案路徑設定（Requirement 38 / Task 209）。全域設定，無租戶。
+ * 公開資訊爬蟲輸出檔案路徑設定（Requirement 38 / Task 212）。全域設定，無租戶。
  *
  * <p><b>路徑模型</b>（沿用 Requirement 34／39／41／42）：DB 只存相對子路徑，實際目錄 = 容器內基底
  * {@code EXPORT_OUTPUT_DIR} resolve 之。本服務只負責「設定」；實際寫檔的是 {@code external-materials-service}

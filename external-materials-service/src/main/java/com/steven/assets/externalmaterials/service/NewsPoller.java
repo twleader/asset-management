@@ -45,7 +45,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * <p>每輪抓取（含開機 warmup）<b>先 upsert news_headline，再由 DB 查詢「當日公開資訊」</b>輸出一份 JSON 至
  * SRPP 退休規劃專案輸入目錄（Task 177，DB 為單一來源），供其量化分析取用；寫檔失敗 graceful，不影響落庫。
  *
- * <p><b>輸出目錄（Requirement 38 / Task 209）</b>：原寫死 {@code news-scraper.export-dir}（容器 {@code /srpp-input}，
+ * <p><b>輸出目錄（Requirement 38 / Task 212）</b>：原寫死 {@code news-scraper.export-dir}（容器 {@code /srpp-input}，
  * 改目的地必須改 docker volume 重新部署），改為 DB 驅動——每輪寫檔前讀 {@code crawler_export_setting}
  * （{@code crawler_key='news-poller'}）的相對子路徑，實際目錄 = 容器基底 {@code EXPORT_OUTPUT_DIR}
  * （預設 {@code /home/steven}，volume 對映 host 家目錄）resolve 之。目錄由「爬蟲資訊查詢」頁設定、免重啟生效
@@ -69,8 +69,8 @@ public class NewsPoller {
     private static final int[][] DEFAULT_TIMES = {{8, 20}, {11, 30}, {18, 0}};
 
     /**
-     * DB 未設定／讀取失敗／值跳脫基底時的 fallback 輸出子路徑（Task 209）。相對 {@code EXPORT_OUTPUT_DIR}
-     * 解析後 = host {@code /Users/steven/Project/SRPP/data/input}，即 Task 209 之前 {@code /srpp-input} 的同一個目錄。
+     * DB 未設定／讀取失敗／值跳脫基底時的 fallback 輸出子路徑（Task 212）。相對 {@code EXPORT_OUTPUT_DIR}
+     * 解析後 = host {@code /Users/steven/Project/SRPP/data/input}，即 Task 212 之前 {@code /srpp-input} 的同一個目錄。
      */
     private static final String DEFAULT_EXPORT_SUBPATH = "Project/SRPP/data/input";
 
@@ -96,7 +96,7 @@ public class NewsPoller {
     private int retentionDays;
 
     /**
-     * 公開資訊 JSON 輸出的容器內**基底**目錄（Task 209）：docker volume 對映 host 家目錄，與 business-services
+     * 公開資訊 JSON 輸出的容器內**基底**目錄（Task 212）：docker volume 對映 host 家目錄，與 business-services
      * 的排程匯出共用同一基底與同一份掛載——前端資料夾樹（由 business 列舉）看得到的目錄才等於爬蟲寫得到的目錄。
      * 實際輸出目錄 = 本基底 resolve {@code crawler_export_setting} 的相對子路徑。
      */
@@ -214,7 +214,7 @@ public class NewsPoller {
      * 範圍＝今天(Asia/Taipei)這批爬蟲抓進來的（{@code fetched_at} 為今天）、且資料日期 {@code published_at}
      * 不早於「上一交易日」的列；上一交易日＝news_headline 中 twse 總體資料的最新資料日（TWSE 權威，無則以
      * {@link MarketCalendar} 最近交易日 fallback）。如此三大法人／大盤成交（日期＝上一交易日）保留，今天抓到
-     * 但發布日更舊的過期新聞則排除。輸出目錄每輪由 {@link #resolveExportDir()} 依 DB 設定決定（Task 209）；
+     * 但發布日更舊的過期新聞則排除。輸出目錄每輪由 {@link #resolveExportDir()} 依 DB 設定決定（Task 212）；
      * 檔名 {@code public_info_<yyyy-MM-dd>.json}（同日多輪覆寫＝當日最新、跨日新檔，**檔名不開放設定**——
      * SRPP 依此檔名取用）；內容含 metadata（generatedAt／trigger／tradingDayCutoff／count）與逐則明細。
      * 寫檔失敗一律 graceful。
@@ -258,7 +258,7 @@ public class NewsPoller {
     }
 
     /**
-     * 本輪的公開資訊 JSON 輸出目錄（Requirement 38 / Task 209）：容器基底 {@code EXPORT_OUTPUT_DIR} resolve
+     * 本輪的公開資訊 JSON 輸出目錄（Requirement 38 / Task 212）：容器基底 {@code EXPORT_OUTPUT_DIR} resolve
      * {@code crawler_export_setting} 設定的相對子路徑。**每輪即時讀取、不快取**，故頁面改設定後下一輪即生效。
      *
      * <p>寫檔前**再驗一次**跳脫（business 於 PUT 時已驗過一次）：ext 才是實際持有檔案系統寫入權的一方，

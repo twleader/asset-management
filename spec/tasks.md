@@ -5189,7 +5189,7 @@ security property，直接 `-D` 讀不到——雙重靜默無效）、改用 JD
 
 ---
 
-### Task 209：爬蟲產生檔案的輸出路徑可於頁面設定（Requirement 38）
+### Task 212：爬蟲產生檔案的輸出路徑可於頁面設定（Requirement 38）
 
 **需求對應：** Requirement 38「爬蟲資訊查詢頁」新增之「輸出檔案路徑設定」相關 AC。
 
@@ -5209,15 +5209,15 @@ security property，直接 `-D` 讀不到——雙重靜默無效）、改用 JD
 （2）不開放**絕對路徑**——等於把容器內檔案系統位置寫進 DB、跨環境不可攜且繞過基底防護；（3）不把路徑併進
 `crawler_schedule`——該表一列一時間點，併入會讓同一事實隨列數重複儲存，且刪時間點會連帶弄丟路徑。
 
-- [x] 209.1 **spec**：`requirements.md` Requirement 38 標題／User Story／背景納入輸出路徑，新增 6 條 AC（路徑設定／路徑模型與掛載對齊／預設值不變行為／資料夾選擇器沿用同一 API／動態生效／權限）；`design.md` 更新 `CrawlerDataBffController` 端點、ERD 實體清單、Requirement 38 設計段（新增「動態輸出檔案路徑」四個子項）、Task 177 SRPP JSON 段之基底描述、`crawler_export_setting` 資料表段與 API 端點區塊；`tasks.md` 本任務。
-- [x] 209.2 **DB changeset**：`v1.64.0-crawler-export-path.sql` 建 `crawler_export_setting`（`crawler_key` UNIQUE ＋ `output_subpath NOT NULL`），冪等寫法，seed `('news-poller','Project/SRPP/data/input')`＝原 `/srpp-input` 的同一 host 目錄；`db.changelog-master.yaml` 註冊。**編號避讓**：原編 v1.63.0 並已在開發 DB 執行，部署時發現另一個 worktree 已先占用 v1.63.0（`v1.63.0-index-export-schedule`，14:05 EXECUTED，尚未進 main）→ 改號至 v1.64.0 避免兩支 `v1.63.0-*` 同時進 main。changeset id 隨檔名改變會被 Liquibase 當成新 migration 重跑，故建表／seed 皆為冪等寫法（舊 id 於開發 DB 留下一筆孤兒 `databasechangelog` 紀錄，無功能影響）。
-- [x] 209.3 **backend model／repository／dto／service／controller**：`CrawlerExportSetting` entity（全域、無 `@Filter`）＋ repository ＋ `CrawlerExportPathDto`；`CrawlerExportPathService`（讀取無列時回 seed 預設、`normalizeSubpath`、`resolveDir` 擋 `..`／絕對路徑、回傳 `baseDir`＋`absolutePath` 供前端顯示）；`CrawlerExportPathController`（`GET/PUT /api/crawler-export-path`，`PUT` 以 `CurrentUserContext.isAdmin()` 縱深防禦）。
+- [x] 212.1 **spec**：`requirements.md` Requirement 38 標題／User Story／背景納入輸出路徑，新增 6 條 AC（路徑設定／路徑模型與掛載對齊／預設值不變行為／資料夾選擇器沿用同一 API／動態生效／權限）；`design.md` 更新 `CrawlerDataBffController` 端點、ERD 實體清單、Requirement 38 設計段（新增「動態輸出檔案路徑」四個子項）、Task 177 SRPP JSON 段之基底描述、`crawler_export_setting` 資料表段與 API 端點區塊；`tasks.md` 本任務。
+- [x] 212.2 **DB changeset**：`v1.64.0-crawler-export-path.sql` 建 `crawler_export_setting`（`crawler_key` UNIQUE ＋ `output_subpath NOT NULL`），冪等寫法，seed `('news-poller','Project/SRPP/data/input')`＝原 `/srpp-input` 的同一 host 目錄；`db.changelog-master.yaml` 註冊。**編號避讓**：原編 v1.63.0 並已在開發 DB 執行，部署時發現另一個 worktree 已先占用 v1.63.0（`v1.63.0-index-export-schedule`，14:05 EXECUTED，尚未進 main）→ 改號至 v1.64.0 避免兩支 `v1.63.0-*` 同時進 main。changeset id 隨檔名改變會被 Liquibase 當成新 migration 重跑，故建表／seed 皆為冪等寫法（舊 id 於開發 DB 留下一筆孤兒 `databasechangelog` 紀錄，無功能影響）。
+- [x] 212.3 **backend model／repository／dto／service／controller**：`CrawlerExportSetting` entity（全域、無 `@Filter`）＋ repository ＋ `CrawlerExportPathDto`；`CrawlerExportPathService`（讀取無列時回 seed 預設、`normalizeSubpath`、`resolveDir` 擋 `..`／絕對路徑、回傳 `baseDir`＋`absolutePath` 供前端顯示）；`CrawlerExportPathController`（`GET/PUT /api/crawler-export-path`，`PUT` 以 `CurrentUserContext.isAdmin()` 縱深防禦）。
       **讀寫的驗證嚴格度刻意不同**：`PUT` 擋下不合法子路徑（→ 400），但 `GET` 組 `absolutePath` 時遇不合法值只回 `null`、不擲例外——DB 內仍可能存在繞過 API 的值（psql 直改、跨環境備份還原、日後改動 `EXPORT_OUTPUT_DIR` 基底），若讀取也失敗會使設定頁 500，反而讓使用者**沒有入口把它改回正常值**（唯一修正管道被自己鎖死）。前端此時顯示「—」、仍可重選並儲存。
-- [x] 209.4 **ext `CrawlerExportPathQuery` ＋ `NewsPoller` 改讀 DB**：新增 `JdbcTemplate` 純讀元件（比照 `CrawlerScheduleQuery`）；`NewsPoller.exportPublicInfoJson()` 每輪讀現值並於寫檔前**再驗一次**跳脫，DB 例外／空值 fallback 常數 `Project/SRPP/data/input`；移除 `news-scraper.export-dir`，改注入 `EXPORT_OUTPUT_DIR`（預設 `/home/steven`）為基底。
-- [x] 209.5 **docker-compose**：ext 新增 `EXPORT_OUTPUT_DIR: /home/steven` 與 volume `${EXPORT_OUTPUT_DIR_HOST:-/Users/steven}:/home/steven`；移除 `/srpp-input` 掛載（其預設目的地已被家目錄涵蓋，host 落點不變）。
-- [x] 209.6 **BFF**：`CrawlerDataBffController` 增 `GET/PUT /api/bff/crawler-data/export-path` 與 `GET /api/bff/crawler-data/export-path/browse`（passthrough 既有 `/api/export-schedule/browse`）；`SecurityConfig` 將 `PUT /api/bff/crawler-data/export-path` 列入 ADMIN。
-- [x] 209.7 **前端**：`api/index.js` `crawlerData` 增 3 支；`CrawlerDataView.vue` 新增「爬蟲輸出檔案設定」卡（唯讀輸入框＋「選擇」開資料夾樹對話框＋新增子資料夾＋儲存，非 ADMIN 唯讀）並顯示完整落點路徑與檔名規則。
-- [x] 209.8 **建置與部署驗證**：`--no-cache` 重 build business／bff／frontend／ext 並 `--force-recreate`（六個容器皆 healthy，含 recreate 上游後 restart bff，`asset-bff` 近 5 分鐘 `Connection refused`／`500` 計數為 **0**）。實測結果：
+- [x] 212.4 **ext `CrawlerExportPathQuery` ＋ `NewsPoller` 改讀 DB**：新增 `JdbcTemplate` 純讀元件（比照 `CrawlerScheduleQuery`）；`NewsPoller.exportPublicInfoJson()` 每輪讀現值並於寫檔前**再驗一次**跳脫，DB 例外／空值 fallback 常數 `Project/SRPP/data/input`；移除 `news-scraper.export-dir`，改注入 `EXPORT_OUTPUT_DIR`（預設 `/home/steven`）為基底。
+- [x] 212.5 **docker-compose**：ext 新增 `EXPORT_OUTPUT_DIR: /home/steven` 與 volume `${EXPORT_OUTPUT_DIR_HOST:-/Users/steven}:/home/steven`；移除 `/srpp-input` 掛載（其預設目的地已被家目錄涵蓋，host 落點不變）。
+- [x] 212.6 **BFF**：`CrawlerDataBffController` 增 `GET/PUT /api/bff/crawler-data/export-path` 與 `GET /api/bff/crawler-data/export-path/browse`（passthrough 既有 `/api/export-schedule/browse`）；`SecurityConfig` 將 `PUT /api/bff/crawler-data/export-path` 列入 ADMIN。
+- [x] 212.7 **前端**：`api/index.js` `crawlerData` 增 3 支；`CrawlerDataView.vue` 新增「爬蟲輸出檔案設定」卡（唯讀輸入框＋「選擇」開資料夾樹對話框＋新增子資料夾＋儲存，非 ADMIN 唯讀）並顯示完整落點路徑與檔名規則。
+- [x] 212.8 **建置與部署驗證**：`--no-cache` 重 build business／bff／frontend／ext 並 `--force-recreate`（六個容器皆 healthy，含 recreate 上游後 restart bff，`asset-bff` 近 5 分鐘 `Connection refused`／`500` 計數為 **0**）。實測結果：
       - **Liquibase**：`v1.64.0-crawler-export-path` EXECUTED；因改號重跑而與舊 id `v1.63.0-crawler-export-path` 併存兩筆紀錄，冪等寫法使重跑為 no-op、business 正常啟動（非 crash loop）。seed 值 `news-poller | Project/SRPP/data/input`。
       - **契約**：`GET` 回 `{"crawlerKey":"news-poller","outputSubpath":"Project/SRPP/data/input","baseDir":"/home/steven","absolutePath":"/home/steven/Project/SRPP/data/input","updatedAt":"2026-07-18 22:26:40"}`；空字串 `PUT` 被正規化回預設子路徑。
       - **路徑安全**：`{"outputSubpath":"../../etc"}` → **400**；`{"outputSubpath":"/etc/passwd"}` → **400**（`detail` 為「輸出子路徑不可跳脫基底目錄，且須為相對路徑」）；非 ADMIN（`X-User-Role: USER`）`PUT` → **403**。
@@ -5225,4 +5225,4 @@ security property，直接 `-D` 讀不到——雙重靜默無效）、改用 JD
       - **端到端改路徑實測**：預設值下 warmup 寫出 `/home/steven/Project/SRPP/data/input/public_info_2026-07-18.json`（309 筆，host 端 108,350 bytes，**與改動前同一個 host 落點**）→ `PUT` 改為 `input/crawler-test` 後重跑，寫出 `/home/steven/input/crawler-test/public_info_2026-07-18.json`（host `/Users/steven/input/crawler-test/` **由程式自動建立**、同樣 108,350 bytes）→ 改回預設後再跑，落點回到 SRPP 目錄。三輪皆無 `.tmp` 殘留（原子 rename 仍正常）。測試目錄事後刪除。
       - **前端／BFF**：`CrawlerDataView-D5i0daWR.js` 含「爬蟲輸出檔案設定」卡與資料夾選擇器；`index-Bv829Q4m.js` 含 `crawler-data/export-path`；未登入打 `GET /api/bff/crawler-data/export-path` 與 `.../export-path/browse` 皆回 **401**（路由已註冊、非 404）。
       - **待使用者目視確認**：設定卡版面與 `el-tree` 資料夾選擇器需於瀏覽器登入後確認（登入屬使用者本人操作）。
-- [ ] 209.9 commit ＋ 兩段式 merge。
+- [ ] 212.9 commit ＋ 兩段式 merge。
