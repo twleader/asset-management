@@ -3739,3 +3739,13 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 - [x] 151.7 前端：`api/index.js` 的 `todayMarketAnalysis` 加 `getRecipients` / `toggleMarketAnalysis`；`TodayMarketAnalysisView.vue` 新增「分析結果寄送對象」`el-card`（收件人表 + `接收每日股市分析` 開關 + 空清單導引至通知設定）。
 - [ ] 151.8 整合 main（Task 149.12–149.15 Batch API/effort/web-search/enabled 已 landed）：merge origin/main、解 7 檔衝突（service 掛勾改 finalize、view/api 併存、migration 改 v1.43.0）；`--no-cache` 重 build business-services + bff + frontend、recreate；驗證 Liquibase v1.43.0 ran、兩欄位建立、bff route 掛載、切換訂閱開關持久化、既有功能（思考深度/新聞搜尋/停用/PROCESSING）未回退。
 - [ ] 151.9 commit + 兩段式 merge（feature 分支 commit + main 用 `--no-ff` merge）。
+
+### Task 152: 今日股市分析批次收尾 poller 於 virtual thread 下不執行 — 改平台執行緒排程器 + client 逾時（Requirement 31 bug fix）
+
+**背景**：實機發現 2026-07-05 手動分析批次在 Anthropic 端送出後約 7 分鐘就 `succeeded`（curl results 端點秒回、結果完整），但 `daily_market_analysis` 一直停在 `PROCESSING`、未落 OK 也未寄信。診斷：`spring.threads.virtual.enabled=true` 下，Boot 為 `@Scheduled` 配置 virtual-thread `SimpleAsyncTaskScheduler`，唯一的 `fixedDelay` 任務 `MarketAnalysisScheduler.pollBatches`（收尾 poller）不週期執行——thread dump 顯示排程 clock 執行緒存活但收尾從未觸發、日誌全無 finalize/例外、重啟仍複現。其餘 7 個 `@Scheduled` 皆 cron、正常。若放任，批次連 12h 逾時判 FAILED 都不會觸發（poller 沒跑），將永遠卡 PROCESSING。
+
+- [x] 152.1 spec：`requirements.md` Req 31 加「收尾 poller 於 virtual thread 組態下可靠執行」驗收項；`design.md` Req 31 設計段加「排程執行緒（SchedulingConfig）」說明；本 Task。
+- [x] 152.2 後端：新增 `config/SchedulingConfig`——定義名為 `taskScheduler` 的 `ThreadPoolTaskScheduler`（pool=3）bean，使 Boot virtual 排程器退讓（`@ConditionalOnMissingBean(TaskScheduler.class)`），`@Scheduled` 改跑平台執行緒（解 fixedDelay 不重排 + SDK on VT 阻塞 + 單執行緒餓死）。Web 層仍維持 virtual threads。
+- [x] 152.3 後端加固：`MarketAnalysisService.client()` 建 `AnthropicOkHttpClient` 時加 `.timeout(Duration.ofSeconds(90))`，避免單次 retrieve/results 呼叫長時間阻塞排程執行緒。
+- [ ] 152.4 `--no-cache` 重 build business-services、recreate；驗證重啟後 poller 於平台執行緒（`scheduled-*`）週期執行，2026-07-05 這筆自 PROCESSING 收成 OK、email 寄出；既有排程（備份／指數回補／警示清理等）未回退。
+- [ ] 152.5 commit + 兩段式 merge（feature 分支單行中文 commit + main `--no-ff` merge）。

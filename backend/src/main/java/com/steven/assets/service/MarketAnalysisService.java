@@ -517,7 +517,12 @@ public class MarketAnalysisService {
             synchronized (this) {
                 c = anthropicClient;
                 if (c == null) {
-                    c = AnthropicOkHttpClient.builder().apiKey(apiKey).build();
+                    // 明確請求逾時（加固）：批次 retrieve／resultsStreaming 若因網路停滯或連線半開而卡住，
+                    // 以此為上限拋出（而非 SDK 預設 10 分鐘），避免單次收尾呼叫長時間阻塞排程執行緒。
+                    c = AnthropicOkHttpClient.builder()
+                            .apiKey(apiKey)
+                            .timeout(Duration.ofSeconds(90))
+                            .build();
                     anthropicClient = c;
                 }
             }
