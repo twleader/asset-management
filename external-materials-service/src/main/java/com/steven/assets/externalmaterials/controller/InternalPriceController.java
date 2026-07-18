@@ -46,7 +46,7 @@ public class InternalPriceController {
     private final com.steven.assets.externalmaterials.client.MacroDataFetchClient macro;
     private final com.steven.assets.externalmaterials.service.IntradayTickStore tickStore;
     private final com.steven.assets.externalmaterials.service.IntradayTickRefresher tickRefresher;
-    private final com.steven.assets.externalmaterials.service.StockSourceQuery stockSource;
+    private final com.steven.assets.externalmaterials.service.TradingDateResolver tradingDateResolver;
 
     /**
      * 同步抓所有持股報價、寫 Redis 後回傳統計。
@@ -227,7 +227,15 @@ public class InternalPriceController {
 
     /**
      * 「當日」走勢圖分時 tick 序列（盤中 polling 累積 + 盤後外部源覆寫）。
-     * date 未指定時取該市場最近一個有資料的交易日（沿用 stock_price_history 的 maxTradingDate）。
+     *
+     * date 未指定時走 {@link com.steven.assets.externalmaterials.service.TradingDateResolver}：盤中 / 剛收盤
+     * 視窗回今天（與 {@link com.steven.assets.externalmaterials.service.PriceCacheWriter} 寫 tick LIST 用的
+     * key 同 date），盤外回 stock_price_history 最近一筆 trading_date。
+     *
+     * 過去 bug：盤中讀路徑直接走 findMaxTradingDate，但盤中 stock_price_history 還沒有今日 row
+     * （ClosePersister 要到 13:32 TW / 16:02 ET 後才 dump），結果讀到上一個交易日的 key，跟寫的
+     * key（今天）對不上，前端「當日」顯示「無當日分時資料」。
+     *
      * Redis LIST 空且服務側已有完整資料源 → 同步觸發一次 refreshOne 作為 cold-start，回填後再回傳。
      */
     @GetMapping("/intraday-ticks")
@@ -235,11 +243,7 @@ public class InternalPriceController {
             @RequestParam String code,
             @RequestParam String market,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
-        LocalDate target = (date != null) ? date
-                : stockSource.findMaxTradingDate(code, market).orElseGet(() -> LocalDate.now(
-                        "美股".equals(market) ? com.steven.assets.externalmaterials.service.MarketClock.US_ZONE
-                                : "英股".equals(market) ? com.steven.assets.externalmaterials.service.MarketClock.LON_ZONE
-                                : com.steven.assets.externalmaterials.service.MarketClock.TW_ZONE));
+        LocalDate target = (date != null) ? date : tradingDateResolver.resolve(code, market);
         var ticks = tickStore.getTicks(code, market, target);
         if (ticks.isEmpty()) {
             tickRefresher.refreshOne(code, market, target);

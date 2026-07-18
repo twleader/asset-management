@@ -15,7 +15,6 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Optional;
 
 /**
  * 寫入 Redis 即時行情 cache。
@@ -33,10 +32,9 @@ import java.util.Optional;
 public class PriceCacheWriter {
 
     private final StringRedisTemplate redis;
-    private final MarketClock clock;
-    private final StockSourceQuery source;
     private final IntradayHighLowTracker hlTracker;
     private final IntradayTickStore tickStore;
+    private final TradingDateResolver tradingDateResolver;
 
     private static final ObjectMapper MAPPER = new ObjectMapper()
             .setSerializationInclusion(JsonInclude.Include.NON_NULL);
@@ -54,7 +52,7 @@ public class PriceCacheWriter {
         String key = "price:" + market + ":" + code;
         String indexKey = "price:index:" + market;
 
-        LocalDate tradingDate = resolveTradingDate(code, market);
+        LocalDate tradingDate = tradingDateResolver.resolve(code, market);
 
         // 盤中聚合 high / low：以本輪成交價更新當日累計，再與外部 API 給的 high/low 取 max/min。
         // 動機：NASDAQ info API 對 ETF 的 keyStats 為 null（VOO/VT 等抓不到 dayrange）。
@@ -201,19 +199,4 @@ public class PriceCacheWriter {
         return fallback;
     }
 
-    /**
-     * tradingDate 解析（與舊 StockPriceService.resolveTradingDate 同邏輯）。
-     * 盤外取資料時會回傳「最近一個有資料的交易日」，避免污染技術指標。
-     */
-    private LocalDate resolveTradingDate(String stockCode, String market) {
-        boolean isUs = "美股".equals(market);
-        boolean liveSession = isUs
-                ? (clock.isUsMarketOpen() || clock.isUsMarketJustClosed())
-                : (clock.isTwMarketOpen() || clock.isTwMarketJustClosed());
-        if (liveSession) {
-            return LocalDate.now(isUs ? MarketClock.US_ZONE : MarketClock.TW_ZONE);
-        }
-        Optional<LocalDate> latest = source.findMaxTradingDate(stockCode, market);
-        return latest.orElseGet(() -> LocalDate.now(isUs ? MarketClock.US_ZONE : MarketClock.TW_ZONE));
-    }
 }

@@ -884,7 +884,7 @@ Redis 中 `price:{market}:{code}` 的 `tradingDate` 欄位代表**這筆價格�
 - `TechnicalIndicatorService.compute()` 看到 live `tradingDate == today` 就把它當「今天的 K 棒」併入 KD/MA9 序列
 - 實際上那筆資料是上週五的收盤 → 等於把上週五重複算了一次，污染技術指標
 
-**規則**（`external-materials-service` 的 `PriceCacheWriter.resolveTradingDate`）：
+**規則**（`external-materials-service` 的 `TradingDateResolver.resolve`，同時供 `PriceCacheWriter` 寫 tick LIST 與 `InternalPriceController.intradayTicks` 讀 tick LIST，確保 read / write 用同一個 trading_date key）：
 
 ```
 isLiveSession = (該市場 isOpen) || (剛收盤 20 分鐘窗口)

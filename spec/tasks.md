@@ -2505,3 +2505,25 @@ Task 87 以 Yahoo `interval=5m` 作為「當日」走勢資料源，但 Yahoo �
 - [ ] 88.12 手動驗證：(a) `docker exec asset-redis redis-cli LRANGE 'price:ticks:台股:0050:2026-06-05' 0 -1` 確認 LIST 存在且有資料；(b) 直接 curl `/api/bff/stock-analysis/intraday-ticks?code=0050&market=台股` 看走勢資料回傳；(c) 等下個 polling 週期，LIST 多一筆 tick；(d) 開啟股票分析切「當日」確認走勢與 Task 87 行為一致
 
 
+### Task 89: 修「當日」分時盤中讀寫 tick key 對不上（trading_date 抽 TradingDateResolver）
+
+對應 Requirements: Requirement 13（[requirements.md:227-231](spec/requirements.md)）
+
+#### 背景
+
+Task 88 上線後，使用者於美股盤中（US 09:30-16:00 ET）開 VT 等持股的「當日」走勢圖顯示「無當日分時資料」。根因：寫 / 讀 tick LIST 各自決定 trading_date key，盤中對不上。
+
+- **寫**（`PriceCacheWriter.write` → `IntradayTickStore.appendTick`）：`PriceCacheWriter.resolveTradingDate` 在 `isUsMarketOpen() || isUsMarketJustClosed()` 時回 `LocalDate.now(US_ZONE)`（今天 = 06-08）→ `RPUSH price:ticks:美股:VT:2026-06-08`。
+- **讀**（`InternalPriceController.intradayTicks`）：date 未指定時直接走 `stockSource.findMaxTradingDate(code, market)`。但盤中 `stock_price_history` **還沒有今日 row**（`ClosePersister` 要等 13:32 TW / 16:02 ET dump 後才寫 DB），結果回傳上一個交易日 06-05 → 讀 key `price:ticks:美股:VT:2026-06-05`。
+- Redis LIST 空 → cold-start `tickRefresher.refreshOne(code, market, 2026-06-05)` → Yahoo 5m 回的是今天（06-08）的 bars → [IntradayTickRefresher.java:121](external-materials-service/src/main/java/com/steven/assets/externalmaterials/service/IntradayTickRefresher.java:121) 的 `if (!t.startsWith(date.toString())) continue` 把 06-08 bars 全部過濾掉（date 是 06-05），用空 list 覆寫 → 前端顯示「無當日分時資料」。
+
+#### Steps:
+
+- [x] 89.1 新 `TradingDateResolver`：把 `PriceCacheWriter.resolveTradingDate` 私有邏輯抽到 `@Component`，支援 台股 / 美股 / 英股（既有 private method 只支援台美），單一決策點，read / write 共用
+- [x] 89.2 `PriceCacheWriter` 改注入 `TradingDateResolver` → `tradingDateResolver.resolve(code, market)`；移除原 `resolveTradingDate` private method + `MarketClock` / `StockSourceQuery` 直接依賴
+- [x] 89.3 `InternalPriceController.intradayTicks` 改用 `tradingDateResolver.resolve(code, market)` 取代 `stockSource.findMaxTradingDate(...).orElseGet(LocalDate.now(zone))`，讀的 date 與寫一致；移除原 `stockSource` 直接依賴
+- [x] 89.4 spec/design.md 「Trading Date 解析」段落更新 helper 名稱與職責，明確標註 read / write 共用
+- [ ] 89.5 Docker 重 build + recreate：`external-materials-service` 單一服務
+- [ ] 89.6 手動驗證：(a) US 盤中時段切到 VT「當日」應立即顯示走勢；(b) `docker exec asset-redis redis-cli LRANGE 'price:ticks:美股:VT:<今日>' 0 -1` 確認有資料；(c) US 盤外切到「當日」仍應 fallback 顯示上一交易日完整走勢
+
+
