@@ -216,7 +216,7 @@ Do not batch unrelated changes into a single commit. Commit early and commit oft
 
 Use `git add -f` when working inside `.worktrees` to override .gitignore rules.
 
-NEVER add extra strings like `Co-Authored-By: Codex Sonnet...`.
+NEVER add extra strings like `Co-Authored-By: Codex ...`.
 
 </GIT_PROTOCOL>
 

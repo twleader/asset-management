@@ -3689,7 +3689,7 @@ Task 96 指數圖「當日」模式只畫分時走勢與月/季/年線水平參�
 **唯一真實不一致＝Entity 註解對不上實際 DB**（`ddl-auto: none` 下註解不影響 runtime，純文件正確性；若未來啟用 `validate` 會誤 fail）：
 
 - [ ] 148.1 `StockPriceHistory.java`：`openPrice`／`highPrice`／`lowPrice`／`closePrice` 位數 `precision=15` → `20`（對齊 DB `NUMERIC(20,4)`）；`volume` 補 `@Column(nullable = false)`（對齊 DB `BIGINT NOT NULL`）。`@UniqueConstraint`／`@Index` 註解本已正確反映 DB，維持不動。
-        ⚠ **本項的前提有誤（Task 197 稽核）**：DB 實際為 `NUMERIC(15,4)` ＋ `volume BIGINT`（nullable），見 `db/init/01_dump.sql`。`NUMERIC(20,4)` 只存在於 `v1.0.0-initial-schema.sql`，而該 changeset 在 dump 中已標記 already-ran、**永不執行**，故從未套用到任何環境。本項是照著永不執行的 changelog 改，反而把 entity 由「與 DB 一致」改成「與 DB 不一致」。因 `ddl-auto: none` 不做 schema 驗證故無 runtime 影響，屬靜默漂移，待後續任務把 entity 改回 `precision=15` 並移除 `volume` 的 `nullable=false`。故本項勾選狀態已改回 `[ ]`——結論被 Task 197.5 推翻，entity 現況仍是 `precision=20` ＋ `volume nullable=false`，與 DB 實際不一致；`design.md:489` 已記為待處理的靜默漂移。（`ddl-auto: none` 無 runtime 影響，且 dump 不在版控無法複驗，本次不改程式碼。）
+        ⚠ **本項的前提有誤（Task 197 稽核）**：DB 實際為 `NUMERIC(15,4)` ＋ `volume BIGINT`（nullable），見 `db/init/01_dump.sql`。`NUMERIC(20,4)` 只存在於 `v1.0.0-initial-schema.sql`，而該 changeset 在 dump 中已標記 already-ran、**永不執行**，故從未套用到任何環境。本項是照著永不執行的 changelog 改，反而把 entity 由「與 DB 一致」改成「與 DB 不一致」。因 `ddl-auto: none` 不做 schema 驗證故無 runtime 影響，屬靜默漂移，待後續任務把 entity 改回 `precision=15` 並移除 `volume` 的 `nullable=false`。故本項勾選狀態已改回 `[ ]`——結論被 Task 197.5 推翻。**✅ 已由 Task 201 收尾**：`db/schema.sql`（Task 200.x 納入版控的 schema-only 鏡像）實測確認 DB 為 `numeric(15,4)` ＋ `volume bigint` 可空，entity 已改回 `precision=15` 並移除 `volume` 的 `nullable=false`，本項描述的方向自始即為錯誤，保留於此僅供追溯。
 - [x] 148.2 `design.md`：ERD 後新增「Schema 基準線與 DB 層唯一鍵」澄清段（dump 為基準線、Liquibase 僅增量、兩表 DB 層約束＋位數明細、稽核只讀 changelog 的誤判提醒）。
 - [x] 148.3 `ExchangeRateHistory` 免改：Entity `buy_rate/sell_rate precision=10,scale=4` 已對齊 DB `NUMERIC(10,4)`、`@UniqueConstraint(currency,rateDate)` 已對齊 DB。
 - [x] 148.4 部署：本次為 `@Column` 註解對齊（`ddl-auto: none` 下**零 runtime 行為變更**），不影響運行 stack 行為；如需運行 jar 位元碼與源碼一致可另行重 build business-services，但非功能必要。
@@ -4992,3 +4992,19 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 - [x] 200.3 **`ExcelExportService.writeLiveAssetsSheet` 增 7 欄**：注入 `TechnicalIndicatorService`；表頭與逐列依上列欄序寫入。昨收沿用即時價 `num4`，漲跌／漲跌幅／月/季/年線用新增 `num2`（`#,##0.00`），KD值為字串 `K {k} / D {d}`。技術指標以 `Map<code|market, FullIndicators>` 於單次匯出快取，同股多券商列僅算一次。`autoSizeColumn` 迴圈上界改 18。
 - [x] 200.4 **建置與部署驗證**：`--no-cache` 重 build business-services，`--force-recreate`（healthy，運行 jar 含 `formatKd`）；owner 1（ADMIN/ACTIVE，最新快照 43 筆持股）以 X-User header 觸發 run-now 產「當前即時資產」`.xlsx`。驗證：新 7 欄到位；`0050` 即時價 100.15／昨收 106.4／漲跌 −6.25（=100.15−106.4）／漲跌幅 −5.874%（=−6.25/106.4）自洽；同檔 `0050` 元大／富邦兩列昨收/漲跌/月季年線/KD 完全相同（快取生效、跨券商一致）；`VOO` 即時價 689.59／昨收 693.8／漲跌 −4.21 亦自洽；KD 呈現 `K 31.63 / D 40.18`。
 - [x] 200.5 commit ＋ 兩段式 merge。
+
+---
+
+### Task 201：修正 Entity 與 DB 的靜默漂移，並清理 Codex skill 副本的代換錯誤
+
+背景：Task 200.x 把 schema-only 鏡像 `db/schema.sql` 納入版控後，過去因「權威 dump 不在版控、無法複驗」而被擱置的 entity 位數爭議首次可自 repo 查證，故一併收尾。同時修正 `.agents/`（Codex 版 skill 副本）機械式 `Claude`→`Codex` 代換造成的錯誤路徑／名稱。
+
+- [x] 201.1 **`StockPriceHistory.java` 對齊實際 DB**：`openPrice`／`highPrice`／`lowPrice`／`closePrice` 的 `precision` 由 `20` 改回 `15`；`volume` 的 `@Column(nullable = false)` 改為 `@Column`（DB 為 `bigint` 可空）。依據 `db/schema.sql`：`close_price numeric(15,4) NOT NULL`、`open/high/low_price numeric(15,4)` 可空、`volume bigint` 可空。此為 Task 148.1 反向操作的收尾（148.1 誤照永不執行的 `v1.0.0-initial-schema.sql` 修改）。`ddl-auto: none` 下**零 runtime 行為變更**，價值在於未來若啟用 `validate` 不會誤 fail。
+- [x] 201.2 **`.agents/` 代換錯誤修正**（共 5 處、4 類；以 `.agents/` 與 `.claude/skills/` 的 tree-diff 窮舉確認範圍，僅 5 個檔案有差異）：
+        `commit-merge-push/SKILL.md:3,37` 分支前綴 `Codex/*` → `codex/*`（實際分支為小寫，如 `codex/spec-code-document-alignment`）；
+        `commit-merge-push/SKILL.md:56` `.Codex/skills/**` → `.agents/skills/**`（Codex 版 skill 的實際位置）；
+        `run-stack/SKILL.md:27` `.Codex/worktrees/` → `.claude/worktrees/`（實際 worktree 目錄，與使用哪個 agent 無關，該路徑原本不存在）；
+        `ag/skills/TKT.{1.init,2.review,3.fix}/SKILL.md` 的 `Co-Authored-By: Codex Sonnet...` → `Co-Authored-By: Codex ...`（Sonnet 是 Claude 的模型名，「Codex Sonnet」不存在）。
+- [x] 201.3 **spec 同步**：`design.md` 的 schema 基準線段落，`StockPriceHistory` 由「已知靜默漂移、待後續任務處理」改記為「已對齊（Task 201）」；`tasks.md` Task 148.1 註記標明已由本任務收尾。
+- [x] 201.4 **驗證**：`mvn compile` 通過；`.agents/` 殘留掃描 `\.Codex|Codex/|Codex Sonnet` 命中數為 0；entity 四個 OHLC 位數與 `volume` nullable 與 `db/schema.sql` 逐欄比對一致。
+- [ ] 201.5 commit ＋ 兩段式 merge。

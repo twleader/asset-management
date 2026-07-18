@@ -24,7 +24,7 @@ User-facing entry: `http://localhost/` (frontend) → proxies `/api/*` to `bff:8
 
 ## Step 1 — Find the real Compose project name (critical)
 
-Multiple worktrees of this repo exist under `.Codex/worktrees/`. **The running stack might have been started from a different worktree than the one you're in.** Containers are `container_name:`-pinned (e.g. `asset-frontend`), so running `docker compose up` from a different worktree with the wrong project name **silently creates a second stack and fails on the container-name clash**.
+Multiple worktrees of this repo exist under `.claude/worktrees/`. **The running stack might have been started from a different worktree than the one you're in.** Containers are `container_name:`-pinned (e.g. `asset-frontend`), so running `docker compose up` from a different worktree with the wrong project name **silently creates a second stack and fails on the container-name clash**.
 
 Always look up the project name from a running container first:
 
