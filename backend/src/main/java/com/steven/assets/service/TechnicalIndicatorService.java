@@ -80,24 +80,32 @@ public class TechnicalIndicatorService {
                 }
             }
 
-            if (series.isEmpty()) return FullIndicators.EMPTY;
-
-            BigDecimal ma20  = simpleMa(series, 20);
-            BigDecimal ma60  = simpleMa(series, 60);
-            BigDecimal ma240 = simpleMa(series, 240);
-
-            KdValues currentKd = stockKd(series);
-            KdValues previousKd = series.size() > 1
-                    ? stockKd(series.subList(1, series.size()))
-                    : KdValues.EMPTY;
-            return new FullIndicators(
-                    ma20, ma60, ma240,
-                    currentKd.k(), currentKd.d(),
-                    previousKd.k(), previousKd.d());
+            return computeFromSeries(series);
         } catch (Exception e) {
             log.warn("compute indicators failed for {} {}", stockCode, market, e);
             return FullIndicators.EMPTY;
         }
+    }
+
+    /**
+     * 對已準備好的降序 OHLC 序列使用同一套 MA／KD 核心。
+     * 交易雷達會先還原權息再呼叫，避免在此服務重複資料存取或混用價基。
+     */
+    FullIndicators computeFromSeries(List<StockPriceHistory> series) {
+        if (series == null || series.isEmpty()) return FullIndicators.EMPTY;
+
+        BigDecimal ma20  = simpleMa(series, 20);
+        BigDecimal ma60  = simpleMa(series, 60);
+        BigDecimal ma240 = simpleMa(series, 240);
+
+        KdValues currentKd = stockKd(series);
+        KdValues previousKd = series.size() > 1
+                ? stockKd(series.subList(1, series.size()))
+                : KdValues.EMPTY;
+        return new FullIndicators(
+                ma20, ma60, ma240,
+                currentKd.k(), currentKd.d(),
+                previousKd.k(), previousKd.d());
     }
 
     /** 取最近 days 筆收盤價平均；series 為 desc。資料不足時回傳 null。 */

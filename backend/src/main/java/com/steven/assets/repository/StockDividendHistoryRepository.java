@@ -18,6 +18,19 @@ public interface StockDividendHistoryRepository extends JpaRepository<StockDivid
         """)
     List<StockDividendHistory> findByStockSinceYear(String code, String market, int sinceYear);
 
+    /**
+     * 交易雷達還原權息用的區間事件；排除年度彙總列與零值事件。
+     */
+    @Query("""
+        SELECT h FROM StockDividendHistory h
+        WHERE h.stockCode = :code AND h.market = :market
+          AND h.exDividendDate BETWEEN :fromDate AND :toDate
+          AND (COALESCE(h.cashDividend, 0) > 0 OR COALESCE(h.stockDividend, 0) > 0)
+        ORDER BY h.exDividendDate ASC, h.id ASC
+        """)
+    List<StockDividendHistory> findAdjustmentEvents(
+            String code, String market, LocalDate fromDate, LocalDate toDate);
+
     Optional<StockDividendHistory> findFirstByStockCodeAndMarketAndYearAndExDividendDate(
             String code, String market, Integer year, LocalDate exDividendDate);
 

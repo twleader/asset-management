@@ -2,11 +2,13 @@ package com.steven.assets.service;
 
 import com.steven.assets.dto.TradingRadarDto;
 import com.steven.assets.model.AssetSnapshot;
+import com.steven.assets.model.Stock;
 import com.steven.assets.model.StockHolding;
 import com.steven.assets.model.StockPriceHistory;
 import com.steven.assets.model.TwseIndexDailyHistory;
 import com.steven.assets.repository.AssetSnapshotRepository;
 import com.steven.assets.repository.StockAlertRepository;
+import com.steven.assets.repository.StockDividendHistoryRepository;
 import com.steven.assets.repository.StockPriceHistoryRepository;
 import com.steven.assets.repository.StockRepository;
 import com.steven.assets.repository.TwseIndexDailyHistoryRepository;
@@ -17,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
@@ -44,8 +47,11 @@ public class TradingRadarService {
 
     private final TradingRadarRuleEngine ruleEngine;
     private final TechnicalIndicatorService indicatorService;
+    private final DistributionAdjustedPriceService adjustedPriceService;
+    private final AssetClassifier assetClassifier;
     private final TwseIndexDailyHistoryRepository twseRepo;
     private final StockPriceHistoryRepository priceHistoryRepo;
+    private final StockDividendHistoryRepository dividendHistoryRepo;
     private final PriceQueryService priceQueryService;
     private final AssetSnapshotRepository snapshotRepo;
     private final StockAlertRepository alertRepo;
@@ -57,6 +63,13 @@ public class TradingRadarService {
     ) {}
 
     private record Target(String code, String market, boolean held) {}
+
+    private record TechnicalData(
+            TechnicalIndicatorService.FullIndicators indicators,
+            List<BigDecimal> completedCloses,
+            BigDecimal previousAdjustedClose,
+            boolean distributionAdjusted
+    ) {}
 
     @Transactional(readOnly = true)
     public TradingRadarDto.Response get() {
@@ -80,7 +93,7 @@ public class TradingRadarService {
                 skippedNonTw.size());
     }
 
-    /** 背景通知評估共用同一份 V2 組裝，不依賴 HTTP owner filter。 */
+    /** 背景通知評估共用同一份 V3 組裝，不依賴 HTTP owner filter。 */
     @Transactional(readOnly = true)
     public TradingRadarDto.StockDecision evaluateForNotification(
             String stockCode, String market, boolean held) {
@@ -133,24 +146,32 @@ public class TradingRadarService {
     private TradingRadarDto.StockDecision buildStock(
             Target target,
             TradingRadarRuleEngine.MarketRegime marketRegime) {
-        String name = stockRepo.findByCodeAndMarket(target.code(), target.market())
-                .map(s -> s.getName())
+        Optional<Stock> stock = stockRepo.findByCodeAndMarket(target.code(), target.market());
+        String name = stock.map(Stock::getName)
                 .filter(n -> n != null && !n.isBlank())
                 .orElse(target.code());
+        String assetClass = assetClassifier.classifyStock(
+                target.code(), target.market(), stock.map(Stock::getAssetClass).orElse(null));
+        TradingRadarRuleEngine.InstrumentType instrumentType = AssetClassifier.BOND.equals(assetClass)
+                ? TradingRadarRuleEngine.InstrumentType.BOND
+                : TradingRadarRuleEngine.InstrumentType.EQUITY;
         try {
             List<StockPriceHistory> rows = priceHistoryRepo.findRecentN(target.code(), target.market(), 241);
-            List<BigDecimal> closes = rows.stream().map(StockPriceHistory::getClosePrice).toList();
             Optional<PriceQueryService.LivePrice> liveOpt = priceQueryService.getLive(target.code(), target.market());
+            TechnicalData technical = prepareTechnicalData(target, rows, liveOpt);
+            List<BigDecimal> closes = technical.completedCloses();
             BigDecimal price = liveOpt.map(PriceQueryService.LivePrice::price)
                     .orElseGet(() -> rows.isEmpty() ? null : rows.get(0).getClosePrice());
-            BigDecimal changePercent = liveOpt.map(PriceQueryService.LivePrice::changePercent)
+            BigDecimal displayChangePercent = liveOpt.map(PriceQueryService.LivePrice::changePercent)
                     .orElse(null);
-            if (changePercent == null && price != null && closes.size() >= 2) {
+            if (displayChangePercent == null && price != null && closes.size() >= 2) {
                 BigDecimal previous = previousCompletedClose(rows, liveOpt.orElse(null));
-                changePercent = changePercent(price, previous);
+                displayChangePercent = changePercent(price, previous);
             }
+            BigDecimal ruleChangePercent = changePercent(price, technical.previousAdjustedClose());
+            if (ruleChangePercent == null) ruleChangePercent = displayChangePercent;
 
-            TechnicalIndicatorService.FullIndicators ind = indicatorService.computeAll(target.code(), target.market());
+            TechnicalIndicatorService.FullIndicators ind = technical.indicators();
             TradingRadarRuleEngine.Confirmation c20 = ruleEngine.confirm(closes, 20);
             TradingRadarRuleEngine.Confirmation c60 = ruleEngine.confirm(closes, 60);
             TradingRadarRuleEngine.Confirmation c240 = ruleEngine.confirm(closes, 240);
@@ -158,14 +179,21 @@ public class TradingRadarService {
                     new TradingRadarRuleEngine.StockInput(
                             target.held(),
                             price,
-                            changePercent,
+                            ruleChangePercent,
                             indicators(ind),
                             ind.previousK(),
                             ind.previousD(),
                             c20,
                             c60,
                             c240,
+                            instrumentType,
                             marketRegime));
+
+            List<String> reasons = new ArrayList<>();
+            if (technical.distributionAdjusted()) {
+                reasons.add("MA／KD、兩日確認與規則漲跌已使用還原權息價，避免把配息缺口誤判為趨勢跌破。 ");
+            }
+            reasons.addAll(result.reasons());
 
             String updatedAt = liveOpt.map(PriceQueryService.LivePrice::updatedAt).orElse(null);
             String asOf = rows.isEmpty() ? null : rows.get(0).getTradingDate().toString();
@@ -173,6 +201,8 @@ public class TradingRadarService {
                     target.code(),
                     name,
                     target.market(),
+                    assetClass,
+                    technical.distributionAdjusted(),
                     target.held(),
                     result.action().name(),
                     actionLabel(result.action()),
@@ -183,7 +213,7 @@ public class TradingRadarService {
                     result.counterTrend().risks(),
                     result.action() != TradingRadarRuleEngine.Action.NO_TRADE,
                     price,
-                    changePercent,
+                    displayChangePercent,
                     updatedAt,
                     asOf,
                     ind.monthlyMa(),
@@ -194,12 +224,80 @@ public class TradingRadarService {
                     c20.name(),
                     c60.name(),
                     c240.name(),
-                    result.reasons(),
+                    List.copyOf(reasons),
                     result.risks());
         } catch (Exception e) {
             log.warn("今日交易雷達：{} {} 組裝失敗", target.market(), target.code(), e);
-            return incompleteStock(target, name, "讀取個股資料失敗，該檔今日不交易。");
+            return incompleteStock(target, name, assetClass, "讀取個股資料失敗，該檔今日不交易。");
         }
+    }
+
+    private TechnicalData prepareTechnicalData(
+            Target target,
+            List<StockPriceHistory> completedRows,
+            Optional<PriceQueryService.LivePrice> liveOpt) {
+        List<StockPriceHistory> combined = new ArrayList<>(completedRows);
+        boolean liveAdded = liveOpt.filter(live -> shouldAddLiveRow(completedRows, live)).isPresent();
+        if (liveAdded) {
+            combined.add(0, liveRow(target, liveOpt.orElseThrow()));
+        }
+        if (combined.isEmpty()) {
+            return new TechnicalData(
+                    TechnicalIndicatorService.FullIndicators.EMPTY, List.of(), null, false);
+        }
+
+        LocalDate fromDate = combined.get(combined.size() - 1).getTradingDate();
+        LocalDate toDate = combined.get(0).getTradingDate();
+        DistributionAdjustedPriceService.Adjustment adjustment = adjustedPriceService.adjust(
+                combined,
+                dividendHistoryRepo.findAdjustmentEvents(
+                        target.code(), target.market(), fromDate, toDate));
+        List<StockPriceHistory> adjustedRows = adjustment.rowsDesc();
+
+        int completedStart = liveAdded ? 1 : 0;
+        int completedEnd = Math.min(completedStart + completedRows.size(), adjustedRows.size());
+        List<BigDecimal> completedCloses = adjustedRows.subList(completedStart, completedEnd).stream()
+                .map(StockPriceHistory::getClosePrice)
+                .toList();
+
+        int indicatorRows = Math.min(adjustedRows.size(), liveAdded ? 241 : 240);
+        TechnicalIndicatorService.FullIndicators indicators = indicatorService.computeFromSeries(
+                adjustedRows.subList(0, indicatorRows));
+        BigDecimal previousAdjustedClose = adjustedRows.size() >= 2
+                ? adjustedRows.get(1).getClosePrice()
+                : null;
+        return new TechnicalData(
+                indicators, completedCloses, previousAdjustedClose, adjustment.adjusted());
+    }
+
+    private boolean shouldAddLiveRow(
+            List<StockPriceHistory> completedRows,
+            PriceQueryService.LivePrice live) {
+        if (live.tradingDate() == null || live.price() == null) return false;
+        LocalDate liveDate;
+        try {
+            liveDate = LocalDate.parse(live.tradingDate());
+        } catch (Exception e) {
+            return false;
+        }
+        LocalDate today = LocalDate.now(TAIPEI);
+        return liveDate.equals(today)
+                && (completedRows.isEmpty()
+                    || !liveDate.equals(completedRows.get(0).getTradingDate()));
+    }
+
+    private StockPriceHistory liveRow(Target target, PriceQueryService.LivePrice live) {
+        BigDecimal price = live.price();
+        return StockPriceHistory.builder()
+                .stockCode(target.code())
+                .market(target.market())
+                .tradingDate(LocalDate.parse(live.tradingDate()))
+                .openPrice(live.openPrice() != null ? live.openPrice() : price)
+                .highPrice(live.highPrice() != null ? live.highPrice() : price)
+                .lowPrice(live.lowPrice() != null ? live.lowPrice() : price)
+                .closePrice(price)
+                .volume(live.volume())
+                .build();
     }
 
     /**
@@ -277,9 +375,10 @@ public class TradingRadarService {
         return new MarketState(summary, TradingRadarRuleEngine.MarketRegime.DATA_INCOMPLETE);
     }
 
-    private TradingRadarDto.StockDecision incompleteStock(Target target, String name, String message) {
+    private TradingRadarDto.StockDecision incompleteStock(
+            Target target, String name, String assetClass, String message) {
         return new TradingRadarDto.StockDecision(
-                target.code(), name, target.market(), target.held(),
+                target.code(), name, target.market(), assetClass, false, target.held(),
                 TradingRadarRuleEngine.Action.NO_TRADE.name(),
                 actionLabel(TradingRadarRuleEngine.Action.NO_TRADE),
                 null,

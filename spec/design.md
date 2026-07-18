@@ -3126,11 +3126,14 @@ TradingRadarView
   → GET /api/trading-radar
   → TradingRadarService
        ├─ TwseIndexDailyHistoryRepository（大盤完成日 K）
-       ├─ TechnicalIndicatorService（MA20／60／240、KD，同義指標權威）
+       ├─ StockRepository + AssetClassifier（有效 STOCK／BOND 類別）
+       ├─ StockDividendHistoryRepository（完成日 K 區間內除權息事件）
+       ├─ DistributionAdjustedPriceService（還原權息 OHLC 純計算）
+       ├─ TechnicalIndicatorService（以同一序列計算 MA20／60／240、KD）
        ├─ AssetSnapshotRepository.findLatestWithStocks（當前持股，owner-scoped）
        ├─ StockAlertRepository.findDistinctStockCodeMarket（觀察，owner-scoped）
        ├─ PriceQueryService（只讀 Redis；miss → stock_price_history）
-       └─ TradingRadarRuleEngine（TW_RULES_V2，純函式規則）
+       └─ TradingRadarRuleEngine（TW_RULES_V3，純函式規則）
 ```
 
 本請求鏈**刻意不注入** `MarketAnalysisService`、LLM SDK、新聞爬蟲或任何 refresh endpoint。頁面按「重新整理」只重讀既有資料，不對外抓行情、不送出 Batch、不產生 AI 費用。現有行情／大盤排程若在背景更新 PostgreSQL 或 Redis，雷達下次讀取自然看見新值；兩者生命週期分離。
@@ -3145,9 +3148,27 @@ TradingRadarView
 
 - `Response`：`ruleVersion`、`generatedAt`、`market`、`stocks`、`skippedNonTwStocks`。
 - `MarketSummary`：`regime`、`regimeLabel`、`score`、`dataComplete`、`asOfDate`、點位／漲跌幅、MA20／60／240、K／D、MA60／240 兩日確認、`reasons`、`risks`。
-- `StockDecision`：code／name／market、`held`、`action`／`actionLabel`、`score`、`counterTrendState`／`counterTrendLabel`、`counterTrendReasons`／`counterTrendRisks`、`dataComplete`、報價／漲跌幅／更新時間／`asOfDate`、MA20／60／240、K／D、MA20／60／240 兩日確認、`reasons`、`risks`。
+- `StockDecision`：code／name／market、`assetClass`、`distributionAdjusted`、`held`、`action`／`actionLabel`、`score`、`counterTrendState`／`counterTrendLabel`、`counterTrendReasons`／`counterTrendRisks`、`dataComplete`、報價／漲跌幅／更新時間／`asOfDate`、MA20／60／240、K／D、MA20／60／240 兩日確認、`reasons`、`risks`。
 
 無新 entity／table／migration；分數與建議皆為可重算的衍生值，不持久化，符合正規化原則。
+
+### 還原權息技術序列（TW_RULES_V3）
+
+交易雷達以 `stock_price_history` 最近 241 根完成日 K 為基礎；若 `PriceQueryService` 有「今日且尚未寫入完成日 K」的 live OHLC，再暫加於序列最前。接著查同一日期區間內 `stock_dividend_history.ex_dividend_date IS NOT NULL` 且現金配息或股票股利為正的事件，由 `DistributionAdjustedPriceService` 以日期升冪套用累積持股因子：
+
+```text
+eventFactor = 1 + stockDividend / 10 + cashDividend / eventDayClose
+sharesAfterEvent = sharesBeforeEvent * eventFactor
+adjustedOHLC(date) = rawOHLC(date) * sharesAtDate / finalShares
+```
+
+`eventDayClose` 取除息日（若該日缺 K，則下一根可用 K）的原始收盤，必須大於 0；無效／未來／區間外事件略過。最後除以 `finalShares`，保證最新一根 OHLC 與原始行情相同，歷史價格則消除現金與股票配息造成的機械缺口。沒有有效事件時直接回原序列且 `distributionAdjusted=false`，不製造浮點漂移。調整後的同一份 OHLC 同時供：
+
+1. `TechnicalIndicatorService.computeFromSeries()` 計算 MA20／60／240、當期與前一期 KD；
+2. `TradingRadarRuleEngine.confirm()` 計算 MA20／60／240 兩收盤日確認；
+3. 規則引擎的單日漲跌（±5% 扣分、逆勢「停止續跌」）＝原始現價相對還原後前一根可比收盤；DTO `changePercent` 仍保留市場報價原始漲跌，兩者語意分離。
+
+禁止只調 MA 不調 KD／確認／規則漲跌，否則會在同一筆決策中混用兩種價基。此調整只發生在交易雷達請求鏈，不覆寫 `stock_price_history`／`stock_dividend_history`，也不改其他頁面既有價格圖與行情漲跌的原始價口徑。
 
 ### 兩收盤日確認
 
@@ -3158,11 +3179,13 @@ TradingRadarView
 - 最新、前一收盤皆嚴格小於各自 SMA → `BELOW`。
 - 一上一下或等於均線 → `MIXED`；資料不足 → `UNAVAILABLE`。
 
-最新價相對均線的分數仍使用 `TechnicalIndicatorService.computeAll()` 回傳的當前指標；若 Redis 有盤中價，該服務既有行為會把盤中價合入當前 MA。兩日確認只讀完成日 K，避免盤中假突破被當成正式確認。
+最新價相對均線的分數使用 `TechnicalIndicatorService.computeFromSeries()` 對還原權息序列算出的當前指標；若 Redis 有尚未入庫的今日盤中價，該 live K 只合入當前 MA／KD，不進兩日確認。兩日確認只讀完成日 K，避免盤中假突破被當成正式確認。
 
-### 規則引擎 `TW_RULES_V2`
+### 規則引擎 `TW_RULES_V3`
 
-大盤與個股的權重、clamp、regime 門檻及主動作映射以 Requirement 43 Acceptance Criteria 為唯一契約；V2 完整保留 V1 的 score/action 結果，只新增獨立 counter-trend state。`TradingRadarRuleEngine` 不碰 repository／網路／時間，輸入皆為數值與確認狀態，輸出 score/action/counterTrend/reasons/risks，確保單元測試可重現。大盤 `DATA_INCOMPLETE` 為全域 veto；個股資料不足則只 veto 該檔。`RISK_OFF` 是主建議買進閘門：即使個股高分也不可回 `BUY_CANDIDATE`／`ADD_CANDIDATE`，但不抹掉獨立的逆勢觀察狀態。
+大盤與標的的權重、clamp、regime 門檻及主動作映射以 Requirement 43 Acceptance Criteria 為唯一契約。V3 保留 V2 的大盤分數與 `STOCK` 行為，新增 `InstrumentType.EQUITY/BOND`：有效類別由 `stock.asset_class` override 優先、否則 `AssetClassifier` 規則判定，無法辨識時保守用 `EQUITY`。`EQUITY` 繼續套用大盤 `RISK_ON +8`／`RISK_OFF -15`、`RISK_OFF` 買進閘門與 `DATA_INCOMPLETE` veto；`BOND` 對台股大盤 regime 計 0 分、不受股票大盤買進閘門影響，大盤資料不足也不單獨 veto，但個別 MA／KD／完成日 K 不足仍一律 `NO_TRADE`。
+
+`TradingRadarRuleEngine` 不碰 repository／網路／時間，輸入皆為數值、資產型別與確認狀態，輸出 score/action/counterTrend/reasons/risks，確保單元測試可重現。債券結果的 reasons 明示「不套用台股大盤加減分與閘門」，避免使用者誤以為漏算；股票 `RISK_OFF` 仍不抹掉獨立的逆勢觀察狀態。
 
 ### 逆勢抄底狀態（獨立第二軌）
 
@@ -3173,6 +3196,8 @@ TradingRadarView
 3. `K<20`：符合 1–3 即 `OVERSOLD_WATCH`，代表跌深但尚非買點。
 4. 升級 `TRIAL_CANDIDATE`：另須 `D<20`、`previousK<=previousD && K>D`，以及 `changePercent>=0`。因此只用當期 `K>D` 不足以冒充黃金交叉，仍下跌也不升級試單。
 
+上述 MA／KD 一律來自還原權息序列。`RISK_OFF` 的逆勢風險文案只適用 `EQUITY`；`BOND` 不顯示股票大盤風險文案。
+
 `TechnicalIndicatorService.FullIndicators` 增加 `previousK`／`previousD`：與當期 KD 使用完全相同的 KD9 遞迴；當期序列計算後，再排除最新一根（盤中 live 或最新完成日 K）計算前一期，資料不足回 null。`TradingRadarService` 將兩值只傳入純規則 `StockInput`，不新增 DB 欄位。`RISK_OFF` 時 counter-trend state 仍可產生，但 `counterTrendRisks` 必含小額分批、主建議優先；這是資訊狀態，不是自動下單授權。
 
 ### API 與前端
@@ -3182,7 +3207,7 @@ TradingRadarView
 | business | `GET /api/trading-radar` | 組裝大盤＋當前使用者台股決策；純讀、graceful per-stock |
 | BFF | `GET /api/bff/trading-radar` | `TradingRadarBffRoutes` rewrite 至 business；一頁一 BFF |
 
-前端新增 `TradingRadarView.vue`：上方大盤 regime 卡（RISK_ON 紅、RISK_OFF 綠、NEUTRAL 灰、DATA_INCOMPLETE 黃；台股配色）、規則版本／資料日／重新整理；下方卡片表格依主動作顯示 tag，另有「逆勢抄底」獨立欄位（`NONE` 顯示 `—`、超跌觀察為 warning、逆勢試單候選為 danger），展開列呈現三條均線確認、主規則理由／風險及逆勢狀態自己的理由／風險。`api/index.js` 新增 `bffApi.tradingRadar.get()`；router 新增 `/trading-radar`；`App.vue` 於「股市綜合分析」加入「今日交易雷達」。
+前端新增 `TradingRadarView.vue`：上方大盤 regime 卡（RISK_ON 紅、RISK_OFF 綠、NEUTRAL 灰、DATA_INCOMPLETE 黃；台股配色）、規則版本／資料日／重新整理；下方卡片表格依主動作顯示 tag，另有「逆勢抄底」獨立欄位（`NONE` 顯示 `—`、超跌觀察為 warning、逆勢試單候選為 danger）。標的名稱下依 DTO 顯示「債券」與「還原權息」小標籤；展開列呈現同一還原價基的三條均線確認、主規則理由／風險及逆勢狀態自己的理由／風險。`api/index.js` 新增 `bffApi.tradingRadar.get()`；router 新增 `/trading-radar`；`App.vue` 於「股市綜合分析」加入「今日交易雷達」。
 
 盤中更新沿用儀表板既有 SSE `/api/market-data/prices/stream`，不另建 endpoint。`price-update` 只處理 `market=台股` 且已存在於目前雷達清單的代號：事件抵達時以 immutable row replacement 立即覆蓋 `price`／`changePercent`／`priceUpdatedAt`；同一批事件以 2 秒 trailing debounce 合併，再以不顯示 loading 的 `bffApi.tradingRadar.get()` 重讀完整 response，讓 MA、KD、score、action、reasons、risks 與最新 Redis 價格一致。背景重算若仍在執行，新事件只標記 pending，完成後再合併補算，避免重疊請求。此流程只讀既有 Redis／PostgreSQL，不呼叫 `/prices/refresh`。
 
@@ -3192,6 +3217,7 @@ TradingRadarView
 
 - `TradingRadarRuleEngineTest`：確認 period+1 邊界、ABOVE／BELOW／MIXED／UNAVAILABLE、分數上下界、買進門檻與 `RISK_OFF` veto、held action mapping、incomplete veto。
 - `TradingRadarRuleEngineTest` V2：以 009804 型輸入確認主分數／出場候選不變但 counter-trend=`OVERSOLD_WATCH`；確認只有真實低檔黃金交叉＋停止續跌才是 `TRIAL_CANDIDATE`，未交叉、仍下跌、年線失守、資料不足皆不可誤判。
+- `DistributionAdjustedPriceServiceTest`／`TradingRadarRuleEngineTest` V3：以 00751B 型除息序列證明原始季／年線跌破在還原後不再誤判；最新價保持原值、無事件完全不改值、現金／股票配息因子正確；`BOND` 不吃台股 `RISK_OFF` 扣分／閘門／veto，`EQUITY` 行為維持 V2。
 - 前端正式建置後確認 `TradingRadarView` chunk 含 `/api/market-data/prices/stream` 與 `price-update`；執行環境確認 SSE endpoint 可建立 `text/event-stream` 回應，且離頁清理與背景重算不觸發 refresh endpoint。
 - 建置：backend test/package、BFF package、frontend build。
 - 執行環境：重建 business／BFF／frontend 後確認 health；以已登入頁面或帶有效 user header 的容器內診斷確認 payload owner-scoped。檢查 business log 與程式依賴，證明 `/api/trading-radar` request 不進 `MarketAnalysisService`、不產生 Anthropic batch。
@@ -3234,7 +3260,7 @@ Redis price-update
      ├─ 個股：只取該 code/market active settings
      └─ 0000/台股：取全部 active 台股 settings
   → explicit owner latest snapshot 判斷 held
-  → TradingRadarService.evaluateForNotification() 共用 TW_RULES_V2
+  → TradingRadarService.evaluateForNotification() 共用目前規則版本（現為 TW_RULES_V3）
   → 比對 persisted last_action / last_counter_trend_state
   → TradingRadarNotificationDispatcher（短批次 per-recipient digest）
   → EmailService.sendHtml([single email], ...)

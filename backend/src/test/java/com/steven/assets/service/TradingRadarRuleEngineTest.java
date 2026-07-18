@@ -87,6 +87,7 @@ class TradingRadarRuleEngineTest {
                 TradingRadarRuleEngine.Confirmation.UNAVAILABLE,
                 TradingRadarRuleEngine.Confirmation.UNAVAILABLE,
                 TradingRadarRuleEngine.Confirmation.UNAVAILABLE,
+                TradingRadarRuleEngine.InstrumentType.EQUITY,
                 TradingRadarRuleEngine.MarketRegime.NEUTRAL));
         assertNull(stock.score());
         assertEquals(TradingRadarRuleEngine.Action.NO_TRADE, stock.action());
@@ -155,6 +156,41 @@ class TradingRadarRuleEngineTest {
                 stock.counterTrend().state());
     }
 
+    @Test
+    void bondDoesNotUseEquityRiskOffPenaltyOrBuyGate() {
+        var equity = engine.evaluateStock(strongStock(
+                true,
+                TradingRadarRuleEngine.InstrumentType.EQUITY,
+                TradingRadarRuleEngine.MarketRegime.RISK_OFF));
+        var bond = engine.evaluateStock(strongStock(
+                true,
+                TradingRadarRuleEngine.InstrumentType.BOND,
+                TradingRadarRuleEngine.MarketRegime.RISK_OFF));
+
+        assertEquals(98, equity.score());
+        assertEquals(TradingRadarRuleEngine.Action.HOLD, equity.action());
+        assertEquals(100, bond.score());
+        assertEquals(TradingRadarRuleEngine.Action.ADD_CANDIDATE, bond.action());
+        assertTrue(bond.reasons().stream().anyMatch(reason -> reason.contains("資產類別為債券")));
+    }
+
+    @Test
+    void incompleteEquityMarketVetoesButBondCanStillBeEvaluated() {
+        var equity = engine.evaluateStock(strongStock(
+                true,
+                TradingRadarRuleEngine.InstrumentType.EQUITY,
+                TradingRadarRuleEngine.MarketRegime.DATA_INCOMPLETE));
+        var bond = engine.evaluateStock(strongStock(
+                true,
+                TradingRadarRuleEngine.InstrumentType.BOND,
+                TradingRadarRuleEngine.MarketRegime.DATA_INCOMPLETE));
+
+        assertNull(equity.score());
+        assertEquals(TradingRadarRuleEngine.Action.NO_TRADE, equity.action());
+        assertEquals(100, bond.score());
+        assertEquals(TradingRadarRuleEngine.Action.ADD_CANDIDATE, bond.action());
+    }
+
     private TradingRadarRuleEngine.MarketInput marketInput(
             BigDecimal price, BigDecimal change,
             BigDecimal ma20, BigDecimal ma60, BigDecimal ma240,
@@ -167,6 +203,13 @@ class TradingRadarRuleEngineTest {
 
     private TradingRadarRuleEngine.StockInput strongStock(
             boolean held, TradingRadarRuleEngine.MarketRegime regime) {
+        return strongStock(held, TradingRadarRuleEngine.InstrumentType.EQUITY, regime);
+    }
+
+    private TradingRadarRuleEngine.StockInput strongStock(
+            boolean held,
+            TradingRadarRuleEngine.InstrumentType instrumentType,
+            TradingRadarRuleEngine.MarketRegime regime) {
         return new TradingRadarRuleEngine.StockInput(
                 held,
                 new BigDecimal("120"),
@@ -179,6 +222,7 @@ class TradingRadarRuleEngineTest {
                 TradingRadarRuleEngine.Confirmation.ABOVE,
                 TradingRadarRuleEngine.Confirmation.ABOVE,
                 TradingRadarRuleEngine.Confirmation.ABOVE,
+                instrumentType,
                 regime);
     }
 
@@ -205,6 +249,7 @@ class TradingRadarRuleEngineTest {
                 TradingRadarRuleEngine.Confirmation.BELOW,
                 TradingRadarRuleEngine.Confirmation.BELOW,
                 annualConfirmation,
+                TradingRadarRuleEngine.InstrumentType.EQUITY,
                 TradingRadarRuleEngine.MarketRegime.RISK_OFF);
     }
 
