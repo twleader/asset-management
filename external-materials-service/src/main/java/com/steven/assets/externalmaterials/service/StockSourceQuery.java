@@ -155,6 +155,14 @@ public class StockSourceQuery {
                 }));
     }
 
+    /** 指定交易日的收盤價（Task 215：入庫折溢價時，與淨值配對的必須是<b>同一交易日</b>的收盤價）。 */
+    public Optional<BigDecimal> findCloseOn(String stockCode, String market, LocalDate tradingDate) {
+        return Optional.ofNullable(jdbc.query(
+                "SELECT close_price FROM stock_price_history WHERE stock_code=? AND market=? AND trading_date=?",
+                ps -> { ps.setString(1, stockCode); ps.setString(2, market); ps.setObject(3, tradingDate); },
+                rs -> rs.next() ? rs.getBigDecimal(1) : null));
+    }
+
     /** 一筆日收盤（交易日＋收盤價），供均線計算（Task 207）。 */
     public record ClosePoint(LocalDate date, BigDecimal close) {}
 
@@ -284,6 +292,32 @@ public class StockSourceQuery {
             jdbc.update(
                     "INSERT INTO commodity_price_history (commodity_code, price_date, close_price) VALUES (?, ?, ?)",
                     code, priceDate, closePrice);
+        }
+    }
+
+    /**
+     * ETF 每日淨值／折溢價入庫（Task 215）：同一 (代號, 市場, 資料日) 覆寫。
+     *
+     * <p>盤中多次抓取會反覆覆寫同一列，故每日最終值＝當日最後一次抓到的值（收盤後那次），
+     * 這正是「當日收盤折溢價」的語意。
+     *
+     * <p>折溢價原樣保存來源值，<b>不由淨值反推</b>——台股該值是證交所發布的權威數字，而其淨值欄在股票型
+     * ETF 已四捨五入至小數 2 位，反推誤差達 0.07 個百分點。市價刻意不入此表（同一事實已在
+     * {@code stock_price_history.close_price}，跨表重複違反完整正規化）。
+     */
+    public void upsertEtfNav(String stockCode, String market, LocalDate navDate,
+                             BigDecimal nav, BigDecimal premiumDiscountPct, String source) {
+        Long existing = jdbc.query(
+                "SELECT id FROM etf_nav_history WHERE stock_code=? AND market=? AND nav_date=?",
+                ps -> { ps.setString(1, stockCode); ps.setString(2, market); ps.setObject(3, navDate); },
+                rs -> rs.next() ? rs.getLong(1) : null);
+        if (existing != null) {
+            jdbc.update("UPDATE etf_nav_history SET nav=?, premium_discount_pct=?, source=? WHERE id=?",
+                    nav, premiumDiscountPct, source, existing);
+        } else {
+            jdbc.update("INSERT INTO etf_nav_history "
+                    + "(stock_code, market, nav_date, nav, premium_discount_pct, source) VALUES (?, ?, ?, ?, ?, ?)",
+                    stockCode, market, navDate, nav, premiumDiscountPct, source);
         }
     }
 

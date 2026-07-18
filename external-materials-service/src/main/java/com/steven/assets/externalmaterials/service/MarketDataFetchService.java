@@ -2,6 +2,7 @@ package com.steven.assets.externalmaterials.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.steven.assets.externalmaterials.client.EtfNavFetchClient;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -622,6 +623,67 @@ public class MarketDataFetchService {
             }
             return null;
         }
+    }
+
+    // ─── 美股 ETF 淨值與折溢價（Task 214）─────────────────────────────────────
+
+    /**
+     * 美股 ETF 淨值與折溢價（Task 214）。放在本 service 而非獨立 client，是為了沿用既有的
+     * {@link #getYahooCrumb()} 單一入口與其 429 negative cache——crumb 若各處自取會互相把對方打成 429。
+     *
+     * <p>取 {@code quoteSummary?modules=summaryDetail,price}：{@code summaryDetail.navPrice} 為 T 日淨值、
+     * {@code price.regularMarketPrice} 為同一回應同一時點的市價，兩者配對計算折溢價。
+     *
+     * <p><b>禁止改用同回應的 {@code previousClose}</b>：那是 T-1 值，與 T 日 navPrice 相除會把 VOO 的真實
+     * +0.003% 溢價放大成 +1.02%（實測），是會過眼的靜默錯誤。
+     *
+     * <p><b>個股自然回 empty</b>：一般股票（如 GOOGL）在 Yahoo 沒有 {@code navPrice} 欄位，故本方法即為
+     * 「這檔是不是 ETF」的資料驅動判定，不需要維護 ETF 白名單（既有 {@code isEtf()} 白名單誤把個股 AVGO
+     * 列為 ETF、又漏掉使用者實際持有的 SGOV，刻意不複用）。
+     *
+     * @param symbol 美股代號（如 VOO）
+     */
+    public EtfNavFetchClient.EtfNav getUsEtfNav(String symbol) {
+        try {
+            String crumb = getYahooCrumb();
+            String url = "https://query2.finance.yahoo.com/v10/finance/quoteSummary/" + symbol
+                    + "?modules=summaryDetail,price&crumb="
+                    + URLEncoder.encode(crumb, StandardCharsets.UTF_8);
+            JsonNode result = mapper.readTree(yahooApiGet(url)).path("quoteSummary").path("result");
+            if (!result.isArray() || result.isEmpty()) return null;
+            JsonNode node = result.get(0);
+
+            BigDecimal nav = rawDecimal(node.path("summaryDetail").path("navPrice"));
+            if (nav == null || nav.compareTo(BigDecimal.ZERO) == 0) return null; // 非 ETF 或無淨值
+
+            // 折溢價<b>刻意留 null</b>：Yahoo 未提供折溢價欄，若在此以 Yahoo 自己的 regularMarketPrice 計算，
+            // 會與匯出列顯示的「即時價」（走 Redis，來源／時點皆不同）對不起來——實測 VOO 兩者相差 0.11%，
+            // 使用者拿本列數字自行驗算會發現折溢價欄兜不攏。故美股折溢價改由取用端以「該列自己的市價」計算，
+            // 保證列內自洽（台股則相反：證交所已算好且其市價與本列即時價同源，直接沿用權威值）。
+            // 報價時點（epoch 秒）轉紐約當地日期，作為淨值資料日；缺值時留白而不臆測
+            String asOf = null;
+            long epoch = node.path("price").path("regularMarketTime").path("raw").asLong(0);
+            if (epoch <= 0) epoch = node.path("price").path("regularMarketTime").asLong(0);
+            if (epoch > 0) {
+                asOf = java.time.Instant.ofEpochSecond(epoch)
+                        .atZone(java.time.ZoneId.of("America/New_York")).toLocalDate().toString();
+            }
+            return new EtfNavFetchClient.EtfNav(symbol, "美股", nav, null, asOf, "Yahoo Finance");
+        } catch (Exception e) {
+            log.warn("美股 ETF 淨值查詢失敗 {}: {}", symbol, e.getMessage());
+            if (e.getMessage() != null && (e.getMessage().contains("401") || e.getMessage().contains("429"))) {
+                yahooCrumb = null;
+            }
+            return null;
+        }
+    }
+
+    /** Yahoo 數值欄位取值：優先 {@code .raw}，退回節點本身的數值；非數值回 null。 */
+    private static BigDecimal rawDecimal(JsonNode node) {
+        JsonNode raw = node.path("raw");
+        if (raw.isNumber()) return BigDecimal.valueOf(raw.asDouble());
+        if (node.isNumber()) return BigDecimal.valueOf(node.asDouble());
+        return null;
     }
 
     // ─── 股利歷史 ──────────────────────────────────────────────────────────────

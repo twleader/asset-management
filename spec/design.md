@@ -2525,6 +2525,58 @@ GET  /api/bff/asset-history/export                    → GET  /api/snapshots/ex
 - **月／季／年線與 KD**：`ExcelExportService` 注入既有共用權威 `TechnicalIndicatorService`，逐 `(code, market)` 呼叫 `computeAll()` 取 `FullIndicators{monthlyMa, quarterlyMa, annualMa, k, d}`（資料源 `stock_price_history` 近 240 筆；與觀察清單／警示同一計算，符合「同義欄位同一 business service」）。以 `Map<code|market, FullIndicators>` 於單次匯出內快取，同股多券商列僅計算一次。KD 併為單一「KD值」欄字串 `K {k} / D {d}`（k/d 皆為 `computeAll` 已 scale 2 位之 BigDecimal，任一為 null 以 `—` 佔位）。
 - **儲存格樣式**：昨收沿用即時價 `num4`；漲跌／漲跌幅／月線／季線／年線用新增 `num2`（`#,##0.00`）；KD值為純字串。查無即時報價或歷史不足者相應欄留白（`cell()` 遇 null 不寫值）。此增列同時作用於 run-now（`exportLiveAssets`）與排程（`exportLiveAssetsForOwner`），皆共用 `writeLiveAssetsSheet`。
 
+### ETF 淨值與折溢價欄（Task 214）
+
+- **資料流**：`external-materials-service` 抓取 → Redis → `business-services` 讀取 → Excel 欄位。
+  business 不直連外部行情 API（既有規範），故淨值比照即時股價走 Redis 中介。
+
+  | 階段 | 元件 | 說明 |
+  |---|---|---|
+  | 抓取（台股） | `client/EtfNavFetchClient.fetchTwAll()` | 一次 GET 證交所 `all_etf.txt`（全市場約 350 檔，含上市＋上櫃），Java HttpClient ＋ `Referer`，比照 `PriceFetchClient` |
+  | 抓取（美股） | `MarketDataFetchService.getUsEtfNav(symbol)` | Yahoo `quoteSummary?modules=summaryDetail,price`；**沿用既有 `getYahooCrumb()` 單一入口**，不另取 crumb（各處自取會互相打成 429） |
+  | 寫入 | `service/EtfNavCacheWriter` | `price:etfnav:{market}:{code}`，String JSON，**TTL 96h** |
+  | 排程 | `service/EtfNavPoller` | 台股交易時段每 5 分鐘（`0 2/5 9-13 * * MON-FRI` TPE）；美股 `0 30 18 * * MON-FRI` NYC；＋開機 warmup ＋ `POST /internal/etf-nav/refresh` |
+  | 讀取 | `PriceQueryService.getEtfNav()` | 回 `Optional<EtfNav>`；**刻意不 fallback DB**（淨值不在 `stock_price_history`，且「查無」是個股的正常狀態） |
+  | 呈現 | `ExcelExportService.writeLiveAssetsSheet` | 欄 18 淨值(`num4`)／19 折溢價(%)(`num2`)／20 淨值時間(字串)；`autoSizeColumn` 上界 18→**21** |
+
+- **獨立 Redis key 而非擴充 `price:{market}:{code}`**：後者有三個寫入者（`write`／`writeVerifiedClose`／`syncClosedFromDb`），
+  多帶欄位會被彼此覆蓋，且會波及 `ClosePersister` 的收盤回填掃描與 `price-update` pub/sub 的 SSE 契約。
+- **TTL 96h（不同於即時價的 24h）**：淨值一天只有一組有意義的值且只在交易時段抓取；24h 會讓週末／連假後第一份匯出整欄空白。
+  payload 內帶 `navAsOf`，判斷新舊看該欄位，不可由「Redis 有值」推論「是今天的值」——這正是第三欄「淨值時間」存在的理由。
+- **ETF 判定＝資料存在性，不用白名單**：台股看代號是否在證交所 ETF 名冊、美股看 Yahoo 是否回 `navPrice`（個股如 GOOGL 沒有此欄位）。
+  既有 `isEtf()` 有三份複本（backend 為死碼、ext、frontend），皆誤含個股 `AVGO`、皆漏 `SGOV`，本功能刻意不複用；
+  日後若要收斂那三份白名單，本處的資料驅動判定可作為替代方案。
+- **折溢價的兩條計算路徑（刻意不統一）**：台股沿用證交所已算好的權威值（其市價與匯出列的「即時價」同源，實測逐檔吻合）；
+  美股則因 Yahoo 未提供折溢價欄，改由 `ExcelExportService.premiumDiscountPct()` 以**該列自己的即時價**與淨值計算。
+  抓取端刻意**不**為美股預先算好——那會用 Yahoo 自己的市價，與列上顯示的即時價不同源（實測 VOO 差 0.11%），
+  造成使用者拿本列數字驗算兜不攏的列內矛盾。
+- **折溢價計算的兩條紅線**（違反會產生「平盤日正常、大跌日離譜」的靜默錯誤，程式碼註解已標明）：
+  1. 台股**直接採用證交所已算好的折溢價欄**，不得由淨值自行重算（淨值欄在股票型四捨五入至 2 位，重算誤差達 0.07 個百分點）。
+  2. **不得用「前一交易日淨值」欄**（該欄對全部檔位皆 T-1）；美股同理**不得用 `previousClose`** 配 `navPrice`。
+- **語意差異（design 明載，避免日後誤解）**：台股寫入的是盤中即時預估淨值，同日不同時間匯出數字會不同；
+  美股則是前一交易日收盤淨值配同時點市價。兩者不是同一時點的概念，欄位語意統一理解為「最近一次取得的淨值」。
+- **失敗處置**：抓取失敗不寫入（保留上一輪值），比照 `PriceCacheWriter` 對 `z='-'` 的處置；`etf-nav.enabled=false` 可整體停用，
+  停用後匯出三欄留白、不影響其他欄位。
+
+#### 每日入庫留存（Task 215）
+
+- **表**：`etf_nav_history(stock_code, market, nav_date, nav, premium_discount_pct, source)`，
+  `(stock_code, market, nav_date)` UNIQUE，Liquibase `v1.63.0-etf-nav-history.sql`（冪等寫法）。全域公開行情，無 `owner_user_id`。
+- **雙寫分工**：Redis（TTL 96h）＝匯出當下要用的「最新一筆」；`etf_nav_history` ＝長期歷史。
+  每次抓取兩邊都寫，DB 端為 upsert，故盤中反覆覆寫同一列，**當日最終值＝最後一次抓取值**。
+- **收盤後補抓（`0 30 17 * * MON-FRI` TPE）**：投信約 17:00 更新當日淨值；這一輪的作用是讓當日最後一次寫入落在收盤後，
+  使 DB 內該日值具「收盤折溢價」語意，而非停在 13:30 前的盤中瞬間。台股交易日 guard 以 `MarketClock.isTradingDay` 判定。
+- **資料日來源**：台股取彙整檔自帶的資料日期欄、美股取報價時點轉紐約當地日期。
+  **解析不出來就不入庫**——不以 `LocalDate.now()` 代入，否則跨日抓取或休市補抓會把資料掛到錯誤日期，且該錯誤在 UNIQUE 約束下會固化成一筆假資料。
+- **不存市價（正規化）**：市價同一事實已在 `stock_price_history.close_price`。折溢價則**不是**衍生值——見上方紅線，
+  台股為證交所權威值且無法由已四捨五入的淨值反推，屬刻意保留的來源事實。
+- **入庫折溢價的兩條路徑**：台股沿用證交所權威值；美股 Yahoo 不提供該欄，改以 `stock_price_history` 中
+  **與淨值同一交易日**的收盤價計算（`EtfNavPoller.resolvePct()` ＋ `StockSourceQuery.findCloseOn()`），查無同日收盤價則留 null、
+  下一輪再補。**與 Excel 欄位語意刻意不同**：匯出欄用「該列當下的即時價」（答『現在買貴了沒』），
+  本表用「該交易日收盤價」（答『當日收盤折溢價』，供日後比較常態區間）。兩者本就不是同一個問題，不應強求一致。
+- **尚無讀取端**：本階段只做累積留存，未新增 entity／repository／API／頁面。日後要畫折溢價走勢圖時再補讀取路徑，
+  屆時歷史資料已經在表內（這正是先行留存的目的）。
+
 ### 資產總覽活頁簿改為「總表 ＋ 每檔持股一張過去一年股價分頁」（Task 206）
 
 - **活頁簿結構**：`buildLiveWorkbook()` 在既有 `writeLiveAssetsSheet`（第一張「當前即時資產」）之後追加 `writeStockPriceHistorySheets(wb, st, latest)`，逐檔產生一張股價分頁。run-now 與每日排程共用同一 `buildLiveWorkbook()`，故兩條路徑內容一致；`exportFull()`（歷年多快照活頁簿）不受影響。
