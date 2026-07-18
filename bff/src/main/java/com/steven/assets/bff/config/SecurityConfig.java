@@ -93,8 +93,11 @@ public class SecurityConfig {
                         // 產生建議 /generate 與儲存條件 /profile 為 per-user（owner-scoped）→ 落 anyExchange().authenticated()
                         .pathMatchers(HttpMethod.PUT, "/api/bff/portfolio-advice/settings")
                             .hasAuthority(AuthConstants.AUTHORITY_ADMIN)
-                        // 爬蟲資訊查詢（Requirement 38）：查詢與讀排程開放已登入者；改爬蟲執行時間限 ADMIN（系統設定變更）
+                        // 爬蟲資訊查詢（Requirement 38）：查詢與讀排程／輸出路徑開放已登入者；改爬蟲執行時間限 ADMIN（系統設定變更）
                         .pathMatchers(HttpMethod.PUT, "/api/bff/crawler-data/schedule")
+                            .hasAuthority(AuthConstants.AUTHORITY_ADMIN)
+                        // 改爬蟲輸出檔案路徑限 ADMIN（Task 212）：此設定決定服務往主機檔案系統寫入的位置
+                        .pathMatchers(HttpMethod.PUT, "/api/bff/crawler-data/export-path")
                             .hasAuthority(AuthConstants.AUTHORITY_ADMIN)
                         // 全域共用參考資料：寫入限 ADMIN（GET 不列入 → 落到 anyExchange().authenticated()）
                         .pathMatchers(HttpMethod.POST, GLOBAL_SETTINGS_PATHS).hasAuthority(AuthConstants.AUTHORITY_ADMIN)

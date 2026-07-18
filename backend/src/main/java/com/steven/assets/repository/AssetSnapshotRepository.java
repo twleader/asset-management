@@ -40,6 +40,12 @@ public interface AssetSnapshotRepository extends JpaRepository<AssetSnapshot, Lo
      */
     Optional<AssetSnapshot> findFirstByOwnerUserIdOrderBySnapshotDateDesc(Long ownerUserId);
 
+    /** 背景交易雷達通知專用：明確 owner 條件並一併載入最新快照持股。 */
+    @Query("SELECT s FROM AssetSnapshot s LEFT JOIN FETCH s.stocks " +
+            "WHERE s.id = (SELECT s2.id FROM AssetSnapshot s2 " +
+            "WHERE s2.ownerUserId = :ownerUserId ORDER BY s2.snapshotDate DESC LIMIT 1)")
+    Optional<AssetSnapshot> findLatestWithStocksByOwnerUserId(Long ownerUserId);
+
     /**
      * 用 JOIN FETCH 載入最新快照及其持股，避免 LazyInitializationException
      * 使用子查詢取得最新快照 ID，再用 JOIN FETCH 載入

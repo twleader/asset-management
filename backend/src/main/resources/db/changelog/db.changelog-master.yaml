@@ -231,5 +231,11 @@ databaseChangeLog:
       file: db/changelog/changes/v1.62.0-exchange-rate-export-schedule.sql
       relativeToChangelogFile: false
   - include:
+      file: db/changelog/changes/v1.63.0-trading-radar-notification.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.64.0-crawler-export-path.sql
+      relativeToChangelogFile: false
+  - include:
       file: db/changelog/changes/v1.65.0-etf-nav-history.sql
       relativeToChangelogFile: false

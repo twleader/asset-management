@@ -232,6 +232,15 @@ export const bffApi = {
       api.patch(`/bff/today-market-analysis/send-times/${id}/active`)
   },
 
+  // TradingRadar（今日交易雷達，Requirement 43）：純本地規則，零 AI API
+  tradingRadar: {
+    get: () => api.get('/bff/trading-radar'),
+    getNotification: (stockCode, market) =>
+      api.get(`/bff/trading-radar/notifications/${encodeURIComponent(stockCode)}`, { params: { market } }),
+    updateNotification: (stockCode, market, payload) =>
+      api.put(`/bff/trading-radar/notifications/${encodeURIComponent(stockCode)}`, payload, { params: { market } })
+  },
+
   // AssetAllocationAdvice（資產配置建議，Requirement 32）
   portfolioAdvice: {
     // 一次聚合：{ latest, history, profile, settings, currentAllocation, projection }
@@ -273,7 +282,14 @@ export const bffApi = {
     // 讀 NewsPoller 執行時間點清單 [{hour,minute,enabled}]
     getSchedule: () => api.get('/bff/crawler-data/schedule'),
     // 整批覆寫執行時間點（限管理者）
-    saveSchedule: (times) => api.put('/bff/crawler-data/schedule', times)
+    saveSchedule: (times) => api.put('/bff/crawler-data/schedule', times),
+    // 讀公開資訊 JSON 輸出路徑設定 {crawlerKey,outputSubpath,baseDir,absolutePath,updatedAt}（Task 212）
+    getExportPath: () => api.get('/bff/crawler-data/export-path'),
+    // 更新輸出子路徑（限管理者；跳脫基底回 400）
+    saveExportPath: (outputSubpath) => api.put('/bff/crawler-data/export-path', { outputSubpath }),
+    // 資料夾樹懶載入（passthrough 至既有 /api/export-schedule/browse）
+    browseExportDir: (subpath = '') =>
+      api.get('/bff/crawler-data/export-path/browse', { params: { subpath } })
   },
 
   // SnapshotList

@@ -5189,6 +5189,92 @@ security property，直接 `-D` 讀不到——雙重靜默無效）、改用 JD
 
 ---
 
+### Task 209：今日交易雷達——不呼叫 AI API 的台股規則式買賣決策輔助（Requirement 43）
+
+**需求對應：** 使用者要求在左側「股市綜合分析」下加入可看台股大盤與指定個股買賣建議的功能，並明確要求不要 call AI API。第一版以「最新持股 ∪ 股票觀察」作為指定標的，純讀既有 PostgreSQL／Redis，不新增外部資料呼叫、不自動下單。
+
+- [ ] 209.1 **spec**：新增 Requirement 43；`design.md` 補請求鏈、owner 隔離、DTO、兩收盤日確認、`TW_RULES_V1`、API／前端與驗證設計；`tasks.md` 本任務；`CLAUDE.md` Requirement 數同步為 43。
+- [ ] 209.2 **規則引擎與 DTO**：新增 `TradingRadarRuleEngine`（純函式、版本 `TW_RULES_V1`）與 `TradingRadarDto`；實作大盤／個股評分、clamp、兩日確認、動作映射、`RISK_OFF` 禁買與 incomplete veto。
+- [ ] 209.3 **business service/API**：新增 `TradingRadarService`／`TradingRadarController`；標的取 owner-scoped 最新持股 ∪ 觀察台股，指標共用 `TechnicalIndicatorService`，報價只讀 `PriceQueryService`，大盤／個股逐檔 graceful，不注入 AI／爬蟲服務。
+- [ ] 209.4 **一頁一 BFF**：新增 `TradingRadarBffRoutes`，rewrite `/api/bff/trading-radar` → `/api/trading-radar`；一般已登入使用者可 GET。
+- [ ] 209.5 **前端**：新增 `TradingRadarView.vue`、`bffApi.tradingRadar`、router `/trading-radar`，並在「股市綜合分析」中加入「今日交易雷達」（位於今日股市分析與股票觀察之間）；完成大盤風險卡、個股決策表、理由／風險展開、空清單與資料不足狀態。
+- [ ] 209.6 **單元測試**：新增 `TradingRadarRuleEngineTest`，覆蓋兩日確認四態、分數 clamp、買進門檻、大盤 `RISK_OFF` veto、held／未持有映射與 incomplete `NO_TRADE`。
+- [ ] 209.7 **建置與部署驗證**：backend tests/package、BFF package、frontend build；重建/recreate business、BFF、frontend 並確認 healthy；驗證實際 payload、選單與畫面，且 `/api/trading-radar` 請求不產生 AI API 呼叫。
+- [x] 209.8 **盤中 SSE 自動更新**：沿用 `/api/market-data/prices/stream`；台股事件先即時更新現價／漲跌幅／行情時間，再以 2 秒 debounce 背景重讀完整雷達以重算 MA／KD／分數／建議；避免重疊重算，離頁關閉 SSE 與 timers，斷線自動重連，不觸發行情 refresh／AI API；完成前端 build、chunk 與執行環境驗證。
+  - 驗證：frontend production build 成功；執行中 `TradingRadarView` chunk 含 SSE path／`price-update`；`/trading-radar`＝200、BFF health＝UP、雷達 API 回 19 檔完整 payload、BFF 部署後連線／500 錯誤＝0。
+- [ ] 209.9 commit ＋兩段式 merge（僅在使用者明確授權 commit／push 後執行）。
+
+---
+
+### Task 210：今日交易雷達——逆勢抄底獨立狀態（Requirement 43 / TW_RULES_V2）
+
+**需求對應：** 使用者要求在原本保守趨勢型分數／主建議之外，額外增加一套逆勢抄底狀態；跌深仍走弱先標「超跌觀察」，出現低檔黃金交叉且停止續跌才升級「逆勢試單候選」，不得把逆勢訊號偽裝成原規則買進建議。
+
+- [x] 210.1 **spec／版本契約**：Requirement 43 與 design 補 `TW_RULES_V2`、兩軌狀態、精確門檻、前一期 KD 權威來源、DTO／前端／風險文案與驗證；V1 score/action 行為保持不變。
+- [x] 210.2 **KD 與純規則引擎**：`TechnicalIndicatorService.FullIndicators` 增 `previousK/previousD`；`TradingRadarRuleEngine` 增 `CounterTrendState/Result`，實作 `NONE`／`OVERSOLD_WATCH`／`TRIAL_CANDIDATE`，不得覆寫 score/action，`RISK_OFF` 加逆勢風險提示。
+- [x] 210.3 **DTO／service**：`StockDecision` 回傳 counter-trend state／label／reasons／risks；完整與 incomplete mapping 一致，無 DB migration、無外部行情或 AI 呼叫。
+- [x] 210.4 **前端**：交易雷達新增獨立「逆勢抄底」欄與展開理由／風險；SSE 背景重算後同步更新新狀態；原「規則建議」、分數與手動重新整理保留。
+- [x] 210.5 **測試與部署**：補 009804 型超跌觀察、真／假黃金交叉、仍續跌、年線失守與 incomplete 測試；backend target test/package、BFF package、frontend build；重建 business/BFF/frontend，確認 V2 payload、頁面 chunk 與健康狀態。
+  - 驗證：規則／通知純函式測試通過；三層 production build 成功；live `TW_RULES_V2` payload 中 009804 維持 score=17、action=`EXIT_CANDIDATE`，另回 `OVERSOLD_WATCH`；business/BFF healthy、頁面 200、bundle 含逆勢欄與 SSE。
+- [ ] 210.6 commit ＋兩段式 merge（僅在使用者明確授權 commit／push 後執行）。
+
+---
+
+### Task 211：每檔交易雷達狀態 Email 通知（Requirement 44）
+
+**需求對應：** 使用者要求每檔股票後方提供按鈕，可選擇哪些交易雷達狀態出現時寄 Email，並指定收件人；通知須在背景價格事件運作，不依賴頁面開啟，且不得重複轟炸或跨租戶寄信。
+
+- [x] 211.1 **spec／契約**：新增 Requirement 44；design 定義狀態選項、逐檔 dialog、正規化三表、owner 隔離、首次 baseline、狀態轉入語意、價格事件合併、per-recipient digest、API/BFF 與驗證；`CLAUDE.md` Requirement 數同步為 44。
+- [x] 211.2 **schema／entity／repository**：新增 v1.63 Liquibase；實作 setting/state/recipient join entities 與 owner-safe repositories，含 unique/FK/index 與 active email 同 owner 查詢。
+- [x] 211.3 **設定 API**：實作 DTO、owner-scoped GET/PUT、狀態 code 驗證、recipient 白名單與 bulk replace；擴充 TradingRadarController／BFF／frontend API。
+- [x] 211.4 **背景偵測與 Email**：PriceStreamService 接入 2 秒合併評估；0000 更新全評估，個股只評該檔；explicit owner latest snapshot 判斷 held；共用 V2 決策、baseline／transition 去重與 per-recipient HTML digest，錯誤 fail-soft。
+- [x] 211.5 **前端**：每列最右新增「通知設定」按鈕與逐檔 dialog；分組勾選主狀態／逆勢狀態、收件人、active，顯示首次 baseline／不重寄說明與無收件人引導。
+- [x] 211.6 **測試與部署**：覆蓋狀態轉入去重、再進入、未選／inactive、收件人 owner 防護與 held mapping；backend target test/package、BFF package、frontend build；重建 business/BFF/frontend，確認 migration、V2 payload、notification API、bundle、health 與 logs。
+  - 驗證：通知 transition／held mapping 與雷達規則測試合計 15/15；三層 production build 成功。v1.63 changeset EXECUTED、三表存在；通知 GET 回 10 個主狀態／2 個逆勢狀態；兩位使用者只見各自收件人，跨 owner recipient PUT 回 400 且 setting 留存 0 筆；頁面 200、business/BFF healthy、bundle 含逐檔按鈕／dialog／notification endpoint，近 5 分鐘無 error／500／connection refused。
+- [ ] 211.7 commit ＋兩段式 merge（僅在使用者明確授權 commit／push 後執行）。
+
+---
+
+### Task 212：爬蟲產生檔案的輸出路徑可於頁面設定（Requirement 38）
+
+**需求對應：** Requirement 38「爬蟲資訊查詢頁」新增之「輸出檔案路徑設定」相關 AC。
+
+**背景：** 使用者於 Task 192（爬蟲執行時間可設定）完成後追加要求「爬蟲除了可以設時間，還要可以設定產生檔案的路徑」。
+此處「產生的檔案」＝ `NewsPoller` 每輪寫給 SRPP 退休規劃專案的公開資訊 JSON（`public_info_<日期>.json`，Task 177），
+原本目的地寫死在 `news-scraper.export-dir`（容器 `/srpp-input`）＋ `docker-compose.yml` 的 volume，改路徑必須改檔重新部署。
+
+**關鍵設計決定（掛載基底對齊）：** 本專案已有一套成熟的「輸出目錄設定」模型（Requirement 34／39／41／42）——DB 只存
+**相對子路徑**、實際目錄由容器基底 `EXPORT_OUTPUT_DIR`（`/home/steven`←host `/Users/steven`）resolve、前端用 `el-tree`
+懶載入資料夾樹挑選、目錄列舉共用 `GET /api/export-schedule/browse`。但那套的寫入方與列舉方都在 **business-services**，
+而爬蟲寫檔在 **external-materials-service**，後者原本只掛了 `/srpp-input` 一個窄目錄 → 前端樹上選得到的資料夾，爬蟲
+根本寫不到。故本任務**替 ext 補上與 business 相同的 host 家目錄掛載與基底環境變數**，讓「同義的輸出資料夾」在兩個
+服務指向同一個實體目錄，才有資格沿用同一支 `browse` API（CLAUDE.md「同義欄位、同一 business service API」）。
+代價是爬蟲容器取得整個家目錄的寫入權限（原僅一個子目錄），此權衡已與使用者確認後採行。
+
+**刻意不做：** （1）不開放設定**檔名**——SRPP 依 `public_info_<日期>.json` 取用，改名等於單方面破壞下游契約；
+（2）不開放**絕對路徑**——等於把容器內檔案系統位置寫進 DB、跨環境不可攜且繞過基底防護；（3）不把路徑併進
+`crawler_schedule`——該表一列一時間點，併入會讓同一事實隨列數重複儲存，且刪時間點會連帶弄丟路徑。
+
+- [x] 212.1 **spec**：`requirements.md` Requirement 38 標題／User Story／背景納入輸出路徑，新增 6 條 AC（路徑設定／路徑模型與掛載對齊／預設值不變行為／資料夾選擇器沿用同一 API／動態生效／權限）；`design.md` 更新 `CrawlerDataBffController` 端點、ERD 實體清單、Requirement 38 設計段（新增「動態輸出檔案路徑」四個子項）、Task 177 SRPP JSON 段之基底描述、`crawler_export_setting` 資料表段與 API 端點區塊；`tasks.md` 本任務。
+- [x] 212.2 **DB changeset**：`v1.64.0-crawler-export-path.sql` 建 `crawler_export_setting`（`crawler_key` UNIQUE ＋ `output_subpath NOT NULL`），冪等寫法，seed `('news-poller','Project/SRPP/data/input')`＝原 `/srpp-input` 的同一 host 目錄；`db.changelog-master.yaml` 註冊。**編號避讓**：原編 v1.63.0 並已在開發 DB 執行，部署時發現另一個 worktree 已先占用 v1.63.0（`v1.63.0-index-export-schedule`，14:05 EXECUTED，尚未進 main）→ 改號至 v1.64.0 避免兩支 `v1.63.0-*` 同時進 main。changeset id 隨檔名改變會被 Liquibase 當成新 migration 重跑，故建表／seed 皆為冪等寫法（舊 id 於開發 DB 留下一筆孤兒 `databasechangelog` 紀錄，無功能影響）。
+- [x] 212.3 **backend model／repository／dto／service／controller**：`CrawlerExportSetting` entity（全域、無 `@Filter`）＋ repository ＋ `CrawlerExportPathDto`；`CrawlerExportPathService`（讀取無列時回 seed 預設、`normalizeSubpath`、`resolveDir` 擋 `..`／絕對路徑、回傳 `baseDir`＋`absolutePath` 供前端顯示）；`CrawlerExportPathController`（`GET/PUT /api/crawler-export-path`，`PUT` 以 `CurrentUserContext.isAdmin()` 縱深防禦）。
+      **讀寫的驗證嚴格度刻意不同**：`PUT` 擋下不合法子路徑（→ 400），但 `GET` 組 `absolutePath` 時遇不合法值只回 `null`、不擲例外——DB 內仍可能存在繞過 API 的值（psql 直改、跨環境備份還原、日後改動 `EXPORT_OUTPUT_DIR` 基底），若讀取也失敗會使設定頁 500，反而讓使用者**沒有入口把它改回正常值**（唯一修正管道被自己鎖死）。前端此時顯示「—」、仍可重選並儲存。
+- [x] 212.4 **ext `CrawlerExportPathQuery` ＋ `NewsPoller` 改讀 DB**：新增 `JdbcTemplate` 純讀元件（比照 `CrawlerScheduleQuery`）；`NewsPoller.exportPublicInfoJson()` 每輪讀現值並於寫檔前**再驗一次**跳脫，DB 例外／空值 fallback 常數 `Project/SRPP/data/input`；移除 `news-scraper.export-dir`，改注入 `EXPORT_OUTPUT_DIR`（預設 `/home/steven`）為基底。
+- [x] 212.5 **docker-compose**：ext 新增 `EXPORT_OUTPUT_DIR: /home/steven` 與 volume `${EXPORT_OUTPUT_DIR_HOST:-/Users/steven}:/home/steven`；移除 `/srpp-input` 掛載（其預設目的地已被家目錄涵蓋，host 落點不變）。
+- [x] 212.6 **BFF**：`CrawlerDataBffController` 增 `GET/PUT /api/bff/crawler-data/export-path` 與 `GET /api/bff/crawler-data/export-path/browse`（passthrough 既有 `/api/export-schedule/browse`）；`SecurityConfig` 將 `PUT /api/bff/crawler-data/export-path` 列入 ADMIN。
+- [x] 212.7 **前端**：`api/index.js` `crawlerData` 增 3 支；`CrawlerDataView.vue` 新增「爬蟲輸出檔案設定」卡（唯讀輸入框＋「選擇」開資料夾樹對話框＋新增子資料夾＋儲存，非 ADMIN 唯讀）並顯示完整落點路徑與檔名規則。
+- [x] 212.8 **建置與部署驗證**：`--no-cache` 重 build business／bff／frontend／ext 並 `--force-recreate`（六個容器皆 healthy，含 recreate 上游後 restart bff，`asset-bff` 近 5 分鐘 `Connection refused`／`500` 計數為 **0**）。實測結果：
+      - **Liquibase**：`v1.64.0-crawler-export-path` EXECUTED；因改號重跑而與舊 id `v1.63.0-crawler-export-path` 併存兩筆紀錄，冪等寫法使重跑為 no-op、business 正常啟動（非 crash loop）。seed 值 `news-poller | Project/SRPP/data/input`。
+      - **契約**：`GET` 回 `{"crawlerKey":"news-poller","outputSubpath":"Project/SRPP/data/input","baseDir":"/home/steven","absolutePath":"/home/steven/Project/SRPP/data/input","updatedAt":"2026-07-18 22:26:40"}`；空字串 `PUT` 被正規化回預設子路徑。
+      - **路徑安全**：`{"outputSubpath":"../../etc"}` → **400**；`{"outputSubpath":"/etc/passwd"}` → **400**（`detail` 為「輸出子路徑不可跳脫基底目錄，且須為相對路徑」）；非 ADMIN（`X-User-Role: USER`）`PUT` → **403**。
+      - **掛載對齊**：`docker inspect asset-external-materials-service` 之 Mounts 為 `/Users/steven → /home/steven`（與 business 同一份），`/srpp-input` 已消失。
+      - **端到端改路徑實測**：預設值下 warmup 寫出 `/home/steven/Project/SRPP/data/input/public_info_2026-07-18.json`（309 筆，host 端 108,350 bytes，**與改動前同一個 host 落點**）→ `PUT` 改為 `input/crawler-test` 後重跑，寫出 `/home/steven/input/crawler-test/public_info_2026-07-18.json`（host `/Users/steven/input/crawler-test/` **由程式自動建立**、同樣 108,350 bytes）→ 改回預設後再跑，落點回到 SRPP 目錄。三輪皆無 `.tmp` 殘留（原子 rename 仍正常）。測試目錄事後刪除。
+      - **前端／BFF**：`CrawlerDataView-D5i0daWR.js` 含「爬蟲輸出檔案設定」卡與資料夾選擇器；`index-Bv829Q4m.js` 含 `crawler-data/export-path`；未登入打 `GET /api/bff/crawler-data/export-path` 與 `.../export-path/browse` 皆回 **401**（路由已註冊、非 404）。
+      - **待使用者目視確認**：設定卡版面與 `el-tree` 資料夾選擇器需於瀏覽器登入後確認（登入屬使用者本人操作）。
+- [x] 212.9 commit ＋ 兩段式 merge（feature `2e40749f` ＋ 編號避讓 `b8513e4c`；main merge `7675d2ef`）。**編號避讓兩次**：本任務原編 Task 209，部署後才發現交易雷達那條線已占用 209／210／**211**（`a1a0dec8` 先 merge 進 main），故一路避讓至 212；同批改掉 17 個檔的引用，含 `Task 192、209`／`Task 177／209` 這類不以 `Task ` 開頭的複合寫法（首次批次取代漏抓、複查時補齊）。純註解／文件變更，三個 JVM 模組重新編譯通過，運行中容器行為不變故未重新部署。merge 衝突兩處皆為「雙方各自在檔尾新增」：`db.changelog-master.yaml`（保留 v1.63.0-trading-radar-notification ＋ v1.64.0-crawler-export-path 兩個 include，依版號排序）與本檔（保留對方 209/210/211 ＋ 本任務 212）；合併後複驗 Task 208–212 各一次無重複、`api/index.js` 兩組 API 並存。
+
+---
+
 ### Task 214：資產總覽匯出增列 ETF 淨值與折溢價欄（Requirement 34）
 
 **需求對應：** Requirement 34 新增 AC「『股票（即時）』增列 ETF 淨值與折溢價欄」。

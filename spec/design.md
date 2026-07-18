@@ -117,7 +117,10 @@ com.steven.assets/
     - `GET /api/bff/crawler-data?date=YYYY-MM-DD&dateField=fetched|published&category=` → business `GET /api/news-headlines`：查指定日期爬回的 `news_headline`（與今日股市分析同讀一份表，符合「同義欄位、同一 business API」）。
     - `GET /api/bff/crawler-data/schedule` → business `GET /api/crawler-schedule?crawler=news-poller`：讀 NewsPoller 已設定的執行時間清單。
     - `PUT /api/bff/crawler-data/schedule` → business `PUT /api/crawler-schedule?crawler=news-poller`：整批覆寫執行時間清單。
-    - 權限：`GET` 落 `authenticated()`；`PUT` 限 ADMIN（`hasRole('ADMIN')`，屬系統設定變更）。
+    - `GET /api/bff/crawler-data/export-path` → business `GET /api/crawler-export-path?crawler=news-poller`：讀公開資訊 JSON 輸出子路徑與基底（Task 212）。
+    - `PUT /api/bff/crawler-data/export-path` → business `PUT /api/crawler-export-path?crawler=news-poller`：更新輸出子路徑（Task 212）。
+    - `GET /api/bff/crawler-data/export-path/browse?subpath=` → business **既有** `GET /api/export-schedule/browse`：資料夾樹懶載入。**刻意不新增第五份目錄列舉實作**（同 Requirement 39／41／42 的沿用決定，CLAUDE.md「同義欄位、同一 business service API」）；BFF 端另立自己的路由則是「一頁一 BFF」要求。
+    - 權限：`GET` 落 `authenticated()`；兩支 `PUT` 均限 ADMIN（`hasRole('ADMIN')`，屬系統設定變更）。
 
 **Repository 層**（Spring Data JPA，共 47 個）
 - `AssetSnapshotRepository`
@@ -467,6 +470,7 @@ DailyMarketAnalysis      (今日股市分析結果，PK = analysis_date；bias/c
 MarketAnalysisSetting    (市場分析設定，單列 id = 1；model / effort / enabled；web_search 相關欄於 Task 179 移除)
 News                     (→ news_headline，爬蟲新聞標題，全域參考、無 owner；供今日分析與公開資訊 SRPP JSON)
 CrawlerSchedule          (→ crawler_schedule，公開資訊爬蟲執行時間設定，全域參考、無 owner；一列一時間點〔crawler_key + run_hour + run_minute + enabled〕；由「爬蟲資訊查詢」頁維護、NewsPoller 每分鐘讀取；Requirement 38)
+CrawlerExportSetting     (→ crawler_export_setting，公開資訊爬蟲輸出檔案路徑設定，全域參考、無 owner；一爬蟲一列〔crawler_key UNIQUE + output_subpath〕；由「爬蟲資訊查詢」頁維護、NewsPoller 每輪寫檔前讀取；Requirement 38 / Task 212)
 MarketAnalysisSendTime   (→ market_analysis_send_time，分析寄送時間，全域參考、無 owner；一列一時點〔send_time UNIQUE + active〕，seed 08:45；由「今日股市分析」頁維護、MarketAnalysisScheduler 每分鐘比對；Requirement 31 / Task 191)
 
 # 資產配置建議（Requirement 32）
@@ -2086,9 +2090,14 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
   - **爬蟲資訊查詢頁 ＋ 動態執行時間（Requirement 38）**：新增「公開資訊」子頁 `/crawler-data`（`CrawlerDataView`）。
     - **依日期查詢**：`CrawlerDataBffController` → business `NewsHeadlineController`（`GET /api/news-headlines?date=&dateField=fetched|published&category=`）讀 `news_headline`。`dateField` 決定用 `fetched_at`（爬取入庫日）或 `published_at`（資料日）當篩選欄位，區間皆為「Asia/Taipei 該日 00:00（含）～翌日 00:00（不含）」轉 `Instant`；`category` 選填。repository 加 `findByFetchedAtBetweenOrderByFetchedAtDesc`／`findByPublishedAtBetweenOrderByPublishedAtDesc`，`category` 於 service 層過濾（單日資料量小）。與 `MarketAnalysisService` 讀同一份 `news_headline`（同義欄位、同一表）。
     - **動態執行時間（多時間點）**：`NewsPoller` 執行時間改由新表 `crawler_schedule`（`crawler_key='news-poller'`，一列一時間點）決定，可於頁面增減。`NewsPoller` **移除寫死的三個 cron（`0 20 8`／`0 30 11`／`0 0 18`，Task 184／188）**，改為**每分鐘 ticker** `@Scheduled(cron="0 * * * * *", zone="Asia/Taipei")`：讀 `crawler_schedule` 已啟用時間點（ext 端新增 `CrawlerScheduleQuery` JdbcTemplate 讀取），命中當前 `HH:mm` 即 `run("scheduled")`。cron 每分鐘僅觸發一次故天然去重、無需額外 slot guard；`run` 以 `dedupe_key` upsert 本就冪等，重跑亦無害。**DB 讀取例外**（表缺／連線失敗）**fallback 至預設 08:20 / 11:30 / 18:00**，避免爬蟲靜默停擺；讀到「空清單」＝使用者刻意清空＝該分鐘不跑。開機 warmup 與保留期清理不變。設定變更免重啟、下一分鐘生效。business 端 `CrawlerScheduleController`（`GET/PUT /api/crawler-schedule?crawler=news-poller`）讀／整批覆寫（delete+insert，驗 0–23／0–59、去重）；`PUT` 限 ADMIN。
+    - **動態輸出檔案路徑（Task 212）**：`NewsPoller` 每輪產出的公開資訊 JSON（Task 177）輸出目錄，由寫死的 `news-scraper.export-dir`（容器 `/srpp-input`，只能改 docker volume 換目的地）改為新表 `crawler_export_setting`（`crawler_key='news-poller'` UNIQUE，一爬蟲一列）決定，可於同頁設定。
+      - **路徑模型＝Requirement 34／39／41／42 那一套**：DB 只存**相對子路徑** `output_subpath`，實際目錄 = 容器內基底 `EXPORT_OUTPUT_DIR`（預設 `/home/steven`）resolve 之。**關鍵前提：`external-materials-service` 也掛上 `${EXPORT_OUTPUT_DIR_HOST:-/Users/steven}:/home/steven`**（原本只有 business-services 有），使「前端資料夾樹（由 business 的 `browse` 列舉）看得到的目錄」＝「ext 爬蟲寫得到的目錄」；兩服務基底路徑同為 `/home/steven`、同一 host 掛載，否則同義的「輸出資料夾」會在兩服務指向不同實體目錄。原 `/srpp-input` 掛載與 `news-scraper.export-dir` 一併移除（其預設目的地 `/Users/steven/Project/SRPP/data/input` 已落在家目錄內，改以 seed 子路徑 `Project/SRPP/data/input` 表達，host 落點完全相同）。
+      - **每輪即時讀取**：`exportPublicInfoJson()` 於寫檔前呼叫 ext 端新增的 `CrawlerExportPathQuery`（`JdbcTemplate` 純讀，比照 `CrawlerScheduleQuery`）取現值，**不快取於欄位**，故設定變更下一輪即生效、免重啟。DB 例外或值為空 → fallback 至常數 `Project/SRPP/data/input`（＝改動前行為），避免靜默改寫落點。
+      - **路徑驗證兩道（縱深防禦）**：business 於 `PUT` 時驗（`..`／絕對路徑跳脫基底 → 400，複用與 `ExportScheduleService.resolveDir` 相同規則）；ext 寫檔前**再驗一次**，DB 值異常則退回預設並 warn——ext 是實際持有檔案系統寫入權的一方，不能只信上游驗過。
+      - **檔名不開放設定**：維持 `public_info_<yyyy-MM-dd>.json`（SRPP 依此檔名取用），本次只開放目錄；暫存檔＋原子 rename 的寫出方式不變。
     - **排程清單同步**：`SchedulePublicBffController` 靜態清單中 NewsPoller 該筆 cron 由 `0 20 8`／`0 30 11`／`0 0 18` 改標「動態：依『爬蟲資訊查詢』頁設定（預設 08:20 / 11:30 / 18:00）」，避免與實際排程漂移。
   - **ext 抓取（`NewsPoller` cron 08:20/11:30/18 Asia/Taipei ＋ `ApplicationReadyEvent` warmup ＋保留 `news-scraper.retention-days` 天）**：`NewsFetchClient`（玩股網 WantGoo JSON API＋MoneyDJ HTML＋自由時報 財經・**政治・國際**〔Task 180〕/經濟日報 RSS〔`region=TW`〕＋**美國財經新聞 CNBC〔Economy／Finance／Markets 三分類〕＋Nasdaq Markets RSS〔`region=US`、`source=cnbc`／`nasdaq`，Task 198〕**，讀真實 `time`/`publishAt`/`pubDate`；UA `Mozilla/5.0`；RSS 用內建 XML/regex 解析、不引第三方；`fetchRss(url, source, region)` 帶 `region` 參數〔台灣來源傳 `TW`、美國來源傳 `US`〕；**台灣混合型一般新聞 feed（自由時報 財經／政治／國際、經濟日報）套 `EditorialNewsFilter.retain`〔Task 199 編輯收錄政策，取代舊 `relevantOnly`／`RELEVANCE_KEYWORDS`〕，逐 feed 過濾——財經一律留、中國新聞只留財經/北京政權、政治只留美日台歐盟＋影響市場地緣、台灣地方只留北北高、其餘濾除；純財經來源 wantgoo／MoneyDJ 與美國 CNBC／Nasdaq 財經專屬 feed 豁免不過濾**；**鉅亨網 cnyes 已於 Task 149.22 移除**）＋`TwseInfoFetchClient`（BFI82U 三大法人買賣金額 RWD JSON、FMTQIK 大盤成交統計 openapi JSON）＋`MarketSnapshotFetchClient`（Task 180／185，由 DB 既有資料組**匯率**＋**美股指數**＋**韓國股市**快照，見下）＋`KrIntradayFetchClient`（Task 193，**即時抓 Yahoo** 組**韓股盤中**快照，見下；為本輪唯一會打外部行情 API 的快照來源）。逐來源 graceful（單一失敗只 warn）。`StockSourceQuery.upsertNews / deleteNewsOlderThan`。**cron 早上那次由 06:00→08:00（Task 177）→08:20（Task 184）、中午 12:00→11:30（Task 188），仍早於 08:45 今日股市分析（拆三 cron `0 20 8`＋`0 30 11`＋`0 0 18`）。來源皆台/美權威網站，不抓中港澳。**
-  - **公開資訊輸出 JSON 供 SRPP（Task 177，DB 為單一來源）**：`NewsPoller` 每輪（cron 08:20/11:30/18 ＋ warmup）**先 upsert `news_headline`，再由 DB 查詢產生 JSON**（不再用記憶體 `rows`；JSON＝DB 當日快照，自然含去重＋個股過濾）。查詢＝`StockSourceQuery.loadTodayPublicInfoForExport(today, cutoff)`：`WHERE (fetched_at AT TIME ZONE 'Asia/Taipei')::date = today AND (published_at AT TIME ZONE 'Asia/Taipei')::date >= cutoff ORDER BY published_at DESC`。`cutoff`＝上一交易日＝`StockSourceQuery.lastTwseTradingDate()`＝`MAX((published_at AT TIME ZONE 'Asia/Taipei')::date) WHERE category LIKE 'twse-%'`（twse 資料自帶日期即 TWSE 權威上一交易日；BFI82U 遇假日回最近交易日）；無 twse 時 fallback `MarketCalendar.isTwTradingDay` 往回找。**刻意不用日曆算 cutoff 為主**——原型：日曆得 7/10、twse 實際 7/09，用 7/10 反把 twse 濾掉；取 twse 自身日期保證總體資料保留、且排除更舊過期新聞。`fetched_at` 於 upsert ON CONFLICT 刷新為 NOW()，故「今天抓到」涵蓋今天各輪碰到的列。容器內 `news-scraper.export-dir`（預設 `/srpp-input`）為基底，`docker-compose.yml` 掛 host `${SRPP_INPUT_DIR_HOST:-/Users/steven/Project/SRPP/data/input}`。檔名 `public_info_<yyyy-MM-dd>.json`（同日覆寫、跨日新檔）；結構 `{ generatedAt, trigger, tradingDayCutoff, count, items:[{title,source,url,category,region,summary,publishedAt}] }`。`news_headline` 保留期（30 天）不受當日範圍影響（供分析讀近 N 天）。`publishedAt` 以 `@JsonFormat` 於 Asia/Taipei（+08:00）序列化（日期與交易日／`tradingDayCutoff` 一致，不因 UTC 倒退一天）。寫出採**暫存檔＋原子 rename**（`Files.createTempFile`＋`Files.move(ATOMIC_MOVE)`）——warmup 執行緒與 cron 可能併發寫同一檔，原子 rename 避免截斷毀損、SRPP 不讀半寫檔。`export-enabled` 可關；寫檔失敗 graceful。
+  - **公開資訊輸出 JSON 供 SRPP（Task 177，DB 為單一來源）**：`NewsPoller` 每輪（cron 08:20/11:30/18 ＋ warmup）**先 upsert `news_headline`，再由 DB 查詢產生 JSON**（不再用記憶體 `rows`；JSON＝DB 當日快照，自然含去重＋個股過濾）。查詢＝`StockSourceQuery.loadTodayPublicInfoForExport(today, cutoff)`：`WHERE (fetched_at AT TIME ZONE 'Asia/Taipei')::date = today AND (published_at AT TIME ZONE 'Asia/Taipei')::date >= cutoff ORDER BY published_at DESC`。`cutoff`＝上一交易日＝`StockSourceQuery.lastTwseTradingDate()`＝`MAX((published_at AT TIME ZONE 'Asia/Taipei')::date) WHERE category LIKE 'twse-%'`（twse 資料自帶日期即 TWSE 權威上一交易日；BFI82U 遇假日回最近交易日）；無 twse 時 fallback `MarketCalendar.isTwTradingDay` 往回找。**刻意不用日曆算 cutoff 為主**——原型：日曆得 7/10、twse 實際 7/09，用 7/10 反把 twse 濾掉；取 twse 自身日期保證總體資料保留、且排除更舊過期新聞。`fetched_at` 於 upsert ON CONFLICT 刷新為 NOW()，故「今天抓到」涵蓋今天各輪碰到的列。輸出目錄 = 容器內基底 `EXPORT_OUTPUT_DIR`（預設 `/home/steven`，`docker-compose.yml` 掛 host `${EXPORT_OUTPUT_DIR_HOST:-/Users/steven}`）resolve `crawler_export_setting.output_subpath`（**Task 212 起可於「爬蟲資訊查詢」頁設定**，seed `Project/SRPP/data/input`；原寫死的 `news-scraper.export-dir`＋`/srpp-input` 掛載已移除，host 落點不變）。檔名 `public_info_<yyyy-MM-dd>.json`（同日覆寫、跨日新檔）；結構 `{ generatedAt, trigger, tradingDayCutoff, count, items:[{title,source,url,category,region,summary,publishedAt}] }`。`news_headline` 保留期（30 天）不受當日範圍影響（供分析讀近 N 天）。`publishedAt` 以 `@JsonFormat` 於 Asia/Taipei（+08:00）序列化（日期與交易日／`tradingDayCutoff` 一致，不因 UTC 倒退一天）。寫出採**暫存檔＋原子 rename**（`Files.createTempFile`＋`Files.move(ATOMIC_MOVE)`）——warmup 執行緒與 cron 可能併發寫同一檔，原子 rename 避免截斷毀損、SRPP 不讀半寫檔。`export-enabled` 可關；寫檔失敗 graceful。
   - **量化快照：匯率＋美股指數＋韓國股市（`MarketSnapshotFetchClient`，Task 180／185）**：使用者要求公開資訊「一定要有」台幣兌美元匯率、美股與韓股重要資訊；此三者原本各自落在 `exchange_rate_history`／`us_index_daily_history`／`foreign_stock_daily_history`、**不在 `news_headline`**，故不進 SRPP 公開資訊 JSON、也不在今日股市分析本地新聞區塊。故由 `MarketSnapshotFetchClient.fetchAll()` 讀**已抓好**的 DB 資料組三則 `NewsRow`，交 `NewsPoller` 與其他來源一併 upsert（DB 為單一來源，SRPP JSON 與今日股市分析都吃得到）：
     1. **匯率**（`category=fx`／`source=bot-fx`／`region=TW`）：`StockSourceQuery.loadLatestUsdRate()` 取 `exchange_rate_history` 最新 USD 列，標題 `台幣兌美元(USD/TWD)匯率（資料日 {rate_date}）：即期買入/賣出/中間價`（中間價 = (買+賣)/2）。
     2. **美股指數**（`category=us-market`／`source=us-index`／`region=US`）：`StockSourceQuery.loadLatestUsIndexClose(code)` 取 `us_index_daily_history` 各碼最近兩筆算漲跌%，一則合併標題 `美股主要指數（截至 {session} 收盤）：道瓊/標普500/那斯達克/費半 {收盤}（{漲跌%}）`。指數資料由 Yahoo Finance（美國站，非中港澳）抓、`IndexDailyRefreshScheduler` 寫入。
@@ -2436,6 +2445,19 @@ UNIQUE (crawler_key, run_hour, run_minute)   -- 同爬蟲同時間點不重覆
 - **changeset 刻意冪等**（`CREATE TABLE IF NOT EXISTS`＋`INSERT ... ON CONFLICT DO NOTHING`＋清舊 seed 的 `DELETE`）：本功能開發期間曾以 changeset id `v1.55.0-crawler-schedule` 在既有開發 DB 建過同一張表並 seed 舊時點 `08:00/12:00/18:00`；為避讓 main 已佔用的 `v1.55.0`，該檔改名為 `v1.58.0-crawler-schedule`，**changeset id 隨檔名改變 → Liquibase 視為新 changeset 會重跑**，遇既有表即 `relation already exists` 而中止啟動。故建表容忍已存在、seed 走 `ON CONFLICT DO NOTHING`，並以 `DELETE` 把殘留的舊 seed（08:00／12:00）對齊為現行時點；`DELETE` 只命中與舊 seed 完全相同的列，不動使用者自行新增的時間點，於全新資料庫為 no-op。
 - 設定變更走「整批覆寫」（`PUT` 先 `deleteByCrawlerKey` 再 batch insert），非逐列 CRUD；ext `NewsPoller` 每分鐘讀已啟用列，DB 讀取例外時 fallback 至 08/12/18。
 
+`crawler_export_setting`（Liquibase `v1.64.0-crawler-export-path.sql`；公開資訊爬蟲輸出檔案路徑設定，Requirement 38 / Task 212）—— **一爬蟲一列**（與 `crawler_schedule` 的「一列一時間點」不同；同為全域設定無 `owner_user_id`）：
+
+```
+id             BIGSERIAL PK
+crawler_key    VARCHAR(64)  NOT NULL UNIQUE   -- 目前僅 'news-poller'
+output_subpath VARCHAR(512) NOT NULL          -- 相對子路徑（相對容器基底 EXPORT_OUTPUT_DIR）
+updated_at     TIMESTAMP
+```
+
+- **為何不併進 `crawler_schedule`**：該表語意是「一列一執行時間點」，輸出路徑是「每爬蟲一個值」；併入會讓路徑隨時間點列數重複儲存同一事實（CLAUDE.md 資料庫完整正規化），且刪一個時間點就會連帶弄丟路徑。故另立一表、以 `crawler_key` 關聯。
+- **只存相對子路徑、不存絕對路徑**：絕對路徑等於把容器內檔案系統位置寫進 DB，跨環境不可攜且繞過基底防護；沿用 Requirement 34／39／41／42 既有模型。實際寫入 = `EXPORT_OUTPUT_DIR` resolve 之，`business`（PUT 時）與 `ext`（寫檔前）各驗一次跳脫。
+- Seed `('news-poller','Project/SRPP/data/input')` ＝ 改為 DB 驅動前 `/srpp-input` volume 的同一個 host 目錄（`/Users/steven/Project/SRPP/data/input`），行為不變。changeset 比照本專案慣例寫成冪等（`CREATE TABLE IF NOT EXISTS`＋`ON CONFLICT DO NOTHING`）。
+
 爬蟲資訊查詢頁 API 端點（Requirement 38）：
 
 ```
@@ -2443,11 +2465,16 @@ UNIQUE (crawler_key, run_hour, run_minute)   -- 同爬蟲同時間點不重覆
 GET  /api/news-headlines?date=YYYY-MM-DD&dateField=fetched|published&category=   # 查該日 news_headline（越新在前），dateField 缺省 fetched
 GET  /api/crawler-schedule?crawler=news-poller                                   # 取 NewsPoller 執行時間清單 [{hour,minute,enabled}]
 PUT  /api/crawler-schedule?crawler=news-poller                                   # 整批覆寫清單（限 ADMIN；驗 0..23/0..59、去重）
+GET  /api/crawler-export-path?crawler=news-poller                                # 取輸出路徑設定 {crawlerKey,outputSubpath,baseDir,absolutePath,updatedAt}
+PUT  /api/crawler-export-path?crawler=news-poller                                # 更新輸出子路徑（限 ADMIN；驗跳脫 → 400）
 
 # BFF（CrawlerDataBffController，WebClient 帶 X-User-*）
 GET  /api/bff/crawler-data?date=&dateField=&category=   → GET /api/news-headlines
 GET  /api/bff/crawler-data/schedule                     → GET /api/crawler-schedule?crawler=news-poller
 PUT  /api/bff/crawler-data/schedule                     → PUT /api/crawler-schedule?crawler=news-poller（限 ADMIN）
+GET  /api/bff/crawler-data/export-path                  → GET /api/crawler-export-path?crawler=news-poller
+PUT  /api/bff/crawler-data/export-path                  → PUT /api/crawler-export-path?crawler=news-poller（限 ADMIN）
+GET  /api/bff/crawler-data/export-path/browse?subpath=  → GET /api/export-schedule/browse（沿用既有目錄列舉，不新增實作）
 ```
 
 ### API 端點
@@ -3137,3 +3164,138 @@ run-now 不動當日 guard——全部同 R41，不重述。
 - `frontend/src/api/index.js`：`exchangeRate` 命名空間新增 5 支
 - `frontend/src/views/ExchangeRateView.vue`：新增「匯出 Excel」按鈕＋匯出對話框＋「排程自動匯出」設定卡＋資料夾選擇器
 - `SchedulePublicBffController.java`：`JOBS` 補「台幣兌美元匯出 每日匯出排程檢查」項目
+
+---
+
+## Requirement 43：今日交易雷達（純本地規則、零 AI API）
+
+### 架構與請求鏈
+
+```text
+TradingRadarView
+  → GET /api/bff/trading-radar
+  → TradingRadarBffRoutes（純 rewrite）
+  → GET /api/trading-radar
+  → TradingRadarService
+       ├─ TwseIndexDailyHistoryRepository（大盤完成日 K）
+       ├─ TechnicalIndicatorService（MA20／60／240、KD，同義指標權威）
+       ├─ AssetSnapshotRepository.findLatestWithStocks（當前持股，owner-scoped）
+       ├─ StockAlertRepository.findDistinctStockCodeMarket（觀察，owner-scoped）
+       ├─ PriceQueryService（只讀 Redis；miss → stock_price_history）
+       └─ TradingRadarRuleEngine（TW_RULES_V2，純函式規則）
+```
+
+本請求鏈**刻意不注入** `MarketAnalysisService`、LLM SDK、新聞爬蟲或任何 refresh endpoint。頁面按「重新整理」只重讀既有資料，不對外抓行情、不送出 Batch、不產生 AI 費用。現有行情／大盤排程若在背景更新 PostgreSQL 或 Redis，雷達下次讀取自然看見新值；兩者生命週期分離。
+
+### 標的選取與 owner 隔離
+
+`TradingRadarService.loadTargets()` 取最新快照 `findLatestWithStocks()` 中 `shares > 0` 的台股，再 union `stock_alert` 衍生觀察清單中的台股，key 為 `code + '\0' + market`，保留穩定順序並排除 `0000/台股`。最新快照 root `AssetSnapshot` 與觀察 root `StockAlert` 均帶 `@Filter(ownerFilter)`，由既有 `TenantFilterAspect` 依 BFF 傳入的 `X-User-Id` 啟用；不可改為直接由無 filter 的 `StockHoldingRepository` 全表查詢。美／英股不進規則引擎，只累加 `skippedNonTwStocks` 供前端說明。
+
+### 資料模型（不入庫）
+
+新增 `TradingRadarDto` 純 response records：
+
+- `Response`：`ruleVersion`、`generatedAt`、`market`、`stocks`、`skippedNonTwStocks`。
+- `MarketSummary`：`regime`、`regimeLabel`、`score`、`dataComplete`、`asOfDate`、點位／漲跌幅、MA20／60／240、K／D、MA60／240 兩日確認、`reasons`、`risks`。
+- `StockDecision`：code／name／market、`held`、`action`／`actionLabel`、`score`、`counterTrendState`／`counterTrendLabel`、`counterTrendReasons`／`counterTrendRisks`、`dataComplete`、報價／漲跌幅／更新時間／`asOfDate`、MA20／60／240、K／D、MA20／60／240 兩日確認、`reasons`、`risks`。
+
+無新 entity／table／migration；分數與建議皆為可重算的衍生值，不持久化，符合正規化原則。
+
+### 兩收盤日確認
+
+`TradingRadarRuleEngine.confirm(closesDesc, period)` 至少需要 `period + 1` 根完成收盤：
+
+- 最新日 SMA＝`close[0..period-1]` 平均；前一日 SMA＝`close[1..period]` 平均。
+- 最新、前一收盤皆嚴格大於各自 SMA → `ABOVE`。
+- 最新、前一收盤皆嚴格小於各自 SMA → `BELOW`。
+- 一上一下或等於均線 → `MIXED`；資料不足 → `UNAVAILABLE`。
+
+最新價相對均線的分數仍使用 `TechnicalIndicatorService.computeAll()` 回傳的當前指標；若 Redis 有盤中價，該服務既有行為會把盤中價合入當前 MA。兩日確認只讀完成日 K，避免盤中假突破被當成正式確認。
+
+### 規則引擎 `TW_RULES_V2`
+
+大盤與個股的權重、clamp、regime 門檻及主動作映射以 Requirement 43 Acceptance Criteria 為唯一契約；V2 完整保留 V1 的 score/action 結果，只新增獨立 counter-trend state。`TradingRadarRuleEngine` 不碰 repository／網路／時間，輸入皆為數值與確認狀態，輸出 score/action/counterTrend/reasons/risks，確保單元測試可重現。大盤 `DATA_INCOMPLETE` 為全域 veto；個股資料不足則只 veto 該檔。`RISK_OFF` 是主建議買進閘門：即使個股高分也不可回 `BUY_CANDIDATE`／`ADD_CANDIDATE`，但不抹掉獨立的逆勢觀察狀態。
+
+### 逆勢抄底狀態（獨立第二軌）
+
+`CounterTrendState` 為 `NONE`／`OVERSOLD_WATCH`／`TRIAL_CANDIDATE`。`evaluateCounterTrend(StockInput)` 只在個股完整資料通過後執行，不對原分數加減分，也不覆寫主 `Action`：
+
+1. 長期結構仍在：`price > MA240` 且 `ma240Confirmation=ABOVE`。
+2. 短中期已明確回檔：`ma20Confirmation=BELOW` 且 `ma60Confirmation=BELOW`。
+3. `K<20`：符合 1–3 即 `OVERSOLD_WATCH`，代表跌深但尚非買點。
+4. 升級 `TRIAL_CANDIDATE`：另須 `D<20`、`previousK<=previousD && K>D`，以及 `changePercent>=0`。因此只用當期 `K>D` 不足以冒充黃金交叉，仍下跌也不升級試單。
+
+`TechnicalIndicatorService.FullIndicators` 增加 `previousK`／`previousD`：與當期 KD 使用完全相同的 KD9 遞迴；當期序列計算後，再排除最新一根（盤中 live 或最新完成日 K）計算前一期，資料不足回 null。`TradingRadarService` 將兩值只傳入純規則 `StockInput`，不新增 DB 欄位。`RISK_OFF` 時 counter-trend state 仍可產生，但 `counterTrendRisks` 必含小額分批、主建議優先；這是資訊狀態，不是自動下單授權。
+
+### API 與前端
+
+| 層 | 端點 | 說明 |
+|---|---|---|
+| business | `GET /api/trading-radar` | 組裝大盤＋當前使用者台股決策；純讀、graceful per-stock |
+| BFF | `GET /api/bff/trading-radar` | `TradingRadarBffRoutes` rewrite 至 business；一頁一 BFF |
+
+前端新增 `TradingRadarView.vue`：上方大盤 regime 卡（RISK_ON 紅、RISK_OFF 綠、NEUTRAL 灰、DATA_INCOMPLETE 黃；台股配色）、規則版本／資料日／重新整理；下方卡片表格依主動作顯示 tag，另有「逆勢抄底」獨立欄位（`NONE` 顯示 `—`、超跌觀察為 warning、逆勢試單候選為 danger），展開列呈現三條均線確認、主規則理由／風險及逆勢狀態自己的理由／風險。`api/index.js` 新增 `bffApi.tradingRadar.get()`；router 新增 `/trading-radar`；`App.vue` 於「股市綜合分析」加入「今日交易雷達」。
+
+盤中更新沿用儀表板既有 SSE `/api/market-data/prices/stream`，不另建 endpoint。`price-update` 只處理 `market=台股` 且已存在於目前雷達清單的代號：事件抵達時以 immutable row replacement 立即覆蓋 `price`／`changePercent`／`priceUpdatedAt`；同一批事件以 2 秒 trailing debounce 合併，再以不顯示 loading 的 `bffApi.tradingRadar.get()` 重讀完整 response，讓 MA、KD、score、action、reasons、risks 與最新 Redis 價格一致。背景重算若仍在執行，新事件只標記 pending，完成後再合併補算，避免重疊請求。此流程只讀既有 Redis／PostgreSQL，不呼叫 `/prices/refresh`。
+
+生命週期與儀表板一致：mount 初始載入完成後建立 `EventSource`；一般網路中斷交由瀏覽器自動 reconnect，若連線進入 `CLOSED` 則 5 秒後重建；unmount 設定 disposed 並關閉 stream、清除 reconnect／recalculate timers，避免離頁後重開連線或更新已卸載狀態。手動重新整理仍可隨時重讀完整雷達。
+
+### 驗證重點
+
+- `TradingRadarRuleEngineTest`：確認 period+1 邊界、ABOVE／BELOW／MIXED／UNAVAILABLE、分數上下界、買進門檻與 `RISK_OFF` veto、held action mapping、incomplete veto。
+- `TradingRadarRuleEngineTest` V2：以 009804 型輸入確認主分數／出場候選不變但 counter-trend=`OVERSOLD_WATCH`；確認只有真實低檔黃金交叉＋停止續跌才是 `TRIAL_CANDIDATE`，未交叉、仍下跌、年線失守、資料不足皆不可誤判。
+- 前端正式建置後確認 `TradingRadarView` chunk 含 `/api/market-data/prices/stream` 與 `price-update`；執行環境確認 SSE endpoint 可建立 `text/event-stream` 回應，且離頁清理與背景重算不觸發 refresh endpoint。
+- 建置：backend test/package、BFF package、frontend build。
+- 執行環境：重建 business／BFF／frontend 後確認 health；以已登入頁面或帶有效 user header 的容器內診斷確認 payload owner-scoped。檢查 business log 與程式依賴，證明 `/api/trading-radar` request 不進 `MarketAnalysisService`、不產生 Anthropic batch。
+
+---
+
+## Requirement 44：每檔交易雷達狀態 Email 通知
+
+### 使用者流程與 API
+
+`TradingRadarView` 表格最右側的「通知設定」按鈕開啟逐檔 dialog。GET
+`/api/bff/trading-radar/notifications/{stockCode}?market=台股` 一次聚合設定、主動作／逆勢狀態 options，以及與通知設定頁同源的 `notification_recipient`；PUT 同一路徑覆寫 `active`、`actionStates`、`counterTrendStates`、`recipientIds`。BFF 沿用 `TradingRadarBffRoutes` rewrite 到 business，不在 BFF 儲存或計算。
+
+主動作選項涵蓋 `TradingRadarRuleEngine.Action` 全部 10 態；逆勢只提供 `OVERSOLD_WATCH`、`TRIAL_CANDIDATE`，不提供無訊號的 `NONE`。選項 label 由 backend 與雷達主 response 共用 label mapper 回傳，避免 dialog 與 Email 文案各自漂移。active 設定至少需一個狀態與一位收件人；inactive 可保存空選項。
+
+### 正規化資料模型
+
+```text
+AppUser (1) ──< TradingRadarNotificationSetting >── Stock(code, market)
+                       │
+                       ├──< TradingRadarNotificationState
+                       │      UNIQUE(setting_id, state_type, state_code)
+                       └──< TradingRadarNotificationRecipient >── NotificationRecipient
+                              UNIQUE(setting_id, recipient_id)
+```
+
+- `trading_radar_notification_setting`：`id`、`owner_user_id`、`stock_code`、`market`、`active`、`initialized`、`last_action`、`last_counter_trend_state`、timestamps；`UNIQUE(owner_user_id, stock_code, market)`，entity 套 `ownerFilter`。
+- `trading_radar_notification_state`：`setting_id`、`state_type`（`ACTION`／`COUNTER_TREND`）、`state_code`；狀態是規則版本契約，不冗存 label。
+- `trading_radar_notification_recipient`：`setting_id`、`recipient_id`，兩端 FK cascade；不冗存 email。
+
+設定 PUT 先以 owner-filtered `NotificationRecipientRepository.findByIdIn()` 取得合法收件人白名單，再以 bulk delete + insert 覆寫兩個 join；setting by-id／by-stock 仍以 `TenantGuard` 與 owner filter 雙重保護。背景取 email 時 join setting 與 recipient 並強制兩者 `owner_user_id` 相同、recipient `active=true`，避免 HTTP filter 不存在時的跨租戶殘列風險。
+
+### 狀態轉入偵測與寄信
+
+```text
+Redis price-update
+  → PriceStreamService（原 SSE + StockAlert 不變）
+  → TradingRadarNotificationService.queueEvaluation(code, market)
+  → 2 秒合併同輪股票
+     ├─ 個股：只取該 code/market active settings
+     └─ 0000/台股：取全部 active 台股 settings
+  → explicit owner latest snapshot 判斷 held
+  → TradingRadarService.evaluateForNotification() 共用 TW_RULES_V2
+  → 比對 persisted last_action / last_counter_trend_state
+  → TradingRadarNotificationDispatcher（短批次 per-recipient digest）
+  → EmailService.sendHtml([single email], ...)
+```
+
+setting `initialized=false` 時，第一次評估只寫入目前 action／counter-trend 作 baseline，不 enqueue。其後，只有「目前值與 last 不同」且新值存在 selected state join 時才 enqueue；評估後無論是否選中都更新 last，使「離開 → 再進入」可重新觸發、持續同態不重寄。PUT（含收件人、狀態、active 修改）一律把 `initialized=false`，避免儲存當下狀態立即寄信。
+
+背景沒有 request context，held 必須以 `AssetSnapshotRepository.findFirstByOwnerUserIdOrderBySnapshotDateDesc(ownerId)` 顯式 owner 條件取得，並在 transaction 內檢查最新快照 `stocks`；不可用無 owner 的 `findLatestWithStocks()`。`TradingRadarService.evaluateForNotification(code, market, held)` 只抽取既有 buildMarket/buildStock 組裝，不查 owner 資料、不改分數。dispatcher 按 active recipient 反轉分組，每位收件人各一封；SMTP disabled／無收件人／例外皆 fail-soft。此鏈不依賴頁面 EventSource 是否存在，也不呼叫外部 refresh 或 AI。
+
+### 前端
+
+操作欄固定在最右側，按鈕開 dialog 後才讀設定，避免雷達初始 GET 為每列增加 N+1。dialog 用兩組 checkbox 顯示主規則狀態與逆勢狀態，另用 recipient checkbox 顯示 email／停用註記；無收件人時提供前往 `/settings/notifications` 的入口。文案明示「第一次只建立基準；只在之後進入所選狀態時寄一次，同狀態持續不重寄」。儲存成功關閉 dialog，不觸發行情 refresh。

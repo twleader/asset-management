@@ -99,6 +99,12 @@ const router = createRouter({
       meta: { title: '今日股市分析', icon: 'Sunrise' }
     },
     {
+      path: '/trading-radar',
+      name: 'TradingRadar',
+      component: () => import('@/views/TradingRadarView.vue'),
+      meta: { title: '今日交易雷達', icon: 'Aim' }
+    },
+    {
       path: '/asset-allocation-advice',
       name: 'AssetAllocationAdvice',
       component: () => import('@/views/AssetAllocationAdviceView.vue'),

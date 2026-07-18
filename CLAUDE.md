@@ -116,6 +116,6 @@ cd frontend
 
 | 文件 | 說明 |
 |------|------|
-| `spec/requirements.md` | User Stories + Acceptance Criteria（39 個 Requirements） |
+| `spec/requirements.md` | User Stories + Acceptance Criteria（44 個 Requirements） |
 | `spec/design.md` | 架構圖、ERD、API 端點、關鍵業務邏輯 |
 | `spec/tasks.md` | 實作任務清單（含完成狀態） |
