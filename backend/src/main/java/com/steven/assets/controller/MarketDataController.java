@@ -1,5 +1,6 @@
 package com.steven.assets.controller;
 
+import com.steven.assets.model.CommodityPriceHistory;
 import com.steven.assets.model.ExchangeRateHistory;
 import com.steven.assets.model.StockPriceHistory;
 import com.steven.assets.service.DividendHistoryService;
@@ -40,6 +41,7 @@ public class MarketDataController {
     private final HistoricalDataService historicalDataService;
     private final PriceStreamService priceStreamService;
     private final DividendHistoryService dividendHistoryService;
+    private final com.steven.assets.service.ExcelExportService excelExportService;
 
     /**
      * 取得交易日曆假日（台股：TWSE Open API；美股：NYSE 規則計算）
@@ -290,5 +292,63 @@ public class MarketDataController {
         if (since == null) since = LocalDate.now().minusYears(10);
         int count = historicalDataService.backfillExchangeRateFrom(currency, since);
         return Map.of("backfilled", count, "currency", currency, "since", since.toString());
+    }
+
+    // ===== 油價金價（Requirement 40 / Task 201）=====
+
+    /**
+     * 三標的（WTI / BRENT / GOLD）區間每日收盤價
+     * GET /api/market-data/commodity?start=2016-07-18&end=2026-07-17
+     * 預設回近 10 年。全域公開行情，無 owner 過濾。
+     */
+    @GetMapping("/commodity")
+    public Map<String, List<CommodityPriceHistory>> getCommodityHistory(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end) {
+        LocalDate[] range = normalizeCommodityRange(start, end);
+        return historicalDataService.getCommodityHistory(range[0], range[1]);
+    }
+
+    /**
+     * 手動觸發油金價刷新：三標的增量回補 + 清理 10 年前資料
+     * POST /api/market-data/commodity/refresh
+     */
+    @PostMapping("/commodity/refresh")
+    public Map<String, Object> refreshCommodities() {
+        Map<String, Object> backfilled = historicalDataService.refreshCommodities();
+        return Map.of("backfilled", backfilled);
+    }
+
+    /**
+     * 油金價區間匯出成單一 .xlsx（日期／WTI／Brent／黃金四欄）
+     * GET /api/market-data/commodity/export?start=2020-01-01&end=2026-07-17
+     */
+    @GetMapping("/commodity/export")
+    public ResponseEntity<org.springframework.core.io.ByteArrayResource> exportCommodities(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end)
+            throws java.io.IOException {
+        LocalDate[] range = normalizeCommodityRange(start, end);
+        byte[] data = excelExportService.exportCommodityPrices(range[0], range[1]);
+        java.time.format.DateTimeFormatter fileFmt = java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd");
+        String filename = "油價金價_" + fileFmt.format(range[0]) + "_" + fileFmt.format(range[1]) + ".xlsx";
+        org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+        headers.setContentDisposition(org.springframework.http.ContentDisposition
+                .attachment().filename(filename, java.nio.charset.StandardCharsets.UTF_8).build());
+        return ResponseEntity.ok().headers(headers)
+                .contentType(MediaType.parseMediaType(
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .contentLength(data.length)
+                .body(new org.springframework.core.io.ByteArrayResource(data));
+    }
+
+    /** 補預設值（近 10 年）並驗證區間；start 晚於 end 直接擋為 400。 */
+    private LocalDate[] normalizeCommodityRange(LocalDate start, LocalDate end) {
+        if (start == null) start = LocalDate.now().minusYears(10);
+        if (end == null) end = LocalDate.now();
+        if (start.isAfter(end)) {
+            throw new IllegalArgumentException("起始日期不可晚於結束日期：" + start + " > " + end);
+        }
+        return new LocalDate[] { start, end };
     }
 }

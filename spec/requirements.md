@@ -933,3 +933,23 @@
 - [ ] **排程執行機制與自癒（比照 Requirement 34／37）**：每分鐘 `@Scheduled` poll（`zone=Asia/Taipei`），以 `now >= 設定時分` ＋ `last_run_date` 當日 guard 判斷（非「分鐘精確相等」，避免排程執行緒被長工作卡住跨分鐘導致整日靜默漏跑）；服務重啟以 `ApplicationReadyEvent` 補跑當日已到點未執行者；`AtomicBoolean` 防重入；單一使用者失敗只記 `last_run_status`＋log、不影響其他使用者（成功或失敗都設當日 guard，避免整天每分鐘重試）。
 - [ ] **檔名**：`已實現損益_{使用者ID}_{YYYYMMDD}.xlsx`（檔名含 owner id，避免多使用者共用同一 subpath 時同名互相覆蓋；同一使用者同日覆寫）。
 - [ ] **排程列表頁需登錄**：新排程須在「公開資訊 → 排程列表」（Requirement 36 / `SchedulePublicBffController` 的 `JOBS`）補上對應項目，避免該頁與實際排程漂移（Task 188 即為修正此類漂移而生）。
+
+### Requirement 40: 公開資訊「油價金價」十年歷史曲線與 Excel 匯出
+
+**User Story:** 作為使用者，我希望在「公開資訊」下有一個「油價金價」頁面，看到最近十年每日的國際油價與金價走勢曲線，並能指定時間區間把油價、金價一起匯出成一個 Excel 檔、自行選擇存檔位置，讓我在評估原物料與抗通膨資產時有長期價格參照。
+
+**Acceptance Criteria:**
+
+- [ ] **標的（國際盤、美元計價）**：收集三條每日序列——`WTI` 西德州原油（Yahoo `CL=F`）、`BRENT` 布蘭特原油（`BZ=F`）、`GOLD` COMEX 黃金（`GC=F`），皆為美元計價（原油 USD/桶、黃金 USD/盎司）。選國際盤而非中油零售油價／台銀黃金存摺，因後兩者公開歷史多半不足十年，無法滿足「最近 10 年每日」。
+- [ ] **十年每日歷史入庫**：每個標的保存最近 10 年的每日收盤價於新表 `commodity_price_history`（`commodity_code` + `price_date` UNIQUE）。首次啟動時自動回補滿 10 年（比照 Requirement 7 的 `HistoricalBackfillService.startupBackfill`），其後每日增量補；超過 10 年的資料由既有 `purgeOldHistory` 一併清理，維持固定十年視窗。
+- [ ] **只存收盤價（不存衍生值）**：本表僅存 `close_price` 原始收盤價。漲跌、漲跌幅、區間最高／最低／平均等一律由前端或匯出時即時計算，不入庫（CLAUDE.md「禁止存入可計算得出的衍生值」）。
+- [ ] **抓取走 external-materials-service**：價格抓取一律由 `external-materials-service` 負責（新增 `CommodityFetchClient` + `CommodityPricePoller`），business-services 不直連外部行情 API，僅透過 `/internal/*` 觸發回補並以 JPA 讀取（CLAUDE.md 資料來源規範）。Yahoo chart API 以 curl 子程序＋短 UA（`Mozilla/5.0`）呼叫，避開 Yahoo 對 Java HttpClient HTTP/2 fingerprint 的封鎖（同 `YahooFxFetchClient` 慣例）。
+- [ ] **每日更新排程**：`@Scheduled` 於台北時間每交易日 06:30 增量補前一日收盤（紐約收盤 = 台北隔日凌晨），失敗只記 log 不中斷其他標的；新排程須登錄「公開資訊 → 排程列表」（Requirement 36 `SchedulePublicBffController.JOBS`），避免該頁與實際排程漂移。
+- [ ] **曲線圖（雙 Y 軸）**：頁面以 ECharts 折線圖同時呈現三條序列。油價（數量級約 20–130）與金價（約 1000–5600）量級差距過大，故採**雙 Y 軸**——左軸油價（WTI／Brent）、右軸金價，否則油價曲線會被壓成貼底直線。提供區間快切（1M／3M／6M／1Y／3Y／5Y／10Y）與 dataZoom 縮放，區間切換為前端記憶體切片、不重打 API。
+- [ ] **KPI 與序列開關**：頁面上方顯示三個標的的最新價、對前一交易日漲跌與漲跌幅（即時由序列末兩點計算）；圖例可個別開關序列，單看油或單看金。
+- [ ] **匯出：可指定時間區間**：匯出對話框可選起訖日期（預設＝目前圖表所選區間），後端只輸出該區間內的資料列。日期參數在後端驗證（`start` 不得晚於 `end`，格式不合或跳脫則回 400）。
+- [ ] **匯出：油價金價同一個檔**：產出單一 `.xlsx`，單張工作表，欄位為 `日期／WTI原油(USD/桶)／布蘭特原油(USD/桶)／黃金(USD/盎司)`——以日期為軸做三序列 **outer join**，某標的當日無報價時該格留空（不補前值、不捏造），確保三個市場交易日不完全重疊時仍逐日對齊。
+- [ ] **匯出：可指定存檔目錄**：前端以 File System Access API（`showSaveFilePicker`）開啟系統「另存新檔」對話框，讓使用者自選資料夾與檔名；不支援該 API 的瀏覽器自動退回一般 blob 下載（既有 anchor-click 慣例），功能不中斷。此處刻意**不沿用** Requirement 34／37／39 的「後端寫入容器目錄＋`browse` 目錄樹」模型——本頁為一次性手動匯出、無排程需求，且瀏覽器端對話框才是使用者實際的本機目錄，後端路徑是容器內路徑。
+- [ ] **檔名預設**：`油價金價_{起日}_{訖日}.xlsx`（例 `油價金價_20160718_20260717.xlsx`），使用者可在另存對話框中改名。
+- [ ] **全域公開資料、不做 owner 過濾**：油金價為全域公開行情（同交易日曆），`commodity_price_history` 不帶 `owner_user_id`、不套 `@Filter(ownerFilter)`，所有登入使用者看到同一份資料。
+- [ ] **一頁一 BFF**：前端只呼叫 `/api/bff/commodity-price/*`（新增 `CommodityPriceBffController`），不直接呼叫 business `/api/market-data/*`（CLAUDE.md BFF 規範）。外部來源失敗時 BFF 降級回空序列而非 5xx，頁面顯示「查無資料」而不是整頁錯誤。

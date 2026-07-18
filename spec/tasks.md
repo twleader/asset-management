@@ -4987,3 +4987,26 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 - [x] 200.3 **`ExcelExportService.writeLiveAssetsSheet` 增 7 欄**：注入 `TechnicalIndicatorService`；表頭與逐列依上列欄序寫入。昨收沿用即時價 `num4`，漲跌／漲跌幅／月/季/年線用新增 `num2`（`#,##0.00`），KD值為字串 `K {k} / D {d}`。技術指標以 `Map<code|market, FullIndicators>` 於單次匯出快取，同股多券商列僅算一次。`autoSizeColumn` 迴圈上界改 18。
 - [x] 200.4 **建置與部署驗證**：`--no-cache` 重 build business-services，`--force-recreate`（healthy，運行 jar 含 `formatKd`）；owner 1（ADMIN/ACTIVE，最新快照 43 筆持股）以 X-User header 觸發 run-now 產「當前即時資產」`.xlsx`。驗證：新 7 欄到位；`0050` 即時價 100.15／昨收 106.4／漲跌 −6.25（=100.15−106.4）／漲跌幅 −5.874%（=−6.25/106.4）自洽；同檔 `0050` 元大／富邦兩列昨收/漲跌/月季年線/KD 完全相同（快取生效、跨券商一致）；`VOO` 即時價 689.59／昨收 693.8／漲跌 −4.21 亦自洽；KD 呈現 `K 31.63 / D 40.18`。
 - [ ] 200.5 commit ＋ 兩段式 merge。
+
+---
+
+### Task 201：公開資訊「油價金價」十年歷史曲線與 Excel 匯出（Requirement 40）
+
+**需求對應：** Requirement 40「公開資訊『油價金價』十年歷史曲線與 Excel 匯出」。
+
+**背景：** 使用者要求在「公開資訊」下新增「油價金價」頁，收集最近 10 年每日油價、金價畫成曲線圖，並可指定時間區間與存檔目錄匯出成單一檔案。標的採國際盤美元計價（WTI `CL=F`／Brent `BZ=F`／COMEX 黃金 `GC=F`），因中油零售油價與台銀黃金存摺的公開歷史不足十年。匯出目錄採瀏覽器 `showSaveFilePicker`（本專案首次使用 File System Access API），與 R34/37/39「後端寫進容器目錄」的排程留存模型分工不同。
+
+- [x] 201.1 **spec**：`requirements.md` 新增 Requirement 40；`design.md` 新增「Requirement 40（Task 201）」設計段（來源表／資料模型／分層／匯出／雙 Y 軸圖表／端點／檔案清單）；`tasks.md` 本任務。
+- [x] 201.2 **DB changeset**：`v1.60.0-commodity-price-history.sql` 建 `commodity_price_history`（`commodity_code`／`price_date`／`close_price`，`uq_commodity_price_code_date` UNIQUE ＋ `idx_commodity_price_code_date`），冪等寫法（`CREATE TABLE IF NOT EXISTS`／`IF NOT EXISTS` 索引）；`db.changelog-master.yaml` 尾端註冊。
+- [x] 201.3 **`CommodityFetchClient`**：curl 子程序 ＋ 短 UA 抓 Yahoo chart；`fetchRange(code, start, end)` 回 `List<CommodityBar(date, close)>`；`null` close 略過；例外吞掉回空 List 並 `log.warn`。
+- [x] 201.4 **落庫與回補**：`StockSourceQuery` 增 `upsertCommodityPrice`（select-then-update/insert）／`findMaxCommodityDate`／`findMinCommodityDate`；`HistoricalBackfillService` 增 `backfillCommodity`（增量）／`backfillCommodityFrom`（強制），`startupBackfill` 追加三標的補滿十年。
+- [x] 201.5 **`CommodityPricePoller`**：`@Scheduled(cron="0 30 6 * * MON-SAT", zone="Asia/Taipei")` 每日增量補前一交易日收盤（紐約收盤＝台北隔日凌晨）；`commodity.enabled` flag；單一標的失敗不影響其他。
+- [x] 201.6 **ext internal 端點**：`InternalPriceController` 增 `POST /internal/backfill/commodity` 與 `/commodity-from`。
+- [x] 201.7 **backend model／repository**：`CommodityPriceHistory` entity（無 owner 欄位、全域公開）＋ repository（區間查詢／`findMaxPriceDate`／`deleteByCommodityCodeAndPriceDateBefore`）。
+- [x] 201.8 **backend service／controller**：`HistoricalDataService` proxy 兩支 ext 端點（`.block()` ＋ try/catch 降級）並於 `purgeOldHistory` 追加十年清理；`MarketDataController` 增 `GET /api/market-data/commodity`、`POST /commodity/refresh`、`GET /commodity/export`（`start`/`end` 驗證，`start > end` 回 400）。
+- [x] 201.9 **Excel 匯出**：`ExcelExportService.exportCommodityPrices(start, end)` ＋ `writeCommoditySheet`，`TreeMap` 三序列 outer join、缺值留空、日期文字格式、價格 `num4`。
+- [x] 201.10 **BFF**：新增 `bff/.../commodityprice/CommodityPriceBffController`（`GET /` 先 refresh 再回十年三序列、`POST /refresh`、`GET /export` passthrough byte[]）；外部失敗降級空序列。
+- [x] 201.11 **前端**：`api/index.js` 增 `commodityPrice` 命名空間；`CommodityPriceView.vue`（三 KPI 卡／雙 Y 軸 ECharts 折線／區間快切／匯出對話框含日期區間 ＋ `showSaveFilePicker` 另存、不支援則退回 anchor 下載）；`router/index.js` 與 `App.vue`「公開資訊」選單加入口。
+- [x] 201.12 **排程列表登錄**：`SchedulePublicBffController.JOBS` 補「油價金價 每日回補」項目。
+- [x] 201.13 **建置與部署驗證**：`--no-cache` 重 build business／ext／bff／frontend 並 `--force-recreate`（四者皆 healthy）。Liquibase `v1.60.0-commodity-price-history` EXECUTED、表與 `uq_commodity_price_code_date`／`idx_commodity_price_code_date` 到位。`POST /api/market-data/commodity/refresh` 回補 `{WTI:2513, BRENT:2515, GOLD:2513}`，DB 三標的皆 `2016-07-18 ~ 2026-07-17`（滿十年）。`GET /api/market-data/commodity?start=&end=` 值與 Yahoo 原始 API 逐日核對一致（2026-07-17：WTI 82.49／Brent 88.1／GOLD 4012.7）；`start > end` 回 400。匯出端點產 `油價金價_20260701_20260717.xlsx`（Content-Disposition UTF-8 中文檔名正確）：單張工作表四欄、三序列依日期 outer join 對齊、7/3–7/5（美國國慶＋週末）整列缺無誤補。前端 chunk `CommodityPriceView-*.js` 已入 nginx 且含 `showSaveFilePicker`、`index-*.js` 含 `bff/commodity-price`。**頁面曲線與另存對話框待使用者於瀏覽器登入後目視確認**（BFF 端點需 Google OAuth session，無法免登入驗證）。
+- [ ] 201.14 commit ＋ 兩段式 merge。

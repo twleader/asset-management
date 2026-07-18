@@ -146,6 +146,24 @@ public class InternalPriceController {
         return Map.of("currency", currency, "records", n);
     }
 
+    /** 增量補油金價：從 max(price_date)+1 至今（Requirement 40）。 */
+    @PostMapping("/backfill/commodity")
+    public Map<String, Object> backfillCommodity(
+            @RequestParam String code,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate since) {
+        int n = historicalBackfill.backfillCommodity(code, since);
+        return Map.of("code", code, "records", n);
+    }
+
+    /** 強制從 since 補油金價（首次補滿十年／補中間缺漏，Requirement 40）。 */
+    @PostMapping("/backfill/commodity-from")
+    public Map<String, Object> backfillCommodityFrom(
+            @RequestParam String code,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate since) {
+        int n = historicalBackfill.backfillCommodityFrom(code, since);
+        return Map.of("code", code, "records", n);
+    }
+
     /** IMF DataMapper 指標查詢（NGDPDPC 人均 GDP / NGDP_RPCH GDP 成長率）。 */
     @GetMapping("/macro/imf")
     public Map<Integer, java.math.BigDecimal> imf(

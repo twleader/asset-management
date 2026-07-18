@@ -41,6 +41,12 @@ news-scraper:
 kr-stock:
   enabled: ${KR_STOCK_ENABLED:true}
 
+# 油價／金價每日回補（Task 201）：每日 06:30（Asia/Taipei）增量補 WTI／Brent／COMEX 黃金前一交易日收盤
+# 至 commodity_price_history，供「公開資訊 → 油價金價」十年曲線與 Excel 匯出。
+# 十年歷史首補由 HistoricalBackfillService.startupBackfill 負責；enabled=false 可停用每日增量。
+commodity:
+  enabled: ${COMMODITY_ENABLED:true}
+
 logging:
   level:
     com.steven.assets.externalmaterials: INFO
