@@ -52,6 +52,17 @@ public class PerformanceComparisonBffController {
     /** 可比較的大盤基準白名單（us-daily-index GET 不驗 code，故由 BFF 守門）。 */
     private static final Set<String> ALLOWED_BENCHMARKS = Set.of("TWSE", "DJI", "SPX", "IXIC", "SOX");
 
+    /**
+     * 已查證為累積型／不配息的台股 ETF：收益不發現金、直接累積於淨值（＝收盤價），故「價格報酬 ≡ 含息報酬」。
+     * 含息模式下這些標的 stock_dividend_history 查無股利（FinMind TaiwanStockDividend／TaiwanStockDividendResult
+     * 兩表＋Yahoo events=div 皆確認「本就不配息」，非資料缺口），仍以原始收盤價視為已含息 → priceOnly=false
+     * （比照英股累積型 UCITS ETF 的處理），避免誤標「價格報酬」讓使用者以為報酬被低估。
+     * 非此白名單的台股／美股查無股利者維持 priceOnly=true（可能是配息型的資料缺口，保守標示；如 AMZN 亦不配息但不擴充清單）。
+     * 代號以 stock 主檔為準（期元大S&P石油主檔碼為 00642，一併列 00642U 以防主檔改用含 U 碼）。
+     */
+    private static final Set<String> ACCUMULATING_TW_ETFS =
+            Set.of("00646", "006205", "00642", "00642U", "00865B");
+
     private static final int MAX_STOCKS = 3;
     private static final int MAX_BENCHMARKS = 5;
 
@@ -264,7 +275,8 @@ public class PerformanceComparisonBffController {
      * <ul>
      *   <li>dividend=false：用原始 closes、priceOnly=false。</li>
      *   <li>dividend=true 且 market 為台股/美股/英股：並行抓除息事件；
-     *       無股利資料（英股目前 stock_dividend_history 皆無）→ 原始 closes、priceOnly=true；
+     *       無股利資料（英股目前 stock_dividend_history 皆無）→ 原始 closes、priceOnly=true，
+     *       但 {@link #ACCUMULATING_TW_ETFS} 內已查證累積型台股 ETF 標 priceOnly=false（收盤已含息）；
      *       有資料 → 股利再投入調整、priceOnly=false。</li>
      * </ul>
      */
@@ -283,8 +295,11 @@ public class PerformanceComparisonBffController {
                     TreeMap<String, BigDecimal> closes = tuple.getT1();
                     List<Map<String, Object>> divs = tuple.getT2();
                     if (divs.isEmpty()) {
-                        // 無股利資料 → 原始 closes、標記純價格
-                        return new SeriesRaw(t, closes, true);
+                        // 無股利資料。已查證累積型台股 ETF（收盤已含息、價=含息報酬）→ priceOnly=false；
+                        // 其餘（配息型資料缺口 / 本就不配息個股如 AMZN）→ 保守標記純價格 priceOnly=true。
+                        boolean accumulating = "台股".equals(t.market())
+                                && ACCUMULATING_TW_ETFS.contains(t.code());
+                        return new SeriesRaw(t, closes, !accumulating);
                     }
                     return new SeriesRaw(t, reinvestDividends(closes, divs, to), false);
                 });
