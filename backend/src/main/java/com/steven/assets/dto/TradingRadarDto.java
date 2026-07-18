@@ -6,7 +6,7 @@ import java.util.List;
 /**
  * 今日交易雷達（Requirement 43）純讀 response。
  *
- * <p>所有分數／建議皆為 {@code TW_RULES_V2} 即時計算的衍生值，不入庫；
+ * <p>所有分數／建議皆為 {@code TW_RULES_V3} 即時計算的衍生值，不入庫；
  * {@code score=null} 代表必要資料不足，不以 0 分冒充有效判斷。</p>
  */
 public final class TradingRadarDto {
@@ -44,6 +44,8 @@ public final class TradingRadarDto {
             String stockCode,
             String stockName,
             String market,
+            String assetClass,
+            boolean distributionAdjusted,
             boolean held,
             String action,
             String actionLabel,

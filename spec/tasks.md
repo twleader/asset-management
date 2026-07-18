@@ -5275,6 +5275,23 @@ security property，直接 `-D` 讀不到——雙重靜默無效）、改用 JD
 
 ---
 
+### Task 213：交易雷達避免配息型債券 ETF 誤判出場（Requirement 43 / TW_RULES_V3）
+
+**需求對應：** 使用者發現 00751B 當日上漲且 KD 轉強，交易雷達仍以 0 分標為「出場候選」。實際稽核確認兩個獨立根因：技術指標直接使用未還原權息 OHLC，使 2026-06-22 現金配息 0.43 元及 240 日內多次配息把 MA60／MA240 機械墊高；同時 `stock.asset_class=BOND` 雖已是系統事實來源，雷達仍把所有台股一律套用 TAIEX `RISK_OFF -15` 與股票買進閘門。
+
+- [x] 213.1 **spec／版本契約**：Requirement 43 與 design 升版 `TW_RULES_V3`，定義還原權息 OHLC 因子、MA／KD／兩日確認同價基、有效資產類別、BOND／STOCK 大盤規則差異、DTO／前端揭露與驗證；不新增資料表、不呼叫外部行情或 AI API。
+- [x] 213.2 **還原權息純計算**：新增 `DistributionAdjustedPriceService`，以區間內 `stock_dividend_history` 現金／股票配息事件調整 OHLC 並縮放至最新價不變；無有效事件原值返回。`StockDividendHistoryRepository` 新增區間純讀 query。
+- [x] 213.3 **同一技術價基整合**：`TechnicalIndicatorService` 抽出 `computeFromSeries` 共用核心；`TradingRadarService` 對完成日 K 與可選今日 live K 一次還原後，同一序列計算 MA／KD、三條兩日確認及規則內部單日漲跌（±5% 扣分／停止續跌），禁止混用原始／還原價；DTO 行情漲跌仍保留原始市場值。
+- [x] 213.4 **資產類別感知規則**：`TradingRadarService` 以 `stock.asset_class` override＋`AssetClassifier` 取得有效類別；`TradingRadarRuleEngine` V3 增 `InstrumentType`，BOND 不套台股大盤加減分、`RISK_OFF` 買進閘門／逆勢風險文案及 `DATA_INCOMPLETE` veto，EQUITY 維持 V2。
+- [x] 213.5 **DTO／前端可解釋性**：`StockDecision` 新增 `assetClass`／`distributionAdjusted`；標的名稱下顯示「債券」／「還原權息」標記，展開 reasons 明示債券未套股票大盤規則。
+- [x] 213.6 **回歸測試與建置**：新增 00751B 型除息序列、最新價不變、無事件 no-op、股票股利因子、BOND／EQUITY RISK_OFF 差異、大盤 incomplete 差異測試；執行 backend target tests/package、BFF package、frontend build。
+  - 驗證：針對性規則／還原權息／通知測試 20/20；Java 21 全後端測試 60/60 並 package 成功；BFF package、frontend production build 成功。Java 25 首輪完整測試因既有 Mockito inline mock 不支援該 JVM 而 29 errors，切回專案指定 Java 21 後全數通過，非本次回歸。
+- [x] 213.7 **部署與實機驗證**：重建／recreate business-services 與 frontend，依 run-stack 慣例 restart BFF；確認服務 healthy、`TW_RULES_V3` payload、00751B 不再為錯誤 `EXIT_CANDIDATE`，畫面顯示「債券／還原權息」，且 logs 無 500／連線錯誤。
+  - 驗證：business-services／BFF healthy、frontend HTTP 200、BFF actuator UP；frontend 運行 chunk `TradingRadarView-CJB-ZrKW.js` 含 `TW_RULES_V3`。owner 1 真實 payload：市場仍 `RISK_OFF score=35`；00751B 回 `assetClass=BOND`、`distributionAdjusted=true`、`score=79`、`action=HOLD/續抱`、MA20／60／240=`31.70／31.39／31.04`、KD=`22.47／19.83`，reasons 同時揭露還原權息與債券不套大盤規則。重建後 BFF `Connection refused|500 Server Error=0`、business `ERROR|TradingRadar 組裝失敗=0`。
+- [x] 213.8 **commit ＋兩段式 merge**：feature commit `42693e95` 已推送；保留 main Task 214／215 後以 `--no-ff` 合併並推送 main。
+
+---
+
 ### Task 214：資產總覽匯出增列 ETF 淨值與折溢價欄（Requirement 34）
 
 **需求對應：** Requirement 34 新增 AC「『股票（即時）』增列 ETF 淨值與折溢價欄」。

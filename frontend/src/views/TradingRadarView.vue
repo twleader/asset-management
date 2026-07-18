@@ -22,7 +22,7 @@
         <div class="card-head">
           <div>
             <span class="section-title">台股大盤風險</span>
-            <el-tag size="small" effect="plain" type="info" class="rule-tag">{{ radar.ruleVersion || 'TW_RULES_V2' }}</el-tag>
+            <el-tag size="small" effect="plain" type="info" class="rule-tag">{{ radar.ruleVersion || 'TW_RULES_V3' }}</el-tag>
           </div>
           <span class="as-of">完成日 K：{{ market.asOfDate || '資料不足' }}</span>
         </div>
@@ -151,15 +151,22 @@
                   </el-col>
                 </el-row>
               </div>
-              <div class="updated-at">行情更新：{{ formatTime(row.priceUpdatedAt) }}　·　完成日 K：{{ row.asOfDate || '—' }}</div>
+              <div class="updated-at">
+                行情更新：{{ formatTime(row.priceUpdatedAt) }}　·　完成日 K：{{ row.asOfDate || '—' }}
+                <span v-if="row.distributionAdjusted">　·　技術價基：還原權息</span>
+              </div>
             </div>
           </template>
         </el-table-column>
 
-        <el-table-column label="標的" min-width="150" fixed="left">
+        <el-table-column label="標的" min-width="175" fixed="left">
           <template #default="{ row }">
             <div class="stock-code">{{ row.stockCode }}</div>
             <div class="stock-name">{{ row.stockName }}</div>
+            <div v-if="row.assetClass === 'BOND' || row.distributionAdjusted" class="stock-meta">
+              <el-tag v-if="row.assetClass === 'BOND'" size="small" type="info" effect="plain">債券</el-tag>
+              <el-tag v-if="row.distributionAdjusted" size="small" type="success" effect="plain">還原權息</el-tag>
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="目前狀態" width="90" align="center">
@@ -321,7 +328,7 @@ import { useRouter } from 'vue-router'
 const router = useRouter()
 const loading = ref(false)
 const refreshing = ref(false)
-const radar = ref({ market: {}, stocks: [], skippedNonTwStocks: 0, ruleVersion: 'TW_RULES_V2' })
+const radar = ref({ market: {}, stocks: [], skippedNonTwStocks: 0, ruleVersion: 'TW_RULES_V3' })
 const notificationVisible = ref(false)
 const notificationLoading = ref(false)
 const notificationSaving = ref(false)
@@ -621,6 +628,7 @@ onUnmounted(() => {
 .stocks-card { margin-top: 16px; }
 .stock-code { font-weight: 750; color: #0f172a; }
 .stock-name { margin-top: 2px; color: #64748b; font-size: 12px; }
+.stock-meta { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
 .price-value { font-weight: 700; color: #0f172a; }
 .slash { color: #cbd5e1; padding: 0 2px; }
 .expand-panel { padding: 8px 28px 18px 56px; background: #f8fafc; }

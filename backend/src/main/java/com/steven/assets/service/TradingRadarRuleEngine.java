@@ -15,10 +15,11 @@ import java.util.List;
 @Component
 public class TradingRadarRuleEngine {
 
-    public static final String RULE_VERSION = "TW_RULES_V2";
+    public static final String RULE_VERSION = "TW_RULES_V3";
 
     public enum Confirmation { ABOVE, BELOW, MIXED, UNAVAILABLE }
     public enum MarketRegime { RISK_ON, NEUTRAL, RISK_OFF, DATA_INCOMPLETE }
+    public enum InstrumentType { EQUITY, BOND }
     public enum CounterTrendState { NONE, OVERSOLD_WATCH, TRIAL_CANDIDATE }
     public enum Action {
         BUY_CANDIDATE,
@@ -59,6 +60,7 @@ public class TradingRadarRuleEngine {
             Confirmation ma20Confirmation,
             Confirmation ma60Confirmation,
             Confirmation ma240Confirmation,
+            InstrumentType instrumentType,
             MarketRegime marketRegime
     ) {}
 
@@ -177,12 +179,16 @@ public class TradingRadarRuleEngine {
             risks.add("KD 同在 80 以上，短線可能過熱。 ");
         }
 
-        if (input.marketRegime() == MarketRegime.RISK_ON) {
-            score += 8;
-            reasons.add("大盤為 RISK_ON，市場環境允許尋找多方機會。 ");
-        } else if (input.marketRegime() == MarketRegime.RISK_OFF) {
-            score -= 15;
-            risks.add("大盤為 RISK_OFF，禁止產生買進或加碼候選。 ");
+        if (equityMarketApplies(input)) {
+            if (input.marketRegime() == MarketRegime.RISK_ON) {
+                score += 8;
+                reasons.add("大盤為 RISK_ON，市場環境允許尋找多方機會。 ");
+            } else if (input.marketRegime() == MarketRegime.RISK_OFF) {
+                score -= 15;
+                risks.add("大盤為 RISK_OFF，禁止產生買進或加碼候選。 ");
+            }
+        } else {
+            reasons.add("資產類別為債券，不套用台股大盤 RISK_ON／RISK_OFF 加減分與買進閘門。 ");
         }
 
         if (input.changePercent().compareTo(BigDecimal.valueOf(5)) >= 0) {
@@ -228,7 +234,7 @@ public class TradingRadarRuleEngine {
             reasons.add("K、D 皆低於 20，且 K 由前一期不高於 D 轉為 K>D，形成低檔黃金交叉。 ");
             reasons.add("本日價格已停止續跌，可列為小額分批的逆勢試單候選。 ");
             risks.add("逆勢試單不取代原本的趨勢分數與主規則建議，必須限制部位並分批。 ");
-            if (input.marketRegime() == MarketRegime.RISK_OFF) {
+            if (equityMarketApplies(input) && input.marketRegime() == MarketRegime.RISK_OFF) {
                 risks.add("大盤仍為 RISK_OFF，只限小額試單，不得視為一般買進或加碼候選。 ");
             }
             return new CounterTrendResult(
@@ -244,7 +250,7 @@ public class TradingRadarRuleEngine {
             risks.add("KD 尚未由 K<=D 轉為 K>D，低檔轉強仍未確認。 ");
         }
         if (!stabilized) risks.add("本日價格仍在下跌，尚未出現停止續跌訊號。 ");
-        if (input.marketRegime() == MarketRegime.RISK_OFF) {
+        if (equityMarketApplies(input) && input.marketRegime() == MarketRegime.RISK_OFF) {
             risks.add("大盤為 RISK_OFF，僅可觀察；若後續升級也只限小額分批，主規則建議仍優先。 ");
         }
         return new CounterTrendResult(
@@ -254,7 +260,7 @@ public class TradingRadarRuleEngine {
     }
 
     private Action actionFor(StockInput input, int score) {
-        boolean buyGate = input.marketRegime() != MarketRegime.RISK_OFF
+        boolean buyGate = (!equityMarketApplies(input) || input.marketRegime() != MarketRegime.RISK_OFF)
                 && input.ma20Confirmation() == Confirmation.ABOVE
                 && input.ma60Confirmation() == Confirmation.ABOVE;
         if (score >= 75 && buyGate) {
@@ -283,8 +289,10 @@ public class TradingRadarRuleEngine {
                 && available(input.ma20Confirmation())
                 && available(input.ma60Confirmation())
                 && available(input.ma240Confirmation())
+                && input.instrumentType() != null
                 && input.marketRegime() != null
-                && input.marketRegime() != MarketRegime.DATA_INCOMPLETE;
+                && (!equityMarketApplies(input)
+                    || input.marketRegime() != MarketRegime.DATA_INCOMPLETE);
     }
 
     private boolean complete(Indicators indicators) {
@@ -298,6 +306,10 @@ public class TradingRadarRuleEngine {
 
     private boolean available(Confirmation confirmation) {
         return confirmation != null && confirmation != Confirmation.UNAVAILABLE;
+    }
+
+    private boolean equityMarketApplies(StockInput input) {
+        return input.instrumentType() != InstrumentType.BOND;
     }
 
     private int priceVsMa(BigDecimal price, BigDecimal ma, int weight, String label,
