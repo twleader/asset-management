@@ -46,7 +46,7 @@ public class ExcelExportService {
     private final com.steven.assets.repository.ExchangeRateHistoryRepository rateHistRepo;
     // 每檔持股「過去一年股價」分頁（Task 206）：收盤價權威來源，與 TechnicalIndicatorService 的 MA/KD 同源
     private final com.steven.assets.repository.StockPriceHistoryRepository priceHistRepo;
-    // ETF 淨值／折溢價（Task 209）：讀 Redis price:etfnav:{market}:{code}（由 ext 排程寫入），business 不直連外部行情
+    // ETF 淨值／折溢價（Task 210）：讀 Redis price:etfnav:{market}:{code}（由 ext 排程寫入），business 不直連外部行情
     private final PriceQueryService priceQueryService;
 
     @PersistenceContext
@@ -580,13 +580,13 @@ public class ExcelExportService {
         cell(sh2, 15, "季線價", st.head);
         cell(sh2, 16, "年線價", st.head);
         cell(sh2, 17, "KD值", st.head);
-        // ETF 淨值／折溢價（Task 209）：個股無淨值故留白，見 writeLiveAssetsSheet 逐列註解
+        // ETF 淨值／折溢價（Task 210）：個股無淨值故留白，見 writeLiveAssetsSheet 逐列註解
         cell(sh2, 18, "淨值", st.head);
         cell(sh2, 19, "折溢價(%)", st.head);
         cell(sh2, 20, "淨值時間", st.head);
         // 技術指標（月/季/年線、KD）逐 (code|market) 快取：同股多券商列僅算一次（Task 200）
         Map<String, TechnicalIndicatorService.FullIndicators> indicatorCache = new HashMap<>();
-        // ETF 淨值／折溢價逐 (code|market) 快取（Task 209）；查無者快取 null，避免同檔多列重複讀 Redis
+        // ETF 淨值／折溢價逐 (code|market) 快取（Task 210）；查無者快取 null，避免同檔多列重複讀 Redis
         Map<String, PriceQueryService.EtfNav> navCache = new HashMap<>();
         for (StockHolding sk : s.getStocks()) {
             Row row = sheet.createRow(r++);
@@ -620,7 +620,7 @@ public class ExcelExportService {
             cell(row, 15, ind.quarterlyMa(), st.num2);
             cell(row, 16, ind.annualMa(), st.num2);
             cell(row, 17, formatKd(ind.k(), ind.d()), null);
-            // ETF 淨值／折溢價（Task 209）：資料驅動——Redis 有值才印，個股（無淨值）與抓取失敗皆自然留白。
+            // ETF 淨值／折溢價（Task 210）：資料驅動——Redis 有值才印，個股（無淨值）與抓取失敗皆自然留白。
             // 刻意不做 isEtf 白名單判定（既有白名單誤含個股 AVGO、又漏掉持有的 SGOV）。
             // 同一檔多券商多列共用同一筆，比照技術指標以 code|market 快取，每檔只讀一次 Redis。
             // 用 containsKey 而非 computeIfAbsent：後者不會快取 null 值，個股（永遠查無）會逐列重讀 Redis
@@ -711,7 +711,7 @@ public class ExcelExportService {
     }
 
     /**
-     * 折溢價%（Task 209）：來源已提供權威值就直接用，否則以<b>本列顯示的即時價</b>與淨值計算。
+     * 折溢價%（Task 210）：來源已提供權威值就直接用，否則以<b>本列顯示的即時價</b>與淨值計算。
      *
      * <p>兩條路徑的理由不同，不可統一：
      * <ul>

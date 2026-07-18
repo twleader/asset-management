@@ -5189,7 +5189,7 @@ security property，直接 `-D` 讀不到——雙重靜默無效）、改用 JD
 
 ---
 
-### Task 209：資產總覽匯出增列 ETF 淨值與折溢價欄（Requirement 34）
+### Task 210：資產總覽匯出增列 ETF 淨值與折溢價欄（Requirement 34）
 
 **需求對應：** Requirement 34 新增 AC「『股票（即時）』增列 ETF 淨值與折溢價欄」。
 
@@ -5208,27 +5208,34 @@ security property，直接 `-D` 讀不到——雙重靜默無效）、改用 JD
 4. **TTL 96h ＋ 輸出「淨值時間」欄**——淨值一天一組值且只在交易時段抓，24h 會讓週末後首份匯出空白；
    但撐久了就必須揭示資料時點，否則使用者無從分辨今日值與殘留值。
 
-- [x] 209.1 **spec**：`requirements.md` Requirement 34 增 AC；`design.md` Requirement 34 章新增「ETF 淨值與折溢價欄」設計段；`tasks.md` 本任務。
-- [x] 209.2 **ext 抓取（台股）**：新增 `client/EtfNavFetchClient`，GET `all_etf.txt` 解析 `{"a1":[...]}`（跳過無 `msgArray` 的空物件、
+- [x] 210.1 **spec**：`requirements.md` Requirement 34 增 AC；`design.md` Requirement 34 章新增「ETF 淨值與折溢價欄」設計段；`tasks.md` 本任務。
+- [x] 210.2 **ext 抓取（台股）**：新增 `client/EtfNavFetchClient`，GET `all_etf.txt` 解析 `{"a1":[...]}`（跳過無 `msgArray` 的空物件、
       數值過 `parseDecimal` 去千分位逗號），取代號／iNAV／證交所折溢價／資料時點，回 `Map<代號, EtfNav>`；失敗回空 Map 不拋出。
-- [x] 209.3 **ext 抓取（美股）**：`MarketDataFetchService.getUsEtfNav(symbol)` 沿用既有 `getYahooCrumb()`／`yahooApiGet()`（短 UA），
-      取 `summaryDetail.navPrice`，`regularMarketTime` 轉紐約日期為資料時點；**折溢價刻意留 null 交由匯出端算**（見 209.6）；
+- [x] 210.3 **ext 抓取（美股）**：`MarketDataFetchService.getUsEtfNav(symbol)` 沿用既有 `getYahooCrumb()`／`yahooApiGet()`（短 UA），
+      取 `summaryDetail.navPrice`，`regularMarketTime` 轉紐約日期為資料時點；**折溢價刻意留 null 交由匯出端算**（見 210.6）；
       無 `navPrice`（個股）回 null；401/429 清空 crumb 快取比照既有慣例。
-- [x] 209.4 **ext 寫入與排程**：新增 `service/EtfNavCacheWriter`（`price:etfnav:{market}:{code}`、TTL 96h、失敗只 log）
+- [x] 210.4 **ext 寫入與排程**：新增 `service/EtfNavCacheWriter`（`price:etfnav:{market}:{code}`、TTL 96h、失敗只 log）
       與 `service/EtfNavPoller`（台股 `0 2/5 9-13 * * MON-FRI` TPE ＋交易時段 guard、美股 `0 30 18 * * MON-FRI` NYC、
       開機 warmup 不阻塞、`refreshAll()` 供手動觸發）；`application.yml` 加 `etf-nav.enabled`；
       `InternalPriceController` 加 `POST /internal/etf-nav/refresh`。
-- [x] 209.5 **business 讀取**：`PriceQueryService` 新增 `EtfNav` record 與 `getEtfNav(code, market)`（讀 Redis、
+- [x] 210.5 **business 讀取**：`PriceQueryService` 新增 `EtfNav` record 與 `getEtfNav(code, market)`（讀 Redis、
       **不 fallback DB**、查無回 `Optional.empty()`）。
-- [x] 209.6 **Excel 欄位**：`ExcelExportService.writeLiveAssetsSheet` 增欄 18 淨值(`num4`)／19 折溢價(%)(`num2`)／20 淨值時間；
+- [x] 210.6 **Excel 欄位**：`ExcelExportService.writeLiveAssetsSheet` 增欄 18 淨值(`num4`)／19 折溢價(%)(`num2`)／20 淨值時間；
       折溢價經 `premiumDiscountPct(nav, livePrice)`：**來源有權威值（台股證交所）就用，沒有（美股）就以該列自己的即時價計算**，
       確保列內自洽——首版讓 ext 端用 Yahoo 自己的市價預算，實測 VOO 出現「即時價 683.935／淨值 683.15／折溢價 0.00」
       互相矛盾的列（自行驗算為 +0.11%），故改為現行做法；
       逐 `code|market` 以 `containsKey` 快取（**不可用 `computeIfAbsent`**——它不快取 null，個股會逐列重讀 Redis）；
       `autoSizeColumn` 上界 18→21。注入 `PriceQueryService`。
-- [x] 209.7 **排程列表登記**：`SchedulePublicBffController.JOBS` 補台股／美股兩筆（否則排程列表與實作漂移，比照 Task 195 教訓）。
-- [ ] 209.8 **建置與部署驗證**：`--no-cache` 重 build external-materials-service 與 business-services（兩個 JVM service，
+- [x] 210.7 **排程列表登記**：`SchedulePublicBffController.JOBS` 補台股／美股兩筆（否則排程列表與實作漂移，比照 Task 195 教訓）。
+- [x] 210.8 **建置與部署驗證**：`--no-cache` 重 build external-materials-service 與 business-services（兩個 JVM service，
       cached build 易出 stale jar）並 `--force-recreate`；**recreate 後一併 restart bff**（Task 208 的 DNS 陷阱）；
       打 `POST /internal/etf-nav/refresh` 後驗 Redis 有 13 檔台股＋3 檔美股 ETF、個股無 key；
       run-now 產檔驗證 ETF 列有淨值／折溢價／淨值時間、個股列三欄留白，且折溢價與證交所頁面數值一致。
-- [ ] 209.9 commit ＋ 兩段式 merge。
+      **實測結果**：warmup 即抓到台股 350 檔名冊、持股 19 檔中 15 檔為 ETF 寫入 Redis，美股 11 檔中 4 檔取得淨值；
+      個股（2330／2881／GOOGL）確認無 key（資料驅動判定生效）。產檔後逐列驗算，16 檔 ETF（13 台股＋3 美股）
+      折溢價欄與「(本列即時價−本列淨值)/淨值」完全吻合、0 列不一致，5 檔個股三欄留白：
+      0050 100.15/98.96=+1.20、00713 60.25/60.65=−0.66、00882 14.56/14.75=−1.29、
+      VOO 683.935/683.15=+0.11、SGOV 100.575/100.57098=+0.01。
+      註：本任務編號原為 209，因另一 worktree 的「今日交易雷達」先佔用 209（spec 已寫入 main 工作樹），
+      依既有慣例避讓改為 210；改編號只動註解與文件字串，不影響已驗證的執行結果，故未重跑部署。
+- [ ] 210.9 commit ＋ 兩段式 merge。

@@ -47,7 +47,7 @@ kr-stock:
 commodity:
   enabled: ${COMMODITY_ENABLED:true}
 
-# ETF 淨值／折溢價（Task 209）：台股盤中每 5 分鐘打證交所 all_etf.txt（一次回全市場，僅 1 個 request）、
+# ETF 淨值／折溢價（Task 210）：台股盤中每 5 分鐘打證交所 all_etf.txt（一次回全市場，僅 1 個 request）、
 # 美股每日美東 18:30 逐檔問 Yahoo quoteSummary，寫入 Redis price:etfnav:{market}:{code}，
 # 供「資產總覽」Excel 匯出的淨值／折溢價欄。enabled=false 可停用；停用後匯出該兩欄留白（不影響其他欄位）。
 etf-nav:

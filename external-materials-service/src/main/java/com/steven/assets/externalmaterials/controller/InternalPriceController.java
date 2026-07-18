@@ -148,7 +148,7 @@ public class InternalPriceController {
     }
 
     /**
-     * 手動重抓 ETF 淨值／折溢價寫入 Redis（Task 209）。不限交易時段，供部署後驗證與抓取失敗時補救。
+     * 手動重抓 ETF 淨值／折溢價寫入 Redis（Task 210）。不限交易時段，供部署後驗證與抓取失敗時補救。
      * 台股一次打證交所全市場彙整檔、美股逐檔問 Yahoo；個股不會有值（資料驅動判定，非白名單）。
      */
     @PostMapping("/etf-nav/refresh")
