@@ -845,6 +845,11 @@
   - **昨收／漲跌／漲跌幅(%)**（緊接「即時價」後）：與即時價**同一 Redis 即時報價來源**——取自 `PriceQueryService.LivePrice.previousClose/priceChange/changePercent`，經 `StockPriceService.getLiveAssets()` 由**同一筆** `LivePrice` 帶進 `LiveStockItem`（零額外 Redis 讀取），確保「即時價 − 昨收 = 漲跌」三值同一 tick 一致；漲跌幅為已計算之百分比數值（例 1.23 = 1.23%）。查無即時報價時三欄留白。
   - **月線價／季線價／年線價／KD值**（置於分頁末欄）：統一取自共用權威 `TechnicalIndicatorService.computeAll(code, market)` 的 `FullIndicators{monthlyMa(MA20)／quarterlyMa(MA60)／annualMa(MA240)／k／d}`，與觀察清單／警示同一計算；KD 以單一「KD值」欄呈現為 `K x.xx / D x.xx`。歷史資料不足以撐滿某視窗時該欄留白、不影響其他欄。同一 `(code, market)` 於同分頁多筆持股（不同券商）僅計算一次並以 `code|market` 於單次匯出內快取共用。
   - 此增列同時套用於「立即匯出到目錄」（run-now）與每日排程產檔（皆走 `ExcelExportService.writeLiveAssetsSheet`）。
+- [ ] **每檔持股各一張「過去一年股價」分頁（Task 206）**：`資產總覽_{使用者ID}_{YYYYMMDD}.xlsx`（run-now 與每日排程共用的同一份活頁簿）第一張分頁維持「當前即時資產」全資產總表，**第二張起每一檔持股一張分頁、分頁名稱＝股票代號**，內容為該檔過去一年（匯出日回推一年至匯出日）的每日股價，欄序 `日期／開盤價／最高價／最低價／收盤價／成交量`，依日期遞增；日期寫成 `yyyy-MM-dd` 文字（比照油價金價／匯率匯出，避免 Excel 依開啟端時區重新詮釋 date cell 偏移一天）。
+  - **資料來源**：一律讀 `stock_price_history`（收盤價權威來源，與技術指標／個股頁曲線同一張表），匯出過程不呼叫外部行情 API；該表保留 10 年歷史，過去一年區間必然涵蓋。
+  - **持股清單**：取自與第一張分頁**同一批**最新快照持股（`asset_snapshot.stocks`），以 `(代號, 市場)` 去重——同一檔股票分散多家券商只出一張分頁——順序同總表由上而下。owner 隔離沿用外層（HTTP 走 `TenantFilterAspect`、背景排程走手動 `enableFilter`），故分頁只含該使用者自己持有的股票。
+  - **查無資料不靜默略過**：區間內無任何收盤價的個股（如剛買進、或該市場尚未回補）仍產生**只有表頭的空分頁**，明示「有這檔持股、但區間內無資料」，與「這檔不存在」可區分。
+  - **分頁名稱衝突**：不同市場出現同一代號時，第二張起以 `代號_市場` 命名；仍衝突則加數字後綴。名稱長度與非法字元以 POI `WorkbookUtil.createSafeSheetName` 收斂（Excel 上限 31 字元、禁 `[]:*?/\`）。
 
 ---
 
