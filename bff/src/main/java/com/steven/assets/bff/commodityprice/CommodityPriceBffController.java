@@ -21,7 +21,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * CommodityPriceView（公開資訊 → 油價金價）專屬 BFF（Requirement 40 / Task 201）。
+ * CommodityPriceView（公開資訊 → 油價金價）專屬 BFF（Requirement 40 / Task 202）。
  *
  * 三個標的（WTI／BRENT／GOLD）為全域公開行情，無 owner 過濾。
  * 外部來源失敗一律降級回空序列而非 5xx——頁面顯示「查無資料」比整頁錯誤好。
@@ -78,7 +78,7 @@ public class CommodityPriceBffController {
                 .map(ResponseEntity::ok);
     }
 
-    // ===== 排程自動匯出設定（Requirement 41 / Task 202，per-user owner-scoped）=====
+    // ===== 排程自動匯出設定（Requirement 41 / Task 203，per-user owner-scoped）=====
     // 沿用 businessServicesClient（WebClientConfig.tenantHeaderFilter 自動帶 X-User-* → 後端 ownerFilter 縮到本人）。
 
     @GetMapping("/export/schedule")

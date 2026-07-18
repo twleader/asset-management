@@ -68,7 +68,7 @@
       </el-table>
     </el-card>
 
-    <!-- 排程自動匯出設定（Requirement 41 / Task 202） -->
+    <!-- 排程自動匯出設定（Requirement 41 / Task 203） -->
     <el-card style="margin-top:20px">
       <template #header>
         <div style="display:flex;align-items:center;justify-content:space-between">
@@ -222,7 +222,7 @@ const exportDialog = reactive({ visible: false, range: [] })
 // File System Access API：可讓使用者自選存檔目錄；Safari／舊版瀏覽器沒有，退回一般下載
 const canPickDirectory = typeof window !== 'undefined' && 'showSaveFilePicker' in window
 
-// 排程自動匯出設定（Requirement 41 / Task 202）
+// 排程自動匯出設定（Requirement 41 / Task 203）
 const schedule = reactive({
   enabled: false, runHour: 8, runMinute: 0, outputSubpath: 'input',
   rangeMonths: 120, lastRunAt: null, lastRunStatus: null, baseDir: ''

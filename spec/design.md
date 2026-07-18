@@ -2688,7 +2688,7 @@ RealizedGainView el-tree 懶載入
 
 `RealizedGainController` 既有 `@GetMapping("/export")`（在 `@RequestMapping("/api/realized-gains")` 下）＝ `/api/realized-gains/export`；新 `RealizedGainExportController` 掛 `/api/realized-gains/export` 並以 `/schedule`、`/run-now` 為子路徑 ＝ `/api/realized-gains/export/schedule`。兩者路徑不同、無 ambiguous mapping。
 
-## Requirement 40（Task 201）：公開資訊「油價金價」十年歷史曲線與 Excel 匯出
+## Requirement 40（Task 202）：公開資訊「油價金價」十年歷史曲線與 Excel 匯出
 
 ### 資料來源與標的
 
@@ -2812,7 +2812,7 @@ CommodityPriceView.vue
 - `frontend/src/router/index.js`、`frontend/src/App.vue`：路由與「公開資訊」選單項
 - `SchedulePublicBffController.java`：`JOBS` 補「油價金價 每日回補」
 
-## Requirement 41（Task 202）：油價金價 Excel 排程自動匯出到指定目錄
+## Requirement 41（Task 203）：油價金價 Excel 排程自動匯出到指定目錄
 
 ### 與既有三套匯出排程的定位
 

@@ -40,7 +40,7 @@ public class ExcelExportService {
     private final StockPriceService stockPriceService;
     // 月/季/年線與 KD 的共用權威計算（與觀察清單／警示同一來源）；供「股票（即時）」分頁增列技術指標欄（Task 200）
     private final TechnicalIndicatorService technicalIndicatorService;
-    // 油價金價匯出（Task 201）：全域公開行情，與頁面曲線同一張表，確保匯出值與圖表一致
+    // 油價金價匯出（Task 202）：全域公開行情，與頁面曲線同一張表，確保匯出值與圖表一致
     private final com.steven.assets.repository.CommodityPriceHistoryRepository commodityHistRepo;
 
     @PersistenceContext
@@ -245,7 +245,7 @@ public class ExcelExportService {
     }
 
     /**
-     * 油價金價區間匯出（Requirement 40 / Task 201）：單張工作表、油金同檔。
+     * 油價金價區間匯出（Requirement 40 / Task 202）：單張工作表、油金同檔。
      * 全域公開行情，無 owner 過濾，故不需要 ForOwner 變體。
      */
     @Transactional(readOnly = true)

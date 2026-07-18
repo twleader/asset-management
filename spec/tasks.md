@@ -1179,7 +1179,7 @@ fallback 為歷史收盤即可。
 
 `StockPrice.priceChange / changePercent`（@Transient）= `price - previousClose`，
 `previousClose` 寫入時優先取自 Yahoo `regularMarketPreviousClose`。觀察到 Yahoo 在週末 / 美股盤外
-回傳異常舊值（NVDA 4/28 收到 4/22 close = 202.50；正確應為 4/27 close = 216.61），
+回傳異常舊值（NVDA 4/28 收到 4/22 close = 203.50；正確應為 4/27 close = 216.61），
 造成 Dashboard 顯示 NVDA ▲5%、GOOGL ▲3.61% 等明顯錯誤的漲跌幅。
 
 歷史表（`stock_price_history`）由我們自家的收盤紀錄 cron 寫入，是權威值；應一律以此為準。
@@ -4995,45 +4995,45 @@ spec-code 一致性稽核發現 7 處 spec 與程式碼落差（多為 spec 文�
 
 ---
 
-### Task 201：公開資訊「油價金價」十年歷史曲線與 Excel 匯出（Requirement 40）
+### Task 202：公開資訊「油價金價」十年歷史曲線與 Excel 匯出（Requirement 40）
 
 **需求對應：** Requirement 40「公開資訊『油價金價』十年歷史曲線與 Excel 匯出」。
 
 **背景：** 使用者要求在「公開資訊」下新增「油價金價」頁，收集最近 10 年每日油價、金價畫成曲線圖，並可指定時間區間與存檔目錄匯出成單一檔案。標的採國際盤美元計價（WTI `CL=F`／Brent `BZ=F`／COMEX 黃金 `GC=F`），因中油零售油價與台銀黃金存摺的公開歷史不足十年。匯出目錄採瀏覽器 `showSaveFilePicker`（本專案首次使用 File System Access API），與 R34/37/39「後端寫進容器目錄」的排程留存模型分工不同。
 
-- [x] 201.1 **spec**：`requirements.md` 新增 Requirement 40；`design.md` 新增「Requirement 40（Task 201）」設計段（來源表／資料模型／分層／匯出／雙 Y 軸圖表／端點／檔案清單）；`tasks.md` 本任務。
-- [x] 201.2 **DB changeset**：`v1.60.0-commodity-price-history.sql` 建 `commodity_price_history`（`commodity_code`／`price_date`／`close_price`，`uq_commodity_price_code_date` UNIQUE ＋ `idx_commodity_price_code_date`），冪等寫法（`CREATE TABLE IF NOT EXISTS`／`IF NOT EXISTS` 索引）；`db.changelog-master.yaml` 尾端註冊。
-- [x] 201.3 **`CommodityFetchClient`**：curl 子程序 ＋ 短 UA 抓 Yahoo chart；`fetchRange(code, start, end)` 回 `List<CommodityBar(date, close)>`；`null` close 略過；例外吞掉回空 List 並 `log.warn`。
-- [x] 201.4 **落庫與回補**：`StockSourceQuery` 增 `upsertCommodityPrice`（select-then-update/insert）／`findMaxCommodityDate`／`findMinCommodityDate`；`HistoricalBackfillService` 增 `backfillCommodity`（增量）／`backfillCommodityFrom`（強制），`startupBackfill` 追加三標的補滿十年。
-- [x] 201.5 **`CommodityPricePoller`**：`@Scheduled(cron="0 30 6 * * MON-SAT", zone="Asia/Taipei")` 每日增量補前一交易日收盤（紐約收盤＝台北隔日凌晨）；`commodity.enabled` flag；單一標的失敗不影響其他。
-- [x] 201.6 **ext internal 端點**：`InternalPriceController` 增 `POST /internal/backfill/commodity` 與 `/commodity-from`。
-- [x] 201.7 **backend model／repository**：`CommodityPriceHistory` entity（無 owner 欄位、全域公開）＋ repository（區間查詢／`findMaxPriceDate`／`deleteByCommodityCodeAndPriceDateBefore`）。
-- [x] 201.8 **backend service／controller**：`HistoricalDataService` proxy 兩支 ext 端點（`.block()` ＋ try/catch 降級）並於 `purgeOldHistory` 追加十年清理；`MarketDataController` 增 `GET /api/market-data/commodity`、`POST /commodity/refresh`、`GET /commodity/export`（`start`/`end` 驗證，`start > end` 回 400）。
-- [x] 201.9 **Excel 匯出**：`ExcelExportService.exportCommodityPrices(start, end)` ＋ `writeCommoditySheet`，`TreeMap` 三序列 outer join、缺值留空、日期文字格式、價格 `num4`。
-- [x] 201.10 **BFF**：新增 `bff/.../commodityprice/CommodityPriceBffController`（`GET /` 先 refresh 再回十年三序列、`POST /refresh`、`GET /export` passthrough byte[]）；外部失敗降級空序列。
-- [x] 201.11 **前端**：`api/index.js` 增 `commodityPrice` 命名空間；`CommodityPriceView.vue`（三 KPI 卡／雙 Y 軸 ECharts 折線／區間快切／匯出對話框含日期區間 ＋ `showSaveFilePicker` 另存、不支援則退回 anchor 下載）；`router/index.js` 與 `App.vue`「公開資訊」選單加入口。
-- [x] 201.12 **排程列表登錄**：`SchedulePublicBffController.JOBS` 補「油價金價 每日回補」項目。
-- [x] 201.13 **建置與部署驗證**：`--no-cache` 重 build business／ext／bff／frontend 並 `--force-recreate`（四者皆 healthy）。Liquibase `v1.60.0-commodity-price-history` EXECUTED、表與 `uq_commodity_price_code_date`／`idx_commodity_price_code_date` 到位。`POST /api/market-data/commodity/refresh` 回補 `{WTI:2513, BRENT:2515, GOLD:2513}`，DB 三標的皆 `2016-07-18 ~ 2026-07-17`（滿十年）。`GET /api/market-data/commodity?start=&end=` 值與 Yahoo 原始 API 逐日核對一致（2026-07-17：WTI 82.49／Brent 88.1／GOLD 4012.7）；`start > end` 回 400。匯出端點產 `油價金價_20260701_20260717.xlsx`（Content-Disposition UTF-8 中文檔名正確）：單張工作表四欄、三序列依日期 outer join 對齊、7/3–7/5（美國國慶＋週末）整列缺無誤補。前端 chunk `CommodityPriceView-*.js` 已入 nginx 且含 `showSaveFilePicker`、`index-*.js` 含 `bff/commodity-price`。**頁面曲線與另存對話框待使用者於瀏覽器登入後目視確認**（BFF 端點需 Google OAuth session，無法免登入驗證）。
-- [ ] 201.14 commit ＋ 兩段式 merge。
+- [x] 202.1 **spec**：`requirements.md` 新增 Requirement 40；`design.md` 新增「Requirement 40（Task 202）」設計段（來源表／資料模型／分層／匯出／雙 Y 軸圖表／端點／檔案清單）；`tasks.md` 本任務。
+- [x] 202.2 **DB changeset**：`v1.60.0-commodity-price-history.sql` 建 `commodity_price_history`（`commodity_code`／`price_date`／`close_price`，`uq_commodity_price_code_date` UNIQUE ＋ `idx_commodity_price_code_date`），冪等寫法（`CREATE TABLE IF NOT EXISTS`／`IF NOT EXISTS` 索引）；`db.changelog-master.yaml` 尾端註冊。
+- [x] 202.3 **`CommodityFetchClient`**：curl 子程序 ＋ 短 UA 抓 Yahoo chart；`fetchRange(code, start, end)` 回 `List<CommodityBar(date, close)>`；`null` close 略過；例外吞掉回空 List 並 `log.warn`。
+- [x] 202.4 **落庫與回補**：`StockSourceQuery` 增 `upsertCommodityPrice`（select-then-update/insert）／`findMaxCommodityDate`／`findMinCommodityDate`；`HistoricalBackfillService` 增 `backfillCommodity`（增量）／`backfillCommodityFrom`（強制），`startupBackfill` 追加三標的補滿十年。
+- [x] 202.5 **`CommodityPricePoller`**：`@Scheduled(cron="0 30 6 * * MON-SAT", zone="Asia/Taipei")` 每日增量補前一交易日收盤（紐約收盤＝台北隔日凌晨）；`commodity.enabled` flag；單一標的失敗不影響其他。
+- [x] 202.6 **ext internal 端點**：`InternalPriceController` 增 `POST /internal/backfill/commodity` 與 `/commodity-from`。
+- [x] 202.7 **backend model／repository**：`CommodityPriceHistory` entity（無 owner 欄位、全域公開）＋ repository（區間查詢／`findMaxPriceDate`／`deleteByCommodityCodeAndPriceDateBefore`）。
+- [x] 202.8 **backend service／controller**：`HistoricalDataService` proxy 兩支 ext 端點（`.block()` ＋ try/catch 降級）並於 `purgeOldHistory` 追加十年清理；`MarketDataController` 增 `GET /api/market-data/commodity`、`POST /commodity/refresh`、`GET /commodity/export`（`start`/`end` 驗證，`start > end` 回 400）。
+- [x] 202.9 **Excel 匯出**：`ExcelExportService.exportCommodityPrices(start, end)` ＋ `writeCommoditySheet`，`TreeMap` 三序列 outer join、缺值留空、日期文字格式、價格 `num4`。
+- [x] 202.10 **BFF**：新增 `bff/.../commodityprice/CommodityPriceBffController`（`GET /` 先 refresh 再回十年三序列、`POST /refresh`、`GET /export` passthrough byte[]）；外部失敗降級空序列。
+- [x] 202.11 **前端**：`api/index.js` 增 `commodityPrice` 命名空間；`CommodityPriceView.vue`（三 KPI 卡／雙 Y 軸 ECharts 折線／區間快切／匯出對話框含日期區間 ＋ `showSaveFilePicker` 另存、不支援則退回 anchor 下載）；`router/index.js` 與 `App.vue`「公開資訊」選單加入口。
+- [x] 202.12 **排程列表登錄**：`SchedulePublicBffController.JOBS` 補「油價金價 每日回補」項目。
+- [x] 202.13 **建置與部署驗證**：`--no-cache` 重 build business／ext／bff／frontend 並 `--force-recreate`（四者皆 healthy）。Liquibase `v1.60.0-commodity-price-history` EXECUTED、表與 `uq_commodity_price_code_date`／`idx_commodity_price_code_date` 到位。`POST /api/market-data/commodity/refresh` 回補 `{WTI:2513, BRENT:2515, GOLD:2513}`，DB 三標的皆 `2016-07-18 ~ 2026-07-17`（滿十年）。`GET /api/market-data/commodity?start=&end=` 值與 Yahoo 原始 API 逐日核對一致（2026-07-17：WTI 82.49／Brent 88.1／GOLD 4012.7）；`start > end` 回 400。匯出端點產 `油價金價_20260701_20260717.xlsx`（Content-Disposition UTF-8 中文檔名正確）：單張工作表四欄、三序列依日期 outer join 對齊、7/3–7/5（美國國慶＋週末）整列缺無誤補。前端 chunk `CommodityPriceView-*.js` 已入 nginx 且含 `showSaveFilePicker`、`index-*.js` 含 `bff/commodity-price`。**頁面曲線與另存對話框待使用者於瀏覽器登入後目視確認**（BFF 端點需 Google OAuth session，無法免登入驗證）。
+- [ ] 202.14 commit ＋ 兩段式 merge。
 
 ---
 
-### Task 202：油價金價 Excel 排程自動匯出到指定目錄（Requirement 41）
+### Task 203：油價金價 Excel 排程自動匯出到指定目錄（Requirement 41）
 
 **需求對應：** Requirement 41「油價金價 Excel 排程自動匯出到指定目錄」。
 
-**背景：** 使用者於 Task 201 完成後追加要求「這個匯出，我要能排程匯到指定目錄」。Task 201 的匯出為瀏覽器 `showSaveFilePicker` 一次性另存；本任務補上 R34／37／39 那套「後端寫進容器目錄＋`el-tree` 目錄選擇器＋每日排程」模型，兩者並存。
+**背景：** 使用者於 Task 202 完成後追加要求「這個匯出，我要能排程匯到指定目錄」。Task 202 的匯出為瀏覽器 `showSaveFilePicker` 一次性另存；本任務補上 R34／37／39 那套「後端寫進容器目錄＋`el-tree` 目錄選擇器＋每日排程」模型，兩者並存。
 
 **關鍵差異（勿照抄 R39）：** 油金價為全域公開行情（`commodity_price_history` 無 `owner_user_id`、無 `@Filter`），背景 cron 產檔**不需**手動 `enableFilter`，直接呼叫 `exportCommodityPrices(start, end)` 即可——排程設定 per-user，但資料本身全域（同 R37 交易日曆）。另新增「匯出範圍」`range_months`，使排程產出隨時間滾動。
 
-- [x] 202.1 **spec**：`requirements.md` 新增 Requirement 41；`design.md` 新增「Requirement 41（Task 202）」設計段（與既有三套排程的定位對照／資料模型／滾動範圍／寫檔安全／排程機制／端點／檔案清單）；`tasks.md` 本任務。
-- [x] 202.2 **DB changeset**：`v1.61.0-commodity-export-schedule.sql` 建 `commodity_export_schedule`（owner UNIQUE ＋ 時分／range_months CHECK），冪等寫法；`db.changelog-master.yaml` 註冊。
-- [x] 202.3 **backend model／repository／dto**：`CommodityExportSchedule` entity（`@Filter(ownerFilter)`）＋ repository ＋ `CommodityExportDto`。
-- [x] 202.4 **`CommodityExportScheduleService`**：設定 CRUD、`resolveDir` 路徑驗證（拒 `..` 與絕對路徑）、`writeAtomically`（tmp ＋ ATOMIC_MOVE）、滾動區間計算、每分鐘 tick（`now >= 時分` ＋ 當日 guard ＋ `AtomicBoolean` 防重入）、`ApplicationReadyEvent` 自癒、run-now（不動 guard）。
-- [x] 202.5 **`CommodityExportController`**：`GET/PUT /api/commodity-export/schedule`、`POST /api/commodity-export/run-now`。目錄列舉沿用既有 `/api/export-schedule/browse`，不新增第四份實作。
-- [x] 202.6 **BFF**：`CommodityPriceBffController` 增 schedule GET/PUT、run-now、browse 四支 passthrough。
-- [x] 202.7 **前端**：`api/index.js` `commodityPrice` 增 4 支；`CommodityPriceView.vue` 增「排程自動匯出」設定卡（開關／每日時間／匯出範圍／資料夾樹選擇器／立即匯出／上次執行結果）。
-- [x] 202.8 **排程列表登錄**：`SchedulePublicBffController.JOBS` 補「油價金價匯出 每日匯出排程檢查」。
-- [x] 202.9 **建置與部署驗證**：`--no-cache` 重 build business／bff／frontend 並 `--force-recreate`（皆 healthy）。Liquibase `v1.61.0-commodity-export-schedule` EXECUTED、表與 `uq_commodity_export_schedule_owner` ＋ 三個 CHECK 到位。驗證項目：**設定 CRUD** — GET 無設定回預設 `{enabled:false, runHour:8, outputSubpath:"input", rangeMonths:null, baseDir:"/home/steven"}`，PUT 正確 upsert；**輸入驗證** — `outputSubpath:"../../etc"` 回 400、`rangeMonths:999` 回 400；**run-now 實際落檔** — 回 `{path:"/home/steven/input/oilgold/油價金價_1_20260718.xlsx", sizeBytes:5569}`，主機端 `/Users/steven/input/oilgold/` 確實出現同大小檔案（volume 對映正確）、無 `.tmp` 殘留；**滾動區間正確** — `rangeMonths:3` 產出 62 筆、`2026-04-20 ~ 2026-07-17`（4/18–19 為週末故首筆落 4/20），表頭四欄與手動匯出一致；**背景排程實際觸發** — 設 07:30 且當日未跑，08:20:00 UTC 的 tick 自動補跑成功（log：`油價金價排程匯出成功 owner=1 → …`），`last_run_date=2026-07-18` guard 已設、`last_run_status` 記錄成功路徑；**前端** — `CommodityPriceView-rf12F3CP.js` 含 `rangeMonths`、`index-C3oONiK9.js` 含三支 `commodity-price/export/*` 路徑；**排程列表** — 運行中 BFF jar 的 `SchedulePublicBffController.class` 含「油價金價」兩筆登錄（回補＋匯出）。驗證後已將測試排程 `enabled` 設回 `false`，避免未經使用者要求的每日自動產檔。**設定卡 UI 與目錄樹選擇器待使用者於瀏覽器登入後目視確認**。
-- [x] 202.10 **對抗式審查修正（`el-select` 綁 null 顯示失真）**：五視角並行審查（排程正確性／租戶隔離／路徑安全／API 契約／前端行為）共 8 個發現，經每個發現 2 名獨立懷疑者對抗式驗證後 6 個被駁回、2 個成立——且為同一缺陷由 api-consistency 與 frontend-behavior 兩視角各自獨立發現：`rangeMonths` 的「全部十年」選項以 `null` 為值，而 element-plus 2.13.6 的 `DEFAULT_EMPTY_VALUES` 含 `null`，致 `hasModelValue=false`、欄位渲染灰色 placeholder 而非「全部十年」，使用者無法分辨「已選全部十年」與「尚未選擇」（值本身正確，純顯示層失真）。**修正**：前端改以哨兵值 `120`（月）表示全部十年——`end.minusMonths(120)` 與 `minusYears(10)` 等價、CHECK 允許 `1..120`，語意零變動，且不依賴 `:empty-values` 這類版本相依 prop；`loadSchedule`／`saveSchedule` 將後端 `null` 映射為 `120`，後端保留 `null` 分支相容未儲存過的舊列。同步更新 `requirements.md` 與 `design.md`。**驗證**：重 build frontend，`rangeMonths=120` 之 run-now 產出 2515 筆、`2016-07-18 ~ 2026-07-17`（76,474 bytes），與十年完全等價（近 3 個月為 62 筆／5,569 bytes）。
-- [ ] 202.11 commit ＋ 兩段式 merge。
+- [x] 203.1 **spec**：`requirements.md` 新增 Requirement 41；`design.md` 新增「Requirement 41（Task 203）」設計段（與既有三套排程的定位對照／資料模型／滾動範圍／寫檔安全／排程機制／端點／檔案清單）；`tasks.md` 本任務。
+- [x] 203.2 **DB changeset**：`v1.61.0-commodity-export-schedule.sql` 建 `commodity_export_schedule`（owner UNIQUE ＋ 時分／range_months CHECK），冪等寫法；`db.changelog-master.yaml` 註冊。
+- [x] 203.3 **backend model／repository／dto**：`CommodityExportSchedule` entity（`@Filter(ownerFilter)`）＋ repository ＋ `CommodityExportDto`。
+- [x] 203.4 **`CommodityExportScheduleService`**：設定 CRUD、`resolveDir` 路徑驗證（拒 `..` 與絕對路徑）、`writeAtomically`（tmp ＋ ATOMIC_MOVE）、滾動區間計算、每分鐘 tick（`now >= 時分` ＋ 當日 guard ＋ `AtomicBoolean` 防重入）、`ApplicationReadyEvent` 自癒、run-now（不動 guard）。
+- [x] 203.5 **`CommodityExportController`**：`GET/PUT /api/commodity-export/schedule`、`POST /api/commodity-export/run-now`。目錄列舉沿用既有 `/api/export-schedule/browse`，不新增第四份實作。
+- [x] 203.6 **BFF**：`CommodityPriceBffController` 增 schedule GET/PUT、run-now、browse 四支 passthrough。
+- [x] 203.7 **前端**：`api/index.js` `commodityPrice` 增 4 支；`CommodityPriceView.vue` 增「排程自動匯出」設定卡（開關／每日時間／匯出範圍／資料夾樹選擇器／立即匯出／上次執行結果）。
+- [x] 203.8 **排程列表登錄**：`SchedulePublicBffController.JOBS` 補「油價金價匯出 每日匯出排程檢查」。
+- [x] 203.9 **建置與部署驗證**：`--no-cache` 重 build business／bff／frontend 並 `--force-recreate`（皆 healthy）。Liquibase `v1.61.0-commodity-export-schedule` EXECUTED、表與 `uq_commodity_export_schedule_owner` ＋ 三個 CHECK 到位。驗證項目：**設定 CRUD** — GET 無設定回預設 `{enabled:false, runHour:8, outputSubpath:"input", rangeMonths:null, baseDir:"/home/steven"}`，PUT 正確 upsert；**輸入驗證** — `outputSubpath:"../../etc"` 回 400、`rangeMonths:999` 回 400；**run-now 實際落檔** — 回 `{path:"/home/steven/input/oilgold/油價金價_1_20260718.xlsx", sizeBytes:5569}`，主機端 `/Users/steven/input/oilgold/` 確實出現同大小檔案（volume 對映正確）、無 `.tmp` 殘留；**滾動區間正確** — `rangeMonths:3` 產出 62 筆、`2026-04-20 ~ 2026-07-17`（4/18–19 為週末故首筆落 4/20），表頭四欄與手動匯出一致；**背景排程實際觸發** — 設 07:30 且當日未跑，08:20:00 UTC 的 tick 自動補跑成功（log：`油價金價排程匯出成功 owner=1 → …`），`last_run_date=2026-07-18` guard 已設、`last_run_status` 記錄成功路徑；**前端** — `CommodityPriceView-rf12F3CP.js` 含 `rangeMonths`、`index-C3oONiK9.js` 含三支 `commodity-price/export/*` 路徑；**排程列表** — 運行中 BFF jar 的 `SchedulePublicBffController.class` 含「油價金價」兩筆登錄（回補＋匯出）。驗證後已將測試排程 `enabled` 設回 `false`，避免未經使用者要求的每日自動產檔。**設定卡 UI 與目錄樹選擇器待使用者於瀏覽器登入後目視確認**。
+- [x] 203.10 **對抗式審查修正（`el-select` 綁 null 顯示失真）**：五視角並行審查（排程正確性／租戶隔離／路徑安全／API 契約／前端行為）共 8 個發現，經每個發現 2 名獨立懷疑者對抗式驗證後 6 個被駁回、2 個成立——且為同一缺陷由 api-consistency 與 frontend-behavior 兩視角各自獨立發現：`rangeMonths` 的「全部十年」選項以 `null` 為值，而 element-plus 2.13.6 的 `DEFAULT_EMPTY_VALUES` 含 `null`，致 `hasModelValue=false`、欄位渲染灰色 placeholder 而非「全部十年」，使用者無法分辨「已選全部十年」與「尚未選擇」（值本身正確，純顯示層失真）。**修正**：前端改以哨兵值 `120`（月）表示全部十年——`end.minusMonths(120)` 與 `minusYears(10)` 等價、CHECK 允許 `1..120`，語意零變動，且不依賴 `:empty-values` 這類版本相依 prop；`loadSchedule`／`saveSchedule` 將後端 `null` 映射為 `120`，後端保留 `null` 分支相容未儲存過的舊列。同步更新 `requirements.md` 與 `design.md`。**驗證**：重 build frontend，`rangeMonths=120` 之 run-now 產出 2515 筆、`2016-07-18 ~ 2026-07-17`（76,474 bytes），與十年完全等價（近 3 個月為 62 筆／5,569 bytes）。
+- [ ] 203.11 commit ＋ 兩段式 merge。

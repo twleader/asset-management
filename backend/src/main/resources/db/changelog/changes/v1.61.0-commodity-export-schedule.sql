@@ -1,7 +1,7 @@
 --liquibase formatted sql
 
 --changeset steven:v1.61.0-commodity-export-schedule
---comment Requirement 41（Task 202）：油價金價每日排程自動匯出，per-user 設定表。每個 owner 一列（owner_user_id UNIQUE、@Filter(ownerFilter) 隔離），存啟用開關、每日執行時分、輸出相對子路徑、匯出範圍月數、上次執行日期(當日 guard)/時間/結果。range_months 為 NULL 代表匯出全部十年；非 NULL 則以「執行當日往前推 N 個月」計算起訖，使留存檔隨時間滾動。與 Requirement 39（realized_gain_export_schedule）的關鍵差異：油金價為全域公開行情（commodity_price_history 無 owner_user_id、無 @Filter），背景 cron 直接產檔即可，不需要 exportXxxForOwner(ownerId) 手動 enableFilter——排程設定 per-user，但資料本身全域（同 Requirement 37 交易日曆）。本 changeset 寫成冪等（CREATE TABLE IF NOT EXISTS），避免日後版號避讓改名導致 changeset id 變動、Liquibase 視為新 changeset 重跑時因表已存在而失敗。表內僅使用者自建設定、無 seed，故毋須補償語句。
+--comment Requirement 41（Task 203）：油價金價每日排程自動匯出，per-user 設定表。每個 owner 一列（owner_user_id UNIQUE、@Filter(ownerFilter) 隔離），存啟用開關、每日執行時分、輸出相對子路徑、匯出範圍月數、上次執行日期(當日 guard)/時間/結果。range_months 為 NULL 代表匯出全部十年；非 NULL 則以「執行當日往前推 N 個月」計算起訖，使留存檔隨時間滾動。與 Requirement 39（realized_gain_export_schedule）的關鍵差異：油金價為全域公開行情（commodity_price_history 無 owner_user_id、無 @Filter），背景 cron 直接產檔即可，不需要 exportXxxForOwner(ownerId) 手動 enableFilter——排程設定 per-user，但資料本身全域（同 Requirement 37 交易日曆）。本 changeset 寫成冪等（CREATE TABLE IF NOT EXISTS），避免日後版號避讓改名導致 changeset id 變動、Liquibase 視為新 changeset 重跑時因表已存在而失敗。表內僅使用者自建設定、無 seed，故毋須補償語句。
 CREATE TABLE IF NOT EXISTS commodity_export_schedule (
     id              BIGSERIAL PRIMARY KEY,
     owner_user_id   BIGINT       NOT NULL,
