@@ -10,6 +10,8 @@ import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
@@ -60,6 +62,18 @@ public class EtfNavPoller {
         refreshTw();
     }
 
+    /**
+     * 台股收盤後補一次（17:30）：投信約 17:00 更新當日淨值，此時抓到的即為當日最終值。
+     *
+     * <p>入庫是 upsert，盤中每輪都會覆寫同一列，故這一輪的意義是<b>讓當日最後一次寫入落在收盤後</b>——
+     * 也就是 DB 內該日的值＝收盤折溢價，而非停在 13:30 前某個盤中瞬間。
+     */
+    @Scheduled(cron = "0 30 17 * * MON-FRI", zone = "Asia/Taipei")
+    public void scheduledTwCloseUpdate() {
+        if (!enabled || !clock.isTradingDay("台股", java.time.LocalDate.now(java.time.ZoneId.of("Asia/Taipei")))) return;
+        refreshTw();
+    }
+
     /** 美股收盤後（美東 18:30）：發行商當日淨值多於 17:00-18:00 ET 間公告，此時抓可拿到 T 日 NAV。 */
     @Scheduled(cron = "0 30 18 * * MON-FRI", zone = "America/New_York")
     public void scheduledUsUpdate() {
@@ -88,6 +102,7 @@ public class EtfNavPoller {
             EtfNav nav = all.get(code);
             if (nav == null) continue; // 不在 ETF 名冊＝個股，正常情形
             writer.write(nav);
+            persist(nav);
             n++;
         }
         log.info("ETF 淨值更新（台股）：持股 {} 檔中 {} 檔為 ETF 並已寫入", tw.size(), n);
@@ -104,9 +119,68 @@ public class EtfNavPoller {
             EtfNav nav = marketDataFetchService.getUsEtfNav(code);
             if (nav == null) continue; // 個股或抓取失敗
             writer.write(nav);
+            persist(nav);
             n++;
         }
         log.info("ETF 淨值更新（美股）：持股 {} 檔中 {} 檔取得淨值", us.size(), n);
         return n;
+    }
+
+    /**
+     * 寫入 {@code etf_nav_history}（Task 211）：Redis 只留最新一筆（TTL 96h）供即時匯出，
+     * 長期折溢價走勢靠這張表留存。
+     *
+     * <p>以來源自帶的資料日為主鍵之一，故同一天多次抓取只覆寫同一列（冪等）；
+     * 入庫失敗只記 log，不影響 Redis 寫入與整輪排程（歷史留存不該拖垮即時功能）。
+     */
+    private void persist(EtfNav nav) {
+        LocalDate navDate = parseNavDate(nav.navAsOf());
+        if (navDate == null || nav.nav() == null) return; // 無資料日或無淨值：不入庫，不臆測日期
+        try {
+            source.upsertEtfNav(nav.stockCode(), nav.market(), navDate,
+                    nav.nav(), resolvePct(nav, navDate), nav.source());
+        } catch (Exception e) {
+            log.warn("ETF 淨值入庫失敗 {} {} {}: {}",
+                    nav.market(), nav.stockCode(), navDate, e.getMessage());
+        }
+    }
+
+    /**
+     * 入庫用的折溢價（Task 211）：來源有權威值就用，沒有就以<b>同一交易日的收盤價</b>與淨值計算。
+     *
+     * <p>台股由證交所發布折溢價，直接沿用（且其淨值已四捨五入，不可反推）。美股 Yahoo 不提供該欄，
+     * 故取 {@code stock_price_history} 中<b>與淨值同一交易日</b>的收盤價計算——刻意不用即時價或前一日收盤：
+     * 前者會讓歷史列的值隨抓取時點漂移、後者是實測會把 VOO 真實 +0.003% 溢價放大成 +1.02% 的錯配。
+     *
+     * <p>查無同日收盤價時回 null（該列折溢價留空），不退而求其次用別日價格湊數；下一輪抓取會再試一次，
+     * 屆時收盤價多半已入庫（upsert 會補上）。
+     *
+     * <p>注意與匯出欄位的語意差異：Excel 的折溢價用「該列當下的即時價」（＝現在買貴了沒），
+     * 本表用「該交易日收盤價」（＝當日收盤折溢價，供日後比較常態區間）。兩者本就不是同一個問題。
+     */
+    private java.math.BigDecimal resolvePct(EtfNav nav, LocalDate navDate) {
+        if (nav.premiumDiscountPct() != null) return nav.premiumDiscountPct();
+        java.math.BigDecimal close = source.findCloseOn(nav.stockCode(), nav.market(), navDate).orElse(null);
+        if (close == null || nav.nav().compareTo(java.math.BigDecimal.ZERO) == 0) return null;
+        return close.subtract(nav.nav())
+                .multiply(java.math.BigDecimal.valueOf(100))
+                .divide(nav.nav(), 4, java.math.RoundingMode.HALF_UP);
+    }
+
+    /**
+     * 解析來源的資料時點為日期：台股為 {@code yyyyMMdd HH:mm:ss}、美股為 {@code yyyy-MM-dd}。
+     * 解析不出來一律回 null（不以「今天」代入——那會在跨日或休市抓取時把資料掛到錯誤的日期）。
+     */
+    private static LocalDate parseNavDate(String navAsOf) {
+        if (navAsOf == null || navAsOf.isBlank()) return null;
+        String head = navAsOf.trim().split("\\s+")[0];
+        try {
+            if (head.length() == 8 && head.chars().allMatch(Character::isDigit)) {
+                return LocalDate.parse(head, DateTimeFormatter.BASIC_ISO_DATE);
+            }
+            return LocalDate.parse(head);
+        } catch (Exception e) {
+            return null;
+        }
     }
 }

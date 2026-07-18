@@ -2531,6 +2531,25 @@ GET  /api/bff/asset-history/export                    → GET  /api/snapshots/ex
 - **失敗處置**：抓取失敗不寫入（保留上一輪值），比照 `PriceCacheWriter` 對 `z='-'` 的處置；`etf-nav.enabled=false` 可整體停用，
   停用後匯出三欄留白、不影響其他欄位。
 
+#### 每日入庫留存（Task 211）
+
+- **表**：`etf_nav_history(stock_code, market, nav_date, nav, premium_discount_pct, source)`，
+  `(stock_code, market, nav_date)` UNIQUE，Liquibase `v1.63.0-etf-nav-history.sql`（冪等寫法）。全域公開行情，無 `owner_user_id`。
+- **雙寫分工**：Redis（TTL 96h）＝匯出當下要用的「最新一筆」；`etf_nav_history` ＝長期歷史。
+  每次抓取兩邊都寫，DB 端為 upsert，故盤中反覆覆寫同一列，**當日最終值＝最後一次抓取值**。
+- **收盤後補抓（`0 30 17 * * MON-FRI` TPE）**：投信約 17:00 更新當日淨值；這一輪的作用是讓當日最後一次寫入落在收盤後，
+  使 DB 內該日值具「收盤折溢價」語意，而非停在 13:30 前的盤中瞬間。台股交易日 guard 以 `MarketClock.isTradingDay` 判定。
+- **資料日來源**：台股取彙整檔自帶的資料日期欄、美股取報價時點轉紐約當地日期。
+  **解析不出來就不入庫**——不以 `LocalDate.now()` 代入，否則跨日抓取或休市補抓會把資料掛到錯誤日期，且該錯誤在 UNIQUE 約束下會固化成一筆假資料。
+- **不存市價（正規化）**：市價同一事實已在 `stock_price_history.close_price`。折溢價則**不是**衍生值——見上方紅線，
+  台股為證交所權威值且無法由已四捨五入的淨值反推，屬刻意保留的來源事實。
+- **入庫折溢價的兩條路徑**：台股沿用證交所權威值；美股 Yahoo 不提供該欄，改以 `stock_price_history` 中
+  **與淨值同一交易日**的收盤價計算（`EtfNavPoller.resolvePct()` ＋ `StockSourceQuery.findCloseOn()`），查無同日收盤價則留 null、
+  下一輪再補。**與 Excel 欄位語意刻意不同**：匯出欄用「該列當下的即時價」（答『現在買貴了沒』），
+  本表用「該交易日收盤價」（答『當日收盤折溢價』，供日後比較常態區間）。兩者本就不是同一個問題，不應強求一致。
+- **尚無讀取端**：本階段只做累積留存，未新增 entity／repository／API／頁面。日後要畫折溢價走勢圖時再補讀取路徑，
+  屆時歷史資料已經在表內（這正是先行留存的目的）。
+
 ### 資產總覽活頁簿改為「總表 ＋ 每檔持股一張過去一年股價分頁」（Task 206）
 
 - **活頁簿結構**：`buildLiveWorkbook()` 在既有 `writeLiveAssetsSheet`（第一張「當前即時資產」）之後追加 `writeStockPriceHistorySheets(wb, st, latest)`，逐檔產生一張股價分頁。run-now 與每日排程共用同一 `buildLiveWorkbook()`，故兩條路徑內容一致；`exportFull()`（歷年多快照活頁簿）不受影響。
