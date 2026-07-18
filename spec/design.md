@@ -2811,3 +2811,112 @@ CommodityPriceView.vue
 - `frontend/src/api/index.js`：`commodityPrice` 命名空間
 - `frontend/src/router/index.js`、`frontend/src/App.vue`：路由與「公開資訊」選單項
 - `SchedulePublicBffController.java`：`JOBS` 補「油價金價 每日回補」
+
+## Requirement 41（Task 202）：油價金價 Excel 排程自動匯出到指定目錄
+
+### 與既有三套匯出排程的定位
+
+| 需求 | 資料範圍 | 背景產檔是否需 owner 過濾 | 產檔方法 |
+|---|---|---|---|
+| R34 歷年資產 | per-user | 需要 | `exportLiveAssetsForOwner(ownerId)` |
+| R39 已實現損益 | per-user | 需要 | `exportRealizedGainsForOwner(ownerId)` |
+| R37 交易日曆 | 全域 | 不需要 | `exportTradingCalendar(year)` |
+| **R41 油價金價** | **全域** | **不需要** | `exportCommodityPrices(start, end)` |
+
+`commodity_price_history` 無 `owner_user_id`、未套 `@Filter(ownerFilter)`，背景 cron 無 request context 也讀得到完整資料，
+故**不需要**新增 `ForOwner` 變體——排程設定 per-user，但資料本身全域（同 R37）。
+這是本需求與 R39 最容易抄錯的一點：R39 若漏了 `enableFilter` 會外洩他人損益，R41 若照抄反而是多餘的。
+
+### 資料模型
+
+```sql
+CREATE TABLE commodity_export_schedule (
+    id              BIGSERIAL PRIMARY KEY,
+    owner_user_id   BIGINT       NOT NULL,      -- @Filter(ownerFilter)，每人一列
+    enabled         BOOLEAN      NOT NULL DEFAULT FALSE,
+    run_hour        INT          NOT NULL DEFAULT 8,
+    run_minute      INT          NOT NULL DEFAULT 0,
+    output_subpath  VARCHAR(255) NOT NULL DEFAULT 'input',
+    range_months    INT,                        -- NULL ＝ 全部十年
+    last_run_date   DATE,                       -- 當日 guard
+    last_run_at     TIMESTAMP,
+    last_run_status VARCHAR(500),
+    updated_at      TIMESTAMP,
+    CONSTRAINT uq_commodity_export_schedule_owner UNIQUE (owner_user_id),
+    CONSTRAINT ck_commodity_export_schedule_hour   CHECK (run_hour BETWEEN 0 AND 23),
+    CONSTRAINT ck_commodity_export_schedule_minute CHECK (run_minute BETWEEN 0 AND 59),
+    CONSTRAINT ck_commodity_export_schedule_range  CHECK (range_months IS NULL OR range_months BETWEEN 1 AND 120)
+);
+```
+
+### 滾動時間範圍
+
+`range_months` 讓排程產出隨時間滾動，而非固定區間：
+
+```
+end   = LocalDate.now(Asia/Taipei)
+start = range_months == null ? end.minusYears(10) : end.minusMonths(range_months)
+```
+
+前端選項對應 `1／3／6／12／36／60／120（全部十年）`，預設 `120`。
+
+**「全部十年」在前端以 `120` 而非 `null` 表示**：Element Plus 的 `el-select` 預設把 `null` 視為
+empty value（`DEFAULT_EMPTY_VALUES` 含 `null`），綁 `null` 時 `hasModelValue` 為 false，
+欄位會渲染灰色 placeholder 而非選項標籤——使用者無法分辨「已選全部十年」與「尚未選擇」（值本身仍正確，
+純顯示層失真）。因 `end.minusMonths(120)` 與 `end.minusYears(10)` 等價、且 CHECK 允許 `1..120`，
+改用 `120` 語意零變動且不必依賴 `:empty-values` 這類版本相依的 prop。
+後端仍保留 `range_months IS NULL` 分支，以相容從未儲存過設定的列（entity 預設即 null）。
+手動匯出（R40）仍為使用者自選絕對起訖日期——兩者語意不同：手動取的是「某段歷史」，排程留的是「最近 N 個月」。
+
+### 寫檔與路徑安全
+
+沿用 R34／37／39 的路徑模型與驗證，**不新增第四份 `browse` 實作**：
+
+- 基底：`@Value("${EXPORT_OUTPUT_DIR:/home/steven}")`，docker volume 對映 host 家目錄
+- `resolveDir(subpath)`：`base.resolve(subpath).normalize()` 後必須 `startsWith(base)`，否則 `IllegalArgumentException` → 400
+- 寫檔比照 R37 `writeAtomically`：先寫 `filename + ".tmp"`，再 `Files.move(..., ATOMIC_MOVE)`，
+  不支援時退 `REPLACE_EXISTING`。避免覆寫既有檔時中途失敗留下半截殘檔
+- 目錄列舉沿用 business 既有 `GET /api/export-schedule/browse?subpath=`（R34），BFF 僅新增自己的 passthrough 路由
+
+### 排程執行機制
+
+比照 R34／37／39：
+
+- `@Scheduled(cron = "0 * * * * *", zone = "Asia/Taipei")` 每分鐘 poll
+- 判斷式為 `now >= 設定時分` ＋ `last_run_date != today`，**非分鐘精確相等**——
+  排程執行緒被長工作卡住跨分鐘時，精確相等會整日靜默漏跑
+- `AtomicBoolean ticking` 防重入
+- `@EventListener(ApplicationReadyEvent.class)` 重啟自癒，補跑當日已到點未執行者
+- 單一使用者失敗只記 `last_run_status` ＋ log，不中斷其他使用者；成功或失敗**都**設當日 guard，
+  避免失敗後整天每分鐘重試
+- run-now 不動當日 guard（驗證路徑用，不應吃掉當日排程）
+
+### API 端點
+
+| 層 | 端點 | 說明 |
+|---|---|---|
+| business | `GET /api/commodity-export/schedule` | 讀當前使用者排程設定（無則回預設值） |
+| business | `PUT /api/commodity-export/schedule` | upsert（驗證時分範圍、range_months、子路徑不跳脫） |
+| business | `POST /api/commodity-export/run-now` | 立即產檔到設定目錄，回 `{path, sizeBytes}`；不動當日 guard |
+| business | `GET /api/export-schedule/browse?subpath=` | （既有，複用）列出基底下子目錄 |
+| BFF | `GET /api/bff/commodity-price/export/schedule` | passthrough |
+| BFF | `PUT /api/bff/commodity-price/export/schedule` | passthrough |
+| BFF | `POST /api/bff/commodity-price/export/run-now` | passthrough |
+| BFF | `GET /api/bff/commodity-price/export/browse` | passthrough 至 business `/api/export-schedule/browse` |
+
+### 新增／異動檔案
+
+**新增**
+- `backend/.../model/CommodityExportSchedule.java`
+- `backend/.../repository/CommodityExportScheduleRepository.java`
+- `backend/.../service/CommodityExportScheduleService.java`（tick／self-heal／run-now／設定 CRUD／路徑驗證／atomic write）
+- `backend/.../controller/CommodityExportController.java`（`@RequestMapping("/api/commodity-export")`）
+- `backend/.../dto/CommodityExportDto.java`
+- `backend/src/main/resources/db/changelog/changes/v1.61.0-commodity-export-schedule.sql`
+
+**異動**
+- `db.changelog-master.yaml`：註冊 v1.61.0
+- `CommodityPriceBffController.java`：新增 schedule／run-now／browse 四支 passthrough
+- `frontend/src/api/index.js`：`commodityPrice` 命名空間新增 4 支
+- `frontend/src/views/CommodityPriceView.vue`：新增「排程自動匯出」設定卡（開關／時間／範圍／資料夾樹／立即匯出／上次結果）
+- `SchedulePublicBffController.java`：`JOBS` 補「油價金價匯出 每日匯出排程檢查」項目

@@ -158,7 +158,11 @@ export const bffApi = {
         params: { ...(start && { start }), ...(end && { end }) },
         responseType: 'blob',
         timeout: 120000
-      })
+      }),
+    getExportSchedule:    () => api.get('/bff/commodity-price/export/schedule', { skipErrorToast: true }),
+    updateExportSchedule: (data) => api.put('/bff/commodity-price/export/schedule', data, { skipErrorToast: true }),
+    runExportNow:         () => api.post('/bff/commodity-price/export/run-now', null, { timeout: 60000, skipErrorToast: true }),
+    browseExportDir:      (subpath = '') => api.get('/bff/commodity-price/export/browse', { params: { subpath }, skipErrorToast: true })
   },
 
   // ExchangeRate

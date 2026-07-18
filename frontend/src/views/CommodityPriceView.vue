@@ -68,6 +68,78 @@
       </el-table>
     </el-card>
 
+    <!-- 排程自動匯出設定（Requirement 41 / Task 202） -->
+    <el-card style="margin-top:20px">
+      <template #header>
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <span class="section-title">⏱️ 排程自動匯出</span>
+          <div style="display:flex;gap:8px">
+            <el-button size="small" :loading="runningNow" @click="handleRunNow">立即匯出到目錄</el-button>
+            <el-button size="small" type="primary" :loading="savingSchedule" @click="saveSchedule">儲存設定</el-button>
+          </div>
+        </div>
+      </template>
+      <el-form :inline="true" label-width="100px" class="schedule-form">
+        <el-form-item label="啟用每日排程">
+          <el-switch v-model="schedule.enabled" />
+        </el-form-item>
+        <el-form-item label="每日執行時間">
+          <el-time-picker v-model="scheduleTime" format="HH:mm" value-format="HH:mm"
+            placeholder="時:分" style="width:130px" />
+        </el-form-item>
+        <el-form-item label="匯出範圍">
+          <el-select v-model="schedule.rangeMonths" style="width:140px">
+            <el-option v-for="o in rangeMonthOptions" :key="String(o.value)"
+              :label="o.label" :value="o.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="輸出資料夾">
+          <el-input v-model="schedule.outputSubpath" readonly placeholder="（家目錄根）" style="width:240px">
+            <template #append>
+              <el-button @click="openDirPicker">選擇</el-button>
+            </template>
+          </el-input>
+        </el-form-item>
+      </el-form>
+      <div class="schedule-hint">
+        以主機家目錄 <code>{{ schedule.baseDir || '/home/steven' }}</code> 為根（對映主機
+        <code>/Users/steven</code>）。按上方「選擇」開啟檔案總管式選擇器挑選子資料夾；例如選 <code>input</code> →
+        主機 <code>/Users/steven/input</code>。每日於指定時間匯出油價金價為
+        <code>油價金價_{使用者ID}_YYYYMMDD.xlsx</code>（內容同上方「匯出 Excel」）。
+        匯出範圍以<b>執行當日往前推</b>計算，故每日產出會隨時間滾動。
+      </div>
+      <div v-if="schedule.lastRunAt || schedule.lastRunStatus" class="schedule-status">
+        上次執行：{{ schedule.lastRunAt || '—' }}　{{ schedule.lastRunStatus || '' }}
+      </div>
+    </el-card>
+
+    <!-- 輸出資料夾選擇器 -->
+    <el-dialog v-model="dirPicker.visible" title="選擇輸出資料夾" width="560px">
+      <div class="dir-picker-path">
+        目前選擇：<code>{{ dirPicker.baseDir || '/home/steven' }}{{ dirPicker.picked ? '/' + dirPicker.picked : '' }}{{ dirPicker.newSub.trim() ? '/' + dirPicker.newSub.trim() : '' }}</code>
+      </div>
+      <el-tree
+        :key="dirPicker.treeKey"
+        lazy
+        :load="loadDirNode"
+        :props="dirTreeProps"
+        node-key="key"
+        highlight-current
+        :expand-on-click-node="false"
+        :default-expanded-keys="['__root__']"
+        class="dir-tree"
+        @node-click="onDirNodeClick" />
+      <div class="dir-new-sub">
+        <span class="dns-label">新增子資料夾</span>
+        <el-input v-model="dirPicker.newSub" placeholder="（選填）在所選資料夾下新增，寫檔時自動建立"
+          style="width:340px" clearable />
+      </div>
+      <template #footer>
+        <el-button @click="dirPicker.visible = false">取消</el-button>
+        <el-button type="primary" @click="confirmDirPick">確定</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 匯出對話框：指定時間區間，存檔位置由瀏覽器另存對話框決定 -->
     <el-dialog v-model="exportDialog.visible" title="匯出油價金價" width="480px">
       <el-form label-width="90px">
@@ -117,7 +189,7 @@ import {
 } from 'echarts/components'
 import VChart from 'vue-echarts'
 import { ElMessage } from 'element-plus'
-import { bffApi } from '@/api'
+import { bffApi, apiErrorMessage } from '@/api'
 import dayjs from 'dayjs'
 
 use([CanvasRenderer, LineChart, TitleComponent, TooltipComponent, LegendComponent,
@@ -150,7 +222,39 @@ const exportDialog = reactive({ visible: false, range: [] })
 // File System Access API：可讓使用者自選存檔目錄；Safari／舊版瀏覽器沒有，退回一般下載
 const canPickDirectory = typeof window !== 'undefined' && 'showSaveFilePicker' in window
 
-onMounted(fetchData)
+// 排程自動匯出設定（Requirement 41 / Task 202）
+const schedule = reactive({
+  enabled: false, runHour: 8, runMinute: 0, outputSubpath: 'input',
+  rangeMonths: 120, lastRunAt: null, lastRunStatus: null, baseDir: ''
+})
+const scheduleTime = ref('08:00')
+const savingSchedule = ref(false)
+const runningNow = ref(false)
+
+// 全部十年以 120（月）表示而非 null：Element Plus 的 el-select 預設把 null 當成 empty value
+// （DEFAULT_EMPTY_VALUES 含 null），綁 null 會顯示灰色 placeholder 而非「全部十年」，
+// 使用者無法分辨「已選全部十年」與「尚未選擇」。後端 end.minusMonths(120) 與 minusYears(10) 等價，
+// 且 CHECK 允許 1..120，故語意零變動。後端仍保留 null 分支以相容未設定過的舊列。
+const ALL_TEN_YEARS_MONTHS = 120
+const rangeMonthOptions = [
+  { label: '近 1 個月', value: 1 },
+  { label: '近 3 個月', value: 3 },
+  { label: '近 6 個月', value: 6 },
+  { label: '近 1 年', value: 12 },
+  { label: '近 3 年', value: 36 },
+  { label: '近 5 年', value: 60 },
+  { label: '全部十年', value: ALL_TEN_YEARS_MONTHS }
+]
+
+// 輸出資料夾選擇器（檔案總管式樹狀）
+const dirPicker = reactive({ visible: false, baseDir: '', picked: '', newSub: '', treeKey: 0 })
+const dirTreeProps = { label: 'name', isLeaf: 'leaf' }
+
+onMounted(() => {
+  fetchData()
+  // 排程設定與行情各自獨立，並行載入；設定讀取失敗不影響圖表
+  loadSchedule().catch(() => {})
+})
 
 async function fetchData() {
   loading.value = true
@@ -374,6 +478,92 @@ async function saveBlob(blob, filename) {
   return true
 }
 
+// ===== 排程自動匯出 =====
+
+async function loadSchedule() {
+  const s = await bffApi.commodityPrice.getExportSchedule()
+  schedule.enabled = !!s.enabled
+  schedule.runHour = s.runHour ?? 8
+  schedule.runMinute = s.runMinute ?? 0
+  schedule.outputSubpath = s.outputSubpath ?? 'input'
+  // 後端 null（未設定過的舊列）＝全部十年，映射成 120 讓下拉正確顯示
+  schedule.rangeMonths = s.rangeMonths ?? ALL_TEN_YEARS_MONTHS
+  schedule.lastRunAt = s.lastRunAt ?? null
+  schedule.lastRunStatus = s.lastRunStatus ?? null
+  schedule.baseDir = s.baseDir ?? ''
+  scheduleTime.value = `${String(schedule.runHour).padStart(2, '0')}:${String(schedule.runMinute).padStart(2, '0')}`
+}
+
+async function saveSchedule() {
+  savingSchedule.value = true
+  try {
+    const [h, m] = (scheduleTime.value || '08:00').split(':').map(Number)
+    const s = await bffApi.commodityPrice.updateExportSchedule({
+      enabled: schedule.enabled,
+      runHour: h,
+      runMinute: m,
+      outputSubpath: (schedule.outputSubpath || 'input').trim(),
+      rangeMonths: schedule.rangeMonths
+    })
+    schedule.runHour = s.runHour ?? h
+    schedule.runMinute = s.runMinute ?? m
+    schedule.outputSubpath = s.outputSubpath ?? schedule.outputSubpath
+    schedule.rangeMonths = s.rangeMonths ?? ALL_TEN_YEARS_MONTHS
+    schedule.baseDir = s.baseDir ?? schedule.baseDir
+    ElMessage.success('排程設定已儲存')
+  } catch (e) {
+    ElMessage.error(apiErrorMessage(e, '儲存失敗，請稍後再試'))
+  } finally {
+    savingSchedule.value = false
+  }
+}
+
+async function handleRunNow() {
+  runningNow.value = true
+  try {
+    const r = await bffApi.commodityPrice.runExportNow()
+    ElMessage.success(`已匯出到：${r.path}`)
+  } catch (e) {
+    ElMessage.error(apiErrorMessage(e, '立即匯出失敗，請確認目錄與權限'))
+  } finally {
+    runningNow.value = false
+  }
+  loadSchedule().catch(() => {}) // 刷新上次執行資訊，失敗不影響匯出結果
+}
+
+function openDirPicker() {
+  dirPicker.picked = schedule.outputSubpath || ''
+  dirPicker.newSub = ''
+  dirPicker.treeKey++            // 強制 el-tree 重新懶載入 root
+  dirPicker.visible = true
+}
+
+// el-tree 懶載入：level 0 以家目錄為單一 root；其餘列該節點子目錄
+async function loadDirNode(node, resolve) {
+  try {
+    if (node.level === 0) {
+      const res = await bffApi.commodityPrice.browseExportDir('')
+      dirPicker.baseDir = res.baseDir || ''
+      resolve([{ name: res.baseDir || '/', path: '', key: '__root__', leaf: false }])
+      return
+    }
+    const res = await bffApi.commodityPrice.browseExportDir(node.data.path || '')
+    resolve((res.directories || []).map(d => ({ name: d.name, path: d.path, key: d.path, leaf: false })))
+  } catch (e) {
+    resolve([])
+  }
+}
+
+const onDirNodeClick = (data) => { dirPicker.picked = data.path || '' }
+
+function confirmDirPick() {
+  let p = dirPicker.picked || ''
+  const sub = (dirPicker.newSub || '').trim().replace(/^\/+|\/+$/g, '')
+  if (sub) p = p ? `${p}/${sub}` : sub
+  schedule.outputSubpath = p
+  dirPicker.visible = false
+}
+
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
@@ -394,4 +584,13 @@ function downloadBlob(blob, filename) {
 .kpi-sub { font-size: 12px; color: #94a3b8; margin-top: 4px; }
 .chart-note { font-size: 12px; color: #94a3b8; margin-top: 8px; }
 .dialog-note { font-size: 12px; color: #64748b; line-height: 1.6; }
+.schedule-form { margin-bottom: 4px; }
+.schedule-hint { font-size: 12px; color: #94a3b8; line-height: 1.6; }
+.schedule-hint code { background: #f1f5f9; color: #475569; padding: 1px 5px; border-radius: 4px; font-size: 11px; }
+.schedule-status { margin-top: 8px; font-size: 12px; color: #64748b; }
+.dir-picker-path { font-size: 13px; color: #475569; margin-bottom: 10px; }
+.dir-picker-path code { background: #f1f5f9; color: #0f172a; padding: 2px 6px; border-radius: 4px; word-break: break-all; }
+.dir-tree { max-height: 340px; overflow: auto; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px; }
+.dir-new-sub { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+.dir-new-sub .dns-label { font-size: 13px; color: #475569; white-space: nowrap; }
 </style>
