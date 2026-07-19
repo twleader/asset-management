@@ -90,7 +90,8 @@ class TradingRadarRuleEngineTest {
                 TradingRadarRuleEngine.Confirmation.UNAVAILABLE,
                 TradingRadarRuleEngine.InstrumentType.EQUITY,
                 TradingRadarRuleEngine.MarketRegime.NEUTRAL,
-                false));
+                false,
+                null));
         assertNull(stock.score());
         assertEquals(TradingRadarRuleEngine.Action.NO_TRADE, stock.action());
         assertEquals(TradingRadarRuleEngine.CounterTrendState.NONE, stock.counterTrend().state());
@@ -104,8 +105,9 @@ class TradingRadarRuleEngineTest {
                 new BigDecimal("24.0"), new BigDecimal("30.0"),
                 TradingRadarRuleEngine.Confirmation.ABOVE));
 
-        assertEquals(17, stock.score());
-        assertEquals(TradingRadarRuleEngine.Action.EXIT_CANDIDATE, stock.action());
+        assertEquals(37, stock.score());
+        // V5：KD 位置子因子讓超賣得正分，分數由 V4 的 17 升至 37，動作隨之由出場候選降級為減碼候選。
+        assertEquals(TradingRadarRuleEngine.Action.REDUCE_CANDIDATE, stock.action());
         assertEquals(TradingRadarRuleEngine.CounterTrendState.OVERSOLD_WATCH,
                 stock.counterTrend().state());
         assertTrue(stock.counterTrend().risks().stream()
@@ -122,7 +124,9 @@ class TradingRadarRuleEngineTest {
 
         assertEquals(TradingRadarRuleEngine.CounterTrendState.TRIAL_CANDIDATE,
                 stock.counterTrend().state());
-        assertEquals(TradingRadarRuleEngine.Action.REDUCE_CANDIDATE, stock.action());
+        // V5：長線佳（價 > 年線）且 KD 位於低檔，KD 位置子因子給正貢獻，
+        // 分數已不再落在減碼區間——這正是「長線好、短線超賣不該被叫賣」的修正。
+        assertEquals(TradingRadarRuleEngine.Action.HOLD_CAUTION, stock.action());
         assertTrue(stock.counterTrend().risks().stream()
                 .anyMatch(risk -> risk.contains("小額試單")));
     }
@@ -169,9 +173,9 @@ class TradingRadarRuleEngineTest {
                 TradingRadarRuleEngine.InstrumentType.BOND,
                 TradingRadarRuleEngine.MarketRegime.RISK_OFF));
 
-        assertEquals(98, equity.score());
+        assertEquals(82, equity.score());
         assertEquals(TradingRadarRuleEngine.Action.HOLD, equity.action());
-        assertEquals(100, bond.score());
+        assertEquals(90, bond.score());
         assertEquals(TradingRadarRuleEngine.Action.ADD_CANDIDATE, bond.action());
         assertTrue(bond.reasons().stream().anyMatch(reason -> reason.contains("資產類別為債券")));
     }
@@ -189,7 +193,7 @@ class TradingRadarRuleEngineTest {
 
         assertNull(equity.score());
         assertEquals(TradingRadarRuleEngine.Action.NO_TRADE, equity.action());
-        assertEquals(100, bond.score());
+        assertEquals(90, bond.score());
         assertEquals(TradingRadarRuleEngine.Action.ADD_CANDIDATE, bond.action());
     }
 
@@ -217,7 +221,8 @@ class TradingRadarRuleEngineTest {
                 TradingRadarRuleEngine.MarketRegime.RISK_ON, false)).score();
         int staleScore = engine.evaluateStock(moderateStock(
                 TradingRadarRuleEngine.MarketRegime.RISK_ON, true)).score();
-        assertEquals(freshScore - 8, staleScore);
+        // V5 的 RISK_ON 貢獻由權重決定，不再是固定 8 分；此處斷言行為（stale 不得加分）而非寫死差值。
+        assertTrue(staleScore < freshScore);
 
         // RISK_OFF 的扣分不因 stale 放寬。
         assertEquals(
@@ -225,6 +230,113 @@ class TradingRadarRuleEngineTest {
                         TradingRadarRuleEngine.MarketRegime.RISK_OFF, false)).score(),
                 engine.evaluateStock(moderateStock(
                         TradingRadarRuleEngine.MarketRegime.RISK_OFF, true)).score());
+    }
+
+    // ─── V5 新增行為（Requirement 43 修訂／Requirement 47）──────────────────────────
+
+    /** 一檔各項技術面全綠的債券 ETF，只有 KD 過熱的差別。對應 00719B 的實測情境。 */
+    private TradingRadarRuleEngine.StockInput bondWithKd(
+            String k, String d, java.math.BigDecimal fxPercentile) {
+        return new TradingRadarRuleEngine.StockInput(
+                false,
+                new BigDecimal("31.68"),
+                new BigDecimal("0.25"),
+                new BigDecimal("0.25"),
+                new TradingRadarRuleEngine.Indicators(
+                        new BigDecimal("31.30"), new BigDecimal("31.01"), new BigDecimal("30.32"),
+                        new BigDecimal(k), new BigDecimal(d)),
+                new BigDecimal("50"),
+                new BigDecimal("50"),
+                TradingRadarRuleEngine.Confirmation.ABOVE,
+                TradingRadarRuleEngine.Confirmation.ABOVE,
+                TradingRadarRuleEngine.Confirmation.ABOVE,
+                TradingRadarRuleEngine.InstrumentType.BOND,
+                TradingRadarRuleEngine.MarketRegime.NEUTRAL,
+                false,
+                fxPercentile);
+    }
+
+    @Test
+    void kdOverheat_vetoesBuyEvenWhenAllTrendSignalsAreGreen() {
+        // 00719B 的實測輸入：站上月/季/年線且三個兩日確認皆 ABOVE，但 K=90.76、D=86.01。
+        var overheated = engine.evaluateStock(bondWithKd("90.76", "86.01", new BigDecimal("83.6")));
+        assertNotEquals(TradingRadarRuleEngine.Action.BUY_CANDIDATE, overheated.action(),
+                "KD 均值 88.4 已達超買區，不得產生買進候選");
+        assertTrue(overheated.risks().stream().anyMatch(r -> r.contains("超買區")));
+
+        // 同樣的均線幾何，KD 不過熱時買進閘門應該打開——證明擋下來的是過熱而非別的條件。
+        var normal = engine.evaluateStock(bondWithKd("51.85", "49.07", new BigDecimal("83.6")));
+        assertEquals(TradingRadarRuleEngine.Action.BUY_CANDIDATE, normal.action());
+        assertTrue(normal.score() > overheated.score(), "過熱標的的分數應低於不過熱者");
+    }
+
+    @Test
+    void expensiveFx_vetoesBuyForForeignCurrencyAssets() {
+        var cheap = engine.evaluateStock(bondWithKd("51.85", "49.07", new BigDecimal("20")));
+        var expensive = engine.evaluateStock(bondWithKd("51.85", "49.07", new BigDecimal("95")));
+
+        assertEquals(TradingRadarRuleEngine.Action.BUY_CANDIDATE, cheap.action());
+        assertNotEquals(TradingRadarRuleEngine.Action.BUY_CANDIDATE, expensive.action(),
+                "換匯位於五年期第 95 百分位時不得產生買進候選");
+        assertTrue(cheap.score() > expensive.score(), "換匯便宜時分數應高於昂貴時");
+    }
+
+    @Test
+    void fxPercentile_isNullForTwdAssets_andWeightIsRedistributed() {
+        // 台幣資產傳 null，該因子的權重由其餘因子吸收，不得以 0 分（中性）充當。
+        var twdAsset = engine.evaluateStock(bondWithKd("51.85", "49.07", null));
+        var fxNeutral = engine.evaluateStock(bondWithKd("51.85", "49.07", new BigDecimal("50")));
+        // 「不適用」與「中性」在加權正規化下並不等價，這正是重分配與補 0 的差別：
+        // 分位 50 的貢獻為 0 但權重仍進分母，會稀釋其餘正貢獻；null 則把權重讓給其他因子。
+        // 故其他因子整體為正時，無曝險者的分數必然高於「被塞了一個 0」的版本。
+        assertTrue(twdAsset.score() > fxNeutral.score(),
+                "無匯率曝險應走權重重分配，不得等同於給 0 分的中性值");
+
+        var fxExpensiveScore = engine.evaluateStock(
+                bondWithKd("51.85", "49.07", new BigDecimal("95"))).score();
+        assertTrue(twdAsset.score() > fxExpensiveScore,
+                "無匯率曝險的標的不應被匯率拖累");
+    }
+
+    @Test
+    void scoreNeverSaturates_evenOnExtremeInputs() {
+        // V4 的缺陷：均線六項全滿即 108 分，超出 clamp 上限，使 KD 過熱的 −3 完全失效
+        //（實測 00719B 原始分 110、00697B 113）。V5 正規化後任何輸入都落在 [0,100] 且不觸邊界。
+        var allPositive = engine.evaluateStock(bondWithKd("99", "80", new BigDecimal("0")));
+        var allNegative = engine.evaluateStock(new TradingRadarRuleEngine.StockInput(
+                false,
+                new BigDecimal("1"),
+                new BigDecimal("-9"),
+                new BigDecimal("-9"),
+                new TradingRadarRuleEngine.Indicators(
+                        new BigDecimal("2"), new BigDecimal("2"), new BigDecimal("2"),
+                        new BigDecimal("5"), new BigDecimal("60")),
+                new BigDecimal("50"),
+                new BigDecimal("50"),
+                TradingRadarRuleEngine.Confirmation.BELOW,
+                TradingRadarRuleEngine.Confirmation.BELOW,
+                TradingRadarRuleEngine.Confirmation.BELOW,
+                TradingRadarRuleEngine.InstrumentType.EQUITY,
+                TradingRadarRuleEngine.MarketRegime.RISK_OFF,
+                false,
+                new BigDecimal("99")));
+
+        assertTrue(allPositive.score() >= 0 && allPositive.score() <= 100);
+        assertTrue(allNegative.score() >= 0 && allNegative.score() <= 100);
+        assertTrue(allNegative.score() < allPositive.score());
+        // 關鍵：KD 在滿分區仍能改變分數（V4 下這裡兩者都會是 100）
+        var sameGeometryLowerKd = engine.evaluateStock(bondWithKd("40", "38", new BigDecimal("0")));
+        assertNotEquals(allPositive.score(), sameGeometryLowerKd.score(),
+                "KD 必須能在均線全綠時仍影響分數，否則就是 V4 的飽和問題重演");
+    }
+
+    @Test
+    void kdPosition_separatesOverboughtFromOversoldReversal() {
+        // 同樣是 K>D（動能為正），但高檔與低檔的意義相反，分數必須有明顯差距。
+        var highReversal = engine.evaluateStock(bondWithKd("90.76", "86.01", new BigDecimal("50")));
+        var lowReversal = engine.evaluateStock(bondWithKd("26.10", "20.70", new BigDecimal("50")));
+        assertTrue(lowReversal.score() > highReversal.score(),
+                "低檔轉強（跌深反彈）的分數應高於高檔轉強（漲多了）");
     }
 
     /** 未觸頂的中性標的：50 −8(<MA20) +12 +15 −5(conf20 BELOW) +8 +10 +5(K>D) = 87。 */
@@ -245,7 +357,8 @@ class TradingRadarRuleEngineTest {
                 TradingRadarRuleEngine.Confirmation.ABOVE,
                 TradingRadarRuleEngine.InstrumentType.EQUITY,
                 regime,
-                marketStale);
+                marketStale,
+                null);
     }
 
     @Test
@@ -278,7 +391,8 @@ class TradingRadarRuleEngineTest {
                 TradingRadarRuleEngine.Confirmation.ABOVE,
                 TradingRadarRuleEngine.InstrumentType.EQUITY,
                 TradingRadarRuleEngine.MarketRegime.RISK_OFF,
-                false);
+                false,
+                null);
         assertEquals(TradingRadarRuleEngine.CounterTrendState.TRIAL_CANDIDATE,
                 engine.evaluateStock(input).counterTrend().state());
 
@@ -298,7 +412,8 @@ class TradingRadarRuleEngineTest {
                 TradingRadarRuleEngine.Confirmation.ABOVE,
                 TradingRadarRuleEngine.InstrumentType.EQUITY,
                 TradingRadarRuleEngine.MarketRegime.RISK_OFF,
-                false);
+                false,
+                null);
         assertEquals(TradingRadarRuleEngine.CounterTrendState.OVERSOLD_WATCH,
                 engine.evaluateStock(stillFalling).counterTrend().state());
     }
@@ -345,7 +460,8 @@ class TradingRadarRuleEngineTest {
                 TradingRadarRuleEngine.Confirmation.ABOVE,
                 instrumentType,
                 regime,
-                marketStale);
+                marketStale,
+                null);
     }
 
     private TradingRadarRuleEngine.StockInput counterTrendStock(
@@ -374,7 +490,8 @@ class TradingRadarRuleEngineTest {
                 annualConfirmation,
                 TradingRadarRuleEngine.InstrumentType.EQUITY,
                 TradingRadarRuleEngine.MarketRegime.RISK_OFF,
-                false);
+                false,
+                null);
     }
 
     private List<BigDecimal> closesDescending(int size, int start) {
