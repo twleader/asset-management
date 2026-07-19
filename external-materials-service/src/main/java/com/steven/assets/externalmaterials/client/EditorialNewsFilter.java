@@ -5,6 +5,7 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * 台灣中文新聞編輯政策過濾（Task 199）：對「混合型」台灣一般新聞 feed（自由時報 財經／政治／國際、經濟日報）
@@ -185,6 +186,43 @@ public final class EditorialNewsFilter {
             // 社會獵奇 / 動物
             "黑熊", "闖民宅");
 
+    // ===== 財經軼事／都市傳說（Task 221）：唯一凌駕 FINANCE 的否決集 =====
+    // 「68歲退休翁嫌定期定額賺太慢…下場曝光」這類個人理財軼事／勵志故事，標題必帶財經詞（股／定期定額／
+    // 半導體股）故在規則1 就被 KEEP:finance 攔下，後面任何否決規則都沒有機會發言——**這是本專案第一條、
+    // 也是唯一一條放在 FINANCE 之前的規則**。它對判斷股市走向沒有資訊量，卻會佔用今日股市分析的 prompt 額度。
+    //
+    // 觸發需**同時**滿足「N歲」與（身分稱謂｜釣魚詞），刻意設計得極窄：語料 2005 則中含「N歲」者 43 則、
+    // 命中 34 則，且全語料命中總數亦為 34——代表不含「N歲」的標題完全不受影響，爆炸半徑為零。
+    // **刻意不收裸的「退休」**（會誤殺「勞工65歲退休可請領月退金」這類退休政策），只收 退休翁／退休師 等複合詞。
+    // 實測存活的必保案例：青安3.0 房貸政策（未滿50歲）、國泰世華董座人事（81歲資深老將）、
+    // 巴菲特給投資人忠告（95歲）、勞退新制（65歲退休可請領）、退休金試算（60歲退休）。
+    private static final Pattern AGE = Pattern.compile("[0-9]+歲");
+    private static final Set<String> ANECDOTE_ROLE = set(
+            "翁", "婦", "大叔", "大嬸", "阿公", "阿嬤", "阿北", "少年", "少女", "女孩", "男孩", "人妻",
+            "老爸", "老母", "寶媽", "童", "高管", "新貴",
+            "退休翁", "退休婦", "退休師", "退休族", "退休男", "退休女");
+    private static final Set<String> ANECDOTE_BAIT = set(
+            "曝光", "後悔", "崩潰", "心酸", "驚見", "翻身", "賺翻", "狂賺", "爽拿", "親吐", "心路", "秘訣",
+            "太慘", "悲嘆", "碰壁", "躺平", "財富自由", "逆襲", "大公開", "致命傷", "心碎", "超狂",
+            "神助攻", "爆款", "一劫");
+
+    // ===== 社會獵奇／犯罪獄政／榮典（Task 221）：置於 FINANCE 之後、其他所有規則之前 =====
+    // 「防囚犯越獄！以色列修法 鱷魚可部署監獄周邊」原本命中 GEO_REGION(以色列)+GEO_TRIGGER(部署) 被判
+    // KEEP:market-geopolitics。**刻意不從 GEO_TRIGGER 移除「部署」**——對抗稽核實測移除會誤殺
+    // 「南韓同意部署薩德系統」「伊朗在荷姆茲海峽部署新型快艇」等真正影響市場的地緣政治（薩德曾重創韓股、
+    // 荷姆茲為油運咽喉），且語料中「部署」有效樣本僅 1 則，不足以支撐移除。改以本否決集在規則4 之前攔下。
+    //
+    // 詞集刻意極保守。以下候選經語料實測會誤殺，**刻意排除**（勿再加入）：
+    // 判刑／監禁／起訴／收押／交保／法院／檢方／刑事（打到「聯準會前顧問說謊遭判38月監禁」「內線交易
+    // 張國華1.2億交保」「國際刑事法院」「立法院」）、領照／換發（台灣媒體主流用法是建照／使照領照量＝
+    // 營建股房市領先指標）、車禍（打到「馬斯克自駕計程車連環車禍遭監理機關調查」）、推擠（台媒報導重大
+    // 法案闖關的標準寫法，如「立法院爆發推擠 藍白強行三讀財劃法」）、罹難／翻覆／空難（重大天災空難有
+    // 供應鏈保險航空股連帶）、走私（打到「防中國走私輝達晶片」）。
+    private static final Set<String> SOCIAL_ODDITY = set(
+            "越獄", "囚犯", "監獄", "獄方", "獄警", "典獄",
+            "鱷魚", "蟒蛇", "動物園",
+            "追晉", "褒揚令");
+
     /** 過濾一批新聞，只留符合編輯政策者。 */
     public static List<NewsRow> retain(List<NewsRow> rows) {
         List<NewsRow> out = new ArrayList<>(rows.size());
@@ -215,8 +253,16 @@ public final class EditorialNewsFilter {
     public static String trace(String text) {
         String t = text == null ? "" : text;
 
-        // 1) 財經一律保留（最先判、涵蓋最廣）＝生活/軟文/體育的唯一豁免（「影響股市大盤」）
+        // 0) 財經軼事／都市傳說否決（Task 221）：**唯一凌駕 FINANCE 的規則**。個人理財軼事必帶財經詞，
+        //    不先於財經判定就永遠攔不到；觸發需同時滿足「N歲」＋（身分稱謂｜釣魚詞），爆炸半徑為零。
+        if (isAnecdote(t)) return "DROP:anecdote";
+
+        // 1) 財經一律保留（涵蓋最廣）＝生活/軟文/體育/社會獵奇的唯一豁免（「影響股市大盤」）
         if (containsAny(t, FINANCE)) return "KEEP:finance";
+
+        // 1b) 社會獵奇／犯罪獄政／榮典否決（Task 221）：緊接財經豁免之後、其他所有規則之前，
+        //     才攔得到原本在規則4 被誤判為地緣政治的「以色列…鱷魚可部署監獄周邊」。
+        if (containsAny(t, SOCIAL_ODDITY)) return "DROP:social-oddity";
 
         // 2) 全世界生活／消費／娛樂／體育軟文否決——除非上方已判為財經，否則一律濾除；政治/中國/地緣/城市白名單皆不救回
         if (containsAny(t, LIFESTYLE)) return "DROP:lifestyle";
@@ -247,6 +293,12 @@ public final class EditorialNewsFilter {
 
         // 9) 其餘：非財經、非指定政治／地方 一般新聞（社會等）＝濾除
         return "DROP:non-finance-general";
+    }
+
+    /** 財經軼事／都市傳說判定（Task 221）：需同時命中「N歲」與（身分稱謂｜釣魚詞）。 */
+    private static boolean isAnecdote(String t) {
+        if (!AGE.matcher(t).find()) return false;
+        return containsAny(t, ANECDOTE_ROLE) || containsAny(t, ANECDOTE_BAIT);
     }
 
     private static boolean containsAny(String text, Set<String> tokens) {
