@@ -172,9 +172,17 @@
           <template #default="{ row }">
             <div class="stock-code">{{ row.stockCode }}</div>
             <div class="stock-name">{{ row.stockName }}</div>
-            <div v-if="row.assetClass === 'BOND' || row.distributionAdjusted" class="stock-meta">
+            <div v-if="row.assetClass === 'BOND' || row.distributionAdjusted || row.fxPercentile != null" class="stock-meta">
               <el-tag v-if="row.assetClass === 'BOND'" size="small" type="info" effect="plain">債券</el-tag>
               <el-tag v-if="row.distributionAdjusted" size="small" type="success" effect="plain">還原權息</el-tag>
+              <el-tooltip
+                v-if="row.fxPercentile != null"
+                placement="top"
+                :content="fxTooltip(row)">
+                <el-tag size="small" :type="fxTagType(row.fxPercentile)" effect="plain">
+                  {{ row.underlyingCurrency }} {{ Math.round(row.fxPercentile) }}%
+                </el-tag>
+              </el-tooltip>
             </div>
           </template>
         </el-table-column>
@@ -507,6 +515,30 @@ async function saveNotification() {
 function goToNotificationSettings() {
   notificationVisible.value = false
   router.push('/settings/notifications')
+}
+
+/**
+ * 匯率分位的標籤配色：越貴越警示。
+ * 這檔標的以台幣交易但持有外幣資產，台幣報價 ≈ 底層外幣價 × 匯率，
+ * 故「站上均線」有相當部分量到的是匯率而非標的本身（Requirement 47）。
+ */
+function fxTagType(pct) {
+  if (pct == null) return 'info'
+  if (pct >= 90) return 'danger'
+  if (pct >= 65) return 'warning'
+  if (pct <= 35) return 'success'
+  return 'info'
+}
+
+function fxTooltip(row) {
+  const pct = Math.round(row.fxPercentile)
+  const cur = row.underlyingCurrency
+  let verdict = '換匯成本處於中性區間'
+  if (pct >= 90) verdict = '換匯過貴，已否決買進建議'
+  else if (pct >= 65) verdict = '換匯偏貴，已反映於分數'
+  else if (pct <= 35) verdict = '換匯相對划算'
+  return `${cur} 兌台幣位於五年期第 ${pct} 百分位——${verdict}。`
+    + `本檔以台幣交易但持有 ${cur} 資產，台幣報價同時受標的與匯率驅動。`
 }
 
 function fmtNumber(value, digits = 2) {

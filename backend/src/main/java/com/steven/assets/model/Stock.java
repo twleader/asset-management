@@ -43,4 +43,13 @@ public class Stock {
      */
     @Column(name = "bond_term", length = 20)
     private String bondTerm;
+
+    /**
+     * 底層資產幣別 override（Requirement 47）：TWD / USD / GBP…
+     * 非空時決定匯率曝險；null 時依 market 推斷（美股→USD、英股→GBP、台股→TWD）。
+     * 台幣計價但持有外幣資產的 ETF（如 00679B/00697B/00719B）必須顯式標記為 USD，
+     * 否則匯率因子會誤判為無曝險。不得以名稱字串比對判斷（更名時會靜默失效）。
+     */
+    @Column(name = "underlying_currency", length = 10)
+    private String underlyingCurrency;
 }
