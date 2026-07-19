@@ -6,7 +6,7 @@ import java.util.List;
 /**
  * 今日交易雷達（Requirement 43）純讀 response。
  *
- * <p>所有分數／建議皆為 {@code TW_RULES_V3} 即時計算的衍生值，不入庫；
+ * <p>所有分數／建議皆為 {@code TW_RULES_V4} 即時計算的衍生值，不入庫；
  * {@code score=null} 代表必要資料不足，不以 0 分冒充有效判斷。</p>
  */
 public final class TradingRadarDto {
@@ -26,6 +26,8 @@ public final class TradingRadarDto {
             String regimeLabel,
             Integer score,
             boolean dataComplete,
+            /** 大盤最新完成日 K 非當前交易日：買進閘門關閉、不採計 RISK_ON 加分（Task 217.1）。 */
+            boolean stale,
             String asOfDate,
             BigDecimal price,
             BigDecimal changePercent,

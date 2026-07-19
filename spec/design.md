@@ -3328,6 +3328,83 @@ setting `initialized=false` 時，第一次評估只寫入目前 action／counte
 
 ---
 
+## Requirement 43／44 修訂（Task 217／218）：判斷邏輯強化與通知抖動抑制（`TW_RULES_V4`）
+
+### 問題根因
+
+三個獨立缺陷，共同根因是「即時值與完成日值混用時缺少新鮮度與穩定性的把關」：
+
+1. **大盤 regime 盤中恆為前一交易日**。`buildMarket()` 只讀 `twse_index_daily_history`（收盤後才入庫），而 `buildStock()` 走 Redis 即時價。`0000/台股` 在 `StockSourceQuery` 被明確排除於即時抓價之外，Redis 內 `price:index:台股` 只是「有哪些代號有 cache」的 SET，**不存在大盤即時價**。故此缺陷無法以「改讀即時來源」修復，只能以新鮮度閘門處理。
+2. **逆勢升級用盤中漲跌幅判定止跌**。`stabilized = changePercent >= 0` 是逆勢軌唯一會隨盤中變動的判定項（`lowKd`／`goldenCross` 皆來自不含 live 的完成日序列），零交叉造成逐 tick 翻轉。
+3. **通知轉入判斷無去抖、無上限、無冷卻**，且暫時性失敗被寫入 baseline。
+
+### 大盤新鮮度閘門
+
+`MarketState` 增加 `stale`：以既有交易日曆解析出「當前台股交易日」（非交易日則取最近一個交易日），與 `rows.get(0).getTradingDate()` 比對，不等即為 stale。傳入 `StockInput` 後由規則引擎處理：
+
+| 情境 | RISK_ON +8 | 買進閘門 | RISK_OFF −15 與 veto |
+|---|---|---|---|
+| 大盤新鮮 | 給 | 依原規則 | 生效 |
+| 大盤 stale | **不給** | **一律關閉** | **仍生效** |
+
+不對稱是刻意的：新鮮度不足時只收緊、不放寬。`DATA_INCOMPLETE` 的既有全域 veto 不變；債券（`InstrumentType.BOND`）本就不套用大盤加減分與買進閘門，stale 對其無影響。
+
+### 逆勢「停止續跌」改基準
+
+`StockInput` 增加 `completedChangePercent`（最近一根完成日 K 相對前一根的漲跌幅，取自還原後序列以與其他逆勢條件同價基）。`evaluateCounterTrend` 的 `stabilized` 改讀此值。盤中即時漲跌幅仍供顯示與「單日漲跌幅扣分」使用，不影響逆勢升級。此後逆勢狀態在盤中為常數，只在完成日 K 變動時改變。
+
+### 降級旗標
+
+`MarketSummary`／`StockDecision` 增加 `degraded`：僅在 `catch` 路徑為 true，代表「讀取失敗」；「資料量不足」（歷史不足 241 根等）走既有 `dataComplete=false`，兩者語意分離。通知鏈只跳過 `degraded`，不跳過正常的資料不足。
+
+### 通知去抖、上限與冷卻
+
+`TradingRadarNotificationTransition` 由「單次比對」改為「持穩計數」：
+
+```text
+（下列每「輪」＝一次實際評估，盤中約 2 分鐘一輪，非 2 秒）
+候選狀態 == 上次候選狀態  → pendingCount++
+候選狀態 != 上次候選狀態  → pendingCount = 1，改記新候選
+pendingCount >= N(=3) 且 候選 != baseline 且 候選 ∈ 已選狀態 → 轉入成立
+轉入成立 → 檢查每日上限與冷卻 → 通過才 enqueue；baseline 一律更新
+```
+
+新增欄位持久化於 `trading_radar_notification_setting`（changeset `v1.67.0`）：`pending_action`／`pending_action_count`／`pending_counter_trend`／`pending_counter_trend_count`、`last_notified_at`、`daily_notify_date`／`daily_notify_count`。持久化而非記憶體，確保 business 容器重建後不重置（否則重建即可繞過上限）。每日計數以台北時區交易日為界。
+
+門檻值（N=3、每日每狀態 1 封、每 setting 每日 4 封、冷卻 30 分）集中為具名常數，供未來移入設定頁。
+
+### 單一節拍：評估與派送同輪（Task 220）
+
+```text
+@Scheduled(fixedDelay = 2s)  TradingRadarNotificationService.runCycle()   ← 唯一計時器
+   ├─ self.getObject().flushEvaluations()   @Transactional（經 proxy，自呼叫會繞過 AOP）
+   │     └─ 逐 setting 評估 → transition → 持久化 baseline → dispatcher.enqueue()
+   └─ dispatcher.flush()                    交易外：drain → 依收件人分組 → 各寄一封
+```
+
+`Dispatcher.flush()` 移除 `@Scheduled(10s)`。理由是**競爭**而非效能：兩個獨立計時器下，派送可能在評估尚未 enqueue 完成時 drain，使同一輪通知被拆成多封信。改為同輪串接後，一輪評估產生的全部通知必然在同一個 batch 內分組。
+
+派送刻意置於交易之外：`flushEvaluations` 為 `@Transactional`，若把 SMTP I/O 納入會撐長交易，且交易回滾時信已寄出、下一輪會重寄。`runCycle` 本身不標 `@Transactional`，並以 `ObjectProvider<TradingRadarNotificationService>` 取得自身 proxy 呼叫交易方法（同類自呼叫不會套用 `@Transactional`）；ObjectProvider 為延遲解析，不造成建構期循環依賴。兩段各自 try/catch，任一失敗不影響另一段與既有價格 SSE。
+
+**評估頻率的正確理解**：2 秒是「價格事件抵達後的排空節拍」，佇列為空即直接 return；真正的評估頻率由 `PricePoller` 台股 cron `0 0/2 9-13`（每 2 分鐘）決定。設計去抖次數 N 時須以 2 分鐘為單位換算。
+
+### 交易時段閘門
+
+`queueEvaluation` 先問既有交易日曆：非台股交易日、或不在交易時段內，直接 return。盤後收盤校正（`writeVerifiedClose`）與休市同步（`syncClosedFromDb`）同樣會 publish `price-update`，此閘門一併擋掉。既有到價警示與 SSE 行為不受影響（本閘門只加在雷達通知入口）。
+
+### 還原權息長窗偏誤：刻意保留並揭露
+
+back-adjustment 等同總報酬序列，對高配息標的在市價不動時仍呈上升，使長窗均線位置分偏多。取消還原會讓除息日回到假跌破（V3 修正的原始問題），故**保留還原**，改以揭露處理：`StockDecision` 增加 `distributionAdjustedYieldPct`＝`(1 − 最舊列 scale) × 100`，即該視窗內的累積還原幅度，前端於「還原權息」tag tooltip 呈現。此欄為純衍生值、不入庫。
+
+### 驗證重點
+
+- `TradingRadarRuleEngineTest`：stale 時不給 RISK_ON 加分且關閉買進閘門、stale 時 RISK_OFF 仍 veto、逆勢 `stabilized` 改讀完成日漲跌幅後盤中不翻轉。
+- `TradingRadarNotificationTransitionTest`：未達 N 次不寄且不改 baseline、達 N 次寄一次、候選中途改變則計數重來、degraded 輪次完全跳過。
+- 每日上限／冷卻：以注入的固定時鐘測試跨日重置與冷卻期內不寄。
+- 交易時段閘門：非交易日與盤後時間 `queueEvaluation` 不入列。
+
+---
+
 ## Requirement 45（Task 216）：股市大盤指數日線 Excel 匯出（開/高/低/收）與排程自動匯出
 
 結構比照 R41／R42（**全域公開行情 ＋ per-user 排程設定**），以下只記差異。

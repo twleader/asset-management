@@ -15,7 +15,7 @@ import java.util.List;
 @Component
 public class TradingRadarRuleEngine {
 
-    public static final String RULE_VERSION = "TW_RULES_V3";
+    public static final String RULE_VERSION = "TW_RULES_V4";
 
     public enum Confirmation { ABOVE, BELOW, MIXED, UNAVAILABLE }
     public enum MarketRegime { RISK_ON, NEUTRAL, RISK_OFF, DATA_INCOMPLETE }
@@ -50,10 +50,17 @@ public class TradingRadarRuleEngine {
             Confirmation ma240Confirmation
     ) {}
 
+    /**
+     * @param changePercent          盤中即時漲跌幅：供顯示與「單日漲跌幅扣分」使用。
+     * @param completedChangePercent 最近一根完成日 K 的漲跌幅：供逆勢「停止續跌」判定，
+     *                               盤中為常數，避免零交叉造成逐 tick 翻轉（Task 217.3）。
+     * @param marketStale            大盤資料非當前交易日：只收緊不放寬（Task 217.2）。
+     */
     public record StockInput(
             boolean held,
             BigDecimal price,
             BigDecimal changePercent,
+            BigDecimal completedChangePercent,
             Indicators indicators,
             BigDecimal previousK,
             BigDecimal previousD,
@@ -61,7 +68,8 @@ public class TradingRadarRuleEngine {
             Confirmation ma60Confirmation,
             Confirmation ma240Confirmation,
             InstrumentType instrumentType,
-            MarketRegime marketRegime
+            MarketRegime marketRegime,
+            boolean marketStale
     ) {}
 
     public record MarketResult(
@@ -181,9 +189,15 @@ public class TradingRadarRuleEngine {
 
         if (equityMarketApplies(input)) {
             if (input.marketRegime() == MarketRegime.RISK_ON) {
-                score += 8;
-                reasons.add("大盤為 RISK_ON，市場環境允許尋找多方機會。 ");
+                // stale 時不給多方加分：大盤停在前一交易日，盤中崩跌看不出來（Task 217.2）。
+                if (input.marketStale()) {
+                    risks.add("大盤資料仍停在前一交易日，暫不採計 RISK_ON 的多方加分。 ");
+                } else {
+                    score += 8;
+                    reasons.add("大盤為 RISK_ON，市場環境允許尋找多方機會。 ");
+                }
             } else if (input.marketRegime() == MarketRegime.RISK_OFF) {
+                // 扣分與 veto 不因 stale 放寬：新鮮度不足時只收緊。
                 score -= 15;
                 risks.add("大盤為 RISK_OFF，禁止產生買進或加碼候選。 ");
             }
@@ -228,7 +242,11 @@ public class TradingRadarRuleEngine {
                 && input.previousD() != null
                 && input.previousK().compareTo(input.previousD()) <= 0
                 && k.compareTo(d) > 0;
-        boolean stabilized = input.changePercent().compareTo(BigDecimal.ZERO) >= 0;
+        // 「停止續跌」以最近一根完成日 K 判定：盤中漲跌幅在 0% 附近零交叉會讓狀態逐 tick 翻轉（Task 217.3）。
+        BigDecimal stabilityBasis = input.completedChangePercent() != null
+                ? input.completedChangePercent()
+                : input.changePercent();
+        boolean stabilized = stabilityBasis.compareTo(BigDecimal.ZERO) >= 0;
 
         if (lowKd && goldenCross && stabilized) {
             reasons.add("K、D 皆低於 20，且 K 由前一期不高於 D 轉為 K>D，形成低檔黃金交叉。 ");
@@ -260,7 +278,10 @@ public class TradingRadarRuleEngine {
     }
 
     private Action actionFor(StockInput input, int score) {
-        boolean buyGate = (!equityMarketApplies(input) || input.marketRegime() != MarketRegime.RISK_OFF)
+        // 大盤 stale 時一律關閉買進閘門（債券不套大盤閘門，故不受影響）。
+        boolean marketAllowsBuy = !equityMarketApplies(input)
+                || (input.marketRegime() != MarketRegime.RISK_OFF && !input.marketStale());
+        boolean buyGate = marketAllowsBuy
                 && input.ma20Confirmation() == Confirmation.ABOVE
                 && input.ma60Confirmation() == Confirmation.ABOVE;
         if (score >= 75 && buyGate) {
