@@ -22,9 +22,12 @@
         <div class="card-head">
           <div>
             <span class="section-title">台股大盤風險</span>
-            <el-tag size="small" effect="plain" type="info" class="rule-tag">{{ radar.ruleVersion || 'TW_RULES_V4' }}</el-tag>
+            <el-tag size="small" effect="plain" type="info" class="rule-tag">{{ radar.ruleVersion || 'TW_RULES_V6' }}</el-tag>
           </div>
-          <span class="as-of">完成日 K：{{ market.asOfDate || '資料不足' }}</span>
+          <div class="as-of-group">
+            <span class="as-of">完成日 K：{{ market.asOfDate || '資料不足' }}</span>
+            <span v-if="market.intraday" class="as-of live-as-of">即時更新：{{ fmtTime(market.liveUpdatedAt) }}</span>
+          </div>
         </div>
       </template>
 
@@ -34,8 +37,8 @@
         type="warning"
         show-icon
         :closable="false"
-        title="大盤為前一交易日資料，今日買進訊號暫停"
-        description="大盤指數只有收盤後才入庫，盤中無即時值；為避免以昨日的偏多環境替今日的即時股價背書，此期間不採計大盤加分，也不產生買進／加碼候選。偏空環境的扣分與限制仍照常生效。" />
+        title="大盤資料非最新，今日買進訊號暫停"
+        description="本次未能取得即時大盤點位，已退回前一交易日資料；為避免以昨日的環境替今日背書，此期間不採計大盤加分，也不產生買進／加碼候選。偏空環境的扣分與限制仍照常生效。" />
 
       <div class="market-layout">
         <div class="regime-panel">
@@ -337,7 +340,7 @@ import { useRouter } from 'vue-router'
 const router = useRouter()
 const loading = ref(false)
 const refreshing = ref(false)
-const radar = ref({ market: {}, stocks: [], skippedNonTwStocks: 0, ruleVersion: 'TW_RULES_V4' })
+const radar = ref({ market: {}, stocks: [], skippedNonTwStocks: 0, ruleVersion: 'TW_RULES_V6' })
 const notificationVisible = ref(false)
 const notificationLoading = ref(false)
 const notificationSaving = ref(false)
@@ -520,6 +523,13 @@ function fmtPct(value) {
   return `${n > 0 ? '+' : ''}${n.toFixed(2)}%`
 }
 
+function fmtTime(value) {
+  if (!value) return '—'
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return '—'
+  return d.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
 function priceColor(value) {
   const n = Number(value)
   if (!Number.isFinite(n) || n === 0) return '#64748b'
@@ -604,6 +614,7 @@ onUnmounted(() => {
 .section-title { font-size: 17px; font-weight: 700; color: #0f172a; }
 .rule-tag { margin-left: 9px; }
 .as-of, .stock-count { color: #64748b; font-size: 12px; }
+.as-of-group { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
 .stock-count { margin-left: 8px; }
 .market-layout { display: grid; grid-template-columns: 230px 1fr; gap: 22px; align-items: stretch; }
 .regime-panel {

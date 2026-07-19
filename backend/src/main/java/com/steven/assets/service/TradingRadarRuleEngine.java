@@ -15,7 +15,7 @@ import java.util.List;
 @Component
 public class TradingRadarRuleEngine {
 
-    public static final String RULE_VERSION = "TW_RULES_V4";
+    public static final String RULE_VERSION = "TW_RULES_V6";
 
     public enum Confirmation { ABOVE, BELOW, MIXED, UNAVAILABLE }
     public enum MarketRegime { RISK_ON, NEUTRAL, RISK_OFF, DATA_INCOMPLETE }

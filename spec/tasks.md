@@ -260,6 +260,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 218 | 交易雷達通知抖動抑制（Requirement 44 修訂） | 本檔 ↓ |
 | 219 | ETF 折溢價納入交易雷達（下一增量，尚未動工） | 本檔 ↓ |
 | 220 | 通知評估與派送併入單一 2 秒節拍（Requirement 44 修訂） | 本檔 ↓ |
+| 228 | 大盤盤中即時判斷（`TW_RULES_V6`，Requirement 43 修訂） | [t228_taiex_intraday_market_signal.md](tasks/t228_taiex_intraday_market_signal.md) |
 
 ---
 

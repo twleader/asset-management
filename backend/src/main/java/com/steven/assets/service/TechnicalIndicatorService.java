@@ -139,12 +139,28 @@ public class TechnicalIndicatorService {
     }
 
     /**
-     * 0000 台股大盤：從 twse_index_daily_history 計算 MA20 / MA60 / MA240 / KD。
+     * 0000 台股大盤：從 twse_index_daily_history 計算 MA20 / MA60 / MA240 / KD；若完成日 K 尚未到今日
+     * 但 Redis 有今日即時點位（Task 228），比照 computeAll() 對一般個股的既有作法暫加一筆到序列最前。
      * OHLC 在 v1.21 之後才補；舊資料 high/low/open 可能為 null，KD 計算時 fallback 用 close。
      */
     private FullIndicators computeAllForTaiex() {
         try {
-            List<TwseIndexDailyHistory> desc = twseDailyRepo.findTopNByOrderByTradingDateDesc(240);
+            List<TwseIndexDailyHistory> desc = new ArrayList<>(twseDailyRepo.findTopNByOrderByTradingDateDesc(240));
+            LocalDate today = LocalDate.now();
+            if (desc.isEmpty() || !today.equals(desc.get(0).getTradingDate())) {
+                Optional<PriceQueryService.LivePrice> liveOpt = priceQuery.getLive("0000", "台股");
+                if (liveOpt.isPresent() && liveOpt.get().tradingDate() != null
+                        && today.toString().equals(liveOpt.get().tradingDate())) {
+                    PriceQueryService.LivePrice live = liveOpt.get();
+                    TwseIndexDailyHistory t = new TwseIndexDailyHistory();
+                    t.setTradingDate(today);
+                    t.setClosePoint(live.price());
+                    t.setHighPoint(live.highPrice() != null ? live.highPrice() : live.price());
+                    t.setLowPoint(live.lowPrice() != null ? live.lowPrice() : live.price());
+                    t.setOpenPoint(live.openPrice());
+                    desc.add(0, t);
+                }
+            }
             if (desc.isEmpty()) return FullIndicators.EMPTY;
 
             BigDecimal ma20  = taiexSimpleMa(desc, 20);
