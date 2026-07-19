@@ -75,7 +75,7 @@ t222_fix_uk_open_price_null.md
 recreate（見 .claude/skills/run-stack）。
 
 ```bash
-/usr/local/apache-maven/apache-maven-3.9.11/bin/mvn -q test -pl backend
+/usr/local/apache-maven/apache-maven-3.9.11/bin/mvn -q -f backend/pom.xml test
 docker compose -p asset-management build --no-cache business-services
 docker compose -p asset-management up -d --no-deps --force-recreate business-services
 curl -s http://localhost:8080/actuator/health
