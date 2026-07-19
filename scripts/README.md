@@ -3,7 +3,8 @@
 | 檔案 | 用途 |
 |------|------|
 | `db-export.sh` / `db-import.sh` | PostgreSQL 安全匯出／清空現有 volume 後還原 |
-| `git-hooks/pre-commit` | SDD 同步檢查（見 CLAUDE.md） |
+| `git-hooks/commit-msg` | SDD 同步檢查——只驗「`spec/` 有無變更」（見 CLAUDE.md）。用 commit-msg 而非 pre-commit，是因為只有這個階段讀得到本次 commit 訊息，`[skip-spec]` 才判斷得準 |
+| `spec-check.sh` | spec 變更的機械前置檢查：編號撞號／重號、Liquibase changeset 版號碰撞與冪等性、宣稱的測試類是否存在、文件計數漂移。實作前搭配 `/spec-review` 使用 |
 
 完整搬機流程、秘密檔案清單與驗收方式請見 [`../INSTALLATION.md`](../INSTALLATION.md)。
 
