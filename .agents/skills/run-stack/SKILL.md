@@ -39,6 +39,50 @@ If the answer is `asset-management` (the convention), pass `-p asset-management`
 DC="docker compose -p asset-management"
 ```
 
+> ⚠ **zsh 不會對 `$DC` 做 word splitting**：`$DC build frontend` 會把整串當成**一個指令名** → `command not found`。
+> 在本專案一律**寫完整指令** `docker compose -p asset-management ...`，不要用 `$DC`。
+
+## Step 1b — 從哪個目錄 build？（多 session 並行時最關鍵的決定）
+
+全機只有一套 image tag（`asset-management-<service>:latest`）與一組 `container_name`。**誰最後 build，誰的版本就在跑**——所以「從哪個目錄 build」直接決定線上跑的是誰的程式碼。
+
+| 情境 | 從哪裡 build |
+|---|---|
+| 變更還在 feature 分支、**尚未** merge 進 main | 該變更所在的 worktree |
+| 變更**已經** merge 進 main | **main 的 worktree**（先追平 `origin/main`） |
+
+**已 merge 就必須從 main build，不要再從自己的 feature worktree build。** 理由：feature worktree 的內容是「main ∪ 我的變更」，缺別人剛 merge 的工作；從那裡 build 會把別人的功能洗掉，對方發現後從他的 worktree build 回來又洗掉你的——實測會無限乒乓（2026-07-18 一小時內來回三次）。**main 是所有人已提交工作的聯集，是唯一的收斂點。**
+
+找出 main 在哪（**位置會中途改變**，別假設在主 repo 目錄）：
+
+```bash
+MW=$(git worktree list --porcelain | awk '/^worktree /{p=$2} /^branch refs\/heads\/main$/{print p}')
+echo "$MW"
+```
+
+從 main build 前逐項確認：
+
+```bash
+git -C "$MW" branch --show-current          # 必須回 main
+git -C "$MW" status --porcelain             # 必須是空的（非空＝別人正在那裡工作，停下來問）
+git -C "$MW" fetch origin && git -C "$MW" merge --ff-only origin/main
+cp /Users/steven/Project/asset-management/.env "$MW/.env"   # worktree 沒有 .env；env_file 相對 compose 檔解析，--env-file 救不了
+```
+
+### 被洗掉時怎麼認出來
+
+症狀是**站沒掛、只是跑舊版**：容器全 healthy、頁面回 200，但功能不見了。**DB 不會跟著回退**，所以典型組合是「資料表還在、seed 還在，但 API 回 `No static resource api/xxx`、前端卡片消失」——看到這組合就是映像被覆蓋，不是 migration 沒跑。
+
+```bash
+# 釘住基準線，事後比對是否又被覆蓋
+docker inspect asset-<svc> --format '{{.Image}}'
+# 運行中的產物是否真的含你的變更（別 grep minify 後的變數名，要 grep API 路徑或中文字面值）
+docker exec asset-frontend sh -c 'grep -l "<你的新文案>" /usr/share/nginx/html/assets/*.js'
+docker exec asset-business-services sh -c 'unzip -l /app/app.jar | grep -i <YourNewClass>'
+```
+
+驗證期間也可能被洗掉。**下結論前再 `inspect` 一次**確認 image SHA 與釘住的基準線相同，否則你的證據是對一顆已經不存在的映像取得的。
+
 ## Step 2 — Match the change to the service
 
 Edit-target → what to rebuild. **Only rebuild what changed** (don't `docker compose up --build` the whole stack — that needlessly rebuilds 3 JVM images and takes minutes):
@@ -156,7 +200,7 @@ docker exec -it asset-redis redis-cli                # redis shell
 A change is shipped when **all** are true:
 
 1. Code edited + spec/ updated (AGENTS.md SDD rule + pre-commit hook)
-2. Affected service image rebuilt
+2. Affected service image rebuilt **from the right directory**（已 merge → 從 main 的 worktree；見 Step 1b）
 3. Container `(healthy)` and serving expected response
 4. The actual changed behaviour was driven (curl the new endpoint / open the changed page)
 
