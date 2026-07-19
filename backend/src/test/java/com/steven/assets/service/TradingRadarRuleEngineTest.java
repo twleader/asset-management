@@ -232,6 +232,114 @@ class TradingRadarRuleEngineTest {
                         TradingRadarRuleEngine.MarketRegime.RISK_OFF, true)).score());
     }
 
+    /** 長線佳＋短線深度超賣的標的。price 100 對 MA240 80 = +25% 乖離，KD 深度超賣且剛黃金交叉。 */
+    private TradingRadarRuleEngine.StockInput trialBuyStock(
+            String k, String d, String prevK, String prevD,
+            String ma240, String completedChange,
+            TradingRadarRuleEngine.Confirmation c240,
+            TradingRadarRuleEngine.MarketRegime regime, boolean stale) {
+        return new TradingRadarRuleEngine.StockInput(
+                false,
+                new BigDecimal("100"),
+                new BigDecimal("0.5"),
+                new BigDecimal(completedChange),
+                new TradingRadarRuleEngine.Indicators(
+                        new BigDecimal("110"), new BigDecimal("105"), new BigDecimal(ma240),
+                        new BigDecimal(k), new BigDecimal(d)),
+                new BigDecimal(prevK),
+                new BigDecimal(prevD),
+                TradingRadarRuleEngine.Confirmation.BELOW,
+                TradingRadarRuleEngine.Confirmation.BELOW,
+                c240,
+                TradingRadarRuleEngine.InstrumentType.EQUITY,
+                regime,
+                stale,
+                null);
+    }
+
+    @Test
+    void trialBuy_firesWhenLongTermStrongAndShortTermDeeplyOversoldAndTurning() {
+        var input = trialBuyStock("15", "14", "12", "16", "80", "0.3",
+                TradingRadarRuleEngine.Confirmation.ABOVE,
+                TradingRadarRuleEngine.MarketRegime.NEUTRAL, false);
+        var result = engine.evaluateStock(input);
+
+        assertEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, result.action(),
+                "長線佳＋KD 深度超賣＋剛黃金交叉＋已止跌，應產生分批試單");
+        // 關鍵：月線與季線都是 BELOW，既有買進閘門必然關閉——證明這是平行路徑而非放寬閘門。
+        assertEquals(TradingRadarRuleEngine.Confirmation.BELOW, input.ma20Confirmation());
+        assertEquals(TradingRadarRuleEngine.Confirmation.BELOW, input.ma60Confirmation());
+    }
+
+    @Test
+    void trialBuy_requiresRealGoldenCross_notMerelyStrongLowKd() {
+        // 前一期已經 K>D（持續強勢）→ 不是交叉，不得試單。
+        var notCrossing = engine.evaluateStock(trialBuyStock("15", "14", "18", "13", "80", "0.3",
+                TradingRadarRuleEngine.Confirmation.ABOVE,
+                TradingRadarRuleEngine.MarketRegime.NEUTRAL, false));
+        assertNotEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, notCrossing.action());
+    }
+
+    @Test
+    void trialBuy_requiresDeepOversold_bothKAndD() {
+        // D 未低於 20 → 尚未完整進入低檔。
+        var shallow = engine.evaluateStock(trialBuyStock("18", "22", "15", "25", "80", "0.3",
+                TradingRadarRuleEngine.Confirmation.ABOVE,
+                TradingRadarRuleEngine.MarketRegime.NEUTRAL, false));
+        assertNotEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, shallow.action());
+    }
+
+    @Test
+    void trialBuy_requiresStoppedFalling_usingCompletedBar() {
+        var stillFalling = engine.evaluateStock(trialBuyStock("15", "14", "12", "16", "80", "-1.2",
+                TradingRadarRuleEngine.Confirmation.ABOVE,
+                TradingRadarRuleEngine.MarketRegime.NEUTRAL, false));
+        assertNotEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, stillFalling.action(),
+                "最近完成日仍在下跌時不得試單");
+    }
+
+    @Test
+    void trialBuy_requiresLongTermPremium_notJustAboveAnnualMa() {
+        // 貼著年線（+1.5%）：price>MA240 成立但乖離不足，長線結構不夠明確。
+        // 這一項是關鍵——實測使用者投組中 price>MA240 幾乎 100% 成立，單靠它沒有篩選力。
+        var hugging = engine.evaluateStock(trialBuyStock("15", "14", "12", "16", "98.5", "0.3",
+                TradingRadarRuleEngine.Confirmation.ABOVE,
+                TradingRadarRuleEngine.MarketRegime.NEUTRAL, false));
+        assertNotEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, hugging.action());
+    }
+
+    @Test
+    void trialBuy_requiresAnnualConfirmation_rejectsFreshBreakout() {
+        var unconfirmed = engine.evaluateStock(trialBuyStock("15", "14", "12", "16", "80", "0.3",
+                TradingRadarRuleEngine.Confirmation.MIXED,
+                TradingRadarRuleEngine.MarketRegime.NEUTRAL, false));
+        assertNotEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, unconfirmed.action());
+    }
+
+    @Test
+    void trialBuy_blockedByRiskOffAndStaleMarketForEquities() {
+        var riskOff = engine.evaluateStock(trialBuyStock("15", "14", "12", "16", "80", "0.3",
+                TradingRadarRuleEngine.Confirmation.ABOVE,
+                TradingRadarRuleEngine.MarketRegime.RISK_OFF, false));
+        assertNotEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, riskOff.action());
+
+        var stale = engine.evaluateStock(trialBuyStock("15", "14", "12", "16", "80", "0.3",
+                TradingRadarRuleEngine.Confirmation.ABOVE,
+                TradingRadarRuleEngine.MarketRegime.RISK_ON, true));
+        assertNotEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, stale.action());
+    }
+
+    @Test
+    void trialBuy_doesNotWidenTheOrdinaryBuyGate() {
+        // 一檔跌破月線季線但 KD 不超賣的標的，不得因為新增了試單路徑就變成可買。
+        var notOversold = engine.evaluateStock(trialBuyStock("55", "50", "48", "52", "80", "0.3",
+                TradingRadarRuleEngine.Confirmation.ABOVE,
+                TradingRadarRuleEngine.MarketRegime.NEUTRAL, false));
+        assertNotEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, notOversold.action());
+        assertNotEquals(TradingRadarRuleEngine.Action.BUY_CANDIDATE, notOversold.action());
+        assertNotEquals(TradingRadarRuleEngine.Action.ADD_CANDIDATE, notOversold.action());
+    }
+
     // ─── V5 新增行為（Requirement 43 修訂／Requirement 47）──────────────────────────
 
     /** 一檔各項技術面全綠的債券 ETF，只有 KD 過熱的差別。對應 00719B 的實測情境。 */

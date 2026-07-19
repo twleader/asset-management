@@ -193,7 +193,10 @@
         </el-table-column>
         <el-table-column label="規則建議" min-width="150" align="center">
           <template #default="{ row }">
-            <el-tag :type="actionType(row.action)" effect="dark">{{ row.actionLabel }}</el-tag>
+            <el-tooltip v-if="row.action === 'TRIAL_BUY'" placement="top" :content="trialBuyHint">
+              <el-tag :type="actionType(row.action)" effect="dark">{{ row.actionLabel }}</el-tag>
+            </el-tooltip>
+            <el-tag v-else :type="actionType(row.action)" effect="dark">{{ row.actionLabel }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="逆勢抄底" min-width="135" align="center">
@@ -577,7 +580,13 @@ function confirmationType(value) {
   return ({ ABOVE: 'danger', BELOW: 'success', MIXED: 'warning', UNAVAILABLE: 'info' })[value] || 'info'
 }
 
+const trialBuyHint = '長線結構明確向上（年線之上且乖離足夠）、短線深度超賣並剛出現低檔黃金交叉、'
+  + '且最近完成日已止跌。本質是接刀——僅適合小額分批、非全額進場；'
+  + '長線判斷失準時虧損可能持續擴大。'
+
 function actionType(action) {
+  // 分批試單刻意不與順勢買進共用配色：前者是接刀、後者是順勢，風險結構不同。
+  if (action === 'TRIAL_BUY') return 'warning'
   if (['BUY_CANDIDATE', 'ADD_CANDIDATE'].includes(action)) return 'danger'
   if (['REDUCE_CANDIDATE', 'EXIT_CANDIDATE', 'AVOID'].includes(action)) return 'success'
   if (['HOLD', 'WATCH', 'HOLD_CAUTION', 'WAIT'].includes(action)) return 'warning'
