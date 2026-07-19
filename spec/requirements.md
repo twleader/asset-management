@@ -1057,6 +1057,16 @@
 - [ ] **一頁一 BFF**：新增 business `GET /api/trading-radar` 與頁面專屬 BFF `GET /api/bff/trading-radar`；前端只呼叫 BFF。此 GET 無寫入、無排程、無新資料表。
 - [ ] **驗證**：規則引擎須有單元測試覆蓋分數 clamp、兩收盤日確認、買進門檻、大盤 `RISK_OFF` 禁買、持有／未持有動作映射與資料不足 `NO_TRADE`；backend、BFF、frontend 均須建置成功，部署後確認頁面可開且請求鏈沒有 AI API 呼叫。
 
+**Requirement 43 修訂（規則版本 `TW_RULES_V4`，Task 217）—— 判斷邏輯強化：**
+
+- [ ] **大盤 regime 新鮮度閘門**：大盤分數與 regime 來源 `twse_index_daily_history` 只有完成日資料，盤中永遠是前一交易日的值（`0000/台股` 被 `StockSourceQuery` 明確排除於即時抓價之外，Redis 無大盤即時價可用）；而個股走 Redis 即時價。兩者混用會在指數盤中重挫當日仍以昨日 `RISK_ON` 放行買進候選。故 `MarketSummary` 增加 `stale` 旗標：**大盤最新完成日 K 的日期不等於「當前台股交易日」時視為 stale**。stale 時：(a) 不給個股 `RISK_ON` 的 +8 加分；(b) 買進閘門一律關閉，不得產生 `BUY_CANDIDATE`／`ADD_CANDIDATE`；(c) `RISK_OFF` 的 −15 扣分與 veto **仍然生效**（保守方向不放寬）；(d) 前端於大盤卡明示「大盤為前一交易日資料，今日買進訊號暫停」。不得以「補一個即時大盤來源」規避——本 Requirement 明訂零外部行情抓取。
+- [ ] **交易日判定沿用既有交易日曆**：判斷「當前台股交易日」須使用既有的交易日曆服務（`isTradingDay`），不得自行以星期幾推算，也不得新建第二份假日清單。非交易日（週末／國定假日／颱風假）時，以最近一個交易日為基準日，不因休市而誤判 stale。
+- [ ] **逆勢「停止續跌」改用完成日 K**：`TRIAL_CANDIDATE` 的 `stabilized` 條件原為「盤中漲跌幅 >= 0」，盤中在 0% 附近的零交叉會讓 `OVERSOLD_WATCH ↔ TRIAL_CANDIDATE` 逐 tick 翻轉。改為以**最近一根完成日 K 的漲跌幅 >= 0** 判定；盤中不因即時價變動而反覆升級／降級。原「不得只用當期 K>D 冒充黃金交叉」的約束不變。
+- [ ] **暫時性失敗不得偽裝成判斷結果**：`buildMarket`／`buildStock` 的 `catch` 目前把 Redis 逾時、DB 查詢中斷等暫時性失敗轉成 `NO_TRADE`／`DATA_INCOMPLETE` 的正常回傳值，與「資料真的不足」無法區分。`StockDecision`／`MarketSummary` 增加 `degraded` 旗標標示「因讀取失敗而降級」（相對於「資料量不足」），供通知鏈判斷是否應跳過（見 Requirement 44 修訂），前端亦須以不同文案區分兩者。
+- [ ] **還原權息長窗偏誤的揭露**：`DistributionAdjustedPriceService` 採「以最新價為錨、往回縮小歷史價」的 back-adjustment，數學上等同總報酬序列。對高配息標的（尤其月配息債券 ETF），此序列在市價完全不動時仍呈上升，使最新價恆高於長窗均線、取得全部均線分數。此為**已知且刻意保留**的行為（除息缺口的修正效益大於此偏誤），但必須揭露：`StockDecision` 增加 `distributionAdjustedYieldPct`（該 240 日視窗內還原累積幅度），前端於「還原權息」tag 的 tooltip 說明「長期均線已含配息累積，位置分偏多」。**不得**因此取消還原（會讓除息日回到假跌破）。
+
+
+
 ---
 
 ### Requirement 44: 每檔交易雷達狀態 Email 通知
@@ -1073,6 +1083,17 @@
 - [ ] **Email 行為**：同一短批次通知依收件人合併，每位收件人各寄一封以保護 email 隱私；內容至少含股票、觸發狀態、主建議、逆勢狀態、分數、現價／漲跌幅、理由／風險與行情時間。SMTP 未設定、無 active 收件人或寄信例外皆只記錄 log，不阻斷價格 SSE／既有到價警示，且不得呼叫 AI API 或外部行情 refresh。
 - [ ] **API／BFF**：business 提供 `GET/PUT /api/trading-radar/notifications/{stockCode}?market=台股`，GET 聚合目前設定、可選狀態與目前使用者收件人；PUT 覆寫 active、所選 action／counter-trend states 與 recipient ids。前端只走同頁 BFF `/api/bff/trading-radar/notifications/**`。
 - [ ] **驗證**：測試至少覆蓋首次基準不寄、轉入選定狀態只寄一次、同狀態不重寄、離開再進入重寄、未選狀態不寄、inactive／跨租戶收件人不寄，以及 owner-specific held 映射；backend、BFF、frontend 建置與 runtime migration／health／API／bundle 均成功。
+
+**Requirement 44 修訂（Task 218）—— 通知抖動抑制：**
+
+- [ ] **狀態需持穩才算轉入（去抖）**：現行 `TradingRadarNotificationTransition` 只比對「與 last 不同」，價格貼著均線震盪時（`priceVsMa` 單一門檻即造成 16 分跳動，足以跨越 55／40 等 action 邊界）會逐次評估反覆轉入而等量寄信。改為**同一新狀態需連續 N 次評估維持不變才算真正轉入**（N 預設 3；設定值存於 setting 或全域組態，不寫死於邏輯）。未達 N 次前只記錄候選狀態，不更新 baseline、不寄信。
+  - **N 次 ≠ N × 2 秒**：2 秒排程是價格事件到達後的排空節拍，佇列為空時直接 return；實際評估頻率由 `PricePoller` 的台股 cron `0 0/2 9-13`（**每 2 分鐘**）決定。故 N=3 在盤中約等於 **6 分鐘**的持穩要求，而非 6 秒。調整 N 時須以此為準。
+- [ ] **同檔同狀態每日寄送上限與冷卻**：同一 `(setting, 狀態)` 每個交易日最多寄 1 封；同一 setting 不論狀態每日最多 `M` 封（M 預設 4）。另設冷卻期：距上次對該 setting 寄信未滿 30 分鐘不再寄。上限與冷卻須持久化（新增欄位或計數表），不得只存記憶體——business 容器重建後不可重置而導致重複寄送。
+- [ ] **降級狀態不得觸發通知也不得污染基準**：當 `StockDecision.degraded=true`（因讀取失敗而降級，見 Requirement 43 修訂）時，該輪評估一律跳過：不寄信、**不更新** `last_action`／`last_counter_trend_state`。避免「暫時失敗 → 寫入 NO_TRADE 基準 → 恢復後被判定為轉入 → 寄出假通知」的假訊號對。資料真的不足（非失敗）造成的 `NO_TRADE` 仍為正常狀態，行為不變。
+- [ ] **非交易時段不評估**：`queueEvaluation` 須先檢查當下是否為台股交易日的交易時段（沿用既有交易日曆，不自建假日表）。盤後收盤校正回寫、休市日以 DB 收盤同步等情境同樣會 publish `price-update`，不得因此觸發評估與寄信。
+- [ ] **單一節拍：評估與派送同輪（Task 220）**：原本評估為 2 秒排程、Email 派送另有獨立 10 秒排程。兩個獨立計時器會競爭——派送可能在評估尚未 enqueue 完成時就 drain 佇列，把同一輪的通知拆成多封信，破壞「每位收件人一輪一封」的合併。改為**由評估排程在同一輪驅動派送**：`TradingRadarNotificationDispatcher.flush()` 移除自身 `@Scheduled`，改由 `TradingRadarNotificationService` 的 2 秒節拍在評估完成後呼叫。派送須在**評估交易 commit 之後**執行，不得置於交易內（SMTP I/O 會撐長交易；且「信已寄出但交易回滾」會造成下一輪重寄）。評估或派送任一方失敗只記 log，不影響另一方與既有價格 SSE。
+- [ ] **前端揭露**：通知 dialog 須提示「勾選相鄰狀態（如「續抱」與「續抱但提高警戒」）在盤中震盪時會較常觸發」，並顯示目前的每日上限與冷卻設定值。
+- [ ] **驗證**：測試至少覆蓋「未達持穩次數不寄」「達持穩次數寄一次」「同日同狀態第二次不寄」「冷卻期內不寄」「degraded 輪次不寄且不改 baseline」「非交易時段不評估」；容器重建後每日計數不重置。
 
 ---
 

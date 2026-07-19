@@ -5429,3 +5429,93 @@ security property，直接 `-D` 讀不到——雙重靜默無效）、改用 JD
       驗證用的排程設定事後已還原為停用（避免留下使用者未設定過的每日排程）。
       **前端畫面（匯出按鈕／對話框／排程卡）需由使用者於瀏覽器確認**——本頁走 Google 登入，代登入屬使用者本人操作。
 - [ ] 216.9 commit ＋ 兩段式 merge。
+
+---
+
+## Task 217：交易雷達判斷邏輯強化（`TW_RULES_V4`，Requirement 43 修訂）
+
+背景：多視角查核發現三項會實際給錯訊號的缺陷（見 spec/design.md「Requirement 43／44 修訂」）。
+本 Task 只處理主規則側，通知側在 Task 218。
+
+- [x] 217.1 **大盤新鮮度閘門**：`TradingRadarService.buildMarket()` 以既有交易日曆解析「當前台股交易日」
+      （非交易日取最近一個交易日），與最新完成日 K 比對得出 `stale`；`MarketState`／`MarketSummary`
+      增加 `stale` 欄位。**不得**新建第二份假日清單，也不得為此補一個大盤即時抓價來源
+      （Requirement 43 明訂零外部行情抓取；且 `0000/台股` 本就被 `StockSourceQuery` 排除）。
+- [x] 217.2 **規則引擎套用 stale**：`StockInput` 增加 `marketStale`；`evaluateStock` 於 stale 時不給
+      `RISK_ON` +8；`actionFor` 的 `buyGate` 於 stale 時一律 false。`RISK_OFF` 的 −15 與 veto 不受影響
+      （只收緊不放寬）。`InstrumentType.BOND` 本就不套大盤閘門，行為不變。
+- [x] 217.3 **逆勢「停止續跌」改用完成日 K**：`StockInput` 增加 `completedChangePercent`
+      （最近一根完成日 K 相對前一根，取自**還原後**序列以與其他逆勢條件同價基）；
+      `evaluateCounterTrend` 的 `stabilized` 改讀此值。盤中即時漲跌幅仍供顯示與單日漲跌扣分使用。
+- [ ] 217.4 **降級旗標**：`MarketSummary`／`StockDecision` 增加 `degraded`，僅 `catch` 路徑為 true；
+      與既有「資料量不足」的 `dataComplete=false` 語意分離，供 Task 218 判斷是否跳過通知。
+- [ ] 217.5 **還原權息長窗偏誤揭露**：`StockDecision` 增加 `distributionAdjustedYieldPct`
+      ＝`(1 − 最舊列 scale) × 100`（純衍生值、不入庫）；`DistributionAdjustedPriceService.Adjustment`
+      一併回傳該值。**不得**因此取消還原（會讓除息日回到假跌破）。
+- [x] 217.6 **RULE_VERSION 升 V4**：`TradingRadarRuleEngine.RULE_VERSION`、前端 fallback 字串、
+      spec 內所有版本字樣一併更新，不得殘留 V3。
+- [~] 217.7 **前端**：大盤卡 stale 警示**已加但未建置驗證**（此 worktree 無 node_modules）；
+      `degraded` 文案與還原權息 tooltip 待 217.4／217.5 完成後再補。原述：大盤卡於 stale 時明示「大盤為前一交易日資料，今日買進訊號暫停」；
+      `degraded` 與「資料不足」用不同文案；「還原權息」tag 加 tooltip 說明長窗均線含配息累積。
+- [x] 217.8 **測試**：已補 stale 不給加分／關閉買進閘門、stale 時 RISK_OFF 仍 veto、債券不受 stale 影響、
+      逆勢 `stabilized` 改讀完成日漲跌幅（盤中翻紅不升級／完成日止跌才升級）。
+      backend 全套 64 測試通過。**注意**：驗證 stale 分差時發現 `strongStock` 原始分 121 被 clamp 吃掉 8 分差，
+      改用未觸頂輸入才測得出——此即既有「分數飽和使 regime 調整項失效」問題的實證，待後續 Task 處理。
+      原述：`TradingRadarRuleEngineTest` 補 stale 不給加分／關閉買進閘門、stale 時 RISK_OFF 仍 veto、
+      逆勢 `stabilized` 改基準後盤中不翻轉；`DistributionAdjustedPriceServiceTest` 補累積還原幅度計算。
+
+## Task 218：交易雷達通知抖動抑制（Requirement 44 修訂）
+
+- [ ] 218.1 **Liquibase `v1.67.0`**：`trading_radar_notification_setting` 增加
+      `pending_action`／`pending_action_count`／`pending_counter_trend`／`pending_counter_trend_count`、
+      `last_notified_at`、`daily_notify_date`／`daily_notify_count`。寫成冪等
+      （`ADD COLUMN IF NOT EXISTS`），避免日後版號避讓改 changeset id 被 Liquibase 視為新 migration 重跑。
+- [ ] 218.2 **持穩去抖**：`TradingRadarNotificationTransition` 由單次比對改為持穩計數（N=3）；
+      未達 N 次只記候選、不更新 baseline、不寄信。門檻集中為具名常數。
+- [ ] 218.3 **每日上限與冷卻**：同 `(setting, 狀態)` 每交易日 1 封、同 setting 每日 4 封、冷卻 30 分；
+      計數持久化（容器重建不得重置）；每日界線以台北時區交易日為準。
+- [ ] 218.4 **降級輪次完全跳過**：`degraded=true` 時不寄信且**不更新** baseline，
+      避免「暫時失敗→寫入 NO_TRADE 基準→恢復後誤判轉入」的假訊號對。
+- [ ] 218.5 **交易時段閘門**：`queueEvaluation` 先查既有交易日曆，非交易日／非交易時段直接 return；
+      只加在雷達通知入口，不影響既有到價警示與 SSE。
+- [ ] 218.6 **前端**：通知 dialog 提示相鄰狀態較常觸發，並顯示目前每日上限與冷卻值。
+- [ ] 218.7 **測試**：未達持穩不寄、達持穩寄一次、候選中途改變計數重來、同日同狀態第二次不寄、
+      冷卻期內不寄、degraded 不寄且不改 baseline、非交易時段不入列；跨日重置以注入固定時鐘驗證。
+- [ ] 218.8 **建置與端到端驗證**：JVM 服務 `--no-cache` 重 build；recreate business 後一併 restart bff；
+      容器內 `curl` 帶 `X-User-*` header 驗證。
+- [ ] 218.9 commit ＋ 兩段式 merge（**待使用者明確指示後才執行**）。
+
+## Task 220：通知評估與派送併入單一 2 秒節拍（Requirement 44 修訂）
+
+- [x] 220.1 `TradingRadarNotificationDispatcher.flush()` 移除 `@Scheduled(fixedDelay = 10s)`，
+      改由 `TradingRadarNotificationService` 驅動；移除該類的 `Scheduled` import。
+- [x] 220.2 新增非交易性的 `runCycle()` 掛 `@Scheduled(fixedDelay = 2s)`：
+      先經自身 proxy（`ObjectProvider<TradingRadarNotificationService>`）呼叫 `@Transactional` 的
+      `flushEvaluations()`，**commit 後**再呼叫 `dispatcher.flush()`。兩段各自 try/catch。
+      派送不得置於交易內（SMTP I/O 撐長交易；回滾後重寄）。
+- [x] 220.3 backend 編譯與全套 64 測試通過。
+- [ ] 220.4 **啟動期驗證（未完成）**：自身注入若解析失敗只會在 Spring context 啟動時炸，
+      現有測試不涵蓋（專案無 `@SpringBootTest` context-load 測試）。需 `--no-cache` 重建 business
+      映像 + recreate + health 確認；因會覆寫全機共用的 `asset-management-*:latest`
+      並把運行中的 stack 換成未 merge 的程式碼，**待使用者指示後才執行**。
+- [ ] 220.5 修正既有文件對評估頻率的誤述：2 秒為排空節拍，真正評估頻率由 `PricePoller`
+      台股 cron `0 0/2 9-13`（每 2 分鐘）決定；Task 218 的去抖 N=3 因此約為 6 分鐘而非 6 秒。（已於
+      requirements.md／design.md 更正）
+
+## Task 219：ETF 折溢價納入交易雷達（下一增量，尚未動工）
+
+歷史淨值來源實測結論（見 memory `reference_etf_nav_history_sources`）：
+證交所／櫃買**無** NAV 歷史；MoneyDJ 技術可行但 robots.txt 明文 `Disallow: /ETF/X/xdjbcd/`
+且聲明禁止 LLM／AI 用途並封鎖 ClaudeBot，**不得**排進正式排程；
+SITCA（投信投顧公會）可行且合規，實測一年 240 個交易日連續無缺口、可回溯至 2015、上市與上櫃同一支查詢涵蓋。
+
+- [ ] 219.1 SITCA 歷史淨值回補（ASP.NET WebForms，需先 GET 取 `__VIEWSTATE`／`__EVENTVALIDATION` 再 POST；
+      一天一次查詢、COMID 留空回全市場約 4425 筆；一年約 240 次，須節流）。
+- [ ] 219.2 `etf_nav_history` 增加 `source` 欄位區分 `OFFICIAL`（證交所當日）／`RECONSTRUCTED`（SITCA 淨值＋
+      既有 `stock_price_history` 收盤價重建）。重建值**只供統計基準**，不對外顯示為權威折溢價。
+      SITCA 股票型 ETF 淨值僅小數 2 位（債券型 4 位），重建誤差約 0.07pp——與既有規格「不得自行反推」的
+      理由一致，故以 `source` 分流而非混存。
+- [ ] 219.3 修既有實作縫：`EtfNavPoller.resolvePct()` 與 `ExcelExportService.premiumDiscountPct()` 的
+      fallback 未依 market 分流，台股遇證交所 g 欄留白會靜默自行反推且 DB 無標記。
+- [ ] 219.4 雷達第三軌「折溢價狀態」：不改分數、不改 action，但溢價顯著高於該檔自身常態時關閉買進閘門
+      （比照 stale 的處理方式）；樣本不足時降級為分類別絕對門檻並於前端揭露。

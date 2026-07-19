@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -80,7 +81,7 @@ class TradingRadarRuleEngineTest {
         assertEquals(TradingRadarRuleEngine.MarketRegime.DATA_INCOMPLETE, market.regime());
 
         var stock = engine.evaluateStock(new TradingRadarRuleEngine.StockInput(
-                true, new BigDecimal("100"), BigDecimal.ZERO,
+                true, new BigDecimal("100"), BigDecimal.ZERO, BigDecimal.ZERO,
                 new TradingRadarRuleEngine.Indicators(null, null, null, null, null),
                 null,
                 null,
@@ -88,7 +89,8 @@ class TradingRadarRuleEngineTest {
                 TradingRadarRuleEngine.Confirmation.UNAVAILABLE,
                 TradingRadarRuleEngine.Confirmation.UNAVAILABLE,
                 TradingRadarRuleEngine.InstrumentType.EQUITY,
-                TradingRadarRuleEngine.MarketRegime.NEUTRAL));
+                TradingRadarRuleEngine.MarketRegime.NEUTRAL,
+                false));
         assertNull(stock.score());
         assertEquals(TradingRadarRuleEngine.Action.NO_TRADE, stock.action());
         assertEquals(TradingRadarRuleEngine.CounterTrendState.NONE, stock.counterTrend().state());
@@ -191,6 +193,116 @@ class TradingRadarRuleEngineTest {
         assertEquals(TradingRadarRuleEngine.Action.ADD_CANDIDATE, bond.action());
     }
 
+
+    // ---- Task 217：大盤新鮮度閘門與逆勢止跌基準 ----
+
+    @Test
+    void marketStale_blocksBuyCandidateEvenWhenRiskOn() {
+        var fresh = engine.evaluateStock(strongStock(
+                false, TradingRadarRuleEngine.InstrumentType.EQUITY,
+                TradingRadarRuleEngine.MarketRegime.RISK_ON, false));
+        assertEquals(TradingRadarRuleEngine.Action.BUY_CANDIDATE, fresh.action());
+
+        var stale = engine.evaluateStock(strongStock(
+                false, TradingRadarRuleEngine.InstrumentType.EQUITY,
+                TradingRadarRuleEngine.MarketRegime.RISK_ON, true));
+        assertNotEquals(TradingRadarRuleEngine.Action.BUY_CANDIDATE, stale.action());
+        assertNotEquals(TradingRadarRuleEngine.Action.ADD_CANDIDATE, stale.action());
+    }
+
+    @Test
+    void marketStale_dropsRiskOnBonusButKeepsRiskOffPenalty() {
+        // 刻意用未觸及 clamp 上限的中性輸入：strongStock 原始分數 121，clamp 後看不出 8 分差。
+        int freshScore = engine.evaluateStock(moderateStock(
+                TradingRadarRuleEngine.MarketRegime.RISK_ON, false)).score();
+        int staleScore = engine.evaluateStock(moderateStock(
+                TradingRadarRuleEngine.MarketRegime.RISK_ON, true)).score();
+        assertEquals(freshScore - 8, staleScore);
+
+        // RISK_OFF 的扣分不因 stale 放寬。
+        assertEquals(
+                engine.evaluateStock(moderateStock(
+                        TradingRadarRuleEngine.MarketRegime.RISK_OFF, false)).score(),
+                engine.evaluateStock(moderateStock(
+                        TradingRadarRuleEngine.MarketRegime.RISK_OFF, true)).score());
+    }
+
+    /** 未觸頂的中性標的：50 −8(<MA20) +12 +15 −5(conf20 BELOW) +8 +10 +5(K>D) = 87。 */
+    private TradingRadarRuleEngine.StockInput moderateStock(
+            TradingRadarRuleEngine.MarketRegime regime, boolean marketStale) {
+        return new TradingRadarRuleEngine.StockInput(
+                true,
+                new BigDecimal("100"),
+                new BigDecimal("1"),
+                new BigDecimal("1"),
+                new TradingRadarRuleEngine.Indicators(
+                        new BigDecimal("105"), new BigDecimal("95"), new BigDecimal("90"),
+                        new BigDecimal("60"), new BigDecimal("40")),
+                new BigDecimal("55"),
+                new BigDecimal("45"),
+                TradingRadarRuleEngine.Confirmation.BELOW,
+                TradingRadarRuleEngine.Confirmation.ABOVE,
+                TradingRadarRuleEngine.Confirmation.ABOVE,
+                TradingRadarRuleEngine.InstrumentType.EQUITY,
+                regime,
+                marketStale);
+    }
+
+    @Test
+    void marketStale_doesNotAffectBond() {
+        var fresh = engine.evaluateStock(strongStock(
+                false, TradingRadarRuleEngine.InstrumentType.BOND,
+                TradingRadarRuleEngine.MarketRegime.RISK_OFF, false));
+        var stale = engine.evaluateStock(strongStock(
+                false, TradingRadarRuleEngine.InstrumentType.BOND,
+                TradingRadarRuleEngine.MarketRegime.RISK_OFF, true));
+        assertEquals(fresh.action(), stale.action());
+        assertEquals(fresh.score(), stale.score());
+    }
+
+    @Test
+    void counterTrendStabilized_readsCompletedBarNotIntradayChange() {
+        // 完成日 K 已止跌(+0.5)，盤中即時仍為 -1.2：應以完成日為準而升級為試單候選。
+        var input = new TradingRadarRuleEngine.StockInput(
+                true,
+                new BigDecimal("20.60"),
+                new BigDecimal("-1.2"),
+                new BigDecimal("0.5"),
+                new TradingRadarRuleEngine.Indicators(
+                        new BigDecimal("23.76"), new BigDecimal("22.37"), new BigDecimal("16.56"),
+                        new BigDecimal("15"), new BigDecimal("14")),
+                new BigDecimal("12"),
+                new BigDecimal("13"),
+                TradingRadarRuleEngine.Confirmation.BELOW,
+                TradingRadarRuleEngine.Confirmation.BELOW,
+                TradingRadarRuleEngine.Confirmation.ABOVE,
+                TradingRadarRuleEngine.InstrumentType.EQUITY,
+                TradingRadarRuleEngine.MarketRegime.RISK_OFF,
+                false);
+        assertEquals(TradingRadarRuleEngine.CounterTrendState.TRIAL_CANDIDATE,
+                engine.evaluateStock(input).counterTrend().state());
+
+        // 完成日 K 仍在跌：盤中翻紅也不得升級。
+        var stillFalling = new TradingRadarRuleEngine.StockInput(
+                true,
+                new BigDecimal("20.60"),
+                new BigDecimal("0.8"),
+                new BigDecimal("-0.9"),
+                new TradingRadarRuleEngine.Indicators(
+                        new BigDecimal("23.76"), new BigDecimal("22.37"), new BigDecimal("16.56"),
+                        new BigDecimal("15"), new BigDecimal("14")),
+                new BigDecimal("12"),
+                new BigDecimal("13"),
+                TradingRadarRuleEngine.Confirmation.BELOW,
+                TradingRadarRuleEngine.Confirmation.BELOW,
+                TradingRadarRuleEngine.Confirmation.ABOVE,
+                TradingRadarRuleEngine.InstrumentType.EQUITY,
+                TradingRadarRuleEngine.MarketRegime.RISK_OFF,
+                false);
+        assertEquals(TradingRadarRuleEngine.CounterTrendState.OVERSOLD_WATCH,
+                engine.evaluateStock(stillFalling).counterTrend().state());
+    }
+
     private TradingRadarRuleEngine.MarketInput marketInput(
             BigDecimal price, BigDecimal change,
             BigDecimal ma20, BigDecimal ma60, BigDecimal ma240,
@@ -210,9 +322,18 @@ class TradingRadarRuleEngineTest {
             boolean held,
             TradingRadarRuleEngine.InstrumentType instrumentType,
             TradingRadarRuleEngine.MarketRegime regime) {
+        return strongStock(held, instrumentType, regime, false);
+    }
+
+    private TradingRadarRuleEngine.StockInput strongStock(
+            boolean held,
+            TradingRadarRuleEngine.InstrumentType instrumentType,
+            TradingRadarRuleEngine.MarketRegime regime,
+            boolean marketStale) {
         return new TradingRadarRuleEngine.StockInput(
                 held,
                 new BigDecimal("120"),
+                new BigDecimal("1"),
                 new BigDecimal("1"),
                 new TradingRadarRuleEngine.Indicators(
                         new BigDecimal("110"), new BigDecimal("100"), new BigDecimal("90"),
@@ -223,7 +344,8 @@ class TradingRadarRuleEngineTest {
                 TradingRadarRuleEngine.Confirmation.ABOVE,
                 TradingRadarRuleEngine.Confirmation.ABOVE,
                 instrumentType,
-                regime);
+                regime,
+                marketStale);
     }
 
     private TradingRadarRuleEngine.StockInput counterTrendStock(
@@ -238,6 +360,7 @@ class TradingRadarRuleEngineTest {
                 true,
                 price,
                 changePercent,
+                changePercent,
                 new TradingRadarRuleEngine.Indicators(
                         new BigDecimal("23.76"),
                         new BigDecimal("22.37"),
@@ -250,7 +373,8 @@ class TradingRadarRuleEngineTest {
                 TradingRadarRuleEngine.Confirmation.BELOW,
                 annualConfirmation,
                 TradingRadarRuleEngine.InstrumentType.EQUITY,
-                TradingRadarRuleEngine.MarketRegime.RISK_OFF);
+                TradingRadarRuleEngine.MarketRegime.RISK_OFF,
+                false);
     }
 
     private List<BigDecimal> closesDescending(int size, int start) {

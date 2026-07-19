@@ -56,10 +56,13 @@ public class TradingRadarService {
     private final AssetSnapshotRepository snapshotRepo;
     private final StockAlertRepository alertRepo;
     private final StockRepository stockRepo;
+    private final MarketDataService marketDataService;
 
+    /** @param stale 大盤最新完成日 K 不是當前台股交易日（Task 217.1）。 */
     private record MarketState(
             TradingRadarDto.MarketSummary summary,
-            TradingRadarRuleEngine.MarketRegime regime
+            TradingRadarRuleEngine.MarketRegime regime,
+            boolean stale
     ) {}
 
     private record Target(String code, String market, boolean held) {}
@@ -68,8 +71,22 @@ public class TradingRadarService {
             TechnicalIndicatorService.FullIndicators indicators,
             List<BigDecimal> completedCloses,
             BigDecimal previousAdjustedClose,
+            BigDecimal completedChangePercent,
             boolean distributionAdjusted
     ) {}
+
+    /**
+     * 當前台股交易日：今天是交易日就取今天，否則往回找最近一個交易日。
+     * 用於判斷大盤資料是否停在更早的交易日；沿用既有交易日曆，不自建假日表。
+     */
+    private LocalDate currentTwTradingDay() {
+        LocalDate day = LocalDate.now(TAIPEI);
+        for (int i = 0; i < 14; i++) {
+            if (marketDataService.isTradingDay(TW_MARKET, day)) return day;
+            day = day.minusDays(1);
+        }
+        return day;
+    }
 
     @Transactional(readOnly = true)
     public TradingRadarDto.Response get() {
@@ -82,7 +99,7 @@ public class TradingRadarService {
         List<TradingRadarDto.StockDecision> decisions = targets.values().stream()
                 .filter(t -> TW_MARKET.equals(t.market()) && !TAIEX_CODE.equals(t.code()))
                 .sorted(Comparator.comparing(Target::code))
-                .map(t -> buildStock(t, market.regime()))
+                .map(t -> buildStock(t, market.regime(), market.stale()))
                 .toList();
 
         return new TradingRadarDto.Response(
@@ -93,12 +110,12 @@ public class TradingRadarService {
                 skippedNonTw.size());
     }
 
-    /** 背景通知評估共用同一份 V3 組裝，不依賴 HTTP owner filter。 */
+    /** 背景通知評估共用同一份 V4 組裝，不依賴 HTTP owner filter。 */
     @Transactional(readOnly = true)
     public TradingRadarDto.StockDecision evaluateForNotification(
             String stockCode, String market, boolean held) {
         MarketState marketState = buildMarket();
-        return buildStock(new Target(stockCode, market, held), marketState.regime());
+        return buildStock(new Target(stockCode, market, held), marketState.regime(), marketState.stale());
     }
 
     private MarketState buildMarket() {
@@ -118,12 +135,16 @@ public class TradingRadarService {
                             c60,
                             c240));
 
+            // 大盤只有完成日資料（0000 被排除於即時抓價之外），停在更早的交易日即為 stale（Task 217.1）。
+            boolean stale = rows.isEmpty()
+                    || !rows.get(0).getTradingDate().equals(currentTwTradingDay());
             String asOf = rows.isEmpty() ? null : rows.get(0).getTradingDate().toString();
             TradingRadarDto.MarketSummary summary = new TradingRadarDto.MarketSummary(
                     result.regime().name(),
                     regimeLabel(result.regime()),
                     result.score(),
                     result.regime() != TradingRadarRuleEngine.MarketRegime.DATA_INCOMPLETE,
+                    stale,
                     asOf,
                     price,
                     changePercent,
@@ -136,7 +157,7 @@ public class TradingRadarService {
                     c240.name(),
                     result.reasons(),
                     result.risks());
-            return new MarketState(summary, result.regime());
+            return new MarketState(summary, result.regime(), stale);
         } catch (Exception e) {
             log.warn("今日交易雷達：大盤資料組裝失敗", e);
             return incompleteMarket("讀取大盤資料失敗，所有個股暫停產生交易訊號。");
@@ -145,7 +166,8 @@ public class TradingRadarService {
 
     private TradingRadarDto.StockDecision buildStock(
             Target target,
-            TradingRadarRuleEngine.MarketRegime marketRegime) {
+            TradingRadarRuleEngine.MarketRegime marketRegime,
+            boolean marketStale) {
         Optional<Stock> stock = stockRepo.findByCodeAndMarket(target.code(), target.market());
         String name = stock.map(Stock::getName)
                 .filter(n -> n != null && !n.isBlank())
@@ -180,6 +202,7 @@ public class TradingRadarService {
                             target.held(),
                             price,
                             ruleChangePercent,
+                            technical.completedChangePercent(),
                             indicators(ind),
                             ind.previousK(),
                             ind.previousD(),
@@ -187,7 +210,8 @@ public class TradingRadarService {
                             c60,
                             c240,
                             instrumentType,
-                            marketRegime));
+                            marketRegime,
+                            marketStale));
 
             List<String> reasons = new ArrayList<>();
             if (technical.distributionAdjusted()) {
@@ -243,7 +267,7 @@ public class TradingRadarService {
         }
         if (combined.isEmpty()) {
             return new TechnicalData(
-                    TechnicalIndicatorService.FullIndicators.EMPTY, List.of(), null, false);
+                    TechnicalIndicatorService.FullIndicators.EMPTY, List.of(), null, null, false);
         }
 
         LocalDate fromDate = combined.get(combined.size() - 1).getTradingDate();
@@ -266,8 +290,15 @@ public class TradingRadarService {
         BigDecimal previousAdjustedClose = adjustedRows.size() >= 2
                 ? adjustedRows.get(1).getClosePrice()
                 : null;
+        // 最近一根完成日 K 相對前一根的漲跌幅（還原後價基），供逆勢「停止續跌」判定（Task 217.3）。
+        int firstCompleted = liveAdded ? 1 : 0;
+        BigDecimal completedChangePercent = adjustedRows.size() >= firstCompleted + 2
+                ? changePercent(adjustedRows.get(firstCompleted).getClosePrice(),
+                                adjustedRows.get(firstCompleted + 1).getClosePrice())
+                : null;
         return new TechnicalData(
-                indicators, completedCloses, previousAdjustedClose, adjustment.adjusted());
+                indicators, completedCloses, previousAdjustedClose,
+                completedChangePercent, adjustment.adjusted());
     }
 
     private boolean shouldAddLiveRow(
@@ -366,13 +397,15 @@ public class TradingRadarService {
                 regimeLabel(TradingRadarRuleEngine.MarketRegime.DATA_INCOMPLETE),
                 null,
                 false,
+                true,
                 null,
                 null, null, null, null, null, null, null,
                 TradingRadarRuleEngine.Confirmation.UNAVAILABLE.name(),
                 TradingRadarRuleEngine.Confirmation.UNAVAILABLE.name(),
                 List.of(),
                 List.of(message));
-        return new MarketState(summary, TradingRadarRuleEngine.MarketRegime.DATA_INCOMPLETE);
+        // 讀不到大盤時保守視為 stale：買進閘門一律關閉。
+        return new MarketState(summary, TradingRadarRuleEngine.MarketRegime.DATA_INCOMPLETE, true);
     }
 
     private TradingRadarDto.StockDecision incompleteStock(

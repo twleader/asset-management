@@ -4,7 +4,6 @@ import com.steven.assets.dto.TradingRadarDto;
 import com.steven.assets.repository.TradingRadarNotificationRecipientRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -48,7 +47,10 @@ public class TradingRadarNotificationDispatcher {
                 decision.counterTrendRisks()));
     }
 
-    @Scheduled(fixedDelay = 10_000L, initialDelay = 10_000L)
+    /**
+     * 由 {@link TradingRadarNotificationService#runCycle()} 在評估交易 commit 後於同一輪呼叫。
+     * 刻意不掛 {@code @Scheduled}：獨立計時器會與評估競爭，把同一輪通知拆成多封信。
+     */
     public void flush() {
         List<Notice> batch = drain();
         if (batch.isEmpty()) return;

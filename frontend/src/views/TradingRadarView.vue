@@ -22,11 +22,20 @@
         <div class="card-head">
           <div>
             <span class="section-title">台股大盤風險</span>
-            <el-tag size="small" effect="plain" type="info" class="rule-tag">{{ radar.ruleVersion || 'TW_RULES_V3' }}</el-tag>
+            <el-tag size="small" effect="plain" type="info" class="rule-tag">{{ radar.ruleVersion || 'TW_RULES_V4' }}</el-tag>
           </div>
           <span class="as-of">完成日 K：{{ market.asOfDate || '資料不足' }}</span>
         </div>
       </template>
+
+      <el-alert
+        v-if="market.stale"
+        class="stale-alert"
+        type="warning"
+        show-icon
+        :closable="false"
+        title="大盤為前一交易日資料，今日買進訊號暫停"
+        description="大盤指數只有收盤後才入庫，盤中無即時值；為避免以昨日的偏多環境替今日的即時股價背書，此期間不採計大盤加分，也不產生買進／加碼候選。偏空環境的扣分與限制仍照常生效。" />
 
       <div class="market-layout">
         <div class="regime-panel">
@@ -328,7 +337,7 @@ import { useRouter } from 'vue-router'
 const router = useRouter()
 const loading = ref(false)
 const refreshing = ref(false)
-const radar = ref({ market: {}, stocks: [], skippedNonTwStocks: 0, ruleVersion: 'TW_RULES_V3' })
+const radar = ref({ market: {}, stocks: [], skippedNonTwStocks: 0, ruleVersion: 'TW_RULES_V4' })
 const notificationVisible = ref(false)
 const notificationLoading = ref(false)
 const notificationSaving = ref(false)
@@ -625,6 +634,7 @@ onUnmounted(() => {
 .counter-trend-title { color: #92400e; font-size: 14px; font-weight: 700; }
 .counter-trend-note { margin-left: 8px; color: #64748b; font-size: 12px; }
 .muted { color: #94a3b8; }
+.stale-alert { margin-bottom: 14px; }
 .stocks-card { margin-top: 16px; }
 .stock-code { font-weight: 750; color: #0f172a; }
 .stock-name { margin-top: 2px; color: #64748b; font-size: 12px; }

@@ -10,6 +10,7 @@ import com.steven.assets.repository.TradingRadarNotificationSettingRepository;
 import com.steven.assets.repository.TradingRadarNotificationStateRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,6 +40,11 @@ public class TradingRadarNotificationService {
     private final TradingRadarNotificationTransition transition;
     private final TradingRadarNotificationDispatcher dispatcher;
     private final Set<String> pending = ConcurrentHashMap.newKeySet();
+    /**
+     * 自身 proxy：{@code runCycle} 需經 proxy 呼叫 {@code flushEvaluations} 才會套用 {@code @Transactional}
+     * （同類自呼叫會繞過 Spring proxy）。以 ObjectProvider 延遲取得，避免建構期循環依賴。
+     */
+    private final ObjectProvider<TradingRadarNotificationService> self;
 
     public void queueEvaluation(String rawCode, String market) {
         if (rawCode == null || !TW_MARKET.equals(market)) return;
@@ -46,8 +52,29 @@ public class TradingRadarNotificationService {
         pending.add(TAIEX_CODE.equals(code) ? ALL_TW : code + '\0' + market);
     }
 
-    /** 同輪多檔價格事件先合併，兩秒後每個 setting 只評估一次。 */
+    /**
+     * 單一 2 秒節拍：先評估（交易性），commit 後在同一輪把該批通知派送出去。
+     *
+     * <p>刻意不讓 dispatcher 自帶獨立排程：兩個獨立計時器會讓 dispatcher 可能在
+     * {@code flushEvaluations} 尚未 enqueue 完時就 drain，把同一輪的通知拆成兩封信，
+     * 破壞「每位收件人一輪一封」的合併。派送置於交易之外，避免 SMTP I/O 撐長交易，
+     * 也避免「信已寄出但交易回滾」造成下一輪重寄。</p>
+     */
     @Scheduled(fixedDelay = 2_000L, initialDelay = 2_000L)
+    public void runCycle() {
+        try {
+            self.getObject().flushEvaluations();
+        } catch (Exception e) {
+            log.warn("交易雷達通知評估失敗", e);
+        }
+        try {
+            dispatcher.flush();
+        } catch (Exception e) {
+            log.warn("交易雷達通知派送失敗", e);
+        }
+    }
+
+    /** 同輪多檔價格事件先合併，每個 setting 只評估一次。由 {@link #runCycle()} 經 proxy 呼叫。 */
     @Transactional
     public void flushEvaluations() {
         Set<String> keys = drainPending();
