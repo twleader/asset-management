@@ -2,8 +2,13 @@
 
 | 檔案 | 用途 |
 |------|------|
-| `db-export.sh` / `db-import.sh` | 開發用 PostgreSQL dump / 還原 |
+| `db-export.sh` / `db-import.sh` | PostgreSQL 安全匯出／清空現有 volume 後還原 |
 | `git-hooks/pre-commit` | SDD 同步檢查（見 CLAUDE.md） |
+
+完整搬機流程、秘密檔案清單與驗收方式請見 [`../INSTALLATION.md`](../INSTALLATION.md)。
+
+> `db/init/01_dump.sql` 含真實個人財務資料，已被 `.gitignore` 排除，不可強制加入 Git。
+> `db-import.sh` 會先執行 `docker compose down -v`，只可在確認現有資料可刪除、且安全 dump 已備妥時使用。
 
 ## 備份排程
 

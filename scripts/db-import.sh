@@ -10,6 +10,8 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 cd "$PROJECT_DIR"
 
+COMPOSE_PROJECT_NAME="asset-management"
+
 # 確認 .env 存在
 if [ ! -f ".env" ]; then
   echo "❌ 找不到 .env 檔案！"
@@ -30,16 +32,20 @@ read -r -p "確定繼續？(y/N) " confirm
 [[ "$confirm" =~ ^[Yy]$ ]] || { echo "已取消"; exit 0; }
 
 echo "▶ 停止並移除舊容器與 volume..."
-docker compose down -v
+docker compose -p "$COMPOSE_PROJECT_NAME" down -v
 
 echo "▶ 重新啟動（PostgreSQL 會自動執行 db/init/01_dump.sql）..."
-docker compose up -d
+docker compose -p "$COMPOSE_PROJECT_NAME" up -d --build
 
-echo "▶ 等待系統啟動（最多 90 秒）..."
-for i in $(seq 1 30); do
-  if docker ps --filter "name=asset-backend" --filter "health=healthy" --format "{{.Names}}" | grep -q asset-backend; then
+echo "▶ 等待系統啟動（最多 180 秒）..."
+for i in $(seq 1 60); do
+  business_health="$(docker inspect --format '{{.State.Health.Status}}' asset-business-services 2>/dev/null || true)"
+  bff_health="$(docker inspect --format '{{.State.Health.Status}}' asset-bff 2>/dev/null || true)"
+  frontend_running="$(docker inspect --format '{{.State.Running}}' asset-frontend 2>/dev/null || true)"
+  if [ "$business_health" = "healthy" ] && [ "$bff_health" = "healthy" ] && [ "$frontend_running" = "true" ]; then
     echo ""
     echo "✅ 匯入完成，系統已啟動：http://localhost"
+    docker compose -p "$COMPOSE_PROJECT_NAME" ps
     exit 0
   fi
   printf "."
@@ -47,5 +53,7 @@ for i in $(seq 1 30); do
 done
 
 echo ""
-echo "⚠️  後端尚未健康，請稍後確認："
-echo "   docker logs asset-backend"
+echo "⚠️  系統尚未全部健康，請檢查狀態與日誌："
+echo "   docker compose -p $COMPOSE_PROJECT_NAME ps"
+echo "   docker compose -p $COMPOSE_PROJECT_NAME logs --tail=200 business-services bff frontend"
+exit 1
