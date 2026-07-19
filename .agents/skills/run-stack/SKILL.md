@@ -199,7 +199,7 @@ docker exec -it asset-redis redis-cli                # redis shell
 
 A change is shipped when **all** are true:
 
-1. Code edited + spec/ updated (AGENTS.md SDD rule + pre-commit hook)
+1. Code edited + spec/ updated (AGENTS.md SDD rule + commit-msg hook)
 2. Affected service image rebuilt **from the right directory**（已 merge → 從 main 的 worktree；見 Step 1b）
 3. Container `(healthy)` and serving expected response
 4. The actual changed behaviour was driven (curl the new endpoint / open the changed page)

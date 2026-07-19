@@ -1,6 +1,6 @@
 ---
 name: commit-merge-push
-description: 在 asset-management 的 feature worktree 上一次完成「commit → merge 進 main → push」。嚴守兩段式 merge 慣例：feature 分支單行短中文 commit，main 用 --no-ff merge commit，禁止 fast-forward 直推。當使用者說「commit & push」「commit + merge + push」「merge 到 main」「上 main」「推上去」之類指令、且當前在 codex/* feature 分支時使用。
+description: 在 asset-management 的 feature worktree 上一次完成「commit → merge 進 main → push」。嚴守兩段式 merge 慣例：feature 分支單行短中文 commit，main 用 --no-ff merge commit，禁止 fast-forward 直推。當使用者說「commit & push」「commit + merge + push」「merge 到 main」「上 main」「推上去」之類指令、且當前在 claude/* feature 分支時使用。
 ---
 
 # Commit → Merge → Push（兩段式 merge）
@@ -18,15 +18,14 @@ description: 在 asset-management 的 feature worktree 上一次完成「commit 
    **不寫 body、不加 `Co-Authored-By` trailer、不用英文。** 多個關注點要拆多個 commit，不要塞 body。
 2. **merge 訊息**：`merge: <該功能簡述>`（同一句中文簡述）。
 3. **禁止 fast-forward 直推 main**。一律 `git merge --no-ff`，讓每個功能單元在 main 上呈現為一個 merge commit。
-4. **SDD**：凡涉及商業邏輯（controller/model/dto/views/router/liquibase/bff）變更，**同一個 commit 必須含 `spec/` 變更**，否則 pre-commit hook 會擋。
-   純樣式 / CSS / AGENTS.md / 本類 skill / typo / import 整理 → commit 訊息加 `[skip-spec]` 前綴 **並用 `--no-verify`**（原因見下方 ⚠）。
+4. **SDD**：凡涉及商業邏輯（controller/model/dto/views/router/liquibase/bff）變更，**同一個 commit 必須含 `spec/` 變更**，否則 commit-msg hook 會擋。
+   純樣式 / CSS / AGENTS.md / 本類 skill / typo / import 整理 → commit 訊息加 `[skip-spec]` 前綴即可，**不需要 `--no-verify`**。
 
-> ⚠ **hook 陷阱**：`scripts/git-hooks/pre-commit` 是讀 `COMMIT_EDITMSG` 檔來偵測 `[skip-spec]`，
-> 但 `git commit -m "..."` 在 pre-commit 階段**還沒**把訊息寫進該檔（git 先跑 hook、之後才寫），
-> 所以**單純 `-m "[skip-spec] ..."` 不會被放行**。真正純樣式/工具變更要用
-> `git commit --no-verify -m "[skip-spec] ..."`：`--no-verify` 跳過（buggy 的）SDD 檢查，
-> 訊息裡仍保留 `[skip-spec]` 標記供 history 閱讀。此 repo 的 hooksPath 只有這一支 pre-commit hook，
-> `--no-verify` 不會誤跳其他檢查。
+> ⚠ **舊寫法已失效，別再照抄。** 這個 gate 從前是 `pre-commit` hook，讀 `COMMIT_EDITMSG` 偵測
+> `[skip-spec]`；但那個階段 git 還沒把 `-m` 的訊息寫進該檔，造成兩個 bug：加了 `[skip-spec]`
+> 仍被擋（fail-closed），而且**下一次 commit 會讀到上一次殘留的訊息而被靜默放行**（fail-open）。
+> 現已改為 `scripts/git-hooks/commit-msg`，以訊息檔路徑作為 `$1`，判斷可靠。
+> 因此 `git commit -m "[skip-spec] ..."` 現在會正常放行，`--no-verify` 請留給真正的緊急情況。
 
 ---
 
@@ -34,7 +33,7 @@ description: 在 asset-management 的 feature worktree 上一次完成「commit 
 
 ```bash
 WT=$(git rev-parse --show-toplevel)                 # 當前 feature worktree
-FEAT=$(git -C "$WT" branch --show-current)           # 例：codex/beautiful-ellis-bfde40
+FEAT=$(git -C "$WT" branch --show-current)           # 例：claude/beautiful-ellis-bfde40
 echo "feature 分支：$FEAT"
 git -C "$WT" status --short
 git -C "$WT" diff --stat
@@ -53,7 +52,7 @@ echo "main worktree：$MAIN_WT"
 ## Step 1 — 在 feature 分支 commit
 
 先判斷要不要 `[skip-spec]`：看 `git diff --stat` 的路徑。
-- 只動到 `frontend/src` 樣式、`AGENTS.md`、`.agents/skills/**`、純 typo → 加 `[skip-spec]`。
+- 只動到 `frontend/src` 樣式、`AGENTS.md`、`.claude/skills/**`、純 typo → 加 `[skip-spec]`。
 - 動到 `*/controller`、`*/model`、`*/dto`、`views`、`router`、liquibase changelog、`bff/**` → **不可** skip；確認 `spec/` 也一起改了且會被 staged。
 
 ```bash
