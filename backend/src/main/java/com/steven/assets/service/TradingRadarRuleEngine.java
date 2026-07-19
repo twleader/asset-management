@@ -47,6 +47,19 @@ public class TradingRadarRuleEngine {
     public enum Action {
         BUY_CANDIDATE,
         ADD_CANDIDATE,
+        /**
+         * 分批試單候選：長線結構明確向上、短線深度超賣且已轉強。
+         *
+         * <p>與 {@link #BUY_CANDIDATE} 的風險結構不同（接刀 vs 順勢），刻意為獨立值，
+         * 使 UI、通知訂閱與日後回測能分開統計。</p>
+         *
+         * <p>存在的理由：買進閘門要求 MA20／MA60 兩日確認皆 ABOVE，而深度超賣幾乎必然
+         * 發生在跌破均線時——實測十年 103,040 個交易日，K&lt;20 且 D&lt;20 出現 6,552 次、
+         * 買進閘門成立 41,808 次，<b>兩者共存 0 次</b>。故「長線佳＋短線超賣轉強」在原本的
+         * 結構下永遠不可能產生買進建議，必須另闢平行路徑，而非放寬 buyGate（放寬會讓所有
+         * 下跌趨勢中的標的一併變成可買）。</p>
+         */
+        TRIAL_BUY,
         HOLD,
         WATCH,
         HOLD_CAUTION,
@@ -421,7 +434,54 @@ public class TradingRadarRuleEngine {
         return v;
     }
 
+    /** 年線乖離達此比例才算「長線結構明確向上」，排除貼著年線與低波動標的。 */
+    private static final double TRIAL_BUY_MIN_ANNUAL_PREMIUM = 0.05;
+    /** 分批試單要求的 KD 深度超賣門檻。 */
+    private static final double TRIAL_BUY_KD_OVERSOLD = 20.0;
+
+    /**
+     * 分批試單：長線結構明確向上、短線深度超賣且剛轉強、且已止跌。
+     *
+     * <p>六項條件全數滿足才成立，任一不足即回 false。刻意嚴格——這條路徑繞過了
+     * 「站上均線」的順勢要求，本質是接刀，寧可錯過也不要誤發。</p>
+     */
+    private boolean qualifiesForTrialBuy(StockInput input) {
+        BigDecimal price = input.price();
+        BigDecimal ma240 = input.indicators() == null ? null : input.indicators().ma240();
+        BigDecimal k = input.indicators() == null ? null : input.indicators().k();
+        BigDecimal d = input.indicators() == null ? null : input.indicators().d();
+        if (price == null || ma240 == null || k == null || d == null) return false;
+        if (ma240.signum() <= 0) return false;
+
+        // 1. 長線結構明確向上：年線之上且乖離足夠（僅 price > ma240 在多頭市場幾乎全數成立，
+        //    無篩選力；加上乖離門檻才能排除貼著年線者與 KD 近乎雜訊的低波動標的）。
+        double premium = price.subtract(ma240).doubleValue() / ma240.doubleValue();
+        if (premium < TRIAL_BUY_MIN_ANNUAL_PREMIUM) return false;
+        // 2. 年線本身已連續兩日站穩，排除剛上穿的假突破。
+        if (input.ma240Confirmation() != Confirmation.ABOVE) return false;
+        // 3. KD 深度超賣。
+        if (k.doubleValue() >= TRIAL_BUY_KD_OVERSOLD || d.doubleValue() >= TRIAL_BUY_KD_OVERSOLD) return false;
+        // 4. 已轉強，且前一期確實是 K<=D——沒有這一項，「持續強勢的低檔股」會被誤判成交叉。
+        if (k.compareTo(d) <= 0) return false;
+        if (input.previousK() == null || input.previousD() == null) return false;
+        if (input.previousK().compareTo(input.previousD()) > 0) return false;
+        // 5. 止跌：用最近一根完成日 K，不可用盤中漲跌幅（零交叉會讓狀態逐 tick 翻轉）。
+        BigDecimal stability = input.completedChangePercent() != null
+                ? input.completedChangePercent()
+                : input.changePercent();
+        if (stability == null || stability.signum() < 0) return false;
+        // 6. 大盤閘門：股票在 RISK_OFF 或資料 stale 時不試單；債券沿用既有豁免。
+        return !equityMarketApplies(input)
+                || (input.marketRegime() != MarketRegime.RISK_OFF && !input.marketStale());
+    }
+
     private Action actionFor(StockInput input, int score) {
+        // 分批試單優先於分數映射：這類標的的短線分數必然偏低（剛跌深），
+        // 若先走分數映射會被判成減碼／出場，與「長線佳、可分批進場」的判斷自相矛盾。
+        if (qualifiesForTrialBuy(input)) {
+            return Action.TRIAL_BUY;
+        }
+
         // 大盤 stale 時一律關閉買進閘門（債券不套大盤閘門，故不受影響）。
         boolean marketAllowsBuy = !equityMarketApplies(input)
                 || (input.marketRegime() != MarketRegime.RISK_OFF && !input.marketStale());

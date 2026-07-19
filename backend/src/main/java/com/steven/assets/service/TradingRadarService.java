@@ -523,6 +523,7 @@ public class TradingRadarService {
         return switch (action) {
             case BUY_CANDIDATE -> "買進候選";
             case ADD_CANDIDATE -> "加碼候選";
+            case TRIAL_BUY -> "分批試單";
             case HOLD -> "續抱";
             case WATCH -> "觀察";
             case HOLD_CAUTION -> "續抱但提高警戒";
