@@ -10,11 +10,12 @@ import java.util.List;
  * ScheduleListView 專屬 BFF（「公開資訊」分組，Requirement 36）。
  *
  * <p>回傳系統所有自動排程的**人工維護靜態清單**。排程分屬兩個服務：
- * {@code business-services}（12 個）與 {@code external-materials-service}（24 個）。
+ * {@code business-services}（15 個）與 {@code external-materials-service}（29 個）。
  * 此頁為唯讀資訊展示，故不做跨服務反射探索、不入 DB、不設管理端點。
  *
- * <p><b>計數慣例：以 {@code @Scheduled} 方法計，一法一筆。</b>external 24 筆對應 25 個標註
- * （{@code TwClosurePoller} 一法兩標，併為一筆）。
+ * <p><b>計數慣例：以 {@code @Scheduled} 方法計，一法一筆。</b>external 29 筆對應 30 個標註
+ * （{@code TwClosurePoller} 一法兩標，併為一筆；Task 228 直接以 {@code grep '@Scheduled'} 逐檔核對重新校正此數，
+ * 修正了 Task 228 之前既已存在、與此清單無關的計數漂移）。
  *
  * <p><b>維護提醒：新增／調整任何 {@code @Scheduled} 時，務必同步更新下方 {@link #JOBS} 清單，避免與實際 cron 漂移。</b>
  * 已非「cron 皆為編譯期常數」——部分排程改為「每分鐘 tick ＋ 比對 DB 可設定時點」，
@@ -48,7 +49,7 @@ public class SchedulePublicBffController {
     private static final String NYC = "America/New_York";
     private static final String LON = "Europe/London";
 
-    /** 全系統排程清單（37 筆）。順序刻意先業務服務、再外部行情服務，前端再依 category 分組。 */
+    /** 全系統排程清單（44 筆）。順序刻意先業務服務、再外部行情服務，前端再依 category 分組。 */
     private static final List<ScheduledJobDto> JOBS = List.of(
             // ===== business-services（12）=====
             new ScheduledJobDto(BUSINESS, "資產快照", "最新快照釘定當日",
@@ -97,9 +98,12 @@ public class SchedulePublicBffController {
                     "刪除 10 年前的股價與匯率歷史",
                     "交易日 17:30", "0 30 17 * * MON-FRI", TPE),
 
-            // ===== external-materials-service（24）=====
+            // ===== external-materials-service（29）=====
             new ScheduledJobDto(EXTERNAL, "即時行情", "台股即時價（盤中）",
                     "盤中每 2 分鐘更新台股即時價至 Redis",
+                    "交易日 09:00–13:00 每 2 分鐘", "0 0/2 9-13 * * MON-FRI", TPE),
+            new ScheduledJobDto(EXTERNAL, "即時行情", "台股大盤即時點位（盤中）",
+                    "盤中每 2 分鐘更新台股大盤（0000）即時點位至 Redis（Task 228）",
                     "交易日 09:00–13:00 每 2 分鐘", "0 0/2 9-13 * * MON-FRI", TPE),
             new ScheduledJobDto(EXTERNAL, "即時行情", "美股即時價（盤中）",
                     "盤中每 2 分鐘更新美股即時價至 Redis",
@@ -184,7 +188,7 @@ public class SchedulePublicBffController {
                     "交易日 05:00–07:00 每 15 分鐘", "0 0/15 5-6 * * MON-FRI；0 0 7 * * MON-FRI", TPE)
     );
 
-    /** GET /api/bff/schedule-list —— 回傳全系統排程清單（37 筆靜態資料）。 */
+    /** GET /api/bff/schedule-list —— 回傳全系統排程清單（44 筆靜態資料）。 */
     @GetMapping
     public List<ScheduledJobDto> list() {
         return JOBS;

@@ -1107,6 +1107,18 @@
 - [ ] **零 AI API 約束不變**：新增的長期與基本面因子一律由本地 DB 的結構化數值計算，不得引入 LLM 判讀財報文字、不得於請求鏈觸發外部抓取。基本面資料由 Requirement 46 的排程預先落地，交易雷達只讀 DB。
 - [ ] **驗證**：單元測試至少覆蓋——正規化後分數恆落在 `[0, 100]`（含全部子因子皆 `+1`、皆 `−1`、以及疊加 `RISK_ON`／`RISK_OFF` 的極端輸入，驗證不再飽和且不觸發 clamp WARN）、缺值權重重分配後實際生效權重總和為 `1`、52 週位置在「現價 > 52 週高」時經 clamp 後仍為 `+1`、ETF 路徑基本面組全 `null`、虧損（有列且 `pe_ratio IS NULL`）計為 `−1` 且優先於歷史不足、`EPS 年增率 = −1` 時 PE 分位回 `null`、EPS 前四季合計 `≤ 0` 回 `null`、新掛牌標的（<750 筆）3 年報酬回 `null` 且不影響其餘子因子、三層動作門檻的邊界值（長期組 `+0.5`／`−0.5` 兩個交界各測上下）、買進硬閘門在分數再高時仍不被繞過。**結構性迴歸判準**（取代「特定標的不得為某動作」的循環論證）：固定其他輸入、僅將長期趨勢組分數由 `−1` 掃到 `+1`，總分須單調遞增且變動幅度 ≥ 短期動能組做同樣掃描時的變動幅度；並輸出全部台股標的的 V4／V5 分數與動作對照表附於任務完成報告。
 
+**Requirement 43 修訂（規則版本 `TW_RULES_V6`，Task 228）—— 大盤盤中即時判斷：**
+
+> **本修訂推翻 Task 217 的「零外部行情抓取」決定，與 Task 223（V5，長期因子與分數飽和修正）為互相獨立的兩個修訂——本修訂只動大盤 regime 的資料新鮮度來源，不改動 Task 223 引入的分組加權評分公式、五個因子組權重或動作門檻分層，`evaluateMarket()`／`MarketInput` 簽名維持不變。** Task 217 當時明文「不得以『補一個即時大盤來源』規避——本 Requirement 明訂零外部行情抓取」，理由是彼時「今日交易雷達」的 User Story 強調零 AI API、零外部呼叫的可重現／可回測特性。使用者於 2026-07-20 重新檢視後，明確要求加入大盤即時資料以改善盤中判斷準確度，並確認願意承擔因此增加的外部依賴（Yahoo Finance）。**保留的原則**：本功能仍不得呼叫任何 AI／LLM API；仍不得因使用者「重新整理」頁面而觸發抓取（抓取一律由獨立背景排程驅動，頁面只讀 Redis／PostgreSQL 既有值，與個股即時價的既有模式一致）。**推翻的原則**：不再要求大盤價完全零外部抓取。
+>
+> - [ ] **大盤盤中即時點位比照個股既有機制**：`0000/台股` 加入 `external-materials-service` 的 Redis 即時價快取（`price:台股:0000`，schema 與個股 `price:{market}:{code}` 相同），不再是 `StockSourceQuery` 明確排除的特例。抓取來源沿用既有的 `MacroDataFetchClient.fetchIndexIntraday("TWSE")`（Yahoo `^TWII` 5 分 K，供「股市大盤查詢」頁「當日走勢」圖表使用的同一支方法，Requirement 18），取該次回傳中最新一筆非 null 收盤點位。排程時段與頻率比照個股台股輪詢（`PricePoller.scheduledTwIntradayUpdate`）：週一～五 09:00–13:30 Asia/Taipei、每 2 分鐘，同樣以 `MarketClock.isTwMarketOpen()` 守門。抓不到有效點位時該輪不寫入，保留 Redis 內上一輪真實值（比照個股 TWSE `z='-'` 的既有慣例，不得以昨收或空值覆寫）。`twse_index_daily_history` 的既有盤後批次寫入（`TwseIndexPoller`）完全不受影響，仍是完成日 K 的唯一權威來源。
+> - [ ] **`MarketSummary.stale` 語意改為「真的沒有任何新鮮資料」**：原 Task 217.1 的 stale 定義（完成日 K 日期 ≠ 當前台股交易日）改為僅在**完成日 K 未到今日、且 Redis 亦無今日即時點位**時才視為 stale。任一者成立即非 stale：完成日 K 已入庫（既有邏輯不變）**或**大盤即時價存在且其 `tradingDate` 為當前台股交易日。stale 時的既有效果全部不變（不給個股 `RISK_ON` 加分、買進閘門關閉、`RISK_OFF` 扣分與 veto 仍生效；Task 223 的大盤環境組貢獻值 `+0.5`／`0`／`−1` 與 stale 閘門互動方式不變，只是 stale 判定本身更容易在盤中提早解除）。
+> - [ ] **MA／KD 與兩日確認的資料口徑不得混用**：大盤即時點位可併入 MA20／60／240、KD 的計算（比照個股既有的「今日尚未入庫時暫加 live K」機制），但**兩收盤日確認（`confirm(closes, 60/240)`）僅能使用 `twse_index_daily_history` 的完成日 K，不得納入即時點位**——這是既有個股邏輯已驗證過的作法（避免盤中價格在均線附近來回造成確認狀態逐 tick 翻轉），大盤必須採同一原則，不得因為新增即時來源而破例。
+> - [ ] **新增 `intraday` 與 `liveUpdatedAt` 欄位**：`MarketSummary` 增加 `intraday`（boolean，true 代表本次 regime 由即時點位計算、而非已入庫完成日 K）與 `liveUpdatedAt`（String，`intraday=true` 時為 Redis 即時價的 `updatedAt`，否則為 null）。既有 `asOfDate` 語意不變，仍為「完成日 K」的日期，不得因為加了即時來源而被即時時間覆蓋。
+> - [ ] **前端文案更新**：大盤卡的 stale 警示文字不得再宣稱「大盤指數只有收盤後才入庫，盤中無即時值」（此說法本修訂後不再成立），改為描述「本次未能取得即時大盤點位，已退回前一交易日資料」的暫時性退化語意。`intraday=true` 時另顯示即時點位的更新時間，與「完成日 K」日期並列、不得互相覆蓋或混淆。
+> - [ ] **規則版本升級**：`TradingRadarRuleEngine.RULE_VERSION` 由 `TW_RULES_V5`（Task 223）升為 `TW_RULES_V6`（前端 fallback 字串同步），因大盤資料新鮮度的判斷邏輯與使用者可觀察行為（盤中買進訊號的出現頻率）有實質變化，比照 Task 217.6／Task 223 的先例。V6 分數與 V5 分數的因子組成、正規化方式完全相同、**不受本修訂影響**，不可比性揭露沿用 Task 223 已建立的機制，不另訂新規則。
+> - [ ] **驗證**：測試須覆蓋「完成日 K 未到今日但 Redis 有今日即時價 → stale=false、intraday=true」「兩者皆無 → stale=true（既有行為不變）」「完成日 K 已到今日 → stale=false、intraday=false（既有行為不變）」「兩日確認只用完成日 K、不受即時點位影響」；`external-materials-service` 須覆蓋「抓不到有效點位時不覆寫 Redis」。
+
 ---
 
 ### Requirement 44: 每檔交易雷達狀態 Email 通知

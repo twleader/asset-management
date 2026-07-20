@@ -136,8 +136,25 @@ public class TradingRadarService {
         try {
             List<TwseIndexDailyHistory> rows = twseRepo.findTopNByOrderByTradingDateDesc(241);
             List<BigDecimal> closes = rows.stream().map(TwseIndexDailyHistory::getClosePoint).toList();
-            BigDecimal price = rows.isEmpty() ? null : rows.get(0).getClosePoint();
-            BigDecimal changePercent = closes.size() >= 2 ? changePercent(closes.get(0), closes.get(1)) : null;
+            LocalDate currentTradingDay = currentTwTradingDay();
+            LocalDate latestEodDate = rows.isEmpty() ? null : rows.get(0).getTradingDate();
+            boolean todayEodPresent = latestEodDate != null && latestEodDate.equals(currentTradingDay);
+
+            Optional<PriceQueryService.LivePrice> liveOpt = priceQueryService.getLive(TAIEX_CODE, TW_MARKET);
+            boolean liveFreshToday = !todayEodPresent && liveOpt.isPresent()
+                    && liveOpt.get().tradingDate() != null
+                    && currentTradingDay.toString().equals(liveOpt.get().tradingDate());
+
+            BigDecimal price;
+            BigDecimal changePercent;
+            if (liveFreshToday) {
+                price = liveOpt.get().price();
+                changePercent = closes.isEmpty() ? null : changePercent(price, closes.get(0));
+            } else {
+                price = closes.isEmpty() ? null : closes.get(0);
+                changePercent = closes.size() >= 2 ? changePercent(closes.get(0), closes.get(1)) : null;
+            }
+
             TechnicalIndicatorService.FullIndicators ind = indicatorService.computeAll(TAIEX_CODE, TW_MARKET);
             TradingRadarRuleEngine.Confirmation c60 = ruleEngine.confirm(closes, 60);
             TradingRadarRuleEngine.Confirmation c240 = ruleEngine.confirm(closes, 240);
@@ -149,10 +166,10 @@ public class TradingRadarService {
                             c60,
                             c240));
 
-            // 大盤只有完成日資料（0000 被排除於即時抓價之外），停在更早的交易日即為 stale（Task 217.1）。
-            boolean stale = rows.isEmpty()
-                    || !rows.get(0).getTradingDate().equals(currentTwTradingDay());
+            // stale＝「完成日 K 未到今日」且「Redis 也無今日即時價」時才成立；任一者成立即非 stale（Task 228）。
+            boolean stale = !todayEodPresent && !liveFreshToday;
             String asOf = rows.isEmpty() ? null : rows.get(0).getTradingDate().toString();
+            String liveUpdatedAt = liveFreshToday ? liveOpt.get().updatedAt() : null;
             TradingRadarDto.MarketSummary summary = new TradingRadarDto.MarketSummary(
                     result.regime().name(),
                     regimeLabel(result.regime()),
@@ -170,7 +187,9 @@ public class TradingRadarService {
                     c60.name(),
                     c240.name(),
                     result.reasons(),
-                    result.risks());
+                    result.risks(),
+                    liveFreshToday,
+                    liveUpdatedAt);
             return new MarketState(summary, result.regime(), stale);
         } catch (Exception e) {
             log.warn("今日交易雷達：大盤資料組裝失敗", e);
@@ -484,7 +503,9 @@ public class TradingRadarService {
                 TradingRadarRuleEngine.Confirmation.UNAVAILABLE.name(),
                 TradingRadarRuleEngine.Confirmation.UNAVAILABLE.name(),
                 List.of(),
-                List.of(message));
+                List.of(message),
+                false,
+                null);
         // 讀不到大盤時保守視為 stale：買進閘門一律關閉。
         return new MarketState(summary, TradingRadarRuleEngine.MarketRegime.DATA_INCOMPLETE, true);
     }

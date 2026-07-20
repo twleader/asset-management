@@ -15,7 +15,8 @@ import java.util.List;
 @Component
 public class TradingRadarRuleEngine {
 
-    public static final String RULE_VERSION = "TW_RULES_V5";
+    /** V6：大盤 regime 新鮮度擴充為可即時判斷（Task 228，Requirement 43 修訂）；股票分數公式本身未變。 */
+    public static final String RULE_VERSION = "TW_RULES_V6";
 
     // ─── V5 因子權重（Requirement 43 修訂／Requirement 47）────────────────────────────
     // V4 為「base 50 + 各因子直接加減 + 硬 clamp」，理論值域 −36~+124：均線六項全滿即 +58，

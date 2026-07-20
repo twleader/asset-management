@@ -267,6 +267,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 225 | 還原權息序列支援股票分割，並排除非正收盤列（Requirement 43 修訂；**t223 的前置任務**）**⚠ spec 審查未通過，有已知的靜默失敗風險，不得進入實作** | [tasks/t225_split_adjusted_series.md](tasks/t225_split_adjusted_series.md) |
 | 226 | 新增「分批試單」動作，解決長線佳＋短線超賣無法產生買進建議的結構互斥（Requirement 43 修訂；前置 t223）**⚠ 尚未送審** | [tasks/t226_trial_buy_oversold_path.md](tasks/t226_trial_buy_oversold_path.md) |
 | 227 | 匯率曝險與換匯估值納入交易雷達評分（Requirement 47；前置 t223）**⚠ 尚未送審** | [tasks/t227_fx_exposure_factor.md](tasks/t227_fx_exposure_factor.md) |
+| 228 | 大盤盤中即時判斷（`TW_RULES_V6`，Requirement 43 修訂） | [t228_taiex_intraday_market_signal.md](tasks/t228_taiex_intraday_market_signal.md) |
 
 > **Task 222–225 全部尚未通過 `/spec-review` 閘門，一律不得進入實作。**
 >
@@ -274,6 +275,8 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 >
 > - **Task 222**（6/10）：三個 Critical——驗證段的 `mvn -pl` 指令在本專案無法執行（無 root pom，三個模組各自獨立）；business-services 未啟用 actuator 故健康檢查回 500；`security_type` 免設定頁的例外聲明被同一 entity 上結構同構的 `stock_style` 反證（後者有完整設定表＋seed＋端點＋前端頁）。另有「資料驅動 ETF 判定」未指名資料來源等 6 個 Major。
 > - **Task 223／224／225**（7/10）：t225 兩個 Critical——`DistributionAdjustedPriceService.adjust()` 的 early-return 會使無除權息紀錄的標的（如 2327，全庫兩筆真分割之一）永遠偵測不到分割；驗證段查詢了不存在的 JSON 欄位而使迴歸判準恆為通過。t223 有四個 Major（85 門檻推導錯誤、over-fetch 未指定、`complete()` 閘門、與逆勢抄底軌重疊未處理）。
+>
+> **上表 Task 223／226／227 的「未通過／尚未送審」標記與 `TradingRadarRuleEngine.java` 現況不一致**（該檔 `RULE_VERSION` 已是 `TW_RULES_V5`，`Action.TRIAL_BUY`、`fxPercentile` 等皆已存在於程式碼）——這是 Task 228 合併 `origin/main` 時發現的既有 spec／程式碼漂移，非 Task 228 造成，本次合併不處理，留待該任務自行同步。
 
 ---
 

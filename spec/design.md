@@ -112,7 +112,7 @@ com.steven.assets/
   - `FundSettingsBffController`：`GET /api/bff/fund-settings/bank-options` → 過濾 active 後的銷售銀行下拉；與 SnapshotForm 的 lookups **同讀 business `/api/settings/banks`**（同義欄位同一來源），fund-settings 頁不再跨頁呼叫 `/api/bff/snapshot-form/lookups`（Task 175：一頁一 BFF 合規化）
   - `RealizedGainBffRoutes`：`/api/realized-gains/**` → business-services。**目前無前端消費者**：原「RealizedGainView 的 Pinia store `gainApi` 共用 CRUD」說法已不成立——該頁已全面走 `RealizedGainBffController` 的 `/api/bff/realized-gain` 聚合端點，前端 `gainApi` wrapper 與 `assetStore` 的三個已實現損益 action 已於 Task 197 移除。route 本身暫留（移除需重建 BFF 服務），**屬待清理項**
   - `MarketDataBffRoutes`：`/api/market-data/**` → business-services。目前**唯一**消費者是 DashboardView 的 SSE 行情串流（`new EventSource('/api/market-data/prices/stream')`，見下方 SSE 段落之已知落差）；`marketDataApi` wrapper（歷史/配息/ETF 成分股）無呼叫端，已於 Task 197 移除，該類查詢皆走 `StockAnalysisBffRoutes` 的 `/api/bff/stock-analysis/**`
-  - `SchedulePublicBffController`（ScheduleListView 專屬，「公開資訊」分組，Requirement 36）：`GET /api/bff/schedule-list` → 回傳系統所有自動排程的**人工維護靜態清單**（`ScheduledJobDto` 不可變 record：service / category / name / description / schedule 白話 / cron / zone），共 **36 筆** ＝ `business-services` 12 ＋ `external-materials-service` 24（**以 `@Scheduled` 方法計**；external 實際 25 個標註，`TwClosurePoller` 一法兩標併為一筆）。此頁為唯讀資訊展示故不做跨服務反射探索、不入 DB、不設管理端點；**新增／調整任何 `@Scheduled` 須同步更新此清單以免漂移**（Task 195 修正 Task 190／191 漏同步之兩處漂移；Task 196.12 新增一筆 JOBS 後僅更新 javadoc 表頭、漏同步總數與本段，於 Task 197 一併修正為 36）。**動態排程**（每分鐘 tick 比對 DB 可設定時點：`NewsPoller`→`crawler_schedule`、`MarketAnalysisScheduler`→`market_analysis_send_time`）於清單標「動態：依『X』頁設定（預設 …）」／「動態（表名）」，**不寫死時間**；每分鐘 tick 但時點為 per-user 私人設定者（`ExportScheduleService`／`TradingCalendarExportScheduleService`）則照列 `每分鐘`／`0 * * * * *` 實際 cron。前端 `ScheduleListView` 之服務別／分類計數由 payload 動態算出，故加減筆數無須改前端。無下游呼叫（不需 WebClient），落 BFF `anyExchange().authenticated()`（已登入者皆可讀）。
+  - `SchedulePublicBffController`（ScheduleListView 專屬，「公開資訊」分組，Requirement 36）：`GET /api/bff/schedule-list` → 回傳系統所有自動排程的**人工維護靜態清單**（`ScheduledJobDto` 不可變 record：service / category / name / description / schedule 白話 / cron / zone），共 **44 筆** ＝ `business-services` 15 ＋ `external-materials-service` 29（**以 `@Scheduled` 方法計**；external 實際 30 個標註，`TwClosurePoller` 一法兩標併為一筆）。此頁為唯讀資訊展示故不做跨服務反射探索、不入 DB、不設管理端點；**新增／調整任何 `@Scheduled` 須同步更新此清單以免漂移**（Task 195 修正 Task 190／191 漏同步之兩處漂移；Task 196.12 新增一筆 JOBS 後僅更新 javadoc 表頭、漏同步總數與本段，於 Task 197 一併修正為 36；本段之後歷經多個任務累積新增排程未同步更新此總數，Task 228 新增大盤盤中即時點位排程時以 `grep '@Scheduled'` 逐檔核對重新校正為 44——12／24 兩數字皆已是 Task 228 之前即存在的計數漂移，非本次新增所致）。**動態排程**（每分鐘 tick 比對 DB 可設定時點：`NewsPoller`→`crawler_schedule`、`MarketAnalysisScheduler`→`market_analysis_send_time`）於清單標「動態：依『X』頁設定（預設 …）」／「動態（表名）」，**不寫死時間**；每分鐘 tick 但時點為 per-user 私人設定者（`ExportScheduleService`／`TradingCalendarExportScheduleService`）則照列 `每分鐘`／`0 * * * * *` 實際 cron。前端 `ScheduleListView` 之服務別／分類計數由 payload 動態算出，故加減筆數無須改前端。無下游呼叫（不需 WebClient），落 BFF `anyExchange().authenticated()`（已登入者皆可讀）。
   - `CrawlerDataBffController`（CrawlerDataView 專屬，「公開資訊」分組，Requirement 38）：爬蟲資訊查詢頁，一頁一 BFF、WebClient 轉呼 business：
     - `GET /api/bff/crawler-data?date=YYYY-MM-DD&dateField=fetched|published&category=` → business `GET /api/news-headlines`：查指定日期爬回的 `news_headline`（與今日股市分析同讀一份表，符合「同義欄位、同一 business API」）。
     - `GET /api/bff/crawler-data/schedule` → business `GET /api/crawler-schedule?crawler=news-poller`：讀 NewsPoller 已設定的執行時間清單。
@@ -165,6 +165,7 @@ com.steven.assets.externalmaterials/
 │   ├── MarketClock     # isTwMarketOpen / isUsMarketOpen（平日 + 時段 + 假日；委派 MarketCalendar 判假日）
 │   ├── MarketCalendar  # 交易日 / 國定假日判定（台股→TWSE holidaySchedule；美/英→NYSE/LSE 純函式）
 │   ├── PriceCacheWriter # 寫入 Redis（封裝 key schema）
+│   ├── TaiexIndexPoller # 大盤盤中即時點位 → Redis（Task 228，見 Requirement 43 修訂 V6）
 │   ├── FundNavPoller   # 信託基金 NAV 每日 cron（Requirement 19）
 │   └── FundNavPersister # 寫 fund_nav 表
 ├── client/
@@ -189,7 +190,7 @@ com.steven.assets.externalmaterials/
 **Redis key schema：**
 | Key | 內容 | TTL | 寫入者 |
 |-----|------|-----|--------|
-| `price:{market}:{code}` | JSON `{ price, prevClose, changePercent, open, high, low, volume, tradingDate, source, updatedAt }` | 24 小時（涵蓋整個交易日 + 跨夜，避免低流動性股票長時間 z='-' 後 TTL 過期退回昨收） | `PriceCacheWriter` 每 2 分鐘 |
+| `price:{market}:{code}` | JSON `{ price, prevClose, changePercent, open, high, low, volume, tradingDate, source, updatedAt }` | 24 小時（涵蓋整個交易日 + 跨夜，避免低流動性股票長時間 z='-' 後 TTL 過期退回昨收） | `PriceCacheWriter` 每 2 分鐘；`price:台股:0000`（大盤）自 Task 228 起亦納入同一 key schema，寫入者為 `TaiexIndexPoller`，`source` 標記含括號（如 `TWSE指數(5m)`）故不進 `IntradayTickStore`（那條 tick 序列供個股「今日走勢」用，與大盤既有的 transient `fetchIndexIntraday` 圖表資料源分離，不混用） |
 | `price:index:{market}` | Set，紀錄該市場所有有 cache 的 stockCode | 24 小時 | 同上 |
 | `price:dayhl:{market}:{code}:{tradingDate}` | JSON `{ high, low }` 該交易日累積觀察到的最高 / 最低成交價 | 36 小時（跨日 dump 後仍可佐證） | `IntradayHighLowTracker` 每次 cron tick |
 | `market:status` | JSON `{ twMarketOpen, usMarketOpen, twTime, usTime }` | 90s（短於輪詢） | `MarketClock` 每分鐘 |
@@ -3181,14 +3182,14 @@ TradingRadarView
        ├─ StockRepository + AssetClassifier（有效 STOCK／BOND 類別）
        ├─ StockDividendHistoryRepository（完成日 K 區間內除權息事件）
        ├─ DistributionAdjustedPriceService（還原權息 OHLC 純計算）
-       ├─ TechnicalIndicatorService（以同一序列計算 MA20／60／240、KD）
+       ├─ TechnicalIndicatorService（以同一序列計算 MA20／60／240、KD；大盤走 twse_index_daily_history + Redis 即時價）
        ├─ AssetSnapshotRepository.findLatestWithStocks（當前持股，owner-scoped）
        ├─ StockAlertRepository.findDistinctStockCodeMarket（觀察，owner-scoped）
-       ├─ PriceQueryService（只讀 Redis；miss → stock_price_history）
-       └─ TradingRadarRuleEngine（TW_RULES_V3，純函式規則）
+       ├─ PriceQueryService（只讀 Redis；miss → stock_price_history；`0000/台股` 自 Task 228 起亦可命中）
+       └─ TradingRadarRuleEngine（TW_RULES_V3 分數規則不變，RULE_VERSION 現為 TW_RULES_V6）
 ```
 
-本請求鏈**刻意不注入** `MarketAnalysisService`、LLM SDK、新聞爬蟲或任何 refresh endpoint。頁面按「重新整理」只重讀既有資料，不對外抓行情、不送出 Batch、不產生 AI 費用。現有行情／大盤排程若在背景更新 PostgreSQL 或 Redis，雷達下次讀取自然看見新值；兩者生命週期分離。
+本請求鏈**刻意不注入** `MarketAnalysisService`、LLM SDK、新聞爬蟲或任何 refresh endpoint。頁面按「重新整理」只重讀既有資料，不對外抓行情、不送出 Batch、不產生 AI 費用；大盤即時點位同樣由獨立背景排程（`TaiexIndexPoller`，見「大盤新鮮度與盤中即時判斷」小節）寫入 Redis，不是本請求鏈觸發的抓取。現有行情／大盤排程若在背景更新 PostgreSQL 或 Redis，雷達下次讀取自然看見新值；兩者生命週期分離。
 
 ### 標的選取與 owner 隔離
 
@@ -3199,7 +3200,7 @@ TradingRadarView
 新增 `TradingRadarDto` 純 response records：
 
 - `Response`：`ruleVersion`、`generatedAt`、`market`、`stocks`、`skippedNonTwStocks`。
-- `MarketSummary`：`regime`、`regimeLabel`、`score`、`dataComplete`、`asOfDate`、點位／漲跌幅、MA20／60／240、K／D、MA60／240 兩日確認、`reasons`、`risks`。
+- `MarketSummary`：`regime`、`regimeLabel`、`score`、`dataComplete`、`stale`（Task 217，見下方「大盤新鮮度與盤中即時判斷」）、`intraday`／`liveUpdatedAt`（Task 228，同小節）、`asOfDate`、點位／漲跌幅、MA20／60／240、K／D、MA60／240 兩日確認、`reasons`、`risks`。
 - `StockDecision`：code／name／market、`assetClass`、`distributionAdjusted`、`held`、`action`／`actionLabel`、`score`、`counterTrendState`／`counterTrendLabel`、`counterTrendReasons`／`counterTrendRisks`、`dataComplete`、報價／漲跌幅／更新時間／`asOfDate`、MA20／60／240、K／D、MA20／60／240 兩日確認、`reasons`、`risks`。
 
 無新 entity／table／migration；分數與建議皆為可重算的衍生值，不持久化，符合正規化原則。
@@ -3232,6 +3233,38 @@ adjustedOHLC(date) = rawOHLC(date) * sharesAtDate / finalShares
 - 一上一下或等於均線 → `MIXED`；資料不足 → `UNAVAILABLE`。
 
 最新價相對均線的分數使用 `TechnicalIndicatorService.computeFromSeries()` 對還原權息序列算出的當前指標；若 Redis 有尚未入庫的今日盤中價，該 live K 只合入當前 MA／KD，不進兩日確認。兩日確認只讀完成日 K，避免盤中假突破被當成正式確認。
+
+### 大盤新鮮度與盤中即時判斷（Task 217 stale gate → Task 228 即時化，`TW_RULES_V4`→`V6`）
+
+**Task 217（V4，既有行為，先前未寫入本文件）：** `twse_index_daily_history` 只有完成日 OHLC，盤後批次（`TwseIndexPoller`）才寫入當日列。`TradingRadarService.buildMarket()` 以既有交易日曆（`MarketDataService.isTradingDay`）解析「當前台股交易日」`currentTwTradingDay()`：非交易日往回找最近一個交易日。若最新完成日 K 的 `tradingDate` 不等於這個值，`MarketSummary.stale=true`。stale 時：不給個股 `RISK_ON` 的 `+8` 加分、買進閘門一律關閉（不得產生 `BUY_CANDIDATE`／`ADD_CANDIDATE`）、但 `RISK_OFF` 的 `-15` 扣分與 veto 仍生效（只收緊不放寬，經 `TradingRadarRuleEngine.StockInput.marketStale` 傳遞）。
+
+**Task 228（V6，本次修訂）：** 大盤加入 Redis 即時價（`price:台股:0000`），寫入者為 `external-materials-service` 新增的 `TaiexIndexPoller`：
+
+```text
+TaiexIndexPoller（週一～五 09:00–13:30 Asia/Taipei，每 2 分鐘，MarketClock.isTwMarketOpen() 守門）
+  → MacroDataFetchClient.fetchIndexIntraday("TWSE")   ← 既有方法，Yahoo ^TWII 5 分 K（Requirement 18 同一來源）
+  → 取最新一筆非 null 收盤點位；查無則整輪不寫（保留 Redis 上一輪真實值，比照個股 z='-' 慣例）
+  → previousClose = StockSourceQuery.loadRecentTaiexCloses(1) 的最近一筆完成日收盤
+  → PriceCacheWriter.write(PriceResult{code=0000, market=台股, source 含括號如 "TWSE指數(5m)", ...}, markClosed=false)
+       → price:台股:0000（TTL 24h，schema 與個股相同）；source 含 "(" 故不進 IntradayTickStore
+```
+
+`TwseIndexPoller`（既有的盤後 TWSE FMTQIK 月報批次寫入 `twse_index_daily_history`）完全不受影響，仍是完成日 K 的唯一權威來源；`TaiexIndexPoller` 只餵 Redis 的盤中即時層。
+
+`TechnicalIndicatorService.computeAllForTaiex()` 比照既有 `computeAll()` 對一般個股的既有作法：完成日序列最新一筆非今日時，查 `PriceQueryService.getLive("0000","台股")`，若其 `tradingDate` 為今日則暫加一筆合成列（`close/high/low` 取自 live price，缺值以 close 補）到序列最前，MA20／60／240 與當期 KD 皆含這筆；`taiexKd` 算前一期時排除這筆，維持既有「當期 vs 前一期」語意。
+
+`TradingRadarService.buildMarket()` 的 `stale` 判定改為：
+
+```java
+boolean todayEodPresent = latestEodDate != null && latestEodDate.equals(currentTwTradingDay());
+boolean liveFreshToday = !todayEodPresent && liveOpt.isPresent()
+        && currentTwTradingDay().toString().equals(liveOpt.get().tradingDate());
+boolean stale = !todayEodPresent && !liveFreshToday;
+```
+
+即「完成日 K 已到今日」或「Redis 有今日即時價」任一成立即非 stale。`price`／`changePercent` 在 `liveFreshToday` 時取即時價（相對最近一根**完成日**收盤算漲跌幅，避免跟自己比較）；`ruleEngine.confirm(closes, 60/240)` 用的 `closes` 序列**維持只含完成日 K**，不因新增即時來源而破例——這是 Task 217.3 已驗證過的原則（避免盤中價格在均線附近來回造成確認狀態逐 tick 翻轉），大盤與個股適用同一原則。`MarketSummary` 新增 `intraday`（regime 是否由即時點位算出）與 `liveUpdatedAt`（Redis 即時價的 `updatedAt`，非 intraday 時為 null）；既有 `asOfDate` 語意不變，仍指完成日 K 的日期。
+
+前端 `TradingRadarView.vue` 的 stale 警示文案不再宣稱「盤中無即時值」（V6 起不再成立），改為「本次未能取得即時大盤點位，已退回前一交易日資料」的暫時性退化語意；`intraday=true` 時另外顯示即時點位更新時間，與「完成日 K」並列。`TradingRadarRuleEngine.RULE_VERSION` 由 `TW_RULES_V4` 升為 `TW_RULES_V6`（分數公式本身不變，只有輸入資料的新鮮度與 stale 語意變化，比照 Task 217.6 先例仍需升版以利前端與使用者辨識行為變化）。
 
 ### 規則引擎 `TW_RULES_V3`
 
@@ -3270,6 +3303,8 @@ adjustedOHLC(date) = rawOHLC(date) * sharesAtDate / finalShares
 - `TradingRadarRuleEngineTest`：確認 period+1 邊界、ABOVE／BELOW／MIXED／UNAVAILABLE、分數上下界、買進門檻與 `RISK_OFF` veto、held action mapping、incomplete veto。
 - `TradingRadarRuleEngineTest` V2：以 009804 型輸入確認主分數／出場候選不變但 counter-trend=`OVERSOLD_WATCH`；確認只有真實低檔黃金交叉＋停止續跌才是 `TRIAL_CANDIDATE`，未交叉、仍下跌、年線失守、資料不足皆不可誤判。
 - `DistributionAdjustedPriceServiceTest`／`TradingRadarRuleEngineTest` V3：以 00751B 型除息序列證明原始季／年線跌破在還原後不再誤判；最新價保持原值、無事件完全不改值、現金／股票配息因子正確；`BOND` 不吃台股 `RISK_OFF` 扣分／閘門／veto，`EQUITY` 行為維持 V2。
+- `TradingRadarRuleEngineTest` V4：stale 時不給 `RISK_ON` 加分且關閉買進閘門、stale 時 `RISK_OFF` 仍 veto、逆勢 `stabilized` 改讀完成日漲跌幅後盤中不翻轉。
+- 新增測試（`TradingRadarService`／`TechnicalIndicatorService` 大盤即時融合邏輯，Task 228，V6）：完成日 K 未到今日但 Redis 有今日即時價 → `stale=false`、`intraday=true`；兩者皆無 → `stale=true`（既有行為不變）；完成日 K 已到今日 → `stale=false`、`intraday=false`（既有行為不變）；兩日確認（`c60`／`c240`）只用完成日 K、不受即時點位影響。`external-materials-service` 大盤盤中輪詢新增測試：抓不到有效點位時不覆寫 Redis（保留上一輪真實值）。
 - 前端正式建置後確認 `TradingRadarView` chunk 含 `/api/market-data/prices/stream` 與 `price-update`；執行環境確認 SSE endpoint 可建立 `text/event-stream` 回應，且離頁清理與背景重算不觸發 refresh endpoint。
 - 建置：backend test/package、BFF package、frontend build。
 - 執行環境：重建 business／BFF／frontend 後確認 health；以已登入頁面或帶有效 user header 的容器內診斷確認 payload owner-scoped。檢查 business log 與程式依賴，證明 `/api/trading-radar` request 不進 `MarketAnalysisService`、不產生 Anthropic batch。
@@ -3334,7 +3369,7 @@ setting `initialized=false` 時，第一次評估只寫入目前 action／counte
 
 三個獨立缺陷，共同根因是「即時值與完成日值混用時缺少新鮮度與穩定性的把關」：
 
-1. **大盤 regime 盤中恆為前一交易日**。`buildMarket()` 只讀 `twse_index_daily_history`（收盤後才入庫），而 `buildStock()` 走 Redis 即時價。`0000/台股` 在 `StockSourceQuery` 被明確排除於即時抓價之外，Redis 內 `price:index:台股` 只是「有哪些代號有 cache」的 SET，**不存在大盤即時價**。故此缺陷無法以「改讀即時來源」修復，只能以新鮮度閘門處理。
+1. **大盤 regime 盤中恆為前一交易日**。`buildMarket()` 只讀 `twse_index_daily_history`（收盤後才入庫），而 `buildStock()` 走 Redis 即時價。`0000/台股` 在 `StockSourceQuery` 被明確排除於即時抓價之外，Redis 內 `price:index:台股` 只是「有哪些代號有 cache」的 SET，**不存在大盤即時價**。故此缺陷（Task 217 當時）無法以「改讀即時來源」修復，只能以新鮮度閘門處理。**此結論已被 Task 228 推翻**：新增 `TaiexIndexPoller` 把大盤盤中點位寫入 `price:台股:0000`，詳見下方「大盤新鮮度與盤中即時判斷」小節；本段落保留作為 Task 217 當時的歷史脈絡，不代表現況。
 2. **逆勢升級用盤中漲跌幅判定止跌**。`stabilized = changePercent >= 0` 是逆勢軌唯一會隨盤中變動的判定項（`lowKd`／`goldenCross` 皆來自不含 live 的完成日序列），零交叉造成逐 tick 翻轉。
 3. **通知轉入判斷無去抖、無上限、無冷卻**，且暫時性失敗被寫入 baseline。
 
