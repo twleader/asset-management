@@ -3,6 +3,7 @@ package com.steven.assets.service;
 import com.steven.assets.dto.TradingRadarDto;
 import com.steven.assets.model.TwseIndexDailyHistory;
 import com.steven.assets.repository.AssetSnapshotRepository;
+import com.steven.assets.repository.ExchangeRateHistoryRepository;
 import com.steven.assets.repository.StockAlertRepository;
 import com.steven.assets.repository.StockDividendHistoryRepository;
 import com.steven.assets.repository.StockPriceHistoryRepository;
@@ -32,7 +33,7 @@ import static org.mockito.Mockito.when;
 
 /**
  * TradingRadarService.buildMarket() 的大盤 stale／intraday 判斷（Task 228，Requirement 43 修訂 V6）。
- * ruleEngine 用真實 TradingRadarRuleEngine（純函式、無副作用），其餘 11 個建構子依賴皆 mock，
+ * ruleEngine 用真實 TradingRadarRuleEngine（純函式、無副作用），其餘 12 個建構子依賴皆 mock，
  * 只隔離出大盤區塊：holdings／watchlist 一律回空，get() 因此只組裝 market，stocks 恆為空 list。
  */
 @ExtendWith(MockitoExtension.class)
@@ -51,6 +52,7 @@ class TradingRadarMarketFreshnessTest {
     @Mock private StockAlertRepository alertRepo;
     @Mock private StockRepository stockRepo;
     @Mock private MarketDataService marketDataService;
+    @Mock private ExchangeRateHistoryRepository exchangeRateRepo;
 
     private TradingRadarService newService() {
         return new TradingRadarService(
@@ -65,7 +67,8 @@ class TradingRadarMarketFreshnessTest {
                 snapshotRepo,
                 alertRepo,
                 stockRepo,
-                marketDataService);
+                marketDataService,
+                exchangeRateRepo);
     }
 
     /** 建 241 筆「由新到舊」完成日收盤：closes[i] = base+i，i 越大代表越久以前、收盤越高（近期下跌趨勢）。 */

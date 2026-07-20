@@ -395,7 +395,7 @@ cd backend && /usr/local/apache-maven/apache-maven-3.9.11/bin/mvn -q test -Dtest
    - `twseDailyRepo` 最新一列已是今日 → 不重複融合即時價（即使 `priceQuery.getLive` 也回今日資料）。
    - `priceQuery.getLive` 回傳 `Optional.empty()` 或 `tradingDate` 非今日 → 行為與 Task 217 之前完全一致（純讀 `twse_index_daily_history`）。
 
-2. 新增一個測試檔於 `backend/src/test/java/com/steven/assets/service/`，涵蓋 `TradingRadarService.buildMarket()` 的新行為（`TradingRadarService` 建構子共 12 個 `private final` 依賴，全部要 mock 出來；其餘與大盤無關的欄位可回傳空集合／`Optional.empty()` 以隔離測試範圍到 `buildMarket()`）：
+2. 新增一個測試檔於 `backend/src/test/java/com/steven/assets/service/`，涵蓋 `TradingRadarService.buildMarket()` 的新行為（`TradingRadarService` 建構子依賴數量以實際原始碼為準——寫這份任務檔時是 12 個，Task 223 併入 main 後新增 `ExchangeRateHistoryRepository` 變成 13 個，實作或之後合併衝突時請重新核對，全部要 mock 出來；其餘與大盤無關的欄位可回傳空集合／`Optional.empty()` 以隔離測試範圍到 `buildMarket()`）：
    - `MarketDataService.isTradingDay("台股", any())` 要 stub 成 `true`，讓 `currentTwTradingDay()` 解析為 `LocalDate.now(Asia/Taipei)`，測試斷言才有意義。
    - `AssetSnapshotRepository.findLatestWithStocks()` 回 `Optional.empty()`、`StockAlertRepository.findDistinctStockCodeMarket()` 回空 list，讓 `get()` 只需組裝大盤區塊即可回傳。
    - 情境一：`twseRepo` 最新列非今日、`priceQueryService.getLive("0000","台股")` 回今日即時價 → 斷言 `market.stale=false`、`market.intraday=true`、`market.liveUpdatedAt` 非 null。
