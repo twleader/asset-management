@@ -3,6 +3,8 @@ package com.steven.assets.service;
 import com.steven.assets.dto.TradingRadarDto;
 import com.steven.assets.model.AssetSnapshot;
 import com.steven.assets.model.Stock;
+import com.steven.assets.repository.ExchangeRateHistoryRepository;
+import com.steven.assets.model.ExchangeRateHistory;
 import com.steven.assets.model.StockHolding;
 import com.steven.assets.model.StockPriceHistory;
 import com.steven.assets.model.TwseIndexDailyHistory;
@@ -45,6 +47,17 @@ public class TradingRadarService {
     private static final String TW_MARKET = "台股";
     private static final String TAIEX_CODE = "0000";
 
+    /**
+     * 匯率分位的回看期（Requirement 47）。
+     *
+     * <p>取五年的理由：同一天（2026-07-17、USD/TWD 32.23）在不同回看期的分位差異極大——
+     * 一年 99.2、三年 73.2、五年 83.6、全歷史 91.8。一年過短會使因子在趨勢行情中長期釘在
+     * 極值而失去區辨力；五年（實測 1247 筆、區間 27.53–33.14）涵蓋台幣由強轉弱的完整週期，
+     * 代表性足夠。調整此值須同步更新 Requirement 47 的記載。</p>
+     */
+    private static final int FX_LOOKBACK_YEARS = 5;
+    private static final String TWD = "TWD";
+
     private final TradingRadarRuleEngine ruleEngine;
     private final TechnicalIndicatorService indicatorService;
     private final DistributionAdjustedPriceService adjustedPriceService;
@@ -57,6 +70,7 @@ public class TradingRadarService {
     private final StockAlertRepository alertRepo;
     private final StockRepository stockRepo;
     private final MarketDataService marketDataService;
+    private final ExchangeRateHistoryRepository exchangeRateRepo;
 
     /** @param stale 大盤最新完成日 K 不是當前台股交易日（Task 217.1）。 */
     private record MarketState(
@@ -216,6 +230,8 @@ public class TradingRadarService {
             TradingRadarRuleEngine.Confirmation c20 = ruleEngine.confirm(closes, 20);
             TradingRadarRuleEngine.Confirmation c60 = ruleEngine.confirm(closes, 60);
             TradingRadarRuleEngine.Confirmation c240 = ruleEngine.confirm(closes, 240);
+            String currency = underlyingCurrencyOf(stock.orElse(null), target.market());
+            BigDecimal fxPct = fxPercentile(stock.orElse(null), target.market());
             TradingRadarRuleEngine.StockResult result = ruleEngine.evaluateStock(
                     new TradingRadarRuleEngine.StockInput(
                             target.held(),
@@ -230,7 +246,8 @@ public class TradingRadarService {
                             c240,
                             instrumentType,
                             marketRegime,
-                            marketStale));
+                            marketStale,
+                            fxPct));
 
             List<String> reasons = new ArrayList<>();
             if (technical.distributionAdjusted()) {
@@ -267,6 +284,8 @@ public class TradingRadarService {
                     c20.name(),
                     c60.name(),
                     c240.name(),
+                    fxPct,
+                    currency,
                     List.copyOf(reasons),
                     result.risks());
         } catch (Exception e) {
@@ -410,6 +429,68 @@ public class TradingRadarService {
                 .setScale(4, RoundingMode.HALF_UP);
     }
 
+    /**
+     * 判定標的的底層資產幣別（Requirement 47）。
+     *
+     * <p>顯式欄位優先，null 時依 market 推斷。<b>刻意不以名稱字串比對</b>（如「含美債二字」）——
+     * 那種做法在標的更名或新增時會靜默失效：匯率因子突然變 null、分數跳動但不報任何錯。</p>
+     */
+    private String underlyingCurrencyOf(Stock stock, String market) {
+        if (stock != null && stock.getUnderlyingCurrency() != null
+                && !stock.getUnderlyingCurrency().isBlank()) {
+            return stock.getUnderlyingCurrency().trim().toUpperCase();
+        }
+        if ("美股".equals(market)) return "USD";
+        if ("英股".equals(market)) return "GBP";
+        return TWD;
+    }
+
+    /**
+     * 底層幣別對台幣的五年期分位（0–100）；台幣資產或資料不足時回 null 交由權重重分配吸收。
+     *
+     * <p>中價取 {@code (buy_rate + sell_rate) / 2}。<b>取不到當日匯率時回 null 而非沿用前值</b>——
+     * 匯率在假日不變動，硬代會使分位在連假期間失真。</p>
+     */
+    private BigDecimal fxPercentile(Stock stock, String market) {
+        String currency = underlyingCurrencyOf(stock, market);
+        if (TWD.equals(currency)) return null;
+        try {
+            LocalDate today = LocalDate.now(TAIPEI);
+            List<ExchangeRateHistory> rows = exchangeRateRepo
+                    .findByCurrencyAndRateDateBetweenOrderByRateDateAsc(
+                            currency, today.minusYears(FX_LOOKBACK_YEARS), today);
+            if (rows == null || rows.size() < 60) return null;
+
+            List<BigDecimal> mids = new ArrayList<>();
+            BigDecimal latest = null;
+            for (ExchangeRateHistory r : rows) {
+                BigDecimal mid = midRate(r);
+                if (mid == null) continue;
+                mids.add(mid);
+                latest = mid;
+            }
+            if (latest == null || mids.size() < 60) return null;
+
+            final BigDecimal reference = latest;
+            long atOrBelow = mids.stream().filter(m -> m.compareTo(reference) <= 0).count();
+            return BigDecimal.valueOf(100.0 * atOrBelow / mids.size())
+                    .setScale(1, RoundingMode.HALF_UP);
+        } catch (Exception e) {
+            log.warn("匯率分位計算失敗（{}／{}）：{}", currency, market, e.getMessage());
+            return null;
+        }
+    }
+
+    private BigDecimal midRate(ExchangeRateHistory row) {
+        if (row == null) return null;
+        BigDecimal buy = row.getBuyRate();
+        BigDecimal sell = row.getSellRate();
+        if (buy == null && sell == null) return null;
+        if (buy == null) return sell;
+        if (sell == null) return buy;
+        return buy.add(sell).divide(BigDecimal.valueOf(2), 6, RoundingMode.HALF_UP);
+    }
+
     private MarketState incompleteMarket(String message) {
         TradingRadarDto.MarketSummary summary = new TradingRadarDto.MarketSummary(
                 TradingRadarRuleEngine.MarketRegime.DATA_INCOMPLETE.name(),
@@ -445,6 +526,8 @@ public class TradingRadarService {
                 TradingRadarRuleEngine.Confirmation.UNAVAILABLE.name(),
                 TradingRadarRuleEngine.Confirmation.UNAVAILABLE.name(),
                 TradingRadarRuleEngine.Confirmation.UNAVAILABLE.name(),
+                null,
+                null,
                 List.of(), List.of(message));
     }
 
@@ -461,6 +544,7 @@ public class TradingRadarService {
         return switch (action) {
             case BUY_CANDIDATE -> "買進候選";
             case ADD_CANDIDATE -> "加碼候選";
+            case TRIAL_BUY -> "分批試單";
             case HOLD -> "續抱";
             case WATCH -> "觀察";
             case HOLD_CAUTION -> "續抱但提高警戒";

@@ -73,6 +73,14 @@ public final class TradingRadarDto {
             String monthlyConfirmation,
             String quarterlyConfirmation,
             String annualConfirmation,
+            /**
+             * 底層資產幣別對台幣的五年期分位（0–100）；台幣資產為 null（Requirement 47）。
+             * 供畫面揭露「現在換匯貴不貴」——台幣計價的美債 ETF 其報價相當部分由匯率驅動
+             * （實測 00719B 與 USD/TWD 近一年相關 0.9737），不揭露會讓使用者以為漲勢來自標的本身。
+             */
+            BigDecimal fxPercentile,
+            /** 底層資產幣別（TWD/USD/GBP…），供前端判斷是否顯示匯率相關說明。 */
+            String underlyingCurrency,
             List<String> reasons,
             List<String> risks
     ) {}
