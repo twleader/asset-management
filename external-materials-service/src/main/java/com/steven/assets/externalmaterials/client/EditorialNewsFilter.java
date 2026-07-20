@@ -223,6 +223,29 @@ public final class EditorialNewsFilter {
             "鱷魚", "蟒蛇", "動物園",
             "追晉", "褒揚令");
 
+    // ===== 南海小型海上摩擦（Task 229）：置於 FINANCE／SOCIAL_ODDITY 之後、LIFESTYLE／CHINA 之前 =====
+    // 「中國海警南海持棍傷人 菲律賓海軍1人遭打傷」這類南海海警／海軍低烈度肢體摩擦，對台股大盤與全球經濟
+    // 無實質影響，但命中 CHINA(南海)＋BEIJING_REGIME(海警) 會在規則③被判 KEEP:china-regime 收錄。改以本
+    // 否決集在規則③之前攔下。三重 AND 守門（缺一不濾）：南海地區詞 ∧ 低烈度摩擦詞 ∧ ¬重大升級詞。
+    //
+    // 對線上 3501 則真實 news_headline 全量抽驗：含南海地區詞者 8 則僅翻轉 1 則（使用者回報案）為 DROP、
+    // 其餘 7 則（南海仲裁 14 國聯署／美海防隊南海巡弋／官媒 AI 影片酸菲／觸怒中南海 GDP…）維持 KEEP；
+    // 含摩擦詞但無南海地區詞者 9 則（荷姆茲對峙／金門驅離×2／不動產扣押…）全不受影響。零反向翻轉。
+    //
+    // 刻意排除的觸發詞（實測會誤傷，勿加入 SCS_SKIRMISH）：對抗／巡弋／侵襲／灰色（打到「美海防隊…對抗
+    // 中國在台海南海灰色侵襲」「美海防隊艦艇加入南海巡弋」等美軍部署／地緣政治）、衝突（GEO_TRIGGER 已用於
+    // 正當地緣政治，且武裝衝突／利益衝突過廣）、軍演／軍事／海警／軍艦（是事件主角而非「小」的標記，重大
+    // 軍演具市場訊號意義，留給規則③）。金門摩擦屬台海戰區、直接涉台灣安全，刻意不納入（只鎖南海）。
+    private static final Set<String> SCS_FEATURE = set("黃岩島", "仁愛礁", "斯卡伯勒");
+    private static final Set<String> SCS_SKIRMISH = set(
+            "持棍", "棍棒", "木棍", "水砲", "水炮", "噴水", "射水", "水柱",
+            "對峙", "驅離", "驅趕", "擦撞", "碰撞", "衝撞", "撞船", "撞擊",
+            "登船", "登檢", "攔檢", "臨檢", "扣押", "扣船", "查扣",
+            "雷射", "激光", "潑漆", "鳴笛", "傷人", "打傷", "受傷", "打人");
+    private static final Set<String> SCS_ESCALATION = set(
+            "開戰", "宣戰", "開火", "交火", "砲擊", "炮擊", "擊沉", "擊落", "擊毀",
+            "空襲", "轟炸", "飛彈", "導彈", "魚雷", "封鎖", "禁運", "斷航", "動員", "戰爭");
+
     /** 過濾一批新聞，只留符合編輯政策者。 */
     public static List<NewsRow> retain(List<NewsRow> rows) {
         List<NewsRow> out = new ArrayList<>(rows.size());
@@ -264,6 +287,11 @@ public final class EditorialNewsFilter {
         //     才攔得到原本在規則4 被誤判為地緣政治的「以色列…鱷魚可部署監獄周邊」。
         if (containsAny(t, SOCIAL_ODDITY)) return "DROP:social-oddity";
 
+        // 1c) 南海小型海上摩擦否決（Task 229）：南海地區詞＋低烈度摩擦詞＋未升級 → 濾。置於財經／社會獵奇
+        //     之後、生活／中國之前，才攔得到原在規則③被 KEEP:china-regime 收錄的「南海海警持棍傷人」類雜訊。
+        //     升級為真正衝突（開火／飛彈／封鎖…）者由 SCS_ESCALATION 守門救回、落回規則③以 KEEP:china-regime 收錄。
+        if (isSouthChinaSeaSkirmish(t)) return "DROP:scs-skirmish";
+
         // 2) 全世界生活／消費／娛樂／體育軟文否決——除非上方已判為財經，否則一律濾除；政治/中國/地緣/城市白名單皆不救回
         if (containsAny(t, LIFESTYLE)) return "DROP:lifestyle";
 
@@ -299,6 +327,17 @@ public final class EditorialNewsFilter {
     private static boolean isAnecdote(String t) {
         if (!AGE.matcher(t).find()) return false;
         return containsAny(t, ANECDOTE_ROLE) || containsAny(t, ANECDOTE_BAIT);
+    }
+
+    /**
+     * 南海小型海上摩擦判定（Task 229）：南海地區詞 ∧ 低烈度摩擦詞 ∧ ¬重大升級詞，三者皆成立才為真。
+     * 南海地區詞須先剝除「中南海」（＝中共領導層駐地，與 South China Sea 無關）再比對「南海」子字串。
+     */
+    private static boolean isSouthChinaSeaSkirmish(String t) {
+        boolean scsRegion = t.replace("中南海", "").contains("南海") || containsAny(t, SCS_FEATURE);
+        return scsRegion
+                && containsAny(t, SCS_SKIRMISH)
+                && !containsAny(t, SCS_ESCALATION);
     }
 
     private static boolean containsAny(String text, Set<String> tokens) {
