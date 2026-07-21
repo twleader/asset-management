@@ -6,7 +6,7 @@ import java.util.List;
 /**
  * 今日交易雷達（Requirement 43）純讀 response。
  *
- * <p>所有分數／建議皆為 {@code TW_RULES_V6} 即時計算的衍生值，不入庫；
+ * <p>所有分數／建議皆為 {@code TW_RULES_V7} 即時計算的衍生值，不入庫；
  * {@code score=null} 代表必要資料不足，不以 0 分冒充有效判斷。</p>
  */
 public final class TradingRadarDto {
@@ -82,6 +82,15 @@ public final class TradingRadarDto {
             /** 底層資產幣別（TWD/USD/GBP…），供前端判斷是否顯示匯率相關說明。 */
             String underlyingCurrency,
             List<String> reasons,
-            List<String> risks
+            List<String> risks,
+            /**
+             * KD 短線熱度：{@code OVERHEATED}／{@code ELEVATED}／{@code NORMAL}（Task 232）。
+             *
+             * <p>供收合列即可辨識——{@code reasons}／{@code risks} 只在展開後顯示，
+             * 使用者於收合狀態看不出 K 已偏高。{@code OVERHEATED} 代表買進閘門已關閉
+             * （動作降級為 HOLD／WATCH，分數不變）；<b>{@code ELEVATED} 純為揭露，
+             * 不影響分數與動作</b>。</p>
+             */
+            String kdHeat
     ) {}
 }
