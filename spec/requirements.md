@@ -1107,6 +1107,10 @@
 - [ ] **零 AI API 約束不變**：新增的長期與基本面因子一律由本地 DB 的結構化數值計算，不得引入 LLM 判讀財報文字、不得於請求鏈觸發外部抓取。基本面資料由 Requirement 46 的排程預先落地，交易雷達只讀 DB。
 - [ ] **驗證**：單元測試至少覆蓋——正規化後分數恆落在 `[0, 100]`（含全部子因子皆 `+1`、皆 `−1`、以及疊加 `RISK_ON`／`RISK_OFF` 的極端輸入，驗證不再飽和且不觸發 clamp WARN）、缺值權重重分配後實際生效權重總和為 `1`、52 週位置在「現價 > 52 週高」時經 clamp 後仍為 `+1`、ETF 路徑基本面組全 `null`、虧損（有列且 `pe_ratio IS NULL`）計為 `−1` 且優先於歷史不足、`EPS 年增率 = −1` 時 PE 分位回 `null`、EPS 前四季合計 `≤ 0` 回 `null`、新掛牌標的（<750 筆）3 年報酬回 `null` 且不影響其餘子因子、三層動作門檻的邊界值（長期組 `+0.5`／`−0.5` 兩個交界各測上下）、買進硬閘門在分數再高時仍不被繞過。**結構性迴歸判準**（取代「特定標的不得為某動作」的循環論證）：固定其他輸入、僅將長期趨勢組分數由 `−1` 掃到 `+1`，總分須單調遞增且變動幅度 ≥ 短期動能組做同樣掃描時的變動幅度；並輸出全部台股標的的 V4／V5 分數與動作對照表附於任務完成報告。
 
+**Requirement 43 修訂（Task 230）—— GET 路徑新增 per-owner Redis 快照寫入（詳見 Requirement 48）：**
+
+- [ ] 原 AC「一頁一 BFF……此 GET 無寫入、無排程、無新資料表」中的「**無寫入**」，因結果快照落地與區間匯出需求（Requirement 48）而修訂：`GET /api/trading-radar` 於成功回應前，在 `CurrentUserContext.hasUser()` 為真時新增一筆 **per-owner Redis 快照寫入**（節流＋去重＋gzip 壓縮，保留窗預設 90 天）。仍維持：**無新資料表**（快照只存 Redis）、**無新增 @Scheduled**（保留窗修剪於寫入路徑 inline 完成）、不呼叫任何外部行情或 AI API。因該 Redis 為 `allkeys-lru` 且與即時股價 `price:*` 共用 256MB，快照量必須受節流／保留窗控制，以免把即時股價快取逐出。前端資訊框「本頁只讀取…」文案同步更新以揭露此寫入。
+
 ---
 
 ### Requirement 44: 每檔交易雷達狀態 Email 通知
@@ -1222,3 +1226,44 @@
 - [ ] **技術面仍以台幣報價計算（刻意的取捨，須記載）**：MA／KD／兩日確認等趨勢指標**維持使用台幣報價**，不改用剝除匯率後的 implied 序列。理由：使用者的實際部位與損益是台幣計價的，剝離後的訊號雖然更純粹地反映債券本身，卻不對應他真正承受的價格波動。匯率的影響改由本 Requirement 的匯率環境組與 UI 揭露處理。**此取捨須明文記載**：本 Requirement 已知技術面訊號對高匯率相關標的（如 00719B，相關係數 0.97）有相當部分來自匯率，選擇以「揭露＋獨立因子」而非「改變價基」處理。
 - [ ] **零 AI API 與零新增抓取約束不變**：匯率分位由本地 `exchange_rate_history` 即時計算，不得寫回資料庫（屬可計算的衍生值）、不得於請求鏈觸發外部抓取、不得引入任何 LLM。
 - [ ] **驗證**：測試至少覆蓋——`underlying_currency` 為 `TWD` 時匯率組回 `null` 且權重重分配後六組實際生效權重總和為 `1`；`USD` 標的在分位 99 時貢獻約 `−0.98`、分位 50 時為 `0`、分位 10 時為 `+0.80`；回看期不足三年時的行為；當日無匯率資料時回 `null` 而非沿用前值；`buy_rate = sell_rate` 的 fallback 列被正確排除或標記。部署後須實查 00719B／00697B／00679B 的匯率組分數與 UI 揭露值，並確認 0050 等台股標的完全不受影響。
+
+---
+
+### Requirement 48: 今日交易雷達結果快照落地 Redis 與 Excel 區間匯出
+
+**User Story:** 作為交易雷達的使用者，我希望每次頁面產生的雷達判斷（大盤風險與我的個股決策）都被保存為帶時間戳的快照，並能指定一段時間區間，把該區間內的多個快照匯出成 Excel、於存檔當下自行指定資料夾，讓我能留存並事後比對盤中／每日的規則決策如何隨行情變化；且此保存不得危及系統既有的即時股價快取。
+
+**Acceptance Criteria:**
+
+- [ ] **快照寫入時機（修訂 Requirement 43「GET 無寫入」）**：`GET /api/trading-radar` 成功組出 `TradingRadarDto.Response` 後、回傳前，於同一 HTTP 請求執行緒把該份結果寫成一筆 per-owner 快照到 Redis。**僅在 `CurrentUserContext.hasUser()` 為真時寫入**（無身分／背景執行緒不得寫入，避免寫出 owner 錯亂的髒快照）；owner 取 `CurrentUserContext.getEffectiveUserId()`（admin 代看時為被代看者，與既有 `ownerFilter` 對齊）。仍維持 Requirement 43 的**無新資料表、無新增 @Scheduled、不呼叫任何外部行情或 AI API**。
+- [ ] **只存 Redis、不新增資料表、不回補**：快照唯一儲存於 Redis（沿用即時股價路徑同一個 Redis、database 0）；**不新增任何 PostgreSQL 資料表**。功能上線前的歷史不回補——匯出區間早於上線日則該段無資料，屬預期。
+- [ ] **保護即時股價快取（本 Requirement 的硬約束）**：此 Redis 為 `--maxmemory 256mb --maxmemory-policy allkeys-lru`，與即時股價 `price:*` 共用；快照量若不受控，記憶體壓力下 LRU 會逐出任意 key（含 `price:*`），危及即時股價功能。故快照寫入**必須**同時具備下列容量控制，缺一不可：(a) **節流**——同一 owner 兩次寫入的最小間隔為具名常數（預設 5 分鐘，可由設定覆寫），間隔內的重讀不再產生新快照（盤中頁面經既有 SSE 每約 2 秒重讀 `get()`，須靠節流收斂）；(b) **去重**——與該 owner 上一筆快照內容（**排除每次都變的 `generatedAt` 後**）相同者不寫入；(c) **壓縮**——JSON 以 gzip 壓縮，因 `StringRedisTemplate` 存字串故壓縮結果以 Base64 編碼存放。
+- [ ] **保留窗、筆數硬上限與自動修剪（不新增排程）**：保留窗為可設定值（預設 **90 天**；**刻意短於 12 個月以配合 256MB 上限**）。每筆快照 value key 帶等於保留窗的 TTL；索引結構在**每次寫入時 inline 修剪**（不新增任何 `@Scheduled`），且為**兩道**：(a) 依時間窗移除超過保留窗的舊項；(b) 依 **per-owner 筆數硬上限**（可設定，預設 5000）以 `ZREMRANGEBYRANK` 只保留最新 N 筆。筆數硬上限給每個 owner 確定的 footprint 天花板，是保護共用 Redis 上 `price:*` 的關鍵——僅靠時間窗在多使用者高頻情境下仍可能累積上萬筆。保留窗為 best-effort：LRU 壓力下可能更早被逐出，匯出端須容忍缺漏；活躍使用者增長時應監控 Redis 記憶體並視需要調高 `maxmemory`。
+- [ ] **Redis key 結構（per-owner，時間戳為序）**：value＝`trading-radar:snap:{ownerId}:{epochMillis}`（內容為 `Base64(gzip(JSON))`，TTL＝保留窗）；索引＝Sorted Set `trading-radar:snap:idx:{ownerId}`（member＝`{epochMillis}`、score＝`epochMillis`，供區間查詢與「取最後寫入時間做節流判斷」）；去重雜湊＝`trading-radar:snap:hash:{ownerId}`（存上一筆內容雜湊，TTL＝保留窗）。`{epochMillis}` 取自 `Response.generatedAt` 解析出的 epoch 毫秒。節流的「上次寫入時間」由索引 ZSet 的最大 score 取得。
+- [ ] **寫入 fail-soft**：整個快照寫入以 try/catch 包住，任何 Redis 例外只記 log、**不得影響 `get()` 的正常回應**——頁面渲染是核心功能，快照是附加。
+- [ ] **前端資訊框文案同步**：`TradingRadarView.vue` 既有資訊框「本頁只讀取系統既有 PostgreSQL 與 Redis 資料…」須改為揭露「並將每次結果快照寫入 Redis 供匯出」；仍維持不呼叫 AI API、不觸發外部行情回補的陳述。
+- [ ] **匯出端點（business，由 Redis 快照組檔）**：新增 business `GET /api/trading-radar/export?from={ISO datetime}&to={ISO datetime}`，回 `ResponseEntity<ByteArrayResource>`（`Content-Disposition: attachment`、UTF-8 檔名、content-type `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`、`contentLength`，比照既有 `RealizedGainController.exportExcel`）。owner 同樣取 `getEffectiveUserId()`，只讀該 owner 快照。`from`／`to` 為 Asia/Taipei 時區的 ISO local datetime，換算為 epoch 毫秒後以 Sorted Set 區間查詢；`from > to` 或格式錯誤回 400。
+- [ ] **匯出讀取須容忍缺漏且在檔內揭露**：以索引區間查得時間點後逐一讀 value；某時間點的 value 已因 TTL／LRU 逐出而讀不到時，**跳過該點、不使整份匯出失敗**。缺漏筆數須於 Excel「快照索引」分頁的彙總列標示「查得／索引預期／缺漏」（**不得只進 server log**——否則使用者看到列數變少會把「資料被逐出」誤判為「那段沒有交易」）。反序列化採 JSON tree（`JsonNode`）逐欄取值、對缺欄位容忍（相容日後 DTO 欄位增修）。
+- [ ] **Excel 結構（多快照，時間為欄）**：至少三張工作表——(1)「快照索引」每列一個快照（快照時間、規則版本、大盤 regime／中文標籤／分數／stale、個股檔數、略過非台股檔數）；(2)「大盤總覽」每列一個快照的 `MarketSummary` 全欄；(3)「個股決策」每列一個（快照時間, 個股）的 `StockDecision` 全欄，**含「快照時間」欄以區分不同時刻**。**所有日期／時間欄一律以 ISO 文字寫入**（比照 Requirement 45／40／42，避免開啟端依時區偏移一天）；`reasons`／`risks` 等清單以換行合併為單格字串。POI 產檔沿用既有 `ExcelExportService` 的 Styles／cell helper 慣例。
+- [ ] **區間無快照**：查得零快照時仍回一份合法 `.xlsx`（表頭齊全、首列註明「指定區間 {from}～{to} 查無交易雷達快照」），**不得回 5xx**。
+- [ ] **一頁一 BFF、二進位 passthrough**：`/api/bff/trading-radar/export` 沿用既有 `TradingRadarBffRoutes`（Spring Cloud Gateway rewrite）自動轉發至 business `/api/trading-radar/export`，二進位 body 與下載 header 原樣穿透；**BFF 不新增程式**。前端只呼叫 BFF。
+- [ ] **前端匯出入口與指定目錄**：`TradingRadarView.vue` 頁首新增「匯出 Excel」按鈕，開啟對話框以 datetime 區間選擇器指定起訖（預設帶入當日 00:00 至現在）。匯出優先以 `showSaveFilePicker`（File System Access API）讓使用者**自選資料夾與檔名**，瀏覽器不支援時退回一般下載；使用者按取消不顯示成功訊息（沿用 `ExchangeRateView.vue` 既有的 `canPickDirectory`／`saveBlob`／`downloadBlob` 模式）。檔名 `交易雷達_{起}_{迄}.xlsx`（`YYYYMMDDHHmm`）。`api/index.js` 的 `tradingRadar` 區塊新增 `exportExcel(from, to)`（`responseType: 'blob'`）。
+- [ ] **零 AI API 不變**：快照寫入與匯出全程只用本地 Redis 與 POI，不呼叫任何 LLM、不觸發外部行情抓取。
+- [ ] **驗證**：單元測試至少覆蓋——節流間隔內不重複寫、內容未變（排除 `generatedAt`）不重複寫、gzip＋Base64 往返可完整還原、保留窗修剪移除逾期索引項、寫入例外不影響 `get()` 回應；匯出多快照產出三分頁且時間欄為文字、value 缺漏被跳過而不失敗、空區間回含表頭的合法檔。部署後以帶 `X-User-*` header 的容器內請求觸發 `get()` 寫入快照、以 `redis-cli` 確認索引與 value（含 TTL），再打 `export` 取回 `.xlsx` 確認三分頁與內容，並確認 `price:*` 即時股價 key 未被大量快照擠出。
+
+**Requirement 48 追加（Task 231）—— 排程自動匯出到指定伺服器目錄（比照公開資訊爬蟲的多時間點設定）：**
+
+- [ ] **本追加修訂上述兩項約束（範圍限縮，不是推翻）**：上述 AC 原寫「**不新增任何 PostgreSQL 資料表**」與「保留窗修剪 inline、**不新增任何 `@Scheduled`**」。本追加修訂為：(a) **快照本身仍只存 Redis、不新增任何快照資料表**；新增的兩張表只存**排程設定**（執行時間點與輸出資料夾），不存任何雷達結果。(b) 新增的 `@Scheduled` **只負責排程觸發寫檔**；**保留窗修剪仍維持在快照寫入路徑 inline 完成**，不改為排程。(c) Requirement 43 的「不呼叫任何外部行情或 AI API」不變。
+- [ ] **與既有手動匯出並存**：本追加**不取代**上述「前端按鈕 → 指定時間區間 → 瀏覽器下載（`showSaveFilePicker` 自選資料夾）」。兩種途徑並存，且**共用同一支產檔邏輯**，不得各自實作而使內容漂移。
+- [ ] **多個執行時間點（比照「爬蟲執行時間設定」卡）**：使用者可設定**多個**每日執行時間點，每個時間點可獨立啟用／停用、移除，並可新增。**每個時間點各自持有當日 guard（`last_run_date` 在時間點列上），不得只在 owner 層設一個** ——否則同日設多個時間點只會跑第一個。
+- [ ] **輸出資料夾（per-owner、伺服器端）**：使用者設定一個輸出資料夾；實際寫入路徑＝容器基底 `EXPORT_OUTPUT_DIR`（預設 `/home/steven`，docker volume 對映主機家目錄 `/Users/steven`）resolve 使用者設定的**相對子路徑**。**只存相對子路徑**；絕對路徑與 `..` 跳脫一律於 service 層擋下（`base.resolve(sub).normalize()` 必須仍 `startsWith(base)`）。目錄不存在時 `Files.createDirectories` 自動建立。
+- [ ] **正規化：時間點與資料夾分兩張表**：`trading_radar_export_time` 一列一時間點（`owner_user_id`／`run_hour`／`run_minute`／`enabled`／`last_run_date`，UNIQUE `(owner_user_id, run_hour, run_minute)`）；`trading_radar_export_setting` 一使用者一列（`owner_user_id` UNIQUE、`output_subpath`、`last_run_at`、`last_run_status`）。**不得把資料夾併進時間點表**——併入會讓同一路徑隨時間點列數重複儲存（違反 CLAUDE.md 正規化），且刪一個時間點會連帶弄丟路徑（沿用既有 `crawler_export_setting` 與 `crawler_schedule` 分表的同一理由）。兩表皆帶 `owner_user_id` 與 `@Filter(ownerFilter)`。
+- [ ] **寫檔內容＝當日全部快照、一天一檔覆寫**：每個時間點觸發時，讀該 owner **當日 00:00 至觸發當下**的 Redis 快照，產出與手動匯出**相同結構**的三分頁 Excel；檔名 `交易雷達_{使用者ID}_{YYYYMMDD}.xlsx`，**同日多個時間點覆寫同一檔、跨日產生新檔**（比照爬蟲 `public_info_<日期>.json` 的行為）。檔名含使用者 ID 的理由同 Requirement 45：多使用者可能指向同一共用目錄，不帶 ID 會互相覆蓋。
+- [ ] **當日零快照時不得寫出空檔**：快照**只在使用者開啟／刷新雷達頁的 HTTP 路徑產生**（背景不產生快照），故使用者當天若在排程時間點前從未開過雷達頁，該 owner 當日區間會**查無快照**。此時**不得寫檔**（避免每天在目錄留下只有表頭的無用檔案，並保留前一版檔案不被覆蓋），改為只把 `last_run_status` 記為「當日尚無快照，未產檔」，且**仍設當日 guard**（避免每 poll 重試整天）。此行為須於前端設定卡明示，讓使用者理解「排程是把你當天看過的雷達倒出來，不是排程自己去算」——與爬蟲「排程自己去抓」的語意不同。
+- [ ] **排程機制（比照既有匯出排程，不得自創）**：`@Scheduled(cron = "0 * * * * *", zone = "Asia/Taipei")` 每分鐘 poll；以 **`now >= 設定時分` ＋ 該時間點的 `last_run_date` 當日 guard** 判斷（**非「分鐘精確相等」**——排程執行緒被長工作卡住跨分鐘會造成整日靜默漏跑）；`@EventListener(ApplicationReadyEvent.class)` 開機自癒補跑當日已到點未執行者；`AtomicBoolean` 防重入；**單一使用者失敗只記 `last_run_status` ＋ log、不影響其他使用者**，且成功或失敗都設當日 guard（避免命中分鐘後每 poll 重試整天）。
+- [ ] **寫檔採 tmp ＋ atomic move**：先寫 `.tmp` 再 `ATOMIC_MOVE`（不支援時退 `REPLACE_EXISTING`），避免覆寫既有檔時中途失敗留下半截殘檔。
+- [ ] **背景無 request context 的 owner 取得**：背景排程沒有 HTTP request，`ownerFilter` 不啟用，`findAll()` 讀全部 owner 的時間點列；**owner 一律取自該列的 `owner_user_id` 並顯式傳入快照讀取**（Redis 快照 key 本就 owner-scoped，不依賴 Hibernate filter）。背景路徑**不得**依賴 `CurrentUserContext`（request-scoped，背景取不到）。
+- [ ] **資料夾選擇器沿用既有 business API**：**不新增目錄列舉端點**，沿用 Requirement 34 既有的 `GET /api/export-schedule/browse?subpath=`；本頁僅在自己的 BFF 增加 passthrough 路由（一頁一 BFF）。
+- [ ] **可手動「立即匯出到目錄」**：提供立即觸發鈕，走**同一支**寫檔邏輯產檔到設定目錄，回傳實際落點路徑與檔案大小；此操作**不動當日 guard**。
+- [ ] **排程列表頁需登錄**：新增的 `@Scheduled` 須同步登錄至「公開資訊 → 排程列表」（Requirement 36 / `SchedulePublicBffController` 的 `JOBS`），避免該頁與實際排程漂移。
+- [ ] **驗證**：單元測試至少覆蓋——同日多個時間點各自 guard（兩個時間點各跑一次而非只跑第一個）、`now >= 時分` 的補跑、停用的時間點不跑、`..` 路徑跳脫被擋、單一 owner 失敗不影響其他 owner。部署後實際設定兩個時間點與一個資料夾，確認到點在主機家目錄對應路徑產生 `交易雷達_{id}_{日期}.xlsx`、同日第二個時間點覆寫同一檔、內容為當日全部快照。

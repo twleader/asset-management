@@ -247,6 +247,17 @@ export const bffApi = {
   // TradingRadar（今日交易雷達，Requirement 43）：純本地規則，零 AI API
   tradingRadar: {
     get: () => api.get('/bff/trading-radar'),
+    exportExcel: (from, to) =>
+      api.get('/bff/trading-radar/export', { params: { from, to }, responseType: 'blob' }),
+    // 排程自動匯出到伺服器目錄（Requirement 48 追加 / Task 231）
+    getExportTimes: () => api.get('/bff/trading-radar/export-schedule/times'),
+    saveExportTimes: (times) => api.put('/bff/trading-radar/export-schedule/times', { times }),
+    getExportSetting: () => api.get('/bff/trading-radar/export-schedule/setting'),
+    saveExportSetting: (outputSubpath) =>
+      api.put('/bff/trading-radar/export-schedule/setting', { outputSubpath }),
+    runExportNow: () => api.post('/bff/trading-radar/export-schedule/run-now'),
+    browseExportDir: (subpath = '') =>
+      api.get('/bff/trading-radar/export/browse', { params: { subpath }, skipErrorToast: true }),
     getNotification: (stockCode, market) =>
       api.get(`/bff/trading-radar/notifications/${encodeURIComponent(stockCode)}`, { params: { market } }),
     updateNotification: (stockCode, market, payload) =>

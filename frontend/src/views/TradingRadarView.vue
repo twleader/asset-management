@@ -5,7 +5,10 @@
         <div class="page-heading">今日交易雷達</div>
         <div class="page-sub">依大盤、MA20／60／240、KD 與連續兩日確認產生規則式決策；不呼叫 AI API</div>
       </div>
-      <el-button :icon="Refresh" :loading="refreshing" @click="load(true)">重新整理</el-button>
+      <div class="header-actions">
+        <el-button :icon="Download" @click="openExport">匯出 Excel</el-button>
+        <el-button :icon="Refresh" :loading="refreshing" @click="load(true)">重新整理</el-button>
+      </div>
     </div>
 
     <el-alert
@@ -14,7 +17,7 @@
       show-icon
       class="local-rule-alert"
       title="純本地規則運算"
-      description="本頁只讀取系統既有 PostgreSQL 與 Redis 資料，不會送出 Claude、OpenAI 或其他 AI API 請求，也不會觸發外部行情回補。"
+      description="本頁讀取系統既有 PostgreSQL 與 Redis 資料，並將每次結果快照寫入 Redis 供匯出；不會送出 Claude、OpenAI 或其他 AI API 請求，也不會觸發外部行情回補。"
     />
 
     <el-card shadow="never" class="market-card" :class="marketClass">
@@ -257,6 +260,101 @@
       description="系統不會自動下單。實際交易前請自行確認即時價格、可用資金、持有部位、交易成本與可承受損失；資料不足時以「今日不交易」為準。"
     />
 
+    <el-card shadow="never" class="sched-card">
+      <template #header>
+        <div class="card-head">
+          <span class="card-title">匯出執行時間設定</span>
+          <span class="card-sub">交易雷達每天自動匯出 Excel 的時間點，可設定多個</span>
+        </div>
+      </template>
+
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        class="sched-note"
+        description="設定後即時生效（免重啟），下一分鐘起依新時間執行。清空全部時間點＝不再自動匯出。匯出內容為「當日已產生的雷達快照」；若當天還沒開過本頁，該次排程會略過不產檔。"
+      />
+
+      <div v-for="(row, idx) in exportTimes" :key="idx" class="sched-row">
+        <el-time-picker
+          v-model="row.time"
+          format="HH:mm"
+          value-format="HH:mm"
+          placeholder="時:分"
+          :clearable="false"
+          style="width:150px"
+        />
+        <el-switch v-model="row.enabled" active-text="啟用" inactive-text="停用" inline-prompt />
+        <el-button type="danger" plain size="small" @click="removeExportTime(idx)">移除</el-button>
+      </div>
+
+      <div class="sched-actions">
+        <el-button :icon="Plus" @click="addExportTime">新增時間點</el-button>
+        <el-button type="primary" :loading="savingTimes" @click="saveExportTimes">儲存設定</el-button>
+      </div>
+    </el-card>
+
+    <el-card shadow="never" class="sched-card">
+      <template #header>
+        <div class="card-head">
+          <span class="card-title">匯出輸出檔案設定</span>
+          <span class="card-sub">每次排程匯出的 Excel 要寫到哪個資料夾</span>
+        </div>
+      </template>
+
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        class="sched-note"
+        description="設定後即時生效（免重啟），下一次排程起寫入新資料夾。目錄不存在時會自動建立。"
+      />
+
+      <div class="sched-row">
+        <span class="dir-label">輸出資料夾</span>
+        <el-input v-model="exportSetting.outputSubpath" placeholder="例如 Project/radar-export" style="width:340px" />
+        <el-button @click="openDirPicker">選擇</el-button>
+        <el-button type="primary" :loading="savingDir" @click="saveExportSetting">儲存設定</el-button>
+        <el-button :loading="runningNow" @click="runExportNow">立即匯出到目錄</el-button>
+      </div>
+
+      <div class="dialog-note dir-hint">
+        以主機家目錄 <code>/home/steven</code>（對映主機 <code>/Users/steven</code>）為根，只能選其下的子資料夾。
+        目前落點：<code>{{ exportSetting.resolvedDir || '—' }}/{{ exportSetting.filenamePattern || '交易雷達_{使用者ID}_{日期}.xlsx' }}</code><br>
+        檔名固定為 <code>交易雷達_&lt;使用者ID&gt;_&lt;日期&gt;.xlsx</code>；同日多個時間點覆寫同一檔、跨日產生新檔。
+        <template v-if="exportSetting.lastRunAt">
+          <br>上次執行：{{ formatTime(exportSetting.lastRunAt) }}　{{ exportSetting.lastRunStatus || '' }}
+        </template>
+      </div>
+    </el-card>
+
+    <el-dialog v-model="dirPicker.visible" title="選擇輸出資料夾" width="560px">
+      <div class="dir-picker-path">
+        目前選擇：<code>{{ dirPicker.baseDir || '/home/steven' }}{{ dirPicker.picked ? '/' + dirPicker.picked : '' }}{{ dirPicker.newSub.trim() ? '/' + dirPicker.newSub.trim() : '' }}</code>
+      </div>
+      <el-tree
+        :key="dirPicker.treeKey"
+        lazy
+        :load="loadDirNode"
+        :props="dirTreeProps"
+        node-key="key"
+        highlight-current
+        :expand-on-click-node="false"
+        :default-expanded-keys="['__root__']"
+        class="dir-tree"
+        @node-click="onDirNodeClick" />
+      <div class="dir-new-sub">
+        <span class="dns-label">新增子資料夾</span>
+        <el-input v-model="dirPicker.newSub" placeholder="（選填）在所選資料夾下新增，寫檔時自動建立"
+          style="width:340px" clearable />
+      </div>
+      <template #footer>
+        <el-button @click="dirPicker.visible = false">取消</el-button>
+        <el-button type="primary" @click="confirmDirPick">確定</el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog
       v-model="notificationVisible"
       :title="`${notificationStock.stockCode || ''} ${notificationStock.stockName || ''}－通知設定`"
@@ -336,18 +434,69 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="exportDialog.visible" title="匯出交易雷達快照" width="480px">
+      <el-form label-width="90px">
+        <el-form-item label="時間區間">
+          <el-date-picker
+            v-model="exportDialog.range"
+            type="datetimerange"
+            value-format="YYYY-MM-DDTHH:mm:ss"
+            start-placeholder="起始時間"
+            end-placeholder="結束時間"
+            :clearable="false"
+            style="width:100%"
+          />
+        </el-form-item>
+        <el-form-item label="匯出內容">
+          <div class="dialog-note">
+            單一 Excel 檔，三張工作表：<b>快照索引／大盤總覽／個股決策</b>；
+            內容取自區間內每次頁面計算存下的 Redis 快照（每 5 分鐘至多一筆）。
+            區間若早於本功能上線日、或快照已逾保留期，該段可能無資料，並會在「快照索引」標示缺漏筆數。
+          </div>
+        </el-form-item>
+        <el-form-item label="存檔位置">
+          <div class="dialog-note">
+            <template v-if="canPickDirectory">
+              按下匯出後會開啟系統「另存新檔」對話框，可自行選擇資料夾與檔名。
+            </template>
+            <template v-else>
+              目前瀏覽器不支援選擇資料夾，檔案將存到瀏覽器預設下載資料夾。
+            </template>
+          </div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="exportDialog.visible = false">取消</el-button>
+        <el-button type="primary" :loading="exporting" @click="onExport">匯出</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { Bell, Refresh } from '@element-plus/icons-vue'
+import { Bell, Download, Plus, Refresh } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import dayjs from 'dayjs'
 import { bffApi } from '@/api'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
 const loading = ref(false)
 const refreshing = ref(false)
+const exporting = ref(false)
+const exportDialog = reactive({ visible: false, range: [] })
+const canPickDirectory = typeof window !== 'undefined' && 'showSaveFilePicker' in window
+// 排程自動匯出到伺服器目錄（Requirement 48 追加 / Task 231）
+const exportTimes = ref([])
+const exportSetting = reactive({
+  outputSubpath: '', resolvedDir: '', filenamePattern: '', lastRunAt: null, lastRunStatus: null
+})
+const savingTimes = ref(false)
+const savingDir = ref(false)
+const runningNow = ref(false)
+const dirPicker = reactive({ visible: false, baseDir: '', picked: '', newSub: '', treeKey: 0 })
+const dirTreeProps = { label: 'name', isLeaf: 'leaf' }
 const radar = ref({ market: {}, stocks: [], skippedNonTwStocks: 0, ruleVersion: 'TW_RULES_V4' })
 const notificationVisible = ref(false)
 const notificationLoading = ref(false)
@@ -605,8 +754,192 @@ function formatTime(value) {
   return Number.isNaN(d.getTime()) ? value : d.toLocaleString('zh-TW', { hour12: false })
 }
 
+// ===== 匯出 Excel（Requirement 48）=====
+function openExport() {
+  exportDialog.range = [
+    dayjs().startOf('day').format('YYYY-MM-DDTHH:mm:ss'),
+    dayjs().format('YYYY-MM-DDTHH:mm:ss')
+  ]
+  exportDialog.visible = true
+}
+
+async function onExport() {
+  const [start, end] = exportDialog.range ?? []
+  if (!start || !end) {
+    ElMessage.warning('請選擇匯出時間區間')
+    return
+  }
+  exporting.value = true
+  try {
+    const blob = await bffApi.tradingRadar.exportExcel(start, end)
+    const filename = `交易雷達_${start.replace(/[^0-9]/g, '').slice(0, 12)}_${end.replace(/[^0-9]/g, '').slice(0, 12)}.xlsx`
+    const saved = await saveBlob(blob, filename)
+    if (saved) {
+      ElMessage.success('匯出完成')
+      exportDialog.visible = false
+    }
+  } catch {
+    // 錯誤訊息由 axios 攔截器統一處理
+  } finally {
+    exporting.value = false
+  }
+}
+
+/**
+ * 優先開啟系統「另存新檔」對話框讓使用者選目錄；不支援時退回一般下載。
+ * 回傳 false 代表使用者主動取消（不顯示成功訊息）。
+ */
+async function saveBlob(blob, filename) {
+  if (canPickDirectory) {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: filename,
+        types: [{
+          description: 'Excel 活頁簿',
+          accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] }
+        }]
+      })
+      const writable = await handle.createWritable()
+      await writable.write(blob)
+      await writable.close()
+      return true
+    } catch (e) {
+      if (e?.name === 'AbortError') return false   // 使用者按取消
+    }
+  }
+  downloadBlob(blob, filename)
+  return true
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
+// ===== 排程自動匯出到伺服器目錄（Requirement 48 追加 / Task 231）=====
+
+const pad2 = (n) => String(n ?? 0).padStart(2, '0')
+const toRows = (times) => (times || []).map(t => ({
+  time: `${pad2(t.runHour)}:${pad2(t.runMinute)}`,
+  enabled: t.enabled !== false
+}))
+
+async function loadExportSchedule() {
+  // 兩個面板並行取得，單一失敗不影響另一個
+  const [timesRes, settingRes] = await Promise.allSettled([
+    bffApi.tradingRadar.getExportTimes(),
+    bffApi.tradingRadar.getExportSetting()
+  ])
+  if (timesRes.status === 'fulfilled') exportTimes.value = toRows(timesRes.value)
+  if (settingRes.status === 'fulfilled' && settingRes.value) Object.assign(exportSetting, settingRes.value)
+}
+
+function addExportTime() {
+  exportTimes.value.push({ time: '08:30', enabled: true })
+}
+
+function removeExportTime(idx) {
+  exportTimes.value.splice(idx, 1)
+}
+
+async function saveExportTimes() {
+  const times = []
+  const seen = new Set()
+  for (const row of exportTimes.value) {
+    if (!row.time) {
+      ElMessage.warning('請填寫所有時間點')
+      return
+    }
+    if (seen.has(row.time)) {
+      ElMessage.warning(`執行時間重複：${row.time}`)
+      return
+    }
+    seen.add(row.time)
+    const [h, m] = row.time.split(':').map(Number)
+    times.push({ runHour: h, runMinute: m, enabled: row.enabled !== false })
+  }
+  savingTimes.value = true
+  try {
+    exportTimes.value = toRows(await bffApi.tradingRadar.saveExportTimes(times))
+    ElMessage.success(times.length ? '已儲存執行時間設定' : '已清空時間點，不再自動匯出')
+  } catch {
+    // 錯誤訊息由 axios 攔截器統一處理
+  } finally {
+    savingTimes.value = false
+  }
+}
+
+async function saveExportSetting() {
+  savingDir.value = true
+  try {
+    Object.assign(exportSetting, await bffApi.tradingRadar.saveExportSetting(exportSetting.outputSubpath))
+    ElMessage.success('已儲存輸出資料夾')
+  } catch {
+    // 錯誤訊息由 axios 攔截器統一處理
+  } finally {
+    savingDir.value = false
+  }
+}
+
+async function runExportNow() {
+  runningNow.value = true
+  try {
+    const res = await bffApi.tradingRadar.runExportNow()
+    if (res?.path) {
+      ElMessage.success(`已寫入 ${res.path}（${Math.round((res.size || 0) / 1024)} KB）`)
+    } else {
+      ElMessage.warning(res?.message || '當日尚無快照，未產檔')
+    }
+    loadExportSchedule().catch(() => {})   // 刷新上次執行資訊
+  } catch {
+    // 錯誤訊息由 axios 攔截器統一處理
+  } finally {
+    runningNow.value = false
+  }
+}
+
+function openDirPicker() {
+  dirPicker.picked = exportSetting.outputSubpath || ''
+  dirPicker.newSub = ''
+  dirPicker.treeKey++            // 強制 el-tree 重新懶載入 root
+  dirPicker.visible = true
+}
+
+// el-tree 懶載入：level 0 以家目錄為單一 root；其餘列該節點子目錄
+async function loadDirNode(node, resolve) {
+  try {
+    if (node.level === 0) {
+      const res = await bffApi.tradingRadar.browseExportDir('')
+      dirPicker.baseDir = res.baseDir || ''
+      resolve([{ name: res.baseDir || '/', path: '', key: '__root__', leaf: false }])
+      return
+    }
+    const res = await bffApi.tradingRadar.browseExportDir(node.data.path || '')
+    resolve((res.directories || []).map(d => ({ name: d.name, path: d.path, key: d.path, leaf: false })))
+  } catch {
+    resolve([])
+  }
+}
+
+const onDirNodeClick = (data) => { dirPicker.picked = data.path || '' }
+
+function confirmDirPick() {
+  let p = dirPicker.picked || ''
+  const sub = (dirPicker.newSub || '').trim().replace(/^\/+|\/+$/g, '')
+  if (sub) p = p ? `${p}/${sub}` : sub
+  exportSetting.outputSubpath = p
+  dirPicker.visible = false
+}
+
 onMounted(() => {
   load(false).catch(() => {}).finally(openPriceStream)
+  loadExportSchedule().catch(() => {})
 })
 
 onUnmounted(() => {
@@ -636,12 +969,30 @@ onUnmounted(() => {
 }
 .page-heading { font-size: 23px; font-weight: 750; color: #0f172a; }
 .page-sub { margin-top: 4px; color: #64748b; font-size: 13px; }
+.header-actions { display: flex; gap: 8px; }
+.dialog-note { color: #64748b; font-size: 13px; line-height: 1.6; }
 .local-rule-alert { margin-bottom: 16px; }
 .market-card { border-top: 4px solid #f59e0b; }
 .market-card.regime-risk-on { border-top-color: #dc2626; }
 .market-card.regime-risk-off { border-top-color: #16a34a; }
 .market-card.regime-neutral { border-top-color: #64748b; }
 .card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+
+/* 排程自動匯出設定卡（Requirement 48 追加 / Task 231） */
+.sched-card { margin-top: 16px; }
+.sched-card .card-title { font-size: 15px; font-weight: 700; color: #0f172a; }
+.sched-card .card-sub { font-size: 13px; color: #94a3b8; font-weight: 400; }
+.sched-note { margin-bottom: 14px; }
+.sched-row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
+.sched-actions { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
+.dir-label { font-size: 13px; color: #475569; white-space: nowrap; }
+.dir-hint { margin-top: 10px; }
+.dir-hint code { background: #f1f5f9; color: #0f172a; padding: 2px 6px; border-radius: 4px; word-break: break-all; }
+.dir-picker-path { font-size: 13px; color: #475569; margin-bottom: 10px; }
+.dir-picker-path code { background: #f1f5f9; color: #0f172a; padding: 2px 6px; border-radius: 4px; word-break: break-all; }
+.dir-tree { max-height: 340px; overflow: auto; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px; }
+.dir-new-sub { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+.dir-new-sub .dns-label { font-size: 13px; color: #475569; white-space: nowrap; }
 .section-title { font-size: 17px; font-weight: 700; color: #0f172a; }
 .rule-tag { margin-left: 9px; }
 .as-of, .stock-count { color: #64748b; font-size: 12px; }
