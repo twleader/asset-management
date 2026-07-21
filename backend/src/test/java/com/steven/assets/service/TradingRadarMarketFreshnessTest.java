@@ -9,6 +9,7 @@ import com.steven.assets.repository.StockDividendHistoryRepository;
 import com.steven.assets.repository.StockPriceHistoryRepository;
 import com.steven.assets.repository.StockRepository;
 import com.steven.assets.repository.TwseIndexDailyHistoryRepository;
+import com.steven.assets.security.CurrentUserContext;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -53,6 +54,10 @@ class TradingRadarMarketFreshnessTest {
     @Mock private StockRepository stockRepo;
     @Mock private MarketDataService marketDataService;
     @Mock private ExchangeRateHistoryRepository exchangeRateRepo;
+    // Task 230：get() 回應前會 fail-soft 寫一筆 per-owner Redis 快照；本測試無 request context，
+    // 該寫入路徑不會被觸發（RequestContextHolder 為 null），mock 僅供建構子。
+    @Mock private TradingRadarSnapshotStore snapshotStore;
+    @Mock private CurrentUserContext currentUserContext;
 
     private TradingRadarService newService() {
         return new TradingRadarService(
@@ -68,7 +73,9 @@ class TradingRadarMarketFreshnessTest {
                 alertRepo,
                 stockRepo,
                 marketDataService,
-                exchangeRateRepo);
+                exchangeRateRepo,
+                snapshotStore,
+                currentUserContext);
     }
 
     /** 建 241 筆「由新到舊」完成日收盤：closes[i] = base+i，i 越大代表越久以前、收盤越高（近期下跌趨勢）。 */

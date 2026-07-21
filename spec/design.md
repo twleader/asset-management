@@ -3289,8 +3289,16 @@ boolean stale = !todayEodPresent && !liveFreshToday;
 
 | 層 | 端點 | 說明 |
 |---|---|---|
-| business | `GET /api/trading-radar` | 組裝大盤＋當前使用者台股決策；純讀、graceful per-stock |
+| business | `GET /api/trading-radar` | 組裝大盤＋當前使用者台股決策；純讀、graceful per-stock；回應前 fail-soft 寫一筆 per-owner Redis 快照（Requirement 48） |
+| business | `GET /api/trading-radar/export?from&to` | 由 Redis 快照組區間 Excel（`ResponseEntity<ByteArrayResource>`）；Requirement 48 |
+| business | `GET/PUT /api/trading-radar/export-schedule/times` | 排程執行時間點清單／整批覆寫（per-owner 多時間點）；Requirement 48 追加 |
+| business | `GET/PUT /api/trading-radar/export-schedule/setting` | 輸出資料夾（相對子路徑）讀取／儲存；Requirement 48 追加 |
+| business | `POST /api/trading-radar/export-schedule/run-now` | 立即匯出到設定目錄，回落點路徑與檔案大小；不動當日 guard |
+| business | `GET /api/export-schedule/browse?subpath=` | **沿用 Requirement 34 既有端點**列舉子資料夾，不新增 |
 | BFF | `GET /api/bff/trading-radar` | `TradingRadarBffRoutes` rewrite 至 business；一頁一 BFF |
+| BFF | `GET /api/bff/trading-radar/export` | `TradingRadarBffRoutes` rewrite 至 business，二進位下載 passthrough |
+| BFF | `/api/bff/trading-radar/export-schedule/**` | 同一 rewrite 自動涵蓋（路徑落在 business 對應位置） |
+| BFF | `GET /api/bff/trading-radar/export/browse` | **須用 `TradingRadarBffController`（`@RestController` + WebClient）轉呼 business `/api/export-schedule/browse`**；不可加 gateway route——該路徑落在既有 wildcard `/api/bff/trading-radar/**` 內會被 rewrite 成不存在的 `/api/trading-radar/export/browse` 而 404。WebFlux 的 `RequestMappingHandlerMapping`(order 0) 先於 Gateway 的 `RoutePredicateHandlerMapping`(order 1)，controller 自動勝出；此寫法亦與其餘 7 頁一致 |
 
 前端新增 `TradingRadarView.vue`：上方大盤 regime 卡（RISK_ON 紅、RISK_OFF 綠、NEUTRAL 灰、DATA_INCOMPLETE 黃；台股配色）、規則版本／資料日／重新整理；下方卡片表格依主動作顯示 tag，另有「逆勢抄底」獨立欄位（`NONE` 顯示 `—`、超跌觀察為 warning、逆勢試單候選為 danger）。標的名稱下依 DTO 顯示「債券」與「還原權息」小標籤；展開列呈現同一還原價基的三條均線確認、主規則理由／風險及逆勢狀態自己的理由／風險。`api/index.js` 新增 `bffApi.tradingRadar.get()`；router 新增 `/trading-radar`；`App.vue` 於「股市綜合分析」加入「今日交易雷達」。
 
@@ -3920,3 +3928,93 @@ KD 位置 = clamp(−(avg(K, D) − 50) / 50, −1, +1)
 解法**不是放寬 buyGate**（會讓所有下跌趨勢標的一併可買），而是新增平行路徑輸出 `TRIAL_BUY`（分批試單），六項條件全滿足才觸發：長期趨勢組 `> +0.5`、KD 位置 `> +0.5`、KD 動能 `> 0`、前期 `K ≤ D`、完成日漲跌幅 `≥ 0`、`EQUITY` 須大盤非 RISK_OFF 非 stale。
 
 `TRIAL_BUY` 觸發時主 `action` 即為 `TRIAL_BUY`，既有 `counterTrendState` 降為診斷欄位——不得再出現「主建議＝減碼候選、逆勢狀態＝逆勢試單候選」的矛盾組合（既有單元測試已把該矛盾寫死，須一併修正）。
+
+---
+
+## Requirement 48：交易雷達結果快照與 Excel 區間匯出
+
+交易雷達本體為純即時運算、結果不落地（`TradingRadarService.get()` 標 `@Transactional(readOnly=true)`，算完組 DTO 即丟）。本 Requirement 讓每次頁面計算的結果保存為帶時間戳的 **per-owner Redis 快照**，並提供區間 Excel 匯出。**快照刻意不新增 PostgreSQL 資料表**（結果只存 Redis；Task 231 新增的兩張表僅存**排程設定**，不存任何雷達結果）、**不回補上線前歷史**。
+
+### 快照寫入（修訂 Requirement 43 的「GET 無寫入」）
+
+`TradingRadarService.get()` 算完 `TradingRadarDto.Response` 後，若當前為 HTTP 請求且 `CurrentUserContext.hasUser()`，呼叫 `TradingRadarSnapshotStore.save(effectiveUserId, response)` 寫一筆快照，再回傳。整段 **fail-soft**，Redis 例外只記 log 不影響回應。
+
+```
+GET /api/bff/trading-radar → (Gateway rewrite) → GET /api/trading-radar
+  → TradingRadarService.get()
+      → 組 TradingRadarDto.Response（既有）
+      → TradingRadarSnapshotStore.save(effectiveUserId, response)   ← 新增，fail-soft
+  → 回傳 response
+```
+
+`TradingRadarSnapshotStore` 集中掌管 key 結構與序列化，寫入與匯出讀取共用同一支（避免 key 格式在兩處漂移）。owner 取 `CurrentUserContext.getEffectiveUserId()`（admin 代看為被代看者，與 `ownerFilter` 對齊）。大盤 `MarketSummary` 雖全域相同，仍整份隨 per-owner 快照存放，讓每份快照自足、匯出免跨 key 拼裝（快照屬歷史回溯用途，比照 `asset_snapshot` 的匯總欄位例外）。
+
+### Redis key 結構與容量控制
+
+單一 Redis（database 0，與 `price:*` 即時價共用；`--maxmemory 256mb --maxmemory-policy allkeys-lru`）。因 LRU 會逐出任意 key，快照必須受控以免擠掉即時股價：
+
+| 用途 | key | 型別／值 |
+|---|---|---|
+| 快照內容 | `trading-radar:snap:{ownerId}:{epochMillis}` | String＝`Base64(gzip(JSON))`，TTL＝保留窗 |
+| 快照索引 | `trading-radar:snap:idx:{ownerId}` | Sorted Set，member＝`epochMillis`、score＝`epochMillis` |
+| 去重雜湊 | `trading-radar:snap:hash:{ownerId}` | String＝上一筆內容雜湊，TTL＝保留窗 |
+
+`epochMillis` 取自 `Response.generatedAt`。四道控制（皆可由設定覆寫）：
+
+- **節流** `SNAPSHOT_MIN_INTERVAL`（預設 5 分鐘）：以索引 ZSet 最大 score 為上次寫入時間，未達間隔不寫。盤中頁面經既有 SSE（`/api/market-data/prices/stream`）每約 2 秒重讀 `get()`，節流把實際寫入收斂到每 5 分鐘一筆。
+- **去重**：與上一筆快照內容（移除 `generatedAt` 後的 JSON）雜湊相同者不寫（盤後頁面開著但內容未變時不重複累積）。
+- **壓縮**：gzip＋Base64（`StringRedisTemplate` 存字串）。
+- **保留窗** `SNAPSHOT_RETENTION`（預設 90 天，短於 12 個月以配合 256MB）＋ **per-owner 筆數硬上限**（`maxPerOwner` 預設 5000）：value key TTL＝保留窗；每次寫入 inline 兩道修剪——`ZREMRANGEBYSCORE idx 0 (now−保留窗)`（時間窗）與 `ZREMRANGEBYRANK idx 0 -(maxPerOwner+1)`（只保留最新 N 筆），索引 ZSet 亦 refresh 一個略長於保留窗的 EXPIRE。**保留窗修剪一律 inline、不設排程**——Task 231 新增的 `@Scheduled` 只負責排程觸發寫檔，不參與快照修剪。
+
+配合 gzip、90 天保留窗與 per-owner 筆數硬上限，單一使用者 footprint 有確定天花板（約數十 MB），對 256MB 為可控且以即時股價快取為優先——僅靠時間窗在多使用者高頻情境下仍可能累積上萬筆而逼近上限，筆數硬上限即為此而設。保留窗為 best-effort：LRU 壓力下可能更早被逐出，活躍使用者增長時應監控記憶體並視需要調高 `maxmemory`。
+
+### 匯出
+
+business `GET /api/trading-radar/export?from&to`（`ResponseEntity<ByteArrayResource>`，比照 `RealizedGainController.exportExcel`）。owner 取 `getEffectiveUserId()`；`from`／`to` 為 Asia/Taipei ISO local datetime → epoch 毫秒（`from > to` 或格式錯誤回 400）。`TradingRadarExportService`：
+
+```
+members = ZRANGEBYSCORE snap:idx:{ownerId} fromEpoch toEpoch
+for m in members: raw = GET snap:{ownerId}:{m}
+  if raw == null: 跳過（TTL/LRU 逐出）並計缺漏數
+  node = ObjectMapper.readTree(gunzip(Base64.decode(raw)))   // JsonNode，容忍缺欄位
+→ POI 產三分頁：快照索引 / 大盤總覽 / 個股決策
+   （每列一快照，或一(快照,個股)；含快照時間欄；所有日期時間欄以 ISO 文字寫入）
+   「快照索引」分頁首列放缺漏彙總「查得 X／索引預期 Y／缺漏 Z」，讓部分被逐出對使用者可見（不只進 log）
+```
+
+零快照時仍回含表頭的合法 `.xlsx`（缺漏彙總列註明查無快照），不回 5xx。BFF 走既有 `TradingRadarBffRoutes` passthrough，二進位與下載 header 原樣穿透，不新增程式。前端 `TradingRadarView.vue` 新增「匯出 Excel」按鈕與 datetime 區間對話框，沿用 `ExchangeRateView.vue` 的 `saveBlob`（`showSaveFilePicker` 指定目錄，fallback 一般下載）；`api/index.js` 的 `tradingRadar` 新增 `exportExcel(from, to)`。
+
+### 測試與驗證
+
+節流／去重／gzip 往返／保留窗修剪／寫入 fail-soft；匯出多快照三分頁、時間欄文字、value 缺漏跳過、空區間回含表頭合法檔。部署後以 `X-User-*` header 觸發 `get()` 寫入、`redis-cli` 驗索引與 TTL、`export` 取回 `.xlsx`，並確認 `price:*` 未被大量快照擠出。
+
+### 排程自動匯出到指定伺服器目錄（Task 231）
+
+與手動瀏覽器下載**並存**，兩者共用同一支產檔邏輯（`TradingRadarExportService`），不得各自實作。比照「爬蟲執行時間設定」提供**多個**每日執行時間點；到點由背景排程把當日快照寫成 Excel 到使用者指定的伺服器資料夾。
+
+**資料模型（兩張表，per-owner）** — 時間點與資料夾**刻意分表**，沿用 `crawler_schedule`／`crawler_export_setting` 的既有理由：併表會使同一路徑隨時間點列數重複儲存（違反正規化），且刪一個時間點會連帶弄丟路徑。
+
+| 表 | 欄位 | 說明 |
+|---|---|---|
+| `trading_radar_export_time` | `id / owner_user_id / run_hour / run_minute / enabled / last_run_date / updated_at`，UNIQUE `(owner_user_id, run_hour, run_minute)` | 一列一時間點。**`last_run_date` 在時間點列上**——當日 guard 必須 per 時間點，否則同日多時間點只跑第一個 |
+| `trading_radar_export_setting` | `id / owner_user_id`(UNIQUE)`/ output_subpath / last_run_at / last_run_status / updated_at` | 一使用者一列，只存**相對子路徑** |
+
+兩表皆 `@Filter(ownerFilter)`。背景排程無 request context → filter 不啟用，`findAll()` 讀全部 owner 列；**owner 取自列上的 `owner_user_id` 並顯式傳入快照讀取**（Redis key 本就 owner-scoped，不依賴 Hibernate filter），背景路徑不得用 request-scoped 的 `CurrentUserContext`。
+
+**排程機制**（照抄 `IndexExportScheduleService`，不自創）：
+
+```
+@Scheduled(cron = "0 * * * * *", zone = "Asia/Taipei") tick()   ← AtomicBoolean 防重入
+@EventListener(ApplicationReadyEvent.class) selfHealOnStartup() ← 開機補跑當日已到點未執行者
+runDueExports():
+  for 每列 enabled 的 trading_radar_export_time（findAll，跨 owner）:
+      if today == last_run_date: continue                    ← 當日 guard（per 時間點）
+      if now >= LocalTime(run_hour, run_minute):             ← 非「分鐘精確相等」，避免卡分鐘整日漏跑
+          export(ownerId)；成功/失敗都設 last_run_date=today ← 單一 owner 失敗不影響他人
+```
+
+**寫檔**：讀該 owner 當日 00:00～當下的 Redis 快照 → 同一支三分頁 Excel → 檔名 `交易雷達_{ownerId}_{yyyyMMdd}.xlsx`（同日覆寫、跨日新檔，比照爬蟲 `public_info_<日期>.json`；含 ownerId 因多使用者可能共用同一目錄）。
+
+**當日零快照時不寫檔**：快照只在使用者開啟／刷新雷達頁的 HTTP 路徑產生（背景不產生），故排程時間點前若使用者當天沒開過頁面即查無快照。此時**不寫檔**（避免每天留下只有表頭的無用檔、並保留前一版不被覆蓋），只把 `last_run_status` 記為「當日尚無快照，未產檔」並**仍設當日 guard**。這是本功能與爬蟲的語意差異：爬蟲是排程自己去抓，本功能是把使用者當天看過的雷達倒出來，須於前端設定卡明示。路徑＝`EXPORT_OUTPUT_DIR`（`/home/steven`，volume 對映 host 家目錄）resolve 相對子路徑，`normalize()` 後須仍 `startsWith(base)`（拒 `..`／絕對路徑），`Files.createDirectories` 自動建目錄，先寫 `.tmp` 再 `ATOMIC_MOVE`（不支援退 `REPLACE_EXISTING`）。
+
+**business-services 可寫主機家目錄**（`docker-compose.yml`：`EXPORT_OUTPUT_DIR: /home/steven` ＋ `${EXPORT_OUTPUT_DIR_HOST:-/Users/steven}:/home/steven`），故排程放 business（同時握有 Redis 快照與 POI）。目錄列舉沿用 Requirement 34 既有 `GET /api/export-schedule/browse?subpath=`，不新增端點。新增的 `@Scheduled` 須同步登錄 `SchedulePublicBffController.JOBS`。

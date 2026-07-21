@@ -74,6 +74,15 @@ market-analysis:
   news-verify-published-date: ${MARKET_ANALYSIS_NEWS_VERIFY_PUBLISHED_DATE:true}
   news-region-block-enabled: ${MARKET_ANALYSIS_NEWS_REGION_BLOCK_ENABLED:true}
 
+# 交易雷達結果快照（Requirement 48）：每次頁面計算把結果存為 per-owner Redis 快照供區間匯出。
+# 與即時股價 price:* 共用 256MB / allkeys-lru 的 Redis，故以節流／保留窗／per-owner 筆數硬上限
+# 控制 footprint，避免快照量把即時股價快取逐出。三值皆可經環境變數覆寫。
+trading-radar:
+  snapshot:
+    min-interval-minutes: ${TRADING_RADAR_SNAPSHOT_MIN_INTERVAL_MINUTES:5}
+    retention-days: ${TRADING_RADAR_SNAPSHOT_RETENTION_DAYS:90}
+    max-per-owner: ${TRADING_RADAR_SNAPSHOT_MAX_PER_OWNER:5000}
+
 server:
   port: ${SERVER_PORT:8080}
 

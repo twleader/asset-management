@@ -14,10 +14,12 @@ import com.steven.assets.repository.StockDividendHistoryRepository;
 import com.steven.assets.repository.StockPriceHistoryRepository;
 import com.steven.assets.repository.StockRepository;
 import com.steven.assets.repository.TwseIndexDailyHistoryRepository;
+import com.steven.assets.security.CurrentUserContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.context.request.RequestContextHolder;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -71,6 +73,8 @@ public class TradingRadarService {
     private final StockRepository stockRepo;
     private final MarketDataService marketDataService;
     private final ExchangeRateHistoryRepository exchangeRateRepo;
+    private final TradingRadarSnapshotStore snapshotStore;
+    private final CurrentUserContext currentUserContext;
 
     /** @param stale 大盤最新完成日 K 不是當前台股交易日（Task 217.1）。 */
     private record MarketState(
@@ -116,12 +120,22 @@ public class TradingRadarService {
                 .map(t -> buildStock(t, market.regime(), market.stale()))
                 .toList();
 
-        return new TradingRadarDto.Response(
+        TradingRadarDto.Response response = new TradingRadarDto.Response(
                 TradingRadarRuleEngine.RULE_VERSION,
                 ZonedDateTime.now(TAIPEI).toOffsetDateTime().toString(),
                 market.summary(),
                 decisions,
                 skippedNonTw.size());
+
+        // Requirement 48：每次頁面計算把結果存為 per-owner Redis 快照供匯出（fail-soft、僅登入的 HTTP 請求）。
+        try {
+            if (RequestContextHolder.getRequestAttributes() != null && currentUserContext.hasUser()) {
+                snapshotStore.save(currentUserContext.getEffectiveUserId(), response);
+            }
+        } catch (Exception e) {
+            log.warn("交易雷達快照寫入失敗（不影響頁面）：{}", e.toString());
+        }
+        return response;
     }
 
     /** 背景通知評估共用同一份 V4 組裝，不依賴 HTTP owner filter。 */
