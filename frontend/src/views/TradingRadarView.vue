@@ -25,7 +25,7 @@
         <div class="card-head">
           <div>
             <span class="section-title">台股大盤風險</span>
-            <el-tag size="small" effect="plain" type="info" class="rule-tag">{{ radar.ruleVersion || 'TW_RULES_V6' }}</el-tag>
+            <el-tag size="small" effect="plain" type="info" class="rule-tag">{{ radar.ruleVersion || 'TW_RULES_V7' }}</el-tag>
           </div>
           <div class="as-of-group">
             <span class="as-of">完成日 K：{{ market.asOfDate || '資料不足' }}</span>
@@ -238,8 +238,18 @@
             <span>{{ fmtNumber(row.annualMa, 2) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="KD" width="120" align="center">
-          <template #default="{ row }">K {{ fmtNumber(row.kValue, 1) }} / D {{ fmtNumber(row.dValue, 1) }}</template>
+        <el-table-column label="KD" width="168" align="center">
+          <template #default="{ row }">
+            <span :class="kdHeatClass(row.kdHeat)">K {{ fmtNumber(row.kValue, 1) }} / D {{ fmtNumber(row.dValue, 1) }}</span>
+            <el-tag
+              v-if="row.kdHeat === 'OVERHEATED' || row.kdHeat === 'ELEVATED'"
+              size="small"
+              class="kd-heat-tag"
+              :type="row.kdHeat === 'OVERHEATED' ? 'danger' : 'warning'"
+              :effect="row.kdHeat === 'OVERHEATED' ? 'dark' : 'plain'">
+              {{ row.kdHeat === 'OVERHEATED' ? '過熱' : '偏熱' }}
+            </el-tag>
+          </template>
         </el-table-column>
         <el-table-column prop="asOfDate" label="完成日 K" width="115" />
         <el-table-column label="通知" width="105" align="center" fixed="right">
@@ -500,7 +510,7 @@ const savingDir = ref(false)
 const runningNow = ref(false)
 const dirPicker = reactive({ visible: false, baseDir: '', picked: '', newSub: '', treeKey: 0 })
 const dirTreeProps = { label: 'name', isLeaf: 'leaf' }
-const radar = ref({ market: {}, stocks: [], skippedNonTwStocks: 0, ruleVersion: 'TW_RULES_V6' })
+const radar = ref({ market: {}, stocks: [], skippedNonTwStocks: 0, ruleVersion: 'TW_RULES_V7' })
 const notificationVisible = ref(false)
 const notificationLoading = ref(false)
 const notificationSaving = ref(false)
@@ -683,6 +693,13 @@ function fxTagType(pct) {
   if (pct >= 65) return 'warning'
   if (pct <= 35) return 'success'
   return 'info'
+}
+
+// 門檻一律由後端 kdHeat 決定，前端不得自行比較 K/D 大小（Task 232）。
+function kdHeatClass(kdHeat) {
+  if (kdHeat === 'OVERHEATED') return 'kd-overheated'
+  if (kdHeat === 'ELEVATED') return 'kd-elevated'
+  return ''
 }
 
 function fxTooltip(row) {
@@ -1044,6 +1061,10 @@ onUnmounted(() => {
 .stock-meta { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
 .price-value { font-weight: 700; color: #0f172a; }
 .slash { color: #cbd5e1; padding: 0 2px; }
+/* 過熱＝動作已降級（紅），偏熱＝僅提醒、動作未受影響（橘）；兩者必須可區分（Task 232）。 */
+.kd-overheated { color: #f56c6c; font-weight: 600; }
+.kd-elevated { color: #e6a23c; }
+.kd-heat-tag { margin-left: 5px; }
 .expand-panel { padding: 8px 28px 18px 56px; background: #f8fafc; }
 .confirm-grid { display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)); gap: 10px; }
 .confirm-item { border: 1px solid #e2e8f0; border-radius: 8px; background: white; padding: 12px; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }

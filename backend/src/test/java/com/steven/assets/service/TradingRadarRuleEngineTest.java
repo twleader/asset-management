@@ -378,6 +378,130 @@ class TradingRadarRuleEngineTest {
         assertTrue(normal.score() > overheated.score(), "過熱標的的分數應低於不過熱者");
     }
 
+    // ── Task 232：過熱補 K 單獨門檻、文案修正與偏熱揭露 ──────────────────────────
+    //
+    // 共用 fixture 為 strongStockWithKd()：價 120 站上 MA20 110／MA60 100／MA240 90，
+    // 三個兩日確認皆 ABOVE，大盤 RISK_ON 非 stale，當日漲跌 1%（不觸發 ±5%），fx 為 null。
+    // 此時 Σw = 0.61(六項均線) + 0.08(動能) + 0.13(位置) + 0.08(大盤) + 0.05(漲跌) = 0.95，
+    // score = round(50 + 50 × Σ(w×c) / 0.95)。
+
+    @Test
+    void kdHeat_userReportedCase_staysAddCandidateAndIsOnlyMarkedElevated() {
+        // 使用者回報的 00882：K 82.3／D 75.2 → avg 78.75 未過 80、K 未過 85。
+        // 本任務刻意不改變此案例的動作（門檻取 85 的直接後果），釘住以免日後被誤調為 80。
+        // 動能 +0.71×0.08、位置 −0.575×0.13 → Σ(w×c)=0.63205 → 83.27 → 83。
+        var held = engine.evaluateStock(strongStockWithKd(true, "82.3", "75.2"));
+
+        assertEquals(83, held.score(), "應複現使用者回報畫面的 83 分");
+        assertEquals(TradingRadarRuleEngine.Action.ADD_CANDIDATE, held.action());
+        assertEquals(TradingRadarRuleEngine.KdHeat.ELEVATED, held.kdHeat());
+    }
+
+    @Test
+    void kdHeat_kAloneOverheated_closesBuyGateWithoutDeductingScore() {
+        // K=86／D=70 → avg 78 未過 80，僅 K 過 85。動能 clamp 為 +1.0、位置 −0.56
+        // → Σ(w×c)=0.6572 → 84.59 → 85。分數仍 ≥ 75，證明降級來自閘門而非扣分。
+        var held = engine.evaluateStock(strongStockWithKd(true, "86", "70"));
+        var notHeld = engine.evaluateStock(strongStockWithKd(false, "86", "70"));
+
+        assertEquals(85, held.score(), "過熱不得扣分");
+        assertEquals(TradingRadarRuleEngine.KdHeat.OVERHEATED, held.kdHeat());
+        assertEquals(TradingRadarRuleEngine.Action.HOLD, held.action());
+        assertEquals(TradingRadarRuleEngine.Action.WATCH, notHeld.action());
+    }
+
+    @Test
+    void kdHeat_overheatRiskText_dropsPullbackProbabilityClaim() {
+        // 十年回測顯示過熱組 20 日內跌逾 10% 的比例（11.1%）低於正常放行組（15.9%），
+        // 故不得再宣稱「回檔機率升高」——系統不對使用者陳述自身資料不支持的因果。
+        var overheated = engine.evaluateStock(strongStockWithKd(true, "86", "70"));
+
+        assertTrue(overheated.risks().stream().noneMatch(r -> r.contains("回檔機率")),
+                "過熱文案不得宣稱回檔機率升高");
+        assertTrue(overheated.risks().stream().anyMatch(r -> r.contains("過熱區")));
+    }
+
+    @Test
+    void kdHeat_avgAndKBothOverheated_emitSingleRiskLine() {
+        var both = engine.evaluateStock(strongStockWithKd(true, "90", "86"));
+
+        assertEquals(TradingRadarRuleEngine.KdHeat.OVERHEATED, both.kdHeat());
+        assertEquals(1, both.risks().stream().filter(r -> r.contains("本日不列入買進／加碼候選")).count(),
+                "avg 與 K 同時過熱時只能輸出一條過熱文案");
+    }
+
+    @Test
+    void kdHeat_elevatedByAvgOnly_doesNotClaimKIsHigh() {
+        // K=70／D=75 → avg 72.5 觸發偏熱，但 K 並未偏高：不得輸出「K 值 …」的假陳述。
+        var elevated = engine.evaluateStock(strongStockWithKd(true, "70", "75"));
+
+        assertEquals(TradingRadarRuleEngine.KdHeat.ELEVATED, elevated.kdHeat());
+        assertTrue(elevated.risks().stream().anyMatch(r -> r.contains("KD 均值 73 偏高")));
+        assertTrue(elevated.risks().stream().noneMatch(r -> r.contains("K 值")),
+                "僅均值偏熱時不得述 K 值");
+    }
+
+    @Test
+    void kdHeat_riskText_neverQuotesThresholdNumber() {
+        // 條件為嚴格大於，而 K=85.02 顯示為 85.0；若把門檻寫進句子會變成
+        // 「K 值 85.0 已高於 85」這種自我否定的陳述。
+        var justOverheated = engine.evaluateStock(strongStockWithKd(true, "85.02", "60"));
+        var justElevated = engine.evaluateStock(strongStockWithKd(true, "80.02", "60"));
+
+        assertEquals(TradingRadarRuleEngine.KdHeat.OVERHEATED, justOverheated.kdHeat());
+        assertEquals(TradingRadarRuleEngine.KdHeat.ELEVATED, justElevated.kdHeat());
+        for (var r : justOverheated.risks()) {
+            assertTrue(!r.contains("高於 85") && !r.contains("高於 80"), "文案不得引述門檻數字：" + r);
+        }
+        for (var r : justElevated.risks()) {
+            assertTrue(!r.contains("高於 85") && !r.contains("高於 80"), "文案不得引述門檻數字：" + r);
+        }
+    }
+
+    @Test
+    void kdHeat_isNormalNotNull_whenIndicatorsAreIncomplete() {
+        // K／D 為 null 會落入既有的資料不足分支；前端只讀三態字串，不得給 null。
+        var incomplete = engine.evaluateStock(new TradingRadarRuleEngine.StockInput(
+                true, new BigDecimal("120"), new BigDecimal("1"), new BigDecimal("1"),
+                new TradingRadarRuleEngine.Indicators(
+                        new BigDecimal("110"), new BigDecimal("100"), new BigDecimal("90"), null, null),
+                null, null,
+                TradingRadarRuleEngine.Confirmation.ABOVE,
+                TradingRadarRuleEngine.Confirmation.ABOVE,
+                TradingRadarRuleEngine.Confirmation.ABOVE,
+                TradingRadarRuleEngine.InstrumentType.EQUITY,
+                TradingRadarRuleEngine.MarketRegime.RISK_ON,
+                false, null));
+
+        assertEquals(TradingRadarRuleEngine.Action.NO_TRADE, incomplete.action());
+        assertEquals(TradingRadarRuleEngine.KdHeat.NORMAL, incomplete.kdHeat());
+    }
+
+    @Test
+    void ruleVersion_isV7() {
+        assertEquals("TW_RULES_V7", TradingRadarRuleEngine.RULE_VERSION);
+    }
+
+    private TradingRadarRuleEngine.StockInput strongStockWithKd(boolean held, String k, String d) {
+        return new TradingRadarRuleEngine.StockInput(
+                held,
+                new BigDecimal("120"),
+                new BigDecimal("1"),
+                new BigDecimal("1"),
+                new TradingRadarRuleEngine.Indicators(
+                        new BigDecimal("110"), new BigDecimal("100"), new BigDecimal("90"),
+                        new BigDecimal(k), new BigDecimal(d)),
+                new BigDecimal("55"),
+                new BigDecimal("45"),
+                TradingRadarRuleEngine.Confirmation.ABOVE,
+                TradingRadarRuleEngine.Confirmation.ABOVE,
+                TradingRadarRuleEngine.Confirmation.ABOVE,
+                TradingRadarRuleEngine.InstrumentType.EQUITY,
+                TradingRadarRuleEngine.MarketRegime.RISK_ON,
+                false,
+                null);
+    }
+
     @Test
     void expensiveFx_vetoesBuyForForeignCurrencyAssets() {
         var cheap = engine.evaluateStock(bondWithKd("51.85", "49.07", new BigDecimal("20")));

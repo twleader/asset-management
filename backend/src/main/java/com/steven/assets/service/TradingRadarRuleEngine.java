@@ -15,8 +15,8 @@ import java.util.List;
 @Component
 public class TradingRadarRuleEngine {
 
-    /** V6：大盤 regime 新鮮度擴充為可即時判斷（Task 228，Requirement 43 修訂）；股票分數公式本身未變。 */
-    public static final String RULE_VERSION = "TW_RULES_V6";
+    /** V7：KD 過熱判定補 K 單獨門檻、修正與實證相反的風險文案、新增偏熱揭露（Task 232）；分數公式本身未變。 */
+    public static final String RULE_VERSION = "TW_RULES_V7";
 
     // ─── V5 因子權重（Requirement 43 修訂／Requirement 47）────────────────────────────
     // V4 為「base 50 + 各因子直接加減 + 硬 clamp」，理論值域 −36~+124：均線六項全滿即 +58，
@@ -38,6 +38,23 @@ public class TradingRadarRuleEngine {
 
     /** KD 位置達此均值以上視為短線過熱，直接否決買進（不靠扣分，扣分會被分數區間稀釋）。 */
     private static final double KD_OVERHEAT_AVG = 80.0;
+    /**
+     * K 單獨達此值亦視為短線過熱（Task 232）。
+     *
+     * <p>存在的理由：原本只看 {@code avg(K,D)}，而 K 剛突破 80 時正是 K 大幅領先 D 之際，
+     * 均值被 D 拉低而不觸發——實測 00882（K 82.3／D 75.2）avg 僅 78.75，被判加碼候選。</p>
+     *
+     * <p><b>此門檻沒有回測依據，是刻意的風險偏好取捨。</b>十年台股 37,720 個買進閘門成立樣本
+     * 顯示，過熱組的後續下檔風險反而低於正常放行組（20 日內跌逾 10% 的比例：K&gt;85 組 10.0%、
+     * 正常放行組 15.9%）。採納理由是使用者不願在單一指標極端超買時收到加碼建議。
+     * 取 85 而非 80 的依據是受影響樣本量（0.63% vs 7.10%），即盡量縮小影響面。
+     * <b>不得於任何文案宣稱本門檻能降低回檔風險。</b></p>
+     */
+    private static final double KD_OVERHEAT_K = 85.0;
+    /** K 單獨達此值視為短線偏熱：純揭露，不影響分數與動作（Task 232）。 */
+    private static final double KD_ELEVATED_K = 80.0;
+    /** KD 均值達此值視為短線偏熱：純揭露，不影響分數與動作（Task 232）。 */
+    private static final double KD_ELEVATED_AVG = 70.0;
     /** 匯率分位達此值以上視為換匯過貴，直接否決買進。 */
     private static final double FX_EXPENSIVE_PCT = 90.0;
 
@@ -45,6 +62,14 @@ public class TradingRadarRuleEngine {
     public enum MarketRegime { RISK_ON, NEUTRAL, RISK_OFF, DATA_INCOMPLETE }
     public enum InstrumentType { EQUITY, BOND }
     public enum CounterTrendState { NONE, OVERSOLD_WATCH, TRIAL_CANDIDATE }
+    /**
+     * KD 短線熱度三態（Task 232）。
+     *
+     * <p>{@code OVERHEATED} 關閉買進閘門（降級為 HOLD／WATCH，不扣分）；
+     * {@code ELEVATED} <b>純為揭露，不影響分數與動作</b>——它存在的理由是收合列看不到
+     * reasons／risks，使用者無從得知 K 已偏高。</p>
+     */
+    public enum KdHeat { OVERHEATED, ELEVATED, NORMAL }
     public enum Action {
         BUY_CANDIDATE,
         ADD_CANDIDATE,
@@ -127,7 +152,9 @@ public class TradingRadarRuleEngine {
             Action action,
             CounterTrendResult counterTrend,
             List<String> reasons,
-            List<String> risks
+            List<String> risks,
+            /** KD 短線熱度（Task 232）；供畫面在收合列即可辨識，不影響 score 與 action。 */
+            KdHeat kdHeat
     ) {}
 
     public record CounterTrendResult(
@@ -199,7 +226,8 @@ public class TradingRadarRuleEngine {
         if (!complete(input)) {
             return new StockResult(null, Action.NO_TRADE,
                     new CounterTrendResult(CounterTrendState.NONE, List.of(), List.of()), List.of(),
-                    List.of("個股必要的 MA20／60／240、KD、241 根完成日 K 或大盤資料不足，今日不交易。"));
+                    List.of("個股必要的 MA20／60／240、KD、241 根完成日 K 或大盤資料不足，今日不交易。"),
+                    KdHeat.NORMAL);
         }
 
         List<String> reasons = new ArrayList<>();
@@ -218,7 +246,10 @@ public class TradingRadarRuleEngine {
         // KD 拆成兩個正交子因子。V4 把兩者混在一組加減分裡，語意上是錯的：
         // K=90.8/D=86.0 與 K=26.1/D=20.7 同樣是 K>D，但前者是「漲多了」、後者是「跌深反彈」。
         acc.add(W_KD_MOMENTUM, kdMomentum(k, d, reasons, risks));
-        acc.add(W_KD_POSITION, kdPosition(k, d, reasons, risks));
+        acc.add(W_KD_POSITION, kdPosition(k, d, reasons));
+        // 熱度文案與買進閘門共用 kdHeatOf()，不在此另行比較門檻（Task 232）。
+        KdHeat kdHeat = kdHeatOf(k, d);
+        describeHeat(kdHeat, k, d, risks);
 
         if (equityMarketApplies(input)) {
             acc.add(W_MARKET, marketContribution(input, reasons, risks));
@@ -233,7 +264,7 @@ public class TradingRadarRuleEngine {
         int score = acc.score();
         Action action = actionFor(input, score);
         CounterTrendResult counterTrend = evaluateCounterTrend(input);
-        return new StockResult(score, action, counterTrend, List.copyOf(reasons), List.copyOf(risks));
+        return new StockResult(score, action, counterTrend, List.copyOf(reasons), List.copyOf(risks), kdHeat);
     }
 
     private CounterTrendResult evaluateCounterTrend(StockInput input) {
@@ -373,16 +404,60 @@ public class TradingRadarRuleEngine {
      * KD 位置：超買為負、超賣為正。這是 V5 新增的維度——V4 只有「K 是否大於 D」，
      * 無法區分「在高檔轉強」（漲多了）與「在低檔轉強」（跌深反彈）。
      */
-    private Double kdPosition(BigDecimal k, BigDecimal d, List<String> reasons, List<String> risks) {
+    private Double kdPosition(BigDecimal k, BigDecimal d, List<String> reasons) {
         if (k == null || d == null) return null;
         double avg = k.add(d).doubleValue() / 2.0;
         double v = clampUnit(-(avg - 50.0) / 50.0);
-        if (avg > KD_OVERHEAT_AVG) {
-            risks.add("KD 均值 " + Math.round(avg) + " 已達超買區，短線過熱、回檔機率升高。 ");
-        } else if (avg < 25.0) {
+        if (avg < 25.0) {
             reasons.add("KD 均值 " + Math.round(avg) + " 位於超賣區，短線跌深。 ");
         }
+        // 超買側的文案改由 describeHeat() 統一輸出，與買進閘門共用同一門檻求值處（Task 232）。
         return v;
+    }
+
+    /**
+     * KD 熱度三態的<b>唯一求值處</b>——買進閘門、風險文案、DTO 皆由此取得。
+     *
+     * <p>刻意集中：門檻若散在閘門與文案各判一次，日後任一處被改就會出現
+     * 「畫面標示過熱、動作卻仍是加碼候選」的矛盾，而那正是 Task 232 要消滅的缺陷。</p>
+     */
+    private KdHeat kdHeatOf(BigDecimal k, BigDecimal d) {
+        if (k == null || d == null) return KdHeat.NORMAL;
+        double avg = k.add(d).doubleValue() / 2.0;
+        double kv = k.doubleValue();
+        if (avg > KD_OVERHEAT_AVG || kv > KD_OVERHEAT_K) return KdHeat.OVERHEATED;
+        if (kv > KD_ELEVATED_K || avg > KD_ELEVATED_AVG) return KdHeat.ELEVATED;
+        return KdHeat.NORMAL;
+    }
+
+    /**
+     * 依熱度輸出風險文案。
+     *
+     * <p>兩個約束：(1) <b>不得宣稱「回檔機率升高」</b>——本專案十年回測顯示過熱組
+     * 20 日內跌逾 10% 的比例（11.1%）低於正常放行組（15.9%），該說法與自身資料矛盾；
+     * (2) <b>不得把門檻數字寫進句子</b>——條件為嚴格大於，而 K=85.02 顯示為 85.0，
+     * 「已高於 85」會變成自我否定的句子。</p>
+     */
+    private void describeHeat(KdHeat heat, BigDecimal k, BigDecimal d, List<String> risks) {
+        if (heat == KdHeat.NORMAL || k == null || d == null) return;
+        double avg = k.add(d).doubleValue() / 2.0;
+        if (heat == KdHeat.OVERHEATED) {
+            // avg 與 K 同時過熱時只輸出一條，avg 版優先。
+            risks.add(avg > KD_OVERHEAT_AVG
+                    ? "KD 均值 " + Math.round(avg) + " 已達超買區，短線位置偏高；本日不列入買進／加碼候選。 "
+                    : "K 值 " + fmt1(k) + " 已達過熱區，短線位置偏高；本日不列入買進／加碼候選。 ");
+        } else {
+            // 兩分支同時成立時只輸出一條，K 版優先；僅 avg 觸發時不得述 K 值
+            //（K=70／D=75 會使 avg=72.5 觸發偏熱，而 K 並未偏高）。
+            risks.add(k.doubleValue() > KD_ELEVATED_K
+                    ? "K 值 " + fmt1(k) + " 偏高，短線偏熱；未達過熱門檻，動作維持。 "
+                    : "KD 均值 " + Math.round(avg) + " 偏高，短線偏熱；未達過熱門檻，動作維持。 ");
+        }
+    }
+
+    /** 一位小數，與畫面 fmtNumber(kValue, 1) 同精度。 */
+    private String fmt1(BigDecimal v) {
+        return v.setScale(1, RoundingMode.HALF_UP).toPlainString();
     }
 
     private Double marketContribution(StockInput input, List<String> reasons, List<String> risks) {
@@ -491,8 +566,7 @@ public class TradingRadarRuleEngine {
         // 一檔長期結構完好的標的不該因為短線過熱就被判減碼，但也不該在過熱時被建議買進。
         BigDecimal k = input.indicators() == null ? null : input.indicators().k();
         BigDecimal d = input.indicators() == null ? null : input.indicators().d();
-        boolean kdOverheated = k != null && d != null
-                && k.add(d).doubleValue() / 2.0 > KD_OVERHEAT_AVG;
+        boolean kdOverheated = kdHeatOf(k, d) == KdHeat.OVERHEATED;
         boolean fxExpensive = input.fxPercentile() != null
                 && input.fxPercentile().doubleValue() >= FX_EXPENSIVE_PCT;
 

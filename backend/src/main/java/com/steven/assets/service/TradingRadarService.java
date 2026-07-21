@@ -301,7 +301,8 @@ public class TradingRadarService {
                     fxPct,
                     currency,
                     List.copyOf(reasons),
-                    result.risks());
+                    result.risks(),
+                    result.kdHeat().name());
         } catch (Exception e) {
             log.warn("今日交易雷達：{} {} 組裝失敗", target.market(), target.code(), e);
             return incompleteStock(target, name, assetClass, "讀取個股資料失敗，該檔今日不交易。");
@@ -542,7 +543,8 @@ public class TradingRadarService {
                 TradingRadarRuleEngine.Confirmation.UNAVAILABLE.name(),
                 null,
                 null,
-                List.of(), List.of(message));
+                List.of(), List.of(message),
+                TradingRadarRuleEngine.KdHeat.NORMAL.name());
     }
 
     private String regimeLabel(TradingRadarRuleEngine.MarketRegime regime) {
