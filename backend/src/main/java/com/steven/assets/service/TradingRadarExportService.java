@@ -123,7 +123,10 @@ public class TradingRadarExportService {
 
     private void writeMarketSheet(Workbook wb, Styles st, List<JsonNode> snapshots) {
         Sheet sheet = wb.createSheet("大盤總覽");
-        String[] headers = {"快照時間", "regime", "中文", "分數", "資料完整", "stale", "完成日K", "最新點位", "漲跌%",
+        // intraday / liveUpdatedAt 為 Task 228（TW_RULES_V6，大盤盤中即時判斷）新增的欄位：
+        // intraday=true 代表該次 regime 由 Redis 即時大盤點位計算而非已入庫完成日 K；asOfDate 語意不變仍為完成日 K。
+        String[] headers = {"快照時間", "regime", "中文", "分數", "資料完整", "stale", "盤中即時", "即時更新時間",
+                "完成日K", "最新點位", "漲跌%",
                 "MA20", "MA60", "MA240", "季線確認", "年線確認", "K", "D", "支持訊號", "風險提醒"};
         int r = 0;
         Row h = sheet.createRow(r++);
@@ -137,18 +140,20 @@ public class TradingRadarExportService {
             cell(row, 3, num(m, "score"), st.num2);
             cell(row, 4, bool(m, "dataComplete"), null);
             cell(row, 5, bool(m, "stale"), null);
-            cell(row, 6, txt(m, "asOfDate"), null);
-            cell(row, 7, num(m, "price"), st.num2);
-            cell(row, 8, num(m, "changePercent"), st.num2);
-            cell(row, 9, num(m, "monthlyMa"), st.num2);
-            cell(row, 10, num(m, "quarterlyMa"), st.num2);
-            cell(row, 11, num(m, "annualMa"), st.num2);
-            cell(row, 12, txt(m, "quarterlyConfirmation"), null);
-            cell(row, 13, txt(m, "annualConfirmation"), null);
-            cell(row, 14, num(m, "kValue"), st.num2);
-            cell(row, 15, num(m, "dValue"), st.num2);
-            cell(row, 16, list(m, "reasons"), null);
-            cell(row, 17, list(m, "risks"), null);
+            cell(row, 6, bool(m, "intraday"), null);
+            cell(row, 7, txt(m, "liveUpdatedAt"), null);
+            cell(row, 8, txt(m, "asOfDate"), null);
+            cell(row, 9, num(m, "price"), st.num2);
+            cell(row, 10, num(m, "changePercent"), st.num2);
+            cell(row, 11, num(m, "monthlyMa"), st.num2);
+            cell(row, 12, num(m, "quarterlyMa"), st.num2);
+            cell(row, 13, num(m, "annualMa"), st.num2);
+            cell(row, 14, txt(m, "quarterlyConfirmation"), null);
+            cell(row, 15, txt(m, "annualConfirmation"), null);
+            cell(row, 16, num(m, "kValue"), st.num2);
+            cell(row, 17, num(m, "dValue"), st.num2);
+            cell(row, 18, list(m, "reasons"), null);
+            cell(row, 19, list(m, "risks"), null);
         }
         autosize(sheet, headers.length);
     }
