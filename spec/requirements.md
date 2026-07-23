@@ -1054,7 +1054,7 @@
 
 **Acceptance Criteria:**
 
-- [ ] **選單與頁面**：在左側「股市綜合分析」群組新增「今日交易雷達」（route `/trading-radar`），置於「今日股市分析」之後、「股票觀察」之前。頁面上方顯示台股大盤風險卡，下方顯示台股標的決策表；提供重新整理按鈕，但不提供自動下單。
+- [ ] **選單與頁面**：在左側「股市綜合分析」群組新增「今日交易雷達」（route `/trading-radar`），置於「今日股市分析」之後、「股票觀察」之前。頁面上方顯示台股大盤風險卡，下方顯示台股標的決策表；提供重新整理按鈕，但不提供自動下單。使用者在個股決策表任一資料列雙擊時，須以該列的 `stockCode`、`stockName`、`market` 開啟跨頁共用的 `StockAnalysisDialog` 股票分析圖；雙擊展開欄與資料欄皆適用，通知設定按鈕維持原本單擊行為。
 - [ ] **零 AI API**：本功能不得注入或呼叫 `MarketAnalysisService`、Anthropic、OpenAI 或其他 LLM client；不得因重新整理而觸發公開資訊爬蟲或外部行情抓取。後端只讀現有 PostgreSQL 與 Redis：大盤讀 `twse_index_daily_history`，標的技術歷史讀 `stock_price_history`、除權息事件讀 `stock_dividend_history`、有效資產類別讀 `stock` 並經 `AssetClassifier` 判定，最新價透過既有 `PriceQueryService`（Redis miss 才退回同一歷史表）。既有外部行情排程仍可獨立更新資料，但不是本頁請求鏈的一部分。
 - [ ] **標的範圍與租戶隔離**：個股清單＝當前使用者「最新資產快照仍持有的台股」∪「股票觀察（`stock_alert` 衍生）的台股」，依 `(stockCode, market)` 去重；`0000/台股` 只作大盤卡、不重複列在個股表。美股／英股第一版不評分，回傳略過檔數並於頁面說明。最新快照與觀察清單皆沿用既有 `ownerFilter`，不得跨使用者洩漏標的。
 - [ ] **同義指標同一來源與還原權息（`TW_RULES_V3`）**：MA20／MA60／MA240／KD 仍由 `TechnicalIndicatorService` 的同一計算核心產生，不在 BFF 或前端重算；交易雷達先把最近完成日 K（以及尚未入庫的當日 live K）與 `stock_dividend_history` 的有效除權息事件組成單一「還原權息 OHLC」序列，再以該同一序列計算 MA、KD、最近 241 根完成日 K 的兩日確認，以及規則內部的單日漲跌幅（含 ±5% 扣分與逆勢「停止續跌」）。現金配息與股票股利因子依事件日套入、整段縮放至最新一日仍等於原始現價；沒有有效事件時數值須與原始序列完全相同。不得讓 MA／KD 用還原值、兩日確認或規則漲跌幅卻用原始值。API／畫面的 `changePercent` 仍顯示市場報價原始漲跌，規則內部值不另存。完成日不足 `period + 1` 根時確認仍為 `UNAVAILABLE`。

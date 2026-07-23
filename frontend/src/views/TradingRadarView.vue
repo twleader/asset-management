@@ -101,6 +101,7 @@
         row-key="stockCode"
         stripe
         style="width:100%"
+        @row-dblclick="onStockDblClick"
       >
         <el-table-column type="expand">
           <template #default="{ row }">
@@ -368,6 +369,8 @@
       </template>
     </el-dialog>
 
+    <StockAnalysisDialog v-model="analysisVisible" :stock="analysisStock" />
+
     <el-dialog
       v-model="notificationVisible"
       :title="`${notificationStock.stockCode || ''} ${notificationStock.stockName || ''}－通知設定`"
@@ -493,6 +496,7 @@ import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
 import { bffApi } from '@/api'
 import { useRouter } from 'vue-router'
+import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
 
 const router = useRouter()
 const loading = ref(false)
@@ -522,6 +526,8 @@ const notificationForm = reactive({
   recipientIds: []
 })
 const notificationOptions = reactive({ actions: [], counterTrends: [], recipients: [] })
+const analysisVisible = ref(false)
+const analysisStock = ref(null)
 const RECALCULATE_DELAY_MS = 2000
 const RECONNECT_DELAY_MS = 5000
 
@@ -623,6 +629,15 @@ function openPriceStream() {
       openPriceStream()
     }, RECONNECT_DELAY_MS)
   }
+}
+
+function onStockDblClick(row) {
+  analysisStock.value = {
+    stockCode: row.stockCode,
+    stockName: row.stockName,
+    market: row.market
+  }
+  analysisVisible.value = true
 }
 
 async function openNotification(row) {
