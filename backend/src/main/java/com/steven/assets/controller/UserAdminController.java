@@ -25,28 +25,32 @@ public class UserAdminController {
     @PostMapping("/login-upsert")
     public UserDto.UserResponse loginUpsert(@RequestBody UserDto.LoginUpsertRequest req) {
         AppUser user = userAdminService.loginUpsert(req.email(), req.name(), req.picture());
-        return UserDto.UserResponse.from(user);
+        return toResponse(user);
     }
 
     /** 依 email 查目前使用者（BFF /api/me 即時取 status 用）。 */
     @GetMapping("/by-email")
     public UserDto.UserResponse byEmail(@RequestParam String email) {
         AppUser user = userAdminService.getByEmail(email);
-        return user == null ? null : UserDto.UserResponse.from(user);
+        return user == null ? null : toResponse(user);
     }
 
     @GetMapping
     public List<UserDto.UserResponse> list() {
-        return userAdminService.listAll().stream().map(UserDto.UserResponse::from).toList();
+        return userAdminService.listAll().stream().map(this::toResponse).toList();
     }
 
     @PatchMapping("/{id}/status")
     public UserDto.UserResponse updateStatus(@PathVariable Long id, @RequestBody UserDto.StatusRequest req) {
-        return UserDto.UserResponse.from(userAdminService.updateStatus(id, req.status()));
+        return toResponse(userAdminService.updateStatus(id, req.status()));
     }
 
     @PatchMapping("/{id}/role")
     public UserDto.UserResponse updateRole(@PathVariable Long id, @RequestBody UserDto.RoleRequest req) {
-        return UserDto.UserResponse.from(userAdminService.updateRole(id, req.role()));
+        return toResponse(userAdminService.updateRole(id, req.role()));
+    }
+
+    private UserDto.UserResponse toResponse(AppUser user) {
+        return UserDto.UserResponse.from(user, userAdminService.isConfiguredAdmin(user.getEmail()));
     }
 }

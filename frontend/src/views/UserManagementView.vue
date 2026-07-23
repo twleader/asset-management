@@ -37,8 +37,8 @@
 
         <el-table-column label="操作" min-width="280" align="right">
           <template #default="{ row }">
-            <template v-if="row.email === ADMIN_EMAIL">
-              <span class="self-hint">管理者帳號</span>
+            <template v-if="row.protectedAdmin">
+              <span class="self-hint">主要管理者</span>
             </template>
             <template v-else>
               <el-button
@@ -69,8 +69,6 @@
 import { userManagementApi } from '@/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
-
-const ADMIN_EMAIL = 'tw.leader@gmail.com'
 
 const users = ref([])
 const loading = ref(false)

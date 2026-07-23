@@ -659,14 +659,15 @@
 
 ### Requirement 28: Gmail OAuth2 登入與多租戶資料隔離
 
-**User Story:** 作為系統管理者與一般使用者，我希望用各自的 Gmail 帳號登入系統，每個人只能管理與檢視「自己的」資產，管理者（`tw.leader@gmail.com`）能切換檢視任何使用者的資產並管理使用者帳號，以確保多人共用同一套系統時的資料隱私與權限分離。
+**User Story:** 作為系統部署者、管理者與一般使用者，我希望部署時能以環境變數指定主要管理者的 Gmail，讓同一份安裝包可安全散佈給不同人；登入後每個人只能管理與檢視「自己的」資產，管理者能切換檢視任何使用者的資產並管理使用者帳號，以確保多人共用同一套系統時的資料隱私與權限分離。
 
 **Acceptance Criteria:**
 
 - [ ] **Gmail OAuth2 登入**：系統採 Spring Security OAuth2 Login（authorization code 重導流程），provider 為 Google。**OAuth2 登入端點落在 BFF（Spring Cloud Gateway / WebFlux reactive，唯一對外入口）**，非內網的 business-services。未登入者存取受保護資源一律先導向 Google 登入。
 - [ ] **Session 機制**：登入成功後 BFF 以 server-side `WebSession` + `SESSION` cookie（`HttpOnly`、`SameSite=Lax`、prod `Secure`）維持登入態；登入只為辨識身分，不保留 Google access/refresh token。前端為 SPA，登入成功後固定 302 導回前端 `/`，由前端打 `GET /api/me` 決定後續導向。
 - [ ] **`GET /api/me`**：回傳目前登入者 `{ email, name, picture, role(ADMIN/USER), status(PENDING/ACTIVE/DISABLED), effectiveUserId, effectiveUserName, isImpersonating, switchableUsers[] }`；`switchableUsers` 僅 ADMIN 才填；`status` 即時查資料庫（核准後不需重登即生效）。未登入時受保護 API 回 **401 JSON**（非 302），由前端攔截後整頁跳轉 `/oauth2/authorization/google`。
-- [ ] **管理者固定身分**：`tw.leader@gmail.com` 永遠為 `role=ADMIN`、`status=ACTIVE`；系統現有的全部資料（快照、損益、代繳、警示、通知收件人）於資料遷移時一律歸屬給管理者。
+- [ ] **主要管理者由環境設定**：business-services 必須讀取必填的 `ADMIN_EMAIL`，啟動時先 `trim`、轉小寫並驗證 email 格式；缺值或格式錯誤須 fail-fast，禁止回退到任何內建帳號。該 email 登入時永遠維持 `role=ADMIN`、`status=ACTIVE`，不得停用或調降角色；其他 Gmail 首次登入規則不變。
+- [ ] **前後端共用同一判定結果**：`UserResponse` 回傳 `protectedAdmin:boolean`；使用者管理頁只能依此欄位標示並鎖定主要管理者操作，不得在 BFF 或前端再保存管理者 email。
 - [ ] **新使用者待核准**：任何其他 Gmail 首次登入，自動建立 `app_user`（`role=USER`、`status=PENDING`）。PENDING 使用者可完成 Google 登入，但呼叫業務 API 一律被擋（回 `403 {code:"ACCOUNT_PENDING"}`），前端導向「等待核准」頁；管理者於使用者管理頁核准成 `ACTIVE` 後始能使用。`DISABLED` 同樣被擋。
 - [ ] **多租戶資料隔離（每人只能看自己）**：下列「資產類」資料以 `owner_user_id` 隔離，每個使用者只能讀寫自己的：`asset_snapshot`（含子表 `bank_deposit`/`stock_holding`/`fund_holding` 經 snapshot 繼承）、`realized_gain`、`payment_account`、`stock_alert`（含 `stock_alert_trigger`、`stock_alert_recipient` join、`watch_stock` 衍生清單）、`notification_recipient`。參考／行情／設定主檔（`bank`、`broker`、`stock`、各 `*_history`、`market_type`、`deposit_type`、`asset_class`、`fund_master`、`fund_nav` 等）維持**全系統共用**，不加 owner。
 - [ ] **過濾強制執行**：business-services 以 request-scoped `CurrentUserContext`（讀 BFF 傳來的 `X-User-Id`/`X-User-Role`/`X-User-Status` header）+ Hibernate `@Filter`（`owner_user_id = :ownerId`）統一過濾所有受隔離 entity 的查詢；寫入路徑以 `CurrentUserContext.effectiveUserId()` 設定 owner。**filter 僅在有 HTTP request 時啟用**，背景 cron（警示偵測 / email dispatcher）不啟用、維持掃全體 active alert 的既有行為。
@@ -675,8 +676,8 @@
 - [ ] **使用者管理（ADMIN）**：新增使用者管理頁（`/settings/users`），管理者可列出所有使用者、核准（PENDING→ACTIVE）、停用（→DISABLED）、設定角色。後端 `/internal/users/**` 管理端點限 ADMIN。
 - [ ] **備份／還原限管理者**：「系統設定 > 備份/還原 資料」僅管理者可用。非管理者前端選單**不顯示**該項與「使用者管理」項；後端雙層阻擋——BFF `/api/bff/backup-restore/**` 與 business-services `/api/backups/**` 皆限 `ROLE_ADMIN`，非 ADMIN 回 403。備份/還原為全系統操作，不套 owner filter。
 - [ ] **唯一性多租戶化**：原本全域唯一的欄位改為「每使用者唯一」——`asset_snapshot.snapshot_date` 改 `(owner_user_id, snapshot_date)` 複合唯一（不同使用者同一天各可有一筆快照）、`notification_recipient.email` 改 `(owner_user_id, email)` 複合唯一。
-- [ ] **資料遷移（Liquibase）**：以 changeset 建立 `app_user` 表、先 seed 管理者列、為各受隔離表加 `owner_user_id` 並把現有資料 backfill 給管理者、再加 `NOT NULL`+FK+index 與複合唯一；`ddl-auto:none`，schema 變更一律走 Liquibase。
-- [ ] **部署**：Nginx／vite proxy 需把 `/oauth2/**`、`/login/oauth2/**`、`/logout` 導向 BFF 並透傳 `X-Forwarded-Proto`（確保 prod https redirect-uri 正確）；Google client-id/secret 由環境變數注入 BFF；cookie session 須一致設定 CSRF（`XSRF-TOKEN`/`X-XSRF-TOKEN`）、`withCredentials`、CORS `allowCredentials=true` 且具名 origin。
+- [ ] **資料遷移（Liquibase）**：既有 `v1.34.0-multi-tenant.sql` 保留不改以維持已部署資料庫 checksum；另以新 changeset 清理舊版固定 email 的空白 seed，且必須同時確認所有 `owner_user_id` 欄位皆無資料、沒有其他外鍵引用才可刪除。若舊帳號仍擁有資料則保留為一般既有帳號；日後更換 `ADMIN_EMAIL` 只改變受保護的主要管理者身分，不會暗中轉移資料所有權。`ddl-auto:none`，schema 變更一律走 Liquibase。
+- [ ] **部署**：Nginx／vite proxy 需把 `/oauth2/**`、`/login/oauth2/**`、`/logout` 導向 BFF 並透傳 `X-Forwarded-Proto`（確保 prod https redirect-uri 正確）；Google client-id/secret 由環境變數注入 BFF，`ADMIN_EMAIL` 只注入 business-services；cookie session 須一致設定 CSRF（`XSRF-TOKEN`/`X-XSRF-TOKEN`）、`withCredentials`、CORS `allowCredentials=true` 且具名 origin。
 
 ### Requirement 29: 資安弱點修補（Stored XSS／設定授權／行情參數注入／個資入版控）
 
@@ -1053,7 +1054,7 @@
 
 **Acceptance Criteria:**
 
-- [ ] **選單與頁面**：在左側「股市綜合分析」群組新增「今日交易雷達」（route `/trading-radar`），置於「今日股市分析」之後、「股票觀察」之前。頁面上方顯示台股大盤風險卡，下方顯示台股標的決策表；提供重新整理按鈕，但不提供自動下單。
+- [ ] **選單與頁面**：在左側「股市綜合分析」群組新增「今日交易雷達」（route `/trading-radar`），置於「今日股市分析」之後、「股票觀察」之前。頁面上方顯示台股大盤風險卡，下方顯示台股標的決策表；提供重新整理按鈕，但不提供自動下單。使用者在個股決策表任一資料列雙擊時，須以該列的 `stockCode`、`stockName`、`market` 開啟跨頁共用的 `StockAnalysisDialog` 股票分析圖；雙擊展開欄與資料欄皆適用，通知設定按鈕維持原本單擊行為。
 - [ ] **零 AI API**：本功能不得注入或呼叫 `MarketAnalysisService`、Anthropic、OpenAI 或其他 LLM client；不得因重新整理而觸發公開資訊爬蟲或外部行情抓取。後端只讀現有 PostgreSQL 與 Redis：大盤讀 `twse_index_daily_history`，標的技術歷史讀 `stock_price_history`、除權息事件讀 `stock_dividend_history`、有效資產類別讀 `stock` 並經 `AssetClassifier` 判定，最新價透過既有 `PriceQueryService`（Redis miss 才退回同一歷史表）。既有外部行情排程仍可獨立更新資料，但不是本頁請求鏈的一部分。
 - [ ] **標的範圍與租戶隔離**：個股清單＝當前使用者「最新資產快照仍持有的台股」∪「股票觀察（`stock_alert` 衍生）的台股」，依 `(stockCode, market)` 去重；`0000/台股` 只作大盤卡、不重複列在個股表。美股／英股第一版不評分，回傳略過檔數並於頁面說明。最新快照與觀察清單皆沿用既有 `ownerFilter`，不得跨使用者洩漏標的。
 - [ ] **同義指標同一來源與還原權息（`TW_RULES_V3`）**：MA20／MA60／MA240／KD 仍由 `TechnicalIndicatorService` 的同一計算核心產生，不在 BFF 或前端重算；交易雷達先把最近完成日 K（以及尚未入庫的當日 live K）與 `stock_dividend_history` 的有效除權息事件組成單一「還原權息 OHLC」序列，再以該同一序列計算 MA、KD、最近 241 根完成日 K 的兩日確認，以及規則內部的單日漲跌幅（含 ±5% 扣分與逆勢「停止續跌」）。現金配息與股票股利因子依事件日套入、整段縮放至最新一日仍等於原始現價；沒有有效事件時數值須與原始序列完全相同。不得讓 MA／KD 用還原值、兩日確認或規則漲跌幅卻用原始值。API／畫面的 `changePercent` 仍顯示市場報價原始漲跌，規則內部值不另存。完成日不足 `period + 1` 根時確認仍為 `UNAVAILABLE`。

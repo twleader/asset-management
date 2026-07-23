@@ -419,7 +419,7 @@ AssetSnapshot (1) ──── (N) FundHolding
 RealizedGain          (獨立，不關聯快照)
 
 # 多租戶 / 認證（Requirement 28）
-AppUser               (使用者主檔，PK = id；email UNIQUE；name / picture〔Google 帳號顯示名稱與頭像，皆 nullable〕；role ADMIN/USER；status PENDING/ACTIVE/DISABLED；created_at / updated_at 皆 NOT NULL）
+AppUser               (使用者主檔，PK = id；email UNIQUE；name / picture〔Google 帳號顯示名稱與頭像，皆 nullable〕；role ADMIN/USER；status PENDING/ACTIVE/DISABLED；created_at / updated_at 皆 NOT NULL；主要管理者由 ADMIN_EMAIL 即時判定，不另存重複欄位）
 AppUser (1) ──── (N) AssetSnapshot          (owner_user_id；子表 bank/stock/fund holding 經 snapshot 繼承 owner)
 AppUser (1) ──── (N) RealizedGain           (owner_user_id)
 AppUser (1) ──── (N) PaymentAccount         (owner_user_id)
@@ -1760,6 +1760,9 @@ volumes:
 ### business-services 身分與過濾
 
 - `CurrentUserFilter`（`OncePerRequestFilter`）讀 `X-User-*` 填 request-scoped `CurrentUserContext`。
+- `application.yml` 的 `app.admin-email` 綁定必填環境變數 `ADMIN_EMAIL`；`UserAdminService` 建構時完成 trim、小寫與格式驗證，缺值／格式錯誤立即中止啟動，禁止以內建 email 作 fallback。登入強制 ADMIN/ACTIVE、停用保護、角色保護與 DTO 標記一律呼叫同一個 `isConfiguredAdmin(email)`，避免多份判定漂移。
+- `ADMIN_EMAIL` 只注入 business-services；BFF 只信任 business-services 回傳的 role/status，前端使用者列表只依 `UserResponse.protectedAdmin` 鎖定「主要管理者」，BFF／前端不得 hard code email。
+- `v1.34.0-multi-tenant.sql` 為歷史 migration，不修改 checksum；`v1.71.0-configurable-admin-email.sql` 先由 catalog 動態掃描所有 `owner_user_id` 欄位（涵蓋歷史上未建 FK 的 owner 表），再以 foreign-key violation 兜底，只有完全無參照的舊固定管理者 seed 才刪除。日後更換 `ADMIN_EMAIL` 不會轉移 owner，舊帳號仍保有原資料，新主要管理者可用既有代看機制管理。
 - 受隔離 entity 加 `@FilterDef(name="ownerFilter")`（定義於 `model/package-info.java`）+ `@Filter(condition="owner_user_id = :ownerId")`。create 流程以 `ctx.effectiveUserId()` set owner。
 - **啟用點 `TenantFilterAspect`**：`@Before("execution(* com.steven.assets.repository..*(..))")` 在每次 repository 呼叫前，於目前 Hibernate session `enableFilter("ownerFilter")`。選 repository 層而非請求進入點，是因為此時已位於 service `@Transactional`（或 OSIV）綁定的 session 內，**不依賴 interceptor 與 OSIV 註冊順序**，過濾必定套用到實際執行的查詢（經實機驗證：帶 `X-User-Id` 不同值查 `/api/snapshots` 各自隔離）。
 - **filter 僅在有 request context 時啟用**（aspect 以 `RequestContextHolder` 判斷）；背景 cron（`AlertNotificationDispatcher` / `StockAlertService.checkAlerts`）無 request context 故不啟用，照舊掃全體 alert、寄信給各 alert 自己挑的收件人。
@@ -1791,8 +1794,8 @@ volumes:
 | `POST /api/impersonate?userId={id}` | BFF（`TenantWebFilter` 攔截，非 controller） | ADMIN | 管理者代看切換（寫/清 `IMPERSONATE_UID` cookie） |
 | `POST /logout` | BFF | 已登入 | 清 session |
 | `GET /api/bff/user-management` 等 | BFF→business | ADMIN | 使用者管理 passthrough（rewrite → `/internal/users`） |
-| `POST /internal/users/login-upsert` | business | 內部 | 登入 upsert + 回 role/status |
-| `GET /internal/users` / `PATCH /internal/users/{id}/status` / `PATCH /internal/users/{id}/role` | business | ADMIN | 列出 / 核准·停用 / 設角色 |
+| `POST /internal/users/login-upsert` | business | 內部 | 登入 upsert + 回 role/status；`UserResponse.protectedAdmin:boolean` 由 business 判定 |
+| `GET /internal/users` / `PATCH /internal/users/{id}/status` / `PATCH /internal/users/{id}/role` | business | ADMIN | 列出 / 核准·停用 / 設角色；每筆 `UserResponse` 含 `protectedAdmin` |
 | `GET /internal/users/by-email?email={email}` | business | 內部 | 依 email 即時查 id/role/status（登入 principal 為快照，核准後即時查詢備援；見上 L1595 設計說明） |
 
 ## Security Considerations
@@ -3300,7 +3303,7 @@ boolean stale = !todayEodPresent && !liveFreshToday;
 | BFF | `/api/bff/trading-radar/export-schedule/**` | 同一 rewrite 自動涵蓋（路徑落在 business 對應位置） |
 | BFF | `GET /api/bff/trading-radar/export/browse` | **須用 `TradingRadarBffController`（`@RestController` + WebClient）轉呼 business `/api/export-schedule/browse`**；不可加 gateway route——該路徑落在既有 wildcard `/api/bff/trading-radar/**` 內會被 rewrite 成不存在的 `/api/trading-radar/export/browse` 而 404。WebFlux 的 `RequestMappingHandlerMapping`(order 0) 先於 Gateway 的 `RoutePredicateHandlerMapping`(order 1)，controller 自動勝出；此寫法亦與其餘 7 頁一致 |
 
-前端新增 `TradingRadarView.vue`：上方大盤 regime 卡（RISK_ON 紅、RISK_OFF 綠、NEUTRAL 灰、DATA_INCOMPLETE 黃；台股配色）、規則版本／資料日／重新整理；下方卡片表格依主動作顯示 tag，另有「逆勢抄底」獨立欄位（`NONE` 顯示 `—`、超跌觀察為 warning、逆勢試單候選為 danger）。標的名稱下依 DTO 顯示「債券」與「還原權息」小標籤；展開列呈現同一還原價基的三條均線確認、主規則理由／風險及逆勢狀態自己的理由／風險。`api/index.js` 新增 `bffApi.tradingRadar.get()`；router 新增 `/trading-radar`；`App.vue` 於「股市綜合分析」加入「今日交易雷達」。
+前端新增 `TradingRadarView.vue`：上方大盤 regime 卡（RISK_ON 紅、RISK_OFF 綠、NEUTRAL 灰、DATA_INCOMPLETE 黃；台股配色）、規則版本／資料日／重新整理；下方卡片表格依主動作顯示 tag，另有「逆勢抄底」獨立欄位（`NONE` 顯示 `—`、超跌觀察為 warning、逆勢試單候選為 danger）。標的名稱下依 DTO 顯示「債券」與「還原權息」小標籤；展開列呈現同一還原價基的三條均線確認、主規則理由／風險及逆勢狀態自己的理由／風險。個股決策表透過 Element Plus `row-dblclick` 將該列 `{ stockCode, stockName, market }` 傳入跨頁共用的 `StockAnalysisDialog`，使雙擊資料列可直接開啟股票分析圖，不新增雷達專屬圖表或 API。`api/index.js` 新增 `bffApi.tradingRadar.get()`；router 新增 `/trading-radar`；`App.vue` 於「股市綜合分析」加入「今日交易雷達」。
 
 盤中更新沿用儀表板既有 SSE `/api/market-data/prices/stream`，不另建 endpoint。`price-update` 只處理 `market=台股` 且已存在於目前雷達清單的代號：事件抵達時以 immutable row replacement 立即覆蓋 `price`／`changePercent`／`priceUpdatedAt`；同一批事件以 2 秒 trailing debounce 合併，再以不顯示 loading 的 `bffApi.tradingRadar.get()` 重讀完整 response，讓 MA、KD、score、action、reasons、risks 與最新 Redis 價格一致。背景重算若仍在執行，新事件只標記 pending，完成後再合併補算，避免重疊請求。此流程只讀既有 Redis／PostgreSQL，不呼叫 `/prices/refresh`。
 

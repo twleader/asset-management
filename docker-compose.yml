@@ -5,7 +5,6 @@ services:
     image: postgres:16-alpine
     container_name: asset-postgres
     restart: unless-stopped
-    env_file: .env
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -51,18 +50,21 @@ services:
       dockerfile: Dockerfile
     container_name: asset-business-services
     restart: unless-stopped
-    env_file: .env
     environment:
       DB_HOST: postgres
       DB_PORT: 5432
       DB_NAME: ${POSTGRES_DB}
       DB_USERNAME: ${POSTGRES_USER}
       DB_PASSWORD: ${POSTGRES_PASSWORD}
+      # Requirement 28：散佈版的主要管理者由安裝者指定；缺值時 Compose 直接顯示錯誤。
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?請在 .env 設定 ADMIN_EMAIL（主要管理者的 Google 帳號）}
       # 讓 rclone 從固定路徑讀取設定，避免依賴 USER/HOME
       RCLONE_CONFIG: /etc/rclone/rclone.conf
       # 警示觸發 email 通知（Requirement 23）：從 .env / host env 透傳
       # MAIL_USERNAME = Gmail 帳號；MAIL_PASSWORD = 16 碼 App Password（非登入密碼）
       # 未設定時 EmailService.isEnabled() 為 false，dispatcher skip 寄信不報錯
+      MAIL_HOST: ${MAIL_HOST:-smtp.gmail.com}
+      MAIL_PORT: ${MAIL_PORT:-587}
       MAIL_USERNAME: ${MAIL_USERNAME:-}
       MAIL_PASSWORD: ${MAIL_PASSWORD:-}
       NOTIFICATION_FROM: ${NOTIFICATION_FROM:-}
@@ -70,6 +72,9 @@ services:
       # 未設定 ANTHROPIC_API_KEY 時 MarketAnalysisService 安全跳過（status=NOT_CONFIGURED），不報錯。
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-4-8}
+      MARKET_ANALYSIS_NEWS_MAX_AGE_DAYS: ${MARKET_ANALYSIS_NEWS_MAX_AGE_DAYS:-5}
+      MARKET_ANALYSIS_NEWS_VERIFY_PUBLISHED_DATE: ${MARKET_ANALYSIS_NEWS_VERIFY_PUBLISHED_DATE:-true}
+      MARKET_ANALYSIS_NEWS_REGION_BLOCK_ENABLED: ${MARKET_ANALYSIS_NEWS_REGION_BLOCK_ENABLED:-true}
       # 歷年資產每日排程自動匯出（Requirement 34 / Task 171）：容器內基底輸出目錄＝主機家目錄根，
       # 對映到下方 volume 的 host 家目錄；使用者於前端檔案總管式選擇器挑選的相對子路徑落於其下。
       EXPORT_OUTPUT_DIR: /home/steven
@@ -77,7 +82,7 @@ services:
       # rclone 設定檔以 read-only 從 host 掛入
       - ${HOME}/.config/rclone/rclone.conf:/etc/rclone/rclone.conf:ro
       # 排程匯出根目錄：host 家目錄掛入容器 /home/steven（可寫）。
-      # 預設對映主機 /Users/steven；子資料夾 input → /Users/steven/input。
+      # 預設對映目前使用者的家目錄；子資料夾 input → 主機家目錄/input。
       - ${EXPORT_OUTPUT_DIR_HOST:-/Users/steven}:/home/steven
     depends_on:
       postgres:
@@ -103,7 +108,6 @@ services:
       dockerfile: Dockerfile
     container_name: asset-external-materials-service
     restart: unless-stopped
-    env_file: .env
     environment:
       DB_HOST: postgres
       DB_PORT: 5432
@@ -113,6 +117,11 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       FINMIND_TOKEN: ${FINMIND_TOKEN:-}
+      NEWS_SCRAPER_ENABLED: ${NEWS_SCRAPER_ENABLED:-true}
+      NEWS_SCRAPER_RETENTION_DAYS: ${NEWS_SCRAPER_RETENTION_DAYS:-30}
+      NEWS_EXPORT_ENABLED: ${NEWS_EXPORT_ENABLED:-true}
+      KR_STOCK_ENABLED: ${KR_STOCK_ENABLED:-true}
+      COMMODITY_ENABLED: ${COMMODITY_ENABLED:-true}
       # 公開資訊 JSON 輸出基底（Task 212）：**必須與 business-services 的 EXPORT_OUTPUT_DIR 相同**——
       # 使用者在「爬蟲資訊查詢」頁挑的資料夾是由 business 的 /api/export-schedule/browse 列舉出來的，
       # 兩者基底不一致，就會出現「前端選得到、爬蟲寫不到（或寫去別處）」的同義欄位分歧。

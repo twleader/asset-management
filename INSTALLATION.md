@@ -1,528 +1,587 @@
-# 資產管理系統搬機與安裝手冊
+# 資產管理系統安裝與使用手冊
 
-本手冊適合第一次接手本系統的人，目標是把舊電腦上的系統、資料與排程完整搬到另一台電腦，並用 Docker 重建。
+這份手冊是給第一次安裝本系統、沒有資訊背景的一般使用者。只要依自己的電腦類型逐步操作，不需要先懂 Docker、Java 或資料庫。
 
-本手冊以「單機、由 `http://localhost` 使用」為主。若要開放給區域網路或網際網路使用，請先完成 HTTPS、Firewall 與反向代理設定，不要直接把目前的服務連接埠暴露到公網。
+本手冊建立的是一套全新的空白系統，不會帶入原作者或其他人的財務資料，也不是舊電腦搬家指南。
 
 ---
 
-## 1. 先理解：只複製程式碼是不夠的
+## 0. 先用 5 分鐘了解安裝流程
 
-完整搬機包含以下四類內容：
+整個安裝分成六件事：
 
-| 內容 | 用途 | 是否在 Git 裡 |
+1. 安裝 Docker。
+2. 取得並解壓縮本系統的正式安裝包。
+3. 建立自己的 `.env` 設定檔。
+4. 向 Google 申請登入用的 Client ID 與 Client Secret。
+5. 用一行指令啟動系統。
+6. 用你在 `ADMIN_EMAIL` 填寫的 Google 帳號登入。
+
+### 本手冊會用到的名詞
+
+| 名詞 | 白話說明 |
+|---|---|
+| Docker | 把本系統和它需要的軟體包在一起執行的工具。安裝 Docker 後，不必另外安裝 Java、Node.js、PostgreSQL 或 Redis。 |
+| Docker Desktop | macOS／Windows 上有圖形介面的 Docker 應用程式，圖示是一隻鯨魚。 |
+| 終端機 | 輸入文字指令的視窗。macOS 叫「終端機」，Windows 本手冊使用「Ubuntu」，Linux 直接用 Terminal。 |
+| 專案根目錄 | 解壓縮後，能看到 `docker-compose.yml` 的那個資料夾。所有啟動指令都要在這裡執行。 |
+| `.env` | 只屬於這台電腦的設定檔，內含密碼與 Google Secret，不可傳給別人。 |
+| 容器 | Docker 中正在執行的一個服務。本系統正常時會有六個主要容器。 |
+
+看到灰底指令區塊時：可以整段複製，貼進終端機，再按 Enter。指令前面的 `$` 若出現在其他網站範例中，不需要一起複製；本手冊的指令已省略 `$`。
+
+---
+
+## 1. 安裝前檢查表
+
+### 1.1 電腦與帳號
+
+- 記憶體至少 8 GB，建議 16 GB。
+- 可用磁碟空間至少 15 GB。
+- 64 位元、仍受原廠支援的 macOS、Windows 10/11 或 Ubuntu。
+- 穩定的網路連線；第一次建置會下載數 GB 的檔案。
+- 一個你能登入的 Google 帳號；它將成為這套安裝的主要管理者。
+- 系統時區建議設為 `Asia/Taipei`。
+
+### 1.2 必裝與選裝軟體
+
+| 軟體 | 是否必裝 | 用途 |
 |---|---|---|
-| 專案程式碼 | 前端、後端、BFF、爬蟲與 Docker 設定 | 是 |
-| `db/init/01_dump.sql` | 真實 PostgreSQL 資料，包括資產、設定與歷史行情 | **否**，刻意忽略 |
-| `.env` | 資料庫密碼、Google OAuth、郵件及 AI 金鑰 | **否**，刻意忽略 |
-| rclone 與匯出檔案 | Google Drive 加密備份設定、排程產出的 Excel／JSON | **否** |
+| Docker Desktop（macOS／Windows）或 Docker Engine（Ubuntu） | **必裝** | 執行整套系統 |
+| 瀏覽器 | **必裝** | 使用系統與設定 Google 登入 |
+| Git | 選裝 | 只有透過 Git repository 取得或更新系統時才需要；收到 ZIP 不需要 |
+| rclone | 選裝 | 只有使用 Google Drive 加密備份時才需要 |
+| 文字編輯器 | 不必另裝 | 本手冊使用系統內建的 `nano` 編輯 `.env` |
 
-> **重要資安提醒**：`01_dump.sql`、`.env`、`rclone.conf` 都含敏感資訊，不可 commit、push、寄一般 Email 或放入未加密雲端空間。請使用加密隨身碟、加密磁碟映像或公司核准的秘密傳輸方式。
+只為了使用本系統，**不需要**另外安裝 Java、Maven、Node.js、npm、PostgreSQL 或 Redis。
 
----
+### 1.3 請只從官方網站下載軟體
 
-## 2. 建議的搬機順序
+- [Docker Desktop for Mac 官方安裝說明](https://docs.docker.com/desktop/setup/install/mac-install/)
+- [Docker Desktop for Windows 官方安裝說明](https://docs.docker.com/desktop/setup/install/windows-install/)
+- [Microsoft WSL 官方安裝說明](https://learn.microsoft.com/windows/wsl/install)
+- [Docker Engine for Ubuntu 官方安裝說明](https://docs.docker.com/engine/install/ubuntu/)
+- [Git 官方下載頁](https://git-scm.com/downloads)
+- [rclone 官方安裝說明](https://rclone.org/install/)
 
-1. 在舊電腦確認程式版本，並把應保留的程式變更 merge／push。
-2. 在舊電腦做最後一次資料庫匯出。
-3. 匯出完成後停止舊系統，避免新舊兩台同時寄信、備份或執行排程。
-4. 安全移交資料庫、秘密設定及必要的輸出檔案。
-5. 在新電腦安裝 Docker 與 Git，clone 正確版本。
-6. 放入設定與資料庫 dump，第一次啟動全部服務。
-7. 完成登入、資料、備份、排程與輸出目錄驗收。
-8. 新系統穩定使用一段時間後，再處理舊電腦。
-
-建議預留 30～60 分鐘的停機搬移時段。第一次下載映像與建置可能另外需要 10～30 分鐘，視網路與電腦速度而定。
+不要從不明下載站取得 Docker、Git 或 rclone。
 
 ---
 
-## 3. 舊電腦：搬移前準備
+## 2. 安裝 Docker：只看自己的作業系統
 
-### 3.1 確認正在使用哪一版程式
+macOS 看 2.1，Windows 看 2.2，Ubuntu Linux 看 2.3。完成其中一節後直接跳到第 3 節。
 
-在專案目錄執行：
+### 2.1 macOS：安裝 Docker Desktop
 
-```bash
-cd /Users/steven/Project/asset-management
-git status --short
-git branch --show-current
-git rev-parse HEAD
-git log -1 --oneline
-```
+#### 步驟 A：確認 Mac 晶片
 
-請把分支名稱與完整 commit ID 記在搬機紀錄中。
+1. 點畫面左上角蘋果圖示。
+2. 點「關於這台 Mac」。
+3. 查看「晶片」或「處理器」：
+   - 顯示 Apple M1、M2、M3、M4 或後續 M 系列：選 **Apple silicon**。
+   - 顯示 Intel：選 **Intel chip**。
 
-- 正式環境建議使用 `main`。
-- 若目前跑的是尚未合併的功能分支，請先完成必要的 commit、merge 與 push；否則新電腦 clone `main` 後不會有該功能。
-- `git status --short` 若有輸出，代表仍有未提交檔案。先確認每一項是否需要保留，不要直接換機。
+#### 步驟 B：下載與安裝
 
-### 3.2 確認舊系統目前健康
+1. 開啟 [Docker Desktop for Mac 官方頁面](https://docs.docker.com/desktop/setup/install/mac-install/)。
+2. 下載符合晶片的版本。
+3. 雙擊下載的 `Docker.dmg`。
+4. 把 Docker 圖示拖到 Applications（應用程式）資料夾。
+5. 到「應用程式」開啟 Docker。
+6. 第一次啟動若出現安全性或管理者密碼提示，依畫面允許必要設定。
+7. 閱讀並接受 Docker 的使用條款。
+8. 等右上角鯨魚圖示穩定，Docker Desktop 顯示 Engine running。
 
-```bash
-docker compose -p asset-management ps
-```
+Docker Desktop 支援的 macOS 版本會隨時間調整，請以官方頁面的 System requirements 為準。企業或政府單位也應先確認 Docker Desktop 授權是否適用。
 
-正常時應看到六個服務：
+#### 步驟 C：確認安裝成功
 
-| 服務 | 容器名稱 | 正常狀態 |
-|---|---|---|
-| PostgreSQL | `asset-postgres` | `running (healthy)` |
-| Redis | `asset-redis` | `running (healthy)` |
-| Business Services | `asset-business-services` | `running (healthy)` |
-| External Materials | `asset-external-materials-service` | `running (healthy)` |
-| BFF | `asset-bff` | `running (healthy)` |
-| Frontend | `asset-frontend` | `running`；此服務未設 healthcheck |
-
-若資料庫或 Business Services 不健康，先解決問題再匯出，避免把未知狀態搬到新電腦。
-
-### 3.3 匯出最後一份 PostgreSQL 資料
+1. 按 `Command + 空白鍵`。
+2. 輸入「終端機」或 `Terminal`，按 Enter。
+3. 逐行執行：
 
 ```bash
-./scripts/db-export.sh
-ls -lh db/init/01_dump.sql
-```
-
-這個檔案是完整的 schema + data dump，也包含 Liquibase 執行紀錄。新電腦會先匯入它，再由 Liquibase 補上程式版本新增的變更。
-
-可另外產生檔案指紋，確認傳輸前後檔案相同：
-
-```bash
-shasum -a 256 db/init/01_dump.sql
-```
-
-Linux 可改用：
-
-```bash
-sha256sum db/init/01_dump.sql
-```
-
-> `db/init/01_dump.sql` 含真實個人財務資料，而且已被 `.gitignore` 排除。請直接放入安全的搬機媒體，**不可用 `git add -f` 上傳**。
-
-### 3.4 準備需要安全移交的檔案
-
-至少準備：
-
-- `db/init/01_dump.sql`
-- 專案根目錄的 `.env`
-- `~/.config/rclone/rclone.conf`（要保留 Google Drive 加密備份時）
-- 應用程式排程輸出的 Excel／JSON 目錄
-- rclone crypt 密碼的獨立備份；遺失後無法解密舊備份
-
-排程輸出目錄的主機根路徑由 `.env` 的 `EXPORT_OUTPUT_DIR_HOST` 決定。實際要複製的是系統頁面中選擇的子資料夾，例如預設爬蟲輸出 `Project/SRPP/data/input`；不需要盲目複製整個使用者家目錄。
-
-不需要搬移：
-
-- `asset-redis-data`：Redis 是可重建的快取。
-- `frontend/node_modules`、各 Java `target`：Docker 會重新建置。
-- `data/*.mv.db`：Docker 正式執行路徑使用 PostgreSQL，這些是舊的 H2 本機資料。
-- Docker volume 的內部目錄：請用 SQL dump 搬移，不要直接複製 volume 檔案。
-
-### 3.5 最後切換前停止舊系統
-
-最後一份 dump 完成後：
-
-```bash
-docker compose -p asset-management stop
-```
-
-`stop` 只停止容器，不會刪除舊資料。新系統通過驗收前，請保留舊電腦及其 Docker volume 作為回復點。
-
-> 不要讓新舊兩套完整系統長時間同時運行。兩邊會使用相同的 Gmail、AI、Google Drive 與排程設定，可能造成重複寄信、重複分析或備份紀錄互相干擾。
-
----
-
-## 4. 新電腦：安裝必要工具
-
-### 4.1 必要軟體
-
-- Git
-- Docker Desktop（macOS／Windows），或 Docker Engine + Compose Plugin（Linux）
-- 可存取此私人 GitLab repository 的帳號或 SSH key
-
-全部服務都由 Docker 建置，因此只為了執行系統時，主機**不需要另外安裝** Java、Maven、Node.js、npm、PostgreSQL 或 Redis。
-
-建議硬體：
-
-- 記憶體至少 8 GB，若同時做開發建議 16 GB 以上
-- 可用磁碟空間至少 10 GB，歷史資料與 Docker 映像增加時需更多空間
-- 系統時區設為 `Asia/Taipei`
-
-確認工具可用：
-
-```bash
-git --version
 docker --version
 docker compose version
+docker run --rm hello-world
 ```
 
-Windows 建議啟用 WSL2，並在 WSL 的 Linux 目錄中 clone 與執行本專案，不要直接用舊版 Windows CMD 執行 Bash 腳本。
+前兩行會顯示版本；最後看到 `Hello from Docker!` 就成功。若顯示無法連線到 Docker daemon，先開啟 Docker Desktop 並等待 Engine running。
 
-### 4.2 取得程式碼
+### 2.2 Windows 10／11：安裝 WSL 2 與 Docker Desktop
 
-SSH 方式：
+本手冊使用 WSL 2。它會在 Windows 裡提供一個 Ubuntu 終端機，之後所有本系統指令都在 Ubuntu 視窗執行，不使用舊版 CMD。
+
+#### 步驟 A：安裝或更新 WSL
+
+1. 按 Windows 鍵，輸入 `PowerShell`。
+2. 在「Windows PowerShell」或「終端機」按右鍵，選「以系統管理員身分執行」。
+3. 執行：
+
+```powershell
+wsl --install
+```
+
+4. 若系統要求，重新啟動電腦。
+5. 重開後從開始功能表開啟「Ubuntu」。第一次開啟會請你建立 Linux 使用者名稱與密碼：
+   - 使用者名稱可用小寫英文，例如 `alice`。
+   - 輸入密碼時畫面不會顯示星號，這是正常的；輸入完按 Enter。
+6. 在 Ubuntu 安裝本手冊會用到的基本工具：
 
 ```bash
-mkdir -p ~/Project
-cd ~/Project
-git clone git@gitlab.com:mysaas4/asset-management.git
-cd asset-management
-git switch main
-git pull --ff-only origin main
-git log -1 --oneline
+sudo apt update
+sudo apt install -y curl nano
 ```
 
-未設定 SSH key 時，可在有權限的情況下使用 HTTPS：
+7. 再回到 PowerShell 執行：
+
+```powershell
+wsl --update
+wsl --version
+```
+
+Docker 官方目前要求 WSL 2.1.5 或更新版本；版本條件可能改變，請以 [Docker Windows 官方頁](https://docs.docker.com/desktop/setup/install/windows-install/) 為準。
+
+#### 步驟 B：安裝 Docker Desktop
+
+1. 從 [Docker Desktop for Windows 官方頁面](https://docs.docker.com/desktop/setup/install/windows-install/) 下載安裝程式。
+2. 雙擊 `Docker Desktop Installer.exe`。
+3. 一般個人電腦可選官方建議的 per-user 安裝模式。
+4. 若畫面出現 `Use WSL 2 instead of Hyper-V`，保持勾選。
+5. 完成後從開始功能表開啟 Docker Desktop。
+6. 閱讀並接受使用條款。
+7. 到 Docker Desktop 的 Settings：
+   - General：確認使用 WSL 2 based engine。
+   - Resources → WSL Integration：確認 Ubuntu 已啟用。
+8. 等 Docker Desktop 顯示 Engine running。
+
+若 WSL 安裝失敗並提到 virtualization，通常需要在 BIOS／UEFI 開啟硬體虛擬化。這會因電腦品牌而不同，請依電腦廠商說明操作；不確定時請找熟悉電腦的人協助，不要隨意修改其他 BIOS 設定。
+
+#### 步驟 C：確認安裝成功
+
+從開始功能表開啟 **Ubuntu**，不是 PowerShell，執行：
 
 ```bash
-git clone https://gitlab.com/mysaas4/asset-management.git
+docker --version
+docker compose version
+docker run --rm hello-world
 ```
 
-`git log -1` 顯示的 commit 應與舊電腦的搬機紀錄一致。若刻意搬移特定分支，請將 `main` 換成已 push 的該分支名稱。
+看到版本與 `Hello from Docker!` 就成功。
+
+### 2.3 Ubuntu Linux：安裝 Docker Engine 與 Compose Plugin
+
+以下適用 Docker 官方目前支援的 64 位元 Ubuntu 版本。Linux Mint 等衍生版可能能使用，但不在本手冊正式支援範圍；支援版本請查 [Docker Ubuntu 官方頁](https://docs.docker.com/engine/install/ubuntu/)。
+
+1. 按 `Ctrl + Alt + T` 開啟終端機。
+2. 移除可能衝突的舊套件。顯示「沒有安裝」可以忽略：
+
+```bash
+sudo apt remove -y docker.io docker-compose docker-compose-v2 docker-doc podman-docker containerd runc
+```
+
+3. 加入 Docker 官方軟體來源：
+
+```bash
+sudo apt update
+sudo apt install -y ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+sudo tee /etc/apt/sources.list.d/docker.sources > /dev/null <<EOF
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
+Components: stable
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+sudo apt update
+```
+
+4. 安裝 Docker Engine、Buildx 與 Compose Plugin：
+
+```bash
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+```
+
+5. 讓目前使用者日後不必每次加 `sudo`：
+
+```bash
+sudo usermod -aG docker "$USER"
+```
+
+6. 登出 Ubuntu 再登入，或重新啟動電腦。這一步不可省略。
+7. 開新終端機確認：
+
+```bash
+docker --version
+docker compose version
+docker run --rm hello-world
+```
+
+看到版本與 `Hello from Docker!` 就成功。若仍出現 permission denied，先確認已登出再登入，不要用 `chmod 777` 修改 Docker socket。
 
 ---
 
-## 5. 新電腦：放入設定與資料
+## 3. 取得正式安裝包
 
-以下操作都在新電腦的專案根目錄進行。
+### 3.1 建議方式：版本化 ZIP
 
-### 5.1 建立 `.env`
+向系統提供者取得有明確版本號的正式 ZIP。提供者應同時告知：
 
-若已從舊電腦安全移交 `.env`，將它放在專案根目錄，然後修改電腦相關路徑。若要重新設定：
+- 版本號或 Git commit ID。
+- 發行日期與更新說明。
+- ZIP 的 SHA-256 指紋。
+- 問題回報方式。
+
+解壓縮後，應看到一個包含 `docker-compose.yml` 的資料夾。
+
+#### macOS
+
+1. 在 Finder 雙擊 ZIP 解壓縮。
+2. 建議把資料夾移到自己的「文件」資料夾。
+3. 開啟終端機，輸入 `cd` 和一個空白，先不要按 Enter。
+4. 把解壓縮後的資料夾拖進終端機視窗，再按 Enter。
+
+#### Windows
+
+1. 在檔案總管對 ZIP 按右鍵，選「全部解壓縮」。
+2. 從開始功能表開啟 Ubuntu，執行 `whoami`，記住顯示的 Linux 使用者名稱。
+3. 在 Windows 檔案總管網址列輸入 `\\wsl$\Ubuntu\home\你的Linux使用者名稱`。
+4. 把解壓縮後的整個專案資料夾複製到這裡。
+5. 回到 Ubuntu，執行 `cd ~/資料夾名稱`。資料夾名稱若不確定，可先執行 `ls` 查看。
+
+不要把專案長期放在 `/mnt/c/...` 直接建置；放在 WSL 的 Linux 家目錄通常較穩定且較快。
+
+#### Ubuntu Linux
+
+在檔案管理員解壓縮後，開啟終端機，輸入 `cd` 和一個空白，把資料夾拖入終端機，再按 Enter。
+
+### 3.2 確認目前位置正確
+
+在終端機執行：
+
+```bash
+pwd
+ls
+test -f docker-compose.yml && echo "位置正確"
+```
+
+看到 `位置正確` 才繼續。至少應有：
+
+```text
+docker-compose.yml
+.env.example
+backend/
+bff/
+external-materials-service/
+frontend/
+scripts/
+```
+
+### 3.3 選用：透過 Git 取得
+
+只有提供者給你 repository 網址、且你有權限時才使用：
+
+```bash
+git clone 提供者給你的_repository_網址 asset-management
+cd asset-management
+```
+
+macOS 執行 `git --version` 時若跳出安裝 Command Line Tools，依畫面安裝即可。Windows 的 Ubuntu 或 Ubuntu Linux 可用以下方式安裝 Git：
+
+```bash
+sudo apt update
+sudo apt install -y git
+```
+
+### 3.4 安裝包安全檢查
+
+正式安裝包不應包含：
+
+- `.env`
+- `db/init/01_dump.sql`
+- `rclone.conf`
+- 資產 Excel、公開資訊 JSON、備份檔或其他人的財務資料
+- 真實 Email、API key、密碼或 OAuth secret
+
+如果看到上述內容，請停止安裝並通知提供者。
+
+---
+
+## 4. 建立這台電腦的設定檔
+
+以下指令都要在能看到 `docker-compose.yml` 的專案根目錄執行。
+
+### 4.1 複製設定範本
 
 ```bash
 cp .env.example .env
+nano .env
 ```
 
-請填妥下列內容：
+`nano` 是文字編輯器：
 
-| 變數 | 是否必要 | 說明 |
-|---|---|---|
-| `POSTGRES_DB` | 必要 | 建議維持 `assets` |
-| `POSTGRES_USER` | 必要 | 建議維持 `assets` |
-| `POSTGRES_PASSWORD` | 必要 | 使用強密碼，不可保留範本的「請填入密碼」 |
-| `GOOGLE_CLIENT_ID` | 正常登入必要 | Google OAuth Web 用戶端 ID |
-| `GOOGLE_CLIENT_SECRET` | 正常登入必要 | Google OAuth 用戶端密鑰 |
-| `MAIL_USERNAME` | 選用 | Gmail 通知寄件帳號；留空會停用寄信 |
-| `MAIL_PASSWORD` | 選用 | Gmail 16 碼應用程式密碼，不是登入密碼 |
-| `NOTIFICATION_FROM` | 選用 | 留空時使用 `MAIL_USERNAME` |
-| `ANTHROPIC_API_KEY` | 選用 | 留空時 AI 分析安全跳過 |
-| `ANTHROPIC_MODEL` | 選用 | 未指定時使用專案預設模型 |
-| `FINMIND_TOKEN` | 選用 | FinMind token；可自行加在 `.env` |
-| `EXPORT_OUTPUT_DIR_HOST` | **必要檢查** | 新電腦上可寫入的絕對路徑 |
+- 用方向鍵移動。
+- 修改完成按 `Ctrl + O`，再按 Enter 儲存。
+- 按 `Ctrl + X` 離開。
 
-`EXPORT_OUTPUT_DIR_HOST` 不可沿用別人的家目錄。例如：
+`.env` 內含秘密，不可寄給別人、上傳 Git 或放進未加密的共用空間。
+
+### 4.2 一定要填的設定
+
+至少確認以下內容已換成你自己的值：
 
 ```dotenv
-# macOS
-EXPORT_OUTPUT_DIR_HOST=/Users/alice
+POSTGRES_DB=assets
+POSTGRES_USER=assets
+POSTGRES_PASSWORD=請換成至少24字元的資料庫密碼
 
-# Linux 或 WSL（擇一填寫，不要兩行同時保留）
-EXPORT_OUTPUT_DIR_HOST=/home/alice
+ADMIN_EMAIL=你的完整Google帳號
+GOOGLE_CLIENT_ID=你的Google_Client_ID
+GOOGLE_CLIENT_SECRET=你的Google_Client_Secret
+
+EXPORT_OUTPUT_DIR_HOST=${HOME}
 ```
 
-注意事項：
+填寫規則：
 
-- `.env` 的等號兩側不要加空白。
-- 不要把 `.env` commit 到 Git；專案已刻意忽略它。
-- 本機以 HTTP 執行時，`SESSION_COOKIE_SECURE` 應維持未設定或 `false`。
-- 只有在 HTTPS 已正確終止時才設定 `SESSION_COOKIE_SECURE=true`，否則登入 cookie 不會送回。
+- 等號左右不要留空白。
+- 不要保留「請填入」或「你的」等範例文字。
+- `ADMIN_EMAIL` 必須是你稍後實際登入的完整 Google 帳號，英文字母大小寫不影響判定。
+- `POSTGRES_PASSWORD` 建議用密碼管理器產生至少 24 字元；為避免 `.env` 解析問題，可使用英文字母、數字、底線與連字號。
+- `EXPORT_OUTPUT_DIR_HOST=${HOME}` 會使用目前使用者的家目錄，通常不必修改。
+- 本機使用 `http://localhost` 時，`SESSION_COOKIE_SECURE` 保持未設定或 `false`；只有完成 HTTPS 部署後才改成 `true`。
 
-### 5.2 設定 Google OAuth 登入
-
-Docker 版從 `http://localhost` 進入，Google Cloud Console 的 OAuth Web 用戶端至少要加入以下重新導向 URI：
-
-```text
-http://localhost/login/oauth2/code/google
-```
-
-若正式使用網域與 HTTPS，另加入：
-
-```text
-https://你的網域/login/oauth2/code/google
-```
-
-登入後，固定管理者帳號是 `tw.leader@gmail.com`；其他 Gmail 帳號第一次登入後會等待管理者核准。
-
-### 5.3 放入資料庫 dump
-
-將舊電腦匯出的檔案放到：
-
-```text
-db/init/01_dump.sql
-```
-
-確認檔案存在且大小合理：
+用以下指令確認家目錄：
 
 ```bash
-ls -lh db/init/01_dump.sql
-shasum -a 256 db/init/01_dump.sql
+echo "$HOME"
 ```
 
-檔案指紋應與舊電腦相同。
+若要把排程輸出放在其他磁碟，`EXPORT_OUTPUT_DIR_HOST` 必須填這台電腦可寫入的絕對路徑。macOS 使用 `/Users/名稱/...`，Ubuntu／WSL 使用 `/home/名稱/...`，不可照抄別人的路徑。
 
-> PostgreSQL 只會在 volume 第一次初始化時自動執行 `db/init/*.sql`。因此一定要在第一次啟動 PostgreSQL **之前**放好 dump。
+### 4.3 先建立選用備份所需的空設定檔
 
-### 5.4 準備 rclone 設定
-
-Compose 固定掛載 `~/.config/rclone/rclone.conf`。即使暫時不用 Google Drive 備份，也請先建立這個檔案，避免 Docker 因來源不存在而把它誤建成資料夾：
+即使暫時不用 Google Drive 備份，也先執行：
 
 ```bash
 mkdir -p ~/.config/rclone
 touch ~/.config/rclone/rclone.conf
 ```
 
-若要沿用既有備份，請用舊電腦的真實 `rclone.conf` 覆蓋空檔。若要重新建立，可先在主機安裝 rclone，再執行：
+這只建立一個空檔，不會連接 Google Drive。
+
+---
+
+## 5. 申請 Google 登入憑證
+
+每一套自行安裝的系統都應建立自己的 Google OAuth 憑證，不可共用系統提供者的 Client Secret。Google Cloud 畫面名稱可能隨版本調整；若看到「Google Auth Platform」，其 Branding、Audience、Clients 分頁就是過去的 OAuth consent screen／Credentials 功能。
+
+### 5.1 建立 Google Cloud Project
+
+1. 開啟 [Google Cloud Console](https://console.cloud.google.com/)。
+2. 用準備當主要管理者的 Google 帳號登入。
+3. 點上方 Project 選擇器，選 New project／新增專案。
+4. 專案名稱可填「我的資產管理系統」，建立後切換到該專案。
+
+### 5.2 設定 OAuth 同意畫面
+
+1. 開啟 Google Auth Platform，或「API 和服務 → OAuth consent screen」。
+2. 填寫應用程式名稱與使用者支援 Email。
+3. 個人 Gmail 通常選 External／外部。Google Workspace 組織可依管理政策選 Internal。
+4. Audience 若維持 Testing／測試，將 `.env` 中的 `ADMIN_EMAIL` 加入 Test users；其他要登入的人也要逐一加入。
+5. 本系統登入只需要基本的 `openid`、`profile`、`email` 身分範圍，不要自行加入讀取 Gmail、Drive 等額外 scope。
+
+External 應用程式在 Testing 狀態只允許 Test users 使用；限制與上限請以 [Google 官方 Audience 說明](https://support.google.com/cloud/answer/15549945) 為準。
+
+### 5.3 建立 Web application Client
+
+1. 到 Clients／憑證。
+2. 點 Create client／建立 OAuth 用戶端 ID。
+3. Application type 選 **Web application**。
+4. 名稱可填「資產管理系統本機」。
+5. 在 Authorized redirect URIs 加入以下完整網址：
+
+```text
+http://localhost/login/oauth2/code/google
+```
+
+6. 建立後複製 Client ID 與 Client Secret。
+7. 回到終端機執行 `nano .env`，填入：
+
+```dotenv
+GOOGLE_CLIENT_ID=剛才複製的Client_ID
+GOOGLE_CLIENT_SECRET=剛才複製的Client_Secret
+```
+
+Redirect URI 的 `http`、主機、連接埠、大小寫、路徑與尾端斜線都必須完全一致，否則 Google 會顯示 `redirect_uri_mismatch`；詳見 [Google OAuth Web Server 官方說明](https://developers.google.com/identity/protocols/oauth2/web-server)。Client Secret 不可放入 ZIP、Git 或截圖公開。
+
+若日後改用正式網域，必須先完成 HTTPS，再另外登記：
+
+```text
+https://你的網域/login/oauth2/code/google
+```
+
+---
+
+## 6. 第一次啟動
+
+### 6.1 啟動前自動檢查
+
+確認 Docker Desktop 已是 Engine running；Ubuntu 確認 Docker service 正在執行。然後在專案根目錄執行：
+
+```bash
+docker compose -p asset-management config --quiet
+test -f .env && echo ".env 存在"
+test -f "$HOME/.config/rclone/rclone.conf" && echo "rclone 設定檔存在"
+```
+
+沒有錯誤，並看到後兩行「存在」才繼續。若第一行顯示 `請在 .env 設定 ADMIN_EMAIL`，回第 4 節修正；若顯示 Google 或資料庫設定缺漏，也先修正 `.env`。
+
+### 6.2 建置並啟動六個服務
+
+```bash
+docker compose -p asset-management up -d --build
+```
+
+第一次會下載基礎映像並編譯程式，依電腦與網路速度可能需要 10～30 分鐘。畫面暫時沒有新文字不一定是當機，請先等待；不要關閉 Docker Desktop 或讓電腦休眠。
+
+指令結束後等待約 1～2 分鐘，再執行：
+
+```bash
+docker compose -p asset-management ps
+```
+
+正常狀態：
+
+| 容器名稱 | 預期狀態 |
+|---|---|
+| `asset-postgres` | running、healthy |
+| `asset-redis` | running、healthy |
+| `asset-business-services` | running、healthy |
+| `asset-external-materials-service` | running、healthy |
+| `asset-bff` | running、healthy |
+| `asset-frontend` | running；此服務沒有 healthcheck |
+
+第一次空白安裝會由 Liquibase 自動建立資料表與基礎設定，不需要原作者的資料庫 dump。
+
+再檢查入口服務：
+
+```bash
+curl -fsS http://localhost:8080/actuator/health
+```
+
+看到以下結果代表 BFF 正常：
+
+```json
+{"status":"UP"}
+```
+
+### 6.3 開啟系統並登入
+
+1. 用瀏覽器開啟 [http://localhost](http://localhost)。
+2. 選擇 Google 登入。
+3. **一定要使用 `.env` 的 `ADMIN_EMAIL` 帳號登入。**
+4. 第一次登入後，該帳號會自動建立為 `ADMIN`、`ACTIVE`，並在使用者管理頁標示「主要管理者」。
+5. 主要管理者不可被停用或調降角色。
+
+其他 Google 帳號第一次登入會是「待核准」，這是正常的。主要管理者登入後到「使用者管理」核准即可。
+
+---
+
+## 7. 第一次使用建議順序
+
+1. 確認主要管理者能進入首頁與使用者管理頁。
+2. 到設定頁檢查銀行、券商、存款類型、市場類型及資產分類。
+3. 輸入或匯入自己的第一份資產資料。
+4. 檢查首頁總資產與各分類數字。
+5. 再依需要啟用 Email、AI、排程匯出及 Google Drive 備份。
+6. 啟用備份後先做一次手動備份並確認能看到檔案。
+
+不要一開始就啟用所有排程。先確認資料、時區、收件人與輸出路徑，避免誤寄 Email 或把檔案寫到錯誤位置。
+
+---
+
+## 8. 選用功能與軟體
+
+### 8.1 Gmail 警示通知
+
+這不是登入用的 Client Secret。若要由 Gmail 寄信：
+
+1. 在寄件 Google 帳號開啟兩步驟驗證。
+2. 依 [Google 官方應用程式密碼說明](https://support.google.com/accounts/answer/185833) 建立 16 碼應用程式密碼。
+3. 在 `.env` 填入：
+
+```dotenv
+MAIL_USERNAME=寄件Google帳號
+MAIL_PASSWORD=16碼應用程式密碼（不要空白）
+NOTIFICATION_FROM=寄件Google帳號
+```
+
+4. 重新建立 Business Services：
+
+```bash
+docker compose -p asset-management up -d --force-recreate business-services
+```
+
+未設定時系統仍可使用，只是不寄通知。
+
+### 8.2 Google Drive 加密備份與 rclone
+
+只有要使用此功能才安裝 rclone。請依 [rclone 官方安裝說明](https://rclone.org/install/) 選擇自己的作業系統；macOS／Ubuntu／WSL 也可使用官方安裝指令：
+
+```bash
+sudo -v
+curl https://rclone.org/install.sh | sudo bash
+rclone version
+```
+
+接著執行：
 
 ```bash
 rclone config
 rclone lsd gdrive-crypt:
 ```
 
-設定中必須有專案使用的 `gdrive-crypt` remote。rclone crypt 密碼要另外保存在密碼管理器與離線備份中。
+設定中必須有名稱為 `gdrive-crypt` 的 remote。`crypt` 密碼遺失後無法解密舊備份，請保存在密碼管理器與安全的離線位置。不要把 `~/.config/rclone/rclone.conf` 傳給別人。
 
-macOS Docker Desktop 通常可直接讀取使用者檔案。原生 Linux 若 Business Services 日誌出現 `Permission denied`，請讓容器內的非 root 使用者對該檔有唯讀權限；不要為了省事對整個家目錄使用 `chmod -R 777`。
+若不使用 Google Drive 備份，保持第 4.3 節建立的空檔即可，不必安裝 rclone。
 
-### 5.5 準備排程輸出目錄
+### 8.3 AI 市場分析與資產配置建議
 
-確認 `.env` 指定的根目錄存在、目前使用者可寫入，而且 Docker Desktop 已允許分享該路徑。再把舊電腦中需要保留的 Excel／JSON 子資料夾複製到相同相對位置。
-
-例如新電腦設定：
+向服務提供者申請自己的 API key，再填入：
 
 ```dotenv
-EXPORT_OUTPUT_DIR_HOST=/Users/alice
+ANTHROPIC_API_KEY=你的API_Key
+ANTHROPIC_MODEL=發行版本建議的模型名稱
 ```
 
-資料庫內的爬蟲子路徑若為 `Project/SRPP/data/input`，實際主機路徑就是：
+使用 AI 功能可能產生費用，也可能將分析所需的市場或理財條件送往外部服務。未填時相關功能安全停用，不阻擋系統啟動。
 
-```text
-/Users/alice/Project/SRPP/data/input
+### 8.4 FinMind token
+
+需要提高相關行情來源的使用額度時，在 `.env` 加入：
+
+```dotenv
+FINMIND_TOKEN=你的Token
 ```
 
-不需要把資料庫中的相對子路徑改成 `/Users/alice/...`；系統刻意只存相對路徑，以便跨電腦搬移。
+未填時系統仍會使用其他可用資料來源，但部分資料可能受限。
 
 ---
 
-## 6. 第一次啟動與資料匯入
+## 9. 日常啟動、停止與查看狀態
 
-### 6.1 啟動前檢查
-
-```bash
-docker compose -p asset-management config --quiet
-test -f .env && echo '.env OK'
-test -f db/init/01_dump.sql && echo 'database dump OK'
-test -f "$HOME/.config/rclone/rclone.conf" && echo 'rclone config OK'
-```
-
-三個檔案都確認後，開始建置與啟動：
-
-```bash
-docker compose -p asset-management up -d --build
-```
-
-第一次會下載 PostgreSQL、Redis、Java、Node 與 Nginx 映像並編譯三個 Java 服務及前端，畫面暫時沒有反應不代表失敗。請等待指令結束。
-
-### 6.2 查看啟動狀態
-
-```bash
-docker compose -p asset-management ps
-```
-
-PostgreSQL 第一次啟動時會匯入 dump；接著 Business Services 檢查 Liquibase，External Materials、BFF、Frontend 再依序啟動。若仍顯示 `starting`，等待約 30～90 秒後再查一次。
-
-也可確認 BFF：
-
-```bash
-curl -fsS http://localhost:8080/actuator/health
-```
-
-預期結果包含：
-
-```json
-{"status":"UP"}
-```
-
-### 6.3 開啟系統
-
-瀏覽器前往：
-
-```text
-http://localhost
-```
-
-使用 Google 登入。若直接呼叫受保護的 `/api/...` 得到 `401`，在沒有登入 cookie 時是正常現象，不代表 BFF 故障。
-
----
-
-## 7. 搬機完成驗收
-
-請由接手人逐項確認，不要只看到首頁就判定完成。
-
-### 7.1 系統與登入
-
-- [ ] 六個 Docker 服務皆為 running，該有 healthcheck 的服務皆為 healthy。
-- [ ] `http://localhost` 可開啟，畫面樣式與功能正常。
-- [ ] 管理者 Google 帳號可登入。
-- [ ] 若有其他使用者，其狀態與權限仍正確。
-
-### 7.2 核心資料
-
-- [ ] 最新資產快照日期與舊電腦一致。
-- [ ] 銀行、券商、存款、股票、基金與已實現損益資料存在。
-- [ ] 觀察清單、警示條件、通知收件人仍存在。
-- [ ] 歷史股價、匯率、股利、指數等圖表有資料。
-- [ ] 各頁面的排程時間、啟用狀態與輸出路徑正確。
-
-可用下列唯讀指令確認快照筆數不是意外歸零：
-
-```bash
-docker compose -p asset-management exec postgres sh -lc \
-  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT COUNT(*) AS snapshot_count FROM asset_snapshot;"'
-```
-
-### 7.3 外部整合
-
-- [ ] Gmail 通知設定可用；需要時執行一次實際測試寄送。
-- [ ] AI 分析頁不是 `NOT_CONFIGURED`，或確認本來就刻意停用。
-- [ ] 「備份／還原資料」頁可同步 Google Drive 清單並完成一次手動備份。
-- [ ] 排程匯出可在新電腦指定的目錄產生檔案。
-- [ ] 公開資訊爬蟲可在設定的子路徑寫出 JSON。
-
-### 7.4 切換完成
-
-- [ ] 記錄新電腦的 commit ID、搬移時間、dump 指紋與驗收人。
-- [ ] 確認舊電腦仍維持停止，避免重複排程。
-- [ ] 保留舊電腦原始資料與加密搬機包至少 7 天，或依組織備份政策辦理。
-
----
-
-## 8. 常見問題與處理方式
-
-### 問題 A：首頁打不開
-
-先看狀態與最近日誌：
-
-```bash
-docker compose -p asset-management ps
-docker compose -p asset-management logs --tail=200 frontend bff business-services
-```
-
-常見原因是 80 或 8080 已被其他程式使用。macOS／Linux 可查：
-
-```bash
-lsof -nP -iTCP:80 -sTCP:LISTEN
-lsof -nP -iTCP:8080 -sTCP:LISTEN
-```
-
-### 問題 B：Google 顯示 `redirect_uri_mismatch`
-
-確認 Google Cloud Console 已登記完全相同的：
-
-```text
-http://localhost/login/oauth2/code/google
-```
-
-協定、主機、連接埠與路徑都必須完全一致。修改 OAuth 設定後可能需要稍候才生效。
-
-### 問題 C：系統能開，但資料全部是空的
-
-最常見原因是 PostgreSQL 已先建立空 volume，之後才放入 `01_dump.sql`。先確認 dump 存在：
-
-```bash
-ls -lh db/init/01_dump.sql
-```
-
-若新電腦的空資料確定可以刪除，才能執行以下重建：
-
-```bash
-docker compose -p asset-management down -v
-docker compose -p asset-management up -d --build
-```
-
-> **警告**：`down -v` 會永久刪除這台電腦目前的 PostgreSQL 與 Redis volume。只可在確認新機資料可捨棄、且安全 dump 仍存在時使用。不要把它當成一般停止指令。
-
-### 問題 D：修改 `.env` 的資料庫密碼後無法連線
-
-`POSTGRES_PASSWORD` 只在 PostgreSQL volume 第一次建立時生效。若已有資料 volume，單純改 `.env` 不會同步修改資料庫內的密碼。
-
-- 搬機初期且資料可重建：確認 dump 後用上一節的 `down -v` 重新初始化。
-- 已正式使用且有新資料：不要刪 volume，請由資料庫管理者正確修改 PostgreSQL 角色密碼。
-
-### 問題 E：備份頁無法連 Google Drive
-
-```bash
-docker compose -p asset-management logs --tail=200 business-services
-docker compose -p asset-management exec business-services \
-  rclone --config /tmp/rclone.conf lsd gdrive-crypt:
-```
-
-檢查 `rclone.conf` 是否存在、可讀，remote 名稱是否正確，以及 crypt 密碼是否與舊備份一致。
-
-### 問題 F：排程顯示成功，但主機找不到輸出檔
-
-依序確認：
-
-1. `.env` 的 `EXPORT_OUTPUT_DIR_HOST` 是新電腦的絕對路徑。
-2. Business Services 與 External Materials 使用同一個根目錄掛載。
-3. Docker Desktop 已允許分享該路徑。
-4. 頁面儲存的是相對子路徑，不是舊電腦的絕對路徑。
-
-修改 `.env` 後要重建受影響容器：
-
-```bash
-docker compose -p asset-management up -d --force-recreate business-services external-materials-service
-```
-
-### 問題 G：程式碼已更新，但畫面還是舊版
-
-先確認 checkout 的 commit：
-
-```bash
-git branch --show-current
-git log -1 --oneline
-```
-
-再從這個專案目錄無快取重建並重建容器：
-
-```bash
-docker compose -p asset-management build --no-cache \
-  business-services external-materials-service bff frontend
-docker compose -p asset-management up -d --force-recreate \
-  business-services external-materials-service bff frontend
-```
-
-最後重新開啟瀏覽器頁面。若仍不一致，可確認目前容器是由哪個專案目錄建立：
-
-```bash
-docker inspect asset-frontend \
-  --format '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}'
-```
-
-顯示的路徑必須是你剛才更新並建置的 checkout。
-
-### 問題 H：某個服務一直 unhealthy
-
-查看該服務最近 200 行日誌：
-
-```bash
-docker compose -p asset-management logs --tail=200 postgres
-docker compose -p asset-management logs --tail=200 business-services
-docker compose -p asset-management logs --tail=200 external-materials-service
-docker compose -p asset-management logs --tail=200 bff
-```
-
-不要一看到 unhealthy 就執行 `down -v`；先保留資料並從第一個出錯的服務往後排查。
-
----
-
-## 9. 日常啟停、更新與備份
-
-啟動：
+開機後先啟動 Docker Desktop。到專案根目錄執行：
 
 ```bash
 docker compose -p asset-management up -d
 ```
 
-停止但保留資料：
+停止但保留全部資料：
 
 ```bash
 docker compose -p asset-management stop
@@ -534,48 +593,242 @@ docker compose -p asset-management stop
 docker compose -p asset-management ps
 ```
 
-查看最近日誌：
+查看最近 200 行紀錄：
 
 ```bash
 docker compose -p asset-management logs --tail=200
 ```
 
-更新正式版前，先做資料庫備份，再更新程式：
+一般停止、重新啟動電腦或 `docker compose down` 不會刪除資料庫 volume。
+
+---
+
+## 10. 備份與更新
+
+### 10.1 手動匯出資料庫
 
 ```bash
 ./scripts/db-export.sh
-git switch main
-git pull --ff-only origin main
+```
+
+產生的 `db/init/01_dump.sql` 含完整私人資料。請保存在加密位置，不可放回發行 ZIP、上傳 Git 或傳給其他使用者。
+
+### 10.2 更新前必做
+
+1. 先匯出資料庫或在備份頁完成備份。
+2. 閱讀提供者的版本說明與相容性提醒。
+3. 另存自己的 `.env` 與 `rclone.conf`；不可用新版範本直接覆蓋。
+4. 確認 Docker Desktop／Docker Engine 正常。
+5. 依提供者的 ZIP 或 Git 方式更新程式。
+6. 在更新後的專案根目錄執行：
+
+```bash
+docker compose -p asset-management config --quiet
 docker compose -p asset-management up -d --build
 docker compose -p asset-management ps
 ```
 
-一般日常操作不要執行 `docker compose down -v`。
+Liquibase 會自動套用新版資料庫結構，不要手動編輯歷史 migration。
+
+### 10.3 更換主要管理者的注意事項
+
+日後修改 `.env` 的 `ADMIN_EMAIL` 並重建 Business Services，會改變「不可停用／不可降級」的主要管理者帳號，但**不會把舊帳號的資產自動搬給新帳號**。舊帳號與它的資料仍會保留；新主要管理者可用管理者代看功能查看或管理。正式更換前請先備份，並確認新帳號已加入 Google OAuth Test users。
 
 ---
 
-## 10. 搬機紀錄範本
+## 11. 常見問題
 
-建議把以下內容存放在不含密碼的維運紀錄中：
+### 11.1 `docker: command not found`
 
-```text
-搬移日期：
-來源電腦：
-目的電腦：
-Git branch：
-Git commit：
-資料庫 dump 檔名：
-資料庫 dump SHA-256：
-EXPORT_OUTPUT_DIR_HOST：
-舊系統停止時間：
-新系統啟用時間：
-Google 登入驗收：通過／不通過
-核心資料驗收：通過／不通過
-Google Drive 備份驗收：通過／不通過／未啟用
-通知寄信驗收：通過／不通過／未啟用
-排程輸出驗收：通過／不通過／未啟用
-驗收人：
-備註：
+- macOS／Windows：Docker Desktop 尚未安裝完成，或安裝後尚未重新開啟終端機。
+- Windows：確認指令是在 Ubuntu 視窗執行，並在 Docker Desktop 開啟 Ubuntu 的 WSL Integration。
+- Ubuntu：回第 2.3 節確認 `docker-ce-cli` 與 Compose Plugin 已安裝。
+
+### 11.2 `Cannot connect to the Docker daemon`
+
+- macOS／Windows：開啟 Docker Desktop，等到 Engine running。
+- Ubuntu：執行 `sudo systemctl start docker`；若是權限錯誤，登出再登入以套用 docker 群組。
+
+### 11.3 Compose 顯示必填設定錯誤
+
+若看到 `請在 .env 設定 ADMIN_EMAIL`，執行：
+
+```bash
+nano .env
 ```
 
-這份紀錄不可包含 `.env` 內容、密碼、API key、OAuth secret 或 rclone crypt 密碼。
+確認有且只有一行 `ADMIN_EMAIL=完整Google帳號`，沒有引號或提示文字。其他必填值也不可空白。
+
+### 11.4 首頁打不開
+
+```bash
+docker compose -p asset-management ps
+docker compose -p asset-management logs --tail=200 frontend bff business-services
+```
+
+先找第一個不是 running／healthy 的服務。不要一看到錯誤就刪除 volume。
+
+若 80 或 8080 已被其他程式使用，macOS／Ubuntu 可查：
+
+```bash
+lsof -nP -iTCP:80 -sTCP:LISTEN
+lsof -nP -iTCP:8080 -sTCP:LISTEN
+```
+
+### 11.5 Google 顯示 `redirect_uri_mismatch`
+
+確認 Google Console 登記的是完全相同的：
+
+```text
+http://localhost/login/oauth2/code/google
+```
+
+請固定從 `http://localhost` 開啟，不要改用 `http://127.0.0.1`。Google 會把它們視為不同網址。
+
+### 11.6 Google 顯示沒有權限或應用程式仍在測試
+
+到 Google Auth Platform 的 Audience／Test users，加入正在登入的 Google 帳號。主要管理者必須加入，其他預計使用者也要加入。若填錯帳號，修正後可能需要等待幾分鐘再試。
+
+### 11.7 主要管理者登入後卻顯示等待核准
+
+1. 比對 `.env` 的 `ADMIN_EMAIL` 與瀏覽器實際選擇的 Google 帳號。
+2. 執行 `docker compose -p asset-management config | grep ADMIN_EMAIL`，確認容器收到正確值。
+3. 修改 `.env` 後執行：
+
+```bash
+docker compose -p asset-management up -d --force-recreate business-services
+```
+
+4. 登出系統，再用正確帳號重新登入。
+
+不要直接用 SQL 修改角色；主要管理者規則由 `ADMIN_EMAIL` 統一判定。
+
+### 11.8 修改資料庫密碼後無法連線
+
+`POSTGRES_PASSWORD` 只在 PostgreSQL volume 第一次建立時初始化。已經有資料後，單純修改 `.env` 不會同步修改資料庫內的密碼。
+
+有正式資料時不要刪除 volume。請還原原密碼，或由熟悉 PostgreSQL 的管理者同時修改資料庫角色密碼。
+
+### 11.9 備份頁無法連 Google Drive
+
+```bash
+docker compose -p asset-management logs --tail=200 business-services
+docker compose -p asset-management exec business-services \
+  rclone --config /tmp/rclone.conf lsd gdrive-crypt:
+```
+
+檢查 `rclone.conf` 是否存在且可讀、remote 名稱是否為 `gdrive-crypt`、crypt 密碼是否正確。不要對整個家目錄執行 `chmod -R 777`。
+
+### 11.10 排程找不到輸出檔
+
+確認：
+
+1. `.env` 的 `EXPORT_OUTPUT_DIR_HOST` 是這台電腦可寫入的路徑。
+2. Docker Desktop 已允許分享該路徑。
+3. 系統頁面選的是相對子路徑，不是別台電腦的絕對路徑。
+
+修改後執行：
+
+```bash
+docker compose -p asset-management up -d --force-recreate \
+  business-services external-materials-service
+```
+
+### 11.11 更新後仍看到舊畫面
+
+```bash
+docker compose -p asset-management build --no-cache \
+  business-services external-materials-service bff frontend
+docker compose -p asset-management up -d --force-recreate \
+  business-services external-materials-service bff frontend
+```
+
+完成後重新整理瀏覽器，必要時關閉舊分頁再開啟。
+
+### 11.12 某個服務一直 unhealthy
+
+```bash
+docker compose -p asset-management logs --tail=200 postgres
+docker compose -p asset-management logs --tail=200 business-services
+docker compose -p asset-management logs --tail=200 external-materials-service
+docker compose -p asset-management logs --tail=200 bff
+```
+
+從第一個出錯的服務開始處理。把錯誤訊息、系統版本與 `docker compose ... ps` 結果交給提供者；不要把 `.env` 或完整資料庫一起傳送。
+
+---
+
+## 12. 隱私與安全
+
+### 12.1 資料放在哪裡
+
+資產、設定、警示與歷史資料主要存放在這台電腦的 Docker PostgreSQL volume。一般停止或重開機不會刪除。
+
+### 12.2 可能連接的外部服務
+
+- Google OAuth：確認登入身分。
+- Gmail SMTP：使用者啟用後寄送通知。
+- Anthropic API：啟用 AI 功能時，分析所需的市場或理財條件可能送往外部服務。
+- 市場資料來源：查詢股票、基金、匯率與公開資訊。
+- Google Drive／rclone：使用者主動啟用的加密資料庫備份。
+
+若不接受某項外部資料處理，不要填入該服務的金鑰，也不要啟用該功能。
+
+### 12.3 本機連線安全
+
+預設網址是 `http://localhost`，本手冊以只在自己的電腦使用為前提。請保持作業系統防火牆開啟，不要在路由器或公共網路開放 80、8080、5432。
+
+若要讓其他電腦或網際網路存取，必須另行規劃 HTTPS、網域、防火牆、反向代理、備份與更新責任；不要直接把本機連接埠對外公開。
+
+---
+
+## 13. 停用與移除
+
+暫時停用並保留資料：
+
+```bash
+docker compose -p asset-management stop
+```
+
+移除容器但保留資料 volume：
+
+```bash
+docker compose -p asset-management down
+```
+
+只有確定所有資料與備份都不再需要時，才可執行：
+
+```bash
+docker compose -p asset-management down -v
+```
+
+**警告：** `down -v` 會永久刪除 PostgreSQL 與 Redis volume。一般更新、停止或故障排查都不需要使用它。
+
+移除容器後，專案資料夾、`.env`、輸出檔與 rclone 設定仍在主機上；若也要刪除，請先確認已無任何需要保留的資料。
+
+---
+
+## 14. 系統提供者發行前檢查表
+
+這一節是給準備散佈系統的人，不是一般安裝者的操作步驟。
+
+### 14.1 發行內容
+
+- [ ] `.env.example` 有 `ADMIN_EMAIL` 說明，但沒有真實帳號或 secret。
+- [ ] 安裝包不含 `.env`、`db/init/01_dump.sql`、`rclone.conf`、私人 Excel／JSON／備份檔。
+- [ ] 安裝包不含 API key、密碼、OAuth secret、IDE cache、`node_modules` 或 Java `target`。
+- [ ] 預設輸出路徑不含原作者姓名或家目錄。
+- [ ] 提供版本號、Git commit、SHA-256、更新說明、授權條款、隱私說明與支援方式。
+
+### 14.2 乾淨安裝驗證
+
+- [ ] 從全新空白 PostgreSQL 完成一次安裝，不依賴私人 dump。
+- [ ] 將 `ADMIN_EMAIL` 設成非原作者 Google 帳號，首次登入即為 `ADMIN/ACTIVE`。
+- [ ] 使用者管理 API 與畫面都以 `protectedAdmin` 標示「主要管理者」，沒有前端 email hard code。
+- [ ] 未設定或誤填 `ADMIN_EMAIL` 時，Compose／服務會清楚拒絕啟動。
+- [ ] 六個主要服務都能啟動，BFF health 為 `UP`。
+- [ ] 能建立或匯入第一份安裝者自己的資產資料。
+- [ ] 選用金鑰保持空白時會安全停用，不阻擋啟動。
+- [ ] 至少在預計支援的 macOS、Windows WSL 2、Ubuntu 版本各驗證一次。
+
+只有上述檢查完成後，才應將版本標示為可供一般使用者自行安裝。

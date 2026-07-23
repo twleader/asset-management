@@ -32,8 +32,6 @@ public final class AuthConstants {
 
     public static final String STATUS_ACTIVE = "ACTIVE";
 
-    public static final String ADMIN_EMAIL = "tw.leader@gmail.com";
-
     /** Reactor context key：本請求解析出的身分。 */
     public static final String CTX_IDENTITY = "tenantIdentity";
 }

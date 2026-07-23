@@ -13,7 +13,7 @@ import java.time.LocalDateTime;
  *
  * <p>身分由 Google OAuth2 的 email 唯一識別。role / status 以字串存（禁止 enum 寫死於 schema）：
  * <ul>
- *   <li>role：{@code ADMIN}（管理者，固定 tw.leader@gmail.com，可代看全部使用者）/ {@code USER}</li>
+ *   <li>role：{@code ADMIN}（管理者；由環境變數指定的主要管理者可代看全部使用者）/ {@code USER}</li>
  *   <li>status：{@code PENDING}（待管理者核准）/ {@code ACTIVE}（可使用）/ {@code DISABLED}（已停用）</li>
  * </ul>
  * 受隔離的資產類資料以本表 id 作為 {@code owner_user_id} 關聯。
