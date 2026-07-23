@@ -165,12 +165,12 @@ public class PriceFetchClient {
         }
     }
 
-    public Optional<PriceResult> getTwClosingPriceFromFinMind(String stockCode, LocalDate startDate) {
+    public Optional<PriceResult> getTwClosingPriceFromFinMind(String stockCode, LocalDate expectedDate) {
         try {
             String url = "https://api.finmindtrade.com/api/v4/data"
                     + "?dataset=TaiwanStockPrice"
                     + "&data_id=" + stockCode
-                    + "&start_date=" + startDate.toString();
+                    + "&start_date=" + expectedDate;
             HttpResponse<String> resp = httpClient.send(
                     finmindRequest(url, 15), HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() != 200) {
@@ -181,6 +181,22 @@ public class PriceFetchClient {
             JsonNode data = mapper.readTree(resp.body()).path("data");
             if (!data.isArray() || data.isEmpty()) return Optional.empty();
             JsonNode row = data.get(data.size() - 1);
+            return parseTwClosingRow(stockCode, row, expectedDate);
+        } catch (Exception e) {
+            log.warn("FinMind 取得台股 {} 收盤失敗: {}", stockCode, e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    /** 僅接受來源交易日等於要求日期的 FinMind 台股收盤列，避免把 T-1 OHLC 誤標成今日。 */
+    static Optional<PriceResult> parseTwClosingRow(
+            String stockCode, JsonNode row, LocalDate expectedDate) {
+        if (row == null || expectedDate == null) return Optional.empty();
+        try {
+            JsonNode dateNode = row.get("date");
+            if (dateNode == null || dateNode.isNull()) return Optional.empty();
+            LocalDate sourceDate = LocalDate.parse(dateNode.asText());
+            if (!expectedDate.equals(sourceDate)) return Optional.empty();
             BigDecimal close = finmindDecimal(row, "close");
             if (close == null) return Optional.empty();
             BigDecimal open = finmindDecimal(row, "open");
@@ -200,7 +216,6 @@ public class PriceFetchClient {
                     open, previousClose, high, low,
                     volume == 0 ? null : volume));
         } catch (Exception e) {
-            log.warn("FinMind 取得台股 {} 收盤失敗: {}", stockCode, e.getMessage());
             return Optional.empty();
         }
     }

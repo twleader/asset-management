@@ -3,11 +3,14 @@ package com.steven.assets.externalmaterials.service;
 import com.steven.assets.externalmaterials.client.PriceFetchClient;
 import com.steven.assets.externalmaterials.client.PriceFetchClient.IntradayBar;
 import com.steven.assets.externalmaterials.client.PriceFetchClient.TickBar;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -15,6 +18,9 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 盤後外部資料源覆寫 Redis tick LIST。
@@ -35,12 +41,63 @@ import java.util.concurrent.Executors;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class IntradayTickRefresher {
 
     private final PriceFetchClient client;
     private final IntradayTickStore tickStore;
     private final StockSourceQuery source;
+    private final MarketClock clock;
+
+    private final Duration selfHealCooldown;
+    private final Duration selfHealWait;
+    private final ConcurrentHashMap<String, HealAttempt> healAttempts = new ConcurrentHashMap<>();
+    private final ExecutorService healExecutor = Executors.newVirtualThreadPerTaskExecutor();
+
+    @Autowired
+    public IntradayTickRefresher(
+            PriceFetchClient client, IntradayTickStore tickStore,
+            StockSourceQuery source, MarketClock clock) {
+        this(client, tickStore, source, clock, Duration.ofSeconds(60), Duration.ofSeconds(8));
+    }
+
+    IntradayTickRefresher(
+            PriceFetchClient client, IntradayTickStore tickStore,
+            StockSourceQuery source, MarketClock clock,
+            Duration selfHealCooldown, Duration selfHealWait) {
+        this.client = client;
+        this.tickStore = tickStore;
+        this.source = source;
+        this.clock = clock;
+        this.selfHealCooldown = selfHealCooldown;
+        this.selfHealWait = selfHealWait;
+    }
+
+    private static final class HealAttempt {
+        private final CompletableFuture<Void> future;
+        private volatile long cooldownUntilNanos;
+
+        private HealAttempt(CompletableFuture<Void> future) {
+            this.future = future;
+            this.cooldownUntilNanos = Long.MAX_VALUE;
+        }
+    }
+
+    @EventListener(ApplicationReadyEvent.class)
+    public void healOpenMarketsOnStartup() {
+        new Thread(() -> {
+            Set<String> tw = new LinkedHashSet<>(), us = new LinkedHashSet<>(), uk = new LinkedHashSet<>();
+            source.collectHeldStockCodes(tw, us, uk);
+            if (clock.isTwMarketOpen()) healOnStartup(tw, "台股", LocalDate.now(MarketClock.TW_ZONE));
+            if (clock.isUsMarketOpen()) healOnStartup(us, "美股", LocalDate.now(MarketClock.US_ZONE));
+            if (clock.isUkMarketOpen()) healOnStartup(uk, "英股", LocalDate.now(MarketClock.LON_ZONE));
+        }, "intraday-tick-self-heal").start();
+    }
+
+    private void healOnStartup(Set<String> codes, String market, LocalDate date) {
+        if (codes.isEmpty()) return;
+        log.info("啟動自癒 {} {} 檔當日分時 tick", market, codes.size());
+        for (String code : codes) refreshOneGuarded(code, market, date, false);
+    }
 
     @Scheduled(cron = "0 0 14 * * MON-FRI", zone = "Asia/Taipei")
     public void refreshTwTicks() {
@@ -82,6 +139,43 @@ public class IntradayTickRefresher {
         } else {
             refreshTwOne(code, date);
         }
+    }
+
+    /**
+     * 讀取路徑的 single-flight 自癒：同一 market/code/date 只允許一個外呼，
+     * 完成後成功失敗皆冷卻 60 秒；呼叫端最多等待 8 秒，逾時後背景工作繼續。
+     */
+    public void refreshOneGuarded(String code, String market, LocalDate date, boolean wait) {
+        String key = market + "_" + code + "_" + date;
+        long now = System.nanoTime();
+        HealAttempt attempt = healAttempts.compute(key, (ignored, existing) -> {
+            if (existing != null && (existing.future.isDone()
+                    ? now < existing.cooldownUntilNanos
+                    : true)) {
+                return existing;
+            }
+            CompletableFuture<Void> future = CompletableFuture.runAsync(
+                    () -> refreshOne(code, market, date), healExecutor);
+            HealAttempt created = new HealAttempt(future);
+            future.whenComplete((ok, error) -> created.cooldownUntilNanos =
+                    System.nanoTime() + selfHealCooldown.toNanos());
+            return created;
+        });
+        purgeExpiredAttempts(now);
+        if (!wait) return;
+        try {
+            attempt.future.get(selfHealWait.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            log.info("分時自癒等待逾時，先回既有資料 {} {} {}", market, code, date);
+        } catch (Exception e) {
+            log.warn("分時自癒失敗 {} {} {}: {}", market, code, date, e.getMessage());
+        }
+    }
+
+    private void purgeExpiredAttempts(long now) {
+        if (healAttempts.size() < 128) return;
+        healAttempts.entrySet().removeIf(e ->
+                e.getValue().future.isDone() && now >= e.getValue().cooldownUntilNanos);
     }
 
     private void refreshTw(Set<String> codes, LocalDate date) {

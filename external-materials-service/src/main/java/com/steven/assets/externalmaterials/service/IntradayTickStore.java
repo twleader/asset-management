@@ -11,7 +11,9 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -118,6 +120,42 @@ public class IntradayTickStore {
             log.warn("getTicks {} {} {}: {}", market, code, tradingDate, e.getMessage());
         }
         return out;
+    }
+
+    /**
+     * 判斷當日 session 是否有明顯缺口。輸入為 {@link #getTicks} 已解析後的有效 ticks：
+     * 空、首筆晚於開盤後 5 分鐘、或相鄰兩筆超過 15 分鐘皆視為不完整。
+     */
+    public static boolean isIncompleteForSession(
+            List<TickPoint> ticks, String market, LocalDate tradingDate) {
+        if (ticks == null || ticks.isEmpty() || tradingDate == null) return true;
+        List<LocalDateTime> times = ticks.stream()
+                .map(TickPoint::time)
+                .map(IntradayTickStore::parseTime)
+                .filter(java.util.Objects::nonNull)
+                .sorted(Comparator.naturalOrder())
+                .toList();
+        if (times.isEmpty()) return true;
+
+        LocalTime open = "美股".equals(market) ? LocalTime.of(9, 30)
+                : "英股".equals(market) ? LocalTime.of(8, 0)
+                : LocalTime.of(9, 0);
+        LocalDateTime latestAllowedFirst = tradingDate.atTime(open).plusMinutes(5);
+        if (times.get(0).isAfter(latestAllowedFirst)) return true;
+
+        for (int i = 1; i < times.size(); i++) {
+            if (Duration.between(times.get(i - 1), times.get(i)).toMinutes() > 15) return true;
+        }
+        return false;
+    }
+
+    private static LocalDateTime parseTime(String value) {
+        if (value == null) return null;
+        try {
+            return LocalDateTime.parse(value);
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     /**

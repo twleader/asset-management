@@ -155,6 +155,21 @@ public class StockSourceQuery {
                 }));
     }
 
+    /** 取指定日期之前最近一個交易日的收盤價（休市 DB→Redis 同步的昨收權威來源）。 */
+    public Optional<BigDecimal> findPreviousCloseBefore(
+            String stockCode, String market, LocalDate beforeDate) {
+        return Optional.ofNullable(jdbc.query(
+                "SELECT close_price FROM stock_price_history " +
+                        "WHERE stock_code=? AND market=? AND trading_date < ? AND close_price IS NOT NULL " +
+                        "ORDER BY trading_date DESC LIMIT 1",
+                ps -> {
+                    ps.setString(1, stockCode);
+                    ps.setString(2, market);
+                    ps.setObject(3, beforeDate);
+                },
+                rs -> rs.next() ? rs.getBigDecimal(1) : null));
+    }
+
     /** 指定交易日的收盤價（Task 215：入庫折溢價時，與淨值配對的必須是<b>同一交易日</b>的收盤價）。 */
     public Optional<BigDecimal> findCloseOn(String stockCode, String market, LocalDate tradingDate) {
         return Optional.ofNullable(jdbc.query(

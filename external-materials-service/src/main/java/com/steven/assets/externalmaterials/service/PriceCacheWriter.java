@@ -185,21 +185,21 @@ public class PriceCacheWriter {
      *（例：美股 Juneteenth 06-19 休市，前端 /realtime 觸發 refreshAll 把 06-18 的 688.11 寫回，
      * 蓋掉 FinMind 的 689.20）。本方法改以 DB 收盤回寫，根治 Redis↔DB 不同步。
      *
-     * 沿用既有 Redis JSON 的 previousClose / stockName / ohlc / volume 以維持顯示；無既有值則寫最小 payload。
+     * previousClose 一律依 DB 最新交易日查嚴格前一筆，避免沿用舊 Redis 交易日的昨收；
+     * stockName / ohlc / volume 則沿用既有 Redis JSON 以維持顯示。
      */
     public void syncClosedFromDb(String code, String market, BigDecimal dbClose) {
         if (dbClose == null) return;
         String key = "price:" + market + ":" + code;
         String indexKey = "price:index:" + market;
 
-        BigDecimal previousClose = null, openPrice = null, highPrice = null, lowPrice = null;
+        BigDecimal openPrice = null, highPrice = null, lowPrice = null;
         Long volume = null;
         String stockName = null;
         String existing = redis.opsForValue().get(key);
         if (existing != null) {
             try {
                 JsonNode node = MAPPER.readTree(existing);
-                if (node.hasNonNull("previousClose")) previousClose = new BigDecimal(node.get("previousClose").asText());
                 if (node.hasNonNull("openPrice"))     openPrice     = new BigDecimal(node.get("openPrice").asText());
                 if (node.hasNonNull("highPrice"))     highPrice     = new BigDecimal(node.get("highPrice").asText());
                 if (node.hasNonNull("lowPrice"))      lowPrice      = new BigDecimal(node.get("lowPrice").asText());
@@ -213,6 +213,8 @@ public class PriceCacheWriter {
                         "美股".equals(market) ? MarketClock.US_ZONE
                         : "英股".equals(market) ? MarketClock.LON_ZONE
                         : MarketClock.TW_ZONE));
+        BigDecimal previousClose = source.findPreviousCloseBefore(code, market, tradingDate)
+                .orElse(null);
 
         Map<String, Object> payload = new HashMap<>();
         payload.put("stockCode", code);

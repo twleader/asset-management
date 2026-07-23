@@ -290,17 +290,31 @@ public class InternalPriceController {
             @RequestParam String code,
             @RequestParam String market,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
-        if (date != null) {
-            return ticksWithColdStart(code, market, date);
-        }
         LocalDate today = LocalDate.now(
                 com.steven.assets.externalmaterials.service.MarketClock.zoneOf(market));
+        if (date != null) {
+            if (date.equals(today) && clock.isTradingDay(market, today)) {
+                return todayTicksWithSelfHeal(code, market, today);
+            }
+            return ticksWithColdStart(code, market, date);
+        }
         if (clock.isTradingDay(market, today)) {
-            var todayTicks = tickStore.getTicks(code, market, today);
+            var todayTicks = todayTicksWithSelfHeal(code, market, today);
             if (!todayTicks.isEmpty()) return todayTicks;
         }
         return ticksWithColdStart(code, market,
                 stockSource.findMaxTradingDate(code, market).orElse(today));
+    }
+
+    private java.util.List<com.steven.assets.externalmaterials.service.IntradayTickStore.TickPoint>
+            todayTicksWithSelfHeal(String code, String market, LocalDate today) {
+        var ticks = tickStore.getTicks(code, market, today);
+        if (com.steven.assets.externalmaterials.service.IntradayTickStore
+                .isIncompleteForSession(ticks, market, today)) {
+            tickRefresher.refreshOneGuarded(code, market, today, true);
+            ticks = tickStore.getTicks(code, market, today);
+        }
+        return ticks;
     }
 
     /**
