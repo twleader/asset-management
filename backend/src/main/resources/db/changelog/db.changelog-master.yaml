@@ -248,3 +248,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/v1.70.0-trading-radar-export-schedule.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.71.0-configurable-admin-email.sql
+      relativeToChangelogFile: false

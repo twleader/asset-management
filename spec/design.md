@@ -419,7 +419,7 @@ AssetSnapshot (1) ──── (N) FundHolding
 RealizedGain          (獨立，不關聯快照)
 
 # 多租戶 / 認證（Requirement 28）
-AppUser               (使用者主檔，PK = id；email UNIQUE；name / picture〔Google 帳號顯示名稱與頭像，皆 nullable〕；role ADMIN/USER；status PENDING/ACTIVE/DISABLED；created_at / updated_at 皆 NOT NULL）
+AppUser               (使用者主檔，PK = id；email UNIQUE；name / picture〔Google 帳號顯示名稱與頭像，皆 nullable〕；role ADMIN/USER；status PENDING/ACTIVE/DISABLED；created_at / updated_at 皆 NOT NULL；主要管理者由 ADMIN_EMAIL 即時判定，不另存重複欄位）
 AppUser (1) ──── (N) AssetSnapshot          (owner_user_id；子表 bank/stock/fund holding 經 snapshot 繼承 owner)
 AppUser (1) ──── (N) RealizedGain           (owner_user_id)
 AppUser (1) ──── (N) PaymentAccount         (owner_user_id)
@@ -1760,6 +1760,9 @@ volumes:
 ### business-services 身分與過濾
 
 - `CurrentUserFilter`（`OncePerRequestFilter`）讀 `X-User-*` 填 request-scoped `CurrentUserContext`。
+- `application.yml` 的 `app.admin-email` 綁定必填環境變數 `ADMIN_EMAIL`；`UserAdminService` 建構時完成 trim、小寫與格式驗證，缺值／格式錯誤立即中止啟動，禁止以內建 email 作 fallback。登入強制 ADMIN/ACTIVE、停用保護、角色保護與 DTO 標記一律呼叫同一個 `isConfiguredAdmin(email)`，避免多份判定漂移。
+- `ADMIN_EMAIL` 只注入 business-services；BFF 只信任 business-services 回傳的 role/status，前端使用者列表只依 `UserResponse.protectedAdmin` 鎖定「主要管理者」，BFF／前端不得 hard code email。
+- `v1.34.0-multi-tenant.sql` 為歷史 migration，不修改 checksum；`v1.71.0-configurable-admin-email.sql` 先由 catalog 動態掃描所有 `owner_user_id` 欄位（涵蓋歷史上未建 FK 的 owner 表），再以 foreign-key violation 兜底，只有完全無參照的舊固定管理者 seed 才刪除。日後更換 `ADMIN_EMAIL` 不會轉移 owner，舊帳號仍保有原資料，新主要管理者可用既有代看機制管理。
 - 受隔離 entity 加 `@FilterDef(name="ownerFilter")`（定義於 `model/package-info.java`）+ `@Filter(condition="owner_user_id = :ownerId")`。create 流程以 `ctx.effectiveUserId()` set owner。
 - **啟用點 `TenantFilterAspect`**：`@Before("execution(* com.steven.assets.repository..*(..))")` 在每次 repository 呼叫前，於目前 Hibernate session `enableFilter("ownerFilter")`。選 repository 層而非請求進入點，是因為此時已位於 service `@Transactional`（或 OSIV）綁定的 session 內，**不依賴 interceptor 與 OSIV 註冊順序**，過濾必定套用到實際執行的查詢（經實機驗證：帶 `X-User-Id` 不同值查 `/api/snapshots` 各自隔離）。
 - **filter 僅在有 request context 時啟用**（aspect 以 `RequestContextHolder` 判斷）；背景 cron（`AlertNotificationDispatcher` / `StockAlertService.checkAlerts`）無 request context 故不啟用，照舊掃全體 alert、寄信給各 alert 自己挑的收件人。
@@ -1791,8 +1794,8 @@ volumes:
 | `POST /api/impersonate?userId={id}` | BFF（`TenantWebFilter` 攔截，非 controller） | ADMIN | 管理者代看切換（寫/清 `IMPERSONATE_UID` cookie） |
 | `POST /logout` | BFF | 已登入 | 清 session |
 | `GET /api/bff/user-management` 等 | BFF→business | ADMIN | 使用者管理 passthrough（rewrite → `/internal/users`） |
-| `POST /internal/users/login-upsert` | business | 內部 | 登入 upsert + 回 role/status |
-| `GET /internal/users` / `PATCH /internal/users/{id}/status` / `PATCH /internal/users/{id}/role` | business | ADMIN | 列出 / 核准·停用 / 設角色 |
+| `POST /internal/users/login-upsert` | business | 內部 | 登入 upsert + 回 role/status；`UserResponse.protectedAdmin:boolean` 由 business 判定 |
+| `GET /internal/users` / `PATCH /internal/users/{id}/status` / `PATCH /internal/users/{id}/role` | business | ADMIN | 列出 / 核准·停用 / 設角色；每筆 `UserResponse` 含 `protectedAdmin` |
 | `GET /internal/users/by-email?email={email}` | business | 內部 | 依 email 即時查 id/role/status（登入 principal 為快照，核准後即時查詢備援；見上 L1595 設計說明） |
 
 ## Security Considerations

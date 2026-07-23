@@ -19,11 +19,12 @@ public class UserDto {
             String picture,
             String role,
             String status,
+            boolean protectedAdmin,
             LocalDateTime createdAt
     ) {
-        public static UserResponse from(AppUser u) {
+        public static UserResponse from(AppUser u, boolean protectedAdmin) {
             return new UserResponse(u.getId(), u.getEmail(), u.getName(), u.getPicture(),
-                    u.getRole(), u.getStatus(), u.getCreatedAt());
+                    u.getRole(), u.getStatus(), protectedAdmin, u.getCreatedAt());
         }
     }
 

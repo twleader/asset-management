@@ -2,33 +2,42 @@ package com.steven.assets.service;
 
 import com.steven.assets.model.AppUser;
 import com.steven.assets.repository.AppUserRepository;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * 使用者主檔管理（Requirement 28）。
  *
- * <p>登入 upsert 與管理者核准／停用／設角色。管理者 email 固定為 {@link #ADMIN_EMAIL}，
- * upsert 時一律維持 ADMIN/ACTIVE，不會被降級或退回待核准。
+ * <p>登入 upsert 與管理者核准／停用／設角色。主要管理者 email 由 {@code ADMIN_EMAIL}
+ * 環境變數提供，upsert 時一律維持 ADMIN/ACTIVE，不會被降級或退回待核准。
  */
 @Service
 @Slf4j
-@RequiredArgsConstructor
 public class UserAdminService {
-
-    public static final String ADMIN_EMAIL = "tw.leader@gmail.com";
 
     private static final Set<String> VALID_STATUS =
             Set.of(AppUser.STATUS_PENDING, AppUser.STATUS_ACTIVE, AppUser.STATUS_DISABLED);
     private static final Set<String> VALID_ROLE =
             Set.of(AppUser.ROLE_ADMIN, AppUser.ROLE_USER);
+    private static final Pattern EMAIL_PATTERN = Pattern.compile(
+            "^[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}$",
+            Pattern.CASE_INSENSITIVE);
 
     private final AppUserRepository userRepo;
+    private final String adminEmail;
+
+    public UserAdminService(AppUserRepository userRepo, @Value("${app.admin-email}") String adminEmail) {
+        this.userRepo = userRepo;
+        this.adminEmail = normalizeAndValidateAdminEmail(adminEmail);
+        log.info("主要管理者帳號已由 ADMIN_EMAIL 載入: {}", this.adminEmail);
+    }
 
     /**
      * 登入時 upsert：存在則更新 name/picture，不存在則建立（一般使用者 PENDING/USER）。
@@ -36,11 +45,11 @@ public class UserAdminService {
      */
     @Transactional
     public AppUser loginUpsert(String email, String name, String picture) {
-        String normalized = email == null ? null : email.trim().toLowerCase();
+        String normalized = email == null ? null : email.trim().toLowerCase(Locale.ROOT);
         if (normalized == null || normalized.isBlank()) {
             throw new IllegalArgumentException("email 不可為空");
         }
-        boolean isAdmin = ADMIN_EMAIL.equalsIgnoreCase(normalized);
+        boolean isAdmin = isConfiguredAdmin(normalized);
         AppUser user = userRepo.findByEmail(normalized).orElseGet(() -> AppUser.builder()
                 .email(normalized)
                 .role(isAdmin ? AppUser.ROLE_ADMIN : AppUser.ROLE_USER)
@@ -64,8 +73,14 @@ public class UserAdminService {
 
     @Transactional(readOnly = true)
     public AppUser getByEmail(String email) {
-        String normalized = email == null ? null : email.trim().toLowerCase();
+        String normalized = email == null ? null : email.trim().toLowerCase(Locale.ROOT);
+        if (normalized == null || normalized.isBlank()) return null;
         return userRepo.findByEmail(normalized).orElse(null);
+    }
+
+    /** 供所有需要保護主要管理者的路徑共用，避免各層自行保存 email。 */
+    public boolean isConfiguredAdmin(String email) {
+        return email != null && adminEmail.equals(email.trim().toLowerCase(Locale.ROOT));
     }
 
     @Transactional
@@ -75,8 +90,8 @@ public class UserAdminService {
         }
         AppUser user = userRepo.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("查無使用者: " + id));
-        if (ADMIN_EMAIL.equalsIgnoreCase(user.getEmail()) && !AppUser.STATUS_ACTIVE.equals(status)) {
-            throw new IllegalArgumentException("不可停用管理者帳號");
+        if (isConfiguredAdmin(user.getEmail()) && !AppUser.STATUS_ACTIVE.equals(status)) {
+            throw new IllegalArgumentException("不可停用主要管理者帳號");
         }
         user.setStatus(status);
         return userRepo.save(user);
@@ -89,10 +104,21 @@ public class UserAdminService {
         }
         AppUser user = userRepo.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("查無使用者: " + id));
-        if (ADMIN_EMAIL.equalsIgnoreCase(user.getEmail()) && !AppUser.ROLE_ADMIN.equals(role)) {
-            throw new IllegalArgumentException("不可調降管理者帳號角色");
+        if (isConfiguredAdmin(user.getEmail()) && !AppUser.ROLE_ADMIN.equals(role)) {
+            throw new IllegalArgumentException("不可調降主要管理者帳號角色");
         }
         user.setRole(role);
         return userRepo.save(user);
+    }
+
+    private static String normalizeAndValidateAdminEmail(String raw) {
+        String normalized = raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT);
+        if (normalized.isBlank()) {
+            throw new IllegalArgumentException("ADMIN_EMAIL 為必填，請在 .env 設定主要管理者的 Google 帳號");
+        }
+        if (!EMAIL_PATTERN.matcher(normalized).matches()) {
+            throw new IllegalArgumentException("ADMIN_EMAIL 格式不正確: " + raw);
+        }
+        return normalized;
     }
 }

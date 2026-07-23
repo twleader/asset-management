@@ -6,7 +6,9 @@
 | `git-hooks/commit-msg` | SDD 同步檢查——只驗「`spec/` 有無變更」（見 CLAUDE.md）。用 commit-msg 而非 pre-commit，是因為只有這個階段讀得到本次 commit 訊息，`[skip-spec]` 才判斷得準 |
 | `spec-check.sh` | spec 變更的機械前置檢查：編號撞號／重號、Liquibase changeset 版號碰撞與冪等性、宣稱的測試類是否存在、文件計數漂移。實作前搭配 `/spec-review` 使用 |
 
-完整搬機流程、秘密檔案清單與驗收方式請見 [`../INSTALLATION.md`](../INSTALLATION.md)。
+一般使用者安裝、首次啟動、日常維運與發行前檢查請見 [`../INSTALLATION.md`](../INSTALLATION.md)。
+
+全新安裝會由 Liquibase 建立空白資料庫，不需要 `db-import.sh` 或任何人的資料 dump。
 
 > `db/init/01_dump.sql` 含真實個人財務資料，已被 `.gitignore` 排除，不可強制加入 Git。
 > `db-import.sh` 會先執行 `docker compose down -v`，只可在確認現有資料可刪除、且安全 dump 已備妥時使用。
