@@ -12,24 +12,31 @@ asset-management/
 ├── bff/                           # BFF（Spring Cloud Gateway + 聚合 controller）
 ├── external-materials-service/    # 抓價 / NAV / 配息子系統
 ├── frontend/                      # Vue 3 SPA
-├── db/init/                       # PostgreSQL 容器初始化 SQL
+├── db/
+│   ├── init/                      # 容器初始化 SQL（01_dump.sql 含真實資料，gitignored）
+│   └── schema.sql                 # schema-only 鏡像，**DB 現況的基準線**
 ├── data/                          # H2 本機開發 DB（gitignored）
 ├── scripts/                       # 維運腳本 + git hooks
 │   ├── db-export.sh
 │   ├── db-import.sh
-│   └── git-hooks/
-│       └── pre-commit             # 強制 SDD 同步
+│   ├── git-hooks/
+│   │   └── commit-msg             # 強制 SDD 同步（只驗 spec/ 有無變更）
+│   └── spec-check.sh              # spec 變更的機械前置檢查
 ├── spec/                          # ⭐ SDD 規格文件（單一真實來源）
 │   ├── requirements.md            # User Stories + AC
 │   ├── design.md                  # 架構 / ERD / API
-│   ├── tasks.md                   # 實作任務清單
+│   ├── tasks.md                   # 任務索引 ＋ 尚未歸檔區段
+│   ├── tasks/                     # 任務檔（archive/ 歷史、tNNN_*.md 新制）
 │   └── steering/                  # ⭐ 長期 context（本檔所在處）
 │       ├── product.md
 │       ├── tech.md
 │       └── structure.md
+├── .claude/                       # skills（run-stack / commit-merge-push / spec-review）、worktrees
 ├── docker-compose.yml
 ├── start.sh
-├── .env / .env.example
+├── .env.example                   # （.env 本身 gitignored）
+├── AGENTS.md
+├── INSTALLATION.md                # 搬機安裝手冊
 └── CLAUDE.md                      # 開發規範摘要（指向本 steering）
 ```
 
@@ -284,25 +291,34 @@ frontend/
 
 ```
 spec/
-├── requirements.md       # 35 個 Requirements（User Story + AC）
+├── requirements.md       # 48 個 Requirements（User Story + AC）
 ├── design.md             # 架構圖、ERD、Service 職責、Sequence
-├── tasks.md              # 22+ 個 Tasks（含完成狀態 checkbox）
+├── tasks.md              # 任務索引（Task 1–220）＋ 尚未歸檔的 201 起區段
+├── tasks/                # 任務檔
+│   ├── README.md         # 自足任務檔規範
+│   ├── archive/          # Task 1–200 歷史，已凍結
+│   └── tNNN_<slug>.md    # 新制自足任務檔（Task 201 之後）
 └── steering/             # 長期 context（每次對話皆載入）
     ├── product.md        # 產品定位 / 使用者 / 範圍
     ├── tech.md           # 技術棧 / 版本 / 慣例
     └── structure.md      # 本檔
 ```
 
+> **新任務不要追加進 `tasks.md`。** 一任務一檔 `spec/tasks/tNNN_<slug>.md`，內容須自足到
+> 「只讀那一支檔就能實作」。規範與範本見 [tasks/README.md](../tasks/README.md)。
+
 ### 6.1 何時動 spec？
 
-| 變更類型 | 是否必須更新 spec | 應更新哪些檔 |
-|----------|-------------------|--------------|
-| 新增 Entity / 改資料模型 | ✅ | requirements + design + tasks |
-| 新增 API endpoint | ✅ | design + tasks（若新功能也要 requirements） |
-| 新增前端頁面 | ✅ | requirements + design（含 route 表）+ tasks |
-| 修正商業邏輯 bug | ✅ | requirements（補 AC 或更新既有 AC）+ tasks |
-| 純 CSS / 樣式 / typo / import 整理 | ❌ | commit 訊息加 `[skip-spec]` |
-| 長期不變的技術選型 / 目錄結構 | ✅ | steering 對應檔（本文件等） |
+| 變更類型 | 是否必須更新 spec | 應更新哪些檔 | 需過 `/spec-review` |
+|----------|-------------------|--------------|---------------------|
+| 新增 Entity / 改資料模型 | ✅ | requirements + design + 任務檔 | ✅ |
+| 新增 API endpoint | ✅ | design + 任務檔（若新功能也要 requirements） | ✅ |
+| 新增前端頁面 | ✅ | requirements + design（含 route 表）+ 任務檔 | ✅ |
+| 修正商業邏輯 bug | ✅ | requirements（補 AC 或更新既有 AC）+ 任務檔 | ✅ |
+| 純 CSS / 樣式 / typo / import 整理 | ❌ | commit 訊息加 `[skip-spec]` | ❌ |
+| 長期不變的技術選型 / 目錄結構 | ✅ | steering 對應檔（本文件等） | ❌ |
+
+審查門檻 `quality_score ≥ 8`，未達不得進入實作；連續 3 輪未過則停下來問人，不要無限迴圈。
 
 ---
 

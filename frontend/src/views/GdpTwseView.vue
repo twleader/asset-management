@@ -29,6 +29,14 @@
             <el-button size="small" @click="onRefreshDaily" :loading="dailyRefreshing">
               回補日線（10 年）
             </el-button>
+            <!-- 分時（當日）為 transient 資料、非日線 OHLC，與匯出內容不同源，故該模式停用 -->
+            <el-tooltip :disabled="!isIntraday" content="「當日」為分時資料，請切換到日線區間再匯出" placement="top">
+              <span>
+                <el-button size="small" type="primary" :disabled="isIntraday" @click="openExport">
+                  匯出 Excel
+                </el-button>
+              </span>
+            </el-tooltip>
           </div>
         </div>
       </template>
@@ -48,6 +56,120 @@
       <v-chart v-if="hasData" :option="compareChartOption" style="height:520px" autoresize />
       <el-empty v-else description="尚無資料" />
     </el-card>
+
+    <!-- 排程自動匯出設定（Requirement 45 / Task 216） -->
+    <el-card style="margin-top:20px">
+      <template #header>
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <span class="section-title">⏱️ 排程自動匯出</span>
+          <div style="display:flex;gap:8px">
+            <el-button size="small" :loading="runningNow" @click="handleRunNow">立即匯出到目錄</el-button>
+            <el-button size="small" type="primary" :loading="savingSchedule" @click="saveSchedule">儲存設定</el-button>
+          </div>
+        </div>
+      </template>
+      <el-form :inline="true" label-width="100px" class="schedule-form">
+        <el-form-item label="啟用每日排程">
+          <el-switch v-model="schedule.enabled" />
+        </el-form-item>
+        <el-form-item label="每日執行時間">
+          <el-time-picker v-model="scheduleTime" format="HH:mm" value-format="HH:mm"
+            placeholder="時:分" style="width:130px" />
+        </el-form-item>
+        <el-form-item label="匯出指數">
+          <el-select v-model="schedule.market" style="width:150px">
+            <el-option v-for="m in MARKETS" :key="m.value" :label="m.label" :value="m.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="匯出範圍">
+          <el-select v-model="schedule.rangeMonths" style="width:140px">
+            <el-option v-for="o in rangeMonthOptions" :key="String(o.value)"
+              :label="o.label" :value="o.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="輸出資料夾">
+          <el-input v-model="schedule.outputSubpath" readonly placeholder="（家目錄根）" style="width:240px">
+            <template #append>
+              <el-button @click="openDirPicker">選擇</el-button>
+            </template>
+          </el-input>
+        </el-form-item>
+      </el-form>
+      <div class="schedule-hint">
+        以主機家目錄 <code>{{ schedule.baseDir || '/home/steven' }}</code> 為根（對映主機
+        <code>/Users/steven</code>）。按上方「選擇」開啟檔案總管式選擇器挑選子資料夾；例如選 <code>input</code> →
+        主機 <code>/Users/steven/input</code>。每日於指定時間匯出所選指數的日線為
+        <code>{{ scheduleMarketLabel }}_{使用者ID}_YYYYMMDD.xlsx</code>（欄位為日期／開盤／最高／最低／收盤，
+        內容同上方「匯出 Excel」）。匯出範圍以<b>執行當日往前推</b>計算，故每日產出會隨時間滾動。
+      </div>
+      <div v-if="schedule.lastRunAt || schedule.lastRunStatus" class="schedule-status">
+        上次執行：{{ schedule.lastRunAt || '—' }}　{{ schedule.lastRunStatus || '' }}
+      </div>
+    </el-card>
+
+    <!-- 輸出資料夾選擇器 -->
+    <el-dialog v-model="dirPicker.visible" title="選擇輸出資料夾" width="560px">
+      <div class="dir-picker-path">
+        目前選擇：<code>{{ dirPicker.baseDir || '/home/steven' }}{{ dirPicker.picked ? '/' + dirPicker.picked : '' }}{{ dirPicker.newSub.trim() ? '/' + dirPicker.newSub.trim() : '' }}</code>
+      </div>
+      <el-tree
+        :key="dirPicker.treeKey"
+        lazy
+        :load="loadDirNode"
+        :props="dirTreeProps"
+        node-key="key"
+        highlight-current
+        :expand-on-click-node="false"
+        :default-expanded-keys="['__root__']"
+        class="dir-tree"
+        @node-click="onDirNodeClick" />
+      <div class="dir-new-sub">
+        <span class="dns-label">新增子資料夾</span>
+        <el-input v-model="dirPicker.newSub" placeholder="（選填）在所選資料夾下新增，寫檔時自動建立"
+          style="width:340px" clearable />
+      </div>
+      <template #footer>
+        <el-button @click="dirPicker.visible = false">取消</el-button>
+        <el-button type="primary" @click="confirmDirPick">確定</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 匯出對話框：指定時間區間，存檔位置由瀏覽器另存對話框決定 -->
+    <el-dialog v-model="exportDialog.visible" :title="`匯出${marketLabel}日線`" width="480px">
+      <el-form label-width="90px">
+        <el-form-item label="時間區間">
+          <el-date-picker
+            v-model="exportDialog.range"
+            type="daterange"
+            value-format="YYYY-MM-DD"
+            start-placeholder="起始日"
+            end-placeholder="結束日"
+            :clearable="false"
+            style="width:100%"
+          />
+        </el-form-item>
+        <el-form-item label="輸出內容">
+          <div class="dialog-note">
+            單一 Excel 檔、一張工作表（{{ marketLabel }}），欄位為
+            <b>日期／開盤／最高／最低／收盤</b>，依日期遞增；當日該欄無資料則留空。
+          </div>
+        </el-form-item>
+        <el-form-item label="存檔位置">
+          <div class="dialog-note">
+            <template v-if="canPickDirectory">
+              按下匯出後會開啟系統「另存新檔」對話框，可自行選擇資料夾與檔名。
+            </template>
+            <template v-else>
+              目前瀏覽器不支援選擇資料夾，檔案將存到瀏覽器預設下載資料夾。
+            </template>
+          </div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="exportDialog.visible = false">取消</el-button>
+        <el-button type="primary" :loading="exporting" @click="onExport">匯出</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -60,7 +182,7 @@ import {
   GridComponent, DataZoomComponent, MarkPointComponent
 } from 'echarts/components'
 import VChart from 'vue-echarts'
-import { bffApi } from '@/api'
+import { bffApi, apiErrorMessage } from '@/api'
 import { ElMessage } from 'element-plus'
 
 use([CanvasRenderer, LineChart, BarChart, TitleComponent, TooltipComponent, LegendComponent,
@@ -216,8 +338,208 @@ function onMarketChange() {
 watch(dailyRange, v => { dailyZoomPct.value = null; if (v === 'd') fetchIntraday() })
 
 onMounted(() => {
-  Promise.allSettled([fetchData(), fetchDailyData()])
+  // 排程設定與兩張圖各自獨立，並行載入；設定讀取失敗不影響圖表
+  Promise.allSettled([fetchData(), fetchDailyData(), loadSchedule()])
 })
+
+// ===== Excel 匯出（Requirement 45 / Task 216）=====
+
+const exporting = ref(false)
+const exportDialog = reactive({ visible: false, range: [] })
+
+// File System Access API：可讓使用者自選存檔目錄；Safari／舊版瀏覽器沒有，退回一般下載
+const canPickDirectory = typeof window !== 'undefined' && 'showSaveFilePicker' in window
+
+function openExport() {
+  // 預設帶入目前圖表可視區間（含手動拖曳後的縮放結果），與畫面所見一致
+  const dates = dailyDates.value
+  if (!dates.length) {
+    ElMessage.warning('尚無日線資料，請先按「回補日線（10 年）」')
+    return
+  }
+  const ez = effectiveDailyZoom.value
+  const lo = Math.max(0, Math.floor((ez.start / 100) * (dates.length - 1)))
+  const hi = Math.min(dates.length - 1, Math.ceil((ez.end / 100) * (dates.length - 1)))
+  exportDialog.range = [dates[lo], dates[hi]]
+  exportDialog.visible = true
+}
+
+async function onExport() {
+  const [start, end] = exportDialog.range ?? []
+  if (!start || !end) {
+    ElMessage.warning('請選擇匯出時間區間')
+    return
+  }
+  exporting.value = true
+  try {
+    const blob = await bffApi.gdpTwse.exportExcel(market.value, start, end)
+    const filename = `${marketLabel.value}_${start.replaceAll('-', '')}_${end.replaceAll('-', '')}.xlsx`
+    const saved = await saveBlob(blob, filename)
+    if (saved) {
+      ElMessage.success('匯出完成')
+      exportDialog.visible = false
+    }
+  } catch {
+  } finally {
+    exporting.value = false
+  }
+}
+
+/**
+ * 優先開啟系統「另存新檔」對話框讓使用者選目錄；不支援時退回一般下載。
+ * 回傳 false 代表使用者主動取消（不顯示成功訊息）。
+ */
+async function saveBlob(blob, filename) {
+  if (canPickDirectory) {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: filename,
+        types: [{
+          description: 'Excel 活頁簿',
+          accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] }
+        }]
+      })
+      const writable = await handle.createWritable()
+      await writable.write(blob)
+      await writable.close()
+      return true
+    } catch (e) {
+      if (e?.name === 'AbortError') return false   // 使用者按取消
+      // 其他錯誤（權限、沙箱等）退回一般下載，功能不中斷
+    }
+  }
+  downloadBlob(blob, filename)
+  return true
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
+// ===== 排程自動匯出 =====
+
+const schedule = reactive({
+  enabled: false, runHour: 8, runMinute: 0, market: 'TWSE', outputSubpath: 'input',
+  rangeMonths: 120, lastRunAt: null, lastRunStatus: null, baseDir: ''
+})
+const scheduleTime = ref('08:00')
+const savingSchedule = ref(false)
+const runningNow = ref(false)
+
+// 排程卡的指數可與圖表目前選取不同（使用者可能在看美股、但排程留存台股），故獨立取 label
+const scheduleMarketLabel = computed(() =>
+  MARKETS.find(m => m.value === schedule.market)?.label ?? '台股大盤')
+
+// 全部十年以 120（月）表示而非 null：Element Plus 的 el-select 預設把 null 當成 empty value，
+// 綁 null 會顯示灰色 placeholder 而非「全部十年」，使用者無法分辨「已選」與「尚未選擇」（同 Task 203／204）。
+const ALL_TEN_YEARS_MONTHS = 120
+const rangeMonthOptions = [
+  { label: '近 1 個月', value: 1 },
+  { label: '近 3 個月', value: 3 },
+  { label: '近 6 個月', value: 6 },
+  { label: '近 1 年', value: 12 },
+  { label: '近 3 年', value: 36 },
+  { label: '近 5 年', value: 60 },
+  { label: '全部十年', value: ALL_TEN_YEARS_MONTHS }
+]
+
+// 輸出資料夾選擇器（檔案總管式樹狀）
+const dirPicker = reactive({ visible: false, baseDir: '', picked: '', newSub: '', treeKey: 0 })
+const dirTreeProps = { label: 'name', isLeaf: 'leaf' }
+
+async function loadSchedule() {
+  const s = await bffApi.gdpTwse.getExportSchedule()
+  schedule.enabled = !!s.enabled
+  schedule.runHour = s.runHour ?? 8
+  schedule.runMinute = s.runMinute ?? 0
+  schedule.market = s.market ?? 'TWSE'
+  schedule.outputSubpath = s.outputSubpath ?? 'input'
+  // 後端 null（未設定過的舊列）＝全部十年，映射成 120 讓下拉正確顯示
+  schedule.rangeMonths = s.rangeMonths ?? ALL_TEN_YEARS_MONTHS
+  schedule.lastRunAt = s.lastRunAt ?? null
+  schedule.lastRunStatus = s.lastRunStatus ?? null
+  schedule.baseDir = s.baseDir ?? ''
+  scheduleTime.value = `${String(schedule.runHour).padStart(2, '0')}:${String(schedule.runMinute).padStart(2, '0')}`
+}
+
+async function saveSchedule() {
+  savingSchedule.value = true
+  try {
+    const [h, m] = (scheduleTime.value || '08:00').split(':').map(Number)
+    const s = await bffApi.gdpTwse.updateExportSchedule({
+      enabled: schedule.enabled,
+      runHour: h,
+      runMinute: m,
+      market: schedule.market,
+      outputSubpath: (schedule.outputSubpath || 'input').trim(),
+      rangeMonths: schedule.rangeMonths
+    })
+    schedule.runHour = s.runHour ?? h
+    schedule.runMinute = s.runMinute ?? m
+    schedule.market = s.market ?? schedule.market
+    schedule.outputSubpath = s.outputSubpath ?? schedule.outputSubpath
+    schedule.rangeMonths = s.rangeMonths ?? ALL_TEN_YEARS_MONTHS
+    schedule.baseDir = s.baseDir ?? schedule.baseDir
+    ElMessage.success('排程設定已儲存')
+  } catch (e) {
+    ElMessage.error(apiErrorMessage(e, '儲存失敗，請稍後再試'))
+  } finally {
+    savingSchedule.value = false
+  }
+}
+
+async function handleRunNow() {
+  runningNow.value = true
+  try {
+    const r = await bffApi.gdpTwse.runExportNow()
+    ElMessage.success(`已匯出到：${r.path}`)
+  } catch (e) {
+    ElMessage.error(apiErrorMessage(e, '立即匯出失敗，請確認目錄與權限'))
+  } finally {
+    runningNow.value = false
+  }
+  loadSchedule().catch(() => {}) // 刷新上次執行資訊，失敗不影響匯出結果
+}
+
+function openDirPicker() {
+  dirPicker.picked = schedule.outputSubpath || ''
+  dirPicker.newSub = ''
+  dirPicker.treeKey++            // 強制 el-tree 重新懶載入 root
+  dirPicker.visible = true
+}
+
+// el-tree 懶載入：level 0 以家目錄為單一 root；其餘列該節點子目錄
+async function loadDirNode(node, resolve) {
+  try {
+    if (node.level === 0) {
+      const res = await bffApi.gdpTwse.browseExportDir('')
+      dirPicker.baseDir = res.baseDir || ''
+      resolve([{ name: res.baseDir || '/', path: '', key: '__root__', leaf: false }])
+      return
+    }
+    const res = await bffApi.gdpTwse.browseExportDir(node.data.path || '')
+    resolve((res.directories || []).map(d => ({ name: d.name, path: d.path, key: d.path, leaf: false })))
+  } catch (e) {
+    resolve([])
+  }
+}
+
+const onDirNodeClick = (data) => { dirPicker.picked = data.path || '' }
+
+function confirmDirPick() {
+  let p = dirPicker.picked || ''
+  const sub = (dirPicker.newSub || '').trim().replace(/^\/+|\/+$/g, '')
+  if (sub) p = p ? `${p}/${sub}` : sub
+  schedule.outputSubpath = p
+  dirPicker.visible = false
+}
 
 async function onRefresh() {
   refreshing.value = true
@@ -525,4 +847,14 @@ const compareChartOption = computed(() => ({
 
 <style scoped>
 .section-title { font-size: 15px; font-weight: 600; }
+.dialog-note { font-size: 12px; color: #64748b; line-height: 1.6; }
+.schedule-form { margin-bottom: 4px; }
+.schedule-hint { font-size: 12px; color: #94a3b8; line-height: 1.6; }
+.schedule-hint code { background: #f1f5f9; color: #475569; padding: 1px 5px; border-radius: 4px; font-size: 11px; }
+.schedule-status { margin-top: 8px; font-size: 12px; color: #64748b; }
+.dir-picker-path { font-size: 13px; color: #475569; margin-bottom: 10px; }
+.dir-picker-path code { background: #f1f5f9; color: #0f172a; padding: 2px 6px; border-radius: 4px; word-break: break-all; }
+.dir-tree { max-height: 340px; overflow: auto; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px; }
+.dir-new-sub { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+.dir-new-sub .dns-label { font-size: 13px; color: #475569; white-space: nowrap; }
 </style>

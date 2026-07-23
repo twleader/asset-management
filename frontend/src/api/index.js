@@ -193,7 +193,19 @@ export const bffApi = {
     refreshIndexDaily: (market = 'TWSE', years = 10) =>
       api.post('/bff/gdp-twse/refresh-index-daily', null, { params: { market, years }, timeout: 180000 }),
     getIndexIntraday: (market = 'TWSE') =>
-      api.get('/bff/gdp-twse/index-intraday', { params: { market } })
+      api.get('/bff/gdp-twse/index-intraday', { params: { market } }),
+    // 指數日線匯出與排程自動匯出（Requirement 45 / Task 216）
+    exportExcel: (market = 'TWSE', start, end) =>
+      api.get('/bff/gdp-twse/export', {
+        params: { market, ...(start && { start }), ...(end && { end }) },
+        responseType: 'blob',
+        timeout: 120000
+      }),
+    getExportSchedule:    () => api.get('/bff/gdp-twse/export/schedule', { skipErrorToast: true }),
+    updateExportSchedule: (data) => api.put('/bff/gdp-twse/export/schedule', data, { skipErrorToast: true }),
+    runExportNow:         () => api.post('/bff/gdp-twse/export/run-now', null, { timeout: 60000, skipErrorToast: true }),
+    browseExportDir:      (subpath = '') =>
+      api.get('/bff/gdp-twse/export/browse', { params: { subpath }, skipErrorToast: true })
   },
 
   // PerformanceComparison（績效比較，Requirement 33）
@@ -235,6 +247,17 @@ export const bffApi = {
   // TradingRadar（今日交易雷達，Requirement 43）：純本地規則，零 AI API
   tradingRadar: {
     get: () => api.get('/bff/trading-radar'),
+    exportExcel: (from, to) =>
+      api.get('/bff/trading-radar/export', { params: { from, to }, responseType: 'blob' }),
+    // 排程自動匯出到伺服器目錄（Requirement 48 追加 / Task 231）
+    getExportTimes: () => api.get('/bff/trading-radar/export-schedule/times'),
+    saveExportTimes: (times) => api.put('/bff/trading-radar/export-schedule/times', { times }),
+    getExportSetting: () => api.get('/bff/trading-radar/export-schedule/setting'),
+    saveExportSetting: (outputSubpath) =>
+      api.put('/bff/trading-radar/export-schedule/setting', { outputSubpath }),
+    runExportNow: () => api.post('/bff/trading-radar/export-schedule/run-now'),
+    browseExportDir: (subpath = '') =>
+      api.get('/bff/trading-radar/export/browse', { params: { subpath }, skipErrorToast: true }),
     getNotification: (stockCode, market) =>
       api.get(`/bff/trading-radar/notifications/${encodeURIComponent(stockCode)}`, { params: { market } }),
     updateNotification: (stockCode, market, payload) =>

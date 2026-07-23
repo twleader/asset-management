@@ -90,7 +90,7 @@
 2. **歷史可回溯。** 快照 + Liquibase + 自動備份輪替（daily 50 份 / weekly 5 份 / manual 5 份）三道防線；任何商業邏輯變更須能回放舊資料。
 3. **外部 API 失敗不拖垮主系統。** 抓價子系統獨立為 `external-materials-service` container；fail-soft 採用 Redis miss → `stock_price_history` fallback。
 4. **單機可運行。** 全套 Docker Compose 啟動於個人 Mac／NAS 即可，不依賴雲端託管服務（除 Google Drive 作為備份目的地）。
-5. **嚴格遵守 SDD 流程。** 任何商業邏輯變更必須先動 `spec/`（requirements → design → tasks）再動 code；pre-commit hook 強制檢查。
+5. **嚴格遵守 SDD 流程。** 任何商業邏輯變更必須先動 `spec/`（requirements → design → 自足任務檔 → `/spec-review` 審查通過）再動 code；commit-msg hook 驗「spec/ 有無變更」，內容正確性由審查閘門把關。
 
 ---
 
@@ -102,7 +102,7 @@
 | 盤中股價更新延遲 | < 2 分鐘（SSE 即時推播後 < 5 秒） |
 | 快照建立失敗率 | 0%（外部 API 失敗時自動 fallback 歷史值） |
 | 備份成功率 | 100%（連續失敗時 UI 顯示警示） |
-| Spec 與 code 同步度 | 100%（pre-commit hook 強制） |
+| Spec 與 code 同步度 | 100%（commit-msg hook 驗變更、`/spec-review` 驗內容） |
 
 ---
 

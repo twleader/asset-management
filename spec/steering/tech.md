@@ -169,16 +169,23 @@ cd frontend
 
 ## 6. 開發工作流（強制 SDD）
 
-### 6.1 SDD 順序（pre-commit hook 強制）
+### 6.1 SDD 順序（第 4 步為實作前閘門）
 
 ```
-1. spec/requirements.md  →  User Story + Acceptance Criteria
-2. spec/design.md        →  架構 / 資料模型 / API 設計
-3. spec/tasks.md         →  對應 Task 標記完成
-4. 實作程式碼
+1. spec/requirements.md     →  User Story + Acceptance Criteria
+2. spec/design.md           →  架構 / 資料模型 / API 設計
+3. spec/tasks/tNNN_*.md     →  建立自足任務檔（規範見 spec/tasks/README.md）
+4. spec 對抗式審查          →  /spec-review，quality_score < 8 不得進入實作
+5. 實作程式碼
 ```
 
-**Pre-commit hook：** `scripts/git-hooks/pre-commit` 檢查 staged 變更是否觸及 controller / model / dto / views / router / db changelog / bff，若有則強制同 commit 必須含 `spec/` 變更。
+第 3 步：Task 201 起的新任務一律建立獨立自足任務檔 `spec/tasks/tNNN_<slug>.md`；`spec/tasks.md` 已降為索引，Task 1–200 凍結於 `spec/tasks/archive/`。
+
+第 4 步：審查必須由**另一支 subagent** 執行（作者自審等於沒審），並先跑 `scripts/spec-check.sh` 取機械證據——編號撞號／重號、Liquibase changeset 版號碰撞與冪等性、spec 宣稱的測試類是否存在、文件計數漂移。
+
+**Commit-msg hook：** `scripts/git-hooks/commit-msg` 檢查 staged 變更是否觸及 controller / model / dto / views / router / db changelog / bff，若有則強制同 commit 必須含 `spec/` 變更。
+
+> hook 與第 4 步是**兩個不同的閘門**。hook 只驗「`spec/` 有沒有被碰」，改個錯字就過關，且觸發清單漏了 `service/`、`repository/`、`external-materials-service/**`（Task 195 的排程漂移就漏過去了）。內容正確性一律由 `/spec-review` 負責。
 
 **首次安裝（每個 clone / worktree）：**
 ```bash

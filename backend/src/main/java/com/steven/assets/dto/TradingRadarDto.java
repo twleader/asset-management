@@ -6,7 +6,7 @@ import java.util.List;
 /**
  * 今日交易雷達（Requirement 43）純讀 response。
  *
- * <p>所有分數／建議皆為 {@code TW_RULES_V3} 即時計算的衍生值，不入庫；
+ * <p>所有分數／建議皆為 {@code TW_RULES_V7} 即時計算的衍生值，不入庫；
  * {@code score=null} 代表必要資料不足，不以 0 分冒充有效判斷。</p>
  */
 public final class TradingRadarDto {
@@ -26,6 +26,8 @@ public final class TradingRadarDto {
             String regimeLabel,
             Integer score,
             boolean dataComplete,
+            /** 大盤最新完成日 K 非當前交易日、且 Redis 亦無今日即時價：買進閘門關閉、不採計 RISK_ON 加分（Task 217.1，語意於 Task 228 擴充）。 */
+            boolean stale,
             String asOfDate,
             BigDecimal price,
             BigDecimal changePercent,
@@ -37,7 +39,11 @@ public final class TradingRadarDto {
             String quarterlyConfirmation,
             String annualConfirmation,
             List<String> reasons,
-            List<String> risks
+            List<String> risks,
+            /** regime 是否由 Redis 今日即時點位算出（相對於「已入庫完成日 K」）（Task 228）。 */
+            boolean intraday,
+            /** intraday=true 時為 Redis 即時價的 updatedAt（ISO 字串）；否則為 null（Task 228）。 */
+            String liveUpdatedAt
     ) {}
 
     public record StockDecision(
@@ -67,7 +73,24 @@ public final class TradingRadarDto {
             String monthlyConfirmation,
             String quarterlyConfirmation,
             String annualConfirmation,
+            /**
+             * 底層資產幣別對台幣的五年期分位（0–100）；台幣資產為 null（Requirement 47）。
+             * 供畫面揭露「現在換匯貴不貴」——台幣計價的美債 ETF 其報價相當部分由匯率驅動
+             * （實測 00719B 與 USD/TWD 近一年相關 0.9737），不揭露會讓使用者以為漲勢來自標的本身。
+             */
+            BigDecimal fxPercentile,
+            /** 底層資產幣別（TWD/USD/GBP…），供前端判斷是否顯示匯率相關說明。 */
+            String underlyingCurrency,
             List<String> reasons,
-            List<String> risks
+            List<String> risks,
+            /**
+             * KD 短線熱度：{@code OVERHEATED}／{@code ELEVATED}／{@code NORMAL}（Task 232）。
+             *
+             * <p>供收合列即可辨識——{@code reasons}／{@code risks} 只在展開後顯示，
+             * 使用者於收合狀態看不出 K 已偏高。{@code OVERHEATED} 代表買進閘門已關閉
+             * （動作降級為 HOLD／WATCH，分數不變）；<b>{@code ELEVATED} 純為揭露，
+             * 不影響分數與動作</b>。</p>
+             */
+            String kdHeat
     ) {}
 }

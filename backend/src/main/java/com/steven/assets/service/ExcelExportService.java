@@ -46,6 +46,11 @@ public class ExcelExportService {
     private final com.steven.assets.repository.ExchangeRateHistoryRepository rateHistRepo;
     // 每檔持股「過去一年股價」分頁（Task 206）：收盤價權威來源，與 TechnicalIndicatorService 的 MA/KD 同源
     private final com.steven.assets.repository.StockPriceHistoryRepository priceHistRepo;
+    // ETF 淨值／折溢價（Task 214）：讀 Redis price:etfnav:{market}:{code}（由 ext 排程寫入），business 不直連外部行情
+    private final PriceQueryService priceQueryService;
+    // 大盤指數日線匯出（Task 216）：與「股市大盤查詢」頁曲線同一張表，確保匯出值與圖表一致
+    private final com.steven.assets.repository.TwseIndexDailyHistoryRepository twseIndexHistRepo;
+    private final com.steven.assets.repository.UsIndexDailyHistoryRepository usIndexHistRepo;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -367,6 +372,97 @@ public class ExcelExportService {
         for (int i = 0; i < 4; i++) sheet.autoSizeColumn(i);
     }
 
+    /**
+     * 大盤指數匯出的顯示標籤（工作表名與兩種檔名共用同一來源，避免三處各自硬編碼中文名而漂移，
+     * 理由同 {@link #exchangeRateLabel}）（Requirement 45 / Task 216）。
+     *
+     * <p>未知代碼直接以代碼本身為標籤，不臆造名稱——呼叫端已有白名單擋，此處只是不讓標籤說謊。
+     * 前端 {@code GdpTwseView.MARKETS} 的 label 是 render 用，後端不可依賴前端字串。
+     */
+    public static String indexLabel(String market) {
+        return switch (market == null ? "" : market.toUpperCase()) {
+            case "TWSE" -> "台股大盤";
+            case "DJI" -> "道瓊工業";
+            case "SPX" -> "標普500";
+            case "IXIC" -> "那斯達克綜合";
+            case "SOX" -> "費城半導體";
+            case "FTSE" -> "英國富時100";
+            case "DAX" -> "德國DAX";
+            case "KOSPI" -> "韓國KOSPI";
+            case "N225" -> "日經225";
+            default -> market == null ? "" : market;
+        };
+    }
+
+    /**
+     * 大盤指數日線區間匯出（Requirement 45 / Task 216）：單張工作表、日期／開高低收五欄。
+     * 全域公開行情（兩張日線表皆無 owner 欄位、無 {@code @Filter}），故不需要 ForOwner 變體（同油價金價／匯率）。
+     */
+    @Transactional(readOnly = true)
+    public byte[] exportIndexDaily(String market, java.time.LocalDate start, java.time.LocalDate end)
+            throws IOException {
+        try (Workbook wb = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            Styles st = new Styles(wb);
+            writeIndexDailySheet(wb, st, market, start, end);
+            wb.write(out);
+            return out.toByteArray();
+        }
+    }
+
+    /**
+     * 「大盤指數日線」分頁：日期／開盤／最高／最低／收盤五欄，單一序列依日期遞增。
+     *
+     * <p><b>四個價格欄直接讀 DB 既有 OHLC 欄位，不重算、不由收盤推導</b>——這與匯率分頁的中間價相反
+     * （那是 {@code @Transient} 衍生值，必須由 entity 算）。兩張表的欄位語意相同，在此正規化成同一組
+     * {@code (date, o, h, l, c)} 後共用同一段寫表邏輯，確保切換指數時版面一致。
+     *
+     * <p>{@code TWSE} 走 {@code twse_index_daily_history}、其餘走 {@code us_index_daily_history}；
+     * 兩表的 open/high/low 皆 nullable（TWSE 早期由 v1.21.0 只抓 ClosingIndex 的殘留列），
+     * null 該格留空、不補前值、不捏造（同油價金價／匯率）。日期寫成文字避免開啟端時區偏移一天。
+     */
+    private void writeIndexDailySheet(Workbook wb, Styles st, String market,
+                                      java.time.LocalDate start, java.time.LocalDate end) {
+        Sheet sheet = wb.createSheet(org.apache.poi.ss.util.WorkbookUtil
+                .createSafeSheetName(indexLabel(market)));
+
+        Row h = sheet.createRow(0);
+        cell(h, 0, "日期", st.head);
+        cell(h, 1, "開盤", st.head);
+        cell(h, 2, "最高", st.head);
+        cell(h, 3, "最低", st.head);
+        cell(h, 4, "收盤", st.head);
+
+        int r = 1;
+        for (IndexDailyRow d : findIndexDaily(market, start, end)) {
+            Row row = sheet.createRow(r++);
+            cell(row, 0, ISO.format(d.date()), null);
+            if (d.open() != null) cell(row, 1, d.open(), st.num4);
+            if (d.high() != null) cell(row, 2, d.high(), st.num4);
+            if (d.low() != null) cell(row, 3, d.low(), st.num4);
+            cell(row, 4, d.close(), st.num4);
+        }
+
+        for (int i = 0; i < 5; i++) sheet.autoSizeColumn(i);
+    }
+
+    /** 兩張日線表正規化後的單日行情（僅供匯出寫表使用，不入庫）。 */
+    private record IndexDailyRow(java.time.LocalDate date, BigDecimal open, BigDecimal high,
+                                 BigDecimal low, BigDecimal close) {}
+
+    /** 依 market 分派到對應日線表，回傳依日期遞增的正規化列。 */
+    private List<IndexDailyRow> findIndexDaily(String market, java.time.LocalDate start, java.time.LocalDate end) {
+        if ("TWSE".equalsIgnoreCase(market)) {
+            return twseIndexHistRepo.findByTradingDateBetweenOrderByTradingDateAsc(start, end).stream()
+                    .map(t -> new IndexDailyRow(t.getTradingDate(), t.getOpenPoint(), t.getHighPoint(),
+                            t.getLowPoint(), t.getClosePoint()))
+                    .toList();
+        }
+        return usIndexHistRepo.findByIndexCodeAndTradingDateBetweenOrderByTradingDateAsc(market, start, end).stream()
+                .map(u -> new IndexDailyRow(u.getTradingDate(), u.getOpenPoint(), u.getHighPoint(),
+                        u.getLowPoint(), u.getClosePoint()))
+                .toList();
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     private void writeSnapshotSheet(Workbook wb, Styles st, AssetSnapshot s) {
         String sheetName = SHEET_FMT.format(s.getSnapshotDate());
@@ -578,8 +674,14 @@ public class ExcelExportService {
         cell(sh2, 15, "季線價", st.head);
         cell(sh2, 16, "年線價", st.head);
         cell(sh2, 17, "KD值", st.head);
+        // ETF 淨值／折溢價（Task 214）：個股無淨值故留白，見 writeLiveAssetsSheet 逐列註解
+        cell(sh2, 18, "淨值", st.head);
+        cell(sh2, 19, "折溢價(%)", st.head);
+        cell(sh2, 20, "淨值時間", st.head);
         // 技術指標（月/季/年線、KD）逐 (code|market) 快取：同股多券商列僅算一次（Task 200）
         Map<String, TechnicalIndicatorService.FullIndicators> indicatorCache = new HashMap<>();
+        // ETF 淨值／折溢價逐 (code|market) 快取（Task 214）；查無者快取 null，避免同檔多列重複讀 Redis
+        Map<String, PriceQueryService.EtfNav> navCache = new HashMap<>();
         for (StockHolding sk : s.getStocks()) {
             Row row = sheet.createRow(r++);
             cell(row, 0, sk.getBroker() != null ? sk.getBroker().getDisplayName() : "", null);
@@ -612,9 +714,22 @@ public class ExcelExportService {
             cell(row, 15, ind.quarterlyMa(), st.num2);
             cell(row, 16, ind.annualMa(), st.num2);
             cell(row, 17, formatKd(ind.k(), ind.d()), null);
+            // ETF 淨值／折溢價（Task 214）：資料驅動——Redis 有值才印，個股（無淨值）與抓取失敗皆自然留白。
+            // 刻意不做 isEtf 白名單判定（既有白名單誤含個股 AVGO、又漏掉持有的 SGOV）。
+            // 同一檔多券商多列共用同一筆，比照技術指標以 code|market 快取，每檔只讀一次 Redis。
+            // 用 containsKey 而非 computeIfAbsent：後者不會快取 null 值，個股（永遠查無）會逐列重讀 Redis
+            String navKey = sk.getStockCode() + "|" + sk.getMarket();
+            if (!navCache.containsKey(navKey)) {
+                navCache.put(navKey, priceQueryService
+                        .getEtfNav(sk.getStockCode(), sk.getMarket()).orElse(null));
+            }
+            PriceQueryService.EtfNav nav = navCache.get(navKey);
+            cell(row, 18, nav == null ? null : nav.nav(), st.num4);
+            cell(row, 19, premiumDiscountPct(nav, livePrice), st.num2);
+            cell(row, 20, nav == null ? null : nav.navAsOf(), null);
         }
 
-        for (int i = 0; i < 18; i++) sheet.autoSizeColumn(i);
+        for (int i = 0; i < 21; i++) sheet.autoSizeColumn(i);
     }
 
     /**
@@ -687,6 +802,29 @@ public class ExcelExportService {
             unique = org.apache.poi.ss.util.WorkbookUtil.createSafeSheetName(withMarket + "_" + (++suffix));
         } while (wb.getSheet(unique) != null);
         return unique;
+    }
+
+    /**
+     * 折溢價%（Task 214）：來源已提供權威值就直接用，否則以<b>本列顯示的即時價</b>與淨值計算。
+     *
+     * <p>兩條路徑的理由不同，不可統一：
+     * <ul>
+     *   <li><b>台股</b>：證交所已算好折溢價，且其市價與本列「即時價」同源（皆為 TWSE mis 的成交價，實測逐檔吻合），
+     *       故直接沿用權威值。<b>不得改為自行重算</b>——證交所的淨值欄在股票型 ETF 四捨五入至小數 2 位，
+     *       重算誤差可達 0.07 個百分點。</li>
+     *   <li><b>美股</b>：Yahoo 未提供折溢價欄。若在抓取端以 Yahoo 自己的市價計算，會與本列「即時價」
+     *       （走 Redis，來源與時點皆不同）對不起來——實測 VOO 兩者相差 0.11%，使用者拿本列數字驗算會兜不攏。
+     *       故改在此以該列自己的即時價計算，保證列內自洽。</li>
+     * </ul>
+     * 淨值或即時價任一缺漏即回 null（留白），不以昨收等替代值湊數。
+     */
+    private static BigDecimal premiumDiscountPct(PriceQueryService.EtfNav nav, BigDecimal livePrice) {
+        if (nav == null) return null;
+        if (nav.premiumDiscountPct() != null) return nav.premiumDiscountPct();
+        if (livePrice == null || nav.nav() == null || nav.nav().compareTo(BigDecimal.ZERO) == 0) return null;
+        return livePrice.subtract(nav.nav())
+                .multiply(BigDecimal.valueOf(100))
+                .divide(nav.nav(), 2, java.math.RoundingMode.HALF_UP);
     }
 
     /** KD 併為單一「KD值」欄字串 "K {k} / D {d}"；兩者皆 null 回 null（留白），單邊 null 以「—」佔位。 */

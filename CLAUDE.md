@@ -8,20 +8,30 @@
 **每一次功能新增或變更，必須依以下順序執行，不得跳過：**
 
 ```
-1. spec/requirements.md  → 先確認或新增 User Story + Acceptance Criteria
-2. spec/design.md        → 確認架構、資料模型、API 設計已反映變更
-3. spec/tasks.md         → 確認對應 Task 已建立並標記完成狀態
-4. 實作程式碼
+1. spec/requirements.md     → 先確認或新增 User Story + Acceptance Criteria
+2. spec/design.md           → 確認架構、資料模型、API 設計已反映變更
+3. spec/tasks/tNNN_*.md     → 建立自足任務檔（規範見 spec/tasks/README.md）
+4. spec 對抗式審查          → /spec-review，quality_score < 8 不得進入實作
+5. 實作程式碼
 ```
+
+> **第 3 步的任務檔是新制。** Task 201 之後的新任務一律建立獨立的自足任務檔
+> `spec/tasks/tNNN_<slug>.md`，不再追加進 `spec/tasks.md`；後者已降為索引，
+> 歷史 Task 1–200 凍結在 `spec/tasks/archive/`。詳見 [spec/tasks/README.md](spec/tasks/README.md)。
+
+> **第 4 步的審查必須由另一支 subagent 執行**，寫 spec 的人自己審等於沒審。
+> 審查前會先跑 `scripts/spec-check.sh` 取機械證據（編號撞號／重號、changeset 版號碰撞與
+> 冪等性、宣稱的測試類是否存在、文件計數漂移）——這些是本專案實際反覆犯的錯，
+> 一年內光編號避讓就有 12 次 commit。
 
 > **凡涉及商業邏輯變更（新增、刪除、修改、bug fix），都必須同步更新 spec/**。
 > 包含：新 Entity、新 API endpoint、新頁面、新業務邏輯，以及修正既有商業邏輯的 bug fix。
 >
 > 唯一例外（可不更新 spec）：純樣式 / CSS 微調、純 typo、純 import 整理等不影響功能契約的變更。
 
-### Pre-commit Hook（強制 SDD 同步）
+### Commit-msg Hook（強制 SDD 同步）
 
-本專案內建 pre-commit hook（`scripts/git-hooks/pre-commit`），staged 變更若觸及
+本專案內建 commit-msg hook（`scripts/git-hooks/commit-msg`），staged 變更若觸及
 controller / model / dto / views / router / db changelog / bff 等「會改變功能或契約」
 的檔案，**強制要求同 commit 也包含 `spec/` 變更**，否則阻擋提交。
 
@@ -33,6 +43,11 @@ git config core.hooksPath scripts/git-hooks
 **例外：**
 - 純樣式 / 無商業邏輯影響的調整：commit 訊息加 `[skip-spec]`
 - 緊急情況：`git commit --no-verify`（請審慎）
+
+> **hook 只是最低限度的閘門，不要把它當成 spec 品質保證。** 它只檢查「`spec/` 有沒有被碰」——
+> 改一個錯字就能過關；而且觸發清單漏了 `service/`、`repository/`、`external-materials-service/**`，
+> Task 195 那兩處排程漂移（改的是 service 層的 `@Scheduled`）根本不會觸發它。
+> 內容正確性由第 4 步的 `/spec-review` 負責。
 
 ---
 
@@ -116,6 +131,15 @@ cd frontend
 
 | 文件 | 說明 |
 |------|------|
-| `spec/requirements.md` | User Stories + Acceptance Criteria（44 個 Requirements） |
+| `spec/requirements.md` | User Stories + Acceptance Criteria（48 個 Requirements） |
 | `spec/design.md` | 架構圖、ERD、API 端點、關鍵業務邏輯 |
-| `spec/tasks.md` | 實作任務清單（含完成狀態） |
+| `spec/tasks.md` | 任務索引（Task 1–220）＋ 尚未歸檔的 Task 201 起區段 |
+| `spec/tasks/README.md` | 自足任務檔規範（新任務寫這裡，不再追加 `tasks.md`） |
+| `spec/tasks/tNNN_*.md` | 自足任務檔（Task 201 之後的新任務） |
+| `spec/tasks/archive/` | Task 1–200 歷史，已凍結不再修改 |
+| `spec/steering/` | 長期 context：`product.md` / `tech.md` / `structure.md` |
+
+| 工具 | 用途 |
+|------|------|
+| `scripts/spec-check.sh` | spec 變更的機械前置檢查（撞號／重號／changeset／計數漂移） |
+| `/spec-review` | 實作前的獨立對抗式審查閘門，門檻 8/10 |
