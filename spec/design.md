@@ -111,7 +111,7 @@ com.steven.assets/
   - `FundBffRoutes`：`/api/funds`、`/api/fund-nav/**`、`/api/fund-dividend/**` → business-services（Requirement 19/20/21）。`/api/funds` 供 FundSettingsView 基金主檔 CRUD 使用；**慣例例外**：基金主檔頁直接沿用 `/api/funds` 資源 passthrough（基金主檔為跨頁共享資源）。SnapshotForm 讀同一份基金主檔，但走自己頁面專屬的 `/api/bff/snapshot-form/funds`（同樣 passthrough 至 `/api/funds`，符合「一頁一 BFF」）。**`/api/fund-nav/**` 與 `/api/fund-dividend/**` 目前無前端消費者**：原「FundSettingsView 的 NAV / 配息回補」說法已不成立——`FundSettingsView.vue` 全頁無任何 NAV／配息呼叫，前端唯一的 NAV 刷新是 `api/index.js` 的 `/bff/snapshot-form/fund-nav/refresh`（走 SnapshotForm 自己的 BFF，不經本 route）。兩條 route 暫留（移除需重建 BFF 服務），**屬待清理項，勿據此段落認定它們是現行的共享例外**
   - `FundSettingsBffController`：`GET /api/bff/fund-settings/bank-options` → 過濾 active 後的銷售銀行下拉；與 SnapshotForm 的 lookups **同讀 business `/api/settings/banks`**（同義欄位同一來源），fund-settings 頁不再跨頁呼叫 `/api/bff/snapshot-form/lookups`（Task 175：一頁一 BFF 合規化）
   - `RealizedGainBffRoutes`：`/api/realized-gains/**` → business-services。**目前無前端消費者**：原「RealizedGainView 的 Pinia store `gainApi` 共用 CRUD」說法已不成立——該頁已全面走 `RealizedGainBffController` 的 `/api/bff/realized-gain` 聚合端點，前端 `gainApi` wrapper 與 `assetStore` 的三個已實現損益 action 已於 Task 197 移除。route 本身暫留（移除需重建 BFF 服務），**屬待清理項**
-  - `MarketDataBffRoutes`：`/api/market-data/**` → business-services。目前**唯一**消費者是 DashboardView 的 SSE 行情串流（`new EventSource('/api/market-data/prices/stream')`，見下方 SSE 段落之已知落差）；`marketDataApi` wrapper（歷史/配息/ETF 成分股）無呼叫端，已於 Task 197 移除，該類查詢皆走 `StockAnalysisBffRoutes` 的 `/api/bff/stock-analysis/**`
+  - `MarketDataBffRoutes`：`/api/market-data/**` → business-services。消費者是 DashboardView 與 TradingRadarView 兩頁的 SSE 行情串流（皆為 `new EventSource('/api/market-data/prices/stream')`，見下方 SSE 段落之已知落差）；`marketDataApi` wrapper（歷史/配息/ETF 成分股）無呼叫端，已於 Task 197 移除，該類查詢皆走 `StockAnalysisBffRoutes` 的 `/api/bff/stock-analysis/**`
   - `SchedulePublicBffController`（ScheduleListView 專屬，「公開資訊」分組，Requirement 36）：`GET /api/bff/schedule-list` → 回傳系統所有自動排程的**人工維護靜態清單**（`ScheduledJobDto` 不可變 record：service / category / name / description / schedule 白話 / cron / zone），共 **44 筆** ＝ `business-services` 15 ＋ `external-materials-service` 29（**以 `@Scheduled` 方法計**；external 實際 30 個標註，`TwClosurePoller` 一法兩標併為一筆）。此頁為唯讀資訊展示故不做跨服務反射探索、不入 DB、不設管理端點；**新增／調整任何 `@Scheduled` 須同步更新此清單以免漂移**（Task 195 修正 Task 190／191 漏同步之兩處漂移；Task 196.12 新增一筆 JOBS 後僅更新 javadoc 表頭、漏同步總數與本段，於 Task 197 一併修正為 36；本段之後歷經多個任務累積新增排程未同步更新此總數，Task 228 新增大盤盤中即時點位排程時以 `grep '@Scheduled'` 逐檔核對重新校正為 44——12／24 兩數字皆已是 Task 228 之前即存在的計數漂移，非本次新增所致）。**動態排程**（每分鐘 tick 比對 DB 可設定時點：`NewsPoller`→`crawler_schedule`、`MarketAnalysisScheduler`→`market_analysis_send_time`）於清單標「動態：依『X』頁設定（預設 …）」／「動態（表名）」，**不寫死時間**；每分鐘 tick 但時點為 per-user 私人設定者（`ExportScheduleService`／`TradingCalendarExportScheduleService`）則照列 `每分鐘`／`0 * * * * *` 實際 cron。前端 `ScheduleListView` 之服務別／分類計數由 payload 動態算出，故加減筆數無須改前端。無下游呼叫（不需 WebClient），落 BFF `anyExchange().authenticated()`（已登入者皆可讀）。
   - `CrawlerDataBffController`（CrawlerDataView 專屬，「公開資訊」分組，Requirement 38）：爬蟲資訊查詢頁，一頁一 BFF、WebClient 轉呼 business：
     - `GET /api/bff/crawler-data?date=YYYY-MM-DD&dateField=fetched|published&category=` → business `GET /api/news-headlines`：查指定日期爬回的 `news_headline`（與今日股市分析同讀一份表，符合「同義欄位、同一 business API」）。
@@ -332,7 +332,7 @@ NASDAQ info API 自 2026/04 起對 ETF 的 `keyStats` 為 null（無 dayrange �
                      [BFF passthrough] → [Frontend EventSource] → stockPrices state
 ```
 
-> ⚠ **已知落差（一頁一 BFF 未合規，待後續任務處理）：** 本段原記載前端訂閱 `/api/bff/market-data/stream`、BFF 另設專屬 rewrite route，但該 route **從未實作**。實際鏈路為前端 `DashboardView.vue` → nginx `location = /api/market-data/prices/stream` → BFF `MarketDataBffRoutes` 的 `/api/market-data/**` passthrough → business-services，**未經 `/api/bff/dashboard/**`**，是全前端唯一繞過 axios wrapper 的裸 URL，違反「一頁一支 BFF」規範。修正方向為新增 `/api/bff/dashboard/prices/stream`（或 `/api/bff/market-data/stream`）route、前端改訂該路徑並同步改 nginx location（SSE route 需保留 `proxy_buffering off`）；屬功能變更，須另走 SDD 循環並重建 BFF 與前端映像。
+> ⚠ **已知落差（一頁一 BFF 未合規，待後續任務處理）：** 本段原記載前端訂閱 `/api/bff/market-data/stream`、BFF 另設專屬 rewrite route，但該 route **從未實作**。實際鏈路為前端 `DashboardView.vue` 與 `TradingRadarView.vue`（交易雷達雙擊看盤上線後成為第二個消費者，見 Task 234）→ nginx `location = /api/market-data/prices/stream` → BFF `MarketDataBffRoutes` 的 `/api/market-data/**` passthrough → business-services，**未經 `/api/bff/{page}/**`**，是全前端**僅有的兩處**繞過 axios wrapper 的裸 URL，違反「一頁一支 BFF」規範。修正方向為新增 `/api/bff/dashboard/prices/stream`（或共用 `/api/bff/market-data/stream`）route、**兩頁**皆改訂該路徑並同步改 nginx location（SSE route 需保留 `proxy_buffering off`）；屬功能變更，須另走 SDD 循環並重建 BFF 與前端映像。
 > nginx 對 `/api/market-data/prices/stream` 路徑需設 `proxy_buffering off`，否則 SSE 會被 buffering 卡住。
 > 前端仍保留初始 GET `/api/bff/dashboard/realtime` 載入第一份 snapshot；之後增量更新走 SSE，不再用 setInterval polling。
 
@@ -3880,7 +3880,7 @@ TradingRadarService.buildStock()
 
 ### 匯率環境組
 
-作為 `TW_RULES_V5` 的第六組，權重 `0.08`，其餘五組同步調整為 `0.20 / 0.17 / 0.28 / 0.18 / 0.09`，合計 `1.00`。單一子因子：
+評分因子之一。**實際落地採扁平因子權重，非巢狀分組**——匯率因子與其餘技術面因子並列於同一層加權，權重 `0.05`（`TradingRadarRuleEngine.W_FX`），完整扁平權重表見 Requirement 47 落地說明與 `requirements.md`（`TW_RULES_V7`）。單一子因子：
 
 ```text
 組分數 = clamp(−(fxPercentile − 50) / 50, −1, +1)
@@ -3888,7 +3888,7 @@ TradingRadarService.buildStock()
 
 `underlying_currency = TWD` 時該組回 `null`，走既有權重重分配——**台股標的不因匯率被加減分**。
 
-回看期取**三年**。同一天在不同回看期的分位差異極大（一年 99.2／三年 73.2／全歷史 91.8），一年過短會使因子在趨勢行情中長期釘在極值而失去區辨力，全歷史涵蓋不同匯率制度。權重與回看期皆為具名常數。
+回看期取**五年**（`TradingRadarService.FX_LOOKBACK_YEARS = 5`）。同一天在不同回看期的分位差異極大（一年 99.2／三年 73.2／五年 83.6／全歷史 91.8）：一年過短會使因子在趨勢行情中長期釘在極值而失去區辨力，三年未涵蓋台幣由強轉弱的完整週期，全歷史涵蓋不同匯率制度；五年（實測 1247 筆、區間 27.53–33.14）涵蓋完整週期且不極端。權重與回看期皆為具名常數。
 
 幣別判定：`stock.underlying_currency` 顯式欄位優先，null 時依 `market` 推斷（美股→USD、英股→GBP、台股→TWD）。**嚴禁以名稱字串比對**（如含「美債」），該做法在更名時會靜默失效。
 

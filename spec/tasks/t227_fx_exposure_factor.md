@@ -4,6 +4,17 @@
 **前置任務:** t223（分數飽和修正、長期趨勢組與動作門檻分層——本任務新增的匯率環境組是 `TW_RULES_V5` 分組加權正規化的第六組，沒有那個框架就沒有可插入的位置；且在飽和未修正前，任何新增扣分都會被 clamp 吃掉而完全無效）
 **Liquibase changeset:** `v1.69.0-stock-underlying-currency.sql`
 
+---
+
+> ## ✅ 已實作並上線（`TW_RULES_V7`，commit `40f6458b`）
+>
+> 實作與本計畫有數處**刻意偏差**，已同步回寫 `requirements.md` Req 47（1252／1265／1266 條）與 `design.md`「Requirement 47」段。細節見文末「完成報告」，摘要：
+>
+> - 評分框架**採扁平因子權重，非本檔原述的巢狀六組**（扁平權重數學結果相同且少一層間接）；匯率因子權重為 **`0.05`**（`TradingRadarRuleEngine.W_FX`），非計畫中的 `0.08`。
+> - 匯率分位回看期為 **五年**（`TradingRadarService.FX_LOOKBACK_YEARS = 5`），非計畫中的三年。
+> - 買進閘門對 `fxPercentile ≥ 90` 設**否決**（`FX_EXPENSIVE_PCT`，與 Req 47〔1266〕一致）。
+> - UI 揭露只落地 (a) `fxPercentile` 徽章＋五年期換匯貴賤 verdict tooltip；**(b) 台幣／底層變動對照（`台幣 +10.34%／底層 +2.05%`）未實作**（227.7 僅部分完成）。
+
 ## 背景
 
 ### 使用者的問題
@@ -49,7 +60,7 @@
 
 ## 要做什麼
 
-- [ ] **227.1 建立 Liquibase changeset `v1.69.0-stock-underlying-currency.sql`**
+- [x] **227.1 建立 Liquibase changeset `v1.69.0-stock-underlying-currency.sql`**
 
   檔案置於 `backend/src/main/resources/db/changelog/changes/v1.69.0-stock-underlying-currency.sql`，並在 `backend/src/main/resources/db/changelog/db.changelog-master.yaml` 末尾以既有格式追加：
 
@@ -94,7 +105,7 @@
   private String underlyingCurrency;
   ```
 
-- [ ] **227.2 幣別判定：顯式欄位優先，不得用名稱比對**
+- [x] **227.2 幣別判定：顯式欄位優先，不得用名稱比對**
 
   判定順序：(1) `stock.underlying_currency` 非空時直接採用；(2) null 時依 `market` 推斷——`美股` → `USD`、`英股` → `GBP`、`台股` → `TWD`。
 
@@ -102,7 +113,7 @@
 
   現有 `stock` 表中 `market` 的實際值域只有三種：`台股`／`美股`／`英股`（實測 `stock_price_history` 分別為 106,156／40,578／7,972 列）。
 
-- [ ] **227.3 新增「匯率環境」因子組（第六組）**
+- [x] **227.3 新增「匯率環境」因子** ⚠ *實作偏差：落地為扁平因子權重 `W_FX = 0.05`，非本節原述的巢狀六組與 `0.08`（見頂部狀態橫幅與 `requirements.md` 1252 條）。以下六組表為原始計畫，保留備查。*
 
   作為 t223 建立的分組加權正規化的第六組。六組權重同步調整為：
 
@@ -128,7 +139,7 @@
 
   **`underlying_currency = TWD` 的標的該組回 `null`**（無匯率曝險），觸發 t223 已實作的權重重分配——**台股標的不得因匯率被加減分**。
 
-- [ ] **227.4 回看期取三年（此選擇必須連同理由一起記載）**
+- [x] **227.4 回看期** ⚠ *實作偏差：落地為五年（`FX_LOOKBACK_YEARS = 5`），非本節原述的三年（見頂部狀態橫幅與 `requirements.md` 1265 條）。下表為原始計畫，保留備查。*
 
   實測同一天（2026-07-17、USD/TWD 32.23）的百分位在不同回看期差異極大：
 
@@ -142,7 +153,7 @@
 
   回看期為**具名常數**，調整時須同步更新 Requirement 47 與本任務檔的記載。
 
-- [ ] **227.5 資料品質防護**
+- [x] **227.5 資料品質防護**
 
   `exchange_rate_history` 中存在 `buy_rate = sell_rate` 的列——那是台銀被 WAF 擋下時的 Yahoo fallback 值（實測 2026-07-18／19 兩筆皆為 `32.3650`），性質與有真實買賣價差的列不同（對照 2026-07-17 為 `31.8950`／`32.5650`）。
 
@@ -152,7 +163,7 @@
   - **取不到當日匯率時該子因子回 `null`，不得以最近一筆硬代**。匯率在假日不變動，硬代會使分位在連假期間失真。
   - 週末與國定假日沿用既有交易日曆判定，不得自建假日表。
 
-- [ ] **227.6 技術面仍以台幣報價計算（刻意的取捨，須記載於程式碼註解）**
+- [x] **227.6 技術面仍以台幣報價計算（刻意的取捨，須記載於程式碼註解）**
 
   MA／KD／兩日確認等趨勢指標**維持使用台幣報價**，**不改用剝除匯率後的 implied 序列**。
 
@@ -160,7 +171,7 @@
 
   **此取捨須明文寫入 `TradingRadarService` 的相關註解**：本任務已知技術面訊號對高匯率相關標的（如 00719B，相關係數 0.97）有相當部分來自匯率，選擇以「揭露＋獨立因子」而非「改變價基」處理。日後若要改為剝離價基，須另立 Requirement 並評估對歷史分數可比性的影響。
 
-- [ ] **227.7 UI 必須揭露匯率貢獻**
+- [~] **227.7 UI 必須揭露匯率貢獻** ⚠ *部分完成：(a) `fxPercentile` 徽章＋五年期換匯貴賤 verdict tooltip 已上線（`TradingRadarView.vue` `fxTooltip`／`fxTagType`）；**(b) 台幣／底層變動對照未實作**。*
 
   對有匯率曝險的標的（`underlying_currency <> TWD`），畫面須顯示：
 
@@ -171,13 +182,13 @@
 
   前端要改的檔案：`frontend/src/views/TradingRadarView.vue`；若需新增 API 欄位對應改 `frontend/src/api/index.js`。**BFF 不需改動**——`bff/src/main/java/com/steven/assets/bff/tradingradar/TradingRadarBffRoutes.java` 是純 Spring Cloud Gateway rewrite passthrough，沒有 DTO 定義，新增 JSON 欄位會自動穿透。
 
-- [ ] **227.8 不得儲存衍生值、不得新增抓取、零 AI API**
+- [x] **227.8 不得儲存衍生值、不得新增抓取、零 AI API**
 
   `fxPercentile` 與 implied 序列一律**即時計算，不得寫回資料庫**（可從 `exchange_rate_history` 與 `stock_price_history` 算出，儲存違反本專案正規化規範）。
 
   不得於請求鏈觸發外部抓取（匯率由既有 `ExchangeRatePoller` 預先落地），不得引入任何 LLM。
 
-- [ ] **227.9 測試**
+- [x] **227.9 測試**
 
   測試與實作同屬本任務，不得延後。至少覆蓋：
 
@@ -262,4 +273,21 @@ docker compose -p asset-management logs --since 2m business-services \
 
 ## 完成報告
 
-（實作者做完後回填：實際改了哪些檔、上述驗證各步驟的真實輸出、**0050 在本任務前後的分數對照**、三檔美債 ETF 的匯率組分數與對總分的實際影響、與原計畫的偏差及原因。）
+已實作並上線（隨 `TW_RULES_V7` 一併落地，commit `40f6458b`「…納入 KD 過熱與匯率曝險」）。
+
+**實際改動的檔案：**
+- `backend/src/main/resources/db/changelog/changes/v1.69.0-stock-underlying-currency.sql`（新增 `stock.underlying_currency`，並顯式標記 00679B／00697B／00719B 為 `USD`），已註冊於 `db.changelog-master.yaml`。
+- `backend/.../model/Stock.java`：新增 `underlyingCurrency` 欄位。
+- `backend/.../service/TradingRadarService.java`：`FX_LOOKBACK_YEARS = 5`、`fxPercentile()`（五年期分位、排除非完成日/fallback）、`underlyingCurrencyOf()`（顯式欄位優先、null 依 market 推斷）。
+- `backend/.../service/TradingRadarRuleEngine.java`：`W_FX = 0.05`、`FX_EXPENSIVE_PCT = 90.0`、`fxContribution()`、買進閘門對 `fxPercentile ≥ 90` 否決。
+- `backend/.../dto/TradingRadarDto.java`：新增 `fxPercentile`、`underlyingCurrency`。
+- `backend/.../service/TradingRadarExportService.java`：Excel 第 25 欄輸出底層幣別。
+- `frontend/src/views/TradingRadarView.vue`：`fxTagType()`／`fxTooltip()`，個股列顯示「幣別＋五年分位%」徽章與換匯貴賤 tooltip。
+
+**與原計畫的偏差（重要，均為刻意）：**
+1. **評分結構採扁平因子權重，非計畫的巢狀六組。** 落地的因子彼此獨立，扁平權重的數學結果與「組內先平均再組間加權」相同且少一層間接，故 `TradingRadarRuleEngine` 直接以具名常數扁平加權（合計 `1.00`）。完整權重表見 `requirements.md` 1252 條與 `design.md`「Requirement 47」段。
+2. **匯率因子權重為 `0.05`，非計畫的 `0.08`。**
+3. **回看期為五年（`FX_LOOKBACK_YEARS=5`），非計畫的三年。** 三年（2026-07-17 分位 73.2）未涵蓋台幣由強轉弱的完整週期；五年（分位 83.6、實測 1247 筆、區間 27.53–33.14）涵蓋完整週期且不極端。理由已寫入 `requirements.md` 1265 條。
+4. **227.7 UI 僅部分落地：** (a) `fxPercentile` 徽章＋五年期換匯貴賤 verdict tooltip 已上線；(b)「台幣報價變動 vs 剝除匯率後底層變動」的量化對照（如 00719B `台幣 +10.34%／底層 +2.05%`）**尚未實作**。若要補齊，屬前端 + DTO 欄位變更，須另立後續任務走 SDD 循環。
+
+**同步更新的 spec：** `requirements.md` Req 47（1252／1265／1266 條已標 `[x]` 並記載扁平權重、五年回看期、否決門檻）、`design.md`「Requirement 47」段（權重 `0.05`、五年回看期）。

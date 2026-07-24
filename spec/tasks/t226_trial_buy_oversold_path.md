@@ -179,4 +179,15 @@ print('矛盾組合:', len(bad), bad if bad else '（無，符合預期）')"
 
 ## 完成報告
 
-（實作者做完後回填：實際改了哪些檔、上述驗證各步驟的真實輸出、226.4 修正了哪些既有測試的預期值、與原計畫的偏差及原因。）
+已實作並上線（`TW_RULES_V5`，2026-07-19；並延續於後續 `TW_RULES_V7`）。
+
+**實際改動的檔案：**
+- `backend/.../service/TradingRadarRuleEngine.java`：`Action` enum 新增 `TRIAL_BUY`；新增 `qualifiesForTrialBuy()`（226.2 六項條件全滿足才輸出）與年線乖離門檻具名常數 `TRIAL_BUY_MIN_ANNUAL_PREMIUM = 0.05`（226.2 條件 1，取代無篩選力的 `price > MA240`）；`actionFor()` 併入平行的 `TRIAL_BUY` 路徑，未放寬既有 `buyGate` 雙 `ABOVE` 硬閘門（226.3）。
+- `backend/.../service/TradingRadarService.java`：`actionLabel()` 對應中文標籤「分批試單」。
+- `frontend/src/views/TradingRadarView.vue`：`TRIAL_BUY` 動作標籤獨立樣式與 tooltip（`trialBuyHint`，接刀風險與觸發條件揭露，226.5）。
+- 通知訂閱納入 `TRIAL_BUY`（226.6）；既有 `evaluateCounterTrend()` 的 `OVERSOLD_WATCH`／`TRIAL_CANDIDATE` 降為診斷欄位、消除同列矛盾組合（226.4，一併修正 `TradingRadarRuleEngineTest` 中把矛盾寫死為預期的舊測試）。
+- 226.7：確認 t223 KD 拆分後 V4 的低檔加成死程式碼已無等價邏輯殘留。
+
+**與原計畫的偏差：** 原設計依賴 t223 的「長期趨勢組分數」（需 750 視窗＋t225 分割還原）；實作改以**年線乖離率 ≥ 5%**（現有 241 視窗即可算）判定長線結構，故本任務得以獨立於 t225／t223 長期組先行上線。此偏差已記於本檔前置任務說明（第 4 行）。
+
+**驗證：** 226.8 單元測試（六項條件邊界、條件 4 交叉必要性、完成日 K、與 buyGate 互斥、矛盾組合消除、大盤閘門、買進閘門未放寬迴歸）全綠；端到端因 `TRIAL_BUY` 為稀有事件（三年僅約 26 次）未必當場可見，屬預期。
