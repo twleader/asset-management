@@ -192,13 +192,14 @@
         </el-row>
         <el-row :gutter="16">
           <el-col :span="12">
-            <el-form-item label="資產名稱" prop="assetName">
-              <el-input v-model="txForm.assetName" />
+            <el-form-item label="代號">
+              <el-input v-model="txForm.assetCode" @blur="autoFillAssetName" @change="autoFillAssetName"
+                placeholder="輸入代號自動帶出名稱（股票）" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="代號">
-              <el-input v-model="txForm.assetCode" />
+            <el-form-item label="資產名稱" prop="assetName">
+              <el-input v-model="txForm.assetName" />
             </el-form-item>
           </el-col>
         </el-row>
@@ -358,6 +359,22 @@ const onBlurField = (field, precision) => {
   const strKey = fieldMap[field]
   if (!String(txForm[strKey] || '').trim()) { txForm[strKey] = ''; return }
   txForm[strKey] = fmtNum(parseNum(txForm[strKey]), precision)
+}
+
+// 輸入代號後自動帶出股名（僅股票類；查 stock 主檔，走同一支 business API，比照 RealizedGainView）
+const autoFillAssetName = async () => {
+  const code = (txForm.assetCode || '').trim().toUpperCase()
+  if (!code) return
+  txForm.assetCode = code
+  if (txForm.assetType !== '股票') return          // 基金不查主檔
+  if (txForm.assetName && txForm.assetName.trim()) return   // 已有名稱不覆寫（使用者手填優先）
+  try {
+    const res = await bffApi.transaction.lookupName({ code, market: txForm.market })
+    const name = res?.stockName || res?.name
+    if (name) txForm.assetName = name
+  } catch (e) {
+    /* 查無或錯誤靜默，由使用者手填 */
+  }
 }
 
 // 台幣成交金額即時預覽

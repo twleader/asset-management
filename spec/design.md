@@ -4201,7 +4201,9 @@ TransactionView el-tree 懶載入
 | business | `PUT /api/asset-transactions/export/schedule` | t238 | upsert 排程設定（驗證時分範圍與子路徑不跳脫） |
 | business | `POST /api/asset-transactions/export/run-now` | t238 | 立即產檔到設定目錄，回 `{path, sizeBytes}`；不動當日 guard |
 | business | `GET /api/export-schedule/browse?subpath=` | 既有複用 | 列出基底下子目錄 |
+| business | `GET /api/stock-alerts/lookup-name?code=&market=` | 既有複用 | 依 code+market 查 stock 主檔回股名（`{stockName}`）；輸入代號自動帶名用 |
 | BFF | `GET/POST/PUT/DELETE /api/bff/transaction[/{id}]` | t237 | 列表聚合（含市場／券商下拉）＋ passthrough CRUD |
+| BFF | `GET /api/bff/transaction/lookup-name?code=&market=` | t237 | passthrough 至 business `GET /api/stock-alerts/lookup-name`（輸入代號自動帶股名，複用同一支 business API，比照 `RealizedGainBffController.lookupName`） |
 | BFF | `GET /api/bff/transaction/export` | t237 | passthrough 下載 |
 | BFF | `GET /api/bff/transaction/export/schedule` | t238 | passthrough |
 | BFF | `PUT /api/bff/transaction/export/schedule` | t238 | passthrough |

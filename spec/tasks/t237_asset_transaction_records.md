@@ -143,6 +143,7 @@ CREATE INDEX IF NOT EXISTS idx_asset_transaction_owner_date
   - `GET`：比照 `RealizedGainBffController`，以 `Mono.zip` 同時取交易紀錄年度彙總（business `GET /api/asset-transactions`）與下拉選單（既有市場 `GET /api/settings/market-types`、券商 `GET /api/settings/brokers`），回前端一包 `{ summaries, markets, brokers }`（brokers 過濾 active==true）。無 year 參數。
   - `POST` / `PUT /{id}` / `DELETE /{id}`：passthrough 至 business `/api/asset-transactions[/{id}]`。
   - `GET /export`：passthrough business `GET /api/asset-transactions/export`，回傳 blob（`Content-Disposition` 透傳，比照既有已實現損益匯出 passthrough）。
+  - `GET /lookup-name`（`@RequestParam String code, @RequestParam String market`）：passthrough business `GET /api/stock-alerts/lookup-name`（輸入代號自動帶股名，**複用同一支 business API、不新增 business 端點**，逐字比照 `RealizedGainBffController.lookupName`——以 `uriBuilder.path(...).queryParam("code", code).queryParam("market", market).build()` 建構，自動編碼）。回 `{ stockName }`。
 - `TransactionBffRoutes.java`：Spring Cloud Gateway route，`/api/asset-transactions/**` → business-services（純轉發；聚合端點走 controller）。比照 `RealizedGainBffRoutes`。
 - BFF 呼叫 business 一律沿用既有把 `X-User-Id/Role/Status` 往下帶的機制（既有 filter），確保 business `TenantFilterAspect` 能 owner-scope。
 
@@ -155,6 +156,7 @@ CREATE INDEX IF NOT EXISTS idx_asset_transaction_owner_date
 - `update(id, payload)` → `PUT /api/bff/transaction/{id}`
 - `remove(id)` → `DELETE /api/bff/transaction/{id}`
 - `exportExcel()` → `GET /api/bff/transaction/export`（`responseType: 'blob'`）
+- `lookupName(params)` → `GET /api/bff/transaction/lookup-name`（`params: { code, market }`；回 `{ stockName }`）
 
 ### 237.10 前端頁面 `TransactionView.vue`
 
@@ -165,6 +167,8 @@ CREATE INDEX IF NOT EXISTS idx_asset_transaction_owner_date
 - 「匯出 Excel」按鈕：呼叫 `transaction.exportExcel()` 取 blob，以既有 anchor-click 下載慣例存檔（檔名由回應 header 帶）。
 - 新增／編輯 dialog `el-form`：
   - 交易類型（`買`/`賣`）、資產類型（`股票`/`基金`）以 `el-select` 提供（選項為前端常數陣列，非後端 enum）。
+  - **欄位順序：「代號」欄置於「資產名稱」欄之前**（交易標的通常為股票，先填代號較符合輸入習慣）。
+  - **輸入代號自動帶出股名**：代號 `el-input` 綁 `@blur="autoFillAssetName"` `@change="autoFillAssetName"`（逐字比照 `RealizedGainView.vue` 的 `autoFillAssetName`）——`code` trim/大寫；`assetName` 已有值則不覆寫；**僅在 `assetType === '股票'`** 時呼叫 `bffApi.transaction.lookupName({ code, market: txForm.market })`，取 `res.stockName`，有值才填入 `assetName`；查無或例外靜默不覆寫（`resolveName` 找不到回空字串）。`market` 表單預設 `台股`，故常見台股情境輸入代號即帶名。
   - 市場、券商通路以 BFF 回傳的 `markets`／`brokers` 下拉；基金通路允許自由輸入（`el-select` 開 `allow-create` 或 `el-input`）。
   - 數字欄位（`shares`/`price`/`amount`/`exchangeRate`）沿用既有 string field ＋ `onBlur` 千分位格式化慣例（比照 `RealizedGainView` 的 `parseNum`/`fmtNum`）。
   - `assetName` 必填、`tradeDate` 必填、`amount` 必填（前端 `rules` ＋ 後端 `@NotNull` 雙重）。
