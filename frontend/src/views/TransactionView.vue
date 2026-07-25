@@ -41,7 +41,7 @@
         </el-table-column>
         <el-table-column label="交易類型" width="80" align="center">
           <template #default="{ row }">
-            <el-tag :type="row.transactionType === '賣' ? 'danger' : 'success'" size="small">{{ row.transactionType }}</el-tag>
+            <el-tag :type="row.transactionType === '買' ? 'danger' : 'success'" size="small">{{ row.transactionType }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="資產類型" width="80" align="center">
@@ -56,7 +56,7 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column label="單價" align="right" width="100">
+        <el-table-column label="單價" align="right" width="120">
           <template #default="{ row }">
             <span v-if="row.price != null">{{ fmtPrice(row.price) }}</span>
             <span v-else>-</span>
