@@ -6,6 +6,7 @@ import com.steven.assets.service.ExcelExportService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.CacheControl;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -64,6 +65,7 @@ public class AssetTransactionController {
                 .attachment().filename(filename, StandardCharsets.UTF_8).build());
         return ResponseEntity.ok()
                 .headers(headers)
+                .cacheControl(CacheControl.noStore())   // 交易資料常變動，匯出不可快取，避免重複匯出回舊檔
                 .contentType(MediaType.parseMediaType(
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
                 .contentLength(data.length)
