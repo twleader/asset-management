@@ -251,3 +251,9 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/v1.71.0-configurable-admin-email.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.72.0-asset-transaction.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.73.0-asset-transaction-export-schedule.sql
+      relativeToChangelogFile: false

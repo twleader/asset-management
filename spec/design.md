@@ -112,7 +112,7 @@ com.steven.assets/
   - `FundSettingsBffController`：`GET /api/bff/fund-settings/bank-options` → 過濾 active 後的銷售銀行下拉；與 SnapshotForm 的 lookups **同讀 business `/api/settings/banks`**（同義欄位同一來源），fund-settings 頁不再跨頁呼叫 `/api/bff/snapshot-form/lookups`（Task 175：一頁一 BFF 合規化）
   - `RealizedGainBffRoutes`：`/api/realized-gains/**` → business-services。**目前無前端消費者**：原「RealizedGainView 的 Pinia store `gainApi` 共用 CRUD」說法已不成立——該頁已全面走 `RealizedGainBffController` 的 `/api/bff/realized-gain` 聚合端點，前端 `gainApi` wrapper 與 `assetStore` 的三個已實現損益 action 已於 Task 197 移除。route 本身暫留（移除需重建 BFF 服務），**屬待清理項**
   - `MarketDataBffRoutes`：`/api/market-data/**` → business-services。消費者是 DashboardView 與 TradingRadarView 兩頁的 SSE 行情串流（皆為 `new EventSource('/api/market-data/prices/stream')`，見下方 SSE 段落之已知落差）；`marketDataApi` wrapper（歷史/配息/ETF 成分股）無呼叫端，已於 Task 197 移除，該類查詢皆走 `StockAnalysisBffRoutes` 的 `/api/bff/stock-analysis/**`
-  - `SchedulePublicBffController`（ScheduleListView 專屬，「公開資訊」分組，Requirement 36）：`GET /api/bff/schedule-list` → 回傳系統所有自動排程的**人工維護靜態清單**（`ScheduledJobDto` 不可變 record：service / category / name / description / schedule 白話 / cron / zone），共 **44 筆** ＝ `business-services` 15 ＋ `external-materials-service` 29（**以 `@Scheduled` 方法計**；external 實際 30 個標註，`TwClosurePoller` 一法兩標併為一筆）。此頁為唯讀資訊展示故不做跨服務反射探索、不入 DB、不設管理端點；**新增／調整任何 `@Scheduled` 須同步更新此清單以免漂移**（Task 195 修正 Task 190／191 漏同步之兩處漂移；Task 196.12 新增一筆 JOBS 後僅更新 javadoc 表頭、漏同步總數與本段，於 Task 197 一併修正為 36；本段之後歷經多個任務累積新增排程未同步更新此總數，Task 228 新增大盤盤中即時點位排程時以 `grep '@Scheduled'` 逐檔核對重新校正為 44——12／24 兩數字皆已是 Task 228 之前即存在的計數漂移，非本次新增所致）。**動態排程**（每分鐘 tick 比對 DB 可設定時點：`NewsPoller`→`crawler_schedule`、`MarketAnalysisScheduler`→`market_analysis_send_time`）於清單標「動態：依『X』頁設定（預設 …）」／「動態（表名）」，**不寫死時間**；每分鐘 tick 但時點為 per-user 私人設定者（`ExportScheduleService`／`TradingCalendarExportScheduleService`）則照列 `每分鐘`／`0 * * * * *` 實際 cron。前端 `ScheduleListView` 之服務別／分類計數由 payload 動態算出，故加減筆數無須改前端。無下游呼叫（不需 WebClient），落 BFF `anyExchange().authenticated()`（已登入者皆可讀）。
+  - `SchedulePublicBffController`（ScheduleListView 專屬，「公開資訊」分組，Requirement 36）：`GET /api/bff/schedule-list` → 回傳系統所有自動排程的**人工維護靜態清單**（`ScheduledJobDto` 不可變 record：service / category / name / description / schedule 白話 / cron / zone），共 **46 筆** ＝ `business-services` 17 ＋ `external-materials-service` 29（**以 `@Scheduled` 方法計**；external 實際 30 個標註，`TwClosurePoller` 一法兩標併為一筆；business 17 含 Requirement 49「交易紀錄匯出」）。此頁為唯讀資訊展示故不做跨服務反射探索、不入 DB、不設管理端點；**新增／調整任何 `@Scheduled` 須同步更新此清單以免漂移**（Task 195 修正 Task 190／191 漏同步之兩處漂移；Task 196.12 新增一筆 JOBS 後僅更新 javadoc 表頭、漏同步總數與本段，於 Task 197 一併修正為 36；本段之後歷經多個任務累積新增排程未同步更新此總數，Task 228 新增大盤盤中即時點位排程時以 `grep '@Scheduled'` 逐檔核對重新校正為 44——12／24 兩數字皆已是 Task 228 之前即存在的計數漂移，非本次新增所致）。**動態排程**（每分鐘 tick 比對 DB 可設定時點：`NewsPoller`→`crawler_schedule`、`MarketAnalysisScheduler`→`market_analysis_send_time`）於清單標「動態：依『X』頁設定（預設 …）」／「動態（表名）」，**不寫死時間**；每分鐘 tick 但時點為 per-user 私人設定者（`ExportScheduleService`／`TradingCalendarExportScheduleService`）則照列 `每分鐘`／`0 * * * * *` 實際 cron。前端 `ScheduleListView` 之服務別／分類計數由 payload 動態算出，故加減筆數無須改前端。無下游呼叫（不需 WebClient），落 BFF `anyExchange().authenticated()`（已登入者皆可讀）。
   - `CrawlerDataBffController`（CrawlerDataView 專屬，「公開資訊」分組，Requirement 38）：爬蟲資訊查詢頁，一頁一 BFF、WebClient 轉呼 business：
     - `GET /api/bff/crawler-data?date=YYYY-MM-DD&dateField=fetched|published&category=` → business `GET /api/news-headlines`：查指定日期爬回的 `news_headline`（與今日股市分析同讀一份表，符合「同義欄位、同一 business API」）。
     - `GET /api/bff/crawler-data/schedule` → business `GET /api/crawler-schedule?crawler=news-poller`：讀 NewsPoller 已設定的執行時間清單。
@@ -419,11 +419,13 @@ AssetSnapshot (1) ──── (N) BankDeposit
 AssetSnapshot (1) ──── (N) StockHolding
 AssetSnapshot (1) ──── (N) FundHolding
 RealizedGain          (獨立，不關聯快照)
+AssetTransaction      (獨立買賣流水帳，不關聯快照；不自動衍生 realized_gain／stock_holding；Requirement 49)
 
 # 多租戶 / 認證（Requirement 28）
 AppUser               (使用者主檔，PK = id；email UNIQUE；name / picture〔Google 帳號顯示名稱與頭像，皆 nullable〕；role ADMIN/USER；status PENDING/ACTIVE/DISABLED；created_at / updated_at 皆 NOT NULL；主要管理者由 ADMIN_EMAIL 即時判定，不另存重複欄位）
 AppUser (1) ──── (N) AssetSnapshot          (owner_user_id；子表 bank/stock/fund holding 經 snapshot 繼承 owner)
 AppUser (1) ──── (N) RealizedGain           (owner_user_id)
+AppUser (1) ──── (N) AssetTransaction        (owner_user_id；手動買賣流水帳；Requirement 49)
 AppUser (1) ──── (N) PaymentAccount         (owner_user_id)
 AppUser (1) ──── (N) StockAlert             (owner_user_id；trigger/recipient join、watch_stock 衍生皆繼承)
 AppUser (1) ──── (N) NotificationRecipient  (owner_user_id)
@@ -482,11 +484,12 @@ AppUser (1) ──── (N) InvestmentPlannedExpense     (owner_user_id；特�
 AppUser (1) ──── (N) PortfolioAdvice              (owner_user_id；歷次建議，條件快照刻意 denormalize)
 PortfolioAdviceSetting   (配置建議設定，單列 id = 1；model / effort / web_search_max_uses)
 
-# 排程匯出（Requirement 34 / 37 / 39）
-# 「一功能一張排程表」——刻意不合併三者，理由見本文件 Requirement 39 之關鍵設計決策
+# 排程匯出（Requirement 34 / 37 / 39 / 49）
+# 「一功能一張排程表」——刻意不合併，理由見本文件 Requirement 39 之關鍵設計決策
 AppUser (1) ──── (1) ExportScheduleSetting            (owner_user_id UNIQUE；歷年資產每日排程自動匯出設定；Requirement 34)
 AppUser (1) ──── (1) TradingCalendarExportSchedule    (owner_user_id UNIQUE；交易日曆每日排程匯出設定；比另兩張多一個 format 欄〔json/excel〕；Requirement 37)
 AppUser (1) ──── (1) RealizedGainExportSchedule       (owner_user_id UNIQUE；已實現損益每日排程匯出設定；Requirement 39)
+AppUser (1) ──── (1) AssetTransactionExportSchedule   (owner_user_id UNIQUE；交易紀錄每日排程匯出設定；Requirement 49)
 
 # 台股臨時休市（颱風假；Requirement 7）
 TwMarketClosure       (台股臨時休市，PK = closure_date；全域參考、無 owner、無 backend entity——ext-materials 直寫、backend 經 /internal/tw-holidays proxy 讀 union)
@@ -716,6 +719,35 @@ TwMarketClosure       (台股臨時休市，PK = closure_date；全域參考、�
 > - `stock_holding.stock_name` / `stock_alert.stock_name` / `watch_stock.stock_name`：與 `stock` 主檔重複，DROP，DTO 由 `StockRepository.findByCodeAndMarket()` join 補上。
 > - `exchange_rate_history.mid_rate`：可由 `(buyRate + sellRate) / 2` 即時計算，改為 `@Transient`。
 > - `realized_gain.trade_year`：可由 `YEAR(tradeDate)` 即時計算，改為 `@Transient`，相關 query 改以日期區間替代。
+
+#### AssetTransaction（交易紀錄／手動買賣流水帳，Requirement 49）
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| id | Long | PK |
+| ownerUserId | Long | 所屬使用者；多租戶隔離欄，nullable=false，`@Filter(ownerFilter)` |
+| transactionType | String(10) | 交易類型：買 / 賣（字串，非寫死 enum），nullable=false |
+| assetType | String(10) | 資產類型：股票 / 基金（字串，非寫死 enum），nullable=false |
+| assetName | String(50) | 資產名稱，nullable=false |
+| assetCode | String(20) | 資產代號（股票代號／基金代碼），可空 |
+| market | String(20) | 市場（股票用，對應 MarketType.code；基金可空） |
+| currency | String(10) | 幣別（TWD/USD） |
+| channel | String(30) | 券商／通路（成交當下名稱字串，刻意 denormalize，比照 realized_gain.broker） |
+| tradeDate | LocalDate | 交易日期，nullable=false |
+| shares | BigDecimal(15,5) | 數量（股數／單位數） |
+| price | BigDecimal(15,4) | 成交單價（原幣） |
+| amount | BigDecimal(20,2) | 成交金額（原幣，含手續費／交易稅後之實際交割金額），nullable=false |
+| exchangeRate | BigDecimal(10,4) | 交易當天匯率（USD 計價時使用） |
+| notes | String(500) | 備註，可空 |
+| year | Integer | 年度（@Transient，由 tradeDate.getYear() 計算，不入庫） |
+
+> **定位：** 獨立的買賣流水帳（flow），與 `RealizedGain`（僅賣出且已結算之損益）、`AssetSnapshot`（時點存量 snapshot）語意不同。三者**互不自動衍生、不共用資料表**——交易紀錄不自動產生／修改 `realized_gain`／`stock_holding`／`asset_snapshot`，亦不由它們反推，避免同一事實跨表存兩份（見 Requirement 49 設計章節）。
+>
+> **正規化：**
+> - `amount`（成交金額）為含費用後之實際交割金額，與 `shares × price` 不必然相等（手續費、交易稅、零股撮合價差），故 `shares`／`price`／`amount` 為各自獨立輸入、非彼此衍生（比照 `realized_gain` 同時存 `shares`／`salePrice`／`proceeds`／`investmentCost`）。
+> - `year` 由 `tradeDate` 即時衍生（`@Transient`），不入庫。
+> - `amountTwd`（台幣成交金額 ＝ `currency==USD ? amount × exchangeRate : amount`）於 DTO 層即時計算，不入庫。
+> - 交易紀錄**不計算損益**（損益為已實現損益頁職責），流水帳只記事實。
+> - `channel` 記錄成交當下名稱字串（刻意 denormalize，比照 `realized_gain.broker`），券商主檔日後改名／停用不影響歷史交易顯示。
 
 #### StockDividendHistory（個股配息歷史）
 | 欄位 | 型別 | 說明 |
@@ -4047,3 +4079,170 @@ runDueExports():
 **當日零快照時不寫檔**：快照只在使用者開啟／刷新雷達頁的 HTTP 路徑產生（背景不產生），故排程時間點前若使用者當天沒開過頁面即查無快照。此時**不寫檔**（避免每天留下只有表頭的無用檔、並保留前一版不被覆蓋），只把 `last_run_status` 記為「當日尚無快照，未產檔」並**仍設當日 guard**。這是本功能與爬蟲的語意差異：爬蟲是排程自己去抓，本功能是把使用者當天看過的雷達倒出來，須於前端設定卡明示。路徑＝`EXPORT_OUTPUT_DIR`（`/home/steven`，volume 對映 host 家目錄）resolve 相對子路徑，`normalize()` 後須仍 `startsWith(base)`（拒 `..`／絕對路徑），`Files.createDirectories` 自動建目錄，先寫 `.tmp` 再 `ATOMIC_MOVE`（不支援退 `REPLACE_EXISTING`）。
 
 **business-services 可寫主機家目錄**（`docker-compose.yml`：`EXPORT_OUTPUT_DIR: /home/steven` ＋ `${EXPORT_OUTPUT_DIR_HOST:-/Users/steven}:/home/steven`），故排程放 business（同時握有 Redis 快照與 POI）。目錄列舉沿用 Requirement 34 既有 `GET /api/export-schedule/browse?subpath=`，不新增端點。新增的 `@Scheduled` 須同步登錄 `SchedulePublicBffController.JOBS`。
+
+## Requirement 49（Task 237／238）：資產交易紀錄（手動買賣流水帳）與 Excel 手動／每日排程匯出
+
+拆為兩支任務落地：**t237** 為核心（entity／CRUD／手動下載／前端頁與選單），**t238** 為每日排程自動匯出（比照 Requirement 39 的整套排程形狀）。
+
+### 定位（與既有功能的邊界）
+
+「交易紀錄」是一份**獨立的買賣流水帳**（flow event ledger），記錄每一筆買進／賣出。刻意與既有三者切分：
+
+| 功能 | 語意 | 資料表 |
+|------|------|--------|
+| 交易紀錄（本需求） | 買賣事件流水帳（flow） | `asset_transaction`（新） |
+| 已實現損益（Requirement 6） | 賣出且已結算之損益 | `realized_gain` |
+| 歷年資產快照（Requirement 1） | 某時點資產存量（snapshot） | `asset_snapshot` + 子表 |
+
+三者**互不自動衍生、不共用資料表**。交易紀錄不會自動產生／修改 `realized_gain`／`stock_holding`／`asset_snapshot`，也不由它們反推——避免「同一事實跨表存兩份」的一致性問題（CLAUDE.md 資料庫正規化）。本需求範圍即這份流水帳的 CRUD 與匯出，**不涉及**以交易紀錄重算持股或損益（若日後要做，屬另一需求，須另立設計）。
+
+### 架構與資料流
+
+沿用 Requirement 39（已實現損益）的整體形狀——手動下載、立即匯出到目錄、每日排程、目錄瀏覽四條路徑，差異只在「匯出哪份活頁簿」與「新增一張獨立流水帳表」。
+
+```
+【手動 CRUD（t237）】
+TransactionView 新增/編輯/刪除
+  → /api/bff/transaction/* (list/create/update/delete)
+    → business /api/asset-transactions/*
+      → AssetTransactionService（HTTP：TenantFilterAspect 自動 owner-scoped）
+      → AssetTransactionRepository（@Filter(ownerFilter)）
+
+【手動下載（t237）】
+TransactionView「匯出 Excel」
+  → GET /api/bff/transaction/export (blob)
+    → business GET /api/asset-transactions/export
+      → ExcelExportService.exportAssetTransactions()        ← HTTP：TenantFilterAspect 自動 owner-scoped
+
+【立即匯出到目錄（t238）】
+TransactionView「立即匯出到目錄」
+  → POST /api/bff/transaction/export/run-now
+    → business POST /api/asset-transactions/export/run-now
+      → AssetTransactionExportScheduleService.runNowForCurrentUser()
+        → ExcelExportService.exportAssetTransactions()      ← HTTP 情境，同上自動 owner-scoped
+        → writeToDir(ownerId, subpath, data)
+
+【每日排程（t238）】
+@Scheduled(cron="0 * * * * *", zone="Asia/Taipei") tick()
+  → runDueExports(): settingRepo.findAll()                 ← 背景無 request context，讀全部 owner 列
+    → 對每個 enabled 且今日未跑且已到點的列：
+      → ExcelExportService.exportAssetTransactionsForOwner(ownerId)   ← 手動 enableFilter 縮到該 owner
+      → writeToDir(ownerId, subpath, data)
+
+【資料夾瀏覽（複用既有 business 端點）】
+TransactionView el-tree 懶載入
+  → GET /api/bff/transaction/export/browse?subpath=  ← 本頁自己的 BFF 路由（一頁一 BFF）
+    → business GET /api/export-schedule/browse        ← 複用 Requirement 34 既有端點，不新增
+```
+
+### 關鍵設計決策
+
+1. **獨立流水帳表、不與 realized_gain／snapshot 合併或互相衍生**：交易紀錄是 flow event，realized_gain 是賣出結算、snapshot 是時點存量，三者語意不同。合併或讓交易紀錄自動生成持股／損益，會把同一事實存兩份並引入跨表一致性維護成本（CLAUDE.md 正規化）。故新增獨立 `asset_transaction`，比照 `RealizedGain` 的「獨立、不關聯快照」定位。
+
+2. **不存衍生值**：`amount`（成交金額，含費用後實際交割金額）與 `shares × price` 不必然相等（手續費／交易稅／零股價差），三者為各自獨立輸入、非彼此衍生（比照 `realized_gain` 同存 `shares`／`salePrice`／`proceeds`／`investmentCost`）；`year` 以 `@Transient` 由 `tradeDate` 衍生；`amountTwd` 於 DTO 層即時算（`currency==USD ? amount×exchangeRate : amount`）。交易紀錄**不計算損益**。
+
+3. **交易類型／資產類型為字串、非寫死 enum**：`買/賣`、`股票/基金` 以字串存欄位；市場／券商下拉沿用既有 `MarketType`／`BrokerEntity` 主檔（CLAUDE.md「禁止 Enum 寫死」）。`channel`（券商／通路）存成交當下名稱字串（刻意 denormalize，比照 `realized_gain.broker`）。
+
+4. **排程比照 Requirement 39、一功能一張排程表**：新增 `asset_transaction_export_schedule`，不與既有排程表合併（各表欄位語意與產出內容不同，合併需動既有 UNIQUE 約束與既有列，風險大於收益）。目錄瀏覽複用 `GET /api/export-schedule/browse`、不複製。
+
+5. **背景排程的租戶隔離（關鍵）**：`AssetTransaction` 帶 `@Filter(ownerFilter)`；背景 `findAll()` 若不 `enableFilter` 會把**所有使用者的交易紀錄寫進每個人的檔案**。故新增 `exportAssetTransactionsForOwner(Long ownerId)`，比照 `exportRealizedGainsForOwner` 在 session 手動啟用 filter。
+
+6. **排程與手動產出同一份**：`exportAssetTransactions()` 與 `exportAssetTransactionsForOwner()` 共用同一個 `buildAssetTransactionsWorkbook()`，三個入口（下載／run-now／排程）內容一致。
+
+### 資料模型
+
+**t237 — 新表 `asset_transaction`**（Liquibase `v1.72.0-asset-transaction.sql`）：
+
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| `id` | BIGSERIAL PK | |
+| `owner_user_id` | BIGINT NOT NULL | 擁有者；`@Filter(ownerFilter)` 隔離 |
+| `transaction_type` | VARCHAR(10) NOT NULL | 買 / 賣 |
+| `asset_type` | VARCHAR(10) NOT NULL | 股票 / 基金 |
+| `asset_name` | VARCHAR(50) NOT NULL | 資產名稱 |
+| `asset_code` | VARCHAR(20) | 資產代號 |
+| `market` | VARCHAR(20) | 市場（對應 MarketType.code） |
+| `currency` | VARCHAR(10) | 幣別 TWD/USD |
+| `channel` | VARCHAR(30) | 券商／通路（成交當下名稱字串） |
+| `trade_date` | DATE NOT NULL | 交易日期 |
+| `shares` | NUMERIC(15,5) | 數量（股數／單位數） |
+| `price` | NUMERIC(15,4) | 成交單價（原幣） |
+| `amount` | NUMERIC(20,2) NOT NULL | 成交金額（原幣，含費用後實際交割金額） |
+| `exchange_rate` | NUMERIC(10,4) | 交易當天匯率（USD 用） |
+| `notes` | VARCHAR(500) | 備註 |
+
+> 無 seed（使用者自建資料）。`year` 不建欄位（`@Transient` 衍生）。
+
+**t238 — 新表 `asset_transaction_export_schedule`**（Liquibase `v1.73.0-asset-transaction-export-schedule.sql`）：
+
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| `id` | BIGSERIAL PK | |
+| `owner_user_id` | BIGINT NOT NULL | 擁有者；UNIQUE `uq_at_export_schedule_owner`（每人一列） |
+| `enabled` | BOOLEAN NOT NULL DEFAULT FALSE | 是否啟用每日排程 |
+| `run_hour` | INT NOT NULL DEFAULT 8 | 每日執行時，CHECK 0..23 |
+| `run_minute` | INT NOT NULL DEFAULT 0 | 每日執行分，CHECK 0..59 |
+| `output_subpath` | VARCHAR(255) NOT NULL DEFAULT 'input' | 相對家目錄基底的輸出子路徑 |
+| `last_run_date` | DATE | 當日已執行 guard（成功／失敗都設） |
+| `last_run_at` | TIMESTAMP | 上次執行時間 |
+| `last_run_status` | VARCHAR(500) | 「成功：/path」或「失敗：訊息」 |
+| `updated_at` | TIMESTAMP | |
+
+### API 端點
+
+| 層 | 方法 路徑 | 任務 | 說明 |
+|----|-----------|------|------|
+| business | `GET /api/asset-transactions` | t237 | 回各年度彙總（含各年度 records，依 tradeDate 新到舊）；年度篩選由前端客戶端切換（比照已實現損益頁） |
+| business | `POST /api/asset-transactions` | t237 | 新增一筆 |
+| business | `PUT /api/asset-transactions/{id}` | t237 | 編輯一筆 |
+| business | `DELETE /api/asset-transactions/{id}` | t237 | 刪除一筆 |
+| business | `GET /api/asset-transactions/export` | t237 | 下載 xlsx（涵蓋所有年度） |
+| business | `GET /api/asset-transactions/export/schedule` | t238 | 取當前使用者排程設定（無則回預設，不寫 DB） |
+| business | `PUT /api/asset-transactions/export/schedule` | t238 | upsert 排程設定（驗證時分範圍與子路徑不跳脫） |
+| business | `POST /api/asset-transactions/export/run-now` | t238 | 立即產檔到設定目錄，回 `{path, sizeBytes}`；不動當日 guard |
+| business | `GET /api/export-schedule/browse?subpath=` | 既有複用 | 列出基底下子目錄 |
+| BFF | `GET/POST/PUT/DELETE /api/bff/transaction[/{id}]` | t237 | 列表聚合（含市場／券商下拉）＋ passthrough CRUD |
+| BFF | `GET /api/bff/transaction/export` | t237 | passthrough 下載 |
+| BFF | `GET /api/bff/transaction/export/schedule` | t238 | passthrough |
+| BFF | `PUT /api/bff/transaction/export/schedule` | t238 | passthrough |
+| BFF | `POST /api/bff/transaction/export/run-now` | t238 | passthrough |
+| BFF | `GET /api/bff/transaction/export/browse` | t238 | passthrough 至 business `/api/export-schedule/browse`（subpath 需 URL-encode） |
+
+### 新增／異動檔案
+
+**t237 新增**
+- `backend/.../model/AssetTransaction.java`
+- `backend/.../repository/AssetTransactionRepository.java`
+- `backend/.../service/AssetTransactionService.java`（CRUD＋列表／年度篩選）
+- `backend/.../controller/AssetTransactionController.java`（`@RequestMapping("/api/asset-transactions")`，含 `GET /export`）
+- `backend/.../dto/AssetTransactionDto.java`（Create/Response/YearSummary）
+- `backend/src/main/resources/db/changelog/changes/v1.72.0-asset-transaction.sql`
+- `bff/.../transaction/TransactionBffController.java`＋`TransactionBffRoutes.java`
+- `frontend/src/views/TransactionView.vue`
+
+**t237 異動**
+- `ExcelExportService.java`：新增 `buildAssetTransactionsWorkbook()`／`writeAssetTransactionsSheet()`／`exportAssetTransactions()`
+- `db.changelog-master.yaml`：註冊 v1.72.0
+- `frontend/src/api/index.js`：新增 `transaction` 命名空間
+- `frontend/src/App.vue`：`mainMenuItems`「資產管理」子選單新增「交易紀錄」
+- `frontend/src/router/index.js`：註冊 `/transactions` 路由
+
+**t238 新增**
+- `backend/.../model/AssetTransactionExportSchedule.java`
+- `backend/.../repository/AssetTransactionExportScheduleRepository.java`
+- `backend/.../service/AssetTransactionExportScheduleService.java`（tick／self-heal／run-now／設定 CRUD／路徑驗證）
+- `backend/.../controller/AssetTransactionExportController.java`（`@RequestMapping("/api/asset-transactions/export")`）
+- `backend/.../dto/AssetTransactionExportDto.java`
+- `backend/src/main/resources/db/changelog/changes/v1.73.0-asset-transaction-export-schedule.sql`
+
+**t238 異動**
+- `ExcelExportService.java`：新增 `exportAssetTransactionsForOwner(Long)`（手動 enableFilter）
+- `db.changelog-master.yaml`：註冊 v1.73.0
+- `TransactionBffController.java`：新增 schedule／run-now／browse passthrough
+- `frontend/src/api/index.js`：`transaction` 命名空間新增排程 4 支
+- `frontend/src/views/TransactionView.vue`：新增「排程自動匯出」設定卡
+- `SchedulePublicBffController.java`：`JOBS` 補「交易紀錄匯出 每日匯出排程檢查」項目
+
+### 端點路徑共存說明
+
+`AssetTransactionController` 既有 `@GetMapping("/export")`（在 `@RequestMapping("/api/asset-transactions")` 下）＝ `/api/asset-transactions/export`；新 `AssetTransactionExportController`（t238）掛 `/api/asset-transactions/export` 並以 `/schedule`、`/run-now` 為子路徑 ＝ `/api/asset-transactions/export/schedule`。兩者路徑不同、無 ambiguous mapping（比照 `RealizedGainController` 與 `RealizedGainExportController` 的既有共存）。
