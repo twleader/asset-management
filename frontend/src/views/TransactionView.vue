@@ -35,7 +35,7 @@
       <el-empty v-if="!filteredRecords.length" description="尚無記錄，請點擊「新增」新增第一筆" />
 
       <el-table v-else :data="filteredRecords" size="small" stripe class="tx-table">
-        <el-table-column prop="assetName" label="資產名稱" width="170" show-overflow-tooltip />
+        <el-table-column prop="assetName" label="資產名稱" min-width="170" show-overflow-tooltip />
         <el-table-column prop="assetCode" label="代號" width="80">
           <template #default="{ row }">{{ row.assetCode || '-' }}</template>
         </el-table-column>
@@ -49,7 +49,7 @@
             <el-tag :type="row.assetType === '基金' ? 'warning' : 'primary'" size="small" effect="plain">{{ row.assetType }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="tradeDate" label="交易日期" width="95" />
+        <el-table-column prop="tradeDate" label="交易日期" width="105" />
         <el-table-column label="數量" align="right" width="100">
           <template #default="{ row }">
             <span v-if="row.shares != null">{{ fmtShares(row.shares, row.market) }}</span>
@@ -89,7 +89,7 @@
         <el-table-column prop="channel" label="券商通路" width="100" show-overflow-tooltip>
           <template #default="{ row }">{{ row.channel || '-' }}</template>
         </el-table-column>
-        <el-table-column prop="notes" label="備註" min-width="120" show-overflow-tooltip>
+        <el-table-column prop="notes" label="備註" width="120" show-overflow-tooltip>
           <template #default="{ row }">{{ row.notes || '-' }}</template>
         </el-table-column>
         <el-table-column label="操作" width="80" fixed="right" align="center">
