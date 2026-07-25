@@ -123,6 +123,7 @@ CREATE INDEX IF NOT EXISTS idx_asset_transaction_owner_date
           .contentLength(data.length).body(new ByteArrayResource(data));
   ```
 - 建立時 `@Valid @RequestBody`。
+- `GET /export` 回應加 `Cache-Control: no-store`（`ResponseEntity...cacheControl(CacheControl.noStore())`）：交易資料常變動，匯出檔不得被瀏覽器快取，否則重複匯出會回舊檔（使用者症狀：改過的列匯出仍顯示舊值）。前端 `exportExcel` 另帶 cache-bust 參數 `_t` 雙重保險。
 
 ### 237.7 手動 Excel 匯出（`ExcelExportService`）
 
