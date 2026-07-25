@@ -164,6 +164,7 @@ CREATE INDEX IF NOT EXISTS idx_asset_transaction_owner_date
 
 - 年度彙總卡片（`el-row`/`el-card`，點擊切換年度篩選；顯示每年度買／賣筆數與台幣買／賣金額）。
 - 明細表格 `el-table`：欄位＝資產名稱／代號／交易類型／資產類型/交易日期／數量／單價／成交金額／台幣成交金額／市場／幣別／券商通路／備註／操作（編輯、刪除搭 `el-popconfirm`）。
+- 明細表上方市場 tab（`el-tabs`，比照 `RealizedGainView`）：全部（name=""）／台股／美股／英股；`marketFilter` ref，`filteredRecords` 在年度篩選後再依 `r.market === marketFilter` 過濾（marketFilter 為空＝全部，不過濾）。
 - 「匯出 Excel」按鈕：呼叫 `transaction.exportExcel()` 取 blob，以既有 anchor-click 下載慣例存檔（檔名由回應 header 帶）。
 - 新增／編輯 dialog `el-form`：
   - 交易類型（`買`/`賣`）、資產類型（`股票`/`基金`）以 `el-select` 提供（選項為前端常數陣列，非後端 enum）。

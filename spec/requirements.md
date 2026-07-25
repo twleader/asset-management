@@ -1327,6 +1327,7 @@
 - [ ] **券商／通路為歷史名稱字串（刻意 denormalize）**：`券商／通路` 記錄成交當下的名稱字串（比照 `realized_gain.broker` 的既有例外），即使日後該券商主檔改名或停用，歷史交易仍顯示成交時的名稱。
 - [ ] **多租戶隔離**：交易紀錄為 per-user 私人資料，新表 `asset_transaction` 帶 `owner_user_id`（nullable=false）與 `@Filter(ownerFilter)`；HTTP 情境（BFF→business）由 `TenantFilterAspect` 自動 owner-scoped 到本人，各使用者只能存取自己的交易紀錄。
 - [ ] **列表與年度篩選**：列表預設依交易日期新到舊排序，可依年度篩選（年度由 `交易日期` 即時衍生）；提供各年度筆數／買賣別統計等彙總資訊供頁面檢視（彙總於伺服端 business service 預先計算、BFF 聚合後回傳，前端只 render，比照既有 BFF 規範）。
+- [ ] **市場 tab 篩選**：明細表上方提供市場 tab（全部／台股／美股／英股，比照已實現損益頁的 `el-tabs`），前端客戶端依 `market` 過濾當前（年度篩選後）明細列；「全部」不過濾。與年度篩選為 AND 關係。
 - [ ] **一頁一 BFF**：前端只呼叫 `/api/bff/transaction/*`（新增 `TransactionBffController`），不直接呼叫 business `/api/asset-transactions/*`；下拉選項（市場／券商）由 BFF 聚合取得（比照 `RealizedGainBffController` 以 `Mono.zip` 同時取資料與下拉主檔）。
 - [ ] **選單與路由**：於「資產管理」子選單（`frontend/src/App.vue` 的 `mainMenuItems`）新增「交易紀錄」項，並在 `frontend/src/router/index.js` 註冊對應路由（`path`／`title`／`icon` 兩處保持一致，比照既有「已實現損益」）。
 - [ ] **手動匯出（瀏覽器下載）**：頁面提供「匯出 Excel」按鈕（`GET /api/bff/transaction/export` → business `GET /api/asset-transactions/export` → `ExcelExportService.exportAssetTransactions()`），瀏覽器直接下載 `.xlsx`，單張「交易紀錄」sheet、涵蓋**所有年度**（含 `年度` 欄），owner-scoped。欄位順序與明細表一致（資產名稱／代號／交易類型／資產類型／交易日期／數量／單價／成交金額／台幣成交金額／市場／幣別／券商通路／匯率／年度／備註）。
