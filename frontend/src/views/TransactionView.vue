@@ -220,7 +220,7 @@
             </el-form-item>
           </el-col>
           <el-col :span="8">
-            <el-form-item label="交易日期" prop="tradeDate" label-width="70px">
+            <el-form-item label="交易日期" prop="tradeDate" label-width="90px">
               <el-date-picker v-model="txForm.tradeDate" type="date" value-format="YYYY-MM-DD" style="width:100%" />
             </el-form-item>
           </el-col>
@@ -263,7 +263,7 @@
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="台幣成交金額">
+            <el-form-item label="台幣成交金額" label-width="110px">
               <strong>{{ fmt(computedAmountTwd) }}</strong>
             </el-form-item>
           </el-col>
