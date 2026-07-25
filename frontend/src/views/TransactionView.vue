@@ -58,7 +58,7 @@
         </el-table-column>
         <el-table-column label="單價" align="right" width="100">
           <template #default="{ row }">
-            <span v-if="row.price != null">{{ fmtCurrency(row.price, row.currency) }}</span>
+            <span v-if="row.price != null">{{ fmtPrice(row.price) }}</span>
             <span v-else>-</span>
           </template>
         </el-table-column>
@@ -245,7 +245,7 @@
           <el-col :span="12">
             <el-form-item label="單價">
               <el-input v-model="txForm.priceStr" :input-style="{ textAlign: 'right' }"
-                @blur="onBlurField('price', 4)" />
+                @blur="onBlurField('price', 6)" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
@@ -436,6 +436,11 @@ const fmtCurrency = (v, currency) => {
   const decimals = currency === 'USD' ? 2 : 0
   return `$${n.toLocaleString('zh-TW', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`
 }
+// 單價固定顯示 6 位小數（Task 239）
+const fmtPrice = (v) => {
+  if (v == null) return '-'
+  return `$${Number(v).toLocaleString('zh-TW', { minimumFractionDigits: 6, maximumFractionDigits: 6 })}`
+}
 const fmtShares = (v, market) => {
   if (v == null) return '-'
   const n = Number(v)
@@ -475,7 +480,7 @@ const openEditDialog = (row) => {
   txForm.notes = row.notes || ''
   const isUsd = txForm.currency === 'USD'
   txForm.sharesStr = row.shares != null ? fmtNum(row.shares, (row.market === '美股' || row.market === '英股') ? 5 : 0) : ''
-  txForm.priceStr = row.price != null ? fmtNum(row.price, 4) : ''
+  txForm.priceStr = row.price != null ? fmtNum(row.price, 6) : ''
   txForm.amountStr = row.amount != null ? fmtNum(row.amount, isUsd ? 2 : 0) : ''
   txForm.exchangeRateStr = row.exchangeRate != null ? fmtNum(row.exchangeRate, 4) : ''
   dialogVisible.value = true

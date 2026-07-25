@@ -313,7 +313,7 @@ public class ExcelExportService {
             cell(row, 3, tx.getAssetType(), null);
             cell(row, 4, tx.getTradeDate() != null ? ISO.format(tx.getTradeDate()) : "", null);
             cell(row, 5, tx.getShares(), st.num4);
-            cell(row, 6, tx.getPrice(), st.num4);
+            cell(row, 6, tx.getPrice(), st.num6);
             cell(row, 7, tx.getAmount(), st.money);
             cell(row, 8, assetTxAmountTwd(tx), st.money);
             cell(row, 9, tx.getMarket(), null);
@@ -960,6 +960,7 @@ public class ExcelExportService {
         final CellStyle money;
         final CellStyle num4;
         final CellStyle num2;
+        final CellStyle num6;
 
         Styles(Workbook wb) {
             DataFormat fmt = wb.createDataFormat();
@@ -985,6 +986,10 @@ public class ExcelExportService {
             // 2 位小數：漲跌／漲跌幅(%)／月線／季線／年線（Task 200）
             num2 = wb.createCellStyle();
             num2.setDataFormat(fmt.getFormat("#,##0.00"));
+
+            // 6 位小數：交易紀錄單價（Task 239）
+            num6 = wb.createCellStyle();
+            num6.setDataFormat(fmt.getFormat("#,##0.000000"));
         }
     }
 }

@@ -734,7 +734,7 @@ TwMarketClosure       (台股臨時休市，PK = closure_date；全域參考、�
 | channel | String(30) | 券商／通路（成交當下名稱字串，刻意 denormalize，比照 realized_gain.broker） |
 | tradeDate | LocalDate | 交易日期，nullable=false |
 | shares | BigDecimal(15,5) | 數量（股數／單位數） |
-| price | BigDecimal(15,4) | 成交單價（原幣） |
+| price | BigDecimal(17,6) | 成交單價（原幣，小數 6 位；Task 239 由 (15,4) 加寬） |
 | amount | BigDecimal(20,2) | 成交金額（原幣，含手續費／交易稅後之實際交割金額），nullable=false |
 | exchangeRate | BigDecimal(10,4) | 交易當天匯率（USD 計價時使用） |
 | notes | String(500) | 備註，可空 |
@@ -4166,7 +4166,7 @@ TransactionView el-tree 懶載入
 | `channel` | VARCHAR(30) | 券商／通路（成交當下名稱字串） |
 | `trade_date` | DATE NOT NULL | 交易日期 |
 | `shares` | NUMERIC(15,5) | 數量（股數／單位數） |
-| `price` | NUMERIC(15,4) | 成交單價（原幣） |
+| `price` | NUMERIC(17,6) | 成交單價（原幣，小數 6 位；Task 239 由 (15,4) 以 v1.74.0 ALTER 加寬） |
 | `amount` | NUMERIC(20,2) NOT NULL | 成交金額（原幣，含費用後實際交割金額） |
 | `exchange_rate` | NUMERIC(10,4) | 交易當天匯率（USD 用） |
 | `notes` | VARCHAR(500) | 備註 |

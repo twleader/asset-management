@@ -73,8 +73,8 @@ public class AssetTransaction {
     @Column(precision = 15, scale = 5)
     private BigDecimal shares;
 
-    /** 單價 */
-    @Column(precision = 15, scale = 4)
+    /** 單價（原幣，小數 6 位；Task 239 由 (15,4) 加寬） */
+    @Column(precision = 17, scale = 6)
     private BigDecimal price;
 
     /** 成交金額（原幣） */

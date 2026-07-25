@@ -257,3 +257,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/v1.73.0-asset-transaction-export-schedule.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.74.0-asset-transaction-price-scale.sql
+      relativeToChangelogFile: false
