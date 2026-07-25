@@ -60,6 +60,22 @@ public class TransactionBffController {
         });
     }
 
+    /**
+     * 輸入代號自動帶出股名（新增/編輯交易列用）。轉呼「同一支」business API
+     * {@code /api/stock-alerts/lookup-name}（與 stock-alert／已實現損益頁同源，符合「同義欄位同一 business service API」），
+     * 不在 business 端新增第二份實作。code/market 由 business 端白名單驗證。
+     */
+    @GetMapping("/lookup-name")
+    public Mono<ResponseEntity<Map<String, Object>>> lookupName(@RequestParam String code,
+                                                                @RequestParam String market) {
+        return businessServicesClient.get()
+                .uri(uriBuilder -> uriBuilder.path("/api/stock-alerts/lookup-name")
+                        .queryParam("code", code)
+                        .queryParam("market", market)
+                        .build())
+                .retrieve().bodyToMono(MAP).map(ResponseEntity::ok);
+    }
+
     @PostMapping
     public Mono<ResponseEntity<Map<String, Object>>> create(@RequestBody Map<String, Object> body) {
         return businessServicesClient.post().uri("/api/asset-transactions")

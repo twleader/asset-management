@@ -151,6 +151,7 @@ export const bffApi = {
   // Transaction（交易紀錄：手動買賣流水帳，Requirement 49 / Task t237、t238）
   transaction: {
     list:        () => api.get('/bff/transaction'),
+    lookupName:  (params) => api.get('/bff/transaction/lookup-name', { params, skipErrorToast: true }),  // 輸入代號自動帶股名，轉呼同一支 business /api/stock-alerts/lookup-name
     create:      (data) => api.post('/bff/transaction', data),
     update:      (id, data) => api.put(`/bff/transaction/${id}`, data),
     remove:      (id) => api.delete(`/bff/transaction/${id}`),
