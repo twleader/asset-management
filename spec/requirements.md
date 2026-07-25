@@ -1311,3 +1311,31 @@
 - [ ] **可手動「立即匯出到目錄」**：提供立即觸發鈕，走**同一支**寫檔邏輯產檔到設定目錄，回傳實際落點路徑與檔案大小；此操作**不動當日 guard**。
 - [ ] **排程列表頁需登錄**：新增的 `@Scheduled` 須同步登錄至「公開資訊 → 排程列表」（Requirement 36 / `SchedulePublicBffController` 的 `JOBS`），避免該頁與實際排程漂移。
 - [ ] **驗證**：單元測試至少覆蓋——同日多個時間點各自 guard（兩個時間點各跑一次而非只跑第一個）、`now >= 時分` 的補跑、停用的時間點不跑、`..` 路徑跳脫被擋、單一 owner 失敗不影響其他 owner。部署後實際設定兩個時間點與一個資料夾，確認到點在主機家目錄對應路徑產生 `交易雷達_{id}_{日期}.xlsx`、同日第二個時間點覆寫同一檔、內容為當日全部快照。
+
+### Requirement 49: 資產交易紀錄（手動買賣流水帳）與 Excel 手動／每日排程匯出
+
+**User Story:** 作為使用者，我希望在「資產管理」下有一個「交易紀錄」頁面，能手動逐筆記錄我的股票與基金買進、賣出交易（含日期、數量、單價、成交金額、券商／通路、幣別等），依年度檢視與篩選，並能把交易紀錄手動下載成 Excel、或設定每日自動匯出到指定資料夾定期留存。
+
+> **定位（與既有功能的關係，務必先讀）：** 「交易紀錄」是一份**獨立的買賣流水帳**（flow），記錄每一筆買進／賣出事件；與既有「已實現損益」（Requirement 6，僅記賣出且已結算之損益）、「歷年資產快照」（Requirement 1，某時點的資產存量 snapshot）語意不同。三者**互不自動衍生、不共用資料表**：交易紀錄不會自動產生／修改 `realized_gain` 或 `stock_holding`／`asset_snapshot`，也不由它們反推，避免「同一事實跨表存兩份」造成不一致（CLAUDE.md 資料庫正規化）。本需求範圍即為這份流水帳本身的 CRUD 與匯出，**不涉及**用交易紀錄重算持股或損益。
+
+**Acceptance Criteria:**
+
+- [ ] **手動逐筆 CRUD**：支援手動新增、編輯、刪除單筆交易紀錄；每筆記錄以下欄位——交易類型（買／賣）、資產類型（股票／基金）、資產名稱（必填）、資產代號、市場（股票用；基金可空）、幣別（TWD／USD）、券商／通路、交易日期（必填）、數量（股數／單位數）、成交單價（原幣）、成交金額（原幣，含手續費／交易稅後之實際交割金額，必填）、交易當天匯率（USD 計價用）、備註。
+- [ ] **交易類型與資產類型為資料驅動、非寫死 enum**：交易類型（買／賣）與資產類型（股票／基金）以字串存入欄位；沿用既有 `MarketType`（市場）與 `BrokerEntity`（券商）主檔提供下拉選項，不新增寫死 enum（CLAUDE.md「禁止 Enum 寫死」）。基金通路若無對應主檔則以自由文字輸入，記錄成交當下名稱字串。
+- [ ] **正規化：不存衍生值**：`成交金額(amount)` 為含費用後之實際交割金額、與 `數量 × 單價` 不必然相等（手續費、交易稅、零股撮合價差），故 `數量`／`單價`／`成交金額` 三者為各自獨立輸入、非彼此衍生（比照既有 `realized_gain` 同時存 `shares`／`salePrice`／`proceeds`／`investmentCost` 的慣例）。`年度` 由 `交易日期` 即時衍生（`@Transient`，不入庫）；`台幣成交金額` 由 `幣別＝USD ? amount × exchangeRate : amount` 於 DTO 層即時計算，不入庫（CLAUDE.md「禁止存入可計算得出的衍生值」）。**交易紀錄不計算損益**（損益是已實現損益頁的職責，流水帳只記事實）。
+- [ ] **券商／通路為歷史名稱字串（刻意 denormalize）**：`券商／通路` 記錄成交當下的名稱字串（比照 `realized_gain.broker` 的既有例外），即使日後該券商主檔改名或停用，歷史交易仍顯示成交時的名稱。
+- [ ] **多租戶隔離**：交易紀錄為 per-user 私人資料，新表 `asset_transaction` 帶 `owner_user_id`（nullable=false）與 `@Filter(ownerFilter)`；HTTP 情境（BFF→business）由 `TenantFilterAspect` 自動 owner-scoped 到本人，各使用者只能存取自己的交易紀錄。
+- [ ] **列表與年度篩選**：列表預設依交易日期新到舊排序，可依年度篩選（年度由 `交易日期` 即時衍生）；提供各年度筆數／買賣別統計等彙總資訊供頁面檢視（彙總於伺服端 business service 預先計算、BFF 聚合後回傳，前端只 render，比照既有 BFF 規範）。
+- [ ] **一頁一 BFF**：前端只呼叫 `/api/bff/transaction/*`（新增 `TransactionBffController`），不直接呼叫 business `/api/asset-transactions/*`；下拉選項（市場／券商）由 BFF 聚合取得（比照 `RealizedGainBffController` 以 `Mono.zip` 同時取資料與下拉主檔）。
+- [ ] **選單與路由**：於「資產管理」子選單（`frontend/src/App.vue` 的 `mainMenuItems`）新增「交易紀錄」項，並在 `frontend/src/router/index.js` 註冊對應路由（`path`／`title`／`icon` 兩處保持一致，比照既有「已實現損益」）。
+- [ ] **手動匯出（瀏覽器下載）**：頁面提供「匯出 Excel」按鈕（`GET /api/bff/transaction/export` → business `GET /api/asset-transactions/export` → `ExcelExportService.exportAssetTransactions()`），瀏覽器直接下載 `.xlsx`，單張「交易紀錄」sheet、涵蓋**所有年度**（含 `年度` 欄），owner-scoped。欄位順序與明細表一致（資產名稱／代號／交易類型／資產類型／交易日期／數量／單價／成交金額／台幣成交金額／市場／幣別／券商通路／匯率／年度／備註）。
+- [ ] **排程／立即匯出的內容＝手動匯出的同一份活頁簿**：排程與「立即匯出到目錄」產出的檔案內容，與手動下載完全一致（同一 `writeAssetTransactionsSheet()`、同樣涵蓋全部年度），不因觸發途徑而不同（CLAUDE.md「同義欄位、同一 business service API」）。
+- [ ] **每日排程自動匯出（per-user，每日單一時間）**：使用者可在交易紀錄頁「排程自動匯出」設定卡開啟每日排程，設定每日執行時間（時:分）與輸出資料夾，系統於該時間把該使用者的交易紀錄匯出成 `.xlsx` 到指定目錄。每日固定一個時間（比照 Requirement 39，非多時段、不設交易日閘門——交易紀錄僅於使用者輸入時異動，每日留存即可）。
+- [ ] **輸出路徑（家目錄為根＋相對子路徑）**：沿用 Requirement 34／39 的路徑模型——容器內基底目錄由 `EXPORT_OUTPUT_DIR`（預設 `/home/steven`）指定，經 docker volume 對映到 host 家目錄；使用者設定的是相對子路徑（例 `input` → host `/Users/steven/input`；空字串＝家目錄根，後端正規化為預設 `input`）。後端一律以「基底 resolve 子路徑後 normalize 必須仍在基底內」驗證，拒絕 `..` 跳脫與絕對路徑；寫檔時 `Files.createDirectories` 自動建立缺少的目錄。
+- [ ] **資料夾選擇器沿用同一支 business API**：設定卡提供檔案總管式 `el-tree` 懶載入資料夾選擇器。目錄列舉**不新增 business 端點**，直接沿用 Requirement 34 既有的 `GET /api/export-schedule/browse?subpath=`（語意相同＝列出基底下子目錄，依 CLAUDE.md「不同頁面顯示同樣意義的值須呼叫同一支 business service API」）；本頁僅在 BFF 新增自己的路由 `GET /api/bff/transaction/export/browse` passthrough 至該端點（依「一個前端頁面一個 BFF」）。
+- [ ] **可手動立即匯出（驗證用）**：設定卡提供「立即匯出到目錄」按鈕（`POST /api/bff/transaction/export/run-now`），立即產檔到設定目錄並回傳實際落點路徑與檔案大小，供使用者驗證路徑正確；此操作**不動當日排程 guard**。
+- [ ] **每使用者各自設定（owner-scoped 設定表）**：排程設定存於新表 `asset_transaction_export_schedule`（每 `owner_user_id` 一列 UNIQUE、`@Filter(ownerFilter)` 隔離），欄位含啟用／時分／輸出子路徑／上次執行日期（當日 guard）／上次執行時間與結果；GET/PUT/run-now 走 HTTP（BFF→business）由 `TenantFilterAspect` 自動 scope 到本人；非管理者亦可設定自己的排程（不限 admin）。
+- [ ] **背景排程必須逐列 `enableFilter`（租戶隔離關鍵）**：`AssetTransaction` entity 帶 `@Filter(ownerFilter)`，而背景 cron 無 request context、`TenantFilterAspect` 不啟用 → `findAll()` 會讀到**全部使用者**的交易紀錄。故排程產檔一律走新增的 `ExcelExportService.exportAssetTransactionsForOwner(ownerId)`，在該 session 手動 `enableFilter("ownerFilter")` 縮到該列 owner，確保各使用者檔案只含自己的資料（比照 Requirement 39 已實現損益）。
+- [ ] **排程執行機制與自癒（比照 Requirement 34／39）**：每分鐘 `@Scheduled` poll（`zone=Asia/Taipei`），以 `now >= 設定時分` ＋ `last_run_date` 當日 guard 判斷（非「分鐘精確相等」，避免排程執行緒被長工作卡住跨分鐘導致整日靜默漏跑）；服務重啟以 `ApplicationReadyEvent` 補跑當日已到點未執行者；`AtomicBoolean` 防重入；單一使用者失敗只記 `last_run_status`＋log、不影響其他使用者（成功或失敗都設當日 guard，避免整天每分鐘重試）。
+- [ ] **檔名**：`交易紀錄_{使用者ID}_{YYYYMMDD}.xlsx`（檔名含 owner id，避免多使用者共用同一 subpath 時同名互相覆蓋；同一使用者同日覆寫）。
+- [ ] **排程列表頁需登錄**：新排程須在「公開資訊 → 排程列表」（Requirement 36 / `SchedulePublicBffController` 的 `JOBS`）補上對應項目，避免該頁與實際排程漂移（Task 188／195 即為修正此類漂移而生）。

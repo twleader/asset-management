@@ -148,6 +148,19 @@ export const bffApi = {
     browseExportDir:      (subpath = '') => api.get('/bff/realized-gain/export/browse', { params: { subpath }, skipErrorToast: true })
   },
 
+  // Transaction（交易紀錄：手動買賣流水帳，Requirement 49 / Task t237、t238）
+  transaction: {
+    list:        () => api.get('/bff/transaction'),
+    create:      (data) => api.post('/bff/transaction', data),
+    update:      (id, data) => api.put(`/bff/transaction/${id}`, data),
+    remove:      (id) => api.delete(`/bff/transaction/${id}`),
+    exportExcel: () => api.get('/bff/transaction/export', { responseType: 'blob' }),
+    getExportSchedule:    () => api.get('/bff/transaction/export/schedule', { skipErrorToast: true }),
+    updateExportSchedule: (data) => api.put('/bff/transaction/export/schedule', data, { skipErrorToast: true }),
+    runExportNow:         () => api.post('/bff/transaction/export/run-now', null, { timeout: 60000, skipErrorToast: true }),
+    browseExportDir:      (subpath = '') => api.get('/bff/transaction/export/browse', { params: { subpath }, skipErrorToast: true })
+  },
+
   // CommodityPrice（公開資訊 → 油價金價）
   commodityPrice: {
     // 開頁載入：BFF 先 refresh 再回近十年三序列，故 timeout 放寬

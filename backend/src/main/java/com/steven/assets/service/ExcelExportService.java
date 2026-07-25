@@ -36,6 +36,8 @@ public class ExcelExportService {
 
     private final AssetSnapshotRepository snapshotRepo;
     private final RealizedGainRepository gainRepo;
+    // 交易紀錄流水帳匯出（Requirement 49 / Task 237）：三入口（下載／run-now／排程）共用同一活頁簿
+    private final com.steven.assets.repository.AssetTransactionRepository assetTxRepo;
     private final StockRepository stockMasterRepo;
     private final StockPriceService stockPriceService;
     // 月/季/年線與 KD 的共用權威計算（與觀察清單／警示同一來源）；供「股票（即時）」分頁增列技術指標欄（Task 200）
@@ -255,6 +257,81 @@ public class ExcelExportService {
             wb.write(out);
             return out.toByteArray();
         }
+    }
+
+    /**
+     * 只匯出交易紀錄流水帳（含全部年度）（Requirement 49 / Task 237）。
+     * HTTP 情境下由 {@link com.steven.assets.security.TenantFilterAspect} 自動 owner-scoped。
+     * 手動下載、排程 run-now 皆走此方法，與背景排程產出同一份活頁簿。
+     */
+    @Transactional(readOnly = true)
+    public byte[] exportAssetTransactions() throws IOException {
+        return buildAssetTransactionsWorkbook();
+    }
+
+    /**
+     * 背景排程用：指定 owner 的交易紀錄匯出（Requirement 49 / Task 238）。
+     * 背景執行緒無 request context，{@code TenantFilterAspect} 不啟用 → {@code findAll} 會讀到全部使用者的交易，
+     * 故在本 session 手動啟用 {@code ownerFilter} 縮到該 owner，確保各使用者檔案只含自己的資料。
+     */
+    @Transactional(readOnly = true)
+    public byte[] exportAssetTransactionsForOwner(Long ownerId) throws IOException {
+        entityManager.unwrap(Session.class)
+                .enableFilter("ownerFilter")
+                .setParameter("ownerId", ownerId);
+        return buildAssetTransactionsWorkbook();
+    }
+
+    /** 交易紀錄活頁簿：單張「交易紀錄」分頁，涵蓋全部年度。 */
+    private byte[] buildAssetTransactionsWorkbook() throws IOException {
+        try (Workbook wb = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            Styles st = new Styles(wb);
+            writeAssetTransactionsSheet(wb, st);
+            wb.write(out);
+            return out.toByteArray();
+        }
+    }
+
+    /**
+     * 「交易紀錄」分頁（Requirement 49）：15 欄固定順序，涵蓋全部年度。
+     * 台幣成交金額即時算（currency=USD 且 exchangeRate 非 null 時＝amount×exchangeRate，否則＝amount），不入庫。
+     */
+    private void writeAssetTransactionsSheet(Workbook wb, Styles st) {
+        Sheet sheet = wb.createSheet("交易紀錄");
+        int r = 0;
+
+        Row h = sheet.createRow(r++);
+        String[] headers = {"資產名稱","代號","交易類型","資產類型","交易日期","數量","單價","成交金額",
+                "台幣成交金額","市場","幣別","券商通路","匯率","年度","備註"};
+        for (int i = 0; i < headers.length; i++) cell(h, i, headers[i], st.head);
+
+        for (AssetTransaction tx : assetTxRepo.findAllByOrderByTradeDateDesc()) {
+            Row row = sheet.createRow(r++);
+            cell(row, 0, tx.getAssetName(), null);
+            cell(row, 1, tx.getAssetCode(), null);
+            cell(row, 2, tx.getTransactionType(), null);
+            cell(row, 3, tx.getAssetType(), null);
+            cell(row, 4, tx.getTradeDate() != null ? ISO.format(tx.getTradeDate()) : "", null);
+            cell(row, 5, tx.getShares(), st.num4);
+            cell(row, 6, tx.getPrice(), st.num4);
+            cell(row, 7, tx.getAmount(), st.money);
+            cell(row, 8, assetTxAmountTwd(tx), st.money);
+            cell(row, 9, tx.getMarket(), null);
+            cell(row, 10, tx.getCurrency(), null);
+            cell(row, 11, tx.getChannel(), null);
+            cell(row, 12, tx.getExchangeRate(), st.num4);
+            cell(row, 13, tx.getYear(), null);
+            cell(row, 14, tx.getNotes(), null);
+        }
+        for (int i = 0; i < headers.length; i++) sheet.autoSizeColumn(i);
+    }
+
+    /** 台幣成交金額：USD 計價且有匯率時＝amount×exchangeRate，否則＝amount（與 AssetTransactionService.toResponse 同規則）。 */
+    private static BigDecimal assetTxAmountTwd(AssetTransaction tx) {
+        if ("USD".equals(tx.getCurrency()) && tx.getExchangeRate() != null && tx.getAmount() != null) {
+            return tx.getAmount().multiply(tx.getExchangeRate());
+        }
+        return tx.getAmount();
     }
 
     /**

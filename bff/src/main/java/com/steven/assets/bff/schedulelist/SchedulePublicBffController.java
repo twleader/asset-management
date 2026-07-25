@@ -10,7 +10,7 @@ import java.util.List;
  * ScheduleListView 專屬 BFF（「公開資訊」分組，Requirement 36）。
  *
  * <p>回傳系統所有自動排程的**人工維護靜態清單**。排程分屬兩個服務：
- * {@code business-services}（16 個）與 {@code external-materials-service}（29 個）。
+ * {@code business-services}（17 個）與 {@code external-materials-service}（29 個）。
  * 此頁為唯讀資訊展示，故不做跨服務反射探索、不入 DB、不設管理端點。
  *
  * <p><b>計數慣例：以 {@code @Scheduled} 方法計，一法一筆。</b>external 29 筆對應 30 個標註
@@ -49,9 +49,9 @@ public class SchedulePublicBffController {
     private static final String NYC = "America/New_York";
     private static final String LON = "Europe/London";
 
-    /** 全系統排程清單（44 筆）。順序刻意先業務服務、再外部行情服務，前端再依 category 分組。 */
+    /** 全系統排程清單（46 筆）。順序刻意先業務服務、再外部行情服務，前端再依 category 分組。 */
     private static final List<ScheduledJobDto> JOBS = List.of(
-            // ===== business-services（16）=====
+            // ===== business-services（17）=====
             new ScheduledJobDto(BUSINESS, "資產快照", "最新快照釘定當日",
                     "將每位使用者的最新快照日期釘為當日並重算資產，讓即時股價覆蓋生效",
                     "每日 00:05", "0 5 0 * * *", TPE),
@@ -100,6 +100,9 @@ public class SchedulePublicBffController {
             new ScheduledJobDto(BUSINESS, "交易雷達匯出", "每日匯出排程檢查",
                     "每分鐘檢查各使用者設定的多個交易雷達匯出時間點，命中執行時間即把當日 Redis 快照產出 Excel 到指定目錄；當日尚無快照則略過不產檔（Requirement 48）",
                     "動態：依「今日交易雷達」頁設定的多個時間點", "0 * * * * *", TPE),
+            new ScheduledJobDto(BUSINESS, "交易紀錄匯出", "每日匯出排程檢查",
+                    "每分鐘檢查各使用者的交易紀錄自動匯出設定，命中執行時間即產出 Excel 到指定目錄（Requirement 49）",
+                    "每分鐘", "0 * * * * *", TPE),
 
             // ===== external-materials-service（29）=====
             new ScheduledJobDto(EXTERNAL, "即時行情", "台股即時價（盤中）",
@@ -191,7 +194,7 @@ public class SchedulePublicBffController {
                     "交易日 05:00–07:00 每 15 分鐘", "0 0/15 5-6 * * MON-FRI；0 0 7 * * MON-FRI", TPE)
     );
 
-    /** GET /api/bff/schedule-list —— 回傳全系統排程清單（44 筆靜態資料）。 */
+    /** GET /api/bff/schedule-list —— 回傳全系統排程清單（46 筆靜態資料）。 */
     @GetMapping
     public List<ScheduledJobDto> list() {
         return JOBS;

@@ -51,6 +51,12 @@ const router = createRouter({
       meta: { title: '已實現損益', icon: 'Money' }
     },
     {
+      path: '/transactions',
+      name: 'Transactions',
+      component: () => import('@/views/TransactionView.vue'),
+      meta: { title: '交易紀錄', icon: 'Tickets' }
+    },
+    {
       path: '/trading-calendar',
       name: 'TradingCalendar',
       component: () => import('@/views/TradingCalendarView.vue'),
