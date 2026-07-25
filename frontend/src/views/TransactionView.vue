@@ -32,6 +32,13 @@
         </div>
       </template>
 
+      <el-tabs v-model="marketFilter" class="market-tabs">
+        <el-tab-pane label="全部" name="" />
+        <el-tab-pane label="台股" name="台股" />
+        <el-tab-pane label="美股" name="美股" />
+        <el-tab-pane label="英股" name="英股" />
+      </el-tabs>
+
       <el-empty v-if="!filteredRecords.length" description="尚無記錄，請點擊「新增」新增第一筆" />
 
       <el-table v-else :data="filteredRecords" size="small" stripe class="tx-table">
@@ -297,6 +304,7 @@ const summaries = ref([])
 const marketOptions = ref([])   // { code, label }
 const brokerOptions = ref([])   // displayName 字串
 const selectedYear = ref(null)
+const marketFilter = ref('')   // 市場 tab：''＝全部，否則 台股/美股/英股
 const dialogVisible = ref(false)
 const saving = ref(false)
 const exporting = ref(false)
@@ -412,11 +420,10 @@ onMounted(() => {
 
 // ===== 明細（依 selectedYear 過濾 summaries[].records）=====
 const filteredRecords = computed(() => {
-  if (selectedYear.value === null) {
-    return summaries.value.flatMap(s => s.records || [])
-  }
-  const s = summaries.value.find(x => x.year === selectedYear.value)
-  return s?.records || []
+  const byYear = selectedYear.value === null
+    ? summaries.value.flatMap(s => s.records || [])
+    : (summaries.value.find(x => x.year === selectedYear.value)?.records || [])
+  return marketFilter.value ? byYear.filter(r => r.market === marketFilter.value) : byYear
 })
 
 const totalBuyCount = computed(() => summaries.value.reduce((a, s) => a + (s.buyCount || 0), 0))
@@ -627,6 +634,7 @@ function confirmDirPick() {
 .year-sub.buy { color: #16a34a; }
 .year-sub.sell { color: #dc2626; }
 .tx-table :deep(.el-table__cell) { font-size: 13.5px; }
+.market-tabs :deep(.el-tabs__header) { margin-bottom: 8px; }
 
 /* 排程自動匯出設定（Task t238） */
 .schedule-form { margin-bottom: 4px; }
