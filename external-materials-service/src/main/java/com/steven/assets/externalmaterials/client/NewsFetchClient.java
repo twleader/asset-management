@@ -84,9 +84,13 @@ public class NewsFetchClient {
     /** 抓全部權威新聞來源，逐來源 graceful，回合併後的清單。 */
     public List<NewsRow> fetchAll() {
         List<NewsRow> out = new ArrayList<>();
-        // 純財經來源（玩股網／MoneyDJ）本就財經專屬，不套編輯政策過濾。
-        out.addAll(safe("wantgoo", this::fetchWantgoo));
-        out.addAll(safe("moneydj", this::fetchMoneydj));
+        // 純財經來源（玩股網／MoneyDJ）：Task 240 起套「三條凌駕 FINANCE 的否決集」（財經軼事／發票彩券／
+        // 家事遺產）——這三條的語意是「即使帶財經詞也無投資資訊量」，與來源是否財經專屬無關。**刻意不套
+        // 整套 EditorialNewsFilter.retain**：FINANCE 是為「從一般新聞版面挑出財經」而設的白名單，套到純
+        // 財經站會誤殺其財經用語不在白名單內的真財經新聞（實測 41 則，含「Uber跌逾4%」「華德動能訪廠」
+        // 「基本工資調漲至3萬」）。
+        out.addAll(safe("wantgoo", () -> EditorialNewsFilter.retainForFinanceFeed(fetchWantgoo())));
+        out.addAll(safe("moneydj", () -> EditorialNewsFilter.retainForFinanceFeed(fetchMoneydj())));
         // 自由時報 財經／政治／國際 與經濟日報為「整個版面」的一般新聞，套 EditorialNewsFilter 編輯政策（Task 199）：
         // 財經一律留；中國新聞只留財經/北京政權；政治只留美日台歐盟＋影響市場地緣；台灣地方只留北北高；其餘濾除。
         // 取代舊 relevantOnly（僅政治/國際、只做財經・政策・地緣關鍵詞白名單），涵蓋更完整。
