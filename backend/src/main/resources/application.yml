@@ -63,7 +63,8 @@ notification:
 external-materials:
   base-url: ${EXTERNAL_MATERIALS_URL:http://external-materials-service:8080}
 
-# 今日股市分析（Requirement 31）：Claude Opus 4.8 + web_search。
+# 今日股市分析（Requirement 31）：Claude Opus 4.8 + 本地新聞（news_headline）。
+# （Task 179 起已移除 web_search server tool，新聞固定讀本地 news_headline。）
 # api-key 未設定時 MarketAnalysisService 安全跳過（status=NOT_CONFIGURED），不報錯。
 anthropic:
   api-key: ${ANTHROPIC_API_KEY:}

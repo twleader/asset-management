@@ -40,7 +40,7 @@ public class News {
     @Column(name = "title", length = 500, nullable = false)
     private String title;
 
-    /** 來源代號：wantgoo / moneydj / ltn / udn / twse / bot-fx / us-index / kr-index / kr-intraday。 */
+    /** 來源代號：wantgoo / moneydj / ltn / udn / twse / bot-fx / us-index / kr-index / kr-intraday。（鉅亨網 cnyes 已於 Task 149.22 移除。） */
     @Column(name = "source", length = 100, nullable = false)
     private String source;
 
