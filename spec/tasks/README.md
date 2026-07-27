@@ -98,7 +98,7 @@ curl -s http://localhost:8080/actuator/health
   （對 DB 現況的斷言**以運行中的 DB 為準**：`docker exec asset-postgres psql -U assets -d assets -c '\d <table>'`。
   **不要引用 `db/changelog/**`** 描述現況——那裡面有永不執行的 changeset，照著改會把原本正確的改成錯的。
   `db/schema.sql` 只能當離線參考，**不是可信基準線**：它是被 `.gitignore` 排除的真基準線 `db/init/01_dump.sql`
-  的去資料鏡像，靠人工重新產出，**實測已落後**——截至 Task 241 它仍沒有 `crawler_export_setting`（v1.64.0）
+  的去資料鏡像，靠人工重新產出，**實測已落後**——截至 Task 245 它仍沒有 `crawler_export_setting`（v1.64.0）
   與 `asset_transaction`（v1.72.0）。查不到某張表時，先確認是「真的沒有」還是「鏡像沒跟上」。
   **但運行中 DB 也不等於 main 的現況**：全機只有一套 `asset-*` 容器、多個 worktree 並行推進，DB 可能已套用
   其他分支尚未 merge 的 changeset。下斷言前先比對

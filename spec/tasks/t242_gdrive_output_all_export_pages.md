@@ -1,13 +1,13 @@
 # [t242] Drive 輸出推廣的地基：共用元件、上傳能力、八張表欄位
 
 **對應 Requirements:** Requirement 51（歷年資產／交易日曆／已實現損益／油價金價／台幣兌美元匯率／GDP-TWSE／交易雷達／交易紀錄八頁的匯出檔案，除本機外可同步一份到 Google Drive；本機照寫不變）
-**前置任務:** t241（爬蟲資訊查詢頁已打通端到端；本任務沿用並**收斂**它建立的 `RcloneClient`／`ProcessRcloneClient`／驗證邏輯）
+**前置任務:** t245（爬蟲資訊查詢頁已打通端到端；本任務沿用並**收斂**它建立的 `RcloneClient`／`ProcessRcloneClient`／驗證邏輯）
 **後續任務:** t243（六個結構相近的頁面）、t244（交易雷達與交易日曆兩個結構例外）
 **Liquibase changeset:** `v1.76.0-gdrive-output-all-export-pages.sql`
 
 ## 背景
 
-Task 241 已讓「爬蟲資訊查詢」頁的輸出資料夾支援 Google Drive 並實測打通（本機與 Drive 兩份 `public_info_2026-07-27.json` 皆 93159 bytes、內容一致）。Requirement 51 要把同一套模型推廣到其餘八頁。
+Task 245 已讓「爬蟲資訊查詢」頁的輸出資料夾支援 Google Drive 並實測打通（本機與 Drive 兩份 `public_info_2026-07-27.json` 皆 93159 bytes、內容一致）。Requirement 51 要把同一套模型推廣到其餘八頁。
 
 **這八頁 × 六層（DB／entity／DTO／service／BFF／前端）遠超「一支任務檔＝一個可獨立驗收的交付」的界線**（`spec/tasks/README.md` 鐵則 1），故刻意拆成三支：
 
@@ -17,9 +17,9 @@ Task 241 已讓「爬蟲資訊查詢」頁的輸出資料夾支援 Google Drive 
 | t243 | 六個結構相近的頁面（DTO／service／BFF／前端） |
 | t244 | 兩個結構例外：交易雷達、交易日曆 |
 
-**本任務刻意不含任何 UI 與 service 整合**，因此完成後功能仍未啟用——這是正確狀態。它的可獨立驗收判準是：八張表欄位到位、共用元件單元測試綠、既有功能（含 t241 的爬蟲頁 Drive 同步）無回歸。
+**本任務刻意不含任何 UI 與 service 整合**，因此完成後功能仍未啟用——這是正確狀態。它的可獨立驗收判準是：八張表欄位到位、共用元件單元測試綠、既有功能（含 t245 的爬蟲頁 Drive 同步）無回歸。
 
-**本任務同時要收斂 t241 留下的技術債。** t241 實作時把 Drive 子路徑驗證寫成 `CrawlerExportPathService` 的 **private static** 方法、remote 名稱則分別注入 `CrawlerExportPathService` 與 `ExportScheduleService` 兩處。private 無法重用，若新元件只是「照抄一份」，做完 Requirement 51 後同一個 module 內會有 2 份驗證邏輯 ＋ 3 處 remote 注入——正是本需求宣告要防的事，只是數量從 8 降到 2。
+**本任務同時要收斂 t245 留下的技術債。** t245 實作時把 Drive 子路徑驗證寫成 `CrawlerExportPathService` 的 **private static** 方法、remote 名稱則分別注入 `CrawlerExportPathService` 與 `ExportScheduleService` 兩處。private 無法重用，若新元件只是「照抄一份」，做完 Requirement 51 後同一個 module 內會有 2 份驗證邏輯 ＋ 3 處 remote 注入——正是本需求宣告要防的事，只是數量從 8 降到 2。
 
 ## 要做什麼
 
@@ -39,9 +39,9 @@ Task 241 已讓「爬蟲資訊查詢」頁的輸出資料夾支援 Google Drive 
   - **不得用 `role == ADMIN` 或 `CurrentUserContext.isAdmin()`**：`role` 是 DB 欄位、可以有多列 ADMIN（實測 `app_user` 現有兩名使用者），第二位若被升為 ADMIN，其報表照樣進到 rclone remote 擁有者的 Drive。`isConfiguredAdmin` 比對 `ADMIN_EMAIL`，全庫唯一一人。
   - **代看（impersonation）情境**：`CurrentUserContext` 只有 `effectiveUserId`／`role`／`status`，**business 端拿不到「登入者是誰」**（`X-User-Id` 在代看時帶的就是被代看者），所以無法在此比對兩者。**明文接受這個限制**：代看時 `isDriveAllowedFor(effectiveUserId)` 天然 fail-closed——被代看者若非 `ADMIN_EMAIL` 即回 false。殘餘風險是「第二位 `role=ADMIN` 者代看主要管理者時仍可 PUT」，以背景排程逐列複驗為最終防線（那一關看的是設定列自己的 owner）。**不要**為此在 `isDriveAllowedFor` 內讀 `CurrentUserContext`——背景排程沒有 request context，會讓所有排程上傳靜默跳過。
 
-- [ ] 242.1.1 **必須抽共用元件，不得複製八份。** 這與 t241 的「不為兩處 rclone 呼叫建共用 module」**不衝突**：那條講的是跨越三個獨立 Maven 專案（`backend`／`bff`／`external-materials-service`，無父 pom）為兩處數十行程式碼建 module；這裡是**同一個 backend module 內**的八個 service 共用同一段邏輯，八份複製是明確的錯誤。
+- [ ] 242.1.1 **必須抽共用元件，不得複製八份。** 這與 t245 的「不為兩處 rclone 呼叫建共用 module」**不衝突**：那條講的是跨越三個獨立 Maven 專案（`backend`／`bff`／`external-materials-service`，無父 pom）為兩處數十行程式碼建 module；這裡是**同一個 backend module 內**的八個 service 共用同一段邏輯，八份複製是明確的錯誤。
 
-- [ ] 242.1.2 驗證規則（**與 t241 的爬蟲頁必須完全一致**，因為兩邊寫進同一個 Drive）：
+- [ ] 242.1.2 驗證規則（**與 t245 的爬蟲頁必須完全一致**，因為兩邊寫進同一個 Drive）：
   - 正規化：去頭尾空白、**只剝結尾** `/`；空字串 → null（未設定）。**不套用任何預設值**——Drive 沒有「合理的預設目錄」，猜錯的代價是把檔案倒進使用者雲端硬碟的非預期位置。
   - **開頭 `/` 回 400**，刻意不剝除（讓使用者知道只能填相對子路徑，勝過默默改寫語意）。**先剝再檢查會讓該 400 分支永遠不可達**。
   - **不得含 `..` 路徑段**：以 `/` 切開**逐段**比對，不可用 `contains("..")`——會誤擋合法目錄名如 `a..b`（242.6 有此案例）。理由要寫對：rclone 對 Drive remote **不做**路徑正規化（實測 `rclone lsd "remote:x/.."` 回 `directory not found`、exit 3），擋它**不是**防目錄跳脫，而是避免在使用者 Drive 上建出字面名為 `..` 的怪目錄。
@@ -50,28 +50,28 @@ Task 241 已讓「爬蟲資訊查詢」頁的輸出資料夾支援 Google Drive 
 
 - [ ] 242.1.3 上傳方法為 **best-effort、不擲例外**，回傳可直接寫進 `gdrive_last_status` 的字串：成功記落點與檔案大小（例 `成功：GDriveOutput:資產管理/交易紀錄_1_20260727.xlsx（12345 bytes）`）、失敗記錯誤摘要、跳過記原因。**一律截斷至 512 字元內**（欄位長度上限，rclone stderr 可能很長）。
 
-- [ ] 242.1.4 **遷入 t241 留下的兩份重複（不是照抄）**：
+- [ ] 242.1.4 **遷入 t245 留下的兩份重複（不是照抄）**：
   - `CrawlerExportPathService` 的 `normalizeGdriveSubpath()`／`validateGdriveSubpath()`（現為 private static）遷入本元件，該 service 改為注入使用。
   - `CrawlerExportPathService` 與 `ExportScheduleService` 的 `@Value("${GDRIVE_OUTPUT_REMOTE:...}")` 注入一併移除，改由本元件提供。
   - **驗收方式**：`grep -rn '@Value("${GDRIVE_OUTPUT_REMOTE' backend/src/main/java` 應**恰為 1 行**（只認注入點）。注意 `CrawlerExportPathDto.java` 與 `CrawlerExportSetting.java` 的 Javadoc 也提到這個變數名，那是正常說明、**不要刪**——所以不能用 `grep -rc 'GDRIVE_OUTPUT_REMOTE'` 當判準（它對目錄是逐檔計數，也不會輸出單一數字）。
-  - **爬蟲頁的既有行為不得改變**——它已實測部署在跑，遷移是純重構。t241 的測試必須仍然綠。
+  - **爬蟲頁的既有行為不得改變**——它已實測部署在跑，遷移是純重構。t245 的測試必須仍然綠。
 
 ### 242.2 `RcloneClient` 加上傳能力
 
-- [ ] 242.2 `RcloneClient` 介面（t241 建立，現有唯一方法 `listDirs`）新增 `copyTo(...)`（上傳單一檔案至 `<remote>:<subpath>/<destFileName>`）。
+- [ ] 242.2 `RcloneClient` 介面（t245 建立，現有唯一方法 `listDirs`）新增 `copyTo(...)`（上傳單一檔案至 `<remote>:<subpath>/<destFileName>`）。
 - [ ] 242.2.1 **維持既有自我約束不變：只實作 `lsjson --dirs-only` 與 `copyto` 兩種操作，不實作任何刪除既有 Drive 檔案的程式路徑。** `scope = drive` 是使用者 Drive 的完整讀寫權，把實際使用面縮到最小是刻意的。
 - [ ] 242.2.2 `ProcessRcloneClient` 實作 `copyTo`：`rclone copyto <localFile> <remote>:<subpath>/<destFileName>`。
   - **config 佈局不變**：沿用該類別既有的 `CONFIG_SOURCE = /etc/rclone/rclone.conf` → `/tmp/rclone-output.conf` 可寫副本 ＋ per-process `RCLONE_CONFIG` 覆寫（`pb.environment().put(...)`）。單一 config 檔同時含備份與輸出兩用途的 section，是使用者明示的決定（代價與復原方式記於 `spec/steering/tech.md` §4）；**本任務不變更 config 佈局**。
-  - **逾時 45 秒**（比照 t241 的 ext 端上傳）。**不得沿用 `BackupService.PROCESS_TIMEOUT_SEC` 的 300 秒**——那是為 pg_dump／整庫上傳設的。
+  - **逾時 45 秒**（比照 t245 的 ext 端上傳）。**不得沿用 `BackupService.PROCESS_TIMEOUT_SEC` 的 300 秒**——那是為 pg_dump／整庫上傳設的。
 - [ ] 242.2.2.1 **`exec()` 必須先參數化（timeout ＋ 操作名稱），不可直接重用。** 既有 `exec()` 把 `LIST_TIMEOUT_SEC`（20 秒）與「目錄列舉」字樣**硬編**在裡面。若上傳直接重用它：（a）會套到 20 秒而非 45 秒；（b）失敗訊息會寫成「Google Drive 目錄列舉逾時」，而這個字串會**原樣寫進使用者可見的 `gdrive_last_status`**。改為傳入 timeout 與操作名稱：列目錄 20 秒／「目錄列舉」，上傳 45 秒／「上傳」。
-- [ ] 242.2.2.2 **`copyTo` 的 argv 必須附加 `RCLONE_LIMITS`（`cmd.addAll(RCLONE_LIMITS)`），`exec()` 不會自動加。** 該常數已存在於 `ProcessRcloneClient`（`--retries 1 --low-level-retries 3 --contimeout 10s --timeout 30s`）。理由（t241 實測 2026-07-27）：rclone 預設 `--low-level-retries 10` ＋ `--timeout 5m`，遇到任何 Drive API 延遲就會把單次上傳放大到數十秒至數分鐘——**外層 45 秒只會讓上傳失敗，不會讓它變快**。實測無參數的手動上傳超過 180 秒未結束、20:30 那輪排程以「逾時（45 秒）」失敗；帶上這四個參數後同一上傳只需 **2.4 秒**。放大效應之所以容易觸發，有兩個實測到的固定成本：token 幾乎每次呼叫都已過期（每次都要 refresh 並寫回 config），以及未設 `root_folder_id`（每次都得從 Drive 根目錄逐層查找子路徑）。
-- [ ] 242.2.3 `ExportScheduleService.browseGdrive` 的 Drive 目錄列舉邏輯遷入 `GdriveOutputSupport`，該 service 改為委派。**controller 端點路徑 `GET /api/export-schedule/browse-gdrive` 不變**，避免動到 t241 已完成並部署的 BFF 與前端。理由：`ExportScheduleService` 已 353 行，同時承擔「歷年資產排程」＋「本機目錄列舉」＋「全庫唯一的 Drive 目錄列舉」，而 t243 還要它再加上傳；Drive 相關邏輯本就該落在共用元件。
+- [ ] 242.2.2.2 **`copyTo` 的 argv 必須附加 `RCLONE_LIMITS`（`cmd.addAll(RCLONE_LIMITS)`），`exec()` 不會自動加。** 該常數已存在於 `ProcessRcloneClient`（`--retries 1 --low-level-retries 3 --contimeout 10s --timeout 30s`）。理由（t245 實測 2026-07-27）：rclone 預設 `--low-level-retries 10` ＋ `--timeout 5m`，遇到任何 Drive API 延遲就會把單次上傳放大到數十秒至數分鐘——**外層 45 秒只會讓上傳失敗，不會讓它變快**。實測無參數的手動上傳超過 180 秒未結束、20:30 那輪排程以「逾時（45 秒）」失敗；帶上這四個參數後同一上傳只需 **2.4 秒**。放大效應之所以容易觸發，有兩個實測到的固定成本：token 幾乎每次呼叫都已過期（每次都要 refresh 並寫回 config），以及未設 `root_folder_id`（每次都得從 Drive 根目錄逐層查找子路徑）。
+- [ ] 242.2.3 `ExportScheduleService.browseGdrive` 的 Drive 目錄列舉邏輯遷入 `GdriveOutputSupport`，該 service 改為委派。**controller 端點路徑 `GET /api/export-schedule/browse-gdrive` 不變**，避免動到 t245 已完成並部署的 BFF 與前端。理由：`ExportScheduleService` 已 353 行，同時承擔「歷年資產排程」＋「本機目錄列舉」＋「全庫唯一的 Drive 目錄列舉」，而 t243 還要它再加上傳；Drive 相關邏輯本就該落在共用元件。
 - [ ] 242.2.3.1 **「目錄不存在」不得回 500。** 先釐清現況（不要照舊版描述做白工）：`RcloneUnavailableException` **已經**被 `ExportScheduleController` 攔成 503（`ResponseStatusException(SERVICE_UNAVAILABLE)`），那條路徑是通的。實測 `GET /api/export-schedule/browse-gdrive?subpath=zzz-not-exist` 回 **500** 的原因不同——rclone 對不存在的目錄以**非零退出**收場，`exec()` 擲的是**裸 `RuntimeException`**，落到 `Exception` 兜底。
   - 修法：`ProcessRcloneClient.listDirs` 攔截 stderr 含 `directory not found` 的情形，**回空清單**——目錄不存在只代表該層沒有內容，與本機 `browse` 遇到不存在目錄時的行為一致（`Files.isDirectory` 為 false 即回空）。`BackupService` 對 `lsjson` 也是同樣處理。使用者展開一個剛被刪掉的資料夾不該看到「伺服器錯誤」。
   - **`RcloneUnavailableException` 與 `RcloneTimeoutException` 必須原樣往上拋**，不可被這個 catch 吞掉——那兩者要讓使用者看到原因。
   - 另在 `GlobalExceptionHandler` 補 `@ExceptionHandler(RcloneUnavailableException.class)` → 503 作為縱深防禦（日後若有新的呼叫點忘了在 controller 攔，不會退化成 500）。
 - [ ] 242.2.4 **改寫 `RcloneClient` 的類別 Javadoc**：它目前明文寫「刻意只有『列目錄』一個方法…backend 端只實作列目錄…實際上傳（`copyto`）在 `external-materials-service` 端」。加 `copyTo` 後這三句全部變成錯的敘述，留在原地會誤導後續讀者。改為「backend 端實作列目錄與上傳兩種操作，仍不實作任何刪除路徑」。
-- [ ] 242.2.5 **Drive 側不做 tmp＋rename**：Drive API 未完成的上傳不會產生可見檔案，逾時被強殺後最壞情況是該次上傳沒發生。這是有意識的接受（同 t241），且 tmp＋改名需要 delete 權限的程式路徑，與 242.2.1 的約束衝突。
+- [ ] 242.2.5 **Drive 側不做 tmp＋rename**：Drive API 未完成的上傳不會產生可見檔案，逾時被強殺後最壞情況是該次上傳沒發生。這是有意識的接受（同 t245），且 tmp＋改名需要 delete 權限的程式路徑，與 242.2.1 的約束衝突。
 - [ ] 242.2.5.1 **但反向的「假失敗」會發生，逾時與確定性失敗的措辭必須分開。** `exec()` 的判準是「行程未在時限內 exit」，**不是**「檔案沒上去」。實測（2026-07-27）：`crawler_export_setting.gdrive_last_status` 記「失敗：rclone 上傳逾時（45 秒）」，同一輪 Drive 端 `rclone lsl` 卻有 122053 bytes 的完整檔案、與本機檔逐 byte 同大小——**上傳其實成功了，只是行程沒在時限內收攤**。照原文推廣到八頁會把這個誤判複製八份。故：
   - 逾時 → 寫 `逾時（45 秒）：Drive 端可能已完成，請於下一輪確認`
   - 只有 **rclone 非零退出** → 才寫 `失敗：<rclone 錯誤>`
@@ -139,7 +139,7 @@ Task 241 已讓「爬蟲資訊查詢」頁的輸出資料夾支援 Google Drive 
   - **上傳失敗字串不含「目錄列舉」字樣**（242.2.2.1 的參數化是否真的做了）
   - **`isDriveAllowedFor`**（242.1.6）：`role=ADMIN` 但 email 非 `ADMIN_EMAIL` → **false**（這是與 `isAdmin` 的關鍵差異）；`ADMIN_EMAIL` 本人 → true；userId 不存在 → **false**（fail-closed）；email 為 null → false
 - [ ] 242.6.1 rclone 呼叫一律以 `RcloneClient` 介面替身注入，**不實際連網**。
-- [ ] 242.6.2 **t241 的爬蟲頁回歸**：`CrawlerExportPathService` 的既有測試（含本機 `output_subpath` 行為與 Drive 欄位驗證）必須在遷移後**仍然全綠**，證明 242.1.4 是純重構。
+- [ ] 242.6.2 **t245 的爬蟲頁回歸**：`CrawlerExportPathService` 的既有測試（含本機 `output_subpath` 行為與 Drive 欄位驗證）必須在遷移後**仍然全綠**，證明 242.1.4 是純重構。
 - [ ] 242.6.3 Mockito 於本專案需 `-DargLine="-Dnet.bytebuddy.experimental=true"`（直接 `-D` 無效，surefire 會 fork）。
 
 ## 驗證
@@ -191,7 +191,7 @@ done   # 兩者都應印出 [GoogleDriver] [gdrive-crypt] [GDriveOutput]
 
 **必須確認的回歸（本任務不新增 UI，故以既有功能為驗收對象）：**
 
-1. **t241 的爬蟲頁 Drive 同步仍然正常**——這是 242.1.4 遷移是否為純重構的關鍵證據。進 `/crawler-data`，確認設定頁能載入、Drive 樹能展開、「上次上傳」仍顯示先前的成功紀錄；重啟 ext 觸發一輪 warmup 後確認 Drive 上出現當日檔案：
+1. **t245 的爬蟲頁 Drive 同步仍然正常**——這是 242.1.4 遷移是否為純重構的關鍵證據。進 `/crawler-data`，確認設定頁能載入、Drive 樹能展開、「上次上傳」仍顯示先前的成功紀錄；重啟 ext 觸發一輪 warmup 後確認 Drive 上出現當日檔案：
    ```bash
    docker compose -p asset-management restart external-materials-service
    # 等 warmup 跑完（約 60 秒）後：
@@ -204,11 +204,11 @@ done   # 兩者都應印出 [GoogleDriver] [gdrive-crypt] [GDriveOutput]
 
 ## 可逆性
 
-- **程式可退回 t241 的狀態**：本任務對 backend 的改動是「抽共用元件＋遷入既有邏輯＋加 `copyTo`」，回退即還原這些檔案。
+- **程式可退回 t245 的狀態**：本任務對 backend 的改動是「抽共用元件＋遷入既有邏輯＋加 `copyTo`」，回退即還原這些檔案。
 - **八張表多出的四個欄位在 t243／t244 完成前沒有任何讀取者**（seed 不啟用、service 未整合），故程式回退後 DB 欄位留著也不影響任何行為。
 - **changeset 跑過就不得改名或移除**（Liquibase 會認成新 migration 重跑 → `column already exists` → business crash loop）。要「回退 DB」只能另開一支新的 changeset 做 `DROP COLUMN IF EXISTS`，不可刪除 `v1.76.0` 檔案或改它的 id。
-- **回退不涉及 `v1.75.0`**（t241 的爬蟲頁欄位），那是獨立且已在生產使用的功能。
+- **回退不涉及 `v1.75.0`**（t245 的爬蟲頁欄位），那是獨立且已在生產使用的功能。
 
 ## 完成報告
 
-（實作者做完後回填：實際改了哪些檔、測試輸出、八張表欄位驗證輸出、`GDRIVE_OUTPUT_REMOTE` 收斂證據、`/api/me` 的 `configuredAdmin` 實際回應、t241 爬蟲頁回歸證據、與原計畫的偏差及原因。）
+（實作者做完後回填：實際改了哪些檔、測試輸出、八張表欄位驗證輸出、`GDRIVE_OUTPUT_REMOTE` 收斂證據、`/api/me` 的 `configuredAdmin` 實際回應、t245 爬蟲頁回歸證據、與原計畫的偏差及原因。）

@@ -120,7 +120,7 @@ cd frontend
 | **央行 / 台銀** | USD/TWD、ZAR/TWD 匯率 | 無 | 沿用 FinMind 為主來源 |
 | **IMF DataMapper** | 台灣 / 韓國人均 GDP（`NGDPDPC`、`NGDP_RPCH`） | 無 | GDP-TWSE 圖 |
 | **Google Drive（rclone `gdrive-crypt`，crypt 加密）** | DB 備份目的地 | `~/.config/rclone/rclone.conf` 的 `[gdrive-crypt]` | read-only volume 掛入 **business-services**；檔名與內容皆加密 |
-| **Google Drive（rclone `GDriveOutput`，`scope=drive`、未加密）** | 匯出檔案輸出目的地（**附加副本**，本機照寫不變） | **同一份** `~/.config/rclone/rclone.conf` 的 `[GDriveOutput]` | read-only 掛入 **business-services ＋ external-materials-service**；per-process `RCLONE_CONFIG` 指向 `/tmp` 可寫副本（token 續期需寫回）。Requirement 50 / Task 241 |
+| **Google Drive（rclone `GDriveOutput`，`scope=drive`、未加密）** | 匯出檔案輸出目的地（**附加副本**，本機照寫不變） | **同一份** `~/.config/rclone/rclone.conf` 的 `[GDriveOutput]` | read-only 掛入 **business-services ＋ external-materials-service**；per-process `RCLONE_CONFIG` 指向 `/tmp` 可寫副本（token 續期需寫回）。Requirement 50 / Task 245 |
 
 > **單一 config 檔的已知取捨（使用者明示的決定）**：`~/.config/rclone/rclone.conf` 同時含
 > `[GoogleDriver]`（`drive.file`，備份底層）／`[gdrive-crypt]`（crypt 層，含解密密碼）／
@@ -228,7 +228,7 @@ git config core.hooksPath scripts/git-hooks
 | `FINMIND_TOKEN` | FinMind Bearer token（選填，未設則匿名） |
 | `BUSINESS_SERVICES_URL` | BFF 路由目標（compose 設 `http://business-services:8080`） |
 | `RCLONE_CONFIG` | business 與 ext 皆為 `/etc/rclone/rclone.conf`（同一份 host `~/.config/rclone/rclone.conf` 唯讀掛入）。程式啟動時各自複製到 `/tmp` 可寫副本（`BackupService` → `/tmp/rclone.conf`、Drive 輸出 → `/tmp/rclone-output.conf`；rclone 續期 OAuth token 需寫回，實測 token 幾乎每次呼叫都已過期），實際呼叫時以 per-process 覆寫指定 |
-| `GDRIVE_OUTPUT_REMOTE` | Drive 輸出用的 remote 名稱（預設 `GDriveOutput`）；需先由使用者以 `rclone config create GDriveOutput drive scope=drive` 建立（**`scope=drive` 是必要的**——`drive.file` 只看得到 rclone 自己建的檔案，列不出使用者手動建的目錄）。Requirement 50 / Task 241 |
+| `GDRIVE_OUTPUT_REMOTE` | Drive 輸出用的 remote 名稱（預設 `GDriveOutput`）；需先由使用者以 `rclone config create GDriveOutput drive scope=drive` 建立（**`scope=drive` 是必要的**——`drive.file` 只看得到 rclone 自己建的檔案，列不出使用者手動建的目錄）。Requirement 50 / Task 245 |
 
 ---
 

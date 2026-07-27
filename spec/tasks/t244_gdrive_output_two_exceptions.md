@@ -13,7 +13,7 @@ Requirement 51 要把「本機照寫＋Drive 附加副本」推廣到八個匯�
 | 交易雷達 | 48 | `trading_radar_export_setting` | 設定 DTO 是**裸單欄** `SettingRequest(String outputSubpath)`，controller 與 service 簽章都只傳一個字串；執行時間點存於**另一張表** `trading_radar_export_time`，**一天可能匯出多次** |
 | 交易日曆 | 37 | `trading_calendar_export_schedule` | 排程 service **自己不寫檔**（委派 `TradingCalendarExportService`）；**沒有 run-now**（手動匯出是 `POST /run`，`subpath` 由 query param 帶入而非讀設定列）；UI 的輸出資料夾在**匯出對話框內**、與手動匯出共用同一欄位 |
 
-**語意（硬約束，與 t241／t242／t243 一致）：本機一律照寫，Drive 只是附加副本，不提供「只寫 Drive」的選項。**
+**語意（硬約束，與 t245／t242／t243 一致）：本機一律照寫，Drive 只是附加副本，不提供「只寫 Drive」的選項。**
 
 **權限與失敗處理完全沿用 t243 的決策**（以下為完整複寫，不需回頭翻 t243）：
 - Drive 開關**只有主要管理者本人能啟用**：`PUT` 時非主要管理者要啟用 → **403**，且必須 `throw new AdminRequiredException()`（`GlobalExceptionHandler` 已映 403）。**不得用 `IllegalArgumentException`**（映 400）、**不得在 service 用 `ResponseStatusException`**（實測會被 `Exception` 兜底成 **500**）。
@@ -49,7 +49,7 @@ Requirement 51 要把「本機照寫＋Drive 附加副本」推廣到八個匯�
   ```
 
 - [x] 244.1.1 改法：`SettingRequest` 加 `gdriveEnabled`（**包裝型別 `Boolean`**）與 `gdriveSubpath`；controller 改為**傳整個 request** 而非拆單一欄位；`saveSetting` 簽章改收 DTO；前端 helper 改收物件（`(payload) => api.put(..., payload)`）。
-- [x] 244.1.2 **`gdriveEnabled` 必須是包裝型別 `Boolean`**：要能分辨「明確送 false」與「整個欄位沒送」。後者（舊版前端、或只想改本機路徑的呼叫端）**不應把已開啟的 Drive 開關靜默關掉**。null 視為「不變更」；`gdriveSubpath` 為 null 時同樣保留既有值。**這正是 t241 在爬蟲頁踩過的坑**（`saveExportPath` 原本只送單一字串，前端存了卻沒生效），本頁的裸字串結構是同一個形狀，特別容易再犯。
+- [x] 244.1.2 **`gdriveEnabled` 必須是包裝型別 `Boolean`**：要能分辨「明確送 false」與「整個欄位沒送」。後者（舊版前端、或只想改本機路徑的呼叫端）**不應把已開啟的 Drive 開關靜默關掉**。null 視為「不變更」；`gdriveSubpath` 為 null 時同樣保留既有值。**這正是 t245 在爬蟲頁踩過的坑**（`saveExportPath` 原本只送單一字串，前端存了卻沒生效），本頁的裸字串結構是同一個形狀，特別容易再犯。
 - [x] 244.1.3 `SettingResponse` 加 `gdriveEnabled`（boolean）、`gdriveSubpath`、`gdriveRemote`（衍生顯示值不入庫）、`gdriveLastRunAt`（格式化字串，比照既有 `lastRunAt`）、`gdriveLastStatus`。維持 `record` 不可變。
 
 ### 244.2 交易雷達：上傳整合與多時間點語意
@@ -67,8 +67,8 @@ Requirement 51 要把「本機照寫＋Drive 附加副本」推廣到八個匯�
 
 - [x] 244.3 `frontend/src/views/TradingRadarView.vue` 的排程設定區塊，在既有「輸出資料夾」之下新增「同步 Google Drive」`el-switch` ＋ Drive 資料夾欄位（readonly ＋「選擇」按鈕）＋「上次上傳」唯讀顯示（文案用「上次上傳」而非「今日上傳」，承 244.2.4）。
 - [x] 244.3.1 `frontend/src/api/index.js` 的 trading-radar 區塊：`saveExportSetting` 改收物件（承 244.1.1），並新增 `browseGdriveExportDir: (subpath = '') => api.get('/bff/trading-radar/export/browse-gdrive', { params: { subpath }, skipErrorToast: true })`（`skipErrorToast` 是同檔既有 `browseExportDir` 的慣例，讓錯誤顯示在 dialog 內、不與全域 toast 打架）。
-- [x] 244.3.2 資料夾選擇器沿用 t241 的雙模式寫法（範本見 `frontend/src/views/CrawlerDataView.vue`：`dirPicker` 帶 `mode: 'local' | 'gdrive'`、`dirPickerTitle` 依 mode 切標題、`openDirPicker(mode)`、樹的 load 依 mode 選 API）。Drive 回傳形狀與本機相同，不需第二套渲染邏輯。
-- [x] 244.3.3 **dialog 的「目前選擇」預覽，兩種 mode 分隔符不同**：Drive 基底是 `remote:`（已含冒號，**直接接**子路徑），本機基底是 `/home/steven`（需 `/` 分隔）。混用會顯示成 `GDriveOutput:/投資理財`——多一個斜線、不是 rclone 格式。（t241 犯過，由使用者截圖發現。）
+- [x] 244.3.2 資料夾選擇器沿用 t245 的雙模式寫法（範本見 `frontend/src/views/CrawlerDataView.vue`：`dirPicker` 帶 `mode: 'local' | 'gdrive'`、`dirPickerTitle` 依 mode 切標題、`openDirPicker(mode)`、樹的 load 依 mode 選 API）。Drive 回傳形狀與本機相同，不需第二套渲染邏輯。
+- [x] 244.3.3 **dialog 的「目前選擇」預覽，兩種 mode 分隔符不同**：Drive 基底是 `remote:`（已含冒號，**直接接**子路徑），本機基底是 `/home/steven`（需 `/` 分隔）。混用會顯示成 `GDriveOutput:/投資理財`——多一個斜線、不是 rclone 格式。（t245 犯過，由使用者截圖發現。）
 - [x] 244.3.4 Drive 樹載入失敗顯示後端訊息，**不得顯示成空樹**（空樹會被誤讀為「Drive 裡沒有資料夾」）。開關關閉時欄位停用但**保留已填值**。開關開啟而資料夾為空時前端擋下儲存並提示。
 - [x] 244.3.5 **非主要管理者不顯示 Drive 開關與欄位**：本 view 目前**沒有引入 auth store**（實測 `isAdmin`／`useAuthStore` 在此頁 grep 為 0），需新增 `import { useAuthStore } from '@/stores/authStore'`，條件用 **`auth.isConfiguredAdmin`**（t242.5.2 新增的 getter）。**不得用 `auth.isAdmin`**——那是 `role === 'ADMIN'` 判準，與後端 403 的判準不一致，會出現「畫面顯示得了、按儲存卻 403」。真正的閘門在後端，前端只是不顯示。
 
@@ -102,7 +102,7 @@ Requirement 51 要把「本機照寫＋Drive 附加副本」推廣到八個匯�
 
 - [x] 244.5.1 **裁定：手動匯出路徑也要上傳 Drive，且實作點在排程 service，不在 controller。** 新增 `TradingCalendarExportScheduleService.runManualForCurrentUser(Integer year, String format, String subpath)`：內部委派 `exportService.exportToDir(...)`，再讀**當前使用者的設定列**取 `gdriveEnabled`／`gdriveSubpath` 後上傳。controller 的 `/run` 改為 `return scheduleService.runManualForCurrentUser(year, format, subpath);` **維持純委派**。
   - **不得把讀設定列與上傳寫在 controller**：`structure.md` 2.2 明訂 Controller「不寫業務邏輯、不直接讀 repository」。而且乾淨解法就在眼前——`TradingCalendarExportController` 已經同時注入 `service` 與 `scheduleService`，`/run` 目前也已是純委派。
-  - 理由（為何手動路徑也要上傳）：run-now／手動匯出的用途就是驗證落點正確，若它不上傳，使用者只能等排程才知道 Drive 設定對不對——這正是 t241 在爬蟲頁缺 run-now 造成的實際不便。
+  - 理由（為何手動路徑也要上傳）：run-now／手動匯出的用途就是驗證落點正確，若它不上傳，使用者只能等排程才知道 Drive 設定對不對——這正是 t245 在爬蟲頁缺 run-now 造成的實際不便。
 - [x] 244.5.2 **不要把上傳邏輯放進 `TradingCalendarExportService.exportToDir`**：該方法被排程與手動兩條路徑共用，且簽章沒有 owner；在裡面查「當前使用者」在背景排程情境下沒有 request context，會拿到錯的人或 null。**兩條路徑各自在自己的層級處理上傳**，共用的只有 `GdriveOutputSupport`。
 - [x] 244.5.3 **`subpath` 來源不一致要在程式註解中記載**：手動匯出的本機目錄來自 query param、Drive 目錄來自設定列，兩者語意刻意不同（前者是「這次匯出到哪」，後者是「Drive 同步的固定目的地」）。不要為了「一致」而讓 Drive 也吃 query param——那會讓使用者每次手動匯出都可能把檔案倒進 Drive 的不同位置。
 
@@ -130,14 +130,14 @@ Requirement 51 要把「本機照寫＋Drive 附加副本」推廣到八個匯�
 - [x] 244.7 兩個 BFF controller 各新增（依「一頁一 BFF」）：
   - `TradingRadarBffController`：既有 `/export/browse` → 新增 `/export/browse-gdrive`
   - `TradingCalendarBffController`：既有 `/export/browse` → 新增 `/export/browse-gdrive`
-- [x] 244.7.1 **兩支都指向同一支** business `GET /api/export-schedule/browse-gdrive`（t241 建立、t242 已把邏輯遷入共用元件，端點路徑不變）。**交易日曆頁尤其注意**：它的**本機**目錄列舉走自己那份 `GET /api/trading-calendar-export/browse`（既有分裂，**本任務不修**），但 **Drive 側不得再開第二份**——不可在 `TradingCalendarExportService` 加 Drive 列舉（CLAUDE.md「不同頁面顯示同樣意義的值須呼叫同一支 business service API」）。
+- [x] 244.7.1 **兩支都指向同一支** business `GET /api/export-schedule/browse-gdrive`（t245 建立、t242 已把邏輯遷入共用元件，端點路徑不變）。**交易日曆頁尤其注意**：它的**本機**目錄列舉走自己那份 `GET /api/trading-calendar-export/browse`（既有分裂，**本任務不修**），但 **Drive 側不得再開第二份**——不可在 `TradingCalendarExportService` 加 Drive 列舉（CLAUDE.md「不同頁面顯示同樣意義的值須呼叫同一支 business service API」）。
 - [x] 244.7.2 **不做 `onErrorReturn` 降級**：remote 未設定／授權失效時要讓可讀錯誤浮到前端 dialog。
 - [x] 244.7.3 檢查兩支 BFF 的設定 `PUT` 是否有 DTO 鏡像類別：`Map<String,Object>` 直通則新欄位自動穿透；**強型別 DTO 必須同步加欄位**，漏一個就會讓 Drive 設定在 BFF 層被靜默吃掉。
 
 ### 244.8 排程列表頁說明同步
 
 - [x] 244.8 本任務**未新增任何 `@Scheduled`**，故「公開資訊 → 排程列表」（`bff/.../schedulelist/SchedulePublicBffController` 的 `JOBS`）**不需新增項目**；但這兩筆的 description 須補上「輸出含 Google Drive 同步（若已啟用）」。
-- [x] 244.8.1 `JOBS` 是無鍵的 `List<ScheduledJobDto>`，**不能用資料表名或 service 名 grep**。本任務兩筆靠 group／name 字串定位：「**交易雷達匯出**」與「**交易日曆**」。（t241 踩過這個坑：`grep news-poller` 在該檔命中 0 次。）
+- [x] 244.8.1 `JOBS` 是無鍵的 `List<ScheduledJobDto>`，**不能用資料表名或 service 名 grep**。本任務兩筆靠 group／name 字串定位：「**交易雷達匯出**」與「**交易日曆**」。（t245 踩過這個坑：`grep news-poller` 在該檔命中 0 次。）
 
 ### 244.9 測試（與實作同屬本任務交付）
 

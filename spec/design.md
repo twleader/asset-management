@@ -117,10 +117,10 @@ com.steven.assets/
     - `GET /api/bff/crawler-data?date=YYYY-MM-DD&dateField=fetched|published&category=` → business `GET /api/news-headlines`：查指定日期爬回的 `news_headline`（與今日股市分析同讀一份表，符合「同義欄位、同一 business API」）。
     - `GET /api/bff/crawler-data/schedule` → business `GET /api/crawler-schedule?crawler=news-poller`：讀 NewsPoller 已設定的執行時間清單。
     - `PUT /api/bff/crawler-data/schedule` → business `PUT /api/crawler-schedule?crawler=news-poller`：整批覆寫執行時間清單。
-    - `GET /api/bff/crawler-data/export-path` → business `GET /api/crawler-export-path?crawler=news-poller`：讀公開資訊 JSON 輸出子路徑與基底（Task 212），Task 241 起同時回 Drive 設定與上次上傳狀態。
-    - `PUT /api/bff/crawler-data/export-path` → business `PUT /api/crawler-export-path?crawler=news-poller`：更新輸出子路徑（Task 212）與 Drive 開關／子路徑（Task 241）。**不新增第二支設定端點**——同一張設定表、同一支 business API，只是 DTO 多了 Drive 欄位。
+    - `GET /api/bff/crawler-data/export-path` → business `GET /api/crawler-export-path?crawler=news-poller`：讀公開資訊 JSON 輸出子路徑與基底（Task 212），Task 245 起同時回 Drive 設定與上次上傳狀態。
+    - `PUT /api/bff/crawler-data/export-path` → business `PUT /api/crawler-export-path?crawler=news-poller`：更新輸出子路徑（Task 212）與 Drive 開關／子路徑（Task 245）。**不新增第二支設定端點**——同一張設定表、同一支 business API，只是 DTO 多了 Drive 欄位。
     - `GET /api/bff/crawler-data/export-path/browse?subpath=` → business **既有** `GET /api/export-schedule/browse`：資料夾樹懶載入。**刻意不新增第五份目錄列舉實作**（同 Requirement 39／41／42 的沿用決定，CLAUDE.md「同義欄位、同一 business service API」）；BFF 端另立自己的路由則是「一頁一 BFF」要求。
-    - `GET /api/bff/crawler-data/export-path/browse-gdrive?subpath=` → business `GET /api/export-schedule/browse-gdrive`：Google Drive 資料夾樹懶載入（Requirement 50 / Task 241）。與本機 `browse` 並列為兩支而非加參數（語意不同：本機基底 vs. Drive remote）；**「Drive 目錄列舉」全庫只准這一支**，其餘頁面日後接 Drive 一律沿用它（含交易日曆頁——其本機列舉自成一份 `trading-calendar-export/browse`，Drive 側不得再開第二份）。
+    - `GET /api/bff/crawler-data/export-path/browse-gdrive?subpath=` → business `GET /api/export-schedule/browse-gdrive`：Google Drive 資料夾樹懶載入（Requirement 50 / Task 245）。與本機 `browse` 並列為兩支而非加參數（語意不同：本機基底 vs. Drive remote）；**「Drive 目錄列舉」全庫只准這一支**，其餘頁面日後接 Drive 一律沿用它（含交易日曆頁——其本機列舉自成一份 `trading-calendar-export/browse`，Drive 側不得再開第二份）。
     - 權限：`GET` 落 `authenticated()`；兩支 `PUT` 均限 ADMIN（`hasRole('ADMIN')`，屬系統設定變更——Drive 子路徑決定服務往使用者雲端硬碟寫入的位置，同理限 ADMIN）。
 
 **Repository 層**（Spring Data JPA，共 47 個）
@@ -541,7 +541,7 @@ DailyMarketAnalysis      (今日股市分析結果，PK = analysis_date；bias/c
 MarketAnalysisSetting    (市場分析設定，單列 id = 1；model / effort / enabled；web_search 相關欄於 Task 179 移除)
 News                     (→ news_headline，爬蟲新聞標題，全域參考、無 owner；供今日分析與公開資訊 SRPP JSON)
 CrawlerSchedule          (→ crawler_schedule，公開資訊爬蟲執行時間設定，全域參考、無 owner；一列一時間點〔crawler_key + run_hour + run_minute + enabled〕；由「爬蟲資訊查詢」頁維護、NewsPoller 每分鐘讀取；Requirement 38)
-CrawlerExportSetting     (→ crawler_export_setting，公開資訊爬蟲輸出檔案路徑設定，全域參考、無 owner；一爬蟲一列〔crawler_key UNIQUE + output_subpath〕；由「爬蟲資訊查詢」頁維護、NewsPoller 每輪寫檔前讀取；Requirement 38 / Task 212。Requirement 50 / Task 241 加 gdrive_enabled + gdrive_subpath + gdrive_last_run_at + gdrive_last_status：本機照寫不變，Drive 為附加副本；**後兩欄由 ext 的 NewsPoller 寫入**——刻意的所有權例外，上傳結果只有 ext 知道，但 ext 只碰這兩欄、UPDATE 命中 0 列不得 upsert，列的所有權仍在 backend)
+CrawlerExportSetting     (→ crawler_export_setting，公開資訊爬蟲輸出檔案路徑設定，全域參考、無 owner；一爬蟲一列〔crawler_key UNIQUE + output_subpath〕；由「爬蟲資訊查詢」頁維護、NewsPoller 每輪寫檔前讀取；Requirement 38 / Task 212。Requirement 50 / Task 245 加 gdrive_enabled + gdrive_subpath + gdrive_last_run_at + gdrive_last_status：本機照寫不變，Drive 為附加副本；**後兩欄由 ext 的 NewsPoller 寫入**——刻意的所有權例外，上傳結果只有 ext 知道，但 ext 只碰這兩欄、UPDATE 命中 0 列不得 upsert，列的所有權仍在 backend)
 MarketAnalysisSendTime   (→ market_analysis_send_time，分析寄送時間，全域參考、無 owner；一列一時點〔send_time UNIQUE + active〕，seed 08:45；由「今日股市分析」頁維護、MarketAnalysisScheduler 每分鐘比對；Requirement 31 / Task 191)
 
 # 資產配置建議（Requirement 32）
@@ -569,7 +569,7 @@ twse_index_year_end_history  (TWSE 指數年末值；Task 97 起已不使用—�
 >
 > 📌 **查證來源：運行中的 DB。** `docker exec asset-postgres psql -U assets -d assets -c '\d <table>'`——欄位型別／位數／nullable 一律以它為準。
 >
-> ⚠ **`db/schema.sql` 不是可信基準線，只能當離線參考。** 它是 `db/init/01_dump.sql`（含真實個人財務資料，被 `.gitignore` 排除）「去除全部資料」後的可版控鏡像，但**靠人工重新產出、實測已落後**：截至 Task 241 它只有 55 張 `CREATE TABLE`，缺 `crawler_export_setting`（v1.64.0）／`asset_transaction`（v1.72.0）／`index_export_schedule`／`trading_radar_export_setting`／`asset_transaction_export_schedule`／`trading_radar_export_time`。在裡面查不到某張表時，先確認是「真的沒有」還是「鏡像沒跟上」。**同理不要引用 `db/changelog/**` 描述現況**——那裡有永不執行的 changeset（下方 `v1.0.0` 的 `NUMERIC(20,4)` 即為前例）。
+> ⚠ **`db/schema.sql` 不是可信基準線，只能當離線參考。** 它是 `db/init/01_dump.sql`（含真實個人財務資料，被 `.gitignore` 排除）「去除全部資料」後的可版控鏡像，但**靠人工重新產出、實測已落後**：截至 Task 245 它只有 55 張 `CREATE TABLE`，缺 `crawler_export_setting`（v1.64.0）／`asset_transaction`（v1.72.0）／`index_export_schedule`／`trading_radar_export_setting`／`asset_transaction_export_schedule`／`trading_radar_export_time`。在裡面查不到某張表時，先確認是「真的沒有」還是「鏡像沒跟上」。**同理不要引用 `db/changelog/**` 描述現況**——那裡有永不執行的 changeset（下方 `v1.0.0` 的 `NUMERIC(20,4)` 即為前例）。
 > - `stock_price_history`：`UNIQUE (stock_code, market, trading_date)`（Hibernate 名 `ukgoyp…`）＋ `INDEX idx_sph_code_date (stock_code, trading_date)`；**以 `db/init/01_dump.sql` 為準**：OHLC 皆 `NUMERIC(15,4)`（`open/high/low` nullable、`close` NOT NULL，見 v1.14.0）、`volume BIGINT`（nullable）。
 >   ⚠ `v1.0.0-initial-schema.sql` 寫的是 `NUMERIC(20,4)` ＋ `volume NOT NULL`，但該 changeset 在 dump 中已標記 already-ran、**永不執行**，故 20,4 從未套用到任何環境——查證位數/nullable 一律以 dump 為準，勿照抄 v1.0.0。
 >   ✅ **已對齊（Task 201）**：Entity `StockPriceHistory` 曾長期宣告 `precision = 20` 與 `volume nullable = false`（Task 148 照著永不執行的 `v1.0.0` changelog 改，反而改成與 DB 不一致），現已改為四個 OHLC 皆 `precision = 15` 且 `volume` 移除 `nullable = false`，與 DB 相符。依據可自 repo 直接查證：見 `db/schema.sql` 的 `stock_price_history`（`close_price numeric(15,4) NOT NULL`、`open/high/low_price numeric(15,4)` 可空、`volume bigint` 可空）。
@@ -2209,7 +2209,7 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
     - **依日期查詢**：`CrawlerDataBffController` → business `NewsHeadlineController`（`GET /api/news-headlines?date=&dateField=fetched|published&category=`）讀 `news_headline`。`dateField` 決定用 `fetched_at`（爬取入庫日）或 `published_at`（資料日）當篩選欄位，區間皆為「Asia/Taipei 該日 00:00（含）～翌日 00:00（不含）」轉 `Instant`；`category` 選填。repository 加 `findByFetchedAtBetweenOrderByFetchedAtDesc`／`findByPublishedAtBetweenOrderByPublishedAtDesc`，`category` 於 service 層過濾（單日資料量小）。與 `MarketAnalysisService` 讀同一份 `news_headline`（同義欄位、同一表）。
     - **動態執行時間（多時間點）**：`NewsPoller` 執行時間改由新表 `crawler_schedule`（`crawler_key='news-poller'`，一列一時間點）決定，可於頁面增減。`NewsPoller` **移除寫死的三個 cron（`0 20 8`／`0 30 11`／`0 0 18`，Task 184／188）**，改為**每分鐘 ticker** `@Scheduled(cron="0 * * * * *", zone="Asia/Taipei")`：讀 `crawler_schedule` 已啟用時間點（ext 端新增 `CrawlerScheduleQuery` JdbcTemplate 讀取），命中當前 `HH:mm` 即 `run("scheduled")`。cron 每分鐘僅觸發一次故天然去重、無需額外 slot guard；`run` 以 `dedupe_key` upsert 本就冪等，重跑亦無害。**DB 讀取例外**（表缺／連線失敗）**fallback 至預設 08:20 / 11:30 / 18:00**，避免爬蟲靜默停擺；讀到「空清單」＝使用者刻意清空＝該分鐘不跑。開機 warmup 與保留期清理不變。設定變更免重啟、下一分鐘生效。business 端 `CrawlerScheduleController`（`GET/PUT /api/crawler-schedule?crawler=news-poller`）讀／整批覆寫（delete+insert，驗 0–23／0–59、去重）；`PUT` 限 ADMIN。
     - **動態輸出檔案路徑（Task 212）**：`NewsPoller` 每輪產出的公開資訊 JSON（Task 177）輸出目錄，由寫死的 `news-scraper.export-dir`（容器 `/srpp-input`，只能改 docker volume 換目的地）改為新表 `crawler_export_setting`（`crawler_key='news-poller'` UNIQUE，一爬蟲一列）決定，可於同頁設定。
-    - **同步上傳 Google Drive（Requirement 50 / Task 241）**：同頁可另外開啟「同步上傳 Google Drive」並指定 Drive 目標資料夾（樹狀選擇器挑選）。**本機那一份照寫不變**——SRPP 依賴本機 `public_info_<日期>.json`，故 Drive 是附加副本而非替代目標，刻意不提供「只寫 Drive」選項。本機檔寫成功後才以 `rclone copyto` 上傳同一份檔案；上傳為 best-effort（失敗只記 ERROR log ＋ `gdrive_last_status`，不 rollback 本機檔、不中斷 `news_headline` 入庫、不擲例外中斷排程），無 retry queue（每輪重新產檔重新上傳＝天然重試）。設定同樣每輪即時讀取、免重啟。
+    - **同步上傳 Google Drive（Requirement 50 / Task 245）**：同頁可另外開啟「同步上傳 Google Drive」並指定 Drive 目標資料夾（樹狀選擇器挑選）。**本機那一份照寫不變**——SRPP 依賴本機 `public_info_<日期>.json`，故 Drive 是附加副本而非替代目標，刻意不提供「只寫 Drive」選項。本機檔寫成功後才以 `rclone copyto` 上傳同一份檔案；上傳為 best-effort（失敗只記 ERROR log ＋ `gdrive_last_status`，不 rollback 本機檔、不中斷 `news_headline` 入庫、不擲例外中斷排程），無 retry queue（每輪重新產檔重新上傳＝天然重試）。設定同樣每輪即時讀取、免重啟。
       - **路徑模型＝Requirement 34／39／41／42 那一套**：DB 只存**相對子路徑** `output_subpath`，實際目錄 = 容器內基底 `EXPORT_OUTPUT_DIR`（預設 `/home/steven`）resolve 之。**關鍵前提：`external-materials-service` 也掛上 `${EXPORT_OUTPUT_DIR_HOST:-/Users/steven}:/home/steven`**（原本只有 business-services 有），使「前端資料夾樹（由 business 的 `browse` 列舉）看得到的目錄」＝「ext 爬蟲寫得到的目錄」；兩服務基底路徑同為 `/home/steven`、同一 host 掛載，否則同義的「輸出資料夾」會在兩服務指向不同實體目錄。原 `/srpp-input` 掛載與 `news-scraper.export-dir` 一併移除（其預設目的地 `/Users/steven/Project/SRPP/data/input` 已落在家目錄內，改以 seed 子路徑 `Project/SRPP/data/input` 表達，host 落點完全相同）。
       - **每輪即時讀取**：`exportPublicInfoJson()` 於寫檔前呼叫 ext 端新增的 `CrawlerExportPathQuery`（`JdbcTemplate` 純讀，比照 `CrawlerScheduleQuery`）取現值，**不快取於欄位**，故設定變更下一輪即生效、免重啟。DB 例外或值為空 → fallback 至常數 `Project/SRPP/data/input`（＝改動前行為），避免靜默改寫落點。
       - **路徑驗證兩道（縱深防禦）**：business 於 `PUT` 時驗（`..`／絕對路徑跳脫基底 → 400，複用與 `ExportScheduleService.resolveDir` 相同規則）；ext 寫檔前**再驗一次**，DB 值異常則退回預設並 warn——ext 是實際持有檔案系統寫入權的一方，不能只信上游驗過。
@@ -2573,7 +2573,7 @@ UNIQUE (crawler_key, run_hour, run_minute)   -- 同爬蟲同時間點不重覆
 id                BIGSERIAL PK
 crawler_key       VARCHAR(64)  NOT NULL UNIQUE   -- 目前僅 'news-poller'
 output_subpath    VARCHAR(512) NOT NULL          -- 本機相對子路徑（相對容器基底 EXPORT_OUTPUT_DIR）
-gdrive_enabled    BOOLEAN      NOT NULL DEFAULT false  -- 是否額外上傳一份到 Google Drive（Requirement 50 / Task 241）
+gdrive_enabled    BOOLEAN      NOT NULL DEFAULT false  -- 是否額外上傳一份到 Google Drive（Requirement 50 / Task 245）
 gdrive_subpath    VARCHAR(512)                   -- Drive 上相對子路徑（相對 rclone remote 根），gdrive_enabled 時必填
 gdrive_last_run_at  TIMESTAMP                    -- 上次 Drive 上傳時間（供設定頁顯示，上傳目的地不在使用者眼前）
 gdrive_last_status  VARCHAR(512)                 -- 上次上傳結果：成功記落點與大小、失敗記錯誤摘要
@@ -2583,7 +2583,7 @@ updated_at        TIMESTAMP
 - **為何不併進 `crawler_schedule`**：該表語意是「一列一執行時間點」，輸出路徑是「每爬蟲一個值」；併入會讓路徑隨時間點列數重複儲存同一事實（CLAUDE.md 資料庫完整正規化），且刪一個時間點就會連帶弄丟路徑。故另立一表、以 `crawler_key` 關聯。
 - **只存相對子路徑、不存絕對路徑**：絕對路徑等於把容器內檔案系統位置寫進 DB，跨環境不可攜且繞過基底防護；沿用 Requirement 34／39／41／42 既有模型。實際寫入 = `EXPORT_OUTPUT_DIR` resolve 之，`business`（PUT 時）與 `ext`（寫檔前）各驗一次跳脫。Drive 端同構：`gdrive_subpath` 亦只存相對子路徑，基底為 rclone remote（名稱由 `GDRIVE_OUTPUT_REMOTE` 給定，預設 `GDriveOutput`，**不寫死於程式**）。
 - Seed `('news-poller','Project/SRPP/data/input')` ＝ 改為 DB 驅動前 `/srpp-input` volume 的同一個 host 目錄（`/Users/steven/Project/SRPP/data/input`），行為不變。changeset 比照本專案慣例寫成冪等（`CREATE TABLE IF NOT EXISTS`＋`ON CONFLICT DO NOTHING`）。
-- **Google Drive 為「附加」而非「替換」（Requirement 50 / Task 241，changeset `v1.75.0-crawler-gdrive-output.sql`）**：`gdrive_*` 欄位新增後，本機 `output_subpath` 的寫入行為**完全不變、一律照寫**；`gdrive_enabled` 為真時才在本機檔寫成功後多上傳一份副本。刻意不做成「儲存目標」單選——**SRPP 退休規劃專案依賴本機 `Project/SRPP/data/input/public_info_<日期>.json`**，單選會讓使用者選了 Drive 就靜默切斷 SRPP 的資料來源。新欄位 seed 不啟用（`gdrive_enabled=false`），既有部署升級後行為與現況一致，且不要求 rclone remote 存在。
+- **Google Drive 為「附加」而非「替換」（Requirement 50 / Task 245，changeset `v1.75.0-crawler-gdrive-output.sql`）**：`gdrive_*` 欄位新增後，本機 `output_subpath` 的寫入行為**完全不變、一律照寫**；`gdrive_enabled` 為真時才在本機檔寫成功後多上傳一份副本。刻意不做成「儲存目標」單選——**SRPP 退休規劃專案依賴本機 `Project/SRPP/data/input/public_info_<日期>.json`**，單選會讓使用者選了 Drive 就靜默切斷 SRPP 的資料來源。新欄位 seed 不啟用（`gdrive_enabled=false`），既有部署升級後行為與現況一致，且不要求 rclone remote 存在。
 - **`gdrive_enabled` 為布林而非分類主檔表**：CLAUDE.md「禁止 Enum 寫死」針對的是使用者會自行增修的**業務分類**（銀行、券商、存款類型、市場類型）；「要不要多上傳一份到 Drive」對應程式中一條具體的 rclone code path，DB 多一列並不會讓程式自動支援新的儲存後端，建主檔表只是假的擴充性。
 
 爬蟲資訊查詢頁 API 端點（Requirement 38）：
@@ -2605,10 +2605,10 @@ GET  /api/bff/crawler-data/export-path                  → GET /api/crawler-exp
 PUT  /api/bff/crawler-data/export-path                  → PUT /api/crawler-export-path?crawler=news-poller（限 ADMIN）
 GET  /api/bff/crawler-data/export-path/browse?subpath=  → GET /api/export-schedule/browse（沿用既有目錄列舉，不新增實作）
 GET  /api/bff/crawler-data/export-path/browse-gdrive?subpath=
-                                                        → GET /api/export-schedule/browse-gdrive（Requirement 50 / Task 241；Drive 資料夾樹懶載入）
+                                                        → GET /api/export-schedule/browse-gdrive（Requirement 50 / Task 245；Drive 資料夾樹懶載入）
 ```
 
-**Google Drive 輸出（Requirement 50 / Task 241）** —— 本機輸出不變、Drive 為附加副本：
+**Google Drive 輸出（Requirement 50 / Task 245）** —— 本機輸出不變、Drive 為附加副本：
 
 ```
 [ext: NewsPoller 每輪]
@@ -2675,7 +2675,7 @@ gdrive_last_status   VARCHAR(512)                          -- 上次結果，截
 - **背景排程須逐列再驗 owner 仍是主要管理者**：排程是背景執行緒、逐列跑 `findAll()`，沒有 `CurrentUserContext`，`PUT` 時的檢查在此完全不適用。若某列在啟用後 owner 被改、DB 被 psql 直改、或 `ADMIN_EMAIL` 換人，背景仍會照上傳——故產檔後、上傳前須以該列 `owner_user_id` 取 email 再走**同一個** `isConfiguredAdmin`，不通過則跳過上傳並寫狀態欄說明原因（不可靜默跳過）。此為與 Requirement 39／49「背景排程必須逐列 `enableFilter`」同一類的縱深防禦。可行性已確認：`AppUser` 未套 `@Filter`，且 `TenantFilterAspect` 在無 request 情境時直接 return，故背景執行緒 `findById(ownerId)` 不會被 fail-closed 成空。
 - **狀態欄與既有 `last_run_status` 分離**：Drive 結果存新的 `gdrive_last_run_at`／`gdrive_last_status`，不併入既有欄位——「本機成功、Drive 失敗」是正常且必須可分辨的狀態；共用一欄會讓本機明明成功卻顯示失敗，使用者去做不必要的排查。
 - **`RcloneClient` 加 `copyTo`，仍不實作刪除**：Requirement 50 的介面只有 `listDirs`；本需求加上傳，但維持「只 `lsjson` 與 `copyto`」的自我約束不變，且沿用既有的 `CONFIG_SOURCE`（`/etc/rclone/rclone.conf`）→ `/tmp/rclone-output.conf` 可寫副本與 per-process 覆寫，**本需求不變更 config 佈局**。
-- **`copyTo` 必須帶 `RCLONE_LIMITS`，且 `exec()` 需參數化**（t241 實測教訓）：rclone 預設 `--low-level-retries 10` ＋ `--timeout 5m`，遇到任何 Drive API 延遲就會把單次上傳放大到數十秒至數分鐘，而外層 process timeout 砍掉它只會讓上傳失敗、不會讓它變快（實測：無參數手動測試 >180 秒未結束、20:30 那輪排程以「逾時（45 秒）」失敗；帶上 `--retries 1 --low-level-retries 3 --contimeout 10s --timeout 30s` 後同一上傳只需 2.4 秒）。既有 `exec()` 把 20 秒與「目錄列舉」字樣硬編，重用前須參數化（timeout ＋ 操作名稱）——否則上傳失敗會把「目錄列舉逾時」原樣寫進使用者可見的 `gdrive_last_status`。
+- **`copyTo` 必須帶 `RCLONE_LIMITS`，且 `exec()` 需參數化**（t245 實測教訓）：rclone 預設 `--low-level-retries 10` ＋ `--timeout 5m`，遇到任何 Drive API 延遲就會把單次上傳放大到數十秒至數分鐘，而外層 process timeout 砍掉它只會讓上傳失敗、不會讓它變快（實測：無參數手動測試 >180 秒未結束、20:30 那輪排程以「逾時（45 秒）」失敗；帶上 `--retries 1 --low-level-retries 3 --contimeout 10s --timeout 30s` 後同一上傳只需 2.4 秒）。既有 `exec()` 把 20 秒與「目錄列舉」字樣硬編，重用前須參數化（timeout ＋ 操作名稱）——否則上傳失敗會把「目錄列舉逾時」原樣寫進使用者可見的 `gdrive_last_status`。
 - **逾時 ≠ 失敗，措辭必須分開**（已實測發生的假失敗）：`exec()` 的判準是「行程未在時限內 exit」而非「檔案沒上去」。實測 `crawler_export_setting.gdrive_last_status` 記「失敗：rclone 上傳逾時（45 秒）」，同一輪 Drive 端卻有 122053 bytes 的完整檔案、與本機逐 byte 同大小。故逾時寫「逾時（N 秒）：Drive 端可能已完成，請於下一輪確認」，只有 rclone 非零退出才寫「失敗：<rclone 錯誤>」。
 - **Drive 目錄列舉仍只有一支**：八頁 BFF 各加自己的 `browse-gdrive` passthrough（一頁一 BFF），但全部指向同一支 business `GET /api/export-schedule/browse-gdrive`——**含交易日曆頁**，即使其本機列舉自成一份 `trading-calendar-export/browse`（既有分裂，不在本需求範圍），Drive 側不得再開第二份。
 - **兩個結構例外（t244）**：（1）**交易日曆**——`TradingCalendarExportScheduleService` 自己不寫檔（委派 `TradingCalendarExportService`），且**沒有 run-now**：其手動匯出是 `POST /api/trading-calendar-export/run?year=&format=&subpath=`，不經排程 service，`subpath` 由 HTTP query param 帶入而非讀設定列，故該路徑若要上傳必須另外讀該使用者的設定列；其 UI 的輸出資料夾也不在頁面卡片上，而在匯出對話框內、與手動匯出共用同一欄位。（2）**交易雷達**——設定 DTO 是裸單欄 `SettingRequest(String outputSubpath)`，controller 與 service 簽章都只傳一個字串，加 Drive 欄位須同時改 record／controller／service 簽章／前端 helper 形狀（＝Requirement 50 在爬蟲頁踩過的同一個坑）；且其執行時間點存於另一張表、一天可能上傳多次，`gdrive_last_status` 為「最後一次」語意。
@@ -2720,7 +2720,7 @@ GET  /api/export-schedule/settings     # 取當前使用者排程設定（無則
 PUT  /api/export-schedule/settings     # upsert 當前使用者設定（enabled/runHour/runMinute/outputSubpath）
 POST /api/export-schedule/run-now      # 立即以當前使用者身分產「當前即時資產」檔寫入其設定目錄（回 path/sizeBytes）
 GET  /api/export-schedule/browse       # 唯讀：列基底（家目錄）下 ?subpath= 的子目錄清單（樹狀選擇器懶載入）
-GET  /api/export-schedule/browse-gdrive # 唯讀：列 Google Drive remote 下 ?subpath= 的子目錄清單（Requirement 50 / Task 241）
+GET  /api/export-schedule/browse-gdrive # 唯讀：列 Google Drive remote 下 ?subpath= 的子目錄清單（Requirement 50 / Task 245）
                                         #   與上一支並列而非加參數：語意不同（本機基底 vs. Drive remote）
                                         #   「Drive 目錄列舉」全庫只准這一支：其餘頁面日後接 Drive 一律沿用，含交易日曆頁
                                         #   （其本機列舉自成一份 trading-calendar-export/browse，但 Drive 側不得再開第二份）
@@ -4272,7 +4272,7 @@ for m in members: raw = GET snap:{ownerId}:{m}
 | 表 | 欄位 | 說明 |
 |---|---|---|
 | `trading_radar_export_time` | `id / owner_user_id / run_hour / run_minute / enabled / last_run_date / updated_at`，UNIQUE `(owner_user_id, run_hour, run_minute)` | 一列一時間點。**`last_run_date` 在時間點列上**——當日 guard 必須 per 時間點，否則同日多時間點只跑第一個 |
-| `trading_radar_export_setting` | `id / owner_user_id`(UNIQUE)`/ output_subpath / last_run_at / last_run_status / updated_at`＋`gdrive_enabled / gdrive_subpath / gdrive_last_run_at / gdrive_last_status`（Requirement 51 / Task 241，`v1.76.0`；型別見「推廣至其餘八個匯出頁」段的統一定義） | 一使用者一列，只存**相對子路徑**。**注意執行時間點在另一張 `trading_radar_export_time`，故本頁一天可能上傳多次**，`gdrive_last_status` 為「最後一次」語意 |
+| `trading_radar_export_setting` | `id / owner_user_id`(UNIQUE)`/ output_subpath / last_run_at / last_run_status / updated_at`＋`gdrive_enabled / gdrive_subpath / gdrive_last_run_at / gdrive_last_status`（Requirement 51 / Task 245，`v1.76.0`；型別見「推廣至其餘八個匯出頁」段的統一定義） | 一使用者一列，只存**相對子路徑**。**注意執行時間點在另一張 `trading_radar_export_time`，故本頁一天可能上傳多次**，`gdrive_last_status` 為「最後一次」語意 |
 
 兩表皆 `@Filter(ownerFilter)`。背景排程無 request context → filter 不啟用，`findAll()` 讀全部 owner 列；**owner 取自列上的 `owner_user_id` 並顯式傳入快照讀取**（Redis key 本就 owner-scoped，不依賴 Hibernate filter），背景路徑不得用 request-scoped 的 `CurrentUserContext`。
 

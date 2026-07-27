@@ -1,4 +1,4 @@
-# [t241] 爬蟲輸出檔案同步上傳 Google Drive（本機輸出照寫不變，Drive 為附加副本）
+# [t245] 爬蟲輸出檔案同步上傳 Google Drive（本機輸出照寫不變，Drive 為附加副本）
 
 **對應 Requirements:** Requirement 50（「爬蟲資訊查詢」頁的輸出資料夾除本機外，可另外把爬蟲產出的公開資訊 JSON 同步一份到使用者 Google 雲端硬碟的指定目錄）
 **前置任務:** 無（建立在 Task 212 已完成的 `crawler_export_setting` 本機輸出路徑機制之上）

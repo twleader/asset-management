@@ -9,7 +9,7 @@
 
 Requirement 51 要把「本機照寫＋Drive 附加副本」推廣到八個匯出頁。t242 已把地基做完（共用元件、上傳能力、DB 欄位、entity 欄位）。本任務負責**六個結構相近的頁面**，剩下兩個結構例外由 t244 處理。
 
-**語意（硬約束，與 t241／t242 一致）：本機一律照寫，Drive 只是附加副本，不提供「只寫 Drive」的選項。** 這八頁匯出的是使用者的資產快照、已實現損益、交易紀錄等財務報表，本機那一份是既有的留存機制，不能因為開了 Drive 就消失。
+**語意（硬約束，與 t245／t242 一致）：本機一律照寫，Drive 只是附加副本，不提供「只寫 Drive」的選項。** 這八頁匯出的是使用者的資產快照、已實現損益、交易紀錄等財務報表，本機那一份是既有的留存機制，不能因為開了 Drive 就消失。
 
 **本任務的六頁，依寫檔結構分兩組**（實測結果，**不可套同一個修改樣板**）：
 
@@ -44,7 +44,7 @@ Requirement 51 要把「本機照寫＋Drive 附加副本」推廣到八個匯�
 - [x] 243.1 六個 DTO（`ExportScheduleDto`／`RealizedGainExportDto`／`AssetTransactionExportDto`／`CommodityExportDto`／`ExchangeRateExportDto`／`IndexExportDto`）的 `SettingResponse` 與 `SettingRequest`（皆為不可變 `record`，維持 record 不變）：
   - `SettingResponse` 加 `gdriveEnabled`（boolean）、`gdriveSubpath`、`gdriveRemote`（＝共用元件提供的 remote 名稱，**衍生顯示值不入庫**，讓前端能在錯誤訊息中指名 remote）、`gdriveLastRunAt`（格式化字串，比照該 DTO 既有 `lastRunAt` 的 `yyyy-MM-dd HH:mm:ss`）、`gdriveLastStatus`
   - `SettingRequest` 加 `gdriveEnabled`、`gdriveSubpath`
-- [x] 243.1.1 **`SettingRequest.gdriveEnabled` 必須用包裝型別 `Boolean` 而非 `boolean`**：要能分辨「明確送 false」與「整個欄位沒送」。後者（舊版前端、或只想改本機路徑／排程時間的呼叫端）**不應把使用者已開啟的 Drive 開關靜默關掉**。null 一律視為「不變更」。同理 `gdriveSubpath` 為 null 時保留既有值。（此為 t241 實作時發現並修正的實際問題。）
+- [x] 243.1.1 **`SettingRequest.gdriveEnabled` 必須用包裝型別 `Boolean` 而非 `boolean`**：要能分辨「明確送 false」與「整個欄位沒送」。後者（舊版前端、或只想改本機路徑／排程時間的呼叫端）**不應把使用者已開啟的 Drive 開關靜默關掉**。null 一律視為「不變更」。同理 `gdriveSubpath` 為 null 時保留既有值。（此為 t245 實作時發現並修正的實際問題。）
 
 ### 243.2 六個 service：`PUT` 的驗證與權限
 
@@ -62,10 +62,10 @@ Requirement 51 要把「本機照寫＋Drive 附加副本」推廣到八個匯�
 - [x] 243.3 每個 service 加一個私有 helper 統一處理「本機檔已寫好 → 視情況上傳 → 寫狀態欄」，再由 **run-now 與排程兩處各呼叫一次**。六頁的 run-now 端點皆為 `POST .../run-now`（已實測確認）。
 - [x] 243.3.1 **順序不可顛倒**：本機檔案是既有的留存機制，必須先確定它寫成功才上傳。**本機寫檔失敗時 Drive 完全不上傳**（絕不可上傳前一次的舊檔）。
 - [x] 243.3.2 A 組（歷年資產／已實現損益／交易紀錄）插在 `writeToDir(...)` 回傳 `Path` 之後；B 組（油價金價／台幣兌美元／GDP-TWSE）插在 `export()` 內、`writeAtomically(...)` 之後。**不要動 `writeAtomically()` 本身**（它沒有設定列情境）。
-- [x] 243.3.3 **run-now 也必須上傳並回報落點**，六個 DTO 的 `RunNowResponse` 各加 `gdrivePath` 與 `gdriveStatus` 兩欄（既有已帶本機 `path`／`sizeBytes`）。run-now 的用途就是驗證落點正確；若 Drive 啟用時它不上傳，使用者就無法在不等排程的情況下驗證 Drive 設定——**這正是 t241 在爬蟲頁缺 run-now 造成的實際不便（當時只能靠重啟容器觸發 warmup 才驗到）**。
+- [x] 243.3.3 **run-now 也必須上傳並回報落點**，六個 DTO 的 `RunNowResponse` 各加 `gdrivePath` 與 `gdriveStatus` 兩欄（既有已帶本機 `path`／`sizeBytes`）。run-now 的用途就是驗證落點正確；若 Drive 啟用時它不上傳，使用者就無法在不等排程的情況下驗證 Drive 設定——**這正是 t245 在爬蟲頁缺 run-now 造成的實際不便（當時只能靠重啟容器觸發 warmup 才驗到）**。
 - [x] 243.3.4 **上傳失敗為 best-effort**：只記 `log.error` 與該列的 `gdrive_last_status`，**絕不** rollback 本機檔案、**絕不**把該使用者的排程標記為失敗（本機那一份確實成功了，既有 `last_run_status` 應維持「成功」）、**絕不**擲例外影響其他使用者的排程列（這六頁的排程都是逐列跑，一列炸掉不能拖垮其餘）。
 - [x] 243.3.4.1 **逾時與確定性失敗的措辭必須分開**（承 t242.2.5.1，已實測發生的假失敗）：`exec()` 的判準是「行程未在時限內 exit」而非「檔案沒上去」——實測有過「狀態欄記逾時失敗，但 Drive 上檔案完整、與本機逐 byte 相同」。逾時寫「逾時（45 秒）：Drive 端可能已完成，請於下一輪確認」，只有 rclone 非零退出才寫「失敗：<rclone 錯誤>」。
-- [x] 243.3.5 **凡「已啟用 Drive 但未實際上傳」也必須寫狀態欄**，內容明示原因（例「跳過：Drive 子路徑不合法」「跳過：owner 非主要管理者」「跳過：rclone 設定不可用」）。否則 `gdrive_last_status` 會停留在**上一次的成功**，設定頁顯示過期的好消息——而這兩個欄位存在的唯一理由就是「上傳目的地不在使用者眼前，不回報就是靜默失敗」。（t241 實作時漏了這點，經審查補上。）
+- [x] 243.3.5 **凡「已啟用 Drive 但未實際上傳」也必須寫狀態欄**，內容明示原因（例「跳過：Drive 子路徑不合法」「跳過：owner 非主要管理者」「跳過：rclone 設定不可用」）。否則 `gdrive_last_status` 會停留在**上一次的成功**，設定頁顯示過期的好消息——而這兩個欄位存在的唯一理由就是「上傳目的地不在使用者眼前，不回報就是靜默失敗」。（t245 實作時漏了這點，經審查補上。）
 - [x] 243.3.6 **狀態欄寫入自身的失敗也必須被吞掉**（DB 短暫不可用時會擲例外）：「回報結果」這件事本身不能成為新的失敗來源。
 - [x] 243.3.7 **不實作 retry queue**：每日排程本身即為重試，Drive 端覆寫同名檔案冪等。
 - [x] 243.3.8 **檔名沿用各頁既有規則，不因 Drive 而改變**：Drive 上與本機同名同內容（多數含 `{使用者ID}` 與日期，例 `交易紀錄_1_20260727.xlsx`）。**不得以「實務上只有一人會啟用」為理由省略 owner id**——那是設定值決定的偶然狀態，不是機制保證。
@@ -90,7 +90,7 @@ Requirement 51 要把「本機照寫＋Drive 附加副本」推廣到八個匯�
   | `ExchangeRateBffController` | `/export/browse` | `/export/browse-gdrive` |
   | `GdpTwseBffController` | `/export/browse` | `/export/browse-gdrive` |
 
-- [x] 243.5.1 **六支全部指向同一支** business `GET /api/export-schedule/browse-gdrive`（t241 建立、t242 已把邏輯遷入共用元件，端點路徑不變）。**不得新造第二份 Drive 目錄列舉**（CLAUDE.md「不同頁面顯示同樣意義的值須呼叫同一支 business service API」）。BFF 層各建一支是「一頁一 BFF」的要求，business 層只有一份實作——兩者不衝突。
+- [x] 243.5.1 **六支全部指向同一支** business `GET /api/export-schedule/browse-gdrive`（t245 建立、t242 已把邏輯遷入共用元件，端點路徑不變）。**不得新造第二份 Drive 目錄列舉**（CLAUDE.md「不同頁面顯示同樣意義的值須呼叫同一支 business service API」）。BFF 層各建一支是「一頁一 BFF」的要求，business 層只有一份實作——兩者不衝突。
 - [x] 243.5.2 **不做 `onErrorReturn` 降級**：remote 未設定／授權失效時 business 回可讀錯誤，必須讓它浮到前端 dialog 顯示。降級成空清單會讓使用者誤讀為「Drive 裡沒有資料夾」而以為自己選錯位置。
 - [x] 243.5.3 檢查各 BFF 的設定 `PUT` 是否有 DTO 鏡像類別：若為 `Map<String,Object>` 直通則新欄位自動穿透、無需改動；若為**強型別 DTO 必須同步加上新欄位**，漏一個就會讓 Drive 設定在 BFF 層被靜默吃掉（前端存了卻沒生效）。
 - [x] 243.5.4 BFF `SecurityConfig`：新的 `GET` 應落在既有的 `anyExchange().authenticated()`；**不需**為 403 加規則（權限判斷在 business 端做，因為背景排程也要用同一套判定）。
@@ -98,10 +98,10 @@ Requirement 51 要把「本機照寫＋Drive 附加副本」推廣到八個匯�
 
 ### 243.6 前端：六個 view ＋ `api/index.js`
 
-- [x] 243.6 `frontend/src/api/index.js` 六個頁面區塊各加 `browseGdriveExportDir`，並確認該頁的 save 函式**送出完整 payload**（含 `gdriveEnabled`／`gdriveSubpath`）。**這一項漏掉會讓 Drive 設定靜默存不進去**——t241 就是漏了這裡（`saveExportPath` 原本只送單一字串），經審查才發現。新 helper 帶 `skipErrorToast: true`（同檔既有 `browseExportDir` 的慣例，讓錯誤顯示在 dialog 內、不與全域 toast 打架）。
+- [x] 243.6 `frontend/src/api/index.js` 六個頁面區塊各加 `browseGdriveExportDir`，並確認該頁的 save 函式**送出完整 payload**（含 `gdriveEnabled`／`gdriveSubpath`）。**這一項漏掉會讓 Drive 設定靜默存不進去**——t245 就是漏了這裡（`saveExportPath` 原本只送單一字串），經審查才發現。新 helper 帶 `skipErrorToast: true`（同檔既有 `browseExportDir` 的慣例，讓錯誤顯示在 dialog 內、不與全域 toast 打架）。
 - [x] 243.6.1 六個 view（`AssetHistoryView`／`RealizedGainView`／`TransactionView`／`CommodityPriceView`／`ExchangeRateView`／`GdpTwseView`）的排程設定卡，在既有「輸出資料夾」之下新增：「同步 Google Drive」`el-switch` ＋ Drive 目標資料夾欄位（readonly ＋「選擇」按鈕）＋「上次上傳」唯讀顯示。
-- [x] 243.6.2 **資料夾選擇器沿用 t241 的雙模式寫法**（範本見 `frontend/src/views/CrawlerDataView.vue`：`dirPicker` reactive 帶 `mode: 'local' | 'gdrive'`、`dirPickerTitle` 依 mode 切標題、`openDirPicker(mode)`、樹的 load 依 mode 選 API）。同一個 `el-dialog` ＋ `el-tree` 即可，因為 Drive 端回傳形狀與本機完全相同，不需第二套渲染邏輯。
-- [x] 243.6.3 **dialog 內的「目前選擇」預覽，兩種 mode 的分隔符不同**：Drive 基底是 `remote:`（已含冒號，後面**直接接**子路徑），本機基底是 `/home/steven`（需要 `/` 分隔）。混用會顯示成 `GDriveOutput:/投資理財` ——多一個斜線、不是 rclone 的路徑格式，會誤導使用者。（t241 犯過這個錯，由使用者截圖發現。）
+- [x] 243.6.2 **資料夾選擇器沿用 t245 的雙模式寫法**（範本見 `frontend/src/views/CrawlerDataView.vue`：`dirPicker` reactive 帶 `mode: 'local' | 'gdrive'`、`dirPickerTitle` 依 mode 切標題、`openDirPicker(mode)`、樹的 load 依 mode 選 API）。同一個 `el-dialog` ＋ `el-tree` 即可，因為 Drive 端回傳形狀與本機完全相同，不需第二套渲染邏輯。
+- [x] 243.6.3 **dialog 內的「目前選擇」預覽，兩種 mode 的分隔符不同**：Drive 基底是 `remote:`（已含冒號，後面**直接接**子路徑），本機基底是 `/home/steven`（需要 `/` 分隔）。混用會顯示成 `GDriveOutput:/投資理財` ——多一個斜線、不是 rclone 的路徑格式，會誤導使用者。（t245 犯過這個錯，由使用者截圖發現。）
 - [x] 243.6.4 Drive 樹載入失敗時把後端訊息顯示在 dialog 內，**不得顯示成空樹**。
 - [x] 243.6.5 開關關閉時 Drive 欄位與「選擇」按鈕停用，但**保留已填的值**（不清空）。開關開啟而資料夾為空時前端即擋下儲存並提示（後端亦回 400，前後端都擋）。
 - [x] 243.6.6 **非主要管理者不顯示 Drive 開關與欄位**（承 243.2.1）。注意這與同一張卡片上的其他欄位不同——本機路徑與排程時間對所有使用者都可見可改。
@@ -114,7 +114,7 @@ Requirement 51 要把「本機照寫＋Drive 附加副本」推廣到八個匯�
 ### 243.7 排程列表頁說明同步
 
 - [x] 243.7 本任務**未新增任何 `@Scheduled`**（上傳掛在既有排程輪次內），故「公開資訊 → 排程列表」（`bff/.../schedulelist/SchedulePublicBffController` 的 `JOBS`）**不需新增項目**；但這六個排程對應的 description 須各補上「輸出含 Google Drive 同步（若已啟用）」。
-- [x] 243.7.1 `JOBS` 是無鍵的 `List<ScheduledJobDto>`，**不能用資料表名或 service 名去 grep**。要靠 group／name 字串定位——本任務六筆為「資產匯出」／「已實現損益匯出」／「交易紀錄匯出」／「油價金價匯出」／「台幣兌美元匯出」／「大盤指數匯出」。（t241 踩過這個坑：`grep news-poller` 在該檔命中 0 次。）
+- [x] 243.7.1 `JOBS` 是無鍵的 `List<ScheduledJobDto>`，**不能用資料表名或 service 名去 grep**。要靠 group／name 字串定位——本任務六筆為「資產匯出」／「已實現損益匯出」／「交易紀錄匯出」／「油價金價匯出」／「台幣兌美元匯出」／「大盤指數匯出」。（t245 踩過這個坑：`grep news-poller` 在該檔命中 0 次。）
 
 ### 243.8 測試（與實作同屬本任務交付）
 

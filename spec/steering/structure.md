@@ -15,7 +15,7 @@ asset-management/
 ├── db/
 │   ├── init/                      # 容器初始化 SQL（01_dump.sql 含真實資料，gitignored）
 │   └── schema.sql                 # schema-only 鏡像（離線參考用，**不是可信基準線**——靠人工重新
-│                                  #   產出，實測已落後：截至 Task 241 仍缺 crawler_export_setting
+│                                  #   產出，實測已落後：截至 Task 245 仍缺 crawler_export_setting
 │                                  #   與 asset_transaction。DB 現況一律查運行中的 DB：
 │                                  #   docker exec asset-postgres psql -U assets -d assets -c '\d <table>'）
 ├── data/                          # H2 本機開發 DB（gitignored）
