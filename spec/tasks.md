@@ -832,3 +832,18 @@ SITCA（投信投顧公會）可行且合規，實測一年 240 個交易日連�
 - [x] 221.5 **單元測試**：`EditorialNewsFilterTest` 新增 `Anecdote`（5 案）與 `SocialOddity`（4 案）兩個巢狀類，含兩則使用者回報案例判 DROP，以及必保回歸錨點（青安3.0／巴菲特／張忠謀／薩德／荷姆茲／領照／車禍／推擠／交保）判 KEEP。
 - [ ] 221.6 **建置與部署驗證**：`--no-cache` 重建 `external-materials-service` 並 recreate，確認下一輪爬取不再收錄該兩類（**待使用者指示；依共用 stack 規則需從 main 的 worktree 重建**）。
 - [ ] 221.7 commit ＋ 兩段式 merge。
+
+### Task 246: 今日股市分析批次收尾 poller 於 virtual thread 下不執行 — 改平台執行緒排程器 ＋ client 逾時（Requirement 31 bug fix）
+
+對應 Requirements: 31
+
+> **編號說明**：本工作原於 2026-07-18 於分支 `claude/happy-williams-a4c86c` 以 **Task 152** 記錄，
+> 但該編號在 main 上已被「資產配置建議（Requirement 32）」占用並歸檔於
+> `spec/tasks/archive/tasks-151-200.md`。兩者為完全不同的工作，故本次併入 main 時避讓為 246。
+
+**背景**：實機發現手動分析批次在 Anthropic 端送出後約 7 分鐘即 `succeeded`（results 端點秒回、結果完整），但 `daily_market_analysis` 一直停在 `PROCESSING`、未落 OK 也未寄信。診斷：`spring.threads.virtual.enabled=true` 下，Boot 為 `@Scheduled` 配置 virtual-thread `SimpleAsyncTaskScheduler`，唯一的 `fixedDelay` 任務 `MarketAnalysisScheduler.pollBatches`（收尾 poller）不週期執行——thread dump 顯示排程 clock 執行緒存活但收尾從未觸發、日誌全無 finalize/例外，重啟仍複現；其餘 7 個 `@Scheduled` 皆 cron、症狀不明顯。若放任，批次連 12h 逾時判 FAILED 都不會觸發。
+
+- [x] 246.1 spec：`requirements.md` Requirement 31 加「收尾 poller 於 virtual thread 組態下可靠執行」驗收項；`design.md` Requirement 31 設計段加「排程執行緒（`SchedulingConfig`）」說明；本 Task。
+- [x] 246.2 後端：新增 `config/SchedulingConfig`——定義名為 `taskScheduler` 的 `ThreadPoolTaskScheduler`（pool=3）bean，使 Boot virtual 排程器退讓（`@ConditionalOnMissingBean(TaskScheduler.class)`），`@Scheduled` 改跑平台執行緒（解 fixedDelay 不重排 ＋ SDK on VT 阻塞 ＋ 單執行緒餓死）。Web 層仍維持 virtual threads。
+- [x] 246.3 後端加固：`MarketAnalysisService.client()` 建 `AnthropicOkHttpClient` 時加 `.timeout(Duration.ofSeconds(90))`，避免單次 retrieve/results 呼叫長時間阻塞排程執行緒。
+- [ ] 246.4 `--no-cache` 重 build business-services、recreate；驗證重啟後 poller 於平台執行緒週期執行、既有排程未回退（**待使用者指示；依共用 stack 規則需從 main 的 worktree 重建**）。
