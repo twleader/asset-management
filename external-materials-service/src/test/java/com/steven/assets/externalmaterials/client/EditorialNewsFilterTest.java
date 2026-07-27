@@ -215,4 +215,89 @@ class EditorialNewsFilterTest {
             assertKeep("中聯致癌油品案 四家公司不動產遭扣押");                 // 語料實例：扣押＋不動產＝財經
         }
     }
+
+    @Nested
+    @DisplayName("發票／彩券中獎與家事遺產（Task 240）")
+    class LotteryAndEstate {
+        @Test void 發票彩券中獎濾除() {
+            assertDrop("7-11開出千萬中獎發票　花150元買飲品成幸運兒");            // 使用者回報案例
+            assertDrop("只花10元抱回200萬！7-ELEVEN 開出一張千萬、七張百萬發票");  // 發票∧開出 AND 組合
+            assertDrop("大樂透頭獎連17摃  加碼100萬獎只剩7組");                   // 語料實例：加碼＝FINANCE
+            assertDrop("快對發票！5-6月統一發票千萬獎「38548029」 完整獎號在這裡");
+            assertDrop("最好的生日禮物！美國男買刮刮樂爽中3千萬");
+        }
+        // 金額詞 千萬／加碼 是真財經的常見訊號，不得因本規則而誤殺
+        @Test void 金額詞的真財經不誤殺() {
+            assertKeep("金管會上半年裁罰出爐 銀行業罰鍰較去年增加近兩千萬");
+            assertKeep("＜財經週報-青安3.0＞青安3.0千萬額度不夠用？ 全台16縣市平均房貸不到千萬");
+            assertKeep("影／混凝土大廠永固-KY董座砸9千萬炒股護盤 一家三人涉證交法送辦");
+            assertKeep("AI巨頭財報前瞻一表看！微軟、Meta、蘋果下周開獎 聚焦資本支出");  // 開獎刻意排除
+            assertKeep("台積電發放特別獎金 每人平均逾百萬");                            // 特別獎刻意排除（特別獎金）
+        }
+        @Test void 家事遺產糾紛濾除() {
+            assertDrop("很多家庭急著分遺產 忘了另一位父母還活著");                  // 使用者回報案例（標題）
+            assertDrop("他繼承父親1500萬遺產全丟進股市 慘痛代價曝光了");
+            assertDrop("最受寵卻一毛都沒分到！阿公留4千萬遺產「被獨漏」 長孫看完遺囑傻眼了");
+            assertDrop("孫女獲祖父母數百萬美元遺產 被要求發誓保密  父因「妻顧人怨」只能拿數萬美元");
+        }
+        // 法制／稅制／市場主體三類豁免
+        @Test void 遺產的法制稅制與市場主體不誤殺() {
+            assertKeep("遺產可免分兄弟姊妹？立院朝野拍板 特留分修法7/28處理");
+            assertKeep("被繼承人遺有應收股利  遺產稅申報一次看");
+            assertKeep("台積電配息創新高、繼承股票先別high！國稅局爆「這天」成股利報稅分水嶺");
+            assertKeep("三星搶攻AI晶片商機！將龍仁半導體國家產業園區首座晶圓廠量產提前一年"); // 家產刻意排除
+        }
+        // 「集團」刻意不列入 ESTATE_EXEMPT：它是高頻泛詞且同時在 FINANCE，收了會讓此類落回 KEEP:finance
+        @Test void 詐騙集團奪產仍應濾除() {
+            assertDrop("詐騙集團騙走老翁遺產 檢警偵辦中");
+        }
+    }
+
+    @Nested
+    @DisplayName("六都軟文與純財經來源（Task 240）")
+    class CivicSoftAndFinanceFeed {
+        @Test void 六都純軟性行程濾除() {
+            assertDrop("侯友宜、谷立言、片山和之同遊新北  搭船欣賞淡江大橋");        // 使用者回報案例
+            assertDrop("（新北）蘇巧慧陪小朋友開心玩 李四川參拜宮廟");
+            assertDrop("李四川現身動畫路跑 盼打造新北IP活動城市 釣出蔡詩萍留言");
+            assertDrop("高雄佛光山修行》蔡壁如宣布出家 預告此時再相見");
+            assertDrop("坪林川友會授旗 李四川：強化交通帶動新北茶鄉觀光升級");
+        }
+        // 只有財經（規則①）豁免；強政治（POLITY_STRONG，規則⑤）在 LIFESTYLE（規則②）之後，不豁免
+        @Test void 六都的財經不誤殺() {
+            assertKeep("全球最大AI晶片先進封裝廠　台積電嘉義二期動土前7座宮廟遶境祈福　員工、在地股東以信徒身分同行");
+            assertKeep("新北大巨蛋落腳樹林！蘇巧慧謝侯友宜、盼加速完善當地交通建設");
+            assertKeep("高雄市待售新成屋逼近1.6萬宅  楠梓和鳳山最多");
+        }
+        // 「參拜」刻意不收（只收「宮廟」）：裸「參拜」會在規則②攔下靖國神社類中日關係事件，
+        // 而規則③CHINA／⑤POLITY_STRONG 都在其後、無從救回
+        @Test void 參拜靖國神社類不誤殺() {
+            assertKeep("日相高市早苗參拜靖國神社 中國外交部強烈抗議");
+            assertKeep("習近平參拜毛澤東紀念堂 中共高層全數到齊");
+        }
+        // 陽明＝陽明海運，不得誤中陽明交大；運價為配套（唯一公司訊號為「陽明」的航運標題靠它保住）
+        @Test void 陽明子字串不誤中() {
+            assertDrop("陽明交大教評會爆爭議 教育部長：組成有瑕疵");                // 使用者回報案例
+            assertKeep("運價走揚  陽明6月營收165.91億年月雙增");
+            assertKeep("美新關稅敲定後 陽明：運價後市將明朗");
+            assertKeep("陽明蔡豐明：運價雖跌 貨量仍滿 後市視美關稅政策而定");        // 語料實例：須用完整標題
+            assertKeep("陽明、台驊6月營運亮麗");
+            assertKeep("陽明7月運價走弱 貨量持平");                                // 運價為唯一財經訊號
+            assertKeep("SCFI運價指數周跌4.3%");
+            assertKeep("鴻海研究院聯手陽明交大 研發超大容量矽光子技術");
+        }
+        // 純財經來源只套三條凌駕 FINANCE 的否決集，其餘一律保留
+        @Test void 純財經來源只濾三類雜訊() {
+            assertThat(EditorialNewsFilter.traceFinanceFeed("很多家庭急著分遺產 忘了另一位父母還活著 當父親或母親其中一位離世後，多數家庭討論的第一件事，往往不是照顧，而是繼承，房子要不要賣？存款怎麼分？"))
+                    .startsWith("DROP");   // 使用者回報案例：標題＋摘要（摘要含「存款」會在整套 cascade 被 KEEP:finance 救回）
+            assertThat(EditorialNewsFilter.traceFinanceFeed("完整獎號一次看！5、6月統一發票開獎千萬特別獎「38548029」")).startsWith("DROP");
+            assertThat(EditorialNewsFilter.traceFinanceFeed("68歲退休翁嫌定期定額賺太慢！看到半導體股狂飆就衝了 下場曝光")).startsWith("DROP");
+            // 以下在整套 cascade 會被誤殺，故純財經來源刻意不套 LIFESTYLE／SOCIAL_ODDITY／non-finance-general
+            assertThat(EditorialNewsFilter.traceFinanceFeed("旅遊市況熱 雄獅東北亞賞楓行程銷售破5成 將擴大拓郵輪版圖")).startsWith("KEEP");
+            assertThat(EditorialNewsFilter.traceFinanceFeed("減肥藥大戰打進法院！諾和諾德怒告禮來廣告誤導")).startsWith("KEEP");
+            assertThat(EditorialNewsFilter.traceFinanceFeed("Hugging Face遭OpenAI模型沙盒「越獄」攻擊 中國AI工具GLM-5.2臨危救場")).startsWith("KEEP");
+            assertThat(EditorialNewsFilter.traceFinanceFeed("自駕合作恐生變 Waymo傳2028年後終止合作 Uber跌逾4%")).startsWith("KEEP");
+            assertThat(EditorialNewsFilter.traceFinanceFeed("基本工資調漲至3萬 商總：對缺工問題仍無解、對雇外勞企業受衝擊最大")).startsWith("KEEP");
+        }
+    }
 }
