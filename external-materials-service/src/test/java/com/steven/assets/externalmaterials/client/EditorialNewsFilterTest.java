@@ -300,4 +300,84 @@ class EditorialNewsFilterTest {
             assertThat(EditorialNewsFilter.traceFinanceFeed("基本工資調漲至3萬 商總：對缺工問題仍無解、對雇外勞企業受衝擊最大")).startsWith("KEEP");
         }
     }
+
+    @Nested
+    @DisplayName("體育賽事與國際政治豁免（Task 241）")
+    class SportsAndIntlPolitics {
+        @Test void 體育賽事濾除() {
+            assertDrop("AI眼中的世界盃8強：14個模型集體押阿根廷 英格蘭卻遭遇「爆冷」警報");   // 語料實例
+            assertDrop("巔峰對決！世足賽決賽開踢前夕 八大AI模型僅Grok、DeepSeek押注阿根廷2:1勝出"); // 語料實例
+            assertDrop("世足》拍照嘲諷梅西曾患「侏儒症」 日本藍髮哥引爆球迷炎上");            // 語料實例
+            assertDrop("土銀羽球隊劉廣珩 許尹鏸勇奪加拿大公開賽銀牌");                      // 語料實例
+        }
+        // 使用者指定的豁免：影響國際政治的大新聞（例如恐怖攻擊）
+        @Test void 國際政治重大事件豁免() {
+            assertKeep("慕尼黑奧運遭恐怖攻擊 11名以色列選手遇害");
+            assertKeep("世界盃期間發生恐怖襲擊 主辦國封鎖場館");
+            assertKeep("波士頓馬拉松爆炸案 3死180傷");
+            assertKeep("世界盃球場外槍擊案 主辦國緊急加強維安");
+            assertKeep("奧運選手村遭挾持 恐怖組織宣稱犯案");
+            assertKeep("巴黎奧運場外發生爆炸 法國提升反恐等級");
+            assertKeep("多國宣布抵制北京冬奧 外交杯葛升溫");
+            assertKeep("國際奧會制裁俄羅斯 禁止其代表隊參加奧運");
+            assertKeep("我國以奧會模式參加亞運 正名運動再起");
+            assertKeep("俄羅斯重返奧運舞台 國際奧委會暫時解除處罰");                      // 語料實例
+        }
+        // 使用者 2026-07-27 裁示：意外／管理不善造成的傷亡不算「影響國際政治」，不得豁免
+        @Test void 場館意外災難不豁免() {
+            assertDrop("足球場看台倒塌 逾百人罹難");
+            assertDrop("奧運場館外傳出爆炸 至少10死");
+            assertDrop("世界盃球場看台踩踏釀30死 主辦單位遭究責");   // 刻意含 SPORT 詞，確保行經規則①d
+        }
+        // 弱豁免必須 AND 守門，否則一般體育新聞會把整個否決集架空（單層豁免時此組 5/5 全被誤救）
+        @Test void 一般體育新聞不得被豁免詞救回() {
+            assertDrop("聯盟制裁違規球隊 罰款500萬並扣除積分");
+            assertDrop("球迷抵制球隊經營不善 場外拉布條抗議");
+            assertDrop("世界盃抽籤爭議 球迷杯葛主辦單位");
+            assertDrop("電競選手人氣爆炸 直播訂閱數翻倍");
+            assertDrop("職棒球員酒駕遭球團暗殺式冷凍");
+            assertDrop("大聯盟球星轉隊 身價爆炸性成長");
+        }
+        // 守門詞不可用「有沒有提到某國家／政治角色」——體育本質即國際，那樣會架空整個否決集
+        @Test void 國家指涉不得作為豁免守門() {
+            assertDrop("世界盃巴西隊球迷抵制主辦單位售票制度");
+            assertDrop("韓國職棒球星遭球團驅逐出隊 引發球迷不滿");
+            assertDrop("中國羽球選手遭禁藥制裁 兩年不得出賽");
+            assertDrop("政府制裁禁藥球員 體育署祭出重罰");
+            assertDrop("總統盃全國羽球錦標賽開打 選手人氣爆炸");     // 總統⊂總統盃 子字串陷阱
+            assertDrop("大聯盟球星遭球隊驅逐 總統也發文力挺");
+        }
+        // 規則①d 必須在②之前的真正理由：體育事件常同時命中非體育的 LIFESTYLE 詞
+        @Test void 體育事件命中非體育生活詞仍須豁免() {
+            assertKeep("奧運開幕演唱會遭恐怖攻擊 多國元首緊急撤離");   // 演唱會∈LIFESTYLE
+            assertKeep("世界盃球迷粉絲見面會爆炸案 主辦國提升反恐");   // 粉絲∈LIFESTYLE
+        }
+        // 硬約束：SPORT 不得凌駕 FINANCE——體育語彙在財經媒體大量作為比喻
+        @Test void 財經比喻含體育詞不誤殺() {
+            assertKeep("高股息ETF受益人數 0056奪冠");
+            assertKeep("隱形冠軍／銳禾獨特工法出頭天 小螺絲攻進晶片封裝");
+            assertKeep("好市多狂吸400萬會員 單店平均營收百億霸氣封王");
+            assertKeep("台灣大6月EPS 0.52元 蟬聯2個月電信股EPS冠軍");
+            assertKeep("卓榮泰喊話打造金融世界盃 亞資中心瞄準超越香港追趕新加坡");
+            assertKeep("ASML加入AI紅利分配行列 全球員工可獲價值74萬股票獎勵");
+        }
+        // 體育帶動的產業／營收新聞必須保留（使用者「影響經濟」判準）
+        @Test void 體育產業財經不誤殺() {
+            assertKeep("世足經濟學／鞋尖上的台灣！全球每五雙足球鞋就有一雙來自這");
+            assertKeep("中鋼、燁輝搶澳洲奧運基建商機 台鏈有望迎訂單大潮");
+            assertKeep("華碩電競周邊營收翻倍 快了");
+            assertKeep("2026世足賽助攻 中華電信MOD、Hami Video收視再寫新猷");
+        }
+        // 純財經來源（無規則①FINANCE）全靠 traceSport 內建閘門
+        @Test void 純財經來源的體育與財經分流() {
+            assertThat(EditorialNewsFilter.traceFinanceFeed("AI眼中的世界盃8強：14個模型集體押阿根廷")).startsWith("DROP");
+            assertThat(EditorialNewsFilter.traceFinanceFeed("巔峰對決！世足賽決賽開踢前夕 八大AI模型押注阿根廷")).startsWith("DROP");
+            assertThat(EditorialNewsFilter.traceFinanceFeed("世足加持 日本電視出貨量創今年高；OLED大減4成")).startsWith("KEEP");
+            assertThat(EditorialNewsFilter.traceFinanceFeed("2026世界盃落幕 FIFA狂攬90億美元 商業巔峰背後仍充滿爭議")).startsWith("KEEP");
+            assertThat(EditorialNewsFilter.traceFinanceFeed("世界盃決賽Nike無緣亮相 adidas成贊助商大贏家")).startsWith("KEEP");
+            assertThat(EditorialNewsFilter.traceFinanceFeed("台灣5月手機銷量42.9萬台月增7% iPhone 17連續5月霸榜奪冠")).startsWith("KEEP");
+            assertThat(EditorialNewsFilter.traceFinanceFeed("0050定期定額人數突破120萬續稱霸 規模逾2.2兆元費率降至0.07%")).startsWith("KEEP");
+            assertThat(EditorialNewsFilter.traceFinanceFeed("俄羅斯重返奧運舞台 國際奧委會暫時解除處罰")).startsWith("KEEP");
+        }
+    }
 }
