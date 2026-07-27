@@ -1,6 +1,6 @@
 ---
 name: spec-review
-description: 對 asset-management 的 spec/ 變更做獨立對抗式審查，未達門檻不得進入實作。先跑 scripts/spec-check.sh 取機械證據，再派一支唯讀 subagent 逐項查證並評分（1–10，門檻 8）。當使用者說「審 spec」「spec review」「spec 寫好了」「可以開始實作了嗎」「檢查規格」之類指令、或剛改完 spec/requirements.md／design.md／tasks 任務檔而尚未動 code 時使用。審查者一律不得修改任何檔案。
+description: 對 asset-management 的 spec/ 變更做獨立對抗式審查，找出實作前該修的問題。先跑 scripts/spec-check.sh 取機械證據，再派一支唯讀 subagent 逐項查證並列出 findings（不打分數、不設通過門檻）。當使用者說「審 spec」「spec review」「spec 寫好了」「可以開始實作了嗎」「檢查規格」之類指令、或剛改完 spec/requirements.md／design.md／tasks 任務檔而尚未動 code 時使用。審查者一律不得修改任何檔案。
 ---
 
 # Spec 對抗式審查（實作前閘門）
@@ -13,9 +13,9 @@ SDD 流程的第 4 步（實作）之前的閘門。目的**不是**檢查「需
 
 1. **審查者不是作者。** 一律用 Agent tool 另起一支 subagent 執行審查。主 agent 剛寫完 spec 就自己審＝沒有獨立性，這一關等於沒跑。
 2. **唯讀。** 審查者禁止 Edit / Write 任何檔案，包含「順手修個 typo」。輸出只有報告。修正由主 agent 在報告產出後執行。
-3. **只找問題，不做摘要。** 不要複述 spec 寫了什麼。沒問題的維度就寫「已查 X，無發現」，不要用篇幅換分數。
-4. **機械證據壓過判斷。** `scripts/spec-check.sh` 報 BLOCK 時，分數上限 6，LLM 不得繞過。
-5. **門檻 8/10。** 未達 8 不得進入實作。修完重審，最多 3 輪；第 3 輪仍未過就停下來問使用者，附上「審查者反覆指出什麼 vs 修正者反覆做了什麼」的分歧摘要，不要無限迴圈。
+3. **只找問題，不做摘要。** 不要複述 spec 寫了什麼。沒問題的維度就寫「已查 X，無發現」，不要用篇幅充數。
+4. **機械證據壓過判斷。** `scripts/spec-check.sh` 報 BLOCK 就是已證實的缺陷，LLM 不得以主觀判斷繞過。
+5. **不打分數、不設通過門檻。** 產出的是 findings 清單，由主 agent 判斷哪些該修、哪些是誤判。**critical 與 major 修完即可進入實作**，minor 可留待後續。重審最多 3 輪；第 3 輪仍在爭同一件事就停下來問使用者，附上「審查者反覆指出什麼 vs 修正者反覆做了什麼」的分歧摘要，不要無限迴圈。
 
 ---
 
@@ -44,9 +44,9 @@ git diff origin/main...HEAD -- spec/          # 未 commit 的變更另跑 git d
 
 用 Agent tool（`subagent_type: Explore` 或 `general-purpose`），把下列內容交給它：Step 0 的完整輸出、Step 1 的完整 diff、以及下面整套 rubric 與規則。要求它**逐維度**回報，每個維度都要有具體證據（檔案:行號、identifier、實際 grep 結果），不接受「大致沒問題」。
 
-### 評分維度（權重）
+### 審查維度（依重要性排序）
 
-| 維度 | 權重 | 查什麼 |
+| 維度 | 權重（僅代表查證力度分配，不用於計分） | 查什麼 |
 |---|---|---|
 | **可查證性** | 0.30 | diff 裡描述**既有事實**的 CamelCase 類名、`/api/...` 路徑、`.vue` 檔名、方法名，逐一 grep 全樹是否存在。前例：Task 61 宣稱的 `WatchListService`／`WatchListController`／`/api/watch-list` **四項全部從未存在**；`design.md` 的 `UsaMap`（實為 `UsFlag`）、Gateway `GlobalFilter`（實為 `WebClientConfig.tenantHeaderFilter()`）、`FundDividendSourceQuery`（實為 `FundNavSourceQuery`）。**新功能尚未實作的識別字合法**——要區分「對現況的錯誤斷言」與「對未來的正當描述」。 |
 | **內部一致性** | 0.25 | 同一份文件的表格 vs 敘述、標題 vs 內文、ERD vs 表清單是否打架。前例：`design.md` 的 API 表仍列 Task 179 已移除的 `webSearchMaxUses`，而**同一節的敘述已寫「Task 179 移除」**；Requirement 31 標題寫「每交易日 08:45」但 AC 內文早已改為可設定。 |
@@ -68,25 +68,20 @@ git diff origin/main...HEAD -- spec/          # 未 commit 的變更另跑 git d
 
 ### 計分
 
-每個維度給 0–5：`0` 不成立／自相矛盾、`1` 很差、`2` 有但不完整、`3` 堪用、`4` 大致完整、`5` 具體且可查證。
+每條 finding 標 severity：
 
-```
-weighted = Σ(score_i × weight_i)
-quality_score = round(1 + 9 × weighted / 5)
-```
+- **critical** — 架構鐵則違反，或對現況的錯誤斷言（會讓實作者做錯事）
+- **major** — 會讓實作者踩坑或漏做，但不至於做錯方向
+- **minor** — 措辭、遺漏的補充、可讀性
 
-**上限規則（覆蓋公式，取最嚴的一條）：**
-- `spec-check.sh` 有任何 BLOCK → 上限 **6**
-- 有任何 Critical finding（架構鐵則違反、對現況的錯誤斷言）→ 上限 **7**
-
-**自我挑戰（必做，寫進報告）：** 「這個分數為什麼不該再低 2 分？」答不出強理由就減 2。
+**自我挑戰（必做，寫進報告）：** 「我這些 findings 裡，哪幾條其實是我查錯或誤判？」——逐條回頭驗一次再送出，寧可少報也不要報錯。
 
 ### 報告格式
 
 ```
 ## 判定
-quality_score: N/10   門檻 8   → 通過 / 不通過
 critical: N   major: N   minor: N
+（critical 與 major 全部修完即可進入實作）
 
 ## Findings
 ### [Critical|Major|Minor] <一句話結論>
@@ -112,7 +107,7 @@ critical: N   major: N   minor: N
 - `scripts/spec-check.sh` 零 BLOCK。
 - 審查由**另一支 subagent** 產出，不是主 agent 自評。
 - 報告含逐維度證據與自我挑戰段落，不是一句「看起來沒問題」。
-- `quality_score ≥ 8`，或已停在第 3 輪並回報使用者。
+- critical 與 major 已修完（或已判定為誤判並說明理由）。
 - 審查過程零檔案修改。
 
 ## 不要做

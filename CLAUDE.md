@@ -11,7 +11,7 @@
 1. spec/requirements.md     → 先確認或新增 User Story + Acceptance Criteria
 2. spec/design.md           → 確認架構、資料模型、API 設計已反映變更
 3. spec/tasks/tNNN_*.md     → 建立自足任務檔（規範見 spec/tasks/README.md）
-4. spec 對抗式審查          → /spec-review，quality_score < 8 不得進入實作
+4. spec 對抗式審查          → /spec-review（找出問題並修，不打分數、不設通過門檻）
 5. 實作程式碼
 ```
 
@@ -131,7 +131,7 @@ cd frontend
 
 | 文件 | 說明 |
 |------|------|
-| `spec/requirements.md` | User Stories + Acceptance Criteria（49 個 Requirements） |
+| `spec/requirements.md` | User Stories + Acceptance Criteria（51 個 Requirements） |
 | `spec/design.md` | 架構圖、ERD、API 端點、關鍵業務邏輯 |
 | `spec/tasks.md` | 任務索引（Task 1–220）＋ 尚未歸檔的 Task 201 起區段 |
 | `spec/tasks/README.md` | 自足任務檔規範（新任務寫這裡，不再追加 `tasks.md`） |
@@ -142,4 +142,4 @@ cd frontend
 | 工具 | 用途 |
 |------|------|
 | `scripts/spec-check.sh` | spec 變更的機械前置檢查（撞號／重號／changeset／計數漂移） |
-| `/spec-review` | 實作前的獨立對抗式審查閘門，門檻 8/10 |
+| `/spec-review` | 實作前的獨立對抗式審查（產出 findings，不打分數；critical／major 修完即可開工） |

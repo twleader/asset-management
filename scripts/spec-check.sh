@@ -197,7 +197,7 @@ done
 
 # ── B8. spec 對 DB 現況的斷言引用了 changelog（錯誤基準線）────────
 if added_lines 'spec/**' | grep -qE 'db/changelog/.*\.sql'; then
-  check "spec 引用了 db/changelog/*.sql 描述 DB 現況 —— 基準線應為 db/schema.sql（Task 148→197→201 的教訓：照永不執行的 changelog 改，反而改成與 DB 不一致）"
+  check "spec 引用了 db/changelog/*.sql —— 若用途是描述 DB 現況即為錯誤基準線（Task 148→197→201 的教訓：照永不執行的 changelog 改，反而改成與 DB 不一致）。現況一律以運行中 DB 為準：docker exec asset-postgres psql -U assets -d assets -c '\\d <table>'。注意 db/schema.sql 只是離線鏡像、已知落後（Task 241 實測缺 crawler_export_setting／asset_transaction），不可當基準線。若本次引用只是「新 changeset 放哪／現有最大版號」則屬正當用途，可忽略本項。"
 fi
 
 # ── 摘要 ──────────────────────────────────────────────────────────

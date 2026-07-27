@@ -95,7 +95,15 @@ curl -s http://localhost:8080/actuator/health
 - 檔案裡有沒有出現 `requirements.md`／`design.md`／`spec.init` 之類的**文件名指引**？有就是沒複寫完。
 - 有沒有出現「同上」「如前所述」「參考另一個任務」？收件者看不到那些。
 - 欄位型別、精度、nullable、命名，是不是寫死在檔案裡而不是要對方去查？
-  （對 DB 現況的斷言要以 `db/schema.sql` 為準，**不要引用 `db/changelog/**`**——那裡面有永不執行的 changeset，照著改會把原本正確的改成錯的。）
+  （對 DB 現況的斷言**以運行中的 DB 為準**：`docker exec asset-postgres psql -U assets -d assets -c '\d <table>'`。
+  **不要引用 `db/changelog/**`** 描述現況——那裡面有永不執行的 changeset，照著改會把原本正確的改成錯的。
+  `db/schema.sql` 只能當離線參考，**不是可信基準線**：它是被 `.gitignore` 排除的真基準線 `db/init/01_dump.sql`
+  的去資料鏡像，靠人工重新產出，**實測已落後**——截至 Task 241 它仍沒有 `crawler_export_setting`（v1.64.0）
+  與 `asset_transaction`（v1.72.0）。查不到某張表時，先確認是「真的沒有」還是「鏡像沒跟上」。
+  **但運行中 DB 也不等於 main 的現況**：全機只有一套 `asset-*` 容器、多個 worktree 並行推進，DB 可能已套用
+  其他分支尚未 merge 的 changeset。下斷言前先比對
+  `SELECT id FROM databasechangelog ORDER BY orderexecuted DESC LIMIT 5` 與 main 的
+  `db.changelog-master.yaml` 尾端。）
 - 驗證段的指令，是不是**貼上去就能跑**？
 - 涉及 `@Scheduled` 的話，有沒有一項是「同步 `SchedulePublicBffController.JOBS`」？漏掉這項是排程列表頁漂移的固定成因。
 
@@ -109,7 +117,7 @@ curl -s http://localhost:8080/actuator/health
 1. spec/requirements.md   → User Story + Acceptance Criteria
 2. spec/design.md         → 架構 / 資料模型 / API 設計
 3. spec/tasks/tNNN_*.md   → 建立自足任務檔（新任務；Task 1–220 見 tasks.md 索引）
-4. spec 對抗式審查        → /spec-review，未達門檻不進實作
+4. spec 對抗式審查        → /spec-review（產出 findings，不打分數）
 5. 實作程式碼
 ```
 
