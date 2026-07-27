@@ -1,0 +1,44 @@
+package com.steven.assets.externalmaterials.service;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Component;
+
+import java.time.LocalDate;
+import java.util.Optional;
+
+/**
+ * 「當下要算到哪個 trading_date」的單一決策點。
+ *
+ * 盤中（市場開盤或剛收盤 20 分鐘窗口）→ 該市場時區的今天。
+ * 盤外 → stock_price_history 最近一筆 trading_date（避免污染技術指標）。
+ *
+ * 供 {@link PriceCacheWriter} 寫 tick LIST 決定 bucket 的 trading_date。
+ *
+ * <p><b>讀取側（{@code InternalPriceController}）刻意不走這一支。</b>本類別原意是讓讀寫共用同一決策點，
+ * 但讀取側後來另外長出更完整的策略：先試「今天」（含 {@code todayTicksWithSelfHeal} 的 tick 不完整自癒），
+ * 為空才退回最近交易日，且非交易日不做 cold-start（颱風假一體休市，refresh 只會抓到昨收平盤幻影）。
+ * 那組行為涵蓋了本類別要解的「盤中讀到上一交易日 key」問題，且多處理了盤後仍要看得到今日 tick 的情形，
+ * 故合併時保留讀取側自身的邏輯，本類別只服務寫入側。
+ */
+@Component
+@RequiredArgsConstructor
+public class TradingDateResolver {
+
+    private final MarketClock clock;
+    private final StockSourceQuery source;
+
+    public LocalDate resolve(String stockCode, String market) {
+        boolean isUs = "美股".equals(market);
+        boolean isUk = "英股".equals(market);
+        boolean liveSession = isUs
+                ? (clock.isUsMarketOpen() || clock.isUsMarketJustClosed())
+                : isUk
+                    ? (clock.isUkMarketOpen() || clock.isUkMarketJustClosed())
+                    : (clock.isTwMarketOpen() || clock.isTwMarketJustClosed());
+        if (liveSession) {
+            return LocalDate.now(MarketClock.zoneOf(market));
+        }
+        Optional<LocalDate> latest = source.findMaxTradingDate(stockCode, market);
+        return latest.orElseGet(() -> LocalDate.now(MarketClock.zoneOf(market)));
+    }
+}

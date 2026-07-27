@@ -40,8 +40,12 @@ class PriceCacheWriterTest {
         when(redis.opsForValue()).thenReturn(values);
         when(redis.opsForSet()).thenReturn(sets);
         when(source.findMaxTradingDate(anyString(), anyString())).thenReturn(Optional.of(LATEST));
-        writer = new PriceCacheWriter(redis, mock(MarketClock.class), source,
-                mock(IntradayHighLowTracker.class), mock(IntradayTickStore.class));
+        // trading date 的決策已抽到 TradingDateResolver（其自身邏輯由 MarketClock 驅動，另行涵蓋）；
+        // 這裡固定回 LATEST，讓本測試專注在 Redis payload 與 previousClose 的組裝。
+        TradingDateResolver tradingDateResolver = mock(TradingDateResolver.class);
+        when(tradingDateResolver.resolve(anyString(), anyString())).thenReturn(LATEST);
+        writer = new PriceCacheWriter(redis, source,
+                mock(IntradayHighLowTracker.class), mock(IntradayTickStore.class), tradingDateResolver);
     }
 
     @Test

@@ -1362,7 +1362,12 @@ Redis 中 `price:{market}:{code}` 的 `tradingDate` 欄位代表**這筆價格�
 - `TechnicalIndicatorService.compute()` 看到 live `tradingDate == today` 就把它當「今天的 K 棒」併入 KD/MA9 序列
 - 實際上那筆資料是上週五的收盤 → 等於把上週五重複算了一次，污染技術指標
 
-**規則**（`external-materials-service` 的 `PriceCacheWriter.resolveTradingDate`）：
+**規則**（`external-materials-service` 的 `TradingDateResolver.resolve`，供 `PriceCacheWriter` 決定寫 tick LIST 的 bucket）：
+
+> **讀取側刻意不共用這一支。** `InternalPriceController.intradayTicks` 另有更完整的策略：先試「今天」
+> （含 `todayTicksWithSelfHeal` 的 tick 不完整自癒，Task 236），為空才退回最近交易日，且**非交易日不做
+> cold-start**（颱風假一體休市，refresh 只會抓到昨收平盤幻影，Task 161）。該策略已涵蓋「盤中讀到上一交易日
+> key 而 tick LIST 為空」這個問題，且多處理了「盤後仍要看得到今日 tick」的情形，故不改為共用。
 
 ```
 isLiveSession = (該市場 isOpen) || (該市場剛收盤 20 分鐘窗口)   // 一律用「該市場自己時區」判定
