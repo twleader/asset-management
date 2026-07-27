@@ -14,7 +14,10 @@ asset-management/
 ├── frontend/                      # Vue 3 SPA
 ├── db/
 │   ├── init/                      # 容器初始化 SQL（01_dump.sql 含真實資料，gitignored）
-│   └── schema.sql                 # schema-only 鏡像，**DB 現況的基準線**
+│   └── schema.sql                 # schema-only 鏡像（離線參考用，**不是可信基準線**——靠人工重新
+│                                  #   產出，實測已落後：截至 Task 241 仍缺 crawler_export_setting
+│                                  #   與 asset_transaction。DB 現況一律查運行中的 DB：
+│                                  #   docker exec asset-postgres psql -U assets -d assets -c '\d <table>'）
 ├── data/                          # H2 本機開發 DB（gitignored）
 ├── scripts/                       # 維運腳本 + git hooks
 │   ├── db-export.sh
@@ -291,7 +294,7 @@ frontend/
 
 ```
 spec/
-├── requirements.md       # 49 個 Requirements（User Story + AC）
+├── requirements.md       # 51 個 Requirements（User Story + AC）
 ├── design.md             # 架構圖、ERD、Service 職責、Sequence
 ├── tasks.md              # 任務索引（Task 1–220）＋ 尚未歸檔的 201 起區段
 ├── tasks/                # 任務檔
@@ -318,7 +321,7 @@ spec/
 | 純 CSS / 樣式 / typo / import 整理 | ❌ | commit 訊息加 `[skip-spec]` | ❌ |
 | 長期不變的技術選型 / 目錄結構 | ✅ | steering 對應檔（本文件等） | ❌ |
 
-審查門檻 `quality_score ≥ 8`，未達不得進入實作；連續 3 輪未過則停下來問人，不要無限迴圈。
+審查產出 findings 清單（critical／major／minor），**不打分數、不設通過門檻**；critical 與 major 修完即可進入實作，minor 可留待後續。連續 3 輪仍在爭同一件事則停下來問人，不要無限迴圈。
 
 ---
 

@@ -144,4 +144,23 @@ public class CommodityPriceBffController {
                     return b.body(e.getBody());
                 });
     }
+
+    /**
+     * Google Drive 資料夾樹懶載入（Requirement 51 / Task 243）：passthrough 至 business
+     * {@code /api/export-schedule/browse-gdrive}。
+     *
+     * <p><b>八個匯出頁全部指向同一支 business 端點</b>——Drive 目錄列舉全庫只有一份實作
+     * （CLAUDE.md「同義欄位、同一 business service API」）；BFF 各建一支則是「一頁一 BFF」的要求，
+     * 兩者不衝突。
+     *
+     * <p><b>刻意不做 onErrorReturn 降級</b>：remote 未設定／授權失效時 business 回 503 帶可讀訊息，
+     * 必須讓它浮到前端 dialog 顯示。降級成空清單會讓使用者誤讀為「Drive 裡沒有資料夾」而以為選錯位置。
+     */
+    @GetMapping("/export/browse-gdrive")
+    public Mono<ResponseEntity<Map<String, Object>>> browseGdriveExportDir(
+            @RequestParam(value = "subpath", required = false, defaultValue = "") String subpath) {
+        return businessServicesClient.get()
+                .uri("/api/export-schedule/browse-gdrive?subpath={subpath}", subpath)
+                .retrieve().bodyToMono(MAP).map(ResponseEntity::ok);
+    }
 }

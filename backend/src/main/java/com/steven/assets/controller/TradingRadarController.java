@@ -96,11 +96,17 @@ public class TradingRadarController {
         return exportScheduleService.getSetting();
     }
 
-    /** 儲存輸出資料夾（相對子路徑）；跳脫基底目錄丟 IllegalArgumentException → 400。 */
+    /**
+     * 儲存輸出資料夾（相對子路徑）與 Drive 同步設定；跳脫基底目錄丟 IllegalArgumentException → 400，
+     * 非主要管理者要啟用 Drive 丟 AdminRequiredException → 403。
+     *
+     * <p><b>傳整個 request 而非拆出單一欄位</b>：原本是 {@code request.outputSubpath()} 裸傳字串，
+     * 那樣新增的 Drive 兩欄會在此靜默消失（Task 244.1）。
+     */
     @PutMapping("/export-schedule/setting")
     public TradingRadarExportDto.SettingResponse saveExportSetting(
             @RequestBody TradingRadarExportDto.SettingRequest request) {
-        return exportScheduleService.saveSetting(request == null ? null : request.outputSubpath());
+        return exportScheduleService.saveSetting(request);
     }
 
     /** 立即匯出到設定目錄（驗證用）；不動任何時間點的當日 guard。 */

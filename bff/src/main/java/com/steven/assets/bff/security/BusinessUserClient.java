@@ -74,6 +74,9 @@ public class BusinessUserClient {
                 (String) m.get("name"),
                 (String) m.get("picture"),
                 (String) m.get("role"),
-                (String) m.get("status"));
+                (String) m.get("status"),
+                // business 的 UserDto.UserResponse.protectedAdmin ＝ isConfiguredAdmin(email)（ADMIN_EMAIL 本人）。
+                // 走 business 既有的單一判定入口，BFF 不自行比對 ADMIN_EMAIL——那會變成第二個判準、各自演化。
+                Boolean.TRUE.equals(m.get("protectedAdmin")));
     }
 }

@@ -30,6 +30,16 @@ public final class AuthConstants {
     public static final String AUTHORITY_UID_PREFIX = "APP_UID_";
     public static final String AUTHORITY_STATUS_PREFIX = "APP_STATUS_";
 
+    /**
+     * 「主要管理者」（{@code ADMIN_EMAIL} 本人）旗標，登入時由 business 的 {@code protectedAdmin} 編入。
+     *
+     * <p><b>與 {@link #AUTHORITY_ADMIN} 語意不同，不可混用</b>：{@code role == ADMIN} 可以有多列，
+     * 而主要管理者全庫唯一一人。Google Drive 同步的啟用權限用的是<b>這一個</b>——rclone remote
+     * 全機只有一份且綁定特定帳號，若以 role 判定，第二位 ADMIN 的財務報表就會被上傳到該帳號。
+     * 前端僅用它決定「顯不顯示」，真正的閘門在 business 端的 403（Requirement 51 / Task 242）。
+     */
+    public static final String AUTHORITY_CONFIGURED_ADMIN = "APP_CONFIGURED_ADMIN";
+
     public static final String STATUS_ACTIVE = "ACTIVE";
 
     /** Reactor context key：本請求解析出的身分。 */

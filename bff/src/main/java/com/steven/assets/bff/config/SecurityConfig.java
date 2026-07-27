@@ -137,6 +137,14 @@ public class SecurityConfig {
                                 authorities.add(new SimpleGrantedAuthority(
                                         AuthConstants.AUTHORITY_STATUS_PREFIX + me.status()));
                             }
+                            // 主要管理者（ADMIN_EMAIL 本人）旗標：供前端決定是否顯示 Google Drive 同步
+                            // 開關（Requirement 51 / Task 242）。與 ROLE_ADMIN 語意不同——role 可有多列
+                            // ADMIN，而 Drive remote 全機只有一份、綁定特定帳號，故只有主要管理者能啟用。
+                            // 真正的閘門在 business 端的 403，這裡只是不顯示。
+                            if (me != null && me.configuredAdmin()) {
+                                authorities.add(new SimpleGrantedAuthority(
+                                        AuthConstants.AUTHORITY_CONFIGURED_ADMIN));
+                            }
                             return (OidcUser) new DefaultOidcUser(authorities,
                                     oidcUser.getIdToken(), oidcUser.getUserInfo());
                         }));

@@ -65,6 +65,7 @@ public class TradingRadarExportScheduleService {
     private final TradingRadarExportService exportService;
     private final TradingRadarSnapshotStore snapshotStore;
     private final ObjectProvider<CurrentUserContext> currentUserProvider;
+    private final GdriveOutputSupport gdrive;
     private final String baseDir;
 
     private final AtomicBoolean ticking = new AtomicBoolean(false);
@@ -74,12 +75,14 @@ public class TradingRadarExportScheduleService {
                                             TradingRadarExportService exportService,
                                             TradingRadarSnapshotStore snapshotStore,
                                             ObjectProvider<CurrentUserContext> currentUserProvider,
+                                            GdriveOutputSupport gdrive,
                                             @Value("${EXPORT_OUTPUT_DIR:/home/steven}") String baseDir) {
         this.timeRepo = timeRepo;
         this.settingRepo = settingRepo;
         this.exportService = exportService;
         this.snapshotStore = snapshotStore;
         this.currentUserProvider = currentUserProvider;
+        this.gdrive = gdrive;
         this.baseDir = baseDir;
     }
 
@@ -150,14 +153,30 @@ public class TradingRadarExportScheduleService {
         return toSettingResponse(ownerId, sub, s);
     }
 
+    /**
+     * 儲存輸出資料夾與 Drive 同步設定。
+     *
+     * <p><b>收整個 request 而非裸字串</b>：原簽章是 {@code saveSetting(String outputSubpath)}，
+     * 新增的 Drive 兩欄在那個形狀下會被靜默丟掉（Task 244.1）。
+     */
     @Transactional
-    public TradingRadarExportDto.SettingResponse saveSetting(String outputSubpath) {
+    public TradingRadarExportDto.SettingResponse saveSetting(TradingRadarExportDto.SettingRequest req) {
         long ownerId = requireOwnerId();
-        String sub = normalizeSubpath(outputSubpath);
+        String sub = normalizeSubpath(req == null ? null : req.outputSubpath());
         resolveDir(sub);    // 驗證跳脫，非法即 IllegalArgumentException → 400
         TradingRadarExportSetting s = settingRepo.findByOwnerUserId(ownerId)
                 .orElseGet(() -> TradingRadarExportSetting.builder().ownerUserId(ownerId).build());
+        // Drive 兩欄一律走共用元件：null 解析（未送出＝不變更）、驗證、啟用時必填、只有主要管理者能啟用（403）。
+        GdriveOutputSupport.DriveSettings drive = gdrive.resolveUpdate(
+                ownerId,
+                req == null ? null : req.gdriveEnabled(),
+                req == null ? null : req.gdriveSubpath(),
+                s.isGdriveEnabled(), s.getGdriveSubpath());
+
         s.setOutputSubpath(sub);
+        s.setGdriveEnabled(drive.enabled());
+        s.setGdriveSubpath(drive.subpath());
+        // 刻意不碰 gdriveLastRunAt／gdriveLastStatus：那是執行結果，不是使用者設定。
         s.setUpdatedAt(LocalDateTime.now(TW_ZONE));
         settingRepo.save(s);
         return toSettingResponse(ownerId, sub, s);
@@ -172,14 +191,23 @@ public class TradingRadarExportScheduleService {
             Path file = writeDailyExport(ownerId, today);
             if (file == null) {
                 recordStatus(ownerId, NO_SNAPSHOT_STATUS);
+                // 沒產檔就完全不上傳（絕不上傳前一次的舊檔），但已啟用時仍寫狀態欄說明原因，
+                // 否則狀態會停在上一次的成功、顯示過期的好消息。
+                GdriveOutputSupport.SyncResult skipped = syncGdrive(ownerId, null, "當日無交易雷達快照");
                 return new TradingRadarExportDto.RunNowResponse(
-                        null, 0L, NO_SNAPSHOT_STATUS + "（請先開啟一次交易雷達頁產生快照）");
+                        null, 0L, NO_SNAPSHOT_STATUS + "（請先開啟一次交易雷達頁產生快照）",
+                        null, skipped == null ? null : skipped.status());
             }
             long size = Files.size(file);
             recordStatus(ownerId, "成功：" + file);
-            return new TradingRadarExportDto.RunNowResponse(file.toString(), size, "匯出完成");
+            // 本機寫成功後才上傳；run-now 的用途就是驗證落點正確，故它也要上傳並回報。
+            GdriveOutputSupport.SyncResult drive = syncGdrive(ownerId, file, null);
+            return new TradingRadarExportDto.RunNowResponse(file.toString(), size, "匯出完成",
+                    drive == null ? null : drive.path(),
+                    drive == null ? null : drive.status());
         } catch (IOException e) {
             recordStatus(ownerId, "失敗：" + e.getMessage());
+            syncGdrive(ownerId, null, "本機匯出失敗");
             throw new IllegalStateException("匯出失敗：" + e.getMessage(), e);
         }
     }
@@ -238,15 +266,18 @@ public class TradingRadarExportScheduleService {
             Path file = writeDailyExport(ownerId, today);
             if (file == null) {
                 recordStatus(ownerId, NO_SNAPSHOT_STATUS);
+                syncGdrive(ownerId, null, "當日無交易雷達快照");
                 log.info("交易雷達排程匯出略過（當日無快照）owner={} {}:{}",
                         ownerId, t.getRunHour(), t.getRunMinute());
             } else {
                 recordStatus(ownerId, "成功：" + file);
+                syncGdrive(ownerId, file, null);
                 log.info("交易雷達排程匯出成功 owner={} {}:{} → {}",
                         ownerId, t.getRunHour(), t.getRunMinute(), file);
             }
         } catch (Exception e) {
             recordStatus(ownerId, "失敗：" + e.getMessage());
+            syncGdrive(ownerId, null, "本機匯出失敗");
             log.warn("交易雷達排程匯出失敗 owner={} {}:{}：{}",
                     ownerId, t.getRunHour(), t.getRunMinute(), e.getMessage(), e);
         } finally {
@@ -299,6 +330,41 @@ public class TradingRadarExportScheduleService {
         settingRepo.save(s);
     }
 
+    /**
+     * 本機檔寫成功後的 Drive 同步（best-effort，Requirement 51 / Task 244）。
+     *
+     * <p><b>順序不可顛倒</b>：本機那一份是既有的留存機制，必須先確定它寫成功才上傳；本機失敗或當日無快照
+     * 時傳 {@code localFile == null} ——完全不上傳，絕不上傳前一次的舊檔，但仍寫狀態欄說明原因
+     * （否則狀態會停在上一次的成功、顯示過期的好消息）。
+     *
+     * <p>不擲例外、不 rollback 本機檔、不改既有 {@code lastRunStatus}——「本機成功、Drive 失敗」是正常
+     * 且必須可分辨的狀態。owner 權限在 {@code syncQuietly} 內<b>每一輪重驗</b>（背景排程沒有 request
+     * context，{@code PUT} 當下的檢查在此不適用）。
+     *
+     * <p><b>本頁一天可能上傳多次</b>：執行時間點存於 {@code trading_radar_export_time}（一列一時間點），
+     * 與其餘七頁「每日單一時間」不同，故狀態欄是「最後一次」語意。
+     *
+     * @param skipReason {@code localFile} 為 null 時寫入狀態欄的原因
+     * @return 未啟用（或設定列不存在）時回 {@code null}；否則為本輪結果，供 run-now 回報落點
+     */
+    private GdriveOutputSupport.SyncResult syncGdrive(long ownerId, Path localFile, String skipReason) {
+        try {
+            TradingRadarExportSetting s = settingRepo.findByOwnerUserId(ownerId).orElse(null);
+            if (s == null || !s.isGdriveEnabled()) return null;
+            GdriveOutputSupport.SyncResult r = localFile == null
+                    ? new GdriveOutputSupport.SyncResult(gdrive.skipped(skipReason), null)
+                    : gdrive.syncQuietly(ownerId, s.getGdriveSubpath(), localFile);
+            s.setGdriveLastRunAt(LocalDateTime.now(TW_ZONE));
+            s.setGdriveLastStatus(r.status());
+            settingRepo.save(s);
+            return r;
+        } catch (RuntimeException e) {
+            // 「回報結果」這件事本身不能成為新的失敗來源（DB 短暫不可用時 save 會擲例外）。
+            log.error("寫入 Drive 同步狀態失敗 owner={}：{}", ownerId, e.getMessage(), e);
+            return null;
+        }
+    }
+
     private long requireOwnerId() {
         CurrentUserContext ctx = currentUserProvider.getObject();
         if (!ctx.hasUser()) {
@@ -348,6 +414,13 @@ public class TradingRadarExportScheduleService {
                 resolveDir(subpath).toString(),
                 "交易雷達_" + ownerId + "_{YYYYMMDD}.xlsx",
                 s == null || s.getLastRunAt() == null ? null : s.getLastRunAt().toString(),
-                s == null ? null : s.getLastRunStatus());
+                s == null ? null : s.getLastRunStatus(),
+                // 讀取一律不驗證 Drive 子路徑：DB 值可能被繞過 API 直改，若讀取也擲例外，設定頁會 500
+                // 而使用者沒有任何入口能把它改回正常值——唯一的修正入口被自己鎖死。存檔時才驗。
+                s != null && s.isGdriveEnabled(),
+                s == null ? null : s.getGdriveSubpath(),
+                gdrive.remoteName(),
+                s == null || s.getGdriveLastRunAt() == null ? null : s.getGdriveLastRunAt().toString(),
+                s == null ? null : s.getGdriveLastStatus());
     }
 }

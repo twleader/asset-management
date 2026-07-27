@@ -9,15 +9,32 @@ package com.steven.assets.dto;
  */
 public class CrawlerExportPathDto {
 
-    /** 讀取／更新後的設定內容。 */
+    /**
+     * 讀取／更新後的設定內容。
+     *
+     * <p>{@code gdriveRemote} 同為衍生顯示值（＝環境變數 {@code GDRIVE_OUTPUT_REMOTE} 現值，不入庫），
+     * 讓前端能在錯誤訊息中指名是哪個 remote 沒設定好。{@code gdriveLastRunAt}／{@code gdriveLastStatus}
+     * 則是 ext 寫入的執行結果，唯讀回傳供設定頁顯示「上次上傳」。
+     */
     public record Response(
             String crawlerKey,
             String outputSubpath,
             String baseDir,
             String absolutePath,
-            String updatedAt
+            String updatedAt,
+            boolean gdriveEnabled,
+            String gdriveSubpath,
+            String gdriveRemote,
+            String gdriveLastRunAt,
+            String gdriveLastStatus
     ) {}
 
-    /** 更新請求：只帶子路徑（空字串／null → 後端正規化為預設值）。 */
-    public record Request(String outputSubpath) {}
+    /**
+     * 更新請求：本機子路徑（空字串／null → 後端正規化為預設值）＋ Drive 設定。
+     *
+     * <p>{@code gdriveEnabled} 用包裝型別 {@code Boolean} 而非 {@code boolean}：要能分辨「明確送 false」
+     * 與「整個欄位沒送」，後者（舊版前端或只想改本機路徑的呼叫端）不應把使用者已開啟的 Drive 開關
+     * 靜默關掉。null 一律視為「不變更」。
+     */
+    public record Request(String outputSubpath, Boolean gdriveEnabled, String gdriveSubpath) {}
 }

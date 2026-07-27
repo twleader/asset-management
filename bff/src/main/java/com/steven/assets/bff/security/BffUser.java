@@ -12,7 +12,14 @@ public record BffUser(
         String name,
         String picture,
         String role,
-        String status
+        String status,
+        /**
+         * 是否為「主要管理者」（{@code ADMIN_EMAIL} 本人）。來自 business 的 {@code protectedAdmin}，
+         * 登入時編入 principal authorities，之後每請求從 principal 還原、不再 round-trip business。
+         *
+         * <p><b>與 {@link #isAdmin()} 語意不同</b>：後者是 {@code role == ADMIN}（可多人）。
+         */
+        boolean configuredAdmin
 ) {
     public boolean isAdmin() {
         return AuthConstants.ROLE_ADMIN.equals(role);
@@ -33,6 +40,7 @@ public record BffUser(
         Long id = null;
         String role = AuthConstants.ROLE_USER;
         String status = null;
+        boolean configuredAdmin = false;
         for (GrantedAuthority a : oidc.getAuthorities()) {
             String s = a.getAuthority();
             if (s == null) continue;
@@ -46,8 +54,10 @@ public record BffUser(
                 }
             } else if (s.startsWith(AuthConstants.AUTHORITY_STATUS_PREFIX)) {
                 status = s.substring(AuthConstants.AUTHORITY_STATUS_PREFIX.length());
+            } else if (s.equals(AuthConstants.AUTHORITY_CONFIGURED_ADMIN)) {
+                configuredAdmin = true;
             }
         }
-        return new BffUser(id, oidc.getEmail(), oidc.getFullName(), oidc.getPicture(), role, status);
+        return new BffUser(id, oidc.getEmail(), oidc.getFullName(), oidc.getPicture(), role, status, configuredAdmin);
     }
 }

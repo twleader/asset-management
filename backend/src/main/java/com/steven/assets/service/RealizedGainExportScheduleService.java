@@ -51,6 +51,7 @@ public class RealizedGainExportScheduleService {
     private final RealizedGainExportScheduleRepository settingRepo;
     private final ExcelExportService excelExportService;
     private final ObjectProvider<CurrentUserContext> currentUserProvider;
+    private final GdriveOutputSupport gdrive;
 
     /** 容器內基底輸出目錄，經 docker volume 對映到 host（見 docker-compose.yml）。 */
     private final String baseDir;
@@ -61,10 +62,12 @@ public class RealizedGainExportScheduleService {
     public RealizedGainExportScheduleService(RealizedGainExportScheduleRepository settingRepo,
                                              ExcelExportService excelExportService,
                                              ObjectProvider<CurrentUserContext> currentUserProvider,
+                                             GdriveOutputSupport gdrive,
                                              @Value("${EXPORT_OUTPUT_DIR:/home/steven}") String baseDir) {
         this.settingRepo = settingRepo;
         this.excelExportService = excelExportService;
         this.currentUserProvider = currentUserProvider;
+        this.gdrive = gdrive;
         this.baseDir = baseDir;
     }
 
@@ -90,11 +93,19 @@ public class RealizedGainExportScheduleService {
 
         RealizedGainExportSchedule s = settingRepo.findByOwnerUserId(ownerId).orElseGet(() ->
                 RealizedGainExportSchedule.builder().ownerUserId(ownerId).build());
+        // Drive 兩欄一律走共用元件：null 解析（未送出＝不變更）、驗證、啟用時必填、只有主要管理者能啟用（403）。
+        // 本機路徑與排程時間刻意維持所有使用者皆可設定——只有 Drive 這一項會把資料送出本機。
+        GdriveOutputSupport.DriveSettings drive = gdrive.resolveUpdate(
+                ownerId, req.gdriveEnabled(), req.gdriveSubpath(), s.isGdriveEnabled(), s.getGdriveSubpath());
+
         s.setOwnerUserId(ownerId);
         s.setEnabled(Boolean.TRUE.equals(req.enabled()));
         s.setRunHour(hour);
         s.setRunMinute(minute);
         s.setOutputSubpath(subpath);
+        s.setGdriveEnabled(drive.enabled());
+        s.setGdriveSubpath(drive.subpath());
+        // 刻意不碰 gdriveLastRunAt／gdriveLastStatus：那是執行結果，不是使用者設定。
         s.setUpdatedAt(LocalDateTime.now(TW_ZONE));
         return toResponse(settingRepo.save(s));
     }
@@ -112,15 +123,20 @@ public class RealizedGainExportScheduleService {
             s.setOwnerUserId(ownerId);
             s.setLastRunAt(LocalDateTime.now(TW_ZONE));
             s.setLastRunStatus("成功：" + file);
+            // 本機寫成功後才上傳；run-now 的用途就是驗證落點正確，故它也要上傳並回報。
+            GdriveOutputSupport.SyncResult drive = syncGdrive(s, file);
             settingRepo.save(s);
             return RealizedGainExportDto.RunNowResponse.builder()
                     .path(file.toString())
                     .sizeBytes(data.length)
+                    .gdrivePath(drive == null ? null : drive.path())
+                    .gdriveStatus(drive == null ? null : drive.status())
                     .build();
         } catch (IOException | RuntimeException e) {
             s.setOwnerUserId(ownerId);
             s.setLastRunAt(LocalDateTime.now(TW_ZONE));
             s.setLastRunStatus("失敗：" + e.getMessage());
+            syncGdrive(s, null); // 本機失敗＝完全不上傳，但已啟用時仍須寫狀態欄說明原因
             settingRepo.save(s);
             throw new RuntimeException("立即匯出失敗：" + e.getMessage(), e);
         }
@@ -180,9 +196,11 @@ public class RealizedGainExportScheduleService {
             Path file = writeToDir(s.getOwnerUserId(), normalizeSubpath(s.getOutputSubpath()), data);
             s.setLastRunStatus("成功：" + file);
             log.info("已實現損益排程匯出成功 owner={} → {}（{} bytes）", s.getOwnerUserId(), file, data.length);
+            syncGdrive(s, file);
         } catch (Exception e) {
             s.setLastRunStatus("失敗：" + e.getMessage());
             log.warn("已實現損益排程匯出失敗 owner={}：{}", s.getOwnerUserId(), e.getMessage(), e);
+            syncGdrive(s, null); // 本機失敗＝不上傳；已啟用時仍寫狀態欄，否則會停在上一次的成功
         } finally {
             // 成功或失敗都設 guard，避免命中分鐘後每 poll 重試整天。
             s.setLastRunDate(today);
@@ -236,6 +254,32 @@ public class RealizedGainExportScheduleService {
                 .lastRunAt(s.getLastRunAt() == null ? null : s.getLastRunAt().format(TS_FMT))
                 .lastRunStatus(s.getLastRunStatus())
                 .baseDir(baseDir)
+                // 讀取一律不驗證 Drive 子路徑：DB 值可能被繞過 API 直改，若讀取也擲例外，設定頁會 500
+                // 而使用者沒有任何入口能把它改回正常值——唯一的修正入口被自己鎖死。存檔時才驗。
+                .gdriveEnabled(s.isGdriveEnabled())
+                .gdriveSubpath(s.getGdriveSubpath())
+                .gdriveRemote(gdrive.remoteName())
+                .gdriveLastRunAt(s.getGdriveLastRunAt() == null ? null : s.getGdriveLastRunAt().format(TS_FMT))
+                .gdriveLastStatus(s.getGdriveLastStatus())
                 .build();
+    }
+
+    /**
+     * 本機檔寫成功後的 Drive 同步（best-effort）。<b>順序不可顛倒</b>：本機那一份是既有的留存機制，
+     * 必須先確定它寫成功才上傳；本機失敗時傳 {@code null} ——完全不上傳，絕不上傳前一次的舊檔。
+     *
+     * <p>不擲例外、不 rollback 本機檔、不改既有 {@code lastRunStatus}——「本機成功、Drive 失敗」是正常
+     * 且必須可分辨的狀態。owner 權限在 {@code syncQuietly} 內<b>每一輪重驗</b>（背景排程沒有 request
+     * context，{@code PUT} 當下的檢查在此不適用）。
+     *
+     * @return 未啟用時回 {@code null}（不碰狀態欄）；否則為本輪結果，供 run-now 回報落點
+     */
+    private GdriveOutputSupport.SyncResult syncGdrive(RealizedGainExportSchedule s, Path localFile) {
+        if (!s.isGdriveEnabled()) return null;
+        GdriveOutputSupport.SyncResult r =
+                gdrive.syncQuietly(s.getOwnerUserId(), s.getGdriveSubpath(), localFile);
+        s.setGdriveLastRunAt(LocalDateTime.now(TW_ZONE));
+        s.setGdriveLastStatus(r.status());
+        return r;
     }
 }

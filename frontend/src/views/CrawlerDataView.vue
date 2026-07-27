@@ -177,7 +177,7 @@
             style="width:340px"
           >
             <template #append>
-              <el-button :disabled="!auth.isAdmin" @click="openDirPicker">選擇</el-button>
+              <el-button :disabled="!auth.isAdmin" @click="openDirPicker('local')">選擇</el-button>
             </template>
           </el-input>
           <el-button
@@ -187,6 +187,45 @@
             :disabled="!exportPathLoaded"
             @click="saveExportPath"
           >儲存設定</el-button>
+        </div>
+
+        <!-- Google Drive 同步（Task 241）：本機照寫不變，這裡只是額外多上傳一份副本 -->
+        <div class="path-row gdrive-row">
+          <span class="field-label">同步 Google Drive</span>
+          <el-switch v-model="exportPath.gdriveEnabled" :disabled="!auth.isAdmin" />
+          <el-input
+            v-model="exportPath.gdriveSubpath"
+            readonly
+            placeholder="（尚未選擇 Drive 資料夾）"
+            :disabled="!exportPath.gdriveEnabled"
+            style="width:340px"
+          >
+            <template #append>
+              <el-button
+                :disabled="!auth.isAdmin || !exportPath.gdriveEnabled"
+                @click="openDirPicker('gdrive')"
+              >選擇</el-button>
+            </template>
+          </el-input>
+        </div>
+
+        <div class="path-hint">
+          開啟後，每輪除了寫入上面的本機資料夾，會<strong>再上傳一份同樣的檔案</strong>到
+          Google Drive 的所選資料夾。<strong>本機那一份永遠照寫、不受影響</strong>（SRPP 退休規劃專案讀的是本機檔）。
+          <template v-if="exportPath.gdriveEnabled && exportPath.gdriveSubpath">
+            <br />Drive 落點：
+            <code>{{ exportPath.gdriveRemote }}:{{ exportPath.gdriveSubpath }}/public_info_{{ today }}.json</code>
+          </template>
+          <span v-if="gdriveDirty" class="path-dirty">
+            ← 尚未儲存的變更，按「儲存設定」後生效
+          </span>
+          <br />
+          上次上傳：
+          <template v-if="exportPath.gdriveLastRunAt">
+            {{ exportPath.gdriveLastRunAt }} —
+            <code>{{ exportPath.gdriveLastStatus || '—' }}</code>
+          </template>
+          <template v-else>—（尚未執行過）</template>
         </div>
 
         <div class="path-hint">
@@ -207,11 +246,20 @@
       </div>
     </el-card>
 
-    <!-- 輸出資料夾選擇器 -->
-    <el-dialog v-model="dirPicker.visible" title="選擇輸出資料夾" width="560px">
+    <!-- 輸出資料夾選擇器（本機／Google Drive 共用，由 dirPicker.mode 決定資料來源） -->
+    <el-dialog v-model="dirPicker.visible" :title="dirPickerTitle" width="560px">
       <div class="dir-picker-path">
-        目前選擇：<code>{{ dirPicker.baseDir || exportPath.baseDir || '/home/steven' }}{{ dirPicker.picked ? '/' + dirPicker.picked : '' }}{{ dirPicker.newSub.trim() ? '/' + dirPicker.newSub.trim() : '' }}</code>
+        目前選擇：<code>{{ dirPickerPreview }}</code>
       </div>
+      <!-- Drive 端讀取失敗必須顯示原因；空樹會被誤讀為「Drive 裡沒有資料夾」 -->
+      <el-alert
+        v-if="dirPicker.error"
+        type="error"
+        :closable="false"
+        show-icon
+        style="margin-bottom:12px"
+        :title="dirPicker.error"
+      />
       <el-tree
         :key="dirPicker.treeKey"
         lazy
@@ -328,20 +376,43 @@ async function saveSchedule() {
   }
 }
 
-// --- 輸出檔案路徑設定（Task 212）---
-const exportPath = reactive({ outputSubpath: '', baseDir: '', absolutePath: '', updatedAt: null })
+// --- 輸出檔案路徑設定（Task 212；Drive 同步為 Task 241）---
+const exportPath = reactive({
+  outputSubpath: '', baseDir: '', absolutePath: '', updatedAt: null,
+  // Google Drive 同步（Task 241）：本機一律照寫，這裡只控制「要不要多上傳一份副本」
+  gdriveEnabled: false, gdriveSubpath: '', gdriveRemote: '',
+  gdriveLastRunAt: null, gdriveLastStatus: ''
+})
 const exportPathLoading = ref(false)
 const exportPathLoaded = ref(false)   // 未成功載入前停用儲存，避免以空值覆寫既有設定
 const savingExportPath = ref(false)
 const today = dayjs().format('YYYY-MM-DD')
 
-// 已儲存的子路徑；用來標示「選了新資料夾但尚未儲存」。落點字串一律沿用後端回傳的 absolutePath，
+// 已儲存的值；用來標示「改了但尚未儲存」。落點字串一律沿用後端回傳的 absolutePath，
 // 不在前端重算正規化規則（空字串→預設子路徑等規則只存在後端，複製一份必然漂移）。
 const savedSubpath = ref('')
+const savedGdrive = reactive({ enabled: false, subpath: '' })
 const exportPathDirty = computed(() => exportPathLoaded.value && exportPath.outputSubpath !== savedSubpath.value)
+const gdriveDirty = computed(() => exportPathLoaded.value
+  && (exportPath.gdriveEnabled !== savedGdrive.enabled || (exportPath.gdriveSubpath || '') !== savedGdrive.subpath))
 
-const dirPicker = reactive({ visible: false, baseDir: '', picked: '', newSub: '', treeKey: 0 })
+// mode 決定這個 dialog 這次是在挑本機還是 Drive 資料夾（共用同一棵樹與同一組操作，只換資料來源）
+const dirPicker = reactive({ visible: false, mode: 'local', baseDir: '', picked: '', newSub: '', treeKey: 0, error: '' })
 const dirTreeProps = { label: 'name', isLeaf: 'leaf' }
+const dirPickerTitle = computed(() => dirPicker.mode === 'gdrive' ? '選擇 Google Drive 資料夾' : '選擇輸出資料夾')
+
+// dialog 內的「目前選擇」預覽。兩種 mode 的分隔符不同：Drive 的基底是 `remote:`（已含冒號，
+// 後面直接接子路徑），本機的基底是 `/home/steven`（需要 `/` 分隔）。混用會顯示成
+// `GDriveOutput:/投資理財` —— 多一個斜線，不是 rclone 的路徑格式，會誤導使用者。
+const dirPickerPreview = computed(() => {
+  const isGdrive = dirPicker.mode === 'gdrive'
+  const base = dirPicker.baseDir
+    || (isGdrive ? (exportPath.gdriveRemote || 'GDriveOutput') + ':' : (exportPath.baseDir || '/home/steven'))
+  const parts = [dirPicker.picked, (dirPicker.newSub || '').trim()].filter(Boolean)
+  if (!parts.length) return base
+  const joined = parts.join('/')
+  return isGdrive ? base + joined : base + '/' + joined
+})
 
 async function fetchExportPath() {
   exportPathLoading.value = true
@@ -351,7 +422,14 @@ async function fetchExportPath() {
     exportPath.baseDir = s.baseDir || ''
     exportPath.absolutePath = s.absolutePath || ''
     exportPath.updatedAt = s.updatedAt || null
+    exportPath.gdriveEnabled = !!s.gdriveEnabled
+    exportPath.gdriveSubpath = s.gdriveSubpath || ''
+    exportPath.gdriveRemote = s.gdriveRemote || ''
+    exportPath.gdriveLastRunAt = s.gdriveLastRunAt || null
+    exportPath.gdriveLastStatus = s.gdriveLastStatus || ''
     savedSubpath.value = exportPath.outputSubpath
+    savedGdrive.enabled = exportPath.gdriveEnabled
+    savedGdrive.subpath = exportPath.gdriveSubpath
     exportPathLoaded.value = true
   } catch (e) {
     exportPathLoaded.value = false
@@ -362,16 +440,29 @@ async function fetchExportPath() {
 }
 
 async function saveExportPath() {
+  // 前端先擋一次（後端也會回 400）：開了同步卻沒指定資料夾，等於要把檔案倒在 Drive 根目錄
+  if (exportPath.gdriveEnabled && !(exportPath.gdriveSubpath || '').trim()) {
+    ElMessage.warning('已啟用 Google Drive 同步，請先選擇 Drive 目標資料夾')
+    return
+  }
   savingExportPath.value = true
   try {
-    const s = (await bffApi.crawlerData.saveExportPath(exportPath.outputSubpath || '')) || {}
+    const s = (await bffApi.crawlerData.saveExportPath({
+      outputSubpath: exportPath.outputSubpath || '',
+      gdriveEnabled: exportPath.gdriveEnabled,
+      gdriveSubpath: exportPath.gdriveSubpath || ''
+    })) || {}
     // 以後端正規化後的值回填（空字串會被正規化為預設子路徑），避免畫面與實際落點不一致
     exportPath.outputSubpath = s.outputSubpath || ''
     exportPath.baseDir = s.baseDir || exportPath.baseDir
     exportPath.absolutePath = s.absolutePath || ''
     exportPath.updatedAt = s.updatedAt || null
+    exportPath.gdriveEnabled = !!s.gdriveEnabled
+    exportPath.gdriveSubpath = s.gdriveSubpath || ''
     savedSubpath.value = exportPath.outputSubpath
-    ElMessage.success('已儲存爬蟲輸出路徑，下一輪抓取起生效')
+    savedGdrive.enabled = exportPath.gdriveEnabled
+    savedGdrive.subpath = exportPath.gdriveSubpath
+    ElMessage.success('已儲存爬蟲輸出設定，下一輪抓取起生效')
   } catch (e) {
     ElMessage.error('儲存失敗：' + apiErrorMessage(e))
   } finally {
@@ -379,25 +470,36 @@ async function saveExportPath() {
   }
 }
 
-function openDirPicker() {
-  dirPicker.picked = exportPath.outputSubpath || ''
+function openDirPicker(mode = 'local') {
+  dirPicker.mode = mode
+  dirPicker.picked = (mode === 'gdrive' ? exportPath.gdriveSubpath : exportPath.outputSubpath) || ''
   dirPicker.newSub = ''
+  dirPicker.baseDir = ''
+  dirPicker.error = ''
   dirPicker.treeKey++            // 強制 el-tree 重新懶載入 root
   dirPicker.visible = true
 }
 
-// el-tree 懶載入：level 0 以家目錄為單一 root；其餘列該節點子目錄
+// el-tree 懶載入：level 0 以基底（本機家目錄／Drive remote 根）為單一 root；其餘列該節點子目錄。
+// 兩種 mode 共用同一棵樹，只換資料來源——Drive 端回傳形狀與本機完全相同，故不需第二套渲染邏輯。
 async function loadDirNode(node, resolve) {
+  const browse = dirPicker.mode === 'gdrive'
+    ? bffApi.crawlerData.browseGdriveExportDir
+    : bffApi.crawlerData.browseExportDir
   try {
     if (node.level === 0) {
-      const res = await bffApi.crawlerData.browseExportDir('')
+      const res = await browse('')
       dirPicker.baseDir = res.baseDir || ''
+      dirPicker.error = ''
       resolve([{ name: res.baseDir || '/', path: '', key: '__root__', leaf: false }])
       return
     }
-    const res = await bffApi.crawlerData.browseExportDir(node.data.path || '')
+    const res = await browse(node.data.path || '')
     resolve((res.directories || []).map(d => ({ name: d.name, path: d.path, key: d.path, leaf: false })))
   } catch (e) {
+    // Drive 端失敗（remote 未設定／授權失效）必須把原因顯示在 dialog 內，不能只是空樹——
+    // 空樹會被誤讀為「Drive 裡沒有資料夾」而讓使用者以為是自己找錯位置
+    if (dirPicker.mode === 'gdrive') dirPicker.error = apiErrorMessage(e)
     resolve([])
   }
 }
@@ -408,7 +510,8 @@ function confirmDirPick() {
   let p = dirPicker.picked || ''
   const sub = (dirPicker.newSub || '').trim().replace(/^\/+|\/+$/g, '')
   if (sub) p = p ? `${p}/${sub}` : sub
-  exportPath.outputSubpath = p
+  if (dirPicker.mode === 'gdrive') exportPath.gdriveSubpath = p
+  else exportPath.outputSubpath = p
   dirPicker.visible = false
 }
 
@@ -437,6 +540,8 @@ onMounted(() => {
 .schedule-actions { margin-top: 12px; display: flex; gap: 12px; }
 
 .path-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+/* Drive 同步列與本機輸出列拉開一點，讓「本機／Drive 是兩件事」在視覺上分得開 */
+.gdrive-row { margin-top: 14px; }
 .path-hint { margin-top: 10px; font-size: 12px; color: #94a3b8; line-height: 1.8; }
 .path-hint code { background: #f1f5f9; color: #475569; padding: 1px 5px; border-radius: 4px; font-size: 11px; word-break: break-all; }
 .path-dirty { color: #d97706; }
