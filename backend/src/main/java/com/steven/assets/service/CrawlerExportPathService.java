@@ -36,10 +36,20 @@ public class CrawlerExportPathService {
     /** 容器內基底輸出目錄，經 docker volume 對映到 host 家目錄（與 business 的排程匯出共用同一基底）。 */
     private final String baseDir;
 
+    /**
+     * Drive 子路徑驗證與 remote 名稱的<b>唯一</b>來源（Task 242）。
+     *
+     * <p>驗證規則原本是本類別的 private static 方法，Task 242 把它遷入共用元件——八個匯出頁與本頁
+     * 寫進的是<b>同一個</b> Drive，規則不能各自演化。本類別改為注入使用，行為不變（純重構）。
+     */
+    private final GdriveOutputSupport gdrive;
+
     public CrawlerExportPathService(CrawlerExportSettingRepository repo,
-                                    @Value("${EXPORT_OUTPUT_DIR:/home/steven}") String baseDir) {
+                                    @Value("${EXPORT_OUTPUT_DIR:/home/steven}") String baseDir,
+                                    GdriveOutputSupport gdrive) {
         this.repo = repo;
         this.baseDir = baseDir;
+        this.gdrive = gdrive;
     }
 
     /** 取某爬蟲的輸出路徑設定；尚未設定時回預設值（不寫入 DB）。 */
@@ -53,15 +63,38 @@ public class CrawlerExportPathService {
         return toResponse(s);
     }
 
-    /** upsert 某爬蟲的輸出子路徑；跳脫基底者擲 {@link IllegalArgumentException}（→ 400）。 */
+    /**
+     * upsert 某爬蟲的輸出子路徑與 Drive 設定；跳脫基底或 Drive 子路徑不合法者擲
+     * {@link IllegalArgumentException}（→ 400）。
+     *
+     * <p><b>{@code gdriveEnabled} 為包裝型別</b>：null＝「整個欄位沒送」＝不變更，與「明確送 false」
+     * 語意不同。舊版前端或只想改本機路徑的呼叫端不該把使用者已開啟的 Drive 開關靜默關掉。
+     * {@code gdriveSubpath} 為 null 時同理保留既有值。
+     */
     @Transactional
     public CrawlerExportPathDto.Response update(String crawlerKey, CrawlerExportPathDto.Request req) {
         String subpath = normalizeSubpath(req == null ? null : req.outputSubpath());
         resolveDir(subpath); // 驗證不跳脫基底（丟出即擋下）
 
         CrawlerExportSetting s = repo.findByCrawlerKey(crawlerKey).orElseGet(CrawlerExportSetting::new);
+
+        boolean enabled = req == null || req.gdriveEnabled() == null
+                ? s.isGdriveEnabled()            // 未送出＝不變更
+                : req.gdriveEnabled();
+        String gdriveSubpath = req == null || req.gdriveSubpath() == null
+                ? s.getGdriveSubpath()           // 未送出＝保留既有值
+                : gdrive.normalizeSubpath(req.gdriveSubpath());
+        // 驗證與「啟用時必填」一律走共用元件（Task 242）：兩邊寫進同一個 Drive，規則不能各自演化。
+        gdrive.validateSubpath(gdriveSubpath);
+        if (enabled && (gdriveSubpath == null || gdriveSubpath.isBlank())) {
+            throw new IllegalArgumentException("已啟用 Google Drive 同步時，必須指定 Drive 目標資料夾");
+        }
+
         s.setCrawlerKey(crawlerKey);
         s.setOutputSubpath(subpath);
+        s.setGdriveEnabled(enabled);
+        s.setGdriveSubpath(gdriveSubpath);
+        // 刻意不碰 gdriveLastRunAt／gdriveLastStatus：那是 ext 寫入的執行結果，不是使用者設定。
         s.setUpdatedAt(Instant.now());
         return toResponse(repo.save(s));
     }
@@ -86,6 +119,12 @@ public class CrawlerExportPathService {
         return target;
     }
 
+    /**
+     * 轉 response。<b>讀取路徑一律不驗證、不擲例外</b>（同 {@link #absolutePathOrNull} 的理由）：
+     * DB 內可能存在繞過 API 寫入的不合法 Drive 子路徑，若讀取也失敗，設定頁會 500 而使用者
+     * <b>沒有任何入口能把它改回正常值</b>——唯一的修正入口被自己鎖死。故原樣回傳供前端顯示，
+     * 存檔時（{@link #update}）才驗。
+     */
     private CrawlerExportPathDto.Response toResponse(CrawlerExportSetting s) {
         String subpath = normalizeSubpath(s.getOutputSubpath());
         return new CrawlerExportPathDto.Response(
@@ -93,7 +132,12 @@ public class CrawlerExportPathService {
                 subpath,
                 baseDir,
                 absolutePathOrNull(subpath),
-                s.getUpdatedAt() == null ? null : TS_FMT.format(s.getUpdatedAt()));
+                s.getUpdatedAt() == null ? null : TS_FMT.format(s.getUpdatedAt()),
+                s.isGdriveEnabled(),
+                s.getGdriveSubpath(),
+                gdrive.remoteName(),
+                s.getGdriveLastRunAt() == null ? null : TS_FMT.format(s.getGdriveLastRunAt()),
+                s.getGdriveLastStatus());
     }
 
     /**

@@ -48,6 +48,9 @@ class AssetTransactionExportScheduleServiceTest {
     @Mock private AssetTransactionExportScheduleRepository settingRepo;
     @Mock private ExcelExportService excelExportService;
     @Mock private ObjectProvider<CurrentUserContext> currentUserProvider;
+    @Mock private RcloneClient rcloneClient;
+    @Mock private com.steven.assets.repository.AppUserRepository appUserRepo;
+    @Mock private UserAdminService userAdminService;
 
     @TempDir Path baseDir;
 
@@ -55,8 +58,11 @@ class AssetTransactionExportScheduleServiceTest {
 
     @BeforeEach
     void setup() {
+        // 注入真實的 GdriveOutputSupport（只把 rclone／使用者查詢換成替身），驗證規則才會真的被跑到。
+        GdriveOutputSupport gdrive =
+                new GdriveOutputSupport(rcloneClient, appUserRepo, userAdminService, "GDriveOutput");
         service = new AssetTransactionExportScheduleService(
-                settingRepo, excelExportService, currentUserProvider, baseDir.toString());
+                settingRepo, excelExportService, currentUserProvider, gdrive, baseDir.toString());
     }
 
     private static LocalDate today() { return LocalDate.now(TW); }
@@ -85,7 +91,7 @@ class AssetTransactionExportScheduleServiceTest {
     void 時越界擲例外() {
         givenCurrentUser(1L);
         assertThatThrownBy(() -> service.updateForCurrentUser(
-                new AssetTransactionExportDto.SettingRequest(true, 24, 0, "input")))
+                new AssetTransactionExportDto.SettingRequest(true, 24, 0, "input", null, null)))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -93,7 +99,7 @@ class AssetTransactionExportScheduleServiceTest {
     void 分越界擲例外() {
         givenCurrentUser(1L);
         assertThatThrownBy(() -> service.updateForCurrentUser(
-                new AssetTransactionExportDto.SettingRequest(true, 8, 60, "input")))
+                new AssetTransactionExportDto.SettingRequest(true, 8, 60, "input", null, null)))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -101,7 +107,7 @@ class AssetTransactionExportScheduleServiceTest {
     void 子路徑跳脫基底被resolveDir擋下() {
         givenCurrentUser(1L);
         assertThatThrownBy(() -> service.updateForCurrentUser(
-                new AssetTransactionExportDto.SettingRequest(true, 8, 0, "../../etc")))
+                new AssetTransactionExportDto.SettingRequest(true, 8, 0, "../../etc", null, null)))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -112,7 +118,7 @@ class AssetTransactionExportScheduleServiceTest {
         when(settingRepo.save(org.mockito.ArgumentMatchers.any())).thenAnswer(inv -> inv.getArgument(0));
 
         AssetTransactionExportDto.SettingResponse resp = service.updateForCurrentUser(
-                new AssetTransactionExportDto.SettingRequest(true, 8, 0, "  "));
+                new AssetTransactionExportDto.SettingRequest(true, 8, 0, "  ", null, null));
 
         assertThat(resp.outputSubpath()).isEqualTo("input");
     }

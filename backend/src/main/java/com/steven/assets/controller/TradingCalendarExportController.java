@@ -12,8 +12,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.time.LocalDate;
-
 /**
  * 交易日曆匯出到指定路徑端點（Requirement 37 / Task 184）。
  *
@@ -28,16 +26,18 @@ public class TradingCalendarExportController {
     private final TradingCalendarExportScheduleService scheduleService;
 
     /**
-     * 產出指定年度整年交易日曆並以指定格式寫檔到 subpath 目錄。
+     * 產出指定年度整年交易日曆並以指定格式寫檔到 subpath 目錄；Drive 同步已啟用時另上傳一份。
      * POST /api/trading-calendar-export/run?year=2026&format=json&subpath=input
+     *
+     * <p><b>維持純委派</b>：Drive 落點要讀當前使用者的排程設定列，那是業務邏輯，依 structure.md 2.2
+     * 不得在 controller 讀 repository，故實作在 {@code TradingCalendarExportScheduleService}。
      */
     @PostMapping("/run")
     public TradingCalendarExportDto.RunResponse run(
             @RequestParam(required = false) Integer year,
             @RequestParam(defaultValue = "json") String format,
             @RequestParam(required = false, defaultValue = "") String subpath) {
-        int targetYear = year != null ? year : LocalDate.now().getYear();
-        return service.exportToDir(targetYear, format, subpath);
+        return scheduleService.runManualForCurrentUser(year, format, subpath);
     }
 
     /** 唯讀列出基底（家目錄）下 subpath 的子目錄，供前端檔案總管式選擇器逐層懶載入。 */

@@ -53,6 +53,10 @@ public class MeController {
             body.put("picture", me != null && me.picture() != null ? me.picture() : oidc.getPicture());
             body.put("role", me == null ? AuthConstants.ROLE_USER : me.role());
             body.put("status", me == null ? null : me.status());
+            // 主要管理者（ADMIN_EMAIL 本人）旗標（Requirement 51 / Task 242）。與 role 語意不同：
+            // role==ADMIN 可有多列，而 Drive 同步只有主要管理者能啟用（remote 全機一份、綁定特定帳號）。
+            // 前端僅用它決定「顯不顯示」Drive 開關，真正的閘門在 business 端的 403。
+            body.put("configuredAdmin", me != null && me.configuredAdmin());
             body.put("effectiveUserId", effectiveUserId);
             body.put("isImpersonating", isImpersonating);
             body.put("effectiveUserName", resolveEffectiveName(users, effectiveUserId, me, oidc));

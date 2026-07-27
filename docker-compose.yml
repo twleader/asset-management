@@ -78,8 +78,16 @@ services:
       # 歷年資產每日排程自動匯出（Requirement 34 / Task 171）：容器內基底輸出目錄＝主機家目錄根，
       # 對映到下方 volume 的 host 家目錄；使用者於前端檔案總管式選擇器挑選的相對子路徑落於其下。
       EXPORT_OUTPUT_DIR: /home/steven
+      # Google Drive 目錄列舉（Requirement 50 / Task 241）：供「爬蟲資訊查詢」頁的 Drive 資料夾樹用。
+      # 備份（gdrive-crypt）與輸出（GDriveOutput）共用同一份 rclone.conf 的不同 section。
+      GDRIVE_OUTPUT_REMOTE: ${GDRIVE_OUTPUT_REMOTE:-GDriveOutput}
     volumes:
-      # rclone 設定檔以 read-only 從 host 掛入
+      # rclone 設定檔以 read-only 從 host 掛入。單一檔含三個 section：
+      #   [GoogleDriver]（drive.file，備份底層）／[gdrive-crypt]（加密層，DB 備份用）／
+      #   [GDriveOutput]（scope=drive，未加密，匯出檔案同步用）
+      # 兩用途共用一檔為使用者明示的決定（原設計為分離兩份以免爬蟲服務取得備份的 crypt 解密密碼）；
+      # 取捨為：省下第二份檔案的維護與搬機成本，代價是 external-materials-service 也讀得到備份憑證。
+      # 兩個 remote 實測為同一個 Google 帳號（Total/Used 一致），故分離的實際收益本就有限。
       - ${HOME}/.config/rclone/rclone.conf:/etc/rclone/rclone.conf:ro
       # 排程匯出根目錄：host 家目錄掛入容器 /home/steven（可寫）。
       # 預設對映目前使用者的家目錄；子資料夾 input → 主機家目錄/input。
@@ -126,6 +134,12 @@ services:
       # 使用者在「爬蟲資訊查詢」頁挑的資料夾是由 business 的 /api/export-schedule/browse 列舉出來的，
       # 兩者基底不一致，就會出現「前端選得到、爬蟲寫不到（或寫去別處）」的同義欄位分歧。
       EXPORT_OUTPUT_DIR: /home/steven
+      # Google Drive 輸出（Requirement 50 / Task 241）：本機照寫不變，Drive 只是附加副本。
+      # remote 名稱不寫死於程式；程式啟動時把唯讀掛入的設定複製到 /tmp/rclone-output.conf
+      # （唯讀掛載會讓 rclone 續期 OAuth token 時寫回失敗而 exit non-zero——實測 token 每次都過期、
+      #  每次上傳都會 refresh 並寫回，故可寫副本是必要的，不是保險）。
+      GDRIVE_OUTPUT_REMOTE: ${GDRIVE_OUTPUT_REMOTE:-GDriveOutput}
+      RCLONE_CONFIG: /etc/rclone/rclone.conf
     volumes:
       # 公開資訊每輪輸出 JSON（Task 177／212）：host 家目錄掛入容器 /home/steven（可寫），與 business-services
       # 同一份掛載。NewsPoller 以 EXPORT_OUTPUT_DIR 為基底、resolve crawler_export_setting 的相對子路徑
@@ -133,6 +147,15 @@ services:
       # Task 212 前為 `${SRPP_INPUT_DIR_HOST:-/Users/steven/Project/SRPP/data/input}:/srpp-input`，
       # 其預設目的地已被本掛載涵蓋（host 落點不變），故移除以免同一目錄有兩個容器路徑。
       - ${EXPORT_OUTPUT_DIR_HOST:-/Users/steven}:/home/steven
+      # Drive 輸出用的 rclone 設定（Task 241）：與 business-services 共用同一份主檔的 [GDriveOutput] section。
+      # **已知取捨（使用者明示的決定）**：該檔同時含 [GoogleDriver] 的 OAuth refresh token 與
+      # [gdrive-crypt] 的 crypt 解密密碼，而本服務是全 stack 唯一對外打第三方的（TWSE／NASDAQ／
+      # FinMind／新聞爬蟲）、攻擊面最大，故掛主檔等於讓爬蟲服務也能解密整庫財務備份。
+      # 原設計為獨立檔以避免此擴權；改為共用是為省下第二份檔案的維護與搬機成本，且實測兩個
+      # remote 為同一 Google 帳號（Total/Used 一致），分離的實際收益本就有限。
+      # 若日後要復原隔離：改回掛 ~/.config/rclone/rclone-gdrive-output.conf 到 /etc/rclone/rclone-output.conf，
+      # 並把上方 RCLONE_CONFIG 改回該路徑（該獨立檔仍保留在 host 上）。
+      - ${HOME}/.config/rclone/rclone.conf:/etc/rclone/rclone.conf:ro
     depends_on:
       postgres:
         condition: service_healthy

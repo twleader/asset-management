@@ -13,6 +13,7 @@ import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -41,6 +42,7 @@ public class TradingCalendarExportScheduleService {
     private final TradingCalendarExportScheduleRepository settingRepo;
     private final TradingCalendarExportService exportService;
     private final ObjectProvider<CurrentUserContext> currentUserProvider;
+    private final GdriveOutputSupport gdrive;
 
     /** 容器內基底輸出目錄（與 Requirement 34 共用同一 volume）。 */
     private final String baseDir;
@@ -51,10 +53,12 @@ public class TradingCalendarExportScheduleService {
     public TradingCalendarExportScheduleService(TradingCalendarExportScheduleRepository settingRepo,
                                                 TradingCalendarExportService exportService,
                                                 ObjectProvider<CurrentUserContext> currentUserProvider,
+                                                GdriveOutputSupport gdrive,
                                                 @Value("${EXPORT_OUTPUT_DIR:/home/steven}") String baseDir) {
         this.settingRepo = settingRepo;
         this.exportService = exportService;
         this.currentUserProvider = currentUserProvider;
+        this.gdrive = gdrive;
         this.baseDir = baseDir;
     }
 
@@ -81,14 +85,60 @@ public class TradingCalendarExportScheduleService {
 
         TradingCalendarExportSchedule s = settingRepo.findByOwnerUserId(ownerId).orElseGet(() ->
                 TradingCalendarExportSchedule.builder().ownerUserId(ownerId).build());
+        // Drive 兩欄一律走共用元件：null 解析（未送出＝不變更）、驗證、啟用時必填、只有主要管理者能啟用（403）。
+        GdriveOutputSupport.DriveSettings drive = gdrive.resolveUpdate(
+                ownerId, req.gdriveEnabled(), req.gdriveSubpath(), s.isGdriveEnabled(), s.getGdriveSubpath());
+
         s.setOwnerUserId(ownerId);
         s.setEnabled(Boolean.TRUE.equals(req.enabled()));
         s.setRunHour(hour);
         s.setRunMinute(minute);
         s.setFormat(format);
         s.setOutputSubpath(subpath);
+        s.setGdriveEnabled(drive.enabled());
+        s.setGdriveSubpath(drive.subpath());
+        // 刻意不碰 gdriveLastRunAt／gdriveLastStatus：那是執行結果，不是使用者設定。
         s.setUpdatedAt(LocalDateTime.now(TW_ZONE));
         return toResponse(settingRepo.save(s));
+    }
+
+    /**
+     * 手動匯出（{@code POST /api/trading-calendar-export/run}）：本機照寫，Drive 已啟用時另上傳一份。
+     *
+     * <p><b>本頁沒有 run-now</b>，手動匯出就是這一支，故它也必須上傳——否則使用者只能等排程才知道
+     * Drive 設定對不對（這正是 Task 241 在爬蟲頁缺 run-now 造成的實際不便）。
+     *
+     * <p><b>兩個 subpath 的來源刻意不同</b>：本機目錄來自 query param（「這次匯出到哪」），Drive 目錄取自
+     * <b>排程設定列</b>（「Drive 同步的固定目的地」）。若讓 Drive 也吃 query param，使用者每次手動匯出都
+     * 可能把檔案倒進 Drive 的不同位置。
+     *
+     * <p>設定列不存在（只手動匯出、從未設過排程）或未啟用時不上傳，也不建列。
+     */
+    public TradingCalendarExportDto.RunResponse runManualForCurrentUser(
+            Integer year, String format, String subpath) {
+        int targetYear = year != null ? year : LocalDate.now(TW_ZONE).getYear();
+        // 本機一律先寫；失敗會直接往上拋（既有行為），此時完全不上傳。
+        TradingCalendarExportDto.RunResponse local = exportService.exportToDir(targetYear, format, subpath);
+
+        GdriveOutputSupport.SyncResult drive = null;
+        CurrentUserContext ctx = currentUserProvider.getObject();
+        if (ctx.hasUser()) {
+            TradingCalendarExportSchedule s =
+                    settingRepo.findByOwnerUserId(ctx.getEffectiveUserId()).orElse(null);
+            if (s != null) {
+                drive = syncGdrive(s, Path.of(local.path()));
+                if (drive != null) saveQuietly(s);
+            }
+        }
+        return TradingCalendarExportDto.RunResponse.builder()
+                .path(local.path())
+                .sizeBytes(local.sizeBytes())
+                .format(local.format())
+                .year(local.year())
+                .totalDays(local.totalDays())
+                .gdrivePath(drive == null ? null : drive.path())
+                .gdriveStatus(drive == null ? null : drive.status())
+                .build();
     }
 
     // ===== 背景排程 =====
@@ -144,9 +194,12 @@ public class TradingCalendarExportScheduleService {
             s.setLastRunStatus("成功：" + r.path());
             log.info("交易日曆排程匯出成功 owner={} format={} → {}（{} bytes）",
                     s.getOwnerUserId(), s.getFormat(), r.path(), r.sizeBytes());
+            // 本機寫成功後才上傳；狀態欄由下方 finally 既有的 save 一併寫入。
+            syncGdrive(s, Path.of(r.path()));
         } catch (Exception e) {
             s.setLastRunStatus("失敗：" + e.getMessage());
             log.warn("交易日曆排程匯出失敗 owner={}：{}", s.getOwnerUserId(), e.getMessage(), e);
+            syncGdrive(s, null); // 本機失敗＝不上傳；已啟用時仍寫狀態欄，否則會停在上一次的成功
         } finally {
             s.setLastRunDate(today);
             s.setLastRunAt(LocalDateTime.now(TW_ZONE));
@@ -164,6 +217,36 @@ public class TradingCalendarExportScheduleService {
         return ctx.getEffectiveUserId();
     }
 
+    /**
+     * 本機檔寫成功後的 Drive 同步（best-effort，Requirement 51 / Task 244）。
+     *
+     * <p><b>順序不可顛倒</b>：本機那一份是既有的留存機制，必須先確定它寫成功才上傳；本機失敗時傳
+     * {@code null} ——完全不上傳，絕不上傳前一次的舊檔，但已啟用時仍寫狀態欄說明原因。
+     *
+     * <p>不擲例外、不改既有 {@code lastRunStatus}——「本機成功、Drive 失敗」是正常且必須可分辨的狀態。
+     * owner 權限在 {@code syncQuietly} 內<b>每一輪重驗</b>（背景排程沒有 request context）。
+     *
+     * <p><b>只改記憶體中的欄位、不自行 save</b>：排程路徑由 {@code runScheduled} 的 finally 一併寫入，
+     * 手動路徑由 {@link #saveQuietly} 寫入。
+     */
+    private GdriveOutputSupport.SyncResult syncGdrive(TradingCalendarExportSchedule s, Path localFile) {
+        if (!s.isGdriveEnabled()) return null;
+        GdriveOutputSupport.SyncResult r =
+                gdrive.syncQuietly(s.getOwnerUserId(), s.getGdriveSubpath(), localFile);
+        s.setGdriveLastRunAt(LocalDateTime.now(TW_ZONE));
+        s.setGdriveLastStatus(r.status());
+        return r;
+    }
+
+    /** 「回報結果」這件事本身不能成為新的失敗來源（DB 短暫不可用時 save 會擲例外）。 */
+    private void saveQuietly(TradingCalendarExportSchedule s) {
+        try {
+            settingRepo.save(s);
+        } catch (RuntimeException e) {
+            log.error("寫入 Drive 同步狀態失敗 owner={}：{}", s.getOwnerUserId(), e.getMessage(), e);
+        }
+    }
+
     private TradingCalendarExportDto.ScheduleSettingResponse toResponse(TradingCalendarExportSchedule s) {
         return TradingCalendarExportDto.ScheduleSettingResponse.builder()
                 .enabled(Boolean.TRUE.equals(s.getEnabled()))
@@ -174,6 +257,13 @@ public class TradingCalendarExportScheduleService {
                 .lastRunAt(s.getLastRunAt() == null ? null : s.getLastRunAt().format(TS_FMT))
                 .lastRunStatus(s.getLastRunStatus())
                 .baseDir(baseDir)
+                // 讀取一律不驗證 Drive 子路徑：DB 值可能被繞過 API 直改，若讀取也擲例外，設定頁會 500
+                // 而使用者沒有任何入口能把它改回正常值——唯一的修正入口被自己鎖死。存檔時才驗。
+                .gdriveEnabled(s.isGdriveEnabled())
+                .gdriveSubpath(s.getGdriveSubpath())
+                .gdriveRemote(gdrive.remoteName())
+                .gdriveLastRunAt(s.getGdriveLastRunAt() == null ? null : s.getGdriveLastRunAt().format(TS_FMT))
+                .gdriveLastStatus(s.getGdriveLastStatus())
                 .build();
     }
 }

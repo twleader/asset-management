@@ -56,6 +56,34 @@ public class TradingRadarExportSetting {
     @Column(name = "last_run_status", length = 500)
     private String lastRunStatus;
 
+    // ── Google Drive 同步（Requirement 51 / Task 242，changeset v1.76.0）─────────────
+    // 本機輸出行為完全不變、一律照寫；以下欄位只控制「要不要在本機檔寫成功後多上傳一份副本」。
+
+    /**
+     * 是否額外上傳一份到 Google Drive。
+     *
+     * <p><b>只有「主要管理者」（{@code ADMIN_EMAIL}）可啟用</b>——rclone remote 全機只有一份且綁定
+     * 某一個特定 Google 帳號，若允許其他使用者啟用，其財務報表會被上傳到該帳號的雲端硬碟，
+     * 且從當事人角度完全不可見。判定走 {@code GdriveOutputSupport.isDriveAllowedFor}。
+     */
+    @Column(name = "gdrive_enabled", nullable = false)
+    private boolean gdriveEnabled;
+
+    /** Drive 上的相對子路徑（基底為 rclone remote）；啟用時必填。 */
+    @Column(name = "gdrive_subpath", length = 512)
+    private String gdriveSubpath;
+
+    /** 上次 Drive 上傳的<b>判斷</b>時間（含成功／失敗／跳過，非僅成功）。 */
+    @Column(name = "gdrive_last_run_at")
+    private LocalDateTime gdriveLastRunAt;
+
+    /**
+     * 上次 Drive 上傳結果。<b>與 {@link #lastRunStatus} 刻意分離、不得併入</b>：
+     * 「本機成功、Drive 失敗」是正常且必須可分辨的狀態，共用一欄會讓本機明明寫成功卻顯示失敗。
+     */
+    @Column(name = "gdrive_last_status", length = 512)
+    private String gdriveLastStatus;
+
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 }

@@ -120,4 +120,24 @@ public class CrawlerDataBffController {
                 .bodyToMono(MAP)
                 .map(ResponseEntity::ok);
     }
+
+    /**
+     * Google Drive 資料夾樹懶載入（Requirement 50 / Task 241）：passthrough 至 business
+     * {@code /api/export-schedule/browse-gdrive}。
+     *
+     * <p>與上方本機 {@code browse} 並列為兩支（語意不同：本機基底 vs. Drive remote），但「Drive 目錄列舉」
+     * 全庫只有 business 那一支實作，本頁只是 passthrough——日後其餘匯出頁接 Drive 時同樣沿用它。
+     *
+     * <p>**刻意不做 onErrorReturn 降級**：remote 未設定／授權失效時 business 回 503 帶可讀訊息，
+     * 必須讓它浮到前端 dialog 顯示。若降級成空清單，使用者會誤讀為「Drive 裡沒有資料夾」而以為選錯位置。
+     */
+    @GetMapping("/export-path/browse-gdrive")
+    public Mono<ResponseEntity<Map<String, Object>>> browseGdriveExportDir(
+            @RequestParam(required = false, defaultValue = "") String subpath) {
+        return businessServicesClient.get()
+                .uri(uri -> uri.path("/api/export-schedule/browse-gdrive").queryParam("subpath", subpath).build())
+                .retrieve()
+                .bodyToMono(MAP)
+                .map(ResponseEntity::ok);
+    }
 }

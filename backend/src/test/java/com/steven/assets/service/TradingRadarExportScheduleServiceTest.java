@@ -56,6 +56,9 @@ class TradingRadarExportScheduleServiceTest {
     @Mock private TradingRadarExportService exportService;
     @Mock private TradingRadarSnapshotStore snapshotStore;
     @Mock private ObjectProvider<CurrentUserContext> currentUserProvider;
+    @Mock private RcloneClient rcloneClient;
+    @Mock private com.steven.assets.repository.AppUserRepository appUserRepo;
+    @Mock private UserAdminService userAdminService;
 
     @TempDir Path baseDir;
 
@@ -63,8 +66,11 @@ class TradingRadarExportScheduleServiceTest {
 
     @BeforeEach
     void setup() {
+        GdriveOutputSupport gdrive =
+                new GdriveOutputSupport(rcloneClient, appUserRepo, userAdminService, "GDriveOutput");
         service = new TradingRadarExportScheduleService(
-                timeRepo, settingRepo, exportService, snapshotStore, currentUserProvider, baseDir.toString());
+                timeRepo, settingRepo, exportService, snapshotStore, currentUserProvider,
+                gdrive, baseDir.toString());
     }
 
     private static LocalDate today() { return LocalDate.now(TW); }
@@ -211,7 +217,7 @@ class TradingRadarExportScheduleServiceTest {
     @Test
     void 輸出子路徑跳脫基底目錄被擋() {
         givenCurrentUser(1L);
-        assertThatThrownBy(() -> service.saveSetting("../../etc"))
+        assertThatThrownBy(() -> service.saveSetting(new TradingRadarExportDto.SettingRequest("../../etc", null, null)))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 

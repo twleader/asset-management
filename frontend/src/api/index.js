@@ -131,7 +131,9 @@ export const bffApi = {
     getExportSchedule:    () => api.get('/bff/asset-history/export-schedule', { skipErrorToast: true }),
     updateExportSchedule: (data) => api.put('/bff/asset-history/export-schedule', data, { skipErrorToast: true }),
     runExportNow:         () => api.post('/bff/asset-history/export-schedule/run-now', null, { timeout: 60000, skipErrorToast: true }),
-    browseExportDir:      (subpath = '') => api.get('/bff/asset-history/export-schedule/browse', { params: { subpath }, skipErrorToast: true })
+    browseExportDir:      (subpath = '') => api.get('/bff/asset-history/export-schedule/browse', { params: { subpath }, skipErrorToast: true }),
+    // Google Drive 資料夾樹懶載入（Requirement 51 / Task 243）
+    browseGdriveExportDir: (subpath = '') => api.get('/bff/asset-history/export-schedule/browse-gdrive', { params: { subpath }, skipErrorToast: true })
   },
 
   // RealizedGain
@@ -145,7 +147,9 @@ export const bffApi = {
     getExportSchedule:    () => api.get('/bff/realized-gain/export/schedule', { skipErrorToast: true }),
     updateExportSchedule: (data) => api.put('/bff/realized-gain/export/schedule', data, { skipErrorToast: true }),
     runExportNow:         () => api.post('/bff/realized-gain/export/run-now', null, { timeout: 60000, skipErrorToast: true }),
-    browseExportDir:      (subpath = '') => api.get('/bff/realized-gain/export/browse', { params: { subpath }, skipErrorToast: true })
+    browseExportDir:      (subpath = '') => api.get('/bff/realized-gain/export/browse', { params: { subpath }, skipErrorToast: true }),
+    // Google Drive 資料夾樹懶載入（Requirement 51 / Task 243）
+    browseGdriveExportDir: (subpath = '') => api.get('/bff/realized-gain/export/browse-gdrive', { params: { subpath }, skipErrorToast: true })
   },
 
   // Transaction（交易紀錄：手動買賣流水帳，Requirement 49 / Task t237、t238）
@@ -159,7 +163,9 @@ export const bffApi = {
     getExportSchedule:    () => api.get('/bff/transaction/export/schedule', { skipErrorToast: true }),
     updateExportSchedule: (data) => api.put('/bff/transaction/export/schedule', data, { skipErrorToast: true }),
     runExportNow:         () => api.post('/bff/transaction/export/run-now', null, { timeout: 60000, skipErrorToast: true }),
-    browseExportDir:      (subpath = '') => api.get('/bff/transaction/export/browse', { params: { subpath }, skipErrorToast: true })
+    browseExportDir:      (subpath = '') => api.get('/bff/transaction/export/browse', { params: { subpath }, skipErrorToast: true }),
+    // Google Drive 資料夾樹懶載入（Requirement 51 / Task 243）
+    browseGdriveExportDir: (subpath = '') => api.get('/bff/transaction/export/browse-gdrive', { params: { subpath }, skipErrorToast: true })
   },
 
   // CommodityPrice（公開資訊 → 油價金價）
@@ -176,7 +182,9 @@ export const bffApi = {
     getExportSchedule:    () => api.get('/bff/commodity-price/export/schedule', { skipErrorToast: true }),
     updateExportSchedule: (data) => api.put('/bff/commodity-price/export/schedule', data, { skipErrorToast: true }),
     runExportNow:         () => api.post('/bff/commodity-price/export/run-now', null, { timeout: 60000, skipErrorToast: true }),
-    browseExportDir:      (subpath = '') => api.get('/bff/commodity-price/export/browse', { params: { subpath }, skipErrorToast: true })
+    browseExportDir:      (subpath = '') => api.get('/bff/commodity-price/export/browse', { params: { subpath }, skipErrorToast: true }),
+    // Google Drive 資料夾樹懶載入（Requirement 51 / Task 243）
+    browseGdriveExportDir: (subpath = '') => api.get('/bff/commodity-price/export/browse-gdrive', { params: { subpath }, skipErrorToast: true })
   },
 
   // ExchangeRate（公開資訊 → 台幣兌美元）
@@ -194,7 +202,9 @@ export const bffApi = {
     getExportSchedule:    () => api.get('/bff/exchange-rate/export/schedule', { skipErrorToast: true }),
     updateExportSchedule: (data) => api.put('/bff/exchange-rate/export/schedule', data, { skipErrorToast: true }),
     runExportNow:         () => api.post('/bff/exchange-rate/export/run-now', null, { timeout: 60000, skipErrorToast: true }),
-    browseExportDir:      (subpath = '') => api.get('/bff/exchange-rate/export/browse', { params: { subpath }, skipErrorToast: true })
+    browseExportDir:      (subpath = '') => api.get('/bff/exchange-rate/export/browse', { params: { subpath }, skipErrorToast: true }),
+    // Google Drive 資料夾樹懶載入（Requirement 51 / Task 243）
+    browseGdriveExportDir: (subpath = '') => api.get('/bff/exchange-rate/export/browse-gdrive', { params: { subpath }, skipErrorToast: true })
   },
 
   // GdpTwse (GDP + 台股大盤年度走勢)
@@ -219,7 +229,10 @@ export const bffApi = {
     updateExportSchedule: (data) => api.put('/bff/gdp-twse/export/schedule', data, { skipErrorToast: true }),
     runExportNow:         () => api.post('/bff/gdp-twse/export/run-now', null, { timeout: 60000, skipErrorToast: true }),
     browseExportDir:      (subpath = '') =>
-      api.get('/bff/gdp-twse/export/browse', { params: { subpath }, skipErrorToast: true })
+      api.get('/bff/gdp-twse/export/browse', { params: { subpath }, skipErrorToast: true }),
+    // Google Drive 資料夾樹懶載入（Requirement 51 / Task 243）
+    browseGdriveExportDir: (subpath = '') =>
+      api.get('/bff/gdp-twse/export/browse-gdrive', { params: { subpath }, skipErrorToast: true })
   },
 
   // PerformanceComparison（績效比較，Requirement 33）
@@ -267,11 +280,16 @@ export const bffApi = {
     getExportTimes: () => api.get('/bff/trading-radar/export-schedule/times'),
     saveExportTimes: (times) => api.put('/bff/trading-radar/export-schedule/times', { times }),
     getExportSetting: () => api.get('/bff/trading-radar/export-schedule/setting'),
-    saveExportSetting: (outputSubpath) =>
-      api.put('/bff/trading-radar/export-schedule/setting', { outputSubpath }),
+    // 收整包而非單一字串：漏送 gdrive* 會讓 Drive 設定存不進去（後端把 null 視為「不變更」）
+    // payload: { outputSubpath, gdriveEnabled, gdriveSubpath }
+    saveExportSetting: (payload) =>
+      api.put('/bff/trading-radar/export-schedule/setting', payload),
     runExportNow: () => api.post('/bff/trading-radar/export-schedule/run-now'),
     browseExportDir: (subpath = '') =>
       api.get('/bff/trading-radar/export/browse', { params: { subpath }, skipErrorToast: true }),
+    // Google Drive 資料夾樹懶載入（Requirement 51 / Task 243）
+    browseGdriveExportDir: (subpath = '') =>
+      api.get('/bff/trading-radar/export/browse-gdrive', { params: { subpath }, skipErrorToast: true }),
     getNotification: (stockCode, market) =>
       api.get(`/bff/trading-radar/notifications/${encodeURIComponent(stockCode)}`, { params: { market } }),
     updateNotification: (stockCode, market, payload) =>
@@ -301,6 +319,8 @@ export const bffApi = {
     // 交易日曆匯出到指定路徑（Requirement 37）
     exportToDir:     (year, format, subpath) => api.post('/bff/trading-calendar/export', null, { params: { year, format, subpath }, timeout: 60000, skipErrorToast: true }),
     browseExportDir: (subpath = '') => api.get('/bff/trading-calendar/export/browse', { params: { subpath }, skipErrorToast: true }),
+    // Google Drive 資料夾樹懶載入（Requirement 51 / Task 243）
+    browseGdriveExportDir: (subpath = '') => api.get('/bff/trading-calendar/export/browse-gdrive', { params: { subpath }, skipErrorToast: true }),
     // 每日排程自動匯出（Task 185）
     getExportSchedule:    () => api.get('/bff/trading-calendar/export/schedule', { skipErrorToast: true }),
     updateExportSchedule: (data) => api.put('/bff/trading-calendar/export/schedule', data, { skipErrorToast: true })
@@ -320,13 +340,21 @@ export const bffApi = {
     getSchedule: () => api.get('/bff/crawler-data/schedule'),
     // 整批覆寫執行時間點（限管理者）
     saveSchedule: (times) => api.put('/bff/crawler-data/schedule', times),
-    // 讀公開資訊 JSON 輸出路徑設定 {crawlerKey,outputSubpath,baseDir,absolutePath,updatedAt}（Task 212）
+    // 讀公開資訊 JSON 輸出路徑設定（Task 212；Task 241 起含 gdrive* 欄位與上次上傳狀態）
+    // {crawlerKey,outputSubpath,baseDir,absolutePath,updatedAt,
+    //  gdriveEnabled,gdriveSubpath,gdriveRemote,gdriveLastRunAt,gdriveLastStatus}
     getExportPath: () => api.get('/bff/crawler-data/export-path'),
-    // 更新輸出子路徑（限管理者；跳脫基底回 400）
-    saveExportPath: (outputSubpath) => api.put('/bff/crawler-data/export-path', { outputSubpath }),
-    // 資料夾樹懶載入（passthrough 至既有 /api/export-schedule/browse）
+    // 更新輸出子路徑＋Drive 設定（限管理者；不合法值回 400）
+    // payload: { outputSubpath, gdriveEnabled, gdriveSubpath }
+    // 收整包而非單一字串：漏送 gdrive* 會讓 Drive 設定存不進去（後端把 null 視為「不變更」）
+    saveExportPath: (payload) => api.put('/bff/crawler-data/export-path', payload),
+    // 本機資料夾樹懶載入（passthrough 至既有 /api/export-schedule/browse）
     browseExportDir: (subpath = '') =>
-      api.get('/bff/crawler-data/export-path/browse', { params: { subpath } })
+      api.get('/bff/crawler-data/export-path/browse', { params: { subpath } }),
+    // Google Drive 資料夾樹懶載入（Task 241）。skipErrorToast：錯誤要顯示在 dialog 內，
+    // 不與全域 toast 打架——remote 未設定時使用者需要看到具體原因，而非空樹
+    browseGdriveExportDir: (subpath = '') =>
+      api.get('/bff/crawler-data/export-path/browse-gdrive', { params: { subpath }, skipErrorToast: true })
   },
 
   // SnapshotList

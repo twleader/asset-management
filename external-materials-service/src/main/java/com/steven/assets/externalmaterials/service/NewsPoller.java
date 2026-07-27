@@ -84,6 +84,7 @@ public class NewsPoller {
     private final MarketCalendar calendar;
     private final CrawlerScheduleQuery scheduleQuery;
     private final CrawlerExportPathQuery exportPathQuery;
+    private final GdriveUploader gdriveUploader;
     private final ObjectMapper objectMapper;
 
     /** 防止上一輪抓取尚未結束又被下一分鐘 ticker 重複觸發（抓取可能耗數十秒）。 */
@@ -221,8 +222,9 @@ public class NewsPoller {
      */
     private void exportPublicInfoJson(String trigger) {
         if (!exportEnabled) return;
+        LocalDate today = LocalDate.now(TW_ZONE);
+        Path writtenFile = null;   // 本機檔寫成功才會被設值；null＝本機這一步失敗，Drive 不該上傳舊檔
         try {
-            LocalDate today = LocalDate.now(TW_ZONE);
             LocalDate cutoff = resolveTradingCutoff(today);
             List<NewsRow> items = source.loadTodayPublicInfoForExport(today, cutoff);
 
@@ -250,11 +252,99 @@ public class NewsPoller {
             } finally {
                 Files.deleteIfExists(tmp);   // move 成功後為 no-op；writeValue 失敗時清掉殘留暫存檔
             }
+            writtenFile = file;   // 本機（SRPP 的資料來源）已確定寫成功，Drive 才可以上傳這一份
             log.info("公開資訊輸出 JSON（{}）：{} 筆（當日 fetched、published≥{}）→ {}",
                     trigger, items.size(), cutoff, file);
         } catch (Exception e) {
             log.warn("公開資訊輸出 JSON 失敗（{}）：{}", trigger, e.getMessage());
         }
+
+        // Drive 同步刻意放在上面 try-catch **之外**：本機寫檔失敗時也要能記錄「跳過」狀態，
+        // 否則設定頁會停留在上一次的「成功」，顯示過期的好消息（Requirement 50）。
+        syncToGdrive(writtenFile, today, trigger);
+    }
+
+    /**
+     * 把本機那一份公開資訊 JSON 額外上傳一份副本到 Google Drive（Requirement 50 / Task 241）。
+     *
+     * <p><b>best-effort，絕不回頭影響本機。</b>本機檔案是 SRPP 退休規劃專案的資料來源，Drive 只是附加副本：
+     * 這裡的任何失敗都只記 log 與 DB 狀態欄，<b>絕不</b> rollback 本機檔案、<b>絕不</b>讓本輪
+     * {@code news_headline} 入庫失敗、<b>絕不</b>擲例外中斷排程。
+     *
+     * <p><b>不實作 retry queue</b>：爬蟲每輪都重新產生當日完整檔案並重新上傳，下一輪即為天然重試
+     * （Drive 端覆寫同名檔本身冪等）。
+     *
+     * <p>package-private 而非 private：本方法的三條「絕不」保證是本任務風險最高的部分，必須能被單元測試
+     * 直接驗證，而不必跑整個抓取流程（比照本服務其他 poller 的 {@code updateOnce()} 測試入口慣例）。
+     *
+     * @param localFile 已寫成功的本機檔；{@code null} 表示本機這一步就失敗了
+     */
+    void syncToGdrive(Path localFile, LocalDate today, String trigger) {
+        CrawlerExportPathQuery.GdriveConfig cfg;
+        try {
+            cfg = exportPathQuery.gdriveConfig(CRAWLER_KEY);
+        } catch (Exception e) {
+            // 連設定都讀不到就無從得知使用者是否啟用；此時不寫狀態欄（避免在「其實沒啟用」時留下誤導訊息）
+            log.warn("讀取 Drive 同步設定失敗（{}），本輪跳過上傳：{}", trigger, e.getMessage());
+            return;
+        }
+        if (!cfg.enabled()) return;   // 未啟用：完全不呼叫 rclone，也不動狀態欄
+
+        // 以下都是「已啟用」的情境——無論成功、失敗或跳過，都必須寫狀態欄，
+        // 讓 gdrive_last_run_at 恆為「最近一次判斷結果」而非「最近一次成功」。
+        try {
+            String skip = null;
+            if (localFile == null) {
+                skip = "跳過：本機檔案寫入失敗，未上傳";
+            } else if (!gdriveUploader.isAvailable()) {
+                skip = "跳過：rclone 設定不可用（remote " + gdriveUploader.remoteName() + " 未掛入設定檔）";
+            } else if (isInvalidGdriveSubpath(cfg.subpath())) {
+                // 縱深防禦：business 於 PUT 時已驗過，但 DB 值可能被 psql 直改或跨環境還原繞過 API。
+                // 刻意**不** fallback 到某個預設 Drive 目錄——把檔案倒進使用者雲端硬碟的非預期位置，
+                // 比不上傳更糟（本機的 fallback 是為了「不要不寫」，Drive 沒有這個理由）。
+                skip = "跳過：Drive 目標資料夾不合法（" + cfg.subpath() + "）";
+            }
+            if (skip != null) {
+                log.warn("Drive 同步{}（{}）", skip, trigger);
+                recordGdriveStatusQuietly(skip);
+                return;
+            }
+
+            String dest = gdriveUploader.upload(localFile, cfg.subpath(), "public_info_" + today + ".json");
+            long size = Files.size(localFile);
+            log.info("Drive 同步成功（{}）：{}（{} bytes）", trigger, dest, size);
+            recordGdriveStatusQuietly("成功：" + dest + "（" + size + " bytes）");
+        } catch (Exception e) {
+            log.error("Drive 同步失敗（{}）：{}", trigger, e.getMessage(), e);
+            recordGdriveStatusQuietly("失敗：" + e.getMessage());
+        }
+    }
+
+    /**
+     * 回寫狀態欄，<b>其自身的失敗也必須被吞掉</b>（DB 短暫不可用時 UPDATE 會擲例外）。
+     * 「回報上傳結果」這件事本身不能成為新的失敗來源。
+     */
+    private void recordGdriveStatusQuietly(String status) {
+        try {
+            exportPathQuery.recordGdriveResult(CRAWLER_KEY, status);
+        } catch (Exception e) {
+            log.warn("回寫 Drive 上傳狀態失敗（不影響本機檔與入庫）：{}", e.getMessage());
+        }
+    }
+
+    /**
+     * Drive 子路徑合法性（與 business 端 {@code CrawlerExportPathService} 同一組規則）。
+     *
+     * <p>{@code ..} 逐段比對而非 {@code contains("..")}，否則會誤擋合法目錄名如 {@code a..b}；
+     * 擋 {@code :} 是防子路徑被 rclone 解讀成切換 remote。
+     */
+    private static boolean isInvalidGdriveSubpath(String subpath) {
+        if (subpath == null || subpath.isBlank()) return true;
+        if (subpath.startsWith("/") || subpath.contains(":")) return true;
+        for (String seg : subpath.split("/")) {
+            if ("..".equals(seg)) return true;
+        }
+        return false;
     }
 
     /**

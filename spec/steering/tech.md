@@ -119,7 +119,23 @@ cd frontend
 | **MoneyDJ** | FundClear 失敗時的 fallback | 無 | |
 | **央行 / 台銀** | USD/TWD、ZAR/TWD 匯率 | 無 | 沿用 FinMind 為主來源 |
 | **IMF DataMapper** | 台灣 / 韓國人均 GDP（`NGDPDPC`、`NGDP_RPCH`） | 無 | GDP-TWSE 圖 |
-| **Google Drive（rclone gdrive-crypt）** | DB 備份目的地 | rclone config | 設定檔以 read-only volume 掛入 container |
+| **Google Drive（rclone `gdrive-crypt`，crypt 加密）** | DB 備份目的地 | `~/.config/rclone/rclone.conf` 的 `[gdrive-crypt]` | read-only volume 掛入 **business-services**；檔名與內容皆加密 |
+| **Google Drive（rclone `GDriveOutput`，`scope=drive`、未加密）** | 匯出檔案輸出目的地（**附加副本**，本機照寫不變） | **同一份** `~/.config/rclone/rclone.conf` 的 `[GDriveOutput]` | read-only 掛入 **business-services ＋ external-materials-service**；per-process `RCLONE_CONFIG` 指向 `/tmp` 可寫副本（token 續期需寫回）。Requirement 50 / Task 241 |
+
+> **單一 config 檔的已知取捨（使用者明示的決定）**：`~/.config/rclone/rclone.conf` 同時含
+> `[GoogleDriver]`（`drive.file`，備份底層）／`[gdrive-crypt]`（crypt 層，含解密密碼）／
+> `[GDriveOutput]`（`scope=drive`，輸出用），且**同一份掛入 business 與 ext 兩個容器**。
+> 代價是 `external-materials-service`（全 stack 唯一對外打第三方者：TWSE／NASDAQ／FinMind／新聞爬蟲）
+> 也讀得到備份的 OAuth refresh token 與 crypt 解密密碼。原設計為分離兩份以避免此擴權；
+> 改為共用是為省下第二份檔案的維護與搬機成本，且實測兩個 remote 為**同一個 Google 帳號**
+> （`rclone about` 的 Total／Used 一致），分離的實際收益本就有限。
+>
+> **若要復原隔離**：host 上仍保留 `~/.config/rclone/rclone-gdrive-output.conf`（只含 `[GDriveOutput]`），
+> 把 compose 兩處掛載改回它、`RCLONE_CONFIG` 改回 `/etc/rclone/rclone-output.conf`，
+> 並把兩支 client 的 `CONFIG_SOURCE` 改回該路徑即可。
+>
+> **host 改過 rclone config 之後必須 `--force-recreate` 容器**：bind mount 指向的 inode 會變成
+> dangling——`ls` 看得到檔案、實際讀取卻回 `ENOENT`，症狀是「設定明明在卻說找不到」。
 
 ---
 
@@ -175,7 +191,7 @@ cd frontend
 1. spec/requirements.md     →  User Story + Acceptance Criteria
 2. spec/design.md           →  架構 / 資料模型 / API 設計
 3. spec/tasks/tNNN_*.md     →  建立自足任務檔（規範見 spec/tasks/README.md）
-4. spec 對抗式審查          →  /spec-review，quality_score < 8 不得進入實作
+4. spec 對抗式審查          →  /spec-review（產出 findings，不打分數；critical／major 修完即可開工）
 5. 實作程式碼
 ```
 
@@ -211,7 +227,8 @@ git config core.hooksPath scripts/git-hooks
 | `REDIS_HOST` / `REDIS_PORT` | 由 compose 注入（redis / 6379） |
 | `FINMIND_TOKEN` | FinMind Bearer token（選填，未設則匿名） |
 | `BUSINESS_SERVICES_URL` | BFF 路由目標（compose 設 `http://business-services:8080`） |
-| `RCLONE_CONFIG` | `/etc/rclone/rclone.conf`（read-only volume 從 host 掛入） |
+| `RCLONE_CONFIG` | business 與 ext 皆為 `/etc/rclone/rclone.conf`（同一份 host `~/.config/rclone/rclone.conf` 唯讀掛入）。程式啟動時各自複製到 `/tmp` 可寫副本（`BackupService` → `/tmp/rclone.conf`、Drive 輸出 → `/tmp/rclone-output.conf`；rclone 續期 OAuth token 需寫回，實測 token 幾乎每次呼叫都已過期），實際呼叫時以 per-process 覆寫指定 |
+| `GDRIVE_OUTPUT_REMOTE` | Drive 輸出用的 remote 名稱（預設 `GDriveOutput`）；需先由使用者以 `rclone config create GDriveOutput drive scope=drive` 建立（**`scope=drive` 是必要的**——`drive.file` 只看得到 rclone 自己建的檔案，列不出使用者手動建的目錄）。Requirement 50 / Task 241 |
 
 ---
 
@@ -229,5 +246,5 @@ git config core.hooksPath scripts/git-hooks
 - **目標環境：** 個人 Mac / NAS / 自架 Linux server，本機 Docker。
 - **入口：** `docker compose up -d`（讀 `.env`）。
 - **資料持久化：** named volumes `asset-postgres-data`、`asset-redis-data`。
-- **備份目的地：** Google Drive（rclone `gdrive-crypt:` 加密 remote）。
+- **備份目的地：** Google Drive（rclone `gdrive-crypt:` 加密 remote）。與匯出輸出用的 `GDriveOutput:` 是**兩個不同的 remote，但共用同一份 config 檔**（Requirement 50）——前者加密、只有 `BackupService` 使用；後者未加密、business ＋ ext 共用。兩者實測為同一個 Google 帳號。共用一檔的已知代價（ext 亦可讀備份憑證）與復原方式見 §4 的取捨說明。
 - **不規劃：** Kubernetes、雲端託管、多區域、CI/CD pipeline（目前手動部署）。

@@ -57,7 +57,7 @@ public class TenantWebFilter implements WebFilter {
      * 用它把「未登入」表成一個 onNext，避免以 {@code switchIfEmpty} 包覆 {@code chain.filter}
      * （{@code Mono<Void>}）而造成過濾鏈被二次訂閱（見 class doc）。
      */
-    private static final BffUser ANONYMOUS = new BffUser(null, null, null, null, null, null);
+    private static final BffUser ANONYMOUS = new BffUser(null, null, null, null, null, null, false);
 
     /**
      * 代看 cookie 的 {@code Secure} 屬性開關（Requirement 30）：由 {@code SESSION_COOKIE_SECURE} 控制，預設 false。
