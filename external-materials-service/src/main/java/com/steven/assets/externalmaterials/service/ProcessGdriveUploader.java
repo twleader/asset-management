@@ -143,11 +143,35 @@ public class ProcessGdriveUploader implements GdriveUploader {
         String dest = remote + ":" + (subpath == null || subpath.isBlank() ? "" : subpath + "/") + destFileName;
         List<String> cmd = new ArrayList<>(List.of("rclone", "copyto", localFile.toString(), dest));
         cmd.addAll(RCLONE_LIMITS);
-        exec(cmd);
+        exec(cmd, "上傳");
         return dest;
     }
 
-    private void exec(List<String> cmd) {
+    /**
+     * 唯讀探測（Requirement 52 / Task 247.4.2）：{@code rclone lsd <remote>:}。
+     *
+     * <p>刻意<b>沿用 {@link #exec} 與 {@link #RCLONE_LIMITS}</b>，不另寫一份 {@code ProcessBuilder}：
+     * 逾時、stderr 解析與「找不到 section」的判定只該有一份。逾時同樣用 {@link #UPLOAD_TIMEOUT_SEC}——
+     * 探測只跑在啟動自檢的背景 daemon 執行緒上，沒有使用者在等，不需要另一組數字。
+     */
+    @Override
+    public void probe() {
+        if (!configReady) {
+            throw new IllegalStateException("rclone 設定不可用（" + CONFIG_SOURCE + " 不存在）");
+        }
+        List<String> cmd = new ArrayList<>(List.of("rclone", "lsd", remote + ":"));
+        cmd.addAll(RCLONE_LIMITS);
+        exec(cmd, "探測");
+    }
+
+    /**
+     * 執行 rclone；失敗一律轉成帶可讀訊息的 {@link RuntimeException}。
+     *
+     * <p><b>{@code opName} 必須由呼叫端傳入</b>：上傳失敗的訊息會原樣寫進使用者可見的
+     * {@code gdrive_last_status}，而探測失敗只進 log，兩者硬編同一個字樣會讓其中一邊自稱錯誤的操作。
+     * 上傳這條路徑的訊息字面刻意維持與 Task 241 當初一字不差。
+     */
+    private void exec(List<String> cmd, String opName) {
         Path errFile = null;
         try {
             errFile = Files.createTempFile("rclone-err-", ".log");
@@ -162,7 +186,7 @@ public class ProcessGdriveUploader implements GdriveUploader {
             Process p = pb.start();
             if (!p.waitFor(UPLOAD_TIMEOUT_SEC, TimeUnit.SECONDS)) {
                 p.destroyForcibly();
-                throw new RuntimeException("rclone 上傳逾時（" + UPLOAD_TIMEOUT_SEC + " 秒）");
+                throw new RuntimeException("rclone " + opName + "逾時（" + UPLOAD_TIMEOUT_SEC + " 秒）");
             }
             int exit = p.exitValue();
             if (exit != 0) {
@@ -170,11 +194,11 @@ public class ProcessGdriveUploader implements GdriveUploader {
                 if (err.contains(NO_SECTION)) {
                     throw new RuntimeException("Drive remote「" + remote + "」尚未設定或授權失效");
                 }
-                throw new RuntimeException("rclone 上傳失敗 (exit=" + exit + "): " + err);
+                throw new RuntimeException("rclone " + opName + "失敗 (exit=" + exit + "): " + err);
             }
         } catch (IOException | InterruptedException e) {
             if (e instanceof InterruptedException) Thread.currentThread().interrupt();
-            throw new RuntimeException("rclone 上傳執行錯誤: " + e.getMessage(), e);
+            throw new RuntimeException("rclone " + opName + "執行錯誤: " + e.getMessage(), e);
         } finally {
             if (errFile != null) {
                 try {

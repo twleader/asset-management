@@ -55,6 +55,31 @@ public class CrawlerExportPathQuery {
     }
 
     /**
+     * 本服務範圍內是否有<b>任何一列</b>啟用 Drive 同步（Requirement 52 / Task 247.4.4）。
+     *
+     * <p>啟動自檢的前置條件：沒人啟用時整個自檢跳過。Requirement 50／51 明訂「既有部署升級後行為與現況
+     * 一致、不要求 rclone remote 存在」——沒人啟用卻每次啟動都噴 WARN，等於把一個附加功能變成所有人的
+     * 雜訊。ext 只管 {@code crawler_export_setting}（全域一列、無 owner），business 端另查它自己的八張表。
+     *
+     * <p><b>例外一律吞掉並回 {@code false}</b>：全新安裝的首次啟動時該表可能還沒建（Liquibase 由 backend
+     * 跑，兩個服務誰先起來沒有保證），這正是本檔 javadoc 既定的「表缺／DB 例外時 fallback」契約。
+     * 自檢是純觀測功能，讓它的前置查詢把服務啟動搞掛完全是本末倒置。
+     *
+     * <p>單值查詢走 {@code queryForObject}，故沒有 {@code RowMapper} 單／雙參數的坑
+     * （見 {@link #gdriveConfig} 的註解）。
+     */
+    public boolean anyGdriveEnabled() {
+        try {
+            Boolean any = jdbc.queryForObject(
+                    "SELECT EXISTS (SELECT 1 FROM crawler_export_setting WHERE gdrive_enabled)", Boolean.class);
+            return Boolean.TRUE.equals(any);
+        } catch (RuntimeException e) {
+            log.warn("查詢 crawler_export_setting 是否啟用 Drive 同步失敗，本次啟動自檢跳過：{}", e.getMessage());
+            return false;
+        }
+    }
+
+    /**
      * 回寫 Drive 上傳結果（Requirement 50 / Task 241）。
      *
      * <p><b>這是 ext 對 {@code crawler_export_setting} 的唯一寫入</b>，且只碰 {@code gdrive_last_run_at}

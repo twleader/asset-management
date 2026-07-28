@@ -340,6 +340,7 @@ import { Plus, Edit, Delete, Download, FolderOpened } from '@element-plus/icons-
 import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
 import { bffApi } from '@/api'
+import { showGdriveSelfCheckWarning } from '@/utils/gdriveSelfCheck'
 import { useAuthStore } from '@/stores/authStore'
 
 const TX_TYPES = ['買', '賣']
@@ -631,6 +632,8 @@ async function saveSchedule() {
     schedule.baseDir = s.baseDir ?? schedule.baseDir
     applyGdrive(s)
     ElMessage.success('排程設定已儲存')
+    // 剛把 Drive 同步打開時後端會附一則自檢警告；正常時為 null，不顯示（Task 247.3.5）
+    showGdriveSelfCheckWarning(s.gdriveSelfCheckWarning)
   } catch (e) {
     ElMessage.error('儲存失敗，請稍後再試')
   } finally {

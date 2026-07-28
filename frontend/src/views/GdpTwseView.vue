@@ -227,6 +227,7 @@ import {
 } from 'echarts/components'
 import VChart from 'vue-echarts'
 import { bffApi, apiErrorMessage } from '@/api'
+import { showGdriveSelfCheckWarning } from '@/utils/gdriveSelfCheck'
 import { useAuthStore } from '@/stores/authStore'
 import { ElMessage } from 'element-plus'
 
@@ -550,6 +551,8 @@ async function saveSchedule() {
     schedule.baseDir = s.baseDir ?? schedule.baseDir
     applyGdrive(s)
     ElMessage.success('排程設定已儲存')
+    // 剛把 Drive 同步打開時後端會附一則自檢警告；正常時為 null，不顯示（Task 247.3.5）
+    showGdriveSelfCheckWarning(s.gdriveSelfCheckWarning)
   } catch (e) {
     ElMessage.error(apiErrorMessage(e, '儲存失敗，請稍後再試'))
   } finally {

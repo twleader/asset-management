@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
@@ -62,6 +63,8 @@ class ExportScheduleGdriveTest {
     @Mock private RcloneClient rcloneClient;
     @Mock private AppUserRepository userRepo;
     @Mock private UserAdminService userAdminService;
+    /** 啟用當下的自檢（Task 247）；替身預設回 null＝自檢正常，要測警告時再 stub。 */
+    @Mock private GdriveSelfCheck selfCheck;
 
     @TempDir Path baseDir;
 
@@ -70,7 +73,7 @@ class ExportScheduleGdriveTest {
     @BeforeEach
     void setup() {
         GdriveOutputSupport gdrive =
-                new GdriveOutputSupport(rcloneClient, userRepo, userAdminService, "GDriveOutput");
+                new GdriveOutputSupport(rcloneClient, userRepo, userAdminService, selfCheck, "GDriveOutput");
         service = new ExportScheduleService(
                 settingRepo, excelExportService, currentUserProvider, gdrive, baseDir.toString());
         when(settingRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
@@ -185,6 +188,57 @@ class ExportScheduleGdriveTest {
         ExportScheduleDto.SettingResponse resp = service.getForCurrentUser();
 
         assertThat(resp.gdriveSubpath()).isEqualTo("/絕對路徑"); // 原樣回傳供前端顯示與修正
+    }
+
+    // ===== 247.3：啟用當下的自檢（八頁共用掛載點的串接）=====
+
+    @Test
+    void 啟用當下自檢失敗仍回2xx_設定照存且不覆蓋上次上傳兩欄() {
+        // 自檢失敗不得讓儲存變成 4xx／5xx：使用者必須能先把設定存起來再去修授權，
+        // 否則唯一的修正入口被自己鎖死。
+        givenCurrentUser(ADMIN_ID);
+        givenUser(ADMIN_ID, "tw.leader@gmail.com", true);
+        ExportScheduleSetting s = setting(ADMIN_ID, false, null);
+        LocalDateTime lastUpload = LocalDateTime.of(2026, 7, 27, 23, 0);
+        s.setGdriveLastRunAt(lastUpload);
+        s.setGdriveLastStatus("成功：GDriveOutput:" + DRIVE_DIR + "/資產總覽_1_20260727.xlsx（1234 bytes）");
+        when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.of(s));
+        when(selfCheck.checkLocal("GDriveOutput"))
+                .thenReturn("讀不到 rclone 設定 /etc/rclone/rclone.conf（檔案不存在或掛載已失效）");
+
+        ExportScheduleDto.SettingResponse resp = service.updateForCurrentUser(
+                new ExportScheduleDto.SettingRequest(true, 8, 0, "input", true, DRIVE_DIR));
+
+        assertThat(resp.gdriveSelfCheckWarning()).contains("讀不到 rclone 設定");
+        assertThat(resp.gdriveEnabled()).isTrue();
+        assertThat(s.isGdriveEnabled()).isTrue();               // 設定確實入庫
+        assertThat(s.getGdriveSubpath()).isEqualTo(DRIVE_DIR);
+        // 那兩欄的語意是「上次上傳」（九個前端頁面都這樣標）：寫進自檢結果會永久覆蓋昨晚真正的上傳記錄，
+        // 且 gdrive_last_run_at 會變成一個根本沒發生過上傳的時刻。
+        assertThat(s.getGdriveLastRunAt()).isEqualTo(lastUpload);
+        assertThat(s.getGdriveLastStatus()).startsWith("成功：");
+    }
+
+    @Test
+    void 已啟用時再次儲存不重跑自檢_回應也不帶警告() {
+        givenCurrentUser(ADMIN_ID);
+        givenUser(ADMIN_ID, "tw.leader@gmail.com", true);   // 明確送 true 仍會走權限檢查
+        when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.of(setting(ADMIN_ID, true, DRIVE_DIR)));
+
+        ExportScheduleDto.SettingResponse resp = service.updateForCurrentUser(
+                new ExportScheduleDto.SettingRequest(true, 9, 30, "input", true, DRIVE_DIR));
+
+        assertThat(resp.gdriveSelfCheckWarning()).isNull();
+        verify(selfCheck, never()).checkLocal(anyString());
+    }
+
+    @Test
+    void 讀取設定不做自檢() {
+        givenCurrentUser(ADMIN_ID);
+        when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.of(setting(ADMIN_ID, true, DRIVE_DIR)));
+
+        assertThat(service.getForCurrentUser().gdriveSelfCheckWarning()).isNull();
+        verify(selfCheck, never()).checkLocal(anyString());
     }
 
     // ===== 243.3.3：run-now 也上傳並回報落點 =====

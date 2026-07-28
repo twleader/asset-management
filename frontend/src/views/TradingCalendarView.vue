@@ -282,6 +282,7 @@
 
 <script setup>
 import { bffApi } from '@/api'
+import { showGdriveSelfCheckWarning } from '@/utils/gdriveSelfCheck'
 import { useAuthStore } from '@/stores/authStore'
 import dayjs from 'dayjs'
 import { ElMessage } from 'element-plus'
@@ -562,6 +563,8 @@ async function saveSchedule() {
     exportDialog.scheduleLastRunStatus = s.lastRunStatus ?? exportDialog.scheduleLastRunStatus
     applyGdrive(s)
     ElMessage.success('排程設定已儲存')
+    // 剛把 Drive 同步打開時後端會附一則自檢警告；正常時為 null，不顯示（Task 247.3.5）
+    showGdriveSelfCheckWarning(s.gdriveSelfCheckWarning)
   } catch (e) {
     ElMessage.error('排程儲存失敗，請確認格式與目錄權限')
   } finally {

@@ -2658,7 +2658,7 @@ GET  /api/bff/crawler-data/export-path/browse-gdrive?subpath=
   **例外一律不得逸出**：整段（含 DB 前置查詢）包在單一 catch-all 內。查詢的八張表在全新安裝首次啟動時可能尚未由 Liquibase 建立（`BadSqlGrammarException`），而既有同類元件 `CrawlerExportPathQuery` 的既定契約就是「表缺／DB 例外時由呼叫端 fallback」；自檢若讓例外逸出，會把純觀測功能變成啟動失敗。L3 沿用既有 `exec(...)` 時會擲 `RcloneUnavailableException`／`RcloneTimeoutException`／`RcloneRateLimitedException`／裸 `RuntimeException` 四種，須全部攔下。
 
   **log 不得輸出 token 值或 config 內容**（該檔含 crypt 解密密碼），L2 只判斷鍵是否存在。L3 的 stderr **盡可能原樣附上**，但既有 `exec(...)` 對「找不到 section」與速率限制兩條分支會換成罐頭訊息，該兩型附其可讀訊息即可。
-- **為何不做健康檢查頁／端點**：啟用時的自檢結果已寫進既有 `gdrive_last_status`、啟動時的只進 `docker logs`；做成第十個管理頁只會多一處要維護，而資訊在既有狀態欄與 log 裡已完整。
+- **為何不做健康檢查頁／端點**：啟用時的自檢結果只走當次回應的 `gdriveSelfCheckWarning`（不入庫、不碰 `gdrive_last_run_at`／`gdrive_last_status`）、啟動時的只進 `docker logs`；做成第十個管理頁只會多一處要維護，而資訊在當次提示與 log 裡已完整。
 - **`scope = drive` 的權衡**：新 remote 取得使用者 Drive 的完整讀寫權，這是能寫進**使用者手動建立**的既有目錄所必要的。程式端自我約束為只用 `lsjson --dirs-only`（列目錄）與 `copyto`（寫指定子路徑）兩種操作，**不實作任何刪除既有 Drive 檔案的程式路徑**，把完整權限的實際使用面縮到最小。
 - **ext 容器部署前提**：實際上傳者是 `external-materials-service`（目前僅裝 `curl`），需於其 Dockerfile 加裝 `rclone`，並唯讀掛入 `~/.config/rclone` **目錄**（單一共用 config，三個 section 共存；掛目錄而非單檔的理由見上方 Task 247 條）＋設 `RCLONE_CONFIG`；**須沿用 `BackupService` 既有的「啟動時複製到可寫路徑」作法**（唯讀掛載會使 rclone 自動續期 OAuth token 時寫回失敗而 exit non-zero），否則 token 過期後上傳會開始整批失敗。ext 以非 root `appuser` 執行，副本須落在 `/tmp`。
 - **中文目錄名編碼：現況已正確，不加 JVM 參數**。若 `sun.jnu.encoding` 退化成 ASCII，`ProcessBuilder` 傳出的中文路徑會變 `?` 並靜默寫錯目錄；但實測 ext 容器現為 UTF-8（base image `eclipse-temurin:21-jre-alpine` 自帶 `LANG=en_US.UTF-8`），且命令列 `-Dsun.jnu.encoding=UTF-8` 對該屬性**無效**（JDK 由 platform locale 決定）。約束改為「不得設 `LANG=C`／清除 base image locale／換成不帶 UTF-8 locale 的 base image」，並以驗證步驟回歸守門。

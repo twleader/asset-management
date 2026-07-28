@@ -77,6 +77,12 @@ public class TradingCalendarExportDto {
             String gdriveSubpath,
             String gdriveRemote,     // rclone remote 名稱；衍生顯示值不入庫
             String gdriveLastRunAt,  // yyyy-MM-dd HH:mm:ss，無則 null
-            String gdriveLastStatus  // 「成功：…」「逾時（…）：…」「失敗：…」「跳過：…」
+            String gdriveLastStatus, // 「成功：…」「逾時（…）：…」「失敗：…」「跳過：…」
+            // ── 啟用當下的可用性自檢（Requirement 52 / Task 247）────────────────
+            // 只有「本次請求把開關從 false 翻成 true」且本地自檢發現問題時才有值，其餘一律 null。
+            // 不入庫，也絕不寫進上面那一欄——gdriveLastStatus 的語意是「上次上傳」，
+            // 寫進去會永久覆蓋昨晚真正上傳成功的落點與大小（Task 247.3.4）。
+            // 注意本頁 record 名為 ScheduleSettingResponse，別照抄其餘七頁的 SettingResponse。
+            String gdriveSelfCheckWarning
     ) {}
 }

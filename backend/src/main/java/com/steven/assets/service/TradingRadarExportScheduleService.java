@@ -177,9 +177,10 @@ public class TradingRadarExportScheduleService {
         s.setGdriveEnabled(drive.enabled());
         s.setGdriveSubpath(drive.subpath());
         // 刻意不碰 gdriveLastRunAt／gdriveLastStatus：那是執行結果，不是使用者設定。
+        // 啟用當下的自檢結果同樣不寫那兩欄（Task 247.3.4），只走當次回應。
         s.setUpdatedAt(LocalDateTime.now(TW_ZONE));
         settingRepo.save(s);
-        return toSettingResponse(ownerId, sub, s);
+        return toSettingResponse(ownerId, sub, s, drive.selfCheckWarning());
     }
 
     /** 立即匯出到目錄（驗證用）。走與排程同一支寫檔邏輯，且**不動任何時間點的當日 guard**。 */
@@ -409,6 +410,16 @@ public class TradingRadarExportScheduleService {
 
     private TradingRadarExportDto.SettingResponse toSettingResponse(
             long ownerId, String subpath, TradingRadarExportSetting s) {
+        // 讀取路徑不做自檢：自檢只在「使用者這次把開關打開」時才有意義。
+        return toSettingResponse(ownerId, subpath, s, null);
+    }
+
+    /**
+     * @param gdriveSelfCheckWarning 本次啟用 Drive 時的自檢警告（Task 247.3.5）；正常時為 {@code null}。
+     *                               <b>不入庫</b>——尤其不得寫進 {@code gdriveLastStatus}，那一欄是「上次上傳」
+     */
+    private TradingRadarExportDto.SettingResponse toSettingResponse(
+            long ownerId, String subpath, TradingRadarExportSetting s, String gdriveSelfCheckWarning) {
         return new TradingRadarExportDto.SettingResponse(
                 subpath,
                 resolveDir(subpath).toString(),
@@ -421,6 +432,7 @@ public class TradingRadarExportScheduleService {
                 s == null ? null : s.getGdriveSubpath(),
                 gdrive.remoteName(),
                 s == null || s.getGdriveLastRunAt() == null ? null : s.getGdriveLastRunAt().toString(),
-                s == null ? null : s.getGdriveLastStatus());
+                s == null ? null : s.getGdriveLastStatus(),
+                gdriveSelfCheckWarning);
     }
 }

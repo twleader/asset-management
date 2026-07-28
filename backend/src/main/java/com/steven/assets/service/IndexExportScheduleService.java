@@ -125,8 +125,9 @@ public class IndexExportScheduleService {
         s.setGdriveEnabled(drive.enabled());
         s.setGdriveSubpath(drive.subpath());
         // 刻意不碰 gdriveLastRunAt／gdriveLastStatus：那是執行結果，不是使用者設定。
+        // 啟用當下的自檢結果同樣不寫那兩欄（Task 247.3.4），只走當次回應。
         s.setUpdatedAt(LocalDateTime.now(TW_ZONE));
-        return toResponse(settingRepo.save(s));
+        return toResponse(settingRepo.save(s), drive.selfCheckWarning());
     }
 
     /** 立即產檔寫入當前使用者設定的目錄（供驗證路徑正確）。不動當日 guard。 */
@@ -298,6 +299,14 @@ public class IndexExportScheduleService {
     }
 
     private IndexExportDto.SettingResponse toResponse(IndexExportSchedule s) {
+        return toResponse(s, null);   // 讀取路徑不做自檢：自檢只在「使用者這次把開關打開」時才有意義
+    }
+
+    /**
+     * @param gdriveSelfCheckWarning 本次啟用 Drive 時的自檢警告（Task 247.3.5）；正常時為 {@code null}。
+     *                               <b>不入庫</b>——尤其不得寫進 {@code gdriveLastStatus}，那一欄是「上次上傳」
+     */
+    private IndexExportDto.SettingResponse toResponse(IndexExportSchedule s, String gdriveSelfCheckWarning) {
         String market = normalizeMarket(s.getMarket());
         return IndexExportDto.SettingResponse.builder()
                 .enabled(Boolean.TRUE.equals(s.getEnabled()))
@@ -317,6 +326,7 @@ public class IndexExportScheduleService {
                 .gdriveRemote(gdrive.remoteName())
                 .gdriveLastRunAt(s.getGdriveLastRunAt() == null ? null : s.getGdriveLastRunAt().format(TS_FMT))
                 .gdriveLastStatus(s.getGdriveLastStatus())
+                .gdriveSelfCheckWarning(gdriveSelfCheckWarning)
                 .build();
     }
 

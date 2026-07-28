@@ -538,6 +538,7 @@ import { Bell, Download, Plus, Refresh } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
 import { bffApi } from '@/api'
+import { showGdriveSelfCheckWarning } from '@/utils/gdriveSelfCheck'
 import { useAuthStore } from '@/stores/authStore'
 import { useRouter } from 'vue-router'
 import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
@@ -994,12 +995,19 @@ async function saveExportSetting() {
   savingDir.value = true
   try {
     // 送整包而非裸字串：漏送 gdrive* 會讓 Drive 設定存不進去（後端把 null 視為「不變更」）
-    Object.assign(exportSetting, await bffApi.tradingRadar.saveExportSetting({
+    // 本頁是整包 Object.assign 回狀態，故先把 gdriveSelfCheckWarning 拆出來：它是當次自檢結果、
+    // 不是設定值，併進 exportSetting 會一直黏在頁面狀態上，重新讀設定也蓋不掉（讀取時後端不回這欄）
+    // `?? {}`：原本是 Object.assign(exportSetting, 回應)，空回應時只是 no-op；改成解構後
+    // null 回應會直接擲 TypeError，補上預設值維持原行為
+    const { gdriveSelfCheckWarning, ...saved } = await bffApi.tradingRadar.saveExportSetting({
       outputSubpath: exportSetting.outputSubpath,
       gdriveEnabled: exportSetting.gdriveEnabled,
       gdriveSubpath: (exportSetting.gdriveSubpath || '').trim()
-    }))
+    }) ?? {}
+    Object.assign(exportSetting, saved)
     ElMessage.success('已儲存輸出資料夾')
+    // 剛把 Drive 同步打開時後端會附一則自檢警告；正常時為 null，不顯示（Task 247.3.5）
+    showGdriveSelfCheckWarning(gdriveSelfCheckWarning)
   } catch {
     // 錯誤訊息由 axios 攔截器統一處理
   } finally {
