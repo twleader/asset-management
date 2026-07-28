@@ -3592,7 +3592,9 @@ TradingRadarView「重新整理」→ POST /api/bff/trading-radar/refresh
 
 `GET /api/trading-radar` **一個位元組都不改**，SSE 背景重算（`recalculateRadar()` → `load(false, true)`）仍走 GET。這不是風格偏好而是必要條件：POST 若被 SSE 路徑呼叫，抓取寫 Redis → `price-update` 事件 → 2 秒 debounce → 再抓取，會形成自我餵食迴圈並持續打外部 API。
 
-`twCodes` 來自 `StockSourceQuery.collectHeldStockCodes()` 的台股 set（最新資產快照持股 ∪ `stock_alert` 觀察清單）。**注意該方法的 `0000/台股` 排除只套在 `stock_alert` 那半段**（`WHERE NOT (stock_code = '0000' AND market = '台股')`），`stock_holding` 那半段沒有；故 `TwRadarRefreshService` 於呼叫 `updatePrices` 前須自行 `tw.remove("0000")`，否則大盤代號會被拿去打 `mis.twse.com.tw`，而 Requirement 43 明訂大盤不走該 API。**不重用既有的 `POST /internal/refresh`**——後者是 `PricePoller.refreshAll()`，會連美股／英股一併抓，而本頁只評台股，多抓只是把使用者的等待時間拉長。
+`twCodes` 來自**新增的** `StockSourceQuery.collectTwRadarCodes(Set<String>)`：每位 owner 各自最新快照的台股持股 ∪ 台股 `stock_alert`，排除 `0000`。
+
+**不重用既有的 `collectHeldStockCodes()`**，因為它取 `SELECT id FROM asset_snapshot ORDER BY snapshot_date DESC LIMIT 1`——全庫只取一筆快照，同日期時 tie-break 任意。實測（2026-07-29 部署後）owner 1 的快照 id 15 有 35 筆台股持股、owner 2 的 id 18 只有 2 筆，兩者同日，Postgres 挑中 id 18；結果雷達顯示 19 檔而回補只涵蓋 18 檔，`2885`（只在 owner 1 持股、不在觀察清單）永遠不會被更新——按鈕說「已抓取最新報價」卻有一列沒動。改用 `DISTINCT ON (owner_user_id) ... ORDER BY owner_user_id, snapshot_date DESC, id DESC` 後實測 19/19 全覆蓋。**`collectHeldStockCodes` 本身不得修改**：它服務每 2 分鐘的 `scheduledTwIntradayUpdate` 與 `refreshAll()`，放大範圍會改變背景排程的外部請求量。`TwRadarRefreshService` 仍保留一次防禦性 `tw.remove("0000")`，不倚賴收集器的排除。**不重用既有的 `POST /internal/refresh`**——後者是 `PricePoller.refreshAll()`，會連美股／英股一併抓，而本頁只評台股，多抓只是把使用者的等待時間拉長。
 
 休市分支沿用 `syncClosedFromDb` 而非重抓，是 Task 111 已驗證的不變式：盤外抓到的 last-tick 會覆蓋 FinMind 校正過的權威收盤，使 Redis 與 `stock_price_history` 不一致，Dashboard／歷年資產／快照表單三處數字互相打架。大盤 `0000` 在休市時不抓，因為 `twse_index_daily_history`（`TwseIndexPoller` 盤後批次）是完成日 K 的唯一權威來源，盤外抓 5 分 K 只會取到昨日尾盤點位。
 
