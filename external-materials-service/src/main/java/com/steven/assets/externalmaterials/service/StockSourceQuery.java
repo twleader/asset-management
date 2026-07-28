@@ -87,6 +87,34 @@ public class StockSourceQuery {
                 });
     }
 
+    /**
+     * 今日交易雷達回補專用：**每位 owner 各自最新快照**的台股持股 ∪ 台股觀察清單，排除大盤 `0000`（Task 249）。
+     *
+     * <p><b>為什麼不重用 {@link #collectHeldStockCodes}：</b>後者取的是
+     * {@code SELECT id FROM asset_snapshot ORDER BY snapshot_date DESC LIMIT 1}——
+     * 全庫只取<b>一筆</b>，且日期相同時 tie-break 由 Postgres 任意決定。實測 2026-07-29 兩位 owner
+     * 同日各有一筆快照（id 15 / owner 1，35 筆台股；id 18 / owner 2，2 筆台股），它挑中 id 18，
+     * 於是 owner 1 只在自己持股、不在觀察清單的標的（實測 `2885`）永遠不會被回補——
+     * 使用者按下「重新整理」卻有一列價格沒動，與按鈕的承諾不符。</p>
+     *
+     * <p>改用 {@code DISTINCT ON (owner_user_id) ... ORDER BY owner_user_id, snapshot_date DESC, id DESC}
+     * 取每位 owner 的最新快照（同 owner 同日多筆時再以 id 決勝，結果具決定性）。範圍仍是全庫——
+     * Redis 行情快取本就是跨租戶共用的市場資料，且回應不回傳任何檔數或代號，不構成租戶洩漏。</p>
+     *
+     * <p><b>刻意不改 {@link #collectHeldStockCodes} 本身</b>：它同時服務每 2 分鐘的
+     * {@code PricePoller.scheduledTwIntradayUpdate} 與 {@code refreshAll()}，放大其範圍會改變背景排程
+     * 對外部 API 的請求量，屬另一個決定。</p>
+     */
+    public void collectTwRadarCodes(Set<String> twCodes) {
+        jdbc.query("SELECT h.stock_code FROM stock_holding h WHERE h.market = '台股' "
+                        + "AND h.snapshot_id IN (SELECT DISTINCT ON (owner_user_id) id FROM asset_snapshot "
+                        + "ORDER BY owner_user_id, snapshot_date DESC, id DESC)",
+                (java.sql.ResultSet rs) -> { twCodes.add(rs.getString("stock_code")); });
+        jdbc.query("SELECT DISTINCT stock_code FROM stock_alert WHERE market = '台股'",
+                (java.sql.ResultSet rs) -> { twCodes.add(rs.getString("stock_code")); });
+        twCodes.remove("0000");   // 大盤走 twse_index_daily_history / Yahoo ^TWII，不打 TWSE mis API
+    }
+
     private static void classify(String code, String market,
                                  Set<String> twCodes, Set<String> usCodes, Set<String> ukCodes) {
         if ("美股".equals(market)) usCodes.add(code);

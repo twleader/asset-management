@@ -66,7 +66,7 @@ class TwRadarRefreshServiceTest {
             Set<String> tw = inv.getArgument(0);
             tw.addAll(java.util.Arrays.asList(codes));
             return null;
-        }).when(source).collectHeldStockCodes(any(), any(), any());
+        }).when(source).collectTwRadarCodes(any());
     }
 
     // ── 開盤中 ────────────────────────────────────────────────
@@ -85,8 +85,7 @@ class TwRadarRefreshServiceTest {
     }
 
     /**
-     * collectHeldStockCodes 的 0000 排除只套在 stock_alert 半段，stock_holding 半段沒有；
-     * 漏剔除就會拿大盤代號去打 mis.twse.com.tw。
+     * 收集器已排除 0000，這裡是服務層的防禦性剔除；漏掉就會拿大盤代號去打 mis.twse.com.tw。
      */
     @Test
     void 大盤代號不得混進個股抓取清單() {
@@ -245,7 +244,7 @@ class TwRadarRefreshServiceTest {
         when(clock.isTwMarketOpen()).thenReturn(false);
         when(clock.isTradingDay(TW, TODAY)).thenReturn(true);
         at(LocalTime.of(14, 0));
-        doAnswer(inv -> null).when(source).collectHeldStockCodes(any(), any(), any());
+        doAnswer(inv -> null).when(source).collectTwRadarCodes(any());
 
         TwRadarRefreshService.Summary s = service.refresh();
 

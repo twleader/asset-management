@@ -314,4 +314,25 @@ docker exec asset-frontend sh -c 'grep -l "bff/trading-radar/refresh" /usr/share
 - 前端 `vite build`：`✓ built in 4.50s`；bundle 驗證 `index-sqajz9F6.js` 同時含 `bff/trading-radar/refresh`（新 POST）與 `get:()=>he.get("/bff/trading-radar")`（GET wrapper 未被取代，SSE 路徑安全）
 - `scripts/spec-check.sh`：0 BLOCK / 0 CHECK
 
-**尚未執行**：Docker image rebuild ＋ container recreate ＋ 容器內端到端 curl 驗證（本專案共用同一套 stack，須依「merge 後從 main 的 worktree 重建」規則進行，待使用者指示）。
+**部署後發現並修正的缺陷（249.12，第二輪）**
+
+首次部署後端到端驗證發現：**雷達顯示 19 檔，回補只涵蓋 18 檔，`2885` 沒被更新**。根因是原計畫沿用的 `StockSourceQuery.collectHeldStockCodes()` 取 `SELECT id FROM asset_snapshot ORDER BY snapshot_date DESC LIMIT 1`——全庫只取一筆快照，且同日期時 tie-break 由 Postgres 任意決定。實測：
+
+```
+ id | owner_user_id | snapshot_date          snapshot_id | 台股持股數
+ 15 |             1 | 2026-07-29                      15 |  35
+ 18 |             2 | 2026-07-29                      18 |   2   ← 被選中
+```
+
+owner 1 只在自己持股、不在觀察清單的標的因此永遠不會被回補，使用者按下按鈕後那一列價格不動，與按鈕承諾矛盾。此為**既有缺陷**（每 2 分鐘的 `PricePoller.scheduledTwIntradayUpdate` 用同一支 collector，所以該檔的即時價一直就沒被輪詢），但本任務把它變成使用者可見的破口。
+
+**修正**：新增 `StockSourceQuery.collectTwRadarCodes(Set<String> twCodes)`——`DISTINCT ON (owner_user_id) ... ORDER BY owner_user_id, snapshot_date DESC, id DESC` 取每位 owner 的最新快照，∪ 台股 `stock_alert`，排除 `0000`。`TwRadarRefreshService` 改用它。**刻意不改 `collectHeldStockCodes` 本身**（它服務背景排程與 `refreshAll()`，放大範圍會改變外部請求量，屬另一個決定）。實測修正後 19/19 全覆蓋、`雷達仍漏=無`。
+
+**部署驗證輸出**
+
+- 從 main 的 worktree（`/Users/steven/Project/asset-management-main`，HEAD=36cc782d）`--no-cache` 重建 business-services／external-materials-service／frontend 後 `--force-recreate`，並 `restart bff`；四者皆 healthy
+- 非 stale image 確認：business jar 含 `TradingRadarRefreshService.class`、external jar 含 `TwRadarRefreshService.class` 與 `TwRadarRefreshService$Summary.class`、frontend `index-Cf-LBB38.js` 含 `bff/trading-radar/refresh`
+- `POST /api/trading-radar/refresh`（帶 `X-User-*` header）→ `HTTP 200`、`{"outcome":"CLOSED_SYNCED","twMarketOpen":false,"elapsedMs":217}`、`radar.stocks` 19 筆
+- 緊接第二次 → `{"outcome":"COOLDOWN","twMarketOpen":false,"elapsedMs":52}`（30 秒冷卻生效）
+- external log 出現 `[tw-radar-refresh] 開始／完成`，耗時 60 ms，未觸發美股／英股抓取
+- `GET /api/trading-radar` → `HTTP 200`，19 檔，不產生 `[tw-radar-refresh]` log（SSE 路徑未被汙染）
