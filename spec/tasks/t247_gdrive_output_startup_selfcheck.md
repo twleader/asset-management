@@ -26,7 +26,9 @@ project 1098468643583 before or it is disabled.
 自訂 client 把配額與 API 啟用狀態綁到該 client 所屬的 GCP 專案。
 **現況**：2026-07-28 15:53 重新授權後這兩個鍵已從該 section 移除（config 1319 → 1219 bytes），改走 rclone
 內建公用 client，403 消失。**新取捨是配額共享**——實測當天 16:03–16:12 補跑八頁時三頁回 `rateLimitExceeded`，
-間隔 60–90 秒重試才成功。日後若為配額改回自訂 client，**必須同時到該 GCP 專案啟用 Drive API**。
+間隔 60–90 秒重試才成功。日後若為配額改回自訂 client，**必須同時滿足三個條件**：該 GCP 專案**啟用 Drive API**（否則重現原因 1）、
+OAuth 同意畫面**已發布**（停在「測試」狀態的 refresh token **7 天即失效**，會以原因 2 的形式重現）、
+授權時選對 Google 帳號。
 
 **原因 2 — `[GDriveOutput]` 的 OAuth token 沒有 `refresh_token`。** 實測該 section 的 token JSON 只有
 `access_token`／`expires_in`／`expiry`／`token_type` 四個鍵，對照 `[GoogleDriver]` 多一個 `refresh_token`。
@@ -157,8 +159,16 @@ Requirement 50／51 的「本機一律照寫、Drive 只是附加副本、上傳
 - [ ] 247.2.5 **L1：來源 config 實際讀得到內容。**
       判準是**實際讀取**（如 `Files.readAllBytes` 或讀首個 byte），**不是 `Files.exists()`**——
       dangling inode 下 `exists()` 走 stat 仍回 true，只有實際讀取才 `ENOENT`。
+      **L1 的價值被一個既有設計放大，實作時要理解**：`configReady`
+      （`ProcessRcloneClient.java:106`／`ProcessGdriveUploader.java:85`）是**啟動時判定一次的旗標、
+      失敗後永不重試**（全檔只在 `initConfig()` 內設為 true，無任何重試路徑）——一旦啟動當下讀不到 config，
+      該容器**整個生命週期**的 Drive 同步都會被跳過。實測 2026-07-28 16:02 就發生過：
+      16:02:25 ext 啟動 → 16:02:26 讀 config 得 `NoSuchFileException` → 16:02:29 host 檔正好被
+      `rclone config` 改寫，結果 business 逃過而 **ext 靜默失效**；**症狀會偽裝成「Drive 好像還在收檔案」**
+      （各匯出頁的 xlsx 由 business 上傳、照常出現），只有爬蟲 JSON 停止更新。
       失敗時 WARN，訊息須含 config 路徑並提示「host 改過 rclone 設定後需
-      `docker compose -p asset-management up -d --force-recreate <service>`」。
+      `docker compose -p asset-management up -d --force-recreate <service>`」，
+      **並明寫「本容器本次生命週期的 Drive 同步將全部跳過」**——這句才是使用者真正需要知道的後果。
       **因為自檢是獨立元件、獨立於 `initConfig()` 的 try/catch，L1 在複製失敗與早退兩條路徑上都會執行到**——
       這正是不把自檢寫進 `ProcessRcloneClient.initConfig()` 的第三個理由：寫在那裡的話，dangling 時
       `Files.copy`（`:127`）會擲例外直接跳到 `:137` 的 catch，L1 在它唯一要涵蓋的情境下反而變成死碼。

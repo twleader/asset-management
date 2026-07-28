@@ -159,7 +159,15 @@ cd frontend
 > 於是「備份好好的，所以 Drive 沒問題」。**現況（2026-07-28 15:53 重新授權後）**：`[GDriveOutput]` 的
 > `client_id`／`client_secret` 已移除（config 1319 → 1219 bytes），亦走內建公用 client，403 消失。
 > **代價是配額共享**：實測當天補跑八頁時三頁回 `rateLimitExceeded`，間隔 60–90 秒重試才成功。
-> 日後若為配額改回自訂 client，**必須同時到該 GCP 專案啟用 Drive API**，否則 403 會重現。
+> 日後若為配額改回自訂 client，**必須同時滿足三件事**：該 GCP 專案啟用 Drive API（否則 403 重現）、
+> OAuth 同意畫面**已發布**（停在「測試」的 refresh token 7 天即失效）、授權時選對帳號。
+>
+> **`configReady` 是啟動時判定一次、失敗永不重試的旗標**：一旦啟動當下讀不到 config，該容器
+> **整個生命週期**的 Drive 同步都被跳過。實測 2026-07-28 16:02:25 ext 啟動、16:02:26 讀 config 失敗、
+> 16:02:29 host 檔被 rclone 改寫——business 逃過、ext 靜默失效。
+> **症狀會偽裝成「Drive 還在收檔案」**（xlsx 由 business 上傳照常出現），只有爬蟲 JSON 停更。
+> 故**改 host config 與 recreate 容器不可同時進行**：改 config → 驗 `refresh_token` → 等 host 檔穩定
+> → 再 recreate business 與 ext → restart bff。
 
 ---
 
