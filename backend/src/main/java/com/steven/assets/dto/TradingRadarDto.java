@@ -21,6 +21,26 @@ public final class TradingRadarDto {
             int skippedNonTwStocks
     ) {}
 
+    /**
+     * 手動「重新整理」的行情回補結果（Task 249）。
+     *
+     * <p>{@code outcome} ∈ {@code FETCHED}（開盤中已重抓）／{@code CLOSED_SYNCED}（休市，已同步 DB 收盤）／
+     * {@code SKIPPED_PENDING_CLOSE}（今日收盤尚未落 DB 的空窗，刻意不同步）／{@code COOLDOWN}／
+     * {@code BUSY}／{@code TIMEOUT}／{@code FAILED}。</p>
+     *
+     * <p><b>刻意不含抓取檔數</b>：回補清單來自全庫（Redis 行情快取本就是跨租戶共用的市場資料），
+     * 回檔數等於把「全庫台股標的數」洩漏給任一使用者；檔數只寫 log。</p>
+     */
+    public record PriceRefresh(String outcome, boolean twMarketOpen, long elapsedMs) {}
+
+    /**
+     * {@code POST /api/trading-radar/refresh} 的回應（Task 249）。
+     *
+     * <p>{@code radar} 與 {@code GET} 完全同形——{@link Response} 不得為此新增欄位，
+     * 它會被 {@code TradingRadarSnapshotStore} 序列化進 Redis 快照供 Requirement 48 的區間匯出讀回。</p>
+     */
+    public record RefreshResponse(Response radar, PriceRefresh priceRefresh) {}
+
     public record MarketSummary(
             String regime,
             String regimeLabel,

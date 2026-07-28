@@ -273,7 +273,11 @@ export const bffApi = {
 
   // TradingRadar（今日交易雷達，Requirement 43）：純本地規則，零 AI API
   tradingRadar: {
+    // 純讀重算；SSE 盤中自動更新走這支（不得改成下方的 refresh，否則會自我餵食迴圈）
     get: () => api.get('/bff/trading-radar'),
+    // Task 249：手動「重新整理」＝先同步回補台股行情再重算。
+    // 外部抓取需時，全域 timeout 30s 不夠用，必須 per-call 覆寫（鏈路上界為 nginx /api/ 的 60s）
+    refresh: () => api.post('/bff/trading-radar/refresh', null, { timeout: 45000 }),
     exportExcel: (from, to) =>
       api.get('/bff/trading-radar/export', { params: { from, to }, responseType: 'blob' }),
     // 排程自動匯出到伺服器目錄（Requirement 48 追加 / Task 231）

@@ -21,6 +21,8 @@ boolean stale = rows.isEmpty()
 
 **這是 Task 217 時的刻意設計**（`spec/requirements.md` Requirement 43「Task 217」修訂區塊原文）：「不得以『補一個即時大盤來源』規避——本 Requirement 明訂零外部行情抓取」。**本任務推翻這個決定**——使用者於 2026-07-20 明確要求加入大盤即時資料，並確認接受因此增加的外部依賴（Yahoo Finance，經既有的 `MacroDataFetchClient.fetchIndexIntraday`）。保留的原則不變：仍不得呼叫任何 AI／LLM API；仍不得因使用者「重新整理」頁面觸發抓取（抓取由獨立背景排程驅動，`TradingRadarService` 只讀 Redis／PostgreSQL 既有值）。
 
+> **後續失效（Task 249，2026-07-29）：** 上一段最後那句「仍不得因使用者『重新整理』頁面觸發抓取」**已被推翻**——使用者要求按下「重新整理」就要抓到最新股價，故新增 `POST /api/trading-radar/refresh` 走同步回補後再重算。詳見 `spec/tasks/t249_trading_radar_manual_price_refresh.md`。**`GET /api/trading-radar` 與 SSE 盤中自動更新仍適用原句**（零外部行情抓取），本段其餘內容不變。
+
 **正確行為（本任務）：** 大盤加入跟個股完全同一套 Redis 即時價機制（`price:台股:0000`）。盤中若 Redis 有今日的即時點位，`stale` 應為 `false`，MA／KD／regime 分數應反映即時點位，讓「今日交易雷達」在盤中真的能對台股大盤走勢做出反應；只有在「完成日 K 未到今日、且 Redis 也抓不到今日即時價」的雙重缺資料情況下，才維持既有的保守 stale 行為。
 
 ## 要做什麼

@@ -32,6 +32,12 @@ import java.util.Set;
 @Service
 public class PriceQueryService {
 
+    /**
+     * 交易雷達手動回補的等待上界（Task 249）。
+     * 鏈路預算：nginx /api/ 60s > axios 45s > 本值 30s > external 端自身約 20s（個股並行 ＋ 大盤 12s 上限）。
+     */
+    private static final long EXTERNAL_REFRESH_TIMEOUT_SECONDS = 30;
+
     private final StringRedisTemplate redis;
     private final StockPriceHistoryRepository historyRepo;
     private final ObjectMapper mapper = new ObjectMapper();
@@ -154,6 +160,22 @@ public class PriceQueryService {
      * Price-service 本身有 2 分鐘 cron，refresh 觸發只是想加速一次性刷新；
      * 不必等結果，下一次輪詢自然會讀到 Redis 最新內容。
      */
+    /**
+     * 同步觸發交易雷達專用的台股行情回補並等待完成（Task 249）。
+     *
+     * <p>與上方 {@link #triggerRefresh()} 的差別有二：(a) 只抓台股個股 ＋ 大盤，不碰美股／英股；
+     * (b) <b>同步等待</b>，因為使用者按下「重新整理」的期待就是「抓完再給我結果」。
+     * 逾時（{@code block(Duration)} 逾時時 Reactor 拋 {@code IllegalStateException}）與任何失敗
+     * 一律由呼叫端降級處理，不得讓它變成 5xx。</p>
+     */
+    public JsonNode refreshTradingRadarPrices() {
+        return priceServiceClient.post()
+                .uri("/internal/refresh/tw-radar")
+                .retrieve()
+                .bodyToMono(JsonNode.class)
+                .block(java.time.Duration.ofSeconds(EXTERNAL_REFRESH_TIMEOUT_SECONDS));
+    }
+
     public java.util.Map<String, Object> triggerRefresh() {
         priceServiceClient.post()
                 .uri("/internal/refresh")

@@ -3511,7 +3511,7 @@ TradingRadarView
        └─ TradingRadarRuleEngine（TW_RULES_V3 分數規則不變，RULE_VERSION 現為 TW_RULES_V7）
 ```
 
-本請求鏈**刻意不注入** `MarketAnalysisService`、LLM SDK、新聞爬蟲或任何 refresh endpoint。頁面按「重新整理」只重讀既有資料，不對外抓行情、不送出 Batch、不產生 AI 費用；大盤即時點位同樣由獨立背景排程（`TaiexIndexPoller`，見「大盤新鮮度與盤中即時判斷」小節）寫入 Redis，不是本請求鏈觸發的抓取。現有行情／大盤排程若在背景更新 PostgreSQL 或 Redis，雷達下次讀取自然看見新值；兩者生命週期分離。
+`GET /api/trading-radar` 這條請求鏈**刻意不注入** `MarketAnalysisService`、LLM SDK、新聞爬蟲或任何 refresh endpoint，只重讀既有資料，不對外抓行情、不送出 Batch、不產生 AI 費用；SSE 盤中自動更新走的也是這條。**Task 249 起，使用者手動按下「重新整理」改走 `POST /api/trading-radar/refresh`，會同步觸發一次台股行情回補後才重算**（見下方「手動重新整理觸發行情回補」小節）；該路徑仍不注入任何 LLM client、不觸發新聞爬蟲、不送出 Batch、不產生 AI 費用。大盤即時點位在 `GET` 路徑上同樣只由獨立背景排程（`TaiexIndexPoller`，見「大盤新鮮度與盤中即時判斷」小節）寫入 Redis。現有行情／大盤排程若在背景更新 PostgreSQL 或 Redis，雷達下次讀取自然看見新值；兩者生命週期分離。
 
 ### 標的選取與 owner 隔離
 
@@ -3607,26 +3607,74 @@ boolean stale = !todayEodPresent && !liveFreshToday;
 
 `TechnicalIndicatorService.FullIndicators` 增加 `previousK`／`previousD`：與當期 KD 使用完全相同的 KD9 遞迴；當期序列計算後，再排除最新一根（盤中 live 或最新完成日 K）計算前一期，資料不足回 null。`TradingRadarService` 將兩值只傳入純規則 `StockInput`，不新增 DB 欄位。`RISK_OFF` 時 counter-trend state 仍可產生，但 `counterTrendRisks` 必含小額分批、主建議優先；這是資訊狀態，不是自動下單授權。
 
+### 手動重新整理觸發行情回補（Task 249）
+
+Task 217 訂下、Task 228 保留的「頁面請求鏈零外部行情抓取」在**使用者手動按鈕**這一條路徑上被推翻：原本「重新整理」只是重打 `GET`，最新價仍取自 `PriceQueryService.getLive` 讀 Redis，而 Redis 的內容由 `PricePoller`（每 2 分鐘）與 `TaiexIndexPoller`（每 2 分鐘）的背景排程決定，兩次排程之間連按不會有任何變化。新增一條**只有手動按鈕會走**的路徑：
+
+```text
+TradingRadarView「重新整理」→ POST /api/bff/trading-radar/refresh
+  → TradingRadarBffRoutes 既有 wildcard rewrite（不新增 route、不新增 controller method）
+  → POST /api/trading-radar/refresh（business, TradingRadarController）
+      → TradingRadarRefreshService
+          1. 雙鍵冷卻閘門：Redis SETNX radar:refresh:cooldown:{ownerId} 與 :global，TTL 皆 30s
+             ├─ 任一已存在 → 跳過步驟 2，outcome=COOLDOWN
+             └─ 兩把都取得 → 步驟 2
+          2. PriceQueryService.refreshTradingRadarPrices()（WebClient，30s timeout，同步等待）
+             → POST /internal/refresh/tw-radar（external-materials-service）
+                 ├─ Semaphore(1).tryAcquire() 失敗 → 立即回 {busy:true}，不抓
+                 ├─ 開盤中（MarketClock.isTwMarketOpen()）→ 兩條【併行】後 join
+                 │    ├─ PricePoller.updatePrices(twCodes, "台股", false)  ← virtual thread/檔，≈20s 上界
+                 │    └─ TaiexIndexPoller.updateOnce()                     ← 大盤 0000，Future.get(12s) 上界
+                 └─ 休市 → 逐檔守門後 PricePoller.syncClosedFromDb(可同步的 twCodes, "台股")；大盤不抓
+                      守門：isTradingDay(今日) 且 findMaxTradingDate(code) != 今日 → 該檔跳過
+                      （13:30–13:32 空窗期，Redis 現值才是當日收盤）；全數跳過 → SKIPPED_PENDING_CLOSE
+          3. TradingRadarService.get()   ← 既有純讀重算，含 Task 230 per-owner 快照寫入
+      → { radar, priceRefresh:{ outcome, twMarketOpen, elapsedMs } }
+           twMarketOpen 一律取 business 的 MarketDataService.isMarketOpenNow("台股")；
+           external 回傳的同名欄位只寫 log（否則跨 13:30 邊界會產生自相矛盾的 payload）
+```
+
+`GET /api/trading-radar` **一個位元組都不改**，SSE 背景重算（`recalculateRadar()` → `load(false, true)`）仍走 GET。這不是風格偏好而是必要條件：POST 若被 SSE 路徑呼叫，抓取寫 Redis → `price-update` 事件 → 2 秒 debounce → 再抓取，會形成自我餵食迴圈並持續打外部 API。
+
+`twCodes` 來自 `StockSourceQuery.collectHeldStockCodes()` 的台股 set（最新資產快照持股 ∪ `stock_alert` 觀察清單）。**注意該方法的 `0000/台股` 排除只套在 `stock_alert` 那半段**（`WHERE NOT (stock_code = '0000' AND market = '台股')`），`stock_holding` 那半段沒有；故 `TwRadarRefreshService` 於呼叫 `updatePrices` 前須自行 `tw.remove("0000")`，否則大盤代號會被拿去打 `mis.twse.com.tw`，而 Requirement 43 明訂大盤不走該 API。**不重用既有的 `POST /internal/refresh`**——後者是 `PricePoller.refreshAll()`，會連美股／英股一併抓，而本頁只評台股，多抓只是把使用者的等待時間拉長。
+
+休市分支沿用 `syncClosedFromDb` 而非重抓，是 Task 111 已驗證的不變式：盤外抓到的 last-tick 會覆蓋 FinMind 校正過的權威收盤，使 Redis 與 `stock_price_history` 不一致，Dashboard／歷年資產／快照表單三處數字互相打架。大盤 `0000` 在休市時不抓，因為 `twse_index_daily_history`（`TwseIndexPoller` 盤後批次）是完成日 K 的唯一權威來源，盤外抓 5 分 K 只會取到昨日尾盤點位。
+
+**但休市分支本身有一個必須守門的空窗**：`MarketClock.isTwMarketOpen()` 上界是 `13:30`，而今日收盤價要到 `ClosePersister.dumpTwCloseFromRedis()`（`cron = "0 32 13 * * MON-FRI"`）才由 Redis 落進 `stock_price_history`。這約兩分鐘內 `syncClosedFromDb` 走的 `findRecentClose`（`ORDER BY trading_date DESC LIMIT 1`）取回的是**昨日**收盤，`PriceCacheWriter.syncClosedFromDb` 會無條件覆寫 Redis 銷毀當日真實收盤；接著 13:32 的 `dumpRedisToDb` **不檢查 payload 的 `tradingDate`**，把該昨收以 `tradingDate=今日` upsert 進 `stock_price_history`，污染收盤價的唯一權威來源，直到 16:00 `verifyTwCloseWithFinMind` 才自癒。既有 `refreshAll` 有同樣的缺口，但它沒有被任何前端按鈕呼叫；Task 249 是第一次把這條路徑接到顯眼按鈕，而 13:30–13:32 恰是使用者最想按的時刻。故本路徑**逐檔守門**：`isTradingDay(今日)` 為真、**且台股當地時間已過 13:30**、且該檔 `findMaxTradingDate(code, "台股")` 不等於今日時跳過該檔，全數跳過即 `outcome=SKIPPED_PENDING_CLOSE`。**13:30 這個時間下界不可省**——少了它，交易日 00:00–09:00 的盤前整段也會落進守門（該時段同樣「休市 ＋ 是交易日 ＋ 今日收盤未落 DB」），回出「已保留最新成交價」這種盤前根本不成立的假陳述；而且守門的理由在盤前是反過來的：DB 有 16:00 FinMind 校正過的權威收盤，Redis 才是該被同步的一方（`PricePoller.warmCacheOnStartup` 在盤外做的正是這件事）。`findMaxTradingDate` 回 `Optional.empty()`（該檔無任何歷史列）視為不納入同步。守門只加在新服務內，**不改動 `PricePoller.syncClosedFromDb`／`PriceCacheWriter.syncClosedFromDb`**（另有 `refreshAll`／`warmCacheOnStartup` 兩個既有呼叫端）。
+
+**逾時預算由內而外收斂在 nginx 的 60 秒之內**（`frontend/nginx.conf` 的 `location /api/` 為 `proxy_read_timeout 60s`，超過即 504；BFF 的 Spring Cloud Gateway 未設 `spring.cloud.gateway.httpclient.response-timeout`，預設不逾時，不構成額外上界，日後亦不得為此功能加設）。**external 端必須自己收斂，不得只靠外層逾時**：個股側 `PriceFetchClient` 每檔 `tse`／`otc` 各 10 秒逾時、virtual-thread-per-code 並行，總時間 ≈ 20 秒；大盤側 `MacroDataFetchClient.fetchIndexIntraday("TWSE")` 走 `curlGetWithRetry(url, 2)`，回應非 JSON（Yahoo WAF 擋）時 `Thread.sleep(10s)` 再 `sleep(20s)`，**單這段最壞 30 秒純睡眠**，且其 `ProcessBuilder("curl", "-s", ...)` 沒有 `-m`、`waitFor()` 亦無逾時，理論上無上界。故大盤與個股**併行**、大盤那條**自帶 `Future.get(12, SECONDS)` 上限**（先等大盤再等個股，順序顛倒會讓 12 秒疊在個股的 20 秒之後），逾時即放棄本輪大盤（Redis 保留上一輪真實點位，符合 `TaiexIndexPoller` 既有「查無有效點位不寫」慣例）。**`ExecutorService` 必須是 bean 生命週期的欄位，絕不可用 try-with-resources 或 `awaitTermination` 收尾**——Java 19+ 的 `ExecutorService.close()` 預設是 `shutdown()` 後 `awaitTermination(1 DAY)`，離開 try 區塊會一路等到大盤任務結束，把 12 秒上限整個作廢（`PricePoller.java:147` 的 `// executor.close() 等所有 task 完成` 正是這個語意）；`cancel(true)` 也救不回來，`curlGetWithRetry` 阻塞在 pipe 讀取時對中斷無反應。**不修改既有 `curlGetWithRetry`**——它同時服務「股市大盤查詢」頁與其他總經抓取，改其重試或逾時是另一個變更的爆炸半徑。business → external 的 `WebClient` 設 30 秒逾時；前端 axios 對此支覆寫 45 秒。business 端逾時或例外**一律不上拋**：記 WARN 後照常重算並以 `outcome=TIMEOUT`／`FAILED` 回傳。
+
+節流有三道，皆為「降級但仍回結果」，不得回 4xx：per-owner Redis 冷卻 30 秒、**全域** Redis 冷卻 30 秒、以及 external 端單一 permit 的 `Semaphore`。兩把 Redis 鍵**不得用 `&&` 短路取得**：短路後 owner 鍵已寫入卻沒有實際抓取，該使用者的冷卻會被無故燒掉、最長要等約 60 秒才解除；任一把未取得時必須把本次已取得的那一把刪掉。全域鍵不可省：`Semaphore` 只擋併發不擋速率，而 per-owner 鍵擋不住「A 按完 5 秒後 B 按」——回補清單是全庫的，N 個使用者輪流按可把外部請求頻率從背景排程的每 2 分鐘一輪推高數十倍（本專案已有被 Yahoo WAF 回 429 的實績）。全域鍵只透露「近期有人刷新過」，而行情快取本就是跨租戶共用的市場資料，不構成租戶洩漏。
+
+使用者按鈕觸發的 `updatePrices` 可能與每 2 分鐘的 `scheduledTwIntradayUpdate` 同時執行——`Semaphore` 只守 `/internal/refresh/tw-radar`，擋不到 `@Scheduled` 那條。兩者對同一批代號併發寫 Redis，最壞是同一檔被兩次 tick 覆寫；值同源且 `PriceCacheWriter` 對 `Optional.empty()` 已有「本輪不更新」保護，實質無害，刻意不加跨路徑鎖（加了反而會讓背景排程被使用者按鈕餓死）。
+
+`priceRefresh` **刻意不回傳抓取檔數**：回補清單是全庫的（Redis 行情快取本就是跨租戶共用的市場資料），回檔數等於把「全庫台股標的數」洩漏給任一使用者；檔數只進 business／external 的 log。`radar` 部分與 GET 完全同形（`TradingRadarDto.Response` 不新增欄位，避免動到 Task 230 已落地的 Redis 快照序列化與 Requirement 48 的區間匯出）。
+
+`RULE_VERSION` 維持 `TW_RULES_V7`：本修訂不碰規則引擎、不碰 `stale`／`intraday` 語意、不碰任何因子或門檻，同一份輸入前後輸出完全相同；升版只會製造假的不可比性訊號並觸發 Requirement 44 的通知基準全面重建。
+
 ### API 與前端
 
 | 層 | 端點 | 說明 |
 |---|---|---|
-| business | `GET /api/trading-radar` | 組裝大盤＋當前使用者台股決策；純讀、graceful per-stock；回應前 fail-soft 寫一筆 per-owner Redis 快照（Requirement 48） |
+| business | `GET /api/trading-radar` | 組裝大盤＋當前使用者台股決策；純讀、graceful per-stock；回應前 fail-soft 寫一筆 per-owner Redis 快照（Requirement 48）。**零外部行情抓取，Task 249 後仍然不變** |
+| business | `POST /api/trading-radar/refresh` | 先同步回補台股即時行情（開盤中抓外部／休市同步 DB 收盤）再走同一支 `get()` 重算；回 `{radar, priceRefresh}`；**per-owner ＋ 全域雙鍵** 30 秒冷卻、逾時／失敗降級不回 5xx；Task 249 |
+| external | `POST /internal/refresh/tw-radar` | 只抓台股個股（`collectHeldStockCodes` 的 tw set，另自行 `remove("0000")`）＋大盤 `0000`，兩者併行、大盤 12 秒上限；`Semaphore(1)` 單一併發，忙碌回 `busy=true`；休市走逐檔守門後的 `syncClosedFromDb`；Task 249 |
 | business | `GET /api/trading-radar/export?from&to` | 由 Redis 快照組區間 Excel（`ResponseEntity<ByteArrayResource>`）；Requirement 48 |
 | business | `GET/PUT /api/trading-radar/export-schedule/times` | 排程執行時間點清單／整批覆寫（per-owner 多時間點）；Requirement 48 追加 |
 | business | `GET/PUT /api/trading-radar/export-schedule/setting` | 輸出資料夾（相對子路徑）讀取／儲存；Requirement 48 追加 |
 | business | `POST /api/trading-radar/export-schedule/run-now` | 立即匯出到設定目錄，回落點路徑與檔案大小；不動當日 guard |
 | business | `GET /api/export-schedule/browse?subpath=` | **沿用 Requirement 34 既有端點**列舉子資料夾，不新增 |
 | BFF | `GET /api/bff/trading-radar` | `TradingRadarBffRoutes` rewrite 至 business；一頁一 BFF |
+| BFF | `POST /api/bff/trading-radar/refresh` | 同一 wildcard rewrite 自動涵蓋（route 無 method predicate）；**不得新增 route 或 controller method**，理由同下方 browse 那列的反面——本路徑在 business 端**存在**對應位置，wildcard rewrite 正確；Task 249 |
 | BFF | `GET /api/bff/trading-radar/export` | `TradingRadarBffRoutes` rewrite 至 business，二進位下載 passthrough |
 | BFF | `/api/bff/trading-radar/export-schedule/**` | 同一 rewrite 自動涵蓋（路徑落在 business 對應位置） |
 | BFF | `GET /api/bff/trading-radar/export/browse` | **須用 `TradingRadarBffController`（`@RestController` + WebClient）轉呼 business `/api/export-schedule/browse`**；不可加 gateway route——該路徑落在既有 wildcard `/api/bff/trading-radar/**` 內會被 rewrite 成不存在的 `/api/trading-radar/export/browse` 而 404。WebFlux 的 `RequestMappingHandlerMapping`(order 0) 先於 Gateway 的 `RoutePredicateHandlerMapping`(order 1)，controller 自動勝出；此寫法亦與其餘 7 頁一致 |
 
 前端新增 `TradingRadarView.vue`：上方大盤 regime 卡（RISK_ON 紅、RISK_OFF 綠、NEUTRAL 灰、DATA_INCOMPLETE 黃；台股配色）、規則版本／資料日／重新整理；下方卡片表格依主動作顯示 tag，另有「逆勢抄底」獨立欄位（`NONE` 顯示 `—`、超跌觀察為 warning、逆勢試單候選為 danger）。標的名稱下依 DTO 顯示「債券」與「還原權息」小標籤；展開列呈現同一還原價基的三條均線確認、主規則理由／風險及逆勢狀態自己的理由／風險。個股決策表透過 Element Plus `row-dblclick` 將該列 `{ stockCode, stockName, market }` 傳入跨頁共用的 `StockAnalysisDialog`，使雙擊資料列可直接開啟股票分析圖，不新增雷達專屬圖表或 API。`api/index.js` 新增 `bffApi.tradingRadar.get()`；router 新增 `/trading-radar`；`App.vue` 於「股市綜合分析」加入「今日交易雷達」。
 
-盤中更新沿用儀表板既有 SSE `/api/market-data/prices/stream`，不另建 endpoint。`price-update` 只處理 `market=台股` 且已存在於目前雷達清單的代號：事件抵達時以 immutable row replacement 立即覆蓋 `price`／`changePercent`／`priceUpdatedAt`；同一批事件以 2 秒 trailing debounce 合併，再以不顯示 loading 的 `bffApi.tradingRadar.get()` 重讀完整 response，讓 MA、KD、score、action、reasons、risks 與最新 Redis 價格一致。背景重算若仍在執行，新事件只標記 pending，完成後再合併補算，避免重疊請求。此流程只讀既有 Redis／PostgreSQL，不呼叫 `/prices/refresh`。
+盤中更新沿用儀表板既有 SSE `/api/market-data/prices/stream`，不另建 endpoint。`price-update` 只處理 `market=台股` 且已存在於目前雷達清單的代號：事件抵達時以 immutable row replacement 立即覆蓋 `price`／`changePercent`／`priceUpdatedAt`；同一批事件以 2 秒 trailing debounce 合併，再以不顯示 loading 的 `bffApi.tradingRadar.get()` 重讀完整 response，讓 MA、KD、score、action、reasons、risks 與最新 Redis 價格一致。背景重算若仍在執行，新事件只標記 pending，完成後再合併補算，避免重疊請求。此流程只讀既有 Redis／PostgreSQL，**不呼叫任何行情 refresh**——Task 249 新增的 `POST /api/bff/trading-radar/refresh` 專供手動按鈕，SSE 路徑不得改呼叫它（否則抓取→寫 Redis→`price-update`→再抓取，形成自我餵食迴圈）。
 
-生命週期與儀表板一致：mount 初始載入完成後建立 `EventSource`；一般網路中斷交由瀏覽器自動 reconnect，若連線進入 `CLOSED` 則 5 秒後重建；unmount 設定 disposed 並關閉 stream、清除 reconnect／recalculate timers，避免離頁後重開連線或更新已卸載狀態。手動重新整理仍可隨時重讀完整雷達。
+生命週期與儀表板一致：mount 初始載入完成後建立 `EventSource`；一般網路中斷交由瀏覽器自動 reconnect，若連線進入 `CLOSED` 則 5 秒後重建；unmount 設定 disposed 並關閉 stream、清除 reconnect／recalculate timers，避免離頁後重開連線或更新已卸載狀態。手動重新整理仍可隨時重讀完整雷達，Task 249 起改為先回補台股行情再重算（見上方「手動重新整理觸發行情回補」）。
 
 ### 驗證重點
 
@@ -3636,6 +3684,7 @@ boolean stale = !todayEodPresent && !liveFreshToday;
 - `TradingRadarRuleEngineTest` V4：stale 時不給 `RISK_ON` 加分且關閉買進閘門、stale 時 `RISK_OFF` 仍 veto、逆勢 `stabilized` 改讀完成日漲跌幅後盤中不翻轉。
 - 新增測試（`TradingRadarService`／`TechnicalIndicatorService` 大盤即時融合邏輯，Task 228，V6）：完成日 K 未到今日但 Redis 有今日即時價 → `stale=false`、`intraday=true`；兩者皆無 → `stale=true`（既有行為不變）；完成日 K 已到今日 → `stale=false`、`intraday=false`（既有行為不變）；兩日確認（`c60`／`c240`）只用完成日 K、不受即時點位影響。`external-materials-service` 大盤盤中輪詢新增測試：抓不到有效點位時不覆寫 Redis（保留上一輪真實值）。
 - 前端正式建置後確認 `TradingRadarView` chunk 含 `/api/market-data/prices/stream` 與 `price-update`；執行環境確認 SSE endpoint 可建立 `text/event-stream` 回應，且離頁清理與背景重算不觸發 refresh endpoint。
+- 新增測試（手動重新整理回補，Task 249）：開盤中 → 個股 `updatePrices` ＋ 大盤 `updateOnce` 皆被呼叫、`outcome=FETCHED`；休市 → 走 `syncClosedFromDb`、大盤不抓、`outcome=CLOSED_SYNCED`；交易日休市但該檔 `findMaxTradingDate` 非今日（13:30–13:32 空窗）→ **不呼叫** `syncClosedFromDb`、`outcome=SKIPPED_PENDING_CLOSE`；非交易日 → 守門不生效、照常同步；冷卻中（per-owner 或全域任一命中）→ external client **零互動**且仍回完整 `radar`、`outcome=COOLDOWN`；external 逾時／例外 → 不上拋、仍回完整 `radar`、`outcome=TIMEOUT`／`FAILED`；`Semaphore` 已被佔用 → 立即 `busy=true` 且不抓。**迴歸**：`GET /api/trading-radar` 對 external client 仍為零互動（守住 SSE 路徑未被汙染）。前端建置後確認 chunk 含 `bff/trading-radar/refresh`，且 `recalculateRadar` 走的仍是 GET wrapper。
 - 建置：backend test/package、BFF package、frontend build。
 - 執行環境：重建 business／BFF／frontend 後確認 health；以已登入頁面或帶有效 user header 的容器內診斷確認 payload owner-scoped。檢查 business log 與程式依賴，證明 `/api/trading-radar` request 不進 `MarketAnalysisService`、不產生 Anthropic batch。
 
