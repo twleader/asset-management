@@ -467,6 +467,7 @@ export const bffApi = {
     createRecipient:  (data) => api.post('/bff/notification-settings/recipients', data),
     updateRecipient:  (id, data) => api.put(`/bff/notification-settings/recipients/${id}`, data),
     toggleActive:     (id) => api.patch(`/bff/notification-settings/recipients/${id}/active`),
+    toggleCalendar:   (id) => api.patch(`/bff/notification-settings/recipients/${id}/calendar`),
     deleteRecipient:  (id) => api.delete(`/bff/notification-settings/recipients/${id}`)
   }
 }

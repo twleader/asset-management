@@ -936,6 +936,7 @@ twse_index_year_end_history  (TWSE 指數年末值；Task 97 起已不使用—�
 | email | String | 收件人 email；存入前 trim + 轉小寫；與 ownerUserId 複合唯一（同一使用者不可重複，**不同使用者可各自使用同一 email**） |
 | active | Boolean | 是否啟用（false 不寄**股價警示**信，但保留設定） |
 | receiveMarketAnalysis | Boolean | 是否接收每日股市分析（預設 true；與 `active`〔接收警示〕**各自獨立**，見 Requirement 31 / Task 151） |
+| addToCalendar | Boolean | 警示 digest 是否夾帶 Google 日曆邀請（預設 false；**僅 `gmail.com` / `googlemail.com` 網域可設為 true**，見 Requirement 23 / Task 248） |
 | createdAt | LocalDateTime | 建立時間 |
 | updatedAt | LocalDateTime | 最近一次更新時間 |
 
@@ -1205,6 +1206,7 @@ PUT    /api/notification-recipients/{id}             # 更新 email
 DELETE /api/notification-recipients/{id}             # 刪除
 PATCH  /api/notification-recipients/{id}/active      # 切換啟用/停用（＝是否接收股價警示信）
 PATCH  /api/notification-recipients/{id}/market-analysis # 切換「是否接收今日股市分析每日 Email」訂閱（Requirement 31 / Task 151；與 active 各自獨立）
+PATCH  /api/notification-recipients/{id}/calendar     # 切換「警示 digest 夾帶 Google 日曆邀請」（Task 248）；非 Gmail 網域「開啟」時回 400，關閉一律放行
 
 # 前端 view 經 BFF：rewrite /api/bff/notification-settings/recipients/** → /api/notification-recipients/**
 ```
@@ -1648,6 +1650,48 @@ StockAlertService.evaluate()
 - `application.yml` 內 `spring.mail.host=smtp.gmail.com:587 STARTTLS`，username / password 走 `${MAIL_USERNAME}` / `${MAIL_PASSWORD}` 環境變數（Gmail App Password，非登入密碼）
 - 寄件人預設 = `MAIL_USERNAME`；可以 `NOTIFICATION_FROM` 覆寫
 - 收件人於 `/notification-settings` 頁面維護，存 `notification_recipient` 表
+
+### Gmail 收件人日曆邀請（Requirement 23 / Task 248）
+
+**目標**：警示觸發的即時性不再受「使用者何時打開信箱」限制——digest email 夾帶 iCalendar 邀請，Google 日曆自動建立事件並推播到手機。
+
+**為什麼是 ics 邀請、不是 Google Calendar API**：收件人是**別人的信箱**（家人 / 副信箱），本系統拿不到他們的 OAuth 授權，Calendar API 無從代其建立事件；服務帳戶亦無自身日曆、個人 Gmail 無法做 domain-wide delegation。夾帶 `METHOD:REQUEST` 的 ics 是唯一「不需收件人授權、又能自動落進日曆」的路徑，且完全走既有 SMTP，不新增任何憑證或對外相依。既有 rclone 的 Google OAuth token（`[GoogleDriver]` 為 `drive.file`、`[GDriveOutput]` 為 `drive`）都只授予雲端硬碟權限，與 calendar scope 無關，**不可**挪用。
+
+**資料模型**：`notification_recipient` 增 `add_to_calendar BOOLEAN NOT NULL DEFAULT FALSE`（Liquibase `v1.77.0-notification-recipient-calendar.sql`）。與 `active`（收警示）、`receive_market_analysis`（收股市分析）三者各自獨立；`add_to_calendar` 是「收警示信時**額外**夾帶日曆邀請」的修飾旗標，`active=false` 時本就不寄信，日曆自然也不會有事件。
+
+**Gmail 網域限制**：只有 `gmail.com` / `googlemail.com` 能開啟（email 已在寫入前 trim + 轉小寫，直接取 `@` 之後比對）。後端 `PATCH .../calendar` 與 `update`（改 email）兩處都要把關：改成非 Gmail 時強制 `addToCalendar=false`，不留殘留狀態。**網域檢查只擋「開啟」方向**（`false` → `true`）；關閉一律放行，否則殘留列將無法從畫面關掉。前端非 Gmail 列顯示「—」。
+
+**掛載點與分組單位變更**：`AlertNotificationDispatcher.flush()` 的 per-recipient 迴圈。既有 `groupByRecipient` 以 **email 字串**為 key（來源 `StockAlertRecipientRepository.findActiveEmailsByAlertId`，只投影 `r.email`），要夾帶 ics 就得知道該列的 `id`（寫進 UID）與 `addToCalendar`——**不可用 `findByEmail(email)` 反查**：`notification_recipient` 的唯一鍵是複合 `(owner_user_id, email)`，不同使用者可各自使用同一 email，而背景排程無 HTTP request context、`TenantFilterAspect` 明文放行不套 `ownerFilter`（見 `TenantFilterAspect`「背景執行緒：不啟用，維持掃全體」），故 `Optional<NotificationRecipient> findByEmail` 在同 email 多列時會丟 `IncorrectResultSizeDataAccessException`，單列時也可能取到**別的租戶**那一列。這正是 Task 145 已為同一支 dispatcher 修過的洞（`findActiveEmailsByAlertId` 額外 join `StockAlert a` 並加 `r.ownerUserId = a.ownerUserId`），不可從另一個入口重新打開。
+
+作法：把該查詢改為投影出收件人身分（`r.id`、`r.email`、`r.addToCalendar`，保留既有的 `r.ownerUserId = a.ownerUserId` 與 `r.active = true` 條件），`groupByRecipient` 的 key 改為 **`recipientId`**，email 僅作寄送位址。**這帶來一個刻意的行為變更**：同一 email 分屬不同租戶時，原本會被合併成一封信寄出（等於跨租戶內容混寄），改 key 後各租戶各寄一封。**手動補發 `resendLastTradingDay` 不夾帶 ics**（使用者主動重寄歷史觸發，再進日曆只會製造重複事件），但同樣改用 id 分組。
+
+**ics 產生**（`AlertCalendarInviteBuilder`，純字串組裝、無第三方 iCal 函式庫）：
+
+```
+BEGIN:VCALENDAR / VERSION:2.0 / PRODID:-//asset-management//alert//ZH-TW / CALSCALE:GREGORIAN / METHOD:REQUEST
+BEGIN:VEVENT
+UID:alert-{recipientId}-{epochMillis}@asset-management      ← 每封新 UID；重複 UID 會被 Google 當成既有事件的更新而覆蓋、且不再推播
+DTSTAMP / DTSTART:{now+2min，秒歸零 UTC} / DTEND:{DTSTART+15min}
+ORGANIZER;CN=資產管理系統:mailto:{from}
+ATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;RSVP=FALSE;CN={email}:mailto:{email}
+SUMMARY:{= 信件主旨} / DESCRIPTION:{每檔一行摘要，RFC 5545 escape} / STATUS:CONFIRMED / SEQUENCE:0 / TRANSP:TRANSPARENT
+BEGIN:VALARM / ACTION:DISPLAY / DESCRIPTION:股票警示觸發 / TRIGGER:-PT1M / END:VALARM
+END:VEVENT / END:VCALENDAR
+```
+
+- **CRLF 換行 + 75 octet folding**（續行以單一空白起始，依 UTF-8 位元組數而非字元數斷行——`DESCRIPTION` 內是中文，按字元斷會超規）
+- **`DTSTART` 必須在未來**：Google 對「已開始」的事件不推播；而事件於其提醒窗內被建立時（收件人日曆預設多為「10 分鐘前」、事件 2 分鐘後開始）Google 會在加入當下立即推播。+2 分鐘同時涵蓋「ics 的 `VALARM` 生效」與「被收件人日曆預設提醒覆蓋」兩種情形，實際延遲 ≈ 1~2 分鐘
+- `TRANSP:TRANSPARENT` 讓事件不佔 free/busy，不干擾收件人的行程可用性
+
+**`DESCRIPTION` 的來源**：日曆事件的逐檔摘要與信件正文**必須同源**，否則日後有人改了 `buildDigest` 的 label 串接或 latest 判準，兩者就會靜默分歧。故 `DigestMail` record 增第四個成分 `List<String> calendarLines`，於 `buildDigest` 既有的逐檔迴圈內順手 append（同一份 `groupByStock` 分組、同順序、同 `formatNumber`），dispatcher 直接取用，**不得在 dispatcher 內重跑一次分組或複製 label 去重邏輯**。
+
+**MIME 結構**：`EmailService.sendHtml` 增一個可選 `icsContent` 參數（多載，既有四參數版委派新版傳 `null`，`MarketAnalysisEmailDispatcher` / `TradingRadarNotificationDispatcher` 的行為不變）。`MimeMessageHelper(msg, true, "UTF-8")` 為 `MULTIPART_MODE_MIXED_RELATED`：root 是 `multipart/mixed`、其內含 `multipart/related`（HTML + inline CID 圖）；ics 以 `MimeBodyPart` 掛到 `helper.getRootMimeMultipart()`（該方法為 `public final`），與 HTML 正文並存。內容以 `DataHandler` + `ByteArrayDataSource` 寫入**明確的 UTF-8 位元組**，**不可用 `setContent(String, type)`**——JavaMail 的 `META-INF/mailcap` 未註冊 `text/calendar`（只有 text/plain、text/html、text/xml、multipart/\*、message/rfc822），會落到 `ObjectDataContentHandler` 的 String 分支以 `Charset.defaultCharset()` 寫出、忽略宣告的 charset。`Content-Transfer-Encoding: 8bit` 顯式設定後 `MimeBodyPart.updateHeaders` 不會覆寫。組 ics / 夾帶失敗一律 `log.warn` 後**照常寄純 email**（比照既有「寄信失敗不阻斷警示判斷」的失敗策略）。
+
+**ORGANIZER 的來源**：必須與實際 SMTP 寄件人一致（Google 靠這點才自動接受 `METHOD:REQUEST`），故 `EmailService.resolveFrom()`（現為 private）開放為 public 供 dispatcher 取用，**不得在別處重寫一份 `NOTIFICATION_FROM` → `MAIL_USERNAME` 的 fallback 判斷**——兩份判斷一旦不同步，ORGANIZER 與寄件人不符會讓功能靜默失效且無 log。
+
+**收件人知情**：開關由帳號擁有者操作、收件人未被徵詢，且 `PARTSTAT=ACCEPTED;RSVP=FALSE` 讓 Gmail 卡片不出現可拒絕的 RSVP（此設定是為了避免 RSVP 回信灌爆寄件信箱）。故**夾帶 ics 的那封 digest，HTML 正文結尾多一行**「本信附有 Google 日曆邀請，如不需要請告知寄件人於『警示通知設定』關閉。」——只在有夾帶時出現。
+
+**已知前提（寫在設定頁提示，不是程式能控制的）**：收件人的 Google 日曆「自動將邀請加入日曆」需維持預設「是」；若設為「僅在我回覆時」，需在信中手動接受一次事件才會進日曆。
 
 ## Infrastructure
 

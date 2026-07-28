@@ -47,6 +47,10 @@ public class NotificationRecipientService {
                 throw new IllegalArgumentException("收件人 " + email + " 已存在");
             });
             r.setEmail(email);
+            // Task 248：改成非 Gmail 就把日曆邀請關掉，不留「非 Gmail 卻已開啟」的殘留狀態
+            if (!isGmail(email)) {
+                r.setAddToCalendar(false);
+            }
         }
         return toResponse(repo.save(r));
     }
@@ -70,6 +74,37 @@ public class NotificationRecipientService {
         return toResponse(repo.save(r));
     }
 
+    /**
+     * 切換「警示 digest 夾帶 Google 日曆邀請」（Requirement 23 / Task 248），owner-scoped 縱深保護。
+     *
+     * <p>網域檢查**只擋開啟方向**（false → true）：關閉一律放行，否則資料被改壞後
+     * （如殘留「非 Gmail 卻已開啟」的列）將永遠無法從畫面關掉。
+     */
+    @Transactional
+    public NotificationRecipientDto.Response toggleCalendar(Long id) {
+        NotificationRecipient r = repo.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Recipient not found: " + id));
+        tenantGuard.assertOwned(r.getOwnerUserId());
+        boolean turningOn = !Boolean.TRUE.equals(r.getAddToCalendar());
+        if (turningOn && !isGmail(r.getEmail())) {
+            throw new IllegalArgumentException("僅 Gmail 收件人可加入 Google 日曆");
+        }
+        r.setAddToCalendar(turningOn);
+        return toResponse(repo.save(r));
+    }
+
+    /**
+     * 是否為 Google 信箱（Task 248）：只有 gmail.com / googlemail.com 的收件人能開啟日曆邀請，
+     * 因為「ics 邀請自動落進日曆」是 Google 端的行為。email 寫入前已 trim + 轉小寫。
+     */
+    public static boolean isGmail(String email) {
+        if (email == null || email.isBlank()) return false;
+        int at = email.lastIndexOf('@');
+        if (at < 0) return false;
+        String domain = email.substring(at + 1).trim().toLowerCase();
+        return "gmail.com".equals(domain) || "googlemail.com".equals(domain);
+    }
+
     @Transactional
     public void delete(Long id) {
         NotificationRecipient r = repo.findById(id)
@@ -86,6 +121,6 @@ public class NotificationRecipientService {
     private NotificationRecipientDto.Response toResponse(NotificationRecipient r) {
         return new NotificationRecipientDto.Response(
                 r.getId(), r.getEmail(), r.getActive(), r.getReceiveMarketAnalysis(),
-                r.getCreatedAt(), r.getUpdatedAt());
+                r.getAddToCalendar(), r.getCreatedAt(), r.getUpdatedAt());
     }
 }

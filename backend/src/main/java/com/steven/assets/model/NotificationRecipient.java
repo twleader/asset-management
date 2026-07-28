@@ -49,6 +49,17 @@ public class NotificationRecipient {
     @Builder.Default
     private Boolean receiveMarketAnalysis = true;
 
+    /**
+     * 警示 digest email 是否夾帶 Google 日曆邀請（ics，Requirement 23 / Task 248）。
+     * **僅 gmail.com / googlemail.com 網域可設為 true**（見 {@code NotificationRecipientService.isGmail}）。
+     * 預設 false：日曆事件會實際寫進別人的日曆，屬明示同意才開的行為，不對既有收件人自動開啟。
+     * 與 {@link #active}（收警示）、{@link #receiveMarketAnalysis}（收股市分析）各自獨立——本旗標只是
+     * 「收警示信時額外夾帶邀請」的修飾，{@code active=false} 時本就不寄信，日曆自然也不會有事件。
+     */
+    @Column(name = "add_to_calendar", nullable = false)
+    @Builder.Default
+    private Boolean addToCalendar = false;
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
