@@ -4588,3 +4588,27 @@ TransactionView el-tree 懶載入
 ### 端點路徑共存說明
 
 `AssetTransactionController` 既有 `@GetMapping("/export")`（在 `@RequestMapping("/api/asset-transactions")` 下）＝ `/api/asset-transactions/export`；新 `AssetTransactionExportController`（t238）掛 `/api/asset-transactions/export` 並以 `/schedule`、`/run-now` 為子路徑 ＝ `/api/asset-transactions/export/schedule`。兩者路徑不同、無 ambiguous mapping（比照 `RealizedGainController` 與 `RealizedGainExportController` 的既有共存）。
+
+---
+
+## Task 250：新增表單的「市場」預設跟隨當前市場 tab（交易紀錄頁 ＋ 已實現損益頁）
+
+對應 Requirements: 49（交易紀錄）／6（已實現損益）。**純前端變更**：不動任何 controller／service／DTO／DB／BFF route，無 Liquibase changeset。
+
+### 現況與問題
+
+`TransactionView.vue` 與 `RealizedGainView.vue` 是同構的兩頁——都有 `marketFilter` 市場 tab（`el-tabs`，`name` 依序為 `''`／`台股`／`美股`／`英股`）做客戶端篩選，也都有一支 `resetForm()` 把表單初值寫死為 `market: '台股'`。結果是使用者切到「美股」tab 後按新增，市場仍預設台股，每筆美股交易都得多改市場與幣別兩欄。
+
+### 設計
+
+1. **預設值只有一處真相**：兩頁各新增一支 `defaultMarket()`＝`marketFilter.value || '台股'`，由 `resetForm()` 取用。**這樣就夠**——兩頁的 `openCreateDialog()` 第一行本來就是 `resetForm()`（`TransactionView.vue:527`、`RealizedGainView.vue:654`），故預設值必定在**開啟當下**重新求值，切了 tab 再按新增一定拿到新值；dialog 上的 `@closed="resetForm"`（`TransactionView.vue:226`、`RealizedGainView.vue:256`）只是關閉時清場，不是預設值的來源。**不在 `openCreateDialog()` 另寫一份覆寫**：預設值若散在兩處，兩處會各自演化成不同答案。
+2. **幣別必須在 `resetForm()` 內一併算好，不能倚賴 watch**：兩頁既有 `watch(() => form.market, m => form.currency = (m === '美股' || m === '英股') ? 'USD' : 'TWD')`，但 watch 只在 `market` 的值**真的改變**時觸發。tab 停在「美股」時 `resetForm()` 把同一個 `美股` 寫回去＝值沒變＝watch 不觸發，若 `currency` 仍寫死 `'TWD'`，表單會停在「美股＋TWD」且**不會自我修正**——這不是短暫的中間狀態，是永久錯值。重現路徑：tab 點「美股」→ 按新增（`market` 台股→美股，watch 觸發，`currency=USD`）→ **不改任何欄位**直接關閉（`@closed` → `resetForm`，美股→美股，watch 不觸發，`currency` 被寫回 `TWD`）→ 再按新增 → 美股＋TWD。故 `resetForm()` 內直接以同一條判斷式算出 `currency`；watch 保留不動（使用者在表單內手動改市場時仍需要它），兩處共用同一組字面值，不另立第二套市場→幣別對照。
+3. **只影響新增**：`openEditDialog()` 一律帶入該列自己的 `market`（現行行為），不受 tab 影響。
+4. **tab 切換不回頭改動已開啟的表單**：預設值只在 `resetForm()` 求值一次。使用者在表單內改過市場後，即使背景 tab 變動也不得覆寫其輸入。
+5. **已知限制（不處理）**：市場 tab 是寫死的四個 pane，而 `TransactionView` 的 `marketOptions` 只含 `active=true` 的市場（`InstitutionService` → `findByActiveTrueOrderBy...`）。某市場在設定頁被停用時，tab 仍在，此時表單的 `el-select` 會退回顯示原始 code（例「英股」而非「英國股市」），送出的值仍是合法的 `MarketType.code`。此風險在改動前就存在（原本寫死的 `'台股'` 被停用時同理），本任務只是多一條觸發路徑，根因是 tab 寫死，屬既有債。
+6. **兩頁的市場下拉來源不同，本任務刻意不統一**：`TransactionView` 的 `el-select` 由 `marketOptions`（BFF 聚合的 `MarketType` 主檔，label 為 `displayName`，例「美國股市」）驅動；`RealizedGainView` 則是寫死的三個 `el-option`（`台股`／`美股`／`英股`）。後者是 CLAUDE.md「禁止 Enum 寫死」的既有債，修它要動該頁 BFF payload 與前端載入流程，爆炸半徑與本次「一行預設值」不同量級，另案處理。兩頁的 tab `name` 與 `MarketType.code` 同為 `台股`／`美股`／`英股` 三個字面值，故 `marketFilter` 的值可直接作為 `market` 使用，無須對照表。
+
+### 異動檔案
+
+- `frontend/src/views/TransactionView.vue`：新增 `defaultMarket()`，`resetForm()` 改用它並同步算 `currency`
+- `frontend/src/views/RealizedGainView.vue`：同上（`gainForm`）
