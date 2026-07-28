@@ -220,9 +220,15 @@ public class ProcessRcloneClient implements RcloneClient {
                 if (isRateLimited(err)) {
                     // 設定與授權都正確，只是這一刻 Drive API 額度用完。原始 stderr 是一整段 Google API 的
                     // JSON，直接吐給使用者會讓人以為要去修設定，故換成一句可行動的說明。
+                    // 建議「設專屬 client_id」時必須連帶講兩個前提，否則使用者照做就會重演 2026-07-28 的事故：
+                    // 自訂 client 把配額與 API 啟用狀態綁到該 client 所屬的 GCP 專案（該專案未啟用 Drive API
+                    // 就是 403），而重新授權若不帶 prompt=consent，Google 不會重發 refresh_token。
+                    // 這句會原樣寫進使用者可見的 gdrive_last_status。
                     throw new RcloneRateLimitedException(
                             "Google Drive API 目前達到每分鐘查詢上限，請稍候幾秒再試（設定與授權皆正常）。"
-                            + "此為 rclone 內建共用憑證的已知限制，根治方式是為 rclone 設定專屬的 OAuth client_id。");
+                            + "此為 rclone 內建共用憑證的已知限制，根治方式是為 rclone 設定專屬的 OAuth client_id；"
+                            + "設定後必須同時到該 GCP 專案啟用 Drive API，"
+                            + "且授權時須帶 `prompt=consent` 才會取得 refresh_token。");
                 }
                 throw new RuntimeException("Google Drive " + opName + "失敗 (exit=" + exit + "): " + err);
             }

@@ -36,16 +36,28 @@ public class GdriveOutputSupport {
     private final AppUserRepository userRepo;
     private final UserAdminService userAdminService;
 
+    /**
+     * 啟用當下的可用性自檢（Requirement 52 / Task 247）。
+     *
+     * <p><b>相依方向只能是這一邊</b>：{@link GdriveSelfCheck} 是葉節點、<b>絕不反向注入本元件</b>——
+     * 反向注入會形成建構子循環依賴，Spring Boot 2.6+ 預設禁止循環參照，結果是
+     * {@code BeanCurrentlyInCreationException}、business-services 整個起不來（Task 247.2.1）。
+     * 故本元件把自己持有的 remote 名稱<b>傳參</b>給它。
+     */
+    private final GdriveSelfCheck selfCheck;
+
     /** Drive 輸出用的 rclone remote 名稱。<b>全 backend 唯一的注入點</b>（Task 242.1.4）。 */
     private final String remote;
 
     public GdriveOutputSupport(RcloneClient rcloneClient,
                                AppUserRepository userRepo,
                                UserAdminService userAdminService,
+                               GdriveSelfCheck selfCheck,
                                @Value("${GDRIVE_OUTPUT_REMOTE:GDriveOutput}") String remote) {
         this.rcloneClient = rcloneClient;
         this.userRepo = userRepo;
         this.userAdminService = userAdminService;
+        this.selfCheck = selfCheck;
         this.remote = remote;
     }
 
@@ -147,8 +159,16 @@ public class GdriveOutputSupport {
 
     // ===== 3. 設定更新：解析未送出的欄位、驗證、權限 =====
 
-    /** {@link #resolveUpdate} 的結果，可直接寫回設定列的兩個欄位。 */
-    public record DriveSettings(boolean enabled, String subpath) {}
+    /**
+     * {@link #resolveUpdate} 的結果：{@code enabled}／{@code subpath} 可直接寫回設定列的兩個欄位，
+     * {@code selfCheckWarning} <b>刻意不入庫</b>。
+     *
+     * <p><b>警告字串為什麼不寫 {@code gdrive_last_status}</b>（Task 247.3.4）：那一欄的語意是「上次<b>上傳</b>
+     * 的結果」，九個前端頁面都把它直接標成「上次上傳」顯示。把自檢結果寫進去有兩個實害——會永久覆蓋昨晚
+     * 真正上傳成功的落點與大小，且 {@code gdrive_last_run_at} 會被寫成一個根本沒發生過上傳的時刻。
+     * 故只走當次回應的 {@code gdriveSelfCheckWarning} 欄位。
+     */
+    public record DriveSettings(boolean enabled, String subpath, String selfCheckWarning) {}
 
     /**
      * 把「請求送來的 Drive 兩欄」與「設定列現值」合成可入庫的值，一次做完 null 解析、正規化、驗證、
@@ -162,6 +182,9 @@ public class GdriveOutputSupport {
      * {@code true} 而本次請求沒送該欄時<b>刻意不檢查</b>：否則 {@code ADMIN_EMAIL} 換人後，該使用者連
      * 本機輸出路徑與排程時間都會被 403 鎖死——而那兩項本來就開放給所有使用者（Requirement 39／49）。
      * 這不是漏洞：真正決定「會不會上傳」的是每一輪產檔前的 {@link #isDriveAllowedFor} 複驗。
+     *
+     * <p><b>「本次把開關從 false 翻成 true」時另做一次本地自檢</b>（Task 247.3.1(a)）：只做這一處，
+     * 八個匯出頁就全部有——見 {@link #selfCheckWarningOnEnable}。
      */
     public DriveSettings resolveUpdate(Long ownerUserId, Boolean requestedEnabled, String requestedSubpath,
                                        boolean currentEnabled, String currentSubpath) {
@@ -174,7 +197,39 @@ public class GdriveOutputSupport {
         if (enabled && (sub == null || sub.isBlank())) {
             throw new IllegalArgumentException("已啟用 Google Drive 同步時，必須指定 Drive 目標資料夾");
         }
-        return new DriveSettings(enabled, sub);
+        // 自檢排在驗證之後：輸入本身就不合法時該回 400，不必也不該讓使用者同時收到兩種訊息。
+        return new DriveSettings(enabled, sub, selfCheckWarningOnEnable(currentEnabled, enabled));
+    }
+
+    /**
+     * 「使用者在這次請求把 Drive 開關從 false 翻成 true」時做一次<b>純本地</b>可用性自檢，
+     * 回傳可直接放進當次回應 {@code gdriveSelfCheckWarning} 的警告字串；一切正常回 {@code null}。
+     *
+     * <p><b>為什麼一定要有「啟用當下」這一處</b>（Task 247.3.2）：Drive 輸出上線 recreate 的當下，九張表的
+     * {@code gdrive_enabled} 全為 false，啟動自檢的前置條件會判定「全庫無人啟用」而整個跳過；使用者接著在 UI
+     * 打開開關，<b>不需要也不會 recreate 容器</b>。實測九列的 {@code updated_at} 全部晚於上線那次 recreate——
+     * 只做啟動自檢的話，2026-07-28 那次事故從頭到尾不會有任何一次自檢執行。
+     *
+     * <p><b>true→true 不重複觸發</b>：那是「只改資料夾」或「只改排程時間」的儲存，每次都跑等於白付成本。
+     *
+     * <p><b>只做 L1＋L2，不做 L3</b>（Task 247.3.3）：L3 走 {@code rclone lsd}、逾時上限 20 秒，同步做會讓
+     * 使用者按下儲存後乾等，而「探測慢」恰恰等於「Drive 有問題」，體感就是儲存卡死；且
+     * {@code TradingRadarExportScheduleService.saveSetting} 與 {@code CrawlerExportPathService.update}
+     * 在 {@code @Transactional} 內，會把 20 秒的外部行程呼叫包進交易、佔住連線。
+     * L3 涵蓋的 403／remote 打錯會在該頁第一次實際上傳時寫進 {@code gdrive_last_status}（既有機制），
+     * 每次服務啟動時也會再探一次。
+     *
+     * <p><b>自檢結果絕不讓儲存變成非 2xx</b>：使用者必須能先把設定存起來再去修授權，否則唯一的修正入口
+     * 被自己鎖死（同 {@code absolutePathOrNull} 的理由）。{@link GdriveSelfCheck#checkLocal} 契約上不擲例外，
+     * 這裡也不另包 try/catch 假裝有防護。
+     *
+     * @param currentEnabled 設定列的現值（本次請求寫入<b>之前</b>）
+     * @param newEnabled     本次請求解析後要寫入的值
+     */
+    public String selfCheckWarningOnEnable(boolean currentEnabled, boolean newEnabled) {
+        if (!newEnabled || currentEnabled) return null;
+        // 沿用狀態欄的截斷機制：措辭風格與 skipped(...) 一致，長度上限也一致，前端顯示區塊才不會被撐爆。
+        return truncate(selfCheck.checkLocal(remote));
     }
 
     // ===== 4. 同步（best-effort，回傳狀態字串） =====

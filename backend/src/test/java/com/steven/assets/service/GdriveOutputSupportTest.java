@@ -49,6 +49,8 @@ class GdriveOutputSupportTest {
     @Mock private RcloneClient rcloneClient;
     @Mock private AppUserRepository userRepo;
     @Mock private UserAdminService userAdminService;
+    /** 啟用當下的自檢（Task 247）；用替身才能在不碰檔案系統的情況下決定「有沒有警告」。 */
+    @Mock private GdriveSelfCheck selfCheck;
 
     @TempDir Path tmp;
 
@@ -56,7 +58,7 @@ class GdriveOutputSupportTest {
 
     @BeforeEach
     void setup() {
-        gdrive = new GdriveOutputSupport(rcloneClient, userRepo, userAdminService, REMOTE);
+        gdrive = new GdriveOutputSupport(rcloneClient, userRepo, userAdminService, selfCheck, REMOTE);
     }
 
     private void givenUser(long id, String email, boolean configuredAdmin) {
@@ -190,6 +192,69 @@ class GdriveOutputSupportTest {
         assertThat(r.enabled()).isTrue();
         assertThat(r.subpath()).isEqualTo("新資料夾");
         verify(userRepo, never()).findById(OTHER_ID);
+    }
+
+    // ===== 啟用當下的自檢（Requirement 52 / Task 247.3.1(a)）=====
+
+    @Test
+    void 開關由false翻true時做一次本地自檢並把警告帶回當次回應() {
+        // 這一處是八個匯出頁共用的掛載點：改這一處，八頁全部有。
+        givenUser(ADMIN_ID, "tw.leader@gmail.com", true);
+        when(selfCheck.checkLocal(REMOTE)).thenReturn("[GDriveOutput] 的 token 缺 refresh_token…");
+
+        GdriveOutputSupport.DriveSettings r =
+                gdrive.resolveUpdate(ADMIN_ID, true, "投資理財/資產管理", false, null);
+
+        assertThat(r.enabled()).isTrue();
+        assertThat(r.selfCheckWarning()).contains("refresh_token");
+        verify(selfCheck).checkLocal(REMOTE);   // remote 由本元件傳入，自檢元件不得自己注入
+    }
+
+    @Test
+    void 已啟用時再次儲存不重複自檢() {
+        // true→true 是「只改資料夾」或「只改排程時間」的儲存，每次都跑等於白付成本。
+        givenUser(ADMIN_ID, "tw.leader@gmail.com", true);   // 明確送 true 仍會走權限檢查
+        GdriveOutputSupport.DriveSettings r =
+                gdrive.resolveUpdate(ADMIN_ID, true, "新資料夾", true, "舊資料夾");
+
+        assertThat(r.selfCheckWarning()).isNull();
+        verify(selfCheck, never()).checkLocal(anyString());
+    }
+
+    @Test
+    void 關閉或維持關閉時不自檢() {
+        assertThat(gdrive.resolveUpdate(ADMIN_ID, false, null, true, "投資理財").selfCheckWarning()).isNull();
+        assertThat(gdrive.resolveUpdate(ADMIN_ID, null, "投資理財", false, null).selfCheckWarning()).isNull();
+        verify(selfCheck, never()).checkLocal(anyString());
+    }
+
+    @Test
+    void 自檢正常時警告為null() {
+        givenUser(ADMIN_ID, "tw.leader@gmail.com", true);
+        when(selfCheck.checkLocal(REMOTE)).thenReturn(null);
+
+        assertThat(gdrive.resolveUpdate(ADMIN_ID, true, "投資理財", false, null).selfCheckWarning()).isNull();
+    }
+
+    @Test
+    void 自檢在輸入驗證之後才跑_不合法輸入不該同時收到兩種訊息() {
+        givenUser(ADMIN_ID, "tw.leader@gmail.com", true);
+
+        assertThatThrownBy(() -> gdrive.resolveUpdate(ADMIN_ID, true, "/絕對路徑", false, null))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        verify(selfCheck, never()).checkLocal(anyString());
+    }
+
+    @Test
+    void 過長的自檢訊息沿用狀態欄的截斷機制() {
+        // 與 gdrive_last_status 同一個 512 上限與措辭風格，前端顯示區塊才不會被撐爆。
+        givenUser(ADMIN_ID, "tw.leader@gmail.com", true);
+        when(selfCheck.checkLocal(REMOTE)).thenReturn("錯".repeat(1000));
+
+        String warning = gdrive.resolveUpdate(ADMIN_ID, true, "投資理財", false, null).selfCheckWarning();
+
+        assertThat(warning).hasSize(512).endsWith("…");
     }
 
     // ===== 同步：狀態措辭 =====

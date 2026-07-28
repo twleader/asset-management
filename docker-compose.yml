@@ -82,13 +82,27 @@ services:
       # 備份（gdrive-crypt）與輸出（GDriveOutput）共用同一份 rclone.conf 的不同 section。
       GDRIVE_OUTPUT_REMOTE: ${GDRIVE_OUTPUT_REMOTE:-GDriveOutput}
     volumes:
-      # rclone 設定檔以 read-only 從 host 掛入。單一檔含三個 section：
+      # rclone 設定以 read-only 從 host 掛入。主檔 rclone.conf 含三個 section：
       #   [GoogleDriver]（drive.file，備份底層）／[gdrive-crypt]（加密層，DB 備份用）／
       #   [GDriveOutput]（scope=drive，未加密，匯出檔案同步用）
       # 兩用途共用一檔為使用者明示的決定（原設計為分離兩份以免爬蟲服務取得備份的 crypt 解密密碼）；
       # 取捨為：省下第二份檔案的維護與搬機成本，代價是 external-materials-service 也讀得到備份憑證。
       # 兩個 remote 實測為同一個 Google 帳號（Total/Used 一致），故分離的實際收益本就有限。
-      - ${HOME}/.config/rclone/rclone.conf:/etc/rclone/rclone.conf:ro
+      #
+      # **掛的是目錄不是單檔**（Task 247.1）：`rclone config` 寫設定是「寫新檔＋rename」的原子替換，
+      # 單檔掛載下容器內的舊 inode link count 會歸零（2026-07-28 實測 `stat -c %h` 回 links=0、
+      # `cat` 回 ENOENT），該容器整個生命週期的 Drive 同步就全部靜默跳過。
+      # **這是常態不是意外**：rclone 每次續期 OAuth token 都會重寫 config，當天 15:30／15:53／16:02
+      # 共三次，其中最後一次發生在容器 recreate 之後 1 分鐘內、掛載當場又 dangling——
+      # 也就是「去 host 重新授權」對執行中的容器完全無效。目錄掛載下 /etc/rclone/rclone.conf
+      # 每次都經目錄查找解析，host 端原子替換後容器內即可讀到新檔（RCLONE_CONFIG 的值刻意不變）。
+      # **限縮**：只消除「單檔被替換」造成的 dangling。若 ~/.config/rclone **目錄本身**被替換
+      # （mv 重建、還原備份、換機搬設定），掛載仍指向舊目錄 inode，屆時仍須 --force-recreate 容器。
+      # **已知副作用**：該目錄下其他檔案會一併以唯讀進入容器——實測另有
+      # rclone-gdrive-output.conf（只含 [GDriveOutput] 的舊隔離版本，刻意保留供復原用）與
+      # rclone.conf.bak-before-merge。**這不擴大權限面**：共用單一 config 檔的取捨已使兩容器都讀得到
+      # 備份憑證，多掛入的兩檔是同一組憑證的舊副本。
+      - ${HOME}/.config/rclone:/etc/rclone:ro
       # 排程匯出根目錄：host 家目錄掛入容器 /home/steven（可寫）。
       # 預設對映目前使用者的家目錄；子資料夾 input → 主機家目錄/input。
       - ${EXPORT_OUTPUT_DIR_HOST:-/Users/steven}:/home/steven
@@ -153,9 +167,26 @@ services:
       # FinMind／新聞爬蟲）、攻擊面最大，故掛主檔等於讓爬蟲服務也能解密整庫財務備份。
       # 原設計為獨立檔以避免此擴權；改為共用是為省下第二份檔案的維護與搬機成本，且實測兩個
       # remote 為同一 Google 帳號（Total/Used 一致），分離的實際收益本就有限。
-      # 若日後要復原隔離：改回掛 ~/.config/rclone/rclone-gdrive-output.conf 到 /etc/rclone/rclone-output.conf，
-      # 並把上方 RCLONE_CONFIG 改回該路徑（該獨立檔仍保留在 host 上）。
-      - ${HOME}/.config/rclone/rclone.conf:/etc/rclone/rclone.conf:ro
+      # 若日後要復原隔離：改為目錄掛載後，rclone-gdrive-output.conf 已經在容器內的
+      # /etc/rclone/rclone-gdrive-output.conf，**只需把上方 RCLONE_CONFIG 改成該路徑**即可。
+      # 不要再另外加一條單檔掛載——那正是本次要根除的 dangling inode 來源（見下方說明）。
+      #
+      # **掛的是目錄不是單檔**（Task 247.1）：`rclone config` 寫設定是「寫新檔＋rename」的原子替換，
+      # 單檔掛載下容器內的舊 inode link count 會歸零（2026-07-28 實測 `stat -c %h` 回 links=0、
+      # `cat` 回 ENOENT）。本服務受害尤深——configReady 是啟動時判定一次、失敗後永不重試的旗標，
+      # 實測 16:02:25 啟動、16:02:26 讀 config 得 NoSuchFileException，該容器整個生命週期的 Drive
+      # 同步就全部靜默跳過，而症狀偽裝成「Drive 好像還在收檔案」（business 上傳的 xlsx 照常出現），
+      # 只有爬蟲 JSON 停止更新。
+      # **這是常態不是意外**：rclone 每次續期 OAuth token 都會重寫 config，當天三次，最後一次發生在
+      # 容器 recreate 之後 1 分鐘內、掛載當場又 dangling——「去 host 重新授權」對執行中的容器完全無效。
+      # 目錄掛載下 /etc/rclone/rclone.conf 每次都經目錄查找解析，host 端原子替換後容器內即可讀到新檔
+      # （RCLONE_CONFIG 的值刻意不變）。
+      # **限縮**：只消除「單檔被替換」造成的 dangling。若 ~/.config/rclone **目錄本身**被替換
+      # （mv 重建、還原備份、換機搬設定），掛載仍指向舊目錄 inode，屆時仍須 --force-recreate 容器。
+      # **已知副作用**：該目錄下其他檔案會一併以唯讀進入容器——實測另有 rclone-gdrive-output.conf
+      # 與 rclone.conf.bak-before-merge。**這不擴大權限面**：上述共用主檔的取捨已使本服務讀得到
+      # 備份憑證，多掛入的兩檔是同一組憑證的舊副本。
+      - ${HOME}/.config/rclone:/etc/rclone:ro
     depends_on:
       postgres:
         condition: service_healthy

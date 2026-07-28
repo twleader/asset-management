@@ -70,6 +70,11 @@ public class CrawlerExportPathService {
      * <p><b>{@code gdriveEnabled} 為包裝型別</b>：null＝「整個欄位沒送」＝不變更，與「明確送 false」
      * 語意不同。舊版前端或只想改本機路徑的呼叫端不該把使用者已開啟的 Drive 開關靜默關掉。
      * {@code gdriveSubpath} 為 null 時同理保留既有值。
+     *
+     * <p><b>本頁的 Drive 自檢必須自己掛一次</b>（Task 247.3.1(b)）：本方法<b>不走</b>
+     * {@code GdriveOutputSupport.resolveUpdate}（它只用該元件的零件自行合成），故八個匯出頁那一處
+     * 涵蓋不到這裡。漏掉就是漏掉最該被攔下的那一次——實測九列設定中，爬蟲頁是 {@code updated_at}
+     * <b>最早</b>被打開的一列（2026-07-27 22:33）。
      */
     @Transactional
     public CrawlerExportPathDto.Response update(String crawlerKey, CrawlerExportPathDto.Request req) {
@@ -89,14 +94,20 @@ public class CrawlerExportPathService {
         if (enabled && (gdriveSubpath == null || gdriveSubpath.isBlank())) {
             throw new IllegalArgumentException("已啟用 Google Drive 同步時，必須指定 Drive 目標資料夾");
         }
+        // 只在「本次把開關從 false 翻成 true」時做一次純本地自檢（L1＋L2，毫秒級、不打網路）。
+        // 位置在驗證與必填判定之後、setter 之前：前者確保輸入不合法時回 400 而不是兩種訊息並陳，
+        // 後者確保讀到的 s.isGdriveEnabled() 還是「寫入之前」的現值。
+        // 本方法在 @Transactional 內，這也正是不在此做 L3（rclone lsd，逾時 20 秒）的理由之一。
+        String selfCheckWarning = gdrive.selfCheckWarningOnEnable(s.isGdriveEnabled(), enabled);
 
         s.setCrawlerKey(crawlerKey);
         s.setOutputSubpath(subpath);
         s.setGdriveEnabled(enabled);
         s.setGdriveSubpath(gdriveSubpath);
         // 刻意不碰 gdriveLastRunAt／gdriveLastStatus：那是 ext 寫入的執行結果，不是使用者設定。
+        // 自檢結果同樣不寫那兩欄（Task 247.3.4），只走當次回應。
         s.setUpdatedAt(Instant.now());
-        return toResponse(repo.save(s));
+        return toResponse(repo.save(s), selfCheckWarning);
     }
 
     /** 去頭尾空白與結尾斜線（避免 {@code input} 與 {@code input/} 存成兩種值）；空字串 → 預設子路徑。 */
@@ -126,6 +137,11 @@ public class CrawlerExportPathService {
      * 存檔時（{@link #update}）才驗。
      */
     private CrawlerExportPathDto.Response toResponse(CrawlerExportSetting s) {
+        return toResponse(s, null);   // 讀取路徑不做自檢：自檢只在「使用者這次把開關打開」時才有意義
+    }
+
+    /** @param gdriveSelfCheckWarning 當次啟用自檢的警告；<b>不入庫</b>，正常時為 {@code null} */
+    private CrawlerExportPathDto.Response toResponse(CrawlerExportSetting s, String gdriveSelfCheckWarning) {
         String subpath = normalizeSubpath(s.getOutputSubpath());
         return new CrawlerExportPathDto.Response(
                 s.getCrawlerKey(),
@@ -137,7 +153,8 @@ public class CrawlerExportPathService {
                 s.getGdriveSubpath(),
                 gdrive.remoteName(),
                 s.getGdriveLastRunAt() == null ? null : TS_FMT.format(s.getGdriveLastRunAt()),
-                s.getGdriveLastStatus());
+                s.getGdriveLastStatus(),
+                gdriveSelfCheckWarning);
     }
 
     /**

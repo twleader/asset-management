@@ -51,6 +51,9 @@ class AssetTransactionExportScheduleServiceTest {
     @Mock private RcloneClient rcloneClient;
     @Mock private com.steven.assets.repository.AppUserRepository appUserRepo;
     @Mock private UserAdminService userAdminService;
+    // 啟用當下的自檢（Task 247）：替身預設回 null（＝自檢正常），本測試的斷言不受影響，
+    // 同時保證這裡不會去讀容器內的 /etc/rclone/rclone.conf。
+    @Mock private GdriveSelfCheck selfCheck;
 
     @TempDir Path baseDir;
 
@@ -60,7 +63,7 @@ class AssetTransactionExportScheduleServiceTest {
     void setup() {
         // 注入真實的 GdriveOutputSupport（只把 rclone／使用者查詢換成替身），驗證規則才會真的被跑到。
         GdriveOutputSupport gdrive =
-                new GdriveOutputSupport(rcloneClient, appUserRepo, userAdminService, "GDriveOutput");
+                new GdriveOutputSupport(rcloneClient, appUserRepo, userAdminService, selfCheck, "GDriveOutput");
         service = new AssetTransactionExportScheduleService(
                 settingRepo, excelExportService, currentUserProvider, gdrive, baseDir.toString());
     }

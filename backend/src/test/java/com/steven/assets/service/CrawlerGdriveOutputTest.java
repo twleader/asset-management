@@ -17,6 +17,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -37,6 +39,8 @@ class CrawlerGdriveOutputTest {
     @Mock private RcloneClient rcloneClient;
     @Mock private com.steven.assets.repository.AppUserRepository appUserRepo;
     @Mock private UserAdminService userAdminService;
+    /** 啟用當下的自檢（Task 247）；替身預設回 null＝自檢正常，要測警告時再 stub。 */
+    @Mock private GdriveSelfCheck selfCheck;
 
     private CrawlerExportPathService service;
 
@@ -44,7 +48,7 @@ class CrawlerGdriveOutputTest {
     void setUp() {
         // Task 242 起驗證規則遷入 GdriveOutputSupport；注入真實元件（rclone 等相依在本測試用不到）。
         GdriveOutputSupport gdrive = new GdriveOutputSupport(
-                rcloneClient, appUserRepo, userAdminService, "GDriveOutput");
+                rcloneClient, appUserRepo, userAdminService, selfCheck, "GDriveOutput");
         service = new CrawlerExportPathService(repo, "/home/steven", gdrive);
         // save 回傳被存進去的那個 entity，讓 assert 能直接看寫入結果
         when(repo.save(any(CrawlerExportSetting.class))).thenAnswer(inv -> inv.getArgument(0));
@@ -164,6 +168,74 @@ class CrawlerGdriveOutputTest {
         assertThat(res.gdriveSubpath()).isEqualTo("投資理財/資產管理");
         assertThat(res.gdriveEnabled()).isTrue();
         assertThat(res.gdriveRemote()).isEqualTo("GDriveOutput");
+    }
+
+    // ===== 247.3.1(b)：爬蟲頁的啟用當下自檢（本頁不走 resolveUpdate，必須自己掛一次）=====
+
+    @Test
+    void 開關由false翻true時做一次本地自檢並把警告帶回當次回應() {
+        // 本頁是唯一不走 GdriveOutputSupport.resolveUpdate 的頁面，也是實測九列設定中最早被打開的一列
+        // （2026-07-27 22:33）——漏掉這一處就是漏掉最該被攔下的那一次。
+        when(repo.findByCrawlerKey(anyString())).thenReturn(Optional.of(existing(false, null)));
+        when(selfCheck.checkLocal("GDriveOutput"))
+                .thenReturn("[GDriveOutput] 的 token 缺 refresh_token，access_token 過期後將無法自動續期");
+
+        CrawlerExportPathDto.Response res = service.update(KEY,
+                new CrawlerExportPathDto.Request("input", true, "投資理財/資產管理"));
+
+        assertThat(res.gdriveSelfCheckWarning()).contains("refresh_token");
+        assertThat(res.gdriveEnabled()).isTrue();          // 自檢失敗不得讓儲存失敗
+        assertThat(res.gdriveSubpath()).isEqualTo("投資理財/資產管理");
+        verify(selfCheck).checkLocal("GDriveOutput");
+    }
+
+    @Test
+    void 已啟用時再次儲存不重跑自檢() {
+        when(repo.findByCrawlerKey(anyString())).thenReturn(Optional.of(existing(true, "投資理財/資產管理")));
+
+        CrawlerExportPathDto.Response res = service.update(KEY,
+                new CrawlerExportPathDto.Request("other", true, "投資理財/資產管理"));
+
+        assertThat(res.gdriveSelfCheckWarning()).isNull();
+        verify(selfCheck, never()).checkLocal(anyString());
+    }
+
+    @Test
+    void 啟用當下的自檢完全不呼叫rclone() {
+        // (b) 只做 L1＋L2（純本地檔案讀取與 JSON 解析），刻意不做 L3：本方法在 @Transactional 內，
+        // 而 rclone lsd 的逾時上限是 20 秒——同步做會把外部行程呼叫包進交易，體感就是儲存卡死。
+        when(repo.findByCrawlerKey(anyString())).thenReturn(Optional.of(existing(false, null)));
+
+        service.update(KEY, new CrawlerExportPathDto.Request("input", true, "投資理財/資產管理"));
+
+        verify(rcloneClient, never()).listDirs(anyString(), anyString());
+        verify(rcloneClient, never()).copyTo(anyString(), any(), anyString(), anyString());
+    }
+
+    @Test
+    void 自檢結果不得寫進上次上傳的兩欄() {
+        // gdrive_last_run_at／gdrive_last_status 的語意是「上次上傳」（前端就是這樣標的）：
+        // 寫進自檢結果會永久覆蓋 ext 真正寫下的上傳記錄。
+        CrawlerExportSetting s = existing(false, null);
+        s.setGdriveLastRunAt(java.time.Instant.parse("2026-07-27T15:00:00Z"));
+        s.setGdriveLastStatus("成功：GDriveOutput:投資理財/資產管理/public_info_2026-07-27.json（1234 bytes）");
+        when(repo.findByCrawlerKey(anyString())).thenReturn(Optional.of(s));
+        when(selfCheck.checkLocal(anyString())).thenReturn("讀不到 rclone 設定 /etc/rclone/rclone.conf");
+
+        CrawlerExportPathDto.Response res = service.update(KEY,
+                new CrawlerExportPathDto.Request("input", true, "投資理財/資產管理"));
+
+        assertThat(res.gdriveSelfCheckWarning()).isNotNull();
+        assertThat(s.getGdriveLastStatus()).startsWith("成功：");
+        assertThat(s.getGdriveLastRunAt()).isEqualTo(java.time.Instant.parse("2026-07-27T15:00:00Z"));
+    }
+
+    @Test
+    void 讀取設定不做自檢() {
+        when(repo.findByCrawlerKey(anyString())).thenReturn(Optional.of(existing(true, "投資理財/資產管理")));
+
+        assertThat(service.get(KEY).gdriveSelfCheckWarning()).isNull();
+        verify(selfCheck, never()).checkLocal(anyString());
     }
 
     // ===== 既有本機行為的迴歸 =====

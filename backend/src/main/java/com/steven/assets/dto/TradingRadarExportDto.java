@@ -40,6 +40,10 @@ public final class TradingRadarExportDto {
      * @param gdriveLastRunAt   上次 Drive 上傳判斷時間；<b>本頁一天可能上傳多次</b>（時間點存於
      *                          {@code trading_radar_export_time}），故此為「最後一次」而非「今天那一次」
      * @param gdriveLastStatus  上次 Drive 上傳結果（成功／逾時／失敗／跳過）
+     * @param gdriveSelfCheckWarning 啟用當下的可用性自檢警告（Requirement 52 / Task 247）：只有「本次請求
+     *                          把開關從 false 翻成 true」且本地自檢發現問題時才有值，其餘一律 null。
+     *                          <b>不入庫，也絕不寫進 {@code gdriveLastStatus}</b>——那一欄的語意是
+     *                          「上次上傳」，寫進去會永久覆蓋真正的上傳記錄（Task 247.3.4）
      */
     public record SettingResponse(
             String outputSubpath,
@@ -51,7 +55,8 @@ public final class TradingRadarExportDto {
             String gdriveSubpath,
             String gdriveRemote,
             String gdriveLastRunAt,
-            String gdriveLastStatus
+            String gdriveLastStatus,
+            String gdriveSelfCheckWarning
     ) {}
 
     /**

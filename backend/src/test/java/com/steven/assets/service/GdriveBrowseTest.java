@@ -42,6 +42,9 @@ class GdriveBrowseTest {
     @Mock private RcloneClient rcloneClient;
     @Mock private com.steven.assets.repository.AppUserRepository appUserRepo;
     @Mock private UserAdminService userAdminService;
+    // 啟用當下的自檢（Task 247）：本測試不涉及啟用路徑，替身預設回 null（＝自檢正常），
+    // 同時保證這裡不會去讀容器內的 /etc/rclone/rclone.conf。
+    @Mock private GdriveSelfCheck selfCheck;
 
     private ExportScheduleService service;
 
@@ -53,7 +56,7 @@ class GdriveBrowseTest {
         // Task 242 起 Drive 邏輯集中在 GdriveOutputSupport；此處注入真實元件、只把 rclone 換成替身，
         // 讓「remote 不可用必須往上拋、不得吞成空清單」這條斷言仍測到真正的路徑。
         GdriveOutputSupport gdrive = new GdriveOutputSupport(
-                rcloneClient, appUserRepo, userAdminService, "GDriveOutput");
+                rcloneClient, appUserRepo, userAdminService, selfCheck, "GDriveOutput");
         service = new ExportScheduleService(settingRepo, excelExportService, currentUserProvider,
                 gdrive, "/home/steven");
     }

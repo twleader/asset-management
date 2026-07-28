@@ -81,6 +81,9 @@ class TradingExportGdriveTest {
     @Mock private RcloneClient rcloneClient;
     @Mock private AppUserRepository userRepo;
     @Mock private UserAdminService userAdminService;
+    // 啟用當下的自檢（Task 247）：替身預設回 null（＝自檢正常），本測試的斷言不受影響，
+    // 同時保證這裡不會去讀容器內的 /etc/rclone/rclone.conf。
+    @Mock private GdriveSelfCheck selfCheck;
 
     @TempDir Path baseDir;
 
@@ -90,7 +93,7 @@ class TradingExportGdriveTest {
     @BeforeEach
     void setup() {
         GdriveOutputSupport gdrive =
-                new GdriveOutputSupport(rcloneClient, userRepo, userAdminService, "GDriveOutput");
+                new GdriveOutputSupport(rcloneClient, userRepo, userAdminService, selfCheck, "GDriveOutput");
         radar = new TradingRadarExportScheduleService(timeRepo, radarSettingRepo, radarExportService,
                 snapshotStore, currentUserProvider, gdrive, baseDir.toString());
         calendar = new TradingCalendarExportScheduleService(calendarRepo, calendarExportService,

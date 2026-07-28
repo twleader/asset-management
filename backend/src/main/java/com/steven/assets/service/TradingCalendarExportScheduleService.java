@@ -98,8 +98,9 @@ public class TradingCalendarExportScheduleService {
         s.setGdriveEnabled(drive.enabled());
         s.setGdriveSubpath(drive.subpath());
         // 刻意不碰 gdriveLastRunAt／gdriveLastStatus：那是執行結果，不是使用者設定。
+        // 啟用當下的自檢結果同樣不寫那兩欄（Task 247.3.4），只走當次回應。
         s.setUpdatedAt(LocalDateTime.now(TW_ZONE));
-        return toResponse(settingRepo.save(s));
+        return toResponse(settingRepo.save(s), drive.selfCheckWarning());
     }
 
     /**
@@ -248,6 +249,15 @@ public class TradingCalendarExportScheduleService {
     }
 
     private TradingCalendarExportDto.ScheduleSettingResponse toResponse(TradingCalendarExportSchedule s) {
+        return toResponse(s, null);   // 讀取路徑不做自檢：自檢只在「使用者這次把開關打開」時才有意義
+    }
+
+    /**
+     * @param gdriveSelfCheckWarning 本次啟用 Drive 時的自檢警告（Task 247.3.5）；正常時為 {@code null}。
+     *                               <b>不入庫</b>——尤其不得寫進 {@code gdriveLastStatus}，那一欄是「上次上傳」
+     */
+    private TradingCalendarExportDto.ScheduleSettingResponse toResponse(TradingCalendarExportSchedule s,
+                                                                        String gdriveSelfCheckWarning) {
         return TradingCalendarExportDto.ScheduleSettingResponse.builder()
                 .enabled(Boolean.TRUE.equals(s.getEnabled()))
                 .runHour(s.getRunHour())
@@ -264,6 +274,7 @@ public class TradingCalendarExportScheduleService {
                 .gdriveRemote(gdrive.remoteName())
                 .gdriveLastRunAt(s.getGdriveLastRunAt() == null ? null : s.getGdriveLastRunAt().format(TS_FMT))
                 .gdriveLastStatus(s.getGdriveLastStatus())
+                .gdriveSelfCheckWarning(gdriveSelfCheckWarning)
                 .build();
     }
 }
