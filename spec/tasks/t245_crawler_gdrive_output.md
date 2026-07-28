@@ -353,7 +353,10 @@ frontend: docker build --no-cache 成功（npm run build 通過）
 3. **`browse-gdrive` 的 remote 不可用回 503 而非 400。** 原計畫只要求「不得 500、不得回空樹」，未指定狀態碼。選 503（Service Unavailable）因為語意是「外部依賴不可用」而非「使用者輸入錯誤」。
 4. **測試檔命名。** 依規範由實作者定：`CrawlerGdriveOutputTest`／`GdriveBrowseTest`／`NewsPollerGdriveSyncTest`。
 
-### 未完成（阻塞於使用者操作）
+### 阻塞事項（2026-07-28 16:09 已解除）
+
+> 以下三點是 2026-07-27 完成報告當下的狀態，保留為歷史記錄。解除經過見本節末的兩個 `####` 小節；
+> **最終可行組態與部署順序以最後一節為準。**
 
 - **241.1 的 OAuth 授權尚未完成。** 獨立 config 檔已建立且格式正確（只含 `[GDriveOutput]` 一段、`scope = drive`、權限 `-rw-------`），但**綁到了錯誤的 Google 帳號**：該帳號根目錄為 `FaceMe`／`元大銀行公有雲專案`／`富邦證券`，遞迴至深度 3 與共用區皆查無「投資理財」；且看不到 `asset-management-backup`（在 `scope=drive` 下同帳號必定可見），容量亦不符（16 GiB／已用 8.4 GiB vs 備份帳號 17 GiB／已用 702 MiB）。需重跑 241.1 並在授權頁選正確帳號。
 - **前端 UI 視覺確認尚未執行**（需 Google 登入 session，實作者不得代為登入）。程式碼層面已由 `npm run build` 通過驗證，但「驗證」段的 5 項瀏覽器手動確認待使用者執行。
@@ -384,4 +387,35 @@ rclone config delete GDriveOutput && rclone config create GDriveOutput drive sco
 
 **授權後必檢**（跳過這步等於沒修）：確認 `[GDriveOutput]` 的 token 確實含 `refresh_token`、且 `client_id` 已消失。
 
-**容器端**：`/etc/rclone/rclone.conf` 為唯讀掛載，ext 於**啟動時**複製到 `/tmp/rclone-output.conf`（token 續期需可寫）。故 host 端重新授權後**必須 recreate ext 容器**才會讀到新 token；沿用舊容器只會繼續用 13:37 那份無 refresh token 的快照。
+**容器端**：`/etc/rclone/rclone.conf` 為唯讀掛載，ext 於**啟動時**複製到 `/tmp/rclone-output.conf`（token 續期需可寫）。故 host 端重新授權後**必須 recreate ext 容器**才會讀到新 token；沿用舊容器只會繼續用 13:37 那份無 refresh token 的快照。**business-services 同樣要 recreate**——`ProcessRcloneClient` 也是啟動時複製，`/crawler-data` 的 Drive 資料夾選擇器走它。
+
+#### 2026-07-28 16:09 解除：端到端驗證通過，並記一個部署順序的坑
+
+**最終可行組態**（以 `rclone config delete GDriveOutput && rclone config create GDriveOutput drive scope=drive` 建立）：
+
+| 項目 | 值 |
+|------|-----|
+| `client_id` | 無（rclone 內建 client） |
+| `scope` | `drive` |
+| `refresh_token` | 有 |
+| 綁定帳號 | `shi.chihung@gmail.com` |
+
+**已驗證的項目**（皆為實測，非推論）：ext 啟動日誌出現 `Drive 輸出用 rclone 設定已複製至可寫路徑（remote=GDriveOutput）`；ext 容器內 `rclone lsd "GDriveOutput:投資理財"` 列出 `資產管理`；ext warmup 實際上傳 `Drive 同步成功（warmup）：…/public_info_2026-07-28.json（115348 bytes）`；`gdrive_last_status` 轉為「成功：…」；business 的 `/api/export-schedule/browse-gdrive?subpath=投資理財` 回 `{"directories":[{"name":"資產管理"…}]}`；使用者於 Drive 網頁確認該檔存在。（前端頁面的 5 項視覺確認仍待使用者自行核對，不在本次實測範圍。）
+
+**踩到的坑（本次最有價值的發現）：改 host config 與 recreate 容器不可同時進行。**
+
+`initConfig()` 的 `configReady` 是**啟動時判定一次的旗標，失敗後不會重試**——一旦啟動當下讀不到掛入的 config，該容器整個生命週期的 Drive 同步都會被跳過（`NewsPoller` 記 `Drive 同步跳過：rclone 設定不可用`）。而單檔 bind mount 綁的是 inode，`rclone config` 是「寫暫存檔再 rename」，host 檔被換掉的瞬間，剛啟動的容器就可能解析不到。實測時序：
+
+| 時間 | 事件 |
+|------|------|
+| 16:02:19 | business 啟動 |
+| 16:02:23 | business 複製成功（逃過） |
+| 16:02:25 | ext 啟動 |
+| 16:02:26 | ext `NoSuchFileException: /etc/rclone/rclone.conf`（掛掉） |
+| 16:02:29 | host `rclone.conf` 被 `rclone config` 改寫 |
+
+結果是 business 正常、ext 靜默失效——**症狀會偽裝成「Drive 好像還在收檔案」**（各匯出頁的 xlsx 由 business 上傳、照常出現），只有爬蟲 JSON 停止更新。診斷時要分辨檔案是哪支服務送的。
+
+**正確順序**：改 config → 驗 `refresh_token=True` → **等 host 檔穩定** → 再 recreate business 與 ext → restart bff。
+
+**另記：`browse-gdrive` 密集呼叫會收到 429。** 實測連續列目錄後首次回 429、隔數十秒重試即正常。成因是 rclone 內建 client 的全球共用配額（`ProcessRcloneClient` 已將該 stderr 特徵轉為可讀訊息）。本任務的上傳路徑（一輪一個小 JSON）不受影響；若目錄瀏覽的 429 常態化，才需改用自建 `client_id`，且必須同時滿足：該 GCP 專案**啟用 Drive API**、OAuth 同意畫面**已發布**（停在「測試」則 refresh token 7 天失效）、授權時選對帳號。
