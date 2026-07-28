@@ -21,14 +21,14 @@ project 1098468643583 before or it is disabled.
 
 **DB 備份完全不受影響**——備份走 `[GoogleDriver]`，同一晚 23:00:56 的 `Uploaded to gdrive-crypt:backups/daily/`
 照常成功。這個不對稱正是誤判來源：「備份好好的，所以 Drive 沒問題」。
-**成因**：事故當下 `[GDriveOutput]` 帶自訂 `client_id`／`client_secret`（實測存在；`rclone config reconnect`
-印出 `Make sure your Redirect URL is set to … in your custom config`，該訊息只在使用自訂 client 時出現），
-自訂 client 把配額與 API 啟用狀態綁到該 client 所屬的 GCP 專案。
-**現況**：2026-07-28 15:53 重新授權後這兩個鍵已從該 section 移除（config 1319 → 1219 bytes），改走 rclone
-內建公用 client，403 消失。**新取捨是配額共享**——實測當天 16:03–16:12 補跑八頁時三頁回 `rateLimitExceeded`，
-間隔 60–90 秒重試才成功。日後若為配額改回自訂 client，**必須同時滿足三個條件**：該 GCP 專案**啟用 Drive API**（否則重現原因 1）、
-OAuth 同意畫面**已發布**（停在「測試」狀態的 refresh token **7 天即失效**，會以原因 2 的形式重現）、
-授權時選對 Google 帳號。
+**成因**：事故當下 `[GDriveOutput]` 帶自訂 `client_id`／`client_secret`，自訂 client 把配額與 API 啟用狀態
+綁到該 client 所屬的 GCP 專案，而該專案未啟用 Drive API。
+**最終組態（2026-07-28 19:35 起）**：**改回自訂 client 並啟用該專案的 Drive API**。中途曾短暫改走 rclone
+內建公用 client（15:53–19:19）以繞開 403，但**內建 client 配額全球共享**——實測 16:03–16:12 補跑八頁時
+三頁回 `rateLimitExceeded`，間隔 60–90 秒重試才成功；改回自訂 client 後專屬配額生效，實測補跑不再撞。
+**改用自訂 client 必須同時滿足四個條件，缺一即以原因 1 或原因 2 的形式失敗**：
+（i）該 GCP 專案**啟用 Drive API**；（ii）OAuth 同意畫面**已發布**（停在「測試」狀態的 refresh token
+**7 天即失效**）；（iii）授權時取得 **refresh_token**（見原因 2，這是最難的一關）；（iv）選對 Google 帳號。
 
 **原因 2 — `[GDriveOutput]` 的 OAuth token 沒有 `refresh_token`。** 實測該 section 的 token JSON 只有
 `access_token`／`expires_in`／`expiry`／`token_type` 四個鍵，對照 `[GoogleDriver]` 多一個 `refresh_token`。
@@ -43,9 +43,33 @@ token expired and there's no refresh token - manually refresh with "rclone confi
 13:39:29 有一次上傳成功、13:42 手動跑 `rclone lsd` 也通，而 token 的 `expiry` 是 `2026-07-28T14:37:15+08:00`——
 15:36 再跑同一個 run-now 就回上面那段錯誤。**任何「跑一次 rclone 看通不通」的檢查，在那一小時內都會給出
 假的綠燈。**
-**取不到 refresh_token 的成因**：Google 對「該 client 已被此帳號授權過」的重複授權不重發 refresh token——
-實測 `rclone config reconnect` 在 3 秒內就 `Got code`（瀏覽器跳過同意畫面）那次拿不到；出現同意畫面的
-那次才拿得到。
+**取不到 refresh_token 的成因與唯一有效解法（當天繞了三次才找到，實作 L2 訊息時必須照抄）**：
+Google 對「該 client 已被此帳號授權過」的重複授權不重發 refresh token，判斷指標是**授權過程有沒有出現
+同意畫面**——實測 `rclone config reconnect` 在 3 秒內就 `Got code`（瀏覽器一閃而過）那幾次全部拿不到。
+
+**關鍵：Google 的授權記錄綁的是「應用程式」而非 client id。** 同一個 GCP 專案下的所有 OAuth client 共用
+同一個同意畫面，在 Google 帳號的「第三方應用程式存取權」中就是**同一個應用程式**。故當天實測 19:19 換上
+**重新產生的** client id/secret 並 reconnect → 仍無 refresh_token；19:29 再授權一次 → 仍無。
+**「換一組新 client」對此完全無效。**
+
+**唯一實測有效的方式（19:35 一次成功）**——把 `prompt=consent` 塞進授權端點：
+
+```bash
+rclone config reconnect GDriveOutput: --drive-auth-url "https://accounts.google.com/o/oauth2/auth?prompt=consent"
+```
+
+（`--drive-auth-url` 為 rclone drive backend 既有 flag，實測 v1.73.5 存在；golang oauth2 的 `AuthCodeURL`
+會偵測既有 query 而以 `&` 正確拼接，故 `prompt=consent` 不會被覆蓋。）
+
+另一條理論上可行但當天走不通的路：先到 https://myaccount.google.com/permissions 撤銷該**應用程式**
+（非 client）的存取權再重新授權——實測使用者在該頁找不到對應項目。**撤銷是否生效的判斷法**：撤銷會
+立即 revoke 已發出的 token，故 `rclone lsd "<remote>:<任一存在的目錄>"` 會由成功轉為失敗；
+**但 access_token 自然過期後症狀完全相同**，此判斷法只在 token 未到 `expiry` 前有效。
+
+**另一個線索**：當天該 client 的憑證 JSON 片段顯示類型鍵為 `web`（桌面應用程式為 `installed`）。
+Web 類型必須在 console 明確登錄重新導向 URI `http://127.0.0.1:53682/`，且重複授權時預設不重發
+refresh token；rclone 官方建議建立 client 時選「桌面應用程式」。當天最終是以 `prompt=consent`
+在 Web 類型上直接解決，未更換類型。
 
 **原因 3 — host 端改過 config 之後，容器內的掛載點成為 dangling inode。** `rclone config` 寫設定是
 「寫新檔 ＋ rename」原子替換，而 `docker-compose.yml` 是以**單一檔案**掛入
@@ -181,8 +205,10 @@ Requirement 50／51 的「本機一律照寫、Drive 只是附加副本、上傳
       「…此為 rclone 內建共用憑證的已知限制，**根治方式是為 rclone 設定專屬的 OAuth client_id**。」
       ——而自訂 client_id 正是本次 403 的成因（見背景原因 1），且使用者現在正處於共享配額狀態
       （實測三次 `rateLimitExceeded`），這句會直接寫進 `gdrive_last_status` 被使用者看到、照做就重演事故。
-      改為補上必要前提：「…根治方式是為 rclone 設定專屬的 OAuth client_id；**設定後必須同時到該 GCP 專案
-      啟用 Drive API，否則會改為回 403 而完全無法上傳**。」**純字串、無邏輯變更。**
+      該建議本身正確（當天最終正是改回自訂 client 才解除配額問題），但**缺了兩個前提，照做會重演
+      403 與 refresh_token 兩個事故**。改為：「…根治方式是為 rclone 設定專屬的 OAuth client_id；
+      **設定後必須同時到該 GCP 專案啟用 Drive API，且授權時須帶 `prompt=consent` 才會取得 refresh_token**。」
+      **純字串、無邏輯變更。**
 - [ ] 247.2.7 **L2：解析 `[<remote>]` section 的 token JSON，檢查 `refresh_token` 存在且非空。**
       這是唯一能在「access_token 尚未過期」期間就抓出原因 2 的辦法——實際探測在那個時間窗內必然通過。
       解析對象是**已複製到 `/tmp/rclone-output.conf` 的副本**（來源可能 dangling）。
@@ -193,8 +219,12 @@ Requirement 50／51 的「本機一律照寫、Drive 只是附加副本、上傳
       token 值非合法 JSON → WARN（無法判定）；**config 副本不存在** → WARN（無法判定，L1 失敗的下游狀態）；
       **檔內無該 section** → WARN（無法判定，remote 名稱錯或尚未建立）。
       WARN 訊息須明寫「`[<remote>]` 的 token 缺 refresh_token，access_token 過期後將無法自動續期」，
-      附修法 `rclone config reconnect <remote>:`，並提示「**若授權過程數秒內就完成（沒出現同意畫面），
-      Google 不會重發 refresh token**，須先到 https://myaccount.google.com/permissions 撤銷該應用授權再重試」。
+      並附**當天唯一實測有效的修法**（見背景原因 2）：
+      `rclone config reconnect <remote>: --drive-auth-url "https://accounts.google.com/o/oauth2/auth?prompt=consent"`。
+      **不得只寫裸的 `rclone config reconnect <remote>:`**——實測那樣會跳過同意畫面而再次拿不到
+      refresh_token（當天連續失敗兩次），且**換一組新的 client id/secret 也無效**（Google 的授權記錄綁
+      「應用程式」＝同意畫面，非 client id）。訊息可再附一句判斷指標：「授權過程若數秒內就完成、
+      沒讓你按『繼續／允許』，就是沒拿到」。
 - [ ] 247.2.8 **L3：實跑一次唯讀探測 `rclone lsd <remote>:`。**
       涵蓋只有真的連線才知道的狀況：Drive API 未啟用（403）、remote 名稱打錯、授權已撤銷。
       走 `RcloneClient.listDirs(remote, "")` 即可（既有介面，唯讀，測試可替身注入）。
@@ -234,8 +264,10 @@ Requirement 50／51 的「本機一律照寫、Drive 只是附加副本、上傳
       （ii）九支設定 service 中 **`TradingRadarExportScheduleService.saveSetting`（`@Transactional` 於 `:162`）與
       `CrawlerExportPathService.update`（`:74`）在交易內**，同步 L3 會把 20 秒的外部行程呼叫包進交易、
       佔住 Hikari 連線（其餘七支目前無 `@Transactional`）；
-      （iii）內建公用 client 的配額為全球共享（實測當天三次 `rateLimitExceeded`），而使用者啟用時正是
-      連續開九個開關的時候，同步探測會加劇撞牆。
+      （iii）啟用時正是連續開九個開關的時候，同步探測等於連續九次打 Drive API。
+      **註**：本條原先的論據是「內建公用 client 配額全球共享，實測當天撞過三次 `rateLimitExceeded`」，
+      該前提已於 2026-07-28 19:35 改回自訂 client 後失效——專屬配額下實測補跑不再撞。
+      本條因此降為次要理由，**(i)(ii) 兩條足以支撐本決定**，不要把已失效的論據照抄進程式碼註解。
       **這不是缺口**：L3 涵蓋的 403／remote 錯誤會在該頁**第一次實際上傳**時寫進 `gdrive_last_status`
       （既有機制，本次事故正是這樣被記錄下來的），而 (a) 每次啟動也會做一次；(b) 真正不可取代的價值在
       **L2**——它是唯一能在 access_token 尚未過期的時間窗內抓出「token 缺 refresh_token」的辦法，

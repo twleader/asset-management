@@ -148,19 +148,31 @@ cd frontend
 > **`[GDriveOutput]` 的 token 必須含 `refresh_token`**：缺了的話 access_token 一過期（實測約 1 小時）即回
 > `token expired and there's no refresh token`，且**無法自動續期**——2026-07-28 的實際事故。
 > 陰險之處是重新授權後的一小時內一切正常，故自檢 L2 直接檢查該鍵是否存在，不倚賴連線探測。
-> 修法：`rclone config reconnect GDriveOutput:`。**若授權過程數秒內就完成（沒出現同意畫面），
-> Google 不會重發 refresh token**——實測 15:47 那次 3 秒 `Got code`、拿到的 token 仍無 refresh_token；
-> 此時要先到 https://myaccount.google.com/permissions 撤銷該應用授權再重試。
+>
+> **修法只有這一個實測有效**（當天裸 reconnect 連兩次失敗、換新 client id 也無效，加上這個參數一次成功）：
+> ```
+> rclone config reconnect GDriveOutput: --drive-auth-url "https://accounts.google.com/o/oauth2/auth?prompt=consent"
+> ```
+> **為什麼裸 `reconnect` 無效**：Google 對已授權過的組合跳過同意畫面、只發 access token；
+> 判斷指標是授權過程**有沒有停下來讓你按「繼續／允許」**——3 秒內 `Got code` 就是沒拿到。
+> **為什麼換一組新 client id 也無效**：Google 的授權記錄綁的是「**應用程式**」（＝OAuth 同意畫面），
+> 同一個 GCP 專案下的所有 client 共用同一個同意畫面，換 client 仍被視為同一個已授權的應用程式。
+> 另一條路是到 https://myaccount.google.com/permissions 撤銷該**應用程式**再授權，但當天在該頁找不到對應項目。
+> **撤銷是否生效的判斷法**：撤銷會立即 revoke 已發出的 token，故 `rclone lsd "GDriveOutput:<存在的目錄>"`
+> 會由成功轉失敗；**但 access_token 自然過期後症狀相同**，此判斷法只在 token 未到 `expiry` 前有效。
 >
 > **兩個 remote 的 OAuth client 來源不同，這是誤判來源**：2026-07-28 事故當下 `[GDriveOutput]` 帶自訂
-> `client_id`／`client_secret`（`rclone config reconnect` 印出 `… in your custom config` 可佐證），
-> 請求算到某個自有 GCP 專案，該專案未啟用 Drive API → `Error 403: Google Drive API has not been used
-> in project 1098468643583`；而 `[GoogleDriver]`（備份）走 rclone 內建公用 client，同一晚照常成功——
-> 於是「備份好好的，所以 Drive 沒問題」。**現況（2026-07-28 15:53 重新授權後）**：`[GDriveOutput]` 的
-> `client_id`／`client_secret` 已移除（config 1319 → 1219 bytes），亦走內建公用 client，403 消失。
-> **代價是配額共享**：實測當天補跑八頁時三頁回 `rateLimitExceeded`，間隔 60–90 秒重試才成功。
-> 日後若為配額改回自訂 client，**必須同時滿足三件事**：該 GCP 專案啟用 Drive API（否則 403 重現）、
-> OAuth 同意畫面**已發布**（停在「測試」的 refresh token 7 天即失效）、授權時選對帳號。
+> `client_id`／`client_secret`，請求算到自有 GCP 專案，該專案未啟用 Drive API →
+> `Error 403: Google Drive API has not been used in project 1098468643583`；而 `[GoogleDriver]`（備份）
+> 走 rclone 內建公用 client，同一晚照常成功——於是「備份好好的，所以 Drive 沒問題」。
+>
+> **最終組態（2026-07-28 19:35 起）**：`[GDriveOutput]` ＝ **自訂 client**（GCP 專案 1098468643583，
+> **Drive API 已啟用**）＋ `scope=drive` ＋ **含 `refresh_token`**；`[GoogleDriver]` 維持內建 client。
+> 中途曾短暫改走內建 client（15:53–19:19）以繞開 403，但**內建 client 配額全球共享**——實測補跑八頁時
+> 三頁回 `rateLimitExceeded`，間隔 60–90 秒才成功；改回自訂 client 後專屬配額生效，補跑不再撞。
+> **改用自訂 client 必須同時滿足四件事**：該 GCP 專案啟用 Drive API、OAuth 同意畫面**已發布**
+> （停在「測試」的 refresh token 7 天即失效）、授權時**帶 `prompt=consent`** 以取得 refresh_token
+> （見下條，這是最難的一關）、選對 Google 帳號。
 >
 > **`configReady` 是啟動時判定一次、失敗永不重試的旗標**：一旦啟動當下讀不到 config，該容器
 > **整個生命週期**的 Drive 同步都被跳過。實測 2026-07-28 16:02:25 ext 啟動、16:02:26 讀 config 失敗、
@@ -260,7 +272,7 @@ git config core.hooksPath scripts/git-hooks
 | `FINMIND_TOKEN` | FinMind Bearer token（選填，未設則匿名） |
 | `BUSINESS_SERVICES_URL` | BFF 路由目標（compose 設 `http://business-services:8080`） |
 | `RCLONE_CONFIG` | business 與 ext 皆為 `/etc/rclone/rclone.conf`（host `~/.config/rclone` **目錄**唯讀掛入 `/etc/rclone`，值指向其中的 `rclone.conf`；掛目錄而非單檔的理由見 §4 的 Task 247 條）。程式啟動時各自複製到 `/tmp` 可寫副本（`BackupService` → `/tmp/rclone.conf`、Drive 輸出 → `/tmp/rclone-output.conf`；rclone 續期 OAuth token 需寫回，實測 token 幾乎每次呼叫都已過期），實際呼叫時以 per-process 覆寫指定 |
-| `GDRIVE_OUTPUT_REMOTE` | Drive 輸出用的 remote 名稱（預設 `GDriveOutput`）；需先由使用者以 `rclone config create GDriveOutput drive scope=drive` 建立（**`scope=drive` 是必要的**——`drive.file` 只看得到 rclone 自己建的檔案，列不出使用者手動建的目錄）。Requirement 50 / Task 245 |
+| `GDRIVE_OUTPUT_REMOTE` | Drive 輸出用的 remote 名稱（預設 `GDriveOutput`）；需先由使用者以 `rclone config create GDriveOutput drive scope=drive` 建立（**`scope=drive` 是必要的**——`drive.file` 只看得到 rclone 自己建的檔案，列不出使用者手動建的目錄）。**現行為自訂 OAuth client**，授權時務必帶 `--drive-auth-url "…?prompt=consent"`（否則拿不到 refresh_token，見 §4）。Requirement 50 / Task 245、Requirement 52 / Task 247 |
 
 ---
 
