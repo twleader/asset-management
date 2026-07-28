@@ -29,6 +29,9 @@ project 1098468643583 before or it is disabled.
 **改用自訂 client 必須同時滿足四個條件，缺一即以原因 1 或原因 2 的形式失敗**：
 （i）該 GCP 專案**啟用 Drive API**；（ii）OAuth 同意畫面**已發布**（停在「測試」狀態的 refresh token
 **7 天即失效**）；（iii）授權時取得 **refresh_token**（見原因 2，這是最難的一關）；（iv）選對 Google 帳號。
+**四項於 2026-07-28 均已實測滿足**（同意畫面為 `In production`）。查發布狀態的位置：新版
+**Google Auth Platform → Audience → Publishing status**——改版後已搬離 Overview 頁，
+舊文件說的「OAuth 同意畫面」頁不存在了，當天就在這裡卡了一次。
 
 **原因 2 — `[GDriveOutput]` 的 OAuth token 沒有 `refresh_token`。** 實測該 section 的 token JSON 只有
 `access_token`／`expires_in`／`expiry`／`token_type` 四個鍵，對照 `[GoogleDriver]` 多一個 `refresh_token`。
