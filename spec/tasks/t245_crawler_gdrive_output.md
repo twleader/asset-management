@@ -358,3 +358,30 @@ frontend: docker build --no-cache 成功（npm run build 通過）
 - **241.1 的 OAuth 授權尚未完成。** 獨立 config 檔已建立且格式正確（只含 `[GDriveOutput]` 一段、`scope = drive`、權限 `-rw-------`），但**綁到了錯誤的 Google 帳號**：該帳號根目錄為 `FaceMe`／`元大銀行公有雲專案`／`富邦證券`，遞迴至深度 3 與共用區皆查無「投資理財」；且看不到 `asset-management-backup`（在 `scope=drive` 下同帳號必定可見），容量亦不符（16 GiB／已用 8.4 GiB vs 備份帳號 17 GiB／已用 702 MiB）。需重跑 241.1 並在授權頁選正確帳號。
 - **前端 UI 視覺確認尚未執行**（需 Google 登入 session，實作者不得代為登入）。程式碼層面已由 `npm run build` 通過驗證，但「驗證」段的 5 項瀏覽器手動確認待使用者執行。
 - 因上述帳號問題，**端到端「檔案真的出現在 Drive 上」尚未驗證**。目前 DB 狀態為 `gdriveEnabled=false`＋`gdriveSubpath=投資理財/資產管理`（刻意保持關閉，避免上傳到綁錯的帳號）；使用者重新授權後只需在頁面上打開開關即可。
+
+#### 2026-07-28 追加診斷：光「選對帳號」不夠，重跑授權前必須先改掉 OAuth client
+
+使用者於 2026-07-28 13:37 左右重跑授權並把 `gdriveEnabled` 打開，仍全數失敗，`gdrive_last_status` 依時序出現兩種錯誤。實測 config 後確認**這兩個錯誤是同一個根因的兩個面向：`[GDriveOutput]` 用了自建的 Google OAuth client，而運作正常的 `[GoogleDriver]`（DB 備份）用的是 rclone 內建 client。**
+
+| 項目 | `[GoogleDriver]`（正常） | `[GDriveOutput]`（失敗） |
+|------|--------------------------|--------------------------|
+| `client_id` | 無（rclone 內建 client） | `1098468643583-…`（自建，GCP 專案 1098468643583） |
+| token 欄位 | `access_token` / `expires_in` / `expiry` / **`refresh_token`** / `token_type` | `access_token` / `expires_in` / `expiry` / `token_type`（**無 `refresh_token`**） |
+
+1. **錯誤一「Drive API has not been used in project 1098468643583 …」只會發生在自建 client 上。** rclone 內建 client 不需要使用者擁有任何 GCP 專案，故 `GoogleDriver` 從未遇到這則錯誤。
+2. **錯誤二「token expired and there's no refresh token」的真因是授權回應根本沒發 `refresh_token`。** token `expiry = 2026-07-28T14:37:15`，即 13:37 取得、14:37 過期後即無法續期。成因是 Google 對**同一組 (OAuth client, 帳號)再次同意**時預設不重發 refresh token（除非帶 `prompt=consent` 或先撤銷既有授權）。
+3. **推論：直接 `rclone config reconnect GDriveOutput:` 會重蹈覆轍。** 它沿用現有 `client_id`，同一組 (client, 帳號) 再次同意 → 很可能再次只拿到 access token，1 小時後回到同一個錯誤。
+
+**修正做法（改為採用 rclone 內建 client，等同 `GoogleDriver` 的做法）**，取代原 241.1／241.1.1 的自建 client 路線：
+
+```bash
+rclone config delete GDriveOutput && rclone config create GDriveOutput drive scope=drive
+```
+
+理由：(a) 完全不需碰 GCP 專案 1098468643583，免去啟用 Drive API、設定同意畫面、加測試使用者等步驟——其中「測試」發布狀態的 refresh token 7 天即失效，對每分鐘輪詢的排程是定時炸彈；(b) 換成不同的 client 即為該 (client, 帳號) 組合的**首次同意**，Google 必定發給 refresh token，直接繞開第 2 點；(c) 241.1.1 所述共用配額限流的代價在本用量（一輪一個小 JSON）下無實質影響。**取捨**：授權畫面顯示 `rclone` 而非自有專案名。
+
+**正確帳號已確認為 `shi.chihung@gmail.com`（顯示名「史帝芬」）** — 以 `GoogleDriver` 的 token 查 Drive `about?fields=user` 取得，即持有 `asset-management-backup` 的同一帳號。授權頁務必選它。
+
+**授權後必檢**（跳過這步等於沒修）：確認 `[GDriveOutput]` 的 token 確實含 `refresh_token`、且 `client_id` 已消失。
+
+**容器端**：`/etc/rclone/rclone.conf` 為唯讀掛載，ext 於**啟動時**複製到 `/tmp/rclone-output.conf`（token 續期需可寫）。故 host 端重新授權後**必須 recreate ext 容器**才會讀到新 token；沿用舊容器只會繼續用 13:37 那份無 refresh token 的快照。
