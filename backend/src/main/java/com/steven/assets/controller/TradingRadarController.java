@@ -6,6 +6,7 @@ import com.steven.assets.dto.TradingRadarNotificationDto;
 import com.steven.assets.service.TradingRadarExportScheduleService;
 import com.steven.assets.service.TradingRadarExportService;
 import com.steven.assets.service.TradingRadarNotificationSettingService;
+import com.steven.assets.service.TradingRadarRefreshService;
 import com.steven.assets.service.TradingRadarService;
 import jakarta.validation.constraints.Pattern;
 import lombok.RequiredArgsConstructor;
@@ -42,10 +43,23 @@ public class TradingRadarController {
     private final TradingRadarNotificationSettingService notificationSettingService;
     private final TradingRadarExportService exportService;
     private final TradingRadarExportScheduleService exportScheduleService;
+    private final TradingRadarRefreshService refreshService;
 
     @GetMapping
     public TradingRadarDto.Response get() {
         return service.get();
+    }
+
+    /**
+     * 手動「重新整理」：先同步回補台股行情再重算（Task 249）。
+     *
+     * <p>只有使用者按下按鈕會走這裡；SSE 盤中自動更新仍走上方的 {@link #get()}，
+     * 否則每個 tick 都會觸發一次外部抓取而形成自我餵食迴圈。
+     * 回補逾時／失敗一律降級成 {@code priceRefresh.outcome}，不回 5xx。</p>
+     */
+    @PostMapping("/refresh")
+    public TradingRadarDto.RefreshResponse refresh() {
+        return refreshService.refreshAndGet();
     }
 
     /**

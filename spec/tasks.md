@@ -726,6 +726,8 @@ security property，直接 `-D` 讀不到——雙重靜默無效）、改用 JD
       （非交易日取最近一個交易日），與最新完成日 K 比對得出 `stale`；`MarketState`／`MarketSummary`
       增加 `stale` 欄位。**不得**新建第二份假日清單，也不得為此補一個大盤即時抓價來源
       （Requirement 43 明訂零外部行情抓取；且 `0000/台股` 本就被 `StockSourceQuery` 排除）。
+      > **事實更正（Task 249 逐行查證）：** 該排除**只套在 `stock_alert` 那半段**（`WHERE NOT (stock_code = '0000' AND market = '台股')`）；
+      > `SELECT stock_code, market FROM stock_holding WHERE snapshot_id = ?` 那半段沒有任何排除。呼叫端不得把它當成保證，須自行 `remove("0000")`。
 - [x] 217.2 **規則引擎套用 stale**：`StockInput` 增加 `marketStale`；`evaluateStock` 於 stale 時不給
       `RISK_ON` +8；`actionFor` 的 `buyGate` 於 stale 時一律 false。`RISK_OFF` 的 −15 與 veto 不受影響
       （只收緊不放寬）。`InstrumentType.BOND` 本就不套大盤閘門，行為不變。

@@ -7,7 +7,7 @@
       </div>
       <div class="header-actions">
         <el-button :icon="Download" @click="openExport">匯出 Excel</el-button>
-        <el-button :icon="Refresh" :loading="refreshing" @click="load(true)">重新整理</el-button>
+        <el-button :icon="Refresh" :loading="refreshing" @click="manualRefresh">重新整理</el-button>
       </div>
     </div>
 
@@ -17,7 +17,7 @@
       show-icon
       class="local-rule-alert"
       title="純本地規則運算"
-      description="本頁讀取系統既有 PostgreSQL 與 Redis 資料，並將每次結果快照寫入 Redis 供匯出；不會送出 Claude、OpenAI 或其他 AI API 請求，也不會觸發外部行情回補。"
+      description="判斷全由本地規則產生，不會送出 Claude、OpenAI 或其他 AI API 請求。按下「重新整理」會先回補一次台股行情再重算；頁面自動更新與其餘操作只讀取既有 PostgreSQL 與 Redis 資料。每次結果快照會寫入 Redis 供匯出。"
     />
 
     <el-card shadow="never" class="market-card" :class="marketClass">
@@ -611,6 +611,7 @@ const market = computed(() => radar.value.market || {})
 const stocks = computed(() => radar.value.stocks || [])
 const marketClass = computed(() => `regime-${String(market.value.regime || 'DATA_INCOMPLETE').toLowerCase().replace('_', '-')}`)
 
+// 純讀重算。初次載入與 SSE 背景重算都走這裡；不觸發任何外部行情抓取。
 async function load(manual = false, silent = false) {
   if (manual) refreshing.value = true
   else if (!silent) loading.value = true
@@ -620,6 +621,35 @@ async function load(manual = false, silent = false) {
   } finally {
     if (!silent) loading.value = false
     if (manual) refreshing.value = false
+  }
+}
+
+// Task 249：outcome → 提示文案。不得宣稱做了沒做的事。
+const REFRESH_MESSAGES = {
+  FETCHED: { type: 'success', text: '已重新抓取即時報價並重算' },
+  CLOSED_SYNCED: { type: 'success', text: '台股目前休市，已同步至最新收盤價並重算' },
+  SKIPPED_PENDING_CLOSE: { type: 'info', text: '今日收盤價尚未落檔，已保留最新成交價並重算' },
+  COOLDOWN: { type: 'info', text: '30 秒內剛更新過，已直接重算' },
+  BUSY: { type: 'info', text: '行情更新進行中，已以現有報價重算' },
+  TIMEOUT: { type: 'warning', text: '行情抓取未完成，已以現有報價重算' },
+  FAILED: { type: 'warning', text: '行情抓取未完成，已以現有報價重算' }
+}
+
+/**
+ * 手動「重新整理」：先同步回補台股行情再重算（Task 249）。
+ * 只有按鈕走這支；scheduleRecalculation / recalculateRadar 一律用上面的 load()，
+ * 否則抓取 → 寫 Redis → price-update → 再抓取，會變成自我餵食迴圈。
+ */
+async function manualRefresh() {
+  refreshing.value = true
+  try {
+    const resp = await bffApi.tradingRadar.refresh()
+    if (disposed) return
+    if (resp?.radar) radar.value = resp.radar
+    const hint = REFRESH_MESSAGES[resp?.priceRefresh?.outcome] || REFRESH_MESSAGES.TIMEOUT
+    ElMessage({ type: hint.type, message: hint.text })
+  } finally {
+    refreshing.value = false
   }
 }
 

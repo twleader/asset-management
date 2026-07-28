@@ -49,6 +49,7 @@ public class InternalPriceController {
     private final com.steven.assets.externalmaterials.service.StockSourceQuery stockSource;
     private final com.steven.assets.externalmaterials.service.TwTyphoonClosureService typhoonClosure;
     private final com.steven.assets.externalmaterials.service.EtfNavPoller etfNavPoller;
+    private final com.steven.assets.externalmaterials.service.TwRadarRefreshService twRadarRefresh;
 
     /**
      * 同步抓所有持股報價、寫 Redis 後回傳統計。
@@ -57,6 +58,17 @@ public class InternalPriceController {
     @PostMapping("/refresh")
     public RefreshSummary refresh() {
         return poller.refreshAll();
+    }
+
+    /**
+     * 今日交易雷達手動「重新整理」專用：只抓台股個股 ＋ 大盤 0000（Task 249）。
+     *
+     * <p>與上方 {@code /refresh} 分開的理由：後者是 {@code refreshAll()}，會連美股／英股一起抓，
+     * 而交易雷達只評台股，多抓只會拉長使用者按下按鈕後的等待時間。</p>
+     */
+    @PostMapping("/refresh/tw-radar")
+    public com.steven.assets.externalmaterials.service.TwRadarRefreshService.Summary refreshTwRadar() {
+        return twRadarRefresh.refresh();
     }
 
     /**
