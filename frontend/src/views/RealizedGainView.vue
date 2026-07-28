@@ -516,9 +516,9 @@ const gainForm = reactive({
   sharesStr: '0', salePriceStr: '0', proceedsStr: '0', investmentCostStr: '0'
 })
 
-// 當市場改變時自動切換預設幣別
+// 當市場改變時自動切換預設幣別（判斷式與 resetForm 共用 defaultCurrency，不另立第二套對照）
 watch(() => gainForm.market, (m) => {
-  gainForm.currency = (m === '美股' || m === '英股') ? 'USD' : 'TWD'
+  gainForm.currency = defaultCurrency(m)
 })
 
 // Parse helpers
@@ -626,10 +626,16 @@ const fmtShares = (v, market) => {
 const pct = (v) => v ? `${(Number(v) * 100).toFixed(2)}%` : '-'
 
 // ===== Dialog actions =====
+// Task 250：新增表單的市場預設＝當前市場 tab（''＝全部 → 台股）
+const defaultMarket = () => marketFilter.value || '台股'
+// 幣別必須在 resetForm 內一併算：tab 未變時 market 同值寫回不會 trigger 上面那個 watch
+const defaultCurrency = (m) => (m === '美股' || m === '英股') ? 'USD' : 'TWD'
+
 const resetForm = () => {
   editingId.value = null
+  const market = defaultMarket()
   Object.assign(gainForm, {
-    assetName: '', assetCode: '', market: '台股', currency: 'TWD', broker: '', tradeDate: '',
+    assetName: '', assetCode: '', market, currency: defaultCurrency(market), broker: '', tradeDate: '',
     sharesStr: '0', salePriceStr: '0', proceedsStr: '0', investmentCostStr: '0'
   })
 }
