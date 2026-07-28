@@ -43,6 +43,12 @@ public class NotificationRecipientController {
         return service.toggleMarketAnalysis(id);
     }
 
+    /** 切換「警示 digest 夾帶 Google 日曆邀請」（Requirement 23 / Task 248）；非 Gmail 開啟時回 400。 */
+    @PatchMapping("/{id}/calendar")
+    public NotificationRecipientDto.Response toggleCalendar(@PathVariable Long id) {
+        return service.toggleCalendar(id);
+    }
+
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable Long id) {
         service.delete(id);

@@ -12,6 +12,8 @@
       style="margin-bottom: 16px;">
       <template #title>
         <span>股票觀察清單的警示條件觸發時，系統會自動寄 email 到下列「啟用」中的收件人。同一輪同時觸發多筆會合併成單一 digest 寄送。</span>
+        <br>
+        <span>Gmail 收件人可另開啟「加入 Google 日曆」，警示信會夾帶日曆邀請、由日曆推播提醒；需收件人的 Google 日曆維持「自動將邀請加入日曆」設定（預設為是），若設為「僅在我回覆時」則需在信中手動接受一次。</span>
       </template>
     </el-alert>
 
@@ -23,6 +25,17 @@
             <el-tag :type="row.active ? 'success' : 'danger'" size="small">
               {{ row.active ? '啟用' : '停用' }}
             </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="Google 日曆" width="130" align="center">
+          <template #default="{ row }">
+            <el-switch
+              v-if="isGmail(row.email)"
+              v-model="row.addToCalendar"
+              @change="toggleCalendar(row)" />
+            <el-tooltip v-else content="僅 Gmail 收件人支援" placement="top">
+              <span class="not-supported">—</span>
+            </el-tooltip>
           </template>
         </el-table-column>
         <el-table-column label="建立時間" width="180">
@@ -114,6 +127,26 @@ async function toggleActive(r) {
   await load()
 }
 
+/** 與後端 NotificationRecipientService.isGmail 同判定；後端仍會擋，這裡只決定是否顯示開關。 */
+function isGmail(email) {
+  if (!email) return false
+  const at = email.lastIndexOf('@')
+  if (at < 0) return false
+  const domain = email.slice(at + 1).trim().toLowerCase()
+  return domain === 'gmail.com' || domain === 'googlemail.com'
+}
+
+async function toggleCalendar(r) {
+  try {
+    await bffApi.notificationSettings.toggleCalendar(r.id)
+    ElMessage.success(r.addToCalendar ? '已加入 Google 日曆' : '已取消 Google 日曆')
+    await load()
+  } catch (e) {
+    r.addToCalendar = !r.addToCalendar   // 後端拒絕時把 switch 還原
+    throw e
+  }
+}
+
 async function remove(r) {
   await ElMessageBox.confirm(`確定要刪除收件人「${r.email}」嗎？此操作無法復原。`, '確認', { type: 'warning' })
   await bffApi.notificationSettings.deleteRecipient(r.id)
@@ -132,4 +165,5 @@ onMounted(load)
 <style scoped>
 .page-header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
 .page-header h2 { margin: 0; flex: 1; }
+.not-supported { color: var(--el-text-color-placeholder); }
 </style>

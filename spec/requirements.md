@@ -550,7 +550,7 @@
 - [ ] **CJK 字型**：legend 含繁中，runtime image（alpine slim JRE）須裝 `font-noto-cjk`，且須用 `Font.createFonts` 挑出 **TC face**（`.ttc` 的 face 0 為日文變體，直接 `createFont` 會顯示日系字形）
 - [ ] 提供「通知收件人」設定頁（`/notification-settings`，主選單「系統設定」群組內），使用者可新增 / 刪除 / 啟停 email 收件人，至少支援 0 ~ N 筆收件人
 - [ ] 股票觀察頁（觀察清單 tab）「新增觀察」左側提供「補發」按鈕：**補發範圍限於當前所在的市場子 tab**（台股 / 美股 / 英股），按鈕文字隨 tab 顯示「補發台股」/「補發美股」/「補發英股」，只把**該市場「最後交易日」當天觸發的事件**（盤中則為當日盤中至今的觸發）彙整後**以收件人為單位**各寄一封 digest email（每位收件人只含其所訂閱警示的觸發），與自動 digest 同格式（含月線/季線/年線、KD）。前端把當前 `marketTab` 以 query param `market` 帶給後端；後端 `resendLastTradingDay(market)` 指定時只處理該單一市場、未指定（null / 空）時 fallback 回全市場（向後相容）。「最後交易日」依市場時區判定：交易日且已過開盤＝當日、盤前 / 週末 / 國定假日則回溯至最近交易日（`lastTradingDate` 迴圈以 `MarketDataService.isTradingDay` 跳過週末與假日）。補發為手動全量重寄，不論該事件先前是否已自動寄出。回傳結果含寄出筆數，前端以訊息提示（提示文案標明市場，如「已補發 美股 N 檔股票給 M 位收件人」；無事件 / 無收件人 / Email 服務未啟用時各給對應提示，不寄空信）
-- [ ] 收件人持久化於資料庫 `notification_recipient` 表（欄位：`id`、`email`、`active`、`created_at`、`updated_at`），不寫死於程式碼或設定檔；email 欄位需正規化（去除前後空白、轉小寫）並 unique 不可重複
+- [ ] 收件人持久化於資料庫 `notification_recipient` 表（欄位：`id`、`owner_user_id`、`email`、`active`、`receive_market_analysis`、`add_to_calendar`、`created_at`、`updated_at`；型別與約束以 `design.md` 的 `NotificationRecipient` 表為準），不寫死於程式碼或設定檔；email 欄位需正規化（去除前後空白、轉小寫），並與 `owner_user_id` 複合 unique（同一使用者不可重複，不同使用者可各自使用同一 email）
 - [ ] **新增 / 編輯警示時防止重複條件**（Task 130）：同一 `(stockCode, market, alertType, maPeriod, threshold)` 視為「完全相同的警示條件」（如 NVDA「低於年線」= `MA_BELOW_PCT` + `maPeriod=240` + `threshold=0`）。`StockAlertService.create` / `update` 存檔前檢查是否已存在相同條件的**另一筆**警示（`update` 以 id 排除自身、`stockCode` 正規化大寫比對；`threshold` 以 `compareTo` 比較避免 scale 差異、`maPeriod` 以 `Objects.equals` 容許 null），若有則**不寫入**並丟 `IllegalArgumentException`「已存在相同的警示條件（{股名} {條件文案}），未重複新增」（→ 400 ProblemDetail）。`active` 與 `recipientIds` **不**納入唯一鍵（重複僅以觸發規則判定，不因啟停 / 收件人不同而視為不同條件）。**前端以 dialog（`ElMessageBox.alert`）呈現後端訊息，而非頂部滑出的 toast**（使用者反映 toast 看起來像系統錯誤）：`stockAlert.create` / `update` 帶 `skipErrorToast` 旗標，使全域 axios 攔截器（`api/index.js`）對這兩支請求**不**跳 `ElMessage`；`StockAlertView.save()` 的 catch 改以 `ElMessageBox.alert(apiErrorMessage(e), '無法儲存警示', { type:'warning' })` 顯示（含重複條件、名稱不符等所有存檔錯誤），對話框關閉後維持表單開啟讓使用者修改。`apiErrorMessage(err)` 為 `api/index.js` 匯出之 helper，取 `ProblemDetail.detail` 優先。**既有的歷史重複列不自動清除**（使用者可於清單以刪除鈕自行移除其中一筆）
 
 **每條警示挑選收件人（Task 125 新增）：**
@@ -567,6 +567,28 @@
 - [ ] 收件人為空、或環境變數 `MAIL_USERNAME` / `MAIL_PASSWORD` 未設定時，dispatcher 直接 skip 寄信（僅 log 警告），不可導致警示判斷流程拋例外、阻擋 `StockAlertService.evaluate()`
 - [ ] 寄信失敗（SMTP 錯誤、authentication 失敗、network 異常）僅 `log.warn`，**不**重試、**不**讓觸發判斷 transaction rollback；觸發紀錄 `StockAlertTrigger` 必須無論寄信成敗都已落地
 
+**Gmail 收件人加入 Google 日曆（Task 248 新增）：**
+
+**User Story:** 作為使用者，我希望警示觸發時除了收到 email，還能自動在 Google 日曆上出現一個事件，靠日曆的推播提醒讓我在手機上立刻知道，而不是等到我打開信箱才看到。
+
+- [ ] 通知收件人可**逐一**設定「加入 Google 日曆」開關（`notification_recipient.add_to_calendar`，預設 `false`）。開啟後，寄給該收件人的**警示 digest email** 額外夾帶一份 iCalendar（RFC 5545）邀請，Gmail / Google 日曆收到後即自動建立日曆事件並推播提醒
+- [ ] **僅 Gmail 網域可開啟**：email 網域為 `gmail.com` 或 `googlemail.com`（正規化後小寫比對）才允許 `add_to_calendar=true`。非 Gmail 收件人前端不顯示可切換的開關（顯示「—」），後端 `PATCH .../calendar` **在「由 `false` 切為 `true`」時**對非 Gmail 收件人回 400 `IllegalArgumentException`「僅 Gmail 收件人可加入 Google 日曆」（不可只靠前端擋）；**反向（`true` → `false`）一律放行不檢查網域**，否則資料被改壞後（如殘留「非 Gmail 卻已開啟」的列）將永遠無法從畫面關閉。收件人 email 由 Gmail 改成非 Gmail 時，`update` 必須一併把 `add_to_calendar` 歸 `false`（避免留下該殘留狀態）
+- [ ] **收件人分組改以收件人 id 為單位**：dispatcher 原本以 email 字串分組（`groupByRecipient`），但 `notification_recipient` 的唯一鍵是複合 `(owner_user_id, email)` —— **不同使用者可各自使用同一 email**，且背景排程無 HTTP request context、Hibernate `ownerFilter` 不啟用。以 email 為 key 有兩個後果：其一，無法安全取回該列的 `id` 與 `add_to_calendar`（同 email 多列會取到別的租戶）；其二，兩個租戶各有同一 email 的收件人時，兩邊的觸發會被**合併進同一封信**寄出。故改以「收件人 id」為分組單位，email 僅作為寄送位址。**行為變更（刻意）**：同一 email 分屬不同租戶時，改為各租戶各寄一封，不再合併——這同時關掉上述跨租戶內容混寄的路徑
+- [ ] 日曆邀請**只掛在自動 digest（`flush()`）**，手動「補發」（`resendLastTradingDay`）**不**夾帶——補發是使用者當下主動按的全量重寄歷史觸發，再塞進日曆只會製造重複事件，且使用者人就在畫面前，不需要推播
+- [ ] **一封 digest 一個日曆事件**（非一檔股票一個）：同一封信涵蓋的所有觸發合併為單一 VEVENT。理由是 Gmail 對含多個 VEVENT 的 `METHOD:REQUEST` 只會辨識第一個，多事件會靜默丟失
+- [ ] 日曆事件內容：
+  - `SUMMARY` = 該封信主旨（`[資產管理] 股票警示觸發 N 筆`，N 為該收件人去重後股票檔數）
+  - `DESCRIPTION` = 每檔一行「股名 (代號 市場) — 條件文案 觸發價 X」的純文字摘要（與信件正文同一份 digest 資料，不另算），特殊字元依 RFC 5545 escape（`\` → `\\`、`;` → `\;`、`,` → `\,`、換行 → `\n`）
+  - `DTSTART` = **寄送當下 + 2 分鐘**（秒歸零、UTC `yyyyMMdd'T'HHmmss'Z'`），`DTEND` = `DTSTART` + 15 分鐘；`VALARM`：`ACTION:DISPLAY` + `TRIGGER:-PT1M`（≈ 寄送後 1 分鐘推播）
+  - `TRANSP:TRANSPARENT`（不佔用忙碌時段，不影響使用者 free/busy）、`STATUS:CONFIRMED`、`SEQUENCE:0`
+  - `UID` = `alert-{recipientId}-{寄送 epochMillis}@asset-management`，**每封信皆為新 UID**（同 UID 會被 Google 視為既有事件的更新而覆蓋前一次觸發、且不再推播）
+  - `ORGANIZER` = 寄件人（`NOTIFICATION_FROM` 或 `MAIL_USERNAME`）；`ATTENDEE` = 該收件人，帶 `PARTSTAT=ACCEPTED;RSVP=FALSE`（預設已接受、不要求回覆，避免 RSVP 回信灌爆寄件信箱）
+- [ ] **`DTSTART` 必須落在未來**（採 +2 分鐘）：Google 日曆對「開始時間已過」的事件不發推播；而事件在其提醒窗內被建立時（例如收件人日曆預設「10 分鐘前提醒」、事件 2 分鐘後開始）Google 會於加入當下立即推播。留 2 分鐘緩衝可同時涵蓋「ics 的 `VALARM` 被採用」與「被收件人日曆預設提醒覆蓋」兩種情形
+- [ ] MIME 結構：iCalendar 以 `Content-Type: text/calendar; charset=UTF-8; method=REQUEST` 的 body part 掛在 root multipart（`MimeMessageHelper.getRootMimeMultipart()`），與既有 HTML 正文 + inline CID 走勢圖並存，**不得破壞既有 HTML 與內嵌圖**；ics 內容以 CRLF 換行，且長行依 RFC 5545 folding（75 octets，續行以單一空白起始）。**內容必須以明確的 UTF-8 位元組寫入**（`DataHandler` + `ByteArrayDataSource`），**不得用 `MimeBodyPart.setContent(String, type)`** —— JavaMail 對 `text/calendar` 沒有 DataContentHandler（`META-INF/mailcap` 只註冊 text/plain、text/html、text/xml、multipart/\*、message/rfc822），會退回以 `Charset.defaultCharset()` 寫出而忽略宣告的 `charset=UTF-8`，中文摘要在非 UTF-8 預設編碼的 JVM 下會變亂碼
+- [ ] 失敗策略比照既有：組 ics 或夾帶失敗一律 `log.warn` 後**照常寄出純 email**，不可讓整封信寄不出去、更不可阻斷警示判斷流程
+- [ ] **收件人知情**：本功能會把警示內容寫進**他人**的 Google 日曆，而開關由帳號擁有者操作、收件人未被徵詢（`ATTENDEE` 帶 `PARTSTAT=ACCEPTED;RSVP=FALSE`，Gmail 卡片上不會出現可拒絕的 RSVP）。故**夾帶日曆邀請的那封 digest，其 HTML 正文結尾必須多一行提示**：「本信附有 Google 日曆邀請，如不需要請告知寄件人於『警示通知設定』關閉。」（只在有夾帶時出現，未夾帶的信件內容不變）。`add_to_calendar` 預設 `false`，不對既有收件人自動開啟
+- [ ] 通知設定頁（`/notification-settings`）新增「Google 日曆」欄：Gmail 收件人顯示可切換的開關（`el-switch`，開＝已加入日曆），非 Gmail 顯示「—」並以 tooltip 說明「僅 Gmail 收件人支援」；頁面說明文字需標示前提——**收件人的 Google 日曆須維持「自動將邀請加入日曆」設定**（Google 日曆預設為「是」），若其設為「僅在我回覆時」，則需在信中手動點一次接受才會進日曆
+- [ ] API：`PATCH /api/notification-recipients/{id}/calendar` 切換開關（比照既有 `/active`、`/market-analysis`，owner-scoped 以 `TenantGuard.assertOwned` 縱深保護），`Response` DTO 增 `addToCalendar` 欄位；前端經既有 BFF `/api/bff/notification-settings/recipients/**` passthrough 取用，不另開 BFF
 
 ---
 

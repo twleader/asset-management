@@ -15,6 +15,7 @@ public class NotificationRecipientDto {
             String email,
             Boolean active,
             Boolean receiveMarketAnalysis,
+            Boolean addToCalendar,
             LocalDateTime createdAt,
             LocalDateTime updatedAt
     ) {}
