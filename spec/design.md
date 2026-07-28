@@ -2627,11 +2627,40 @@ GET  /api/bff/crawler-data/export-path/browse-gdrive?subpath=
   | DB 備份／還原 | `/etc/rclone/rclone.conf` | `/tmp/rclone.conf` | `BackupService` | 掛（但不使用） | 掛 |
   | Drive 輸出／目錄列舉 | `/etc/rclone/rclone.conf` | `/tmp/rclone-output.conf` | `RcloneClient`／`ProcessGdriveUploader` | 掛 | 掛 |
 
-  **代價**：`external-materials-service`（全 stack 唯一對外打第三方者：TWSE／NASDAQ／FinMind／新聞爬蟲，攻擊面最大）也讀得到備份的 OAuth refresh token 與 crypt 解密密碼——即具備**解密整庫財務備份**的能力。原設計為分離兩份以避免此擴權；改為共用是為省下第二份檔案的維護與搬機成本，且實測兩個 remote 為**同一個 Google 帳號**（`rclone about` 的 Total／Used 一致），分離的實際收益本就有限。**若要復原隔離**：host 上仍保留只含 `[GDriveOutput]` 的 `~/.config/rclone/rclone-gdrive-output.conf`，把 compose 兩處掛載與 `RCLONE_CONFIG` 改回 `/etc/rclone/rclone-output.conf`、兩支 client 的 `CONFIG_SOURCE` 一併改回即可。
+  **代價**：`external-materials-service`（全 stack 唯一對外打第三方者：TWSE／NASDAQ／FinMind／新聞爬蟲，攻擊面最大）也讀得到備份的 OAuth refresh token 與 crypt 解密密碼——即具備**解密整庫財務備份**的能力。原設計為分離兩份以避免此擴權；改為共用是為省下第二份檔案的維護與搬機成本，且實測兩個 remote 為**同一個 Google 帳號**（`rclone about` 的 Total／Used 一致），分離的實際收益本就有限。**若要復原隔離**：host 上仍保留只含 `[GDriveOutput]` 的 `~/.config/rclone/rclone-gdrive-output.conf`，把 compose 兩處掛載與 `RCLONE_CONFIG` 改回 `/etc/rclone/rclone-output.conf`、兩支 client 的 `CONFIG_SOURCE` 一併改回即可（**Task 247 後掛載粒度已是目錄，復原時要一併改回單檔掛載**——但那會重新引入下方所述的 dangling inode）。
 - **兩份可寫副本刻意分開**（`/tmp/rclone.conf` vs `/tmp/rclone-output.conf`）：來源同一份，但各自續期自己的 access token、互不覆寫。
-- **host 改過 rclone config 後必須 `--force-recreate` 容器**：bind mount 指向的 inode 會變成 dangling——`ls` 看得到檔案、實際讀取回 `ENOENT`，症狀是「設定明明在卻說找不到」。故驗證掛載時不可只用 `ls`，要實際讀取（`head -c 1 <file> >/dev/null && grep -o '^\[.*\]' <file>`）。
+- **掛目錄而非單檔（Requirement 52 / Task 247）**：compose 兩處掛的是 `${HOME}/.config/rclone:/etc/rclone:ro`（目錄），**不是** `…/rclone.conf:/etc/rclone/rclone.conf:ro`（單檔）。`RCLONE_CONFIG` 與兩支 client 的 `CONFIG_SOURCE` 仍為 `/etc/rclone/rclone.conf`、值不變。原因：`rclone config` 寫設定是「寫新檔＋rename」原子替換，**單檔掛載下替換後容器內舊 inode 的 link count 歸零**——2026-07-28 實測兩容器皆 `stat` 看得到（`links=0`）而 `cat` 回 `ENOENT`，使得「使用者去 host 重新授權」對執行中的容器完全無效。**這是常態而非例外**：rclone 每次續期 OAuth token 都會重寫 config，實測當天 15:30／15:53／16:02 三次原子替換，其中 16:02 那次發生在容器 recreate 後 1 分鐘內、掛載當場又 dangling。掛目錄後該路徑每次經目錄查找解析，新檔即時可見。**限縮**：消除的是「單檔替換」造成的 dangling；若 `~/.config/rclone` **目錄本身**被替換（`mv` 後重建、還原備份、換機搬設定），掛載仍指向舊目錄 inode，同一失效模式往上搬一層，屆時仍須 recreate。副作用：該目錄下其他檔（`rclone-gdrive-output.conf`、`rclone.conf.bak-before-merge`）一併唯讀進入容器；不擴大權限面，因為單一 config 檔的共用取捨已使兩容器都讀得到同一組憑證。
+- **掛目錄不等於免重啟**：兩支 client 都在啟動時複製一份到 `/tmp` 後**執行期不再重讀來源**，故 host 重新授權後仍須 recreate 容器才生效。**刻意不做 config 熱重載**——理由是範圍控制（需要 watch／輪詢與並發保護，收益只有省一次 recreate）；**不要以「重載會覆蓋較新的 token」為理由**，那個理由撐不住：token 健康時 rclone 會自己再 refresh、只多一次網路往返，token 缺 `refresh_token` 時從來源重載反而正是想要的行為。改變的只是失效模式：從「`ls` 看得到卻讀不到」的怪症狀，變成「用的是舊 token」這種自檢會直接指名的狀況。驗證掛載時仍不可只用 `ls`，要實際讀取（`head -c 1 <file> >/dev/null && grep -o '^\[.*\]' <file>`）。
+- **可用性自檢三層 ＋ 兩個時機（Requirement 52 / Task 247）**：**全部只寫 WARN log、不阻止啟動、不阻止設定儲存、不影響 `configReady` 與任何既有判定**。三層各自對應一種 2026-07-28 實際發生過的失敗，缺一層就會漏掉其中一種：
+
+  | 層 | 檢查 | 擋掉的失敗 | 為何不能省 |
+  |---|---|---|---|
+  | L1 | 來源 config **實際讀得到內容** | dangling inode | `Files.exists()` 走 stat，dangling 下仍回 true；只有實際讀取才 `ENOENT` |
+  | L2 | `[<remote>]` 的 token JSON **含非空 `refresh_token`** | token 無法自動續期 | access_token 未過期的那一小時內，L3 必然通過、看起來完全正常 |
+  | L3 | 實跑 `rclone lsd <remote>:` | Drive API 未啟用（403）、remote 名稱錯、授權已撤銷 | 只有真的連線才知道 |
+
+  **兩個時機，只做啟動時等於防不到本次事故**：（a）服務啟動時；（b）**使用者把 `gdrive_enabled` 由 false 改為 true 的那一次設定儲存**。實測時序證明只做 (a) 沒有用——R50／R51 部署 recreate 當下九張表全為 false（`NOT NULL DEFAULT false`、seed 不啟用），使用者是在容器已在跑之後才從 UI 打開開關的（`updated_at` 實測：`crawler_export_setting` 07-27 22:33、`export_schedule_setting` 07-28 12:09、`trading_radar_export_setting` 12:56、`exchange_rate_export_schedule` 12:58，全部晚於 21:31 的上線 recreate），「啟用」到「下次啟動」之間的空窗正是事故發生的整段時間。
+
+  **(b) 需要兩個掛載點，不是一個**：八個匯出頁的儲存共用 `GdriveOutputSupport.resolveUpdate`（全樹該方法的呼叫點恰為八支匯出 service），但**爬蟲頁不走它**——`CrawlerExportPathService.update()` 雖注入同一個元件，卻只用其零件（`normalizeSubpath` `:86`／`validateSubpath` `:88`／`remoteName` `:138`）自行合成。而爬蟲頁正是九列中最早被打開的一列（`updated_at` 07-27 22:33），漏掉它等於漏掉最該被攔下的那一次。
+
+  **(b) 只做 L1 ＋ L2，不做 L3**：這兩層純本地（毫秒級、不打網路）。**L3 刻意排除**，三個理由：(i) L3 逾時 20 秒，同步做會讓使用者按下儲存後乾等最長 20 秒，而「探測慢」恰恰等於「Drive 有問題」；(ii) `TradingRadarExportScheduleService.saveSetting`（`@Transactional` 於 `:162`）與 `CrawlerExportPathService.update`（`:74`）在交易內，同步 L3 會把外部行程呼叫包進交易、佔住連線；(iii) 內建公用 client 配額全球共享（實測三次 `rateLimitExceeded`），而使用者啟用時正是連續開九個開關的時候。**這不是缺口**：L3 涵蓋的 403／remote 錯誤會在該頁第一次實際上傳時寫進 `gdrive_last_status`（既有機制），(a) 每次啟動也會做；(b) 不可取代的價值在 **L2**——唯一能在 access_token 尚未過期的時間窗內抓出「token 缺 refresh_token」的辦法。
+
+  **(b) 的結果一律不寫 `gdrive_last_run_at`／`gdrive_last_status`**：那兩欄的既有語意是**上傳結果**（R50 明訂「成功記落點路徑與檔案大小…由設定卡顯示『上次上傳』」），九個前端 view 全部標成「上次上傳」直接顯示。寫進去會（i）永久覆蓋真正的上傳記錄，（ii）讓 `gdrive_last_run_at` 指向一個沒有發生任何上傳的時刻（設定卡顯示「上次上傳：12:09 — 自檢失敗」而 12:09 沒上傳過）。故走**當次回應**：九頁的儲存 response DTO 各加一個**非持久化**警告欄位（如 `gdriveSelfCheckWarning`，正常為 null），前端在既有「儲存成功」提示旁多顯示一則警告。**不新增 DB 欄位、不新增端點、不新增頁面或元件**；九頁 BFF passthrough 已存在，DTO 加欄位即隨既有路徑帶到前端。九支 service 既有的「刻意不碰 `gdriveLastRunAt`／`gdriveLastStatus`」註解（全樹命中 9 次）維持成立、不開例外。**失敗不得讓儲存回非 2xx**（沿用 `absolutePathOrNull` 的既有理由：唯一的修正入口不能被自己鎖死）。
+
+  **啟動自檢的前置條件**：先查 DB 是否**存在任一列 `gdrive_enabled=true`**（business 查八張表、ext 查 `crawler_export_setting`，走 `JdbcTemplate` 繞過 owner filter——問的是「全庫有沒有人啟用」而非「我的設定」），全未啟用就整個跳過，維持 Requirement 50／51「既有部署不要求 rclone remote 存在」的承諾。**此前置條件只約束 (a)**（(b) 那一刻的請求本身就是啟用的證據）。
+
+  **相依方向必須單向，否則起不來**：因 (b) 要求 `GdriveOutputSupport` 呼叫自檢，**自檢元件就不得反向注入 `GdriveOutputSupport`**——本專案全樹建構子注入且未開 `allow-circular-references`，踩到即 `BeanCurrentlyInCreationException`。remote 名稱改為**每次呼叫傳參**（沿用 `ProcessRcloneClient` 既有模式：建構子不吃 remote，`listDirs`／`copyTo` 由呼叫端傳入）；啟動時所需的 remote 由第三個薄元件（掛 `ApplicationReadyEvent` 者）注入 `GdriveOutputSupport` 取得後傳入。Task 242.1.4「`GDRIVE_OUTPUT_REMOTE` 為全 backend 唯一注入點」不因本需求破例。
+
+  **啟動自檢一律走獨立 daemon 執行緒**：**理由不是 `depends_on: service_healthy`**——`ApplicationReadyEvent` 發布時 web server 已在 listen、healthcheck 已可回應。真正的理由是該事件的 listener 跑在**主執行緒**、彼此**無順序保證**，阻塞 20 秒會延後 `SpringApplication.run()` 收尾與同事件其他 listener；若排在 availability listener 之前，readiness 轉 `ACCEPTING_TRAFFIC` 一樣被拖 20 秒。逾時仍設 20 秒作為執行緒內上限。
+
+  **ext 端的 L3 需要新增唯讀探測**：`GdriveUploader` 只有 `upload`／`isAvailable`／`remoteName`，其 javadoc 把「只實作 `copyto`、不實作任何刪除路徑」寫成安全不變量。L3 要新增 `rclone lsd <remote>:`，**這是對該不變量的明示修改**，javadoc 須同步改為「兩種操作：`copyto`（寫）與 `lsd`（唯讀列目錄）；仍不實作任何刪除路徑」。不得在自檢元件內另寫一份 `ProcessBuilder`——那會複製逾時、stderr 解析與 rate-limit 判定三份邏輯。
+
+  **例外一律不得逸出**：整段（含 DB 前置查詢）包在單一 catch-all 內。查詢的八張表在全新安裝首次啟動時可能尚未由 Liquibase 建立（`BadSqlGrammarException`），而既有同類元件 `CrawlerExportPathQuery` 的既定契約就是「表缺／DB 例外時由呼叫端 fallback」；自檢若讓例外逸出，會把純觀測功能變成啟動失敗。L3 沿用既有 `exec(...)` 時會擲 `RcloneUnavailableException`／`RcloneTimeoutException`／`RcloneRateLimitedException`／裸 `RuntimeException` 四種，須全部攔下。
+
+  **log 不得輸出 token 值或 config 內容**（該檔含 crypt 解密密碼），L2 只判斷鍵是否存在。L3 的 stderr **盡可能原樣附上**，但既有 `exec(...)` 對「找不到 section」與速率限制兩條分支會換成罐頭訊息，該兩型附其可讀訊息即可。
+- **為何不做健康檢查頁／端點**：啟用時的自檢結果已寫進既有 `gdrive_last_status`、啟動時的只進 `docker logs`；做成第十個管理頁只會多一處要維護，而資訊在既有狀態欄與 log 裡已完整。
 - **`scope = drive` 的權衡**：新 remote 取得使用者 Drive 的完整讀寫權，這是能寫進**使用者手動建立**的既有目錄所必要的。程式端自我約束為只用 `lsjson --dirs-only`（列目錄）與 `copyto`（寫指定子路徑）兩種操作，**不實作任何刪除既有 Drive 檔案的程式路徑**，把完整權限的實際使用面縮到最小。
-- **ext 容器部署前提**：實際上傳者是 `external-materials-service`（目前僅裝 `curl`），需於其 Dockerfile 加裝 `rclone`，並唯讀掛入單一 `~/.config/rclone/rclone.conf`（三個 section 共存，取捨見上一條）＋設 `RCLONE_CONFIG`；**須沿用 `BackupService` 既有的「啟動時複製到可寫路徑」作法**（唯讀掛載會使 rclone 自動續期 OAuth token 時寫回失敗而 exit non-zero），否則 token 過期後上傳會開始整批失敗。ext 以非 root `appuser` 執行，副本須落在 `/tmp`。
+- **ext 容器部署前提**：實際上傳者是 `external-materials-service`（目前僅裝 `curl`），需於其 Dockerfile 加裝 `rclone`，並唯讀掛入 `~/.config/rclone` **目錄**（單一共用 config，三個 section 共存；掛目錄而非單檔的理由見上方 Task 247 條）＋設 `RCLONE_CONFIG`；**須沿用 `BackupService` 既有的「啟動時複製到可寫路徑」作法**（唯讀掛載會使 rclone 自動續期 OAuth token 時寫回失敗而 exit non-zero），否則 token 過期後上傳會開始整批失敗。ext 以非 root `appuser` 執行，副本須落在 `/tmp`。
 - **中文目錄名編碼：現況已正確，不加 JVM 參數**。若 `sun.jnu.encoding` 退化成 ASCII，`ProcessBuilder` 傳出的中文路徑會變 `?` 並靜默寫錯目錄；但實測 ext 容器現為 UTF-8（base image `eclipse-temurin:21-jre-alpine` 自帶 `LANG=en_US.UTF-8`），且命令列 `-Dsun.jnu.encoding=UTF-8` 對該屬性**無效**（JDK 由 platform locale 決定）。約束改為「不得設 `LANG=C`／清除 base image locale／換成不帶 UTF-8 locale 的 base image」，並以驗證步驟回歸守門。
 - **不為兩處 rclone 呼叫建共用 module**：`backend`／`bff`／`external-materials-service` 為三個獨立 Maven 專案、無父 pom。ext 端 rclone 呼叫為薄封裝（`ProcessBuilder`＋逾時＋exit code 檢查），刻意與 `BackupService.execProcess` 各自實作——為兩處數十行程式碼引入跨服務 module 會使三個服務的建置相互耦合，成本高於重複本身。**注意這條只適用於跨服務**：Requirement 51 把 Drive 輸出推廣到 backend 內的八個匯出 service 時，必須抽**同一個 backend 內的共用元件**（`GdriveOutputSupport`），八份複製是明確的錯誤。
 

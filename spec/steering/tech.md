@@ -131,11 +131,35 @@ cd frontend
 > （`rclone about` 的 Total／Used 一致），分離的實際收益本就有限。
 >
 > **若要復原隔離**：host 上仍保留 `~/.config/rclone/rclone-gdrive-output.conf`（只含 `[GDriveOutput]`），
-> 把 compose 兩處掛載改回它、`RCLONE_CONFIG` 改回 `/etc/rclone/rclone-output.conf`，
+> 把 compose 兩處掛載改回它、`RCLONE_CONFIG` 改回 `/etc/rclone/rclone-output.conf`
+> （**Task 247 後掛載粒度已是目錄，復原成單檔掛載會重新引入下述 dangling inode**），
 > 並把兩支 client 的 `CONFIG_SOURCE` 改回該路徑即可。
 >
-> **host 改過 rclone config 之後必須 `--force-recreate` 容器**：bind mount 指向的 inode 會變成
-> dangling——`ls` 看得到檔案、實際讀取卻回 `ENOENT`，症狀是「設定明明在卻說找不到」。
+> **掛的是目錄不是單檔（Requirement 52 / Task 247）**：compose 兩處為 `${HOME}/.config/rclone:/etc/rclone:ro`。
+> `rclone config` 寫設定是「寫新檔＋rename」，**單檔掛載下替換後容器內舊 inode 會 dangling**——
+> 2026-07-28 實測兩容器皆 `stat` 看得到（`links=0`）而 `cat` 回 `ENOENT`，症狀是「設定明明在卻說找不到」，
+> 且讓「去 host 重新授權」對執行中的容器完全無效。**這是常態不是例外**：rclone 每次續期 token 都重寫 config，
+> 當天 15:30／15:53／16:02 三次，最後那次在容器 recreate 後 1 分鐘內就讓掛載又 dangling。
+> 掛目錄後新檔即時可見；但**若 `~/.config/rclone` 目錄本身被替換**（`mv` 重建、還原備份、換機）仍會 dangling。
+>
+> **仍須 `--force-recreate` 才會用到新設定**：兩支 client 在啟動時複製到 `/tmp` 後執行期不重讀
+> （刻意不做熱重載，理由是範圍控制而非 token 新舊）。驗證掛載不可只用 `ls`，要實際讀取。
+>
+> **`[GDriveOutput]` 的 token 必須含 `refresh_token`**：缺了的話 access_token 一過期（實測約 1 小時）即回
+> `token expired and there's no refresh token`，且**無法自動續期**——2026-07-28 的實際事故。
+> 陰險之處是重新授權後的一小時內一切正常，故自檢 L2 直接檢查該鍵是否存在，不倚賴連線探測。
+> 修法：`rclone config reconnect GDriveOutput:`。**若授權過程數秒內就完成（沒出現同意畫面），
+> Google 不會重發 refresh token**——實測 15:47 那次 3 秒 `Got code`、拿到的 token 仍無 refresh_token；
+> 此時要先到 https://myaccount.google.com/permissions 撤銷該應用授權再重試。
+>
+> **兩個 remote 的 OAuth client 來源不同，這是誤判來源**：2026-07-28 事故當下 `[GDriveOutput]` 帶自訂
+> `client_id`／`client_secret`（`rclone config reconnect` 印出 `… in your custom config` 可佐證），
+> 請求算到某個自有 GCP 專案，該專案未啟用 Drive API → `Error 403: Google Drive API has not been used
+> in project 1098468643583`；而 `[GoogleDriver]`（備份）走 rclone 內建公用 client，同一晚照常成功——
+> 於是「備份好好的，所以 Drive 沒問題」。**現況（2026-07-28 15:53 重新授權後）**：`[GDriveOutput]` 的
+> `client_id`／`client_secret` 已移除（config 1319 → 1219 bytes），亦走內建公用 client，403 消失。
+> **代價是配額共享**：實測當天補跑八頁時三頁回 `rateLimitExceeded`，間隔 60–90 秒重試才成功。
+> 日後若為配額改回自訂 client，**必須同時到該 GCP 專案啟用 Drive API**，否則 403 會重現。
 
 ---
 
@@ -227,7 +251,7 @@ git config core.hooksPath scripts/git-hooks
 | `REDIS_HOST` / `REDIS_PORT` | 由 compose 注入（redis / 6379） |
 | `FINMIND_TOKEN` | FinMind Bearer token（選填，未設則匿名） |
 | `BUSINESS_SERVICES_URL` | BFF 路由目標（compose 設 `http://business-services:8080`） |
-| `RCLONE_CONFIG` | business 與 ext 皆為 `/etc/rclone/rclone.conf`（同一份 host `~/.config/rclone/rclone.conf` 唯讀掛入）。程式啟動時各自複製到 `/tmp` 可寫副本（`BackupService` → `/tmp/rclone.conf`、Drive 輸出 → `/tmp/rclone-output.conf`；rclone 續期 OAuth token 需寫回，實測 token 幾乎每次呼叫都已過期），實際呼叫時以 per-process 覆寫指定 |
+| `RCLONE_CONFIG` | business 與 ext 皆為 `/etc/rclone/rclone.conf`（host `~/.config/rclone` **目錄**唯讀掛入 `/etc/rclone`，值指向其中的 `rclone.conf`；掛目錄而非單檔的理由見 §4 的 Task 247 條）。程式啟動時各自複製到 `/tmp` 可寫副本（`BackupService` → `/tmp/rclone.conf`、Drive 輸出 → `/tmp/rclone-output.conf`；rclone 續期 OAuth token 需寫回，實測 token 幾乎每次呼叫都已過期），實際呼叫時以 per-process 覆寫指定 |
 | `GDRIVE_OUTPUT_REMOTE` | Drive 輸出用的 remote 名稱（預設 `GDriveOutput`）；需先由使用者以 `rclone config create GDriveOutput drive scope=drive` 建立（**`scope=drive` 是必要的**——`drive.file` 只看得到 rclone 自己建的檔案，列不出使用者手動建的目錄）。Requirement 50 / Task 245 |
 
 ---
