@@ -172,7 +172,9 @@ cd frontend
 > 三頁回 `rateLimitExceeded`，間隔 60–90 秒才成功；改回自訂 client 後專屬配額生效，補跑不再撞。
 > **改用自訂 client 必須同時滿足四件事**：該 GCP 專案啟用 Drive API、OAuth 同意畫面**已發布**
 > （停在「測試」的 refresh token 7 天即失效）、授權時**帶 `prompt=consent`** 以取得 refresh_token
-> （見下條，這是最難的一關）、選對 Google 帳號。
+> （見下條，這是最難的一關）、選對 Google 帳號。**四項於 2026-07-28 均已實測滿足**
+> （同意畫面為 `In production`）。發布狀態的欄位位置：新版 **Google Auth Platform → Audience →
+> Publishing status**（改版後已搬離 Overview 頁，舊文件寫的「OAuth 同意畫面」頁已不存在）。
 >
 > **`configReady` 是啟動時判定一次、失敗永不重試的旗標**：一旦啟動當下讀不到 config，該容器
 > **整個生命週期**的 Drive 同步都被跳過。實測 2026-07-28 16:02:25 ext 啟動、16:02:26 讀 config 失敗、
