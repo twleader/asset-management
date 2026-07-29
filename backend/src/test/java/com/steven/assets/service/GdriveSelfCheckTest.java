@@ -5,6 +5,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentCaptor;
 import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -140,9 +141,42 @@ class GdriveSelfCheckTest {
 
     // ===== 247.6.2 前置 DB 查詢擲例外時自檢靜默結束 =====
 
+    /**
+     * 前置查詢必須涵蓋<b>全部九張</b>支援 Drive 的設定表（Task 254 加入第九張
+     * {@code stock_alert_export_setting}）。
+     *
+     * <p>少查一張就是<b>假綠燈</b>：只在該頁啟用 Drive 的部署，遇到 rclone token 失效或 remote 被改名時，
+     * 重啟會判定「全庫無人啟用」而整個跳過 L3 探測、不噴任何 WARN——正是 Requirement 52 要消除的
+     * 「明天早上才發現全掛」。這條測試存在的唯一理由，就是讓「日後新增第十張表卻忘了加進 UNION」變紅。
+     */
+    @Test
+    void 前置查詢涵蓋全部九張支援Drive的設定表() throws IOException {
+        writeConfig(configSource, token("\"refresh_token\":\"dummy\""));
+        writeConfig(configWritable, token("\"refresh_token\":\"dummy\""));
+        when(jdbc.query(anyString(), ArgumentMatchers.<RowMapper<Boolean>>any()))
+                .thenReturn(List.of(false));
+
+        selfCheck.runStartupCheck(REMOTE);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbc).query(sql.capture(), ArgumentMatchers.<RowMapper<Boolean>>any());
+        assertThat(sql.getValue()).contains(
+                "export_schedule_setting",
+                "trading_calendar_export_schedule",
+                "index_export_schedule",
+                "exchange_rate_export_schedule",
+                "trading_radar_export_setting",
+                "commodity_export_schedule",
+                "realized_gain_export_schedule",
+                "asset_transaction_export_schedule",
+                "stock_alert_export_setting");
+        // 九張表 = 八次 UNION ALL；數量對不上代表有人加了表卻沒接上，或接錯成別的運算子
+        assertThat(sql.getValue().split("UNION ALL", -1)).hasSize(9);
+    }
+
     @Test
     void 前置查詢擲BadSqlGrammar時不擲出且不呼叫rclone() {
-        // 全新安裝的首次啟動可能還沒建這八張表；自檢若讓例外逸出，純觀測功能就變成啟動失敗
+        // 全新安裝的首次啟動可能還沒建這九張表；自檢若讓例外逸出，純觀測功能就變成啟動失敗
         when(jdbc.query(anyString(), ArgumentMatchers.<RowMapper<Boolean>>any()))
                 .thenThrow(new BadSqlGrammarException("query", "SELECT EXISTS (...)",
                         new SQLSyntaxErrorException("relation \"export_schedule_setting\" does not exist")));

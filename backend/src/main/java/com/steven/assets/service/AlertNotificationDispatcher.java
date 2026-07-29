@@ -56,7 +56,8 @@ public class AlertNotificationDispatcher {
     /** 複合條件群組的收件人 join（Task 253）：群組觸發走這一支，與單一警示的 recipientLinkRepo 平行存在。 */
     private final StockAlertGroupRecipientRepository groupRecipientRepo;
     private final EmailService emailService;
-    private final StockRepository stockMasterRepo;
+    /** 股名解析（Task 254 起收斂到 {@code StockMasterService.resolveNameLocalOnly}，與觸發匯出的 JSON 同源）。 */
+    private final StockMasterService stockMasterService;
     private final StockAlertTriggerRepository triggerRepo;
     private final StockAlertRepository alertRepo;
     private final AlertChartRenderer chartRenderer;
@@ -482,13 +483,16 @@ public class AlertNotificationDispatcher {
         return n.stripTrailingZeros().toPlainString();
     }
 
+    /**
+     * 委派 {@link StockMasterService#resolveNameLocalOnly}（Task 254 收斂）。行為與遷移前一字不差：
+     * {@code 0000}＋台股 →「台股大盤」；否則查本地主檔；查無回代號本身；不打外部 API。
+     *
+     * <p>收斂的理由：警示觸發匯出的 JSON 也要顯示股名，那是同一個顯示欄位；兩份實作必然分歧。
+     * <b>不可改用 {@code StockMasterService.resolveName}</b>——那一支查無主檔時會打外部行情 API
+     * 並寫回主檔、排 10 年回補，查無最終回空字串。
+     */
     private String resolveStockName(String code, String market) {
-        if ("0000".equals(code) && "台股".equals(market)) {
-            return "台股大盤";
-        }
-        return stockMasterRepo.findByCodeAndMarket(code, market)
-                .map(s -> s.getName())
-                .orElse(code);
+        return stockMasterService.resolveNameLocalOnly(code, market);
     }
 
     /**

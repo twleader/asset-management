@@ -275,3 +275,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/v1.79.0-naive-timestamp-to-taipei.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.81.0-stock-alert-export-setting.sql
+      relativeToChangelogFile: false

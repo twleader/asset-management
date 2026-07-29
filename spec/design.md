@@ -83,7 +83,7 @@ com.steven.assets/
   - `GET /api/bff/gdp-twse/index-daily`：台股大盤／海外指數每日 OHLC
   - `POST /api/bff/gdp-twse/refresh-index-daily`：刷新指數日線
   - `GET /api/bff/gdp-twse/index-intraday`：指數當日分時
-- 其他 settings/passthrough（每頁一支 Spring Cloud Gateway route 配置，rewrite `/api/bff/{page}/**` → `/api/{resource}/**`）：BankSettings、BrokerSettings、DepositTypeSettings、MarketTypeSettings、AssetClassSettings（`/api/bff/asset-class-settings/**`）、TransitFundTypeSettings、StockAlert（`/api/bff/stock-alert/**`）、BackupRestore（`/api/bff/backup-restore/**`）、NotificationSettings（`/api/bff/notification-settings/recipients/**` → `/api/notification-recipients/**`）、PaymentAccountSettings（見「Payment Accounts / Categories」段落，Requirement 22）、UserManagement（`/api/bff/user-management/**`，見 Requirement 28「API 端點（新增）」）、TodayMarketAnalysisRecipients（`/api/bff/today-market-analysis/recipients/**` → `/api/notification-recipients/{id}/market-analysis`，見 Task 151）
+- 其他 settings/passthrough（每頁一支 Spring Cloud Gateway route 配置，rewrite `/api/bff/{page}/**` → `/api/{resource}/**`）：BankSettings、BrokerSettings、DepositTypeSettings、MarketTypeSettings、AssetClassSettings（`/api/bff/asset-class-settings/**`）、TransitFundTypeSettings、StockAlert（`/api/bff/stock-alert/**`；**Requirement 54 起另有 `StockAlertBffController` 與此 route 並存**——`GET/PUT /api/bff/stock-alert/export-setting`、`POST .../run-now`、`GET .../browse`、`GET .../browse-gdrive`，後兩者 passthrough 至既有唯一那支 `/api/export-schedule/browse{,-gdrive}`。萬用 route 會把這幾條錯誤 rewrite 成 `/api/stock-alerts/export-setting/...`，靠 WebFlux `RequestMappingHandlerMapping`（order 0）先於 Gateway `RoutePredicateHandlerMapping`（order 1）由 controller 接走；同一模式的既有先例為 `TradingRadarBffController` ＋ `TradingRadarBffRoutes`）、BackupRestore（`/api/bff/backup-restore/**`）、NotificationSettings（`/api/bff/notification-settings/recipients/**` → `/api/notification-recipients/**`）、PaymentAccountSettings（見「Payment Accounts / Categories」段落，Requirement 22）、UserManagement（`/api/bff/user-management/**`，見 Requirement 28「API 端點（新增）」）、TodayMarketAnalysisRecipients（`/api/bff/today-market-analysis/recipients/**` → `/api/notification-recipients/{id}/market-analysis`，見 Task 151）
 - `WatchStockBffRoutes`（WatchStockView 專屬，`/api/bff/watch-stock/**`）：純 Spring Cloud Gateway passthrough route，rewrite `/api/bff/watch-stock(/**)` → `/api/watch-stocks(/**)` 轉至 business-services。觀察清單已改為「`stock_alert` 衍生 view」，**衍生與 enrichment 一律在 business-services（`WatchStockController` / `WatchStockService`）完成，BFF 僅轉發不重算**：
   - `GET /api/bff/watch-stock` → `GET /api/watch-stocks`：business-services 由 `stock_alert` 群組去重衍生清單，對每筆 (stockCode, market) 補上 live 報價、技術指標、最近觸發資訊
   - `PUT /api/bff/watch-stock/order` → `PUT /api/watch-stocks/order`：拖曳排序時把該股票所有 alert 的 displayOrder 整組重排
@@ -140,7 +140,8 @@ com.steven.assets/
 - `StockAlertRepository`（含衍生 query：`findDistinctStockCodeMarket()` 提供觀察清單去重結果）
 - `StockAlertGroupRepository`（複合 AND 條件群組；Task 253）
 - `StockAlertGroupRecipientRepository`（群組 ↔ 收件人多對多 join；Task 253）
-- `StockAlertTriggerRepository`（警示觸發歷史，30 天輪替）
+- `StockAlertTriggerRepository`（警示觸發歷史，30 天輪替；含 Requirement 54 的 owner-scoped 當日觸發 join 查詢——本表無 `owner_user_id` 亦未掛 `@Filter`，owner 一律由 `alert_id` / `group_id` join 取得）
+- `StockAlertExportSettingRepository`（警示觸發即時匯出設定，per-user；Requirement 54）
 - `BackupSettingRepository`（備份保留代數設定，單列資料表）
 - `BackupRecordRepository`（備份紀錄，單一事實來源；Requirement 15）
 - `StockDividendHistoryRepository`（股利歷史，Requirement 13）
@@ -427,6 +428,7 @@ src/
   - 交易日判定委派至 `MarketDataService.getTwHolidays(year)` / `getUsHolidays(year)`，並排除週末
 - `WatchStockService`: 觀察清單 view 服務（不再對應實體表）。`findAll()` 由 `StockAlertRepository.findDistinctStockCodeMarket()` 取得去重 (stockCode, market) 清單後，整合 Redis live 報價（透過 `PriceQueryService`）、技術指標（`TechnicalIndicatorService.computeAll()` 回傳 `FullIndicators`：月線 MA20／季線 MA60／年線 MA240／K／D，填入 `WatchStockDto.Response` 的 `monthlyMa`／`quarterlyMa`／`annualMa`／`kValue`／`dValue`）與該股票最近一次 StockAlert 觸發資訊；`reorder(orderedStockKeys)` 拖曳重排時把每個股票所有 alert 的 `displayOrder` 整組依新順序重新指派；不提供 delete 入口（移除觀察一律由 `StockAlertService.delete` 在「警示條件」頁逐筆刪除）。**「警示」欄顯示窗**：最近觸發（時間／股價／月線／季線／年線／KD）與「警示條件」紅字只顯示落在 `StockAlertService.FRESHNESS_TRADING_DAYS`（= 2，最後交易日及前一日）內的觸發，cutoff 由 `recentTradingDayCutoff(market, 2)` 取 `stock_price_history` 最近 2 個 distinct `trading_date` 之較早一天午夜；與警示頁 `StockAlertService.toResponse` 共用同一常數確保兩頁口徑一致（同義欄位同一來源）。此 UI 顯示窗與 `stock_alert_trigger` 保留 30 天為兩個獨立概念。**「警示條件」欄的 MA% 觸發價**：`buildConditions()` 把已算好的 `FullIndicators` 一併傳給 `StockAlertService.buildLabel(alert, ind)`，`MA_*_PCT` 且 threshold≠0 的條件於 label 附換算後的觸發價（`對應均線 × (1 ± pct/100)`，如「高於季線 20%（360）」），重用同一份即時均線值、不另查（Task 146，詳 Requirement 16）。**複合 AND 群組（Task 253）**：`buildConditions()` 把 `group_id` 相同的成員合併成**一條** `Condition`（label 以 `" 且 "`（前後各一個半形空白）串接、`triggered` 取該群組的 `lastTriggeredAt` 而非成員的），不再逐條列出——否則使用者在觀察頁看到的是散開的多條，看不出那是「同時成立才觸發」；「警示」欄的最近觸發彙總（`lastAlert`）亦需納入該股票所有群組的 `lastTriggeredAt` 一併取 max
 - `StockAlertService`: 到價警示 CRUD、條件評估、排序、最近觸發資訊回寫；`create` 對 `0000`（台股大盤）跳過 `stockMasterRepo.upsert`。**複合 AND 群組（Task 253）**：群組 CRUD 與評估同住本 service（群組與獨立條件共用 `matches(alert, currentPrice)`、`buildLabel`、`computeTriggeredAt`、freshness cutoff，拆成獨立 service 會複製這五處而必然分歧）；`checkAlerts` / `checkAlertsFor` 掃描獨立條件時查詢改為 `findByActiveTrueAndGroupIdIsNull()`，再另掃 `stockAlertGroupRepo.findByActiveTrue()` 逐一 `evaluateGroup`。群組成員的 `active` 恆為 true、`last_triggered_*` 不寫，觸發狀態一律記在群組上。`create` / `update` 在 `stockMasterRepo.upsert` 之前以 `assertNameMatchesCode(code, market, userName)` 守門：以 `historicalDataService.fetchTwStockName / fetchUsStockName` 取得外部 canonical name（權威來源 ext-materials-service `/internal/stock-name`），canonical 非空且與 user-supplied `stockName` 不一致時，**再對照 `stockMasterRepo.findByCodeAndMarket(code, market).name`（本地主檔亦視為合法 canonical）**；兩者皆不相符才 throw `IllegalArgumentException`（由 `GlobalExceptionHandler` 映射為 `400`）。canonical 空則 fall through（外部 API 異常時不阻擋）。`0000` + `台股` 跳過守門；`0000` + `美股` 直接拒絕。設計目的：阻止使用者把錯誤代號（如把 2500 標成「台積電」）寫入 `stock` 主檔導致觀察清單出現名稱對但完全無報價的列；同時避免「外部來源回應與本地主檔不一致」（例 Yahoo `shortName` 「NVIDIA Corporation」vs 主檔過去寫入的 「NVIDIA Corporation Common Stock」）造成 lookupName 自動帶名後 save 被自己擋下
+- `StockAlertTriggerExportService`（Requirement 54）: 警示觸發的即時 JSON 匯出。由 `StockAlertService.recordTrigger` / `recordGroupTrigger` 在寫入 `stock_alert_trigger` 之後呼叫，依該觸發的 owner（`alert_id` / `group_id` join 取得）重查其**當日**（`created_at` 台北牆鐘）全部觸發並全量重寫 `alert_triggers_{ownerUserId}_{yyyyMMdd}.json`。**三個入口、語意各異**：`writeExport(ownerId)`（真正產檔，取 per-owner 鎖）／`exportForTrigger(ownerId)`（看 `enabled` 閘門 ＋ 套 60 秒去抖）／`runNow(ownerId)`（**不看 `enabled`**——它是驗證工具；**不套去抖**，且**不更新去抖的 `lastUploadAt`**，否則按一次按鈕就讓觸發路徑靜默停 60 秒）。**本機同步寫、Drive 非同步合併**：本機以 tmp（**檔名帶 `UUID` 唯一後綴**——三條路徑寫同一個檔名，固定 `.tmp` 會讓後到者 `Files.move` 撞 `NoSuchFileException`）＋ `ATOMIC_MOVE` 在觸發執行緒完成（毫秒級），並以 per-owner 鎖序列化三條寫檔路徑（Redis 訂閱者執行緒的觸發、`POST /api/stock-alerts/check` 的 HTTP 執行緒、run-now 的 HTTP 執行緒）；Drive 上傳丟單執行緒 `ScheduledExecutorService`，以「**已排定任務旗標 ＋ 最近一次實際上傳完成時間**」延後合併（最小間隔 60 秒，見下方禁令），一律走 `GdriveOutputSupport.syncQuietly`（含每次上傳前的 owner 複驗），**不自行呼叫 rclone、不自行判權限**。股名走 `StockMasterService.resolveNameLocalOnly`（本地限定；**不是**既有的 `resolveName`——那一支查無主檔時會打外部行情 API 並寫回主檔、排 10 年回補，在 Redis 訂閱者執行緒上做這些正是本設計要防的事）。整段包 try/catch，任何失敗只記 log 與狀態欄
 - **交易日 / 國定假日判定（單一事實來源）**：`business-services` 側以 `MarketDataService.isTradingDay(market, date)`（dispatch 至 `isTwTradingDay/isUsTradingDay/isUkTradingDay`）與 `isMarketOpenNow(market)`（`MarketZones` 時段 + `isTradingDay` 假日）為唯一入口。`StockAlertService.evaluate`（live 觸發閘門）/ `computeTriggeredAt`（交易時段判斷）、`AlertNotificationDispatcher.withinSendWindow / lastTradingDate`、`StockPriceService.getMarketStatus`（→ `isXxxMarketOpen`）全部委派之，不再各自只判週末。`external-materials-service` 側對應為 `MarketCalendar` + `MarketClock`（抓價 / 收盤排程閘門）。台股假日權威 = TWSE holidaySchedule（business-services 經 `/internal/tw-holidays` proxy、ext-materials 直接 fetch，同一份）；美 / 英假日為 NYSE / LSE 法定規則純函式，因兩服務無共用 module 而各持一份（交叉註解鎖定，修改須同步）。Requirement 7 / 16 / 23
 - **颱風假 / 台股臨時休市偵測（Requirement 7）**：颱風等臨時停班停課由地方政府當日 / 前一晚公布，**不在** TWSE 年度 holidaySchedule 中；證交所休市與否，法規上取決於「臺北市政府是否宣布停止上班」。故在既有國定假日機制外，另建一條「當日偵測 → 台股假日 override」資料流：
   - **權威來源**：行政院人事行政總處（DGPA）「天然災害停止上班及上課情形」`https://www.dgpa.gov.tw/typh/daily/nds.html`（HTML）。解析臺北市列的「今天」狀態字（`<FONT>` 內文，`TwTyphoonClosureService.parseTaipeiTodayClause`）；`closedForTrading` 判定：含「停止上班」且非「晚上 / 傍晚 / 夜間」限定、且無「HH:MM 起」HH:MM ≥ 13:30 → **休市**（全日 / 上午 / 下午覆蓋 09:00–13:30）；含「照常上班」/ 僅晚間或收盤後起停班 → 交易日。
@@ -532,6 +534,7 @@ ForeignStockDailyHistory (→ foreign_stock_daily_history，海外參考個股�
 StockAlert            (到價警示，獨立資料表；觀察清單由此表 GROUP BY (stockCode, market) 衍生)
 StockAlertGroup       (複合條件群組，群組內條件全部同時成立才觸發；成員為 group_id 非空的 StockAlert)
 StockAlertTrigger     (警示觸發歷史，FK→stock_alert / stock_alert_group 恰一，保留 30 天)
+StockAlertExportSetting (觸發即時匯出 JSON 的 per-user 設定；事件驅動、無執行時刻欄位；Requirement 54)
 
 # 總經 / 指數（Requirement 18）
 TaiwanGdpPerCapitaHistory / JapanGdpPerCapitaHistory / KoreaGdpPerCapitaHistory   (人均 GDP + 實質成長率)
@@ -940,6 +943,32 @@ twse_index_year_end_history  (TWSE 指數年末值；Task 97 起已不使用—�
 > **資料填寫**：5 個技術指標皆無條件計算寫入（不論觸發類型是 PRICE / MA / KD），便於事後分析「觸發當下整個技術面狀態」。透過 `TechnicalIndicatorService.computeAll()` 一次取得 MA20 / MA60 / MA240 / K / D。
 > **`alert_id` / `group_id` 恰好一個非空（Task 253）**：DB 以 CHECK 約束 `(alert_id IS NOT NULL) <> (group_id IS NOT NULL)` 保證。群組觸發**只寫一筆**（不是每個成員各一筆）——寫 N 筆會讓補發路徑把同一次 AND 觸發還原成 N 條獨立條件、文案與 live 寄出的合併 label 分歧。補發時 `group_id` 非空的列以群組合併 label（各成員 label 以 `" 且 "`（前後各一個半形空白）串接）還原條件文案，與 live 路徑共用同一支 `buildGroupLabel`。
 
+> **刻意沒有 `owner_user_id`（Requirement 54）**：owner 一律由 `alert_id` → `stock_alert.owner_user_id` 或 `group_id` → `stock_alert_group.owner_user_id` join 取得。加冗餘 owner 欄違反正規化，且會與來源分家（alert 換 owner 後舊 trigger 列不會跟著改）。**本表未掛 `@Filter(ownerFilter)`**，任何跨使用者的讀取（如觸發匯出）都必須自行以 join 縮 owner，直接 `findAll()` 是跨租戶外流。
+
+> **兩個時間欄的時區語意不同，取用前務必分清（Requirement 53／54）**：`triggeredAt` 是**市場牆鐘**（美股存紐約時間、英股存倫敦時間），`createdAt` 是**台北牆鐘**。凡是「哪一天發生的」這類以台北為基準的判定（例如觸發匯出的當日檔案歸屬），一律用 `createdAt`；用 `triggeredAt` 會讓台北凌晨觸發的美股警示被歸到前一天。
+
+#### StockAlertExportSetting（觸發匯出設定，Requirement 54 新增）
+
+警示觸發時即時把當日觸發寫成 JSON 到指定目錄的 per-user 設定。**與其他九個匯出頁的設定表結構相近但刻意少兩欄**——本頁是事件驅動而非排程，沒有執行時刻可設。
+
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| id | Long | PK |
+| ownerUserId | Long | 擁有者（唯一，`@Filter(ownerFilter)`；Requirement 28） |
+| enabled | Boolean | 是否啟用觸發匯出（NOT NULL DEFAULT false） |
+| outputSubpath | String | 本機相對子路徑（實際落點 = `EXPORT_OUTPUT_DIR` resolve 之） |
+| lastRunAt | LocalDateTime | 最後一次匯出時間（台北牆鐘） |
+| lastRunStatus | String | 最後一次匯出結果（**「最後一次」而非「今日」語意**：一天可能寫入多次） |
+| gdriveEnabled | Boolean | 是否同步 Drive（NOT NULL DEFAULT false；限主要管理者啟用） |
+| gdriveSubpath | String(512) | Drive 相對子路徑 |
+| gdriveLastRunAt | LocalDateTime | 最後一次 Drive 上傳時間 |
+| gdriveLastStatus | String(512) | 最後一次 Drive 上傳結果（與 `lastRunStatus` **分離**：本機成功而 Drive 失敗是正常且必須可分辨的狀態） |
+| createdAt / updatedAt | LocalDateTime | 建立／更新時間（台北牆鐘） |
+
+> **無 `run_hour` / `run_minute`**：匯出掛在 `StockAlertService.recordTrigger` / `recordGroupTrigger` 之後，由觸發事件驅動。套排程頁樣板會多出兩個永遠沒人讀的欄位。
+> **本機即時、Drive 合併去抖**：本機寫檔在觸發執行緒同步完成（毫秒級）；Drive 上傳丟單執行緒 `ScheduledExecutorService`，以「已排定任務旗標 ＋ 最近一次實際上傳完成時間」**延後至間隔到期**合併（最小間隔 60 秒）。理由：`PriceStreamService.onPriceUpdate` 對 `checkAlertsFor` 是同步呼叫、其上游為 Redis 訂閱者執行緒（同時負責 SSE 廣播與交易雷達評估），而 rclone 上傳逾時上限 45 秒——同步上傳一次卡住就是整條即時價管線停擺。檔案為當日全量重寫，晚一點上傳的那份必然含先前所有內容，合併不遺失資料。
+> **被合併跳過時兩個 Drive 狀態欄一律不碰**（`gdrive_last_run_at`／`gdrive_last_status` 值保持不變）：那兩欄的語意是「上次**上傳**的結果」，寫任何東西進去都會覆蓋掉前一次真正成功的落點與 bytes——與 Requirement 52 禁止把自檢警告寫進該欄同一理由。使用者要知道「本機即時、Drive 最多延遲約一分鐘」走 UI 常駐文案，不入庫。
+> **去抖以「延後至間隔到期的單一任務」表達**（`ScheduledExecutorService.schedule`），**不可**寫成「距上次上傳未滿間隔就只標記 pending、由已排入的任務完成後補跑」——後者在「最後一次觸發發生於上一次上傳完成之後、且當天不再有觸發」時沒有任何執行中的任務會回頭看 pending，Drive 那份會永久缺最後一筆。
 
 #### TransitFundType（新增）
 | 欄位 | 型別 | 說明 |
@@ -1241,7 +1270,14 @@ POST   /api/stock-alerts/check            # 手動觸發檢查
 GET    /api/stock-alerts/lookup-name      # 以股票代號查名稱（前端共用）
 GET    /api/stock-alerts/lookup-code      # 反向：以股名查代號（只查本地 stock 主檔，精確匹配）
 GET    /api/stock-alerts/recipients       # 列出可挑選收件人 [{id,email,active}]（委派 NotificationRecipientService；供警示對話框「通知對象」多選；Task 125）
+GET    /api/stock-alerts/export-setting          # 觸發即時匯出設定（owner-scoped；Requirement 54）
+PUT    /api/stock-alerts/export-setting          # 更新設定（Drive 開關限主要管理者，否則 403）
+POST   /api/stock-alerts/export-setting/run-now  # 立即以當日已發生的觸發產檔（驗證落點用；當日無觸發亦寫出 triggers: [] 的合法 JSON）
 ```
+
+> **觸發即時匯出（Requirement 54）：** 匯出掛在 `StockAlertService.recordTrigger`（獨立條件）與 `recordGroupTrigger`（複合群組）**寫入 `stock_alert_trigger` 之後**——先寫檔會漏掉當次那一筆。檔名 `alert_triggers_{ownerUserId}_{yyyyMMdd}.json`，內容為該 owner **當日**（以 `created_at` 台北牆鐘界定，非 `triggered_at`）所有觸發的全量重寫，本機以 tmp ＋ `ATOMIC_MOVE` 落檔（下游可能正在讀）。條件文案一律取自 `StockAlertService.buildLabel` / `buildGroupLabel`，不在匯出端另行串接（同義欄位同一來源）。匯出整段包 try/catch，失敗不回滾 `stock_alert_trigger`、不中斷 email enqueue、不拋出中止整輪檢查。**目錄瀏覽不在此服務**：沿用既有唯一那支 `GET /api/export-schedule/browse{,-gdrive}`。
+
+
 
 > **每條警示挑選收件人（Task 125）：** `StockAlertDto.Request` / `Response` 新增 `recipientIds`（`List<Long>`）。`create` / `update` 以 `recipientIds` 覆寫 `stock_alert_recipient`（先 `deleteByAlertId` 再批次 insert）；`Response` 回填該警示目前的 `recipientIds`。對話框「通知對象」多選的可選清單走同頁 BFF `GET /api/bff/stock-alert/recipients`（passthrough → `/api/stock-alerts/recipients`，後端委派 `NotificationRecipientService.findAll()`，與通知設定頁同一份資料源）。新增警示預設全選；選 0 位代表觸發不寄信。
 
@@ -2813,7 +2849,7 @@ GET  /api/bff/crawler-data/export-path/browse-gdrive?subpath=
 
   **(b) 的結果一律不寫 `gdrive_last_run_at`／`gdrive_last_status`**：那兩欄的既有語意是**上傳結果**（R50 明訂「成功記落點路徑與檔案大小…由設定卡顯示『上次上傳』」），九個前端 view 全部標成「上次上傳」直接顯示。寫進去會（i）永久覆蓋真正的上傳記錄，（ii）讓 `gdrive_last_run_at` 指向一個沒有發生任何上傳的時刻（設定卡顯示「上次上傳：12:09 — 自檢失敗」而 12:09 沒上傳過）。故走**當次回應**：九頁的儲存 response DTO 各加一個**非持久化**警告欄位（如 `gdriveSelfCheckWarning`，正常為 null），前端在既有「儲存成功」提示旁多顯示一則警告。**不新增 DB 欄位、不新增端點、不新增頁面或元件**；九頁 BFF passthrough 已存在，DTO 加欄位即隨既有路徑帶到前端。九支 service 既有的「刻意不碰 `gdriveLastRunAt`／`gdriveLastStatus`」註解（全樹命中 9 次）維持成立、不開例外。**失敗不得讓儲存回非 2xx**（沿用 `absolutePathOrNull` 的既有理由：唯一的修正入口不能被自己鎖死）。
 
-  **啟動自檢的前置條件**：先查 DB 是否**存在任一列 `gdrive_enabled=true`**（business 查八張表、ext 查 `crawler_export_setting`，走 `JdbcTemplate` 繞過 owner filter——問的是「全庫有沒有人啟用」而非「我的設定」），全未啟用就整個跳過，維持 Requirement 50／51「既有部署不要求 rclone remote 存在」的承諾。**此前置條件只約束 (a)**（(b) 那一刻的請求本身就是啟用的證據）。
+  **啟動自檢的前置條件**：先查 DB 是否**存在任一列 `gdrive_enabled=true`**（business 查九張表——Requirement 51 的八張 ＋ Requirement 54 的 `stock_alert_export_setting`；ext 查 `crawler_export_setting`，走 `JdbcTemplate` 繞過 owner filter——問的是「全庫有沒有人啟用」而非「我的設定」），全未啟用就整個跳過，維持 Requirement 50／51「既有部署不要求 rclone remote 存在」的承諾。**每新增一個支援 Drive 的設定表都必須同步加進這個 UNION**，少查一張就會給假綠燈：只在該頁啟用 Drive 的部署，遇到 token 失效或 remote 改名時會整個跳過 L3 探測、不噴任何 WARN。**此前置條件只約束 (a)**（(b) 那一刻的請求本身就是啟用的證據）。
 
   **相依方向必須單向，否則起不來**：因 (b) 要求 `GdriveOutputSupport` 呼叫自檢，**自檢元件就不得反向注入 `GdriveOutputSupport`**——本專案全樹建構子注入且未開 `allow-circular-references`，踩到即 `BeanCurrentlyInCreationException`。remote 名稱改為**每次呼叫傳參**（沿用 `ProcessRcloneClient` 既有模式：建構子不吃 remote，`listDirs`／`copyTo` 由呼叫端傳入）；啟動時所需的 remote 由第三個薄元件（掛 `ApplicationReadyEvent` 者）注入 `GdriveOutputSupport` 取得後傳入。Task 242.1.4「`GDRIVE_OUTPUT_REMOTE` 為全 backend 唯一注入點」不因本需求破例。
 

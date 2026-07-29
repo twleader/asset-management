@@ -113,6 +113,122 @@
       </el-table>
     </el-card>
 
+    <!--
+      觸發即時匯出（Requirement 54 / Task 254）。
+      與其他九個匯出頁不同，這裡是**事件驅動**而非排程，故沒有「每日執行時間」——
+      條件一觸發就立刻寫檔。
+    -->
+    <el-card class="export-card">
+      <template #header>
+        <span class="section-title">📤 觸發即時匯出（JSON）</span>
+      </template>
+      <el-form :inline="true" label-width="110px" class="export-form">
+        <el-form-item label="啟用即時匯出">
+          <el-switch v-model="exportSetting.enabled" />
+        </el-form-item>
+        <el-form-item label="輸出資料夾">
+          <el-input v-model="exportSetting.outputSubpath" readonly placeholder="（家目錄根）" style="width:240px">
+            <template #append>
+              <el-button :icon="FolderOpened" @click="openDirPicker()">選擇</el-button>
+            </template>
+          </el-input>
+        </el-form-item>
+        <!--
+          Google Drive 同步：本機一律照寫，這裡只是額外多上傳一份副本。
+          僅「主要管理者」可見可設——rclone remote 全機只有一份且綁定某個 Google 帳號，
+          若其他使用者能啟用，他的資料會被上傳到那個帳號的雲端硬碟。真正的閘門在後端 403。
+        -->
+        <el-form-item v-if="auth.isConfiguredAdmin" label="同步 Google Drive">
+          <div style="display:flex; flex-direction:column; gap:6px">
+            <div style="display:flex; align-items:center; gap:12px">
+              <el-switch v-model="exportSetting.gdriveEnabled" />
+              <el-input
+                v-model="exportSetting.gdriveSubpath"
+                readonly
+                placeholder="（尚未選擇 Drive 資料夾）"
+                :disabled="!exportSetting.gdriveEnabled"
+                style="width:260px"
+              >
+                <template #append>
+                  <el-button :disabled="!exportSetting.gdriveEnabled" @click="openDirPicker('gdrive')">選擇</el-button>
+                </template>
+              </el-input>
+            </div>
+            <div class="export-hint">
+              開啟後除了寫入上面的本機資料夾，會<strong>再上傳一份同樣的檔案</strong>到 Google Drive 的所選資料夾；
+              <strong>本機那一份永遠即時照寫、不受影響</strong>。
+              <template v-if="exportSetting.gdriveEnabled && exportSetting.gdriveSubpath">
+                <br />Drive 落點：<code>{{ exportSetting.gdriveRemote || 'GDriveOutput' }}:{{ exportSetting.gdriveSubpath }}</code>
+              </template>
+              <br /><strong>本機即時、Drive 最多延遲約一分鐘</strong>：短時間內連續觸發時，
+              Drive 那一份會合併成一次上傳（檔案每次都是當日全量重寫，合併不會少任何一筆）。
+              <br />上次上傳：
+              <template v-if="exportSetting.gdriveLastRunAt">
+                {{ exportSetting.gdriveLastRunAt }} — <code>{{ exportSetting.gdriveLastStatus || '—' }}</code>
+              </template>
+              <template v-else>—（尚未上傳過）</template>
+            </div>
+          </div>
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" :loading="savingExport" @click="saveExportSetting">儲存設定</el-button>
+          <el-button :loading="runningExport" @click="runNowExport">立即匯出</el-button>
+        </el-form-item>
+      </el-form>
+      <div class="export-hint">
+        警示條件（含複合條件群組）一旦觸發，立刻把<strong>當日全部觸發</strong>寫成 JSON 到指定資料夾，
+        檔名 <code>alert_triggers_{{ '{使用者ID}' }}_YYYYMMDD.json</code>；同日多次觸發覆寫同一檔、跨日新檔。
+        以主機家目錄 <code>{{ exportSetting.baseDir || '/home/steven' }}</code> 為根（對映主機
+        <code>/Users/steven</code>），按上方「選擇」挑子資料夾。
+        <template v-if="exportSetting.resolvedDir">
+          <br />本機落點：<code>{{ exportSetting.resolvedDir }}</code>
+        </template>
+        <br />「立即匯出」會把當日已發生的觸發重新產檔（<strong>不看上面的啟用開關</strong>），供驗證落點用；
+        當日尚無觸發時會寫出一個空的觸發清單。
+        <br />警示觸發紀錄在資料庫只保留 30 天，但<strong>已匯出的 JSON 檔案系統一律不刪</strong>——
+        資料庫清掉之後，先前寫出的檔案仍留在資料夾裡。
+      </div>
+      <div v-if="exportSetting.lastRunAt || exportSetting.lastRunStatus" class="export-status">
+        上次匯出：{{ exportSetting.lastRunAt || '—' }}　{{ exportSetting.lastRunStatus || '' }}
+      </div>
+    </el-card>
+
+    <!-- 輸出資料夾選擇器（檔案總管式樹狀；本機／Drive 雙模式共用同一棵樹） -->
+    <el-dialog v-model="dirPicker.visible" :title="dirPickerTitle" width="560px">
+      <div class="dir-picker-path">
+        目前選擇：<code>{{ dirPickerPreview }}</code>
+      </div>
+      <!-- Drive 端讀取失敗必須顯示原因；空樹會被誤讀為「Drive 裡沒有資料夾」而以為選錯位置 -->
+      <el-alert
+        v-if="dirPicker.error"
+        type="error"
+        :closable="false"
+        show-icon
+        style="margin-bottom:12px"
+        :title="dirPicker.error"
+      />
+      <el-tree
+        :key="dirPicker.treeKey"
+        lazy
+        :load="loadDirNode"
+        :props="dirTreeProps"
+        node-key="key"
+        highlight-current
+        :expand-on-click-node="false"
+        :default-expanded-keys="['__root__']"
+        class="dir-tree"
+        @node-click="onDirNodeClick" />
+      <div class="dir-new-sub">
+        <span class="dns-label">新增子資料夾</span>
+        <el-input v-model="dirPicker.newSub" placeholder="（選填）在所選資料夾下新增，寫檔時自動建立"
+          style="width:340px" clearable />
+      </div>
+      <template #footer>
+        <el-button @click="dirPicker.visible = false">取消</el-button>
+        <el-button type="primary" @click="confirmDirPick">確定</el-button>
+      </template>
+    </el-dialog>
+
     <StockAnalysisDialog v-model="analysisVisible" :stock="analysisStock" />
 
     <!-- 新增/編輯 Dialog -->
@@ -357,14 +473,20 @@
 </template>
 
 <script setup>
-import { Plus, Edit, Delete, Loading, Operation, Refresh } from '@element-plus/icons-vue'
+import { Plus, Edit, Delete, Loading, Operation, Refresh, FolderOpened } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import Sortable from 'sortablejs'
 import dayjs from 'dayjs'
 import { bffApi, apiErrorMessage } from '@/api/index.js'
+import { useAuthStore } from '@/stores/authStore'
+import { showGdriveSelfCheckWarning } from '@/utils/gdriveSelfCheck'
 import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
 import TaiwanMap from '@/components/TaiwanMap.vue'
 import UsFlag from '@/components/UsFlag.vue'
+
+// Drive 開關的顯示條件用 isConfiguredAdmin（比對 ADMIN_EMAIL、全庫唯一一人），
+// **不是** isAdmin（那是 role === 'ADMIN'，DB 欄位、可以有多列）
+const auth = useAuthStore()
 
 // 父層（StockMonitorView）監聽 alert-saved，藉以重新載入觀察清單（觀察清單由 stock_alert 衍生）
 const emit = defineEmits(['alert-saved'])
@@ -486,9 +608,158 @@ function initSortable() {
 }
 
 onMounted(async () => {
-  await Promise.allSettled([loadAlerts(), loadRecipients()])
+  // 多來源一律並行，不序列 await
+  await Promise.allSettled([loadAlerts(), loadRecipients(), loadExportSetting()])
   nextTick(initSortable)
 })
+
+// ===== 觸發即時匯出設定（Requirement 54 / Task 254）=====
+
+const exportSetting = reactive({
+  enabled: false,
+  outputSubpath: '',
+  baseDir: '',
+  resolvedDir: '',
+  // Drive 同步；gdriveRemote 是後端給的顯示值，不入庫
+  gdriveEnabled: false, gdriveSubpath: '', gdriveRemote: '',
+  gdriveLastRunAt: null, gdriveLastStatus: '',
+  lastRunAt: null, lastRunStatus: ''
+})
+const savingExport = ref(false)
+const runningExport = ref(false)
+
+async function loadExportSetting() {
+  try {
+    const s = await bffApi.stockAlert.getExportSetting()
+    applyExportSetting(s)
+  } catch (e) {
+    // 設定讀不到不該擋住整頁警示清單；失敗就維持預設值（開關關閉）
+    console.warn('觸發匯出設定載入失敗', e)
+  }
+}
+
+/** 把後端回的欄位寫回本地狀態（讀取一律不驗證，不合法值也照顯示供使用者修正）。 */
+function applyExportSetting(s) {
+  exportSetting.enabled = !!s.enabled
+  exportSetting.outputSubpath = s.outputSubpath || ''
+  exportSetting.baseDir = s.baseDir || ''
+  exportSetting.resolvedDir = s.resolvedDir || ''
+  exportSetting.lastRunAt = s.lastRunAt || null
+  exportSetting.lastRunStatus = s.lastRunStatus || ''
+  exportSetting.gdriveEnabled = !!s.gdriveEnabled
+  exportSetting.gdriveSubpath = s.gdriveSubpath || ''
+  exportSetting.gdriveRemote = s.gdriveRemote || ''
+  exportSetting.gdriveLastRunAt = s.gdriveLastRunAt || null
+  exportSetting.gdriveLastStatus = s.gdriveLastStatus || ''
+}
+
+async function saveExportSetting() {
+  // 前端先擋一次空值，後端仍會驗（真正的閘門在後端）
+  if (exportSetting.gdriveEnabled && !(exportSetting.gdriveSubpath || '').trim()) {
+    ElMessage.warning('已啟用 Google Drive 同步，請先選擇 Drive 目標資料夾')
+    return
+  }
+  savingExport.value = true
+  try {
+    const s = await bffApi.stockAlert.saveExportSetting({
+      enabled: exportSetting.enabled,
+      outputSubpath: (exportSetting.outputSubpath || '').trim(),
+      gdriveEnabled: exportSetting.gdriveEnabled,
+      gdriveSubpath: (exportSetting.gdriveSubpath || '').trim()
+    })
+    applyExportSetting(s)
+    ElMessage.success('觸發匯出設定已儲存')
+    // 啟用當下的可用性自檢警告（Requirement 52）：不入庫，只在這一次回應裡
+    showGdriveSelfCheckWarning(s.gdriveSelfCheckWarning)
+  } catch (e) {
+    // Drive 僅限主要管理者啟用 → 後端回 403，訊息要讓使用者就地看到
+    ElMessage.error(apiErrorMessage(e, '觸發匯出設定儲存失敗'))
+  } finally {
+    savingExport.value = false
+  }
+}
+
+async function runNowExport() {
+  runningExport.value = true
+  try {
+    const r = await bffApi.stockAlert.runNowExport()
+    ElMessage.success(`${r.message}：${r.path}（${r.size} bytes）`)
+    if (r.gdriveStatus) ElMessage.info(`Google Drive：${r.gdriveStatus}`)
+    await loadExportSetting()
+  } catch (e) {
+    ElMessage.error(apiErrorMessage(e, '立即匯出失敗'))
+  } finally {
+    runningExport.value = false
+  }
+}
+
+// ===== 雙模式資料夾選擇器（本機／Drive 共用同一棵 el-tree）=====
+
+const dirTreeProps = { label: 'name', children: 'children', isLeaf: 'leaf' }
+const dirPicker = reactive({
+  visible: false, mode: 'local', picked: '', newSub: '', baseDir: '', error: '', treeKey: 0
+})
+
+const dirPickerTitle = computed(() =>
+  dirPicker.mode === 'gdrive' ? '選擇 Google Drive 資料夾' : '選擇輸出資料夾')
+
+// 兩種 mode 的分隔符不同：Drive 基底是 `remote:`（已含冒號，後面直接接子路徑），
+// 本機基底是 `/home/steven`（需要 `/` 分隔）。混用會顯示成 `GDriveOutput:/投資理財`，
+// 多一個斜線、不是 rclone 的路徑格式，會誤導使用者。
+const dirPickerPreview = computed(() => {
+  const isGdrive = dirPicker.mode === 'gdrive'
+  const base = dirPicker.baseDir
+    || (isGdrive ? (exportSetting.gdriveRemote || 'GDriveOutput') + ':' : (exportSetting.baseDir || '/home/steven'))
+  const parts = [dirPicker.picked, (dirPicker.newSub || '').trim()].filter(Boolean)
+  const joined = parts.join('/')
+  if (!joined) return base
+  return isGdrive ? base + joined : base + '/' + joined
+})
+
+function openDirPicker(mode = 'local') {
+  dirPicker.mode = mode
+  dirPicker.picked = (mode === 'gdrive' ? exportSetting.gdriveSubpath : exportSetting.outputSubpath) || ''
+  dirPicker.newSub = ''
+  dirPicker.baseDir = ''         // 兩種 mode 的基底不同，重開時一律重新取
+  dirPicker.error = ''
+  dirPicker.treeKey++            // 強制 el-tree 重新懶載入 root
+  dirPicker.visible = true
+}
+
+// el-tree 懶載入：level 0 以基底為單一 root；其餘列該節點子目錄
+async function loadDirNode(node, resolve) {
+  const browse = dirPicker.mode === 'gdrive'
+    ? bffApi.stockAlert.browseGdriveExportDir
+    : bffApi.stockAlert.browseExportDir
+  try {
+    if (node.level === 0) {
+      const res = await browse('')
+      dirPicker.baseDir = res.baseDir || ''
+      dirPicker.error = ''
+      resolve([{ name: res.baseDir || '/', path: '', key: '__root__', leaf: false }])
+      return
+    }
+    const res = await browse(node.data.path || '')
+    resolve((res.directories || []).map(d => ({ name: d.name, path: d.path, key: d.path, leaf: false })))
+  } catch (e) {
+    // Drive 端失敗要顯示原因（remote 未設定／授權失效）；空樹會被誤讀為「Drive 裡沒有資料夾」
+    if (dirPicker.mode === 'gdrive') {
+      dirPicker.error = e?.response?.data?.detail || e?.message || 'Google Drive 資料夾讀取失敗'
+    }
+    resolve([])
+  }
+}
+
+const onDirNodeClick = (data) => { dirPicker.picked = data.path || '' }
+
+function confirmDirPick() {
+  let p = dirPicker.picked || ''
+  const sub = (dirPicker.newSub || '').trim().replace(/^\/+|\/+$/g, '')
+  if (sub) p = p ? `${p}/${sub}` : sub
+  if (dirPicker.mode === 'gdrive') exportSetting.gdriveSubpath = p
+  else exportSetting.outputSubpath = p
+  dirPicker.visible = false
+}
 
 
 // ===== Dialog =====
@@ -836,4 +1107,16 @@ defineExpose({
   color: #64748b;
   line-height: 1.6;
 }
+
+/* 觸發即時匯出卡（Task 254）；樣式沿用其他九個匯出頁的 schedule-* 慣例 */
+.export-card { margin-top: 16px; }
+.export-hint { font-size: 12px; color: #94a3b8; line-height: 1.7; }
+.export-hint code { background: #f1f5f9; color: #475569; padding: 1px 5px; border-radius: 4px; font-size: 11px; }
+.export-hint strong { color: #64748b; }
+.export-status { margin-top: 8px; font-size: 12px; color: #64748b; }
+.dir-picker-path { font-size: 13px; color: #475569; margin-bottom: 10px; }
+.dir-picker-path code { background: #f1f5f9; color: #0f172a; padding: 2px 6px; border-radius: 4px; word-break: break-all; }
+.dir-tree { max-height: 340px; overflow: auto; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px; }
+.dir-new-sub { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+.dir-new-sub .dns-label { font-size: 13px; color: #475569; white-space: nowrap; }
 </style>
