@@ -58,24 +58,40 @@ git config core.hooksPath scripts/git-hooks
 ### SDD 自動閘門（PostToolUse 提示 ＋ PreToolUse 強制）
 
 commit-msg hook 有兩個先天限制：**時機在 commit 當下**（程式早就寫完了），且**只驗
-「`spec/` 有沒有被碰」、不驗有沒有審過**。`.claude/hooks/` 下的兩支補的正是這一段。
+「`spec/` 有沒有被碰」、不驗有沒有審過**。`.claude/hooks/` 下的三支補的正是這一段。
 
 | 閘門 | 規則 | 時機 |
 |---|---|---|
 | `notify-spec-changed` | 寫完 spec → **立刻**提示跑 `/spec-review` | 寫入 `spec/` 後 |
 | `require-spec-review` | 改了 spec → 必須審過才能寫 code | 寫入實作檔前 |
+| `notify-code-changed` | 寫完 code → 提示派 `arch-auditor` 查架構符規 | 寫入實作檔後 |
 | `commit-msg` | 改了 code → 必須有 spec | commit 時 |
 
-**為什麼要兩支。** 只有硬擋的話，是「撞到牆才回頭審」——中間可能已經想好一整套
-實作方向。在 spec 落地當下就提示，順序才對（審完再想怎麼寫）。提示每個 spec 變更
-週期只出現一次，連改五個 spec 檔不會被唸五次。
+> **`notify-code-changed` 刻意只提示、不擋 commit。** 要硬擋只能攔 `git commit`，
+> 那會干擾到其他 worktree 的提交流程（本專案同時有 30+ 個 worktree）。
+> 查證完由 `bash .claude/hooks/arch-review-pass.sh` 記錄；紀錄綁定**實作程式碼的
+> 內容雜湊**，code 再變動即失效並重新提示。逃生門 `SKIP_ARCH_GATE=1`。
+>
+> `arch-auditor` 與 `spec-auditor` 互補：前者在實作**後**審程式碼是否違反架構鐵則，
+> 後者在實作**前**審規格的可查證性。兩者都唯讀，都由主 agent 在報告產出後負責修。
+> **`arch-auditor` 是 diff-scoped**，呼叫時必須餵本次變更的完整 diff——不餵它會退化成
+> 全樹掃描，把既有技術債整包倒出來，淹掉真正的新增違規。
 
-三者刻意不重疊。**完全沒動 `spec/` 的純 bug fix / 樣式調整不會被擋也不會被提示**
+**spec 那一組為什麼要兩支。** 只有硬擋的話，是「撞到牆才回頭審」——中間可能已經想好
+一整套實作方向。在 spec 落地當下就提示，順序才對（審完再想怎麼寫）。提示每個 spec
+變更週期只出現一次，連改五個 spec 檔不會被唸五次。
+
+四者刻意不重疊。**完全沒動 `spec/` 的純 bug fix / 樣式調整不會被任何閘門擋下**
 （那種情境由 commit-msg 負責），閘門只在真正的 SDD 週期裡收緊，避免變成人人繞道。
 
-> **hook 叫不到 subagent。** hook 是 shell 指令，無法直接執行 `spec-auditor`——
-> 它只能提示模型去跑。唯一的替代是在 hook 裡跑 headless `claude -p`，但單次審查
-> 約 6～7 分鐘，每次寫 spec 都同步卡住不可接受，故不採用。
+> **唯一的例外是 `notify-code-changed`。** 它以「有沒有寫實作檔」為觸發條件，
+> 不看 `spec/` 動了沒——因為純 bug fix 一樣能違反架構鐵則（往 controller 塞一個
+> Repository 就是）。代價是純 bug fix 也會收到一次提示。之所以可接受：它**不阻斷**、
+> 且每個變更週期只出現一次。真的不想被提示就 `SKIP_ARCH_GATE=1`。
+
+> **hook 叫不到 subagent。** hook 是 shell 指令，無法直接執行 `spec-auditor`／
+> `arch-auditor`——它只能提示模型去跑。唯一的替代是在 hook 裡跑 headless `claude -p`，
+> 但單次審查約 6～7 分鐘，每次存檔都同步卡住不可接受，故不採用。
 
 審查通過後由 `/spec-review` 的 Step 4 記錄：
 
