@@ -33,3 +33,7 @@ frontend/dist/
 backend/data/
 db/init/*.sql
 stock_alert_data.sql
+
+# Claude Code SDD 閘門的本機狀態（審查通過紀錄，不進版控）
+.claude/.spec-review-state
+.claude/.spec-review-notified
