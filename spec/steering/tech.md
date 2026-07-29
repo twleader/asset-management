@@ -55,7 +55,8 @@ Browser ──► nginx:80 (Frontend) ──► bff:8080 ──► business-serv
 - **存 enum 一律用 `@Enumerated(EnumType.STRING)`**（事實上多數已改為 `String` + 動態主檔表）。
 - **金額：`BigDecimal`**，scale 視欄位而定（價格 4、單位數 6、台幣金額 2）。
 - **日期：`LocalDate`**（不存時間）；時間戳：`Instant`。
-- **市場時區感知時間：** `lastTriggeredAt` 等以「該股市場本地 wall-time」儲存（TW = `Asia/Taipei`、US = `America/New_York`），不用 JVM 預設時區。
+- **市場時區感知時間：** `lastTriggeredAt` / `triggeredAt` 以「該股市場本地 wall-time」儲存（TW = `Asia/Taipei`、US = `America/New_York`、UK = `Europe/London`），一律經 `MarketZones` 顯式指定，不依賴 JVM 預設時區。
+- **JVM 預設時區 = `Asia/Taipei`（Requirement 53 / Task 252）：** 三個 JVM 容器由 compose 的 `TZ` 環境變數設定，PostgreSQL 由啟動參數設定。其語意是「沒有顯式指定 ZoneId 的呼叫落在哪裡」——切換前為 UTC，是全系統唯一沒有人想要的時區。除上述兩個市場牆鐘欄位外，所有 `timestamp without time zone` 欄位一律存台北牆鐘；涉及「交易日／今日」的判定一律走 `MarketZones.today(market)`，禁用裸 `LocalDate.now()`。
 
 ### 2.4 啟動指令（本機開發）
 

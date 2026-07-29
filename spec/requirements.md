@@ -1389,7 +1389,7 @@
 
 **Acceptance Criteria:**
 
-- [ ] **手動逐筆 CRUD**：支援手動新增、編輯、刪除單筆交易紀錄；每筆記錄以下欄位——交易類型（買／賣）、資產類型（股票／基金）、資產名稱（必填）、資產代號、市場（股票用；基金可空）、幣別（TWD／USD）、券商／通路、交易日期（必填）、數量（股數／單位數）、成交單價（原幣，支援小數 6 位——輸入、儲存、明細顯示、Excel 匯出一致，Task 239）、成交金額（原幣，含手續費／交易稅後之實際交割金額，必填）、交易當天匯率（USD 計價用）、備註。
+- [ ] **手動逐筆 CRUD**：支援手動新增、編輯、刪除單筆交易紀錄；每筆記錄以下欄位——交易類型（買／賣）、資產類型（股票／基金）、資產名稱（必填）、資產代號、市場（股票用；基金可空）、幣別（TWD／USD）、券商／通路、交易日期（必填）、數量（股數／單位數）、成交單價（原幣，支援小數 6 位——輸入、儲存、明細顯示、Excel 匯出一致，Task 239）、成交金額（原幣，含手續費／交易稅後之實際交割金額，必填）、交易當天匯率（USD 計價用；**Task 251 起改為依交易日期自動帶入的唯讀欄，不再由使用者手填**，見下方三條）、備註。
 - [ ] **代號優先、輸入代號自動帶出股名**：新增／編輯表單將「代號」欄置於「資產名稱」欄之前（交易標的通常為股票，先填代號較符合輸入習慣）；當資產類型為股票且已選市場時，於代號輸入完成（blur/change）自動查 stock 主檔帶出資產名稱——找不到時不覆寫（由使用者手填）、使用者已手填的名稱亦不覆寫。此查名走與其他頁面**同一支** business API `GET /api/stock-alerts/lookup-name?code=&market=`（CLAUDE.md「同義欄位、同一 business service API」，比照已實現損益頁），本頁僅在自己的 BFF 新增 `GET /api/bff/transaction/lookup-name` passthrough（一頁一 BFF），**不新增** business 端點；資產類型為基金時不查主檔。
 - [ ] **交易類型與資產類型為資料驅動、非寫死 enum**：交易類型（買／賣）與資產類型（股票／基金）以字串存入欄位；沿用既有 `MarketType`（市場）與 `BrokerEntity`（券商）主檔提供下拉選項，不新增寫死 enum（CLAUDE.md「禁止 Enum 寫死」）。基金通路若無對應主檔則以自由文字輸入，記錄成交當下名稱字串。
 - [ ] **正規化：不存衍生值**：`成交金額(amount)` 為含費用後之實際交割金額、與 `數量 × 單價` 不必然相等（手續費、交易稅、零股撮合價差），故 `數量`／`單價`／`成交金額` 三者為各自獨立輸入、非彼此衍生（比照既有 `realized_gain` 同時存 `shares`／`salePrice`／`proceeds`／`investmentCost` 的慣例）。`年度` 由 `交易日期` 即時衍生（`@Transient`，不入庫）；`台幣成交金額` 由 `幣別＝USD ? amount × exchangeRate : amount` 於 DTO 層即時計算，不入庫（CLAUDE.md「禁止存入可計算得出的衍生值」）。**交易紀錄不計算損益**（損益是已實現損益頁的職責，流水帳只記事實）。
@@ -1397,6 +1397,10 @@
 - [ ] **多租戶隔離**：交易紀錄為 per-user 私人資料，新表 `asset_transaction` 帶 `owner_user_id`（nullable=false）與 `@Filter(ownerFilter)`；HTTP 情境（BFF→business）由 `TenantFilterAspect` 自動 owner-scoped 到本人，各使用者只能存取自己的交易紀錄。
 - [ ] **列表與年度篩選**：列表預設依交易日期新到舊排序，可依年度篩選（年度由 `交易日期` 即時衍生）；提供各年度筆數／買賣別統計等彙總資訊供頁面檢視（彙總於伺服端 business service 預先計算、BFF 聚合後回傳，前端只 render，比照既有 BFF 規範）。
 - [ ] **市場 tab 篩選**：明細表上方提供市場 tab（全部／台股／美股／英股，比照已實現損益頁的 `el-tabs`），前端客戶端依 `market` 過濾當前（年度篩選後）明細列；「全部」不過濾。與年度篩選為 AND 關係。
+- [ ] **匯率不由使用者填寫，依交易日期自動帶出（Task 251）**：USD 計價的交易，「匯率」欄改為**唯讀自動帶入**——使用者選定「交易日期」後系統即依該日期查出匯率填入，欄位不再接受手動輸入。取值走與快照（Requirement 1）、美股持股交易日匯率（Requirement 3）、已實現損益**同一支** business API `GET /api/market-data/exchange-rate/on-date?currency=USD&date=`，取其**中間價 `midRate`**（＝(即期買入＋即期賣出)/2，四捨五入至小數 4 位），底層為 `ExchangeRateHistoryRepository.findClosestRate`＝**該日或之前最近一筆**（closest-on-or-before）。本頁僅在自己的 BFF 新增 `GET /api/bff/transaction/exchange-rate?date=` passthrough（一頁一 BFF），**不新增 business 端點、不新增第二份查詢實作**（CLAUDE.md「同義欄位、同一 business service API」）。口徑刻意採中間價而非即期買入：`asset_snapshot.usd_exchange_rate`／`stock_holding.transaction_exchange_rate`／`realized_gain.exchange_rate` 三處同義欄位皆為中間價，只有基金估值（`FundNavService`）刻意用即期買入，本欄語意屬前者。
+- [ ] **匯率回退取值時必須揭露實際採用的日期**：`exchange_rate_history` 有假日缺口——近 365 個日曆日僅約 72%（263 天）有 USD 列，週末一律沒有，農曆年、清明、國慶等國定假日的平日也沒有，最長須往前退 9 天（2026-02-13 → 02-23）。故查得的匯率日期經常不等於交易日期，UI **必須顯示實際採用的匯率日期**（例「2026-02-13 匯率」），不得讓使用者誤以為那是交易當天的牌告價。查無任何列（交易日期早於 USD 匯率主檔起點 2016-07-29，business 端回 404）時欄位留空並提示，**仍允許儲存**（匯率存 null、台幣成交金額退回原幣金額，與現行 null 行為一致），不得因查不到匯率而擋住使用者存檔。
+- [ ] **「查無牌告」與「查詢失敗」必須分開處理，且失敗時要留手動逃生口**：兩者後果不同，不得共用同一句提示。**查無**（business 回 404，即該日之前沒有任何 USD 列）＝資料本來就不存在，欄位留空、維持唯讀、可直接儲存。**查詢失敗**（business 5xx、逾時、BFF 與 business 之間連線中斷）＝資料可能存在只是取不到，此時必須(a)顯示與查無不同的訊息、(b)**暫時解除匯率欄的唯讀狀態讓使用者可手動輸入**。理由：本需求把手填欄改為唯讀，等於拿掉了使用者原本唯一的輸入手段；若查詢失敗時仍鎖著，使用者將完全無法記下一筆金額正確的 USD 交易——而 `exchangeRate` 為 null 的 USD 交易，其台幣成交金額會等於美元金額（少算約 32 倍）並直接計入年度彙總 `totalBuyAmountTwd`／`totalSellAmountTwd`。**「不要由我填」的訴求是針對正常情況**，不是要求在系統故障時也不准填。
+- [ ] **編輯既有紀錄不得覆寫已存的匯率**：開啟編輯對話框時一律顯示該筆自己已存的 `exchangeRate`，**不重查、不覆寫**；只有在使用者**實際改動了交易日期**、或該筆原本就沒有匯率（null）時才重新查詢。此保護必須以「開啟編輯時另存一份原值 ＋ 交易日期是否被改動的顯式旗標」實作，**不得**僅依賴「匯率欄目前是否為空」這種可被其他操作破壞的狀態——例如在編輯中把市場由美股改成台股（幣別轉 TWD、匯率欄清空）再改回美股，若僅憑空值判斷就會觸發重查並覆寫該筆原本的匯率，而交易日期從頭到尾沒被碰過。理由有二且皆有實據：(a) 既有資料中存在使用者刻意填入、與當日中間價不同的值（`asset_transaction` id=63，MSFT 2026-01-29 存 31.5000，該日中間價為 31.2350、即期賣出為 31.5700），那可能是券商實際扣款匯率；(b) `exchange_rate_history` 的當日列會被隔日 FinMind 的真實買賣價覆寫（`realized_gain` 已有 4 組「存檔值 ≠ 事後重算值」的實例，如 2026-04-21 存 31.4850／現算 31.4200），無條件重查等於用事後修訂過的數字改寫歷史交易。交易紀錄的匯率是**成交當下凍結的事實**，比照同表「券商／通路記錄成交當下名稱字串」的既有 denormalization 例外。
 - [ ] **新增表單的市場預設跟隨當前市場 tab（Task 250）**：按「新增交易紀錄」開啟表單時，「市場」欄預設值＝當前市場 tab（台股／美股／英股）；tab 為「全部」時預設「台股」（維持既有行為）。幣別隨之連動（美股／英股→USD，其餘→TWD），沿用既有「市場改變時自動切換預設幣別」的同一套判斷，不另立第二套。**只影響新增**：編輯既有紀錄一律帶入該筆自己的 `market`，不受 tab 影響；表單開啟後使用者自行改選的市場不得被 tab 覆寫。理由：使用者在美股 tab 下按新增，十之八九要記的就是美股交易，預設寫死「台股」使每一筆美股交易都得多改兩個欄位（市場＋幣別）。同一行為同步套用於已實現損益頁（Requirement 6）。
 - [ ] **一頁一 BFF**：前端只呼叫 `/api/bff/transaction/*`（新增 `TransactionBffController`），不直接呼叫 business `/api/asset-transactions/*`；下拉選項（市場／券商）由 BFF 聚合取得（比照 `RealizedGainBffController` 以 `Mono.zip` 同時取資料與下拉主檔）。
 - [ ] **選單與路由**：於「資產管理」子選單（`frontend/src/App.vue` 的 `mainMenuItems`）新增「交易紀錄」項，並在 `frontend/src/router/index.js` 註冊對應路由（`path`／`title`／`icon` 兩處保持一致，比照既有「已實現損益」）。
@@ -1524,3 +1528,33 @@ rclone config reconnect GDriveOutput: --drive-auth-url "https://accounts.google.
 - [ ] **順帶修正一句會誘導使用者重演事故的既有訊息**：`ProcessRcloneClient` 速率限制分支寫進 `gdrive_last_status` 的字串目前是「此為 rclone 內建共用憑證的已知限制，**根治方式是為 rclone 設定專屬的 OAuth client_id**」——該建議本身正確（當天最終正是改回自訂 client 才解除配額問題），但**缺了會讓人重演 403 與 refresh_token 兩個事故的前提**。須補上：「設定後**必須同時到該 GCP 專案啟用 Drive API**，且授權時須帶 `prompt=consent` 才會取得 refresh_token」。純字串、無邏輯變更。
 - [ ] **排程列表頁不需新增項目**：本需求未新增任何 `@Scheduled`，故「公開資訊 → 排程列表」（Requirement 36 / `SchedulePublicBffController` 的 `JOBS`）不需新增或修改任何項目。
 - [ ] **測試**：L2 的 token 解析須有單元測試涵蓋上述**五種**輸入；L1 須有「來源檔讀取失敗時只 warn、初始化不擲例外、服務仍可啟動」的測試；「全庫無任何列啟用時整個啟動自檢跳過、不呼叫 rclone」須有測試（以介面替身驗證零呼叫）；「前置 DB 查詢擲例外時自檢靜默結束、不影響啟動」須有測試；「(b) 自檢失敗仍回 2xx、設定已存入、且 `gdrive_last_run_at`／`gdrive_last_status` **未被改動**」須有測試（後半段是 Requirement 50 語意的回歸保護）；「**(b) 完全不呼叫 rclone**」須有測試（以介面替身驗證零呼叫——這是「(b) 不做 L3」的機械保證）；**爬蟲頁與八個匯出頁兩個掛載點各需一個「false→true 觸發、true→true 不觸發」的測試**。**自檢一律不實際連網**——(a) 的 L3 走既有介面替身。
+
+---
+
+### Requirement 53: 系統時區基準統一為台北（讓「現在幾點」在全系統只有一個答案）
+
+**User Story:** 作為使用者，我希望畫面上每一個時間都是台北時間、警示的冷卻期是真的 24 小時，而不是「有些頁面對、有些少 8 小時」，也不必自己心算容器跑在哪個時區。
+
+**背景（已實測，非推論）：** 三個 JVM 容器（business-services／external-materials-service／bff）的 `TZ` 環境變數從未設定，base image `eclipse-temurin:21-jre-alpine` 無 `/etc/timezone`，故 JVM 預設時區為 **UTC**；`docker-compose.yml` 全檔無任何 TZ 設定；PostgreSQL 的 `timezone` 亦為 UTC（且已被 initdb 寫進資料目錄的 `postgresql.conf`，單設容器 `TZ` 環境變數無效）。於是所有**未帶 ZoneId 的** `LocalDateTime.now()` / `LocalDate.now()` 產生的是 UTC 牆鐘，寫進 `timestamp without time zone` 欄位後不帶任何時區資訊，前端再原字串顯示 —— 使用者看到的時間**恆少 8 小時**。而「需要指定時區的地方」（46 個帶 `zone` 的 `@Scheduled`、`MarketZones`、`MarketClock`、7 支匯出排程的 `TW_ZONE`）**早已 100% 顯式化**，因此 JVM 預設時區的唯一作用，就是決定那些沒寫 zone 的呼叫落在哪裡 —— 而 UTC 是全系統唯一沒有任何人想要的時區。
+
+**Acceptance Criteria:**
+
+- [ ] **單一開關**：三個 JVM 服務（`business-services`／`external-materials-service`／`bff`）於 `docker-compose.yml` 設 `TZ: ${APP_TZ:-Asia/Taipei}`；PostgreSQL 因 `postgresql.conf` 已被 initdb 寫死 `timezone = UTC`（實測 `source=configuration file`），若要改須用啟動參數 `command: ["postgres","-c","timezone=Asia/Taipei","-c","log_timezone=Asia/Taipei"]`，設環境變數無效。**但要理解它的作用範圍**：pgjdbc 每條連線的 startup packet 都會以 JVM 預設時區覆寫該連線的 session TimeZone，故 server 端的 `timezone` **管不到任何應用連線**；設它是為了讓手動 `psql` 查詢與 server 日誌跟應用同一個基準。`frontend`(nginx) 設 `TZ` 僅為 access log 可讀性；`redis` 不設（無時間語意）
+- [ ] **既有的市場時區邏輯零位移**：46 個帶 `zone` 屬性的 `@Scheduled` 觸發時刻不得改變（Spring 的 `zone` 覆蓋 JVM 預設）；3 個 `fixedDelay`／`fixedDelayString` 排程本質與時區無關。**本需求不新增、不修改任何 `@Scheduled`**，故「公開資訊 → 排程列表」（Requirement 36 / `SchedulePublicBffController.JOBS`）不需新增或修改任何項目
+- [ ] **警示冷卻期修正（本需求最嚴重的既有 bug）**：`StockAlertService` 的 24 小時冷卻判定，左側 `lastTriggeredAt` 是**市場牆鐘**（`computeTriggeredAt()` 以 `ZonedDateTime.now(市場 zone)` 寫入）、右側卻是 JVM 牆鐘，兩個不同時鐘直接比較，實際冷卻長度為 `24h ± 市場 offset`：**台股 32 小時**、英股 25 小時、美股 20 小時。台股警示於早上觸發後，隔天整個交易日（13:30 收盤前）都仍在冷卻中而**靜默漏發**。修法：右側改用同一市場的牆鐘。**此修正必須與 TZ 切換同批**——只改 TZ 會把台股修好（32h→24h）卻讓美股惡化成 12h、英股 17h（台北牆鐘比紐約快 12h、比倫敦快 7h），變成同一封警示信一天內重複寄兩次
+- [ ] **三處「靠 UTC 巧合才正確」的交易日判定必須同批改**：目前三個市場的交易時段在 UTC 日期上恰與其交易日重合，故裸 `LocalDate.now()` 湊巧可用；切換為台北後，**美股在台北 00:00–04:00（＝ET 12:00–16:00，含收盤前最關鍵的 4 小時）會算出 `today = D+1`**，與 Redis／DB 的 `tradingDate = D` 兩側比對同時失敗 → 今日即時價完全不併入序列 → MA20/60/240 與 KD 全部以不含今日價的舊序列計算，警示判定與畫面指標同時失真。三處皆改為以該股市場時區取今日
+- [ ] **新增市場時區的單一入口**：`MarketZones` 提供 `today(String market)` 與 `nowLocal(String market)`，作為所有「市場今日／市場現在」的唯一取得方式，避免各處各自寫一遍 `LocalDate.now(resolve(market))`
+- [ ] **naive timestamp 欄位的語意收斂為兩種**：`timestamp without time zone` 欄位一律存**台北牆鐘**，唯二例外為 `stock_alert.last_triggered_at` 與 `stock_alert_trigger.triggered_at`（存**市場牆鐘**，是顯示端要的語意——使用者要看到「紐約時間 12:00 觸發」），該例外須於 `design.md` 與欄位註解標明。切換前的四種並存時鐘（台北／UTC／市場／DB）不得留存
+- [ ] **一次性歷史資料校正，且必須與 TZ 切換同一次部署**：47 個非 Liquibase 的 naive 欄位中，**只有 11 欄需要 `+ INTERVAL '8 hours'`**；**28 欄已是台北牆鐘（由 service 層 `LocalDateTime.now(TW_ZONE)` 寫入）絕對不可動**，動了會弄壞排程的「今日是否已跑過」判定；2 欄市場牆鐘不可動；2 欄 Liquibase 內部不管；其餘為下一條所述的「不位移」欄位。台北全年固定 UTC+8、無夏令時間，固定 interval 安全
+- [ ] **判準是「寫入端怎麼繫結」，不是 Java 型別**（這一條決定上一條的清單，寫錯就是不可逆的資料損毀）：
+  - 裸 `LocalDateTime.now()` → **位移** → 納入校正
+  - SQL `NOW()` 灌進 naive 欄 → **位移** → 納入校正（pgjdbc 每條連線把 JVM 預設時區當 session TimeZone 送出，`timestamptz→timestamp` 的隱式轉型即依該值）
+  - JdbcTemplate 的 `Timestamp.from(instant)`（不帶 Calendar）→ **位移**，但**破口在寫入端**：改歷史值只會把舊列一起弄錯。修法是把寫入端改綁 `LocalDateTime.ofInstant(now, ZoneOffset.UTC)`，歷史資料不動
+  - **Hibernate 的 `Instant` 欄位 → 不位移，絕對不可校正**：Hibernate 6 對 `Instant` 走 `TimestampUtcAsJdbcTimestampJdbcType`，bind 與 extract 兩側都帶 UTC Calendar，時區中立。對這些欄位 `+8` 會把目前正確的顯示永久改壞
+- [ ] **同一個欄位可能有兩個寫入端**：`crawler_export_setting.gdrive_last_run_at` 由 business 的 Hibernate（`Instant`，時區中立）與 ext 的 JdbcTemplate（`Timestamp.from`，隨 JVM 時區）各寫一次。切換後兩端會分家 8 小時，故必須把 ext 端改成顯式 UTC 繫結；此欄**不納入**歷史校正
+- [ ] **changeset 不可重跑**：本專案有前科（changeset 改 id 導致 Liquibase 視為新 migration 重跑 → 整站 crash loop）。校正 changeset 的 id **絕對不可改名**，且須附 `--rollback` 區塊；上線前須確認 `databasechangelog` 中無同 id 紀錄。重跑一次的後果是資料變成 +16 小時。**刻意不設日期 cutoff**：Liquibase 於 Web 層與排程啟動前執行、ext 又以 `depends_on: service_healthy` 等待 business，執行當下全表皆為舊值；寫死 cutoff 反而會在部署延後時漏掉那幾天的新列
+- [ ] **測試環境與正式一致**：`backend` 與 `external-materials-service` 的 surefire 加 `-Duser.timezone=Asia/Taipei`，避免「本機測試過、容器行為不同」；並新增測試斷言市場今日入口在台北凌晨時段回傳美東當日而非 D+1
+- [ ] **前端：顯示端零改動，但「今天」的產生方式必須改**。
+  - **顯示端零改動**：後端改吐台北牆鐘後，既有的字串切割顯示（`s.replace('T',' ').slice(0,16)`）與 `dayjs` 格式化**自動變正確**。已確認前端不存在任何 +8 小時補償 hack（無 `28800`／`addHours(8)`／`utcOffset`），故**不得**為本需求在前端新增任何時區補償——那會造成雙重補償
+  - **但前端自己算的「今天」是 UTC，後端換時區救不到**：`new Date().toISOString().slice(0,10)` 取的是 UTC 日期，台北 00:00–08:00 之間會得到「昨天」。這影響三處使用者可見的預設日期（新增交易／已實現損益／新增快照），且會與後端的 `isToday` 判定分家——目前兩邊碰巧都是 UTC 才一致，後端一改台北就會裂開，導致快照表單不刷即時匯率、美英股部位用舊 USD 匯率換算。這批必須改用本地日期（`toLocaleDateString('sv-SE')`），與後端同一個時區基準
+- [ ] **可回退**：`TZ` 以 `${APP_TZ:-Asia/Taipei}` 形式注入，回退只需覆寫環境變數並 recreate；但 DB 校正無法由 Liquibase 自動 rollback，changeset 內須附對應的 `- INTERVAL '8 hours'` 反向 SQL 供人工執行

@@ -168,4 +168,9 @@ docker exec asset-frontend ls /usr/share/nginx/html/assets/ | grep -E 'Transacti
 - `scripts/spec-check.sh`：0 BLOCK / 0 CHECK
 - spec 對抗式審查（獨立 subagent）：critical 0 / major 3 / minor 4，**7 條全數修正**——(a) 驗證段補 `cp .env`（worktree 無 `.env`，compose interpolate 階段就會失敗）；(b) 刪除恆為通過的 bundle grep，改為比對 chunk content hash；(c) **修正 watch 技術理由**：原寫「pre-flush 造成短暫停在 TWD」是錯的，真正的失效是「同值寫回不 trigger watch」造成的**永久**錯值，並補上專門釘這條路徑的驗收第 5／10 條；(d) 補記 `openCreateDialog()` 本身就會呼叫 `resetForm()`（需求成立的真正保證）；(e) 修正 frontend `--no-cache` 的理由；(f) 補記市場被停用時的已知限制；(g) Requirement 6 的 AC 拆成兩條，只讓新行為掛 Task 250
 
-**尚未執行**：Docker image rebuild ＋ container recreate ＋ 10 條實機操作驗證（本專案共用同一套 stack，依「merge 後從 main 的 worktree 重建」規則進行）。
+**部署（已執行）**：merge 進 main 後依「共用 stack 一律從 main 的 worktree 重建」規則，於 `/Users/steven/Project/asset-management-main` 執行 `build --no-cache frontend` ＋ `up -d --no-deps --force-recreate frontend`。驗證：
+- chunk content hash 兩支皆變動 — `TransactionView-ldmfbm17.js` → `TransactionView-Jg_3iNo8.js`、`RealizedGainView-Db8VsCEl.js` → `RealizedGainView-CC1lntmL.js`（證明不是 stale bundle）
+- 兩支新 chunk 各含 1 處 `||"台股"`（`defaultMarket()` 的 minified 形式；改動前寫死的 `market:"台股"` 不會產生此樣式）
+- `curl -s -o /dev/null -w "%{http_code}" http://localhost/` → `200`
+
+**尚未執行**：10 條實機操作驗證需以 Google 帳號登入 UI，無法在無人值守下代跑，留給使用者確認。

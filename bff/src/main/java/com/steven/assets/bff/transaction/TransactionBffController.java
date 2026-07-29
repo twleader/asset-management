@@ -2,6 +2,7 @@ package com.steven.assets.bff.transaction;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -16,6 +17,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -74,6 +76,31 @@ public class TransactionBffController {
                         .queryParam("market", market)
                         .build())
                 .retrieve().bodyToMono(MAP).map(ResponseEntity::ok);
+    }
+
+    /**
+     * 交易日期對應的匯率（Task 251）。轉呼「同一支」business API
+     * {@code /api/market-data/exchange-rate/on-date}（與快照表單、美股持股交易日匯率、已實現損益同源，
+     * 底層同為 {@code ExchangeRateHistoryRepository.findClosestRate}），不在 business 端新增第二份實作。
+     *
+     * <p>降級<b>只針對 4xx</b>：business 對「該日之前沒有任何該幣別的列」回 404，此處轉為 200 空物件，
+     * 讓前端把欄位留白並提示「查無牌告」。5xx／逾時／連線中斷<b>必須讓它浮上去</b>——那是「取不到」
+     * 而非「沒有」，前端要據以解除匯率欄的唯讀狀態讓使用者手動輸入（Requirement 49）。兩者若共用同一條
+     * 降級路徑，使用者會在系統故障時看到「查無匯率」並存下 exchangeRate=null 的 USD 交易，其台幣金額
+     * 會等於美元金額（少算約 32 倍）且直接計入年度彙總。
+     */
+    @GetMapping("/exchange-rate")
+    public Mono<ResponseEntity<Map<String, Object>>> exchangeRate(@RequestParam String date) {
+        return businessServicesClient.get()
+                .uri(uriBuilder -> uriBuilder.path("/api/market-data/exchange-rate/on-date")
+                        .queryParam("currency", "USD")
+                        .queryParam("date", date)
+                        .build())
+                .retrieve()
+                .onStatus(HttpStatusCode::is4xxClientError, resp -> Mono.empty())
+                .bodyToMono(MAP)
+                .defaultIfEmpty(Collections.emptyMap())
+                .map(ResponseEntity::ok);
     }
 
     @PostMapping

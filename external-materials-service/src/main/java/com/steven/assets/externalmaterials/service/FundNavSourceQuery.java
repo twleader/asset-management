@@ -50,11 +50,11 @@ public class FundNavSourceQuery {
         Instant now = Instant.now();
         if (existing != null) {
             jdbc.update("UPDATE fund_nav SET nav=?, source=?, fetched_at=? WHERE id=?",
-                    nav, source, java.sql.Timestamp.from(now), existing);
+                    nav, source, java.time.LocalDateTime.ofInstant(now, java.time.ZoneOffset.UTC), existing);
         } else {
             jdbc.update("INSERT INTO fund_nav (fund_code, nav_date, nav, source, fetched_at) "
                     + "VALUES (?, ?, ?, ?, ?)",
-                    fundCode, navDate, nav, source, java.sql.Timestamp.from(now));
+                    fundCode, navDate, nav, source, java.time.LocalDateTime.ofInstant(now, java.time.ZoneOffset.UTC));
         }
     }
 
@@ -70,11 +70,11 @@ public class FundNavSourceQuery {
         Instant now = Instant.now();
         if (existing != null) {
             jdbc.update("UPDATE fund_dividend_history SET amount=?, currency=?, frequency=?, fetched_at=? WHERE id=?",
-                    amount, currency, frequency, java.sql.Timestamp.from(now), existing);
+                    amount, currency, frequency, java.time.LocalDateTime.ofInstant(now, java.time.ZoneOffset.UTC), existing);
         } else {
             jdbc.update("INSERT INTO fund_dividend_history (fund_code, base_date, amount, currency, frequency, fetched_at) "
                     + "VALUES (?, ?, ?, ?, ?, ?)",
-                    fundCode, baseDate, amount, currency, frequency, java.sql.Timestamp.from(now));
+                    fundCode, baseDate, amount, currency, frequency, java.time.LocalDateTime.ofInstant(now, java.time.ZoneOffset.UTC));
         }
     }
 }

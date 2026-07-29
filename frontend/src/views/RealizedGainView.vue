@@ -352,6 +352,7 @@ import dayjs from 'dayjs'
 import { bffApi } from '@/api'
 import { showGdriveSelfCheckWarning } from '@/utils/gdriveSelfCheck'
 import { useAuthStore } from '@/stores/authStore'
+import { todayLocal } from '@/utils/localDate'
 import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
 
 const realizedGains = ref([])
@@ -658,7 +659,7 @@ async function handleExport() {
 
 const openCreateDialog = () => {
   resetForm()
-  gainForm.tradeDate = new Date().toISOString().slice(0, 10)
+  gainForm.tradeDate = todayLocal()
   dialogVisible.value = true
 }
 

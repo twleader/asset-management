@@ -61,6 +61,14 @@ public class StockAlertTrigger {
     @Column(nullable = false, length = 20)
     private String market;
 
+    /**
+     * 觸發時間，**存「該股市場」的牆鐘**（台股台北／美股紐約／英股倫敦），
+     * 由 {@code StockAlertService.computeTriggeredAt()} 寫入。
+     *
+     * <p>Requirement 53「naive 欄位一律存台北牆鐘」的**唯二例外之一**（另一個是
+     * {@code StockAlert.lastTriggeredAt}）。<b>不可納入時區校正 migration</b>。
+     * 注意同一列的 {@code createdAt} 是 JVM 牆鐘，兩者相減依市場恆為 −8h／+4h／−1h，這是預期的。
+     */
     @Column(name = "triggered_at", nullable = false)
     private LocalDateTime triggeredAt;
 

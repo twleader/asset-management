@@ -272,7 +272,8 @@
           </el-col>
           <el-col :span="8">
             <el-form-item label="交易日期" prop="tradeDate" label-width="90px">
-              <el-date-picker v-model="txForm.tradeDate" type="date" value-format="YYYY-MM-DD" style="width:100%" />
+              <el-date-picker v-model="txForm.tradeDate" type="date" value-format="YYYY-MM-DD" style="width:100%"
+                :clearable="false" @change="onTradeDateChange" />
             </el-form-item>
           </el-col>
         </el-row>
@@ -309,8 +310,13 @@
         <el-row :gutter="16">
           <el-col :span="12">
             <el-form-item label="匯率" v-if="txForm.currency === 'USD'">
-              <el-input v-model="txForm.exchangeRateStr" :input-style="{ textAlign: 'right' }"
-                @blur="onBlurField('exchangeRate', 4)" />
+              <el-input v-model="txForm.exchangeRateStr" :disabled="!fxError"
+                :input-style="{ textAlign: 'right' }" @blur="onBlurField('exchangeRate', 4)" />
+              <span class="fx-hint fx-hint-warn" v-if="fxError">匯率服務暫時無法連線，可自行輸入或稍後再試</span>
+              <span class="fx-hint" v-else-if="fxNotFound">查無 {{ txForm.tradeDate }} 或之前的匯率，可留空儲存</span>
+              <span class="fx-hint" v-else-if="fxRateDate && fxRateDate !== txForm.tradeDate">
+                採用 {{ fxRateDate }} 匯率（交易日無牌告）
+              </span>
             </el-form-item>
           </el-col>
           <el-col :span="12">
@@ -342,6 +348,7 @@ import dayjs from 'dayjs'
 import { bffApi } from '@/api'
 import { showGdriveSelfCheckWarning } from '@/utils/gdriveSelfCheck'
 import { useAuthStore } from '@/stores/authStore'
+import { todayLocal } from '@/utils/localDate'
 
 const TX_TYPES = ['買', '賣']
 const ASSET_TYPES = ['股票', '基金']
@@ -439,6 +446,52 @@ const autoFillAssetName = async () => {
   }
 }
 
+// ===== Task 251：匯率依交易日期自動帶出（唯讀） =====
+const fxRateDate = ref('')      // 實際採用的匯率日期（可能早於交易日期：假日往前退）
+const fxNotFound = ref(false)   // 查無（BFF 對 404 回 200 {}）：該日之前沒有任何 USD 列
+const fxError = ref(false)      // 查詢失敗（5xx／逾時／連線中斷）：解除唯讀讓使用者手填
+const originalFxStr = ref('')   // 編輯時該筆自己已存的匯率，供切換幣別後還原
+const fxDateDirty = ref(false)  // 使用者是否「實際改動過」交易日期
+let fxSeq = 0                   // 競態序號：只認最後一次
+
+const clearFx = () => {
+  txForm.exchangeRateStr = ''
+  fxRateDate.value = ''; fxNotFound.value = false; fxError.value = false
+}
+
+const refreshExchangeRate = async () => {
+  const date = txForm.tradeDate
+  const seq = ++fxSeq                        // 必須在 early-return 之前遞增，才能讓 in-flight 的舊查詢作廢
+  if (txForm.currency !== 'USD' || !date) { clearFx(); return }
+  try {
+    const res = await bffApi.transaction.exchangeRate(date)
+    if (seq !== fxSeq) return                // 已有更新的查詢，丟棄本次結果
+    const rate = res?.midRate
+    if (rate != null) {
+      txForm.exchangeRateStr = fmtNum(Number(rate), 4)
+      fxRateDate.value = res.rateDate || ''
+      fxNotFound.value = false; fxError.value = false
+    } else {                                 // 查無牌告（BFF 已把 404 降級成 200 {}）
+      clearFx(); fxNotFound.value = true
+    }
+  } catch (e) {                              // 非 4xx：取不到，不是沒有 → 解鎖讓使用者手填
+    if (seq !== fxSeq) return
+    clearFx(); fxError.value = true
+  }
+}
+
+const onTradeDateChange = () => { fxDateDirty.value = true; refreshExchangeRate() }
+
+// 幣別切到 USD 時補匯率；切離 USD 時清掉，避免殘值
+watch(() => txForm.currency, (c) => {
+  if (c !== 'USD') { fxSeq++; clearFx(); return }          // fxSeq++ 使 in-flight 查詢作廢
+  if (originalFxStr.value && !fxDateDirty.value) {          // 編輯中且日期未被改動 → 還原原值，不重查
+    txForm.exchangeRateStr = originalFxStr.value
+    return
+  }
+  if (!String(txForm.exchangeRateStr || '').trim()) refreshExchangeRate()
+})
+
 // 台幣成交金額即時預覽
 const computedAmountTwd = computed(() => {
   const amount = parseNum(txForm.amountStr)
@@ -526,12 +579,15 @@ const resetForm = () => {
     market, currency: defaultCurrency(market), channel: '', tradeDate: '', notes: '',
     sharesStr: '', priceStr: '', amountStr: '', exchangeRateStr: ''
   })
+  // Task 251：清掉上一次的匯率狀態，避免殘留到下一次開啟
+  originalFxStr.value = ''; fxDateDirty.value = false; clearFx()
   formRef.value?.clearValidate()
 }
 
 const openCreateDialog = () => {
   resetForm()
-  txForm.tradeDate = new Date().toISOString().slice(0, 10)
+  txForm.tradeDate = todayLocal()
+  refreshExchangeRate()          // Task 251：預設日期（今天）的匯率
   dialogVisible.value = true
 }
 
@@ -551,6 +607,7 @@ const openEditDialog = (row) => {
   txForm.priceStr = row.price != null ? fmtNum(row.price, 6) : ''
   txForm.amountStr = row.amount != null ? fmtNum(row.amount, isUsd ? 2 : 0) : ''
   txForm.exchangeRateStr = row.exchangeRate != null ? fmtNum(row.exchangeRate, 4) : ''
+  originalFxStr.value = txForm.exchangeRateStr   // Task 251：保留該筆自己的匯率，供切換幣別後還原
   dialogVisible.value = true
 }
 
@@ -745,6 +802,10 @@ function confirmDirPick() {
 .year-sub.sell { color: #dc2626; }
 .tx-table :deep(.el-table__cell) { font-size: 13.5px; }
 .market-tabs :deep(.el-tabs__header) { margin-bottom: 8px; }
+
+/* 匯率自動帶入的狀態提示（Task 251） */
+.fx-hint { display: block; font-size: 12px; color: #94a3b8; line-height: 1.5; margin-top: 2px; }
+.fx-hint-warn { color: var(--el-color-warning); }
 
 /* 排程自動匯出設定（Task t238） */
 .schedule-form { margin-bottom: 4px; }

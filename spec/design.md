@@ -1767,6 +1767,54 @@ END:VEVENT / END:VCALENDAR
 
 **已知前提（寫在設定頁提示，不是程式能控制的）**：收件人的 Google 日曆「自動將邀請加入日曆」需維持預設「是」；若設為「僅在我回覆時」，需在信中手動接受一次事件才會進日曆。
 
+## 系統時區基準（Requirement 53 / Task 252）
+
+### 三條規則
+
+1. **JVM 預設時區 = `Asia/Taipei`，由 compose 的 `TZ` 環境變數設定，是唯一開關。** 它的語意是「沒有顯式指定 ZoneId 的呼叫落在哪裡」。切換前為 UTC——那是全系統唯一沒有任何人想要的時區（使用者在台灣，三個市場時區則早已 100% 顯式化）。
+2. **`timestamp without time zone` 欄位一律存台北牆鐘**，唯二例外：`stock_alert.last_triggered_at` 與 `stock_alert_trigger.triggered_at` 存**市場牆鐘**（`computeTriggeredAt()` 的 `ZonedDateTime.now(市場 zone)`），因為顯示端要的就是「紐約時間 12:00 觸發」。這兩欄的 entity 需有註解標明。
+3. **涉及「交易日／今日」的判定一律走 `MarketZones.today(market)` / `nowLocal(market)`，禁用裸 `LocalDate.now()`。** 沒有市場語境的顯示用時間戳可用裸 `now()`（此時它就是台北）。
+
+### 為什麼是容器 TZ 而不是別的做法
+
+- **`spring.jackson.time-zone` 無效**：它只對本身帶時區的型別（`Date`／`Calendar`／`ZonedDateTime`）生效。entity 全是 `LocalDateTime`，按定義沒有時區資訊，Jackson 只能照字面輸出（實測 JSON 為 `"createdAt":"2026-06-05T18:53:29.153553"`，無 `Z` 無 offset），沒有 offset 可寫也就沒有東西可轉。
+- **`TimeZone.setDefault()` 在 `@PostConstruct` 不可靠**：`@Scheduled` 的 cron 在 `ScheduledAnnotationBeanPostProcessor` 註冊時就把時區綁進 trigger，與哪個 `@PostConstruct` 先跑沒有保證。要改就在 JVM 啟動前決定。
+- **PostgreSQL 不能只設 `TZ` 環境變數**：實測資料目錄的 `postgresql.conf` 已被 initdb 寫死 `timezone = UTC`（`pg_settings.source = configuration file`），環境變數贏不過它，要改須用 `command: ["postgres","-c","timezone=Asia/Taipei",...]`。**但它管不到應用連線**：pgjdbc 的 startup packet 一律以 JVM 預設時區覆寫該連線的 session TimeZone，故 server 端的值只影響手動 `psql` 查詢與 server 日誌。設它是為了讓這兩者與應用同基準，不是為了改變應用行為。
+
+### 部署約束（本任務最關鍵的一條）
+
+**三段——容器 TZ、程式碼修正、歷史校正——必須同一個 commit、同一次 build、同一次 `up -d`。** 拆開部署會產生半套狀態：只改 TZ 不改冷卻判定 → 美股警示 12 小時就重複寄信；只跑 migration 不改 TZ → 所有時間顯示變成**超前** 8 小時；只改 TZ 不改 ext 寫入端 → `gdrive_last_run_at` 的兩個寫入端分家。
+
+### 49 個 naive 欄位的分類
+
+**判準是「寫入端怎麼繫結」，不是 Java 型別。** 這一點決定了 migration 清單，寫錯就是不可逆的資料損毀。
+
+| 分類 | 欄位數 | 寫入端 | 會隨 JVM 時區位移？ | 處置 |
+|---|---|---|---|---|
+| 裸 `LocalDateTime.now()` | 10 | 5 個 entity 的 `@PrePersist`/`@PreUpdate`（9 欄）＋ `MarketAnalysisService`（1 欄） | 會 | **`+ INTERVAL '8 hours'`** |
+| SQL `NOW()` 灌進 naive 欄 | 1 | ext `StockSourceQuery` | 會（pgjdbc 以 JVM 時區當 session TimeZone） | **`+ INTERVAL '8 hours'`** |
+| JdbcTemplate `Timestamp.from(instant)` | 3 | ext `CrawlerExportPathQuery` / `FundNavSourceQuery` | 會（`setTimestamp` 不帶 Calendar） | **改寫入端**綁 `LocalDateTime.ofInstant(now, UTC)`；**歷史資料不動** |
+| Hibernate 的 `Instant` 欄位 | 3 | business JPA | **不會** | **絕對不可動** |
+| 台北牆鐘 | 28 | service 層 `LocalDateTime.now(TW_ZONE)`（7 張匯出排程表 ×3、交易雷達匯出 ×4、備份 ×3） | 不會 | **不可動**——動了會弄壞排程的「今日是否已跑過」判定 |
+| 市場牆鐘 | 2 | `computeTriggeredAt()` | 不會 | **不可動**（規則 2 的例外） |
+| DB 內部 | 2 | Liquibase | — | 不管 |
+
+合計 10+1+3+3+28+2+2 = 49。**需要歷史校正的只有前兩列共 11 欄。**
+
+**為什麼 Hibernate 的 `Instant` 不位移**：Hibernate 6 對 `Instant` 走 `TimestampUtcAsJdbcTimestampJdbcType`，bind 是 `setTimestamp(i, ts, UTC_CALENDAR)`、extract 是 `getTimestamp(i, UTC_CALENDAR)`，兩側都釘在 UTC，與 JVM 預設時區無關。對這類欄位 `+8` 會把目前正確的顯示永久改壞——這是本任務最容易犯、且最難回復的錯。
+
+**同一欄可能有兩個寫入端**：`crawler_export_setting.gdrive_last_run_at` 由 business 的 Hibernate（`Instant`，UTC 中立）與 ext 的 JdbcTemplate（`Timestamp.from`，隨 JVM 時區）各寫一次。切換前兩者碰巧都產生 UTC 牆鐘所以一致；切換後 ext 端會變台北而 Hibernate 端仍是 UTC → 分家 8 小時。修法是把 ext 端改為顯式 UTC 繫結，**不是**校正歷史值。
+
+分類判準以**寫入端程式碼**為準，並以運行中 DB 的實值交叉驗證（把每個欄位的 `max()` 與 `now() AT TIME ZONE 'UTC'` 相減：台北牆鐘那組落在 +5～+8h，UTC 那組落在 0～−1h）。
+
+### 校正後仍存在的殘留
+
+`LocalDateTime` 欄位是時區中立的（牆鐘原樣往返），所以切換本身**不會改變任何舊列的數字**——不校正的話，畫面顯示也不會變（仍舊錯 8 小時），只有新列開始正確，形成「同一張表兩種基準、看不出哪個是哪個」的混合態。校正的意義正是消除這個混合態，而不是修復切換造成的破壞。
+
+### 不受影響（切換前後行為完全相同）
+
+46 個帶 `zone` 的 `@Scheduled`（Spring 的 `zone` 覆蓋 JVM 預設，已用運行中日誌實證：英股 `0 32 16` zone=Europe/London 於 `15:32:00Z` 觸發＝倫敦 16:32 BST）、3 個 `fixedDelay` 排程、`MarketZones`／`MarketClock`、`AlertNotificationDispatcher.withinSendWindow()`、`BackupService` 的 `DISPLAY_ZONE`、所有 `Instant.now()`（絕對時間軸）、10 個 `timestamptz` 欄位、以及**全部前端顯示程式碼**（後端改吐台北牆鐘後自動正確；前端不存在任何 +8 補償 hack，不得為此新增，否則雙重補償）。
+
 ## Infrastructure
 
 ### Docker Compose Services
@@ -4686,3 +4734,46 @@ TransactionView el-tree 懶載入
 
 - `frontend/src/views/TransactionView.vue`：新增 `defaultMarket()`，`resetForm()` 改用它並同步算 `currency`
 - `frontend/src/views/RealizedGainView.vue`：同上（`gainForm`）
+
+---
+
+## Task 251：交易紀錄的匯率改為依交易日期自動帶出（唯讀）
+
+對應 Requirements: 49。**前端 ＋ BFF 變更，business 與 DB 零變更**（沿用既有端點與既有欄位），無 Liquibase changeset。
+
+### 現況
+
+`asset_transaction.exchange_rate` 是**全庫唯一**靠使用者手打的匯率：`TransactionView.vue` 以 `el-input`（`txForm.exchangeRateStr`）接受輸入，`AssetTransactionService.create/update` 原封寫入 `req.exchangeRate()`，後端零查詢。同語意的其他三處早已自動化——`asset_snapshot.usd_exchange_rate` 與 `stock_holding.transaction_exchange_rate` 由前端依日期查（`bffApi.snapshotForm.exchangeRate(date)`），`realized_gain.exchange_rate` 由 business 端 `AssetService.lookupExchangeRate(tradeDate)` 自動查，該頁表單根本沒有匯率輸入欄。
+
+### 資料流（新增的只有最上面兩層）
+
+```
+TransactionView 交易日期變更 / 幣別切到 USD
+  → bffApi.transaction.exchangeRate(date)            ← 前端新 wrapper
+  → GET /api/bff/transaction/exchange-rate?date=     ← BFF 新增 passthrough（本頁自己的 BFF）
+      → GET /api/market-data/exchange-rate/on-date?currency=USD&date=   ← 既有 business 端點，不動
+          → HistoricalDataService.getExchangeRateOnDate
+              → ExchangeRateHistoryRepository.findClosestRate（該日或之前最近一筆）
+  ← { rateDate, midRate, buyRate, sellRate, fundValuationRate }（查無 → BFF 回 200 {}）
+  → 前端取 midRate 填入唯讀欄，並顯示實際 rateDate
+```
+
+### 關鍵設計決策
+
+1. **不新增 business 端點、不新增第二份查詢實作**。`GET /api/market-data/exchange-rate/on-date` 已存在且語意完全相同（`findClosestRate` 為全庫唯一的 closest-on-or-before 匯率查詢，已有 6 個呼叫端）。依「一頁一 BFF」，交易頁不得直接呼叫別頁的 `GET /api/bff/snapshot-form/exchange-rate`，也不走 `/api/market-data/**` 的 gateway passthrough，而是在 `TransactionBffController` 新增自己的 passthrough（寫法比照同檔既有的 `/lookup-name`）。
+2. **取中間價 `midRate`**。同義欄位的三處（快照、持股交易日匯率、已實現損益）都用中間價；只有基金估值刻意用即期買入（`getFundValuationRate()`，註解明寫「不可用中間價（會高估）」）。本欄語意屬前者。
+3. **BFF 不做「今天先 refresh」**。`SnapshotFormBffController` 在 `date == LocalDate.now()` 時會先 `POST /api/market-data/exchange-rate/refresh` 再查，本頁**刻意不照做**，兩個理由：(a) 該 refresh 一次做三件事——FinMind 回補近 10 天、台銀/Yahoo 抓今日、**`purgeOldExchangeRates(currency, 10)` 刪除十年前的資料**，對一個「填表時順手查匯率」的動作而言副作用過大；(b) 盤中匯率排程本來就每 5 分鐘更新（`ExchangeRatePoller` 的 `@Scheduled(cron = "0 0/5 9-15 * * MON-FRI", zone = "Asia/Taipei")`，寫死於程式碼、非 DB 可設定），今日值通常已在。代價是清晨或排程尚未跑到時會回退到前一個有資料日，而該日期會顯示在 UI 上（見決策 5），不是靜默的。
+   > 註：**不要拿「容器時區」當作不做 refresh 的理由**。Task 252 起全 stack 以啟動參數統一為 `Asia/Taipei`（實測 host／business／bff 三者同秒同時區），`LocalDate.now()` 與 `date == today` 的判斷是可靠的；此處不照做純粹是因為副作用與收益不成比例。
+4. **不在 business 端補值**。`AssetTransactionService` 維持原封寫入，不比照 `AssetService.createRealizedGain` 加 `lookupExchangeRate`。理由：已實現損益那套「寫入時查一次、讀取時若為 null 再查一次」已被實測證明會產生**存檔值與事後重算值不一致**（4 組實例），而交易紀錄的定位是「流水帳只記事實」；匯率一律由前端在使用者眼前查得、看得到、連同表單一起送出，寫入什麼就是使用者當下看到的那個數字。
+5. **回退取值必須揭露 `rateDate`**。近 365 天只有 72.1% 的日曆日有 USD 列（週末全缺、國定假日的平日也缺，最長退 9 天），所以「查到的匯率不是交易當天的」是常態而非例外。UI 顯示實際採用日期，使用者才能判斷是否要沿用。
+6. **編輯既有紀錄不重查**（本任務最容易做錯的地方）。只有「使用者改動交易日期」或「該筆原本無匯率」才觸發查詢。無條件重查會用事後被 FinMind 覆寫過的值改寫歷史交易，也會抹掉使用者刻意填入的券商實際扣款匯率（`asset_transaction` id=63 即為實例：存 31.5000，該日中間價 31.2350）。
+   **實作上必須用「原值備份 ＋ 日期已異動旗標」，不得只憑「匯率欄目前是否為空」判斷。** 只憑空值的版本有一條實際會走到的破口：編輯一筆美股交易時把「市場」誤改為台股（`market` watch 把 `currency` 轉 TWD → 匯率欄被清空），再改回美股（`currency` 轉回 USD → 看到空值 → 觸發查詢），交易日期一次都沒被碰過，該筆的歷史匯率就被當日中間價覆寫了，而欄位是唯讀的、使用者沒有手段改回來。
+7. **競態以請求序號解**。使用者連續改日期會送出多個非同步請求，後送出的可能先回。以單調遞增的 `seq` 標記每次查詢，回應時比對 `seq !== latestSeq` 即丟棄，避免舊日期的匯率蓋掉新日期的。**每一條會使前次查詢作廢的路徑都必須遞增 `seq`**——包含「幣別切離 USD 而清空匯率」這種不發出新請求、只做清空的路徑；否則 in-flight 的舊回應仍會把值寫回一個已經不該有匯率的表單。
+8. **「查無牌告」與「查詢失敗」分開處理，失敗時解除唯讀**。兩者後果不同：查無（business 404）是資料本來就沒有，欄位留空、維持唯讀、可直接存檔；查詢失敗（5xx／逾時／連線中斷）是取不到而非沒有，此時**暫時解除唯讀讓使用者可手動輸入**。這是本需求的必要配套——把手填欄改成唯讀等於拿掉使用者唯一的輸入手段，若失敗時仍鎖著，使用者就完全無法記下一筆金額正確的 USD 交易，而 `exchangeRate=null` 的 USD 交易其台幣金額會等於美元金額（少算約 32 倍）且直接進年度彙總。故 BFF 的降級**只針對 4xx**，5xx 與連線錯誤要讓前端分辨得出來。
+9. **不論查無或失敗都不擋存檔**。`exchangeRate` 送 null 時 `amountTwd` 退回原幣金額——`AssetTransactionService.toResponse` 與 `ExcelExportService.assetTxAmountTwd` 兩處既有公式本來就處理 null，不需修改。
+
+### 異動檔案
+
+- `bff/.../transaction/TransactionBffController.java`：新增 `GET /exchange-rate?date=` passthrough（404／錯誤降級為 `200 {}`）
+- `frontend/src/api/index.js`：`transaction` 命名空間新增 `exchangeRate(date)`
+- `frontend/src/views/TransactionView.vue`：匯率欄改唯讀、新增自動查詢與 `rateDate` 揭露、競態序號

@@ -344,10 +344,10 @@
 /usr/local/apache-maven/apache-maven-3.9.11/bin/mvn -q -f backend/pom.xml test -Dtest='StockAlertGroupLabelTest,StockAlertGroupValidationTest,StockAlertGroupMatchTest'
 ```
 
-全量測試（Mockito 測試在本機 JDK 需 byte-buddy experimental 旗標，且必須經 `-DargLine` 傳入，直接 `-D` 對 surefire fork 無效）：
+全量測試（Mockito 在本機 JDK 需 byte-buddy experimental 旗標；**必須用 `-DextraArgLine`，不可用 `-DargLine`**——Task 252 起 `backend/pom.xml` 的 surefire `argLine` 固定為 `-Duser.timezone=Asia/Taipei ${extraArgLine}`，命令列直接下 `-DargLine=` 會整條覆蓋掉時區設定，實測會讓 181 個 Mockito 測試轉為 error）：
 
 ```bash
-/usr/local/apache-maven/apache-maven-3.9.11/bin/mvn -f backend/pom.xml test -DargLine="-Dnet.bytebuddy.experimental=true"
+/usr/local/apache-maven/apache-maven-3.9.11/bin/mvn -f backend/pom.xml test -DextraArgLine=-Dnet.bytebuddy.experimental=true
 ```
 
 部署（本專案無 dev server，「改好」＝ image rebuild + container recreate；JVM service 一律 `--no-cache`，否則 cached layer 可能不含本次變更）：
@@ -469,7 +469,7 @@ docker exec asset-postgres psql -U assets -d assets -c "SELECT id, alert_id, gro
 - `frontend/src/views/WatchStockView.vue`：群組條件加「複合」標籤
 
 **驗證輸出**
-- `mvn test -DargLine="-Dnet.bytebuddy.experimental=true"` → **Tests run: 303, Failures: 0, Errors: 0**（含本任務 27 項，零回歸）
+- `mvn test -DextraArgLine=-Dnet.bytebuddy.experimental=true` → **Tests run: 310, Failures: 0, Errors: 0**（含本任務 27 項，零回歸；310 為併入 main 的 Task 252 之後的總數，併入前為 303）
 - `vite build` → `✓ built in 4.35s`，零錯誤
 - jar 內確認含 `StockAlertGroup.class` 等新 class 與 `v1.78.0-stock-alert-group.sql`（防 stale jar）
 - 容器啟動日誌：`v1.78.0-stock-alert-group ran successfully in 37ms`、`v1.78.0-stock-alert-group-constraints ran successfully in 7ms`，零 ERROR
@@ -492,6 +492,8 @@ docker exec asset-postgres psql -U assets -d assets -c "SELECT id, alert_id, gro
 3. **`stock_alert_group_recipient` 的兩個 FK 改為具名**（`fk_sagr_group` / `fk_sagr_recipient`）：253.17b 以名稱指稱該 FK，匿名的話 Postgres 會自動命名為 `stock_alert_group_recipient_recipient_id_fkey`，與規格不一致。仍在 `CREATE TABLE IF NOT EXISTS` 內，冪等性不受影響。
 4. **`evaluateGroup` 用明確迴圈而非 `allMatch`**：短路後仍為未評估的成員補 `false` 佔位，使 `memberResults` 筆數與成員數一致 —— 否則 `groupTriggered` 的「≥2 成員」守門會被短路壓成 1 筆而誤判。
 5. **`StockAlertRepository.deleteByGroupId` 用 derived delete、join 表的 `deleteByGroupId` 用 bulk `@Modifying`**：兩張表的正確選擇相反。join 表有唯一鍵，`replaceGroupRecipients` 先刪後插會撞 `uq_stock_alert_group_recipient`（Hibernate action queue 預設先 insert 後 delete），故需 bulk 立即執行；`stock_alert` 無唯一鍵，反倒要避免 bulk 繞過 persistence context 造成成員殘留 managed 狀態、flush 時對已刪列發 UPDATE。
+
+6. **併入 main 的 Task 252（系統時區統一台北）後，補修群組 cooldown 的時區 bug**：Task 252 把獨立條件的 24h cooldown 右側由 `LocalDateTime.now()` 改為 `MarketZones.nowLocal(market)`——兩側必須同為該市場牆鐘，否則冷卻長度變成 24h ± 市場 offset（台股實測 32h，早上觸發後隔天整個交易日仍在冷卻中而靜默漏發）。`evaluateGroup` 的群組 cooldown 是本任務新寫的、帶著一模一樣的 bug，**且 git 因改在不同行而自動合併成功、沒有產生衝突標記**。已一併改為 `MarketZones.nowLocal(group.getMarket()).minusHours(24)`。這類「自動合併成功但語意錯誤」的情形，只能靠 merge 後重讀對方改了什麼來發現。
 
 **尚未完成**
 - commit / merge 進 main / 從 main 的 worktree 重建（依專案「共用 stack 誰最後 build 誰生效」規則）。
