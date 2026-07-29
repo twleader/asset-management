@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -159,6 +160,97 @@ public class HistoricalBackfillService {
         }
         if (count > 0) log.info("台股 {} 匯入 {} 筆", stockCode, count);
         return count;
+    }
+
+    /**
+     * 歷史修復結果（Task 258）。
+     *
+     * @param codesProcessed    實際處理的代號數
+     * @param rowsOverwritten   實際覆寫的列數（含寫回相同值者）
+     * @param codesWithNoSource 權威來源在該區間完全沒回傳 bar 的代號數
+     * @param codesFailed       抓取擲例外的代號數（已 graceful 跳過，不中斷整批）
+     */
+    public record RepairSummary(
+            String market, LocalDate from, LocalDate to,
+            int codesProcessed, int rowsOverwritten, int codesWithNoSource, int codesFailed) {}
+
+    /**
+     * 對指定市場與日期區間重新抓取權威日線並<b>覆寫</b>既有列（Task 258）。
+     *
+     * <p><b>為什麼不能重用 {@link #backfillTwStock}：</b>它有兩道各自獨立的阻擋使它修不了既有列——
+     * (1) 起點一律 {@code maxDate.plusDays(1)}，故區間中段永遠碰不到（腐化標的的 {@code maxDate} 就是
+     * 最近交易日 → {@code start} 落在明天 → {@code !start.isBefore(end)} → {@code return 0}）；
+     * (2) for-loop 內 {@code if (store.existsHistory(...)) continue;} 明確 skip-if-exists。
+     * {@code StockSourceQuery.upsertHistory} 本身是真 upsert（先 SELECT id、存在則 UPDATE），
+     * 但那兩道守門讓 backfill 路徑從不對既有日期呼叫它。故本方法是新路徑，不是既有路徑加參數。</p>
+     *
+     * <p><b>刻意不做偵測式判定：</b>採「重抓權威值直接覆寫」而非「先判斷哪列是錯的再修」。後者需要一套
+     * 啟發式規則，會有把真平盤誤判成腐化而覆寫掉正確資料的風險；覆寫式做法對真平盤無害（寫回相同的值），
+     * 且順帶修好「盤中 tick 被當收盤」那一類而不需要偵測它們。</p>
+     *
+     * <p><b>來源查無時保留既有列</b>，不刪除、不猜值、不以鄰日內插——來源查無可能是真休市、可能是該檔
+     * 當日無交易、也可能是來源暫時故障，三者都不足以支撐刪資料或填近似值（Requirement 7 禁止回寫充數）。</p>
+     *
+     * @param stockCode 指定單檔；null／空白時取 {@code collectAllStockCodes} 該市場的那一份
+     */
+    public RepairSummary repairRange(String market, String stockCode, LocalDate from, LocalDate to) {
+        if (!"台股".equals(market) && !"美股".equals(market) && !"英股".equals(market)) {
+            throw new IllegalArgumentException("market 只接受 台股 / 美股 / 英股，收到：" + market);
+        }
+        if (from == null || to == null || from.isAfter(to)) {
+            throw new IllegalArgumentException("from 不得晚於 to（from=" + from + ", to=" + to + "）");
+        }
+
+        List<String> codes;
+        if (stockCode == null || stockCode.isBlank()) {
+            Set<String> tw = new LinkedHashSet<>(), us = new LinkedHashSet<>(), uk = new LinkedHashSet<>();
+            store.collectAllStockCodes(tw, us, uk);
+            codes = new ArrayList<>("美股".equals(market) ? us : "英股".equals(market) ? uk : tw);
+        } else {
+            codes = List.of(stockCode.trim());
+        }
+
+        // 今日列獨佔給 ClosePersister（Task 84）；市場時區由 MarketClock.zoneOf 分流
+        LocalDate today = LocalDate.now(MarketClock.zoneOf(market));
+        // 逐檔節流沿用 startupBackfill 的既有值：台股 600ms、美/英股 2000ms
+        long throttle = "台股".equals(market) ? 600L : 2000L;
+
+        log.info("歷史修復 {} {} ~ {}：{} 檔", market, from, to, codes.size());
+        int rows = 0, noSource = 0, failed = 0, processed = 0;
+        boolean first = true;
+        for (String code : codes) {
+            if (!first) sleep(throttle);
+            first = false;
+            processed++;
+            try {
+                List<HistoricalBar> bars = switch (market) {
+                    case "美股" -> priceFetch.fetchUsHistoricalRange(code, from, to);
+                    case "英股" -> priceFetch.fetchUkHistoricalRange(code, from, to);
+                    default -> priceFetch.fetchTwHistoricalRange(code, from, to);
+                };
+                if (bars == null || bars.isEmpty()) {
+                    log.warn("歷史修復 {} {}：來源在 {} ~ {} 無任何 bar，既有列保留不動",
+                            market, code, from, to);
+                    noSource++;
+                    continue;
+                }
+                int wrote = 0;
+                for (HistoricalBar bar : bars) {
+                    if (bar.tradingDate().equals(today)) continue;   // 今日列獨佔
+                    // 與 backfill 的差別就在這裡：不檢查 existsHistory，一律覆寫
+                    store.upsertHistory(code, market, bar.tradingDate(),
+                            bar.open(), bar.high(), bar.low(), bar.close(), bar.volume());
+                    wrote++;
+                }
+                rows += wrote;
+            } catch (Exception e) {
+                log.warn("歷史修復 {} {} 失敗（不中斷整批）: {}", market, code, e.getMessage());
+                failed++;
+            }
+        }
+        log.info("歷史修復完成 {} {} ~ {}：處理 {} 檔、覆寫 {} 列、來源查無 {} 檔、失敗 {} 檔",
+                market, from, to, processed, rows, noSource, failed);
+        return new RepairSummary(market, from, to, processed, rows, noSource, failed);
     }
 
     public int backfillUsStock(String stockCode, LocalDate since, LocalDate until) {

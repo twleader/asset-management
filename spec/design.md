@@ -232,6 +232,116 @@ NASDAQ info API 自 2026/04 起對 ETF 的 `keyStats` 為 null（無 dayrange �
 
 `source` 欄不再出現 `"TWSE(前收)"`、也不會出現實驗階段曾用過的 `"TWSE(開盤)"`；走勢圖今日格的 `source.contains("(")` 守門條件仍適用於 `(history)` 等非「今日真實成交」來源（保留，避免未來其他來源被誤拼入今日格）。
 
+**持股抓價清單的 owner 涵蓋範圍（Task 257，推翻 Task 249 的「`collectHeldStockCodes` 不得修改」）：** `StockSourceQuery` 有三條收集路徑，Task 257 只動中間這條：
+
+| 方法 | 範圍 | 呼叫端 |
+|---|---|---|
+| `collectAllStockCodes` | `stock` 主檔 ∪ 全庫最新快照持股 ∪ `stock_alert` | `PricePoller.warmCacheOnStartup`、`DividendPersister` ×2 |
+| `collectHeldStockCodes` | 最新快照持股 ∪ `stock_alert` | `PricePoller` ×4（盤中 cron ×3 ＋ `refreshAll`）、`ClosePersister` ×4、`IntradayTickRefresher` ×4、`EtfNavPoller` ×2 |
+| `collectTwRadarCodes` | **每位 owner** 最新快照的台股持股 ∪ 台股 `stock_alert` | `TwRadarRefreshService`（Task 249） |
+
+`collectHeldStockCodes` 原本取 `SELECT id FROM asset_snapshot ORDER BY snapshot_date DESC LIMIT 1`——**全庫只取一筆**。Task 249 已在 `collectTwRadarCodes` 指出這個缺陷，但當時只新增新方法繞過，判斷「改既有方法會放大背景排程的外部請求量」而不動它。**該判斷經量測後不成立**：改為 per-owner 後實測台股 18 → 19 檔（只多 `2885` 一檔）、美股 9 → 9、英股 3 → 3，外部請求量幾乎不變；而不改的代價是落選 owner 的持股完全沒有行情。
+
+`stock_holding` 一檔股票在同一快照內可有多列（依券商／帳戶分列），故 owner 1 的 35 列台股持股去重後與觀察清單高度重疊，最終只多出 1 檔——這也是「請求量爆增」的預期沒有發生的原因。
+
+**未被涵蓋時的連鎖故障（2026-07-29 實測 `2885` 元大金）：**
+
+```text
+PricePoller.scheduledTwIntradayUpdate（每 2 分鐘）跳過 2885
+  （log 逐輪為「更新台股即時價格 (18 檔)」；唯一涵蓋 2885 的是開機一次性的
+    warmCacheOnStartup「背景補抓 cold cache：台股 34 檔」＝ collectAllStockCodes）
+  → Redis price:台股:2885 停在前一交易日 FinMind 校正過的值（TTL 24h 內仍活著）
+  → 13:32 ClosePersister.dumpTwCloseFromRedis 依 price:index:台股（34 檔，含 2885）
+      把該舊值以 tradingDate=07-29 寫進 stock_price_history
+      （07-29 列 O/H/L/C/volume 與 07-28 完全相同：63.5 / 64.6 / 64.7 / 62.6 / 36045128；
+        volume 為 FinMind 的股數級距而非 TWSE mis 的張數，可據以判定該值不是當日 tick）
+  → 16:00 ClosePersister.verifyTwCloseWithFinMind 同樣用 collectHeldStockCodes（18 檔）
+      2885 不在內 → 假收盤未被校正（log：「成功覆寫 18 檔，缺漏 0 檔」）
+  → TTL 到期後 price:台股:2885 消失
+  → 前端 $63.50 ▲$0.00 (0.00%)：price 取自 stock_price_history 的假收盤，
+    priceChange／changePercent 因 Redis 無 entry 而為 0（實際 07-29 收盤 62.2）
+```
+
+> `stock_price_history` 07-29 的台股批次為連續 id 157154–157187 共 34 列，與 13:32 dump 的「34 檔」一致，可確認該日今日列全部出自 Redis dump 而非其他路徑。`2885` 在 `stock` 主檔內，故 `collectAllStockCodes`（34 檔）涵蓋它——這也是 Redis 曾有該 key 的來源；缺的是**持續刷新**與**收盤校正**。
+
+同輪受害者共 13 檔（07-29 與 07-28 完全相同）：`006205`／`00642`／`00646`／`00695B`／`00929`／`1616`／`2002`／`2412`／`2606`／`2885`／`7556`／`9933`／`IB01`。
+
+**Task 257 的範圍只有收集器本身。** 13:32 dump 不檢查 payload `tradingDate`／`closed` 這件事（design.md 的 Task 249 段落已記載為既有缺口，同輪另有 `1301`／`2409`／`2882` 被寫入 10:40–11:30 的盤中 tick 當收盤）與既寫錯歷史列的回補，皆**不在** Task 257 內，留待各自的任務處理。
+
+**收盤 dump 的逐檔守門與歷史修復（Task 258）：** `ClosePersister.dumpRedisToDb` 原本的寫入條件只有「Redis 有 `price`」：
+
+```java
+String json = redis.opsForValue().get("price:" + market + ":" + code);
+if (json == null) continue;
+BigDecimal price = bd(r, "price");
+if (price == null) continue;
+source.upsertHistory(code, market, tradingDate, ...);   // ← tradingDate 是「今天」，與 payload 無關
+```
+
+`codes` 來自 Redis SET `price:index:{market}`，而該 SET 是由 `PriceCacheWriter` 在**任何**寫入時加入的——包含開機一次性的 `PricePoller.warmCacheOnStartup`，它用的是涵蓋 `stock` 主檔的 `collectAllStockCodes`（實測台股 34 檔），比盤中 cron 的 `collectHeldStockCodes`（Task 257 修正後 19 檔）大得多。**差集那 15 檔**（已不在任何 owner 最新快照、也不在 `stock_alert`，但仍在 `stock` 主檔的「曾持有／曾觀察」標的）於是每次重啟就被寫進 Redis 一次、之後再也不被 cron 刷新，卻仍被 13:32 的 dump 當成當日收盤寫進 DB。
+
+**這不是一次性殘留，而是一個自我延續的迴路：**
+
+```text
+DB 錯誤列（某檔某日的假收盤）
+  → PriceCacheWriter.syncClosedFromDb 讀 DB 最近收盤寫回 Redis（休市刷新／warmCacheOnStartup 走此路）
+  → 13:32 dumpRedisToDb 讀 Redis 寫回 DB，冠上「今日」日期
+  → 新的錯誤列成為下一輪 syncClosedFromDb 讀到的「最近收盤」
+  → 每個交易日多一列，且值永遠不變
+```
+
+實測腐化量（2026 年，判準為「與該檔前一個有資料的交易日 OHLCV 全等」）：
+
+| 市場 | 2026 年腐化列 | 最早 | 最晚 |
+|---|---|---|---|
+| 台股 | 122 | 2026-06-25 | 2026-07-29 |
+| 美股 | 3 | 2026-07-10 | 2026-07-29 |
+| 英股 | 3 | 2026-07-17 | 2026-07-29 |
+
+受害代號高度集中且固定：`006205 00642 00646 00695B 00929 1301 1616 2002 2409 2412 2606 2882 7556 9933`（＋ Task 257 的 `2885`、美股 `AAPL`／`MSFT`、英股 `IB01`）。典型樣態是 O/H/L 為 `null`、`volume` 為 `0`、收盤固定不動——因為 `syncClosedFromDb` 寫的 payload 只有 `price` 沒有 OHLC，dump 的 `bd(r,"openPrice")` 取到 null、`volume` 缺漏補 0。例 `2002` 中鋼 2026-07-16～07-29 共 8 個交易日收盤全記 `19.1000`（Yahoo 實際為 18.80／18.65／18.55／18.80／19.15／19.25／19.00…）。
+
+**守門條件（兩條，皆必要）：**
+
+1. payload 的 `tradingDate` 必須等於本次 dump 的目標交易日。擋掉上述迴路（陳舊值的 `tradingDate` 是舊日期或 DB 的 `maxTradingDate`）。
+2. payload 的 `updatedAt` 距本次執行時刻不得超過 **12 分鐘**。擋掉「同日但早於收盤數小時」的盤中 tick——實測 2026-07-29 的 `1301`（`updatedAt` 10:40）／`2409`（10:55）／`2882`（11:30）就是被當成收盤寫入的盤中值。12 分鐘的下界理由：三個 dump 皆排在收盤後 2 分鐘（13:32 TW／16:02 ET／16:32 LON），而盤中 cron 每 2 分鐘一輪，故合法值的 `updatedAt` 必落在收盤前最後幾輪。
+
+> **條件 2 之所以用「距 now 的間隔」而非「與市場當地收盤時刻比較」**：`PriceCacheWriter` 寫 `updatedAt` 時三處都綁 `MarketClock.TW_ZONE`（`LocalDateTime.now(MarketClock.TW_ZONE)`），即**所有市場的 `updatedAt` 都是台北牆鐘**。拿它去比美股／英股的當地收盤時刻會分別位移 12／7 小時。改成比「距本次執行時刻」則兩端同為台北牆鐘，三個市場同一段程式碼即正確。
+>
+> **刻意不用 payload 的 `closed` 當守門條件**：13:32 dump 要取的正是 13:28～13:30 那輪盤中 cron 寫入的值，`PricePoller.scheduledTwIntradayUpdate` 呼叫 `updatePrices(tw, "台股", false)`，故該值的 `closed` 為 `false`。以 `closed == true` 守門會把正常路徑整個擋掉、當日一列都寫不進去。
+
+守不過即**跳過該檔不寫任何列**，不得回填昨收／開盤價（Requirement 7 禁止回寫充數）。代價（刻意接受）：流動性極低、收盤前 12 分鐘無成交的標的當日可能無列，下游 `PriceQueryService.getLive` 與 `findRecentClose` 自然 fallback 至最近一筆收盤——這是誠實的狀態，優於把三小時前的盤中價記成收盤。持股標的另有 16:00 TW／18:00 ET FinMind 校正與 17:00 LON Yahoo 校正作為當日收盤的最終權威，不受本守門影響。
+
+**為什麼既有回補路徑修不了錯誤列。** `HistoricalBackfillService.backfillTwStock`（`backfillUsStock`／`backfillUkStock` 同構）有兩道各自獨立的阻擋：
+
+```java
+if (maxDate == null) start = since;
+else if (minDate != null && since.isBefore(minDate)) start = since;
+else start = maxDate.plusDays(1);                    // ← 阻擋一：起點永遠是 maxDate+1
+...
+if (store.existsHistory(stockCode, "台股", bar.tradingDate())) continue;   // ← 阻擋二：skip-if-exists
+```
+
+阻擋一使區間中段永遠碰不到（腐化標的的 `maxDate` 就是最近交易日，故 `start` 落在明天、`!start.isBefore(end)` 直接 `return 0`）；阻擋二使即使硬塞區間也會跳過每個已有列的日期。`StockSourceQuery.upsertHistory` 本身是真 upsert（先 `SELECT id`，存在則 `UPDATE`），但這兩道守門讓 backfill 路徑從不對既有日期呼叫它。故修復必須是**新的路徑**，不是既有路徑加參數。
+
+**修復路徑設計。** 新增 `HistoricalBackfillService.repairRange(market, code, from, to)` 與內部端點 `POST /internal/repair/history`：
+
+```text
+POST /internal/repair/history?market=台股&from=2026-06-01&to=2026-07-29[&code=2002]
+  → 未指定 code 時，代號集合取 StockSourceQuery.collectAllStockCodes 該市場的那一份
+    （＝ stock 主檔 ∪ 每 owner 最新快照持股 ∪ stock_alert；涵蓋所有可能有列的標的）
+  → 逐檔呼叫既有的 priceFetch.fetchTwHistoricalRange / fetchUsHistoricalRange / fetchUkHistoricalRange
+    （台股走 FinMind TaiwanStockPrice，volume 取 Trading_Volume 為股數級距、與 DB 現有列同口徑；
+      美／英股走 Yahoo chart interval=1d）
+  → 逐 bar：跳過該市場當日 bar（今日列獨佔，Task 84）；
+             其餘一律 upsertHistory 覆寫（不檢查 existsHistory）
+  → 來源未回傳某日 bar → 該日原列保留不動，不刪除、不猜值
+  → 回 { market, codesProcessed, rowsOverwritten, codesWithNoSource }
+```
+
+冪等：同一區間重跑會以相同的權威值覆寫，結果不變。**不新增任何 `@Scheduled`**，故 `SchedulePublicBffController.JOBS` 不需同步——根因（Task 257 的抓價範圍）與機制（本任務的 dump 守門）都已修，常駐稽核排程屬另一個決定。**不動 schema**，無 Liquibase changeset。
+
+> FinMind 現況補記：容器內 `FINMIND_TOKEN` 為**空字串**（`application.yml` 為 `${FINMIND_TOKEN:}`，兩份 `.env` 皆未設該變數），故需 token 的 `TaiwanStockKBar`（5 分 K，供分時 tick）回 400；但**日線 `TaiwanStockPrice` 免 token 可用**（實測 HTTP 200，`2002` 2026-07-20 收盤 18.55 與 Yahoo 一致）。回補與 16:00 收盤校正走的都是日線那支，不受 token 缺漏影響。
+
 **國定假日整段休市（2026/06，修 Juneteenth 仍抓價 / 觸發 bug）：** cron 以 `MON-FRI` 觸發只能濾週末，平日仍可能是國定假日（美股 6/19 Juneteenth 為週五）。原 `MarketClock` 只有 `isWeekend` 判斷 → `isUsMarketOpen()` 在假日回 `true` → `PricePoller` 照抓（NASDAQ 回前一交易日收盤）、`PriceCacheWriter.resolveTradingDate` 把假日當「live session」→ tradingDate = 假日當天 → 污染 intraday tick；`ClosePersister` 同樣於假日把 Redis 最後價 dump 成假日當日收盤寫進 DB。
 
 修正：新增 `MarketCalendar`（ext-materials 內的交易日 / 假日權威）：
@@ -3797,7 +3907,7 @@ TradingRadarView「重新整理」→ POST /api/bff/trading-radar/refresh
 
 `twCodes` 來自**新增的** `StockSourceQuery.collectTwRadarCodes(Set<String>)`：每位 owner 各自最新快照的台股持股 ∪ 台股 `stock_alert`，排除 `0000`。
 
-**不重用既有的 `collectHeldStockCodes()`**，因為它取 `SELECT id FROM asset_snapshot ORDER BY snapshot_date DESC LIMIT 1`——全庫只取一筆快照，同日期時 tie-break 任意。實測（2026-07-29 部署後）owner 1 的快照 id 15 有 35 筆台股持股、owner 2 的 id 18 只有 2 筆，兩者同日，Postgres 挑中 id 18；結果雷達顯示 19 檔而回補只涵蓋 18 檔，`2885`（只在 owner 1 持股、不在觀察清單）永遠不會被更新——按鈕說「已抓取最新報價」卻有一列沒動。改用 `DISTINCT ON (owner_user_id) ... ORDER BY owner_user_id, snapshot_date DESC, id DESC` 後實測 19/19 全覆蓋。**`collectHeldStockCodes` 本身不得修改**：它服務每 2 分鐘的 `scheduledTwIntradayUpdate` 與 `refreshAll()`，放大範圍會改變背景排程的外部請求量。`TwRadarRefreshService` 仍保留一次防禦性 `tw.remove("0000")`，不倚賴收集器的排除。**不重用既有的 `POST /internal/refresh`**——後者是 `PricePoller.refreshAll()`，會連美股／英股一併抓，而本頁只評台股，多抓只是把使用者的等待時間拉長。
+**不重用既有的 `collectHeldStockCodes()`**，因為它取 `SELECT id FROM asset_snapshot ORDER BY snapshot_date DESC LIMIT 1`——全庫只取一筆快照，同日期時 tie-break 任意。實測（2026-07-29 部署後）owner 1 的快照 id 15 有 35 筆台股持股、owner 2 的 id 18 只有 2 筆，兩者同日，Postgres 挑中 id 18；結果雷達顯示 19 檔而回補只涵蓋 18 檔，`2885`（只在 owner 1 持股、不在觀察清單）永遠不會被更新——按鈕說「已抓取最新報價」卻有一列沒動。改用 `DISTINCT ON (owner_user_id) ... ORDER BY owner_user_id, snapshot_date DESC, id DESC` 後實測 19/19 全覆蓋。~~**`collectHeldStockCodes` 本身不得修改**：它服務每 2 分鐘的 `scheduledTwIntradayUpdate` 與 `refreshAll()`，放大範圍會改變背景排程的外部請求量。~~ **（此句已由 Task 257 推翻，見下方「持股抓價清單的 owner 涵蓋範圍」；保留原句作為當時的決策記錄。）** `TwRadarRefreshService` 仍保留一次防禦性 `tw.remove("0000")`，不倚賴收集器的排除。**不重用既有的 `POST /internal/refresh`**——後者是 `PricePoller.refreshAll()`，會連美股／英股一併抓，而本頁只評台股，多抓只是把使用者的等待時間拉長。
 
 休市分支沿用 `syncClosedFromDb` 而非重抓，是 Task 111 已驗證的不變式：盤外抓到的 last-tick 會覆蓋 FinMind 校正過的權威收盤，使 Redis 與 `stock_price_history` 不一致，Dashboard／歷年資產／快照表單三處數字互相打架。大盤 `0000` 在休市時不抓，因為 `twse_index_daily_history`（`TwseIndexPoller` 盤後批次）是完成日 K 的唯一權威來源，盤外抓 5 分 K 只會取到昨日尾盤點位。
 
