@@ -4,6 +4,7 @@ import com.steven.assets.model.StockPriceHistory;
 import com.steven.assets.model.TwseIndexDailyHistory;
 import com.steven.assets.repository.StockPriceHistoryRepository;
 import com.steven.assets.repository.TwseIndexDailyHistoryRepository;
+import com.steven.assets.util.MarketZones;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -62,7 +63,9 @@ public class TechnicalIndicatorService {
         }
         try {
             List<StockPriceHistory> desc = historyRepo.findRecentN(stockCode, market, 240);
-            LocalDate today = LocalDate.now();
+            // Task 252：用該股市場時區的今日。JVM 牆鐘在美股台北 00:00–04:00 會取到 D+1，
+            // 與 tradingDate（D）比對失敗 → 今日即時價不併入 → MA/KD 用舊序列算。
+            LocalDate today = MarketZones.today(market);
             List<StockPriceHistory> series = new ArrayList<>(desc);
 
             if (series.isEmpty() || !today.equals(series.get(0).getTradingDate())) {
@@ -146,7 +149,8 @@ public class TechnicalIndicatorService {
     private FullIndicators computeAllForTaiex() {
         try {
             List<TwseIndexDailyHistory> desc = new ArrayList<>(twseDailyRepo.findTopNByOrderByTradingDateDesc(240));
-            LocalDate today = LocalDate.now();
+            // Task 252：台股大盤，顯式用台北時區（本方法無 market 參數）
+            LocalDate today = LocalDate.now(MarketZones.TW_ZONE);
             if (desc.isEmpty() || !today.equals(desc.get(0).getTradingDate())) {
                 Optional<PriceQueryService.LivePrice> liveOpt = priceQuery.getLive("0000", "台股");
                 if (liveOpt.isPresent() && liveOpt.get().tradingDate() != null

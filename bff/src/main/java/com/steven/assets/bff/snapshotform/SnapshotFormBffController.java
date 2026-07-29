@@ -18,6 +18,7 @@ import reactor.core.publisher.Mono;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -36,6 +37,9 @@ import java.util.Map;
 @RequestMapping("/api/bff/snapshot-form")
 @RequiredArgsConstructor
 public class SnapshotFormBffController {
+
+    /** Requirement 53 / Task 252：使用者心中的「今天」永遠是台北今天，不隨 JVM 預設時區漂移。 */
+    private static final ZoneId TW_ZONE = ZoneId.of("Asia/Taipei");
 
     private final WebClient businessServicesClient;
     private final SnapshotEnricher enricher;
@@ -103,7 +107,10 @@ public class SnapshotFormBffController {
      */
     @GetMapping("/exchange-rate")
     public Mono<ResponseEntity<Map<String, Object>>> exchangeRate(@RequestParam String date) {
-        boolean isToday = date.equals(LocalDate.now().toString());
+        // Requirement 53 / Task 252：顯式用台北今日。前端送來的 date 也已改為本地（台北）日期
+        // （utils/localDate.js 的 todayLocal），兩邊必須同一個時區基準——先前雙方碰巧都是 UTC 才一致，
+        // 若一邊改台北、另一邊仍 UTC，台北 00:00–08:00 就會判定「不是今天」而不刷即時匯率。
+        boolean isToday = date.equals(LocalDate.now(TW_ZONE).toString());
         Mono<Void> refresh = isToday
                 ? businessServicesClient.post()
                         .uri(uri -> uri.path("/api/market-data/exchange-rate/refresh")

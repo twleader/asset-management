@@ -1693,6 +1693,54 @@ END:VEVENT / END:VCALENDAR
 
 **已知前提（寫在設定頁提示，不是程式能控制的）**：收件人的 Google 日曆「自動將邀請加入日曆」需維持預設「是」；若設為「僅在我回覆時」，需在信中手動接受一次事件才會進日曆。
 
+## 系統時區基準（Requirement 53 / Task 252）
+
+### 三條規則
+
+1. **JVM 預設時區 = `Asia/Taipei`，由 compose 的 `TZ` 環境變數設定，是唯一開關。** 它的語意是「沒有顯式指定 ZoneId 的呼叫落在哪裡」。切換前為 UTC——那是全系統唯一沒有任何人想要的時區（使用者在台灣，三個市場時區則早已 100% 顯式化）。
+2. **`timestamp without time zone` 欄位一律存台北牆鐘**，唯二例外：`stock_alert.last_triggered_at` 與 `stock_alert_trigger.triggered_at` 存**市場牆鐘**（`computeTriggeredAt()` 的 `ZonedDateTime.now(市場 zone)`），因為顯示端要的就是「紐約時間 12:00 觸發」。這兩欄的 entity 需有註解標明。
+3. **涉及「交易日／今日」的判定一律走 `MarketZones.today(market)` / `nowLocal(market)`，禁用裸 `LocalDate.now()`。** 沒有市場語境的顯示用時間戳可用裸 `now()`（此時它就是台北）。
+
+### 為什麼是容器 TZ 而不是別的做法
+
+- **`spring.jackson.time-zone` 無效**：它只對本身帶時區的型別（`Date`／`Calendar`／`ZonedDateTime`）生效。entity 全是 `LocalDateTime`，按定義沒有時區資訊，Jackson 只能照字面輸出（實測 JSON 為 `"createdAt":"2026-06-05T18:53:29.153553"`，無 `Z` 無 offset），沒有 offset 可寫也就沒有東西可轉。
+- **`TimeZone.setDefault()` 在 `@PostConstruct` 不可靠**：`@Scheduled` 的 cron 在 `ScheduledAnnotationBeanPostProcessor` 註冊時就把時區綁進 trigger，與哪個 `@PostConstruct` 先跑沒有保證。要改就在 JVM 啟動前決定。
+- **PostgreSQL 不能只設 `TZ` 環境變數**：實測資料目錄的 `postgresql.conf` 已被 initdb 寫死 `timezone = UTC`（`pg_settings.source = configuration file`），環境變數贏不過它，要改須用 `command: ["postgres","-c","timezone=Asia/Taipei",...]`。**但它管不到應用連線**：pgjdbc 的 startup packet 一律以 JVM 預設時區覆寫該連線的 session TimeZone，故 server 端的值只影響手動 `psql` 查詢與 server 日誌。設它是為了讓這兩者與應用同基準，不是為了改變應用行為。
+
+### 部署約束（本任務最關鍵的一條）
+
+**三段——容器 TZ、程式碼修正、歷史校正——必須同一個 commit、同一次 build、同一次 `up -d`。** 拆開部署會產生半套狀態：只改 TZ 不改冷卻判定 → 美股警示 12 小時就重複寄信；只跑 migration 不改 TZ → 所有時間顯示變成**超前** 8 小時；只改 TZ 不改 ext 寫入端 → `gdrive_last_run_at` 的兩個寫入端分家。
+
+### 49 個 naive 欄位的分類
+
+**判準是「寫入端怎麼繫結」，不是 Java 型別。** 這一點決定了 migration 清單，寫錯就是不可逆的資料損毀。
+
+| 分類 | 欄位數 | 寫入端 | 會隨 JVM 時區位移？ | 處置 |
+|---|---|---|---|---|
+| 裸 `LocalDateTime.now()` | 10 | 5 個 entity 的 `@PrePersist`/`@PreUpdate`（9 欄）＋ `MarketAnalysisService`（1 欄） | 會 | **`+ INTERVAL '8 hours'`** |
+| SQL `NOW()` 灌進 naive 欄 | 1 | ext `StockSourceQuery` | 會（pgjdbc 以 JVM 時區當 session TimeZone） | **`+ INTERVAL '8 hours'`** |
+| JdbcTemplate `Timestamp.from(instant)` | 3 | ext `CrawlerExportPathQuery` / `FundNavSourceQuery` | 會（`setTimestamp` 不帶 Calendar） | **改寫入端**綁 `LocalDateTime.ofInstant(now, UTC)`；**歷史資料不動** |
+| Hibernate 的 `Instant` 欄位 | 3 | business JPA | **不會** | **絕對不可動** |
+| 台北牆鐘 | 28 | service 層 `LocalDateTime.now(TW_ZONE)`（7 張匯出排程表 ×3、交易雷達匯出 ×4、備份 ×3） | 不會 | **不可動**——動了會弄壞排程的「今日是否已跑過」判定 |
+| 市場牆鐘 | 2 | `computeTriggeredAt()` | 不會 | **不可動**（規則 2 的例外） |
+| DB 內部 | 2 | Liquibase | — | 不管 |
+
+合計 10+1+3+3+28+2+2 = 49。**需要歷史校正的只有前兩列共 11 欄。**
+
+**為什麼 Hibernate 的 `Instant` 不位移**：Hibernate 6 對 `Instant` 走 `TimestampUtcAsJdbcTimestampJdbcType`，bind 是 `setTimestamp(i, ts, UTC_CALENDAR)`、extract 是 `getTimestamp(i, UTC_CALENDAR)`，兩側都釘在 UTC，與 JVM 預設時區無關。對這類欄位 `+8` 會把目前正確的顯示永久改壞——這是本任務最容易犯、且最難回復的錯。
+
+**同一欄可能有兩個寫入端**：`crawler_export_setting.gdrive_last_run_at` 由 business 的 Hibernate（`Instant`，UTC 中立）與 ext 的 JdbcTemplate（`Timestamp.from`，隨 JVM 時區）各寫一次。切換前兩者碰巧都產生 UTC 牆鐘所以一致；切換後 ext 端會變台北而 Hibernate 端仍是 UTC → 分家 8 小時。修法是把 ext 端改為顯式 UTC 繫結，**不是**校正歷史值。
+
+分類判準以**寫入端程式碼**為準，並以運行中 DB 的實值交叉驗證（把每個欄位的 `max()` 與 `now() AT TIME ZONE 'UTC'` 相減：台北牆鐘那組落在 +5～+8h，UTC 那組落在 0～−1h）。
+
+### 校正後仍存在的殘留
+
+`LocalDateTime` 欄位是時區中立的（牆鐘原樣往返），所以切換本身**不會改變任何舊列的數字**——不校正的話，畫面顯示也不會變（仍舊錯 8 小時），只有新列開始正確，形成「同一張表兩種基準、看不出哪個是哪個」的混合態。校正的意義正是消除這個混合態，而不是修復切換造成的破壞。
+
+### 不受影響（切換前後行為完全相同）
+
+46 個帶 `zone` 的 `@Scheduled`（Spring 的 `zone` 覆蓋 JVM 預設，已用運行中日誌實證：英股 `0 32 16` zone=Europe/London 於 `15:32:00Z` 觸發＝倫敦 16:32 BST）、3 個 `fixedDelay` 排程、`MarketZones`／`MarketClock`、`AlertNotificationDispatcher.withinSendWindow()`、`BackupService` 的 `DISPLAY_ZONE`、所有 `Instant.now()`（絕對時間軸）、10 個 `timestamptz` 欄位、以及**全部前端顯示程式碼**（後端改吐台北牆鐘後自動正確；前端不存在任何 +8 補償 hack，不得為此新增，否則雙重補償）。
+
 ## Infrastructure
 
 ### Docker Compose Services
@@ -3636,7 +3684,9 @@ TradingRadarView「重新整理」→ POST /api/bff/trading-radar/refresh
 
 `GET /api/trading-radar` **一個位元組都不改**，SSE 背景重算（`recalculateRadar()` → `load(false, true)`）仍走 GET。這不是風格偏好而是必要條件：POST 若被 SSE 路徑呼叫，抓取寫 Redis → `price-update` 事件 → 2 秒 debounce → 再抓取，會形成自我餵食迴圈並持續打外部 API。
 
-`twCodes` 來自 `StockSourceQuery.collectHeldStockCodes()` 的台股 set（最新資產快照持股 ∪ `stock_alert` 觀察清單）。**注意該方法的 `0000/台股` 排除只套在 `stock_alert` 那半段**（`WHERE NOT (stock_code = '0000' AND market = '台股')`），`stock_holding` 那半段沒有；故 `TwRadarRefreshService` 於呼叫 `updatePrices` 前須自行 `tw.remove("0000")`，否則大盤代號會被拿去打 `mis.twse.com.tw`，而 Requirement 43 明訂大盤不走該 API。**不重用既有的 `POST /internal/refresh`**——後者是 `PricePoller.refreshAll()`，會連美股／英股一併抓，而本頁只評台股，多抓只是把使用者的等待時間拉長。
+`twCodes` 來自**新增的** `StockSourceQuery.collectTwRadarCodes(Set<String>)`：每位 owner 各自最新快照的台股持股 ∪ 台股 `stock_alert`，排除 `0000`。
+
+**不重用既有的 `collectHeldStockCodes()`**，因為它取 `SELECT id FROM asset_snapshot ORDER BY snapshot_date DESC LIMIT 1`——全庫只取一筆快照，同日期時 tie-break 任意。實測（2026-07-29 部署後）owner 1 的快照 id 15 有 35 筆台股持股、owner 2 的 id 18 只有 2 筆，兩者同日，Postgres 挑中 id 18；結果雷達顯示 19 檔而回補只涵蓋 18 檔，`2885`（只在 owner 1 持股、不在觀察清單）永遠不會被更新——按鈕說「已抓取最新報價」卻有一列沒動。改用 `DISTINCT ON (owner_user_id) ... ORDER BY owner_user_id, snapshot_date DESC, id DESC` 後實測 19/19 全覆蓋。**`collectHeldStockCodes` 本身不得修改**：它服務每 2 分鐘的 `scheduledTwIntradayUpdate` 與 `refreshAll()`，放大範圍會改變背景排程的外部請求量。`TwRadarRefreshService` 仍保留一次防禦性 `tw.remove("0000")`，不倚賴收集器的排除。**不重用既有的 `POST /internal/refresh`**——後者是 `PricePoller.refreshAll()`，會連美股／英股一併抓，而本頁只評台股，多抓只是把使用者的等待時間拉長。
 
 休市分支沿用 `syncClosedFromDb` 而非重抓，是 Task 111 已驗證的不變式：盤外抓到的 last-tick 會覆蓋 FinMind 校正過的權威收盤，使 Redis 與 `stock_price_history` 不一致，Dashboard／歷年資產／快照表單三處數字互相打架。大盤 `0000` 在休市時不抓，因為 `twse_index_daily_history`（`TwseIndexPoller` 盤後批次）是完成日 K 的唯一權威來源，盤外抓 5 分 K 只會取到昨日尾盤點位。
 

@@ -81,7 +81,9 @@ public class PriceCacheWriter {
         payload.put("stockName", result.stockName());
         payload.put("source", result.source());
         payload.put("tradingDate", tradingDate.toString());
-        payload.put("updatedAt", LocalDateTime.now().toString());
+        // Task 252：顯式台北牆鐘。此值前端直接顯示，且 StockPriceService 會跨 key 取 max——
+        // 若跟著 JVM 預設時區跑，切換當下新舊 tick 會是兩種基準，max 恆被先覆寫的那一筆鎖住。
+        payload.put("updatedAt", LocalDateTime.now(MarketClock.TW_ZONE).toString());
         payload.put("closed", markClosed);
 
         try {
@@ -161,7 +163,9 @@ public class PriceCacheWriter {
         payload.put("stockName", stockName);
         payload.put("source", "FinMind");
         payload.put("tradingDate", tradingDate.toString());
-        payload.put("updatedAt", LocalDateTime.now().toString());
+        // Task 252：顯式台北牆鐘。此值前端直接顯示，且 StockPriceService 會跨 key 取 max——
+        // 若跟著 JVM 預設時區跑，切換當下新舊 tick 會是兩種基準，max 恆被先覆寫的那一筆鎖住。
+        payload.put("updatedAt", LocalDateTime.now(MarketClock.TW_ZONE).toString());
         payload.put("closed", true);
 
         try {
@@ -230,7 +234,9 @@ public class PriceCacheWriter {
         payload.put("stockName", stockName);
         payload.put("source", "DB-close");
         payload.put("tradingDate", tradingDate.toString());
-        payload.put("updatedAt", LocalDateTime.now().toString());
+        // Task 252：顯式台北牆鐘。此值前端直接顯示，且 StockPriceService 會跨 key 取 max——
+        // 若跟著 JVM 預設時區跑，切換當下新舊 tick 會是兩種基準，max 恆被先覆寫的那一筆鎖住。
+        payload.put("updatedAt", LocalDateTime.now(MarketClock.TW_ZONE).toString());
         payload.put("closed", true);
 
         try {

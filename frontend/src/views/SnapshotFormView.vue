@@ -1411,6 +1411,7 @@ import TaiwanMap from '@/components/TaiwanMap.vue'
 import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
 import UsFlag from '@/components/UsFlag.vue'
 import Sortable from 'sortablejs'
+import { todayLocal, toLocalDateString } from '@/utils/localDate'
 
 const route  = useRoute()
 const router = useRouter()
@@ -1792,9 +1793,7 @@ function syncBrCostStr(br) {
 async function onUsTransactionDateChange(br, date) {
   if (!date) { br.transactionExchangeRate = null; return }
   // el-date-picker 可能回傳 Date 物件，統一轉為 yyyy-MM-dd 字串
-  const dateStr = date instanceof Date
-    ? date.toISOString().slice(0, 10)
-    : String(date).slice(0, 10)
+  const dateStr = toLocalDateString(date)
   try {
     const res = await bffApi.snapshotForm.exchangeRate(dateStr)
     const newRate = Number(res.midRate)
@@ -2568,7 +2567,7 @@ onMounted(async () => {
 
   // 新增快照時：載入今天匯率作為預設值
   if (!isEdit.value) {
-    const today = new Date().toISOString().slice(0, 10)
+    const today = todayLocal()
     form.snapshotDate = today
     await loadExchangeRateForDate(today)
   }

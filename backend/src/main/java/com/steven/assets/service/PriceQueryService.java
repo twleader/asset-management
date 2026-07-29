@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.steven.assets.model.StockPriceHistory;
 import com.steven.assets.repository.StockPriceHistoryRepository;
+import com.steven.assets.util.MarketZones;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -247,11 +248,11 @@ public class PriceQueryService {
                 null, null,
                 h.getOpenPrice(), h.getHighPrice(), h.getLowPrice(), h.getVolume(),
                 h.getTradingDate().toString(),
-                LocalDateTime.now(ZoneId.systemDefault()).toString(),
+                // Task 252：顯示用時間戳，顯式指定台北（切換後 systemDefault() 雖等於台北，但明示優於隱式）
+                LocalDateTime.now(MarketZones.TW_ZONE).toString(),
                 true,
                 "history"
         );
     }
 
-    public LocalDate today() { return LocalDate.now(); }
 }

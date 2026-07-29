@@ -85,13 +85,12 @@ public class TwRadarRefreshService {
 
         long t0 = System.nanoTime();
         try {
+            // 用雷達專用收集器（每位 owner 各自最新快照 ∪ 觀察清單，已排除 0000）。
+            // 不可改回 collectHeldStockCodes：它全庫只取一筆最新快照且同日 tie-break 任意，
+            // 實測會整個略過某位 owner 的持股，使該使用者按下按鈕後有標的的價格沒被更新。
             Set<String> tw = new LinkedHashSet<>();
-            Set<String> us = new LinkedHashSet<>();
-            Set<String> uk = new LinkedHashSet<>();
-            source.collectHeldStockCodes(tw, us, uk);
-            // collectHeldStockCodes 的 0000 排除只套在 stock_alert 半段，stock_holding 半段沒有；
-            // 不剔除的話大盤代號會被拿去打 mis.twse.com.tw（Requirement 43 明訂大盤不走該 API）。
-            tw.remove(TAIEX_CODE);
+            source.collectTwRadarCodes(tw);
+            tw.remove(TAIEX_CODE);   // 防禦性：收集器已排除，這裡不倚賴它
             log.info("[tw-radar-refresh] 開始：台股 {} 檔，開盤中={}", tw.size(), open);
 
             int indexUpdated = open ? refreshOpenMarket(tw) : 0;

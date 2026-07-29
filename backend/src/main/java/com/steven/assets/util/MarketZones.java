@@ -1,6 +1,8 @@
 package com.steven.assets.util;
 
 import java.time.DayOfWeek;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
@@ -27,6 +29,23 @@ public final class MarketZones {
         if ("美股".equals(market)) return US_ZONE;
         if ("英股".equals(market)) return LON_ZONE;
         return TW_ZONE;
+    }
+
+    /**
+     * 該市場時區的「今日」（Requirement 53 / Task 252）。
+     *
+     * <p><b>凡是要拿「今天」去比對 {@code tradingDate}（DB 的 date 欄位或 Redis 的日期字串）的地方，
+     * 一律用本方法，禁用裸 {@code LocalDate.now()}。</b> 裸呼叫取的是 JVM 預設時區（現為 Asia/Taipei）的
+     * 今日——對美股而言，台北 00:00–04:00 正是 ET 12:00–16:00（收盤前最關鍵的 4 小時），此時裸呼叫會得到
+     * {@code D+1} 而資料端是 {@code D}，比對同時失敗 → 今日即時價不併入序列 → MA/KD 全部用舊序列算。
+     */
+    public static LocalDate today(String market) {
+        return LocalDate.now(resolve(market));
+    }
+
+    /** 該市場時區的「現在」（牆鐘）。與 {@code lastTriggeredAt} / {@code triggeredAt} 等市場牆鐘欄位比較時必須用本方法。 */
+    public static LocalDateTime nowLocal(String market) {
+        return LocalDateTime.now(resolve(market));
     }
 
     /** 該市場開盤時刻（市場當地時間）。 */
