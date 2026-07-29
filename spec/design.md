@@ -561,7 +561,7 @@ PortfolioAdviceSetting   (配置建議設定，單列 id = 1；model / effort / 
 AppUser (1) ──── (1) ExportScheduleSetting            (owner_user_id UNIQUE；歷年資產每日排程自動匯出設定；Requirement 34)
 AppUser (1) ──── (1) TradingCalendarExportSchedule    (owner_user_id UNIQUE；交易日曆每日排程匯出設定；比另兩張多一個 format 欄〔json/excel〕；Requirement 37)
 AppUser (1) ──── (1) RealizedGainExportSchedule       (owner_user_id UNIQUE；已實現損益每日排程匯出設定；Requirement 39)
-AppUser (1) ──── (1) AssetTransactionExportSchedule   (owner_user_id UNIQUE；交易紀錄每日排程匯出設定；Requirement 49)
+AppUser (1) ──── (N) AssetTransactionExportSchedule   (每人多筆每日排程；Task 255 起移除 owner_user_id UNIQUE；Requirement 49)
 
 # 台股臨時休市（颱風假；Requirement 7）
 TwMarketClosure       (台股臨時休市，PK = closure_date；全域參考、無 owner、無 backend entity——ext-materials 直寫、backend 經 /internal/tw-holidays proxy 讀 union)
@@ -4574,20 +4574,21 @@ TransactionView「匯出 Excel」
     → business GET /api/asset-transactions/export
       → ExcelExportService.exportAssetTransactions()        ← HTTP：TenantFilterAspect 自動 owner-scoped
 
-【立即匯出到目錄（t238）】
-TransactionView「立即匯出到目錄」
-  → POST /api/bff/transaction/export/run-now
-    → business POST /api/asset-transactions/export/run-now
-      → AssetTransactionExportScheduleService.runNowForCurrentUser()
+【立即匯出到目錄（t238；t255 起改為逐筆）】
+TransactionView 某一筆排程的「立即匯出」
+  → POST /api/bff/transaction/export/schedules/{id}/run-now
+    → business POST /api/asset-transactions/export/schedules/{id}/run-now
+      → AssetTransactionExportScheduleService.runNowForCurrentUser(id)
+        → findByIdAndOwnerUserId(id, ownerId)              ← findById 不吃 @Filter，必須帶 owner 條件
         → ExcelExportService.exportAssetTransactions()      ← HTTP 情境，同上自動 owner-scoped
-        → writeToDir(ownerId, subpath, data)
+        → writeToDir(ownerId, name, subpath, data)          ← t255：name 非空時進檔名
 
-【每日排程（t238）】
+【每日排程（t238；t255 起同一 owner 可有多列）】
 @Scheduled(cron="0 * * * * *", zone="Asia/Taipei") tick()
-  → runDueExports(): settingRepo.findAll()                 ← 背景無 request context，讀全部 owner 列
-    → 對每個 enabled 且今日未跑且已到點的列：
-      → ExcelExportService.exportAssetTransactionsForOwner(ownerId)   ← 手動 enableFilter 縮到該 owner
-      → writeToDir(ownerId, subpath, data)
+  → runDueExports(): settingRepo.findAll()                 ← 背景無 request context，讀全部 owner 的全部列
+    → 對每個 enabled 且今日未跑且已到點的列（同一 owner 可能命中多列）：
+      → ExcelExportService.exportAssetTransactionsForOwner(ownerId)   ← 每列各自 enableFilter，不得合併
+      → writeToDir(ownerId, name, subpath, data)
 
 【資料夾瀏覽（複用既有 business 端點）】
 TransactionView el-tree 懶載入
@@ -4638,7 +4639,8 @@ TransactionView el-tree 懶載入
 | 欄位 | 型別 | 說明 |
 |------|------|------|
 | `id` | BIGSERIAL PK | |
-| `owner_user_id` | BIGINT NOT NULL | 擁有者；UNIQUE `uq_at_export_schedule_owner`（每人一列） |
+| `owner_user_id` | BIGINT NOT NULL | 擁有者；t238 為 UNIQUE `uq_at_export_schedule_owner`（每人一列），**t255 起 DROP 該 UNIQUE、改每人多列**，另建 index `idx_at_export_schedule_owner` |
+| `name` | VARCHAR(50)（t255 新增，nullable） | 排程名稱（選填，≤20 字、僅中英數／底線／連字號／空白）；非空時進檔名 |
 | `enabled` | BOOLEAN NOT NULL DEFAULT FALSE | 是否啟用每日排程 |
 | `run_hour` | INT NOT NULL DEFAULT 8 | 每日執行時，CHECK 0..23 |
 | `run_minute` | INT NOT NULL DEFAULT 0 | 每日執行分，CHECK 0..59 |
@@ -4659,17 +4661,22 @@ TransactionView el-tree 懶載入
 | business | `PUT /api/asset-transactions/{id}` | t237 | 編輯一筆 |
 | business | `DELETE /api/asset-transactions/{id}` | t237 | 刪除一筆 |
 | business | `GET /api/asset-transactions/export` | t237 | 下載 xlsx（涵蓋所有年度） |
-| business | `GET /api/asset-transactions/export/schedule` | t238 | 取當前使用者排程設定（無則回預設，不寫 DB） |
-| business | `PUT /api/asset-transactions/export/schedule` | t238 | upsert 排程設定（驗證時分範圍與子路徑不跳脫） |
-| business | `POST /api/asset-transactions/export/run-now` | t238 | 立即產檔到設定目錄，回 `{path, sizeBytes}`；不動當日 guard |
+| business | ~~`GET /api/asset-transactions/export/schedule`~~ | t238，**t255 移除** | 單筆語意已被下列多筆端點取代，**不並存**（並存＝同一設定兩套語意，必然漂移） |
+| business | ~~`PUT /api/asset-transactions/export/schedule`~~ | t238，**t255 移除** | 同上 |
+| business | ~~`POST /api/asset-transactions/export/run-now`~~ | t238，**t255 移除** | 同上 |
+| business | `GET /api/asset-transactions/export/schedules` | t255 | 列出本人全部排程（依 run_hour, run_minute, id 排序）＋ `baseDir`／`gdriveRemote` 等顯示用衍生值 |
+| business | `POST /api/asset-transactions/export/schedules` | t255 | 新增一筆（每人上限 10，超過回 400） |
+| business | `PUT /api/asset-transactions/export/schedules/{id}` | t255 | 修改指定一筆（先驗歸屬，非本人回 404） |
+| business | `DELETE /api/asset-transactions/export/schedules/{id}` | t255 | 刪除指定一筆（先驗歸屬，非本人回 404） |
+| business | `POST /api/asset-transactions/export/schedules/{id}/run-now` | t255 | 以該筆設定立即產檔，回 `{path, sizeBytes, gdrivePath, gdriveStatus}`；不動該筆當日 guard |
 | business | `GET /api/export-schedule/browse?subpath=` | 既有複用 | 列出基底下子目錄 |
 | business | `GET /api/stock-alerts/lookup-name?code=&market=` | 既有複用 | 依 code+market 查 stock 主檔回股名（`{stockName}`）；輸入代號自動帶名用 |
 | BFF | `GET/POST/PUT/DELETE /api/bff/transaction[/{id}]` | t237 | 列表聚合（含市場／券商下拉）＋ passthrough CRUD |
 | BFF | `GET /api/bff/transaction/lookup-name?code=&market=` | t237 | passthrough 至 business `GET /api/stock-alerts/lookup-name`（輸入代號自動帶股名，複用同一支 business API，比照 `RealizedGainBffController.lookupName`） |
 | BFF | `GET /api/bff/transaction/export` | t237 | passthrough 下載 |
-| BFF | `GET /api/bff/transaction/export/schedule` | t238 | passthrough |
-| BFF | `PUT /api/bff/transaction/export/schedule` | t238 | passthrough |
-| BFF | `POST /api/bff/transaction/export/run-now` | t238 | passthrough |
+| BFF | `GET/POST /api/bff/transaction/export/schedules` | t255 | passthrough（取代 t238 的單筆 `/export/schedule`） |
+| BFF | `PUT/DELETE /api/bff/transaction/export/schedules/{id}` | t255 | passthrough |
+| BFF | `POST /api/bff/transaction/export/schedules/{id}/run-now` | t255 | passthrough（取代 t238 的 `/export/run-now`） |
 | BFF | `GET /api/bff/transaction/export/browse` | t238 | passthrough 至 business `/api/export-schedule/browse`（subpath 需 URL-encode） |
 
 ### 新增／異動檔案
@@ -4709,7 +4716,65 @@ TransactionView el-tree 懶載入
 
 ### 端點路徑共存說明
 
-`AssetTransactionController` 既有 `@GetMapping("/export")`（在 `@RequestMapping("/api/asset-transactions")` 下）＝ `/api/asset-transactions/export`；新 `AssetTransactionExportController`（t238）掛 `/api/asset-transactions/export` 並以 `/schedule`、`/run-now` 為子路徑 ＝ `/api/asset-transactions/export/schedule`。兩者路徑不同、無 ambiguous mapping（比照 `RealizedGainController` 與 `RealizedGainExportController` 的既有共存）。
+`AssetTransactionController` 既有 `@GetMapping("/export")`（在 `@RequestMapping("/api/asset-transactions")` 下）＝ `/api/asset-transactions/export`；新 `AssetTransactionExportController`（t238）掛 `/api/asset-transactions/export` 並以 `/schedule`、`/run-now` 為子路徑 ＝ `/api/asset-transactions/export/schedule`。兩者路徑不同、無 ambiguous mapping（比照 `RealizedGainController` 與 `RealizedGainExportController` 的既有共存）。**t255 把子路徑改為 `/schedules`、`/schedules/{id}`、`/schedules/{id}/run-now`，共存結論不變**（`/export` 本身仍只有 t237 那一支 GET）。
+
+---
+
+## Task 255：交易紀錄排程自動匯出改為「每人可多筆」
+
+對應 Requirement 49。**只動交易紀錄頁（R49）一頁**，其餘七個匯出頁與爬蟲頁維持每人一筆不變——那些頁的內容是全域資料或固定範圍報表，一天多份的實際需求由使用者提出的只有交易紀錄這一頁；一次改八頁會把風險面放大八倍卻沒有對應收益。
+
+### 為什麼是「多列」而不是「一列多時間」
+
+| 候選 | 為何不採 |
+|------|----------|
+| 一列存多個時間（`run_times VARCHAR` 如 `07:30,22:00`） | 一欄塞多值＝把結構塞進字串，之後的 per-time 狀態（上次執行、成功／失敗）無處可放，且違反正規化 |
+| 一列一 cron 字串 | 使用者要設的是「每天幾點」，cron 表達力遠超需求卻把驗證與 UI 複雜度全部帶進來 |
+| **多列（採用）** | 每筆排程＝一列，時間／目錄／Drive／執行狀態天然各自持有；`findAll()` 逐列判斷的既有 tick 邏輯**一行不用改語意**，只是列變多 |
+
+### 資料模型變更（changeset `v1.80.0-asset-transaction-export-schedules-multi.sql`）
+
+```sql
+ALTER TABLE asset_transaction_export_schedule DROP CONSTRAINT IF EXISTS uq_at_export_schedule_owner;
+ALTER TABLE asset_transaction_export_schedule ADD COLUMN IF NOT EXISTS name VARCHAR(50);
+CREATE INDEX IF NOT EXISTS idx_at_export_schedule_owner ON asset_transaction_export_schedule(owner_user_id);
+```
+
+- **全冪等**（`IF EXISTS`／`IF NOT EXISTS`）：全機共用一套運行中 DB、多 worktree 並行，非冪等即 business-services crash loop 整站掛（Task 207 教訓）。
+- **不做資料遷移**：既有每人 1 列原地成為第 1 筆排程，`name` 為 NULL → 檔名與落點逐字元不變（screenshot 中的 `交易紀錄_1_20260729.xlsx` 仍是同一個檔名，下游程式不會斷）。
+- UNIQUE 掉了以後 owner 查詢失去索引 → 補 `idx_at_export_schedule_owner`（列表端點與 by-id 驗歸屬都走它）。
+
+### 執行語意
+
+- tick／self-heal 完全沿用 t238：`findAll()` → 逐列 `enabled` ＋ `today != lastRunDate` ＋ `now >= run_hour:run_minute` → 產檔。**唯一差別是同一 owner 可能出現多列**，故產檔一律走 `exportAssetTransactionsForOwner(ownerId)`（每列各自 `enableFilter`），不得為了省事在迴圈外只 enable 一次。
+- 單列失敗只寫該列狀態欄；`finally` 一律設該列當日 guard。
+- Drive 同步與 admin-only 閘門逐列各自判斷（`GdriveOutputSupport.resolveUpdate`／`syncQuietly` 的既有簽章即為 per-row，無須改動）。
+
+### 檔名與覆寫
+
+`交易紀錄_{ownerId}_{YYYYMMDD}.xlsx`；`name` 非空時 `交易紀錄_{ownerId}_{name}_{YYYYMMDD}.xlsx`。同 owner 兩筆同資料夾同檔名時後者覆寫前者：兩份都是**執行當下**的完整資料（三入口共用 `buildAssetTransactionsWorkbook()`、皆涵蓋全部年度，不會缺年度），但**不是同一時點的快照**——兩次執行之間的 CRUD 只反映在後者。UI 須明示此行為。`name` 白名單驗證（`^[\p{IsHan}A-Za-z0-9_\- ]{1,20}$`）在寫入端擋下，因為它會直接進檔名。
+
+### 多租戶
+
+`findById` 不吃 `@Filter`（Requirement 28 既知缺口，見 `TenantGuard` javadoc）。PUT／DELETE／run-now 一律 `findByIdAndOwnerUserId(id, ownerId)`，查無即擲 `NoSuchElementException`（既有 `GlobalExceptionHandler` 已對映 404），**不可**先 `findById` 再比對後回 403——那會洩漏他人排程是否存在（`TenantAccessException` 同樣被對映成 404，正是同一個考量）。
+
+### 新增／異動檔案
+
+**t255 新增**
+- `backend/src/main/resources/db/changelog/changes/v1.80.0-asset-transaction-export-schedules-multi.sql`
+
+**t255 異動**
+- `backend/.../model/AssetTransactionExportSchedule.java`：移除 `@Table` 的 UNIQUE、新增 `name` 欄
+- `backend/.../repository/AssetTransactionExportScheduleRepository.java`：移除 `findByOwnerUserId`；新增 `findByOwnerUserIdOrderByRunHourAscRunMinuteAscIdAsc`／`findByIdAndOwnerUserId`／`countByOwnerUserId`
+- `backend/.../dto/AssetTransactionExportDto.java`：`SettingResponse` → `SchedulesResponse` ＋ `Item`；`SettingRequest` 加 `name`
+- `backend/.../service/AssetTransactionExportScheduleService.java`：list／create／update(id)／delete(id)／runNow(id)；`writeToDir` 加 `name`
+- `backend/.../controller/AssetTransactionExportController.java`：三支單筆端點 → 五支多筆端點
+- `bff/.../transaction/TransactionBffController.java`：對應的 passthrough 換掉
+- `bff/.../schedulelist/SchedulePublicBffController.java`：只改「交易紀錄匯出」那一筆的 description（**筆數不變**）
+- `db.changelog-master.yaml`：註冊 v1.80.0
+- `frontend/src/api/index.js`：`transaction` 命名空間的排程方法改為多筆版
+- `frontend/src/views/TransactionView.vue`：排程卡改為可新增／刪除的多筆列表
+- `backend/src/test/java/.../AssetTransactionExportScheduleServiceTest.java`：改寫並補多筆／驗歸屬／名稱／上限測試
 
 ---
 

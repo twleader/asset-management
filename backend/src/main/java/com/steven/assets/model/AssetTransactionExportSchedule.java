@@ -11,17 +11,22 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 /**
- * 資產交易紀錄每日排程自動匯出設定（Requirement 49 / Task 238）。
+ * 資產交易紀錄每日排程自動匯出設定（Requirement 49 / Task 238；Task 255 起每人可多列）。
  *
- * <p>每個使用者一列（{@code owner_user_id} UNIQUE），以 {@code @Filter(ownerFilter)} 隔離設定本身。
- * HTTP 情境（BFF→business）由 {@link com.steven.assets.security.TenantFilterAspect} 自動 owner-scoped 到本人；
+ * <p><b>每個使用者可有多列</b>——Task 255 移除了原本的 {@code uq_at_export_schedule_owner} UNIQUE，
+ * 一列＝一筆每日排程，各自持有時間／輸出目錄／Drive 設定／執行狀態（{@code last_run_*}）。
+ * 設定本身以 {@code @Filter(ownerFilter)} 隔離。
+ *
+ * <p>HTTP 情境（BFF→business）由 {@link com.steven.assets.security.TenantFilterAspect} 自動 owner-scoped 到本人；
  * 背景排程 {@code AssetTransactionExportScheduleService} 無 request context → filter 不啟用，
  * {@code findAll()} 讀全部列（跨所有 owner），產檔時才對「該列 owner」手動 {@code enableFilter}
  * （見 {@code ExcelExportService.exportAssetTransactionsForOwner}）。
+ *
+ * <p><b>by-id 存取（PUT／DELETE／run-now）不得用 {@code findById}</b>：Hibernate {@code @Filter} 不套用於
+ * {@code EntityManager.find()}，一律走 {@code findByIdAndOwnerUserId}，否則可用他人排程 id 讀改刪。
  */
 @Entity
-@Table(name = "asset_transaction_export_schedule", uniqueConstraints = @UniqueConstraint(
-        name = "uq_at_export_schedule_owner", columnNames = {"owner_user_id"}))
+@Table(name = "asset_transaction_export_schedule")
 @Filter(name = "ownerFilter", condition = "owner_user_id = :ownerId")
 @Data
 @NoArgsConstructor
@@ -36,6 +41,14 @@ public class AssetTransactionExportSchedule {
     /** 擁有者（Requirement 28） */
     @Column(name = "owner_user_id", nullable = false)
     private Long ownerUserId;
+
+    /**
+     * 排程名稱（選填，Task 255）。非空時會成為檔名的一段：
+     * {@code 交易紀錄_{ownerId}_{name}_{yyyyMMdd}.xlsx}；為 null／空白時檔名與 Task 238 逐字元相同。
+     * 因為它會直接進檔名，寫入端以白名單驗證（中英數／底線／連字號／空白，≤20 字）。
+     */
+    @Column(name = "name", length = 50)
+    private String name;
 
     /** 是否啟用每日排程 */
     @Column(nullable = false)
