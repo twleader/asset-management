@@ -135,6 +135,24 @@ public class InternalPriceController {
         return historicalBackfill.backfillSingleStock(code, market, since, until);
     }
 
+    /**
+     * 歷史修復（Task 258）：對指定市場與日期區間重抓權威日線並<b>覆寫</b>既有列。
+     *
+     * <p>與 {@code /backfill/stock} 的差別：後者是增量（起點 {@code maxDate+1}）＋ skip-if-exists，
+     * 修不了區間中段已存在的錯誤列。本端點一律覆寫，但仍跳過該市場當日列（今日列獨佔給 ClosePersister）、
+     * 且來源查無某日時保留既有列不動。冪等，可重複執行。</p>
+     *
+     * <p>維護用入口，不做成使用者可按的按鈕；business-services 與 BFF 端刻意不加 proxy。</p>
+     */
+    @PostMapping("/repair/history")
+    public HistoricalBackfillService.RepairSummary repairHistory(
+            @RequestParam String market,
+            @RequestParam(required = false) String code,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        return historicalBackfill.repairRange(market, code, from, to);
+    }
+
     /** 全持股 + USD 匯率 10 年回補（耗時操作）。 */
     @PostMapping("/backfill/all")
     public Map<String, Object> backfillAll() {

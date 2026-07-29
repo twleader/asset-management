@@ -64,19 +64,36 @@ public class StockSourceQuery {
                 });
     }
 
-    /** 取最新快照所有持股代號（盤中 / 盤後皆用同一份）。 */
+    /**
+     * 收集需要抓報價的持股代號：<b>每位 owner 各自</b>最新快照的持股 ∪ {@code stock_alert} 觀察清單。
+     * 盤中 / 盤後皆用同一份。
+     *
+     * <p><b>Task 257 起改為 per-owner。</b>原本取
+     * {@code SELECT id FROM asset_snapshot ORDER BY snapshot_date DESC LIMIT 1}——全庫只取一筆快照。
+     * 本系統為多租戶，且 Requirement 35 每日把各 owner 的最新快照日期都釘成當日，於是多位 owner 的
+     * 最新快照必然同日、tie-break 由 Postgres 任意決定。實測 2026-07-29：owner 1 的快照 id 15 有 35 筆
+     * 台股持股、owner 2 的 id 18 只有 2 筆，Postgres 挑中 id 18，使 {@code 2885}（元大金，只在 owner 1
+     * 持股、不在觀察清單）既不被每 2 分鐘的 {@code PricePoller.scheduledTwIntradayUpdate} 抓價、
+     * 也不被 16:00 的 {@code ClosePersister.verifyTwCloseWithFinMind} 校正收盤，前端因而顯示前一交易日
+     * 的假收盤（63.50，實際 07-29 收盤 62.2）。</p>
+     *
+     * <p>Task 249 曾判斷「改本方法會放大背景排程對外部 API 的請求量」而不動它，改為新增
+     * {@link #collectTwRadarCodes(Set)} 繞過。<b>該判斷經量測後不成立</b>：改為 per-owner 後實測
+     * 台股 18 → 19 檔（只多 {@code 2885} 一檔）、美股 9 → 9、英股 3 → 3。原因是 {@code stock_holding}
+     * 同一檔股票在同一快照內可依券商／帳戶分列，去重後與觀察清單高度重疊。兩者現已同口徑。</p>
+     *
+     * <p>{@code ORDER BY} 三個欄位一個都不能少：{@code owner_user_id} 是 {@code DISTINCT ON} 的必要
+     * 前綴、{@code snapshot_date DESC} 取最新、{@code id DESC} 是同 owner 同日多筆時的決定性 tie-break
+     * （少了它就退回本 bug 的「任意 tie-break」）。</p>
+     */
     public void collectHeldStockCodes(Set<String> twCodes, Set<String> usCodes, Set<String> ukCodes) {
-        Long latestSnapshotId = jdbc.query(
-                "SELECT id FROM asset_snapshot ORDER BY snapshot_date DESC LIMIT 1",
-                rs -> rs.next() ? rs.getLong(1) : null);
-        if (latestSnapshotId != null) {
-            jdbc.query("SELECT stock_code, market FROM stock_holding WHERE snapshot_id = ?",
-                    ps -> ps.setLong(1, latestSnapshotId),
-                    (java.sql.ResultSet rs) -> {
-                        classify(rs.getString("stock_code"), rs.getString("market"),
-                                twCodes, usCodes, ukCodes);
-                    });
-        }
+        jdbc.query("SELECT stock_code, market FROM stock_holding "
+                        + "WHERE snapshot_id IN (SELECT DISTINCT ON (owner_user_id) id FROM asset_snapshot "
+                        + "ORDER BY owner_user_id, snapshot_date DESC, id DESC)",
+                (java.sql.ResultSet rs) -> {
+                    classify(rs.getString("stock_code"), rs.getString("market"),
+                            twCodes, usCodes, ukCodes);
+                });
         // watch_stock 表已廢止（v1.22）；觀察清單由 stock_alert 衍生
         // 排除 0000（台股大盤）— 走 twse_index_daily_history，不打 TWSE mis API
         jdbc.query("SELECT DISTINCT stock_code, market FROM stock_alert " +
@@ -104,6 +121,9 @@ public class StockSourceQuery {
      * <p><b>刻意不改 {@link #collectHeldStockCodes} 本身</b>：它同時服務每 2 分鐘的
      * {@code PricePoller.scheduledTwIntradayUpdate} 與 {@code refreshAll()}，放大其範圍會改變背景排程
      * 對外部 API 的請求量，屬另一個決定。</p>
+     *
+     * <p><b>（Task 257 已推翻上一段）</b>實測改為 per-owner 後台股僅 18 → 19 檔、美股與英股不變，
+     * 請求量幾無變化；{@link #collectHeldStockCodes} 現已改為同一口徑。上一段保留為當時的決策記錄。</p>
      */
     public void collectTwRadarCodes(Set<String> twCodes) {
         jdbc.query("SELECT h.stock_code FROM stock_holding h WHERE h.market = '台股' "

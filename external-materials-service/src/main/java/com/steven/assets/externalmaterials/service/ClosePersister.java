@@ -13,10 +13,14 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZonedDateTime;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
@@ -43,6 +47,71 @@ public class ClosePersister {
     private final MarketCalendar calendar;
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    /**
+     * 收盤 dump 可接受的 payload 陳舊上限（Task 258）。三個 dump 皆排在收盤後 2 分鐘
+     * （13:32 TW／16:02 ET／16:32 LON），而盤中 cron 每 2 分鐘一輪，故合法值的 {@code updatedAt}
+     * 必落在收盤前最後幾輪。改小會擋掉正常路徑，改大會放進盤中 tick。
+     */
+    static final Duration MAX_PAYLOAD_STALENESS = Duration.ofMinutes(12);
+
+    /**
+     * 收盤 dump 的逐檔守門（Task 258）。回 {@code true} 才允許把該 payload 寫成 {@code targetDate} 的收盤。
+     *
+     * <p><b>為什麼需要：</b>{@link #dumpRedisToDb} 原本只要 Redis payload 有 {@code price} 就寫進
+     * {@code stock_price_history} 當日列，既不檢查 payload 的 {@code tradingDate}、也不檢查該值有多舊。
+     * 代號集合來自 Redis SET {@code price:index:{market}}，其中含開機 {@code warmCacheOnStartup} 以
+     * {@code collectAllStockCodes} 寫入（實測台股 34 檔）、之後再也不被盤中 cron（Task 257 後 19 檔）
+     * 刷新的「曾持有／曾觀察」標的；加上 {@code PriceCacheWriter.syncClosedFromDb} 會從 DB 最近收盤
+     * 寫回 Redis，錯誤值遂透過 Redis 洗一圈回到 DB、每個交易日自我延續一列。實測 2026 年已累積
+     * 台股 122 列、美股 3 列、英股 3 列假收盤（例 {@code 2002} 中鋼 2026-07-16～07-29 共 8 個交易日
+     * 收盤全記 19.1000、O/H/L 為 null、volume 0）。</p>
+     *
+     * <p><b>兩條規則皆須成立：</b></p>
+     * <ol>
+     *   <li>{@code tradingDate} 必須等於 {@code targetDate}——擋掉上述迴路（陳舊值帶的是舊日期，
+     *       或 {@code syncClosedFromDb} 寫入的 DB {@code maxTradingDate}）。</li>
+     *   <li>{@code updatedAt} 距 {@code now} 不得超過 {@link #MAX_PAYLOAD_STALENESS}——擋掉「同日但
+     *       早於收盤數小時」的盤中 tick（實測 2026-07-29 的 {@code 1301} 10:40／{@code 2409} 10:55／
+     *       {@code 2882} 11:30 就是被當成收盤寫入的盤中值）。</li>
+     * </ol>
+     *
+     * <p><b>{@code now} 必須是台北牆鐘。</b>{@code PriceCacheWriter} 三處寫 {@code updatedAt} 都是
+     * {@code LocalDateTime.now(MarketClock.TW_ZONE)}，即所有市場的 {@code updatedAt} 都是台北牆鐘；
+     * 拿它去比美股／英股的當地收盤時刻會分別位移 12／7 小時。改成比「距本次執行時刻」則兩端同為
+     * 台北牆鐘，三個市場同一段程式碼即正確。</p>
+     *
+     * <p><b>刻意不用 payload 的 {@code closed} 當守門條件。</b>13:32 dump 要取的正是 13:28～13:30
+     * 那輪盤中 cron 寫入的值，而 {@code PricePoller.scheduledTwIntradayUpdate} 呼叫的是
+     * {@code updatePrices(tw, "台股", false)} → {@code closed} 為 {@code false}。以
+     * {@code closed == true} 守門會把正常路徑整個擋掉、當日一列都寫不進去。</p>
+     */
+    static boolean shouldDumpPayload(JsonNode payload, LocalDate targetDate, LocalDateTime now) {
+        if (payload == null || targetDate == null || now == null) return false;
+
+        JsonNode td = payload.get("tradingDate");
+        if (td == null || td.isNull()) return false;
+        LocalDate payloadDate;
+        try {
+            payloadDate = LocalDate.parse(td.asText());
+        } catch (Exception e) {
+            return false;
+        }
+        if (!payloadDate.equals(targetDate)) return false;
+
+        JsonNode ua = payload.get("updatedAt");
+        if (ua == null || ua.isNull()) return false;
+        LocalDateTime updatedAt;
+        try {
+            updatedAt = LocalDateTime.parse(ua.asText());
+        } catch (Exception e) {
+            return false;
+        }
+        Duration age = Duration.between(updatedAt, now);
+        // updatedAt 晚於 now（容器時鐘微幅倒退）視為 0 分鐘，不得因負值被誤擋
+        if (age.isNegative()) return true;
+        return age.compareTo(MAX_PAYLOAD_STALENESS) <= 0;
+    }
 
     /**
      * 開機自我修復：若今天該跑的 close 邏輯已過排程時間但 DB 沒當日資料，補跑一次。
@@ -278,7 +347,9 @@ public class ClosePersister {
             log.warn("Redis index 為空：price:index:{}（盤中 cron 可能沒寫成功）", market);
             return 0;
         }
+        LocalDateTime now = LocalDateTime.now(MarketClock.TW_ZONE);
         int n = 0;
+        List<String> skipped = new ArrayList<>();
         for (String code : codes) {
             String json = redis.opsForValue().get("price:" + market + ":" + code);
             if (json == null) continue;
@@ -286,6 +357,11 @@ public class ClosePersister {
                 JsonNode r = MAPPER.readTree(json);
                 BigDecimal price = bd(r, "price");
                 if (price == null) continue;
+                // Task 258：陳舊值 / 盤中 tick 不得被冠上今日日期寫成收盤
+                if (!shouldDumpPayload(r, tradingDate, now)) {
+                    skipped.add(code);
+                    continue;
+                }
                 source.upsertHistory(code, market, tradingDate,
                         bd(r, "openPrice"), bd(r, "highPrice"), bd(r, "lowPrice"),
                         price,
@@ -294,6 +370,13 @@ public class ClosePersister {
             } catch (Exception e) {
                 log.warn("dump Redis {} {} 失敗: {}", market, code, e.getMessage());
             }
+        }
+        // 不得靜默截斷：被守門跳過的檔要看得見，否則「dump 完成：N 檔」讀起來像全部成功
+        if (!skipped.isEmpty()) {
+            log.info("{} 收盤 dump 寫入 {} 檔、守門跳過 {} 檔"
+                            + "（payload 非本交易日 {} 或距今超過 {} 分鐘）：{}",
+                    market, n, skipped.size(), tradingDate,
+                    MAX_PAYLOAD_STALENESS.toMinutes(), skipped);
         }
         return n;
     }
