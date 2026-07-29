@@ -176,15 +176,17 @@
         </el-form-item>
       </el-form>
       <div class="export-hint">
-        警示條件（含複合條件群組）一旦觸發，立刻把<strong>當日全部觸發</strong>寫成 JSON 到指定資料夾，
-        檔名 <code>alert_triggers_{{ '{使用者ID}' }}_YYYYMMDD.json</code>；同日多次觸發覆寫同一檔、跨日新檔。
+        警示條件（含複合條件群組）一旦觸發，立刻把<strong>最近 3 天的全部觸發</strong>寫成 JSON 到指定資料夾，
+        檔名 <code>alert_triggers_{{ '{使用者ID}' }}.json</code>（固定不含日期）；每次觸發覆寫同一個檔案。
+        <br /><strong>刻意不用「每日一檔」</strong>：美股盤中（紐約 09:30–16:00）換算台北是 21:30 到隔日 04:00、
+        跨過午夜，按日期分檔會把<strong>同一個美股交易日的觸發切成兩個檔案</strong>；滾動視窗讓它們一定在一起。
         以主機家目錄 <code>{{ exportSetting.baseDir || '/home/steven' }}</code> 為根（對映主機
         <code>/Users/steven</code>），按上方「選擇」挑子資料夾。
         <template v-if="exportSetting.resolvedDir">
           <br />本機落點：<code>{{ exportSetting.resolvedDir }}</code>
         </template>
-        <br />「立即匯出」會把當日已發生的觸發重新產檔（<strong>不看上面的啟用開關</strong>），供驗證落點用；
-        當日尚無觸發時會寫出一個空的觸發清單。
+        <br />「立即匯出」會把近 3 天已發生的觸發重新產檔（<strong>不看上面的啟用開關</strong>），供驗證落點用；
+        近 3 天尚無觸發時會寫出一個空的觸發清單。
         <br />警示觸發紀錄在資料庫只保留 30 天，但<strong>已匯出的 JSON 檔案系統一律不刪</strong>——
         資料庫清掉之後，先前寫出的檔案仍留在資料夾裡。
       </div>

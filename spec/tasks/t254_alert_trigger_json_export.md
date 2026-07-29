@@ -1,5 +1,11 @@
 # [t254] 警示觸發即時匯出 JSON 到指定目錄（本機即時 ＋ Google Drive 合併同步）
 
+> **⚠ 檔案切分方式已被 [t256](t256_alert_export_rolling_window.md) 取代（2026-07-29）。**
+> 本檔的「當日一檔 `alert_triggers_{ownerId}_{yyyyMMdd}.json`」有結構性缺陷：美股交易時段換算台北是
+> 21:30 → 隔日 04:00、橫跨午夜，同一個美股交易日的觸發**必然**被切成兩個檔案（實測紐約 07-28 的四筆
+> 被切成台北 07-28 三筆 ＋ 07-29 一筆）。現行為**固定單檔 `alert_triggers_{ownerId}.json` ＋ 3 天滾動視窗**。
+> 本檔其餘內容（事件驅動接入點、本機即時／Drive 去抖、owner join、權限、路徑驗證、測試）仍然有效。
+
 **對應 Requirements:** Requirement 54（警示條件一旦觸發，立刻把該使用者當日的觸發內容寫成 JSON 到指定目錄；本機一律照寫，Drive 為可選的附加副本）
 **前置任務:** 無（t242／t243 建立的 `GdriveOutputSupport` 與 `RcloneClient.copyTo` 已在 main 上；t253 的複合條件群組亦已在 main 上。本任務只沿用，不修改它們）
 **Liquibase changeset:** `v1.81.0-stock-alert-export-setting.sql`

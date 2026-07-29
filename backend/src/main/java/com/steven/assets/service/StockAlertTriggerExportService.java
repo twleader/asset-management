@@ -65,11 +65,28 @@ import java.util.concurrent.locks.ReentrantLock;
 public class StockAlertTriggerExportService {
 
     private static final ZoneId TW_ZONE = ZoneId.of("Asia/Taipei");
-    private static final DateTimeFormatter FILE_DATE = DateTimeFormatter.ofPattern("yyyyMMdd");
     private static final DateTimeFormatter TS_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
-    /** 檔名樣式，供設定頁顯示；`{0}`＝owner id、`{1}`＝台北當日 yyyyMMdd。 */
-    public static final String FILENAME_PATTERN = "alert_triggers_{使用者ID}_{yyyyMMdd}.json";
+    /**
+     * 檔名樣式，供設定頁顯示。<b>固定單檔、不含日期</b>（Task 256）。
+     *
+     * <p><b>為什麼不用「每日一檔」</b>：美股交易時段（紐約 09:30–16:00）換算台北是 21:30 → 隔日 04:00、
+     * 橫跨午夜，任何以台北日期分檔的方案都會把同一個美股交易日切成兩個檔案。實測紐約 07-28 的四筆觸發
+     * 被切成台北 07-28 三筆（VT/QQQ/VOO）＋ 07-29 一筆（AMZN），使用者打開當日檔只看得到一筆。
+     * 台股 09:00–13:30、英股 15:00–23:30 換算台北都不跨午夜，只有美股每天中。
+     */
+    public static final String FILENAME_PATTERN = "alert_triggers_{使用者ID}.json";
+
+    /**
+     * 匯出視窗長度（台北日曆日）：今日 ＋ 前 2 日。
+     *
+     * <p><b>以日曆日而非「now − 72 小時」界定</b>：滾動小時數會讓同一筆觸發隨匯出時刻在檔案裡忽隱忽現
+     * ——下游兩次讀到不同結果，卻沒有任何事件發生。3 天足以涵蓋週末與連假（週五盤中觸發，週一早上讀
+     * 仍讀得到）。
+     *
+     * <p>非 final：測試需要調整才驗得到視窗邊界。不做成 DB 設定欄位（多一個沒人會調的欄位）。
+     */
+    private int windowDays = 3;
 
     /**
      * Drive 上傳的最小間隔（毫秒）。
@@ -136,6 +153,16 @@ public class StockAlertTriggerExportService {
         this.debounceIntervalMillis = millis;
     }
 
+    /** 測試用：調整視窗長度才驗得到邊界。 */
+    void setWindowDays(int days) {
+        this.windowDays = days;
+    }
+
+    /** 視窗長度（天），供 JSON 與測試對照。 */
+    public int windowDays() {
+        return windowDays;
+    }
+
     /** per-owner 的 Drive 去抖狀態：是否已有排定中的任務 ＋ 最近一次<b>實際上傳完成</b>的時刻。 */
     private static final class DriveDebounceState {
         boolean scheduled;
@@ -200,15 +227,16 @@ public class StockAlertTriggerExportService {
             StockAlertExportSetting s = settingRepo.findByOwnerUserId(ownerUserId).orElseGet(() ->
                     StockAlertExportSetting.builder().ownerUserId(ownerUserId).build());
 
-            LocalDate today = LocalDate.now(TW_ZONE);
-            List<StockAlertTrigger> triggers = triggerRepo.findByOwnerAndCreatedAtInDay(
-                    ownerUserId, today.atStartOfDay(), today.plusDays(1).atStartOfDay());
-            byte[] data = buildJson(ownerUserId, today, triggers);
+            // 視窗起點＝今日台北日期 −(windowDays−1) 天的 00:00；無上界（未來時間不存在）
+            LocalDateTime since = LocalDate.now(TW_ZONE).minusDays(windowDays - 1L).atStartOfDay();
+            List<StockAlertTrigger> triggers =
+                    triggerRepo.findByOwnerAndCreatedAtAfter(ownerUserId, since);
+            byte[] data = buildJson(ownerUserId, since, triggers);
 
             Path file;
             try {
                 file = writeAtomically(s.getOutputSubpath(),
-                        "alert_triggers_" + ownerUserId + "_" + today.format(FILE_DATE) + ".json", data);
+                        "alert_triggers_" + ownerUserId + ".json", data);
             } catch (IOException | RuntimeException e) {
                 s.setOwnerUserId(ownerUserId);
                 s.setLastRunAt(LocalDateTime.now(TW_ZONE));
@@ -261,10 +289,13 @@ public class StockAlertTriggerExportService {
      * 「匯出當下」的均線，會讓 MA% 條件的換算觸發價與觸發當下不符，而且一次匯出要為每筆觸發打一次
      * 指標計算。
      */
-    private byte[] buildJson(Long ownerUserId, LocalDate today, List<StockAlertTrigger> triggers) {
+    private byte[] buildJson(Long ownerUserId, LocalDateTime since, List<StockAlertTrigger> triggers) {
         ObjectNode root = objectMapper.createObjectNode();
         root.put("ownerUserId", ownerUserId);
-        root.put("date", today.toString());
+        // windowDays / since 讓下游知道「沒有更早的資料」是視窗造成的，不是真的沒觸發過。
+        // 刻意不輸出 date：固定單檔沒有「這是哪一天的檔」這個語意，留著會誤導下游以為只含那一天。
+        root.put("windowDays", windowDays);
+        root.put("since", since.toString());
         root.put("exportedAt", LocalDateTime.now(TW_ZONE).toString());
         root.put("triggerCount", triggers.size());
 

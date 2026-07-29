@@ -166,9 +166,9 @@ public class StockAlertController {
     }
 
     /**
-     * 立即把<b>當日已發生的觸發</b>產檔（驗證落點用）。
+     * 立即把<b>視窗內（近 3 天）已發生的觸發</b>產檔（驗證落點用）。
      *
-     * <p><b>不看 {@code enabled}</b>——設定尚未啟用時使用者同樣需要確認落點正確。當日尚無任何觸發時
+     * <p><b>不看 {@code enabled}</b>——設定尚未啟用時使用者同樣需要確認落點正確。視窗內尚無任何觸發時
      * 仍寫出 {@code triggers: []} 的合法 JSON，不回 404、不靜默不產檔。
      */
     @PostMapping("/export-setting/run-now")
@@ -177,8 +177,8 @@ public class StockAlertController {
         try {
             StockAlertTriggerExportService.ExportResult r = exportService.runNow(ownerId);
             String msg = r.triggerCount() == 0
-                    ? "當日尚無觸發，已寫出空的觸發清單（可用於驗證落點）"
-                    : "已匯出當日 " + r.triggerCount() + " 筆觸發";
+                    ? "近 " + exportService.windowDays() + " 天尚無觸發，已寫出空的觸發清單（可用於驗證落點）"
+                    : "已匯出近 " + exportService.windowDays() + " 天共 " + r.triggerCount() + " 筆觸發";
             return new StockAlertExportDto.RunNowResponse(
                     r.file().toString(), r.sizeBytes(), r.triggerCount(), msg,
                     r.gdrivePath(), r.gdriveStatus());
