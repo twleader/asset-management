@@ -5,7 +5,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
-import java.sql.Timestamp;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.time.Instant;
 import java.util.List;
 
@@ -94,9 +95,14 @@ public class CrawlerExportPathQuery {
     public void recordGdriveResult(String crawlerKey, String status) {
         String msg = status == null ? null
                 : (status.length() > MAX_STATUS_LEN ? status.substring(0, MAX_STATUS_LEN) : status);
+        // Requirement 53 / Task 252：**不可用 Timestamp.from(instant)**——JdbcTemplate 走
+        // ps.setTimestamp() 不帶 Calendar，會依 JVM 預設時區換算，容器改成 Asia/Taipei 後寫進去的
+        // 就變成台北牆鐘。而這一欄同時由 business 的 Hibernate 以 Instant 寫入
+        // （CrawlerExportSetting.gdriveLastRunAt，走 TIMESTAMP_UTC／UTC Calendar、時區中立、恆為 UTC 牆鐘），
+        // 兩個寫入端會分家 8 小時。改綁 LocalDateTime（pgjdbc 牆鐘原樣寫入）並顯式取 UTC，與 Hibernate 對齊。
         int updated = jdbc.update(
                 "UPDATE crawler_export_setting SET gdrive_last_run_at = ?, gdrive_last_status = ? WHERE crawler_key = ?",
-                Timestamp.from(Instant.now()), msg, crawlerKey);
+                LocalDateTime.ofInstant(Instant.now(), ZoneOffset.UTC), msg, crawlerKey);
         if (updated == 0) {
             log.warn("回寫 Drive 上傳狀態時查無 crawler_export_setting 列（crawler_key={}），"
                     + "本次狀態未記錄；該列由 backend 擁有，ext 不代為建立。狀態內容：{}", crawlerKey, msg);

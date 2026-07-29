@@ -11,6 +11,7 @@ import com.steven.assets.repository.StockAlertRepository;
 import com.steven.assets.repository.StockAlertTriggerRepository;
 import com.steven.assets.repository.StockPriceHistoryRepository;
 import com.steven.assets.repository.StockRepository;
+import com.steven.assets.util.MarketZones;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -267,9 +268,13 @@ public class StockAlertService {
             if (priceOpt.isEmpty() || priceOpt.get().price() == null) return;
             double currentPrice = priceOpt.get().price().doubleValue();
 
-            // 24-hour cooldown
+            // 24-hour cooldown（Requirement 53 / Task 252）
+            // 兩側必須同為「該股市場的牆鐘」：lastTriggeredAt 由 computeTriggeredAt() 以
+            // ZonedDateTime.now(市場 zone) 寫入，右側若用 JVM 牆鐘，冷卻長度會變成 24h ± 市場 offset
+            // ——修正前實測為台股 32h（早上觸發後隔天整個交易日仍在冷卻中而靜默漏發）、英股 25h、美股 20h。
             if (alert.getLastTriggeredAt() != null &&
-                    alert.getLastTriggeredAt().isAfter(LocalDateTime.now().minusHours(24))) {
+                    alert.getLastTriggeredAt().isAfter(
+                            MarketZones.nowLocal(alert.getMarket()).minusHours(24))) {
                 return;
             }
 
@@ -610,7 +615,10 @@ public class StockAlertService {
     }
 
     private List<StockPriceHistory> withTodayIfMissing(List<StockPriceHistory> desc, String code, String market) {
-        LocalDate today = java.time.LocalDate.now();
+        // Task 252：必須用該股市場時區的今日——這裡要拿 today 去比對 tradingDate（DB 的 date 與 Redis 的日期字串）。
+        // 用 JVM 牆鐘的話，美股在台北 00:00–04:00（＝ET 12:00–16:00）會取到 D+1 而資料端是 D，
+        // 兩個比對同時失敗 → 今日即時價完全不併入 → MA/KD 用不含今日價的舊序列算。
+        LocalDate today = MarketZones.today(market);
         if (!desc.isEmpty() && desc.get(0).getTradingDate().equals(today)) return desc;
         return priceQuery.getLive(code, market)
                 .filter(lp -> lp.tradingDate() != null && today.toString().equals(lp.tradingDate()))

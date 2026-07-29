@@ -61,7 +61,9 @@ public class EtfNavCacheWriter {
         payload.put("premiumDiscountPct", nav.premiumDiscountPct());
         payload.put("navAsOf", nav.navAsOf());
         payload.put("source", nav.source());
-        payload.put("updatedAt", LocalDateTime.now().toString());
+        // Task 252：顯式台北牆鐘。此值前端直接顯示，且 StockPriceService 會跨 key 取 max——
+        // 若跟著 JVM 預設時區跑，切換當下新舊 tick 會是兩種基準，max 恆被先覆寫的那一筆鎖住。
+        payload.put("updatedAt", LocalDateTime.now(MarketClock.TW_ZONE).toString());
         try {
             redis.opsForValue().set(key(nav.market(), nav.stockCode()),
                     MAPPER.writeValueAsString(payload), NAV_TTL);
