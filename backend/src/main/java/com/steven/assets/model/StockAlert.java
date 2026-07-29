@@ -61,6 +61,15 @@ public class StockAlert {
     @Builder.Default
     private Integer displayOrder = 0;
 
+    /**
+     * 最近一次觸發時間，**存「該股市場」的牆鐘**（台股台北／美股紐約／英股倫敦），
+     * 由 {@code StockAlertService.computeTriggeredAt()} 的 {@code ZonedDateTime.now(市場 zone)} 寫入。
+     *
+     * <p>這是 Requirement 53「naive 欄位一律存台北牆鐘」的**唯二例外之一**（另一個是
+     * {@code StockAlertTrigger.triggeredAt}）——顯示端要的就是「紐約時間 12:00 觸發」。
+     * <b>不可納入任何時區校正 migration</b>，也<b>不可</b>拿它跟 JVM 牆鐘比較：
+     * 冷卻判定必須用 {@code MarketZones.nowLocal(market)}，否則冷卻長度會變成 24h ± 市場 offset。
+     */
     private LocalDateTime lastTriggeredAt;
 
     /** 觸發當下的股價 */

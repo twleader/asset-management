@@ -20,6 +20,13 @@
 
     <properties>
         <java.version>21</java.version>
+        <!--
+          Task 252：測試 JVM 的額外參數。surefire 的 argLine 只能有一個值，命令列直接下
+          -DargLine=... 會**覆蓋**掉時區設定；故把可變的部分抽成本 property 供疊加。
+          例（本機 JDK 為 25 時跑 Mockito 需要）：
+            mvn test -DextraArgLine=-Dnet.bytebuddy.experimental=true
+        -->
+        <extraArgLine></extraArgLine>
     </properties>
 
     <dependencies>
@@ -127,6 +134,19 @@
                             <artifactId>lombok</artifactId>
                         </exclude>
                     </excludes>
+                </configuration>
+            </plugin>
+            <plugin>
+                <!--
+                  Requirement 53 / Task 252：測試 JVM 的時區必須與正式環境（容器 TZ=Asia/Taipei）一致，
+                  否則會出現「本機測試過、容器行為不同」的時區問題。
+                  額外參數走 ${extraArgLine} 疊加，**不要**在命令列直接下 -DargLine=...（那會覆蓋掉時區）：
+                    mvn test -DextraArgLine=-Dnet.bytebuddy.experimental=true
+                -->
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <argLine>-Duser.timezone=Asia/Taipei ${extraArgLine}</argLine>
                 </configuration>
             </plugin>
         </plugins>

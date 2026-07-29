@@ -342,6 +342,7 @@ import dayjs from 'dayjs'
 import { bffApi } from '@/api'
 import { showGdriveSelfCheckWarning } from '@/utils/gdriveSelfCheck'
 import { useAuthStore } from '@/stores/authStore'
+import { todayLocal } from '@/utils/localDate'
 
 const TX_TYPES = ['買', '賣']
 const ASSET_TYPES = ['股票', '基金']
@@ -531,7 +532,7 @@ const resetForm = () => {
 
 const openCreateDialog = () => {
   resetForm()
-  txForm.tradeDate = new Date().toISOString().slice(0, 10)
+  txForm.tradeDate = todayLocal()
   dialogVisible.value = true
 }
 

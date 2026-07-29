@@ -5,6 +5,11 @@ services:
     image: postgres:16-alpine
     container_name: asset-postgres
     restart: unless-stopped
+    # Requirement 53 / Task 252：時區必須用啟動參數設定，**不可只設 TZ 環境變數**——
+    # 實測資料目錄的 postgresql.conf 已被 initdb 寫死 `timezone = UTC`（pg_settings.source = configuration file），
+    # 環境變數贏不過它。影響範圍是 SQL NOW()／now() 與 timestamptz 的顯示表示法；
+    # naive timestamp 欄位的值由應用端寫入，不受此設定影響。
+    command: ["postgres", "-c", "timezone=Asia/Taipei", "-c", "log_timezone=Asia/Taipei"]
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -51,6 +56,11 @@ services:
     container_name: asset-business-services
     restart: unless-stopped
     environment:
+      # Requirement 53 / Task 252：JVM 預設時區。其語意是「沒有顯式指定 ZoneId 的呼叫落在哪裡」——
+      # 未設時為 UTC，是全系統唯一沒有人想要的時區（使用者在台灣，三個市場時區則早已全部顯式化：
+      # 46 個帶 zone 的 @Scheduled、MarketZones、MarketClock、匯出排程的 TW_ZONE，皆不受本設定影響）。
+      # 回退方式：覆寫 APP_TZ 環境變數後 recreate（但 DB 的 v1.79.0 校正需另行手動反向執行）。
+      TZ: ${APP_TZ:-Asia/Taipei}
       DB_HOST: postgres
       DB_PORT: 5432
       DB_NAME: ${POSTGRES_DB}
@@ -131,6 +141,10 @@ services:
     container_name: asset-external-materials-service
     restart: unless-stopped
     environment:
+      # Requirement 53 / Task 252：與 business-services 同一個時區基準（見該處說明）。
+      # 本服務的市場時間層（MarketClock／TradingDateResolver／ClosePersister 等）全部顯式帶市場 ZoneId，
+      # 不受本設定影響；受影響的是 PriceCacheWriter 寫進 Redis 的 updatedAt 這類「牆上時鐘」。
+      TZ: ${APP_TZ:-Asia/Taipei}
       DB_HOST: postgres
       DB_PORT: 5432
       POSTGRES_DB: ${POSTGRES_DB}
@@ -213,6 +227,8 @@ services:
     container_name: asset-bff
     restart: unless-stopped
     environment:
+      # Requirement 53 / Task 252：與其他 JVM 服務同一個時區基準。
+      TZ: ${APP_TZ:-Asia/Taipei}
       BUSINESS_SERVICES_URL: http://business-services:8080
       # Gmail OAuth2 登入（Requirement 28）：值由專案 .env 注入；未填時用 placeholder 讓 BFF 仍能啟動
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-placeholder-client-id}
@@ -241,6 +257,9 @@ services:
       dockerfile: Dockerfile
     container_name: asset-frontend
     restart: unless-stopped
+    environment:
+      # Task 252：僅為 nginx access log 可讀性；前端時間顯示由瀏覽器本地時區決定，與此無關。
+      TZ: ${APP_TZ:-Asia/Taipei}
     ports:
       - "80:80"
     depends_on:
