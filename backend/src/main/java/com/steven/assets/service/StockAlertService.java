@@ -54,6 +54,14 @@ public class StockAlertService {
     private final HistoricalDataService historicalDataService;
     private final TechnicalIndicatorService indicatorService;
     private final AlertNotificationDispatcher notificationDispatcher;
+    /**
+     * 觸發即時匯出 JSON（Requirement 54 / Task 254）。
+     *
+     * <p>單向相依：本 service → 匯出 service。匯出端需要條件文案時以 {@code StockAlertService.buildLabel}
+     * / {@code buildGroupLabel} <b>靜態呼叫</b>（兩支都是 {@code public static}），<b>不反向注入本 service</b>
+     * ——那會形成建構子循環依賴，Spring Boot 2.6+ 預設禁止循環參照，結果是整個 business-services 起不來。
+     */
+    private final StockAlertTriggerExportService triggerExportService;
     private final MarketDataService marketDataService;
     private final StockAlertRecipientRepository recipientLinkRepo;
     private final NotificationRecipientService notificationRecipientService;
@@ -871,6 +879,13 @@ public class StockAlertService {
         } catch (Exception e) {
             log.warn("enqueue 複合條件 email 通知失敗 group {}: {}", group.getId(), e.getMessage());
         }
+        // Requirement 54：即時匯出當日觸發 JSON。獨立條件與複合群組**兩條路徑都要接**——
+        // 只接一條會讓「複合條件觸發了但檔案沒動」，而使用者從畫面上看不出差別。
+        try {
+            triggerExportService.exportForTrigger(group.getOwnerUserId());
+        } catch (Exception e) {
+            log.warn("複合條件警示觸發匯出失敗 group {}: {}", group.getId(), e.getMessage());
+        }
     }
 
     /** 依 maPeriod 挑出對應的 MA（20=月線、60=季線、240=年線）；非 MA 類型或無 maPeriod 時回 quarterly 當預設。 */
@@ -1420,6 +1435,13 @@ public class StockAlertService {
                     ind.monthlyMa(), ind.quarterlyMa(), ind.annualMa(), ind.k(), ind.d());
         } catch (Exception e) {
             log.warn("enqueue email 通知失敗 alert {}: {}", alert.getId(), e.getMessage());
+        }
+        // Requirement 54：即時匯出當日觸發 JSON（自成一段 try/catch，比照上面兩段——
+        // 匯出失敗絕不回滾 trigger、不中斷 email、不回拋而中止整輪檢查）
+        try {
+            triggerExportService.exportForTrigger(alert.getOwnerUserId());
+        } catch (Exception e) {
+            log.warn("警示觸發匯出失敗 alert {}: {}", alert.getId(), e.getMessage());
         }
     }
 

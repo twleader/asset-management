@@ -86,6 +86,29 @@ public class StockMasterService {
     }
 
     /**
+     * <b>純本地</b>的股票名稱解析：{@code 0000}＋台股 →「台股大盤」；否則查本地 {@code stock} 主檔；
+     * <b>查無回代號本身</b>。不打外部行情 API、不寫主檔、不觸發歷史回補。
+     *
+     * <p><b>與 {@link #resolveName} 是兩件事，不可混用</b>（Task 254）：那一支查無主檔時會打
+     * FinMind／Yahoo、把結果 upsert 回主檔並背景排 10 年回補，查無最終回<b>空字串</b>。
+     * 警示觸發匯出跑在 Redis 訂閱者執行緒上（{@code PriceStreamService.onPriceUpdate} 對
+     * {@code checkAlertsFor} 是同步呼叫），在那條路徑上打外部 HTTP 會拖住整條即時價管線；
+     * 而 email digest 顯示「查無 → 代號本身」也比顯示空字串合理。
+     *
+     * <p>本方法由 {@code AlertNotificationDispatcher}（email 內的股名）與
+     * {@code StockAlertTriggerExportService}（JSON 的 {@code stockName}）共用——同一個顯示欄位
+     * 只能有一份來源，兩份必然分歧。
+     */
+    public String resolveNameLocalOnly(String code, String market) {
+        if ("0000".equals(code) && "台股".equals(market)) {
+            return "台股大盤";
+        }
+        return stockMasterRepo.findByCodeAndMarket(code, market)
+                .map(s -> s.getName())
+                .orElse(code);
+    }
+
+    /**
      * 反向查找：依股名精確匹配回股票代號（只查本地主檔，不打外部——FinMind/Yahoo 為 code→name 設計，反查不可靠）。
      * 空名稱回空字串；「台股大盤」＋台股特例回 0000；查無回空字串。
      */

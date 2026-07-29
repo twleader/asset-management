@@ -54,7 +54,11 @@ public class GdriveSelfCheck {
     private static final Path CONFIG_WRITABLE = Path.of("/tmp/rclone-output.conf");
 
     /**
-     * 「全庫是否有任一列啟用 Drive 輸出」。<b>八張表一次查完</b>，少查一張就會給假綠燈。
+     * 「全庫是否有任一列啟用 Drive 輸出」。<b>九張表一次查完</b>，少查一張就會給假綠燈。
+     *
+     * <p><b>每新增一個支援 Drive 的設定表都必須加進這個 UNION</b>（最新一張是 Task 254 的
+     * {@code stock_alert_export_setting}）。漏加的話，只在該頁啟用 Drive 的部署遇到 token 失效或
+     * remote 被改名時，重啟會判定「全庫無人啟用」而整個跳過 L3 探測、不噴任何 WARN。
      *
      * <p>沒有這個前置條件，Requirement 50／51 明訂的「既有部署升級後行為與現況一致、不要求 rclone
      * remote 存在」就被推翻——沒人啟用 Drive 的部署會每次啟動都噴 WARN。
@@ -72,7 +76,8 @@ public class GdriveSelfCheck {
               UNION ALL SELECT 1 FROM trading_radar_export_setting      WHERE gdrive_enabled
               UNION ALL SELECT 1 FROM commodity_export_schedule         WHERE gdrive_enabled
               UNION ALL SELECT 1 FROM realized_gain_export_schedule     WHERE gdrive_enabled
-              UNION ALL SELECT 1 FROM asset_transaction_export_schedule WHERE gdrive_enabled) AS any_enabled
+              UNION ALL SELECT 1 FROM asset_transaction_export_schedule WHERE gdrive_enabled
+              UNION ALL SELECT 1 FROM stock_alert_export_setting        WHERE gdrive_enabled) AS any_enabled
             """;
 
     private final RcloneClient rcloneClient;

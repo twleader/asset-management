@@ -394,7 +394,16 @@ export const bffApi = {
     createGroup: (data) => api.post('/bff/stock-alert/groups', data, { skipErrorToast: true }),
     updateGroup: (id, data) => api.put(`/bff/stock-alert/groups/${id}`, data, { skipErrorToast: true }),
     toggleGroupActive: (id) => api.patch(`/bff/stock-alert/groups/${id}/active`),
-    deleteGroup: (id) => api.delete(`/bff/stock-alert/groups/${id}`)
+    deleteGroup: (id) => api.delete(`/bff/stock-alert/groups/${id}`),
+    // 觸發即時匯出（Requirement 54 / Task 254）。事件驅動、非排程，故沒有執行時間欄位。
+    // browse / browse-gdrive 由 StockAlertBffController 接走（不是萬用 route），最終指向
+    // business 既有唯一那支 /api/export-schedule/browse{,-gdrive}
+    getExportSetting:      () => api.get('/bff/stock-alert/export-setting', { skipErrorToast: true }),
+    // skipErrorToast：Drive 開關被 403 擋下時，訊息要顯示在設定卡內讓使用者就地理解，不走頂部 toast
+    saveExportSetting:     (data) => api.put('/bff/stock-alert/export-setting', data, { skipErrorToast: true }),
+    runNowExport:          () => api.post('/bff/stock-alert/export-setting/run-now', {}, { skipErrorToast: true }),
+    browseExportDir:       (subpath = '') => api.get('/bff/stock-alert/export-setting/browse', { params: { subpath }, skipErrorToast: true }),
+    browseGdriveExportDir: (subpath = '') => api.get('/bff/stock-alert/export-setting/browse-gdrive', { params: { subpath }, skipErrorToast: true })
   },
 
   // WatchStock — v1.22 起改為 stock_alert 衍生 view，操作以 (stockCode, market) tuple

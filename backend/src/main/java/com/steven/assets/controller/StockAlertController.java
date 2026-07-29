@@ -2,14 +2,21 @@ package com.steven.assets.controller;
 
 import com.steven.assets.dto.NotificationRecipientDto;
 import com.steven.assets.dto.StockAlertDto;
+import com.steven.assets.dto.StockAlertExportDto;
+import com.steven.assets.model.StockAlertExportSetting;
+import com.steven.assets.security.CurrentUserContext;
+import com.steven.assets.security.UnauthenticatedException;
 import com.steven.assets.service.StockAlertService;
+import com.steven.assets.service.StockAlertTriggerExportService;
 import com.steven.assets.service.StockMasterService;
 import jakarta.validation.constraints.Pattern;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
+import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 
@@ -25,6 +32,9 @@ public class StockAlertController {
 
     private final StockAlertService service;
     private final StockMasterService stockMasterService;
+    /** 觸發即時匯出設定與 run-now（Requirement 54 / Task 254）。 */
+    private final StockAlertTriggerExportService exportService;
+    private final ObjectProvider<CurrentUserContext> currentUserProvider;
 
     @GetMapping
     public List<StockAlertDto.Response> findAll() {
@@ -129,5 +139,82 @@ public class StockAlertController {
             @RequestParam String name,
             @RequestParam String market) {
         return ResponseEntity.ok(Map.of("stockCode", stockMasterService.resolveCode(name, market)));
+    }
+
+    // ===== 觸發即時匯出設定（Requirement 54 / Task 254）=====
+
+    /** 取當前使用者的觸發匯出設定；查無時回預設值（不寫入 DB）。 */
+    @GetMapping("/export-setting")
+    public StockAlertExportDto.SettingResponse getExportSetting() {
+        return toResponse(exportService.getOrDefault(requireOwnerId()), null);
+    }
+
+    /**
+     * upsert 觸發匯出設定。
+     *
+     * <p>Drive 開關要求設為 true 而當前使用者不是主要管理者時回 <b>403</b>（{@code AdminRequiredException}
+     * → {@code GlobalExceptionHandler}）；子路徑不合法回 400。本機輸出路徑與啟用開關則所有使用者皆可設定
+     * ——只有 Drive 那一項會把資料送出本機，此不對稱是刻意的。
+     */
+    @PutMapping("/export-setting")
+    public StockAlertExportDto.SettingResponse updateExportSetting(
+            @RequestBody StockAlertExportDto.SettingRequest req) {
+        Long ownerId = requireOwnerId();
+        String warning = exportService.update(ownerId, req.enabled(), req.outputSubpath(),
+                req.gdriveEnabled(), req.gdriveSubpath());
+        return toResponse(exportService.getOrDefault(ownerId), warning);
+    }
+
+    /**
+     * 立即把<b>當日已發生的觸發</b>產檔（驗證落點用）。
+     *
+     * <p><b>不看 {@code enabled}</b>——設定尚未啟用時使用者同樣需要確認落點正確。當日尚無任何觸發時
+     * 仍寫出 {@code triggers: []} 的合法 JSON，不回 404、不靜默不產檔。
+     */
+    @PostMapping("/export-setting/run-now")
+    public StockAlertExportDto.RunNowResponse runNowExport() {
+        Long ownerId = requireOwnerId();
+        try {
+            StockAlertTriggerExportService.ExportResult r = exportService.runNow(ownerId);
+            String msg = r.triggerCount() == 0
+                    ? "當日尚無觸發，已寫出空的觸發清單（可用於驗證落點）"
+                    : "已匯出當日 " + r.triggerCount() + " 筆觸發";
+            return new StockAlertExportDto.RunNowResponse(
+                    r.file().toString(), r.sizeBytes(), r.triggerCount(), msg,
+                    r.gdrivePath(), r.gdriveStatus());
+        } catch (IOException e) {
+            throw new RuntimeException("立即匯出失敗：" + e.getMessage(), e);
+        }
+    }
+
+    private Long requireOwnerId() {
+        CurrentUserContext ctx = currentUserProvider.getObject();
+        if (!ctx.hasUser()) {
+            throw new UnauthenticatedException("未識別使用者，無法存取觸發匯出設定");
+        }
+        return ctx.getEffectiveUserId();
+    }
+
+    /**
+     * @param selfCheckWarning 本次啟用 Drive 時的自檢警告（Requirement 52）；正常時為 null。
+     *                         <b>不入庫</b>——尤其不得寫進 {@code gdriveLastStatus}，那一欄是「上次上傳」。
+     */
+    private StockAlertExportDto.SettingResponse toResponse(StockAlertExportSetting s, String selfCheckWarning) {
+        return new StockAlertExportDto.SettingResponse(
+                s.isEnabled(),
+                s.getOutputSubpath(),
+                exportService.baseDir(),
+                exportService.resolvedDirDisplay(s.getOutputSubpath()),
+                StockAlertTriggerExportService.FILENAME_PATTERN,
+                StockAlertTriggerExportService.fmt(s.getLastRunAt()),
+                s.getLastRunStatus(),
+                // 讀取一律不驗證 Drive 子路徑：DB 值可能被繞過 API 直改，若讀取也擲例外，設定頁會 500
+                // 而使用者沒有任何入口能把它改回正常值——唯一的修正入口被自己鎖死。存檔時才驗。
+                s.isGdriveEnabled(),
+                s.getGdriveSubpath(),
+                exportService.gdriveRemoteName(),
+                StockAlertTriggerExportService.fmt(s.getGdriveLastRunAt()),
+                s.getGdriveLastStatus(),
+                selfCheckWarning);
     }
 }
