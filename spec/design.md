@@ -138,6 +138,8 @@ com.steven.assets/
 - `MarketTypeRepository`
 - `TransitFundTypeRepository`
 - `StockAlertRepository`（含衍生 query：`findDistinctStockCodeMarket()` 提供觀察清單去重結果）
+- `StockAlertGroupRepository`（複合 AND 條件群組；Task 253）
+- `StockAlertGroupRecipientRepository`（群組 ↔ 收件人多對多 join；Task 253）
 - `StockAlertTriggerRepository`（警示觸發歷史，30 天輪替）
 - `BackupSettingRepository`（備份保留代數設定，單列資料表）
 - `BackupRecordRepository`（備份紀錄，單一事實來源；Requirement 15）
@@ -423,8 +425,8 @@ src/
   - 輪替策略：`daily/` 保留 50 份、`weekly/` 保留 5 份、`manual/` 保留 5 份（自救點不計入）
   - 輪替觸發點：(a) 每次排程／手動備份成功上傳後對該資料夾跑一次；(b) `updateSetting()` 儲存後對三個資料夾各跑一次（讓使用者調降保留代數時立即套用，不需等到下一次排程）。rotate 失敗以 `try/catch` 包住只記 log，不讓設定儲存 API 失敗
   - 交易日判定委派至 `MarketDataService.getTwHolidays(year)` / `getUsHolidays(year)`，並排除週末
-- `WatchStockService`: 觀察清單 view 服務（不再對應實體表）。`findAll()` 由 `StockAlertRepository.findDistinctStockCodeMarket()` 取得去重 (stockCode, market) 清單後，整合 Redis live 報價（透過 `PriceQueryService`）、技術指標（`TechnicalIndicatorService.computeAll()` 回傳 `FullIndicators`：月線 MA20／季線 MA60／年線 MA240／K／D，填入 `WatchStockDto.Response` 的 `monthlyMa`／`quarterlyMa`／`annualMa`／`kValue`／`dValue`）與該股票最近一次 StockAlert 觸發資訊；`reorder(orderedStockKeys)` 拖曳重排時把每個股票所有 alert 的 `displayOrder` 整組依新順序重新指派；不提供 delete 入口（移除觀察一律由 `StockAlertService.delete` 在「警示條件」頁逐筆刪除）。**「警示」欄顯示窗**：最近觸發（時間／股價／月線／季線／年線／KD）與「警示條件」紅字只顯示落在 `StockAlertService.FRESHNESS_TRADING_DAYS`（= 2，最後交易日及前一日）內的觸發，cutoff 由 `recentTradingDayCutoff(market, 2)` 取 `stock_price_history` 最近 2 個 distinct `trading_date` 之較早一天午夜；與警示頁 `StockAlertService.toResponse` 共用同一常數確保兩頁口徑一致（同義欄位同一來源）。此 UI 顯示窗與 `stock_alert_trigger` 保留 30 天為兩個獨立概念。**「警示條件」欄的 MA% 觸發價**：`buildConditions()` 把已算好的 `FullIndicators` 一併傳給 `StockAlertService.buildLabel(alert, ind)`，`MA_*_PCT` 且 threshold≠0 的條件於 label 附換算後的觸發價（`對應均線 × (1 ± pct/100)`，如「高於季線 20%（360）」），重用同一份即時均線值、不另查（Task 146，詳 Requirement 16）
-- `StockAlertService`: 到價警示 CRUD、條件評估、排序、最近觸發資訊回寫；`create` 對 `0000`（台股大盤）跳過 `stockMasterRepo.upsert`。`create` / `update` 在 `stockMasterRepo.upsert` 之前以 `assertNameMatchesCode(code, market, userName)` 守門：以 `historicalDataService.fetchTwStockName / fetchUsStockName` 取得外部 canonical name（權威來源 ext-materials-service `/internal/stock-name`），canonical 非空且與 user-supplied `stockName` 不一致時，**再對照 `stockMasterRepo.findByCodeAndMarket(code, market).name`（本地主檔亦視為合法 canonical）**；兩者皆不相符才 throw `IllegalArgumentException`（由 `GlobalExceptionHandler` 映射為 `400`）。canonical 空則 fall through（外部 API 異常時不阻擋）。`0000` + `台股` 跳過守門；`0000` + `美股` 直接拒絕。設計目的：阻止使用者把錯誤代號（如把 2500 標成「台積電」）寫入 `stock` 主檔導致觀察清單出現名稱對但完全無報價的列；同時避免「外部來源回應與本地主檔不一致」（例 Yahoo `shortName` 「NVIDIA Corporation」vs 主檔過去寫入的 「NVIDIA Corporation Common Stock」）造成 lookupName 自動帶名後 save 被自己擋下
+- `WatchStockService`: 觀察清單 view 服務（不再對應實體表）。`findAll()` 由 `StockAlertRepository.findDistinctStockCodeMarket()` 取得去重 (stockCode, market) 清單後，整合 Redis live 報價（透過 `PriceQueryService`）、技術指標（`TechnicalIndicatorService.computeAll()` 回傳 `FullIndicators`：月線 MA20／季線 MA60／年線 MA240／K／D，填入 `WatchStockDto.Response` 的 `monthlyMa`／`quarterlyMa`／`annualMa`／`kValue`／`dValue`）與該股票最近一次 StockAlert 觸發資訊；`reorder(orderedStockKeys)` 拖曳重排時把每個股票所有 alert 的 `displayOrder` 整組依新順序重新指派；不提供 delete 入口（移除觀察一律由 `StockAlertService.delete` 在「警示條件」頁逐筆刪除）。**「警示」欄顯示窗**：最近觸發（時間／股價／月線／季線／年線／KD）與「警示條件」紅字只顯示落在 `StockAlertService.FRESHNESS_TRADING_DAYS`（= 2，最後交易日及前一日）內的觸發，cutoff 由 `recentTradingDayCutoff(market, 2)` 取 `stock_price_history` 最近 2 個 distinct `trading_date` 之較早一天午夜；與警示頁 `StockAlertService.toResponse` 共用同一常數確保兩頁口徑一致（同義欄位同一來源）。此 UI 顯示窗與 `stock_alert_trigger` 保留 30 天為兩個獨立概念。**「警示條件」欄的 MA% 觸發價**：`buildConditions()` 把已算好的 `FullIndicators` 一併傳給 `StockAlertService.buildLabel(alert, ind)`，`MA_*_PCT` 且 threshold≠0 的條件於 label 附換算後的觸發價（`對應均線 × (1 ± pct/100)`，如「高於季線 20%（360）」），重用同一份即時均線值、不另查（Task 146，詳 Requirement 16）。**複合 AND 群組（Task 253）**：`buildConditions()` 把 `group_id` 相同的成員合併成**一條** `Condition`（label 以 `" 且 "`（前後各一個半形空白）串接、`triggered` 取該群組的 `lastTriggeredAt` 而非成員的），不再逐條列出——否則使用者在觀察頁看到的是散開的多條，看不出那是「同時成立才觸發」；「警示」欄的最近觸發彙總（`lastAlert`）亦需納入該股票所有群組的 `lastTriggeredAt` 一併取 max
+- `StockAlertService`: 到價警示 CRUD、條件評估、排序、最近觸發資訊回寫；`create` 對 `0000`（台股大盤）跳過 `stockMasterRepo.upsert`。**複合 AND 群組（Task 253）**：群組 CRUD 與評估同住本 service（群組與獨立條件共用 `matches(alert, currentPrice)`、`buildLabel`、`computeTriggeredAt`、freshness cutoff，拆成獨立 service 會複製這五處而必然分歧）；`checkAlerts` / `checkAlertsFor` 掃描獨立條件時查詢改為 `findByActiveTrueAndGroupIdIsNull()`，再另掃 `stockAlertGroupRepo.findByActiveTrue()` 逐一 `evaluateGroup`。群組成員的 `active` 恆為 true、`last_triggered_*` 不寫，觸發狀態一律記在群組上。`create` / `update` 在 `stockMasterRepo.upsert` 之前以 `assertNameMatchesCode(code, market, userName)` 守門：以 `historicalDataService.fetchTwStockName / fetchUsStockName` 取得外部 canonical name（權威來源 ext-materials-service `/internal/stock-name`），canonical 非空且與 user-supplied `stockName` 不一致時，**再對照 `stockMasterRepo.findByCodeAndMarket(code, market).name`（本地主檔亦視為合法 canonical）**；兩者皆不相符才 throw `IllegalArgumentException`（由 `GlobalExceptionHandler` 映射為 `400`）。canonical 空則 fall through（外部 API 異常時不阻擋）。`0000` + `台股` 跳過守門；`0000` + `美股` 直接拒絕。設計目的：阻止使用者把錯誤代號（如把 2500 標成「台積電」）寫入 `stock` 主檔導致觀察清單出現名稱對但完全無報價的列；同時避免「外部來源回應與本地主檔不一致」（例 Yahoo `shortName` 「NVIDIA Corporation」vs 主檔過去寫入的 「NVIDIA Corporation Common Stock」）造成 lookupName 自動帶名後 save 被自己擋下
 - **交易日 / 國定假日判定（單一事實來源）**：`business-services` 側以 `MarketDataService.isTradingDay(market, date)`（dispatch 至 `isTwTradingDay/isUsTradingDay/isUkTradingDay`）與 `isMarketOpenNow(market)`（`MarketZones` 時段 + `isTradingDay` 假日）為唯一入口。`StockAlertService.evaluate`（live 觸發閘門）/ `computeTriggeredAt`（交易時段判斷）、`AlertNotificationDispatcher.withinSendWindow / lastTradingDate`、`StockPriceService.getMarketStatus`（→ `isXxxMarketOpen`）全部委派之，不再各自只判週末。`external-materials-service` 側對應為 `MarketCalendar` + `MarketClock`（抓價 / 收盤排程閘門）。台股假日權威 = TWSE holidaySchedule（business-services 經 `/internal/tw-holidays` proxy、ext-materials 直接 fetch，同一份）；美 / 英假日為 NYSE / LSE 法定規則純函式，因兩服務無共用 module 而各持一份（交叉註解鎖定，修改須同步）。Requirement 7 / 16 / 23
 - **颱風假 / 台股臨時休市偵測（Requirement 7）**：颱風等臨時停班停課由地方政府當日 / 前一晚公布，**不在** TWSE 年度 holidaySchedule 中；證交所休市與否，法規上取決於「臺北市政府是否宣布停止上班」。故在既有國定假日機制外，另建一條「當日偵測 → 台股假日 override」資料流：
   - **權威來源**：行政院人事行政總處（DGPA）「天然災害停止上班及上課情形」`https://www.dgpa.gov.tw/typh/daily/nds.html`（HTML）。解析臺北市列的「今天」狀態字（`<FONT>` 內文，`TwTyphoonClosureService.parseTaipeiTodayClause`）；`closedForTrading` 判定：含「停止上班」且非「晚上 / 傍晚 / 夜間」限定、且無「HH:MM 起」HH:MM ≥ 13:30 → **休市**（全日 / 上午 / 下午覆蓋 09:00–13:30）；含「照常上班」/ 僅晚間或收盤後起停班 → 交易日。
@@ -511,6 +513,9 @@ FundClassOverride     (基金分類人工指定，PK = fund_name；asset_class /
 PaymentCategory(1) ── (N) PaymentAccount   (代繳記錄分類 + 記錄，Requirement 22)
 NotificationRecipient (警示通知收件人，Requirement 23)
 StockAlert (N) ──< stock_alert_recipient >── (N) NotificationRecipient  (每條警示挑選收件人；Task 125)
+StockAlertGroup (1) ──── (N) StockAlert     (group_id nullable；非空＝AND 群組成員，不自行觸發；Task 253)
+StockAlertGroup (N) ──< stock_alert_group_recipient >── (N) NotificationRecipient  (群組挑選收件人；Task 253)
+StockAlertGroup (1) ──── (N) StockAlertTrigger  (trigger.group_id；與 trigger.alert_id 恰好一個非空；Task 253)
 
 # 基金（Requirement 19–21）
 FundMaster            (信託基金主檔，PK = fund_code)
@@ -525,7 +530,8 @@ ForeignStockDailyHistory (→ foreign_stock_daily_history，海外參考個股�
 
 # 警示
 StockAlert            (到價警示，獨立資料表；觀察清單由此表 GROUP BY (stockCode, market) 衍生)
-StockAlertTrigger     (警示觸發歷史，FK→stock_alert，保留 30 天)
+StockAlertGroup       (複合條件群組，群組內條件全部同時成立才觸發；成員為 group_id 非空的 StockAlert)
+StockAlertTrigger     (警示觸發歷史，FK→stock_alert / stock_alert_group 恰一，保留 30 天)
 
 # 總經 / 指數（Requirement 18）
 TaiwanGdpPerCapitaHistory / JapanGdpPerCapitaHistory / KoreaGdpPerCapitaHistory   (人均 GDP + 實質成長率)
@@ -871,6 +877,45 @@ twse_index_year_end_history  (TWSE 指數年末值；Task 97 起已不使用—�
 
 > **均線通用化**：原本以 `QUARTERLY_MA_*` / `ANNUAL_MA_*` 兩組字串表達兩種均線，改為通用的 `MA_ABOVE_PCT` / `MA_BELOW_PCT` + `ma_period` 數字欄位。未來新增任何天數的均線警示（5、10、20、120…）皆不需新增 enum-like 字串，前端下拉只增加 `maPeriod` 選項即可。Liquibase 遷移 `v1.24.0` 將舊資料一次轉換（QUARTERLY → 60、ANNUAL → 240）。
 
+> **複合條件成員（Task 253 新增 `group_id`）**：`stock_alert` 新增 nullable `group_id`（FK → `stock_alert_group.id`，`ON DELETE CASCADE`）。`group_id IS NULL` ＝ 既有的獨立單一條件，評估、cooldown、寄信行為完全不變；`group_id` 非空 ＝ 該列是某個 AND 群組的成員，**不得再自行觸發**，其 `active` 一律為 true、`last_triggered_*` 五欄一律不寫（觸發狀態記在群組上）。因此 `StockAlertService.checkAlerts` / `checkAlertsFor` 的「取 active 警示」查詢必須由 `findByActiveTrue()` 改為 `findByActiveTrueAndGroupIdIsNull()` —— 漏改的話成員會各自獨立觸發，AND 靜默退化成 OR。
+
+#### StockAlertGroup（複合條件群組，Task 253 新增）
+
+一個群組綁 2～5 條 `stock_alert` 條件，**群組內所有條件在同一次評估中同時成立才觸發一次**。只支援單層 AND：不支援 OR，也不支援巢狀運算式；要 OR 就照現況拆成多筆獨立條件。因為只有一種運算子，**刻意不設 `logic_op` 欄位**（存一個恆定值違反「不存可計算得出的衍生值」原則）；日後真要支援 OR 再加 nullable 欄位即可。
+
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| id | Long | PK |
+| ownerUserId | Long | 所屬使用者；多租戶隔離欄，nullable=false，掛 `@Filter(ownerFilter)` |
+| stockCode | String | 股票代號（群組內所有條件必為同一檔） |
+| market | String | 市場代碼 |
+| active | Boolean | 是否啟用；**群組的啟停唯一開關**（成員的 `active` 恆為 true，不另具意義） |
+| displayOrder | Integer | 警示頁拖曳排序，與獨立條件共用同一個排序空間 |
+| lastTriggeredAt | LocalDateTime | 最近一次觸發時間（24h cooldown 以此為準） |
+| lastTriggeredPrice | BigDecimal | 觸發時股價 |
+| lastTriggeredMaValue | BigDecimal | 觸發時均線值（取群組內第一個 MA 條件對應的 `maPeriod`；無 MA 條件則 null） |
+| lastTriggeredKdValue | BigDecimal | 觸發時 K 值 |
+| lastTriggeredDValue | BigDecimal | 觸發時 D 值 |
+| createdAt / updatedAt | LocalDateTime | 建立 / 更新時間（`@PreUpdate` 維護） |
+
+> **「同時成立」的定義**：同一次 `evaluateGroup` 呼叫中，用**同一份現價**（`PriceQueryService.getLive`）判定所有成員條件，且每個成員沿用與獨立條件**完全相同的指標計算路徑** —— 一律走 `StockAlertService.matches(alert, currentPrice)`，該方法就是原本 `evaluate` 內那段 switch 原封不動抽出，獨立條件與群組成員共用，確保兩條路徑口徑零分歧。不接受「兩條件在某時間窗內先後成立」的寬鬆語意。
+> **刻意不寫成「共用同一份預先算好的 `FullIndicators`」**：`matches` 內的 `checkMaDeviation` / `checkKdValue` 各自查 `historyRepo.findRecentN` 現算，其 MA 口徑（`withTodayIfMissing` 後取簡單平均）與 `TechnicalIndicatorService.computeAll()` 未必逐位一致。把成員改成吃一份預算好的指標，等於偷偷改動既有單一條件的觸發門檻——**這是明文禁止的重構方向**，別被「同一份指標」的直覺說法誘導。
+> **成員 entity 必須 detach**：`checkMaDeviation` / `checkKdValue` 命中時會把 MA / K / D **回寫進傳入的 `StockAlert` 物件**（既有副作用，`evaluate` 靠它凍結指標值）。群組成員由 repository 取出時是 managed 狀態，而 `POST /api/stock-alerts/check` 走 HTTP 路徑、OSIV 預設開啟，隨後的 `groupRepo.save(group)` 會 flush 整個 persistence context，把髒掉的成員一併寫進 DB，違反「成員 `last_triggered_*` 一律不寫」。取出成員後即 detach。
+>
+> **不做盤中補抓**：獨立條件在 `lastTriggeredAt IS NULL` 時會走 `findRecentIntradayTrigger` 抓 Yahoo 5 分 K 回溯最近 3 個交易日精確定位觸發時點；**群組不走此路徑**，只在每 2 分鐘的 live 評估判定。要支援得對每根 bar 重算 price/MA20/60/240/K/D 再套 AND，成本遠高於效益，漏掉的僅是「盤中短暫同時成立又立刻脫離」的尖峰。
+>
+> **空群組防呆**：群組成員數 < 2 時不觸發（`allMatch` 對空集合恆真，直接放行等於無條件觸發）。
+
+#### StockAlertGroupRecipient（複合條件群組 ↔ 收件人 join，Task 253 新增）
+
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| id | Long | PK |
+| groupId | Long | FK → `stock_alert_group.id`（`ON DELETE CASCADE`） |
+| recipientId | Long | FK → `notification_recipient.id`（`ON DELETE CASCADE`） |
+
+`(group_id, recipient_id)` 組合 unique。**不以「把同一份收件人寫進群組內每個成員的 `stock_alert_recipient`」代替** —— 那會讓同一事實在 N 個成員上各存一份，違反正規化原則，且成員間清單可能不同步而語意矛盾。`AlertNotificationDispatcher` 因此需要第二支投影查詢 `findActiveTargetsByGroupId`（與既有 `findActiveTargetsByAlertId` 同樣保留 `r.ownerUserId = 群組.ownerUserId` 與 `r.active = true` 兩個條件，理由見 Task 145 的背景排程無 `ownerFilter` 說明）。
+
 #### StockAlertTrigger（觸發歷史，新增）
 
 每次警示條件成立時，除了覆寫 `StockAlert.last_triggered_*` 欄位外，另寫一筆 `stock_alert_trigger` 紀錄，保留近 30 天供事後追蹤。
@@ -878,7 +923,8 @@ twse_index_year_end_history  (TWSE 指數年末值；Task 97 起已不使用—�
 | 欄位 | 型別 | 說明 |
 |------|------|------|
 | id | Long | PK |
-| alertId | Long | FK → `stock_alert.id`（CASCADE on delete） |
+| alertId | Long | FK → `stock_alert.id`（CASCADE on delete）。**Task 253 起改為 nullable**：群組觸發時為 NULL |
+| groupId | Long | FK → `stock_alert_group.id`（CASCADE on delete），**Task 253 新增，nullable**：獨立條件觸發時為 NULL |
 | stockCode | String | 觸發當下的股票代號（denorm 快取，避免 JOIN） |
 | market | String | 市場 |
 | triggeredAt | LocalDateTime | 觸發時間（同 `StockAlert.lastTriggeredAt`） |
@@ -892,6 +938,7 @@ twse_index_year_end_history  (TWSE 指數年末值；Task 97 起已不使用—�
 
 > **保留策略**：每日排程刪除 `created_at < NOW() - 30 days` 的紀錄（`StockAlertService.cleanupOldTriggers` @Scheduled cron `0 0 4 * * *` Asia/Taipei）。
 > **資料填寫**：5 個技術指標皆無條件計算寫入（不論觸發類型是 PRICE / MA / KD），便於事後分析「觸發當下整個技術面狀態」。透過 `TechnicalIndicatorService.computeAll()` 一次取得 MA20 / MA60 / MA240 / K / D。
+> **`alert_id` / `group_id` 恰好一個非空（Task 253）**：DB 以 CHECK 約束 `(alert_id IS NOT NULL) <> (group_id IS NOT NULL)` 保證。群組觸發**只寫一筆**（不是每個成員各一筆）——寫 N 筆會讓補發路徑把同一次 AND 觸發還原成 N 條獨立條件、文案與 live 寄出的合併 label 分歧。補發時 `group_id` 非空的列以群組合併 label（各成員 label 以 `" 且 "`（前後各一個半形空白）串接）還原條件文案，與 live 路徑共用同一支 `buildGroupLabel`。
 
 
 #### TransitFundType（新增）
@@ -1197,6 +1244,24 @@ GET    /api/stock-alerts/recipients       # 列出可挑選收件人 [{id,email,
 ```
 
 > **每條警示挑選收件人（Task 125）：** `StockAlertDto.Request` / `Response` 新增 `recipientIds`（`List<Long>`）。`create` / `update` 以 `recipientIds` 覆寫 `stock_alert_recipient`（先 `deleteByAlertId` 再批次 insert）；`Response` 回填該警示目前的 `recipientIds`。對話框「通知對象」多選的可選清單走同頁 BFF `GET /api/bff/stock-alert/recipients`（passthrough → `/api/stock-alerts/recipients`，後端委派 `NotificationRecipientService.findAll()`，與通知設定頁同一份資料源）。新增警示預設全選；選 0 位代表觸發不寄信。
+
+#### Stock Alert Groups（複合 AND 條件，Task 253 新增）
+
+```
+POST   /api/stock-alerts/groups                # 建立群組（body 含 stockCode/market/conditions[]/recipientIds/active）
+PUT    /api/stock-alerts/groups/{id}           # 更新群組（conditions 整組覆寫）
+DELETE /api/stock-alerts/groups/{id}           # 刪除群組（成員 alert 與 join 列由 FK CASCADE 連帶清除）
+PATCH  /api/stock-alerts/groups/{id}/active    # 啟用/停用群組
+
+# 前端 view 經既有 BFF：/api/bff/stock-alert/groups/** → /api/stock-alerts/groups/**
+# StockAlertBffRoutes 已是 /api/bff/stock-alert/** 萬用 passthrough，新端點不需改 BFF
+```
+
+> **混合清單（Task 253）：** `GET /api/stock-alerts` 改回「獨立條件 + 群組」的混合列表。`StockAlertDto.Response` 新增兩欄：`kind`（`"SINGLE"` / `"GROUP"`）與 `conditions`（`List<ConditionItem>`，僅 `GROUP` 有值；`SINGLE` 為 null）。**群組列的 `id` 是 `stock_alert_group.id`，與獨立條件的 `stock_alert.id` 分屬不同表、值會相撞**，故前端 `row-key` 必須用 `` `${kind}-${id}` ``、所有列操作（編輯 / 刪除 / 啟停）依 `kind` 分派到不同端點。`conditionLabel` 對群組為合併 label（各成員 label 以 `" 且 "`（前後各一個半形空白）串接），供表格單欄顯示與觀察頁共用。
+>
+> `PUT /api/stock-alerts/reorder` 的 body 由 `List<Long>` 改為 `List<{kind, id}>`（獨立條件與群組共用同一個 `display_order` 排序空間，不能只送 id）。
+>
+> 群組的 `conditions` 條目結構為 `{alertType, maPeriod, threshold}`（與 `StockAlertDto.Request` 的單一條件三欄同名同義），`create` / `update` 以整組覆寫成員 `stock_alert` 列，成員的 `active` 一律寫 true、`display_order` 依陣列順序遞增（決定 label 串接順序）。
 
 #### Notification Recipients（Requirement 23 新增）
 ```
@@ -1578,12 +1643,20 @@ FinMind 自 2025 年起對匿名呼叫額度收緊，超量會回 `402 Payment R
 **架構**：
 
 ```
-StockAlertService.evaluate()
-  ├─ 24h cooldown 通過 + 條件命中
+StockAlertService.evaluate()          # 獨立條件（group_id IS NULL）
+  ├─ 24h cooldown 通過 + matches(alert, price) 命中
   ├─ alertRepo.save(凍結 K/D/MA)
   ├─ recordTrigger() → 寫 StockAlertTrigger（必落地，無論寄信成敗）
   └─ alertNotificationDispatcher.enqueue(alert, triggeredAt, price,
                                          ind.monthlyMa, ind.quarterlyMa, ind.annualMa, ind.k, ind.d)
+
+StockAlertService.evaluateGroup()     # 複合 AND 群組（Task 253）
+  ├─ 群組 24h cooldown 通過（看 group.lastTriggeredAt，成員不各自 cooldown）
+  ├─ 成員數 ≥ 2 且「每一個成員」matches(member, 同一份 price) 皆為 true   ← AND
+  ├─ groupRepo.save(凍結 K/D/MA 到群組)
+  ├─ recordGroupTrigger() → 寫「一筆」StockAlertTrigger（alert_id=NULL, group_id=群組 id）
+  └─ enqueueGroup(group, 合併 label, …)  → 與獨立條件共用同一條 queue / flush 路徑
+  ※ 不走 findRecentIntradayTrigger（複合條件不做 5 分 K 盤中補抓）
                                   │
                                   ▼
                        in-memory ConcurrentLinkedQueue
@@ -1612,6 +1685,7 @@ StockAlertService.evaluate()
 - **寄送時段閘門（盤外不寄，`withinSendWindow`）**：flush 對 drain 出的每筆觸發依其市場時區判定是否在 `[開盤, 收盤+10 分]` 平日時段（台 09:00–13:40 / 美 09:30–16:10 / 英 08:00–16:40；開收盤時刻取自 `MarketZones.openTime/closeTime` 單一來源，`SEND_GRACE_MINUTES=10` 容納 60s flush 延遲與 cron 採樣落後；不考慮假日，與 `computeTriggeredAt` / `lastTradingDate` 同口徑——假日本就無 price-update 觸發，放行亦無信可寄）。盤外市場的觸發本輪 **丟棄不寄**（queue 一律 drain 不回填，避免無限長大；`StockAlertTrigger` 歷史已落地，使用者可按「補發」重寄）。多市場混批逐筆判定，僅寄出仍在盤中的市場（例：深夜台股已收盤、美股盤中 → 只寄美股）。動機：避免在該市場盤外時段收到當日早已收盤的警示信。手動 `resendLastTradingDay()` **不經此閘門**（明確的使用者重寄動作）
 - 收件人空 / `MAIL_USERNAME` 空 / SMTP 例外：一律 `log.warn` 後返回，**絕不**拋例外回到 `StockAlertService` —— 警示判斷必須與通知解耦
 - **每條警示挑選收件人（Task 125）**：flush 不再「全部觸發一封、寄給所有 active 收件人」，而是逐筆觸發以 `alert_id` 經 `stock_alert_recipient` 查出選定收件人、交集 `active=true`，反轉成 `Map<email, List<觸發>>`；每位收件人各組一封僅含「其訂閱觸發」的 digest，`sendHtml(List.of(email), …)` 單一收件人寄出。`recipientsFor(alertId)` 結果於該輪 flush 內以 `Map<Long,List<String>>` 快取（同 alert 多筆觸發不重查）；走勢圖 PNG 以 `stockCode+market` 為 key 跨收件人快取，避免同一檔重複 render。為此 `PendingTrigger` record 增帶 `alertId` 欄位（`enqueue` 時填 `alert.getId()`、補發 `toPending` 時填 `StockAlertTrigger.alertId`），作為 `groupByRecipient` 查收件人與快取的 key。`resendLastTradingDay()` 回傳 `ResendResult{status, count（去重股票檔數）, recipientCount（實際寄達人數）}`，前端補發提示顯示「已補發 N 檔股票給 M 位收件人」
+- **複合 AND 群組的收件人（Task 253）**：`PendingTrigger` 增帶 nullable `groupId`；`groupByRecipient` 依 `groupId` 是否非空，分別走 `findActiveTargetsByGroupId(groupId)`（查 `stock_alert_group_recipient`）或既有的 `findActiveTargetsByAlertId(alertId)`，兩支查詢皆保留 `r.ownerUserId = 擁有者.ownerUserId` 與 `r.active = true` 條件（Task 145 的背景排程無 `ownerFilter` 縱深防護，不得從新入口重新打開）。快取 key 因此需能區分兩者（例：以 `"A"+alertId` / `"G"+groupId` 字串為 key），**沿用純 `Long` 當 key 會讓 alert 5 與 group 5 互相污染收件人清單**。digest 內文與 `calendarLines` 走既有 `groupByStock` 合併——同一檔的獨立條件觸發與群組觸發本就該併在同一區塊
 - digest 主旨：`[資產管理] 股票警示觸發 N 筆`，N = **該收件人這封信**去重後的股票檔數（非觸發筆數）；同輪不同收件人各自的 N 可能不同
 - **同一股票（stockCode+market）多條件觸發合併成一筆**（`groupByStock`，保留首次出現順序）：標題 `{stockName} ({stockCode} {market}) — {label1、label2…}`（該股所有觸發條件 label 去重串接），其下依序 `觸發時間`、`股價`、三條均線 `月線 {monthlyMa}`／`季線 {quarterlyMa}`／`年線 {annualMa}`、`KD：K {k} / D {d}`。技術快照（時間/股價/MA/KD）取該股**最近一筆觸發**（max `triggeredAt`）——同股各條件的 MA/KD 本即同源、僅時間略異（某條均線因歷史不足為 null 時該行省略；K/D 皆 null 時整行省略）。三條均線值取自 `recordTrigger` 當下 `TechnicalIndicatorService.computeAll()` 的 `FullIndicators`，與 `stock_alert_trigger` 落地的 `monthly_ma/quarterly_ma/annual_ma` 同源
 

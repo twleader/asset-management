@@ -37,6 +37,23 @@ public class StockAlert {
     private String market;
 
     /**
+     * 所屬複合條件群組（Task 253）。沿用本專案「以 Long id 顯式關聯」慣例（同 {@link StockAlertTrigger#getAlertId()}），
+     * 不映射 JPA 關聯，避免 lazy-init 與 dispatcher 取值複雜化。
+     *
+     * <p><b>{@code null}</b> ＝ 獨立單一條件，行為與 Task 253 前完全相同：自行評估、自行記 24h cooldown、
+     * 自行寄信，同一檔股票掛多條時語意是 OR。
+     *
+     * <p><b>非空</b> ＝ {@link StockAlertGroup} 的 AND 成員，<b>不得自行觸發</b>：
+     * 背景檢查一律以 {@code findByActiveTrueAndGroupIdIsNull()} 取獨立條件，成員不會進入 {@code evaluate}。
+     * 成員的 {@code active} 恆為 true（啟停由群組那一列決定）、{@code last_triggered_*} 五欄一律不寫
+     * （觸發狀態只記在群組上，避免同一次 AND 觸發在兩處各留一份紀錄）。
+     * 成員的 {@code displayOrder} 也另有語意：從群組自己的 {@code displayOrder} 起算，決定群組內條件的串接順序，
+     * 同時避免壓低觀察清單去重查詢的 {@code MIN(display_order)} 而把該股票整組頂到最前面。
+     */
+    @Column(name = "group_id")
+    private Long groupId;
+
+    /**
      * 警示類型：
      * PRICE_ABOVE / PRICE_BELOW  — 現價高於 / 低於 threshold
      * MA_ABOVE_PCT / MA_BELOW_PCT — 現價偏離 MA{maPeriod} 達 threshold %（threshold=0 表示剛跨過）

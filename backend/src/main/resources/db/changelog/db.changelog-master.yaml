@@ -270,5 +270,8 @@ databaseChangeLog:
       file: db/changelog/changes/v1.77.0-notification-recipient-calendar.sql
       relativeToChangelogFile: false
   - include:
+      file: db/changelog/changes/v1.78.0-stock-alert-group.sql
+      relativeToChangelogFile: false
+  - include:
       file: db/changelog/changes/v1.79.0-naive-timestamp-to-taipei.sql
       relativeToChangelogFile: false

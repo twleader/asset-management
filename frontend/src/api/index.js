@@ -371,18 +371,27 @@ export const bffApi = {
     exportExcel: () => api.get('/bff/snapshot-list/export', { responseType: 'blob' })
   },
 
-  // StockAlert
+  // StockAlert — Task 253 起清單為「獨立條件（SINGLE）+ 複合條件群組（GROUP）」混合，
+  // 群組另有 /groups 系列端點；全部走同一支萬用 passthrough BFF（/api/bff/stock-alert/** → /api/stock-alerts/**）
   stockAlert: {
     getAll:    () => api.get('/bff/stock-alert'),
     getRecipients: () => api.get('/bff/stock-alert/recipients'),   // 警示對話框「通知對象」可挑選清單（Task 125）
-    reorder:   (ids) => api.put('/bff/stock-alert/reorder', ids),
+    // Task 253：payload 由 id 陣列改為 [{kind,id}] —— 獨立條件與群組的 id 分屬 stock_alert / stock_alert_group
+    // 兩張表、值必然相撞，只送 id 後端無從判斷該把新的 displayOrder 寫進哪一張表
+    reorder:   (orderItems) => api.put('/bff/stock-alert/reorder', orderItems),
     lookupName:(params) => api.get('/bff/stock-alert/lookup-name', { params }),
     lookupCode:(params) => api.get('/bff/stock-alert/lookup-code', { params }),
     // skipErrorToast：存檔錯誤（如重複條件）改由 StockAlertView.save() 以 dialog 呈現，不走頂部 toast
     create:    (data) => api.post('/bff/stock-alert', data, { skipErrorToast: true }),
     update:    (id, data) => api.put(`/bff/stock-alert/${id}`, data, { skipErrorToast: true }),
     toggleActive: (id) => api.patch(`/bff/stock-alert/${id}/active`),
-    delete:    (id) => api.delete(`/bff/stock-alert/${id}`)
+    delete:    (id) => api.delete(`/bff/stock-alert/${id}`),
+    // 複合條件群組（Task 253）。create/update 同樣帶 skipErrorToast：
+    // 驗證錯誤（條件數不足 / 組內重複 / 與既有群組重複）要顯示在 dialog 內，讓使用者能就地修正
+    createGroup: (data) => api.post('/bff/stock-alert/groups', data, { skipErrorToast: true }),
+    updateGroup: (id, data) => api.put(`/bff/stock-alert/groups/${id}`, data, { skipErrorToast: true }),
+    toggleGroupActive: (id) => api.patch(`/bff/stock-alert/groups/${id}/active`),
+    deleteGroup: (id) => api.delete(`/bff/stock-alert/groups/${id}`)
   },
 
   // WatchStock — v1.22 起改為 stock_alert 衍生 view，操作以 (stockCode, market) tuple

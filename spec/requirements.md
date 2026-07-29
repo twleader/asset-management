@@ -373,6 +373,16 @@
 - [ ] 觸發時間（`lastTriggeredAt` / `stock_alert_trigger.triggered_at`）一律以「該股市場的本地 wall time」儲存（台股 = Asia/Taipei、美股 = America/New_York）。`computeTriggeredAt` 在交易時段內 fallback 不再用 JVM 預設時區的 `LocalDateTime.now()`，改用 `ZonedDateTime.now(marketZone).toLocalDateTime()`，與 Yahoo intraday bar、`tradingDate.atTime(close)` 對齊。前端 `WatchStockView` / `StockAlertView` 顯示時加市場時區後綴（`TW` / `NY`），避免使用者把美股的「13:30」誤讀為台北時間
 - [ ] **國定假日不觸發任何警示**：市場休市日（依該市場國定假日表，週末已隱含）即使 Redis 仍持有前一交易日的即時快取價，`StockAlertService.evaluate` 也不得產生「當日」觸發 —— live 觸發分支以 `MarketDataService.isTradingDay(market, 該市場時區今日)` 為閘門，假日時略過（仍落到「補抓最近交易日盤中觸發」分支，該分支只掃 `stock_price_history` 真實交易日，假日無資料故不會誤觸發）。`computeTriggeredAt` 的「交易時段內用 `now()`」判斷亦由純平日改為 `isTradingDay`（假日 → 退回最近交易日收盤時刻）。解決症狀：美股 Juneteenth（6/19，週五）休市卻仍把條件標成「06/19 09:30 NY」觸發
 - [x] **「警示」欄顯示窗 = 最後一個交易日（或交易當日）及前一交易日，共 2 個交易日**：`lastTriggeredAt` 早於此窗的觸發視為過期，不顯示「觸發時間／股價／月線／季線／年線／KD」，「警示條件」也不套紅字（解決收盤後數日仍殘留舊觸發，例：6/17 仍顯示 6/12 NY 觸發）。窗以 `stock_price_history` 該市場最近 2 個 distinct `trading_date` 之較早一天午夜為下界（`recentTradingDayCutoff(market, 2)`）；觀察頁（`WatchStockService`，含 `0000` 大盤分支）與警示頁（`StockAlertService.toResponse`）共用單一常數 `StockAlertService.FRESHNESS_TRADING_DAYS`，兩頁口徑一致。此 UI 顯示窗與 `stock_alert_trigger` 歷史保留 30 天（供補發／稽核）為兩個獨立概念
+- [ ] **複合條件警示（AND 群組；Task 253）**：現行每一列 `stock_alert` 各自獨立評估、獨立 24h cooldown、獨立寄信，語意天然是 OR（任一條件達標即觸發）。新增「複合條件」＝一個 `stock_alert_group` 綁 2～5 條件，**群組內所有條件在同一次評估中同時成立才觸發一次**：
+  - 新表 `stock_alert_group`（含 `owner_user_id` 多租戶隔離、`active`、`display_order`、`last_triggered_*` 五欄）；`stock_alert` 新增 nullable `group_id`：**`group_id IS NULL` 為既有的獨立單一條件，行為完全不變**；`group_id` 非空者為群組成員，**不得再自行觸發**
+  - 群組**只支援單層 AND**，不支援 OR、不支援巢狀運算式。要 OR 就照現況拆成多筆獨立條件（每筆各自觸發、各自寄信）
+  - 「同時成立」定義為**同一次評估、同一份現價**，且每個成員沿用與獨立條件**完全相同的指標計算路徑**（共用的 `matches(alert, currentPrice)`）；不接受「兩條件在某時間窗內先後成立」。注意此處刻意不寫成「共用同一份預先算好的技術指標」——既有 `checkMaDeviation` / `checkKdValue` 各自查 `stock_price_history` 現算，其 MA 口徑與 `TechnicalIndicatorService.computeAll()` 未必逐位一致，改成共用一份等於偷改既有單一條件的觸發門檻
+  - 群組成員的 `active` 一律強制 true，啟停一律用群組的 `active`——避免停用單一成員讓 AND 條件數悄悄變少、判定變寬鬆
+  - 群組至少 2 個條件、至多 5 個；同群組內不得有兩個完全相同的條件（同 `alertType` + `maPeriod` + `threshold`）；兩個群組的條件集合完全相同時視為重複、拒絕建立（比照既有單一條件的重複守門）
+  - **複合條件不做盤中補抓**：既有單一條件在 `lastTriggeredAt IS NULL` 時會抓 Yahoo 5 分 K 回溯最近 3 個交易日、精確定位觸發時點（`findRecentIntradayTrigger`）；群組不走此路徑，只在每 2 分鐘的 live 評估判定。取捨：補抓要對每根 bar 重算全部指標再套 AND，成本遠高於效益，且漏掉的是「盤中短暫同時成立又立刻脫離」的尖峰
+  - 收件人以獨立 join 表 `stock_alert_group_recipient` 表達（不在群組成員的 `stock_alert_recipient` 各存一份，避免同一事實重複儲存）
+  - 觸發時寫**一筆** `stock_alert_trigger`（`alert_id` 為 NULL、`group_id` 為群組 id），email digest 的條件文案為群組合併 label（各條件 label 以 `" 且 "`（前後各一個半形空白）串接，如「低於季線 10%（92.09） 且 K 值低於 15」）；手動補發沿用同一份 label 組法
+  - 警示頁的清單為「獨立條件 + 群組」混合列，群組列顯示合併 label；觀察頁「警示條件」欄把同群組成員合併成一條顯示，不再拆成多條（否則使用者看不出那是 AND）
 
 ---
 

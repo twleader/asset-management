@@ -1,7 +1,9 @@
 package com.steven.assets.service;
 
 import com.steven.assets.model.StockAlert;
+import com.steven.assets.model.StockAlertGroup;
 import com.steven.assets.model.StockAlertTrigger;
+import com.steven.assets.repository.StockAlertGroupRecipientRepository;
 import com.steven.assets.repository.StockAlertRecipientRepository;
 import com.steven.assets.repository.StockAlertRepository;
 import com.steven.assets.repository.StockAlertTriggerRepository;
@@ -51,6 +53,8 @@ public class AlertNotificationDispatcher {
     private static final int SEND_GRACE_MINUTES = 10;
 
     private final StockAlertRecipientRepository recipientLinkRepo;
+    /** 複合條件群組的收件人 join（Task 253）：群組觸發走這一支，與單一警示的 recipientLinkRepo 平行存在。 */
+    private final StockAlertGroupRecipientRepository groupRecipientRepo;
     private final EmailService emailService;
     private final StockRepository stockMasterRepo;
     private final StockAlertTriggerRepository triggerRepo;
@@ -68,6 +72,7 @@ public class AlertNotificationDispatcher {
             String stockName = resolveStockName(alert.getStockCode(), alert.getMarket());
             queue.offer(new PendingTrigger(
                     alert.getId(),
+                    null,               // 獨立單一條件：無群組
                     alert.getStockCode(),
                     alert.getMarket(),
                     stockName,
@@ -81,6 +86,43 @@ public class AlertNotificationDispatcher {
                     dValue));
         } catch (Exception e) {
             log.warn("enqueue 警示通知失敗 alert {}: {}", alert.getId(), e.getMessage());
+        }
+    }
+
+    /**
+     * 複合條件群組觸發入列（Task 253），比照 {@link #enqueue}。
+     *
+     * <p>一次 AND 觸發只入列**一筆**（不是每個成員各一筆），故 {@code conditionLabel} 由呼叫端
+     * （{@code StockAlertService.recordGroupTrigger}）以 {@code buildGroupLabel} 產生的合併文案傳入，
+     * 本方法不自行串接 —— 警示頁 / 觀察頁 / email digest / 補發四條路徑共用同一份串接邏輯，
+     * 任一端自己接一份就會與其他端分歧。
+     *
+     * <p>{@code alertId} 填 null、{@code groupId} 填群組 id，兩者恰好一個非空（與
+     * {@code stock_alert_trigger} 的 {@code ck_sat_alert_xor_group} 同一不變式），
+     * 下游 {@code groupByRecipient} 據此決定查哪一張 join 表。
+     */
+    public void enqueueGroup(StockAlertGroup group, String conditionLabel,
+                             LocalDateTime triggeredAt, BigDecimal price,
+                             BigDecimal monthlyMa, BigDecimal quarterlyMa, BigDecimal annualMa,
+                             BigDecimal kValue, BigDecimal dValue) {
+        try {
+            String stockName = resolveStockName(group.getStockCode(), group.getMarket());
+            queue.offer(new PendingTrigger(
+                    null,               // 群組觸發：不掛任何單一警示 id
+                    group.getId(),
+                    group.getStockCode(),
+                    group.getMarket(),
+                    stockName,
+                    conditionLabel,
+                    triggeredAt,
+                    price,
+                    monthlyMa,
+                    quarterlyMa,
+                    annualMa,
+                    kValue,
+                    dValue));
+        } catch (Exception e) {
+            log.warn("enqueue 複合條件警示通知失敗 group {}: {}", group.getId(), e.getMessage());
         }
     }
 
@@ -144,7 +186,13 @@ public class AlertNotificationDispatcher {
 
     /**
      * 把觸發清單反轉成 {@code Map<收件人 id, 該收件人的內容>}（保留首次出現順序）。
-     * 每筆觸發以其 {@code alertId} 查「選定 ∩ active」收件人；同 alert 多筆觸發在本輪以 cache 不重查。
+     * 每筆觸發以其 {@code alertId}（獨立條件）或 {@code groupId}（複合條件群組，Task 253）
+     * 查「選定 ∩ active」收件人；同一來源本輪多筆觸發以 cache 不重查。
+     *
+     * <p>Task 253 把 cache key 從 {@code Long} 改成**帶前綴的字串**（{@code "A" + alertId} /
+     * {@code "G" + groupId}）：{@code stock_alert} 與 {@code stock_alert_group} 各自 BIGSERIAL，
+     * id 值必然重疊，沿用裸 id 當 key 會讓 alert id = 5 與 group id = 5 互相污染收件人清單
+     * ——寄錯人，且症狀隨兩表序號進度飄移、極難重現。
      *
      * <p>Task 248 把分組 key 從 email 字串改為 **recipientId**：{@code notification_recipient} 的唯一鍵是
      * 複合 {@code (owner_user_id, email)}，不同使用者可各自使用同一 email。以 email 為 key 時，兩個租戶
@@ -152,10 +200,10 @@ public class AlertNotificationDispatcher {
      * 同租戶內 {@code (owner, email)} 唯一，故行為與封數皆不變。
      */
     private Map<Long, RecipientBatch> groupByRecipient(List<PendingTrigger> triggers) {
-        Map<Long, List<AlertRecipientTarget>> targetCache = new HashMap<>();
+        Map<String, List<AlertRecipientTarget>> targetCache = new HashMap<>();
         LinkedHashMap<Long, RecipientBatch> byRecipient = new LinkedHashMap<>();
         for (PendingTrigger t : triggers) {
-            for (AlertRecipientTarget target : targetCache.computeIfAbsent(t.alertId, this::targetsFor)) {
+            for (AlertRecipientTarget target : targetCache.computeIfAbsent(cacheKey(t), k -> targetsFor(t))) {
                 byRecipient.computeIfAbsent(target.id(), k -> new RecipientBatch(target, new ArrayList<>()))
                         .triggers().add(t);
             }
@@ -163,13 +211,23 @@ public class AlertNotificationDispatcher {
         return byRecipient;
     }
 
-    /** 某警示「選定 ∩ active=true」的收件人；查詢失敗 / alertId 為 null 時回空清單（不阻斷其他收件人）。 */
-    private List<AlertRecipientTarget> targetsFor(Long alertId) {
-        if (alertId == null) return List.of();
+    /** 收件人查詢的 cache key：前綴區分兩張 join 表，避免 alert id 與 group id 撞號（見 {@link #groupByRecipient}）。 */
+    private static String cacheKey(PendingTrigger t) {
+        return t.groupId != null ? "G" + t.groupId : "A" + t.alertId;
+    }
+
+    /**
+     * 該筆觸發「選定 ∩ active=true」的收件人：群組觸發查 {@code stock_alert_group_recipient}，
+     * 獨立條件查既有的 {@code stock_alert_recipient}。
+     * 查詢失敗 / 兩個 id 皆為 null 時回空清單（不阻斷本輪其他收件人）。
+     */
+    private List<AlertRecipientTarget> targetsFor(PendingTrigger t) {
         try {
-            return recipientLinkRepo.findActiveTargetsByAlertId(alertId);
+            if (t.groupId != null) return groupRecipientRepo.findActiveTargetsByGroupId(t.groupId);
+            if (t.alertId == null) return List.of();
+            return recipientLinkRepo.findActiveTargetsByAlertId(t.alertId);
         } catch (Exception e) {
-            log.warn("查警示 {} 收件人失敗：{}", alertId, e.getMessage());
+            log.warn("查警示收件人失敗（alert {} / group {}）：{}", t.alertId, t.groupId, e.getMessage());
             return List.of();
         }
     }
@@ -214,18 +272,43 @@ public class AlertNotificationDispatcher {
         return new ResendResult(ResendStatus.SENT, distinctStocks, byRecipient.size());
     }
 
-    /** trigger 列 → PendingTrigger：回查 alert 還原條件文案（孤兒觸發 fallback「警示觸發」）。 */
+    /**
+     * trigger 列 → PendingTrigger：回查條件文案（孤兒觸發 fallback「警示觸發」，不靜默丟棄該筆）。
+     *
+     * <p>Task 253：{@code group_id} 非空的列是一次 AND 觸發（{@code alert_id} 必為 null，
+     * 由 {@code ck_sat_alert_xor_group} 保證），文案改以群組成員經 {@code buildGroupLabel} 還原，
+     * 與 live 寄出的合併 label 同一份邏輯。**必須先判 groupId** —— 直接沿用
+     * {@code alertRepo.findById(t.getAlertId())} 會對 null 主鍵丟
+     * {@code InvalidDataAccessApiUsageException}，整批補發連帶失敗。
+     */
     private PendingTrigger toPending(StockAlertTrigger t) {
-        String label = alertRepo.findById(t.getAlertId())
-                .map(StockAlertService::buildLabel)
-                .orElse("警示觸發");
+        String label = t.getGroupId() != null ? groupLabelFor(t.getGroupId()) : singleLabelFor(t.getAlertId());
         return new PendingTrigger(
-                t.getAlertId(),
+                t.getAlertId(), t.getGroupId(),
                 t.getStockCode(), t.getMarket(),
                 resolveStockName(t.getStockCode(), t.getMarket()), label,
                 t.getTriggeredAt(), t.getPrice(),
                 t.getMonthlyMa(), t.getQuarterlyMa(), t.getAnnualMa(),
                 t.getKValue(), t.getDValue());
+    }
+
+    /** 獨立條件的補發文案；alert 已刪除（或 alert_id 為 null）則用孤兒 fallback。 */
+    private String singleLabelFor(Long alertId) {
+        if (alertId == null) return "警示觸發";
+        return alertRepo.findById(alertId).map(StockAlertService::buildLabel).orElse("警示觸發");
+    }
+
+    /**
+     * 複合條件的補發文案：以成員（依 displayOrder 升冪）重組合併 label，{@code ind} 傳 null
+     * ——補發還原的是歷史觸發，不該附上「此刻」換算的觸發價（比照獨立條件走無指標的 buildLabel）。
+     *
+     * <p>群組已被刪除時成員會隨 {@code fk_stock_alert_group ... ON DELETE CASCADE} 一併消失，
+     * {@code buildGroupLabel} 對空成員回空字串 → 這裡轉成孤兒 fallback「警示觸發」，該筆照樣寄出。
+     */
+    private String groupLabelFor(Long groupId) {
+        String label = StockAlertService.buildGroupLabel(
+                alertRepo.findByGroupIdOrderByDisplayOrderAsc(groupId), null);
+        return label.isEmpty() ? "警示觸發" : label;
     }
 
     /**
@@ -408,8 +491,16 @@ public class AlertNotificationDispatcher {
                 .orElse(code);
     }
 
+    /**
+     * 佇列中的單筆待寄觸發。
+     *
+     * <p>{@code alertId} 與 {@code groupId} **恰好一個非空**（Task 253）：前者是獨立單一條件、
+     * 後者是複合條件群組的一次 AND 觸發；兩者決定去哪一張 join 表查收件人，
+     * 也是 {@code stock_alert_trigger.ck_sat_alert_xor_group} 在記憶體中的對應不變式。
+     */
     private record PendingTrigger(
             Long alertId,
+            Long groupId,
             String stockCode,
             String market,
             String stockName,
