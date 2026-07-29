@@ -4610,3 +4610,46 @@ TransactionView el-tree 懶載入
 
 - `frontend/src/views/TransactionView.vue`：新增 `defaultMarket()`，`resetForm()` 改用它並同步算 `currency`
 - `frontend/src/views/RealizedGainView.vue`：同上（`gainForm`）
+
+---
+
+## Task 251：交易紀錄的匯率改為依交易日期自動帶出（唯讀）
+
+對應 Requirements: 49。**前端 ＋ BFF 變更，business 與 DB 零變更**（沿用既有端點與既有欄位），無 Liquibase changeset。
+
+### 現況
+
+`asset_transaction.exchange_rate` 是**全庫唯一**靠使用者手打的匯率：`TransactionView.vue` 以 `el-input`（`txForm.exchangeRateStr`）接受輸入，`AssetTransactionService.create/update` 原封寫入 `req.exchangeRate()`，後端零查詢。同語意的其他三處早已自動化——`asset_snapshot.usd_exchange_rate` 與 `stock_holding.transaction_exchange_rate` 由前端依日期查（`bffApi.snapshotForm.exchangeRate(date)`），`realized_gain.exchange_rate` 由 business 端 `AssetService.lookupExchangeRate(tradeDate)` 自動查，該頁表單根本沒有匯率輸入欄。
+
+### 資料流（新增的只有最上面兩層）
+
+```
+TransactionView 交易日期變更 / 幣別切到 USD
+  → bffApi.transaction.exchangeRate(date)            ← 前端新 wrapper
+  → GET /api/bff/transaction/exchange-rate?date=     ← BFF 新增 passthrough（本頁自己的 BFF）
+      → GET /api/market-data/exchange-rate/on-date?currency=USD&date=   ← 既有 business 端點，不動
+          → HistoricalDataService.getExchangeRateOnDate
+              → ExchangeRateHistoryRepository.findClosestRate（該日或之前最近一筆）
+  ← { rateDate, midRate, buyRate, sellRate, fundValuationRate }（查無 → BFF 回 200 {}）
+  → 前端取 midRate 填入唯讀欄，並顯示實際 rateDate
+```
+
+### 關鍵設計決策
+
+1. **不新增 business 端點、不新增第二份查詢實作**。`GET /api/market-data/exchange-rate/on-date` 已存在且語意完全相同（`findClosestRate` 為全庫唯一的 closest-on-or-before 匯率查詢，已有 6 個呼叫端）。依「一頁一 BFF」，交易頁不得直接呼叫別頁的 `GET /api/bff/snapshot-form/exchange-rate`，也不走 `/api/market-data/**` 的 gateway passthrough，而是在 `TransactionBffController` 新增自己的 passthrough（寫法比照同檔既有的 `/lookup-name`）。
+2. **取中間價 `midRate`**。同義欄位的三處（快照、持股交易日匯率、已實現損益）都用中間價；只有基金估值刻意用即期買入（`getFundValuationRate()`，註解明寫「不可用中間價（會高估）」）。本欄語意屬前者。
+3. **BFF 不做「今天先 refresh」**。`SnapshotFormBffController` 在 `date == LocalDate.now()` 時會先 `POST /api/market-data/exchange-rate/refresh` 再查，本頁**刻意不照做**，兩個理由：(a) 該 refresh 一次做三件事——FinMind 回補近 10 天、台銀/Yahoo 抓今日、**`purgeOldExchangeRates(currency, 10)` 刪除十年前的資料**，對一個「填表時順手查匯率」的動作而言副作用過大；(b) 盤中匯率排程本來就每 5 分鐘更新（`ExchangeRatePoller` 的 `@Scheduled(cron = "0 0/5 9-15 * * MON-FRI", zone = "Asia/Taipei")`，寫死於程式碼、非 DB 可設定），今日值通常已在。代價是清晨或排程尚未跑到時會回退到前一個有資料日，而該日期會顯示在 UI 上（見決策 5），不是靜默的。
+   > 註：**不要拿「容器時區」當作不做 refresh 的理由**。Task 252 起全 stack 以啟動參數統一為 `Asia/Taipei`（實測 host／business／bff 三者同秒同時區），`LocalDate.now()` 與 `date == today` 的判斷是可靠的；此處不照做純粹是因為副作用與收益不成比例。
+4. **不在 business 端補值**。`AssetTransactionService` 維持原封寫入，不比照 `AssetService.createRealizedGain` 加 `lookupExchangeRate`。理由：已實現損益那套「寫入時查一次、讀取時若為 null 再查一次」已被實測證明會產生**存檔值與事後重算值不一致**（4 組實例），而交易紀錄的定位是「流水帳只記事實」；匯率一律由前端在使用者眼前查得、看得到、連同表單一起送出，寫入什麼就是使用者當下看到的那個數字。
+5. **回退取值必須揭露 `rateDate`**。近 365 天只有 72.1% 的日曆日有 USD 列（週末全缺、國定假日的平日也缺，最長退 9 天），所以「查到的匯率不是交易當天的」是常態而非例外。UI 顯示實際採用日期，使用者才能判斷是否要沿用。
+6. **編輯既有紀錄不重查**（本任務最容易做錯的地方）。只有「使用者改動交易日期」或「該筆原本無匯率」才觸發查詢。無條件重查會用事後被 FinMind 覆寫過的值改寫歷史交易，也會抹掉使用者刻意填入的券商實際扣款匯率（`asset_transaction` id=63 即為實例：存 31.5000，該日中間價 31.2350）。
+   **實作上必須用「原值備份 ＋ 日期已異動旗標」，不得只憑「匯率欄目前是否為空」判斷。** 只憑空值的版本有一條實際會走到的破口：編輯一筆美股交易時把「市場」誤改為台股（`market` watch 把 `currency` 轉 TWD → 匯率欄被清空），再改回美股（`currency` 轉回 USD → 看到空值 → 觸發查詢），交易日期一次都沒被碰過，該筆的歷史匯率就被當日中間價覆寫了，而欄位是唯讀的、使用者沒有手段改回來。
+7. **競態以請求序號解**。使用者連續改日期會送出多個非同步請求，後送出的可能先回。以單調遞增的 `seq` 標記每次查詢，回應時比對 `seq !== latestSeq` 即丟棄，避免舊日期的匯率蓋掉新日期的。**每一條會使前次查詢作廢的路徑都必須遞增 `seq`**——包含「幣別切離 USD 而清空匯率」這種不發出新請求、只做清空的路徑；否則 in-flight 的舊回應仍會把值寫回一個已經不該有匯率的表單。
+8. **「查無牌告」與「查詢失敗」分開處理，失敗時解除唯讀**。兩者後果不同：查無（business 404）是資料本來就沒有，欄位留空、維持唯讀、可直接存檔；查詢失敗（5xx／逾時／連線中斷）是取不到而非沒有，此時**暫時解除唯讀讓使用者可手動輸入**。這是本需求的必要配套——把手填欄改成唯讀等於拿掉使用者唯一的輸入手段，若失敗時仍鎖著，使用者就完全無法記下一筆金額正確的 USD 交易，而 `exchangeRate=null` 的 USD 交易其台幣金額會等於美元金額（少算約 32 倍）且直接進年度彙總。故 BFF 的降級**只針對 4xx**，5xx 與連線錯誤要讓前端分辨得出來。
+9. **不論查無或失敗都不擋存檔**。`exchangeRate` 送 null 時 `amountTwd` 退回原幣金額——`AssetTransactionService.toResponse` 與 `ExcelExportService.assetTxAmountTwd` 兩處既有公式本來就處理 null，不需修改。
+
+### 異動檔案
+
+- `bff/.../transaction/TransactionBffController.java`：新增 `GET /exchange-rate?date=` passthrough（404／錯誤降級為 `200 {}`）
+- `frontend/src/api/index.js`：`transaction` 命名空間新增 `exchangeRate(date)`
+- `frontend/src/views/TransactionView.vue`：匯率欄改唯讀、新增自動查詢與 `rateDate` 揭露、競態序號

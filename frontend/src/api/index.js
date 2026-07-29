@@ -156,6 +156,9 @@ export const bffApi = {
   transaction: {
     list:        () => api.get('/bff/transaction'),
     lookupName:  (params) => api.get('/bff/transaction/lookup-name', { params, skipErrorToast: true }),  // 輸入代號自動帶股名，轉呼同一支 business /api/stock-alerts/lookup-name
+    // Task 251：依交易日期查匯率（轉呼同一支 business /api/market-data/exchange-rate/on-date）
+    // 查無牌告時 BFF 回 200 {}；5xx／連線失敗才會走到呼叫端的 catch（頁面自己有欄位內提示，故抑制全域 toast）
+    exchangeRate: (date) => api.get('/bff/transaction/exchange-rate', { params: { date }, skipErrorToast: true }),
     create:      (data) => api.post('/bff/transaction', data),
     update:      (id, data) => api.put(`/bff/transaction/${id}`, data),
     remove:      (id) => api.delete(`/bff/transaction/${id}`),
