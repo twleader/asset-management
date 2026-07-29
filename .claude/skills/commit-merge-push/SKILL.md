@@ -59,12 +59,12 @@ echo "main worktree：$MAIN_WT"
 git -C "$WT" add -A                                  # .env 等已被 .gitignore，不會誤入
 # 一般（含 spec/ 變更）：
 git -C "$WT" commit -m "<單行短中文簡述>"
-# 純樣式 / 工具（無商業邏輯）：必須 --no-verify，訊息仍帶 [skip-spec] 標記
-git -C "$WT" commit --no-verify -m "[skip-spec] <簡述>"
+# 純樣式 / 工具（無商業邏輯）：加 [skip-spec] 前綴即可，**不需要** --no-verify
+git -C "$WT" commit -m "[skip-spec] <簡述>"
 ```
 
-- commit 被 hook 擋（要求 spec）= 訊號：要嘛補 `spec/` 再 commit，要嘛確認真的是純樣式 → 用 `--no-verify -m "[skip-spec] ..."`。
-- **不要**只加 `[skip-spec]` 而不加 `--no-verify`——hook 讀不到 `-m` 訊息（見鐵則 ⚠），照樣會擋。
+- commit 被 hook 擋（要求 spec）= 訊號：要嘛補 `spec/` 再 commit，要嘛確認真的是純樣式 → 改用 `-m "[skip-spec] ..."`。
+- `--no-verify` 只留給真正的緊急情況（見鐵則 4）。現行 hook 是 `commit-msg`、以訊息檔路徑作為 `$1`，`-m` 裡的 `[skip-spec]` 讀得到、會正常放行；主 clone 的 `scripts/git-hooks/` 底下也已無舊的 `pre-commit`。
 - 沒有任何變更可 commit？確認是否早已 commit；若只是要 merge 既有 commit，跳到 Step 3。
 
 ## Step 2 — 推 feature 分支到 origin（保留分支）
