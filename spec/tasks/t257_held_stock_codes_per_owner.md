@@ -1,6 +1,6 @@
 # [t257] 持股抓價清單改為涵蓋每位 owner 的最新快照（修元大金 2885 價格永不更新）
 
-**對應 Requirements:** Requirement 7（市場資料整合——自動取得市場資料以提供即時的資產估值；本任務新增其中「持股抓價清單必須涵蓋每一位 owner 的最新快照」一條驗收項）
+**對應 Requirements:** Requirement 7（市場資料整合——自動取得市場資料以提供即時的資產估值；本任務新增其中「持股抓價清單必須涵蓋每一位 owner 的最新快照」一條驗收項）＋ Requirement 43 修訂（今日交易雷達手動重新整理——本任務**推翻**其中「不得修改 `collectHeldStockCodes` 本身」一句，該句已於 requirements.md 加刪除線並註記）
 **前置任務:** 無（t249 已上線並新增了 `collectTwRadarCodes`，本任務把同一個修法套用到 `collectHeldStockCodes`，並推翻 t249 當時「不得修改該方法」的判斷）
 **Liquibase changeset:** 無（不動資料庫 schema）
 
@@ -92,7 +92,7 @@ DB 佐證（`docker exec asset-postgres psql -U assets -d assets`）：
 
 ### 257.1 `collectHeldStockCodes` 改為 per-owner 最新快照
 
-- [ ] 257.1 修改 `external-materials-service/src/main/java/com/steven/assets/externalmaterials/service/StockSourceQuery.java` 的 `collectHeldStockCodes(Set<String> twCodes, Set<String> usCodes, Set<String> ukCodes)`：
+- [x] 257.1 修改 `external-materials-service/src/main/java/com/steven/assets/externalmaterials/service/StockSourceQuery.java` 的 `collectHeldStockCodes(Set<String> twCodes, Set<String> usCodes, Set<String> ukCodes)`：
 
   **刪掉**先查 `latestSnapshotId` 再 `WHERE snapshot_id = ?` 的兩段式查詢，**改為單一查詢**：
 
@@ -109,42 +109,51 @@ DB 佐證（`docker exec asset-postgres psql -U assets -d assets`）：
   - **JdbcTemplate 多列查詢的 callback 必須寫成 void 區塊** `(java.sql.ResultSet rs) -> { classify(...); }`，**不可寫成 expression lambda**——後者會被 Java 解析成 `ResultSetExtractor` 多載，`rs` 未定位，runtime 才炸。既有兩段程式碼已是正確寫法，改寫時不要退化。
   - 因為不再需要 `latestSnapshotId`，順帶確認沒有留下未使用的區域變數或 import。
 
-- [ ] 257.1.1 更新該方法的 javadoc：原文為「取最新快照所有持股代號（盤中 / 盤後皆用同一份）。」，改為說明「**每位 owner 各自**最新快照的持股 ∪ `stock_alert` 觀察清單」，並註明 Task 257 推翻了 Task 249 當時「不得修改本方法」的判斷、附上量測結果（台股 18→19、美股 9→9、英股 3→3）。
+- [x] 257.1.1 更新該方法的 javadoc：原文為「取最新快照所有持股代號（盤中 / 盤後皆用同一份）。」，改為說明「**每位 owner 各自**最新快照的持股 ∪ `stock_alert` 觀察清單」，並註明 Task 257 推翻了 Task 249 當時「不得修改本方法」的判斷、附上量測結果（台股 18→19、美股 9→9、英股 3→3）。
 
-- [ ] 257.1.2 更新 `collectTwRadarCodes` 的 javadoc：其中「**刻意不改 `collectHeldStockCodes` 本身**：它同時服務每 2 分鐘的 `PricePoller.scheduledTwIntradayUpdate` 與 `refreshAll()`，放大其範圍會改變背景排程對外部 API 的請求量，屬另一個決定。」一段**不要刪除**（它是當時的決策記錄），在其後加註「（Task 257 已推翻：實測改為 per-owner 後台股僅 18→19 檔，請求量幾無變化；兩者現已同口徑。）」。
+- [x] 257.1.2 更新 `collectTwRadarCodes` 的 javadoc：其中「**刻意不改 `collectHeldStockCodes` 本身**：它同時服務每 2 分鐘的 `PricePoller.scheduledTwIntradayUpdate` 與 `refreshAll()`，放大其範圍會改變背景排程對外部 API 的請求量，屬另一個決定。」一段**不要刪除**（它是當時的決策記錄），在其後加註「（Task 257 已推翻：實測改為 per-owner 後台股僅 18→19 檔，請求量幾無變化；兩者現已同口徑。）」。
+- [x] 257.1.3 同一份 javadoc 開頭「為什麼不重用 `collectHeldStockCodes`」那段也要加註「（Task 257 後 `collectHeldStockCodes` 已改為同一個 `DISTINCT ON` 子查詢，本段描述的是 Task 249 當時的狀態）」，否則同一份 javadoc 前後矛盾。
 
 ### 257.2 不得順帶更動的東西
 
-- [ ] 257.2 `collectAllStockCodes` 的 `ORDER BY snapshot_date DESC LIMIT 1` **維持原狀**（見「明確不在本任務範圍內的事」第 3 項）。
-- [ ] 257.2.1 `ClosePersister`、`PricePoller`、`IntradayTickRefresher`、`EtfNavPoller` 這 14 個呼叫端**一行都不改**——它們透過修好的收集器自動擴大涵蓋範圍，這正是本修法的重點。
-- [ ] 257.2.2 **不新增、不修改任何 `@Scheduled` 方法**，故 `SchedulePublicBffController.JOBS` 排程清單不需同步（本任務不造成該頁漂移）。
-- [ ] 257.2.3 不動資料庫 schema、不新增 Liquibase changeset。
-- [ ] 257.2.4 不動前端。
+- [x] 257.2 `collectAllStockCodes` 的 `ORDER BY snapshot_date DESC LIMIT 1` **維持原狀**（見「明確不在本任務範圍內的事」第 3 項）。
+- [x] 257.2.1 `ClosePersister`、`PricePoller`、`IntradayTickRefresher`、`EtfNavPoller` 這 14 個呼叫端**一行都不改**——它們透過修好的收集器自動擴大涵蓋範圍，這正是本修法的重點。
+- [x] 257.2.2 **不新增、不修改任何 `@Scheduled` 方法**，故 `SchedulePublicBffController.JOBS` 排程清單不需同步（本任務不造成該頁漂移）。
+- [x] 257.2.3 不動資料庫 schema、不新增 Liquibase changeset。
+- [x] 257.2.4 不動前端。
 
 ### 257.3 單元測試
 
-- [ ] 257.3 新增 `external-materials-service/src/test/java/com/steven/assets/externalmaterials/service/StockSourceQueryHeldCodesTest.java`。
+- [x] 257.3 新增 `external-materials-service/src/test/java/com/steven/assets/externalmaterials/service/StockSourceQueryHeldCodesTest.java`。
 
   現有測試慣例（照抄同目錄的 `CrawlerExportPathQueryTest`）：以 `mock(JdbcTemplate.class)` 建構受測類、JUnit 5 `@Test`、AssertJ `assertThat`、**測試方法名用繁體中文**。
 
   至少涵蓋：
 
-  - [ ] 257.3.1 **SQL 契約**：以 `ArgumentCaptor<String>` 捕捉 `collectHeldStockCodes` 對 `jdbc.query(...)` 發出的持股查詢字串，斷言它**同時**含有 `DISTINCT ON (owner_user_id)`、`snapshot_date DESC`、`id DESC`，且**不含** `ORDER BY snapshot_date DESC LIMIT 1`。這條測試的用途是釘住「tie-break 必須具決定性」——沒有它，未來有人把 `id DESC` 拿掉不會被任何測試發現。
-  - [ ] 257.3.2 **市場分流**：餵入 `(2885, 台股)`、`(VOO, 美股)`、`(VWRA, 英股)` 三列，斷言三個 `Set` 各收到正確的一筆、且互不混入。
-  - [ ] 257.3.3 **`stock_alert` 仍被聯集且大盤仍被排除**：斷言 `stock_alert` 那條查詢字串仍含 `stock_alert` 與 `0000` 的排除條件，並驗證 alert 來源的代號會併入結果 Set。
-  - [ ] 257.3.4 **無快照時不擲例外**：持股查詢回空結果時，方法正常返回、`stock_alert` 那段仍照跑（本次改寫移除了 `latestSnapshotId != null` 的守門，等價行為必須由測試釘住）。
+  - [x] 257.3.1 **SQL 契約**（as-built 拆成三個測試方法，以 `doAnswer` 攔下 `jdbc.query(String, RowCallbackHandler)` 收集 SQL 字串與 handler，非 `ArgumentCaptor`）：
+    - [x] 257.3.1a 持股查詢含 `DISTINCT ON (owner_user_id)`。
+    - [x] 257.3.1b tie-break 斷言為**精確字串** `ORDER BY owner_user_id, snapshot_date DESC, id DESC`——格式被釘死是刻意的：沒有它，未來有人把 `id DESC` 拿掉不會被任何測試發現。
+    - [x] 257.3.1c **不含**舊寫法 `ORDER BY snapshot_date DESC LIMIT 1`，且 `jdbc.query(String, ResultSetExtractor)` 這個多載**一次都不得被呼叫**（`verify(jdbc, never())`）——用意是釘住兩段式 `latestSnapshotId` 查詢已完全移除。**代價須知**：若日後該方法確有需要新增其他單值查詢（例如加一道 owner 數量的 sanity log），這條會以「舊寫法殘留」的名義誤報失敗；屆時應改為只斷言 SQL 字串不含舊寫法。
+  - [x] 257.3.2 **市場分流**：餵入 `(2885, 台股)`、`(VOO, 美股)`、`(VWRA, 英股)` 三列，斷言三個 `Set` 各收到正確的一筆、且互不混入。
+  - [x] 257.3.3 **`stock_alert` 仍被聯集且大盤仍被排除**：斷言 `stock_alert` 那條查詢字串仍含 `stock_alert` 與 `0000` 的排除條件，並驗證 alert 來源的代號會併入結果 Set。
+  - [x] 257.3.4 **無快照時不擲例外**：持股查詢回空結果時，方法正常返回、`stock_alert` 那段仍照跑（本次改寫移除了 `latestSnapshotId != null` 的守門，等價行為必須由測試釘住）。
+  - [x] 257.3.5 **回歸錨點：雷達收集器未被波及**：另驗 `collectTwRadarCodes` 仍發出自己的 `DISTINCT ON (owner_user_id)` 持股查詢並仍排除大盤 `0000`，確保本次改動沒有把 Task 249 的雷達收集器一併改壞。（as-built 已有此測試，原 257.3 未宣稱，補記於此。）
 
   以 Mockito 模擬 `jdbc.query(String, RowCallbackHandler)` 時，用 `doAnswer` 取出 callback 並餵入 `mock(ResultSet.class)` 驅動 `classify`（`TwRadarRefreshServiceTest` 已有 `doAnswer` 的用法可參考）。
 
 ## 驗證
 
 ```bash
-# 1) 建置 + 單元測試（Mockito on Java 21：本模組不需 byte-buddy experimental 旗標）
-/usr/local/apache-maven/apache-maven-3.9.11/bin/mvn -q -f external-materials-service/pom.xml test
+# 1) 建置 + 單元測試（本機 JVM 為 Java 25、pom 的 java.version 21 只是編譯目標，
+#    故 Mockito 仍需 byte-buddy experimental；與 t258 同一口徑）
+#    絕不可用 -DargLine —— 那會覆蓋掉 pom 既有的 -Duser.timezone=Asia/Taipei
+/usr/local/apache-maven/apache-maven-3.9.11/bin/mvn -q -f external-materials-service/pom.xml test \
+  -DextraArgLine=-Dnet.bytebuddy.experimental=true
 
 # 2) 只跑本任務新增的測試
 /usr/local/apache-maven/apache-maven-3.9.11/bin/mvn -f external-materials-service/pom.xml \
-  test -Dtest=StockSourceQueryHeldCodesTest
+  test -Dtest=StockSourceQueryHeldCodesTest \
+  -DextraArgLine=-Dnet.bytebuddy.experimental=true
 
 # 3) 重建並 recreate（JVM service 必須 --no-cache，否則 layer cache 會出 stale jar）
 #    從 worktree 跑 compose 前先把主 repo 的 .env 複製進來（env_file 相對 compose 檔解析）
@@ -194,4 +203,29 @@ docker run --rm --network asset-network curlimages/curl:latest -s \
 
 ## 完成報告
 
-（實作者做完後回填：實際改了哪些檔、驗證輸出、與原計畫的偏差及原因。）
+**狀態：已實作、已部署、已合併 main。** 實作 commit `b975ae75`（與 Task 258 同一 commit），merge commit `3bec71af`。
+本段於 2026-07-30 補寫 spec 時回填（原 commit 未回填完成報告，故 53 個 checkbox 當時全未勾選）。
+
+**實際改的檔（2 個）**
+
+| 檔 | 改動 |
+|---|---|
+| `external-materials-service/.../service/StockSourceQuery.java` | `collectHeldStockCodes` 的兩段式查詢（先 `latestSnapshotId` 再 `WHERE snapshot_id = ?`）改為單一查詢 `WHERE snapshot_id IN (SELECT DISTINCT ON (owner_user_id) id FROM asset_snapshot ORDER BY owner_user_id, snapshot_date DESC, id DESC)`；同步改寫該方法 javadoc；`collectTwRadarCodes` javadoc 加註「Task 257 已推翻」。`collectAllStockCodes` 未動（257.2） |
+| `external-materials-service/src/test/.../StockSourceQueryHeldCodesTest.java` | 新增，7 個 `@Test`（繁中方法名）：持股查詢必須取每位owner各自的最新快照／快照tiebreak必須具決定性／不得再出現全庫只取一筆快照的舊寫法／三個市場各自分流且互不混入／觀察清單仍被聯集進來且大盤仍被排除／完全沒有快照時不擲例外且觀察清單仍照跑／雷達收集器仍維持自己的每owner查詢與大盤排除 |
+
+**驗證輸出**（2026-07-30 05:12 CST，皆唯讀查證）
+
+- **抓價清單檔數（4b 的 DB 等價驗證，盤外可查）**：對 `asset-postgres` 跑 per-owner 子查詢 ∪ `stock_alert` → 台股 **19**、美股 **9**、英股 **3**；同一 SQL 換回舊寫法 → 台股 **18**、美股 9、英股 3；`EXCEPT` 差集**只有一列 `2885`**。與本任務宣稱的 18→19／9→9／3→3 完全一致。
+- **快照分佈（佐證 tie-break 就是本 bug 情境）**：`(18, owner 2, 2026-07-30)`、`(15, owner 1, 2026-07-30)`、`(9, owner 1, 2026-06-22)`、`(4, owner 1, 2025-12-31)`——兩位 owner 最新快照確實同日，舊寫法的任意 tie-break 會選中 id 18（owner 2，僅 2 筆台股持股）。
+- **4c Redis 已有 2885**（修好前 `EXISTS` 回 0）：`EXISTS price:台股:2885` → `1`；`GET` → `price=62.2000`、`previousClose=63.5000`、`priceChange=-1.3000`、`changePercent=-2.047244`、`tradingDate=2026-07-29`、`source=DB-close`、`closed=true`。即前端不再顯示 `$63.50 ▲$0.00 (0.00%)`。
+- **部署非 stale jar**（本專案有 cached build 出 stale jar 的前例，故實查）：容器 `asset-external-materials-service` 的 image `sha256:b413014b1157`，image built `2026-07-29T20:47:01Z`（＝台北 07-30 04:47:01，commit 後 92 秒）、container created 04:47:10、`RestartCount=0`；compose label `working_dir=/Users/steven/Project/asset-management-main`（＝從 main 的 worktree 重建，符合共用 stack 規則）。容器內 `unzip -p /app/app.jar` + `strings` 確認 `StockSourceQuery.class` 含新 SQL 常量、**不含**舊字串 `SELECT id FROM asset_snapshot ORDER BY ...`。
+
+**尚未驗證的項目（非失敗，是時間窗未到）**
+
+- 驗證段 4b 的「更新台股即時價格 (19 檔)」日誌：容器 2026-07-30 04:47 才建立，台股 09:00 才開盤，故現有日誌（僅 100 行、04:47:11～04:47:51）無此訊息。**下一個交易日盤中回頭核**，預期由 18 檔變 19 檔。
+
+**與原計畫的偏差**
+
+1. **257.3.1 as-built 拆成三個測試方法**，且手法是 `doAnswer` 攔下 `jdbc.query(String, RowCallbackHandler)` 收集 SQL，而非任務檔原寫的 `ArgumentCaptor<String>`；另加了一條比 spec 更強的斷言 `verify(jdbc, never()).query(String, ResultSetExtractor)`。已據實改寫 257.3.1 為 a／b／c 三小項並註明該強斷言的代價。
+2. **多了一個 spec 未宣稱的測試**（雷達收集器回歸錨點），已補記為 257.3.5。
+3. 驗證段步驟 1／2 原註「Mockito on Java 21：本模組不需 byte-buddy experimental 旗標」與 t258 同段落矛盾且與本機實況不符（本機 JVM 為 Java 25），已更正為 `-DextraArgLine=-Dnet.bytebuddy.experimental=true` 並註明不可用 `-DargLine`。
