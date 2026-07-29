@@ -136,23 +136,39 @@ public class TransactionBffController {
                 });
     }
 
-    // ===== 排程自動匯出（Requirement 49 / Task 238）=====
+    // ===== 排程自動匯出（Requirement 49 / Task 238；Task 255 起每人可多筆）=====
+    // 純 passthrough。X-User-* 由全域 WebClient filter 自動往下帶，讓 business 端 TenantFilterAspect
+    // 能 owner-scope；by-id 的歸屬驗證在 business 端（BFF 不做租戶判斷）。
 
-    @GetMapping("/export/schedule")
-    public Mono<ResponseEntity<Map<String, Object>>> getExportSchedule() {
-        return businessServicesClient.get().uri("/api/asset-transactions/export/schedule")
+    @GetMapping("/export/schedules")
+    public Mono<ResponseEntity<Map<String, Object>>> listExportSchedules() {
+        return businessServicesClient.get().uri("/api/asset-transactions/export/schedules")
                 .retrieve().bodyToMono(MAP).map(ResponseEntity::ok);
     }
 
-    @PutMapping("/export/schedule")
-    public Mono<ResponseEntity<Map<String, Object>>> updateExportSchedule(@RequestBody Map<String, Object> body) {
-        return businessServicesClient.put().uri("/api/asset-transactions/export/schedule")
+    @PostMapping("/export/schedules")
+    public Mono<ResponseEntity<Map<String, Object>>> createExportSchedule(@RequestBody Map<String, Object> body) {
+        return businessServicesClient.post().uri("/api/asset-transactions/export/schedules")
                 .bodyValue(body).retrieve().bodyToMono(MAP).map(ResponseEntity::ok);
     }
 
-    @PostMapping("/export/run-now")
-    public Mono<ResponseEntity<Map<String, Object>>> runExportNow() {
-        return businessServicesClient.post().uri("/api/asset-transactions/export/run-now")
+    @PutMapping("/export/schedules/{id}")
+    public Mono<ResponseEntity<Map<String, Object>>> updateExportSchedule(@PathVariable Long id,
+                                                                          @RequestBody Map<String, Object> body) {
+        return businessServicesClient.put().uri("/api/asset-transactions/export/schedules/{id}", id)
+                .bodyValue(body).retrieve().bodyToMono(MAP).map(ResponseEntity::ok);
+    }
+
+    /** business 端回的是「變更後的完整清單」，故這裡不能用 toBodilessEntity()。 */
+    @DeleteMapping("/export/schedules/{id}")
+    public Mono<ResponseEntity<Map<String, Object>>> deleteExportSchedule(@PathVariable Long id) {
+        return businessServicesClient.delete().uri("/api/asset-transactions/export/schedules/{id}", id)
+                .retrieve().bodyToMono(MAP).map(ResponseEntity::ok);
+    }
+
+    @PostMapping("/export/schedules/{id}/run-now")
+    public Mono<ResponseEntity<Map<String, Object>>> runExportNow(@PathVariable Long id) {
+        return businessServicesClient.post().uri("/api/asset-transactions/export/schedules/{id}/run-now", id)
                 .retrieve().bodyToMono(MAP).map(ResponseEntity::ok);
     }
 

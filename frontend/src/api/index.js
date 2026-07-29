@@ -163,9 +163,12 @@ export const bffApi = {
     update:      (id, data) => api.put(`/bff/transaction/${id}`, data),
     remove:      (id) => api.delete(`/bff/transaction/${id}`),
     exportExcel: () => api.get('/bff/transaction/export', { responseType: 'blob', params: { _t: Date.now() } }),  // _t cache-bust：避免瀏覽器回舊匯出檔
-    getExportSchedule:    () => api.get('/bff/transaction/export/schedule', { skipErrorToast: true }),
-    updateExportSchedule: (data) => api.put('/bff/transaction/export/schedule', data, { skipErrorToast: true }),
-    runExportNow:         () => api.post('/bff/transaction/export/run-now', null, { timeout: 60000, skipErrorToast: true }),
+    // 排程自動匯出（Task 255：每人可多筆；變更端點一律回「變更後的完整清單」，前端不做客戶端合併）
+    listExportSchedules:  () => api.get('/bff/transaction/export/schedules', { skipErrorToast: true }),
+    createExportSchedule: (data) => api.post('/bff/transaction/export/schedules', data, { skipErrorToast: true }),
+    updateExportSchedule: (id, data) => api.put(`/bff/transaction/export/schedules/${id}`, data, { skipErrorToast: true }),
+    deleteExportSchedule: (id) => api.delete(`/bff/transaction/export/schedules/${id}`, { skipErrorToast: true }),
+    runExportNow:         (id) => api.post(`/bff/transaction/export/schedules/${id}/run-now`, null, { timeout: 60000, skipErrorToast: true }),
     browseExportDir:      (subpath = '') => api.get('/bff/transaction/export/browse', { params: { subpath }, skipErrorToast: true }),
     // Google Drive 資料夾樹懶載入（Requirement 51 / Task 243）
     browseGdriveExportDir: (subpath = '') => api.get('/bff/transaction/export/browse-gdrive', { params: { subpath }, skipErrorToast: true })

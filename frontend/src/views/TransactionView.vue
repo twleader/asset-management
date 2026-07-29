@@ -112,76 +112,105 @@
       </el-table>
     </el-card>
 
-    <!-- 排程自動匯出設定（Requirement 49 / Task t238） -->
+    <!-- 排程自動匯出設定（Requirement 49 / Task t238；Task 255 起每人可多筆） -->
     <el-card style="margin-top:20px">
       <template #header>
         <div style="display:flex;align-items:center;justify-content:space-between">
           <span class="section-title">⏱️ 排程自動匯出</span>
-          <div style="display:flex;gap:8px">
-            <el-button size="small" :icon="Download" :loading="runningNow" @click="handleRunNow">立即匯出到目錄</el-button>
-            <el-button size="small" type="primary" :loading="savingSchedule" @click="saveSchedule">儲存設定</el-button>
-          </div>
+          <el-button size="small" type="primary" :icon="Plus" :loading="addingSchedule" @click="addSchedule">
+            新增排程
+          </el-button>
         </div>
       </template>
-      <el-form :inline="true" label-width="100px" class="schedule-form">
-        <el-form-item label="啟用每日排程">
-          <el-switch v-model="schedule.enabled" />
-        </el-form-item>
-        <el-form-item label="每日執行時間">
-          <el-time-picker v-model="scheduleTime" format="HH:mm" value-format="HH:mm"
-            placeholder="時:分" style="width:130px" />
-        </el-form-item>
-        <el-form-item label="輸出資料夾">
-          <el-input v-model="schedule.outputSubpath" readonly placeholder="（家目錄根）" style="width:240px">
-            <template #append>
-              <el-button :icon="FolderOpened" @click="openDirPicker">選擇</el-button>
-            </template>
-          </el-input>
-        </el-form-item>
-        <!--
-          Google Drive 同步（Requirement 51 / Task 243）：本機一律照寫，這裡只是額外多上傳一份副本。
-          僅「主要管理者」可見可設——rclone remote 全機只有一份且綁定某個 Google 帳號，
-          若其他使用者能啟用，他的財務報表會被上傳到那個帳號的雲端硬碟。真正的閘門在後端。
-        -->
-        <el-form-item v-if="auth.isConfiguredAdmin" label="同步 Google Drive">
-          <div style="display:flex; flex-direction:column; gap:6px">
-            <div style="display:flex; align-items:center; gap:12px">
-              <el-switch v-model="schedule.gdriveEnabled" />
-              <el-input
-                v-model="schedule.gdriveSubpath"
-                readonly
-                placeholder="（尚未選擇 Drive 資料夾）"
-                :disabled="!schedule.gdriveEnabled"
-                style="width:260px"
-              >
-                <template #append>
-                  <el-button :disabled="!schedule.gdriveEnabled" @click="openDirPicker('gdrive')">選擇</el-button>
-                </template>
-              </el-input>
-            </div>
-            <div style="font-size:12px; color:var(--el-text-color-secondary); line-height:1.7">
-              開啟後除了寫入上面的本機資料夾，會<strong>再上傳一份同樣的檔案</strong>到 Google Drive 的所選資料夾；
-              <strong>本機那一份永遠照寫、不受影響</strong>。
-              <template v-if="schedule.gdriveEnabled && schedule.gdriveSubpath">
-                <br />Drive 落點：<code>{{ schedule.gdriveRemote || 'GDriveOutput' }}:{{ schedule.gdriveSubpath }}</code>
+
+      <el-empty v-if="!schedules.length" description="尚未建立排程，按右上「新增排程」開始。" :image-size="80" />
+
+      <!-- 每一筆排程一個區塊：時間／資料夾／Drive 設定與執行狀態都各自持有 -->
+      <div v-for="(s, idx) in schedules" :key="s.id" class="schedule-row">
+        <div class="schedule-row-head">
+          <span class="schedule-row-title">{{ s.name || `排程 #${idx + 1}` }}</span>
+          <div style="display:flex;gap:8px">
+            <el-button size="small" :icon="Download" :loading="s._running" @click="handleRunNow(idx)">
+              立即匯出
+            </el-button>
+            <el-button size="small" type="primary" :loading="s._saving" @click="saveSchedule(idx)">儲存</el-button>
+            <el-popconfirm title="確定刪除這筆排程？" width="200" @confirm="handleDeleteSchedule(idx)">
+              <template #reference>
+                <el-button size="small" type="danger" :icon="Delete" :loading="s._deleting">刪除</el-button>
               </template>
-              <br />上次上傳：
-              <template v-if="schedule.gdriveLastRunAt">
-                {{ schedule.gdriveLastRunAt }} — <code>{{ schedule.gdriveLastStatus || '—' }}</code>
-              </template>
-              <template v-else>—（尚未執行過）</template>
-            </div>
+            </el-popconfirm>
           </div>
-        </el-form-item>
-      </el-form>
-      <div class="schedule-hint">
-        以主機家目錄 <code>{{ schedule.baseDir || '/home/steven' }}</code> 為根（對映主機
-        <code>/Users/steven</code>）。按上方「選擇」開啟檔案總管式選擇器挑選子資料夾；例如選 <code>input</code> →
-        主機 <code>/Users/steven/input</code>。每日於指定時間匯出交易紀錄為
-        <code>交易紀錄_{使用者ID}_YYYYMMDD.xlsx</code>（內容同上方「匯出 Excel」，涵蓋全部年度）。
+        </div>
+        <el-form :inline="true" label-width="100px" class="schedule-form">
+          <el-form-item label="名稱">
+            <el-input v-model="s.name" maxlength="20" show-word-limit style="width:190px"
+              placeholder="（選填，會進檔名）" />
+          </el-form-item>
+          <el-form-item label="啟用每日排程">
+            <el-switch v-model="s.enabled" />
+          </el-form-item>
+          <el-form-item label="每日執行時間">
+            <el-time-picker v-model="s._time" format="HH:mm" value-format="HH:mm"
+              placeholder="時:分" style="width:130px" />
+          </el-form-item>
+          <el-form-item label="輸出資料夾">
+            <el-input v-model="s.outputSubpath" readonly placeholder="（家目錄根）" style="width:240px">
+              <template #append>
+                <el-button :icon="FolderOpened" @click="openDirPicker(idx)">選擇</el-button>
+              </template>
+            </el-input>
+          </el-form-item>
+          <!--
+            Google Drive 同步（Requirement 51 / Task 243）：本機一律照寫，這裡只是額外多上傳一份副本。
+            僅「主要管理者」可見可設——rclone remote 全機只有一份且綁定某個 Google 帳號，
+            若其他使用者能啟用，他的財務報表會被上傳到那個帳號的雲端硬碟。真正的閘門在後端。
+          -->
+          <el-form-item v-if="auth.isConfiguredAdmin" label="同步 Google Drive">
+            <div style="display:flex; flex-direction:column; gap:6px">
+              <div style="display:flex; align-items:center; gap:12px">
+                <el-switch v-model="s.gdriveEnabled" />
+                <el-input
+                  v-model="s.gdriveSubpath"
+                  readonly
+                  placeholder="（尚未選擇 Drive 資料夾）"
+                  :disabled="!s.gdriveEnabled"
+                  style="width:260px"
+                >
+                  <template #append>
+                    <el-button :disabled="!s.gdriveEnabled" @click="openDirPicker(idx, 'gdrive')">選擇</el-button>
+                  </template>
+                </el-input>
+              </div>
+              <div style="font-size:12px; color:var(--el-text-color-secondary); line-height:1.7">
+                開啟後除了寫入上面的本機資料夾，會<strong>再上傳一份同樣的檔案</strong>到 Google Drive 的所選資料夾；
+                <strong>本機那一份永遠照寫、不受影響</strong>。
+                <template v-if="s.gdriveEnabled && s.gdriveSubpath">
+                  <br />Drive 落點：<code>{{ gdriveRemote || 'GDriveOutput' }}:{{ s.gdriveSubpath }}</code>
+                </template>
+                <br />上次上傳：
+                <template v-if="s.gdriveLastRunAt">
+                  {{ s.gdriveLastRunAt }} — <code>{{ s.gdriveLastStatus || '—' }}</code>
+                </template>
+                <template v-else>—（尚未執行過）</template>
+              </div>
+            </div>
+          </el-form-item>
+        </el-form>
+        <div class="schedule-status">
+          上次執行：{{ s.lastRunAt || '—' }}　{{ s.lastRunStatus || '' }}
+        </div>
       </div>
-      <div v-if="schedule.lastRunAt || schedule.lastRunStatus" class="schedule-status">
-        上次執行：{{ schedule.lastRunAt || '—' }}　{{ schedule.lastRunStatus || '' }}
+
+      <div class="schedule-hint">
+        以主機家目錄 <code>{{ baseDir || '/home/steven' }}</code> 為根（對映主機
+        <code>/Users/steven</code>）。按「選擇」開啟檔案總管式選擇器挑選子資料夾；例如選 <code>input</code> →
+        主機 <code>/Users/steven/input</code>。每筆排程於各自時間匯出交易紀錄為
+        <code>交易紀錄_{使用者ID}_YYYYMMDD.xlsx</code>；<strong>填了名稱的排程</strong>檔名為
+        <code>交易紀錄_{使用者ID}_{名稱}_YYYYMMDD.xlsx</code>（內容同上方「匯出 Excel」，涵蓋全部年度）。
+        <br />兩筆排程若指到<strong>同一資料夾且同檔名</strong>（都沒填名稱或名稱相同），後執行的會覆寫前一份。
+        每一份都是<strong>執行當下</strong>的完整交易紀錄（不會缺年度），但不是同一時點的快照——兩次執行之間新增或修改的交易
+        只會出現在後面那一份。要各時段各留一份，請填不同名稱。
+        <br />「立即匯出」使用的是<strong>已儲存</strong>的設定；剛改過還沒按「儲存」的值不會生效。
       </div>
     </el-card>
 
@@ -364,20 +393,18 @@ const exporting = ref(false)
 const editingId = ref(null)
 const formRef = ref(null)
 
-// 排程自動匯出設定（Task t238）
-const schedule = reactive({
-  // Drive 同步（Task 243）；gdriveRemote 是後端給的顯示值，不入庫
-  gdriveEnabled: false, gdriveSubpath: '', gdriveRemote: '',
-  gdriveLastRunAt: null, gdriveLastStatus: '',
-  enabled: false, runHour: 8, runMinute: 0, outputSubpath: 'input', lastRunAt: null, lastRunStatus: null, baseDir: '' })
-const scheduleTime = ref('08:00')
-const savingSchedule = ref(false)
-const runningNow = ref(false)
+// 排程自動匯出設定（Task t238；Task 255 起每人可多筆）
+// baseDir／gdriveRemote 是後端給的顯示值、全清單共用一份（不入庫、不放進單筆內）
+const schedules = ref([])
+const baseDir = ref('')
+const gdriveRemote = ref('')
+const addingSchedule = ref(false)
 
 // 輸出資料夾選擇器（檔案總管式樹狀）
 // mode：'local'＝本機家目錄樹、'gdrive'＝Drive remote 樹（回傳形狀相同，共用同一棵 el-tree）
+// rowIndex：dialog 只有一個，必須記住這次是為哪一筆排程而開
 const dirPicker = reactive({
-  visible: false, mode: 'local', baseDir: '', picked: '', newSub: '', treeKey: 0, error: ''
+  visible: false, mode: 'local', rowIndex: -1, baseDir: '', picked: '', newSub: '', treeKey: 0, error: ''
 })
 const auth = useAuthStore()
 const dirTreeProps = { label: 'name', isLeaf: 'leaf' }
@@ -508,22 +535,13 @@ async function load() {
   brokerOptions.value = (data.brokers ?? []).map(b => b.displayName)
 }
 
-async function loadSchedule() {
-  const s = await bffApi.transaction.getExportSchedule()
-  schedule.enabled = !!s.enabled
-  schedule.runHour = s.runHour ?? 8
-  schedule.runMinute = s.runMinute ?? 0
-  schedule.outputSubpath = s.outputSubpath ?? 'input'
-  schedule.lastRunAt = s.lastRunAt ?? null
-  schedule.lastRunStatus = s.lastRunStatus ?? null
-  schedule.baseDir = s.baseDir ?? ''
-  applyGdrive(s)
-  scheduleTime.value = `${String(schedule.runHour).padStart(2, '0')}:${String(schedule.runMinute).padStart(2, '0')}`
+async function loadSchedules() {
+  applySchedules(await bffApi.transaction.listExportSchedules())
 }
 
 // 多 panel 並行載入
 onMounted(() => {
-  Promise.allSettled([load(), loadSchedule()])
+  Promise.allSettled([load(), loadSchedules()])
 })
 
 // ===== 明細（依 selectedYear 過濾 summaries[].records）=====
@@ -671,50 +689,106 @@ async function handleExport() {
   }
 }
 
-// ===== 排程自動匯出 =====
-async function saveSchedule() {
-  // 前後端都擋：開了同步卻沒選資料夾，後端也會回 400
-  if (schedule.gdriveEnabled && !(schedule.gdriveSubpath || '').trim()) {
-    ElMessage.warning('已開啟 Google Drive 同步時，必須選擇 Drive 目標資料夾')
-    return
-  }
-  savingSchedule.value = true
+// ===== 排程自動匯出（每人多筆） =====
+
+/**
+ * 把後端回的完整清單寫回本地狀態。所有變更端點都回「變更後的完整清單」，
+ * 前端一律整份取代、不做客戶端合併，避免本地狀態與 DB 分歧。
+ * `_time`／`_saving` 等底線開頭欄位是純 UI 狀態，送回後端前會被拿掉。
+ * Drive 欄位讀取一律不驗證，不合法值也照顯示，供使用者自行修正。
+ */
+function applySchedules(res) {
+  baseDir.value = res.baseDir ?? ''
+  gdriveRemote.value = res.gdriveRemote ?? ''
+  schedules.value = (res.schedules ?? []).map(s => ({
+    id: s.id,
+    name: s.name || '',
+    enabled: !!s.enabled,
+    runHour: s.runHour ?? 8,
+    runMinute: s.runMinute ?? 0,
+    outputSubpath: s.outputSubpath ?? 'input',
+    lastRunAt: s.lastRunAt ?? null,
+    lastRunStatus: s.lastRunStatus ?? null,
+    gdriveEnabled: !!s.gdriveEnabled,
+    gdriveSubpath: s.gdriveSubpath || '',
+    gdriveLastRunAt: s.gdriveLastRunAt || null,
+    gdriveLastStatus: s.gdriveLastStatus || '',
+    _time: `${String(s.runHour ?? 8).padStart(2, '0')}:${String(s.runMinute ?? 0).padStart(2, '0')}`,
+    _saving: false, _running: false, _deleting: false
+  }))
+  // 剛把某筆的 Drive 同步打開時後端會附一則自檢警告；正常時為 null，不顯示（Task 247.3.5）
+  showGdriveSelfCheckWarning(res.gdriveSelfCheckWarning)
+}
+
+/** 新增：直接建一筆停用的預設排程，使用者再自行設定並儲存（不做前端草稿列，避免 id 為 null 的分支狀態）。 */
+async function addSchedule() {
+  addingSchedule.value = true
   try {
-    const [h, m] = (scheduleTime.value || '08:00').split(':').map(Number)
-    const s = await bffApi.transaction.updateExportSchedule({
-      enabled: schedule.enabled,
-      gdriveEnabled: schedule.gdriveEnabled,
-      gdriveSubpath: (schedule.gdriveSubpath || '').trim(),
-      runHour: h,
-      runMinute: m,
-      outputSubpath: (schedule.outputSubpath || 'input').trim()
-    })
-    schedule.runHour = s.runHour ?? h
-    schedule.runMinute = s.runMinute ?? m
-    schedule.outputSubpath = s.outputSubpath ?? schedule.outputSubpath
-    schedule.baseDir = s.baseDir ?? schedule.baseDir
-    applyGdrive(s)
-    ElMessage.success('排程設定已儲存')
-    // 剛把 Drive 同步打開時後端會附一則自檢警告；正常時為 null，不顯示（Task 247.3.5）
-    showGdriveSelfCheckWarning(s.gdriveSelfCheckWarning)
+    applySchedules(await bffApi.transaction.createExportSchedule({
+      enabled: false, runHour: 8, runMinute: 0, outputSubpath: 'input'
+    }))
+    ElMessage.success('已新增一筆排程，請設定時間與資料夾後儲存')
   } catch (e) {
-    ElMessage.error('儲存失敗，請稍後再試')
+    ElMessage.error(e?.response?.data?.detail || '新增排程失敗，請稍後再試')
   } finally {
-    savingSchedule.value = false
+    addingSchedule.value = false
   }
 }
 
-async function handleRunNow() {
-  runningNow.value = true
+async function saveSchedule(idx) {
+  const s = schedules.value[idx]
+  if (!s) return
+  // 前後端都擋：開了同步卻沒選資料夾，後端也會回 400
+  if (s.gdriveEnabled && !(s.gdriveSubpath || '').trim()) {
+    ElMessage.warning('已開啟 Google Drive 同步時，必須選擇 Drive 目標資料夾')
+    return
+  }
+  s._saving = true
   try {
-    const r = await bffApi.transaction.runExportNow()
+    const [h, m] = (s._time || '08:00').split(':').map(Number)
+    applySchedules(await bffApi.transaction.updateExportSchedule(s.id, {
+      name: (s.name || '').trim(),
+      enabled: s.enabled,
+      gdriveEnabled: s.gdriveEnabled,
+      gdriveSubpath: (s.gdriveSubpath || '').trim(),
+      runHour: h,
+      runMinute: m,
+      outputSubpath: (s.outputSubpath || 'input').trim()
+    }))
+    ElMessage.success('排程設定已儲存')
+  } catch (e) {
+    // 名稱不合法／時分越界等後端會回可讀訊息，直接顯示比「請稍後再試」有用
+    ElMessage.error(e?.response?.data?.detail || '儲存失敗，請稍後再試')
+    s._saving = false
+  }
+}
+
+async function handleDeleteSchedule(idx) {
+  const s = schedules.value[idx]
+  if (!s) return
+  s._deleting = true
+  try {
+    applySchedules(await bffApi.transaction.deleteExportSchedule(s.id))
+    ElMessage.success('已刪除')
+  } catch (e) {
+    ElMessage.error(e?.response?.data?.detail || '刪除失敗，請稍後再試')
+    s._deleting = false
+  }
+}
+
+async function handleRunNow(idx) {
+  const s = schedules.value[idx]
+  if (!s) return
+  s._running = true
+  try {
+    const r = await bffApi.transaction.runExportNow(s.id)
     ElMessage.success(`已匯出到：${r.path}`)
   } catch (e) {
-    ElMessage.error('立即匯出失敗，請確認目錄與權限')
+    ElMessage.error(e?.response?.data?.detail || '立即匯出失敗，請確認目錄與權限')
   } finally {
-    runningNow.value = false
+    s._running = false
   }
-  loadSchedule().catch(() => {}) // 刷新上次執行資訊，失敗不影響匯出結果
+  loadSchedules().catch(() => {}) // 刷新上次執行資訊，失敗不影響匯出結果
 }
 
 
@@ -728,25 +802,19 @@ const dirPickerTitle = computed(() =>
 const dirPickerPreview = computed(() => {
   const isGdrive = dirPicker.mode === 'gdrive'
   const base = dirPicker.baseDir
-    || (isGdrive ? (schedule.gdriveRemote || 'GDriveOutput') + ':' : (schedule.baseDir || '/home/steven'))
+    || (isGdrive ? (gdriveRemote.value || 'GDriveOutput') + ':' : (baseDir.value || '/home/steven'))
   const parts = [dirPicker.picked, (dirPicker.newSub || '').trim()].filter(Boolean)
   const joined = parts.join('/')
   if (!joined) return base
   return isGdrive ? base + joined : base + '/' + joined
 })
 
-/** 把後端回的 Drive 欄位寫回本地狀態（讀取一律不驗證，不合法值也照顯示供使用者修正）。 */
-function applyGdrive(s) {
-  schedule.gdriveEnabled = !!s.gdriveEnabled
-  schedule.gdriveSubpath = s.gdriveSubpath || ''
-  schedule.gdriveRemote = s.gdriveRemote || ''
-  schedule.gdriveLastRunAt = s.gdriveLastRunAt || null
-  schedule.gdriveLastStatus = s.gdriveLastStatus || ''
-}
-
-function openDirPicker(mode = 'local') {
+/** dialog 只有一個，故必須記住這次是為哪一筆排程（rowIndex）而開，確定時才寫得回正確的那一筆。 */
+function openDirPicker(rowIndex, mode = 'local') {
+  const s = schedules.value[rowIndex]
+  dirPicker.rowIndex = rowIndex
   dirPicker.mode = mode
-  dirPicker.picked = (mode === 'gdrive' ? schedule.gdriveSubpath : schedule.outputSubpath) || ''
+  dirPicker.picked = (mode === 'gdrive' ? s?.gdriveSubpath : s?.outputSubpath) || ''
   dirPicker.newSub = ''
   dirPicker.baseDir = ''         // 兩種 mode 的基底不同，重開時一律重新取
   dirPicker.error = ''
@@ -784,8 +852,11 @@ function confirmDirPick() {
   let p = dirPicker.picked || ''
   const sub = (dirPicker.newSub || '').trim().replace(/^\/+|\/+$/g, '')
   if (sub) p = p ? `${p}/${sub}` : sub
-  if (dirPicker.mode === 'gdrive') schedule.gdriveSubpath = p
-  else schedule.outputSubpath = p
+  const s = schedules.value[dirPicker.rowIndex]
+  if (s) {
+    if (dirPicker.mode === 'gdrive') s.gdriveSubpath = p
+    else s.outputSubpath = p
+  }
   dirPicker.visible = false
 }
 </script>
@@ -809,6 +880,9 @@ function confirmDirPick() {
 
 /* 排程自動匯出設定（Task t238） */
 .schedule-form { margin-bottom: 4px; }
+.schedule-row { border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 16px 4px; margin-bottom: 12px; }
+.schedule-row-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.schedule-row-title { font-size: 14px; font-weight: 600; color: #1e293b; }
 .schedule-hint { font-size: 12px; color: #94a3b8; line-height: 1.6; }
 .schedule-hint code { background: #f1f5f9; color: #475569; padding: 1px 5px; border-radius: 4px; font-size: 11px; }
 .schedule-status { margin-top: 8px; font-size: 12px; color: #64748b; }

@@ -101,7 +101,7 @@ public class SchedulePublicBffController {
                     "每分鐘檢查各使用者設定的多個交易雷達匯出時間點，命中執行時間即把當日 Redis 快照產出 Excel 到指定目錄；當日尚無快照則略過不產檔（Requirement 48）；輸出含 Google Drive 同步（若已啟用）",
                     "動態：依「今日交易雷達」頁設定的多個時間點", "0 * * * * *", TPE),
             new ScheduledJobDto(BUSINESS, "交易紀錄匯出", "每日匯出排程檢查",
-                    "每分鐘檢查各使用者的交易紀錄自動匯出設定，命中執行時間即產出 Excel 到指定目錄（Requirement 49）；輸出含 Google Drive 同步（若已啟用）",
+                    "每分鐘檢查各使用者的每一筆交易紀錄自動匯出排程（Task 255 起每人可設定多筆，各有自己的時間與輸出資料夾），命中執行時間即產出 Excel 到該筆指定目錄（Requirement 49）；輸出含 Google Drive 同步（若已啟用）",
                     "每分鐘", "0 * * * * *", TPE),
 
             // ===== external-materials-service（29）=====
