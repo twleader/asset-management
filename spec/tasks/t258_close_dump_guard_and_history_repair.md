@@ -25,7 +25,7 @@
  2026-07-29   |            |            |           |     19.1000 |      0
 ```
 
-Yahoo（`2002.TW`, `interval=1d`）同期實際收盤為 18.80／18.65／18.55／18.80／18.85／19.10／19.15／19.25／19.00 —— 每日皆不同。O/H/L 為 null、`volume` 為 0 是這類假收盤的特徵指紋。
+Yahoo（`2002.TW`, `interval=1d`）同期實際收盤逐日為 `07-16` 18.80、`07-17` 18.65、`07-20` 18.55、`07-21` 18.80、`07-22` 18.85、`07-23` 19.10、`07-24` 19.15、`07-27` 19.25、`07-28` 19.00、`07-29` 18.95 —— 除 `07-16`／`07-21` 同為 18.80 外每日不同。**注意上表只有 8 列**（`07-22`／`07-23` 未受害），區間交易日數是 10、腐化列數是 8，兩個數字不可混用。O/H/L 為 null、`volume` 為 0 是這類假收盤的特徵指紋。
 
 受害代號固定且集中：`006205 00642 00646 00695B 00929 1301 1616 2002 2409 2412 2606 2882 7556 9933`，另加美股 `AAPL`／`MSFT`、英股 `IB01`。
 
@@ -94,7 +94,7 @@ for (HistoricalBar bar : priceFetch.fetchTwHistoricalRange(stockCode, start, end
 
 ### 258.1 `dumpRedisToDb` 逐檔守門
 
-- [ ] 258.1 在 `ClosePersister` 新增 **package-private static** 方法作為可單元測試的接縫：
+- [x] 258.1 在 `ClosePersister` 新增 **package-private static** 方法作為可單元測試的接縫：
 
   ```java
   static boolean shouldDumpPayload(JsonNode payload, LocalDate targetDate, LocalDateTime now)
@@ -102,73 +102,80 @@ for (HistoricalBar bar : priceFetch.fetchTwHistoricalRange(stockCode, start, end
 
   回 `true` 才允許寫入。判定規則（兩條**皆須**成立）：
 
-  - [ ] 258.1.1 **`tradingDate` 必須等於 `targetDate`**。payload 的 `tradingDate` 缺漏、為 null、無法解析、或不等於 `targetDate` → 回 `false`。
-  - [ ] 258.1.2 **`updatedAt` 距 `now` 不得超過 12 分鐘**。`updatedAt` 缺漏／null／無法解析 → 回 `false`。負值（`updatedAt` 晚於 `now`，時鐘微幅倒退）視為 0 分鐘、**通過**（不得因此擋掉正常路徑）。以常數 `MAX_PAYLOAD_STALENESS = Duration.ofMinutes(12)` 表達，**須可在測試中引用**。
+  - [x] 258.1.1 **`tradingDate` 必須等於 `targetDate`**。payload 的 `tradingDate` 缺漏、為 null、無法解析、或不等於 `targetDate` → 回 `false`。
+  - [x] 258.1.2 **`updatedAt` 距 `now` 不得超過 12 分鐘**。`updatedAt` 缺漏／null／無法解析 → 回 `false`。負值（`updatedAt` 晚於 `now`，時鐘微幅倒退）視為 0 分鐘、**通過**（不得因此擋掉正常路徑）。以常數 `MAX_PAYLOAD_STALENESS = Duration.ofMinutes(12)` 表達，**須可在測試中引用**。
 
-- [ ] 258.1.3 **`updatedAt` 一律以台北牆鐘解讀，不做時區換算。** `PriceCacheWriter` 三處寫入（現行第 86／168／239 行）都是 `LocalDateTime.now(MarketClock.TW_ZONE)`，即**所有市場的 `updatedAt` 都是台北牆鐘**。`dumpRedisToDb` 呼叫本方法時 `now` 一律傳 `LocalDateTime.now(MarketClock.TW_ZONE)`，**不得**改傳市場當地時間——那會讓美股位移 12 小時、英股 7 小時，守門在該兩市場恆為 false。
-- [ ] 258.1.4 **不得以 payload 的 `closed` 欄位作為守門條件。** 13:32 dump 要取的正是 13:28～13:30 那輪盤中 cron 寫入的值，而 `PricePoller.scheduledTwIntradayUpdate` 呼叫的是 `updatePrices(tw, "台股", false)` → `PriceCacheWriter` 寫 `payload.put("closed", markClosed)` 為 `false`。以 `closed == true` 守門會把正常路徑整個擋掉、當日一列都寫不進去。
-- [ ] 258.1.5 在 `dumpRedisToDb` 的 for-loop 內，`price == null` 檢查之後、`upsertHistory` 之前套用本守門。守不過即 `continue`，**不寫任何列、不得回填昨收／開盤價／中價**（Requirement 7 禁止回寫充數）。
-- [ ] 258.1.6 `dumpRedisToDb` 回傳值語意不變（實際寫入列數）。另以 `log.info` 記錄被跳過的檔數與代號（**沿用本專案「不得靜默截斷」原則**：被跳過就要看得到，否則「dump 完成：N 檔」讀起來像全部成功）。訊息格式自訂，但須同時含寫入數與跳過數。
-- [ ] 258.1.7 `dumpTwCloseFromRedis`／`dumpUsCloseFromRedis`／`dumpUkCloseFromRedis` 三支呼叫端**本身不改**（含既有的 `calendar.isXxxTradingDay` 假日守門與 log 訊息）。守門只加在共用的 `dumpRedisToDb` 內，三個市場一體適用。
+- [x] 258.1.3 **`updatedAt` 一律以台北牆鐘解讀，不做時區換算。** `PriceCacheWriter` 三處寫入（現行第 86／168／239 行）都是 `LocalDateTime.now(MarketClock.TW_ZONE)`，即**所有市場的 `updatedAt` 都是台北牆鐘**。`dumpRedisToDb` 呼叫本方法時 `now` 一律傳 `LocalDateTime.now(MarketClock.TW_ZONE)`，**不得**改傳市場當地時間——那會讓美股位移 12 小時、英股 7 小時，守門在該兩市場恆為 false。
+- [x] 258.1.4 **不得以 payload 的 `closed` 欄位作為守門條件。** 13:32 dump 要取的正是 13:28～13:30 那輪盤中 cron 寫入的值，而 `PricePoller.scheduledTwIntradayUpdate` 呼叫的是 `updatePrices(tw, "台股", false)` → `PriceCacheWriter` 寫 `payload.put("closed", markClosed)` 為 `false`。以 `closed == true` 守門會把正常路徑整個擋掉、當日一列都寫不進去。
+- [x] 258.1.5 在 `dumpRedisToDb` 的 for-loop 內，`price == null` 檢查之後、`upsertHistory` 之前套用本守門。守不過即 `continue`，**不寫任何列、不得回填昨收／開盤價／中價**（Requirement 7 禁止回寫充數）。
+- [x] 258.1.6 `dumpRedisToDb` 回傳值語意不變（實際寫入列數）。另以 `log.info` 記錄被跳過的檔數與代號（**沿用本專案「不得靜默截斷」原則**：被跳過就要看得到，否則「dump 完成：N 檔」讀起來像全部成功）。訊息格式自訂，但須同時含寫入數與跳過數。**範圍釐清**：這裡記錄的只有**守門跳過**的檔；既有的 `json == null`（key 已逾 TTL）與 `price == null` 兩條 skip 沿用原本的靜默 `continue`、不計入跳過數。故「寫入數＋跳過數」可能小於 `price:index:{market}` 的檔數，讀日誌時以此為準（若日後要求三者可對帳，須另立一條 spec 項並同步改實作）。
+- [x] 258.1.7 `dumpTwCloseFromRedis`／`dumpUsCloseFromRedis`／`dumpUkCloseFromRedis` 三支呼叫端**本身不改**（含既有的 `calendar.isXxxTradingDay` 假日守門與 log 訊息）。守門只加在共用的 `dumpRedisToDb` 內，三個市場一體適用。
+- [x] 258.1.7a **`dumpRedisToDb` 其實有第四個呼叫端：`selfHealMissedClose`**（開機補救「服務在 dump 時點沒在跑」），它同樣受守門約束。**連帶後果須明白寫出**：開機補跑時 Redis payload 的 `updatedAt` 幾乎必然早於 12 分鐘（那是收盤前寫入的值，開機時點通常已過收盤數十分鐘），**規則 2 會把整批擋掉，self-heal 的 Redis dump 分支因此實質失效**。刻意接受——把數小時前的值寫成收盤正是本任務要根除的行為；當日收盤仍由 16:00 TW／18:00 ET FinMind 與 17:00 LON Yahoo 的 verify 路徑補上（走外部權威來源、不讀 Redis，不受守門影響）。真正補不到的情境是「連 verify 時點也沒在跑」，該情境以 `/internal/repair/history` 手動修復。
 
 ### 258.2 新增歷史修復路徑
 
-- [ ] 258.2 在 `HistoricalBackfillService` 新增：
+- [x] 258.2 在 `HistoricalBackfillService` 新增：
 
   ```java
   public RepairSummary repairRange(String market, String stockCode, LocalDate from, LocalDate to)
   ```
 
-  - [ ] 258.2.1 `stockCode` 為 null／空白時，代號集合取 `StockSourceQuery.collectAllStockCodes(tw, us, uk)` 中對應該市場的那一份（＝ `stock` 主檔 ∪ 每 owner 最新快照持股 ∪ `stock_alert`；涵蓋所有可能有列的標的）。指定 `stockCode` 時只處理該檔。
-  - [ ] 258.2.2 市場字串只接受 `台股`／`美股`／`英股`，分別呼叫既有的 `priceFetch.fetchTwHistoricalRange`／`fetchUsHistoricalRange`／`fetchUkHistoricalRange`（**不得新寫抓取邏輯**）。其他值擲 `IllegalArgumentException`。
-  - [ ] 258.2.3 逐 bar 處理：**跳過** `bar.tradingDate().equals(LocalDate.now(該市場時區))` 的 bar（今日列獨佔給 `ClosePersister`，Task 84；該市場時區由 `MarketClock.zoneOf(market)` 取得，現行第 32–34 行已有該分流）。
-  - [ ] 258.2.4 其餘 bar **一律** `store.upsertHistory(...)` 覆寫，**不檢查 `existsHistory`**——這正是與 `backfillTwStock` 的差別，也是本任務存在的理由。
-  - [ ] 258.2.5 **來源未回傳某日 bar 時，該日既有列保留不動**：不刪除、不猜值、不以鄰日內插。理由：來源查無可能是真休市、可能是該檔當日無交易、也可能是來源暫時故障；三者都不足以支撐「刪掉既有資料」或「填一個近似值」。
-  - [ ] 258.2.6 逐檔之間 `sleep`：台股沿用 `backfillTwStock` 呼叫端的 600ms、美／英股沿用 2000ms（見 `startupBackfill` 現行第 81／91／101 行的既有節流值），避免打爆外部來源。
-  - [ ] 258.2.7 單檔失敗只 `log.warn` 並計入 `codesFailed`，**不中斷整批**（graceful，沿用本專案逐來源 graceful 慣例）。
-  - [ ] 258.2.8 `RepairSummary` 為不可變 `record`，欄位：`market`、`from`、`to`、`codesProcessed`、`rowsOverwritten`、`codesWithNoSource`、`codesFailed`。
-  - [ ] 258.2.9 **冪等**：同一區間重跑以相同權威值覆寫，結果不變。不得引入「已修過就跳過」之類的狀態記錄。
+  - [x] 258.2.1 `stockCode` 為 null／空白時，代號集合取 `StockSourceQuery.collectAllStockCodes(tw, us, uk)` 中對應該市場的那一份（＝ `stock` 主檔 ∪ 每 owner 最新快照持股 ∪ `stock_alert`；涵蓋所有可能有列的標的）。指定 `stockCode` 時只處理該檔。
+  - [x] 258.2.2 市場字串只接受 `台股`／`美股`／`英股`，分別呼叫既有的 `priceFetch.fetchTwHistoricalRange`／`fetchUsHistoricalRange`／`fetchUkHistoricalRange`（**不得新寫抓取邏輯**）。其他值擲 `IllegalArgumentException`。
+  - [x] 258.2.3 逐 bar 處理：**跳過** `bar.tradingDate().equals(LocalDate.now(該市場時區))` 的 bar（今日列獨佔給 `ClosePersister`，Task 84；該市場時區由 `MarketClock.zoneOf(market)` 取得，現行第 32–34 行已有該分流）。
+  - [x] 258.2.4 其餘 bar **一律** `store.upsertHistory(...)` 覆寫，**不檢查 `existsHistory`**——這正是與 `backfillTwStock` 的差別，也是本任務存在的理由。
+  - [x] 258.2.5a **實際語意是 upsert，不只「覆寫」**：`upsertHistory` 無列時會 INSERT，故區間內原本**沒有列**的交易日也會被補上。刻意接受（來源既然回了權威 bar，補上比留空正確），但須知它不是「純修復」——對歷史稀疏的標的跑大區間會新增可觀列數，`rowsOverwritten` 這個欄名涵蓋 UPDATE 與 INSERT 兩者。
+  - [x] 258.2.5 **來源未回傳某日 bar 時，該日既有列保留不動**：不刪除、不猜值、不以鄰日內插。理由：來源查無可能是真休市、可能是該檔當日無交易、也可能是來源暫時故障；三者都不足以支撐「刪掉既有資料」或「填一個近似值」。
+  - [x] 258.2.6 逐檔之間 `sleep`：台股沿用 `backfillTwStock` 呼叫端的 600ms、美／英股沿用 2000ms（見 `startupBackfill` 現行第 81／91／101 行的既有節流值），避免打爆外部來源。
+  - [x] 258.2.7 單檔失敗只 `log.warn` 並計入 `codesFailed`，**不中斷整批**（graceful，沿用本專案逐來源 graceful 慣例）。
+  - [x] 258.2.8 `RepairSummary` 為不可變 `record`，欄位：`market`、`from`、`to`、`codesProcessed`、`rowsOverwritten`、`codesWithNoSource`、`codesFailed`。
+  - [x] 258.2.9 **冪等**：同一區間重跑以相同權威值覆寫，結果不變。不得引入「已修過就跳過」之類的狀態記錄。
 
-- [ ] 258.3 在 `InternalPriceController`（`external-materials-service/.../controller/InternalPriceController.java`，現行 `@RequestMapping("/internal")`）新增：
+- [x] 258.3 在 `InternalPriceController`（`external-materials-service/.../controller/InternalPriceController.java`，現行 `@RequestMapping("/internal")`）新增：
 
   ```java
   @PostMapping("/repair/history")
   public HistoricalBackfillService.RepairSummary repairHistory(
           @RequestParam String market,
           @RequestParam(required = false) String code,
-          @RequestParam String from,
-          @RequestParam String to)
+          @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+          @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to)
   ```
 
-  - [ ] 258.3.1 `from`／`to` 以 `LocalDate.parse` 解析；`from` 晚於 `to` 擲 `IllegalArgumentException`。
-  - [ ] 258.3.2 端點放在 `/internal` 之下，與既有 `/internal/backfill/*` 同一層級與風格（該前綴不對外暴露，由 business-services 內部呼叫）。**本任務不新增 business-services 或 BFF 端的 proxy、不動前端**——這是維護用的一次性修復入口，不做成使用者可按的按鈕。
+  - [x] 258.3.1 `from`／`to` 由 Spring `@DateTimeFormat(iso = ISO.DATE)` 綁定為 `LocalDate`（沿用同檔 `/internal/backfill/stock` 的既有風格，controller 不自行 `LocalDate.parse`），格式錯誤由 Spring 綁定層回 **400**；`from` 晚於 `to` 與 market 白名單的驗證一律放在 `repairRange` 開頭（單一入口，直呼 service 的單元測試亦能覆蓋），擲 `IllegalArgumentException`。**因 ext-materials 全樹未設 `@ControllerAdvice`，該例外對外表現為 HTTP 500 而非 400**——刻意接受的維運端點現況。
+  - [x] 258.3.2a **`market` 為中文，手動呼叫時必須 URL-encode**：`%E5%8F%B0%E8%82%A1`（台股）／`%E7%BE%8E%E8%82%A1`（美股）／`%E8%8B%B1%E8%82%A1`（英股）。Tomcat 依 RFC 7230／3986 拒絕 request target 內的原始非 ASCII 位元，直接寫 `market=台股` 會在進 controller 之前回 400「Invalid character found in the request target」，且日誌只有 Tomcat 例外、看不到任何 repair 訊息。
+  - [x] 258.3.2 端點放在 `/internal` 之下，與既有 `/internal/backfill/*` 同一層級與風格（該前綴不對外暴露，由 business-services 內部呼叫）。**本任務不新增 business-services 或 BFF 端的 proxy、不動前端**——這是維護用的一次性修復入口，不做成使用者可按的按鈕。
 
 ### 258.4 明確不做的事
 
-- [ ] 258.4 **不新增、不修改任何 `@Scheduled` 方法**，故 `SchedulePublicBffController.JOBS` 排程清單不需同步（本任務不造成該頁計數漂移）。根因（t257 的抓價範圍）與機制（258.1 的守門）都已修，常駐稽核排程屬另一個決定。
-- [ ] 258.4.1 **不動 `PriceCacheWriter.syncClosedFromDb`**。它是迴路的一環，但它本身的行為（休市時讓 Redis 與 DB 收盤一致）是 Task 111 已驗證的必要不變式；迴路由 258.1 的守門在 dump 側切斷即可。改它會波及 `refreshAll`／`warmCacheOnStartup`／`TwRadarRefreshService` 三個既有呼叫端。
-- [ ] 258.4.2 **不動 `backfillTwStock`／`backfillUsStock`／`backfillUkStock` 及其兩道守門**。它們的「增量 ＋ skip-if-exists」語意服務 `startupBackfill`、`/internal/backfill/stock`、`/internal/backfill/all`、`StockMasterService` 新標的回補等多個呼叫端；放寬會讓每次啟動都重灌全部歷史。
-- [ ] 258.4.3 **不動 schema、不新增 Liquibase changeset。**
-- [ ] 258.4.4 **不處理 2026 年以前那些 OHLCV 全等的列**（台股 2016／2017／2019／2020／2021 共 51 列、英股 2019 共 20 列、美股 2020 共 2 列）。它們早於本 dump 機制存在，性質是 10 年歷史回補的來源資料特性（低流動性標的的真平盤、或來源本身無 O/H/L），不是本 bug 的產物。要處理需另行查證真偽，屬另一個任務。
-- [ ] 258.4.5 **不對「已存在的錯誤列」做偵測式判定**。修復採「重抓權威值直接覆寫」而非「先判斷哪列是錯的再修」——後者需要一套啟發式規則，會有把真平盤誤判成腐化而覆寫掉正確資料的風險。覆寫式做法對真平盤是無害的（寫回相同的值），且順帶修好「盤中 tick 被當收盤」那一類（`1301`／`2409`／`2882`）而不需要偵測它們。
+- [x] 258.4 **不新增、不修改任何 `@Scheduled` 方法**，故 `SchedulePublicBffController.JOBS` 排程清單不需同步（本任務不造成該頁計數漂移）。根因（t257 的抓價範圍）與機制（258.1 的守門）都已修，常駐稽核排程屬另一個決定。
+- [x] 258.4.1 **不動 `PriceCacheWriter.syncClosedFromDb`**。它是迴路的一環，但它本身的行為（休市時讓 Redis 與 DB 收盤一致）是 Task 111 已驗證的必要不變式；迴路由 258.1 的守門在 dump 側切斷即可。改它會波及 `refreshAll`／`warmCacheOnStartup`／`TwRadarRefreshService` 三個既有呼叫端。
+- [x] 258.4.2 **不動 `backfillTwStock`／`backfillUsStock`／`backfillUkStock` 及其兩道守門**。它們的「增量 ＋ skip-if-exists」語意服務 `startupBackfill`、`/internal/backfill/stock`、`/internal/backfill/all`、`StockMasterService` 新標的回補等多個呼叫端；放寬會讓每次啟動都重灌全部歷史。
+- [x] 258.4.3 **不動 schema、不新增 Liquibase changeset。**
+- [x] 258.4.4 **不處理 2026 年以前那些 OHLCV 全等的列**（台股 2016／2017／2019／2020／2021 共 51 列、英股 2019 共 20 列、美股 2020 共 2 列）。它們早於本 dump 機制存在，性質是 10 年歷史回補的來源資料特性（低流動性標的的真平盤、或來源本身無 O/H/L），不是本 bug 的產物。要處理需另行查證真偽，屬另一個任務。
+- [x] 258.4.5 **不對「已存在的錯誤列」做偵測式判定**。修復採「重抓權威值直接覆寫」而非「先判斷哪列是錯的再修」——後者需要一套啟發式規則，會有把真平盤誤判成腐化而覆寫掉正確資料的風險。覆寫式做法對真平盤是無害的（寫回相同的值），且順帶修好「盤中 tick 被當收盤」那一類（`1301`／`2409`／`2882`）而不需要偵測它們。
+- [x] 258.4.6 **已知且接受的副作用：每日 dump 入庫檔數會下降。** 守門上線後，只有當日被盤中 cron 刷新過的代號能寫當日列，故每日 dump 檔數由 Redis index 的規模降至抓價清單的規模——實測 `SCARD price:index:{market}` 為台股 **34**／美股 **13**／英股 **4**，而 per-owner 抓價集合為台股 **19**／美股 **9**／英股 **3**，即差集 **15／4／1** 檔當日不再有列。這些正是「已不在任何 owner 最新快照、也不在 `stock_alert`，但仍在 `stock` 主檔」的曾持有／曾觀察標的；它們的歷史由下次容器啟動的 `startupBackfill` 增量補齊，或需要時以 `/internal/repair/history` 手動處理，**刻意不設常駐排程**。台股大盤 `0000` 不受影響——它的權威來源本就是 `twse_index_daily_history`、不走這條 dump。
 
 ### 258.5 單元測試
 
 沿用同目錄既有慣例：`mock(...)` 建構受測類、JUnit 5 `@Test`、AssertJ `assertThat`、**測試方法名用繁體中文**（見 `CrawlerExportPathQueryTest`、`TwRadarRefreshServiceTest`）。
 
-- [ ] 258.5 新增 `external-materials-service/src/test/java/com/steven/assets/externalmaterials/service/ClosePersisterDumpGuardTest.java`，直接測 `shouldDumpPayload`（package-private，同 package 可見），以固定的 `targetDate`／`now` 驅動，不依賴真實時鐘：
-  - [ ] 258.5.1 `tradingDate` 早於 `targetDate`（陳舊值）→ `false`。**這是 122 列腐化的主判準，必須有。**
-  - [ ] 258.5.2 `tradingDate` 等於 `targetDate` 但 `updatedAt` 早於 `now` 3 小時（盤中 tick，對應實測的 `1301` 10:40）→ `false`。
-  - [ ] 258.5.3 `tradingDate` 等於 `targetDate`、`updatedAt` 距 `now` 1 分鐘、**且 `closed` 為 `false`** → `true`。**這是回歸錨點**：釘住「不得以 `closed` 守門」，否則正常的 13:32 路徑會被整個擋掉。
-  - [ ] 258.5.4 `updatedAt` 距 `now` 恰為 12 分鐘 → `true`（邊界含入）；12 分 1 秒 → `false`。
-  - [ ] 258.5.5 `tradingDate` 缺漏／`updatedAt` 缺漏／兩者格式錯誤 → 皆 `false`，且**不擲例外**。
-  - [ ] 258.5.6 `updatedAt` 晚於 `now`（時鐘倒退）→ `true`。
-- [ ] 258.5.7 新增 `external-materials-service/src/test/java/com/steven/assets/externalmaterials/service/HistoricalRepairRangeTest.java`：
-  - [ ] 258.5.8 既有列**會被覆寫**：`store.existsHistory` 回 `true` 時仍呼叫 `upsertHistory`（與 `backfillTwStock` 的 skip-if-exists 對照）。用 `verify` 斷言 `upsertHistory` 被呼叫，且 `existsHistory` **不被**當成跳過條件。
-  - [ ] 258.5.9 該市場當日 bar **被跳過**：來源回傳含今日的 bar 清單時，今日那筆不得進 `upsertHistory`。
-  - [ ] 258.5.10 來源未回傳某日 bar → 對該日**完全不呼叫** `upsertHistory`（既有列保留）。
-  - [ ] 258.5.11 市場字串非三者之一 → 擲 `IllegalArgumentException`。
-  - [ ] 258.5.12 單檔抓取擲例外時不中斷整批，其餘檔仍被處理，且該檔計入 `codesFailed`。
+- [x] 258.5 新增 `external-materials-service/src/test/java/com/steven/assets/externalmaterials/service/ClosePersisterDumpGuardTest.java`，直接測 `shouldDumpPayload`（package-private，同 package 可見），以固定的 `targetDate`／`now` 驅動，不依賴真實時鐘：
+  - [x] 258.5.1 `tradingDate` 早於 `targetDate`（陳舊值）→ `false`。**這是 122 列腐化的主判準，必須有。**
+  - [x] 258.5.2 `tradingDate` 等於 `targetDate` 但 `updatedAt` 早於 `now` 3 小時（盤中 tick，對應實測的 `1301` 10:40）→ `false`。
+  - [x] 258.5.3 `tradingDate` 等於 `targetDate`、`updatedAt` 距 `now` 1 分鐘、**且 `closed` 為 `false`** → `true`。**這是回歸錨點**：釘住「不得以 `closed` 守門」，否則正常的 13:32 路徑會被整個擋掉。
+  - [x] 258.5.4 `updatedAt` 距 `now` 恰為 12 分鐘 → `true`（邊界含入）；12 分 1 秒 → `false`。
+  - [x] 258.5.5 `tradingDate` 缺漏／`updatedAt` 缺漏／兩者格式錯誤 → 皆 `false`，且**不擲例外**。
+  - [x] 258.5.6 `updatedAt` 晚於 `now`（時鐘倒退）→ `true`。
+  - [x] 258.5.6a payload **完全沒有 `closed` 欄位**時仍依 `tradingDate`／`updatedAt` 兩條規則判定（→ `true`），釘住「`closed` 不是守門條件」的另一面。
+  - [x] 258.5.6b 直接斷言 `ClosePersister.MAX_PAYLOAD_STALENESS.toMinutes() == 12`，同時釘住門檻值與該常數的 package-private 可見度（改小會擋掉正常路徑、改大會放進盤中 tick）。
+- [x] 258.5.7 新增 `external-materials-service/src/test/java/com/steven/assets/externalmaterials/service/HistoricalRepairRangeTest.java`：
+  - [x] 258.5.8 既有列**會被覆寫**：`store.existsHistory` 回 `true` 時仍呼叫 `upsertHistory`（與 `backfillTwStock` 的 skip-if-exists 對照）。用 `verify` 斷言 `upsertHistory` 被呼叫，且 `existsHistory` **不被**當成跳過條件。
+  - [x] 258.5.9 該市場當日 bar **被跳過**：來源回傳含今日的 bar 清單時，今日那筆不得進 `upsertHistory`。
+  - [x] 258.5.10 來源**整檔全空** → 完全不呼叫 `upsertHistory`、亦不得呼叫任何刪除路徑（既有列保留），該檔計入 `codesWithNoSource`。
+  - [x] 258.5.10a 來源**只回傳區間內部分日期** → 缺漏那幾日完全不被 `upsertHistory`（既有列保留），`rowsOverwritten` 只計來源真的有回 bar 的日期；此類 per-day 缺漏**不**計入 `codesWithNoSource`（該欄只計整區間完全無 bar 的代號）。
+  - [x] 258.5.11 市場字串非三者之一 → 擲 `IllegalArgumentException`。
+  - [x] 258.5.12 單檔抓取擲例外時不中斷整批，其餘檔仍被處理，且該檔計入 `codesFailed`。
 
 ## 驗證
 
@@ -254,5 +261,37 @@ docker logs asset-external-materials-service --since 24h 2>&1 | grep -E 'Redis d
 
 ## 完成報告
 
-（實作者做完後回填：實際改了哪些檔、驗證輸出、與原計畫的偏差及原因。）
+**狀態：已實作、已部署、已合併 main，歷史修復已執行完畢。** 實作 commit `b975ae75`（與 Task 257 同一 commit），merge commit `3bec71af`。
+本段於 2026-07-30 補寫 spec 時回填（原 commit 未回填完成報告，故 40 個 checkbox 當時全未勾選）。
+
+**實際改的檔（5 個）**
+
+| 檔 | 改動 |
+|---|---|
+| `.../service/ClosePersister.java` | 新增 `static final Duration MAX_PAYLOAD_STALENESS = Duration.ofMinutes(12)` 與 package-private `static boolean shouldDumpPayload(JsonNode, LocalDate targetDate, LocalDateTime now)`；`dumpRedisToDb` 在 `price == null` 之後、`upsertHistory` 之前套用守門，守不過即記入 `skipped` 並 `continue`；迴圈後以 `log.info` 印「寫入 N 檔、守門跳過 M 檔（payload 非本交易日 X 或距今超過 12 分鐘）：[代號]」。`now` 一律 `LocalDateTime.now(MarketClock.TW_ZONE)` |
+| `.../service/HistoricalBackfillService.java` | 新增 `record RepairSummary(String market, LocalDate from, LocalDate to, int codesProcessed, int rowsOverwritten, int codesWithNoSource, int codesFailed)` 與 `repairRange(market, stockCode, from, to)`；market 白名單與 `from > to` 驗證於方法開頭擲 `IllegalArgumentException`；節流台股 600ms／美英股 2000ms；單檔例外只 `log.warn` 並計入 `codesFailed` |
+| `.../controller/InternalPriceController.java` | 新增 `POST /internal/repair/history`（`market` 必填、`code` 選填、`from`／`to` 以 `@DateTimeFormat(ISO.DATE)` 綁定） |
+| `src/test/.../ClosePersisterDumpGuardTest.java` | 新增，11 個 `@Test` |
+| `src/test/.../HistoricalRepairRangeTest.java` | 新增，6 個 `@Test` |
+
+**驗證輸出**（2026-07-30 05:12 CST，皆唯讀查證）
+
+- **4a／4c 腐化列已歸零**：沿用本檔驗證段的 SQL、限 `trading_date >= '2026-01-01'` → **`(0 rows)`**，三個市場皆不再出現。對照修復前的台股 **122**／美股 **3**／英股 **3**，降為 0／0／0。
+- **258.4.4「不處理 2026 年以前」未被誤觸**：同一 SQL 去掉年份限制並按年分組 → 台股 2016=19、2017=4、2019=2、2020=25、2021=1（合計 **51**）、美股 2020=**2**、英股 2019=**20**，與本檔宣稱「不處理」的 51／2／20 逐年逐市場完全相符，證明修復未越界。
+- **4d 抽驗 `2002` 中鋼 2026-07-16～07-29**：收盤已不再全為 `19.1000`，O/H/L 不再為 null、volume 不再為 0。逐日為 `07-16` 18.65/18.80/18.55/**18.80**、`07-17` 18.80/18.95/18.60/**18.65**、`07-20` 18.90/18.95/18.50/**18.55**、`07-21` 18.60/18.90/18.60/**18.80**、`07-22` 18.75/19.00/18.75/**18.85**、`07-23` 19.00/19.45/19.00/**19.10**、`07-24` 18.95/19.35/18.90/**19.15**、`07-27` 19.25/19.35/19.15/**19.25**、`07-28` 19.10/19.20/18.85/**19.00**、`07-29` 19.10/19.15/18.65/**18.95**（O/H/L/**C**），與背景段列出的權威值一致。
+- **部署非 stale jar**：image `sha256:b413014b1157`，built 2026-07-30 04:47:01（commit 後 92 秒）、container created 04:47:10、`RestartCount=0`、compose `working_dir=/Users/steven/Project/asset-management-main`（從 main 的 worktree 重建，符合共用 stack 規則）。容器內 `unzip -p /app/app.jar` + `strings` 確認 `ClosePersister.class` 含守門碼、`HistoricalBackfillService.class` 含 `repairRange`、controller 含 `repair/history`。
+
+**尚未驗證的項目（非失敗，是時間窗未到）**
+
+- **驗證段 5a／5b（守門在真實 dump 路徑上生效）尚未被執行過一次。** 容器 2026-07-30 04:47:10 才建立，而三個 dump 排程為 13:32 TW／16:02 ET／16:32 LON，07-29 的兩個都早於容器建立時間。日誌全長僅 100 行（04:47:11～04:47:51，第一行即 Spring banner 故未被截斷），`grep 'Redis dump 完成|跳過|FinMind 校正'` 零命中；DB 亦無任何 2026-07-30 列（三市場 `max(trading_date)` 皆為 07-29）。
+- **下一個交易日的待核基準**（已量好，可直接對）：`SCARD price:index:*` 為台股 34／美股 13／英股 4，per-owner 抓價集合為台股 19／美股 9／英股 3。守門若生效，13:32 的日誌應為「寫入 ~19 檔、守門跳過 ~15 檔」，且 4a 的腐化列數必須維持 0（守門未生效的話那 15 檔會各多一列）。
+
+**與原計畫的偏差**
+
+1. **`repairRange` 的執行輸出已不可復原。** DB 證據顯示它確實跑過（2026 腐化列為 0；`stock_price_history` 最高的 20 個 id `157216–157235` 全是台股 07-22／07-23 的列，代號恰為 `006205 00642 00646 1301 1616 2002 2409 2412 2606 9933` 這 10 檔受害標的，且這 10 檔都不在本次啟動 `startupBackfill` 的回補清單內），但執行是在目前這個容器之前的實例上，`RepairSummary` 回應與「歷史修復完成…」的 INFO 日誌都隨容器 recreate 消失。**故本報告刻意不補一段 RepairSummary JSON**——那會是憑空編造。
+2. **端點參數綁定與驗證位置**與原計畫不同：原 258.3 寫 `@RequestParam String from/to` ＋ controller 內 `LocalDate.parse`，as-built 用 `@DateTimeFormat(ISO.DATE) LocalDate` 綁定（沿用同檔 `/internal/backfill/stock` 風格），`from > to` 的檢查放在 `repairRange` 開頭。已據實更新 258.3 與 258.3.1，並補 258.3.2a 記錄「`market` 必須 URL-encode」這個實測踩過的坑。
+3. **`shouldDumpPayload` 的實際語意比原計畫多一條**：`updatedAt` 晚於 `now`（容器時鐘微幅倒退）視為 0 分鐘並**通過**。原 258.1.2 已寫到這條，as-built 一致；但測試多了兩個 spec 未宣稱的案例（無 `closed` 欄位、常數值斷言），已補記為 258.5.6a／258.5.6b。
+4. **`repairRange` 實際是 upsert 而非純覆寫**（缺列的日期會被 INSERT），原文只說「覆寫既有列」。已補 258.2.5a。
+5. **守門連帶讓 `selfHealMissedClose` 的 Redis dump 分支實質失效**（開機時 payload 必然超過 12 分鐘）。原 258.1.7 只列三個 dump 呼叫端、未提這個第四呼叫端與後果。已補 258.1.7a，並在 design.md 守門代價段同步記載。
+6. **每日 dump 入庫檔數下降 15／4／1 檔**這個副作用原本沒有明文寫出，已補 258.4.6。
 
