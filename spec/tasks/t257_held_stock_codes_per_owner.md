@@ -88,32 +88,6 @@ DB 佐證（`docker exec asset-postgres psql -U assets -d assets`）：
 
 使用者已知悉且明示只做本任務範圍。**副作用要講清楚：本任務不會讓畫面上既有的 `$63.50` 立刻變成 `62.2`**——它保證的是 2026-07-30 起 `2885` 進入每 2 分鐘輪詢與 16:00 FinMind 校正，當日之後的價格正確；`stock_price_history` 既有的 07-29 錯誤列仍在，快照日尚無收盤時前端 fallback 到該列就仍會顯示 63.50。既寫錯的歷史列由另一支任務回補。
 
-### 給 Gherkin 格式轉換分支的交接（防止本任務的 AC 被靜默丟掉）
-
-本任務在 `spec/requirements.md` 的 Requirement 7 新增了一條 Markdown checkbox 形式的 AC（「**「持股抓價清單」必須涵蓋每一位 owner 的最新快照（Task 257）**」）。撰寫當下 `origin/main`（`9835e4a7`）的 `requirements.md` 仍是 Markdown checkbox 格式，故照該格式寫入。
-
-但分支 `claude/spec-gherkin-bdd-format-2f210e` 的工作區已把 `requirements.md` 全數轉成 Gherkin（`zh-TW` 方言），兩者 merge 時本條 AC 會撞號。該分支的 `HANDOFF-gherkin.md` 自述前一輪曾因「讀取範圍短於覆蓋範圍」靜默蓋掉 14 行硬約束，故此處預先給出等價的 Gherkin 場景，reconcile 時直接採用即可，不需回頭重新推導：
-
-```gherkin
-  場景: 持股抓價清單必須涵蓋每一位 owner 的最新快照
-    本系統為多租戶，且 Requirement 35 每日把各 owner 的最新快照日期都釘成當日，
-    於是多位 owner 的最新快照必然同日、tie-break 由 Postgres 任意決定。
-    落選 owner 的持股（若又不在觀察清單內）就完全不會被抓價，也不會被收盤校正。
-    實測 2026-07-29：owner 1 快照 id 15 有 35 筆台股持股、owner 2 快照 id 18 只有 2 筆，
-    兩者同為 2026-07-30，Postgres 選中 id 18，使 `2885`（元大金）落在每 2 分鐘的
-    `PricePoller.scheduledTwIntradayUpdate` 與 16:00 `ClosePersister.verifyTwCloseWithFinMind`
-    的 18 檔範圍之外，前端顯示 `$63.50 ▲$0.00 (0.00%)`（07-28 收盤），實際 07-29 收盤為 62.2。
-
-    此清單為跨租戶共用的市場資料抓取範圍，不回傳給任何使用者，不構成租戶洩漏。
-
-    假設 多位 owner 各自擁有同一日期的最新快照
-    當 `StockSourceQuery.collectHeldStockCodes` 收集需要抓價的持股代號
-    那麼 必須以 `DISTINCT ON (owner_user_id)` 取每位 owner 各自的最新快照
-    而且 排序必須為 `ORDER BY owner_user_id, snapshot_date DESC, id DESC` 使 tie-break 具決定性
-    而且 口徑必須與 `collectTwRadarCodes`（Task 249）一致
-    但是 不得再以 `SELECT id FROM asset_snapshot ORDER BY snapshot_date DESC LIMIT 1` 全庫只取一筆
-```
-
 ## 要做什麼
 
 ### 257.1 `collectHeldStockCodes` 改為 per-owner 最新快照
