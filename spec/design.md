@@ -1532,7 +1532,7 @@ bondLongValue  = Σ(bond.currentValue where term=LONG)
 Redis 中 `price:{market}:{code}` 的 `tradingDate` 欄位代表**這筆價格資料對應的真實交易日**，不是 cache 寫入當下日期。
 
 **為什麼重要**：TWSE mis API 在週日深夜或非交易時段仍會回傳上一個交易日的最後成交資料。若 `external-materials-service` 的 `/internal/refresh` 盤外被觸發時盲目把 `tradingDate` 設為 `LocalDate.now()`，會造成：
-- `TechnicalIndicatorService.compute()` 看到 live `tradingDate == today` 就把它當「今天的 K 棒」併入 KD/MA9 序列
+- `TechnicalIndicatorService.computeAll()` 看到 live `tradingDate == today` 就把它當「今天的 K 棒」併入 KD/MA9 序列
 - 實際上那筆資料是上週五的收盤 → 等於把上週五重複算了一次，污染技術指標
 
 **規則**（`external-materials-service` 的 `TradingDateResolver.resolve`，供 `PriceCacheWriter` 決定寫 tick LIST 的 bucket）：
