@@ -89,7 +89,7 @@ class StockAlertTriggerExportTest {
 
         service.exportForTrigger(OWNER_A);
 
-        verify(triggerRepo, never()).findByOwnerAndCreatedAtInDay(anyLong(), any(), any());
+        verify(triggerRepo, never()).findByOwnerAndCreatedAtAfter(anyLong(), any());
         verify(gdrive, never()).syncQuietly(anyLong(), any(), any());
         assertThat(listJson()).isEmpty();
     }
@@ -100,49 +100,83 @@ class StockAlertTriggerExportTest {
 
         service.exportForTrigger(OWNER_A);
 
-        verify(triggerRepo, never()).findByOwnerAndCreatedAtInDay(anyLong(), any(), any());
+        verify(triggerRepo, never()).findByOwnerAndCreatedAtAfter(anyLong(), any());
         assertThat(listJson()).isEmpty();
     }
 
-    // ===== 254.10.1 當日邊界一律以 created_at（台北牆鐘）界定 =====
+    // ===== 256.6 滾動視窗（取代 t254 的「當日一檔」）=====
 
     @Test
-    void 查詢窗以台北當日的createdAt界定而非triggeredAt() {
+    void 視窗起點為今日減兩天的零時且無上界() {
         LocalDate today = LocalDate.now(TW);
         enabled(OWNER_A);
-        when(triggerRepo.findByOwnerAndCreatedAtInDay(eq(OWNER_A), any(), any())).thenReturn(List.of());
+        when(triggerRepo.findByOwnerAndCreatedAtAfter(eq(OWNER_A), any())).thenReturn(List.of());
 
         service.exportForTrigger(OWNER_A);
 
-        ArgumentCaptor<LocalDateTime> start = ArgumentCaptor.forClass(LocalDateTime.class);
-        ArgumentCaptor<LocalDateTime> end = ArgumentCaptor.forClass(LocalDateTime.class);
-        verify(triggerRepo).findByOwnerAndCreatedAtInDay(eq(OWNER_A), start.capture(), end.capture());
-        assertThat(start.getValue()).isEqualTo(today.atStartOfDay());
-        assertThat(end.getValue()).isEqualTo(today.plusDays(1).atStartOfDay());
+        ArgumentCaptor<LocalDateTime> since = ArgumentCaptor.forClass(LocalDateTime.class);
+        verify(triggerRepo).findByOwnerAndCreatedAtAfter(eq(OWNER_A), since.capture());
+        // 3 個台北日曆日＝今日 ＋ 前 2 日；刻意不是「now − 72 小時」（那會讓同一筆觸發隨匯出時刻忽隱忽現）
+        assertThat(since.getValue()).isEqualTo(today.minusDays(2).atStartOfDay());
     }
 
     @Test
-    void 美股觸發的triggeredAt為紐約前一日時仍歸入台北當日檔案() throws Exception {
+    void 跨台北午夜的同一個美股交易日觸發必須在同一個檔案() throws Exception {
+        // 這是 t254「每日一檔」缺陷的探針：美股 09:30–16:00 ET ＝ 台北 21:30 → 隔日 04:00，
+        // 舊設計會把同一個紐約交易日切成兩個檔（實測 VT/QQQ/VOO 進 D 日檔、AMZN 進 D+1 日檔）
         LocalDate today = LocalDate.now(TW);
+        LocalDate nyTradingDay = today.minusDays(1);
         enabled(OWNER_A);
-        // 台北今日 01:00 觸發的美股警示：triggered_at 是紐約時間、日期為前一天；created_at 才是台北今日
-        StockAlertTrigger t = trigger(11L, 101L, null, "AAPL", "美股",
-                today.minusDays(1).atTime(13, 0),      // triggered_at（紐約牆鐘、前一日）
-                today.atTime(1, 0));                    // created_at（台北牆鐘、今日）
-        when(triggerRepo.findByOwnerAndCreatedAtInDay(eq(OWNER_A), any(), any())).thenReturn(List.of(t));
-        when(alertRepo.findById(101L)).thenReturn(Optional.of(alert(101L, OWNER_A, "PRICE_BELOW", "150")));
+        StockAlertTrigger early = trigger(11L, 101L, null, "VOO", "美股",
+                nyTradingDay.atTime(9, 40),              // 紐約 09:40
+                today.minusDays(1).atTime(21, 40));      // 台北 D 日 21:40
+        StockAlertTrigger late = trigger(12L, 102L, null, "AMZN", "美股",
+                nyTradingDay.atTime(12, 0),              // 紐約 12:00（同一個交易日）
+                today.atTime(0, 0));                     // 台北 D+1 日 00:00
+        when(triggerRepo.findByOwnerAndCreatedAtAfter(eq(OWNER_A), any()))
+                .thenReturn(List.of(early, late));
+        when(alertRepo.findById(101L)).thenReturn(Optional.of(alert(101L, OWNER_A, "PRICE_BELOW", "500")));
+        when(alertRepo.findById(102L)).thenReturn(Optional.of(alert(102L, OWNER_A, "PRICE_BELOW", "150")));
 
         service.exportForTrigger(OWNER_A);
 
-        JsonNode root = readJson(OWNER_A, today);
-        assertThat(root.get("date").asText()).isEqualTo(today.toString());
-        assertThat(root.get("triggerCount").asInt()).isEqualTo(1);
-        JsonNode n = root.get("triggers").get(0);
-        assertThat(n.get("stockCode").asText()).isEqualTo("AAPL");
-        // 兩個時間都輸出，且標明 triggeredAt 的時區語意，下游才解讀得了
-        assertThat(n.get("triggeredAt").asText()).startsWith(today.minusDays(1).toString());
-        assertThat(n.get("triggeredAtZone").asText()).isEqualTo("America/New_York");
-        assertThat(n.get("createdAt").asText()).startsWith(today.toString());
+        JsonNode root = readJson(OWNER_A);
+        assertThat(root.get("triggerCount").asInt()).isEqualTo(2);
+        assertThat(root.get("triggers")).hasSize(2);
+        assertThat(root.toString()).contains("VOO").contains("AMZN");
+        // 兩筆的 triggeredAt 都是同一個紐約交易日，時區語意有標明
+        for (JsonNode n : root.get("triggers")) {
+            assertThat(n.get("triggeredAt").asText()).startsWith(nyTradingDay.toString());
+            assertThat(n.get("triggeredAtZone").asText()).isEqualTo("America/New_York");
+        }
+    }
+
+    @Test
+    void 檔名不含日期且連續兩次匯出寫同一個檔() throws Exception {
+        enabled(OWNER_A);
+        when(triggerRepo.findByOwnerAndCreatedAtAfter(eq(OWNER_A), any())).thenReturn(List.of());
+
+        service.exportForTrigger(OWNER_A);
+        service.exportForTrigger(OWNER_A);
+
+        // 固定單檔：不會因為跨日或多次匯出而長出第二個檔
+        assertThat(listJson()).hasSize(1);
+        assertThat(listJson().get(0).getFileName().toString()).isEqualTo("alert_triggers_1.json");
+    }
+
+    @Test
+    void JSON含視窗資訊且不再有date欄位() throws Exception {
+        LocalDate today = LocalDate.now(TW);
+        enabled(OWNER_A);
+        when(triggerRepo.findByOwnerAndCreatedAtAfter(eq(OWNER_A), any())).thenReturn(List.of());
+
+        service.exportForTrigger(OWNER_A);
+
+        JsonNode root = readJson(OWNER_A);
+        assertThat(root.get("windowDays").asInt()).isEqualTo(3);
+        assertThat(root.get("since").asText()).startsWith(today.minusDays(2).toString());
+        // date 是「當日一檔」時代的欄位；固定單檔留著會誤導下游以為只含那一天
+        assertThat(root.has("date")).isFalse();
     }
 
     // ===== 254.10.2 owner 隔離（查詢必須帶 owner，兩條 join 路徑都涵蓋） =====
@@ -152,9 +186,9 @@ class StockAlertTriggerExportTest {
         LocalDate today = LocalDate.now(TW);
         enabled(OWNER_A);
         enabled(OWNER_B);
-        when(triggerRepo.findByOwnerAndCreatedAtInDay(eq(OWNER_A), any(), any())).thenReturn(List.of(
+        when(triggerRepo.findByOwnerAndCreatedAtAfter(eq(OWNER_A), any())).thenReturn(List.of(
                 trigger(11L, 101L, null, "2330", "台股", today.atTime(10, 0), today.atTime(10, 0))));
-        when(triggerRepo.findByOwnerAndCreatedAtInDay(eq(OWNER_B), any(), any())).thenReturn(List.of(
+        when(triggerRepo.findByOwnerAndCreatedAtAfter(eq(OWNER_B), any())).thenReturn(List.of(
                 trigger(22L, null, 201L, "00878", "台股", today.atTime(11, 0), today.atTime(11, 0))));
         when(alertRepo.findById(101L)).thenReturn(Optional.of(alert(101L, OWNER_A, "PRICE_BELOW", "900")));
         when(alertRepo.findByGroupIdOrderByDisplayOrderAsc(201L)).thenReturn(List.of(
@@ -163,8 +197,8 @@ class StockAlertTriggerExportTest {
         service.exportForTrigger(OWNER_A);
         service.exportForTrigger(OWNER_B);
 
-        JsonNode a = readJson(OWNER_A, today);
-        JsonNode b = readJson(OWNER_B, today);
+        JsonNode a = readJson(OWNER_A);
+        JsonNode b = readJson(OWNER_B);
         assertThat(a.get("triggers")).hasSize(1);
         assertThat(a.get("triggers").get(0).get("stockCode").asText()).isEqualTo("2330");
         assertThat(b.get("triggers")).hasSize(1);
@@ -180,14 +214,14 @@ class StockAlertTriggerExportTest {
     void 群組觸發的condition為成員以且串接的合併label() throws Exception {
         LocalDate today = LocalDate.now(TW);
         enabled(OWNER_A);
-        when(triggerRepo.findByOwnerAndCreatedAtInDay(eq(OWNER_A), any(), any())).thenReturn(List.of(
+        when(triggerRepo.findByOwnerAndCreatedAtAfter(eq(OWNER_A), any())).thenReturn(List.of(
                 trigger(33L, null, 201L, "2330", "台股", today.atTime(10, 0), today.atTime(10, 0))));
         when(alertRepo.findByGroupIdOrderByDisplayOrderAsc(201L)).thenReturn(List.of(
                 alert(301L, OWNER_A, "KD_BELOW", "15"), alert(302L, OWNER_A, "PRICE_BELOW", "900")));
 
         service.exportForTrigger(OWNER_A);
 
-        JsonNode n = readJson(OWNER_A, today).get("triggers").get(0);
+        JsonNode n = readJson(OWNER_A).get("triggers").get(0);
         assertThat(n.get("source").asText()).isEqualTo("GROUP");
         assertThat(n.get("alertId").isNull()).isTrue();
         assertThat(n.get("groupId").asLong()).isEqualTo(201L);
@@ -206,12 +240,12 @@ class StockAlertTriggerExportTest {
         t.setPrice(new BigDecimal("92.0000"));
         t.setQuarterlyMa(new BigDecimal("102.3200"));
         t.setMonthlyMa(null);   // 資料不足
-        when(triggerRepo.findByOwnerAndCreatedAtInDay(eq(OWNER_A), any(), any())).thenReturn(List.of(t));
+        when(triggerRepo.findByOwnerAndCreatedAtAfter(eq(OWNER_A), any())).thenReturn(List.of(t));
         when(alertRepo.findById(101L)).thenReturn(Optional.of(alert(101L, OWNER_A, "PRICE_BELOW", "100")));
 
         service.exportForTrigger(OWNER_A);
 
-        JsonNode n = readJson(OWNER_A, today).get("triggers").get(0);
+        JsonNode n = readJson(OWNER_A).get("triggers").get(0);
         assertThat(n.get("price").isNumber()).isTrue();
         assertThat(n.get("price").decimalValue()).isEqualByComparingTo("92.0000");
         assertThat(n.get("quarterlyMa").isNumber()).isTrue();
@@ -224,12 +258,12 @@ class StockAlertTriggerExportTest {
         LocalDate today = LocalDate.now(TW);
         when(settingRepo.findByOwnerUserId(OWNER_A)).thenReturn(Optional.of(
                 setting(OWNER_A, false, false)));   // 刻意未啟用：run-now 不看 enabled
-        when(triggerRepo.findByOwnerAndCreatedAtInDay(eq(OWNER_A), any(), any())).thenReturn(List.of());
+        when(triggerRepo.findByOwnerAndCreatedAtAfter(eq(OWNER_A), any())).thenReturn(List.of());
 
         StockAlertTriggerExportService.ExportResult r = service.runNow(OWNER_A);
 
         assertThat(r.triggerCount()).isZero();
-        JsonNode root = readJson(OWNER_A, today);
+        JsonNode root = readJson(OWNER_A);
         assertThat(root.get("triggerCount").asInt()).isZero();
         assertThat(root.get("triggers").isArray()).isTrue();
         assertThat(root.get("triggers")).isEmpty();
@@ -240,7 +274,7 @@ class StockAlertTriggerExportTest {
     @Test
     void 間隔內連續觸發只上傳一次() {
         enabled(OWNER_A, true);
-        when(triggerRepo.findByOwnerAndCreatedAtInDay(eq(OWNER_A), any(), any())).thenReturn(List.of());
+        when(triggerRepo.findByOwnerAndCreatedAtAfter(eq(OWNER_A), any())).thenReturn(List.of());
         when(gdrive.syncQuietly(anyLong(), any(), any()))
                 .thenReturn(new GdriveOutputSupport.SyncResult("成功：x（1 bytes）", "GDriveOutput:x"));
         service.setDebounceIntervalMillis(3_000L);   // 拉長到足以涵蓋三次連續觸發
@@ -259,7 +293,7 @@ class StockAlertTriggerExportTest {
         // 這條是「只標記 pending、由已排入任務完成後補跑」那個資料遺失寫法的唯一探針：
         // 壞實作下第二次觸發只會設 pending，而第一個任務早已結束，沒人回頭看它 → 只有 1 次 copyTo
         enabled(OWNER_A, true);
-        when(triggerRepo.findByOwnerAndCreatedAtInDay(eq(OWNER_A), any(), any())).thenReturn(List.of());
+        when(triggerRepo.findByOwnerAndCreatedAtAfter(eq(OWNER_A), any())).thenReturn(List.of());
         when(gdrive.syncQuietly(anyLong(), any(), any()))
                 .thenReturn(new GdriveOutputSupport.SyncResult("成功：x（1 bytes）", "GDriveOutput:x"));
         service.setDebounceIntervalMillis(500L);
@@ -277,7 +311,7 @@ class StockAlertTriggerExportTest {
     void 被合併的那幾次不得碰兩個Drive狀態欄() {
         StockAlertExportSetting s = setting(OWNER_A, true, true);
         when(settingRepo.findByOwnerUserId(OWNER_A)).thenReturn(Optional.of(s));
-        when(triggerRepo.findByOwnerAndCreatedAtInDay(eq(OWNER_A), any(), any())).thenReturn(List.of());
+        when(triggerRepo.findByOwnerAndCreatedAtAfter(eq(OWNER_A), any())).thenReturn(List.of());
         when(gdrive.syncQuietly(anyLong(), any(), any()))
                 .thenReturn(new GdriveOutputSupport.SyncResult("成功：x（1 bytes）", "GDriveOutput:x"));
         service.setDebounceIntervalMillis(30_000L);
@@ -307,7 +341,7 @@ class StockAlertTriggerExportTest {
     void runNow不看enabled且不套去抖() throws Exception {
         StockAlertExportSetting s = setting(OWNER_A, false, true);   // enabled=false，但 Drive 開著
         when(settingRepo.findByOwnerUserId(OWNER_A)).thenReturn(Optional.of(s));
-        when(triggerRepo.findByOwnerAndCreatedAtInDay(eq(OWNER_A), any(), any())).thenReturn(List.of());
+        when(triggerRepo.findByOwnerAndCreatedAtAfter(eq(OWNER_A), any())).thenReturn(List.of());
         when(gdrive.syncQuietly(anyLong(), any(), any()))
                 .thenReturn(new GdriveOutputSupport.SyncResult("成功：x（1 bytes）", "GDriveOutput:x"));
         service.setDebounceIntervalMillis(60_000L);
@@ -323,7 +357,7 @@ class StockAlertTriggerExportTest {
     @Test
     void runNow不更新去抖時鐘_按一次立即匯出不會讓觸發路徑靜默停一個間隔() {
         enabled(OWNER_A, true);
-        when(triggerRepo.findByOwnerAndCreatedAtInDay(eq(OWNER_A), any(), any())).thenReturn(List.of());
+        when(triggerRepo.findByOwnerAndCreatedAtAfter(eq(OWNER_A), any())).thenReturn(List.of());
         when(gdrive.syncQuietly(anyLong(), any(), any()))
                 .thenReturn(new GdriveOutputSupport.SyncResult("成功：x（1 bytes）", "GDriveOutput:x"));
         service.setDebounceIntervalMillis(30_000L);
@@ -351,7 +385,7 @@ class StockAlertTriggerExportTest {
         StockAlertExportSetting s = setting(OWNER_A, true, true);
         s.setOutputSubpath("nope/../../../etc");   // 跳脫基底 → resolveDir 擋下
         when(settingRepo.findByOwnerUserId(OWNER_A)).thenReturn(Optional.of(s));
-        when(triggerRepo.findByOwnerAndCreatedAtInDay(eq(OWNER_A), any(), any())).thenReturn(List.of());
+        when(triggerRepo.findByOwnerAndCreatedAtAfter(eq(OWNER_A), any())).thenReturn(List.of());
         when(gdrive.skipped(any())).thenReturn("跳過：本輪未產生本機檔案");
 
         service.exportForTrigger(OWNER_A);
@@ -406,9 +440,8 @@ class StockAlertTriggerExportTest {
         }
     }
 
-    private JsonNode readJson(long owner, LocalDate day) throws Exception {
-        Path f = tmp.resolve("input").resolve("alert_triggers_" + owner + "_"
-                + day.format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd")) + ".json");
+    private JsonNode readJson(long owner) throws Exception {
+        Path f = tmp.resolve("input").resolve("alert_triggers_" + owner + ".json");
         assertThat(f).exists();
         return mapper.readTree(Files.readString(f));
     }
