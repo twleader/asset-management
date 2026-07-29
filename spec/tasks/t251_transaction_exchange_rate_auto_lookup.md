@@ -325,4 +325,12 @@ docker exec asset-business-services curl -s -o /dev/null -w "%{http_code}\n" "ht
 8. **[minor] `el-date-picker` 預設 clearable** — 清空再選回同一天會連發兩次 `change`，第二次日期其實沒變卻仍重查。已加 `:clearable="false"`（`tradeDate` 本為必填）。
 9. **[minor] 「2026-07-04 之後」** → 該日本身就在 9 筆 `buy=sell` 之列，已改為「起」。
 
-**尚未執行**：Docker image rebuild ＋ container recreate ＋ 8 條實機操作驗證（依「共用 stack、merge 後從 main 的 worktree 重建」規則進行）。
+**與 main 的併行衝突（實作期間發生）**：本任務進行中，main 被另一個 worktree 推進了 Task 252（系統時區統一台北），其中**同樣改了 `TransactionView.vue` 的 `openCreateDialog`**（`new Date().toISOString().slice(0,10)` → `todayLocal()`，理由是 `toISOString()` 為 UTC，台北 00:00–08:00 會取到昨天）。該行正是本任務要插入 `refreshExchangeRate()` 的位置，merge 時衝突。已在 feature 分支先 `merge origin/main` 解衝突（兩者都保留：`todayLocal()` ＋ `refreshExchangeRate()`），再併入 main，故本頁的預設交易日期沿用 Task 252 的本地日期慣例、不會在清晨查到前一天的匯率。
+
+**部署（已執行）**：merge 進 main 後依「共用 stack 一律從 main 的 worktree 重建」規則，於 `/Users/steven/Project/asset-management-main` 執行 `build --no-cache bff frontend` ＋ `up -d --no-deps --force-recreate bff frontend`。驗證：
+- `asset-bff` 健康檢查通過；jar 內 `TransactionBffController.class` 含常數 `/api/market-data/exchange-rate/on-date` 與 `/exchange-rate`（證明不是 stale jar）
+- frontend chunk hash 已變動：`TransactionView-B4c1iOC6.js` → `TransactionView-CFooehwP.js`
+- 運行中的 bundle `index-B-KUzJpt.js` 含 `bff/transaction/exchange-rate`
+- `curl -s -o /dev/null -w "%{http_code}" http://localhost/` → `200`
+
+**尚未執行**：8 條實機操作驗證需以 Google 帳號登入 UI，無法在無人值守下代跑，留給使用者確認（重點為第 6／7 條的編輯保護）。
