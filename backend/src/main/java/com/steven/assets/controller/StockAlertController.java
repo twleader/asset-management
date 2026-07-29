@@ -58,10 +58,45 @@ public class StockAlertController {
         return service.toggleActive(id);
     }
 
-    /** 更新排列順序，body 為排序後的 id 陣列 */
+    /**
+     * 建立複合條件群組（Task 253）：2～5 個條件在同一次檢查中同時成立才觸發（單層 AND）。
+     * 條件筆數、型別合法性、群組內／群組間重複皆由 service 驗證，違反時丟 IllegalArgumentException
+     * → {@code GlobalExceptionHandler} 轉 400 ProblemDetail。
+     */
+    @PostMapping("/groups")
+    public StockAlertDto.Response createGroup(@RequestBody StockAlertDto.GroupRequest req) {
+        return service.createGroup(req);
+    }
+
+    /** 更新複合條件群組；成員為整組覆寫（先刪後建），詳見 {@link StockAlertService#updateGroup}。 */
+    @PutMapping("/groups/{id}")
+    public StockAlertDto.Response updateGroup(@PathVariable Long id, @RequestBody StockAlertDto.GroupRequest req) {
+        return service.updateGroup(id, req);
+    }
+
+    /** 刪除複合條件群組（連帶刪除其成員與收件人 join）。 */
+    @DeleteMapping("/groups/{id}")
+    public ResponseEntity<Void> deleteGroup(@PathVariable Long id) {
+        service.deleteGroup(id);
+        return ResponseEntity.noContent().build();
+    }
+
+    /** 群組啟停：只翻轉群組那一列，成員的 active 恆為 true、不跟著動。 */
+    @PatchMapping("/groups/{id}/active")
+    public StockAlertDto.Response toggleGroupActive(@PathVariable Long id) {
+        return service.toggleGroupActive(id);
+    }
+
+    /**
+     * 更新排列順序，body 為排序後的 {@code {kind, id}} 陣列。
+     *
+     * <p>Task 253 起獨立條件與群組共用同一個排序空間，但兩者 id 分屬 {@code stock_alert} /
+     * {@code stock_alert_group} 兩張表、值必然重疊，所以不能只送 id 陣列，必須以 {@code kind}
+     * （{@code "SINGLE"} / {@code "GROUP"}）指明要更新哪一張表。
+     */
     @PutMapping("/reorder")
-    public ResponseEntity<Void> reorder(@RequestBody List<Long> orderedIds) {
-        service.reorder(orderedIds);
+    public ResponseEntity<Void> reorder(@RequestBody List<StockAlertDto.OrderItem> orderedItems) {
+        service.reorder(orderedItems);
         return ResponseEntity.noContent().build();
     }
 

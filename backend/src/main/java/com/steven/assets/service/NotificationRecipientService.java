@@ -3,6 +3,7 @@ package com.steven.assets.service;
 import com.steven.assets.dto.NotificationRecipientDto;
 import com.steven.assets.model.NotificationRecipient;
 import com.steven.assets.repository.NotificationRecipientRepository;
+import com.steven.assets.repository.StockAlertGroupRecipientRepository;
 import com.steven.assets.repository.StockAlertRecipientRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -16,6 +17,7 @@ public class NotificationRecipientService {
 
     private final NotificationRecipientRepository repo;
     private final StockAlertRecipientRepository alertRecipientRepo;
+    private final StockAlertGroupRecipientRepository groupRecipientRepo;
     private final com.steven.assets.security.TenantGuard tenantGuard;
 
     public List<NotificationRecipientDto.Response> findAll() {
@@ -111,6 +113,7 @@ public class NotificationRecipientService {
                 .orElseThrow(() -> new IllegalArgumentException("Recipient not found: " + id));
         tenantGuard.assertOwned(r.getOwnerUserId());
         alertRecipientRepo.deleteByRecipientId(id);   // Task 125：連帶刪除其在警示 join 表的列（DB 亦有 ON DELETE CASCADE 雙保險）
+        groupRecipientRepo.deleteByRecipientId(id);   // Task 253：複合條件群組的 join 表同步清（維持「service 顯式刪 ＋ DB CASCADE」雙保險，只做一半日後 CASCADE 一調整就留孤兒列）
         repo.delete(r);
     }
 

@@ -97,6 +97,10 @@
             <template v-if="row.conditions && row.conditions.length">
               <div v-for="(c, i) in row.conditions" :key="i"
                 :style="{ fontSize: '12px', color: conditionColor(c) }">
+                <!-- Task 253：複合條件群組已由後端合併成單一 condition（label 以「 且 」串好），
+                     這裡只標示它是 AND 群組，避免使用者誤讀成「任一成立就會通知」 -->
+                <el-tag v-if="isGroupCondition(c)" size="small" type="warning"
+                  style="margin-right:4px;vertical-align:middle">複合</el-tag>
                 {{ c.label }}<span v-if="!c.active"> (停用)</span>
               </div>
             </template>
@@ -265,6 +269,13 @@ const fmtVolume = (v) => {
   if (v == null) return '—'
   return Number(v).toLocaleString()
 }
+
+// Task 253：該條 condition 是否為複合條件（AND 群組）。
+// 一律取後端旗標，不從 label 是否含「且」反推——股名與門檻文字都可能含該字，猜錯就會給獨立條件亂貼標籤。
+// 兩種旗標名皆接受：後端若把群組旗標做成 boolean（group）或沿用清單頁的 kind（'GROUP'）都能正確顯示。
+// 注意：撰寫時 WatchStockDto.Condition 只有 label / active / triggered 三欄，兩個旗標都還沒有，
+// 在後端補上任一欄之前這個標籤不會出現（畫面退回 Task 253 前的樣子，不會顯示錯誤資訊）。
+const isGroupCondition = (c) => c?.group === true || c?.kind === 'GROUP'
 
 const conditionColor = (c) => {
   if (!c.active) return '#94a3b8'   // 停用：淺色
