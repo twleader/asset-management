@@ -15,6 +15,12 @@
 5. 實作程式碼
 ```
 
+> **第 3→4→5 步之間有機器閘門把關，不靠自律。** 寫完 `spec/` 會**立刻**收到跑
+> `/spec-review` 的提示；在通過審查並記錄之前，對 `backend/**`／`bff/**`／
+> `external-materials-service/**`／`frontend/src/views/*.vue`／`frontend/src/router/**`／
+> `db/changelog/**` 的任何寫入都會被擋下。詳見下方
+> [SDD 自動閘門](#sdd-自動閘門posttooluse-提示--pretooluse-強制)。
+
 > **第 3 步的任務檔是新制。** Task 201 之後的新任務一律建立獨立的自足任務檔
 > `spec/tasks/tNNN_<slug>.md`，不再追加進 `spec/tasks.md`；後者已降為索引，
 > 歷史 Task 1–200 凍結在 `spec/tasks/archive/`。詳見 [spec/tasks/README.md](spec/tasks/README.md)。
@@ -48,6 +54,44 @@ git config core.hooksPath scripts/git-hooks
 > 改一個錯字就能過關；而且觸發清單漏了 `service/`、`repository/`、`external-materials-service/**`，
 > Task 195 那兩處排程漂移（改的是 service 層的 `@Scheduled`）根本不會觸發它。
 > 內容正確性由第 4 步的 `/spec-review` 負責。
+
+### SDD 自動閘門（PostToolUse 提示 ＋ PreToolUse 強制）
+
+commit-msg hook 有兩個先天限制：**時機在 commit 當下**（程式早就寫完了），且**只驗
+「`spec/` 有沒有被碰」、不驗有沒有審過**。`.claude/hooks/` 下的兩支補的正是這一段。
+
+| 閘門 | 規則 | 時機 |
+|---|---|---|
+| `notify-spec-changed` | 寫完 spec → **立刻**提示跑 `/spec-review` | 寫入 `spec/` 後 |
+| `require-spec-review` | 改了 spec → 必須審過才能寫 code | 寫入實作檔前 |
+| `commit-msg` | 改了 code → 必須有 spec | commit 時 |
+
+**為什麼要兩支。** 只有硬擋的話，是「撞到牆才回頭審」——中間可能已經想好一整套
+實作方向。在 spec 落地當下就提示，順序才對（審完再想怎麼寫）。提示每個 spec 變更
+週期只出現一次，連改五個 spec 檔不會被唸五次。
+
+三者刻意不重疊。**完全沒動 `spec/` 的純 bug fix / 樣式調整不會被擋也不會被提示**
+（那種情境由 commit-msg 負責），閘門只在真正的 SDD 週期裡收緊，避免變成人人繞道。
+
+> **hook 叫不到 subagent。** hook 是 shell 指令，無法直接執行 `spec-auditor`——
+> 它只能提示模型去跑。唯一的替代是在 hook 裡跑 headless `claude -p`，但單次審查
+> 約 6～7 分鐘，每次寫 spec 都同步卡住不可接受，故不採用。
+
+審查通過後由 `/spec-review` 的 Step 4 記錄：
+
+```bash
+bash .claude/hooks/spec-review-pass.sh          # 記錄通過
+bash .claude/hooks/spec-review-pass.sh --status # 查目前狀態
+```
+
+紀錄綁定**當下 `spec/` 的內容雜湊**；spec 之後再被改動即自動失效、需重審——
+否則「審過一次就永久放行」等於沒擋。
+
+**例外：** `SKIP_SPEC_GATE=1`（例如只是回填任務完成報告）。
+
+> 無須手動安裝，`.claude/settings.json` 已掛載。但**修改該檔後需重啟 session 才生效**。
+> 另注意 `core.hooksPath` 設的是**絕對路徑**、指向主 clone；改 `scripts/git-hooks/`
+> 底下的檔案要 merge 進 main 後才會實際生效。
 
 ---
 
@@ -106,7 +150,7 @@ git config core.hooksPath scripts/git-hooks
 **2. 同義欄位、同一 business service API**
 
 不同頁面顯示「同樣意義的值」時，BFF 必須呼叫**同一支 business service API**取得，避免值在不同頁面不一致。
-- 例：股票即時 K/D/季線 → 兩個頁面都透過 `TechnicalIndicatorService.compute()`
+- 例：股票即時 K/D/季線 → 兩個頁面都透過 `TechnicalIndicatorService.computeAll()`
 - 例：snapshot 預估配息 → 各頁面都讀 `asset_snapshot.estimated_annual_dividend`（不要前端各自重算）
 - 例：股價收盤值 → 一律從 `stock_price_history` 抓
 - 共用邏輯抽到 `bff/common/`（如 `SnapshotEnricher`），各 BFF controller 注入使用

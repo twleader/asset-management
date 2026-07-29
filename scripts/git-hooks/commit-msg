@@ -69,7 +69,7 @@ $(echo "$trigger" | sed 's/^/    /')
     1. spec/requirements.md     → User Story + Acceptance Criteria
     2. spec/design.md           → 架構 / 資料模型 / API
     3. spec/tasks/tNNN_*.md     → 自足任務檔（規範見 spec/tasks/README.md）
-    4. /spec-review             → 對抗式審查，quality_score < 8 不得實作
+    4. /spec-review             → 對抗式審查，critical／major 修完才進入實作
 
 注意：本 hook 只驗「spec/ 有沒有被碰」，不看內容。
 內容正確性請跑 bash scripts/spec-check.sh 與 /spec-review。
