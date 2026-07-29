@@ -495,6 +495,14 @@ docker exec asset-postgres psql -U assets -d assets -c "SELECT id, alert_id, gro
 
 6. **併入 main 的 Task 252（系統時區統一台北）後，補修群組 cooldown 的時區 bug**：Task 252 把獨立條件的 24h cooldown 右側由 `LocalDateTime.now()` 改為 `MarketZones.nowLocal(market)`——兩側必須同為該市場牆鐘，否則冷卻長度變成 24h ± 市場 offset（台股實測 32h，早上觸發後隔天整個交易日仍在冷卻中而靜默漏發）。`evaluateGroup` 的群組 cooldown 是本任務新寫的、帶著一模一樣的 bug，**且 git 因改在不同行而自動合併成功、沒有產生衝突標記**。已一併改為 `MarketZones.nowLocal(group.getMarket()).minusHours(24)`。這類「自動合併成功但語意錯誤」的情形，只能靠 merge 後重讀對方改了什麼來發現。
 
+7. **編號避讓時 `sed` 改到 changeset SQL 的註解 → checksum 變 → business crash loop（已修復，但值得記住）**：本任務因 main 兩度推進而三次避讓編號（249→250→251→253），最後一次用 `sed` 把 `Task 251` 全域換成 `Task 253`，**連 `v1.78.0-stock-alert-group.sql` 註解裡的那一處也換了**。Liquibase 的 checksum 涵蓋 changeset 全文（含註解），於是已部署環境啟動時報
+   `v1.78.0-stock-alert-group::steven was: 9:eb4e797415c0b017da0bf3b3d4ee650d but is now: 9:ea142710c6338f41a922861579692310`
+   → `ValidationFailedException` → `entityManagerFactory` 建不起來 → **crash loop 整站掛**。
+   這是 [[Liquibase changeset 改名會重跑]] 的變體：不必改 changeset id，**光改註解就足以炸掉**。
+   修法（本次採用）：因該 changeset 全句冪等且尚未進 main，直接
+   `DELETE FROM databasechangelog WHERE id LIKE 'v1.78.0%'` 後重啟，讓它以新 checksum 重跑 —— 重跑時所有語句都是 no-op（表已存在則 `CREATE TABLE IF NOT EXISTS` 跳過、`DO $$` 內查 `pg_constraint` 判定約束已存在），日誌確認 `ran successfully in 15ms / 3ms`、零 ERROR。**順帶完成了冪等性的實地驗證**（在表已存在的狀態下重跑）。
+   **給後人的規則：changeset SQL 檔一旦在任何環境跑過，就不要再碰它的內容——包含註解。編號避讓的 `sed` 要把 `db/changelog/` 排除在外。**
+
 **尚未完成**
 - commit / merge 進 main / 從 main 的 worktree 重建（依專案「共用 stack 誰最後 build 誰生效」規則）。
 - 前端畫面未經瀏覽器實地操作驗證：`/stocks?tab=alerts` 需 Google 登入，代為認證不在可做範圍。已以「打包後 bundle 含新字串」與後端端到端回應佐證，畫面確認留給使用者。
