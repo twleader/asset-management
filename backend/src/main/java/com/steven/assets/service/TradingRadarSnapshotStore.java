@@ -76,24 +76,49 @@ public class TradingRadarSnapshotStore {
      * 整段 fail-soft：任何 Redis 例外只記 log，不得往外拋影響頁面（呼叫端亦再包一層 try/catch）。
      */
     public void save(long ownerId, TradingRadarDto.Response resp) {
+        write(ownerId, resp, true);
+    }
+
+    /**
+     * 背景重算產檔專用（Task 260）：略過節流與去重，其餘（gzip＋Base64、value TTL＝保留窗、
+     * 索引 ZSet、兩道 inline 修剪）與 {@link #save} 完全相同。
+     *
+     * <p><b>為什麼必須略過去重</b>：背景補產若被「與上一筆內容相同即不寫」擋掉（休市日／連假時
+     * 內容可能與前一筆逐位元相同），當日就仍然無快照、仍然不產檔——修法自我失效。節流同理。
+     * footprint 影響可忽略：每 owner 每時間點每日一筆，對 per-owner 5000 筆硬上限而言是雜訊。
+     */
+    public void saveRecomputed(long ownerId, TradingRadarDto.Response resp) {
+        write(ownerId, resp, false);
+    }
+
+    /**
+     * {@link #save} 與 {@link #saveRecomputed} 共用的寫入主體（Task 260）。
+     *
+     * @param enforceThrottleAndDedupe {@code false} 時只跳過「(1) 節流」與「(2) 去重」兩段
+     *                                 early-return；去重雜湊 {@code trading-radar:snap:hash:{ownerId}}
+     *                                 仍照寫，讓雜湊維持「＝最後一次實際寫入的內容」這個不變式。
+     */
+    private void write(long ownerId, TradingRadarDto.Response resp, boolean enforceThrottleAndDedupe) {
         try {
             long ts = epochMillis(resp.generatedAt());
             Duration minInterval = Duration.ofMinutes(minIntervalMinutes);
             Duration retention = Duration.ofDays(retentionDays);
             String idx = idxKey(ownerId);
 
-            // (1) 節流：以索引最大 score 為上次寫入時間
-            Set<ZSetOperations.TypedTuple<String>> top = redis.opsForZSet().reverseRangeWithScores(idx, 0, 0);
-            if (top != null && !top.isEmpty()) {
-                Double lastScore = top.iterator().next().getScore();
-                if (lastScore != null && ts - lastScore.longValue() < minInterval.toMillis()) {
-                    return; // 節流窗內，不寫
+            if (enforceThrottleAndDedupe) {
+                // (1) 節流：以索引最大 score 為上次寫入時間
+                Set<ZSetOperations.TypedTuple<String>> top = redis.opsForZSet().reverseRangeWithScores(idx, 0, 0);
+                if (top != null && !top.isEmpty()) {
+                    Double lastScore = top.iterator().next().getScore();
+                    if (lastScore != null && ts - lastScore.longValue() < minInterval.toMillis()) {
+                        return; // 節流窗內，不寫
+                    }
                 }
             }
 
             // (2) 去重：與上一筆內容（排除 generatedAt）比對
             String hash = contentHash(resp);
-            if (hash.equals(redis.opsForValue().get(hashKey(ownerId)))) {
+            if (enforceThrottleAndDedupe && hash.equals(redis.opsForValue().get(hashKey(ownerId)))) {
                 return; // 內容未變，不重複累積
             }
 

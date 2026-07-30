@@ -50,6 +50,18 @@ public interface StockAlertRepository extends JpaRepository<StockAlert, Long> {
             "FROM StockAlert a GROUP BY a.stockCode, a.market ORDER BY ord ASC")
     List<Object[]> findDistinctStockCodeMarket();
 
+    /**
+     * 觀察清單衍生 view 的 owner-scoped 版本（Task 260）：背景產檔重算用。
+     * 背景無 request context → {@code TenantFilterAspect} 不啟用 {@code @Filter(ownerFilter)}，
+     * 故 owner 條件必須顯式寫在查詢裡；不得改用無 owner 的
+     * {@link #findDistinctStockCodeMarket()}（背景會撈到全部租戶的觀察清單）。
+     * 結果欄位與排序與無 owner 版本完全一致：[stockCode, market, minDisplayOrder]，依 minDisplayOrder 升冪。
+     */
+    @Query("SELECT a.stockCode, a.market, MIN(a.displayOrder) as ord " +
+            "FROM StockAlert a WHERE a.ownerUserId = :ownerUserId " +
+            "GROUP BY a.stockCode, a.market ORDER BY ord ASC")
+    List<Object[]> findDistinctStockCodeMarketByOwnerUserId(Long ownerUserId);
+
     /** 同股票同市場所有 alert 的最小 displayOrder（拖曳重排觀察清單時用作群組 anchor）。 */
     @Query("SELECT MIN(a.displayOrder) FROM StockAlert a " +
             "WHERE a.stockCode = :code AND a.market = :market")

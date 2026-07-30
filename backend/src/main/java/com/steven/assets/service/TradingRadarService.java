@@ -108,24 +108,7 @@ public class TradingRadarService {
 
     @Transactional(readOnly = true)
     public TradingRadarDto.Response get() {
-        MarketState market = buildMarket();
-        Map<String, Target> targets = new LinkedHashMap<>();
-        Set<String> skippedNonTw = new HashSet<>();
-        loadLatestHoldings(targets, skippedNonTw);
-        loadWatchList(targets, skippedNonTw);
-
-        List<TradingRadarDto.StockDecision> decisions = targets.values().stream()
-                .filter(t -> TW_MARKET.equals(t.market()) && !TAIEX_CODE.equals(t.code()))
-                .sorted(Comparator.comparing(Target::code))
-                .map(t -> buildStock(t, market.regime(), market.stale()))
-                .toList();
-
-        TradingRadarDto.Response response = new TradingRadarDto.Response(
-                TradingRadarRuleEngine.RULE_VERSION,
-                ZonedDateTime.now(TAIPEI).toOffsetDateTime().toString(),
-                market.summary(),
-                decisions,
-                skippedNonTw.size());
+        TradingRadarDto.Response response = assemble(null);
 
         // Requirement 48：每次頁面計算把結果存為 per-owner Redis 快照供匯出（fail-soft、僅登入的 HTTP 請求）。
         try {
@@ -136,6 +119,45 @@ public class TradingRadarService {
             log.warn("交易雷達快照寫入失敗（不影響頁面）：{}", e.toString());
         }
         return response;
+    }
+
+    /**
+     * 背景產檔前的重算（Task 260）：顯式 owner、不觸碰 request-scoped 的 CurrentUserContext，
+     * 重算後 append 一筆快照供當日匯出。
+     */
+    @Transactional(readOnly = true)
+    public TradingRadarDto.Response recomputeAndStoreForOwner(long ownerId) {
+        TradingRadarDto.Response response = assemble(ownerId);
+        snapshotStore.saveRecomputed(ownerId, response);
+        return response;
+    }
+
+    /**
+     * 今日交易雷達的資料組裝主體（Task 260 從 {@code get()} 抽出）。
+     *
+     * @param ownerId {@code null} 代表走 request-scoped {@code ownerFilter}（HTTP 路徑，
+     *                無 owner 查詢方法）；非 null 代表顯式 owner 查詢（背景路徑，owner-scoped
+     *                查詢方法），不得依賴 {@link CurrentUserContext}。
+     */
+    private TradingRadarDto.Response assemble(Long ownerId) {
+        MarketState market = buildMarket();
+        Map<String, Target> targets = new LinkedHashMap<>();
+        Set<String> skippedNonTw = new HashSet<>();
+        loadLatestHoldings(targets, skippedNonTw, ownerId);
+        loadWatchList(targets, skippedNonTw, ownerId);
+
+        List<TradingRadarDto.StockDecision> decisions = targets.values().stream()
+                .filter(t -> TW_MARKET.equals(t.market()) && !TAIEX_CODE.equals(t.code()))
+                .sorted(Comparator.comparing(Target::code))
+                .map(t -> buildStock(t, market.regime(), market.stale()))
+                .toList();
+
+        return new TradingRadarDto.Response(
+                TradingRadarRuleEngine.RULE_VERSION,
+                ZonedDateTime.now(TAIPEI).toOffsetDateTime().toString(),
+                market.summary(),
+                decisions,
+                skippedNonTw.size());
     }
 
     /** 背景通知評估共用同一份 V4 組裝，不依賴 HTTP owner filter。 */
@@ -399,8 +421,10 @@ public class TradingRadarService {
         return rows.get(0).getClosePrice();
     }
 
-    private void loadLatestHoldings(Map<String, Target> targets, Set<String> skippedNonTw) {
-        Optional<AssetSnapshot> snapshot = snapshotRepo.findLatestWithStocks();
+    private void loadLatestHoldings(Map<String, Target> targets, Set<String> skippedNonTw, Long ownerId) {
+        Optional<AssetSnapshot> snapshot = ownerId == null
+                ? snapshotRepo.findLatestWithStocks()
+                : snapshotRepo.findLatestWithStocksByOwnerUserId(ownerId);
         if (snapshot.isEmpty()) return;
         for (StockHolding holding : snapshot.get().getStocks()) {
             if (holding.getStockCode() == null || holding.getMarket() == null) continue;
@@ -409,8 +433,11 @@ public class TradingRadarService {
         }
     }
 
-    private void loadWatchList(Map<String, Target> targets, Set<String> skippedNonTw) {
-        for (Object[] row : alertRepo.findDistinctStockCodeMarket()) {
+    private void loadWatchList(Map<String, Target> targets, Set<String> skippedNonTw, Long ownerId) {
+        List<Object[]> rows = ownerId == null
+                ? alertRepo.findDistinctStockCodeMarket()
+                : alertRepo.findDistinctStockCodeMarketByOwnerUserId(ownerId);
+        for (Object[] row : rows) {
             addTarget(targets, skippedNonTw, (String) row[0], (String) row[1], false);
         }
     }

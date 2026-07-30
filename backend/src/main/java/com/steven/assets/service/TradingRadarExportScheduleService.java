@@ -1,5 +1,6 @@
 package com.steven.assets.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.steven.assets.dto.TradingRadarExportDto;
 import com.steven.assets.model.TradingRadarExportSetting;
 import com.steven.assets.model.TradingRadarExportTime;
@@ -38,15 +39,19 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * 交易雷達排程自動匯出到指定伺服器目錄（Requirement 48 追加 / Task 231）。
  *
- * <p>比照公開資訊爬蟲，使用者可設定<b>多個</b>每日執行時間點與一個輸出資料夾；到點把該 owner
- * <b>當日</b>的 Redis 快照產成 Excel 寫入該資料夾（檔名 {@code 交易雷達_{ownerId}_{yyyyMMdd}.xlsx}，
- * 同日覆寫、跨日新檔）。與手動匯出共用 {@link TradingRadarExportService} 同一支產檔邏輯。
+ * <p>比照公開資訊爬蟲，使用者可設定<b>多個</b>每日執行時間點與一個輸出資料夾；到點先回補台股即時行情、
+ * 由背景重算一次雷達並寫入快照，再把該 owner<b>當日</b>的 Redis 快照產成 Excel 寫入該資料夾
+ * （檔名 {@code 交易雷達_{ownerId}_{yyyyMMdd}.xlsx}，同日覆寫、跨日新檔；Task 260）。
+ * 與手動匯出共用 {@link TradingRadarExportService} 同一支產檔邏輯。
  *
  * <p><b>當日 guard 放在時間點列</b>（{@code trading_radar_export_time.last_run_date}）而非 owner 層，
  * 否則同日設多個時間點只會跑第一個。
  *
  * <p><b>背景無 request context</b> → {@code ownerFilter} 不啟用，{@code findAll()} 讀全部 owner 列；
  * owner 一律取自列上的 {@code ownerUserId}，不得觸碰 request-scoped 的 {@link CurrentUserContext}。
+ * 產檔前的回補與重算同理：一律用 {@link PriceQueryService#refreshTradingRadarPrices()}／
+ * {@link TradingRadarService#recomputeAndStoreForOwner(long)} 的顯式 owner 版本，不得經由
+ * request-scoped 的元件。
  *
  * <p>路徑安全：使用者只設定「相對子路徑」，實際寫入 = 容器基底 {@code EXPORT_OUTPUT_DIR} resolve 子路徑，
  * 並驗證 normalize 後仍在基底內（拒 {@code ..}／絕對路徑跳脫）。
@@ -57,8 +62,11 @@ public class TradingRadarExportScheduleService {
 
     private static final ZoneId TW_ZONE = ZoneId.of("Asia/Taipei");
     private static final DateTimeFormatter FILE_DATE = DateTimeFormatter.ofPattern("yyyyMMdd");
-    /** 當日查無快照時的狀態文字（快照只在使用者開頁的 HTTP 路徑產生，背景不產生）。 */
+    private static final String TW_MARKET = "台股";
+    /** 背景重算失敗且當日確實零快照時的降級終點（Task 260）。 */
     static final String NO_SNAPSHOT_STATUS = "當日尚無快照，未產檔";
+    /** 非台股交易日時的狀態文字（休市日不產檔，Task 260）。 */
+    static final String NON_TRADING_DAY_STATUS = "非台股交易日，未產檔";
 
     private final TradingRadarExportTimeRepository timeRepo;
     private final TradingRadarExportSettingRepository settingRepo;
@@ -67,6 +75,9 @@ public class TradingRadarExportScheduleService {
     private final ObjectProvider<CurrentUserContext> currentUserProvider;
     private final GdriveOutputSupport gdrive;
     private final String baseDir;
+    private final TradingRadarService radarService;
+    private final PriceQueryService priceQueryService;
+    private final MarketDataService marketDataService;
 
     private final AtomicBoolean ticking = new AtomicBoolean(false);
 
@@ -76,7 +87,10 @@ public class TradingRadarExportScheduleService {
                                             TradingRadarSnapshotStore snapshotStore,
                                             ObjectProvider<CurrentUserContext> currentUserProvider,
                                             GdriveOutputSupport gdrive,
-                                            @Value("${EXPORT_OUTPUT_DIR:/home/steven}") String baseDir) {
+                                            @Value("${EXPORT_OUTPUT_DIR:/home/steven}") String baseDir,
+                                            TradingRadarService radarService,
+                                            PriceQueryService priceQueryService,
+                                            MarketDataService marketDataService) {
         this.timeRepo = timeRepo;
         this.settingRepo = settingRepo;
         this.exportService = exportService;
@@ -84,6 +98,9 @@ public class TradingRadarExportScheduleService {
         this.currentUserProvider = currentUserProvider;
         this.gdrive = gdrive;
         this.baseDir = baseDir;
+        this.radarService = radarService;
+        this.priceQueryService = priceQueryService;
+        this.marketDataService = marketDataService;
     }
 
     // ===== 設定 CRUD（HTTP 路徑）=====
@@ -183,11 +200,18 @@ public class TradingRadarExportScheduleService {
         return toSettingResponse(ownerId, sub, s, drive.selfCheckWarning());
     }
 
-    /** 立即匯出到目錄（驗證用）。走與排程同一支寫檔邏輯，且**不動任何時間點的當日 guard**。 */
+    /**
+     * 立即匯出到目錄（驗證用）。走與排程同一支寫檔邏輯，且**不動任何時間點的當日 guard**。
+     *
+     * <p>產檔前一律先回補台股即時行情並重算一次（Task 260）——run-now 的用途就是驗證落點，
+     * 使用者明確觸發，**不受交易日限制**，休市日也必須可用並照樣重算。
+     */
     @Transactional
     public TradingRadarExportDto.RunNowResponse runNow() {
         long ownerId = requireOwnerId();
         LocalDate today = LocalDate.now(TW_ZONE);
+        refreshPricesQuietly();
+        recomputeQuietly(ownerId);
         try {
             Path file = writeDailyExport(ownerId, today);
             if (file == null) {
@@ -196,7 +220,7 @@ public class TradingRadarExportScheduleService {
                 // 否則狀態會停在上一次的成功、顯示過期的好消息。
                 GdriveOutputSupport.SyncResult skipped = syncGdrive(ownerId, null, "當日無交易雷達快照");
                 return new TradingRadarExportDto.RunNowResponse(
-                        null, 0L, NO_SNAPSHOT_STATUS + "（請先開啟一次交易雷達頁產生快照）",
+                        null, 0L, NO_SNAPSHOT_STATUS + "（重算失敗且當日無既有快照）",
                         null, skipped == null ? null : skipped.status());
             }
             long size = Files.size(file);
@@ -242,21 +266,81 @@ public class TradingRadarExportScheduleService {
     }
 
     /**
-     * 掃所有啟用中的時間點，對「今日尚未執行且排程時間已到」者產檔。
+     * 掃所有啟用中的時間點，對「今日尚未執行且排程時間已到」者，先回補行情、重算一次，再產檔
+     * （Task 260）。
      *
      * <p>用 {@code now >= 排程時間}（而非「分鐘精確相等」）＋該時間點的 {@code lastRunDate} 當日 guard：
-     * 排程執行緒被長工作卡住而跨越分鐘時，後續 tick 會自動補跑，避免整日靜默漏跑。
+     * 排程執行緒被長工作卡住而跨越分鐘時，後續 tick 會自動補跑，避免整日靜默漏跑。判斷條件本身
+     * 一個都不能改。</p>
+     *
+     * <p>先收集 due 清單再動作：due 為空時完全不呼叫回補（否則每分鐘都在打 external）；
+     * due 非空但當日非台股交易日時，整批只記狀態、設 guard，不回補不重算不產檔不上傳；
+     * due 非空且是交易日時，一輪只回補一次（跨 owner 共用同一份市場資料），再逐 owner
+     * 重算＋產檔。</p>
      */
     private void runDueExports() {
         LocalDate today = LocalDate.now(TW_ZONE);
         LocalTime now = LocalTime.now(TW_ZONE);
+        List<TradingRadarExportTime> due = new ArrayList<>();
         // 背景無 request context → ownerFilter 不啟用，讀全部 owner 的時間點列
         for (TradingRadarExportTime t : timeRepo.findAll()) {
             if (!Boolean.TRUE.equals(t.getEnabled())) continue;
             if (today.equals(t.getLastRunDate())) continue;
             if (!now.isBefore(LocalTime.of(t.getRunHour(), t.getRunMinute()))) {
-                runScheduled(t, today);
+                due.add(t);
             }
+        }
+        if (due.isEmpty()) return;
+
+        if (!marketDataService.isTradingDay(TW_MARKET, today)) {
+            for (TradingRadarExportTime t : due) {
+                long ownerId = t.getOwnerUserId();
+                recordStatus(ownerId, NON_TRADING_DAY_STATUS);
+                log.info("交易雷達排程匯出略過（非台股交易日）owner={} {}:{}",
+                        ownerId, t.getRunHour(), t.getRunMinute());
+                t.setLastRunDate(today);
+                t.setUpdatedAt(LocalDateTime.now(TW_ZONE));
+                timeRepo.save(t);
+            }
+            return;
+        }
+
+        refreshPricesQuietly();
+        for (TradingRadarExportTime t : due) {
+            recomputeQuietly(t.getOwnerUserId());
+            runScheduled(t, today);
+        }
+    }
+
+    /**
+     * 產檔前回補台股即時行情（Task 260）。<b>一輪只回補一次</b>——回補清單是全庫台股標的
+     * （跨租戶共用的市場資料），逐 owner 各打一次只是重複打同一份清單。
+     *
+     * <p><b>不得沿用 TradingRadarRefreshService.refreshAndGet()</b>：其冷卻鍵取自 request-scoped 的
+     * CurrentUserContext，背景會落到 "anonymous"，且會與使用者按下「重新整理」互相燒掉冷卻。
+     *
+     * <p>回補失敗／逾時／BUSY 一律只記 log 後繼續——外部服務不可用不得使當日缺檔，
+     * 那是用一個新的失敗模式換掉舊的。開機自癒（ApplicationReadyEvent）時 external 可能尚未就緒，
+     * 這條降級路徑即為該情境所需。
+     */
+    private void refreshPricesQuietly() {
+        try {
+            JsonNode result = priceQueryService.refreshTradingRadarPrices();
+            log.info("交易雷達排程產檔前行情回補完成：{}", result);
+        } catch (Exception e) {
+            log.warn("交易雷達排程產檔前行情回補失敗（不影響後續重算與產檔）：{}", e.toString());
+        }
+    }
+
+    /**
+     * 產檔前重算（Task 260）。失敗只記 log——重算是「盡力讓檔更新」，不是產檔的新前提；
+     * 後續 writeDailyExport 會回退用當日既有快照產檔，當日確實零快照才不寫檔。
+     */
+    private void recomputeQuietly(long ownerId) {
+        try {
+            radarService.recomputeAndStoreForOwner(ownerId);
+        } catch (Exception e) {
+            log.warn("交易雷達排程產檔前重算失敗 owner={}（不影響同輪其他使用者）：{}", ownerId, e.toString());
         }
     }
 
@@ -293,8 +377,9 @@ public class TradingRadarExportScheduleService {
 
     /**
      * 產出該 owner 當日（00:00～當下）快照的 Excel 並寫入其設定目錄，回傳實際落點；
-     * <b>當日查無快照時回 {@code null} 且不寫檔</b>——快照只在使用者開啟／刷新雷達頁的 HTTP 路徑產生，
-     * 背景不產生；若照寫會每天在使用者目錄留下只有表頭的無用檔，並蓋掉同名前一版。
+     * <b>當日查無快照時回 {@code null} 且不寫檔</b>——呼叫端已在此之前先回補行情並重算一次
+     * （Task 260），故此處查無快照代表「背景重算失敗且當日確實零快照」的降級終點，
+     * 不再是常態路徑；若照寫會在使用者目錄留下只有表頭的無用檔，並蓋掉同名前一版。
      */
     private Path writeDailyExport(long ownerId, LocalDate today) throws IOException {
         long fromEpoch = today.atStartOfDay(TW_ZONE).toInstant().toEpochMilli();
