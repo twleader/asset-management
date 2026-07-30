@@ -84,6 +84,12 @@ class TradingExportGdriveTest {
     // 啟用當下的自檢（Task 247）：替身預設回 null（＝自檢正常），本測試的斷言不受影響，
     // 同時保證這裡不會去讀容器內的 /etc/rclone/rclone.conf。
     @Mock private GdriveSelfCheck selfCheck;
+    // Task 260：交易雷達排程新增的三個建構子依賴。本檔不測產檔前重算本身（那是
+    // TradingRadarExportScheduleServiceTest 的範圍），只需讓既有的 tick()/runNow() 測試
+    // 能通過「是否交易日」分支——不 stub 為 true 會讓這裡既有的成功案例全部誤判成休市日。
+    @Mock private TradingRadarService radarService;
+    @Mock private PriceQueryService priceQueryService;
+    @Mock private MarketDataService marketDataService;
 
     @TempDir Path baseDir;
 
@@ -95,13 +101,15 @@ class TradingExportGdriveTest {
         GdriveOutputSupport gdrive =
                 new GdriveOutputSupport(rcloneClient, userRepo, userAdminService, selfCheck, "GDriveOutput");
         radar = new TradingRadarExportScheduleService(timeRepo, radarSettingRepo, radarExportService,
-                snapshotStore, currentUserProvider, gdrive, baseDir.toString());
+                snapshotStore, currentUserProvider, gdrive, baseDir.toString(),
+                radarService, priceQueryService, marketDataService);
         calendar = new TradingCalendarExportScheduleService(calendarRepo, calendarExportService,
                 currentUserProvider, gdrive, baseDir.toString());
         when(radarSettingRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(calendarRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(calendarExportService.requireValidFormat(anyString())).thenAnswer(inv -> inv.getArgument(0));
         when(calendarExportService.requireValidSubpath(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        when(marketDataService.isTradingDay(anyString(), any(LocalDate.class))).thenReturn(true);
     }
 
     private void givenCurrentUser(long id) {

@@ -131,6 +131,79 @@ class TradingRadarSnapshotStoreTest {
         verify(zsetOps, never()).add(anyString(), anyString(), anyDouble());
     }
 
+    /**
+     * Task 260：背景補產若被去重擋掉，當日就仍然無快照、仍然不產檔——修法自我失效。
+     * 先 save 一筆，再以內容相同（僅 generatedAt 不同）的 Response 呼叫 saveRecomputed，
+     * 斷言索引 ZSet 確實多一筆（未被去重的 early-return 擋下）。
+     */
+    @Test
+    void saveRecomputed不被去重擋下() {
+        when(zsetOps.reverseRangeWithScores(anyString(), anyLong(), anyLong())).thenReturn(new LinkedHashSet<>());
+        when(valueOps.get(HASH_KEY)).thenReturn(null);
+        store.save(1L, resp("2026-07-20T10:00:00+08:00"));
+        ArgumentCaptor<String> hashCap = ArgumentCaptor.forClass(String.class);
+        verify(valueOps).set(eq(HASH_KEY), hashCap.capture(), any(Duration.class));
+        String writtenHash = hashCap.getValue();
+
+        reset(valueOps, zsetOps);
+        when(redis.opsForValue()).thenReturn(valueOps);
+        when(redis.opsForZSet()).thenReturn(zsetOps);
+        when(zsetOps.reverseRangeWithScores(anyString(), anyLong(), anyLong())).thenReturn(new LinkedHashSet<>());
+        when(valueOps.get(HASH_KEY)).thenReturn(writtenHash);   // 與上一筆內容相同（僅 generatedAt 不同）
+
+        String iso2 = "2026-07-20T13:30:00+08:00";
+        long ts2 = epoch(iso2);
+        store.saveRecomputed(1L, resp(iso2));
+
+        verify(zsetOps).add(eq(IDX_KEY), eq(Long.toString(ts2)), eq((double) ts2));
+        verify(valueOps).set(eq("trading-radar:snap:1:" + ts2), anyString(), any(Duration.class));
+    }
+
+    /** Task 260：saveRecomputed 在節流窗（5 分鐘）內仍必須寫入，否則休市日／連假的補產會被節流擋掉。 */
+    @Test
+    void saveRecomputed不被節流擋下() {
+        long ts1 = epoch("2026-07-20T10:00:00+08:00");
+        Set<ZSetOperations.TypedTuple<String>> top = new LinkedHashSet<>();
+        top.add(new DefaultTypedTuple<>("x", (double) ts1));
+        when(zsetOps.reverseRangeWithScores(anyString(), anyLong(), anyLong())).thenReturn(top);
+        when(valueOps.get(HASH_KEY)).thenReturn(null);
+
+        String iso2 = "2026-07-20T10:01:00+08:00";   // 1 分鐘後，仍在 5 分鐘節流窗內
+        long ts2 = epoch(iso2);
+        store.saveRecomputed(1L, resp(iso2));
+
+        verify(zsetOps).add(eq(IDX_KEY), eq(Long.toString(ts2)), eq((double) ts2));
+        verify(valueOps).set(eq("trading-radar:snap:1:" + ts2), anyString(), any(Duration.class));
+    }
+
+    /**
+     * Task 260：saveRecomputed 略過去重「檢查」，但仍必須「寫入」去重雜湊——否則雜湊停在更舊的內容，
+     * 破壞「雜湊＝最後一次實際寫入的內容」這個不變式。驗證方式：saveRecomputed 後以同內容呼叫 save，
+     * 該次必須被去重擋下（代表雜湊確實被 saveRecomputed 更新過）。
+     */
+    @Test
+    void saveRecomputed仍更新去重雜湊() {
+        when(zsetOps.reverseRangeWithScores(anyString(), anyLong(), anyLong())).thenReturn(new LinkedHashSet<>());
+        when(valueOps.get(HASH_KEY)).thenReturn(null);
+
+        store.saveRecomputed(1L, resp("2026-07-20T10:00:00+08:00"));
+        ArgumentCaptor<String> hashCap = ArgumentCaptor.forClass(String.class);
+        verify(valueOps).set(eq(HASH_KEY), hashCap.capture(), any(Duration.class));
+        String writtenHash = hashCap.getValue();
+
+        reset(valueOps, zsetOps);
+        when(redis.opsForValue()).thenReturn(valueOps);
+        when(redis.opsForZSet()).thenReturn(zsetOps);
+        when(zsetOps.reverseRangeWithScores(anyString(), anyLong(), anyLong())).thenReturn(new LinkedHashSet<>());
+        when(valueOps.get(HASH_KEY)).thenReturn(writtenHash);
+
+        // 同內容（僅 generatedAt 不同）呼叫 save——此次啟用去重，斷言確實被擋下
+        store.save(1L, resp("2026-07-20T13:30:00+08:00"));
+
+        verify(valueOps, never()).set(startsWith("trading-radar:snap:1:"), anyString(), any(Duration.class));
+        verify(zsetOps, never()).add(anyString(), anyString(), anyDouble());
+    }
+
     @Test
     void range_容忍value被逐出的缺漏並計數() throws Exception {
         long ts1 = 100L, ts2 = 200L;

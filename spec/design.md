@@ -4769,6 +4769,8 @@ for m in members: raw = GET snap:{ownerId}:{m}
 
 **排程機制**（照抄 `IndexExportScheduleService`，不自創）：
 
+> **下面這份 `runDueExports()` 虛擬碼已由 Task 260 取代**，僅存為 Task 231 當時的決策記錄。**現行流程見本節末的「Task 260：產檔前一律重算」**（差異：先收集 due 清單 → 休市日直接記狀態返回 → 一輪回補一次行情 → 逐列重算後才產檔）。照這份舊虛擬碼實作會做出已被推翻的行為。
+
 ```
 @Scheduled(cron = "0 * * * * *", zone = "Asia/Taipei") tick()   ← AtomicBoolean 防重入
 @EventListener(ApplicationReadyEvent.class) selfHealOnStartup() ← 開機補跑當日已到點未執行者
@@ -4781,7 +4783,85 @@ runDueExports():
 
 **寫檔**：讀該 owner 當日 00:00～當下的 Redis 快照 → 同一支三分頁 Excel → 檔名 `交易雷達_{ownerId}_{yyyyMMdd}.xlsx`（同日覆寫、跨日新檔，比照爬蟲 `public_info_<日期>.json`；含 ownerId 因多使用者可能共用同一目錄）。
 
-**當日零快照時不寫檔**：快照只在使用者開啟／刷新雷達頁的 HTTP 路徑產生（背景不產生），故排程時間點前若使用者當天沒開過頁面即查無快照。此時**不寫檔**（避免每天留下只有表頭的無用檔、並保留前一版不被覆蓋），只把 `last_run_status` 記為「當日尚無快照，未產檔」並**仍設當日 guard**。這是本功能與爬蟲的語意差異：爬蟲是排程自己去抓，本功能是把使用者當天看過的雷達倒出來，須於前端設定卡明示。路徑＝`EXPORT_OUTPUT_DIR`（`/home/steven`，volume 對映 host 家目錄）resolve 相對子路徑，`normalize()` 後須仍 `startsWith(base)`（拒 `..`／絕對路徑），`Files.createDirectories` 自動建目錄，先寫 `.tmp` 再 `ATOMIC_MOVE`（不支援退 `REPLACE_EXISTING`）。
+~~**當日零快照時不寫檔**：快照只在使用者開啟／刷新雷達頁的 HTTP 路徑產生（背景不產生），故排程時間點前若使用者當天沒開過頁面即查無快照。此時**不寫檔**（避免每天留下只有表頭的無用檔、並保留前一版不被覆蓋），只把 `last_run_status` 記為「當日尚無快照，未產檔」並**仍設當日 guard**。這是本功能與爬蟲的語意差異：爬蟲是排程自己去抓，本功能是把使用者當天看過的雷達倒出來，須於前端設定卡明示。~~ **← 已由 Task 260 推翻，見下節「產檔前重算」。** 保留原文為決策記錄：此設計使排程隱性依賴「使用者當天先開過頁」，2026-07-30 因該依賴未成立而缺檔。
+
+路徑＝`EXPORT_OUTPUT_DIR`（`/home/steven`，volume 對映 host 家目錄）resolve 相對子路徑，`normalize()` 後須仍 `startsWith(base)`（拒 `..`／絕對路徑），`Files.createDirectories` 自動建目錄，先寫 `.tmp` 再 `ATOMIC_MOVE`（不支援退 `REPLACE_EXISTING`）。
+
+### Task 260：產檔前一律重算（推翻「背景不產生快照」）
+
+**問題**：排程原本只是「把當日既有快照倒成 Excel」。快照唯一產生點是 `TradingRadarService.get()` 內受
+`RequestContextHolder.getRequestAttributes() != null && currentUserContext.hasUser()` 守門的那一段，即**只有登入使用者開頁時才產生**。
+2026-07-30 使用者當日凌晨沒開頁，09:10 那一輪查無快照 → 略過 → Drive 缺檔；11:43 人工開頁後 11:45 那一輪才成功。
+
+**新流程**（掛在既有 `tick()`／`selfHealOnStartup()`，**不新增 `@Scheduled`**，故 `SchedulePublicBffController.JOBS` 不動）：
+
+```
+runDueExports():
+  today = LocalDate.now(Asia/Taipei)
+  due = [ 所有 enabled 且 today != last_run_date 且 now >= (run_hour, run_minute) 的時間點列 ]
+  if due 為空: return
+  if !marketDataService.isTradingDay("台股", today):        ← 休市日不產檔（使用者決定）
+      for t in due: recordStatus(owner, NON_TRADING_DAY_STATUS); 設 guard          ← 不重算、不回補、不上傳
+      return
+  priceQueryService.refreshTradingRadarPrices()             ← 一輪只回補一次（清單全庫、跨租戶共用）
+                                                             失敗／逾時／BUSY 只記 log，繼續往下
+  for t in due:
+      tradingRadarService.recomputeAndStoreForOwner(owner)  ← 顯式 owner-scoped 重算 + append 快照
+      runScheduled(t, today)                                ← 既有：產檔 → 本機寫成功後 syncGdrive
+```
+
+`TradingRadarService` 的三個入口（**共用同一份 V4 組裝**，不得各自實作而使判斷漂移）：
+
+```java
+get()                            // HTTP：owner 由 request-scoped ownerFilter 決定，既有快照守門不變
+recomputeAndStoreForOwner(id)    // 背景產檔：顯式 owner，重算後 append 一筆快照（Task 260 新增）
+evaluateForNotification(...)     // 背景通知：單檔評估（既有）
+private assemble(Long ownerId)   // ownerId == null → 走 ownerFilter（HTTP）；非 null → 顯式 owner 查詢
+```
+
+**為什麼不能直接重用 `TradingRadarService.get()`**（本節最容易踩的雷）：
+
+| `get()` 內的呼叫 | owner 條件來自 | 背景（無 request context）的後果 |
+|---|---|---|
+| `snapshotRepo.findLatestWithStocks()` | 無 owner 條件，靠 `TenantFilterAspect` 啟用 `@Filter(ownerFilter)` | filter 不啟用 → 讀到**全庫最大 snapshot_date 那一筆**（可能是別的 owner） |
+| `alertRepo.findDistinctStockCodeMarket()` | 同上 | filter 不啟用 → 讀到**全部租戶的觀察清單** |
+| `snapshotStore.save(...)` 的 owner | `currentUserContext.getEffectiveUserId()` | request-scoped，背景取不到 → 該段本來就被守門跳過 |
+
+故新增 owner 顯式參數的重算路徑：持股走既有 `findLatestWithStocksByOwnerUserId(ownerId)`（背景通知已在用，同一支），
+觀察清單新增 `StockAlertRepository.findDistinctStockCodeMarketByOwnerUserId(ownerId)`。
+大盤組裝（`buildMarket()`）owner-agnostic，原樣重用。
+
+**快照寫入須略過節流與去重**：`TradingRadarSnapshotStore.save()` 的 5 分鐘節流與內容去重（排除 `generatedAt` 後比對
+`trading-radar:snap:hash:{ownerId}`）是為了保護與 `price:*` 共用的 256MB `allkeys-lru` Redis。但背景補產若被去重擋掉，
+當日就仍然無快照、仍然不產檔——修法自我失效。故 store 提供**只供背景產檔用**的入口略過這兩道，
+其餘（gzip＋Base64、value TTL＝保留窗、索引 ZSet、兩道 inline 修剪）完全沿用。
+footprint 影響可忽略：每 owner 每時間點每日一筆，對 per-owner 5000 筆硬上限而言是雜訊。
+
+**但反向影響必須揭露**：背景那筆同樣進索引 ZSet（節流讀的是索引最大 score）、同樣更新去重雜湊，故
+**使用者在排程時間點後 5 分鐘內開頁，該次可能不再產生新快照**；內容與背景那筆相同時亦會被去重擋下。
+這是 Task 260 之前不會發生的可觀察行為變化，判定可接受（兩者都代表「這段時間沒有新資訊」，且背景那筆已在當日匯出區間內）。
+刻意**不**讓背景寫入繞過索引或不更新雜湊——那會使去重基準停在更舊的內容，語意更難推理。
+
+**排程列表頁的說明文字必須同步**：本節不新增 `@Scheduled`，故 `SchedulePublicBffController.JOBS` **不新增項目**；
+但既有「交易雷達匯出」那一筆的 `description` 現寫著「當日尚無快照則略過不產檔」，Task 260 後為假，必須改寫
+（比照 Requirement 51 對八個排程 description 補「輸出含 Google Drive 同步」的同一理由——
+「不新增 `@Scheduled` ⇒ `JOBS` 不必動」在本專案已被否決過一次）。
+
+**快照是 append 不是取代**：匯出區間仍為「當日 00:00～觸發當下」的累積，故 11:45 的檔含 09:10 那一筆。
+刻意不改成「只匯出最新一筆」——那會弄丟當日盤中變化，正是 Requirement 48 要留存的東西。
+
+**降級路徑**（外部依賴不得變成產檔的新單點故障）：
+
+| 失敗點 | 行為 |
+|---|---|
+| 行情回補逾時／失敗／BUSY | 記 log，**照樣**用現有 Redis 值重算並產檔 |
+| 重算或快照寫入擲例外 | 記 log，**回退**用當日既有快照產檔；當日確實零快照才回到「當日尚無快照，未產檔」＋不寫檔、不上傳 |
+| 單一 owner 失敗 | 只記該 owner 的 `last_run_status`，不影響同輪其他 owner（既有語意不變） |
+
+**仍然完全不變的禁令**：不注入或呼叫 `MarketAnalysisService`／Anthropic／OpenAI／任何 LLM client；不觸發新聞爬蟲；不新增資料表。
+本次推翻的只有「排程路徑不得觸發外部**行情**抓取」一項——Task 249 已為手按按鈕的路徑推翻過，本次把適用範圍擴大到排程產檔。
+背景**不得**沿用 `TradingRadarRefreshService.refreshAndGet()`：其冷卻鍵取自 request-scoped 的 `CurrentUserContext`
+（背景會落到 `anonymous`）且會與使用者按鈕互相燒掉冷卻，背景直接呼叫 `PriceQueryService.refreshTradingRadarPrices()`。
 
 **business-services 可寫主機家目錄**（`docker-compose.yml`：`EXPORT_OUTPUT_DIR: /home/steven` ＋ `${EXPORT_OUTPUT_DIR_HOST:-/Users/steven}:/home/steven`），故排程放 business（同時握有 Redis 快照與 POI）。目錄列舉沿用 Requirement 34 既有 `GET /api/export-schedule/browse?subpath=`，不新增端點。新增的 `@Scheduled` 須同步登錄 `SchedulePublicBffController.JOBS`。
 

@@ -98,7 +98,7 @@ public class SchedulePublicBffController {
                     "刪除 10 年前的股價與匯率歷史",
                     "交易日 17:30", "0 30 17 * * MON-FRI", TPE),
             new ScheduledJobDto(BUSINESS, "交易雷達匯出", "每日匯出排程檢查",
-                    "每分鐘檢查各使用者設定的多個交易雷達匯出時間點，命中執行時間即把當日 Redis 快照產出 Excel 到指定目錄；當日尚無快照則略過不產檔（Requirement 48）；輸出含 Google Drive 同步（若已啟用）",
+                    "每分鐘檢查各使用者設定的多個交易雷達匯出時間點，命中執行時間即先回補台股即時行情、由背景重算一次雷達並寫入快照，再把當日快照產出 Excel 到指定目錄；台股休市日不產檔（Requirement 48）；輸出含 Google Drive 同步（若已啟用）",
                     "動態：依「今日交易雷達」頁設定的多個時間點", "0 * * * * *", TPE),
             new ScheduledJobDto(BUSINESS, "交易紀錄匯出", "每日匯出排程檢查",
                     "每分鐘檢查各使用者的每一筆交易紀錄自動匯出排程（Task 255 起每人可設定多筆，各有自己的時間與輸出資料夾），命中執行時間即產出 Excel 到該筆指定目錄（Requirement 49）；輸出含 Google Drive 同步（若已啟用）",

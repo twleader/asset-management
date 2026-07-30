@@ -17,7 +17,7 @@
       show-icon
       class="local-rule-alert"
       title="純本地規則運算"
-      description="判斷全由本地規則產生，不會送出 Claude、OpenAI 或其他 AI API 請求。按下「重新整理」會先回補一次台股行情再重算；頁面自動更新與其餘操作只讀取既有 PostgreSQL 與 Redis 資料。每次結果快照會寫入 Redis 供匯出。"
+      description="判斷全由本地規則產生，不會送出 Claude、OpenAI 或其他 AI API 請求。按下「重新整理」會先回補一次台股行情再重算；頁面自動更新與其餘操作只讀取既有 PostgreSQL 與 Redis 資料；排程產檔則會另外觸發一次台股行情回補。每次結果快照會寫入 Redis 供匯出。"
     />
 
     <el-card shadow="never" class="market-card" :class="marketClass">
@@ -287,7 +287,7 @@
         :closable="false"
         show-icon
         class="sched-note"
-        description="設定後即時生效（免重啟），下一分鐘起依新時間執行。清空全部時間點＝不再自動匯出。匯出內容為「當日已產生的雷達快照」；若當天還沒開過本頁，該次排程會略過不產檔。"
+        description="設定後即時生效（免重啟），下一分鐘起依新時間執行。清空全部時間點＝不再自動匯出。每次排程產檔前會先回補台股行情並重新計算一次雷達，不需先開本頁；匯出內容為當日累積的全部快照（含排程自己算出的那幾筆）；台股休市日不產檔。"
       />
 
       <div v-for="(row, idx) in exportTimes" :key="idx" class="sched-row">
