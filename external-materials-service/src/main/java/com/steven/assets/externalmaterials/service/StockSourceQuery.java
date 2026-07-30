@@ -374,20 +374,36 @@ public class StockSourceQuery {
      * <p>折溢價原樣保存來源值，<b>不由淨值反推</b>——台股該值是證交所發布的權威數字，而其淨值欄在股票型
      * ETF 已四捨五入至小數 2 位，反推誤差達 0.07 個百分點。市價刻意不入此表（同一事實已在
      * {@code stock_price_history.close_price}，跨表重複違反完整正規化）。
+     *
+     * <p><b>覆寫守門（Task 259）</b>：{@code pctOrigin} 標記這一筆折溢價是來源直接提供（{@code OFFICIAL}）
+     * 還是本系統以收盤價反推（{@code RECONSTRUCTED}）。若既有列已是 {@code OFFICIAL}，本次寫入的是
+     * {@code RECONSTRUCTED}，則 {@code premium_discount_pct}／{@code pct_origin} 兩欄<b>不覆寫</b>——
+     * 正常抓取流程下不會發生（台股不再反推、美股從未產生 {@code OFFICIAL}），此守門是防禦未來新增
+     * 資料來源（如 SITCA）時的誤用。{@code nav}／{@code source} 兩欄不受此守門影響，仍照常更新。
      */
     public void upsertEtfNav(String stockCode, String market, LocalDate navDate,
-                             BigDecimal nav, BigDecimal premiumDiscountPct, String source) {
+                             BigDecimal nav, BigDecimal premiumDiscountPct, String pctOrigin, String source) {
         Long existing = jdbc.query(
                 "SELECT id FROM etf_nav_history WHERE stock_code=? AND market=? AND nav_date=?",
                 ps -> { ps.setString(1, stockCode); ps.setString(2, market); ps.setObject(3, navDate); },
                 rs -> rs.next() ? rs.getLong(1) : null);
-        if (existing != null) {
-            jdbc.update("UPDATE etf_nav_history SET nav=?, premium_discount_pct=?, source=? WHERE id=?",
-                    nav, premiumDiscountPct, source, existing);
-        } else {
+        if (existing == null) {
             jdbc.update("INSERT INTO etf_nav_history "
-                    + "(stock_code, market, nav_date, nav, premium_discount_pct, source) VALUES (?, ?, ?, ?, ?, ?)",
-                    stockCode, market, navDate, nav, premiumDiscountPct, source);
+                    + "(stock_code, market, nav_date, nav, premium_discount_pct, pct_origin, source) "
+                    + "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    stockCode, market, navDate, nav, premiumDiscountPct, pctOrigin, source);
+            return;
+        }
+        String existingOrigin = jdbc.query(
+                "SELECT pct_origin FROM etf_nav_history WHERE id=?",
+                ps -> ps.setLong(1, existing),
+                rs -> rs.next() ? rs.getString(1) : null);
+        boolean blockOverwrite = "OFFICIAL".equals(existingOrigin) && "RECONSTRUCTED".equals(pctOrigin);
+        if (blockOverwrite) {
+            jdbc.update("UPDATE etf_nav_history SET nav=?, source=? WHERE id=?", nav, source, existing);
+        } else {
+            jdbc.update("UPDATE etf_nav_history SET nav=?, premium_discount_pct=?, pct_origin=?, source=? WHERE id=?",
+                    nav, premiumDiscountPct, pctOrigin, source, existing);
         }
     }
 

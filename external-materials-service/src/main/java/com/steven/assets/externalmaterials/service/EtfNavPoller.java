@@ -137,34 +137,50 @@ public class EtfNavPoller {
         LocalDate navDate = parseNavDate(nav.navAsOf());
         if (navDate == null || nav.nav() == null) return; // 無資料日或無淨值：不入庫，不臆測日期
         try {
+            PremiumResult premium = resolvePremium(nav, navDate,
+                    (code, date) -> source.findCloseOn(code, nav.market(), date));
             source.upsertEtfNav(nav.stockCode(), nav.market(), navDate,
-                    nav.nav(), resolvePct(nav, navDate), nav.source());
+                    nav.nav(), premium.pct(), premium.origin(), nav.source());
         } catch (Exception e) {
             log.warn("ETF 淨值入庫失敗 {} {} {}: {}",
                     nav.market(), nav.stockCode(), navDate, e.getMessage());
         }
     }
 
+    /** 折溢價值與其來源標記（Task 259）：{@code origin} 為 {@code OFFICIAL}／{@code RECONSTRUCTED}／{@code null}。 */
+    record PremiumResult(java.math.BigDecimal pct, String origin) {}
+
     /**
-     * 入庫用的折溢價（Task 215）：來源有權威值就用，沒有就以<b>同一交易日的收盤價</b>與淨值計算。
+     * 入庫用的折溢價（Task 215，Task 259 起依 market 分流並標記來源）：
+     * 來源有權威值就用（{@code OFFICIAL}）；沒有時，僅美股以<b>同一交易日的收盤價</b>與淨值反推
+     * （{@code RECONSTRUCTED}）——台股<b>不反推</b>，因其淨值欄在股票型 ETF 已四捨五入至小數 2 位，
+     * 反推誤差達 0.07 個百分點，與證交所公告值對不上（Requirement 34）。
      *
-     * <p>台股由證交所發布折溢價，直接沿用（且其淨值已四捨五入，不可反推）。美股 Yahoo 不提供該欄，
-     * 故取 {@code stock_price_history} 中<b>與淨值同一交易日</b>的收盤價計算——刻意不用即時價或前一日收盤：
-     * 前者會讓歷史列的值隨抓取時點漂移、後者是實測會把 VOO 真實 +0.003% 溢價放大成 +1.02% 的錯配。
-     *
-     * <p>查無同日收盤價時回 null（該列折溢價留空），不退而求其次用別日價格湊數；下一輪抓取會再試一次，
-     * 屆時收盤價多半已入庫（upsert 會補上）。
+     * <p>美股反推刻意不用即時價或前一日收盤：前者會讓歷史列的值隨抓取時點漂移、後者是實測會把 VOO
+     * 真實 +0.003% 溢價放大成 +1.02% 的錯配。查無同日收盤價或淨值為 0 時回 {@code PremiumResult(null, null)}
+     * （該列折溢價留空），不退而求其次用別日價格湊數；下一輪抓取會再試一次，屆時收盤價多半已入庫。
      *
      * <p>注意與匯出欄位的語意差異：Excel 的折溢價用「該列當下的即時價」（＝現在買貴了沒），
      * 本表用「該交易日收盤價」（＝當日收盤折溢價，供日後比較常態區間）。兩者本就不是同一個問題。
+     *
+     * @param closeLookup 取代直接呼叫 {@link StockSourceQuery#findCloseOn}，使本方法可脫離 Spring context 單元測試
      */
-    private java.math.BigDecimal resolvePct(EtfNav nav, LocalDate navDate) {
-        if (nav.premiumDiscountPct() != null) return nav.premiumDiscountPct();
-        java.math.BigDecimal close = source.findCloseOn(nav.stockCode(), nav.market(), navDate).orElse(null);
-        if (close == null || nav.nav().compareTo(java.math.BigDecimal.ZERO) == 0) return null;
-        return close.subtract(nav.nav())
+    static PremiumResult resolvePremium(EtfNav nav, LocalDate navDate,
+            java.util.function.BiFunction<String, LocalDate, java.util.Optional<java.math.BigDecimal>> closeLookup) {
+        if (nav.premiumDiscountPct() != null) {
+            return new PremiumResult(nav.premiumDiscountPct(), "OFFICIAL");
+        }
+        if ("台股".equals(nav.market())) {
+            return new PremiumResult(null, null); // 台股折溢價欄留白：不反推
+        }
+        java.math.BigDecimal close = closeLookup.apply(nav.stockCode(), navDate).orElse(null);
+        if (close == null || nav.nav().compareTo(java.math.BigDecimal.ZERO) == 0) {
+            return new PremiumResult(null, null);
+        }
+        java.math.BigDecimal pct = close.subtract(nav.nav())
                 .multiply(java.math.BigDecimal.valueOf(100))
                 .divide(nav.nav(), 4, java.math.RoundingMode.HALF_UP);
+        return new PremiumResult(pct, "RECONSTRUCTED");
     }
 
     /**
