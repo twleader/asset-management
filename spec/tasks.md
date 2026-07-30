@@ -644,7 +644,7 @@ security property，直接 `-D` 讀不到——雙重靜默無效）、改用 JD
   changeset comment 與 design.md 皆已載明理由。
 
 - [x] 215.1 **spec**：`requirements.md` Requirement 34 增 AC；`design.md` 新增「每日入庫留存（Task 215）」小節；`tasks.md` 本任務。
-- [x] 215.2 **Liquibase `v1.63.0-etf-nav-history.sql`**：建 `etf_nav_history`（`stock_code`／`market`／`nav_date`／`nav`／
+- [x] 215.2 **Liquibase `v1.65.0-etf-nav-history.sql`**（原編 `v1.63.0`，因與 `v1.63.0-trading-radar-notification.sql` 撞號而改版號避讓；`spec/design.md` 已同步更正，本行 2026-07-30 隨 Task 259 一併修正）：建 `etf_nav_history`（`stock_code`／`market`／`nav_date`／`nav`／
       `premium_discount_pct`／`source`，`uq_etf_nav_code_market_date` UNIQUE ＋ `idx_etf_nav_code_date`），
       冪等寫法（`CREATE TABLE / INDEX IF NOT EXISTS`）；`db.changelog-master.yaml` 尾端註冊。
 - [x] 215.3 **`StockSourceQuery.upsertEtfNav()`**：比照既有 `upsertCommodityPrice` 的 select-then-update/insert 形狀（JdbcTemplate，無 JPA entity）。
@@ -661,7 +661,7 @@ security property，直接 `-D` 讀不到——雙重靜默無效）、改用 JD
 - [x] 215.7 **建置與部署驗證**：`--no-cache` 重 build business-services（Liquibase 於其啟動時執行）與 external-materials-service 並
       `--force-recreate` ＋ restart bff；驗 `etf_nav_history` 表已建立、手動觸發後 16 檔 ETF 各一列且數值與 Redis 一致、
       個股無列、重複觸發不新增列（upsert 冪等）。
-      **實測結果**：Liquibase 於 business 啟動時 `Run: 1` 執行 `v1.63.0-etf-nav-history` 成功建表；
+      **實測結果**：Liquibase 於 business 啟動時 `Run: 1` 執行 `v1.65.0-etf-nav-history`（原編 `v1.63.0`，已避讓）成功建表；
       觸發後入庫 **19 列**（15 台股＋4 美股，含觀察清單的 00719B／00850／QQQ），個股零列；
       重複觸發後仍為 19 列（upsert 冪等）。台股折溢價沿用證交所值（0050 +1.20／00713 −0.66／00882 −1.29）；
       **美股折溢價經同日收盤價驗算逐檔吻合**：VOO 683.935/683.15=0.1149、VT 154.94/154.73=0.1357、
@@ -789,23 +789,44 @@ security property，直接 `-D` 讀不到——雙重靜默無效）、改用 JD
       台股 cron `0 0/2 9-13`（每 2 分鐘）決定；Task 218 的去抖 N=3 因此約為 6 分鐘而非 6 秒。（已於
       requirements.md／design.md 更正）
 
-## Task 219：ETF 折溢價納入交易雷達（下一增量，尚未動工）
+## Task 219：ETF 折溢價納入交易雷達（219.2／219.3 已拆分並完成，219.1／219.4 尚未動工）
 
-歷史淨值來源實測結論（見 memory `reference_etf_nav_history_sources`）：
-證交所／櫃買**無** NAV 歷史；MoneyDJ 技術可行但 robots.txt 明文 `Disallow: /ETF/X/xdjbcd/`
-且聲明禁止 LLM／AI 用途並封鎖 ClaudeBot，**不得**排進正式排程；
-SITCA（投信投顧公會）可行且合規，實測一年 240 個交易日連續無缺口、可回溯至 2015、上市與上櫃同一支查詢涵蓋。
+> **2026-07-30 動工前盤點更正**：本節原文的兩個前提有誤，已於下方標明並更正，供日後接續 219.1／219.4 時參考，
+> 不要重複踩同樣的假設。
 
-- [ ] 219.1 SITCA 歷史淨值回補（ASP.NET WebForms，需先 GET 取 `__VIEWSTATE`／`__EVENTVALIDATION` 再 POST；
-      一天一次查詢、COMID 留空回全市場約 4425 筆；一年約 240 次，須節流）。
-- [ ] 219.2 `etf_nav_history` 增加 `source` 欄位區分 `OFFICIAL`（證交所當日）／`RECONSTRUCTED`（SITCA 淨值＋
-      既有 `stock_price_history` 收盤價重建）。重建值**只供統計基準**，不對外顯示為權威折溢價。
-      SITCA 股票型 ETF 淨值僅小數 2 位（債券型 4 位），重建誤差約 0.07pp——與既有規格「不得自行反推」的
-      理由一致，故以 `source` 分流而非混存。
-- [ ] 219.3 修既有實作縫：`EtfNavPoller.resolvePct()` 與 `ExcelExportService.premiumDiscountPct()` 的
-      fallback 未依 market 分流，台股遇證交所 g 欄留白會靜默自行反推且 DB 無標記。
-- [ ] 219.4 雷達第三軌「折溢價狀態」：不改分數、不改 action，但溢價顯著高於該檔自身常態時關閉買進閘門
-      （比照 stale 的處理方式）；樣本不足時降級為分類別絕對門檻並於前端揭露。
+- [x] ~~219.2 `etf_nav_history` 增加 `source` 欄位~~——**前提錯誤**：`source` 欄位建表時就存在，
+      且已被「淨值提供站台」（`TWSE`／`Yahoo Finance`）占用，與本項想表達的「折溢價怎麼算出來」是不同軸、
+      不可合用一欄。已拆出為 **[t259](tasks/t259_etf_premium_origin_no_reverse_calc.md)**，新增獨立欄位
+      `pct_origin`（`OFFICIAL`／`RECONSTRUCTED`／`NULL`），並改為對接 TWSE 而非原文設想的 SITCA
+      （219.1 的 SITCA 回補尚未動工，故現階段沒有 SITCA 重建值需要標記；美股 Yahoo 反推是唯一既有的
+      RECONSTRUCTED 來源）。
+- [x] ~~219.3 修既有實作縫~~——已隨 219.2 一併於 **t259** 完成：`EtfNavPoller`（改名 `resolvePremium`）與
+      `ExcelExportService.premiumDiscountPct()` 皆已依 market 分流，台股 `g` 欄留白不再反推。
+- [ ] 219.1 歷史淨值來源結論（保留原文，未被本次盤點推翻；見 memory `reference_etf_nav_history_sources`）：證交所／櫃買**無** NAV 歷史；MoneyDJ 技術可行
+      但 robots.txt 明文 `Disallow: /ETF/X/xdjbcd/` 且聲明禁止 LLM／AI 用途並封鎖 ClaudeBot，**不得**排進
+      正式排程；SITCA（投信投顧公會）可行且合規，實測一年 240 個交易日連續無缺口、可回溯至 2015、
+      上市與上櫃同一支查詢涵蓋。SITCA 歷史淨值回補（ASP.NET WebForms，需先 GET 取
+      `__VIEWSTATE`／`__EVENTVALIDATION` 再 POST；一天一次查詢、COMID 留空回全市場約 4425 筆；
+      一年約 240 次，須節流）**尚未動工**。實作前须知：
+      本 repo 對 `__VIEWSTATE` 型 ASP.NET WebForms、以及 `application/x-www-form-urlencoded` POST
+      **皆無先例**；既有「10 年回補」都是一次 range 查詢，逐日 240 次的既有先例只有 TWSE 報酬指數
+      回補一支，節流與 single-flight 防護要另外設計。t259 已把 `pct_origin='RECONSTRUCTED'` 的位置
+      空出來給未來的 SITCA 重建值使用，但 219.1 動工前應先確認 SITCA 淨值精度與 0.07pp 反推誤差是否
+      成立——`spec/tasks.md`／`spec/requirements.md` 內現有的「反推誤差 0.07pp」記載講的是**證交所**
+      股票型 ETF 淨值四捨五入至 2 位所致，與 SITCA 無關。**SITCA 本身的精度已另有查證**：memory
+      `reference_etf_nav_history_sources` 記載 SITCA 股票型 ETF 淨值同樣僅小數 2 位（債券型 4 位）、
+      反推誤差同為約 0.07pp（與證交所巧合同一精度），但**該記錄不在 repo 追蹤範圍內**，動工時應以此為
+      查證起點覆核，而非視為全新未知、也不應誤以為兩個數字互不相干的巧合各自成立而重新驗證。
+- [ ] 219.4 雷達第三軌「折溢價狀態」（**尚未動工**，且動工前應先評估效益）：不改分數、不改 action，
+      但溢價顯著高於該檔自身常態時關閉買進閘門；樣本不足時降級為分類別絕對門檻並於前端揭露。
+      **原文「比照 stale 的處理方式」是錯的範本**——`marketStale` 其實會改分數（`RISK_ON` 加分被抽掉），
+      並非純閘門；真正「不改分數、不改 action 映射、只關閉買進閘門並於收合列揭露」的既有前例是
+      `kdHeat`（Task 232），動工時應照抄它的落地形狀（enum 三態 → `StockResult` → `StockDecision` DTO →
+      前端收合列 tag，且刻意不進匯出、不進通知）。**效益務必先評估**：買進閘門只在 `score ≥ 75` 時才有
+      任何作用，且十年 103,040 個交易日的實測顯示 `TRIAL_BUY`（抄底路徑）與買進閘門**共存 0 次**——
+      即這個第三軌完全不影響 `TRIAL_BUY`；另外現有折溢價資料**台股**每檔僅 10 個交易日、sd 介於
+      0.14–0.47pp，**美股**僅 9 個交易日、sd 介於 0.01–1.13pp（波動遠大於台股、樣本亦更不足，兩市場
+      不可套同一組門檻），皆不足以定義「自身常態」，需等 219.1 的 SITCA 回補補齊歷史後才可能算出有意義的門檻。
 
 ---
 

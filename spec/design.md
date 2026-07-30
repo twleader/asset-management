@@ -3181,7 +3181,7 @@ GET  /api/bff/asset-history/export                    → GET  /api/snapshots/ex
 #### 每日入庫留存（Task 215）
 
 - **表**：`etf_nav_history(stock_code, market, nav_date, nav, premium_discount_pct, source)`，
-  `(stock_code, market, nav_date)` UNIQUE，Liquibase `v1.63.0-etf-nav-history.sql`（冪等寫法）。全域公開行情，無 `owner_user_id`。
+  `(stock_code, market, nav_date)` UNIQUE，Liquibase `v1.65.0-etf-nav-history.sql`（冪等寫法；前版誤記為 `v1.63.0`，該版號實際已被 `v1.63.0-trading-radar-notification.sql` 占用，此處更正）。全域公開行情，無 `owner_user_id`。無對應 JPA entity／repository，全走 `StockSourceQuery` 的原生 JDBC。
 - **雙寫分工**：Redis（TTL 96h）＝匯出當下要用的「最新一筆」；`etf_nav_history` ＝長期歷史。
   每次抓取兩邊都寫，DB 端為 upsert，故盤中反覆覆寫同一列，**當日最終值＝最後一次抓取值**。
 - **收盤後補抓（`0 30 17 * * MON-FRI` TPE）**：投信約 17:00 更新當日淨值；這一輪的作用是讓當日最後一次寫入落在收盤後，
@@ -3191,11 +3191,72 @@ GET  /api/bff/asset-history/export                    → GET  /api/snapshots/ex
 - **不存市價（正規化）**：市價同一事實已在 `stock_price_history.close_price`。折溢價則**不是**衍生值——見上方紅線，
   台股為證交所權威值且無法由已四捨五入的淨值反推，屬刻意保留的來源事實。
 - **入庫折溢價的兩條路徑**：台股沿用證交所權威值；美股 Yahoo 不提供該欄，改以 `stock_price_history` 中
-  **與淨值同一交易日**的收盤價計算（`EtfNavPoller.resolvePct()` ＋ `StockSourceQuery.findCloseOn()`），查無同日收盤價則留 null、
-  下一輪再補。**與 Excel 欄位語意刻意不同**：匯出欄用「該列當下的即時價」（答『現在買貴了沒』），
-  本表用「該交易日收盤價」（答『當日收盤折溢價』，供日後比較常態區間）。兩者本就不是同一個問題，不應強求一致。
+  **與淨值同一交易日**的收盤價計算（`EtfNavPoller.resolvePremium()` ＋ `StockSourceQuery.findCloseOn()`，
+  Task 259 起改名，見下節），查無同日收盤價則留 null、下一輪再補。**與 Excel 欄位語意刻意不同**：
+  匯出欄用「該列當下的即時價」（答『現在買貴了沒』），本表用「該交易日收盤價」（答『當日收盤折溢價』，
+  供日後比較常態區間）。兩者本就不是同一個問題，不應強求一致。
 - **尚無讀取端**：本階段只做累積留存，未新增 entity／repository／API／頁面。日後要畫折溢價走勢圖時再補讀取路徑，
   屆時歷史資料已經在表內（這正是先行留存的目的）。
+
+#### 折溢價來源標記 `pct_origin`（Task 259，修既有反推缺口）
+
+**現況缺陷**：上方兩條紅線只是設計意圖，`EtfNavFetchClient.fetchTwAll()` 實際的 skip 條件是
+`if (nav == null && pct == null) continue;`（**AND**）——「淨值有值、折溢價欄留白」的列仍會往下傳，
+`EtfNavPoller.resolvePct()` 隨即以 `stock_price_history` 同日收盤價反推出一個值，
+而 `upsertEtfNav` 寫入的 `source` 欄仍是呼叫端傳入的站台名（`"TWSE"`），**DB 上沒有任何欄位能區分
+這一列是證交所公告值還是本系統反推值**。美股因 Yahoo 完全不提供折溢價欄，**100% 走反推**、標記同樣是 `"Yahoo Finance"`。
+
+**`source` 與「怎麼算出來的」是兩個獨立軸，不可合併**：`source` 維持既有語意＝提供淨值的站台
+（`TWSE`／`Yahoo Finance`，未來可能新增來源），既有 186 列不回填、不改寫。新增欄位
+`pct_origin VARCHAR(20) NULL`，值域：
+
+| 值 | 意義 | 適用市場 |
+|---|---|---|
+| `OFFICIAL` | 折溢價欄由來源直接提供 | 僅台股（證交所 `g` 欄有值時） |
+| `RECONSTRUCTED` | 本系統以 `(收盤價−淨值)/淨值` 反推 | 僅美股（Yahoo 無此欄，唯一取得方式） |
+| `NULL` | 該列無折溢價（淨值有值但折溢價欄留白，且非美股反推情境） | 台股 `g` 欄留白時 |
+
+此為**資料來源標記，不是使用者可自訂的業務分類**——比照既有「來源標記」欄位的慣例（如
+`realized_gain.broker` 記錄成交當下券商名稱），一律 plain `VARCHAR`、無 CHECK 約束、不入 `/api/settings/*`、
+不建管理頁面。與「禁止 Enum 寫死」的規範不衝突：那條規範管的是**業務分類**（銀行、券商、市場類型），
+`pct_origin` 是抓取管線內部記帳，值域由程式碼決定、使用者無從新增。
+
+**修法**（刻意不改 `EtfNavFetchClient.EtfNav` record 本身，避免同動 台股／美股兩處建構呼叫點；
+「怎麼算出來的」這個判斷發生在 `EtfNavPoller.resolvePct()` 內，離 `upsertEtfNav` 呼叫點最近）：
+
+1. `EtfNavPoller` 新增 package-private static record：
+   `record PremiumResult(java.math.BigDecimal pct, String origin) {}`。
+2. 現行 `private java.math.BigDecimal resolvePct(EtfNav nav, LocalDate navDate)` 改為
+   `static PremiumResult resolvePremium(EtfNav nav, LocalDate navDate, java.util.function.BiFunction<String,LocalDate,java.util.Optional<java.math.BigDecimal>> closeLookup)`
+   （比照本專案「static 純函式＋依賴改參數注入以利脫離 Spring context 測試」的既有精神，如
+   `ClosePersister.shouldDumpPayload`；惟 `shouldDumpPayload` 三個參數皆為直接傳入資料、內部不呼叫外部依賴，
+   本例額外需要把 `source.findCloseOn` 改為函式參數注入，屬本任務新增的接縫手法，兩者不完全相同）：
+   - `nav.premiumDiscountPct() != null` → `PremiumResult(該值, "OFFICIAL")`。**僅台股會落在此分支**
+     （美股抓取端本就固定回 null 折溢價，見 `MarketDataFetchService.getUsEtfNav`）。
+   - `"台股".equals(nav.market())` 且 `premiumDiscountPct() == null` → `PremiumResult(null, null)`，
+     **不查 `closeLookup` 反推**。
+   - 其餘（美股，`premiumDiscountPct() == null`）→ 沿用現行反推公式，`PremiumResult(反推值, "RECONSTRUCTED")`；
+     查無收盤價或淨值為 0 時 → `PremiumResult(null, null)`。
+   - **`closeLookup` 的 `BiFunction<String,LocalDate,Optional<BigDecimal>>` 只帶「代號」與「日期」兩個維度**，
+     但 `StockSourceQuery.findCloseOn(String stockCode, String market, LocalDate tradingDate)` 是三參數方法，
+     `market` 不能省略——`persist()` 呼叫處**不得**直接寫方法參考 `source::findCloseOn`（arity 不符，編譯失敗），
+     必須以 lambda 綁定當下 `nav.market()`：
+     ```java
+     PremiumResult premium = resolvePremium(nav, navDate,
+             (code, date) -> source.findCloseOn(code, nav.market(), date));
+     ```
+3. `upsertEtfNav` 新增守門：寫入前先讀既有列的 `pct_origin`，若既有值為 `OFFICIAL` 而本次要寫入的是
+   `RECONSTRUCTED`，**折溢價欄與 `pct_origin` 皆不覆寫**（淨值欄本身仍可更新，維持「同日多次抓取取最後一次」
+   的既有語意）。此情境在正常抓取流程下不會發生（台股不再反推、美股從未有 `OFFICIAL`），
+   守門是防禦未來新增來源時的誤用。
+4. `ExcelExportService.premiumDiscountPct()` 的台股分支同步關閉反推（與 `resolvePremium()` 用不同的價格輸入——
+   前者用該列即時價、後者用與淨值同交易日的收盤價，這是「盤中折溢價」與「收盤折溢價」兩個不同事實，
+   刻意保留兩份計算——但「台股不反推」這條規則兩處必須一致）。同步改為 package-private static
+   （現行為 `private static`）以利單元測試，比照上一點的接縫模式。
+
+**Liquibase**：`v1.82.0-etf-nav-pct-origin.sql`，`ALTER TABLE etf_nav_history ADD COLUMN IF NOT EXISTS
+pct_origin VARCHAR(20)`。不回填既有 186 列（皆為 `TWSE`／`Yahoo Finance` 抓取當時未記錄此欄，
+無法回溯判斷各列當初是否反推；新列自然帶值，舊列 `pct_origin` 維持 `NULL` 屬誠實狀態）。
 
 ### 資產總覽活頁簿改為「總表 ＋ 每檔持股一張過去一年股價分頁」（Task 206）
 

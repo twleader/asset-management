@@ -888,16 +888,18 @@ public class ExcelExportService {
      * <ul>
      *   <li><b>台股</b>：證交所已算好折溢價，且其市價與本列「即時價」同源（皆為 TWSE mis 的成交價，實測逐檔吻合），
      *       故直接沿用權威值。<b>不得改為自行重算</b>——證交所的淨值欄在股票型 ETF 四捨五入至小數 2 位，
-     *       重算誤差可達 0.07 個百分點。</li>
+     *       重算誤差可達 0.07 個百分點（Requirement 34／Task 259 起：台股折溢價欄留白時<b>一律回 null</b>，
+     *       不得以本列即時價反推）。</li>
      *   <li><b>美股</b>：Yahoo 未提供折溢價欄。若在抓取端以 Yahoo 自己的市價計算，會與本列「即時價」
      *       （走 Redis，來源與時點皆不同）對不起來——實測 VOO 兩者相差 0.11%，使用者拿本列數字驗算會兜不攏。
      *       故改在此以該列自己的即時價計算，保證列內自洽。</li>
      * </ul>
      * 淨值或即時價任一缺漏即回 null（留白），不以昨收等替代值湊數。
      */
-    private static BigDecimal premiumDiscountPct(PriceQueryService.EtfNav nav, BigDecimal livePrice) {
+    static BigDecimal premiumDiscountPct(PriceQueryService.EtfNav nav, BigDecimal livePrice) {
         if (nav == null) return null;
         if (nav.premiumDiscountPct() != null) return nav.premiumDiscountPct();
+        if ("台股".equals(nav.market())) return null; // Task 259：台股折溢價缺漏不反推
         if (livePrice == null || nav.nav() == null || nav.nav().compareTo(BigDecimal.ZERO) == 0) return null;
         return livePrice.subtract(nav.nav())
                 .multiply(BigDecimal.valueOf(100))
