@@ -112,7 +112,7 @@ DB 佐證（`docker exec asset-postgres psql -U assets -d assets`）：
 - [x] 257.1.1 更新該方法的 javadoc：原文為「取最新快照所有持股代號（盤中 / 盤後皆用同一份）。」，改為說明「**每位 owner 各自**最新快照的持股 ∪ `stock_alert` 觀察清單」，並註明 Task 257 推翻了 Task 249 當時「不得修改本方法」的判斷、附上量測結果（台股 18→19、美股 9→9、英股 3→3）。
 
 - [x] 257.1.2 更新 `collectTwRadarCodes` 的 javadoc：其中「**刻意不改 `collectHeldStockCodes` 本身**：它同時服務每 2 分鐘的 `PricePoller.scheduledTwIntradayUpdate` 與 `refreshAll()`，放大其範圍會改變背景排程對外部 API 的請求量，屬另一個決定。」一段**不要刪除**（它是當時的決策記錄），在其後加註「（Task 257 已推翻：實測改為 per-owner 後台股僅 18→19 檔，請求量幾無變化；兩者現已同口徑。）」。
-- [ ] 257.1.3 **（尚未落實，見完成報告偏差 4）** 同一份 javadoc 開頭「為什麼不重用 `collectHeldStockCodes`」那段也要加註「（Task 257 後 `collectHeldStockCodes` 已改為同一個 `DISTINCT ON` 子查詢，本段描述的是 Task 249 當時的狀態）」，否則同一份 javadoc 前後矛盾。**另一處同樣過期的斷言在 `TwRadarRefreshService.java:89-91`**：註解寫「不可改回 `collectHeldStockCodes`：它全庫只取一筆最新快照且同日 tie-break 任意」——前半在 Task 257 後已為假。結論（不可改回）仍成立，但理由句須改為「它不做 SQL 層 `market='台股'` 過濾、也不無條件 `remove("0000")`」。兩處要一起修。
+- [x] 257.1.3 同一份 javadoc 開頭「為什麼不重用 `collectHeldStockCodes`」那段也要加註「（Task 257 後 `collectHeldStockCodes` 已改為同一個 `DISTINCT ON` 子查詢，本段描述的是 Task 249 當時的狀態）」，否則同一份 javadoc 前後矛盾。**另一處同樣過期的斷言在 `TwRadarRefreshService.java:89-91`**：註解寫「不可改回 `collectHeldStockCodes`：它全庫只取一筆最新快照且同日 tie-break 任意」——前半在 Task 257 後已為假。結論（不可改回）仍成立，但理由句須改為「它不做 SQL 層 `market='台股'` 過濾、也不無條件 `remove("0000")`」。兩處要一起修。
 
 ### 257.2 不得順帶更動的東西
 
@@ -227,5 +227,5 @@ docker run --rm --network asset-network curlimages/curl:latest -s \
 1. **257.3.1 as-built 拆成三個測試方法**，且手法是 `doAnswer` 攔下 `jdbc.query(String, RowCallbackHandler)` 收集 SQL，而非任務檔原寫的 `ArgumentCaptor<String>`；另加了一條比 spec 更強的斷言 `verify(jdbc, never()).query(String, ResultSetExtractor)`。已據實改寫 257.3.1 為 a／b／c 三小項並註明該強斷言的代價。
 2. **多了一個 spec 未宣稱的測試**（雷達收集器回歸錨點），已補記為 257.3.5。
 3. 驗證段步驟 1／2 原註「Mockito on Java 21：本模組不需 byte-buddy experimental 旗標」與 t258 同段落矛盾且與本機實況不符（本機 JVM 為 Java 25），已更正為 `-DextraArgLine=-Dnet.bytebuddy.experimental=true` 並註明不可用 `-DargLine`。
-4. **257.1.3 尚未落實，故維持未勾。** 補寫 spec 時發現 `collectTwRadarCodes` javadoc **開頭**那段「為什麼不重用 `collectHeldStockCodes`」仍逐字寫著「後者取的是 `SELECT id FROM asset_snapshot ORDER BY snapshot_date DESC LIMIT 1`——全庫只取一筆」，沒有任何 Task 257 caveat（`grep -ran 'Task 249 當時的狀態'` 零命中）；`b975ae75` 加註的只有第二段（257.1.2）。同一份 javadoc 因此前後矛盾。**另 `TwRadarRefreshService.java:89-91` 的註解也有同一句過期斷言**（「它全庫只取一筆最新快照且同日 tie-break 任意」），兩處要一起修。這需要一次純註解修正，屬 `external-materials-service/**` 寫入、受 SDD 閘門管，故不在本次「純 spec」變更內處理。
+4. **257.1.3 原 commit 漏做，已於補寫 spec 後的追加 commit 補上。** `b975ae75` 只加註了 `collectTwRadarCodes` javadoc 的第二段（257.1.2），**開頭**那段「為什麼不重用 `collectHeldStockCodes`」仍逐字寫著「後者取的是 `SELECT id FROM asset_snapshot ORDER BY snapshot_date DESC LIMIT 1`——全庫只取一筆」，同一份 javadoc 因此前後矛盾；`TwRadarRefreshService.java:88-91` 的行內註解也有同一句過期斷言。兩處已一併修正：保留原文作為 Task 249 當時的決策記錄（加上「以下為 Task 249 當時的狀態」限定），另加一段說明兩支仍不可互相替換，但**理由已換成**「本方法在 SQL 層 `WHERE h.market = '台股'` 過濾並無條件 `remove("0000")`；`collectHeldStockCodes` 靠 `classify()` 的 else 分支把非美股非英股的一切 market 值歸入台股、且只在 `stock_alert` 側排除 `0000`」。**純註解變更，零行為改動**（`git diff` 的所有增刪行皆為 `*`／`//` 開頭），`mvn compile` 通過。
 5. 完成報告中的 Redis payload 與日誌行數為**時點快照**（2026-07-30 05:12 CST）。之後盤中 tick 已覆寫 `price:台股:2885`（`source` 轉為 `TWSE`）、日誌亦已增長，該兩項無法回溯覆核；DB 與 image 相關的數字則可隨時重查。
