@@ -107,12 +107,19 @@ public class StockSourceQuery {
     /**
      * 今日交易雷達回補專用：**每位 owner 各自最新快照**的台股持股 ∪ 台股觀察清單，排除大盤 `0000`（Task 249）。
      *
-     * <p><b>為什麼不重用 {@link #collectHeldStockCodes}：</b>後者取的是
+     * <p><b>為什麼不重用 {@link #collectHeldStockCodes}（以下為 Task 249 當時的狀態）：</b>後者當時取的是
      * {@code SELECT id FROM asset_snapshot ORDER BY snapshot_date DESC LIMIT 1}——
      * 全庫只取<b>一筆</b>，且日期相同時 tie-break 由 Postgres 任意決定。實測 2026-07-29 兩位 owner
      * 同日各有一筆快照（id 15 / owner 1，35 筆台股；id 18 / owner 2，2 筆台股），它挑中 id 18，
      * 於是 owner 1 只在自己持股、不在觀察清單的標的（實測 `2885`）永遠不會被回補——
      * 使用者按下「重新整理」卻有一列價格沒動，與按鈕的承諾不符。</p>
+     *
+     * <p><b>Task 257 起上段的前提已不成立</b>：{@link #collectHeldStockCodes} 現在用的是同一個
+     * {@code DISTINCT ON (owner_user_id)} 子查詢。兩支<b>仍不可互相替換</b>，但理由換成了另外兩點：
+     * 本方法在 SQL 層就 {@code WHERE h.market = '台股'} 過濾、並在方法尾端無條件
+     * {@code remove("0000")}；{@link #collectHeldStockCodes} 則靠 {@code classify()} 的 else 分支把
+     * 「非美股、非英股」的一切 market 值（含 NULL 與日後新增的市場類型）歸入台股，且只在
+     * {@code stock_alert} 那條查詢排除 {@code 0000}。</p>
      *
      * <p>改用 {@code DISTINCT ON (owner_user_id) ... ORDER BY owner_user_id, snapshot_date DESC, id DESC}
      * 取每位 owner 的最新快照（同 owner 同日多筆時再以 id 決勝，結果具決定性）。範圍仍是全庫——

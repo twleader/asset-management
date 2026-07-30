@@ -86,8 +86,9 @@ public class TwRadarRefreshService {
         long t0 = System.nanoTime();
         try {
             // 用雷達專用收集器（每位 owner 各自最新快照 ∪ 觀察清單，已排除 0000）。
-            // 不可改回 collectHeldStockCodes：它全庫只取一筆最新快照且同日 tie-break 任意，
-            // 實測會整個略過某位 owner 的持股，使該使用者按下按鈕後有標的的價格沒被更新。
+            // 不可改回 collectHeldStockCodes：兩者自 Task 257 起雖共用同一個 DISTINCT ON (owner_user_id)
+            // 子查詢，但後者不做 SQL 層 market='台股' 過濾、也不無條件 remove("0000")——它靠 classify()
+            // 的 else 分支把非美股非英股的一切 market 值歸入台股，本頁只評台股，換過去會多抓且含大盤。
             Set<String> tw = new LinkedHashSet<>();
             source.collectTwRadarCodes(tw);
             tw.remove(TAIEX_CODE);   // 防禦性：收集器已排除，這裡不倚賴它
