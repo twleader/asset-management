@@ -80,9 +80,7 @@ public class TechnicalIndicatorService {
             BigDecimal wr9) {}
 
     /** MACD 一族逐期輸出（Task 262）；暖機不足者為 EMPTY。 */
-    private record MacdPoint(BigDecimal ema12, BigDecimal ema26, BigDecimal dif, BigDecimal macd, BigDecimal osc) {
-        private static final MacdPoint EMPTY = new MacdPoint(null, null, null, null, null);
-    }
+    private record MacdPoint(BigDecimal ema12, BigDecimal ema26, BigDecimal dif, BigDecimal macd, BigDecimal osc) {}
 
     /** 序列核心逐期輸出；暖機不足 9 筆者為 EMPTY。 */
     private record KdPoint(BigDecimal k, BigDecimal d, BigDecimal j9, BigDecimal k3d2, BigDecimal rsv) {
@@ -152,7 +150,8 @@ public class TechnicalIndicatorService {
     }
 
     /**
-     * 走勢圖用的整段指標序列（Task 261）：[start, end] 逐日的 MA20/60/240 + K/D/J9/K3D2/RSV。
+     * 走勢圖用的整段指標序列：[start, end] 逐日的 MA20/60/240 + K/D/J9/K3D2/RSV（Task 261）
+     * ＋ EMA12/EMA26/DIF/MACD/OSC、RSI5/RSI10、BIAS10/BIAS20/B10−B20、W%R9（Task 262 指標選單）。
      *
      * 與單點 {@link #computeAll} 共用同一份 MA／KD 核心與同一套今日 live 併入規則，因此
      * <b>當 end &gt;= 該市場今日時，尾筆的 k/d/ma* 逐位等於 computeAll()、倒數第二筆的 k/d 等於

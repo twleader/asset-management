@@ -753,7 +753,7 @@ const chartOption = computed(() => {
       const fmt = v => (v == null ? '' : Number(v).toLocaleString('en-US', {
         minimumFractionDigits: 2, maximumFractionDigits: 2
       }))
-      // 五個 KD 指標的最新值一律取 BFF 的 latest（＝指標序列本身最後一筆），
+      // 子圖指標（依 selectedIndicator 而定）的最新值一律取 BFF 的 latest（＝指標序列本身最後一筆），
       // 與「當日」水平線同值；均線同理，確保切換期間看到相同數字
       // 子圖 legend 的項目依選單而變（畫線的 + 只顯示數值的；OSC 柱狀不列 legend）
       const subLegend = [...spec.lines, ...(spec.legendOnly || [])]
@@ -766,7 +766,7 @@ const chartOption = computed(() => {
         '成本均價':   cost != null ? fmt(cost) : ''
       }
       for (const [name, key] of subLegend) map[name] = fmt(num(lt[key]))
-      // 漲跌箭頭：只加在五個 KD 指標上（股價／均線／成本均價維持無箭頭）。
+      // 漲跌箭頭：只加在子圖指標上（股價／均線／成本均價維持無箭頭）。
       // 比較基準為指標序列的最後兩筆（BFF 已備妥 prev*），台股慣例漲紅跌綠。
       const arrowOf = (cur, prev) => {
         const a = num(cur), b = num(prev)
@@ -779,7 +779,6 @@ const chartOption = computed(() => {
         arrowMap[name] = arrowOf(lt[key], lt['prev' + key.charAt(0).toUpperCase() + key.slice(1)])
       }
       // 每個 series 在 legend 數值的色彩，對應線條顏色（與 logo 一致）。
-      // K3D2 / RSV 不畫線（子圖僅 90px，五條會過密），只顯示數值故用中性深灰。
       const colorMap = {
         '股價':      '#3b82f6',
         '月線MA20':  '#f59e0b',
@@ -817,7 +816,7 @@ const chartOption = computed(() => {
         return `{n|${name}}\n${valuePart}${arrowPart}`
       }
       const textStyle = { fontSize: 12, color: '#475569', rich: richStyles }
-      // 兩組 legend，各自貼著自己的 pane：股價／均線在上圖頂端，五個 KD 指標移到
+      // 兩組 legend，各自貼著自己的 pane：股價／均線在上圖頂端，子圖指標移到
       // 兩張圖中間（＝KD 子圖正上方）。十項全擠在頂端一列會過密且與股價無關聯。
       // KD 那組用 bottom 定位（不依賴容器總高）：grid[1] 頂端距底部 = bottom 60 + height 155 = 215，
       // legend 兩行約 36px，加上下各 16px 間隙 → bottom 231，落在 231~267，grid[0] 則收在 283。
