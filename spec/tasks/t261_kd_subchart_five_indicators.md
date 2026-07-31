@@ -125,8 +125,9 @@
 
 - [x] 261.12 series（第 752–764 行，皆 `xAxisIndex: 1, yAxisIndex: 1`）：
   - `K9`／`D9`：沿用現有兩個 series 定義只改 `name`；掛在 K 上的 80/20 `markLine`（`silent: true`、灰色虛線）維持不動。
-  - `J9`：新增 line series，`lineStyle: { width: 1.5, color: '#0ea5e9', type: 'dashed' }`、`showSymbol: false`、`endLabel` 比照 K9/D9。
-  - `K3D2`／`RSV`：**不畫線**（90px 高的子圖再加兩條會過密；K3D2 = 3K−2D 可由 K9／D9 直接推得、RSV 可由 K9 與前一日 K9 反解 `RSV = 3K − 2·prevK`，資訊不會遺失），**但必須各掛一個 `data: []` 的同名 line series**（`itemStyle: { color: '#334155' }`、`showSymbol: false`）。理由：ECharts `LegendView` 對「`legend.data` 有名字卻找不到同名 series」的處理是**整個項目連同數值都不繪製**（production build 無任何提示），不是 render 成灰色圖示——省略空 series 會讓這兩個數值直接消失且無錯誤訊息。
+  - `J9`：新增 line series，`lineStyle: { width: 1.5, color: '#0ea5e9', type: 'dashed' }`、`showSymbol: false`。
+  - **KD 三條線一律不設 `endLabel`**：legend 就在子圖正上方約 30px 處、顯示同樣三個數值，右側再標一次只會擠成一團（K9/D9/J9 的值常相距不到 10，在子圖裡只差數 px）。上圖的股價／均線／成本均價則保留 `endLabel`（legend 距離較遠，需要線條識別的視覺錨點）。
+  - `K3D2`／`RSV`：**不畫線**（子圖再加兩條會過密；K3D2 = 3K−2D 可由 K9／D9 直接推得、RSV 可由 K9 與前一日 K9 反解 `RSV = 3K − 2·prevK`，資訊不會遺失），**但必須各掛一個 `data: []` 的同名 line series**（`itemStyle: { color: '#334155' }`、`showSymbol: false`）。理由：ECharts `LegendView` 對「`legend.data` 有名字卻找不到同名 series」的處理是**整個項目連同數值都不繪製**（production build 無任何提示），不是 render 成灰色圖示——省略空 series 會讓這兩個數值直接消失且無錯誤訊息。
   - 這兩項不會進 tooltip（`trigger: 'axis'` 逐 series 列出），此為預期行為。
 
 - [x] 261.13 子圖 Y 軸（第 710 行 `{ gridIndex: 1, type: 'value', min: 0, max: 100, splitNumber: 2, ... }`）改為自適應：
@@ -243,8 +244,13 @@ docker exec asset-business-services sh -c 'curl -s "http://localhost:8080/api/ma
 2. **J9／K3D2 公式測試的容差**：原本設 `0.011`，實測失敗——實作以**未捨入** k/d 計算，而測試只能拿已捨入的 k/d 反算，理論誤差上限為 `3×0.005 + 2×0.005 + 0.005 = 0.03`，實測差 0.02。改為 `0.031`。這反而**實證了**「不走二次捨入」這條規則的必要性（兩種路徑末位確實會差）。
 3. **前端 `history` ref 完全移除**（原 261.9 寫「若仍需…」）：改為單一資料來源，`defaultZoomRange`／`latestTradingDate`／`intradayQuote` 昨收三處全部改由 `chart-series` 的 `dates`／`prices` 推導，昨收反找時跳過 `null`（聯集後尾格可能是「有指標、無股價」）。`api/index.js` 的 `getStockHistory` 定義保留但已無呼叫端。
 4. **legend `itemGap`**：由 36 收窄為 18（項目數 7 → 10），未動 `grid[0].top`。
-5. **legend 改為兩組（使用者回饋後調整）**：原本十項全放頂端一列，實機過密。改為 ECharts `legend` 陣列——上組（股價／月線／季線／年線／成本均價，`top: 8`）與下組（K9／D9／J9／K3D2／RSV，`bottom: 156`＝KD 子圖正上方、兩張圖中間），`grid[0].bottom` 190 → 200 讓出該列，`itemGap` 回到 30。
-6. **MA 累加方向（架構查證後修正）**：新增的 `maAt()` 原本以「舊→新」累加，而既有 `simpleMa()`／`taiexSimpleMa()` 是「新→舊」。double 加法不可結合，末位差經 `setScale(2, HALF_UP)` 會在 `x.xx5` 邊界翻面——實測 MA20 約 **1.7%** 的日子會與 `computeAll()` 差 0.01，走勢圖 legend 的「月線MA20」就會跟觀察清單表格對不上，正好牴觸本任務的核心宣稱。已把 `maAt()` 迴圈方向改為新→舊（**不動 `simpleMa`**，動它會改到 `computeAll()` 的對外數值），並新增「40 組隨機漫步價格掃邊界」的迴歸測試釘住此順序。
+5. **Y 軸刻度與 endLabel 重疊（使用者回饋後調整）**：
+   - 原本只給 `min`/`max`（對齊 10 的倍數）＋ `splitNumber: 2`，echarts 會自己挑「好看的」間隔卻不對齊端點，實機產生 `-40 / 0 / 100 / 130` 這種**不等距**刻度。
+     第一次改成「`min`/`max` 對齊 50 的倍數 ＋ 固定 `interval: 50`」，刻度是等距了，但**留白過頭**：J9 只要跌破 0 一點點（如 -5）就被 `floor` 到 -50，實機出現 `-50 ~ 150` 而三條線全擠在 0~100、只佔子圖一半高度，比原本更難讀。
+     最終作法：`min`/`max` 只對齊 **10** 的倍數（貼合資料），`interval` 取 `(max - min) / 2` ——`range` 恆為 10 的倍數，故 `interval` 必為 5 的倍數的整數，刻度自然等距且對齊端點，且**只有三個刻度**（子圖高度有限，多了就擠）。仍保留 `min ≤ 20`、`max ≥ 80` 以確保 20/80 參考線可見。實測 J9 約 -8~105 時得 `-20 / 50 / 120`，資料佔 81% 高度。
+   - 上圖 endLabel 值接近時互相疊住（實機：股價 2,405.50 與季線MA60 2,347.75 在 y 軸上僅差約 10px）。五條線加 `labelLayout: { moveOverlap: 'shiftY' }` 讓它們沿 Y 軸自動錯開。三個前提已逐一查證：`labelLayout` 由 `echarts/lib/export/core.js` 自動 `use(installLabelLayout)`（本專案用 tree-shaking 版，無須額外註冊）；`endLabel` 經 `polyline.setTextContent()` 掛載，會被 `LabelManager` 的 `group.traverse` 收集且 `_addLabel` 不過濾 `dataIndex`；markPoint 屬獨立的 `MarkPointView`、不在 `chartView.group` 內，「最高/最低」色塊不受影響。
+6. **legend 改為兩組（使用者回饋後調整）**：原本十項全放頂端一列，實機過密。改為 ECharts `legend` 陣列——上組（股價／月線／季線／年線／成本均價，`top: 8`）與下組（K9／D9／J9／K3D2／RSV，`bottom: 156`＝KD 子圖正上方、兩張圖中間），`grid[0].bottom` 190 → 200 讓出該列，`itemGap` 回到 30。
+7. **MA 累加方向（架構查證後修正）**：新增的 `maAt()` 原本以「舊→新」累加，而既有 `simpleMa()`／`taiexSimpleMa()` 是「新→舊」。double 加法不可結合，末位差經 `setScale(2, HALF_UP)` 會在 `x.xx5` 邊界翻面——實測 MA20 約 **1.7%** 的日子會與 `computeAll()` 差 0.01，走勢圖 legend 的「月線MA20」就會跟觀察清單表格對不上，正好牴觸本任務的核心宣稱。已把 `maAt()` 迴圈方向改為新→舊（**不動 `simpleMa`**，動它會改到 `computeAll()` 的對外數值），並新增「40 組隨機漫步價格掃邊界」的迴歸測試釘住此順序。
 
 ### 部署與實機驗證（已完成）
 

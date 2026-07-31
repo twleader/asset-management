@@ -1855,7 +1855,7 @@ prevK / prevD 續存**未捨入**值；輸出各欄才 setScale(2, HALF_UP)
 J9 / K3D2 亦以該圈**未捨入**的 k、d 計算後才捨入（與遞迴內部精度一致，避免二次捨入）
 ```
 
-> `J9` 與 `K3D2` 是同一對 K/D 的兩種鏡像慣例（前者偏重 D、後者偏重 K），**刻意兩者都給**：使用者要在同一畫面對照兩種流派的乖離訊號。因為互為鏡像，兩條都畫會讓 90px 高的子圖無法判讀，故只畫 J9。
+> `J9` 與 `K3D2` 是同一對 K/D 的兩種鏡像慣例（前者偏重 D、後者偏重 K），**刻意兩者都給**：使用者要在同一畫面對照兩種流派的乖離訊號。因為互為鏡像，兩條都畫會讓子圖線條過密無法判讀，故只畫 J9。
 > 註：`J9 = 3D − 2K` 的方向由使用者提供的畫面實測值反推確立（K9=40.36、D9=32.74 → J9=17.50、K3D2=55.60），與坊間常見的 `J = 3K − 2D` 相反；兩個方向的值本專案都提供，不需二擇一。
 
 **同源保證（機械判準）**：序列與 `computeAll()` 共用同一套今日 live 併入規則（最新歷史列非該市場今日、且 live 的 `tradingDate` 等於今日 → 以 `closePrice=price`、`highPrice=highPrice ?? price`、`lowPrice=lowPrice ?? price` 併為今日列）。因此**當 `end >= MarketZones.today(market)` 時，序列最後一筆的 `k`/`d`/`ma20`/`ma60`/`ma240` 必須逐位等於 `computeAll()` 的對應欄位，倒數第二筆的 `k`/`d` 必須等於 `previousK`/`previousD`**（`end` 早於今日時序列不併 live，兩者本就不必相等）。`0000`＋`台股` 走 `twse_index_daily_history` 的特例（含 Redis 今日即時點位併入、舊資料 high/low 為 null 時 fallback close）序列版同樣適用。
