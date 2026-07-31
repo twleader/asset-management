@@ -9,10 +9,15 @@ import org.springframework.context.annotation.Configuration;
 /**
  * StockAnalysisDialog 共用對話框專屬 BFF route。
  *
- * 此元件被 Dashboard / SnapshotForm / WatchStock / StockAlert 四個 view 同時使用。
- * 為符合 CLAUDE.md「同義欄位、同一 business service API」原則 — 四個 view 顯示
+ * 此元件被 Dashboard / SnapshotForm / WatchStock / StockAlert / RealizedGain / TradingRadar
+ * 六個 view 同時使用（RealizedGain 為損益明細列雙擊、TradingRadar 為個股決策表列雙擊，Task 234）。
+ * 為符合 CLAUDE.md「同義欄位、同一 business service API」原則 — 六個 view 顯示
  * 同一支股票的歷史價、配息歷史、ETF 持股都應該走同一個入口 — 將其拆為獨立 BFF route，
- * 而非由四個父 view 的 BFF 各自重複代理。
+ * 而非由六個父 view 的 BFF 各自重複代理。
+ *
+ * 走勢圖本身的資料不在這裡：它要把股價與技術指標兩支上游 join 起來（aggregation），
+ * 由 {@link StockAnalysisChartBffController} 的 /api/bff/stock-analysis/chart-series 提供（Task 261）。
+ * 本檔的五條 route 皆為精確路徑、不含萬用，不會攔截到該 controller。
  */
 @Configuration
 public class StockAnalysisBffRoutes {

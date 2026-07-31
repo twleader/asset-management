@@ -42,6 +42,7 @@ public class MarketDataController {
     private final PriceStreamService priceStreamService;
     private final DividendHistoryService dividendHistoryService;
     private final com.steven.assets.service.ExcelExportService excelExportService;
+    private final com.steven.assets.service.TechnicalIndicatorService technicalIndicatorService;
 
     /**
      * 取得交易日曆假日（台股：TWSE Open API；美股：NYSE 規則計算）
@@ -195,6 +196,22 @@ public class MarketDataController {
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end) {
         return historicalDataService.getStockHistory(code, market, start, end);
+    }
+
+    /**
+     * 走勢圖技術指標整段序列（Task 261；StockAnalysisDialog 走勢圖用，經 BFF chart-series 聚合）
+     * GET /api/market-data/indicators/series?code=0050&market=台股&start=2016-07-31&end=2026-07-31
+     *
+     * 與單點 /api/settings 系列無關；此序列與 TechnicalIndicatorService.computeAll() 同源，
+     * end 已到該市場今日時尾筆逐位等於 computeAll()（走勢圖與觀察清單表格同源的機械判準）。
+     */
+    @GetMapping("/indicators/series")
+    public List<com.steven.assets.service.TechnicalIndicatorService.IndicatorPoint> getIndicatorSeries(
+            @RequestParam @Pattern(regexp = CODE_PATTERN, message = "股票代號格式不合法") String code,
+            @RequestParam @Pattern(regexp = MARKET_PATTERN, message = "市場別格式不合法") String market,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end) {
+        return technicalIndicatorService.indicatorSeries(code, market, start, end);
     }
 
     /**

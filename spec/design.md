@@ -97,8 +97,9 @@ com.steven.assets/
   - `GET /api/bff/snapshot-form/lookups`：表單下拉一次取齊（banks / brokers / depositTypes / transitFundTypes，皆已過濾 active）
   - `GET /api/bff/snapshot-form/funds`：信託基金主檔（passthrough 至 `/api/funds`），每筆已含 latestNav / latestFxRate / twdPerUnit；`?date=` 時改用該基準日（Requirement 19/21）
   - `POST /api/bff/snapshot-form/fund-nav/refresh`：觸發後端 → external-materials-service 立即刷新所有基金 NAV，回 `{ success, failed, total }`
-- `StockAnalysisBffRoutes`（StockAnalysisDialog 跨 view 共用元件專屬）：對話框被 Dashboard / SnapshotForm / WatchStock / StockAlert / RealizedGain 五個 view 同時使用（已實現損益明細列雙擊開啟），依「同義欄位、同一 business service API」原則拆為獨立 BFF route，避免在五個父 view 的 BFF 各自重複代理。Dashboard 開啟此 dialog 的觸發點有三：持股表格列雙擊（`onStockDblClick`）、個股 bar 圖雙擊（`onBarDblClick`）、以及「資產配置分佈」tab 2/3 個股穿透圓餅圖 segment 單擊（`onLookthroughPieClick(params, market)`，「其它」聚合段無代號不開；命中當前快照 `mergedStocks` 同 `stockCode`+`market` 的直接持股則沿用完整列以保留 `avgCostOriginal` 成本欄位、否則僅帶 `{stockCode, stockName, market}`）。提供：
+- `StockAnalysisBffRoutes` ＋ `StockAnalysisChartBffController`（Task 261 新增的 aggregation controller，與同前綴的 exact-path route 並存；WebFlux `RequestMappingHandlerMapping`（order 0）先於 Gateway `RoutePredicateHandlerMapping`（order 1），且既有五條 route 皆為精確路徑、不含萬用，故不衝突——同一模式的既有先例為 `StockAlertBffController` ＋ `StockAlertBffRoutes`）（StockAnalysisDialog 跨 view 共用元件專屬）：對話框被 Dashboard / SnapshotForm / WatchStock / StockAlert / RealizedGain / TradingRadar **六個** view 同時使用（損益明細列雙擊開啟為既有；交易雷達個股決策表列雙擊為 Task 234 加入），依「同義欄位、同一 business service API」原則拆為獨立 BFF route，避免在六個父 view 的 BFF 各自重複代理。Dashboard 開啟此 dialog 的觸發點有三：持股表格列雙擊（`onStockDblClick`）、個股 bar 圖雙擊（`onBarDblClick`）、以及「資產配置分佈」tab 2/3 個股穿透圓餅圖 segment 單擊（`onLookthroughPieClick(params, market)`，「其它」聚合段無代號不開；命中當前快照 `mergedStocks` 同 `stockCode`+`market` 的直接持股則沿用完整列以保留 `avgCostOriginal` 成本欄位、否則僅帶 `{stockCode, stockName, market}`）。提供：
   - `GET /api/bff/stock-analysis/history/stock` → `/api/market-data/history/stock`
+  - `GET /api/bff/stock-analysis/chart-series`（Task 261，由 **`StockAnalysisChartBffController`** 提供，**非 Gateway passthrough**）：走勢圖上下兩個 pane 的完整資料，由 BFF 並行呼叫 business 的 `/api/market-data/history/stock`（股價 OHLC）與 `/api/market-data/indicators/series`（MA20／MA60／MA240／K9／D9／J9／K3D2／RSV 逐日值），**以 `tradingDate` 聯集對齊後**回傳前端可直接 render 的等長陣列。走勢圖原本在前端自算 KD／MA，與觀察清單顯示的後端 `computeAll()` 值在盤中不一致；上收後同源。兩支上游的今日格條件不同（股價要求 `source` 不含括號、`0000` 更不併 live；指標比照 `computeAll` 併 live），故**必須取聯集**——取股價側日期會把今日的指標點靜默丟掉，legend 顯示前一日的值，等於沒修
   - `GET /api/bff/stock-analysis/dividends` → `/api/market-data/dividends`
   - `GET /api/bff/stock-analysis/etf-holdings` → `/api/market-data/etf-holdings`
   - `POST /api/bff/stock-analysis/backfill-stock` → `/api/market-data/history/backfill-stock`（Task 136 lazy 回補：走勢圖無歷史時即時觸發單檔 10 年回補後重載；只寫 `stock_price_history` 不入主檔、今日列獨佔給 `ClosePersister`）
@@ -1263,6 +1264,7 @@ GET    /api/market-data/holidays?year=2026                     # 台股 / 美股
 POST   /api/market-data/history/backfill                       # 補齊所有歷史股價
 POST   /api/market-data/history/backfill-stock?code=&market=&since=&until=  # 補齊單支股票歷史股價
 GET    /api/market-data/history/stock?code=&market=            # 查詢單支股票歷史股價
+GET    /api/market-data/indicators/series?code=&market=&start=&end=  # 走勢圖技術指標整段序列（Task 261）：逐日 {tradingDate, ma20, ma60, ma240, k, d, j9, k3d2, rsv}，視窗不足者該欄 null。與單點 `TechnicalIndicatorService.computeAll()` 共用同一核心與同一套今日 live 併入規則 → 當 end >= MarketZones.today(market) 時序列最後一筆恆等於 computeAll()，倒數第二筆的 k/d 恆等於 previousK/previousD（走勢圖與觀察清單同源的機械判準；交易雷達個股表走還原權息價基，刻意不在此列）。0000 台股大盤走 twse_index_daily_history 特例
 POST   /api/market-data/history/prices-on-date?date=           # 批次查詢指定日期各股收盤價
 GET    /api/market-data/exchange-rate?currency=USD&start=&end= # 匯率歷史（省略區間則回傳全部）
 GET    /api/market-data/exchange-rate/latest?currency=USD      # 最新匯率
@@ -1820,6 +1822,73 @@ FinMind 自 2025 年起對匿名呼叫額度收緊，超量會回 `402 Payment R
 
 > **歷史背景**：早期 BFF 在 response 動態組裝 estimatedAnnualDividend，導致同一張快照在 AssetHistory 與 Dashboard 顯示不同值（一邊用即時股價、一邊用快照當日股價）。改為「snapshot 欄位即真相」後三邊一致，並符合 CLAUDE.md「同義欄位、同一 business service API」原則。
 
+### 走勢圖技術指標序列（Requirement 13 / Task 261）
+
+`StockAnalysisDialog.vue` 走勢圖的 MA20／MA60／MA240 與 KD 子圖的 K9／D9／J9／K3D2／RSV，**全部由 business-services 的 `TechnicalIndicatorService` 供給，前端不做任何指標計算**。
+
+**為什麼上收**：走勢圖原本以前端 `calcKD()`／`calcMA()` 就 `/api/bff/stock-analysis/history/stock` 的序列自算，而觀察清單（`WatchStockView`，Requirement 14）表格顯示的同義 K/D／均線來自後端 `TechnicalIndicatorService.computeAll()`。**兩者今日那一格的資料源不同**：
+
+| | `computeAll()`（表格） | `HistoricalDataService.getStockHistory()`（走勢圖舊路徑） |
+|---|---|---|
+| 今日格來源 | Redis live，只要 `tradingDate == today` 就併入 | Redis live，且**必須** `source` 不含括號（排除 `(history)`／`(前收)`／`(買賣中價)`）；**`0000` 台股大盤完全不併 live** |
+| 今日格高低價 | `highPrice ?? price`、`lowPrice ?? price`（真實盤中高低） | **無 high/low**，KD 遞迴 fallback 收盤價 |
+
+結果是盤中 HH9／LL9 可能不同（RSV 不同），或一邊有今日格一邊沒有（整段遞迴差一期）——使用者在觀察清單雙擊某列開走勢圖，**同一畫面看到兩組 K/D**。CLAUDE.md 的 BFF 規範恰好把這個情境列為具名例子（「股票即時 K/D/季線 → 兩個頁面都透過 `TechnicalIndicatorService.computeAll()`」），故本次上收使該規範對走勢圖真正成立。
+
+> ⚠️ **同源範圍只到「原始價基」為止。** 交易雷達（`TradingRadarView`）**個股決策表**的 K/D 不是 `computeAll()`——它走 `TradingRadarService` → `DistributionAdjustedPriceService.adjust()` 還原配息／除權後再 `computeFromSeries(還原序列)`，與走勢圖的原始價基**刻意不同**；凡視窗內有配息的個股必然對不上，這是既有規範「禁止混用原始／還原價」的結果，**不納入本次同源範圍、不得為此改動任一方**。交易雷達的**大盤卡**才是走 `computeAll()`。
+
+**演算法**（序列版與單點 `computeAll()` 共用同一份核心）：
+
+> **現況有三套 KD 遞迴，本次只碰第一套**：`TechnicalIndicatorService.stockKd()`（吃 `StockPriceHistory`）、同類的 `taiexKd()`（吃 `TwseIndexDailyHistory`，服務大盤卡）、`AlertChartRenderer.calcKd()`（警示 email PNG 圖自有）。序列版只與 `stockKd()` 合併共用核心；**後兩者本次一律不動**（動 `taiexKd()` 會改到大盤卡的對外數值）。大盤序列改以既有的「指數日線 → `StockPriceHistory`」映射轉型後餵同一份序列核心，繞開型別差異而不必新增第三套。
+
+```
+序列 asc（最早在前）；highs[i]／lows[i] 缺值時 fallback closes[i]
+MA_n[i]  = i < n-1 ? null : avg(closes[i-n+1..i])                 // n = 20 / 60 / 240
+i < 8    → K/D/J9/K3D2/RSV 皆 null（KD 暖機不足 9 筆）
+HH9 = max(highs[i-8..i]) ; LL9 = min(lows[i-8..i])
+RSV = (HH9 == LL9) ? 50 : (closes[i] − LL9) / (HH9 − LL9) × 100
+K   = prevK × 2/3 + RSV / 3          （seed prevK = 50，自序列最早一筆起遞迴）
+D   = prevD × 2/3 + K   / 3          （seed prevD = 50）
+J9    = 3 × D − 2 × K
+K3D2  = 3 × K − 2 × D
+prevK / prevD 續存**未捨入**值；輸出各欄才 setScale(2, HALF_UP)
+J9 / K3D2 亦以該圈**未捨入**的 k、d 計算後才捨入（與遞迴內部精度一致，避免二次捨入）
+```
+
+> `J9` 與 `K3D2` 是同一對 K/D 的兩種鏡像慣例（前者偏重 D、後者偏重 K），**刻意兩者都給**：使用者要在同一畫面對照兩種流派的乖離訊號。因為互為鏡像，兩條都畫會讓 90px 高的子圖無法判讀，故只畫 J9。
+> 註：`J9 = 3D − 2K` 的方向由使用者提供的畫面實測值反推確立（K9=40.36、D9=32.74 → J9=17.50、K3D2=55.60），與坊間常見的 `J = 3K − 2D` 相反；兩個方向的值本專案都提供，不需二擇一。
+
+**同源保證（機械判準）**：序列與 `computeAll()` 共用同一套今日 live 併入規則（最新歷史列非該市場今日、且 live 的 `tradingDate` 等於今日 → 以 `closePrice=price`、`highPrice=highPrice ?? price`、`lowPrice=lowPrice ?? price` 併為今日列）。因此**當 `end >= MarketZones.today(market)` 時，序列最後一筆的 `k`/`d`/`ma20`/`ma60`/`ma240` 必須逐位等於 `computeAll()` 的對應欄位，倒數第二筆的 `k`/`d` 必須等於 `previousK`/`previousD`**（`end` 早於今日時序列不併 live，兩者本就不必相等）。`0000`＋`台股` 走 `twse_index_daily_history` 的特例（含 Redis 今日即時點位併入、舊資料 high/low 為 null 時 fallback close）序列版同樣適用。
+
+> **重構紅線**：`computeAll()` 現況取最近 240 筆、`previousK/previousD` 以 `subList(1,…)` 重跑同一遞迴。改為序列版共用核心時**對外數值必須完全不變**——到價警示觸發門檻（Requirement 16）、警示 email 技術指標（Requirement 23）、觀察清單 KD 欄（Requirement 14）、MA% 換算觸發價（Task 146）、歷年資產 Excel 匯出的均線／KD 欄（`ExcelExportService`）都吃這些值。須有測試證明重構前後逐位相同。
+> 等價性推導：`previousK/previousD` 改由序列倒數第二筆取得與 `subList(1,…)` 重跑同值——`subList(1,…)` 丟掉的是 desc 的最新一筆，`reversed()` 後即完整 asc 序列的前綴，起算點（asc index 8）、seed（50/50）、9 筆視窗全同，遞迴路徑逐項相同。「240 筆」改「全部歷史」對尾值亦無影響：seed 敏感度按 `(2/3)^n` 衰減，40 次迭代內即低於量級 50 的 double ULP。
+
+**繪製與 legend**
+
+| 指標 | 畫線 | 顏色 | legend 數值 |
+|---|---|---|---|
+| K9 | 實線 | `#f59e0b` | ✓ |
+| D9 | 實線 | `#15803d` | ✓ |
+| J9 | 虛線 | `#0ea5e9` | ✓ |
+| K3D2 | ✗（`data: []` 空 series） | `#334155` | ✓ |
+| RSV | ✗（`data: []` 空 series） | `#334155` | ✓ |
+
+K3D2／RSV 不畫線但**必須**掛同名空 series：ECharts `LegendView` 對「`legend.data` 有名字卻找不到同名 series」的處理是**整個項目連同 formatter 產生的數值都不繪製**（開發模式印 `... series not exists` warning，production build 無任何提示），不是 render 成灰色。掛空 series 後 `seriesStyleTask` 仍會把 `itemStyle.color` 寫進 visual，legend 圖示顏色正確。
+
+**五個 KD 指標**的數值後附漲跌箭頭 `▲`／`▼`（vs 指標序列前一筆同指標值；相等或無前值則不顯示；**股價／均線／成本均價維持現況無箭頭**），配色台股慣例漲紅 `#dc2626`、跌綠 `#16a34a`，與同圖 markPoint 一致。箭頭與數值同屬 ECharts `legend.formatter` 的 rich text；rich key 沿用既有「由 `colorMap` 的 index 產生（`v0`/`v1`/…）」機制（該 map 仍含「股價」「月線MA20」等中文鍵，而 zrender 的 `STYLE_REG = /\{([a-zA-Z0-9_]+)\|/` 不接受中文），箭頭因需與數值異色另佔一組 key。
+
+**前端單一資料來源**：走勢圖頁籤一律只讀 `chart-series`，**不再另呼叫 `/history/stock`**。理由不只是省一次請求——同一份股價抓兩次會在盤中拿到兩個不同的即時價，正是本任務要消滅的那類不一致。連帶地，原本讀 `history` 的三處也改由 `chart-series` 推導：期間按鈕的預設縮放窗（`defaultZoomRange` 的 total）、標題列「資料截止」（`latestTradingDate`）、「當日」上方的昨收（Task 158，反找嚴格早於分時交易日的最後一筆收盤——因聯集後尾格可能是「有指標無股價」的 `null`，反找時須跳過 `null`）。股利頁籤的「除息日昨收價」不受影響（該值來自股利 API 的回應列，本就不走 `/history/stock`）。
+
+**對齊在 BFF 做，不在前端**：股價與指標是兩支 business API，**今日格條件不同故日期集合可能不等**（見上表）。此跨來源 join 屬 aggregation，依 CLAUDE.md「BFF 負責跨服務 aggregation、預先計算，前端只負責 render」須由 `bff/stockanalysis/` 的 aggregation controller 完成（該套件現況只有純 Gateway `rewritePath` route，需新增 controller），前端不得自行 join。
+
+對齊規則：x 軸取兩序列 `tradingDate` 的**聯集**（升冪），股價缺該日填 `null`、指標缺該日填 `null`。**不可取股價側日期當基準**——指標側的日期集合可能嚴格較大（股價要求 `source` 不含括號、`0000` 完全不併 live），取股價側會把今日的指標點靜默丟掉，legend 顯示前一交易日的值，本次要修的不一致原封不動（`0000` 大盤為必然觸發）。legend 的五個 KD 值與三條均線一律取**指標序列本身的最後一筆**；**箭頭只加在五個 KD 值上**，比較指標序列的最後兩筆。BFF 兩支上游並行呼叫；指標上游失敗時仍須回傳股價陣列（指標欄留空），走勢圖不得整張消失。
+
+**Y 軸**：子圖 y 軸**不可固定 `min:0 / max:100`**——`J9 = 3D − 2K` 在 K/D 交叉時常越出 [0,100]，固定軸會把 J9 線裁掉、看似斷線。改為取 K9/D9/J9 實際值域，`pad = (hi − lo) × 0.1 || 5`（比照同檔股價軸 `(hi-lo)*0.1 || hi*0.001 || 1` 的 fallback 鏈寫法，避免值域退化成一點時 pad=0 讓線貼軸邊被切），再強制 `min ≤ 20`、`max ≥ 80` 讓既有 80／20 `markLine` 恆在可視範圍內；最後 `min`/`max` 各向外取整到 10 的倍數（避免 `splitNumber: 2` 產生 `-37.5` 這類刻度）。全序列皆 null 時退回 `min: 0 / max: 100`。
+
+**「當日」（intraday）模式**：分時 tick 數不足以重算日線級指標，八個指標值一律取**指標序列的最後一筆**（盤中該筆已含今日即時價，非「前一收盤日」的值）以整段分鐘網格常數填滿畫成水平參考線，箭頭同樣比較指標序列最後兩筆——確保切回日線期間時看到相同數字。
+
+**不同步變更**：警示 email 的 PNG 走勢圖（`AlertChartRenderer`）自有一份走 `getStockHistory` 的 KD 計算，維持只畫 K/D 兩線、Y 軸 0~100（信件圖幅小，三線加自適應軸難判讀）；唯一例外是該類 javadoc 中「與前端 `calcKD` 同一遞迴」的字樣須改指本類自有的 `calcKd`，因前端該函式於本次刪除。
+
 ### 警示觸發 Email 通知（Requirement 23）
 
 **目標**：警示條件觸發時自動寄 email，避免使用者盯盤。
@@ -1888,8 +1957,8 @@ StockAlertService.evaluateGroup()     # 複合 AND 群組（Task 253）
 - `AlertNotificationDispatcher.buildDigest()` 回 `DigestMail{html, inlineImages(cid→png), stockCount}`：每檔股票區塊組好文字後，**依序取兩張圖各以獨立 CID 內嵌**——(1) 年圖 `renderPriceMaPng(code, market)` → `images.put("chart{i}", png)` + `<img src="cid:chart{i}">`；(2) 當日分時圖 `renderIntradayPng(code, market)` → `images.put("intraday{i}", png)` + `<img src="cid:intraday{i}">`。兩者各自 `Optional`：任一 empty 只略過該圖、另一圖與文字照寄。`chartCache` 以 `"price "` / `"intraday "` 前綴命名空間 + `stockCode+market` 為 key 跨收件人共用，同檔兩圖各只 render 一次（單檔觸發之 digest 內嵌 2 張圖）
 - `AlertChartRenderer`：純 Java（XChart）server-side 繪圖，**上下雙 pane 合成一張 PNG**（Graphics2D 垂直拼接）：
   - 資料一律走 `HistoricalDataService.getStockHistory(code, market, end-120M, end)`（與畫面 `StockAnalysisDialog` **同 120 個月範圍**、0000 自動讀 `twse_index_daily_history` 含 OHLC、併今日即時價）
-  - MA：與前端 `calcMA` 相同——**每點對 window 重新加總**（非滑動扣減，避免長序列累積誤差）+ `BigDecimal HALF_UP` 2 位
-  - KD：與前端 `calcKD` / `TechnicalIndicatorService` 同一遞迴（period 9、RSV=(close-ll)/(hh-ll)*100、hh==ll→50、K=prevK*2/3+RSV/3、D=prevD*2/3+K/3、seed 50/50、high/low 缺值 fallback close、續算用未捨入值）。整段歷史算完再切尾 252（≈1年），尾值與畫面逐位一致
+  - MA：`AlertChartRenderer` 自有一份——**每點對 window 重新加總**（非滑動扣減，避免長序列累積誤差）+ `BigDecimal HALF_UP` 2 位
+  - KD：與 `TechnicalIndicatorService` 同一遞迴（period 9、RSV=(close-ll)/(hh-ll)*100、hh==ll→50、K=prevK*2/3+RSV/3、D=prevD*2/3+K/3、seed 50/50、high/low 缺值 fallback close、續算用未捨入值）。整段歷史算完再切尾 252（≈1年），尾值與畫面逐位一致
   - 上 pane：股價(藍) + 月線MA20(橘) + 季線MA60(紫) + 年線MA240(紅)，隱藏 x 軸（日期只畫在下 pane）；下 pane：K(橘) / D(綠)，Y 0~100，80/20 灰虛線（`setShowInLegend(false)` 不進圖例）
   - **股價線標最高 / 最低點**（比照畫面 `StockAnalysisDialog` 的 markPoint）：`addHiLoMarkers` 找顯示窗（≈252 日）內股價最高 / 最低收盤，各以 `HiLoMarker`（自訂 `Annotation` 子類）畫出——圓點落在線上 + 圓角色塊兩行（第一行「最高/最低 + 價位 `%,.2f`」、第二行日期 `yyyy/MM/dd`），紅最高(#dc2626) / 綠最低(#16a34a)（紅漲綠跌）。色塊位置：最高放點下方、最低放點上方，水平夾在 plot 內避免出界。最高 / 最低同點（區間平盤）只畫最高。座標用 `Annotation.getXAxisScreenValue/getYAxisScreenValue`（paint 時軸範圍已算妥）→ 點精準落線上；不用 `AnnotationText`（其字色由 styler 全域共用、無法逐點分紅綠）
   - legend 文字 = 中文名稱 + 空白 + 最新值（`%,.2f`），白底，與畫面同

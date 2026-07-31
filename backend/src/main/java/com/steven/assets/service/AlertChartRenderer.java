@@ -53,8 +53,8 @@ import java.util.stream.Stream;
  * 與畫面 StockAnalysisDialog 同源、同數值、同版面：
  *  - 資料一律走 {@link HistoricalDataService#getStockHistory}（抓 120 個月與畫面同範圍、0000 大盤自動改讀
  *    twse_index_daily_history 含 OHLC、由 service 併入今日即時價）。
- *  - MA20/60/240：與前端 calcMA 相同——每點對 window 重新加總（非滑動扣減）+ BigDecimal HALF_UP 2 位。
- *  - K/D：與前端 calcKD / {@link TechnicalIndicatorService} 同一遞迴（period=9、RSV=(close-ll)/(hh-ll)*100、
+ *  - MA20/60/240：本類自有的 calcMa——每點對 window 重新加總（非滑動扣減）+ BigDecimal HALF_UP 2 位。
+ *  - K/D：本類自有的 calcKd，與 {@link TechnicalIndicatorService} 同一遞迴（period=9、RSV=(close-ll)/(hh-ll)*100、
  *    hh==ll→50、K=prevK*2/3+RSV/3、D=prevD*2/3+K/3、seed 50/50、high/low 缺值 fallback close、續算用未捨入值）。
  *    整段歷史算完再切尾 252（≈1年），故尾值（legend）與畫面逐位一致。
  *
@@ -498,7 +498,7 @@ public class AlertChartRenderer {
         }
     }
 
-    /** 與前端 calcMA 一致：每點對 window 重新加總（非滑動扣減）、四捨五入 2 位；不足 window 回 null。 */
+    /** 每點對 window 重新加總（非滑動扣減）、四捨五入 2 位；不足 window 回 null。 */
     private static Double[] calcMa(double[] closes, int window) {
         Double[] out = new Double[closes.length];
         for (int i = 0; i < closes.length; i++) {
@@ -511,7 +511,7 @@ public class AlertChartRenderer {
     }
 
     /**
-     * 與前端 calcKD / TechnicalIndicatorService 完全一致：period=9、RSV=(close-ll)/(hh-ll)*100（hh==ll→50）、
+     * 與 TechnicalIndicatorService 完全一致：period=9、RSV=(close-ll)/(hh-ll)*100（hh==ll→50）、
      * K=prevK*2/3+RSV/3、D=prevD*2/3+K/3、seed prevK=prevD=50、high/low 缺值 fallback closePrice、續算用未捨入值。
      * 回傳 [0]=K、[1]=D，未達 period 的點為 Double.NaN。
      */

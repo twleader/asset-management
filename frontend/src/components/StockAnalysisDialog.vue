@@ -22,7 +22,7 @@
           <el-icon class="is-loading" size="36"><Loading /></el-icon>
           <div>{{ backfilling ? '首次載入，補齊 10 年歷史中…（約需數秒）' : '載入歷史股價中…' }}</div>
         </div>
-        <div v-else-if="!history.length" class="analysis-empty">
+        <div v-else-if="!chartDates.length" class="analysis-empty">
           無歷史資料，請先執行股價補齊
         </div>
         <template v-else>
@@ -179,7 +179,14 @@ defineEmits(['update:modelValue'])
 const activeTab = ref('chart')
 const loading = ref(false)
 const backfilling = ref(false)  // Task 136：首次無歷史 → 即時補齊 10 年中
-const history = ref([])
+// 走勢圖資料：BFF chart-series 已把股價與技術指標以 tradingDate 聯集對齊，前端零計算、零 join。
+// 形狀：{ dates[], prices[], ma20[], ma60[], ma240[], k[], d[], j9[], k3d2[], rsv[], latest{} }
+const series = ref(null)
+const chartDates  = computed(() => series.value?.dates  ?? [])
+const chartPrices = computed(() => series.value?.prices ?? [])
+// legend／「當日」水平線用的最新值：BFF 已挑好「指標序列本身的最後一筆」，
+// 不是對齊後陣列的最後一筆——0000 大盤盤中兩者不同（股價側不併 live、指標側併）
+const latestIndicators = computed(() => series.value?.latest ?? null)
 const months = ref(12)
 const intradayTicks = ref([])
 const intradayLoading = ref(false)
@@ -194,7 +201,7 @@ const isIntraday = computed(() => months.value === 0)
 // 期間按鈕的預設縮放窗（日線：以 months 換算 ~21 個交易日/月；當日：整段全顯示）
 const defaultZoomRange = computed(() => {
   if (isIntraday.value) return { start: 0, end: 100 }
-  const total = history.value.length
+  const total = chartDates.value.length
   const want = Math.max(20, Math.round(months.value * 21))
   const start = total > 0 ? Math.max(0, 100 * (total - want) / total) : 0
   return { start, end: 100 }
@@ -218,9 +225,8 @@ const latestTradingDate = computed(() => {
     const t = intradayTicks.value[intradayTicks.value.length - 1]?.time
     return t ? String(t).substring(0, 10) : null
   }
-  const h = history.value
-  if (!h || !h.length) return null
-  return h[h.length - 1]?.tradingDate ?? null
+  const d = chartDates.value
+  return d.length ? d[d.length - 1] : null
 })
 
 // 「當日」報價摘要：昨收、現價、今日漲跌（僅當日模式且已有分時 tick 時回值）。
@@ -239,13 +245,14 @@ const intradayQuote = computed(() => {
   }
   if (price == null) return null
   const sessionDate = String(ticks[0]?.time || '').substring(0, 10)  // 分時序列所屬交易日（YYYY-MM-DD）
-  // 昨收：history（升冪）中 tradingDate 嚴格早於當日交易日的最後一筆收盤
+  // 昨收：日線序列（升冪）中 tradingDate 嚴格早於當日交易日的最後一筆收盤。
+  // 聯集對齊後尾格可能是「有指標、無股價」的 null（0000 大盤盤中必然如此），故須跳過 null。
   let previousClose = null
-  const hist = history.value
-  for (let i = hist.length - 1; i >= 0; i--) {
-    const d = hist[i]?.tradingDate
-    if (d && d < sessionDate && hist[i]?.closePrice != null) {
-      previousClose = Number(hist[i].closePrice); break
+  const dates = chartDates.value
+  const prices = chartPrices.value
+  for (let i = dates.length - 1; i >= 0; i--) {
+    if (dates[i] && dates[i] < sessionDate && prices[i] != null) {
+      previousClose = Number(prices[i]); break
     }
   }
   if (!(previousClose > 0)) return { price, previousClose: null, change: null, changePct: null }
@@ -272,7 +279,7 @@ async function fetchHistory() {
   if (!props.stock) return
   loading.value = true
   backfilling.value = false
-  history.value = []
+  series.value = null
   try {
     // 一次抓 10 年（DB 查詢 < 100ms），之後切期間只調 dataZoom，不再 roundtrip
     const end = new Date().toISOString().split('T')[0]
@@ -281,23 +288,23 @@ async function fetchHistory() {
     const start = startDate.toISOString().split('T')[0]
     const code = props.stock.stockCode
     const market = props.stock.market
-    let data = await bffApi.stockAnalysis.getStockHistory(code, market, start, end)
+    let data = await bffApi.stockAnalysis.getChartSeries(code, market, start, end)
     // Task 136：無歷史（多為 ETF 透視成份股尚未被 startup / 每日 cron 補到）→ 即時觸發單檔 10 年回補後重載一次。
     // 只寫 stock_price_history、不入主檔（backfill-stock 端點本就不碰主檔）；今日列獨佔給 ClosePersister。
     // 台股大盤 0000 不觸發（歷史走 twse_index_daily_history）。
     const isTaiex = code === '0000' && market === '台股'
-    if ((!Array.isArray(data) || data.length === 0) && !isTaiex) {
+    if (!data?.dates?.length && !isTaiex) {
       backfilling.value = true
       try {
         await bffApi.stockAnalysis.backfillStock(code, market)
-        data = await bffApi.stockAnalysis.getStockHistory(code, market, start, end)
+        data = await bffApi.stockAnalysis.getChartSeries(code, market, start, end)
       } catch (e) {
         console.warn('歷史回補失敗:', e)
       } finally {
         backfilling.value = false
       }
     }
-    history.value = Array.isArray(data) ? data : []
+    series.value = data?.dates?.length ? data : null
   } catch (e) {
     console.warn('無法取得歷史股價:', e)
   } finally {
@@ -444,33 +451,11 @@ const etfExternalLinks = computed(() => {
   return []
 })
 
-function calcMA(prices, n) {
-  return prices.map((_, i) => {
-    if (i < n - 1) return null
-    const avg = prices.slice(i - n + 1, i + 1).reduce((s, v) => s + v, 0) / n
-    return parseFloat(avg.toFixed(2))
-  })
-}
-
-function calcKD(hist, period = 9) {
-  const highs  = hist.map(d => Number(d.highPrice  || d.closePrice || 0))
-  const lows   = hist.map(d => Number(d.lowPrice   || d.closePrice || 0))
-  const closes = hist.map(d => Number(d.closePrice || 0))
-  const K = [], D = []
-  let prevK = 50, prevD = 50
-  for (let i = 0; i < closes.length; i++) {
-    if (i < period - 1) { K.push(null); D.push(null); continue }
-    const hh = Math.max(...highs.slice(i - period + 1, i + 1))
-    const ll = Math.min(...lows.slice(i - period + 1, i + 1))
-    const rsv = hh === ll ? 50 : (closes[i] - ll) / (hh - ll) * 100
-    const k = prevK * 2 / 3 + rsv / 3
-    const d = prevD * 2 / 3 + k  / 3
-    K.push(parseFloat(k.toFixed(2)))
-    D.push(parseFloat(d.toFixed(2)))
-    prevK = k; prevD = d
-  }
-  return { K, D }
-}
+// Task 261：MA 與 KD 一律由後端 TechnicalIndicatorService 供給（經 BFF chart-series 對齊），
+// 前端不再自算——原本的 calcMA()／calcKD() 已刪除。理由：走勢圖自算的值與觀察清單表格顯示的
+// 後端 computeAll() 值在盤中會不一致（後端併今日 live 的真實盤中高低價且不濾 source，
+// 前端資料源只併 source 不含括號的實際成交、且合成列沒有 high/low），
+// 同一畫面雙擊同一列會看到兩組 K/D。
 
 // 各市場交易時段 [開盤, 收盤] HH:mm（市場當地時區、DST 不變）。鏡射後端 MarketZones（單一事實來源）：
 // 美股 09:30–16:00 / 英股 08:00–16:30 / 其餘（台股、大盤 0000）09:00–13:30。
@@ -522,24 +507,30 @@ function maxMinMarkPoints(data, labels, lo, hi) {
 }
 
 const chartOption = computed(() => {
-  const hist = history.value
-  if (!hist.length) return {}
+  const sr = series.value
+  if (!sr?.dates?.length) return {}
   const s = props.stock || {}
 
-  // 日線基礎：所有期間（含「當日」的 MA/KD 水平參考線）都從這份算
-  const dailyDates  = hist.map(d => d.tradingDate)
-  const dailyPrices = hist.map(d => parseFloat(Number(d.closePrice || 0).toFixed(2)))
-  const dailyMa20   = calcMA(dailyPrices, 20)
-  const dailyMa60   = calcMA(dailyPrices, 60)
-  const dailyMa240  = calcMA(dailyPrices, 240)
-  const dailyKD     = calcKD(hist)
-  const lastOf = arr => arr.length ? arr[arr.length - 1] : null
+  // 日線基礎：BFF chart-series 已聯集對齊，直接取用（前端不再計算 MA / KD）
+  const num = v => (v == null ? null : Number(v))
+  const col = key => (sr[key] ?? []).map(num)
+  const dailyDates  = sr.dates
+  const dailyPrices = col('prices')
+  const dailyMa20   = col('ma20')
+  const dailyMa60   = col('ma60')
+  const dailyMa240  = col('ma240')
+  const dailyK      = col('k')
+  const dailyD      = col('d')
+  const dailyJ      = col('j9')
+  // legend／「當日」水平線的最新值一律取 BFF 挑好的「指標序列本身最後一筆」，
+  // 不可取對齊後陣列的末格——0000 大盤盤中末格是「有指標、無股價」，兩者不同
+  const lt = latestIndicators.value || {}
 
   const intraday = isIntraday.value
   // intraday 模式但 tick 序列還沒抓到 → 暫時不畫，由外層 v-if 的 loading 處理
   if (intraday && !intradayTicks.value.length) return {}
 
-  let dates, prices, ma20, ma60, ma240, K, D, xLabelFormatter
+  let dates, prices, ma20, ma60, ma240, K, D, J, xLabelFormatter
   if (intraday) {
     const ticks = intradayTicks.value
     // 當日 X 軸固定延伸到「收盤時間」而非「現在時間」（與指數當日圖 Requirement 18 同設計、同視覺行為）：
@@ -563,13 +554,14 @@ const chartOption = computed(() => {
       priceGrid[idx] = parseFloat(Number(t.price).toFixed(2))
     }
     prices = priceGrid
-    // intraday tick 數不足以重算日線 MA / KD → 取日線最新值、以整段網格常數填滿畫成水平參考線（畫到收盤）
+    // intraday tick 數不足以重算日線 MA / KD → 取指標序列最新值、以整段網格常數填滿畫成水平參考線（畫到收盤）
     const fill = v => dates.map(() => v)
-    ma20  = fill(lastOf(dailyMa20))
-    ma60  = fill(lastOf(dailyMa60))
-    ma240 = fill(lastOf(dailyMa240))
-    K     = fill(lastOf(dailyKD.K))
-    D     = fill(lastOf(dailyKD.D))
+    ma20  = fill(num(lt.ma20))
+    ma60  = fill(num(lt.ma60))
+    ma240 = fill(num(lt.ma240))
+    K     = fill(num(lt.k))
+    D     = fill(num(lt.d))
+    J     = fill(num(lt.j9))
     // 整段分鐘網格：軸標籤只在整點 / 半點顯示，避免數百格 HH:mm 全擠上
     xLabelFormatter = v => v
   } else {
@@ -578,8 +570,9 @@ const chartOption = computed(() => {
     ma20   = dailyMa20
     ma60   = dailyMa60
     ma240  = dailyMa240
-    K      = dailyKD.K
-    D      = dailyKD.D
+    K      = dailyK
+    D      = dailyD
+    J      = dailyJ
     xLabelFormatter = v => v.substring(0, 7)
   }
 
@@ -597,6 +590,24 @@ const chartOption = computed(() => {
     const usd = props.usdRate ? Number(props.usdRate) : null
     cost = (s.market === '美股' || s.market === '英股') && usd ? costTwd / usd : costTwd
   }
+
+  // KD 子圖 Y 軸：不可再固定 min:0/max:100 —— J9 = 3D − 2K 在 K/D 交叉時常越出 [0,100]，
+  // 固定軸會把 J9 線裁掉、看起來像斷線。改為依 K9/D9/J9 實際值域自適應，並強制涵蓋 20/80
+  // 讓既有的超買超賣參考虛線恆在畫面內；min/max 各向外取整到 10 的倍數，
+  // 避免 splitNumber:2 生出 -37.5 這類刻度。
+  const kdYAxis = (() => {
+    const vals = [...K, ...D, ...J].filter(v => v != null && Number.isFinite(v))
+    const base = { gridIndex: 1, type: 'value', splitNumber: 2,
+      axisLabel: { fontSize: 10 }, splitLine: { lineStyle: { color: '#f0f0f0' } } }
+    if (!vals.length) return { ...base, min: 0, max: 100 }
+    const lo = Math.min(...vals), hi = Math.max(...vals)
+    const pad = (hi - lo) * 0.1 || 5
+    return {
+      ...base,
+      min: Math.floor(Math.min(20, lo - pad) / 10) * 10,
+      max: Math.ceil(Math.max(80, hi + pad) / 10) * 10
+    }
+  })()
 
   // 最高 / 最低點：只在目前可視區間內找（資料一次載 10 年、期間鈕只調縮放窗，不可用 ECharts 原生 markPoint max/min）
   const ez = effectiveZoom.value
@@ -639,32 +650,55 @@ const chartOption = computed(() => {
       }
     },
     legend: (() => {
-      const last = arr => arr.length ? arr[arr.length - 1] : null
       const fmt = v => (v == null ? '' : Number(v).toLocaleString('en-US', {
         minimumFractionDigits: 2, maximumFractionDigits: 2
       }))
+      // 五個 KD 指標的最新值一律取 BFF 的 latest（＝指標序列本身最後一筆），
+      // 與「當日」水平線同值；均線同理，確保切換期間看到相同數字
       const map = {
         // 當日網格末格恆為未來 null → 取最後一筆非 null 分時價（日線模式 == 末格，行為不變）
         '股價':       fmt(lastNonNull(prices)),
-        '月線MA20':   fmt(last(ma20)),
-        '季線MA60':   fmt(last(ma60)),
-        '年線MA240':  fmt(last(ma240)),
+        '月線MA20':   fmt(num(lt.ma20)),
+        '季線MA60':   fmt(num(lt.ma60)),
+        '年線MA240':  fmt(num(lt.ma240)),
         '成本均價':   cost != null ? fmt(cost) : '',
-        'K':          fmt(last(K)),
-        'D':          fmt(last(D))
+        'K9':         fmt(num(lt.k)),
+        'D9':         fmt(num(lt.d)),
+        'J9':         fmt(num(lt.j9)),
+        'K3D2':       fmt(num(lt.k3d2)),
+        'RSV':        fmt(num(lt.rsv))
       }
-      // 每個 series 在 legend 數值的色彩，對應線條顏色（與 logo 一致）
+      // 漲跌箭頭：只加在五個 KD 指標上（股價／均線／成本均價維持無箭頭）。
+      // 比較基準為指標序列的最後兩筆（BFF 已備妥 prev*），台股慣例漲紅跌綠。
+      const arrowOf = (cur, prev) => {
+        const a = num(cur), b = num(prev)
+        if (a == null || b == null || a === b) return null
+        return a > b ? { ch: '▲', color: '#dc2626' } : { ch: '▼', color: '#16a34a' }
+      }
+      const arrowMap = {
+        'K9':   arrowOf(lt.k,    lt.prevK),
+        'D9':   arrowOf(lt.d,    lt.prevD),
+        'J9':   arrowOf(lt.j9,   lt.prevJ9),
+        'K3D2': arrowOf(lt.k3d2, lt.prevK3d2),
+        'RSV':  arrowOf(lt.rsv,  lt.prevRsv)
+      }
+      // 每個 series 在 legend 數值的色彩，對應線條顏色（與 logo 一致）。
+      // K3D2 / RSV 不畫線（子圖僅 90px，五條會過密），只顯示數值故用中性深灰。
       const colorMap = {
         '股價':      '#3b82f6',
         '月線MA20':  '#f59e0b',
         '季線MA60':  '#8b5cf6',
         '年線MA240': '#ef4444',
         '成本均價':  '#64748b',
-        'K':         '#f59e0b',
-        'D':         '#15803d'
+        'K9':        '#f59e0b',
+        'D9':        '#15803d',
+        'J9':        '#0ea5e9',
+        'K3D2':      '#334155',
+        'RSV':       '#334155'
       }
-      // 用 index 當 rich key（避免中文字無法作為 echarts rich style key）
-      const keyByName = {}
+      // 用 index 當 rich key：colorMap 仍含「股價」「月線MA20」等中文鍵，
+      // 而 zrender 的 rich style key 只接受 [a-zA-Z0-9_]
+      const keyByName = {}, arrowKeyByName = {}
       const richStyles = { n: { fontSize: 12, color: '#475569', lineHeight: 16 } }
       Object.entries(colorMap).forEach(([name, color], i) => {
         const k = 'v' + i
@@ -672,26 +706,48 @@ const chartOption = computed(() => {
         richStyles[k] = {
           fontSize: 12, color, lineHeight: 16, fontWeight: 700, padding: [2, 0, 0, 0]
         }
-      })
-      return {
-        data: cost != null
-          ? ['股價', '月線MA20', '季線MA60', '年線MA240', '成本均價', 'K', 'D']
-          : ['股價', '月線MA20', '季線MA60', '年線MA240', 'K', 'D'],
-        top: 8,
-        itemGap: 36,
-        formatter: name => map[name]
-          ? `{n|${name}}\n{${keyByName[name] || 'n'}|${map[name]}}`
-          : name,
-        textStyle: {
-          fontSize: 12,
-          color: '#475569',
-          rich: richStyles
+        const arrow = arrowMap[name]
+        if (arrow) {
+          const ak = 'a' + i
+          arrowKeyByName[name] = ak
+          richStyles[ak] = {
+            fontSize: 11, color: arrow.color, lineHeight: 16, fontWeight: 700, padding: [2, 0, 0, 3]
+          }
         }
+      })
+      const formatter = name => {
+        if (!map[name]) return name
+        const arrow = arrowMap[name]
+        const valuePart = `{${keyByName[name] || 'n'}|${map[name]}}`
+        const arrowPart = arrow ? `{${arrowKeyByName[name]}|${arrow.ch}}` : ''
+        return `{n|${name}}\n${valuePart}${arrowPart}`
       }
+      const textStyle = { fontSize: 12, color: '#475569', rich: richStyles }
+      // 兩組 legend，各自貼著自己的 pane：股價／均線在上圖頂端，五個 KD 指標移到
+      // 兩張圖中間（＝KD 子圖正上方）。十項全擠在頂端一列會過密且與股價無關聯。
+      // KD 那組用 bottom 定位（不依賴容器總高）：grid[1] 頂端距底部 = bottom 60 + height 90 = 150，
+      // legend 兩行約 36px，故 bottom 156 讓它落在 156~192，剛好在 grid[0]（bottom 200）之下。
+      return [
+        {
+          data: cost != null
+            ? ['股價', '月線MA20', '季線MA60', '年線MA240', '成本均價']
+            : ['股價', '月線MA20', '季線MA60', '年線MA240'],
+          top: 8,
+          itemGap: 30,
+          formatter, textStyle
+        },
+        {
+          data: ['K9', 'D9', 'J9', 'K3D2', 'RSV'],
+          bottom: 156,
+          itemGap: 30,
+          formatter, textStyle
+        }
+      ]
     })(),
     axisPointer: { link: [{ xAxisIndex: 'all' }] },
     grid: [
-      { left: 64, right: 96, top: 72, bottom: 190 },
+      // bottom 200：讓出 KD legend 那一列（bottom 156 起、約 36px 高）
+      { left: 64, right: 96, top: 72, bottom: 200 },
       { left: 64, right: 96, top: 'auto', height: 90, bottom: 60 }
     ],
     dataZoom: [
@@ -707,7 +763,7 @@ const chartOption = computed(() => {
     ],
     yAxis: [
       priceYAxis,
-      { gridIndex: 1, type: 'value', min: 0, max: 100, splitNumber: 2, axisLabel: { fontSize: 10 }, splitLine: { lineStyle: { color: '#f0f0f0' } } }
+      kdYAxis
     ],
     series: [
       { name: '股價', type: 'line', xAxisIndex: 0, yAxisIndex: 0, data: prices,
@@ -749,7 +805,7 @@ const chartOption = computed(() => {
           color: lastNonNull(prices) >= cost ? '#16a34a' : '#ef4444'
         }
       }] : []),
-      { name: 'K', type: 'line', xAxisIndex: 1, yAxisIndex: 1, data: K,
+      { name: 'K9', type: 'line', xAxisIndex: 1, yAxisIndex: 1, data: K,
         lineStyle: { width: 1.5, color: '#f59e0b' }, itemStyle: { color: '#f59e0b' }, showSymbol: false,
         endLabel: { show: true, formatter: '{c}', fontSize: 11, color: '#f59e0b' },
         markLine: {
@@ -758,10 +814,23 @@ const chartOption = computed(() => {
           label: { formatter: '{c}', fontSize: 10, color: '#94a3b8' }
         }
       },
-      { name: 'D', type: 'line', xAxisIndex: 1, yAxisIndex: 1, data: D,
+      { name: 'D9', type: 'line', xAxisIndex: 1, yAxisIndex: 1, data: D,
         lineStyle: { width: 1.5, color: '#15803d' }, itemStyle: { color: '#15803d' }, showSymbol: false,
         endLabel: { show: true, formatter: '{c}', fontSize: 11, color: '#15803d' }
-      }
+      },
+      // J9 = 3D − 2K，振幅大於 K/D 且常越出 0~100（故上面 kdYAxis 不再固定範圍）；虛線以與 K9/D9 區隔
+      { name: 'J9', type: 'line', xAxisIndex: 1, yAxisIndex: 1, data: J,
+        lineStyle: { width: 1.5, color: '#0ea5e9', type: 'dashed' }, itemStyle: { color: '#0ea5e9' }, showSymbol: false,
+        endLabel: { show: true, formatter: '{c}', fontSize: 11, color: '#0ea5e9' }
+      },
+      // K3D2 與 RSV 只在 legend 顯示數值、不畫線（子圖僅 90px，五條線會過密無法判讀；
+      // K3D2 可由 K9/D9 推得、RSV 可由 K9 與前一日 K9 反解，資訊不遺失）。
+      // 但空 series 不可省：ECharts LegendView 找不到同名 series 時，該 legend 項目
+      // 連同 formatter 產生的數值都不會被畫出來（production build 連 warning 都沒有）。
+      { name: 'K3D2', type: 'line', xAxisIndex: 1, yAxisIndex: 1, data: [],
+        itemStyle: { color: '#334155' }, showSymbol: false },
+      { name: 'RSV', type: 'line', xAxisIndex: 1, yAxisIndex: 1, data: [],
+        itemStyle: { color: '#334155' }, showSymbol: false }
     ]
   }
 })

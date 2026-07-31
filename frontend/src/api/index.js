@@ -109,6 +109,10 @@ export const bffApi = {
 
   // StockAnalysisDialog（跨 view 共用元件）
   stockAnalysis: {
+    // Task 261：走勢圖上下兩個 pane 的完整資料。BFF 已並行取得股價與技術指標序列並以
+    // tradingDate 聯集對齊，前端零計算、零 join（指標與觀察清單表格同源於 TechnicalIndicatorService）。
+    getChartSeries: (code, market, start, end) =>
+      api.get('/bff/stock-analysis/chart-series', { params: { code, market, start, end } }),
     getStockHistory: (code, market, start, end) =>
       api.get('/bff/stock-analysis/history/stock', { params: { code, market, start, end } }),
     getDividendHistory: (code, market, years = 10) =>
