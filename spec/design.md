@@ -204,7 +204,7 @@ com.steven.assets.externalmaterials/
 NASDAQ info API 自 2026/04 起對 ETF 的 `keyStats` 為 null（無 dayrange 欄位），對 stocks 也僅剩 dayrange，無法穩定取得「今日最高/最低」。為避免 ETF（VOO/VT 等）的 high/low 為 null，`external-materials-service` 在每輪抓價後自行聚合：以該檔當日已記錄的 high/low 與最新成交價做 max / min，回寫 Redis。`PriceCacheWriter` 在寫 `price:{market}:{code}` 時：
 - 若外部 API 已回傳 high/low，最終值取「外部值與聚合值的 max(high) / min(low)」（覆蓋 cron 起點之前已過去的盤中波動）
 - 若外部 API 未回傳，直接採用聚合值
-- 聚合 key 的 `tradingDate` 與 JSON 中的 `tradingDate` 同源（`PriceCacheWriter.resolveTradingDate`），確保跨日（美股 session 跨 ET 午夜在 TW 看為當日）能正確分桶
+- 聚合 key 的 `tradingDate` 與 JSON 中的 `tradingDate` 同源：`PriceCacheWriter` 每輪只呼叫一次 `TradingDateResolver.resolve(code, market)`，同一個值同時餵給聚合 key 與 JSON payload，確保跨日（美股 session 跨 ET 午夜在 TW 看為當日）能正確分桶
 
 > `market:status` TTL 設 90s 短於輪詢間隔，確保 Redis 過期前一定會被覆寫；fail-safe 若 external-materials-service 掛了，`PriceQueryService` 視 Redis miss 為「未開盤」（保守處理）。
 
@@ -375,14 +375,14 @@ POST /internal/repair/history?market=%E5%8F%B0%E8%82%A1&from=2026-06-01&to=2026-
 
 > FinMind 現況補記：容器內 `FINMIND_TOKEN` 為**空字串**（`application.yml` 為 `${FINMIND_TOKEN:}`，兩份 `.env` 皆未設該變數），故需 token 的 `TaiwanStockKBar`（5 分 K，供分時 tick）回 400；但**日線 `TaiwanStockPrice` 免 token 可用**（實測 HTTP 200，`2002` 2026-07-20 收盤 18.55 與 Yahoo 一致）。回補與 16:00 收盤校正走的都是日線那支，不受 token 缺漏影響。
 
-**國定假日整段休市（2026/06，修 Juneteenth 仍抓價 / 觸發 bug）：** cron 以 `MON-FRI` 觸發只能濾週末，平日仍可能是國定假日（美股 6/19 Juneteenth 為週五）。原 `MarketClock` 只有 `isWeekend` 判斷 → `isUsMarketOpen()` 在假日回 `true` → `PricePoller` 照抓（NASDAQ 回前一交易日收盤）、`PriceCacheWriter.resolveTradingDate` 把假日當「live session」→ tradingDate = 假日當天 → 污染 intraday tick；`ClosePersister` 同樣於假日把 Redis 最後價 dump 成假日當日收盤寫進 DB。
+**國定假日整段休市（2026/06，修 Juneteenth 仍抓價 / 觸發 bug）：** cron 以 `MON-FRI` 觸發只能濾週末，平日仍可能是國定假日（美股 6/19 Juneteenth 為週五）。原 `MarketClock` 只有 `isWeekend` 判斷 → `isUsMarketOpen()` 在假日回 `true` → `PricePoller` 照抓（NASDAQ 回前一交易日收盤）、`PriceCacheWriter` 寫 tick 前呼叫的 `TradingDateResolver.resolve` 把假日當「live session」→ tradingDate = 假日當天 → 污染 intraday tick；`ClosePersister` 同樣於假日把 Redis 最後價 dump 成假日當日收盤寫進 DB。
 
 修正：新增 `MarketCalendar`（ext-materials 內的交易日 / 假日權威）：
 - `isTwTradingDay/isUsTradingDay/isUkTradingDay(date)` = `非週末 && 非該市場假日`。
 - 台股假日委派既有 `MarketDataFetchService.getTwHolidays(year)`（TWSE holidaySchedule，已是台股唯一來源；抓不到時保守視為交易日，與 business-services 既有退化一致）。
 - 美股 / 英股假日為 NYSE / LSE 法定規則純函式（與 `business-services` `MarketDataService.getUsHolidays/getUkHolidays` 同一套；因兩服務無共用 module、且 ext-materials 不可反向依賴 business-services（避免循環），故各持一份並以交叉註解鎖定「修改須同步」，per-year 快取）。
 
-`MarketClock.isXxxMarketOpen / isXxxMarketJustClosed` 全部改為「`MarketCalendar.isXxxTradingDay(當日)` && 時段」。連帶效果：`PricePoller` 各 scheduled 抓價（gated on `isXxxMarketOpen`）假日自動 skip；`PriceCacheWriter.resolveTradingDate`（依 `isXxxMarketOpen/isXxxMarketJustClosed` 判 live session）假日自動退回 DB 最近交易日。`ClosePersister` 各 dump / verify / `selfHealMissedClose` 另加 `MarketCalendar.isXxxTradingDay` 早退守門（`PricePoller` 假日不抓，但 Redis 仍有前一交易日值且 TTL 24h，若不守門 dump 會把它標成假日當日寫 DB）。`PricePoller.refreshAll`（手動 `/internal/refresh`）的 `markClosed` 亦由 `false` 改為 `!isXxxMarketOpen()`，與 `warmCacheOnStartup` 一致，避免手動刷新在假日 append 假 tick。
+`MarketClock.isXxxMarketOpen / isXxxMarketJustClosed` 全部改為「`MarketCalendar.isXxxTradingDay(當日)` && 時段」。連帶效果：`PricePoller` 各 scheduled 抓價（gated on `isXxxMarketOpen`）假日自動 skip；`TradingDateResolver.resolve`（依 `isXxxMarketOpen/isXxxMarketJustClosed` 判 live session，由 `PriceCacheWriter` 呼叫）假日自動退回 DB 最近交易日。`ClosePersister` 各 dump / verify / `selfHealMissedClose` 另加 `MarketCalendar.isXxxTradingDay` 早退守門（`PricePoller` 假日不抓，但 Redis 仍有前一交易日值且 TTL 24h，若不守門 dump 會把它標成假日當日寫 DB）。`PricePoller.refreshAll`（手動 `/internal/refresh`）的 `markClosed` 亦由 `false` 改為 `!isXxxMarketOpen()`，與 `warmCacheOnStartup` 一致，避免手動刷新在假日 append 假 tick。
 
 **對外介面（`InternalPriceController`，class-level `@RequestMapping("/internal")`，共 33 支）：**
 
@@ -499,7 +499,7 @@ POST /internal/repair/history?market=%E5%8F%B0%E8%82%A1&from=2026-06-01&to=2026-
 
 | Method | Path | 說明 |
 |--------|------|------|
-| POST | `/internal/refresh` | 同步抓所有持股報價、寫 Redis，回 `PricePoller.RefreshSummary`。供使用者按「刷新」（`PriceQueryService`）。見「對外介面」、「國定假日整段休市」（假日 `markClosed`）、「Live 行情 tradingDate 語意（盤外刷新防呆）」（`resolveTradingDate` 盤外守則） |
+| POST | `/internal/refresh` | 同步抓所有持股報價、寫 Redis，回 `PricePoller.RefreshSummary`。供使用者按「刷新」（`PriceQueryService`）。見「對外介面」、「國定假日整段休市」（假日 `markClosed`）、「Live 行情 tradingDate 語意（盤外刷新防呆）」（`TradingDateResolver.resolve` 盤外守則） |
 | POST | `/internal/close/verify-tw` | 手動觸發 FinMind 校正**當日台股**收盤價（同 16:00 排程），覆寫 `stock_price_history` 並回寫 Redis，回 `{verified:n}`。見「Sequence（盤後收盤）」 |
 | POST | `/internal/close/verify-us` | 手動觸發 FinMind 校正**當日美股**收盤價（同 18:00 ET 排程），回 `{verified:n}`。見「Sequence（盤後收盤）」 |
 | GET | `/internal/health` | 回 `{status:"UP", twMarketOpen, usMarketOpen}`（`MarketClock`）；健康檢查用 |
