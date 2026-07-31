@@ -506,6 +506,11 @@ function maxMinMarkPoints(data, labels, lo, hi) {
   return pts
 }
 
+// 值接近時讓 endLabel 沿 Y 軸自動錯開（例：股價 2405.50 與季線MA60 2347.75 在 y 軸上僅差約 10px）。
+// labelLayout 由 echarts/core 自動註冊（export/core.js 已 use(installLabelLayout)），無須額外 use()。
+// 只影響 series 自己的 label：markPoint 的「最高/最低」色塊屬獨立的 MarkPointView，不在此列。
+const SHIFT_Y = { moveOverlap: 'shiftY', hideOverlap: false }
+
 const chartOption = computed(() => {
   const sr = series.value
   if (!sr?.dates?.length) return {}
@@ -596,17 +601,23 @@ const chartOption = computed(() => {
   // 讓既有的超買超賣參考虛線恆在畫面內；min/max 各向外取整到 10 的倍數，
   // 避免 splitNumber:2 生出 -37.5 這類刻度。
   const kdYAxis = (() => {
-    const vals = [...K, ...D, ...J].filter(v => v != null && Number.isFinite(v))
-    const base = { gridIndex: 1, type: 'value', splitNumber: 2,
+    const base = { gridIndex: 1, type: 'value',
       axisLabel: { fontSize: 10 }, splitLine: { lineStyle: { color: '#f0f0f0' } } }
-    if (!vals.length) return { ...base, min: 0, max: 100 }
+    const vals = [...K, ...D, ...J].filter(v => v != null && Number.isFinite(v))
+    if (!vals.length) return { ...base, min: 0, max: 100, interval: 50 }
     const lo = Math.min(...vals), hi = Math.max(...vals)
     const pad = (hi - lo) * 0.1 || 5
-    return {
-      ...base,
-      min: Math.floor(Math.min(20, lo - pad) / 10) * 10,
-      max: Math.ceil(Math.max(80, hi + pad) / 10) * 10
-    }
+    // 刻度只放三個（頭、中、尾）且必須等距——子圖僅 90px，多了就擠。
+    // 作法：min/max 對齊 10 的倍數後，interval 取 (max-min)/2，因 range 恆為 10 的倍數，
+    // interval 必為 5 的倍數的整數，刻度自然等距且對齊端點。
+    // ⚠ 不可只給 min/max 而讓 echarts 自己挑間隔——它會挑「好看的」間隔卻不對齊端點，
+    // 實機產生過 -40 / 0 / 100 / 130 這種不等距刻度。
+    // ⚠ 也不可把 min/max 對齊到 50 的倍數——J9 只要跌破 0 一點點（如 -5）就會被 floor 到 -50，
+    // 白白多出 45 的空間，三條線被壓成子圖一半高度反而更難讀。
+    // min ≤ 20、max ≥ 80 保證 20/80 超買超賣參考線恆在可視範圍內。
+    const min = Math.min(20, Math.floor((lo - pad) / 10) * 10)
+    const max = Math.max(80, Math.ceil((hi + pad) / 10) * 10)
+    return { ...base, min, max, interval: (max - min) / 2 }
   })()
 
   // 最高 / 最低點：只在目前可視區間內找（資料一次載 10 年、期間鈕只調縮放窗，不可用 ECharts 原生 markPoint max/min）
@@ -766,7 +777,7 @@ const chartOption = computed(() => {
       kdYAxis
     ],
     series: [
-      { name: '股價', type: 'line', xAxisIndex: 0, yAxisIndex: 0, data: prices,
+      { name: '股價', type: 'line', xAxisIndex: 0, yAxisIndex: 0, data: prices, labelLayout: SHIFT_Y,
         // 當日：稀疏 tick 落在整段分鐘網格上，connectNulls 讓 2 分輪詢 / 5 分 K 之間連成連續線；
         // 末端未來時段的 trailing null 無後續點不會被橋接，故線正確止於最新一筆
         connectNulls: intraday,
@@ -786,17 +797,17 @@ const chartOption = computed(() => {
           }
         }
       },
-      { name: '月線MA20', type: 'line', xAxisIndex: 0, yAxisIndex: 0, data: ma20,
+      { name: '月線MA20', type: 'line', xAxisIndex: 0, yAxisIndex: 0, data: ma20, labelLayout: SHIFT_Y,
         lineStyle: { width: 1.5, color: '#f59e0b' }, itemStyle: { color: '#f59e0b' }, showSymbol: false,
         endLabel: { show: true, formatter: '{c}', fontSize: 11, color: '#f59e0b' } },
-      { name: '季線MA60', type: 'line', xAxisIndex: 0, yAxisIndex: 0, data: ma60,
+      { name: '季線MA60', type: 'line', xAxisIndex: 0, yAxisIndex: 0, data: ma60, labelLayout: SHIFT_Y,
         lineStyle: { width: 1.5, color: '#8b5cf6' }, itemStyle: { color: '#8b5cf6' }, showSymbol: false,
         endLabel: { show: true, formatter: '{c}', fontSize: 11, color: '#8b5cf6' } },
-      { name: '年線MA240', type: 'line', xAxisIndex: 0, yAxisIndex: 0, data: ma240,
+      { name: '年線MA240', type: 'line', xAxisIndex: 0, yAxisIndex: 0, data: ma240, labelLayout: SHIFT_Y,
         lineStyle: { width: 1.5, color: '#ef4444' }, itemStyle: { color: '#ef4444' }, showSymbol: false,
         endLabel: { show: true, formatter: '{c}', fontSize: 11, color: '#ef4444' } },
       ...(cost != null ? [{
-        name: '成本均價', type: 'line', xAxisIndex: 0, yAxisIndex: 0,
+        name: '成本均價', type: 'line', xAxisIndex: 0, yAxisIndex: 0, labelLayout: SHIFT_Y,
         data: dates.map(() => parseFloat(cost.toFixed(2))),
         lineStyle: { color: '#64748b', type: 'dashed', width: 1.5 },
         itemStyle: { color: '#64748b' }, showSymbol: false,
@@ -807,7 +818,6 @@ const chartOption = computed(() => {
       }] : []),
       { name: 'K9', type: 'line', xAxisIndex: 1, yAxisIndex: 1, data: K,
         lineStyle: { width: 1.5, color: '#f59e0b' }, itemStyle: { color: '#f59e0b' }, showSymbol: false,
-        endLabel: { show: true, formatter: '{c}', fontSize: 11, color: '#f59e0b' },
         markLine: {
           silent: true, data: [{ yAxis: 80 }, { yAxis: 20 }],
           lineStyle: { color: '#94a3b8', type: 'dashed', width: 1 },
@@ -815,13 +825,11 @@ const chartOption = computed(() => {
         }
       },
       { name: 'D9', type: 'line', xAxisIndex: 1, yAxisIndex: 1, data: D,
-        lineStyle: { width: 1.5, color: '#15803d' }, itemStyle: { color: '#15803d' }, showSymbol: false,
-        endLabel: { show: true, formatter: '{c}', fontSize: 11, color: '#15803d' }
+        lineStyle: { width: 1.5, color: '#15803d' }, itemStyle: { color: '#15803d' }, showSymbol: false
       },
       // J9 = 3D − 2K，振幅大於 K/D 且常越出 0~100（故上面 kdYAxis 不再固定範圍）；虛線以與 K9/D9 區隔
       { name: 'J9', type: 'line', xAxisIndex: 1, yAxisIndex: 1, data: J,
-        lineStyle: { width: 1.5, color: '#0ea5e9', type: 'dashed' }, itemStyle: { color: '#0ea5e9' }, showSymbol: false,
-        endLabel: { show: true, formatter: '{c}', fontSize: 11, color: '#0ea5e9' }
+        lineStyle: { width: 1.5, color: '#0ea5e9', type: 'dashed' }, itemStyle: { color: '#0ea5e9' }, showSymbol: false
       },
       // K3D2 與 RSV 只在 legend 顯示數值、不畫線（子圖僅 90px，五條線會過密無法判讀；
       // K3D2 可由 K9/D9 推得、RSV 可由 K9 與前一日 K9 反解，資訊不遺失）。
