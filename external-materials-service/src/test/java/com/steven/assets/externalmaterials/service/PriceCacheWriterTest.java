@@ -2,6 +2,7 @@ package com.steven.assets.externalmaterials.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.steven.assets.externalmaterials.client.PriceFetchClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -17,6 +18,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -28,6 +30,8 @@ class PriceCacheWriterTest {
     private StringRedisTemplate redis;
     private ValueOperations<String, String> values;
     private StockSourceQuery source;
+    /** Task 263：write(..., aggregateHighLow) 的兩條路徑要能 verify，故提為欄位（原為建構時的匿名 mock）。 */
+    private IntradayHighLowTracker hlTracker;
     private PriceCacheWriter writer;
 
     @BeforeEach
@@ -37,6 +41,7 @@ class PriceCacheWriterTest {
         values = mock(ValueOperations.class);
         SetOperations<String, String> sets = mock(SetOperations.class);
         source = mock(StockSourceQuery.class);
+        hlTracker = mock(IntradayHighLowTracker.class);
         when(redis.opsForValue()).thenReturn(values);
         when(redis.opsForSet()).thenReturn(sets);
         when(source.findMaxTradingDate(anyString(), anyString())).thenReturn(Optional.of(LATEST));
@@ -45,7 +50,7 @@ class PriceCacheWriterTest {
         TradingDateResolver tradingDateResolver = mock(TradingDateResolver.class);
         when(tradingDateResolver.resolve(anyString(), anyString())).thenReturn(LATEST);
         writer = new PriceCacheWriter(redis, source,
-                mock(IntradayHighLowTracker.class), mock(IntradayTickStore.class), tradingDateResolver);
+                hlTracker, mock(IntradayTickStore.class), tradingDateResolver);
     }
 
     @Test
@@ -95,6 +100,56 @@ class PriceCacheWriterTest {
         assertThat(payload.has("priceChange")).isFalse();
         assertThat(payload.has("changePercent")).isFalse();
         assertThat(payload.path("price").decimalValue()).isEqualByComparingTo("10.00");
+    }
+
+    /**
+     * 個股路徑（兩參數版 → aggregateHighLow=true）：外部值與當日本地聚合取 max(high)/min(low)。
+     * 動機見 {@link IntradayHighLowTracker}：NASDAQ info API 對 ETF 的 keyStats 為 null，
+     * 沒有這層聚合的話 VOO/VT 等的 high/low 永遠抓不到。
+     */
+    @Test
+    void write_defaultPath_mergesWithLocalAggregate() throws Exception {
+        when(hlTracker.observe(anyString(), anyString(), any(), any()))
+                .thenReturn(new IntradayHighLowTracker.HighLow(
+                        new BigDecimal("12.50"), new BigDecimal("11.00")));
+
+        JsonNode payload = writeAndCapture(priceResult("2330", "12.00", "12.20", "11.50"), null);
+
+        verify(hlTracker).observe(anyString(), anyString(), any(), any());
+        assertThat(payload.path("highPrice").decimalValue()).isEqualByComparingTo("12.50");  // 聚合值較高
+        assertThat(payload.path("lowPrice").decimalValue()).isEqualByComparingTo("11.00");   // 聚合值較低
+    }
+
+    /**
+     * 大盤路徑（Task 263，aggregateHighLow=false）：來源已給當日權威 high/low，
+     * 不得碰 price:dayhl:* —— 聚合是 max/min 的單向累積，誤入的極值無法被後續正確值修正。
+     */
+    @Test
+    void write_noAggregatePath_usesResultHighLowAndSkipsTracker() throws Exception {
+        JsonNode payload = writeAndCapture(priceResult("0000", "20050.00", "20180.00", "19870.00"), false);
+
+        verify(hlTracker, never()).observe(any(), any(), any(), any());
+        assertThat(payload.path("highPrice").decimalValue()).isEqualByComparingTo("20180.00");
+        assertThat(payload.path("lowPrice").decimalValue()).isEqualByComparingTo("19870.00");
+    }
+
+    private static PriceFetchClient.PriceResult priceResult(String code, String price, String high, String low) {
+        return new PriceFetchClient.PriceResult(
+                code, "台股", new BigDecimal(price),
+                null, null, "TWSE", "測試", null, null, null,
+                new BigDecimal("10.00"), new BigDecimal(high), new BigDecimal(low), null);
+    }
+
+    /** aggregateHighLow 為 null 時走兩參數版（既有呼叫端形狀）。 */
+    private JsonNode writeAndCapture(PriceFetchClient.PriceResult result, Boolean aggregateHighLow) throws Exception {
+        if (aggregateHighLow == null) {
+            writer.write(result, false);
+        } else {
+            writer.write(result, false, aggregateHighLow);
+        }
+        ArgumentCaptor<String> json = ArgumentCaptor.forClass(String.class);
+        verify(values).set(anyString(), json.capture(), any());
+        return MAPPER.readTree(json.getValue());
     }
 
     private JsonNode syncAndCapture(String code, String close) throws Exception {

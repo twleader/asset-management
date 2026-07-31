@@ -15,8 +15,8 @@ import java.util.List;
 @Component
 public class TradingRadarRuleEngine {
 
-    /** V7：KD 過熱判定補 K 單獨門檻、修正與實證相反的風險文案、新增偏熱揭露（Task 232）；分數公式本身未變。 */
-    public static final String RULE_VERSION = "TW_RULES_V7";
+    /** V8：大盤即時點位的 high／low 改由 Yahoo 5 分 K 的 high／low 陣列提供，K／D 與 regime／score 隨之改變（Task 263）；因子組成、權重與正規化未變。 */
+    public static final String RULE_VERSION = "TW_RULES_V8";
 
     // ─── V5 因子權重（Requirement 43 修訂／Requirement 47）────────────────────────────
     // V4 為「base 50 + 各因子直接加減 + 硬 clamp」，理論值域 −36~+124：均線六項全滿即 +58，

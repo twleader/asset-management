@@ -455,6 +455,83 @@ public class MacroDataFetchClient {
     }
 
     /**
+     * 指數當日 5 分 K 摘要（Task 263）：date 為該批點位所屬的交易所當地日期，呼叫端據此守門。
+     * 四個數值欄各自獨立判 null（某陣列整日皆 null 時該欄為 null，不影響其餘欄位）。
+     */
+    public record DayQuote(java.time.LocalDate date, BigDecimal open, BigDecimal high,
+                           BigDecimal low, BigDecimal latestClose) {}
+
+    /**
+     * 指數「當日」OHLC 摘要（Task 263）。與 {@link #fetchIndexIntraday} 打同一個 Yahoo URL
+     * （interval=5m&range=5d）、走同一支 {@code curlGetWithRetry}，但回傳的是**該批點位所屬日期**
+     * 與當日 open / high / low / 最新收盤，供 {@code TaiexIndexPoller} 守門與填欄。
+     *
+     * <p><b>為什麼不改 {@link #fetchIndexIntraday} 而另開一支：</b>後者的回傳型別
+     * {@link IndexIntradayPoint} 只有 time / close 兩欄，且會補滿整個交易時段的 5 分格
+     * （未到的時段 close 為 null）以固定「股市大盤查詢」頁當日走勢圖的 x 軸。動它就動到那一頁。
+     *
+     * <p><b>與 {@code fetchIndexIntraday} 的 {@code byDate.lastKey()} 有一處刻意的差異：</b>
+     * 後者在分組前就跳過 close 為 null 的格，故它取的是「最新一個<b>有成交收盤</b>的交易日」；
+     * 本方法對全部 timestamp 分日後取 max。兩者只在「今日有格但 close 整日皆 null」時分歧，
+     * 而該情形經呼叫端的 {@code latestClose == null} 守門後行為一致（皆不寫入）。
+     *
+     * @return 查無資料 / 無 timestamp 陣列 / 例外時回 {@code null}
+     */
+    public DayQuote fetchIndexIntradayDay(String market) {
+        String symbol = INDEX_INTRADAY_YAHOO.get(market);
+        if (symbol == null) {
+            log.warn("未知指數市場: {}", market);
+            return null;
+        }
+        try {
+            String url = "https://query2.finance.yahoo.com/v8/finance/chart/"
+                    + symbol.replace("^", "%5E") + "?interval=5m&range=5d";
+            String body = curlGetWithRetry(url, 2);
+            JsonNode root = mapper.readTree(body);
+            JsonNode chart = root.path("chart").path("result").path(0);
+            JsonNode timestamps = chart.path("timestamp");
+            JsonNode quotes = chart.path("indicators").path("quote").path(0);
+            if (!timestamps.isArray() || timestamps.isEmpty()) {
+                String err = root.path("chart").path("error").path("description").asText("");
+                log.warn("Yahoo 指數 {} 當日摘要無資料: {}", symbol, err.isEmpty() ? "no timestamps" : err);
+                return null;
+            }
+            java.time.ZoneId zone = java.time.ZoneId.of(
+                    chart.path("meta").path("exchangeTimezoneName").asText("Asia/Taipei"));
+
+            // 對全部 timestamp 分日後取 max（不預先濾 null close，理由見 javadoc）
+            java.time.LocalDate day = null;
+            List<Integer> idx = new ArrayList<>();
+            for (int i = 0; i < timestamps.size(); i++) {
+                java.time.LocalDate d = java.time.Instant.ofEpochSecond(timestamps.get(i).asLong())
+                        .atZone(zone).toLocalDate();
+                if (day == null || d.isAfter(day)) {
+                    day = d;
+                    idx.clear();
+                }
+                if (d.equals(day)) idx.add(i);
+            }
+            if (day == null) return null;
+
+            BigDecimal open = null, high = null, low = null, latestClose = null;
+            for (int i : idx) {
+                BigDecimal o = jsonDecimal4(quotes.path("open").path(i));
+                BigDecimal h = jsonDecimal4(quotes.path("high").path(i));
+                BigDecimal l = jsonDecimal4(quotes.path("low").path(i));
+                BigDecimal c = jsonDecimal4(quotes.path("close").path(i));
+                if (open == null && o != null) open = o;                     // 當日第一格的開盤
+                if (h != null && (high == null || h.compareTo(high) > 0)) high = h;
+                if (l != null && (low == null || l.compareTo(low) < 0)) low = l;
+                if (c != null) latestClose = c;                              // 當日最後一格的收盤
+            }
+            return new DayQuote(day, open, high, low, latestClose);
+        } catch (Exception e) {
+            log.warn("Yahoo 指數 {} 當日摘要抓取失敗: {}", market, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
      * curl 子程序 + 重試（Yahoo Finance 對 Java HTTP client 友善度差，偶發 429）。
      * 回應非 JSON 視為被擋，等 10s/20s/... 後重試，最多 maxRetries 次。
      */
