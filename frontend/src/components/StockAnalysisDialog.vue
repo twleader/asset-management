@@ -622,6 +622,25 @@ const chartOption = computed(() => {
 
   // 最高 / 最低點：只在目前可視區間內找（資料一次載 10 年、期間鈕只調縮放窗，不可用 ECharts 原生 markPoint max/min）
   const ez = effectiveZoom.value
+
+  // x 軸標籤：日線只在「月份切換」的那一格顯示——ECharts 預設每隔 N 格顯示一個，
+  // 而 N 個交易日常落在同一個月，實機因此出現連續好幾個「2025-08」。
+  // 再依目前可視範圍抽稀到最多 10 個，10 年期間才不會擠成一團；不旋轉，維持水平好讀。
+  const xLabelInterval = intraday
+    ? ((idx, val) => typeof val === 'string' && (val.endsWith(':00') || val.endsWith(':30')))
+    : (() => {
+        const lo = Math.max(0, Math.floor(dates.length * ez.start / 100))
+        const hi = Math.min(dates.length - 1, Math.ceil(dates.length * ez.end / 100))
+        const monthStarts = []
+        for (let i = lo; i <= hi; i++) {
+          const cur = String(dates[i] || '').substring(0, 7)
+          const prev = i > 0 ? String(dates[i - 1] || '').substring(0, 7) : null
+          if (cur && cur !== prev) monthStarts.push(i)
+        }
+        const stride = Math.max(1, Math.ceil(monthStarts.length / 10))
+        const show = new Set(monthStarts.filter((_, k) => k % stride === 0))
+        return idx => show.has(idx)
+      })()
   let markData = []
   const totalPts = prices.length
   if (totalPts > 0) {
@@ -736,8 +755,8 @@ const chartOption = computed(() => {
       const textStyle = { fontSize: 12, color: '#475569', rich: richStyles }
       // 兩組 legend，各自貼著自己的 pane：股價／均線在上圖頂端，五個 KD 指標移到
       // 兩張圖中間（＝KD 子圖正上方）。十項全擠在頂端一列會過密且與股價無關聯。
-      // KD 那組用 bottom 定位（不依賴容器總高）：grid[1] 頂端距底部 = bottom 60 + height 140 = 200，
-      // legend 兩行約 36px，故 bottom 206 讓它落在 206~242，剛好在 grid[0]（bottom 250）之下。
+      // KD 那組用 bottom 定位（不依賴容器總高）：grid[1] 頂端距底部 = bottom 60 + height 155 = 215，
+      // legend 兩行約 36px，加上下各 16px 間隙 → bottom 231，落在 231~267，grid[0] 則收在 283。
       return [
         {
           data: cost != null
@@ -749,7 +768,7 @@ const chartOption = computed(() => {
         },
         {
           data: ['K9', 'D9', 'J9', 'K3D2', 'RSV'],
-          bottom: 206,
+          bottom: 231,
           itemGap: 30,
           formatter, textStyle
         }
@@ -757,10 +776,11 @@ const chartOption = computed(() => {
     })(),
     axisPointer: { link: [{ xAxisIndex: 'all' }] },
     grid: [
-      // 容器總高 580。上下 pane 約 65:35（258 / 140）——子圖過矮時三條 KD 線會擠成一團看不出交叉，
-      // 這是實機回饋的主因。bottom 250 = KD legend 那一列(206 起、約 36 高) + 8 間隙。
-      { left: 64, right: 96, top: 72, bottom: 250 },
-      { left: 64, right: 96, top: 'auto', height: 140, bottom: 60 }
+      // 容器總高 580。上下 pane 約 58:42（225 / 155）——子圖過矮時三條 KD 線會擠成一團看不出交叉。
+      // bottom 283 = grid[1] 頂端(215) + 16 + KD legend 一列(36) + 16，
+      // legend 上下各留 16px 呼吸空間；只留 6~8px 時它會緊貼上圖底軸，實機看起來很擠。
+      { left: 64, right: 96, top: 72, bottom: 283 },
+      { left: 64, right: 96, top: 'auto', height: 155, bottom: 60 }
     ],
     dataZoom: [
       // 期間按鈕只調 dataZoom 窗（不 roundtrip）；ez 合成自手動拖曳(zoomPct)優先、否則期間預設，最高/最低標記同窗
@@ -769,9 +789,9 @@ const chartOption = computed(() => {
     ],
     xAxis: [
       { gridIndex: 0, type: 'category', data: dates, boundaryGap: false, axisLabel: { show: false }, axisLine: { onZero: false } },
-      { gridIndex: 1, type: 'category', data: dates, boundaryGap: false, axisLabel: { rotate: 30, fontSize: 10, formatter: xLabelFormatter,
-        // 當日為整段分鐘網格（數百格）→ 只在整點 / 半點顯示標籤；日線維持自動疏密
-        interval: intraday ? ((idx, val) => typeof val === 'string' && (val.endsWith(':00') || val.endsWith(':30'))) : 'auto' } }
+      { gridIndex: 1, type: 'category', data: dates, boundaryGap: false,
+        axisLabel: { rotate: 0, fontSize: 10, margin: 12, hideOverlap: true,
+          formatter: xLabelFormatter, interval: xLabelInterval } }
     ],
     yAxis: [
       priceYAxis,
