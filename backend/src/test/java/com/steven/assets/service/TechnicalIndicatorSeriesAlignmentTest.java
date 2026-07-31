@@ -201,6 +201,135 @@ class TechnicalIndicatorSeriesAlignmentTest {
         assertThat(series.get(29).ma240()).isNull();
     }
 
+    // ── Task 262：MACD／RSI／乖離率／威廉指標 ──────────────────────────
+
+    /** 指定收盤序列（high/low 給定偏移），供需要精確期望值的指標測試使用。 */
+    private List<StockPriceHistory> rowsOf(double[] closes, double hiOff, double loOff) {
+        List<StockPriceHistory> rows = new ArrayList<>();
+        for (int i = 0; i < closes.length; i++) {
+            rows.add(StockPriceHistory.builder()
+                    .stockCode(CODE).market(MARKET)
+                    .tradingDate(END.minusDays(closes.length - 1 - i))
+                    .closePrice(BigDecimal.valueOf(closes[i]))
+                    .highPrice(BigDecimal.valueOf(closes[i] + hiOff))
+                    .lowPrice(BigDecimal.valueOf(closes[i] - loOff))
+                    .build());
+        }
+        return rows;
+    }
+
+    /**
+     * RSI 必須是 Wilder 平滑，不是簡單移動平均。
+     * 此序列下兩者相差 9.42（Wilder 74.12 / SMA 64.71），足以辨別；
+     * 而「連漲趨近 100、連跌趨近 0」那類斷言在兩種平滑下都成立、抓不到差異。
+     */
+    @Test
+    void RSI必須用Wilder平滑而非簡單移動平均() {
+        double[] closes = {100, 102, 101, 104, 103, 107, 105, 110, 108, 113, 111, 109, 114, 112, 118};
+        List<StockPriceHistory> asc = rowsOf(closes, 0, 0);
+        givenSeries(asc);
+
+        List<TechnicalIndicatorService.IndicatorPoint> series =
+                service().indicatorSeries(CODE, MARKET, END.minusDays(closes.length - 1), END);
+        TechnicalIndicatorService.IndicatorPoint last = series.get(series.size() - 1);
+
+        assertThat(last.rsi5()).isEqualByComparingTo(new BigDecimal("74.12"));
+        assertThat(last.rsi5()).as("64.71 是簡單移動平均的結果，不可採用")
+                .isNotEqualByComparingTo(new BigDecimal("64.71"));
+    }
+
+    /** MACD 的價基是 DI＝(H+L+2C)/4，不是收盤價——用不對稱的 high/low 讓兩者必然不同。 */
+    @Test
+    void MACD價基必須是DI而非收盤價() {
+        double[] closes = new double[60];
+        for (int i = 0; i < closes.length; i++) closes[i] = 100 + (i % 13) * 2.0;
+        // high 比 close 高 6、low 只低 1 → DI 明顯高於 close，兩種價基算出的 EMA12 必然不同
+        givenSeries(rowsOf(closes, 6, 1));
+
+        List<TechnicalIndicatorService.IndicatorPoint> series =
+                service().indicatorSeries(CODE, MARKET, END.minusDays(closes.length - 1), END);
+        TechnicalIndicatorService.IndicatorPoint last = series.get(series.size() - 1);
+
+        // DI = (c+6 + c-1 + 2c)/4 = c + 1.25 → EMA12 應比「純收盤價版」高約 1.25
+        givenSeries(rowsOf(closes, 0, 0));   // high/low = close ⇒ DI 退化為 close
+        TechnicalIndicatorService.IndicatorPoint closeBased = service()
+                .indicatorSeries(CODE, MARKET, END.minusDays(closes.length - 1), END)
+                .get(series.size() - 1);
+
+        assertThat(last.ema12().doubleValue() - closeBased.ema12().doubleValue())
+                .as("DI 價基應比收盤價基高 (6-1)/4 = 1.25")
+                .isCloseTo(1.25, org.assertj.core.data.Offset.offset(0.01));
+    }
+
+    @Test
+    void MACD三者關係在捨入後仍須成立() {
+        List<StockPriceHistory> asc = ascRows(300);
+        givenSeries(asc);
+
+        List<TechnicalIndicatorService.IndicatorPoint> series =
+                service().indicatorSeries(CODE, MARKET, END.minusDays(60), END);
+
+        org.assertj.core.data.Offset<Double> tol = org.assertj.core.data.Offset.offset(0.011);
+        for (TechnicalIndicatorService.IndicatorPoint p : series) {
+            if (p.dif() == null) continue;
+            assertThat(p.dif().doubleValue())
+                    .isCloseTo(p.ema12().doubleValue() - p.ema26().doubleValue(), tol);
+            if (p.macd() != null) {
+                assertThat(p.osc().doubleValue())
+                        .isCloseTo(p.dif().doubleValue() - p.macd().doubleValue(), tol);
+            }
+        }
+    }
+
+    @Test
+    void 乖離率差值與威廉指標恆等式須成立() {
+        List<StockPriceHistory> asc = ascRows(300);
+        givenSeries(asc);
+
+        List<TechnicalIndicatorService.IndicatorPoint> series =
+                service().indicatorSeries(CODE, MARKET, END.minusDays(60), END);
+
+        org.assertj.core.data.Offset<Double> tol = org.assertj.core.data.Offset.offset(0.011);
+        for (TechnicalIndicatorService.IndicatorPoint p : series) {
+            if (p.bias10() != null && p.bias20() != null) {
+                assertThat(p.b10b20().doubleValue())
+                        .isCloseTo(p.bias10().doubleValue() - p.bias20().doubleValue(), tol);
+            }
+            if (p.rsv() != null) {
+                // W%R9 = 100 − RSV9（代數恆等式）
+                assertThat(p.wr9()).isEqualByComparingTo(
+                        new BigDecimal("100").subtract(p.rsv()).setScale(2, java.math.RoundingMode.HALF_UP));
+            }
+        }
+    }
+
+    /** 暖機邊界：EMA 以前 n 筆 SMA 作 seed，故 ema12 前 11、ema26 前 25、macd 前 33 筆為 null。 */
+    @Test
+    void 新指標的暖機邊界須為null() {
+        double[] closes = new double[40];
+        for (int i = 0; i < closes.length; i++) closes[i] = 100 + (i % 7);
+        givenSeries(rowsOf(closes, 1, 1));
+
+        List<TechnicalIndicatorService.IndicatorPoint> s =
+                service().indicatorSeries(CODE, MARKET, END.minusDays(closes.length - 1), END);
+
+        assertThat(s).hasSize(40);
+        assertThat(s.get(10).ema12()).isNull();
+        assertThat(s.get(11).ema12()).isNotNull();
+        assertThat(s.get(24).ema26()).isNull();
+        assertThat(s.get(25).ema26()).isNotNull();
+        assertThat(s.get(24).dif()).isNull();
+        assertThat(s.get(25).dif()).isNotNull();
+        assertThat(s.get(32).macd()).isNull();
+        assertThat(s.get(33).macd()).isNotNull();
+        assertThat(s.get(4).rsi5()).isNull();
+        assertThat(s.get(5).rsi5()).isNotNull();
+        assertThat(s.get(9).rsi10()).isNull();
+        assertThat(s.get(10).rsi10()).isNotNull();
+        assertThat(s.get(8).bias10()).isNull();
+        assertThat(s.get(9).bias10()).isNotNull();
+    }
+
     @Test
     void 台股大盤0000的序列尾筆必須等於computeAll的大盤值() {
         List<TwseIndexDailyHistory> asc = new ArrayList<>();

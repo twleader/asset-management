@@ -31,7 +31,12 @@ class ChartSeriesAlignerTest {
         return new IndicatorPointDto(date,
                 BigDecimal.valueOf(10), BigDecimal.valueOf(20), BigDecimal.valueOf(30),
                 BigDecimal.valueOf(k), BigDecimal.valueOf(k - 1),
-                BigDecimal.valueOf(k - 2), BigDecimal.valueOf(k + 2), BigDecimal.valueOf(k + 5));
+                BigDecimal.valueOf(k - 2), BigDecimal.valueOf(k + 2), BigDecimal.valueOf(k + 5),
+                // Task 262 的 11 個新欄位：值由 k 衍生，只要能辨別「有沒有被對齊帶出來」即可
+                BigDecimal.valueOf(k + 10), BigDecimal.valueOf(k + 11), BigDecimal.valueOf(k + 12),
+                BigDecimal.valueOf(k + 13), BigDecimal.valueOf(k + 14), BigDecimal.valueOf(k + 15),
+                BigDecimal.valueOf(k + 16), BigDecimal.valueOf(k + 17), BigDecimal.valueOf(k + 18),
+                BigDecimal.valueOf(k + 19), BigDecimal.valueOf(k + 20));
     }
 
     @Test
@@ -109,6 +114,36 @@ class ChartSeriesAlignerTest {
         assertThat(out.dates()).containsExactly("2026-07-29", "2026-07-30", "2026-07-31");
         assertThat(out.prices()).containsExactly(
                 BigDecimal.valueOf(100.0), BigDecimal.valueOf(101.0), BigDecimal.valueOf(102.0));
+    }
+
+    /** Task 262 的新欄位必須同樣參與聯集對齊，長度與 dates 一致（漏接的話畫面會少一整組指標）。 */
+    @Test
+    void 新增的指標欄位同樣參與聯集對齊() {
+        List<PricePointDto> prices = List.of(price("2026-07-29", 100), price("2026-07-30", 101));
+        List<IndicatorPointDto> indicators = List.of(
+                indicator("2026-07-29", 40), indicator("2026-07-30", 41), indicator("2026-07-31", 42));
+
+        ChartSeriesDto out = ChartSeriesAligner.align(prices, indicators);
+
+        int n = out.dates().size();
+        assertThat(n).isEqualTo(3);
+        assertThat(out.ema12()).hasSize(n);
+        assertThat(out.ema26()).hasSize(n);
+        assertThat(out.dif()).hasSize(n);
+        assertThat(out.macd()).hasSize(n);
+        assertThat(out.osc()).hasSize(n);
+        assertThat(out.rsi5()).hasSize(n);
+        assertThat(out.rsi10()).hasSize(n);
+        assertThat(out.bias10()).hasSize(n);
+        assertThat(out.bias20()).hasSize(n);
+        assertThat(out.b10b20()).hasSize(n);
+        assertThat(out.wr9()).hasSize(n);
+        // 指標側多出的 7/31 那格，新欄位也要帶出來（k+10 = 52）
+        assertThat(out.ema12().get(2)).isEqualByComparingTo(BigDecimal.valueOf(52));
+        // latest 的新欄位取指標序列尾筆（7/31），prev 取 7/30
+        assertThat(out.latest().wr9()).isEqualByComparingTo(BigDecimal.valueOf(62));
+        assertThat(out.latest().prevWr9()).isEqualByComparingTo(BigDecimal.valueOf(61));
+        assertThat(out.latest().osc()).isEqualByComparingTo(BigDecimal.valueOf(56));
     }
 
     @Test

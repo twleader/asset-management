@@ -99,7 +99,7 @@ com.steven.assets/
   - `POST /api/bff/snapshot-form/fund-nav/refresh`：觸發後端 → external-materials-service 立即刷新所有基金 NAV，回 `{ success, failed, total }`
 - `StockAnalysisBffRoutes` ＋ `StockAnalysisChartBffController`（Task 261 新增的 aggregation controller，與同前綴的 exact-path route 並存；WebFlux `RequestMappingHandlerMapping`（order 0）先於 Gateway `RoutePredicateHandlerMapping`（order 1），且既有五條 route 皆為精確路徑、不含萬用，故不衝突——同一模式的既有先例為 `StockAlertBffController` ＋ `StockAlertBffRoutes`）（StockAnalysisDialog 跨 view 共用元件專屬）：對話框被 Dashboard / SnapshotForm / WatchStock / StockAlert / RealizedGain / TradingRadar **六個** view 同時使用（損益明細列雙擊開啟為既有；交易雷達個股決策表列雙擊為 Task 234 加入），依「同義欄位、同一 business service API」原則拆為獨立 BFF route，避免在六個父 view 的 BFF 各自重複代理。Dashboard 開啟此 dialog 的觸發點有三：持股表格列雙擊（`onStockDblClick`）、個股 bar 圖雙擊（`onBarDblClick`）、以及「資產配置分佈」tab 2/3 個股穿透圓餅圖 segment 單擊（`onLookthroughPieClick(params, market)`，「其它」聚合段無代號不開；命中當前快照 `mergedStocks` 同 `stockCode`+`market` 的直接持股則沿用完整列以保留 `avgCostOriginal` 成本欄位、否則僅帶 `{stockCode, stockName, market}`）。提供：
   - `GET /api/bff/stock-analysis/history/stock` → `/api/market-data/history/stock`
-  - `GET /api/bff/stock-analysis/chart-series`（Task 261，由 **`StockAnalysisChartBffController`** 提供，**非 Gateway passthrough**）：走勢圖上下兩個 pane 的完整資料，由 BFF 並行呼叫 business 的 `/api/market-data/history/stock`（股價 OHLC）與 `/api/market-data/indicators/series`（MA20／MA60／MA240／K9／D9／J9／K3D2／RSV 逐日值），**以 `tradingDate` 聯集對齊後**回傳前端可直接 render 的等長陣列。走勢圖原本在前端自算 KD／MA，與觀察清單顯示的後端 `computeAll()` 值在盤中不一致；上收後同源。兩支上游的今日格條件不同（股價要求 `source` 不含括號、`0000` 更不併 live；指標比照 `computeAll` 併 live），故**必須取聯集**——取股價側日期會把今日的指標點靜默丟掉，legend 顯示前一日的值，等於沒修
+  - `GET /api/bff/stock-analysis/chart-series`（Task 261，由 **`StockAnalysisChartBffController`** 提供，**非 Gateway passthrough**）：走勢圖上下兩個 pane 的完整資料，由 BFF 並行呼叫 business 的 `/api/market-data/history/stock`（股價 OHLC）與 `/api/market-data/indicators/series`（逐日的 MA20／MA60／MA240 ＋ KD 五值 ＋ MACD／RSI／乖離率／威廉指標共 19 個指標欄位，完整清單見「API Design」的 `/api/market-data/indicators/series`），**以 `tradingDate` 聯集對齊後**回傳前端可直接 render 的等長陣列。走勢圖原本在前端自算 KD／MA，與觀察清單顯示的後端 `computeAll()` 值在盤中不一致；上收後同源。兩支上游的今日格條件不同（股價要求 `source` 不含括號、`0000` 更不併 live；指標比照 `computeAll` 併 live），故**必須取聯集**——取股價側日期會把今日的指標點靜默丟掉，legend 顯示前一日的值，等於沒修
   - `GET /api/bff/stock-analysis/dividends` → `/api/market-data/dividends`
   - `GET /api/bff/stock-analysis/etf-holdings` → `/api/market-data/etf-holdings`
   - `POST /api/bff/stock-analysis/backfill-stock` → `/api/market-data/history/backfill-stock`（Task 136 lazy 回補：走勢圖無歷史時即時觸發單檔 10 年回補後重載；只寫 `stock_price_history` 不入主檔、今日列獨佔給 `ClosePersister`）
@@ -1264,7 +1264,7 @@ GET    /api/market-data/holidays?year=2026                     # 台股 / 美股
 POST   /api/market-data/history/backfill                       # 補齊所有歷史股價
 POST   /api/market-data/history/backfill-stock?code=&market=&since=&until=  # 補齊單支股票歷史股價
 GET    /api/market-data/history/stock?code=&market=            # 查詢單支股票歷史股價
-GET    /api/market-data/indicators/series?code=&market=&start=&end=  # 走勢圖技術指標整段序列（Task 261）：逐日 {tradingDate, ma20, ma60, ma240, k, d, j9, k3d2, rsv}，視窗不足者該欄 null。與單點 `TechnicalIndicatorService.computeAll()` 共用同一核心與同一套今日 live 併入規則 → 當 end >= MarketZones.today(market) 時序列最後一筆恆等於 computeAll()，倒數第二筆的 k/d 恆等於 previousK/previousD（走勢圖與觀察清單同源的機械判準；交易雷達個股表走還原權息價基，刻意不在此列）。0000 台股大盤走 twse_index_daily_history 特例
+GET    /api/market-data/indicators/series?code=&market=&start=&end=  # 走勢圖技術指標整段序列（Task 261 建立、Task 262 擴充）：逐日 {tradingDate, ma20, ma60, ma240, k, d, j9, k3d2, rsv, ema12, ema26, dif, macd, osc, rsi5, rsi10, bias10, bias20, b10b20, wr9}，視窗不足／暖機不足者該欄 null（含 ema*／dif／macd／osc——EMA 以前 n 筆 SMA 作 seed，故 ema12 前 11 筆、ema26 前 25 筆、macd 前 33 筆為 null）。一次回傳全部指標，前端切換選單時不再 roundtrip。與單點 `TechnicalIndicatorService.computeAll()` 共用同一核心與同一套今日 live 併入規則 → 當 end >= MarketZones.today(market) 時序列最後一筆恆等於 computeAll()，倒數第二筆的 k/d 恆等於 previousK/previousD（走勢圖與觀察清單同源的機械判準；交易雷達個股表走還原權息價基，刻意不在此列）。0000 台股大盤走 twse_index_daily_history 特例
 POST   /api/market-data/history/prices-on-date?date=           # 批次查詢指定日期各股收盤價
 GET    /api/market-data/exchange-rate?currency=USD&start=&end= # 匯率歷史（省略區間則回傳全部）
 GET    /api/market-data/exchange-rate/latest?currency=USD      # 最新匯率
@@ -1885,9 +1885,51 @@ K3D2／RSV 不畫線但**必須**掛同名空 series：ECharts `LegendView` 對�
 
 **Y 軸**：子圖 y 軸**不可固定 `min:0 / max:100`**——`J9 = 3D − 2K` 在 K/D 交叉時常越出 [0,100]，固定軸會把 J9 線裁掉、看似斷線。改為取 K9/D9/J9 實際值域，`pad = (hi − lo) × 0.1 || 5`（比照同檔股價軸 `(hi-lo)*0.1 || hi*0.001 || 1` 的 fallback 鏈寫法，避免值域退化成一點時 pad=0 讓線貼軸邊被切），再強制 `min ≤ 20`、`max ≥ 80` 讓既有 80／20 `markLine` 恆在可視範圍內；最後 `min`/`max` 各向外取整到 10 的倍數（避免 `splitNumber: 2` 產生 `-37.5` 這類刻度）。全序列皆 null 時退回 `min: 0 / max: 100`。
 
-**「當日」（intraday）模式**：分時 tick 數不足以重算日線級指標，八個指標值一律取**指標序列的最後一筆**（盤中該筆已含今日即時價，非「前一收盤日」的值）以整段分鐘網格常數填滿畫成水平參考線，箭頭同樣比較指標序列最後兩筆——確保切回日線期間時看到相同數字。
+**「當日」（intraday）模式**：分時 tick 數不足以重算日線級指標，所有指標值（Task 261 為 3 條均線＋5 個 KD 值；Task 262 起再加上當前選單所需的指標欄位）一律取**指標序列的最後一筆**（盤中該筆已含今日即時價，非「前一收盤日」的值）以整段分鐘網格常數填滿畫成水平參考線，箭頭同樣比較指標序列最後兩筆——確保切回日線期間時看到相同數字。
 
 **不同步變更**：警示 email 的 PNG 走勢圖（`AlertChartRenderer`）自有一份走 `getStockHistory` 的 KD 計算，維持只畫 K/D 兩線、Y 軸 0~100（信件圖幅小，三線加自適應軸難判讀）；唯一例外是該類 javadoc 中「與前端 `calcKD` 同一遞迴」的字樣須改指本類自有的 `calcKd`，因前端該函式於本次刪除。
+
+### 走勢圖指標選單：MACD／RSI／乖離率／威廉指標（Requirement 13 / Task 262）
+
+KD 子圖上方提供下拉選單，一次只畫一組指標。**參數全部對齊 Yahoo 股市台股頁**（2026-07-31 實測），不採國際慣用值——使用者的判讀習慣建立在該畫面上。
+
+| 指標 | 欄位 | 參數 | 子圖 Y 軸 | 參考線 |
+|---|---|---|---|---|
+| KD,J | k／d／j9／k3d2／rsv | 9 | 自適應 | 80／20 |
+| MACD | 資料 5 欄 ema12／ema26／dif／macd／osc；**legend 只顯示前 4 個**（osc 是柱狀，不列 legend） | 12、26、DIF 平滑 9；價基 **DI=(H+L+2C)/4** | 自適應，**值域只取 dif／macd／osc 且只取目前可視區間**（ema 與價格同量級，納入會把三者壓成一條線；取整段 10 年序列則短期間視窗會被壓成平線），強制涵蓋 0 | 0 |
+| RSI | rsi5／rsi10 | **5、10**（非 6／12） | 0~100 | 70／30 |
+| 乖離率 | bias10／bias20／b10b20 | 10、20 | 自適應，**只取目前可視區間**、強制涵蓋 0；**不對齊 10 的倍數、不套 20/80 強制**（BIAS 典型值域僅 ±5，照抄 KD 的規則會讓線只佔軸高一成） | 0 |
+| 威廉指標 | wr9 | 9 | 0~100 | 20／80（值小＝超買，超買線在下） |
+
+**公式**（皆用還原前的原始價，與既有 KD／MA 同價基；**MACD 取 DI＝(H+L+2C)/4，其餘取收盤價**）：
+
+```
+DI[i]   = (high[i] + low[i] + 2 × close[i]) / 4          ← MACD 的價基是需求指數，不是收盤價
+EMAn[i] = i < n-1 ? null
+        : i == n-1 ? SMA(DI[0..n-1])                     ← seed 用前 n 筆簡單平均，不是 DI[0]
+        : DI[i] × k + EMAn[i-1] × (1 − k)                , k = 2 / (n + 1)
+DIF     = EMA12 − EMA26                                  ← 任一為 null 則 null（故 i < 25 為 null）
+MACD    = DIF 的 9 日 EMA（同上遞迴、同樣以 SMA seed，故 i < 33 為 null）
+OSC     = DIF − MACD                                     ← 畫柱狀，正紅負綠
+
+RSIn[i] = i < n ? null : 100 − 100 / (1 + avgGain / avgLoss)
+          Wilder 平滑：avgGain[n] = 前 n 期漲幅的簡單平均；之後 avgGain[i] = (avgGain[i-1] × (n−1) + gain[i]) / n
+          avgLoss 同理。avgLoss == 0 → 100；avgGain 與 avgLoss 同為 0（連續平盤）→ 50
+BIASn   = (close − MAn) / MAn × 100
+B10−B20 = BIAS10 − BIAS20
+W%R9    = (HH9 − close) / (HH9 − LL9) × 100             , HH9 == LL9 → 50
+```
+
+> `W%R9 = 100 − RSV9` 是**代數恆等式**：`(HH−C)/(HH−LL) = [(HH−LL)−(C−LL)]/(HH−LL) = 1 − RSV/100`，且兩者取同一個 9 日視窗、high/low 缺值同樣 fallback close、`HH==LL` 同樣取 50。RSV 已由 Task 261 的序列核心算出，故威廉指標**直接由既有 RSV 導出、不另跑一次視窗掃描**。（Yahoo 未直接顯示 RSV 欄位，故此式無獨立實測值可比對，但代數上嚴格成立。）
+>
+> 驗收用的 Yahoo 實測值（2330，2026-07-31）：`EMA12 2338.96／EMA26 2360.89／DIF9 −21.94／MACD −8.23`、`RSI5 65.78／RSI10 56.53`、`BIAS10 3.88／BIAS20 1.83／B10−B20 2.05`、`W%R9 7.55`。自洽性可直接驗：`2338.96 − 2360.89 = −21.93 ≈ DIF9`、`3.88 − 1.83 = 2.05 = B10−B20`。
+> **上表是逐位比對的基準，不只是驗自洽。** 以本專案 `stock_price_history` 的 2330 全序列實算，下列 9 個值與 Yahoo **逐位相同**：K9 42.65／D9 32.92／J9 13.45、RSI5 65.78／RSI10 56.53（Wilder）、BIAS10 3.88／BIAS20 1.83／B10−B20 2.05、W%R9 7.55 —— 證明我方 OHLC 與 Yahoo 同源。
+> 唯一的例外是 MACD：它的價基是 **DI＝(H+L+2C)/4**（台股慣例）而非收盤價，用收盤價算 EMA12 得 2338.68（差 0.28）、用 DI 得 2338.9583（差 0.0017，四捨五入即 2338.96）。DI 基準下 EMA26／DIF／MACD 仍有 ≤0.12 殘差（來源未查明），故 MACD 採容差 0.15、其餘指標逐位相符。
+
+**一次回傳全部指標，不依選單分批請求。** 走勢圖既有設計是「一次抓 10 年、切期間只調 dataZoom 不 roundtrip」（見上一節），切指標比照辦理才不會「切一次卡一下」。20 個欄位 × 約 2500 筆，gzip 後與現況同量級；若日後欄位再擴張到成交量／DMI 等而 payload 成為問題，再改為依 `indicators=` 參數分批並在前端快取。
+
+**前端**：選單以 Element Plus `el-select` 放在圖表上方既有的「期間：」那一列（純 DOM、零絕對定位），預設 `KD,J`。與 Yahoo 放在子圖左上不同——本專案圖表是單一 canvas，DOM 無法插進兩張圖中間；絕對定位疊在 canvas 上會有水平碰撞風險（`legend[1]` 未設 `left`、ECharts 預設水平置中，容器變窄時左緣會往左移撞上選單）。切換只重算 `chartOption` 的子圖 series／y 軸／參考線，不重新抓資料。
+⚠️ **MACD 的 OSC 是柱狀，必須顯式 `use(BarChart)`**——本專案前端 echarts 為 tree-shaking 版，漏註冊會靜默不畫且無任何錯誤訊息（Task 96 的 `MarkPointComponent` 即為前例）。
 
 ### 警示觸發 Email 通知（Requirement 23）
 
