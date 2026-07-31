@@ -736,8 +736,8 @@ const chartOption = computed(() => {
       const textStyle = { fontSize: 12, color: '#475569', rich: richStyles }
       // 兩組 legend，各自貼著自己的 pane：股價／均線在上圖頂端，五個 KD 指標移到
       // 兩張圖中間（＝KD 子圖正上方）。十項全擠在頂端一列會過密且與股價無關聯。
-      // KD 那組用 bottom 定位（不依賴容器總高）：grid[1] 頂端距底部 = bottom 60 + height 90 = 150，
-      // legend 兩行約 36px，故 bottom 156 讓它落在 156~192，剛好在 grid[0]（bottom 200）之下。
+      // KD 那組用 bottom 定位（不依賴容器總高）：grid[1] 頂端距底部 = bottom 60 + height 140 = 200，
+      // legend 兩行約 36px，故 bottom 206 讓它落在 206~242，剛好在 grid[0]（bottom 250）之下。
       return [
         {
           data: cost != null
@@ -749,7 +749,7 @@ const chartOption = computed(() => {
         },
         {
           data: ['K9', 'D9', 'J9', 'K3D2', 'RSV'],
-          bottom: 156,
+          bottom: 206,
           itemGap: 30,
           formatter, textStyle
         }
@@ -757,9 +757,10 @@ const chartOption = computed(() => {
     })(),
     axisPointer: { link: [{ xAxisIndex: 'all' }] },
     grid: [
-      // bottom 200：讓出 KD legend 那一列（bottom 156 起、約 36px 高）
-      { left: 64, right: 96, top: 72, bottom: 200 },
-      { left: 64, right: 96, top: 'auto', height: 90, bottom: 60 }
+      // 容器總高 580。上下 pane 約 65:35（258 / 140）——子圖過矮時三條 KD 線會擠成一團看不出交叉，
+      // 這是實機回饋的主因。bottom 250 = KD legend 那一列(206 起、約 36 高) + 8 間隙。
+      { left: 64, right: 96, top: 72, bottom: 250 },
+      { left: 64, right: 96, top: 'auto', height: 140, bottom: 60 }
     ],
     dataZoom: [
       // 期間按鈕只調 dataZoom 窗（不 roundtrip）；ez 合成自手動拖曳(zoomPct)優先、否則期間預設，最高/最低標記同窗
