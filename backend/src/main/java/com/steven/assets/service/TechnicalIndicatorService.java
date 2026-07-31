@@ -65,7 +65,24 @@ public class TechnicalIndicatorService {
             BigDecimal d,
             BigDecimal j9,
             BigDecimal k3d2,
-            BigDecimal rsv) {}
+            BigDecimal rsv,
+            // Task 262：走勢圖指標選單。參數對齊 Yahoo 股市台股頁（實測 2330 2026-07-31）。
+            BigDecimal ema12,
+            BigDecimal ema26,
+            BigDecimal dif,
+            BigDecimal macd,
+            BigDecimal osc,
+            BigDecimal rsi5,
+            BigDecimal rsi10,
+            BigDecimal bias10,
+            BigDecimal bias20,
+            BigDecimal b10b20,
+            BigDecimal wr9) {}
+
+    /** MACD 一族逐期輸出（Task 262）；暖機不足者為 EMPTY。 */
+    private record MacdPoint(BigDecimal ema12, BigDecimal ema26, BigDecimal dif, BigDecimal macd, BigDecimal osc) {
+        private static final MacdPoint EMPTY = new MacdPoint(null, null, null, null, null);
+    }
 
     /** 序列核心逐期輸出；暖機不足 9 筆者為 EMPTY。 */
     private record KdPoint(BigDecimal k, BigDecimal d, BigDecimal j9, BigDecimal k3d2, BigDecimal rsv) {
@@ -154,14 +171,33 @@ public class TechnicalIndicatorService {
             if (asc.isEmpty()) return List.of();
 
             List<KdPoint> kd = kdSeriesAsc(asc);
+            List<MacdPoint> macd = macdSeriesAsc(asc);
+            Double[] rsi5 = rsiSeriesAsc(asc, 5);
+            Double[] rsi10 = rsiSeriesAsc(asc, 10);
+
             List<IndicatorPoint> out = new ArrayList<>();
             for (int i = 0; i < asc.size(); i++) {
                 LocalDate date = asc.get(i).getTradingDate();
                 if (date.isBefore(start)) continue;   // 暖機段只參與計算、不回傳
                 KdPoint p = kd.get(i);
+                MacdPoint m = macd.get(i);
+                Double b10 = biasRaw(asc, i, 10);
+                Double b20 = biasRaw(asc, i, 20);
+                // 威廉指標由 RSV 直接導出：W%R9 = 100 − RSV9 為代數恆等式
+                // （(HH−C)/(HH−LL) = 1 − RSV/100），同視窗、同 fallback、HH==LL 同取 50
+                BigDecimal wr9 = p.rsv() == null
+                        ? null
+                        : BigDecimal.valueOf(100).subtract(p.rsv()).setScale(2, RoundingMode.HALF_UP);
                 out.add(new IndicatorPoint(date,
                         maAt(asc, i, 20), maAt(asc, i, 60), maAt(asc, i, 240),
-                        p.k(), p.d(), p.j9(), p.k3d2(), p.rsv()));
+                        p.k(), p.d(), p.j9(), p.k3d2(), p.rsv(),
+                        m.ema12(), m.ema26(), m.dif(), m.macd(), m.osc(),
+                        rsi5[i] == null ? null : scale2(rsi5[i]),
+                        rsi10[i] == null ? null : scale2(rsi10[i]),
+                        b10 == null ? null : scale2(b10),
+                        b20 == null ? null : scale2(b20),
+                        (b10 == null || b20 == null) ? null : scale2(b10 - b20),
+                        wr9));
             }
             return out;
         } catch (Exception e) {
@@ -287,6 +323,125 @@ public class TechnicalIndicatorService {
 
     private static BigDecimal scale2(double v) {
         return BigDecimal.valueOf(v).setScale(2, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * DI（需求指數）＝ (最高 + 最低 + 2×收盤) / 4，MACD 一族的價基。
+     *
+     * <b>台股慣例用 DI 而非收盤價</b>：以 2330 全序列實算，用收盤價得 EMA12 = 2338.6794
+     * （與 Yahoo 的 2338.96 差 0.28），用 DI 得 2338.9583（差 0.0017）。
+     * high/low 缺值時 fallback close，沿用 {@link #kdSeriesAsc} 的既有慣例（0000 大盤舊資料即如此）。
+     */
+    private static double diOf(StockPriceHistory h) {
+        double c = h.getClosePrice().doubleValue();
+        double hi = h.getHighPrice() != null ? h.getHighPrice().doubleValue() : c;
+        double lo = h.getLowPrice()  != null ? h.getLowPrice().doubleValue()  : c;
+        return (hi + lo + 2 * c) / 4;
+    }
+
+    /**
+     * n 期 EMA，以「前 n 筆的簡單平均」作 seed、之前為 null。
+     *
+     * 刻意不用 src[0] 當 seed：本專案歷史只保留 10 年而前端 start 也是 10 年前，
+     * 返回區間內沒有暖機緩衝，seed 取首筆會讓最左端出現「DIF/OSC 從 0 慢慢張開」的假象。
+     */
+    private static Double[] emaWithSmaSeed(double[] src, int n) {
+        Double[] out = new Double[src.length];
+        if (src.length < n) return out;
+        double sum = 0;
+        for (int i = 0; i < n; i++) sum += src[i];
+        out[n - 1] = sum / n;
+        double k = 2.0 / (n + 1);
+        for (int i = n; i < src.length; i++) out[i] = src[i] * k + out[i - 1] * (1 - k);
+        return out;
+    }
+
+    /** MACD 一族序列（Task 262）：EMA12／EMA26／DIF／MACD／OSC，價基為 DI。 */
+    private static List<MacdPoint> macdSeriesAsc(List<StockPriceHistory> asc) {
+        int len = asc.size();
+        double[] di = new double[len];
+        for (int i = 0; i < len; i++) di[i] = diOf(asc.get(i));
+
+        Double[] e12 = emaWithSmaSeed(di, 12);
+        Double[] e26 = emaWithSmaSeed(di, 26);
+
+        Double[] dif = new Double[len];
+        for (int i = 0; i < len; i++) {
+            if (e12[i] != null && e26[i] != null) dif[i] = e12[i] - e26[i];
+        }
+        // MACD = DIF 的 9 日 EMA，同樣以 SMA seed（DIF 自第 25 期起有值 → MACD 自第 33 期起有值）
+        Double[] macd = new Double[len];
+        int difStart = -1;
+        for (int i = 0; i < len; i++) if (dif[i] != null) { difStart = i; break; }
+        if (difStart >= 0 && len - difStart >= 9) {
+            double sum = 0;
+            for (int i = difStart; i < difStart + 9; i++) sum += dif[i];
+            int seedIdx = difStart + 8;
+            macd[seedIdx] = sum / 9;
+            double k = 2.0 / 10;
+            for (int i = seedIdx + 1; i < len; i++) macd[i] = dif[i] * k + macd[i - 1] * (1 - k);
+        }
+
+        List<MacdPoint> out = new ArrayList<>(len);
+        for (int i = 0; i < len; i++) {
+            // 五個欄位各自獨立判斷暖機：ema12 自第 11 期、ema26 自第 25 期起有值，
+            // 不可用「任一為 null 就整筆 EMPTY」——那會讓已算出的 ema12 在第 11~24 期被連坐清成 null
+            BigDecimal oscVal = (dif[i] != null && macd[i] != null) ? scale2(dif[i] - macd[i]) : null;
+            out.add(new MacdPoint(
+                    e12[i] == null ? null : scale2(e12[i]),
+                    e26[i] == null ? null : scale2(e26[i]),
+                    dif[i] == null ? null : scale2(dif[i]),
+                    macd[i] == null ? null : scale2(macd[i]),
+                    oscVal));
+        }
+        return out;
+    }
+
+    /**
+     * RSI 序列（Task 262），採 <b>Wilder 平滑</b>——首值為前 n 期漲跌幅的簡單平均，
+     * 之後 {@code avg = (avg × (n−1) + 本期) / n}。
+     *
+     * 實測 2330 於 2026-07-31：Wilder 得 RSI5 = 65.78／RSI10 = 56.53，與 Yahoo 逐位相同；
+     * 簡單移動平均得 60.00／61.95，明顯不符。兩者 RSI10 差 5.4 點，不可混用。
+     */
+    private static Double[] rsiSeriesAsc(List<StockPriceHistory> asc, int n) {
+        int len = asc.size();
+        Double[] out = new Double[len];
+        if (len <= n) return out;
+
+        double[] gain = new double[len];
+        double[] loss = new double[len];
+        for (int i = 1; i < len; i++) {
+            double diff = asc.get(i).getClosePrice().doubleValue() - asc.get(i - 1).getClosePrice().doubleValue();
+            gain[i] = Math.max(0, diff);
+            loss[i] = Math.max(0, -diff);
+        }
+        double avgGain = 0, avgLoss = 0;
+        for (int i = 1; i <= n; i++) { avgGain += gain[i]; avgLoss += loss[i]; }
+        avgGain /= n; avgLoss /= n;
+        out[n] = rsiOf(avgGain, avgLoss);
+        for (int i = n + 1; i < len; i++) {
+            avgGain = (avgGain * (n - 1) + gain[i]) / n;
+            avgLoss = (avgLoss * (n - 1) + loss[i]) / n;
+            out[i] = rsiOf(avgGain, avgLoss);
+        }
+        return out;
+    }
+
+    private static double rsiOf(double avgGain, double avgLoss) {
+        if (avgLoss == 0) return avgGain == 0 ? 50 : 100;   // 連續平盤 → 50；只漲不跌 → 100
+        return 100 - 100 / (1 + avgGain / avgLoss);
+    }
+
+    /**
+     * 乖離率 BIASn ＝ (收盤 − MAn) / MAn × 100，回傳未捨入值（供 b10b20 相減後才捨入）。
+     * 刻意重用已捨入的 {@link #maAt}——保住 Task 261 的「新→舊」累加方向，誤差 < 0.001 個百分點。
+     */
+    private static Double biasRaw(List<StockPriceHistory> asc, int i, int days) {
+        BigDecimal ma = maAt(asc, i, days);
+        if (ma == null || ma.signum() == 0) return null;
+        double m = ma.doubleValue();
+        return (asc.get(i).getClosePrice().doubleValue() - m) / m * 100;
     }
 
     /**

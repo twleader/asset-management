@@ -20,6 +20,18 @@ public record ChartSeriesDto(
         List<BigDecimal> j9,
         List<BigDecimal> k3d2,
         List<BigDecimal> rsv,
+        // Task 262
+        List<BigDecimal> ema12,
+        List<BigDecimal> ema26,
+        List<BigDecimal> dif,
+        List<BigDecimal> macd,
+        List<BigDecimal> osc,
+        List<BigDecimal> rsi5,
+        List<BigDecimal> rsi10,
+        List<BigDecimal> bias10,
+        List<BigDecimal> bias20,
+        List<BigDecimal> b10b20,
+        List<BigDecimal> wr9,
         Latest latest) {
 
     /**
@@ -42,5 +54,27 @@ public record ChartSeriesDto(
             BigDecimal prevD,
             BigDecimal prevJ9,
             BigDecimal prevK3d2,
-            BigDecimal prevRsv) {}
+            BigDecimal prevRsv,
+            // Task 262：osc 不進 legend，但「當日」模式要用它畫水平柱狀，故仍須帶出
+            BigDecimal ema12,
+            BigDecimal ema26,
+            BigDecimal dif,
+            BigDecimal macd,
+            BigDecimal osc,
+            BigDecimal rsi5,
+            BigDecimal rsi10,
+            BigDecimal bias10,
+            BigDecimal bias20,
+            BigDecimal b10b20,
+            BigDecimal wr9,
+            BigDecimal prevEma12,
+            BigDecimal prevEma26,
+            BigDecimal prevDif,
+            BigDecimal prevMacd,
+            BigDecimal prevRsi5,
+            BigDecimal prevRsi10,
+            BigDecimal prevBias10,
+            BigDecimal prevBias20,
+            BigDecimal prevB10b20,
+            BigDecimal prevWr9) {}
 }

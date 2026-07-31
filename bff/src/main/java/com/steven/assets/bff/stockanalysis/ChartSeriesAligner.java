@@ -66,6 +66,17 @@ public final class ChartSeriesAligner {
                 column(dates, indicatorByDate, IndicatorPointDto::j9),
                 column(dates, indicatorByDate, IndicatorPointDto::k3d2),
                 column(dates, indicatorByDate, IndicatorPointDto::rsv),
+                column(dates, indicatorByDate, IndicatorPointDto::ema12),
+                column(dates, indicatorByDate, IndicatorPointDto::ema26),
+                column(dates, indicatorByDate, IndicatorPointDto::dif),
+                column(dates, indicatorByDate, IndicatorPointDto::macd),
+                column(dates, indicatorByDate, IndicatorPointDto::osc),
+                column(dates, indicatorByDate, IndicatorPointDto::rsi5),
+                column(dates, indicatorByDate, IndicatorPointDto::rsi10),
+                column(dates, indicatorByDate, IndicatorPointDto::bias10),
+                column(dates, indicatorByDate, IndicatorPointDto::bias20),
+                column(dates, indicatorByDate, IndicatorPointDto::b10b20),
+                column(dates, indicatorByDate, IndicatorPointDto::wr9),
                 latestOf(indicatorRows));
     }
 
@@ -95,6 +106,18 @@ public final class ChartSeriesAligner {
                 prev == null ? null : prev.d(),
                 prev == null ? null : prev.j9(),
                 prev == null ? null : prev.k3d2(),
-                prev == null ? null : prev.rsv());
+                prev == null ? null : prev.rsv(),
+                last.ema12(), last.ema26(), last.dif(), last.macd(), last.osc(),
+                last.rsi5(), last.rsi10(), last.bias10(), last.bias20(), last.b10b20(), last.wr9(),
+                prev == null ? null : prev.ema12(),
+                prev == null ? null : prev.ema26(),
+                prev == null ? null : prev.dif(),
+                prev == null ? null : prev.macd(),
+                prev == null ? null : prev.rsi5(),
+                prev == null ? null : prev.rsi10(),
+                prev == null ? null : prev.bias10(),
+                prev == null ? null : prev.bias20(),
+                prev == null ? null : prev.b10b20(),
+                prev == null ? null : prev.wr9());
     }
 }
