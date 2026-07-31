@@ -10,6 +10,7 @@ import com.steven.assets.repository.StockAlertRepository;
 import com.steven.assets.repository.StockPriceHistoryRepository;
 import com.steven.assets.repository.StockRepository;
 import com.steven.assets.repository.TwseIndexDailyHistoryRepository;
+import com.steven.assets.util.MarketZones;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -17,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -238,8 +240,22 @@ public class WatchStockService {
     }
 
     /**
-     * 0000 = 台股大盤（TAIEX）的 Response：價格 + OHLC 走 twse_index_daily_history。
-     * 季線（MA60）/ KD / 年線等指標由 TechnicalIndicatorService 對 0000 的特例分支計算。
+     * 0000 = 台股大盤（TAIEX）的 Response。
+     *
+     * <p><b>報價欄分盤中／盤後兩層（Task 263）。</b>完成日 K（{@code twse_index_daily_history}）的今日列
+     * 要等 {@code TwseIndexPoller} 的 14:00 排程才寫入，故 09:00–14:00 整個盤中「最新一筆」恆為<b>昨日</b>；
+     * 原本無條件讀它、並把 {@code closed} 寫死 {@code true}，於是這一列整個盤中停在昨天，而同一列的
+     * MA／KD 由 {@code computeAllForTaiex()} 算出、已含今日即時點位——畫面同時呈現「今天的指標」與
+     * 「昨天的股價」。現行規則：完成日 K 未到今日、且 Redis {@code price:台股:0000} 的 tradingDate
+     * 等於台北今日時，price / OHLC / tradingDate 五欄一律取自即時值且 {@code closed=false}；其餘情形
+     * 維持既有的完成日 K 行為。判定條件與 {@code TechnicalIndicatorService.computeAllForTaiex()}
+     * <b>語意等價</b>（值逐次相同），否則同列的股價與指標會再次落在不同日期。
+     *
+     * <p>{@code previousClose} 兩層<b>共用同一條規則</b>：日線表中 trading_date 嚴格早於當列
+     * tradingDate 的最後一筆。<b>刻意不讀 Redis payload 的 previousClose</b>——「股市大盤查詢」頁
+     * 當日卡的昨收讀同一張表、用同一條規則，兩頁的昨收是同義欄位必須同源。
+     *
+     * <p>季線（MA60）/ KD / 年線等指標由 TechnicalIndicatorService 對 0000 的特例分支計算。
      * 大盤無買賣盤口、無成交量定義 → buyPrice / sellPrice / volume 為 null。
      */
     private WatchStockDto.Response toIndexResponse(String code, String market) {
@@ -249,7 +265,28 @@ public class WatchStockService {
         Boolean closed = null;
 
         List<TwseIndexDailyHistory> recent = twseDailyRepo.findTop60ByOrderByTradingDateDesc();
-        if (!recent.isEmpty()) {
+        LocalDate today = MarketZones.today("台股");
+        boolean eodHasToday = !recent.isEmpty() && today.equals(recent.get(0).getTradingDate());
+
+        // 與 computeAllForTaiex() 等價的 live 併入條件：完成日 K 未到今日，且 live 的 tradingDate 為今日
+        Optional<PriceQueryService.LivePrice> liveOpt = eodHasToday
+                ? Optional.empty()
+                : priceQuery.getLive(TAIEX_INDEX_CODE, "台股");
+        boolean useLive = liveOpt.isPresent()
+                && liveOpt.get().tradingDate() != null
+                && today.toString().equals(liveOpt.get().tradingDate());
+
+        if (useLive) {
+            // 五欄全部取自 live，不逐欄 fallback 回完成日 K——混搭會讓同一列出現兩個日期的值。
+            // 某欄為 null 就顯示「—」，那是誠實的空值。
+            PriceQueryService.LivePrice live = liveOpt.get();
+            price = live.price();
+            openPrice = live.openPrice();
+            highPrice = live.highPrice();
+            lowPrice = live.lowPrice();
+            tradingDate = live.tradingDate();
+            closed = false;
+        } else if (!recent.isEmpty()) {
             TwseIndexDailyHistory latest = recent.get(0);
             price = latest.getClosePoint();
             openPrice = latest.getOpenPoint();
@@ -257,17 +294,25 @@ public class WatchStockService {
             lowPrice = latest.getLowPoint();
             tradingDate = latest.getTradingDate().toString();
             closed = true;
-            if (recent.size() >= 2) {
-                previousClose = recent.get(1).getClosePoint();
+        }
+
+        if (tradingDate != null) {
+            LocalDate displayDate = LocalDate.parse(tradingDate);
+            for (TwseIndexDailyHistory h : recent) {          // recent 為降冪，第一筆嚴格早於顯示日者即昨收
+                if (h.getTradingDate().isBefore(displayDate)) {
+                    previousClose = h.getClosePoint();
+                    break;
+                }
             }
-            if (price != null && previousClose != null && previousClose.signum() != 0) {
-                BigDecimal diff = price.subtract(previousClose);
-                priceChange = diff.setScale(4, RoundingMode.HALF_UP);
-                changePercent = diff
-                        .divide(previousClose, 6, RoundingMode.HALF_UP)
-                        .multiply(BigDecimal.valueOf(100))
-                        .setScale(4, RoundingMode.HALF_UP);
-            }
+        }
+        // priceChange / changePercent 一律現算，不取 Redis payload 內的既算值（那是依它自己那份昨收算的）
+        if (price != null && previousClose != null && previousClose.signum() != 0) {
+            BigDecimal diff = price.subtract(previousClose);
+            priceChange = diff.setScale(4, RoundingMode.HALF_UP);
+            changePercent = diff
+                    .divide(previousClose, 6, RoundingMode.HALF_UP)
+                    .multiply(BigDecimal.valueOf(100))
+                    .setScale(4, RoundingMode.HALF_UP);
         }
 
         // 警示條件：列出該股票所有 alert 條件 label

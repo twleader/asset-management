@@ -16,6 +16,8 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -48,9 +50,15 @@ class TechnicalIndicatorTaiexLiveBlendTest {
     }
 
     private PriceQueryService.LivePrice liveOn(LocalDate tradingDate, BigDecimal price) {
+        return liveOn(tradingDate, price, null, null);
+    }
+
+    /** Task 263：high / low 有值的 live（大盤自該任務起由 Yahoo 5 分 K 的 high/low 陣列提供當日真實區間）。 */
+    private PriceQueryService.LivePrice liveOn(LocalDate tradingDate, BigDecimal price,
+                                               BigDecimal high, BigDecimal low) {
         return new PriceQueryService.LivePrice(
                 "0000", "台股大盤", "台股", price, null, null, null,
-                null, null, null, null, null, null,
+                null, null, null, high, low, null,
                 tradingDate.toString(), "2026-07-20T10:30:00", false, "TWSE指數(5m)");
     }
 
@@ -83,6 +91,39 @@ class TechnicalIndicatorTaiexLiveBlendTest {
         BigDecimal expectedMa20 = BigDecimal.valueOf(sum / 20).setScale(2, RoundingMode.HALF_UP);
         assertEquals(expectedMa20, ind.monthlyMa());
         verify(priceQuery, never()).getLive("0000", "台股");
+    }
+
+    /**
+     * Task 263：live 的 highPrice / lowPrice 真的會進 KD 的 RSV，不是被 fallback 成 price。
+     *
+     * <p>大盤的 Redis high / low 在 Task 263 之前恆為 null（`TaiexIndexPoller` 傳 null、
+     * `PriceCacheWriter` 回退成「5 分格<b>收盤價</b>」的本地聚合），故 `live.highPrice() != null`
+     * 的 true 分支原本零覆蓋。Task 263 起改為 Yahoo 「5 分格 high / low <b>陣列</b>」的 max/min，
+     * 區間變寬 → RSV 變 → 盤中 K / D 與修正前不同（這是修正，不是 regression）。
+     *
+     * <p><b>fixture 約束</b>：`descRows` 的 live close(500) 遠高於其餘各格(100..108)，故不給 high 時
+     * `highest == close`、RSV 恆為 100；此時<b>只放寬 low 不會改變 K/D</b>。方向性一般式為
+     * `RSV_new &lt; RSV_old ⟺ δ·(H−C) &lt; (C−L)·ε`（δ=低點下移、ε=高點上移），並非恆真，
+     * 故本 case 固定用「只放寬 high」（δ=0、ε&gt;0），該條件必然成立、K 必然下降。
+     */
+    @Test
+    void completedKNotToday_liveHighLowEntersRsv_notFallenBackToPrice() {
+        LocalDate today = LocalDate.now();
+        List<TwseIndexDailyHistory> rows = descRows(today.minusDays(1), 100);
+        when(twseDailyRepo.findTopNByOrderByTradingDateDesc(240)).thenReturn(rows);
+
+        when(priceQuery.getLive("0000", "台股"))
+                .thenReturn(Optional.of(liveOn(today, BigDecimal.valueOf(500))));
+        TechnicalIndicatorService.FullIndicators withoutHl = service().computeAll("0000", "台股");
+
+        // 只放寬 high（600 > price 500），low 維持不給 → highest 由 500 抬到 600，RSV 必然下降
+        when(priceQuery.getLive("0000", "台股")).thenReturn(Optional.of(
+                liveOn(today, BigDecimal.valueOf(500), BigDecimal.valueOf(600), null)));
+        TechnicalIndicatorService.FullIndicators withHl = service().computeAll("0000", "台股");
+
+        assertNotEquals(withoutHl.k(), withHl.k());
+        assertTrue(withHl.k().compareTo(withoutHl.k()) < 0,
+                "放寬 high 後收盤在區間內的相對位置下降，K 必須跟著下降：" + withoutHl.k() + " → " + withHl.k());
     }
 
     @Test

@@ -1,7 +1,7 @@
 package com.steven.assets.externalmaterials.service;
 
 import com.steven.assets.externalmaterials.client.MacroDataFetchClient;
-import com.steven.assets.externalmaterials.client.MacroDataFetchClient.IndexIntradayPoint;
+import com.steven.assets.externalmaterials.client.MacroDataFetchClient.DayQuote;
 import com.steven.assets.externalmaterials.client.PriceFetchClient.PriceResult;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -9,6 +9,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 
 /**
@@ -20,8 +21,9 @@ import java.util.List;
  * 的既有盤後批次（TwseIndexPoller）完全不受影響，仍是完成日 K 的唯一權威來源；本類別只餵
  * Redis 的盤中即時層。
  *
- * 抓取來源沿用既有 MacroDataFetchClient.fetchIndexIntraday("TWSE")（Yahoo ^TWII 5 分 K，
- * 「股市大盤查詢」頁「當日走勢」圖表已在用同一支方法，Requirement 18），不新增外部 API 依賴。
+ * 抓取來源為 MacroDataFetchClient.fetchIndexIntradayDay("TWSE")（Task 263 新增；與「股市大盤查詢」頁
+ * 「當日走勢」圖表用的 fetchIndexIntraday 同一個 Yahoo ^TWII 5 分 K URL、同一支 curlGetWithRetry，
+ * 但回傳含所屬日期與當日 open/high/low），不新增外部 API 依賴。
  */
 @Slf4j
 @Service
@@ -49,31 +51,50 @@ public class TaiexIndexPoller {
 
     /** package-private：供測試直接呼叫，略過 cron/isTwMarketOpen 判斷。 */
     void updateOnce() {
-        List<IndexIntradayPoint> points = macroClient.fetchIndexIntraday("TWSE");
-        BigDecimal latestClose = null;
-        for (int i = points.size() - 1; i >= 0; i--) {
-            if (points.get(i).close() != null) {
-                latestClose = points.get(i).close();
+        DayQuote quote = macroClient.fetchIndexIntradayDay("TWSE");
+
+        // 日期守門（Task 263）：來源回傳橫跨最近五個交易日，「最新交易日」不等於「今日」——
+        // Yahoo 尚未產生今日第一根 5 分格時它就是昨日，而 cron 第一輪落在 09:00:00 整、今日
+        // 09:00 那格要到 09:05 才收，故每個交易日開盤都會撞到一次。原本只判「非 null」，
+        // 於是把昨日點位當今日 tick 寫入，並經 IntradayHighLowTracker 污染當日最低（該聚合
+        // 只取 min，錯值不會被後續正確值修正，會持續整個交易日）。
+        //
+        // 查無有效點位／非今日：本輪不寫，保留 Redis 上一輪真實值（比照個股 TWSE z='-' 的既有
+        // 慣例，不得以昨收或空值覆寫；見 PricePoller.updatePrices 對 Optional.empty() 的處理）。
+        if (quote == null || quote.latestClose() == null) return;
+        LocalDate today = LocalDate.now(MarketClock.TW_ZONE);
+        if (!today.equals(quote.date())) {
+            log.debug("大盤點位屬 {} 非今日 {}，本輪不寫入", quote.date(), today);
+            return;
+        }
+
+        // 昨收取「嚴格早於本批點位日期」的最後一筆完成日 K。不可直接取最新一筆——TwseIndexPoller
+        // 於 14:00 寫入今日完成日 K 後「最新一筆」即為今日，昨收會變成今日收盤。現行 cron（9-13）
+        // 與 isTwMarketOpen()（上界 13:30）使本方法不會在 14:00 後執行，故此為防禦性處理。
+        // loadRecentTaiexCloses 回傳為升冪，由後往前找第一筆嚴格早於 quote.date() 者。
+        List<StockSourceQuery.ClosePoint> prevRows = source.loadRecentTaiexCloses(2);
+        BigDecimal previousClose = null;
+        for (int i = prevRows.size() - 1; i >= 0; i--) {
+            if (prevRows.get(i).date().isBefore(quote.date())) {
+                previousClose = prevRows.get(i).close();
                 break;
             }
         }
-        // 查無有效點位：本輪不寫，保留 Redis 上一輪真實值（比照個股 TWSE z='-' 的既有慣例，
-        // 不得以昨收或空值覆寫；見 PricePoller.updatePrices 對 Optional.empty() 的處理）。
-        if (latestClose == null) return;
-
-        List<StockSourceQuery.ClosePoint> prevRows = source.loadRecentTaiexCloses(1);
-        BigDecimal previousClose = prevRows.isEmpty() ? null : prevRows.get(prevRows.size() - 1).close();
 
         PriceResult result = new PriceResult(
-                TAIEX_CODE, TW_MARKET, latestClose,
+                TAIEX_CODE, TW_MARKET, quote.latestClose(),
                 null, null,                 // change / changePct：由 PriceCacheWriter 依 previousClose 自算
                 "TWSE指數(5m)",              // 含括號 → PriceCacheWriter 不會把這筆併入 IntradayTickStore
                 "台股大盤",
                 null, null,                 // buyPrice / sellPrice：指數無此概念
-                null,                       // openPrice：MA/KD 判斷不吃這欄，留白不臆造
+                quote.open(),               // 當日第一格開盤（Task 263：原本留 null，觀察清單「開盤」欄因此恆為空白）
                 previousClose,
-                null, null,                 // highPrice / lowPrice：交給 PriceCacheWriter 內的 IntradayHighLowTracker 自動聚合
+                quote.high(), quote.low(),  // 來源當日全部 5 分格的最高／最低
                 null);                      // volume：指數無成交量概念
-        writer.write(result, false);
+
+        // aggregateHighLow=false：來源已給當日權威 high/low，不再與 price:dayhl:* 的本地累計 merge。
+        // 本地聚合的存在理由是「外部 API 不提供 dayrange」（NASDAQ 對 ETF 的 keyStats 為 null），
+        // 對 Yahoo 5 分 K 不成立；且聚合的 max/min 語意使誤入的極值無法被後續正確值修正。
+        writer.write(result, false, false);
     }
 }

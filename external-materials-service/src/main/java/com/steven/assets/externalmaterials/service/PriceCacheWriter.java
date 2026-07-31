@@ -49,6 +49,20 @@ public class PriceCacheWriter {
     private static final Duration LIVE_TTL = Duration.ofHours(24);
 
     public void write(PriceResult result, boolean markClosed) {
+        write(result, markClosed, true);
+    }
+
+    /**
+     * @param aggregateHighLow 是否讓 high / low 參與 {@link IntradayHighLowTracker} 的當日本地聚合。
+     *
+     * <p>個股一律 {@code true}（兩參數版即此）。**台股大盤 {@code 0000} 自 Task 263 起傳 {@code false}**：
+     * 本地聚合的存在理由是「外部 API 不提供 dayrange」（起因為 NASDAQ 對 ETF 的 keyStats 為 null），
+     * 而 Yahoo 5 分 K 本來就給整日的 high / low 陣列，前提不成立；且聚合是 max/min 的單向累積，
+     * 一旦誤入極值就<b>無法</b>被後續正確值修正——`TaiexIndexPoller` 恰好每個交易日開盤都會撞到一次
+     * 「Yahoo 尚未產生今日第一根格」而取到昨日點位（該守門已於 Task 263 補上，但聚合的不可逆性
+     * 使得「就算守門漏了也不該污染當日極值」仍是必要的第二道防線）。
+     */
+    public void write(PriceResult result, boolean markClosed, boolean aggregateHighLow) {
         String market = result.market();
         String code = result.stockCode();
         String key = "price:" + market + ":" + code;
@@ -58,10 +72,17 @@ public class PriceCacheWriter {
 
         // 盤中聚合 high / low：以本輪成交價更新當日累計，再與外部 API 給的 high/low 取 max/min。
         // 動機：NASDAQ info API 對 ETF 的 keyStats 為 null（VOO/VT 等抓不到 dayrange）。
-        IntradayHighLowTracker.HighLow agg =
-                hlTracker.observe(code, market, tradingDate, result.price());
-        BigDecimal mergedHigh = mergeHigh(result.highPrice(), agg.high());
-        BigDecimal mergedLow  = mergeLow(result.lowPrice(),  agg.low());
+        BigDecimal mergedHigh, mergedLow;
+        if (aggregateHighLow) {
+            IntradayHighLowTracker.HighLow agg =
+                    hlTracker.observe(code, market, tradingDate, result.price());
+            mergedHigh = mergeHigh(result.highPrice(), agg.high());
+            mergedLow  = mergeLow(result.lowPrice(),  agg.low());
+        } else {
+            // 來源已給當日權威 high / low，不觸碰 price:dayhl:*（連讀都不讀）
+            mergedHigh = result.highPrice();
+            mergedLow  = result.lowPrice();
+        }
 
         Map<String, Object> payload = new HashMap<>();
         payload.put("stockCode", code);

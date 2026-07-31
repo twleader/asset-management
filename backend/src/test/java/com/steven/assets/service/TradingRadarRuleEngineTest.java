@@ -477,9 +477,15 @@ class TradingRadarRuleEngineTest {
         assertEquals(TradingRadarRuleEngine.KdHeat.NORMAL, incomplete.kdHeat());
     }
 
+    /**
+     * Task 263 升為 V8：大盤即時點位的 high／low 改由 Yahoo 5 分 K 的 high／low 陣列提供
+     * （原本是「5 分格收盤價」的本地聚合），K／D 與 regime／score 因此與修正前不同。
+     * 升版判準沿用 Task 228（V6）與 Task 232（V7）——因子組成、權重、正規化完全未動，
+     * 但使用者可觀察行為有實質變化即升版。
+     */
     @Test
-    void ruleVersion_isV7() {
-        assertEquals("TW_RULES_V7", TradingRadarRuleEngine.RULE_VERSION);
+    void ruleVersion_isV8() {
+        assertEquals("TW_RULES_V8", TradingRadarRuleEngine.RULE_VERSION);
     }
 
     private TradingRadarRuleEngine.StockInput strongStockWithKd(boolean held, String k, String d) {
