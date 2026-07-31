@@ -53,6 +53,29 @@ public class TechnicalIndicatorService {
     }
 
     /**
+     * 走勢圖用的逐日指標點（Task 261）。視窗／暖機不足的欄位為 null（不是 0）。
+     * j9 = 3D − 2K、k3d2 = 3K − 2D（同一對 K/D 的兩種鏡像慣例，畫面兩者都要顯示）。
+     */
+    public record IndicatorPoint(
+            LocalDate tradingDate,
+            BigDecimal ma20,
+            BigDecimal ma60,
+            BigDecimal ma240,
+            BigDecimal k,
+            BigDecimal d,
+            BigDecimal j9,
+            BigDecimal k3d2,
+            BigDecimal rsv) {}
+
+    /** 序列核心逐期輸出；暖機不足 9 筆者為 EMPTY。 */
+    private record KdPoint(BigDecimal k, BigDecimal d, BigDecimal j9, BigDecimal k3d2, BigDecimal rsv) {
+        private static final KdPoint EMPTY = new KdPoint(null, null, null, null, null);
+    }
+
+    /** 取「全部歷史」時的下界；stock_price_history 保留期本就只有 10 年，此值僅為不設限的哨兵。 */
+    private static final LocalDate EPOCH_START = LocalDate.of(1970, 1, 1);
+
+    /**
      * 一次計算 MA20 / MA60 / MA240 / K / D。
      * 歷史資料不足以撐滿某個視窗時，該欄位回傳 null（其他仍照算）。
      */
@@ -111,6 +134,115 @@ public class TechnicalIndicatorService {
                 previousKd.k(), previousKd.d());
     }
 
+    /**
+     * 走勢圖用的整段指標序列（Task 261）：[start, end] 逐日的 MA20/60/240 + K/D/J9/K3D2/RSV。
+     *
+     * 與單點 {@link #computeAll} 共用同一份 MA／KD 核心與同一套今日 live 併入規則，因此
+     * <b>當 end &gt;= 該市場今日時，尾筆的 k/d/ma* 逐位等於 computeAll()、倒數第二筆的 k/d 等於
+     * previousK/previousD</b>——這是「走勢圖與觀察清單表格不再出現兩組數字」的機械判準。
+     *
+     * 取數刻意涵蓋 end 之前的<b>全部</b>歷史（而非 computeAll 的 240 筆）以供 MA240／KD 暖機；
+     * 但 stock_price_history 保留期本就只有 10 年、前端 start 也是 10 年前，故線圖前段的 MA240
+     * 仍會是 null（與前端舊 calcMA 行為相同，非回歸）。
+     */
+    @Transactional(readOnly = true)
+    public List<IndicatorPoint> indicatorSeries(String stockCode, String market, LocalDate start, LocalDate end) {
+        try {
+            List<StockPriceHistory> asc = isTaiex(stockCode, market)
+                    ? taiexSeriesAsc(stockCode, market, end)
+                    : stockSeriesAsc(stockCode, market, end);
+            if (asc.isEmpty()) return List.of();
+
+            List<KdPoint> kd = kdSeriesAsc(asc);
+            List<IndicatorPoint> out = new ArrayList<>();
+            for (int i = 0; i < asc.size(); i++) {
+                LocalDate date = asc.get(i).getTradingDate();
+                if (date.isBefore(start)) continue;   // 暖機段只參與計算、不回傳
+                KdPoint p = kd.get(i);
+                out.add(new IndicatorPoint(date,
+                        maAt(asc, i, 20), maAt(asc, i, 60), maAt(asc, i, 240),
+                        p.k(), p.d(), p.j9(), p.k3d2(), p.rsv()));
+            }
+            return out;
+        } catch (Exception e) {
+            log.warn("compute indicator series failed for {} {}", stockCode, market, e);
+            return List.of();
+        }
+    }
+
+    /** 一般個股：全史 asc ＋（end 已到今日時）比照 computeAll() 併入今日 live。 */
+    private List<StockPriceHistory> stockSeriesAsc(String stockCode, String market, LocalDate end) {
+        List<StockPriceHistory> asc = new ArrayList<>(
+                historyRepo.findByStockCodeAndMarketAndTradingDateBetweenOrderByTradingDateAsc(
+                        stockCode, market, EPOCH_START, end));
+        LocalDate today = MarketZones.today(market);
+        if (end.isBefore(today)) return asc;
+        if (!asc.isEmpty() && today.equals(asc.get(asc.size() - 1).getTradingDate())) return asc;
+
+        Optional<PriceQueryService.LivePrice> spOpt = priceQuery.getLive(stockCode, market);
+        if (spOpt.isPresent() && spOpt.get().tradingDate() != null
+                && today.toString().equals(spOpt.get().tradingDate())) {
+            PriceQueryService.LivePrice sp = spOpt.get();
+            asc.add(StockPriceHistory.builder()
+                    .stockCode(stockCode).market(market).tradingDate(today)
+                    .closePrice(sp.price())
+                    .highPrice(sp.highPrice() != null ? sp.highPrice() : sp.price())
+                    .lowPrice(sp.lowPrice()  != null ? sp.lowPrice()  : sp.price())
+                    .build());
+        }
+        return asc;
+    }
+
+    /**
+     * 0000 台股大盤：指數日線映射成 StockPriceHistory 後餵同一份序列核心，
+     * 避免為了型別差異再長出第四套 KD／MA 遞迴（taiexKd/taiexSimpleMa 服務 computeAll 的既有路徑，不動）。
+     */
+    private List<StockPriceHistory> taiexSeriesAsc(String stockCode, String market, LocalDate end) {
+        List<StockPriceHistory> asc = twseDailyRepo
+                .findByTradingDateBetweenOrderByTradingDateAsc(EPOCH_START, end)
+                .stream()
+                .map(d -> StockPriceHistory.builder()
+                        .stockCode(stockCode).market(market).tradingDate(d.getTradingDate())
+                        .closePrice(d.getClosePoint())
+                        .highPrice(d.getHighPoint())
+                        .lowPrice(d.getLowPoint())
+                        .build())
+                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+
+        LocalDate today = LocalDate.now(MarketZones.TW_ZONE);
+        if (end.isBefore(today)) return asc;
+        if (!asc.isEmpty() && today.equals(asc.get(asc.size() - 1).getTradingDate())) return asc;
+
+        Optional<PriceQueryService.LivePrice> liveOpt = priceQuery.getLive("0000", "台股");
+        if (liveOpt.isPresent() && liveOpt.get().tradingDate() != null
+                && today.toString().equals(liveOpt.get().tradingDate())) {
+            PriceQueryService.LivePrice live = liveOpt.get();
+            asc.add(StockPriceHistory.builder()
+                    .stockCode(stockCode).market(market).tradingDate(today)
+                    .closePrice(live.price())
+                    .highPrice(live.highPrice() != null ? live.highPrice() : live.price())
+                    .lowPrice(live.lowPrice()  != null ? live.lowPrice()  : live.price())
+                    .build());
+        }
+        return asc;
+    }
+
+    /**
+     * asc 序列中第 i 期的 n 日均線（往前 n 筆收盤均價）；不足 n 筆回 null。
+     *
+     * <b>累加方向必須是「新→舊」，與 {@link #simpleMa}／{@link #taiexSimpleMa} 一致。</b>
+     * double 加法不可結合：同一組收盤價換個順序相加，末位差經
+     * {@code BigDecimal.valueOf(sum / days).setScale(2, HALF_UP)} 會在 x.xx5 邊界翻面
+     * ——實測反向累加時 MA20 約 1.7% 的日子會與 computeAll() 差 0.01，走勢圖 legend 的
+     * 「月線MA20」就會跟觀察清單表格對不上，正是本任務要消滅的那類不一致。
+     */
+    private static BigDecimal maAt(List<StockPriceHistory> asc, int i, int days) {
+        if (i < days - 1) return null;
+        double sum = 0;
+        for (int j = i; j >= i - days + 1; j--) sum += asc.get(j).getClosePrice().doubleValue();
+        return BigDecimal.valueOf(sum / days).setScale(2, RoundingMode.HALF_UP);
+    }
+
     /** 取最近 days 筆收盤價平均；series 為 desc。資料不足時回傳 null。 */
     private static BigDecimal simpleMa(List<StockPriceHistory> series, int days) {
         if (series.size() < days) return null;
@@ -122,10 +254,23 @@ public class TechnicalIndicatorService {
     /** 與既有 KD9 完全同式；desc 最新在前，回傳該序列最後一期 K/D。 */
     private static KdValues stockKd(List<StockPriceHistory> desc) {
         if (desc.size() < 9) return KdValues.EMPTY;
-        List<StockPriceHistory> asc = new ArrayList<>(desc).reversed();
+        List<KdPoint> series = kdSeriesAsc(new ArrayList<>(desc).reversed());
+        KdPoint last = series.get(series.size() - 1);
+        return new KdValues(last.k(), last.d());
+    }
+
+    /**
+     * KD9 序列核心（Task 261）：asc 最早在前，回傳與輸入等長、逐期的 K/D/J9/K3D2/RSV，
+     * 暖機不足 9 筆者為 {@link KdPoint#EMPTY}。
+     * 單點的 {@link #stockKd} 亦走這裡取最後一筆——全站股票 KD 只有這一份遞迴。
+     * k/d 續存未捨入值，j9/k3d2 亦以未捨入的 k/d 算完才捨入（與遞迴內部精度一致，避免二次捨入）。
+     */
+    private static List<KdPoint> kdSeriesAsc(List<StockPriceHistory> asc) {
+        List<KdPoint> out = new ArrayList<>(asc.size());
         double k = 50, d = 50;
         int period = 9;
-        for (int i = period - 1; i < asc.size(); i++) {
+        for (int i = 0; i < asc.size(); i++) {
+            if (i < period - 1) { out.add(KdPoint.EMPTY); continue; }
             List<StockPriceHistory> window = asc.subList(i - period + 1, i + 1);
             double highest = window.stream().mapToDouble(h -> h.getHighPrice() != null
                     ? h.getHighPrice().doubleValue() : h.getClosePrice().doubleValue()).max().orElse(0);
@@ -135,10 +280,13 @@ public class TechnicalIndicatorService {
                     : (asc.get(i).getClosePrice().doubleValue() - lowest) / (highest - lowest) * 100;
             k = k * 2.0 / 3 + rsv / 3.0;
             d = d * 2.0 / 3 + k / 3.0;
+            out.add(new KdPoint(scale2(k), scale2(d), scale2(3 * d - 2 * k), scale2(3 * k - 2 * d), scale2(rsv)));
         }
-        return new KdValues(
-                BigDecimal.valueOf(k).setScale(2, RoundingMode.HALF_UP),
-                BigDecimal.valueOf(d).setScale(2, RoundingMode.HALF_UP));
+        return out;
+    }
+
+    private static BigDecimal scale2(double v) {
+        return BigDecimal.valueOf(v).setScale(2, RoundingMode.HALF_UP);
     }
 
     /**
