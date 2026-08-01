@@ -81,6 +81,24 @@ public class AssetTransaction {
     @Column(nullable = false, precision = 20, scale = 2)
     private BigDecimal amount;
 
+    /**
+     * 手續費（原幣，與 amount 同幣別；Task 268）。
+     *
+     * <p>純記錄欄：不參與 amountTwd 計算、不參與年度彙總、不回頭調整 amount。
+     * {@code null} ＝「這筆沒記費用」、{@code 0} ＝「確實免收」，兩者語意不同，任一層都不得互相轉換。
+     */
+    @Column(precision = 15, scale = 2)
+    private BigDecimal fee;
+
+    /**
+     * 證交稅（原幣，與 amount 同幣別；Task 268）。
+     *
+     * <p>純記錄欄，語意同 {@link #fee}。不依交易類型設限——英股印花稅課在買進，
+     * 綁死「賣才有稅」會使英股買進的稅無處可記。
+     */
+    @Column(name = "transaction_tax", precision = 15, scale = 2)
+    private BigDecimal transactionTax;
+
     /** 交易當天匯率（USD 計價時使用） */
     @Column(precision = 10, scale = 4)
     private BigDecimal exchangeRate;

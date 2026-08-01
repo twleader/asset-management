@@ -293,8 +293,11 @@ public class ExcelExportService {
     }
 
     /**
-     * 「交易紀錄」分頁（Requirement 49）：15 欄固定順序，涵蓋全部年度。
+     * 「交易紀錄」分頁（Requirement 49）：17 欄固定順序（Task 268 由 15 欄增為 17），涵蓋全部年度。
      * 台幣成交金額即時算（currency=USD 且 exchangeRate 非 null 時＝amount×exchangeRate，否則＝amount），不入庫。
+     *
+     * <p>手續費／證交稅（index 9、10）為純記錄欄，**不參與台幣成交金額計算**；未填時 {@link #cell}
+     * 對 null 不寫值，該格為空白（與同表 shares／price／exchangeRate 的既有行為一致）。
      */
     private void writeAssetTransactionsSheet(Workbook wb, Styles st) {
         Sheet sheet = wb.createSheet("交易紀錄");
@@ -302,7 +305,7 @@ public class ExcelExportService {
 
         Row h = sheet.createRow(r++);
         String[] headers = {"資產名稱","代號","交易類型","資產類型","交易日期","數量","單價","成交金額",
-                "台幣成交金額","市場","幣別","券商通路","匯率","年度","備註"};
+                "台幣成交金額","手續費","證交稅","市場","幣別","券商通路","匯率","年度","備註"};
         for (int i = 0; i < headers.length; i++) cell(h, i, headers[i], st.head);
 
         for (AssetTransaction tx : assetTxRepo.findAllByOrderByTradeDateDesc()) {
@@ -316,12 +319,14 @@ public class ExcelExportService {
             cell(row, 6, tx.getPrice(), st.num6);
             cell(row, 7, tx.getAmount(), st.money);
             cell(row, 8, assetTxAmountTwd(tx), st.money);
-            cell(row, 9, tx.getMarket(), null);
-            cell(row, 10, tx.getCurrency(), null);
-            cell(row, 11, tx.getChannel(), null);
-            cell(row, 12, tx.getExchangeRate(), st.num4);
-            cell(row, 13, tx.getYear(), null);
-            cell(row, 14, tx.getNotes(), null);
+            cell(row, 9, tx.getFee(), st.money);
+            cell(row, 10, tx.getTransactionTax(), st.money);
+            cell(row, 11, tx.getMarket(), null);
+            cell(row, 12, tx.getCurrency(), null);
+            cell(row, 13, tx.getChannel(), null);
+            cell(row, 14, tx.getExchangeRate(), st.num4);
+            cell(row, 15, tx.getYear(), null);
+            cell(row, 16, tx.getNotes(), null);
         }
         for (int i = 0; i < headers.length; i++) sheet.autoSizeColumn(i);
     }
