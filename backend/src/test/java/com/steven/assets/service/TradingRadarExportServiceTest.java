@@ -34,6 +34,16 @@ class TradingRadarExportServiceTest {
     @Mock private TradingRadarSnapshotStore store;
     @Mock private CurrentUserContext currentUserContext;
 
+    /**
+     * <b>刻意注入真的 {@link com.steven.assets.service.export.ExcelDocRenderer}（不是 mock）</b>：
+     * 本測試驗的是實際產出的三分頁版面，換成 mock 就什麼都驗不到。
+     * Requirement 55 / Task 271 讓本 service 多了這個依賴，{@code @InjectMocks} 對未宣告成
+     * {@code @Mock} 的欄位會塞 null，故用 {@code @Spy} 提供真實實例。<b>下方斷言一字不得改。</b>
+     */
+    @org.mockito.Spy
+    private com.steven.assets.service.export.ExcelDocRenderer excelDocRenderer =
+            new com.steven.assets.service.export.ExcelDocRenderer();
+
     @InjectMocks private TradingRadarExportService service;
 
     private final ObjectMapper mapper = new ObjectMapper();

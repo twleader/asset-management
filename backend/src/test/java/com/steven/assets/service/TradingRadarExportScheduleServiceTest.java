@@ -81,8 +81,11 @@ class TradingRadarExportScheduleServiceTest {
         GdriveOutputSupport gdrive =
                 new GdriveOutputSupport(rcloneClient, appUserRepo, userAdminService, selfCheck, "GDriveOutput");
         service = new TradingRadarExportScheduleService(
-                timeRepo, settingRepo, exportService, snapshotStore, currentUserProvider,
-                gdrive, baseDir.toString(), radarService, priceQueryService, marketDataService);
+                timeRepo, settingRepo, exportService, snapshotStore, currentUserProvider, gdrive,
+                new com.steven.assets.service.export.ExcelDocRenderer(),
+                new com.steven.assets.service.export.JsonDocRenderer(new com.fasterxml.jackson.databind.ObjectMapper()),
+                new com.steven.assets.service.export.DualFormatExportWriter(gdrive),
+                baseDir.toString(), radarService, priceQueryService, marketDataService);
         // 預設交易日；休市日分支由專屬測試覆寫。類別已標 @MockitoSettings(LENIENT)，
         // 不需要 HTTP-only 測試裡額外呼叫 lenient()。
         when(marketDataService.isTradingDay(anyString(), any(LocalDate.class))).thenReturn(true);
@@ -107,8 +110,21 @@ class TradingRadarExportScheduleServiceTest {
         when(snapshotStore.range(eq(owner), anyLong(), anyLong()))
                 .thenReturn(new TradingRadarSnapshotStore.SnapshotRange(
                         List.of(TextNode.valueOf("snap")), 1, 0));
-        when(exportService.exportForOwner(eq(owner), anyLong(), anyLong()))
-                .thenReturn("xlsx-bytes".getBytes());
+        when(exportService.radarDoc(eq(owner), anyLong(), anyLong())).thenReturn(radarDoc());
+    }
+
+    /** 最小合法 doc：本測試驗的是落檔與狀態，內容只需能被兩個 renderer 產出。 */
+    private static com.steven.assets.service.export.ExportDoc radarDoc() {
+        var table = new com.steven.assets.service.export.ExportDoc.Table(
+                null, null, List.of("代碼"), true, false, false, null, List.of(List.of("2330")));
+        return new com.steven.assets.service.export.ExportDoc("交易雷達",
+                List.of(new com.steven.assets.service.export.ExportDoc.Sheet("快照索引", List.of(table), 1)));
+    }
+
+    /** 同一主檔名的 .json 那一份（Requirement 55：兩份主檔名相同、只差副檔名）。 */
+    private static Path jsonOf(Path xlsx) {
+        String n = xlsx.getFileName().toString();
+        return xlsx.resolveSibling(n.substring(0, n.length() - ".xlsx".length()) + ".json");
     }
 
     private Path expectedFile(long owner, String subpath) {
@@ -138,7 +154,7 @@ class TradingRadarExportScheduleServiceTest {
 
         service.tick();
 
-        verify(exportService, never()).exportForOwner(anyLong(), anyLong(), anyLong());
+        verify(exportService, never()).radarDoc(anyLong(), anyLong(), anyLong());
     }
 
     @Test
@@ -149,7 +165,7 @@ class TradingRadarExportScheduleServiceTest {
 
         service.tick();
 
-        verify(exportService, never()).exportForOwner(anyLong(), anyLong(), anyLong());
+        verify(exportService, never()).radarDoc(anyLong(), anyLong(), anyLong());
         assertThat(t.getLastRunDate()).isEqualTo(yesterday());   // 未被動到
     }
 
@@ -160,7 +176,7 @@ class TradingRadarExportScheduleServiceTest {
 
         service.tick();
 
-        verify(exportService, never()).exportForOwner(anyLong(), anyLong(), anyLong());
+        verify(exportService, never()).radarDoc(anyLong(), anyLong(), anyLong());
     }
 
     /**
@@ -182,7 +198,7 @@ class TradingRadarExportScheduleServiceTest {
         assertThat(expectedFile(1L, "out")).exists();
         ArgumentCaptor<TradingRadarExportSetting> cap = ArgumentCaptor.forClass(TradingRadarExportSetting.class);
         verify(settingRepo, atLeastOnce()).save(cap.capture());
-        assertThat(cap.getValue().getLastRunStatus()).startsWith("成功：");
+        assertThat(cap.getValue().getLastRunStatus()).startsWith("xlsx 成功：").contains("／json 成功：");
     }
 
     /** 不是只在查無快照時才補算：當日已有快照時，排程仍會重算並把新快照 append 進去。 */
@@ -256,7 +272,7 @@ class TradingRadarExportScheduleServiceTest {
         assertThat(t.getLastRunDate()).isEqualTo(today());
         verify(priceQueryService, never()).refreshTradingRadarPrices();
         verify(radarService, never()).recomputeAndStoreForOwner(anyLong());
-        verify(exportService, never()).exportForOwner(anyLong(), anyLong(), anyLong());
+        verify(exportService, never()).radarDoc(anyLong(), anyLong(), anyLong());
 
         ArgumentCaptor<TradingRadarExportSetting> cap = ArgumentCaptor.forClass(TradingRadarExportSetting.class);
         verify(settingRepo, atLeastOnce()).save(cap.capture());
@@ -278,7 +294,7 @@ class TradingRadarExportScheduleServiceTest {
         assertThat(expectedFile(1L, "out")).exists();
         ArgumentCaptor<TradingRadarExportSetting> cap = ArgumentCaptor.forClass(TradingRadarExportSetting.class);
         verify(settingRepo, atLeastOnce()).save(cap.capture());
-        assertThat(cap.getValue().getLastRunStatus()).startsWith("成功：");
+        assertThat(cap.getValue().getLastRunStatus()).startsWith("xlsx 成功：").contains("／json 成功：");
     }
 
     /** 重算擲例外且當日確實零快照 → 維持既有「不寫檔、不上傳」的降級終點，不得回歸為總是產檔。 */
@@ -293,7 +309,7 @@ class TradingRadarExportScheduleServiceTest {
 
         service.tick();
 
-        verify(exportService, never()).exportForOwner(anyLong(), anyLong(), anyLong());
+        verify(exportService, never()).radarDoc(anyLong(), anyLong(), anyLong());
         assertThat(Files.exists(baseDir.resolve("out"))).isFalse();
         verify(rcloneClient, never()).copyTo(any(), any(), any(), any());
         ArgumentCaptor<TradingRadarExportSetting> cap = ArgumentCaptor.forClass(TradingRadarExportSetting.class);
@@ -361,10 +377,9 @@ class TradingRadarExportScheduleServiceTest {
         when(snapshotStore.range(anyLong(), anyLong(), anyLong()))
                 .thenReturn(new TradingRadarSnapshotStore.SnapshotRange(
                         List.of(TextNode.valueOf("snap")), 1, 0));
-        when(exportService.exportForOwner(eq(1L), anyLong(), anyLong()))
-                .thenThrow(new IOException("磁碟壞了"));
-        when(exportService.exportForOwner(eq(2L), anyLong(), anyLong()))
-                .thenReturn("xlsx-bytes".getBytes());
+        when(exportService.radarDoc(eq(1L), anyLong(), anyLong()))
+                .thenThrow(new RuntimeException("磁碟壞了"));
+        when(exportService.radarDoc(eq(2L), anyLong(), anyLong())).thenReturn(radarDoc());
 
         service.tick();
 

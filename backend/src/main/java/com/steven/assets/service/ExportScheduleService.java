@@ -52,6 +52,10 @@ public class ExportScheduleService {
     private final ObjectProvider<CurrentUserContext> currentUserProvider;
 
     private final GdriveOutputSupport gdrive;
+    // 雙格式匯出（Requirement 55 / Task 271）：一次查詢取得 doc，再 render 成 xlsx 與 JSON 兩份
+    private final com.steven.assets.service.export.ExcelDocRenderer excelDocRenderer;
+    private final com.steven.assets.service.export.JsonDocRenderer jsonDocRenderer;
+    private final com.steven.assets.service.export.DualFormatExportWriter dualWriter;
 
     /** 容器內基底輸出目錄，經 docker volume 對映到 host（見 docker-compose.yml）。 */
     private final String baseDir;
@@ -63,11 +67,17 @@ public class ExportScheduleService {
                                  ExcelExportService excelExportService,
                                  ObjectProvider<CurrentUserContext> currentUserProvider,
                                  GdriveOutputSupport gdrive,
+                                 com.steven.assets.service.export.ExcelDocRenderer excelDocRenderer,
+                                 com.steven.assets.service.export.JsonDocRenderer jsonDocRenderer,
+                                 com.steven.assets.service.export.DualFormatExportWriter dualWriter,
                                  @Value("${EXPORT_OUTPUT_DIR:/home/steven}") String baseDir) {
         this.settingRepo = settingRepo;
         this.excelExportService = excelExportService;
         this.currentUserProvider = currentUserProvider;
         this.gdrive = gdrive;
+        this.excelDocRenderer = excelDocRenderer;
+        this.jsonDocRenderer = jsonDocRenderer;
+        this.dualWriter = dualWriter;
         this.baseDir = baseDir;
     }
 
@@ -118,20 +128,23 @@ public class ExportScheduleService {
                 ExportScheduleSetting.builder().ownerUserId(ownerId).build());
         String subpath = normalizeSubpath(s.getOutputSubpath());
         try {
-            // HTTP 情境：exportLiveAssets() 由 TenantFilterAspect 自動 owner-scoped 到當前使用者。
-            byte[] data = excelExportService.exportLiveAssets();
-            Path file = writeToDir(ownerId, subpath, data);
+            // HTTP 情境：liveAssetsDoc() 由 TenantFilterAspect 自動 owner-scoped 到當前使用者。
+            // 一次查詢取得 doc，再 render 兩種格式——本匯出點吃 Redis 即時價，查兩次會對不起來。
+            var r = writeDual(s, ownerId, excelExportService.liveAssetsDoc(), subpath);
             s.setOwnerUserId(ownerId);
             s.setLastRunAt(LocalDateTime.now(TW_ZONE));
-            s.setLastRunStatus("成功：" + file);
-            // 本機寫成功後才上傳；run-now 的用途就是驗證落點正確，故它也要上傳並回報。
-            GdriveOutputSupport.SyncResult drive = syncGdrive(s, file);
+            s.setLastRunStatus(r.localStatus());
+            applyGdriveStatus(s, r);
             settingRepo.save(s);
             return ExportScheduleDto.RunNowResponse.builder()
-                    .path(file.toString())
-                    .sizeBytes(data.length)
-                    .gdrivePath(drive == null ? null : drive.path())
-                    .gdriveStatus(drive == null ? null : drive.status())
+                    // 既有三欄語意不變：一律指 xlsx 那一份
+                    .path(r.xlsxFile() == null ? null : r.xlsxFile().toString())
+                    .sizeBytes(r.xlsxFile() == null ? 0 : (int) Files.size(r.xlsxFile()))
+                    .gdrivePath(r.xlsxGdrivePath())
+                    .gdriveStatus(r.gdriveStatus())
+                    .jsonPath(r.jsonFile() == null ? null : r.jsonFile().toString())
+                    .jsonSizeBytes(r.jsonFile() == null ? 0 : (int) Files.size(r.jsonFile()))
+                    .jsonGdrivePath(r.jsonGdrivePath())
                     .build();
         } catch (IOException | RuntimeException e) {
             s.setOwnerUserId(ownerId);
@@ -272,11 +285,12 @@ public class ExportScheduleService {
     /** 背景：對指定 owner 產檔並更新 guard／狀態。單一使用者失敗只記錄、不影響其他人。 */
     private void runScheduled(ExportScheduleSetting s, LocalDate today) {
         try {
-            byte[] data = excelExportService.exportLiveAssetsForOwner(s.getOwnerUserId());
-            Path file = writeToDir(s.getOwnerUserId(), normalizeSubpath(s.getOutputSubpath()), data);
-            s.setLastRunStatus("成功：" + file);
-            log.info("排程匯出成功 owner={} → {}（{} bytes）", s.getOwnerUserId(), file, data.length);
-            syncGdrive(s, file);
+            var r = writeDual(s, s.getOwnerUserId(),
+                    excelExportService.liveAssetsDocForOwner(s.getOwnerUserId()),
+                    normalizeSubpath(s.getOutputSubpath()));
+            s.setLastRunStatus(r.localStatus());
+            applyGdriveStatus(s, r);
+            log.info("排程匯出 owner={} → {}", s.getOwnerUserId(), r.localStatus());
         } catch (Exception e) {
             s.setLastRunStatus("失敗：" + e.getMessage());
             log.warn("排程匯出失敗 owner={}：{}", s.getOwnerUserId(), e.getMessage(), e);
@@ -315,14 +329,40 @@ public class ExportScheduleService {
         return target;
     }
 
-    /** 建立目錄並寫入 xlsx，回傳實際檔案路徑。檔名含 ownerId，避免多使用者同 subpath 時同名互相覆蓋。 */
-    private Path writeToDir(Long ownerId, String subpath, byte[] data) throws IOException {
-        Path dir = resolveDir(subpath);
-        Files.createDirectories(dir);
-        String filename = "資產總覽_" + ownerId + "_" + LocalDate.now(TW_ZONE).format(FILE_DATE) + ".xlsx";
-        Path file = dir.resolve(filename);
-        Files.write(file, data);
-        return file;
+    /**
+     * 一次查詢的 doc → render 兩種格式 → 寫兩份檔（Requirement 55 / Task 271）。
+     *
+     * <p>主檔名含 ownerId，避免多使用者同 subpath 時同名互相覆蓋；<b>不含副檔名</b>，
+     * 由 {@code DualFormatExportWriter} 各自加上 {@code .xlsx}／{@code .json}。
+     * <b>兩支 render 各自 try/catch、失敗的那一份傳 null</b>：一份失敗不得中斷另一份。
+     * {@code resolveDir} 不可省略——它擋的是子路徑跳脫基底，是另一道防線。
+     */
+    private com.steven.assets.service.export.DualFormatExportWriter.DualResult writeDual(
+            ExportScheduleSetting s, Long ownerId,
+            com.steven.assets.service.export.ExportDoc doc, String subpath) throws IOException {
+        byte[] xlsx = null;
+        byte[] json = null;
+        try {
+            xlsx = excelDocRenderer.render(doc);
+        } catch (Exception e) {
+            log.warn("資產總覽 xlsx render 失敗 owner={}：{}", ownerId, e.getMessage(), e);
+        }
+        try {
+            json = jsonDocRenderer.render(doc);
+        } catch (Exception e) {
+            log.warn("資產總覽 json render 失敗 owner={}：{}", ownerId, e.getMessage(), e);
+        }
+        String baseName = "資產總覽_" + ownerId + "_" + LocalDate.now(TW_ZONE).format(FILE_DATE);
+        return dualWriter.write(ownerId, resolveDir(subpath), baseName, json, xlsx,
+                s.isGdriveEnabled(), s.getGdriveSubpath());
+    }
+
+    /** 寫回 Drive 狀態欄。未啟用時 {@code gdriveStatus} 為 null，此時兩欄一律不碰（沿用既有語意）。 */
+    private void applyGdriveStatus(ExportScheduleSetting s,
+                                   com.steven.assets.service.export.DualFormatExportWriter.DualResult r) {
+        if (r.gdriveStatus() == null) return;
+        s.setGdriveLastRunAt(LocalDateTime.now(TW_ZONE));
+        s.setGdriveLastStatus(r.gdriveStatus());
     }
 
     /**

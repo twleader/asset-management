@@ -86,6 +86,8 @@ public class NewsPoller {
     private final CrawlerExportPathQuery exportPathQuery;
     private final GdriveUploader gdriveUploader;
     private final ObjectMapper objectMapper;
+    // 公開資訊的 Excel 那一份（Requirement 55 / Task 272）：吃 JSON 已組好的同一份 payload，不重查
+    private final PublicInfoXlsxWriter xlsxWriter;
 
     /** 防止上一輪抓取尚未結束又被下一分鐘 ticker 重複觸發（抓取可能耗數十秒）。 */
     private final AtomicBoolean running = new AtomicBoolean(false);
@@ -224,6 +226,7 @@ public class NewsPoller {
         if (!exportEnabled) return;
         LocalDate today = LocalDate.now(TW_ZONE);
         Path writtenFile = null;   // 本機檔寫成功才會被設值；null＝本機這一步失敗，Drive 不該上傳舊檔
+        Path xlsxFile = null;      // 同上；xlsx 失敗時 JSON 那一份仍照常上傳
         try {
             LocalDate cutoff = resolveTradingCutoff(today);
             List<NewsRow> items = source.loadTodayPublicInfoForExport(today, cutoff);
@@ -255,13 +258,52 @@ public class NewsPoller {
             writtenFile = file;   // 本機（SRPP 的資料來源）已確定寫成功，Drive 才可以上傳這一份
             log.info("公開資訊輸出 JSON（{}）：{} 筆（當日 fetched、published≥{}）→ {}",
                     trigger, items.size(), cutoff, file);
+
+            // Excel 那一份（Requirement 55 / Task 272）：沿用**同一份 payload**，不重查。
+            // 順序守門——JSON 是 SRPP 的權威來源，先確定它寫成功才寫 xlsx；反向（xlsx 失敗）
+            // 只記 warn，絕不影響 JSON、絕不中斷爬取流程。
+            xlsxFile = writePublicInfoXlsx(dir, today, payload, trigger);
         } catch (Exception e) {
             log.warn("公開資訊輸出 JSON 失敗（{}）：{}", trigger, e.getMessage());
         }
 
         // Drive 同步刻意放在上面 try-catch **之外**：本機寫檔失敗時也要能記錄「跳過」狀態，
         // 否則設定頁會停留在上一次的「成功」，顯示過期的好消息（Requirement 50）。
-        syncToGdrive(writtenFile, today, trigger);
+        syncToGdrive(writtenFile, xlsxFile, today, trigger);
+    }
+
+    /**
+     * 寫出 Excel 那一份（Requirement 55 / Task 272）：主檔名與 JSON 相同、只差副檔名。
+     *
+     * <p><b>整段 graceful</b>：產檔或寫檔失敗只記 {@code warn} 並回 {@code null}——
+     * 絕不影響已寫成功的 JSON（SRPP 的資料來源）、絕不中斷本輪爬取。
+     */
+    private Path writePublicInfoXlsx(Path dir, LocalDate today, Map<String, Object> payload, String trigger) {
+        Path tmp = null;
+        try {
+            byte[] data = xlsxWriter.build(payload);
+            Path file = dir.resolve("public_info_" + today + ".xlsx");
+            tmp = Files.createTempFile(dir, "public_info_", ".xlsx.tmp");
+            Files.write(tmp, data);
+            try {
+                Files.move(tmp, file, StandardCopyOption.ATOMIC_MOVE);
+            } catch (java.nio.file.AtomicMoveNotSupportedException amse) {
+                Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING);
+            }
+            log.info("公開資訊輸出 Excel（{}）：{}（{} bytes）", trigger, file, data.length);
+            return file;
+        } catch (Exception e) {
+            log.warn("公開資訊輸出 Excel 失敗（{}）：{}——JSON 那一份不受影響", trigger, e.getMessage());
+            return null;
+        } finally {
+            if (tmp != null) {
+                try {
+                    Files.deleteIfExists(tmp);
+                } catch (Exception ignored) {
+                    // 清 tmp 失敗不影響本輪結果
+                }
+            }
+        }
     }
 
     /**
@@ -277,9 +319,11 @@ public class NewsPoller {
      * <p>package-private 而非 private：本方法的三條「絕不」保證是本任務風險最高的部分，必須能被單元測試
      * 直接驗證，而不必跑整個抓取流程（比照本服務其他 poller 的 {@code updateOnce()} 測試入口慣例）。
      *
-     * @param localFile 已寫成功的本機檔；{@code null} 表示本機這一步就失敗了
+     * @param localFile 已寫成功的本機 JSON 檔；{@code null} 表示本機這一步就失敗了
+     * @param xlsxFile  已寫成功的本機 Excel 檔；{@code null} 表示那一份沒產出——
+     *                  <b>此時 JSON 那一份仍照常上傳</b>（JSON 是 SRPP 的契約，不能因為 Excel 壞掉就不同步）
      */
-    void syncToGdrive(Path localFile, LocalDate today, String trigger) {
+    void syncToGdrive(Path localFile, Path xlsxFile, LocalDate today, String trigger) {
         CrawlerExportPathQuery.GdriveConfig cfg;
         try {
             cfg = exportPathQuery.gdriveConfig(CRAWLER_KEY);
@@ -310,14 +354,40 @@ public class NewsPoller {
                 return;
             }
 
-            String dest = gdriveUploader.upload(localFile, cfg.subpath(), "public_info_" + today + ".json");
-            long size = Files.size(localFile);
-            log.info("Drive 同步成功（{}）：{}（{} bytes）", trigger, dest, size);
-            recordGdriveStatusQuietly("成功：" + dest + "（" + size + " bytes）");
+            String jsonDest = gdriveUploader.upload(localFile, cfg.subpath(), "public_info_" + today + ".json");
+            long jsonSize = Files.size(localFile);
+            log.info("Drive 同步成功（{}）：{}（{} bytes）", trigger, jsonDest, jsonSize);
+            String jsonStatus = "成功：" + jsonDest + "（" + jsonSize + " bytes）";
+
+            // xlsx 那一份（Requirement 55 / Task 272）：沒產出就記「跳過」，但 JSON 已上傳的事實不受影響。
+            String xlsxStatus;
+            if (xlsxFile == null) {
+                xlsxStatus = "跳過：本輪未產生 Excel";
+            } else {
+                try {
+                    String dest = gdriveUploader.upload(xlsxFile, cfg.subpath(), "public_info_" + today + ".xlsx");
+                    long size = Files.size(xlsxFile);
+                    log.info("Drive 同步成功（{}）：{}（{} bytes）", trigger, dest, size);
+                    xlsxStatus = "成功：" + dest + "（" + size + " bytes）";
+                } catch (Exception e) {
+                    log.error("Drive 同步 Excel 失敗（{}）：{}", trigger, e.getMessage(), e);
+                    xlsxStatus = "失敗：" + e.getMessage();
+                }
+            }
+            // 字串契約沿用 backend 共用元件的 "xlsx …／json …"，且**必須能分辨是哪一份**；
+            // 兩半各自先截斷再合併——合併後才截尾會把 ／json 那一整段切掉。
+            recordGdriveStatusQuietly(halfOf(xlsxStatus, "xlsx ") + "／" + halfOf(jsonStatus, "json "));
         } catch (Exception e) {
             log.error("Drive 同步失敗（{}）：{}", trigger, e.getMessage(), e);
             recordGdriveStatusQuietly("失敗：" + e.getMessage());
         }
+    }
+
+    /** 合併前每半的上限：扣掉 {@code "xlsx "} 與 {@code "／json "} 共 12 字元的固定開銷後對半分。 */
+    private static String halfOf(String status, String prefix) {
+        int max = (512 - 12) / 2;
+        String s = status == null ? "" : status;
+        return prefix + (s.length() <= max ? s : s.substring(0, max - 1) + "…");
     }
 
     /**

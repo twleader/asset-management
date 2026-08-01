@@ -56,6 +56,11 @@ public class IndexExportDto {
             long sizeBytes,
             // run-now 的用途就是驗證落點正確，故 Drive 啟用時它也上傳並回報落點與狀態（Task 243.3.3）。
             String gdrivePath,    // 實際 Drive 落點（remote:subpath/檔名）；未啟用或未上傳成功為 null
-            String gdriveStatus   // 同 gdriveLastStatus 的措辭；未啟用為 null
+            String gdriveStatus,  // 同 gdriveLastStatus 的措辭；未啟用為 null
+            // 雙格式匯出新增（Requirement 55 / Task 270）：json 那一份的落點，
+            // 主檔名與 xlsx 相同、只差副檔名；既有三欄語意不變（一律指 xlsx）
+            String jsonPath,
+            long jsonSizeBytes,
+            String jsonGdrivePath
     ) {}
 }

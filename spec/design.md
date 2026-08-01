@@ -5301,3 +5301,184 @@ TransactionView 交易日期變更 / 幣別切到 USD
 - `bff/.../transaction/TransactionBffController.java`：新增 `GET /exchange-rate?date=` passthrough（404／錯誤降級為 `200 {}`）
 - `frontend/src/api/index.js`：`transaction` 命名空間新增 `exchangeRate(date)`
 - `frontend/src/views/TransactionView.vue`：匯率欄改唯讀、新增自動查詢與 `rateDate` 揭露、競態序號
+
+## Requirement 55（Task 269–272）：所有自動匯出一律同時產出 JSON 與 Excel（主檔名相同）
+
+### 為什麼需要中介模型（不是加一支 xlsx→json 轉換器）
+
+十個自動匯出點裡有七個只有 Excel。這七份的產生方式是 `ExcelExportService`（997 行）與
+`TradingRadarExportService`（279 行）**直接對 POI 逐格 `cell(row, i, value, style)`**——沒有任何
+中介資料結構。要在不重複查詢的前提下多產一份 JSON，只有兩條路：
+
+| 方案 | 做法 | 為何不採用／採用 |
+|---|---|---|
+| A. 通用 `xlsx → json` 轉換器 | 產完 xlsx 後把 workbook 讀回來轉 JSON | **不採用。** 只能得到「工作表→列→格」的位置式 JSON，下游要靠數格子解析；且 Excel 的顯示格式（`#,##0.00`）會把 `BigDecimal` 精度截掉，JSON 拿到的是**顯示值不是資料值**。 |
+| B. 中介模型 ＋ 雙 renderer | 查詢結果先落成 `ExportDoc`，再各自 render 成 xlsx／json | **採用。** 唯一能同時滿足「一次查詢」與「語意化 JSON」的做法。代價是既有 Excel 排版程式碼要改寫，以既有測試 ＋ 新增的**逐列逐格 ＋ 儲存格樣式**斷言守門（只比對表頭文字與列數不夠——實測有字級與 BLANK 格兩個陷阱只有逐格樣式比對抓得到）。 |
+
+### 資料模型 `ExportDoc`（`backend/.../service/export/`）
+
+**模型是「一張 sheet ＝ 一串 block」，不是固定的 note／meta／tables 三欄位。** 這一點是設計評審後修正的：
+固定三欄位表達不出既有版面，實測有四處還原不了——
+
+| 既有版面 | 固定三欄位為何表達不出 |
+|---|---|
+| 「當前即時資產」的 `基準快照日期／美元匯率／即時總資產` 是**同一列六格**（label,value,label,value,label,value，`ExcelExportService.java:667-673`） | 拆成三個 `Kv` 會變三列；做成 3 欄 `Table` 會變「表頭列＋資料列」兩列 |
+| 「即時彙總」四列（`summaryRow`，`:190-195`）**沒有表頭列**，且第 0 欄標籤走 `st.head` | `Table` 必寫表頭列，且資料列無法指定某一欄用 head 樣式 |
+| 早退分支（`:651-663`）輸出**三列**：`當前即時資產`(section) ／ `匯出時間`+值 ／ `尚無資產快照`(**無樣式**) | `Sheet` 只有一個 `note` 名額，裝得下標題就裝不下「尚無資產快照」 |
+| 「當前即時資產」的 `匯出時間` 列與下一列之間**沒有空行**（`:654-673` 中間無 `r++`），空行在那之後才出現（`:675`） | 「meta 非空就空一列」的通則在這張分頁會多插一列，使其後全部位移 |
+
+故改為 block list：**render 順序＝list 順序**，空行本身也是一種 block，不靠任何通則推導。
+
+```java
+package com.steven.assets.service.export;
+
+public record ExportDoc(String title, List<Sheet> sheets) {
+
+    /** 一張工作表。autoSizeColumns＝結束時要 autoSize 的欄數（既有各分頁不同，不可由 headers 推導）。 */
+    public record Sheet(String name, List<Block> blocks, int autoSizeColumns) {}
+
+    public sealed interface Block permits Line, KvRow, Table, Blank {}
+
+    /** 單格文字列（標題列、提示列）。 */
+    public record Line(String text, LineStyle style) implements Block {}
+
+    /** 同一列的 label／value 交錯：label 走 head 樣式、value 走各自 Format。 */
+    public record KvRow(List<Kv> cells) implements Block {}
+
+    /** 表格。name 非 null 時前置一列 section 標題。 */
+    public record Table(String name, LineStyle nameStyle,
+                        List<String> headers, boolean showHeader, boolean labelFirstColumn,
+                        boolean omitNullCells,
+                        List<Format> columnFormats, List<List<Object>> rows) implements Block {}
+
+    /** 空行：只遞增列索引、不建立 Row（與既有裸 `r++` 等價）。 */
+    public record Blank() implements Block {}
+
+    public record Kv(String key, Object value, Format format) {}
+
+    /** 文字列／表格標題列的樣式。PLAIN＝不套任何 CellStyle。 */
+    public enum LineStyle { PLAIN, HEAD, SECTION_13, SECTION_12, WARN }
+
+    /** 只影響 Excel 儲存格；JSON renderer 一律忽略（BOOL_ZH／LIST_LINES 亦然）。 */
+    public enum Format { TEXT, MONEY, NUM2, NUM4, NUM6, DATE, TIMESTAMP, BOOL_ZH, LIST_LINES }
+}
+```
+
+**`SECTION_13` 與 `SECTION_12` 必須並存，不能合併。** `ExcelExportService.Styles.section` 是粗體 **13pt**
+（`:976-980`）、`TradingRadarExportService.Styles.section` 是粗體 **12pt**（`:263-267`）。把兩者當「同一種
+section」統一，會靜默把交易雷達「快照索引」分頁的標題列字級改掉，而只比對文字的回歸測試抓不到。
+
+**`BOOL_ZH` 與 `LIST_LINES` 是「同一個值、兩種呈現」的載體。** 交易雷達的既有取值輔助
+（`TradingRadarExportService.java:213-236`）把缺值轉成空字串、boolean 轉成「是」／「否」、陣列以 `\n` 串接——
+那是 **Excel 的顯示決定**。若照用不變，JSON 會拿到 `"是"`，直接違反本需求「boolean 就是 JSON boolean」的
+驗收條件。故 `bool()`／`list()` 那兩類欄位在 doc 裡放語意值（`Boolean`／`List<String>`／`null`），
+兩種呈現各自在 render 當下套用；**這兩型的 `null` 在 Excel 側一律寫成空字串格**（既有 `bool()`／`list()`
+缺值就回 `""`），不落入通用的 null→BLANK 規則。
+
+**但 `txt()` 那一類不動。** 它缺值回 `""`、Excel 那格是**空字串格**；若改放 `null`，Excel 會變 BLANK 格，
+違反 Excel 零回歸。故這些欄位在 doc 裡放 `""`，JSON 那側因此也是 `""`——**這是 Requirement 55 已登錄的
+具名例外**，不是疏漏。三類的處置不同，不要一概而論。
+
+**值一律以原始型別放進 `rows`／`Kv.value`**（`BigDecimal`／`LocalDate`／`LocalDateTime`／`String`／
+`Boolean`／`List<String>`／`null`），不在建構期轉成字串——轉了之後 JSON 就永遠拿不回型別與原精度。
+
+### 兩個 renderer
+
+- `ExcelDocRenderer.render(ExportDoc) → byte[]`，另提供
+  `writeSheet(Workbook, ExportDoc.Sheet)` 供混合活頁簿使用（`exportFull` 的「已實現損益」分頁與排程那份
+  是同一支 writer，必須共用）。`Styles` 為 renderer 內部、依 workbook 建立並快取，**呼叫端不傳**；
+  共 **八種**：`head`／`section13`／`section12`／`warn`／`money`／`num2`／`num4`／`num6`
+  （`money` 與 `num2` 格式字串同為 `#,##0.00` 但**必須是兩個獨立的 `CellStyle` 實例**）。
+  **兩份既有 `Styles` 的下場不同**：`ExcelExportService.Styles` 保留（`writeCurrentSummarySheet`／
+  `writeSnapshotSheet`／`summaryRow` 仍在用）；`TradingRadarExportService.Styles`（只有
+  `head`／`section`／`warn`／`num2`，沒有 money／num4／num6）在三張分頁全接 doc 之後成為死碼，
+  連同該服務的 private `cell()`／`autosize()` 一併刪除。
+  逐 block 依序寫，不插入任何 doc 沒指定的列；結束時 `autoSizeColumn(0..autoSizeColumns-1)`。
+- **`null` 值有兩種既有行為，由 `Table.omitNullCells` 區分，不可統一：**
+  - `false`（有呼叫 `cell(row, i, null, style)` 的分頁）→ `createCell` 後不 `setCellValue`、
+    **也不 `setCellStyle`**（既有 `cell()` 在 `if (value == null) return;` 就離開，style 那行沒跑到）
+    → 存在的 BLANK 格、無樣式。
+  - `true`（值為 null 時根本不呼叫 `cell()` 的分頁：油價金價 `:385-387`、匯率 `:444-446`、
+    指數 `:516-518`）→ 該格**完全不建**。
+  兩者讀回時可分辨（`getCell(i)` 為 null vs BLANK、`getLastCellNum()` 不同）。JSON 側兩者都輸出 `null`。
+- **`Blank` block 只遞增列索引、不 `createRow`**——既有四處空行都是裸 `r++`
+  （`ExcelExportService.java:675`／`:685`／`:707`／`:725`），POI 不會為它們寫出 `<row>`。
+- `Format.TEXT`／`DATE`／`TIMESTAMP`／`BOOL_ZH`／`LIST_LINES` 一律**不套 `CellStyle`**（既有這些格都是
+  `cell(row, i, v, null)`）；只有 `MONEY`／`NUM2`／`NUM4`／`NUM6` 才套。
+- `JsonDocRenderer.render(ExportDoc) → byte[]`：走同一串 block，分桶成
+  `{title, generatedAt, sheets:[{name, lines:[…], meta:{…}, tables:[{name, rows:[{欄名: 值}]}]}]}`——
+  `Line` 進 `lines`、`KvRow` 的每個 `Kv` 併進 `meta`、`Table` 進 `tables`、`Blank` 忽略。
+  `rows` 一律是**物件陣列**（headers 與該列 zip 成 `LinkedHashMap`），不得輸出依位置解析的陣列。
+  `BigDecimal` → JSON number 保留原精度；`LocalDate` → `yyyy-MM-dd`；
+  **`LocalDateTime` → `yyyy-MM-dd'T'HH:mm:ss`（ISO local，不加位移）**，只有檔案層級的 `generatedAt`
+  這種本身帶時區的值才輸出 `+08:00`；`Boolean` → JSON boolean；`List<String>` → JSON 陣列；
+  `null` → JSON `null`。`omitNullCells` 與 `LineStyle`／`Format` 一律不影響 JSON。
+### 雙檔落地 `DualFormatExportWriter`（`@Component`）
+
+十個匯出點的落檔邏輯目前各寫一份（三份直接 `Files.write`、其餘 tmp＋`ATOMIC_MOVE`）。本需求把
+「寫兩份 ＋ 同步 Drive ＋ 組狀態字串」收斂成一支共用元件：
+
+```java
+public record DualResult(Path jsonFile,          // 該份 render 或寫檔失敗時為 null
+                         Path xlsxFile,          // 同上
+                         String localStatus,          // 已截斷至 500 字元內
+                         String gdriveStatus,         // 已截斷至 512 字元內；未啟用時 null
+                         String xlsxGdrivePath,       // Drive 落點，供 run-now 回報；未上傳為 null
+                         String jsonGdrivePath) {}
+
+DualResult write(Long ownerUserId, Path dir, String baseName,
+                 byte[] jsonBytes, byte[] xlsxBytes,
+                 boolean gdriveEnabled, String gdriveSubpath) throws IOException;
+```
+
+- `baseName` **不含副檔名**——這是「主檔名相同」的結構性保證：呼叫端沒有機會讓兩份檔名分岔。
+- **`jsonBytes`／`xlsxBytes` 允許為 `null`**，代表該份 render 失敗；本元件跳過該份、照寫另一份，
+  並在 `localStatus` 記「render 失敗」。這是「一份 render 失敗不得中斷另一份」那條驗收條件的唯一落腳點
+  ——render 發生在呼叫端、在本元件之前，簽章不允許 null 的話那條 AC 沒有任何實作承接。
+- **`baseName` 的路徑逃脫重驗在本元件內做**：不得含 `/`、`\`、`..` 或任何路徑分隔字元，落點求出後
+  重驗 `file.normalize().startsWith(dir)`，為假即擲 `IllegalArgumentException`。這是從
+  `AssetTransactionExportScheduleService.writeToDir`（`:328-331`）搬進來的**既有**防線——交易紀錄的
+  排程名會進檔名，而 DB 值可能被繞過 API 以 psql 直改。刪掉舊落檔實作時若不搬，等於靜默弄丟一道安全檢查。
+- 兩份各自 `dir.resolve(baseName + ".json" | ".xlsx")`，各自寫同目錄唯一 tmp 再 `ATOMIC_MOVE`
+  （`AtomicMoveNotSupportedException` 時 fallback `REPLACE_EXISTING`，沿用既有寫法）。
+- **一份失敗不影響另一份**：兩份各自 try/catch，都嘗試；`localStatus` 如實記「成功／失敗」到副檔名層級。
+- **跨兩檔非原子，明文接受**（見 Requirement 55 驗收條件）。**不實作任何「失敗就刪掉另一份」的路徑。**
+- Drive：**兩份本機都寫成功才上傳**（順序不可顛倒，沿用 Requirement 51 的既有決定）；對同一
+  `gdriveSubpath` 呼叫 `GdriveOutputSupport.syncQuietly` 兩次，兩個結果合併成一句、能分辨是哪一份成功。
+- **截斷在元件內做，不是呼叫端做**：`localStatus` ≤ 500、`gdriveStatus` ≤ 512（`varchar` 上限，
+  實測自運行中 DB）。截斷優先保留「成功／失敗」與副檔名標記，路徑過長時截尾加 `…`。漏截斷的後果是
+  JPA save 擲 `DataException`、把一次**本機其實已成功**的匯出記成失敗。
+
+### 十個匯出點的接法
+
+| 匯出點 | 改法 |
+|---|---|
+| 1 資產總覽、2 已實現損益、3 匯率、4 指數、5 交易紀錄、6 油價金價 | `ExcelExportService` 對應的 `buildXxxWorkbook()` 改為 `buildXxxDoc() → ExportDoc`，Excel 由 `ExcelDocRenderer` 產出。手動下載端點改呼叫 `ExcelDocRenderer.render(buildXxxDoc())`，**產物必須與改動前一致**。 |
+| 7 交易雷達 | `TradingRadarExportService.build()` 的三分頁（快照索引／大盤總覽／個股決策）改建 `ExportDoc`。**四支取值輔助 `txt`／`num`／`bool`／`list`（`:213-236`）不得照用**——它們把缺值轉成 `""`、boolean 轉成「是」／「否」、陣列以 `\n` 串接，那是 Excel 的顯示決定；doc 裡一律放語意值（`null`／`Boolean`／`List<String>`），呈現交給 `Format.BOOL_ZH`／`LIST_LINES`。「快照索引」的標題列走 `SECTION_12`（該服務的 section 是 12pt）。 |
+| 8 交易日曆 | `TradingCalendarExportService.exportToDir(year, format, subpath)` → `exportToDir(year, subpath)`，一律兩份。`FORMAT_JSON`／`FORMAT_EXCEL`／`requireValidFormat` 移除；DB 欄位 `trading_calendar_export_schedule.format` **保留但停用**（entity 上標 `@Deprecated`，程式一律不讀寫）。**既有 `buildJson` 的 JSON 結構為對外契約、不得改變**——它不走 `JsonDocRenderer`，維持既有形狀。故本匯出點是十個裡唯一**不接** `ExportDoc` 的（它本來就有兩個 builder、且共吃同一份 `buildDays(year)`），只把落檔換成共用元件。**注意 `getTwHolidays(year)` 在改動前就已被呼叫兩次**（`buildDays` 一次、`buildJson` 組 `holidays` 區塊再一次），單次查詢探針不可寫成 `times(1)`。 |
+| 9 警示觸發 | 既有 JSON **輸出 byte 不變**，但需一次最小重構：`buildJson(...)` 目前直接回 `byte[]`（`:292-300` 內組 `ObjectNode root`），拆成 `ObjectNode buildPayload(...)` ＋ 既有序列化兩步，讓 xlsx 能吃同一份 payload。新增 `ExportDoc alertTriggersDoc(ObjectNode payload)`（**型別是 `ObjectNode` 不是 `Map<String,Object>`**），`KvRow`＝檔層級欄位、單一 Table＝`triggers` 陣列，再 render 成 xlsx。|
+| 10 爬蟲公開資訊 | 在 `external-materials-service` 內做，**不共用 backend 的元件**（三個 Maven 專案無父 pom，Requirement 50 已就此定案）。ext 端 `pom.xml` 加 `poi-ooxml`，寫一支極小的 `PublicInfoXlsxWriter`：metadata 區 ＋ `items` 表。既有 JSON 一律不動。 |
+
+### 前端
+
+- `TradingCalendarView.vue`：移除格式 radio 與 `exportDialog.format`，檔名說明改為「同時產生
+  `交易日曆_{年}.json` 與 `交易日曆_{年}.xlsx`」。
+- 其餘匯出頁設定卡寫死副檔名的檔名說明，一律改為明示兩份；run-now 成功提示改為同時顯示兩份落點。
+  **新增哪些欄位依匯出點分兩種，不可對調語意：**
+  - **第 1～8 項**（既有欄位指向 xlsx）→ 加 `jsonPath`／`jsonSizeBytes`／`jsonGdrivePath`。
+  - **第 9、10 項**（警示觸發、爬蟲公開資訊；既有欄位本來就指向 `.json`，那是它們的對外契約）
+    → 既有欄位**維持指向 `.json`**，改為另加 `xlsxPath`／`xlsxSizeBytes`／`xlsxGdrivePath`。**各頁的前端文案由該頁所屬的
+  任務檔負責**，不集中到收尾任務——集中會讓中間狀態的 UI 說謊。
+- BFF 對這些端點多為 `Map<String,Object>` passthrough，新欄位自動透傳、**無需改 BFF DTO**；
+  唯一要動 BFF 的是交易日曆（`TradingCalendarBffController.export` 的 `@RequestParam format` 與
+  `.queryParam("format", ...)` 移除）。
+
+### 刻意不做
+
+- **不新增、不移除、不調整任何 `@Scheduled`**，故 `SchedulePublicBffController.JOBS` **不新增也不移除項目**。
+  **但九條 `description` 必須改寫**（`:71`／`:74`／`:77`／`:80`／`:83`／`:86`／`:101`／`:104`／`:188`
+  現寫「產出 Excel」「以其格式（JSON／Excel）」「輸出公開資訊 JSON」，落地後全部為假）。
+  「不動 `@Scheduled` ⇒ `JOBS` 不必動」這個推論本專案已於 Requirement 48／Task 260 否決過一次，不得再犯。
+- **不新增 Liquibase changeset**：`format` 欄位保留不刪，狀態欄靠截斷不加長，本需求零 schema 變更。
+- **不把 `BackupService` 的 `*.dump` 納入**（二進位還原檔，無表格語意）。
+- **不為 ext service 與 backend 建共用 module**（Requirement 50 已否決同一提案）。

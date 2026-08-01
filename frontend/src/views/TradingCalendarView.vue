@@ -143,12 +143,6 @@
         <el-form-item label="年度">
           <el-input-number v-model="exportDialog.year" :min="1970" :max="2100" :step="1" controls-position="right" style="width:160px" />
         </el-form-item>
-        <el-form-item label="檔案格式">
-          <el-radio-group v-model="exportDialog.format">
-            <el-radio label="json">JSON</el-radio>
-            <el-radio label="excel">Excel (.xlsx)</el-radio>
-          </el-radio-group>
-        </el-form-item>
         <el-form-item label="輸出資料夾">
           <el-input v-model="exportDialog.subpath" readonly placeholder="（家目錄根）" style="width:300px">
             <template #append>
@@ -160,7 +154,7 @@
       <div class="export-hint">
         以主機家目錄 <code>{{ exportDialog.baseDir || '/home/steven' }}</code> 為根（對映主機 <code>/Users/steven</code>）。
         匯出該年度整年交易日曆（台／美／英三市每日交易日 ＋ 各市場國定假日）為
-        <code>交易日曆_{{ exportDialog.year }}.{{ exportDialog.format === 'excel' ? 'xlsx' : 'json' }}</code>。
+        <code>交易日曆_{{ exportDialog.year }}.json</code> 與 <code>交易日曆_{{ exportDialog.year }}.xlsx</code> <strong>兩份</strong>（主檔名相同、只差副檔名）。
       </div>
       <div v-if="exportDialog.lastResult" class="export-status">
         ✅ 已匯出：<code>{{ exportDialog.lastResult.path }}</code>
@@ -215,7 +209,7 @@
       </div>
       <div class="export-hint">
         啟用後每日於指定時間，自動以上方選定的<strong>格式與資料夾</strong>匯出「當前年度」交易日曆
-        （<code>交易日曆_{當前年}.{{ exportDialog.format === 'excel' ? 'xlsx' : 'json' }}</code>），隨年度與臨時休市更新保持最新。
+        （<code>交易日曆_{當前年}.json</code> 與 <code>.xlsx</code> <strong>兩份</strong>），隨年度與臨時休市更新保持最新。
       </div>
       <div v-if="exportDialog.scheduleLastRunAt || exportDialog.scheduleLastRunStatus" class="export-status">
         上次排程執行：{{ exportDialog.scheduleLastRunAt || '—' }}　{{ exportDialog.scheduleLastRunStatus || '' }}
@@ -297,7 +291,7 @@ const selectedDate = ref(null)
 
 // 匯出到指定路徑（Requirement 37）＋每日排程（Task 185）
 const exportDialog = reactive({
-  visible: false, year: dayjs().year(), format: 'json', subpath: 'input', baseDir: '', exporting: false, lastResult: null,
+  visible: false, year: dayjs().year(), subpath: 'input', baseDir: '', exporting: false, lastResult: null,
   scheduleEnabled: false, scheduleTime: '08:00', savingSchedule: false, scheduleLastRunAt: null, scheduleLastRunStatus: null,
   // Drive 同步（Task 244）：目的地存在排程設定列上，與上方 subpath（本次匯出到哪）刻意不同
   gdriveEnabled: false, gdriveSubpath: '', gdriveRemote: '',
@@ -522,7 +516,6 @@ async function openExportDialog() {
 async function loadSchedule() {
   const s = await bffApi.tradingCalendar.getExportSchedule()
   exportDialog.scheduleEnabled = !!s.enabled
-  if (s.format) exportDialog.format = s.format
   if (s.outputSubpath != null) exportDialog.subpath = s.outputSubpath
   if (s.baseDir) exportDialog.baseDir = s.baseDir
   const h = s.runHour ?? 8, m = s.runMinute ?? 0
@@ -554,7 +547,6 @@ async function saveSchedule() {
       enabled: exportDialog.scheduleEnabled,
       runHour: h,
       runMinute: m,
-      format: exportDialog.format,
       outputSubpath: exportDialog.subpath,
       gdriveEnabled: exportDialog.gdriveEnabled,
       gdriveSubpath: (exportDialog.gdriveSubpath || '').trim()
@@ -623,7 +615,7 @@ function confirmDirPick() {
 async function doExport() {
   exportDialog.exporting = true
   try {
-    const r = await bffApi.tradingCalendar.exportToDir(exportDialog.year, exportDialog.format, exportDialog.subpath)
+    const r = await bffApi.tradingCalendar.exportToDir(exportDialog.year, exportDialog.subpath)
     exportDialog.lastResult = r
     // 手動匯出也會同步 Drive（Task 244.5.1）；狀態即時反映在「上次上傳」
     if (r.gdriveStatus) {

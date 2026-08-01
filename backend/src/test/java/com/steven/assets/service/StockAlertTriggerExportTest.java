@@ -30,6 +30,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.awaitility.Awaitility.await;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -74,8 +75,13 @@ class StockAlertTriggerExportTest {
 
     @BeforeEach
     void setUp() {
+        // 雙格式匯出（Task 272）：renderer 與雙檔落地元件一律注入真實實例，
+        // 換成 mock 會讓「兩份檔真的被寫出來」完全驗不到。
         service = new StockAlertTriggerExportService(settingRepo, triggerRepo, alertRepo,
-                stockMasterService, gdrive, mapper, tmp.toString());
+                stockMasterService, gdrive, mapper,
+                new com.steven.assets.service.export.ExcelDocRenderer(),
+                new com.steven.assets.service.export.DualFormatExportWriter(gdrive),
+                tmp.toString());
         when(settingRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(stockMasterService.resolveNameLocalOnly(any(), any())).thenReturn("台積電");
     }
@@ -285,7 +291,7 @@ class StockAlertTriggerExportTest {
 
         // 三次觸發合併成一次上傳（本機那三次都已即時寫完）
         await().atMost(java.time.Duration.ofSeconds(10))
-                .untilAsserted(() -> verify(gdrive, times(1)).syncQuietly(eq(OWNER_A), any(), any()));
+                .untilAsserted(() -> verify(gdrive, times(2)).syncQuietly(eq(OWNER_A), any(), any()));   // 1 輪 × 兩份
     }
 
     @Test
@@ -300,11 +306,11 @@ class StockAlertTriggerExportTest {
 
         service.exportForTrigger(OWNER_A);   // 立刻上傳（距上次上傳已超過間隔）
         await().atMost(java.time.Duration.ofSeconds(5))
-                .untilAsserted(() -> verify(gdrive, times(1)).syncQuietly(eq(OWNER_A), any(), any()));
+                .untilAsserted(() -> verify(gdrive, times(2)).syncQuietly(eq(OWNER_A), any(), any()));   // 1 輪 × 兩份
 
         service.exportForTrigger(OWNER_A);   // 落在間隔內，且此刻沒有任何執行中的任務
         await().atMost(java.time.Duration.ofSeconds(5))
-                .untilAsserted(() -> verify(gdrive, times(2)).syncQuietly(eq(OWNER_A), any(), any()));
+                .untilAsserted(() -> verify(gdrive, times(4)).syncQuietly(eq(OWNER_A), any(), any()));   // 2 輪 × 兩份
     }
 
     @Test
@@ -319,7 +325,7 @@ class StockAlertTriggerExportTest {
         // 第一次觸發：距上次上傳已超過間隔 → 立刻上傳（延遲 0），這一次寫狀態欄是正確的
         service.exportForTrigger(OWNER_A);
         await().atMost(java.time.Duration.ofSeconds(10))
-                .untilAsserted(() -> verify(gdrive, times(1)).syncQuietly(eq(OWNER_A), any(), any()));
+                .untilAsserted(() -> verify(gdrive, times(2)).syncQuietly(eq(OWNER_A), any(), any()));   // 1 輪 × 兩份
 
         // 擺一個哨兵值，代表「前一次真正成功的落點與時刻」
         LocalDateTime sentinel = LocalDateTime.of(2026, 7, 28, 20, 30);
@@ -330,7 +336,7 @@ class StockAlertTriggerExportTest {
         service.exportForTrigger(OWNER_A);
 
         // 被合併期間兩欄必須原封不動（寫「跳過」「失敗」或任何字樣都會覆蓋掉真正的成功紀錄）
-        verify(gdrive, times(1)).syncQuietly(eq(OWNER_A), any(), any());
+        verify(gdrive, times(2)).syncQuietly(eq(OWNER_A), any(), any());   // 1 輪 × 兩份
         assertThat(s.getGdriveLastRunAt()).isEqualTo(sentinel);
         assertThat(s.getGdriveLastStatus()).contains("成功：").contains("舊檔.json");
     }
@@ -350,7 +356,7 @@ class StockAlertTriggerExportTest {
 
         assertThat(r.file()).exists();
         assertThat(s.isEnabled()).isFalse();                       // run-now 不改變 enabled
-        verify(gdrive, times(1)).syncQuietly(eq(OWNER_A), any(), any());   // 同步上傳、未被去抖壓住
+        verify(gdrive, times(2)).syncQuietly(eq(OWNER_A), any(), any());   // 同步上傳、未被去抖壓住   // 1 輪 × 兩份
         assertThat(r.gdrivePath()).isEqualTo("GDriveOutput:x");
     }
 
@@ -367,7 +373,7 @@ class StockAlertTriggerExportTest {
 
         // run-now 那次不更新 lastUploadAt，故觸發路徑的排定延遲為 0、立刻上傳（共兩次）
         await().atMost(java.time.Duration.ofSeconds(10))
-                .untilAsserted(() -> verify(gdrive, times(2)).syncQuietly(eq(OWNER_A), any(), any()));
+                .untilAsserted(() -> verify(gdrive, times(4)).syncQuietly(eq(OWNER_A), any(), any()));   // 2 輪 × 兩份
     }
 
     // ===== 254.10.5 匯出失敗不影響觸發本身 =====
@@ -444,5 +450,142 @@ class StockAlertTriggerExportTest {
         Path f = tmp.resolve("input").resolve("alert_triggers_" + owner + ".json");
         assertThat(f).exists();
         return mapper.readTree(Files.readString(f));
+    }
+
+    // ===== 雙格式（Requirement 55 / Task 272）=====
+
+    @Test
+    void 兩份都寫出且主檔名逐字元相同() throws Exception {
+        enabled(OWNER_A);
+        when(triggerRepo.findByOwnerAndCreatedAtAfter(eq(OWNER_A), any()))
+                .thenReturn(List.of(trigger(1L, 10L, null, "2330", "TW",
+                        LocalDateTime.now(), LocalDateTime.now())));
+
+        service.exportForTrigger(OWNER_A);
+
+        java.nio.file.Path json = tmp.resolve("input").resolve("alert_triggers_" + OWNER_A + ".json");
+        java.nio.file.Path xlsx = tmp.resolve("input").resolve("alert_triggers_" + OWNER_A + ".xlsx");
+        assertThat(json).exists();
+        assertThat(xlsx).exists();
+        String j = json.getFileName().toString();
+        String x = xlsx.getFileName().toString();
+        assertThat(j.substring(0, j.lastIndexOf('.')))
+                .as("兩份主檔名必須逐字元相同").isEqualTo(x.substring(0, x.lastIndexOf('.')));
+        List<String> names;
+        try (var s = java.nio.file.Files.list(tmp.resolve("input"))) {
+            names = s.map(f -> f.getFileName().toString()).toList();
+        }
+        assertThat(names).noneMatch(n -> n.endsWith(".tmp"));
+    }
+
+    @Test
+    void xlsx的表頭由payload動態推導_不得硬編() throws Exception {
+        enabled(OWNER_A);
+        when(triggerRepo.findByOwnerAndCreatedAtAfter(eq(OWNER_A), any()))
+                .thenReturn(List.of(trigger(1L, 10L, null, "2330", "TW",
+                        LocalDateTime.now(), LocalDateTime.now())));
+
+        service.exportForTrigger(OWNER_A);
+
+        // 表頭必須逐欄對上 JSON 那一份 triggers[0] 的 key 順序——硬編一份清單的實作會在
+        // Requirement 54 日後加欄位時靜默少一欄，而 JSON 有、Excel 沒有。
+        var root = mapper.readTree(java.nio.file.Files.readAllBytes(
+                tmp.resolve("input").resolve("alert_triggers_" + OWNER_A + ".json")));
+        List<String> jsonKeys = new java.util.ArrayList<>();
+        root.get("triggers").get(0).fieldNames().forEachRemaining(jsonKeys::add);
+
+        try (var wb = new org.apache.poi.xssf.usermodel.XSSFWorkbook(
+                java.nio.file.Files.newInputStream(
+                        tmp.resolve("input").resolve("alert_triggers_" + OWNER_A + ".xlsx")))) {
+            var sheet = wb.getSheet("警示觸發");
+            assertThat((Object) sheet).isNotNull();
+            // 版面：KvRow ＋ 空行 ＋ section 標題 ＋ 表頭列
+            assertThat((Object) sheet.getRow(1)).as("空行不建 Row").isNull();
+            assertThat(sheet.getRow(2).getCell(0).getStringCellValue()).isEqualTo("觸發明細");
+            var header = sheet.getRow(3);
+            List<String> xlsxHeaders = new java.util.ArrayList<>();
+            for (int i = 0; i < header.getLastCellNum(); i++) {
+                xlsxHeaders.add(header.getCell(i).getStringCellValue());
+            }
+            assertThat(xlsxHeaders).containsExactlyElementsOf(jsonKeys);
+            assertThat(sheet.getRow(4).getCell(xlsxHeaders.indexOf("stockCode")).getStringCellValue())
+                    .isEqualTo("2330");
+        }
+    }
+
+    @Test
+    void 空觸發時仍產出含表頭的合法xlsx() throws Exception {
+        enabled(OWNER_A);
+        when(triggerRepo.findByOwnerAndCreatedAtAfter(eq(OWNER_A), any())).thenReturn(List.of());
+
+        service.exportForTrigger(OWNER_A);
+
+        try (var wb = new org.apache.poi.xssf.usermodel.XSSFWorkbook(
+                java.nio.file.Files.newInputStream(
+                        tmp.resolve("input").resolve("alert_triggers_" + OWNER_A + ".xlsx")))) {
+            var header = wb.getSheet("警示觸發").getRow(3);
+            List<String> headers = new java.util.ArrayList<>();
+            for (int i = 0; i < header.getLastCellNum(); i++) {
+                headers.add(header.getCell(i).getStringCellValue());
+            }
+            // TRIGGER_FIELDS 是 buildPayload 欄位順序的第二份手寫副本；這條斷言是它漂移的唯一探針
+            assertThat(headers).containsExactly(
+                    "triggerId", "source", "alertId", "groupId", "stockCode", "stockName", "market",
+                    "condition", "triggeredAt", "triggeredAtZone", "createdAt", "price",
+                    "monthlyMa", "quarterlyMa", "annualMa", "kValue", "dValue");
+        }
+    }
+
+    @Test
+    void TRIGGER_FIELDS必須與buildPayload實際寫入的欄位一致() throws Exception {
+        // 上一條驗的是「空觸發時的表頭」，這條驗它與**有資料時 payload 實際的 key 集合**相同——
+        // 兩者分歧時空檔的表頭會與有資料的檔對不起來，而只看其中一條測試都是綠的。
+        enabled(OWNER_A);
+        when(triggerRepo.findByOwnerAndCreatedAtAfter(eq(OWNER_A), any()))
+                .thenReturn(List.of(trigger(1L, 10L, null, "2330", "TW",
+                        LocalDateTime.now(), LocalDateTime.now())));
+
+        service.exportForTrigger(OWNER_A);
+
+        var root = mapper.readTree(java.nio.file.Files.readAllBytes(
+                tmp.resolve("input").resolve("alert_triggers_" + OWNER_A + ".json")));
+        List<String> jsonKeys = new java.util.ArrayList<>();
+        root.get("triggers").get(0).fieldNames().forEachRemaining(jsonKeys::add);
+
+        assertThat(jsonKeys).containsExactly(
+                "triggerId", "source", "alertId", "groupId", "stockCode", "stockName", "market",
+                "condition", "triggeredAt", "triggeredAtZone", "createdAt", "price",
+                "monthlyMa", "quarterlyMa", "annualMa", "kValue", "dValue");
+    }
+
+    @Test
+    void xlsx產檔失敗不得弄丟既有的JSON契約檔() throws Exception {
+        // 本任務最大的風險：新加的 POI 產檔若擲例外沒被接住，會連 Requirement 54 的對外契約檔一起弄丟。
+        // 用「xlsx 目標路徑被同名目錄占住」構造寫檔失敗（render 本身無法從外部注入失敗）。
+        enabled(OWNER_A);
+        when(triggerRepo.findByOwnerAndCreatedAtAfter(eq(OWNER_A), any())).thenReturn(List.of());
+        java.nio.file.Files.createDirectories(tmp.resolve("input"));
+        java.nio.file.Files.createDirectory(
+                tmp.resolve("input").resolve("alert_triggers_" + OWNER_A + ".xlsx"));
+
+        assertThatCode(() -> service.exportForTrigger(OWNER_A)).doesNotThrowAnyException();
+
+        java.nio.file.Path json = tmp.resolve("input").resolve("alert_triggers_" + OWNER_A + ".json");
+        assertThat(json).as("JSON 是 SRPP／下游的契約檔，xlsx 壞掉不得影響它").exists();
+        assertThat(mapper.readTree(java.nio.file.Files.readAllBytes(json)).has("triggers")).isTrue();
+    }
+
+    @Test
+    void runNow回傳既有欄位指向json_xlsx走新增的三欄() throws Exception {
+        enabled(OWNER_A);
+        when(triggerRepo.findByOwnerAndCreatedAtAfter(eq(OWNER_A), any())).thenReturn(List.of());
+
+        StockAlertTriggerExportService.ExportResult r = service.runNow(OWNER_A);
+
+        // 與其餘八個匯出點相反：既有欄位維持指向 .json（本頁的對外契約）
+        assertThat(r.file().getFileName().toString()).endsWith(".json");
+        assertThat(r.sizeBytes()).isPositive();
+        assertThat(r.xlsxFile().getFileName().toString()).endsWith(".xlsx");
+        assertThat(r.xlsxSizeBytes()).isPositive();
     }
 }

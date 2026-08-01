@@ -176,8 +176,8 @@
         </el-form-item>
       </el-form>
       <div class="export-hint">
-        警示條件（含複合條件群組）一旦觸發，立刻把<strong>最近 3 天的全部觸發</strong>寫成 JSON 到指定資料夾，
-        檔名 <code>alert_triggers_{{ '{使用者ID}' }}.json</code>（固定不含日期）；每次觸發覆寫同一個檔案。
+        警示條件（含複合條件群組）一旦觸發，立刻把<strong>最近 3 天的全部觸發</strong>寫到指定資料夾，
+        檔名 <code>alert_triggers_{{ '{使用者ID}' }}.json</code> 與 <code>.xlsx</code> <strong>兩份</strong>（主檔名相同、只差副檔名，固定不含日期）；每次觸發覆寫同一組檔案。
         <br /><strong>刻意不用「每日一檔」</strong>：美股盤中（紐約 09:30–16:00）換算台北是 21:30 到隔日 04:00、
         跨過午夜，按日期分檔會把<strong>同一個美股交易日的觸發切成兩個檔案</strong>；滾動視窗讓它們一定在一起。
         以主機家目錄 <code>{{ exportSetting.baseDir || '/home/steven' }}</code> 為根（對映主機

@@ -32,6 +32,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -75,8 +76,22 @@ class ExportScheduleGdriveTest {
         GdriveOutputSupport gdrive =
                 new GdriveOutputSupport(rcloneClient, userRepo, userAdminService, selfCheck, "GDriveOutput");
         service = new ExportScheduleService(
-                settingRepo, excelExportService, currentUserProvider, gdrive, baseDir.toString());
+                settingRepo, excelExportService, currentUserProvider, gdrive,
+                new com.steven.assets.service.export.ExcelDocRenderer(),
+                new com.steven.assets.service.export.JsonDocRenderer(new com.fasterxml.jackson.databind.ObjectMapper()),
+                new com.steven.assets.service.export.DualFormatExportWriter(gdrive),
+                baseDir.toString());
         when(settingRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+    }
+
+    /** 最小合法 doc：本測試驗的是 Drive 同步與狀態欄，內容只需能被兩個 renderer 產出。 */
+    private static com.steven.assets.service.export.ExportDoc doc() {
+        var table = new com.steven.assets.service.export.ExportDoc.Table(
+                null, null, java.util.List.of("代號"), true, false, false, null,
+                java.util.List.of(java.util.List.of("2330")));
+        return new com.steven.assets.service.export.ExportDoc("資產總覽",
+                java.util.List.of(new com.steven.assets.service.export.ExportDoc.Sheet(
+                        "當前即時資產", java.util.List.of(table), 1)));
     }
 
     private void givenCurrentUser(long id) {
@@ -248,7 +263,7 @@ class ExportScheduleGdriveTest {
         givenCurrentUser(ADMIN_ID);
         givenUser(ADMIN_ID, "tw.leader@gmail.com", true);
         when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.of(setting(ADMIN_ID, true, DRIVE_DIR)));
-        when(excelExportService.exportLiveAssets()).thenReturn("xlsx".getBytes());
+        when(excelExportService.liveAssetsDoc()).thenReturn(doc());
         when(rcloneClient.copyTo(anyString(), any(), anyString(), anyString()))
                 .thenReturn("GDriveOutput:" + DRIVE_DIR + "/資產總覽_1_x.xlsx");
 
@@ -256,14 +271,14 @@ class ExportScheduleGdriveTest {
 
         assertThat(Path.of(r.path())).exists();                       // 本機照寫
         assertThat(r.gdrivePath()).startsWith("GDriveOutput:" + DRIVE_DIR);
-        assertThat(r.gdriveStatus()).startsWith("成功：");
+        assertThat(r.gdriveStatus()).startsWith("xlsx 成功：").contains("／json ");
     }
 
     @Test
     void 未啟用時run_now不上傳且不碰狀態欄() throws IOException {
         givenCurrentUser(ADMIN_ID);
         when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.of(setting(ADMIN_ID, false, null)));
-        when(excelExportService.exportLiveAssets()).thenReturn("xlsx".getBytes());
+        when(excelExportService.liveAssetsDoc()).thenReturn(doc());
 
         ExportScheduleDto.RunNowResponse r = service.runNowForCurrentUser();
 
@@ -279,12 +294,12 @@ class ExportScheduleGdriveTest {
         givenUser(OTHER_ID, "hi.steven@gmail.com", false);
         ExportScheduleSetting s = setting(OTHER_ID, true, DRIVE_DIR);
         when(settingRepo.findAll()).thenReturn(List.of(s));
-        when(excelExportService.exportLiveAssetsForOwner(OTHER_ID)).thenReturn("xlsx".getBytes());
+        when(excelExportService.liveAssetsDocForOwner(OTHER_ID)).thenReturn(doc());
 
         service.selfHealOnStartup();
 
         assertThat(expectedLocalFile(OTHER_ID)).exists();              // 本機那一份不受影響
-        assertThat(s.getLastRunStatus()).startsWith("成功：");          // 既有排程狀態仍為成功
+        assertThat(s.getLastRunStatus()).startsWith("xlsx 成功：");    // 既有排程狀態仍為成功
         assertThat(s.getGdriveLastStatus()).contains("跳過").contains("主要管理者");
         assertThat(s.getGdriveLastRunAt()).isNotNull();                // 不可靜默跳過
         verify(rcloneClient, never()).copyTo(anyString(), any(), anyString(), anyString());
@@ -295,15 +310,15 @@ class ExportScheduleGdriveTest {
         givenUser(ADMIN_ID, "tw.leader@gmail.com", true);
         ExportScheduleSetting s = setting(ADMIN_ID, true, DRIVE_DIR);
         when(settingRepo.findAll()).thenReturn(List.of(s));
-        when(excelExportService.exportLiveAssetsForOwner(ADMIN_ID)).thenReturn("xlsx".getBytes());
+        when(excelExportService.liveAssetsDocForOwner(ADMIN_ID)).thenReturn(doc());
         when(rcloneClient.copyTo(anyString(), any(), anyString(), anyString()))
                 .thenReturn("GDriveOutput:" + DRIVE_DIR + "/資產總覽_1_x.xlsx");
 
         service.selfHealOnStartup();
 
         assertThat(expectedLocalFile(ADMIN_ID)).exists();
-        assertThat(s.getLastRunStatus()).startsWith("成功：");
-        assertThat(s.getGdriveLastStatus()).startsWith("成功：");
+        assertThat(s.getLastRunStatus()).startsWith("xlsx 成功：").contains("／json 成功：");
+        assertThat(s.getGdriveLastStatus()).startsWith("xlsx 成功：").contains("／json ");
     }
 
     // ===== 243.3.4：上傳失敗為 best-effort =====
@@ -313,15 +328,15 @@ class ExportScheduleGdriveTest {
         givenUser(ADMIN_ID, "tw.leader@gmail.com", true);
         ExportScheduleSetting s = setting(ADMIN_ID, true, DRIVE_DIR);
         when(settingRepo.findAll()).thenReturn(List.of(s));
-        when(excelExportService.exportLiveAssetsForOwner(ADMIN_ID)).thenReturn("xlsx".getBytes());
+        when(excelExportService.liveAssetsDocForOwner(ADMIN_ID)).thenReturn(doc());
         when(rcloneClient.copyTo(anyString(), any(), anyString(), anyString()))
                 .thenThrow(new RuntimeException("rclone exit 3"));
 
         service.selfHealOnStartup();   // 不得擲例外——一列炸掉不能拖垮其餘 owner
 
         assertThat(expectedLocalFile(ADMIN_ID)).exists();
-        assertThat(s.getLastRunStatus()).startsWith("成功：");   // 本機確實成功，不得標記為失敗
-        assertThat(s.getGdriveLastStatus()).startsWith("失敗："); // 兩個狀態欄必須可分辨
+        assertThat(s.getLastRunStatus()).startsWith("xlsx 成功：");        // 本機確實成功，不得標記為失敗
+        assertThat(s.getGdriveLastStatus()).contains("失敗：");             // 兩個狀態欄必須可分辨
     }
 
     @Test
@@ -329,7 +344,7 @@ class ExportScheduleGdriveTest {
         givenUser(ADMIN_ID, "tw.leader@gmail.com", true);
         ExportScheduleSetting s = setting(ADMIN_ID, true, DRIVE_DIR);
         when(settingRepo.findAll()).thenReturn(List.of(s));
-        when(excelExportService.exportLiveAssetsForOwner(ADMIN_ID)).thenReturn("xlsx".getBytes());
+        when(excelExportService.liveAssetsDocForOwner(ADMIN_ID)).thenReturn(doc());
         when(rcloneClient.copyTo(anyString(), any(), anyString(), anyString()))
                 .thenThrow(new RcloneClient.RcloneTimeoutException("timeout", 45));
 
@@ -343,7 +358,7 @@ class ExportScheduleGdriveTest {
         givenUser(ADMIN_ID, "tw.leader@gmail.com", true);
         ExportScheduleSetting s = setting(ADMIN_ID, true, DRIVE_DIR);
         when(settingRepo.findAll()).thenReturn(List.of(s));
-        when(excelExportService.exportLiveAssetsForOwner(ADMIN_ID))
+        when(excelExportService.liveAssetsDocForOwner(ADMIN_ID))
                 .thenThrow(new RuntimeException("產檔失敗"));
 
         service.selfHealOnStartup();

@@ -205,8 +205,8 @@
         以主機家目錄 <code>{{ baseDir || '/home/steven' }}</code> 為根（對映主機
         <code>/Users/steven</code>）。按「選擇」開啟檔案總管式選擇器挑選子資料夾；例如選 <code>input</code> →
         主機 <code>/Users/steven/input</code>。每筆排程於各自時間匯出交易紀錄為
-        <code>交易紀錄_{使用者ID}_YYYYMMDD.xlsx</code>；<strong>填了名稱的排程</strong>檔名為
-        <code>交易紀錄_{使用者ID}_{名稱}_YYYYMMDD.xlsx</code>（內容同上方「匯出 Excel」，涵蓋全部年度）。
+        <code>交易紀錄_{使用者ID}_YYYYMMDD.xlsx</code> 與 <code>.json</code> <strong>兩份</strong>（主檔名相同）；<strong>填了名稱的排程</strong>檔名為
+        <code>交易紀錄_{使用者ID}_{名稱}_YYYYMMDD.xlsx</code>（同樣兩份；內容同上方「匯出 Excel」，涵蓋全部年度）。
         <br />兩筆排程若指到<strong>同一資料夾且同檔名</strong>（都沒填名稱或名稱相同），後執行的會覆寫前一份。
         每一份都是<strong>執行當下</strong>的完整交易紀錄（不會缺年度），但不是同一時點的快照——兩次執行之間新增或修改的交易
         只會出現在後面那一份。要各時段各留一份，請填不同名稱。

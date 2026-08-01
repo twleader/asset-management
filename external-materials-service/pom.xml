@@ -55,6 +55,14 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+
+        <!-- 公開資訊輸出的 Excel 那一份（Requirement 55 / Task 267）。版本與 backend/pom.xml 一致；
+             刻意不與 backend 共用 module——三個 Maven 專案無父 pom，Requirement 50 已就此定案。 -->
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-ooxml</artifactId>
+            <version>5.3.0</version>
+        </dependency>
     </dependencies>
 
     <build>

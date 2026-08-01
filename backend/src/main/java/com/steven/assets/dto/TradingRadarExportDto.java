@@ -65,6 +65,11 @@ public final class TradingRadarExportDto {
      * <p>{@code gdrivePath}／{@code gdriveStatus} 為 Drive 落點與狀態——run-now 的用途就是驗證落點正確，
      * 故 Drive 啟用時它也上傳並回報；未啟用時兩者為 null。
      */
+    /**
+     * run-now 結果。既有五欄語意不變：{@code path}／{@code size}／{@code gdrivePath} 一律指 xlsx 那一份。
+     * 雙格式匯出（Requirement 55 / Task 271）另加 json 那一份的三欄，主檔名與 xlsx 相同、只差副檔名。
+     */
     public record RunNowResponse(String path, long size, String message,
-                                 String gdrivePath, String gdriveStatus) {}
+                                 String gdrivePath, String gdriveStatus,
+                                 String jsonPath, long jsonSizeBytes, String jsonGdrivePath) {}
 }
