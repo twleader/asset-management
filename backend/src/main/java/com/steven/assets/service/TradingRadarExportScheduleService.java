@@ -41,7 +41,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * <p>比照公開資訊爬蟲，使用者可設定<b>多個</b>每日執行時間點與一個輸出資料夾；到點先回補台股即時行情、
  * 由背景重算一次雷達並寫入快照，再把該 owner<b>當日</b>的 Redis 快照產成 Excel 寫入該資料夾
- * （檔名 {@code 交易雷達_{ownerId}_{yyyyMMdd}.xlsx}，同日覆寫、跨日新檔；Task 260）。
+ * （主檔名 {@code 交易雷達_{ownerId}_{yyyyMMdd}}，<b>同時產出 .xlsx 與 .json 兩份</b>，
+ * 同日覆寫、跨日新檔；Task 260、Requirement 55）。
  * 與手動匯出共用 {@link TradingRadarExportService} 同一支產檔邏輯。
  *
  * <p><b>當日 guard 放在時間點列</b>（{@code trading_radar_export_time.last_run_date}）而非 owner 層，
@@ -74,6 +75,10 @@ public class TradingRadarExportScheduleService {
     private final TradingRadarSnapshotStore snapshotStore;
     private final ObjectProvider<CurrentUserContext> currentUserProvider;
     private final GdriveOutputSupport gdrive;
+    // 雙格式匯出（Requirement 55 / Task 271）：一次查詢取得 doc，再 render 成 xlsx 與 JSON 兩份
+    private final com.steven.assets.service.export.ExcelDocRenderer excelDocRenderer;
+    private final com.steven.assets.service.export.JsonDocRenderer jsonDocRenderer;
+    private final com.steven.assets.service.export.DualFormatExportWriter dualWriter;
     private final String baseDir;
     private final TradingRadarService radarService;
     private final PriceQueryService priceQueryService;
@@ -87,6 +92,9 @@ public class TradingRadarExportScheduleService {
                                             TradingRadarSnapshotStore snapshotStore,
                                             ObjectProvider<CurrentUserContext> currentUserProvider,
                                             GdriveOutputSupport gdrive,
+                                            com.steven.assets.service.export.ExcelDocRenderer excelDocRenderer,
+                                            com.steven.assets.service.export.JsonDocRenderer jsonDocRenderer,
+                                            com.steven.assets.service.export.DualFormatExportWriter dualWriter,
                                             @Value("${EXPORT_OUTPUT_DIR:/home/steven}") String baseDir,
                                             TradingRadarService radarService,
                                             PriceQueryService priceQueryService,
@@ -97,6 +105,9 @@ public class TradingRadarExportScheduleService {
         this.snapshotStore = snapshotStore;
         this.currentUserProvider = currentUserProvider;
         this.gdrive = gdrive;
+        this.excelDocRenderer = excelDocRenderer;
+        this.jsonDocRenderer = jsonDocRenderer;
+        this.dualWriter = dualWriter;
         this.baseDir = baseDir;
         this.radarService = radarService;
         this.priceQueryService = priceQueryService;
@@ -213,23 +224,27 @@ public class TradingRadarExportScheduleService {
         refreshPricesQuietly();
         recomputeQuietly(ownerId);
         try {
-            Path file = writeDailyExport(ownerId, today);
-            if (file == null) {
+            var r = writeDailyExport(ownerId, today);
+            if (r == null) {
                 recordStatus(ownerId, NO_SNAPSHOT_STATUS);
                 // 沒產檔就完全不上傳（絕不上傳前一次的舊檔），但已啟用時仍寫狀態欄說明原因，
                 // 否則狀態會停在上一次的成功、顯示過期的好消息。
                 GdriveOutputSupport.SyncResult skipped = syncGdrive(ownerId, null, "當日無交易雷達快照");
                 return new TradingRadarExportDto.RunNowResponse(
                         null, 0L, NO_SNAPSHOT_STATUS + "（重算失敗且當日無既有快照）",
-                        null, skipped == null ? null : skipped.status());
+                        null, skipped == null ? null : skipped.status(), null, 0L, null);
             }
-            long size = Files.size(file);
-            recordStatus(ownerId, "成功：" + file);
-            // 本機寫成功後才上傳；run-now 的用途就是驗證落點正確，故它也要上傳並回報。
-            GdriveOutputSupport.SyncResult drive = syncGdrive(ownerId, file, null);
-            return new TradingRadarExportDto.RunNowResponse(file.toString(), size, "匯出完成",
-                    drive == null ? null : drive.path(),
-                    drive == null ? null : drive.status());
+            recordStatus(ownerId, r.localStatus());
+            applyGdriveStatus(ownerId, r);
+            // 既有三欄語意不變：一律指 xlsx 那一份
+            return new TradingRadarExportDto.RunNowResponse(
+                    r.xlsxFile() == null ? null : r.xlsxFile().toString(),
+                    r.xlsxFile() == null ? 0L : Files.size(r.xlsxFile()),
+                    "匯出完成",
+                    r.xlsxGdrivePath(), r.gdriveStatus(),
+                    r.jsonFile() == null ? null : r.jsonFile().toString(),
+                    r.jsonFile() == null ? 0L : Files.size(r.jsonFile()),
+                    r.jsonGdrivePath());
         } catch (IOException e) {
             recordStatus(ownerId, "失敗：" + e.getMessage());
             syncGdrive(ownerId, null, "本機匯出失敗");
@@ -348,17 +363,17 @@ public class TradingRadarExportScheduleService {
     private void runScheduled(TradingRadarExportTime t, LocalDate today) {
         long ownerId = t.getOwnerUserId();
         try {
-            Path file = writeDailyExport(ownerId, today);
-            if (file == null) {
+            var r = writeDailyExport(ownerId, today);
+            if (r == null) {
                 recordStatus(ownerId, NO_SNAPSHOT_STATUS);
                 syncGdrive(ownerId, null, "當日無交易雷達快照");
                 log.info("交易雷達排程匯出略過（當日無快照）owner={} {}:{}",
                         ownerId, t.getRunHour(), t.getRunMinute());
             } else {
-                recordStatus(ownerId, "成功：" + file);
-                syncGdrive(ownerId, file, null);
-                log.info("交易雷達排程匯出成功 owner={} {}:{} → {}",
-                        ownerId, t.getRunHour(), t.getRunMinute(), file);
+                recordStatus(ownerId, r.localStatus());
+                applyGdriveStatus(ownerId, r);
+                log.info("交易雷達排程匯出 owner={} {}:{} → {}",
+                        ownerId, t.getRunHour(), t.getRunMinute(), r.localStatus());
             }
         } catch (Exception e) {
             recordStatus(ownerId, "失敗：" + e.getMessage());
@@ -381,7 +396,8 @@ public class TradingRadarExportScheduleService {
      * （Task 260），故此處查無快照代表「背景重算失敗且當日確實零快照」的降級終點，
      * 不再是常態路徑；若照寫會在使用者目錄留下只有表頭的無用檔，並蓋掉同名前一版。
      */
-    private Path writeDailyExport(long ownerId, LocalDate today) throws IOException {
+    private com.steven.assets.service.export.DualFormatExportWriter.DualResult writeDailyExport(
+            long ownerId, LocalDate today) throws IOException {
         long fromEpoch = today.atStartOfDay(TW_ZONE).toInstant().toEpochMilli();
         long toEpoch = ZonedDateTime.now(TW_ZONE).toInstant().toEpochMilli();
 
@@ -389,9 +405,24 @@ public class TradingRadarExportScheduleService {
             return null;
         }
 
-        byte[] data = exportService.exportForOwner(ownerId, fromEpoch, toEpoch);
-        String filename = "交易雷達_" + ownerId + "_" + today.format(FILE_DATE) + ".xlsx";
-        return writeAtomically(currentSubpath(ownerId), filename, data);
+        // 一次查詢取得 doc，再 render 兩種格式（不得為兩種格式各查一次 Redis 快照）
+        var doc = exportService.radarDoc(ownerId, fromEpoch, toEpoch);
+        byte[] xlsx = null;
+        byte[] json = null;
+        try {
+            xlsx = excelDocRenderer.render(doc);
+        } catch (Exception e) {
+            log.warn("交易雷達 xlsx render 失敗 owner={}：{}", ownerId, e.getMessage(), e);
+        }
+        try {
+            json = jsonDocRenderer.render(doc);
+        } catch (Exception e) {
+            log.warn("交易雷達 json render 失敗 owner={}：{}", ownerId, e.getMessage(), e);
+        }
+        String baseName = "交易雷達_" + ownerId + "_" + today.format(FILE_DATE);
+        TradingRadarExportSetting cfg = settingRepo.findByOwnerUserId(ownerId).orElse(null);
+        return dualWriter.write(ownerId, resolveDir(currentSubpath(ownerId)), baseName, json, xlsx,
+                cfg != null && cfg.isGdriveEnabled(), cfg == null ? null : cfg.getGdriveSubpath());
     }
 
     private String currentSubpath(long ownerId) {
@@ -433,6 +464,26 @@ public class TradingRadarExportScheduleService {
      * @param skipReason {@code localFile} 為 null 時寫入狀態欄的原因
      * @return 未啟用（或設定列不存在）時回 {@code null}；否則為本輪結果，供 run-now 回報落點
      */
+    /**
+     * 寫回 Drive 狀態欄（雙格式版）。上傳已由 {@code DualFormatExportWriter} 完成，
+     * 此處只負責把合併後的狀態字串存回設定列。未啟用時 {@code gdriveStatus} 為 null，兩欄一律不碰。
+     *
+     * <p>比照既有 {@link #syncGdrive}：「回報結果」本身不得成為新的失敗來源，故整段包 try/catch。
+     */
+    private void applyGdriveStatus(long ownerId,
+                                   com.steven.assets.service.export.DualFormatExportWriter.DualResult r) {
+        if (r.gdriveStatus() == null) return;
+        try {
+            TradingRadarExportSetting s = settingRepo.findByOwnerUserId(ownerId).orElse(null);
+            if (s == null) return;
+            s.setGdriveLastRunAt(LocalDateTime.now(TW_ZONE));
+            s.setGdriveLastStatus(r.gdriveStatus());
+            settingRepo.save(s);
+        } catch (RuntimeException e) {
+            log.error("寫入 Drive 同步狀態失敗 owner={}：{}", ownerId, e.getMessage(), e);
+        }
+    }
+
     private GdriveOutputSupport.SyncResult syncGdrive(long ownerId, Path localFile, String skipReason) {
         try {
             TradingRadarExportSetting s = settingRepo.findByOwnerUserId(ownerId).orElse(null);
@@ -474,24 +525,6 @@ public class TradingRadarExportScheduleService {
         return target;
     }
 
-    /**
-     * 先寫 {@code .tmp} 再 atomic move：避免覆寫既有檔時中途失敗留下半截殘檔。
-     * tmp 檔名帶唯一後綴——{@code selfHealOnStartup} 與 {@code runNow} 都不走 {@code ticking} 旗標，
-     * 同一 owner 同一日可能有兩條路徑併發寫檔；固定 tmp 名會讓後者 {@code Files.move} 撞 NoSuchFileException。
-     */
-    private Path writeAtomically(String subpath, String filename, byte[] data) throws IOException {
-        Path dir = resolveDir(subpath);
-        Files.createDirectories(dir);
-        Path file = dir.resolve(filename);
-        Path tmp = dir.resolve(filename + "." + UUID.randomUUID() + ".tmp");
-        Files.write(tmp, data);
-        try {
-            Files.move(tmp, file, StandardCopyOption.ATOMIC_MOVE);
-        } catch (AtomicMoveNotSupportedException e) {
-            Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING);
-        }
-        return file;
-    }
 
     private TradingRadarExportDto.SettingResponse toSettingResponse(
             long ownerId, String subpath, TradingRadarExportSetting s) {
@@ -508,7 +541,8 @@ public class TradingRadarExportScheduleService {
         return new TradingRadarExportDto.SettingResponse(
                 subpath,
                 resolveDir(subpath).toString(),
-                "交易雷達_" + ownerId + "_{YYYYMMDD}.xlsx",
+                // 一律兩份、主檔名相同（Requirement 55 / Task 271）；此字串會顯示在設定頁
+                "交易雷達_" + ownerId + "_{YYYYMMDD}.xlsx / .json",
                 s == null || s.getLastRunAt() == null ? null : s.getLastRunAt().toString(),
                 s == null ? null : s.getLastRunStatus(),
                 // 讀取一律不驗證 Drive 子路徑：DB 值可能被繞過 API 直改，若讀取也擲例外，設定頁會 500

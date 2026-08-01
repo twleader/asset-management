@@ -67,18 +67,18 @@ public class TradingCalendarBffController {
     // ===== 交易日曆匯出到指定路徑（Requirement 37 / Task 184）=====
 
     /**
-     * POST /api/bff/trading-calendar/export?year=&format=json|excel&subpath=
-     * 產出整年交易日曆並寫檔到指定目錄，回 {path,sizeBytes,format,year,totalDays}。
+     * POST /api/bff/trading-calendar/export?year=&subpath=
+     * 產出整年交易日曆並寫檔到指定目錄，<b>一律同時產 JSON 與 Excel 兩份</b>（Requirement 55 / Task 271）；
+     * 回 {path,sizeBytes,jsonPath,jsonSizeBytes,jsonGdrivePath,year,totalDays,…}。
+     * {@code format} 參數自 Requirement 55 起移除——使用者不再需要二選一。
      */
     @PostMapping("/export")
     public Mono<ResponseEntity<Map<String, Object>>> export(
             @RequestParam(required = false) Integer year,
-            @RequestParam(defaultValue = "json") String format,
             @RequestParam(required = false, defaultValue = "") String subpath) {
         return businessServicesClient.post()
                 .uri(uri -> uri.path("/api/trading-calendar-export/run")
                         .queryParamIfPresent("year", java.util.Optional.ofNullable(year))
-                        .queryParam("format", format)
                         .queryParam("subpath", subpath)
                         .build())
                 .retrieve().bodyToMono(MAP)

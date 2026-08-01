@@ -71,6 +71,10 @@ public class AssetTransactionExportScheduleService {
     private final ExcelExportService excelExportService;
     private final ObjectProvider<CurrentUserContext> currentUserProvider;
     private final GdriveOutputSupport gdrive;
+    // 雙格式匯出（Requirement 55 / Task 270）：一次查詢取得 doc，再 render 成 xlsx 與 JSON 兩份
+    private final com.steven.assets.service.export.ExcelDocRenderer excelDocRenderer;
+    private final com.steven.assets.service.export.JsonDocRenderer jsonDocRenderer;
+    private final com.steven.assets.service.export.DualFormatExportWriter dualWriter;
 
     /** 容器內基底輸出目錄，經 docker volume 對映到 host（見 docker-compose.yml）。 */
     private final String baseDir;
@@ -82,11 +86,17 @@ public class AssetTransactionExportScheduleService {
                                                  ExcelExportService excelExportService,
                                                  ObjectProvider<CurrentUserContext> currentUserProvider,
                                                  GdriveOutputSupport gdrive,
+                                                 com.steven.assets.service.export.ExcelDocRenderer excelDocRenderer,
+                                                 com.steven.assets.service.export.JsonDocRenderer jsonDocRenderer,
+                                                 com.steven.assets.service.export.DualFormatExportWriter dualWriter,
                                                  @Value("${EXPORT_OUTPUT_DIR:/home/steven}") String baseDir) {
         this.settingRepo = settingRepo;
         this.excelExportService = excelExportService;
         this.currentUserProvider = currentUserProvider;
         this.gdrive = gdrive;
+        this.excelDocRenderer = excelDocRenderer;
+        this.jsonDocRenderer = jsonDocRenderer;
+        this.dualWriter = dualWriter;
         this.baseDir = baseDir;
     }
 
@@ -135,19 +145,22 @@ public class AssetTransactionExportScheduleService {
         // 取列刻意放在 try 之外：查無要回 404，包進 try 會被下面的 catch 轉成 500。
         AssetTransactionExportSchedule s = requireOwned(id, ownerId);
         try {
-            // HTTP 情境：exportAssetTransactions() 由 TenantFilterAspect 自動 owner-scoped 到當前使用者。
-            byte[] data = excelExportService.exportAssetTransactions();
-            Path file = writeToDir(ownerId, s.getName(), s.getOutputSubpath(), data);
+            // HTTP 情境：assetTransactionsDoc() 由 TenantFilterAspect 自動 owner-scoped 到當前使用者。
+            // 一次查詢取得 doc，再 render 兩種格式——兩份檔內容一致的唯一保證。
+            var r = writeDual(s, ownerId, excelExportService.assetTransactionsDoc());
             s.setLastRunAt(LocalDateTime.now(TW_ZONE));
-            s.setLastRunStatus("成功：" + file);
-            // 本機寫成功後才上傳；run-now 的用途就是驗證落點正確，故它也要上傳並回報。
-            GdriveOutputSupport.SyncResult drive = syncGdrive(s, file);
+            s.setLastRunStatus(r.localStatus());
+            applyGdriveStatus(s, r);
             settingRepo.save(s);
             return AssetTransactionExportDto.RunNowResponse.builder()
-                    .path(file.toString())
-                    .sizeBytes(data.length)
-                    .gdrivePath(drive == null ? null : drive.path())
-                    .gdriveStatus(drive == null ? null : drive.status())
+                    // 既有三欄語意不變：一律指 xlsx 那一份
+                    .path(r.xlsxFile() == null ? null : r.xlsxFile().toString())
+                    .sizeBytes(r.xlsxFile() == null ? 0 : Files.size(r.xlsxFile()))
+                    .gdrivePath(r.xlsxGdrivePath())
+                    .gdriveStatus(r.gdriveStatus())
+                    .jsonPath(r.jsonFile() == null ? null : r.jsonFile().toString())
+                    .jsonSizeBytes(r.jsonFile() == null ? 0 : Files.size(r.jsonFile()))
+                    .jsonGdrivePath(r.jsonGdrivePath())
                     .build();
         } catch (IOException | RuntimeException e) {
             s.setLastRunAt(LocalDateTime.now(TW_ZONE));
@@ -213,12 +226,12 @@ public class AssetTransactionExportScheduleService {
      */
     private void runScheduled(AssetTransactionExportSchedule s, LocalDate today) {
         try {
-            byte[] data = excelExportService.exportAssetTransactionsForOwner(s.getOwnerUserId());
-            Path file = writeToDir(s.getOwnerUserId(), s.getName(), s.getOutputSubpath(), data);
-            s.setLastRunStatus("成功：" + file);
-            log.info("交易紀錄排程匯出成功 owner={} schedule={} → {}（{} bytes）",
-                    s.getOwnerUserId(), s.getId(), file, data.length);
-            syncGdrive(s, file);
+            var r = writeDual(s, s.getOwnerUserId(),
+                    excelExportService.assetTransactionsDocForOwner(s.getOwnerUserId()));
+            s.setLastRunStatus(r.localStatus());
+            applyGdriveStatus(s, r);
+            log.info("交易紀錄排程匯出 owner={} schedule={} → {}",
+                    s.getOwnerUserId(), s.getId(), r.localStatus());
         } catch (Exception e) {
             s.setLastRunStatus("失敗：" + e.getMessage());
             log.warn("交易紀錄排程匯出失敗 owner={} schedule={}：{}",
@@ -312,25 +325,47 @@ public class AssetTransactionExportScheduleService {
     }
 
     /**
-     * 建立目錄並寫入 xlsx，回傳實際檔案路徑。
+     * 一次查詢的 doc → render 兩種格式 → 寫兩份檔（Requirement 55 / Task 270）。
      *
-     * <p>檔名含 ownerId，避免多使用者同 subpath 時同名互相覆蓋；{@code name} 非空時再加一段，
-     * 讓同一人的多筆排程可各留一份。<b>{@code name} 為空時檔名與 Task 238 逐字元相同</b>
-     * （既有排程升級後落點與檔名不變，餵給下游程式的輸入檔不會斷）。
+     * <p>主檔名含 ownerId，避免多使用者同 subpath 時同名互相覆蓋；{@code name} 非空時再加一段，
+     * 讓同一人的多筆排程可各留一份。<b>{@code name} 為空時主檔名與 Task 238 逐字元相同</b>
+     * （既有排程升級後落點與主檔名不變，餵給下游程式的輸入檔不會斷；只是多出一份同名的 {@code .json}）。
+     *
+     * <p><b>主檔名不含副檔名</b>，由 {@code DualFormatExportWriter} 各自加上 {@code .xlsx}／{@code .json}。
+     * 排程名 {@code name} 會進主檔名，故它的<b>路徑逃脫重驗已搬進共用元件</b>
+     * （DB 值可能被繞過 API 以 psql 直改，既有 {@code toResponse}／{@code syncQuietly} 都是這個假設）。
+     * {@code resolveDir} 仍留在此處——它擋的是子路徑跳脫基底，是另一道防線，不可一併刪除。
+     *
+     * <p><b>兩支 render 各自 try/catch、失敗的那一份傳 null</b>：一份 render 失敗不得中斷另一份的寫入。
      */
-    private Path writeToDir(Long ownerId, String name, String subpath, byte[] data) throws IOException {
-        Path dir = resolveDir(normalizeSubpath(subpath));
-        Files.createDirectories(dir);
-        String date = LocalDate.now(TW_ZONE).format(FILE_DATE);
-        String suffix = (name == null || name.isBlank()) ? "" : "_" + name.trim();
-        Path file = dir.resolve("交易紀錄_" + ownerId + suffix + "_" + date + ".xlsx");
-        // 與 subpath 同等級的執行時重驗：DB 值可能被繞過 API 以 psql 直改（既有 toResponse／
-        // GdriveOutputSupport.syncQuietly 都是這個假設），name 進了檔名就等於進了路徑。
-        if (!file.normalize().startsWith(dir)) {
-            throw new IllegalArgumentException("排程名稱不合法，拒絕寫入：" + name);
+    private com.steven.assets.service.export.DualFormatExportWriter.DualResult writeDual(
+            AssetTransactionExportSchedule s, Long ownerId,
+            com.steven.assets.service.export.ExportDoc doc) throws IOException {
+        byte[] xlsx = null;
+        byte[] json = null;
+        try {
+            xlsx = excelDocRenderer.render(doc);
+        } catch (Exception e) {
+            log.warn("交易紀錄 xlsx render 失敗 owner={} schedule={}：{}", ownerId, s.getId(), e.getMessage(), e);
         }
-        Files.write(file, data);
-        return file;
+        try {
+            json = jsonDocRenderer.render(doc);
+        } catch (Exception e) {
+            log.warn("交易紀錄 json render 失敗 owner={} schedule={}：{}", ownerId, s.getId(), e.getMessage(), e);
+        }
+        String name = s.getName();
+        String suffix = (name == null || name.isBlank()) ? "" : "_" + name.trim();
+        String baseName = "交易紀錄_" + ownerId + suffix + "_" + LocalDate.now(TW_ZONE).format(FILE_DATE);
+        return dualWriter.write(ownerId, resolveDir(normalizeSubpath(s.getOutputSubpath())),
+                baseName, json, xlsx, s.isGdriveEnabled(), s.getGdriveSubpath());
+    }
+
+    /** 寫回 Drive 狀態欄。未啟用時 {@code gdriveStatus} 為 null，此時兩欄一律不碰（沿用既有語意）。 */
+    private void applyGdriveStatus(AssetTransactionExportSchedule s,
+                                   com.steven.assets.service.export.DualFormatExportWriter.DualResult r) {
+        if (r.gdriveStatus() == null) return;
+        s.setGdriveLastRunAt(LocalDateTime.now(TW_ZONE));
+        s.setGdriveLastStatus(r.gdriveStatus());
     }
 
     /**

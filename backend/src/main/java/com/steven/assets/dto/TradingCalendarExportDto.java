@@ -19,9 +19,16 @@ public class TradingCalendarExportDto {
      */
     @Builder
     public record RunResponse(
+            // 雙格式匯出（Requirement 55 / Task 271）：一律產兩份、主檔名相同，
+            // 既有 path／sizeBytes／gdrivePath 語意不變（一律指 xlsx），json 那份另加三欄
             String path,       // 容器內絕對路徑（顯示用）
             long sizeBytes,
-            String format,     // json / excel
+            String jsonPath,
+            long jsonSizeBytes,
+            String jsonGdrivePath,
+            // 共用元件已算好、已截斷的本機狀態字串。呼叫端一律沿用，不得自組——
+            // 自組會在「兩份都失敗」時把 null 串成假的「成功：null／null」，且無截斷會溢位 varchar(500)。
+            String localStatus,
             int year,
             int totalDays,     // 該年度天數（365／366）
             String gdrivePath,   // Drive 落點；未啟用或未上傳成功為 null
@@ -56,7 +63,6 @@ public class TradingCalendarExportDto {
             Boolean enabled,
             Integer runHour,
             Integer runMinute,
-            String format,        // json / excel
             String outputSubpath,
             Boolean gdriveEnabled,
             String gdriveSubpath
@@ -67,7 +73,6 @@ public class TradingCalendarExportDto {
             Boolean enabled,
             Integer runHour,
             Integer runMinute,
-            String format,
             String outputSubpath,
             String lastRunAt,      // yyyy-MM-dd HH:mm:ss，無則 null
             String lastRunStatus,  // 「成功：/path」或「失敗：訊息」

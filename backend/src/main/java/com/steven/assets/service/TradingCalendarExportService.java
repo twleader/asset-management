@@ -50,20 +50,21 @@ public class TradingCalendarExportService {
     /** DayOfWeek MONDAY(1)..SUNDAY(7) → 中文星期。 */
     private static final String[] WEEKDAY_ZH = {"一", "二", "三", "四", "五", "六", "日"};
 
-    public static final String FORMAT_JSON = "json";
-    public static final String FORMAT_EXCEL = "excel";
-
     private final MarketDataService marketDataService;
     private final ObjectMapper objectMapper;
+    // 雙格式匯出（Requirement 55 / Task 271）：兩份檔的落地、tmp＋atomic move 與狀態字串一律走共用元件
+    private final com.steven.assets.service.export.DualFormatExportWriter dualWriter;
 
     /** 容器內基底輸出目錄，經 docker volume 對映到 host（見 docker-compose.yml），與 Requirement 34 共用同一 volume。 */
     private final String baseDir;
 
     public TradingCalendarExportService(MarketDataService marketDataService,
                                         ObjectMapper objectMapper,
+                                        com.steven.assets.service.export.DualFormatExportWriter dualWriter,
                                         @Value("${EXPORT_OUTPUT_DIR:/home/steven}") String baseDir) {
         this.marketDataService = marketDataService;
         this.objectMapper = objectMapper;
+        this.dualWriter = dualWriter;
         this.baseDir = baseDir;
     }
 
@@ -72,34 +73,38 @@ public class TradingCalendarExportService {
     /**
      * 產出指定年度整年交易日曆並以指定格式寫檔到 {@code subpath} 目錄。
      *
+     * <p><b>一律同時產出 JSON 與 Excel 兩份，主檔名相同</b>（Requirement 55 / Task 271）——
+     * 使用者不再需要二選一。
+     *
+     * <p><b>本匯出點刻意不接 {@code ExportDoc}</b>：它本來就有兩個 builder、且共吃同一份
+     * {@link #buildDays}，而 {@link #buildJson} 的輸出是對外契約、形狀不得改變。改接中介模型
+     * 只會改變既有輸出、沒有任何好處。只把落檔換成共用元件（取得 tmp＋atomic move 與統一狀態字串）。
+     *
+     * <p>Drive 上傳<b>不在此處</b>：本方法沒有 owner 與 Drive 設定，由排程服務負責上傳兩份。
+     *
      * @param year   西元年（1970..2100）
-     * @param format {@value #FORMAT_JSON} 或 {@value #FORMAT_EXCEL}（大小寫不敏感）
      * @param subpath 相對家目錄根的子路徑（空＝家目錄根）
      */
-    public TradingCalendarExportDto.RunResponse exportToDir(int year, String format, String subpath) {
-        String fmt = normalizeFormat(format);
+    public TradingCalendarExportDto.RunResponse exportToDir(int year, String subpath) {
         if (year < 1970 || year > 2100) {
             throw new IllegalArgumentException("年度必須介於 1970～2100：" + year);
         }
         String sub = normalizeSubpath(subpath);
 
         List<DayRow> days = buildDays(year);
-        byte[] data;
-        String filename;
         try {
-            if (FORMAT_JSON.equals(fmt)) {
-                data = buildJson(year, days);
-                filename = "交易日曆_" + year + ".json";
-            } else {
-                data = buildExcel(year, days);
-                filename = "交易日曆_" + year + ".xlsx";
-            }
-            Path file = writeAtomically(sub, filename, data);
-            log.info("交易日曆匯出成功 year={} format={} → {}（{} bytes）", year, fmt, file, data.length);
+            byte[] json = buildJson(year, days);
+            byte[] xlsx = buildExcel(year, days);
+            // gdriveEnabled=false：本方法只寫本機兩份，Drive 由排程服務處理（見 271.3.2.1）
+            var r = dualWriter.write(null, resolveDir(sub), "交易日曆_" + year, json, xlsx, false, null);
+            log.info("交易日曆匯出 year={} → {}", year, r.localStatus());
             return TradingCalendarExportDto.RunResponse.builder()
-                    .path(file.toString())
-                    .sizeBytes(data.length)
-                    .format(fmt)
+                    // 既有欄位語意不變：指 xlsx 那一份
+                    .path(r.xlsxFile() == null ? null : r.xlsxFile().toString())
+                    .sizeBytes(r.xlsxFile() == null ? 0 : (int) Files.size(r.xlsxFile()))
+                    .jsonPath(r.jsonFile() == null ? null : r.jsonFile().toString())
+                    .jsonSizeBytes(r.jsonFile() == null ? 0 : (int) Files.size(r.jsonFile()))
+                    .localStatus(r.localStatus())
                     .year(year)
                     .totalDays(days.size())
                     .build();
@@ -244,11 +249,6 @@ public class TradingCalendarExportService {
 
     // ===== 供排程設定 PUT 前置驗證（Task 185）=====
 
-    /** 驗證並回傳正規化格式（json/excel）；非法丟 IllegalArgumentException → 400。 */
-    public String requireValidFormat(String format) {
-        return normalizeFormat(format);
-    }
-
     /** 驗證子路徑正規化後不跳脫基底目錄（非法丟 IllegalArgumentException → 400）；回正規化後子路徑。 */
     public String requireValidSubpath(String subpath) {
         String sub = normalizeSubpath(subpath);
@@ -257,14 +257,6 @@ public class TradingCalendarExportService {
     }
 
     // ===== 輔助 =====
-
-    private static String normalizeFormat(String format) {
-        String f = format == null ? "" : format.trim().toLowerCase();
-        if (!FORMAT_JSON.equals(f) && !FORMAT_EXCEL.equals(f)) {
-            throw new IllegalArgumentException("檔案格式僅支援 json / excel：" + format);
-        }
-        return f;
-    }
 
     /** trim + 去頭尾斜線；空字串保留（＝家目錄根）。 */
     private static String normalizeSubpath(String subpath) {
@@ -284,20 +276,6 @@ public class TradingCalendarExportService {
         return target;
     }
 
-    /** 建立目錄，先寫 *.tmp 再原子 rename 覆寫目標，避免同名覆寫時出現部分寫入殘檔。 */
-    private Path writeAtomically(String subpath, String filename, byte[] data) throws IOException {
-        Path dir = resolveDir(subpath);
-        Files.createDirectories(dir);
-        Path file = dir.resolve(filename);
-        Path tmp = dir.resolve(filename + ".tmp");
-        Files.write(tmp, data);
-        try {
-            Files.move(tmp, file, StandardCopyOption.ATOMIC_MOVE);
-        } catch (AtomicMoveNotSupportedException e) {
-            Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING);
-        }
-        return file;
-    }
 
     /** 單日交易日曆列；鍵名（tw/us/uk + *Holiday）與 TradingCalendarView 前端日格模型一致。 */
     public record DayRow(

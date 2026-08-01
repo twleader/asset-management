@@ -80,7 +80,6 @@ public class TradingCalendarExportScheduleService {
         int minute = req.runMinute() == null ? 0 : req.runMinute();
         if (hour < 0 || hour > 23) throw new IllegalArgumentException("執行時(hour)必須介於 0～23");
         if (minute < 0 || minute > 59) throw new IllegalArgumentException("執行分(minute)必須介於 0～59");
-        String format = exportService.requireValidFormat(req.format());       // 驗 json/excel（丟即擋）
         String subpath = exportService.requireValidSubpath(req.outputSubpath()); // 驗不跳脫（丟即擋）
 
         TradingCalendarExportSchedule s = settingRepo.findByOwnerUserId(ownerId).orElseGet(() ->
@@ -93,7 +92,7 @@ public class TradingCalendarExportScheduleService {
         s.setEnabled(Boolean.TRUE.equals(req.enabled()));
         s.setRunHour(hour);
         s.setRunMinute(minute);
-        s.setFormat(format);
+        // format 欄位自 Requirement 55 起停用（一律雙格式）；DB 欄位保留但程式不再讀寫
         s.setOutputSubpath(subpath);
         s.setGdriveEnabled(drive.enabled());
         s.setGdriveSubpath(drive.subpath());
@@ -116,29 +115,37 @@ public class TradingCalendarExportScheduleService {
      * <p>設定列不存在（只手動匯出、從未設過排程）或未啟用時不上傳，也不建列。
      */
     public TradingCalendarExportDto.RunResponse runManualForCurrentUser(
-            Integer year, String format, String subpath) {
+            Integer year, String subpath) {
         int targetYear = year != null ? year : LocalDate.now(TW_ZONE).getYear();
         // 本機一律先寫；失敗會直接往上拋（既有行為），此時完全不上傳。
-        TradingCalendarExportDto.RunResponse local = exportService.exportToDir(targetYear, format, subpath);
+        TradingCalendarExportDto.RunResponse local = exportService.exportToDir(targetYear, subpath);
 
-        GdriveOutputSupport.SyncResult drive = null;
+        BothUploaded drive = null;
         CurrentUserContext ctx = currentUserProvider.getObject();
         if (ctx.hasUser()) {
             TradingCalendarExportSchedule s =
                     settingRepo.findByOwnerUserId(ctx.getEffectiveUserId()).orElse(null);
             if (s != null) {
-                drive = syncGdrive(s, Path.of(local.path()));
+                if (local.path() != null && local.jsonPath() != null) {
+                    drive = syncGdriveBoth(s, Path.of(local.path()), Path.of(local.jsonPath()));
+                } else {
+                    GdriveOutputSupport.SyncResult skipped = syncGdrive(s, null);
+                    drive = skipped == null ? null : new BothUploaded(skipped.status(), null, null);
+                }
                 if (drive != null) saveQuietly(s);
             }
         }
         return TradingCalendarExportDto.RunResponse.builder()
                 .path(local.path())
                 .sizeBytes(local.sizeBytes())
-                .format(local.format())
+                .jsonPath(local.jsonPath())
+                .jsonSizeBytes(local.jsonSizeBytes())
                 .year(local.year())
                 .totalDays(local.totalDays())
-                .gdrivePath(drive == null ? null : drive.path())
+                .gdrivePath(drive == null ? null : drive.xlsxPath())
                 .gdriveStatus(drive == null ? null : drive.status())
+                .jsonGdrivePath(drive == null ? null : drive.jsonPath())
+                .localStatus(local.localStatus())
                 .build();
     }
 
@@ -191,12 +198,18 @@ public class TradingCalendarExportScheduleService {
         try {
             // 交易日曆為全域資料，無需 owner 過濾；匯出當前西元年（隨年度/颱風假更新保持最新）。
             TradingCalendarExportDto.RunResponse r =
-                    exportService.exportToDir(today.getYear(), s.getFormat(), s.getOutputSubpath());
-            s.setLastRunStatus("成功：" + r.path());
-            log.info("交易日曆排程匯出成功 owner={} format={} → {}（{} bytes）",
-                    s.getOwnerUserId(), s.getFormat(), r.path(), r.sizeBytes());
-            // 本機寫成功後才上傳；狀態欄由下方 finally 既有的 save 一併寫入。
-            syncGdrive(s, Path.of(r.path()));
+                    exportService.exportToDir(today.getYear(), s.getOutputSubpath());
+            // 一律沿用共用元件算好、已截斷的字串：自組會在兩份都失敗時記成假的「成功：null／null」，
+            // 且無截斷會讓 varchar(500) 溢位而把一次本機其實已成功的匯出記成失敗。
+            s.setLastRunStatus(r.localStatus());
+            log.info("交易日曆排程匯出成功 owner={} → {}／{}",
+                    s.getOwnerUserId(), r.path(), r.jsonPath());
+            // 本機兩份都寫成功才上傳；狀態欄由下方 finally 既有的 save 一併寫入。
+            if (r.path() != null && r.jsonPath() != null) {
+                syncGdriveBoth(s, Path.of(r.path()), Path.of(r.jsonPath()));
+            } else {
+                syncGdrive(s, null);   // 未兩份皆成功＝不上傳，但已啟用時仍寫狀態欄
+            }
         } catch (Exception e) {
             s.setLastRunStatus("失敗：" + e.getMessage());
             log.warn("交易日曆排程匯出失敗 owner={}：{}", s.getOwnerUserId(), e.getMessage(), e);
@@ -230,6 +243,43 @@ public class TradingCalendarExportScheduleService {
      * <p><b>只改記憶體中的欄位、不自行 save</b>：排程路徑由 {@code runScheduled} 的 finally 一併寫入，
      * 手動路徑由 {@link #saveQuietly} 寫入。
      */
+    /** {@code gdrive_last_status} 的欄位上限（實測自運行中 DB）。 */
+    private static final int GDRIVE_STATUS_MAX = 512;
+    /** 合併前每半的上限：扣掉 {@code "xlsx "} 與 {@code "／json "} 共 12 字元的固定開銷後對半分。 */
+    private static final int GDRIVE_HALF_MAX = (GDRIVE_STATUS_MAX - 12) / 2;
+
+    /**
+     * 上傳<b>兩份</b>到同一個 Drive 子路徑（Requirement 55 / Task 271.3.2.1）。
+     *
+     * <p>{@code exportToDir} 的簽章不含 owner 與 Drive 設定，結構上走不到
+     * {@code DualFormatExportWriter} 的 Drive 段，故本匯出點與警示觸發同型：狀態字串的合併與截斷
+     * 必須自己做。字串契約沿用共用元件的 {@code "xlsx …／json …"}，兩半<b>各自先截斷再合併</b>
+     * ——合併後才截尾會把 {@code ／json …} 整段切掉，違反「必須能分辨是哪一份」。
+     */
+    /** 兩份的 Drive 落點與合併後的狀態字串。 */
+    private record BothUploaded(String status, String xlsxPath, String jsonPath) {}
+
+    private BothUploaded syncGdriveBoth(TradingCalendarExportSchedule s,
+                                        Path xlsxFile, Path jsonFile) {
+        if (!s.isGdriveEnabled()) return null;
+        GdriveOutputSupport.SyncResult x =
+                gdrive.syncQuietly(s.getOwnerUserId(), s.getGdriveSubpath(), xlsxFile);
+        GdriveOutputSupport.SyncResult j =
+                gdrive.syncQuietly(s.getOwnerUserId(), s.getGdriveSubpath(), jsonFile);
+        String merged = "xlsx " + truncate(x.status(), GDRIVE_HALF_MAX)
+                + "／json " + truncate(j.status(), GDRIVE_HALF_MAX);
+        s.setGdriveLastRunAt(LocalDateTime.now(TW_ZONE));
+        s.setGdriveLastStatus(merged);
+        // 兩個落點都要回：既有 gdrivePath 指 xlsx、新增的 jsonGdrivePath 指 json。
+        // 只回 xlsx 會讓 jsonGdrivePath 恆為 null，前端無從分辨「沒上傳」與「有上傳但沒回報」。
+        return new BothUploaded(merged, x.path(), j.path());
+    }
+
+    private static String truncate(String s, int max) {
+        if (s == null) return null;
+        return s.length() <= max ? s : s.substring(0, max - 1) + "…";
+    }
+
     private GdriveOutputSupport.SyncResult syncGdrive(TradingCalendarExportSchedule s, Path localFile) {
         if (!s.isGdriveEnabled()) return null;
         GdriveOutputSupport.SyncResult r =
@@ -262,7 +312,6 @@ public class TradingCalendarExportScheduleService {
                 .enabled(Boolean.TRUE.equals(s.getEnabled()))
                 .runHour(s.getRunHour())
                 .runMinute(s.getRunMinute())
-                .format(s.getFormat())
                 .outputSubpath(s.getOutputSubpath())
                 .lastRunAt(s.getLastRunAt() == null ? null : s.getLastRunAt().format(TS_FMT))
                 .lastRunStatus(s.getLastRunStatus())

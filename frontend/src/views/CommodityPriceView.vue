@@ -140,7 +140,7 @@
         以主機家目錄 <code>{{ schedule.baseDir || '/home/steven' }}</code> 為根（對映主機
         <code>/Users/steven</code>）。按上方「選擇」開啟檔案總管式選擇器挑選子資料夾；例如選 <code>input</code> →
         主機 <code>/Users/steven/input</code>。每日於指定時間匯出油價金價為
-        <code>油價金價_{使用者ID}_YYYYMMDD.xlsx</code>（內容同上方「匯出 Excel」）。
+        <code>油價金價_{使用者ID}_YYYYMMDD.xlsx</code> 與 <code>.json</code> <strong>兩份</strong>（主檔名相同、只差副檔名；內容同上方「匯出 Excel」）。
         匯出範圍以<b>執行當日往前推</b>計算，故每日產出會隨時間滾動。
       </div>
       <div v-if="schedule.lastRunAt || schedule.lastRunStatus" class="schedule-status">

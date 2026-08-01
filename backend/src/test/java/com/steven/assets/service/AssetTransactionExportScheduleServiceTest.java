@@ -38,8 +38,8 @@ import static org.mockito.Mockito.when;
  *
  * <p>最關鍵的兩件事：
  * <ol>
- *   <li>背景排程走 {@code exportAssetTransactionsForOwner(ownerId)}（owner-scoped）而非 HTTP 版
- *       {@code exportAssetTransactions()}——後者在無 request context 的背景執行緒會匯出所有人的交易。</li>
+ *   <li>背景排程走 {@code assetTransactionsDocForOwner(ownerId)}（owner-scoped）而非 HTTP 版
+ *       {@code assetTransactionsDoc()}——後者在無 request context 的背景執行緒會匯出所有人的交易。</li>
  *   <li>by-id 操作走 {@code findByIdAndOwnerUserId} 而非 {@code findById}／{@code deleteById}——
  *       後者不吃 Hibernate {@code @Filter}，會讓任何人以他人排程 id 讀改刪。</li>
  * </ol>
@@ -70,8 +70,15 @@ class AssetTransactionExportScheduleServiceTest {
         // 注入真實的 GdriveOutputSupport（只把 rclone／使用者查詢換成替身），驗證規則才會真的被跑到。
         GdriveOutputSupport gdrive =
                 new GdriveOutputSupport(rcloneClient, appUserRepo, userAdminService, selfCheck, "GDriveOutput");
+        // 雙格式匯出（Task 270）：兩個 renderer 與雙檔落地元件一律注入真實實例，
+        // 換成 mock 會讓「兩份檔真的被寫出來」這件事完全驗不到。
+        var excelRenderer = new com.steven.assets.service.export.ExcelDocRenderer();
+        var jsonRenderer = new com.steven.assets.service.export.JsonDocRenderer(
+                new com.fasterxml.jackson.databind.ObjectMapper());
+        var dualWriter = new com.steven.assets.service.export.DualFormatExportWriter(gdrive);
         service = new AssetTransactionExportScheduleService(
-                settingRepo, excelExportService, currentUserProvider, gdrive, baseDir.toString());
+                settingRepo, excelExportService, currentUserProvider, gdrive,
+                excelRenderer, jsonRenderer, dualWriter, baseDir.toString());
         when(settingRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(settingRepo.findByOwnerUserIdOrderByRunHourAscRunMinuteAscIdAsc(anyLong())).thenReturn(List.of());
     }
@@ -90,6 +97,20 @@ class AssetTransactionExportScheduleServiceTest {
     private static AssetTransactionExportSchedule sched(long owner, int h, int m, boolean enabled,
                                                         String subpath, LocalDate lastRun) {
         return sched(owner, owner, null, h, m, enabled, subpath, lastRun);
+    }
+
+    /** 最小合法 doc：本測試驗的是落檔與狀態，內容只需能被兩個 renderer 產出。 */
+    private static com.steven.assets.service.export.ExportDoc doc() {
+        var table = new com.steven.assets.service.export.ExportDoc.Table(
+                null, null, List.of("代號"), true, false, false, null, List.of(List.of("2330")));
+        return new com.steven.assets.service.export.ExportDoc("交易紀錄",
+                List.of(new com.steven.assets.service.export.ExportDoc.Sheet("交易紀錄", List.of(table), 1)));
+    }
+
+    /** 同一主檔名的 .json 那一份（Requirement 55：兩份主檔名逐字元相同、只差副檔名）。 */
+    private static Path jsonOf(Path xlsx) {
+        String n = xlsx.getFileName().toString();
+        return xlsx.resolveSibling(n.substring(0, n.length() - ".xlsx".length()) + ".json");
     }
 
     private Path expectedFile(long owner, String subpath) {
@@ -238,7 +259,7 @@ class AssetTransactionExportScheduleServiceTest {
         assertThatThrownBy(() -> service.runNowForCurrentUser(99L))
                 .isInstanceOf(NoSuchElementException.class);
         verify(settingRepo, never()).findById(any());
-        verify(excelExportService, never()).exportAssetTransactions();
+        verify(excelExportService, never()).assetTransactionsDoc();
     }
 
     @Test
@@ -260,14 +281,14 @@ class AssetTransactionExportScheduleServiceTest {
         givenCurrentUser(1L);
         AssetTransactionExportSchedule s = sched(7L, 1L, null, 8, 0, true, "out", yesterday());
         when(settingRepo.findByIdAndOwnerUserId(7L, 1L)).thenReturn(Optional.of(s));
-        when(excelExportService.exportAssetTransactions()).thenReturn("xlsx".getBytes());
+        when(excelExportService.assetTransactionsDoc()).thenReturn(doc());
 
         AssetTransactionExportDto.RunNowResponse resp = service.runNowForCurrentUser(7L);
 
         assertThat(resp.path()).contains("交易紀錄_1_");
         // run-now 走 HTTP 版（非 owner 版），且不改當日 guard
-        verify(excelExportService).exportAssetTransactions();
-        verify(excelExportService, never()).exportAssetTransactionsForOwner(anyLong());
+        verify(excelExportService).assetTransactionsDoc();
+        verify(excelExportService, never()).assetTransactionsDocForOwner(anyLong());
         assertThat(s.getLastRunDate()).isEqualTo(yesterday()); // 未被動到
     }
 
@@ -276,7 +297,7 @@ class AssetTransactionExportScheduleServiceTest {
         givenCurrentUser(1L);
         when(settingRepo.findByIdAndOwnerUserId(7L, 1L))
                 .thenReturn(Optional.of(sched(7L, 1L, "晚班", 22, 0, true, "out2", yesterday())));
-        when(excelExportService.exportAssetTransactions()).thenReturn("xlsx".getBytes());
+        when(excelExportService.assetTransactionsDoc()).thenReturn(doc());
 
         service.runNowForCurrentUser(7L);
 
@@ -288,13 +309,17 @@ class AssetTransactionExportScheduleServiceTest {
     @Test
     void 命中執行時間且今日未跑則產檔並設當日guard_走owner版() throws Exception {
         when(settingRepo.findAll()).thenReturn(List.of(sched(1L, 0, 0, true, "out", yesterday())));
-        when(excelExportService.exportAssetTransactionsForOwner(1L)).thenReturn("xlsx".getBytes());
+        when(excelExportService.assetTransactionsDocForOwner(1L)).thenReturn(doc());
 
         service.tick();
 
         // 背景必須走 owner-scoped 版，而非 HTTP 版（否則洩漏所有人的交易）
-        verify(excelExportService).exportAssetTransactionsForOwner(1L);
+        verify(excelExportService).assetTransactionsDocForOwner(1L);
+        verify(excelExportService, never()).assetTransactionsDoc();
+        // 只驗 xxxDoc 被叫一次擋不住「xlsx 走既有的 byte[] 方法、json 另呼一次 doc」——
+        // 那會查兩次資料卻全綠，走 HTTP 版更會匯出所有人的交易。故一併釘死舊的兩支公開方法。
         verify(excelExportService, never()).exportAssetTransactions();
+        verify(excelExportService, never()).exportAssetTransactionsForOwner(anyLong());
         assertThat(expectedFile(1L, "out")).exists();
     }
 
@@ -304,7 +329,7 @@ class AssetTransactionExportScheduleServiceTest {
 
         service.tick();
 
-        verify(excelExportService, never()).exportAssetTransactionsForOwner(anyLong());
+        verify(excelExportService, never()).assetTransactionsDocForOwner(anyLong());
     }
 
     @Test
@@ -314,7 +339,7 @@ class AssetTransactionExportScheduleServiceTest {
 
         service.tick();
 
-        verify(excelExportService, never()).exportAssetTransactionsForOwner(anyLong());
+        verify(excelExportService, never()).assetTransactionsDocForOwner(anyLong());
         assertThat(s.getLastRunDate()).isEqualTo(yesterday()); // 未被動到
     }
 
@@ -325,7 +350,7 @@ class AssetTransactionExportScheduleServiceTest {
 
         service.tick();
 
-        verify(excelExportService, never()).exportAssetTransactionsForOwner(anyLong());
+        verify(excelExportService, never()).assetTransactionsDocForOwner(anyLong());
     }
 
     @Test
@@ -333,8 +358,8 @@ class AssetTransactionExportScheduleServiceTest {
         AssetTransactionExportSchedule bad = sched(1L, 0, 0, true, "out1", yesterday());
         AssetTransactionExportSchedule good = sched(2L, 0, 0, true, "out2", yesterday());
         when(settingRepo.findAll()).thenReturn(List.of(bad, good));
-        when(excelExportService.exportAssetTransactionsForOwner(1L)).thenThrow(new IOException("磁碟壞了"));
-        when(excelExportService.exportAssetTransactionsForOwner(2L)).thenReturn("xlsx".getBytes());
+        when(excelExportService.assetTransactionsDocForOwner(1L)).thenThrow(new RuntimeException("磁碟壞了"));
+        when(excelExportService.assetTransactionsDocForOwner(2L)).thenReturn(doc());
 
         service.tick();
 
@@ -352,7 +377,7 @@ class AssetTransactionExportScheduleServiceTest {
         AssetTransactionExportSchedule due = sched(1L, 1L, "早班", 0, 0, true, "a", yesterday());
         AssetTransactionExportSchedule notYet = sched(2L, 1L, "晚班", 23, 59, true, "b", yesterday());
         when(settingRepo.findAll()).thenReturn(List.of(due, notYet));
-        when(excelExportService.exportAssetTransactionsForOwner(1L)).thenReturn("xlsx".getBytes());
+        when(excelExportService.assetTransactionsDocForOwner(1L)).thenReturn(doc());
 
         service.tick();
 
@@ -367,13 +392,13 @@ class AssetTransactionExportScheduleServiceTest {
         AssetTransactionExportSchedule s1 = sched(1L, 1L, "早班", 0, 0, true, "a", yesterday());
         AssetTransactionExportSchedule s2 = sched(2L, 1L, "晚班", 0, 0, true, "b", yesterday());
         when(settingRepo.findAll()).thenReturn(List.of(s1, s2));
-        when(excelExportService.exportAssetTransactionsForOwner(1L)).thenReturn("xlsx".getBytes());
+        when(excelExportService.assetTransactionsDocForOwner(1L)).thenReturn(doc());
 
         service.tick();
 
         // 每列各自呼叫 owner 版，不得合併成一次
-        verify(excelExportService, org.mockito.Mockito.times(2)).exportAssetTransactionsForOwner(1L);
-        verify(excelExportService, never()).exportAssetTransactions();
+        verify(excelExportService, org.mockito.Mockito.times(2)).assetTransactionsDocForOwner(1L);
+        verify(excelExportService, never()).assetTransactionsDoc();
         assertThat(expectedFile(1L, "早班", "a")).exists();
         assertThat(expectedFile(1L, "晚班", "b")).exists();
     }
@@ -383,15 +408,15 @@ class AssetTransactionExportScheduleServiceTest {
         AssetTransactionExportSchedule bad = sched(1L, 1L, "早班", 0, 0, true, "a", yesterday());
         AssetTransactionExportSchedule good = sched(2L, 1L, "晚班", 0, 0, true, "b", yesterday());
         when(settingRepo.findAll()).thenReturn(List.of(bad, good));
-        when(excelExportService.exportAssetTransactionsForOwner(1L))
-                .thenThrow(new IOException("磁碟壞了"))
-                .thenReturn("xlsx".getBytes());
+        when(excelExportService.assetTransactionsDocForOwner(1L))
+                .thenThrow(new RuntimeException("磁碟壞了"))
+                .thenReturn(doc());
 
         service.tick();
 
         assertThat(bad.getLastRunStatus()).startsWith("失敗：");
         assertThat(bad.getLastRunDate()).isEqualTo(today());
-        assertThat(good.getLastRunStatus()).startsWith("成功：");
+        assertThat(good.getLastRunStatus()).startsWith("xlsx 成功：").contains("／json 成功：");
         assertThat(expectedFile(1L, "晚班", "b")).exists();
     }
 
@@ -400,22 +425,25 @@ class AssetTransactionExportScheduleServiceTest {
     @Test
     void 無名稱時檔名與Task238逐字元相同() throws Exception {
         when(settingRepo.findAll()).thenReturn(List.of(sched(1L, 1L, null, 0, 0, true, "out", yesterday())));
-        when(excelExportService.exportAssetTransactionsForOwner(1L)).thenReturn("xlsx".getBytes());
+        when(excelExportService.assetTransactionsDocForOwner(1L)).thenReturn(doc());
 
         service.tick();
 
         Path expected = baseDir.resolve("out")
                 .resolve("交易紀錄_1_" + today().format(FILE_DATE) + ".xlsx");
         assertThat(expected).exists();
+        // Requirement 55：同一主檔名的 .json 也必須存在，兩份只差副檔名
+        assertThat(jsonOf(expected)).exists();
     }
 
     @Test
     void 有名稱時檔名多一段名稱() throws Exception {
         when(settingRepo.findAll()).thenReturn(List.of(sched(1L, 1L, "早班", 0, 0, true, "out", yesterday())));
-        when(excelExportService.exportAssetTransactionsForOwner(1L)).thenReturn("xlsx".getBytes());
+        when(excelExportService.assetTransactionsDocForOwner(1L)).thenReturn(doc());
 
         service.tick();
 
         assertThat(expectedFile(1L, "早班", "out")).exists();
+        assertThat(jsonOf(expectedFile(1L, "早班", "out"))).exists();
     }
 }

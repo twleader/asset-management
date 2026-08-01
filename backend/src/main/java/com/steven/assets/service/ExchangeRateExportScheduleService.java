@@ -14,10 +14,8 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -67,6 +65,10 @@ public class ExchangeRateExportScheduleService {
     private final ExcelExportService excelExportService;
     private final ObjectProvider<CurrentUserContext> currentUserProvider;
     private final GdriveOutputSupport gdrive;
+    // 雙格式匯出（Requirement 55 / Task 270）：一次查詢取得 doc，再 render 成 xlsx 與 JSON 兩份
+    private final com.steven.assets.service.export.ExcelDocRenderer excelDocRenderer;
+    private final com.steven.assets.service.export.JsonDocRenderer jsonDocRenderer;
+    private final com.steven.assets.service.export.DualFormatExportWriter dualWriter;
 
     /** 容器內基底輸出目錄，經 docker volume 對映到 host（見 docker-compose.yml）。 */
     private final String baseDir;
@@ -78,11 +80,17 @@ public class ExchangeRateExportScheduleService {
                                             ExcelExportService excelExportService,
                                             ObjectProvider<CurrentUserContext> currentUserProvider,
                                             GdriveOutputSupport gdrive,
+                                            com.steven.assets.service.export.ExcelDocRenderer excelDocRenderer,
+                                            com.steven.assets.service.export.JsonDocRenderer jsonDocRenderer,
+                                            com.steven.assets.service.export.DualFormatExportWriter dualWriter,
                                             @Value("${EXPORT_OUTPUT_DIR:/home/steven}") String baseDir) {
         this.settingRepo = settingRepo;
         this.excelExportService = excelExportService;
         this.currentUserProvider = currentUserProvider;
         this.gdrive = gdrive;
+        this.excelDocRenderer = excelDocRenderer;
+        this.jsonDocRenderer = jsonDocRenderer;
+        this.dualWriter = dualWriter;
         this.baseDir = baseDir;
     }
 
@@ -137,19 +145,21 @@ public class ExchangeRateExportScheduleService {
         ExchangeRateExportSchedule s = settingRepo.findByOwnerUserId(ownerId).orElseGet(() ->
                 ExchangeRateExportSchedule.builder().ownerUserId(ownerId).build());
         try {
-            Path file = export(s, ownerId);
-            long size = Files.size(file);
+            var r = export(s, ownerId);
             s.setOwnerUserId(ownerId);
             s.setLastRunAt(LocalDateTime.now(TW_ZONE));
-            s.setLastRunStatus("成功：" + file);
-            // 本機寫成功後才上傳；run-now 的用途就是驗證落點正確，故它也要上傳並回報。
-            GdriveOutputSupport.SyncResult drive = syncGdrive(s, file);
+            s.setLastRunStatus(r.localStatus());
+            applyGdriveStatus(s, r);
             settingRepo.save(s);
             return ExchangeRateExportDto.RunNowResponse.builder()
-                    .path(file.toString())
-                    .sizeBytes(size)
-                    .gdrivePath(drive == null ? null : drive.path())
-                    .gdriveStatus(drive == null ? null : drive.status())
+                    // 既有三欄語意不變：一律指 xlsx 那一份
+                    .path(r.xlsxFile() == null ? null : r.xlsxFile().toString())
+                    .sizeBytes(r.xlsxFile() == null ? 0 : Files.size(r.xlsxFile()))
+                    .gdrivePath(r.xlsxGdrivePath())
+                    .gdriveStatus(r.gdriveStatus())
+                    .jsonPath(r.jsonFile() == null ? null : r.jsonFile().toString())
+                    .jsonSizeBytes(r.jsonFile() == null ? 0 : Files.size(r.jsonFile()))
+                    .jsonGdrivePath(r.jsonGdrivePath())
                     .build();
         } catch (IOException | RuntimeException e) {
             s.setOwnerUserId(ownerId);
@@ -211,10 +221,10 @@ public class ExchangeRateExportScheduleService {
     /** 背景：對指定設定產檔並更新 guard／狀態。單一使用者失敗只記錄、不影響其他人。 */
     private void runScheduled(ExchangeRateExportSchedule s, LocalDate today) {
         try {
-            Path file = export(s, s.getOwnerUserId());
-            s.setLastRunStatus("成功：" + file);
-            log.info("台幣兌美元排程匯出成功 owner={} → {}", s.getOwnerUserId(), file);
-            syncGdrive(s, file);
+            var r = export(s, s.getOwnerUserId());
+            s.setLastRunStatus(r.localStatus());
+            applyGdriveStatus(s, r);
+            log.info("台幣兌美元排程匯出 owner={} → {}", s.getOwnerUserId(), r.localStatus());
         } catch (Exception e) {
             s.setLastRunStatus("失敗：" + e.getMessage());
             log.warn("台幣兌美元排程匯出失敗 owner={}：{}", s.getOwnerUserId(), e.getMessage(), e);
@@ -233,15 +243,54 @@ public class ExchangeRateExportScheduleService {
      * 依設定的滾動區間產檔並寫入目錄，回傳實際落點。
      * 與手動匯出走同一支 {@code exportExchangeRates}，確保兩種途徑內容一致。
      */
-    private Path export(ExchangeRateExportSchedule s, Long ownerId) throws IOException {
+    private com.steven.assets.service.export.DualFormatExportWriter.DualResult export(
+            ExchangeRateExportSchedule s, Long ownerId) throws IOException {
         LocalDate end = LocalDate.now(TW_ZONE);
         Integer months = s.getRangeMonths();
         LocalDate start = months == null ? end.minusYears(10) : end.minusMonths(months);
-        byte[] data = excelExportService.exportExchangeRates(CURRENCY, start, end);
-        String filename = ExcelExportService.exchangeRateLabel(CURRENCY)
-                + "_" + ownerId + "_" + end.format(FILE_DATE) + ".xlsx";
-        return writeAtomically(normalizeSubpath(s.getOutputSubpath()), filename, data);
+        // 一次查詢取得 doc（不得為兩種格式各查一次）
+        var doc = excelExportService.exchangeRatesDoc(CURRENCY, start, end);
+        String baseName = ExcelExportService.exchangeRateLabel(CURRENCY)
+                + "_" + ownerId + "_" + end.format(FILE_DATE);
+        return writeDual(s, ownerId, doc, baseName);
     }
+    /**
+     * 一次查詢的 doc → render 兩種格式 → 寫兩份檔（Requirement 55 / Task 270）。
+     *
+     * <p><b>主檔名不含副檔名</b>，由 {@code DualFormatExportWriter} 各自加上 {@code .xlsx}／{@code .json}
+     * ——呼叫端沒有機會讓兩份分岔。<b>兩支 render 各自 try/catch、失敗的那一份傳 null</b>：
+     * 一份 render 失敗不得中斷另一份的寫入。
+     *
+     * <p>{@code resolveDir} 不可省略——它擋的是使用者設定的子路徑跳脫基底，與共用元件擋的
+     * 「主檔名不得含路徑分隔字元」是兩道不同的防線。
+     */
+    private com.steven.assets.service.export.DualFormatExportWriter.DualResult writeDual(
+            ExchangeRateExportSchedule s, Long ownerId,
+            com.steven.assets.service.export.ExportDoc doc, String baseName) throws IOException {
+        byte[] xlsx = null;
+        byte[] json = null;
+        try {
+            xlsx = excelDocRenderer.render(doc);
+        } catch (Exception e) {
+            log.warn("台幣兌美元 xlsx render 失敗 owner={}：{}", ownerId, e.getMessage(), e);
+        }
+        try {
+            json = jsonDocRenderer.render(doc);
+        } catch (Exception e) {
+            log.warn("台幣兌美元 json render 失敗 owner={}：{}", ownerId, e.getMessage(), e);
+        }
+        return dualWriter.write(ownerId, resolveDir(normalizeSubpath(s.getOutputSubpath())),
+                baseName, json, xlsx, s.isGdriveEnabled(), s.getGdriveSubpath());
+    }
+
+    /** 寫回 Drive 狀態欄。未啟用時 {@code gdriveStatus} 為 null，此時兩欄一律不碰（沿用既有語意）。 */
+    private void applyGdriveStatus(ExchangeRateExportSchedule s,
+                                   com.steven.assets.service.export.DualFormatExportWriter.DualResult r) {
+        if (r.gdriveStatus() == null) return;
+        s.setGdriveLastRunAt(LocalDateTime.now(TW_ZONE));
+        s.setGdriveLastStatus(r.gdriveStatus());
+    }
+
 
     private Long requireOwnerId() {
         CurrentUserContext ctx = currentUserProvider.getObject();
@@ -267,23 +316,6 @@ public class ExchangeRateExportScheduleService {
         return target;
     }
 
-    /**
-     * 先寫 {@code .tmp} 再 atomic move（比照 Requirement 37）：避免覆寫既有檔時中途失敗留下半截殘檔，
-     * 讓使用者永遠讀到完整的前一版或完整的新版。
-     */
-    private Path writeAtomically(String subpath, String filename, byte[] data) throws IOException {
-        Path dir = resolveDir(subpath);
-        Files.createDirectories(dir);
-        Path file = dir.resolve(filename);
-        Path tmp = dir.resolve(filename + ".tmp");
-        Files.write(tmp, data);
-        try {
-            Files.move(tmp, file, StandardCopyOption.ATOMIC_MOVE);
-        } catch (AtomicMoveNotSupportedException e) {
-            Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING);
-        }
-        return file;
-    }
 
     private ExchangeRateExportDto.SettingResponse toResponse(ExchangeRateExportSchedule s) {
         return toResponse(s, null);   // 讀取路徑不做自檢：自檢只在「使用者這次把開關打開」時才有意義

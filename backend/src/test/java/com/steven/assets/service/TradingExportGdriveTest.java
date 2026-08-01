@@ -101,13 +101,15 @@ class TradingExportGdriveTest {
         GdriveOutputSupport gdrive =
                 new GdriveOutputSupport(rcloneClient, userRepo, userAdminService, selfCheck, "GDriveOutput");
         radar = new TradingRadarExportScheduleService(timeRepo, radarSettingRepo, radarExportService,
-                snapshotStore, currentUserProvider, gdrive, baseDir.toString(),
-                radarService, priceQueryService, marketDataService);
+                snapshotStore, currentUserProvider, gdrive,
+                new com.steven.assets.service.export.ExcelDocRenderer(),
+                new com.steven.assets.service.export.JsonDocRenderer(new com.fasterxml.jackson.databind.ObjectMapper()),
+                new com.steven.assets.service.export.DualFormatExportWriter(gdrive),
+                baseDir.toString(), radarService, priceQueryService, marketDataService);
         calendar = new TradingCalendarExportScheduleService(calendarRepo, calendarExportService,
                 currentUserProvider, gdrive, baseDir.toString());
         when(radarSettingRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(calendarRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
-        when(calendarExportService.requireValidFormat(anyString())).thenAnswer(inv -> inv.getArgument(0));
         when(calendarExportService.requireValidSubpath(anyString())).thenAnswer(inv -> inv.getArgument(0));
         when(marketDataService.isTradingDay(anyString(), any(LocalDate.class))).thenReturn(true);
     }
@@ -138,12 +140,19 @@ class TradingExportGdriveTest {
                 .gdriveEnabled(gdriveEnabled).gdriveSubpath(gdriveSubpath).build();
     }
 
+    /** 最小合法 doc：本測試驗的是 Drive 同步與狀態欄，內容只需能被兩個 renderer 產出。 */
+    private static com.steven.assets.service.export.ExportDoc radarDoc() {
+        var table = new com.steven.assets.service.export.ExportDoc.Table(
+                null, null, List.of("代碼"), true, false, false, null, List.of(List.of("2330")));
+        return new com.steven.assets.service.export.ExportDoc("交易雷達",
+                List.of(new com.steven.assets.service.export.ExportDoc.Sheet("快照索引", List.of(table), 1)));
+    }
+
     private void givenSnapshots(long owner) throws IOException {
         when(snapshotStore.range(eq(owner), anyLong(), anyLong()))
                 .thenReturn(new TradingRadarSnapshotStore.SnapshotRange(
                         List.of(TextNode.valueOf("snap")), 1, 0));
-        when(radarExportService.exportForOwner(eq(owner), anyLong(), anyLong()))
-                .thenReturn("xlsx-bytes".getBytes());
+        when(radarExportService.radarDoc(eq(owner), anyLong(), anyLong())).thenReturn(radarDoc());
     }
 
     @Test
@@ -191,11 +200,12 @@ class TradingExportGdriveTest {
 
         radar.tick();
 
-        verify(rcloneClient, times(2)).copyTo(anyString(), any(), eq(DRIVE_DIR), anyString());
+        // 兩個時間點 × 每次兩份（xlsx ＋ json）＝ 4 次
+        verify(rcloneClient, times(4)).copyTo(anyString(), any(), eq(DRIVE_DIR), anyString());
         ArgumentCaptor<TradingRadarExportSetting> cap =
                 ArgumentCaptor.forClass(TradingRadarExportSetting.class);
         verify(radarSettingRepo, org.mockito.Mockito.atLeastOnce()).save(cap.capture());
-        assertThat(cap.getValue().getGdriveLastStatus()).startsWith("成功：");
+        assertThat(cap.getValue().getGdriveLastStatus()).startsWith("xlsx 成功：").contains("／json ");
     }
 
     @Test
@@ -230,7 +240,7 @@ class TradingExportGdriveTest {
 
         assertThat(Path.of(r.path())).exists();                  // 本機照寫
         assertThat(r.gdrivePath()).startsWith("GDriveOutput:" + DRIVE_DIR);
-        assertThat(r.gdriveStatus()).startsWith("成功：");
+        assertThat(r.gdriveStatus()).startsWith("xlsx 成功：").contains("／json ");
     }
 
     @Test
@@ -262,22 +272,29 @@ class TradingExportGdriveTest {
     private TradingCalendarExportSchedule calendarSetting(long owner, boolean gdriveEnabled, String gdriveSubpath) {
         return TradingCalendarExportSchedule.builder()
                 .id(owner).ownerUserId(owner)
-                .enabled(true).runHour(0).runMinute(0).format("json").outputSubpath("input")
+                .enabled(true).runHour(0).runMinute(0).outputSubpath("input")
                 .gdriveEnabled(gdriveEnabled).gdriveSubpath(gdriveSubpath).build();
     }
 
     /** 讓 exportToDir 真的把檔案落在它收到的子路徑，回傳與正式實作同形狀的 RunResponse。 */
     private void givenCalendarExportWrites() {
-        when(calendarExportService.exportToDir(anyInt(), anyString(), anyString()))
+        when(calendarExportService.exportToDir(anyInt(), anyString()))
                 .thenAnswer(inv -> {
                     int year = inv.getArgument(0);
-                    String sub = inv.getArgument(2);
+                    String sub = inv.getArgument(1);
                     Path dir = baseDir.resolve(sub);
                     Files.createDirectories(dir);
-                    Path f = dir.resolve("交易日曆_" + year + ".json");
-                    Files.writeString(f, "{}");
+                    // Task 271 起一律兩份、主檔名相同
+                    Path xlsx = dir.resolve("交易日曆_" + year + ".xlsx");
+                    Path json = dir.resolve("交易日曆_" + year + ".json");
+                    Files.writeString(xlsx, "xlsx");
+                    Files.writeString(json, "{}");
                     return TradingCalendarExportDto.RunResponse.builder()
-                            .path(f.toString()).sizeBytes(2).format("json").year(year).totalDays(365).build();
+                            .path(xlsx.toString()).sizeBytes(4)
+                            .jsonPath(json.toString()).jsonSizeBytes(2)
+                            // Task 271 起狀態字串由共用元件算好帶回，排程端一律沿用、不自組
+                            .localStatus("成功：" + xlsx + "／json 成功：" + json)
+                            .year(year).totalDays(365).build();
                 });
     }
 
@@ -294,11 +311,12 @@ class TradingExportGdriveTest {
                 .thenReturn("GDriveOutput:" + DRIVE_DIR + "/交易日曆_2026.json");
 
         TradingCalendarExportDto.RunResponse r =
-                calendar.runManualForCurrentUser(2026, "json", "Downloads");
+                calendar.runManualForCurrentUser(2026, "Downloads");
 
         assertThat(r.path()).contains("Downloads");                       // 本機落在 query param 指定處
-        verify(rcloneClient).copyTo(anyString(), any(), eq(DRIVE_DIR), anyString());  // Drive 落在設定列
-        assertThat(r.gdriveStatus()).startsWith("成功：");
+        // Task 271 起一律上傳兩份（xlsx ＋ json），兩份都落在設定列指定的 Drive 目錄
+        verify(rcloneClient, times(2)).copyTo(anyString(), any(), eq(DRIVE_DIR), anyString());
+        assertThat(r.gdriveStatus()).startsWith("xlsx 成功：").contains("／json ");
     }
 
     @Test
@@ -308,7 +326,7 @@ class TradingExportGdriveTest {
         givenCalendarExportWrites();
 
         TradingCalendarExportDto.RunResponse r =
-                calendar.runManualForCurrentUser(2026, "json", "Downloads");
+                calendar.runManualForCurrentUser(2026, "Downloads");
 
         assertThat(r.gdriveStatus()).isNull();
         verify(rcloneClient, never()).copyTo(anyString(), any(), anyString(), anyString());
@@ -327,8 +345,9 @@ class TradingExportGdriveTest {
         calendar.selfHealOnStartup();
 
         assertThat(s.getLastRunStatus()).startsWith("成功：");
-        assertThat(s.getGdriveLastStatus()).startsWith("成功：");
-        verify(rcloneClient).copyTo(anyString(), any(), eq(DRIVE_DIR), anyString());
+        assertThat(s.getGdriveLastStatus()).startsWith("xlsx 成功：").contains("／json ");
+        // Task 271 起一律上傳兩份（xlsx ＋ json）
+        verify(rcloneClient, times(2)).copyTo(anyString(), any(), eq(DRIVE_DIR), anyString());
     }
 
     @Test
@@ -336,7 +355,7 @@ class TradingExportGdriveTest {
         givenUser(ADMIN_ID, "tw.leader@gmail.com", true);
         TradingCalendarExportSchedule s = calendarSetting(ADMIN_ID, true, DRIVE_DIR);
         when(calendarRepo.findAll()).thenReturn(List.of(s));
-        when(calendarExportService.exportToDir(anyInt(), anyString(), anyString()))
+        when(calendarExportService.exportToDir(anyInt(), anyString()))
                 .thenThrow(new RuntimeException("產檔失敗"));
 
         calendar.selfHealOnStartup();
@@ -354,21 +373,21 @@ class TradingExportGdriveTest {
 
         assertThatThrownBy(() -> calendar.updateForCurrentUser(
                 new TradingCalendarExportDto.ScheduleSettingRequest(
-                        true, 8, 0, "json", "input", true, DRIVE_DIR)))
+                        true, 8, 0, "input", true, DRIVE_DIR)))
                 .isInstanceOf(AdminRequiredException.class);
     }
 
     @Test
-    void 日曆_只改格式不得清掉既有Drive設定() {
+    void 日曆_只改排程時間不得清掉既有Drive設定() {
         givenCurrentUser(ADMIN_ID);
         when(calendarRepo.findByOwnerUserId(ADMIN_ID))
                 .thenReturn(Optional.of(calendarSetting(ADMIN_ID, true, DRIVE_DIR)));
 
         TradingCalendarExportDto.ScheduleSettingResponse resp = calendar.updateForCurrentUser(
                 new TradingCalendarExportDto.ScheduleSettingRequest(
-                        true, 8, 0, "excel", "input", null, null));
+                        true, 8, 0, "input", null, null));
 
-        assertThat(resp.format()).isEqualTo("excel");
+        // format 欄位自 Requirement 55 起停用（一律雙格式），response 不再有該欄
         assertThat(resp.gdriveEnabled()).isTrue();
         assertThat(resp.gdriveSubpath()).isEqualTo(DRIVE_DIR);
     }

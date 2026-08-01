@@ -2,27 +2,19 @@ package com.steven.assets.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.steven.assets.security.CurrentUserContext;
+import com.steven.assets.service.export.ExportDoc;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.poi.ss.usermodel.Cell;
-import org.apache.poi.ss.usermodel.CellStyle;
-import org.apache.poi.ss.usermodel.Font;
-import org.apache.poi.ss.usermodel.HorizontalAlignment;
-import org.apache.poi.ss.usermodel.IndexedColors;
-import org.apache.poi.ss.usermodel.Row;
-import org.apache.poi.ss.usermodel.Sheet;
-import org.apache.poi.ss.usermodel.Workbook;
-import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.stereotype.Service;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
-import java.util.StringJoiner;
+import java.util.ArrayList;
+import java.util.Arrays;
 
 /**
  * 交易雷達結果快照的 Excel 區間匯出（Requirement 48）。
@@ -39,6 +31,8 @@ public class TradingRadarExportService {
 
     private final TradingRadarSnapshotStore store;
     private final CurrentUserContext currentUserContext;
+    // 雙格式匯出（Requirement 55 / Task 271）：三分頁改建 ExportDoc，xlsx 由 renderer 產出
+    private final com.steven.assets.service.export.ExcelDocRenderer excelDocRenderer;
 
     /** HTTP 手動匯出：owner 取自 request-scoped 的 CurrentUserContext。 */
     public byte[] export(String from, String to) throws IOException {
@@ -53,7 +47,17 @@ public class TradingRadarExportService {
         TradingRadarSnapshotStore.SnapshotRange range = (ownerId == null)
                 ? new TradingRadarSnapshotStore.SnapshotRange(List.of(), 0, 0)
                 : store.range(ownerId, fromEpoch, toEpoch);
-        return build(range, from, to);
+        return excelDocRenderer.render(radarDoc(range, from, to));
+    }
+
+    /**
+     * 交易雷達的 {@link ExportDoc}（Requirement 55 / Task 271）。
+     *
+     * <p>排程端<b>只呼叫一次</b>取得 doc，再 render 成 xlsx 與 JSON——本匯出點吃 Redis 快照，
+     * 呼叫兩次等於查兩次，兩份檔可能對不起來。
+     */
+    public ExportDoc radarDoc(long ownerId, long fromEpoch, long toEpoch) {
+        return radarDoc(store.range(ownerId, fromEpoch, toEpoch), isoLocal(fromEpoch), isoLocal(toEpoch));
     }
 
     /**
@@ -62,20 +66,16 @@ public class TradingRadarExportService {
      * 與手動匯出共用同一支 {@link #build}，確保兩種途徑內容一致。
      */
     public byte[] exportForOwner(long ownerId, long fromEpoch, long toEpoch) throws IOException {
-        return build(store.range(ownerId, fromEpoch, toEpoch), isoLocal(fromEpoch), isoLocal(toEpoch));
+        return excelDocRenderer.render(radarDoc(ownerId, fromEpoch, toEpoch));
     }
 
-    /** 共用產檔：三分頁 Excel。 */
-    private byte[] build(TradingRadarSnapshotStore.SnapshotRange range, String fromLabel, String toLabel)
-            throws IOException {
-        try (Workbook wb = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-            Styles st = new Styles(wb);
-            writeIndexSheet(wb, st, range, fromLabel, toLabel);
-            writeMarketSheet(wb, st, range.snapshots());
-            writeStockSheet(wb, st, range.snapshots());
-            wb.write(out);
-            return out.toByteArray();
-        }
+    /** 共用產檔：三分頁 doc。手動匯出與背景排程共用同一支，確保兩種途徑內容一致。 */
+    private ExportDoc radarDoc(TradingRadarSnapshotStore.SnapshotRange range,
+                               String fromLabel, String toLabel) {
+        return new ExportDoc("交易雷達", List.of(
+                indexSheet(range, fromLabel, toLabel),
+                marketSheet(range.snapshots()),
+                stockSheet(range.snapshots())));
     }
 
     private static String isoLocal(long epochMillis) {
@@ -90,129 +90,134 @@ public class TradingRadarExportService {
         }
     }
 
-    private void writeIndexSheet(Workbook wb, Styles st, TradingRadarSnapshotStore.SnapshotRange range,
-                                 String from, String to) {
-        Sheet sheet = wb.createSheet("快照索引");
-        int r = 0;
-        Row summary = sheet.createRow(r++);
+    private ExportDoc.Sheet indexSheet(TradingRadarSnapshotStore.SnapshotRange range, String from, String to) {
+        // r0：條件樣式的提示列——缺漏時走 WARN，否則走 SECTION_12（本服務的 section 是 12pt，不是 13pt）
         String text = range.snapshots().isEmpty()
                 ? "指定區間 " + from + "～" + to + " 查無交易雷達快照（索引預期 " + range.indexCount() + " 筆）"
                 : "查得 " + range.snapshots().size() + " 筆／索引預期 " + range.indexCount()
                         + " 筆／缺漏 " + range.missingCount() + " 筆（已逾期或被 LRU 逐出）";
-        cell(summary, 0, text, range.missingCount() > 0 ? st.warn : st.section);
+        ExportDoc.Line note = new ExportDoc.Line(text,
+                range.missingCount() > 0 ? ExportDoc.LineStyle.WARN : ExportDoc.LineStyle.SECTION_12);
 
-        String[] headers = {"快照時間", "規則版本", "大盤 regime", "大盤中文", "大盤分數", "大盤 stale", "個股檔數", "略過非台股檔數"};
-        Row h = sheet.createRow(r++);
-        for (int i = 0; i < headers.length; i++) cell(h, i, headers[i], st.head);
-
+        List<String> headers = List.of("快照時間", "規則版本", "大盤 regime", "大盤中文",
+                "大盤分數", "大盤 stale", "個股檔數", "略過非台股檔數");
+        List<List<Object>> rows = new ArrayList<>();
         for (JsonNode s : range.snapshots()) {
             JsonNode m = s.path("market");
             JsonNode stocks = s.path("stocks");
-            Row row = sheet.createRow(r++);
-            cell(row, 0, txt(s, "generatedAt"), null);
-            cell(row, 1, txt(s, "ruleVersion"), null);
-            cell(row, 2, txt(m, "regime"), null);
-            cell(row, 3, txt(m, "regimeLabel"), null);
-            cell(row, 4, num(m, "score"), st.num2);
-            cell(row, 5, bool(m, "stale"), null);
-            cell(row, 6, stocks.isArray() ? stocks.size() : 0, null);
-            cell(row, 7, num(s, "skippedNonTwStocks"), null);
+            rows.add(Arrays.asList(
+                    txt(s, "generatedAt"), txt(s, "ruleVersion"),
+                    txt(m, "regime"), txt(m, "regimeLabel"),
+                    num(m, "score"), boolVal(m, "stale"),
+                    stocks.isArray() ? stocks.size() : 0, num(s, "skippedNonTwStocks")));
         }
-        autosize(sheet, headers.length);
+        return new ExportDoc.Sheet("快照索引",
+                List.of(note, new ExportDoc.Table(null, null, headers, true, false, false,
+                        List.of(ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.NUM2, ExportDoc.Format.BOOL_ZH, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT), rows)),
+                headers.size());
     }
 
-    private void writeMarketSheet(Workbook wb, Styles st, List<JsonNode> snapshots) {
-        Sheet sheet = wb.createSheet("大盤總覽");
+    private ExportDoc.Sheet marketSheet(List<JsonNode> snapshots) {
         // intraday / liveUpdatedAt 為 Task 228（TW_RULES_V6，大盤盤中即時判斷）新增的欄位：
         // intraday=true 代表該次 regime 由 Redis 即時大盤點位計算而非已入庫完成日 K；asOfDate 語意不變仍為完成日 K。
-        String[] headers = {"快照時間", "regime", "中文", "分數", "資料完整", "stale", "盤中即時", "即時更新時間",
-                "完成日K", "最新點位", "漲跌%",
-                "MA20", "MA60", "MA240", "季線確認", "年線確認", "K", "D", "支持訊號", "風險提醒"};
-        int r = 0;
-        Row h = sheet.createRow(r++);
-        for (int i = 0; i < headers.length; i++) cell(h, i, headers[i], st.head);
+        // 本分頁沒有 section 標題列，第 0 列就是表頭列——不得新增任何列。
+        List<String> headers = List.of("快照時間", "regime", "中文", "分數", "資料完整", "stale", "盤中即時",
+                "即時更新時間", "完成日K", "最新點位", "漲跌%",
+                "MA20", "MA60", "MA240", "季線確認", "年線確認", "K", "D", "支持訊號", "風險提醒");
+        List<List<Object>> rows = new ArrayList<>();
         for (JsonNode s : snapshots) {
             JsonNode m = s.path("market");
-            Row row = sheet.createRow(r++);
-            cell(row, 0, txt(s, "generatedAt"), null);
-            cell(row, 1, txt(m, "regime"), null);
-            cell(row, 2, txt(m, "regimeLabel"), null);
-            cell(row, 3, num(m, "score"), st.num2);
-            cell(row, 4, bool(m, "dataComplete"), null);
-            cell(row, 5, bool(m, "stale"), null);
-            cell(row, 6, bool(m, "intraday"), null);
-            cell(row, 7, txt(m, "liveUpdatedAt"), null);
-            cell(row, 8, txt(m, "asOfDate"), null);
-            cell(row, 9, num(m, "price"), st.num2);
-            cell(row, 10, num(m, "changePercent"), st.num2);
-            cell(row, 11, num(m, "monthlyMa"), st.num2);
-            cell(row, 12, num(m, "quarterlyMa"), st.num2);
-            cell(row, 13, num(m, "annualMa"), st.num2);
-            cell(row, 14, txt(m, "quarterlyConfirmation"), null);
-            cell(row, 15, txt(m, "annualConfirmation"), null);
-            cell(row, 16, num(m, "kValue"), st.num2);
-            cell(row, 17, num(m, "dValue"), st.num2);
-            cell(row, 18, list(m, "reasons"), null);
-            cell(row, 19, list(m, "risks"), null);
+            rows.add(Arrays.asList(
+                    txt(s, "generatedAt"), txt(m, "regime"), txt(m, "regimeLabel"), num(m, "score"),
+                    boolVal(m, "dataComplete"), boolVal(m, "stale"), boolVal(m, "intraday"),
+                    txt(m, "liveUpdatedAt"), txt(m, "asOfDate"),
+                    num(m, "price"), num(m, "changePercent"),
+                    num(m, "monthlyMa"), num(m, "quarterlyMa"), num(m, "annualMa"),
+                    txt(m, "quarterlyConfirmation"), txt(m, "annualConfirmation"),
+                    num(m, "kValue"), num(m, "dValue"),
+                    listVal(m, "reasons"), listVal(m, "risks")));
         }
-        autosize(sheet, headers.length);
+        return new ExportDoc.Sheet("大盤總覽",
+                List.of(new ExportDoc.Table(null, null, headers, true, false, false, List.of(ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.NUM2, ExportDoc.Format.BOOL_ZH, ExportDoc.Format.BOOL_ZH, ExportDoc.Format.BOOL_ZH, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.NUM2, ExportDoc.Format.NUM2, ExportDoc.Format.NUM2, ExportDoc.Format.NUM2, ExportDoc.Format.NUM2, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.NUM2, ExportDoc.Format.NUM2, ExportDoc.Format.LIST_LINES, ExportDoc.Format.LIST_LINES), rows)),
+                headers.size());
     }
 
-    private void writeStockSheet(Workbook wb, Styles st, List<JsonNode> snapshots) {
-        Sheet sheet = wb.createSheet("個股決策");
-        String[] headers = {"快照時間", "代碼", "名稱", "市場", "資產類別", "持有", "還原權息", "動作", "動作中文", "分數",
-                "逆勢狀態", "逆勢中文", "現價", "漲跌%", "行情更新", "完成日K", "MA20", "MA60", "MA240",
-                "月線確認", "季線確認", "年線確認", "K", "D", "匯率分位", "底層幣別", "資料完整",
+    private ExportDoc.Sheet stockSheet(List<JsonNode> snapshots) {
+        // 同上：沒有 section 標題列，第 0 列即表頭列。
+        List<String> headers = List.of("快照時間", "代碼", "名稱", "市場", "資產類別", "持有", "還原權息",
+                "動作", "動作中文", "分數", "逆勢狀態", "逆勢中文", "現價", "漲跌%", "行情更新", "完成日K",
+                "MA20", "MA60", "MA240", "月線確認", "季線確認", "年線確認", "K", "D", "匯率分位",
+                "底層幣別", "資料完整",
                 // Task 264：二維決策的時機維度與其兩個輸入；ETF 折溢價（非 ETF 留白）
                 "時機", "季線乖離%", "52週位置", "折溢價%",
-                "支持訊號", "風險提醒", "逆勢條件", "逆勢風險"};
-        int r = 0;
-        Row h = sheet.createRow(r++);
-        for (int i = 0; i < headers.length; i++) cell(h, i, headers[i], st.head);
+                "支持訊號", "風險提醒", "逆勢條件", "逆勢風險");
+        List<List<Object>> rows = new ArrayList<>();
         for (JsonNode s : snapshots) {
             String gen = txt(s, "generatedAt");
             JsonNode stocks = s.path("stocks");
             if (!stocks.isArray()) continue;
             for (JsonNode d : stocks) {
-                Row row = sheet.createRow(r++);
-                cell(row, 0, gen, null);
-                cell(row, 1, txt(d, "stockCode"), null);
-                cell(row, 2, txt(d, "stockName"), null);
-                cell(row, 3, txt(d, "market"), null);
-                cell(row, 4, txt(d, "assetClass"), null);
-                cell(row, 5, bool(d, "held"), null);
-                cell(row, 6, bool(d, "distributionAdjusted"), null);
-                cell(row, 7, txt(d, "action"), null);
-                cell(row, 8, txt(d, "actionLabel"), null);
-                cell(row, 9, num(d, "score"), st.num2);
-                cell(row, 10, txt(d, "counterTrendState"), null);
-                cell(row, 11, txt(d, "counterTrendLabel"), null);
-                cell(row, 12, num(d, "price"), st.num2);
-                cell(row, 13, num(d, "changePercent"), st.num2);
-                cell(row, 14, txt(d, "priceUpdatedAt"), null);
-                cell(row, 15, txt(d, "asOfDate"), null);
-                cell(row, 16, num(d, "monthlyMa"), st.num2);
-                cell(row, 17, num(d, "quarterlyMa"), st.num2);
-                cell(row, 18, num(d, "annualMa"), st.num2);
-                cell(row, 19, txt(d, "monthlyConfirmation"), null);
-                cell(row, 20, txt(d, "quarterlyConfirmation"), null);
-                cell(row, 21, txt(d, "annualConfirmation"), null);
-                cell(row, 22, num(d, "kValue"), st.num2);
-                cell(row, 23, num(d, "dValue"), st.num2);
-                cell(row, 24, num(d, "fxPercentile"), st.num2);
-                cell(row, 25, txt(d, "underlyingCurrency"), null);
-                cell(row, 26, bool(d, "dataComplete"), null);
-                cell(row, 27, txt(d, "timingLabel"), null);
-                cell(row, 28, num(d, "ma60BiasPercent"), st.num2);
-                cell(row, 29, num(d, "week52Position"), st.num2);
-                cell(row, 30, num(d, "etfPremiumPct"), st.num2);
-                cell(row, 31, list(d, "reasons"), null);
-                cell(row, 32, list(d, "risks"), null);
-                cell(row, 33, list(d, "counterTrendReasons"), null);
-                cell(row, 34, list(d, "counterTrendRisks"), null);
+                rows.add(Arrays.asList(
+                        gen, txt(d, "stockCode"), txt(d, "stockName"), txt(d, "market"),
+                        txt(d, "assetClass"), boolVal(d, "held"), boolVal(d, "distributionAdjusted"),
+                        txt(d, "action"), txt(d, "actionLabel"), num(d, "score"),
+                        txt(d, "counterTrendState"), txt(d, "counterTrendLabel"),
+                        num(d, "price"), num(d, "changePercent"),
+                        txt(d, "priceUpdatedAt"), txt(d, "asOfDate"),
+                        num(d, "monthlyMa"), num(d, "quarterlyMa"), num(d, "annualMa"),
+                        txt(d, "monthlyConfirmation"), txt(d, "quarterlyConfirmation"),
+                        txt(d, "annualConfirmation"), num(d, "kValue"), num(d, "dValue"),
+                        num(d, "fxPercentile"), txt(d, "underlyingCurrency"), boolVal(d, "dataComplete"),
+                        // Task 264 的四欄（index 27–30）；缺欄位時 txt()→""、num()→null，與 main 的 cell() 一致
+                        txt(d, "timingLabel"), num(d, "ma60BiasPercent"),
+                        num(d, "week52Position"), num(d, "etfPremiumPct"),
+                        listVal(d, "reasons"), listVal(d, "risks"),
+                        listVal(d, "counterTrendReasons"), listVal(d, "counterTrendRisks")));
             }
         }
-        autosize(sheet, headers.length);
+        // 逐列對齊上面的 headers（35 欄）。**headers／此清單／rows 三者長度與順序必須一致**——
+        // Task 264 插欄時這一串落在 git 衝突標記之外、被三方合併靜默保留成舊的 31 欄版，
+        // `ExportDoc.Table` 的 compact constructor 才在 runtime 擲長度不符。拆成多行就是為了讓下次看得見。
+        List<ExportDoc.Format> formats = List.of(
+                ExportDoc.Format.TEXT,      // 0  快照時間
+                ExportDoc.Format.TEXT,      // 1  代碼
+                ExportDoc.Format.TEXT,      // 2  名稱
+                ExportDoc.Format.TEXT,      // 3  市場
+                ExportDoc.Format.TEXT,      // 4  資產類別
+                ExportDoc.Format.BOOL_ZH,   // 5  持有
+                ExportDoc.Format.BOOL_ZH,   // 6  還原權息
+                ExportDoc.Format.TEXT,      // 7  動作
+                ExportDoc.Format.TEXT,      // 8  動作中文
+                ExportDoc.Format.NUM2,      // 9  分數
+                ExportDoc.Format.TEXT,      // 10 逆勢狀態
+                ExportDoc.Format.TEXT,      // 11 逆勢中文
+                ExportDoc.Format.NUM2,      // 12 現價
+                ExportDoc.Format.NUM2,      // 13 漲跌%
+                ExportDoc.Format.TEXT,      // 14 行情更新
+                ExportDoc.Format.TEXT,      // 15 完成日K
+                ExportDoc.Format.NUM2,      // 16 MA20
+                ExportDoc.Format.NUM2,      // 17 MA60
+                ExportDoc.Format.NUM2,      // 18 MA240
+                ExportDoc.Format.TEXT,      // 19 月線確認
+                ExportDoc.Format.TEXT,      // 20 季線確認
+                ExportDoc.Format.TEXT,      // 21 年線確認
+                ExportDoc.Format.NUM2,      // 22 K
+                ExportDoc.Format.NUM2,      // 23 D
+                ExportDoc.Format.NUM2,      // 24 匯率分位
+                ExportDoc.Format.TEXT,      // 25 底層幣別
+                ExportDoc.Format.BOOL_ZH,   // 26 資料完整
+                ExportDoc.Format.TEXT,      // 27 時機          ┐ Task 264
+                ExportDoc.Format.NUM2,      // 28 季線乖離%      │
+                ExportDoc.Format.NUM2,      // 29 52週位置      │
+                ExportDoc.Format.NUM2,      // 30 折溢價%       ┘
+                ExportDoc.Format.LIST_LINES,// 31 支持訊號
+                ExportDoc.Format.LIST_LINES,// 32 風險提醒
+                ExportDoc.Format.LIST_LINES,// 33 逆勢條件
+                ExportDoc.Format.LIST_LINES // 34 逆勢風險
+        );
+        return new ExportDoc.Sheet("個股決策",
+                List.of(new ExportDoc.Table(null, null, headers, true, false, false, formats, rows)),
+                headers.size());
     }
 
     // ── JsonNode 取值 helper（容忍缺欄位）──────────────────────────────
@@ -226,60 +231,29 @@ public class TradingRadarExportService {
         return v.isNumber() ? v.decimalValue() : null;
     }
 
-    private static String bool(JsonNode n, String field) {
+    /**
+     * boolean 欄的<b>語意值</b>（Requirement 55 / Task 271）：缺值回 {@code null}。
+     * Excel 的「是」／「否」呈現交給 {@code Format.BOOL_ZH}、JSON 則輸出 boolean——
+     * 既有 {@link #bool} 把兩者壓成同一個字串，照用會讓 JSON 拿到 "是" 而違反本需求的驗收條件。
+     */
+    private static Boolean boolVal(JsonNode n, String field) {
         JsonNode v = n.path(field);
-        return (v.isMissingNode() || v.isNull()) ? "" : (v.asBoolean() ? "是" : "否");
+        return (v.isMissingNode() || v.isNull()) ? null : v.asBoolean();
     }
 
-    private static String list(JsonNode n, String field) {
+    /**
+     * 陣列欄的<b>語意值</b>：非陣列回 {@code null}。
+     * Excel 的 {@code \n} 串接交給 {@code Format.LIST_LINES}、JSON 則輸出字串陣列。
+     */
+    private static List<String> listVal(JsonNode n, String field) {
         JsonNode v = n.path(field);
-        if (!v.isArray()) return "";
-        StringJoiner sj = new StringJoiner("\n");
-        v.forEach(e -> sj.add(e.asText()));
-        return sj.toString();
+        if (!v.isArray()) return null;
+        List<String> out = new ArrayList<>();
+        v.forEach(e -> out.add(e.asText()));
+        return out;
     }
 
-    // ── POI helper（比照 ExcelExportService 慣例）──────────────────────
-    private void cell(Row row, int col, Object value, CellStyle style) {
-        Cell c = row.createCell(col);
-        if (value == null) return;
-        if (value instanceof BigDecimal bd) c.setCellValue(bd.doubleValue());
-        else if (value instanceof Number nb) c.setCellValue(nb.doubleValue());
-        else c.setCellValue(value.toString());
-        if (style != null) c.setCellStyle(style);
-    }
 
-    private void autosize(Sheet sheet, int cols) {
-        for (int i = 0; i < cols; i++) sheet.autoSizeColumn(i);
-    }
 
-    private static class Styles {
-        final CellStyle head;
-        final CellStyle section;
-        final CellStyle warn;
-        final CellStyle num2;
 
-        Styles(Workbook wb) {
-            Font headFont = wb.createFont();
-            headFont.setBold(true);
-            head = wb.createCellStyle();
-            head.setFont(headFont);
-            head.setAlignment(HorizontalAlignment.CENTER);
-
-            Font secFont = wb.createFont();
-            secFont.setBold(true);
-            secFont.setFontHeightInPoints((short) 12);
-            section = wb.createCellStyle();
-            section.setFont(secFont);
-
-            Font warnFont = wb.createFont();
-            warnFont.setBold(true);
-            warnFont.setColor(IndexedColors.RED.getIndex());
-            warn = wb.createCellStyle();
-            warn.setFont(warnFont);
-
-            num2 = wb.createCellStyle();
-            num2.setDataFormat(wb.createDataFormat().getFormat("#,##0.00"));
-        }
-    }
 }

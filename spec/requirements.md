@@ -1768,3 +1768,84 @@ rclone config reconnect GDriveOutput: --drive-auth-url "https://accounts.google.
 - [ ] **必須把新設定表加進啟動自檢的「全庫是否有任一列啟用 Drive」查詢**（Requirement 52）：該查詢目前是**八張表**的 UNION，是啟動時 L3 探測（`rclone lsd`）的前置閘門。漏加的話，只在本頁啟用 Drive 的部署遇到 rclone token 失效或 remote 被改名時，重啟會判定「全庫無人啟用」而**整個跳過探測、不噴任何 WARN**——正是 Requirement 52 要消除的那種「明天早上才發現全掛」。此為**假綠燈**，必須有測試守門（斷言該查詢的 SQL 確實含新表名）。
 - [ ] **排程列表頁不新增項目**：本需求不新增任何 `@Scheduled`（匯出掛在既有觸發路徑內），故「公開資訊 → 排程列表」（Requirement 36 / `SchedulePublicBffController.JOBS`）不需新增項目。
 - [ ] **測試**：（a）**跨午夜的美股交易日不得被切開**（本需求修正的那個缺陷的探針）——同一個美股交易日的兩筆觸發，`created_at` 分別落在台北 D 日 21:30 與 D+1 日 00:00，**必須同時出現在同一個檔案**；另驗視窗起點為 `今日 − 2 天` 的 00:00（落在起點前一秒的觸發不得入檔）；（b）**owner 隔離**——A 的觸發不得出現在 B 的檔案，且 join 兩路徑（`alert_id` 與 `group_id`）都要涵蓋；（c）**群組觸發**的條件文案為 `buildGroupLabel` 的合併結果（`" 且 "` 串接）而非單條；（d）**未啟用**時完全不產檔；（e）**匯出失敗不影響** `stock_alert_trigger` 寫入與 email enqueue；（f）**Drive 合併去抖**三點缺一不可——(f1) 60 秒內連續 N 次觸發只呼叫一次 `copyTo`；(f2) **尾端補跑**：兩次觸發相隔 5 秒、之後不再有任何觸發，間隔到期後**必須**發生第二次 `copyTo`（這條是上面那個資料遺失寫法的唯一探針，缺了它壞實作也會全綠）；(f3) 被合併的那幾次 `gdrive_last_run_at` 與 `gdrive_last_status` **值保持不變**（不只是「不得寫成失敗」）；（g）rclone 一律以 `RcloneClient` 介面替身注入、不實際連網；（h）既有警示觸發行為（`last_triggered_*` 覆寫、email、24h cooldown）須有回歸測試確認未被改動。
+
+### Requirement 55: 所有自動匯出的檔案一律同時產出 JSON 與 Excel 兩份（主檔名相同）
+
+**User Story:** 作為使用者，我希望系統自動產生的每一份匯出檔，都同時有 `.json` 與 `.xlsx` 兩份、主檔名完全相同，讓我可以自己打開 Excel 看，也可以讓其他程式直接讀 JSON，不必為了換一種格式去改設定、也不必等下一次排程。
+
+**背景：** 目前十個自動匯出點的格式是歷史累積出來的，彼此不一致——七個只有 Excel、兩個只有 JSON、交易日曆則要使用者在 json／excel 之間**二選一**。這造成兩件事：（a）想用程式消費 Excel-only 的那七份，只能解析 xlsx；（b）想用眼睛看 JSON-only 的那兩份，只能自己轉檔。使用者的決定是**不要再選**：兩種都給。
+
+**十個自動匯出點的現況與目標（本需求的完整範圍，不得只做一部分）：**
+
+| # | 匯出 | 主檔名 | 現況 | 目標 |
+|---|---|---|---|---|
+| 1 | 歷年資產／當前即時資產（Requirement 34） | `資產總覽_{ownerId}_{yyyyMMdd}` | 僅 `.xlsx` | 加 `.json` |
+| 2 | 已實現損益（Requirement 39） | `已實現損益_{ownerId}_{yyyyMMdd}` | 僅 `.xlsx` | 加 `.json` |
+| 3 | 台幣兌美元匯率（Requirement 42） | `台幣兌美元_{ownerId}_{yyyyMMdd}` | 僅 `.xlsx` | 加 `.json` |
+| 4 | 大盤指數日線（Requirement 45） | `{指數標籤}_{ownerId}_{yyyyMMdd}` | 僅 `.xlsx` | 加 `.json` |
+| 5 | 油價金價（Requirement 41） | `油價金價_{ownerId}_{yyyyMMdd}` | 僅 `.xlsx` | 加 `.json` |
+| 6 | 資產交易紀錄（Requirement 49） | `交易紀錄_{ownerId}{_排程名}_{yyyyMMdd}` | 僅 `.xlsx` | 加 `.json` |
+| 7 | 今日交易雷達（Requirement 48） | `交易雷達_{ownerId}_{yyyyMMdd}` | 僅 `.xlsx` | 加 `.json` |
+| 8 | 交易日曆（Requirement 37） | `交易日曆_{年}` | json **或** xlsx（二選一） | 一律兩份 |
+| 9 | 警示觸發（Requirement 54） | `alert_triggers_{ownerId}` | 僅 `.json` | 加 `.xlsx` |
+| 10 | 爬蟲公開資訊（Requirement 38／50） | `public_info_{yyyy-MM-dd}` | 僅 `.json` | 加 `.xlsx` |
+
+> **明確排除：資料庫備份 `*.dump`（`BackupService`，每交易日 15:30／07:00／週日 05:00）不在本需求範圍內。** 三個理由，任一個單獨成立即足夠：
+> 1. 那是 `pg_dump --format=custom` 的**二進位還原檔**，不是報表匯出，內容無「表格」語意可轉成 Excel；強行轉換只會產生一份不能拿來還原的假備份。
+> 2. 它**從不落在 `EXPORT_OUTPUT_DIR`**——落點是容器內 `/tmp`，上傳後即刪，本機不留。本需求的十個匯出點全部寫在使用者設定的輸出資料夾裡，兩者是不同的機制。
+> 3. 它上傳到**與匯出完全不同的 rclone remote**（備份用 remote，非 `GDRIVE_OUTPUT_REMOTE`）。
+>
+> **這個排除是作者代使用者做的判斷。** 使用者的原話是「所有自動排程匯出的檔案」；若使用者其實希望備份檔也一併有 Excel 版本，請另開需求——本需求不涵蓋，也不會在實作中順手加上。
+
+> **第 9、10 項雖然不是「每天某時刻跑一次」，仍在範圍內。** 警示觸發是事件驅動（Requirement 54）、爬蟲公開資訊是每輪爬取後產出（Requirement 38），但兩者都是**系統自動產生、非使用者按鈕觸發**的匯出檔，使用者的「所有自動匯出的檔案」涵蓋它們。
+
+**Acceptance Criteria:**
+
+- [ ] **主檔名完全相同，只差副檔名**：同一次匯出產生的兩份檔，去掉 `.json`／`.xlsx` 之後的字串必須逐字元相同（含 ownerId、日期、排程名後綴、指數標籤）。**不得**為了區分而在其中一份加上 `_json`／`_excel` 之類的後綴，也不得把兩份寫進不同子目錄。
+- [ ] **兩份檔必須來自同一次資料查詢**：一次匯出＝查一次資料 → 產生一份中介文件 → render 成兩種格式。**不得**為了實作方便而讓 JSON 與 Excel 各自跑一次查詢。理由是實質的：第 1 項（當前即時資產）與第 7 項（交易雷達）吃的是 Redis 即時價，兩次查詢之間價格會變，使用者會拿到兩份數字對不起來的檔案，而且無從得知哪一份才是對的。這也是 CLAUDE.md「同義欄位、同一資料來源」在檔案層級的延伸。
+- [ ] **JSON 必須是語意化結構，不是 Excel 的逐格鏡像**：以「工作表 → 區塊 → 具名欄位」表達，資料列為物件陣列、key 是該欄的中文表頭，例：
+
+  ```json
+  {
+    "title": "資產總覽",
+    "generatedAt": "2026-08-01T08:00:00+08:00",
+    "sheets": [{
+      "name": "當前即時資產",
+      "meta": { "基準快照日期": "2026-08-01", "美元匯率": 32.1054, "即時總資產": 12345678.9 },
+      "tables": [
+        { "name": "銀行存款", "rows": [{ "銀行": "國泰世華", "存款類型": "定存", "幣別": "TWD", "原幣金額": 1000000, "台幣金額": 1000000, "備註": null }] }
+      ]
+    }]
+  }
+  ```
+
+  **不得**輸出 `rows: [["國泰世華","定存",…]]` 這種依位置解析的陣列——那等於要求下游自己去數第幾格，欄位一改就靜默錯位。
+- [ ] **JSON 的數值一律是 JSON number、null 一律是 null**：`BigDecimal` 直接輸出為數字並**保留資料庫原精度**，不得套用 Excel 的顯示格式（千分位、固定兩位小數、百分比符號）；日期輸出 ISO-8601 字串：`LocalDate` → `yyyy-MM-dd`；**`LocalDateTime` → `yyyy-MM-dd'T'HH:mm:ss`（不加時區位移——它本來就沒有時區資訊，加位移等於憑空捏造）**；只有本身帶時區的值（例如檔案層級的 `generatedAt`）才輸出 `+08:00`。**沒有值就是 `null`**，不得以 `0`、`"-"` 或空字串充數（同 Requirement 54 對警示觸發 JSON 的既有規定；唯一例外是上一條登錄的交易雷達 `txt()` 欄位）。Excel 那一份的顯示格式維持現況不變——**顯示格式只影響 Excel，不得滲進 JSON**。
+- [ ] **既有 Excel 的內容不得減損，判準是「逐列逐格 ＋ 儲存格樣式」**：重構到中介模型之後，七份既有 Excel 的**分頁名稱、分頁順序、列索引、每一格的值、每一格的 `CellStyle`（粗體／字級／`dataFormat` 字串）、空白列的位置、`autoSizeColumn` 的欄數**必須與改動前一致。這七份已經在使用者的目錄裡累積了歷史檔案，欄位漂移會讓新舊檔無法並排比對。**手動下載端點（各匯出頁的「立即匯出」與下載 API）產出的 Excel 同樣不得改變**——它們與排程走同一個 builder。
+  - **「只比對表頭文字與資料列數」不算數**：本需求已實測到兩個只有逐格樣式比對才抓得到的陷阱——(a) `ExcelExportService.Styles.section` 是**粗體 13pt**、`TradingRadarExportService.Styles.section` 是**粗體 12pt**，把兩者當「同一種 section 樣式」合併會靜默把交易雷達的標題列字級改掉；(b) 既有 `cell(row, i, null, style)` 是 `row.createCell(i)` **之後**才 `if (value == null) return;`，產生的是**存在的 BLANK 格**，不是「沒有這一格」，renderer 若改成「null 就不建格」會讓 `row.getLastCellNum()` 與既有不同。
+  - **例外必須具名**：若某處確實無法無損還原，**不得**默默改掉，必須在本需求列出具名例外（哪一個分頁、哪一列、差異是什麼），並同步改該處的回歸測試斷言。「宣稱保留版面、實際改變版面」是本需求明文禁止的。
+  - **已登錄的具名例外（僅此三則，新增任何一則都必須寫進這裡）：**
+    1. **交易雷達（第 7 項）三分頁中原本由 `TradingRadarExportService.txt()` 取值的字串欄，JSON 缺值輸出 `""` 而非 `null`。** 理由：既有 `txt()` 缺值回 `""`，Excel 那一格是**空字串格**；若為了滿足「缺值就是 null」而在 doc 裡放 `null`，Excel 會變成 BLANK 格，違反本條的 Excel 零回歸。兩害相權取其輕——保 Excel、JSON 這幾欄接受 `""`。（同服務的 `bool()`／`list()` **不適用**本例外：它們改放語意值後，Excel 側由 `Format.BOOL_ZH`／`LIST_LINES` 維持既有呈現、JSON 側輸出 `null`／boolean／陣列，兩邊都與既有一致。）
+    2. **既有刻意寫空字串 `""` 而非 null 的欄位，JSON 也輸出 `""`。** 實測共六欄：已實現損益的「交易日期」（`ExcelExportService.java:929`）、交易紀錄的「交易日期」（`:314`）、「當前即時資產」分頁的銀行存款「銀行」（`:699`）／基金「銀行」（`:719`）／股票「券商」（`:764`）／股票「交易日期」（`:785`）。理由與第 1 則相同：既有 Excel 那幾格是**空字串格**，改放 null 會變 BLANK 格而違反 Excel 零回歸。故 JSON 型別的測試斷言（「無值欄為 JSON null 非空字串」）**必須排除這六欄**。
+    3. **牆鐘時間戳欄位不做值相等比對。** 「匯出時間」「generatedAt」「exportedAt」這類 `LocalDateTime.now(...)` 的格與欄位，逐列逐格／逐 byte 比對時改以「存在 ＋ 型別 ＋ 樣式 ＋ 符合格式正則」取代值相等。理由：backend 全樹沒有 `Clock` 注入、也沒有 `mockStatic` 的既有用法，值相等的斷言寫不出來。**本需求不引入 `Clock` 注入**——那是跨十個匯出點的獨立重構。
+- [ ] **既有兩份 JSON 的內容與檔名一律不得變動**：`public_info_{yyyy-MM-dd}.json` 是 SRPP 退休規劃專案的輸入契約（Requirement 38 已明列「檔名不開放設定——SRPP 依此檔名取用」），`alert_triggers_{ownerId}.json` 是 Requirement 54 對下游程式的契約。本需求對這兩項**只新增一份 `.xlsx`**，既有 JSON 的欄位、結構、產生時機全部照舊。新增的 Excel 由既有 JSON payload 轉出，**不得為了做 Excel 而回頭改動 JSON 的形狀**。
+- [ ] **交易日曆的「json／excel 二選一」設定停用**：前端 `TradingCalendarView.vue` 的格式 radio 移除、`exportToDir` 不再吃 format 參數、排程一律產兩份。DB 欄位 `trading_calendar_export_schedule.format` **保留不刪**（避免不可逆的 drop column），但**程式一律不再讀寫它**，並在 design 與 entity 上標記 deprecated。既有列殘留的 `json`／`excel` 值不影響行為。
+- [ ] **Google Drive 同步兩份都要上傳**（Requirement 50／51 的既有模型不變）：啟用 Drive 的匯出點，本機兩份都寫成功後才上傳，**兩份都要上傳到同一個 Drive 子路徑**。上傳仍為 best-effort、不擲例外、不 rollback 本機檔；「本機成功、Drive 失敗」仍是可分辨的狀態。**只有一份上傳成功時，狀態欄必須分別寫明哪一份成功、哪一份失敗**，不得合併成一個看不出是哪份的「部分成功」。
+- [ ] **狀態欄合併後必須截斷，且截斷不得吃掉關鍵資訊**：`last_run_status` 為 `varchar(500)`、`gdrive_last_status` 為 `varchar(512)`（實測自運行中 DB）。兩份檔的落點合併寫入後很容易超長（中文檔名 ＋ 兩個絕對路徑），**必須先截斷再寫入**，否則 JPA save 會擲 `DataException` 而讓整輪匯出被判失敗——**本機檔其實已經寫成功了**，這是最典型的假失敗。截斷策略：優先保留「成功／失敗」與副檔名標記，路徑過長時截尾並加 `…`。
+- [ ] **落檔順序與原子性**：每一份檔各自沿用既有的「同目錄 tmp ＋ `ATOMIC_MOVE`」寫法（`ExportScheduleService`／`RealizedGainExportScheduleService` 目前是直接 `Files.write`，本需求一併補上 tmp＋atomic move，理由同 Requirement 54：下游程式可能正在讀）。**跨兩個檔案的原子性做不到，明文接受**：極短暫的時間窗內可能只有一份是新的。**不得**為此引入「兩份都成功才算成功、否則刪掉已寫的那一份」——刪檔路徑是新的風險，且會讓使用者在磁碟滿的情況下連舊檔都失去。
+- [ ] **一份失敗不得讓另一份不寫**：JSON render 失敗（例如某個值無法序列化）不得中斷 Excel 的寫入，反之亦然。兩份都嘗試、各自記錄結果；狀態欄如實反映「Excel 成功、JSON 失敗」這種部分成功。**絕不**因為其中一份失敗就讓整輪匯出擲例外中止——第 9 項（警示觸發）的匯出掛在 Redis 訂閱者執行緒上，擲出去會影響整條即時價管線（Requirement 54 已明列）。
+  - **唯一的具名例外是第 10 項（爬蟲公開資訊）**：本機 `public_info_*.json` 是 SRPP 的權威資料來源，既有實作以 `writtenFile` 變數守門（JSON 沒寫成功就完全不上傳）。故該匯出點的順序是**先 JSON、後 xlsx**，且 **JSON 寫失敗時 xlsx 不寫**；反向（xlsx 失敗）則 JSON 照寫照上傳。這是刻意的例外，不適用於其餘九個匯出點。
+- [ ] **檔名的路徑逃脫重驗必須搬進共用元件，不得隨舊落檔實作一起被刪**：`AssetTransactionExportScheduleService.writeToDir` 目前有一道既有防線——排程名 `name` 會進檔名，故落點求出後重驗 `file.normalize().startsWith(dir)`，理由是「DB 值可能被繞過 API 以 psql 直改」。本需求要刪掉各服務自己的落檔實作，**這道防線必須先搬進共用的雙檔落地元件**（`baseName` 不得含 `/`、`\`、`..` 或任何路徑分隔字元；落點求出後重驗仍在 `dir` 內，為假即擲 `IllegalArgumentException`），否則會在重構中靜默弄丟一道安全檢查。
+- [ ] **爬蟲公開資訊的 Excel 產在 `external-materials-service`**：該匯出點在 ext service（`NewsPoller`），不在 backend。三個 Maven 專案無父 pom、不共用程式碼（Requirement 50 已就此定案），故 ext 端需自行引入 `poi-ooxml` 並自帶一份極小的 JSON→Excel 轉換。**不得**為此把 backend 的匯出元件搬成共用 module——那是為兩處數十行程式碼建 module，Requirement 50 已否決過同一個提案。
+- [ ] **排程列表頁不新增項目，但九條說明文字必須同步改寫**：本需求不新增、不移除、不調整任何 `@Scheduled` 的 cron，故「公開資訊 → 排程列表」（Requirement 36 / `SchedulePublicBffController.JOBS`）**不新增也不移除項目**。**但「不動 `@Scheduled` ⇒ `JOBS` 不必動」這個推論在本專案已經被否決過一次**（見 design.md Requirement 48 段落：Task 260 後交易雷達那一筆的 `description` 變成假的，必須改寫），本需求不得再犯同一個錯。實測 `SchedulePublicBffController.java` 有**九條** `description` 會在本需求落地後變成假的，全部必須改寫：
+  - `:71`／`:77`／`:80`／`:83`／`:86`／`:101`／`:104` 寫「產出 Excel（到指定目錄）」→ 改為「同時產出 JSON 與 Excel 兩份（主檔名相同）」
+  - `:74` 寫「即**以其格式（JSON／Excel）**產出當前年度交易日曆」→ 該子句整段移除（二選一已被本需求拆掉）
+  - `:188` 寫「每輪輸出公開資訊 **JSON** 至本機設定資料夾」→ 改為「JSON 與 Excel 兩份」
+  **`:86` 的原文是「產出所選指數的開高低收 Excel 到指定目錄」——它不含「產出 Excel」四字，字面搜尋會漏掉它；`:188` 則根本不含 `Excel` 二字。** 故驗收**不能用「舊文案樣式歸零」當判準**（新文案本身就含「產出 JSON 與 Excel」，任何鎖舊文案的樣式改完後都還是會命中新文案，永遠回不了 0）。
+  **改用「含格式字樣的那幾條，是否全部帶上新措辭」當判準**，且**九條的新措辭必須統一含 `同時產出 JSON 與 Excel 兩份` 這個確切子字串**：
+  ```bash
+  grep -E 'Excel|輸出公開資訊 JSON' bff/src/main/java/com/steven/assets/bff/schedulelist/SchedulePublicBffController.java | grep -vc '同時產出 JSON 與 Excel 兩份'
+  ```
+  改動前為 **9**、改完後應為 **0**（已實測）。這個判準與測試端的 `allMatch` 斷言同義，兩者不會互斥。
+- [ ] **前端各匯出頁的檔名說明文字須同步**：目前多頁在設定卡寫死「檔名 `xxx.xlsx`」或「`交易日曆_{年}.json`」。改為明示「會同時產生 `.json` 與 `.xlsx` 兩份、主檔名相同」。文案漂移會讓使用者以為只有一份、進而懷疑另一份是殘留垃圾。
+- [ ] **測試**：（a）**主檔名一致性**——每個匯出點各一條斷言，取兩個落點檔名去掉副檔名後 `assertEquals`；（b）**單次查詢**——以 mock 驗證「本需求新引入的那一層」（`xxxDoc(...)`）在一次匯出中**恰好被呼叫一次**，這是「兩份數字對不起來」的唯一探針，第 1、7 項的即時價來源尤其必要。**探針必須對準新引入的那一層，不得對準既有的資料來源方法**：實測交易日曆的 `marketDataService.getTwHolidays(year)` 在**改動前就已經被呼叫兩次**（`buildDays` 一次、`buildJson` 內組 `holidays` 區塊再一次），寫成 `times(1)` 會永遠紅，逼實作者去改 `buildJson`——而那正是本需求明文保護的對外契約。凡是斷言既有方法呼叫次數的探針，一律先跑改動前的版本確認基準次數，再把該次數寫進斷言並註明「這是既有行為」；（c）**既有 Excel 零回歸**——七份既有 Excel 各自**逐列逐格**比對：分頁名、列索引、每格的值、每格 `CellStyle` 的粗體／字級／`dataFormat`、空白列位置、`autoSizeColumn` 欄數，與重構前一致。基準以改動前的 git 版本產出的 workbook 為準。**特別必須有一條斷言 section 標題列的 `getCellStyle().getFont().getFontHeightInPoints()`**——交易雷達是 12pt、其餘七份是 13pt，只比對文字的測試抓不到字級被統一掉；（d）**既有 JSON 零回歸**——`public_info` 與 `alert_triggers` 的 JSON payload 逐欄位比對未變；（e）**JSON 型別**——數值為 number 非字串、缺值為 null 非 `0`／空字串、`BigDecimal` 精度未被顯示格式截掉。**斷言須排除上面登錄的具名例外一與二那幾欄**（交易雷達 `txt()` 欄位、六個既有寫 `""` 的欄位），它們的缺值就是 `""`；（f）**部分失敗**——注入一個會讓 JSON render 失敗的值，斷言 Excel 仍寫出且狀態欄如實記錄，且方法未擲例外。**這條的落腳點是雙檔落地元件的簽章必須允許 `jsonBytes`／`xlsxBytes` 為 `null`**（＝該份 render 失敗）：render 發生在呼叫端、在該元件之前，簽章若不允許 null，render 擲例外時根本走不到落檔那一步，本條就沒有任何實作承接；（g）**狀態欄截斷**——以超長子路徑構造超過 500／512 字元的狀態字串，斷言寫入不擲 `DataException` 且保留成功／失敗標記；（h）**Drive 兩份**——以 `RcloneClient` 替身斷言一次匯出呼叫 `copyTo` 兩次、目標子路徑相同、檔名分別為兩個副檔名，且僅一份成功時狀態欄能分辨是哪一份。

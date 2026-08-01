@@ -237,7 +237,7 @@
             按「儲存設定」後生效
           </span>
           <br />
-          檔名固定為 <code>public_info_&lt;日期&gt;.json</code>（SRPP 退休規劃專案依此檔名取用，故不開放修改）；
+          檔名固定為 <code>public_info_&lt;日期&gt;.json</code> 與 <code>.xlsx</code> <strong>兩份</strong>（主檔名相同；SRPP 退休規劃專案依 .json 這一份取用，故不開放修改）；
           同日多輪覆寫、跨日產生新檔。
           <template v-if="exportPath.updatedAt">
             <br />上次修改：{{ exportPath.updatedAt }}

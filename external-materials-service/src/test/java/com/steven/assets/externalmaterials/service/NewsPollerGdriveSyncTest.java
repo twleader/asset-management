@@ -53,7 +53,9 @@ class NewsPollerGdriveSyncTest {
             mock(CrawlerScheduleQuery.class),
             exportPathQuery,
             uploader,
-            new ObjectMapper());
+            new ObjectMapper(),
+            // Task 272：多一個 xlsx writer；本測試只驗 Drive 同步，注入真實實例即可
+            new PublicInfoXlsxWriter(new ObjectMapper()));
 
     private Path writtenFile(Path dir) throws IOException {
         Path f = dir.resolve("public_info_" + TODAY + ".json");
@@ -75,7 +77,7 @@ class NewsPollerGdriveSyncTest {
         when(exportPathQuery.gdriveConfig(anyString()))
                 .thenReturn(CrawlerExportPathQuery.GdriveConfig.disabled());
 
-        poller.syncToGdrive(writtenFile(dir), TODAY, "test");
+        poller.syncToGdrive(writtenFile(dir), null, TODAY, "test");
 
         verifyNoInteractions(uploader);
         verify(exportPathQuery, never()).recordGdriveResult(anyString(), anyString());
@@ -87,7 +89,7 @@ class NewsPollerGdriveSyncTest {
         when(exportPathQuery.gdriveConfig(anyString())).thenThrow(new RuntimeException("DB down"));
 
         Path file = writtenFile(dir);
-        assertThatCode(() -> poller.syncToGdrive(file, TODAY, "test")).doesNotThrowAnyException();
+        assertThatCode(() -> poller.syncToGdrive(file, null, TODAY, "test")).doesNotThrowAnyException();
 
         verifyNoInteractions(uploader);
         verify(exportPathQuery, never()).recordGdriveResult(anyString(), anyString());
@@ -103,7 +105,7 @@ class NewsPollerGdriveSyncTest {
         when(uploader.upload(eq(file), eq(SUBPATH), eq("public_info_" + TODAY + ".json")))
                 .thenReturn("GDriveOutput:" + SUBPATH + "/public_info_" + TODAY + ".json");
 
-        poller.syncToGdrive(file, TODAY, "test");
+        poller.syncToGdrive(file, null, TODAY, "test");
 
         verify(exportPathQuery).recordGdriveResult(anyString(), contains("成功："));
         assertThat(file).exists();
@@ -118,7 +120,7 @@ class NewsPollerGdriveSyncTest {
         when(uploader.upload(any(), anyString(), anyString()))
                 .thenThrow(new RuntimeException("rclone 上傳逾時（45 秒）"));
 
-        assertThatCode(() -> poller.syncToGdrive(file, TODAY, "test")).doesNotThrowAnyException();
+        assertThatCode(() -> poller.syncToGdrive(file, null, TODAY, "test")).doesNotThrowAnyException();
 
         verify(exportPathQuery).recordGdriveResult(anyString(), contains("失敗："));
         assertThat(file).exists();
@@ -133,7 +135,7 @@ class NewsPollerGdriveSyncTest {
         doThrow(new RuntimeException("DB down"))
                 .when(exportPathQuery).recordGdriveResult(anyString(), anyString());
 
-        assertThatCode(() -> poller.syncToGdrive(file, TODAY, "test")).doesNotThrowAnyException();
+        assertThatCode(() -> poller.syncToGdrive(file, null, TODAY, "test")).doesNotThrowAnyException();
 
         assertThat(file).exists();
     }
@@ -142,7 +144,7 @@ class NewsPollerGdriveSyncTest {
     void 本機寫檔失敗時跳過上傳但仍寫狀態欄() {
         enabled(SUBPATH);
 
-        poller.syncToGdrive(null, TODAY, "test");
+        poller.syncToGdrive(null, null, TODAY, "test");
 
         verify(uploader, never()).upload(any(), anyString(), anyString());
         verify(exportPathQuery).recordGdriveResult(anyString(), contains("跳過"));
@@ -155,7 +157,7 @@ class NewsPollerGdriveSyncTest {
         when(uploader.isAvailable()).thenReturn(false);
         when(uploader.remoteName()).thenReturn("GDriveOutput");
 
-        poller.syncToGdrive(writtenFile(dir), TODAY, "test");
+        poller.syncToGdrive(writtenFile(dir), null, TODAY, "test");
 
         verify(uploader, never()).upload(any(), anyString(), anyString());
         verify(exportPathQuery).recordGdriveResult(anyString(), contains("跳過"));
@@ -175,7 +177,7 @@ class NewsPollerGdriveSyncTest {
             when(uploader.isAvailable()).thenReturn(true);
             when(uploader.remoteName()).thenReturn("GDriveOutput");
 
-            poller.syncToGdrive(file, TODAY, "test");
+            poller.syncToGdrive(file, null, TODAY, "test");
 
             verify(uploader, never()).upload(any(), anyString(), anyString());
             verify(exportPathQuery).recordGdriveResult(anyString(), contains("跳過"));
@@ -189,8 +191,47 @@ class NewsPollerGdriveSyncTest {
         Path file = writtenFile(dir);
         when(uploader.upload(any(), anyString(), anyString())).thenReturn("GDriveOutput:投資理財/a..b/x.json");
 
-        poller.syncToGdrive(file, TODAY, "test");
+        poller.syncToGdrive(file, null, TODAY, "test");
 
         verify(uploader).upload(eq(file), eq("投資理財/a..b"), eq("public_info_" + TODAY + ".json"));
+    }
+
+    // ===== 雙格式（Requirement 55 / Task 272）=====
+
+    @Test
+    void 兩份都存在時上傳兩份且狀態能分辨哪一份(@TempDir Path dir) throws IOException {
+        when(exportPathQuery.gdriveConfig(anyString()))
+                .thenReturn(new CrawlerExportPathQuery.GdriveConfig(true, SUBPATH));
+        when(uploader.isAvailable()).thenReturn(true);
+        when(uploader.upload(any(), anyString(), anyString())).thenReturn("GDriveOutput:x");
+
+        Path json = writtenFile(dir);
+        Path xlsx = dir.resolve("public_info_" + TODAY + ".xlsx");
+        java.nio.file.Files.writeString(xlsx, "xlsx");
+
+        poller.syncToGdrive(json, xlsx, TODAY, "test");
+
+        // 兩份都上傳，且檔名分別為兩個副檔名
+        org.mockito.ArgumentCaptor<String> names = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(uploader, org.mockito.Mockito.times(2))
+                .upload(any(), org.mockito.ArgumentMatchers.eq(SUBPATH), names.capture());
+        assertThat(names.getAllValues()).anyMatch(n -> n.endsWith(".json")).anyMatch(n -> n.endsWith(".xlsx"));
+        verify(exportPathQuery).recordGdriveResult(anyString(),
+                org.mockito.ArgumentMatchers.matches("(?s)xlsx 成功：.*／json 成功：.*"));
+    }
+
+    @Test
+    void xlsx沒產出時JSON那一份仍照常上傳(@TempDir Path dir) throws IOException {
+        // JSON 是 SRPP 的契約，不能因為 Excel 壞掉就不同步
+        when(exportPathQuery.gdriveConfig(anyString()))
+                .thenReturn(new CrawlerExportPathQuery.GdriveConfig(true, SUBPATH));
+        when(uploader.isAvailable()).thenReturn(true);
+        when(uploader.upload(any(), anyString(), anyString())).thenReturn("GDriveOutput:x");
+
+        poller.syncToGdrive(writtenFile(dir), null, TODAY, "test");
+
+        verify(uploader, org.mockito.Mockito.times(1)).upload(any(), anyString(), anyString());
+        verify(exportPathQuery).recordGdriveResult(anyString(), contains("json 成功："));
+        verify(exportPathQuery).recordGdriveResult(anyString(), contains("xlsx 跳過："));
     }
 }

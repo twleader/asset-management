@@ -52,7 +52,15 @@ public class TradingCalendarExportSchedule {
     @Builder.Default
     private Integer runMinute = 0;
 
-    /** 匯出格式：json / excel */
+    /**
+     * 匯出格式：json / excel。
+     *
+     * @deprecated Requirement 55（Task 271）起<b>一律同時產出兩份</b>，本欄位已停用、程式一律不讀寫。
+     *             欄位保留僅為避免不可逆的 drop column；DB 上它是 {@code NOT NULL} ＋ CHECK 約束，
+     *             故 <b>預設值必須留著</b>（移除或改成會寫入 null 的形式，新增列會違反 NOT NULL）。
+     *             既有列殘留的 {@code json}／{@code excel} 值不影響行為，不需要 migration 清空。
+     */
+    @Deprecated
     @Column(nullable = false, length = 10)
     @Builder.Default
     private String format = "json";

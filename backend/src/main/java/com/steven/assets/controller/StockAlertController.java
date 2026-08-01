@@ -180,8 +180,11 @@ public class StockAlertController {
                     ? "近 " + exportService.windowDays() + " 天尚無觸發，已寫出空的觸發清單（可用於驗證落點）"
                     : "已匯出近 " + exportService.windowDays() + " 天共 " + r.triggerCount() + " 筆觸發";
             return new StockAlertExportDto.RunNowResponse(
-                    r.file().toString(), r.sizeBytes(), r.triggerCount(), msg,
-                    r.gdrivePath(), r.gdriveStatus());
+                    // 既有欄位維持指向 .json（本頁的對外契約）；xlsx 那份走新增的三欄
+                    r.file() == null ? null : r.file().toString(), r.sizeBytes(), r.triggerCount(), msg,
+                    r.gdrivePath(), r.gdriveStatus(),
+                    r.xlsxFile() == null ? null : r.xlsxFile().toString(),
+                    r.xlsxSizeBytes(), r.xlsxGdrivePath());
         } catch (IOException e) {
             throw new RuntimeException("立即匯出失敗：" + e.getMessage(), e);
         }

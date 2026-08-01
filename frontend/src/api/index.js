@@ -331,7 +331,7 @@ export const bffApi = {
     get:           (year) => api.get('/bff/trading-calendar', { params: year ? { year } : {} }),
     marketStatus: () => api.get('/bff/trading-calendar/market-status'),
     // 交易日曆匯出到指定路徑（Requirement 37）
-    exportToDir:     (year, format, subpath) => api.post('/bff/trading-calendar/export', null, { params: { year, format, subpath }, timeout: 60000, skipErrorToast: true }),
+    exportToDir:     (year, subpath) => api.post('/bff/trading-calendar/export', null, { params: { year, subpath }, timeout: 60000, skipErrorToast: true }),
     browseExportDir: (subpath = '') => api.get('/bff/trading-calendar/export/browse', { params: { subpath }, skipErrorToast: true }),
     // Google Drive 資料夾樹懶載入（Requirement 51 / Task 243）
     browseGdriveExportDir: (subpath = '') => api.get('/bff/trading-calendar/export/browse-gdrive', { params: { subpath }, skipErrorToast: true }),

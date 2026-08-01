@@ -17,7 +17,9 @@ import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import com.steven.assets.service.export.ExcelDocRenderer;
 import org.mockito.InjectMocks;
+import org.mockito.Spy;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
@@ -52,6 +54,14 @@ class AssetTransactionExcelExportTest {
     @Mock private PriceQueryService priceQueryService;
     @Mock private TwseIndexDailyHistoryRepository twseIndexHistRepo;
     @Mock private UsIndexDailyHistoryRepository usIndexHistRepo;
+
+    /**
+     * <b>刻意注入真的 {@link ExcelDocRenderer}（不是 mock）</b>：本測試是「既有 Excel 逐格零回歸」的守門，
+     * 換成 mock 就什麼都驗不到了。Requirement 55 / Task 270 讓 ExcelExportService 多了這個依賴，
+     * {@code @InjectMocks} 對未宣告成 {@code @Mock} 的欄位會塞 null，故用 {@code @Spy} 提供真實實例。
+     * <b>下方所有斷言一字不得改</b>——它們變紅就是真回歸。
+     */
+    @Spy private ExcelDocRenderer excelDocRenderer = new ExcelDocRenderer();
 
     @InjectMocks private ExcelExportService service;
 

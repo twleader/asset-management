@@ -58,7 +58,11 @@ class GdriveBrowseTest {
         GdriveOutputSupport gdrive = new GdriveOutputSupport(
                 rcloneClient, appUserRepo, userAdminService, selfCheck, "GDriveOutput");
         service = new ExportScheduleService(settingRepo, excelExportService, currentUserProvider,
-                gdrive, "/home/steven");
+                gdrive,
+                new com.steven.assets.service.export.ExcelDocRenderer(),
+                new com.steven.assets.service.export.JsonDocRenderer(new com.fasterxml.jackson.databind.ObjectMapper()),
+                new com.steven.assets.service.export.DualFormatExportWriter(gdrive),
+                "/home/steven");
     }
 
     @Test

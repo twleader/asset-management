@@ -362,8 +362,8 @@
 
       <div class="dialog-note dir-hint">
         以主機家目錄 <code>/home/steven</code>（對映主機 <code>/Users/steven</code>）為根，只能選其下的子資料夾。
-        目前落點：<code>{{ exportSetting.resolvedDir || '—' }}/{{ exportSetting.filenamePattern || '交易雷達_{使用者ID}_{日期}.xlsx' }}</code><br>
-        檔名固定為 <code>交易雷達_&lt;使用者ID&gt;_&lt;日期&gt;.xlsx</code>；同日多個時間點覆寫同一檔、跨日產生新檔。
+        目前落點：<code>{{ exportSetting.resolvedDir || '—' }}/{{ exportSetting.filenamePattern || '交易雷達_{使用者ID}_{日期}.xlsx / .json' }}</code><br>
+        檔名固定為 <code>交易雷達_&lt;使用者ID&gt;_&lt;日期&gt;</code>，<strong>同時產生 .xlsx 與 .json 兩份</strong>；同日多個時間點覆寫同一檔、跨日產生新檔。
         <template v-if="exportSetting.lastRunAt">
           <br>上次執行：{{ formatTime(exportSetting.lastRunAt) }}　{{ exportSetting.lastRunStatus || '' }}
         </template>

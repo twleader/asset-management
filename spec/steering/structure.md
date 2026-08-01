@@ -63,6 +63,7 @@ backend/
     │   │   └── WebConfig.java
     │   ├── controller/                        # REST endpoints（/api/{resource}）
     │   ├── service/                           # 領域邏輯
+    │   │   └── export/                        # 匯出中介模型 ExportDoc ＋ 兩個 renderer ＋ 雙檔落地（Req 55）
     │   ├── repository/                        # Spring Data JPA repo
     │   ├── model/                             # JPA Entity + Embedded ID
     │   └── dto/                               # Java records（request/response）
@@ -294,7 +295,7 @@ frontend/
 
 ```
 spec/
-├── requirements.md       # 54 個 Requirements（User Story + AC）
+├── requirements.md       # 55 個 Requirements（User Story + AC）
 ├── design.md             # 架構圖、ERD、Service 職責、Sequence
 ├── tasks.md              # 任務索引（Task 1–220）＋ 尚未歸檔的 201 起區段
 ├── tasks/                # 任務檔

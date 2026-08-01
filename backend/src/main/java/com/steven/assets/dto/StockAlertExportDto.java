@@ -68,6 +68,12 @@ public final class StockAlertExportDto {
      * @param gdrivePath   Drive 落點；未啟用或上傳未成功時為 null
      * @param gdriveStatus Drive 上傳狀態；未啟用時為 null
      */
+    /**
+     * run-now 結果。<b>既有欄位維持指向 {@code .json}</b>（Requirement 55 / Task 272）——
+     * 與其餘八個匯出點相反，因為 {@code alert_triggers_*.json} 是本頁的對外契約。
+     * 新增的是 xlsx 那三欄；兩份主檔名相同、只差副檔名。
+     */
     public record RunNowResponse(String path, long size, int triggerCount, String message,
-                                 String gdrivePath, String gdriveStatus) {}
+                                 String gdrivePath, String gdriveStatus,
+                                 String xlsxPath, long xlsxSizeBytes, String xlsxGdrivePath) {}
 }

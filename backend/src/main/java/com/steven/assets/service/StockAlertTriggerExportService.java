@@ -2,6 +2,9 @@ package com.steven.assets.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.steven.assets.service.export.ExportDoc;
+import java.util.ArrayList;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.steven.assets.model.StockAlert;
 import com.steven.assets.model.StockAlertExportSetting;
@@ -75,7 +78,8 @@ public class StockAlertTriggerExportService {
      * 被切成台北 07-28 三筆（VT/QQQ/VOO）＋ 07-29 一筆（AMZN），使用者打開當日檔只看得到一筆。
      * 台股 09:00–13:30、英股 15:00–23:30 換算台北都不跨午夜，只有美股每天中。
      */
-    public static final String FILENAME_PATTERN = "alert_triggers_{使用者ID}.json";
+    // 供前端設定頁顯示；Requirement 55 / Task 272 起一律兩份、主檔名相同
+    public static final String FILENAME_PATTERN = "alert_triggers_{使用者ID}.json / .xlsx";
 
     /**
      * 匯出視窗長度（台北日曆日）：今日 ＋ 前 2 日。
@@ -105,6 +109,9 @@ public class StockAlertTriggerExportService {
     private final StockMasterService stockMasterService;
     private final GdriveOutputSupport gdrive;
     private final ObjectMapper objectMapper;
+    // 雙格式匯出（Requirement 55 / Task 272）：既有 JSON 一行不動，另由同一份 payload 攤出 xlsx
+    private final com.steven.assets.service.export.ExcelDocRenderer excelDocRenderer;
+    private final com.steven.assets.service.export.DualFormatExportWriter dualWriter;
 
     /** 容器內基底輸出目錄，經 docker volume 對映到 host（見 docker-compose.yml）。 */
     private final String baseDir;
@@ -138,6 +145,8 @@ public class StockAlertTriggerExportService {
                                           StockMasterService stockMasterService,
                                           GdriveOutputSupport gdrive,
                                           ObjectMapper objectMapper,
+                                          com.steven.assets.service.export.ExcelDocRenderer excelDocRenderer,
+                                          com.steven.assets.service.export.DualFormatExportWriter dualWriter,
                                           @Value("${EXPORT_OUTPUT_DIR:/home/steven}") String baseDir) {
         this.settingRepo = settingRepo;
         this.triggerRepo = triggerRepo;
@@ -145,6 +154,8 @@ public class StockAlertTriggerExportService {
         this.stockMasterService = stockMasterService;
         this.gdrive = gdrive;
         this.objectMapper = objectMapper;
+        this.excelDocRenderer = excelDocRenderer;
+        this.dualWriter = dualWriter;
         this.baseDir = baseDir;
     }
 
@@ -208,8 +219,14 @@ public class StockAlertTriggerExportService {
     }
 
     /** 一次匯出的結果（本機落點、bytes、觸發筆數，以及 Drive 那一側的結果）。 */
+    /**
+     * <b>既有欄位維持指向 {@code .json}</b>（Requirement 55 / Task 272）——與其餘八個匯出點相反。
+     * 理由：{@code alert_triggers_*.json} 是本匯出點的對外契約，既有 {@code file}／{@code sizeBytes}
+     * 指的就是那一份，改成指向 xlsx 會靜默改變既有回應語意。新增的是 xlsx 那三欄。
+     */
     public record ExportResult(Path file, long sizeBytes, int triggerCount,
-                               String gdrivePath, String gdriveStatus) {}
+                               String gdrivePath, String gdriveStatus,
+                               Path xlsxFile, long xlsxSizeBytes, String xlsxGdrivePath) {}
 
     // ===== 核心：真正產檔 =====
 
@@ -231,12 +248,23 @@ public class StockAlertTriggerExportService {
             LocalDateTime since = LocalDate.now(TW_ZONE).minusDays(windowDays - 1L).atStartOfDay();
             List<StockAlertTrigger> triggers =
                     triggerRepo.findByOwnerAndCreatedAtAfter(ownerUserId, since);
-            byte[] data = buildJson(ownerUserId, since, triggers);
-
-            Path file;
+            // 一次組 payload，兩種格式共用——JSON 是對外契約，xlsx 由同一份 payload 攤出來
+            ObjectNode payload = buildPayload(ownerUserId, since, triggers);
+            byte[] data = toJsonBytes(payload);
+            // xlsx 的 render 單獨包 try/catch：新加的 POI 產檔若擲例外而沒被接住，
+            // 會連既有的 JSON（Requirement 54 的對外契約檔）一起弄丟。
+            byte[] xlsx = null;
             try {
-                file = writeAtomically(s.getOutputSubpath(),
-                        "alert_triggers_" + ownerUserId + ".json", data);
+                xlsx = excelDocRenderer.render(alertTriggersDoc(payload));
+            } catch (Exception e) {
+                log.warn("警示觸發 xlsx render 失敗 owner={}：{}", ownerUserId, e.getMessage(), e);
+            }
+
+            com.steven.assets.service.export.DualFormatExportWriter.DualResult dual;
+            try {
+                // gdriveEnabled=false：本機兩份由共用元件寫，Drive 仍走下方既有的去抖／立即兩條分支
+                dual = dualWriter.write(ownerUserId, resolveDir(s.getOutputSubpath()),
+                        "alert_triggers_" + ownerUserId, data, xlsx, false, null);
             } catch (IOException | RuntimeException e) {
                 s.setOwnerUserId(ownerUserId);
                 s.setLastRunAt(LocalDateTime.now(TW_ZONE));
@@ -251,25 +279,32 @@ public class StockAlertTriggerExportService {
                 throw e;
             }
 
+            Path file = dual.jsonFile();
             s.setOwnerUserId(ownerUserId);
             s.setLastRunAt(LocalDateTime.now(TW_ZONE));
-            s.setLastRunStatus(truncate("成功：" + file + "（" + data.length + " bytes，"
-                    + triggers.size() + " 筆觸發）"));
+            // 一律沿用共用元件算好、已截斷的字串：自組會在其中一份失敗時說謊，且無截斷會溢位欄位長度。
+            s.setLastRunStatus(truncate(dual.localStatus() + "（" + triggers.size() + " 筆觸發）"));
             settingRepo.save(s);
 
             // 本機檔寫成功之後才上傳，順序不可顛倒。
             String gdrivePath = null;
             String gdriveStatus = null;
+            String xlsxGdrivePath = null;
             if (s.isGdriveEnabled()) {
                 if (debounceDriveUpload) {
-                    scheduleDriveUpload(ownerUserId, file);
+                    scheduleDriveUpload(ownerUserId);
                 } else {
-                    GdriveOutputSupport.SyncResult r = uploadNow(ownerUserId, s.getGdriveSubpath(), file, false);
-                    gdrivePath = r.path();
+                    // run-now：立即上傳，且同樣要上傳兩份
+                    BothUploaded r = uploadBothNow(ownerUserId, s.getGdriveSubpath(),
+                            file, dual.xlsxFile(), false);
+                    gdrivePath = r.jsonPath();
                     gdriveStatus = r.status();
+                    xlsxGdrivePath = r.xlsxPath();
                 }
             }
-            return new ExportResult(file, data.length, triggers.size(), gdrivePath, gdriveStatus);
+            return new ExportResult(file, data.length, triggers.size(), gdrivePath, gdriveStatus,
+                    dual.xlsxFile(),
+                    dual.xlsxFile() == null ? 0L : Files.size(dual.xlsxFile()), xlsxGdrivePath);
         } finally {
             lock.unlock();
         }
@@ -289,7 +324,12 @@ public class StockAlertTriggerExportService {
      * 「匯出當下」的均線，會讓 MA% 條件的換算觸發價與觸發當下不符，而且一次匯出要為每筆觸發打一次
      * 指標計算。
      */
-    private byte[] buildJson(Long ownerUserId, LocalDateTime since, List<StockAlertTrigger> triggers) {
+    /**
+     * 組裝 payload。<b>內容一行未改</b>（Requirement 55 / Task 272 只是把它從序列化拆開，
+     * 好讓新增的 xlsx 吃到<b>同一份</b> payload）——這份 JSON 是 Requirement 54 對下游的契約，
+     * 輸出 byte 必須與改動前逐 byte 相同。
+     */
+    private ObjectNode buildPayload(Long ownerUserId, LocalDateTime since, List<StockAlertTrigger> triggers) {
         ObjectNode root = objectMapper.createObjectNode();
         root.put("ownerUserId", ownerUserId);
         // windowDays / since 讓下游知道「沒有更早的資料」是視窗造成的，不是真的沒觸發過。
@@ -324,6 +364,11 @@ public class StockAlertTriggerExportService {
             putDecimal(n, "kValue", t.getKValue());
             putDecimal(n, "dValue", t.getDValue());
         }
+        return root;
+    }
+
+    /** 序列化那三行：原地搬出來，一字未改。 */
+    private byte[] toJsonBytes(ObjectNode root) {
         try {
             return objectMapper.writerWithDefaultPrettyPrinter()
                     .writeValueAsString(root).getBytes(StandardCharsets.UTF_8);
@@ -331,6 +376,71 @@ public class StockAlertTriggerExportService {
             throw new IllegalStateException("警示觸發 JSON 序列化失敗：" + e.getMessage(), e);
         }
     }
+
+    /**
+     * 把既有 payload 攤成 {@link ExportDoc}，供 xlsx render（Requirement 55 / Task 272）。
+     *
+     * <p>參數型別是 {@code ObjectNode} 而非 {@code Map<String,Object>}——payload 本來就是 ObjectNode，
+     * 硬轉成 Map 會多一層轉換並丟失型別。
+     *
+     * <p><b>headers 由 payload 動態推導，不得在 Excel 側硬編一份欄位清單</b>：硬編的那一份在
+     * Requirement 54 日後加欄位時會靜默少一欄，而 JSON 有、Excel 沒有，兩份檔就不一致了。
+     * 推導方式為「所有元素 key 的聯集、以第一個元素的順序為基準」。
+     */
+    ExportDoc alertTriggersDoc(ObjectNode payload) {
+        List<ExportDoc.Kv> meta = new ArrayList<>();
+        for (String key : List.of("ownerUserId", "windowDays", "since", "exportedAt", "triggerCount")) {
+            JsonNode v = payload.path(key);
+            meta.add(new ExportDoc.Kv(key, v.isMissingNode() || v.isNull() ? null : jsonScalar(v),
+                    ExportDoc.Format.TEXT));
+        }
+
+        JsonNode arr = payload.path("triggers");
+        List<String> headers = new ArrayList<>();
+        if (arr.isArray()) {
+            for (JsonNode e : arr) {
+                e.fieldNames().forEachRemaining(f -> { if (!headers.contains(f)) headers.add(f); });
+            }
+        }
+        if (headers.isEmpty()) {
+            // 空觸發時仍須產出含表頭的合法檔——欄位順序取自 buildPayload 內實際寫入的順序（單一來源）
+            headers.addAll(TRIGGER_FIELDS);
+        }
+
+        List<List<Object>> rows = new ArrayList<>();
+        if (arr.isArray()) {
+            for (JsonNode e : arr) {
+                List<Object> row = new ArrayList<>(headers.size());
+                for (String h : headers) {
+                    JsonNode v = e.path(h);
+                    row.add(v.isMissingNode() || v.isNull() ? null : jsonScalar(v));
+                }
+                rows.add(row);
+            }
+        }
+        List<ExportDoc.Format> formats = new ArrayList<>(headers.size());
+        for (int i = 0; i < headers.size(); i++) formats.add(ExportDoc.Format.TEXT);
+
+        return new ExportDoc("警示觸發", List.of(new ExportDoc.Sheet("警示觸發", List.of(
+                new ExportDoc.KvRow(meta),
+                new ExportDoc.Blank(),
+                new ExportDoc.Table("觸發明細", ExportDoc.LineStyle.SECTION_13, headers,
+                        true, false, false, formats, rows)),
+                Math.max(headers.size(), meta.size() * 2))));
+    }
+
+    /** JsonNode → 原始型別（數值保留 BigDecimal，boolean 保留 Boolean），供兩個 renderer 各自呈現。 */
+    private static Object jsonScalar(JsonNode v) {
+        if (v.isNumber()) return v.decimalValue();
+        if (v.isBoolean()) return v.booleanValue();
+        return v.asText();
+    }
+
+    /** 空觸發時的表頭順序；與 {@link #buildPayload} 內寫入 trigger 物件的順序一致。 */
+    private static final List<String> TRIGGER_FIELDS = List.of(
+            "triggerId", "source", "alertId", "groupId", "stockCode", "stockName", "market",
+            "condition", "triggeredAt", "triggeredAtZone", "createdAt", "price",
+            "monthlyMa", "quarterlyMa", "annualMa", "kValue", "dValue");
 
     /**
      * 該筆觸發的條件文案。alert／group 已被刪除時回 {@code null} 而非讓整份匯出失敗
@@ -364,27 +474,6 @@ public class StockAlertTriggerExportService {
 
     // ===== 本機落檔 =====
 
-    /**
-     * 先寫 tmp 再 atomic move：下游程式可能正在讀同一個檔案，就地覆寫會讓對方讀到半截 JSON。
-     *
-     * <p><b>tmp 檔名帶 {@code UUID} 唯一後綴</b>——本服務有三條寫檔路徑（觸發、{@code POST /check}、
-     * run-now），固定 tmp 名會讓後到者的 {@code Files.move} 撞 {@code NoSuchFileException}
-     * （比照 {@code TradingRadarExportScheduleService} 為同一情境所做的處理）。這與 per-owner 鎖是
-     * 互補的兩層防護。
-     */
-    private Path writeAtomically(String subpath, String filename, byte[] data) throws IOException {
-        Path dir = resolveDir(subpath);
-        Files.createDirectories(dir);
-        Path file = dir.resolve(filename);
-        Path tmp = dir.resolve(filename + "." + UUID.randomUUID() + ".tmp");
-        Files.write(tmp, data);
-        try {
-            Files.move(tmp, file, StandardCopyOption.ATOMIC_MOVE);
-        } catch (AtomicMoveNotSupportedException e) {
-            Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING);
-        }
-        return file;
-    }
 
     /** 基底 resolve 子路徑並驗證仍在基底內（拒 `..`／絕對路徑跳脫）。 */
     Path resolveDir(String subpath) {
@@ -411,7 +500,7 @@ public class StockAlertTriggerExportService {
      * 「上次<b>上傳</b>的結果」，寫進去會覆蓋掉前一次真正成功的落點與 bytes，並把時間欄寫成一個根本
      * 沒發生過上傳的時刻。使用者要知道「本機即時、Drive 最多延遲約一分鐘」，走 UI 常駐文案，不入庫。
      */
-    private void scheduleDriveUpload(Long ownerUserId, Path localFile) {
+    private void scheduleDriveUpload(Long ownerUserId) {
         DriveDebounceState st = debounce.computeIfAbsent(ownerUserId, k -> new DriveDebounceState());
         long delay;
         synchronized (st) {
@@ -427,7 +516,16 @@ public class StockAlertTriggerExportService {
             try {
                 StockAlertExportSetting cur = settingRepo.findByOwnerUserId(ownerUserId).orElse(null);
                 if (cur == null || !cur.isGdriveEnabled()) return;
-                uploadNow(ownerUserId, cur.getGdriveSubpath(), localFile, true);
+                // 兩個 Path 在任務內以固定檔名重新解析，**不捕捉排定當下的值**：
+                // 檔名固定、內容為當日全量重寫，故到期時磁碟上那一份必然是最新的。
+                // 若捕捉排定當下的 xlsxFile，第一次觸發剛好 render 失敗（null）時，該視窗內
+                // 後續觸發全被合併掉，到期仍以 null 執行——那天最後一次觸發就再也補不回來。
+                Path dir = resolveDir(cur.getOutputSubpath());
+                Path json = dir.resolve("alert_triggers_" + ownerUserId + ".json");
+                Path xlsx = dir.resolve("alert_triggers_" + ownerUserId + ".xlsx");
+                uploadBothNow(ownerUserId, cur.getGdriveSubpath(),
+                        Files.exists(json) ? json : null,
+                        Files.exists(xlsx) ? xlsx : null, true);
             } catch (Exception e) {
                 log.warn("警示觸發匯出的 Drive 上傳失敗 owner={}：{}", ownerUserId, e.getMessage(), e);
             }
@@ -444,9 +542,15 @@ public class StockAlertTriggerExportService {
      * @param updateDebounceClock run-now 傳 {@code false}——按一次「立即匯出」不該讓觸發路徑的 Drive
      *                            同步靜默停一個間隔
      */
-    private GdriveOutputSupport.SyncResult uploadNow(Long ownerUserId, String subpath,
-                                                      Path localFile, boolean updateDebounceClock) {
-        GdriveOutputSupport.SyncResult r = gdrive.syncQuietly(ownerUserId, subpath, localFile);
+    private BothUploaded uploadBothNow(Long ownerUserId, String subpath,
+                                       Path jsonFile, Path xlsxFile, boolean updateDebounceClock) {
+        GdriveOutputSupport.SyncResult j = gdrive.syncQuietly(ownerUserId, subpath, jsonFile);
+        GdriveOutputSupport.SyncResult x = xlsxFile == null
+                ? new GdriveOutputSupport.SyncResult(gdrive.skipped("本輪未產生 xlsx"), null)
+                : gdrive.syncQuietly(ownerUserId, subpath, xlsxFile);
+        // 字串契約沿用共用元件的 "xlsx …／json …"；兩半各自先截斷再合併——合併後才截尾會把
+        // ／json 那一整段切掉，違反「必須能分辨是哪一份成功、哪一份失敗」。
+        String merged = truncate("xlsx " + half(x.status()) + "／json " + half(j.status()));
         if (updateDebounceClock) {
             DriveDebounceState st = debounce.computeIfAbsent(ownerUserId, k -> new DriveDebounceState());
             synchronized (st) {
@@ -455,10 +559,20 @@ public class StockAlertTriggerExportService {
         }
         settingRepo.findByOwnerUserId(ownerUserId).ifPresent(cur -> {
             cur.setGdriveLastRunAt(LocalDateTime.now(TW_ZONE));
-            cur.setGdriveLastStatus(r.status());
+            cur.setGdriveLastStatus(merged);
             settingRepo.save(cur);
         });
-        return r;
+        return new BothUploaded(merged, x.path(), j.path());
+    }
+
+    /** 兩份的 Drive 落點與合併後的狀態字串。 */
+    private record BothUploaded(String status, String xlsxPath, String jsonPath) {}
+
+    /** 合併前每半的上限：扣掉 {@code "xlsx "} 與 {@code "／json "} 共 12 字元的固定開銷後對半分。 */
+    private static String half(String s) {
+        if (s == null) return "";
+        int max = (512 - 12) / 2;
+        return s.length() <= max ? s : s.substring(0, max - 1) + "…";
     }
 
     // ===== 設定讀寫（供 controller）=====
