@@ -188,7 +188,7 @@ const activeTab = ref('chart')
 const loading = ref(false)
 const backfilling = ref(false)  // Task 136：首次無歷史 → 即時補齊 10 年中
 // 走勢圖資料：BFF chart-series 已把股價與技術指標以 tradingDate 聯集對齊，前端零計算、零 join。
-// 形狀：{ dates[], prices[], ma20[], ma60[], ma240[], k[], d[], j9[], k3d2[], rsv[], latest{} }
+// 形狀：{ dates[], prices[], ma5[], ma20[], ma60[], ma240[], k[], d[], j9[], k3d2[], rsv[], latest{} }
 const series = ref(null)
 const chartDates  = computed(() => series.value?.dates  ?? [])
 const chartPrices = computed(() => series.value?.prices ?? [])
@@ -567,6 +567,7 @@ const chartOption = computed(() => {
   const col = key => (sr[key] ?? []).map(num)
   const dailyDates  = sr.dates
   const dailyPrices = col('prices')
+  const dailyMa5    = col('ma5')
   const dailyMa20   = col('ma20')
   const dailyMa60   = col('ma60')
   const dailyMa240  = col('ma240')
@@ -582,7 +583,7 @@ const chartOption = computed(() => {
   // 子圖要用到的所有欄位（畫線的、畫柱的、只顯示數值的）
   const subKeys = [...spec.lines, ...(spec.bars || []), ...(spec.legendOnly || [])].map(x => x[1])
 
-  let dates, prices, ma20, ma60, ma240, xLabelFormatter
+  let dates, prices, ma5, ma20, ma60, ma240, xLabelFormatter
   const subVals = {}
   // subYAxis 的可視區間切片以子圖 x 軸長度為準（intraday 為分鐘網格、日線為交易日）
   let subDates = []
@@ -611,6 +612,7 @@ const chartOption = computed(() => {
     prices = priceGrid
     // intraday tick 數不足以重算日線 MA / KD → 取指標序列最新值、以整段網格常數填滿畫成水平參考線（畫到收盤）
     const fill = v => dates.map(() => v)
+    ma5   = fill(num(lt.ma5))
     ma20  = fill(num(lt.ma20))
     ma60  = fill(num(lt.ma60))
     ma240 = fill(num(lt.ma240))
@@ -623,6 +625,7 @@ const chartOption = computed(() => {
   } else {
     dates  = dailyDates
     prices = dailyPrices
+    ma5    = dailyMa5
     ma20   = dailyMa20
     ma60   = dailyMa60
     ma240  = dailyMa240
@@ -760,6 +763,7 @@ const chartOption = computed(() => {
       const map = {
         // 當日網格末格恆為未來 null → 取最後一筆非 null 分時價（日線模式 == 末格，行為不變）
         '股價':       fmt(lastNonNull(prices)),
+        '週線MA5':    fmt(num(lt.ma5)),
         '月線MA20':   fmt(num(lt.ma20)),
         '季線MA60':   fmt(num(lt.ma60)),
         '年線MA240':  fmt(num(lt.ma240)),
@@ -781,6 +785,7 @@ const chartOption = computed(() => {
       // 每個 series 在 legend 數值的色彩，對應線條顏色（與 logo 一致）。
       const colorMap = {
         '股價':      '#3b82f6',
+        '週線MA5':   '#10b981',
         '月線MA20':  '#f59e0b',
         '季線MA60':  '#8b5cf6',
         '年線MA240': '#ef4444',
@@ -823,8 +828,8 @@ const chartOption = computed(() => {
       return [
         {
           data: cost != null
-            ? ['股價', '月線MA20', '季線MA60', '年線MA240', '成本均價']
-            : ['股價', '月線MA20', '季線MA60', '年線MA240'],
+            ? ['股價', '週線MA5', '月線MA20', '季線MA60', '年線MA240', '成本均價']
+            : ['股價', '週線MA5', '月線MA20', '季線MA60', '年線MA240'],
           top: 8,
           itemGap: 30,
           formatter, textStyle
@@ -881,6 +886,9 @@ const chartOption = computed(() => {
           }
         }
       },
+      { name: '週線MA5', type: 'line', xAxisIndex: 0, yAxisIndex: 0, data: ma5, labelLayout: SHIFT_Y,
+        lineStyle: { width: 1.5, color: '#10b981' }, itemStyle: { color: '#10b981' }, showSymbol: false,
+        endLabel: { show: true, formatter: '{c}', fontSize: 11, color: '#10b981' } },
       { name: '月線MA20', type: 'line', xAxisIndex: 0, yAxisIndex: 0, data: ma20, labelLayout: SHIFT_Y,
         lineStyle: { width: 1.5, color: '#f59e0b' }, itemStyle: { color: '#f59e0b' }, showSymbol: false,
         endLabel: { show: true, formatter: '{c}', fontSize: 11, color: '#f59e0b' } },

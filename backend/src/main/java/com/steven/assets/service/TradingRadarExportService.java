@@ -163,6 +163,8 @@ public class TradingRadarExportService {
         String[] headers = {"快照時間", "代碼", "名稱", "市場", "資產類別", "持有", "還原權息", "動作", "動作中文", "分數",
                 "逆勢狀態", "逆勢中文", "現價", "漲跌%", "行情更新", "完成日K", "MA20", "MA60", "MA240",
                 "月線確認", "季線確認", "年線確認", "K", "D", "匯率分位", "底層幣別", "資料完整",
+                // Task 264：二維決策的時機維度與其兩個輸入；ETF 折溢價（非 ETF 留白）
+                "時機", "季線乖離%", "52週位置", "折溢價%",
                 "支持訊號", "風險提醒", "逆勢條件", "逆勢風險"};
         int r = 0;
         Row h = sheet.createRow(r++);
@@ -200,10 +202,14 @@ public class TradingRadarExportService {
                 cell(row, 24, num(d, "fxPercentile"), st.num2);
                 cell(row, 25, txt(d, "underlyingCurrency"), null);
                 cell(row, 26, bool(d, "dataComplete"), null);
-                cell(row, 27, list(d, "reasons"), null);
-                cell(row, 28, list(d, "risks"), null);
-                cell(row, 29, list(d, "counterTrendReasons"), null);
-                cell(row, 30, list(d, "counterTrendRisks"), null);
+                cell(row, 27, txt(d, "timingLabel"), null);
+                cell(row, 28, num(d, "ma60BiasPercent"), st.num2);
+                cell(row, 29, num(d, "week52Position"), st.num2);
+                cell(row, 30, num(d, "etfPremiumPct"), st.num2);
+                cell(row, 31, list(d, "reasons"), null);
+                cell(row, 32, list(d, "risks"), null);
+                cell(row, 33, list(d, "counterTrendReasons"), null);
+                cell(row, 34, list(d, "counterTrendRisks"), null);
             }
         }
         autosize(sheet, headers.length);

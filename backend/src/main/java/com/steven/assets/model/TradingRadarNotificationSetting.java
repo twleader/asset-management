@@ -52,6 +52,18 @@ public class TradingRadarNotificationSetting {
     @Builder.Default
     private Boolean initialized = false;
 
+    /**
+     * {@code lastAction} 是哪個 {@code TradingRadarRuleEngine.RULE_VERSION} 算出來的（Task 264）。
+     *
+     * <p>與現行 RULE_VERSION 不符時視同<b>未初始化</b>：Requirement 44 明訂規則版本變更後
+     * 通知基準須全部重建、升級後首輪只建基準不寄信。V9 改變了動作映射結構，拿 V9 動作比對
+     * V8 的 {@code lastAction} 必然大量不相等而觸發假通知。</p>
+     *
+     * <p>既有列為 {@code null}（版本未知），與任何版本皆不相等，故升級後首輪自動重建。</p>
+     */
+    @Column(length = 30)
+    private String ruleVersion;
+
     @Column(name = "last_action", length = 50)
     private String lastAction;
 

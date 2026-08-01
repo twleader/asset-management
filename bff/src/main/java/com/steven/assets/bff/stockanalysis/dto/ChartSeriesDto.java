@@ -12,6 +12,8 @@ import java.util.List;
 public record ChartSeriesDto(
         List<String> dates,
         List<BigDecimal> prices,
+        /** 週線 MA5（Task 265）。 */
+        List<BigDecimal> ma5,
         List<BigDecimal> ma20,
         List<BigDecimal> ma60,
         List<BigDecimal> ma240,
@@ -42,6 +44,7 @@ public record ChartSeriesDto(
      * prev* 僅五個 KD 指標需要（供 legend 漲跌箭頭比較），均線不加箭頭。
      */
     public record Latest(
+            BigDecimal ma5,
             BigDecimal ma20,
             BigDecimal ma60,
             BigDecimal ma240,

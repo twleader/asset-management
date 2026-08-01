@@ -112,8 +112,13 @@ public class TradingRadarNotificationService {
                     setting.getId(), TradingRadarNotificationState.TYPE_ACTION));
             Set<String> counterTrends = Set.copyOf(stateRepo.findStateCodes(
                     setting.getId(), TradingRadarNotificationState.TYPE_COUNTER_TREND));
+            // Task 264：規則版本變更即視同未初始化——本輪只建基準不寄信（Requirement 44）。
+            // 不這樣做的話，V9 的動作會直接與 V8 存下的 lastAction 比對，而本次刻意改了動作映射結構，
+            // 比對必然大量不相等 → 升級當下對每一筆訂閱狂發假通知。
+            boolean baselineValid = Boolean.TRUE.equals(setting.getInitialized())
+                    && TradingRadarRuleEngine.RULE_VERSION.equals(setting.getRuleVersion());
             TradingRadarNotificationTransition.Result result = transition.evaluate(
-                    Boolean.TRUE.equals(setting.getInitialized()),
+                    baselineValid,
                     setting.getLastAction(),
                     setting.getLastCounterTrendState(),
                     decision.action(),
@@ -122,6 +127,7 @@ public class TradingRadarNotificationService {
                     counterTrends);
 
             setting.setInitialized(true);
+            setting.setRuleVersion(TradingRadarRuleEngine.RULE_VERSION);
             setting.setLastAction(result.nextAction());
             setting.setLastCounterTrendState(result.nextCounterTrend());
             settingRepo.save(setting);

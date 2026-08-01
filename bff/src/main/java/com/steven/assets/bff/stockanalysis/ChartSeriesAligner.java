@@ -58,6 +58,7 @@ public final class ChartSeriesAligner {
         return new ChartSeriesDto(
                 dates,
                 priceCol,
+                column(dates, indicatorByDate, IndicatorPointDto::ma5),
                 column(dates, indicatorByDate, IndicatorPointDto::ma20),
                 column(dates, indicatorByDate, IndicatorPointDto::ma60),
                 column(dates, indicatorByDate, IndicatorPointDto::ma240),
@@ -100,7 +101,7 @@ public final class ChartSeriesAligner {
         IndicatorPointDto last = indicators.get(indicators.size() - 1);
         IndicatorPointDto prev = indicators.size() > 1 ? indicators.get(indicators.size() - 2) : null;
         return new ChartSeriesDto.Latest(
-                last.ma20(), last.ma60(), last.ma240(),
+                last.ma5(), last.ma20(), last.ma60(), last.ma240(),
                 last.k(), last.d(), last.j9(), last.k3d2(), last.rsv(),
                 prev == null ? null : prev.k(),
                 prev == null ? null : prev.d(),

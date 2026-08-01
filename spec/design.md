@@ -99,7 +99,7 @@ com.steven.assets/
   - `POST /api/bff/snapshot-form/fund-nav/refresh`：觸發後端 → external-materials-service 立即刷新所有基金 NAV，回 `{ success, failed, total }`
 - `StockAnalysisBffRoutes` ＋ `StockAnalysisChartBffController`（Task 261 新增的 aggregation controller，與同前綴的 exact-path route 並存；WebFlux `RequestMappingHandlerMapping`（order 0）先於 Gateway `RoutePredicateHandlerMapping`（order 1），且既有五條 route 皆為精確路徑、不含萬用，故不衝突——同一模式的既有先例為 `StockAlertBffController` ＋ `StockAlertBffRoutes`）（StockAnalysisDialog 跨 view 共用元件專屬）：對話框被 Dashboard / SnapshotForm / WatchStock / StockAlert / RealizedGain / TradingRadar **六個** view 同時使用（損益明細列雙擊開啟為既有；交易雷達個股決策表列雙擊為 Task 234 加入），依「同義欄位、同一 business service API」原則拆為獨立 BFF route，避免在六個父 view 的 BFF 各自重複代理。Dashboard 開啟此 dialog 的觸發點有三：持股表格列雙擊（`onStockDblClick`）、個股 bar 圖雙擊（`onBarDblClick`）、以及「資產配置分佈」tab 2/3 個股穿透圓餅圖 segment 單擊（`onLookthroughPieClick(params, market)`，「其它」聚合段無代號不開；命中當前快照 `mergedStocks` 同 `stockCode`+`market` 的直接持股則沿用完整列以保留 `avgCostOriginal` 成本欄位、否則僅帶 `{stockCode, stockName, market}`）。提供：
   - `GET /api/bff/stock-analysis/history/stock` → `/api/market-data/history/stock`
-  - `GET /api/bff/stock-analysis/chart-series`（Task 261，由 **`StockAnalysisChartBffController`** 提供，**非 Gateway passthrough**）：走勢圖上下兩個 pane 的完整資料，由 BFF 並行呼叫 business 的 `/api/market-data/history/stock`（股價 OHLC）與 `/api/market-data/indicators/series`（逐日的 MA20／MA60／MA240 ＋ KD 五值 ＋ MACD／RSI／乖離率／威廉指標共 19 個指標欄位，完整清單見「API Design」的 `/api/market-data/indicators/series`），**以 `tradingDate` 聯集對齊後**回傳前端可直接 render 的等長陣列。走勢圖原本在前端自算 KD／MA，與觀察清單顯示的後端 `computeAll()` 值在盤中不一致；上收後同源。兩支上游的今日格條件不同（股價要求 `source` 不含括號、`0000` 更不併 live；指標比照 `computeAll` 併 live），故**必須取聯集**——取股價側日期會把今日的指標點靜默丟掉，legend 顯示前一日的值，等於沒修
+  - `GET /api/bff/stock-analysis/chart-series`（Task 261，由 **`StockAnalysisChartBffController`** 提供，**非 Gateway passthrough**）：走勢圖上下兩個 pane 的完整資料，由 BFF 並行呼叫 business 的 `/api/market-data/history/stock`（股價 OHLC）與 `/api/market-data/indicators/series`（逐日的 MA20／MA60／MA240 ＋ KD 五值 ＋ MACD／RSI／乖離率／威廉指標共 20 個指標欄位（Task 265 新增週線 MA5），完整清單見「API Design」的 `/api/market-data/indicators/series`），**以 `tradingDate` 聯集對齊後**回傳前端可直接 render 的等長陣列。走勢圖原本在前端自算 KD／MA，與觀察清單顯示的後端 `computeAll()` 值在盤中不一致；上收後同源。兩支上游的今日格條件不同（股價要求 `source` 不含括號、`0000` 更不併 live；指標比照 `computeAll` 併 live），故**必須取聯集**——取股價側日期會把今日的指標點靜默丟掉，legend 顯示前一日的值，等於沒修
   - `GET /api/bff/stock-analysis/dividends` → `/api/market-data/dividends`
   - `GET /api/bff/stock-analysis/etf-holdings` → `/api/market-data/etf-holdings`
   - `POST /api/bff/stock-analysis/backfill-stock` → `/api/market-data/history/backfill-stock`（Task 136 lazy 回補：走勢圖無歷史時即時觸發單檔 10 年回補後重載；只寫 `stock_price_history` 不入主檔、今日列獨佔給 `ClosePersister`）
@@ -1274,7 +1274,7 @@ GET    /api/market-data/holidays?year=2026                     # 台股 / 美股
 POST   /api/market-data/history/backfill                       # 補齊所有歷史股價
 POST   /api/market-data/history/backfill-stock?code=&market=&since=&until=  # 補齊單支股票歷史股價
 GET    /api/market-data/history/stock?code=&market=            # 查詢單支股票歷史股價
-GET    /api/market-data/indicators/series?code=&market=&start=&end=  # 走勢圖技術指標整段序列（Task 261 建立、Task 262 擴充）：逐日 {tradingDate, ma20, ma60, ma240, k, d, j9, k3d2, rsv, ema12, ema26, dif, macd, osc, rsi5, rsi10, bias10, bias20, b10b20, wr9}，視窗不足／暖機不足者該欄 null（含 ema*／dif／macd／osc——EMA 以前 n 筆 SMA 作 seed，故 ema12 前 11 筆、ema26 前 25 筆、macd 前 33 筆為 null）。一次回傳全部指標，前端切換選單時不再 roundtrip。與單點 `TechnicalIndicatorService.computeAll()` 共用同一核心與同一套今日 live 併入規則 → 當 end >= MarketZones.today(market) 時序列最後一筆恆等於 computeAll()，倒數第二筆的 k/d 恆等於 previousK/previousD（走勢圖與觀察清單同源的機械判準；交易雷達個股表走還原權息價基，刻意不在此列）。0000 台股大盤走 twse_index_daily_history 特例
+GET    /api/market-data/indicators/series?code=&market=&start=&end=  # 走勢圖技術指標整段序列（Task 261 建立、Task 262 擴充）：逐日 {tradingDate, ma5, ma20, ma60, ma240, k, d, j9, k3d2, rsv, ema12, ema26, dif, macd, osc, rsi5, rsi10, bias10, bias20, b10b20, wr9}，視窗不足／暖機不足者該欄 null（含 ema*／dif／macd／osc——EMA 以前 n 筆 SMA 作 seed，故 ema12 前 11 筆、ema26 前 25 筆、macd 前 33 筆為 null）。一次回傳全部指標，前端切換選單時不再 roundtrip。與單點 `TechnicalIndicatorService.computeAll()` 共用同一核心與同一套今日 live 併入規則 → 當 end >= MarketZones.today(market) 時序列最後一筆恆等於 computeAll()，倒數第二筆的 k/d 恆等於 previousK/previousD（走勢圖與觀察清單同源的機械判準；交易雷達個股表走還原權息價基，刻意不在此列）。0000 台股大盤走 twse_index_daily_history 特例
 POST   /api/market-data/history/prices-on-date?date=           # 批次查詢指定日期各股收盤價
 GET    /api/market-data/exchange-rate?currency=USD&start=&end= # 匯率歷史（省略區間則回傳全部）
 GET    /api/market-data/exchange-rate/latest?currency=USD      # 最新匯率
@@ -3998,7 +3998,7 @@ TradingRadarView
        ├─ AssetSnapshotRepository.findLatestWithStocks（當前持股，owner-scoped）
        ├─ StockAlertRepository.findDistinctStockCodeMarket（觀察，owner-scoped）
        ├─ PriceQueryService（只讀 Redis；miss → stock_price_history；`0000/台股` 自 Task 228 起亦可命中）
-       └─ TradingRadarRuleEngine（TW_RULES_V3 分數規則不變，RULE_VERSION 現為 TW_RULES_V7）
+       └─ TradingRadarRuleEngine（TW_RULES_V3 分數規則不變，RULE_VERSION 現為 TW_RULES_V9，見 Task 264 的二維決策段落）
 ```
 
 `GET /api/trading-radar` 這條請求鏈**刻意不注入** `MarketAnalysisService`、LLM SDK、新聞爬蟲或任何 refresh endpoint，只重讀既有資料，不對外抓行情、不送出 Batch、不產生 AI 費用；SSE 盤中自動更新走的也是這條。**Task 249 起，使用者手動按下「重新整理」改走 `POST /api/trading-radar/refresh`，會同步觸發一次台股行情回補後才重算**（見下方「手動重新整理觸發行情回補」小節）；該路徑仍不注入任何 LLM client、不觸發新聞爬蟲、不送出 Batch、不產生 AI 費用。大盤即時點位在 `GET` 路徑上同樣只由獨立背景排程（`TaiexIndexPoller`，見「大盤新鮮度與盤中即時判斷」小節）寫入 Redis。現有行情／大盤排程若在背景更新 PostgreSQL 或 Redis，雷達下次讀取自然看見新值；兩者生命週期分離。
@@ -4094,6 +4094,33 @@ boolean stale = !todayEodPresent && !liveFreshToday;
 大盤與標的的權重、clamp、regime 門檻及主動作映射以 Requirement 43 Acceptance Criteria 為唯一契約。V3 保留 V2 的大盤分數與 `STOCK` 行為，新增 `InstrumentType.EQUITY/BOND`：有效類別由 `stock.asset_class` override 優先、否則 `AssetClassifier` 規則判定，無法辨識時保守用 `EQUITY`。`EQUITY` 繼續套用大盤 `RISK_ON +8`／`RISK_OFF -15`、`RISK_OFF` 買進閘門與 `DATA_INCOMPLETE` veto；`BOND` 對台股大盤 regime 計 0 分、不受股票大盤買進閘門影響，大盤資料不足也不單獨 veto，但個別 MA／KD／完成日 K 不足仍一律 `NO_TRADE`。
 
 `TradingRadarRuleEngine` 不碰 repository／網路／時間，輸入皆為數值、資產型別與確認狀態，輸出 score/action/counterTrend/reasons/risks，確保單元測試可重現。債券結果的 reasons 明示「不套用台股大盤加減分與閘門」，避免使用者誤以為漏算；股票 `RISK_OFF` 仍不抹掉獨立的逆勢觀察狀態。
+
+### 二維決策：趨勢品質 × 進場時機（`TW_RULES_V9`，Task 264／265）
+
+> **V9 推翻了「動作由 `score` 單一維度分層」這個自 V1 起的結構。** 原結構下 `score` 量的是順勢強度（六項均線因子權重 `0.61`／總權重 `0.95`），使得**六項均線全為 `+1` 時 `score` 的數學下限為 `65`**（帶匯率因子的標的為 `62`）——其餘因子即使踩到各自的真實極小值也達不到減碼(<40)／出場(<25)。反向亦然：跌破全部均線的急跌情境實算 `score=14` → `EXIT_CANDIDATE`。即「均線之上永遠不賣、跌破均線必然賣」，追高殺低是該結構的**必然後果**而非參數問題。
+
+`score` 語意不變（趨勢品質），另立正交的 `TimingState`（`EXTREME_OVERBOUGHT`／`OVERBOUGHT`／`NEUTRAL`／`OVERSOLD`／`EXTREME_OVERSOLD`），由 KD 熱度與**季線乖離**共同判定（門檻皆為具名常數，判定由極端往中性依序返回、互斥且窮盡）。`actionFor()` 的順序改為：
+
+1. `qualifiesForTrialBuy()` → `TRIAL_BUY`（不變）
+2. **`EXTREME_OVERBOUGHT` 且 KD 高檔死叉**（`previousK > previousD && k <= d`）→ `REDUCE_CANDIDATE`／`AVOID`，**凌駕分數**。高檔時分數必高，不凌駕就永遠觸發不到。**必須要求死叉確認**——只要超買就賣會在主升段初期砍掉部位，與「獲利最大化」衝突。
+3. **分數落在減碼／出場區但 `EXTREME_OVERSOLD`** → 降級 `HOLD_CAUTION`／`WAIT`。**安全閥**：`ma240Confirmation == BELOW` 且 `week52Position <= 0.10` 者不受保護、照常出場，否則持續崩壞的標的會因 KD 永遠釘在低檔而**永遠拿不到出場訊號**。
+4. 其餘沿用既有 `score` 分層與 `buyGate`（既有**五個**硬條件一項不放寬：大盤允許、MA20 `ABOVE`、MA60 `ABOVE`、KD 未過熱、換匯未過貴；t264 另加第六個——ETF 溢價硬否決）
+
+第 2、3 步依 `TimingState` 判定順序不可能同時成立。
+
+**`TRIAL_BUY` 的 `RISK_OFF` 封鎖已移除**（`marketStale` 封鎖保留）。原封鎖使「大盤急跌時買進」在結構上不可能，且與同引擎 `evaluateCounterTrend()` 既有的「只限小額試單」文案自相矛盾。其餘五項條件不放寬，**保留年線乖離 `≥ 5%` 即安全邊界**：大盤急跌＋個股長線完好＝錯殺＝買點；個股自身跌破年線＝長線已壞＝不接刀。
+
+**因子由 11 個增為 14 個**：新增季線乖離（`clampUnit(−bias/25)`）、52 週相對位置（`(pos−0.5)×2` 且**必須 clamp**——高低取自完成日 K 而現價可能是 Redis 即時價，創新高當日 `pos > 1` 會打破 `score ∈ [0,100]` 不變量）、ETF 折溢價自身歷史分位（與 `fxContribution` 同形）。權重重配後尺度佔比由「短期最重」轉為「中期最重」，符合數周至兩年的持有期。**兩個新技術因子正交**：52 週位置量「長期趨勢好不好」（刻意保持正向），季線乖離量「現在進場貴不貴」（過度延伸為負）。
+
+> **14 個因子的完整權重表以 Requirement 43 修訂（`TW_RULES_V9`）Acceptance Criteria 中的權重表為唯一契約，本文件刻意不複寫**——沿用本檔既有慣例（「設計文件不複寫權重數字，避免兩處數字漂移」）。
+
+**窄幅 KD 失效是 V9 的必要前置而非選配**：`(hi9−lo9)/lo9 < 2%` 時 KD 位置回 `null`、`kdHeatOf()` 回 `NORMAL`、`TimingState` 不得由 KD 判定。00719B 實測 9 日高低帶平均寬度僅 `1.011%`，其 `K=90.76` 實質只代表「比 9 日低點高 0.37 元」；V9 新增兩條由 KD 驅動的動作覆寫，不先做此防護會對債券 ETF **大量誤發減碼建議**。
+
+**ETF 折溢價**走既有 `etf_nav_history.premium_discount_pct`（Task 215）與 Redis `price:etfnav:{market}:{code}`，非新資料源。評分用**自身歷史 250 日分位**（台灣債券 ETF 長期存在結構性溢價，統一絕對門檻會系統性誤判），另設**絕對硬否決** `>= 3.0%` 關閉 `buyGate`——兩者並存是刻意的：分位管「相對自己貴不貴」，絕對值管「溢價 3% 就是為同一籃資產多付 3%」。**禁止由市價與淨值反推**（t259 鐵則）。折溢價不納入 `EXTREME_OVERBOUGHT`（溢價會在一天內收斂，減碼是不可逆建議）。
+
+**還原價基（Task 265）**：除權息還原**既有已符合**——MA／KD／兩日確認／規則漲跌全走 `DistributionAdjustedPriceService`，且還原涵蓋 `highPrice`／`lowPrice`（`:112-113`）不只 `closePrice`，故 V9 新增的 52 週高低與 9 日帶寬取自 `adjustedRows` 亦為同一價基，**不違反「禁止混用原始／還原價」**。缺陷在**股票分割完全不還原**（`validEvent()` `:84-88` 只接受現金股利與股票股利），0050 於 2025-06-18 有 1:4 分割；視窗內若有分割會使 MA 與 52 週高低混用兩種價基、**方向相反且不拋任何例外**，目前未爆純屬 241 根視窗落在該分割日之後的時間巧合。分割偵測採序列啟發式（`ratio ≥ 2.0`／`≤ 0.5` ＋「接近 `{2,3,4,5,10}` 之一、誤差 ≤ 10%」二次驗證），**門檻不得放寬**——±15% 以上的跳空實測 21 筆中僅 2 筆為真分割，小門檻會把序列改壞，而**改壞序列比不還原更糟**（前者無法從畫面察覺）。另新增週線 MA5，**刻意不納入評分與買進閘門**（5 個交易日尺度與「數周至兩年」需求及 V9 降低短線權重的方向直接衝突）。
+
+**明確不在 V9 範圍**：Fed／台灣央行利率資訊（六個利率識別字全庫零命中；`央行` 僅出現於新聞爬蟲的關鍵字清單與註解、未進入評分鏈。需新資料源）、美股／英股（仍只評估台股）、個股基本面（三張表不存在，須 Task 266 建抓取 → 累積 → Task 267 接線為 `TW_RULES_V10`；來源只給當期快照且 MOPS 禁爬，故 EPS 年增率須累積約 2 年）。**前端不得宣稱雷達已納入利率或央行資訊。**
 
 ### 逆勢抄底狀態（獨立第二軌）
 
@@ -4456,6 +4483,8 @@ run-now 不動當日 guard——全部同 R41／R42，不重述。
 
 ## Requirement 46（Task 222）：台股基本面資料抓取與歷史落地
 
+> **⛔ Task 222 已由 [t266](tasks/t266_stock_fundamental_ingestion.md) 取代，本章節不得作為實作依據。** 資料來源限制、三張表的欄位設計、虧損公司仍須寫入一列等分析仍然有效並已移入 t266；changeset 版號改為 `v1.83.0-stock-fundamental`（見下方更正）。
+
 ### 為什麼這件事必須先做，且愈早愈好
 
 TWSE／TPEx 開放 API 只提供「當期單一快照」，**且 `?date=` 參數被伺服器忽略**（實測傳 `date=11412` 仍回 `11506`）。歷史月營收的唯一來源在 MOPS，而 `mopsov.twse.com.tw/robots.txt` 為 `User-Agent: * / Disallow: /`（僅開放 bingbot），沒有合規回補管道。
@@ -4494,7 +4523,7 @@ PostgreSQL               stock_valuation_daily / stock_financial_quarter / stock
 
 ### 資料模型
 
-三張表皆為**全域公開行情**，比照 `stock_price_history` 不帶 `owner_user_id`、不套 `@Filter`。changeset `v1.68.0-stock-fundamentals`（**刻意避開 `v1.67.0`——該版號已由 Task 218 的通知去抖欄位預定，雖檔案尚未建立**）。
+三張表皆為**全域公開行情**，比照 `stock_price_history` 不帶 `owner_user_id`、不套 `@Filter`。changeset `v1.83.0-stock-fundamental`（**原記 `v1.68.0-stock-fundamentals`，已隨 Task 222 → t266 的取代一併更正；`v1.82.0-etf-nav-pct-origin.sql` 為現存最高版號**）（**刻意避開 `v1.67.0`——該版號已由 Task 218 的通知去抖欄位預定，雖檔案尚未建立**）。
 
 ```text
 stock_valuation_daily     UK(stock_code, market, trading_date)
@@ -4527,7 +4556,7 @@ stock_monthly_revenue     UK(stock_code, market, revenue_year, revenue_month)
 
 > `MarketDataFetchService.java:641`：「本方法即為『這檔是不是 ETF』的資料驅動判定，不需要維護 ETF 白名單（既有 `isEtf()` 白名單誤把個股 AVGO 列為 ETF、又漏掉使用者實際持有的 SGOV，**刻意不複用**）」
 
-`EtfNavPoller.java:29` 與 `ExcelExportService.java:718` 同旨。故本設計**跟隨既有方向，不做方向反轉**：
+`EtfNavPoller.java:29` 與 `ExcelExportService.java:795` 同旨。故本設計**跟隨既有方向，不做方向反轉**：
 
 ```text
 判定順序：
@@ -4549,6 +4578,8 @@ TWSE 舊版 `rwd/BWIBBU_d`（可回溯 2005-09-02）能一次補齊歷史 PE，�
 ---
 
 ## Requirement 43 修訂（Task 223）：長期因子併入總分與飽和修正（`TW_RULES_V5`）
+
+> **⛔ Task 223 已由 [t264](tasks/t264_radar_mean_reversion_and_top_exit.md) 取代，本章節不得作為實作依據。** **其問題診斷仍然正確且被 t264 引用**，但解法完全不同：t264 採「扁平權重 ＋ 二維 `TimingState` 動作覆寫」，**不做五組分組正規化、不做三層動作門檻、取數視窗維持 241 根不擴大**。故本章節下方關於「750 根視窗」「五組標準化」「依長期組分數選門檻層」的敘述**全部失效**——照做會實作出 t264 明文禁止的東西。任務順序亦改為 **t265 → t264 →（t266 →）t267**。
 
 ### 飽和問題是前置條件，不是附帶修正
 
@@ -4805,7 +4836,9 @@ buyGate = marketAllowsBuy && MA20 ABOVE && MA60 ABOVE && !kdOverheated && !fxExp
 
 **`K > 85` 這道門檻沒有回測依據，是刻意的風險偏好取捨。** 十年台股 38,186 個「買進閘門其他條件成立」樣本中，37,720 個具完整 20 交易日後續者分組回測顯示，過熱組的後續下檔風險反而**低於**正常放行組（20 日內跌逾 10% 的比例：`avg>80` 組 `11.1%`、`K>85` 組 `10.0%`、正常放行組 `15.9%`），分年檢視含 2018／2022 下跌年皆一致。採納理由是使用者不願在單一指標極端超買時收到加碼建議。**`85` 相對 `80` 的選擇依據是受影響樣本量**（`0.63%` vs `7.10%`），即在一條無實證支持的規則上盡量縮小影響面——下檔風險數據對 `80` 與 `85` 皆不支持，不構成選定理由。**不得在註解或 UI 文案中宣稱此門檻有實證支持**；完整數據與已知偏誤見 Requirement 43 修訂（`TW_RULES_V7`）。同理，過熱風險文案不得再宣稱「回檔機率升高」——該說法與本專案自身資料矛盾。
 
-**過熱閘門與偏熱揭露不套用窄幅防護。** 上一段的窄幅防護（`(hi9 − lo9)/lo9 < 2%` 時 KD 位置回 `null`）**只作用於 KD 位置子因子的計分**，不作用於過熱閘門與 `kdHeat` 三態。兩者目的不同：窄幅防護是避免讓雜訊等級的 KD 去**加減分數**；而過熱閘門與揭露的作用是「在使用者可能追高時不主動建議買進、並如實顯示指標讀數」——即使 00719B 這類窄幅標的的 `K=90.76` 實質意義薄弱，對它顯示「K 已達 90.8」仍是正確的陳述，且不主動建議加碼是保守方向。故窄幅標的照常適用 `kdOverheated` 與 `kdHeat`，不設豁免分支。
+> **⛔ 本段結論已由 `TW_RULES_V9`（Task 264 的 264.2）推翻，不得再依本段實作。** Task 232 當時的前提是「`kdHeat` 只影響買進閘門與揭露文案」，故窄幅失真的代價有限；V9 新增了兩條**由 KD 驅動的動作覆寫**（極端超買＋高檔死叉 → 減碼；極端超賣 → 阻擋出場），窄幅標的的 KD 飽和會直接變成錯誤的減碼建議，代價已完全不同。故 V9 起 `kdHeatOf()` 在 `(hi9−lo9)/lo9 < 2%` 時一律回 `NORMAL`，`qualifiesForTrialBuy()` 與 `evaluateCounterTrend()` 亦同。**連帶影響**：窄幅標的因此不再輸出過熱／偏熱標記，Requirement 43 修訂（Task 232）AC「偏熱與過熱狀態必須在收合列可辨識」對這類標的改以「窄幅，KD 不具參考性」標記滿足，不得留白。
+
+**（以下為 Task 232 的原始決策記錄）過熱閘門與偏熱揭露不套用窄幅防護。** 上一段的窄幅防護（`(hi9 − lo9)/lo9 < 2%` 時 KD 位置回 `null`）**只作用於 KD 位置子因子的計分**，不作用於過熱閘門與 `kdHeat` 三態。兩者目的不同：窄幅防護是避免讓雜訊等級的 KD 去**加減分數**；而過熱閘門與揭露的作用是「在使用者可能追高時不主動建議買進、並如實顯示指標讀數」——即使 00719B 這類窄幅標的的 `K=90.76` 實質意義薄弱，對它顯示「K 已達 90.8」仍是正確的陳述，且不主動建議加碼是保守方向。故窄幅標的照常適用 `kdOverheated` 與 `kdHeat`，不設豁免分支。
 
 **偏熱揭露必須在收合列可見。** `reasons`／`risks` 僅在表格列展開後顯示，而使用者回報的正是收合狀態下看不出 K 已達 82.3。故 `K > 80 || avg(K,D) > 70` 但未達過熱門檻時，除輸出資訊性提示外，須於收合列既有 KD 欄加註視覺標記，且**過熱（已降級）與偏熱（未降級）的標記須可區分**。此揭露不影響分數與動作。**兩個觸發分支的文案不得共用同一句**：`K > 80` 命中時述 K 值，僅 `avg > 70` 命中時述均值（`K=70, D=75` 會使 `avg=72.5` 觸發偏熱而 K 並未高於 80，共用 K 版文案會輸出假陳述）。
 

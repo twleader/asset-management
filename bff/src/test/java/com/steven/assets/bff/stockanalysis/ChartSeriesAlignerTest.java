@@ -29,6 +29,7 @@ class ChartSeriesAlignerTest {
 
     private IndicatorPointDto indicator(String date, double k) {
         return new IndicatorPointDto(date,
+                BigDecimal.valueOf(5),   // Task 265：ma5（週線）
                 BigDecimal.valueOf(10), BigDecimal.valueOf(20), BigDecimal.valueOf(30),
                 BigDecimal.valueOf(k), BigDecimal.valueOf(k - 1),
                 BigDecimal.valueOf(k - 2), BigDecimal.valueOf(k + 2), BigDecimal.valueOf(k + 5),

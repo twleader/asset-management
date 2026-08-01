@@ -261,22 +261,30 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 219 | ETF 折溢價納入交易雷達（下一增量，尚未動工） | 本檔 ↓ |
 | 220 | 通知評估與派送併入單一 2 秒節拍（Requirement 44 修訂） | 本檔 ↓ |
 | 221 | 濾除「影響不了全球經濟／股市」的雜訊新聞（Requirement 31 / EditorialNewsFilter） | 本檔 ↓ |
-| 222 | 台股個股基本面資料每日抓取與歷史落地（Requirement 46） | [tasks/t222_stock_fundamental_ingestion.md](tasks/t222_stock_fundamental_ingestion.md) |
-| 223 | 交易雷達分數飽和修正、長期趨勢組與動作門檻分層（`TW_RULES_V5`，Requirement 43 修訂）**⚠ spec 審查未通過（7/10），不得進入實作** | [tasks/t223_long_term_scoring_v5.md](tasks/t223_long_term_scoring_v5.md) |
-| 224 | 交易雷達基本面組接線與啟用（Requirement 43 修訂；須等 t222 資料累積達門檻）**⚠ spec 審查未通過，不得進入實作** | [tasks/t224_fundamental_factor_wiring.md](tasks/t224_fundamental_factor_wiring.md) |
-| 225 | 還原權息序列支援股票分割，並排除非正收盤列（Requirement 43 修訂；**t223 的前置任務**）**⚠ spec 審查未通過，有已知的靜默失敗風險，不得進入實作** | [tasks/t225_split_adjusted_series.md](tasks/t225_split_adjusted_series.md) |
+| 222 | 台股個股基本面資料每日抓取與歷史落地（Requirement 46）**⛔ 已由 t266 取代，不得依本檔實作** | [tasks/t222_stock_fundamental_ingestion.md](tasks/t222_stock_fundamental_ingestion.md) |
+| 223 | 交易雷達分數飽和修正、長期趨勢組與動作門檻分層（`TW_RULES_V5`，Requirement 43 修訂）**⛔ 已由 t264 取代（問題診斷仍有效、解法改為二維動作映射），不得依本檔實作** | [tasks/t223_long_term_scoring_v5.md](tasks/t223_long_term_scoring_v5.md) |
+| 224 | 交易雷達基本面組接線與啟用（Requirement 43 修訂）**⛔ 已由 t267 取代（子因子定義仍有效、權重接法改為扁平），不得依本檔實作** | [tasks/t224_fundamental_factor_wiring.md](tasks/t224_fundamental_factor_wiring.md) |
+| 225 | 還原權息序列支援股票分割，並排除非正收盤列（Requirement 43 修訂）**⛔ 已由 t265 取代（不擴大取數視窗），不得依本檔實作** | [tasks/t225_split_adjusted_series.md](tasks/t225_split_adjusted_series.md) |
 | 226 | 新增「分批試單」動作，解決長線佳＋短線超賣無法產生買進建議的結構互斥（Requirement 43 修訂；前置 t223）**⚠ 尚未送審** | [tasks/t226_trial_buy_oversold_path.md](tasks/t226_trial_buy_oversold_path.md) |
 | 227 | 匯率曝險與換匯估值納入交易雷達評分（Requirement 47；前置 t223）**⚠ 尚未送審** | [tasks/t227_fx_exposure_factor.md](tasks/t227_fx_exposure_factor.md) |
 | 228 | 大盤盤中即時判斷（`TW_RULES_V6`，Requirement 43 修訂） | [t228_taiex_intraday_market_signal.md](tasks/t228_taiex_intraday_market_signal.md) |
+| 264 | 交易雷達改為「趨勢品質 × 進場時機」二維決策：均值回歸、高檔轉弱出場、極端超賣不殺低、ETF 折溢價（`TW_RULES_V9`，Requirement 43 修訂；前置 t265）**已通過對抗式審查（3 輪）並完成實作** | [tasks/t264_radar_mean_reversion_and_top_exit.md](tasks/t264_radar_mean_reversion_and_top_exit.md) |
+| 265 | 還原序列補齊股票分割，並新增週線 MA5（Requirement 43；**t264 的前置任務**，取代 t225）**已通過對抗式審查（3 輪）並完成實作** | [tasks/t265_split_adjusted_series.md](tasks/t265_split_adjusted_series.md) |
+| 266 | 台股個股基本面資料每日抓取與歷史落地（取代 t222；只建資料管道、不改評分）**⚠ 尚未送審** | [tasks/t266_stock_fundamental_ingestion.md](tasks/t266_stock_fundamental_ingestion.md) |
+| 267 | 個股基本面因子接進交易雷達（`TW_RULES_V10`，取代 t224；前置 t266 ＋ t264）**⚠ 尚未送審** | [tasks/t267_fundamental_factor_wiring.md](tasks/t267_fundamental_factor_wiring.md) |
 
-> **Task 222–225 全部尚未通過 `/spec-review` 閘門，一律不得進入實作。**
+> **註：本索引表僅列至 228 與 264–267；Task 229–263 未登錄於本表，以 `spec/tasks/tNNN_*.md` 檔案本身為準。**
+
+> **Task 222–225 已全部被 t264–t267 取代（見上表），保留僅作為決策記錄，一律不得依其實作。**
+>
+> 原狀態：全部尚未通過 `/spec-review` 閘門。
 >
 > 審查歷程：全範圍三輪 5 → 5 → 7，t222 單獨一輪 6（門檻 8）。各任務檔上方的「待解問題」區塊記錄了已查證屬實的未解問題。
 >
 > - **Task 222**（6/10）：三個 Critical——驗證段的 `mvn -pl` 指令在本專案無法執行（無 root pom，三個模組各自獨立）；business-services 未啟用 actuator 故健康檢查回 500；`security_type` 免設定頁的例外聲明被同一 entity 上結構同構的 `stock_style` 反證（後者有完整設定表＋seed＋端點＋前端頁）。另有「資料驅動 ETF 判定」未指名資料來源等 6 個 Major。
 > - **Task 223／224／225**（7/10）：t225 兩個 Critical——`DistributionAdjustedPriceService.adjust()` 的 early-return 會使無除權息紀錄的標的（如 2327，全庫兩筆真分割之一）永遠偵測不到分割；驗證段查詢了不存在的 JSON 欄位而使迴歸判準恆為通過。t223 有四個 Major（85 門檻推導錯誤、over-fetch 未指定、`complete()` 閘門、與逆勢抄底軌重疊未處理）。
 >
-> **上表 Task 223／226／227 的「未通過／尚未送審」標記與 `TradingRadarRuleEngine.java` 現況不一致**（該檔 `RULE_VERSION` 已是 `TW_RULES_V5`，`Action.TRIAL_BUY`、`fxPercentile` 等皆已存在於程式碼）——這是 Task 228 合併 `origin/main` 時發現的既有 spec／程式碼漂移，非 Task 228 造成，本次合併不處理，留待該任務自行同步。
+> **上表 Task 223／226／227 的「未通過／尚未送審」標記與 `TradingRadarRuleEngine.java` 現況不一致**（該檔 `RULE_VERSION` 實際已是 `TW_RULES_V8`、Task 264 將升為 `TW_RULES_V9`，且 `Action.TRIAL_BUY`、`fxPercentile` 等皆已存在於程式碼）——這是 Task 228 合併 `origin/main` 時發現的既有 spec／程式碼漂移。**Task 223 的部分已由本次的取代關係處理（223 → t264）**；226／227 的標記漂移仍未處理。
 
 ---
 

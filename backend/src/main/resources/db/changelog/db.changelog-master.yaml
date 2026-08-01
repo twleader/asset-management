@@ -284,3 +284,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/v1.82.0-etf-nav-pct-origin.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.83.0-radar-notification-rule-version.sql
+      relativeToChangelogFile: false
