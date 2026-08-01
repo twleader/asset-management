@@ -101,6 +101,22 @@ class ExportDocRendererTest {
     class JsonTypes {
 
         @Test
+        @DisplayName("generatedAt 是標準 ISO-8601：含 +08:00、無 [Asia/Taipei] 後綴、小數秒 3 位")
+        void generatedAt為標準ISO8601() throws Exception {
+            String at = readJson(doc(new ExportDoc.Blank())).get("generatedAt").asText();
+
+            // 實機踩過：ZonedDateTime.toString() 會輸出 2026-08-02T02:55:03.980696424+08:00[Asia/Taipei]
+            // ——方括號後綴與 9 位小數秒都是 Java 特有擴充，不是 ISO-8601／RFC 3339。
+            assertThat(at).as("不得帶 [Asia/Taipei] 這種 Java 特有後綴").doesNotContain("[");
+            assertThat(at).as("本身帶時區的值必須輸出位移").endsWith("+08:00");
+
+            // 真正的判準是「標準解析器吃得下」，不是字串長得像
+            assertThat(java.time.OffsetDateTime.parse(at)).isNotNull();
+            assertThat(at).as("小數秒最多 3 位——Python 的 fromisoformat 只接受 3 或 6 位")
+                    .matches("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?\\+08:00");
+        }
+
+        @Test
         @DisplayName("BigDecimal 輸出為 JSON number 且保留原精度")
         void 數值保留原精度() throws Exception {
             ExportDoc d = doc(table(List.of("匯率"), List.of(ExportDoc.Format.NUM4),

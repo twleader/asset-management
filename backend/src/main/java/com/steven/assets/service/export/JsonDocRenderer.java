@@ -9,6 +9,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -34,6 +35,13 @@ public class JsonDocRenderer {
     private static final DateTimeFormatter ISO_DATE = DateTimeFormatter.ISO_LOCAL_DATE;
     /** ISO local，刻意不加時區位移——LocalDateTime 本來就沒有時區資訊，加位移等於憑空捏造。 */
     private static final DateTimeFormatter ISO_LOCAL_DT = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
+    /**
+     * {@code generatedAt} 專用。<b>不可用 {@code ZonedDateTime.toString()}</b>——它是 Java 特有的
+     * ISO-8601 擴充，會多輸出 {@code [Asia/Taipei]} 這個方括號後綴，且小數秒到奈秒（9 位）。
+     * 兩者都不是標準 ISO-8601／RFC 3339：實測 Python 的 {@code datetime.fromisoformat()}
+     * 對後綴與 9 位小數秒都直接擲 {@code ValueError}，而本檔的下游正是 SRPP 退休規劃專案。
+     */
+    private static final DateTimeFormatter ISO_OFFSET_DT = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
 
     private final ObjectMapper objectMapper;
 
@@ -44,8 +52,10 @@ public class JsonDocRenderer {
     public byte[] render(ExportDoc doc) throws IOException {
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("title", doc.title());
-        // 本身帶時區的值，故輸出含 +08:00 的位移（與 LocalDateTime 欄位不同）
-        root.put("generatedAt", ZonedDateTime.now(TW_ZONE).toString());
+        // 本身帶時區的值，故輸出含 +08:00 的位移（與 LocalDateTime 欄位不同）；
+        // 截到毫秒是為了讓小數秒維持 3 位——標準解析器（含 Python fromisoformat）只接受 3 或 6 位。
+        root.put("generatedAt",
+                ZonedDateTime.now(TW_ZONE).truncatedTo(ChronoUnit.MILLIS).format(ISO_OFFSET_DT));
 
         List<Object> sheets = new ArrayList<>();
         for (ExportDoc.Sheet sheet : doc.sheets()) {
