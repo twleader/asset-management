@@ -198,6 +198,13 @@ public record ExportDoc(String title, List<Sheet> sheets) {
       `showHeader=false` 的 Table **JSON 仍以 headers 當 key**。
       **不得**輸出 `[["國泰世華","定存",…]]` 這種依位置解析的陣列。
 - [x] 269.3.2 `generatedAt` 為 `ZonedDateTime.now(ZoneId.of("Asia/Taipei"))` 的 ISO-8601 字串（含 `+08:00`）。
+  - [x] 269.3.2.1 **不得用 `ZonedDateTime.toString()`**（初版就是這樣寫，部署後實測才發現）。它是 Java 特有的
+        ISO-8601 擴充，會多一個方括號後綴、且小數秒到奈秒：實機輸出為
+        `2026-08-02T02:55:03.980696424+08:00[Asia/Taipei]`。**兩者都不是標準 ISO-8601／RFC 3339**——
+        實測 Python 的 `datetime.fromisoformat()` 對後綴與 9 位小數秒都直接擲 `ValueError`，
+        而本檔的下游正是 SRPP 退休規劃專案。改用
+        `.truncatedTo(ChronoUnit.MILLIS).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)`。
+        判準是「標準解析器吃得下」（測試以 `OffsetDateTime.parse` 實際解一次），不是字串長得像。
 - [x] 269.3.3 型別規則（本任務的核心價值，逐條測）：
   - `BigDecimal` → JSON **number**，**保留原精度**，不得經過任何 `setScale`／`String.format`／千分位。
   - `LocalDate` → `"yyyy-MM-dd"`；`LocalDateTime` → `"yyyy-MM-ddTHH:mm:ss"`（**ISO local，不加位移**——
@@ -408,3 +415,11 @@ docker compose -p asset-management up -d --no-deps --force-recreate business-ser
    這是 backend `service/` 底下第一個子 package，`structure.md` §6.1 明列目錄結構變更必須更新 steering。
    （該樹在 main 上已漏列 `security/` 與 `util/`，屬既有債，本次刻意不擴大處理。）
 6. **POI 5.x 移除了 `CellStyle.getFont(Workbook)`**，測試改用 `wb.getFontAt(style.getFontIndex())`。
+7. **`generatedAt` 初版用 `ZonedDateTime.toString()`，部署後抽驗實檔才發現不是標準 ISO-8601。**
+   實機輸出 `2026-08-02T02:55:03.980696424+08:00[Asia/Taipei]`：方括號後綴與 9 位小數秒都是 Java
+   特有擴充，Python 的 `datetime.fromisoformat()` 兩者都擲 `ValueError`，而下游正是 SRPP。
+   **這一條原本完全沒有測試**（`grep generatedAt` 在測試檔零命中）——單元測試全綠、golden 逐格比對全綠，
+   都驗不到它，因為 golden 只涵蓋 Excel、而 JSON 的型別測試只測了 cell 值不含檔案層級欄位。
+   已改為 `.truncatedTo(ChronoUnit.MILLIS).format(ISO_OFFSET_DATE_TIME)` 並補測試，
+   判準是**用 `OffsetDateTime.parse` 實際解一次**而非比對字串長相（見 269.3.2.1）。
+   教訓：「測試全綠」與「產物可被下游使用」是兩件事，落地後一定要抽驗實檔。
