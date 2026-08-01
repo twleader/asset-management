@@ -975,6 +975,8 @@ twse_index_year_end_history  (TWSE 指數年末值；Task 97 起已不使用—�
 | shares | BigDecimal(15,5) | 數量（股數／單位數） |
 | price | BigDecimal(17,6) | 成交單價（原幣，小數 6 位；Task 239 由 (15,4) 加寬） |
 | amount | BigDecimal(20,2) | 成交金額（原幣，含手續費／交易稅後之實際交割金額），nullable=false |
+| fee | BigDecimal(15,2) | 手續費（原幣，選填；Task 268 新增，v1.84.0） |
+| transactionTax | BigDecimal(15,2) | 證交稅（原幣，選填；Task 268 新增，v1.84.0） |
 | exchangeRate | BigDecimal(10,4) | 交易當天匯率（USD 計價時使用） |
 | notes | String(500) | 備註，可空 |
 | year | Integer | 年度（@Transient，由 tradeDate.getYear() 計算，不入庫） |
@@ -982,7 +984,8 @@ twse_index_year_end_history  (TWSE 指數年末值；Task 97 起已不使用—�
 > **定位：** 獨立的買賣流水帳（flow），與 `RealizedGain`（僅賣出且已結算之損益）、`AssetSnapshot`（時點存量 snapshot）語意不同。三者**互不自動衍生、不共用資料表**——交易紀錄不自動產生／修改 `realized_gain`／`stock_holding`／`asset_snapshot`，亦不由它們反推，避免同一事實跨表存兩份（見 Requirement 49 設計章節）。
 >
 > **正規化：**
-> - `amount`（成交金額）為含費用後之實際交割金額，與 `shares × price` 不必然相等（手續費、交易稅、零股撮合價差），故 `shares`／`price`／`amount` 為各自獨立輸入、非彼此衍生（比照 `realized_gain` 同時存 `shares`／`salePrice`／`proceeds`／`investmentCost`）。
+> - `amount`（成交金額）為含費用後之實際交割金額，與 `shares × price` 不必然相等（手續費、交易稅、零股撮合價差），故 `shares`／`price`／`amount`／`fee`／`transactionTax` 為各自獨立輸入、非彼此衍生（比照 `realized_gain` 同時存 `shares`／`salePrice`／`proceeds`／`investmentCost`）。
+> - `fee`／`transactionTax`（Task 268）是**純記錄欄**：不參與 `amountTwd` 計算、不參與年度彙總、不回頭調整 `amount`。它們與 `amount` **同幣別**（該筆 `currency`），不另存幣別欄。`null` ＝「沒記」（明細顯示 `-`、Excel 留空格），`0` ＝「確實免收」，兩者語意不同、任一層都不得互相轉換；一律 `@PositiveOrZero`（負值於 `@Valid` 階段擋下、不入庫；**實際狀態碼為 500 而非 400**，見 Requirement 49 該條 AC 的既有 `GlobalExceptionHandler` 兜底說明）。
 > - `year` 由 `tradeDate` 即時衍生（`@Transient`），不入庫。
 > - `amountTwd`（台幣成交金額 ＝ `currency==USD ? amount × exchangeRate : amount`）於 DTO 層即時計算，不入庫。
 > - 交易紀錄**不計算損益**（損益為已實現損益頁職責），流水帳只記事實。
@@ -5092,7 +5095,7 @@ TransactionView el-tree 懶載入
 
 1. **獨立流水帳表、不與 realized_gain／snapshot 合併或互相衍生**：交易紀錄是 flow event，realized_gain 是賣出結算、snapshot 是時點存量，三者語意不同。合併或讓交易紀錄自動生成持股／損益，會把同一事實存兩份並引入跨表一致性維護成本（CLAUDE.md 正規化）。故新增獨立 `asset_transaction`，比照 `RealizedGain` 的「獨立、不關聯快照」定位。
 
-2. **不存衍生值**：`amount`（成交金額，含費用後實際交割金額）與 `shares × price` 不必然相等（手續費／交易稅／零股價差），三者為各自獨立輸入、非彼此衍生（比照 `realized_gain` 同存 `shares`／`salePrice`／`proceeds`／`investmentCost`）；`year` 以 `@Transient` 由 `tradeDate` 衍生；`amountTwd` 於 DTO 層即時算（`currency==USD ? amount×exchangeRate : amount`）。交易紀錄**不計算損益**。
+2. **不存衍生值**：`amount`（成交金額，含費用後實際交割金額）與 `shares × price` 不必然相等（手續費／交易稅／零股價差），`shares`／`price`／`amount`／`fee`／`transactionTax` **五者**（t268 起，原為前三者）為各自獨立輸入、非彼此衍生（比照 `realized_gain` 同存 `shares`／`salePrice`／`proceeds`／`investmentCost`）；`year` 以 `@Transient` 由 `tradeDate` 衍生；`amountTwd` 於 DTO 層即時算（`currency==USD ? amount×exchangeRate : amount`）。交易紀錄**不計算損益**。
 
 3. **交易類型／資產類型為字串、非寫死 enum**：`買/賣`、`股票/基金` 以字串存欄位；市場／券商下拉沿用既有 `MarketType`／`BrokerEntity` 主檔（CLAUDE.md「禁止 Enum 寫死」）。`channel`（券商／通路）存成交當下名稱字串（刻意 denormalize，比照 `realized_gain.broker`）。
 
@@ -5101,6 +5104,10 @@ TransactionView el-tree 懶載入
 5. **背景排程的租戶隔離（關鍵）**：`AssetTransaction` 帶 `@Filter(ownerFilter)`；背景 `findAll()` 若不 `enableFilter` 會把**所有使用者的交易紀錄寫進每個人的檔案**。故新增 `exportAssetTransactionsForOwner(Long ownerId)`，比照 `exportRealizedGainsForOwner` 在 session 手動啟用 filter。
 
 6. **排程與手動產出同一份**：`exportAssetTransactions()` 與 `exportAssetTransactionsForOwner()` 共用同一個 `buildAssetTransactionsWorkbook()`，三個入口（下載／run-now／排程）內容一致。
+
+7. **手續費／證交稅為純記錄欄，刻意不參與任何既有計算（t268）**：新增 `fee`／`transaction_tax` 兩欄後，`amount` 的語意、`amountTwd` 的公式（`currency==USD ? amount × exchangeRate : amount`）與年度彙總（各筆 `amountTwd` 加總）**全部維持原狀**。不做「淨額 ＝ `amount ± fee ± tax`」的衍生欄、不用它取代任何既有顯示值。理由：`amount` 的既有定義本就是「含手續費／交易稅後之實際交割金額」，使用者現有 59 筆紀錄（實測 `SELECT count(*) FROM asset_transaction`）皆依此語意輸入；讓新欄位參與計算，等於在升級當下無聲改寫既有年度統計。既有列兩欄為 NULL——把 NULL 當 0 或當「待補」都會產生與升級前不同的數字，故唯一安全的選擇是完全不參與。**同理不做資料回填**：`amount` 與 `shares × price` 的差額同時混有手續費、交易稅與零股撮合價差，無法拆分，回推等於捏造。
+
+8. **兩欄不依交易類型／市場設限（t268）**：不做「僅賣出可填證交稅」。本頁市場含**英股**，英國印花稅（Stamp Duty 0.5%）課在**買進**；綁死「賣才有稅」會使英股買進無處可記。台股買進不課稅由使用者留空表達，不由程式強制。此決定同時避免了「交易類型改買↔賣時要不要清空稅額」這條沒有正確答案的分支。
 
 ### 資料模型
 
@@ -5121,10 +5128,14 @@ TransactionView el-tree 懶載入
 | `shares` | NUMERIC(15,5) | 數量（股數／單位數） |
 | `price` | NUMERIC(17,6) | 成交單價（原幣，小數 6 位；Task 239 由 (15,4) 以 v1.74.0 ALTER 加寬） |
 | `amount` | NUMERIC(20,2) NOT NULL | 成交金額（原幣，含費用後實際交割金額） |
+| `fee` | NUMERIC(15,2)（t268 新增，nullable） | 手續費（原幣，與 `amount` 同幣別；純記錄、不參與計算） |
+| `transaction_tax` | NUMERIC(15,2)（t268 新增，nullable） | 證交稅（原幣，與 `amount` 同幣別；純記錄、不參與計算） |
 | `exchange_rate` | NUMERIC(10,4) | 交易當天匯率（USD 用） |
 | `notes` | VARCHAR(500) | 備註 |
 
 > 無 seed（使用者自建資料）。`year` 不建欄位（`@Transient` 衍生）。
+>
+> **t268 — `fee`／`transaction_tax`**（Liquibase `v1.84.0-asset-transaction-fee-tax.sql`）：兩欄以 `ADD COLUMN IF NOT EXISTS` 加入，**nullable、無 DEFAULT、不回填**。刻意不給 `DEFAULT 0`——`0` 的語意是「確實免收」，既有 59 列並非如此，給預設值等於替使用者捏造事實；`IF NOT EXISTS` 使 changeset 冪等，重跑無害。
 
 **t238 — 新表 `asset_transaction_export_schedule`**（Liquibase `v1.73.0-asset-transaction-export-schedule.sql`）：
 
@@ -5205,6 +5216,18 @@ TransactionView el-tree 懶載入
 - `frontend/src/api/index.js`：`transaction` 命名空間新增排程 4 支
 - `frontend/src/views/TransactionView.vue`：新增「排程自動匯出」設定卡
 - `SchedulePublicBffController.java`：`JOBS` 補「交易紀錄匯出 每日匯出排程檢查」項目
+
+**t268 新增**
+- `backend/src/main/resources/db/changelog/changes/v1.84.0-asset-transaction-fee-tax.sql`
+
+**t268 異動**
+- `AssetTransaction.java`：新增 `fee`／`transactionTax` 兩個 `BigDecimal` 欄（`precision=15, scale=2`）
+- `AssetTransactionDto.java`：`CreateAssetTransactionRequest`／`AssetTransactionResponse` 各新增兩欄；`@PositiveOrZero`
+- `AssetTransactionService.java`：`createAssetTransaction`／`updateAssetTransaction`／`toResponse` 各帶上兩欄（**`toResponse` 的 `amountTwd` 公式不變**）
+- `ExcelExportService.java`：`writeAssetTransactionsSheet()` 由 15 欄增為 17 欄（「台幣成交金額」後插「手續費」「證交稅」）
+- `db.changelog-master.yaml`：註冊 v1.84.0
+- `frontend/src/views/TransactionView.vue`：表單新增兩欄輸入、明細表新增兩欄顯示
+- **BFF 不需異動**：`TransactionBffController` 的 create／update 為 `Map<String,Object>` passthrough，新欄位自動穿透；`frontend/src/api/index.js` 同理不需異動。
 
 ### 端點路徑共存說明
 

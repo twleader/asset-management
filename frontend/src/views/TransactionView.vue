@@ -85,6 +85,19 @@
             <span v-else>{{ fmt(row.amountTwd) }}</span>
           </template>
         </el-table-column>
+        <!-- Task 268：判 != null 而非 truthy——後者會把「確實免收 0 元」也顯示成「沒記」的 - -->
+        <el-table-column label="手續費" align="right" width="90">
+          <template #default="{ row }">
+            <span v-if="row.fee != null">{{ fmtCurrency(row.fee, row.currency) }}</span>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="證交稅" align="right" width="90">
+          <template #default="{ row }">
+            <span v-if="row.transactionTax != null">{{ fmtCurrency(row.transactionTax, row.currency) }}</span>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
         <el-table-column label="市場" width="70" align="center">
           <template #default="{ row }">{{ row.market || '-' }}</template>
         </el-table-column>
@@ -336,6 +349,25 @@
             </el-form-item>
           </el-col>
         </el-row>
+        <!--
+          Task 268：手續費／證交稅。兩欄皆選填、皆常駐顯示——刻意不依交易類型或市場條件顯示，
+          英股印花稅課在「買進」，綁死「賣才有稅」會使英股買進的稅無處可記；台股買進不課證交稅
+          由使用者留空表達。留空存 null（＝沒記）、明確填 0 存 0（＝確實免收），兩者語意不同。
+        -->
+        <el-row :gutter="16">
+          <el-col :span="12">
+            <el-form-item label="手續費">
+              <el-input v-model="txForm.feeStr" :input-style="{ textAlign: 'right' }"
+                placeholder="選填" @blur="onBlurField('fee', txForm.currency === 'USD' ? 2 : 0)" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="證交稅">
+              <el-input v-model="txForm.transactionTaxStr" :input-style="{ textAlign: 'right' }"
+                placeholder="選填" @blur="onBlurField('transactionTax', txForm.currency === 'USD' ? 2 : 0)" />
+            </el-form-item>
+          </el-col>
+        </el-row>
         <el-row :gutter="16">
           <el-col :span="12">
             <el-form-item label="匯率" v-if="txForm.currency === 'USD'">
@@ -421,7 +453,9 @@ const rules = {
 const txForm = reactive({
   transactionType: '買', assetType: '股票', assetName: '', assetCode: '',
   market: '台股', currency: 'TWD', channel: '', tradeDate: '', notes: '',
-  sharesStr: '', priceStr: '', amountStr: '', exchangeRateStr: ''
+  sharesStr: '', priceStr: '', amountStr: '', exchangeRateStr: '',
+  // Task 268：手續費／證交稅（選填）。空字串一律送 null，不得送 0——null＝「沒記」、0＝「確實免收」
+  feeStr: '', transactionTaxStr: ''
 })
 
 // 市場改變時自動切換預設幣別（判斷式與 resetForm 共用 defaultCurrency，不另立第二套對照）
@@ -449,7 +483,9 @@ const fieldMap = {
   shares: 'sharesStr',
   price: 'priceStr',
   amount: 'amountStr',
-  exchangeRate: 'exchangeRateStr'
+  exchangeRate: 'exchangeRateStr',
+  fee: 'feeStr',
+  transactionTax: 'transactionTaxStr'
 }
 const onBlurField = (field, precision) => {
   const strKey = fieldMap[field]
@@ -595,7 +631,8 @@ const resetForm = () => {
   Object.assign(txForm, {
     transactionType: '買', assetType: '股票', assetName: '', assetCode: '',
     market, currency: defaultCurrency(market), channel: '', tradeDate: '', notes: '',
-    sharesStr: '', priceStr: '', amountStr: '', exchangeRateStr: ''
+    sharesStr: '', priceStr: '', amountStr: '', exchangeRateStr: '',
+    feeStr: '', transactionTaxStr: ''
   })
   // Task 251：清掉上一次的匯率狀態，避免殘留到下一次開啟
   originalFxStr.value = ''; fxDateDirty.value = false; clearFx()
@@ -624,6 +661,9 @@ const openEditDialog = (row) => {
   txForm.sharesStr = row.shares != null ? fmtNum(row.shares, (row.market === '美股' || row.market === '英股') ? 5 : 0) : ''
   txForm.priceStr = row.price != null ? fmtNum(row.price, 6) : ''
   txForm.amountStr = row.amount != null ? fmtNum(row.amount, isUsd ? 2 : 0) : ''
+  // Task 268：null 帶空字串（不是 0）；使用者存的 0 會帶回 '0'，兩者在表單上仍可區分
+  txForm.feeStr = row.fee != null ? fmtNum(row.fee, isUsd ? 2 : 0) : ''
+  txForm.transactionTaxStr = row.transactionTax != null ? fmtNum(row.transactionTax, isUsd ? 2 : 0) : ''
   txForm.exchangeRateStr = row.exchangeRate != null ? fmtNum(row.exchangeRate, 4) : ''
   originalFxStr.value = txForm.exchangeRateStr   // Task 251：保留該筆自己的匯率，供切換幣別後還原
   dialogVisible.value = true
@@ -638,6 +678,11 @@ const submit = async () => {
     const price = String(txForm.priceStr || '').trim() ? parseNum(txForm.priceStr) : null
     const exchangeRate = (txForm.currency === 'USD' && String(txForm.exchangeRateStr || '').trim())
       ? parseNum(txForm.exchangeRateStr) : null
+    // Task 268：先以 trim() 判空再決定要不要呼叫 parseNum——parseNum 對無法解析的字串回 0，
+    // 直接呼叫會把「留空」變成「確實免收 0 元」，兩者語意不同（硬約束 G）
+    const fee = String(txForm.feeStr || '').trim() ? parseNum(txForm.feeStr) : null
+    const transactionTax = String(txForm.transactionTaxStr || '').trim()
+      ? parseNum(txForm.transactionTaxStr) : null
     const payload = {
       transactionType: txForm.transactionType,
       assetType: txForm.assetType,
@@ -649,6 +694,7 @@ const submit = async () => {
       tradeDate: txForm.tradeDate,
       shares, price,
       amount: parseNum(txForm.amountStr),
+      fee, transactionTax,
       exchangeRate,
       notes: txForm.notes || null
     }
