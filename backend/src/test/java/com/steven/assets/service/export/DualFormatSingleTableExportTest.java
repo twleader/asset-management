@@ -165,6 +165,9 @@ class DualFormatSingleTableExportTest {
         a.setAssetName("台積電"); a.setAssetCode("2330"); a.setTransactionType("BUY");
         a.setAssetType("STOCK"); a.setTradeDate(D1); a.setShares(new BigDecimal("1000"));
         a.setPrice(new BigDecimal("1105.500000")); a.setAmount(new BigDecimal("1105500"));
+        // Task 268 的兩欄：第一筆有值（驗 MONEY 格式），第二筆刻意留 null（驗無樣式 BLANK 格）。
+        // fee 的 null≠0 是刻意的語意，JSON 側必須維持 null 才分辨得出「沒記費用」與「確實免收」。
+        a.setFee(new BigDecimal("1575")); a.setTransactionTax(new BigDecimal("3316"));
         a.setMarket("TW"); a.setCurrency("TWD"); a.setChannel("元大");
         a.setExchangeRate(null); a.setNotes("備註");
         AssetTransaction b = new AssetTransaction();

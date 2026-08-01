@@ -73,6 +73,8 @@ class TradingRadarSnapshotStoreTest {
         TradingRadarDto.MarketSummary m = new TradingRadarDto.MarketSummary(
                 "NEUTRAL", "中性／等待確認", 40, true, false, "2026-07-20",
                 new BigDecimal("42449.70"), new BigDecimal("-0.52"),
+                // Task 265：weeklyMa（僅顯示，不參與評分）
+                new BigDecimal("42800.00"),
                 new BigDecimal("45650.14"), new BigDecimal("43601.32"), new BigDecimal("32564.92"),
                 new BigDecimal("22.5"), new BigDecimal("32.0"), "BELOW", "ABOVE",
                 List.of("最新價位於年線之上。"), List.of("最新價位於月線之下。"),

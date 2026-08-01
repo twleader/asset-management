@@ -1,5 +1,9 @@
 # [t222] 台股個股基本面資料每日抓取與歷史落地（TWSE／TPEx 開放 API）
 
+> ## ⛔ 本任務已由 [t266](t266_stock_fundamental_ingestion.md) 取代，不得再依本檔實作
+>
+> 本檔從未實作。其後續 t224 綁在 t223 的五組分組正規化框架上，而該框架已由 Task 264 改採扁平權重取代。資料來源限制（TWSE／TPEx 只給當期快照、MOPS 禁爬故歷史無法回補）的分析仍然有效，已移入 t266。
+
 **對應 Requirements:** Requirement 46（台股個股基本面資料每日抓取與歷史落地——因官方開放資料只給當期快照、不提供歷史查詢，系統須自上線第一天起自行累積時間序列，供交易雷達評分反映公司長期體質）
 **前置任務:** 無
 **Liquibase changeset:** `v1.68.0-stock-fundamentals.sql`
@@ -343,7 +347,7 @@ TWSE／TPEx openapi 本身即為 MOPS 資料的官方 JSON 轉發（TPEx 端點�
                                     （既有 isEtf() 白名單誤把個股 AVGO 列為 ETF、又漏掉使用者實際
                                     持有的 SGOV，刻意不複用）」
   EtfNavPoller.java:29             同旨
-  ExcelExportService.java:718      「刻意不做 isEtf 白名單判定（既有白名單誤含個股 AVGO、又漏掉持有的 SGOV）」
+  ExcelExportService.java:795      「刻意不做 isEtf 白名單判定（既有白名單誤含個股 AVGO、又漏掉持有的 SGOV）」
   ```
 
   故本任務**跟隨既有方向**，判定順序為：

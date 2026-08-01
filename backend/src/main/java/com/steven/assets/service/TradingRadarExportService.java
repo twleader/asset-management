@@ -5,9 +5,6 @@ import com.steven.assets.security.CurrentUserContext;
 import com.steven.assets.service.export.ExportDoc;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.poi.ss.usermodel.Cell;
-import org.apache.poi.ss.usermodel.Sheet;
-import org.apache.poi.ss.usermodel.Workbook;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -150,7 +147,10 @@ public class TradingRadarExportService {
         List<String> headers = List.of("快照時間", "代碼", "名稱", "市場", "資產類別", "持有", "還原權息",
                 "動作", "動作中文", "分數", "逆勢狀態", "逆勢中文", "現價", "漲跌%", "行情更新", "完成日K",
                 "MA20", "MA60", "MA240", "月線確認", "季線確認", "年線確認", "K", "D", "匯率分位",
-                "底層幣別", "資料完整", "支持訊號", "風險提醒", "逆勢條件", "逆勢風險");
+                "底層幣別", "資料完整",
+                // Task 264：二維決策的時機維度與其兩個輸入；ETF 折溢價（非 ETF 留白）
+                "時機", "季線乖離%", "52週位置", "折溢價%",
+                "支持訊號", "風險提醒", "逆勢條件", "逆勢風險");
         List<List<Object>> rows = new ArrayList<>();
         for (JsonNode s : snapshots) {
             String gen = txt(s, "generatedAt");
@@ -168,12 +168,55 @@ public class TradingRadarExportService {
                         txt(d, "monthlyConfirmation"), txt(d, "quarterlyConfirmation"),
                         txt(d, "annualConfirmation"), num(d, "kValue"), num(d, "dValue"),
                         num(d, "fxPercentile"), txt(d, "underlyingCurrency"), boolVal(d, "dataComplete"),
+                        // Task 264 的四欄（index 27–30）；缺欄位時 txt()→""、num()→null，與 main 的 cell() 一致
+                        txt(d, "timingLabel"), num(d, "ma60BiasPercent"),
+                        num(d, "week52Position"), num(d, "etfPremiumPct"),
                         listVal(d, "reasons"), listVal(d, "risks"),
                         listVal(d, "counterTrendReasons"), listVal(d, "counterTrendRisks")));
             }
         }
+        // 逐列對齊上面的 headers（35 欄）。**headers／此清單／rows 三者長度與順序必須一致**——
+        // Task 264 插欄時這一串落在 git 衝突標記之外、被三方合併靜默保留成舊的 31 欄版，
+        // `ExportDoc.Table` 的 compact constructor 才在 runtime 擲長度不符。拆成多行就是為了讓下次看得見。
+        List<ExportDoc.Format> formats = List.of(
+                ExportDoc.Format.TEXT,      // 0  快照時間
+                ExportDoc.Format.TEXT,      // 1  代碼
+                ExportDoc.Format.TEXT,      // 2  名稱
+                ExportDoc.Format.TEXT,      // 3  市場
+                ExportDoc.Format.TEXT,      // 4  資產類別
+                ExportDoc.Format.BOOL_ZH,   // 5  持有
+                ExportDoc.Format.BOOL_ZH,   // 6  還原權息
+                ExportDoc.Format.TEXT,      // 7  動作
+                ExportDoc.Format.TEXT,      // 8  動作中文
+                ExportDoc.Format.NUM2,      // 9  分數
+                ExportDoc.Format.TEXT,      // 10 逆勢狀態
+                ExportDoc.Format.TEXT,      // 11 逆勢中文
+                ExportDoc.Format.NUM2,      // 12 現價
+                ExportDoc.Format.NUM2,      // 13 漲跌%
+                ExportDoc.Format.TEXT,      // 14 行情更新
+                ExportDoc.Format.TEXT,      // 15 完成日K
+                ExportDoc.Format.NUM2,      // 16 MA20
+                ExportDoc.Format.NUM2,      // 17 MA60
+                ExportDoc.Format.NUM2,      // 18 MA240
+                ExportDoc.Format.TEXT,      // 19 月線確認
+                ExportDoc.Format.TEXT,      // 20 季線確認
+                ExportDoc.Format.TEXT,      // 21 年線確認
+                ExportDoc.Format.NUM2,      // 22 K
+                ExportDoc.Format.NUM2,      // 23 D
+                ExportDoc.Format.NUM2,      // 24 匯率分位
+                ExportDoc.Format.TEXT,      // 25 底層幣別
+                ExportDoc.Format.BOOL_ZH,   // 26 資料完整
+                ExportDoc.Format.TEXT,      // 27 時機          ┐ Task 264
+                ExportDoc.Format.NUM2,      // 28 季線乖離%      │
+                ExportDoc.Format.NUM2,      // 29 52週位置      │
+                ExportDoc.Format.NUM2,      // 30 折溢價%       ┘
+                ExportDoc.Format.LIST_LINES,// 31 支持訊號
+                ExportDoc.Format.LIST_LINES,// 32 風險提醒
+                ExportDoc.Format.LIST_LINES,// 33 逆勢條件
+                ExportDoc.Format.LIST_LINES // 34 逆勢風險
+        );
         return new ExportDoc.Sheet("個股決策",
-                List.of(new ExportDoc.Table(null, null, headers, true, false, false, List.of(ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.BOOL_ZH, ExportDoc.Format.BOOL_ZH, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.NUM2, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.NUM2, ExportDoc.Format.NUM2, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.NUM2, ExportDoc.Format.NUM2, ExportDoc.Format.NUM2, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.NUM2, ExportDoc.Format.NUM2, ExportDoc.Format.NUM2, ExportDoc.Format.TEXT, ExportDoc.Format.BOOL_ZH, ExportDoc.Format.LIST_LINES, ExportDoc.Format.LIST_LINES, ExportDoc.Format.LIST_LINES, ExportDoc.Format.LIST_LINES), rows)),
+                List.of(new ExportDoc.Table(null, null, headers, true, false, false, formats, rows)),
                 headers.size());
     }
 

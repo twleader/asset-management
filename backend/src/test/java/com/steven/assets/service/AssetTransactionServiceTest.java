@@ -24,8 +24,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * AssetTransactionService 單元測試（Requirement 49 / Task 237）。
- * 覆蓋 CRUD、年度分組彙總、amountTwd 三情境。
+ * AssetTransactionService 單元測試（Requirement 49 / Task 237、268）。
+ * 覆蓋 CRUD、年度分組彙總、amountTwd 三情境，以及手續費／證交稅純記錄欄
+ * （Task 268：讀寫正確、不參與 amountTwd 與年度彙總、null 與 0 可區分）。
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -38,17 +39,33 @@ class AssetTransactionServiceTest {
 
     private static AssetTransaction tx(String type, String currency, LocalDate date,
                                        BigDecimal amount, BigDecimal rate) {
+        return txWithCost(type, currency, date, amount, rate, null, null);
+    }
+
+    /** Task 268：帶手續費／證交稅的變體。 */
+    private static AssetTransaction txWithCost(String type, String currency, LocalDate date,
+                                               BigDecimal amount, BigDecimal rate,
+                                               BigDecimal fee, BigDecimal transactionTax) {
         return AssetTransaction.builder()
                 .transactionType(type).assetType("股票").assetName("台積電")
                 .currency(currency).tradeDate(date).amount(amount).exchangeRate(rate)
+                .fee(fee).transactionTax(transactionTax)
                 .build();
     }
 
     private static AssetTransactionDto.CreateAssetTransactionRequest req(
             String type, String currency, LocalDate date, BigDecimal amount, BigDecimal rate) {
+        return reqWithCost(type, currency, date, amount, rate, null, null);
+    }
+
+    /** Task 268：帶手續費／證交稅的變體。 */
+    private static AssetTransactionDto.CreateAssetTransactionRequest reqWithCost(
+            String type, String currency, LocalDate date, BigDecimal amount, BigDecimal rate,
+            BigDecimal fee, BigDecimal transactionTax) {
         return new AssetTransactionDto.CreateAssetTransactionRequest(
                 type, "股票", "台積電", "2330", "台股", currency, "富邦",
-                date, new BigDecimal("1000"), new BigDecimal("1000"), amount, rate, "備註");
+                date, new BigDecimal("1000"), new BigDecimal("1000"), amount,
+                fee, transactionTax, rate, "備註");
     }
 
     @Test
@@ -154,5 +171,103 @@ class AssetTransactionServiceTest {
         assertThat(y2025.sellCount()).isEqualTo(0);
         assertThat(y2025.totalBuyAmountTwd()).isEqualByComparingTo("1000");
         assertThat(y2025.totalSellAmountTwd()).isEqualByComparingTo("0");
+    }
+
+    // ===== Task 268：手續費／證交稅（純記錄欄）=====
+
+    @Test
+    void 建立時手續費與證交稅正確寫入() {
+        when(tenantGuard.requireCurrentUserId()).thenReturn(42L);
+        when(txRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        var resp = service.createAssetTransaction(reqWithCost("賣", "TWD", LocalDate.of(2026, 7, 1),
+                new BigDecimal("27000"), null, new BigDecimal("20"), new BigDecimal("81")));
+
+        ArgumentCaptor<AssetTransaction> cap = ArgumentCaptor.forClass(AssetTransaction.class);
+        verify(txRepo).save(cap.capture());
+        assertThat(cap.getValue().getFee()).isEqualByComparingTo("20");
+        assertThat(cap.getValue().getTransactionTax()).isEqualByComparingTo("81");
+        assertThat(resp.fee()).isEqualByComparingTo("20");
+        assertThat(resp.transactionTax()).isEqualByComparingTo("81");
+    }
+
+    @Test
+    void 手續費與證交稅為null時不影響amountTwd() {
+        when(txRepo.findAllByOrderByTradeDateDesc()).thenReturn(List.of(
+                txWithCost("買", "USD", LocalDate.of(2026, 5, 1),
+                        new BigDecimal("100"), new BigDecimal("32"), null, null)));
+
+        var r = service.getAssetTransactionsByYear().get(0).records().get(0);
+
+        assertThat(r.amountTwd()).isEqualByComparingTo("3200");
+        assertThat(r.fee()).isNull();
+        assertThat(r.transactionTax()).isNull();
+    }
+
+    /** 硬約束 B 的回歸錨點：兩欄不得參與 amountTwd 計算。 */
+    @Test
+    void 手續費與證交稅不參與amountTwd計算() {
+        when(txRepo.findAllByOrderByTradeDateDesc()).thenReturn(List.of(
+                txWithCost("買", "USD", LocalDate.of(2026, 5, 1),
+                        new BigDecimal("100"), new BigDecimal("32"),
+                        new BigDecimal("1"), new BigDecimal("2"))));
+
+        var r = service.getAssetTransactionsByYear().get(0).records().get(0);
+
+        // 仍是 100×32＝3200，不是 (100-1-2)×32＝3104，也不是 3200-1-2＝3197
+        assertThat(r.amountTwd()).isEqualByComparingTo("3200");
+        assertThat(r.amount()).isEqualByComparingTo("100");
+    }
+
+    /** 硬約束 C 的回歸錨點：兩欄不得參與年度彙總。 */
+    @Test
+    void 手續費與證交稅不參與年度彙總() {
+        when(txRepo.findAllByOrderByTradeDateDesc()).thenReturn(List.of(
+                txWithCost("買", "TWD", LocalDate.of(2026, 3, 1),
+                        new BigDecimal("1000"), null, new BigDecimal("20"), null),
+                txWithCost("賣", "TWD", LocalDate.of(2026, 4, 1),
+                        new BigDecimal("2000"), null, new BigDecimal("30"), new BigDecimal("6"))));
+
+        var y2026 = service.getAssetTransactionsByYear().get(0);
+
+        // 未扣費用：1000 與 2000，不是 980／1964
+        assertThat(y2026.totalBuyAmountTwd()).isEqualByComparingTo("1000");
+        assertThat(y2026.totalSellAmountTwd()).isEqualByComparingTo("2000");
+    }
+
+    @Test
+    void 更新時手續費送null即清空() {
+        AssetTransaction existing = txWithCost("買", "TWD", LocalDate.of(2026, 1, 1),
+                new BigDecimal("100"), null, new BigDecimal("20"), new BigDecimal("3"));
+        existing.setId(7L);
+        existing.setOwnerUserId(9L);
+        when(txRepo.findById(7L)).thenReturn(java.util.Optional.of(existing));
+        when(txRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        var resp = service.updateAssetTransaction(7L,
+                reqWithCost("買", "TWD", LocalDate.of(2026, 1, 1),
+                        new BigDecimal("100"), null, null, null));
+
+        assertThat(existing.getFee()).isNull();
+        assertThat(existing.getTransactionTax()).isNull();
+        assertThat(resp.fee()).isNull();
+        assertThat(resp.transactionTax()).isNull();
+    }
+
+    /** 硬約束 G 的回歸錨點：0（確實免收）與 null（沒記）不得被任一層互相轉換。 */
+    @Test
+    void 手續費為零與未填在response中可區分() {
+        when(txRepo.findAllByOrderByTradeDateDesc()).thenReturn(List.of(
+                txWithCost("賣", "TWD", LocalDate.of(2026, 5, 2),
+                        new BigDecimal("1000"), null, BigDecimal.ZERO, BigDecimal.ZERO),
+                txWithCost("買", "TWD", LocalDate.of(2026, 5, 1),
+                        new BigDecimal("1000"), null, null, null)));
+
+        var records = service.getAssetTransactionsByYear().get(0).records();
+
+        assertThat(records.get(0).fee()).isNotNull().isEqualByComparingTo("0");
+        assertThat(records.get(0).transactionTax()).isNotNull().isEqualByComparingTo("0");
+        assertThat(records.get(1).fee()).isNull();
+        assertThat(records.get(1).transactionTax()).isNull();
     }
 }

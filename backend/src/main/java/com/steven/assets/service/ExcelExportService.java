@@ -317,16 +317,21 @@ public class ExcelExportService {
     }
 
     /**
-     * 「交易紀錄」分頁（Requirement 49）：15 欄固定順序，涵蓋全部年度。
+     * 「交易紀錄」分頁（Requirement 49）：17 欄固定順序（Task 268 由 15 欄增為 17），涵蓋全部年度。
      * 台幣成交金額即時算（currency=USD 且 exchangeRate 非 null 時＝amount×exchangeRate，否則＝amount），不入庫。
+     *
+     * <p>手續費／證交稅（index 9、10）為純記錄欄，**不參與台幣成交金額計算**；未填時 {@link #cell}
+     * 對 null 不寫值，該格為空白（與同表 shares／price／exchangeRate 的既有行為一致）。
      */
     private ExportDoc.Sheet assetTransactionsSheet() {
         List<String> headers = List.of("資產名稱","代號","交易類型","資產類型","交易日期","數量","單價",
-                "成交金額","台幣成交金額","市場","幣別","券商通路","匯率","年度","備註");
+                "成交金額","台幣成交金額","手續費","證交稅","市場","幣別","券商通路","匯率","年度","備註");
         List<ExportDoc.Format> formats = List.of(
                 ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT,
                 ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.NUM4,
                 ExportDoc.Format.NUM6, ExportDoc.Format.MONEY, ExportDoc.Format.MONEY,
+                // 手續費／證交稅（Task 268，index 9、10）：對齊 main 的 st.money
+                ExportDoc.Format.MONEY, ExportDoc.Format.MONEY,
                 ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT,
                 ExportDoc.Format.NUM4, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT);
 
@@ -343,6 +348,10 @@ public class ExcelExportService {
                     tx.getPrice(),
                     tx.getAmount(),
                     assetTxAmountTwd(tx),
+                    // 純記錄欄，不參與台幣成交金額；null＝沒記費用、0＝確實免收，兩者語意不同不得互轉，
+                    // 故一律原值傳下去（omitNullCells=false → null 產生無樣式的 BLANK 格，與 main 的 cell() 一致）
+                    tx.getFee(),
+                    tx.getTransactionTax(),
                     tx.getMarket(),
                     tx.getCurrency(),
                     tx.getChannel(),

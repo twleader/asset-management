@@ -112,7 +112,9 @@
   - **快照索引**（`:93-122`）：r0 是一列提示文字（條件樣式，見 271.2.2）、r1 才是表頭列、其後為資料列，
     結尾 `autosize(sheet, headers.length)`（8 欄）。
   - **大盤總覽**（`:124-160`）：**沒有標題列**，**r0 就是表頭列**（20 欄），其後資料列。
-  - **個股決策**（`:161-212`）：**沒有標題列**，**r0 就是表頭列**（31 欄），其後資料列。
+  - **個股決策**（`:161-212`）：**沒有標題列**，**r0 就是表頭列**（35 欄），其後資料列。
+    （原為 31 欄；併入 main 時 Task 264 在「資料完整」後插入「時機」「季線乖離%」「52週位置」
+    「折溢價%」四欄，原 index 27–30 的四個陣列欄後移為 31–34。）
   **後兩張不得新增任何列**（含 section 標題列與 `Blank`）——多一列就是版面變動。
   它們的 doc 是單一 `Table`（`name = null`、`showHeader = true`、`labelFirstColumn = false`）。
   **三張分頁一律 `omitNullCells = false`**：該服務的 `cell()` 逐格無條件呼叫，null 時建 BLANK 格。
@@ -391,3 +393,12 @@ docker exec asset-business-services sh -c 'ls -l /home/steven/input/ | grep -E "
 6. **`arch-auditor` 指出 golden 的 provenance 無法從產物本身證明**（只有 POI 的 creator metadata）。
    結構佐證成立：`live_assets.xlsx` 的 0-based 第 3／9／14／19 列**不存在 `<row>` 元素**、第 2 列有 6 個 `<c>`
    ——正是「空行不建 Row」與「同列六格」的指紋，新實作若做錯就對不上。
+7. **併入 main 後個股決策由 31 欄變 35 欄。** merge `origin/main`（71bf6a29）時，Task 264 在
+   「資料完整」（index 26）之後插入「時機」（TEXT／`timingLabel`）、「季線乖離%」（NUM2／`ma60BiasPercent`）、
+   「52週位置」（NUM2／`week52Position`）、「折溢價%」（NUM2／`etfPremiumPct`），原 index 27–30 的四個
+   `LIST_LINES` 欄後移為 31–34。**大盤總覽（20 欄）與快照索引（8 欄）未變。**
+   **踩到的坑：`columnFormats` 那一串落在 git 衝突標記之外**，三方合併靜默保留了 31 欄版；
+   只改衝突區內的 headers／rows 會讓 `ExportDoc.Table` 的 compact constructor 在 runtime 擲
+   `IllegalArgumentException`（長度不符）。headers／formats／rows **三處必須同時改且順序一致**。
+   `golden/radar.xlsx` 與 `golden/radar_empty.xlsx` 已用合併後的 origin/main 重產（個股決策表頭列 35 格已驗）。
+   `TradingRadarDualFormatTest` 對「逆勢條件」的硬編 `getCell(29)` 隨之改為 `getCell(33)`。

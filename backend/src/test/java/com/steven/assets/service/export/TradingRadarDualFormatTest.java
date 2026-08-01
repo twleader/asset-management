@@ -152,9 +152,12 @@ class TradingRadarDualFormatTest {
         assertThat(signals.get(0).asText()).isEqualTo("均線多頭排列");
 
         // fixture 的 market 沒有 reasons 以外的陣列欄之一 → 缺欄位時 Excel 空字串格、JSON null
+        // index 33＝「逆勢條件」：Task 264 在 index 26 之後插入四欄，原本的 29 已變成「52週位置」（NUM2）。
         Sheet s = GoldenWorkbooks.read(service.exportForOwner(1L, 0L, 1L)).getSheet("個股決策");
-        assertThat(s.getRow(1).getCell(29).getCellType()).isEqualTo(CellType.STRING);
-        assertThat(s.getRow(1).getCell(29).getStringCellValue()).isEmpty();
+        assertThat(s.getRow(0).getCell(33).getStringCellValue())
+                .as("鎖住欄序：這個 index 一旦被插欄推移，下面兩條斷言會驗到別的欄位").isEqualTo("逆勢條件");
+        assertThat(s.getRow(1).getCell(33).getCellType()).isEqualTo(CellType.STRING);
+        assertThat(s.getRow(1).getCell(33).getStringCellValue()).isEmpty();
         JsonNode stockRows = mapper.readTree(jsonRenderer.render(service.radarDoc(1L, 0L, 1L)))
                 .at("/sheets/2/tables/0/rows");
         assertThat(stockRows.get(0).get("逆勢條件").isNull()).isTrue();
@@ -217,6 +220,11 @@ class TradingRadarDualFormatTest {
         s1.put("action", "HOLD"); s1.put("actionLabel", "續抱"); s1.put("score", 61.0);
         s1.put("price", 1105.0); s1.put("changePct", 0.45);
         s1.put("dataComplete", true);
+        // Task 264 的四欄：前三個給值（驗 TEXT／NUM2），etfPremiumPct 刻意不給
+        // ——2330 不是 ETF，「非 ETF 留白」正是該欄的真實語意，同時驗得到 num() 缺欄位的行為。
+        s1.put("timingLabel", "回檔買點");
+        s1.put("ma60BiasPercent", 12.75);
+        s1.put("week52Position", 88.50);
         s1.putArray("supportSignals").add("季線之上");
         s1.putArray("riskWarnings");
         return root;

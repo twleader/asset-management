@@ -19,7 +19,7 @@
 | `ExchangeRateExportScheduleService` | `台幣兌美元_{ownerId}_{yyyyMMdd}` | `台幣兌美元`（＝`ExcelExportService.exchangeRateLabel(currency)`） | 日期／即期買入／即期賣出／中間價（4 欄） |
 | `IndexExportScheduleService` | `{indexLabel(market)}_{ownerId}_{yyyyMMdd}` | `createSafeSheetName(indexLabel(market))` | 日期／開盤／最高／最低／收盤（5 欄） |
 | `CommodityExportScheduleService` | `油價金價_{ownerId}_{yyyyMMdd}` | `油價金價` | 日期／WTI原油(USD/桶)／布蘭特原油(USD/桶)／黃金(USD/盎司)（4 欄） |
-| `AssetTransactionExportScheduleService` | `交易紀錄_{ownerId}{_排程名}_{yyyyMMdd}` | `交易紀錄` | 15 欄固定順序（見 `writeAssetTransactionsSheet`） |
+| `AssetTransactionExportScheduleService` | `交易紀錄_{ownerId}{_排程名}_{yyyyMMdd}` | `交易紀錄` | **17** 欄固定順序（見 `assetTransactionsSheet()`；併入 main 時 Task 268 於 index 9、10 插入「手續費」「證交稅」，兩欄皆 `Format.MONEY`） |
 
 **「既有 Excel 內容不得減損」是本任務最大的風險**，判準是**逐列逐格 ＋ 儲存格樣式**（不是只比對表頭文字
 與列數）。這五份已經在使用者目錄裡累積了歷史檔案，欄位或樣式漂移會讓新舊檔無法並排比對。而且五份的
@@ -217,7 +217,9 @@
     - `AssetTransactionExcelExportTest`：它用 `@InjectMocks` 建 `ExcelExportService`，
       本任務為該 service 新增 `ExcelDocRenderer` 依賴後會被注入 `null` 而 NPE。
       **修法是注入一個真正的 `ExcelDocRenderer` 實例（不是 mock）**——
-      **它的分頁名／15 欄表頭／列數／儲存格值等斷言一字都不得改**：那是本任務唯一的既有逐格守門，
+      **它的分頁名／17 欄表頭／列數／儲存格值等斷言一字都不得改**：那是本任務唯一的既有逐格守門，
+      （原為 15 欄；併入 main 時 Task 268 在「台幣成交金額」後插入「手續費」「證交稅」兩欄，
+      該測試的 `EXPECTED_HEADERS` 與 `getCell(9)`／`getCell(10)` 斷言由 main 側帶入，同樣一字不改。）
       改掉等於把守門拆了。**那些斷言若在注入修好之後仍然紅，就是真回歸，要改的是實作不是測試。**
     **`ExportScheduleGdriveTest` 與 `TradingExportGdriveTest` 屬 t271 範圍**
     （前者測 `ExportScheduleService`＝資產總覽，後者 mock 的是 `TradingRadarExportService`／
@@ -298,3 +300,11 @@ docker exec asset-business-services sh -c 'ls -l /home/steven/input/ | grep 已�
 6. **三支服務的未使用 import、一段孤兒 javadoc、一處 `(int)` 窄化轉型**（`arch-auditor` 的 minor）已清。
 7. **`writeDual`／`applyGdriveStatus` 在五支服務各一份**，未再抽共用：五個 schedule entity 無共同介面，
    抽共用需先為它們建抽象；且淨帳上重複量是**下降**的（刪 4 份 `writeAtomically` ＋ 1 份 `writeToDir`）。
+8. **併入 main 後交易紀錄由 15 欄變 17 欄。** merge `origin/main`（71bf6a29）時，Task 268 在
+   「台幣成交金額」（index 8）之後插入「手續費」「證交稅」，兩欄 `Format.MONEY`（對齊 main 的 `st.money`）。
+   衝突解法是「**形狀取本任務的 `ExportDoc`、欄位內容取 main 的 17 欄**」——不得為了讓 golden 過而回退欄位。
+   `golden/asset_transactions.xlsx` 已用**合併後的 origin/main** ＋ 與 `DualFormatSingleTableExportTest.txs()`
+   逐字相同的 fixture 重產（表頭列 17 格已驗）。fixture 第一筆補上 `fee`／`transactionTax` 的值、
+   第二筆維持 null，兩欄的 MONEY 格式與 BLANK 語意各驗得到一邊。
+   `AssetTransactionExcelExportTest` 由 main 帶入 17 欄斷言與 `getCell(9)`／`getCell(10)` 的 BLANK 檢查，
+   它與 golden 互為獨立守門：前者驗「有值」、後者驗「逐格逐樣式」。

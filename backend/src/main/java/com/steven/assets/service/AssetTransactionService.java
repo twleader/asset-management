@@ -22,6 +22,11 @@ import java.util.TreeMap;
  * {@link TenantGuard#assertOwned(Long)} 驗歸屬（{@code findById} 不受 {@code @Filter} 約束）。
  *
  * <p>交易紀錄不算損益：衍生 {@code amountTwd}／{@code year} 於 {@link #toResponse} 即時計算，不入庫。
+ *
+ * <p>Task 268 的 {@code fee}／{@code transactionTax} 是**純記錄欄**：原樣讀寫，
+ * 不參與 {@code amountTwd} 計算、不參與 {@link #getAssetTransactionsByYear} 的年度彙總、
+ * 不回頭調整 {@code amount}。既有 59 列的 {@code amount} 本就依「含費用後之實際交割金額」語意輸入，
+ * 讓新欄位參與計算會在升級當下無聲改寫既有年度統計數字。
  */
 @Service
 @RequiredArgsConstructor
@@ -46,6 +51,8 @@ public class AssetTransactionService {
                 .shares(req.shares())
                 .price(req.price())
                 .amount(req.amount())
+                .fee(req.fee())
+                .transactionTax(req.transactionTax())
                 .exchangeRate(req.exchangeRate())
                 .notes(req.notes())
                 .build();
@@ -70,6 +77,9 @@ public class AssetTransactionService {
         tx.setShares(req.shares());
         tx.setPrice(req.price());
         tx.setAmount(req.amount());
+        // 全量取代語意：送 null 即清空該欄（與同表既有 shares／price／notes 一致）
+        tx.setFee(req.fee());
+        tx.setTransactionTax(req.transactionTax());
         tx.setExchangeRate(req.exchangeRate());
         tx.setNotes(req.notes());
 
@@ -137,6 +147,8 @@ public class AssetTransactionService {
                 tx.getShares(),
                 tx.getPrice(),
                 tx.getAmount(),
+                tx.getFee(),
+                tx.getTransactionTax(),
                 tx.getExchangeRate(),
                 tx.getNotes(),
                 amountTwd,

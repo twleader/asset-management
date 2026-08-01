@@ -35,7 +35,16 @@ public class TechnicalIndicatorService {
         return "0000".equals(code) && "台股".equals(market);
     }
 
-    /** 完整指標：MA20／60／240、當期 KD 與前一期 KD。 */
+    /**
+     * 完整指標：MA5／20／60／240、當期 KD 與前一期 KD。
+     *
+     * @param weeklyMa 週線（MA5，台股慣例的 5 個交易日；Task 265）。
+     *                 <b>刻意不進入 {@code TradingRadarRuleEngine.StockInput}、不參與評分與買進閘門</b>——
+     *                 5 個交易日的尺度與「獲利期間數周至兩年」的需求直接衝突，也與 Task 264 降低短線
+     *                 權重的方向相反。它只供畫面顯示與查證。
+     *                 <b>價基依呼叫路徑而不同</b>：{@link #computeFromSeries} 由呼叫端餵入（交易雷達餵還原序列），
+     *                 {@link #computeAll} 自行讀原始序列故為未還原值——此為 MA20/60/240 既有的同一限制。
+     */
     public record FullIndicators(
             BigDecimal monthlyMa,
             BigDecimal quarterlyMa,
@@ -43,9 +52,10 @@ public class TechnicalIndicatorService {
             BigDecimal k,
             BigDecimal d,
             BigDecimal previousK,
-            BigDecimal previousD) {
+            BigDecimal previousD,
+            BigDecimal weeklyMa) {
         public static final FullIndicators EMPTY = new FullIndicators(
-                null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null);
     }
 
     private record KdValues(BigDecimal k, BigDecimal d) {
@@ -58,6 +68,8 @@ public class TechnicalIndicatorService {
      */
     public record IndicatorPoint(
             LocalDate tradingDate,
+            /** 週線 MA5（Task 265）：台股慣例的 5 個交易日。 */
+            BigDecimal ma5,
             BigDecimal ma20,
             BigDecimal ma60,
             BigDecimal ma240,
@@ -135,6 +147,7 @@ public class TechnicalIndicatorService {
     FullIndicators computeFromSeries(List<StockPriceHistory> series) {
         if (series == null || series.isEmpty()) return FullIndicators.EMPTY;
 
+        BigDecimal ma5   = simpleMa(series, 5);
         BigDecimal ma20  = simpleMa(series, 20);
         BigDecimal ma60  = simpleMa(series, 60);
         BigDecimal ma240 = simpleMa(series, 240);
@@ -146,7 +159,8 @@ public class TechnicalIndicatorService {
         return new FullIndicators(
                 ma20, ma60, ma240,
                 currentKd.k(), currentKd.d(),
-                previousKd.k(), previousKd.d());
+                previousKd.k(), previousKd.d(),
+                ma5);
     }
 
     /**
@@ -188,6 +202,7 @@ public class TechnicalIndicatorService {
                         ? null
                         : BigDecimal.valueOf(100).subtract(p.rsv()).setScale(2, RoundingMode.HALF_UP);
                 out.add(new IndicatorPoint(date,
+                        maAt(asc, i, 5),
                         maAt(asc, i, 20), maAt(asc, i, 60), maAt(asc, i, 240),
                         p.k(), p.d(), p.j9(), p.k3d2(), p.rsv(),
                         m.ema12(), m.ema26(), m.dif(), m.macd(), m.osc(),
@@ -469,6 +484,7 @@ public class TechnicalIndicatorService {
             }
             if (desc.isEmpty()) return FullIndicators.EMPTY;
 
+            BigDecimal ma5   = taiexSimpleMa(desc, 5);
             BigDecimal ma20  = taiexSimpleMa(desc, 20);
             BigDecimal ma60  = taiexSimpleMa(desc, 60);
             BigDecimal ma240 = taiexSimpleMa(desc, 240);
@@ -480,7 +496,8 @@ public class TechnicalIndicatorService {
             return new FullIndicators(
                     ma20, ma60, ma240,
                     currentKd.k(), currentKd.d(),
-                    previousKd.k(), previousKd.d());
+                    previousKd.k(), previousKd.d(),
+                    ma5);
         } catch (Exception e) {
             log.warn("compute TAIEX indicators failed", e);
             return FullIndicators.EMPTY;

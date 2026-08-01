@@ -3,6 +3,7 @@ package com.steven.assets.service;
 import com.steven.assets.dto.TradingRadarDto;
 import com.steven.assets.model.AssetSnapshot;
 import com.steven.assets.model.Stock;
+import com.steven.assets.repository.EtfNavHistoryRepository;
 import com.steven.assets.repository.ExchangeRateHistoryRepository;
 import com.steven.assets.model.ExchangeRateHistory;
 import com.steven.assets.model.StockHolding;
@@ -60,6 +61,18 @@ public class TradingRadarService {
     private static final int FX_LOOKBACK_YEARS = 5;
     private static final String TWD = "TWD";
 
+    /**
+     * ETF 折溢價分位的回看筆數與最小樣本數（Task 264）。
+     *
+     * <p><b>必須用自身歷史分位而非絕對值評分</b>：不同 ETF 的常態折溢價水準差異極大（台灣債券 ETF
+     * 長期存在結構性溢價），用同一組絕對門檻套全部 ETF 會系統性誤判。絕對門檻另由規則引擎的硬否決處理。</p>
+     *
+     * <p><b>可用時程</b>：{@code etf_nav_history} 建表於 2026-07-19 且不回填，故本因子在上線後
+     * 約 3 個月內對每一檔 ETF 恆為 {@code null}（由權重重分配吸收）；絕對硬否決不受此限、即刻生效。</p>
+     */
+    private static final int ETF_PREMIUM_LOOKBACK_DAYS = 250;
+    private static final int ETF_PREMIUM_MIN_SAMPLES = 60;
+
     private final TradingRadarRuleEngine ruleEngine;
     private final TechnicalIndicatorService indicatorService;
     private final DistributionAdjustedPriceService adjustedPriceService;
@@ -73,6 +86,7 @@ public class TradingRadarService {
     private final StockRepository stockRepo;
     private final MarketDataService marketDataService;
     private final ExchangeRateHistoryRepository exchangeRateRepo;
+    private final EtfNavHistoryRepository etfNavHistoryRepo;
     private final TradingRadarSnapshotStore snapshotStore;
     private final CurrentUserContext currentUserContext;
 
@@ -85,12 +99,20 @@ public class TradingRadarService {
 
     private record Target(String code, String market, boolean held) {}
 
+    /**
+     * @param week52High         還原序列前 240（含 live 則 241）筆的最高價，供 52 週相對位置。
+     * @param week52Low          同上的最低價。
+     * @param kdBandWidthPercent 還原序列前 9 筆的高低帶寬度（%），供窄幅 KD 失效判定（Task 264）。
+     */
     private record TechnicalData(
             TechnicalIndicatorService.FullIndicators indicators,
             List<BigDecimal> completedCloses,
             BigDecimal previousAdjustedClose,
             BigDecimal completedChangePercent,
-            boolean distributionAdjusted
+            boolean distributionAdjusted,
+            BigDecimal week52High,
+            BigDecimal week52Low,
+            BigDecimal kdBandWidthPercent
     ) {}
 
     /**
@@ -215,6 +237,7 @@ public class TradingRadarService {
                     asOf,
                     price,
                     changePercent,
+                    ind.weeklyMa(),
                     ind.monthlyMa(),
                     ind.quarterlyMa(),
                     ind.annualMa(),
@@ -268,6 +291,11 @@ public class TradingRadarService {
             TradingRadarRuleEngine.Confirmation c240 = ruleEngine.confirm(closes, 240);
             String currency = underlyingCurrencyOf(stock.orElse(null), target.market());
             BigDecimal fxPct = fxPercentile(stock.orElse(null), target.market());
+            BigDecimal ma60Bias = biasPercent(price, ind.quarterlyMa());
+            BigDecimal ma240Bias = biasPercent(price, ind.annualMa());
+            BigDecimal week52Pos = week52Position(price, technical.week52High(), technical.week52Low());
+            BigDecimal etfPremiumPct = etfPremiumPct(target.code(), target.market());
+            BigDecimal etfPremiumPercentile = etfPremiumPercentile(target.code(), target.market(), etfPremiumPct);
             TradingRadarRuleEngine.StockResult result = ruleEngine.evaluateStock(
                     new TradingRadarRuleEngine.StockInput(
                             target.held(),
@@ -283,11 +311,17 @@ public class TradingRadarService {
                             instrumentType,
                             marketRegime,
                             marketStale,
-                            fxPct));
+                            fxPct,
+                            ma60Bias,
+                            ma240Bias,
+                            week52Pos,
+                            technical.kdBandWidthPercent(),
+                            etfPremiumPct,
+                            etfPremiumPercentile));
 
             List<String> reasons = new ArrayList<>();
             if (technical.distributionAdjusted()) {
-                reasons.add("MA／KD、兩日確認與規則漲跌已使用還原權息價，避免把配息缺口誤判為趨勢跌破。 ");
+                reasons.add("MA／KD、兩日確認與規則漲跌已使用還原權息／分割價，避免把配息缺口或分割跳空誤判為趨勢跌破。 ");
             }
             reasons.addAll(result.reasons());
 
@@ -324,7 +358,14 @@ public class TradingRadarService {
                     currency,
                     List.copyOf(reasons),
                     result.risks(),
-                    result.kdHeat().name());
+                    result.kdHeat().name(),
+                    result.timingState().name(),
+                    timingLabel(result.timingState()),
+                    ma60Bias,
+                    week52Pos,
+                    ind.weeklyMa(),
+                    etfPremiumPct,
+                    etfPremiumPercentile);
         } catch (Exception e) {
             log.warn("今日交易雷達：{} {} 組裝失敗", target.market(), target.code(), e);
             return incompleteStock(target, name, assetClass, "讀取個股資料失敗，該檔今日不交易。");
@@ -342,7 +383,8 @@ public class TradingRadarService {
         }
         if (combined.isEmpty()) {
             return new TechnicalData(
-                    TechnicalIndicatorService.FullIndicators.EMPTY, List.of(), null, null, false);
+                    TechnicalIndicatorService.FullIndicators.EMPTY, List.of(), null, null, false,
+                    null, null, null);
         }
 
         LocalDate fromDate = combined.get(combined.size() - 1).getTradingDate();
@@ -371,9 +413,78 @@ public class TradingRadarService {
                 ? changePercent(adjustedRows.get(firstCompleted).getClosePrice(),
                                 adjustedRows.get(firstCompleted + 1).getClosePrice())
                 : null;
+        // Task 264：52 週高低與 9 日帶寬一律取自同一份還原序列，與 MA／KD 同一價基
+        //（DistributionAdjustedPriceService 同時還原 high／low，見該檔 :112-113），
+        // 不違反「禁止混用原始／還原價」。
+        List<StockPriceHistory> window = adjustedRows.subList(0, indicatorRows);
+        BigDecimal week52High = maxHigh(window);
+        BigDecimal week52Low = minLow(window);
+        BigDecimal kdBandWidthPercent = bandWidthPercent(
+                adjustedRows.subList(0, Math.min(adjustedRows.size(), 9)));
+
         return new TechnicalData(
                 indicators, completedCloses, previousAdjustedClose,
-                completedChangePercent, adjustment.adjusted());
+                completedChangePercent, adjustment.adjusted(),
+                window.size() >= 240 ? week52High : null,
+                window.size() >= 240 ? week52Low : null,
+                kdBandWidthPercent);
+    }
+
+    /** 還原序列的最高價；全為 null 時回 null（不得以 0 充當）。 */
+    private BigDecimal maxHigh(List<StockPriceHistory> rows) {
+        BigDecimal max = null;
+        for (StockPriceHistory r : rows) {
+            BigDecimal h = r.getHighPrice() != null ? r.getHighPrice() : r.getClosePrice();
+            if (h == null) continue;
+            if (max == null || h.compareTo(max) > 0) max = h;
+        }
+        return max;
+    }
+
+    /** 還原序列的最低價；全為 null 時回 null。 */
+    private BigDecimal minLow(List<StockPriceHistory> rows) {
+        BigDecimal min = null;
+        for (StockPriceHistory r : rows) {
+            BigDecimal l = r.getLowPrice() != null ? r.getLowPrice() : r.getClosePrice();
+            if (l == null) continue;
+            if (min == null || l.compareTo(min) < 0) min = l;
+        }
+        return min;
+    }
+
+    /** 9 日高低帶寬度（%）：不足 9 筆、取不到高低或低點非正時回 null（缺值視同未觸發保護）。 */
+    private BigDecimal bandWidthPercent(List<StockPriceHistory> rows) {
+        if (rows.size() < 9) return null;
+        BigDecimal hi = maxHigh(rows);
+        BigDecimal lo = minLow(rows);
+        if (hi == null || lo == null || lo.signum() <= 0) return null;
+        return hi.subtract(lo)
+                .divide(lo, 8, RoundingMode.HALF_UP)
+                .multiply(BigDecimal.valueOf(100));
+    }
+
+    /** 現價對均線的乖離率（%）；均線缺值或非正時回 null。 */
+    private BigDecimal biasPercent(BigDecimal price, BigDecimal ma) {
+        if (price == null || ma == null || ma.signum() <= 0) return null;
+        return price.subtract(ma)
+                .divide(ma, 8, RoundingMode.HALF_UP)
+                .multiply(BigDecimal.valueOf(100));
+    }
+
+    /**
+     * 52 週相對位置，值域 {@code [0,1]}。
+     *
+     * <p><b>必須 clamp</b>：高低取自完成日 K 而 {@code price} 可能是 Redis 即時價，創 52 週新高當日
+     * {@code pos > 1} 會使因子貢獻超出 {@code [-1,+1]} 而破壞 {@code score ∈ [0,100]} 不變量。
+     * 此路徑只在創新高當天出現，平時測不到。</p>
+     */
+    private BigDecimal week52Position(BigDecimal price, BigDecimal high, BigDecimal low) {
+        if (price == null || high == null || low == null) return null;
+        BigDecimal range = high.subtract(low);
+        if (range.signum() <= 0) return null;
+        BigDecimal pos = price.subtract(low).divide(range, 8, RoundingMode.HALF_UP);
+        if (pos.signum() < 0) return BigDecimal.ZERO;
+        return pos.compareTo(BigDecimal.ONE) > 0 ? BigDecimal.ONE : pos;
     }
 
     private boolean shouldAddLiveRow(
@@ -523,6 +634,58 @@ public class TradingRadarService {
         }
     }
 
+    /**
+     * 現行 ETF 折溢價（%）。Redis 即時值優先，但<b>須驗 {@code navAsOf} 為最近一個交易日</b>；
+     * 不新鮮則退回 {@code etf_nav_history} 最新一筆。非 ETF 或查無回 {@code null}。
+     *
+     * <p>驗新鮮度的理由：{@code price:etfnav:*} 的 TTL 為 96 小時，不驗日期會讓最多 4 天前的折溢價
+     * 觸發硬否決。本專案剛為同類問題做過修正（大盤即時點位的日期驗證）。</p>
+     *
+     * <p><b>禁止由市價與淨值反推</b>（Task 259）：{@code premiumDiscountPct} 為 null 就是缺值。</p>
+     */
+    private BigDecimal etfPremiumPct(String code, String market) {
+        try {
+            var live = priceQueryService.getEtfNav(code, market);
+            if (live.isPresent() && live.get().premiumDiscountPct() != null
+                    && isFreshNav(live.get().navAsOf())) {
+                return live.get().premiumDiscountPct();
+            }
+            List<BigDecimal> recent = etfNavHistoryRepo.findRecentPremiumPct(
+                    code, market, org.springframework.data.domain.PageRequest.of(0, 1));
+            return recent.isEmpty() ? null : recent.get(0);
+        } catch (Exception e) {
+            log.warn("ETF 折溢價取得失敗（{}／{}）：{}", code, market, e.getMessage());
+            return null;
+        }
+    }
+
+    /** Redis 折溢價的 navAsOf 須等於當前台股交易日，否則視為不新鮮。 */
+    private boolean isFreshNav(String navAsOf) {
+        if (navAsOf == null || navAsOf.isBlank()) return false;
+        try {
+            return LocalDate.parse(navAsOf.substring(0, 10)).equals(currentTwTradingDay());
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** 現行折溢價在該 ETF 自身歷史分布中的百分位（0–100）；樣本不足或非 ETF 回 null。 */
+    private BigDecimal etfPremiumPercentile(String code, String market, BigDecimal current) {
+        if (current == null) return null;
+        try {
+            List<BigDecimal> history = etfNavHistoryRepo.findRecentPremiumPct(
+                    code, market,
+                    org.springframework.data.domain.PageRequest.of(0, ETF_PREMIUM_LOOKBACK_DAYS));
+            if (history.size() < ETF_PREMIUM_MIN_SAMPLES) return null;
+            long atOrBelow = history.stream().filter(v -> v.compareTo(current) <= 0).count();
+            return BigDecimal.valueOf(100.0 * atOrBelow / history.size())
+                    .setScale(1, RoundingMode.HALF_UP);
+        } catch (Exception e) {
+            log.warn("ETF 折溢價分位計算失敗（{}／{}）：{}", code, market, e.getMessage());
+            return null;
+        }
+    }
+
     private BigDecimal midRate(ExchangeRateHistory row) {
         if (row == null) return null;
         BigDecimal buy = row.getBuyRate();
@@ -541,7 +704,7 @@ public class TradingRadarService {
                 false,
                 true,
                 null,
-                null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null,
                 TradingRadarRuleEngine.Confirmation.UNAVAILABLE.name(),
                 TradingRadarRuleEngine.Confirmation.UNAVAILABLE.name(),
                 List.of(),
@@ -571,7 +734,10 @@ public class TradingRadarService {
                 null,
                 null,
                 List.of(), List.of(message),
-                TradingRadarRuleEngine.KdHeat.NORMAL.name());
+                TradingRadarRuleEngine.KdHeat.NORMAL.name(),
+                TradingRadarRuleEngine.TimingState.NEUTRAL.name(),
+                timingLabel(TradingRadarRuleEngine.TimingState.NEUTRAL),
+                null, null, null, null, null);
     }
 
     private String regimeLabel(TradingRadarRuleEngine.MarketRegime regime) {
@@ -580,6 +746,18 @@ public class TradingRadarService {
             case NEUTRAL -> "中性／等待確認";
             case RISK_OFF -> "偏空／降低風險";
             case DATA_INCOMPLETE -> "資料不足／今日不交易";
+        };
+    }
+
+    /** 進場時機的顯示文案（Task 264）。 */
+    public static String timingLabel(TradingRadarRuleEngine.TimingState state) {
+        if (state == null) return "—";
+        return switch (state) {
+            case EXTREME_OVERBOUGHT -> "極端超買";
+            case OVERBOUGHT -> "偏貴";
+            case NEUTRAL -> "中性";
+            case OVERSOLD -> "偏便宜";
+            case EXTREME_OVERSOLD -> "極端超賣";
         };
     }
 
