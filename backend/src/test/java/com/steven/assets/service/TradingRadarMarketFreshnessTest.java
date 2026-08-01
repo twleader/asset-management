@@ -3,6 +3,7 @@ package com.steven.assets.service;
 import com.steven.assets.dto.TradingRadarDto;
 import com.steven.assets.model.TwseIndexDailyHistory;
 import com.steven.assets.repository.AssetSnapshotRepository;
+import com.steven.assets.repository.EtfNavHistoryRepository;
 import com.steven.assets.repository.ExchangeRateHistoryRepository;
 import com.steven.assets.repository.StockAlertRepository;
 import com.steven.assets.repository.StockDividendHistoryRepository;
@@ -54,6 +55,7 @@ class TradingRadarMarketFreshnessTest {
     @Mock private StockRepository stockRepo;
     @Mock private MarketDataService marketDataService;
     @Mock private ExchangeRateHistoryRepository exchangeRateRepo;
+    @Mock private EtfNavHistoryRepository etfNavHistoryRepo;
     // Task 230：get() 回應前會 fail-soft 寫一筆 per-owner Redis 快照；本測試無 request context，
     // 該寫入路徑不會被觸發（RequestContextHolder 為 null），mock 僅供建構子。
     @Mock private TradingRadarSnapshotStore snapshotStore;
@@ -74,6 +76,7 @@ class TradingRadarMarketFreshnessTest {
                 stockRepo,
                 marketDataService,
                 exchangeRateRepo,
+                etfNavHistoryRepo,
                 snapshotStore,
                 currentUserContext);
     }
@@ -98,7 +101,7 @@ class TradingRadarMarketFreshnessTest {
                 new TechnicalIndicatorService.FullIndicators(
                         BigDecimal.valueOf(20000), BigDecimal.valueOf(20000), BigDecimal.valueOf(20000),
                         BigDecimal.valueOf(60), BigDecimal.valueOf(50),
-                        BigDecimal.valueOf(55), BigDecimal.valueOf(52)));
+                        BigDecimal.valueOf(55), BigDecimal.valueOf(52), null));
     }
 
     private PriceQueryService.LivePrice liveOn(LocalDate tradingDate, BigDecimal price) {

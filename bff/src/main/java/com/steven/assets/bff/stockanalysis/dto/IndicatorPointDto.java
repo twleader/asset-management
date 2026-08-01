@@ -8,6 +8,8 @@ import java.math.BigDecimal;
  */
 public record IndicatorPointDto(
         String tradingDate,
+        /** 週線 MA5（Task 265）。 */
+        BigDecimal ma5,
         BigDecimal ma20,
         BigDecimal ma60,
         BigDecimal ma240,

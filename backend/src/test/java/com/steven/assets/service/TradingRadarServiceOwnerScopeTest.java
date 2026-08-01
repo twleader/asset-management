@@ -2,6 +2,7 @@ package com.steven.assets.service;
 
 import com.steven.assets.dto.TradingRadarDto;
 import com.steven.assets.repository.AssetSnapshotRepository;
+import com.steven.assets.repository.EtfNavHistoryRepository;
 import com.steven.assets.repository.ExchangeRateHistoryRepository;
 import com.steven.assets.repository.StockAlertRepository;
 import com.steven.assets.repository.StockDividendHistoryRepository;
@@ -54,6 +55,7 @@ class TradingRadarServiceOwnerScopeTest {
     @Mock private StockRepository stockRepo;
     @Mock private MarketDataService marketDataService;
     @Mock private ExchangeRateHistoryRepository exchangeRateRepo;
+    @Mock private EtfNavHistoryRepository etfNavHistoryRepo;
     @Mock private TradingRadarSnapshotStore snapshotStore;
     @Mock private CurrentUserContext currentUserContext;
 
@@ -72,6 +74,7 @@ class TradingRadarServiceOwnerScopeTest {
                 stockRepo,
                 marketDataService,
                 exchangeRateRepo,
+                etfNavHistoryRepo,
                 snapshotStore,
                 currentUserContext);
     }

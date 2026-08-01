@@ -25,7 +25,7 @@
         <div class="card-head">
           <div>
             <span class="section-title">台股大盤風險</span>
-            <el-tag size="small" effect="plain" type="info" class="rule-tag">{{ radar.ruleVersion || 'TW_RULES_V8' }}</el-tag>
+            <el-tag size="small" effect="plain" type="info" class="rule-tag">{{ radar.ruleVersion || 'TW_RULES_V9' }}</el-tag>
           </div>
           <div class="as-of-group">
             <span class="as-of">完成日 K：{{ market.asOfDate || '資料不足' }}</span>
@@ -59,6 +59,7 @@
             <strong>{{ fmtNumber(market.price, 2) }}</strong>
             <span :style="{ color: priceColor(market.changePercent) }">{{ fmtPct(market.changePercent) }}</span>
           </div>
+          <div class="metric"><span class="metric-label">週線 MA5</span><strong>{{ fmtNumber(market.weeklyMa, 2) }}</strong></div>
           <div class="metric"><span class="metric-label">月線 MA20</span><strong>{{ fmtNumber(market.monthlyMa, 2) }}</strong></div>
           <div class="metric"><span class="metric-label">季線 MA60</span><strong>{{ fmtNumber(market.quarterlyMa, 2) }}</strong><small>{{ confirmationLabel(market.quarterlyConfirmation) }}</small></div>
           <div class="metric"><span class="metric-label">年線 MA240</span><strong>{{ fmtNumber(market.annualMa, 2) }}</strong><small>{{ confirmationLabel(market.annualConfirmation) }}</small></div>
@@ -108,12 +109,28 @@
             <div class="expand-panel">
               <div class="confirm-grid">
                 <div class="confirm-item">
+                  <span>週線 MA5</span><strong>{{ fmtNumber(row.weeklyMa, 2) }}</strong>
+                </div>
+                <div class="confirm-item">
                   <span>月線 MA20</span><strong>{{ fmtNumber(row.monthlyMa, 2) }}</strong>
                   <el-tag size="small" :type="confirmationType(row.monthlyConfirmation)" effect="plain">{{ confirmationLabel(row.monthlyConfirmation) }}</el-tag>
                 </div>
                 <div class="confirm-item">
                   <span>季線 MA60</span><strong>{{ fmtNumber(row.quarterlyMa, 2) }}</strong>
                   <el-tag size="small" :type="confirmationType(row.quarterlyConfirmation)" effect="plain">{{ confirmationLabel(row.quarterlyConfirmation) }}</el-tag>
+                </div>
+                <div class="confirm-item">
+                  <span>季線乖離</span><strong>{{ row.ma60BiasPercent == null ? '—' : fmtPct(row.ma60BiasPercent) }}</strong>
+                </div>
+                <div class="confirm-item">
+                  <span>52 週位置</span>
+                  <strong>{{ row.week52Position == null ? '—' : Math.round(row.week52Position * 100) + '%' }}</strong>
+                </div>
+                <div v-if="row.etfPremiumPct != null" class="confirm-item">
+                  <span>折溢價</span>
+                  <strong>{{ fmtPct(row.etfPremiumPct) }}<small
+                    v-if="row.etfPremiumPercentile != null"> · 自身歷史 {{ Math.round(row.etfPremiumPercentile) }} 分位</small><small
+                    v-else> · 分位資料累積中（需滿 60 個交易日）</small></strong>
                 </div>
                 <div class="confirm-item">
                   <span>年線 MA240</span><strong>{{ fmtNumber(row.annualMa, 2) }}</strong>
@@ -169,7 +186,7 @@
               </div>
               <div class="updated-at">
                 行情更新：{{ formatTime(row.priceUpdatedAt) }}　·　完成日 K：{{ row.asOfDate || '—' }}
-                <span v-if="row.distributionAdjusted">　·　技術價基：還原權息</span>
+                <span v-if="row.distributionAdjusted">　·　技術價基：還原權息／分割</span>
               </div>
             </div>
           </template>
@@ -181,7 +198,7 @@
             <div class="stock-name">{{ row.stockName }}</div>
             <div v-if="row.assetClass === 'BOND' || row.distributionAdjusted || row.fxPercentile != null" class="stock-meta">
               <el-tag v-if="row.assetClass === 'BOND'" size="small" type="info" effect="plain">債券</el-tag>
-              <el-tag v-if="row.distributionAdjusted" size="small" type="success" effect="plain">還原權息</el-tag>
+              <el-tag v-if="row.distributionAdjusted" size="small" type="success" effect="plain">還原權息／分割</el-tag>
               <el-tooltip
                 v-if="row.fxPercentile != null"
                 placement="top"
@@ -204,6 +221,16 @@
               <el-tag :type="actionType(row.action)" effect="dark">{{ row.actionLabel }}</el-tag>
             </el-tooltip>
             <el-tag v-else :type="actionType(row.action)" effect="dark">{{ row.actionLabel }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="時機" width="104" align="center">
+          <template #default="{ row }">
+            <el-tooltip v-if="row.timingState && row.timingState !== 'NEUTRAL'" :content="timingHint(row)" placement="top">
+              <el-tag :type="timingType(row.timingState)" :effect="timingEffect(row.timingState)">
+                {{ row.timingLabel }}
+              </el-tag>
+            </el-tooltip>
+            <span v-else class="muted">—</span>
           </template>
         </el-table-column>
         <el-table-column label="逆勢抄底" min-width="135" align="center">
@@ -583,7 +610,7 @@ const dirPickerPreview = computed(() => {
   if (!joined) return base
   return isGdrive ? base + joined : base + '/' + joined
 })
-const radar = ref({ market: {}, stocks: [], skippedNonTwStocks: 0, ruleVersion: 'TW_RULES_V8' })
+const radar = ref({ market: {}, stocks: [], skippedNonTwStocks: 0, ruleVersion: 'TW_RULES_V9' })
 const notificationVisible = ref(false)
 const notificationLoading = ref(false)
 const notificationSaving = ref(false)
@@ -870,6 +897,29 @@ function confirmationType(value) {
   return ({ ABOVE: 'danger', BELOW: 'success', MIXED: 'warning', UNAVAILABLE: 'info' })[value] || 'info'
 }
 
+function timingType(state) {
+  if (state === 'EXTREME_OVERBOUGHT' || state === 'EXTREME_OVERSOLD') return 'danger'
+  if (state === 'OVERBOUGHT' || state === 'OVERSOLD') return 'warning'
+  return 'info'
+}
+function timingEffect(state) {
+  return state === 'EXTREME_OVERBOUGHT' || state === 'EXTREME_OVERSOLD' ? 'dark' : 'plain'
+}
+// 文案只陳述「當前位置與狀態」，不得出現預測隔日漲跌的語句（Task 264）。
+function timingHint(row) {
+  switch (row.timingState) {
+    case 'EXTREME_OVERBOUGHT':
+      return '短線 KD 已達過熱且明顯偏離季線。若同時出現 KD 高檔死亡交叉，本日會轉為減碼候選。'
+    case 'OVERBOUGHT':
+      return '短線偏貴。其中 KD 過熱與 ETF 溢價過高會關閉買進閘門；單純的季線乖離偏高只反映在分數，不關閉閘門。'
+    case 'OVERSOLD':
+      return '短線偏便宜（KD 偏低或明顯低於季線）。'
+    case 'EXTREME_OVERSOLD':
+      return '已深度超跌，此位置不建議追殺出場；但年線兩日跌破且位於 52 週最低段者不套用此保護。'
+    default:
+      return ''
+  }
+}
 const trialBuyHint = '長線結構明確向上（年線之上且乖離足夠）、短線深度超賣並剛出現低檔黃金交叉、'
   + '且最近完成日已止跌。本質是接刀——僅適合小額分批、非全額進場；'
   + '長線判斷失準時虧損可能持續擴大。'

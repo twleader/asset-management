@@ -6,7 +6,7 @@ import java.util.List;
 /**
  * 今日交易雷達（Requirement 43）純讀 response。
  *
- * <p>所有分數／建議皆為 {@code TW_RULES_V8} 即時計算的衍生值，不入庫；
+ * <p>所有分數／建議皆為 {@code TW_RULES_V9} 即時計算的衍生值，不入庫；
  * {@code score=null} 代表必要資料不足，不以 0 分冒充有效判斷。</p>
  */
 public final class TradingRadarDto {
@@ -51,6 +51,8 @@ public final class TradingRadarDto {
             String asOfDate,
             BigDecimal price,
             BigDecimal changePercent,
+            /** 週線 MA5（Task 265）；僅供顯示，不參與評分。 */
+            BigDecimal weeklyMa,
             BigDecimal monthlyMa,
             BigDecimal quarterlyMa,
             BigDecimal annualMa,
@@ -111,6 +113,19 @@ public final class TradingRadarDto {
              * （動作降級為 HOLD／WATCH，分數不變）；<b>{@code ELEVATED} 純為揭露，
              * 不影響分數與動作</b>。</p>
              */
-            String kdHeat
+            String kdHeat,
+            /** 進場時機（Task 264）；供收合列辨識，並對動作做雙向覆寫。 */
+            String timingState,
+            String timingLabel,
+            /** 現價對季線的乖離率（%），V9 的均值回歸主因子。 */
+            BigDecimal ma60BiasPercent,
+            /** 52 週相對位置 [0,1]（已 clamp）。 */
+            BigDecimal week52Position,
+            /** 週線 MA5（Task 265）；僅供顯示，不參與評分與買進閘門。 */
+            BigDecimal weeklyMa,
+            /** ETF 折溢價（%）；非 ETF 為 null，畫面不得顯示為 0。 */
+            BigDecimal etfPremiumPct,
+            /** ETF 折溢價的自身歷史分位（0–100）；樣本不足或非 ETF 為 null。 */
+            BigDecimal etfPremiumPercentile
     ) {}
 }
