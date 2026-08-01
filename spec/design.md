@@ -3245,7 +3245,7 @@ GET  /api/bff/asset-history/export                    → GET  /api/snapshots/ex
 
 ### 關鍵業務邏輯
 
-- **匯出內容單一來源**：`ExcelExportService.buildWorkbook()` 產出活頁簿＝`writeCurrentSummarySheet()`（第一張，讀最新快照彙總）＋每快照一張 `writeSnapshotSheet()`＋`writeRealizedGainsSheet()`。
+- **匯出內容單一來源**：`ExcelExportService.buildWorkbook()` 產出活頁簿＝`writeCurrentSummarySheet()`（第一張，讀最新快照彙總）＋每快照一張 `writeSnapshotSheet()`＋`realizedGainsSheet()`（Requirement 55／Task 270 起由 `writeRealizedGainsSheet()` 改為回傳 `ExportDoc.Sheet`，`buildWorkbook()` 內以 `ExcelDocRenderer.writeSheet(wb, sheet)` 寫入）。
   - `exportFull()`：`@Transactional(readOnly=true)`，HTTP 情境靠 `TenantFilterAspect` 自動 owner-scoped，呼叫 `buildWorkbook()`。
   - `exportFullForOwner(Long ownerId)`：`@Transactional(readOnly=true)`，於 session 手動 `entityManager.unwrap(Session.class).enableFilter("ownerFilter").setParameter("ownerId", ownerId)` 後呼叫同一 `buildWorkbook()`（背景排程用；aspect 於背景不啟用、不覆寫）。
 - **當前彙總總表**：讀最新一筆 `asset_snapshot`，欄位：匯出時間、最新快照日期、美元匯率、資產總計、存款總計、股票現值／成本／未實現損益、基金現值／成本／未實現損益、預估年配息、當年度已實現損益。無快照時寫「尚無快照」提示列。
@@ -3260,16 +3260,16 @@ GET  /api/bff/asset-history/export                    → GET  /api/snapshots/ex
 
 ### 本次增修（排程改匯出「當前即時資產」＋家目錄為根＋檔案總管式資料夾選擇）
 
-- **排程／run-now 改匯出「當前即時資產」**：`ExcelExportService` 新增 `exportLiveAssets()`（HTTP，aspect owner-scoped）與 `exportLiveAssetsForOwner(Long ownerId)`（背景，手動 `enableFilter`），皆走 `buildLiveWorkbook()`。內容單一來源＝`StockPriceService.getLiveAssets()`（最新快照持股 × Redis 即時股價，與 Dashboard 首頁「當前資產」同一數字；存款／基金沿用最新快照凍結值），股票逐檔以 `(code, market)` 對映即時價與即時現值；deposits／funds 明細讀最新快照（`AssetSnapshotRepository.findLatest()` 後於同交易 lazy load）。排版比照 `writeSnapshotSheet`（銀行存款／基金／股票分區，股票加「即時價」欄、現值用即時值，投資成本共用抽出的 `stockCostTwd()` 換匯），末段列即時彙總（存款總計／基金現值／即時股票現值／即時總資產）。`ExportScheduleService.runNowForCurrentUser()` 改呼叫 `exportLiveAssets()`、`runScheduled()` 改呼叫 `exportLiveAssetsForOwner()`。手動「匯出 Excel」（`/api/snapshots/export` → `exportFull()` 多分頁歷次）維持不變。
+- **排程／run-now 改匯出「當前即時資產」**：`ExcelExportService` 新增 `exportLiveAssets()`（HTTP，aspect owner-scoped）與 `exportLiveAssetsForOwner(Long ownerId)`（背景，手動 `enableFilter`），皆走 `liveAssetsDoc()`／`liveAssetsDocForOwner()`（Requirement 55／Task 271 起由 `buildLiveWorkbook()` 改為回傳 `ExportDoc`，再由 `ExcelDocRenderer`／`JsonDocRenderer` 各 render 一份）。內容單一來源＝`StockPriceService.getLiveAssets()`（最新快照持股 × Redis 即時股價，與 Dashboard 首頁「當前資產」同一數字；存款／基金沿用最新快照凍結值），股票逐檔以 `(code, market)` 對映即時價與即時現值；deposits／funds 明細讀最新快照（`AssetSnapshotRepository.findLatest()` 後於同交易 lazy load）。排版比照 `writeSnapshotSheet`（銀行存款／基金／股票分區，股票加「即時價」欄、現值用即時值，投資成本共用抽出的 `stockCostTwd()` 換匯），末段列即時彙總（存款總計／基金現值／即時股票現值／即時總資產）。`ExportScheduleService.runNowForCurrentUser()` 改呼叫 `exportLiveAssets()`、`runScheduled()` 改呼叫 `exportLiveAssetsForOwner()`。手動「匯出 Excel」（`/api/snapshots/export` → `exportFull()` 多分頁歷次）維持不變。
 - **家目錄為根**：`EXPORT_OUTPUT_DIR` 預設由 `/data/export-output` 改為 `/home/steven`；volume host 端由 `/Users/steven/Project/SRPP/data` 改為 `/Users/steven`。`output_subpath` 仍為相對子路徑（相對家目錄根），路徑安全驗證邏輯不變。
 - **檔案總管式資料夾選擇（唯讀 browse）**：`ExportScheduleService.browse(subpath)` 以 `startsWith(base)` 驗證後 `Files.list` 僅取子目錄（隱藏 dotfiles、依名稱排序），回 `BrowseResponse{baseDir, subpath, absolutePath, directories:[{name, path}]}`；`ExportScheduleController` 加 `GET /browse`，BFF passthrough。前端 `AssetHistoryView.vue` 標題改「排程自動匯出最新資產」，輸出資料夾改 `el-tree` 懶載入樹狀選擇對話框（`load` 呼叫 browse 逐層展開，點選節點取相對子路徑）＋可選填「新增子資料夾名稱」（寫檔時 `Files.createDirectories` 自動建立，故 browse 保持唯讀、無需新增變更檔案系統的端點）。
 
 ### 「股票（即時）」分頁增列即時報價與技術指標欄（Task 200）
 
-- **欄位增列**：`ExcelExportService.writeLiveAssetsSheet` 的股票分頁在「即時價」後插入 `昨收／漲跌／漲跌幅(%)`，並於分頁末增列 `月線價／季線價／年線價／KD值`。完整欄序（0–17）：`券商／市場／代號／名稱／股數／投資成本／即時價／昨收／漲跌／漲跌幅(%)／即時現值／預估配息／交易類型／交易日期／月線價／季線價／年線價／KD值`。
+- **欄位增列**：`ExcelExportService.liveAssetsSheet`（Requirement 55／Task 271 起由 `writeLiveAssetsSheet` 改為回傳 `ExportDoc.Sheet`）的股票分頁在「即時價」後插入 `昨收／漲跌／漲跌幅(%)`，並於分頁末增列 `月線價／季線價／年線價／KD值`。完整欄序（0–17）：`券商／市場／代號／名稱／股數／投資成本／即時價／昨收／漲跌／漲跌幅(%)／即時現值／預估配息／交易類型／交易日期／月線價／季線價／年線價／KD值`。
 - **昨收／漲跌／漲跌幅單一來源**：`StockPriceService.LiveStockItem` record 於末尾擴增 `previousClose／priceChange／changePercent` 三欄，於 `getLiveAssets()` 由**同一筆** `PriceQueryService.LivePrice` 帶出（該筆本已在迴圈內讀取，零額外 Redis 讀取），與「即時價」同一 tick，確保「即時價 − 昨收 = 漲跌」一致。此為向後相容的末尾擴欄——`GET /api/market-data/live-assets`（Dashboard）JSON 多回三欄、既有前端忽略；建構點僅 `StockPriceService` 一處、無測試以位置參數建構此 record。
 - **月／季／年線與 KD**：`ExcelExportService` 注入既有共用權威 `TechnicalIndicatorService`，逐 `(code, market)` 呼叫 `computeAll()` 取 `FullIndicators{monthlyMa, quarterlyMa, annualMa, k, d}`（資料源 `stock_price_history` 近 240 筆；與觀察清單／警示同一計算，符合「同義欄位同一 business service」）。以 `Map<code|market, FullIndicators>` 於單次匯出內快取，同股多券商列僅計算一次。KD 併為單一「KD值」欄字串 `K {k} / D {d}`（k/d 皆為 `computeAll` 已 scale 2 位之 BigDecimal，任一為 null 以 `—` 佔位）。
-- **儲存格樣式**：昨收沿用即時價 `num4`；漲跌／漲跌幅／月線／季線／年線用新增 `num2`（`#,##0.00`）；KD值為純字串。查無即時報價或歷史不足者相應欄留白（`cell()` 遇 null 不寫值）。此增列同時作用於 run-now（`exportLiveAssets`）與排程（`exportLiveAssetsForOwner`），皆共用 `writeLiveAssetsSheet`。
+- **儲存格樣式**：昨收沿用即時價 `num4`；漲跌／漲跌幅／月線／季線／年線用新增 `num2`（`#,##0.00`）；KD值為純字串。查無即時報價或歷史不足者相應欄留白（`cell()` 遇 null 不寫值）。此增列同時作用於 run-now（`exportLiveAssets`）與排程（`exportLiveAssetsForOwner`），皆共用 `liveAssetsSheet`（Task 271 前為 `writeLiveAssetsSheet`）。
 
 ### ETF 淨值與折溢價欄（Task 214）
 
@@ -3386,7 +3386,7 @@ pct_origin VARCHAR(20)`。不回填既有 186 列（皆為 `TWSE`／`Yahoo Finan
 
 ### 資產總覽活頁簿改為「總表 ＋ 每檔持股一張過去一年股價分頁」（Task 206）
 
-- **活頁簿結構**：`buildLiveWorkbook()` 在既有 `writeLiveAssetsSheet`（第一張「當前即時資產」）之後追加 `writeStockPriceHistorySheets(wb, st, latest)`，逐檔產生一張股價分頁。run-now 與每日排程共用同一 `buildLiveWorkbook()`，故兩條路徑內容一致；`exportFull()`（歷年多快照活頁簿）不受影響。
+- **活頁簿結構**：`liveAssetsDoc()` 在 `liveAssetsSheet`（第一張「當前即時資產」）之後追加 `stockPriceHistorySheets(latest)`，逐檔產生一張股價分頁（Requirement 55／Task 271 起由 `buildLiveWorkbook()`／`writeLiveAssetsSheet`／`writeStockPriceHistorySheets` 改為回傳 `ExportDoc`／`ExportDoc.Sheet`）。run-now 與每日排程共用同一份 `ExportDoc`，故兩條路徑內容一致，且 `.xlsx` 與 `.json` 兩份必然同源；`exportFull()`（歷年多快照活頁簿）不受影響。
 - **持股清單與去重**：來源為第一張分頁**同一個** `AssetSnapshot latest`（同一交易內 lazy load，不另查）；以 `LinkedHashSet<code|market>` 去重並保留總表順序，同檔多券商只出一張。`latest == null`（尚無快照）時不產生任何股價分頁。
 - **資料查詢**：`StockPriceHistoryRepository.findByStockCodeAndMarketAndTradingDateBetweenOrderByTradingDateAsc(code, market, today.minusYears(1), today)`（`today` 取 `Asia/Taipei`）——沿用既有派生查詢，不新增 repository 方法。`stock_price_history` 為收盤價唯一權威來源（`HistoricalDataService.purgeOldHistory` 保留 10 年），與 `TechnicalIndicatorService` 的 MA/KD 同源，故匯出的收盤價與總表末四欄的技術指標必然自洽；匯出過程零外部行情呼叫。
 - **分頁內容**：第 0 列表頭 `日期／開盤價／最高價／最低價／收盤價／成交量`，其後每交易日一列。日期以 `ISO` 格式寫成**文字**（同油價金價／匯率分頁的既有理由：避免時區位移）；OHLC 用 `num4`、成交量為整數不套小數樣式。開高低與成交量在 DB 可空（`StockPriceHistory` 僅 `close_price NOT NULL`），該格留白不補值。**查無資料仍建立只有表頭的空分頁**，讓「持有但無資料」與「未持有」可區分。
@@ -3577,7 +3577,7 @@ RealizedGainView el-tree 懶載入
 
 3. **背景排程的租戶隔離（與 Requirement 37 的關鍵差異）**：`RealizedGain` 帶 `@Filter(ownerFilter)`。交易日曆是全域市場資料，背景產檔不需資料過濾；已實現損益是 per-user 資料，背景 `findAll()` 若不 `enableFilter` 會把**所有使用者的損益寫進每個人的檔案**。故新增 `exportRealizedGainsForOwner(Long ownerId)`，比照既有 `exportFullForOwner` / `exportLiveAssetsForOwner` 在 session 手動啟用 filter。
 
-4. **排程與手動產出同一份**：`exportRealizedGains()` 與 `exportRealizedGainsForOwner()` 共用同一個 `buildRealizedGainsWorkbook()`，兩者只差 filter 啟用方式，確保三個入口（下載／run-now／排程）內容一致。
+4. **排程與手動產出同一份**：`exportRealizedGains()` 與 `exportRealizedGainsForOwner()` 共用同一個 `realizedGainsSheet()`（Requirement 55／Task 270 起由 `buildRealizedGainsWorkbook()` 改為 `realizedGainsDoc()`／`realizedGainsDocForOwner()` → `ExportDoc`），兩者只差 filter 啟用方式，確保三個入口（下載／run-now／排程）內容一致。
 
 ### 資料模型
 
@@ -5267,7 +5267,7 @@ CREATE INDEX IF NOT EXISTS idx_at_export_schedule_owner ON asset_transaction_exp
 
 ### 檔名與覆寫
 
-`交易紀錄_{ownerId}_{YYYYMMDD}.xlsx`；`name` 非空時 `交易紀錄_{ownerId}_{name}_{YYYYMMDD}.xlsx`。同 owner 兩筆同資料夾同檔名時後者覆寫前者：兩份都是**執行當下**的完整資料（三入口共用 `buildAssetTransactionsWorkbook()`、皆涵蓋全部年度，不會缺年度），但**不是同一時點的快照**——兩次執行之間的 CRUD 只反映在後者。UI 須明示此行為。`name` 白名單驗證（`^[\p{IsHan}A-Za-z0-9_\- ]{1,20}$`）在寫入端擋下，因為它會直接進檔名。
+`交易紀錄_{ownerId}_{YYYYMMDD}.xlsx`；`name` 非空時 `交易紀錄_{ownerId}_{name}_{YYYYMMDD}.xlsx`。同 owner 兩筆同資料夾同檔名時後者覆寫前者：兩份都是**執行當下**的完整資料（三入口共用 `assetTransactionsSheet()`、皆涵蓋全部年度，不會缺年度），但**不是同一時點的快照**——兩次執行之間的 CRUD 只反映在後者。UI 須明示此行為。`name` 白名單驗證（`^[\p{IsHan}A-Za-z0-9_\- ]{1,20}$`）在寫入端擋下，因為它會直接進檔名。
 
 ### 多租戶
 
@@ -5509,7 +5509,7 @@ DualResult write(Long ownerUserId, Path dir, String baseName,
 
 | 匯出點 | 改法 |
 |---|---|
-| 1 資產總覽、2 已實現損益、3 匯率、4 指數、5 交易紀錄、6 油價金價 | `ExcelExportService` 對應的 `buildXxxWorkbook()` 改為 `buildXxxDoc() → ExportDoc`，Excel 由 `ExcelDocRenderer` 產出。手動下載端點改呼叫 `ExcelDocRenderer.render(buildXxxDoc())`，**產物必須與改動前一致**。 |
+| 1 資產總覽、2 已實現損益、3 匯率、4 指數、5 交易紀錄、6 油價金價 | `ExcelExportService` 對應的 `buildXxxWorkbook()` 改為回傳 `ExportDoc` 的 `xxxDoc()`（實際符號：`liveAssetsDoc()`／`realizedGainsDoc()`／`exchangeRatesDoc()`／`indexDailyDoc()`／`assetTransactionsDoc()`／`commodityPricesDoc()`，各另有 `…ForOwner` 版），Excel 由 `ExcelDocRenderer` 產出。手動下載端點改呼叫 `ExcelDocRenderer.render(xxxDoc())`，**產物必須與改動前一致**。 |
 | 7 交易雷達 | `TradingRadarExportService.build()` 的三分頁（快照索引／大盤總覽／個股決策）改建 `ExportDoc`。**四支取值輔助 `txt`／`num`／`bool`／`list`（`:213-236`）不得照用**——它們把缺值轉成 `""`、boolean 轉成「是」／「否」、陣列以 `\n` 串接，那是 Excel 的顯示決定；doc 裡一律放語意值（`null`／`Boolean`／`List<String>`），呈現交給 `Format.BOOL_ZH`／`LIST_LINES`。「快照索引」的標題列走 `SECTION_12`（該服務的 section 是 12pt）。 |
 | 8 交易日曆 | `TradingCalendarExportService.exportToDir(year, format, subpath)` → `exportToDir(year, subpath)`，一律兩份。`FORMAT_JSON`／`FORMAT_EXCEL`／`requireValidFormat` 移除；DB 欄位 `trading_calendar_export_schedule.format` **保留但停用**（entity 上標 `@Deprecated`，程式一律不讀寫）。**既有 `buildJson` 的 JSON 結構為對外契約、不得改變**——它不走 `JsonDocRenderer`，維持既有形狀。故本匯出點是十個裡唯一**不接** `ExportDoc` 的（它本來就有兩個 builder、且共吃同一份 `buildDays(year)`），只把落檔換成共用元件。**注意 `getTwHolidays(year)` 在改動前就已被呼叫兩次**（`buildDays` 一次、`buildJson` 組 `holidays` 區塊再一次），單次查詢探針不可寫成 `times(1)`。 |
 | 9 警示觸發 | 既有 JSON **輸出 byte 不變**，但需一次最小重構：`buildJson(...)` 目前直接回 `byte[]`（`:292-300` 內組 `ObjectNode root`），拆成 `ObjectNode buildPayload(...)` ＋ 既有序列化兩步，讓 xlsx 能吃同一份 payload。新增 `ExportDoc alertTriggersDoc(ObjectNode payload)`（**型別是 `ObjectNode` 不是 `Map<String,Object>`**），`KvRow`＝檔層級欄位、單一 Table＝`triggers` 陣列，再 render 成 xlsx。|
