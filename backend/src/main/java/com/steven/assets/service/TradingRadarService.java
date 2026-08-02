@@ -238,7 +238,8 @@ public class TradingRadarService {
                     result.reasons(),
                     result.risks(),
                     liveFreshToday,
-                    liveUpdatedAt);
+                    liveUpdatedAt,
+                    toDto(ind.extended()));
             return new MarketState(summary, result.regime(), stale);
         } catch (Exception e) {
             log.warn("今日交易雷達：大盤資料組裝失敗", e);
@@ -358,7 +359,8 @@ public class TradingRadarService {
                     week52Pos,
                     ind.weeklyMa(),
                     etfPremiumPct,
-                    etfPremiumPercentile);
+                    etfPremiumPercentile,
+                    toDto(ind.extended()));
         } catch (Exception e) {
             log.warn("今日交易雷達：{} {} 組裝失敗", target.market(), target.code(), e);
             return incompleteStock(target, name, assetClass, "讀取個股資料失敗，該檔今日不交易。");
@@ -597,6 +599,23 @@ public class TradingRadarService {
         return buy.add(sell).divide(BigDecimal.valueOf(2), 6, RoundingMode.HALF_UP);
     }
 
+    /**
+     * 指標服務的擴充指標 → DTO（Task 280）。
+     *
+     * <p><b>只搬這 14 個值。</b>{@code FullIndicators} 的 MA／K／D 一律維持既有取法
+     *（{@code ind.monthlyMa()} 等），不得改由這裡供給——同一列出現兩個 MA 來源就是漂移的開端。</p>
+     */
+    private static TradingRadarDto.ExtendedIndicators toDto(
+            TechnicalIndicatorService.ExtendedIndicators e) {
+        if (e == null) return null;
+        return new TradingRadarDto.ExtendedIndicators(
+                e.j9(), e.k3d2(), e.rsv(),
+                e.ema12(), e.ema26(), e.dif(), e.macd(), e.osc(),
+                e.rsi5(), e.rsi10(),
+                e.bias10(), e.bias20(), e.b10b20(),
+                e.wr9());
+    }
+
     private MarketState incompleteMarket(String message) {
         TradingRadarDto.MarketSummary summary = new TradingRadarDto.MarketSummary(
                 TradingRadarRuleEngine.MarketRegime.DATA_INCOMPLETE.name(),
@@ -611,6 +630,7 @@ public class TradingRadarService {
                 List.of(),
                 List.of(message),
                 false,
+                null,
                 null);
         // 讀不到大盤時保守視為 stale：買進閘門一律關閉。
         return new MarketState(summary, TradingRadarRuleEngine.MarketRegime.DATA_INCOMPLETE, true);
@@ -638,7 +658,7 @@ public class TradingRadarService {
                 TradingRadarRuleEngine.KdHeat.NORMAL.name(),
                 TradingRadarRuleEngine.TimingState.NEUTRAL.name(),
                 timingLabel(TradingRadarRuleEngine.TimingState.NEUTRAL),
-                null, null, null, null, null);
+                null, null, null, null, null, null);
     }
 
     private String regimeLabel(TradingRadarRuleEngine.MarketRegime regime) {

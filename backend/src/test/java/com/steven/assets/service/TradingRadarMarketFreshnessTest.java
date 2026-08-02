@@ -104,7 +104,7 @@ class TradingRadarMarketFreshnessTest {
                 new TechnicalIndicatorService.FullIndicators(
                         BigDecimal.valueOf(20000), BigDecimal.valueOf(20000), BigDecimal.valueOf(20000),
                         BigDecimal.valueOf(60), BigDecimal.valueOf(50),
-                        BigDecimal.valueOf(55), BigDecimal.valueOf(52), null));
+                        BigDecimal.valueOf(55), BigDecimal.valueOf(52), null, TechnicalIndicatorService.ExtendedIndicators.EMPTY));
     }
 
     private PriceQueryService.LivePrice liveOn(LocalDate tradingDate, BigDecimal price) {

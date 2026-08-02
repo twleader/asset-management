@@ -53,9 +53,40 @@ public class TechnicalIndicatorService {
             BigDecimal d,
             BigDecimal previousK,
             BigDecimal previousD,
-            BigDecimal weeklyMa) {
+            BigDecimal weeklyMa,
+            /** 走勢圖指標選單同一組值（Task 280）；純揭露，不進評分。 */
+            ExtendedIndicators extended) {
         public static final FullIndicators EMPTY = new FullIndicators(
-                null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, ExtendedIndicators.EMPTY);
+    }
+
+    /**
+     * 走勢圖指標選單（Task 262）同一組值的單點版（Task 280）。
+     *
+     * <p>暖機／視窗不足的欄位為 {@code null}（不是 0）；全部 {@code setScale(2, HALF_UP)}。
+     * 價基由 {@link #computeFromSeries} 的呼叫端決定（交易雷達餵還原權息序列），
+     * 與同一份 {@link FullIndicators} 的 {@code k}／{@code d} 出自同一個 {@code series} 參數。</p>
+     *
+     * <p><b>純揭露：一律不進 {@code TradingRadarRuleEngine} 的 StockInput／MarketInput</b>——
+     * 要接進評分請走 Task 276 的 SDD 循環（`TechnicalIndicatorSeriesAlignmentTest` 有反射釘子把關）。</p>
+     */
+    public record ExtendedIndicators(
+            BigDecimal j9,
+            BigDecimal k3d2,
+            BigDecimal rsv,
+            BigDecimal ema12,
+            BigDecimal ema26,
+            BigDecimal dif,
+            BigDecimal macd,
+            BigDecimal osc,
+            BigDecimal rsi5,
+            BigDecimal rsi10,
+            BigDecimal bias10,
+            BigDecimal bias20,
+            BigDecimal b10b20,
+            BigDecimal wr9) {
+        public static final ExtendedIndicators EMPTY = new ExtendedIndicators(
+                null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     private record KdValues(BigDecimal k, BigDecimal d) {
@@ -152,15 +183,60 @@ public class TechnicalIndicatorService {
         BigDecimal ma60  = simpleMa(series, 60);
         BigDecimal ma240 = simpleMa(series, 240);
 
-        KdValues currentKd = stockKd(series);
-        KdValues previousKd = series.size() > 1
-                ? stockKd(series.subList(1, series.size()))
-                : KdValues.EMPTY;
+        // Task 280：單趟 kdSeriesAsc 同時供當期 KD／前一期 KD／擴充指標三者取值。
+        // 值與「跑兩趟 stockKd」逐位相同（bit-identical），證明如下：
+        // kdSeriesAsc 是對 asc 序列的**前綴相依前向遞迴**——out[i] 只依賴 asc[0..i]
+        //（視窗 asc[i-8..i] ＋ 由 index 0 累進的 k/d）。舊版的 previous 走
+        // stockKd(desc.subList(1, n))，其反轉後的 asc 正是完整 asc 的前綴 asc[0..n-2]，
+        // 故尾筆恆等於完整序列的 out[n-2]。
+        // 長度守門亦自然等價：kdSeriesAsc 對 i < 8 一律填 KdPoint.EMPTY（k/d 為 null），
+        // 與舊版 stockKd 在 size < 9 回 KdValues.EMPTY 相同；唯一需要的判斷是 n >= 2 的索引下界。
+        List<StockPriceHistory> asc = new ArrayList<>(series).reversed();
+        List<KdPoint> kd = kdSeriesAsc(asc);
+        int last = asc.size() - 1;
+        KdPoint currentKd = kd.get(last);
+        KdPoint previousKd = last >= 1 ? kd.get(last - 1) : KdPoint.EMPTY;
+
         return new FullIndicators(
                 ma20, ma60, ma240,
                 currentKd.k(), currentKd.d(),
                 previousKd.k(), previousKd.d(),
-                ma5);
+                ma5,
+                extendedOf(asc, kd));
+    }
+
+    /**
+     * asc 序列最新一期的擴充指標（Task 280）：J9／K3D2／RSV ＋ MACD 一族 ＋ RSI5／RSI10
+     * ＋ BIAS10／BIAS20／B10−B20 ＋ W%R9。
+     *
+     * <p><b>不含任何新的遞迴</b>——一律呼叫 Task 261／262 既有的序列核心後取尾筆；
+     * KD 那一趟由呼叫端傳入，避免重複計算。</p>
+     */
+    private static ExtendedIndicators extendedOf(List<StockPriceHistory> asc, List<KdPoint> kd) {
+        if (asc.isEmpty()) return ExtendedIndicators.EMPTY;
+        int i = asc.size() - 1;
+
+        KdPoint p = kd.get(i);
+        List<MacdPoint> macd = macdSeriesAsc(asc);
+        Double rsi5 = rsiSeriesAsc(asc, 5)[i];
+        Double rsi10 = rsiSeriesAsc(asc, 10)[i];
+        Double b10 = biasRaw(asc, i, 10);
+        Double b20 = biasRaw(asc, i, 20);
+        MacdPoint m = macd.get(i);
+        // 威廉指標由 RSV 直接導出（W%R9 = 100 − RSV9 為代數恆等式），與 indicatorSeries 逐字同式
+        BigDecimal wr9 = p.rsv() == null
+                ? null
+                : BigDecimal.valueOf(100).subtract(p.rsv()).setScale(2, RoundingMode.HALF_UP);
+
+        return new ExtendedIndicators(
+                p.j9(), p.k3d2(), p.rsv(),
+                m.ema12(), m.ema26(), m.dif(), m.macd(), m.osc(),
+                rsi5 == null ? null : scale2(rsi5),
+                rsi10 == null ? null : scale2(rsi10),
+                b10 == null ? null : scale2(b10),
+                b20 == null ? null : scale2(b20),
+                (b10 == null || b20 == null) ? null : scale2(b10 - b20),
+                wr9);
     }
 
     /**
@@ -244,6 +320,22 @@ public class TechnicalIndicatorService {
     }
 
     /**
+     * 指數日線 → {@link StockPriceHistory} 的<b>唯一</b>映射（Task 280 抽出共用）。
+     *
+     * <p>{@code high}／{@code low} 直接進 KD 的 RSV 分母與 MACD 的 DI 價基，漏抄不會報錯只會算錯；
+     * 舊資料為 null 時由序列核心自行 fallback close（既有慣例，不在此補值）。
+     * Task 276 之後要加成交量時，只要改這一支。</p>
+     */
+    private static StockPriceHistory toRow(TwseIndexDailyHistory d, String stockCode, String market) {
+        return StockPriceHistory.builder()
+                .stockCode(stockCode).market(market).tradingDate(d.getTradingDate())
+                .closePrice(d.getClosePoint())
+                .highPrice(d.getHighPoint())
+                .lowPrice(d.getLowPoint())
+                .build();
+    }
+
+    /**
      * 0000 台股大盤：指數日線映射成 StockPriceHistory 後餵同一份序列核心，
      * 避免為了型別差異再長出第四套 KD／MA 遞迴（taiexKd/taiexSimpleMa 服務 computeAll 的既有路徑，不動）。
      */
@@ -251,12 +343,7 @@ public class TechnicalIndicatorService {
         List<StockPriceHistory> asc = twseDailyRepo
                 .findByTradingDateBetweenOrderByTradingDateAsc(EPOCH_START, end)
                 .stream()
-                .map(d -> StockPriceHistory.builder()
-                        .stockCode(stockCode).market(market).tradingDate(d.getTradingDate())
-                        .closePrice(d.getClosePoint())
-                        .highPrice(d.getHighPoint())
-                        .lowPrice(d.getLowPoint())
-                        .build())
+                .map(d -> toRow(d, stockCode, market))
                 .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
 
         LocalDate today = LocalDate.now(MarketZones.TW_ZONE);
@@ -301,18 +388,11 @@ public class TechnicalIndicatorService {
         return BigDecimal.valueOf(sum / days).setScale(2, RoundingMode.HALF_UP);
     }
 
-    /** 與既有 KD9 完全同式；desc 最新在前，回傳該序列最後一期 K/D。 */
-    private static KdValues stockKd(List<StockPriceHistory> desc) {
-        if (desc.size() < 9) return KdValues.EMPTY;
-        List<KdPoint> series = kdSeriesAsc(new ArrayList<>(desc).reversed());
-        KdPoint last = series.get(series.size() - 1);
-        return new KdValues(last.k(), last.d());
-    }
-
     /**
      * KD9 序列核心（Task 261）：asc 最早在前，回傳與輸入等長、逐期的 K/D/J9/K3D2/RSV，
      * 暖機不足 9 筆者為 {@link KdPoint#EMPTY}。
-     * 單點的 {@link #stockKd} 亦走這裡取最後一筆——全站股票 KD 只有這一份遞迴。
+     * {@link #computeFromSeries} 走這裡<b>單趟</b>取尾筆（當期 KD）與倒數第二筆（前一期 KD）——
+     * 全站股票 KD 只有這一份遞迴（Task 280 起連 previous 也不再另跑一趟）。
      * k/d 續存未捨入值，j9/k3d2 亦以未捨入的 k/d 算完才捨入（與遞迴內部精度一致，避免二次捨入）。
      */
     private static List<KdPoint> kdSeriesAsc(List<StockPriceHistory> asc) {
@@ -493,11 +573,19 @@ public class TechnicalIndicatorService {
             KdValues previousKd = desc.size() > 1
                     ? taiexKd(desc.subList(1, desc.size()))
                     : KdValues.EMPTY;
+            // Task 280：擴充指標把「已含今日 live 合成列」的同一份 desc 映射成 StockPriceHistory 後
+            // 餵同一組序列核心（不新增第四套遞迴）。core 的 8 個欄位仍由 taiexSimpleMa／taiexKd 產生，
+            // 一個位元都不變。整段留在既有的 try 內——例外逸出會被 TradingRadarService 的 catch
+            // 放大成整張大盤卡 DATA_INCOMPLETE、全部個股停發訊號。
+            List<StockPriceHistory> ascRows = desc.reversed().stream()
+                    .map(d -> toRow(d, "0000", "台股"))
+                    .toList();
             return new FullIndicators(
                     ma20, ma60, ma240,
                     currentKd.k(), currentKd.d(),
                     previousKd.k(), previousKd.d(),
-                    ma5);
+                    ma5,
+                    extendedOf(ascRows, kdSeriesAsc(ascRows)));
         } catch (Exception e) {
             log.warn("compute TAIEX indicators failed", e);
             return FullIndicators.EMPTY;

@@ -74,7 +74,7 @@ class StockAlertGroupLabelTest {
                 new BigDecimal("102.32"),   // 季線
                 new BigDecimal("77.00"),    // 年線
                 new BigDecimal("12.3"), new BigDecimal("14.5"),
-                new BigDecimal("11.0"), new BigDecimal("13.0"), null);
+                new BigDecimal("11.0"), new BigDecimal("13.0"), null, TechnicalIndicatorService.ExtendedIndicators.EMPTY);
 
         assertEquals("低於季線 10%（92.09） 且 K 值低於 15",
                 StockAlertService.buildGroupLabel(
@@ -89,7 +89,7 @@ class StockAlertGroupLabelTest {
         TechnicalIndicatorService.FullIndicators ind = new TechnicalIndicatorService.FullIndicators(
                 new BigDecimal("55.00"), new BigDecimal("102.32"), new BigDecimal("77.00"),
                 new BigDecimal("12.3"), new BigDecimal("14.5"),
-                new BigDecimal("11.0"), new BigDecimal("13.0"), null);
+                new BigDecimal("11.0"), new BigDecimal("13.0"), null, TechnicalIndicatorService.ExtendedIndicators.EMPTY);
 
         assertEquals("低於季線 且 K 值低於 15",
                 StockAlertService.buildGroupLabel(
