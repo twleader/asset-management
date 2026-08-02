@@ -54,14 +54,14 @@ public class TechnicalIndicatorService {
             BigDecimal previousK,
             BigDecimal previousD,
             BigDecimal weeklyMa,
-            /** 走勢圖指標選單同一組值（Task 280）；純揭露，不進評分。 */
+            /** 走勢圖指標選單同一組值（Task 281）；純揭露，不進評分。 */
             ExtendedIndicators extended) {
         public static final FullIndicators EMPTY = new FullIndicators(
                 null, null, null, null, null, null, null, null, ExtendedIndicators.EMPTY);
     }
 
     /**
-     * 走勢圖指標選單（Task 262）同一組值的單點版（Task 280）。
+     * 走勢圖指標選單（Task 262）同一組值的單點版（Task 281）。
      *
      * <p>暖機／視窗不足的欄位為 {@code null}（不是 0）；全部 {@code setScale(2, HALF_UP)}。
      * 價基由 {@link #computeFromSeries} 的呼叫端決定（交易雷達餵還原權息序列），
@@ -183,7 +183,7 @@ public class TechnicalIndicatorService {
         BigDecimal ma60  = simpleMa(series, 60);
         BigDecimal ma240 = simpleMa(series, 240);
 
-        // Task 280：單趟 kdSeriesAsc 同時供當期 KD／前一期 KD／擴充指標三者取值。
+        // Task 281：單趟 kdSeriesAsc 同時供當期 KD／前一期 KD／擴充指標三者取值。
         // 值與「跑兩趟 stockKd」逐位相同（bit-identical），證明如下：
         // kdSeriesAsc 是對 asc 序列的**前綴相依前向遞迴**——out[i] 只依賴 asc[0..i]
         //（視窗 asc[i-8..i] ＋ 由 index 0 累進的 k/d）。舊版的 previous 走
@@ -206,7 +206,7 @@ public class TechnicalIndicatorService {
     }
 
     /**
-     * asc 序列最新一期的擴充指標（Task 280）：J9／K3D2／RSV ＋ MACD 一族 ＋ RSI5／RSI10
+     * asc 序列最新一期的擴充指標（Task 281）：J9／K3D2／RSV ＋ MACD 一族 ＋ RSI5／RSI10
      * ＋ BIAS10／BIAS20／B10−B20 ＋ W%R9。
      *
      * <p><b>不含任何新的遞迴</b>——一律呼叫 Task 261／262 既有的序列核心後取尾筆；
@@ -320,7 +320,7 @@ public class TechnicalIndicatorService {
     }
 
     /**
-     * 指數日線 → {@link StockPriceHistory} 的<b>唯一</b>映射（Task 280 抽出共用）。
+     * 指數日線 → {@link StockPriceHistory} 的<b>唯一</b>映射（Task 281 抽出共用）。
      *
      * <p>{@code high}／{@code low} 直接進 KD 的 RSV 分母與 MACD 的 DI 價基，漏抄不會報錯只會算錯；
      * 舊資料為 null 時由序列核心自行 fallback close（既有慣例，不在此補值）。
@@ -392,7 +392,7 @@ public class TechnicalIndicatorService {
      * KD9 序列核心（Task 261）：asc 最早在前，回傳與輸入等長、逐期的 K/D/J9/K3D2/RSV，
      * 暖機不足 9 筆者為 {@link KdPoint#EMPTY}。
      * {@link #computeFromSeries} 走這裡<b>單趟</b>取尾筆（當期 KD）與倒數第二筆（前一期 KD）——
-     * 全站股票 KD 只有這一份遞迴（Task 280 起連 previous 也不再另跑一趟）。
+     * 全站股票 KD 只有這一份遞迴（Task 281 起連 previous 也不再另跑一趟）。
      * k/d 續存未捨入值，j9/k3d2 亦以未捨入的 k/d 算完才捨入（與遞迴內部精度一致，避免二次捨入）。
      */
     private static List<KdPoint> kdSeriesAsc(List<StockPriceHistory> asc) {
@@ -573,7 +573,7 @@ public class TechnicalIndicatorService {
             KdValues previousKd = desc.size() > 1
                     ? taiexKd(desc.subList(1, desc.size()))
                     : KdValues.EMPTY;
-            // Task 280：擴充指標把「已含今日 live 合成列」的同一份 desc 映射成 StockPriceHistory 後
+            // Task 281：擴充指標把「已含今日 live 合成列」的同一份 desc 映射成 StockPriceHistory 後
             // 餵同一組序列核心（不新增第四套遞迴）。core 的 8 個欄位仍由 taiexSimpleMa／taiexKd 產生，
             // 一個位元都不變。整段留在既有的 try 內——例外逸出會被 TradingRadarService 的 catch
             // 放大成整張大盤卡 DATA_INCOMPLETE、全部個股停發訊號。

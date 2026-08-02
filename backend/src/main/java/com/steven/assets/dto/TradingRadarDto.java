@@ -34,7 +34,7 @@ public final class TradingRadarDto {
     public record PriceRefresh(String outcome, boolean twMarketOpen, long elapsedMs) {}
 
     /**
-     * 走勢圖指標選單（Task 262）同一組值的雷達版（Task 280）。
+     * 走勢圖指標選單（Task 262）同一組值的雷達版（Task 281）。
      *
      * <p><b>純揭露：不參與評分</b>——不進 {@code StockInput}／{@code MarketInput}，不影響
      * {@code action}／{@code score}／{@code regime}／{@code buyGate}／{@code kdHeat}／{@code timingState}，
@@ -97,7 +97,7 @@ public final class TradingRadarDto {
             boolean intraday,
             /** intraday=true 時為 Redis 即時價的 updatedAt（ISO 字串）；否則為 null（Task 228）。 */
             String liveUpdatedAt,
-            /** 走勢圖指標選單同一組值（Task 280）；純揭露、只進匯出檔，畫面不顯示。 */
+            /** 走勢圖指標選單同一組值（Task 281）；純揭露、只進匯出檔，畫面不顯示。 */
             ExtendedIndicators extendedIndicators
     ) {}
 
@@ -160,7 +160,7 @@ public final class TradingRadarDto {
             BigDecimal etfPremiumPct,
             /** ETF 折溢價的自身歷史分位（0–100）；樣本不足或非 ETF 為 null。 */
             BigDecimal etfPremiumPercentile,
-            /** 走勢圖指標選單同一組值（Task 280）；純揭露、只進匯出檔，畫面不顯示。 */
+            /** 走勢圖指標選單同一組值（Task 281）；純揭露、只進匯出檔，畫面不顯示。 */
             ExtendedIndicators extendedIndicators
     ) {}
 }

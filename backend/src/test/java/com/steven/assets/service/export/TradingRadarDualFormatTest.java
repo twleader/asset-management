@@ -153,7 +153,7 @@ class TradingRadarDualFormatTest {
         assertThat(signals.get(0).asText()).isEqualTo("均線多頭排列");
 
         // fixture 的 market 沒有 reasons 以外的陣列欄之一 → 缺欄位時 Excel 空字串格、JSON null
-        // index 48＝「逆勢條件」：Task 280 在 index 15 之後插入「週線MA5」、index 24 之後插入 14 個擴充指標，
+        // index 48＝「逆勢條件」：Task 281 在 index 15 之後插入「週線MA5」、index 24 之後插入 14 個擴充指標，
         // 故舊 index 33 位移為 48（映射：old<16→old、old<24→old+1、其餘 old+15）。
         Sheet s = GoldenWorkbooks.read(service.exportForOwner(1L, 0L, 1L)).getSheet("個股決策");
         assertThat(s.getRow(0).getCell(48).getStringCellValue())
@@ -182,9 +182,9 @@ class TradingRadarDualFormatTest {
                 .as("具名例外一：改成 null 會讓 Excel 由空字串格變 BLANK 格").isEmpty();
     }
 
-    // ===== Task 280：週線 MA5 ＋ 走勢圖指標選單的 14 個值 =====
+    // ===== Task 281：週線 MA5 ＋ 走勢圖指標選單的 14 個值 =====
 
-    private static final List<String> MARKET_HEADERS_T280 = List.of(
+    private static final List<String> MARKET_HEADERS_T281 = List.of(
             "快照時間", "regime", "中文", "分數", "資料完整", "stale", "盤中即時",
             "即時更新時間", "完成日K", "最新點位", "漲跌%",
             "週線MA5", "MA20", "MA60", "MA240", "季線確認", "年線確認", "K", "D",
@@ -192,7 +192,7 @@ class TradingRadarDualFormatTest {
             "RSI5", "RSI10", "BIAS10", "BIAS20", "BIAS10-BIAS20", "W%R9",
             "支持訊號", "風險提醒");
 
-    private static final List<String> STOCK_HEADERS_T280 = List.of(
+    private static final List<String> STOCK_HEADERS_T281 = List.of(
             "快照時間", "代碼", "名稱", "市場", "資產類別", "持有", "還原權息",
             "動作", "動作中文", "分數", "逆勢狀態", "逆勢中文", "現價", "漲跌%", "行情更新", "完成日K",
             "週線MA5", "MA20", "MA60", "MA240", "月線確認", "季線確認", "年線確認", "K", "D",
@@ -215,7 +215,7 @@ class TradingRadarDualFormatTest {
      * 而所有測試照樣綠。這條把兩者釘在一起。
      */
     @Test
-    @DisplayName("Task 280：匯出的 14 個擴充指標欄名必須逐字等於 DTO 的 record 元件名（含順序）")
+    @DisplayName("Task 281：匯出的 14 個擴充指標欄名必須逐字等於 DTO 的 record 元件名（含順序）")
     void 匯出欄名與DTO元件名綁定() {
         List<String> dtoComponents = new ArrayList<>();
         for (java.lang.reflect.RecordComponent c
@@ -226,8 +226,8 @@ class TradingRadarDualFormatTest {
                 "j9", "k3d2", "rsv", "ema12", "ema26", "dif", "macd", "osc",
                 "rsi5", "rsi10", "bias10", "bias20", "b10b20", "wr9");
         // 表頭與 key 一一對應（順序即欄序）
-        assertThat(MARKET_HEADERS_T280.subList(19, 33)).containsExactlyElementsOf(EXT_HEADERS_EXPECTED);
-        assertThat(STOCK_HEADERS_T280.subList(25, 39)).containsExactlyElementsOf(EXT_HEADERS_EXPECTED);
+        assertThat(MARKET_HEADERS_T281.subList(19, 33)).containsExactlyElementsOf(EXT_HEADERS_EXPECTED);
+        assertThat(STOCK_HEADERS_T281.subList(25, 39)).containsExactlyElementsOf(EXT_HEADERS_EXPECTED);
         assertThat(EXT_HEADERS_EXPECTED).hasSameSizeAs(dtoComponents);
     }
 
@@ -236,22 +236,22 @@ class TradingRadarDualFormatTest {
             "RSI5", "RSI10", "BIAS10", "BIAS20", "BIAS10-BIAS20", "W%R9");
 
     @Test
-    @DisplayName("Task 280：兩張分頁的表頭逐字等於預期的 35／50 欄清單（含順序）")
+    @DisplayName("Task 281：兩張分頁的表頭逐字等於預期的 35／50 欄清單（含順序）")
     void 表頭逐字與欄數() throws Exception {
         when(store.range(1L, 0L, 1L)).thenReturn(
                 new TradingRadarSnapshotStore.SnapshotRange(List.of(snapshotNode()), 1, 0));
         Workbook wb = GoldenWorkbooks.read(service.exportForOwner(1L, 0L, 1L));
 
         assertThat(headerRow(wb.getSheet("大盤總覽")))
-                .as("大盤總覽 20 → 35 欄").containsExactlyElementsOf(MARKET_HEADERS_T280);
+                .as("大盤總覽 20 → 35 欄").containsExactlyElementsOf(MARKET_HEADERS_T281);
         assertThat(headerRow(wb.getSheet("個股決策")))
-                .as("個股決策 35 → 50 欄").containsExactlyElementsOf(STOCK_HEADERS_T280);
+                .as("個股決策 35 → 50 欄").containsExactlyElementsOf(STOCK_HEADERS_T281);
         assertThat(wb.getSheet("快照索引").getRow(1).getLastCellNum())
                 .as("快照索引一欄都不動").isEqualTo((short) 8);
     }
 
     @Test
-    @DisplayName("Task 280：新增 15 欄的值取自快照、格式為 NUM2；JSON 為 number")
+    @DisplayName("Task 281：新增 15 欄的值取自快照、格式為 NUM2；JSON 為 number")
     void 新增欄的值與格式() throws Exception {
         when(store.range(1L, 0L, 1L)).thenReturn(
                 new TradingRadarSnapshotStore.SnapshotRange(List.of(snapshotNode()), 1, 0));
@@ -284,7 +284,7 @@ class TradingRadarDualFormatTest {
     }
 
     @Test
-    @DisplayName("Task 280：舊快照沒有 extendedIndicators／weeklyMa 時，新增 15 欄為空白格與 JSON null，不擲例外")
+    @DisplayName("Task 281：舊快照沒有 extendedIndicators／weeklyMa 時，新增 15 欄為空白格與 JSON null，不擲例外")
     void 舊快照相容() throws Exception {
         ObjectNode legacy = (ObjectNode) snapshotNode();
         ((ObjectNode) legacy.path("market")).remove(List.of("weeklyMa", "extendedIndicators"));
@@ -308,12 +308,12 @@ class TradingRadarDualFormatTest {
     }
 
     @Test
-    @DisplayName("Task 280：插欄前後既有欄逐格未變（對 radar_pre_t280 做欄索引映射比對）")
+    @DisplayName("Task 281：插欄前後既有欄逐格未變（對 radar_pre_t281 做欄索引映射比對）")
     void 插欄前後既有欄逐格未變() throws Exception {
         when(store.range(1L, 0L, 1L)).thenReturn(
                 new TradingRadarSnapshotStore.SnapshotRange(List.of(snapshotNode()), 2, 1));
         Workbook actual = GoldenWorkbooks.read(service.exportForOwner(1L, 0L, 1L));
-        Workbook pre = GoldenWorkbooks.golden("radar_pre_t280");
+        Workbook pre = GoldenWorkbooks.golden("radar_pre_t281");
 
         assertSameMapped(pre, actual, "快照索引", c -> c);
         assertSameMapped(pre, actual, "大盤總覽", c -> c < 11 ? c : (c < 18 ? c + 1 : c + 15));
@@ -323,7 +323,7 @@ class TradingRadarDualFormatTest {
         when(store.range(2L, 0L, 1L)).thenReturn(
                 new TradingRadarSnapshotStore.SnapshotRange(List.of(), 0, 0));
         Workbook actualEmpty = GoldenWorkbooks.read(service.exportForOwner(2L, 0L, 1L));
-        Workbook preEmpty = GoldenWorkbooks.golden("radar_empty_pre_t280");
+        Workbook preEmpty = GoldenWorkbooks.golden("radar_empty_pre_t281");
         assertSameMapped(preEmpty, actualEmpty, "快照索引", c -> c);
         assertSameMapped(preEmpty, actualEmpty, "大盤總覽", c -> c < 11 ? c : (c < 18 ? c + 1 : c + 15));
         assertSameMapped(preEmpty, actualEmpty, "個股決策", c -> c < 16 ? c : (c < 24 ? c + 1 : c + 15));
@@ -414,7 +414,7 @@ class TradingRadarDualFormatTest {
         s1.put("week52Position", 88.50);
         s1.putArray("supportSignals").add("季線之上");
         s1.putArray("riskWarnings");
-        // Task 280：週線 MA5 ＋ 走勢圖指標選單的 14 個值。大盤與個股都給，
+        // Task 281：週線 MA5 ＋ 走勢圖指標選單的 14 個值。大盤與個股都給，
         // 兩者的欄名與匯出端讀的 key **刻意同名**（不同於本 fixture 其餘欄位），才驗得到值真的被寫出來。
         m.put("weeklyMa", 22950.0);
         m.set("extendedIndicators", extNode(M, 1));
@@ -423,7 +423,7 @@ class TradingRadarDualFormatTest {
         return root;
     }
 
-    /** Task 280：14 個擴充指標的 fixture 值；{@code seed} 讓大盤與個股互不相同，避免抓錯節點也剛好通過。 */
+    /** Task 281：14 個擴充指標的 fixture 值；{@code seed} 讓大盤與個股互不相同，避免抓錯節點也剛好通過。 */
     private static ObjectNode extNode(ObjectMapper M, int seed) {
         ObjectNode e = M.createObjectNode();
         String[] keys = {"j9", "k3d2", "rsv", "ema12", "ema26", "dif", "macd", "osc",

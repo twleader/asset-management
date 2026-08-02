@@ -121,7 +121,7 @@ public class TradingRadarExportService {
         // intraday / liveUpdatedAt 為 Task 228（TW_RULES_V6，大盤盤中即時判斷）新增的欄位：
         // intraday=true 代表該次 regime 由 Redis 即時大盤點位計算而非已入庫完成日 K；asOfDate 語意不變仍為完成日 K。
         // 本分頁沒有 section 標題列，第 0 列就是表頭列——不得新增任何列。
-        // Task 280：週線MA5 插在 MA20 之前、14 個擴充指標插在 D 之後（20 → 35 欄）。
+        // Task 281：週線MA5 插在 MA20 之前、14 個擴充指標插在 D 之後（20 → 35 欄）。
         // headers／formats／rows 三者長度與順序必須一致——ExportDoc.Table 只在 runtime 才擲長度不符。
         List<String> headers = new ArrayList<>(List.of("快照時間", "regime", "中文", "分數", "資料完整", "stale", "盤中即時",
                 "即時更新時間", "完成日K", "最新點位", "漲跌%",
@@ -160,7 +160,7 @@ public class TradingRadarExportService {
                 ExportDoc.Format.TEXT,      // 8  完成日K
                 ExportDoc.Format.NUM2,      // 9  最新點位
                 ExportDoc.Format.NUM2,      // 10 漲跌%
-                ExportDoc.Format.NUM2,      // 11 週線MA5      ← Task 280
+                ExportDoc.Format.NUM2,      // 11 週線MA5      ← Task 281
                 ExportDoc.Format.NUM2,      // 12 MA20
                 ExportDoc.Format.NUM2,      // 13 MA60
                 ExportDoc.Format.NUM2,      // 14 MA240
@@ -169,7 +169,7 @@ public class TradingRadarExportService {
                 ExportDoc.Format.NUM2,      // 17 K
                 ExportDoc.Format.NUM2       // 18 D
         ));
-        for (int i = 0; i < EXT_HEADERS.size(); i++) formats.add(ExportDoc.Format.NUM2); // 19–32 Task 280 擴充指標
+        for (int i = 0; i < EXT_HEADERS.size(); i++) formats.add(ExportDoc.Format.NUM2); // 19–32 Task 281 擴充指標
         formats.add(ExportDoc.Format.LIST_LINES);   // 33 支持訊號
         formats.add(ExportDoc.Format.LIST_LINES);   // 34 風險提醒
 
@@ -180,7 +180,7 @@ public class TradingRadarExportService {
 
     private ExportDoc.Sheet stockSheet(List<JsonNode> snapshots) {
         // 同上：沒有 section 標題列，第 0 列即表頭列。
-        // Task 280：週線MA5 插在 MA20 之前、14 個擴充指標插在 D 之後（35 → 50 欄）。
+        // Task 281：週線MA5 插在 MA20 之前、14 個擴充指標插在 D 之後（35 → 50 欄）。
         List<String> headers = new ArrayList<>(List.of("快照時間", "代碼", "名稱", "市場", "資產類別", "持有", "還原權息",
                 "動作", "動作中文", "分數", "逆勢狀態", "逆勢中文", "現價", "漲跌%", "行情更新", "完成日K",
                 "週線MA5",
@@ -239,7 +239,7 @@ public class TradingRadarExportService {
                 ExportDoc.Format.NUM2,      // 13 漲跌%
                 ExportDoc.Format.TEXT,      // 14 行情更新
                 ExportDoc.Format.TEXT,      // 15 完成日K
-                ExportDoc.Format.NUM2,      // 16 週線MA5      ← Task 280
+                ExportDoc.Format.NUM2,      // 16 週線MA5      ← Task 281
                 ExportDoc.Format.NUM2,      // 17 MA20
                 ExportDoc.Format.NUM2,      // 18 MA60
                 ExportDoc.Format.NUM2,      // 19 MA240
@@ -249,7 +249,7 @@ public class TradingRadarExportService {
                 ExportDoc.Format.NUM2,      // 23 K
                 ExportDoc.Format.NUM2       // 24 D
         ));
-        for (int i = 0; i < EXT_HEADERS.size(); i++) formats.add(ExportDoc.Format.NUM2); // 25–38 Task 280 擴充指標
+        for (int i = 0; i < EXT_HEADERS.size(); i++) formats.add(ExportDoc.Format.NUM2); // 25–38 Task 281 擴充指標
         formats.addAll(List.of(
                 ExportDoc.Format.NUM2,      // 39 匯率分位
                 ExportDoc.Format.TEXT,      // 40 底層幣別
@@ -280,7 +280,7 @@ public class TradingRadarExportService {
     }
 
     /**
-     * 巢狀子節點的數值欄（Task 280）：父節點缺漏或為 null 時回 {@code null}。
+     * 巢狀子節點的數值欄（Task 281）：父節點缺漏或為 null 時回 {@code null}。
      *
      * <p>本功能上線前寫入的 Redis 快照沒有 {@code extendedIndicators}；{@code JsonNode.path()}
      * 對 MissingNode 與 NullNode 都回 MissingNode，故舊快照自然得到 {@code null}
@@ -290,7 +290,7 @@ public class TradingRadarExportService {
         return num(parent.path(child), field);
     }
 
-    /** Task 280 新增的 14 個擴充指標欄，順序即匯出欄序。 */
+    /** Task 281 新增的 14 個擴充指標欄，順序即匯出欄序。 */
     private static final List<String> EXT_KEYS = List.of(
             "j9", "k3d2", "rsv", "ema12", "ema26", "dif", "macd", "osc",
             "rsi5", "rsi10", "bias10", "bias20", "b10b20", "wr9");

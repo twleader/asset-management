@@ -366,7 +366,7 @@ class TechnicalIndicatorSeriesAlignmentTest {
         assertThat(last.ma240()).isEqualByComparingTo(single.annualMa());
     }
 
-    // ===== Task 280：擴充指標（純揭露，只進匯出檔）=====
+    // ===== Task 281：擴充指標（純揭露，只進匯出檔）=====
 
     /** 逐位比對用：14 個擴充欄一次比完。 */
     private static void assertExtendedEquals(TechnicalIndicatorService.ExtendedIndicators a,
@@ -556,7 +556,7 @@ class TechnicalIndicatorSeriesAlignmentTest {
 
     /**
      * <b>決策釘子，不是行為驗證</b>（比照 {@code WeeklyMaTest.weeklyMaMustNotBeAnInputToTheRuleEngine}）。
-     * Task 280 明訂這 14 個值純揭露、只進匯出檔；要接進評分請走 Task 276 的 SDD 循環，
+     * Task 281 明訂這 14 個值純揭露、只進匯出檔；要接進評分請走 Task 276 的 SDD 循環，
      * <b>不得在此放寬斷言</b>——沒有這條就分不出「t276 有意接線」與「有人不小心接了」。
      */
     @Test
@@ -571,7 +571,7 @@ class TechnicalIndicatorSeriesAlignmentTest {
                 String n = c.getName().toLowerCase();
                 for (String b : banned) {
                     assertThat(n)
-                            .as("%s.%s：Task 280 的擴充指標為純揭露，接進評分須走 t276 的 SDD 循環",
+                            .as("%s.%s：Task 281 的擴充指標為純揭露，接進評分須走 t276 的 SDD 循環",
                                     input.getSimpleName(), c.getName())
                             .doesNotContain(b);
                 }

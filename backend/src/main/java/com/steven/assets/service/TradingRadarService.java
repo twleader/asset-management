@@ -600,7 +600,7 @@ public class TradingRadarService {
     }
 
     /**
-     * 指標服務的擴充指標 → DTO（Task 280）。
+     * 指標服務的擴充指標 → DTO（Task 281）。
      *
      * <p><b>只搬這 14 個值。</b>{@code FullIndicators} 的 MA／K／D 一律維持既有取法
      *（{@code ind.monthlyMa()} 等），不得改由這裡供給——同一列出現兩個 MA 來源就是漂移的開端。</p>

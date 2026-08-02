@@ -80,7 +80,7 @@ class TradingRadarSnapshotStoreTest {
                 List.of("最新價位於年線之上。"), List.of("最新價位於月線之下。"),
                 // Task 228（TW_RULES_V6）新增：intraday／liveUpdatedAt
                 false, null,
-                // Task 280：擴充技術指標（本測試只驗快照往返，不驗指標值）
+                // Task 281：擴充技術指標（本測試只驗快照往返，不驗指標值）
                 null);
         return new TradingRadarDto.Response("TW_RULES_V5", generatedAt, m, List.of(), 0);
     }

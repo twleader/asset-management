@@ -283,9 +283,9 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 277 | 交易雷達的短線與中長線雙軌建議（Requirement 60；前置 t273 ＋ t274 ＋ t276；推翻 t265「MA5 不進評分」的前提） **⚠ 尚未送審** | [tasks/t277_dual_horizon_recommendations.md](tasks/t277_dual_horizon_recommendations.md) |
 | 278 | 台股歷史估值回補，推翻 Requirement 46 的「預設不實作」（Requirement 61；前置 t266） **⚠ 尚未送審** | [tasks/t278_twse_valuation_history_backfill.md](tasks/t278_twse_valuation_history_backfill.md) |
 | 279 | 清除 `stock_price_history` 台股 175 列非正收盤，並在 fetch／收盤校正／寫入／Redis／DB 五處擋住復發（Requirement 62）**已通過對抗式審查（3 輪）** | [tasks/t279_nonpositive_close_price_cleanup.md](tasks/t279_nonpositive_close_price_cleanup.md) |
-| 280 | 交易雷達匯出補上週線 MA5 與走勢圖指標選單的 14 個值（大盤總覽 20→35 欄、個股決策 35→50 欄；Requirement 43／48）**已通過對抗式審查（4 輪）** | [tasks/t280_radar_export_indicators.md](tasks/t280_radar_export_indicators.md) |
+| 281 | 交易雷達匯出補上週線 MA5 與走勢圖指標選單的 14 個值（大盤總覽 20→35 欄、個股決策 35→50 欄；Requirement 43／48）**已通過對抗式審查（4 輪）** | [tasks/t281_radar_export_indicators.md](tasks/t281_radar_export_indicators.md) |
 
-> **註：本索引表僅列至 228、264–267 與 269–280；Task 229–263 與 268 未登錄於本表，以 `spec/tasks/tNNN_*.md` 檔案本身為準。**
+> **註：本索引表僅列至 228、264–267 與 269–281；Task 229–263 與 268 未登錄於本表，以 `spec/tasks/tNNN_*.md` 檔案本身為準。**
 
 > **Task 222–225 已全部被 t264–t267 取代（見上表），保留僅作為決策記錄，一律不得依其實作。**
 >
