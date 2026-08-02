@@ -273,14 +273,18 @@ class TradingRadarDualFormatTest {
         assertThat(s.getRow(1).getCell(16).getNumericCellValue()).isEqualTo(1102.50);
         assertThat(s.getRow(1).getCell(25).getNumericCellValue()).isEqualTo(200.25);
         assertThat(s.getRow(1).getCell(38).getNumericCellValue()).isEqualTo(213.25);
+        assertThat(s.getRow(1).getCell(16).getCellStyle().getDataFormatString()).isEqualTo("#,##0.00");
         assertThat(s.getRow(1).getCell(25).getCellStyle().getDataFormatString()).isEqualTo("#,##0.00");
 
         JsonNode json = mapper.readTree(jsonRenderer.render(service.radarDoc(1L, 0L, 1L)));
         JsonNode mr = json.at("/sheets/1/tables/0/rows").get(0);
         assertThat(mr.get("週線MA5").isNumber()).isTrue();
+        assertThat(mr.get("週線MA5").decimalValue()).isEqualByComparingTo("22950.0");
         assertThat(mr.get("J9").decimalValue()).isEqualByComparingTo("100.25");
         assertThat(mr.get("W%R9").decimalValue()).isEqualByComparingTo("113.25");
         JsonNode sr = json.at("/sheets/2/tables/0/rows").get(0);
+        assertThat(sr.get("週線MA5").isNumber()).isTrue();
+        assertThat(sr.get("週線MA5").decimalValue()).isEqualByComparingTo("1102.50");
         assertThat(sr.get("BIAS10-BIAS20").decimalValue()).isEqualByComparingTo("212.25");
     }
 
@@ -304,6 +308,7 @@ class TradingRadarDualFormatTest {
                     .as("個股 index %d 缺值應為 BLANK 而非 0", c).isEqualTo(CellType.BLANK);
         }
         JsonNode json = mapper.readTree(jsonRenderer.render(service.radarDoc(9L, 0L, 1L)));
+        assertThat(json.at("/sheets/1/tables/0/rows").get(0).get("週線MA5").isNull()).isTrue();
         assertThat(json.at("/sheets/1/tables/0/rows").get(0).get("J9").isNull()).isTrue();
         assertThat(json.at("/sheets/2/tables/0/rows").get(0).get("週線MA5").isNull()).isTrue();
     }

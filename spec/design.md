@@ -4072,7 +4072,7 @@ TradingRadarView
        ├─ StockRepository + AssetClassifier（有效 STOCK／BOND 類別）
        ├─ StockDividendHistoryRepository（完成日 K 區間內除權息事件）
        ├─ DistributionAdjustedPriceService（還原權息 OHLC 純計算）
-       ├─ TechnicalIndicatorService（以同一序列計算 MA20／60／240、KD；大盤走 twse_index_daily_history + Redis 即時價）
+       ├─ TechnicalIndicatorService（以同一序列計算 MA5／20／60／240、KD；大盤走 twse_index_daily_history + Redis 即時價）
        ├─ AssetSnapshotRepository.findLatestWithStocks（當前持股，owner-scoped）
        ├─ StockAlertRepository.findDistinctStockCodeMarket（觀察，owner-scoped）
        ├─ PriceQueryService（只讀 Redis；miss → stock_price_history；`0000/台股` 自 Task 228 起亦可命中）
@@ -4094,6 +4094,12 @@ TradingRadarView
 - `StockDecision`（Task 281 後 39 個 component）：code／name／market、`assetClass`、`distributionAdjusted`、`held`、`action`／`actionLabel`、`score`、`counterTrendState`／`counterTrendLabel`、`counterTrendReasons`／`counterTrendRisks`、`dataComplete`、報價／漲跌幅／更新時間／`asOfDate`、MA20／60／240、K／D、MA20／60／240 兩日確認、`fxPercentile`／`underlyingCurrency`（Requirement 47）、`reasons`、`risks`、`kdHeat`（Task 232）、`timingState`／`timingLabel`／`ma60BiasPercent`／`week52Position`（Task 264）、`weeklyMa`（Task 265）、`etfPremiumPct`／`etfPremiumPercentile`、`extendedIndicators`（Task 281）。
 
 無新 entity／table／migration；分數與建議皆為可重算的衍生值，不持久化，符合正規化原則。
+
+### 個股均線摘要呈現（Task 284）
+
+`TradingRadarView.vue` 個股表格的收合列沿用單一均線摘要欄，不增加表格欄數。該欄標題為 `MA5／20／60／240`，值固定依 `StockDecision.weeklyMa`、`monthlyMa`、`quarterlyMa`、`annualMa` 排列，使用既有 `fmtNumber(value, 2)` 與 `／` 分隔。四值與分隔線包在 `.ma-summary` 容器，CSS 固定 `display: inline-flex`、`align-items: center`、`white-space: nowrap`；欄位 `min-width` 加至 250px 只作寬度基準，禁止換行由容器樣式保證。MA5 的唯一資料來源仍是後端 `TechnicalIndicatorService` → `TradingRadarService` → `StockDecision.weeklyMa`，前端不得由價格陣列自行重算。
+
+這項呈現推翻 Task 281「雷達表過寬，畫面不新增欄位」的舊範圍決定，但只擴充既有均線摘要格，不新增獨立欄。展開列既有「週線 MA5」與大盤卡維持不變。MA5 仍不進規則引擎，頁首描述決策依據的 MA20／60／240 文案不變，`RULE_VERSION` 亦不升版。
 
 ### 還原權息技術序列（TW_RULES_V3）
 
@@ -5120,6 +5126,12 @@ POST /api/trading-radar/export?from&to        ← 由 GET 改為 POST（新增�
 這條路徑即 `spec/tasks/t276_unused_indicators_and_volume.md` 的 276.1 所規劃的「擴充 `FullIndicators` 的輸出」，故 t276 之後只需把值接進 `StockInput`、不必再長第二份輸出。代價是 `computeAll()` 的所有呼叫端（觀察清單、警示觸發落地、資產 Excel 匯出）也會多算這些值卻不使用——O(n) 且 n ≤ 241，刻意付這個代價換「只有一條取值路徑」，**不得**為此加 `boolean withExtended` 把路徑分岔。**不得改呼叫走勢圖那條 `indicatorSeries()`**（原始價基，會與同列的 `k`／`d` 矛盾）。既有視窗對 MACD／RSI 的單向遞迴已足夠收斂（序列長 241 時 EMA26 seed 殘留權重 `(1−2/27)^215 ≈ 6.5×10⁻⁸`、Wilder RSI10 `0.9^230 ≈ 3×10⁻¹¹`），故**個股維持 241／240、大盤維持 `computeAllForTaiex()` 既有的 240**，兩邊都不延長也不對齊——理由不是「改了會算錯」（240 vs 241 的 `k`／`d` 實測 bit-identical，`taiexSimpleMa(desc,240)` 只讀 `desc[0..239]`），而是那條路徑另有三個非雷達消費端（觀察清單 `0000` KD 欄、Requirement 44 通知門檻、走勢圖同源判準），動它超出範圍且數值上無收益。
 
 **舊快照留白**：上線前的 Redis 快照沒有 `extendedIndicators`，既有 `num()` 對缺欄位回 `null` → Excel 空白格、JSON `null`，不得補 0。**golden 基準須重產**（`radar.xlsx`／`radar_empty.xlsx`），舊基準另存 `radar_pre_t281.xlsx`／`radar_empty_pre_t281.xlsx` 並以欄索引映射逐格比對，證明既有欄未被改壞。
+
+#### 收合列補顯示 MA5 的匯出回歸邊界（Task 284）
+
+Task 284 不改匯出模型：`TradingRadarExportService.marketSheet()` 與 `stockSheet()` 已各有唯一一欄 `週線MA5`，皆讀快照的 `weeklyMa`、使用 `NUM2`，且位於 `MA20` 左側；`JsonDocRenderer` 由同一份 `ExportDoc` 自動產生同名 JSON number。頁首手動匯出、排程與 run-now 均共用此文件模型，因此不得在任一入口另加一條 MA5 特例。
+
+既有 `TradingRadarDualFormatTest` 已鎖住 35／50 欄表頭與兩側 MA5 數值，但覆蓋並不對稱：Excel 格式與 JSON number 只直接驗大盤 MA5，舊快照 JSON `null` 只直接驗個股 MA5。Task 284 補齊個股 MA5 的 `#,##0.00` 與 JSON number，並對大盤／個股 MA5 各自斷言舊快照的 Excel `BLANK` 與 JSON `null`。本次不改欄序、不重產 golden 檔。
 
 ### 測試與驗證
 
