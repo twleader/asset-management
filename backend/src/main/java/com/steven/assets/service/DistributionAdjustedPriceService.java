@@ -132,7 +132,10 @@ public class DistributionAdjustedPriceService {
         for (int i = 1; i < rowsAsc.size(); i++) {
             BigDecimal prevClose = rowsAsc.get(i - 1).getClosePrice();
             BigDecimal close = rowsAsc.get(i).getClosePrice();
-            // 非正收盤一律跳過：實測台股有 176 筆，否則會除以零或產生誤判。
+            // 非正收盤一律跳過（除以零與誤判的縱深防禦）。Task 279 前實測台股有 175 筆
+            // 這種列（來源對「當日無整股成交」不發布 OHLC、FinMind 序列化為 0.0），
+            // 已全數刪除、且 stock_price_history.close_price 已有 CHECK (close_price > 0)，
+            // 故現在應恆為 0 筆；此判斷保留，不依賴上游守門。
             if (prevClose == null || close == null || prevClose.signum() <= 0 || close.signum() <= 0) {
                 continue;
             }

@@ -170,7 +170,10 @@ class DistributionAdjustedPriceServiceTest {
                 "須採標準比例 4 而非觀察值 3.95，保留當日真實漲跌");
     }
 
-    /** 非正收盤不得造成除以零或誤判（實測台股有 176 筆）。 */
+    /**
+     * 非正收盤不得造成除以零或誤判。Task 279 前實測台股有 175 筆這種列，已全數刪除且
+     * DB 加上 CHECK (close_price > 0)；本測試守的是程式端的縱深防禦，不因資料清乾淨而移除。
+     */
     @Test
     void nonPositiveCloseRowsAreSkippedWithoutThrowing() {
         List<StockPriceHistory> rows = List.of(

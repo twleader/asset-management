@@ -2,6 +2,7 @@ package com.steven.assets.externalmaterials.service;
 
 import com.steven.assets.externalmaterials.client.NewsRow;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -17,6 +18,7 @@ import java.util.Set;
  * 直接走 JdbcTemplate（不用 JPA entity），避免和 backend 重複維護 entity。
  */
 @Component
+@Slf4j
 @RequiredArgsConstructor
 public class StockSourceQuery {
 
@@ -459,27 +461,38 @@ public class StockSourceQuery {
 
     /**
      * 寫入或更新 stock_price_history（同一 trading_date 視為覆寫）。
+     *
+     * @return {@code true} 表示實際寫入或更新了一列；{@code false} 表示因收盤價非正而被拒絕。
+     *         呼叫端的成功計數一律以此回傳值為準，不得無條件累加。
      */
-    public void upsertHistory(String stockCode, String market, LocalDate tradingDate,
-                              BigDecimal open, BigDecimal high, BigDecimal low,
-                              BigDecimal close, Long volume) {
+    public boolean upsertHistory(String stockCode, String market, LocalDate tradingDate,
+                                 BigDecimal open, BigDecimal high, BigDecimal low,
+                                 BigDecimal close, Long volume) {
+        // 非正或缺漏的收盤價一律不寫（Requirement 62 / Task 279）。
+        // 「沒有價」不得被轉成「價 0」——原本這裡對 close 套 nz() 正是這個反模式，已移除。
+        // 刻意不擲例外：ClosePersister.dumpRedisToDb 逐檔 try/catch，擲出去只會被吃掉、
+        // 留下一行看不出原因的 warn。DB 端另有 CHECK (close_price > 0) 作為最後一道。
+        if (close == null || close.signum() <= 0) {
+            log.warn("拒絕寫入非正收盤：{} {} {} close={}", market, stockCode, tradingDate, close);
+            return false;
+        }
         Long existing = jdbc.query(
                 "SELECT id FROM stock_price_history WHERE stock_code=? AND market=? AND trading_date=?",
                 ps -> { ps.setString(1, stockCode); ps.setString(2, market); ps.setObject(3, tradingDate); },
                 rs -> rs.next() ? rs.getLong(1) : null);
-        // open / high / low / close 一律保留 null（無資料），不再用 0 偽裝。
-        // close 仍套 nz：上游 dumpRedisToDb 已先用 price 過濾掉 null，留 nz 只是雙保險。
+        // open / high / low 一律保留 null（無資料），不再用 0 偽裝。
         if (existing != null) {
             jdbc.update(
                     "UPDATE stock_price_history SET open_price=?, high_price=?, low_price=?, close_price=?, volume=? WHERE id=?",
-                    open, high, low, nz(close), volume == null ? 0L : volume, existing);
+                    open, high, low, close, volume == null ? 0L : volume, existing);
         } else {
             jdbc.update(
                     "INSERT INTO stock_price_history (stock_code, market, trading_date, open_price, high_price, low_price, close_price, volume) " +
                             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     stockCode, market, tradingDate,
-                    open, high, low, nz(close), volume == null ? 0L : volume);
+                    open, high, low, close, volume == null ? 0L : volume);
         }
+        return true;
     }
 
     /**
@@ -587,9 +600,9 @@ public class StockSourceQuery {
         }
     }
 
-    private static BigDecimal nz(BigDecimal v) {
-        return v == null ? BigDecimal.ZERO : v;
-    }
+    // nz(BigDecimal) 已移除（Requirement 62 / Task 279）：它唯一的使用者是 upsertHistory 的
+    // close 欄，作用是把 null 轉成 0 以滿足 NOT NULL——正是「沒有價就寫價 0」的反模式。
+    // 現在非正／null 的 close 一律拒寫，不需要這個轉換。
 
     // ===== 本地財經新聞 news_headline（Task 149.21）：ext 直寫、backend JPA 讀 =====
 

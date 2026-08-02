@@ -460,6 +460,14 @@ POST /internal/repair/history?market=%E5%8F%B0%E8%82%A1&from=2026-06-01&to=2026-
 
 **「今日列」獨佔規則（Task 84）：** `stock_price_history` 中市場時區「當日」row 只能由上述 `ClosePersister` 路徑（13:32 TW / 16:02 ET / **16:32 LON** dump，16:00 TW / 18:00 ET FinMind verify / **17:00 LON Yahoo verify**，含 `selfHealMissedClose` 過收盤時點補救；其 Redis dump 分支自 Task 258 起亦受 dump 守門約束）寫入。`HistoricalBackfillService.backfillTwStock` / `backfillUsStock` / `backfillUkStock` / `repairRange` 即使被任意路徑觸發（`startupBackfill` 條件 stale、`SnapshotFormBffController.triggerBackfillThenRefetch`、`/api/market-data/history/backfill-stock` 手動觸發、`/internal/backfill/all`、`/internal/repair/history` 手動維運觸發），在 for-loop 中遇到 `bar.tradingDate().equals(LocalDate.now(該市場時區))` 必須 `continue`（`repairRange` 用 `MarketClock.zoneOf(market)` 統一分流；三支 backfill 各自寫死 `TW_ZONE`／`US_ZONE`／`LON_ZONE`，語意等價）。原因：外部歷史 API 在盤中也會回一根「今日 partial bar」 — Yahoo Finance `chart?interval=1d` 把今日 open/high/low/「此刻 last trade」打包成一筆 `HistoricalBar`，若直接 upsert 就會落在 `stock_price_history` 充當「收盤」，與 Redis 即時 tick 脫鉤（例 2026-06-05 NY 盤中 VOO：Redis tick 677.20 / DB row close 689.70）。今日列由 ClosePersister 在收盤後（含 self-heal）建立，使 backfill 路徑只負責「歷史」、close 路徑只負責「當日」，職責不重疊。
 
+**`close_price` 恆為正的資料契約（Requirement 62／Task 279 起）：** `stock_price_history.close_price` 除了 `NOT NULL`，另有 **`CHECK (close_price > 0)`**（changeset `v1.85.0-drop-nonpositive-close.sql`，先刪既有髒列再加約束）。語意是「該市場該日的**整股收盤價**」——**沒有整股成交價的日子不存在這一列**，與台股非交易日（週末、國定假日）在本表沒有列完全同形，消費端一律按「缺列」處理、不需要額外的旗標判斷。
+
+> **由來與兩道防線。** 交易所對「當日無整股成交」不發布 OHLC（TWSE 回 `--`），FinMind 將其序列化為 `close: 0.0`；舊版 `PriceFetchClient.fetchTwHistoricalRange` 只擋 `close == null`，於是 0 被當成合法收盤寫入，實測累積 **175 列**（006208 87、7556 67，其餘 9 檔共 21）。單一列即讓當日乖離率變成 −100%，並污染 MA60 與波動度。**注意「零價」不等於「零成交」**：175 列中有 **48 列成交量不為 0**（當日只有零股／盤後成交，交易所仍不發布 OHLC），其餘 127 列才是 `volume=0`；此外**台股口徑（`market='台股'`）下**另有 **9 列是 `close_price>0 AND volume=0`——不在這 175 列內、屬合法資料、不得刪除**（不限市場的全表為 102 列）。故判準只能是 `close_price <= 0`，不得用 `volume` 代理。
+>
+> 守門共四道。**入口側兩處**（都讀同一個 FinMind `dataset=TaiwanStockPrice`，故兩處都要擋）：`PriceFetchClient.fetchTwHistoricalRange`（歷史回補）與 `parseTwClosingRow`（16:00 台股收盤校正）皆擋 `signum() <= 0`。**寫入側兩處**：`StockSourceQuery.upsertHistory` 拒寫非正／null close（並移除原本把 null 轉成 0 的 `nz()`），`PriceCacheWriter.writeVerifiedClose` 拒寫非正 price 進 Redis／不發布 `price-update`。DB 的 `CHECK` 為最後一道。
+>
+> **為什麼 Redis 那一道不能省。** `ClosePersister.verify*CloseWithFinMind` 在 `upsertHistory` 之後還會呼叫 `writeVerifiedClose` 寫 Redis live cache（見上方 sequence），該路徑**不經過 DB**——只擋 DB 的話，Dashboard／SnapshotForm 仍會讀到 Redis 裡的股價 0。此處守門刻意放在 `writeVerifiedClose`，因為**美股收盤校正走的也是 FinMind**（`getUsClosingPriceFromFinMind`，同樣只擋 null），一處守門即涵蓋台／美／英三個市場，不必逐一改解析分支。**一律不回補、不 carry-forward、不以成交金額÷成交股數反推**——那是零股均價，與整股收盤價是不同的價格序列。`DistributionAdjustedPriceService.detectSplits()` 仍保留跳過非正收盤的判斷，作為除以零的縱深防禦。
+
 **Live price push（Redis pub/sub + SSE，取代輪詢）：**
 
 為了消除前端 2 分鐘 polling 與 external-materials-service 2 分鐘 cron 的相位差（最差 ~4 分鐘 lag），
@@ -756,7 +764,7 @@ twse_index_year_end_history  (TWSE 指數年末值；Task 97 起已不使用—�
 > 📌 **查證來源：運行中的 DB。** `docker exec asset-postgres psql -U assets -d assets -c '\d <table>'`——欄位型別／位數／nullable 一律以它為準。
 >
 > ⚠ **`db/schema.sql` 不是可信基準線，只能當離線參考。** 它是 `db/init/01_dump.sql`（含真實個人財務資料，被 `.gitignore` 排除）「去除全部資料」後的可版控鏡像，但**靠人工重新產出、實測已落後**：截至 Task 245 它只有 55 張 `CREATE TABLE`，缺 `crawler_export_setting`（v1.64.0）／`asset_transaction`（v1.72.0）／`index_export_schedule`／`trading_radar_export_setting`／`asset_transaction_export_schedule`／`trading_radar_export_time`。在裡面查不到某張表時，先確認是「真的沒有」還是「鏡像沒跟上」。**同理不要引用 `db/changelog/**` 描述現況**——那裡有永不執行的 changeset（下方 `v1.0.0` 的 `NUMERIC(20,4)` 即為前例）。
-> - `stock_price_history`：`UNIQUE (stock_code, market, trading_date)`（Hibernate 名 `ukgoyp…`）＋ `INDEX idx_sph_code_date (stock_code, trading_date)`；**以 `db/init/01_dump.sql` 為準**：OHLC 皆 `NUMERIC(15,4)`（`open/high/low` nullable、`close` NOT NULL，見 v1.14.0）、`volume BIGINT`（nullable）。
+> - `stock_price_history`：`UNIQUE (stock_code, market, trading_date)`（Hibernate 名 `ukgoyp…`）＋ `INDEX idx_sph_code_date (stock_code, trading_date)`；**以 `db/init/01_dump.sql` 為準**：OHLC 皆 `NUMERIC(15,4)`（`open/high/low` nullable、`close` NOT NULL，見 v1.14.0）、`volume BIGINT`（nullable）＋ `CHECK ck_sph_close_price_positive (close_price > 0)`（v1.85.0，Task 279 起）。
 >   ⚠ `v1.0.0-initial-schema.sql` 寫的是 `NUMERIC(20,4)` ＋ `volume NOT NULL`，但該 changeset 在 dump 中已標記 already-ran、**永不執行**，故 20,4 從未套用到任何環境——查證位數/nullable 一律以 dump 為準，勿照抄 v1.0.0。
 >   ✅ **已對齊（Task 201）**：Entity `StockPriceHistory` 曾長期宣告 `precision = 20` 與 `volume nullable = false`（Task 148 照著永不執行的 `v1.0.0` changelog 改，反而改成與 DB 不一致），現已改為四個 OHLC 皆 `precision = 15` 且 `volume` 移除 `nullable = false`，與 DB 相符。依據可自 repo 直接查證：見 `db/schema.sql` 的 `stock_price_history`（`close_price numeric(15,4) NOT NULL`、`open/high/low_price numeric(15,4)` 可空、`volume bigint` 可空）。
 > - `exchange_rate_history`：`UNIQUE (currency, rate_date)`（Hibernate 名 `uk977p…`）＝ upsert 覆寫鍵；`buy_rate/sell_rate NUMERIC(10,4)`，**兩者皆 nullable**（`db/schema.sql` 實測；Entity 未標 `nullable=false` 屬正確，反倒是 `v1.0.0-initial-schema.sql` 寫的 `NOT NULL` 與 DB 不符——同樣因該 changeset 永不執行而未套用）。
@@ -4814,7 +4822,7 @@ score = 50 + 50 × (−0.146) ≈ 43
 
 **門檻不能設小。** 實測全台股序列中 ±15% 以上的跳空共 21 筆，僅 2 筆為真分割（`0050 −74.8%`、`2327 −73.8%`），其餘 19 筆分布在 `−22% ~ +47%`（停牌復牌、興櫃期間、資料源缺日）。真分割與雜訊之間有巨大安全間隙，50% 門檻在現有 10 年資料上零誤報零漏抓。
 
-另須排除 `close_price <= 0` 的列（實測台股 176 筆），否則分割偵測會除以零、52 週相對位置會恆為 `+1`。
+另須排除 `close_price <= 0` 的列，否則分割偵測會除以零、52 週相對位置會恆為 `+1`。（原文寫「實測台股 176 筆」，實測為 **175** 筆；**Requirement 62／Task 279 完成並部署後**該批髒列會被全數刪除、並加上 `CHECK (close_price > 0)` 約束，屆時為 0 筆——撰稿當下 2026-08-02 實測仍為 175 列。此處的排除判斷一律保留為除以零的縱深防禦。）
 
 買進硬閘門（MA20＋MA60 雙 `ABOVE`、大盤非 `RISK_OFF`、非 stale）**完全不受分層影響**：分層只調分數門檻，長期組再高也不得繞過雙 `ABOVE`。
 
