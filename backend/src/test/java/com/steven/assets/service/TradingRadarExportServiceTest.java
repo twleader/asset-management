@@ -70,7 +70,8 @@ class TradingRadarExportServiceTest {
         when(store.range(eq(1L), anyLong(), anyLong()))
                 .thenReturn(new TradingRadarSnapshotStore.SnapshotRange(List.of(n1, n2), 3, 1));
 
-        byte[] data = service.export("2026-07-20T00:00:00", "2026-07-20T23:59:59");
+        byte[] data = excelDocRenderer.render(
+                service.manualDoc("2026-07-20T00:00:00", "2026-07-20T23:59:59").doc());
 
         try (Workbook wb = new XSSFWorkbook(new ByteArrayInputStream(data))) {
             assertThat(wb.getNumberOfSheets()).isEqualTo(3);
@@ -92,7 +93,8 @@ class TradingRadarExportServiceTest {
         when(store.range(eq(1L), anyLong(), anyLong()))
                 .thenReturn(new TradingRadarSnapshotStore.SnapshotRange(List.of(), 0, 0));
 
-        byte[] data = service.export("2026-07-20T00:00:00", "2026-07-20T23:59:59");
+        byte[] data = excelDocRenderer.render(
+                service.manualDoc("2026-07-20T00:00:00", "2026-07-20T23:59:59").doc());
 
         try (Workbook wb = new XSSFWorkbook(new ByteArrayInputStream(data))) {
             assertThat(wb.getNumberOfSheets()).isEqualTo(3);
@@ -102,13 +104,13 @@ class TradingRadarExportServiceTest {
 
     @Test
     void 起始晚於結束回400語意的IllegalArgument() {
-        assertThatThrownBy(() -> service.export("2026-07-20T13:00:00", "2026-07-20T09:00:00"))
+        assertThatThrownBy(() -> service.manualDoc("2026-07-20T13:00:00", "2026-07-20T09:00:00"))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
     void 時間格式錯誤丟IllegalArgument() {
-        assertThatThrownBy(() -> service.export("not-a-date", "2026-07-20T09:00:00"))
+        assertThatThrownBy(() -> service.manualDoc("not-a-date", "2026-07-20T09:00:00"))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 }

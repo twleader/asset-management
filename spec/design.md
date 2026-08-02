@@ -4349,14 +4349,14 @@ TradingRadarView「重新整理」→ POST /api/bff/trading-radar/refresh
 | business | `GET /api/trading-radar` | 組裝大盤＋當前使用者台股決策；純讀、graceful per-stock；回應前 fail-soft 寫一筆 per-owner Redis 快照（Requirement 48）。**零外部行情抓取，Task 249 後仍然不變** |
 | business | `POST /api/trading-radar/refresh` | 先同步回補台股即時行情（開盤中抓外部／休市同步 DB 收盤）再走同一支 `get()` 重算；回 `{radar, priceRefresh}`；**per-owner ＋ 全域雙鍵** 30 秒冷卻、逾時／失敗降級不回 5xx；Task 249 |
 | external | `POST /internal/refresh/tw-radar` | 只抓台股個股（`collectTwRadarCodes` 的 tw set，`TwRadarRefreshService` 另自行 `remove("0000")` 作防禦）＋大盤 `0000`，兩者併行、大盤 12 秒上限；`Semaphore(1)` 單一併發，忙碌回 `busy=true`；休市走逐檔守門後的 `syncClosedFromDb`；Task 249 |
-| business | `GET /api/trading-radar/export?from&to` | 由 Redis 快照組區間 Excel（`ResponseEntity<ByteArrayResource>`）；Requirement 48 |
+| business | `POST /api/trading-radar/export?from&to`（**Task 283 起由 GET 改為 POST**——新增落檔／Drive 副作用） | 由 Redis 快照組區間 Excel（`ResponseEntity<ByteArrayResource>`）；Requirement 48 |
 | business | `GET/PUT /api/trading-radar/export-schedule/times` | 排程執行時間點清單／整批覆寫（per-owner 多時間點）；Requirement 48 追加 |
 | business | `GET/PUT /api/trading-radar/export-schedule/setting` | 輸出資料夾（相對子路徑）讀取／儲存；Requirement 48 追加 |
 | business | `POST /api/trading-radar/export-schedule/run-now` | 立即匯出到設定目錄，回落點路徑與檔案大小；不動當日 guard |
 | business | `GET /api/export-schedule/browse?subpath=` | **沿用 Requirement 34 既有端點**列舉子資料夾，不新增 |
 | BFF | `GET /api/bff/trading-radar` | `TradingRadarBffRoutes` rewrite 至 business；一頁一 BFF |
 | BFF | `POST /api/bff/trading-radar/refresh` | 同一 wildcard rewrite 自動涵蓋（route 無 method predicate）；**不得新增 route 或 controller method**，理由同下方 browse 那列的反面——本路徑在 business 端**存在**對應位置，wildcard rewrite 正確；Task 249 |
-| BFF | `GET /api/bff/trading-radar/export` | `TradingRadarBffRoutes` rewrite 至 business，二進位下載 passthrough |
+| BFF | `POST /api/bff/trading-radar/export`（Task 283 起改 POST；route 無 method predicate，自動穿透） | `TradingRadarBffRoutes` rewrite 至 business，二進位下載 passthrough |
 | BFF | `/api/bff/trading-radar/export-schedule/**` | 同一 rewrite 自動涵蓋（路徑落在 business 對應位置） |
 | BFF | `GET /api/bff/trading-radar/export/browse` | **須用 `TradingRadarBffController`（`@RestController` + WebClient）轉呼 business `/api/export-schedule/browse`**；不可加 gateway route——該路徑落在既有 wildcard `/api/bff/trading-radar/**` 內會被 rewrite 成不存在的 `/api/trading-radar/export/browse` 而 404。WebFlux 的 `RequestMappingHandlerMapping`(order 0) 先於 Gateway 的 `RoutePredicateHandlerMapping`(order 1)，controller 自動勝出；此寫法亦與其餘 7 頁一致 |
 
@@ -5063,7 +5063,7 @@ GET /api/bff/trading-radar → (Gateway rewrite) → GET /api/trading-radar
 
 ### 匯出
 
-business `GET /api/trading-radar/export?from&to`（`ResponseEntity<ByteArrayResource>`，比照 `RealizedGainController.exportExcel`）。owner 取 `getEffectiveUserId()`；`from`／`to` 為 Asia/Taipei ISO local datetime → epoch 毫秒（`from > to` 或格式錯誤回 400）。`TradingRadarExportService`：
+business `POST /api/trading-radar/export?from&to`（**Task 283 起由 GET 改為 POST**，見下方小節；`ResponseEntity<ByteArrayResource>`，比照 `RealizedGainController.exportExcel`）。owner 取 `getEffectiveUserId()`；`from`／`to` 為 Asia/Taipei ISO local datetime → epoch 毫秒（`from > to` 或格式錯誤回 400）。**Task 283 起由 `TradingRadarExportScheduleService.exportAndWriteManual` 承接請求，doc 仍由 `TradingRadarExportService.manualDoc` 產出**。`TradingRadarExportService`：
 
 ```
 members = ZRANGEBYSCORE snap:idx:{ownerId} fromEpoch toEpoch
@@ -5076,6 +5076,30 @@ for m in members: raw = GET snap:{ownerId}:{m}
 ```
 
 零快照時仍回含表頭的合法 `.xlsx`（缺漏彙總列註明查無快照），不回 5xx。BFF 走既有 `TradingRadarBffRoutes` passthrough，二進位與下載 header 原樣穿透，不新增程式。前端 `TradingRadarView.vue` 新增「匯出 Excel」按鈕與 datetime 區間對話框，沿用 `ExchangeRateView.vue` 的 `saveBlob`（`showSaveFilePicker` 指定目錄，fallback 一般下載）；`api/index.js` 的 `tradingRadar` 新增 `exportExcel(from, to)`。
+
+#### 頁首「匯出 Excel」同時落一份 JSON ＋ Excel 到伺服器目錄（Task 283）
+
+本頁的兩個手動入口原本行為不一致：排程卡的「立即匯出到目錄」走 `writeDailyExport` → `DualFormatExportWriter`（兩份 ＋ Drive），而頁首「匯出 Excel」只回單一 xlsx 供下載、不落檔。Task 283 讓後者在**下載行為完全不變**的前提下，額外落一份 json ＋ xlsx 到該 owner 的輸出目錄。
+
+```
+POST /api/trading-radar/export?from&to        ← 由 GET 改為 POST（新增副作用，不掛 GET）
+  └─ TradingRadarExportScheduleService.exportAndWriteManual(from, to)
+       ├─ md = exportService.manualDoc(from, to)   ← 只查一次 Redis（Requirement 55 硬約束）
+            （回 ManualDoc(doc, snapshotCount)；走 private radarDoc(range,..) 多載以保住 null-owner 分支）
+       ├─ md.snapshotCount() == 0 ─────→ 只回下載、一律不落檔（skipped）
+       ├─ jsonDocRenderer.render(md.doc())  ← 失敗只記 log，傳 null 給 writer（該份跳過）
+       ├─ excelDocRenderer.render(md.doc()) ──→ ResponseEntity body（下載，檔名沿用 交易雷達_{起}_{迄}.xlsx）
+       └─ DualFormatExportWriter.write(...) ──→ 交易雷達_{ownerId}_{to的yyyyMMdd}.{json,xlsx}
+                                                → 輸出目錄 ＋（啟用時）Drive
+                                                失敗只記 log，不影響下載
+回應標頭 X-Dir-Export: ok | failed | skipped   ← 前端據此顯示誠實訊息
+```
+
+**方法放在 `TradingRadarExportScheduleService` 而非 `TradingRadarExportService`**：後者被前者注入（`:74`），反向注入即建構子循環依賴（Spring Boot 3.4.4 啟動失敗）；把 `resolveDir`／`currentSubpath` 改成 package-private 也繞不開——那兩支是用實例欄位的**實例方法**，呼叫端仍得持有實例。而排程服務已握有全部需要的依賴，零新依賴。
+
+**前端取狀態的機制**：`api/index.js` 的成功攔截器由 `res => res.data` 改為 `res => (res.config?.rawResponse ? res : res.data)`；per-call 旗標 `rawResponse` 與既有的 `skipAuthRedirect`（`:19`）／`skipErrorToast`（`:32`）同型，**預設行為不變**，目前唯一使用者是 `tradingRadar.exportExcel`。這是全前端第一個讀 response header 的機制（`grep -ran "\.headers\[" frontend/src/` 原本零命中），記在此以免下一個人再造一套。
+
+**三個刻意的取捨**：(a) **落檔沿用排程檔名**（日期取 `to`，非牆鐘今日）——下游 SRPP 以該檔名取用，改用區間檔名等於下游拿不到。⚠️ **代價與排程並不相同、必須揭露**：排程的 `from` 恆為當日 00:00，內容永遠是「那一天」；手動區間由使用者自選、**可跨日**，故 `from=7/20, to=7/25` 會產出檔名為 `..._20260725` 但內容含六天快照的檔，下游會把它當 7/25 當日檔取用。⚠️ 另**查得零快照時一律不落檔**（回 `skipped`）——排程端 `:393-398` 的既有 javadoc 已載明「照寫會留下只有表頭的無用檔，並蓋掉同名前一版」，手動路徑沒有同一道 guard 就會摧毀使用者既有的好檔並同步上 Drive。(b) **不得拆成兩支端點**（一支下載、一支落檔）——那是兩次 `store.range()`，Requirement 55 已點名交易雷達吃即時快照、查兩次會產生對不起來的兩份檔。(c) **不寫 `trading_radar_export_setting` 的四個狀態欄**——那四欄的語意是「排程（含 run-now）最後一次的結果」，手動下載寫進去會讓使用者無法分辨排程有沒有正常跑。
 
 #### 週線 MA5 與擴充技術指標欄（Task 281）
 

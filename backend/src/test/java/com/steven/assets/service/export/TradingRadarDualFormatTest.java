@@ -111,7 +111,8 @@ class TradingRadarDualFormatTest {
     void ownerId為null不擲NPE() {
         when(currentUserContext.getEffectiveUserId()).thenReturn(null);
         assertThatCode(() -> {
-            Workbook wb = GoldenWorkbooks.read(service.export("2026-07-30T00:00:00", "2026-07-31T00:00:00"));
+            Workbook wb = GoldenWorkbooks.read(new ExcelDocRenderer().render(
+                    service.manualDoc("2026-07-30T00:00:00", "2026-07-31T00:00:00").doc()));
             assertThat(wb.getNumberOfSheets()).isEqualTo(3);
             assertThat(wb.getSheet("快照索引").getRow(0).getCell(0).getStringCellValue()).contains("查無交易雷達快照");
         }).doesNotThrowAnyException();

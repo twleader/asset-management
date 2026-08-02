@@ -34,8 +34,23 @@ public class TradingRadarExportService {
     // 雙格式匯出（Requirement 55 / Task 271）：三分頁改建 ExportDoc，xlsx 由 renderer 產出
     private final com.steven.assets.service.export.ExcelDocRenderer excelDocRenderer;
 
-    /** HTTP 手動匯出：owner 取自 request-scoped 的 CurrentUserContext。 */
-    public byte[] export(String from, String to) throws IOException {
+    /**
+     * 頁首手動匯出的 doc（Task 283）：**只查一次 Redis**，供呼叫端 render 成下載用 xlsx 與落檔用的兩份。
+     *
+     * @param snapshotCount 查得的快照筆數。<b>取 {@code range.snapshots().size()}，不是 {@code indexCount()}</b>
+     *                      ——索引還在但 value 全被 TTL／LRU 逐出時 {@code indexCount > 0} 而 snapshots 為空，
+     *                      取錯會讓落檔端用「只有表頭的檔」覆寫掉當日排程產出的好檔。
+     */
+    public record ManualDoc(ExportDoc doc, int snapshotCount) {}
+
+    /**
+     * HTTP 手動匯出的 doc：owner 取自 request-scoped 的 CurrentUserContext（可能為 null）。
+     *
+     * <p>格式錯誤與 {@code from > to} 在此轉成 {@link IllegalArgumentException}（→ 400）；
+     * 呼叫端要用 {@code to} 的日期組檔名時<b>必須排在本方法之後</b>，自行提前 parse 會擲
+     * {@code DateTimeParseException} → 500。</p>
+     */
+    public ManualDoc manualDoc(String from, String to) {
         long fromEpoch = parseEpoch(from);
         long toEpoch = parseEpoch(to);
         if (fromEpoch > toEpoch) {
@@ -47,7 +62,7 @@ public class TradingRadarExportService {
         TradingRadarSnapshotStore.SnapshotRange range = (ownerId == null)
                 ? new TradingRadarSnapshotStore.SnapshotRange(List.of(), 0, 0)
                 : store.range(ownerId, fromEpoch, toEpoch);
-        return excelDocRenderer.render(radarDoc(range, from, to));
+        return new ManualDoc(radarDoc(range, from, to), range.snapshots().size());
     }
 
     /**

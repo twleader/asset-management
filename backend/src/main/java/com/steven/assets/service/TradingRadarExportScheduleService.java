@@ -212,6 +212,62 @@ public class TradingRadarExportScheduleService {
     }
 
     /**
+     * 頁首「匯出 Excel」的結果（Task 283）。
+     *
+     * @param xlsx       下載用 byte[]，永不為 null（render 失敗直接向外擲 → 5xx）
+     * @param dirOutcome {@code "ok"}／{@code "failed"}／{@code "skipped"}，直接作為 {@code X-Dir-Export} 標頭值
+     */
+    public record ManualExportResult(byte[] xlsx, String dirOutcome) {}
+
+    /**
+     * 頁首「匯出 Excel」：下載仍給單一 xlsx（體驗不變），<b>另外</b>落一份 json ＋ xlsx 到輸出目錄
+     * 並（啟用時）同步 Drive（Task 283）。
+     *
+     * <p><b>只查一次 Redis</b>——同一份 doc 同時 render 出下載用與落檔用的檔。Requirement 55 明訂
+     * 本匯出點吃 Redis 即時快照、查兩次會產出對不起來的兩份檔。</p>
+     *
+     * <p><b>本方法一律不寫 {@code trading_radar_export_setting} 的四個狀態欄</b>
+     * （{@code recordStatus}／{@code applyGdriveStatus}／{@code syncGdrive} 都不呼叫）：那四欄的語意是
+     * 「<b>排程</b>（含 run-now）最後一次的結果」，手動下載寫進去會讓排程卡顯示一個不是排程產生的落點，
+     * 使用者無法分辨排程有沒有正常跑。</p>
+     */
+    public ManualExportResult exportAndWriteManual(String from, String to) throws IOException {
+        // 格式錯誤與 from > to 由 manualDoc 內部轉成 IllegalArgumentException → 400；
+        // to 的日期解析必須排在它之後，提前自己 parse 會擲 DateTimeParseException → 500。
+        TradingRadarExportService.ManualDoc md = exportService.manualDoc(from, to);
+        byte[] xlsx = excelDocRenderer.render(md.doc());   // 失敗即向外擲：使用者拿不到檔就該回 5xx
+
+        // 不得用 requireOwnerId()：它在無使用者時擲 IllegalArgumentException → 400，
+        // 而本端點必須回「200 ＋ skipped ＋ 含表頭的合法 xlsx」。
+        Long ownerId = currentUserProvider.getObject().getEffectiveUserId();
+        if (ownerId == null || md.snapshotCount() == 0) {
+            // 零快照時照寫會在使用者目錄留下只有表頭的無用檔，並蓋掉同名前一版（見 writeDailyExport 的 javadoc）
+            return new ManualExportResult(xlsx, "skipped");
+        }
+
+        String outcome = "failed";
+        try {
+            byte[] json = null;
+            try {
+                json = jsonDocRenderer.render(md.doc());
+            } catch (Exception e) {
+                log.warn("交易雷達手動匯出 json render 失敗 owner={}：{}", ownerId, e.getMessage(), e);
+            }
+            // 檔名與排程完全相同、日期取 to（不是牆鐘今日）：下游以排程檔名取用
+            String baseName = "交易雷達_" + ownerId + "_"
+                    + LocalDateTime.parse(to).toLocalDate().format(FILE_DATE);
+            TradingRadarExportSetting cfg = settingRepo.findByOwnerUserId(ownerId).orElse(null);
+            var r = dualWriter.write(ownerId, resolveDir(currentSubpath(ownerId)), baseName, json, xlsx,
+                    cfg != null && cfg.isGdriveEnabled(), cfg == null ? null : cfg.getGdriveSubpath());
+            if (r.jsonFile() != null && r.xlsxFile() != null) outcome = "ok";
+        } catch (Exception e) {
+            // 落檔失敗一律不影響下載——使用者當下要的是那個檔
+            log.warn("交易雷達手動匯出落檔失敗 owner={}：{}", ownerId, e.getMessage(), e);
+        }
+        return new ManualExportResult(xlsx, outcome);
+    }
+
+    /**
      * 立即匯出到目錄（驗證用）。走與排程同一支寫檔邏輯，且**不動任何時間點的當日 guard**。
      *
      * <p>產檔前一律先回補台股即時行情並重算一次（Task 260）——run-now 的用途就是驗證落點，

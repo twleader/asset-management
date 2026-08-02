@@ -549,6 +549,10 @@
             <template v-else>
               目前瀏覽器不支援選擇資料夾，檔案將存到瀏覽器預設下載資料夾。
             </template>
+            <div>
+              另會在<b>伺服器輸出目錄</b>產生同名的 <b>.json ＋ .xlsx</b> 兩份（落點見下方「匯出輸出檔案設定」卡；
+              已啟用 Google Drive 同步時一併上傳）。該區間查無快照時只下載、不落檔。
+            </div>
           </div>
         </el-form-item>
       </el-form>
@@ -963,11 +967,20 @@ async function onExport() {
   }
   exporting.value = true
   try {
-    const blob = await bffApi.tradingRadar.exportExcel(start, end)
+    // Task 283：改回完整 response——除了下載用的 blob，還要讀 X-Dir-Export 判斷落檔結果
+    const res = await bffApi.tradingRadar.exportExcel(start, end)
     const filename = `交易雷達_${start.replace(/[^0-9]/g, '').slice(0, 12)}_${end.replace(/[^0-9]/g, '').slice(0, 12)}.xlsx`
-    const saved = await saveBlob(blob, filename)
+    const saved = await saveBlob(res.data, filename)
     if (saved) {
-      ElMessage.success('匯出完成')
+      // 落檔失敗不得顯示成功——UI 說謊正是 Task 282 修掉的那個病
+      const outcome = res.headers?.['x-dir-export']   // axios 的 header key 一律小寫
+      if (outcome === 'ok') {
+        ElMessage.success('匯出完成，並已同時寫入伺服器輸出目錄（JSON ＋ Excel）')
+      } else if (outcome === 'failed') {
+        ElMessage.warning('已下載 Excel；寫入伺服器輸出目錄失敗，請查後端 log')
+      } else {
+        ElMessage.success('匯出完成（該區間查無快照，未落檔）')
+      }
       exportDialog.visible = false
     }
   } catch {

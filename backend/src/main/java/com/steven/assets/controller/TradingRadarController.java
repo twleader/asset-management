@@ -4,7 +4,6 @@ import com.steven.assets.dto.TradingRadarDto;
 import com.steven.assets.dto.TradingRadarExportDto;
 import com.steven.assets.dto.TradingRadarNotificationDto;
 import com.steven.assets.service.TradingRadarExportScheduleService;
-import com.steven.assets.service.TradingRadarExportService;
 import com.steven.assets.service.TradingRadarNotificationSettingService;
 import com.steven.assets.service.TradingRadarRefreshService;
 import com.steven.assets.service.TradingRadarService;
@@ -41,7 +40,6 @@ public class TradingRadarController {
 
     private final TradingRadarService service;
     private final TradingRadarNotificationSettingService notificationSettingService;
-    private final TradingRadarExportService exportService;
     private final TradingRadarExportScheduleService exportScheduleService;
     private final TradingRadarRefreshService refreshService;
 
@@ -67,14 +65,19 @@ public class TradingRadarController {
      * from/to 為 Asia/Taipei 的 ISO local datetime（如 2026-07-20T00:00:00）；
      * 格式錯誤或 from>to 由 service 拋 IllegalArgumentException，經 GlobalExceptionHandler 轉 400。
      */
-    @GetMapping("/export")
+    @PostMapping("/export")
     public ResponseEntity<ByteArrayResource> export(
             @RequestParam String from, @RequestParam String to) throws IOException {
-        byte[] data = exportService.export(from, to);
+        // Task 283：改 POST——本端點自此有副作用（落檔、Drive 上傳），不得掛在 GET。
+        // 下載那一份與落檔的兩份出自同一次查詢（Requirement 55），故不得拆成兩支端點。
+        var result = exportScheduleService.exportAndWriteManual(from, to);
+        byte[] data = result.xlsx();
         String filename = "交易雷達_" + compact(from) + "_" + compact(to) + ".xlsx";
         HttpHeaders headers = new HttpHeaders();
         headers.setContentDisposition(ContentDisposition
                 .attachment().filename(filename, StandardCharsets.UTF_8).build());
+        // ASCII-safe：ok／failed／skipped，供前端顯示誠實訊息（標頭放中文路徑需另外編碼）
+        headers.set("X-Dir-Export", result.dirOutcome());
         return ResponseEntity.ok()
                 .headers(headers)
                 .contentType(MediaType.parseMediaType(
