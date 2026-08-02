@@ -437,6 +437,18 @@ docker exec asset-redis redis-cli --bigkeys
 4. **反射釘子的禁用字串改為精確欄名**：初版用 `bias` 當字根，誤中 Task 264 既有且合法的 `ma60BiasPercent`／`ma240BiasPercent`（那是「現價對季／年線的乖離」，與 BIAS10／BIAS20 是不同的東西），測試當場紅燈。改為 14 個精確欄名＋`extended`。
 5. **新增一條原計畫沒有的測試**（arch-auditor 建議）：`EXT_KEYS` 與 `TradingRadarDto.ExtendedIndicators` 的 record 元件名之間原本沒有任何編譯期或測試期綁定——改了 DTO 欄名，匯出會靜默變成 14 個空白格而全測試皆綠。
 
+### 部署與實機驗證（已完成）
+
+已 merge 進 main（`ce409536`）並依共用 stack 規則**從 main 的 worktree** 以 `-p asset-management` 重建：
+`docker compose -p asset-management build --no-cache business-services` → `up -d --force-recreate` → `restart bff`（recreate 換 IP，BFF 握舊 IP 會回 500 且約 3 分鐘不自癒）。
+
+- **產物非 stale**：image 建置時間戳為本次（16:42）；`unzip -p /app/app.jar …TradingRadarDto$ExtendedIndicators.class | strings | grep -c wr9` = **1**。六個服務全 `(healthy)`。
+- **端點實機回應**（`GET /api/trading-radar`，19 檔個股）：大盤與每一檔個股的 `extendedIndicators` 皆為 14 個欄位。恆等式自洽（全部在容差內）——大盤 `|j9−(3d−2k)| = 0.01`（≤0.03）、`|dif−(ema12−ema26)| = 0.01`（≤0.015）、`wr9 == 100−rsv` 精確相等；0050／0056 同樣通過。
+- **匯出檔實測**：快照索引 **8 欄**（未動）、大盤總覽 **35 欄**、個股決策 **50 欄**，欄序與 281.16／281.17 逐字相符；`週線MA5` 在 `MA20` 左邊、14 個指標欄在 `D` 右邊。
+- **舊快照相容（實機）**：同一份檔的 6 筆快照中，部署前的 5 筆（02:59–15:24）`J9`／`W%R9` 為**空白格**、不是 0；部署後那筆（16:43）有值且與 API 回應逐位相同。`週線MA5` **連舊列都有值**——它本來就在 DTO 裡（Task 265），只是從未進匯出，與問題陳述一致。
+- **回測端點效能**：`/internal/backtest/rules`（3 檔 × 2.5 年）`real 0m1.63s`，無異常。⚠️ **改動前的對照值未取得**（舊 image 已被覆蓋），故「倍率 ≤ 1.2」這條**未實際比對**；單趟 KD 的正確性由 `單趟kdSeriesAsc合併後既有八個欄位逐位不變` 釘住。
+- **Redis 體積**：最新快照 6,784 bytes vs 部署前 4,008／4,924 bytes（gzip 後約 +38%，與每檔多 14 個數值欄相符）；索引 ZSet 80 members（上限 5000）；`price:*` 共 **74** 個 key 完好，未被擠出。
+
 ### 尚未執行
 
-- **部署與實機驗證**（驗證段第 2–8 步）：image rebuild ＋ container recreate、端點自測、匯出檔實測、舊快照相容、觀察清單零回歸、**回測端點 wall time 倍率**、**Redis `--bigkeys` 體積對照**——待使用者指示。依共用 stack 規則，merge 進 main 後應從 main 的 worktree 重建。
+- **瀏覽器畫面確認**：本任務刻意不動畫面，故無新 UI 可看；若要確認「觀察清單 K/D 與三條均線未回歸」（驗證段第 6 步）需使用者自行登入。
