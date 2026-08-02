@@ -28,7 +28,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 
 ---
 
-## 任務索引（Task 1–220，共 228 個區段）
+## 任務索引（Task 1–228、264–267、269–278）
 
 | Task | 標題 | 位置 |
 |---|---|---|
@@ -276,8 +276,14 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 270 | 五個單表匯出改走 `ExportDoc` 雙格式：已實現損益／匯率／指數／油價金價／交易紀錄（Requirement 55；前置 t269）**已完成實作** | [tasks/t270_dual_format_single_table_exports.md](tasks/t270_dual_format_single_table_exports.md) |
 | 271 | 資產總覽與交易雷達改走 `ExportDoc` 雙格式，交易日曆改為一律兩份（Requirement 55；前置 t269）**已完成實作** | [tasks/t271_dual_format_multi_block_exports.md](tasks/t271_dual_format_multi_block_exports.md) |
 | 272 | 兩份 JSON-primary 匯出加上 Excel（警示觸發、爬蟲公開資訊）＋ 排程列表頁文案收尾（Requirement 55；前置 t270／t271）**已完成實作** | [tasks/t272_dual_format_json_primary_exports.md](tasks/t272_dual_format_json_primary_exports.md) |
+| 273 | 交易雷達規則回測框架：量測各規則述詞在 5／20／60／240 交易日的前瞻報酬分布 vs 同標的同期間基準（Requirement 56；只建工具、不改行為，為 t274／t275／t276／t277 的門檻依據）**⚠ 尚未送審** | [tasks/t273_radar_rule_backtest_framework.md](tasks/t273_radar_rule_backtest_framework.md) |
+| 274 | 季線乖離改以標的自身波動正規化，修正固定百分比門檻的結構性失效（Requirement 57；前置 t273）**⚠ 尚未送審** | [tasks/t274_volatility_normalized_thresholds.md](tasks/t274_volatility_normalized_thresholds.md) |
+| 275 | 美債殖利率曲線落地 `treasury_yield_daily` 與債券 ETF 的利率因子（Requirement 58；前置 t273）**⚠ 尚未送審** | [tasks/t275_treasury_yield_curve_and_bond_factor.md](tasks/t275_treasury_yield_curve_and_bond_factor.md) |
+| 276 | 把已落地但未使用的技術指標（MACD／RSI／W%R／J9／BIAS 差值）與成交量納入評分（Requirement 59；前置 t273）**⚠ 尚未送審** | [tasks/t276_unused_indicators_and_volume.md](tasks/t276_unused_indicators_and_volume.md) |
+| 277 | 交易雷達的短線與中長線雙軌建議（Requirement 60；前置 t273 ＋ t274 ＋ t276；推翻 t265「MA5 不進評分」的前提） **⚠ 尚未送審** | [tasks/t277_dual_horizon_recommendations.md](tasks/t277_dual_horizon_recommendations.md) |
+| 278 | 台股歷史估值回補，推翻 Requirement 46 的「預設不實作」（Requirement 61；前置 t266） **⚠ 尚未送審** | [tasks/t278_twse_valuation_history_backfill.md](tasks/t278_twse_valuation_history_backfill.md) |
 
-> **註：本索引表僅列至 228、264–267 與 269–272；Task 229–263 與 268 未登錄於本表，以 `spec/tasks/tNNN_*.md` 檔案本身為準。**
+> **註：本索引表僅列至 228、264–267 與 269–278；Task 229–263 與 268 未登錄於本表，以 `spec/tasks/tNNN_*.md` 檔案本身為準。**
 
 > **Task 222–225 已全部被 t264–t267 取代（見上表），保留僅作為決策記錄，一律不得依其實作。**
 >

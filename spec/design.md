@@ -490,11 +490,11 @@ POST /internal/repair/history?market=%E5%8F%B0%E8%82%A1&from=2026-06-01&to=2026-
 > nginx 對 `/api/market-data/prices/stream` 路徑需設 `proxy_buffering off`，否則 SSE 會被 buffering 卡住（實作見 `frontend/nginx.conf` 的 `location = /api/market-data/prices/stream`）。
 > 前端仍保留初始 GET `/api/bff/dashboard/realtime` 載入第一份 snapshot；之後增量更新走 SSE，不再用 setInterval polling。
 
-#### external-materials-service Internal API（`InternalPriceController`，28 支）
+#### external-materials-service Internal API（`InternalPriceController`，30 支）
 
-**這些是 service 間內部端點，不是公開 API**：不經 BFF、不對前端暴露，僅在 docker network 內由 `business-services` 以 WebClient 呼叫（class 層 `@RequestMapping("/internal")` + method 層路徑；**全部參數皆為 query string，無 request body**）。此表為 28 支端點的**完整清單**（單一事實來源）；設計理由 / 退化行為凡 design.md 已有段落記載者，「說明」欄一律以**段落標題或 Task / Requirement 編號**交叉引用（不用行號，避免引用隨增刪行漂移），不在此重述（避免同一事實兩處記載各自漂移）。
+**這些是 service 間內部端點，不是公開 API**：不經 BFF、不對前端暴露，僅在 docker network 內由 `business-services` 以 WebClient 呼叫（class 層 `@RequestMapping("/internal")` + method 層路徑；**全部參數皆為 query string，無 request body**）。此表列 30 支（28 支既有 ＋ Task 275 的 `/internal/macro/treasury-yield` 與 Task 278 的 `/internal/valuation/twse-daily` 兩支**規劃中**）。**⚠ 本表已非完整清單**：實測 `grep -cE '@(Get|Post|Put|Delete|Patch)Mapping' InternalPriceController.java` ＝ **33**，即另有 5 支既有端點未登錄（本次變更之前即存在的漂移，**另立任務補齊**）。數字一律以該 grep 實查後填入，不得硬抄；設計理由 / 退化行為凡 design.md 已有段落記載者，「說明」欄一律以**段落標題或 Task / Requirement 編號**交叉引用（不用行號，避免引用隨增刪行漂移），不在此重述（避免同一事實兩處記載各自漂移）。
 
-> 例外：`close/verify-tw` / `close/verify-us` / `health` 三支目前**無 business-services 呼叫端**，為維運手動觸發（container 內 curl）與健康檢查用；其餘 25 支皆有 backend caller。
+> 例外：`close/verify-tw` / `close/verify-us` / `health` 三支目前**無 business-services 呼叫端**，為維運手動觸發（container 內 curl）與健康檢查用；其餘 27 支皆有 backend caller。
 
 **行情 / 收盤（`PricePoller` / `ClosePersister` / `MarketClock`）：**
 
@@ -553,6 +553,25 @@ POST /internal/repair/history?market=%E5%8F%B0%E8%82%A1&from=2026-06-01&to=2026-
 | GET | `/internal/macro/us-index?code=` | 海外指數近 10 年每日 OHLC（Yahoo v8 chart，`range=10y`）。`code ∈ {DJI, SPX, SP500TR, IXIC, SOX, FTSE, DAX, KOSPI, N225}`，回 `List<DailyOhlc>`。見「Macro History」對應資料表的 `us_index_daily_history` |
 | GET | `/internal/macro/twse-return-index?date=` | TWSE 發行量加權股價報酬指數（含息）單日收盤，回 `TwseReturnIndexPoint`；**非交易日 / 查無回 204 No Content**。見 Task 170「含息（total return）演算法與資料管線」 |
 | GET | `/internal/macro/index-intraday?market=` | 指數「當日」分時（Yahoo 5m，最新交易日；transient 不寫 DB）。`market ∈ {TWSE, DJI, SPX, IXIC, SOX, FTSE, DAX, KOSPI, N225}`，回 `List<IndexIntradayPoint>`。見「Macro History」的「當日」分時資料源段落 |
+| GET | `/internal/macro/treasury-yield?tenor=` | 美國公債殖利率近 10 年每日收盤（Yahoo v8 chart，`range=10y`）。`tenor ∈ {M3, Y5, Y10, Y30}` → `^IRX`／`^FVX`／`^TNX`／`^TYX`，回 `List<TreasuryYieldPoint>`。**Requirement 58／Task 275**，見「Macro History」對應資料表的 `treasury_yield_daily` |
+
+**個股估值（新 client，供 business 編排端 proxy 後 upsert `stock_valuation_daily`；不屬 `MacroDataFetchClient` 那一組）：**
+
+| Method | Path | 說明 |
+|--------|------|------|
+| GET | `/internal/valuation/twse-daily?date=` | 台股歷史估值單日快照（TWSE `rwd/zh/afterTrading/BWIBBU_d?date=&selectType=ALL&response=json`，短 UA `Mozilla/5.0`），回該日全上市個股的 PE／PB／殖利率。**Requirement 61／Task 278**。**抓取實作與合規 Javadoc 隨新 client 類別落在本服務**（見下方 business `/internal` 表的警語） |
+
+#### business-services Internal API（手動觸發，不排程、不進 BFF、不進前端）
+
+> **本服務此前沒有這類 `/internal` 抓取／作業端點**——實測 `grep -ran 'RequestMapping("/internal' backend/src` 只有 `UserAdminController` 的 `/internal/users`（受 `AdminGateInterceptor` 限 ADMIN）。下列端點為首批，須**明訂授權立場**：納入 `AdminGateInterceptor.addPathPatterns`，或刻意只靠「容器不對外映射 8080」（實測 `asset-business-services` 只有內部 `8080/tcp`，host 的 8080 是 `asset-bff`）。二選一寫死，因為驗收指令是在容器內裸打、不帶 `X-User-*` header。
+
+> ⚠ **本表的端點一律不得自行對外發 HTTP。** `spec/steering/structure.md` 的架構鐵則明訂「❌ business-services 直接打外部行情 / NAV / 配息 API（**一律經 external-materials**）」與「抓價邏輯不寄宿在 business-services」。需要外部資料時一律比照 `MacroHistoryService.refreshUsIndexDaily()` 的既有模式——經 `priceServiceClient` proxy 至 external-materials 的 `/internal/*`，再於 business 端 upsert。
+
+| Method | Path | 說明 |
+|--------|------|------|
+| POST | `/internal/backtest/rules` | 交易雷達規則回測（**Requirement 56／Task 273**）。逐日切片餵給同一支 `TradingRadarRuleEngine`，量測各述詞在 `+5`／`+20`／`+60`／`+240` 交易日的前瞻報酬分布與同標的同期間基準。可指定標的子集與日期區間；同一輸入得同一輸出。**純讀 DB ＋ 記憶體運算，不對外發任何請求**，故不涉上述鐵則。**分鐘級運算，刻意不掛任何使用者請求路徑**（掛上會拖垮交易雷達頁），消費者是「調門檻時的維護者」而非每日使用者 |
+| POST | `/internal/macro/treasury-yield/refresh?tenor=` | 美債殖利率手動回補／補救（**Requirement 58／Task 275**）：proxy 至 ext-materials 的 `/internal/macro/treasury-yield?tenor=` 後 upsert `treasury_yield_daily`。`tenor ∈ {M3, Y5, Y10, Y30}`，不帶參數時四個全跑。形狀比照 `MacroHistoryService.refreshUsIndexDaily()` |
+| POST | `/internal/valuation/backfill?from=&to=` | 台股歷史估值回補的**編排端**（**Requirement 61／Task 278**）：逐日呼叫 external-materials 的 `/internal/valuation/twse-daily?date=`（**抓取與短 UA 落在該服務，business 端不得自行 curl TWSE**），取回後 upsert `stock_valuation_daily`。低頻單次、可指定起訖日、可從中斷處續跑。**不得新增 `@Scheduled`**，故排程列表頁不需新增項目 |
 
 ### Frontend Architecture (Vue 3)
 
@@ -1577,6 +1596,13 @@ GET    /api/bff/gdp-twse/index-intraday?market=TWSE   # 「當日」分時：回
   - 海外參考個股每日收盤：韓股三星電子 005930 / SK 海力士 000660，供公開資訊爬蟲組韓股快照（`kr-market`）算漲跌%（只需最新＋前一交易日收盤，故僅存 `close_point`；KRW 幣別可達百萬級，精度放寬 NUMERIC(18,4)）
   - 來源 Yahoo Finance v8 chart API（`005930.KS`/`000660.KS`，時區 Asia/Seoul），ext-materials `PriceFetchClient.fetchKrHistoricalRange` 以 curl 子程序（短 UA `Mozilla/5.0`）抓、`KrStockPoller`（每日 16:00 Asia/Taipei ＋開機 warmup）upsert
   - **與 `us_index_daily_history` 分表**（那張語意為「指數」）、**與 `stock_price_history` 分表**（那張為投組個股、market 分類驅動、涉持股/觀察）：本表僅存固定的海外參考個股收盤，語意獨立、不污染既有兩條線
+
+- `treasury_yield_daily`          ((tenor, trading_date) PK, yield_percent NUMERIC(10,4), updated_at) — **Requirement 58／Task 275**
+  - 美國公債殖利率曲線四個天期：`tenor ∈ {M3, Y5, Y10, Y30}`，來源 Yahoo Finance v8 chart API 的 `^IRX`／`^FVX`／`^TNX`／`^TYX`，經既有 `MacroDataFetchClient.fetchUsIndexDaily(code)` 抓取（`^` 須 URL-encode 為 `%5E`；短 UA `Mozilla/5.0`，長 Chrome UA 被 WAF 回 429）。實測（2026-08-01）四者各 **2514 筆**，涵蓋 2016-08-01 ~ 2026-07-31
+  - **與 `us_index_daily_history` 分表**的理由：那張的欄位為 `open_point`／`high_point`／`low_point`／`close_point`，語意是「指數點數」；殖利率是**百分比**（`4.745` 代表 4.745%），量綱不同，混存會讓下游無從分辨一個 `4.745` 是點數還是百分率。另本表只需收盤殖利率，不需 OHLC
+  - **殖利率代碼另開 `TREASURY_YAHOO` Map ＋ `fetchTreasuryYieldDaily(tenor)`（Task 275 已定案）**：`US_INDEX_YAHOO` 與 `/internal/macro/us-index` 的 `code ∈ {9 個}` 值域**皆不動**。兩張表各 ≤ 10 對，故 `Map.of` 不必改（`java.util.Map.of` 的多載上限為 10 對，該 Map 現有 9 對——**只有**併入單一 Map 變 13 對時才必須改 `Map.ofEntries`，本專案不走該路徑）
+  - **`close` 為 null 的日子一律略過不寫**（實測 `^TNX` 約 0.04% 為 null，美股假日對齊造成），**不得以前一日的值回填**——回填會製造「利率連續數日不動」的假事實，而利率因子正是要偵測其變動；缺日由下游以「取最近一個有值的交易日」處理
+  - 全域公開行情資料，比照 `stock_price_history` **不帶 `owner_user_id`、不套 `@Filter`**；寫入採 upsert（重複抓取須冪等）
 
 GDP 兩表 seed data 直接寫入 Liquibase changelog（歷史值不變）。
 日線表（10 年 ~2400 筆）改由使用者按「回補日線」觸發 TWSE MI_5MINS_HIST 月報抓取（changelog 僅建表不 seed），原因：資料量大、會隨時間遞增，不適合寫死於 changelog。
@@ -4123,7 +4149,88 @@ boolean stale = !todayEodPresent && !liveFreshToday;
 
 **還原價基（Task 265）**：除權息還原**既有已符合**——MA／KD／兩日確認／規則漲跌全走 `DistributionAdjustedPriceService`，且還原涵蓋 `highPrice`／`lowPrice`（`:112-113`）不只 `closePrice`，故 V9 新增的 52 週高低與 9 日帶寬取自 `adjustedRows` 亦為同一價基，**不違反「禁止混用原始／還原價」**。缺陷在**股票分割完全不還原**（`validEvent()` `:84-88` 只接受現金股利與股票股利），0050 於 2025-06-18 有 1:4 分割；視窗內若有分割會使 MA 與 52 週高低混用兩種價基、**方向相反且不拋任何例外**，目前未爆純屬 241 根視窗落在該分割日之後的時間巧合。分割偵測採序列啟發式（`ratio ≥ 2.0`／`≤ 0.5` ＋「接近 `{2,3,4,5,10}` 之一、誤差 ≤ 10%」二次驗證），**門檻不得放寬**——±15% 以上的跳空實測 21 筆中僅 2 筆為真分割，小門檻會把序列改壞，而**改壞序列比不還原更糟**（前者無法從畫面察覺）。另新增週線 MA5，**刻意不納入評分與買進閘門**（5 個交易日尺度與「數周至兩年」需求及 V9 降低短線權重的方向直接衝突）。
 
-**明確不在 V9 範圍**：Fed／台灣央行利率資訊（六個利率識別字全庫零命中；`央行` 僅出現於新聞爬蟲的關鍵字清單與註解、未進入評分鏈。需新資料源）、美股／英股（仍只評估台股）、個股基本面（三張表不存在，須 Task 266 建抓取 → 累積 → Task 267 接線為 `TW_RULES_V10`；來源只給當期快照且 MOPS 禁爬，故 EPS 年增率須累積約 2 年）。**前端不得宣稱雷達已納入利率或央行資訊。**
+**明確不在 V9 範圍**：Fed／台灣央行利率資訊（六個利率識別字全庫零命中；`央行` 僅出現於新聞爬蟲的關鍵字清單與註解、未進入評分鏈。需新資料源）、美股／英股（仍只評估台股）、個股基本面（三張表不存在，須 Task 266 建抓取 → 累積 → Task 267 接線為 `TW_RULES_V10`；來源只給當期快照且 MOPS 禁爬，故 EPS 年增率須累積約 2 年）。**前端不得宣稱雷達已納入利率或央行資訊**〔**部分解除**：Requirement 58／Task 275 落地後，「利率」限於「**債券標的**已納入美債殖利率因子」的範圍內解除；「**央行／政策利率**」維持禁止（台灣央行仍無確認的官方 API）。解除前不得提前宣稱。〕
+
+> **⚠ 上段的三項「不在範圍」中，有兩項已由 Requirement 58（Task 275）與 Requirement 61（Task 278）改變前提；第三項維持不變：**
+>
+> | 項目 | V9 當時的記載 | 現況（2026-08-01 實測） |
+> |---|---|---|
+> | **美債殖利率** | 「需新資料源」 | **資料已確認可得**：`^IRX`／`^FVX`／`^TNX`／`^TYX` 經 Yahoo v8 chart API 各回 **2514 筆**（2016-08-01 ~ 2026-07-31），管道即既有的 `MacroDataFetchClient.fetchUsIndexDaily()`。由 Requirement 58（t275）落地為 `treasury_yield_daily` 並接為 `BOND` 專屬因子。**台灣央行政策利率仍無確認的官方 API，維持不在範圍。** |
+> | **個股基本面的歷史** | 「來源只給當期快照且 MOPS 禁爬」 | **須分兩半看**：EPS／ROE 的部分**記載正確且不變**（`mopsov.twse.com.tw/robots.txt` 實測為 `Disallow: /`，僅 bingbot 例外，只能自上線起累積）；但 **PE／PB／殖利率的歷史可回補**——`www.twse.com.tw/robots.txt` 實測 `/rwd/zh/afterTrading/` 落在 `Allow: /` 之下（僅禁 `/epaper/`、`/FTSE/`），`BWIBBU_d?date=20200102` 實回 941 筆、可回溯至 2005-09-02。由 Requirement 61（t278）落地。 |
+> | 美股／英股 | 仍只評估台股 | **不變。** `TradingRadarService.assemble()` 的 filter 仍只留台股。 |
+>
+> **另：上段「週線 MA5 刻意不納入評分」的決定已由 Requirement 60（t277）推翻**，但推翻的是其**前提**而非其論證——原論證「5 個交易日尺度與數周至兩年的需求衝突」在「雷達只輸出單一持有期建議」的前提下正確；Requirement 60 改為**雙軌輸出**，短線軌有自己的因子與權重、不與中長線軌爭奪同一組權重，故 MA5 進入短線軌不再與中長線軌的方向衝突。**中長線軌維持 V9 以來「中期為最大權重組」不變。**
+
+### 規則回測框架（Requirement 56／Task 273）
+
+`TradingRadarRuleEngine` 是純函數（`import` 只有 `BigDecimal`／`RoundingMode`／`ArrayList`／`List`／`Component`，不碰 repository／網路／時間），而 `stock_price_history` 有 154,834 筆／71 檔／2016-08-01 ~ 2026-07-31（各標的交易日數自 318 至 2439 不等，49 檔中 12 檔不足 2400 筆；扣掉 240 筆暖機後最短者只剩約 78 個可用交易日，須逐標的揭露樣本數）。**這兩件事合起來使回測在技術上是現成的**——把歷史序列逐日切片餵給同一支引擎即可，不需要模擬器，也不需要第二份規則實作。
+
+```text
+POST /internal/backtest/rules（手動觸發，不排程、不進 BFF、不進前端）
+  → BacktestService
+       ├─ StockPriceHistoryRepository（逐標的全序列 asc）
+       ├─ StockDividendHistoryRepository ＋ DistributionAdjustedPriceService（還原權息＋還原分割；前瞻報酬取自全序列）
+       ├─ TradingRadarRuleEngine（同一支，不得複製判定邏輯）
+       └─ 輸出：每（述詞 × horizon）的 n／平均／中位數／勝率／下檔風險／百分位 ＋ 同標的同期間基準
+```
+
+**三條會靜默出錯的正確性約束**（皆須有專門測試守門，因為違反時不會拋例外、只會讓結果變好看）：
+
+1. **前視偏誤的真正來源是「全期統計量」，不是還原切片。** 第 `t` 日的判定只能用 `≤ t` 的資料——52 週高低、任何 `max`／`min`／分位數一律只能取自 `[t−239, t]`，不得掃全序列。
+   > **⚠ 還原權息的切片經分析確認不構成前視偏誤（初版記載有誤，已更正）**：back-adjustment 為 `adj[i] = raw[i] × shares[i] / shares_final`，逐 `t` 重錨得 `raw[i] × shares[i] / shares[t]`，兩者在視窗內只差一個**與 `i` 無關的常數倍率**；而引擎的全部價格導出輸入皆為**尺度不變量**（`confirm()`、`ma60BiasPercent`、`week52Position`、`kdBandWidthPercent`、KD 的 `rsv`、`changePercent`），乘上正常數全部不變。故切片不改變任何判定，**不得宣稱逐 `t` 重錨修正了前視偏誤**，也不需要為此付出 O(n²)。仍建議採固定基期正向還原，理由是語意清楚而非正確性。
+2. **前瞻報酬必須用還原序列**：用原始收盤價會讓除息日產生假跌幅，月配息債券 ETF 在 240 日視窗內尤其嚴重。
+3. **暖機期排除**：需要 240 根完成日 K 的因子在序列前 240 筆不可得，這些日子 production 會回 `NO_TRADE`，回測一律排除而非以 `null` 當中性值放行。
+
+**基準的定義是「同標的同期間所有具備完整前瞻報酬的交易日」**，不是零。只報訊號組的絕對報酬在多頭十年裡沒有資訊量。
+
+**不輸出 p 值與信賴區間**：單一市場、單一十年期、標的高度重疊、連續多日同一訊號成立造成嚴重自相關，古典檢定前提不成立。輸出一律為「歷史上此條件成立後的報酬分布」，**不得表述為預測**（沿用 `KD_OVERHEAT_K` Javadoc 已建立的紀律）。
+
+### 波動度正規化（Requirement 57／Task 274）
+
+固定百分比的乖離門檻在不同標的上退化為兩種極端。**量測口徑必須與 production 同源**：以 `DistributionAdjustedPriceService` 的輸出（還原權息＋還原分割）逐日實算 `(adjClose − MA60)/MA60`，先剔除 `close_price <= 0` 的髒列（台股實測 **175 列**），暖機排除前 240 筆。
+
+| 標的 | `\|bias\|>12%` | `\|bias\|>20%` | bias σ | **V9 極端態實際觸發率** | **因窄幅 KD 停用** |
+|---|---|---|---|---|---|
+| 00719B | 0.00% | 0.00% | 1.60 | **0.00%** | **91.4%** |
+| 00865B | 0.00% | 0.00% | 1.84 | **0.00%** | **87.4%** |
+| 00697B | 0.00% | 0.00% | 2.05 | **0.00%** | **72.8%** |
+| 00695B | 0.00% | 0.00% | 2.04 | **0.00%** | **70.9%** |
+| 2412 | 0.00% | 0.00% | 2.16 | **0.00%** | 41.6% |
+| 00751B | 0.18% | 0.00% | 3.38 | **0.00%** | 25.7% |
+| 2330 | 15.69% | 2.32% | 7.85 | 1.41% | 0.5% |
+| 2327 | **40.89%** | **23.45%** | **21.37** | **9.94%** | 0.0% |
+
+> **⚠ 「`|bias|>20%` 的比例」不等於「極端態實際觸發率」。** `TimingState` 的極端態是**合取**（`EXTREME_OVERSOLD = KD 深度超賣 ∧ bias ≤ −20%`），且 KD 側在窄幅時被 `narrowKdBand` 整組停用。2327 的極端態真值是 **9.94%**，不是 23.45%。
+
+**六檔標的的極端態觸發率為 0.00%**（00719B／00865B／00697B／00695B／2412／00751B）——「極端超賣不殺低」對它們十年來從未生效。改以標的自身近 60 日日報酬標準差 `σ` 正規化：`normalizedBias = bias ÷ (σ × 100)`（`bias` 是百分比、`σ` 是比例，量綱必須對齊），門檻改以 `σ` 倍數表示。`σ` 須以還原序列計算、須有絕對下限、樣本不足時回退固定門檻並揭露。**原始 `ma60BiasPercent` 照常輸出不變**——被取代的只有「拿它比對固定門檻」這件事。
+
+> **量綱**：`bias` 是 60 日尺度、`σ` 是單日尺度，相除帶約 `√(60/3) ≈ 4.47` 的放大，**合理門檻落在十倍量級而非 2–3σ**（實測 2σ 會讓 48.68%–79.43% 的交易日觸發）。正規化確實有效：`normalizedBias` 的 σ 收斂到 3.37–5.73（原始 bias σ 為 1.60–21.37）。
+
+**⚠ 射程邊界：本項單獨修不好債券 ETF 的保護。** 極端態的 KD 側在四檔債券 ETF 有 **70.9%–91.4%** 的交易日被 `narrowKdBand` 停用，即使乖離側完全修好，那些日子仍不可能進入極端態。**窄幅 KD 失效（`KD_BAND_MIN_PERCENT = 2%`）與本機制並存、不得互相取代**——KD 的飽和是值域被壓縮，不是尺度問題，正規化不會修好它；要處理須另立任務。
+
+### 已落地但未使用的指標與量能（Requirement 59／Task 276）
+
+`TechnicalIndicatorService`（Task 261／262）已對每個交易日算出 `EMA12`／`EMA26`／`DIF`／`MACD`／`OSC`、`RSI5`／`RSI10`、`BIAS10`／`BIAS20`／`B10−B20`、`W%R9`、`J9`、`K3D2`、`RSV`、`MA5`，但雷達走的是另一支 `computeFromSeries()` → `FullIndicators`（只有 8 個欄位），**這些指標一個都沒進評分鏈**。`stock_price_history.volume` 有完整資料（實測 null 0 筆、僅 229 筆為 0）而 14 個因子也一個都沒用到。
+
+**三個結構性約束：**
+
+1. **`FullIndicators` 只新增欄位，不動既有計算結果。** Task 262 已把 `K9`／`D9`／`J9`／`RSI5`／`RSI10`／`BIAS10`／`BIAS20`／`B10−B20`／`W%R9` 與 Yahoo 逐位比對過（2330 於 2026-07-31），該同源判準綁在既有輸出上。RSI 採 **Wilder 平滑**、MACD 價基為 **DI ＝ (H+L+2C)/4**、EMA 以 SMA seed——沿用，不得另造第二套。
+
+2. **量能必須用相對量，且中位數而非平均數。** `volumeRatio = volume ÷ 近 N 日成交量中位數`；除權息日與法人調節日的爆量會把平均數整個拉高，使其後數月的「爆量」都判不出來。`volume` 為 0／null 時該因子回 `null`（權重由 `Accumulator` 重分配，**不得填 0**）。`0000` 的 `volume` 實測全為 0，大盤不引入量能因子。
+
+3. **⚠ `adjust()` 的 `volume` 縮放只能用「只含分割」的因子。** `DistributionAdjustedPriceService.adjust()` 現行對四個價格欄位縮放但 `volume` 原樣帶過；分割後成交量量級跳增（實測 0050 於 2025-06-18 的 1:4 分割，前後 30 日中位數 12,956,054 → 78,953,424，比值 **6.09**），`volumeRatio` 視窗跨越分割日會產生持續數月的假爆量。
+
+   **但傳給 `adjust()` 的 `scale` 是分割與配息合流後的因子**（`events` 同時裝 `detectSplits()` 與 `dividendFactor()`，`shares` 連乘全部）。直接拿它縮放 `volume` 會把配息也套進成交量——與「現金配息不影響成交量」矛盾，且月配息 ETF 十年累積因子可達 1.3 倍以上、**不拋任何例外**。故須以 `FactorEvent.split()` **另累積一條 split-only 因子**，`adjust()` 增加 `splitScale` 參數；價格仍用原本的混合 `scale`。
+
+   > 唯一能抓出「誤用混合 `scale`」的探針是**「有現金配息但無分割時 `volume` 逐筆不變」**——「無任何事件時不變」那條在壞實作下也會通過。
+
+### 雙軌決策：短線軌 × 中長線軌（Requirement 60／Task 277）
+
+使用者要的是「5 個交易日後可獲利 5% 也是不錯的建議」與「持有期數周至兩年」**同時成立**。兩者的答案可能相反（短線超買、長期結構完好），單一分數無法表達。故改為兩組獨立的 `score` 與 `action`，**各自有獨立的因子集合與權重**——**不得以「同一個分數套兩組門檻」實作**，那只是把一個數字切兩刀。
+
+兩軌衝突時**一律並列呈現、不自動仲裁**：哪一軌該聽取決於使用者當下的資金安排，系統沒有該資訊。既有的單軌 API 欄位語意明確定義為「中長線軌」並保留，避免通知／匯出／快照三個既有消費端靜默改變語意。
+
+短線軌的因子須以 Requirement 56 的 `+5` 日 horizon 量測結果挑選（候選：MA5、RSI5、KD 與 J9、W%R9、MACD 的 OSC 轉向、`volumeRatio`、單日漲跌幅），**不得憑直覺挑選**。「不追高殺低」的對稱性論證（買方有「超買否決買進」，賣方就必須有「超賣否決賣出」）**在短線軌同樣成立**，短線軌須有其對應的極端態覆寫。
 
 ### 逆勢抄底狀態（獨立第二軌）
 
@@ -4243,7 +4350,7 @@ AppUser (1) ──< TradingRadarNotificationSetting >── Stock(code, market)
                               UNIQUE(setting_id, recipient_id)
 ```
 
-- `trading_radar_notification_setting`：`id`、`owner_user_id`、`stock_code`、`market`、`active`、`initialized`、`last_action`、`last_counter_trend_state`、timestamps；`UNIQUE(owner_user_id, stock_code, market)`，entity 套 `ownerFilter`。
+- `trading_radar_notification_setting`：`id`、`owner_user_id`、`stock_code`、`market`、`active`、`initialized`、`last_action`、`last_counter_trend_state`、**`rule_version`**（Task 264／`v1.83.0`：與現行 `RULE_VERSION` 不符即視同未初始化、自動重建通知基準）、timestamps；`UNIQUE(owner_user_id, stock_code, market)`，entity 套 `ownerFilter`。**Task 277 將再新增短線軌的追蹤欄位（`v1.86.0`），並須一併決策 `trading_radar_notification_state` 的 `ck_trn_state_type CHECK (state_type IN ('ACTION','COUNTER_TREND'))` 是否放寬**——沿用 `ACTION` 會讓既有訂閱靜默擴及短線軌。
 - `trading_radar_notification_state`：`setting_id`、`state_type`（`ACTION`／`COUNTER_TREND`）、`state_code`；狀態是規則版本契約，不冗存 label。
 - `trading_radar_notification_recipient`：`setting_id`、`recipient_id`，兩端 FK cascade；不冗存 email。
 
