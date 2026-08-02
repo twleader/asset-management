@@ -36,6 +36,15 @@ public interface StockPriceHistoryRepository extends JpaRepository<StockPriceHis
     @Query("SELECT h FROM StockPriceHistory h WHERE h.stockCode = ?1 AND h.market = ?2 ORDER BY h.tradingDate DESC LIMIT ?3")
     List<StockPriceHistory> findRecentN(String stockCode, String market, int n);
 
+    /**
+     * 取該標的的<b>全序列</b>（升序），供 Task 273 的回測框架逐日切片。
+     *
+     * <p>與 {@link #findRecentN} 分開的理由：後者固定回降序的最近 N 筆，回測需要的是可從頭掃到尾、
+     * 且能對任一 {@code t} 取出「截至 t 的 241 筆視窗」的完整序列。</p>
+     */
+    @Query("SELECT h FROM StockPriceHistory h WHERE h.stockCode = ?1 AND h.market = ?2 ORDER BY h.tradingDate ASC")
+    List<StockPriceHistory> findAllByStockCodeAndMarketOrderByTradingDateAsc(String stockCode, String market);
+
     /** 刪除交易日期早於指定日的舊資料 */
     long deleteByTradingDateBefore(LocalDate cutoffDate);
 

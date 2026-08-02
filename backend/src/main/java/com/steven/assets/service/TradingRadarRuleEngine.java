@@ -243,7 +243,26 @@ public class TradingRadarRuleEngine {
             /** KD 短線熱度（Task 232）；供畫面在收合列即可辨識，不影響 score 與 action。 */
             KdHeat kdHeat,
             /** 進場時機（Task 264）；供畫面在收合列即可辨識，並對動作做雙向覆寫。 */
-            TimingState timingState
+            TimingState timingState,
+            /**
+             * KD 高檔死亡交叉（Task 273 新增輸出）。
+             *
+             * <p><b>純為輸出，不改變任何既有行為</b>——它只是把 {@link #kdDeadCross(StockInput)} 這個
+             * 既有內部判定的結果暴露出來，供回測框架組出「極端超買＋高檔死叉」這條述詞，
+             * 而不必在回測端複製一份會漂移的判定邏輯。</p>
+             *
+             * <p>資料不完整而走 {@code NO_TRADE} 早退分支時一律為 {@code false}：那代表
+             * <b>無法判定</b>，不得因為「呼叫 kdDeadCross 剛好也回 false」就視為等價——
+             * 兩者表面相同但語意不同。</p>
+             */
+            boolean kdDeadCross,
+            /**
+             * 長期結構已破壞（年線兩日跌破且 52 週位置 ≤ {@link #WEEK52_BROKEN}；Task 273 新增輸出）。
+             *
+             * <p>存在理由與 {@code kdDeadCross} 相同：供回測分辨「極端超賣受保護」與
+             * 「極端超賣但崩壞、不受保護」兩組日子。早退分支同樣一律 {@code false}。</p>
+             */
+            boolean longTermBroken
     ) {}
 
     public record CounterTrendResult(
@@ -314,10 +333,13 @@ public class TradingRadarRuleEngine {
 
     public StockResult evaluateStock(StockInput input) {
         if (!complete(input)) {
+            // kdDeadCross／longTermBroken 一律填 false：資料不完整代表「無法判定」，
+            // 不得改呼叫 kdDeadCross(input)——那在 indicators 為 null 時會回到「偶然的 false」，
+            // 表面相同但語意不同（Task 273）。
             return new StockResult(null, Action.NO_TRADE,
                     new CounterTrendResult(CounterTrendState.NONE, List.of(), List.of()), List.of(),
                     List.of("個股必要的 MA20／60／240、KD、241 根完成日 K 或大盤資料不足，今日不交易。"),
-                    KdHeat.NORMAL, TimingState.NEUTRAL);
+                    KdHeat.NORMAL, TimingState.NEUTRAL, false, false);
         }
 
         List<String> reasons = new ArrayList<>();
@@ -364,8 +386,11 @@ public class TradingRadarRuleEngine {
         TimingState timing = timingOf(input);
         Action action = actionFor(input, score, timing, risks, reasons);
         CounterTrendResult counterTrend = evaluateCounterTrend(input);
+        // 兩個新欄位純為輸出（Task 273），不參與 score／action 的產生——上方 actionFor() 已各自
+        // 呼叫過同樣的判定，此處重算是為了把結果暴露給回測，兩者必然一致（純函數）。
         return new StockResult(score, action, counterTrend,
-                List.copyOf(reasons), List.copyOf(risks), kdHeat, timing);
+                List.copyOf(reasons), List.copyOf(risks), kdHeat, timing,
+                kdDeadCross(input), longTermBroken(input));
     }
 
     private CounterTrendResult evaluateCounterTrend(StockInput input) {

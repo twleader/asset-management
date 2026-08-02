@@ -4,6 +4,7 @@ import com.steven.assets.externalmaterials.client.CommodityFetchClient;
 import com.steven.assets.externalmaterials.client.ExchangeRateFetchClient;
 import com.steven.assets.externalmaterials.client.PriceFetchClient;
 import com.steven.assets.externalmaterials.client.PriceFetchClient.HistoricalBar;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -45,6 +46,15 @@ class HistoricalRepairRangeTest {
 
     private final HistoricalBackfillService service =
             new HistoricalBackfillService(priceFetch, rateFetch, commodityFetch, store, etfFetch);
+
+    @BeforeEach
+    void stubUpsertAsWritten() {
+        // Task 279：upsertHistory 改回 boolean（true = 實際寫入），且 rowsOverwritten 只在
+        // 回 true 時累加。mock 的 boolean 預設是 false，不 stub 的話這裡的筆數斷言會全部變 0。
+        // 一律回 true＝「這些案例的收盤價都是正常值」，與各案例的 bar(...) 資料相符。
+        when(store.upsertHistory(anyString(), anyString(), any(),
+                any(), any(), any(), any(), any())).thenReturn(true);
+    }
 
     private static HistoricalBar bar(LocalDate d, String close) {
         return new HistoricalBar(d, new BigDecimal("18.6"), new BigDecimal("19.0"),

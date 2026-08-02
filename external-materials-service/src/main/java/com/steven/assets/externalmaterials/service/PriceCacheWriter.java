@@ -148,6 +148,16 @@ public class PriceCacheWriter {
     public void writeVerifiedClose(PriceResult result) {
         String market = result.market();
         String code = result.stockCode();
+        // 非正收盤一律不進 Redis、不推播（Requirement 62 / Task 279）。
+        // 來源對「當日無整股成交」不發布 OHLC，FinMind 序列化為 0.0；DB 端已有 upsertHistory
+        // 與 CHECK 兩道守門，但這條路徑不經過 DB——不擋的話 live cache 會被寫成股價 0 並
+        // 由 SSE 推到前端。守門放在這裡而非各市場的解析分支，是因為台股走 parseTwClosingRow、
+        // 美股走 getUsClosingPriceFromFinMind、英股走 Yahoo verify，三者都匯流到本方法。
+        // 不寫即維持前一個值，符合「抓不到就維持上一個 tick、禁止回寫充數」的既有紀律。
+        if (result.price() == null || result.price().signum() <= 0) {
+            log.warn("拒絕以非正收盤覆寫 Redis live cache：{} {} price={}", market, code, result.price());
+            return;
+        }
         String key = "price:" + market + ":" + code;
         String indexKey = "price:index:" + market;
 

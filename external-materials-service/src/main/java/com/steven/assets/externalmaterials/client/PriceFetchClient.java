@@ -198,7 +198,11 @@ public class PriceFetchClient {
             LocalDate sourceDate = LocalDate.parse(dateNode.asText());
             if (!expectedDate.equals(sourceDate)) return Optional.empty();
             BigDecimal close = finmindDecimal(row, "close");
-            if (close == null) return Optional.empty();
+            // 非正收盤＝該日無整股成交，來源以 0 表示「無價」（Requirement 62 / Task 279）。
+            // 這裡不擋的話，即使 upsertHistory 拒寫 DB，ClosePersister 仍會呼叫
+            // PriceCacheWriter.writeVerifiedClose 把 0 寫進 Redis live cache 並推播，
+            // 使畫面顯示股價 0。回 empty 讓該檔當日算 miss、Redis 維持前一個值。
+            if (close == null || close.signum() <= 0) return Optional.empty();
             BigDecimal open = finmindDecimal(row, "open");
             BigDecimal high = finmindDecimal(row, "max");
             BigDecimal low  = finmindDecimal(row, "min");
@@ -477,20 +481,7 @@ public class PriceFetchClient {
                 }
                 JsonNode data = mapper.readTree(resp.body()).path("data");
                 if (!data.isArray() || data.isEmpty()) continue;
-                List<HistoricalBar> bars = new java.util.ArrayList<>();
-                for (JsonNode row : data) {
-                    LocalDate date = LocalDate.parse(row.path("date").asText());
-                    BigDecimal close = finmindDecimal(row, "close");
-                    if (close == null) continue;
-                    bars.add(new HistoricalBar(
-                            date,
-                            finmindDecimal(row, "open"),
-                            finmindDecimal(row, "max"),
-                            finmindDecimal(row, "min"),
-                            close,
-                            row.path("Trading_Volume").asLong(0),
-                            candidate));
-                }
+                List<HistoricalBar> bars = parseTwHistoricalRows(data, candidate);
                 if (!candidate.equals(stockCode)) {
                     log.info("台股 {} 在 FinMind 的完整代號為 {}", stockCode, candidate);
                 }
@@ -500,6 +491,42 @@ public class PriceFetchClient {
             }
         }
         return List.of();
+    }
+
+    /**
+     * 解析 FinMind {@code TaiwanStockPrice} 的 data 陣列成日 K 序列。
+     *
+     * <p><b>非正收盤一律跳過（Requirement 62 / Task 279）。</b>交易所對「當日無整股成交」不發布
+     * OHLC——TWSE 回 {@code '--'}，FinMind 則序列化為 {@code 0.0}（實測 006208 2016-08-03：
+     * {@code {"Trading_Volume":0,"open":0.0,...,"close":0.0}}；2017-03-28 更是成交 113 股、
+     * 金額 4,859、3 筆，OHLC 仍為 {@code '--'}，即當日只有零股／盤後成交）。舊版只擋 {@code null}，
+     * 於是 0 被當成合法收盤寫入，累積出 175 列髒資料，單一列即讓當日乖離率變成 −100% 並污染
+     * MA60 與波動度。**真值不存在**（交易所沒有該日收盤價），故一律跳過而非以任何方式補值。
+     *
+     * <p>抽成 package-private static 以便直接做表格測試——本模組沒有 MockWebServer／WireMock，
+     * 且 {@code httpClient} 於建構子自建、無注入點，測不了整支 HTTP 方法。同檔的
+     * {@code parseTwClosingRow} 是同樣理由的既有前例。
+     */
+    static List<HistoricalBar> parseTwHistoricalRows(JsonNode data, String candidate) {
+        List<HistoricalBar> bars = new java.util.ArrayList<>();
+        for (JsonNode row : data) {
+            BigDecimal close = finmindDecimal(row, "close");
+            // 只跳過該列，不得整批丟棄或提前 return——同批的正常列必須全部保留。
+            if (close == null || close.signum() <= 0) {
+                log.debug("跳過台股 {} {} 非正收盤（來源無整股成交價）: {}",
+                        candidate, row.path("date").asText(), close);
+                continue;
+            }
+            bars.add(new HistoricalBar(
+                    LocalDate.parse(row.path("date").asText()),
+                    finmindDecimal(row, "open"),
+                    finmindDecimal(row, "max"),
+                    finmindDecimal(row, "min"),
+                    close,
+                    row.path("Trading_Volume").asLong(0),
+                    candidate));
+        }
+        return bars;
     }
 
     /**
