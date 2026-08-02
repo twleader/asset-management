@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -136,6 +137,44 @@ public class CrawlerDataBffController {
             @RequestParam(required = false, defaultValue = "") String subpath) {
         return businessServicesClient.get()
                 .uri(uri -> uri.path("/api/export-schedule/browse-gdrive").queryParam("subpath", subpath).build())
+                .retrieve()
+                .bodyToMono(MAP)
+                .map(ResponseEntity::ok);
+    }
+
+    /**
+     * 手動「立即匯出」（Requirement 63 / Task 280；限 ADMIN，BFF SecurityConfig 已擋）：<b>只重產檔案</b>，
+     * 不抓取、不寫 {@code news_headline}。
+     *
+     * <p><b>刻意不做 {@code onErrorReturn} 降級</b>（與上方查詢／排程 GET 不同，與 export-path 一致）：
+     * 手動觸發的失敗與「仍在背景執行」都必須讓使用者看見，降級成空物件會讓人誤以為成功。
+     *
+     * <p>維持 {@code Map<String, Object>} 直通、<b>不建 BFF 端 DTO 鏡像類</b>——鏡像類會多一處必須同步的
+     * 欄位清單，漏一個欄位就在這一層被靜默吃掉（Task 245 已踩過同一個坑）。
+     */
+    @PostMapping("/export/run-now")
+    public Mono<ResponseEntity<Map<String, Object>>> runExportNow() {
+        return businessServicesClient.post()
+                .uri(uri -> uri.path("/api/crawler-export-path/run-now").queryParam("crawler", NEWS_POLLER).build())
+                .retrieve()
+                .bodyToMono(MAP)
+                .map(ResponseEntity::ok);
+    }
+
+    /**
+     * 手動「立即抓取並匯出」（Requirement 63 / Task 280；限 ADMIN）：<b>完整跑一輪</b>——抓取 →
+     * upsert {@code news_headline} → 產出 {@code .json} ＋ {@code .xlsx} 兩份 → Drive 同步。
+     *
+     * <p>路徑帶 {@code fetch-and-} 前綴＝「會先重新抓」，未帶前綴的 {@code /export/run-now} 一律是
+     * 「只重產檔案」——三層（BFF／business／ext）一致，避免同一字串在不同層反義而被靜默接反。
+     *
+     * <p>降級與回應型別的取捨同上一支。
+     */
+    @PostMapping("/export/fetch-and-run-now")
+    public Mono<ResponseEntity<Map<String, Object>>> fetchAndRunExportNow() {
+        return businessServicesClient.post()
+                .uri(uri -> uri.path("/api/crawler-export-path/fetch-and-run-now")
+                        .queryParam("crawler", NEWS_POLLER).build())
                 .retrieve()
                 .bodyToMono(MAP)
                 .map(ResponseEntity::ok);

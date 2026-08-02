@@ -1632,7 +1632,7 @@
 
 > **定位：** 本需求是 Requirement 50 的**推廣**，語意完全相同——**本機一律照寫，Drive 只是附加副本**，不提供「只寫 Drive」的選項。Requirement 50 已在「爬蟲資訊查詢」一頁打通端到端（實測：本機與 Drive 兩份 93159 bytes 完全一致），本需求把同一套模型套到其餘八頁。差異只有兩處：（1）這八頁的匯出設定是 **per-user（owner-scoped）** 而非全域，（2）實際上傳者是 **business-services**（這八頁的排程都在 business，且該容器已有 rclone）而非 `external-materials-service`。
 
-**背景：** 九個有「輸出資料夾」選擇器的頁面中，Requirement 50 只做了爬蟲資訊查詢一頁；其餘八頁（Requirement 34／37／39／41／42／45／48／49）的匯出仍只認本機路徑。這八頁的設定各存於自己的表——`export_schedule_setting`／`trading_calendar_export_schedule`／`index_export_schedule`／`exchange_rate_export_schedule`／`trading_radar_export_setting`／`commodity_export_schedule`／`realized_gain_export_schedule`／`asset_transaction_export_schedule`——**八張全部帶 `owner_user_id` ＋ `@Filter(ownerFilter)`**，與爬蟲那張全域無 owner 的 `crawler_export_setting` 結構不同。Requirement 50 已建好可重用的部分：Drive 目錄列舉端點 `GET /api/export-schedule/browse-gdrive`、`RcloneClient` 介面與 `ProcessRcloneClient` 實作（含可寫副本機制）、以及前端 `el-tree` 選擇器的雙模式（本機／Drive）寫法。
+**背景：** 九個有「輸出資料夾」選擇器的頁面中（**此為 Requirement 54 的警示觸發匯出頁落地前的計數；現況為十個，見 Requirement 63**），Requirement 50 只做了爬蟲資訊查詢一頁；其餘八頁（Requirement 34／37／39／41／42／45／48／49）的匯出仍只認本機路徑。這八頁的設定各存於自己的表——`export_schedule_setting`／`trading_calendar_export_schedule`／`index_export_schedule`／`exchange_rate_export_schedule`／`trading_radar_export_setting`／`commodity_export_schedule`／`realized_gain_export_schedule`／`asset_transaction_export_schedule`——**八張全部帶 `owner_user_id` ＋ `@Filter(ownerFilter)`**，與爬蟲那張全域無 owner 的 `crawler_export_setting` 結構不同。Requirement 50 已建好可重用的部分：Drive 目錄列舉端點 `GET /api/export-schedule/browse-gdrive`、`RcloneClient` 介面與 `ProcessRcloneClient` 實作（含可寫副本機制）、以及前端 `el-tree` 選擇器的雙模式（本機／Drive）寫法。
 
 **Acceptance Criteria:**
 
@@ -2264,3 +2264,48 @@ FROM stock_price_history WHERE market='台股';
   - （e）**changeset 冪等與 CHECK 約束生效**：本模組無 DB 測試基礎設施，這兩項**以驗證段的實機指令驗收、不寫成單元測試**——冪等以「刪掉 `databasechangelog` 對應列後重啟 business-services，Liquibase 不得失敗」驗證；CHECK 以「直接 INSERT 一列 `close_price=0` 須被 DB 拒絕」驗證。
 
 ---
+
+---
+
+### Requirement 63: 「爬蟲資訊查詢」頁補上手動匯出（兩顆按鈕：只重產檔案／完整跑一輪），兩種格式都產出
+
+**User Story:** 作為管理者，我希望在「爬蟲資訊查詢」頁能手動把公開資訊匯出成檔案，不必等排程時間點、也不必重啟容器靠開機 warmup；而且我要能分兩種情況操作——（1）**只重產檔案**：剛改完輸出資料夾或 Google Drive 設定，想立刻確認檔案真的落在新位置，這種情況不需要重抓、要秒回；（2）**完整跑一輪**：我現在就要一份含最新新聞的公開資訊（例如 SRPP 退休規劃專案要跑分析），願意等抓取跑完。兩種情況都要**同時產出 `.json` 與 `.xlsx` 兩份**，與排程輪產出的檔案完全一樣。
+
+**背景：** **十個**有「輸出資料夾」設定的匯出頁裡（`grep -ranl "輸出資料夾" frontend/src/views/` 實測：歷年資產／油價金價／**爬蟲資訊查詢**／匯率／GDP-TWSE／已實現損益／**警示觸發**／交易日曆／交易雷達／交易紀錄），**爬蟲資訊查詢頁是唯一一個完全沒有手動觸發入口的**——其餘**八頁**有 `POST .../run-now`「立即匯出」，交易日曆有 `POST /api/trading-calendar-export/run`。**這裡刻意不沿用 Requirement 51 的「九個…其中七頁」**：那組數字的母體是 Requirement 51 自己界定的八頁推廣範圍（寫於 Requirement 54 的警示觸發匯出頁落地之前），在該需求的脈絡內正確、但不能當成全庫計數搬過來用。此缺口已在 Requirement 51 的 run-now 條明文記載：「這正是 Requirement 50 在爬蟲頁缺 run-now 而造成的實際不便（實測時只能靠重啟容器觸發 warmup 才驗到）」；Requirement 55 的 t272 亦以「爬蟲公開資訊沒有 run-now DTO」為由跳過該頁的回應欄位工作。`NewsPoller` 現有的觸發途徑只有兩個：`crawler_schedule` 設定的時間點（每分鐘 ticker 命中即跑，Requirement 38 / Task 192，seed 預設 08:20／11:30／18:00）與開機 `ApplicationReadyEvent` warmup。
+
+> **本需求不改變排程輪的任何行為。** Requirement 55 / Task 272 已讓每輪爬取同時產出 `public_info_<yyyy-MM-dd>.json` 與 `public_info_<yyyy-MM-dd>.xlsx`、Drive 啟用時兩份都上傳——**排程側的「兩種格式」已經成立，本需求不重做、不改動**。本需求新增的只有手動入口，且手動入口一律共用同一段產檔與同步程式碼。
+
+**Acceptance Criteria:**
+
+- [ ] **兩顆按鈕、兩種語意，都放在「爬蟲輸出檔案設定」卡**：
+  - **「立即匯出」＝只重產檔案**：不抓取、不寫 `news_headline`，直接由 DB 現有資料產出 `public_info_<今日>.json` ＋ `.xlsx` 到設定資料夾，Drive 已啟用則兩份都上傳。用途是「改完設定立刻驗證落點」與「臨時要一份檔案」。
+  - **「立即抓取並匯出」＝完整跑一輪**：重新抓取所有來源（權威新聞、證交所三大法人／大盤成交、台幣兌美元與美股快照、韓股盤中、台股均線突破）→ 以 `dedupe_key` upsert 進 `news_headline` → 清理保留期外舊聞 → 產出兩份檔案 → Drive 同步。與排程輪、warmup 完全同一段程式碼。
+  **兩顆並存是刻意的**，不得只做其中一顆：只做前者則「我要最新新聞」永遠只能等排程；只做後者則單純驗證落點要付出一次完整抓取（十餘個來源序列抓取）的代價，而 `news_headline` 只有爬蟲會寫、內容根本不會變。
+- [ ] **兩顆都必須走既有那一段程式碼，不得複製第二份流程**：「立即抓取並匯出」共用 `NewsPoller` 的 `run(trigger)`；兩顆共用同一支 `exportPublicInfoJson(trigger)`（含其內部的 xlsx 產出、tmp ＋ `ATOMIC_MOVE`、Drive 同步）。三條途徑（排程／warmup／手動）若各寫一份，抓取來源清單、個股過濾、cutoff 規則、雙格式產出、Drive 同步這五處遲早漂移（CLAUDE.md「同義欄位、同一 business service API」的同一理由）。
+- [ ] **產出的檔案與排程輪完全相同，兩種格式一律都產**：檔名 `public_info_<今日>.json` ＋ `public_info_<今日>.xlsx`（主檔名相同、只差副檔名，Requirement 55），目錄取自 `crawler_export_setting.output_subpath`（每次即時讀 DB、不快取），內容範圍規則不變（當日 `fetched_at` ＋ `published_at ≥ 上一交易日`）。同日多次覆寫當天那一份、跨日產生新檔。**手動觸發不得產生第二種檔名、不得寫進不同子目錄、不得只產其中一種格式。**
+- [ ] **Requirement 55 的順序守門在手動路徑同樣成立**：先寫 JSON、後寫 xlsx；**JSON 寫失敗時 xlsx 不寫**；反向（xlsx 產檔或寫檔失敗）只記 `warn`，JSON 那一份照寫、照上傳。這是 Requirement 55 明列的「唯一具名例外」（本機 `public_info_*.json` 是 SRPP 的權威資料來源），手動路徑不得因為要回報結果而把它改掉。
+- [ ] **輸出的 `trigger` 欄位新增兩種值**：JSON payload 既有的**頂層** `trigger` 欄位（payload 為扁平結構、無 `metadata` 包裹層；現值 `warmup`／`scheduled`）新增 `manual`（完整跑一輪）與 `manual-export`（只重產檔案），讓 SRPP 與事後追查能分辨這份檔案是誰觸發的。**這不違反 Requirement 55「既有 JSON 的欄位、結構不得變動」**——變動的是既有欄位的**值域**，欄位集合與結構完全不動；`trigger` 本來就已是多值欄位。xlsx 那一份的 metadata 區同樣照既有邏輯帶出該值（不另外處理）。
+- [ ] **一頁一 BFF、逐層 passthrough 至實際執行者**：爬蟲跑在 `external-materials-service`，**business 端只是 proxy**（比照既有 `POST /api/fund-nav/refresh` → `POST /internal/fund-nav/refresh` 的同一模式），與其餘八頁 run-now「business 自己產檔」的結構不同。三層路徑：
+  - 只重產檔案：前端 → `POST /api/bff/crawler-data/export/run-now` → business `POST /api/crawler-export-path/run-now?crawler=news-poller` → ext `POST /internal/news-poller/export-now`
+  - 完整跑一輪：前端 → `POST /api/bff/crawler-data/export/fetch-and-run-now` → business `POST /api/crawler-export-path/fetch-and-run-now?crawler=news-poller` → ext `POST /internal/news-poller/fetch-and-export-now`
+  前端一律只呼叫自己頁面的 BFF，不直接呼叫 business 或 ext。**ext 端那支完整跑一輪的端點刻意不叫 `run-now`**：全庫既有的八個 `POST .../run-now` 一律是「立即匯出到目錄、不重新抓資料」，若 ext 端拿 `run-now` 去指「會重新抓取」的那一支，同一個字串在 business 層與 ext 層就會**語意相反**——兩支都產出同名的兩份檔、只差有沒有抓，接反是**靜默**的（編譯器與測試都抓不到），事後看 log 追查也會誤判。故三層一律以 `fetch-and-` 前綴表達「先抓」，未帶前綴者一律是「只重產檔案」。**BFF 這兩支刻意不做 `onErrorReturn` 降級**（與同一支 controller 的查詢／排程 `GET` 不同、與 `export-path` 一致）：手動觸發的失敗與「仍在背景執行」都必須讓使用者看見，降級成空物件會讓人誤以為成功。
+- [ ] **兩支都限 ADMIN**：兩者都會寫入主機檔案系統與（啟用時）使用者的 Google 雲端硬碟，「完整跑一輪」另外會對外部網站發出請求並寫 `news_headline`，與同卡片的「修改輸出路徑」`PUT` 同級。BFF `SecurityConfig` 對兩支 `POST` 各加 `hasAuthority(ADMIN)`（**不列出就會落到 `anyExchange().authenticated()`**），business 端以 `CurrentUserContext.isAdmin()` 縱深防禦（比照 `CrawlerExportPathController.update`）；非 ADMIN 前端不顯示這兩顆按鈕。
+- [ ] **不重疊執行，兩顆共用同一個閘門**：`NewsPoller` 既有的 `AtomicBoolean running`（warmup 與排程輪共用）為唯一併發閘門，**兩顆手動按鈕都必須取得它**。取不到時**不啟動第二輪**，直接回明確狀態給使用者（不排隊、不重試）。反之手動輪持有旗標期間，落在同一分鐘的排程輪會照既有規則被跳過——**這是既有行為，不為手動輪增設補償邏輯**。「只重產檔案」持有旗標的時間極短（不抓取；Drive 未啟用時通常 1 秒內），Drive 啟用時上限為兩份各 45 秒的上傳逾時。
+- [ ] **回應內容足以驗證落點，且必須分得出是哪一份**：成功時回傳**兩個本機絕對路徑與兩個檔案大小**（`.json` 與 `.xlsx` 各一組）與本輪輸出筆數；「完整跑一輪」另回 upsert 成功／失敗筆數。Drive 已啟用時另回**兩個 Drive 落點**與狀態字串（措辭沿用 `gdrive_last_status`，即 `xlsx …／json …` 的既有契約），未啟用則為 null。**只有一份成功時回應必須分辨得出是哪一份**（同 Requirement 55）。run-now 存在的理由就是驗證落點正確，只回一個路徑等於少驗一半。
+- [ ] **回應狀態必須包含「沒跑完」與「沒跑」，既不得謊報失敗、也不得謊報成功**：狀態值為
+  - `OK` —— 這一輪跑完了，**且本機 JSON 那一份確實寫成功**；
+  - `FAILED` —— 跑了，但**本機 JSON 寫檔失敗**（例如輸出子路徑不可寫、磁碟滿）。**這個值不可省略**：本機寫檔失敗是 `NewsPoller` 既有的 graceful 行為（只 `log.warn`、不擲例外），若不另立狀態，一次什麼檔都沒產生的匯出會回 `OK` 並在前端顯示綠色成功、落點欄還是 `null`——那正好打掉本需求「run-now 存在的理由就是驗證落點正確」這條理由本身。判準是**結構化的**——「`jsonPath == null` **且非 `export-enabled=false` 早退**」（實作以列舉表達），不得靠比對訊息字串，也**不得只看 `jsonPath == null`**（那會把 `DISABLED` 併吃進 `FAILED`）；
+  - `BUSY` —— 上一輪（排程／warmup／另一顆按鈕）尚未結束，本次未啟動；
+  - `RUNNING` —— 等待逾時，**不是失敗**（見下一條）；
+  - `DISABLED` —— 功能被關閉。**兩顆按鈕看的開關不同**：「完整跑一輪」看 `news-scraper.enabled`（false 即整輪不啟動）；「只重產檔案」**不看它**（那是「要不要自動抓取」的開關，與重產檔案無關）、只看 `news-scraper.export-enabled`。照「兩顆都看兩個開關」實作會讓「爬蟲整體停用但仍想重產檔案」的情境被錯誤擋掉。
+    **`enabled=true` 但 `export-enabled=false` 這一格必須明確定案**：「完整跑一輪」**照跑**（抓取與 `news_headline` upsert 都會完成、不得跳過），但產檔那一步早退，故回 `DISABLED` ＋ `message` 明示「抓取已完成 N 則，公開資訊輸出已停用（`news-scraper.export-enabled=false`）故未產檔」，此時 `upserted`／`failed` **有值**、`jsonPath`／`xlsxPath` 為 `null`。**不得回 `OK`**（什麼檔都沒產生卻顯示綠色成功，正是 `FAILED`／`DISABLED` 要防的事），也**不得回 `FAILED`**（沒有東西失敗，是被設定關掉）；
+  - `ERROR` —— business 呼叫 ext 失敗（連線不通、5xx）。**`FAILED` 與 `ERROR` 是不同的事**：前者是「跑到了、檔案沒寫成」，後者是「根本沒跑到 ext」。
+
+  **沿用既有八支 `XxxExportDto.RunNowResponse` 的類名慣例，但欄位形狀刻意不同**——其中六支是 `path`／`sizeBytes`／`gdrivePath`／`gdriveStatus` ＋ Task 270／271 加上的 `jsonPath`／`jsonSizeBytes`／`jsonGdrivePath` 共七欄的「一定跑完」語意，另兩支（`TradingRadarExportDto`／`StockAlertExportDto`）為既有例外、本來就含 `message`。本頁相對於那六支多了 `status`（含三種「沒跑完／沒跑成」）、`mode`（自證是哪一顆按鈕）、筆數與 `message`。
+- [ ] **逾時語意必須明確**：「完整跑一輪」典型 3–5 秒，但十餘個來源序列抓取、各有 15 秒 request timeout，最壞可達數分鐘；「只重產檔案」本身極快，但 Drive 啟用時兩份上傳各有 45 秒上限（Requirement 50），最壞合計 90 秒。而 nginx `/api/` 的 `proxy_read_timeout` 為 60 秒。故 **business→ext 的呼叫一律設 50 秒上限**（`< 60`，確保 business 一定先回應、由我們自己決定回什麼，而不是讓 nginx 回一個沒有語意的 504）：逾時**不代表失敗**——ext 是 servlet 容器，request 執行緒不因 client 斷線而中止，**那一輪會繼續跑完、檔案照寫**，故須回 `RUNNING` 並提示使用者稍後重新整理頁面查看結果。**ext 端不得為了配合這個上限而中斷抓取、縮短各來源逾時或縮短 Drive 上傳逾時**（那會讓手動輪抓到的資料比排程輪少、或讓 Drive 同步在手動路徑上比排程路徑更容易失敗）。
+- [ ] **不新增排程、不新增資料表欄位、不新增 changeset**：本需求不新增任何 `@Scheduled`（手動輪是 HTTP 觸發），故「公開資訊 → 排程列表」（Requirement 36 / `SchedulePublicBffController` 的 `JOBS`）**不新增也不移除項目**（維持 46 筆）；但既有那筆「財經新聞抓取」的 `description` 須補上「亦可於『爬蟲資訊查詢』頁手動立即匯出或立即抓取並匯出」，避免該頁與實際行為漂移（Task 195／260 皆為修正此類漂移而生）。**改寫後該條仍須含 `同時產出 JSON 與 Excel 兩份` 這個確切子字串**，否則會打破 Requirement 55 已落地的 `allMatch` 斷言。執行結果同步回傳前端顯示、**不落 DB**，故無 Liquibase changeset（Drive 上傳結果仍照 Requirement 50 既有機制寫 `crawler_export_setting.gdrive_last_run_at`／`gdrive_last_status`）。
+- [ ] **按完自動刷新頁面既有區塊**：兩顆按鈕結束後前端都重新查詢當日 `news_headline` 表格與重新載入輸出設定卡（後者含「上次上傳」狀態），讓畫面所見即為這一次的結果，不必手動重整。刷新失敗不得覆蓋掉操作結果訊息。
+- [ ] **`BUSY`／`RUNNING` 不得以錯誤樣式呈現，`FAILED`／`ERROR` 則必須**：前者兩種不是「操作失敗」（一個是沒啟動、一個是還在背景跑），前端一律以警示（非錯誤）樣式顯示後端給的中文說明——紅色錯誤會讓使用者以為需要補救。反之 `FAILED`（檔案沒寫成）與 `ERROR`（呼叫不到 ext）**必須**以錯誤樣式呈現。
+- [ ] **顯示層不得印出 `null`，且「部分成功」必須看得出來**：`status=OK` 只代表**本機 JSON 那一份**寫成功，另有兩種必然會發生的部分成功，前端一律降為警示樣式並說明是哪一半沒成：（a）**`xlsxPath` 為 null**——xlsx 產檔失敗時 JSON 仍照寫（本需求明列的順序守門），此時只列 JSON 落點並註明「Excel 這一份本輪未產出」，**不得印出「…／null」**；（b）**`gdriveStatus` 含「失敗」或「跳過」**——Drive 上傳失敗不影響本機、仍回 `OK`，若不呈現，Drive 上傳失敗在畫面上與完全成功無法區分。**判準必須是「包含」而非「開頭」**：既有狀態字串一律是 `xlsx …／json …` 的合併格式（Requirement 55 已定案的契約），「xlsx 上傳失敗、json 成功」時字串是 `xlsx 失敗：…／json 成功：…`、**並不以「失敗」開頭**，而此時 `xlsxPath` 又非 null（本機那份有產出、只是沒上傳成功），用「開頭」當判準會讓**最常見的那種部分失敗顯示綠色成功**。`FAILED`／`ERROR` 時一律不列落點（那時落點是 `null`）。
+- [ ] **時段性來源為空不是錯誤**：韓股盤中快照僅於台北 08:00–14:30 產出、台股均線突破僅於偵測到漲破／跌破時產出。在非該時段觸發「完整跑一輪」時這些來源自然為空，屬正常行為，回應與提示不得把它呈現為失敗。
+- [ ] **測試**：（a）**`running` 已被持有時兩顆都不啟動第二輪**——斷言抓取替身零互動、且**未產生任何檔案**（只斷言回傳 `BUSY` 在「根本沒有互斥」的實作下也會偶然通過）；（b）**「只重產檔案」不抓取**——斷言所有 fetch client 替身零互動、`upsertNews` 零呼叫，而**兩份檔案仍照常產出**（這是兩顆按鈕語意差異的唯一探針）；（c）**trigger 標籤**——兩顆分別產出 `manual` 與 `manual-export`，且該值同時出現在 JSON payload 與 xlsx 的 metadata 區；（d）**雙格式與順序守門在手動路徑成立**——兩份都產出且主檔名相同；xlsx 產檔失敗時 JSON 仍寫出且仍上傳 Drive；JSON 寫失敗時 xlsx 不寫；（e）**Drive 兩份**——以 `GdriveUploader` 替身斷言手動路徑上傳兩次、子路徑相同、檔名分別為兩個副檔名，且 Requirement 50 的三條「絕不」保證（不 rollback 本機檔、不讓入庫失敗、不擲例外）不因手動途徑而改變；（f）**business 端非 ADMIN 呼叫回 403**（兩支各一條）；（f2）**本機寫檔失敗回 `FAILED` 而非 `OK`**——讓輸出目錄不可寫（或讓 `Files.createDirectories`／寫檔擲例外），斷言 `status=FAILED`、`jsonPath` 為 null、方法未擲例外；（g）**逾時回 `RUNNING` 而非 `ERROR`**——等待上限須可由設定覆寫成極小值，否則測試得真的等 50 秒；連線失敗才回 `ERROR`。ext 端測試一律以替身注入、不實際連網、不碰真 DB。

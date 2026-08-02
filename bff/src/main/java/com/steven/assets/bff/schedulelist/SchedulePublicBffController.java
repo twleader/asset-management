@@ -186,7 +186,9 @@ public class SchedulePublicBffController {
             new ScheduledJobDto(EXTERNAL, "財經新聞", "財經新聞抓取",
                     "抓取財經新聞＋公開資訊快照；執行時間改由 DB 驅動，可於「爬蟲資訊查詢」頁增減多個時間點（Requirement 38）。"
                             + "每輪輸出公開資訊，同時產出 JSON 與 Excel 兩份（主檔名相同）至本機設定資料夾，並於已啟用時同步上傳一份副本至 Google Drive"
-                            + "（Requirement 50；本機一律照寫，Drive 為附加副本、失敗不影響本機檔與入庫）",
+                            + "（Requirement 50；本機一律照寫，Drive 為附加副本、失敗不影響本機檔與入庫）。"
+                            + "亦可於「爬蟲資訊查詢」頁按「立即匯出」（只重產檔案）或「立即抓取並匯出」"
+                            + "（完整跑一輪）手動觸發（Requirement 63）",
                     "動態：依「爬蟲資訊查詢」頁設定（預設 08:20 / 11:30 / 18:00）", "動態（crawler_schedule）", TPE),
             new ScheduledJobDto(EXTERNAL, "韓股", "韓股參考個股抓取",
                     "每日抓取韓國三星電子／SK 海力士收盤，供公開資訊韓股快照（KOSPI 另讀既有海外指數）",

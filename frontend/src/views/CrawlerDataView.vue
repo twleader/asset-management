@@ -243,6 +243,40 @@
             <br />上次修改：{{ exportPath.updatedAt }}
           </template>
         </div>
+
+        <!-- 手動匯出兩顆（Requirement 63 / Task 280）：不必等排程時間點，也不必重啟容器靠 warmup。
+             一顆在跑時另一顆停用——同時按必然有一顆拿到 BUSY -->
+        <template v-if="auth.isAdmin">
+          <div class="path-row run-row">
+            <span class="field-label">手動匯出</span>
+            <el-button
+              type="primary"
+              plain
+              :loading="running === 'export'"
+              :disabled="running !== ''"
+              @click="runManual('export')"
+            >
+              <el-icon style="margin-right:4px"><Download /></el-icon>立即匯出
+            </el-button>
+            <el-button
+              type="success"
+              plain
+              :loading="running === 'fetch'"
+              :disabled="running !== ''"
+              @click="runManual('fetch')"
+            >
+              <el-icon style="margin-right:4px"><Refresh /></el-icon>立即抓取並匯出
+            </el-button>
+          </div>
+
+          <div class="path-hint">
+            「立即匯出」＝<strong>只重產檔案</strong>（不重新抓取），內容與上一輪相同、適合改完設定後驗證落點，秒回；
+            「立即抓取並匯出」＝<strong>完整跑一輪</strong>（重新抓新聞與公開資訊快照 → 入庫 → 產檔），會有最新資料。
+            兩者都會產出 <code>.json</code> 與 <code>.xlsx</code> <strong>兩份</strong>，檔名與目錄和排程輪完全相同
+            （同日覆寫當天那一份）；Google Drive 同步已啟用時，<strong>兩份都會上傳</strong>。
+            上一輪還在跑時會提示「尚未結束」並略過，不會同時跑兩輪。
+          </div>
+        </template>
       </div>
     </el-card>
 
@@ -473,6 +507,60 @@ async function saveExportPath() {
   }
 }
 
+// --- 手動匯出兩顆（Requirement 63 / Task 280）---
+// 'export'＝只重產檔案（不抓取）；'fetch'＝完整跑一輪。兩者共用同一支結果處理。
+// 單一 running 字串同時當 loading 與互斥旗標：一顆在跑時另一顆停用，避免必然拿到 BUSY。
+const running = ref('')
+
+async function runManual(kind) {
+  running.value = kind
+  try {
+    const r = (await (kind === 'fetch'
+      ? bffApi.crawlerData.fetchAndRunExportNow()
+      : bffApi.crawlerData.runExportNow())) || {}
+    showManualResult(r)
+  } catch (e) {
+    ElMessage.error('手動匯出失敗：' + apiErrorMessage(e))
+  } finally {
+    running.value = ''
+  }
+  // 刷新頁面既有兩塊：當日爬回資料表格、輸出設定卡（含「上次上傳」狀態）。
+  // 兩支的失敗都吞掉，不得覆蓋掉上面的操作結果訊息。
+  fetchData().catch(() => {})
+  fetchExportPath().catch(() => {})
+}
+
+// status 分三類呈現。總則：任何分支都不得把 null 印進訊息。
+function showManualResult(r) {
+  if (r.status !== 'OK') {
+    // FAILED（跑了但檔案沒寫成）／ERROR（根本沒呼叫到爬蟲服務）才是真的失敗；
+    // BUSY（沒啟動）／RUNNING（還在背景跑）／DISABLED（功能被關）用紅色會讓人以為要補救。
+    const fn = (r.status === 'FAILED' || r.status === 'ERROR') ? ElMessage.error : ElMessage.warning
+    fn(r.message || '爬蟲未執行')
+    return
+  }
+
+  const counts = [
+    r.exported == null ? null : `輸出 ${r.exported} 筆`,
+    r.upserted == null ? null : `入庫 ${r.upserted} 筆`
+  ].filter(Boolean).join('、')
+
+  // OK 只代表「本機 JSON 那一份」寫成功，另有兩種部分成功必須看得出來：
+  // (a) xlsx 沒產出（產檔失敗時 JSON 仍照寫）；(b) Drive 上傳失敗或跳過。
+  if (!r.xlsxPath) {
+    ElMessage.warning(`${counts}；已匯出 ${r.jsonPath}，但 Excel 這一份本輪未產出（不影響 SRPP 讀的 JSON）`)
+    return
+  }
+  // 判準是「包含」不是「開頭」——狀態字串是 `xlsx …／json …` 的合併格式，
+  // 「xlsx 上傳失敗、json 成功」時整串以 `xlsx ` 起頭而非「失敗」，用開頭判會顯示成完全成功。
+  const gd = r.gdriveStatus || ''
+  if (gd.includes('失敗') || gd.includes('跳過')) {
+    ElMessage.warning(`${counts}；本機兩份已寫出，但 Google Drive 同步未全部成功：${gd}`)
+    return
+  }
+  ElMessage.success(`${counts}；已匯出 ${r.jsonPath} 與 ${r.xlsxPath}`)
+}
+
 function openDirPicker(mode = 'local') {
   dirPicker.mode = mode
   dirPicker.picked = (mode === 'gdrive' ? exportPath.gdriveSubpath : exportPath.outputSubpath) || ''
@@ -545,6 +633,8 @@ onMounted(() => {
 .path-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 /* Drive 同步列與本機輸出列拉開一點，讓「本機／Drive 是兩件事」在視覺上分得開 */
 .gdrive-row { margin-top: 14px; }
+/* 手動匯出是「動作」不是「設定」，以分隔線與上方的設定區隔開 */
+.run-row { margin-top: 16px; padding-top: 16px; border-top: 1px solid #e2e8f0; }
 .path-hint { margin-top: 10px; font-size: 12px; color: #94a3b8; line-height: 1.8; }
 .path-hint code { background: #f1f5f9; color: #475569; padding: 1px 5px; border-radius: 4px; font-size: 11px; word-break: break-all; }
 .path-dirty { color: #d97706; }

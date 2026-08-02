@@ -43,4 +43,50 @@ public class CrawlerExportPathDto {
      * 靜默關掉。null 一律視為「不變更」。
      */
     public record Request(String outputSubpath, Boolean gdriveEnabled, String gdriveSubpath) {}
+
+    /**
+     * 手動匯出的結果（Requirement 63 / Task 280），兩顆按鈕共用。
+     *
+     * <p><b>欄位名稱與順序與 ext 的 {@code NewsPoller.ManualRunResult} 逐字相同</b>——business 只是 proxy，
+     * 一對一才不會在這一層靜默吃掉欄位。
+     *
+     * <p>{@code status}：
+     * <ul>
+     *   <li>{@code OK} —— 這一輪跑完了，<b>且本機 JSON 那一份確實寫成功</b>。注意這<b>不</b>代表 xlsx 與
+     *       Drive 也都成功：{@code xlsxPath} 為 null（xlsx 產檔失敗、JSON 照寫）與 {@code gdriveStatus}
+     *       含「失敗」／「跳過」都是「部分成功」，顯示層須分辨。</li>
+     *   <li>{@code FAILED} —— 跑了，但<b>本機 JSON 寫檔失敗</b>（輸出子路徑不可寫、磁碟滿等）。
+     *       與 {@code ERROR} <b>是不同的事</b>：這是「跑到了、檔案沒寫成」。</li>
+     *   <li>{@code BUSY} —— 上一輪（排程／warmup／另一顆按鈕）尚未結束，本次未啟動。</li>
+     *   <li>{@code RUNNING} —— 等待逾時，<b>不是失敗</b>：ext 是 servlet 容器，request 執行緒不因 client
+     *       斷線而中止，那一輪會繼續跑完、檔案照寫。</li>
+     *   <li>{@code DISABLED} —— 功能被關閉。「完整跑一輪」看 {@code news-scraper.enabled}；
+     *       「只重產檔案」只看 {@code news-scraper.export-enabled}。</li>
+     *   <li>{@code ERROR} —— 呼叫 ext 失敗（連線不通、5xx），即<b>根本沒跑到 ext</b>。</li>
+     * </ul>
+     *
+     * <p><b>欄位形狀刻意與其餘八支 {@code XxxExportDto.RunNowResponse} 不同</b>：其中六支是
+     * {@code path}／{@code sizeBytes}／{@code gdrivePath}／{@code gdriveStatus} ＋ Task 270／271 加的
+     * {@code jsonPath}／{@code jsonSizeBytes}／{@code jsonGdrivePath} 共七欄的「一定跑完」語意
+     * （另兩支 {@code TradingRadarExportDto}／{@code StockAlertExportDto} 為既有例外、本來就含 message）。
+     * 本頁多了 {@code status}（含三種「沒跑完／沒跑成」）、{@code mode}（自證是哪一顆按鈕）、筆數與 message。
+     *
+     * @param upserted 只有 {@code mode=FETCH_AND_EXPORT} 有值；{@code EXPORT_ONLY} 一律 null
+     * @param failed   同上
+     */
+    public record RunNowResponse(
+            String status,
+            String mode,
+            String jsonPath,
+            Long jsonSizeBytes,
+            String xlsxPath,
+            Long xlsxSizeBytes,
+            Integer upserted,
+            Integer failed,
+            Integer exported,
+            String jsonGdrivePath,
+            String xlsxGdrivePath,
+            String gdriveStatus,
+            String message
+    ) {}
 }

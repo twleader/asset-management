@@ -2,15 +2,20 @@ package com.steven.assets.service;
 
 import com.steven.assets.dto.CrawlerExportPathDto;
 import com.steven.assets.model.CrawlerExportSetting;
+import com.steven.assets.model.CrawlerSchedule;
 import com.steven.assets.repository.CrawlerExportSettingRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Mono;
 
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.concurrent.TimeoutException;
 
 /**
  * 公開資訊爬蟲輸出檔案路徑設定（Requirement 38 / Task 212）。全域設定，無租戶。
@@ -44,12 +49,85 @@ public class CrawlerExportPathService {
      */
     private final GdriveOutputSupport gdrive;
 
+    /**
+     * 手動匯出的等待上限（秒，Requirement 63 / Task 280）。<b>不寫死成常數</b>：測試要能覆寫成 1
+     * 而不必真的等 50 秒。預設 50 &lt; nginx {@code /api/} 的 {@code proxy_read_timeout 60s}，
+     * 確保 business 一定先回應、由我們自己決定回什麼，而不是讓 nginx 回一個沒有語意的 504。
+     */
+    private final long runNowTimeoutSeconds;
+
+    /** 手動匯出用；爬蟲跑在 ext，本服務只是 proxy（比照 {@code POST /api/fund-nav/refresh} 的既有模式）。 */
+    private final WebClient externalClient;
+
     public CrawlerExportPathService(CrawlerExportSettingRepository repo,
                                     @Value("${EXPORT_OUTPUT_DIR:/home/steven}") String baseDir,
-                                    GdriveOutputSupport gdrive) {
+                                    GdriveOutputSupport gdrive,
+                                    @Value("${external-materials.base-url:http://external-materials-service:8080}")
+                                    String externalUrl,
+                                    @Value("${crawler.run-now.timeout-seconds:50}") long runNowTimeoutSeconds) {
         this.repo = repo;
         this.baseDir = baseDir;
         this.gdrive = gdrive;
+        // 靜態 WebClient.builder()——與 backend 其餘 6 處呼叫 ext 的寫法一致（全樹零處注入 WebClient.Builder）
+        this.externalClient = WebClient.builder().baseUrl(externalUrl).build();
+        this.runNowTimeoutSeconds = runNowTimeoutSeconds;
+    }
+
+    /**
+     * 手動「立即匯出」（Requirement 63 / Task 280）：<b>只重產檔案</b>，proxy 至 ext
+     * {@code POST /internal/news-poller/export-now}。
+     */
+    public CrawlerExportPathDto.RunNowResponse runNow(String crawlerKey) {
+        return proxyManualRun(crawlerKey, "/internal/news-poller/export-now", "匯出");
+    }
+
+    /**
+     * 手動「立即抓取並匯出」（Requirement 63 / Task 280）：<b>完整跑一輪</b>，proxy 至 ext
+     * {@code POST /internal/news-poller/fetch-and-export-now}。
+     */
+    public CrawlerExportPathDto.RunNowResponse fetchAndRunNow(String crawlerKey) {
+        return proxyManualRun(crawlerKey, "/internal/news-poller/fetch-and-export-now", "抓取");
+    }
+
+    /**
+     * 兩顆按鈕共用的 proxy——爬蟲跑在 {@code external-materials-service}，本服務不重新實作任何抓取或產檔邏輯。
+     *
+     * <p><b>逾時不等於失敗。</b> 完整跑一輪典型 3~5 秒，但十餘個來源序列抓取（各 15 秒 request timeout）
+     * 最壞可達數分鐘；只重產檔案本身極快，但 Drive 啟用時兩份上傳各有 45 秒上限。等待上限到了就回
+     * {@code RUNNING}：ext 是 servlet 容器，request 執行緒不因 client 斷線而中止，<b>那一輪會繼續跑完、
+     * 檔案照寫</b>，謊報失敗只會讓使用者去做多餘的補救。
+     *
+     * <p><b>逾時分支必須寫在 reactive chain 內</b>：{@code Mono.timeout(Duration)} 送出的是 checked 的
+     * {@link TimeoutException}，而 {@code block()} 會把它包成 {@code RuntimeException}——外層寫
+     * {@code catch (TimeoutException)} 是編譯錯誤，寫 {@code catch (Exception)} 則會把逾時誤判為失敗。
+     *
+     * <p><b>刻意不加 {@code @Transactional}</b>：不能把數十秒的 HTTP 呼叫包進資料庫交易。
+     */
+    private CrawlerExportPathDto.RunNowResponse proxyManualRun(String crawlerKey, String path, String action) {
+        // 這兩支的 proxy 目標是 news-poller 專屬端點、crawlerKey 不會被帶下去；
+        // 不驗就等於 ?crawler=whatever 也會觸發爬蟲。
+        if (!CrawlerSchedule.CRAWLER_NEWS_POLLER.equals(crawlerKey)) {
+            throw new IllegalArgumentException("目前只支援 crawler=" + CrawlerSchedule.CRAWLER_NEWS_POLLER
+                    + "，收到：" + crawlerKey);
+        }
+        CrawlerExportPathDto.RunNowResponse running = new CrawlerExportPathDto.RunNowResponse(
+                "RUNNING", null, null, null, null, null, null, null, null, null, null, null,
+                "爬蟲仍在背景執行（已超過 " + runNowTimeoutSeconds + " 秒），這一輪會跑完並照常寫檔；"
+                        + "請稍後重新整理頁面查看結果");
+        try {
+            return externalClient.post()
+                    .uri(path)
+                    .retrieve()
+                    .bodyToMono(CrawlerExportPathDto.RunNowResponse.class)
+                    .timeout(Duration.ofSeconds(runNowTimeoutSeconds))
+                    .onErrorResume(TimeoutException.class, e -> Mono.just(running))
+                    .block();
+        } catch (Exception e) {
+            // 逾時走不到這裡（已由上面 onErrorResume 攔下）；這裡只剩連線不通、5xx 等真正的失敗
+            return new CrawlerExportPathDto.RunNowResponse(
+                    "ERROR", null, null, null, null, null, null, null, null, null, null, null,
+                    "呼叫爬蟲服務失敗（" + action + "）：" + e.getMessage());
+        }
     }
 
     /** 取某爬蟲的輸出路徑設定；尚未設定時回預設值（不寫入 DB）。 */

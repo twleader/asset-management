@@ -49,7 +49,9 @@ class CrawlerGdriveOutputTest {
         // Task 242 起驗證規則遷入 GdriveOutputSupport；注入真實元件（rclone 等相依在本測試用不到）。
         GdriveOutputSupport gdrive = new GdriveOutputSupport(
                 rcloneClient, appUserRepo, userAdminService, selfCheck, "GDriveOutput");
-        service = new CrawlerExportPathService(repo, "/home/steven", gdrive);
+        // 後兩個參數為 Task 280 手動匯出 proxy 所需（本測試不觸及 run-now，給不會被用到的值）
+        service = new CrawlerExportPathService(repo, "/home/steven", gdrive,
+                "http://external-materials-service:8080", 50);
         // save 回傳被存進去的那個 entity，讓 assert 能直接看寫入結果
         when(repo.save(any(CrawlerExportSetting.class))).thenAnswer(inv -> inv.getArgument(0));
     }
