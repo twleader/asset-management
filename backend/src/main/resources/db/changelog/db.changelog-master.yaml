@@ -290,3 +290,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/v1.84.0-asset-transaction-fee-tax.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.85.0-drop-nonpositive-close.sql
+      relativeToChangelogFile: false

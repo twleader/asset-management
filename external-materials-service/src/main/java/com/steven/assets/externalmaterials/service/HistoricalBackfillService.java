@@ -154,9 +154,10 @@ public class HistoricalBackfillService {
             }
             // 以使用者輸入的原始代號存入（FinMind 後綴版只用於 fetch，不汙染主鍵）
             if (store.existsHistory(stockCode, "台股", bar.tradingDate())) continue;
-            store.upsertHistory(stockCode, "台股", bar.tradingDate(),
-                    bar.open(), bar.high(), bar.low(), bar.close(), bar.volume());
-            count++;
+            if (store.upsertHistory(stockCode, "台股", bar.tradingDate(),
+                    bar.open(), bar.high(), bar.low(), bar.close(), bar.volume())) {
+                count++;   // 被拒的非正收盤列不得算成已寫入（Task 279）
+            }
         }
         if (count > 0) log.info("台股 {} 匯入 {} 筆", stockCode, count);
         return count;
@@ -238,9 +239,10 @@ public class HistoricalBackfillService {
                 for (HistoricalBar bar : bars) {
                     if (bar.tradingDate().equals(today)) continue;   // 今日列獨佔
                     // 與 backfill 的差別就在這裡：不檢查 existsHistory，一律覆寫
-                    store.upsertHistory(code, market, bar.tradingDate(),
-                            bar.open(), bar.high(), bar.low(), bar.close(), bar.volume());
-                    wrote++;
+                    if (store.upsertHistory(code, market, bar.tradingDate(),
+                            bar.open(), bar.high(), bar.low(), bar.close(), bar.volume())) {
+                        wrote++;   // 被拒的非正收盤列不得算成已寫入（Task 279）
+                    }
                 }
                 rows += wrote;
             } catch (Exception e) {
@@ -272,9 +274,10 @@ public class HistoricalBackfillService {
                 continue;
             }
             if (store.existsHistory(stockCode, "美股", bar.tradingDate())) continue;
-            store.upsertHistory(stockCode, "美股", bar.tradingDate(),
-                    bar.open(), bar.high(), bar.low(), bar.close(), bar.volume());
-            count++;
+            if (store.upsertHistory(stockCode, "美股", bar.tradingDate(),
+                    bar.open(), bar.high(), bar.low(), bar.close(), bar.volume())) {
+                count++;   // 被拒的非正收盤列不得算成已寫入（Task 279）
+            }
         }
         if (count > 0) log.info("美股 {} 匯入 {} 筆", stockCode, count);
         return count;
@@ -299,9 +302,10 @@ public class HistoricalBackfillService {
                 continue;
             }
             if (store.existsHistory(stockCode, "英股", bar.tradingDate())) continue;
-            store.upsertHistory(stockCode, "英股", bar.tradingDate(),
-                    bar.open(), bar.high(), bar.low(), bar.close(), bar.volume());
-            count++;
+            if (store.upsertHistory(stockCode, "英股", bar.tradingDate(),
+                    bar.open(), bar.high(), bar.low(), bar.close(), bar.volume())) {
+                count++;   // 被拒的非正收盤列不得算成已寫入（Task 279）
+            }
         }
         if (count > 0) log.info("英股 {} 匯入 {} 筆", stockCode, count);
         return count;

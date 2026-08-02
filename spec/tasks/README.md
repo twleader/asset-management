@@ -4,7 +4,7 @@ Task 201 之後的新任務，一律建立**獨立的自足任務檔** `spec/tas
 
 ```
 spec/
-├── tasks.md              # 索引（Task 1–220）＋ 尚未歸檔的 201 起區段
+├── tasks.md              # 索引（Task 1–228、264–267、269–278）＋ 尚未歸檔的 201 起區段
 └── tasks/
     ├── README.md         # 本檔
     ├── archive/          # Task 1–200 歷史，已凍結
@@ -116,7 +116,7 @@ curl -s http://localhost:8080/actuator/health
 ```
 1. spec/requirements.md   → User Story + Acceptance Criteria
 2. spec/design.md         → 架構 / 資料模型 / API 設計
-3. spec/tasks/tNNN_*.md   → 建立自足任務檔（新任務；Task 1–220 見 tasks.md 索引）
+3. spec/tasks/tNNN_*.md   → 建立自足任務檔（新任務；既有任務見 tasks.md 索引）
 4. spec 對抗式審查        → /spec-review（產出 findings，不打分數）
 5. 實作程式碼
 ```

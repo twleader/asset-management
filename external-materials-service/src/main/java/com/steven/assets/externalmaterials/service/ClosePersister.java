@@ -218,13 +218,15 @@ public class ClosePersister {
                 Optional<PriceResult> r = client.getTwClosingPriceFromFinMind(code, today);
                 if (r.isEmpty()) { miss++; continue; }
                 PriceResult pr = r.get();
-                source.upsertHistory(code, "台股", today,
+                boolean wrote = source.upsertHistory(code, "台股", today,
                         pr.openPrice(), pr.highPrice(), pr.lowPrice(),
                         pr.price(), pr.volume());
                 // FinMind 為權威收盤，同步覆寫 Redis live cache 以與 DB 一致
                 // （避免 Dashboard / SnapshotForm 讀 Redis 仍看到盤中 last tick）
                 cacheWriter.writeVerifiedClose(pr);
-                ok++;
+                // ok 同時是本方法的回傳值，selfHealMissedClose 以 ok == 0 決定要不要
+                // fallback 去 dump Redis；非正收盤被拒時不得計入，否則數字與事實不符（Task 279）
+                if (wrote) ok++;
                 Thread.sleep(300);
             } catch (Exception e) {
                 log.warn("FinMind 校正台股 {} 收盤失敗: {}", code, e.getMessage());
@@ -269,12 +271,12 @@ public class ClosePersister {
                 Optional<PriceResult> r = client.getUsClosingPriceFromFinMind(code, today);
                 if (r.isEmpty()) { miss++; continue; }
                 PriceResult pr = r.get();
-                source.upsertHistory(code, "美股", today,
+                boolean wrote = source.upsertHistory(code, "美股", today,
                         pr.openPrice(), pr.highPrice(), pr.lowPrice(),
                         pr.price(), pr.volume());
                 // FinMind 為權威收盤，同步覆寫 Redis live cache 以與 DB 一致
                 cacheWriter.writeVerifiedClose(pr);
-                ok++;
+                if (wrote) ok++;   // 同台股：被拒的列不計入（Task 279）
                 Thread.sleep(300);
             } catch (Exception e) {
                 log.warn("FinMind 校正美股 {} 收盤失敗: {}", code, e.getMessage());
@@ -322,14 +324,14 @@ public class ClosePersister {
                 if (bars.isEmpty()) { miss++; continue; }
                 PriceFetchClient.HistoricalBar bar = bars.get(bars.size() - 1);
                 if (!bar.tradingDate().equals(today)) { miss++; continue; }
-                source.upsertHistory(code, "英股", today,
+                boolean wrote = source.upsertHistory(code, "英股", today,
                         bar.open(), bar.high(), bar.low(), bar.close(), bar.volume());
                 // 同步覆寫 Redis live cache 以與 DB 一致
                 PriceResult pr = new PriceResult(code, "英股", bar.close(), null, null, "Yahoo",
                         null, null, null,
                         bar.open(), null, bar.high(), bar.low(), bar.volume());
                 cacheWriter.writeVerifiedClose(pr);
-                ok++;
+                if (wrote) ok++;   // 同台股：被拒的列不計入（Task 279）
                 Thread.sleep(500);
             } catch (Exception e) {
                 log.warn("Yahoo 校正英股 {} 收盤失敗: {}", code, e.getMessage());
@@ -362,11 +364,12 @@ public class ClosePersister {
                     skipped.add(code);
                     continue;
                 }
-                source.upsertHistory(code, market, tradingDate,
+                if (source.upsertHistory(code, market, tradingDate,
                         bd(r, "openPrice"), bd(r, "highPrice"), bd(r, "lowPrice"),
                         price,
-                        r.hasNonNull("volume") ? r.get("volume").asLong() : null);
-                n++;
+                        r.hasNonNull("volume") ? r.get("volume").asLong() : null)) {
+                    n++;   // 被拒的非正收盤列不得算成已寫入（Task 279）
+                }
             } catch (Exception e) {
                 log.warn("dump Redis {} {} 失敗: {}", market, code, e.getMessage());
             }

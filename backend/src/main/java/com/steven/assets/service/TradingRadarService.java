@@ -76,6 +76,12 @@ public class TradingRadarService {
     private final TradingRadarRuleEngine ruleEngine;
     private final TechnicalIndicatorService indicatorService;
     private final DistributionAdjustedPriceService adjustedPriceService;
+    /**
+     * 把 OHLC 序列組成 {@code StockInput} 技術面欄位的<b>唯一擁有者</b>（Task 273 的 273.2b）。
+     * 本服務與 {@code BacktestService} 共用它——回測若另寫一份，兩份會隨演進而分歧，
+     * 屆時回測量到的是與線上不同的規則，且不會有任何報錯。
+     */
+    private final RadarInputAssembler assembler;
     private final AssetClassifier assetClassifier;
     private final TwseIndexDailyHistoryRepository twseRepo;
     private final StockPriceHistoryRepository priceHistoryRepo;
@@ -98,22 +104,6 @@ public class TradingRadarService {
     ) {}
 
     private record Target(String code, String market, boolean held) {}
-
-    /**
-     * @param week52High         還原序列前 240（含 live 則 241）筆的最高價，供 52 週相對位置。
-     * @param week52Low          同上的最低價。
-     * @param kdBandWidthPercent 還原序列前 9 筆的高低帶寬度（%），供窄幅 KD 失效判定（Task 264）。
-     */
-    private record TechnicalData(
-            TechnicalIndicatorService.FullIndicators indicators,
-            List<BigDecimal> completedCloses,
-            BigDecimal previousAdjustedClose,
-            BigDecimal completedChangePercent,
-            boolean distributionAdjusted,
-            BigDecimal week52High,
-            BigDecimal week52Low,
-            BigDecimal kdBandWidthPercent
-    ) {}
 
     /**
      * 當前台股交易日：今天是交易日就取今天，否則往回找最近一個交易日。
@@ -272,28 +262,31 @@ public class TradingRadarService {
         try {
             List<StockPriceHistory> rows = priceHistoryRepo.findRecentN(target.code(), target.market(), 241);
             Optional<PriceQueryService.LivePrice> liveOpt = priceQueryService.getLive(target.code(), target.market());
-            TechnicalData technical = prepareTechnicalData(target, rows, liveOpt);
-            List<BigDecimal> closes = technical.completedCloses();
+            // price 只依賴 rows 與 liveOpt，不依賴組裝結果；因組裝需要它作為乖離／52 週位置的分子，
+            // 故先於 prepareTechnicalData 求值（順序調整不改變任何取值，Task 273 的 273.2b）。
             BigDecimal price = liveOpt.map(PriceQueryService.LivePrice::price)
                     .orElseGet(() -> rows.isEmpty() ? null : rows.get(0).getClosePrice());
+            RadarInputAssembler.Assembled technical = prepareTechnicalData(target, rows, liveOpt, price);
+            List<BigDecimal> closes = technical.completedCloses();
             BigDecimal displayChangePercent = liveOpt.map(PriceQueryService.LivePrice::changePercent)
                     .orElse(null);
             if (displayChangePercent == null && price != null && closes.size() >= 2) {
                 BigDecimal previous = previousCompletedClose(rows, liveOpt.orElse(null));
                 displayChangePercent = changePercent(price, previous);
             }
-            BigDecimal ruleChangePercent = changePercent(price, technical.previousAdjustedClose());
+            // 組裝結果一律取自 RadarInputAssembler，與回測共用同一份（Task 273 的 273.2b）。
+            BigDecimal ruleChangePercent = technical.ruleChangePercent();
             if (ruleChangePercent == null) ruleChangePercent = displayChangePercent;
 
             TechnicalIndicatorService.FullIndicators ind = technical.indicators();
-            TradingRadarRuleEngine.Confirmation c20 = ruleEngine.confirm(closes, 20);
-            TradingRadarRuleEngine.Confirmation c60 = ruleEngine.confirm(closes, 60);
-            TradingRadarRuleEngine.Confirmation c240 = ruleEngine.confirm(closes, 240);
+            TradingRadarRuleEngine.Confirmation c20 = technical.ma20Confirmation();
+            TradingRadarRuleEngine.Confirmation c60 = technical.ma60Confirmation();
+            TradingRadarRuleEngine.Confirmation c240 = technical.ma240Confirmation();
             String currency = underlyingCurrencyOf(stock.orElse(null), target.market());
             BigDecimal fxPct = fxPercentile(stock.orElse(null), target.market());
-            BigDecimal ma60Bias = biasPercent(price, ind.quarterlyMa());
-            BigDecimal ma240Bias = biasPercent(price, ind.annualMa());
-            BigDecimal week52Pos = week52Position(price, technical.week52High(), technical.week52Low());
+            BigDecimal ma60Bias = technical.ma60BiasPercent();
+            BigDecimal ma240Bias = technical.ma240BiasPercent();
+            BigDecimal week52Pos = technical.week52Position();
             BigDecimal etfPremiumPct = etfPremiumPct(target.code(), target.market());
             BigDecimal etfPremiumPercentile = etfPremiumPercentile(target.code(), target.market(), etfPremiumPct);
             TradingRadarRuleEngine.StockResult result = ruleEngine.evaluateStock(
@@ -372,119 +365,30 @@ public class TradingRadarService {
         }
     }
 
-    private TechnicalData prepareTechnicalData(
+    /**
+     * 組裝技術面欄位。**實際邏輯全在 {@link RadarInputAssembler}**，本方法只負責 production 專屬的
+     * 「當日 live K 併入」與事件查詢；回測走同一支 assembler，故兩者不可能漂移（Task 273 的 273.2b）。
+     */
+    private RadarInputAssembler.Assembled prepareTechnicalData(
             Target target,
             List<StockPriceHistory> completedRows,
-            Optional<PriceQueryService.LivePrice> liveOpt) {
+            Optional<PriceQueryService.LivePrice> liveOpt,
+            BigDecimal price) {
         List<StockPriceHistory> combined = new ArrayList<>(completedRows);
         boolean liveAdded = liveOpt.filter(live -> shouldAddLiveRow(completedRows, live)).isPresent();
         if (liveAdded) {
             combined.add(0, liveRow(target, liveOpt.orElseThrow()));
         }
-        if (combined.isEmpty()) {
-            return new TechnicalData(
-                    TechnicalIndicatorService.FullIndicators.EMPTY, List.of(), null, null, false,
-                    null, null, null);
-        }
+        if (combined.isEmpty()) return RadarInputAssembler.Assembled.EMPTY;
 
         LocalDate fromDate = combined.get(combined.size() - 1).getTradingDate();
         LocalDate toDate = combined.get(0).getTradingDate();
-        DistributionAdjustedPriceService.Adjustment adjustment = adjustedPriceService.adjust(
+        return assembler.assemble(
                 combined,
-                dividendHistoryRepo.findAdjustmentEvents(
-                        target.code(), target.market(), fromDate, toDate));
-        List<StockPriceHistory> adjustedRows = adjustment.rowsDesc();
-
-        int completedStart = liveAdded ? 1 : 0;
-        int completedEnd = Math.min(completedStart + completedRows.size(), adjustedRows.size());
-        List<BigDecimal> completedCloses = adjustedRows.subList(completedStart, completedEnd).stream()
-                .map(StockPriceHistory::getClosePrice)
-                .toList();
-
-        int indicatorRows = Math.min(adjustedRows.size(), liveAdded ? 241 : 240);
-        TechnicalIndicatorService.FullIndicators indicators = indicatorService.computeFromSeries(
-                adjustedRows.subList(0, indicatorRows));
-        BigDecimal previousAdjustedClose = adjustedRows.size() >= 2
-                ? adjustedRows.get(1).getClosePrice()
-                : null;
-        // 最近一根完成日 K 相對前一根的漲跌幅（還原後價基），供逆勢「停止續跌」判定（Task 217.3）。
-        int firstCompleted = liveAdded ? 1 : 0;
-        BigDecimal completedChangePercent = adjustedRows.size() >= firstCompleted + 2
-                ? changePercent(adjustedRows.get(firstCompleted).getClosePrice(),
-                                adjustedRows.get(firstCompleted + 1).getClosePrice())
-                : null;
-        // Task 264：52 週高低與 9 日帶寬一律取自同一份還原序列，與 MA／KD 同一價基
-        //（DistributionAdjustedPriceService 同時還原 high／low，見該檔 :112-113），
-        // 不違反「禁止混用原始／還原價」。
-        List<StockPriceHistory> window = adjustedRows.subList(0, indicatorRows);
-        BigDecimal week52High = maxHigh(window);
-        BigDecimal week52Low = minLow(window);
-        BigDecimal kdBandWidthPercent = bandWidthPercent(
-                adjustedRows.subList(0, Math.min(adjustedRows.size(), 9)));
-
-        return new TechnicalData(
-                indicators, completedCloses, previousAdjustedClose,
-                completedChangePercent, adjustment.adjusted(),
-                window.size() >= 240 ? week52High : null,
-                window.size() >= 240 ? week52Low : null,
-                kdBandWidthPercent);
-    }
-
-    /** 還原序列的最高價；全為 null 時回 null（不得以 0 充當）。 */
-    private BigDecimal maxHigh(List<StockPriceHistory> rows) {
-        BigDecimal max = null;
-        for (StockPriceHistory r : rows) {
-            BigDecimal h = r.getHighPrice() != null ? r.getHighPrice() : r.getClosePrice();
-            if (h == null) continue;
-            if (max == null || h.compareTo(max) > 0) max = h;
-        }
-        return max;
-    }
-
-    /** 還原序列的最低價；全為 null 時回 null。 */
-    private BigDecimal minLow(List<StockPriceHistory> rows) {
-        BigDecimal min = null;
-        for (StockPriceHistory r : rows) {
-            BigDecimal l = r.getLowPrice() != null ? r.getLowPrice() : r.getClosePrice();
-            if (l == null) continue;
-            if (min == null || l.compareTo(min) < 0) min = l;
-        }
-        return min;
-    }
-
-    /** 9 日高低帶寬度（%）：不足 9 筆、取不到高低或低點非正時回 null（缺值視同未觸發保護）。 */
-    private BigDecimal bandWidthPercent(List<StockPriceHistory> rows) {
-        if (rows.size() < 9) return null;
-        BigDecimal hi = maxHigh(rows);
-        BigDecimal lo = minLow(rows);
-        if (hi == null || lo == null || lo.signum() <= 0) return null;
-        return hi.subtract(lo)
-                .divide(lo, 8, RoundingMode.HALF_UP)
-                .multiply(BigDecimal.valueOf(100));
-    }
-
-    /** 現價對均線的乖離率（%）；均線缺值或非正時回 null。 */
-    private BigDecimal biasPercent(BigDecimal price, BigDecimal ma) {
-        if (price == null || ma == null || ma.signum() <= 0) return null;
-        return price.subtract(ma)
-                .divide(ma, 8, RoundingMode.HALF_UP)
-                .multiply(BigDecimal.valueOf(100));
-    }
-
-    /**
-     * 52 週相對位置，值域 {@code [0,1]}。
-     *
-     * <p><b>必須 clamp</b>：高低取自完成日 K 而 {@code price} 可能是 Redis 即時價，創 52 週新高當日
-     * {@code pos > 1} 會使因子貢獻超出 {@code [-1,+1]} 而破壞 {@code score ∈ [0,100]} 不變量。
-     * 此路徑只在創新高當天出現，平時測不到。</p>
-     */
-    private BigDecimal week52Position(BigDecimal price, BigDecimal high, BigDecimal low) {
-        if (price == null || high == null || low == null) return null;
-        BigDecimal range = high.subtract(low);
-        if (range.signum() <= 0) return null;
-        BigDecimal pos = price.subtract(low).divide(range, 8, RoundingMode.HALF_UP);
-        if (pos.signum() < 0) return BigDecimal.ZERO;
-        return pos.compareTo(BigDecimal.ONE) > 0 ? BigDecimal.ONE : pos;
+                dividendHistoryRepo.findAdjustmentEvents(target.code(), target.market(), fromDate, toDate),
+                liveAdded,
+                completedRows.size(),
+                price);
     }
 
     private boolean shouldAddLiveRow(
@@ -569,17 +473,14 @@ public class TradingRadarService {
         targets.put(key, new Target(code, market, held || (existing != null && existing.held())));
     }
 
+    /** 委派 {@link RadarInputAssembler}，避免同一段換算在兩處各自漂移（Task 273）。 */
     private TradingRadarRuleEngine.Indicators indicators(TechnicalIndicatorService.FullIndicators ind) {
-        return new TradingRadarRuleEngine.Indicators(
-                ind.monthlyMa(), ind.quarterlyMa(), ind.annualMa(), ind.k(), ind.d());
+        return assembler.indicators(ind);
     }
 
+    /** 委派 {@link RadarInputAssembler}，避免同一段換算在兩處各自漂移（Task 273）。 */
     private BigDecimal changePercent(BigDecimal current, BigDecimal previous) {
-        if (current == null || previous == null || previous.signum() == 0) return null;
-        return current.subtract(previous)
-                .divide(previous, 8, RoundingMode.HALF_UP)
-                .multiply(BigDecimal.valueOf(100))
-                .setScale(4, RoundingMode.HALF_UP);
+        return assembler.changePercent(current, previous);
     }
 
     /**

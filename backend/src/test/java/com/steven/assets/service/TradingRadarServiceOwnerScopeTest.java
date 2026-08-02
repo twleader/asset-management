@@ -64,6 +64,9 @@ class TradingRadarServiceOwnerScopeTest {
                 new TradingRadarRuleEngine(),
                 indicatorService,
                 adjustedPriceService,
+                // Task 273：組裝已抽為 RadarInputAssembler。此處刻意用**真的** assembler 包同一組 mock，
+                // 使本測試的行為與抽取前完全相同（mock 的 adjust 回 null → 走既有的降級分支）。
+                new RadarInputAssembler(indicatorService, adjustedPriceService, new TradingRadarRuleEngine()),
                 assetClassifier,
                 twseRepo,
                 priceHistoryRepo,
