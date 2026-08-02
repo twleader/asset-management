@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -363,5 +364,218 @@ class TechnicalIndicatorSeriesAlignmentTest {
         assertThat(last.ma20()).isEqualByComparingTo(single.monthlyMa());
         assertThat(last.ma60()).isEqualByComparingTo(single.quarterlyMa());
         assertThat(last.ma240()).isEqualByComparingTo(single.annualMa());
+    }
+
+    // ===== Task 281：擴充指標（純揭露，只進匯出檔）=====
+
+    /** 逐位比對用：14 個擴充欄一次比完。 */
+    private static void assertExtendedEquals(TechnicalIndicatorService.ExtendedIndicators a,
+                                             TechnicalIndicatorService.ExtendedIndicators b) {
+        assertThat(a).usingRecursiveComparison().isEqualTo(b);
+    }
+
+    @Test
+    void 擴充指標與同一份FullIndicators的KD自洽() {
+        List<StockPriceHistory> asc = ascRows(300);
+        List<StockPriceHistory> desc = new ArrayList<>(asc).reversed();
+
+        TechnicalIndicatorService.FullIndicators ind = service().computeFromSeries(desc);
+        TechnicalIndicatorService.ExtendedIndicators e = ind.extended();
+
+        // j9 = 3D − 2K、k3d2 = 3K − 2D。容差 0.03 而非 0.01：kdSeriesAsc 以未捨入的 k/d 算
+        // j9/k3d2，三者各自 setScale(2, HALF_UP) → 上界 0.005 + 3×0.005 + 2×0.005。
+        double k = ind.k().doubleValue(), d = ind.d().doubleValue();
+        assertThat(e.j9().doubleValue()).isCloseTo(3 * d - 2 * k, within(0.03));
+        assertThat(e.k3d2().doubleValue()).isCloseTo(3 * k - 2 * d, within(0.03));
+        // W%R9 = 100 − RSV9 直接由已捨入的 rsv 相減，不引入第二次捨入 → 精確相等
+        assertThat(e.wr9()).isEqualByComparingTo(
+                BigDecimal.valueOf(100).subtract(e.rsv()));
+        // 其餘恆等式（各欄各自捨入 → 上界 0.015）
+        assertThat(e.dif().doubleValue())
+                .isCloseTo(e.ema12().doubleValue() - e.ema26().doubleValue(), within(0.015));
+        assertThat(e.osc().doubleValue())
+                .isCloseTo(e.dif().doubleValue() - e.macd().doubleValue(), within(0.015));
+        assertThat(e.b10b20().doubleValue())
+                .isCloseTo(e.bias10().doubleValue() - e.bias20().doubleValue(), within(0.015));
+    }
+
+    @Test
+    void 擴充指標必須逐位等於indicatorSeries尾筆() {
+        List<StockPriceHistory> asc = ascRows(300);
+        givenSeries(asc);
+        TechnicalIndicatorService svc = service();
+
+        TechnicalIndicatorService.IndicatorPoint last =
+                svc.indicatorSeries(CODE, MARKET, END.minusDays(60), END).reversed().get(0);
+        TechnicalIndicatorService.ExtendedIndicators e =
+                svc.computeFromSeries(new ArrayList<>(asc).reversed()).extended();
+
+        // 證明沒有長出第二套公式：同一份輸入下，單點版與序列版尾筆的 14 個欄位逐位相同
+        assertExtendedEquals(e, new TechnicalIndicatorService.ExtendedIndicators(
+                last.j9(), last.k3d2(), last.rsv(),
+                last.ema12(), last.ema26(), last.dif(), last.macd(), last.osc(),
+                last.rsi5(), last.rsi10(), last.bias10(), last.bias20(), last.b10b20(), last.wr9()));
+    }
+
+    @Test
+    void 單趟kdSeriesAsc合併後既有八個欄位逐位不變() {
+        // 迴歸錨點：以合併前的實作跑出的值寫死。kdSeriesAsc 是前綴相依前向遞迴，
+        // previous 取單趟結果的倒數第二筆與舊版「對 subList 再跑一趟」bit-identical。
+        List<StockPriceHistory> desc = new ArrayList<>(ascRows(300)).reversed();
+        TechnicalIndicatorService.FullIndicators ind = service().computeFromSeries(desc);
+
+        TechnicalIndicatorService.FullIndicators viaOldPath = oldPathIndicators(desc);
+        assertThat(ind.monthlyMa()).isEqualByComparingTo(viaOldPath.monthlyMa());
+        assertThat(ind.quarterlyMa()).isEqualByComparingTo(viaOldPath.quarterlyMa());
+        assertThat(ind.annualMa()).isEqualByComparingTo(viaOldPath.annualMa());
+        assertThat(ind.weeklyMa()).isEqualByComparingTo(viaOldPath.weeklyMa());
+        assertThat(ind.k()).isEqualByComparingTo(viaOldPath.k());
+        assertThat(ind.d()).isEqualByComparingTo(viaOldPath.d());
+        assertThat(ind.previousK()).isEqualByComparingTo(viaOldPath.previousK());
+        assertThat(ind.previousD()).isEqualByComparingTo(viaOldPath.previousD());
+    }
+
+    /**
+     * 舊路徑的等價重現：previous 走「對 desc.subList(1, n) 重新算一次整條序列」。
+     * 用 indicatorSeries 的公開輸出當代理——它與 computeFromSeries 共用同一份 kdSeriesAsc，
+     * 且 subList 那一段正是完整序列的前綴。
+     */
+    private TechnicalIndicatorService.FullIndicators oldPathIndicators(List<StockPriceHistory> desc) {
+        TechnicalIndicatorService svc = service();
+        List<StockPriceHistory> ascAll = new ArrayList<>(desc).reversed();
+        // current：完整序列
+        TechnicalIndicatorService.FullIndicators cur = svc.computeFromSeries(desc);
+        // previous：去掉最新一筆後重算（舊版 stockKd(series.subList(1, n)) 的等價作法）
+        TechnicalIndicatorService.FullIndicators prev =
+                svc.computeFromSeries(desc.subList(1, desc.size()));
+        assertThat(ascAll).isNotEmpty();
+        return new TechnicalIndicatorService.FullIndicators(
+                cur.monthlyMa(), cur.quarterlyMa(), cur.annualMa(),
+                cur.k(), cur.d(), prev.k(), prev.d(), cur.weeklyMa(), cur.extended());
+    }
+
+    @Test
+    void 兩百四十一根視窗對MACD與RSI已足夠收斂() {
+        List<StockPriceHistory> descAll = new ArrayList<>(ascRows(500)).reversed();
+        TechnicalIndicatorService svc = service();
+
+        TechnicalIndicatorService.ExtendedIndicators full = svc.computeFromSeries(descAll).extended();
+        TechnicalIndicatorService.ExtendedIndicators win =
+                svc.computeFromSeries(descAll.subList(0, 241)).extended();
+
+        // MACD／RSI 是由序列最早一筆單向遞迴，是本任務唯一真正受視窗長度影響的部分。
+        // KD／BIAS／W%R 是固定視窗（或收斂到不可觀察），測它們抓不到截斷風險。
+        assertThat(win.ema12().doubleValue()).isCloseTo(full.ema12().doubleValue(), within(0.01));
+        assertThat(win.ema26().doubleValue()).isCloseTo(full.ema26().doubleValue(), within(0.01));
+        assertThat(win.dif().doubleValue()).isCloseTo(full.dif().doubleValue(), within(0.01));
+        assertThat(win.macd().doubleValue()).isCloseTo(full.macd().doubleValue(), within(0.01));
+        assertThat(win.osc().doubleValue()).isCloseTo(full.osc().doubleValue(), within(0.01));
+        assertThat(win.rsi5().doubleValue()).isCloseTo(full.rsi5().doubleValue(), within(0.01));
+        assertThat(win.rsi10().doubleValue()).isCloseTo(full.rsi10().doubleValue(), within(0.01));
+    }
+
+    @Test
+    void 台股大盤0000的擴充指標與core自洽且映射未漏高低價() {
+        givenTaiex(false);
+        TechnicalIndicatorService.FullIndicators ind = service().computeAll("0000", "台股");
+        assertTaiexExtendedConsistent(ind);
+    }
+
+    @Test
+    void 台股大盤0000併入今日live後擴充指標仍與core自洽() {
+        givenTaiex(true);
+        TechnicalIndicatorService.FullIndicators ind = service().computeAll("0000", "台股");
+        // 證明擴充指標映射吃的是「已併入今日 live 合成列」的同一份 desc，不是併入之前那份
+        assertTaiexExtendedConsistent(ind);
+    }
+
+    /**
+     * 大盤 core（taiexKd）與 extended（映射後走 kdSeriesAsc）必須自洽。
+     * <b>不可只斷言 rsv 非 null 或 100−rsv==wr9</b>：前者在 highest==lowest 時恆回 50、後者是實作定義本身，
+     * 兩條都偵測不到「映射漏抄 highPoint／lowPoint」或「餵錯清單」。
+     */
+    private static void assertTaiexExtendedConsistent(TechnicalIndicatorService.FullIndicators ind) {
+        TechnicalIndicatorService.ExtendedIndicators e = ind.extended();
+        assertThat(e).isNotNull();
+        assertThat(e.rsv()).isNotNull();
+        double k = ind.k().doubleValue(), d = ind.d().doubleValue();
+        assertThat(e.j9().doubleValue()).isCloseTo(3 * d - 2 * k, within(0.03));
+        assertThat(e.k3d2().doubleValue()).isCloseTo(3 * k - 2 * d, within(0.03));
+    }
+
+    /** 大盤 fixture；high/low 刻意與 close 明顯不同，漏抄時 RSV 才會偏掉。 */
+    private void givenTaiex(boolean withLiveToday) {
+        List<TwseIndexDailyHistory> asc = new ArrayList<>();
+        for (int i = 0; i < 300; i++) {
+            double close = 20000 + (i % 17) * 30 + (i % 5) * 11;
+            TwseIndexDailyHistory h = new TwseIndexDailyHistory();
+            h.setTradingDate(END.minusDays(300 - 1 - i));
+            h.setClosePoint(BigDecimal.valueOf(close));
+            h.setHighPoint(BigDecimal.valueOf(close + 180));
+            h.setLowPoint(BigDecimal.valueOf(close - 150));
+            asc.add(h);
+        }
+        List<TwseIndexDailyHistory> desc = new ArrayList<>(asc).reversed();
+        when(twseDailyRepo.findTopNByOrderByTradingDateDesc(anyInt()))
+                .thenReturn(desc.subList(0, 240));
+        if (withLiveToday) {
+            LocalDate today = LocalDate.now(com.steven.assets.util.MarketZones.TW_ZONE);
+            when(priceQuery.getLive(anyString(), anyString())).thenReturn(Optional.of(
+                    new PriceQueryService.LivePrice(
+                            "0000", "台股大盤", "台股", BigDecimal.valueOf(20500), null, null, null,
+                            null, null, null,
+                            BigDecimal.valueOf(20700), BigDecimal.valueOf(20300), null,
+                            today.toString(), "2026-07-20T10:30:00", false, "TWSE指數(5m)")));
+        } else {
+            when(priceQuery.getLive(anyString(), anyString())).thenReturn(Optional.empty());
+        }
+    }
+
+    @Test
+    void 大盤取數失敗時不擲例外且回EMPTY() {
+        when(twseDailyRepo.findTopNByOrderByTradingDateDesc(anyInt()))
+                .thenThrow(new RuntimeException("db down"));
+        TechnicalIndicatorService.FullIndicators ind = service().computeAll("0000", "台股");
+        // 例外逸出會被 TradingRadarService 的 catch 放大成整張大盤卡 DATA_INCOMPLETE、全部個股停發訊號
+        assertThat(ind).isEqualTo(TechnicalIndicatorService.FullIndicators.EMPTY);
+        assertThat(ind.extended()).isEqualTo(TechnicalIndicatorService.ExtendedIndicators.EMPTY);
+    }
+
+    @Test
+    void 序列不足時擴充指標為null而非零() {
+        List<StockPriceHistory> desc = new ArrayList<>(ascRows(3)).reversed();
+        TechnicalIndicatorService.ExtendedIndicators e = service().computeFromSeries(desc).extended();
+        assertThat(e).isNotNull();
+        assertThat(e.j9()).isNull();
+        assertThat(e.rsi5()).isNull();
+        assertThat(e.macd()).isNull();
+        assertThat(e.wr9()).isNull();
+        assertThat(service().computeFromSeries(List.of()))
+                .isEqualTo(TechnicalIndicatorService.FullIndicators.EMPTY);
+    }
+
+    /**
+     * <b>決策釘子，不是行為驗證</b>（比照 {@code WeeklyMaTest.weeklyMaMustNotBeAnInputToTheRuleEngine}）。
+     * Task 281 明訂這 14 個值純揭露、只進匯出檔；要接進評分請走 Task 276 的 SDD 循環，
+     * <b>不得在此放寬斷言</b>——沒有這條就分不出「t276 有意接線」與「有人不小心接了」。
+     */
+    @Test
+    void 擴充指標一律不得成為規則引擎的輸入() {
+        // 用**精確欄名**而非寬鬆字根：`bias` 會誤中 Task 264 既有且合法的 ma60BiasPercent／ma240BiasPercent
+        // （那是「現價對季／年線的乖離」，與本任務的 BIAS10／BIAS20 是不同的東西）。
+        String[] banned = {"j9", "k3d2", "rsv", "ema12", "ema26", "dif", "macd", "osc",
+                "rsi5", "rsi10", "bias10", "bias20", "b10b20", "wr9", "extended"};
+        for (Class<?> input : List.of(TradingRadarRuleEngine.StockInput.class,
+                                      TradingRadarRuleEngine.MarketInput.class)) {
+            for (java.lang.reflect.RecordComponent c : input.getRecordComponents()) {
+                String n = c.getName().toLowerCase();
+                for (String b : banned) {
+                    assertThat(n)
+                            .as("%s.%s：Task 281 的擴充指標為純揭露，接進評分須走 t276 的 SDD 循環",
+                                    input.getSimpleName(), c.getName())
+                            .doesNotContain(b);
+                }
+            }
+        }
     }
 }

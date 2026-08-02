@@ -4090,8 +4090,8 @@ TradingRadarView
 新增 `TradingRadarDto` 純 response records：
 
 - `Response`：`ruleVersion`、`generatedAt`、`market`、`stocks`、`skippedNonTwStocks`。
-- `MarketSummary`：`regime`、`regimeLabel`、`score`、`dataComplete`、`stale`（Task 217，見下方「大盤新鮮度與盤中即時判斷」）、`intraday`／`liveUpdatedAt`（Task 228，同小節）、`asOfDate`、點位／漲跌幅、MA20／60／240、K／D、MA60／240 兩日確認、`reasons`、`risks`。
-- `StockDecision`：code／name／market、`assetClass`、`distributionAdjusted`、`held`、`action`／`actionLabel`、`score`、`counterTrendState`／`counterTrendLabel`、`counterTrendReasons`／`counterTrendRisks`、`dataComplete`、報價／漲跌幅／更新時間／`asOfDate`、MA20／60／240、K／D、MA20／60／240 兩日確認、`reasons`、`risks`。
+- `MarketSummary`（Task 281 後 21 個 component）：`regime`、`regimeLabel`、`score`、`dataComplete`、`stale`（Task 217，見下方「大盤新鮮度與盤中即時判斷」）、`intraday`／`liveUpdatedAt`（Task 228，同小節）、`asOfDate`、點位／漲跌幅、`weeklyMa`（Task 265）、MA20／60／240、K／D、MA60／240 兩日確認、`reasons`、`risks`、`extendedIndicators`（Task 281）。
+- `StockDecision`（Task 281 後 39 個 component）：code／name／market、`assetClass`、`distributionAdjusted`、`held`、`action`／`actionLabel`、`score`、`counterTrendState`／`counterTrendLabel`、`counterTrendReasons`／`counterTrendRisks`、`dataComplete`、報價／漲跌幅／更新時間／`asOfDate`、MA20／60／240、K／D、MA20／60／240 兩日確認、`fxPercentile`／`underlyingCurrency`（Requirement 47）、`reasons`、`risks`、`kdHeat`（Task 232）、`timingState`／`timingLabel`／`ma60BiasPercent`／`week52Position`（Task 264）、`weeklyMa`（Task 265）、`etfPremiumPct`／`etfPremiumPercentile`、`extendedIndicators`（Task 281）。
 
 無新 entity／table／migration；分數與建議皆為可重算的衍生值，不持久化，符合正規化原則。
 
@@ -4107,9 +4107,10 @@ adjustedOHLC(date) = rawOHLC(date) * sharesAtDate / finalShares
 
 `eventDayClose` 取除息日（若該日缺 K，則下一根可用 K）的原始收盤，必須大於 0；無效／未來／區間外事件略過。最後除以 `finalShares`，保證最新一根 OHLC 與原始行情相同，歷史價格則消除現金與股票配息造成的機械缺口。沒有有效事件時直接回原序列且 `distributionAdjusted=false`，不製造浮點漂移。調整後的同一份 OHLC 同時供：
 
-1. `TechnicalIndicatorService.computeFromSeries()` 計算 MA20／60／240、當期與前一期 KD；
+1. `TechnicalIndicatorService.computeFromSeries()` 計算 MA5／20／60／240、當期與前一期 KD；
 2. `TradingRadarRuleEngine.confirm()` 計算 MA20／60／240 兩收盤日確認；
-3. 規則引擎的單日漲跌（±5% 扣分、逆勢「停止續跌」）＝原始現價相對還原後前一根可比收盤；DTO `changePercent` 仍保留市場報價原始漲跌，兩者語意分離。
+3. 規則引擎的單日漲跌（±5% 扣分、逆勢「停止續跌」）＝原始現價相對還原後前一根可比收盤；DTO `changePercent` 仍保留市場報價原始漲跌，兩者語意分離；
+4. **同一支 `computeFromSeries()` 另回傳 `FullIndicators.extended()`**——J9／K3D2／RSV／EMA12／EMA26／DIF／MACD／OSC／RSI5／RSI10／BIAS10／BIAS20／BIAS10-BIAS20／W%R9 共 14 個純揭露值（Task 281），供 DTO 的 `extendedIndicators` 與匯出檔。**吃的就是第 1 項的同一個 `series` 參數**，不是另一次取數，故 `j9 = 3D − 2K` 對該列的 `k`／`d` **在未捨入精度上恆成立**。⚠️ **呈現層不成立**：`kdSeriesAsc` 對 `k`／`d`／`j9` 是各自 `setScale(2, HALF_UP)`，故 API 與匯出檔的 2 位小數值代回該式最多可差 `3×0.005 + 2×0.005 + 0.005 = 0.03`（`k3d2` 同；`dif`／`osc`／`b10b20` 為 0.015；只有 `wr9 = 100 − rsv` 精確）。這組值只供匯出檔揭露，不進 `StockInput`、不影響 `action`／`score`，`RULE_VERSION` 不升版。
 
 禁止只調 MA 不調 KD／確認／規則漲跌，否則會在同一筆決策中混用兩種價基。此調整只發生在交易雷達請求鏈，不覆寫 `stock_price_history`／`stock_dividend_history`，也不改其他頁面既有價格圖與行情漲跌的原始價口徑。
 
@@ -4152,7 +4153,7 @@ TaiexIndexPoller（週一～五 09:00–13:30 Asia/Taipei，每 2 分鐘，Marke
 
 `TechnicalIndicatorService.computeAllForTaiex()` 比照既有 `computeAll()` 對一般個股的既有作法：完成日序列最新一筆非今日時，查 `PriceQueryService.getLive("0000","台股")`，若其 `tradingDate` 為今日則暫加一筆合成列（`close/high/low` 取自 live price，缺值以 close 補）到序列最前，MA20／60／240 與當期 KD 皆含這筆；`taiexKd` 算前一期時排除這筆，維持既有「當期 vs 前一期」語意。
 
-> **Task 263 改變了這筆合成列的 high／low 取值，盤中 TAIEX 的 K／D 因此與修正前不同（是修正，非 regression）。** Task 228 的 `TaiexIndexPoller` 傳 `highPrice`／`lowPrice = null`，`PriceCacheWriter` 的 `mergeHigh(null, agg)` 回退為聚合值，故 `price:台股:0000` 的 high／low 實際上是**「5 分格收盤價」的本地 max/min**；Task 263 起改為 Yahoo **「5 分格 high／low 陣列」的 max/min**，區間必然變寬（實測 2026-07-31：low 由 39933.30 變 41610.41）。這兩欄直接進 KD 的 RSV 分母，連帶影響三處：本方法的合成今日列 → 觀察清單 `0000` 的 K／D 欄；`taiexSeriesAsc` 的今日點（Task 261）→ 走勢圖 KD 子圖；以及經 `MarketSummary.kValue`／`dValue` → 交易雷達的 regime／score，並可能連動 Requirement 44 的狀態轉換寄信。故 **`RULE_VERSION` 由 `TW_RULES_V7` 升為 `TW_RULES_V8`**（`TradingRadarView.vue` 的顯示 fallback 與 `radar` ref 初始值兩處 hardcode 同步）：本專案的升版判準不是「公式有沒有變」——Task 228（V6）與 Task 232（V7）的 AC 都明文寫著「因子組成、權重與正規化方式完全相同」卻照樣升版，理由都是「使用者可觀察行為有實質變化」；唯一的不升版先例 Task 249 成立的關鍵是「同一份輸入前後產生完全相同的輸出」，本次不符合。V8 與 V7 的因子組成、權重、正規化方式相同，**不另訂不可比性揭露**。`RULE_VERSION` 在程式碼裡只是標籤（`TradingRadarService` 塞進 DTO、`TradingRadarExportService` 寫進 Excel，`trading_radar_notification_state` 無該欄），升版不觸發 Requirement 44 的通知基準重建。
+> **Task 263 改變了這筆合成列的 high／low 取值，盤中 TAIEX 的 K／D 因此與修正前不同（是修正，非 regression）。** Task 228 的 `TaiexIndexPoller` 傳 `highPrice`／`lowPrice = null`，`PriceCacheWriter` 的 `mergeHigh(null, agg)` 回退為聚合值，故 `price:台股:0000` 的 high／low 實際上是**「5 分格收盤價」的本地 max/min**；Task 263 起改為 Yahoo **「5 分格 high／low 陣列」的 max/min**，區間必然變寬（實測 2026-07-31：low 由 39933.30 變 41610.41）。這兩欄直接進 KD 的 RSV 分母，連帶影響三處：本方法的合成今日列 → 觀察清單 `0000` 的 K／D 欄；`taiexSeriesAsc` 的今日點（Task 261）→ 走勢圖 KD 子圖；以及經 `MarketSummary.kValue`／`dValue` → 交易雷達的 regime／score，並可能連動 Requirement 44 的狀態轉換寄信。故 **`RULE_VERSION` 由 `TW_RULES_V7` 升為 `TW_RULES_V8`**（`TradingRadarView.vue` 的顯示 fallback 與 `radar` ref 初始值兩處 hardcode 同步）：本專案的升版判準不是「公式有沒有變」——Task 228（V6）與 Task 232（V7）的 AC 都明文寫著「因子組成、權重與正規化方式完全相同」卻照樣升版，理由都是「使用者可觀察行為有實質變化」；不升版的先例有**兩個**：Task 249 成立的關鍵是「同一份輸入前後產生完全相同的輸出」（本次不符合）；**Task 281 為第二個先例**，成立條件是「新增欄位**純揭露**——不進 `StockInput`／`MarketInput`，`action`／`score`／`regime`／`reasons`／`risks` 逐位不變」，其輸出**結構**確有變化（DTO 多一個巢狀欄位、匯出檔多 15 欄、快照雜湊改變）但**規則集本身未變**，故不升版。**這兩條互斥、不得混用**：Task 281 不滿足 Task 249 的條件，援引錯了會得到相反結論。V8 與 V7 的因子組成、權重、正規化方式相同，**不另訂不可比性揭露**。`RULE_VERSION` 在程式碼裡只是標籤（`TradingRadarService` 塞進 DTO、`TradingRadarExportService` 寫進 Excel，`trading_radar_notification_state` 無該欄），升版不觸發 Requirement 44 的通知基準重建。
 
 `TradingRadarService.buildMarket()` 的 `stale` 判定改為：
 
@@ -5075,6 +5076,26 @@ for m in members: raw = GET snap:{ownerId}:{m}
 ```
 
 零快照時仍回含表頭的合法 `.xlsx`（缺漏彙總列註明查無快照），不回 5xx。BFF 走既有 `TradingRadarBffRoutes` passthrough，二進位與下載 header 原樣穿透，不新增程式。前端 `TradingRadarView.vue` 新增「匯出 Excel」按鈕與 datetime 區間對話框，沿用 `ExchangeRateView.vue` 的 `saveBlob`（`showSaveFilePicker` 指定目錄，fallback 一般下載）；`api/index.js` 的 `tradingRadar` 新增 `exportExcel(from, to)`。
+
+#### 週線 MA5 與擴充技術指標欄（Task 281）
+
+「大盤總覽」（20 → **35** 欄）與「個股決策」（35 → **50** 欄）各新增 15 欄，「快照索引」不動：
+
+| 位置 | 新增欄 | 來源 |
+|---|---|---|
+| `MA20` 之前 | `週線MA5` | 既有 `weeklyMa`（Task 265 已在 DTO 與畫面，只是從未進匯出） |
+| `D` 之後 | `J9`／`K3D2`／`RSV`／`EMA12`／`EMA26`／`DIF`／`MACD`／`OSC`／`RSI5`／`RSI10`／`BIAS10`／`BIAS20`／`BIAS10-BIAS20`／`W%R9` | 新的 `extendedIndicators` 巢狀欄（`TradingRadarDto.ExtendedIndicators`） |
+
+**刻意插欄而非追加到最後**：追加會讓 15 個數值欄落在四個 `LIST_LINES` 長文字欄右側，開檔時遠在畫面外。代價是 `headers`／`columnFormats`／`rows` 三份清單的索引全數位移——`ExportDoc.Table` 的 compact constructor 只在 runtime 擲長度不符，Task 264 插欄時該清單就曾被三方合併靜默保留成舊版。
+
+**值長在 `FullIndicators` 裡，不另建取值路徑**：`TechnicalIndicatorService.FullIndicators` 新增一個巢狀 component `extended`（`ExtendedIndicators` record，14 個值），由 `computeFromSeries(series)` 對**同一個 `series` 參數**一併算出。於是：
+
+- **個股**——`RadarInputAssembler.assemble()` 既有的 `computeFromSeries(adjustedRows.subList(0, indicatorRows))` 自動帶出擴充值，`RadarInputAssembler` 與 `TradingRadarService.prepareTechnicalData()` **一行都不改**；價基與同列 `k`／`d` 天然同源。
+- **大盤**——`computeAllForTaiex()` 把已取得的指數日線 desc 清單映射成 `StockPriceHistory`（`closePrice←closePoint`、`highPrice←highPoint`、`lowPrice←lowPoint`，同 `taiexSeriesAsc` 的既有對應）後算擴充值，填進同一個 `FullIndicators`；`core` 的 8 個既有欄位仍由 `taiexSimpleMa()`／`taiexKd()` 算出、**一個位元都不變**，`buildMarket()` 的 `computeAll(TAIEX_CODE, TW_MARKET)` 呼叫也不必改。新增的計算留在既有的 `try` 內，失敗仍回 `FullIndicators.EMPTY`——讓例外逸出會被 `TradingRadarService` 的 catch 放大成整張大盤卡 `DATA_INCOMPLETE`、全部個股停發訊號。
+
+這條路徑即 `spec/tasks/t276_unused_indicators_and_volume.md` 的 276.1 所規劃的「擴充 `FullIndicators` 的輸出」，故 t276 之後只需把值接進 `StockInput`、不必再長第二份輸出。代價是 `computeAll()` 的所有呼叫端（觀察清單、警示觸發落地、資產 Excel 匯出）也會多算這些值卻不使用——O(n) 且 n ≤ 241，刻意付這個代價換「只有一條取值路徑」，**不得**為此加 `boolean withExtended` 把路徑分岔。**不得改呼叫走勢圖那條 `indicatorSeries()`**（原始價基，會與同列的 `k`／`d` 矛盾）。既有視窗對 MACD／RSI 的單向遞迴已足夠收斂（序列長 241 時 EMA26 seed 殘留權重 `(1−2/27)^215 ≈ 6.5×10⁻⁸`、Wilder RSI10 `0.9^230 ≈ 3×10⁻¹¹`），故**個股維持 241／240、大盤維持 `computeAllForTaiex()` 既有的 240**，兩邊都不延長也不對齊——理由不是「改了會算錯」（240 vs 241 的 `k`／`d` 實測 bit-identical，`taiexSimpleMa(desc,240)` 只讀 `desc[0..239]`），而是那條路徑另有三個非雷達消費端（觀察清單 `0000` KD 欄、Requirement 44 通知門檻、走勢圖同源判準），動它超出範圍且數值上無收益。
+
+**舊快照留白**：上線前的 Redis 快照沒有 `extendedIndicators`，既有 `num()` 對缺欄位回 `null` → Excel 空白格、JSON `null`，不得補 0。**golden 基準須重產**（`radar.xlsx`／`radar_empty.xlsx`），舊基準另存 `radar_pre_t281.xlsx`／`radar_empty_pre_t281.xlsx` 並以欄索引映射逐格比對，證明既有欄未被改壞。
 
 ### 測試與驗證
 

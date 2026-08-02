@@ -34,6 +34,37 @@ public final class TradingRadarDto {
     public record PriceRefresh(String outcome, boolean twMarketOpen, long elapsedMs) {}
 
     /**
+     * 走勢圖指標選單（Task 262）同一組值的雷達版（Task 281）。
+     *
+     * <p><b>純揭露：不參與評分</b>——不進 {@code StockInput}／{@code MarketInput}，不影響
+     * {@code action}／{@code score}／{@code regime}／{@code buyGate}／{@code kdHeat}／{@code timingState}，
+     * 故 {@code RULE_VERSION} 不升版（理由是「規則集本身未變」，<b>不援引</b> Task 249 的
+     * 「輸出完全相同」條件——本次輸出結構確有變化）。</p>
+     *
+     * <p><b>價基與同一列的 {@code kValue}／{@code dValue} 相同</b>：個股為還原權息序列、
+     * 大盤為指數日線序列，與雙擊該列開啟的走勢圖（原始價基）<b>刻意不同</b>，
+     * 凡視窗內有配息／除權的個股必然對不上，這是既有鐵則「禁止混用原始／還原價」的結果。</p>
+     *
+     * <p>暖機／視窗不足的欄位為 {@code null}，<b>不得以 0 充數</b>。全部 2 位小數。</p>
+     */
+    public record ExtendedIndicators(
+            BigDecimal j9,
+            BigDecimal k3d2,
+            BigDecimal rsv,
+            BigDecimal ema12,
+            BigDecimal ema26,
+            BigDecimal dif,
+            BigDecimal macd,
+            BigDecimal osc,
+            BigDecimal rsi5,
+            BigDecimal rsi10,
+            BigDecimal bias10,
+            BigDecimal bias20,
+            BigDecimal b10b20,
+            BigDecimal wr9
+    ) {}
+
+    /**
      * {@code POST /api/trading-radar/refresh} 的回應（Task 249）。
      *
      * <p>{@code radar} 與 {@code GET} 完全同形——{@link Response} 不得為此新增欄位，
@@ -65,7 +96,9 @@ public final class TradingRadarDto {
             /** regime 是否由 Redis 今日即時點位算出（相對於「已入庫完成日 K」）（Task 228）。 */
             boolean intraday,
             /** intraday=true 時為 Redis 即時價的 updatedAt（ISO 字串）；否則為 null（Task 228）。 */
-            String liveUpdatedAt
+            String liveUpdatedAt,
+            /** 走勢圖指標選單同一組值（Task 281）；純揭露、只進匯出檔，畫面不顯示。 */
+            ExtendedIndicators extendedIndicators
     ) {}
 
     public record StockDecision(
@@ -126,6 +159,8 @@ public final class TradingRadarDto {
             /** ETF 折溢價（%）；非 ETF 為 null，畫面不得顯示為 0。 */
             BigDecimal etfPremiumPct,
             /** ETF 折溢價的自身歷史分位（0–100）；樣本不足或非 ETF 為 null。 */
-            BigDecimal etfPremiumPercentile
+            BigDecimal etfPremiumPercentile,
+            /** 走勢圖指標選單同一組值（Task 281）；純揭露、只進匯出檔，畫面不顯示。 */
+            ExtendedIndicators extendedIndicators
     ) {}
 }

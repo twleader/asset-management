@@ -450,7 +450,7 @@ public class StockAlertTriggerExportService {
         TechnicalIndicatorService.FullIndicators ind = new TechnicalIndicatorService.FullIndicators(
                 // weeklyMa 傳 null：觸發紀錄未留存 MA5，且本方法只用來組條件文案、不讀週線（Task 265）。
                 t.getMonthlyMa(), t.getQuarterlyMa(), t.getAnnualMa(), t.getKValue(), t.getDValue(),
-                null, null, null);
+                null, null, null, TechnicalIndicatorService.ExtendedIndicators.EMPTY);
         try {
             if (t.getGroupId() != null) {
                 List<StockAlert> members = alertRepo.findByGroupIdOrderByDisplayOrderAsc(t.getGroupId());

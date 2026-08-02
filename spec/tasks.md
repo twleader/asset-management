@@ -284,8 +284,9 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 278 | 台股歷史估值回補，推翻 Requirement 46 的「預設不實作」（Requirement 61；前置 t266） **⚠ 尚未送審** | [tasks/t278_twse_valuation_history_backfill.md](tasks/t278_twse_valuation_history_backfill.md) |
 | 279 | 清除 `stock_price_history` 台股 175 列非正收盤，並在 fetch／收盤校正／寫入／Redis／DB 五處擋住復發（Requirement 62）**已通過對抗式審查（3 輪）** | [tasks/t279_nonpositive_close_price_cleanup.md](tasks/t279_nonpositive_close_price_cleanup.md) |
 | 280 | 爬蟲資訊查詢頁補上手動匯出：「立即匯出」（只重產檔案）＋「立即抓取並匯出」（完整跑一輪），兩者都產 JSON ＋ Excel 兩份（Requirement 63） | [tasks/t280_crawler_manual_export.md](tasks/t280_crawler_manual_export.md) |
+| 281 | 交易雷達匯出補上週線 MA5 與走勢圖指標選單的 14 個值（大盤總覽 20→35 欄、個股決策 35→50 欄；Requirement 43／48）**已通過對抗式審查（4 輪）** | [tasks/t281_radar_export_indicators.md](tasks/t281_radar_export_indicators.md) |
 
-> **註：本索引表僅列至 228、264–267、269–279 與 280；Task 229–263 與 268 未登錄於本表，以 `spec/tasks/tNNN_*.md` 檔案本身為準。**
+> **註：本索引表僅列至 228、264–267、269–279 與 280–281；Task 229–263 與 268 未登錄於本表，以 `spec/tasks/tNNN_*.md` 檔案本身為準。**
 
 > **Task 222–225 已全部被 t264–t267 取代（見上表），保留僅作為決策記錄，一律不得依其實作。**
 >
