@@ -191,7 +191,7 @@ cd frontend
 
 | 文件 | 說明 |
 |------|------|
-| `spec/requirements.md` | User Stories + Acceptance Criteria（55 個 Requirements） |
+| `spec/requirements.md` | User Stories + Acceptance Criteria（56 個 Requirements；編號至 62，56–61 由其他進行中分支取用） |
 | `spec/design.md` | 架構圖、ERD、API 端點、關鍵業務邏輯 |
 | `spec/tasks.md` | 任務索引（Task 1–220）＋ 尚未歸檔的 Task 201 起區段 |
 | `spec/tasks/README.md` | 自足任務檔規範（新任務寫這裡，不再追加 `tasks.md`） |

@@ -276,8 +276,9 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 270 | 五個單表匯出改走 `ExportDoc` 雙格式：已實現損益／匯率／指數／油價金價／交易紀錄（Requirement 55；前置 t269）**已完成實作** | [tasks/t270_dual_format_single_table_exports.md](tasks/t270_dual_format_single_table_exports.md) |
 | 271 | 資產總覽與交易雷達改走 `ExportDoc` 雙格式，交易日曆改為一律兩份（Requirement 55；前置 t269）**已完成實作** | [tasks/t271_dual_format_multi_block_exports.md](tasks/t271_dual_format_multi_block_exports.md) |
 | 272 | 兩份 JSON-primary 匯出加上 Excel（警示觸發、爬蟲公開資訊）＋ 排程列表頁文案收尾（Requirement 55；前置 t270／t271）**已完成實作** | [tasks/t272_dual_format_json_primary_exports.md](tasks/t272_dual_format_json_primary_exports.md) |
+| 279 | 清除 `stock_price_history` 台股 175 列非正收盤，並在 fetch／收盤校正／寫入／Redis／DB 五處擋住復發（Requirement 62）**已通過對抗式審查（3 輪）** | [tasks/t279_nonpositive_close_price_cleanup.md](tasks/t279_nonpositive_close_price_cleanup.md) |
 
-> **註：本索引表僅列至 228、264–267 與 269–272；Task 229–263 與 268 未登錄於本表，以 `spec/tasks/tNNN_*.md` 檔案本身為準。**
+> **註：本索引表僅列至 228、264–267、269–272 與 279；Task 229–263 與 268 未登錄於本表，以 `spec/tasks/tNNN_*.md` 檔案本身為準。編號 273–278 已由其他進行中的分支取用（本分支不含這些檔），故本任務接續為 279。**
 
 > **Task 222–225 已全部被 t264–t267 取代（見上表），保留僅作為決策記錄，一律不得依其實作。**
 >
