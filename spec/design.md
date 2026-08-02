@@ -122,7 +122,10 @@ com.steven.assets/
     - `PUT /api/bff/crawler-data/export-path` → business `PUT /api/crawler-export-path?crawler=news-poller`：更新輸出子路徑（Task 212）與 Drive 開關／子路徑（Task 245）。**不新增第二支設定端點**——同一張設定表、同一支 business API，只是 DTO 多了 Drive 欄位。
     - `GET /api/bff/crawler-data/export-path/browse?subpath=` → business **既有** `GET /api/export-schedule/browse`：資料夾樹懶載入。**刻意不新增第五份目錄列舉實作**（同 Requirement 39／41／42 的沿用決定，CLAUDE.md「同義欄位、同一 business service API」）；BFF 端另立自己的路由則是「一頁一 BFF」要求。
     - `GET /api/bff/crawler-data/export-path/browse-gdrive?subpath=` → business `GET /api/export-schedule/browse-gdrive`：Google Drive 資料夾樹懶載入（Requirement 50 / Task 245）。與本機 `browse` 並列為兩支而非加參數（語意不同：本機基底 vs. Drive remote）；**「Drive 目錄列舉」全庫只准這一支**，其餘頁面日後接 Drive 一律沿用它（含交易日曆頁——其本機列舉自成一份 `trading-calendar-export/browse`，Drive 側不得再開第二份）。
-    - 權限：`GET` 落 `authenticated()`；兩支 `PUT` 均限 ADMIN（`hasRole('ADMIN')`，屬系統設定變更——Drive 子路徑決定服務往使用者雲端硬碟寫入的位置，同理限 ADMIN）。
+    - `POST /api/bff/crawler-data/export/run-now` → business `POST /api/crawler-export-path/run-now?crawler=news-poller` → ext `POST /internal/news-poller/export-now`：**只重產檔案**（不抓取），產出 `.json` ＋ `.xlsx` 兩份並同步 Drive（Requirement 63）。
+    - `POST /api/bff/crawler-data/export/fetch-and-run-now` → business `POST /api/crawler-export-path/fetch-and-run-now?crawler=news-poller` → ext `POST /internal/news-poller/fetch-and-export-now`：**完整跑一輪**（抓取 → 入庫 → 產出兩份 → Drive；Requirement 63）。**爬蟲跑在 `external-materials-service`，business 端只是 proxy**（比照既有 `POST /api/fund-nav/refresh` → `POST /internal/fund-nav/refresh`），與其餘八頁 run-now「business 自己產檔」的結構不同。**三層一律以 `fetch-and-` 前綴表達「先抓」**，未帶前綴者一律是「只重產檔案」——若讓 ext 端的完整輪叫 `run-now`（全庫既有的八個 `run-now` 都是「不重新抓資料」），同一字串會在兩層語意相反，而接反是靜默的（兩支都產出同名兩份檔）。
+    - 上述兩支 `POST` 是本 BFF 僅有的 `POST`，且**刻意不做 `onErrorReturn` 降級**（與上方查詢／排程 `GET` 不同、與 `export-path` 一致）：手動觸發的失敗與「仍在背景執行」都必須讓使用者看見，降級成空物件會讓人誤以為成功。回應維持 `Map<String,Object>` 直通、**不建 BFF 端 DTO 鏡像類**——多一處要同步的欄位清單，漏一個欄位就在這一層被靜默吃掉（Task 245 已踩過同一個坑）。
+    - 權限：`GET` 落 `authenticated()`；兩支 `PUT` 與兩支 `POST` 均限 ADMIN（`hasRole('ADMIN')`，屬系統設定變更／系統操作——Drive 子路徑決定服務往使用者雲端硬碟寫入的位置，手動觸發則會寫入主機檔案系統與使用者雲端硬碟，「完整跑一輪」另會對外部網站發請求並寫 `news_headline`，同理限 ADMIN）。**BFF `SecurityConfig` 未列出的路徑會落到 `anyExchange().authenticated()`**，故這兩支必須各自列出。
 
 **Repository 層**（Spring Data JPA，共 47 個）
 - `AssetSnapshotRepository`
@@ -385,7 +388,7 @@ POST /internal/repair/history?market=%E5%8F%B0%E8%82%A1&from=2026-06-01&to=2026-
 
 `MarketClock.isXxxMarketOpen / isXxxMarketJustClosed` 全部改為「`MarketCalendar.isXxxTradingDay(當日)` && 時段」。連帶效果：`PricePoller` 各 scheduled 抓價（gated on `isXxxMarketOpen`）假日自動 skip；`TradingDateResolver.resolve`（依 `isXxxMarketOpen/isXxxMarketJustClosed` 判 live session，由 `PriceCacheWriter` 呼叫）假日自動退回 DB 最近交易日。`ClosePersister` 各 dump / verify / `selfHealMissedClose` 另加 `MarketCalendar.isXxxTradingDay` 早退守門（`PricePoller` 假日不抓，但 Redis 仍有前一交易日值且 TTL 24h，若不守門 dump 會把它標成假日當日寫 DB）。`PricePoller.refreshAll`（手動 `/internal/refresh`）的 `markClosed` 亦由 `false` 改為 `!isXxxMarketOpen()`，與 `warmCacheOnStartup` 一致，避免手動刷新在假日 append 假 tick。
 
-**對外介面（`InternalPriceController`，class-level `@RequestMapping("/internal")`，共 33 支）：**
+**對外介面（`InternalPriceController`，class-level `@RequestMapping("/internal")`，共 35 支）：**
 
 > **不對前端暴露 REST**；全部僅在 docker network 內由 `business-services` 呼叫（或維運手動觸發）。前端仍打 `business-services` 的 `/api/market-data/*`，由 `PriceQueryService` 從 Redis 取值。
 > **本表為 `/internal/*` 的「有哪些端點、參數、呼叫端」之唯一出處**——他處提及個別端點時不得自訂另一組參數或呼叫端清單（同「同義欄位、同一來源」之文件版精神）。端點的**語意細節與設計理由**可在各功能設計段展開（例如 `/internal/repair/history` 的守門與冪等理由在「修復路徑設計」段、`/internal/refresh/tw-radar` 的併發與逐檔守門在 Requirement 43 段），但兩邊的參數與呼叫端必須一致；改一邊就要同步另一邊。
@@ -411,6 +414,8 @@ POST /internal/repair/history?market=%E5%8F%B0%E8%82%A1&from=2026-06-01&to=2026-
 | POST | `/internal/backfill/commodity-from` | 油金價**強制**自 `since` 回補（首次補滿十年／補中間缺漏，Requirement 40） | `HistoricalDataService` |
 | POST | `/internal/exchange-rate/refresh-bot` | 台銀（BOT）匯率即時刷新 | `HistoricalDataService` |
 | POST | `/internal/tw-closure/detect` | 觸發台股臨時休市（颱風假）偵測 | `MarketDataService`（Task 160） |
+| POST | `/internal/news-poller/export-now` | 手動**只重產檔案**：不抓取、不寫 `news_headline`，直接由 DB 產出 `public_info_<今日>.json` ＋ `.xlsx` 並同步 Drive（`trigger=manual-export`）。回 `NewsPoller.ManualRunResult`（Requirement 63） | `CrawlerExportPathService`（**WebClient 呼叫寫在 service 不在 controller**；同表 `FundNavController` 幾支是既有反例，不要照抄） |
+| POST | `/internal/news-poller/fetch-and-export-now` | 手動**完整跑一輪**：抓取 → upsert `news_headline` → 產出兩份檔案 → 同步 Drive（`trigger=manual`）。回 `NewsPoller.ManualRunResult`（Requirement 63）。**刻意不叫 `run-now`**——全庫既有八個 `run-now` 皆為「不重新抓資料」，同名反義的接錯是靜默的 | `CrawlerExportPathService`（同上） |
 | GET | `/internal/macro/imf` | IMF 總經資料（GDP 等） | `MacroHistoryService` |
 | GET | `/internal/macro/dgbas` | 主計總處（DGBAS）總經資料 | `MacroHistoryService` |
 | GET | `/internal/macro/twse-monthly` | 台股大盤月資料 | `MacroHistoryService` |
@@ -490,11 +495,13 @@ POST /internal/repair/history?market=%E5%8F%B0%E8%82%A1&from=2026-06-01&to=2026-
 > nginx 對 `/api/market-data/prices/stream` 路徑需設 `proxy_buffering off`，否則 SSE 會被 buffering 卡住（實作見 `frontend/nginx.conf` 的 `location = /api/market-data/prices/stream`）。
 > 前端仍保留初始 GET `/api/bff/dashboard/realtime` 載入第一份 snapshot；之後增量更新走 SSE，不再用 setInterval polling。
 
-#### external-materials-service Internal API（`InternalPriceController`，28 支）
+#### external-materials-service Internal API（`InternalPriceController`，35 支）
 
-**這些是 service 間內部端點，不是公開 API**：不經 BFF、不對前端暴露，僅在 docker network 內由 `business-services` 以 WebClient 呼叫（class 層 `@RequestMapping("/internal")` + method 層路徑；**全部參數皆為 query string，無 request body**）。此表為 28 支端點的**完整清單**（單一事實來源）；設計理由 / 退化行為凡 design.md 已有段落記載者，「說明」欄一律以**段落標題或 Task / Requirement 編號**交叉引用（不用行號，避免引用隨增刪行漂移），不在此重述（避免同一事實兩處記載各自漂移）。
+**這些是 service 間內部端點，不是公開 API**：不經 BFF、不對前端暴露，僅在 docker network 內由 `business-services` 以 WebClient 呼叫（class 層 `@RequestMapping("/internal")` + method 層路徑；**全部參數皆為 query string，無 request body**）。端點的「有哪些、參數、呼叫端」以上方「對外介面」那張表為**單一事實來源**（35 支全列）；本節依功能分組展開語意細節，設計理由 / 退化行為凡 design.md 已有段落記載者，「說明」欄一律以**段落標題或 Task / Requirement 編號**交叉引用（不用行號，避免引用隨增刪行漂移），不在此重述（避免同一事實兩處記載各自漂移）。
 
-> 例外：`close/verify-tw` / `close/verify-us` / `health` 三支目前**無 business-services 呼叫端**，為維運手動觸發（container 內 curl）與健康檢查用；其餘 25 支皆有 backend caller。
+> **計數校正（Requirement 63）**：本節標題原寫 28 支、上方「對外介面」表寫 33 支，兩者已漂移；實測 `grep -c '@PostMapping\|@GetMapping'` 為 **33**（本需求新增兩支後為 **35**）。兩處均已校正為 35。**本節下方的分組表刻意不逐支重列**（既有就沒有列全，補齊屬本需求範圍外）——要查完整清單一律看上方「對外介面」那張。
+
+> 例外：`close/verify-tw` / `close/verify-us` / `etf-nav/refresh` / `repair/history` / `health` 五支目前**無 business-services 呼叫端**，為維運手動觸發（container 內 curl）與健康檢查用；其餘皆有 backend caller。
 
 **行情 / 收盤（`PricePoller` / `ClosePersister` / `MarketClock`）：**
 
@@ -523,6 +530,19 @@ POST /internal/repair/history?market=%E5%8F%B0%E8%82%A1&from=2026-06-01&to=2026-
 | POST | `/internal/fund-dividend/refresh` | 同步全抓基金配息歷史（Req 20），回 `FundDividendPoller.RefreshSummary`。business 端 `POST /api/fund-dividend/refresh` proxy 至此 |
 | POST | `/internal/fund-nav/backfill?years=10` | 基金 NAV 歷史回補（Req 21，`years` 預設 10），回 `BackfillSummary`。見「Funds / Fund NAV / Fund Dividend」段落 |
 | POST | `/internal/fund-dividend/backfill?years=10` | 基金配息歷史回補（Req 21，`years` 預設 10），回 `BackfillSummary` |
+
+**公開資訊爬蟲手動觸發（`NewsPoller`，Requirement 63）：**
+
+| Method | Path | 說明 |
+|--------|------|------|
+| POST | `/internal/news-poller/export-now` | **只重產檔案**：不抓取、不寫 `news_headline`，由 DB 直接產出 `public_info_<今日>.json` ＋ `.xlsx` 兩份並（啟用時）同步 Drive，`trigger=manual-export`。走 `exportPublicInfoJson()` 同一段 |
+| POST | `/internal/news-poller/fetch-and-export-now` | **完整跑一輪**：抓取 → upsert `news_headline` → 清理保留期外舊聞 → 產出兩份檔案 → 同步 Drive，`trigger=manual`。走 `run()` 同一段 |
+
+> **命名**：`fetch-and-` 前綴＝「會先重新抓」，未帶前綴＝「只重產檔案」。ext 這支**刻意不叫 `run-now`**——全庫既有的八個 `POST .../run-now` 一律是「立即匯出到目錄、不重新抓資料」，若 ext 拿同一字串指「會抓」的那支，同名在 business 層與 ext 層就會反義，而接反是**靜默**的（兩支都產出同名的兩份檔，只差有沒有抓）。
+>
+> 兩支皆回 `NewsPoller.ManualRunResult`（ext 產生的 `status` ∈ `OK`／`FAILED`／`BUSY`／`DISABLED`；`RUNNING`／`ERROR` 由 business 端於逾時／連線失敗時合成）。**`FAILED` ＝ 跑了但本機 JSON 寫檔失敗**（判準為結構化的 `ExportStatus` 列舉＝「`jsonPath == null` **且非 `export-enabled=false` 早退**」，不比對訊息字串；只看 `jsonPath == null` 會把 `DISABLED` 併吃掉）——本機寫檔失敗是既有的 graceful 行為（只 `log.warn`），沒有這個值就會把「什麼檔都沒產生」回成 `OK`。**兩支共用既有的 `NewsPoller.running`（`AtomicBoolean`）互斥**：取不到就回 `BUSY`、不排隊、不啟第二輪。**兩支刻意不設自己的逾時上限**——上游放棄等待不影響這一輪跑完與寫檔，逾時語意由 business 端負責（50 秒 → `RUNNING`），ext 端縮短任何逾時都會讓手動輪抓得比排程輪少。business 端 `POST /api/crawler-export-path/{run-now,fetch-and-run-now}`（限 ADMIN）分別 proxy 至此，見「爬蟲資訊查詢頁」段落。
+>
+> 放在 `InternalPriceController` 而非另開 controller，沿用該檔已是**全庫 internal 端點單一入口**的既有事實（它已含颱風假偵測 `tw-closure/detect`、匯率刷新 `exchange-rate/refresh-bot` 等與 price 無關的端點）；另開第二支 controller 會讓上方「本表為 `/internal/*` 的唯一出處」不再成立。
 
 **個股資料 / 分時（`MarketDataFetchService` / `PriceFetchClient` / `IntradayTickStore`）：**
 
@@ -2685,14 +2705,23 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
     - **依日期查詢**：`CrawlerDataBffController` → business `NewsHeadlineController`（`GET /api/news-headlines?date=&dateField=fetched|published&category=`）讀 `news_headline`。`dateField` 決定用 `fetched_at`（爬取入庫日）或 `published_at`（資料日）當篩選欄位，區間皆為「Asia/Taipei 該日 00:00（含）～翌日 00:00（不含）」轉 `Instant`；`category` 選填。repository 加 `findByFetchedAtBetweenOrderByFetchedAtDesc`／`findByPublishedAtBetweenOrderByPublishedAtDesc`，`category` 於 service 層過濾（單日資料量小）。與 `MarketAnalysisService` 讀同一份 `news_headline`（同義欄位、同一表）。
     - **動態執行時間（多時間點）**：`NewsPoller` 執行時間改由新表 `crawler_schedule`（`crawler_key='news-poller'`，一列一時間點）決定，可於頁面增減。`NewsPoller` **移除寫死的三個 cron（`0 20 8`／`0 30 11`／`0 0 18`，Task 184／188）**，改為**每分鐘 ticker** `@Scheduled(cron="0 * * * * *", zone="Asia/Taipei")`：讀 `crawler_schedule` 已啟用時間點（ext 端新增 `CrawlerScheduleQuery` JdbcTemplate 讀取），命中當前 `HH:mm` 即 `run("scheduled")`。cron 每分鐘僅觸發一次故天然去重、無需額外 slot guard；`run` 以 `dedupe_key` upsert 本就冪等，重跑亦無害。**DB 讀取例外**（表缺／連線失敗）**fallback 至預設 08:20 / 11:30 / 18:00**，避免爬蟲靜默停擺；讀到「空清單」＝使用者刻意清空＝該分鐘不跑。開機 warmup 與保留期清理不變。設定變更免重啟、下一分鐘生效。business 端 `CrawlerScheduleController`（`GET/PUT /api/crawler-schedule?crawler=news-poller`）讀／整批覆寫（delete+insert，驗 0–23／0–59、去重）；`PUT` 限 ADMIN。
     - **動態輸出檔案路徑（Task 212）**：`NewsPoller` 每輪產出的公開資訊 JSON（Task 177）輸出目錄，由寫死的 `news-scraper.export-dir`（容器 `/srpp-input`，只能改 docker volume 換目的地）改為新表 `crawler_export_setting`（`crawler_key='news-poller'` UNIQUE，一爬蟲一列）決定，可於同頁設定。
+    - **手動匯出：兩顆按鈕（Requirement 63 / Task 280）**：設定卡提供「立即匯出」與「立即抓取並匯出」兩顆按鈕（限 ADMIN），不必等排程時間點、不必重啟容器靠 warmup。**兩者的差別只有「要不要先抓」**：
+      - **「立即匯出」＝只重產檔案**：不抓取、不寫 `news_headline`，直接由 DB 現有資料走 `exportPublicInfoJson("manual-export")` 產出 `public_info_<今日>.json` ＋ `.xlsx` 兩份並（啟用時）同步 Drive。用途＝改完輸出資料夾／Drive 設定後**立刻驗證落點**、或臨時要一份檔案。極快（不打外部網站）。
+      - **「立即抓取並匯出」＝完整跑一輪**：走 `run("manual")`——重新抓所有來源 → upsert `news_headline` → 清理保留期外舊聞 → 產出兩份 → Drive 同步。用途＝現在就要含最新新聞的一份。
+      **兩顆並存是刻意的**：只做前者則「要最新新聞」永遠得等排程；只做後者則單純驗證落點要付出一次完整抓取的代價，而 `news_headline` 只有爬蟲會寫、不重抓內容根本不會變。**三條途徑（排程／warmup／手動）共用同一段 `run()`／`exportPublicInfoJson()`**，只有 `trigger` 標籤不同（新增 `manual`／`manual-export` 兩種值，寫入 JSON payload 的**頂層** `trigger` 欄位——payload 為扁平結構、無 `metadata` 包裹層；xlsx 的 metadata 區照既有邏輯帶出同一值）。各自若寫一份，抓取來源清單、個股過濾、cutoff 規則、雙格式產出、Drive 同步這五處遲早漂移。
+      **併發**：兩顆都必須取得既有的 `NewsPoller.running`（`AtomicBoolean`，warmup 與排程輪共用）；取不到即回 `BUSY`、不排隊、不啟第二輪。手動輪持有旗標期間落在同一分鐘的排程輪照既有規則被跳過——既有行為，不增設補償邏輯。
+      **逾時**：business→ext 設 **50 秒上限**（`< nginx /api/ 的 proxy_read_timeout 60s`，確保由 business 決定回什麼而非 nginx 回無語意的 504）。逾時回 `RUNNING` 而**非失敗**——ext 是 servlet 容器，request 執行緒不因 client 斷線而中止，那一輪會跑完、檔案照寫。**ext 端不得為配合此上限而中斷抓取、縮短各來源逾時或縮短 Drive 上傳逾時**。逾時分支必須寫在 reactive chain 內（`Mono.timeout` 送出的是 checked `TimeoutException`，`block()` 會把它包成 `RuntimeException`——外層 `catch (TimeoutException)` 是編譯錯誤，`catch (Exception)` 則會把逾時誤判為失敗）；proxy 方法**刻意不加 `@Transactional`**，不把數十秒的 HTTP 呼叫包進資料庫交易。
+      **狀態值域**：ext 產生 `OK`（跑完且本機 JSON 寫成功）／`FAILED`（跑了但本機 JSON **寫檔失敗**——判準為結構化的 `ExportStatus` 列舉，即「`jsonPath == null` **且非 `export-enabled=false` 早退**」，不得只看 `jsonPath == null`，那會把 `DISABLED` 併吃掉）／`BUSY`／`DISABLED`；business 於逾時／連線失敗時合成 `RUNNING`／`ERROR`。**`FAILED` 不可省略**——本機寫檔失敗是既有的 graceful 行為（只 `log.warn`、不擲例外），沒有這個值就會把「什麼檔都沒產生」回成 `OK` 並在前端顯示綠色成功。**`DISABLED` 的判準兩顆不同**：「完整跑一輪」看 `news-scraper.enabled`、「只重產檔案」只看 `news-scraper.export-enabled`（前者是「要不要自動抓取」，與重產檔案無關），且一律**直接讀欄位／列舉**、不比對訊息字串。**`enabled=true` 但 `export-enabled=false` 時「完整跑一輪」照跑**（抓取與 upsert 都完成），產檔那一步早退，回 `DISABLED` ＋ `upserted`／`failed` 有值、`jsonPath`／`xlsxPath` 為 null。
+      **顯示層**：`OK` 只代表本機 JSON 那一份成功。`xlsxPath == null`（xlsx 產檔失敗、JSON 照寫）與 `gdriveStatus` **包含**「失敗」／「跳過」（Drive 上傳失敗仍回 `OK`）兩種部分成功，前端一律降為警示樣式並說明是哪一半沒成，**任何分支都不得把 `null` 印進訊息**。**Drive 的判準是「包含」不是「開頭」**——狀態字串一律為 `xlsx …／json …` 的合併格式，「xlsx 上傳失敗、json 成功」時是 `xlsx 失敗：…／json 成功：…`、不以「失敗」開頭，用「開頭」判會讓最常見的部分失敗顯示為完全成功。
+      **執行結果不落 DB**（同步回傳前端顯示），故本需求無 Liquibase changeset；Drive 上傳結果仍照既有機制寫 `gdrive_last_run_at`／`gdrive_last_status`。
     - **同步上傳 Google Drive（Requirement 50 / Task 245）**：同頁可另外開啟「同步上傳 Google Drive」並指定 Drive 目標資料夾（樹狀選擇器挑選）。**本機那一份照寫不變**——SRPP 依賴本機 `public_info_<日期>.json`，故 Drive 是附加副本而非替代目標，刻意不提供「只寫 Drive」選項。本機檔寫成功後才以 `rclone copyto` 上傳同一份檔案；上傳為 best-effort（失敗只記 ERROR log ＋ `gdrive_last_status`，不 rollback 本機檔、不中斷 `news_headline` 入庫、不擲例外中斷排程），無 retry queue（每輪重新產檔重新上傳＝天然重試）。設定同樣每輪即時讀取、免重啟。
       - **路徑模型＝Requirement 34／39／41／42 那一套**：DB 只存**相對子路徑** `output_subpath`，實際目錄 = 容器內基底 `EXPORT_OUTPUT_DIR`（預設 `/home/steven`）resolve 之。**關鍵前提：`external-materials-service` 也掛上 `${EXPORT_OUTPUT_DIR_HOST:-/Users/steven}:/home/steven`**（原本只有 business-services 有），使「前端資料夾樹（由 business 的 `browse` 列舉）看得到的目錄」＝「ext 爬蟲寫得到的目錄」；兩服務基底路徑同為 `/home/steven`、同一 host 掛載，否則同義的「輸出資料夾」會在兩服務指向不同實體目錄。原 `/srpp-input` 掛載與 `news-scraper.export-dir` 一併移除（其預設目的地 `/Users/steven/Project/SRPP/data/input` 已落在家目錄內，改以 seed 子路徑 `Project/SRPP/data/input` 表達，host 落點完全相同）。
       - **每輪即時讀取**：`exportPublicInfoJson()` 於寫檔前呼叫 ext 端新增的 `CrawlerExportPathQuery`（`JdbcTemplate` 純讀，比照 `CrawlerScheduleQuery`）取現值，**不快取於欄位**，故設定變更下一輪即生效、免重啟。DB 例外或值為空 → fallback 至常數 `Project/SRPP/data/input`（＝改動前行為），避免靜默改寫落點。
       - **路徑驗證兩道（縱深防禦）**：business 於 `PUT` 時驗（`..`／絕對路徑跳脫基底 → 400，複用與 `ExportScheduleService.resolveDir` 相同規則）；ext 寫檔前**再驗一次**，DB 值異常則退回預設並 warn——ext 是實際持有檔案系統寫入權的一方，不能只信上游驗過。
       - **檔名不開放設定**：維持 `public_info_<yyyy-MM-dd>.json`（SRPP 依此檔名取用），本次只開放目錄；暫存檔＋原子 rename 的寫出方式不變。
     - **排程清單同步**：`SchedulePublicBffController` 靜態清單中 NewsPoller 該筆 cron 由 `0 20 8`／`0 30 11`／`0 0 18` 改標「動態：依『爬蟲資訊查詢』頁設定（預設 08:20 / 11:30 / 18:00）」，避免與實際排程漂移。
-  - **ext 抓取（`NewsPoller` cron 08:20/11:30/18 Asia/Taipei ＋ `ApplicationReadyEvent` warmup ＋保留 `news-scraper.retention-days` 天）**：`NewsFetchClient`（玩股網 WantGoo JSON API＋MoneyDJ HTML＋自由時報 財經・**政治・國際**〔Task 180〕/經濟日報 RSS〔`region=TW`〕＋**美國財經新聞 CNBC〔Economy／Finance／Markets 三分類〕＋Nasdaq Markets RSS〔`region=US`、`source=cnbc`／`nasdaq`，Task 198〕**，讀真實 `time`/`publishAt`/`pubDate`；UA `Mozilla/5.0`；RSS 用內建 XML/regex 解析、不引第三方；`fetchRss(url, source, region)` 帶 `region` 參數〔台灣來源傳 `TW`、美國來源傳 `US`〕；**台灣混合型一般新聞 feed（自由時報 財經／政治／國際、經濟日報）套 `EditorialNewsFilter.retain`〔Task 199 編輯收錄政策，取代舊 `relevantOnly`／`RELEVANCE_KEYWORDS`〕，逐 feed 過濾——財經一律留、中國新聞只留財經/北京政權、政治只留美日台歐盟＋影響市場地緣、台灣地方只留北北高、其餘濾除；純財經來源 wantgoo／MoneyDJ 與美國 CNBC／Nasdaq 財經專屬 feed 豁免不過濾**；**鉅亨網 cnyes 已於 Task 149.22 移除**）＋`TwseInfoFetchClient`（BFI82U 三大法人買賣金額 RWD JSON、FMTQIK 大盤成交統計 openapi JSON）＋`MarketSnapshotFetchClient`（Task 180／185，由 DB 既有資料組**匯率**＋**美股指數**＋**韓國股市**快照，見下）＋`KrIntradayFetchClient`（Task 193，**即時抓 Yahoo** 組**韓股盤中**快照，見下；為本輪唯一會打外部行情 API 的快照來源）。逐來源 graceful（單一失敗只 warn）。`StockSourceQuery.upsertNews / deleteNewsOlderThan`。**cron 早上那次由 06:00→08:00（Task 177）→08:20（Task 184）、中午 12:00→11:30（Task 188），仍早於 08:45 今日股市分析（拆三 cron `0 20 8`＋`0 30 11`＋`0 0 18`）。來源皆台/美權威網站，不抓中港澳。**
-  - **公開資訊輸出 JSON 供 SRPP（Task 177，DB 為單一來源）**：`NewsPoller` 每輪（cron 08:20/11:30/18 ＋ warmup）**先 upsert `news_headline`，再由 DB 查詢產生 JSON**（不再用記憶體 `rows`；JSON＝DB 當日快照，自然含去重＋個股過濾）。查詢＝`StockSourceQuery.loadTodayPublicInfoForExport(today, cutoff)`：`WHERE (fetched_at AT TIME ZONE 'Asia/Taipei')::date = today AND (published_at AT TIME ZONE 'Asia/Taipei')::date >= cutoff ORDER BY published_at DESC`。`cutoff`＝上一交易日＝`StockSourceQuery.lastTwseTradingDate()`＝`MAX((published_at AT TIME ZONE 'Asia/Taipei')::date) WHERE category LIKE 'twse-%'`（twse 資料自帶日期即 TWSE 權威上一交易日；BFI82U 遇假日回最近交易日）；無 twse 時 fallback `MarketCalendar.isTwTradingDay` 往回找。**刻意不用日曆算 cutoff 為主**——原型：日曆得 7/10、twse 實際 7/09，用 7/10 反把 twse 濾掉；取 twse 自身日期保證總體資料保留、且排除更舊過期新聞。`fetched_at` 於 upsert ON CONFLICT 刷新為 NOW()，故「今天抓到」涵蓋今天各輪碰到的列。輸出目錄 = 容器內基底 `EXPORT_OUTPUT_DIR`（預設 `/home/steven`，`docker-compose.yml` 掛 host `${EXPORT_OUTPUT_DIR_HOST:-/Users/steven}`）resolve `crawler_export_setting.output_subpath`（**Task 212 起可於「爬蟲資訊查詢」頁設定**，seed `Project/SRPP/data/input`；原寫死的 `news-scraper.export-dir`＋`/srpp-input` 掛載已移除，host 落點不變）。檔名 `public_info_<yyyy-MM-dd>.json`（同日覆寫、跨日新檔）；結構 `{ generatedAt, trigger, tradingDayCutoff, count, items:[{title,source,url,category,region,summary,publishedAt}] }`。`news_headline` 保留期（30 天）不受當日範圍影響（供分析讀近 N 天）。`publishedAt` 以 `@JsonFormat` 於 Asia/Taipei（+08:00）序列化（日期與交易日／`tradingDayCutoff` 一致，不因 UTC 倒退一天）。寫出採**暫存檔＋原子 rename**（`Files.createTempFile`＋`Files.move(ATOMIC_MOVE)`）——warmup 執行緒與 cron 可能併發寫同一檔，原子 rename 避免截斷毀損、SRPP 不讀半寫檔。`export-enabled` 可關；寫檔失敗 graceful。
+  - **ext 抓取（`NewsPoller`：`crawler_schedule` 設定的時間點〔seed 08:20／11:30／18:00 Asia/Taipei，Requirement 38 起改為 DB 驅動，**不再是寫死 cron**〕＋ `ApplicationReadyEvent` warmup ＋ 手動觸發〔Requirement 63〕＋保留 `news-scraper.retention-days` 天）**：`NewsFetchClient`（玩股網 WantGoo JSON API＋MoneyDJ HTML＋自由時報 財經・**政治・國際**〔Task 180〕/經濟日報 RSS〔`region=TW`〕＋**美國財經新聞 CNBC〔Economy／Finance／Markets 三分類〕＋Nasdaq Markets RSS〔`region=US`、`source=cnbc`／`nasdaq`，Task 198〕**，讀真實 `time`/`publishAt`/`pubDate`；UA `Mozilla/5.0`；RSS 用內建 XML/regex 解析、不引第三方；`fetchRss(url, source, region)` 帶 `region` 參數〔台灣來源傳 `TW`、美國來源傳 `US`〕；**台灣混合型一般新聞 feed（自由時報 財經／政治／國際、經濟日報）套 `EditorialNewsFilter.retain`〔Task 199 編輯收錄政策，取代舊 `relevantOnly`／`RELEVANCE_KEYWORDS`〕，逐 feed 過濾——財經一律留、中國新聞只留財經/北京政權、政治只留美日台歐盟＋影響市場地緣、台灣地方只留北北高、其餘濾除；純財經來源 wantgoo／MoneyDJ 與美國 CNBC／Nasdaq 財經專屬 feed 豁免不過濾**；**鉅亨網 cnyes 已於 Task 149.22 移除**）＋`TwseInfoFetchClient`（BFI82U 三大法人買賣金額 RWD JSON、FMTQIK 大盤成交統計 openapi JSON）＋`MarketSnapshotFetchClient`（Task 180／185，由 DB 既有資料組**匯率**＋**美股指數**＋**韓國股市**快照，見下）＋`KrIntradayFetchClient`（Task 193，**即時抓 Yahoo** 組**韓股盤中**快照，見下；為本輪唯一會打外部行情 API 的快照來源）。逐來源 graceful（單一失敗只 warn）。`StockSourceQuery.upsertNews / deleteNewsOlderThan`。**（史實）早上那次由 06:00→08:00（Task 177）→08:20（Task 184）、中午 12:00→11:30（Task 188），仍早於 08:45 今日股市分析；當時為寫死的三個 cron `0 20 8`＋`0 30 11`＋`0 0 18`，Requirement 38 起已改為 `crawler_schedule` 的 seed 值。來源皆台/美權威網站，不抓中港澳。**
+  - **公開資訊輸出 JSON 供 SRPP（Task 177，DB 為單一來源）**：`NewsPoller` 每輪（`crawler_schedule` 設定時間點 ＋ warmup ＋ 手動觸發）**先 upsert `news_headline`，再由 DB 查詢產生 JSON**（不再用記憶體 `rows`；JSON＝DB 當日快照，自然含去重＋個股過濾）。查詢＝`StockSourceQuery.loadTodayPublicInfoForExport(today, cutoff)`：`WHERE (fetched_at AT TIME ZONE 'Asia/Taipei')::date = today AND (published_at AT TIME ZONE 'Asia/Taipei')::date >= cutoff ORDER BY published_at DESC`。`cutoff`＝上一交易日＝`StockSourceQuery.lastTwseTradingDate()`＝`MAX((published_at AT TIME ZONE 'Asia/Taipei')::date) WHERE category LIKE 'twse-%'`（twse 資料自帶日期即 TWSE 權威上一交易日；BFI82U 遇假日回最近交易日）；無 twse 時 fallback `MarketCalendar.isTwTradingDay` 往回找。**刻意不用日曆算 cutoff 為主**——原型：日曆得 7/10、twse 實際 7/09，用 7/10 反把 twse 濾掉；取 twse 自身日期保證總體資料保留、且排除更舊過期新聞。`fetched_at` 於 upsert ON CONFLICT 刷新為 NOW()，故「今天抓到」涵蓋今天各輪碰到的列。輸出目錄 = 容器內基底 `EXPORT_OUTPUT_DIR`（預設 `/home/steven`，`docker-compose.yml` 掛 host `${EXPORT_OUTPUT_DIR_HOST:-/Users/steven}`）resolve `crawler_export_setting.output_subpath`（**Task 212 起可於「爬蟲資訊查詢」頁設定**，seed `Project/SRPP/data/input`；原寫死的 `news-scraper.export-dir`＋`/srpp-input` 掛載已移除，host 落點不變）。檔名 `public_info_<yyyy-MM-dd>.json`（同日覆寫、跨日新檔）；結構 `{ generatedAt, trigger, tradingDayCutoff, count, items:[{title,source,url,category,region,summary,publishedAt}] }`。`news_headline` 保留期（30 天）不受當日範圍影響（供分析讀近 N 天）。`publishedAt` 以 `@JsonFormat` 於 Asia/Taipei（+08:00）序列化（日期與交易日／`tradingDayCutoff` 一致，不因 UTC 倒退一天）。寫出採**暫存檔＋原子 rename**（`Files.createTempFile`＋`Files.move(ATOMIC_MOVE)`）——warmup 執行緒與 cron 可能併發寫同一檔，原子 rename 避免截斷毀損、SRPP 不讀半寫檔。`export-enabled` 可關；寫檔失敗 graceful。
   - **量化快照：匯率＋美股指數＋韓國股市（`MarketSnapshotFetchClient`，Task 180／185）**：使用者要求公開資訊「一定要有」台幣兌美元匯率、美股與韓股重要資訊；此三者原本各自落在 `exchange_rate_history`／`us_index_daily_history`／`foreign_stock_daily_history`、**不在 `news_headline`**，故不進 SRPP 公開資訊 JSON、也不在今日股市分析本地新聞區塊。故由 `MarketSnapshotFetchClient.fetchAll()` 讀**已抓好**的 DB 資料組三則 `NewsRow`，交 `NewsPoller` 與其他來源一併 upsert（DB 為單一來源，SRPP JSON 與今日股市分析都吃得到）：
     1. **匯率**（`category=fx`／`source=bot-fx`／`region=TW`）：`StockSourceQuery.loadLatestUsdRate()` 取 `exchange_rate_history` 最新 USD 列，標題 `台幣兌美元(USD/TWD)匯率（資料日 {rate_date}）：即期買入/賣出/中間價`（中間價 = (買+賣)/2）。
     2. **美股指數**（`category=us-market`／`source=us-index`／`region=US`）：`StockSourceQuery.loadLatestUsIndexClose(code)` 取 `us_index_daily_history` 各碼最近兩筆算漲跌%，一則合併標題 `美股主要指數（截至 {session} 收盤）：道瓊/標普500/那斯達克/費半 {收盤}（{漲跌%}）`。指數資料由 Yahoo Finance（美國站，非中港澳）抓、`IndexDailyRefreshScheduler` 寫入。
@@ -3072,6 +3101,15 @@ PUT  /api/crawler-schedule?crawler=news-poller                                  
 GET  /api/crawler-export-path?crawler=news-poller                                # 取輸出路徑設定 {crawlerKey,outputSubpath,baseDir,absolutePath,updatedAt,
                                                                                  #   gdriveEnabled,gdriveSubpath,gdriveRemote,gdriveLastRunAt,gdriveLastStatus}
 PUT  /api/crawler-export-path?crawler=news-poller                                # 更新輸出子路徑＋Drive 設定（限 ADMIN；驗跳脫 → 400）
+POST /api/crawler-export-path/run-now?crawler=news-poller                        # 手動「只重產檔案」（限 ADMIN）→ proxy 至 ext
+                                                                                 #   POST /internal/news-poller/export-now（50 秒上限；逾時回 RUNNING 非失敗）
+POST /api/crawler-export-path/fetch-and-run-now?crawler=news-poller              # 手動「完整跑一輪」（限 ADMIN）→ proxy 至 ext
+                                                                                 #   POST /internal/news-poller/fetch-and-export-now（同 50 秒上限）
+                                                                                 # 兩支同回 {status:OK|FAILED|BUSY|RUNNING|DISABLED|ERROR, mode,
+                                                                                 #   jsonPath, jsonSizeBytes, xlsxPath, xlsxSizeBytes,
+                                                                                 #   upserted, failed, exported,
+                                                                                 #   jsonGdrivePath, xlsxGdrivePath, gdriveStatus, message}
+                                                                                 #   （Requirement 63 / Task 280；upserted／failed 僅完整跑一輪有值）
 
 # BFF（CrawlerDataBffController，WebClient 帶 X-User-*）
 GET  /api/bff/crawler-data?date=&dateField=&category=   → GET /api/news-headlines
@@ -3082,6 +3120,9 @@ PUT  /api/bff/crawler-data/export-path                  → PUT /api/crawler-exp
 GET  /api/bff/crawler-data/export-path/browse?subpath=  → GET /api/export-schedule/browse（沿用既有目錄列舉，不新增實作）
 GET  /api/bff/crawler-data/export-path/browse-gdrive?subpath=
                                                         → GET /api/export-schedule/browse-gdrive（Requirement 50 / Task 245；Drive 資料夾樹懶載入）
+POST /api/bff/crawler-data/export/run-now               → POST /api/crawler-export-path/run-now?crawler=news-poller（限 ADMIN）
+POST /api/bff/crawler-data/export/fetch-and-run-now     → POST /api/crawler-export-path/fetch-and-run-now?crawler=news-poller（限 ADMIN）
+                                                        # Requirement 63 / Task 280。本 BFF 僅有的兩支 POST，皆不做 onErrorReturn 降級
 ```
 
 **Google Drive 輸出（Requirement 50 / Task 245）** —— 本機輸出不變、Drive 為附加副本：

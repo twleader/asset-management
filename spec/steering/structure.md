@@ -295,7 +295,7 @@ frontend/
 
 ```
 spec/
-├── requirements.md       # 55 個 Requirements（User Story + AC）
+├── requirements.md       # 63 個 Requirements（User Story + AC）
 ├── design.md             # 架構圖、ERD、Service 職責、Sequence
 ├── tasks.md              # 任務索引（Task 1–220）＋ 尚未歸檔的 201 起區段
 ├── tasks/                # 任務檔

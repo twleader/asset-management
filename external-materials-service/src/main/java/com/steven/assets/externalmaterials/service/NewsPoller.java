@@ -52,6 +52,18 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * （不快取於欄位，下一輪即讀到新值）。DB 例外／空值／跳脫基底時 fallback 至 {@link #DEFAULT_EXPORT_SUBPATH}
  * ＝改為 DB 驅動前 {@code /srpp-input} 的同一個 host 目錄。
  *
+ * <p><b>手動觸發（Requirement 63 / Task 280）</b>：除排程與 warmup 外，另有兩個手動入口，
+ * 由「爬蟲資訊查詢」頁的兩顆按鈕經 BFF → business proxy 至 ext：
+ * <ul>
+ *   <li>{@link #exportNow()}（「立即匯出」）——<b>只重產檔案</b>：不抓取、不寫 {@code news_headline}，
+ *       直接走 {@link #exportPublicInfoJson(String)}，{@code trigger} 標為 {@code manual-export}。</li>
+ *   <li>{@link #fetchAndExportNow()}（「立即抓取並匯出」）——<b>完整跑一輪</b>：走同一段
+ *       {@link #run(String)}，{@code trigger} 標為 {@code manual}。</li>
+ * </ul>
+ * 三條途徑（排程／warmup／手動）共用同一段程式碼、只有 {@code trigger} 標籤不同——各寫一份的話，
+ * 抓取來源清單、個股過濾、cutoff 規則、雙格式產出、Drive 同步這五處遲早漂移。兩個手動入口都必須
+ * 取得同一個 {@link #running} 旗標（取不到即回 {@code BUSY}、不排隊、不啟第二輪）。
+ *
  * <p>開機 warmup（{@link ApplicationReadyEvent}）先跑一次，部署後立即有資料。每次末尾清理保留期外舊聞。
  * 逐來源／逐則 graceful：任一失敗只 log warn、不影響其他，比照既有 producer 慣例。
  */
@@ -91,6 +103,66 @@ public class NewsPoller {
 
     /** 防止上一輪抓取尚未結束又被下一分鐘 ticker 重複觸發（抓取可能耗數十秒）。 */
     private final AtomicBoolean running = new AtomicBoolean(false);
+
+    /** 手動觸發的模式標籤（Requirement 63 / Task 280）：回應要能自證是哪一顆按鈕的結果。 */
+    private static final String MODE_FETCH_AND_EXPORT = "FETCH_AND_EXPORT";
+    private static final String MODE_EXPORT_ONLY = "EXPORT_ONLY";
+
+    /**
+     * 一輪輸出的結果分類（Requirement 63 / Task 280）。
+     *
+     * <p><b>必須是結構化的分類，不得靠比對訊息字串分流</b>：{@code export-enabled=false} 早退與寫檔失敗
+     * 產生的 {@link ExportOutcome} <b>形狀完全相同</b>（{@code jsonPath == null} ＋ 一段中文 message），
+     * 而這兩者在前端一個是灰色提示、一個是紅色錯誤。
+     */
+    enum ExportStatus {
+        /** 本機 JSON 那一份確實寫成功（xlsx 與 Drive 可能仍失敗，另由各自欄位表達）。 */
+        OK,
+        /** 跑了，但本機 JSON 寫檔失敗（輸出目錄不可寫、磁碟滿等）。 */
+        FAILED,
+        /** {@code news-scraper.export-enabled=false}，產檔那一步早退。 */
+        DISABLED
+    }
+
+    /** 一輪輸出的結果（Task 280）。除 {@code outcome} 外欄位為 null＝該步驟沒做或失敗，皆為既有的 graceful 行為。 */
+    record ExportOutcome(ExportStatus outcome, String jsonPath, Long jsonSizeBytes,
+                         String xlsxPath, Long xlsxSizeBytes, Integer exported,
+                         String jsonGdrivePath, String xlsxGdrivePath, String gdriveStatus,
+                         String message) {}
+
+    /** Drive 同步結果（Task 280）；未啟用（或連設定都讀不到）時三欄皆為 null。 */
+    record GdriveOutcome(String jsonPath, String xlsxPath, String status) {}
+
+    /**
+     * 手動觸發一輪的結果（Requirement 63 / Task 280），由 ext 的兩支 {@code /internal/news-poller/*}
+     * 端點回傳、business 端原樣 proxy 給前端。
+     *
+     * <p>{@code status}：{@code OK}（跑完了，且本機 JSON 那一份確實寫成功）／{@code FAILED}（跑了但本機
+     * JSON 寫檔失敗）／{@code BUSY}（上一輪尚未結束、本次未啟動）／{@code DISABLED}（功能被關閉）。
+     * <b>{@code RUNNING}／{@code ERROR} 由 business 端於逾時／連線失敗時合成，ext 不產生這兩個值。</b>
+     *
+     * <p>排程輪與 warmup 不看這個回傳值，行為完全不受影響。
+     *
+     * @param mode      {@code FETCH_AND_EXPORT}／{@code EXPORT_ONLY}
+     * @param upserted  只有 {@code FETCH_AND_EXPORT} 有值；{@code EXPORT_ONLY} 一律 null
+     *                  （不是 {@code 0}——那會被讀成「抓了但一筆都沒進」，與「根本沒抓」是不同的事）
+     * @param failed    同上
+     */
+    public record ManualRunResult(
+            String status,
+            String mode,
+            String jsonPath,
+            Long jsonSizeBytes,
+            String xlsxPath,
+            Long xlsxSizeBytes,
+            Integer upserted,
+            Integer failed,
+            Integer exported,
+            String jsonGdrivePath,
+            String xlsxGdrivePath,
+            String gdriveStatus,
+            String message
+    ) {}
 
     @Value("${news-scraper.enabled:true}")
     private boolean enabled;
@@ -167,13 +239,78 @@ public class NewsPoller {
             return;
         }
         try {
-            run(trigger);
+            run(trigger);   // 排程輪與 warmup 忽略回傳值，行為與 Task 280 之前完全相同
         } finally {
             running.set(false);
         }
     }
 
-    private void run(String trigger) {
+    /**
+     * 手動「立即抓取並匯出」（Requirement 63 / Task 280）：完整跑一輪，與排程輪、warmup 走
+     * <b>同一段</b> {@link #run(String)}，只有 {@code trigger} 標籤不同（{@code manual}）。
+     *
+     * <p><b>方法名刻意不叫 {@code runNow()}</b>：business 端叫 {@code runNow(...)} 的是「只重產檔案」
+     * （對應 {@code POST /api/crawler-export-path/run-now}，沿用全庫既有八個 run-now「不重新抓資料」的語意）。
+     * 同一字串在兩層反義時，接反是<b>靜默的</b>——兩支都產出同名的兩份檔，只差有沒有抓。
+     *
+     * <p><b>自己做 {@code compareAndSet} 而不改寫 {@link #runGuarded}</b>：後者是 warmup 與排程輪的入口，
+     * 它「取不到旗標就只 log 並 return」的行為必須原封不動；手動輪則需要把「沒跑」這件事<b>回報給使用者</b>。
+     * 三者共用同一個 {@link #running} 欄位即達成互斥。
+     */
+    public ManualRunResult fetchAndExportNow() {
+        if (!enabled) {
+            return busyOrDisabled("DISABLED", MODE_FETCH_AND_EXPORT,
+                    "爬蟲已停用（news-scraper.enabled=false），未執行");
+        }
+        if (!running.compareAndSet(false, true)) {
+            log.info("本地新聞抓取（manual）略過：上一輪尚未結束");
+            return busyOrDisabled("BUSY", MODE_FETCH_AND_EXPORT, "上一輪抓取尚未結束，本次未啟動；請稍候再試");
+        }
+        try {
+            return run("manual");
+        } finally {
+            running.set(false);
+        }
+    }
+
+    /**
+     * 手動「立即匯出」（Requirement 63 / Task 280）：<b>只重產檔案</b>——不抓取、不寫 {@code news_headline}，
+     * 直接由 DB 現有資料走 {@link #exportPublicInfoJson(String)} 產出兩份檔案並（啟用時）同步 Drive，
+     * {@code trigger} 標為 {@code manual-export}。用途是改完輸出資料夾／Drive 設定後立刻驗證落點。
+     *
+     * <p><b>刻意不看 {@code news-scraper.enabled}</b>：那是「要不要自動抓取」的開關，與重產檔案無關；
+     * 看了會讓「爬蟲整體停用但仍想重產檔案」的情境被錯誤擋掉。{@code DISABLED} 一律由
+     * {@link #exportPublicInfoJson(String)} 回傳的 {@link ExportStatus} 決定（{@code export-enabled}
+     * 的判斷在該方法第一行、單一來源），<b>不在這裡複製一份判斷、也不比對訊息字串</b>。
+     *
+     * <p><b>同樣要取得 {@link #running}</b>：它與排程輪寫的是<b>同一組檔名</b>，共用同一個閘門才不會出現
+     * 「排程輪寫到一半、手動輪同時覆寫」的交錯情境。持有時間極短（不抓取），Drive 啟用時上限為兩份各 45 秒。
+     */
+    public ManualRunResult exportNow() {
+        if (!running.compareAndSet(false, true)) {
+            log.info("公開資訊輸出（manual-export）略過：上一輪尚未結束");
+            return busyOrDisabled("BUSY", MODE_EXPORT_ONLY, "上一輪抓取尚未結束，本次未啟動；請稍候再試");
+        }
+        ExportOutcome out;
+        try {
+            out = exportPublicInfoJson("manual-export");
+        } finally {
+            running.set(false);
+        }
+        // upserted／failed 一律 null：這條路徑根本沒抓，填 0 會被讀成「抓了但一筆都沒進」
+        return new ManualRunResult(out.outcome().name(), MODE_EXPORT_ONLY,
+                out.jsonPath(), out.jsonSizeBytes(), out.xlsxPath(), out.xlsxSizeBytes(),
+                null, null, out.exported(),
+                out.jsonGdrivePath(), out.xlsxGdrivePath(), out.gdriveStatus(), out.message());
+    }
+
+    /** 「沒跑」的兩種結果（{@code BUSY}／{@code DISABLED}）：除 status／mode／message 外一律 null。 */
+    private static ManualRunResult busyOrDisabled(String status, String mode, String message) {
+        return new ManualRunResult(status, mode, null, null, null, null,
+                null, null, null, null, null, null, message);
+    }
+
+    private ManualRunResult run(String trigger) {
         List<NewsRow> rows = new ArrayList<>();
         rows.addAll(newsClient.fetchAll());
         rows.addAll(twseClient.fetchAll());
@@ -209,7 +346,17 @@ public class NewsPoller {
         }
         log.info("本地新聞抓取（{}）：upsert {} 則、失敗 {}、清理過期 {} 則", trigger, ok, fail, deleted);
 
-        exportPublicInfoJson(trigger);
+        ExportOutcome out = exportPublicInfoJson(trigger);
+        // status 一律映自 outcome，不得寫死 OK：抓取成功但檔案寫不出去時，那一輪對使用者而言就是失敗的。
+        // enabled=true 但 export-enabled=false 這一格因此有明確答案——抓取與 upsert 照跑完（不跳過），
+        // 產檔早退 → DISABLED，且 upserted／failed 有值、兩個路徑為 null。
+        String message = out.outcome() == ExportStatus.DISABLED
+                ? "抓取已完成 " + ok + " 則，" + out.message()
+                : out.message();
+        return new ManualRunResult(out.outcome().name(), MODE_FETCH_AND_EXPORT,
+                out.jsonPath(), out.jsonSizeBytes(), out.xlsxPath(), out.xlsxSizeBytes(),
+                ok, fail, out.exported(),
+                out.jsonGdrivePath(), out.xlsxGdrivePath(), out.gdriveStatus(), message);
     }
 
     /**
@@ -222,11 +369,18 @@ public class NewsPoller {
      * SRPP 依此檔名取用）；內容含 metadata（generatedAt／trigger／tradingDayCutoff／count）與逐則明細。
      * 寫檔失敗一律 graceful。
      */
-    private void exportPublicInfoJson(String trigger) {
-        if (!exportEnabled) return;
+    private ExportOutcome exportPublicInfoJson(String trigger) {
+        if (!exportEnabled) {
+            return new ExportOutcome(ExportStatus.DISABLED, null, null, null, null, null,
+                    null, null, null, "公開資訊輸出已停用（news-scraper.export-enabled=false），未產檔");
+        }
         LocalDate today = LocalDate.now(TW_ZONE);
         Path writtenFile = null;   // 本機檔寫成功才會被設值；null＝本機這一步失敗，Drive 不該上傳舊檔
         Path xlsxFile = null;      // 同上；xlsx 失敗時 JSON 那一份仍照常上傳
+        Long jsonSize = null;      // Task 280：多帶一份既有資訊出去供手動輪回報，不影響任何既有分支
+        Long xlsxSize = null;
+        Integer exported = null;
+        String failure = null;
         try {
             LocalDate cutoff = resolveTradingCutoff(today);
             List<NewsRow> items = source.loadTodayPublicInfoForExport(today, cutoff);
@@ -256,6 +410,8 @@ public class NewsPoller {
                 Files.deleteIfExists(tmp);   // move 成功後為 no-op；writeValue 失敗時清掉殘留暫存檔
             }
             writtenFile = file;   // 本機（SRPP 的資料來源）已確定寫成功，Drive 才可以上傳這一份
+            jsonSize = sizeOrNull(file);
+            exported = items.size();
             log.info("公開資訊輸出 JSON（{}）：{} 筆（當日 fetched、published≥{}）→ {}",
                     trigger, items.size(), cutoff, file);
 
@@ -263,13 +419,42 @@ public class NewsPoller {
             // 順序守門——JSON 是 SRPP 的權威來源，先確定它寫成功才寫 xlsx；反向（xlsx 失敗）
             // 只記 warn，絕不影響 JSON、絕不中斷爬取流程。
             xlsxFile = writePublicInfoXlsx(dir, today, payload, trigger);
+            xlsxSize = sizeOrNull(xlsxFile);
         } catch (Exception e) {
             log.warn("公開資訊輸出 JSON 失敗（{}）：{}", trigger, e.getMessage());
+            failure = "本機寫檔失敗：" + e.getMessage();
         }
 
         // Drive 同步刻意放在上面 try-catch **之外**：本機寫檔失敗時也要能記錄「跳過」狀態，
         // 否則設定頁會停留在上一次的「成功」，顯示過期的好消息（Requirement 50）。
-        syncToGdrive(writtenFile, xlsxFile, today, trigger);
+        GdriveOutcome gdrive = syncToGdrive(writtenFile, xlsxFile, today, trigger);
+
+        // outcome 依 writtenFile 決定（已排除 DISABLED——那在方法第一行就早退了）：
+        // 非 null → OK；null → FAILED。不得只看「路徑是不是 null」而不分辨早退，那會把 DISABLED 併吃掉。
+        return new ExportOutcome(
+                writtenFile == null ? ExportStatus.FAILED : ExportStatus.OK,
+                writtenFile == null ? null : writtenFile.toAbsolutePath().toString(), jsonSize,
+                xlsxFile == null ? null : xlsxFile.toAbsolutePath().toString(), xlsxSize,
+                exported, gdrive.jsonPath(), gdrive.xlsxPath(), gdrive.status(), failure);
+    }
+
+    /**
+     * 取檔案大小，失敗回 {@code null}（Task 280）。
+     *
+     * <p><b>絕不讓它擲出</b>：檔案大小純粹是回報用的附加資訊，而這兩次取值都插在
+     * {@link #exportPublicInfoJson} 既有的 try 內——若讓 {@code Files.size} 的 {@code IOException}
+     * 逸出，JSON 那一份的取值失敗會連帶跳過 {@link #writePublicInfoXlsx}（JSON 已寫成功卻不產 xlsx，
+     * 破壞 Requirement 55 的雙格式保證），xlsx 那一份的取值失敗則會讓一次其實全部成功的匯出
+     * 被記成「本機寫檔失敗」。取不到大小只是少一個數字，不該改變任何控制流。
+     */
+    private static Long sizeOrNull(Path file) {
+        if (file == null) return null;
+        try {
+            return Files.size(file);
+        } catch (Exception e) {
+            log.warn("取檔案大小失敗（不影響已寫出的檔案）：{}", e.getMessage());
+            return null;
+        }
     }
 
     /**
@@ -319,20 +504,26 @@ public class NewsPoller {
      * <p>package-private 而非 private：本方法的三條「絕不」保證是本任務風險最高的部分，必須能被單元測試
      * 直接驗證，而不必跑整個抓取流程（比照本服務其他 poller 的 {@code updateOnce()} 測試入口慣例）。
      *
+     * <p>Task 280 起回傳 {@link GdriveOutcome} 供手動輪把結果回報給使用者。<b>回傳值只是把既有的
+     * log／狀態欄內容多帶一份出去，上述三條「絕不」保證與所有既有分支的行為完全不變</b>——
+     * 排程輪與 warmup 忽略這個回傳值。
+     *
      * @param localFile 已寫成功的本機 JSON 檔；{@code null} 表示本機這一步就失敗了
      * @param xlsxFile  已寫成功的本機 Excel 檔；{@code null} 表示那一份沒產出——
      *                  <b>此時 JSON 那一份仍照常上傳</b>（JSON 是 SRPP 的契約，不能因為 Excel 壞掉就不同步）
+     * @return Drive 落點與狀態；未啟用（或連設定都讀不到）時三欄皆為 {@code null}
      */
-    void syncToGdrive(Path localFile, Path xlsxFile, LocalDate today, String trigger) {
+    GdriveOutcome syncToGdrive(Path localFile, Path xlsxFile, LocalDate today, String trigger) {
         CrawlerExportPathQuery.GdriveConfig cfg;
         try {
             cfg = exportPathQuery.gdriveConfig(CRAWLER_KEY);
         } catch (Exception e) {
             // 連設定都讀不到就無從得知使用者是否啟用；此時不寫狀態欄（避免在「其實沒啟用」時留下誤導訊息）
             log.warn("讀取 Drive 同步設定失敗（{}），本輪跳過上傳：{}", trigger, e.getMessage());
-            return;
+            return new GdriveOutcome(null, null, null);
         }
-        if (!cfg.enabled()) return;   // 未啟用：完全不呼叫 rclone，也不動狀態欄
+        // 未啟用：完全不呼叫 rclone，也不動狀態欄
+        if (!cfg.enabled()) return new GdriveOutcome(null, null, null);
 
         // 以下都是「已啟用」的情境——無論成功、失敗或跳過，都必須寫狀態欄，
         // 讓 gdrive_last_run_at 恆為「最近一次判斷結果」而非「最近一次成功」。
@@ -351,7 +542,7 @@ public class NewsPoller {
             if (skip != null) {
                 log.warn("Drive 同步{}（{}）", skip, trigger);
                 recordGdriveStatusQuietly(skip);
-                return;
+                return new GdriveOutcome(null, null, skip);
             }
 
             String jsonDest = gdriveUploader.upload(localFile, cfg.subpath(), "public_info_" + today + ".json");
@@ -361,6 +552,7 @@ public class NewsPoller {
 
             // xlsx 那一份（Requirement 55 / Task 272）：沒產出就記「跳過」，但 JSON 已上傳的事實不受影響。
             String xlsxStatus;
+            String xlsxDest = null;
             if (xlsxFile == null) {
                 xlsxStatus = "跳過：本輪未產生 Excel";
             } else {
@@ -369,6 +561,7 @@ public class NewsPoller {
                     long size = Files.size(xlsxFile);
                     log.info("Drive 同步成功（{}）：{}（{} bytes）", trigger, dest, size);
                     xlsxStatus = "成功：" + dest + "（" + size + " bytes）";
+                    xlsxDest = dest;
                 } catch (Exception e) {
                     log.error("Drive 同步 Excel 失敗（{}）：{}", trigger, e.getMessage(), e);
                     xlsxStatus = "失敗：" + e.getMessage();
@@ -376,10 +569,16 @@ public class NewsPoller {
             }
             // 字串契約沿用 backend 共用元件的 "xlsx …／json …"，且**必須能分辨是哪一份**；
             // 兩半各自先截斷再合併——合併後才截尾會把 ／json 那一整段切掉。
-            recordGdriveStatusQuietly(halfOf(xlsxStatus, "xlsx ") + "／" + halfOf(jsonStatus, "json "));
+            // 注意：正常分支一律以 "xlsx " 起頭，故「xlsx 失敗、json 成功」時整串**不以「失敗」開頭**——
+            // 呼叫端判斷部分失敗必須用「包含」而非「開頭」（Requirement 63）。
+            String merged = halfOf(xlsxStatus, "xlsx ") + "／" + halfOf(jsonStatus, "json ");
+            recordGdriveStatusQuietly(merged);
+            return new GdriveOutcome(jsonDest, xlsxDest, merged);
         } catch (Exception e) {
             log.error("Drive 同步失敗（{}）：{}", trigger, e.getMessage(), e);
-            recordGdriveStatusQuietly("失敗：" + e.getMessage());
+            String status = "失敗：" + e.getMessage();
+            recordGdriveStatusQuietly(status);
+            return new GdriveOutcome(null, null, status);
         }
     }
 

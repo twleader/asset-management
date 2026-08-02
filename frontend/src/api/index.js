@@ -368,7 +368,16 @@ export const bffApi = {
     // Google Drive 資料夾樹懶載入（Task 241）。skipErrorToast：錯誤要顯示在 dialog 內，
     // 不與全域 toast 打架——remote 未設定時使用者需要看到具體原因，而非空樹
     browseGdriveExportDir: (subpath = '') =>
-      api.get('/bff/crawler-data/export-path/browse-gdrive', { params: { subpath }, skipErrorToast: true })
+      api.get('/bff/crawler-data/export-path/browse-gdrive', { params: { subpath }, skipErrorToast: true }),
+    // 手動匯出兩支（限管理者，Requirement 63 / Task 280）。
+    // runExportNow＝只重產檔案（不抓取）；fetchAndRunExportNow＝完整跑一輪。
+    // timeout 70000 而非其他頁 run-now 慣用的 60000：nginx /api/ 的 proxy_read_timeout 為 60s、
+    // business 端 50s 就會回 RUNNING，把 axios 設在 nginx 之後才不會兩邊同時到期而分不清是誰斷的。
+    // skipErrorToast：BUSY／RUNNING 都不是「失敗」，訊息由本頁自己呈現。
+    runExportNow: () =>
+      api.post('/bff/crawler-data/export/run-now', null, { timeout: 70000, skipErrorToast: true }),
+    fetchAndRunExportNow: () =>
+      api.post('/bff/crawler-data/export/fetch-and-run-now', null, { timeout: 70000, skipErrorToast: true })
   },
 
   // SnapshotList

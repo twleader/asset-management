@@ -99,6 +99,13 @@ public class SecurityConfig {
                         // 改爬蟲輸出檔案路徑限 ADMIN（Task 212）：此設定決定服務往主機檔案系統寫入的位置
                         .pathMatchers(HttpMethod.PUT, "/api/bff/crawler-data/export-path")
                             .hasAuthority(AuthConstants.AUTHORITY_ADMIN)
+                        // 手動匯出兩支限 ADMIN（Requirement 63 / Task 280）：都會寫主機檔案系統與使用者的
+                        // Google 雲端硬碟，fetch-and- 那支另會對外部網站發請求並寫 news_headline。
+                        // 不列出就會落到 anyExchange().authenticated()（一般使用者也能觸發）
+                        .pathMatchers(HttpMethod.POST, "/api/bff/crawler-data/export/run-now")
+                            .hasAuthority(AuthConstants.AUTHORITY_ADMIN)
+                        .pathMatchers(HttpMethod.POST, "/api/bff/crawler-data/export/fetch-and-run-now")
+                            .hasAuthority(AuthConstants.AUTHORITY_ADMIN)
                         // 全域共用參考資料：寫入限 ADMIN（GET 不列入 → 落到 anyExchange().authenticated()）
                         .pathMatchers(HttpMethod.POST, GLOBAL_SETTINGS_PATHS).hasAuthority(AuthConstants.AUTHORITY_ADMIN)
                         .pathMatchers(HttpMethod.PUT, GLOBAL_SETTINGS_PATHS).hasAuthority(AuthConstants.AUTHORITY_ADMIN)

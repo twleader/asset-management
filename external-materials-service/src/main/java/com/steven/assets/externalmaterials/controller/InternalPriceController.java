@@ -50,6 +50,7 @@ public class InternalPriceController {
     private final com.steven.assets.externalmaterials.service.TwTyphoonClosureService typhoonClosure;
     private final com.steven.assets.externalmaterials.service.EtfNavPoller etfNavPoller;
     private final com.steven.assets.externalmaterials.service.TwRadarRefreshService twRadarRefresh;
+    private final com.steven.assets.externalmaterials.service.NewsPoller newsPoller;
 
     /**
      * 同步抓所有持股報價、寫 Redis 後回傳統計。
@@ -109,6 +110,35 @@ public class InternalPriceController {
     public FundDividendBackfillService.BackfillSummary backfillFundDividend(
             @RequestParam(defaultValue = "10") int years) {
         return fundDividendBackfillService.backfillAll(years);
+    }
+
+    /**
+     * 公開資訊爬蟲手動「只重產檔案」（Requirement 63 / Task 280）：<b>不抓取、不寫 news_headline</b>，
+     * 直接由 DB 產出 {@code public_info_<今日>.json} ＋ {@code .xlsx} 兩份並（啟用時）同步 Drive，
+     * {@code trigger} 標為 {@code manual-export}。business 端 {@code POST /api/crawler-export-path/run-now}
+     * （限 ADMIN）proxy 至此。
+     *
+     * <p>與排程輪共用 {@code NewsPoller.running} 旗標：已在跑就回 {@code status=BUSY}、不啟第二輪。
+     */
+    @PostMapping("/news-poller/export-now")
+    public com.steven.assets.externalmaterials.service.NewsPoller.ManualRunResult exportPublicInfoNow() {
+        return newsPoller.exportNow();
+    }
+
+    /**
+     * 公開資訊爬蟲手動「完整跑一輪」（Requirement 63 / Task 280）：抓取 → upsert news_headline →
+     * 清理保留期外舊聞 → 產出兩份檔案 → Drive 同步，{@code trigger} 標為 {@code manual}。
+     * business 端 {@code POST /api/crawler-export-path/fetch-and-run-now}（限 ADMIN）proxy 至此。
+     *
+     * <p><b>路徑刻意不叫 {@code run-now}</b>：全庫既有的八個 {@code POST .../run-now} 一律是
+     * 「立即匯出、不重新抓資料」，同一字串在兩層反義時接反是靜默的（兩支都產出同名的兩份檔，只差有沒有抓）。
+     *
+     * <p>典型一輪 3~5 秒，但十餘個來源序列抓取（各 15 秒 request timeout）最壞可達數分鐘；
+     * <b>本端點刻意不設上限</b>——上游放棄等待不影響這一輪跑完與寫檔（逾時由 business 端負責回報 RUNNING）。
+     */
+    @PostMapping("/news-poller/fetch-and-export-now")
+    public com.steven.assets.externalmaterials.service.NewsPoller.ManualRunResult fetchAndExportPublicInfoNow() {
+        return newsPoller.fetchAndExportNow();
     }
 
     /** 手動觸發 FinMind 校正當日台股收盤價（同 16:00 排程），覆寫 stock_price_history。 */

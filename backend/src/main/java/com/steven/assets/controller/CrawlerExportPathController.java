@@ -7,6 +7,7 @@ import com.steven.assets.security.CurrentUserContext;
 import com.steven.assets.service.CrawlerExportPathService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -44,5 +45,36 @@ public class CrawlerExportPathController {
             throw new AdminRequiredException();
         }
         return service.update(crawler, req);
+    }
+
+    /**
+     * 手動「立即匯出」（Requirement 63 / Task 280）：<b>只重產檔案</b>——不抓取、不寫 {@code news_headline}，
+     * 由 DB 現有資料產出 {@code .json} ＋ {@code .xlsx} 兩份並（啟用時）同步 Drive。
+     *
+     * <p>限管理者：會寫入主機檔案系統與使用者的 Google 雲端硬碟，與「修改輸出路徑」同級。
+     * 實際執行者是 {@code external-materials-service}，service 只做 proxy。
+     */
+    @PostMapping("/run-now")
+    public CrawlerExportPathDto.RunNowResponse runNow(
+            @RequestParam(name = "crawler", defaultValue = CrawlerSchedule.CRAWLER_NEWS_POLLER) String crawler) {
+        if (!currentUser.isAdmin()) {
+            throw new AdminRequiredException();
+        }
+        return service.runNow(crawler);
+    }
+
+    /**
+     * 手動「立即抓取並匯出」（Requirement 63 / Task 280）：<b>完整跑一輪</b>——抓取 →
+     * upsert {@code news_headline} → 產出兩份檔案 → Drive 同步。
+     *
+     * <p>限管理者：除上述之外還會對外部網站發出請求並寫 {@code news_headline}。
+     */
+    @PostMapping("/fetch-and-run-now")
+    public CrawlerExportPathDto.RunNowResponse fetchAndRunNow(
+            @RequestParam(name = "crawler", defaultValue = CrawlerSchedule.CRAWLER_NEWS_POLLER) String crawler) {
+        if (!currentUser.isAdmin()) {
+            throw new AdminRequiredException();
+        }
+        return service.fetchAndRunNow(crawler);
     }
 }
