@@ -257,13 +257,17 @@
             <div :style="{ color: priceColor(row.changePercent) }">{{ fmtPct(row.changePercent) }}</div>
           </template>
         </el-table-column>
-        <el-table-column label="MA20／60／240" min-width="190" align="right">
+        <el-table-column label="MA5／20／60／240" min-width="250" align="right">
           <template #default="{ row }">
-            <span>{{ fmtNumber(row.monthlyMa, 2) }}</span>
-            <span class="slash">／</span>
-            <span>{{ fmtNumber(row.quarterlyMa, 2) }}</span>
-            <span class="slash">／</span>
-            <span>{{ fmtNumber(row.annualMa, 2) }}</span>
+            <span class="ma-summary">
+              <span>{{ fmtNumber(row.weeklyMa, 2) }}</span>
+              <span class="slash">／</span>
+              <span>{{ fmtNumber(row.monthlyMa, 2) }}</span>
+              <span class="slash">／</span>
+              <span>{{ fmtNumber(row.quarterlyMa, 2) }}</span>
+              <span class="slash">／</span>
+              <span>{{ fmtNumber(row.annualMa, 2) }}</span>
+            </span>
           </template>
         </el-table-column>
         <el-table-column label="KD" width="168" align="center">
@@ -1273,6 +1277,7 @@ onUnmounted(() => {
 .stock-name { margin-top: 2px; color: #64748b; font-size: 12px; }
 .stock-meta { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
 .price-value { font-weight: 700; color: #0f172a; }
+.ma-summary { display: inline-flex; align-items: center; white-space: nowrap; }
 .slash { color: #cbd5e1; padding: 0 2px; }
 /* 過熱＝動作已降級（紅），偏熱＝僅提醒、動作未受影響（橘）；兩者必須可區分（Task 232）。 */
 .kd-overheated { color: #f56c6c; font-weight: 600; }

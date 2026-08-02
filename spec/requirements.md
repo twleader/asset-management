@@ -1359,6 +1359,12 @@
 - [ ] **與走勢圖 popup 的數字必然不同，屬預期行為（Task 281）**：雷達個股列雙擊開啟的走勢圖走**原始價基**（`indicatorSeries()`），本組值走**還原權息價基**；凡視窗內有配息／除權的個股，兩邊的 KD／MACD／RSI／BIAS／W%R 必然對不上。這是既有鐵則「禁止混用原始／還原價」的結果，**不得為了讓兩邊一致而改動任一方**，驗收也不得拿兩者互相比對。
 - [ ] **驗證**：單元測試至少覆蓋——(a) **「不參與評分」的機械釘子**：以反射掃 `TradingRadarRuleEngine.StockInput` 與 `MarketInput` 的 record component 名，斷言不含 `j9`／`k3d2`／`rsv`／`ema`／`dif`／`macd`／`osc`／`rsi`／`bias`／`b10b20`／`wr9`／`extended` 任一字樣（比照既有 `WeeklyMaTest.weeklyMaMustNotBeAnInputToTheRuleEngine` 的決策釘子寫法；失敗訊息須指向「要接進評分請走 t276 的 SDD 循環」）；(b) **同源自洽**：同一份 `FullIndicators` 內 `|j9 − (3d − 2k)| ≤ 0.03`、`|k3d2 − (3k − 2d)| ≤ 0.03`（個股與 `0000` 大盤各一組，大盤那組須另跑一次「已併入今日 live 合成列」的變體）；(c) **既有 8 個欄位零回歸**，含 `previousK`／`previousD` 在單趟合併後與現況 bit-identical；(d) **視窗收斂**：全史 vs 241 筆的 MACD／RSI 差值 ≤ 0.01。部署後另須實測回測端點的 wall time 倍率與 Redis 體積變化。
 
+**Requirement 43 追加（Task 284）—— 個股決策收合列顯示週線 MA5：**
+
+- [ ] **推翻 Task 281「畫面不新增欄位」的範圍決定，但不增加表格欄數**：`TradingRadarView.vue` 的個股決策收合列已把三條均線放在同一欄；該欄由 `MA20／60／240` 改為 `MA5／20／60／240`，同一格依序顯示 `weeklyMa`／`monthlyMa`／`quarterlyMa`／`annualMa`。這不是新增第五個獨立表格欄，而是在既有均線摘要欄補上已存在的值，故不再以「表格過寬」隱藏 MA5。
+- [ ] **只用既有同源欄位，不新增計算或 API**：MA5 必須直接讀 `StockDecision.weeklyMa`；不得在前端由歷史價重算、不得新增 BFF／business 端點、不得改 DTO。值為 `null` 時沿用 `fmtNumber` 顯示 `—`，不得補 0。欄位最小寬度須隨四個數值加寬；四值與分隔線另包在 `.ma-summary` 容器，以 `display: inline-flex` ＋ `white-space: nowrap` 明確禁止內部換行。250px 只是欄寬基準，不得把它當成防換行機制。
+- [ ] **MA5 仍然只供揭露**：本追加不把 `weeklyMa` 接入 `StockInput`／`MarketInput`，不改分數、動作、買進閘門、`reasons`／`risks` 或 `RULE_VERSION`。頁首「依大盤、MA20／60／240、KD 與連續兩日確認產生規則式決策」描述的是規則依據，維持原文，避免誤稱 MA5 已參與決策。
+
 ---
 
 ### Requirement 44: 每檔交易雷達狀態 Email 通知
@@ -1590,6 +1596,11 @@
 - [ ] **Drive 同步比照排程**：`DualFormatExportWriter` 既有規則不變——**本機兩份都寫成功才上傳 Drive**，未啟用 Drive 時不碰 Drive 狀態欄。本追加**不改**該元件。
 - [ ] **不動排程路徑與狀態欄**：`trading_radar_export_setting` 的 `last_run_at`／`last_run_status`／`gdrive_last_run_at`／`gdrive_last_status` 四欄的語意是「**排程**（含 run-now）最後一次的結果」，**手動下載這條路徑一律不寫這四欄**——寫了會讓排程卡顯示一個不是排程產生的落點，使用者無法分辨「排程有沒有正常跑」。
 - [ ] **驗證**：單元測試至少覆蓋——(a) **只查一次 Redis**：`verify(storeMock, times(1)).range(...)`（⚠️ **不可寫成「`radarDoc(...)` 恰好呼叫一次」**——該方法有 public／private 兩個多載，本路徑走 private 那支，Mockito verify 不到）；(b) 落檔失敗時仍回 200 且 body 為 xlsx、標頭為 `failed`；(c) **`ownerId == null` 時標頭為 `skipped`、下載仍回 200 且為含表頭的合法 xlsx**；(c2) **該區間零快照時標頭為 `skipped` 且 writer 零呼叫**；(d) 落檔檔名取 `to` 的日期而非牆鐘今日；(e) 四個狀態欄未被寫入。部署後於頁首按「匯出 Excel」，確認瀏覽器仍下載 xlsx、且 `data/input` 同時出現 `交易雷達_{id}_{日期}.json` 與 `.xlsx`（兩份 mtime 相同），Drive 啟用時兩份也都上傳。
+
+**Requirement 48 追加（Task 284）—— MA5 匯出回歸約束：**
+
+- [ ] **匯出現況已符合，不得重複加欄**：`TradingRadarExportService` 現已在「大盤總覽」與「個股決策」兩張分頁把既有 `weeklyMa` 輸出為 `週線MA5`，位置緊鄰且位於 `MA20` 之前；同一份 `ExportDoc` 亦使 JSON 具有同名數值欄。Task 284 只補前端收合列，不新增第二個 `MA5`／`週線MA5` 匯出欄，也不改表頭、格式、欄序或舊快照缺值留白的行為。
+- [ ] **所有匯出入口持續同源，並補齊對稱測試**：頁首手動匯出、排程與「立即匯出到目錄」皆須維持走同一份 `TradingRadarExportService` 文件模型；不得只在其中一條路徑另外塞 MA5。現有 `TradingRadarDualFormatTest` 已逐字驗證兩張分頁表頭與兩側 MA5 數值，但只驗了大盤 MA5 的 Excel 格式／JSON number，以及個股 MA5 的舊快照 JSON `null`。Task 284 必須補上個股 MA5 的 `#,##0.00` 格式與 JSON number，並讓大盤、個股兩側都明確斷言舊快照的 Excel `BLANK` 與 JSON `null`；不得以同列其他擴充指標的斷言代替 MA5。
 
 ### Requirement 49: 資產交易紀錄（手動買賣流水帳）與 Excel 手動／每日排程匯出
 
