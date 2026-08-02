@@ -276,8 +276,9 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 270 | 五個單表匯出改走 `ExportDoc` 雙格式：已實現損益／匯率／指數／油價金價／交易紀錄（Requirement 55；前置 t269）**已完成實作** | [tasks/t270_dual_format_single_table_exports.md](tasks/t270_dual_format_single_table_exports.md) |
 | 271 | 資產總覽與交易雷達改走 `ExportDoc` 雙格式，交易日曆改為一律兩份（Requirement 55；前置 t269）**已完成實作** | [tasks/t271_dual_format_multi_block_exports.md](tasks/t271_dual_format_multi_block_exports.md) |
 | 272 | 兩份 JSON-primary 匯出加上 Excel（警示觸發、爬蟲公開資訊）＋ 排程列表頁文案收尾（Requirement 55；前置 t270／t271）**已完成實作** | [tasks/t272_dual_format_json_primary_exports.md](tasks/t272_dual_format_json_primary_exports.md) |
+| 273 | 交易雷達匯出補上週線 MA5 與走勢圖指標選單的 14 個值（大盤總覽 20→35 欄、個股決策 35→50 欄；Requirement 43／48） | [tasks/t273_radar_export_indicators.md](tasks/t273_radar_export_indicators.md) |
 
-> **註：本索引表僅列至 228、264–267 與 269–272；Task 229–263 與 268 未登錄於本表，以 `spec/tasks/tNNN_*.md` 檔案本身為準。**
+> **註：本索引表僅列至 228、264–267 與 269–273；Task 229–263 與 268 未登錄於本表，以 `spec/tasks/tNNN_*.md` 檔案本身為準。**
 
 > **Task 222–225 已全部被 t264–t267 取代（見上表），保留僅作為決策記錄，一律不得依其實作。**
 >

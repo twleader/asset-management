@@ -1346,6 +1346,16 @@
 - [ ] **版本與不可比性**：`RULE_VERSION` 由 `TW_RULES_V8` 升為 `TW_RULES_V9`。**同步點共五處**（`grep -ran "TW_RULES_V8"`）：`TradingRadarRuleEngine.java:19`（本體）、`frontend/src/views/TradingRadarView.vue:28`、`:586`、`backend/.../dto/TradingRadarDto.java:9`（javadoc）、`backend/src/test/.../TradingRadarRuleEngineTest.java:488`（`ruleVersion_isV8` 須連方法名一併改）。另 `design.md:4001` 已於本次 spec 變更同步更正為 `TW_RULES_V8`，升版時一併改為 `TW_RULES_V9`。與 Task 228／232／263 三次「因子組成、權重與正規化方式完全相同」的升版不同，**本次新增因子、重配全部權重並改變動作映射結構，V9 與 V8 分數不可直接比較**，須揭露。**Requirement 44 的通知基準須全部重建**，升級後首輪評估一律只建基準不寄信。
 - [ ] **驗證**：`score ∈ [0,100]` 恆成立；權重總和以斷言釘住；`week52Position` 在創 52 週新高當日 clamp 後仍為 `+1`（專屬測試，平時測不到）；四條需求對應行為測試（高檔死叉→減碼／無死叉→維持、極端超賣→阻擋出場、崩壞股→照常出場、`RISK_OFF` 且非 stale→`TRIAL_BUY` 而 stale→不得）；窄幅 KD 失效路徑以生效權重總和斷言。**既有測試 `:388-398`（83 分 `ADD_CANDIDATE`）與 `:405-412`（85 分 `HOLD`）的期望值會因權重重配而改變，須依新權重重算後更新並列出新舊對照——不得為了讓舊測試通過而回頭改權重。**
 
+**Requirement 43 追加（Task 273）—— 擴充技術指標欄位（純揭露、不參與評分、不升版）：**
+
+- [ ] **擴充技術指標欄位（純揭露，使用者追加需求 Task 273）**：`MarketSummary` 與 `StockDecision` 各新增一個巢狀欄位 `extendedIndicators`，帶走勢圖指標選單（Task 262）同一組 **14 個值**——`j9`／`k3d2`／`rsv`／`ema12`／`ema26`／`dif`／`macd`／`osc`／`rsi5`／`rsi10`／`bias10`／`bias20`／`b10b20`／`wr9`（皆 `BigDecimal`、2 位小數，暖機／視窗不足者為 `null`，**不得以 0 充數**）。**一律不參與評分**：不進 `StockInput`／`MarketInput`、不影響 `action`／`score`／`regime`／`buyGate`／`kdHeat`／`timingState`，理由同週線 MA5——它們是 5～26 日尺度的短線指標，納入評分與「數周至兩年」的需求方向相反。故 `RULE_VERSION` **不升版**，理由是「**規則集本身未變**」：本追加不新增／不修改任何 `StockInput`／`MarketInput` 因子、權重或動作門檻，同一份輸入產生逐位相同的 `action`／`score`／`regime`／`reasons`／`risks`。**刻意不援引 Task 249 那條「同一份輸入前後產生完全相同的輸出」**——本追加的輸出結構確有變化（DTO 多一個純揭露巢狀欄位、匯出檔多 15 欄、快照雜湊必然改變），不滿足該條件；既有判準原文為「使用者可觀察**行為**有實質變化」（`design.md` 第 4081 行附近），不得被本 AC 收窄成「決策行為」後拿去當後續任務的先例。
+- [ ] **擴充指標的價基必須與同一列的 K／D 同源（Task 273 硬約束）**：個股一律吃 `DistributionAdjustedPriceService` 還原權息後、**餵給 `computeFromSeries()` 的同一份序列物件**；大盤一律吃 `computeAllForTaiex()` **同一次取得的**指數日線序列（含今日 live 合成列）。**不得**改由走勢圖那條原始價基的 `indicatorSeries()` 取值，也**不得**為此另外查一次資料——同一列出現兩種價基會讓 `k` 與 `j9` 互相矛盾（`j9 = 3D − 2K` 在該列不再成立），而分兩次取數會讓兩批值落在不同的 Redis tick 上。
+- [ ] **視窗長度一律沿用各自路徑的既有值，不得為新指標延長也不得對齊（Task 273）**：MACD 與 RSI 是由序列最早一筆單向遞迴（無滑動視窗），起算點理論上有影響；但既有視窗已足夠收斂——序列長 241 時，EMA26 的 SMA seed 落在 asc index 25、遞迴 215 步，seed 殘留權重為 `(1−2/27)^215 ≈ 6.5×10⁻⁸`；Wilder RSI10 的 seed 落在 index 10、遞迴 230 步，殘留 `0.9^230 ≈ 3×10⁻¹¹`。兩者皆遠低於 2 位小數的捨入尺度（0.005）；序列長 240 時各少一步，結論不變。**兩條路徑的既有筆數本來就不同，不得為了「看起來一致」而改動任一邊**：
+  - **個股**沿用 `TradingRadarService` 的 `priceHistoryRepo.findRecentN(code, market, 241)`，還原後取 `min(size, liveAdded ? 241 : 240)` 筆餵指標核心。
+  - **大盤**沿用 `TechnicalIndicatorService.computeAllForTaiex()` 內既有的 `twseDailyRepo.findTopNByOrderByTradingDateDesc(**240**)`（盤中併入今日 live 合成列後為 241 根）。**不得為了湊成 241 而改掉這個 240**，理由有二：(a) 那條是 `computeAll("0000","台股")` 的路徑，**與雷達無關的三個消費端**（觀察清單 `0000` 的 KD 欄、Requirement 44 的通知門檻、走勢圖同源判準）都吃它，動它超出本任務範圍；(b) **數值上也毫無收益**——KD 對多一筆最舊列不敏感（`taiexKd` 的 seed 殘留為 `(2/3)^232 ≈ 1.4×10⁻⁴¹`，實測同一序列取 240 vs 241 的 `k`／`d` 在 double 精度上即 bit-identical），`taiexSimpleMa(desc, 240)` 只讀 `desc[0..239]`、多出的那筆根本不進 MA。（`TradingRadarService.buildMarket()` 另有一支 `twseRepo.findTopNByOrderByTradingDateDesc(241)`，那是餵 `ruleEngine.confirm()` 的 `closes`，與指標序列無關，同樣不動。）
+  - 一律**不得**為新指標另開全史查詢：那會讓同一列的 MA／KD 與 MACD／RSI 吃到不同長度的序列，且在雷達逐檔迴圈中放大成 N 次全史掃描。
+- [ ] **與走勢圖 popup 的數字必然不同，屬預期行為（Task 273）**：雷達個股列雙擊開啟的走勢圖走**原始價基**（`indicatorSeries()`），本組值走**還原權息價基**；凡視窗內有配息／除權的個股，兩邊的 KD／MACD／RSI／BIAS／W%R 必然對不上。這是既有鐵則「禁止混用原始／還原價」的結果，**不得為了讓兩邊一致而改動任一方**，驗收也不得拿兩者互相比對。
+
 ---
 
 ### Requirement 44: 每檔交易雷達狀態 Email 通知
@@ -1536,6 +1546,20 @@
 - [ ] **背景寫入會佔用該 owner 的節流窗與去重基準（刻意取捨，須揭露）**：既有節流是「與該 owner 索引 ZSet 最大 score 的間隔 < 5 分鐘即不寫」，去重基準是 `trading-radar:snap:hash:{ownerId}`。背景重算寫入的快照同樣進索引、同樣更新該雜湊，故**使用者若在排程時間點後 5 分鐘內開頁，該次開頁可能不再產生新快照；內容與背景那筆相同時亦會被去重擋下**。這是 Task 260 之前不會發生的可觀察行為變化。判定為可接受：兩者都代表「這段時間內雷達判斷沒有新資訊」，快照少一筆不影響匯出內容（背景那筆已在當日區間內）。**不得**為此讓背景寫入繞過索引或不更新雜湊——那會使去重基準停在更舊的內容，語意更難推理。
 - [ ] **前端文案同步（兩處）**：(a) `TradingRadarView.vue` 排程卡說明現為「匯出內容為『當日已產生的雷達快照』；若當天還沒開過本頁，該次排程會略過不產檔。」，須改為揭露「每次排程產檔前會**先回補台股行情並重新計算**一次雷達，不需先開本頁；台股休市日不產檔」。(b) 頁首資訊框現為「按下『重新整理』會先回補一次台股行情再重算；頁面自動更新與其餘操作只讀取既有 PostgreSQL 與 Redis 資料。」，其中「只讀取既有資料」的陳述在排程路徑已不成立，須補述排程產檔亦會觸發回補。仍須維持「不送出任何 AI API 請求」的陳述。
 - [ ] **驗證**：單元測試至少覆蓋——當日零快照時排程仍產檔（推翻舊行為的回歸錨點）、當日已有快照時仍重算並 append（不是只在空窗才算）、背景重算走 owner-scoped 查詢且不觸碰 `CurrentUserContext`、回補失敗仍產檔、休市日不產檔且仍設 guard 且不呼叫回補、重算擲例外時回退用既有快照產檔、背景寫入不被去重擋下。部署後於台股休市日以 run-now 驗證重算產檔可用；下一個交易日確認 09:10 那一輪在使用者未開頁的情況下即產出檔案並上傳 Drive（`gdrive_last_status` 為成功、Drive 檔案 createdTime 落在 09:10）。
+
+**Requirement 48 追加（Task 273）—— 匯出檔補齊週線 MA5 與走勢圖指標選單的同一組值：**
+
+- [ ] **問題陳述（實測）**：`weeklyMa`（週線 MA5，Task 265）自產生起就同時存在於 `MarketSummary` 與 `StockDecision`，也顯示在畫面上（`TradingRadarView.vue:62` 大盤卡、`:112` 個股展開列），**但三分頁匯出從未包含它**——「大盤總覽」與「個股決策」的均線欄只有 MA20／MA60／MA240。使用者留存的檔案因此缺一條他在畫面上看得到的線。走勢圖指標選單（Task 262）的 MACD／RSI／乖離率／威廉指標與 J9／K3D2／RSV 亦同樣不在匯出檔內。
+- [ ] **「大盤總覽」與「個股決策」兩張分頁各新增 15 欄**：`週線MA5`（讀既有的 `weeklyMa`，**不新增計算**）＋ 上述 Requirement 43 追加的 14 個擴充指標 `J9`／`K3D2`／`RSV`／`EMA12`／`EMA26`／`DIF`／`MACD`／`OSC`／`RSI5`／`RSI10`／`BIAS10`／`BIAS20`／`BIAS10-BIAS20`／`W%R9`。**「快照索引」分頁一欄都不動**（它是每列一快照的彙總索引，塞逐檔指標沒有意義）。
+  ⚠️ **本追加之後，上方那條「`StockDecision` 全欄」的 AC 仍是近似描述**：`StockDecision` 共 38 個 component，補完 `weeklyMa` 後仍有 `kdHeat`／`timingState`／`etfPremiumPercentile` **三個刻意不匯出**（前二者是狀態標籤、其語意已由已匯出的 `reasons`／`risks`／`時機` 涵蓋，後者是分位輔助值）。記在此處是為了讓下一個人不必再查一次同樣的帳。
+- [ ] **欄位插在既有技術指標旁，不得追加到最後**：`週線MA5` 插在 `MA20` **之前**（週→月→季→年的自然順序），其餘 14 欄緊接在 `D` **之後**。追加到最後會讓 15 個數值欄落在四個 `LIST_LINES` 長文字欄（支持訊號／風險提醒／逆勢條件／逆勢風險）右側，實際開檔時遠在畫面外，等於沒加。欄數：大盤總覽 **20 → 35**、個股決策 **35 → 50**。
+- [ ] **`headers`／`columnFormats`／`rows` 三者長度與順序必須同步**：`ExportDoc.Table` 的 compact constructor 只在 runtime 才擲長度不符；Task 264 插欄時該清單落在三方合併的衝突標記之外、被靜默保留成舊的 31 欄版。新增 15 欄的 `Format` 一律 `NUM2`（與既有 MA／K／D 同）。
+- [ ] **舊快照缺欄位時留白，不得補 0**：匯出讀的是 Redis 既有快照，上線前寫入的快照沒有 `extendedIndicators`（`weeklyMa` 則自 Task 265 起即有）。既有 `num()` 對缺欄位回 `null` → Excel 為空白格、JSON 為 `null`，**此行為即為所需**，不得改成 `0`、`"-"` 或空字串。
+- [ ] **golden 零回歸基準須重新產生，且必須保留舊基準做插欄比對**：`backend/src/test/resources/golden/radar.xlsx`／`radar_empty.xlsx` 是 Task 271 用來釘住「重構未改動輸出」的基準，本追加**刻意改動輸出**，故必須重產。舊基準另存為 `radar_pre_t273.xlsx`／`radar_empty_pre_t273.xlsx`，並新增一條測試以**欄索引映射**逐格比對，斷言既有 35／20 欄的值、型別、`dataFormat`、粗體、字級全未變。**只重產不比對是不夠的**——那樣「順手把既有欄改壞」與「新增了欄」在測試上完全無法分辨。
+- [ ] **JSON 那一份自動跟隨，不改 renderer**：雙格式匯出（Requirement 55）的 JSON 以 `headers` 與該列 zip 成物件，新增欄自動成為新的 key（`週線MA5`／`J9`／…），**不需改 `JsonDocRenderer`**；數值一律 JSON number、缺值 `null`（本追加新增的 15 欄全部走 `num()`，不適用 Requirement 55 那條「`txt()` 欄位缺值為 `""`」的具名例外）。
+- [ ] **快照去重雜湊會因新欄位改變一次（可接受，須揭露）**：`trading-radar:snap:hash:{ownerId}` 存的是排除 `generatedAt` 後的內容雜湊。DTO 新增欄位會讓上線後第一筆快照必然與部署前的雜湊不同 → **不會被去重擋下**。影響僅為多一筆快照，不需特別處理，但**不得**為此清除既有雜湊 key。
+  ⚠️ **節流不在此豁免之列**：`write()` 的順序是「**先**節流、**後**去重」，`SNAPSHOT_MIN_INTERVAL` 預設 5 分鐘。部署後若該 owner 5 分鐘內已被開頁或 SSE 觸發過，下一次 `get()` 仍不落新快照——驗收時看到匯出檔新欄全空，要先排除節流再判定功能沒生效。
+- [ ] **驗證**：單元測試至少覆蓋——(a) 兩張分頁的表頭**逐字**等於預期的 35／50 欄清單（含順序）；(b) 新增欄的值取自快照對應欄位、格式為 `NUM2`；(c) 舊快照（無 `extendedIndicators`）匯出時新增欄為空白格／JSON `null` 且不擲例外；(d) 插欄前後既有欄逐格未變（對 `radar_pre_t273` 的映射比對）。部署後以實際排程產出的 `.xlsx` 與 `.json` 各開一次，確認兩張分頁都有這 15 欄、數值與同一筆快照的 API 回應逐位一致。
 
 ### Requirement 49: 資產交易紀錄（手動買賣流水帳）與 Excel 手動／每日排程匯出
 
