@@ -10,7 +10,9 @@ const api = axios.create({
 })
 
 api.interceptors.response.use(
-  res => res.data,
+  // Task 283：呼叫端傳 rawResponse:true 時回完整 response（需讀回應標頭，如 X-Dir-Export）；
+  // 與既有的 skipAuthRedirect／skipErrorToast 同型的 per-call 旗標，預設行為完全不變。
+  res => (res.config?.rawResponse ? res : res.data),
   err => {
     const status = err.response?.status
     const code = err.response?.data?.code
@@ -288,8 +290,11 @@ export const bffApi = {
     // Task 249：手動「重新整理」＝先同步回補台股行情再重算。
     // 外部抓取需時，全域 timeout 30s 不夠用，必須 per-call 覆寫（鏈路上界為 nginx /api/ 的 60s）
     refresh: () => api.post('/bff/trading-radar/refresh', null, { timeout: 45000 }),
+    // Task 283：改 POST（新增落檔／Drive 副作用）；rawResponse 供讀 X-Dir-Export 標頭。
+    // params 必須放第三個引數——axios post 簽章是 (url, data, config)，放第二個會變成 body 而 query 消失。
     exportExcel: (from, to) =>
-      api.get('/bff/trading-radar/export', { params: { from, to }, responseType: 'blob' }),
+      api.post('/bff/trading-radar/export', null,
+        { params: { from, to }, responseType: 'blob', rawResponse: true }),
     // 排程自動匯出到伺服器目錄（Requirement 48 追加 / Task 231）
     getExportTimes: () => api.get('/bff/trading-radar/export-schedule/times'),
     saveExportTimes: (times) => api.put('/bff/trading-radar/export-schedule/times', { times }),

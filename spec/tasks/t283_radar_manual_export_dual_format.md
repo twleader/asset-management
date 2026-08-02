@@ -78,7 +78,7 @@
 
 ### A. 後端 `TradingRadarExportService`（只抽出 doc、不加任何依賴）
 
-- [ ] 283.1 把既有 `export(String from, String to)`（`:38-51`）**拆成兩段**，新增 public 方法：
+- [x] 283.1 把既有 `export(String from, String to)`（`:38-51`）**拆成兩段**，新增 public 方法：
 
   ```java
   /**
@@ -96,12 +96,12 @@
 
   內容即現行 `export(...)` 去掉最後一行 render 的部分（`parseEpoch` 兩參數 ＋ `from > to` 檢查 ＋ `getEffectiveUserId()` ＋ null-owner 空 range 分支 ＋ `radarDoc(range, from, to)`）。
   ⚠️ **本服務的建構子一個依賴都不准加**——`TradingRadarDualFormatTest.java:49` 是 `new TradingRadarExportService(store, currentUserContext, new ExcelDocRenderer())`，加依賴即編譯失敗；`TradingRadarExportServiceTest` 的 `@InjectMocks` 對未宣告 `@Mock` 的欄位會塞 null，該檔 `:38-44` 明文寫「下方斷言一字不得改」。
-- [ ] 283.2 **移除 `export(String from, String to)`**（本任務後無 production 呼叫端）。
+- [x] 283.2 **移除 `export(String from, String to)`**（本任務後無 production 呼叫端）。
   ⚠️ **任務檔初版給的 grep 是錯的**（`exportService.export(` 只命中 controller 那一處，測試裡的變數名是 `service`）。正確掃描：`grep -ran "\.export(" backend/src`，實際共 **5 處測試呼叫端**必須一併改為 `new ExcelDocRenderer().render(service.manualDoc(a, b).doc())`（⚠️ **別漏 `.doc()`**——`manualDoc` 回的是 `ManualDoc` 不是 `ExportDoc`，`ExcelDocRenderer.render` 只吃後者）；其中 `TradingRadarExportServiceTest:105`／`:111` 是 `assertThatThrownBy`，只要改成 `service.manualDoc(a, b)`、不必 render——`TradingRadarExportServiceTest.java:73`／`:95`／`:105`／`:111`、`TradingRadarDualFormatTest.java:114`。**只改呼叫寫法，斷言一字不動。**
 
 ### B. 後端 `TradingRadarExportScheduleService`（新方法放這裡）
 
-- [ ] 283.3 新增 public record 與 public 方法：
+- [x] 283.3 新增 public record 與 public 方法：
 
   ```java
   /**
@@ -122,14 +122,14 @@
   - 目錄與 Drive 設定沿用同檔既有的 `resolveDir(currentSubpath(ownerId))` 與 `settingRepo.findByOwnerUserId(ownerId)` 的 `isGdriveEnabled()`／`getGdriveSubpath()`（同一個類別內，直接呼叫 private 方法即可）。
   - ⚠️ **落檔全程包 try/catch**，任何失敗只記 log 並回 `"failed"`，**不得讓下載失敗**。
   - ⚠️ **不得寫 `trading_radar_export_setting` 的四個狀態欄**（`last_run_at`／`last_run_status`／`gdrive_last_run_at`／`gdrive_last_status`）：那四欄的語意是「**排程**（含 run-now）最後一次的結果」，手動下載寫進去會讓排程卡顯示一個不是排程產生的落點，使用者無法分辨排程有沒有正常跑。故**不得呼叫** `recordStatus(...)`（`:439`）／`applyGdriveStatus(...)`（`:473`）／`syncGdrive(...)`（`:487`）**三支**。⚠️ `writeDailyExport` 回傳的正是 `DualResult`、接上 `applyGdriveStatus(...)` 太自然，這是最容易誤犯的一處。
-- [ ] 283.4 **查得零快照時只回下載、一律不落檔**，`dirOutcome` 回 `"skipped"`。
+- [x] 283.4 **查得零快照時只回下載、一律不落檔**，`dirOutcome` 回 `"skipped"`。
   ⚠️ 這條直接引用同檔 `:393-398` 的既有 javadoc 原文：「**當日查無快照時回 `null` 且不寫檔**……若照寫會在使用者目錄留下只有表頭的無用檔，並蓋掉同名前一版。」手動路徑若沒有同一道 guard，使用者挑到沒有快照的區間（上線前的日期、週末）按下按鈕，就會用**只有表頭的空檔覆寫掉該日排程產出的好檔**，而且 Drive 也跟著同步上去——那是資料損失，不是踩坑。
   判定順序：`ownerId == null` → `"skipped"`；`md.snapshotCount() == 0` → `"skipped"`（⚠️ **不得**在 `exportAndWriteManual` 內另呼叫 `snapshotStore.range(...)`——那是第二次查 Redis）；writer 回傳且 `jsonFile != null && xlsxFile != null` → `"ok"`；其餘（擲例外或任一份為 null）→ `"failed"`。
   ⚠️ **`"skipped"` 不含「未設定輸出目錄」**：`currentSubpath()`（`:428-433`）在無設定列時 `orElse(TradingRadarExportSetting.DEFAULT_SUBPATH)`，而 `DEFAULT_SUBPATH = "input"`（`model/TradingRadarExportSetting.java:36`）——**「未設定目錄」在本系統裡不是一個狀態**，排程照樣寫進 `{EXPORT_OUTPUT_DIR}/input`。若把它做成 skipped，同一位沒有設定列的使用者會變成「排程有落檔、手動說沒設定目錄」，正是本任務要修的那種不一致的新一版。
 
 ### C. 後端 controller
 
-- [ ] 283.5 `TradingRadarController` 的 `@GetMapping("/export")`（`:70`）**改為 `@PostMapping("/export")`**，改呼叫 `exportScheduleService.exportAndWriteManual(from, to)`：
+- [x] 283.5 `TradingRadarController` 的 `@GetMapping("/export")`（`:70`）**改為 `@PostMapping("/export")`**，改呼叫 `exportScheduleService.exportAndWriteManual(from, to)`：
   - query 參數 `from`／`to`、下載檔名（`交易雷達_{compact(from)}_{compact(to)}.xlsx`，`compact` 在 `:87`）、content-type、`contentLength`、`ContentDisposition` **一律不變**。
   - 新增回應標頭 `X-Dir-Export`，值取 `result.dirOutcome()`。⚠️ 必須是 ASCII（`ok`／`failed`／`skipped`）——標頭放中文路徑需額外編碼，落點資訊前端已可由設定卡得知。
   - **不保留 GET 版本**：本端點自本任務起有副作用（寫檔、上傳 Drive），不得掛在 `GET`；唯一呼叫端是本頁前端（經 BFF passthrough）。
@@ -139,20 +139,20 @@
 
 ### D. 前端
 
-- [ ] 283.6 `frontend/src/api/index.js` 的 response interceptor 目前是 `res => res.data`（`:12-13`），**api 方法拿到的就只有 blob、拿不到標頭**。加一個**向後相容的 per-call 旗標分支**（與同檔既有的 `skipAuthRedirect`（`:19`）／`skipErrorToast` 慣例同型）：
+- [x] 283.6 `frontend/src/api/index.js` 的 response interceptor 目前是 `res => res.data`（`:12-13`），**api 方法拿到的就只有 blob、拿不到標頭**。加一個**向後相容的 per-call 旗標分支**（與同檔既有的 `skipAuthRedirect`（`:19`）／`skipErrorToast` 慣例同型）：
 
   ```js
   res => (res.config?.rawResponse ? res : res.data),
   ```
 
   ⚠️ **只有本任務的呼叫端傳 `rawResponse: true`**，其餘所有呼叫端行為完全不變。**不得改動 interceptor 的預設行為**。
-- [ ] 283.7 `tradingRadar.exportExcel(from, to)`（`:291-292`）由 `api.get` 改為：
+- [x] 283.7 `tradingRadar.exportExcel(from, to)`（`:291-292`）由 `api.get` 改為：
   ```js
   exportExcel: (from, to) =>
     api.post('/bff/trading-radar/export', null, { params: { from, to }, responseType: 'blob', rawResponse: true }),
   ```
   ⚠️ axios 的 `post` 簽章是 `(url, data, config)`——**`params` 必須放第三個引數**，放進第二個會變成 request body 而 query 參數消失（後端 `@RequestParam` 缺參數 → 400）。
-- [ ] 283.8 `frontend/src/views/TradingRadarView.vue` 的 `onExport()`（**`:958`**，不是初版寫的 `:558`）改為取 `res.data` 當 blob、`res.headers['x-dir-export']` 當狀態（⚠️ axios 的 header key 一律小寫），下載成功（`saveBlob` 回 true）後依狀態顯示：
+- [x] 283.8 `frontend/src/views/TradingRadarView.vue` 的 `onExport()`（**`:958`**，不是初版寫的 `:558`）改為取 `res.data` 當 blob、`res.headers['x-dir-export']` 當狀態（⚠️ axios 的 header key 一律小寫），下載成功（`saveBlob` 回 true）後依狀態顯示：
   - `ok` → `ElMessage.success('匯出完成，並已同時寫入伺服器輸出目錄（JSON ＋ Excel）')`
   - `failed` → `ElMessage.warning('已下載 Excel；寫入伺服器輸出目錄失敗，請查後端 log')`
   - `skipped` → `ElMessage.success('匯出完成（該區間查無快照，未落檔）')`
@@ -162,7 +162,7 @@
 
 ### E. 測試
 
-- [ ] 283.9 在 `backend/src/test/java/com/steven/assets/service/` 新增一支測試類（檔名由實作者決定並在完成報告記錄；**刻意不在此綁死**——`spec-check.sh` 的 B5 會把「spec 提到但全樹不存在的測試類」判為 BLOCK）。沿用同目錄慣例（`@ExtendWith(MockitoExtension.class)` ＋ `@Mock` ＋ AssertJ ＋繁體中文方法名）。
+- [x] 283.9 在 `backend/src/test/java/com/steven/assets/service/` 新增一支測試類（檔名由實作者決定並在完成報告記錄；**刻意不在此綁死**——`spec-check.sh` 的 B5 會把「spec 提到但全樹不存在的測試類」判為 BLOCK）。沿用同目錄慣例（`@ExtendWith(MockitoExtension.class)` ＋ `@Mock` ＋ AssertJ ＋繁體中文方法名）。
   ⚠️ **本測試不能用 `@InjectMocks`**：`TradingRadarExportScheduleService` 是**顯式 13 參數建構子**（`:89-115`，順序 `timeRepo, settingRepo, exportService, snapshotStore, currentUserProvider, gdrive, excelDocRenderer, jsonDocRenderer, dualWriter, baseDir, radarService, priceQueryService, marketDataService`），其中 `baseDir` 是 `String`（`:98` 的 `@Value`）、`exportService` 又必須是**真實實例**。`@InjectMocks` 會把 `baseDir` 塞 null → `resolveDir`（`:519`）第一行 `Path.of(baseDir)` NPE → 被落檔 try/catch 吞成 `"failed"`，`ok` 那條會以看不出原因的方式紅燈。故直接呼叫 13 參數建構子：`baseDir` 傳 `@TempDir Path` 的字串，`currentUserProvider` 用 `@Mock ObjectProvider<CurrentUserContext>` ＋ `when(...getObject()).thenReturn(ctxMock)`，`ctxMock` 與真實 `TradingRadarExportService` 共用同一個。
   涵蓋：
   - **只查一次 Redis（Requirement 55 的機械判準，必測）**：`verify(storeMock, times(1)).range(anyLong(), anyLong(), anyLong())`。
@@ -177,10 +177,10 @@
 
 ### 明確不做的事
 
-- [ ] 283.10 **不動 `DualFormatExportWriter`**（本機兩份都成功才上傳 Drive 的既有規則不變）、**不動排程與 run-now 的既有行為**（只在 `TradingRadarExportScheduleService` 新增方法）、**不動 BFF 與 `SecurityConfig`**。
-- [ ] 283.11 **不動 `trading_radar_export_setting` 的 schema 與四個狀態欄的語意**；零 Liquibase changeset。
-- [ ] 283.12 **不新增 `@Scheduled`**，故 `SchedulePublicBffController.JOBS`（`:100-101`）不新增項目；既有「交易雷達匯出」那筆 description 描述的是排程觸發，本任務只改手動入口，該段文字仍為真、**不需改寫**。
-- [ ] 283.13 **不改 `frontend/src/utils/dualExportMessage.js`**（t282 建立、九頁 run-now 共用，該檔沒有 skipped 概念）；本任務的訊息另寫在本頁。
+- [x] 283.10 **不動 `DualFormatExportWriter`**（本機兩份都成功才上傳 Drive 的既有規則不變）、**不動排程與 run-now 的既有行為**（只在 `TradingRadarExportScheduleService` 新增方法）、**不動 BFF 與 `SecurityConfig`**。
+- [x] 283.11 **不動 `trading_radar_export_setting` 的 schema 與四個狀態欄的語意**；零 Liquibase changeset。
+- [x] 283.12 **不新增 `@Scheduled`**，故 `SchedulePublicBffController.JOBS`（`:100-101`）不新增項目；既有「交易雷達匯出」那筆 description 描述的是排程觸發，本任務只改手動入口，該段文字仍為真、**不需改寫**。
+- [x] 283.13 **不改 `frontend/src/utils/dualExportMessage.js`**（t282 建立、九頁 run-now 共用，該檔沒有 skipped 概念）；本任務的訊息另寫在本頁。
 
 ## 驗證
 
@@ -257,4 +257,32 @@ docker exec asset-business-services sh -c 'ls -l --time-style=+%H:%M:%S /home/st
 
 ## 完成報告
 
-（實作者做完後回填：實際改了哪些檔、驗證輸出、與原計畫的偏差及原因。）
+### 實際改動
+
+| 檔案 | 內容 |
+|---|---|
+| `backend/.../service/TradingRadarExportService.java` | `export(String,String)` 拆為 public `manualDoc(from,to)` 回新的巢狀 record `ManualDoc(ExportDoc doc, int snapshotCount)`（`snapshotCount` 取 `range.snapshots().size()`）；**建構子零新依賴** |
+| `backend/.../service/TradingRadarExportScheduleService.java` | 新增 record `ManualExportResult(byte[] xlsx, String dirOutcome)` 與 `exportAndWriteManual(from,to)`：一次 `manualDoc` → render 下載 xlsx → guard（null owner／零快照 → `skipped`）→ render json（失敗傳 null）→ `dualWriter.write(...)`，全程 try/catch 不影響下載；不呼叫 `recordStatus`／`applyGdriveStatus`／`syncGdrive` |
+| `backend/.../controller/TradingRadarController.java` | `@GetMapping("/export")` → `@PostMapping`，改呼叫 `exportScheduleService.exportAndWriteManual(...)`，加回應標頭 `X-Dir-Export`；移除已成死欄位的 `TradingRadarExportService` 注入與 import |
+| `frontend/src/api/index.js` | interceptor 加 per-call 旗標 `res => (res.config?.rawResponse ? res : res.data)`；`tradingRadar.exportExcel` 改 `api.post(url, null, {params, responseType:'blob', rawResponse:true})` |
+| `frontend/src/views/TradingRadarView.vue` | `onExport` 改收完整 response、依 `x-dir-export` 顯示三種訊息（`failed` 走 warning）；匯出對話框「存檔位置」補述伺服器目錄與 Drive 兩個落點 |
+| `backend/src/test/.../TradingRadarExportServiceTest.java`／`export/TradingRadarDualFormatTest.java` | 5 處呼叫端由 `service.export(a,b)` 改為 `render(service.manualDoc(a,b).doc())`（`assertThatThrownBy` 兩處只改方法名）；**斷言一字未動** |
+| `backend/src/test/.../RadarManualExportDualFormatTest.java` | 新增，8 個 `@Test` |
+
+### 驗證輸出
+
+- `mvn -f backend/pom.xml test`：**Tests run: 533, Failures: 0, Errors: 0 — BUILD SUCCESS**（改動前 525，新增 8）。
+- 前端 `npm run build`：`✓ built in 4.38s`。
+- `spec-check.sh`：BLOCK 0 / CHECK 0。對抗式 spec 審查 **3 輪**（2＋3＋0 critical、5＋7＋4 major 全數處理）。
+- `arch-auditor`：critical 0／major 0／minor 1（新增的 record javadoc 插到 `runNow()` 的 javadoc 之後、把它變成孤兒），已修。
+  - 該 auditor 另實測確認：全路徑只有一次 `store.range`（`exportAndWriteManual` 內零呼叫）、guard 在 `dualWriter.write` 之前、`settingRepo.save` 於本路徑零呼叫、`rawResponse` 全前端只有三行且未影響其餘 30+ 呼叫端、BFF route 無 method predicate 故 POST 自動穿透。
+
+### 與原計畫的偏差
+
+1. **測試檔名**：任務檔刻意不綁死（避免 `spec-check.sh` 的 B5 誤判），實際命名為 `RadarManualExportDualFormatTest`，放在 `backend/src/test/java/com/steven/assets/service/`（而非 `service/export/`）——受測類別 `TradingRadarExportScheduleService` 在 `service` 套件，且測試需存取同套件的型別。
+2. **多加一條測試**（原計畫六條，實際八條）：另加「`ownerId == null` → skipped」（第 3 輪 M3 要求）與「格式錯誤／`from > to` 仍擲 `IllegalArgumentException`（→400）」，後者釘住「`to` 的日期解析必須排在 `manualDoc` 之後」這條約束。
+3. **json render 失敗的測試用匿名子類覆寫 `JsonDocRenderer.render`**，而非 mock——該欄位在建構子注入且測試需要真實 `ExcelDocRenderer`，混用較亂。
+
+### 尚未執行
+
+- **部署與實機驗證**（驗證段第 3–5 步）：image rebuild ＋ container recreate、`POST` 端點自測（⚠️ 用 `GET` 打會得到 405，那不是 bug）、畫面實測（下載體驗不變、三種訊息、`data/input` 同時出現兩份且 mtime 相同、Drive 兩份、按取消不顯示訊息、排程狀態欄未被改動）——待使用者指示。依共用 stack 規則，merge 進 main 後應從 main 的 worktree 重建。
