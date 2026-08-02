@@ -144,14 +144,29 @@ SSE 廣播與交易雷達評估。多產一份 Excel 會增加該執行緒的工
 
 ### 272.3 前端文案
 
-- [x] 272.3 兩個頁面的設定卡檔名說明改為明示兩份，run-now 提示顯示兩個落點：
+- [ ] 272.3 兩個頁面的設定卡檔名說明改為明示兩份，run-now 提示顯示兩個落點：
   - `frontend/src/views/StockAlertView.vue`（警示觸發匯出卡）
   - `frontend/src/views/CrawlerDataView.vue`（爬蟲輸出路徑卡）
+
+  > **本項只完成了一半，勾是假的（2026-08-02 實測）。** 兩頁的設定卡**檔名說明**確實都改成兩份了；
+  > 但「run-now 提示顯示兩個落點」只有爬蟲頁成立，而**那一半實際是 t280 落地的**
+  > （`CrawlerDataView.vue:534-562` 的 `showManualResult`）——本任務落地時爬蟲頁根本還沒有手動觸發入口。
+  > `StockAlertView.vue:688` 至今仍是 `ElMessage.success(\`${r.message}：${r.path}（${r.size} bytes）\`)`，
+  > 只列 json 那一份。**文案那一半不需要重做**，未完成的只有 `StockAlertView` 的結果提示，
+  > 由 **t282** 承接（該頁的 `path` 是 json、`xlsxPath` 才是 xlsx，對映與其餘八頁相反）。
+
   **實作前先 grep 找出實際位置**：
   ```bash
   grep -rn 'alert_triggers\|public_info\|\.json' frontend/src/views/StockAlertView.vue frontend/src/views/CrawlerDataView.vue
   ```
-- [x] 272.3.1 **全前端最後一次巡檢**（t270／t271 已各自改完自己那幾頁，本項只是收尾確認）：
+- [ ] 272.3.1 **全前端最後一次巡檢**（t270／t271 已各自改完自己那幾頁，本項只是收尾確認）：
+
+  > **這一項的勾是假的，而且它是四個假勾裡最該負責的一個（2026-08-02 實測）。** 它自稱「全前端
+  > 最後一次巡檢」，卻只用 `grep '\.xlsx\|\.json'` 掃**文案**，完全沒有涵蓋 run-now 的**結果提示**——
+  > 而後者根本不含 `.xlsx`／`.json` 字面（它印的是 response 變數 `${r.path}`），
+  > **這個 grep 判準在設計上就抓不到它**。九頁的結果提示因此一路漏到使用者回報。
+  > 由 **t282** 承接，並改用「舊寫法歸零 ＋ 共用模組接上九頁」的判準（見 t282 驗證段）。
+
   ```bash
   grep -ran '\.xlsx\|\.json' frontend/src/views/*.vue
   ```
@@ -329,7 +344,9 @@ docker exec asset-business-services sh -c 'cd /home/steven/input && n=0; for f i
 
 ## 完成報告
 
-**狀態：已完成。Requirement 55 全部落地——十個自動匯出點皆同時產出 `.json` 與 `.xlsx`。**
+**狀態：後端與文案已完成，Requirement 55 的產檔部分全部落地——十個自動匯出點皆同時產出 `.json` 與 `.xlsx`。
+但 272.3 的「run-now 提示顯示兩個落點」在 `StockAlertView` 未實作、272.3.1 的「全前端最後一次巡檢」
+用了抓不到結果提示的判準（2026-08-02 由使用者回報「只匯出 excel」時發現，九頁皆漏，由 t282 承接）。**
 
 | 檔案 | 改動 |
 |---|---|

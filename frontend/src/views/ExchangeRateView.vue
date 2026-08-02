@@ -238,6 +238,7 @@ import { TitleComponent, TooltipComponent, LegendComponent, GridComponent, DataZ
 import VChart from 'vue-echarts'
 import { bffApi, apiErrorMessage } from '@/api'
 import { showGdriveSelfCheckWarning } from '@/utils/gdriveSelfCheck'
+import { showDualExportResult } from '@/utils/dualExportMessage'
 import { useAuthStore } from '@/stores/authStore'
 import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
@@ -547,7 +548,8 @@ async function handleRunNow() {
   runningNow.value = true
   try {
     const r = await bffApi.exchangeRate.runExportNow()
-    ElMessage.success(`已匯出到：${r.path}`)
+    // path 依契約一律指 xlsx、jsonPath 指 json（Requirement 55 / Task 282）
+    showDualExportResult({ jsonPath: r.jsonPath, xlsxPath: r.path, gdriveStatus: r.gdriveStatus })
   } catch (e) {
     ElMessage.error(apiErrorMessage(e, '立即匯出失敗，請確認目錄與權限'))
   } finally {

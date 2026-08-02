@@ -5702,9 +5702,71 @@ DualResult write(Long ownerUserId, Path dir, String baseName,
   - **第 9、10 項**（警示觸發、爬蟲公開資訊；既有欄位本來就指向 `.json`，那是它們的對外契約）
     → 既有欄位**維持指向 `.json`**，改為另加 `xlsxPath`／`xlsxSizeBytes`／`xlsxGdrivePath`。**各頁的前端文案由該頁所屬的
   任務檔負責**，不集中到收尾任務——集中會讓中間狀態的 UI 說謊。
+
 - BFF 對這些端點多為 `Map<String,Object>` passthrough，新欄位自動透傳、**無需改 BFF DTO**；
   唯一要動 BFF 的是交易日曆（`TradingCalendarBffController.export` 的 `@RequestParam format` 與
-  `.queryParam("format", ...)` 移除）。
+  `.queryParam("format", ...)` 移除；**t271 已完成**）。
+
+#### run-now 結果訊息的共用組法（`frontend/src/utils/dualExportMessage.js`，Task 282）
+
+t269–t272 只落實了設定卡的**檔名說明文字**，九頁的 run-now **結果提示**全部漏做（實測只有爬蟲頁做對，
+而那一頁的分支是 t280 落地的），使用者因而在 2026-08-02 回報「應該匯出 json 和 excel，結果只匯出
+excel」——檔案其實兩份都在。
+
+**爬蟲頁不在這九頁之內，且它的黑名單判準（`gd.includes('失敗')||gd.includes('跳過')`）在該頁是正確的**：
+它走 `external-materials-service` 的 `NewsPoller.syncToGdrive`，狀態語彙只有 `成功：`／`跳過：`／`失敗：`
+三種（逾時被 catch 成 `失敗：rclone …逾時（45 秒）`），黑名單窮盡。這九頁走 backend 的
+`GdriveOutputSupport`，多出 `逾時` 與 `暫時未上傳`，才不能用黑名單——Requirement 63 與 Requirement 55
+在這一點上沒有衝突，差別是兩邊的狀態語彙不同。修法不是逐頁補一句 template literal，而是抽一支共用函式，理由與後端把落檔收斂進
+`DualFormatExportWriter` 完全相同：**九份各寫一次，措辭與判準必然分歧**。
+
+**本節只描述前端訊息組法，不含任何 backend／BFF 變更**——九支 run-now 的回應早已帶著兩個路徑欄位
+與 `gdriveStatus`，九支 BFF 亦皆為 passthrough 或 gateway rewrite（上一條 bullet 的交易日曆 BFF
+變更屬 t271，已完成，與 Task 282 無關）。
+
+```js
+showDualExportResult({ jsonPath, xlsxPath, gdriveStatus, prefix })
+```
+
+- **輸入是兩個具名落點，不是整包 response**。九頁的欄位名不一致（第 1～8 項 `path`＝xlsx／`jsonPath`＝json，
+  第 9 項警示觸發 `path`＝json／`xlsxPath`＝xlsx），由呼叫端各自對映；**模組內不得硬編欄位名**，
+  否則第 9 項會把兩份說反——而說反是**靜默**的（兩個檔案都在，只有文字錯）。
+- **五分支，順序即判斷順序**（先判本機落點、再判 Drive）：
+
+  | # | 判準 | 型別 |
+  |---|---|---|
+  | 1 | 兩個落點皆空 | `warning`「本輪未產出任何檔案」 |
+  | 2 | 恰一個為空 | `warning`，列出成功那一份並明講缺哪一種格式 |
+  | 3 | 兩份都有、`gdriveStatus` 非「兩半皆成功」且含「失敗」／「略過」／「跳過」 | `warning` ＋狀態字串 |
+  | 4 | 兩份都有、`gdriveStatus` 非「兩半皆成功」的其餘情形（逾時／暫時未上傳） | `info` ＋狀態字串 |
+  | 5 | 其餘（`gdriveStatus` 為空＝未啟用，或兩半皆成功） | `success`，兩個落點都列出；`gdriveStatus` 非空時一併附上 |
+
+- **Drive 的主判準是「兩半是否皆為成功」的白名單，不是列舉關鍵字的黑名單。** 單邊狀態有五種取值
+  （`GdriveOutputSupport`：`成功：…`／`逾時（N 秒）：Drive 端可能已完成…`／`暫時未上傳：Drive API 達每分鐘查詢上限…`／
+  `失敗：…`／`跳過：…`），另有 `DualFormatExportWriter:101` 的 `略過：本機未兩份皆成功，不上傳`。
+  以「含失敗或跳過」當黑名單，**逾時**與**暫時未上傳**會落進綠色 success——那正是本任務要修的同一類說謊。
+  判準：
+
+  ```js
+  const bothOk = /^xlsx 成功：/.test(gd) && gd.includes('／json 成功：')
+  ```
+
+  合併格式 `xlsx <狀態>／json <狀態>` 在三個產生點一致（`DualFormatExportWriter:98-99`、
+  `StockAlertTriggerExportService:553`、`TradingCalendarExportScheduleService:269-270`），
+  **警示觸發頁雖然 json 是主格式，合併字串仍是 `xlsx …／json …`**。
+  **不得簡化成 `gd.includes('成功')`**：「xlsx 失敗、json 成功」時為真，最常見的部分失敗會顯示成綠色。
+  **截斷不破壞此判準**：兩半各自從尾端截至 250 字元後才合併（`DualFormatExportWriter:40-41,170-172`），
+  `成功：` 前綴必存活；反之以尾端特徵（如 `bytes）`）判斷的寫法會在長路徑時失效。
+- **第 3 與第 4 分開，是因為兩者要求使用者做的事不同**：`失敗`／`跳過`／`略過` 是確定沒上去（要人介入）；
+  `逾時` 的既有措辭明寫「Drive 端可能已完成，請於下一輪確認」、`暫時未上傳` 明寫「下一輪排程會自動重試」，
+  塗成黃色警告等於要使用者為系統會自己處理的事採取行動。**分支 3／4 加上分支 5 末句的「非空時一併附上」，
+  三者合起來才完整承接 `StockAlertView` 既有的 `ElMessage.info(gdriveStatus)`**——該句是全庫唯一在
+  Drive **成功**時也顯示落點的地方，移除後若成功分支不附狀態字串，該頁的 Drive 落點會在畫面上消失。
+- **分支 1 走 `warning` 不是 `error`**：呼叫端能走到這裡代表 HTTP 沒失敗，真正的例外由各頁既有的
+  `catch` 處理；此處只負責「跑完了但什麼都沒產出」這一格。
+- `prefix` 供呼叫端前綴既有的額外資訊（警示觸發頁的 `r.message`），預設空字串。
+- 交易日曆頁除了 toast，`export-status` 那一列也顯示落點，**同樣要列兩份**（它是留在畫面上的那一份，
+  比一閃即逝的 toast 更常被當成事實）。
 
 ### 刻意不做
 
