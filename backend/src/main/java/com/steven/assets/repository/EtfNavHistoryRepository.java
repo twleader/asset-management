@@ -28,4 +28,13 @@ public interface EtfNavHistoryRepository extends JpaRepository<EtfNavHistory, Lo
     List<BigDecimal> findRecentPremiumPct(
             @Param("code") String code, @Param("market") String market,
             org.springframework.data.domain.Pageable pageable);
+
+    /**
+     * 該標的的折溢價全序列（升序），供 Task 273 的回測逐日對齊。
+     *
+     * <p><b>回測期間結構性缺值</b>：本表建於 2026-07-19 且不回填，實測僅 11 個交易日／19 檔，
+     * 十年 2400+ 個交易日中約 0.5% 有值。回測必須逐標的揭露「實際有值的天數」，
+     * 不得讓缺值靜默變成「折溢價否決永不成立」而被誤讀為 production 行為。</p>
+     */
+    List<EtfNavHistory> findByStockCodeAndMarketOrderByNavDateAsc(String stockCode, String market);
 }

@@ -2,8 +2,12 @@
 
 **對應 Requirements:** **Requirement 46**（台股個股基本面資料每日抓取與歷史落地——本任務為其唯一實作任務，接手自被取代的 t222）；Requirement 43 修訂（今日交易雷達——個股評分須納入公司體質；本任務只建立資料管道，不改評分）
 **前置任務:** 無
-**後續任務:** t267（把本任務落地的資料接成評分因子）
-**Liquibase changeset:** `v1.83.0-stock-fundamental.sql`（三張新表 ＋ `crawler_schedule` 的 `fundamental` 冪等 seed ＋ `stock.security_type` 欄位；版號須於實作前重新確認未被其他 worktree 佔用）
+**後續任務:** t267（把本任務落地的資料接成評分因子）、t278（回補 `stock_valuation_daily` 的歷史 PE／PB／殖利率）
+**Liquibase changeset:** `v1.87.0-stock-fundamental.sql`（三張新表 ＋ `crawler_schedule` 的 `fundamental` 冪等 seed ＋ `stock.security_type` 欄位；版號須於實作前重新確認未被其他 worktree 佔用）
+
+> **⚠ 版號已避讓（2026-08-01）：本檔原記載的 `v1.83.0-stock-fundamental.sql` 已撞號。** `v1.83.0-radar-notification-rule-version.sql`（Task 264）與 `v1.84.0-asset-transaction-fee-tax.sql`（Task 268）皆已在 main 上，`v1.85.0` 由 t275（`treasury_yield_daily`）預留、`v1.86.0` 由 t277（雙軌通知欄位）預留，故本任務改用 `v1.87.0`。**實作前仍須以 `ls backend/src/main/resources/db/changelog/changes/ | sort -V | tail` 重新確認**——本專案有 30+ 個 worktree 並行推進 main，版號會被其他分支先佔走。
+>
+> **避讓時的硬約束：改 changeset 檔名或內容（含 `--comment` 註解）都會改變 Liquibase 的 checksum。** 註解也計入 checksum，改註解會造成 `ValidationFailed` 而讓 business-services 進入 crash loop。做編號避讓的 `sed` 必須排除 `db/changelog/`。
 
 > **本任務取代 `spec/tasks/t222_stock_fundamental_ingestion.md`**（該檔從未實作，且其後續 t224 綁在 t223 的五組框架上；本任務改為銜接 t264 的扁平權重）。
 

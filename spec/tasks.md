@@ -28,7 +28,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 
 ---
 
-## 任務索引（Task 1–220，共 228 個區段）
+## 任務索引（Task 1–228、264–267、273–278）
 
 | Task | 標題 | 位置 |
 |---|---|---|
@@ -272,8 +272,14 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 265 | 還原序列補齊股票分割，並新增週線 MA5（Requirement 43；**t264 的前置任務**，取代 t225）**已通過對抗式審查（3 輪）並完成實作** | [tasks/t265_split_adjusted_series.md](tasks/t265_split_adjusted_series.md) |
 | 266 | 台股個股基本面資料每日抓取與歷史落地（取代 t222；只建資料管道、不改評分）**⚠ 尚未送審** | [tasks/t266_stock_fundamental_ingestion.md](tasks/t266_stock_fundamental_ingestion.md) |
 | 267 | 個股基本面因子接進交易雷達（`TW_RULES_V10`，取代 t224；前置 t266 ＋ t264）**⚠ 尚未送審** | [tasks/t267_fundamental_factor_wiring.md](tasks/t267_fundamental_factor_wiring.md) |
+| 273 | 交易雷達規則回測框架：量測各規則述詞在 5／20／60／240 交易日的前瞻報酬分布 vs 同標的同期間基準（Requirement 56；只建工具、不改行為，為 t274／t275／t276／t277 的門檻依據）**⚠ 尚未送審** | [tasks/t273_radar_rule_backtest_framework.md](tasks/t273_radar_rule_backtest_framework.md) |
+| 274 | 季線乖離改以標的自身波動正規化，修正固定百分比門檻的結構性失效（Requirement 57；前置 t273）**⚠ 尚未送審** | [tasks/t274_volatility_normalized_thresholds.md](tasks/t274_volatility_normalized_thresholds.md) |
+| 275 | 美債殖利率曲線落地 `treasury_yield_daily` 與債券 ETF 的利率因子（Requirement 58；前置 t273）**⚠ 尚未送審** | [tasks/t275_treasury_yield_curve_and_bond_factor.md](tasks/t275_treasury_yield_curve_and_bond_factor.md) |
+| 276 | 把已落地但未使用的技術指標（MACD／RSI／W%R／J9／BIAS 差值）與成交量納入評分（Requirement 59；前置 t273）**⚠ 尚未送審** | [tasks/t276_unused_indicators_and_volume.md](tasks/t276_unused_indicators_and_volume.md) |
+| 277 | 交易雷達的短線與中長線雙軌建議（Requirement 60；前置 t273 ＋ t274 ＋ t276；推翻 t265「MA5 不進評分」的前提） **⚠ 尚未送審** | [tasks/t277_dual_horizon_recommendations.md](tasks/t277_dual_horizon_recommendations.md) |
+| 278 | 台股歷史估值回補，推翻 Requirement 46 的「預設不實作」（Requirement 61；前置 t266） **⚠ 尚未送審** | [tasks/t278_twse_valuation_history_backfill.md](tasks/t278_twse_valuation_history_backfill.md) |
 
-> **註：本索引表僅列至 228 與 264–267；Task 229–263 未登錄於本表，以 `spec/tasks/tNNN_*.md` 檔案本身為準。**
+> **註：本索引表僅列至 228、264–267 與 273–278；Task 229–263、268–272 未登錄於本表，以 `spec/tasks/tNNN_*.md` 檔案本身為準。**（269–272 為 origin/main 上的「雙格式匯出」四份任務，同樣未登錄。）
 
 > **Task 222–225 已全部被 t264–t267 取代（見上表），保留僅作為決策記錄，一律不得依其實作。**
 >
