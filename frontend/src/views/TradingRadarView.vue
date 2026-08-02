@@ -566,6 +566,7 @@ import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
 import { bffApi } from '@/api'
 import { showGdriveSelfCheckWarning } from '@/utils/gdriveSelfCheck'
+import { showDualExportResult } from '@/utils/dualExportMessage'
 import { useAuthStore } from '@/stores/authStore'
 import { useRouter } from 'vue-router'
 import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
@@ -1099,10 +1100,16 @@ async function runExportNow() {
   runningNow.value = true
   try {
     const res = await bffApi.tradingRadar.runExportNow()
-    if (res?.path) {
-      ElMessage.success(`已寫入 ${res.path}（${Math.round((res.size || 0) / 1024)} KB）`)
+    // 「當日尚無快照」是業務語意上的「沒東西可匯出」，與產檔失敗不同，故仍單獨處理。
+    // 判準必須比對訊息內容而非「path 為空」：兩份 render 都失敗時後端一樣回 message="匯出完成"，
+    // 用 path 判會把「產檔壞了」講成「今天本來就沒東西」，使用者不會來報修。
+    // 用 includes 而非 ===：另有 NO_SNAPSHOT_STATUS + "（重算失敗且當日無既有快照）" 的降級版本。
+    if (res?.message?.includes('當日尚無快照')) {
+      ElMessage.warning(res.message)
     } else {
-      ElMessage.warning(res?.message || '當日尚無快照，未產檔')
+      // path 依契約一律指 xlsx、jsonPath 指 json（Requirement 55 / Task 282）。
+      // 不再顯示 KB：兩份大小差很多，只印一個會誤導；落點才是 run-now 要驗證的東西。
+      showDualExportResult({ jsonPath: res?.jsonPath, xlsxPath: res?.path, gdriveStatus: res?.gdriveStatus })
     }
     loadExportSchedule().catch(() => {})   // 刷新上次執行資訊
   } catch {

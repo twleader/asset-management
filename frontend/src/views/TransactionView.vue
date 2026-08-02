@@ -408,6 +408,7 @@ import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
 import { bffApi } from '@/api'
 import { showGdriveSelfCheckWarning } from '@/utils/gdriveSelfCheck'
+import { showDualExportResult } from '@/utils/dualExportMessage'
 import { useAuthStore } from '@/stores/authStore'
 import { todayLocal } from '@/utils/localDate'
 
@@ -828,7 +829,8 @@ async function handleRunNow(idx) {
   s._running = true
   try {
     const r = await bffApi.transaction.runExportNow(s.id)
-    ElMessage.success(`已匯出到：${r.path}`)
+    // path 依契約一律指 xlsx、jsonPath 指 json（Requirement 55 / Task 282）
+    showDualExportResult({ jsonPath: r.jsonPath, xlsxPath: r.path, gdriveStatus: r.gdriveStatus })
   } catch (e) {
     ElMessage.error(e?.response?.data?.detail || '立即匯出失敗，請確認目錄與權限')
   } finally {

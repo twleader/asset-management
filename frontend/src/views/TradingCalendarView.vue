@@ -156,9 +156,18 @@
         匯出該年度整年交易日曆（台／美／英三市每日交易日 ＋ 各市場國定假日）為
         <code>交易日曆_{{ exportDialog.year }}.json</code> 與 <code>交易日曆_{{ exportDialog.year }}.xlsx</code> <strong>兩份</strong>（主檔名相同、只差副檔名）。
       </div>
+      <!--
+        兩個落點都列出（Requirement 55 / Task 282）：這一列留在畫面上，比一閃即逝的 toast
+        更常被當成事實，只列一份等於把「只匯出 excel」那個誤解釘在畫面上。
+        不再顯示 KB——sizeBytes 只有 xlsx 那一份，配上兩個落點會變成「兩個檔案、一個大小」。
+      -->
       <div v-if="exportDialog.lastResult" class="export-status">
-        ✅ 已匯出：<code>{{ exportDialog.lastResult.path }}</code>
-        （{{ exportDialog.lastResult.totalDays }} 天，{{ (exportDialog.lastResult.sizeBytes / 1024).toFixed(1) }} KB）
+        ✅ 已匯出：
+        <!-- 兩個落點各自 v-if：任一份 render 失敗時該欄為 null，裸印會變成「已匯出： 與 x.json」 -->
+        <code v-if="exportDialog.lastResult.path">{{ exportDialog.lastResult.path }}</code>
+        <template v-if="exportDialog.lastResult.path && exportDialog.lastResult.jsonPath"> 與 </template>
+        <code v-if="exportDialog.lastResult.jsonPath">{{ exportDialog.lastResult.jsonPath }}</code>
+        （{{ exportDialog.lastResult.totalDays }} 天）
       </div>
 
       <!-- 每日排程自動匯出（Task 185）：共用上方格式／資料夾 -->
@@ -277,6 +286,7 @@
 <script setup>
 import { bffApi } from '@/api'
 import { showGdriveSelfCheckWarning } from '@/utils/gdriveSelfCheck'
+import { showDualExportResult } from '@/utils/dualExportMessage'
 import { useAuthStore } from '@/stores/authStore'
 import dayjs from 'dayjs'
 import { ElMessage } from 'element-plus'
@@ -622,7 +632,8 @@ async function doExport() {
       exportDialog.gdriveLastStatus = r.gdriveStatus
       exportDialog.gdriveLastRunAt = dayjs().format('YYYY-MM-DD HH:mm:ss')
     }
-    ElMessage.success(`已匯出到：${r.path}`)
+    // path 依契約一律指 xlsx、jsonPath 指 json（Requirement 55 / Task 282）
+    showDualExportResult({ jsonPath: r.jsonPath, xlsxPath: r.path, gdriveStatus: r.gdriveStatus })
   } catch (e) {
     ElMessage.error('匯出失敗，請確認年度、格式與目錄權限')
   } finally {

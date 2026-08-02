@@ -482,6 +482,7 @@ import dayjs from 'dayjs'
 import { bffApi, apiErrorMessage } from '@/api/index.js'
 import { useAuthStore } from '@/stores/authStore'
 import { showGdriveSelfCheckWarning } from '@/utils/gdriveSelfCheck'
+import { showDualExportResult } from '@/utils/dualExportMessage'
 import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
 import TaiwanMap from '@/components/TaiwanMap.vue'
 import UsFlag from '@/components/UsFlag.vue'
@@ -685,8 +686,13 @@ async function runNowExport() {
   runningExport.value = true
   try {
     const r = await bffApi.stockAlert.runNowExport()
-    ElMessage.success(`${r.message}：${r.path}（${r.size} bytes）`)
-    if (r.gdriveStatus) ElMessage.info(`Google Drive：${r.gdriveStatus}`)
+    // **本頁的對映與其餘八頁相反**：path 是 .json（alert_triggers_*.json 是本頁的對外契約），
+    // xlsxPath 才是 .xlsx。照抄其他頁會把兩份說反，而說反是靜默的——兩個檔案都在，只有文字錯。
+    // 原本另一行的 ElMessage.info(gdriveStatus) 併入共用邏輯：分支 3／4 承接 Drive 的非成功狀態、
+    // 分支 5 在 gdriveStatus 非空時附上，成功時的 Drive 落點不會因此消失。
+    showDualExportResult({
+      jsonPath: r.path, xlsxPath: r.xlsxPath, gdriveStatus: r.gdriveStatus, prefix: r.message
+    })
     await loadExportSetting()
   } catch (e) {
     ElMessage.error(apiErrorMessage(e, '立即匯出失敗'))
