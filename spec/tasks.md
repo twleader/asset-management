@@ -288,8 +288,9 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 282 | 九個匯出頁的手動匯出結果提示改為報出 JSON 與 Excel 兩個落點（t270.3／t271.5／t272.3／t272.3.1 漏做，使用者回報「只匯出 excel」；Requirement 55） | [tasks/t282_dual_export_runnow_message.md](tasks/t282_dual_export_runnow_message.md) |
 | 283 | 交易雷達頁首「匯出 Excel」在下載之外，同時落一份 JSON ＋ Excel 到伺服器輸出目錄（Requirement 48／55） | [tasks/t283_radar_manual_export_dual_format.md](tasks/t283_radar_manual_export_dual_format.md) |
 | 284 | 交易雷達個股收合列補顯示週線 MA5，並守住 Excel／JSON 匯出既有 MA5 欄（Requirement 43／48） | [tasks/t284_trading_radar_ma5_summary.md](tasks/t284_trading_radar_ma5_summary.md) |
+| 287 | 股市大盤排程匯出支援多時間點與多指數 checkbox（Requirement 45） | [tasks/t287_index_export_multi_time_market.md](tasks/t287_index_export_multi_time_market.md) |
 
-> **註：本索引表僅列至 228、264–267、269–279 與 280–284；Task 229–263 與 268 未登錄於本表，以 `spec/tasks/tNNN_*.md` 檔案本身為準。**
+> **註：本索引表僅列至 228、264–267、269–279 與 280–287；Task 229–263 與 268 未登錄於本表，以 `spec/tasks/tNNN_*.md` 檔案本身為準。**
 
 > **Task 222–225 已全部被 t264–t267 取代（見上表），保留僅作為決策記錄，一律不得依其實作。**
 >

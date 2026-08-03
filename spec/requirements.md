@@ -1407,20 +1407,20 @@
 - [ ] **「當日」分時模式不提供匯出**：頁面區間選「當日」時走的是 transient 分時資料（非日線表、不入庫），與本需求的日線 OHLC 不同源。此模式下匯出按鈕停用並提示改選日線區間，避免匯出一份與畫面不符的資料。
 - [ ] **日期寫為文字**：比照 Requirement 40／42，日期欄以 ISO 文字寫入而非 Excel date cell，避免開啟端依時區重新詮釋而偏移一天。
 - [ ] **指數標籤單一來源**：工作表名、手動匯出檔名、排程檔名三處共用同一支 `ExcelExportService.indexLabel(market)`（`TWSE`→`台股大盤`、`DJI`→`道瓊工業`…），不得各處硬編碼中文名而漂移（同 Requirement 42 的 `exchangeRateLabel`）。未知代碼直接以代碼本身為標籤，不臆造名稱。
-- [ ] **指數代碼白名單驗證**：`market` 參數以既有的 `MacroHistoryService.OVERSEAS_INDEX_CODES ∪ {TWSE}` 白名單驗證，未知代碼回 400（資安 Requirement 29：不得讓任意字串流入查詢與檔名）。
-- [ ] **排程／立即匯出的內容＝手動匯出的同一份活頁簿**：排程與「立即匯出到目錄」產出的檔案，與手動匯出走同一支 `ExcelExportService.exportIndexDaily(market, start, end)`，不因觸發途徑而不同（CLAUDE.md「同義欄位、同一 business service API」）。
-- [ ] **每日排程自動匯出（per-user，每日單一時間）**：頁面新增「排程自動匯出」設定卡，可開啟每日排程並設定執行時間（時:分）與輸出資料夾，系統於該時間匯出 `.xlsx` 到指定目錄。每日固定一個時間（比照 Requirement 34／39／41／42）。
-- [ ] **排程需可指定匯出的指數**：與 Requirement 42（單一幣別頁、刻意不設 `currency` 欄）不同，本頁**本來就有 9 個指數可選**，故排程表設 `market` 欄（預設 `TWSE`）並於設定卡提供指數下拉。此處加欄不是為不存在的需求預留，而是頁面既有維度。
+- [ ] **指數代碼白名單驗證**：`market` 參數以既有的 `MacroHistoryService.DAILY_INDEX_CODES`（`OVERSEAS_INDEX_CODES ∪ {TWSE}` 的 Java 單一來源）白名單驗證，未知代碼回 400（資安 Requirement 29：不得讓任意字串流入查詢與檔名）。
+- [ ] **排程／立即匯出的內容＝手動匯出的同一份活頁簿**：排程與「立即匯出到目錄」每個 market 都走 `ExcelExportService.indexDailyDoc(market, start, end)`；手動 `exportIndexDaily` 只作為下載 wrapper 並委派同一個 `indexDailyDoc`，不因觸發途徑而不同（CLAUDE.md「同義欄位、同一 business service API」）。
+- [ ] **每日排程自動匯出（per-user，多時間點）**：頁面新增「排程自動匯出」設定卡，可開啟每日排程並建立零至多個時間點；每個時間點各自保存時:分、啟用狀態、當日 guard、上次執行時間與結果。系統於每個啟用時間點到達後匯出該時間點勾選的指數到共用輸出資料夾。清空時間點或關閉總開關都不再自動產檔；時間點使用 `now >= 設定時分` 判定，避免排程執行緒跨分鐘而漏跑。
+- [ ] **每個時間點以 checkbox 複選匯出指數**：與 Requirement 42（單一幣別頁、刻意不設 `currency` 欄）不同，本頁有 9 個指數可選；設定卡每個時間點的「匯出指數」必須是可勾選多個值的下拉選單（`TWSE`／`DJI`／`SPX`／`IXIC`／`SOX`／`FTSE`／`DAX`／`KOSPI`／`N225`）。一個時間點可產生多個指數檔案，檔名各自以 `ExcelExportService.indexLabel(market)` 命名；不同時間點可勾選不同指數，例如早上只匯出台股、晚上匯出美股。每個時間點至少勾選一個指數才能儲存；未知代碼回 400。
 - [ ] **可設定匯出時間範圍**：排程設定含「匯出範圍」（近 1 個月／3 個月／6 個月／1 年／3 年／5 年／全部十年，預設全部十年），每次執行以「執行當日往前推該範圍」計算起訖日期，讓留存檔案隨時間滾動而非固定區間。範圍以月數存於 `range_months`，「全部十年」＝ `120`；後端另接受 `NULL` 同義為全部十年，以相容從未儲存過設定的列。前端不以 `null` 表示（同 Requirement 42：`el-select` 會把 `null` 當 empty value 而顯示 placeholder）。
 - [ ] **輸出路徑（家目錄為根＋相對子路徑）**：沿用 Requirement 34／37／39／41／42 的路徑模型——容器內基底目錄由 `EXPORT_OUTPUT_DIR`（預設 `/home/steven`）指定，經 docker volume 對映到 host 家目錄；使用者設定的是相對子路徑。後端一律以「基底 resolve 子路徑後 normalize 必須仍在基底內」驗證，拒絕 `..` 跳脫與絕對路徑；寫檔時 `Files.createDirectories` 自動建立缺少的目錄。
 - [ ] **資料夾選擇器沿用同一支 business API**：設定卡提供檔案總管式 `el-tree` 懶載入資料夾選擇器。目錄列舉**不新增 business 端點**，沿用 Requirement 34 既有的 `GET /api/export-schedule/browse?subpath=`；本頁僅在 BFF 新增自己的路由 `GET /api/bff/gdp-twse/export/browse` passthrough（依「一個前端頁面一個 BFF」）。
-- [ ] **可手動立即匯出（驗證用）**：設定卡提供「立即匯出到目錄」按鈕（`POST /api/bff/gdp-twse/export/run-now`），立即產檔到設定目錄並回傳實際落點路徑與檔案大小；此操作**不動當日排程 guard**。
-- [ ] **每使用者各自設定（owner-scoped 設定表）**：排程設定存於新表 `index_export_schedule`（每 `owner_user_id` 一列 UNIQUE、`@Filter(ownerFilter)` 隔離），欄位含啟用／時分／指數代碼／輸出子路徑／匯出範圍／上次執行日期（當日 guard）／上次執行時間與結果。
-- [ ] **背景產檔不需 `enableFilter`（同 Requirement 41／42）**：指數日線為**全域公開行情**（兩張日線表皆無 `owner_user_id`、無 `@Filter`），故背景 cron 直接呼叫 `exportIndexDaily(market, start, end)` 即可，不需要 `exportXxxForOwner(ownerId)` 變體——**排程設定 per-user，但資料本身全域**。
-- [ ] **排程執行機制與自癒（比照 Requirement 34／37／39／41／42）**：每分鐘 `@Scheduled` poll（`zone=Asia/Taipei`），以 `now >= 設定時分` ＋ `last_run_date` 當日 guard 判斷（非「分鐘精確相等」，避免排程執行緒被長工作卡住跨分鐘導致整日靜默漏跑）；服務重啟以 `ApplicationReadyEvent` 補跑當日已到點未執行者；`AtomicBoolean` 防重入；單一使用者失敗只記 `last_run_status`＋log、不影響其他使用者（成功或失敗都設當日 guard）。
+- [ ] **可手動立即匯出（驗證用）**：設定卡提供「立即匯出到目錄」按鈕（`POST /api/bff/gdp-twse/export/run-now`），依所有已設定時間點的指數勾選聯集，每一個指數各產生一組同主檔名的 `.xlsx` 與 `.json` 到設定目錄，回傳 `files[]`（含 `market`、兩種格式落點、大小與 Drive 狀態）以及第一筆檔案的既有相容欄位；此操作**不動任何時間點的當日 guard**。既有設定列沒有任何時間點時沿用未儲存設定的 transient `08:00＋TWSE` 預設以維持立即匯出相容性，且不得因 run-now 將 transient parent 寫回 DB；已儲存且清空時間點的設定才回 400。
+- [ ] **每使用者各自設定（owner-scoped 設定表）**：排程共用設定仍存於 `index_export_schedule`（每 `owner_user_id` 一列 UNIQUE、`@Filter(ownerFilter)` 隔離），欄位含總啟用／輸出子路徑／匯出範圍／Drive 設定；時間點另存 `index_export_schedule_time`（一列一時間點、`schedule_id` 外鍵、時分／啟用／當日 guard／上次執行時間與結果），指數多選另存 `index_export_schedule_time_market`（一列一時間點一指數，複合主鍵）。既有單一時間／單一指數資料須由 migration 原地轉成一個時間點與一筆 market，檔案與排程行為向後相容。
+- [ ] **背景產檔不需 `enableFilter`（同 Requirement 41／42）**：指數日線為**全域公開行情**（兩張日線表皆無 `owner_user_id`、無 `@Filter`），故背景 cron 直接呼叫 `indexDailyDoc(market, start, end)` 即可，不需要 `exportXxxForOwner(ownerId)` 變體——**排程設定 per-user，但資料本身全域**。
+- [ ] **排程執行機制與自癒（比照 Requirement 34／37／39／41／42）**：每分鐘 `@Scheduled` poll（`zone=Asia/Taipei`），逐一檢查每個時間點，以 `now >= 設定時分` ＋該時間點的 `last_run_date` 當日 guard 判斷（非「分鐘精確相等」）；服務重啟以 `ApplicationReadyEvent` 補跑當日已到點未執行者；`AtomicBoolean` 防重入；單一時間點失敗只記該列 `last_run_status`＋log、不影響同一使用者其他時間點或其他使用者（成功或失敗都設該時間點 guard）。每個選取指數仍走同一支 `ExcelExportService.indexDailyDoc`，一個指數失敗不得阻止同一時間點其他指數嘗試。
 - [ ] **寫檔採 tmp ＋ atomic move**：先寫 `.tmp` 再 `ATOMIC_MOVE`（不支援時退 `REPLACE_EXISTING`），避免覆寫既有檔時因中途失敗留下半截殘檔。
-- [ ] **檔名**：`{指數名}_{使用者ID}_{YYYYMMDD}.xlsx`。含 owner id 的原因同 Requirement 41／42：資料雖為全域，但各使用者可設不同指數與範圍，同日產出內容不同，不帶 id 會在共用目錄互相覆蓋。
-- [ ] **排程列表頁需登錄**：新排程須在「公開資訊 → 排程列表」（Requirement 36 / `SchedulePublicBffController` 的 `JOBS`）補上對應項目，避免該頁與實際排程漂移。
+- [ ] **檔名與多時間點覆寫規則**：每個指數各產生 `{指數名}_{使用者ID}_{YYYYMMDD}.xlsx` 與同主檔名 `.json`；同一使用者同一指數若被多個時間點選取，當日沿用同一主檔名並由較晚一次覆寫，跨日產生新檔。含 owner id 的原因同 Requirement 41／42：資料雖為全域，但各使用者可設不同指數與範圍，同日產出內容不同，不帶 id 會在共用目錄互相覆蓋。
+- [ ] **排程列表頁維持既有登錄**：本任務沿用既有每分鐘 `IndexExportScheduleService` 排程，不新增第二支 `@Scheduled`；實作時確認「大盤指數匯出／每日匯出排程檢查」既有 `SchedulePublicBffController.JOBS` 項目仍存在，並同步調整描述以反映多時間點，避免重複登錄或頁面與實際行為漂移。
 
 ---
 
