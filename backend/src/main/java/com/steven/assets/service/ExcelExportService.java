@@ -508,8 +508,9 @@ public class ExcelExportService {
     }
 
     /**
-     * 大盤指數日線區間匯出（Requirement 45 / Task 216）：單張工作表、日期／開高低收 ＋ 四條均線九欄
-     * （第六～九欄為 Task 285／286 新增的計算欄：週線MA5／月線MA20／季線MA60／年線MA240）。
+     * 大盤指數日線區間匯出（Requirement 45 / Task 216）：單張工作表、日期／開高低收 ＋ 四條均線
+     * ＋ 成交股數／成交金額十一欄（第六～九欄為 Task 285／286 新增的計算欄：週線MA5／月線MA20／
+     * 季線MA60／年線MA240；第十～十一欄為 Task 289 新增，直接取欄位、非計算欄）。
      * 全域公開行情（兩張日線表皆無 owner 欄位、無 {@code @Filter}），故不需要 ForOwner 變體（同油價金價／匯率）。
      */
     @Transactional(readOnly = true)
@@ -525,12 +526,12 @@ public class ExcelExportService {
     }
 
     /**
-     * 「大盤指數日線」分頁：日期／開盤／最高／最低／收盤／週線MA5／月線MA20／季線MA60／年線MA240
-     * 九欄，單一序列依日期遞增。
+     * 「大盤指數日線」分頁：日期／開盤／最高／最低／收盤／週線MA5／月線MA20／季線MA60／年線MA240／
+     * 成交股數／成交金額十一欄，單一序列依日期遞增。
      *
      * <p><b>四個價格欄直接讀 DB 既有 OHLC 欄位，不重算、不由收盤推導</b>——這與匯率分頁的中間價相反
      * （那是 {@code @Transient} 衍生值，必須由 entity 算）。兩張表的欄位語意相同，在此正規化成同一組
-     * {@code (date, o, h, l, c)} 後共用同一段寫表邏輯，確保切換指數時版面一致。
+     * {@code (date, o, h, l, c, volume, turnover)} 後共用同一段寫表邏輯，確保切換指數時版面一致。
      *
      * <p><b>第六～九欄是本分頁唯一不直接取自 DB 欄位的四欄</b>（Task 285 建立 MA5、Task 286 補齊
      * MA20/60/240）：該日含當日往前 N 個交易日 {@code close} 的簡單移動平均（N ∈ {5,20,60,240}，
@@ -540,6 +541,10 @@ public class ExcelExportService {
      * 兩處是兩份實作（不同 Maven 專案、無法共用程式碼），取捨與被放棄的選項見
      * spec/design.md 的 Requirement 45「週線MA5：唯一的計算欄」。
      *
+     * <p><b>第十～十一欄（成交股數／成交金額，Task 289）直接取 entity 既有欄位，不計算</b>：
+     * TWSE 讀 {@code tradeVolume}／{@code tradeValue}；海外指數讀 {@code volume}，
+     * {@code turnover}（成交金額）固定 {@code null}（無此資料，非計算值）。
+     *
      * <p>{@code TWSE} 走 {@code twse_index_daily_history}、其餘走 {@code us_index_daily_history}；
      * 兩表的 open/high/low 皆 nullable（TWSE 早期由 v1.21.0 只抓 ClosingIndex 的殘留列），
      * null 該格留空、不補前值、不捏造（同油價金價／匯率）。日期寫成文字避免開啟端時區偏移一天。
@@ -547,12 +552,14 @@ public class ExcelExportService {
     private ExportDoc.Sheet indexDailySheet(String market,
                                             java.time.LocalDate start, java.time.LocalDate end) {
         List<String> headers = List.of("日期", "開盤", "最高", "最低", "收盤",
-                "週線MA5", "月線MA20", "季線MA60", "年線MA240");
+                "週線MA5", "月線MA20", "季線MA60", "年線MA240", "成交股數", "成交金額");
         List<ExportDoc.Format> formats = List.of(ExportDoc.Format.DATE, ExportDoc.Format.NUM4,
                 ExportDoc.Format.NUM4, ExportDoc.Format.NUM4, ExportDoc.Format.NUM4,
                 // 四條均線定義上只有 2 位小數（divide(window, 2, HALF_UP)）；
                 // 用 NUM4 會多印兩個恆為 0 的位數而謊稱精度
-                ExportDoc.Format.NUM2, ExportDoc.Format.NUM2, ExportDoc.Format.NUM2, ExportDoc.Format.NUM2);
+                ExportDoc.Format.NUM2, ExportDoc.Format.NUM2, ExportDoc.Format.NUM2, ExportDoc.Format.NUM2,
+                // 成交股數／成交金額恆為整數（trade_value 為 NUMERIC(20,0) 無小數位），NUM0 才不謊稱精度
+                ExportDoc.Format.NUM0, ExportDoc.Format.NUM0);
 
         // 回看 MA_LOOKBACK_DAYS 天：只用區間內收盤時，檔案前幾列的均線必為空（使用者會讀成 bug）。
         // 回看列只參與均線計算，不得輸出。400 天由最長視窗 MA240（239 個交易日）決定，見常數 javadoc。
@@ -562,7 +569,8 @@ public class ExcelExportService {
             IndexDailyRow d = all.get(i);
             if (d.date().isBefore(start)) continue;   // 回看列：算完均線就丟
             rows.add(java.util.Arrays.asList(d.date(), d.open(), d.high(), d.low(), d.close(),
-                    indexMaAt(all, i, 5), indexMaAt(all, i, 20), indexMaAt(all, i, 60), indexMaAt(all, i, 240)));
+                    indexMaAt(all, i, 5), indexMaAt(all, i, 20), indexMaAt(all, i, 60), indexMaAt(all, i, 240),
+                    d.volume(), d.turnover()));
         }
         // omitNullCells=true：既有 open/high/low 是 if (x != null) cell(...)，缺值時該格根本不建。
         // close_point 為 NOT NULL（見上方 javadoc），故收盤那一欄不受此旗標影響。
@@ -573,9 +581,14 @@ public class ExcelExportService {
                 headers.size());
     }
 
-    /** 兩張日線表正規化後的單日行情（僅供匯出寫表使用，不入庫）。 */
+    /**
+     * 兩張日線表正規化後的單日行情（僅供匯出寫表使用，不入庫）。
+     * {@code volume}／{@code turnover} 直接取自 entity 既有欄位、不計算（Task 289）：
+     * TWSE 讀 {@code tradeVolume}／{@code tradeValue}；海外指數讀 {@code volume}，
+     * {@code turnover} 固定 {@code null}（無成交金額資料，非計算值）。
+     */
     private record IndexDailyRow(java.time.LocalDate date, BigDecimal open, BigDecimal high,
-                                 BigDecimal low, BigDecimal close) {}
+                                 BigDecimal low, BigDecimal close, Long volume, BigDecimal turnover) {}
 
     /**
      * 均線回看天數（日曆天）。要湊滿最長視窗 MA240 需要當日之前的 239 個交易日；
@@ -614,12 +627,12 @@ public class ExcelExportService {
         if ("TWSE".equalsIgnoreCase(market)) {
             return twseIndexHistRepo.findByTradingDateBetweenOrderByTradingDateAsc(start, end).stream()
                     .map(t -> new IndexDailyRow(t.getTradingDate(), t.getOpenPoint(), t.getHighPoint(),
-                            t.getLowPoint(), t.getClosePoint()))
+                            t.getLowPoint(), t.getClosePoint(), t.getTradeVolume(), t.getTradeValue()))
                     .toList();
         }
         return usIndexHistRepo.findByIndexCodeAndTradingDateBetweenOrderByTradingDateAsc(market, start, end).stream()
                 .map(u -> new IndexDailyRow(u.getTradingDate(), u.getOpenPoint(), u.getHighPoint(),
-                        u.getLowPoint(), u.getClosePoint()))
+                        u.getLowPoint(), u.getClosePoint(), u.getVolume(), null))
                 .toList();
     }
 

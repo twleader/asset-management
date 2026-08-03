@@ -151,7 +151,7 @@
         以主機家目錄 <code>{{ schedule.baseDir || '/home/steven' }}</code> 為根（對映主機
         <code>/Users/steven</code>）。按上方「選擇」開啟檔案總管式選擇器挑選子資料夾；例如選 <code>input</code> →
         主機 <code>/Users/steven/input</code>。每日於各時間點匯出該列勾選指數的日線為
-        <code>{指數名}_{使用者ID}_YYYYMMDD.xlsx</code> 與 <code>.json</code> <strong>兩份</strong>（主檔名相同、只差副檔名；欄位為日期／開盤／最高／最低／收盤／週線MA5／月線MA20／季線MA60／年線MA240，
+        <code>{指數名}_{使用者ID}_YYYYMMDD.xlsx</code> 與 <code>.json</code> <strong>兩份</strong>（主檔名相同、只差副檔名；欄位為日期／開盤／最高／最低／收盤／週線MA5／月線MA20／季線MA60／年線MA240／成交股數／成交金額，
         內容同上方「匯出 Excel」）。匯出範圍以<b>執行當日往前推</b>計算，故每日產出會隨時間滾動。
       </div>
     </el-card>
@@ -209,8 +209,9 @@
         <el-form-item label="輸出內容">
           <div class="dialog-note">
             單一 Excel 檔、一張工作表（{{ marketLabel }}），欄位為
-            <b>日期／開盤／最高／最低／收盤／週線MA5／月線MA20／季線MA60／年線MA240</b>，依日期遞增；當日該欄無資料則留空。
+            <b>日期／開盤／最高／最低／收盤／週線MA5／月線MA20／季線MA60／年線MA240／成交股數／成交金額</b>，依日期遞增；當日該欄無資料則留空。
             四條均線＝該日含當日往前對應交易日數（5／20／60／240）的收盤均價（與上方圖表的四條線同值）。
+            成交股數／成交金額直接取自資料庫既有欄位（不重算）；海外指數無成交金額資料，該欄留空。
           </div>
         </el-form-item>
         <el-form-item label="存檔位置">

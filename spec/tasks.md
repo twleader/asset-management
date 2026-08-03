@@ -292,8 +292,9 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 286 | 大盤指數日線匯出補齊月線MA20／季線MA60／年線MA240（6 欄→9 欄），回看視窗由 30 日放大為 400 日以支撐 MA240 的 239 個交易日（Requirement 45） | [tasks/t286_index_export_all_four_ma.md](tasks/t286_index_export_all_four_ma.md) |
 | 287 | 股市大盤排程匯出支援多時間點與多指數 checkbox（Requirement 45） | [tasks/t287_index_export_multi_time_market.md](tasks/t287_index_export_multi_time_market.md) |
 | 288 | 股市大盤查詢頁的日線圖下方新增每日成交量柱狀子圖（台股走 TWSE FMTQIK 成交金額／股數、海外走 Yahoo `volume`；Requirement 18） | [tasks/t288_index_daily_volume_chart.md](tasks/t288_index_daily_volume_chart.md) |
+| 289 | 大盤指數日線匯出（Excel／JSON）加「成交股數」「成交金額」兩欄，九欄擴為十一欄（Requirement 45） | [tasks/t289_index_export_volume.md](tasks/t289_index_export_volume.md) |
 
-> **註：本索引表僅列至 228、264–267、269–279 與 280–288；Task 229–263 與 268 未登錄於本表，以 `spec/tasks/tNNN_*.md` 檔案本身為準。**
+> **註：本索引表僅列至 228、264–267、269–279 與 280–289；Task 229–263 與 268 未登錄於本表，以 `spec/tasks/tNNN_*.md` 檔案本身為準。**
 
 > **Task 222–225 已全部被 t264–t267 取代（見上表），保留僅作為決策記錄，一律不得依其實作。**
 >

@@ -4529,7 +4529,7 @@ back-adjustment 等同總報酬序列，對高配息標的在市價不動時仍�
 
 ---
 
-## Requirement 45（Task 216）：股市大盤指數日線 Excel 匯出（開/高/低/收＋四條均線；第六欄為 Task 285、第七～九欄為 Task 286 新增）與排程自動匯出
+## Requirement 45（Task 216）：股市大盤指數日線 Excel 匯出（開/高/低/收＋四條均線＋成交股數/成交金額；第六欄為 Task 285、第七～九欄為 Task 286、第十～十一欄為 Task 289 新增）與排程自動匯出
 
 結構比照 R41／R42（**全域公開行情 ＋ per-user 排程設定**），以下只記差異。這次把原本「每人一個時間＋一個指數」擴充成「每人一筆共用設定、底下多個時間點；每個時間點再複選多個指數」，讓 09:00 台股與 22:00 美股可以各自設定。
 
@@ -4546,11 +4546,37 @@ back-adjustment 等同總報酬序列，對高配息標的在市價不動時仍�
 
 `twse_index_daily_history` 與 `us_index_daily_history` 皆無 `owner_user_id`、未套 `@Filter(ownerFilter)`。
 
-### 匯出內容：直接取 DB 既有 OHLC 欄位 ＋ 四欄計算欄（四條均線）
+### 匯出內容：直接取 DB 既有 OHLC 欄位 ＋ 四欄計算欄（四條均線）＋ 兩欄成交量欄（Task 289）
 
-工作表九欄：**日期／開盤／最高／最低／收盤／週線MA5／月線MA20／季線MA60／年線MA240**，
-單一序列依日期遞增（第六欄為 Task 285、第七～九欄為 Task 286 新增，見下方「週線MA5：唯一的計算欄」；
-Task 285 前為五欄、Task 286 前為六欄）。四條均線**依視窗由短到長**排在收盤之後，與圖表 legend 同序。
+工作表十一欄：**日期／開盤／最高／最低／收盤／週線MA5／月線MA20／季線MA60／年線MA240／成交股數／成交金額**，
+單一序列依日期遞增（第六欄為 Task 285、第七～九欄為 Task 286、第十～十一欄為 Task 289 新增，
+見下方「週線MA5：唯一的計算欄」與「成交股數／成交金額：直接取欄位、非計算欄」；
+Task 285 前為五欄、Task 286 前為六欄、Task 289 前為九欄）。四條均線**依視窗由短到長**排在收盤之後，
+與圖表 legend 同序；成交股數／成交金額固定排在最末（附加原則同 Task 285／286）。
+
+### 成交股數／成交金額：直接取欄位、非計算欄（Task 289）
+
+與四條均線不同，第十～十一欄**直接讀 entity 既有欄位、不計算**：`findIndexDaily` 的 `IndexDailyRow`
+新增 `volume`（Long）／`turnover`（BigDecimal，nullable）兩個欄位——TWSE 分支讀
+`TwseIndexDailyHistory.getTradeVolume()`／`getTradeValue()`；海外分支讀 `UsIndexDailyHistory.getVolume()`
+填入 `volume`，`turnover` 固定回 `null`（`UsIndexDailyHistory` entity 本身就沒有成交金額欄位，Yahoo 無此資料）。
+
+**這不是 §3.2 鐵則第 4 條的「同義值重複實作」，不需要援引 MA5 那組具名例外。** 本頁圖表（BFF
+`GdpTwseBffController.buildIndexDailyBody`）對海外指數的 `turnovers` 也恆回全 `null` 陣列，
+但兩處都只是**單純賦值、無計算邏輯**（backend 端 `entity.getTradeValue()`；BFF 端 `GdpTwseBffController.java:204`
+的 `Object t = tw ? r.get("tradeValue") : null;`，海外指數直接以三元運算式賦 `null`——即使改成呼叫
+`r.get("tradeValue")`，因海外指數的 JSON 回應本來就不含該鍵，`Map.get` 對缺鍵一樣回 `null`，結果等價），
+數學上不存在「兩處算出不同值」的可能——如同開/高/低/收四個價格欄同樣是 backend 匯出（JPA repository 直讀）
+與 BFF 圖表（REST GET 轉發同一張表）兩處各自取值，卻從未被視為需要收斂的重複實作。§3.2 鐵則第 4 條與
+MA5 那組例外要處理的是「兩處各自**計算**同一個衍生值、實作可能分岔」（如 BigDecimal 累加 vs double 累加），
+不是「兩處各自讀同一個 DB 欄位」。
+兩欄皆整數（`trade_value` 為 `NUMERIC(20,0)` 無小數位），`NULL` 時該格留空（`omitNullCells` 語意不變），
+不補 0、不補前值、不由其他欄位推導（CLAUDE.md「禁止存入可從其他欄位計算得出的衍生值」——匯出端本就只讀不算）。
+
+**新增 `ExportDoc.Format.NUM0`（`#,##0`，千分位無小數）**：現有 `MONEY`／`NUM2`／`NUM4`／`NUM6` 皆帶固定小數位，
+成交股數／成交金額恆為整數，套用既有格式會印出恆為 0 的小數位、謊稱精度（與 Task 285／286 選 `NUM2` 而非
+`NUM4` 給均線欄同一原則）。`JsonDocRenderer` 明文不讀 `Format`（只讀 header／rows 兩個結構），
+故新增 enum 值與對應 `ExcelDocRenderer` 樣式不影響 JSON 輸出。
 
 四個價格欄**直接讀 entity 既有欄位**（`openPoint`／`highPoint`／`lowPoint`／`closePoint`），
 不重算也不由收盤價推導——這與 R42 的中間價相反（那是 `@Transient` 衍生值，必須由 entity 算）。
@@ -4832,6 +4858,28 @@ run-now 不動任何時間點 guard——全部同 R41／R42 的既有安全邊�
 - `spec/steering/structure.md` §3.2：具名例外由「兩份實作」更新為「三份實作」（見上方 §3.2 第 4 條）
 - **BFF 主程式邏輯不動**：`index-daily` 早已回 `ma5/ma20/ma60/ma240` 四條，圖表也早有四條線；
   本次只補匯出
+
+**Task 289 異動（加「成交股數」「成交金額」兩欄，9 欄 → 11 欄）**
+- `backend/.../service/export/ExportDoc.java`：`Format` enum 新增 `NUM0`（`#,##0`，千分位無小數）
+- `backend/.../service/export/ExcelDocRenderer.java`：`Styles` 新增 `num0` CellStyle；`styleFor` 加對應 case；
+  `ExcelExportService.java:1029` 那個獨立 `Styles`（服務 `writeCurrentSummarySheet`／`writeSnapshotSheet`）**不改**，
+  與 `indexDailySheet` 走的渲染路徑無關
+- `ExcelExportService.java`：`IndexDailyRow` 加 `volume`（Long）／`turnover`（BigDecimal，nullable）；
+  `findIndexDaily` 兩分支各自帶出 `tradeVolume`／`tradeValue`（TWSE）與 `volume`（海外，`turnover` 固定
+  `null`）；`indexDailySheet` 表頭與 formats 各加「成交股數」「成交金額」（`NUM0`／`NUM0`），固定排在最末
+- `MacroHistoryController.java`：**僅 javadoc**——`/api/index-daily/export` 那段欄位清單九欄→十一欄
+- `GdpTwseBffController.java`：**不改**——海外指數 `turnovers` 恆回 `null` 陣列的邏輯本就是單純欄位缺值
+  （非計算值），與匯出端各自讀取同一張表，不構成 §3.2 第 4 條的重複實作，不需援引 MA5 那組具名例外
+- `SchedulePublicBffController.java`：**僅文案**——「大盤指數匯出」JOBS description 的欄位清單補上
+  「＋成交股數／成交金額」
+- `frontend/src/views/GdpTwseView.vue`：**僅文案**——匯出對話框與排程說明的欄位清單
+- `backend/.../export/DualFormatSingleTableExportTest.java`：**新增**「插欄後既有九欄逐格未變」
+  （對新增的 `index_twse_pre_t289` 做 identity 映射，`index_twse_pre_t285`／`_pre_t286` 兩份原樣保留但
+  `getLastCellNum()` 斷言由 9 改 11）；**新增**「成交股數／成交金額值與 JSON」（含台股有值、海外
+  `turnover` 為 null 兩種案例）
+- `backend/.../export/ExportDocRendererTest.java`：**新增**一則對 `NUM0` 格式字串與獨立 `CellStyle` 實例的斷言
+- `backend/src/test/resources/golden/index_twse.xlsx`：再次重產（表頭 9 → 11 格）；
+  `index_twse_pre_t289.xlsx` 新增（＝ Task 286 版，9 欄），供 identity 映射比對
 
 ---
 

@@ -161,6 +161,7 @@ public class ExcelDocRenderer {
             case NUM2 -> st.num2;
             case NUM4 -> st.num4;
             case NUM6 -> st.num6;
+            case NUM0 -> st.num0;
             default -> null;
         };
     }
@@ -180,7 +181,7 @@ public class ExcelDocRenderer {
     }
 
     /**
-     * 八種樣式。<b>不是「兩支既有服務的聯集」</b>——{@code ExcelExportService.Styles.section} 是粗體 13pt、
+     * 九種樣式。<b>不是「兩支既有服務的聯集」</b>——{@code ExcelExportService.Styles.section} 是粗體 13pt、
      * {@code TradingRadarExportService.Styles.section} 是粗體 12pt，取聯集會靜默改掉其中一支的字級。
      *
      * <p>{@code money} 與 {@code num2} 的格式字串同為 {@code #,##0.00}，但<b>必須是兩個獨立的 CellStyle 實例</b>
@@ -199,6 +200,7 @@ public class ExcelDocRenderer {
         final CellStyle num2;
         final CellStyle num4;
         final CellStyle num6;
+        final CellStyle num0;
 
         Styles(Workbook wb) {
             DataFormat fmt = wb.createDataFormat();
@@ -238,6 +240,9 @@ public class ExcelDocRenderer {
 
             num6 = wb.createCellStyle();
             num6.setDataFormat(fmt.getFormat("#,##0.000000"));
+
+            num0 = wb.createCellStyle();
+            num0.setDataFormat(fmt.getFormat("#,##0"));
         }
 
         CellStyle of(ExportDoc.LineStyle style) {

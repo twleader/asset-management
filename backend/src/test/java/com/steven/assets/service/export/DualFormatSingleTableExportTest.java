@@ -7,6 +7,7 @@ import com.steven.assets.model.CommodityPriceHistory;
 import com.steven.assets.model.ExchangeRateHistory;
 import com.steven.assets.model.RealizedGain;
 import com.steven.assets.model.TwseIndexDailyHistory;
+import com.steven.assets.model.UsIndexDailyHistory;
 import com.steven.assets.repository.*;
 import com.steven.assets.service.ExcelExportService;
 import com.steven.assets.service.PriceQueryService;
@@ -397,9 +398,9 @@ class DualFormatSingleTableExportTest {
             // 新欄只出現在表頭列：fixture 僅 2 列、湊不滿任何視窗，故資料列該格根本不建（omitNullCells）
             Sheet s = actual.getSheetAt(0);
             assertThat(s.getRow(0).getCell(5).getStringCellValue()).isEqualTo("週線MA5");
-            // Task 286 插欄後表頭共 9 格（不是 t285 當下的 6 格）——本測試只驗「t285 插的那一欄未變」，
-            // 表格總欄數已因 t286 變動，這裡必須跟著改，否則會誤判 t286 打壞了東西。
-            assertThat(s.getRow(0).getLastCellNum()).isEqualTo((short) 9);
+            // Task 289 插欄後表頭共 11 格（不是 t285 當下的 6 格）——本測試只驗「t285 插的那一欄未變」，
+            // 表格總欄數已因 t286／t289 變動，這裡必須跟著改，否則會誤判後面的任務打壞了東西。
+            assertThat(s.getRow(0).getLastCellNum()).isEqualTo((short) 11);
             assertThat(s.getRow(1).getCell(5)).as("視窗未滿 → 該格不建，不是 BLANK").isNull();
             assertThat(s.getRow(2).getCell(5)).isNull();
         }
@@ -418,7 +419,7 @@ class DualFormatSingleTableExportTest {
             assertThat(s.getRow(0).getCell(6).getStringCellValue()).isEqualTo("月線MA20");
             assertThat(s.getRow(0).getCell(7).getStringCellValue()).isEqualTo("季線MA60");
             assertThat(s.getRow(0).getCell(8).getStringCellValue()).isEqualTo("年線MA240");
-            assertThat(s.getRow(0).getLastCellNum()).isEqualTo((short) 9);
+            assertThat(s.getRow(0).getLastCellNum()).isEqualTo((short) 11);
             // fixture 僅 2 列，三個新視窗全部湊不滿，資料列該格根本不建
             assertThat(s.getRow(1).getCell(6)).isNull();
             assertThat(s.getRow(1).getCell(7)).isNull();
@@ -527,6 +528,82 @@ class DualFormatSingleTableExportTest {
             assertThat(s.getRow(1).getCell(0).getStringCellValue()).isEqualTo(rangeStart.toString());
             assertThat(s.getRow(1).getCell(8))
                     .as("回看足夠（239 筆歷史 ＋ 當日）→ 第一列 MA240 就有值").isNotNull();
+        }
+
+        // ===== Task 289：加「成交股數」「成交金額」兩欄 =====
+
+        @Test
+        @DisplayName("插欄後既有九欄逐格未變（對 index_twse_pre_t289 做 identity 映射比對）")
+        void 插欄後既有九欄未變() throws Exception {
+            stubAll();
+            Workbook actual = read(service.exportIndexDaily("TWSE", D1, D2));
+            Workbook pre = golden("index_twse_pre_t289");
+
+            // 附加在最末 → 欄索引不位移，映射即 identity；驗到欄索引 0–8（日期～年線MA240）逐格未變
+            assertSameMapped(pre, actual, c -> c);
+
+            Sheet s = actual.getSheetAt(0);
+            assertThat(s.getRow(0).getCell(9).getStringCellValue()).isEqualTo("成交股數");
+            assertThat(s.getRow(0).getCell(10).getStringCellValue()).isEqualTo("成交金額");
+            assertThat(s.getRow(0).getLastCellNum()).isEqualTo((short) 11);
+        }
+
+        @Test
+        @DisplayName("成交股數／成交金額直接取 entity 欄位值，NUM0 格式無小數位；既有欄索引不受影響；JSON 同值")
+        void 成交股數成交金額值與JSON() throws Exception {
+            when(twseIndexHistRepo.findByTradingDateBetweenOrderByTradingDateAsc(any(), any()))
+                    .thenReturn(twseIndexWithVolume());
+
+            Sheet s = read(service.exportIndexDaily("TWSE", D1, D1)).getSheetAt(0);
+            assertThat(s.getRow(0).getLastCellNum()).isEqualTo((short) 11);
+            assertThat(s.getRow(1).getCell(9).getNumericCellValue()).isEqualTo(14683404939d);
+            assertThat(s.getRow(1).getCell(10).getNumericCellValue()).isEqualTo(1367817795171d);
+            assertThat(s.getRow(1).getCell(9).getCellStyle().getDataFormatString())
+                    .as("整數欄不得謊稱小數精度").isEqualTo("#,##0");
+            // 既有欄索引 0/4（日期／收盤）未受新增兩欄影響
+            assertThat(s.getRow(1).getCell(0).getStringCellValue()).isEqualTo(D1.toString());
+            assertThat(s.getRow(1).getCell(4).getNumericCellValue()).isEqualTo(23050.00);
+
+            JsonNode rows = json(service.indexDailyDoc("TWSE", D1, D1)).at("/sheets/0/tables/0/rows");
+            assertThat(rows.get(0).size()).as("十一欄").isEqualTo(11);
+            assertThat(rows.get(0).get("成交股數").asLong()).isEqualTo(14683404939L);
+            assertThat(rows.get(0).get("成交金額").decimalValue()).isEqualByComparingTo("1367817795171");
+        }
+
+        @Test
+        @DisplayName("海外指數：成交股數取 volume，成交金額固定為 null（無此資料，非計算值）")
+        void 海外指數成交金額固定為null() throws Exception {
+            when(usIndexHistRepo.findByIndexCodeAndTradingDateBetweenOrderByTradingDateAsc(anyString(), any(), any()))
+                    .thenReturn(djiWithVolume());
+
+            Sheet s = read(service.exportIndexDaily("DJI", D1, D1)).getSheetAt(0);
+            assertThat(s.getRow(1).getCell(9).getNumericCellValue()).isEqualTo(300000000d);
+            assertThat(s.getRow(1).getCell(10)).as("海外指數無成交金額資料，該格根本不建，不是 BLANK").isNull();
+
+            JsonNode rows = json(service.indexDailyDoc("DJI", D1, D1)).at("/sheets/0/tables/0/rows");
+            assertThat(rows.get(0).get("成交股數").asLong()).isEqualTo(300000000L);
+            assertThat(rows.get(0).get("成交金額").isNull()).as("JSON 亦為 null，不是 0").isTrue();
+        }
+
+        /** 單日、含成交股數／成交金額（供 289.7(b) 值比對，不動 {@code twseIndex()} fixture）。 */
+        private static List<TwseIndexDailyHistory> twseIndexWithVolume() {
+            TwseIndexDailyHistory a = new TwseIndexDailyHistory();
+            a.setTradingDate(D1); a.setOpenPoint(new BigDecimal("23000.00"));
+            a.setHighPoint(new BigDecimal("23100.00")); a.setLowPoint(new BigDecimal("22900.00"));
+            a.setClosePoint(new BigDecimal("23050.00"));
+            a.setTradeVolume(14683404939L);
+            a.setTradeValue(new BigDecimal("1367817795171"));
+            return List.of(a);
+        }
+
+        /** 單日海外指數（DJI），含 volume（供 289.7(c) 值比對）。 */
+        private static List<UsIndexDailyHistory> djiWithVolume() {
+            UsIndexDailyHistory a = new UsIndexDailyHistory();
+            a.setIndexCode("DJI"); a.setTradingDate(D1);
+            a.setOpenPoint(new BigDecimal("40000.0000")); a.setHighPoint(new BigDecimal("40100.0000"));
+            a.setLowPoint(new BigDecimal("39900.0000")); a.setClosePoint(new BigDecimal("40050.0000"));
+            a.setVolume(300000000L);
+            return List.of(a);
         }
 
         /** 7 個交易日、全部 >= START（模擬 DB 歷史最前端湊不滿 5 筆）。 */

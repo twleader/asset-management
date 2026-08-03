@@ -141,5 +141,5 @@ public record ExportDoc(String title, List<Sheet> sheets) {
      * 在型別層級的保證。{@code BOOL_ZH}（Excel 寫「是」／「否」）與 {@code LIST_LINES}（Excel 以 {@code \n} 串接）
      * 尤其如此：JSON 該拿到 boolean 與字串陣列。
      */
-    public enum Format { TEXT, MONEY, NUM2, NUM4, NUM6, DATE, TIMESTAMP, BOOL_ZH, LIST_LINES }
+    public enum Format { TEXT, MONEY, NUM2, NUM4, NUM6, NUM0, DATE, TIMESTAMP, BOOL_ZH, LIST_LINES }
 }

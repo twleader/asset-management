@@ -282,6 +282,19 @@ class ExportDocRendererTest {
         }
 
         @Test
+        @DisplayName("NUM0 為千分位無小數（#,##0），且與 MONEY／NUM2 是不同的 CellStyle 實例（Task 289）")
+        void NUM0格式獨立於其他數值格() throws Exception {
+            ExportDoc.Table t = new ExportDoc.Table(null, null, List.of("整數", "小數"), true, false, false,
+                    List.of(ExportDoc.Format.NUM0, ExportDoc.Format.NUM2),
+                    List.of(List.of(1367817795171L, new BigDecimal("1"))));
+            Row row = readBack(doc(t)).getRow(1);
+            assertThat(row.getCell(0).getCellStyle().getDataFormatString()).isEqualTo("#,##0");
+            assertThat(row.getCell(0).getCellStyle().getIndex())
+                    .as("NUM0 須是獨立的 CellStyle 實例，不得與 NUM2／MONEY 共用（同檔既有 money/num2 的強調）")
+                    .isNotEqualTo(row.getCell(1).getCellStyle().getIndex());
+        }
+
+        @Test
         @DisplayName("日期寫成文字 cell，不是 Excel date cell（避免開啟端時區偏移一天）")
         void 日期為文字格() throws Exception {
             ExportDoc.Table t = new ExportDoc.Table(null, null, List.of("日"), true, false, false,
