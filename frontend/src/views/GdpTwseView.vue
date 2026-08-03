@@ -261,7 +261,7 @@ const market = ref('TWSE')
 const marketLabel = computed(() => MARKETS.find(m => m.value === market.value)?.label ?? '台股大盤')
 const dailyDates = ref([])
 const dailyCloses = ref([])
-const dailyMa5 = ref([])      // 週線（MA5＝台股慣例的 5 個交易日，非日曆週；Task 284）
+const dailyMa5 = ref([])      // 週線（MA5＝台股慣例的 5 個交易日，非日曆週；Task 285）
 const dailyMa20 = ref([])
 const dailyMa60 = ref([])
 const dailyMa240 = ref([])

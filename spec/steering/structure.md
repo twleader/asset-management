@@ -162,10 +162,10 @@ bff/src/main/java/com/steven/assets/bff/
 2. **路徑前綴：** `/api/bff/{page-name}/...`。Gateway route 將 `/api/bff/{page}/**` rewrite 為 `/api/{resource}/**`。
 3. **跨頁共用邏輯放 `bff/common/`。** 如 `SnapshotEnricher`（注入歷史收盤價、合併 broker rows）。
 4. **同義欄位 → 同一支 business service API。** BFF 不在不同頁重複呼叫不同 endpoint 取同義值。
-   - **具名例外（唯一一組，Task 284／285）：台股大盤的均線（MA5/20/60/240）目前有三份實作**——
+   - **具名例外（唯一一組，Task 285／286）：台股大盤的均線（MA5/20/60/240）目前有三份實作**——
      (1) 「股市大盤查詢」頁圖表走 `GdpTwseBffController.movingAverage`（BFF，BigDecimal，只用已落地日線收盤）；
      (2) 該頁匯出走 `ExcelExportService.indexMaAt`（backend，BigDecimal，同樣只用已落地日線收盤，
-     Task 284 建立 MA5、Task 285 擴為四個視窗）；(3) 交易雷達／走勢圖／觀察清單走
+     Task 285 建立 MA5、Task 286 擴為四個視窗）；(3) 交易雷達／走勢圖／觀察清單走
      `TechnicalIndicatorService`（double，**盤中併入 Redis 即時點位**）。(1)(2) 定義相同（皆不含 live），
      彼此以「同定義同精度」保證同值，只是分屬 BFF／backend 兩處各自實作；(3) 因語意不同（含 live）另計。
      **擋住把 (1)(2) 收斂進 (3) 的是語意不是技術**：`TechnicalIndicatorService` 只覆蓋 `0000`＋`台股`

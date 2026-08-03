@@ -371,25 +371,25 @@ class DualFormatSingleTableExportTest {
         }
     }
 
-    // ===== Task 284：大盤指數日線加第六欄「週線MA5」 =====
+    // ===== Task 285：大盤指數日線加第六欄「週線MA5」 =====
 
     @Nested
-    @DisplayName("Task 284／285：大盤指數日線的四條均線欄")
+    @DisplayName("Task 285／286：大盤指數日線的四條均線欄")
     class WeeklyMa5 {
 
-        /** 匯出區間；本組 fixture 的日期一律 >= START（284.15），回看測試另備 fixture（284.16）。 */
+        /** 匯出區間；本組 fixture 的日期一律 >= START（285.15），回看測試另備 fixture（285.16）。 */
         private static final LocalDate START = LocalDate.of(2026, 7, 1);
         private static final LocalDate END = LocalDate.of(2026, 7, 31);
 
-        /** 長天期均線 fixture 的起始日（285.12）；與 START/END 無關，日期一律 >= 本值，不觸發回看過濾。 */
+        /** 長天期均線 fixture 的起始日（286.12）；與 START/END 無關，日期一律 >= 本值，不觸發回看過濾。 */
         private static final LocalDate LONG_START = LocalDate.of(2025, 1, 1);
 
         @Test
-        @DisplayName("插欄前後既有五欄逐格未變（對 index_twse_pre_t284 做 identity 映射比對）")
+        @DisplayName("插欄前後既有五欄逐格未變（對 index_twse_pre_t285 做 identity 映射比對）")
         void 插欄前後既有五欄未變() throws Exception {
             stubAll();
             Workbook actual = read(service.exportIndexDaily("TWSE", D1, D2));
-            Workbook pre = golden("index_twse_pre_t284");
+            Workbook pre = golden("index_twse_pre_t285");
 
             // 附加在最末 → 欄索引不位移，映射即 identity（t281 插在中間時才需要位移函式）
             assertSameMapped(pre, actual, c -> c);
@@ -397,19 +397,19 @@ class DualFormatSingleTableExportTest {
             // 新欄只出現在表頭列：fixture 僅 2 列、湊不滿任何視窗，故資料列該格根本不建（omitNullCells）
             Sheet s = actual.getSheetAt(0);
             assertThat(s.getRow(0).getCell(5).getStringCellValue()).isEqualTo("週線MA5");
-            // Task 285 插欄後表頭共 9 格（不是 t284 當下的 6 格）——本測試只驗「t284 插的那一欄未變」，
-            // 表格總欄數已因 t285 變動，這裡必須跟著改，否則會誤判 t285 打壞了東西。
+            // Task 286 插欄後表頭共 9 格（不是 t285 當下的 6 格）——本測試只驗「t285 插的那一欄未變」，
+            // 表格總欄數已因 t286 變動，這裡必須跟著改，否則會誤判 t286 打壞了東西。
             assertThat(s.getRow(0).getLastCellNum()).isEqualTo((short) 9);
             assertThat(s.getRow(1).getCell(5)).as("視窗未滿 → 該格不建，不是 BLANK").isNull();
             assertThat(s.getRow(2).getCell(5)).isNull();
         }
 
         @Test
-        @DisplayName("插欄前後既有六欄逐格未變（對 index_twse_pre_t285 做 identity 映射比對）")
+        @DisplayName("插欄前後既有六欄逐格未變（對 index_twse_pre_t286 做 identity 映射比對）")
         void 插欄前後既有六欄未變() throws Exception {
             stubAll();
             Workbook actual = read(service.exportIndexDaily("TWSE", D1, D2));
-            Workbook pre = golden("index_twse_pre_t285");
+            Workbook pre = golden("index_twse_pre_t286");
 
             // 附加在最末 → 欄索引不位移，映射即 identity
             assertSameMapped(pre, actual, c -> c);
@@ -464,7 +464,7 @@ class DualFormatSingleTableExportTest {
             ArgumentCaptor<LocalDate> from = ArgumentCaptor.forClass(LocalDate.class);
             verify(twseIndexHistRepo)
                     .findByTradingDateBetweenOrderByTradingDateAsc(from.capture(), any());
-            assertThat(from.getValue()).as("查詢起點須回看 400 個日曆天（Task 285 由 30 天放大）")
+            assertThat(from.getValue()).as("查詢起點須回看 400 個日曆天（Task 286 由 30 天放大）")
                     .isEqualTo(START.minusDays(400));
 
             assertThat(s.getLastRowNum()).as("4 筆回看列不得輸出，只剩表頭 ＋ 3 列").isEqualTo(3);
@@ -582,7 +582,7 @@ class DualFormatSingleTableExportTest {
     }
 
     /**
-     * 以欄索引映射逐格比對值、型別、dataFormat、粗體、字級（Task 284，比照
+     * 以欄索引映射逐格比對值、型別、dataFormat、粗體、字級（Task 285，比照
      * {@code TradingRadarDualFormatTest.assertSameMapped}——那支是別的測試類別的 private static，跨類別用不到）。
      *
      * <p><b>不可改用同檔的 {@link #assertSameWorkbook}</b>：它會斷言 {@code getLastCellNum()} 相等，

@@ -9,7 +9,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 釘住 {@code GdpTwseBffController.movingAverage} 的 MA 定義（Requirement 18／45、Task 284）。
+ * 釘住 {@code GdpTwseBffController.movingAverage} 的 MA 定義（Requirement 18／45、Task 285）。
  *
  * <p><b>為什麼需要這一支：</b>「週線MA5」同一個語意的值有兩份實作——本圖表走這裡，
  * 而該頁匯出的「週線MA5」欄走 business 的 {@code ExcelExportService.ma5At}。兩者在不同 Maven 專案

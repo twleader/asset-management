@@ -509,7 +509,7 @@ public class ExcelExportService {
 
     /**
      * 大盤指數日線區間匯出（Requirement 45 / Task 216）：單張工作表、日期／開高低收 ＋ 四條均線九欄
-     * （第六～九欄為 Task 284／285 新增的計算欄：週線MA5／月線MA20／季線MA60／年線MA240）。
+     * （第六～九欄為 Task 285／286 新增的計算欄：週線MA5／月線MA20／季線MA60／年線MA240）。
      * 全域公開行情（兩張日線表皆無 owner 欄位、無 {@code @Filter}），故不需要 ForOwner 變體（同油價金價／匯率）。
      */
     @Transactional(readOnly = true)
@@ -532,7 +532,7 @@ public class ExcelExportService {
      * （那是 {@code @Transient} 衍生值，必須由 entity 算）。兩張表的欄位語意相同，在此正規化成同一組
      * {@code (date, o, h, l, c)} 後共用同一段寫表邏輯，確保切換指數時版面一致。
      *
-     * <p><b>第六～九欄是本分頁唯一不直接取自 DB 欄位的四欄</b>（Task 284 建立 MA5、Task 285 補齊
+     * <p><b>第六～九欄是本分頁唯一不直接取自 DB 欄位的四欄</b>（Task 285 建立 MA5、Task 286 補齊
      * MA20/60/240）：該日含當日往前 N 個交易日 {@code close} 的簡單移動平均（N ∈ {5,20,60,240}，
      * 交易日非日曆週／月／季／年）。定義與精度**必須**與本頁圖表的四條均線
      * （BFF {@code GdpTwseBffController.movingAverage(closes, window)}）逐位相同——同為 BigDecimal
@@ -583,7 +583,7 @@ public class ExcelExportService {
      * 折算約再扣 21～26 天休市日 ≈ 261～266 個交易日，對 239 仍有約 22～27 個交易日餘裕
      * （理論下限約 239×365/242 ≈ 361 個日曆天，400 尚有約 11% headroom；即使跨兩次農曆年的最壞情況，
      * 交易日仍約 259～260，≥ 239）。回看不足只會讓 {@link #indexMaAt} 回 null（缺值），不會算錯
-     * ——故此常數選保守即可（Task 284 原為 30，只夠 MA5；Task 285 放大為 400 以支撐四條均線）。
+     * ——故此常數選保守即可（Task 285 原為 30，只夠 MA5；Task 286 放大為 400 以支撐四條均線）。
      */
     private static final int MA_LOOKBACK_DAYS = 400;
 
@@ -598,7 +598,7 @@ public class ExcelExportService {
      *
      * <p>刻意不叫 {@code maAt}：{@code TechnicalIndicatorService.maAt} 是股票路徑的同名同形方法
      * （double 累加、可能併入 Redis 今日即時點位），語意不同，同名會讓
-     * {@code grep -ran "maAt" backend} 混淆兩種實作（Task 285）。
+     * {@code grep -ran "maAt" backend} 混淆兩種實作（Task 286）。
      */
     private static BigDecimal indexMaAt(List<IndexDailyRow> asc, int i, int window) {
         if (i < window - 1) return null;

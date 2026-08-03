@@ -1,4 +1,4 @@
-# [t284] 股市大盤查詢頁的日線圖與匯出加上「週線（MA5）」
+# [t285] 股市大盤查詢頁的日線圖與匯出加上「週線（MA5）」
 
 **對應 Requirements:** Requirement 18（股市大盤查詢：指數日線／當日分時 ＋ 台日韓人均 GDP 比較）、Requirement 45（股市大盤指數日線 Excel 匯出與排程自動匯出）
 **前置任務:** 無（t270 的 `ExportDoc` 雙格式基礎已在 main）
@@ -22,7 +22,7 @@
 
 ### A. BFF：`index-daily` 回傳加 `ma5`
 
-- [x] 284.1 `bff/src/main/java/com/steven/assets/bff/gdptwse/GdpTwseBffController.java`
+- [x] 285.1 `bff/src/main/java/com/steven/assets/bff/gdptwse/GdpTwseBffController.java`
   的 `getIndexDaily(...)` 在 `body.put("ma20", movingAverage(closes, 20));` **之前**加一行
   `body.put("ma5", movingAverage(closes, 5));`。
   - **必須複用同一支 `movingAverage(List<BigDecimal>, int window)` private method**，不得另寫一份 5 日版本：
@@ -37,14 +37,14 @@
 
 檔案：`frontend/src/views/GdpTwseView.vue`
 
-- [x] 284.2 新增 `const dailyMa5 = ref([])`，在 `fetchDailyData()` 內 `dailyMa5.value = (res.ma5 ?? []).map(num)`
+- [x] 285.2 新增 `const dailyMa5 = ref([])`，在 `fetchDailyData()` 內 `dailyMa5.value = (res.ma5 ?? []).map(num)`
       （比照既有 `dailyMa20`／`dailyMa60`／`dailyMa240` 的**兩處**：宣告在 `:263-265`、
-      `fetchDailyData()` 賦值在 `:359-361`。第三處 `:706-708` 屬 284.4）。
-- [x] 284.3 `cardTitle` 的日線分支由
+      `fetchDailyData()` 賦值在 `:359-361`。第三處 `:706-708` 屬 285.4）。
+- [x] 285.3 `cardTitle` 的日線分支由
       `` `${marketLabel.value}每日收盤（近 10 年，含月線/季線/年線）` `` 改為
       `` `${marketLabel.value}每日收盤（近 10 年，含週線/月線/季線/年線）` ``。
       「當日」分支（`${marketLabel.value}當日走勢…`）**不動**。
-- [x] 284.4 `dailyChartOption` 內：
+- [x] 285.4 `dailyChartOption` 內：
   - 加 `const ma5Data = intraday ? xData.map(() => lastOf(dailyMa5.value)) : dailyMa5.value`
     （與既有三條**同一寫法**：當日模式取日線最新 MA5 值鋪成水平參考線）。
   - `legend.data` 由 `['收盤', '月線 (MA20)', '季線 (MA60)', '年線 (MA240)']`
@@ -67,10 +67,10 @@
       **一律不得更動**；紫色與四者皆可辨。
   - **最高／最低 markPoint 仍只掛在「收盤」那條 series 上**，不因多一條均線而改變；
     `maxMinMarkPoints(closeData, ...)` 的輸入不得改成 MA5。
-- [x] 284.5 匯出對話框「輸出內容」說明文字
+- [x] 285.5 匯出對話框「輸出內容」說明文字
       `欄位為 <b>日期／開盤／最高／最低／收盤</b>，依日期遞增；當日該欄無資料則留空。`
       改為 `欄位為 <b>日期／開盤／最高／最低／收盤／週線MA5</b>，…`（週線那句補「週線MA5 為 5 個交易日收盤均價」）。
-- [x] 284.6 排程卡下方 `.schedule-hint` 的
+- [x] 285.6 排程卡下方 `.schedule-hint` 的
       `（主檔名相同、只差副檔名；欄位為日期／開盤／最高／最低／收盤，內容同上方「匯出 Excel」）`
       同步補上「／週線MA5」——**這兩處文案漏改就等於文件對使用者說謊**，且是本專案反覆出現的漂移型錯誤。
 
@@ -78,24 +78,24 @@
 
 檔案：`backend/src/main/java/com/steven/assets/service/ExcelExportService.java`（`indexDailySheet` 與 `findIndexDaily`）
 
-- [x] 284.7 表頭由 `List.of("日期", "開盤", "最高", "最低", "收盤")`
+- [x] 285.7 表頭由 `List.of("日期", "開盤", "最高", "最低", "收盤")`
       改為 `List.of("日期", "開盤", "最高", "最低", "收盤", "週線MA5")`——**新欄一律附加在最末**。
       既有五欄的欄索引 0–4 不得位移：`DualFormatSingleTableExportTest` 有寫死的欄索引斷言
       （`getCell(1)`／`getCell(3)` 為 null、`getCell(4)` ＝ 23200.00）。
       **插在中間並非做不到**——t281 就是把「週線MA5」插在雷達的 `MA20` 之前，再維護一組欄索引位移函式
       （`c -> c < 11 ? c : (c < 18 ? c + 1 : c + 15)`）對改動前的 golden 比對——但那是本次不必要的成本：
-      附加在最末，284.14 的比對用 identity 映射即可，既有斷言的欄索引也一格都不用改。
+      附加在最末，285.14 的比對用 identity 映射即可，既有斷言的欄索引也一格都不用改。
       **同步改 javadoc（四處，漏一處就留下一句假話）**：`ExcelExportService.java:511`「單張工作表、
       日期／開高低收**五欄**」、`:527`「日期／開盤／最高／最低／收盤**五欄**」、
       `:529`「**四個價格欄**直接讀 DB 既有 OHLC 欄位」，以及 **`MacroHistoryController.java:122`**
       「指數日線區間匯出成單一 .xlsx（日期／開盤／最高／最低／收盤**五欄**）」——
       全部更新為「六欄／第六欄為計算欄（週線MA5）」。
       （查法：`grep -ran "五欄\|開盤／最高／最低／收盤" backend/src/main/java`，本次會失效的正是這四處。）
-- [x] 284.8 `formats` 對應加第六個 `ExportDoc.Format.NUM2`（**不是 NUM4**）：
+- [x] 285.8 `formats` 對應加第六個 `ExportDoc.Format.NUM2`（**不是 NUM4**）：
       MA5 定義上只有 2 位小數（`divide(5, 2, HALF_UP)`），用 NUM4 會多印兩個恆為 0 的位數、
       謊稱精度。交易雷達匯出的「週線MA5」欄同樣是 NUM2（既有先例）。
       `ExportDoc.Table` 建構子會驗 `columnFormats.size() == headers.size()`，漏加會直接擲 `IllegalArgumentException`。
-- [x] 284.9 **MA5 計算**：以區間內（含回看列）的 `close` 依日期遞增計算「該日含當日往前 5 個交易日的簡單移動平均」，
+- [x] 285.9 **MA5 計算**：以區間內（含回看列）的 `close` 依日期遞增計算「該日含當日往前 5 個交易日的簡單移動平均」，
       **BigDecimal 精確加總後 `divide(5, 2, RoundingMode.HALF_UP)`**，前 4 列（視窗未滿）為 `null`。
   - **精度與算法必須與 BFF `GdpTwseBffController.movingAverage(closes, 5)` 逐位相同**
     （同為 BigDecimal 精確加總、無中間捨入、`divide(window, 2, HALF_UP)`）——同一指數同一日期，
@@ -110,9 +110,9 @@
         本頁另外 8 個海外指數（DJI/SPX/IXIC/SOX/FTSE/DAX/KOSPI/N225）在該服務**沒有任何分支**，
         走 `stockSeriesAsc` 只會去查 `stock_price_history` 而得到空序列；
     (b) 它會併入 Redis 今日盤中即時點位，本匯出一律只用已落地的日線收盤；
-    (c) 它的 `simpleMa`／`taiexSimpleMa`／`maAt` 都是 `double` 累加，與 284.9 要求的 BigDecimal 精度不同
+    (c) 它的 `simpleMa`／`taiexSimpleMa`／`maAt` 都是 `double` 累加，與 285.9 要求的 BigDecimal 精度不同
         （對 `numeric(14,4)` 的海外指數在 `.xx500` 邊界可能差 0.01）。
-- [x] 284.10 **回看視窗**：`findIndexDaily(market, start, end)` 的查詢起點改為 `start.minusDays(30)`，
+- [x] 285.10 **回看視窗**：`findIndexDaily(market, start, end)` 的查詢起點改為 `start.minusDays(30)`，
       算完 MA5 後**只輸出 `date >= start` 的列**，回看列不得出現在檔案中。
   - 理由：只用區間內收盤時，檔案前 4 列的週線必為空——使用者會讀成 bug。
   - 30 個日曆天足以涵蓋含農曆年連假在內的 4 個交易日（連假最長約 9 天 ＋ 前後週末）。
@@ -121,9 +121,9 @@
     兩條路徑都要吃到回看起點（把回看寫在共用的呼叫端，不要只改其中一條）。
   - DB 本身湊不滿 5 個交易日時（該指數歷史最前端）該格留 `null`，**不補前值、不以不足視窗的平均充數**
     ——同既有 open/high/low 的處理。`omitNullCells=true` 語意不變：該格**根本不建**（非 BLANK 格）。
-- [x] 284.11 `ExportDoc.Sheet(..., headers.size())` 的 `autoSizeColumns` 自動跟著變 6（既有寫法已是 `headers.size()`，
+- [x] 285.11 `ExportDoc.Sheet(..., headers.size())` 的 `autoSizeColumns` 自動跟著變 6（既有寫法已是 `headers.size()`，
       確認不要改成寫死常數）。
-- [x] 284.12 **不得**改動 `exportIndexDaily`／`indexDailyDoc` 的簽章與 `IndexExportScheduleService` 的呼叫方式：
+- [x] 285.12 **不得**改動 `exportIndexDaily`／`indexDailyDoc` 的簽章與 `IndexExportScheduleService` 的呼叫方式：
       排程與手動匯出走同一支 `indexDailyDoc(market, start, end)`，兩條途徑自動同時拿到新欄
       （CLAUDE.md「同義欄位、同一 business service API」）。JSON 那一份由同一份 headers 產生
       key `"週線MA5"`，**不需要**也**不得**另寫 JSON 分支。
@@ -132,10 +132,10 @@
 
 檔案：`backend/src/test/java/com/steven/assets/service/export/DualFormatSingleTableExportTest.java`
 
-- [x] 284.13 **golden 基準重產（順序不可顛倒）**：
-  1. 先把現行 `backend/src/test/resources/golden/index_twse.xlsx` **複製**為 `index_twse_pre_t284.xlsx`
+- [x] 285.13 **golden 基準重產（順序不可顛倒）**：
+  1. 先把現行 `backend/src/test/resources/golden/index_twse.xlsx` **複製**為 `index_twse_pre_t285.xlsx`
      （兩個檔名都要存在，**不是 `git mv`**），並 `git add` 之。
-  2. 實作完 284.7–284.11 後才重產 `index_twse.xlsx`。repo 內沒有 golden 產生器，作法是暫時在該測試類別加一支
+  2. 實作完 285.7–285.11 後才重產 `index_twse.xlsx`。repo 內沒有 golden 產生器，作法是暫時在該測試類別加一支
      拋棄式測試，**stub 與 fixture 必須與該檔現行的完全同一份**（`stubAll()` ＋ `twseIndex()`），寫出後刪掉：
      ```java
      java.nio.file.Files.write(java.nio.file.Path.of("src/test/resources/golden/index_twse.xlsx"),
@@ -143,32 +143,32 @@
      ```
      （工作目錄為 `backend/`。）
   3. **不得順手改 `twseIndex()` fixture**（現行為 D1=2026-07-30 全欄有值、D2=2026-07-31 只有收盤 23200.00，
-     共 2 列）——改了會讓 284.14 的「既有欄未變」比對失去意義。2 列不足 5 筆，故重產後
+     共 2 列）——改了會讓 285.14 的「既有欄未變」比對失去意義。2 列不足 5 筆，故重產後
      **MA5 那格不存在**（`omitNullCells`），golden 的唯一差異是**表頭列多一格「週線MA5」**。
-- [x] 284.14 新增測試「插欄後既有五欄逐格未變」：以 `index_twse_pre_t284` 為期望值，
+- [x] 285.14 新增測試「插欄後既有五欄逐格未變」：以 `index_twse_pre_t285` 為期望值，
       對 `service.exportIndexDaily("TWSE", D1, D2)` 的產出做**欄索引 identity 映射**逐格比對
       （值、型別、`dataFormat`、粗體、字級），並斷言新欄只出現在表頭列。
       ⚠️ **只重產 golden 不做這條比對是不夠的**——那樣「新增了欄」與「順手改壞既有欄」無法分辨。
       ⚠️ **不可沿用同檔的 `assertSameWorkbook`**：它會斷言 `getLastCellNum()` 相等，而表頭列是 5 vs 6，必紅。
       可比照 `TradingRadarDualFormatTest.assertSameMapped`（該檔 `:333`，`private static`，
       跨測試類別用不到，**需複製一份**到 `DualFormatSingleTableExportTest`），映射函式傳 `c -> c`。
-- [x] 284.15 新增測試「MA5 值正確且與 BFF 同定義」：另備一組**獨立 fixture**（不與 golden 比對）
+- [x] 285.15 新增測試「MA5 值正確且與 BFF 同定義」：另備一組**獨立 fixture**（不與 golden 比對）
       至少 7 個交易日的 TWSE 收盤序列，斷言：
   ⚠️ **本條 fixture 的日期一律 `>= 傳入的 start`**（模擬「DB 歷史最前端湊不滿 5 筆」的情境）。
-  若把前幾筆放在 `start` 之前，284.10 的回看過濾會把它們濾掉、第一列就有值，本條的「前 4 列為 null」必紅。
-  **它與 284.16 的「含 `start` 之前列」fixture 是兩組不同資料，不得共用。**
+  若把前幾筆放在 `start` 之前，285.10 的回看過濾會把它們濾掉、第一列就有值，本條的「前 4 列為 null」必紅。
+  **它與 285.16 的「含 `start` 之前列」fixture 是兩組不同資料，不得共用。**
   - 前 4 列該格**不存在**（`getCell(5) == null`）、第 5 列起有值；
   - 第 5 列的值 ＝ 前 5 個收盤的算術平均四捨五入到 2 位（在測試裡以 `BigDecimal` 手算期望值，
     **不得**呼叫被測程式自己算期望值）；
   - JSON 那一份（`JsonDocRenderer.render(service.indexDailyDoc(...))`）同列的 `"週線MA5"`
     為相同數值、前 4 列為 `null`。
-- [x] 284.16 新增測試「回看列不得出現在檔案中」：stub repo 回傳含 `start` 之前日期的列，
+- [x] 285.16 新增測試「回看列不得出現在檔案中」：stub repo 回傳含 `start` 之前日期的列，
       斷言產出的第一列日期 ＝ `start`（不是回看起點），且該列 MA5 **有值**
       （證明回看有生效、不是把回看列直接印出來）。
       ⚠️ 現行 stub 是 `findByTradingDateBetweenOrderByTradingDateAsc(any(), any())`，
       回看與否從回傳值看不出來——本條須改用 `ArgumentCaptor` 或具體日期 matcher 斷言
       **實際傳入 repo 的起點 ＝ `start.minusDays(30)`**。
-- [x] 284.17 **BFF 側把 MA 定義釘進測試**（本次唯一的跨模組防漂移代償，見下方「架構決策」）：
+- [x] 285.17 **BFF 側把 MA 定義釘進測試**（本次唯一的跨模組防漂移代償，見下方「架構決策」）：
   - `GdpTwseBffController.movingAverage` 由 `private` 改為 **package-private**（加註
     `/** package-private：供同 package 的單元測試釘住 MA 定義，勿改回 private */`）。
   - 在 `bff/src/test/java/com/steven/assets/bff/gdptwse/` 下**新增一支 JUnit 5 單元測試類**
@@ -210,7 +210,7 @@
 - 不動股票分析走勢圖／交易雷達／觀察清單的任何 MA5（那些走 `TechnicalIndicatorService`，是另一條資料流）。
 - **不新增** `SchedulePublicBffController` 的 `JOBS` 項目（沒有新排程），但**該檔的文案要改一句**：
   「大盤指數匯出／每日匯出排程檢查」那筆的說明含「…主檔名相同，**欄位為開高低收**）…」，
-  須改為「欄位為開高低收＋週線MA5」——那是排程一覽頁的使用者可見文案，與 284.5／284.6 同性質，
+  須改為「欄位為開高低收＋週線MA5」——那是排程一覽頁的使用者可見文案，與 285.5／285.6 同性質，
   漏改一樣是對使用者說謊。
 
 ## 驗證
@@ -225,7 +225,7 @@
 /usr/local/apache-maven/apache-maven-3.9.11/bin/mvn -q -f backend/pom.xml test \
   -DextraArgLine=-Dnet.bytebuddy.experimental=true
 
-# 3. BFF 測試（含 284.17 新增的 movingAverage 定義測試）＋ 打包
+# 3. BFF 測試（含 285.17 新增的 movingAverage 定義測試）＋ 打包
 /usr/local/apache-maven/apache-maven-3.9.11/bin/mvn -q -f bff/pom.xml test
 /usr/local/apache-maven/apache-maven-3.9.11/bin/mvn -q -f bff/pom.xml package -DskipTests
 
@@ -283,7 +283,7 @@ cd /Users/steven/Project/asset-management && docker compose -p asset-management 
 | `backend/.../controller/MacroHistoryController.java` | 僅 javadoc（五欄→六欄） |
 | `backend/src/test/.../export/DualFormatSingleTableExportTest.java` | 新增 `WeeklyMa5` 三條測試 ＋ `assertSameMapped` helper |
 | `backend/src/test/resources/golden/index_twse.xlsx` | 重產（表頭多一格；資料列因 fixture 只有 2 筆而無 MA5 格） |
-| `backend/src/test/resources/golden/index_twse_pre_t284.xlsx` | 新增：改動前基準，供 identity 映射比對 |
+| `backend/src/test/resources/golden/index_twse_pre_t285.xlsx` | 新增：改動前基準，供 identity 映射比對 |
 | `frontend/src/views/GdpTwseView.vue` | 第五條線「週線 (MA5)」＋標題＋legend＋當日水平線＋兩處文案 |
 
 ### 測試結果
@@ -317,7 +317,7 @@ cd /Users/steven/Project/asset-management && docker compose -p asset-management 
   驗收裸打不存在的 8081 且未考慮 OAuth、宣稱做不到的機械判準、「無共同計算落點」與程式碼不符）；
   R2 4 major（「第一次兩份實作」不實、javadoc 漏第四處、被放棄選項的理由不成立、例外未寫進規範）；
   R3 2 major（「第一次」仍不實、任務檔殘留被推翻的舊理由）。全部修完，`scripts/spec-check.sh` 0 BLOCK。
-  期間 origin/main 占用 283 → 整體避讓為 284。
+  期間 origin/main 占用 283 → 整體避讓為 285。
 - **`arch-auditor`（實作後）**：0 critical／2 major，兩條同源——「同義欄位 → 同一支 business service API」。
   它的關鍵反駁成立：規範要的是 **BFF 呼叫同一支 business API**，不是共用程式碼，故原本
   「跨 Maven 專案無法共用」的論證答非所問；且 backend 內部 `ExcelExportService` 與
@@ -333,10 +333,10 @@ cd /Users/steven/Project/asset-management && docker compose -p asset-management 
 
 ### 與計畫的偏差
 
-- **無功能偏差**，284.1–284.17 全數照做。
-- **編號避讓**：本任務原編 283，實作前 origin/main 推進並占用 283（交易雷達頁首匯出雙格式），整體改為 **284**。
-- 284.17 的 BFF 測試類名刻意不寫進 spec（`scripts/spec-check.sh` 的 B5 會把「spec 提到但全樹不存在的測試類」
+- **無功能偏差**，285.1–285.17 全數照做。
+- **編號避讓**：本任務原編 283，實作前 origin/main 推進並占用 283（交易雷達頁首匯出雙格式），整體改為 **285**。
+- 285.17 的 BFF 測試類名刻意不寫進 spec（`scripts/spec-check.sh` 的 B5 會把「spec 提到但全樹不存在的測試類」
   判為 BLOCK，而實作前它本來就還不存在），實際落檔為 `GdpTwseBffControllerMaTest`。
-- 284.15 的「至少含一組會觸發 HALF_UP 進位的收盤值」：2 位小數的收盤除以 5 恆為 3 位小數且末位為偶數
+- 285.15 的「至少含一組會觸發 HALF_UP 進位的收盤值」：2 位小數的收盤除以 5 恆為 3 位小數且末位為偶數
   （`k/500 = 2k/1000`），故 `x.xxx5` 平手在 TWSE 精度下**數學上不可能**；改以「100.028 → 100.03」的進位案例
   涵蓋，並在測試註解記下此推導。海外指數的 4 位小數精度另立一條測試。
