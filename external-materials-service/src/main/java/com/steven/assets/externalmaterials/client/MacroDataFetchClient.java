@@ -190,14 +190,157 @@ public class MacroDataFetchClient {
         return Map.of("growth", growth, "gdpUsd", gdpUsd);
     }
 
-    /** 大盤每日 OHLC（從 MI_5MINS_HIST 月報拆出）。 */
+    /**
+     * 大盤/指數每日 OHLC ＋成交量（從 MI_5MINS_HIST 月報拆出 OHLC，FMTQIK 月報拆出成交量）。
+     * volume=成交股數(股)；value=成交金額(元)，僅台股有（Yahoo 無此欄，海外指數恆 null）。
+     */
     public record DailyOhlc(LocalDate tradingDate,
-                             BigDecimal open, BigDecimal high, BigDecimal low, BigDecimal close) {}
+                             BigDecimal open, BigDecimal high, BigDecimal low, BigDecimal close,
+                             Long volume, BigDecimal value) {}
+
+    /** FMTQIK 單日成交股數／成交金額（供 fetchTwseMonthlyDaily 併抓 join 用）。套件內可見，供測試直接建構。 */
+    record Turnover(Long volume, BigDecimal value) {}
 
     /**
-     * TWSE MI_5MINS_HIST 月報（www.twse.com.tw 版本）。
+     * TWSE FMTQIK 月報（市場成交資訊）。MI_5MINS_HIST 只有 OHLC 四欄、沒有成交量，故另抓本表 join。
+     * 用 www.twse.com.tw 的 rwd 版（支援 ?date= 回補歷史；openapi 版只回最新一批、不支援 date，
+     * 那支是 {@code TwseInfoFetchClient} 供「大盤成交統計」新聞用，與本方法互不影響）。
+     * 回應 schema: { stat:"OK", hints:"單位：元、股",
+     *                fields:[日期, 成交股數, 成交金額, 成交筆數, 發行量加權股價指數, 漲跌點數],
+     *                data:[["115/07/01","14,683,404,939","1,367,817,795,171",...], ...] }
+     */
+    private static final String TWSE_TURNOVER_URL =
+            "https://www.twse.com.tw/rwd/zh/afterTrading/FMTQIK?response=json&date=";
+
+    /**
+     * FMTQIK 回應 JSON 解析為 date→Turnover map；stat!=OK 或無 data 陣列回空 map。
+     * 套件內可見、純函式（不做 I/O），供 fetchTwseTurnoverMonthly 呼叫，亦供測試直接驗證解析與 join 邏輯。
+     */
+    static Map<LocalDate, Turnover> parseTwseTurnoverJson(JsonNode root) {
+        if (!"OK".equals(root.path("stat").asText())) return Collections.emptyMap();
+        JsonNode data = root.path("data");
+        if (!data.isArray() || data.isEmpty()) return Collections.emptyMap();
+
+        Map<LocalDate, Turnover> out = new LinkedHashMap<>();
+        for (JsonNode row : data) {
+            if (!row.isArray() || row.size() < 3) continue;
+            String rocDate = row.get(0).asText("");  // e.g. "115/07/01"
+            String[] parts = rocDate.split("/");
+            if (parts.length != 3) continue;
+            LocalDate d;
+            try {
+                d = LocalDate.of(
+                        Integer.parseInt(parts[0]) + 1911,
+                        Integer.parseInt(parts[1]),
+                        Integer.parseInt(parts[2]));
+            } catch (Exception e) { continue; }
+
+            Long volume = parseLong(row.get(1).asText(""));
+            BigDecimal value = parseIndex(row.get(2).asText(""));
+            out.put(d, new Turnover(volume, value));
+        }
+        return out;
+    }
+
+    /**
+     * FMTQIK 短期熔斷：實測（2026-08-03）10 年批次回補逐月併抓 FMTQIK 時，約第 26 個月起
+     * TWSE 開始對 MI_5MINS_HIST 與 FMTQIK 兩支端點「同時」回 307（推測為同一組 WAF 限流），
+     * 若照樣繼續打，會把「本次新增的 FMTQIK 呼叫」的代價轉嫁到「既有的 MI_5MINS_HIST 呼叫」
+     * 上──連本來單獨呼叫可撐完整個批次的價格資料都被拖累跳過。三次以上連續非 2xx 視為已被
+     * 限流，暫停呼叫 FMTQIK 一段冷卻期（不再消耗 request 額度），讓 MI_5MINS_HIST 至少維持
+     * 本次變更前的既有可靠度；剩餘月份的量欄留 null，之後重新回補時自然逐步補齊。
+     */
+    private final java.util.concurrent.atomic.AtomicInteger fmtqikConsecutiveNon2xx =
+            new java.util.concurrent.atomic.AtomicInteger(0);
+    private volatile long fmtqikCooldownUntilMs = 0L;
+    private static final int FMTQIK_TRIP_THRESHOLD = 3;
+    private static final long FMTQIK_COOLDOWN_MS = 5 * 60_000L;
+
+    /** 任何失敗（非 2xx／stat != OK／例外）一律回空 map、不拋，由呼叫端降級為量欄 null。 */
+    private Map<LocalDate, Turnover> fetchTwseTurnoverMonthly(int year, int month) {
+        if (System.currentTimeMillis() < fmtqikCooldownUntilMs) {
+            return Collections.emptyMap();   // 熔斷中：不消耗額外 request 額度，不拖累 MI_5MINS_HIST
+        }
+        try {
+            String date = String.format("%04d%02d01", year, month);
+            HttpRequest req = HttpRequest.newBuilder(URI.create(TWSE_TURNOVER_URL + date))
+                    .header("Accept", "application/json")
+                    .header("User-Agent", "Mozilla/5.0")
+                    .timeout(Duration.ofSeconds(15))
+                    .GET().build();
+            HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString());
+            if (res.statusCode() / 100 != 2) {
+                tripFmtqikCircuitIfNeeded();
+                return Collections.emptyMap();
+            }
+            fmtqikConsecutiveNon2xx.set(0);
+            JsonNode root = mapper.readTree(res.body());
+            return parseTwseTurnoverJson(root);
+        } catch (Exception e) {
+            log.warn("TWSE FMTQIK {}/{} 月報抓取失敗：{}", year, month, e.getMessage());
+            tripFmtqikCircuitIfNeeded();
+            return Collections.emptyMap();
+        }
+    }
+
+    private void tripFmtqikCircuitIfNeeded() {
+        if (fmtqikConsecutiveNon2xx.incrementAndGet() >= FMTQIK_TRIP_THRESHOLD) {
+            fmtqikCooldownUntilMs = System.currentTimeMillis() + FMTQIK_COOLDOWN_MS;
+            fmtqikConsecutiveNon2xx.set(0);
+            log.warn("TWSE FMTQIK 連續 {} 次非 2xx，判定已被限流，暫停呼叫 {} 分鐘",
+                    FMTQIK_TRIP_THRESHOLD, FMTQIK_COOLDOWN_MS / 60_000);
+        }
+    }
+
+    /** "413,214,615,558" → 413214615558L；空/"-"/無法解析回 null。 */
+    private static Long parseLong(String raw) {
+        if (raw == null) return null;
+        String s = raw.replace(",", "").trim();
+        if (s.isEmpty() || "-".equals(s)) return null;
+        try { return Long.parseLong(s); } catch (NumberFormatException e) { return null; }
+    }
+
+    /**
+     * MI_5MINS_HIST 回應 JSON ＋ 已解析好的成交量 map，join 成 DailyOhlc 列。
+     * 套件內可見、純函式（不做 I/O），供 fetchTwseMonthlyDaily 呼叫，亦供測試直接驗證。
+     * FMTQIK 該日查無對應 turnover 時，量欄留 null，OHLC 仍照原樣加入——不得因此略過該列。
+     */
+    static List<DailyOhlc> parseTwseMonthlyOhlcJson(JsonNode root, Map<LocalDate, Turnover> turnovers) {
+        if (!"OK".equals(root.path("stat").asText())) return Collections.emptyList();
+        JsonNode data = root.path("data");
+        if (!data.isArray() || data.isEmpty()) return Collections.emptyList();
+
+        List<DailyOhlc> out = new ArrayList<>();
+        for (JsonNode row : data) {
+            if (!row.isArray() || row.size() < 5) continue;
+            String rocDate = row.get(0).asText("");  // e.g. "115/05/04"
+            String[] parts = rocDate.split("/");
+            if (parts.length != 3) continue;
+            LocalDate d;
+            try {
+                d = LocalDate.of(
+                        Integer.parseInt(parts[0]) + 1911,
+                        Integer.parseInt(parts[1]),
+                        Integer.parseInt(parts[2]));
+            } catch (Exception e) { continue; }
+
+            BigDecimal open  = parseIndex(row.get(1).asText(""));
+            BigDecimal high  = parseIndex(row.get(2).asText(""));
+            BigDecimal low   = parseIndex(row.get(3).asText(""));
+            BigDecimal close = parseIndex(row.get(4).asText(""));
+            if (close == null) continue;
+            Turnover t = turnovers.get(d);
+            out.add(new DailyOhlc(d, open, high, low, close,
+                    t == null ? null : t.volume(), t == null ? null : t.value()));
+        }
+        return out;
+    }
+
+    /**
+     * TWSE MI_5MINS_HIST 月報（www.twse.com.tw 版本）＋ FMTQIK 月報（成交股數／成交金額）併抓後以交易日 join。
      * 回應 schema: { stat: "OK", fields: [日期, 開盤指數, 最高指數, 最低指數, 收盤指數],
      *               data: [["民國年/月/日","12,345.67",...], ...] }
+     * FMTQIK 該月失敗或該日查無時，量欄留 null，OHLC 仍照原樣回傳——不得因此整月略過。
      */
     public List<DailyOhlc> fetchTwseMonthlyDaily(int year, int month) {
         try {
@@ -210,32 +353,8 @@ public class MacroDataFetchClient {
             HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString());
             if (res.statusCode() / 100 != 2) return Collections.emptyList();
             JsonNode root = mapper.readTree(res.body());
-            if (!"OK".equals(root.path("stat").asText())) return Collections.emptyList();
-            JsonNode data = root.path("data");
-            if (!data.isArray() || data.isEmpty()) return Collections.emptyList();
-
-            List<DailyOhlc> out = new ArrayList<>();
-            for (JsonNode row : data) {
-                if (!row.isArray() || row.size() < 5) continue;
-                String rocDate = row.get(0).asText("");  // e.g. "115/05/04"
-                String[] parts = rocDate.split("/");
-                if (parts.length != 3) continue;
-                LocalDate d;
-                try {
-                    d = LocalDate.of(
-                            Integer.parseInt(parts[0]) + 1911,
-                            Integer.parseInt(parts[1]),
-                            Integer.parseInt(parts[2]));
-                } catch (Exception e) { continue; }
-
-                BigDecimal open  = parseIndex(row.get(1).asText(""));
-                BigDecimal high  = parseIndex(row.get(2).asText(""));
-                BigDecimal low   = parseIndex(row.get(3).asText(""));
-                BigDecimal close = parseIndex(row.get(4).asText(""));
-                if (close == null) continue;
-                out.add(new DailyOhlc(d, open, high, low, close));
-            }
-            return out;
+            Map<LocalDate, Turnover> turnovers = fetchTwseTurnoverMonthly(year, month);
+            return parseTwseMonthlyOhlcJson(root, turnovers);
         } catch (Exception e) {
             log.warn("TWSE MI_5MINS_HIST {}/{} 月報抓取失敗：{}", year, month, e.getMessage());
             return Collections.emptyList();
@@ -342,11 +461,14 @@ public class MacroDataFetchClient {
                 if (close.isNull() || close.isMissingNode()) continue;
                 LocalDate d = java.time.Instant.ofEpochSecond(timestamps.get(i).asLong())
                         .atZone(zone).toLocalDate();
+                JsonNode volumeNode = quotes.path("volume").path(i);
+                Long volume = (volumeNode.isNull() || volumeNode.isMissingNode()) ? null : volumeNode.asLong();
                 out.add(new DailyOhlc(d,
                         jsonDecimal4(quotes.path("open").path(i)),
                         jsonDecimal4(quotes.path("high").path(i)),
                         jsonDecimal4(quotes.path("low").path(i)),
-                        jsonDecimal4(close)));
+                        jsonDecimal4(close),
+                        volume, null));   // value（成交金額）Yahoo 無此欄，恆 null
             }
             return out;
         } catch (Exception e) {

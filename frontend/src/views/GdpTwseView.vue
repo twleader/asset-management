@@ -40,7 +40,8 @@
           </div>
         </div>
       </template>
-      <v-chart v-if="hasDailyData" ref="dailyChartRef" :option="dailyChartOption" style="height:480px" autoresize @datazoom="onDailyZoom" />
+      <v-chart v-if="hasDailyData" ref="dailyChartRef" :option="dailyChartOption"
+               :update-options="{ notMerge: true }" style="height:480px" autoresize @datazoom="onDailyZoom" />
       <el-empty v-else :description="emptyDesc" />
     </el-card>
 
@@ -263,6 +264,9 @@ const dailyCloses = ref([])
 const dailyMa20 = ref([])
 const dailyMa60 = ref([])
 const dailyMa240 = ref([])
+const dailyVolumes = ref([])      // 成交量（股）：台股=成交股數、海外=成交量（Task 286）
+const dailyTurnovers = ref([])    // 成交金額（元）：僅台股非空，海外恆全 null
+const dailyHasVolume = ref(false) // 該指數整段是否有成交量資料（由 BFF 判定，決定成交量子圖顯示與否）
 const dailyRange = ref('1y')
 const dailyRefreshing = ref(false)
 const dailyChartRef = ref(null)
@@ -285,7 +289,7 @@ const hasDailyData = computed(() =>
 const cardTitle = computed(() =>
   isIntraday.value
     ? `${marketLabel.value}當日走勢${intradayDate.value ? `（${intradayDate.value}）` : ''}`
-    : `${marketLabel.value}每日收盤（近 10 年，含月線/季線/年線）`)
+    : `${marketLabel.value}每日收盤（近 10 年，含月線/季線/年線${dailyHasVolume.value ? '與成交量' : ''}）`)
 const emptyDesc = computed(() =>
   isIntraday.value
     ? `尚無${marketLabel.value}當日分時資料`
@@ -359,6 +363,9 @@ async function fetchDailyData() {
     dailyMa20.value = (res.ma20 ?? []).map(num)
     dailyMa60.value = (res.ma60 ?? []).map(num)
     dailyMa240.value = (res.ma240 ?? []).map(num)
+    dailyVolumes.value = (res.volumes ?? []).map(num)
+    dailyTurnovers.value = (res.turnovers ?? []).map(num)
+    dailyHasVolume.value = !!res.hasVolume
   } catch {}
 }
 
@@ -698,6 +705,27 @@ function onDailyZoom() {
   dailyZoomPct.value = { start: dz.start, end: dz.end }
 }
 
+// 成交量柱色依當日收盤 vs 前一交易日收盤決定：紅漲、綠跌、灰平（台股慣例）；序列第一筆無前值 → 平盤灰
+function barColorAt(closeData, i) {
+  if (i === 0) return '#94a3b8'
+  const cur = closeData[i], prev = closeData[i - 1]
+  if (cur == null || prev == null) return '#94a3b8'
+  if (cur > prev) return '#dc2626'
+  if (cur < prev) return '#16a34a'
+  return '#94a3b8'
+}
+
+// 海外指數成交量依整段最大值自動選單位：≥1e8→億股、≥1e4→萬股、其餘原值（Task 286）
+function pickVolumeUnit(values) {
+  const absVals = values.filter(v => v != null).map(v => Math.abs(Number(v)))
+  const maxV = absVals.length ? Math.max(...absVals) : 0
+  if (maxV >= 1e8) return { divisor: 1e8, label: '億股' }
+  if (maxV >= 1e4) return { divisor: 1e4, label: '萬股' }
+  return { divisor: 1, label: '股' }
+}
+
+const VOLUME_FALLBACK_LEGEND = '本指數無成交量資料'
+
 const dailyChartOption = computed(() => {
   const intraday = isIntraday.value
   // 當日模式：x 軸為分時 HH:mm、收盤＝分時 closes、月/季/年線改畫水平參考線（取日線最新 MA 值，同口徑）
@@ -707,11 +735,32 @@ const dailyChartOption = computed(() => {
   const ma60Data = intraday ? xData.map(() => lastOf(dailyMa60.value)) : dailyMa60.value
   const ma240Data = intraday ? xData.map(() => lastOf(dailyMa240.value)) : dailyMa240.value
   const ez = effectiveDailyZoom.value
-  const dataZoom = intraday
-    ? [{ type: 'inside', start: 0, end: 100 }, { type: 'slider', start: 0, end: 100, height: 20, bottom: 10 }]
+  const zoomStart = intraday ? 0 : ez.start
+  const zoomEnd = intraday ? 100 : ez.end
+
+  // 「當日」模式（分時 API 無逐格成交量）或本指數整段無量（如費城半導體 SOX）都不畫成交量子圖（Task 286）
+  const tw = market.value === 'TWSE'
+  const showVolume = !intraday && dailyHasVolume.value
+  const volumeSeriesName = tw ? '成交金額' : '成交量'
+  const overseasUnit = tw ? null : pickVolumeUnit(dailyVolumes.value)
+  const volumeUnitLabel = tw ? '億元' : overseasUnit.label
+  const volumeDivisor = tw ? 1e8 : overseasUnit.divisor
+  const volumeRaw = tw ? dailyTurnovers.value : dailyVolumes.value
+  // 單日 0 或 null → 該柱留空（null），不得給 0（0 會畫成貼底的實心柱，看起來像「當天有成交但量極小」）
+  const volumeDisplay = volumeRaw.map(v => (v == null || Number(v) === 0) ? null : Number(v) / volumeDivisor)
+  const volumeBarData = volumeDisplay.map((v, i) => ({
+    value: v,
+    itemStyle: { color: barColorAt(closeData, i) }
+  }))
+
+  const dataZoom = showVolume
+    ? [
+        { type: 'inside', xAxisIndex: [0, 1], start: zoomStart, end: zoomEnd },
+        { type: 'slider', xAxisIndex: [0, 1], start: zoomStart, end: zoomEnd, height: 20, bottom: 10 }
+      ]
     : [
-        { type: 'inside', start: ez.start, end: ez.end },
-        { type: 'slider', start: ez.start, end: ez.end, height: 20, bottom: 10 }
+        { type: 'inside', start: zoomStart, end: zoomEnd },
+        { type: 'slider', start: zoomStart, end: zoomEnd, height: 20, bottom: 10 }
       ]
   // 最高 / 最低點：只在目前可視區間內找（資料為完整 10 年、區間按鈕只調縮放，不可用 ECharts 原生 max/min）
   let markData = []
@@ -723,26 +772,80 @@ const dailyChartOption = computed(() => {
   }
   // 當日模式 Y 軸鎖定「當日價格區間」(+10% padding)，避免被遠離當日價位的均線水平線撐平走勢；
   // 日線模式維持 scale:true。均線水平線落在區間外時由 series clip 自動裁切，數值仍保留在 legend。
-  let yAxis = { type: 'value', name: '收盤點位', scale: true, axisLabel: { formatter: v => v.toLocaleString() } }
+  let priceYAxis = { type: 'value', name: '收盤點位', gridIndex: 0, scale: true, axisLabel: { formatter: v => v.toLocaleString() } }
   if (intraday) {
     const vals = closeData.filter(v => v != null)
     if (vals.length) {
       const lo = Math.min(...vals), hi = Math.max(...vals)
       const pad = (hi - lo) * 0.1 || hi * 0.001 || 1
-      yAxis = {
-        type: 'value', name: '收盤點位',
+      priceYAxis = {
+        type: 'value', name: '收盤點位', gridIndex: 0,
         min: lo - pad, max: hi + pad,
         axisLabel: { formatter: v => v.toLocaleString() }
       }
     }
   }
+
+  const grid = showVolume
+    ? [
+        { left: 70, right: 30, top: 70, bottom: 150 },      // 上：價格
+        { left: 70, right: 30, height: 70, bottom: 60 }     // 下：成交量
+      ]
+    : { left: 70, right: 30, top: 70, bottom: 60 }
+
+  const xAxis = showVolume
+    ? [
+        // ⚠️ 日期標籤畫在「下圖」，上圖關掉：兩個 pane 上下相疊，標籤只能放在整體最底部；
+        //    若放上圖，會畫在兩個 pane 中間的夾縫裡，真正在最下方的成交量 pane 反而沒有日期可對照。
+        { gridIndex: 0, type: 'category', data: xData, axisLabel: { show: false }, axisLine: { onZero: false } },
+        { gridIndex: 1, type: 'category', data: xData, axisLabel: { fontSize: 11, hideOverlap: true } }
+      ]
+    : { type: 'category', data: xData, axisLabel: { fontSize: 11 } }
+
+  const yAxis = showVolume
+    ? [
+        priceYAxis,
+        {
+          type: 'value', gridIndex: 1, scale: true,
+          name: tw ? '成交金額（億元）' : `成交量（${volumeUnitLabel}）`,
+          axisLabel: { formatter: v => v.toLocaleString() }
+        }
+      ]
+    : priceYAxis
+
+  const legendData = ['收盤', '月線 (MA20)', '季線 (MA60)', '年線 (MA240)']
+  // 「當日」模式維持既有四項，不加成交量相關 legend 項；日線模式依 hasVolume 加「成交金額/成交量」或無成交量提示
+  if (!intraday) legendData.push(dailyHasVolume.value ? volumeSeriesName : VOLUME_FALLBACK_LEGEND)
+
   return {
     tooltip: {
       trigger: 'axis',
+      // 雙 grid 下讓十字準星貫穿上下兩圖、tooltip 同時彙整兩圖 series（單 grid 時 link 為 no-op，不影響現況）；
+      // 比照同 repo 既有雙 grid 先例 StockAnalysisDialog.vue:748
+      axisPointer: { type: 'cross', link: [{ xAxisIndex: 'all' }] },
       formatter: params => {
         if (!params || params.length === 0) return ''
         let s = `<strong>${params[0].axisValue}</strong><br/>`
         params.forEach(p => {
+          if (p.seriesName === volumeSeriesName) {
+            const idx = p.dataIndex
+            if (tw) {
+              const turnoverRaw = dailyTurnovers.value[idx]
+              const volRaw = dailyVolumes.value[idx]
+              const turnoverText = turnoverRaw == null ? '-'
+                : `${(Number(turnoverRaw) / 1e8).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} 億元`
+              const volText = volRaw == null ? '-'
+                : `${(Number(volRaw) / 1e8).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} 億股`
+              s += `${p.marker}成交金額: ${turnoverText}<br/>`
+              s += `成交量: ${volText}<br/>`
+            } else {
+              const volRaw = dailyVolumes.value[idx]
+              const volText = volRaw == null ? '-'
+                : `${(Number(volRaw) / volumeDivisor).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${volumeUnitLabel}`
+              s += `${p.marker}成交量: ${volText}<br/>`
+            }
+            return
+          }
           const v = p.value
           const txt = v == null ? '-' : Number(v).toLocaleString(undefined, {
             minimumFractionDigits: 2, maximumFractionDigits: 2
@@ -753,11 +856,20 @@ const dailyChartOption = computed(() => {
       }
     },
     legend: {
-      data: ['收盤', '月線 (MA20)', '季線 (MA60)', '年線 (MA240)'],
+      data: legendData,
       top: 0,
       itemGap: 30,
       textStyle: { lineHeight: 18 },
       formatter: name => {
+        if (name === VOLUME_FALLBACK_LEGEND) return name
+        if (name === volumeSeriesName) {
+          let v = null
+          for (let i = volumeDisplay.length - 1; i >= 0; i--) {
+            if (volumeDisplay[i] != null) { v = volumeDisplay[i]; break }
+          }
+          if (v == null) return `${name}\n-`
+          return `${name}\n${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${volumeUnitLabel}`
+        }
         const map = {
           '收盤': closeData,
           '月線 (MA20)': ma20Data,
@@ -773,18 +885,16 @@ const dailyChartOption = computed(() => {
         return `${name}\n${Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
       }
     },
-    grid: { left: 70, right: 30, top: 70, bottom: 60 },
-    xAxis: {
-      type: 'category',
-      data: xData,
-      axisLabel: { fontSize: 11 }
-    },
+    grid,
+    xAxis,
     yAxis,
     dataZoom,
     series: [
       {
         name: '收盤',
         type: 'line',
+        xAxisIndex: 0,
+        yAxisIndex: 0,
         data: closeData,
         showSymbol: false,
         sampling: 'lttb',
@@ -812,6 +922,8 @@ const dailyChartOption = computed(() => {
       {
         name: '月線 (MA20)',
         type: 'line',
+        xAxisIndex: 0,
+        yAxisIndex: 0,
         data: ma20Data,
         showSymbol: false,
         smooth: !intraday,
@@ -821,6 +933,8 @@ const dailyChartOption = computed(() => {
       {
         name: '季線 (MA60)',
         type: 'line',
+        xAxisIndex: 0,
+        yAxisIndex: 0,
         data: ma60Data,
         showSymbol: false,
         smooth: !intraday,
@@ -830,12 +944,24 @@ const dailyChartOption = computed(() => {
       {
         name: '年線 (MA240)',
         type: 'line',
+        xAxisIndex: 0,
+        yAxisIndex: 0,
         data: ma240Data,
         showSymbol: false,
         smooth: !intraday,
         lineStyle: { width: 1.5, color: '#3b82f6', type: intraday ? 'dashed' : 'solid' },
         itemStyle: { color: '#3b82f6' }
-      }
+      },
+      ...(showVolume ? [{
+        name: volumeSeriesName,
+        type: 'bar',
+        xAxisIndex: 1,
+        yAxisIndex: 1,
+        data: volumeBarData,
+        barMaxWidth: 8,
+        large: true,
+        largeThreshold: 600
+      }] : [])
     ]
   }
 })

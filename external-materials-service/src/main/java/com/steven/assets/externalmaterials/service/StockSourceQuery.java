@@ -179,22 +179,30 @@ public class StockSourceQuery {
                 }));
     }
 
-    /** Upsert 台股大盤每日 OHLC（同一 trading_date 視為覆寫；OHLC 任一者可為 null）。 */
+    /**
+     * Upsert 台股大盤每日 OHLC ＋成交量（同一 trading_date 視為覆寫；OHLC／量欄任一者可為 null）。
+     * tradeVolume／tradeValue 以 COALESCE 保值——FMTQIK 該次抓不到時傳 null，不可把 DB 既有值洗掉
+     * （否則任何一次 FMTQIK 失效就會把已回補好的整月量欄靜默清成 null，畫面只表現為「柱子消失」）。
+     */
     public void upsertTwseIndexDaily(LocalDate tradingDate,
                                       BigDecimal openPoint, BigDecimal highPoint,
-                                      BigDecimal lowPoint, BigDecimal closePoint) {
+                                      BigDecimal lowPoint, BigDecimal closePoint,
+                                      Long tradeVolume, BigDecimal tradeValue) {
         Long existing = jdbc.query(
                 "SELECT 1 FROM twse_index_daily_history WHERE trading_date=?",
                 ps -> ps.setObject(1, tradingDate),
                 rs -> rs.next() ? 1L : null);
         if (existing != null) {
             jdbc.update("UPDATE twse_index_daily_history " +
-                            "SET open_point=?, high_point=?, low_point=?, close_point=? WHERE trading_date=?",
-                    openPoint, highPoint, lowPoint, closePoint, tradingDate);
+                            "SET open_point=?, high_point=?, low_point=?, close_point=?, " +
+                            "trade_volume=COALESCE(?, trade_volume), trade_value=COALESCE(?, trade_value) " +
+                            "WHERE trading_date=?",
+                    openPoint, highPoint, lowPoint, closePoint, tradeVolume, tradeValue, tradingDate);
         } else {
             jdbc.update("INSERT INTO twse_index_daily_history " +
-                            "(trading_date, open_point, high_point, low_point, close_point) VALUES (?, ?, ?, ?, ?)",
-                    tradingDate, openPoint, highPoint, lowPoint, closePoint);
+                            "(trading_date, open_point, high_point, low_point, close_point, trade_volume, trade_value) " +
+                            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    tradingDate, openPoint, highPoint, lowPoint, closePoint, tradeVolume, tradeValue);
         }
     }
 

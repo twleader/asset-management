@@ -15,6 +15,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.reactive.function.client.ExchangeStrategies;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.math.BigDecimal;
@@ -87,7 +88,15 @@ public class MacroHistoryService {
         this.koreaGdpRepo = koreaGdpRepo;
         this.twseDailyRepo = twseDailyRepo;
         this.usDailyRepo = usDailyRepo;
-        this.priceServiceClient = WebClient.builder().baseUrl(externalUrl).build();
+        // maxInMemorySize 提高至 16MB（WebClient 預設 256KB）：/internal/macro/us-index 一次回近 10 年
+        // （~2500 筆）且 Task 286 起每筆多了 volume/value 兩欄，實測已超出預設值導致
+        // DataBufferLimitException（回補回 upserted=0，靜默失敗、無明顯錯誤畫面）。16MB 與 BFF
+        // 既有 businessServicesClient（bff/.../WebClientConfig.java）同一慣例值。
+        ExchangeStrategies strategies = ExchangeStrategies.builder()
+                .codecs(cfg -> cfg.defaultCodecs().maxInMemorySize(16 * 1024 * 1024))
+                .build();
+        this.priceServiceClient = WebClient.builder().baseUrl(externalUrl)
+                .exchangeStrategies(strategies).build();
     }
 
     // ========== 股市分析頁查詢（read）— 由 MacroHistoryController 委派（Controller 不直接讀 repository） ==========
@@ -298,12 +307,7 @@ public class MacroHistoryService {
             if (rows.isEmpty()) {
                 skippedMonths++;
             } else {
-                // 保留既有 close_point_tr（報酬指數）：fetchTwseMonthlyDailyProxy 只帶價格 OHLC，
-                // 直接 saveAll（JPA merge）會把已回補的 close_point_tr 洗成 null（含息 TWSE 線靜默退化）。
-                for (TwseIndexDailyHistory row : rows) {
-                    twseDailyRepo.findById(row.getTradingDate())
-                            .ifPresent(ex -> row.setClosePointTr(ex.getClosePointTr()));
-                }
+                preserveExistingTwseDailyFields(rows);
                 twseDailyRepo.saveAll(rows);
                 upserted += rows.size();
             }
@@ -319,8 +323,28 @@ public class MacroHistoryService {
                 "to", end.toString());
     }
 
+    /**
+     * 保留既有 close_point_tr（報酬指數）／trade_volume／trade_value：本次抓到的列若這些欄位為 null，
+     * 回填 DB 既有值，就地修改傳入的 {@code rows}（供 refreshTwseDaily 呼叫 saveAll 前的最後一步）。
+     *
+     * <p>fetchTwseMonthlyDailyProxy 只帶當次抓到的價格 OHLC ＋（若 FMTQIK 有回應）量欄，直接
+     * saveAll（JPA merge）會把已回補的 close_point_tr／trade_volume／trade_value 洗成 null
+     * （含息 TWSE 線靜默退化、成交量柱子無聲消失，皆無任何錯誤訊息）。
+     *
+     * <p>套件內可見：供測試直接以 mock repository 驗證保值邏輯，不需經過 WebClient 抓取層。
+     */
+    void preserveExistingTwseDailyFields(List<TwseIndexDailyHistory> rows) {
+        for (TwseIndexDailyHistory row : rows) {
+            twseDailyRepo.findById(row.getTradingDate()).ifPresent(ex -> {
+                row.setClosePointTr(ex.getClosePointTr());
+                if (row.getTradeVolume() == null) row.setTradeVolume(ex.getTradeVolume());
+                if (row.getTradeValue() == null)  row.setTradeValue(ex.getTradeValue());
+            });
+        }
+    }
+
     private record DailyOhlcDto(String tradingDate, BigDecimal open, BigDecimal high,
-                                 BigDecimal low, BigDecimal close) {}
+                                 BigDecimal low, BigDecimal close, Long volume, BigDecimal value) {}
 
     private List<TwseIndexDailyHistory> fetchTwseMonthlyDailyProxy(YearMonth ym) {
         try {
@@ -338,7 +362,8 @@ public class MacroHistoryService {
                 out.add(new TwseIndexDailyHistory(
                         LocalDate.parse(d.tradingDate()),
                         d.open(), d.high(), d.low(), d.close(),
-                        null));   // closePointTr 由 refresh-tr / 每日排程另行回補
+                        null,   // closePointTr 由 refresh-tr / 每日排程另行回補
+                        d.volume(), d.value()));
             }
             return out;
         } catch (Exception e) {
@@ -477,7 +502,7 @@ public class MacroHistoryService {
             for (DailyOhlcDto d : arr) {
                 if (d.tradingDate() == null || d.close() == null) continue;
                 out.add(new UsIndexDailyHistory(code, LocalDate.parse(d.tradingDate()),
-                        d.open(), d.high(), d.low(), d.close()));
+                        d.open(), d.high(), d.low(), d.close(), d.volume()));
             }
             return out;
         } catch (Exception e) {
