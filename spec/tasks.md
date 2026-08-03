@@ -28,7 +28,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 
 ---
 
-## 任務索引（Task 1–228、264–267、269–283）
+## 任務索引（Task 1–228、264–267、269–286）
 
 | Task | 標題 | 位置 |
 |---|---|---|
@@ -288,8 +288,10 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 282 | 九個匯出頁的手動匯出結果提示改為報出 JSON 與 Excel 兩個落點（t270.3／t271.5／t272.3／t272.3.1 漏做，使用者回報「只匯出 excel」；Requirement 55） | [tasks/t282_dual_export_runnow_message.md](tasks/t282_dual_export_runnow_message.md) |
 | 283 | 交易雷達頁首「匯出 Excel」在下載之外，同時落一份 JSON ＋ Excel 到伺服器輸出目錄（Requirement 48／55） | [tasks/t283_radar_manual_export_dual_format.md](tasks/t283_radar_manual_export_dual_format.md) |
 | 284 | 交易雷達個股收合列補顯示週線 MA5，並守住 Excel／JSON 匯出既有 MA5 欄（Requirement 43／48） | [tasks/t284_trading_radar_ma5_summary.md](tasks/t284_trading_radar_ma5_summary.md) |
+| 285 | 股市大盤查詢頁日線圖加畫週線 MA5（四線→五線），匯出（xlsx／json）加第六欄「週線MA5」並回看 30 日避免前 4 列空白（Requirement 18／45） | [tasks/t285_index_daily_weekly_ma5.md](tasks/t285_index_daily_weekly_ma5.md) |
+| 286 | 大盤指數日線匯出補齊月線MA20／季線MA60／年線MA240（6 欄→9 欄），回看視窗由 30 日放大為 400 日以支撐 MA240 的 239 個交易日（Requirement 45） | [tasks/t286_index_export_all_four_ma.md](tasks/t286_index_export_all_four_ma.md) |
 
-> **註：本索引表僅列至 228、264–267、269–279 與 280–284；Task 229–263 與 268 未登錄於本表，以 `spec/tasks/tNNN_*.md` 檔案本身為準。**
+> **註：本索引表僅列至 228、264–267、269–286；Task 229–263 與 268 未登錄於本表，以 `spec/tasks/tNNN_*.md` 檔案本身為準。**
 
 > **Task 222–225 已全部被 t264–t267 取代（見上表），保留僅作為決策記錄，一律不得依其實作。**
 >

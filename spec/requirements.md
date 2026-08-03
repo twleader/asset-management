@@ -466,7 +466,7 @@
 - [ ] 「回補資料」按鈕同步觸發 TWN + JPN + KOR 三國 GDP 回補
 - [ ] 經濟成長率取**實質 GDP 成長率**（台灣優先 DGBAS NA8101A1A「經濟成長率(%)」、缺則 IMF `NGDP_RPCH`；日本、韓國 IMF `NGDP_RPCH`），不再由前後端用人均 GDP（USD）相減推算（因含匯率波動會失真）；存於 `*_gdp_per_capita_history.real_gdp_growth_rate`。圖的成長率柱狀皆讀此欄位（同一資料源）
 - [ ] 同頁「最上方」加第三張卡：台股大盤（TAIEX）每日收盤近 10 年走勢圖
-  - 顯示每日收盤點位（`close_point`）+ 月線（MA20）+ 季線（MA60）+ 年線（MA240）四條曲線
+  - 顯示每日收盤點位（`close_point`）+ 週線（MA5）+ 月線（MA20）+ 季線（MA60）+ 年線（MA240）五條曲線（**週線 MA5 為 Task 285 新增**，原為四條）
   - 區間切換按鈕：1 個月 / 3 個月 / 半年 / 1 年 / 2 年 / 5 年（透過 dataZoom 對齊 X 軸末端，前段 240 個交易日仍保留以利 MA240 完整顯示）
   - 後端日線資料表 `twse_index_daily_history`（`trading_date` PK, `open_point`, `high_point`, `low_point`, `close_point` 各 NUMERIC(12,2)），由 Liquibase changelog 建立（不 seed 歷史值）
   - business service 新增 `GET /api/twse-daily-index?from=YYYY-MM-DD&to=YYYY-MM-DD` 與 `POST /api/twse-daily-index/refresh?years=10`，後者逐月呼叫 TWSE FMTQIK 月報抓全部交易日 OHLC（`OpeningIndex` / `HighestIndex` / `LowestIndex` / `ClosingIndex`）upsert 至 DB
@@ -474,16 +474,16 @@
   - BFF 新增 `GET /api/bff/gdp-twse/twse-daily?years=10`：載入近 N 年日線並計算 MA20/60/240 後一次回傳；前端切換區間僅用 dataZoom 不再打 API
   - BFF 新增 `POST /api/bff/gdp-twse/refresh-twse-daily?years=10`：proxy 至 business `/api/twse-daily-index/refresh`，回補可能要 1~2 分鐘
   - 「回補資料」按鈕同步觸發 TWN GDP + KOR GDP + 大盤年末 + 大盤日線四項回補
-- [ ] 第三張卡（每日收盤日線圖）支援**市場切換**（一次顯示一個指數，沿用同一套「收盤＋月線 MA20／季線 MA60／年線 MA240」四線版型與區間切換鈕）：頂部下拉選單可在「台股大盤 / 道瓊工業 / 標普 500 / 那斯達克綜合 / 費城半導體 / 英國富時 100 / 德國 DAX / 韓國 KOSPI / 日經 225」九者間切換；卡片標題、空狀態提示文字隨選取指數動態變化
+- [ ] 第三張卡（每日收盤日線圖）支援**市場切換**（一次顯示一個指數，沿用同一套「收盤＋週線 MA5／月線 MA20／季線 MA60／年線 MA240」五線版型與區間切換鈕；Task 285 前為四線）：頂部下拉選單可在「台股大盤 / 道瓊工業 / 標普 500 / 那斯達克綜合 / 費城半導體 / 英國富時 100 / 德國 DAX / 韓國 KOSPI / 日經 225」九者間切換；卡片標題、空狀態提示文字隨選取指數動態變化
   - 「美國四大指數」＝道瓊工業 (DJI / `^DJI`)、標普 500 (SPX / `^GSPC`)、那斯達克綜合 (IXIC / `^IXIC`)、費城半導體 (SOX / `^SOX`)
   - 「海外主要指數」＝英國富時 100 (FTSE / `^FTSE`)、德國 DAX (DAX / `^GDAXI`)、韓國 KOSPI (KOSPI / `^KS11`)、日經 225 (N225 / `^N225`)；與美股四大指數共用同一條 `us_index_daily_history` 日線管線（依 `index_code` 區分），不另建表
   - 美股 + 海外指數每日 OHLC 存於同一資料表 `us_index_daily_history`（複合主鍵 `(index_code, trading_date)`，`index_code ∈ {DJI, SPX, IXIC, SOX, FTSE, DAX, KOSPI, N225}`，OHLC 四欄 NUMERIC(14,4)），由 Liquibase changelog 建立（不 seed 歷史值）。表名沿用 `us_index_daily_history`（語意已一般化為「海外指數日線」，欄位本就以 `index_code` 通用化，**零遷移**）
   - 資料來源為 **Yahoo Finance v8 chart API**（`range=10y&interval=1d`），於 ext-materials-service 以 curl 子程序抓取（避開 Yahoo 對 Java HTTP fingerprint 的封鎖，與既有美股歷史抓取 `fetchUsHistoricalRange` 同 pattern）。原評估的 Stooq CSV 經實測在部署環境被擋（連 `aapl.us` 等通用標的都回錯誤頁），故改採 Yahoo；抓取邏輯封裝於 `MacroDataFetchClient.fetchUsIndexDaily(code)` 單一方法，日後可一處替換來源
   - 日線 timestamp → 交易日改依 Yahoo meta 之 `exchangeTimezoneName` 轉當地時區（非寫死 `America/New_York`）：美股 daily bar timestamp 在開盤時刻（09:30 ET）轉 NY 與轉交易所時區結果相同，但亞洲/歐洲指數 daily bar timestamp 在 UTC 午夜（＝當地開盤），若仍用 NY 時區會把日期回退一日（如東京 6/15 變 6/14）。改讀交易所時區後對所有市場一致正確
   - business service 新增 `GET /api/us-daily-index?code=&from=&to=` 與 `POST /api/us-daily-index/refresh?code=`（單一指數；Yahoo `range=10y` 一次呼叫即取得近 10 年，不需逐月迴圈）
-  - BFF 將原 `.../twse-daily`、`.../refresh-twse-daily` **一般化**為 `GET /api/bff/gdp-twse/index-daily?market=&years=10` 與 `POST /api/bff/gdp-twse/refresh-index-daily?market=&years=10`（`market=TWSE` 走台股大盤、其餘走對應美股指數）；回傳格式（dates/closes/ma20/ma60/ma240）與 MA 計算對兩市場完全相同，由同一支 BFF 服務（同義欄位同一來源），確保版面一致
+  - BFF 將原 `.../twse-daily`、`.../refresh-twse-daily` **一般化**為 `GET /api/bff/gdp-twse/index-daily?market=&years=10` 與 `POST /api/bff/gdp-twse/refresh-index-daily?market=&years=10`（`market=TWSE` 走台股大盤、其餘走對應美股指數）；回傳格式（dates/closes/**ma5**(Task 285 新增)/ma20/ma60/ma240）與 MA 計算對兩市場完全相同，由同一支 BFF 服務（同義欄位同一來源），確保版面一致
   - 「回補日線（10 年）」按鈕回補「當前選取」的指數
-- [ ] 區間切換鈕新增「**當日**」（置於最前）：切到當日顯示該指數「盤中即時 / 盤後最後交易日」的分時走勢線（5 分 K 收盤連線，x 軸為該市場當地時區 HH:mm）；月線/季線/年線改畫成**水平參考線**（取日線最新 MA20/60/240 值，與其他期間同口徑，比照股票分析「當日」Task 87）
+- [ ] 區間切換鈕新增「**當日**」（置於最前）：切到當日顯示該指數「盤中即時 / 盤後最後交易日」的分時走勢線（5 分 K 收盤連線，x 軸為該市場當地時區 HH:mm）；週線/月線/季線/年線改畫成**水平參考線**（取日線最新 MA5/20/60/240 值，與其他期間同口徑，比照股票分析「當日」Task 87；週線 MA5 那條為 Task 285 新增，與另外三條同一分支、同一畫法）
   - 當日資料即時向 **Yahoo v8 chart**（`interval=5m&range=5d`，取最新交易日的 bar）抓取、不寫 DB（指數不在 Redis tick 輪詢名單，故採即時抓取而非 Task 88 兩階段 tick store）。盤中回最新交易日當天部分 bar＝即時、盤後回最後完整交易日，自動滿足「盤中即時／盤後最後交易日」
   - market→Yahoo symbol：TWSE→`^TWII`、DJI→`^DJI`、SPX→`^GSPC`、IXIC→`^IXIC`、SOX→`^SOX`、FTSE→`^FTSE`、DAX→`^GDAXI`、KOSPI→`^KS11`、N225→`^N225`
   - 當日模式 Y 軸**鎖定當日價格區間**（min/max 取分時收盤上下界 +10% padding），不可用 `scale:true` 全 series 自動範圍——否則遠離當日價位的均線水平線（如強趨勢指數的年線在下、月線在上）會把 Y 軸跨距撐到數千點，當日數百點的起伏被壓成平線。均線水平線落在區間外時由 series clip 裁切，數值仍保留在 legend
@@ -493,6 +493,7 @@
   - **昨收須為「真正的前一交易日」**（Task 105）：當日走勢的現在點位是即時抓 Yahoo（最新交易日），昨收若取自過時的日線表會退回數日前舊收盤、使漲跌% 失真（實機 SOX 曾顯示 +13.88%）。除「缺值→null」外，日線表「過時但非空→昨收為錯的舊值」亦屬失效，故海外指數日線須由排程恆保最新（見下條）
   - 海外指數日線（`us_index_daily_history`）由 business-services `IndexDailyRefreshScheduler` **自動回補**：每日 07:00（Asia/Taipei，TUE-SAT，美股收盤後）對 8 指數（DJI/SPX/IXIC/SOX/FTSE/DAX/KOSPI/N225）逐一呼叫 `refreshUsIndexDaily`（Yahoo `range=10y` idempotent upsert）；開機時若任一指數最新日期過時（> 4 日）亦觸發 self-heal 回補。角色比照台股大盤日線之 external-materials `TwseIndexPoller`，確保日線圖 / MA / 當日走勢昨收恆為最新（不再靠手動「回補日線（10 年）」按鈕維持新鮮度）
 - [ ] 日線圖「收盤」線標出**目前可視區間內**的最高 / 最低點（紅最高、綠最低＝台股紅漲綠跌）：點上以小圓點標記，旁附**色塊標籤（紅/綠底白字）兩行**——第一行「最高／最低 + 點位（四捨五入、千分位）」、**第二行日期；「當日」分時模式第二行改為時間（HH:mm）**（標籤第二行直接取該點 x 軸類別字串 `labels[i]`，日線即日期、當日即時間，不必分支）。色塊位置依該點在可視窗的水平位置自適應避邊（靠右→放左、靠左→放右、其餘最高在下/最低在上，避免撞到頂部 legend 與底部縮放軸、或溢出左右邊界）。因日線資料為完整 10 年一次載入、區間鈕僅調 dataZoom 縮放窗，**不可用 ECharts 原生 `markPoint type:'max'/'min'`**——它會掃整段 10 年的極值，縮到短區間時最低點（如 10 年前低點）會落在畫面外、看似壞掉。改依目前可視窗（區間鈕預設 `dailyZoomRange` 或使用者手動拖曳後的 `dailyZoomPct`，合成 `effectiveDailyZoom`）換算可視索引範圍後自行找極值，並透過 `@datazoom` 事件讀回圖表當前 start/end% 即時重算。markPoint `coord` 以該點**日期字串**定位（非絕對索引），避免 dataZoom `filterMode:'filter'` 過濾視窗外資料後絕對索引對不準。切換市場 / 區間時清掉手動縮放（回該區間預設窗）；「當日」分時模式同口徑標出當日最高 / 最低
+- [ ] **日線圖加畫「週線（MA5）」**（Task 285）：均線由三條（月/季/年）增為四條，新增**週線 MA5**＝台股慣例的「**5 個交易日**簡單移動平均」（**非日曆週**、非週 K），與月/季/年線**同一算法、同一資料源、同一支 BFF `movingAverage(closes, window)`，只差視窗長度**；視窗未滿的前 4 個交易日為 `null`（不以不足視窗的平均充數）。BFF `GET /api/bff/gdp-twse/index-daily` 回傳新增 `ma5` 陣列（與 `dates`／`closes` 等長），台股與海外指數同一格式。前端：卡片標題由「（近 10 年，含月線/季線/年線）」改為「（近 10 年，含週線/月線/季線/年線）」；legend 新增「週線 (MA5)」並比照既有三條在名稱下方顯示最新值；線色須與既有四條可辨——收盤 `#1f2937`／MA20 `#f59e0b`／MA60 `#10b981`／MA240 `#3b82f6` 皆不變，**MA5 取 `#8b5cf6`**。「當日」分時模式 MA5 亦畫成水平參考線（取日線最新 MA5 值），與另外三條同一分支、同一虛線樣式。**MA5 只加線、不改既有任何一條線的資料或樣式**；最高/最低 markPoint 仍只掛在「收盤」線上，不因新增均線而改變
 
 ---
 
@@ -1395,13 +1396,28 @@
 
 ---
 
-### Requirement 45: 股市大盤指數日線 Excel 匯出（開/高/低/收）與排程自動匯出到指定目錄
+### Requirement 45: 股市大盤指數日線 Excel 匯出（開/高/低/收＋四條均線）與排程自動匯出到指定目錄
 
 **User Story:** 作為使用者，我希望「股市大盤查詢」頁也能像油價金價與匯率頁一樣，指定時間區間把大盤指數的每日行情匯出成 Excel，並可設定每日自動匯出到指定資料夾，讓大盤歷史定期留存到本機目錄。
 
 **Acceptance Criteria:**
 
-- [ ] **匯出內容含每日開盤／最高／最低／收盤**：單一 Excel 檔、單一工作表（表名＝指數中文名，如 `台股大盤`），欄位為 **日期／開盤／最高／最低／收盤**，依日期遞增排列。四個價格欄皆取自資料庫既有的 OHLC 欄位（`twse_index_daily_history` 與 `us_index_daily_history` 的 `open_point`／`high_point`／`low_point`／`close_point`），**不重算、不由收盤價推導**。某欄當日為 `NULL`（早期資料）時該格留空，不補前值、不捏造。
+- [ ] **匯出內容含每日開盤／最高／最低／收盤**：單一 Excel 檔、單一工作表（表名＝指數中文名，如 `台股大盤`），欄位為 **日期／開盤／最高／最低／收盤／週線MA5／月線MA20／季線MA60／年線MA240**（第六欄為 Task 285 新增、第七～九欄為 Task 286 新增，見下三條），依日期遞增排列。四個價格欄皆取自資料庫既有的 OHLC 欄位（`twse_index_daily_history` 與 `us_index_daily_history` 的 `open_point`／`high_point`／`low_point`／`close_point`），**不重算、不由收盤價推導**。某欄當日為 `NULL`（早期資料）時該格留空，不補前值、不捏造。
+- [ ] **加「週線MA5」欄，且必須附加在最後**（Task 285）：工作表欄位由五欄增為六欄——日期／開盤／最高／最低／收盤／**週線MA5**。新欄**一律附加在最末**，既有五欄的欄索引（0–4）不得位移：既有 golden 逐格比對與下游取值皆以欄索引定位，附加在最末才能用 **identity 映射**做「插欄前後既有欄逐格未變」的比對、既有斷言的欄索引一格都不用改（插在中間並非做不到——Task 281 就是插在中間再維護一組欄索引位移函式——但那是本次不必要的成本）。此欄是本匯出**唯一的計算欄**（其餘皆直接取 DB 欄位），定義為「**該日往前含當日 5 個交易日 `close_point` 的簡單移動平均**」（台股慣例的 5 個交易日，非日曆週），以 `BigDecimal` 精確加總後 `divide(5, 2, HALF_UP)`——與本頁圖表的週線 MA5（BFF `movingAverage(closes, 5)`，同為 BigDecimal 加總後 `divide(window, 2, HALF_UP)`）**逐位相同**：同一指數同一日期，圖上看到的值與檔案裡的值必須一模一樣（唯一界線：落在圖表 10 年視窗**最前 4 個交易日**者，圖上因視窗未滿為空、匯出若回看得到更早的列則有值——定義相同，差別只在各自視窗的左緣）。JSON 那一份（Requirement 55 雙格式）欄名同為 `週線MA5`，由同一份 header 清單產生，兩種格式不得分岔。
+- [ ] **四條均線全部進匯出**（Task 286，接續 Task 285）：工作表欄位由六欄再增為**九欄**——
+  日期／開盤／最高／最低／收盤／**週線MA5／月線MA20／季線MA60／年線MA240**。使用者要求「月線、季線、年線的價位也要匯出」；
+  四條均線與本頁圖表的四條線**同定義同精度**（各自視窗的 SMA、BigDecimal 精確加總後 `divide(window, 2, HALF_UP)`），
+  同一指數同一日期，圖上看到的四個值與檔案裡的四欄必須一模一樣（同上一條的左緣界線：MA240 的左緣是最前 **239** 個
+  交易日，不是 4 個）。四欄一律 `Format.NUM2`，且**依視窗由短到長排列在收盤之後**（MA5→MA20→MA60→MA240），
+  既有**六欄**的欄索引 0–5 仍不得位移。JSON 那一份的欄名同為 `週線MA5`／`月線MA20`／`季線MA60`／`年線MA240`，
+  由同一份 header 清單產生。
+- [ ] **回看視窗須涵蓋最長的均線視窗**（Task 286 起）：回看天數由 Task 285 的 30 天放大為 **400 個日曆天**——
+  最長的 MA240 需要當日之前的 **239 個交易日**，400 個日曆天約含 285 個平日，台股每年約 240～242 個交易日
+  （年約 19～21 天非週末休市），折算約再扣 21～26 天休市日 ≈ **261～266 個交易日**，對 239 仍有約
+  **22～27 個交易日**餘裕（理論下限約 361 個日曆天，400 尚有約 11% headroom；即使跨兩次農曆年的最壞情況，
+  交易日仍約 259～260，≥ 239）。**不足時一律留空，絕不以不足視窗的平均充數**——
+  回看不夠只會讓前幾列的長天期均線變空（可辨識的缺值），永遠不會產生錯的數字。
+- [ ] **MA 需回看區間起始日之前的交易日，且回看列不得出現在檔案中**（Task 285 建立、Task 286 擴充）：若只用 `[start, end]` 區間內的收盤計算，檔案前幾列的均線必為空——那是使用者眼中的 bug，不是缺值。故查詢須向前回看（`start.minusDays(400)`），四條均線算完後**只輸出 `tradingDate >= start` 的列**。資料庫本身湊不滿該視窗時（該指數歷史最前端）該格留空，不補前值、不以不足視窗的平均充數（同既有 open/high/low 的 null 處理）；`omitNullCells` 語意不變＝該格根本不建，非 BLANK 格。
 - [ ] **匯出的指數＝頁面目前選取的指數**：本頁可切換 9 個指數（`TWSE`／`DJI`／`SPX`／`IXIC`／`SOX`／`FTSE`／`DAX`／`KOSPI`／`N225`），手動匯出一律匯出**目前選取**的那一個，不是固定台股大盤，也不是九個併成一檔——與畫面所見一致。
 - [ ] **手動匯出（指定時間區間、瀏覽器另存）**：日線圖工具列（區間按鈕與「回補日線」旁）新增「匯出 Excel」按鈕，開啟對話框可指定起訖日期，預設帶入目前圖表所選區間。按下匯出優先開啟系統「另存新檔」對話框（`showSaveFilePicker`）供自選資料夾與檔名；瀏覽器不支援時退回一般下載。使用者按取消不顯示成功訊息。檔名 `{指數名}_{起}_{迄}.xlsx`（`YYYYMMDD`）。
 - [ ] **「當日」分時模式不提供匯出**：頁面區間選「當日」時走的是 transient 分時資料（非日線表、不入庫），與本需求的日線 OHLC 不同源。此模式下匯出按鈕停用並提示改選日線區間，避免匯出一份與畫面不符的資料。

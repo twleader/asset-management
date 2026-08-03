@@ -134,7 +134,7 @@
         以主機家目錄 <code>{{ schedule.baseDir || '/home/steven' }}</code> 為根（對映主機
         <code>/Users/steven</code>）。按上方「選擇」開啟檔案總管式選擇器挑選子資料夾；例如選 <code>input</code> →
         主機 <code>/Users/steven/input</code>。每日於指定時間匯出所選指數的日線為
-        <code>{{ scheduleMarketLabel }}_{使用者ID}_YYYYMMDD.xlsx</code> 與 <code>.json</code> <strong>兩份</strong>（主檔名相同、只差副檔名；欄位為日期／開盤／最高／最低／收盤，
+        <code>{{ scheduleMarketLabel }}_{使用者ID}_YYYYMMDD.xlsx</code> 與 <code>.json</code> <strong>兩份</strong>（主檔名相同、只差副檔名；欄位為日期／開盤／最高／最低／收盤／週線MA5／月線MA20／季線MA60／年線MA240，
         內容同上方「匯出 Excel」）。匯出範圍以<b>執行當日往前推</b>計算，故每日產出會隨時間滾動。
       </div>
       <div v-if="schedule.lastRunAt || schedule.lastRunStatus" class="schedule-status">
@@ -195,7 +195,8 @@
         <el-form-item label="輸出內容">
           <div class="dialog-note">
             單一 Excel 檔、一張工作表（{{ marketLabel }}），欄位為
-            <b>日期／開盤／最高／最低／收盤</b>，依日期遞增；當日該欄無資料則留空。
+            <b>日期／開盤／最高／最低／收盤／週線MA5／月線MA20／季線MA60／年線MA240</b>，依日期遞增；當日該欄無資料則留空。
+            四條均線＝該日含當日往前對應交易日數（5／20／60／240）的收盤均價（與上方圖表的四條線同值）。
           </div>
         </el-form-item>
         <el-form-item label="存檔位置">
@@ -260,6 +261,7 @@ const market = ref('TWSE')
 const marketLabel = computed(() => MARKETS.find(m => m.value === market.value)?.label ?? '台股大盤')
 const dailyDates = ref([])
 const dailyCloses = ref([])
+const dailyMa5 = ref([])      // 週線（MA5＝台股慣例的 5 個交易日，非日曆週；Task 285）
 const dailyMa20 = ref([])
 const dailyMa60 = ref([])
 const dailyMa240 = ref([])
@@ -285,7 +287,7 @@ const hasDailyData = computed(() =>
 const cardTitle = computed(() =>
   isIntraday.value
     ? `${marketLabel.value}當日走勢${intradayDate.value ? `（${intradayDate.value}）` : ''}`
-    : `${marketLabel.value}每日收盤（近 10 年，含月線/季線/年線）`)
+    : `${marketLabel.value}每日收盤（近 10 年，含週線/月線/季線/年線）`)
 const emptyDesc = computed(() =>
   isIntraday.value
     ? `尚無${marketLabel.value}當日分時資料`
@@ -356,6 +358,7 @@ async function fetchDailyData() {
     const res = await bffApi.gdpTwse.getIndexDaily(market.value, 10)
     dailyDates.value = res.dates ?? []
     dailyCloses.value = (res.closes ?? []).map(num)
+    dailyMa5.value = (res.ma5 ?? []).map(num)
     dailyMa20.value = (res.ma20 ?? []).map(num)
     dailyMa60.value = (res.ma60 ?? []).map(num)
     dailyMa240.value = (res.ma240 ?? []).map(num)
@@ -700,9 +703,10 @@ function onDailyZoom() {
 
 const dailyChartOption = computed(() => {
   const intraday = isIntraday.value
-  // 當日模式：x 軸為分時 HH:mm、收盤＝分時 closes、月/季/年線改畫水平參考線（取日線最新 MA 值，同口徑）
+  // 當日模式：x 軸為分時 HH:mm、收盤＝分時 closes、週/月/季/年線改畫水平參考線（取日線最新 MA 值，同口徑）
   const xData = intraday ? intradayTimes.value : dailyDates.value
   const closeData = intraday ? intradayCloses.value : dailyCloses.value
+  const ma5Data = intraday ? xData.map(() => lastOf(dailyMa5.value)) : dailyMa5.value
   const ma20Data = intraday ? xData.map(() => lastOf(dailyMa20.value)) : dailyMa20.value
   const ma60Data = intraday ? xData.map(() => lastOf(dailyMa60.value)) : dailyMa60.value
   const ma240Data = intraday ? xData.map(() => lastOf(dailyMa240.value)) : dailyMa240.value
@@ -753,13 +757,14 @@ const dailyChartOption = computed(() => {
       }
     },
     legend: {
-      data: ['收盤', '月線 (MA20)', '季線 (MA60)', '年線 (MA240)'],
+      data: ['收盤', '週線 (MA5)', '月線 (MA20)', '季線 (MA60)', '年線 (MA240)'],
       top: 0,
       itemGap: 30,
       textStyle: { lineHeight: 18 },
       formatter: name => {
         const map = {
           '收盤': closeData,
+          '週線 (MA5)': ma5Data,
           '月線 (MA20)': ma20Data,
           '季線 (MA60)': ma60Data,
           '年線 (MA240)': ma240Data
@@ -808,6 +813,15 @@ const dailyChartOption = computed(() => {
             formatter: p => `${p.name} ${p.value}\n${p.data.xlabel}`
           }
         }
+      },
+      {
+        name: '週線 (MA5)',
+        type: 'line',
+        data: ma5Data,
+        showSymbol: false,
+        smooth: !intraday,
+        lineStyle: { width: 1.5, color: '#8b5cf6', type: intraday ? 'dashed' : 'solid' },
+        itemStyle: { color: '#8b5cf6' }
       },
       {
         name: '月線 (MA20)',
