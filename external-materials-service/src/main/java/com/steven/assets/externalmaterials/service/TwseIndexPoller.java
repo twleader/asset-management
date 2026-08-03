@@ -13,9 +13,10 @@ import java.time.ZoneId;
 import java.util.List;
 
 /**
- * 台股大盤每日收盤排程：盤後抓 TWSE FMTQIK 當月月報，upsert 每日 TAIEX。
+ * 台股大盤每日收盤排程：盤後抓 TWSE MI_5MINS_HIST 當月月報（Task 288 起併抓 FMTQIK 補成交股數／成交金額），
+ * upsert 每日 TAIEX。
  *
- * TWSE openapi 更新時點不固定（觀察通常隔日才上）；故每日多次嘗試補齊：
+ * TWSE 月報更新時點不固定（觀察通常隔日才上）；故每日多次嘗試補齊：
  *   14:00 / 17:00 / 隔日 08:30 — 抓「當月 + 上月（跨月時銜接）」並 upsert。
  */
 @Slf4j
@@ -30,7 +31,7 @@ public class TwseIndexPoller {
     @Scheduled(cron = "0 0 14 * * MON-FRI", zone = "Asia/Taipei")
     public void afternoonRefresh() { refresh("14:00"); }
 
-    /** 收盤後 3.5 小時，給 openapi 多點時間發佈 */
+    /** 收盤後 3.5 小時，給 TWSE 月報多點時間發佈 */
     @Scheduled(cron = "0 0 17 * * MON-FRI", zone = "Asia/Taipei")
     public void eveningRefresh() { refresh("17:00"); }
 
@@ -51,7 +52,7 @@ public class TwseIndexPoller {
     private int upsertMonth(YearMonth ym) {
         List<DailyOhlc> rows = macroFetch.fetchTwseMonthlyDaily(ym.getYear(), ym.getMonthValue());
         for (DailyOhlc r : rows) {
-            store.upsertTwseIndexDaily(r.tradingDate(), r.open(), r.high(), r.low(), r.close());
+            store.upsertTwseIndexDaily(r.tradingDate(), r.open(), r.high(), r.low(), r.close(), r.volume(), r.value());
         }
         return rows.size();
     }

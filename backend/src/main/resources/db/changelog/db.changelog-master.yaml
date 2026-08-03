@@ -294,5 +294,8 @@ databaseChangeLog:
       file: db/changelog/changes/v1.85.0-drop-nonpositive-close.sql
       relativeToChangelogFile: false
   - include:
+      file: db/changelog/changes/v1.88.0-index-daily-volume.sql
+      relativeToChangelogFile: false
+  - include:
       file: db/changelog/changes/v1.88.0-index-export-multi-time-market.sql
       relativeToChangelogFile: false

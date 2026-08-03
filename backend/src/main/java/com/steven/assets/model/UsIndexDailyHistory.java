@@ -45,6 +45,11 @@ public class UsIndexDailyHistory {
     @Column(name = "close_point", nullable = false, precision = 14, scale = 4)
     private BigDecimal closePoint;
 
+    /** 成交量（股）。取自 Yahoo v8 chart 的 indicators.quote[0].volume。⚠️ 各市場口徑不一致，不得跨指數比較：
+     *  實測 SOX 恆為 0（純計算型指數無成交量）、KOSPI 量級明顯偏小（非股數原值）。 */
+    @Column(name = "volume")
+    private Long volume;
+
     @Data
     @NoArgsConstructor
     @AllArgsConstructor
