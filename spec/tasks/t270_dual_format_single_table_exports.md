@@ -17,7 +17,7 @@
 |---|---|---|---|
 | `RealizedGainExportScheduleService` | `已實現損益_{ownerId}_{yyyyMMdd}` | `已實現損益` | 資產名稱／代號／交易日期／股數／賣出均價／收帳金額／投資成本／損益／報酬率／市場／幣別／券商／匯率／年度（14 欄） |
 | `ExchangeRateExportScheduleService` | `台幣兌美元_{ownerId}_{yyyyMMdd}` | `台幣兌美元`（＝`ExcelExportService.exchangeRateLabel(currency)`） | 日期／即期買入／即期賣出／中間價（4 欄） |
-| `IndexExportScheduleService` | `{indexLabel(market)}_{ownerId}_{yyyyMMdd}` | `createSafeSheetName(indexLabel(market))` | 日期／開盤／最高／最低／收盤（5 欄） |
+| `IndexExportScheduleService` | `{indexLabel(market)}_{ownerId}_{yyyyMMdd}` | `createSafeSheetName(indexLabel(market))` | 日期／開盤／最高／最低／收盤（5 欄）〔**Task 284 起為 6 欄**（末尾加「週線MA5」）、**Task 285 起為 9 欄**（再加月線MA20／季線MA60／年線MA240）〕 |
 | `CommodityExportScheduleService` | `油價金價_{ownerId}_{yyyyMMdd}` | `油價金價` | 日期／WTI原油(USD/桶)／布蘭特原油(USD/桶)／黃金(USD/盎司)（4 欄） |
 | `AssetTransactionExportScheduleService` | `交易紀錄_{ownerId}{_排程名}_{yyyyMMdd}` | `交易紀錄` | **17** 欄固定順序（見 `assetTransactionsSheet()`；併入 main 時 Task 268 於 index 9、10 插入「手續費」「證交稅」，兩欄皆 `Format.MONEY`） |
 

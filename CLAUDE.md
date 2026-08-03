@@ -193,7 +193,7 @@ cd frontend
 |------|------|
 | `spec/requirements.md` | User Stories + Acceptance Criteria（63 個 Requirements） |
 | `spec/design.md` | 架構圖、ERD、API 端點、關鍵業務邏輯 |
-| `spec/tasks.md` | 任務索引（Task 1–228、264–267、269–278）＋ 尚未歸檔的 Task 201 起區段；Task 229–263 與 268 未登錄於本表，以 `spec/tasks/tNNN_*.md` 檔案本身為準 |
+| `spec/tasks.md` | 任務索引（Task 1–228、264–267、269–282、284–285；**283 在 origin/main 已存在**〔`t283_radar_manual_export_dual_format.md`〕**但本分支尚未 merge 帶入，故此處列表暫無該列，merge 後補回**）＋ 尚未歸檔的 Task 201 起區段；Task 229–263 與 268 未登錄於本表，以 `spec/tasks/tNNN_*.md` 檔案本身為準 |
 | `spec/tasks/README.md` | 自足任務檔規範（新任務寫這裡，不再追加 `tasks.md`） |
 | `spec/tasks/tNNN_*.md` | 自足任務檔（Task 201 之後的新任務） |
 | `spec/tasks/archive/` | Task 1–200 歷史，已凍結不再修改 |

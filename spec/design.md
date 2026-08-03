@@ -80,7 +80,7 @@ com.steven.assets/
 - `GdpTwseBffController`（GdpTwseView 專屬，`@RequestMapping("/api/bff/gdp-twse")`）：股市大盤查詢頁的指數日線／當日＋台韓人均 GDP 聚合（Requirement 18）：
   - `GET /api/bff/gdp-twse`：台／韓人均 GDP + 實質成長率歷史
   - `POST /api/bff/gdp-twse/refresh`：自 IMF 刷新人均 GDP
-  - `GET /api/bff/gdp-twse/index-daily`：台股大盤／海外指數每日 OHLC
+  - `GET /api/bff/gdp-twse/index-daily`：台股大盤／海外指數每日 OHLC ＋ MA5/20/60/240（`ma5` 為 Task 284 新增）
   - `POST /api/bff/gdp-twse/refresh-index-daily`：刷新指數日線
   - `GET /api/bff/gdp-twse/index-intraday`：指數當日分時
 - 其他 settings/passthrough（每頁一支 Spring Cloud Gateway route 配置，rewrite `/api/bff/{page}/**` → `/api/{resource}/**`）：BankSettings、BrokerSettings、DepositTypeSettings、MarketTypeSettings、AssetClassSettings（`/api/bff/asset-class-settings/**`）、TransitFundTypeSettings、StockAlert（`/api/bff/stock-alert/**`；**Requirement 54 起另有 `StockAlertBffController` 與此 route 並存**——`GET/PUT /api/bff/stock-alert/export-setting`、`POST .../run-now`、`GET .../browse`、`GET .../browse-gdrive`，後兩者 passthrough 至既有唯一那支 `/api/export-schedule/browse{,-gdrive}`。萬用 route 會把這幾條錯誤 rewrite 成 `/api/stock-alerts/export-setting/...`，靠 WebFlux `RequestMappingHandlerMapping`（order 0）先於 Gateway `RoutePredicateHandlerMapping`（order 1）由 controller 接走；同一模式的既有先例為 `TradingRadarBffController` ＋ `TradingRadarBffRoutes`）、BackupRestore（`/api/bff/backup-restore/**`）、NotificationSettings（`/api/bff/notification-settings/recipients/**` → `/api/notification-recipients/**`）、PaymentAccountSettings（見「Payment Accounts / Categories」段落，Requirement 22）、UserManagement（`/api/bff/user-management/**`，見 Requirement 28「API 端點（新增）」）、TodayMarketAnalysisRecipients（`/api/bff/today-market-analysis/recipients/**` → `/api/notification-recipients/{id}/market-analysis`，見 Task 151）
@@ -1549,7 +1549,7 @@ GET    /api/index-intraday?market=TWSE         # 指數「當日」分時（Yaho
 GET    /api/bff/gdp-twse?years=40              # 前端 view 專用，回傳近 N 年彙整資料
 POST   /api/bff/gdp-twse/refresh?years=40      # 並行觸發 TWN+JPN+KOR 人均 GDP 回補（見下方說明）
 GET    /api/bff/gdp-twse/index-daily?market=TWSE&years=10
-                                               # 指數日線 + MA20/60/240（market=TWSE 或 DJI/SPX/IXIC/SOX/FTSE/DAX/KOSPI/N225；一次載入，前端 dataZoom 切區間）
+                                               # 指數日線 + MA5/20/60/240（market=TWSE 或 DJI/SPX/IXIC/SOX/FTSE/DAX/KOSPI/N225；一次載入，前端 dataZoom 切區間）
 POST   /api/bff/gdp-twse/refresh-index-daily?market=TWSE&years=10  # 觸發「當前選取」指數日線回補
 GET    /api/bff/gdp-twse/index-intraday?market=TWSE   # 「當日」分時：回 tradingDate + times(HH:mm) + closes + previousClose/lastClose/change/changePercent
 ```
@@ -1560,7 +1560,7 @@ GET    /api/bff/gdp-twse/index-intraday?market=TWSE   # 「當日」分時：回
 > **「最新交易日」不等於「今日」。** 開盤瞬間 Yahoo 尚未產生今日第一根 5 分格時，`byDate.lastKey()` 取到的是**昨日**；本方法供圖表用故無妨（x 軸本就顯示最後一個有資料的交易日），但**任何拿它的值當「今日即時報價」的呼叫端都必須自行驗證日期**。Task 228 的 `TaiexIndexPoller` 漏了這一步，實測導致昨日點位被寫成今日 tick（見「大盤新鮮度與盤中即時判斷」節）。Task 263 因此另加 `fetchIndexIntradayDay(market)`：同一個 URL、同一個 `curlGetWithRetry`，但回傳 `DayQuote{date, open, high, low, latestClose}`——`date` 為該批點位所屬的當地日期（呼叫端據此守門）、`open`／`high`／`low` 取自 `indicators.quote[0]` 的對應陣列（當日首格開盤、各格最高之最大、各格最低之最小）。**既有 `fetchIndexIntraday` 一行不動**：它的回傳型別 `IndexIntradayPoint` 只有 `time`／`close` 且補滿整個交易時段的 5 分格（未到者 `close=null`）以固定 x 軸，改它會動到「股市大盤查詢」頁
 - market→Yahoo symbol：TWSE→`^TWII`、DJI→`^DJI`、SPX→`^GSPC`、IXIC→`^IXIC`、SOX→`^SOX`、FTSE→`^FTSE`、DAX→`^GDAXI`、KOSPI→`^KS11`、N225→`^N225`
 - 各市場交易時段（補滿 5 分格用，當地時區）：TWSE 09:00–13:30、美股四大 09:30–16:00、FTSE 08:00–16:30、DAX 09:00–17:30、KOSPI 09:00–15:30、N225 09:00–15:30（東京 2024-11-05 收盤由 15:00 延至 15:30；前場 09:00–11:30、後場 12:30–15:30，午休 11:30–12:30 無 bar→留 null）。以 `INDEX_TRADING_HOURS` map 查詢，未知市場 fallback 09:30–16:00
-- 前端「當日」模式 x 軸改 HH:mm、收盤單線；月/季/年線改畫水平參考線（取日線最新 MA20/60/240），與其他期間同口徑
+- 前端「當日」模式 x 軸改 HH:mm、收盤單線；週/月/季/年線改畫水平參考線（取日線最新 MA5/20/60/240，`ma5` 那條為 Task 284 新增、與另外三條同一分支），與其他期間同口徑
 - 「當日」卡片標題列另顯示**昨收 / 漲跌 / 漲跌%**，由 BFF 計算（前端只 render，符合「計算放 BFF」）：`previousClose` ＝該指數日線表（`twse_index_daily_history` / `us_index_daily_history`）中 `tradingDate` **之前**最後一筆收盤——與觀察清單 0000 報價 `WatchStockService.toIndexResponse` 讀**同一張日線表**、且自 Task 263 起兩處**共用同一條「嚴格早於顯示日的最後一筆」規則**（該任務讓觀察清單的 `price`／OHLC 在盤中改讀 Redis 即時點位，但 `previousClose` 刻意**不**改讀 Redis payload，正是為了維持這裡的同源保證），昨收為同一事實來源、值一致；`lastClose` ＝分時 `closes` 末筆非 null（盤中即時 / 盤後收盤）；`change = lastClose − previousClose`、`changePercent = change / previousClose ×100`（HALF_UP 2 位）。BFF 以 `Mono.zip` 並行抓 intraday 與「近 40 日日線 tail」（台股 `/api/twse-daily-index`、美股 `/api/us-daily-index`，與 `index-daily` 同一支 business API，同義欄位同一來源；40 日涵蓋最長連假確保含前一交易日）；日線 asc，取「`tradingDate` 嚴格小於當日」的最後一筆。日線未回補導致昨收缺值時 `change/changePercent` 回 null，前端整段不顯示
 - **昨收新鮮度 — 海外指數日線自動回補（Task 105）**：上述昨收讀日線表，前提是日線表「最新」（含前一交易日）。`us_index_daily_history` 原本只靠前端「回補日線（10 年）」按鈕手動觸發、無排程，久未點擊的指數會停在舊日期；當日走勢點位是即時 Yahoo（最新交易日），昨收卻退回數日前舊收盤 → 漲跌% 失真（實機 SOX 顯示 +13.88%，實際 ~+5%）。注意失效模式是「過時但**非空**→昨收為錯的舊值」，非「缺值→null」，故 BFF 的 null 守門擋不住。修法：business-services 新增 `IndexDailyRefreshScheduler` 讓日線表恆保最新（昨收不變更事實來源），角色比照台股大盤的 ext-materials `TwseIndexPoller`：
   - `@Scheduled(cron = "0 0 7 * * TUE-SAT", zone = "Asia/Taipei")`：美股 16:00 ET 收盤後（≈隔日 04~05:00 台北）足夠緩衝，07:00 對 8 指數逐一呼叫 `MacroHistoryService.refreshUsIndexDaily(code)`（＝手動按鈕同一條 Yahoo `range=10y` idempotent upsert，500ms 間隔）；此時亞/歐/美最新交易日皆已收
@@ -1586,12 +1586,13 @@ GET    /api/bff/gdp-twse/index-intraday?market=TWSE   # 「當日」分時：回
 {
   "dates":  ["2016-05-05", ..., "2026-05-05"],
   "closes": [8295.74, ..., 23000.00],
+  "ma5":    [null, ..., 23010.88],
   "ma20":   [null, ..., 22950.12],
   "ma60":   [null, ..., 22500.45],
   "ma240":  [null, ..., 21800.30]
 }
 ```
-（`null` 代表移動平均尚未滿視窗的早期資料點）
+（`null` 代表移動平均尚未滿視窗的早期資料點。`ma5` 為 Task 284 新增的**週線**——台股慣例的 5 個交易日 SMA、非日曆週，與另外三條走同一支 `movingAverage(closes, window)`，只差視窗長度；四條 MA 皆為 BigDecimal 精確加總後 `divide(window, 2, HALF_UP)`。同一組 `ma5` 定義另由 business 端 `ExcelExportService` 於「週線MA5」匯出欄重算一次——兩處刻意同定義同精度，確保圖上的值與檔案裡的值逐位相同，見 Requirement 45 章節）
 
 台灣人均 GDP / 實質成長率資料來源（**DGBAS 優先、IMF 備援**）：
 - ext-materials-service `MacroDataFetchClient.fetchDgbasNationalIncome()` 抓主計總處 NA8101A1A
@@ -4509,7 +4510,7 @@ back-adjustment 等同總報酬序列，對高配息標的在市價不動時仍�
 
 ---
 
-## Requirement 45（Task 216）：股市大盤指數日線 Excel 匯出（開/高/低/收）與排程自動匯出
+## Requirement 45（Task 216）：股市大盤指數日線 Excel 匯出（開/高/低/收＋四條均線；第六欄為 Task 284、第七～九欄為 Task 285 新增）與排程自動匯出
 
 結構比照 R41／R42（**全域公開行情 ＋ per-user 排程設定**），以下只記差異。
 
@@ -4526,9 +4527,11 @@ back-adjustment 等同總報酬序列，對高配息標的在市價不動時仍�
 
 `twse_index_daily_history` 與 `us_index_daily_history` 皆無 `owner_user_id`、未套 `@Filter(ownerFilter)`。
 
-### 匯出內容：直接取 DB 既有 OHLC 欄位
+### 匯出內容：直接取 DB 既有 OHLC 欄位 ＋ 四欄計算欄（四條均線）
 
-工作表五欄：**日期／開盤／最高／最低／收盤**，單一序列依日期遞增。
+工作表九欄：**日期／開盤／最高／最低／收盤／週線MA5／月線MA20／季線MA60／年線MA240**，
+單一序列依日期遞增（第六欄為 Task 284、第七～九欄為 Task 285 新增，見下方「週線MA5：唯一的計算欄」；
+Task 284 前為五欄、Task 285 前為六欄）。四條均線**依視窗由短到長**排在收盤之後，與圖表 legend 同序。
 
 四個價格欄**直接讀 entity 既有欄位**（`openPoint`／`highPoint`／`lowPoint`／`closePoint`），
 不重算也不由收盤價推導——這與 R42 的中間價相反（那是 `@Transient` 衍生值，必須由 entity 算）。
@@ -4540,6 +4543,130 @@ back-adjustment 等同總報酬序列，對高配息標的在市價不動時仍�
 清空重建或未來新增指數會再度出現只有收盤的中繼狀態。
 `close_point` NOT NULL。TWSE 精度 `numeric(12,2)`、海外 `numeric(14,4)`，沿用 `Styles.num4`。
 日期以 ISO 文字寫入（非 date cell），避免開啟端時區偏移一天（同 R40／R42）。
+
+### 週線MA5：唯一的計算欄（Task 284 建立；Task 285 擴充為四條均線）
+
+> 標題沿用 Task 284 定案時的原文字面——`ExcelExportService`／`GdpTwseBffController` 等既有 javadoc
+> 與 `spec/steering/structure.md` §3.2 皆以「週線MA5：唯一的計算欄」為錨點文字交叉引用，
+> 改標題會讓那些引用全部失效。內容已擴充涵蓋全部四條均線。
+
+第六～九欄是本匯出**唯一不直接取自 DB 欄位**的四欄，定義：
+
+> 該日（含當日）往前 **N 個交易日**的 `close_point` 簡單移動平均，
+> N ∈ {5（週線）, 20（月線）, 60（季線）, 240（年線）}——**交易日，非日曆週／月／季／年**。
+> `BigDecimal` 精確加總後 `divide(N, 2, HALF_UP)`；視窗未滿一律 `null`。
+
+**四欄走同一支 `indexMaAt(rows, i, window)`，只差視窗長度**——與 BFF 的 `movingAverage(closes, window)`
+是同一個結構（那邊也是四條線共用一支）。**不得**為某一條均線另寫一份。
+（刻意不叫 `maAt`：`TechnicalIndicatorService` 已有一支同名同形的 `maAt(asc, i, days)`，
+語意不同——那支是股票路徑、`double` 累加、可能併入 Redis 今日即時點位——同名會讓
+`grep -ran "maAt" backend` 混淆兩種實作。）
+
+**與圖表 MA5 的同值保證（＋這是一筆有意識借下的債）。** 本頁圖表的四條均線一律由 BFF
+`GdpTwseBffController.movingAverage(closes, window)` 算出（BigDecimal 滾動加總、`divide(window, 2, HALF_UP)`），
+匯出端則在 business 的 `ExcelExportService` 重算。**這不是本專案第一次**——台股大盤的 MA 今天就已經有兩份
+實作、且都讀 `twse_index_daily_history`：BFF 的 `movingAverage`（BigDecimal）與
+`TechnicalIndicatorService.taiexSimpleMa`（`double` 累加後 `setScale(2, HALF_UP)`，經 `computeAllForTaiex()`
+→ `TradingRadarService` → `MarketSummary.weeklyMa/monthlyMa/…`）。本次是在這條既有裂縫上再加一道，
+而 t281 的交易雷達匯出走的是相反做法（「`週線MA5`（讀既有的 `weeklyMa`，不新增計算）」）。
+
+**必須寫清楚的是：這不是「無處可放」，是「範圍外」。** business 其實正是兩條流的**共同上游**
+（`GdpTwseBffController` 的 `index-daily` 本來就打 business 的 `/api/twse-daily-index`／`/api/us-daily-index`）。
+business 另有逐日 MA5 的既有實作（`TechnicalIndicatorService.IndicatorPoint.ma5`，
+經 `GET /api/market-data/indicators/series` 提供）。
+
+> **不可用「那支不是現成解」搪塞。** 它確實**只覆蓋 `0000`＋`台股`**（`TechnicalIndicatorService.isTaiex`
+> 只認這一組，本頁另外 8 個海外指數在該服務沒有分支，走 `stockSeriesAsc` 只會查 `stock_price_history`
+> 得到空序列）——但**唯一會與別處撞值的正好就是 TWSE**，而那正是它已覆蓋的那一個；
+> 另外 8 個指數全站沒有同義競品，怎麼算都不會不一致。真正擋住它的是**語意**不是覆蓋率：
+> 它會**併入 Redis 今日盤中即時點位**，而本圖的 MA20/60/240 與本匯出一律只用已落地的日線收盤。
+> 只把 MA5 換成它，會讓**同一張圖上的五條線有兩種口徑**（週線含盤中、其餘不含），
+> 那比現在的分裂更糟；匯出更不能用（匯出是已落地收盤的檔案留存）。
+> **同理，backend 內部「直接注入 `TechnicalIndicatorService`」也不是本次的解**——
+> 那兩支同專案、同 Spring context，技術上完全共用得了，擋住的一樣是 live 併入語意與覆蓋率，
+> 不是建置結構。（真要收斂，見下方選項 2 與「已知分裂」段。）
+
+被放棄的選項有三，都可行、都超出「加一條線一個欄」的範圍：
+
+1. **把 MA 塞進既有兩支 GET**（`/api/twse-daily-index`／`/api/us-daily-index`）：兩支目前**直接回 entity list**
+   （`MacroHistoryController` 回 `List<TwseIndexDailyHistory>`／`List<UsIndexDailyHistory>`），要帶 MA 就得改回傳型別；
+   且 MA 掛在 range query 上會**隨查詢區間變值**——`index-intraday` 用同一支端點只查 40 日 tail，
+   同一個 `ma240` 在兩個呼叫端會是兩種語意。（呼叫端本身不成問題：三處呼叫端
+   `GdpTwseBffController` ×2、`PerformanceComparisonBffController` ×1 皆以 `bodyToMono(LIST_MAP)` 解析，
+   加欄位對它們是 additive。）
+2. **新增一支 business 序列端點回 `{dates, closes, ma5, ma20, ma60, ma240}`、BFF 改為 relay**：
+   這是單一實作最便宜的路線，不動任何既有端點契約。放棄的理由是**代價與收益不成比例**——
+   它把 MA 計算搬出 BFF（而 CLAUDE.md 明文把「預先計算」派給 BFF），在 business 多出第三種同一份日線序列的
+   表述，且要動一條使用者天天在看、目前正常運作的圖表路徑；換得的只有「少一份實作」，
+   使用者看到的東西一模一樣。**這是本次借下的債；日後兩處若真的出現不一致，正解是回頭做這一條。**
+3. **抽 shared module** 放共用 MA 工具——backend 與 bff 是兩個獨立 Maven 專案（`asset-management`／
+   `asset-management-bff`，**無共同 aggregator／parent POM**——各自 parent 為 `spring-boot-starter-parent`
+   ——且彼此無相依），新增共用模組是建置結構層級的改動。
+
+**本次接受的做法是「同定義同精度」的人工約束**：同為 BigDecimal 精確加總（無中間捨入）＋
+`divide(window, 2, HALF_UP)`（`window ∈ {5, 20, 60, 240}`），輸入同為兩張日線表的 `close_point`。
+兩邊查詢區間本就不同（BFF 取近 10 年、匯出取 `[start−400d, end]`），成立的是**同一交易日的同一視窗
+會取到同一組列**——因為 `close_point` 兩張表皆 NOT NULL，BFF 的 `if (d == null || c == null) continue;`
+不會命中、不會少列。
+
+> **同值保證的兩處界線**（不寫下來就會變成本專案典型的「過度絕對斷言」）：
+> 1. **圖表 10 年視窗最左緣**：BFF 起點寫死 `today.minusYears(10)`，該處各自視窗未滿故為 `null`
+>    （MA5 為最前 4 個交易日、MA240 為最前 239 個交易日）；匯出若回看得到更早的列則有值。
+>    兩者定義相同，差別只在各自視窗的左緣。DB 因 `refresh?years=10` 逐年往回累積而超過 10 年後，
+>    此差異會成為常態。
+> 2. **交易雷達匯出也有欄叫「週線MA5」／「MA20」／「MA60」／「MA240」**（`TradingRadarExportService`
+>    讀 `MarketSummary.weeklyMa`／`monthlyMa`／`quarterlyMa`／`annualMa`，走 `taiexSimpleMa` 的 `double`
+>    路徑），走勢圖的同名線（`indicators/series` → `TechnicalIndicatorService.maAt`）亦然。
+>    三者同名、同語意（台股大盤 5 交易日均）、同一張 `twse_index_daily_history`。**本次不收斂。**
+>
+>    **但差異的成因必須講對，否則會去修錯的地方：**
+>    - **不是精度差。** 台股收盤為 `numeric(12,2)`，5 筆之和除以 5 的精確商恆為**三位小數且第三位為偶數**
+>      （`n/500 = 2n/1000`），永遠碰不到 `.xxx5` 的 HALF_UP 邊界；而 double 累加對 ~2×10⁵ 量級的誤差約
+>      10⁻¹⁰，距最近邊界 ≥ 5×10⁻⁴，**跨不過去**。50 萬組隨機 2 位小數樣本實測：兩路徑不一致 **0 次**。
+>      故對 TWSE，`double` 版與 `BigDecimal` 版**逐位相同**。（4 位小數的海外指數理論上可能出現平手，
+>      但那 8 個指數在 `TechnicalIndicatorService` 根本沒有分支、沒有競品，不構成不一致。）
+>    - **是 live 併入語意差。** 交易雷達／走勢圖走 `computeAllForTaiex`／`indicatorSeries`，
+>      盤中會把 Redis 今日即時點位併成今日列；本匯出只用已落地收盤。**盤中同日兩個檔案本來就該不同**
+>      （一個是即時快照、一個是收盤留存），這不是 bug。
+>
+>    要真正收斂成一份實作，必須先決定「MA 要不要併 live」這個**語意**問題（各消費端答案不同），
+>    再統一 `TechnicalIndicatorService` 的算術路徑——那會動到交易雷達、觀察清單、走勢圖與其 golden，
+>    是獨立任務，不在本次範圍。
+
+**這個例外只適用本匯出，不寫進 `steering/structure.md` 3.2**（該條規範的是「BFF 不在不同頁重複呼叫不同
+endpoint 取同義值」，本案是同一頁的畫面值 vs 檔案值，屬規範精神而非字面違反）。**殘餘風險是沒有跨模組的
+自動化交叉驗證**：`movingAverage` 在另一個 Maven 專案，backend 的測試載不到它，寫不出「A 等於 B」的測試。
+代償是**兩邊各自把定義釘在自己的測試裡**：
+- 匯出端 `DualFormatSingleTableExportTest`：獨立 fixture ＋ 測試內 `BigDecimal` 手算比對（t284.15）。
+- BFF 端：`bff/src/test/java/com/steven/assets/bff/gdptwse/` 下**新增一支單元測試**，對
+  `movingAverage(closes, 5)` 手算比對，並釘住「視窗未滿填 null」與「2 位小數 HALF_UP」（t284.17）。
+  為此 `movingAverage` 由 `private` 改為 **package-private**。
+
+任一邊改了定義，該邊的測試就會紅——這是本次能拿到的最強機械防線。
+
+**回看視窗（`start.minusDays(400)`，Task 285 由 30 天放大）。** 只用區間內收盤時，檔案前幾列的均線必為空
+——使用者會讀成 bug。故查詢向前回看，算完四條均線後**只輸出 `tradingDate >= start` 的列**，
+回看列不得出現在檔案中。這也讓匯出值與圖表值在區間左緣一致（圖表拿的是完整 10 年序列，本來就有前面的資料）。
+
+**400 天怎麼來的：由最長視窗 MA240 決定。** MA240 需要當日之前的 **239 個交易日**；
+400 個日曆天約含 400÷7×5 ≈ 285 個平日，台股每年約 240～242 個交易日（年約 19～21 天非週末休市），
+折算 400 天跨約 1.1 年約再扣 21～26 天休市日 ≈ **261～266 個交易日**，對 239 仍有約 **22～27 個交易日**
+餘裕（理論下限約 239×365/242 ≈ 361 個日曆天，400 尚有約 11% headroom）。即使 400 天窗口跨兩次農曆年
+（各休約 5～6 個平日）的最壞情況，交易日仍約 259～260，仍 ≥ 239。Task 284 的 30 天只夠 MA5，
+補上 MA20/60/240 後必須放大——**這是一個常數，四條均線共用**（回看以最長者為準，短視窗自然涵蓋）。
+
+**回看不足只會缺值、不會算錯。** DB 湊不滿該視窗時（該指數歷史最前端，或回看仍不足）該格留空——
+`omitNullCells` 語意不變＝該格根本不建，非 BLANK 格；不補前值、**不以不足視窗的平均充數**。
+故 400 這個數字選保守一點即可，永遠不會產生錯的數字。
+
+**新欄一律附加在最末。** 既有欄索引不得位移（Task 284 時為 0–4、Task 285 時為 0–5）：
+golden 逐格比對與既有斷言以欄索引定位（`DualFormatSingleTableExportTest` 的「指數：D2 只有收盤 →
+`getCell(1)`／`getCell(3)` 不存在、`getCell(4)` ＝ 23200.00」）。**插在中間並非做不到**——
+t281 就是把「週線MA5」插在雷達的 `MA20` 之前，再以欄索引位移函式
+（`c -> c < 11 ? c : (c < 18 ? c + 1 : c + 15)`）對改動前的 golden 比對——但那要維護一組位移函式；
+附加在最末可用 **identity 映射**比對，既有斷言的欄索引也一格都不用改。
+JSON 那一份（R55 雙格式）欄名同為 `週線MA5`／`月線MA20`／`季線MA60`／`年線MA240`，
+由同一份 header 清單產生，兩種格式不會分岔。
 
 ### 兩張來源表的分派
 
@@ -4638,6 +4765,43 @@ run-now 不動當日 guard——全部同 R41／R42，不重述。
 - `frontend/src/api/index.js`：`gdpTwse` 命名空間新增 5 支
 - `frontend/src/views/GdpTwseView.vue`：新增「匯出 Excel」按鈕＋匯出對話框＋「排程自動匯出」設定卡＋資料夾選擇器
 - `SchedulePublicBffController.java`：`JOBS` 補「大盤指數匯出 每日匯出排程檢查」項目
+
+**Task 284 異動（週線MA5）**
+- `ExcelExportService.java`：`indexDailySheet` 加第六欄「週線MA5」（回看 30 日、只輸出 `>= start` 的列）
+  ＋ javadoc 的「五欄／四個價格欄」敘述更新
+- `MacroHistoryController.java`：**僅 javadoc**——`/api/index-daily/export` 那段的「日期／開盤／最高／最低／收盤五欄」改六欄
+- `GdpTwseBffController.java`：`index-daily` 回傳加 `ma5`（同一支 `movingAverage`，window=5）；
+  該方法由 `private` 改 package-private 供測試釘定義 ＋ javadoc 的 MA 清單更新
+- `bff/src/test/java/com/steven/assets/bff/gdptwse/`：新增一支單元測試，釘住 `movingAverage` 的視窗／null／精度
+- `backend/.../service/export/DualFormatSingleTableExportTest.java`：新增「插欄零回歸（identity 映射）」
+  「MA5 值」「回看視窗」三條測試，並把 `twseIndexHistRepo` 的 stub 改為可斷言查詢起點的形式
+- `SchedulePublicBffController.java`：**僅文案**——排程一覽的「欄位為開高低收」補上「＋週線MA5」（不新增 `JOBS` 項目）
+- `frontend/src/views/GdpTwseView.vue`：日線圖加第五條線「週線 (MA5)」＋卡片標題／匯出對話框／排程說明文案的欄位清單
+- `backend/src/test/resources/golden/index_twse.xlsx`：重產（表頭多一格「週線MA5」）；
+  `index_twse_pre_t284.xlsx` 新增，保留改動前基準供欄索引比對
+
+**Task 285 異動（補齊月線／季線／年線，6 欄 → 9 欄）**
+- `ExcelExportService.java`：`ma5At` 一般化為 `indexMaAt(rows, i, window)`（改名避免與
+  `TechnicalIndicatorService.maAt` 同名同形造成 grep／文件歧義）；表頭與 formats 各加三欄；
+  回看常數 `MA5_LOOKBACK_DAYS`(30) → `MA_LOOKBACK_DAYS`(400)；javadoc 六欄→九欄
+- `MacroHistoryController.java`：**僅 javadoc**——六欄→九欄。另 `ExcelExportService.java:534`
+  「第六欄『週線MA5』是本分頁唯一的計算欄」須改為「第六～九欄是本分頁唯一不直接取自 DB 欄位的四欄」
+  （標題錨點「週線MA5：唯一的計算欄」本身不變，見上方標題節的說明）
+- `GdpTwseBffController.java` / `bff/src/test/.../GdpTwseBffControllerMaTest.java`：**不改**
+  ——兩處對本節的交叉引用是錨點文字「週線MA5：唯一的計算欄」，標題未變則引用仍然有效
+- `SchedulePublicBffController.java`：**僅文案**——「＋週線MA5」→「＋四條均線」
+- `frontend/src/views/GdpTwseView.vue`：**僅文案**——匯出對話框與排程說明的欄位清單（圖表本身不動，
+  BFF `index-daily` 早已回四條 MA、圖表也早有四條線）
+- `backend/.../export/DualFormatSingleTableExportTest.java`：**新增**「插欄後既有六欄逐格未變」
+  （對 `index_twse_pre_t285` 做 identity 映射，`index_twse_pre_t284` 那條原樣保留但
+  `getLastCellNum()` 斷言由 6 改 9）；**新增**「長天期均線值與JSON」（≥241 列獨立 fixture，
+  `MA5值與JSON` 原樣保留不動）；**新增**「回看視窗足以支撐 MA240」；
+  既有「回看列不輸出」的 `minusDays(30)` 斷言改為 `minusDays(400)`
+- `backend/src/test/resources/golden/index_twse.xlsx`：再次重產（表頭 6 → 9 格）；
+  `index_twse_pre_t285.xlsx` 新增（＝ Task 284 版，6 欄），供 identity 映射比對
+- `spec/steering/structure.md` §3.2：具名例外由「兩份實作」更新為「三份實作」（見上方 §3.2 第 4 條）
+- **BFF 主程式邏輯不動**：`index-daily` 早已回 `ma5/ma20/ma60/ma240` 四條，圖表也早有四條線；
+  本次只補匯出
 
 ---
 

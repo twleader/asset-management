@@ -22,6 +22,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
@@ -39,6 +40,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -365,6 +367,261 @@ class DualFormatSingleTableExportTest {
                         assertThat(a.getStringCellValue()).isEqualTo(b.getStringCellValue());
                     }
                 }
+            }
+        }
+    }
+
+    // ===== Task 284：大盤指數日線加第六欄「週線MA5」 =====
+
+    @Nested
+    @DisplayName("Task 284／285：大盤指數日線的四條均線欄")
+    class WeeklyMa5 {
+
+        /** 匯出區間；本組 fixture 的日期一律 >= START（284.15），回看測試另備 fixture（284.16）。 */
+        private static final LocalDate START = LocalDate.of(2026, 7, 1);
+        private static final LocalDate END = LocalDate.of(2026, 7, 31);
+
+        /** 長天期均線 fixture 的起始日（285.12）；與 START/END 無關，日期一律 >= 本值，不觸發回看過濾。 */
+        private static final LocalDate LONG_START = LocalDate.of(2025, 1, 1);
+
+        @Test
+        @DisplayName("插欄前後既有五欄逐格未變（對 index_twse_pre_t284 做 identity 映射比對）")
+        void 插欄前後既有五欄未變() throws Exception {
+            stubAll();
+            Workbook actual = read(service.exportIndexDaily("TWSE", D1, D2));
+            Workbook pre = golden("index_twse_pre_t284");
+
+            // 附加在最末 → 欄索引不位移，映射即 identity（t281 插在中間時才需要位移函式）
+            assertSameMapped(pre, actual, c -> c);
+
+            // 新欄只出現在表頭列：fixture 僅 2 列、湊不滿任何視窗，故資料列該格根本不建（omitNullCells）
+            Sheet s = actual.getSheetAt(0);
+            assertThat(s.getRow(0).getCell(5).getStringCellValue()).isEqualTo("週線MA5");
+            // Task 285 插欄後表頭共 9 格（不是 t284 當下的 6 格）——本測試只驗「t284 插的那一欄未變」，
+            // 表格總欄數已因 t285 變動，這裡必須跟著改，否則會誤判 t285 打壞了東西。
+            assertThat(s.getRow(0).getLastCellNum()).isEqualTo((short) 9);
+            assertThat(s.getRow(1).getCell(5)).as("視窗未滿 → 該格不建，不是 BLANK").isNull();
+            assertThat(s.getRow(2).getCell(5)).isNull();
+        }
+
+        @Test
+        @DisplayName("插欄前後既有六欄逐格未變（對 index_twse_pre_t285 做 identity 映射比對）")
+        void 插欄前後既有六欄未變() throws Exception {
+            stubAll();
+            Workbook actual = read(service.exportIndexDaily("TWSE", D1, D2));
+            Workbook pre = golden("index_twse_pre_t285");
+
+            // 附加在最末 → 欄索引不位移，映射即 identity
+            assertSameMapped(pre, actual, c -> c);
+
+            Sheet s = actual.getSheetAt(0);
+            assertThat(s.getRow(0).getCell(6).getStringCellValue()).isEqualTo("月線MA20");
+            assertThat(s.getRow(0).getCell(7).getStringCellValue()).isEqualTo("季線MA60");
+            assertThat(s.getRow(0).getCell(8).getStringCellValue()).isEqualTo("年線MA240");
+            assertThat(s.getRow(0).getLastCellNum()).isEqualTo((short) 9);
+            // fixture 僅 2 列，三個新視窗全部湊不滿，資料列該格根本不建
+            assertThat(s.getRow(1).getCell(6)).isNull();
+            assertThat(s.getRow(1).getCell(7)).isNull();
+            assertThat(s.getRow(1).getCell(8)).isNull();
+        }
+
+        @Test
+        @DisplayName("MA5＝含當日往前 5 個交易日收盤的精確平均（2 位 HALF_UP），前 4 列無值；JSON 同值")
+        void MA5值與JSON() throws Exception {
+            when(twseIndexHistRepo.findByTradingDateBetweenOrderByTradingDateAsc(any(), any()))
+                    .thenReturn(sevenDays());
+
+            Sheet s = read(service.exportIndexDaily("TWSE", START, END)).getSheetAt(0);
+            for (int i = 1; i <= 4; i++) {
+                assertThat(s.getRow(i).getCell(5)).as("第 %d 列視窗未滿 → 該格不建", i).isNull();
+            }
+            // 期望值在測試內手算，不呼叫被測程式自己算：
+            //   前 5 筆 100.00+100.01+100.02+100.03+100.05 = 500.11 → /5 = 100.022 → HALF_UP(2) = 100.02
+            assertThat(s.getRow(5).getCell(5).getNumericCellValue()).isEqualTo(100.02);
+            //   第 2~6 筆 100.01+100.02+100.03+100.05+100.03 = 500.14 → /5 = 100.028 → HALF_UP(2) = 100.03（進位）
+            assertThat(s.getRow(6).getCell(5).getNumericCellValue()).isEqualTo(100.03);
+            //   第 3~7 筆 100.02+100.03+100.05+100.03+100.07 = 500.20 → /5 = 100.04（整除）
+            assertThat(s.getRow(7).getCell(5).getNumericCellValue()).isEqualTo(100.04);
+            // 2 位小數的收盤價除以 5 恆為 3 位小數且末位為偶數（k/500 = 2k/1000），
+            // 故 x.xxx5 的 HALF_UP 平手在 TWSE 精度下數學上不可能出現——上面第二筆的「進位」即為最強案例。
+            assertThat(s.getRow(5).getCell(5).getCellStyle().getDataFormatString()).isEqualTo("#,##0.00");
+
+            JsonNode rows = json(service.indexDailyDoc("TWSE", START, END)).at("/sheets/0/tables/0/rows");
+            assertThat(rows.get(0).get("週線MA5").isNull()).as("JSON 前 4 列為 null，不是 0").isTrue();
+            assertThat(rows.get(3).get("週線MA5").isNull()).isTrue();
+            assertThat(rows.get(4).get("週線MA5").decimalValue()).isEqualByComparingTo("100.02");
+            assertThat(rows.get(5).get("週線MA5").decimalValue()).isEqualByComparingTo("100.03");
+        }
+
+        @Test
+        @DisplayName("查詢向前回看 400 天，但回看列不得出現在檔案中（第一列即 start 且已有 MA5）")
+        void 回看列不輸出() throws Exception {
+            when(twseIndexHistRepo.findByTradingDateBetweenOrderByTradingDateAsc(any(), any()))
+                    .thenReturn(withLookback());
+
+            Sheet s = read(service.exportIndexDaily("TWSE", START, END)).getSheetAt(0);
+
+            ArgumentCaptor<LocalDate> from = ArgumentCaptor.forClass(LocalDate.class);
+            verify(twseIndexHistRepo)
+                    .findByTradingDateBetweenOrderByTradingDateAsc(from.capture(), any());
+            assertThat(from.getValue()).as("查詢起點須回看 400 個日曆天（Task 285 由 30 天放大）")
+                    .isEqualTo(START.minusDays(400));
+
+            assertThat(s.getLastRowNum()).as("4 筆回看列不得輸出，只剩表頭 ＋ 3 列").isEqualTo(3);
+            assertThat(s.getRow(1).getCell(0).getStringCellValue())
+                    .as("第一列即 start，不是回看起點").isEqualTo(START.toString());
+            //   回看的 4 筆 ＋ start 當天 = 100.00+100.01+100.02+100.03+100.05 = 500.11 → 100.02
+            assertThat(s.getRow(1).getCell(5).getNumericCellValue())
+                    .as("第一列就要有值——這正是回看存在的理由").isEqualTo(100.02);
+        }
+
+        @Test
+        @DisplayName("月線／季線／年線＝含當日往前對應交易日數收盤的精確平均，各自暖機列準確；JSON 同值")
+        void 長天期均線值與JSON() throws Exception {
+            when(twseIndexHistRepo.findByTradingDateBetweenOrderByTradingDateAsc(any(), any()))
+                    .thenReturn(longSeries());
+            LocalDate end = LONG_START.plusDays(250);
+
+            Sheet s = read(service.exportIndexDaily("TWSE", LONG_START, end)).getSheetAt(0);
+
+            // MA20（欄索引 6）：暖機 19 列（data index 0..18），index 19 起有值
+            assertThat(s.getRow(19).getCell(6)).as("MA20 暖機未滿（data index 18）→ 該格不建").isNull();
+            // 期望值在測試內手算：close[i] = 100.00 + i*0.01，MA20 於 data index 19
+            //   = 前 20 筆(index 0..19)之和 2001.90 / 20 = 100.095 → HALF_UP(2) = 100.10
+            assertThat(s.getRow(20).getCell(6).getNumericCellValue()).isEqualTo(100.10);
+
+            // MA60（欄索引 7）：暖機 59 列，index 59 起有值
+            assertThat(s.getRow(59).getCell(7)).as("MA60 暖機未滿（data index 58）→ 該格不建").isNull();
+            //   前 60 筆(index 0..59)之和 6017.70 / 60 = 100.295 → HALF_UP(2) = 100.30
+            assertThat(s.getRow(60).getCell(7).getNumericCellValue()).isEqualTo(100.30);
+
+            // MA240（欄索引 8）：暖機 239 列，index 239 起有值
+            assertThat(s.getRow(239).getCell(8)).as("MA240 暖機未滿（data index 238）→ 該格不建").isNull();
+            //   前 240 筆(index 0..239)之和 24286.80 / 240 = 101.195 → HALF_UP(2) = 101.20
+            assertThat(s.getRow(240).getCell(8).getNumericCellValue()).isEqualTo(101.20);
+
+            JsonNode rows = json(service.indexDailyDoc("TWSE", LONG_START, end)).at("/sheets/0/tables/0/rows");
+            assertThat(rows.get(18).get("月線MA20").isNull()).as("JSON 暖機列為 null，不是 0").isTrue();
+            assertThat(rows.get(19).get("月線MA20").decimalValue()).isEqualByComparingTo("100.10");
+            assertThat(rows.get(58).get("季線MA60").isNull()).isTrue();
+            assertThat(rows.get(59).get("季線MA60").decimalValue()).isEqualByComparingTo("100.30");
+            assertThat(rows.get(238).get("年線MA240").isNull()).isTrue();
+            assertThat(rows.get(239).get("年線MA240").decimalValue()).isEqualByComparingTo("101.20");
+        }
+
+        @Test
+        @DisplayName("回看視窗需涵蓋 239 個交易日以支撐 MA240（回看列不得輸出，第一列即有 MA240）")
+        void 回看支撐MA240() throws Exception {
+            LocalDate rangeStart = LocalDate.of(2026, 1, 1);
+            when(twseIndexHistRepo.findByTradingDateBetweenOrderByTradingDateAsc(any(), any()))
+                    .thenReturn(lookbackFor240(rangeStart));
+
+            Sheet s = read(service.exportIndexDaily("TWSE", rangeStart, rangeStart)).getSheetAt(0);
+
+            ArgumentCaptor<LocalDate> from = ArgumentCaptor.forClass(LocalDate.class);
+            verify(twseIndexHistRepo)
+                    .findByTradingDateBetweenOrderByTradingDateAsc(from.capture(), any());
+            assertThat(from.getValue()).isEqualTo(rangeStart.minusDays(400));
+
+            assertThat(s.getLastRowNum()).as("239 筆回看列不得輸出，只剩表頭 ＋ 1 列").isEqualTo(1);
+            assertThat(s.getRow(1).getCell(0).getStringCellValue()).isEqualTo(rangeStart.toString());
+            assertThat(s.getRow(1).getCell(8))
+                    .as("回看足夠（239 筆歷史 ＋ 當日）→ 第一列 MA240 就有值").isNotNull();
+        }
+
+        /** 7 個交易日、全部 >= START（模擬 DB 歷史最前端湊不滿 5 筆）。 */
+        private static List<TwseIndexDailyHistory> sevenDays() {
+            String[] closes = {"100.00", "100.01", "100.02", "100.03", "100.05", "100.03", "100.07"};
+            int[] days = {1, 2, 3, 6, 7, 8, 9};   // 2026-07 的平日
+            List<TwseIndexDailyHistory> out = new ArrayList<>();
+            for (int i = 0; i < closes.length; i++) {
+                out.add(day(LocalDate.of(2026, 7, days[i]), closes[i]));
+            }
+            return out;
+        }
+
+        /** 前 4 筆落在 START 之前（回看列）、後 3 筆自 START 起。 */
+        private static List<TwseIndexDailyHistory> withLookback() {
+            String[] closes = {"100.00", "100.01", "100.02", "100.03", "100.05", "100.03", "100.07"};
+            int[] june = {24, 25, 26, 29};                 // 回看列
+            List<TwseIndexDailyHistory> out = new ArrayList<>();
+            for (int i = 0; i < 4; i++) out.add(day(LocalDate.of(2026, 6, june[i]), closes[i]));
+            for (int i = 4; i < 7; i++) out.add(day(LocalDate.of(2026, 7, i - 3), closes[i]));
+            return out;
+        }
+
+        private static TwseIndexDailyHistory day(LocalDate d, String close) {
+            TwseIndexDailyHistory h = new TwseIndexDailyHistory();
+            h.setTradingDate(d);
+            h.setClosePoint(new BigDecimal(close));
+            return h;
+        }
+
+        /**
+         * 245 個交易日、全部 >= LONG_START（不觸發回看過濾），收盤 close[i] = 100.00 + i×0.01（i 為
+         * 0-based data index），刻意取等差數列——MA20/60/240 在各自暖機邊界的和恰為 x.x95，
+         * HALF_UP 捨入必進位，是可在測試內手算、且不依賴被測程式自身的期望值。
+         */
+        private static List<TwseIndexDailyHistory> longSeries() {
+            List<TwseIndexDailyHistory> out = new ArrayList<>();
+            for (int i = 0; i < 245; i++) {
+                out.add(day(LONG_START.plusDays(i), new BigDecimal("100.00").add(BigDecimal.valueOf(i, 2)).toPlainString()));
+            }
+            return out;
+        }
+
+        /** 239 個交易日的回看列（皆早於 rangeStart）＋ 區間內剛好 1 筆，收盤全相同以讓 MA240 易驗證非 null。 */
+        private static List<TwseIndexDailyHistory> lookbackFor240(LocalDate rangeStart) {
+            List<TwseIndexDailyHistory> out = new ArrayList<>();
+            for (int i = 239; i >= 1; i--) {
+                out.add(day(rangeStart.minusDays(i), "100.00"));
+            }
+            out.add(day(rangeStart, "100.00"));
+            return out;
+        }
+    }
+
+    /**
+     * 以欄索引映射逐格比對值、型別、dataFormat、粗體、字級（Task 284，比照
+     * {@code TradingRadarDualFormatTest.assertSameMapped}——那支是別的測試類別的 private static，跨類別用不到）。
+     *
+     * <p><b>不可改用同檔的 {@link #assertSameWorkbook}</b>：它會斷言 {@code getLastCellNum()} 相等，
+     * 而表頭列插欄前後是 5 vs 6，必紅。<b>只重產 golden 不做這條比對也是不夠的</b>——
+     * 那樣「新增了欄」與「順手把既有欄改壞」無法分辨。
+     */
+    private static void assertSameMapped(Workbook expected, Workbook actual,
+                                         java.util.function.IntUnaryOperator map) {
+        Sheet e = expected.getSheetAt(0);
+        Sheet a = actual.getSheetAt(0);
+        assertThat(a.getSheetName()).as("分頁名").isEqualTo(e.getSheetName());
+        assertThat(a.getLastRowNum()).as("列數").isEqualTo(e.getLastRowNum());
+        for (int ri = 0; ri <= e.getLastRowNum(); ri++) {
+            Row er = e.getRow(ri);
+            if (er == null) continue;
+            Row ar = a.getRow(ri);
+            assertThat(ar).as("第 %d 列", ri).isNotNull();
+            for (int ci = 0; ci < er.getLastCellNum(); ci++) {
+                Cell ec = er.getCell(ci);
+                int target = map.applyAsInt(ci);
+                Cell ac = ar.getCell(target);
+                String where = String.format("舊(%d,%d) → 新(%d,%d)", ri, ci, ri, target);
+                if (ec == null) {
+                    assertThat(ac).as("%s 該格應不存在", where).isNull();
+                    continue;
+                }
+                assertThat(ac).as("%s 該格應存在", where).isNotNull();
+                assertThat(ac.getCellType()).as("%s 型別", where).isEqualTo(ec.getCellType());
+                if (ec.getCellType() == CellType.STRING) {
+                    assertThat(ac.getStringCellValue()).as("%s 值", where).isEqualTo(ec.getStringCellValue());
+                } else if (ec.getCellType() == CellType.NUMERIC) {
+                    assertThat(ac.getNumericCellValue()).as("%s 值", where).isEqualTo(ec.getNumericCellValue());
+                }
+                assertThat(ac.getCellStyle().getDataFormatString())
+                        .as("%s dataFormat", where).isEqualTo(ec.getCellStyle().getDataFormatString());
+                var ef = expected.getFontAt(ec.getCellStyle().getFontIndex());
+                var af = actual.getFontAt(ac.getCellStyle().getFontIndex());
+                assertThat(af.getBold()).as("%s 粗體", where).isEqualTo(ef.getBold());
+                assertThat(af.getFontHeightInPoints()).as("%s 字級", where).isEqualTo(ef.getFontHeightInPoints());
             }
         }
     }

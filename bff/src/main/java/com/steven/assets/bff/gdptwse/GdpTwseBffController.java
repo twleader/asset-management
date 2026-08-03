@@ -147,7 +147,8 @@ public class GdpTwseBffController {
     }
 
     /**
-     * 指數日線（近 N 年）+ MA20 / MA60 / MA240。一次回傳完整資料；前端切換區間僅用 dataZoom 不重打 API。
+     * 指數日線（近 N 年）+ MA5 / MA20 / MA60 / MA240。一次回傳完整資料；前端切換區間僅用 dataZoom 不重打 API。
+     * MA5＝週線（台股慣例的 5 個交易日，非日曆週；Task 284）。
      * market=TWSE 走台股大盤（/api/twse-daily-index），其餘（DJI/SPX/IXIC/SOX/FTSE/DAX/KOSPI/N225）走海外指數（/api/us-daily-index）。
      * 兩市場回傳格式與 MA 計算完全相同（同義欄位同一來源），確保版面一致。
      */
@@ -189,6 +190,7 @@ public class GdpTwseBffController {
                     Map<String, Object> body = new HashMap<>();
                     body.put("dates", dates);
                     body.put("closes", closes);
+                    body.put("ma5", movingAverage(closes, 5));
                     body.put("ma20", movingAverage(closes, 20));
                     body.put("ma60", movingAverage(closes, 60));
                     body.put("ma240", movingAverage(closes, 240));
@@ -387,8 +389,15 @@ public class GdpTwseBffController {
 
     /**
      * 簡單移動平均：window 不足時填 null。回傳 List<Object>（可含 null）。
+     *
+     * <p>BigDecimal 精確加總（無中間捨入）＋ {@code divide(window, 2, HALF_UP)}——
+     * <b>這個定義同時被 business 的 {@code ExcelExportService} 的「週線MA5」匯出欄複製一份</b>
+     * （Task 284；兩者不同 Maven 專案、無法共用程式碼，改以同定義同精度保證同值）。
+     * 動這裡的精度／捨入前，先看 spec/design.md 的 Requirement 45「週線MA5：唯一的計算欄」。
+     *
+     * <p>package-private：供同 package 的單元測試釘住 MA 定義，勿改回 private。
      */
-    private List<Object> movingAverage(List<BigDecimal> values, int window) {
+    List<Object> movingAverage(List<BigDecimal> values, int window) {
         int n = values.size();
         List<Object> out = new ArrayList<>(n);
         BigDecimal sum = BigDecimal.ZERO;

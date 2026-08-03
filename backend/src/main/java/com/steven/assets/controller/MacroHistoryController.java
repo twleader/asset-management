@@ -119,7 +119,8 @@ public class MacroHistoryController {
     }
 
     /**
-     * 指數日線區間匯出成單一 .xlsx（日期／開盤／最高／最低／收盤五欄）（Requirement 45 / Task 216）。
+     * 指數日線區間匯出成單一 .xlsx（日期／開盤／最高／最低／收盤／週線MA5／月線MA20／季線MA60／
+     * 年線MA240 九欄；第六～九欄為 Task 284／285 新增的計算欄）（Requirement 45 / Task 216）。
      * GET /api/index-daily/export?market=TWSE&start=2020-01-01&end=2026-07-18
      * 預設回近 10 年。全域公開行情，無 owner 過濾。
      *

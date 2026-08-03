@@ -508,7 +508,8 @@ public class ExcelExportService {
     }
 
     /**
-     * 大盤指數日線區間匯出（Requirement 45 / Task 216）：單張工作表、日期／開高低收五欄。
+     * 大盤指數日線區間匯出（Requirement 45 / Task 216）：單張工作表、日期／開高低收 ＋ 四條均線九欄
+     * （第六～九欄為 Task 284／285 新增的計算欄：週線MA5／月線MA20／季線MA60／年線MA240）。
      * 全域公開行情（兩張日線表皆無 owner 欄位、無 {@code @Filter}），故不需要 ForOwner 變體（同油價金價／匯率）。
      */
     @Transactional(readOnly = true)
@@ -524,11 +525,20 @@ public class ExcelExportService {
     }
 
     /**
-     * 「大盤指數日線」分頁：日期／開盤／最高／最低／收盤五欄，單一序列依日期遞增。
+     * 「大盤指數日線」分頁：日期／開盤／最高／最低／收盤／週線MA5／月線MA20／季線MA60／年線MA240
+     * 九欄，單一序列依日期遞增。
      *
      * <p><b>四個價格欄直接讀 DB 既有 OHLC 欄位，不重算、不由收盤推導</b>——這與匯率分頁的中間價相反
      * （那是 {@code @Transient} 衍生值，必須由 entity 算）。兩張表的欄位語意相同，在此正規化成同一組
      * {@code (date, o, h, l, c)} 後共用同一段寫表邏輯，確保切換指數時版面一致。
+     *
+     * <p><b>第六～九欄是本分頁唯一不直接取自 DB 欄位的四欄</b>（Task 284 建立 MA5、Task 285 補齊
+     * MA20/60/240）：該日含當日往前 N 個交易日 {@code close} 的簡單移動平均（N ∈ {5,20,60,240}，
+     * 交易日非日曆週／月／季／年）。定義與精度**必須**與本頁圖表的四條均線
+     * （BFF {@code GdpTwseBffController.movingAverage(closes, window)}）逐位相同——同為 BigDecimal
+     * 精確加總 ＋ {@code divide(window, 2, HALF_UP)}，故同一指數同一日期，畫面與檔案顯示同一個值。
+     * 兩處是兩份實作（不同 Maven 專案、無法共用程式碼），取捨與被放棄的選項見
+     * spec/design.md 的 Requirement 45「週線MA5：唯一的計算欄」。
      *
      * <p>{@code TWSE} 走 {@code twse_index_daily_history}、其餘走 {@code us_index_daily_history}；
      * 兩表的 open/high/low 皆 nullable（TWSE 早期由 v1.21.0 只抓 ClosingIndex 的殘留列），
@@ -536,13 +546,23 @@ public class ExcelExportService {
      */
     private ExportDoc.Sheet indexDailySheet(String market,
                                             java.time.LocalDate start, java.time.LocalDate end) {
-        List<String> headers = List.of("日期", "開盤", "最高", "最低", "收盤");
+        List<String> headers = List.of("日期", "開盤", "最高", "最低", "收盤",
+                "週線MA5", "月線MA20", "季線MA60", "年線MA240");
         List<ExportDoc.Format> formats = List.of(ExportDoc.Format.DATE, ExportDoc.Format.NUM4,
-                ExportDoc.Format.NUM4, ExportDoc.Format.NUM4, ExportDoc.Format.NUM4);
+                ExportDoc.Format.NUM4, ExportDoc.Format.NUM4, ExportDoc.Format.NUM4,
+                // 四條均線定義上只有 2 位小數（divide(window, 2, HALF_UP)）；
+                // 用 NUM4 會多印兩個恆為 0 的位數而謊稱精度
+                ExportDoc.Format.NUM2, ExportDoc.Format.NUM2, ExportDoc.Format.NUM2, ExportDoc.Format.NUM2);
 
+        // 回看 MA_LOOKBACK_DAYS 天：只用區間內收盤時，檔案前幾列的均線必為空（使用者會讀成 bug）。
+        // 回看列只參與均線計算，不得輸出。400 天由最長視窗 MA240（239 個交易日）決定，見常數 javadoc。
+        List<IndexDailyRow> all = findIndexDaily(market, start.minusDays(MA_LOOKBACK_DAYS), end);
         List<List<Object>> rows = new java.util.ArrayList<>();
-        for (IndexDailyRow d : findIndexDaily(market, start, end)) {
-            rows.add(java.util.Arrays.asList(d.date(), d.open(), d.high(), d.low(), d.close()));
+        for (int i = 0; i < all.size(); i++) {
+            IndexDailyRow d = all.get(i);
+            if (d.date().isBefore(start)) continue;   // 回看列：算完均線就丟
+            rows.add(java.util.Arrays.asList(d.date(), d.open(), d.high(), d.low(), d.close(),
+                    indexMaAt(all, i, 5), indexMaAt(all, i, 20), indexMaAt(all, i, 60), indexMaAt(all, i, 240)));
         }
         // omitNullCells=true：既有 open/high/low 是 if (x != null) cell(...)，缺值時該格根本不建。
         // close_point 為 NOT NULL（見上方 javadoc），故收盤那一欄不受此旗標影響。
@@ -556,6 +576,38 @@ public class ExcelExportService {
     /** 兩張日線表正規化後的單日行情（僅供匯出寫表使用，不入庫）。 */
     private record IndexDailyRow(java.time.LocalDate date, BigDecimal open, BigDecimal high,
                                  BigDecimal low, BigDecimal close) {}
+
+    /**
+     * 均線回看天數（日曆天）。要湊滿最長視窗 MA240 需要當日之前的 239 個交易日；
+     * 400 個日曆天約含 400÷7×5 ≈ 285 個平日，台股每年約 240～242 個交易日（年約 19～21 天非週末休市），
+     * 折算約再扣 21～26 天休市日 ≈ 261～266 個交易日，對 239 仍有約 22～27 個交易日餘裕
+     * （理論下限約 239×365/242 ≈ 361 個日曆天，400 尚有約 11% headroom；即使跨兩次農曆年的最壞情況，
+     * 交易日仍約 259～260，≥ 239）。回看不足只會讓 {@link #indexMaAt} 回 null（缺值），不會算錯
+     * ——故此常數選保守即可（Task 284 原為 30，只夠 MA5；Task 285 放大為 400 以支撐四條均線）。
+     */
+    private static final int MA_LOOKBACK_DAYS = 400;
+
+    /**
+     * {@code asc.get(i)} 那一天的均線：含當日往前 {@code window} 個交易日收盤的簡單移動平均
+     * （{@code window ∈ {5, 20, 60, 240}}，對應週／月／季／年線）；視窗未滿回 {@code null}
+     * （不補前值、不以不足視窗的平均充數）。
+     *
+     * <p><b>BigDecimal 精確加總、只在最後 {@code divide(window, 2, HALF_UP)} 捨入一次</b>——與 BFF
+     * {@code GdpTwseBffController.movingAverage(closes, window)} 同定義同精度，兩處對同一組收盤逐位相同。
+     * 不可改用 {@code double} 累加（加法不可結合，會在捨入邊界翻面，讓圖與檔案偶爾差 0.01）。
+     *
+     * <p>刻意不叫 {@code maAt}：{@code TechnicalIndicatorService.maAt} 是股票路徑的同名同形方法
+     * （double 累加、可能併入 Redis 今日即時點位），語意不同，同名會讓
+     * {@code grep -ran "maAt" backend} 混淆兩種實作（Task 285）。
+     */
+    private static BigDecimal indexMaAt(List<IndexDailyRow> asc, int i, int window) {
+        if (i < window - 1) return null;
+        BigDecimal sum = BigDecimal.ZERO;
+        for (int j = i - window + 1; j <= i; j++) {
+            sum = sum.add(asc.get(j).close());
+        }
+        return sum.divide(BigDecimal.valueOf(window), 2, java.math.RoundingMode.HALF_UP);
+    }
 
     /** 依 market 分派到對應日線表，回傳依日期遞增的正規化列。 */
     private List<IndexDailyRow> findIndexDaily(String market, java.time.LocalDate start, java.time.LocalDate end) {
