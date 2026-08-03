@@ -72,14 +72,26 @@
         <el-form-item label="啟用每日排程">
           <el-switch v-model="schedule.enabled" />
         </el-form-item>
-        <el-form-item label="每日執行時間">
-          <el-time-picker v-model="scheduleTime" format="HH:mm" value-format="HH:mm"
-            placeholder="時:分" style="width:130px" />
-        </el-form-item>
-        <el-form-item label="匯出指數">
-          <el-select v-model="schedule.market" style="width:150px">
-            <el-option v-for="m in MARKETS" :key="m.value" :label="m.label" :value="m.value" />
-          </el-select>
+        <el-form-item label="匯出時段" style="width:100%">
+          <div style="display:flex;flex-direction:column;gap:8px;width:100%">
+            <div v-for="(row, idx) in scheduleTimes" :key="row.key"
+                 style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <el-time-picker v-model="row.time" format="HH:mm" value-format="HH:mm"
+                placeholder="時:分" style="width:130px" />
+              <el-select v-model="row.markets" multiple collapse-tags collapse-tags-tooltip
+                placeholder="勾選指數" style="width:280px">
+                <el-option v-for="m in MARKETS" :key="m.value" :label="m.label" :value="m.value">
+                  <el-checkbox :model-value="row.markets.includes(m.value)" style="pointer-events:none">
+                    {{ m.label }}
+                  </el-checkbox>
+                </el-option>
+              </el-select>
+              <el-switch v-model="row.enabled" active-text="啟用" />
+              <el-button text type="danger" @click="removeScheduleTime(idx)">移除</el-button>
+            </div>
+            <el-button text type="primary" @click="addScheduleTime">＋新增時間點</el-button>
+            <span style="font-size:12px;color:#94a3b8">每個時間點可複選指數，例如早上台股、晚上美股；清空時間點代表不自動匯出。</span>
+          </div>
         </el-form-item>
         <el-form-item label="匯出範圍">
           <el-select v-model="schedule.rangeMonths" style="width:140px">
@@ -133,8 +145,8 @@
       <div class="schedule-hint">
         以主機家目錄 <code>{{ schedule.baseDir || '/home/steven' }}</code> 為根（對映主機
         <code>/Users/steven</code>）。按上方「選擇」開啟檔案總管式選擇器挑選子資料夾；例如選 <code>input</code> →
-        主機 <code>/Users/steven/input</code>。每日於指定時間匯出所選指數的日線為
-        <code>{{ scheduleMarketLabel }}_{使用者ID}_YYYYMMDD.xlsx</code> 與 <code>.json</code> <strong>兩份</strong>（主檔名相同、只差副檔名；欄位為日期／開盤／最高／最低／收盤／週線MA5／月線MA20／季線MA60／年線MA240，
+        主機 <code>/Users/steven/input</code>。每日於各時間點匯出該列勾選指數的日線為
+        <code>{指數名}_{使用者ID}_YYYYMMDD.xlsx</code> 與 <code>.json</code> <strong>兩份</strong>（主檔名相同、只差副檔名；欄位為日期／開盤／最高／最低／收盤／週線MA5／月線MA20／季線MA60／年線MA240，
         內容同上方「匯出 Excel」）。匯出範圍以<b>執行當日往前推</b>計算，故每日產出會隨時間滾動。
       </div>
       <div v-if="schedule.lastRunAt || schedule.lastRunStatus" class="schedule-status">
@@ -480,16 +492,28 @@ const schedule = reactive({
   gdriveEnabled: false, gdriveSubpath: '', gdriveRemote: '',
   gdriveLastRunAt: null, gdriveLastStatus: '',
  
-  enabled: false, runHour: 8, runMinute: 0, market: 'TWSE', outputSubpath: 'input',
-  rangeMonths: 120, lastRunAt: null, lastRunStatus: null, baseDir: ''
+  enabled: false, outputSubpath: 'input', rangeMonths: 120,
+  lastRunAt: null, lastRunStatus: null, baseDir: ''
 })
-const scheduleTime = ref('08:00')
+const scheduleTimes = ref([])
 const savingSchedule = ref(false)
 const runningNow = ref(false)
-
-// 排程卡的指數可與圖表目前選取不同（使用者可能在看美股、但排程留存台股），故獨立取 label
-const scheduleMarketLabel = computed(() =>
-  MARKETS.find(m => m.value === schedule.market)?.label ?? '台股大盤')
+let scheduleRowSeq = 0
+function newScheduleTime(time = '08:00', markets = ['TWSE'], enabled = true) {
+  return { key: `schedule-${++scheduleRowSeq}`, time, markets: [...markets], enabled: enabled !== false }
+}
+function addScheduleTime() { scheduleTimes.value.push(newScheduleTime()) }
+function removeScheduleTime(index) { scheduleTimes.value.splice(index, 1) }
+function scheduleRowsFromResponse(s) {
+  if (Array.isArray(s.times)) {
+    return s.times.map(t => newScheduleTime(
+      `${String(t.runHour ?? 8).padStart(2, '0')}:${String(t.runMinute ?? 0).padStart(2, '0')}`,
+      t.markets || [], t.enabled !== false))
+  }
+  // 舊版 API 相容：單一時分／market 映射成一列。
+  return [newScheduleTime(`${String(s.runHour ?? 8).padStart(2, '0')}:${String(s.runMinute ?? 0).padStart(2, '0')}`,
+    [s.market || 'TWSE'], true)]
+}
 
 // 全部十年以 120（月）表示而非 null：Element Plus 的 el-select 預設把 null 當成 empty value，
 // 綁 null 會顯示灰色 placeholder 而非「全部十年」，使用者無法分辨「已選」與「尚未選擇」（同 Task 203／204）。
@@ -515,9 +539,7 @@ const dirTreeProps = { label: 'name', isLeaf: 'leaf' }
 async function loadSchedule() {
   const s = await bffApi.gdpTwse.getExportSchedule()
   schedule.enabled = !!s.enabled
-  schedule.runHour = s.runHour ?? 8
-  schedule.runMinute = s.runMinute ?? 0
-  schedule.market = s.market ?? 'TWSE'
+  scheduleTimes.value = scheduleRowsFromResponse(s)
   schedule.outputSubpath = s.outputSubpath ?? 'input'
   // 後端 null（未設定過的舊列）＝全部十年，映射成 120 讓下拉正確顯示
   schedule.rangeMonths = s.rangeMonths ?? ALL_TEN_YEARS_MONTHS
@@ -525,7 +547,6 @@ async function loadSchedule() {
   schedule.lastRunStatus = s.lastRunStatus ?? null
   schedule.baseDir = s.baseDir ?? ''
   applyGdrive(s)
-  scheduleTime.value = `${String(schedule.runHour).padStart(2, '0')}:${String(schedule.runMinute).padStart(2, '0')}`
 }
 
 async function saveSchedule() {
@@ -536,20 +557,24 @@ async function saveSchedule() {
   }
   savingSchedule.value = true
   try {
-    const [h, m] = (scheduleTime.value || '08:00').split(':').map(Number)
+    const seen = new Set()
+    const times = scheduleTimes.value.map(row => {
+      const [h, m] = (row.time || '08:00').split(':').map(Number)
+      const key = `${h}:${m}`
+      if (seen.has(key)) throw new Error('時間點不可重複')
+      seen.add(key)
+      if (!row.markets?.length) throw new Error('每個時間點至少勾選一個指數')
+      return { runHour: h, runMinute: m, enabled: row.enabled, markets: row.markets }
+    })
     const s = await bffApi.gdpTwse.updateExportSchedule({
       enabled: schedule.enabled,
       gdriveEnabled: schedule.gdriveEnabled,
       gdriveSubpath: (schedule.gdriveSubpath || '').trim(),
-      runHour: h,
-      runMinute: m,
-      market: schedule.market,
+      times,
       outputSubpath: (schedule.outputSubpath || 'input').trim(),
       rangeMonths: schedule.rangeMonths
     })
-    schedule.runHour = s.runHour ?? h
-    schedule.runMinute = s.runMinute ?? m
-    schedule.market = s.market ?? schedule.market
+    scheduleTimes.value = scheduleRowsFromResponse(s)
     schedule.outputSubpath = s.outputSubpath ?? schedule.outputSubpath
     schedule.rangeMonths = s.rangeMonths ?? ALL_TEN_YEARS_MONTHS
     schedule.baseDir = s.baseDir ?? schedule.baseDir
@@ -569,7 +594,12 @@ async function handleRunNow() {
   try {
     const r = await bffApi.gdpTwse.runExportNow()
     // path 依契約一律指 xlsx、jsonPath 指 json（Requirement 55 / Task 282）
-    showDualExportResult({ jsonPath: r.jsonPath, xlsxPath: r.path, gdriveStatus: r.gdriveStatus })
+    if (Array.isArray(r.files) && r.files.length > 1) {
+      const lines = r.files.map(f => `${f.marketLabel || f.market}: Excel ${f.path || '失敗'}；JSON ${f.jsonPath || '失敗'}`).join('\n')
+      ElMessage.success({ message: lines, duration: 8000, showClose: true })
+    } else {
+      showDualExportResult({ jsonPath: r.jsonPath, xlsxPath: r.path, gdriveStatus: r.gdriveStatus })
+    }
   } catch (e) {
     ElMessage.error(apiErrorMessage(e, '立即匯出失敗，請確認目錄與權限'))
   } finally {

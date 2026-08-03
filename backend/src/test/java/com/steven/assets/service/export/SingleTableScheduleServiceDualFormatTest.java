@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.steven.assets.model.CommodityExportSchedule;
 import com.steven.assets.model.ExchangeRateExportSchedule;
 import com.steven.assets.model.IndexExportSchedule;
+import com.steven.assets.model.IndexExportScheduleTime;
 import com.steven.assets.model.RealizedGainExportSchedule;
 import com.steven.assets.repository.AppUserRepository;
 import com.steven.assets.repository.CommodityExportScheduleRepository;
@@ -190,8 +191,9 @@ class SingleTableScheduleServiceDualFormatTest {
     @Test
     @DisplayName("大盤指數日線：兩份落檔、主檔名一致，且 doc 只取一次")
     void 指數() throws Exception {
-        var s = IndexExportSchedule.builder().ownerUserId(1L).enabled(true).market("TWSE")
-                .runHour(0).runMinute(0).outputSubpath("out").lastRunDate(LocalDate.now(TW).minusDays(1)).build();
+        var s = IndexExportSchedule.builder().ownerUserId(1L).enabled(true).outputSubpath("out").build();
+        s.addTime(IndexExportScheduleTime.builder().runHour(0).runMinute(0)
+                .lastRunDate(LocalDate.now(TW).minusDays(1)).markets(new java.util.LinkedHashSet<>(java.util.Set.of("TWSE"))).build());
         when(indexRepo.findAll()).thenReturn(List.of(s));
 
         indexService.tick();
