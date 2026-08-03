@@ -1551,7 +1551,7 @@ POST   /api/bff/gdp-twse/refresh?years=40      # 並行觸發 TWN+JPN+KOR 人均
 GET    /api/bff/gdp-twse/index-daily?market=TWSE&years=10
                                                # 指數日線 + MA20/60/240 + 成交量（market=TWSE 或 DJI/SPX/IXIC/SOX/FTSE/DAX/KOSPI/N225；一次載入，前端 dataZoom 切區間）
 POST   /api/bff/gdp-twse/refresh-index-daily?market=TWSE&years=10  # 觸發「當前選取」指數日線回補
-       # 逾時三處必須一致放寬（Task 286）：nginx location（frontend/nginx.conf，預設 /api/ 為 60s——**這才是真正生效的上限**）、
+       # 逾時三處必須一致放寬（Task 288）：nginx location（frontend/nginx.conf，預設 /api/ 為 60s——**這才是真正生效的上限**）、
        # BFF Duration、前端 axios timeout，皆 360s。台股逐月 120 次序列呼叫實測 250s+，只改 BFF/axios 仍會在第 60 秒被 nginx 切斷回 504
 GET    /api/bff/gdp-twse/index-intraday?market=TWSE   # 「當日」分時：回 tradingDate + times(HH:mm) + closes + previousClose/lastClose/change/changePercent
 ```
@@ -1598,7 +1598,7 @@ GET    /api/bff/gdp-twse/index-intraday?market=TWSE   # 「當日」分時：回
 ```
 （`null` 代表移動平均尚未滿視窗的早期資料點）
 
-成交量三欄（Task 286，供日線圖的成交量柱狀子圖）：
+成交量三欄（Task 288，供日線圖的成交量柱狀子圖）：
 - `volumes` — 成交股數（股）。台股取 `twse_index_daily_history.trade_volume`、海外指數取 `us_index_daily_history.volume`；該日缺值填 `null`
 - `turnovers` — 成交金額（元），**僅台股**（`market=TWSE`）非空，取 `twse_index_daily_history.trade_value`；海外指數 Yahoo 無此欄位，一律回長度相同的全 `null` 陣列（不回缺欄，避免前端分支）
 - `hasVolume` — 該指數整段是否有任何「非 null 且非 0」的量值，**只看該市場實際繪製的那一欄**：台股看 `turnovers`（畫的是成交金額）、海外指數看 `volumes`。**不採 OR 邏輯**（`volumes` 或 `turnovers` 任一），否則會允許「`volumes` 有值、`turnovers` 全 null」這種台股實際不會發生、卻讓子圖畫出一整排空柱的組合。**由 BFF 判定、前端只 render**：`false` 時前端隱藏整個子圖並顯示「本指數無成交量資料」。費城半導體 SOX 的 Yahoo `volume` 恆為 `0`（非 null），故判定條件不可只判 null
@@ -1626,9 +1626,9 @@ GET    /api/bff/gdp-twse/index-intraday?market=TWSE   # 「當日」分時：回
 - `twse_index_daily_history`      (trading_date PK, open_point / high_point / low_point / close_point 皆 NUMERIC(12,2)、close_point_tr NUMERIC(12,2)、**trade_volume BIGINT**、**trade_value NUMERIC(20,0)**)
   - OHLC 同時供 Requirement 18 大盤日線圖、Requirement 14 觀察清單 0000 KD 計算使用
   - `MacroHistoryService.refreshTwseDaily` 從 TWSE `MI_5MINS_HIST` 月報抓取四欄（`開盤指數` / `最高指數` / `最低指數` / `收盤指數`），同步 upsert
-  - **`trade_volume`（成交股數，股）／`trade_value`（成交金額，元）— Task 286**：供 Requirement 18 日線圖的成交量柱狀子圖。來源為**另一支** TWSE 月報 `FMTQIK`（`https://www.twse.com.tw/rwd/zh/afterTrading/FMTQIK?date=YYYYMM01&response=json`，欄位 `日期／成交股數／成交金額／成交筆數／發行量加權股價指數／漲跌點數`）——`MI_5MINS_HIST` **沒有量欄**，故 `/internal/macro/twse-monthly` 同月份併抓兩支 API 後以交易日 join。兩欄 nullable：FMTQIK 該月失敗時量欄留 null 但 OHLC 照寫；**回補時必須保留 DB 既有值**（與 `close_point_tr` 同一條反覆蓋規則，JPA merge 全欄寫入會靜默洗成 null）。億元／億股換算一律於前端顯示時計算，**不入庫**（禁存衍生值）
+  - **`trade_volume`（成交股數，股）／`trade_value`（成交金額，元）— Task 288**：供 Requirement 18 日線圖的成交量柱狀子圖。來源為**另一支** TWSE 月報 `FMTQIK`（`https://www.twse.com.tw/rwd/zh/afterTrading/FMTQIK?date=YYYYMM01&response=json`，欄位 `日期／成交股數／成交金額／成交筆數／發行量加權股價指數／漲跌點數`）——`MI_5MINS_HIST` **沒有量欄**，故 `/internal/macro/twse-monthly` 同月份併抓兩支 API 後以交易日 join。兩欄 nullable：FMTQIK 該月失敗時量欄留 null 但 OHLC 照寫；**回補時必須保留 DB 既有值**（與 `close_point_tr` 同一條反覆蓋規則，JPA merge 全欄寫入會靜默洗成 null）。億元／億股換算一律於前端顯示時計算，**不入庫**（禁存衍生值）
 - `us_index_daily_history`        ((index_code, trading_date) PK, open_point / high_point / low_point / close_point 皆 NUMERIC(14,4)、**volume BIGINT**)
-  - **`volume`（成交量，股）— Task 286**：取自既有 Yahoo v8 chart 回應的 `indicators.quote[0].volume`（同一次呼叫即含，不新增外部來源）。nullable。⚠️ **各市場口徑不一致、不得跨指數比較**：實測 2026-08-02，`^SOX` 恆為 `0`（純計算型指數無成交量，前端據此隱藏整個子圖）、`^KS11` 回 275,700 量級（韓國實際成交股數為數億股，該欄顯非股數原值）
+  - **`volume`（成交量，股）— Task 288**：取自既有 Yahoo v8 chart 回應的 `indicators.quote[0].volume`（同一次呼叫即含，不新增外部來源）。nullable。⚠️ **各市場口徑不一致、不得跨指數比較**：實測 2026-08-02，`^SOX` 恆為 `0`（純計算型指數無成交量，前端據此隱藏整個子圖）、`^KS11` 回 275,700 量級（韓國實際成交股數為數億股，該欄顯非股數原值）
   - 美股四大指數（道瓊 DJI / 標普500 SPX / 那斯達克綜合 IXIC / 費城半導體 SOX）+ 海外主要指數（英國富時 FTSE / 德國 DAX / 韓國 KOSPI / 日經 N225）每日 OHLC，供 Requirement 18 日線圖「市場切換」。表名沿用 `us_index_daily_history`（語意已一般化為「海外指數日線」，欄位本以 `index_code` 通用化，新增市場零遷移）
   - 來源 Yahoo Finance v8 chart API（`^DJI`/`^GSPC`/`^IXIC`/`^SOX`/`^FTSE`/`^GDAXI`/`^KS11`/`^N225`，`range=10y&interval=1d`），ext-materials-service `MacroDataFetchClient.fetchUsIndexDaily(code)` 以 curl 子程序抓取（避 Yahoo Java fingerprint 封鎖）；timestamp→交易日依 Yahoo meta `exchangeTimezoneName` 轉當地時區（非寫死 NY，否則亞洲/歐洲指數日期回退一日）；`MacroHistoryService.refreshUsIndexDaily(code)` 經 `/internal/macro/us-index` proxy 後 upsert
   - **與 `twse_index_daily_history` 分表**的理由：台股大盤為單一指數（無 code 欄）、且已與 Requirement 14 觀察清單 0000 報價/KD 與當年年末回填邏輯耦合，分表可完全不動既有台股流程；兩表由 `GdpTwseBffController` 以**同一套 MA 計算**服務（同義欄位同一來源），確保兩市場版面一致
@@ -4162,7 +4162,7 @@ TaiexIndexPoller（週一～五 09:00–13:30 Asia/Taipei，每 2 分鐘，Marke
 
 **Task 263 為何大盤不參與 `IntradayHighLowTracker`：** 本地聚合的存在理由是「外部 API 不提供 dayrange」（起因為 NASDAQ 對 ETF 的 `keyStats` 為 null，見 Requirement 14），對大盤不成立——Yahoo 5 分 K 本來就給整日的 high／low 陣列。故 `PriceCacheWriter.write` 新增三參數 overload `write(result, markClosed, aggregateHighLow)`，`aggregateHighLow=false` 時跳過 `hlTracker.observe` 直接採用 `result` 帶的 high／low；既有兩參數版委派為 `aggregateHighLow=true`，**個股路徑逐行不變**。
 
-`TwseIndexPoller`（既有的盤後 TWSE `MI_5MINS_HIST` 月報批次寫入 `twse_index_daily_history`；**原記載為 FMTQIK 與程式碼不符，Task 286 更正**——`FMTQIK` 是 Task 286 起另外併抓的成交量來源，OHLC 一直是 `MI_5MINS_HIST`）完全不受影響，仍是完成日 K 的唯一權威來源；`TaiexIndexPoller` 只餵 Redis 的盤中即時層。
+`TwseIndexPoller`（既有的盤後 TWSE `MI_5MINS_HIST` 月報批次寫入 `twse_index_daily_history`；**原記載為 FMTQIK 與程式碼不符，Task 288 更正**——`FMTQIK` 是 Task 288 起另外併抓的成交量來源，OHLC 一直是 `MI_5MINS_HIST`）完全不受影響，仍是完成日 K 的唯一權威來源；`TaiexIndexPoller` 只餵 Redis 的盤中即時層。
 
 `TechnicalIndicatorService.computeAllForTaiex()` 比照既有 `computeAll()` 對一般個股的既有作法：完成日序列最新一筆非今日時，查 `PriceQueryService.getLive("0000","台股")`，若其 `tradingDate` 為今日則暫加一筆合成列（`close/high/low` 取自 live price，缺值以 close 補）到序列最前，MA20／60／240 與當期 KD 皆含這筆；`taiexKd` 算前一期時排除這筆，維持既有「當期 vs 前一期」語意。
 

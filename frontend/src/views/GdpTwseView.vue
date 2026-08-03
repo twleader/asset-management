@@ -264,7 +264,7 @@ const dailyCloses = ref([])
 const dailyMa20 = ref([])
 const dailyMa60 = ref([])
 const dailyMa240 = ref([])
-const dailyVolumes = ref([])      // 成交量（股）：台股=成交股數、海外=成交量（Task 286）
+const dailyVolumes = ref([])      // 成交量（股）：台股=成交股數、海外=成交量（Task 288）
 const dailyTurnovers = ref([])    // 成交金額（元）：僅台股非空，海外恆全 null
 const dailyHasVolume = ref(false) // 該指數整段是否有成交量資料（由 BFF 判定，決定成交量子圖顯示與否）
 const dailyRange = ref('1y')
@@ -289,7 +289,7 @@ const hasDailyData = computed(() =>
 const cardTitle = computed(() =>
   isIntraday.value
     ? `${marketLabel.value}當日走勢${intradayDate.value ? `（${intradayDate.value}）` : ''}`
-    : `${marketLabel.value}每日收盤（近 10 年，含月線/季線/年線${dailyHasVolume.value ? '與成交量' : ''}）`)
+    : `${marketLabel.value}每日收盤（近 10 年，含週線/月線/季線/年線${dailyHasVolume.value ? '與成交量' : ''}）`)
 const emptyDesc = computed(() =>
   isIntraday.value
     ? `尚無${marketLabel.value}當日分時資料`
@@ -715,7 +715,7 @@ function barColorAt(closeData, i) {
   return '#94a3b8'
 }
 
-// 海外指數成交量依整段最大值自動選單位：≥1e8→億股、≥1e4→萬股、其餘原值（Task 286）
+// 海外指數成交量依整段最大值自動選單位：≥1e8→億股、≥1e4→萬股、其餘原值（Task 288）
 function pickVolumeUnit(values) {
   const absVals = values.filter(v => v != null).map(v => Math.abs(Number(v)))
   const maxV = absVals.length ? Math.max(...absVals) : 0
@@ -738,7 +738,7 @@ const dailyChartOption = computed(() => {
   const zoomStart = intraday ? 0 : ez.start
   const zoomEnd = intraday ? 100 : ez.end
 
-  // 「當日」模式（分時 API 無逐格成交量）或本指數整段無量（如費城半導體 SOX）都不畫成交量子圖（Task 286）
+  // 「當日」模式（分時 API 無逐格成交量）或本指數整段無量（如費城半導體 SOX）都不畫成交量子圖（Task 288）
   const tw = market.value === 'TWSE'
   const showVolume = !intraday && dailyHasVolume.value
   const volumeSeriesName = tw ? '成交金額' : '成交量'

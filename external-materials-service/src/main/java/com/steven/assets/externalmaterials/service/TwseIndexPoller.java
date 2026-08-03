@@ -13,7 +13,7 @@ import java.time.ZoneId;
 import java.util.List;
 
 /**
- * 台股大盤每日收盤排程：盤後抓 TWSE MI_5MINS_HIST 當月月報（Task 286 起併抓 FMTQIK 補成交股數／成交金額），
+ * 台股大盤每日收盤排程：盤後抓 TWSE MI_5MINS_HIST 當月月報（Task 288 起併抓 FMTQIK 補成交股數／成交金額），
  * upsert 每日 TAIEX。
  *
  * TWSE 月報更新時點不固定（觀察通常隔日才上）；故每日多次嘗試補齊：

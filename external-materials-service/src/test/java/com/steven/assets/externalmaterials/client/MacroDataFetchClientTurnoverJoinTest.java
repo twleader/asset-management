@@ -13,7 +13,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Task 286：驗證 MacroDataFetchClient 的 TWSE 大盤 OHLC ＋ 成交量 join 邏輯。
+ * Task 288：驗證 MacroDataFetchClient 的 TWSE 大盤 OHLC ＋ 成交量 join 邏輯。
  * 核心不變量：FMTQIK（成交量來源）失敗或該日查無對應，不得造成 MI_5MINS_HIST（OHLC 來源）
  * 的資料列被吃掉——量欄留 null 即可，OHLC 本身必須完整保留。
  */

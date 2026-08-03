@@ -10,7 +10,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * {@link GdpTwseBffController#buildIndexDailyBody(boolean, List)} 的成交量/成交金額欄位（Task 286）。
+ * {@link GdpTwseBffController#buildIndexDailyBody(boolean, List)} 的成交量/成交金額欄位（Task 288）。
  *
  * 純函式測試，不涉及 WebClient/Mono，風格比照 {@code ChartSeriesAlignerTest}。
  * 測試方法名以 e/e2/f/g 標註對應 spec 的驗證項目，方便追溯。

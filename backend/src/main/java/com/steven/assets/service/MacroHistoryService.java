@@ -89,7 +89,7 @@ public class MacroHistoryService {
         this.twseDailyRepo = twseDailyRepo;
         this.usDailyRepo = usDailyRepo;
         // maxInMemorySize 提高至 16MB（WebClient 預設 256KB）：/internal/macro/us-index 一次回近 10 年
-        // （~2500 筆）且 Task 286 起每筆多了 volume/value 兩欄，實測已超出預設值導致
+        // （~2500 筆）且 Task 288 起每筆多了 volume/value 兩欄，實測已超出預設值導致
         // DataBufferLimitException（回補回 upserted=0，靜默失敗、無明顯錯誤畫面）。16MB 與 BFF
         // 既有 businessServicesClient（bff/.../WebClientConfig.java）同一慣例值。
         ExchangeStrategies strategies = ExchangeStrategies.builder()

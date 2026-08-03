@@ -1,10 +1,10 @@
-# [t286] 股市大盤查詢頁的日線圖下方新增每日成交量柱狀子圖
+# [t288] 股市大盤查詢頁的日線圖下方新增每日成交量柱狀子圖
 
 **對應 Requirements:** Requirement 18（股市大盤查詢頁：台股大盤／美股四大／海外四指數的近 10 年日線 + MA20/60/240 + 當日分時，以及台日韓人均 GDP 比較）
 **前置任務:** 無（但與 `t284` 改同一段程式碼，見下方衝突警告）
 **Liquibase changeset:** `v1.88.0-index-daily-volume.sql`
 
-> **編號避讓說明（2026-08-02 複查）**：`t284`／`t285` 已被 `gmail-calendar-alert-integration-6fe79c`（`t284_index_daily_weekly_ma5`、`t285_index_export_all_four_ma`）與 `compound-condition-trigger-f55151`（`t285_index_export_multi_schedule`）占用，故任務編號取 `t286`（全 worktree 掃描無第二份 `t286_*`）。`wonderful-fermi-c522e5` 原本也用 284/285，但已自行避讓改為 `t287`／`t288`，與本任務無關。
+> **編號避讓說明（2026-08-02 複查）**：`t284`／`t285` 已被 `gmail-calendar-alert-integration-6fe79c`（`t284_index_daily_weekly_ma5`、`t285_index_export_all_four_ma`）與 `compound-condition-trigger-f55151`（`t285_index_export_multi_schedule`）占用，故任務編號取 `t288`（全 worktree 掃描無第二份 `t288_*`）。`wonderful-fermi-c522e5` 原本也用 284/285，但已自行避讓改為 `t287`／`t288`，與本任務無關。
 >
 > **版號避讓的判準是「有沒有人預留」，不是「檔案系統上的最大值」**：全部 worktree 的 `changes/` 目錄最大都還是 `v1.85.0-drop-nonpositive-close.sql`，運行中 DB 的 `databasechangelog` 尾端亦同，但 `grep -rn "v1.8[6-9].0" spec/tasks/*.md` 顯示 **`v1.86.0` 由 `t277`（雙軌通知欄位）與 `t285`（多筆匯出排程）預留、`v1.87.0` 由 `t266`（基本面三表）預留**——三者都還沒落地，`ls | sort -V | tail` 一個都查不出來。故本任務取 **`v1.88.0`**。
 >
@@ -14,19 +14,19 @@
 >
 > `gmail-calendar-alert-integration-6fe79c` 的 `t284_index_daily_weekly_ma5.md`（日線圖加週線 MA5，該 worktree 已標記實作完成但未 commit）動的是**同五處**（已核對該 worktree 的實際 `git diff`）：
 >
-> | 位置 | t284 做什麼 | t286 做什麼 | 後果 |
+> | 位置 | t284 做什麼 | t288 做什麼 | 後果 |
 > |---|---|---|---|
 > | `GdpTwseBffController.getIndexDaily` 的 `map(rows -> ...)`（`:189-195`） | 在 `body.put("ma20", …)` 前插 `ma5` | 插 `volumes`／`turnovers`／`hasVolume` | 可共存，但同段落易撞 merge 衝突 |
-> | `GdpTwseBffController.java:150` 的 javadoc | 改為「+ MA5 / MA20 / MA60 / MA240」 | 286.6.2.1 要求補三個新欄位 | **同一行**，需合併兩邊措辭而非互相覆寫 |
-> | `SchedulePublicBffController.java` 匯出描述（`:86`） | 加「＋週線MA5」 | 286.4.3 改的是「大盤指數」`:147-155` 三筆（不同筆但同檔） | 不互斥，但同檔連續改動易撞行號 |
+> | `GdpTwseBffController.java:150` 的 javadoc | 改為「+ MA5 / MA20 / MA60 / MA240」 | 288.6.2.1 要求補三個新欄位 | **同一行**，需合併兩邊措辭而非互相覆寫 |
+> | `SchedulePublicBffController.java` 匯出描述（`:86`） | 加「＋週線MA5」 | 288.4.3 改的是「大盤指數」`:147-155` 三筆（不同筆但同檔） | 不互斥，但同檔連續改動易撞行號 |
 > | `GdpTwseView.vue:288` 的 `cardTitle` | 改為 `…（近 10 年，含週線/月線/季線/年線）` | 改為 `…（近 10 年，含月線/季線/年線與成交量）` | **互斥**，後 merge 者靜默蓋掉前者 |
 > | `dailyChartOption` 的 `legend.data`／`series` | 加 MA5 一條線與 legend 項 | 整段改雙 grid | 整段 merge 衝突 |
 >
 > **本任務的因應**：
-> - 286.6.1 插入新欄位時**不得移除或改寫既有的任何一行 `body.put("ma*", …)`**；若 t284 已先 landed，`ma5` 那行同樣保留。
-> - 286.6.2.1 修 `:150` javadoc 時，**若 t284 已先 landed，須同時保留「MA5」與新增的三個成交量欄位**，不得二選一覆寫。
-> - 286.7.8 的標題：**若 t284 已先 landed，改為 `${marketLabel}每日收盤（近 10 年，含週線/月線/季線/年線與成交量）`**；否則用不含「週線」的版本。實作前以 `grep -n "cardTitle" -A 4 frontend/src/views/GdpTwseView.vue` 確認當下實際字串。
-> - 286.7.3 改 `dailyChartOption` 前先 `git log --oneline origin/main -5 -- frontend/src/views/GdpTwseView.vue` 確認 t284 是否已進 main；若已進，雙 grid 的 series 陣列須含 MA5 那條並補 `xAxisIndex: 0, yAxisIndex: 0`。
+> - 288.6.1 插入新欄位時**不得移除或改寫既有的任何一行 `body.put("ma*", …)`**；若 t284 已先 landed，`ma5` 那行同樣保留。
+> - 288.6.2.1 修 `:150` javadoc 時，**若 t284 已先 landed，須同時保留「MA5」與新增的三個成交量欄位**，不得二選一覆寫。
+> - 288.7.8 的標題：**若 t284 已先 landed，改為 `${marketLabel}每日收盤（近 10 年，含週線/月線/季線/年線與成交量）`**；否則用不含「週線」的版本。實作前以 `grep -n "cardTitle" -A 4 frontend/src/views/GdpTwseView.vue` 確認當下實際字串。
+> - 288.7.3 改 `dailyChartOption` 前先 `git log --oneline origin/main -5 -- frontend/src/views/GdpTwseView.vue` 確認 t284 是否已進 main；若已進，雙 grid 的 series 陣列須含 MA5 那條並補 `xAxisIndex: 0, yAxisIndex: 0`。
 >
 > 另注意 `t285_index_export_all_four_ma`（同 worktree、依附 t284）與 `t285_index_export_multi_schedule`（`compound-condition-trigger-f55151`）為**同號不同任務**，本任務不涉及，僅在此提醒編號現況會持續變動。
 
@@ -115,15 +115,15 @@ frontend/src/api/index.js:230    timeout: 180000
 
 ## 要做什麼
 
-### 286.1 Liquibase changeset（新欄位）
+### 288.1 Liquibase changeset（新欄位）
 
-- [ ] 286.1.1 新增 `backend/src/main/resources/db/changelog/changes/v1.88.0-index-daily-volume.sql`：
+- [ ] 288.1.1 新增 `backend/src/main/resources/db/changelog/changes/v1.88.0-index-daily-volume.sql`：
 
   ```sql
   --liquibase formatted sql
 
   --changeset steven:v1.88.0-index-daily-volume
-  --comment 指數日線加成交量欄位，供 Requirement 18 日線圖的每日成交量柱狀子圖（Task 286）
+  --comment 指數日線加成交量欄位，供 Requirement 18 日線圖的每日成交量柱狀子圖（Task 288）
   -- 台股：trade_volume=成交股數(股)、trade_value=成交金額(元)，來源 TWSE FMTQIK 月報（MI_5MINS_HIST 無量欄）
   -- 海外：volume=成交量(股)，取自既有 Yahoo v8 chart 回應的 indicators.quote[0].volume，不新增外部來源
   -- 皆 nullable：既有列全為 null，由回補補齊；SOX 恆為 0（純計算型指數無成交量）
@@ -136,21 +136,21 @@ frontend/src/api/index.js:230    timeout: 180000
       ADD COLUMN volume BIGINT;
   ```
 
-- [ ] 286.1.2 於 `backend/src/main/resources/db/changelog/db.changelog-master.yaml` **尾端**掛入該檔（比照既有 `v1.85.0-drop-nonpositive-close.sql` 那一筆的寫法）。
+- [ ] 288.1.2 於 `backend/src/main/resources/db/changelog/db.changelog-master.yaml` **尾端**掛入該檔（比照既有 `v1.85.0-drop-nonpositive-close.sql` 那一筆的寫法）。
 
-- [ ] 286.1.3 **不得存任何衍生值**：億元／億股換算一律在前端顯示時計算，不入庫、BFF 也不回換算後的值（CLAUDE.md「禁止存入可從其他欄位計算得出的衍生值」）。
+- [ ] 288.1.3 **不得存任何衍生值**：億元／億股換算一律在前端顯示時計算，不入庫、BFF 也不回換算後的值（CLAUDE.md「禁止存入可從其他欄位計算得出的衍生值」）。
 
-- [ ] 286.1.4 **`--comment` 與 changeset 內容一旦 commit 就不得再改**：Liquibase checksum 含註解，事後編輯會讓 business-services 進 `ValidationFailed` crash loop。若後續需要編號避讓，**避讓用的 `sed` 必須排除 `db/changelog/`**。
+- [ ] 288.1.4 **`--comment` 與 changeset 內容一旦 commit 就不得再改**：Liquibase checksum 含註解，事後編輯會讓 business-services 進 `ValidationFailed` crash loop。若後續需要編號避讓，**避讓用的 `sed` 必須排除 `db/changelog/`**。
 
-- [ ] 286.1.5 **建檔前確認 `v1.88.0-*.sql` 不存在**（判準是檔案存不存在，不是它是不是最大值——`v1.86.0`／`v1.87.0` 已被 t277／t285／t266 預留但尚未落地，`ls | sort -V | tail` 查不出來）：
+- [ ] 288.1.5 **建檔前確認 `v1.88.0-*.sql` 不存在**（判準是檔案存不存在，不是它是不是最大值——`v1.86.0`／`v1.87.0` 已被 t277／t285／t266 預留但尚未落地，`ls | sort -V | tail` 查不出來）：
 
   ```bash
   ls backend/src/main/resources/db/changelog/changes/ | grep -c "^v1\.88\.0" ; grep -rn "v1\.8[89]\.0\|v1\.9[0-9]\.0" spec/tasks/*.md
   ```
 
-### 286.2 Entity（backend）
+### 288.2 Entity（backend）
 
-- [ ] 286.2.1 `backend/src/main/java/com/steven/assets/model/TwseIndexDailyHistory.java` 新增兩欄，擺在 `closePointTr` 之後：
+- [ ] 288.2.1 `backend/src/main/java/com/steven/assets/model/TwseIndexDailyHistory.java` 新增兩欄，擺在 `closePointTr` 之後：
 
   ```java
   /** 成交股數（股）。來源 TWSE FMTQIK 月報「成交股數」欄；供 Requirement 18 成交量柱狀子圖。 */
@@ -162,9 +162,9 @@ frontend/src/api/index.js:230    timeout: 180000
   private BigDecimal tradeValue;
   ```
 
-  - [ ] 286.2.1.1 **順手修正該檔 `:15` 的過時斷言**：目前寫「來源：TWSE openapi MI_5MINS_HIST 月報（含 `OpeningIndex`/`HighestIndex`/`LowestIndex`/`ClosingIndex`）」，但實際 URL 是 `https://www.twse.com.tw/rwd/zh/TAIEX/MI_5MINS_HIST`（**非 openapi**）、欄名為中文（`開盤指數`／`最高指數`／`最低指數`／`收盤指數`）。本次 spec 已一併更正 `design.md` 與 `requirements.md` 的同一句孿生描述，程式碼註解不同步就會留下第三份錯誤斷言。
+  - [ ] 288.2.1.1 **順手修正該檔 `:15` 的過時斷言**：目前寫「來源：TWSE openapi MI_5MINS_HIST 月報（含 `OpeningIndex`/`HighestIndex`/`LowestIndex`/`ClosingIndex`）」，但實際 URL 是 `https://www.twse.com.tw/rwd/zh/TAIEX/MI_5MINS_HIST`（**非 openapi**）、欄名為中文（`開盤指數`／`最高指數`／`最低指數`／`收盤指數`）。本次 spec 已一併更正 `design.md` 與 `requirements.md` 的同一句孿生描述，程式碼註解不同步就會留下第三份錯誤斷言。
 
-- [ ] 286.2.2 `backend/src/main/java/com/steven/assets/model/UsIndexDailyHistory.java` 新增一欄，擺在 `closePoint` 之後：
+- [ ] 288.2.2 `backend/src/main/java/com/steven/assets/model/UsIndexDailyHistory.java` 新增一欄，擺在 `closePoint` 之後：
 
   ```java
   /** 成交量（股）。取自 Yahoo v8 chart 的 indicators.quote[0].volume。⚠️ 各市場口徑不一致，不得跨指數比較：
@@ -173,12 +173,12 @@ frontend/src/api/index.js:230    timeout: 180000
   private Long volume;
   ```
 
-- [ ] 286.2.3 **兩支 entity 都有 `@AllArgsConstructor`，加欄位會改變建構子簽章。** 已用 `grep -ran "new TwseIndexDailyHistory(\|new UsIndexDailyHistory("` 查出**全部**呼叫端（`-a` 不可省略，本專案有 `.java` 被 `file(1)` 判為 data 而被普通 `grep -r` 整檔跳過）：
+- [ ] 288.2.3 **兩支 entity 都有 `@AllArgsConstructor`，加欄位會改變建構子簽章。** 已用 `grep -ran "new TwseIndexDailyHistory(\|new UsIndexDailyHistory("` 查出**全部**呼叫端（`-a` 不可省略，本專案有 `.java` 被 `file(1)` 判為 data 而被普通 `grep -r` 整檔跳過）：
 
   | 檔案:行 | 形式 | 要改嗎 |
   |---|---|---|
-  | `backend/.../service/MacroHistoryService.java:338` | 全參數 `new TwseIndexDailyHistory(date, o, h, l, c, null)` | **要**（見 286.5.1） |
-  | `backend/.../service/MacroHistoryService.java:479` | 全參數 `new UsIndexDailyHistory(code, date, o, h, l, c)` | **要**（見 286.5.2） |
+  | `backend/.../service/MacroHistoryService.java:338` | 全參數 `new TwseIndexDailyHistory(date, o, h, l, c, null)` | **要**（見 288.5.1） |
+  | `backend/.../service/MacroHistoryService.java:479` | 全參數 `new UsIndexDailyHistory(code, date, o, h, l, c)` | **要**（見 288.5.2） |
   | `backend/.../service/TechnicalIndicatorService.java:556` | 無參數 `new TwseIndexDailyHistory()` + setter | 不用 |
   | `backend/src/test/.../TechnicalIndicatorSeriesAlignmentTest.java:339, 511` | 無參數 + setter | 不用 |
   | `backend/src/test/.../TechnicalIndicatorTaiexLiveBlendTest.java:44` | 無參數 + setter | 不用 |
@@ -188,11 +188,11 @@ frontend/src/api/index.js:230    timeout: 180000
 
   實作時仍須重跑該 grep 確認現況未變。
 
-### 286.3 external-materials-service：抓取端
+### 288.3 external-materials-service：抓取端
 
 檔案：`external-materials-service/src/main/java/com/steven/assets/externalmaterials/client/MacroDataFetchClient.java`
 
-- [ ] 286.3.1 `DailyOhlc` record 加兩欄（現為 `(LocalDate tradingDate, BigDecimal open, BigDecimal high, BigDecimal low, BigDecimal close)`）：
+- [ ] 288.3.1 `DailyOhlc` record 加兩欄（現為 `(LocalDate tradingDate, BigDecimal open, BigDecimal high, BigDecimal low, BigDecimal close)`）：
 
   ```java
   /** 大盤/指數每日 OHLC ＋成交量。volume=成交股數(股)；value=成交金額(元)，僅台股有（Yahoo 無此欄，海外指數恆 null）。 */
@@ -201,7 +201,7 @@ frontend/src/api/index.js:230    timeout: 180000
                           Long volume, BigDecimal value) {}
   ```
 
-- [ ] 286.3.2 新增 `FMTQIK` 常數與抓取方法：
+- [ ] 288.3.2 新增 `FMTQIK` 常數與抓取方法：
 
   ```java
   /**
@@ -217,21 +217,21 @@ frontend/src/api/index.js:230    timeout: 180000
 
   抓取方法回 `Map<LocalDate, long[]>`／或 `Map<LocalDate, Turnover>`（自訂 record `{Long volume, BigDecimal value}`），民國年日期解析與 `fetchTwseMonthlyDaily` 現有寫法一致（`parts[0] + 1911`）；數字去逗號後解析，空／`-`／解析失敗該欄回 null。
 
-  - [ ] 286.3.2.1 **UA 沿用短 UA `Mozilla/5.0`**（與同檔既有寫法一致）；`HttpRequest` 加 `.timeout(Duration.ofSeconds(15))`（與同檔 `fetchTwseMonthlyDaily`:208 一致）——**不可省略**：逐月 120 次序列呼叫下，任何一次無上限等待都會讓「250 秒＋餘裕」的 360 秒 timeout 假設（見 286.7.1）失效。
-  - [ ] 286.3.2.2 **任何失敗（非 2xx、`stat != "OK"`、例外）一律回空 map、不拋**，由呼叫端降級為量欄 null。
+  - [ ] 288.3.2.1 **UA 沿用短 UA `Mozilla/5.0`**（與同檔既有寫法一致）；`HttpRequest` 加 `.timeout(Duration.ofSeconds(15))`（與同檔 `fetchTwseMonthlyDaily`:208 一致）——**不可省略**：逐月 120 次序列呼叫下，任何一次無上限等待都會讓「250 秒＋餘裕」的 360 秒 timeout 假設（見 288.7.1）失效。
+  - [ ] 288.3.2.2 **任何失敗（非 2xx、`stat != "OK"`、例外）一律回空 map、不拋**，由呼叫端降級為量欄 null。
 
-- [ ] 286.3.3 `fetchTwseMonthlyDaily(year, month)` 改為併抓：先抓既有 `MI_5MINS_HIST` 得 OHLC，再抓 `FMTQIK` 得量 map，以 `LocalDate` join 填入 `volume`／`value`。
+- [ ] 288.3.3 `fetchTwseMonthlyDaily(year, month)` 改為併抓：先抓既有 `MI_5MINS_HIST` 得 OHLC，再抓 `FMTQIK` 得量 map，以 `LocalDate` join 填入 `volume`／`value`。
 
-  - [ ] 286.3.3.1 **FMTQIK 失敗或該日查無時，OHLC 仍照原樣回傳、量欄留 null。不得整月回空**——否則某月成交量抓不到會連帶讓那個月的價格資料整月消失。
-  - [ ] 286.3.3.2 **不得改動既有 OHLC 的解析邏輯與 `close == null` 就跳過該列的守門**。
+  - [ ] 288.3.3.1 **FMTQIK 失敗或該日查無時，OHLC 仍照原樣回傳、量欄留 null。不得整月回空**——否則某月成交量抓不到會連帶讓那個月的價格資料整月消失。
+  - [ ] 288.3.3.2 **不得改動既有 OHLC 的解析邏輯與 `close == null` 就跳過該列的守門**。
 
-- [ ] 286.3.4 `fetchUsIndexDaily(indexCode)` 於既有迴圈補讀 `quotes.path("volume").path(i)`：null／missing → `null`；否則 `asLong()`。`value` 一律傳 `null`（Yahoo 無成交金額欄）。**不得新增任何外部呼叫**——同一個 `range=10y` 回應裡就有。
+- [ ] 288.3.4 `fetchUsIndexDaily(indexCode)` 於既有迴圈補讀 `quotes.path("volume").path(i)`：null／missing → `null`；否則 `asLong()`。`value` 一律傳 `null`（Yahoo 無成交金額欄）。**不得新增任何外部呼叫**——同一個 `range=10y` 回應裡就有。
 
-- [ ] 286.3.5 `InternalPriceController` 的 `/macro/twse-monthly`、`/macro/us-index` 兩個端點**簽章不動**（回傳型別已是 `List<DailyOhlc>`，加欄位自動帶出）。
+- [ ] 288.3.5 `InternalPriceController` 的 `/macro/twse-monthly`、`/macro/us-index` 兩個端點**簽章不動**（回傳型別已是 `List<DailyOhlc>`，加欄位自動帶出）。
 
-### 286.4 external-materials-service：台股盤後排程的寫入端
+### 288.4 external-materials-service：台股盤後排程的寫入端
 
-- [ ] 286.4.1 `external-materials-service/.../service/StockSourceQuery.java` 的 `upsertTwseIndexDaily` 加兩個參數 `Long tradeVolume, BigDecimal tradeValue`，SQL 改為：
+- [ ] 288.4.1 `external-materials-service/.../service/StockSourceQuery.java` 的 `upsertTwseIndexDaily` 加兩個參數 `Long tradeVolume, BigDecimal tradeValue`，SQL 改為：
 
   ```java
   // UPDATE 分支：量欄以 COALESCE 保值——FMTQIK 該次抓不到時傳 null，不可把 DB 既有值洗掉
@@ -243,14 +243,14 @@ frontend/src/api/index.js:230    timeout: 180000
 
   INSERT 分支照常帶入兩個新欄位（新列本來就沒有既有值要保）。
 
-  - [ ] 286.4.1.1 **`COALESCE` 不可省。** 現行 UPDATE 是全欄覆寫；若直接 `trade_volume=?`，任何一次 FMTQIK 失效（站台維護、改版）都會把已回補好的整月量欄靜默清成 null，而價格看起來完全正常——這種錯誤從畫面上只會表現為「柱子突然不見了」，不會有任何錯誤訊息。
-  - [ ] 286.4.1.2 既有的 `close_point_tr` 不在 UPDATE 的 SET 清單中（現況即如此），**維持不動**。
+  - [ ] 288.4.1.1 **`COALESCE` 不可省。** 現行 UPDATE 是全欄覆寫；若直接 `trade_volume=?`，任何一次 FMTQIK 失效（站台維護、改版）都會把已回補好的整月量欄靜默清成 null，而價格看起來完全正常——這種錯誤從畫面上只會表現為「柱子突然不見了」，不會有任何錯誤訊息。
+  - [ ] 288.4.1.2 既有的 `close_point_tr` 不在 UPDATE 的 SET 清單中（現況即如此），**維持不動**。
 
-- [ ] 286.4.2 `external-materials-service/.../service/TwseIndexPoller.java` 的 `upsertMonth` 把 `r.volume()`／`r.value()` 傳入上述新簽章。**不新增 `@Scheduled`**，三個既有排程時點（14:00／17:00／隔日 08:30）一行不動。
+- [ ] 288.4.2 `external-materials-service/.../service/TwseIndexPoller.java` 的 `upsertMonth` 把 `r.volume()`／`r.value()` 傳入上述新簽章。**不新增 `@Scheduled`**，三個既有排程時點（14:00／17:00／隔日 08:30）一行不動。
 
-  - [ ] 286.4.2.1 **順手修正該檔 `:16,18` 的過時斷言**：`:16` 寫「盤後抓 TWSE **FMTQIK** 當月月報」、`:18` 寫「TWSE **openapi** 更新時點不固定」——實際來源是 `www.twse.com.tw/rwd/...` 的 `MI_5MINS_HIST`（非 openapi），`FMTQIK` 是本任務起才併抓的成交量來源。改為「盤後抓 TWSE `MI_5MINS_HIST` 當月月報（Task 286 起併抓 `FMTQIK` 補成交股數／成交金額），upsert 每日 TAIEX」與「TWSE 月報更新時點不固定」。
+  - [ ] 288.4.2.1 **順手修正該檔 `:16,18` 的過時斷言**：`:16` 寫「盤後抓 TWSE **FMTQIK** 當月月報」、`:18` 寫「TWSE **openapi** 更新時點不固定」——實際來源是 `www.twse.com.tw/rwd/...` 的 `MI_5MINS_HIST`（非 openapi），`FMTQIK` 是本任務起才併抓的成交量來源。改為「盤後抓 TWSE `MI_5MINS_HIST` 當月月報（Task 288 起併抓 `FMTQIK` 補成交股數／成交金額），upsert 每日 TAIEX」與「TWSE 月報更新時點不固定」。
 
-- [ ] 286.4.3 因既有排程的抓取內容擴充，同步 `bff/src/main/java/com/steven/assets/bff/schedulelist/SchedulePublicBffController.java` 的 `JOBS` 三筆描述（否則排程列表頁與實際行為漂移）：
+- [ ] 288.4.3 因既有排程的抓取內容擴充，同步 `bff/src/main/java/com/steven/assets/bff/schedulelist/SchedulePublicBffController.java` 的 `JOBS` 三筆描述（否則排程列表頁與實際行為漂移）：
 
   | 現行 name | 現行 description | 改為 |
   |---|---|---|
@@ -260,15 +260,15 @@ frontend/src/api/index.js:230    timeout: 180000
 
   三筆的 `cron`／`zone`／`schedule` 欄位**皆不動**。此三筆與 t284（若已先 landed）改動的是同檔不同筆（t284 改 `:86` 的匯出描述），不互斥但同檔連續編輯，實作時留意行號位移。
 
-### 286.5 backend：回補服務
+### 288.5 backend：回補服務
 
 檔案：`backend/src/main/java/com/steven/assets/service/MacroHistoryService.java`
 
-- [ ] 286.5.1 `DailyOhlcDto` record（`:322`）加 `Long volume, BigDecimal value` 兩欄，對齊 ext-materials 的 `DailyOhlc`。`fetchTwseMonthlyDailyProxy` 於 `new TwseIndexDailyHistory(...)` 帶入。
+- [ ] 288.5.1 `DailyOhlcDto` record（`:322`）加 `Long volume, BigDecimal value` 兩欄，對齊 ext-materials 的 `DailyOhlc`。`fetchTwseMonthlyDailyProxy` 於 `new TwseIndexDailyHistory(...)` 帶入。
 
-- [ ] 286.5.2 `fetchUsIndexDailyProxy` 於 `new UsIndexDailyHistory(...)` 帶入 `d.volume()`。
+- [ ] 288.5.2 `fetchUsIndexDailyProxy` 於 `new UsIndexDailyHistory(...)` 帶入 `d.volume()`。
 
-- [ ] 286.5.3 **`refreshTwseDaily` 的反覆蓋規則要擴及新兩欄。** 現行程式碼（`:301-306`）只保 `close_point_tr`：
+- [ ] 288.5.3 **`refreshTwseDaily` 的反覆蓋規則要擴及新兩欄。** 現行程式碼（`:301-306`）只保 `close_point_tr`：
 
   ```java
   // 保留既有 close_point_tr（報酬指數）：fetchTwseMonthlyDailyProxy 只帶價格 OHLC，
@@ -290,17 +290,17 @@ frontend/src/api/index.js:230    timeout: 180000
   });
   ```
 
-  - [ ] 286.5.3.1 **條件式回填不可寫成無條件覆寫**（`row.setTradeVolume(ex.getTradeVolume())` 不加 null 判斷）——那會讓回補永遠寫不進新抓到的量，第一次回補以外的每一次都變成無效操作。
+  - [ ] 288.5.3.1 **條件式回填不可寫成無條件覆寫**（`row.setTradeVolume(ex.getTradeVolume())` 不加 null 判斷）——那會讓回補永遠寫不進新抓到的量，第一次回補以外的每一次都變成無效操作。
 
-- [ ] 286.5.4 `refreshUsIndexDaily` 的 `usDailyRepo.saveAll(rows)` **維持現況不加保值邏輯**：Yahoo 的 `volume` 與 OHLC 來自同一個回應，不存在「價格抓到但量沒抓到」的分歧；且 `us_index_daily_history` 沒有等同 `close_point_tr` 的獨立回補欄位。
+- [ ] 288.5.4 `refreshUsIndexDaily` 的 `usDailyRepo.saveAll(rows)` **維持現況不加保值邏輯**：Yahoo 的 `volume` 與 OHLC 來自同一個回應，不存在「價格抓到但量沒抓到」的分歧；且 `us_index_daily_history` 沒有等同 `close_point_tr` 的獨立回補欄位。
 
-- [ ] 286.5.5 `MacroHistoryController` 的 `/api/twse-daily-index`、`/api/us-daily-index` 兩支 GET **簽章不動**（回傳 entity list，新欄位自動出現在 JSON，鍵名為 `tradeVolume`／`tradeValue`／`volume`）。
+- [ ] 288.5.5 `MacroHistoryController` 的 `/api/twse-daily-index`、`/api/us-daily-index` 兩支 GET **簽章不動**（回傳 entity list，新欄位自動出現在 JSON，鍵名為 `tradeVolume`／`tradeValue`／`volume`）。
 
-### 286.6 BFF
+### 288.6 BFF
 
 檔案：`bff/src/main/java/com/steven/assets/bff/gdptwse/GdpTwseBffController.java`
 
-- [ ] 286.6.1 `getIndexDaily` 的組裝迴圈補三個輸出欄位，**長度恆等於 `dates`、逐格對齊**：
+- [ ] 288.6.1 `getIndexDaily` 的組裝迴圈補三個輸出欄位，**長度恆等於 `dates`、逐格對齊**：
 
   | 欄位 | 台股（`market=TWSE`） | 海外指數 |
   |---|---|---|
@@ -310,26 +310,26 @@ frontend/src/api/index.js:230    timeout: 180000
 
   > `hasVolume` 的判定欄位**必須只看該市場實際畫出來的那一欄**——台股畫的是成交金額（`turnovers`），**不得**用「`volumes` 或 `turnovers` 任一」的 OR 邏輯：兩欄雖同源於 FMTQIK 同一列、實務上同進同出，但 OR 允許「`volumes` 有值、`turnovers` 全 null」這個台股實際不會發生、卻會讓子圖畫出一整排空柱的組合。單元測試 (e) 須含這組反例。
 
-  - [ ] 286.6.1.1 `turnovers` 在海外指數時**必須回長度相同的全 null 陣列，不可回缺欄或空陣列**——前端以索引取值，缺欄會讓 tooltip 分支炸掉。
-  - [ ] 286.6.1.2 `hasVolume` **由 BFF 判定**（CLAUDE.md「BFF 負責預先計算，前端只 render」）。判定條件是「非 null 且非 0」而非只判 null：`^SOX` 回的是一整排 `0` 而不是 null，只判 null 會漏掉它、畫出一整排零高度柱。
-  - [ ] 286.6.1.3 既有的跳過條件 `if (d == null || c == null) continue;` 不動——量欄跟著該列一起被跳過，三個陣列與 `dates` 自然對齊。
+  - [ ] 288.6.1.1 `turnovers` 在海外指數時**必須回長度相同的全 null 陣列，不可回缺欄或空陣列**——前端以索引取值，缺欄會讓 tooltip 分支炸掉。
+  - [ ] 288.6.1.2 `hasVolume` **由 BFF 判定**（CLAUDE.md「BFF 負責預先計算，前端只 render」）。判定條件是「非 null 且非 0」而非只判 null：`^SOX` 回的是一整排 `0` 而不是 null，只判 null 會漏掉它、畫出一整排零高度柱。
+  - [ ] 288.6.1.3 既有的跳過條件 `if (d == null || c == null) continue;` 不動——量欄跟著該列一起被跳過，三個陣列與 `dates` 自然對齊。
 
-- [ ] 286.6.2 `refreshIndexDaily`（`GdpTwseBffController.java:214`）的 `.timeout(Duration.ofSeconds(180))` 改為 `Duration.ofSeconds(360)`，並在該處加註解說明原因（台股逐月 120 次序列呼叫，實測 `MI_5MINS_HIST` 單次 ~1.3s ＋ 每月 800ms 間隔 ≈ 250s，併抓 FMTQIK 後更長）。
+- [ ] 288.6.2 `refreshIndexDaily`（`GdpTwseBffController.java:214`）的 `.timeout(Duration.ofSeconds(180))` 改為 `Duration.ofSeconds(360)`，並在該處加註解說明原因（台股逐月 120 次序列呼叫，實測 `MI_5MINS_HIST` 單次 ~1.3s ＋ 每月 800ms 間隔 ≈ 250s，併抓 FMTQIK 後更長）。
 
-  - [ ] 286.6.2.1 **同步修正該檔兩處已過時的 javadoc**：`:150` 的「指數日線（近 N 年）+ MA20 / MA60 / MA240」須補上新增的三個輸出欄位；`:200` 的「market=TWSE → 台股逐月 TWSE 月報（**耗時 1~2 分鐘**）」與實測 250 秒互斥，改為實測值。漏改就是留下新的錯誤斷言。
+  - [ ] 288.6.2.1 **同步修正該檔兩處已過時的 javadoc**：`:150` 的「指數日線（近 N 年）+ MA20 / MA60 / MA240」須補上新增的三個輸出欄位；`:200` 的「market=TWSE → 台股逐月 TWSE 月報（**耗時 1~2 分鐘**）」與實測 250 秒互斥，改為實測值。漏改就是留下新的錯誤斷言。
 
-- [ ] 286.6.3 `getIndexIntraday`（當日分時）**一行不動**，契約維持 `tradingDate`／`times`／`closes`／`previousClose`／`lastClose`／`change`／`changePercent`。
+- [ ] 288.6.3 `getIndexIntraday`（當日分時）**一行不動**，契約維持 `tradingDate`／`times`／`closes`／`previousClose`／`lastClose`／`change`／`changePercent`。
 
-### 286.7 前端
+### 288.7 前端
 
 檔案：`frontend/src/views/GdpTwseView.vue`、`frontend/src/api/index.js`
 
-- [ ] 286.7.1 **逾時三處一起改，缺一則整項無效**（詳見背景段「台股 10 年回補本來就會逾時」）：
+- [ ] 288.7.1 **逾時三處一起改，缺一則整項無效**（詳見背景段「台股 10 年回補本來就會逾時」）：
 
-  - [ ] 286.7.1.1 `frontend/nginx.conf`：在既有的 `location /api/`（`:43-51`，`proxy_read_timeout 60s`）**之前**新增一個精確匹配的 location，比照同檔 `:28-38` 的 SSE 先例：
+  - [ ] 288.7.1.1 `frontend/nginx.conf`：在既有的 `location /api/`（`:43-51`，`proxy_read_timeout 60s`）**之前**新增一個精確匹配的 location，比照同檔 `:28-38` 的 SSE 先例：
 
     ```nginx
-    # 指數日線 10 年回補：台股逐月 120 次序列呼叫，實測 250 秒以上（Task 286）。
+    # 指數日線 10 年回補：台股逐月 120 次序列呼叫，實測 250 秒以上（Task 288）。
     # 走預設的 /api/ location 會在第 60 秒被 proxy_read_timeout 切斷回 504，而 business 端仍在背景跑完。
     location = /api/bff/gdp-twse/refresh-index-daily {
         set $bff_upstream bff:8080;
@@ -344,13 +344,13 @@ frontend/src/api/index.js:230    timeout: 180000
 
     ⚠️ 端點帶 query string（`?market=TWSE&years=10`），`location =` 比對的是**路徑**、不含 query，故精確匹配成立。**沿用既有 location 的全部 `proxy_set_header`**——漏掉 `X-Forwarded-*` 會影響 BFF 的租戶標頭與 OAuth 導向。
 
-  - [ ] 286.7.1.2 `frontend/src/api/index.js:230` 的 `gdpTwse.refreshIndexDaily` 把 `timeout: 180000` 改為 `timeout: 360000`。
+  - [ ] 288.7.1.2 `frontend/src/api/index.js:230` 的 `gdpTwse.refreshIndexDaily` 把 `timeout: 180000` 改為 `timeout: 360000`。
 
-  - [ ] 286.7.1.3 **改 `nginx.conf` 必須 `--no-cache` 重 build frontend 映像才生效**（它烘進 image，不是 mount 進去的）。
+  - [ ] 288.7.1.3 **改 `nginx.conf` 必須 `--no-cache` 重 build frontend 映像才生效**（它烘進 image，不是 mount 進去的）。
 
-- [ ] 286.7.2 `fetchDailyData()` 接收並存下 `volumes`／`turnovers`／`hasVolume` 三個新欄位為 ref。切換市場時比照既有欄位一併更新。
+- [ ] 288.7.2 `fetchDailyData()` 接收並存下 `volumes`／`turnovers`／`hasVolume` 三個新欄位為 ref。切換市場時比照既有欄位一併更新。
 
-- [ ] 286.7.3 `dailyChartOption` 由單 grid 改雙 grid。**參考同 repo 既有的雙 grid 實作** `frontend/src/components/StockAnalysisDialog.vue:846-857`（上下 pane ＋ `dataZoom.xAxisIndex: [0,1]` ＋ `axisPointer.link`），關鍵設定：
+- [ ] 288.7.3 `dailyChartOption` 由單 grid 改雙 grid。**參考同 repo 既有的雙 grid 實作** `frontend/src/components/StockAnalysisDialog.vue:846-857`（上下 pane ＋ `dataZoom.xAxisIndex: [0,1]` ＋ `axisPointer.link`），關鍵設定：
 
   ```js
   axisPointer: { link: [{ xAxisIndex: 'all' }] },
@@ -372,54 +372,54 @@ frontend/src/api/index.js:230    timeout: 180000
 
   上述數值是起點不是定論，實作時以實機截圖確認不重疊、不裁切。**但 `axisLabel` 的上下配置不是「數值」、不在此免責範圍**——`StockAnalysisDialog.vue:858-863` 就是這樣配的，照抄即可。
 
-  - [ ] 286.7.3.1 **既有的四條 series 都要顯式補 `xAxisIndex: 0, yAxisIndex: 0`**——多 grid 下省略會落到預設軸、線畫到錯的 pane。
-  - [ ] 286.7.3.2 **`dataZoom` 必須帶 `xAxisIndex: [0, 1]`**，否則區間鈕與拖曳只作用於上圖，兩張圖的 X 軸會錯位。
-  - [ ] 286.7.3.3 既有 `onDailyZoom()` 讀 `opt?.dataZoom?.[0]` 的邏輯不變（仍是同一個 inside zoom）。最高／最低 markPoint 的可視區間計算 `maxMinMarkPoints` **一行不動**。
+  - [ ] 288.7.3.1 **既有的四條 series 都要顯式補 `xAxisIndex: 0, yAxisIndex: 0`**——多 grid 下省略會落到預設軸、線畫到錯的 pane。
+  - [ ] 288.7.3.2 **`dataZoom` 必須帶 `xAxisIndex: [0, 1]`**，否則區間鈕與拖曳只作用於上圖，兩張圖的 X 軸會錯位。
+  - [ ] 288.7.3.3 既有 `onDailyZoom()` 讀 `opt?.dataZoom?.[0]` 的邏輯不變（仍是同一個 inside zoom）。最高／最低 markPoint 的可視區間計算 `maxMinMarkPoints` **一行不動**。
 
-  - [ ] 286.7.3.4 **`GdpTwseView.vue:43` 的 `<v-chart>` 必須補 `:update-options="{ notMerge: true }"`**（目前沒有，即 vue-echarts 預設 `notMerge: false`）：
+  - [ ] 288.7.3.4 **`GdpTwseView.vue:43` 的 `<v-chart>` 必須補 `:update-options="{ notMerge: true }"`**（目前沒有，即 vue-echarts 預設 `notMerge: false`）：
 
     ```html
     <v-chart v-if="hasDailyData" ref="dailyChartRef" :option="dailyChartOption"
              :update-options="{ notMerge: true }" style="height:480px" autoresize @datazoom="onDailyZoom" />
     ```
 
-    **這是 286.7.6／286.7.7 能不能成立的前提。** 兩者都是「陣列長度變短」的情境（`grid`／`xAxis`／`yAxis` 由 2 個退回 1 個、成交量 series 消失），merge 語意下舊的第二個 grid 與軸線會**殘留在畫面上**，正好變成 286.7.6 自己禁止的「一塊空白 ＋ 一條孤立軸線」，而且**不會有任何錯誤訊息**。同 repo 的雙 grid 先例 `StockAnalysisDialog.vue:67-70` 已為同一個坑留下註解（切換指標時子圖 series 數量會變）。`dataZoom` 的 start/end 本就由 `ez` 明確指定，`notMerge` 不會丟失縮放狀態。
+    **這是 288.7.6／288.7.7 能不能成立的前提。** 兩者都是「陣列長度變短」的情境（`grid`／`xAxis`／`yAxis` 由 2 個退回 1 個、成交量 series 消失），merge 語意下舊的第二個 grid 與軸線會**殘留在畫面上**，正好變成 288.7.6 自己禁止的「一塊空白 ＋ 一條孤立軸線」，而且**不會有任何錯誤訊息**。同 repo 的雙 grid 先例 `StockAnalysisDialog.vue:67-70` 已為同一個坑留下註解（切換指標時子圖 series 數量會變）。`dataZoom` 的 start/end 本就由 `ez` 明確指定，`notMerge` 不會丟失縮放狀態。
 
-- [ ] 286.7.4 成交量 series：
+- [ ] 288.7.4 成交量 series：
 
   ```js
   { name: volumeSeriesName, type: 'bar', xAxisIndex: 1, yAxisIndex: 1,
     data: volumeBarData, barMaxWidth: 8, large: true, largeThreshold: 600 }
   ```
 
-  - [ ] 286.7.4.1 **柱色依當日收盤 vs 前一交易日收盤**逐點指定 `itemStyle.color`：漲 `#dc2626`、跌 `#16a34a`、平 `#94a3b8`。**序列第一筆無前值 → 平盤灰**。以 `data: [{ value, itemStyle: { color } }, ...]` 形式給值。
-  - [ ] 286.7.4.2 **柱值換算在前端做**：台股 `turnovers[i] / 1e8`（億元，2 位小數）；海外 `volumes[i]` 依整段最大值自動選單位（≥1e8 → 除 1e8 標「億股」、≥1e4 → 除 1e4 標「萬股」、其餘原值標「股」）。
-  - [ ] 286.7.4.3 單日 `0` 或 `null` → 該柱給 `null`（留空），**不得給 0**（0 會畫成貼底的實心柱，看起來像「當天有成交但量極小」）。
-  - [ ] 286.7.4.4 Y 軸名稱：台股固定 `成交金額（億元）`；海外為 `成交量（{自動選出的單位}）`。
-  - [ ] 286.7.4.5 **`type: 'bar'` 需要 `BarChart` 已註冊。** 本檔的 `use([...])` 已含 `BarChart`（第二張 GDP 圖在用），確認即可、不要重複註冊。⚠️ 本專案 echarts 為 tree-shaking 版，漏 `use()` 會**靜默不畫且無錯誤訊息**（Task 96 的 `MarkPointComponent` 為前例）。
+  - [ ] 288.7.4.1 **柱色依當日收盤 vs 前一交易日收盤**逐點指定 `itemStyle.color`：漲 `#dc2626`、跌 `#16a34a`、平 `#94a3b8`。**序列第一筆無前值 → 平盤灰**。以 `data: [{ value, itemStyle: { color } }, ...]` 形式給值。
+  - [ ] 288.7.4.2 **柱值換算在前端做**：台股 `turnovers[i] / 1e8`（億元，2 位小數）；海外 `volumes[i]` 依整段最大值自動選單位（≥1e8 → 除 1e8 標「億股」、≥1e4 → 除 1e4 標「萬股」、其餘原值標「股」）。
+  - [ ] 288.7.4.3 單日 `0` 或 `null` → 該柱給 `null`（留空），**不得給 0**（0 會畫成貼底的實心柱，看起來像「當天有成交但量極小」）。
+  - [ ] 288.7.4.4 Y 軸名稱：台股固定 `成交金額（億元）`；海外為 `成交量（{自動選出的單位}）`。
+  - [ ] 288.7.4.5 **`type: 'bar'` 需要 `BarChart` 已註冊。** 本檔的 `use([...])` 已含 `BarChart`（第二張 GDP 圖在用），確認即可、不要重複註冊。⚠️ 本專案 echarts 為 tree-shaking 版，漏 `use()` 會**靜默不畫且無錯誤訊息**（Task 96 的 `MarkPointComponent` 為前例）。
 
-  - [ ] 286.7.4.6 **legend 處理**：既有 `legend.data`（`GdpTwseView.vue:756`）為固定四項 `['收盤', '月線 (MA20)', '季線 (MA60)', '年線 (MA240)']`，`legend.formatter` 的 `map`（`:761-766`）逐項換算最新值，**找不到的名字會直接顯示 `-`**（同檔既有行為，`:772`）。成交量 series 加入時：
-    - (a) `hasVolume === true` 時，`legend.data` 追加 `volumeSeriesName`（台股「成交金額」、海外「成交量」）；`legend.formatter` 的 `map` 補這一筆，值換算沿用 286.7.4.2 的單位公式，取序列最後一筆非 null 值格式化顯示（無值顯示 `-`，與既有四項同規則）。
+  - [ ] 288.7.4.6 **legend 處理**：既有 `legend.data`（`GdpTwseView.vue:756`）為固定四項 `['收盤', '月線 (MA20)', '季線 (MA60)', '年線 (MA240)']`，`legend.formatter` 的 `map`（`:761-766`）逐項換算最新值，**找不到的名字會直接顯示 `-`**（同檔既有行為，`:772`）。成交量 series 加入時：
+    - (a) `hasVolume === true` 時，`legend.data` 追加 `volumeSeriesName`（台股「成交金額」、海外「成交量」）；`legend.formatter` 的 `map` 補這一筆，值換算沿用 288.7.4.2 的單位公式，取序列最後一筆非 null 值格式化顯示（無值顯示 `-`，與既有四項同規則）。
     - (b) `hasVolume === false` 時，`legend.data` **不得**含 `volumeSeriesName`（沒有對應 series，掛了會依既有規則顯示 `-`，不是想要的「本指數無成交量資料」提示）；改為在同一個 `legend` 區塊追加一個純文字說明項（例如以 `legend.formatter` 對固定的提示文字 key 特殊處理，或於 `legend` 旁另加一個不參與圖表縮放的靜態文字節點）——**實作者擇一寫法，但結果必須是「與既有四項同一視覺列」，不是另開一塊獨立區域**。
 
-- [ ] 286.7.5 tooltip：`trigger: 'axis'` 沿用現有 formatter，但成交量列要另外格式化——價格列維持 2 位小數千分位，成交量列改為：
-  - 台股：`成交金額: 1.37 兆元`／`13,678.18 億元` 擇一格式（實作者定，需一致；`trade_value ÷ 1e8` 即億元，與 286.7.4.2 的柱值換算公式同一份數字，`2026-07-01` 實測 `1367817795171 ÷ 1e8 = 13,678.18` 億元）＋ 另起一行 `成交量: 146.83 億股`
-  - 海外：`成交量: 4.87 億股`（依 286.7.4.2 的單位）
-  - [ ] 286.7.5.1 tooltip 的 `params` 在雙 grid 下會同時含上下圖的 series，**以 `seriesName` 判斷該列走哪套格式**，不可用索引位置（legend 開關會改變順序）。
+- [ ] 288.7.5 tooltip：`trigger: 'axis'` 沿用現有 formatter，但成交量列要另外格式化——價格列維持 2 位小數千分位，成交量列改為：
+  - 台股：`成交金額: 1.37 兆元`／`13,678.18 億元` 擇一格式（實作者定，需一致；`trade_value ÷ 1e8` 即億元，與 288.7.4.2 的柱值換算公式同一份數字，`2026-07-01` 實測 `1367817795171 ÷ 1e8 = 13,678.18` 億元）＋ 另起一行 `成交量: 146.83 億股`
+  - 海外：`成交量: 4.87 億股`（依 288.7.4.2 的單位）
+  - [ ] 288.7.5.1 tooltip 的 `params` 在雙 grid 下會同時含上下圖的 series，**以 `seriesName` 判斷該列走哪套格式**，不可用索引位置（legend 開關會改變順序）。
 
-- [ ] 286.7.6 **`hasVolume === false` 時（費城半導體 SOX）**：不畫成交量 series、不建第二個 grid，`grid`／`xAxis`／`yAxis`／`dataZoom` 全部退回目前的單軸形式（上圖恢復占滿 480px）。「本指數無成交量資料」的顯示方式見 286.7.4.6(b)——與收盤／MA20/60/240 同一個 legend 列，不新增獨立文字區塊。**不可保留一個空的 grid**（會留下一塊空白與一條孤立的軸線）。
+- [ ] 288.7.6 **`hasVolume === false` 時（費城半導體 SOX）**：不畫成交量 series、不建第二個 grid，`grid`／`xAxis`／`yAxis`／`dataZoom` 全部退回目前的單軸形式（上圖恢復占滿 480px）。「本指數無成交量資料」的顯示方式見 288.7.4.6(b)——與收盤／MA20/60/240 同一個 legend 列，不新增獨立文字區塊。**不可保留一個空的 grid**（會留下一塊空白與一條孤立的軸線）。
 
-- [ ] 286.7.7 **「當日」（`dailyRange === 'd'`）模式維持現行單圖版型**，不畫成交量子圖：分時 API `/api/bff/gdp-twse/index-intraday` 的契約只有 `times`／`closes`，沒有逐格成交量；本任務**不得**為此改動分時 API 契約或 `fetchIndexIntraday`。
+- [ ] 288.7.7 **「當日」（`dailyRange === 'd'`）模式維持現行單圖版型**，不畫成交量子圖：分時 API `/api/bff/gdp-twse/index-intraday` 的契約只有 `times`／`closes`，沒有逐格成交量；本任務**不得**為此改動分時 API 契約或 `fetchIndexIntraday`。
 
-- [ ] 286.7.8 卡片標題（`cardTitle`）日線模式改為 `${marketLabel}每日收盤（近 10 年，含月線/季線/年線與成交量）`；`hasVolume === false` 時維持原標題不加「與成交量」。
+- [ ] 288.7.8 卡片標題（`cardTitle`）日線模式改為 `${marketLabel}每日收盤（近 10 年，含月線/季線/年線與成交量）`；`hasVolume === false` 時維持原標題不加「與成交量」。
 
-### 286.8 不得做的事
+### 288.8 不得做的事
 
-- [ ] 286.8.1 **不得改動 Excel／JSON 匯出的欄位**。`ExcelExportService.exportIndexDaily` 與相關排程匯出維持「日期／開盤／最高／最低／收盤」五欄。該契約寫死在三處使用者可見文字裡：`GdpTwseView.vue` 匯出對話框的「輸出內容」說明、排程卡 `schedule-hint` 的說明、以及 `SchedulePublicBffController` 「每日匯出排程檢查」的 description（`欄位為開高低收`）。擴欄會外溢到九個匯出頁的共用提示，另案處理。
-- [ ] 286.8.2 **不得改動 `TwseInfoFetchClient`**（openapi 版 FMTQIK，供「大盤成交統計」新聞用，不支援歷史回補）。
-- [ ] 286.8.3 **不得新增任何 `@Scheduled`**。
-- [ ] 286.8.4 **不得改動 `HistoricalDataService.getStockHistory` 對 `0000` 的處理**、**不得改動 `TechnicalIndicatorService` 的任何輸出**——兩者都讀 `twse_index_daily_history`，但只吃 OHLC，加欄位對它們是透明的；順手改會動到觀察清單 KD 與到價警示門檻。
-- [ ] 286.8.5 **不得把成交量納入交易雷達評分**——那是 `t276_unused_indicators_and_volume.md` 的範圍，且它走的是 `stock_price_history.volume` 與還原權息序列，與本任務的指數量完全不同源。
+- [ ] 288.8.1 **不得改動 Excel／JSON 匯出的欄位**。`ExcelExportService.exportIndexDaily` 與相關排程匯出維持「日期／開盤／最高／最低／收盤」五欄。該契約寫死在三處使用者可見文字裡：`GdpTwseView.vue` 匯出對話框的「輸出內容」說明、排程卡 `schedule-hint` 的說明、以及 `SchedulePublicBffController` 「每日匯出排程檢查」的 description（`欄位為開高低收`）。擴欄會外溢到九個匯出頁的共用提示，另案處理。
+- [ ] 288.8.2 **不得改動 `TwseInfoFetchClient`**（openapi 版 FMTQIK，供「大盤成交統計」新聞用，不支援歷史回補）。
+- [ ] 288.8.3 **不得新增任何 `@Scheduled`**。
+- [ ] 288.8.4 **不得改動 `HistoricalDataService.getStockHistory` 對 `0000` 的處理**、**不得改動 `TechnicalIndicatorService` 的任何輸出**——兩者都讀 `twse_index_daily_history`，但只吃 OHLC，加欄位對它們是透明的；順手改會動到觀察清單 KD 與到價警示門檻。
+- [ ] 288.8.5 **不得把成交量納入交易雷達評分**——那是 `t276_unused_indicators_and_volume.md` 的範圍，且它走的是 `stock_price_history.volume` 與還原權息序列，與本任務的指數量完全不同源。
 
 ## 驗證
 
@@ -433,16 +433,16 @@ curl -s --max-time 20 -H "User-Agent: Mozilla/5.0" "https://www.twse.com.tw/rwd/
 curl -s --max-time 25 -H "User-Agent: Mozilla/5.0" "https://query2.finance.yahoo.com/v8/finance/chart/%5ESOX?range=5d&interval=1d" | python3 -c "import json,sys; print(json.load(sys.stdin)['chart']['result'][0]['indicators']['quote'][0].get('volume'))"
 ```
 
-第一條須回 `"stat":"OK"` 且 `fields` 含 `成交股數`／`成交金額`；第二條須回一組 `0`（若 Yahoo 改為提供 SOX 真實量，286.7.6 的隱藏邏輯仍正確，只是不再觸發）。
+第一條須回 `"stat":"OK"` 且 `fields` 含 `成交股數`／`成交金額`；第二條須回一組 `0`（若 Yahoo 改為提供 SOX 真實量，288.7.6 的隱藏邏輯仍正確，只是不再觸發）。
 
 ### 單元測試
 
 - [ ] **(a) `MacroDataFetchClient` 的 FMTQIK join**：以構造的 `MI_5MINS_HIST` ＋ `FMTQIK` 兩份 JSON（可用上方實測片段），斷言 join 後 `volume`／`value` 逐日正確、且民國年轉西元正確。
 - [ ] **(b) FMTQIK 失敗不吃掉 OHLC**：FMTQIK 回非 200／`stat != "OK"` 時，`fetchTwseMonthlyDaily` 仍回完整 OHLC 列數，量欄為 null。**這是「某月量抓不到→整月價格消失」的唯一探針。**
 - [ ] **(c) `refreshTwseDaily` 不洗掉既有量欄**：DB 既有列有 `tradeVolume`，本次抓到的列量欄為 null → save 後 DB 值不變。
-- [ ] **(d) (c) 的反向探針**：DB 既有列有舊 `tradeVolume`，本次抓到**新的非 null** 量值 → save 後 DB 為新值。若 286.5.3 誤寫成無條件回填，(c) 會通過而 (d) 必失敗。
+- [ ] **(d) (c) 的反向探針**：DB 既有列有舊 `tradeVolume`，本次抓到**新的非 null** 量值 → save 後 DB 為新值。若 288.5.3 誤寫成無條件回填，(c) 會通過而 (d) 必失敗。
 - [ ] **(e) `hasVolume` 對「整段皆 0」回 `false`**：以 SOX 形狀的資料（volume 全 0）斷言 BFF 回 `hasVolume=false`；再以「全 null」與「混有非 0 值」各一組斷言 false／true。**只判 null 不判 0 的實作會在第一組失敗。**
-- [ ] **(e2) 台股 `hasVolume` 不得誤用 OR 邏輯（286.6.1 反例）**：構造一組台股資料，`tradeVolume`（→`volumes`）全部非 null 非 0、但 `tradeValue`（→`turnovers`）全部為 null，斷言 BFF 回 `hasVolume=false`。**若實作誤寫成「`volumes` 或 `turnovers` 任一非空即真」，本組會回 `true` 而失敗**——這是「用 A 欄決定 B 欄畫不畫」的唯一探針，(e) 的 SOX 案例（單一陣列）測不到這個雙陣列不一致的情境。
+- [ ] **(e2) 台股 `hasVolume` 不得誤用 OR 邏輯（288.6.1 反例）**：構造一組台股資料，`tradeVolume`（→`volumes`）全部非 null 非 0、但 `tradeValue`（→`turnovers`）全部為 null，斷言 BFF 回 `hasVolume=false`。**若實作誤寫成「`volumes` 或 `turnovers` 任一非空即真」，本組會回 `true` 而失敗**——這是「用 A 欄決定 B 欄畫不畫」的唯一探針，(e) 的 SOX 案例（單一陣列）測不到這個雙陣列不一致的情境。
 - [ ] **(f) `turnovers` 在海外指數為「長度相同的全 null 陣列」**，非空陣列、非缺欄。
 - [ ] **(g) 三個陣列長度恆等於 `dates`**：含「某列 `closePoint` 為 null 被既有守門跳過」的情形。
 
@@ -472,7 +472,7 @@ cp /Users/steven/Project/asset-management/.env .
 docker compose -p asset-management build --no-cache business-services external-materials-service bff frontend
 ```
 
-> `frontend` 也必須 `--no-cache`：`nginx.conf`（286.7.1.1）與 vite bundle 都烘進映像，普通 build 會命中 layer cache 而不重跑。
+> `frontend` 也必須 `--no-cache`：`nginx.conf`（288.7.1.1）與 vite bundle 都烘進映像，普通 build 會命中 layer cache 而不重跑。
 
 ```bash
 docker compose -p asset-management up -d --no-deps --force-recreate business-services external-materials-service bff frontend
@@ -576,7 +576,7 @@ fetch('/api/bff/gdp-twse/index-daily?market=SOX&years=10').then(r=>r.json()).the
 - [ ] 拖曳下方 slider：**上下兩圖同步縮放**，最高／最低色塊標記仍隨可視區間更新。
 - [ ] hover：十字準星**貫穿上下兩圖**，tooltip 同時顯示價格四值與成交金額／成交量。
 - [ ] 切到「費城半導體」：成交量子圖**整個消失**、上圖恢復滿高，「本指數無成交量資料」**與「收盤／月線／季線／年線」同一橫列顯示**（不是圖表下方另開一塊獨立文字區），且**沒有留下空白區塊或孤立軸線**。
-- [ ] 切回台股大盤：legend 出現第五項「成交金額」，顯示最新一筆值（依 286.7.4.2 單位換算）。
+- [ ] 切回台股大盤：legend 出現第五項「成交金額」，顯示最新一筆值（依 288.7.4.2 單位換算）。
 - [ ] 切到「當日」：維持單圖版型（無成交量子圖），均線為水平參考線，昨收／漲跌顯示正常。
 - [ ] 切到「道瓊工業」：子圖出現，Y 軸單位為億股量級（非「股」原值一長串數字）。
 - [ ] 日期標籤只出現在**最下方**（成交量 pane 底下）一份，兩個 pane 中間的夾縫**沒有**懸空的標籤。
@@ -599,7 +599,7 @@ fetch('/api/bff/gdp-twse/index-daily?market=SOX&years=10').then(r=>r.json()).the
 
 1. **WebClient 256KB 預設緩衝區限制**：`MacroHistoryService.priceServiceClient` 原本未設定 `ExchangeStrategies`，加了 `volume`/`value` 兩欄後，`/internal/macro/us-index` 一次回應近 10 年（~2500 筆）JSON 超過預設 256KB，觸發 `DataBufferLimitException`，回補靜默回 `upserted:0`（無任何錯誤畫面）。修法：比照 BFF 既有 `WebClientConfig` 的做法，加 `ExchangeStrategies.builder().codecs(cfg -> cfg.defaultCodecs().maxInMemorySize(16*1024*1024))`。修復後 DJI／SOX 回補皆 `upserted:2513`。
 2. **TWSE 對 MI_5MINS_HIST／FMTQIK 有請求量閾值限流（實測發現，非本任務可控）**：10 年批次回補逐月序列呼叫，實測約第 26 個月起 TWSE 開始對兩支端點「同時」回 307 導向（Java HttpClient 呈現為 `IOException: Invalid redirection`）；獨立重現實驗證實：純 `MI_5MINS_HIST`（單端點）60 次請求可全數成功，但兩端點交錯呼叫在約 50~55 次請求後必觸發。這代表**本任務新增的 FMTQIK 呼叫，會把「本來單獨呼叫可撐完整批次」的 `MI_5MINS_HIST` 也一併拖累**（同一批限流視窗內兩端點的請求量加總計算）。修法：加入 FMTQIK 熔斷器（連續 3 次非 2xx 即暫停呼叫 5 分鐘），確保出問題時優先保住 `MI_5MINS_HIST`（價格資料）的既有可靠度，量欄則優雅降級為 null、留待下次回補。**這是外部 TWSE 服務的限流特性，非本任務邏輯錯誤**；影響是「單次 10 年批次回補無法保證一次補滿全部月份的成交量」，但既有 `skippedMonths`／`upserted` 回報機制與冪等 upsert 設計，讓多次點擊回補可逐步累積覆蓋率（實測三次回補後，近 2 年約 574 個交易日已有成交量資料）。
-3. **`axisPointer.link` 遺漏**：首次實作雙 grid 時忘記加十字準星跨圖聯動設定（286.7.3 的關鍵設定之一）。瀏覽器驗證時發現十字準星只停在上圖，比對同 repo 既有雙 grid 先例 `StockAnalysisDialog.vue:748` 後，補上 `tooltip.axisPointer: { type: 'cross', link: [{ xAxisIndex: 'all' }] }`（放在 `tooltip` 內，而非全域 `axisPointer`，與參考實作一致）。修復後截圖確認垂直虛線與日期標籤已貫穿至底部成交量圖。
+3. **`axisPointer.link` 遺漏**：首次實作雙 grid 時忘記加十字準星跨圖聯動設定（288.7.3 的關鍵設定之一）。瀏覽器驗證時發現十字準星只停在上圖，比對同 repo 既有雙 grid 先例 `StockAnalysisDialog.vue:748` 後，補上 `tooltip.axisPointer: { type: 'cross', link: [{ xAxisIndex: 'all' }] }`（放在 `tooltip` 內，而非全域 `axisPointer`，與參考實作一致）。修復後截圖確認垂直虛線與日期標籤已貫穿至底部成交量圖。
 4. **共用 Docker Stack 被其他 worktree 覆蓋（部署環境問題，非程式碼問題）**：驗證過程中 `frontend`／`bff`／`business-services` 三個容器映像先後被其他並行 worktree（另有 session 在測試 index-export-multi-schedule 功能）重新 build 覆蓋，一度導致瀏覽器驗證看到舊版行為（無成交量子圖、BFF 回應缺 `volumes`/`turnovers`/`hasVolume`）。每次發現後皆重新 `--no-cache` build＋recreate 該服務並以 jar 內容（`unzip -p ... | strings | grep`）直接確認程式碼版本後才繼續驗證。**使用者驗證時回報的「儲存設定出現錯誤」（`index_export_schedule` 缺 `last_run_at` 欄）已查證為另一 worktree 的 schema 遷移（`v1.88.0-index-export-multi-time-market`）與目前程式碼不相容所致，與本任務無關，未予處理。**
 
 ### 驗證輸出

@@ -21,13 +21,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 
 /**
- * {@link MacroHistoryService#preserveExistingTwseDailyFields(List)} 保值邏輯（Task t286）。
+ * {@link MacroHistoryService#preserveExistingTwseDailyFields(List)} 保值邏輯（Task t288）。
  *
  * <p>tradeVolume／tradeValue 來自獨立的 FMTQIK 月報，可能與主要 TWSE 價格來源分別失敗；
  * refreshTwseDaily 對 saveAll 前的最後一步呼叫本方法，避免「這次抓到的列這兩欄剛好是 null」
  * 時經 JPA merge 整列覆寫，把先前已回補的成交量／成交金額洗掉。
  *
- * <p>closePointTr 為既有（pre-t286）行為，一律無條件回填既有 DB 值，非本測試重點，
+ * <p>closePointTr 為既有（pre-t288）行為，一律無條件回填既有 DB 值，非本測試重點，
  * 僅在其中一個案例附帶驗證未被本次變更波及。
  */
 @ExtendWith(MockitoExtension.class)

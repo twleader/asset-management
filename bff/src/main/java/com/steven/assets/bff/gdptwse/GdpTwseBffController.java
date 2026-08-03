@@ -147,8 +147,8 @@ public class GdpTwseBffController {
     }
 
     /**
-     * 指數日線（近 N 年）+ MA20 / MA60 / MA240 + 成交量（volumes/turnovers/hasVolume，Task 286）。
-     * 一次回傳完整資料；前端切換區間僅用 dataZoom 不重打 API。
+     * 指數日線（近 N 年）+ MA5 / MA20 / MA60 / MA240（MA5＝週線，Task 285）+ 成交量
+     * （volumes/turnovers/hasVolume，Task 288）。一次回傳完整資料；前端切換區間僅用 dataZoom 不重打 API。
      * market=TWSE 走台股大盤（/api/twse-daily-index），其餘（DJI/SPX/IXIC/SOX/FTSE/DAX/KOSPI/N225）走海外指數（/api/us-daily-index）。
      * 兩市場回傳格式與 MA 計算完全相同（同義欄位同一來源），確保版面一致。
      */
@@ -180,7 +180,7 @@ public class GdpTwseBffController {
     }
 
     /**
-     * 組裝 {@code /index-daily} 回傳 body：dates/closes/ma20/ma60/ma240/volumes/turnovers/hasVolume（Task 286）。
+     * 組裝 {@code /index-daily} 回傳 body：dates/closes/ma5/ma20/ma60/ma240/volumes/turnovers/hasVolume（Task 285／288）。
      * 純函式（不做網路 I/O），套件內可見，供測試直接驗證——business API 回傳的原始列（{@code rows}）
      * 一律以 Map 形式傳入，不需經過 WebClient 抓取層。
      */
@@ -213,6 +213,7 @@ public class GdpTwseBffController {
         Map<String, Object> body = new HashMap<>();
         body.put("dates", dates);
         body.put("closes", closes);
+        body.put("ma5", movingAverage(closes, 5));
         body.put("ma20", movingAverage(closes, 20));
         body.put("ma60", movingAverage(closes, 60));
         body.put("ma240", movingAverage(closes, 240));
@@ -234,7 +235,7 @@ public class GdpTwseBffController {
 
     /**
      * 觸發「當前選取」指數的日線回補。market=TWSE → 台股逐月 TWSE 月報（實測近 10 年約 250 秒以上，
-     * Task 286 起併抓 FMTQIK 補成交量後更長）；其餘 → 海外指數 Yahoo v8 chart（range=10y，一次呼叫即整段）。
+     * Task 288 起併抓 FMTQIK 補成交量後更長）；其餘 → 海外指數 Yahoo v8 chart（range=10y，一次呼叫即整段）。
      */
     @PostMapping("/refresh-index-daily")
     public Mono<ResponseEntity<Map<String, Object>>> refreshIndexDaily(
@@ -248,7 +249,7 @@ public class GdpTwseBffController {
                         : uri.path("/api/us-daily-index/refresh").queryParam("code", market).build())
                 .retrieve().bodyToMono(mapRef)
                 // 台股逐月 120 次序列呼叫，實測 MI_5MINS_HIST 單次 ~1.3s ＋ 每月 800ms 間隔 ≈ 250s，
-                // 併抓 FMTQIK 後更長（Task 286）。這裡放寬到 360s 只是其中一關——
+                // 併抓 FMTQIK 後更長（Task 288）。這裡放寬到 360s 只是其中一關——
                 // frontend/nginx.conf 的 location /api/ 預設 60s 才是真正生效的上限，須另開 location 放寬（見前端）。
                 .timeout(Duration.ofSeconds(360))
                 .onErrorResume(e -> Mono.just(Map.of("error", e.getMessage())))
@@ -427,7 +428,7 @@ public class GdpTwseBffController {
     /**
      * 簡單移動平均：window 不足時填 null。回傳 List<Object>（可含 null）。
      */
-    private static List<Object> movingAverage(List<BigDecimal> values, int window) {
+    static List<Object> movingAverage(List<BigDecimal> values, int window) {
         int n = values.size();
         List<Object> out = new ArrayList<>(n);
         BigDecimal sum = BigDecimal.ZERO;

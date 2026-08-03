@@ -227,7 +227,7 @@ export const bffApi = {
     getIndexDaily: (market = 'TWSE', years = 10) =>
       api.get('/bff/gdp-twse/index-daily', { params: { market, years } }),
     refreshIndexDaily: (market = 'TWSE', years = 10) =>
-      // 台股逐月 120 次序列呼叫，實測近 10 年約 250 秒以上；nginx 另有專屬 location 放寬 proxy_read_timeout（Task 286）
+      // 台股逐月 120 次序列呼叫，實測近 10 年約 250 秒以上；nginx 另有專屬 location 放寬 proxy_read_timeout（Task 288）
       api.post('/bff/gdp-twse/refresh-index-daily', null, { params: { market, years }, timeout: 360000 }),
     getIndexIntraday: (market = 'TWSE') =>
       api.get('/bff/gdp-twse/index-intraday', { params: { market } }),

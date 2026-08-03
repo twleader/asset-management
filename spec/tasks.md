@@ -287,11 +287,13 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 281 | 交易雷達匯出補上週線 MA5 與走勢圖指標選單的 14 個值（大盤總覽 20→35 欄、個股決策 35→50 欄；Requirement 43／48）**已通過對抗式審查（4 輪）** | [tasks/t281_radar_export_indicators.md](tasks/t281_radar_export_indicators.md) |
 | 282 | 九個匯出頁的手動匯出結果提示改為報出 JSON 與 Excel 兩個落點（t270.3／t271.5／t272.3／t272.3.1 漏做，使用者回報「只匯出 excel」；Requirement 55） | [tasks/t282_dual_export_runnow_message.md](tasks/t282_dual_export_runnow_message.md) |
 | 283 | 交易雷達頁首「匯出 Excel」在下載之外，同時落一份 JSON ＋ Excel 到伺服器輸出目錄（Requirement 48／55） | [tasks/t283_radar_manual_export_dual_format.md](tasks/t283_radar_manual_export_dual_format.md) |
-| 286 | 股市大盤查詢頁的日線圖下方新增每日成交量柱狀子圖（台股走 TWSE FMTQIK 成交金額／股數、海外走 Yahoo `volume`；Requirement 18） | [tasks/t286_index_daily_volume_chart.md](tasks/t286_index_daily_volume_chart.md) |
+| 284 | 交易雷達個股收合列補顯示週線 MA5，並守住 Excel／JSON 匯出既有 MA5 欄（Requirement 43／48） | [tasks/t284_trading_radar_ma5_summary.md](tasks/t284_trading_radar_ma5_summary.md) |
+| 285 | 股市大盤查詢頁日線圖加畫週線 MA5（四線→五線），匯出（xlsx／json）加第六欄「週線MA5」並回看 30 日避免前 4 列空白（Requirement 18／45） | [tasks/t285_index_daily_weekly_ma5.md](tasks/t285_index_daily_weekly_ma5.md) |
+| 286 | 大盤指數日線匯出補齊月線MA20／季線MA60／年線MA240（6 欄→9 欄），回看視窗由 30 日放大為 400 日以支撐 MA240 的 239 個交易日（Requirement 45） | [tasks/t286_index_export_all_four_ma.md](tasks/t286_index_export_all_four_ma.md) |
+| 287 | 股市大盤排程匯出支援多時間點與多指數 checkbox（Requirement 45） | [tasks/t287_index_export_multi_time_market.md](tasks/t287_index_export_multi_time_market.md) |
+| 288 | 股市大盤查詢頁的日線圖下方新增每日成交量柱狀子圖（台股走 TWSE FMTQIK 成交金額／股數、海外走 Yahoo `volume`；Requirement 18） | [tasks/t288_index_daily_volume_chart.md](tasks/t288_index_daily_volume_chart.md) |
 
-> **註：本索引表僅列至 228、264–267、269–279、280–283 與 286；Task 229–263 與 268 未登錄於本表，以 `spec/tasks/tNNN_*.md` 檔案本身為準。**
->
-> **⚠ 284–288 的編號現況（2026-08-02 複查，各 worktree 現況會持續變動，動筆前務必重查）**：`284` 目前僅 `gmail-calendar-alert-integration-6fe79c` 一份（`t284_index_daily_weekly_ma5`，不撞號）；**`285` 為同號不同任務**（`gmail-calendar-alert-integration-6fe79c` 的 `t285_index_export_all_four_ma` vs `compound-condition-trigger-f55151` 的 `t285_index_export_multi_schedule`），合併進 main 前須解號；**`287`／`288` 已由 `wonderful-fermi-c522e5` 預留**（`t287_transaction_schedule_dialog_edit`／`t288_single_schedule_cards_dialog_edit`，該 worktree 原用 284/285、已自行避讓改號）。故本表暫不列 284–288，開新任務前一律重跑編號掃描。
+> **註：本索引表僅列至 228、264–267、269–279 與 280–288；Task 229–263 與 268 未登錄於本表，以 `spec/tasks/tNNN_*.md` 檔案本身為準。**
 
 > **Task 222–225 已全部被 t264–t267 取代（見上表），保留僅作為決策記錄，一律不得依其實作。**
 >

@@ -469,10 +469,10 @@
   - 顯示每日收盤點位（`close_point`）+ 月線（MA20）+ 季線（MA60）+ 年線（MA240）四條曲線
   - 區間切換按鈕：1 個月 / 3 個月 / 半年 / 1 年 / 2 年 / 5 年（透過 dataZoom 對齊 X 軸末端，前段 240 個交易日仍保留以利 MA240 完整顯示）
   - 後端日線資料表 `twse_index_daily_history`（`trading_date` PK, `open_point`, `high_point`, `low_point`, `close_point` 各 NUMERIC(12,2)），由 Liquibase changelog 建立（不 seed 歷史值）
-  - business service 新增 `GET /api/twse-daily-index?from=YYYY-MM-DD&to=YYYY-MM-DD` 與 `POST /api/twse-daily-index/refresh?years=10`，後者逐月呼叫 TWSE `MI_5MINS_HIST` 月報抓全部交易日 OHLC（`開盤指數` / `最高指數` / `最低指數` / `收盤指數`）upsert 至 DB。**⚠️ 本條原記載來源為 `FMTQIK`，與程式碼不符**：實際來源自始至今是 `https://www.twse.com.tw/rwd/zh/TAIEX/MI_5MINS_HIST`（`MacroDataFetchClient.TWSE_DAILY_OHLC_URL`），`FMTQIK` 只有收盤沒有 OHLC；Task 286 更正之
+  - business service 新增 `GET /api/twse-daily-index?from=YYYY-MM-DD&to=YYYY-MM-DD` 與 `POST /api/twse-daily-index/refresh?years=10`，後者逐月呼叫 TWSE `MI_5MINS_HIST` 月報抓全部交易日 OHLC（`開盤指數` / `最高指數` / `最低指數` / `收盤指數`）upsert 至 DB。**⚠️ 本條原記載來源為 `FMTQIK`，與程式碼不符**：實際來源自始至今是 `https://www.twse.com.tw/rwd/zh/TAIEX/MI_5MINS_HIST`（`MacroDataFetchClient.TWSE_DAILY_OHLC_URL`），`FMTQIK` 只有收盤沒有 OHLC；Task 288 更正之
   - 大盤 OHLC 同時供 Requirement 14（觀察清單 0000 KD 計算）使用，不另建表
   - BFF 新增 `GET /api/bff/gdp-twse/twse-daily?years=10`：載入近 N 年日線並計算 MA20/60/240 後一次回傳；前端切換區間僅用 dataZoom 不再打 API
-  - BFF 新增 `POST /api/bff/gdp-twse/refresh-twse-daily?years=10`：proxy 至 business `/api/twse-daily-index/refresh`（**Task 286 實測近 10 年為 250 秒上下，非本條原記載的「1~2 分鐘」**，見下方「回補逾時」）
+  - BFF 新增 `POST /api/bff/gdp-twse/refresh-twse-daily?years=10`：proxy 至 business `/api/twse-daily-index/refresh`（**Task 288 實測近 10 年為 250 秒上下，非本條原記載的「1~2 分鐘」**，見下方「回補逾時」）
   - 「回補資料」按鈕同步觸發 TWN GDP + KOR GDP + 大盤年末 + 大盤日線四項回補
 - [ ] 第三張卡（每日收盤日線圖）支援**市場切換**（一次顯示一個指數，沿用同一套「收盤＋月線 MA20／季線 MA60／年線 MA240」四線版型與區間切換鈕）：頂部下拉選單可在「台股大盤 / 道瓊工業 / 標普 500 / 那斯達克綜合 / 費城半導體 / 英國富時 100 / 德國 DAX / 韓國 KOSPI / 日經 225」九者間切換；卡片標題、空狀態提示文字隨選取指數動態變化
   - 「美國四大指數」＝道瓊工業 (DJI / `^DJI`)、標普 500 (SPX / `^GSPC`)、那斯達克綜合 (IXIC / `^IXIC`)、費城半導體 (SOX / `^SOX`)
@@ -481,7 +481,7 @@
   - 資料來源為 **Yahoo Finance v8 chart API**（`range=10y&interval=1d`），於 ext-materials-service 以 curl 子程序抓取（避開 Yahoo 對 Java HTTP fingerprint 的封鎖，與既有美股歷史抓取 `fetchUsHistoricalRange` 同 pattern）。原評估的 Stooq CSV 經實測在部署環境被擋（連 `aapl.us` 等通用標的都回錯誤頁），故改採 Yahoo；抓取邏輯封裝於 `MacroDataFetchClient.fetchUsIndexDaily(code)` 單一方法，日後可一處替換來源
   - 日線 timestamp → 交易日改依 Yahoo meta 之 `exchangeTimezoneName` 轉當地時區（非寫死 `America/New_York`）：美股 daily bar timestamp 在開盤時刻（09:30 ET）轉 NY 與轉交易所時區結果相同，但亞洲/歐洲指數 daily bar timestamp 在 UTC 午夜（＝當地開盤），若仍用 NY 時區會把日期回退一日（如東京 6/15 變 6/14）。改讀交易所時區後對所有市場一致正確
   - business service 新增 `GET /api/us-daily-index?code=&from=&to=` 與 `POST /api/us-daily-index/refresh?code=`（單一指數；Yahoo `range=10y` 一次呼叫即取得近 10 年，不需逐月迴圈）
-  - BFF 將原 `.../twse-daily`、`.../refresh-twse-daily` **一般化**為 `GET /api/bff/gdp-twse/index-daily?market=&years=10` 與 `POST /api/bff/gdp-twse/refresh-index-daily?market=&years=10`（`market=TWSE` 走台股大盤、其餘走對應美股指數）；回傳格式（dates/closes/ma20/ma60/ma240，**Task 286 起再加 volumes/turnovers/hasVolume**）與 MA 計算對兩市場完全相同，由同一支 BFF 服務（同義欄位同一來源），確保版面一致
+  - BFF 將原 `.../twse-daily`、`.../refresh-twse-daily` **一般化**為 `GET /api/bff/gdp-twse/index-daily?market=&years=10` 與 `POST /api/bff/gdp-twse/refresh-index-daily?market=&years=10`（`market=TWSE` 走台股大盤、其餘走對應美股指數）；回傳格式（dates/closes/ma20/ma60/ma240，**Task 288 起再加 volumes/turnovers/hasVolume**）與 MA 計算對兩市場完全相同，由同一支 BFF 服務（同義欄位同一來源），確保版面一致
   - 「回補日線（10 年）」按鈕回補「當前選取」的指數
 - [ ] 區間切換鈕新增「**當日**」（置於最前）：切到當日顯示該指數「盤中即時 / 盤後最後交易日」的分時走勢線（5 分 K 收盤連線，x 軸為該市場當地時區 HH:mm）；月線/季線/年線改畫成**水平參考線**（取日線最新 MA20/60/240 值，與其他期間同口徑，比照股票分析「當日」Task 87）
   - 當日資料即時向 **Yahoo v8 chart**（`interval=5m&range=5d`，取最新交易日的 bar）抓取、不寫 DB（指數不在 Redis tick 輪詢名單，故採即時抓取而非 Task 88 兩階段 tick store）。盤中回最新交易日當天部分 bar＝即時、盤後回最後完整交易日，自動滿足「盤中即時／盤後最後交易日」
@@ -492,7 +492,7 @@
   - 「當日」模式於卡片標題列顯示**昨日收盤 / 漲跌 / 漲跌%**：昨收＝該指數日線表（`twse_index_daily_history` / `us_index_daily_history`）中「當日 `tradingDate` 之前最後一個交易日」的收盤——與觀察清單 0000 報價 `WatchStockService` 讀**同一張日線表**（同義欄位同一事實來源，值一致）；漲跌＝分時最新點位（`closes` 末筆非 null＝盤中即時 / 盤後收盤）− 昨收，漲跌%＝漲跌 / 昨收 ×100。**計算一律於 BFF**（前端只 render），`GET /api/bff/gdp-twse/index-intraday` 回傳增加 `previousClose` / `lastClose` / `change` / `changePercent`。配色比照觀察清單 `priceColor` 紅漲綠跌（台股慣例）；昨收缺值（日線尚未回補）時該段不顯示，不影響走勢圖本身
   - **昨收須為「真正的前一交易日」**（Task 105）：當日走勢的現在點位是即時抓 Yahoo（最新交易日），昨收若取自過時的日線表會退回數日前舊收盤、使漲跌% 失真（實機 SOX 曾顯示 +13.88%）。除「缺值→null」外，日線表「過時但非空→昨收為錯的舊值」亦屬失效，故海外指數日線須由排程恆保最新（見下條）
   - 海外指數日線（`us_index_daily_history`）由 business-services `IndexDailyRefreshScheduler` **自動回補**：每日 07:00（Asia/Taipei，TUE-SAT，美股收盤後）對 8 指數（DJI/SPX/IXIC/SOX/FTSE/DAX/KOSPI/N225）逐一呼叫 `refreshUsIndexDaily`（Yahoo `range=10y` idempotent upsert）；開機時若任一指數最新日期過時（> 4 日）亦觸發 self-heal 回補。角色比照台股大盤日線之 external-materials `TwseIndexPoller`，確保日線圖 / MA / 當日走勢昨收恆為最新（不再靠手動「回補日線（10 年）」按鈕維持新鮮度）
-- [ ] **日線圖下方新增「每日成交量」柱狀子圖**（Task 286）：原本整張卡只有價格與三條均線，看不出量能——「爆量長黑」「無量假突破」這類判讀在畫面上完全缺席。改為上下兩個 grid（上：收盤＋MA20/60/240＋最高最低標記，維持現況；下：成交量柱狀），兩者共用同一條 X 軸類別、同一組 `dataZoom`（`xAxisIndex: [0, 1]`）與 `axisPointer.link`，區間鈕與手動拖曳同時作用於兩圖
+- [ ] **日線圖下方新增「每日成交量」柱狀子圖**（Task 288）：原本整張卡只有價格與三條均線，看不出量能——「爆量長黑」「無量假突破」這類判讀在畫面上完全缺席。改為上下兩個 grid（上：收盤＋MA20/60/240＋最高最低標記，維持現況；下：成交量柱狀），兩者共用同一條 X 軸類別、同一組 `dataZoom`（`xAxisIndex: [0, 1]`）與 `axisPointer.link`，區間鈕與手動拖曳同時作用於兩圖
   - **台股大盤柱值為「成交金額」、單位億元**（Y 軸標示即為「成交金額（億元）」）：台股口語的「大盤量能 4000 億」指的就是成交金額，鉅亨網／Yahoo 股市大盤圖下方那根柱同此口徑。成交股數另存於 DB 並在 tooltip 一併顯示（「成交量 x.xx 億股」），兩個口徑都拿得到、日後要對調顯示只改前端
   - **海外指數柱值為「成交量（股）」**（Yahoo `indicators.quote[0].volume`，無成交金額欄位），Y 軸依該指數量級自動選單位（≥1e8 → 億股、≥1e4 → 萬股、其餘原值）。⚠️ **各市場口徑不一致，不得跨指數比較**：實測（2026-08-02）`^KS11` 回 275,700 量級（韓國實際成交股數為數億股，Yahoo 該欄顯非股數原值），`^SOX` **恆為 0**（純計算型指數無成交量）
   - **無量資料時不畫柱、不留空 grid**：**只看該市場實際繪製的那一欄**判定——台股看成交金額（不採「成交金額或成交股數任一」的 OR 邏輯，那會放行「有股數、無金額」這種台股實際不會發生卻讓子圖畫出一整排空柱的組合）、海外指數看成交量。整段皆為 0 或 null（費城半導體 SOX 即為此類）時，子圖不顯示、上圖恢復占滿整張卡的高度，並於 legend 位置顯示「本指數無成交量資料」。單日缺值（0／null）則該日柱留空、其餘照畫。⚠️ 判定條件**必須同時排除 0 與 null**：SOX 回的是一整排 `0` 而非 null，只判 null 會漏掉它、畫出一整排零高度柱
