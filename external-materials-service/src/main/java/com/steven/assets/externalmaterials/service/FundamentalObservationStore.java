@@ -8,6 +8,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
@@ -451,7 +452,7 @@ public class FundamentalObservationStore {
     private record IndustryLatest(BigDecimal revenue, BigDecimal prior, BigDecimal yoy, int count,
                                   String urls, Instant available, String basis) {
         boolean same(BigDecimal r, BigDecimal p, BigDecimal y, int c, String json, Instant at, String b) {
-            return decimalEquals(revenue, r) && decimalEquals(prior, p) && decimalEquals(yoy, y)
+            return wholeNumberEquals(revenue, r) && wholeNumberEquals(prior, p) && decimalEquals(yoy, y)
                     && count == c && jsonEquals(urls, json) && availabilityEquals(available, at, basis)
                     && Objects.equals(basis, b);
         }
@@ -473,7 +474,19 @@ public class FundamentalObservationStore {
     }
 
     private static boolean decimalEquals(BigDecimal left, BigDecimal right) {
-        return left == null ? right == null : right != null && left.compareTo(right) == 0;
+        return decimalEquals(left, right, 4);
+    }
+
+    private static boolean wholeNumberEquals(BigDecimal left, BigDecimal right) {
+        return decimalEquals(left, right, 0);
+    }
+
+    private static boolean decimalEquals(BigDecimal left, BigDecimal right, int scale) {
+        // 比較精度必須與 schema 一致：比率／EPS 是 NUMERIC(*,4)，產業總營收是 NUMERIC(24,0)。
+        // 否則來源值被 PostgreSQL 量化後，下一輪會把同一數值誤判成修正版 observation。
+        return left == null ? right == null : right != null
+                && left.setScale(scale, RoundingMode.HALF_UP)
+                .compareTo(right.setScale(scale, RoundingMode.HALF_UP)) == 0;
     }
 
     /** OBSERVED 的可用時點定義為第一次成功觀測；同值重跑不得把它往後推。 */
