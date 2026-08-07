@@ -56,6 +56,8 @@ class TradingRadarServiceOwnerScopeTest {
     @Mock private StockRepository stockRepo;
     @Mock private MarketDataService marketDataService;
     @Mock private ExchangeRateHistoryRepository exchangeRateRepo;
+    @Mock private TradingRadarMarketContextService marketContextService;
+    @Mock private FundamentalAnalysisService fundamentalAnalysisService;
     @Mock private EtfNavHistoryRepository etfNavHistoryRepo;
     @Mock private TradingRadarSnapshotStore snapshotStore;
     @Mock private CurrentUserContext currentUserContext;
@@ -78,7 +80,8 @@ class TradingRadarServiceOwnerScopeTest {
                 alertRepo,
                 stockRepo,
                 marketDataService,
-                exchangeRateRepo,
+                marketContextService,
+                fundamentalAnalysisService,
                 etfNavHistoryRepo,
                 snapshotStore,
                 currentUserContext);
@@ -91,6 +94,9 @@ class TradingRadarServiceOwnerScopeTest {
                         null, null, null, null, null, null,
                         null, null, true, "CLOSE_PENDING"));
         lenient().when(marketDataService.isTradingDay(anyString(), any(LocalDate.class))).thenReturn(true);
+        lenient().when(marketContextService.resolve(any())).thenReturn(
+                new TradingRadarMarketContextService.Resolved(
+                        TradingRadarMarketContextService.MarketContext.EMPTY, List.of()));
         lenient().when(twseRepo.findTopNByOrderByTradingDateDesc(241)).thenReturn(List.of());
         lenient().when(priceQueryService.getLive(anyString(), anyString())).thenReturn(Optional.empty());
         lenient().when(indicatorService.computeAll(anyString(), anyString()))

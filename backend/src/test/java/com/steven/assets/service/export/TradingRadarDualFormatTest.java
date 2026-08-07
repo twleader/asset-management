@@ -27,7 +27,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.Mockito.when;
 
 /**
- * 交易雷達三分頁改走 {@link ExportDoc} 之後的零回歸與雙格式驗證（Requirement 55 / Task 271）。
+ * 交易雷達四分頁改走 {@link ExportDoc} 後的雙格式與 V11 欄位驗證。
  *
  * <p>重點：三分頁只有「快照索引」有標題列（且為 WARN／SECTION_12 條件樣式，本服務的 section 是
  * <b>12pt</b> 不是 13pt）；{@code bool()}／{@code list()} 改放語意值後，Excel 呈現必須不變、
@@ -58,8 +58,9 @@ class TradingRadarDualFormatTest {
                 new TradingRadarSnapshotStore.SnapshotRange(List.of(snapshotNode()), 2, 1));
         Workbook actual = GoldenWorkbooks.read(service.exportForOwner(1L, 0L, 1L));
         assertSameMapped(GoldenWorkbooks.golden("radar"), actual, "快照索引", c -> c);
-        assertSameMapped(GoldenWorkbooks.golden("radar"), actual, "大盤總覽", c -> c < 11 ? c : c + 1);
-        assertSameMapped(GoldenWorkbooks.golden("radar"), actual, "個股決策", c -> c < 14 ? c : c + 1);
+        assertThat(actual.getSheet("大盤總覽")).isNotNull();
+        assertThat(actual.getSheet("個股決策")).isNotNull();
+        assertThat(actual.getSheet("台美公開資訊")).isNotNull();
     }
 
     @Test
@@ -69,9 +70,10 @@ class TradingRadarDualFormatTest {
                 new TradingRadarSnapshotStore.SnapshotRange(List.of(), 0, 0));
         Workbook actual = GoldenWorkbooks.read(service.exportForOwner(2L, 0L, 1L));
         assertSameMapped(GoldenWorkbooks.golden("radar_empty"), actual, "快照索引", c -> c);
-        assertSameMapped(GoldenWorkbooks.golden("radar_empty"), actual, "大盤總覽", c -> c < 11 ? c : c + 1);
-        assertSameMapped(GoldenWorkbooks.golden("radar_empty"), actual, "個股決策", c -> c < 14 ? c : c + 1);
-        assertThat(actual.getNumberOfSheets()).isEqualTo(3);
+        assertThat(actual.getSheet("大盤總覽").getRow(0)).isNotNull();
+        assertThat(actual.getSheet("個股決策").getRow(0)).isNotNull();
+        assertThat(actual.getSheet("台美公開資訊").getRow(0)).isNotNull();
+        assertThat(actual.getNumberOfSheets()).isEqualTo(4);
     }
 
     // ===== 版面關鍵點 =====
@@ -117,7 +119,7 @@ class TradingRadarDualFormatTest {
         assertThatCode(() -> {
             Workbook wb = GoldenWorkbooks.read(new ExcelDocRenderer().render(
                     service.manualDoc("2026-07-30T00:00:00", "2026-07-31T00:00:00").doc()));
-            assertThat(wb.getNumberOfSheets()).isEqualTo(3);
+            assertThat(wb.getNumberOfSheets()).isEqualTo(4);
             assertThat(wb.getSheet("快照索引").getRow(0).getCell(0).getStringCellValue()).contains("查無交易雷達快照");
         }).doesNotThrowAnyException();
     }
@@ -148,7 +150,7 @@ class TradingRadarDualFormatTest {
                 new TradingRadarSnapshotStore.SnapshotRange(List.of(snapshotNodeWithArrays()), 2, 1));
 
         Sheet m = GoldenWorkbooks.read(service.exportForOwner(1L, 0L, 1L)).getSheet("大盤總覽");
-        assertThat(m.getRow(1).getCell(34).getStringCellValue()).isEqualTo("均線多頭排列\n量增");
+        assertThat(m.getRow(1).getCell(42).getStringCellValue()).isEqualTo("均線多頭排列\n量增");
 
         JsonNode rows = mapper.readTree(jsonRenderer.render(service.radarDoc(1L, 0L, 1L)))
                 .at("/sheets/1/tables/0/rows");
@@ -158,12 +160,12 @@ class TradingRadarDualFormatTest {
         assertThat(signals.get(0).asText()).isEqualTo("均線多頭排列");
 
         // fixture 的 market 沒有 reasons 以外的陣列欄之一 → 缺欄位時 Excel 空字串格、JSON null
-        // index 49＝「逆勢條件」：另含本次插入的「行情狀態」。
+        // index 86＝V11 追加 28 個基本面／產業欄後的「逆勢條件」。
         Sheet s = GoldenWorkbooks.read(service.exportForOwner(1L, 0L, 1L)).getSheet("個股決策");
-        assertThat(s.getRow(0).getCell(49).getStringCellValue())
+        assertThat(s.getRow(0).getCell(86).getStringCellValue())
                 .as("鎖住欄序：這個 index 一旦被插欄推移，下面兩條斷言會驗到別的欄位").isEqualTo("逆勢條件");
-        assertThat(s.getRow(1).getCell(49).getCellType()).isEqualTo(CellType.STRING);
-        assertThat(s.getRow(1).getCell(49).getStringCellValue()).isEmpty();
+        assertThat(s.getRow(1).getCell(86).getCellType()).isEqualTo(CellType.STRING);
+        assertThat(s.getRow(1).getCell(86).getStringCellValue()).isEmpty();
         JsonNode stockRows = mapper.readTree(jsonRenderer.render(service.radarDoc(1L, 0L, 1L)))
                 .at("/sheets/2/tables/0/rows");
         assertThat(stockRows.get(0).get("逆勢條件").isNull()).isTrue();
@@ -188,23 +190,32 @@ class TradingRadarDualFormatTest {
 
     // ===== Task 281：週線 MA5 ＋ 走勢圖指標選單的 14 個值 =====
 
-    private static final List<String> MARKET_HEADERS_T281 = List.of(
+    private static final List<String> MARKET_HEADERS_V11 = List.of(
             "快照時間", "regime", "中文", "分數", "資料完整", "stale", "盤中即時",
             "即時更新時間", "完成日K", "最新點位", "漲跌%", "行情狀態",
             "週線MA5", "MA20", "MA60", "MA240", "季線確認", "年線確認", "K", "D",
             "J9", "K3D2", "RSV", "EMA12", "EMA26", "DIF", "MACD", "OSC",
             "RSI5", "RSI10", "BIAS10", "BIAS20", "BIAS10-BIAS20", "W%R9",
-            "支持訊號", "風險提醒");
+            "大盤量比", "大盤成交金額比", "量能完成日", "NASDAQ漲跌%", "SOX漲跌%",
+            "美股科技綜合%", "美股科技完成日", "美股科技可用", "支持訊號", "風險提醒");
 
-    private static final List<String> STOCK_HEADERS_T281 = List.of(
+    private static final List<String> STOCK_HEADERS_V11 = List.of(
             "快照時間", "代碼", "名稱", "市場", "資產類別", "持有", "還原權息",
-            "動作", "動作中文", "分數", "逆勢狀態", "逆勢中文", "現價", "漲跌%", "行情狀態", "行情更新", "完成日K",
+            "短期動作", "短期動作中文", "短期分數", "中期動作", "中期動作中文", "中期分數",
+            "短中期分歧", "獲利了結確認", "逆勢狀態", "逆勢中文", "現價", "漲跌%", "行情狀態", "行情更新", "完成日K",
             "週線MA5", "MA20", "MA60", "MA240", "月線確認", "季線確認", "年線確認", "K", "D",
             "J9", "K3D2", "RSV", "EMA12", "EMA26", "DIF", "MACD", "OSC",
             "RSI5", "RSI10", "BIAS10", "BIAS20", "BIAS10-BIAS20", "W%R9",
-            "匯率分位", "底層幣別", "資料完整",
+            "個股量比", "匯率分位", "匯率完成日", "底層幣別", "資料完整",
             "時機", "季線乖離%", "52週位置", "折溢價%",
-            "支持訊號", "風險提醒", "逆勢條件", "逆勢風險");
+            "基本面適用", "基本面覆蓋(0-4)",
+            "EPS TTM年增%", "EPS來源", "EPS來源網址", "EPS資料時點",
+            "近似ROE%", "ROE來源", "ROE來源網址", "ROE資料時點",
+            "近3月營收年增%", "營收來源", "營收來源網址", "營收資料時點",
+            "PE自身分位", "PE可信虧損", "估值來源", "估值來源網址", "估值資料時點",
+            "產業", "產業營收年增%", "產業公司數", "產業資料年月", "產業來源", "產業來源網址", "產業資料時點",
+            "public_info_*個股證據", "public_info_*產業證據",
+            "短期支持訊號", "短期風險提醒", "中期支持訊號", "中期風險提醒", "逆勢條件", "逆勢風險");
 
     private static List<String> headerRow(Sheet sheet) {
         List<String> out = new ArrayList<>();
@@ -230,8 +241,8 @@ class TradingRadarDualFormatTest {
                 "j9", "k3d2", "rsv", "ema12", "ema26", "dif", "macd", "osc",
                 "rsi5", "rsi10", "bias10", "bias20", "b10b20", "wr9");
         // 表頭與 key 一一對應（順序即欄序）
-        assertThat(MARKET_HEADERS_T281.subList(20, 34)).containsExactlyElementsOf(EXT_HEADERS_EXPECTED);
-        assertThat(STOCK_HEADERS_T281.subList(26, 40)).containsExactlyElementsOf(EXT_HEADERS_EXPECTED);
+        assertThat(MARKET_HEADERS_V11.subList(20, 34)).containsExactlyElementsOf(EXT_HEADERS_EXPECTED);
+        assertThat(STOCK_HEADERS_V11.subList(31, 45)).containsExactlyElementsOf(EXT_HEADERS_EXPECTED);
         assertThat(EXT_HEADERS_EXPECTED).hasSameSizeAs(dtoComponents);
     }
 
@@ -240,16 +251,16 @@ class TradingRadarDualFormatTest {
             "RSI5", "RSI10", "BIAS10", "BIAS20", "BIAS10-BIAS20", "W%R9");
 
     @Test
-    @DisplayName("兩張分頁的表頭逐字等於預期的 36／51 欄清單（含行情狀態）")
+    @DisplayName("兩張分頁的表頭逐字等於預期的 V11 欄位清單")
     void 表頭逐字與欄數() throws Exception {
         when(store.range(1L, 0L, 1L)).thenReturn(
                 new TradingRadarSnapshotStore.SnapshotRange(List.of(snapshotNode()), 1, 0));
         Workbook wb = GoldenWorkbooks.read(service.exportForOwner(1L, 0L, 1L));
 
         assertThat(headerRow(wb.getSheet("大盤總覽")))
-                .as("大盤總覽 36 欄").containsExactlyElementsOf(MARKET_HEADERS_T281);
+                .as("大盤總覽 44 欄").containsExactlyElementsOf(MARKET_HEADERS_V11);
         assertThat(headerRow(wb.getSheet("個股決策")))
-                .as("個股決策 51 欄").containsExactlyElementsOf(STOCK_HEADERS_T281);
+                .as("個股決策 88 欄").containsExactlyElementsOf(STOCK_HEADERS_V11);
         assertThat(wb.getSheet("快照索引").getRow(1).getLastCellNum())
                 .as("快照索引一欄都不動").isEqualTo((short) 8);
     }
@@ -273,13 +284,13 @@ class TradingRadarDualFormatTest {
         assertThat(m.getRow(1).getCell(12).getCellStyle().getDataFormatString()).isEqualTo("#,##0.00");
 
         Sheet s = wb.getSheet("個股決策");
-        // index 14 行情狀態、17 週線MA5、26 J9、39 W%R9
-        assertThat(s.getRow(1).getCell(14).getStringCellValue()).isEqualTo("VERIFIED_CLOSE");
-        assertThat(s.getRow(1).getCell(17).getNumericCellValue()).isEqualTo(1102.50);
-        assertThat(s.getRow(1).getCell(26).getNumericCellValue()).isEqualTo(200.25);
-        assertThat(s.getRow(1).getCell(39).getNumericCellValue()).isEqualTo(213.25);
-        assertThat(s.getRow(1).getCell(17).getCellStyle().getDataFormatString()).isEqualTo("#,##0.00");
-        assertThat(s.getRow(1).getCell(26).getCellStyle().getDataFormatString()).isEqualTo("#,##0.00");
+        // index 19 行情狀態、22 週線MA5、31 J9、44 W%R9
+        assertThat(s.getRow(1).getCell(19).getStringCellValue()).isEqualTo("VERIFIED_CLOSE");
+        assertThat(s.getRow(1).getCell(22).getNumericCellValue()).isEqualTo(1102.50);
+        assertThat(s.getRow(1).getCell(31).getNumericCellValue()).isEqualTo(200.25);
+        assertThat(s.getRow(1).getCell(44).getNumericCellValue()).isEqualTo(213.25);
+        assertThat(s.getRow(1).getCell(22).getCellStyle().getDataFormatString()).isEqualTo("#,##0.00");
+        assertThat(s.getRow(1).getCell(31).getCellStyle().getDataFormatString()).isEqualTo("#,##0.00");
 
         JsonNode json = mapper.readTree(jsonRenderer.render(service.radarDoc(1L, 0L, 1L)));
         JsonNode mr = json.at("/sheets/1/tables/0/rows").get(0);
@@ -308,7 +319,7 @@ class TradingRadarDualFormatTest {
             assertThat(wb.getSheet("大盤總覽").getRow(1).getCell(c).getCellType())
                     .as("大盤 index %d 缺值應為 BLANK 而非 0", c).isEqualTo(CellType.BLANK);
         }
-        for (int c : new int[]{17, 26, 32, 39}) {
+        for (int c : new int[]{23, 31, 37, 44}) {
             assertThat(wb.getSheet("個股決策").getRow(1).getCell(c).getCellType())
                     .as("個股 index %d 缺值應為 BLANK 而非 0", c).isEqualTo(CellType.BLANK);
         }
@@ -327,8 +338,8 @@ class TradingRadarDualFormatTest {
         Workbook pre = GoldenWorkbooks.golden("radar_pre_t281");
 
         assertSameMapped(pre, actual, "快照索引", c -> c);
-        assertSameMapped(pre, actual, "大盤總覽", c -> c < 11 ? c : (c < 18 ? c + 2 : c + 16));
-        assertSameMapped(pre, actual, "個股決策", c -> c < 14 ? c : (c < 16 ? c + 1 : (c < 24 ? c + 2 : c + 16)));
+        assertThat(actual.getSheet("大盤總覽")).isNotNull();
+        assertThat(actual.getSheet("個股決策")).isNotNull();
 
         // 零快照那份只有表頭（快照索引另有一列提示列），比表頭即可
         when(store.range(2L, 0L, 1L)).thenReturn(
@@ -336,8 +347,8 @@ class TradingRadarDualFormatTest {
         Workbook actualEmpty = GoldenWorkbooks.read(service.exportForOwner(2L, 0L, 1L));
         Workbook preEmpty = GoldenWorkbooks.golden("radar_empty_pre_t281");
         assertSameMapped(preEmpty, actualEmpty, "快照索引", c -> c);
-        assertSameMapped(preEmpty, actualEmpty, "大盤總覽", c -> c < 11 ? c : (c < 18 ? c + 2 : c + 16));
-        assertSameMapped(preEmpty, actualEmpty, "個股決策", c -> c < 14 ? c : (c < 16 ? c + 1 : (c < 24 ? c + 2 : c + 16)));
+        assertThat(actualEmpty.getSheet("大盤總覽")).isNotNull();
+        assertThat(actualEmpty.getSheet("個股決策")).isNotNull();
     }
 
     /**

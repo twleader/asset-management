@@ -4,7 +4,7 @@
 **前置任務:** t273（規則回測框架——利率因子的形式、方向與權重必須引用其量測輸出，不得憑「利率漲債券跌」的通則直接寫死）
 **Liquibase changeset:** `v1.85.0-treasury-yield-daily.sql`（**預留版號**）
 
-> **⚠ 複驗的判準是「該版號檔是否已存在」，不是「它是不是最大值」。** 本路線圖同時預留了 `v1.85.0`（本任務）、`v1.86.0`（t277 雙軌通知欄位）、`v1.87.0`（t266 基本面三表）。t266 是 t278 的前置、最可能先落地，故 `ls backend/src/main/resources/db/changelog/changes/ | sort -V | tail` 很可能回 `v1.87.0` 而非 `v1.84.0`——**那不代表本任務的 `v1.85.0` 被佔用**。實作前請直接檢查 `v1.85.0-*.sql` 是否存在；本專案有 30+ 個 worktree 並行推進 main，版號會被其他分支先佔走。
+> **⚠ 複驗的判準是「該版號檔是否已存在」，不是「它是不是最大值」。** 本路線圖預留了 `v1.85.0`（本任務）與 `v1.87.0`（t266 基本面三表）；t277 的 `v1.86.0` 短期通知 changeset 已隨 t291 取代 t277 而取消。t266 是 t278 的前置、可能先落地，故 `ls backend/src/main/resources/db/changelog/changes/ | sort -V | tail` 可能回 `v1.87.0`——**那不代表本任務的 `v1.85.0` 被佔用**。實作前直接檢查 `v1.85.0-*.sql` 是否存在；若已被其他分支佔用，重新走 SDD 避讓，不得覆寫。
 
 ## 背景
 
@@ -192,7 +192,7 @@
 
   > **⚠ grep 的命中數多於同步點數。** 以 `TW_RULES_V9` 實測為例，`grep -ran` 回 **7 個命中、分布在 5 個檔案**，但只有上表 5 處該改。另外兩個是 `TradingRadarRuleEngine.java` 權重表上方的說明註解（歷史敘述，改不改皆可），以及 **`backend/src/main/resources/db/changelog/changes/v1.83.0-radar-notification-rule-version.sql` 的 `--comment`——絕對不可改**：Liquibase 的 checksum **包含註解**，改了會 `ValidationFailed`、讓 business-services 進入 crash loop。**做批次取代的 `sed` 必須排除 `db/changelog/`。**
 
-  > **實作順序警告**：`RULE_VERSION` 的字面值**取決於落地順序，本檔刻意不預設**。同時會各佔用一級版號的有：**t267**（已預約 `TW_RULES_V10`）、t274、t276、t277，以及本任務。設 `V(n)` 為實作當下的實際值，本任務升為 `V(n+1)`。**實作前必須先 `grep -ran "RULE_VERSION" backend/src` 讀取當下實際值，不得依本檔或任何 spec 的假設。**
+  > **實作順序警告**：`RULE_VERSION` 的字面值**取決於落地順序，本檔刻意不預設**。同時可能各佔用一級版號的有 t267、t274 與本任務；t276／t277 已由 t291 取代。設 `V(n)` 為實作當下的實際值，本任務升為 `V(n+1)`。**實作前必須先 `grep -ran "RULE_VERSION" backend/src` 讀取當下實際值，不得依本檔或任何 spec 的假設。**
 
 - [ ] 275.5.1 **通知基準會自動重建**：`trading_radar_notification_setting.rule_version` 與現行 `RULE_VERSION` 不符時視同未初始化（機制由 Task 264 的 `v1.83.0-radar-notification-rule-version.sql` 建立），升級後首輪評估一律只建基準不寄信。須實際確認生效，否則升級首輪會對每筆訂閱狂發假通知。
 

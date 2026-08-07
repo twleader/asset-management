@@ -1218,11 +1218,11 @@
 > | 問題陳述（本段第一條） | 診斷正確，Task 264 直接引用 | t264 |
 > | 長窗因子的前置：分割還原 | 分割缺陷屬實，且視窗內現已有一筆（2327，2025-08-25） | t265 |
 > | 窄幅標的的 KD 位置必須失效 | t264 的 264.2 明文「沿用 t223 既有結論」 | t264 |
-> | 基本面組四個子因子定義 | 定義本身正確，只有權重接法改為扁平 | t267 |
-> | PE 的兩種 `null` 語意與優先序、低分位方向性限制 | 同上 | t267 |
-> | ETF 不套用基本面組 | 同上（判定順序改依 Requirement 46 的三段） | t267 |
-> | 基本面組的生效時程須揭露 | 資料來源限制不變 | t266／t267 |
-> | 分數可比性的界線 | 缺值重分配機制不變 | t267 |
+> | 基本面組四個子因子定義 | 定義由 t292 承接，並修正累計財報先轉單季 | t292 |
+> | PE 的兩種 `null` 語意與優先序、低分位方向性限制 | 同上 | t292 |
+> | ETF 不套用基本面組 | 同上（判定順序依 Requirement 46 的三段） | t292 |
+> | 基本面組的生效時程須揭露 | 資料來源限制不變 | t292 |
+> | 分數可比性的界線 | 缺值重分配機制不變 | t292 |
 >
 > 標為 `[x]` 的**四條**（KD 拆分、短期動能組扁平權重、`TRIAL_BUY`、`TRIAL_BUY` 風險揭露）已落地。
 
@@ -1363,7 +1363,7 @@
 - [ ] **ETF 折溢價（使用者追加需求）**：新增 `etfPremiumPercentile`（該 ETF **自身歷史** 250 日折溢價分位，權重 `0.06`，與 `fxContribution` 同形）與**絕對硬否決** `etfPremiumPct >= 3.0%` 關閉 `buyGate`。資料走既有 `etf_nav_history.premium_discount_pct`（Requirement 34／Task 215）與 Redis `price:etfnav:{market}:{code}`，**非新資料源**。**必須用自身歷史分位而非絕對值做評分**（台灣債券 ETF 長期存在結構性溢價，統一絕對門檻會系統性誤判）；**絕對門檻與分位並存是刻意的**（分位管「相對自己貴不貴」，絕對值管「溢價 3% 就是為同一籃資產多付 3%」）。**禁止由市價與淨值反推**（t259 既有鐵則：股票型 ETF 淨值僅取小數 2 位，反推誤差達 0.07 個百分點）。折溢價**納入** `OVERBOUGHT`（`etfPremiumPct >= ETF_PREMIUM_EXPENSIVE` 為該狀態的一個「或」分支），但**不納入** `EXTREME_OVERBOUGHT`（溢價會在一天內收斂，而減碼是不可逆建議）。
 - [ ] **除權息與分割還原（使用者追加需求，Task 265）**：除權息還原**現況已符合**——雷達的 MA／KD／兩日確認／規則漲跌全走 `DistributionAdjustedPriceService` 還原序列，且還原涵蓋 `highPrice`／`lowPrice` 不只 `closePrice`。**缺陷在股票分割完全不還原**（`validEvent()` 只接受現金股利與股票股利，`stock_dividend_history` 亦無分割欄位），0050 於 2025-06-18 執行 1:4 分割（`188.65 → 47.57`）。視窗內若有分割會使 MA 與 52 週高低混用兩種價基、**方向相反且不拋任何例外**；目前未爆純屬 241 根視窗恰好落在該分割日之後的時間巧合。故 Task 265 為本修訂的前置。另新增**週線 MA5**，但**刻意不納入評分與買進閘門**——MA5 是 5 個交易日尺度，納入評分會與「數周至兩年」需求及本修訂降低短線權重的方向直接衝突。
 - [ ] **大盤不再獎勵追高**：`evaluateMarket()` 移除「單日漲逾 3% → `+3`」；單日跌逾 3% 的 `−10` 保留（只收緊不放寬的既有原則）。
-- [ ] **明確不在本修訂範圍**：(a) **Fed／台灣央行等利率資訊**——全庫查證 `grep -ran`：`federal_funds`／`policy_rate`／`treasury`／`TNX`／`yieldCurve`／`FOMC` 六個識別字在 `backend/src/main`、`external-materials-service/src/main`、`db` 三處零命中（既有「殖利率」字樣全為股息殖利率）；`央行` 有 5 筆命中但全部位於新聞爬蟲的關鍵字清單與註解（`EditorialNewsFilter.java:66,125,147`、`NewsFetchClient.java:25,50`），**未進入雷達評分鏈**。結論不變（雷達沒有利率資訊、需新資料源，另立任務），但不得寫成「央行零命中」；**前端不得宣稱雷達已納入利率或央行資訊**。(b) **美股／英股**——仍只評估台股。(c) **個股基本面**——需求成立且必須實作，但三張基本面表在本系統中完全不存在，且來源只給當期快照、MOPS 禁爬故歷史無法回補，須「先建抓取（Task 266）、再等累積、最後接線（Task 267，`TW_RULES_V10`）」三步走；與本修訂彼此獨立不得互相阻塞。
+- [ ] **明確不在本修訂範圍**：(a) **Fed／台灣央行等利率資訊**——全庫查證 `grep -ran`：`federal_funds`／`policy_rate`／`treasury`／`TNX`／`yieldCurve`／`FOMC` 六個識別字在 `backend/src/main`、`external-materials-service/src/main`、`db` 三處零命中（既有「殖利率」字樣全為股息殖利率）；`央行` 有 5 筆命中但全部位於新聞爬蟲的關鍵字清單與註解（`EditorialNewsFilter.java:66,125,147`、`NewsFetchClient.java:25,50`），**未進入雷達評分鏈**。結論不變（雷達沒有利率資訊、需新資料源，另立任務），但不得寫成「央行零命中」；**前端不得宣稱雷達已納入利率或央行資訊**。(b) **美股／英股**——仍只評估台股。(c) **個股基本面**——此時尚不屬 V9 範圍；其後已由 Task 292 合併資料管線、雙軌接線與產業發展因子，不再依 t266／t267 分段實作。
 - [ ] **文案約束**：**不得宣稱能預測隔日漲跌**。使用者需求原文為「事先看出隔日將大幅反彈／隔日下殺風險很高」，但本功能是規則式系統、無回測支撐的預測能力；所有文案只能陳述**當前位置與狀態**，不得出現「預期隔日反彈」「明日將下跌」等預測性語句。此約束與既有 `KD_OVERHEAT_K` 註解「不得於任何文案宣稱本門檻能降低回檔風險」同源。門檻數字亦不得寫進句子（沿用 `describeHeat()` 既有約束）。
 - [ ] **版本與不可比性**：`RULE_VERSION` 由 `TW_RULES_V8` 升為 `TW_RULES_V9`。**同步點共五處**（`grep -ran "TW_RULES_V8"`）：`TradingRadarRuleEngine.java:19`（本體）、`frontend/src/views/TradingRadarView.vue:28`、`:586`、`backend/.../dto/TradingRadarDto.java:9`（javadoc）、`backend/src/test/.../TradingRadarRuleEngineTest.java:488`（`ruleVersion_isV8` 須連方法名一併改）。另 `design.md:4001` 已於本次 spec 變更同步更正為 `TW_RULES_V8`，升版時一併改為 `TW_RULES_V9`。與 Task 228／232／263 三次「因子組成、權重與正規化方式完全相同」的升版不同，**本次新增因子、重配全部權重並改變動作映射結構，V9 與 V8 分數不可直接比較**，須揭露。**Requirement 44 的通知基準須全部重建**，升級後首輪評估一律只建基準不寄信。
 - [ ] **驗證**：`score ∈ [0,100]` 恆成立；權重總和以斷言釘住；`week52Position` 在創 52 週新高當日 clamp 後仍為 `+1`（專屬測試，平時測不到）；四條需求對應行為測試（高檔死叉→減碼／無死叉→維持、極端超賣→阻擋出場、崩壞股→照常出場、`RISK_OFF` 且非 stale→`TRIAL_BUY` 而 stale→不得）；窄幅 KD 失效路徑以生效權重總和斷言。**既有測試 `:388-398`（83 分 `ADD_CANDIDATE`）與 `:405-412`（85 分 `HOLD`）的期望值會因權重重配而改變，須依新權重重算後更新並列出新舊對照——不得為了讓舊測試通過而回頭改權重。**
@@ -1372,20 +1372,45 @@
 
 - [ ] **擴充技術指標欄位（純揭露，使用者追加需求 Task 281）**：`MarketSummary` 與 `StockDecision` 各新增一個巢狀欄位 `extendedIndicators`，帶走勢圖指標選單（Task 262）同一組 **14 個值**——`j9`／`k3d2`／`rsv`／`ema12`／`ema26`／`dif`／`macd`／`osc`／`rsi5`／`rsi10`／`bias10`／`bias20`／`b10b20`／`wr9`（皆 `BigDecimal`、2 位小數，暖機／視窗不足者為 `null`，**不得以 0 充數**）。**一律不參與評分**：不進 `StockInput`／`MarketInput`、不影響 `action`／`score`／`regime`／`buyGate`／`kdHeat`／`timingState`，理由同週線 MA5——它們是 5～26 日尺度的短線指標，納入評分與「數周至兩年」的需求方向相反。故 `RULE_VERSION` **不升版**，理由是「**規則集本身未變**」：本追加不新增／不修改任何 `StockInput`／`MarketInput` 因子、權重或動作門檻，同一份輸入產生逐位相同的 `action`／`score`／`regime`／`reasons`／`risks`。**刻意不援引 Task 249 那條「同一份輸入前後產生完全相同的輸出」**——本追加的輸出結構確有變化（DTO 多一個純揭露巢狀欄位、匯出檔多 15 欄、快照雜湊必然改變），不滿足該條件；既有判準原文為「使用者可觀察**行為**有實質變化」（見 `design.md` 中 Task 263 的 `RULE_VERSION` 升版段），不得被本 AC 收窄成「決策行為」後拿去當後續任務的先例。
 - [ ] **值一律長在 `FullIndicators` 上，不得另建第二條取值路徑（Task 281 硬約束）**：`TechnicalIndicatorService.FullIndicators` 新增一個巢狀 component `extended`，由**既有的 `computeFromSeries(series)` 對同一個 `series` 參數**一併算出。個股因此自動沿用 `RadarInputAssembler` 既有的還原權息序列（該檔與 `prepareTechnicalData()` 一行都不改）；大盤由 `computeAllForTaiex()` 把**同一次取得的**指數日線序列映射成 `StockPriceHistory` 後算出，`core` 的 8 個既有欄位一個位元都不變。
-  **不得**改由走勢圖那條原始價基的 `indicatorSeries()` 取值，**不得**為此另外查一次資料（分兩次取數會讓兩批值落在不同的 Redis tick 上），也**不得**為匯出單獨寫一支同義的取值方法——同一列出現兩種價基會讓 `k` 與 `j9` 互相矛盾（`j9 = 3D − 2K` 在該列不再成立），而兩份同義輸出會在 t276 把這些指標接進評分時分岔。此作法即 t276 的 276.1 所規劃的「擴充 `FullIndicators` 的輸出」，本追加先落地該步、但一個值都不進評分。
+  **不得**改由走勢圖那條原始價基的 `indicatorSeries()` 取值，**不得**為此另外查一次資料（分兩次取數會讓兩批值落在不同的 Redis tick 上），也**不得**為匯出單獨寫一支同義的取值方法——同一列出現兩種價基會讓 `k` 與 `j9` 互相矛盾（`j9 = 3D − 2K` 在該列不再成立），而兩份同義輸出會在後續接進評分時分岔。此作法即後續 Task 291 所沿用的「擴充 `FullIndicators` 單一路徑」；本追加落地該步時，一個值都不進評分。
   **連帶成本（刻意接受，但必須實測）**：受影響的不只 `computeAll()` 的低頻呼叫端（觀察清單、警示觸發落地、資產 Excel 匯出——**均不在即時價 tick 路徑上**），**最大宗是 `BacktestService`**：它經 `RadarInputAssembler.assemble()` 對每檔標的 × 每個交易日各呼叫一次 `computeFromSeries`，而 `/internal/backtest/rules` 已是分鐘級運算。故本追加**同時要求把 `computeFromSeries` 現有的兩趟 `kdSeriesAsc` 與新增的一趟合併為單趟**（`kdSeriesAsc` 是前綴相依的前向遞迴，`out[i]` 只依賴 `asc[0..i]`，故 `previousK`／`previousD` 取單趟結果的倒數第二筆與現況 **bit-identical**），淨效果為 3 趟降 1 趟、抵銷新增的 MACD／RSI／BIAS。回測端點的前後 wall time 須實測，倍率 > 1.2 即視為未達設計目標。**不得**為此加 `boolean withExtended` 之類的旗標把路徑分岔。
 - [ ] **視窗長度一律沿用各自路徑的既有值，不得為新指標延長也不得對齊（Task 281）**：MACD 與 RSI 是由序列最早一筆單向遞迴（無滑動視窗），起算點理論上有影響；但既有視窗已足夠收斂——序列長 241 時，EMA26 的 SMA seed 落在 asc index 25、遞迴 215 步，seed 殘留權重為 `(1−2/27)^215 ≈ 6.5×10⁻⁸`；Wilder RSI10 的 seed 落在 index 10、遞迴 230 步，殘留 `0.9^230 ≈ 3×10⁻¹¹`。兩者皆遠低於 2 位小數的捨入尺度（0.005）；序列長 240 時各少一步，結論不變。**兩條路徑的既有筆數本來就不同，不得為了「看起來一致」而改動任一邊**：
   - **個股**沿用 `TradingRadarService` 的 `priceHistoryRepo.findRecentN(code, market, 241)`，還原後由 `RadarInputAssembler` 取 `min(size, liveAdded ? 241 : 240)` 筆餵指標核心。
   - **大盤**沿用 `TechnicalIndicatorService.computeAllForTaiex()` 內既有的 `twseDailyRepo.findTopNByOrderByTradingDateDesc(**240**)`（盤中併入今日 live 合成列後為 241 根）。**不得為了湊成 241 而改掉這個 240**，理由有二：(a) 那條是 `computeAll("0000","台股")` 的路徑，**與雷達無關的三個消費端**（觀察清單 `0000` 的 KD 欄、Requirement 44 的通知門檻、走勢圖同源判準）都吃它，動它超出本任務範圍；(b) **數值上也毫無收益**——KD 對多一筆最舊列不敏感（`taiexKd` 的 seed 殘留為 `(2/3)^232 ≈ 1.4×10⁻⁴¹`，實測同一序列取 240 vs 241 的 `k`／`d` 在 double 精度上即 bit-identical），`taiexSimpleMa(desc, 240)` 只讀 `desc[0..239]`、多出的那筆根本不進 MA。（`TradingRadarService.buildMarket()` 另有一支 `twseRepo.findTopNByOrderByTradingDateDesc(241)`，那是餵 `ruleEngine.confirm()` 的 `closes`，與指標序列無關，同樣不動。）
   - 一律**不得**為新指標另開全史查詢：那會讓同一列的 MA／KD 與 MACD／RSI 吃到不同長度的序列，且在雷達逐檔迴圈中放大成 N 次全史掃描。
 - [ ] **與走勢圖 popup 的數字必然不同，屬預期行為（Task 281）**：雷達個股列雙擊開啟的走勢圖走**原始價基**（`indicatorSeries()`），本組值走**還原權息價基**；凡視窗內有配息／除權的個股，兩邊的 KD／MACD／RSI／BIAS／W%R 必然對不上。這是既有鐵則「禁止混用原始／還原價」的結果，**不得為了讓兩邊一致而改動任一方**，驗收也不得拿兩者互相比對。
-- [ ] **驗證**：單元測試至少覆蓋——(a) **「不參與評分」的機械釘子**：以反射掃 `TradingRadarRuleEngine.StockInput` 與 `MarketInput` 的 record component 名，斷言不含 `j9`／`k3d2`／`rsv`／`ema`／`dif`／`macd`／`osc`／`rsi`／`bias`／`b10b20`／`wr9`／`extended` 任一字樣（比照既有 `WeeklyMaTest.weeklyMaMustNotBeAnInputToTheRuleEngine` 的決策釘子寫法；失敗訊息須指向「要接進評分請走 t276 的 SDD 循環」）；(b) **同源自洽**：同一份 `FullIndicators` 內 `|j9 − (3d − 2k)| ≤ 0.03`、`|k3d2 − (3k − 2d)| ≤ 0.03`（個股與 `0000` 大盤各一組，大盤那組須另跑一次「已併入今日 live 合成列」的變體）；(c) **既有 8 個欄位零回歸**，含 `previousK`／`previousD` 在單趟合併後與現況 bit-identical；(d) **視窗收斂**：全史 vs 241 筆的 MACD／RSI 差值 ≤ 0.01。部署後另須實測回測端點的 wall time 倍率與 Redis 體積變化。
+- [ ] **驗證**：單元測試至少覆蓋——(a) **Task 281 當時「不參與評分」的機械釘子**：以反射掃 `TradingRadarRuleEngine.StockInput` 與 `MarketInput` 的 record component 名，斷言不含 `j9`／`k3d2`／`rsv`／`ema`／`dif`／`macd`／`osc`／`rsi`／`bias`／`b10b20`／`wr9`／`extended` 任一字樣；此釘子只適用於 Task 291 實作前，Task 291 依其新版 AC 反轉為斷言這些輸入確實接線；(b) **同源自洽**：同一份 `FullIndicators` 內 `|j9 − (3d − 2k)| ≤ 0.03`、`|k3d2 − (3k − 2d)| ≤ 0.03`（個股與 `0000` 大盤各一組，大盤那組須另跑一次「已併入今日 live 合成列」的變體）；(c) **既有 8 個欄位零回歸**，含 `previousK`／`previousD` 在單趟合併後與現況 bit-identical；(d) **視窗收斂**：全史 vs 241 筆的 MACD／RSI 差值 ≤ 0.01。部署後另須實測回測端點的 wall time 倍率與 Redis 體積變化。
 
 **Requirement 43 追加（Task 284）—— 個股決策收合列顯示週線 MA5：**
 
 - [ ] **推翻 Task 281「畫面不新增欄位」的範圍決定，但不增加表格欄數**：`TradingRadarView.vue` 的個股決策收合列已把三條均線放在同一欄；該欄由 `MA20／60／240` 改為 `MA5／20／60／240`，同一格依序顯示 `weeklyMa`／`monthlyMa`／`quarterlyMa`／`annualMa`。這不是新增第五個獨立表格欄，而是在既有均線摘要欄補上已存在的值，故不再以「表格過寬」隱藏 MA5。
 - [ ] **只用既有同源欄位，不新增計算或 API**：MA5 必須直接讀 `StockDecision.weeklyMa`；不得在前端由歷史價重算、不得新增 BFF／business 端點、不得改 DTO。值為 `null` 時沿用 `fmtNumber` 顯示 `—`，不得補 0。欄位最小寬度須隨四個數值加寬；四值與分隔線另包在 `.ma-summary` 容器，以 `display: inline-flex` ＋ `white-space: nowrap` 明確禁止內部換行。250px 只是欄寬基準，不得把它當成防換行機制。
 - [ ] **MA5 仍然只供揭露**：本追加不把 `weeklyMa` 接入 `StockInput`／`MarketInput`，不改分數、動作、買進閘門、`reasons`／`risks` 或 `RULE_VERSION`。頁首「依大盤、MA20／60／240、KD 與連續兩日確認產生規則式決策」描述的是規則依據，維持原文，避免誤稱 MA5 已參與決策。
+
+**Requirement 43 修訂（規則版本 `TW_RULES_V10`，Task 291）—— 一週至六個月的純獲利機會評分：**
+
+> **本修訂推翻四項舊前提：** (a) V9「數周至兩年」改為短期約 5 個交易日與中期 20／60／120 個交易日（約一至六個月）；(b) Task 281／284 的 MA5 與擴充指標「純揭露、不參與評分」改為兩軌皆以非零權重評分；(c) V9「極端超買＋KD 死叉即可減碼」改為高檔且三項獨立轉弱證據至少兩項；(d) V9「長期結構破壞者不受極端超賣保護」刪除。後兩項直接依 t273 十年回測：前者四個 horizon 相對基準皆為正（賣後仍上漲），後者被排除組同樣顯著反彈。
+
+- [ ] **標的與個人條件邊界**：標的只取使用者的台股持股與觀察清單聯集；`held` 只改動作文字，不進分數。不得讀取或推導成本價、資金、配置、個人目標或風險承受度，評分純看市場獲利機會；不保證獲利、不自動下單。
+- [ ] **雙軌獨立評分**：新增短期 `shortScore/shortAction/shortReasons/shortRisks`，既有 `score/action/reasons/risks` 保留並定義為中期。兩軌各自用獨立權重，不得用單一分數套兩組門檻；畫面收合列明示「短期（約一週）」「中期（1–6 月）」及分歧。
+- [ ] **全部指定指標皆進分數**：MA5／20／60／240、KD/J、MACD、RSI5/10、W%R9、BIAS10/20/B10−B20、個股相對量、大盤環境、完成日漲跌、匯率與 ETF 折溢價皆有非零權重；缺值不進生效權重、不得填 0。精確權重與正規化以自足任務 t291 為唯一實作契約。
+- [ ] **台股大盤量能與前一美股科技交易日**：大盤量能以決策時點已完成的最新日 `trade_volume`／`trade_value` 對前 20 個正值交易日中位數計算；美股只取 session close（16:00 America/New_York，含 DST）不晚於顯式 `decisionInstant` 的 IXIC／SOX 最新共同完成日，合成 `0.4×IXIC+0.6×SOX`。production 與回測皆傳 as-of instant，不得在 resolver 內取 today；日期錯位、樣本不足或超過 5 個日曆日一律 unavailable，不得補 0。
+- [ ] **債券 ETF 匯率資料品質**：新增的 `MarketDataService.isTwTradingDayKnown(LocalDate)` 以 `Optional<Boolean>` 區分「交易／休市／日曆不可得」；`fxTargetDate` 只可由此權威假日日曆入口求得，empty 即 fail closed，不得以平日或歷史缺列猜測。五年分位只含決策時點已完成、買賣價皆正且不相等的精確日期列；`buy=sell` 的 Yahoo fallback 排除。目標完成日無精確有效列、樣本少於 600 或資料過期時 `fxPercentile=null`，不得沿用最後值；回應揭露 `fxAsOfDate`，回測只能使用訊號日當時可見資料。
+- [ ] **台美公開財經資訊**：回應與快照帶 `news_headline` 近 72 小時 `category=news` 的 TW／US 各最多三筆，畫面分組顯示標題、來源、時間與原文連結。新聞文字無可信結構化方向，不做關鍵字情緒打分；可量化的大盤量能與美股科技才進分數。頁面不得觸發行情／新聞／匯率抓取、crawler 或 AI／LLM；只有求 `fxTargetDate` 可沿用既有 fail-closed 台股假日日曆 proxy／快取。
+- [ ] **不追高殺低與獲利了結**：過熱、單日漲幅達 5%、完成日仍下跌或缺值、匯率第 90 百分位以上、ETF 溢價 3% 以上或 stale 均關閉一般 BUY／ADD；任何低接都必須已止跌。極端超賣一律阻擋減碼／出場，不再以 long-term-broken 排除。獲利了結必須在極端高檔，且 `KD 死叉／OSC<0／下跌且相對量>=1.2` 至少兩項同時成立；只有 KD 死叉不得減碼。
+- [ ] **相容性、匯出與版本**：快照、Excel／JSON 與 UI 顯示兩軌、大盤量能、美股科技、公開資訊與個股相對量；舊欄位維持中期語意，舊快照缺欄可讀。既有通知只追蹤中期 action，UI 須明示，不新增通知欄或 changeset。`RULE_VERSION` 升為 `TW_RULES_V10`，不得修改歷史 Liquibase changeset。
+- [ ] **驗證**：兩軌權重各為 1.00、分數在 0–100、持有與否不改分數、每組因子有方向測試、分割只調整成交量且配息不調整、台股與美股日期嚴格對齊、新聞不改分數、只有多重轉弱才獲利了結、極端超賣不殺低、舊快照可讀；回測以 5／20／60／120 日輸出對同標的同期間基準差額。
+
+**Requirement 43／46 修訂（規則版本 `TW_RULES_V11`，Task 292）—— 個股特別納入財報、基本面與產業發展：**
+
+- [ ] **個股與 ETF 邊界**：只有台股個股納入 EPS 年增率、近似 ROE、3 個月月營收 YoY、PE 自身歷史分位與全市場產業營收 YoY；ETF 不套用個股財報或產業因子，缺值權重依既有 `Accumulator` 重分配，不得補 0。ETF 判定依序為 `etf_nav_history` 資料存在、台股 `00` 開頭；不得新增硬編 `security_type` 業務分類規避專案的設定資料鐵則，基本面沒資料不等於 ETF。
+- [ ] **`public_info_*` 優先與逐因子 fallback**：雷達先讀 `news_headline`（它是 `public_info_<日期>.json/.xlsx` 的同一 PostgreSQL 事實來源，不直接解析匯出檔），以股票代號／完整名稱與產業名稱找近 120 日的財報、公司營運及產業發展公開資訊，揭露標題、摘要、來源、發布時間與原文連結。新聞文字不得被硬解析成 EPS／ROE／PE，也不得用關鍵字情緒猜方向；因此某結構化因子沒有可信值時，external-materials-service 才按 **TWSE／TPEx 交易所 → Yahoo → 玩股網 → FinMind** 的固定順位補該因子。來源只在其能提供可追溯結構化資料時採用；玩股網若只有新聞，即只補公開資訊證據並視數值仍缺，再往 FinMind。每筆 observation 只含單一 provider family，保存 provider、來源日／首次觀測時間與全部實際 source URLs；EPS、近似 ROE、營收、PE、產業五個衍生因子各自揭露 provider/sourceUrls。低順位不得覆寫高順位同期間的有效值，不得跨 provider 拼接同一衍生因子的分子、分母；全數缺漏維持 `null`，不得補 0。
+- [ ] **本地請求鏈與來源合規**：外部來源只由 external-materials-service 的排程／開機自癒／管理者手動入口抓取並落地 PostgreSQL；交易所仍採官方整批 OpenAPI，上市／上櫃、一般業與全部金融產業分表都必須覆蓋。Yahoo／玩股網／FinMind 僅為目標個股缺項的 fail-soft fallback，不得擴成全市場逐檔掃描；既有 MOPS 禁抓邊界不變。雷達 GET、頁面重新整理、SSE、快照匯出、通知與回測皆只讀本地資料，不直接抓取、不呼叫 AI／LLM。
+- [ ] **財報計算、觀測版本與防前視**：財報來源為年度累計值，Q2／Q3／Q4 必須先減同年前季轉為單季，才可組 TTM，禁止直接加總四筆累計值。四表 append observation version、不覆寫舊值；同值重跑 no-op、修正值 append 並綁自己的 `observed_at`。估值必須已完成當日 14:00；財報、月營收與產業彙總必須在官方出表日 18:00 後才可用。production／回測共用顯式 `decisionInstant` 的 as-of resolver，且 `source_available_at`、`observed_at` 都不得晚於它；已入庫的未來列與日後修正版皆不得帶回訊號日。
+- [ ] **評分與特別注意**：V11 十九因子的短期／中期獨立權重依自足任務 t292，合計各為 1.00；個股的基本面＋產業權重為短期 20%、中期 36%。可用基本面中至少兩項明顯惡化，或處於虧損且另一項轉弱時，兩軌都關閉 BUY／ADD／TRIAL_BUY；但不因財報直接強迫賣出，避免財報公布後殺低。正基本面也不得繞過止跌、過熱、匯率、折溢價或 stale 門檻。
+- [ ] **產業發展不以新聞臆測**：產業公開資訊先依上一條規則揭露；量化產業因子仍以同輪上市／上櫃全市場月營收合計對去年同期計算，至少三家公司才有效。不得用使用者清單當產業母體、不得由新聞關鍵字猜產業漲跌。API／畫面揭露產業名、YoY、公司數、資料年月與數值來源。
+- [ ] **積累進度、來源與相容性**：API／畫面／快照／Excel／JSON 顯示基本面生效 `n/4`、數值、資料日、**逐因子 provider/sourceUrls**、fallback 狀態，以及個股／產業 `public_info_*` 證據；歷史不足時明示權重已重分配，不得宣稱已完整評估。PE 只有來源明確標示虧損才可計 `-1`，欄位缺漏仍是 null。近似 ROE 明示為 TTM 淨利除最新期末權益，非正式 ROE。舊快照缺欄可讀；通知仍只追蹤中期 action，V11 首輪只重建 baseline 不寄信。
+- [ ] **驗證**：至少覆蓋 `public_info_*` 同源查詢與精確標的比對、固定 provider 順位／逐因子 fallback／高順位保護、多期因子全部 observation 同 provider family、官方兩站 parser、六種產業財報、累計轉單季、as-of 防前視、虧損 PE 與缺列語意、產業全市場彙總、ETF 不套用、兩軌權重與分數邊界、惡化只擋買不強迫賣、舊快照、通知中期邊界與 Docker 實資料驗證。
 
 ---
 
@@ -1470,18 +1495,18 @@
 
 **Acceptance Criteria:**
 
-- [ ] **資料來源與合規界線**：只使用 TWSE 開放 API（`https://openapi.twse.com.tw/`，上市）與 TPEx 開放 API（`https://www.tpex.org.tw/openapi/`，上櫃）。兩者皆免 API key、無需註冊。合規依據：TWSE／TPEx 使用條款雖禁止以爬蟲程式擷取本站資料，但明文豁免「已授權『政府資料開放平臺』提供公眾使用之資料」，`/openapi/` 正是該授權通道；政府資料開放授權條款允許程式化取用與衍生著作，義務為標示出處。**嚴禁抓取公開資訊觀測站 MOPS**（`mopsov.twse.com.tw/robots.txt` 為 `User-Agent: * / Disallow: /`，僅開放 bingbot），亦不得抓取 TWSE／TPEx 的 HTML 頁面。TWSE／TPEx openapi 本身即為 MOPS 資料的官方 JSON 轉發（TPEx 端點前綴即為 `mopsfin_`），無需另尋來源。程式碼須於 client 類別 Javadoc 標示資料來源與授權依據。
+- [ ] **資料來源與合規界線**〔**本條「只使用」已由 Requirement 43／46 的 Task 292 修訂為 `public_info_*` 優先、交易所後缺項才按 Yahoo／玩股網／FinMind fallback；交易所仍是結構化數值第一順位，MOPS 禁抓不變**〕：只使用 TWSE 開放 API（`https://openapi.twse.com.tw/`，上市）與 TPEx 開放 API（`https://www.tpex.org.tw/openapi/`，上櫃）。兩者皆免 API key、無需註冊。合規依據：TWSE／TPEx 使用條款雖禁止以爬蟲程式擷取本站資料，但明文豁免「已授權『政府資料開放平臺』提供公眾使用之資料」，`/openapi/` 正是該授權通道；政府資料開放授權條款允許程式化取用與衍生著作，義務為標示出處。**嚴禁抓取公開資訊觀測站 MOPS**（`mopsov.twse.com.tw/robots.txt` 為 `User-Agent: * / Disallow: /`，僅開放 bingbot），亦不得抓取 TWSE／TPEx 的 HTML 頁面。TWSE／TPEx openapi 本身即為 MOPS 資料的官方 JSON 轉發（TPEx 端點前綴即為 `mopsfin_`），無需另尋來源。程式碼須於 client 類別 Javadoc 標示資料來源與授權依據。
 - [ ] **快照式來源必須自行落地累積（本 Requirement 的核心價值）**：實測確認 openapi 全部端點只回「當期單一快照」，且 `?date=` 參數**會被直接忽略**（傳 `date=11412` 仍回 `11506` 的資料）。故每日抓取的快照必須逐日寫入自有資料表建立時間序列；**每延後一天上線，就永久少一天且無法補回**（歷史月營收的唯一來源在 MOPS，而 MOPS 全站禁止程式化存取）。此為本 Requirement 優先於評分邏輯（Requirement 43 修訂）實作的理由。
 - [ ] **整批端點，不逐檔輪詢**：`BWIBBU_ALL` 單次回傳全市場 1079 筆、`t187ap06_L_ci` 1043 筆、`t187ap05_L` 1082 筆、TPEx 對應端點 884–891 筆。抓取一律採整批單次 GET 後於本地比對落地，**不得**沿用既有 FinMind 路徑的「逐檔查詢＋`Thread.sleep(300)` 節流」模式（該模式為逐檔 API 而設，用在整批端點上會產生上千次無謂請求）。實測連續 8 次請求無節流跡象，但仍須設定 connect／read timeout 並於失敗時退避重試。
-- [ ] **三張資料表，完整正規化**：新增 (a) `stock_valuation_daily`——`stock_code`／`market`／`trading_date` 為業務唯一鍵，欄位 `pe_ratio`、`pb_ratio`、`dividend_yield_pct`（皆 `numeric(12,4)` 且 **nullable**）；(b) `stock_financial_quarter`——唯一鍵 `stock_code`／`market`／`fiscal_year`／`fiscal_quarter`，欄位 `eps`（`numeric(12,4)`）、`net_income_parent`、`equity_parent`（皆 `bigint`，單位千元，與來源一致）；(c) `stock_monthly_revenue`——唯一鍵 `stock_code`／`market`／`revenue_year`／`revenue_month`，欄位 `revenue`（`bigint`，千元）、`revenue_yoy_pct`（`numeric(12,4)`）。三表皆為**全域公開行情資料**，比照 `stock_price_history` **不帶 `owner_user_id`、不套 `@Filter`**，並各帶 `updated_at TIMESTAMP NOT NULL DEFAULT now()`（稽核用，不參與計算；不另設 `fetched_date`）。寫入採 upsert（同一鍵重複抓取須為冪等）。**`market` 欄位一律填 `'台股'`**，與 `stock_price_history`／`stock` 對齊（該欄實際值域只有 `台股`／`美股`／`英股` 三種）；**不得填 `'上市'`／`'上櫃'`**——這是跨表 join key，填錯會使下游 `WHERE market='台股'` 靜默回零筆、基本面因子永遠為 `null` 而不報錯。上市／上櫃的區別不入此欄，需要時另加 `listing_board`。
+- [ ] **三張資料表，完整正規化**〔**Task 292 保留三表欄位語意並新增產業彙總表，但推翻「期間唯一鍵＋覆寫」：四表改存 append observation versions，因修正版若覆寫舊值會造成回測前視；來源與 availability/observed provenance 亦由 Task 292 補齊**〕：新增 (a) `stock_valuation_daily`——`stock_code`／`market`／`trading_date` 為業務唯一鍵，欄位 `pe_ratio`、`pb_ratio`、`dividend_yield_pct`（皆 `numeric(12,4)` 且 **nullable**）；(b) `stock_financial_quarter`——唯一鍵 `stock_code`／`market`／`fiscal_year`／`fiscal_quarter`，欄位 `eps`（`numeric(12,4)`）、`net_income_parent`、`equity_parent`（皆 `bigint`，單位千元，與來源一致）；(c) `stock_monthly_revenue`——唯一鍵 `stock_code`／`market`／`revenue_year`／`revenue_month`，欄位 `revenue`（`bigint`，千元）、`revenue_yoy_pct`（`numeric(12,4)`）。三表皆為**全域公開行情資料**，比照 `stock_price_history` **不帶 `owner_user_id`、不套 `@Filter`**，並各帶 `updated_at TIMESTAMP NOT NULL DEFAULT now()`（稽核用，不參與計算；不另設 `fetched_date`）。寫入採 upsert（同一鍵重複抓取須為冪等）。**`market` 欄位一律填 `'台股'`**，與 `stock_price_history`／`stock` 對齊（該欄實際值域只有 `台股`／`美股`／`英股` 三種）；**不得填 `'上市'`／`'上櫃'`**——這是跨表 join key，填錯會使下游 `WHERE market='台股'` 靜默回零筆、基本面因子永遠為 `null` 而不報錯。上市／上櫃的區別不入此欄，需要時另加 `listing_board`。
 - [ ] **禁止儲存衍生值**：**不得**新增 `roe` 欄位——ROE 可由 `net_income_parent ÷ equity_parent` 計算得出，儲存即違反本專案「禁止存入可從其他欄位計算得出的衍生值」的正規化規範。同理不得儲存「近四季 EPS 合計」「營收成長率均值」等聚合結果。ROE 與各項聚合一律於評分時計算。TWSE／TPEx **未提供任何現成 ROE 欄位**（兩站 swagger 搜尋「報酬率」皆無命中），此為已確認事實，不需再尋找來源。
 - [ ] **ROE 計算口徑的失真必須揭露**：以 `淨利 ÷ 期末權益` 計算（來源未提供平均權益），且單季數值年化（×4）會放大旺季效應。使用此值的一方（Requirement 43 修訂的基本面組）須於理由文案標示為「近四季合計 ÷ 最新期末權益」的近似值，不得呈現為經審計的正式 ROE。
 - [ ] **產業別分表必須完整涵蓋**：TWSE 的損益表與資產負債表依產業切分為 `_ci`（一般業）、`_fh`（金控）、`_ins`（保險）、`_bd`（證券）、`_mim`（其他）、`_basi` 等多支端點，只讀 `_ci` 會整段漏掉金融股（如 2881、2885、2891——皆在現有 `stock_price_history` 中有 2439 筆完整歷史，屬使用者實際持股）。抓取須涵蓋全部產業別端點；各端點欄位結構不同，須個別對應。**上櫃 TPEx 的 key 命名與上市不一致**（`mopsfin_t187ap06_O_ci` 用 `SecuritiesCompanyCode`／`Year`／`Season`，`mopsfin_t187ap07_O_ci` 混用 `SecuritiesCompanyCode` 與中文 `年度`／`季別`，`mopsfin_t187ap05_O` 全中文 `公司代號`，TWSE 對應端點則全中文），須建立明確的 key 映射表，不得假設兩市場欄位同名。
-- [ ] **空值與虧損的語意區分**：`BWIBBU_ALL` 實測 1079 筆中 247 筆 `PEratio` 為**空字串**，代表該公司虧損（無正 EPS 可計算本益比），**不是**資料缺漏。落地時空字串一律寫入 `NULL`，**嚴禁以 `0` 代替**——`pe_ratio = 0` 會在下游被解讀為「本益比極低＝極便宜」而把虧損公司評為最優。同理 `eps`、`revenue_yoy_pct` 等欄位的缺值一律 `NULL`。此語意區分（虧損 vs 未抓到）須於資料表欄位註解明載。
-- [ ] **虧損公司仍須寫入一列（下游區分兩種 `null` 的前提）**：當來源回傳該股票但 `PEratio` 為空字串時，**仍須寫入 `stock_valuation_daily` 一列**（`pe_ratio` 為 `NULL`，其餘欄位照常），不得因「沒有 PE」而整列略過。理由：Requirement 43 修訂規定「有列且 `pe_ratio IS NULL`＝虧損，計為 `−1`」與「當日無列＝未抓到，回 `null`」是兩種不同語意且行為相反；若虧損公司整列不寫，下游無從區分，虧損會被誤判為資料缺失而免於扣分。
+- [ ] **空值與虧損的語意區分**〔**Task 292 新增 nullable `pe_loss_flag`：只有來源明確空 PE 才為 true，provider 不支援／欄位缺漏為 null；不再以「有列且 PE null」推定虧損**〕：`BWIBBU_ALL` 實測 1079 筆中 247 筆 `PEratio` 為**空字串**，代表該公司虧損（無正 EPS 可計算本益比），**不是**資料缺漏。落地時空字串一律寫入 `NULL`，**嚴禁以 `0` 代替**——`pe_ratio = 0` 會在下游被解讀為「本益比極低＝極便宜」而把虧損公司評為最優。同理 `eps`、`revenue_yoy_pct` 等欄位的缺值一律 `NULL`。此語意區分（虧損 vs 未抓到）須於資料表欄位註解明載。
+- [ ] **虧損公司仍須寫入一列（下游區分兩種 `null` 的前提）**〔**Task 292 後以 `pe_loss_flag=true` 作唯一可信虧損判準**〕：當來源回傳該股票但 `PEratio` 為空字串時，**仍須寫入 `stock_valuation_daily` 一列**（`pe_ratio` 為 `NULL`，其餘欄位照常），不得因「沒有 PE」而整列略過。理由：Requirement 43 修訂規定「有列且 `pe_ratio IS NULL`＝虧損，計為 `−1`」與「當日無列＝未抓到，回 `null`」是兩種不同語意且行為相反；若虧損公司整列不寫，下游無從區分，虧損會被誤判為資料缺失而免於扣分。
 - [ ] **`revenue_yoy_pct` 為刻意保留的 denormalization（例外說明）**：`stock_monthly_revenue` 同時存 `revenue` 與 `revenue_yoy_pct`，後者在自建歷史累積滿 13 個月後可由 `revenue(Y,M) ÷ revenue(Y−1,M) − 1` 重建，形式上屬衍生值。**刻意保留**，理由：本表的歷史自上線起累積，滿 13 個月前**沒有去年同月基期**，屆時 `revenue_yoy_pct` 是來源直給且**無法由本表重建**的獨立事實；捨棄它等同讓月營收 YoY 子因子首年完全不可用。比照 `realized_gain.broker`（記錄成交當下券商名稱）的既有 denormalization 例外慣例。此例外須於欄位註解與 changeset `--comment` 記載，避免日後維護者依「禁止衍生值」規則誤刪。
-- [ ] **ETF 判定採資料驅動，跟隨專案既有決策方向**：判定順序為 (1) `stock.security_type` override（`STOCK`／`ETF`，nullable）；(2) **資料驅動**——該標的在 ETF 淨值資料中有紀錄即為 ETF；(3) fallback 規則——台股 `00` 開頭為 ETF。**不得以 `US_ETF_WHITELIST` 白名單作為判定依據。** 理由：該白名單有**兩份完全相同的複本**（`MarketDataService.java:378` 與 `MarketDataFetchService.java:371`，分屬 backend 與 external-materials-service 兩個 deployable），皆把 `AVGO`（Broadcom，個股）誤列為 ETF、皆漏 `SGOV`；且專案既有決策已三度明文記載棄用它——`MarketDataFetchService.java:641`「本方法即為『這檔是不是 ETF』的資料驅動判定，不需要維護 ETF 白名單（既有 `isEtf()` 白名單誤把個股 AVGO 列為 ETF、又漏掉使用者實際持有的 SGOV，刻意不複用）」，`EtfNavPoller.java:29` 與 `ExcelExportService.java:795` 同旨。本 Requirement 跟隨此既有方向，不做方向反轉。既有的兩份白名單**不在本 Requirement 修正範圍**（它們服務於其他既有路徑），但新程式碼一律不得引用。
-- [ ] **`security_type` 為技術判定 override，刻意不建設定頁（例外聲明）**：本專案規範「所有業務分類必須存入資料庫並提供 `/api/settings/*` 管理端點與前端設定頁面」（如 `asset_class` 具備設定表＋seed＋`GET/POST/PUT/PATCH /api/settings/asset-classes`＋`PUT /api/settings/securities/asset-class`＋`AssetClassSettingsView.vue`＋專屬 BFF 的完整五件套）。`security_type` **刻意不比照辦理**，理由：它不是使用者可自訂的業務分類（值域固定為 `STOCK`／`ETF` 兩者，不會新增第三種），而是「這檔證券在市場上是不是 ETF」的客觀技術事實，主要由資料驅動判定得出；此欄位僅作為資料驅動誤判時的逃生口，預期使用頻率極低。故本 Requirement 只建欄位、不建設定表、不建管理端點、不建前端頁面。**若日後發現需要頻繁人工修正，即代表資料驅動判定不可靠，屆時應優先修正判定邏輯而非補設定頁。** 修正路徑（DBA 手動 `UPDATE`）須記載於欄位註解。
+- [ ] **ETF 判定採資料驅動，跟隨專案既有決策方向**〔**Task 292 移除第 (1) 項 `security_type`，只保留 ETF 淨值資料與 `00` fallback，避免違反禁止硬編業務分類鐵則**〕：判定順序為 (1) `stock.security_type` override（`STOCK`／`ETF`，nullable）；(2) **資料驅動**——該標的在 ETF 淨值資料中有紀錄即為 ETF；(3) fallback 規則——台股 `00` 開頭為 ETF。**不得以 `US_ETF_WHITELIST` 白名單作為判定依據。** 理由：該白名單有**兩份完全相同的複本**（`MarketDataService.java:378` 與 `MarketDataFetchService.java:371`，分屬 backend 與 external-materials-service 兩個 deployable），皆把 `AVGO`（Broadcom，個股）誤列為 ETF、皆漏 `SGOV`；且專案既有決策已三度明文記載棄用它——`MarketDataFetchService.java:641`「本方法即為『這檔是不是 ETF』的資料驅動判定，不需要維護 ETF 白名單（既有 `isEtf()` 白名單誤把個股 AVGO 列為 ETF、又漏掉使用者實際持有的 SGOV，刻意不複用）」，`EtfNavPoller.java:29` 與 `ExcelExportService.java:795` 同旨。本 Requirement 跟隨此既有方向，不做方向反轉。既有的兩份白名單**不在本 Requirement 修正範圍**（它們服務於其他既有路徑），但新程式碼一律不得引用。
+- [ ] **`security_type` 為技術判定 override，刻意不建設定頁（例外聲明）**〔**⛔ 已由 Task 292 推翻：本欄位不建立，後文僅保留被推翻的決策記錄**〕：本專案規範「所有業務分類必須存入資料庫並提供 `/api/settings/*` 管理端點與前端設定頁面」（如 `asset_class` 具備設定表＋seed＋`GET/POST/PUT/PATCH /api/settings/asset-classes`＋`PUT /api/settings/securities/asset-class`＋`AssetClassSettingsView.vue`＋專屬 BFF 的完整五件套）。`security_type` **刻意不比照辦理**，理由：它不是使用者可自訂的業務分類（值域固定為 `STOCK`／`ETF` 兩者，不會新增第三種），而是「這檔證券在市場上是不是 ETF」的客觀技術事實，主要由資料驅動判定得出；此欄位僅作為資料驅動誤判時的逃生口，預期使用頻率極低。故本 Requirement 只建欄位、不建設定表、不建管理端點、不建前端頁面。**若日後發現需要頻繁人工修正，即代表資料驅動判定不可靠，屆時應優先修正判定邏輯而非補設定頁。** 修正路徑（DBA 手動 `UPDATE`）須記載於欄位註解。
 - [ ] **ETF 無基本面資料為預期行為**：實測 ETF 在全部基本面資料集為「整筆不存在」而非空值（`BWIBBU_ALL`／`t187ap05_L`／`t187ap06_L_ci` 中 `00` 開頭筆數皆為 0）。抓取端不得因 ETF 查無資料而記為失敗或重試，落地後三張表本就不會有 ETF 列。
 - [ ] **排程、自癒與手動觸發（沿用既有慣例）**：於 `external-materials-service` 新增抓取，比照 `DividendPersister` 的骨架（低頻資料，**不經 Redis**——Redis 在本專案專用於即時價格路徑，基本面資料直接寫 PostgreSQL）。**執行時點須讀 DB 而非硬編字面時間**：沿用既有的 `crawler_schedule` 機制（`CrawlerScheduleQuery.enabledTimes(crawlerKey)`，`NewsPoller` 為參考實作——`@Scheduled(cron = "0 * * * * *")` 只當每分鐘節拍，實際觸發時點比對 DB 設定），並於 changeset 冪等 seed 一筆 `crawler_key = 'fundamental'`；表缺列或 DB 例外時 fallback 預設時間並記 WARN。**不得以「本專案排程時點一律硬編」為由略過**——該服務除 `crawler_schedule` 外另有 `commodity_export_schedule`、`exchange_rate_export_schedule`、`export_schedule_setting`、`index_export_schedule`、`realized_gain_export_schedule`、`trading_calendar_export_schedule` 共 7 張排程設定表，DB 可設定機制是既有慣例。估值資料每日抓取一次、財報與月營收每日檢查是否有新期別（公布日不固定，每日檢查最單純且不漏）。須提供 `@EventListener(ApplicationReadyEvent.class)` 開機自癒補跑當日錯過的抓取，`AtomicBoolean` 防重入（比照 `NewsPoller`；`DividendPersister` 未做此項），逐項 try/catch 使單一端點失敗不中斷整批並於結束時 log 成功／失敗計數。另須於 `InternalPriceController`（`/internal`）新增手動觸發端點供部署後驗證與失敗補救，比照既有 `/internal/dividend/sync` 慣例。
 - [ ] **排程列表頁需登錄**：新增的 `@Scheduled` 須同步登錄至「公開資訊 → 排程列表」（`SchedulePublicBffController` 的靜態 `JOBS` 清單）。該清單為手動維護，漏登即造成該頁與實際排程漂移。
@@ -1495,7 +1520,7 @@
   > | 短 User-Agent `Mozilla/5.0`、`BWIBBU_d` 欄位 schema 在 2017／2018 年間變更過 | **✅ 仍然有效**，已複寫進 Requirement 61 |
   >
   〕：TWSE 舊版 `rwd/zh/afterTrading/BWIBBU_d?date=YYYYMMDD` 可回溯至 2005-09-02、TPEx 舊 PHP 端點可回溯至民國 100 年，能一次補齊歷史 PE／PB／殖利率（使 Requirement 43 修訂的「PE 自身歷史分位」子因子立即可用，而非等待 250 個交易日累積）。但這兩個端點**並非官方指定的開放資料通道**，不在使用條款的開放資料豁免範圍內，屬合規灰色地帶。故本 Requirement **預設不實作歷史回補**；PE 分位子因子在樣本不足期間回 `null` 並由權重重分配吸收。若日後決定實作，須另立 Requirement 並明確記錄合規評估結論、限制為低頻單次執行、使用短 User-Agent `Mozilla/5.0`（長 Chrome UA 會被 WAF 擋）、並附上顯名聲明。另注意 `BWIBBU_d` 的欄位 schema 在 2017／2018 年間變更過（2015 年僅 5 欄、2018 年後才有收盤價與財報年季），parser 須依日期分支。
-- [ ] **不得使用 FinMind 作為主來源**：FinMind 資料經實測與官方完全吻合（2330 於 2026-07-17 的 PER 30.79、EPS 22.08、月營收 442,679,969 千元逐項一致），但其免費層強制逐檔查詢（不帶 `data_id` 回 400），全市場掃一輪需 7 小時以上，且其免責條款明列「不得將即時資料直接呈現於 web、App 等對外介面」「不包含對外再散布」。既有價格路徑已使用 FinMind 屬既成事實，本 Requirement 不擴大其使用範圍。
+- [ ] **不得使用 FinMind 作為主來源**〔**Task 292 保留本條主來源與全市場禁令，但允許在 `public_info_*`、交易所、Yahoo、玩股網皆無結構化值後，僅對使用者持股／觀察代號作最後順位缺項 fallback**〕：FinMind 資料經實測與官方完全吻合（2330 於 2026-07-17 的 PER 30.79、EPS 22.08、月營收 442,679,969 千元逐項一致），但其免費層強制逐檔查詢（不帶 `data_id` 回 400），全市場掃一輪需 7 小時以上，且其免責條款明列「不得將即時資料直接呈現於 web、App 等對外介面」「不包含對外再散布」。既有價格路徑已使用 FinMind 屬既成事實，本 Requirement 不擴大其使用範圍。
 - [ ] **驗證**：測試至少覆蓋——整批 JSON 解析（含上市／上櫃兩套 key 命名）、`PEratio` 空字串落地為 `NULL` 而非 `0`、同一鍵重複抓取的 upsert 冪等性、金融股產業別端點（`_fh`／`_ins`）確實被涵蓋且 2881／2885／2891 有資料落地、ETF 查無資料不記為失敗、`security_type` override 優先於規則判定、`AVGO` 修正後判定為個股而 `SGOV` 判定為 ETF。部署後須以手動端點觸發一次完整抓取，並實查三張表確認筆數與內容（非僅確認 HTTP 200）。
 
 ---
@@ -2015,7 +2040,7 @@ rclone config reconnect GDriveOutput: --drive-auth-url "https://accounts.google.
   2. **述詞可組合**：允許以「基礎條件 ∧ 附加條件」的形式臨時組出述詞（例如「`EXTREME_OVERSOLD` ∧ `score < 40`」「站上均線 ∧ `volumeRatio > k`」），不必為每個新問題改程式。
   3. **輸入契約須明文定義**：請求 body 的 schema（標的子集、日期區間、horizon 清單、門檻候選值、述詞組合）與輸出的 CSV 欄位須寫在本 Requirement 內，**下游任務要據此撰寫自己的驗收指令**。
 
-  > **不做這一項的後果**：t273 做完後，t274／t275／t276／t277 四份會同時卡住——它們的門檻決策全都依賴「掃描」而非「單點量測」，屆時得回頭改 t273，等於重做。
+  > **不做這一項的後果**：t273 做完後，t291／t274／t275 會同時卡住——它們的門檻決策全都依賴「掃描」而非「單點量測」，屆時得回頭改 t273，等於重做。t276／t277 已由 t291 取代。
 
 - [ ] **四個持有期，對應使用者的兩種決策尺度**：每條述詞在 `+5`／`+20`／`+60`／`+240` 個**交易日**（非日曆日）後各計算一次前瞻報酬。`+5` 對應短線（使用者明示「5 個交易日後可獲利 5%，這也是不錯的建議」），`+60`／`+240` 對應中長線（「持有期數周至兩年」）。四個 horizon 一律全部輸出，不得只輸出其中一部分——後續 Requirement 要靠「同一條規則在不同 horizon 的表現差異」決定該規則屬於哪一軌。
 - [ ] **前瞻報酬的定義與計算基準**：訊號日 `t` 的 `h` 日前瞻報酬 ＝ `adjClose[t+h] / adjClose[t] − 1`，其中 `adjClose` 為**還原權息且還原分割後的收盤價序列**——與 `TradingRadarService` 餵給引擎的序列同一套（`DistributionAdjustedPriceService` 加上 Task 265 的分割還原）。**不得用原始收盤價**：現金配息與股票股利會讓除息日產生假跌幅，月配息債券 ETF 在 240 日視窗內尤其嚴重，用原始價會系統性低估其報酬。`t+h` 超出序列尾端時該樣本在該 horizon **不計入**（記為 `insufficientForward`），不得以最後一日充數，也不得因此整個訊號日被丟棄（它在較短的 horizon 仍有效）。
@@ -2153,7 +2178,7 @@ rclone config reconnect GDriveOutput: --drive-auth-url "https://accounts.google.
   - **不得**在任何文案宣稱本項做完後保護對所有標的全面生效。
   - KD 側的死區是否要處理（以及如何處理），**不在本 Requirement 範圍**——`narrowKdBand` 的存在有其獨立且已實證的理由（見下一條），貿然放寬會讓債券 ETF 大量誤發訊號。若要處理須另立 Requirement，並以 Requirement 56 的框架先量測。
 - [ ] **`kdBandWidthPercent` 的窄幅失效判定維持不變**：現行「9 日高低帶寬度 < 2% 時 KD 全面失效」（`KD_BAND_MIN_PERCENT`）是**同一個問題的另一個面向**，且已有實測依據（00719B 近 60 個交易日的 9 日高低帶平均寬度僅 1.011%，其 `K=90.76` 實質只代表「比 9 日低點高 0.37 元」）。本 Requirement **不改動該機制**，兩者並存：波動度正規化處理「乖離的尺度」，窄幅失效處理「KD 在雜訊上飽和」。**不得**以「已有正規化」為由移除窄幅保護——KD 的飽和是值域被壓縮，不是尺度問題，正規化不會修好它。
-- [ ] **`RULE_VERSION` 升版與通知基準重建**：`RULE_VERSION` **升版一級**。**版本字串一律以實作當下 `TradingRadarRuleEngine.RULE_VERSION` 的實際值 +1 為準，任何 spec 文件不得預先指定字面值**——`spec/tasks/t267_fundamental_factor_wiring.md` 已預約 `TW_RULES_V10`，本 Requirement 若也寫死 V10 就會撞號，而 `TradingRadarNotificationService` 是以**字串相等**判斷通知基準是否有效（版本名相同即視同已初始化），撞號會讓基準**不重建**、升級首輪對每筆訂閱寄出大量假通知。
+- [ ] **`RULE_VERSION` 升版與通知基準重建**：一般任務一律先讀實作當下 `TradingRadarRuleEngine.RULE_VERSION`，再升一級，不得依歷史 spec 猜測。Task 291 已在開始實作前確認 active baseline 為 `TW_RULES_V9`，故該次升版明定為 `TW_RULES_V10`；Task 292 再以已實作的 V10 為基礎升為 `TW_RULES_V11`。其後 t274／t275 仍須讀當時實際值再 +1。`TradingRadarNotificationService` 以字串相等判斷基準是否有效，不同規則不得共用版本名，否則升級首輪可能寄出假通知。
 
   **同步點共五處**（以 `grep -ran "<當下版本字串>"` 取得，`-a` 不可省略）：`TradingRadarRuleEngine.java` 本體常數、`frontend/src/views/TradingRadarView.vue` 的 `radar` ref 初始值與顯示 fallback（兩處）、`backend/.../dto/TradingRadarDto.java` 的 Javadoc、`backend/src/test/.../TradingRadarRuleEngineTest.java` 的斷言（連同其測試方法名一併改）。**grep 另會命中 `TradingRadarRuleEngine.java` 的權重表註解（可不改）與 `db/changelog/changes/v1.83.0-*.sql` 的 `--comment`（絕不可改——Liquibase checksum 含註解，改了會 `ValidationFailed` 並讓 business-services 進入 crash loop）。**
 
@@ -2237,6 +2262,8 @@ rclone config reconnect GDriveOutput: --drive-auth-url "https://accounts.google.
 
 ### Requirement 59: 把已落地但未使用的技術指標與成交量納入交易雷達評分
 
+> **⛔ 下方原始 User Story 與 Acceptance Criteria 已由本 Requirement 尾端的 Task 291 修訂取代，不得依原文實作。** 原文保留作為資料缺口、分割假爆量與公式同源的歷史診斷。
+
 **User Story:** 作為投資人，我希望交易雷達用上系統已經算出來的全部技術指標與成交量，而不是只看均線與 KD 兩項；尤其是量價背離這種比 KD 死叉更早出現的訊號。
 
 > **本 Requirement 的缺口是「已有資料未使用」，不是「缺資料」。** `TechnicalIndicatorService`（Task 261／262）已對每個交易日算出並輸出：`EMA12`／`EMA26`／`DIF`／`MACD`／`OSC`、`RSI5`／`RSI10`、`BIAS10`／`BIAS20`／`B10−B20`、`W%R9`、`J9`、`K3D2`、`RSV`、`MA5`。而 `TradingRadarRuleEngine.StockInput` 接收的**技術指標**只有 `MA20`／`MA60`／`MA240`／`K`／`D`／`previousK`／`previousD`（另有三條均線的 `Confirmation`，以及 `ma60BiasPercent`／`ma240BiasPercent`／`week52Position`／`kdBandWidthPercent` 等由價格導出的衍生量，與 `fxPercentile`／`etfPremiumPct`／`etfPremiumPercentile` 等非技術面欄位）——**上述指標一個都沒進入評分鏈**。另 `stock_price_history.volume` 欄位有完整資料（實測 154,834 筆中 **null 為 0 筆**，僅 229 筆為 0），而 14 個因子中沒有任何一個用到成交量。
@@ -2264,6 +2291,8 @@ rclone config reconnect GDriveOutput: --drive-auth-url "https://accounts.google.
 
 ### Requirement 60: 交易雷達的短線與中長線雙軌建議
 
+> **⛔ 下方原始 User Story 與 Acceptance Criteria 已由本 Requirement 尾端的 Task 291 修訂取代，不得依原文實作。** 尤其「中長線至兩年」「由個人資金安排仲裁」「短期通知須擴充 DB」三項已失效。
+
 **User Story:** 作為投資人，我希望交易雷達同時給我短線與中長線兩種建議——「5 個交易日後可獲利 5%」對我是有價值的建議，「未來一到兩年的趨勢品質」也是；這兩件事的答案可能不同，我要能同時看到，而不是被迫只拿到其中一種。
 
 > **本 Requirement 推翻一個既有的刻意決定。** `TechnicalIndicatorService.FullIndicators.weeklyMa` 的 Javadoc 現載：「**刻意不進入 `TradingRadarRuleEngine.StockInput`、不參與評分與買進閘門**——5 個交易日的尺度與『獲利期間數周至兩年』的需求直接衝突，也與 Task 264 降低短線權重的方向相反。它只供畫面顯示與查證。」該決定在「雷達只輸出單一持有期的建議」這個前提下是正確的。本 Requirement 改變的正是那個前提：**雷達改為雙軌輸出，短線軌有自己的因子與門檻，不再與中長線軌爭奪同一組權重**。故 `MA5` 等短線指標得以進入短線軌，而中長線軌維持 `TW_RULES_V9` 以來「中期為最大權重組」的方向不變。
@@ -2282,6 +2311,16 @@ rclone config reconnect GDriveOutput: --drive-auth-url "https://accounts.google.
 - [ ] **通知與匯出須能區分兩軌**：Requirement 44 的每檔狀態 Email 通知、以及 Requirement 48 的雷達快照落地與 Excel 匯出，皆須能區分兩軌的動作變化，不得只追蹤其中一軌而讓另一軌的變化靜默。`RULE_VERSION` 升版一級後通知基準全部重建（由 `trading_radar_notification_setting.rule_version` 機制承接）。
 - [ ] **API 與畫面的相容性**：`/api/trading-radar` 與 `/api/bff/trading-radar` 新增雙軌欄位；既有的單軌欄位語意須明確定義為「中長線軌」並保留，避免既有消費端（通知、匯出、快照）靜默改變語意。前端須在收合列即可看出兩軌是否分歧。
 - [ ] **驗證**：測試至少覆蓋——(a) 構造一組「短線超買、長期結構完好」的輸入，斷言兩軌動作確實不同（若實作退化為單一分數切兩刀，此測試必失敗）；(b) 中長線軌對固定輸入的分數與動作回歸不變；(c) 兩軌衝突時 API 同時回傳兩者且不合成；(d) 短線軌的極端態覆寫在兩個方向皆成立；(e) 通知鏈能偵測到「僅短線軌變化」的情形。部署後於實機確認頁面可同時看到兩軌且持有期標示清楚。
+
+**Requirement 59／60 修訂（Task 291，取代 t276／t277）：**
+
+- [ ] **兩軌持有期收斂**：短期固定約 5 個交易日；中期以 20／60／120 個交易日檢視，最長約 6 個月，不再延伸至兩年。既有單軌欄位保留為中期，新短期欄位並列；兩軌衝突只揭露、不合成，但此處的原因是不同 horizon，不是要讀取個人資金安排。
+- [ ] **強制納入而非候選評估**：依使用者最新明示，MA5／20／60／240、KD/J、MACD、RSI、W%R、乖離率與成交量全部納入兩軌評分；代數相依的原始欄位在同一因子組內平均，不得重複灌權重。個股量使用最新完成日 ÷ 前 20 個正成交量日中位數，缺值重分配。
+- [ ] **股數事件量價同基準**：事件以 `shareGrowth=postShares/preShares` 定義，逐列 `historicalShareScale=cumulative/final`，成交量以 `sourceVolume/historicalShareScale` 還原；分割與股票股利會改變股份數量，現金股利不得調整 volume。測試必須同時守住「現金配息不改量」「股票股利 1 元使事件前量 ×1.1」與「1:4 分割前 scale=0.25、量 ×4」。
+- [ ] **市場與公開資訊**：台股大盤完成日量比、前一 IXIC／SOX 共同交易日報酬進市場分數；TW／US 近 72 小時公開財經標題進 API／快照／畫面但不做文字情緒分數。行情、指數、匯率與新聞只讀本地資料；唯一跨服務例外是既有台股假日日曆 proxy／快取，零行情抓取、零 crawler、零 AI。
+- [ ] **純獲利、不追高殺低**：評分不納入成本、資金、配置與個人理財需求；過熱關閉買進、止跌才低接、極端超賣阻擋賣出。高檔獲利了結至少要有 KD／MACD／量價三類中的兩類轉弱確認，修正 t273 已量出「KD 死叉單獨減碼會過早」的缺陷。
+- [ ] **通知邊界改為中期-only**：短期 action 進畫面、快照與匯出，但不新增通知 DB 欄位；既有通知設定只比較中期 action 並在 UI 清楚標示。此條明文推翻原 Requirement 60「兩軌都必須通知」的擴張要求。
+- [ ] **權重、欄位、排序、閘門、缺值與驗證的精確契約**：以自足任務 `spec/tasks/t291_trading_radar_profit_horizon.md` 為唯一實作來源；t276／t277 已作廢。
 
 ---
 

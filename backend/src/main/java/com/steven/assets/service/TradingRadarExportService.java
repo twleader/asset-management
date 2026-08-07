@@ -19,7 +19,7 @@ import java.util.Arrays;
 /**
  * 交易雷達結果快照的 Excel 區間匯出（Requirement 48）。
  *
- * <p>讀 {@link TradingRadarSnapshotStore} 的區間快照 → POI 三分頁（快照索引／大盤總覽／個股決策）→ byte[]。
+ * <p>讀 {@link TradingRadarSnapshotStore} 的區間快照 → 四分頁（快照索引／大盤總覽／個股決策／台美公開資訊）→ byte[]。
  * 所有日期時間欄以 ISO 文字寫入，避免開啟端依時區偏移一天；部分快照被逐出時於「快照索引」彙總列揭露缺漏。</p>
  */
 @Slf4j
@@ -31,7 +31,7 @@ public class TradingRadarExportService {
 
     private final TradingRadarSnapshotStore store;
     private final CurrentUserContext currentUserContext;
-    // 雙格式匯出（Requirement 55 / Task 271）：三分頁改建 ExportDoc，xlsx 由 renderer 產出
+    // 雙格式匯出：四分頁共用同一份 ExportDoc，xlsx／JSON 不得各自組裝而漂移。
     private final com.steven.assets.service.export.ExcelDocRenderer excelDocRenderer;
 
     /**
@@ -78,19 +78,20 @@ public class TradingRadarExportService {
     /**
      * 背景排程用：以**顯式 ownerId** 產檔（Requirement 48 追加 / Task 231）。
      * 背景無 request context，取不到 request-scoped 的 CurrentUserContext，故 owner 必須由呼叫端傳入。
-     * 與手動匯出共用同一支 {@link #build}，確保兩種途徑內容一致。
+     * 與手動匯出共用同一支 doc builder，確保兩種途徑內容一致。
      */
     public byte[] exportForOwner(long ownerId, long fromEpoch, long toEpoch) throws IOException {
         return excelDocRenderer.render(radarDoc(ownerId, fromEpoch, toEpoch));
     }
 
-    /** 共用產檔：三分頁 doc。手動匯出與背景排程共用同一支，確保兩種途徑內容一致。 */
+    /** 共用產檔：四分頁 doc。手動匯出與背景排程共用同一支。 */
     private ExportDoc radarDoc(TradingRadarSnapshotStore.SnapshotRange range,
                                String fromLabel, String toLabel) {
         return new ExportDoc("交易雷達", List.of(
                 indexSheet(range, fromLabel, toLabel),
                 marketSheet(range.snapshots()),
-                stockSheet(range.snapshots())));
+                stockSheet(range.snapshots()),
+                publicInformationSheet(range.snapshots())));
     }
 
     private static String isoLocal(long epochMillis) {
@@ -136,14 +137,16 @@ public class TradingRadarExportService {
         // intraday / liveUpdatedAt 為 Task 228（TW_RULES_V6，大盤盤中即時判斷）新增的欄位：
         // intraday=true 代表該次 regime 由 Redis 即時大盤點位計算而非已入庫完成日 K；asOfDate 語意不變仍為完成日 K。
         // 本分頁沒有 section 標題列，第 0 列就是表頭列——不得新增任何列。
-        // Task 281：週線MA5 插在 MA20 之前、14 個擴充指標插在 D 之後；行情狀態共 36 欄。
+        // V11：週線 MA5、完整擴充指標、大盤量能與前一美股科技共同完成日一併匯出。
         // headers／formats／rows 三者長度與順序必須一致——ExportDoc.Table 只在 runtime 才擲長度不符。
         List<String> headers = new ArrayList<>(List.of("快照時間", "regime", "中文", "分數", "資料完整", "stale", "盤中即時",
                 "即時更新時間", "完成日K", "最新點位", "漲跌%", "行情狀態",
                 "週線MA5",
                 "MA20", "MA60", "MA240", "季線確認", "年線確認", "K", "D"));
         headers.addAll(EXT_HEADERS);
-        headers.addAll(List.of("支持訊號", "風險提醒"));
+        headers.addAll(List.of("大盤量比", "大盤成交金額比", "量能完成日",
+                "NASDAQ漲跌%", "SOX漲跌%", "美股科技綜合%", "美股科技完成日", "美股科技可用",
+                "支持訊號", "風險提醒"));
 
         List<List<Object>> rows = new ArrayList<>();
         for (JsonNode s : snapshots) {
@@ -158,7 +161,11 @@ public class TradingRadarExportService {
                     txt(m, "quarterlyConfirmation"), txt(m, "annualConfirmation"),
                     num(m, "kValue"), num(m, "dValue")));
             row.addAll(extCells(m));
-            row.addAll(Arrays.asList(listVal(m, "reasons"), listVal(m, "risks")));
+            row.addAll(Arrays.asList(
+                    num(m, "marketVolumeRatio"), num(m, "marketTurnoverRatio"), txt(m, "marketVolumeAsOfDate"),
+                    num(m, "nasdaqChangePercent"), num(m, "soxChangePercent"),
+                    num(m, "usTechCompositePercent"), txt(m, "usTechAsOfDate"), boolVal(m, "usTechAvailable"),
+                    listVal(m, "reasons"), listVal(m, "risks")));
             rows.add(row);
         }
 
@@ -186,6 +193,10 @@ public class TradingRadarExportService {
                 ExportDoc.Format.NUM2       // 19 D
         ));
         for (int i = 0; i < EXT_HEADERS.size(); i++) formats.add(ExportDoc.Format.NUM2);
+        formats.addAll(List.of(
+                ExportDoc.Format.NUM2, ExportDoc.Format.NUM2, ExportDoc.Format.TEXT,
+                ExportDoc.Format.NUM2, ExportDoc.Format.NUM2, ExportDoc.Format.NUM2,
+                ExportDoc.Format.TEXT, ExportDoc.Format.BOOL_ZH));
         formats.add(ExportDoc.Format.LIST_LINES);
         formats.add(ExportDoc.Format.LIST_LINES);
 
@@ -196,16 +207,19 @@ public class TradingRadarExportService {
 
     private ExportDoc.Sheet stockSheet(List<JsonNode> snapshots) {
         // 同上：沒有 section 標題列，第 0 列即表頭列。
-        // Task 281 擴充指標加上行情狀態後共 51 欄。
+        // V11 同時保留短／中期欄位，並追加逐因子可稽核的基本面／產業來源。
         List<String> headers = new ArrayList<>(List.of("快照時間", "代碼", "名稱", "市場", "資產類別", "持有", "還原權息",
-                "動作", "動作中文", "分數", "逆勢狀態", "逆勢中文", "現價", "漲跌%", "行情狀態", "行情更新", "完成日K",
+                "短期動作", "短期動作中文", "短期分數",
+                "中期動作", "中期動作中文", "中期分數", "短中期分歧", "獲利了結確認",
+                "逆勢狀態", "逆勢中文", "現價", "漲跌%", "行情狀態", "行情更新", "完成日K",
                 "週線MA5",
                 "MA20", "MA60", "MA240", "月線確認", "季線確認", "年線確認", "K", "D"));
         headers.addAll(EXT_HEADERS);
-        headers.addAll(List.of("匯率分位", "底層幣別", "資料完整",
-                // Task 264：二維決策的時機維度與其兩個輸入；ETF 折溢價（非 ETF 留白）
-                "時機", "季線乖離%", "52週位置", "折溢價%",
-                "支持訊號", "風險提醒", "逆勢條件", "逆勢風險"));
+        headers.addAll(List.of("個股量比", "匯率分位", "匯率完成日", "底層幣別", "資料完整",
+                "時機", "季線乖離%", "52週位置", "折溢價%"));
+        headers.addAll(FUNDAMENTAL_HEADERS);
+        headers.addAll(List.of(
+                "短期支持訊號", "短期風險提醒", "中期支持訊號", "中期風險提醒", "逆勢條件", "逆勢風險"));
 
         List<List<Object>> rows = new ArrayList<>();
         for (JsonNode s : snapshots) {
@@ -216,7 +230,9 @@ public class TradingRadarExportService {
                 List<Object> row = new ArrayList<>(Arrays.asList(
                         gen, txt(d, "stockCode"), txt(d, "stockName"), txt(d, "market"),
                         txt(d, "assetClass"), boolVal(d, "held"), boolVal(d, "distributionAdjusted"),
+                        txt(d, "shortAction"), txt(d, "shortActionLabel"), num(d, "shortScore"),
                         txt(d, "action"), txt(d, "actionLabel"), num(d, "score"),
+                        boolVal(d, "horizonConflict"), boolVal(d, "profitTakingConfirmed"),
                         txt(d, "counterTrendState"), txt(d, "counterTrendLabel"),
                         num(d, "price"), num(d, "changePercent"), txt(d, "quoteStatus"),
                         txt(d, "priceUpdatedAt"), txt(d, "asOfDate"),
@@ -226,18 +242,19 @@ public class TradingRadarExportService {
                         txt(d, "annualConfirmation"), num(d, "kValue"), num(d, "dValue")));
                 row.addAll(extCells(d));
                 row.addAll(Arrays.asList(
-                        num(d, "fxPercentile"), txt(d, "underlyingCurrency"), boolVal(d, "dataComplete"),
-                        // Task 264 的四欄（index 42–45）；缺欄位時 txt()→""、num()→null，與 main 的 cell() 一致
+                        num(d, "volumeRatio"), num(d, "fxPercentile"), txt(d, "fxAsOfDate"),
+                        txt(d, "underlyingCurrency"), boolVal(d, "dataComplete"),
                         txt(d, "timingLabel"), num(d, "ma60BiasPercent"),
-                        num(d, "week52Position"), num(d, "etfPremiumPct"),
+                        num(d, "week52Position"), num(d, "etfPremiumPct")));
+                row.addAll(fundamentalCells(d.path("fundamental")));
+                row.addAll(Arrays.asList(
+                        listVal(d, "shortReasons"), listVal(d, "shortRisks"),
                         listVal(d, "reasons"), listVal(d, "risks"),
                         listVal(d, "counterTrendReasons"), listVal(d, "counterTrendRisks")));
                 rows.add(row);
             }
         }
-        // 逐列對齊上面的 headers（51 欄）。**headers／此清單／rows 三者長度與順序必須一致**——
-        // Task 264 插欄時這一串落在 git 衝突標記之外、被三方合併靜默保留成舊的 31 欄版，
-        // `ExportDoc.Table` 的 compact constructor 才在 runtime 擲長度不符。拆成多行就是為了讓下次看得見。
+        // headers／formats／rows 三者長度與順序必須一致；ExportDoc 會在建構時 fail fast。
         List<ExportDoc.Format> formats = new ArrayList<>(List.of(
                 ExportDoc.Format.TEXT,      // 0  快照時間
                 ExportDoc.Format.TEXT,      // 1  代碼
@@ -246,41 +263,49 @@ public class TradingRadarExportService {
                 ExportDoc.Format.TEXT,      // 4  資產類別
                 ExportDoc.Format.BOOL_ZH,   // 5  持有
                 ExportDoc.Format.BOOL_ZH,   // 6  還原權息
-                ExportDoc.Format.TEXT,      // 7  動作
-                ExportDoc.Format.TEXT,      // 8  動作中文
-                ExportDoc.Format.NUM2,      // 9  分數
-                ExportDoc.Format.TEXT,      // 10 逆勢狀態
-                ExportDoc.Format.TEXT,      // 11 逆勢中文
-                ExportDoc.Format.NUM2,      // 12 現價
-                ExportDoc.Format.NUM2,      // 13 漲跌%
-                ExportDoc.Format.TEXT,      // 14 行情狀態
-                ExportDoc.Format.TEXT,      // 15 行情更新
-                ExportDoc.Format.TEXT,      // 16 完成日K
-                ExportDoc.Format.NUM2,      // 17 週線MA5      ← Task 281
-                ExportDoc.Format.NUM2,      // 18 MA20
-                ExportDoc.Format.NUM2,      // 19 MA60
-                ExportDoc.Format.NUM2,      // 20 MA240
-                ExportDoc.Format.TEXT,      // 21 月線確認
-                ExportDoc.Format.TEXT,      // 22 季線確認
-                ExportDoc.Format.TEXT,      // 23 年線確認
-                ExportDoc.Format.NUM2,      // 24 K
-                ExportDoc.Format.NUM2       // 25 D
+                ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.NUM2, // 短期
+                ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.NUM2, // 中期
+                ExportDoc.Format.BOOL_ZH, ExportDoc.Format.BOOL_ZH,
+                ExportDoc.Format.TEXT, ExportDoc.Format.TEXT,
+                ExportDoc.Format.NUM2, ExportDoc.Format.NUM2, ExportDoc.Format.TEXT,
+                ExportDoc.Format.TEXT, ExportDoc.Format.TEXT,
+                ExportDoc.Format.NUM2, ExportDoc.Format.NUM2, ExportDoc.Format.NUM2, ExportDoc.Format.NUM2,
+                ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT,
+                ExportDoc.Format.NUM2, ExportDoc.Format.NUM2
         ));
-        for (int i = 0; i < EXT_HEADERS.size(); i++) formats.add(ExportDoc.Format.NUM2); // 25–38 Task 281 擴充指標
+        for (int i = 0; i < EXT_HEADERS.size(); i++) formats.add(ExportDoc.Format.NUM2);
         formats.addAll(List.of(
-                ExportDoc.Format.NUM2,      // 39 匯率分位
-                ExportDoc.Format.TEXT,      // 40 底層幣別
-                ExportDoc.Format.BOOL_ZH,   // 41 資料完整
-                ExportDoc.Format.TEXT,      // 42 時機          ┐ Task 264
-                ExportDoc.Format.NUM2,      // 43 季線乖離%      │
-                ExportDoc.Format.NUM2,      // 44 52週位置      │
-                ExportDoc.Format.NUM2,      // 45 折溢價%       ┘
-                ExportDoc.Format.LIST_LINES,// 46 支持訊號
-                ExportDoc.Format.LIST_LINES,// 47 風險提醒
-                ExportDoc.Format.LIST_LINES,// 48 逆勢條件
-                ExportDoc.Format.LIST_LINES // 49 逆勢風險
+                ExportDoc.Format.NUM2, ExportDoc.Format.NUM2, ExportDoc.Format.TEXT,
+                ExportDoc.Format.TEXT, ExportDoc.Format.BOOL_ZH,
+                ExportDoc.Format.TEXT, ExportDoc.Format.NUM2, ExportDoc.Format.NUM2, ExportDoc.Format.NUM2
+        ));
+        formats.addAll(FUNDAMENTAL_FORMATS);
+        formats.addAll(List.of(
+                ExportDoc.Format.LIST_LINES, ExportDoc.Format.LIST_LINES,
+                ExportDoc.Format.LIST_LINES, ExportDoc.Format.LIST_LINES,
+                ExportDoc.Format.LIST_LINES, ExportDoc.Format.LIST_LINES
         ));
         return new ExportDoc.Sheet("個股決策",
+                List.of(new ExportDoc.Table(null, null, headers, true, false, false, formats, rows)),
+                headers.size());
+    }
+
+    private ExportDoc.Sheet publicInformationSheet(List<JsonNode> snapshots) {
+        List<String> headers = List.of("快照時間", "地區", "發布時間", "來源", "標題", "摘要", "網址");
+        List<List<Object>> rows = new ArrayList<>();
+        for (JsonNode snapshot : snapshots) {
+            JsonNode items = snapshot.path("publicInformation");
+            if (!items.isArray()) continue;
+            for (JsonNode item : items) {
+                rows.add(List.of(
+                        txt(snapshot, "generatedAt"), txt(item, "region"), txt(item, "publishedAt"),
+                        txt(item, "source"), txt(item, "title"), txt(item, "summary"), txt(item, "url")));
+            }
+        }
+        List<ExportDoc.Format> formats = List.of(
+                ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT,
+                ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT);
+        return new ExportDoc.Sheet("台美公開資訊",
                 List.of(new ExportDoc.Table(null, null, headers, true, false, false, formats, rows)),
                 headers.size());
     }
@@ -316,10 +341,56 @@ public class TradingRadarExportService {
             "J9", "K3D2", "RSV", "EMA12", "EMA26", "DIF", "MACD", "OSC",
             "RSI5", "RSI10", "BIAS10", "BIAS20", "BIAS10-BIAS20", "W%R9");
 
+    /** V11 個股基本面／產業欄；每個衍生因子都單獨保留 provider、URL 與 as-of。 */
+    private static final List<String> FUNDAMENTAL_HEADERS = List.of(
+            "基本面適用", "基本面覆蓋(0-4)",
+            "EPS TTM年增%", "EPS來源", "EPS來源網址", "EPS資料時點",
+            "近似ROE%", "ROE來源", "ROE來源網址", "ROE資料時點",
+            "近3月營收年增%", "營收來源", "營收來源網址", "營收資料時點",
+            "PE自身分位", "PE可信虧損", "估值來源", "估值來源網址", "估值資料時點",
+            "產業", "產業營收年增%", "產業公司數", "產業資料年月", "產業來源", "產業來源網址", "產業資料時點",
+            "public_info_*個股證據", "public_info_*產業證據");
+
+    private static final List<ExportDoc.Format> FUNDAMENTAL_FORMATS = List.of(
+            ExportDoc.Format.BOOL_ZH, ExportDoc.Format.NUM2,
+            ExportDoc.Format.NUM2, ExportDoc.Format.TEXT, ExportDoc.Format.LIST_LINES, ExportDoc.Format.TEXT,
+            ExportDoc.Format.NUM2, ExportDoc.Format.TEXT, ExportDoc.Format.LIST_LINES, ExportDoc.Format.TEXT,
+            ExportDoc.Format.NUM2, ExportDoc.Format.TEXT, ExportDoc.Format.LIST_LINES, ExportDoc.Format.TEXT,
+            ExportDoc.Format.NUM2, ExportDoc.Format.BOOL_ZH, ExportDoc.Format.TEXT, ExportDoc.Format.LIST_LINES, ExportDoc.Format.TEXT,
+            ExportDoc.Format.TEXT, ExportDoc.Format.NUM2, ExportDoc.Format.NUM2, ExportDoc.Format.TEXT,
+            ExportDoc.Format.TEXT, ExportDoc.Format.LIST_LINES, ExportDoc.Format.TEXT,
+            ExportDoc.Format.LIST_LINES, ExportDoc.Format.LIST_LINES);
+
     /** 依 {@link #EXT_KEYS} 順序取出 14 個值；缺欄位為 null。 */
     private static List<Object> extCells(JsonNode n) {
         List<Object> out = new ArrayList<>(EXT_KEYS.size());
         for (String k : EXT_KEYS) out.add(num(n, "extendedIndicators", k));
+        return out;
+    }
+
+    private static List<Object> fundamentalCells(JsonNode f) {
+        return Arrays.asList(
+                boolVal(f, "applicable"), num(f, "coverage"),
+                num(f, "epsYoyPct"), txt(f, "epsProvider"), listVal(f, "epsSourceUrls"), txt(f, "epsAsOf"),
+                num(f, "approximateRoePct"), txt(f, "roeProvider"), listVal(f, "roeSourceUrls"), txt(f, "roeAsOf"),
+                num(f, "revenueYoy3mPct"), txt(f, "revenueProvider"), listVal(f, "revenueSourceUrls"), txt(f, "revenueAsOf"),
+                num(f, "pePercentile"), boolVal(f, "peLossFlag"), txt(f, "valuationProvider"),
+                listVal(f, "valuationSourceUrls"), txt(f, "valuationAsOf"),
+                txt(f, "industryName"), num(f, "industryRevenueYoyPct"), num(f, "industryCompanyCount"),
+                txt(f, "industryPeriod"), txt(f, "industryProvider"), listVal(f, "industrySourceUrls"),
+                txt(f, "industryAsOf"), evidenceVal(f, "companyPublicInformation"),
+                evidenceVal(f, "industryPublicInformation"));
+    }
+
+    /** 公開資訊保留原文與網址，不從標題產生任何數值或情緒欄。 */
+    private static List<String> evidenceVal(JsonNode parent, String field) {
+        JsonNode items = parent.path(field);
+        if (!items.isArray()) return null;
+        List<String> out = new ArrayList<>();
+        for (JsonNode item : items) {
+            out.add(String.join(" ｜ ", txt(item, "publishedAt"), txt(item, "source"),
+                    txt(item, "title"), txt(item, "url")));
+        }
         return out;
     }
 

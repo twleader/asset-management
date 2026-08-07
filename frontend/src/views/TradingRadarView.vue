@@ -3,7 +3,7 @@
     <div class="header-row">
       <div>
         <div class="page-heading">今日交易雷達</div>
-        <div class="page-sub">依大盤、MA20／60／240、KD 與連續兩日確認產生規則式決策；不呼叫 AI API</div>
+        <div class="page-sub">短期約一週、中期一至六個月；綜合技術面、量能、美股科技、匯率、個股基本面與產業發展</div>
       </div>
       <div class="header-actions">
         <el-button :icon="Download" @click="openExport">匯出 Excel</el-button>
@@ -17,7 +17,7 @@
       show-icon
       class="local-rule-alert"
       title="純本地規則運算"
-      description="判斷全由本地規則產生，不會送出 Claude、OpenAI 或其他 AI API 請求。按下「重新整理」會先回補一次台股行情再重算；頁面自動更新與其餘操作只讀取既有 PostgreSQL 與 Redis 資料；排程產檔則會另外觸發一次台股行情回補。每次結果快照會寫入 Redis 供匯出。"
+      description="判斷全由本地規則產生，不會送出 Claude、OpenAI 或其他 AI API 請求。按下「重新整理」會先回補一次台股行情再重算；頁面評分只讀取已入庫的 PostgreSQL／Redis 資料。個股質性證據先取 public_info_*，結構化財報與估值由背景排程依交易所→Yahoo→玩股網→FinMind 補齊，不在本頁請求時即時抓外網。"
     />
 
     <el-card shadow="never" class="market-card" :class="marketClass">
@@ -25,7 +25,7 @@
         <div class="card-head">
           <div>
             <span class="section-title">台股大盤風險</span>
-            <el-tag size="small" effect="plain" type="info" class="rule-tag">{{ radar.ruleVersion || 'TW_RULES_V9' }}</el-tag>
+            <el-tag size="small" effect="plain" type="info" class="rule-tag">{{ radar.ruleVersion || 'TW_RULES_V11' }}</el-tag>
           </div>
           <div class="as-of-group">
             <span class="as-of">完成日 K：{{ market.asOfDate || '資料不足' }}</span>
@@ -65,6 +65,10 @@
           <div class="metric"><span class="metric-label">季線 MA60</span><strong>{{ fmtNumber(market.quarterlyMa, 2) }}</strong><small>{{ confirmationLabel(market.quarterlyConfirmation) }}</small></div>
           <div class="metric"><span class="metric-label">年線 MA240</span><strong>{{ fmtNumber(market.annualMa, 2) }}</strong><small>{{ confirmationLabel(market.annualConfirmation) }}</small></div>
           <div class="metric"><span class="metric-label">KD</span><strong>K {{ fmtNumber(market.kValue, 1) }} / D {{ fmtNumber(market.dValue, 1) }}</strong></div>
+          <div class="metric"><span class="metric-label">大盤完成日量比</span><strong>{{ fmtRatio(market.marketVolumeRatio) }}</strong><small>{{ market.marketVolumeAsOfDate || '資料不足' }}</small></div>
+          <div class="metric"><span class="metric-label">成交金額比</span><strong>{{ fmtRatio(market.marketTurnoverRatio) }}</strong></div>
+          <div class="metric"><span class="metric-label">NASDAQ 前一日</span><strong :style="{ color: priceColor(market.nasdaqChangePercent) }">{{ fmtPct(market.nasdaqChangePercent) }}</strong></div>
+          <div class="metric"><span class="metric-label">SOX 前一日</span><strong :style="{ color: priceColor(market.soxChangePercent) }">{{ fmtPct(market.soxChangePercent) }}</strong><small>{{ market.usTechAsOfDate || '資料不足' }}</small></div>
         </div>
       </div>
 
@@ -82,6 +86,27 @@
             <li v-for="(item, i) in market.risks" :key="`mk-${i}`">{{ item }}</li>
           </ul>
           <div v-else class="muted">目前沒有額外風險提醒。</div>
+        </el-col>
+      </el-row>
+    </el-card>
+
+    <el-card shadow="never" class="public-info-card">
+      <template #header>
+        <div class="card-head">
+          <span class="section-title">台美公開財經資訊</span>
+          <span class="as-of">近 72 小時；原文揭露，不做關鍵字情緒評分</span>
+        </div>
+      </template>
+      <el-row :gutter="18">
+        <el-col v-for="group in informationGroups" :key="group.region" :xs="24" :md="12">
+          <div class="reason-title">{{ group.label }}</div>
+          <div v-if="group.items.length" class="info-list">
+            <div v-for="item in group.items" :key="`${group.region}-${item.url}-${item.publishedAt}`" class="info-item">
+              <a :href="item.url" target="_blank" rel="noopener noreferrer">{{ item.title }}</a>
+              <small>{{ item.source || '來源未標示' }} · {{ formatTime(item.publishedAt) }}</small>
+            </div>
+          </div>
+          <div v-else class="muted">近 72 小時無可用資訊。</div>
         </el-col>
       </el-row>
     </el-card>
@@ -141,20 +166,111 @@
                   <span>KD</span><strong>K {{ fmtNumber(row.kValue, 1) }} / D {{ fmtNumber(row.dValue, 1) }}</strong>
                   <small>完成日 K：{{ row.asOfDate || '—' }}</small>
                 </div>
+                <div class="confirm-item"><span>J9</span><strong>{{ fmtNumber(row.extendedIndicators?.j9, 2) }}</strong></div>
+                <div class="confirm-item"><span>MACD／DIF／OSC</span><strong>{{ fmtNumber(row.extendedIndicators?.macd, 2) }}／{{ fmtNumber(row.extendedIndicators?.dif, 2) }}／{{ fmtNumber(row.extendedIndicators?.osc, 2) }}</strong></div>
+                <div class="confirm-item"><span>RSI5／RSI10</span><strong>{{ fmtNumber(row.extendedIndicators?.rsi5, 2) }}／{{ fmtNumber(row.extendedIndicators?.rsi10, 2) }}</strong></div>
+                <div class="confirm-item"><span>BIAS10／BIAS20</span><strong>{{ fmtNumber(row.extendedIndicators?.bias10, 2) }}／{{ fmtNumber(row.extendedIndicators?.bias20, 2) }}</strong></div>
+                <div class="confirm-item"><span>W%R9</span><strong>{{ fmtNumber(row.extendedIndicators?.wr9, 2) }}</strong></div>
+                <div class="confirm-item"><span>個股完成日量比</span><strong>{{ fmtRatio(row.volumeRatio) }}</strong></div>
+                <div v-if="row.underlyingCurrency && row.underlyingCurrency !== 'TWD'" class="confirm-item"><span>匯率完成日</span><strong>{{ row.fxAsOfDate || '精確資料不可得' }}</strong></div>
+              </div>
+
+              <div class="fundamental-panel">
+                <div class="fundamental-head">
+                  <span class="fundamental-title">基本面與產業</span>
+                  <el-tag v-if="row.fundamental?.applicable" size="small" type="info" effect="plain">
+                    基本面 {{ row.fundamental.coverage ?? 0 }}/4
+                  </el-tag>
+                </div>
+                <div v-if="!row.fundamental" class="muted">舊快照尚未含基本面欄位，請重新整理。</div>
+                <div v-else-if="!row.fundamental.applicable" class="muted">
+                  ETF 不適用個股財報與產業營收因子，其權重已重分配至其餘可用因子。
+                </div>
+                <template v-else>
+                  <div class="fundamental-grid">
+                    <div class="fundamental-item">
+                      <span>EPS TTM 年增</span><strong>{{ fmtPct(row.fundamental.epsYoyPct) }}</strong>
+                      <small>{{ sourceLine(row.fundamental.epsProvider, row.fundamental.epsAsOf) }}</small>
+                      <div class="source-links"><a v-for="(url, i) in row.fundamental.epsSourceUrls || []" :key="`eps-${i}`" :href="url" target="_blank" rel="noopener noreferrer">來源 {{ i + 1 }}</a></div>
+                    </div>
+                    <div class="fundamental-item">
+                      <span>近似 ROE</span><strong>{{ fmtPct(row.fundamental.approximateRoePct) }}</strong>
+                      <small>近四季母公司淨利÷最新權益，非正式 ROE</small>
+                      <small>{{ sourceLine(row.fundamental.roeProvider, row.fundamental.roeAsOf) }}</small>
+                      <div class="source-links"><a v-for="(url, i) in row.fundamental.roeSourceUrls || []" :key="`roe-${i}`" :href="url" target="_blank" rel="noopener noreferrer">來源 {{ i + 1 }}</a></div>
+                    </div>
+                    <div class="fundamental-item">
+                      <span>近 3 月營收年增</span><strong>{{ fmtPct(row.fundamental.revenueYoy3mPct) }}</strong>
+                      <small>{{ sourceLine(row.fundamental.revenueProvider, row.fundamental.revenueAsOf) }}</small>
+                      <div class="source-links"><a v-for="(url, i) in row.fundamental.revenueSourceUrls || []" :key="`rev-${i}`" :href="url" target="_blank" rel="noopener noreferrer">來源 {{ i + 1 }}</a></div>
+                    </div>
+                    <div class="fundamental-item">
+                      <span>PE 自身分位</span>
+                      <strong v-if="row.fundamental.peLossFlag === true">可信來源顯示虧損</strong>
+                      <strong v-else>{{ row.fundamental.pePercentile == null ? '—' : Math.round(row.fundamental.pePercentile) + ' 分位' }}</strong>
+                      <small>{{ sourceLine(row.fundamental.valuationProvider, row.fundamental.valuationAsOf) }}</small>
+                      <div class="source-links"><a v-for="(url, i) in row.fundamental.valuationSourceUrls || []" :key="`pe-${i}`" :href="url" target="_blank" rel="noopener noreferrer">來源 {{ i + 1 }}</a></div>
+                    </div>
+                    <div class="fundamental-item">
+                      <span>產業發展</span><strong>{{ row.fundamental.industryName || '—' }} · {{ fmtPct(row.fundamental.industryRevenueYoyPct) }}</strong>
+                      <small>{{ row.fundamental.industryPeriod || '資料累積中' }}<template v-if="row.fundamental.industryCompanyCount != null"> · {{ row.fundamental.industryCompanyCount }} 家</template></small>
+                      <small>{{ sourceLine(row.fundamental.industryProvider, row.fundamental.industryAsOf) }}</small>
+                      <div class="source-links"><a v-for="(url, i) in row.fundamental.industrySourceUrls || []" :key="`ind-${i}`" :href="url" target="_blank" rel="noopener noreferrer">來源 {{ i + 1 }}</a></div>
+                    </div>
+                  </div>
+                  <el-row :gutter="18" class="public-evidence-row">
+                    <el-col :xs="24" :md="12">
+                      <div class="reason-title">public_info_* 個股證據</div>
+                      <div v-if="row.fundamental.companyPublicInformation?.length" class="info-list compact">
+                        <div v-for="item in row.fundamental.companyPublicInformation" :key="`co-${item.url}-${item.publishedAt}`" class="info-item">
+                          <a :href="item.url" target="_blank" rel="noopener noreferrer">{{ item.title }}</a>
+                          <small>{{ item.source || '來源未標示' }} · {{ formatTime(item.publishedAt) }}</small>
+                        </div>
+                      </div>
+                      <div v-else class="muted">近 120 日無相關公開資訊；不加分也不扣分。</div>
+                    </el-col>
+                    <el-col :xs="24" :md="12">
+                      <div class="reason-title">public_info_* 產業證據</div>
+                      <div v-if="row.fundamental.industryPublicInformation?.length" class="info-list compact">
+                        <div v-for="item in row.fundamental.industryPublicInformation" :key="`in-${item.url}-${item.publishedAt}`" class="info-item">
+                          <a :href="item.url" target="_blank" rel="noopener noreferrer">{{ item.title }}</a>
+                          <small>{{ item.source || '來源未標示' }} · {{ formatTime(item.publishedAt) }}</small>
+                        </div>
+                      </div>
+                      <div v-else class="muted">近 120 日無相關公開資訊；不加分也不扣分。</div>
+                    </el-col>
+                  </el-row>
+                </template>
               </div>
 
               <el-row :gutter="18" class="reason-row">
                 <el-col :xs="24" :md="12">
-                  <div class="reason-title positive">支持訊號</div>
-                  <ul v-if="row.reasons?.length" class="reason-list">
-                    <li v-for="(item, i) in row.reasons" :key="`sr-${row.stockCode}-${i}`">{{ item }}</li>
+                  <div class="reason-title positive">短期（約一週）支持訊號</div>
+                  <ul v-if="row.shortReasons?.length" class="reason-list">
+                    <li v-for="(item, i) in row.shortReasons" :key="`ssr-${row.stockCode}-${i}`">{{ item }}</li>
                   </ul>
                   <div v-else class="muted">沒有足夠的支持訊號。</div>
                 </el-col>
                 <el-col :xs="24" :md="12">
-                  <div class="reason-title risk">風險提醒</div>
+                  <div class="reason-title risk">短期（約一週）風險提醒</div>
+                  <ul v-if="row.shortRisks?.length" class="reason-list">
+                    <li v-for="(item, i) in row.shortRisks" :key="`ssk-${row.stockCode}-${i}`">{{ item }}</li>
+                  </ul>
+                  <div v-else class="muted">目前沒有額外風險提醒。</div>
+                </el-col>
+              </el-row>
+              <el-row :gutter="18" class="reason-row">
+                <el-col :xs="24" :md="12">
+                  <div class="reason-title positive">中期（1–6 月）支持訊號</div>
+                  <ul v-if="row.reasons?.length" class="reason-list">
+                    <li v-for="(item, i) in row.reasons" :key="`mr-${row.stockCode}-${i}`">{{ item }}</li>
+                  </ul>
+                  <div v-else class="muted">沒有足夠的支持訊號。</div>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <div class="reason-title risk">中期（1–6 月）風險提醒</div>
                   <ul v-if="row.risks?.length" class="reason-list">
-                    <li v-for="(item, i) in row.risks" :key="`sk-${row.stockCode}-${i}`">{{ item }}</li>
+                    <li v-for="(item, i) in row.risks" :key="`mk-${row.stockCode}-${i}`">{{ item }}</li>
                   </ul>
                   <div v-else class="muted">目前沒有額外風險提醒。</div>
                 </el-col>
@@ -216,13 +332,39 @@
             <el-tag size="small" :type="row.held ? 'warning' : 'info'" effect="plain">{{ row.held ? '持有' : '觀察' }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="規則建議" min-width="150" align="center">
+        <el-table-column label="基本面／產業" min-width="150" align="center">
+          <template #default="{ row }">
+            <template v-if="row.fundamental?.applicable">
+              <el-tag size="small" type="info" effect="plain">基本面 {{ row.fundamental.coverage ?? 0 }}/4</el-tag>
+              <div class="industry-inline">
+                {{ row.fundamental.industryName || '產業累積中' }}
+                <span v-if="row.fundamental.industryRevenueYoyPct != null">{{ fmtPct(row.fundamental.industryRevenueYoyPct) }}</span>
+              </div>
+            </template>
+            <span v-else-if="row.fundamental" class="muted">ETF 不適用個股財報</span>
+            <span v-else class="muted">資料尚未提供</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="短期（約一週）" min-width="150" align="center">
+          <template #default="{ row }">
+            <el-tooltip v-if="row.shortAction === 'TRIAL_BUY'" placement="top" :content="trialBuyHint">
+              <el-tag :type="actionType(row.shortAction)" effect="dark">{{ row.shortActionLabel }}</el-tag>
+            </el-tooltip>
+            <el-tag v-else :type="actionType(row.shortAction)" effect="dark">{{ row.shortActionLabel || '今日不交易' }}</el-tag>
+            <div class="score-inline" :style="{ color: scoreColor(row.shortScore) }">{{ row.shortScore == null ? '—' : row.shortScore + ' 分' }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column label="中期（1–6 月）" min-width="150" align="center">
           <template #default="{ row }">
             <el-tooltip v-if="row.action === 'TRIAL_BUY'" placement="top" :content="trialBuyHint">
               <el-tag :type="actionType(row.action)" effect="dark">{{ row.actionLabel }}</el-tag>
             </el-tooltip>
             <el-tag v-else :type="actionType(row.action)" effect="dark">{{ row.actionLabel }}</el-tag>
+            <div class="score-inline" :style="{ color: scoreColor(row.score) }">{{ row.score == null ? '—' : row.score + ' 分' }}</div>
           </template>
+        </el-table-column>
+        <el-table-column label="分歧" width="82" align="center">
+          <template #default="{ row }"><el-tag v-if="row.horizonConflict" type="warning" effect="dark">短中分歧</el-tag><span v-else class="muted">—</span></template>
         </el-table-column>
         <el-table-column label="時機" width="104" align="center">
           <template #default="{ row }">
@@ -243,12 +385,6 @@
             >
               {{ row.counterTrendLabel }}
             </el-tag>
-            <span v-else class="muted">—</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="分數" width="88" align="center">
-          <template #default="{ row }">
-            <strong v-if="row.score != null" :style="{ color: scoreColor(row.score) }">{{ row.score }}</strong>
             <span v-else class="muted">—</span>
           </template>
         </el-table-column>
@@ -306,7 +442,7 @@
       :closable="false"
       show-icon
       title="規則式決策輔助，不是獲利保證"
-      description="系統不會自動下單。實際交易前請自行確認即時價格、可用資金、持有部位、交易成本與可承受損失；資料不足時以「今日不交易」為準。"
+      description="評分只比較市場上的獲利機會，不納入成本價、可用資金、配置或其他個人理財需求。財報、估值與產業歷史自上線後累積；缺值權重會重分配，因此不同標的的分數組成可能不同。系統不保證獲利、不會自動下單；資料不足時以「今日不交易」為準。"
     />
 
     <el-card shadow="never" class="sched-card">
@@ -466,7 +602,7 @@
         />
 
         <el-form label-position="top">
-          <el-form-item label="主規則建議">
+          <el-form-item label="中期建議（1–6 月）">
             <el-checkbox-group v-model="notificationForm.actionStates" class="state-options">
               <el-checkbox
                 v-for="option in notificationOptions.actions"
@@ -544,7 +680,7 @@
         </el-form-item>
         <el-form-item label="匯出內容">
           <div class="dialog-note">
-            單一 Excel 檔，三張工作表：<b>快照索引／大盤總覽／個股決策</b>；
+            單一 Excel 檔，四張工作表：<b>快照索引／大盤總覽／個股決策／台美公開資訊</b>；
             內容取自區間內每次頁面計算存下的 Redis 快照（每 5 分鐘至多一筆）。
             區間若早於本功能上線日、或快照已逾保留期，該段可能無資料，並會在「快照索引」標示缺漏筆數。
           </div>
@@ -624,7 +760,7 @@ const dirPickerPreview = computed(() => {
   if (!joined) return base
   return isGdrive ? base + joined : base + '/' + joined
 })
-const radar = ref({ market: {}, stocks: [], skippedNonTwStocks: 0, ruleVersion: 'TW_RULES_V9' })
+const radar = ref({ market: {}, stocks: [], publicInformation: [], skippedNonTwStocks: 0, ruleVersion: 'TW_RULES_V11' })
 const notificationVisible = ref(false)
 const notificationLoading = ref(false)
 const notificationSaving = ref(false)
@@ -650,6 +786,10 @@ let disposed = false
 
 const market = computed(() => radar.value.market || {})
 const stocks = computed(() => radar.value.stocks || [])
+const informationGroups = computed(() => [
+  { region: 'TW', label: '台灣', items: (radar.value.publicInformation || []).filter(item => item.region === 'TW') },
+  { region: 'US', label: '美國', items: (radar.value.publicInformation || []).filter(item => item.region === 'US') }
+])
 const marketClass = computed(() => `regime-${String(market.value.regime || 'DATA_INCOMPLETE').toLowerCase().replace('_', '-')}`)
 
 // 純讀重算。初次載入與 SSE 背景重算都走這裡；不觸發任何外部行情抓取。
@@ -886,6 +1026,16 @@ function fmtPct(value) {
   return `${n > 0 ? '+' : ''}${n.toFixed(2)}%`
 }
 
+function fmtRatio(value) {
+  if (value == null || Number.isNaN(Number(value))) return '—'
+  return `${Number(value).toFixed(2)} 倍`
+}
+
+function sourceLine(provider, asOf) {
+  if (!provider && !asOf) return '資料累積中'
+  return [provider || '來源未標示', asOf ? formatTime(asOf) : null].filter(Boolean).join(' · ')
+}
+
 function fmtTime(value) {
   if (!value) return '—'
   const d = new Date(value)
@@ -930,13 +1080,13 @@ function timingEffect(state) {
 function timingHint(row) {
   switch (row.timingState) {
     case 'EXTREME_OVERBOUGHT':
-      return '短線 KD 已達過熱且明顯偏離季線。若同時出現 KD 高檔死亡交叉，本日會轉為減碼候選。'
+      return 'KD 已達過熱且明顯偏離季線；只有 KD 死叉、MACD 轉弱、下跌爆量三類證據至少兩項成立，才確認獲利了結。'
     case 'OVERBOUGHT':
       return '短線偏貴。其中 KD 過熱與 ETF 溢價過高會關閉買進閘門；單純的季線乖離偏高只反映在分數，不關閉閘門。'
     case 'OVERSOLD':
       return '短線偏便宜（KD 偏低或明顯低於季線）。'
     case 'EXTREME_OVERSOLD':
-      return '已深度超跌，此位置不建議追殺出場；但年線兩日跌破且位於 52 週最低段者不套用此保護。'
+      return '已深度超跌，此位置不建議追殺出場；即使長期結構偏弱，V11 仍保留低檔保護並另列風險。'
     default:
       return ''
   }
@@ -1284,11 +1434,20 @@ onUnmounted(() => {
 .counter-trend-note { margin-left: 8px; color: #64748b; font-size: 12px; }
 .muted { color: #94a3b8; }
 .stale-alert { margin-bottom: 14px; }
+.public-info-card { margin-top: 16px; }
+.info-list { display: flex; flex-direction: column; gap: 10px; }
+.info-item { display: flex; flex-direction: column; gap: 3px; padding-bottom: 9px; border-bottom: 1px solid #e2e8f0; }
+.info-item a { color: #1d4ed8; font-size: 13px; line-height: 1.5; text-decoration: none; }
+.info-item a:hover { text-decoration: underline; }
+.info-item small { color: #64748b; }
 .stocks-card { margin-top: 16px; }
 .stock-code { font-weight: 750; color: #0f172a; }
 .stock-name { margin-top: 2px; color: #64748b; font-size: 12px; }
 .stock-meta { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.industry-inline { margin-top: 5px; color: #64748b; font-size: 11px; line-height: 1.45; }
+.industry-inline span { display: block; color: #0f766e; font-weight: 700; }
 .price-value { font-weight: 700; color: #0f172a; }
+.score-inline { margin-top: 5px; font-size: 12px; font-weight: 700; }
 .ma-summary { display: inline-flex; align-items: center; white-space: nowrap; }
 .slash { color: #cbd5e1; padding: 0 2px; }
 /* 過熱＝動作已降級（紅），偏熱＝僅提醒、動作未受影響（橘）；兩者必須可區分（Task 232）。 */
@@ -1299,6 +1458,18 @@ onUnmounted(() => {
 .confirm-grid { display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)); gap: 10px; }
 .confirm-item { border: 1px solid #e2e8f0; border-radius: 8px; background: white; padding: 12px; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
 .confirm-item span, .confirm-item small { color: #64748b; font-size: 12px; }
+.fundamental-panel { margin-top: 18px; border: 1px solid #cbd5e1; border-radius: 9px; background: #fff; padding: 14px 16px; }
+.fundamental-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.fundamental-title { color: #0f172a; font-size: 14px; font-weight: 750; }
+.fundamental-grid { display: grid; grid-template-columns: repeat(5, minmax(145px, 1fr)); gap: 10px; }
+.fundamental-item { border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; padding: 11px; display: flex; flex-direction: column; gap: 5px; }
+.fundamental-item > span, .fundamental-item small { color: #64748b; font-size: 11px; line-height: 1.45; }
+.fundamental-item strong { color: #0f172a; font-size: 14px; }
+.source-links { display: flex; flex-wrap: wrap; gap: 8px; }
+.source-links a { color: #1d4ed8; font-size: 11px; text-decoration: none; }
+.source-links a:hover { text-decoration: underline; }
+.public-evidence-row { margin-top: 14px; }
+.info-list.compact { max-height: 180px; overflow: auto; }
 .updated-at { margin-top: 12px; color: #64748b; font-size: 12px; }
 .disclaimer { margin-top: 16px; }
 .notification-help { margin-bottom: 16px; }
@@ -1313,10 +1484,11 @@ onUnmounted(() => {
   .market-layout { grid-template-columns: 1fr; }
   .market-metrics { grid-template-columns: repeat(3, 1fr); }
   .confirm-grid { grid-template-columns: repeat(2, 1fr); }
+  .fundamental-grid { grid-template-columns: repeat(2, 1fr); }
 }
 @media (max-width: 720px) {
   .header-row, .card-head { align-items: flex-start; flex-direction: column; }
-  .market-metrics, .confirm-grid { grid-template-columns: 1fr; }
+  .market-metrics, .confirm-grid, .fundamental-grid { grid-template-columns: 1fr; }
   .expand-panel { padding-left: 16px; padding-right: 16px; }
   .state-options { grid-template-columns: 1fr; }
 }

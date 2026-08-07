@@ -13,7 +13,7 @@ import java.util.Comparator;
 import java.util.List;
 
 /**
- * 把原始 OHLC 轉成以最新價格為基準的還原權息／分割序列。
+ * 把原始 OHLCV 轉成以最新價基與股數基準還原的權息／分割序列。
  *
  * <p>只做純計算、不寫回 entity 或資料庫；沒有可用事件時原值返回，避免無謂精度漂移。</p>
  *
@@ -47,8 +47,16 @@ public class DistributionAdjustedPriceService {
 
     public record Adjustment(List<StockPriceHistory> rowsDesc, boolean adjusted) {}
 
-    /** 內部統一事件：除權息與分割合流後依日期升冪套用同一個累積因子。 */
-    private record FactorEvent(LocalDate date, BigDecimal factor, boolean split) {}
+    /**
+     * 內部統一事件。{@code priceGrowth} 含現金股利、股票股利與分割；{@code shareGrowth}
+     * 僅代表事件後股數／事件前股數，現金股利恆為 1，避免拿價格因子污染成交量。
+     */
+    private record FactorEvent(
+            LocalDate date,
+            BigDecimal priceGrowth,
+            BigDecimal shareGrowth,
+            boolean split
+    ) {}
 
     public Adjustment adjust(
             List<StockPriceHistory> rowsDesc,
@@ -73,7 +81,10 @@ public class DistributionAdjustedPriceService {
                     .sorted(Comparator.comparing(StockDividendHistory::getExDividendDate)
                             .thenComparing(e -> e.getId() == null ? Long.MAX_VALUE : e.getId()))
                     .forEach(e -> events.add(new FactorEvent(
-                            e.getExDividendDate(), dividendFactor(e, closeOn(rowsAsc, e.getExDividendDate())), false)));
+                            e.getExDividendDate(),
+                            dividendFactor(e, closeOn(rowsAsc, e.getExDividendDate())),
+                            stockShareGrowth(e),
+                            false)));
         }
         if (events.isEmpty()) {
             return new Adjustment(List.copyOf(rowsDesc), false);
@@ -83,35 +94,50 @@ public class DistributionAdjustedPriceService {
         events.sort(Comparator.comparing(FactorEvent::date)
                 .thenComparing(e -> e.split() ? 0 : 1));
 
-        List<BigDecimal> sharesByRow = new ArrayList<>(rowsAsc.size());
-        BigDecimal shares = BigDecimal.ONE;
+        List<BigDecimal> priceGrowthByRow = new ArrayList<>(rowsAsc.size());
+        List<BigDecimal> shareGrowthByRow = new ArrayList<>(rowsAsc.size());
+        BigDecimal cumulativePriceGrowth = BigDecimal.ONE;
+        BigDecimal cumulativeShareGrowth = BigDecimal.ONE;
         int eventIndex = 0;
         boolean applied = false;
 
         for (StockPriceHistory row : rowsAsc) {
             while (eventIndex < events.size()
                     && !events.get(eventIndex).date().isAfter(row.getTradingDate())) {
-                BigDecimal factor = events.get(eventIndex).factor();
-                // 反向分割的因子 < 1，故判準是「不等於 1」而非「大於 1」——舊寫法使 shares 單調遞增、
-                // scale <= 1 恆成立，反向分割在結構上無法表達（Task 265）。
-                if (factor != null && factor.signum() > 0 && factor.compareTo(BigDecimal.ONE) != 0) {
-                    shares = shares.multiply(factor);
+                FactorEvent event = events.get(eventIndex);
+                BigDecimal priceGrowth = event.priceGrowth();
+                BigDecimal shareGrowth = event.shareGrowth();
+                // 反向分割的 growth < 1，故判準是「不等於 1」而非「大於 1」（Task 265）。
+                if (priceGrowth != null && priceGrowth.signum() > 0) {
+                    cumulativePriceGrowth = cumulativePriceGrowth.multiply(priceGrowth);
+                }
+                if (shareGrowth != null && shareGrowth.signum() > 0) {
+                    cumulativeShareGrowth = cumulativeShareGrowth.multiply(shareGrowth);
+                }
+                if ((priceGrowth != null && priceGrowth.compareTo(BigDecimal.ONE) != 0)
+                        || (shareGrowth != null && shareGrowth.compareTo(BigDecimal.ONE) != 0)) {
                     applied = true;
                 }
                 eventIndex++;
             }
-            sharesByRow.add(shares);
+            priceGrowthByRow.add(cumulativePriceGrowth);
+            shareGrowthByRow.add(cumulativeShareGrowth);
         }
 
         if (!applied) {
             return new Adjustment(List.copyOf(rowsDesc), false);
         }
 
-        BigDecimal finalShares = shares;
+        BigDecimal finalPriceGrowth = cumulativePriceGrowth;
+        BigDecimal finalShareGrowth = cumulativeShareGrowth;
         List<StockPriceHistory> adjustedAsc = new ArrayList<>(rowsAsc.size());
         for (int i = 0; i < rowsAsc.size(); i++) {
-            BigDecimal scale = sharesByRow.get(i).divide(finalShares, SCALE, RoundingMode.HALF_UP);
-            adjustedAsc.add(adjust(rowsAsc.get(i), scale));
+            BigDecimal priceScale = priceGrowthByRow.get(i)
+                    .divide(finalPriceGrowth, SCALE, RoundingMode.HALF_UP);
+            // historicalShareScale = cumulativeAtRow / final。1:4 分割前為 0.25，故 volume / 0.25 = ×4。
+            BigDecimal historicalShareScale = shareGrowthByRow.get(i)
+                    .divide(finalShareGrowth, SCALE, RoundingMode.HALF_UP);
+            adjustedAsc.add(adjust(rowsAsc.get(i), priceScale, historicalShareScale));
         }
         adjustedAsc.sort(Comparator.comparing(StockPriceHistory::getTradingDate).reversed());
         return new Adjustment(List.copyOf(adjustedAsc), true);
@@ -120,8 +146,8 @@ public class DistributionAdjustedPriceService {
     /**
      * 以相鄰收盤的比例偵測股票分割（Task 265）。
      *
-     * <p>回傳的因子語意與股票股利相同：{@code shares} 乘上該因子，使分割日<b>之前</b>的價格
-     * 被縮放為 {@code 1/ratio}，對齊分割後的價基。反向分割的因子 &lt; 1，earlier 價格因而放大。</p>
+     * <p>回傳的 {@code priceGrowth} 與 {@code shareGrowth} 都是事件後／事件前比例：分割日之前的價格
+     * 乘 {@code 1/ratio}，成交量除以 {@code 1/ratio}；反向分割時兩者方向相反地調整。</p>
      *
      * <p>採<b>標準比例</b>（{@code {2,3,4,5,10}} 之一）而非觀察到的實際比例：實際比例
      * （0050 為 3.966）含當日真實漲跌，用它還原會把真實價格變動也一併抹掉。</p>
@@ -143,7 +169,7 @@ public class DistributionAdjustedPriceService {
             if (ratio < SPLIT_FORWARD_MIN && ratio > SPLIT_REVERSE_MAX) continue;
 
             // 大額股票股利（如配股 10 元＝1:1）同樣使價格腰斬，ratio ≈ 2.0 會被誤認為 2:1 分割。
-            // 若不排除，該事件會被 dividendFactor 與 detectSplits 各計一次、shares 被乘成 4 倍，
+            // 若不排除，該事件會被 dividendFactor 與 detectSplits 各計一次、price/share growth 被乘成 4 倍，
             // 分割前價格被縮成 1/4 而非 1/2——方向錯、幅度錯、且不拋任何例外。
             if (hasStockDividendOn(rawEvents, rowsAsc.get(i).getTradingDate())) {
                 log.info("跳空已由股票股利解釋，不認定為分割：{}/{} {} ratio={}",
@@ -162,7 +188,7 @@ public class DistributionAdjustedPriceService {
             log.info("偵測到股票分割並還原：{}/{} {} ratio={}（採標準比例 {}）",
                     rowsAsc.get(i).getStockCode(), rowsAsc.get(i).getMarket(),
                     rowsAsc.get(i).getTradingDate(), String.format("%.4f", ratio), canonical.toPlainString());
-            out.add(new FactorEvent(rowsAsc.get(i).getTradingDate(), canonical, true));
+            out.add(new FactorEvent(rowsAsc.get(i).getTradingDate(), canonical, canonical, true));
         }
         return out;
     }
@@ -223,22 +249,40 @@ public class DistributionAdjustedPriceService {
         return BigDecimal.ONE.add(stockFactor).add(cashFactor);
     }
 
+    /** 股票股利造成的股數成長；現金股利不改變股數。 */
+    private BigDecimal stockShareGrowth(StockDividendHistory event) {
+        return positive(event.getStockDividend())
+                ? BigDecimal.ONE.add(event.getStockDividend()
+                        .divide(STOCK_PAR_VALUE, SCALE, RoundingMode.HALF_UP))
+                : BigDecimal.ONE;
+    }
+
     private boolean positive(BigDecimal value) {
         return value != null && value.signum() > 0;
     }
 
-    private StockPriceHistory adjust(StockPriceHistory source, BigDecimal scale) {
+    private StockPriceHistory adjust(
+            StockPriceHistory source,
+            BigDecimal priceScale,
+            BigDecimal historicalShareScale) {
         return StockPriceHistory.builder()
                 .id(source.getId())
                 .stockCode(source.getStockCode())
                 .market(source.getMarket())
                 .tradingDate(source.getTradingDate())
-                .openPrice(scale(source.getOpenPrice(), scale))
-                .highPrice(scale(source.getHighPrice(), scale))
-                .lowPrice(scale(source.getLowPrice(), scale))
-                .closePrice(scale(source.getClosePrice(), scale))
-                .volume(source.getVolume())
+                .openPrice(scale(source.getOpenPrice(), priceScale))
+                .highPrice(scale(source.getHighPrice(), priceScale))
+                .lowPrice(scale(source.getLowPrice(), priceScale))
+                .closePrice(scale(source.getClosePrice(), priceScale))
+                .volume(scaleVolume(source.getVolume(), historicalShareScale))
                 .build();
+    }
+
+    private Long scaleVolume(Long volume, BigDecimal historicalShareScale) {
+        if (volume == null || historicalShareScale == null || historicalShareScale.signum() <= 0) return volume;
+        return BigDecimal.valueOf(volume)
+                .divide(historicalShareScale, 0, RoundingMode.HALF_UP)
+                .longValueExact();
     }
 
     private BigDecimal scale(BigDecimal value, BigDecimal factor) {

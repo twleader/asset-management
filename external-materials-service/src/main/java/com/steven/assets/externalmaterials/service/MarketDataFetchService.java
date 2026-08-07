@@ -112,6 +112,16 @@ public class MarketDataFetchService {
     public record DividendHistoryResult(
             String stockCode, String market, String source, String message, List<DividendRow> rows) {}
 
+    /** Yahoo quoteSummary 的可追溯估值欄位；sourceUrl 刻意不含短效 crumb。 */
+    public record YahooValuation(
+            BigDecimal peRatio,
+            BigDecimal pbRatio,
+            BigDecimal dividendYieldPct,
+            String sourceUrl) {}
+
+    /** 區分「請求成功但無估值」與 401／429／網路失敗，供基本面 poller 正確回報來源健康度。 */
+    public record YahooValuationFetch(boolean succeeded, YahooValuation valuation, String error) {}
+
     // ─── 殖利率 ────────────────────────────────────────────────────────────────
 
     public DividendRateResult getDividendRate(String stockCode, String market) {
@@ -675,6 +685,43 @@ public class MarketDataFetchService {
                 yahooCrumb = null;
             }
             return null;
+        }
+    }
+
+    /**
+     * 取得單一 Yahoo 標的估值，沿用本服務唯一的 cookie／crumb 與 429 negative cache。
+     *
+     * <p>不得改回 Java HttpClient 直打 quoteSummary：Yahoo 會依 TLS 指紋回 401／429；
+     * 也不得另建第二份 crumb，否則 ETF 持股、淨值與基本面會互相觸發限流。</p>
+     */
+    public YahooValuationFetch getYahooValuation(String symbol) {
+        String canonicalUrl = "https://query2.finance.yahoo.com/v10/finance/quoteSummary/" + symbol
+                + "?modules=summaryDetail,defaultKeyStatistics";
+        try {
+            String crumb = getYahooCrumb();
+            String requestUrl = canonicalUrl + "&crumb="
+                    + URLEncoder.encode(crumb, StandardCharsets.UTF_8);
+            JsonNode result = mapper.readTree(yahooApiGet(requestUrl))
+                    .path("quoteSummary").path("result");
+            if (!result.isArray()) {
+                return new YahooValuationFetch(false, null, "invalid quoteSummary response");
+            }
+            if (result.isEmpty()) return new YahooValuationFetch(true, null, null);
+            JsonNode row = result.get(0);
+            BigDecimal pe = rawDecimal(row.path("summaryDetail").path("trailingPE"));
+            BigDecimal pb = rawDecimal(row.path("defaultKeyStatistics").path("priceToBook"));
+            BigDecimal yield = rawDecimal(row.path("summaryDetail").path("dividendYield"));
+            if (yield != null) yield = yield.multiply(BigDecimal.valueOf(100));
+            if (pe == null && pb == null && yield == null) {
+                return new YahooValuationFetch(true, null, null);
+            }
+            return new YahooValuationFetch(true, new YahooValuation(pe, pb, yield, canonicalUrl), null);
+        } catch (Exception e) {
+            log.debug("Yahoo 估值查詢失敗 {}: {}", symbol, e.getMessage());
+            if (e.getMessage() != null && (e.getMessage().contains("401") || e.getMessage().contains("429"))) {
+                yahooCrumb = null;
+            }
+            return new YahooValuationFetch(false, null, e.getMessage());
         }
     }
 

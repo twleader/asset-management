@@ -9,6 +9,7 @@ import com.steven.assets.repository.StockDividendHistoryRepository;
 import com.steven.assets.repository.StockPriceHistoryRepository;
 import com.steven.assets.repository.StockRepository;
 import com.steven.assets.repository.TwseIndexDailyHistoryRepository;
+import com.steven.assets.repository.UsIndexDailyHistoryRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -22,10 +23,14 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -46,10 +51,13 @@ class BacktestServiceTest {
     @Mock private StockPriceHistoryRepository priceHistoryRepo;
     @Mock private StockDividendHistoryRepository dividendHistoryRepo;
     @Mock private TwseIndexDailyHistoryRepository twseRepo;
+    @Mock private UsIndexDailyHistoryRepository usIndexRepo;
     @Mock private ExchangeRateHistoryRepository exchangeRateRepo;
     @Mock private EtfNavHistoryRepository etfNavHistoryRepo;
     @Mock private StockRepository stockRepo;
     @Mock private PriceQueryService priceQuery;
+    @Mock private TradingRadarMarketContextService marketContextService;
+    @Mock private FundamentalAnalysisService fundamentalAnalysisService;
 
     private final TradingRadarRuleEngine engine = new TradingRadarRuleEngine();
     private final DistributionAdjustedPriceService adjust = new DistributionAdjustedPriceService();
@@ -63,7 +71,8 @@ class BacktestServiceTest {
         return new BacktestService(
                 engine, assembler(), new AssetClassifier(),
                 priceHistoryRepo, dividendHistoryRepo, twseRepo,
-                exchangeRateRepo, etfNavHistoryRepo, stockRepo, adjust);
+                usIndexRepo, exchangeRateRepo, etfNavHistoryRepo, stockRepo, adjust, marketContextService,
+                fundamentalAnalysisService);
     }
 
     // ─────────────────────────── 測試資料 ───────────────────────────
@@ -111,6 +120,27 @@ class BacktestServiceTest {
         when(twseRepo.findAllByOrderByTradingDateAsc()).thenReturn(List.of());
         when(etfNavHistoryRepo.findByStockCodeAndMarketOrderByNavDateAsc(CODE, TW)).thenReturn(List.of());
         when(stockRepo.findByCodeAndMarket(CODE, TW)).thenReturn(java.util.Optional.empty());
+        when(fundamentalAnalysisService.resolveInputsForBacktest(anyString(), anyString(), any()))
+                .thenAnswer(invocation -> {
+                    List<java.time.Instant> instants = invocation.getArgument(2);
+                    Map<java.time.Instant, TradingRadarRuleEngine.FundamentalInput> result =
+                            new java.util.LinkedHashMap<>();
+                    instants.forEach(instant -> result.put(
+                            instant, TradingRadarRuleEngine.FundamentalInput.NOT_APPLICABLE));
+                    return result;
+                });
+    }
+
+    @Test
+    @DisplayName("基本面回測每檔只呼叫一次批次 resolver，不逐日查詢")
+    void fundamentalsAreResolvedOncePerCode() {
+        List<StockPriceHistory> asc = series(280, 100, 0.001, 999, 0.0);
+        stubRepos(asc, List.of());
+
+        service().run(new BacktestDto.Request(List.of(CODE), null, null, List.of(5), null, null));
+
+        verify(fundamentalAnalysisService).resolveInputsForBacktest(eq(CODE), eq(TW), any());
+        verify(fundamentalAnalysisService, never()).resolve(anyString(), anyString(), anyString(), any());
     }
 
     // ─────────────────────────── (a) 前視偏誤 ───────────────────────────
@@ -354,9 +384,9 @@ class BacktestServiceTest {
     // ─────────────────────────── (i) 回歸 ───────────────────────────
 
     @Test
-    @DisplayName("(i) 本任務不升版：RULE_VERSION 仍為 TW_RULES_V9")
-    void ruleVersionUnchanged() {
-        assertThat(TradingRadarRuleEngine.RULE_VERSION).isEqualTo("TW_RULES_V9");
+    @DisplayName("Task 292 回測與 production 共用 TW_RULES_V11")
+    void ruleVersionIsV11() {
+        assertThat(TradingRadarRuleEngine.RULE_VERSION).isEqualTo("TW_RULES_V11");
     }
 
     @Test

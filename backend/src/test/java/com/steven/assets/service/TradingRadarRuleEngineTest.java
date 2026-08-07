@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -107,11 +108,10 @@ class TradingRadarRuleEngineTest {
                 new BigDecimal("24.0"), new BigDecimal("30.0"),
                 TradingRadarRuleEngine.Confirmation.ABOVE));
 
-        // V4 17 → V5 37 → V9 41：KD 位置讓超賣得正分（V5），V9 再加上季線乖離
-        //（現價 20.60 對季線 22.37＝−7.9%）同樣給正貢獻，動作因而由減碼候選再降級為續抱警戒。
-        // 這正是「長線好、短線超賣不該被叫賣」的方向，與需求 3「不殺低」一致。
-        assertEquals(41, stock.score());
-        assertEquals(TradingRadarRuleEngine.Action.HOLD_CAUTION, stock.action());
+        // V11 的「不殺低」只在 KD 深度超賣且季線乖離 <= -10% 的 EXTREME_OVERSOLD 生效。
+        // 本案對季線乖離為 -7.9%，雖屬 OVERSOLD_WATCH，仍不可偽裝已觸發極端低檔保護。
+        assertEquals(33, stock.score());
+        assertEquals(TradingRadarRuleEngine.Action.REDUCE_CANDIDATE, stock.action());
         assertEquals(TradingRadarRuleEngine.CounterTrendState.OVERSOLD_WATCH,
                 stock.counterTrend().state());
         assertTrue(stock.counterTrend().risks().stream()
@@ -178,9 +178,9 @@ class TradingRadarRuleEngineTest {
                 TradingRadarRuleEngine.InstrumentType.BOND,
                 TradingRadarRuleEngine.MarketRegime.RISK_OFF));
 
-        assertEquals(84, equity.score());
+        assertEquals(74, equity.score());
         assertEquals(TradingRadarRuleEngine.Action.HOLD, equity.action());
-        assertEquals(91, bond.score());
+        assertEquals(92, bond.score());
         assertEquals(TradingRadarRuleEngine.Action.ADD_CANDIDATE, bond.action());
         assertTrue(bond.reasons().stream().anyMatch(reason -> reason.contains("資產類別為債券")));
     }
@@ -198,7 +198,7 @@ class TradingRadarRuleEngineTest {
 
         assertNull(equity.score());
         assertEquals(TradingRadarRuleEngine.Action.NO_TRADE, equity.action());
-        assertEquals(91, bond.score());
+        assertEquals(92, bond.score());
         assertEquals(TradingRadarRuleEngine.Action.ADD_CANDIDATE, bond.action());
     }
 
@@ -414,8 +414,8 @@ class TradingRadarRuleEngineTest {
     //
     // 共用 fixture 為 strongStockWithKd()：價 120 站上 MA20 110／MA60 100／MA240 90，
     // 三個兩日確認皆 ABOVE，大盤 RISK_ON 非 stale，當日漲跌 1%（不觸發 ±5%），fx 為 null。
-    // 此時 Σw = 0.61(六項均線) + 0.08(動能) + 0.13(位置) + 0.08(大盤) + 0.05(漲跌) = 0.95，
-    // score = round(50 + 50 × Σ(w×c) / 0.95)。
+    // V11 已重配技術面權重並為個股預留基本面／產業權重；
+    // 此舊 fixture 以 NOT_APPLICABLE 輸入驗證技術面硬閘門，缺項由同一 Accumulator 正規化。
 
     @Test
     void kdHeat_userReportedCase_staysAddCandidateAndIsOnlyMarkedElevated() {
@@ -424,7 +424,7 @@ class TradingRadarRuleEngineTest {
         // 動能 +0.71×0.08、位置 −0.575×0.13 → Σ(w×c)=0.63205 → 83.27 → 83。
         var held = engine.evaluateStock(strongStockWithKd(true, "82.3", "75.2"));
 
-        assertEquals(86, held.score(), "V9 權重重配後為 86 分（V8 為 83）");
+        assertEquals(87, held.score(), "V11 中期技術面重配後為 87 分");
         assertEquals(TradingRadarRuleEngine.Action.ADD_CANDIDATE, held.action());
         assertEquals(TradingRadarRuleEngine.KdHeat.ELEVATED, held.kdHeat());
     }
@@ -436,7 +436,7 @@ class TradingRadarRuleEngineTest {
         var held = engine.evaluateStock(strongStockWithKd(true, "86", "70"));
         var notHeld = engine.evaluateStock(strongStockWithKd(false, "86", "70"));
 
-        assertEquals(87, held.score(), "過熱不得扣分（V9 權重重配後為 87，V8 為 85）");
+        assertEquals(87, held.score(), "過熱硬閘門不在 KD/J 因子之外再重複扣分");
         assertEquals(TradingRadarRuleEngine.KdHeat.OVERHEATED, held.kdHeat());
         assertEquals(TradingRadarRuleEngine.Action.HOLD, held.action());
         assertEquals(TradingRadarRuleEngine.Action.WATCH, notHeld.action());
@@ -518,8 +518,8 @@ class TradingRadarRuleEngineTest {
      * 但使用者可觀察行為有實質變化即升版。
      */
     @Test
-    void ruleVersion_isV9() {
-        assertEquals("TW_RULES_V9", TradingRadarRuleEngine.RULE_VERSION);
+    void ruleVersion_isV11() {
+        assertEquals("TW_RULES_V11", TradingRadarRuleEngine.RULE_VERSION);
     }
 
     // ═══ Task 264：使用者四條需求的驗收測試 ═══════════════════════════════════
@@ -530,17 +530,33 @@ class TradingRadarRuleEngineTest {
      * <p>V8 沒有任何在高檔主動建議賣出的路徑——KD 過熱只關買進閘門、不扣分，動作停在 HOLD。</p>
      */
     @Test
-    void requirement_highPointShouldProduceReduceWhenKdDeadCrossesAtOverbought() {
+    void requirement_kdDeadCrossAloneMustNotProduceReduceAtOverbought() {
         // K=88／D=90：avg=89 > 80 故過熱；本期 k <= d、前期 K>D ⇒ 高檔死叉成立。
         var held = engine.evaluateStock(v9Stock(true, "88", "90", "92", "90", "25", "0.60"));
         var notHeld = engine.evaluateStock(v9Stock(false, "88", "90", "92", "90", "25", "0.60"));
 
         assertEquals(TradingRadarRuleEngine.TimingState.EXTREME_OVERBOUGHT, held.timingState());
-        assertEquals(TradingRadarRuleEngine.Action.REDUCE_CANDIDATE, held.action(),
-                "極端超買且高檔轉弱時須主動建議減碼，不得停在續抱");
+        assertNotEquals(TradingRadarRuleEngine.Action.REDUCE_CANDIDATE, held.action(),
+                "t273 已否定 KD 死叉單一賣出假設，V11 至少還需 MACD 或下跌爆量一項");
+        assertNotEquals(TradingRadarRuleEngine.Action.AVOID, notHeld.action());
+        assertTrue(!held.profitTakingConfirmed());
+    }
+
+    @Test
+    void requirement_profitTakingNeedsTwoIndependentWeakeningSignals() {
+        var heldInput = withExtended(
+                v9Stock(true, "88", "90", "92", "90", "25", "0.60"),
+                extended("0", "0", "0", "-1"), null);
+        var freeInput = withExtended(
+                v9Stock(false, "88", "90", "92", "90", "25", "0.60"),
+                extended("0", "0", "0", "-1"), null);
+
+        var held = engine.evaluateStock(heldInput);
+        var notHeld = engine.evaluateStock(freeInput);
+        assertTrue(held.profitTakingConfirmed());
+        assertEquals(TradingRadarRuleEngine.Action.REDUCE_CANDIDATE, held.action());
         assertEquals(TradingRadarRuleEngine.Action.AVOID, notHeld.action());
-        assertTrue(held.risks().stream().anyMatch(r -> r.contains("不預測隔日漲跌")),
-                "不得宣稱預測能力");
+        assertTrue(held.risks().stream().anyMatch(r -> r.contains("不預測後續漲跌")));
     }
 
     /** 對照組：同樣極端超買但**未**轉弱（前期 K 已在 D 之下）→ 不得減碼，讓利潤奔跑。 */
@@ -572,24 +588,22 @@ class TradingRadarRuleEngineTest {
         assertTrue(held.reasons().stream().anyMatch(r -> r.contains("不建議追殺出場")));
     }
 
-    /** 安全閥：長期結構已完全破壞者不受保護，否則崩壞股永遠拿不到出場訊號。 */
+    /** t273 顯示長期結構破壞組仍顯著反彈，V11 不再取消極端超賣保護。 */
     @Test
-    void requirement_brokenLongTermStructureStillExitsDespiteExtremeOversold() {
+    void requirement_brokenLongTermStructureStillReceivesExtremeOversoldProtection() {
         var held = engine.evaluateStock(v9CrashStock(true, "0.05"));
 
         assertEquals(TradingRadarRuleEngine.TimingState.EXTREME_OVERSOLD, held.timingState());
-        assertTrue(held.action() == TradingRadarRuleEngine.Action.EXIT_CANDIDATE
-                        || held.action() == TradingRadarRuleEngine.Action.REDUCE_CANDIDATE,
-                "年線兩日跌破且位於 52 週最低段 ⇒ 不套用保護，維持分數映射的原始輸出（實得："
-                        + held.action() + "，分數 " + held.score() + "）");
-        assertTrue(held.risks().stream().anyMatch(r -> r.contains("長期結構視為破壞")));
+        assertEquals(TradingRadarRuleEngine.Action.HOLD_CAUTION, held.action());
+        assertTrue(held.risks().stream().anyMatch(r -> r.contains("長期結構仍偏弱")));
     }
 
     /** 需求「不追高」：季線乖離因子讓過度拉伸的標的分數自然下降，V8 的二元 ±1 量不到「貴」。 */
     @Test
     void requirement_extensionFactorPenalisesStretchedPrice() {
-        var stretched = engine.evaluateStock(v9Stock(true, "60", "58", "55", "54", "25", "0.60"));
-        var nearMa = engine.evaluateStock(v9Stock(true, "60", "58", "55", "54", "0", "0.60"));
+        var base = v9Stock(true, "60", "58", "55", "54", "0", "0.60");
+        var stretched = engine.evaluateStock(withExtended(base, extended("10", "20", "8", "1"), null));
+        var nearMa = engine.evaluateStock(withExtended(base, extended("0", "0", "0", "1"), null));
 
         assertTrue(stretched.score() < nearMa.score(),
                 "同樣站上均線，乖離 +25% 的分數必須低於貼著季線者（V8 兩者完全相同）");
@@ -611,7 +625,70 @@ class TradingRadarRuleEngineTest {
     /** 權重總和以斷言釘住，不靠人工加總。 */
     @Test
     void weightsSumToExactlyOne() {
-        assertEquals(1.0, TradingRadarRuleEngine.WEIGHT_SUM, 1e-9);
+        assertEquals(1.0, TradingRadarRuleEngine.SHORT_WEIGHT_SUM, 1e-9);
+        assertEquals(1.0, TradingRadarRuleEngine.MEDIUM_WEIGHT_SUM, 1e-9);
+    }
+
+    @Test
+    void heldFlagDoesNotChangeEitherHorizonScore() {
+        var held = engine.evaluateStock(strongStock(true, TradingRadarRuleEngine.MarketRegime.RISK_ON));
+        var watched = engine.evaluateStock(strongStock(false, TradingRadarRuleEngine.MarketRegime.RISK_ON));
+        assertEquals(held.score(), watched.score());
+        assertEquals(held.shortScore(), watched.shortScore());
+    }
+
+    @Test
+    void positiveFundamentalsLiftBothHorizonsAndMatterMoreToMediumTerm() {
+        var base = strongStock(false, TradingRadarRuleEngine.MarketRegime.RISK_ON);
+        var neutral = engine.evaluateStock(withFundamental(base,
+                new TradingRadarRuleEngine.FundamentalInput(true, 0.0, 0.0, 0.0, 0.0, 0.0, false)));
+        var positive = engine.evaluateStock(withFundamental(base,
+                new TradingRadarRuleEngine.FundamentalInput(true, 1.0, 1.0, 1.0, 1.0, 1.0, false)));
+
+        assertTrue(positive.shortScore() > neutral.shortScore());
+        assertTrue(positive.score() > neutral.score());
+        assertTrue(positive.score() - neutral.score() > positive.shortScore() - neutral.shortScore(),
+                "中期基本面＋產業權重 36% 必須高於短期 20%");
+    }
+
+    @Test
+    void multipleFundamentalDeteriorationBlocksBuyButDoesNotForceSell() {
+        var deteriorating = new TradingRadarRuleEngine.FundamentalInput(
+                true, -1.0, -0.9, 0.2, 0.1, 0.0, false);
+        var watched = engine.evaluateStock(withFundamental(
+                strongStock(false, TradingRadarRuleEngine.MarketRegime.RISK_ON), deteriorating));
+        var held = engine.evaluateStock(withFundamental(
+                strongStock(true, TradingRadarRuleEngine.MarketRegime.RISK_ON), deteriorating));
+
+        assertNotEquals(TradingRadarRuleEngine.Action.BUY_CANDIDATE, watched.action());
+        assertNotEquals(TradingRadarRuleEngine.Action.ADD_CANDIDATE, held.action());
+        assertFalse(List.of(TradingRadarRuleEngine.Action.REDUCE_CANDIDATE,
+                TradingRadarRuleEngine.Action.EXIT_CANDIDATE).contains(held.action()),
+                "多項惡化是買方閘門，不得直接製造賣出");
+        assertTrue(held.risks().stream().anyMatch(v -> v.contains("基本面多項惡化")));
+    }
+
+    @Test
+    void peLossPlusAnotherWeakFactorBlocksTrialBuy() {
+        var base = trialBuyStock("15", "14", "12", "16", "80", "0.3",
+                TradingRadarRuleEngine.Confirmation.ABOVE,
+                TradingRadarRuleEngine.MarketRegime.RISK_OFF, false);
+        var result = engine.evaluateStock(withFundamental(base,
+                new TradingRadarRuleEngine.FundamentalInput(true, -0.6, 0.2, 0.1, -1.0, 0.0, true)));
+
+        assertNotEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, result.action());
+        assertEquals(TradingRadarRuleEngine.CounterTrendState.OVERSOLD_WATCH, result.counterTrend().state());
+        assertTrue(result.counterTrend().risks().stream().anyMatch(v -> v.contains("基本面多項惡化")));
+    }
+
+    @Test
+    void etfNotApplicableRedistributesAllFundamentalWeights() {
+        var result = engine.evaluateStock(withFundamental(
+                strongStock(false, TradingRadarRuleEngine.InstrumentType.BOND,
+                        TradingRadarRuleEngine.MarketRegime.NEUTRAL),
+                TradingRadarRuleEngine.FundamentalInput.NOT_APPLICABLE));
+        assertTrue(result.reasons().stream().noneMatch(v -> v.contains("基本面")));
+        assertTrue(result.risks().stream().noneMatch(v -> v.contains("基本面")));
     }
 
     /** ETF 溢價 ≥ 3% 硬否決買進，且與自身歷史分位無關。 */
@@ -669,6 +746,43 @@ class TradingRadarRuleEngineTest {
                 null,
                 new BigDecimal(ma60Bias), new BigDecimal("33.3"),
                 new BigDecimal(week52), new BigDecimal(band), null, null);
+    }
+
+    private TradingRadarRuleEngine.StockInput withExtended(
+            TradingRadarRuleEngine.StockInput base,
+            TradingRadarRuleEngine.ExtendedIndicators extended,
+            BigDecimal volumeRatio) {
+        return new TradingRadarRuleEngine.StockInput(
+                base.held(), base.price(), base.changePercent(), base.completedChangePercent(),
+                base.indicators(), base.previousK(), base.previousD(),
+                base.ma20Confirmation(), base.ma60Confirmation(), base.ma240Confirmation(),
+                base.instrumentType(), base.marketRegime(), base.marketStale(), base.fxPercentile(),
+                base.ma60BiasPercent(), base.ma240BiasPercent(), base.week52Position(),
+                base.kdBandWidthPercent(), base.etfPremiumPct(), base.etfPremiumPercentile(),
+                new BigDecimal("115"), extended, volumeRatio);
+    }
+
+    private TradingRadarRuleEngine.StockInput withFundamental(
+            TradingRadarRuleEngine.StockInput base,
+            TradingRadarRuleEngine.FundamentalInput fundamental) {
+        return new TradingRadarRuleEngine.StockInput(
+                base.held(), base.price(), base.changePercent(), base.completedChangePercent(),
+                base.indicators(), base.previousK(), base.previousD(),
+                base.ma20Confirmation(), base.ma60Confirmation(), base.ma240Confirmation(),
+                base.instrumentType(), base.marketRegime(), base.marketStale(), base.fxPercentile(),
+                base.ma60BiasPercent(), base.ma240BiasPercent(), base.week52Position(),
+                base.kdBandWidthPercent(), base.etfPremiumPct(), base.etfPremiumPercentile(),
+                base.weeklyMa(), base.extendedIndicators(), base.volumeRatio(), fundamental);
+    }
+
+    private TradingRadarRuleEngine.ExtendedIndicators extended(
+            String bias10, String bias20, String b10b20, String osc) {
+        return new TradingRadarRuleEngine.ExtendedIndicators(
+                new BigDecimal("50"), null, null,
+                null, null, null, null, new BigDecimal(osc),
+                new BigDecimal("50"), new BigDecimal("50"),
+                new BigDecimal(bias10), new BigDecimal(bias20), new BigDecimal(b10b20),
+                new BigDecimal("50"));
     }
 
     /** 跌破全部均線、KD 深度超賣、大盤急跌的崩跌情境；week52 決定長期結構是否已破壞。 */

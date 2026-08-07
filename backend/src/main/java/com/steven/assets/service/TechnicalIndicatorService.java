@@ -18,7 +18,7 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * 共用技術指標計算：月線 MA20、季線 MA60、年線 MA240、KD9。
+ * 共用技術指標計算：MA5／20／60／240、KD/J、MACD、RSI、乖離率與威廉指標。
  * 取最近 240 筆歷史，若當日已有報價但未寫入 history，會把今日股價合併入計算。
  */
 @Service
@@ -39,9 +39,7 @@ public class TechnicalIndicatorService {
      * 完整指標：MA5／20／60／240、當期 KD 與前一期 KD。
      *
      * @param weeklyMa 週線（MA5，台股慣例的 5 個交易日；Task 265）。
-     *                 <b>刻意不進入 {@code TradingRadarRuleEngine.StockInput}、不參與評分與買進閘門</b>——
-     *                 5 個交易日的尺度與「獲利期間數周至兩年」的需求直接衝突，也與 Task 264 降低短線
-     *                 權重的方向相反。它只供畫面顯示與查證。
+     *                 Task 291 起會進入交易雷達的短期與中期獨立權重，短期權重較高。
      *                 <b>價基依呼叫路徑而不同</b>：{@link #computeFromSeries} 由呼叫端餵入（交易雷達餵還原序列），
      *                 {@link #computeAll} 自行讀原始序列故為未還原值——此為 MA20/60/240 既有的同一限制。
      */
@@ -54,7 +52,7 @@ public class TechnicalIndicatorService {
             BigDecimal previousK,
             BigDecimal previousD,
             BigDecimal weeklyMa,
-            /** 走勢圖指標選單同一組值（Task 281）；純揭露，不進評分。 */
+            /** 走勢圖指標選單同一組值；Task 291 起由 RadarInputAssembler 接入雙軌評分。 */
             ExtendedIndicators extended) {
         public static final FullIndicators EMPTY = new FullIndicators(
                 null, null, null, null, null, null, null, null, ExtendedIndicators.EMPTY);
@@ -67,8 +65,9 @@ public class TechnicalIndicatorService {
      * 價基由 {@link #computeFromSeries} 的呼叫端決定（交易雷達餵還原權息序列），
      * 與同一份 {@link FullIndicators} 的 {@code k}／{@code d} 出自同一個 {@code series} 參數。</p>
      *
-     * <p><b>純揭露：一律不進 {@code TradingRadarRuleEngine} 的 StockInput／MarketInput</b>——
-     * 要接進評分請走 Task 276 的 SDD 循環（`TechnicalIndicatorSeriesAlignmentTest` 有反射釘子把關）。</p>
+     * <p>Task 291 起，個股的 J／MACD／RSI／BIAS／W%R 進入短期與中期評分；
+     * EMA12／EMA26 只透過 DIF、DIF／MACD 只透過 OSC 同源納入，避免代數相依值重複灌權重。
+     * 大盤仍以既有 MA／KD 加上市場量能與美股科技日報酬形成 regime。</p>
      */
     public record ExtendedIndicators(
             BigDecimal j9,

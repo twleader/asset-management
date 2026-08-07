@@ -164,7 +164,7 @@ class RadarManualExportDualFormatTest {
         assertThat(r.dirOutcome()).isEqualTo("skipped");
         try (var wb = new org.apache.poi.xssf.usermodel.XSSFWorkbook(
                 new java.io.ByteArrayInputStream(r.xlsx()))) {
-            assertThat(wb.getNumberOfSheets()).isEqualTo(3);
+            assertThat(wb.getNumberOfSheets()).isEqualTo(4);
         }
         verify(dualWriter, never()).write(any(), any(), anyString(), any(), any(), anyBoolean(), any());
     }

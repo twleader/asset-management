@@ -16,45 +16,63 @@ import java.util.List;
 public class TradingRadarRuleEngine {
 
     /**
-     * V9：動作映射由「分數單一維度」改為「趨勢品質 × 進場時機」二維（Task 264）。
-     *
-     * <p>新增季線乖離、52 週相對位置、ETF 折溢價三個因子並重配全部權重；新增 {@link TimingState}
-     * 對動作做雙向覆寫（極端超買＋高檔死叉 → 減碼；極端超賣 → 阻擋出場）；移除 {@code TRIAL_BUY}
-     * 的 {@code RISK_OFF} 封鎖。<b>V9 與 V8 的分數不可直接比較</b>——與 Task 228／232／263 三次
-     * 「因子組成、權重與正規化方式完全相同」的升版不同，本次改了因子、權重與映射結構。</p>
+     * V11：同一標的以短期約一週與中期一至六個月兩組獨立權重評分（Task 291／292）。
+     * 除全部技術指標、個股／大盤量能、美股科技、債券 ETF 匯率外，個股另納入
+     * EPS、近似 ROE、營收、PE 與產業營收；中期基本面＋產業權重高於短期。
+     * 高檔獲利了結須多項轉弱確認，極端超賣則一律阻擋追殺。
      */
-    public static final String RULE_VERSION = "TW_RULES_V9";
+    public static final String RULE_VERSION = "TW_RULES_V11";
 
-    // ─── V9 因子權重（Requirement 43 修訂／Task 264）────────────────────────────
-    // V5~V8 為 11 個因子，尺度佔比「短期 0.37／中期 0.20／長期 0.25／環境 0.18」——短期壓過長期，
-    // 與「獲利期間數周至兩年」的需求相反。V9 增為 14 個，改為「短期 0.23／中期 0.29／長期 0.27／
-    // 環境 0.15／估值 0.06」，中期（數周至數月）成為最大組。
-    // 權重表以 Requirement 43 修訂（TW_RULES_V9）的 Acceptance Criteria 為唯一契約。
-    private static final double W_MA20_POS = 0.06;
-    private static final double W_MA20_CONF = 0.05;
-    private static final double W_KD_MOMENTUM = 0.05;
-    private static final double W_KD_POSITION = 0.07;
-    private static final double W_MA60_POS = 0.10;
-    private static final double W_MA60_CONF = 0.07;
-    /** 季線乖離（均值回歸）：V9 對「不追高殺低」的評分層修正，與動作層的 TimingState 覆寫互補。 */
-    private static final double W_EXTENSION = 0.12;
-    private static final double W_MA240_POS = 0.11;
-    private static final double W_MA240_CONF = 0.09;
-    /** 52 週相對位置：長期趨勢品質。刻意保持正向——追高的抑制由季線乖離與時機覆寫負責。 */
-    private static final double W_52W_POS = 0.07;
-    private static final double W_MARKET = 0.06;
-    private static final double W_DAY_MOVE = 0.04;
-    private static final double W_FX = 0.05;
-    /** ETF 折溢價自身歷史分位：溢價買進等於為同一籃資產多付錢。 */
-    private static final double W_ETF_PREMIUM = 0.06;
+    // ─── V11 雙軌因子權重（Requirement 43／59／60，Task 291／292）────────────
+    private static final double SW_MA5 = 0.05;
+    private static final double SW_MA20 = 0.06;
+    private static final double SW_MA60 = 0.04;
+    private static final double SW_MA240 = 0.02;
+    private static final double SW_KD_J = 0.10;
+    private static final double SW_MACD = 0.08;
+    private static final double SW_RSI = 0.06;
+    private static final double SW_WR = 0.04;
+    private static final double SW_BIAS = 0.07;
+    private static final double SW_VOLUME = 0.08;
+    private static final double SW_MARKET = 0.09;
+    private static final double SW_DAY_MOVE = 0.04;
+    private static final double SW_FX = 0.04;
+    private static final double SW_ETF_PREMIUM = 0.03;
+    private static final double SW_EPS = 0.03;
+    private static final double SW_ROE = 0.03;
+    private static final double SW_REVENUE = 0.04;
+    private static final double SW_PE = 0.02;
+    private static final double SW_INDUSTRY = 0.08;
 
-    /** 全部權重的合計，供測試以斷言釘住（不得靠人工加總）。 */
-    static final double WEIGHT_SUM = W_MA20_POS + W_MA20_CONF + W_KD_MOMENTUM + W_KD_POSITION
-            + W_MA60_POS + W_MA60_CONF + W_EXTENSION + W_MA240_POS + W_MA240_CONF + W_52W_POS
-            + W_MARKET + W_DAY_MOVE + W_FX + W_ETF_PREMIUM;
+    private static final double MW_MA5 = 0.02;
+    private static final double MW_MA20 = 0.05;
+    private static final double MW_MA60 = 0.08;
+    private static final double MW_MA240 = 0.07;
+    private static final double MW_KD_J = 0.04;
+    private static final double MW_MACD = 0.05;
+    private static final double MW_RSI = 0.04;
+    private static final double MW_WR = 0.03;
+    private static final double MW_BIAS = 0.08;
+    private static final double MW_VOLUME = 0.05;
+    private static final double MW_MARKET = 0.06;
+    private static final double MW_DAY_MOVE = 0.02;
+    private static final double MW_FX = 0.03;
+    private static final double MW_ETF_PREMIUM = 0.02;
+    private static final double MW_EPS = 0.07;
+    private static final double MW_ROE = 0.07;
+    private static final double MW_REVENUE = 0.05;
+    private static final double MW_PE = 0.05;
+    private static final double MW_INDUSTRY = 0.12;
 
-    /** 季線乖離的飽和點（%）：正負 25% 即達 -1／+1。 */
-    private static final double BIAS_SATURATION = 25.0;
+    static final double SHORT_WEIGHT_SUM = SW_MA5 + SW_MA20 + SW_MA60 + SW_MA240 + SW_KD_J
+            + SW_MACD + SW_RSI + SW_WR + SW_BIAS + SW_VOLUME + SW_MARKET + SW_DAY_MOVE + SW_FX
+            + SW_ETF_PREMIUM + SW_EPS + SW_ROE + SW_REVENUE + SW_PE + SW_INDUSTRY;
+    static final double MEDIUM_WEIGHT_SUM = MW_MA5 + MW_MA20 + MW_MA60 + MW_MA240 + MW_KD_J
+            + MW_MACD + MW_RSI + MW_WR + MW_BIAS + MW_VOLUME + MW_MARKET + MW_DAY_MOVE + MW_FX
+            + MW_ETF_PREMIUM + MW_EPS + MW_ROE + MW_REVENUE + MW_PE + MW_INDUSTRY;
+    /** 舊測試名稱相容；V11 的主欄位是中期分數。 */
+    static final double WEIGHT_SUM = MEDIUM_WEIGHT_SUM;
+
     /** 極端超買／超賣的季線乖離門檻（%）。 */
     private static final double BIAS_EXTREME_HIGH = 20.0;
     private static final double BIAS_EXTREME_LOW = -20.0;
@@ -66,8 +84,8 @@ public class TradingRadarRuleEngine {
      * 9 日高低帶寬度低於此比例（%）時，KD 視為在雜訊上飽和而失效（Task 264）。
      *
      * <p>實測 00719B（元大美債1-3）近 60 個交易日的 9 日高低帶平均寬度僅 {@code 1.011%}，
-     * 其 {@code K=90.76} 實質只代表「比 9 日低點高 0.37 元」。V9 新增兩條由 KD 驅動的<b>動作覆寫</b>，
-     * 不做此防護會讓債券 ETF 大量誤發減碼與試單建議——那比現況更糟。</p>
+     * 其 {@code K=90.76} 實質只代表「比 9 日低點高 0.37 元」。V10 起把 KD／J／W%R 納入評分與時機判斷，
+     * 不做此防護會讓窄幅債券 ETF 的飽和值誤導分數與動作。</p>
      */
     private static final double KD_BAND_MIN_PERCENT = 2.0;
 
@@ -94,17 +112,17 @@ public class TradingRadarRuleEngine {
     /**
      * 極端超賣的門檻，對稱於 {@link #KD_OVERHEAT_AVG}／{@link #KD_OVERHEAT_K}（Task 264）。
      *
-     * <p><b>對稱性是 V9 的核心論證</b>：買方既有「超買否決買進」，賣方就必須有「超賣否決賣出」，
+     * <p><b>V11 延續此對稱性</b>：買方既有「超買否決買進」，賣方就必須有「超賣否決賣出」，
      * 否則系統只在單一方向上保守，等於在低點建議殺低。</p>
      */
     private static final double KD_OVERSOLD_AVG = 20.0;
     private static final double KD_OVERSOLD_K = 15.0;
 
     /**
-     * 52 週相對位置低於此值、且年線已兩日跌破時，視為長期結構已完全破壞。
+     * 52 週相對位置低於此值、且年線已兩日跌破時，標記長期結構偏弱。
      *
-     * <p>這是「極端超賣不殺低」的必要安全閥：沒有它，一檔持續崩壞的標的會因為 KD 永遠釘在低檔而
-     * <b>永遠拿不到出場訊號</b>。有了它，「大盤急跌造成的錯殺」被保護、「真實崩壞」仍會出場。</p>
+     * <p>V11 只把此狀態當作風險揭露與回測觀察欄位；依 t273 實證，它不再取消極端超賣保護，
+     * 避免在低檔因長期趨勢弱而追殺。</p>
      */
     private static final double WEEK52_BROKEN = 0.10;
 
@@ -178,16 +196,67 @@ public class TradingRadarRuleEngine {
             BigDecimal d
     ) {}
 
+    /** Task 281 已落地的完整技術指標；Task 291 起納入雙軌評分。 */
+    public record ExtendedIndicators(
+            BigDecimal j9,
+            BigDecimal k3d2,
+            BigDecimal rsv,
+            BigDecimal ema12,
+            BigDecimal ema26,
+            BigDecimal dif,
+            BigDecimal macd,
+            BigDecimal osc,
+            BigDecimal rsi5,
+            BigDecimal rsi10,
+            BigDecimal bias10,
+            BigDecimal bias20,
+            BigDecimal b10b20,
+            BigDecimal wr9
+    ) {}
+
     public record MarketInput(
             BigDecimal price,
             BigDecimal changePercent,
             Indicators indicators,
             Confirmation ma60Confirmation,
-            Confirmation ma240Confirmation
-    ) {}
+            Confirmation ma240Confirmation,
+            BigDecimal completedChangePercent,
+            BigDecimal marketVolumeRatio,
+            BigDecimal marketTurnoverRatio,
+            BigDecimal nasdaqChangePercent,
+            BigDecimal soxChangePercent,
+            BigDecimal usTechCompositePercent,
+            boolean usTechAvailable
+    ) {
+        /** V10 前的呼叫形狀；量能與美股資料缺值時不加減分。 */
+        public MarketInput(BigDecimal price, BigDecimal changePercent, Indicators indicators,
+                           Confirmation ma60Confirmation, Confirmation ma240Confirmation) {
+            this(price, changePercent, indicators, ma60Confirmation, ma240Confirmation,
+                    changePercent, null, null, null, null, null, false);
+        }
+    }
 
     /**
-     * @param changePercent          盤中即時漲跌幅：供顯示與「單日漲跌幅扣分」使用。
+     * Task 292 已在 as-of resolver 正規化為 [-1,+1] 的基本面／產業輸入。
+     *
+     * <p>{@code applicable=false} 代表 ETF，五項一律不適用；個股的某項 {@code null}
+     * 代表當時資料尚未累積完成，由 Accumulator 重分配權重，不得填 0。</p>
+     */
+    public record FundamentalInput(
+            boolean applicable,
+            Double epsContribution,
+            Double roeContribution,
+            Double revenueContribution,
+            Double peContribution,
+            Double industryContribution,
+            boolean peLoss
+    ) {
+        public static final FundamentalInput NOT_APPLICABLE =
+                new FundamentalInput(false, null, null, null, null, null, false);
+    }
+
+    /**
+     * @param changePercent          盤中即時漲跌幅：只供既有相容欄位與顯示使用。
      * @param completedChangePercent 最近一根完成日 K 的漲跌幅：供逆勢「停止續跌」判定，
      *                               盤中為常數，避免零交叉造成逐 tick 翻轉（Task 217.3）。
      * @param marketStale            大盤資料非當前交易日：只收緊不放寬（Task 217.2）。
@@ -196,7 +265,7 @@ public class TradingRadarRuleEngine {
      *                               ≈ 底層外幣價 × 匯率——實測 00719B 與 USD/TWD 近一年相關係數 0.9737、
      *                               剝除匯率後底層僅動 2.05%（台幣價動 10.34%），故「站上均線」量到的
      *                               相當部分是匯率而非標的本身。此欄位讓換匯貴賤能獨立進入評分（Requirement 47）。
-     * @param ma60BiasPercent        現價對季線的乖離率（%）。數周至數月尺度，是 V9 的均值回歸主因子。
+     * @param ma60BiasPercent        現價對季線的乖離率（%），供 V11 時機狀態與追高／低接閘門使用。
      * @param ma240BiasPercent       現價對年線的乖離率（%）。供 TRIAL_BUY 的長線結構門檻與風險文案。
      *                               <b>單位為百分比</b>，故 {@link #TRIAL_BUY_MIN_ANNUAL_PREMIUM} 亦以百分比表示。
      * @param week52Position         52 週相對位置，值域 {@code [0,1]}（呼叫端須 clamp）。長期趨勢品質。
@@ -224,8 +293,45 @@ public class TradingRadarRuleEngine {
             BigDecimal week52Position,
             BigDecimal kdBandWidthPercent,
             BigDecimal etfPremiumPct,
-            BigDecimal etfPremiumPercentile
-    ) {}
+            BigDecimal etfPremiumPercentile,
+            BigDecimal weeklyMa,
+            ExtendedIndicators extendedIndicators,
+            BigDecimal volumeRatio,
+            FundamentalInput fundamental
+    ) {
+        /** V10 的完整技術面建構式；舊回測／測試沒有基本面 observation。 */
+        public StockInput(
+                boolean held, BigDecimal price, BigDecimal changePercent, BigDecimal completedChangePercent,
+                Indicators indicators, BigDecimal previousK, BigDecimal previousD,
+                Confirmation ma20Confirmation, Confirmation ma60Confirmation, Confirmation ma240Confirmation,
+                InstrumentType instrumentType, MarketRegime marketRegime, boolean marketStale,
+                BigDecimal fxPercentile, BigDecimal ma60BiasPercent, BigDecimal ma240BiasPercent,
+                BigDecimal week52Position, BigDecimal kdBandWidthPercent,
+                BigDecimal etfPremiumPct, BigDecimal etfPremiumPercentile,
+                BigDecimal weeklyMa, ExtendedIndicators extendedIndicators, BigDecimal volumeRatio) {
+            this(held, price, changePercent, completedChangePercent, indicators, previousK, previousD,
+                    ma20Confirmation, ma60Confirmation, ma240Confirmation, instrumentType, marketRegime,
+                    marketStale, fxPercentile, ma60BiasPercent, ma240BiasPercent, week52Position,
+                    kdBandWidthPercent, etfPremiumPct, etfPremiumPercentile, weeklyMa,
+                    extendedIndicators, volumeRatio, FundamentalInput.NOT_APPLICABLE);
+        }
+
+        /** Task 291 前的建構形狀；新增 optional 因子缺值時由 Accumulator 重分配。 */
+        public StockInput(
+                boolean held, BigDecimal price, BigDecimal changePercent, BigDecimal completedChangePercent,
+                Indicators indicators, BigDecimal previousK, BigDecimal previousD,
+                Confirmation ma20Confirmation, Confirmation ma60Confirmation, Confirmation ma240Confirmation,
+                InstrumentType instrumentType, MarketRegime marketRegime, boolean marketStale,
+                BigDecimal fxPercentile, BigDecimal ma60BiasPercent, BigDecimal ma240BiasPercent,
+                BigDecimal week52Position, BigDecimal kdBandWidthPercent,
+                BigDecimal etfPremiumPct, BigDecimal etfPremiumPercentile) {
+            this(held, price, changePercent, completedChangePercent, indicators, previousK, previousD,
+                    ma20Confirmation, ma60Confirmation, ma240Confirmation, instrumentType, marketRegime,
+                    marketStale, fxPercentile, ma60BiasPercent, ma240BiasPercent, week52Position,
+                    kdBandWidthPercent, etfPremiumPct, etfPremiumPercentile, null, null, null,
+                    FundamentalInput.NOT_APPLICABLE);
+        }
+    }
 
     public record MarketResult(
             Integer score,
@@ -240,16 +346,15 @@ public class TradingRadarRuleEngine {
             CounterTrendResult counterTrend,
             List<String> reasons,
             List<String> risks,
-            /** KD 短線熱度（Task 232）；供畫面在收合列即可辨識，不影響 score 與 action。 */
+            /** KD 短線熱度；V11 同時影響 KD/J 因子、買進閘門與畫面揭露。 */
             KdHeat kdHeat,
             /** 進場時機（Task 264）；供畫面在收合列即可辨識，並對動作做雙向覆寫。 */
             TimingState timingState,
             /**
-             * KD 高檔死亡交叉（Task 273 新增輸出）。
+             * KD 高檔死亡交叉（Task 273 新增輸出，Task 291 起為多證據獲利了結條件之一）。
              *
-             * <p><b>純為輸出，不改變任何既有行為</b>——它只是把 {@link #kdDeadCross(StockInput)} 這個
-             * 既有內部判定的結果暴露出來，供回測框架組出「極端超買＋高檔死叉」這條述詞，
-             * 而不必在回測端複製一份會漂移的判定邏輯。</p>
+             * <p>不得單獨觸發賣出；必須與 MACD 或下跌爆量至少一項共同成立，
+             * 並且已位於極端高檔，才構成 {@code profitTakingConfirmed}。</p>
              *
              * <p>資料不完整而走 {@code NO_TRADE} 早退分支時一律為 {@code false}：那代表
              * <b>無法判定</b>，不得因為「呼叫 kdDeadCross 剛好也回 false」就視為等價——
@@ -259,10 +364,15 @@ public class TradingRadarRuleEngine {
             /**
              * 長期結構已破壞（年線兩日跌破且 52 週位置 ≤ {@link #WEEK52_BROKEN}；Task 273 新增輸出）。
              *
-             * <p>存在理由與 {@code kdDeadCross} 相同：供回測分辨「極端超賣受保護」與
-             * 「極端超賣但崩壞、不受保護」兩組日子。早退分支同樣一律 {@code false}。</p>
+             * <p>供回測與風險揭露；V11 不再讓此狀態取消極端超賣保護。早退分支一律為 false。</p>
              */
-            boolean longTermBroken
+            boolean longTermBroken,
+            Integer shortScore,
+            Action shortAction,
+            List<String> shortReasons,
+            List<String> shortRisks,
+            boolean horizonConflict,
+            boolean profitTakingConfirmed
     ) {}
 
     public record CounterTrendResult(
@@ -324,6 +434,43 @@ public class TradingRadarRuleEngine {
             risks.add("大盤單日漲幅達 3% 以上，追價風險升高。 ");
         }
 
+        Double marketActivity = averageAvailable(
+                decimal(input.marketVolumeRatio()), decimal(input.marketTurnoverRatio()));
+        if (marketActivity == null || input.completedChangePercent() == null) {
+            risks.add("大盤完成日成交量或成交金額資料不足，本日不採計量價環境分數。 ");
+        } else if (input.completedChangePercent().signum() > 0 && marketActivity >= 1.1) {
+            score += 8;
+            reasons.add("大盤完成日上漲且量能／成交金額同步放大，需求獲得確認。 ");
+        } else if (input.completedChangePercent().signum() < 0 && marketActivity >= 1.1) {
+            score -= 10;
+            risks.add("大盤完成日下跌且量能／成交金額放大，市場賣壓升高。 ");
+        } else if (input.completedChangePercent().signum() > 0 && marketActivity <= 0.8) {
+            score -= 3;
+            risks.add("大盤完成日上漲但量能不足，漲勢確認偏弱。 ");
+        } else if (input.completedChangePercent().signum() < 0 && marketActivity <= 0.8) {
+            score += 3;
+            reasons.add("大盤完成日下跌但量能收斂，賣壓未擴大。 ");
+        }
+
+        if (!input.usTechAvailable() || input.usTechCompositePercent() == null) {
+            risks.add("前一個已完成的美股科技共同交易日資料不足，本日不採計跨市場分數。 ");
+        } else {
+            double us = input.usTechCompositePercent().doubleValue();
+            if (us >= 1.0) {
+                score += 6;
+                reasons.add("前一美股科技交易日明顯上漲，跨市場風險偏好正向。 ");
+            } else if (us > 0) {
+                score += 3;
+                reasons.add("前一美股科技交易日上漲，跨市場情緒略偏正向。 ");
+            } else if (us <= -1.5) {
+                score -= 6;
+                risks.add("前一美股科技交易日明顯下跌，科技風險偏好轉弱。 ");
+            } else if (us < 0) {
+                score -= 3;
+                risks.add("前一美股科技交易日下跌，跨市場情緒略偏保守。 ");
+            }
+        }
+
         score = clamp(score);
         MarketRegime regime = score >= 65
                 ? MarketRegime.RISK_ON
@@ -339,58 +486,112 @@ public class TradingRadarRuleEngine {
             return new StockResult(null, Action.NO_TRADE,
                     new CounterTrendResult(CounterTrendState.NONE, List.of(), List.of()), List.of(),
                     List.of("個股必要的 MA20／60／240、KD、241 根完成日 K 或大盤資料不足，今日不交易。"),
-                    KdHeat.NORMAL, TimingState.NEUTRAL, false, false);
+                    KdHeat.NORMAL, TimingState.NEUTRAL, false, false,
+                    null, Action.NO_TRADE, List.of(),
+                    List.of("必要資料不足，短期軌今日不交易。"), false, false);
         }
 
+        boolean narrowBand = narrowKdBand(input);
+        KdHeat kdHeat = kdHeatOf(input);
+        TimingState timing = timingOf(input);
+        boolean profitTaking = profitTakingConfirmed(input, timing);
+
+        HorizonScore medium = evaluateHorizon(input, false, narrowBand, kdHeat, timing, profitTaking);
+        HorizonScore shortTerm = evaluateHorizon(input, true, narrowBand, kdHeat, timing, profitTaking);
+        CounterTrendResult counterTrend = evaluateCounterTrend(input);
+        return new StockResult(
+                medium.score(), medium.action(), counterTrend,
+                medium.reasons(), medium.risks(), kdHeat, timing,
+                kdDeadCross(input), longTermBroken(input),
+                shortTerm.score(), shortTerm.action(), shortTerm.reasons(), shortTerm.risks(),
+                actionGroup(medium.action()) != actionGroup(shortTerm.action()), profitTaking);
+    }
+
+    private record HorizonScore(
+            int score,
+            Action action,
+            List<String> reasons,
+            List<String> risks
+    ) {}
+
+    /** 單一持有期的完整累加與動作映射；兩軌各自建立 Accumulator，不共用分數再切門檻。 */
+    private HorizonScore evaluateHorizon(
+            StockInput input,
+            boolean shortTerm,
+            boolean narrowBand,
+            KdHeat kdHeat,
+            TimingState timing,
+            boolean profitTaking) {
         List<String> reasons = new ArrayList<>();
         List<String> risks = new ArrayList<>();
         Accumulator acc = new Accumulator();
 
-        acc.add(W_MA20_POS, positionOf(input.price(), input.indicators().ma20(), "月線", reasons, risks));
-        acc.add(W_MA60_POS, positionOf(input.price(), input.indicators().ma60(), "季線", reasons, risks));
-        acc.add(W_MA240_POS, positionOf(input.price(), input.indicators().ma240(), "年線", reasons, risks));
-        acc.add(W_MA20_CONF, confirmationOf(input.ma20Confirmation(), "月線", reasons, risks));
-        acc.add(W_MA60_CONF, confirmationOf(input.ma60Confirmation(), "季線", reasons, risks));
-        acc.add(W_MA240_CONF, confirmationOf(input.ma240Confirmation(), "年線", reasons, risks));
+        acc.add(shortTerm ? SW_MA5 : MW_MA5,
+                positionOf(input.price(), input.weeklyMa(), "週線", reasons, risks));
+        acc.add(shortTerm ? SW_MA20 : MW_MA20,
+                maWithConfirmation(input.price(), input.indicators().ma20(), input.ma20Confirmation(),
+                        "月線", reasons, risks));
+        acc.add(shortTerm ? SW_MA60 : MW_MA60,
+                maWithConfirmation(input.price(), input.indicators().ma60(), input.ma60Confirmation(),
+                        "季線", reasons, risks));
+        acc.add(shortTerm ? SW_MA240 : MW_MA240,
+                maWithConfirmation(input.price(), input.indicators().ma240(), input.ma240Confirmation(),
+                        "年線", reasons, risks));
 
-        acc.add(W_EXTENSION, extensionOf(input.ma60BiasPercent(), reasons, risks));
-        acc.add(W_52W_POS, week52Of(input.week52Position(), reasons, risks));
-
-        BigDecimal k = input.indicators().k();
-        BigDecimal d = input.indicators().d();
-        boolean narrowBand = narrowKdBand(input);
         if (narrowBand) {
-            risks.add("近 9 個交易日的高低帶過窄，KD 在雜訊上飽和，本日不以 KD 判斷位置與時機。 ");
+            risks.add("近 9 個交易日高低帶過窄，KD／J／W%R 在雜訊上飽和，本日不採計。 ");
         }
-        // KD 拆成兩個正交子因子。V4 把兩者混在一組加減分裡，語意上是錯的：
-        // K=90.8/D=86.0 與 K=26.1/D=20.7 同樣是 K>D，但前者是「漲多了」、後者是「跌深反彈」。
-        acc.add(W_KD_MOMENTUM, kdMomentum(k, d, reasons, risks));
-        // 窄幅時 KD 位置回 null，權重由 Accumulator 重分配（不得以 0 充當中性值）。
-        acc.add(W_KD_POSITION, narrowBand ? null : kdPosition(k, d, reasons));
-        // 熱度文案與買進閘門共用 kdHeatOf()，不在此另行比較門檻（Task 232）。
-        KdHeat kdHeat = kdHeatOf(input);
-        describeHeat(kdHeat, k, d, risks);
+        acc.add(shortTerm ? SW_KD_J : MW_KD_J,
+                narrowBand ? null : kdJContribution(input, reasons, risks));
+        acc.add(shortTerm ? SW_MACD : MW_MACD,
+                macdContribution(input.extendedIndicators(), reasons, risks));
+        acc.add(shortTerm ? SW_RSI : MW_RSI,
+                rsiContribution(input.extendedIndicators(), reasons, risks));
+        acc.add(shortTerm ? SW_WR : MW_WR,
+                narrowBand ? null : wrContribution(input.extendedIndicators(), reasons, risks));
+        acc.add(shortTerm ? SW_BIAS : MW_BIAS,
+                biasContribution(input.extendedIndicators(), reasons, risks));
+        acc.add(shortTerm ? SW_VOLUME : MW_VOLUME,
+                volumeContribution(input.completedChangePercent(), input.volumeRatio(), reasons, risks));
 
         if (equityMarketApplies(input)) {
-            acc.add(W_MARKET, marketContribution(input, reasons, risks));
+            acc.add(shortTerm ? SW_MARKET : MW_MARKET, marketContribution(input, reasons, risks));
         } else {
-            // 債券不套台股大盤 regime：該因子回 null，權重由其餘有效因子按比例吸收。
             reasons.add("資產類別為債券，不套用台股大盤 RISK_ON／RISK_OFF 加減分與買進閘門。 ");
         }
+        acc.add(shortTerm ? SW_DAY_MOVE : MW_DAY_MOVE,
+                completedDayContribution(input.completedChangePercent(), reasons, risks));
+        acc.add(shortTerm ? SW_FX : MW_FX,
+                fxContribution(input.fxPercentile(), reasons, risks));
+        acc.add(shortTerm ? SW_ETF_PREMIUM : MW_ETF_PREMIUM,
+                etfPremiumContribution(input, reasons, risks));
 
-        acc.add(W_DAY_MOVE, dayMoveContribution(input.changePercent(), risks));
-        acc.add(W_FX, fxContribution(input.fxPercentile(), reasons, risks));
-        acc.add(W_ETF_PREMIUM, etfPremiumContribution(input, reasons, risks));
+        FundamentalInput fundamental = input.fundamental();
+        if (fundamental != null && fundamental.applicable()) {
+            acc.add(shortTerm ? SW_EPS : MW_EPS,
+                    fundamentalContribution(fundamental.epsContribution(), "EPS 年增", reasons, risks));
+            acc.add(shortTerm ? SW_ROE : MW_ROE,
+                    fundamentalContribution(fundamental.roeContribution(), "近似 ROE", reasons, risks));
+            acc.add(shortTerm ? SW_REVENUE : MW_REVENUE,
+                    fundamentalContribution(fundamental.revenueContribution(), "近三月營收年增", reasons, risks));
+            acc.add(shortTerm ? SW_PE : MW_PE,
+                    fundamentalContribution(fundamental.peContribution(),
+                            fundamental.peLoss() ? "PE（可信來源顯示虧損）" : "PE 自身分位",
+                            reasons, risks));
+            acc.add(shortTerm ? SW_INDUSTRY : MW_INDUSTRY,
+                    fundamentalContribution(fundamental.industryContribution(), "產業營收年增", reasons, risks));
+            int available = availableFundamentalCount(fundamental);
+            if (available == 0) {
+                risks.add("個股基本面與產業歷史尚在累積，本日缺值權重已重分配，不宣稱已完整評估。 ");
+            } else if (available < 5) {
+                risks.add("部分個股基本面／產業資料尚在累積，缺值權重已重分配。 ");
+            }
+        }
 
+        describeHeat(kdHeat, input.indicators().k(), input.indicators().d(), risks);
         int score = acc.score();
-        TimingState timing = timingOf(input);
-        Action action = actionFor(input, score, timing, risks, reasons);
-        CounterTrendResult counterTrend = evaluateCounterTrend(input);
-        // 兩個新欄位純為輸出（Task 273），不參與 score／action 的產生——上方 actionFor() 已各自
-        // 呼叫過同樣的判定，此處重算是為了把結果暴露給回測，兩者必然一致（純函數）。
-        return new StockResult(score, action, counterTrend,
-                List.copyOf(reasons), List.copyOf(risks), kdHeat, timing,
-                kdDeadCross(input), longTermBroken(input));
+        Action action = actionFor(input, score, timing, profitTaking, risks, reasons);
+        return new HorizonScore(score, action, List.copyOf(reasons), List.copyOf(risks));
     }
 
     private CounterTrendResult evaluateCounterTrend(StockInput input) {
@@ -421,12 +622,10 @@ public class TradingRadarRuleEngine {
                 && input.previousK().compareTo(input.previousD()) <= 0
                 && k.compareTo(d) > 0;
         // 「停止續跌」以最近一根完成日 K 判定：盤中漲跌幅在 0% 附近零交叉會讓狀態逐 tick 翻轉（Task 217.3）。
-        BigDecimal stabilityBasis = input.completedChangePercent() != null
-                ? input.completedChangePercent()
-                : input.changePercent();
-        boolean stabilized = stabilityBasis.compareTo(BigDecimal.ZERO) >= 0;
+        BigDecimal stabilityBasis = input.completedChangePercent();
+        boolean stabilized = stabilityBasis != null && stabilityBasis.compareTo(BigDecimal.ZERO) >= 0;
 
-        if (lowKd && goldenCross && stabilized) {
+        if (lowKd && goldenCross && stabilized && !fundamentalDeteriorating(input)) {
             reasons.add("K、D 皆低於 20，且 K 由前一期不高於 D 轉為 K>D，形成低檔黃金交叉。 ");
             reasons.add("本日價格已停止續跌，可列為小額分批的逆勢試單候選。 ");
             risks.add("逆勢試單不取代原本的趨勢分數與主規則建議，必須限制部位並分批。 ");
@@ -437,6 +636,10 @@ public class TradingRadarRuleEngine {
                     CounterTrendState.TRIAL_CANDIDATE,
                     List.copyOf(reasons),
                     List.copyOf(risks));
+        }
+
+        if (lowKd && goldenCross && stabilized && fundamentalDeteriorating(input)) {
+            risks.add("基本面多項惡化，本次只保留超跌觀察，不升級為逆勢試單候選。 ");
         }
 
         if (!lowKd) risks.add("D 尚未低於 20，KD 尚未完整進入低檔。 ");
@@ -477,7 +680,7 @@ public class TradingRadarRuleEngine {
         int score() {
             if (sumW <= 0) return 50;
             double sigma = sumWC / sumW;
-            return (int) Math.round(50 + 50 * sigma);
+            return Math.max(0, Math.min(100, (int) Math.round(50 + 50 * sigma)));
         }
     }
 
@@ -518,31 +721,192 @@ public class TradingRadarRuleEngine {
         return null;
     }
 
-    /** KD 動能：K 與 D 的乖離，±10 即飽和。表達短線轉強／轉弱。 */
-    private Double kdMomentum(BigDecimal k, BigDecimal d, List<String> reasons, List<String> risks) {
-        if (k == null || d == null) return null;
-        double v = clampUnit(k.subtract(d).doubleValue() / 10.0);
-        if (v > 0) {
-            reasons.add("KD 為 K>D，短線動能偏正向。 ");
-        } else if (v < 0) {
-            risks.add("KD 未呈 K>D，短線動能偏弱。 ");
+    /** MA20／60／240 將即時位置與兩個完成日的確認等權平均。 */
+    private Double maWithConfirmation(BigDecimal price, BigDecimal ma, Confirmation confirmation,
+                                      String label, List<String> reasons, List<String> risks) {
+        return averageAvailable(
+                positionOf(price, ma, label, reasons, risks),
+                confirmationOf(confirmation, label, reasons, risks));
+    }
+
+    /** KD 方向、KD 均值位置與 J9 位置三者的可用值平均。 */
+    private Double kdJContribution(StockInput input, List<String> reasons, List<String> risks) {
+        BigDecimal k = input.indicators() == null ? null : input.indicators().k();
+        BigDecimal d = input.indicators() == null ? null : input.indicators().d();
+        Double direction = null;
+        Double position = null;
+        if (k != null && d != null) {
+            direction = (double) Integer.signum(k.compareTo(d));
+            double average = k.add(d).doubleValue() / 2.0;
+            position = clampUnit((50.0 - average) / 50.0);
+            if (direction > 0) reasons.add("KD 為 K>D，短線動能轉強。 ");
+            if (direction < 0) risks.add("KD 為 K<D，短線動能轉弱。 ");
+            if (average < 25) reasons.add("KD 位於低檔，具跌深承接條件。 ");
+            if (average > 75) risks.add("KD 位於高檔，不鼓勵追價。 ");
         }
-        return v;
+        BigDecimal j = input.extendedIndicators() == null ? null : input.extendedIndicators().j9();
+        Double jPosition = j == null ? null : clampUnit((50.0 - j.doubleValue()) / 50.0);
+        return averageAvailable(direction, position, jPosition);
+    }
+
+    /** MACD 只取 OSC 正負，避免 DIF、MACD、OSC 的代數相依值重複灌權重。 */
+    private Double macdContribution(ExtendedIndicators indicators,
+                                    List<String> reasons, List<String> risks) {
+        BigDecimal osc = indicators == null ? null : indicators.osc();
+        if (osc == null) return null;
+        int sign = osc.signum();
+        if (sign > 0) reasons.add("MACD 柱狀體 OSC 為正，動能偏多。 ");
+        if (sign < 0) risks.add("MACD 柱狀體 OSC 為負，動能偏弱。 ");
+        return (double) sign;
+    }
+
+    /** RSI5／RSI10 可用值平均，以 50 為中性；低檔有利承接、高檔抑制追價。 */
+    private Double rsiContribution(ExtendedIndicators indicators,
+                                   List<String> reasons, List<String> risks) {
+        if (indicators == null) return null;
+        Double average = averageAvailable(decimal(indicators.rsi5()), decimal(indicators.rsi10()));
+        if (average == null) return null;
+        if (average <= 30) reasons.add("RSI 位於低檔，價格位置有利逢低觀察。 ");
+        if (average >= 70) risks.add("RSI 位於高檔，避免追價。 ");
+        return clampUnit((50.0 - average) / 50.0);
+    }
+
+    /** 本系統 W%R 值域為 0（高檔）至 100（低檔）。 */
+    private Double wrContribution(ExtendedIndicators indicators,
+                                  List<String> reasons, List<String> risks) {
+        BigDecimal wr = indicators == null ? null : indicators.wr9();
+        if (wr == null) return null;
+        if (wr.doubleValue() >= 80) reasons.add("威廉指標位於低檔，具跌深承接條件。 ");
+        if (wr.doubleValue() <= 20) risks.add("威廉指標位於高檔，避免追價。 ");
+        return clampUnit((wr.doubleValue() - 50.0) / 50.0);
+    }
+
+    /** BIAS10、BIAS20、BIAS10-BIAS20 分別依固定尺度正規化後取可用值平均。 */
+    private Double biasContribution(ExtendedIndicators indicators,
+                                    List<String> reasons, List<String> risks) {
+        if (indicators == null) return null;
+        Double value = averageAvailable(
+                indicators.bias10() == null ? null : clampUnit(-indicators.bias10().doubleValue() / 10.0),
+                indicators.bias20() == null ? null : clampUnit(-indicators.bias20().doubleValue() / 20.0),
+                indicators.b10b20() == null ? null : clampUnit(-indicators.b10b20().doubleValue() / 8.0));
+        if (value != null && value > 0.4) reasons.add("乖離率偏低，具均值回歸與逢低承接空間。 ");
+        if (value != null && value < -0.4) risks.add("乖離率偏高，追價成本升高。 ");
+        return value;
+    }
+
+    /** 個股完成日量價確認；相對量使用調整後成交股數計算。 */
+    private Double volumeContribution(BigDecimal completedChangePercent, BigDecimal volumeRatio,
+                                      List<String> reasons, List<String> risks) {
+        if (completedChangePercent == null || volumeRatio == null) return null;
+        int direction = completedChangePercent.signum();
+        double ratio = volumeRatio.doubleValue();
+        if (direction > 0 && ratio >= 1.2) {
+            reasons.add("完成日帶量上漲，需求獲得成交量確認。 ");
+            return 1.0;
+        }
+        if (direction < 0 && ratio >= 1.2) {
+            risks.add("完成日爆量下跌，籌碼賣壓升高。 ");
+            return -1.0;
+        }
+        if (direction > 0 && ratio <= 0.7) {
+            risks.add("完成日上漲但量能不足，漲勢確認偏弱。 ");
+            return -0.4;
+        }
+        if (direction < 0 && ratio <= 0.7) {
+            reasons.add("完成日下跌但成交量收斂，賣壓未擴大。 ");
+            return 0.4;
+        }
+        return 0.0;
+    }
+
+    /** 完成日漲跌採均值回歸方向，上漲延伸為負、下跌回落為正。 */
+    private Double completedDayContribution(BigDecimal completedChangePercent,
+                                            List<String> reasons, List<String> risks) {
+        if (completedChangePercent == null) return null;
+        double value = clampUnit(-completedChangePercent.doubleValue() / 5.0);
+        if (completedChangePercent.compareTo(BigDecimal.valueOf(5)) >= 0) {
+            risks.add("完成日漲幅達 5% 以上，避免追高。 ");
+        } else if (completedChangePercent.signum() < 0) {
+            reasons.add("完成日價格回落，位置成本相對降低；仍須等待止跌才可買進。 ");
+        }
+        return value;
+    }
+
+    /** 數值已由 as-of resolver 映射至 [-1,+1]；本引擎只負責具名揭露與加權。 */
+    private Double fundamentalContribution(
+            Double contribution, String label, List<String> reasons, List<String> risks) {
+        if (contribution == null) return null;
+        double value = clampUnit(contribution);
+        if (value >= 0.5) reasons.add(label + "表現正向，已納入評分。 ");
+        else if (value <= -0.5) risks.add(label + "表現偏弱，已納入評分。 ");
+        return value;
+    }
+
+    private int availableFundamentalCount(FundamentalInput input) {
+        int count = 0;
+        if (input.epsContribution() != null) count++;
+        if (input.roeContribution() != null) count++;
+        if (input.revenueContribution() != null) count++;
+        if (input.peContribution() != null) count++;
+        if (input.industryContribution() != null) count++;
+        return count;
     }
 
     /**
-     * KD 位置：超買為負、超賣為正。這是 V5 新增的維度——V4 只有「K 是否大於 D」，
-     * 無法區分「在高檔轉強」（漲多了）與「在低檔轉強」（跌深反彈）。
+     * 多項惡化只是買方硬閘門，不直接製造賣出訊號，避免在財報公布後追殺。
      */
-    private Double kdPosition(BigDecimal k, BigDecimal d, List<String> reasons) {
-        if (k == null || d == null) return null;
-        double avg = k.add(d).doubleValue() / 2.0;
-        double v = clampUnit(-(avg - 50.0) / 50.0);
-        if (avg < 25.0) {
-            reasons.add("KD 均值 " + Math.round(avg) + " 位於超賣區，短線跌深。 ");
+    private boolean fundamentalDeteriorating(StockInput input) {
+        FundamentalInput f = input == null ? null : input.fundamental();
+        if (f == null || !f.applicable()) return false;
+        Double[] basic = { f.epsContribution(), f.roeContribution(), f.revenueContribution(), f.peContribution() };
+        int severe = 0;
+        for (Double value : basic) if (value != null && value <= -0.8) severe++;
+        if (severe >= 2) return true;
+        if (!f.peLoss()) return false;
+        return (f.epsContribution() != null && f.epsContribution() <= -0.5)
+                || (f.roeContribution() != null && f.roeContribution() <= -0.5)
+                || (f.revenueContribution() != null && f.revenueContribution() <= -0.5);
+    }
+
+    /** 極端高檔時，KD、MACD、下跌爆量三種獨立轉弱證據至少兩項才確認獲利了結。 */
+    private boolean profitTakingConfirmed(StockInput input, TimingState timing) {
+        if (timing != TimingState.EXTREME_OVERBOUGHT) return false;
+        int evidence = kdDeadCross(input) ? 1 : 0;
+        ExtendedIndicators extended = input.extendedIndicators();
+        if (extended != null && extended.osc() != null && extended.osc().signum() < 0) evidence++;
+        if (input.completedChangePercent() != null && input.completedChangePercent().signum() < 0
+                && input.volumeRatio() != null && input.volumeRatio().compareTo(BigDecimal.valueOf(1.2)) >= 0) {
+            evidence++;
         }
-        // 超買側的文案改由 describeHeat() 統一輸出，與買進閘門共用同一門檻求值處（Task 232）。
-        return v;
+        return evidence >= 2;
+    }
+
+    /** 短中期分歧只比較買進／中性／賣出／無法判定四個方向群組。 */
+    private int actionGroup(Action action) {
+        if (action == null || action == Action.NO_TRADE) return 4;
+        return switch (action) {
+            case BUY_CANDIDATE, ADD_CANDIDATE, TRIAL_BUY -> 1;
+            case HOLD, WATCH, HOLD_CAUTION, WAIT -> 2;
+            case REDUCE_CANDIDATE, EXIT_CANDIDATE, AVOID -> 3;
+            case NO_TRADE -> 4;
+        };
+    }
+
+    private static Double decimal(BigDecimal value) {
+        return value == null ? null : value.doubleValue();
+    }
+
+    private static Double averageAvailable(Double... values) {
+        double sum = 0;
+        int count = 0;
+        if (values != null) {
+            for (Double value : values) {
+                if (value == null) continue;
+                sum += value;
+                count++;
+            }
+        }
+        return count == 0 ? null : sum / count;
     }
 
     /**
@@ -583,49 +947,13 @@ public class TradingRadarRuleEngine {
      *
      * <p><b>低檔側同樣要防護，不可只防高檔。</b>{@code qualifiesForTrialBuy()} 的深度超賣條件與
      * {@code evaluateCounterTrend()} 直接吃原始 K／D、不經 {@code kdHeatOf()}，故本方法必須被那兩處
-     * 一併引用；而 V9 正在移除 {@code TRIAL_BUY} 的 {@code RISK_OFF} 封鎖，等於放大該路徑的觸發面。</p>
+     * 一併引用；V11 也把 J 與 W%R 同組停用，避免同一窄幅震盪被重複計分。</p>
      *
      * <p>資料不足（{@code null}）時視同未觸發，不得因缺值而關閉保護。</p>
      */
     private boolean narrowKdBand(StockInput input) {
         BigDecimal band = input == null ? null : input.kdBandWidthPercent();
         return band != null && band.doubleValue() < KD_BAND_MIN_PERCENT;
-    }
-
-    /**
-     * 季線乖離（均值回歸）：過度延伸為負、過度超跌為正。
-     *
-     * <p>這是 V9 對「不追高殺低」的<b>評分層</b>修正，與 {@link #timingOf} 的動作層覆寫互補——
-     * 評分層讓拉伸的標的分數自然下降，動作層在極端時直接改變動作。V8 的 {@code positionOf()}
-     * 只回二元 ±1，價格高於年線 0.01% 與 33% 貢獻完全相同，量不到「貴」這件事。</p>
-     */
-    private Double extensionOf(BigDecimal ma60BiasPercent, List<String> reasons, List<String> risks) {
-        if (ma60BiasPercent == null) return null;
-        double bias = ma60BiasPercent.doubleValue();
-        double v = clampUnit(-bias / BIAS_SATURATION);
-        if (bias >= BIAS_HIGH) {
-            risks.add("最新價已明顯偏離季線（乖離 " + Math.round(bias) + "%），追高風險升高。 ");
-        } else if (bias <= BIAS_LOW) {
-            reasons.add("最新價已明顯低於季線（乖離 " + Math.round(bias) + "%），具均值回歸空間。 ");
-        }
-        return v;
-    }
-
-    /**
-     * 52 週相對位置：長期趨勢品質，刻意保持正向。
-     *
-     * <p>與季線乖離<b>正交</b>：本因子量的是「長期趨勢好不好」，季線乖離量的是「現在進場貴不貴」。
-     * 追高的抑制由後者與時機覆寫負責，不由本因子承擔——3 到 12 個月尺度的動能是長期趨勢的正向訊號。</p>
-     */
-    private Double week52Of(BigDecimal week52Position, List<String> reasons, List<String> risks) {
-        if (week52Position == null) return null;
-        double pos = Math.max(0.0, Math.min(1.0, week52Position.doubleValue()));
-        if (pos >= 0.9) {
-            reasons.add("價格位於 52 週區間的高位（第 " + Math.round(pos * 100) + " 百分位），長期趨勢強勢。 ");
-        } else if (pos <= 0.1) {
-            risks.add("價格位於 52 週區間的低位（第 " + Math.round(pos * 100) + " 百分位），長期趨勢疲弱。 ");
-        }
-        return clampUnit((pos - 0.5) * 2);
     }
 
     /**
@@ -728,20 +1056,6 @@ public class TradingRadarRuleEngine {
         return 0.0;
     }
 
-    /** 單日異常波動一律視為風險，雙向皆負（沿用 V4 語意：追高與急跌都扣分）。值域 [-1, 0]。 */
-    private Double dayMoveContribution(BigDecimal changePercent, List<String> risks) {
-        if (changePercent == null) return null;
-        if (changePercent.compareTo(BigDecimal.valueOf(5)) >= 0) {
-            risks.add("個股單日漲幅達 5% 以上，避免追高。 ");
-            return -1.0;
-        }
-        if (changePercent.compareTo(BigDecimal.valueOf(-5)) <= 0) {
-            risks.add("個股單日跌幅達 5% 以上，波動風險升高。 ");
-            return -1.0;
-        }
-        return 0.0;
-    }
-
     /**
      * 換匯估值：底層幣別對台幣的五年期分位，越貴貢獻越負（Requirement 47）。
      * 台幣資產傳 null，權重由其餘因子吸收——台股標的不因匯率被加減分。
@@ -785,6 +1099,8 @@ public class TradingRadarRuleEngine {
         BigDecimal d = input.indicators() == null ? null : input.indicators().d();
         if (price == null || ma240 == null || k == null || d == null) return false;
         if (ma240.signum() <= 0) return false;
+        // 基本面多項惡化時不主動接刀；這只擋買，不引發賣出。
+        if (fundamentalDeteriorating(input)) return false;
         // 0. 窄幅標的的 KD 在雜訊上飽和，深度超賣條件失去意義（Task 264）。
         if (narrowKdBand(input)) return false;
         // 0b. ETF 溢價過高時不進場——這是「為同一籃資產多付錢」，與追高同性質。
@@ -806,9 +1122,7 @@ public class TradingRadarRuleEngine {
         if (input.previousK() == null || input.previousD() == null) return false;
         if (input.previousK().compareTo(input.previousD()) > 0) return false;
         // 5. 止跌：用最近一根完成日 K，不可用盤中漲跌幅（零交叉會讓狀態逐 tick 翻轉）。
-        BigDecimal stability = input.completedChangePercent() != null
-                ? input.completedChangePercent()
-                : input.changePercent();
+        BigDecimal stability = input.completedChangePercent();
         if (stability == null || stability.signum() < 0) return false;
         // 6. 大盤閘門：只擋 stale，不再擋 RISK_OFF（Task 264；債券沿用既有豁免）。
         //    推翻 Task 226 的理由：使用者明確要求「股市急跌時應建議買入」，而急跌時 regime 必為
@@ -820,13 +1134,9 @@ public class TradingRadarRuleEngine {
         return !equityMarketApplies(input) || !input.marketStale();
     }
 
-    /**
-     * 二維動作映射（Task 264）：{@code score}（趨勢品質）× {@link TimingState}（進場時機）。
-     *
-     * <p>順序為 1) 分批試單 → 2) 極端超買＋高檔死叉的<b>減碼覆寫</b> → 3) 極端超賣的<b>阻擋出場</b>
-     * → 4) 既有分數分層。第 2、3 步依 {@link #timingOf} 的判定順序不可能同時成立。</p>
-     */
+    /** V11 動作映射：兩軌各自以分數分層，再套止跌／追高／基本面閘門與對稱高低檔保護。 */
     private Action actionFor(StockInput input, int score, TimingState timing,
+                             boolean profitTaking,
                              List<String> risks, List<String> reasons) {
         // 分批試單優先於分數映射：這類標的的短線分數必然偏低（剛跌深），
         // 若先走分數映射會被判成減碼／出場，與「長線佳、可分批進場」的判斷自相矛盾。
@@ -838,10 +1148,10 @@ public class TradingRadarRuleEngine {
             return Action.TRIAL_BUY;
         }
 
-        // ── 第 2 步：高點應建議賣出（需求 6）。此覆寫凌駕分數——高檔時分數必高，不凌駕就永遠觸發不到。
-        if (timing == TimingState.EXTREME_OVERBOUGHT && kdDeadCross(input)) {
-            reasons.add("已達極端超買（KD 過熱且明顯偏離季線），且 KD 於高檔形成死亡交叉、短線轉弱。 ");
-            risks.add("本訊號描述的是當前位置與轉弱狀態，不預測隔日漲跌；分批減碼優於一次出清。 ");
+        // 高檔獲利了結須 KD／MACD／下跌爆量三類至少兩類轉弱；KD 死叉單獨不得再賣。
+        if (profitTaking) {
+            reasons.add("已達極端高檔，且 KD／MACD／量價三類轉弱證據至少兩項成立，獲利了結獲得確認。 ");
+            risks.add("本訊號只描述高檔與多項轉弱狀態，不預測後續漲跌；分批處理可降低單點判斷風險。 ");
             return input.held() ? Action.REDUCE_CANDIDATE : Action.AVOID;
         }
 
@@ -856,13 +1166,27 @@ public class TradingRadarRuleEngine {
                 && input.fxPercentile().doubleValue() >= FX_EXPENSIVE_PCT;
         boolean premiumExpensive = input.etfPremiumPct() != null
                 && input.etfPremiumPct().doubleValue() >= ETF_PREMIUM_EXPENSIVE;
+        boolean stillFalling = input.completedChangePercent() == null
+                || input.completedChangePercent().signum() < 0;
+        boolean chasedDailyMove = input.completedChangePercent() != null
+                && input.completedChangePercent().compareTo(BigDecimal.valueOf(5)) >= 0;
+        boolean overbought = timing == TimingState.OVERBOUGHT
+                || timing == TimingState.EXTREME_OVERBOUGHT;
+        boolean fundamentalsBlockBuy = fundamentalDeteriorating(input);
+        if (fundamentalsBlockBuy) {
+            risks.add("基本面多項惡化，兩軌的買進／加碼／試單閘門關閉；本條件不直接產生賣出。 ");
+        }
 
         boolean buyGate = marketAllowsBuy
                 && input.ma20Confirmation() == Confirmation.ABOVE
                 && input.ma60Confirmation() == Confirmation.ABOVE
                 && !kdOverheated
                 && !fxExpensive
-                && !premiumExpensive;
+                && !premiumExpensive
+                && !stillFalling
+                && !chasedDailyMove
+                && !overbought
+                && !fundamentalsBlockBuy;
         if (score >= 75 && buyGate) {
             return input.held() ? Action.ADD_CANDIDATE : Action.BUY_CANDIDATE;
         }
@@ -874,13 +1198,11 @@ public class TradingRadarRuleEngine {
                 ? (input.held() ? Action.REDUCE_CANDIDATE : Action.AVOID)
                 : (input.held() ? Action.EXIT_CANDIDATE : Action.AVOID);
         if (timing == TimingState.EXTREME_OVERSOLD) {
-            if (longTermBroken(input)) {
-                risks.add("雖已深度超跌，但年線已連續兩日跌破且價格位於 52 週區間最低段，"
-                        + "長期結構視為破壞，不套用「超跌不出場」的保護。 ");
-                return mapped;
-            }
             reasons.add("已達極端超賣（KD 深度超賣且明顯低於季線），此位置不建議追殺出場。 ");
-            risks.add("本訊號只描述當前位置，不預測反彈時點；長期結構若進一步轉壞仍應重新評估。 ");
+            if (longTermBroken(input)) {
+                risks.add("長期結構仍偏弱，但 V11 的極端超賣保護不再因年線破壞而失效，避免低點殺出。 ");
+            }
+            risks.add("本訊號只描述當前位置，不預測反彈時點；後續條件改變仍應重新評估。 ");
             return input.held() ? Action.HOLD_CAUTION : Action.WAIT;
         }
         return mapped;
@@ -889,8 +1211,7 @@ public class TradingRadarRuleEngine {
     /**
      * 長期結構已完全破壞：年線兩日跌破<b>且</b>位於 52 週區間最低段。
      *
-     * <p>這是「極端超賣不殺低」的必要安全閥——沒有它，持續崩壞的標的會因 KD 永遠釘在低檔而
-     * 永遠拿不到出場訊號。判準與 {@code TRIAL_BUY} 的年線結構要求同源。</p>
+     * <p>V11 僅供風險揭露與回測，不再取消極端超賣保護；判準仍與年線結構要求同源。</p>
      */
     private boolean longTermBroken(StockInput input) {
         return input.ma240Confirmation() == Confirmation.BELOW

@@ -89,6 +89,39 @@ class DistributionAdjustedPriceServiceTest {
                 adjusted.rowsDesc().get(1).getClosePrice())));
     }
 
+    @Test
+    void forwardSplitAdjustsHistoricalVolumeToTheLatestShareBasis() {
+        LocalDate splitDate = LocalDate.of(2026, 3, 2);
+        List<StockPriceHistory> rows = List.of(
+                rowWithVolume(splitDate, "25.00", 400L),
+                rowWithVolume(splitDate.minusDays(1), "100.00", 100L));
+
+        var adjusted = service.adjust(rows, List.of());
+
+        assertTrue(adjusted.adjusted());
+        assertEquals(400L, adjusted.rowsDesc().get(0).getVolume());
+        assertEquals(400L, adjusted.rowsDesc().get(1).getVolume(),
+                "1:4 分割前的成交股數須乘 4，才能和分割後的相對量同股數基準");
+    }
+
+    @Test
+    void cashDividendAdjustsPriceButNeverVolume() {
+        LocalDate exDate = LocalDate.of(2026, 4, 1);
+        List<StockPriceHistory> rows = List.of(
+                rowWithVolume(exDate, "90.00", 120L),
+                rowWithVolume(exDate.minusDays(1), "100.00", 100L));
+        StockDividendHistory dividend = StockDividendHistory.builder()
+                .id(20L).stockCode("00751B").market("台股")
+                .exDividendDate(exDate).cashDividend(BigDecimal.TEN).build();
+
+        var adjusted = service.adjust(rows, List.of(dividend));
+
+        assertTrue(adjusted.adjusted());
+        assertEquals(120L, adjusted.rowsDesc().get(0).getVolume());
+        assertEquals(100L, adjusted.rowsDesc().get(1).getVolume(),
+                "現金股利不改變流通股數，歷史成交量不得跟著價格因子縮放");
+    }
+
     // ─── Task 265：股票分割還原 ──────────────────────────────────────────────
 
     /**
@@ -299,6 +332,19 @@ class DistributionAdjustedPriceServiceTest {
                 .highPrice(close)
                 .lowPrice(close)
                 .closePrice(close)
+                .build();
+    }
+
+    private StockPriceHistory rowWithVolume(LocalDate date, String close, long volume) {
+        return StockPriceHistory.builder()
+                .stockCode("00751B")
+                .market("台股")
+                .tradingDate(date)
+                .openPrice(new BigDecimal(close))
+                .highPrice(new BigDecimal(close))
+                .lowPrice(new BigDecimal(close))
+                .closePrice(new BigDecimal(close))
+                .volume(volume)
                 .build();
     }
 
