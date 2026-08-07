@@ -3,6 +3,7 @@ package com.steven.assets.externalmaterials.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.steven.assets.externalmaterials.client.StockFundamentalFetchClient;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.PreparedStatementSetter;
 import org.springframework.jdbc.core.ResultSetExtractor;
@@ -20,7 +21,9 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /** Task 292 observation history 守門：同值重跑 no-op，來源修正版只追加、不覆寫。 */
@@ -57,7 +60,51 @@ class FundamentalObservationStoreTest {
         var result = store.append(bundle(new BigDecimal("21.00")));
 
         assertThat(result.valuations()).isOne();
-        verify(jdbc).update(anyString(), any(Object[].class));
+        ArgumentCaptor<Object[]> arguments = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbc).update(anyString(), arguments.capture());
+        // PostgreSQL JDBC 無法直接推斷 Instant；store 必須明確綁成 TIMESTAMPTZ 可接受的 Timestamp。
+        assertThat(arguments.getValue()[9]).isEqualTo(Timestamp.from(AVAILABLE_AT));
+    }
+
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void everyObservationInsertBindsAvailableInstantAsTimestamp() {
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        when(jdbc.query(anyString(), any(PreparedStatementSetter.class), any(ResultSetExtractor.class)))
+                .thenAnswer(invocation -> null);
+        when(jdbc.update(anyString(), any(Object[].class))).thenReturn(1);
+        FundamentalObservationStore store = new FundamentalObservationStore(jdbc, new ObjectMapper());
+
+        store.append(new StockFundamentalFetchClient.Bundle(
+                List.of(),
+                List.of(new StockFundamentalFetchClient.Financial(
+                        "2330", 2026, 2, new BigDecimal("30.50"), 600_000L, 1_000_000L,
+                        StockFundamentalFetchClient.EXCHANGE, List.of(SOURCE_URL), AVAILABLE_AT, "PUBLISHED")),
+                List.of(new StockFundamentalFetchClient.Revenue(
+                        "2330", 2026, 7, "半導體業", 100_000L, 90_000L, new BigDecimal("11.11"),
+                        StockFundamentalFetchClient.EXCHANGE, List.of(SOURCE_URL), AVAILABLE_AT, "PUBLISHED"))));
+        store.appendIndustry("半導體業", 2026, 7, new BigDecimal("100000"),
+                new BigDecimal("90000"), new BigDecimal("11.11"), 1,
+                StockFundamentalFetchClient.EXCHANGE, List.of(SOURCE_URL), AVAILABLE_AT, "PUBLISHED");
+
+        ArgumentCaptor<Object[]> arguments = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbc, times(3)).update(anyString(), arguments.capture());
+        assertThat(arguments.getAllValues().get(0)[9]).isEqualTo(Timestamp.from(AVAILABLE_AT));
+        assertThat(arguments.getAllValues().get(1)[10]).isEqualTo(Timestamp.from(AVAILABLE_AT));
+        assertThat(arguments.getAllValues().get(2)[9]).isEqualTo(Timestamp.from(AVAILABLE_AT));
+    }
+
+    @Test
+    void industryObservationRejectsMissingAvailableTimeBeforeTouchingDatabase() {
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        FundamentalObservationStore store = new FundamentalObservationStore(jdbc, new ObjectMapper());
+
+        int written = store.appendIndustry("半導體業", 2026, 7, BigDecimal.ONE,
+                BigDecimal.ONE, BigDecimal.ZERO, 1,
+                StockFundamentalFetchClient.EXCHANGE, List.of(SOURCE_URL), null, "PUBLISHED");
+
+        assertThat(written).isZero();
+        verifyNoInteractions(jdbc);
     }
 
     @Test
