@@ -54,7 +54,8 @@
         </el-table-column>
         <el-table-column label="股價" width="90" align="right">
           <template #default="{ row }">
-            <strong :style="{ color: priceColor(row.priceChange) }">
+            <span v-if="isClosePending(row)" style="color:#d97706;font-size:12px">收盤價待補</span>
+            <strong v-else :style="{ color: priceColor(row.priceChange) }">
               {{ fmtNum(row.price) }}
             </strong>
           </template>
@@ -147,6 +148,7 @@ import { bffApi } from '@/api/index.js'
 import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
 import TaiwanMap from '@/components/TaiwanMap.vue'
 import UsFlag from '@/components/UsFlag.vue'
+import { isClosePending } from '@/utils/displayQuote'
 
 // 觀察清單由 stock_alert 衍生：「新增觀察」按鈕請父層 (StockMonitorView) 切到警示條件 tab 並彈出新增 dialog
 const emit = defineEmits(['request-new-alert'])

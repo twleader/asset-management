@@ -136,10 +136,10 @@ public class TradingRadarExportService {
         // intraday / liveUpdatedAt 為 Task 228（TW_RULES_V6，大盤盤中即時判斷）新增的欄位：
         // intraday=true 代表該次 regime 由 Redis 即時大盤點位計算而非已入庫完成日 K；asOfDate 語意不變仍為完成日 K。
         // 本分頁沒有 section 標題列，第 0 列就是表頭列——不得新增任何列。
-        // Task 281：週線MA5 插在 MA20 之前、14 個擴充指標插在 D 之後（20 → 35 欄）。
+        // Task 281：週線MA5 插在 MA20 之前、14 個擴充指標插在 D 之後；行情狀態共 36 欄。
         // headers／formats／rows 三者長度與順序必須一致——ExportDoc.Table 只在 runtime 才擲長度不符。
         List<String> headers = new ArrayList<>(List.of("快照時間", "regime", "中文", "分數", "資料完整", "stale", "盤中即時",
-                "即時更新時間", "完成日K", "最新點位", "漲跌%",
+                "即時更新時間", "完成日K", "最新點位", "漲跌%", "行情狀態",
                 "週線MA5",
                 "MA20", "MA60", "MA240", "季線確認", "年線確認", "K", "D"));
         headers.addAll(EXT_HEADERS);
@@ -152,7 +152,7 @@ public class TradingRadarExportService {
                     txt(s, "generatedAt"), txt(m, "regime"), txt(m, "regimeLabel"), num(m, "score"),
                     boolVal(m, "dataComplete"), boolVal(m, "stale"), boolVal(m, "intraday"),
                     txt(m, "liveUpdatedAt"), txt(m, "asOfDate"),
-                    num(m, "price"), num(m, "changePercent"),
+                    num(m, "price"), num(m, "changePercent"), txt(m, "quoteStatus"),
                     num(m, "weeklyMa"),
                     num(m, "monthlyMa"), num(m, "quarterlyMa"), num(m, "annualMa"),
                     txt(m, "quarterlyConfirmation"), txt(m, "annualConfirmation"),
@@ -162,7 +162,7 @@ public class TradingRadarExportService {
             rows.add(row);
         }
 
-        // 逐行對齊上面的 headers（35 欄）。Task 264 的插欄事故就是這一串靜默保留成舊版，故不再寫成單行。
+        // 逐行對齊上面的 headers（36 欄）。Task 264 的插欄事故就是這一串靜默保留成舊版，故不再寫成單行。
         List<ExportDoc.Format> formats = new ArrayList<>(List.of(
                 ExportDoc.Format.TEXT,      // 0  快照時間
                 ExportDoc.Format.TEXT,      // 1  regime
@@ -175,18 +175,19 @@ public class TradingRadarExportService {
                 ExportDoc.Format.TEXT,      // 8  完成日K
                 ExportDoc.Format.NUM2,      // 9  最新點位
                 ExportDoc.Format.NUM2,      // 10 漲跌%
-                ExportDoc.Format.NUM2,      // 11 週線MA5      ← Task 281
-                ExportDoc.Format.NUM2,      // 12 MA20
-                ExportDoc.Format.NUM2,      // 13 MA60
-                ExportDoc.Format.NUM2,      // 14 MA240
-                ExportDoc.Format.TEXT,      // 15 季線確認
-                ExportDoc.Format.TEXT,      // 16 年線確認
-                ExportDoc.Format.NUM2,      // 17 K
-                ExportDoc.Format.NUM2       // 18 D
+                ExportDoc.Format.TEXT,      // 11 行情狀態
+                ExportDoc.Format.NUM2,      // 12 週線MA5      ← Task 281
+                ExportDoc.Format.NUM2,      // 13 MA20
+                ExportDoc.Format.NUM2,      // 14 MA60
+                ExportDoc.Format.NUM2,      // 15 MA240
+                ExportDoc.Format.TEXT,      // 16 季線確認
+                ExportDoc.Format.TEXT,      // 17 年線確認
+                ExportDoc.Format.NUM2,      // 18 K
+                ExportDoc.Format.NUM2       // 19 D
         ));
-        for (int i = 0; i < EXT_HEADERS.size(); i++) formats.add(ExportDoc.Format.NUM2); // 19–32 Task 281 擴充指標
-        formats.add(ExportDoc.Format.LIST_LINES);   // 33 支持訊號
-        formats.add(ExportDoc.Format.LIST_LINES);   // 34 風險提醒
+        for (int i = 0; i < EXT_HEADERS.size(); i++) formats.add(ExportDoc.Format.NUM2);
+        formats.add(ExportDoc.Format.LIST_LINES);
+        formats.add(ExportDoc.Format.LIST_LINES);
 
         return new ExportDoc.Sheet("大盤總覽",
                 List.of(new ExportDoc.Table(null, null, headers, true, false, false, formats, rows)),
@@ -195,9 +196,9 @@ public class TradingRadarExportService {
 
     private ExportDoc.Sheet stockSheet(List<JsonNode> snapshots) {
         // 同上：沒有 section 標題列，第 0 列即表頭列。
-        // Task 281：週線MA5 插在 MA20 之前、14 個擴充指標插在 D 之後（35 → 50 欄）。
+        // Task 281 擴充指標加上行情狀態後共 51 欄。
         List<String> headers = new ArrayList<>(List.of("快照時間", "代碼", "名稱", "市場", "資產類別", "持有", "還原權息",
-                "動作", "動作中文", "分數", "逆勢狀態", "逆勢中文", "現價", "漲跌%", "行情更新", "完成日K",
+                "動作", "動作中文", "分數", "逆勢狀態", "逆勢中文", "現價", "漲跌%", "行情狀態", "行情更新", "完成日K",
                 "週線MA5",
                 "MA20", "MA60", "MA240", "月線確認", "季線確認", "年線確認", "K", "D"));
         headers.addAll(EXT_HEADERS);
@@ -217,7 +218,7 @@ public class TradingRadarExportService {
                         txt(d, "assetClass"), boolVal(d, "held"), boolVal(d, "distributionAdjusted"),
                         txt(d, "action"), txt(d, "actionLabel"), num(d, "score"),
                         txt(d, "counterTrendState"), txt(d, "counterTrendLabel"),
-                        num(d, "price"), num(d, "changePercent"),
+                        num(d, "price"), num(d, "changePercent"), txt(d, "quoteStatus"),
                         txt(d, "priceUpdatedAt"), txt(d, "asOfDate"),
                         num(d, "weeklyMa"),
                         num(d, "monthlyMa"), num(d, "quarterlyMa"), num(d, "annualMa"),
@@ -234,7 +235,7 @@ public class TradingRadarExportService {
                 rows.add(row);
             }
         }
-        // 逐列對齊上面的 headers（50 欄）。**headers／此清單／rows 三者長度與順序必須一致**——
+        // 逐列對齊上面的 headers（51 欄）。**headers／此清單／rows 三者長度與順序必須一致**——
         // Task 264 插欄時這一串落在 git 衝突標記之外、被三方合併靜默保留成舊的 31 欄版，
         // `ExportDoc.Table` 的 compact constructor 才在 runtime 擲長度不符。拆成多行就是為了讓下次看得見。
         List<ExportDoc.Format> formats = new ArrayList<>(List.of(
@@ -252,17 +253,18 @@ public class TradingRadarExportService {
                 ExportDoc.Format.TEXT,      // 11 逆勢中文
                 ExportDoc.Format.NUM2,      // 12 現價
                 ExportDoc.Format.NUM2,      // 13 漲跌%
-                ExportDoc.Format.TEXT,      // 14 行情更新
-                ExportDoc.Format.TEXT,      // 15 完成日K
-                ExportDoc.Format.NUM2,      // 16 週線MA5      ← Task 281
-                ExportDoc.Format.NUM2,      // 17 MA20
-                ExportDoc.Format.NUM2,      // 18 MA60
-                ExportDoc.Format.NUM2,      // 19 MA240
-                ExportDoc.Format.TEXT,      // 20 月線確認
-                ExportDoc.Format.TEXT,      // 21 季線確認
-                ExportDoc.Format.TEXT,      // 22 年線確認
-                ExportDoc.Format.NUM2,      // 23 K
-                ExportDoc.Format.NUM2       // 24 D
+                ExportDoc.Format.TEXT,      // 14 行情狀態
+                ExportDoc.Format.TEXT,      // 15 行情更新
+                ExportDoc.Format.TEXT,      // 16 完成日K
+                ExportDoc.Format.NUM2,      // 17 週線MA5      ← Task 281
+                ExportDoc.Format.NUM2,      // 18 MA20
+                ExportDoc.Format.NUM2,      // 19 MA60
+                ExportDoc.Format.NUM2,      // 20 MA240
+                ExportDoc.Format.TEXT,      // 21 月線確認
+                ExportDoc.Format.TEXT,      // 22 季線確認
+                ExportDoc.Format.TEXT,      // 23 年線確認
+                ExportDoc.Format.NUM2,      // 24 K
+                ExportDoc.Format.NUM2       // 25 D
         ));
         for (int i = 0; i < EXT_HEADERS.size(); i++) formats.add(ExportDoc.Format.NUM2); // 25–38 Task 281 擴充指標
         formats.addAll(List.of(

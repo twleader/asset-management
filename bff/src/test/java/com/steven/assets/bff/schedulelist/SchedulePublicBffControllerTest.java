@@ -24,9 +24,11 @@ class SchedulePublicBffControllerTest {
     }
 
     @Test
-    @DisplayName("項目數不變：本需求不新增也不移除任何排程")
-    void 項目數不變() {
-        assertThat(jobs()).hasSize(46);
+    @DisplayName("排程清單完整列出 19 個業務與 29 個外部行情工作")
+    void 項目數正確() {
+        assertThat(jobs()).hasSize(48);
+        assertThat(jobs()).filteredOn(j -> "業務服務".equals(j.service())).hasSize(19);
+        assertThat(jobs()).filteredOn(j -> "外部行情服務".equals(j.service())).hasSize(29);
     }
 
     @Test

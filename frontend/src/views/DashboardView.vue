@@ -253,7 +253,8 @@
             </el-table-column>
             <el-table-column label="股價/漲跌(%)" width="190" align="right">
               <template #default="{ row }">
-                <span v-if="getPriceCell(row)">
+                <span v-if="isRowClosePending(row)" style="color:#d97706;font-size:12px">收盤價待補</span>
+                <span v-else-if="getPriceCell(row)">
                   <span :style="{ fontWeight: 600, color: priceNumberColor(row) }">{{ formatPrice(getPriceCell(row).price) }}</span>
                   <span v-if="getPriceCell(row).priceChange != null"
                     :style="{ color: changeColor(getPriceCell(row).priceChange), fontSize: '11px', marginLeft: '4px' }">
@@ -397,6 +398,7 @@ import { useAssetStore } from '@/stores/assetStore'
 import { bffApi } from '@/api'
 import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
 import { escapeHtml } from '@/utils/escapeHtml'
+import { isAcceptedTodayQuote, isClosePending, marketToday, mergeSseQuote } from '@/utils/displayQuote'
 
 let orderSaveTimer = null
 let stockSortable = null
@@ -456,7 +458,9 @@ function openPriceStream() {
       const p = JSON.parse(ev.data)
       // 後端 SSE payload 用 changePct，前端內部用 changePercent，順手 mirror 一下
       if (p.changePct != null && p.changePercent == null) p.changePercent = p.changePct
-      stockPrices.value = { ...stockPrices.value, [`${p.market}_${p.stockCode}`]: p }
+      const key = `${p.market}_${p.stockCode}`
+      const merged = mergeSseQuote(stockPrices.value[key], p, marketToday(p.market))
+      stockPrices.value = { ...stockPrices.value, [key]: merged }
     } catch (e) {
       console.warn('SSE 解析失敗:', e)
     }
@@ -472,6 +476,7 @@ function openPriceStream() {
 async function refreshMarketStatus() {
   try {
     const data = await bffApi.dashboard.realtime()
+    if (data?.stockPrices) applyPricesAndStatus(data.stockPrices, data.marketStatus ?? marketStatus.value)
     if (data?.marketStatus) marketStatus.value = data.marketStatus
     if (data?.liveAssets) liveAssets.value = data.liveAssets
   } catch (e) {
@@ -566,12 +571,21 @@ function getRealtimePrice(row) {
   const key = `${row.market}_${row.stockCode}`
   const p = stockPrices.value[key]
   if (!p || p.price == null) return null
+  if (!isAcceptedTodayQuote(p, marketToday(row.market))) return null
   if (p.priceChange == null) return null
   return {
     price: Number(p.price),
     priceChange: Number(p.priceChange),
     changePercent: p.changePercent != null ? Number(p.changePercent) : null
   }
+}
+
+function getQuoteForRow(row) {
+  return stockPrices.value[`${row.market}_${row.stockCode}`]
+}
+
+function isRowClosePending(row) {
+  return isBaselineToday(row.market) && isClosePending(getQuoteForRow(row))
 }
 
 // 台股慣例配色：漲紅、跌綠、平盤灰（與股票走勢圖 markPoint「紅漲綠跌」一致）。
@@ -587,6 +601,7 @@ function changeArrow(v) {
 // 「股價/漲跌(%)」欄顯示資料：basedate == 該市場當日 → 即時價（getRealtimePrice）；
 // 否則 → 快照收盤價 + 該收盤日「vs 前一交易日」的當日漲跌（BFF 已算入 stockPrices，收盤/週末亦可顯示）。
 function getPriceCell(row) {
+  if (isRowClosePending(row)) return null
   const live = getRealtimePrice(row)
   if (live) {
     return { price: live.price, priceChange: live.priceChange, changePercent: live.changePercent }

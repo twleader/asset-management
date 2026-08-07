@@ -82,6 +82,7 @@ public final class TradingRadarDto {
             String asOfDate,
             BigDecimal price,
             BigDecimal changePercent,
+            String quoteStatus,
             /** 週線 MA5（Task 265）；僅供顯示，不參與評分。 */
             BigDecimal weeklyMa,
             BigDecimal monthlyMa,
@@ -118,6 +119,7 @@ public final class TradingRadarDto {
             boolean dataComplete,
             BigDecimal price,
             BigDecimal changePercent,
+            String quoteStatus,
             String priceUpdatedAt,
             String asOfDate,
             BigDecimal monthlyMa,

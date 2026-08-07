@@ -50,6 +50,7 @@ public class WatchStockDto {
             String tradingDate,
             String priceUpdatedAt,
             Boolean closed,
+            String quoteStatus,
             // 該股票所有警示條件（依 displayOrder 升冪），「警示條件」欄逐條列出
             List<Condition> conditions,
             // 警示彙總（最近一次觸發）

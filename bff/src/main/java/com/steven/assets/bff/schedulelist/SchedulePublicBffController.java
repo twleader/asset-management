@@ -10,7 +10,7 @@ import java.util.List;
  * ScheduleListView 專屬 BFF（「公開資訊」分組，Requirement 36）。
  *
  * <p>回傳系統所有自動排程的**人工維護靜態清單**。排程分屬兩個服務：
- * {@code business-services}（17 個）與 {@code external-materials-service}（29 個）。
+ * {@code business-services}（19 個）與 {@code external-materials-service}（29 個）。
  * 此頁為唯讀資訊展示，故不做跨服務反射探索、不入 DB、不設管理端點。
  *
  * <p><b>計數慣例：以 {@code @Scheduled} 方法計，一法一筆。</b>external 29 筆對應 30 個標註
@@ -49,9 +49,9 @@ public class SchedulePublicBffController {
     private static final String NYC = "America/New_York";
     private static final String LON = "Europe/London";
 
-    /** 全系統排程清單（46 筆）。順序刻意先業務服務、再外部行情服務，前端再依 category 分組。 */
+    /** 全系統排程清單（48 筆）。順序刻意先業務服務、再外部行情服務，前端再依 category 分組。 */
     private static final List<ScheduledJobDto> JOBS = List.of(
-            // ===== business-services（17）=====
+            // ===== business-services（19）=====
             new ScheduledJobDto(BUSINESS, "資產快照", "最新快照釘定當日",
                     "將每位使用者的最新快照日期釘為當日並重算資產，讓即時股價覆蓋生效",
                     "每日 00:05", "0 5 0 * * *", TPE),
@@ -64,6 +64,12 @@ public class SchedulePublicBffController {
             new ScheduledJobDto(BUSINESS, "今日股市分析", "分析批次收尾輪詢",
                     "定期撈在製的 Batch API 批次，批次完成後把結果落庫",
                     "每 90 秒（啟動後延遲 60 秒）", "fixedDelay=90s, initialDelay=60s", ""),
+            new ScheduledJobDto(BUSINESS, "股票警示", "警示通知派送",
+                    "每 60 秒派送已觸發但尚未通知的股票警示",
+                    "每 60 秒", "fixedDelay=60s", ""),
+            new ScheduledJobDto(BUSINESS, "交易雷達", "雷達通知派送",
+                    "每 2 秒檢查交易雷達通知佇列並派送待處理通知",
+                    "每 2 秒（啟動後延遲 2 秒）", "fixedDelay=2s, initialDelay=2s", ""),
             new ScheduledJobDto(BUSINESS, "大盤指數", "海外指數日線回補",
                     "各國大盤指數收盤後回補日線（最新日線過時才抓）",
                     "每日 07:00（週二~六）", "0 0 7 * * TUE-SAT", TPE),
@@ -126,11 +132,11 @@ public class SchedulePublicBffController {
             new ScheduledJobDto(EXTERNAL, "即時行情", "英股分時收尾",
                     "收盤後把英股當日分時 tick 收尾補齊",
                     "交易日 17:00", "0 0 17 * * MON-FRI", LON),
-            new ScheduledJobDto(EXTERNAL, "收盤落庫", "台股收盤價落庫",
-                    "把 Redis 台股收盤價 dump 進 stock_price_history",
-                    "交易日 13:32", "0 32 13 * * MON-FRI", TPE),
-            new ScheduledJobDto(EXTERNAL, "收盤落庫", "台股收盤價校正",
-                    "用 FinMind 校正並覆寫台股當日收盤價",
+            new ScheduledJobDto(EXTERNAL, "收盤落庫", "台股官方收盤對帳",
+                    "以 TWSE MI_INDEX 與 TPEx 日收盤全市場資料寫入可稽核的官方收盤，缺漏時於午後重試",
+                    "交易日 14:05、15:35、17:35", "0 5 14 * * MON-FRI；0 35 15,17 * * MON-FRI", TPE),
+            new ScheduledJobDto(EXTERNAL, "收盤落庫", "台股收盤缺漏補抓",
+                    "16:00 僅用 FinMind 補官方來源仍缺漏的台股標的，不覆寫已完成列",
                     "交易日 16:00", "0 0 16 * * MON-FRI", TPE),
             new ScheduledJobDto(EXTERNAL, "收盤落庫", "美股收盤價落庫",
                     "把 Redis 美股收盤價 dump 進 DB",
@@ -198,7 +204,7 @@ public class SchedulePublicBffController {
                     "交易日 05:00–07:00 每 15 分鐘", "0 0/15 5-6 * * MON-FRI；0 0 7 * * MON-FRI", TPE)
     );
 
-    /** GET /api/bff/schedule-list —— 回傳全系統排程清單（46 筆靜態資料）。 */
+    /** GET /api/bff/schedule-list —— 回傳全系統排程清單（48 筆靜態資料）。 */
     @GetMapping
     public List<ScheduledJobDto> list() {
         return JOBS;

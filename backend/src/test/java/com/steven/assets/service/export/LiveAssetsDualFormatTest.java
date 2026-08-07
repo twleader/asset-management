@@ -248,10 +248,10 @@ class LiveAssetsDualFormatTest {
         var a = new StockPriceService.LiveStockItem("2330", "台積電", "TW",
                 new BigDecimal("1000"), new BigDecimal("1105.0000"), new BigDecimal("1105000"),
                 Boolean.FALSE, "2026-07-31",
-                new BigDecimal("1100.0000"), new BigDecimal("5.00"), new BigDecimal("0.45"));
+                new BigDecimal("1100.0000"), new BigDecimal("5.00"), new BigDecimal("0.45"), "LIVE");
         var b = new StockPriceService.LiveStockItem("0050", "元大台灣50", "TW",
                 new BigDecimal("2000"), new BigDecimal("195.5000"), new BigDecimal("391000"),
-                Boolean.FALSE, "2026-07-31", null, null, null);
+                Boolean.FALSE, "2026-07-31", null, null, null, "LIVE");
         return new StockPriceService.LiveAssetsResponse(
                 1L, "2026-07-31", new BigDecimal("32.1054"),
                 new BigDecimal("500000"), new BigDecimal("300000"),

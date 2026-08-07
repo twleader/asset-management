@@ -1,15 +1,21 @@
 package com.steven.assets.externalmaterials.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.steven.assets.externalmaterials.client.PriceFetchClient.PriceResult;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -44,33 +50,33 @@ class PriceCacheWriterNonPositiveCloseTest {
 
     @Test
     void zeroClose_isNotWrittenToRedis_andNotPublished() {
-        writer.writeVerifiedClose(result("台股", BigDecimal.ZERO));
+        writer.writeVerifiedClose(result("台股", BigDecimal.ZERO), LocalDate.of(2026, 8, 7));
         verifyNothingWritten();
     }
 
     @Test
     void negativeClose_isNotWrittenToRedis_andNotPublished() {
-        writer.writeVerifiedClose(result("台股", new BigDecimal("-2.5")));
+        writer.writeVerifiedClose(result("台股", new BigDecimal("-2.5")), LocalDate.of(2026, 8, 7));
         verifyNothingWritten();
     }
 
     @Test
     void nullClose_isNotWrittenToRedis_andNotPublished() {
-        writer.writeVerifiedClose(result("台股", null));
+        writer.writeVerifiedClose(result("台股", null), LocalDate.of(2026, 8, 7));
         verifyNothingWritten();
     }
 
     /** 守門必須涵蓋美股／英股：它們的收盤校正同樣匯流到本方法。 */
     @Test
     void zeroClose_isRejectedForUsAndUkToo() {
-        writer.writeVerifiedClose(result("美股", BigDecimal.ZERO));
-        writer.writeVerifiedClose(result("英股", BigDecimal.ZERO));
+        writer.writeVerifiedClose(result("美股", BigDecimal.ZERO), LocalDate.of(2026, 8, 7));
+        writer.writeVerifiedClose(result("英股", BigDecimal.ZERO), LocalDate.of(2026, 8, 7));
         verifyNothingWritten();
     }
 
     @Test
     void rejection_doesNotThrow() {
-        assertThatCode(() -> writer.writeVerifiedClose(result("台股", BigDecimal.ZERO)))
+        assertThatCode(() -> writer.writeVerifiedClose(result("台股", BigDecimal.ZERO), LocalDate.of(2026, 8, 7)))
                 .doesNotThrowAnyException();
     }
 
@@ -85,7 +91,28 @@ class PriceCacheWriterNonPositiveCloseTest {
     void positiveClose_stillWrites() {
         ValueOperations<String, String> ops = mock(ValueOperations.class);
         org.mockito.Mockito.when(redis.opsForValue()).thenReturn(ops);
-        writer.writeVerifiedClose(result("台股", new BigDecimal("39.60")));
+        writer.writeVerifiedClose(result("台股", new BigDecimal("39.60")), LocalDate.of(2026, 8, 7));
         verify(redis, org.mockito.Mockito.atLeastOnce()).opsForValue();
+    }
+
+    @Test
+    void verifiedClosePayloadUsesExplicitDateSourceAndStatus() throws Exception {
+        ValueOperations<String, String> ops = mock(ValueOperations.class);
+        org.mockito.Mockito.when(redis.opsForValue()).thenReturn(ops);
+        PriceResult official = new PriceResult(
+                "006208", "台股", new BigDecimal("123.45"), null, null,
+                StockSourceQuery.TWSE_MI_INDEX, "富邦台50", null, null,
+                new BigDecimal("122.00"), null, new BigDecimal("124.00"),
+                new BigDecimal("121.50"), 1000L);
+
+        writer.writeVerifiedClose(official, LocalDate.of(2026, 8, 7));
+
+        ArgumentCaptor<String> json = ArgumentCaptor.forClass(String.class);
+        verify(ops).set(eq("price:台股:006208"), json.capture(), any(java.time.Duration.class));
+        JsonNode payload = new ObjectMapper().readTree(json.getValue());
+        assertThat(payload.path("tradingDate").asText()).isEqualTo("2026-08-07");
+        assertThat(payload.path("source").asText()).isEqualTo(StockSourceQuery.TWSE_MI_INDEX);
+        assertThat(payload.path("closed").asBoolean()).isTrue();
+        assertThat(payload.path("quoteStatus").asText()).isEqualTo("VERIFIED_CLOSE");
     }
 }

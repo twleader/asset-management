@@ -4,6 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.steven.assets.externalmaterials.client.PriceFetchClient;
 import com.steven.assets.externalmaterials.client.PriceFetchClient.PriceResult;
+import com.steven.assets.externalmaterials.client.TwOfficialCloseClient;
+import com.steven.assets.externalmaterials.client.TwOfficialCloseClient.OfficialClose;
+import com.steven.assets.externalmaterials.client.TwOfficialCloseClient.OfficialCloseBatch;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -25,12 +28,10 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * 盤後收盤價持久化（兩段式，台股）：
- * - 13:32 TW {@link #dumpTwCloseFromRedis()}：盤中最後一輪 cron（13:30）寫進 Redis 的價即為當日收盤
- *   （TWSE mis 的最後一筆成交），秒到資料庫，不依賴 FinMind 即時性
- * - 16:00 TW {@link #verifyTwCloseWithFinMind()}：FinMind TaiwanStockPrice 盤後 1-2 小時才發佈，
- *   此時呼叫驗證／覆寫；FinMind 有回值就以 FinMind 為權威。**同時覆寫 Redis** 以避免 Dashboard /
- *   SnapshotForm 讀 Redis 仍看到盤中 last tick（13:28 那輪）。
+ * 盤後收盤價持久化（台股）：
+ * - 14:05、15:35、17:35 以 TWSE／TPEx 官方全市場日收盤對帳並保存來源
+ * - 16:00 僅以 FinMind 補官方來源仍缺漏的標的
+ * - 舊 13:32 Redis dump 已停用，最後成交不得再冒充官方收盤
  *
  * 美股：16:02 ET {@link #dumpUsCloseFromRedis()} dump Redis（盤中最後一輪 cron 16:00 寫的 NASDAQ 收盤），
  *   18:00 ET {@link #verifyUsCloseWithFinMind()} 以 FinMind USStockPrice 校正並同步覆寫 Redis。
@@ -45,12 +46,23 @@ public class ClosePersister {
     private final StringRedisTemplate redis;
     private final PriceCacheWriter cacheWriter;
     private final MarketCalendar calendar;
+    private final TwOfficialCloseClient twOfficialCloseClient;
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    static final String FINMIND_US_CLOSE = "FINMIND_US_CLOSE";
+    static final String YAHOO_UK_CLOSE = "YAHOO_UK_CLOSE";
+    static final String NASDAQ_REDIS_CLOSE = "NASDAQ_REDIS_CLOSE";
+    static final String YAHOO_REDIS_CLOSE = "YAHOO_REDIS_CLOSE";
+
+    public record TwCloseReconciliation(int expected, int verified, List<String> missingCodes) {
+        public TwCloseReconciliation {
+            missingCodes = List.copyOf(missingCodes);
+        }
+    }
 
     /**
-     * 收盤 dump 可接受的 payload 陳舊上限（Task 258）。三個 dump 皆排在收盤後 2 分鐘
-     * （13:32 TW／16:02 ET／16:32 LON），而盤中 cron 每 2 分鐘一輪，故合法值的 {@code updatedAt}
+     * 海外市場收盤 dump 可接受的 payload 陳舊上限（Task 258）。兩個 dump 皆排在收盤後 2 分鐘
+     * （16:02 ET／16:32 LON），而盤中 cron 每 2 分鐘一輪，故合法值的 {@code updatedAt}
      * 必落在收盤前最後幾輪。改小會擋掉正常路徑，改大會放進盤中 tick。
      */
     static final Duration MAX_PAYLOAD_STALENESS = Duration.ofMinutes(12);
@@ -122,24 +134,7 @@ public class ClosePersister {
         new Thread(() -> {
             try {
                 ZonedDateTime nowTw = ZonedDateTime.now(MarketClock.TW_ZONE);
-                LocalDate today = nowTw.toLocalDate();
-                if (calendar.isTwTradingDay(today)) {
-                    if (nowTw.toLocalTime().isAfter(LocalTime.of(16, 0))) {
-                        // 16:00 後：若 DB 無當日資料，先試 FinMind；FinMind 失敗 fallback Redis dump
-                        if (!hasAnyHistoryFor(today, "台股")) {
-                            log.info("self-heal: 台股今日 ({}) DB 無資料，跑 FinMind 校正", today);
-                            int finmindOk = verifyTwCloseWithFinMind();
-                            if (finmindOk == 0) {
-                                log.info("self-heal: FinMind 全空，改用 Redis dump");
-                                dumpTwCloseFromRedis();
-                            }
-                        }
-                    } else if (nowTw.toLocalTime().isAfter(LocalTime.of(13, 32))
-                            && !hasAnyHistoryFor(today, "台股")) {
-                        log.info("self-heal: 台股今日 ({}) DB 無資料，dump Redis 補一次", today);
-                        dumpTwCloseFromRedis();
-                    }
-                }
+                selfHealTwClose(nowTw);
                 ZonedDateTime nowUs = ZonedDateTime.now(MarketClock.US_ZONE);
                 LocalDate todayUs = nowUs.toLocalDate();
                 if (calendar.isUsTradingDay(todayUs)) {
@@ -183,25 +178,59 @@ public class ClosePersister {
     }
 
     /**
-     * 13:32 TW：把 13:30 那輪 cron 已寫進 Redis 的價（= TWSE mis 最後成交）dump 到 stock_price_history。
-     * Redis TTL 24h，13:32 還在窗口內。
+     * 舊的台股 Redis 收盤 dump 已停用。盤中最後成交不保證等於集合競價後的官方收盤，
+     * 因此這個方法保留相容性但永遠不再寫 DB。
      */
-    @Scheduled(cron = "0 32 13 * * MON-FRI", zone = "Asia/Taipei")
+    @Deprecated(forRemoval = false)
     public void dumpTwCloseFromRedis() {
-        LocalDate today = LocalDate.now(MarketClock.TW_ZONE);
-        if (!calendar.isTwTradingDay(today)) {
-            log.info("假日休市，略過台股 Redis 收盤 dump ({})", today);
-            return;
-        }
-        log.info("排程：dump 台股 Redis 收盤價到 DB ({})", today);
-        int n = dumpRedisToDb("台股", today);
-        log.info("台股 Redis dump 完成：{} 檔", n);
+        log.warn("台股 Redis 收盤 dump 已停用；等待 TWSE／TPEx 官方收盤對帳");
     }
 
     /**
-     * 16:00 TW：用 FinMind 校正當日收盤價。FinMind 有回值即以其為權威覆寫 DB；
-     * 沒回值（still pending or 假日）保留 13:32 dump 結果。
+     * TWSE／TPEx 官方日收盤全市場對帳。14:05 先跑，15:35、17:35 再補來源短暫失敗或晚發的標的。
      */
+    @Scheduled(cron = "0 5 14 * * MON-FRI", zone = "Asia/Taipei")
+    @Scheduled(cron = "0 35 15,17 * * MON-FRI", zone = "Asia/Taipei")
+    public void reconcileTwOfficialCloseScheduled() {
+        LocalDate today = LocalDate.now(MarketClock.TW_ZONE);
+        if (!calendar.isTwTradingDay(today)) {
+            log.info("假日休市，略過台股官方收盤對帳 ({})", today);
+            return;
+        }
+        reconcileTwOfficialClose(today);
+    }
+
+    public TwCloseReconciliation reconcileTwOfficialClose(LocalDate targetDate) {
+        Set<String> tw = new LinkedHashSet<>(), us = new LinkedHashSet<>(), uk = new LinkedHashSet<>();
+        source.collectHeldStockCodes(tw, us, uk);
+        tw.remove("0000");
+        OfficialCloseBatch batch = twOfficialCloseClient.fetch(targetDate);
+
+        for (String code : tw) {
+            OfficialClose row = batch.rows().get(code);
+            if (row == null || !targetDate.equals(row.tradingDate())) continue;
+            boolean wrote = source.upsertVerifiedHistory(
+                    code, "台股", targetDate,
+                    row.open(), row.high(), row.low(), row.close(), row.volume(), row.source());
+            if (wrote) {
+                PriceResult verified = new PriceResult(
+                        code, "台股", row.close(), null, null, row.source(),
+                        row.name(), null, null,
+                        row.open(), null, row.high(), row.low(), row.volume());
+                cacheWriter.writeVerifiedClose(verified, targetDate);
+            }
+        }
+
+        List<String> missing = tw.stream()
+                .filter(code -> !source.hasTrustedTwClose(code, targetDate))
+                .sorted()
+                .toList();
+        log.info("台股官方收盤對帳完成 target={} expected={} verified={} missing={} sourceFailures={}",
+                targetDate, tw.size(), tw.size() - missing.size(), missing, batch.sourceFailures());
+        return new TwCloseReconciliation(tw.size(), tw.size() - missing.size(), missing);
+    }
+
+    /** 16:00 僅以 FinMind 補官方來源仍缺漏的標的，不覆寫已驗證完成列。 */
     @Scheduled(cron = "0 0 16 * * MON-FRI", zone = "Asia/Taipei")
     public int verifyTwCloseWithFinMind() {
         LocalDate today = LocalDate.now(MarketClock.TW_ZONE);
@@ -209,24 +238,28 @@ public class ClosePersister {
             log.info("假日休市，略過台股 FinMind 收盤校正 ({})", today);
             return 0;
         }
-        log.info("排程：FinMind 校正台股當日收盤價");
+        return verifyTwCloseWithFinMind(today);
+    }
+
+    int verifyTwCloseWithFinMind(LocalDate targetDate) {
+        log.info("FinMind 補台股官方收盤缺漏 ({})", targetDate);
         Set<String> tw = new LinkedHashSet<>(), us = new LinkedHashSet<>(), uk = new LinkedHashSet<>();
         source.collectHeldStockCodes(tw, us, uk);
+        tw.remove("0000");
         int ok = 0, miss = 0;
         for (String code : tw) {
+            if (source.hasTrustedTwClose(code, targetDate)) continue;
             try {
-                Optional<PriceResult> r = client.getTwClosingPriceFromFinMind(code, today);
+                Optional<PriceResult> r = client.getTwClosingPriceFromFinMind(code, targetDate);
                 if (r.isEmpty()) { miss++; continue; }
-                PriceResult pr = r.get();
-                boolean wrote = source.upsertHistory(code, "台股", today,
+                PriceResult pr = withSource(r.get(), StockSourceQuery.FINMIND_TW_CLOSE);
+                boolean wrote = source.upsertVerifiedHistory(code, "台股", targetDate,
                         pr.openPrice(), pr.highPrice(), pr.lowPrice(),
-                        pr.price(), pr.volume());
-                // FinMind 為權威收盤，同步覆寫 Redis live cache 以與 DB 一致
-                // （避免 Dashboard / SnapshotForm 讀 Redis 仍看到盤中 last tick）
-                cacheWriter.writeVerifiedClose(pr);
-                // ok 同時是本方法的回傳值，selfHealMissedClose 以 ok == 0 決定要不要
-                // fallback 去 dump Redis；非正收盤被拒時不得計入，否則數字與事實不符（Task 279）
-                if (wrote) ok++;
+                        pr.price(), pr.volume(), StockSourceQuery.FINMIND_TW_CLOSE);
+                if (wrote) {
+                    cacheWriter.writeVerifiedClose(pr, targetDate);
+                    ok++;
+                }
                 Thread.sleep(300);
             } catch (Exception e) {
                 log.warn("FinMind 校正台股 {} 收盤失敗: {}", code, e.getMessage());
@@ -235,6 +268,33 @@ public class ClosePersister {
         }
         log.info("FinMind 校正台股收盤完成：成功覆寫 {} 檔，缺漏 {} 檔", ok, miss);
         return ok;
+    }
+
+    void selfHealTwClose(ZonedDateTime nowTw) {
+        Optional<LocalDate> target = latestCompletedTwTarget(nowTw);
+        if (target.isEmpty()) return;
+        LocalDate tradingDate = target.get();
+        ZonedDateTime officialReady = tradingDate.atTime(14, 5).atZone(MarketClock.TW_ZONE);
+        if (nowTw.isBefore(officialReady)) return;
+
+        TwCloseReconciliation result = reconcileTwOfficialClose(tradingDate);
+        ZonedDateTime fallbackReady = tradingDate.atTime(16, 0).atZone(MarketClock.TW_ZONE);
+        if (result.verified() < result.expected() && !nowTw.isBefore(fallbackReady)) {
+            verifyTwCloseWithFinMind(tradingDate);
+        }
+    }
+
+    Optional<LocalDate> latestCompletedTwTarget(ZonedDateTime nowTw) {
+        LocalDate today = nowTw.toLocalDate();
+        LocalDate candidate = calendar.isTwTradingDay(today)
+                && nowTw.toLocalTime().isBefore(LocalTime.of(14, 5))
+                ? today.minusDays(1)
+                : today;
+        for (int i = 0; i < 14; i++, candidate = candidate.minusDays(1)) {
+            if (calendar.isTwTradingDay(candidate)) return Optional.of(candidate);
+        }
+        log.warn("14 日內找不到台股已完成交易日，略過收盤自我修復 now={}", nowTw);
+        return Optional.empty();
     }
 
     /**
@@ -270,12 +330,12 @@ public class ClosePersister {
             try {
                 Optional<PriceResult> r = client.getUsClosingPriceFromFinMind(code, today);
                 if (r.isEmpty()) { miss++; continue; }
-                PriceResult pr = r.get();
-                boolean wrote = source.upsertHistory(code, "美股", today,
+                PriceResult pr = withSource(r.get(), FINMIND_US_CLOSE);
+                boolean wrote = source.upsertVerifiedHistory(code, "美股", today,
                         pr.openPrice(), pr.highPrice(), pr.lowPrice(),
-                        pr.price(), pr.volume());
+                        pr.price(), pr.volume(), FINMIND_US_CLOSE);
                 // FinMind 為權威收盤，同步覆寫 Redis live cache 以與 DB 一致
-                cacheWriter.writeVerifiedClose(pr);
+                cacheWriter.writeVerifiedClose(pr, today);
                 if (wrote) ok++;   // 同台股：被拒的列不計入（Task 279）
                 Thread.sleep(300);
             } catch (Exception e) {
@@ -324,13 +384,13 @@ public class ClosePersister {
                 if (bars.isEmpty()) { miss++; continue; }
                 PriceFetchClient.HistoricalBar bar = bars.get(bars.size() - 1);
                 if (!bar.tradingDate().equals(today)) { miss++; continue; }
-                boolean wrote = source.upsertHistory(code, "英股", today,
-                        bar.open(), bar.high(), bar.low(), bar.close(), bar.volume());
+                boolean wrote = source.upsertVerifiedHistory(code, "英股", today,
+                        bar.open(), bar.high(), bar.low(), bar.close(), bar.volume(), YAHOO_UK_CLOSE);
                 // 同步覆寫 Redis live cache 以與 DB 一致
-                PriceResult pr = new PriceResult(code, "英股", bar.close(), null, null, "Yahoo",
+                PriceResult pr = new PriceResult(code, "英股", bar.close(), null, null, YAHOO_UK_CLOSE,
                         null, null, null,
                         bar.open(), null, bar.high(), bar.low(), bar.volume());
-                cacheWriter.writeVerifiedClose(pr);
+                cacheWriter.writeVerifiedClose(pr, today);
                 if (wrote) ok++;   // 同台股：被拒的列不計入（Task 279）
                 Thread.sleep(500);
             } catch (Exception e) {
@@ -364,10 +424,12 @@ public class ClosePersister {
                     skipped.add(code);
                     continue;
                 }
-                if (source.upsertHistory(code, market, tradingDate,
+                String closeSource = "美股".equals(market) ? NASDAQ_REDIS_CLOSE : YAHOO_REDIS_CLOSE;
+                if (source.upsertVerifiedHistory(code, market, tradingDate,
                         bd(r, "openPrice"), bd(r, "highPrice"), bd(r, "lowPrice"),
                         price,
-                        r.hasNonNull("volume") ? r.get("volume").asLong() : null)) {
+                        r.hasNonNull("volume") ? r.get("volume").asLong() : null,
+                        closeSource)) {
                     n++;   // 被拒的非正收盤列不得算成已寫入（Task 279）
                 }
             } catch (Exception e) {
@@ -388,6 +450,15 @@ public class ClosePersister {
         JsonNode v = n.get(f);
         if (v == null || v.isNull()) return null;
         try { return new BigDecimal(v.asText()); } catch (Exception e) { return null; }
+    }
+
+    private static PriceResult withSource(PriceResult result, String stableSource) {
+        return new PriceResult(
+                result.stockCode(), result.market(), result.price(),
+                result.change(), result.changePct(), stableSource,
+                result.stockName(), result.buyPrice(), result.sellPrice(),
+                result.openPrice(), result.previousClose(), result.highPrice(),
+                result.lowPrice(), result.volume());
     }
 
     private boolean hasAnyHistoryFor(LocalDate date, String market) {

@@ -6,6 +6,7 @@ import com.steven.assets.model.StockPriceHistory;
 import com.steven.assets.repository.StockPriceHistoryRepository;
 import com.steven.assets.util.MarketZones;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -14,9 +15,13 @@ import org.springframework.web.reactive.function.client.WebClient;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.Clock;
 import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -43,13 +48,30 @@ public class PriceQueryService {
     private final StockPriceHistoryRepository historyRepo;
     private final ObjectMapper mapper = new ObjectMapper();
     private final WebClient priceServiceClient;
+    private final MarketDataService marketDataService;
+    private final Clock clock;
 
+    private static final Set<String> TRUSTED_TW_CLOSE_SOURCES = Set.of(
+            "TWSE_MI_INDEX", "TPEX_DAILY_CLOSE", "FINMIND_TW_CLOSE");
+
+    @Autowired
     public PriceQueryService(StringRedisTemplate redis,
                              StockPriceHistoryRepository historyRepo,
-                             @Value("${external-materials.base-url:http://external-materials-service:8080}") String priceServiceUrl) {
+                             @Value("${external-materials.base-url:http://external-materials-service:8080}") String priceServiceUrl,
+                             MarketDataService marketDataService) {
+        this(redis, historyRepo, priceServiceUrl, marketDataService, Clock.systemUTC());
+    }
+
+    PriceQueryService(StringRedisTemplate redis,
+                      StockPriceHistoryRepository historyRepo,
+                      String priceServiceUrl,
+                      MarketDataService marketDataService,
+                      Clock clock) {
         this.redis = redis;
         this.historyRepo = historyRepo;
         this.priceServiceClient = WebClient.builder().baseUrl(priceServiceUrl).build();
+        this.marketDataService = marketDataService;
+        this.clock = clock;
     }
 
     /** Redis JSON payload 對應結構（對外 DTO 與舊 StockPriceDto 形狀相容）。 */
@@ -70,28 +92,106 @@ public class PriceQueryService {
             String tradingDate,
             String updatedAt,
             Boolean closed,
-            String source
+            String source,
+            String quoteStatus
     ) {
         public BigDecimal change() { return priceChange; }
         public BigDecimal changePct() { return changePercent; }
     }
 
+    public enum DisplayPhase { OPEN, AFTER_CLOSE, PREVIOUS_SESSION }
+
+    public record DisplaySession(
+            DisplayPhase phase,
+            LocalDate targetTradingDate,
+            LocalDate marketToday
+    ) {}
+
+    public record PriceKey(String stockCode, String market) {}
+
     public Optional<LivePrice> getLive(String stockCode, String market) {
-        String key = "price:" + market + ":" + stockCode;
-        String json = null;
-        try {
-            json = redis.opsForValue().get(key);
-        } catch (Exception e) {
-            log.warn("Redis 讀取失敗 {}: {}", key, e.getMessage());
-        }
-        if (json != null) {
-            try {
-                return Optional.of(parse(json));
-            } catch (Exception e) {
-                log.warn("Redis JSON 解析失敗 {}: {}", key, e.getMessage());
-            }
-        }
+        Optional<LivePrice> cached = readRedis(stockCode, market);
+        if (cached.isPresent()) return cached;
         return fallbackToHistory(stockCode, market);
+    }
+
+    /**
+     * 顯示層唯一報價入口。開盤中才接受當日 Redis 成交；盤後、盤前與休市日只接受
+     * {@code stock_price_history} 中目標交易日且帶可信 {@code close_source} 的完成收盤。
+     */
+    public Optional<LivePrice> getDisplayPrice(String stockCode, String market) {
+        // Task 290 的 exact-date/provenance gate 僅收緊台股。美股與英股沿用既有
+        // Redis-first、miss 才取最近完成日的語意，避免 nullable migration 讓既有海外歷史列
+        // 在部署後被誤判為 CLOSE_PENDING。
+        if (!"台股".equals(market)) return getLive(stockCode, market);
+
+        DisplaySession session = displaySession(market);
+        if (session.phase() == DisplayPhase.OPEN) {
+            Optional<LivePrice> cached = readRedis(stockCode, market)
+                    .filter(p -> session.marketToday().toString().equals(p.tradingDate()));
+            if (cached.isPresent()) return Optional.of(withStatus(cached.get(), "LIVE", false));
+
+            LocalDate previous = previousTradingDay(market, session.marketToday().minusDays(1))
+                    .orElse(session.marketToday().minusDays(1));
+            return exactTrustedHistory(stockCode, market, previous, "PREVIOUS_CLOSE")
+                    .or(() -> Optional.of(pending(stockCode, market, previous)));
+        }
+
+        String status = session.phase() == DisplayPhase.AFTER_CLOSE
+                ? "VERIFIED_CLOSE" : "PREVIOUS_CLOSE";
+        return exactTrustedHistory(stockCode, market, session.targetTradingDate(), status)
+                .or(() -> Optional.of(pending(stockCode, market, session.targetTradingDate())));
+    }
+
+    public DisplaySession displaySession(String market) {
+        ZoneId zone = MarketZones.resolve(market);
+        ZonedDateTime now = ZonedDateTime.now(clock.withZone(zone));
+        LocalDate today = now.toLocalDate();
+        boolean tradingToday = marketDataService.isTradingDay(market, today);
+        LocalTime time = now.toLocalTime();
+        if (tradingToday
+                && !time.isBefore(MarketZones.openTime(market))
+                && time.isBefore(MarketZones.closeTime(market))) {
+            return new DisplaySession(DisplayPhase.OPEN, today, today);
+        }
+        if (tradingToday && !time.isBefore(MarketZones.closeTime(market))) {
+            return new DisplaySession(DisplayPhase.AFTER_CLOSE, today, today);
+        }
+        LocalDate start = tradingToday ? today.minusDays(1) : today;
+        LocalDate target = previousTradingDay(market, start).orElse(start);
+        return new DisplaySession(DisplayPhase.PREVIOUS_SESSION, target, today);
+    }
+
+    public boolean isTrustedClose(StockPriceHistory row) {
+        if (row == null || row.getCloseSource() == null || row.getCloseSource().isBlank()) return false;
+        return !"台股".equals(row.getMarket())
+                || TRUSTED_TW_CLOSE_SOURCES.contains(row.getCloseSource());
+    }
+
+    private Optional<LocalDate> previousTradingDay(String market, LocalDate start) {
+        LocalDate candidate = start;
+        for (int i = 0; i < 14; i++, candidate = candidate.minusDays(1)) {
+            if (marketDataService.isTradingDay(market, candidate)) return Optional.of(candidate);
+        }
+        return Optional.empty();
+    }
+
+    private Optional<LivePrice> exactTrustedHistory(
+            String stockCode, String market, LocalDate tradingDate, String quoteStatus) {
+        return historyRepo.findByStockCodeAndMarketAndTradingDate(stockCode, market, tradingDate)
+                .filter(this::isTrustedClose)
+                .map(row -> historyToLive(row, market, stockCode, quoteStatus));
+    }
+
+    private Optional<LivePrice> readRedis(String stockCode, String market) {
+        String key = "price:" + market + ":" + stockCode;
+        try {
+            String json = redis.opsForValue().get(key);
+            if (json != null) return Optional.of(parse(json));
+        } catch (Exception e) {
+            log.warn("Redis 讀取或解析失敗 {}: {}", key, e.getMessage());
+        }
+        return Optional.empty();
     }
 
     /**
@@ -137,18 +237,36 @@ public class PriceQueryService {
         List<LivePrice> all = new ArrayList<>();
         for (String market : new String[]{"台股", "美股", "英股"}) {
             String indexKey = "price:index:" + market;
-            Set<String> codes = redis.opsForSet().members(indexKey);
-            if (codes == null || codes.isEmpty()) continue;
-            for (String code : codes) {
-                String json = redis.opsForValue().get("price:" + market + ":" + code);
-                if (json == null) continue;
-                try {
-                    all.add(parse(json));
-                } catch (Exception e) {
-                    log.warn("Redis JSON 解析失敗 {} {}: {}", market, code, e.getMessage());
-                }
+            try {
+                Set<String> codes = redis.opsForSet().members(indexKey);
+                if (codes == null) continue;
+                for (String code : codes) readRedis(code, market).ifPresent(all::add);
+            } catch (Exception e) {
+                log.warn("Redis index 讀取失敗 {}: {}", indexKey, e.getMessage());
             }
         }
+        all.sort(Comparator.comparing(LivePrice::market).thenComparing(LivePrice::stockCode));
+        return all;
+    }
+
+    /** 把呼叫端必要代號與 Redis index 聯集後逐檔套用顯示狀態閘門。 */
+    public List<LivePrice> getAllDisplayPrices(Set<PriceKey> required) {
+        List<LivePrice> all = new ArrayList<>();
+        Set<PriceKey> keys = new LinkedHashSet<>(required == null ? Set.of() : required);
+        for (String market : new String[]{"台股", "美股", "英股"}) {
+            String indexKey = "price:index:" + market;
+            try {
+                Set<String> codes = redis.opsForSet().members(indexKey);
+                if (codes != null) {
+                    for (String code : codes) keys.add(new PriceKey(code, market));
+                }
+            } catch (Exception e) {
+                log.warn("Redis index 讀取失敗 {}: {}", indexKey, e.getMessage());
+            }
+        }
+        keys.stream()
+                .filter(key -> !("台股".equals(key.market()) && "0000".equals(key.stockCode())))
+                .forEach(key -> getDisplayPrice(key.stockCode(), key.market()).ifPresent(all::add));
         all.sort(Comparator.comparing(LivePrice::market).thenComparing(LivePrice::stockCode));
         return all;
     }
@@ -210,7 +328,10 @@ public class PriceQueryService {
                 text(n, "tradingDate"),
                 text(n, "updatedAt"),
                 n.hasNonNull("closed") ? n.get("closed").asBoolean() : null,
-                text(n, "source")
+                text(n, "source"),
+                text(n, "quoteStatus") != null
+                        ? text(n, "quoteStatus")
+                        : (n.path("closed").asBoolean(false) ? "VERIFIED_CLOSE" : "LIVE")
         );
     }
 
@@ -229,10 +350,11 @@ public class PriceQueryService {
     private Optional<LivePrice> fallbackToHistory(String stockCode, String market) {
         return historyRepo.findRecentN(stockCode, market, 1).stream()
                 .findFirst()
-                .map(h -> historyToLive(h, market, stockCode));
+                .map(h -> historyToLive(h, market, stockCode, "PREVIOUS_CLOSE"));
     }
 
-    private LivePrice historyToLive(StockPriceHistory h, String market, String code) {
+    private LivePrice historyToLive(
+            StockPriceHistory h, String market, String code, String quoteStatus) {
         BigDecimal close = h.getClosePrice();
         BigDecimal prev = historyRepo.findClosestPrice(code, market, h.getTradingDate().minusDays(1))
                 .map(StockPriceHistory::getClosePrice).orElse(null);
@@ -251,8 +373,27 @@ public class PriceQueryService {
                 // Task 252：顯示用時間戳，顯式指定台北（切換後 systemDefault() 雖等於台北，但明示優於隱式）
                 LocalDateTime.now(MarketZones.TW_ZONE).toString(),
                 true,
-                "history"
+                h.getCloseSource(),
+                quoteStatus
         );
+    }
+
+    private LivePrice pending(String code, String market, LocalDate targetDate) {
+        return new LivePrice(
+                code, null, market,
+                null, null, null, null,
+                null, null, null, null, null, null,
+                targetDate.toString(),
+                LocalDateTime.now(clock.withZone(MarketZones.TW_ZONE)).toString(),
+                false, null, "CLOSE_PENDING");
+    }
+
+    private LivePrice withStatus(LivePrice row, String status, boolean closed) {
+        return new LivePrice(
+                row.stockCode(), row.stockName(), row.market(), row.price(), row.previousClose(),
+                row.priceChange(), row.changePercent(), row.buyPrice(), row.sellPrice(),
+                row.openPrice(), row.highPrice(), row.lowPrice(), row.volume(), row.tradingDate(),
+                row.updatedAt(), closed, row.source(), status);
     }
 
 }
