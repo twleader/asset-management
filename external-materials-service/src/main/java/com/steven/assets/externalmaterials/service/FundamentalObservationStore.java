@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.YearMonth;
@@ -277,6 +278,8 @@ public class FundamentalObservationStore {
             List<String> sourceUrls,
             Instant sourceAvailableAt,
             String basis) {
+        if (industry == null || industry.isBlank() || year <= 0 || month < 1 || month > 12
+                || sourceAvailableAt == null) return 0;
         IndustryLatest latest = jdbc.query("""
                         SELECT revenue, prior_year_revenue, revenue_yoy_pct, company_count,
                                source_urls::text, source_available_at, availability_basis
@@ -300,7 +303,7 @@ public class FundamentalObservationStore {
                    availability_basis, observed_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, now())
                 """, industry, year, month, revenue, priorRevenue, yoy, companyCount,
-                provider, urls, sourceAvailableAt, basis);
+                provider, urls, Timestamp.from(sourceAvailableAt), basis);
     }
 
     private int appendValuation(StockFundamentalFetchClient.Valuation row) {
@@ -326,7 +329,7 @@ public class FundamentalObservationStore {
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, now())
                 """, row.stockCode(), TW_MARKET, row.tradingDate(), row.peRatio(), row.pbRatio(),
                 row.dividendYieldPct(), row.peLossFlag(), row.provider(), urls,
-                row.sourceAvailableAt(), row.availabilityBasis());
+                Timestamp.from(row.sourceAvailableAt()), row.availabilityBasis());
     }
 
     private int appendFinancial(StockFundamentalFetchClient.Financial row) {
@@ -354,7 +357,7 @@ public class FundamentalObservationStore {
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, now())
                 """, row.stockCode(), TW_MARKET, row.fiscalYear(), row.fiscalQuarter(), row.cumulativeEps(),
                 row.cumulativeNetIncomeParent(), row.equityParent(), row.provider(), urls,
-                row.sourceAvailableAt(), row.availabilityBasis());
+                Timestamp.from(row.sourceAvailableAt()), row.availabilityBasis());
     }
 
     private int appendRevenue(StockFundamentalFetchClient.Revenue row) {
@@ -383,7 +386,7 @@ public class FundamentalObservationStore {
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, now())
                 """, row.stockCode(), TW_MARKET, row.revenueYear(), row.revenueMonth(), row.industryName(),
                 row.revenue(), row.priorYearRevenue(), row.revenueYoyPct(), row.provider(), urls,
-                row.sourceAvailableAt(), row.availabilityBasis());
+                Timestamp.from(row.sourceAvailableAt()), row.availabilityBasis());
     }
 
     private String json(List<String> urls) {
