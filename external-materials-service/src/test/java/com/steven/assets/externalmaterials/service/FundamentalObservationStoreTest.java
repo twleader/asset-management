@@ -36,12 +36,13 @@ class FundamentalObservationStoreTest {
     @SuppressWarnings({"unchecked", "rawtypes"})
     void identicalPublishedObservationIsNoOp() throws Exception {
         JdbcTemplate jdbc = mock(JdbcTemplate.class);
-        ResultSet rs = latestValuation(new BigDecimal("20.00"));
+        ResultSet rs = latestValuation(new BigDecimal("20.1235"));
         when(jdbc.query(anyString(), any(PreparedStatementSetter.class), any(ResultSetExtractor.class)))
                 .thenAnswer(invocation -> ((ResultSetExtractor) invocation.getArgument(2)).extractData(rs));
 
         FundamentalObservationStore store = new FundamentalObservationStore(jdbc, new ObjectMapper());
-        var result = store.append(bundle(new BigDecimal("20.0")));
+        // 來源比 NUMERIC(12,4) 多出的精度，不得在每輪抓取時製造假 revision。
+        var result = store.append(bundle(new BigDecimal("20.123456")));
 
         assertThat(result.valuations()).isZero();
         verify(jdbc, never()).update(anyString(), any(Object[].class));
@@ -64,6 +65,37 @@ class FundamentalObservationStoreTest {
         verify(jdbc).update(anyString(), arguments.capture());
         // PostgreSQL JDBC 無法直接推斷 Instant；store 必須明確綁成 TIMESTAMPTZ 可接受的 Timestamp。
         assertThat(arguments.getValue()[9]).isEqualTo(Timestamp.from(AVAILABLE_AT));
+    }
+
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void monthlyRevenueRoundingToStoredPrecisionIsNoOp() throws Exception {
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        ResultSet rs = latestRevenue(new BigDecimal("20.1235"));
+        when(jdbc.query(anyString(), any(PreparedStatementSetter.class), any(ResultSetExtractor.class)))
+                .thenAnswer(invocation -> ((ResultSetExtractor) invocation.getArgument(2)).extractData(rs));
+
+        FundamentalObservationStore store = new FundamentalObservationStore(jdbc, new ObjectMapper());
+        var result = store.append(revenueBundle(new BigDecimal("20.123456")));
+
+        assertThat(result.revenues()).isZero();
+        verify(jdbc, never()).update(anyString(), any(Object[].class));
+    }
+
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void monthlyRevenueChangeAcrossStoredPrecisionAppendsRevision() throws Exception {
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        ResultSet rs = latestRevenue(new BigDecimal("20.1235"));
+        when(jdbc.query(anyString(), any(PreparedStatementSetter.class), any(ResultSetExtractor.class)))
+                .thenAnswer(invocation -> ((ResultSetExtractor) invocation.getArgument(2)).extractData(rs));
+        when(jdbc.update(anyString(), any(Object[].class))).thenReturn(1);
+
+        FundamentalObservationStore store = new FundamentalObservationStore(jdbc, new ObjectMapper());
+        var result = store.append(revenueBundle(new BigDecimal("20.12356")));
+
+        assertThat(result.revenues()).isOne();
+        verify(jdbc).update(anyString(), any(Object[].class));
     }
 
     @Test
@@ -172,6 +204,14 @@ class FundamentalObservationStoreTest {
                 List.of(SOURCE_URL), AVAILABLE_AT, "PUBLISHED")), List.of(), List.of());
     }
 
+    private static StockFundamentalFetchClient.Bundle revenueBundle(BigDecimal yoy) {
+        return new StockFundamentalFetchClient.Bundle(List.of(), List.of(), List.of(
+                new StockFundamentalFetchClient.Revenue(
+                        "2330", 2026, 7, "半導體業", 100_000L, 90_000L, yoy,
+                        StockFundamentalFetchClient.EXCHANGE,
+                        List.of(SOURCE_URL), AVAILABLE_AT, "PUBLISHED")));
+    }
+
     private static List<FundamentalObservationStore.FinancialCoverage> completeFinancials() {
         return financialsFrom(2026, 2);
     }
@@ -215,6 +255,19 @@ class FundamentalObservationStoreTest {
         when(rs.getBigDecimal(2)).thenReturn(new BigDecimal("5.1"));
         when(rs.getBigDecimal(3)).thenReturn(new BigDecimal("1.2"));
         when(rs.getObject(4)).thenReturn(false);
+        when(rs.getString(5)).thenReturn("[\"" + SOURCE_URL + "\"]");
+        when(rs.getTimestamp(6)).thenReturn(Timestamp.from(AVAILABLE_AT));
+        when(rs.getString(7)).thenReturn("PUBLISHED");
+        return rs;
+    }
+
+    private static ResultSet latestRevenue(BigDecimal yoy) throws Exception {
+        ResultSet rs = mock(ResultSet.class);
+        when(rs.next()).thenReturn(true);
+        when(rs.getString(1)).thenReturn("半導體業");
+        when(rs.getObject(2)).thenReturn(100_000L);
+        when(rs.getObject(3)).thenReturn(90_000L);
+        when(rs.getBigDecimal(4)).thenReturn(yoy);
         when(rs.getString(5)).thenReturn("[\"" + SOURCE_URL + "\"]");
         when(rs.getTimestamp(6)).thenReturn(Timestamp.from(AVAILABLE_AT));
         when(rs.getString(7)).thenReturn("PUBLISHED");
