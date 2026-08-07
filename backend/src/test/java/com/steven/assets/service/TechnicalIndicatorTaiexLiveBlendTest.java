@@ -59,7 +59,7 @@ class TechnicalIndicatorTaiexLiveBlendTest {
         return new PriceQueryService.LivePrice(
                 "0000", "台股大盤", "台股", price, null, null, null,
                 null, null, null, high, low, null,
-                tradingDate.toString(), "2026-07-20T10:30:00", false, "TWSE指數(5m)");
+                tradingDate.toString(), "2026-07-20T10:30:00", false, "TWSE指數(5m)", "LIVE");
     }
 
     @Test

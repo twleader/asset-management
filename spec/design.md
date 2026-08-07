@@ -47,7 +47,7 @@ com.steven.assets/
 - `AssetService`: 快照 CRUD、總額計算、損益運算、歷史分析
 - `ExcelImportService`: Excel 解析、格式偵測、資料清洗、批次儲存
 - `MarketDataService`: 股利率查詢、ETF 持股查詢等不屬於即時報價的市場資料（外部抓價已搬至 `external-materials-service`）
-- `PriceQueryService`: 對 `external-materials-service` 寫入 Redis 的 live 行情做唯讀；live 一律先讀 Redis，miss 則 fallback 至 `stock_price_history` 最近一筆收盤；歷史收盤直接讀 DB。`MarketDataController` 等對外 endpoint 皆透過此 service 取值，介面對 BFF / 前端不變
+- `PriceQueryService`: 對 `external-materials-service` 寫入 Redis 的 live 行情做唯讀。`getLive` 保留原始 live 語意（Redis first、miss 才 fallback 最近完成日），供警示／技術指標與交易雷達規則引擎；`getDisplayPrice`／`getAllDisplayPrices` 則是公開報價與估值的防線：以可注入 `Clock` 與市場日曆解析 `DisplaySession(phase,targetTradingDate)`，開盤中回當日 Redis（`LIVE`）；盤後／盤前／非交易日的台股只回 target date 且 `close_source` 命中信任清單的列（盤後 `VERIFIED_CLOSE`，其餘 `PREVIOUS_CLOSE`），否則回空價 placeholder（`CLOSE_PENDING`），不得向前跳過缺檔拿更舊收盤冒充。`StockPriceService` 的 prices／price／live-assets、Trading Radar 使用者可見價與歷史圖最新完成格一律走此 gate
 - `HistoricalDataService`: 歷史股價與匯率資料管理；歷史回補範圍以 `stock` 主檔（含曾持有 / 觀察清單 / 警示）為主，並聯集歷史快照中的持股代號
 - `StockMasterService`: `stock` 主檔（被觀察 / 持有 / 警示標的的聯集）的唯一寫入入口。原本各路徑各自呼叫 `StockRepository.upsert(code, market, name)`，現統一改走 `StockMasterService.upsert(...)`：先以 `existsByCodeAndMarket` 判定是否為「新標的」（先前不存在），upsert 後若為新標的（且非台股大盤 0000）即以**單執行緒佇列**（serialize，避免大量匯入時並發打爆 Yahoo）背景呼叫 `HistoricalDataService.backfillSingleStock(code, market, now−10y)` 觸發 10 年歷史回補。動機：`HistoricalBackfillService.startupBackfill` 只在「服務啟動」掃描主檔回補，兩次重啟之間新增的標的（例 2026-06 新增英股 IB01）會落入「即時價有、走勢圖歷史只有今日一格」的空窗。呼叫端：`StockAlertService.create/update`、`AssetService.createSnapshot/updateSnapshot`、`StockAlertController.lookupName`（皆原 upsert 點）。既有標的的名稱更新 → `isNew=false` → 不重複回補；回補本身 idempotent（skip 已存在日期、今日列獨佔給 `ClosePersister`），失敗則由下次重啟 `startupBackfill` 的 stale/missing 條件補救
 - `InstitutionService`: 銀行、券商、存款類型、市場類型的 CRUD、停用管理、關鍵字比對邏輯
@@ -86,13 +86,14 @@ com.steven.assets/
 - 其他 settings/passthrough（每頁一支 Spring Cloud Gateway route 配置，rewrite `/api/bff/{page}/**` → `/api/{resource}/**`）：BankSettings、BrokerSettings、DepositTypeSettings、MarketTypeSettings、AssetClassSettings（`/api/bff/asset-class-settings/**`）、TransitFundTypeSettings、StockAlert（`/api/bff/stock-alert/**`；**Requirement 54 起另有 `StockAlertBffController` 與此 route 並存**——`GET/PUT /api/bff/stock-alert/export-setting`、`POST .../run-now`、`GET .../browse`、`GET .../browse-gdrive`，後兩者 passthrough 至既有唯一那支 `/api/export-schedule/browse{,-gdrive}`。萬用 route 會把這幾條錯誤 rewrite 成 `/api/stock-alerts/export-setting/...`，靠 WebFlux `RequestMappingHandlerMapping`（order 0）先於 Gateway `RoutePredicateHandlerMapping`（order 1）由 controller 接走；同一模式的既有先例為 `TradingRadarBffController` ＋ `TradingRadarBffRoutes`）、BackupRestore（`/api/bff/backup-restore/**`）、NotificationSettings（`/api/bff/notification-settings/recipients/**` → `/api/notification-recipients/**`）、PaymentAccountSettings（見「Payment Accounts / Categories」段落，Requirement 22）、UserManagement（`/api/bff/user-management/**`，見 Requirement 28「API 端點（新增）」）、TodayMarketAnalysisRecipients（`/api/bff/today-market-analysis/recipients/**` → `/api/notification-recipients/{id}/market-analysis`，見 Task 151）
 - `WatchStockBffRoutes`（WatchStockView 專屬，`/api/bff/watch-stock/**`）：純 Spring Cloud Gateway passthrough route，rewrite `/api/bff/watch-stock(/**)` → `/api/watch-stocks(/**)` 轉至 business-services。觀察清單已改為「`stock_alert` 衍生 view」，**衍生與 enrichment 一律在 business-services（`WatchStockController` / `WatchStockService`）完成，BFF 僅轉發不重算**：
   - `GET /api/bff/watch-stock` → `GET /api/watch-stocks`：business-services 由 `stock_alert` 群組去重衍生清單，對每筆 (stockCode, market) 補上 live 報價、技術指標、最近觸發資訊
+    - 使用者可見報價改走 `PriceQueryService.getDisplayPrice`，`WatchStockDto.Response` 傳遞 `quoteStatus`；`CLOSE_PENDING` 時價格顯示「收盤價待補」、不 fallback 昨收，技術指標內部計算仍可用 raw `getLive`
   - `PUT /api/bff/watch-stock/order` → `PUT /api/watch-stocks/order`：拖曳排序時把該股票所有 alert 的 displayOrder 整組重排
   - `POST /api/bff/watch-stock/resend-digest?market=` → `POST /api/watch-stocks/resend-digest`：手動補發最後交易日警示 digest 信，`market` query（台股/美股/英股）限定只補發當前市場 tab、原樣帶過（passthrough 也涵蓋 `GET /api/watch-stocks/chart.png`）
   - 新增觀察由前端直接呼叫 `/api/bff/stock-alert/**` 建立警示條件；移除觀察由前端在「警示條件」頁刪除該股票所有 alert 達成，因此不提供 watch-stock 級的 create / delete 端點
 - `SnapshotFormBffController`（SnapshotFormView 專屬）：把表單頁的多步協調邏輯（價格批次查 + backfill fallback + 配息率補抓 + 名稱補齊 + 匯率智慧 fallback）集中於此
   - `GET /api/bff/snapshot-form/{id}`：編輯模式 bootstrap，回傳 enriched detail + mergedStocks
-  - `POST /api/bff/snapshot-form/prices?date=YYYY-MM-DD`：批次取得每筆股票的歷史收盤價 + 漲跌 + 名稱 + 配息率（DB 缺資料時自動 backfill 重試）。`enrichBatch` per-market 基準日規則：basedate==該市場今日→用 live 即時漲跌；否則（frozen）改用 `hist`（`prices-on-date`）已算好的「當日漲跌」（該收盤日 vs 前一交易日），不再留空——收盤/週末頁也顯示漲跌，與 Dashboard 同源。前端 `SnapshotFormView` `.price-up=#dc2626`（漲紅）/`.price-down=#16a34a`（跌綠），台股慣例
-  - `GET /api/bff/snapshot-form/realtime`：2 分鐘輪詢用，先 trigger 後端刷新行情再回傳 stockPrices + marketStatus
+  - `POST /api/bff/snapshot-form/prices?date=YYYY-MM-DD`：批次取得每筆股票的歷史收盤價 + 漲跌 + 名稱 + 配息率（DB 缺資料時自動 backfill 重試）。`enrichBatch` per-market 基準日規則：basedate==該市場今日→使用 display quote；若收盤後為 `CLOSE_PENDING`，必須回 `price=null` 並傳遞 status，前端清除先前的盤中價並顯示「收盤價待補」，不得回退昨收；否則（frozen）改用 `hist`（`prices-on-date`）已算好的「當日漲跌」（該收盤日 vs 前一交易日）。前端 `SnapshotFormView` `.price-up=#dc2626`（漲紅）/`.price-down=#16a34a`（跌綠），台股慣例
+  - `GET /api/bff/snapshot-form/realtime`：2 分鐘輪詢用，先 trigger 後端刷新行情再回傳 display `stockPrices` + marketStatus；每輪都必須套用 null/status，不得因為 price 為 null 就保留上一輪舊價
   - `GET /api/bff/snapshot-form/exchange-rate?date=YYYY-MM-DD`：取指定日期 USD 匯率（今天會先 refresh，假日往前 fallback）
   - `GET /api/bff/snapshot-form/lookups`：表單下拉一次取齊（banks / brokers / depositTypes / transitFundTypes，皆已過濾 active）
   - `GET /api/bff/snapshot-form/funds`：信託基金主檔（passthrough 至 `/api/funds`），每筆已含 latestNav / latestFxRate / twdPerUnit；`?date=` 時改用該基準日（Requirement 19/21）
@@ -113,7 +114,7 @@ com.steven.assets/
   - `FundSettingsBffController`：`GET /api/bff/fund-settings/bank-options` → 過濾 active 後的銷售銀行下拉；與 SnapshotForm 的 lookups **同讀 business `/api/settings/banks`**（同義欄位同一來源），fund-settings 頁不再跨頁呼叫 `/api/bff/snapshot-form/lookups`（Task 175：一頁一 BFF 合規化）
   - `RealizedGainBffRoutes`：`/api/realized-gains/**` → business-services。**目前無前端消費者**：原「RealizedGainView 的 Pinia store `gainApi` 共用 CRUD」說法已不成立——該頁已全面走 `RealizedGainBffController` 的 `/api/bff/realized-gain` 聚合端點，前端 `gainApi` wrapper 與 `assetStore` 的三個已實現損益 action 已於 Task 197 移除。route 本身暫留（移除需重建 BFF 服務），**屬待清理項**
   - `MarketDataBffRoutes`：`/api/market-data/**` → business-services。消費者是 DashboardView 與 TradingRadarView 兩頁的 SSE 行情串流（皆為 `new EventSource('/api/market-data/prices/stream')`，見下方 SSE 段落之已知落差）；`marketDataApi` wrapper（歷史/配息/ETF 成分股）無呼叫端，已於 Task 197 移除，該類查詢皆走 `StockAnalysisBffRoutes` 的 `/api/bff/stock-analysis/**`
-  - `SchedulePublicBffController`（ScheduleListView 專屬，「公開資訊」分組，Requirement 36）：`GET /api/bff/schedule-list` → 回傳系統所有自動排程的**人工維護靜態清單**（`ScheduledJobDto` 不可變 record：service / category / name / description / schedule 白話 / cron / zone），共 **46 筆** ＝ `business-services` 17 ＋ `external-materials-service` 29（**以 `@Scheduled` 方法計**；external 實際 30 個標註，`TwClosurePoller` 一法兩標併為一筆；business 17 含 Requirement 49「交易紀錄匯出」）。此頁為唯讀資訊展示故不做跨服務反射探索、不入 DB、不設管理端點；**新增／調整任何 `@Scheduled` 須同步更新此清單以免漂移**（Task 195 修正 Task 190／191 漏同步之兩處漂移；Task 196.12 新增一筆 JOBS 後僅更新 javadoc 表頭、漏同步總數與本段，於 Task 197 一併修正為 36；本段之後歷經多個任務累積新增排程未同步更新此總數，Task 228 新增大盤盤中即時點位排程時以 `grep '@Scheduled'` 逐檔核對重新校正為 44——12／24 兩數字皆已是 Task 228 之前即存在的計數漂移，非本次新增所致）。**動態排程**（每分鐘 tick 比對 DB 可設定時點：`NewsPoller`→`crawler_schedule`、`MarketAnalysisScheduler`→`market_analysis_send_time`）於清單標「動態：依『X』頁設定（預設 …）」／「動態（表名）」，**不寫死時間**；每分鐘 tick 但時點為 per-user 私人設定者（`ExportScheduleService`／`TradingCalendarExportScheduleService`）則照列 `每分鐘`／`0 * * * * *` 實際 cron。前端 `ScheduleListView` 之服務別／分類計數由 payload 動態算出，故加減筆數無須改前端。無下游呼叫（不需 WebClient），落 BFF `anyExchange().authenticated()`（已登入者皆可讀）。
+  - `SchedulePublicBffController`（ScheduleListView 專屬，「公開資訊」分組，Requirement 36）：`GET /api/bff/schedule-list` → 回傳系統所有自動排程的**人工維護靜態清單**（`ScheduledJobDto` 不可變 record：service / category / name / description / schedule 白話 / cron / zone），共 **48 筆** ＝ `business-services` 19 ＋ `external-materials-service` 29（**以 `@Scheduled` 方法計**；business 另包含 `AlertNotificationDispatcher` 每 60 秒與 `TradingRadarNotificationService` 每 2 秒兩個 fixed-delay job；Task 290 後 external 實際 31 個標註，`TwClosurePoller` 與台股官方收盤對帳各為一法兩標、各併為一筆）。此頁為唯讀資訊展示故不做跨服務反射探索、不入 DB、不設管理端點；**新增／調整任何 `@Scheduled` 須同步更新此清單以免漂移**。**動態排程**（每分鐘 tick 比對 DB 可設定時點：`NewsPoller`→`crawler_schedule`、`MarketAnalysisScheduler`→`market_analysis_send_time`）於清單標「動態：依『X』頁設定（預設 …）」／「動態（表名）」，**不寫死時間**；每分鐘 tick 但時點為 per-user 私人設定者（`ExportScheduleService`／`TradingCalendarExportScheduleService`）則照列 `每分鐘`／`0 * * * * *` 實際 cron。前端 `ScheduleListView` 之服務別／分類計數由 payload 動態算出，故加減筆數無須改前端。無下游呼叫（不需 WebClient），落 BFF `anyExchange().authenticated()`（已登入者皆可讀）。
   - `CrawlerDataBffController`（CrawlerDataView 專屬，「公開資訊」分組，Requirement 38）：爬蟲資訊查詢頁，一頁一 BFF、WebClient 轉呼 business：
     - `GET /api/bff/crawler-data?date=YYYY-MM-DD&dateField=fetched|published&category=` → business `GET /api/news-headlines`：查指定日期爬回的 `news_headline`（與今日股市分析同讀一份表，符合「同義欄位、同一 business API」）。
     - `GET /api/bff/crawler-data/schedule` → business `GET /api/crawler-schedule?crawler=news-poller`：讀 NewsPoller 已設定的執行時間清單。
@@ -169,7 +170,7 @@ com.steven.assets.externalmaterials/
 ├── client/             # TwseClient、NasdaqClient、FinMindClient（從 backend 搬出）
 ├── service/
 │   ├── PricePoller     # 兩段獨立 cron（搬自原 StockPriceService.scheduledTw/UsIntradayUpdate）
-│   ├── ClosePersister  # 盤後收盤 cron（搬自 recordTw/UsClosingPrice），寫 stock_price_history
+│   ├── ClosePersister  # 盤後收盤 cron；台股官方逐檔對帳、美英既有校正，寫 stock_price_history
 │   ├── MarketClock     # isTwMarketOpen / isUsMarketOpen（平日 + 時段 + 假日；委派 MarketCalendar 判假日）
 │   ├── MarketCalendar  # 交易日 / 國定假日判定（台股→TWSE holidaySchedule；美/英→NYSE/LSE 純函式）
 │   ├── PriceCacheWriter # 寫入 Redis（封裝 key schema）
@@ -178,6 +179,7 @@ com.steven.assets.externalmaterials/
 │   └── FundNavPersister # 寫 fund_nav 表
 ├── client/
 │   ├── PriceFetchClient
+│   ├── TwOfficialCloseClient # TWSE MI_INDEX（指定日）＋ TPEx 全市場收盤；逐來源日期守門
 │   ├── DividendFetchClient
 │   └── FundNavFetchClient # FundClear / MoneyDJ 抓 NAV（Requirement 19）
 └── controller/
@@ -198,7 +200,7 @@ com.steven.assets.externalmaterials/
 **Redis key schema：**
 | Key | 內容 | TTL | 寫入者 |
 |-----|------|-----|--------|
-| `price:{market}:{code}` | JSON `{ price, prevClose, changePercent, open, high, low, volume, tradingDate, source, updatedAt }` | 24 小時（涵蓋整個交易日 + 跨夜，避免低流動性股票長時間 z='-' 後 TTL 過期退回昨收） | `PriceCacheWriter` 每 2 分鐘；`price:台股:0000`（大盤）自 Task 228 起亦納入同一 key schema，寫入者為 `TaiexIndexPoller`，`source` 標記含括號（如 `TWSE指數(5m)`）故不進 `IntradayTickStore`（那條 tick 序列供個股「今日走勢」用，與大盤既有的 transient `fetchIndexIntraday` 圖表資料源分離，不混用） |
+| `price:{market}:{code}` | JSON `{ price, prevClose, changePercent, open, high, low, volume, tradingDate, source, updatedAt, closed, quoteStatus }`；`quoteStatus ∈ LIVE / VERIFIED_CLOSE / PREVIOUS_CLOSE`，`CLOSE_PENDING` 由 business display query 在當日收盤缺列時合成、不寫 Redis | 24 小時（涵蓋整個交易日 + 跨夜，避免低流動性股票長時間 z='-' 後 TTL 過期退回昨收） | `PriceCacheWriter` 每 2 分鐘及盤後權威收盤回寫；`price:台股:0000`（大盤）自 Task 228 起亦納入同一 key schema，寫入者為 `TaiexIndexPoller`，`source` 標記含括號（如 `TWSE指數(5m)`）故不進 `IntradayTickStore`（那條 tick 序列供個股「今日走勢」用，與大盤既有的 transient `fetchIndexIntraday` 圖表資料源分離，不混用） |
 | `price:index:{market}` | Set，紀錄該市場所有有 cache 的 stockCode | 24 小時 | 同上 |
 | `price:dayhl:{market}:{code}:{tradingDate}` | JSON `{ high, low }` 該交易日累積觀察到的最高 / 最低成交價 | 36 小時（跨日 dump 後仍可佐證） | `IntradayHighLowTracker` 每次 cron tick。**大盤 `0000` 自 Task 263 起不在此列**：Yahoo 5 分 K 本就提供整日 high／low，本地聚合的存在理由（外部 API 不給 dayrange）對它不成立，且聚合的 max／min 語意使誤入的極值無法被後續正確值修正 |
 | `market:status` | JSON `{ twMarketOpen, usMarketOpen, twTime, usTime }` | 90s（短於輪詢） | `MarketClock` 每分鐘 |
@@ -212,7 +214,7 @@ NASDAQ info API 自 2026/04 起對 ETF 的 `keyStats` 為 null（無 dayrange �
 
 > `market:status` TTL 設 90s 短於輪詢間隔，確保 Redis 過期前一定會被覆寫；fail-safe 若 external-materials-service 掛了，`PriceQueryService` 視 Redis miss 為「未開盤」（保守處理）。
 
-**抓價來源同舊**：TWSE mis API（台股 live）、NASDAQ info API（美股 live）、FinMind TaiwanStockPrice（台股盤後收盤）。
+**抓價來源**：TWSE mis API（台股 live）、NASDAQ info API（美股 live）；台股正式收盤由 TWSE `MI_INDEX` 指定交易日檔（上市）＋ TPEx 全市場日收盤檔（上櫃）對帳，FinMind `TaiwanStockPrice` 只作缺檔 fallback。
 
 **美股盤中 `openPrice` 補強（2026/05 初版用 NASDAQ /historical；2026/06 Task 120 改 Yahoo daily bar）：** NASDAQ `/info` endpoint 自 2026/04 起不再回傳 `OpenPrice`。初版改打 `https://api.nasdaq.com/api/quote/{code}/historical?...&fromdate==todate==美東今日`，但 NASDAQ 對「`fromdate == todate`」一律回 **400（`Provided date is less than from date`）**、給日期區間盤中又**不含今日列**，故該法恆失敗 → `openPrice` 永遠 null → Redis live 無 open → 盤後 dump 進 `stock_price_history` 亦無 open → 觀察清單「開盤」欄對所有美股恆顯示「—」。**現行作法**：`PriceFetchClient.fetchUsTodayOpenFromYahoo(code)` 打 `https://query2.finance.yahoo.com/v8/finance/chart/{code}?interval=1d&range=1d`，取 `chart.result[0].indicators.quote[0].open[0]`（盤中＝今日部分 bar 的 open、盤後＝完整 bar 的 open；只取 open 欄、不碰 close，不違反 Task 84「禁寫今日列收盤」）。走 curl 子程序避開 Yahoo HTTP/2 fingerprint 偵測；為補強欄位遇 429 fail-fast 不重試（`curlGetWithRetry(url, 0)`），取不到回 null 由 `WatchStockService` 的 `stock_price_history` fallback 接手。HTTP 呼叫在 `PricePoller.updatePrices` 的 virtual-thread pool 中與其他 stock 並行執行，不會延長 cron 週期。台股 open 走 TWSE mis `o`。
 
@@ -321,11 +323,11 @@ DB 錯誤列（某檔某日的假收盤）
 
 > **條件 2 之所以用「距 now 的間隔」而非「與市場當地收盤時刻比較」**：`PriceCacheWriter` 寫 `updatedAt` 時三處都綁 `MarketClock.TW_ZONE`（`LocalDateTime.now(MarketClock.TW_ZONE)`），即**所有市場的 `updatedAt` 都是台北牆鐘**。拿它去比美股／英股的當地收盤時刻會分別位移 12／7 小時。改成比「距本次執行時刻」則兩端同為台北牆鐘，三個市場同一段程式碼即正確。
 >
-> **刻意不用 payload 的 `closed` 當守門條件**：13:32 dump 要取的正是 13:28～13:30 那輪盤中 cron 寫入的值，`PricePoller.scheduledTwIntradayUpdate` 呼叫 `updatePrices(tw, "台股", false)`，故該值的 `closed` 為 `false`。以 `closed == true` 守門會把正常路徑整個擋掉、當日一列都寫不進去。
+> **刻意不用 payload 的 `closed` 當 Task 258 dump 守門條件**：美／英股 dump 要取的仍是收盤前最後一輪 `closed=false` 的盤中 cron 值。台股在 Task 258 當時同理，但 Task 290 已停止 13:32 台股 Redis→DB dump；該 payload 只保留為暫定行情，正式收盤改走官方日檔。
 
-守不過即**跳過該檔不寫任何列**，不得回填昨收／開盤價（Requirement 7 禁止回寫充數）。代價（刻意接受）：流動性極低、收盤前 12 分鐘無成交的標的當日可能無列，下游 `PriceQueryService.getLive` 與 `findRecentClose` 自然 fallback 至最近一筆收盤——這是誠實的狀態，優於把三小時前的盤中價記成收盤。持股標的另有 16:00 TW／18:00 ET FinMind 校正與 17:00 LON Yahoo 校正作為當日收盤的最終權威，不受本守門影響——**但這三條的實證強度不同，不可一概當成安全網**：台股那條有實證（`TaiwanStockPrice` 免 token 可用，見下方 FinMind 現況補記）；**美股那條實測寫 0 檔**（2026-07-29 18:00 ET 的日誌為「成功覆寫 0 檔，缺漏 9 檔」，9 檔即美股抓價集合全數，回應 HTTP 200 但 `data` 為空，疑為 `USStockPrice` 需 token 而容器內 `FINMIND_TOKEN` 為空字串）；英股那條**未查證**（現行容器建立時已過該時點，無樣本）。
+守不過即**跳過該檔不寫任何列**，不得回填昨收／開盤價（Requirement 7 禁止回寫充數）。Task 290 起本守門的實際 dump 消費者只剩美股 16:02 ET 與英股 16:32 LON；台股 13:32 不再落 DB。美股另有 18:00 ET FinMind、英股另有 17:00 LON Yahoo 校正，但兩者的實證強度不同：美股曾實測整批空資料，英股樣本亦不完整，故仍保留 Task 258 守門與手動歷史修復能力。
 
-> **對 `selfHealMissedClose` 的連帶影響（刻意接受，但必須知道）：** 它經三支 `dumpXxCloseFromRedis` wrapper **間接**走到 `dumpRedisToDb`（後者是 private、只有那 3 個直接呼叫點），用途是「服務在 dump 時點沒在跑（restart／crash），開機後補跑一次」。守門加在共用的 `dumpRedisToDb` 內，故 self-heal 這條路徑同樣受規範——而開機補跑時 Redis payload 的 `updatedAt` 幾乎必然早於 12 分鐘（那是收盤前寫入的值，開機時點通常已過收盤數十分鐘以上），且若 `warmCacheOnStartup` 已先跑過 `syncClosedFromDb` 則 `tradingDate` 會被改寫成 DB 的 `maxTradingDate`，**故視兩條啟動執行緒的相對次序，擋下它的是規則 1 或規則 2；兩種情況都是整批擋掉，self-heal 的 Redis dump 分支因此實質失效**。這是刻意接受的：把數小時前的值寫成收盤，正是本任務要根除的行為；台股當日收盤仍由 16:00 TW FinMind verify 補上（走外部權威來源、不讀 Redis，不受守門影響）。**美股沒有這層保障**：18:00 ET 的 FinMind verify 實測寫 0 檔（見上段），故當「服務在 16:02 ET 的 dump 時點沒在跑」**且**「回到線上時距最後一輪盤中 tick 已超過 12 分鐘（或 `warmCacheOnStartup` 的 `syncClosedFromDb` 已先把 `tradingDate` 改寫成 `maxTradingDate`）」**且**「該次重啟早於 18:00 ET」三者同時成立時 → **美股當日收盤永久缺列**，不需要「連 verify 時點也沒在跑」這個前提。**三個條件不可省**：若 16:02 時服務還活著，dump 已寫入、開機後 `selfHealMissedClose` 會被 `!hasAnyHistoryFor(todayUs, "美股")` 短路；若崩後很快回來（例如 16:01 崩、16:05 回，最後一輪 tick 是 16:00 ET），`age ≤ 12 分鐘` 且 `tradingDate` 仍是當日，兩條規則都會放行、self-heal 的 dump 照樣寫得進去。英股的 17:00 LON Yahoo verify 未查證。上述缺列一律需以 `/internal/repair/history` 手動修復。
+> **對 `selfHealMissedClose` 的連帶影響：** 美／英股的 Redis dump self-heal 仍受上述 12 分鐘守門，重啟太晚時可能整批擋下，缺列需靠各自校正或 `/internal/repair/history`。台股自 Task 290 起不走 Redis dump self-heal：14:05 後啟動一律重跑 TWSE／TPEx 官方全集合對帳，16:00 後再對仍缺檔者跑 FinMind。判斷單位由舊的 `hasAnyHistoryFor` 全市場布林改成 `expected − exactDateRows` 逐檔集合，已有部分列不得短路整輪補救。
 
 **為什麼既有回補路徑修不了錯誤列。** `HistoricalBackfillService.backfillTwStock`（`backfillUsStock`／`backfillUkStock` 同構）有兩道各自獨立的阻擋：
 
@@ -386,7 +388,7 @@ POST /internal/repair/history?market=%E5%8F%B0%E8%82%A1&from=2026-06-01&to=2026-
 - 台股假日委派既有 `MarketDataFetchService.getTwHolidays(year)`（TWSE holidaySchedule，已是台股唯一來源；抓不到時保守視為交易日，與 business-services 既有退化一致）。
 - 美股 / 英股假日為 NYSE / LSE 法定規則純函式（與 `business-services` `MarketDataService.getUsHolidays/getUkHolidays` 同一套；因兩服務無共用 module、且 ext-materials 不可反向依賴 business-services（避免循環），故各持一份並以交叉註解鎖定「修改須同步」，per-year 快取）。
 
-`MarketClock.isXxxMarketOpen / isXxxMarketJustClosed` 全部改為「`MarketCalendar.isXxxTradingDay(當日)` && 時段」。連帶效果：`PricePoller` 各 scheduled 抓價（gated on `isXxxMarketOpen`）假日自動 skip；`TradingDateResolver.resolve`（依 `isXxxMarketOpen/isXxxMarketJustClosed` 判 live session，由 `PriceCacheWriter` 呼叫）假日自動退回 DB 最近交易日。`ClosePersister` 各 dump / verify / `selfHealMissedClose` 另加 `MarketCalendar.isXxxTradingDay` 早退守門（`PricePoller` 假日不抓，但 Redis 仍有前一交易日值且 TTL 24h，若不守門 dump 會把它標成假日當日寫 DB）。`PricePoller.refreshAll`（手動 `/internal/refresh`）的 `markClosed` 亦由 `false` 改為 `!isXxxMarketOpen()`，與 `warmCacheOnStartup` 一致，避免手動刷新在假日 append 假 tick。
+`MarketClock.isXxxMarketOpen / isXxxMarketJustClosed` 全部改為「`MarketCalendar.isXxxTradingDay(當日)` && 時段」。連帶效果：`PricePoller` 各 scheduled 抓價（gated on `isXxxMarketOpen`）假日自動 skip；`TradingDateResolver.resolve`（依 `isXxxMarketOpen/isXxxMarketJustClosed` 判 live session，由 `PriceCacheWriter` 呼叫）假日自動退回 DB 最近交易日。`ClosePersister` 各 scheduled today-path dump / verify 與美英 self-heal 另加 `MarketCalendar.isXxxTradingDay(today)` 早退守門（`PricePoller` 假日不抓，但 Redis 仍有前一交易日值且 TTL 24h，若不守門 dump 會把它標成假日當日寫 DB）。Task 290 起台股啟動 self-heal 為明確例外：假日／週末可對「最近完成交易日 target」呼叫帶日期官方對帳，但絕不寫假日日期。`PricePoller.refreshAll`（手動 `/internal/refresh`）的 `markClosed` 亦由 `false` 改為 `!isXxxMarketOpen()`，與 `warmCacheOnStartup` 一致，避免手動刷新在假日 append 假 tick。
 
 **對外介面（`InternalPriceController`，class-level `@RequestMapping("/internal")`，共 35 支）：**
 
@@ -448,22 +450,42 @@ POST /internal/repair/history?market=%E5%8F%B0%E8%82%A1&from=2026-06-01&to=2026-
 
 **Sequence（盤後收盤）：**
 ```
-[external-materials-service @Scheduled 13:32/16:02] → Redis last tick
+[台股 13:32] Redis last tick 保持 closed=false，只是暫定行情，不寫 DB
+
+[台股 14:05／15:35／17:35] → TwOfficialCloseClient
+   ├→ TWSE MI_INDEX?date=YYYYMMDD&type=ALLBUT0999（上市；回應 date 必須完全相等）
+   └→ TPEx tpex_mainboard_daily_close_quotes（上櫃；民國 Date 轉 ISO 後必須完全相等）
+      → 與 collectHeldStockCodes 台股預期集合交集
+      → [DB stock_price_history UPSERT] + Redis closed=true + SSE
+
+[台股 16:00] → FinMind（只查上述流程仍缺當日列的代號；來源 date 必須完全相等）
+   → [DB UPSERT] + Redis closed=true + SSE
+
+[美股 16:02 ET／英股 16:32 LON] → Redis last tick
    → ClosePersister.dump*CloseFromRedis → [DB stock_price_history UPSERT]
 
-[external-materials-service @Scheduled 16:00 TW / 18:00 ET] → FinMind
-   → ClosePersister.verify*CloseWithFinMind
+[美股 18:00 ET FinMind／英股 17:00 LON Yahoo] → ClosePersister verify
      ├→ [DB stock_price_history UPSERT]                  // 權威收盤值
      └→ PriceCacheWriter.writeVerifiedClose
          ├→ [Redis SET price:{market}:{code}]            // 覆寫盤中 last tick
          └→ Redis PUBLISH price-update                   // SSE 推送
 ```
 
-> 為什麼 FinMind 校正後也要覆寫 Redis：盤中最後一輪 cron 通常落在 13:28 / 15:58（集合競價開始前 2 分鐘），
+> 為什麼官方／FinMind／Yahoo 校正後也要覆寫 Redis：盤中最後一輪 cron 通常落在 13:28 / 15:58（集合競價開始前 2 分鐘），
 > 抓到的是盤中 last tick 而非 13:30 / 16:00 集合競價產生的官方收盤。若只更新 DB，Dashboard / SnapshotForm
 > 在 `basedate == 今日` 時讀 Redis 就會看到 last tick，與「歷年資產管理」（讀 DB）對不起來。
 
-**「今日列」獨佔規則（Task 84）：** `stock_price_history` 中市場時區「當日」row 只能由上述 `ClosePersister` 路徑（13:32 TW / 16:02 ET / **16:32 LON** dump，16:00 TW / 18:00 ET FinMind verify / **17:00 LON Yahoo verify**，含 `selfHealMissedClose` 過收盤時點補救；其 Redis dump 分支自 Task 258 起亦受 dump 守門約束）寫入。`HistoricalBackfillService.backfillTwStock` / `backfillUsStock` / `backfillUkStock` / `repairRange` 即使被任意路徑觸發（`startupBackfill` 條件 stale、`SnapshotFormBffController.triggerBackfillThenRefetch`、`/api/market-data/history/backfill-stock` 手動觸發、`/internal/backfill/all`、`/internal/repair/history` 手動維運觸發），在 for-loop 中遇到 `bar.tradingDate().equals(LocalDate.now(該市場時區))` 必須 `continue`（`repairRange` 用 `MarketClock.zoneOf(market)` 統一分流；三支 backfill 各自寫死 `TW_ZONE`／`US_ZONE`／`LON_ZONE`，語意等價）。原因：外部歷史 API 在盤中也會回一根「今日 partial bar」 — Yahoo Finance `chart?interval=1d` 把今日 open/high/low/「此刻 last trade」打包成一筆 `HistoricalBar`，若直接 upsert 就會落在 `stock_price_history` 充當「收盤」，與 Redis 即時 tick 脫鉤（例 2026-06-05 NY 盤中 VOO：Redis tick 677.20 / DB row close 689.70）。今日列由 ClosePersister 在收盤後（含 self-heal）建立，使 backfill 路徑只負責「歷史」、close 路徑只負責「當日」，職責不重疊。
+**台股官方收盤對帳（Task 290）：** `TwOfficialCloseClient` 每輪只做兩個 bounded curl（`--fail --silent --show-error --max-time 25`，短 UA），而不是逐檔請求：TWSE `MI_INDEX` 以 `date=YYYYMMDD&type=ALLBUT0999` 指定目標日，於 `tables[]` 以欄名定位「證券代號／證券名稱／成交股數／開盤價／最高價／最低價／收盤價」；TPEx OpenAPI 讀 `Date／SecuritiesCompanyCode／CompanyName／TradingShares／Open／High／Low／Close`。TWSE 根節點 `date` 與 TPEx 每列民國年月日轉換結果都必須等於目標日；`--`、空字串、無法解析或 `close <= 0` 的列略過。兩來源各自 fail-closed、互不連坐，合併後再與 `collectHeldStockCodes` 台股集合取交集，避免把全市場上千檔全寫入 DB。
+
+`ClosePersister.reconcileTwOfficialClose(LocalDate targetDate)` 先把 `collectHeldStockCodes` 台股集合顯式移除 `0000`，再把剩餘個股當 expected；大盤不進 coverage、missing 或 FinMind 個股 fallback。每次都 upsert 所有命中的官方列，不採 skip-if-exists，因此可覆寫 13:32 舊版曾誤寫的盤中值，也可安全重跑。命中列以 `StockSourceQuery.upsertVerifiedHistory(..., closeSource)` 同時寫入價格與出處；舊 `upsertHistory` 繼續服務歷史回補，INSERT 不填來源，UPDATE 覆寫價格時必須同步 `close_source=NULL`，避免新值沿用舊 provenance。結果以不可變 `TwCloseReconciliation(expected, verified, missingCodes)` 表示並完整記錄缺檔。16:00 排程以 `verifyTwCloseWithFinMind(today)` 算 `expected − hasTrustedTwClose(code,targetDate)`，只對缺檔逐檔查詢；17:35 官方批次仍可覆寫。coverage 也必須用 `hasTrustedTwClose`，不能以單純 row 存在代替。
+
+排程入口只在 today 為交易日時傳 today；啟動 `selfHealMissedClose` 的 candidate 為「today 是交易日且 now < 14:05 時用 yesterday，否則用 today」，再以 `MarketCalendar.isTwTradingDay` 向前有界尋找 target。當 `now` 已晚於 `targetDate 14:05` 時，不論今天是否週末／假日，都呼叫 `reconcileTwOfficialClose(targetDate)`；已晚於 `targetDate 16:00` 時再呼叫 `verifyTwCloseWithFinMind(targetDate)`。因此週一盤前與週六部署都會修復週五，跨日不會被「today 非交易日」或 `hasAnyHistoryFor` 短路，且不會把週一盤前錯選為尚未完成的週一。目標日解析與兩個帶日期 helper 均可直接單元測試；查無有界交易日才 fail-closed 並記 log。
+
+`stock_price_history.close_source` 是可稽核的收盤出處，不等於 Redis 的暫定 `source`。Liquibase `v1.89.0-stock-price-close-source.sql` 新增 nullable `VARCHAR(64)`，並同步 `db/schema.sql` 與 `StockPriceHistory` entity；既有列保持 null，migration 不回推出處。台股信任清單固定為 `TWSE_MI_INDEX`、`TPEX_DAILY_CLOSE`、`FINMIND_TW_CLOSE`；美／英現行收盤寫入路徑也須留下自己的非空出處，否則 display gate 視為待確認。普通 `upsertHistory` 的 UPDATE 明確把 `close_source` 清為 null；這不是宣稱普通歷史來源不可信，而是防止覆寫 OHLCV 後仍錯誤繼承另一筆價格的 verified provenance。
+
+`PriceCacheWriter.writeVerifiedClose` 改收 `(PriceResult result, LocalDate tradingDate)`；payload `source=result.source()`、`tradingDate=tradingDate`、`closed=true`、`quoteStatus=VERIFIED_CLOSE`。盤中 `write(..., markClosed=false)` 標 `LIVE`；休市 DB→Redis 同步標 `PREVIOUS_CLOSE`。日期與來源均由已驗證事實顯式傳入，解掉舊實作把英股日期落到台北日、且所有來源硬標 `FinMind` 的錯誤。
+
+**「今日列」獨佔規則（Task 84／290）：** `stock_price_history` 中市場時區「當日」row 只能由上述 `ClosePersister` 路徑寫入。台股為 TWSE／TPEx 官方對帳與 FinMind 缺檔 fallback，**13:32 Redis last tick 不在寫入者之列**；美／英股仍含 16:02 ET／16:32 LON dump 與各自校正。`HistoricalBackfillService.backfillTwStock` / `backfillUsStock` / `backfillUkStock` / `repairRange` 即使被任意路徑觸發（`startupBackfill` 條件 stale、`SnapshotFormBffController.triggerBackfillThenRefetch`、`/api/market-data/history/backfill-stock` 手動觸發、`/internal/backfill/all`、`/internal/repair/history` 手動維運觸發），在 for-loop 中遇到 `bar.tradingDate().equals(LocalDate.now(該市場時區))` 必須 `continue`（`repairRange` 用 `MarketClock.zoneOf(market)` 統一分流；三支 backfill 各自寫死 `TW_ZONE`／`US_ZONE`／`LON_ZONE`，語意等價）。原因：外部歷史 API 在盤中也會回一根「今日 partial bar」，若直接 upsert 就會充當收盤。今日列由 ClosePersister 在收盤後（含 self-heal）建立，使 backfill 與當日 close 職責不重疊。
 
 **`close_price` 恆為正的資料契約（Requirement 62／Task 279 起）：** `stock_price_history.close_price` 除了 `NOT NULL`，另有 **`CHECK (close_price > 0)`**（changeset `v1.85.0-drop-nonpositive-close.sql`，先刪既有髒列再加約束）。語意是「該市場該日的**整股收盤價**」——**沒有整股成交價的日子不存在這一列**，與台股非交易日（週末、國定假日）在本表沒有列完全同形，消費端一律按「缺列」處理、不需要額外的旗標判斷。
 
@@ -516,7 +538,7 @@ POST /internal/repair/history?market=%E5%8F%B0%E8%82%A1&from=2026-06-01&to=2026-
 | Method | Path | 說明 |
 |--------|------|------|
 | POST | `/internal/refresh` | 同步抓所有持股報價、寫 Redis，回 `PricePoller.RefreshSummary`。供使用者按「刷新」（`PriceQueryService`）。見「對外介面」、「國定假日整段休市」（假日 `markClosed`）、「Live 行情 tradingDate 語意（盤外刷新防呆）」（`TradingDateResolver.resolve` 盤外守則） |
-| POST | `/internal/close/verify-tw` | 手動觸發 FinMind 校正**當日台股**收盤價（同 16:00 排程），覆寫 `stock_price_history` 並回寫 Redis，回 `{verified:n}`。見「Sequence（盤後收盤）」 |
+| POST | `/internal/close/verify-tw` | 手動觸發 FinMind 補齊**當日台股仍缺列**的收盤價（同 16:00 fallback；不重查官方已對帳完成的代號），覆寫 `stock_price_history` 並回寫 Redis，回 `{verified:n}`。見「Sequence（盤後收盤）」 |
 | POST | `/internal/close/verify-us` | 手動觸發 FinMind 校正**當日美股**收盤價（同 18:00 ET 排程），回 `{verified:n}`。見「Sequence（盤後收盤）」 |
 | GET | `/internal/health` | 回 `{status:"UP", twMarketOpen, usMarketOpen}`（`MarketClock`）；健康檢查用 |
 
@@ -629,9 +651,11 @@ src/
 | 條件 | `price`／`openPrice`／`highPrice`／`lowPrice`／`tradingDate` | `closed` |
 |---|---|---|
 | 完成日 K 最新一筆 **未到**台北當日，且 `getLive("0000","台股")` 有值且其 `tradingDate` **等於**台北當日 | 取自 Redis 即時點位 | `false` |
-| 其餘（Redis 無值／`tradingDate` 非今日／完成日 K 已含今日） | 取自完成日 K 最新一筆（既有行為） | `true` |
+| 其餘（Redis 無值／`tradingDate` 非今日／完成日 K 已含今日） | 取自完成日 K 最新一筆（Task 263 當時行為；盤後已由 Task 290 覆寫） | `true` |
 
 判定條件與 `computeAllForTaiex()` 併入今日 live 的條件**語意等價（對任何輸入判定結果逐次相同）**，否則同列的股價與指標會再次落在不同日期。**不是文字照抄**——兩邊的區域變數形狀不同（`toIndexResponse` 已持有降冪的 `recent` 清單、`computeAllForTaiex` 另有自己的 `desc`），且 Task 263 明訂不得改動 `TechnicalIndicatorService` 的任何一行；稽核時比對判定結果而非字面。`previousClose` 兩種情形共用同一條規則——`twse_index_daily_history` 中 `trading_date` **嚴格早於當列 `tradingDate`** 的最後一筆 `close_point`，**不讀 Redis payload 的 `previousClose`**（與「股市大盤查詢」頁當日卡的昨收同源，見該節）。`priceChange`／`changePercent` 一律由 `price` 與 `previousClose` 現算（scale 4／先除 scale 6 再 ×100 取 scale 4，HALF_UP，與個股路徑同式）。`buyPrice`／`sellPrice`／`volume` 恆為 null。**走勢圖股價側不受影響**：`HistoricalDataService.getStockHistory` 對 `0000` 明訂「完全不併 live」（Task 261）維持不變
+
+> **Task 290 display 覆寫：** `0000` 排除於個股 `getAllDisplayPrices` universe，仍由 `toIndexResponse` 專用路徑處理。交易日盤中且 Redis 為台北當日才回上述即時點位並標 `quoteStatus=LIVE`；收盤後只在 `twse_index_daily_history` 有精確當日完成日 K 時回 `VERIFIED_CLOSE`，否則回 null price／`CLOSE_PENDING`，不得退昨日；盤前或非交易日才回最近完成日／`PREVIOUS_CLOSE`。`closed` 僅為相容欄位，不能代替 `quoteStatus`。`previousClose` 與技術指標的既有規則不變
 - `StockAlertService`: 到價警示 CRUD、條件評估、排序、最近觸發資訊回寫；`create` 對 `0000`（台股大盤）跳過 `stockMasterRepo.upsert`。**複合 AND 群組（Task 253）**：群組 CRUD 與評估同住本 service（群組與獨立條件共用 `matches(alert, currentPrice)`、`buildLabel`、`computeTriggeredAt`、freshness cutoff，拆成獨立 service 會複製這五處而必然分歧）；`checkAlerts` / `checkAlertsFor` 掃描獨立條件時查詢改為 `findByActiveTrueAndGroupIdIsNull()`，再另掃 `stockAlertGroupRepo.findByActiveTrue()` 逐一 `evaluateGroup`。群組成員的 `active` 恆為 true、`last_triggered_*` 不寫，觸發狀態一律記在群組上。`create` / `update` 在 `stockMasterRepo.upsert` 之前以 `assertNameMatchesCode(code, market, userName)` 守門：以 `historicalDataService.fetchTwStockName / fetchUsStockName` 取得外部 canonical name（權威來源 ext-materials-service `/internal/stock-name`），canonical 非空且與 user-supplied `stockName` 不一致時，**再對照 `stockMasterRepo.findByCodeAndMarket(code, market).name`（本地主檔亦視為合法 canonical）**；兩者皆不相符才 throw `IllegalArgumentException`（由 `GlobalExceptionHandler` 映射為 `400`）。canonical 空則 fall through（外部 API 異常時不阻擋）。`0000` + `台股` 跳過守門；`0000` + `美股` 直接拒絕。設計目的：阻止使用者把錯誤代號（如把 2500 標成「台積電」）寫入 `stock` 主檔導致觀察清單出現名稱對但完全無報價的列；同時避免「外部來源回應與本地主檔不一致」（例 Yahoo `shortName` 「NVIDIA Corporation」vs 主檔過去寫入的 「NVIDIA Corporation Common Stock」）造成 lookupName 自動帶名後 save 被自己擋下
 - `StockAlertTriggerExportService`（Requirement 54）: 警示觸發的即時 JSON 匯出。由 `StockAlertService.recordTrigger` / `recordGroupTrigger` 在寫入 `stock_alert_trigger` 之後呼叫，依該觸發的 owner（`alert_id` / `group_id` join 取得）重查其**最近 3 個台北日曆日**（`created_at` ≥ 今日−2 天的 00:00）全部觸發並全量重寫 `alert_triggers_{ownerUserId}.json`（**固定檔名、不含日期**）。**三個入口、語意各異**：`writeExport(ownerId)`（真正產檔，取 per-owner 鎖）／`exportForTrigger(ownerId)`（看 `enabled` 閘門 ＋ 套 60 秒去抖）／`runNow(ownerId)`（**不看 `enabled`**——它是驗證工具；**不套去抖**，且**不更新去抖的 `lastUploadAt`**，否則按一次按鈕就讓觸發路徑靜默停 60 秒）。**本機同步寫、Drive 非同步合併**：本機以 tmp（**檔名帶 `UUID` 唯一後綴**——三條路徑寫同一個檔名，固定 `.tmp` 會讓後到者 `Files.move` 撞 `NoSuchFileException`）＋ `ATOMIC_MOVE` 在觸發執行緒完成（毫秒級），並以 per-owner 鎖序列化三條寫檔路徑（Redis 訂閱者執行緒的觸發、`POST /api/stock-alerts/check` 的 HTTP 執行緒、run-now 的 HTTP 執行緒）；Drive 上傳丟單執行緒 `ScheduledExecutorService`，以「**已排定任務旗標 ＋ 最近一次實際上傳完成時間**」延後合併（最小間隔 60 秒，見下方禁令），一律走 `GdriveOutputSupport.syncQuietly`（含每次上傳前的 owner 複驗），**不自行呼叫 rclone、不自行判權限**。股名走 `StockMasterService.resolveNameLocalOnly`（本地限定；**不是**既有的 `resolveName`——那一支查無主檔時會打外部行情 API 並寫回主檔、排 10 年回補，在 Redis 訂閱者執行緒上做這些正是本設計要防的事）。整段包 try/catch，任何失敗只記 log 與狀態欄
 - **交易日 / 國定假日判定（單一事實來源）**：`business-services` 側以 `MarketDataService.isTradingDay(market, date)`（dispatch 至 `isTwTradingDay/isUsTradingDay/isUkTradingDay`）與 `isMarketOpenNow(market)`（`MarketZones` 時段 + `isTradingDay` 假日）為唯一入口。`StockAlertService.evaluate`（live 觸發閘門）/ `computeTriggeredAt`（交易時段判斷）、`AlertNotificationDispatcher.withinSendWindow / lastTradingDate`、`StockPriceService.getMarketStatus`（→ `isXxxMarketOpen`）全部委派之，不再各自只判週末。`external-materials-service` 側對應為 `MarketCalendar` + `MarketClock`（抓價 / 收盤排程閘門）。台股假日權威 = TWSE holidaySchedule（business-services 經 `/internal/tw-holidays` proxy、ext-materials 直接 fetch，同一份）；美 / 英假日為 NYSE / LSE 法定規則純函式，因兩服務無共用 module 而各持一份（交叉註解鎖定，修改須同步）。Requirement 7 / 16 / 23
@@ -641,7 +665,7 @@ src/
   - **單一注入點**：`MarketDataFetchService.getTwHolidays(year)` 於回傳 TWSE 年度假日前，read-time union `TwTyphoonClosureService.closuresForYear(year)`（DB → in-memory 快取，不污染 TWSE per-year 快取）。因 `MarketCalendar.isTwHoliday` 與 `/internal/tw-holidays` 皆匯集於此方法，颱風休市對台股所有下游（market-status、`MarketClock`/`PricePoller`/`ClosePersister` 抓價收盤閘門、警示、備份、08:45 分析、交易日曆）與國定假日同一 cascade 自動一體生效，**前端零改動**（`TradingCalendarView` 既有 `day.twHoliday` 渲染 + market-status 開盤中→休市）。
   - **排程**：`TwClosurePoller`（ext-materials）`0 0/15 5-6 * * MON-FRI；0 0 7 * * MON-FRI`（＝05:00–07:00 Asia/Taipei，Task 187 由 5-8＝05:00–08:45 縮短；含 07:00 需兩條 cron）開盤前每 15 分鐘爬 DGPA + `ApplicationReadyEvent` self-heal 補跑一次（部署後立即修正當日、含收盤後補進日曆供回溯）。
   - **傳播（business 端快取設計）**：`business-services` `MarketDataService.getTwHolidays` 對**當年度**改採短 TTL（10 分鐘）快取 `twHolidayCurrentYearCache`（過去 / 未來年度仍 `twHolidayCache` 永久快取）。理由：颱風假可能於**任何時刻**（早盤排程、開機 self-heal、手動 `detect`）由 ext 寫入，若沿用永久 per-year 快取＋僅早晨時窗 evict，則 07:00 後（＝颱風 poller 最後一 tick 之後；含盤中部署 self-heal / 手動觸發 / 07:00 tick race。此 07:00 為 poller 時窗尾、與 08:45 分析時刻語意不同勿混）才偵測到的休市無法當日傳播、整個交易日誤判為交易日。短 TTL 保證同日任何偵測於 ≤10 分鐘內傳播至 market-status / 分析 / 警示 / 備份 / 交易日曆，不依賴固定時窗。另 `fetchTwHolidaysFromExt` 逾時 / 失敗回空表時**不寫入快取**（沿用前一次成功值），避免一次瞬斷把整年假日毒化為零筆。退化：DGPA 失敗 / 查無臺北市狀態 → 保守維持交易日；只新增、不覆寫 TWSE 固定假日。內部觸發 `POST /internal/tw-closure/detect` 供手動 / 驗證。
-  - **資料層一體休市（偵測落後補清；Task 161）**：偵測有時序落差——颱風假可能盤中甚至收盤後才公告 / 偵測到（如部署晚於當日盤中）。在偵測寫入 `tw_market_closure` 前 `isTwTradingDay` 仍回 true，`ClosePersister.dumpTwCloseFromRedis`（13:32）把 Redis 昨收平盤 dump 進 `stock_price_history` 當日列、盤中 polling 把昨收 tick 塞進 Redis `price:ticks:台股:*:date` bucket → 「當日」走勢圖顯示昨收平盤線、`InternalPriceController.intraday-ticks` 預設日期經 `findMaxTradingDate` 落回該休市日、且假日列污染日線 / 均線。故 `TwTyphoonClosureService` 於**偵測命中**（`detectAndPersistToday` upsert 後）與 **`ApplicationReadyEvent` 開機 self-heal**（`selfHealClosureMarketData` 逐一掃本年度 `closuresForYear`）兩路徑呼叫 `purgeClosureMarketData(date)`：`StockSourceQuery.deleteTwHistoryOn(date)` 刪台股當日 `stock_price_history` + `IntradayTickStore.purgeTwTicksOn(date)` 刪台股當日 Redis 分時 bucket。**嚴格限市場字串 `台股`**——英股 / 美股同日照常交易，其 bucket 與日線不得清；**不動即時價 live cache** `price:{market}:{code}`（休市日 last price = 昨收，本就是正確現價，且比照 price cache 跨夜耐久性不回寫充數）。清除後 `findMaxTradingDate` 回休市前一交易日，「當日」分時端點自然回退（如 7/10 颱風假 → 顯示 7/9），與交易日曆一體休市一致。持久性：真休市日外部日線源本無該日 bar、`backfillTwStock` 亦 skip 今日列，故清除後不被回補重灌。redeploy（image rebuild + container recreate）即觸發開機 self-heal，無需手動 SQL / redis-cli。
+  - **資料層一體休市（偵測落後補清；Task 161）**：偵測有時序落差——颱風假可能盤中甚至收盤後才公告 / 偵測到（如部署晚於當日盤中）。在偵測寫入 `tw_market_closure` 前 `isTwTradingDay` 仍回 true；**Task 290 前的舊版** `ClosePersister.dumpTwCloseFromRedis`（13:32）可能把 Redis 昨收平盤 dump 進 `stock_price_history` 當日列，Task 290 後則可能已有官方／FinMind 在晚偵測前寫入的部分當日列；盤中 polling 亦可能把昨收 tick 塞進 Redis `price:ticks:台股:*:date` bucket → 「當日」走勢圖顯示假資料、`InternalPriceController.intraday-ticks` 預設日期經 `findMaxTradingDate` 落回該休市日、且假日列污染日線 / 均線。故 `TwTyphoonClosureService` 於**偵測命中**（`detectAndPersistToday` upsert 後）與 **`ApplicationReadyEvent` 開機 self-heal**（`selfHealClosureMarketData` 逐一掃本年度 `closuresForYear`）兩路徑呼叫 `purgeClosureMarketData(date)`：`StockSourceQuery.deleteTwHistoryOn(date)` 刪台股當日 `stock_price_history` + `IntradayTickStore.purgeTwTicksOn(date)` 刪台股當日 Redis 分時 bucket。**嚴格限市場字串 `台股`**——英股 / 美股同日照常交易，其 bucket 與日線不得清；**不動即時價 live cache** `price:{market}:{code}`（休市日 last price = 昨收，本就是正確現價，且比照 price cache 跨夜耐久性不回寫充數）。清除後 `findMaxTradingDate` 回休市前一交易日，「當日」分時端點自然回退（如 7/10 颱風假 → 顯示 7/9），與交易日曆一體休市一致。持久性：真休市日外部日線源本無該日 bar、`backfillTwStock` 亦 skip 今日列，故清除後不被回補重灌。redeploy（image rebuild + container recreate）即觸發開機 self-heal，無需手動 SQL / redis-cli。
 - `ExcelExportService`: Apache POI 產生快照與已實現損益的 .xlsx 匯出檔
 - `SnapshotDateRollScheduler`（Requirement 35 / Task 174）：每日 `0 5 0 * * *` Asia/Taipei 把**每個 owner 各自最新一筆** `asset_snapshot` 的 `snapshot_date` 釘成當日，並以 `AssetService.recalcTotals` 重算該筆匯總。動機：BFF `LiveAssetsOverlay.applyToLatest` 的 per-market 基準日閘門僅覆蓋「最新快照日 == 該市場今日」的市場即時價，最新快照停在過去日期時三市場皆不覆蓋 → 資產顯示過去凍結收盤；釘成當日即打開閘門。背景無 request context → `ownerFilter` 不啟用，以 `AssetSnapshotRepository.findDistinctOwnerUserIds()` + 帶 owner 的 `findFirstByOwnerUserIdOrderBySnapshotDateDesc` 逐 owner 隔離（比照 `ExportScheduleService`）。`snapshotDate < 今日才 roll`（== 今日／未來日期 no-op）兼作 `(owner_user_id, snapshot_date)` 唯一鍵防護。**只重算被 roll 的最新一筆、不動歷史快照**（且避免 `recalcAllDividends` 每日對全 owner 全歷史重抓 NAV／配息的外部副作用）。迴圈置於 scheduler bean、逐 owner 呼叫 `AssetService` public `@Transactional rollLatestSnapshotToTodayForOwner`（每 owner 獨立交易，免 self-invocation 繞過 proxy 使整批同一交易連坐 rollback）；`@EventListener(ApplicationReadyEvent)` 另起 thread sleep 30s 後 self-heal 補跑當日、`volatile LocalDate` 當日 guard（roll 冪等，多跑無害）。無 DB schema 變更（僅 UPDATE 既有列）。
 
@@ -784,7 +808,7 @@ twse_index_year_end_history  (TWSE 指數年末值；Task 97 起已不使用—�
 > 📌 **查證來源：運行中的 DB。** `docker exec asset-postgres psql -U assets -d assets -c '\d <table>'`——欄位型別／位數／nullable 一律以它為準。
 >
 > ⚠ **`db/schema.sql` 不是可信基準線，只能當離線參考。** 它是 `db/init/01_dump.sql`（含真實個人財務資料，被 `.gitignore` 排除）「去除全部資料」後的可版控鏡像，但**靠人工重新產出、實測已落後**：截至 Task 245 它只有 55 張 `CREATE TABLE`，缺 `crawler_export_setting`（v1.64.0）／`asset_transaction`（v1.72.0）／`index_export_schedule`／`trading_radar_export_setting`／`asset_transaction_export_schedule`／`trading_radar_export_time`。在裡面查不到某張表時，先確認是「真的沒有」還是「鏡像沒跟上」。**同理不要引用 `db/changelog/**` 描述現況**——那裡有永不執行的 changeset（下方 `v1.0.0` 的 `NUMERIC(20,4)` 即為前例）。
-> - `stock_price_history`：`UNIQUE (stock_code, market, trading_date)`（Hibernate 名 `ukgoyp…`）＋ `INDEX idx_sph_code_date (stock_code, trading_date)`；**以 `db/init/01_dump.sql` 為準**：OHLC 皆 `NUMERIC(15,4)`（`open/high/low` nullable、`close` NOT NULL，見 v1.14.0）、`volume BIGINT`（nullable）＋ `CHECK ck_sph_close_price_positive (close_price > 0)`（v1.85.0，Task 279 起）。
+> - `stock_price_history`：`UNIQUE (stock_code, market, trading_date)`（Hibernate 名 `ukgoyp…`）＋ `INDEX idx_sph_code_date (stock_code, trading_date)`；**以 `db/init/01_dump.sql` 為準**：OHLC 皆 `NUMERIC(15,4)`（`open/high/low` nullable、`close` NOT NULL，見 v1.14.0）、`volume BIGINT`（nullable）＋ `CHECK ck_sph_close_price_positive (close_price > 0)`（v1.85.0，Task 279 起）。Task 290 以 `v1.89.0-stock-price-close-source.sql` 再加 nullable `close_source VARCHAR(64)`；null 表示無法證明產生路徑，不得被盤後 display gate 當成已驗證。
 >   ⚠ `v1.0.0-initial-schema.sql` 寫的是 `NUMERIC(20,4)` ＋ `volume NOT NULL`，但該 changeset 在 dump 中已標記 already-ran、**永不執行**，故 20,4 從未套用到任何環境——查證位數/nullable 一律以 dump 為準，勿照抄 v1.0.0。
 >   ✅ **已對齊（Task 201）**：Entity `StockPriceHistory` 曾長期宣告 `precision = 20` 與 `volume nullable = false`（Task 148 照著永不執行的 `v1.0.0` changelog 改，反而改成與 DB 不一致），現已改為四個 OHLC 皆 `precision = 15` 且 `volume` 移除 `nullable = false`，與 DB 相符。依據可自 repo 直接查證：見 `db/schema.sql` 的 `stock_price_history`（`close_price numeric(15,4) NOT NULL`、`open/high/low_price numeric(15,4)` 可空、`volume bigint` 可空）。
 > - `exchange_rate_history`：`UNIQUE (currency, rate_date)`（Hibernate 名 `uk977p…`）＝ upsert 覆寫鍵；`buy_rate/sell_rate NUMERIC(10,4)`，**兩者皆 nullable**（`db/schema.sql` 實測；Entity 未標 `nullable=false` 屬正確，反倒是 `v1.0.0-initial-schema.sql` 寫的 `NOT NULL` 與 DB 不符——同樣因該 changeset 永不執行而未套用）。
@@ -1060,7 +1084,19 @@ twse_index_year_end_history  (TWSE 指數年末值；Task 97 起已不使用—�
 
 #### Live 行情（Redis）
 
-`StockPrice` Entity 與 `stock_price` 表已廢除，盤中即時行情改存 Redis（schema 見上方 External Materials Service Architecture）。`PriceQueryService` 從 Redis 取值並組裝成原 `StockPriceDto` 形狀，對 BFF / 前端介面不變。
+`StockPrice` Entity 與 `stock_price` 表已廢除，盤中即時行情改存 Redis（schema 見上方 External Materials Service Architecture）。`PriceQueryService.getLive` 從 Redis 取值並組裝成 live DTO，供內部盤中判斷；公開報價改由 `getDisplayPrice`／`getAllDisplayPrices` 依市場階段解析：
+
+| 市場階段 | 價格來源 | `quoteStatus` | 缺資料行為 |
+|---|---|---|---|
+| 交易日開盤中 | 當日 Redis | `LIVE` | 沿用最近完成日 fallback，但不得標成今日收盤 |
+| 交易日收盤後 | `stock_price_history` 精確當日且 `close_source` 通過市場信任條件的列 | `VERIFIED_CLOSE` | 回同代號 placeholder：`price=null`、`CLOSE_PENDING` |
+| 交易日盤前／非交易日 | 台股：市場日曆解析的最近目標交易日且 `close_source` 可信；其他市場沿既有最近完成日 | `PREVIOUS_CLOSE` | 台股 exact target 缺列／來源不可信則回該 target 的 `CLOSE_PENDING`，不得跳到更舊日 |
+
+`StockPriceService.getAllPrices/getPrice/getLiveAssets`、`WatchStockService`、Trading Radar response 的使用者可見價格與 `SnapshotFormBffController` 最新完成日價格一律走 display 路徑。雷達規則組裝仍可讀 raw live，但個股 DTO 的 `price/changePercent/quoteStatus` 必須由 display quote 覆寫；大盤 `MarketSummary` 也新增 nullable `quoteStatus`，規則輸入可留 raw，response 可見 `price/changePercent` 則走 TAIEX exact target gate。舊 Redis radar snapshot 是 JsonNode 讀取、不反序列化 record，缺新欄仍可匯出；部署後 content hash 改變而寫第一筆新 schema 快照是預期行為。前端 SSE 套同一單調狀態守門。個股批次 universe 是「當前 owner 最新快照持股 key ∪ Redis index key」，並排除走專用 TAIEX 路徑的 `0000`；不能只枚舉 Redis index，否則正是缺快取的持股會從 API 整列消失，連 `CLOSE_PENDING` 都無法顯示。`HistoricalDataService.getPricesOnDate(stocks,date)` 在 requested date 落於 `DisplaySession.targetTradingDate <= date <= marketToday` 時逐一呼叫 `getDisplayPrice`（含週末 latest snapshot 被 `SnapshotDateRollScheduler` 釘成週六／週日，以及交易日盤前 today），`SnapshotPriceDto` 傳 `quoteStatus/source` 且 pending 仍回同 key／null price；早於 target 才走 `findClosestPrice`。因此 `SnapshotEnricher.fetchSnapshotPriceRows` 的 Dashboard summary、切換快照、look-through、SnapshotForm bootstrap 及 live-assets 失敗降級都不能從 closest-history 把未驗證價滲回最新完成日。`getLiveAssets` 遇 `CLOSE_PENDING` 時該 holding 的 `currentPrice` 留 null、`liveValue` 保留快照既存 `currentValue`，並把 status 傳到 BFF／前端，不得拿 Redis last tick 或昨收重算。
+
+`HistoricalDataService.getStockHistory` 對台股最新 display target date 套同一 provenance gate：開盤中才可合成當日 raw live；盤後、盤前或非交易日若 exact target row 缺少可信來源，從日線結果移除該 row 且不合成 Redis。如此 Dashboard／觀察清單／交易雷達與六頁共用的 StockAnalysisDialog 不會出現同日不同價。舊於 target 的歷史 row 不因 migration 後 `close_source=null` 被整批刪除；守門只作用於最新應完成交易日。
+
+Dashboard 每分鐘 realtime 回應必須同時套用 `stockPrices`、`marketStatus`、`liveAssets`，使 13:30 前已開啟的頁面也會進入 pending。Dashboard 與 TradingRadar SSE 的狀態轉移保持單調：現有 `CLOSE_PENDING` 或 `VERIFIED_CLOSE` 都只有在 payload **顯式**帶 `quoteStatus=VERIFIED_CLOSE` 且 `tradingDate` 為該市場今日時才可覆寫；`closed=true` 不是證據，尤其 `syncClosedFromDb` 的 `PREVIOUS_CLOSE + closed=true` 必須被拒絕，不能升級 pending、也不能降級 verified。SnapshotForm 每次 realtime 收到 pending 都要清掉既有暫定價，WatchStock 與 TradingRadar 則直接顯示待補文案。前端將接受狀態／pending 判斷抽為 `utils/displayQuote.js`，使用 Node 內建 `node:test` 驗證，無需新增測試 dependency。這層只保護「對使用者宣稱的現價／收盤估值」；警示、技術指標與交易雷達規則輸入仍可使用 `getLive`。
 
 #### WatchStock（已廢止）
 
@@ -1351,14 +1387,14 @@ GET    /api/bff/dashboard/realtime                  # 2 分鐘輪詢用：最新
 
 > 儀表板「股票持股」股價顯示規則（與「觀察股票」共用同一 Redis live cache，由 `external-materials-service` 兩支獨立 cron 各自每 2 分鐘更新）：
 > - 規則 **per-market 判斷**：對每一檔股票，依其市場各自決定是否顯示即時價。
->   - **台股**：`basedate == LocalDate.now(Asia/Taipei)` → 顯示 `stockPrices` 即時價＋漲跌%（盤中由 cron 每 2 分鐘更新）。
->   - **美股**：`basedate == LocalDate.now(America/New_York)` → 顯示 `stockPrices` 即時價＋漲跌%。EST/EDT 由 JVM `ZoneId` 自動處理。
+>   - **台股**：`basedate == LocalDate.now(Asia/Taipei)` 且 display quote 為 `LIVE` 或 `VERIFIED_CLOSE` → 顯示 `stockPrices` 價格＋漲跌%；`CLOSE_PENDING` → 顯示「收盤價待補」。
+>   - **美股／英股**：同樣以各自市場時區今日與 `quoteStatus` 判斷；EST/EDT、BST/GMT 由 JVM `ZoneId` 自動處理。
 >   - 為什麼分市場：使用者通常在 TW 收盤後建快照（`basedate = TW 那天`），但美股 session 跨午夜（TW 21:30 → 隔日 05:00），TW 已過午夜後 `basedate（昨天）== TW 今日（今天）` 會誤判；改用 `basedate == 美東今日` 才能正確涵蓋 TW 凌晨對應的美股盤中。
 > - 否則（basedate 為過去日期、或該市場非當日 = frozen）顯示快照保存的當日 `stockPrice`（即 `latestSnapshotDetail.stocks[].stockPrice`），**並一併顯示該收盤日的「當日漲跌」**（該收盤日收盤 vs 前一交易日收盤）；不參與 polling 切換。當日漲跌由 business-services `prices-on-date` 回傳（每檔以 `findClosestPrice(date)` 取收盤 `h`、再以 `findClosestPrice(h.tradingDate − 1)` 取前一交易日收盤算差），BFF `SnapshotEnricher.fetchSnapshotCloseData` 一次 HTTP 取回 `closeMap + changeMap`，`mergePerMarketPrices` 將 changeMap 併入 frozen entry 的 `priceChange`／`changePercent`。無前一交易日資料時留 null（前端只顯示收盤價）。
-> - **per-market 判斷一律由 BFF 完成**（`SnapshotEnricher.mergePerMarketPrices`），前端禁止重做 basedate / 市場開盤判斷。live vs frozen 由 `basedate == 該市場當地今日`（前端 `shouldApplyLive` / BFF `isCurrentBasedate`）決定，**不再以 `priceChange` 是否為 null 判定**（frozen entry 現在也帶當日漲跌）。前端 `getPriceCell()`：`getRealtimePrice()`（受 `shouldApplyLive` 閘門）有值 → live；否則取 `row.stockPrice` + `stockPrices[key]` 的 frozen 漲跌，且僅在 `stockPrices.tradingDate == 該列 snapshotDate`（＝所選快照為最新快照，map 才對應）時採用漲跌，選歷史快照則只顯示收盤價。
+> - **per-market 基準日判斷一律由 BFF 完成**（`SnapshotEnricher.mergePerMarketPrices`）；前端只額外執行 API 契約要求的 `quoteStatus`／`tradingDate` 顯示守門，不自行推導官方收盤。live vs frozen 仍由 `basedate == 該市場當地今日`（前端 `shouldApplyLive` / BFF `isCurrentBasedate`）決定，**不得以 `priceChange` 是否為 null 判定**。前端 `getRealtimePrice()` 對今日列只接受 `LIVE` 的當日盤中價或**顯式** `VERIFIED_CLOSE` 的當日收盤；`closed=true` 本身、`PREVIOUS_CLOSE`、`CLOSE_PENDING` 與缺 status 的 SSE 一律拒絕。`getPriceCell()` 對 pending 顯示固定文字，不再 fallback 顯示快照盤中價；選歷史快照則維持凍結收盤。
 > - **漲跌配色（台股慣例）**：上漲紅 `#dc2626`、下跌綠 `#16a34a`、平盤/無資料灰 `#94a3b8`（前端 `changeColor`／`changeArrow`），live 與 frozen 兩情形一致，與走勢圖 markPoint「紅漲綠跌」同慣例；與損益 / KPI 卡「綠獲利、紅虧損」為不同語意，刻意不統一。
 >
-> KPI「資產總計」一致性（**per-market 基準日閘門**，見 Task 121）：Dashboard `liveLatest` 對台股 / 美股 / 英股各自判斷 `basedate == 該市場當地今日`（`isBaselineToday`），今日市場用 `customTableData × overlayLivePrice` 的 live 值、非今日市場維持快照凍結收盤；`totalAssets` **僅在三市場皆為今日時**才採用 `liveAssets.liveTotalAssets`（全 live 口徑，與「歷年資產管理」今日列共用同一支 business-service API、同值），否則一律 per-market 加總（`totalDeposit + totalFundValue + per-market totalStockValue`）。**禁止前端再加「市場開盤」閘門**；是否套 live 純由 `basedate == 該市場今日` 決定。
+> KPI「資產總計」一致性（**per-market 基準日閘門**，見 Task 121／290）：Dashboard `liveLatest` 對台股 / 美股 / 英股各自判斷 `basedate == 該市場當地今日`（`isBaselineToday`），今日市場用 `customTableData × overlayLivePrice` 的 display value、非今日市場維持快照凍結收盤；`totalAssets` **僅在三市場皆為今日時**才採用 `liveAssets.liveTotalAssets`，否則一律 per-market 加總。`CLOSE_PENDING` 的 holding 由 backend 把 `liveValue` 保留為快照既存 `currentValue`，故不會用盤中尾值重算；前端不得以市場開盤狀態另選資料源，只按 `quoteStatus` 接受或拒絕報價。
 >
 > KPI 五卡（資產總計 / 存款總計 / **股票現值** / **債券現值** / 預估年配息）：第 3、4 張與「現金/債券/股票」圓餅圖 tab 同邏輯，顯示資產類別歸類值——股票現值 = `stockValue`（股票型：一般股票/ETF ＋ 股票型基金，不含債券 ETF）、債券現值 = `bondValue`（債券型：債券 ETF ＋ 債券型基金），與圓餅圖 **同一 business-service 來源**（`kpiCards` 依 `liveLatest.id` 於 `store.history` 找對應 row 取 `stockValue`／`bondValue`），採快照凍結逐筆 `currentValue`、不套盤中 live（同 Requirement 25，與圓餅圖同值，兩卡佔比 == 圓餅圖股票／債券）；`sub` 皆顯示「佔比 X.X%」。**回復嚴格加總**：存款 + 股票現值 + 債券現值 == `totalAssets`（債券 ETF 只計入債券現值）。原 `liveLatest` 的 live 股票加總仍保留、併入「資產總計」live 口徑。
 >
@@ -2191,7 +2227,7 @@ END:VEVENT / END:VCALENDAR
 
 ### 不受影響（切換前後行為完全相同）
 
-46 個帶 `zone` 的 `@Scheduled`（Spring 的 `zone` 覆蓋 JVM 預設，已用運行中日誌實證：英股 `0 32 16` zone=Europe/London 於 `15:32:00Z` 觸發＝倫敦 16:32 BST）、3 個 `fixedDelay` 排程、`MarketZones`／`MarketClock`、`AlertNotificationDispatcher.withinSendWindow()`、`BackupService` 的 `DISPLAY_ZONE`、所有 `Instant.now()`（絕對時間軸）、10 個 `timestamptz` 欄位、以及**全部前端顯示程式碼**（後端改吐台北牆鐘後自動正確；前端不存在任何 +8 補償 hack，不得為此新增，否則雙重補償）。
+Task 290 後 47 個帶 `zone` 的 `@Scheduled` annotation（Spring 的 `zone` 覆蓋 JVM 預設；官方對帳同一方法的兩個 annotation 分開計數。英股 `0 32 16` zone=Europe/London 已用運行中日誌實證於 `15:32:00Z` 觸發＝倫敦 16:32 BST）、3 個 `fixedDelay` 排程、`MarketZones`／`MarketClock`、`AlertNotificationDispatcher.withinSendWindow()`、`BackupService` 的 `DISPLAY_ZONE`、所有 `Instant.now()`（絕對時間軸）、10 個 `timestamptz` 欄位、以及**全部前端顯示程式碼**（後端改吐台北牆鐘後自動正確；前端不存在任何 +8 補償 hack，不得為此新增，否則雙重補償）。
 
 ## Infrastructure
 
@@ -4352,13 +4388,15 @@ TradingRadarView「重新整理」→ POST /api/bff/trading-radar/refresh
 
 **但休市分支本身有一個必須守門的空窗**：`MarketClock.isTwMarketOpen()` 上界是 `13:30`，而今日收盤價要到 `ClosePersister.dumpTwCloseFromRedis()`（`cron = "0 32 13 * * MON-FRI"`）才由 Redis 落進 `stock_price_history`。這約兩分鐘內 `syncClosedFromDb` 走的 `findRecentClose`（`ORDER BY trading_date DESC LIMIT 1`）取回的是**昨日**收盤，`PriceCacheWriter.syncClosedFromDb` 會無條件覆寫 Redis 銷毀當日真實收盤；接著 13:32 的 `dumpRedisToDb` **不檢查 payload 的 `tradingDate`**，把該昨收以 `tradingDate=今日` upsert 進 `stock_price_history`，污染收盤價的唯一權威來源，直到 16:00 `verifyTwCloseWithFinMind` 才自癒。**（Task 258 起此 dump 側缺口已封）**：`dumpRedisToDb` 逐檔守門 payload 的 `tradingDate`／`updatedAt`，13:30–13:32 空窗內 `syncClosedFromDb` 寫回的昨收因 `tradingDate` 為 DB `maxTradingDate` 而被規則 1 直接擋下，不再進 DB、也不需等 16:00 自癒。Task 249 的 `SKIPPED_PENDING_CLOSE` 守門仍保留，因它另負責「回報語意不得謊稱已保留最新成交價」。既有 `refreshAll` 有同樣的缺口，但它沒有被任何前端按鈕呼叫；Task 249 是第一次把這條路徑接到顯眼按鈕，而 13:30–13:32 恰是使用者最想按的時刻。故本路徑**逐檔守門**：`isTradingDay(今日)` 為真、**且台股當地時間已過 13:30**、且該檔 `findMaxTradingDate(code, "台股")` 不等於今日時跳過該檔，全數跳過即 `outcome=SKIPPED_PENDING_CLOSE`。**13:30 這個時間下界不可省**——少了它，交易日 00:00–09:00 的盤前整段也會落進守門（該時段同樣「休市 ＋ 是交易日 ＋ 今日收盤未落 DB」），回出「已保留最新成交價」這種盤前根本不成立的假陳述；而且守門的理由在盤前是反過來的：DB 有 16:00 FinMind 校正過的權威收盤，Redis 才是該被同步的一方（`PricePoller.warmCacheOnStartup` 在盤外做的正是這件事）。`findMaxTradingDate` 回 `Optional.empty()`（該檔無任何歷史列）視為不納入同步。守門只加在新服務內，**不改動 `PricePoller.syncClosedFromDb`／`PriceCacheWriter.syncClosedFromDb`**（另有 `refreshAll`／`warmCacheOnStartup` 兩個既有呼叫端）。
 
+> **Task 290 現況覆寫上段的「13:32／16:00」時間與來源敘述，但不移除 Task 249 守門：** 台股 13:32 不再落 DB，盤後 pending window 改為 13:30 起直到最早 14:05 官方對帳逐檔完成；缺檔可延續至 15:35／16:00 FinMind fallback／17:35。既有 predicate 本來就是「已過 13:30 且該檔 DB 尚無今日列」，沒有把 13:32 寫進程式，所以可直接涵蓋拉長後的逐檔 pending window；盤前 DB 的權威來源則改讀「最近一次官方對帳或缺檔 fallback」，不再假設一定來自 FinMind。
+
 **逾時預算由內而外收斂在 nginx 的 60 秒之內**（`frontend/nginx.conf` 的 `location /api/` 為 `proxy_read_timeout 60s`，超過即 504；BFF 的 Spring Cloud Gateway 未設 `spring.cloud.gateway.httpclient.response-timeout`，預設不逾時，不構成額外上界，日後亦不得為此功能加設）。**external 端必須自己收斂，不得只靠外層逾時**：個股側 `PriceFetchClient` 每檔 `tse`／`otc` 各 10 秒逾時、virtual-thread-per-code 並行，總時間 ≈ 20 秒；大盤側 `MacroDataFetchClient.fetchIndexIntraday("TWSE")` 走 `curlGetWithRetry(url, 2)`，回應非 JSON（Yahoo WAF 擋）時 `Thread.sleep(10s)` 再 `sleep(20s)`，**單這段最壞 30 秒純睡眠**，且其 `ProcessBuilder("curl", "-s", ...)` 沒有 `-m`、`waitFor()` 亦無逾時，理論上無上界。故大盤與個股**併行**、大盤那條**自帶 `Future.get(12, SECONDS)` 上限**（先等大盤再等個股，順序顛倒會讓 12 秒疊在個股的 20 秒之後），逾時即放棄本輪大盤（Redis 保留上一輪真實點位，符合 `TaiexIndexPoller` 既有「查無有效點位不寫」慣例）。**`ExecutorService` 必須是 bean 生命週期的欄位，絕不可用 try-with-resources 或 `awaitTermination` 收尾**——Java 19+ 的 `ExecutorService.close()` 預設是 `shutdown()` 後 `awaitTermination(1 DAY)`，離開 try 區塊會一路等到大盤任務結束，把 12 秒上限整個作廢（`PricePoller.java:147` 的 `// executor.close() 等所有 task 完成` 正是這個語意）；`cancel(true)` 也救不回來，`curlGetWithRetry` 阻塞在 pipe 讀取時對中斷無反應。**不修改既有 `curlGetWithRetry`**——它同時服務「股市大盤查詢」頁與其他總經抓取，改其重試或逾時是另一個變更的爆炸半徑。business → external 的 `WebClient` 設 30 秒逾時；前端 axios 對此支覆寫 45 秒。business 端逾時或例外**一律不上拋**：記 WARN 後照常重算並以 `outcome=TIMEOUT`／`FAILED` 回傳。
 
 節流有三道，皆為「降級但仍回結果」，不得回 4xx：per-owner Redis 冷卻 30 秒、**全域** Redis 冷卻 30 秒、以及 external 端單一 permit 的 `Semaphore`。兩把 Redis 鍵**不得用 `&&` 短路取得**：短路後 owner 鍵已寫入卻沒有實際抓取，該使用者的冷卻會被無故燒掉、最長要等約 60 秒才解除；任一把未取得時必須把本次已取得的那一把刪掉。全域鍵不可省：`Semaphore` 只擋併發不擋速率，而 per-owner 鍵擋不住「A 按完 5 秒後 B 按」——回補清單是全庫的，N 個使用者輪流按可把外部請求頻率從背景排程的每 2 分鐘一輪推高數十倍（本專案已有被 Yahoo WAF 回 429 的實績）。全域鍵只透露「近期有人刷新過」，而行情快取本就是跨租戶共用的市場資料，不構成租戶洩漏。
 
 使用者按鈕觸發的 `updatePrices` 可能與每 2 分鐘的 `scheduledTwIntradayUpdate` 同時執行——`Semaphore` 只守 `/internal/refresh/tw-radar`，擋不到 `@Scheduled` 那條。兩者對同一批代號併發寫 Redis，最壞是同一檔被兩次 tick 覆寫；值同源且 `PriceCacheWriter` 對 `Optional.empty()` 已有「本輪不更新」保護，實質無害，刻意不加跨路徑鎖（加了反而會讓背景排程被使用者按鈕餓死）。
 
-`priceRefresh` **刻意不回傳抓取檔數**：回補清單是全庫的（Redis 行情快取本就是跨租戶共用的市場資料），回檔數等於把「全庫台股標的數」洩漏給任一使用者；檔數只進 business／external 的 log。`radar` 部分與 GET 完全同形（`TradingRadarDto.Response` 不新增欄位，避免動到 Task 230 已落地的 Redis 快照序列化與 Requirement 48 的區間匯出）。
+`priceRefresh` **刻意不回傳抓取檔數**：回補清單是全庫的（Redis 行情快取本就是跨租戶共用的市場資料），回檔數等於把「全庫台股標的數」洩漏給任一使用者；檔數只進 business／external 的 log。`radar` 部分與 GET 完全同形。Task 249 當時的「`TradingRadarDto.Response` 不新增欄位」只是在約束該 refresh 功能不要另造不同 schema；**Task 290 明確覆寫**，在 GET 與 refresh 共用的 `MarketSummary`／`StockDecision` 新增 nullable `quoteStatus`。Redis 舊快照以 JsonNode 讀取，缺欄自然為 null，不需 migration 或重寫；`TradingRadarExportService` 為手動欄序，須在「大盤總覽」與「個股決策」各插入 TEXT「行情狀態」欄，新快照寫 status、舊快照輸出空白／JSON null，並以 headers／formats／rows 欄數一致與 legacy 相容測試鎖住。
 
 `RULE_VERSION` 維持 `TW_RULES_V7`：本修訂不碰規則引擎、不碰 `stale`／`intraday` 語意、不碰任何因子或門檻，同一份輸入前後輸出完全相同；升版只會製造假的不可比性訊號並觸發 Requirement 44 的通知基準全面重建。
 

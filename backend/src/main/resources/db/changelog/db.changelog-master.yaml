@@ -299,3 +299,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/v1.88.0-index-export-multi-time-market.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.89.0-stock-price-close-source.sql
+      relativeToChangelogFile: false

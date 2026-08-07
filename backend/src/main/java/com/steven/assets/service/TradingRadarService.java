@@ -87,6 +87,7 @@ public class TradingRadarService {
     private final StockPriceHistoryRepository priceHistoryRepo;
     private final StockDividendHistoryRepository dividendHistoryRepo;
     private final PriceQueryService priceQueryService;
+    private final TaiexDisplayPriceService taiexDisplayPriceService;
     private final AssetSnapshotRepository snapshotRepo;
     private final StockAlertRepository alertRepo;
     private final StockRepository stockRepo;
@@ -216,7 +217,8 @@ public class TradingRadarService {
 
             // stale＝「完成日 K 未到今日」且「Redis 也無今日即時價」時才成立；任一者成立即非 stale（Task 228）。
             boolean stale = !todayEodPresent && !liveFreshToday;
-            String asOf = rows.isEmpty() ? null : rows.get(0).getTradingDate().toString();
+            TaiexDisplayPriceService.DisplayQuote display = taiexDisplayPriceService.resolve();
+            String asOf = display.tradingDate();
             String liveUpdatedAt = liveFreshToday ? liveOpt.get().updatedAt() : null;
             TradingRadarDto.MarketSummary summary = new TradingRadarDto.MarketSummary(
                     result.regime().name(),
@@ -225,8 +227,9 @@ public class TradingRadarService {
                     result.regime() != TradingRadarRuleEngine.MarketRegime.DATA_INCOMPLETE,
                     stale,
                     asOf,
-                    price,
-                    changePercent,
+                    display.price(),
+                    display.changePercent(),
+                    display.quoteStatus(),
                     ind.weeklyMa(),
                     ind.monthlyMa(),
                     ind.quarterlyMa(),
@@ -263,17 +266,20 @@ public class TradingRadarService {
         try {
             List<StockPriceHistory> rows = priceHistoryRepo.findRecentN(target.code(), target.market(), 241);
             Optional<PriceQueryService.LivePrice> liveOpt = priceQueryService.getLive(target.code(), target.market());
+            Optional<PriceQueryService.LivePrice> displayOpt =
+                    priceQueryService.getDisplayPrice(target.code(), target.market());
             // price 只依賴 rows 與 liveOpt，不依賴組裝結果；因組裝需要它作為乖離／52 週位置的分子，
             // 故先於 prepareTechnicalData 求值（順序調整不改變任何取值，Task 273 的 273.2b）。
             BigDecimal price = liveOpt.map(PriceQueryService.LivePrice::price)
                     .orElseGet(() -> rows.isEmpty() ? null : rows.get(0).getClosePrice());
             RadarInputAssembler.Assembled technical = prepareTechnicalData(target, rows, liveOpt, price);
             List<BigDecimal> closes = technical.completedCloses();
-            BigDecimal displayChangePercent = liveOpt.map(PriceQueryService.LivePrice::changePercent)
+            BigDecimal displayPrice = displayOpt.map(PriceQueryService.LivePrice::price).orElse(null);
+            BigDecimal displayChangePercent = displayOpt.map(PriceQueryService.LivePrice::changePercent)
                     .orElse(null);
-            if (displayChangePercent == null && price != null && closes.size() >= 2) {
-                BigDecimal previous = previousCompletedClose(rows, liveOpt.orElse(null));
-                displayChangePercent = changePercent(price, previous);
+            if (displayChangePercent == null && displayPrice != null && closes.size() >= 2) {
+                BigDecimal previous = previousCompletedClose(rows, displayOpt.orElse(null));
+                displayChangePercent = changePercent(displayPrice, previous);
             }
             // 組裝結果一律取自 RadarInputAssembler，與回測共用同一份（Task 273 的 273.2b）。
             BigDecimal ruleChangePercent = technical.ruleChangePercent();
@@ -319,8 +325,10 @@ public class TradingRadarService {
             }
             reasons.addAll(result.reasons());
 
-            String updatedAt = liveOpt.map(PriceQueryService.LivePrice::updatedAt).orElse(null);
-            String asOf = rows.isEmpty() ? null : rows.get(0).getTradingDate().toString();
+            String updatedAt = displayOpt.map(PriceQueryService.LivePrice::updatedAt).orElse(null);
+            String asOf = displayOpt.map(PriceQueryService.LivePrice::tradingDate)
+                    .orElseGet(() -> rows.isEmpty() ? null : rows.get(0).getTradingDate().toString());
+            String quoteStatus = displayOpt.map(PriceQueryService.LivePrice::quoteStatus).orElse("CLOSE_PENDING");
             return new TradingRadarDto.StockDecision(
                     target.code(),
                     name,
@@ -336,8 +344,9 @@ public class TradingRadarService {
                     result.counterTrend().reasons(),
                     result.counterTrend().risks(),
                     result.action() != TradingRadarRuleEngine.Action.NO_TRADE,
-                    price,
+                    displayPrice,
                     displayChangePercent,
+                    quoteStatus,
                     updatedAt,
                     asOf,
                     ind.monthlyMa(),
@@ -624,7 +633,8 @@ public class TradingRadarService {
                 false,
                 true,
                 null,
-                null, null, null, null, null, null, null, null,
+                null, null, "CLOSE_PENDING",
+                null, null, null, null, null, null,
                 TradingRadarRuleEngine.Confirmation.UNAVAILABLE.name(),
                 TradingRadarRuleEngine.Confirmation.UNAVAILABLE.name(),
                 List.of(),
@@ -647,7 +657,7 @@ public class TradingRadarService {
                 counterTrendLabel(TradingRadarRuleEngine.CounterTrendState.NONE),
                 List.of(), List.of(),
                 false,
-                null, null, null, null,
+                null, null, "CLOSE_PENDING", null, null,
                 null, null, null, null, null,
                 TradingRadarRuleEngine.Confirmation.UNAVAILABLE.name(),
                 TradingRadarRuleEngine.Confirmation.UNAVAILABLE.name(),

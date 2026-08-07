@@ -51,4 +51,8 @@ public class StockPriceHistory {
 
     @Column
     private Long volume;
+
+    /** 可稽核的收盤來源；null 代表無法證明產生路徑。 */
+    @Column(length = 64)
+    private String closeSource;
 }

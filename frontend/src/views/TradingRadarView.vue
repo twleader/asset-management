@@ -56,7 +56,8 @@
         <div class="market-metrics">
           <div class="metric">
             <span class="metric-label">最新點位</span>
-            <strong>{{ fmtNumber(market.price, 2) }}</strong>
+            <strong v-if="isClosePending(market)" style="color:#d97706;font-size:13px">收盤價待補</strong>
+            <strong v-else>{{ fmtNumber(market.price, 2) }}</strong>
             <span :style="{ color: priceColor(market.changePercent) }">{{ fmtPct(market.changePercent) }}</span>
           </div>
           <div class="metric"><span class="metric-label">週線 MA5</span><strong>{{ fmtNumber(market.weeklyMa, 2) }}</strong></div>
@@ -253,8 +254,11 @@
         </el-table-column>
         <el-table-column label="現價／漲跌" min-width="130" align="right">
           <template #default="{ row }">
-            <div class="price-value">{{ fmtNumber(row.price, 2) }}</div>
-            <div :style="{ color: priceColor(row.changePercent) }">{{ fmtPct(row.changePercent) }}</div>
+            <div v-if="isClosePending(row)" style="color:#d97706;font-size:12px">收盤價待補</div>
+            <template v-else>
+              <div class="price-value">{{ fmtNumber(row.price, 2) }}</div>
+              <div :style="{ color: priceColor(row.changePercent) }">{{ fmtPct(row.changePercent) }}</div>
+            </template>
           </template>
         </el-table-column>
         <el-table-column label="MA5／20／60／240" min-width="250" align="right">
@@ -578,6 +582,7 @@ import { showDualExportResult } from '@/utils/dualExportMessage'
 import { useAuthStore } from '@/stores/authStore'
 import { useRouter } from 'vue-router'
 import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
+import { isClosePending, marketToday, mergeSseQuote } from '@/utils/displayQuote'
 
 const router = useRouter()
 const loading = ref(false)
@@ -664,7 +669,7 @@ async function load(manual = false, silent = false) {
 const REFRESH_MESSAGES = {
   FETCHED: { type: 'success', text: '已重新抓取即時報價並重算' },
   CLOSED_SYNCED: { type: 'success', text: '台股目前休市，已同步至最新收盤價並重算' },
-  SKIPPED_PENDING_CLOSE: { type: 'info', text: '今日收盤價尚未落檔，已保留最新成交價並重算' },
+  SKIPPED_PENDING_CLOSE: { type: 'info', text: '今日官方收盤尚未完成，畫面會維持等待狀態' },
   COOLDOWN: { type: 'info', text: '30 秒內剛更新過，已直接重算' },
   BUSY: { type: 'info', text: '行情更新進行中，已以現有報價重算' },
   TIMEOUT: { type: 'warning', text: '行情抓取未完成，已以現有報價重算' },
@@ -726,16 +731,23 @@ function applyPriceUpdate(payload) {
   const nextStocks = (radar.value.stocks || []).map(row => {
     if (row.market !== '台股' || String(row.stockCode) !== String(payload.stockCode)) return row
     matched = true
-    return {
+    const incoming = {
       ...row,
-      price: payload.price ?? row.price,
+      ...payload,
+      quoteStatus: payload.quoteStatus ?? 'LIVE',
       changePercent: payload.changePercent ?? payload.changePct ?? row.changePercent,
       priceUpdatedAt: payload.updatedAt ?? row.priceUpdatedAt
     }
+    const merged = mergeSseQuote(row, incoming, marketToday('台股'))
+    if (merged === row) return row
+    return {
+      ...row,
+      ...merged
+    }
   })
 
-  if (!matched) return
-  radar.value = { ...radar.value, stocks: nextStocks }
+  if (matched) radar.value = { ...radar.value, stocks: nextStocks }
+  if (!matched && String(payload.stockCode) !== '0000') return
   scheduleRecalculation()
 }
 

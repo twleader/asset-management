@@ -22,6 +22,12 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class StockSourceQuery {
 
+    public static final String TWSE_MI_INDEX = "TWSE_MI_INDEX";
+    public static final String TPEX_DAILY_CLOSE = "TPEX_DAILY_CLOSE";
+    public static final String FINMIND_TW_CLOSE = "FINMIND_TW_CLOSE";
+    public static final Set<String> TRUSTED_TW_CLOSE_SOURCES = Set.of(
+            TWSE_MI_INDEX, TPEX_DAILY_CLOSE, FINMIND_TW_CLOSE);
+
     private final JdbcTemplate jdbc;
 
     /** stock 主檔全部代號（不分市場）集合，供公開資訊個股過濾（Task 178）。 */
@@ -491,7 +497,7 @@ public class StockSourceQuery {
         // open / high / low 一律保留 null（無資料），不再用 0 偽裝。
         if (existing != null) {
             jdbc.update(
-                    "UPDATE stock_price_history SET open_price=?, high_price=?, low_price=?, close_price=?, volume=? WHERE id=?",
+                    "UPDATE stock_price_history SET open_price=?, high_price=?, low_price=?, close_price=?, volume=?, close_source=NULL WHERE id=?",
                     open, high, low, close, volume == null ? 0L : volume, existing);
         } else {
             jdbc.update(
@@ -501,6 +507,48 @@ public class StockSourceQuery {
                     open, high, low, close, volume == null ? 0L : volume);
         }
         return true;
+    }
+
+    /**
+     * 寫入已驗證的收盤價與其可稽核來源。呼叫端必須已驗證來源日期恰等於 tradingDate。
+     */
+    public boolean upsertVerifiedHistory(String stockCode, String market, LocalDate tradingDate,
+                                         BigDecimal open, BigDecimal high, BigDecimal low,
+                                         BigDecimal close, Long volume, String closeSource) {
+        if (close == null || close.signum() <= 0) {
+            log.warn("拒絕寫入非正驗證收盤：{} {} {} close={}", market, stockCode, tradingDate, close);
+            return false;
+        }
+        if (closeSource == null || closeSource.isBlank()) {
+            log.warn("拒絕寫入缺少來源的驗證收盤：{} {} {}", market, stockCode, tradingDate);
+            return false;
+        }
+        Long existing = jdbc.query(
+                "SELECT id FROM stock_price_history WHERE stock_code=? AND market=? AND trading_date=?",
+                ps -> { ps.setString(1, stockCode); ps.setString(2, market); ps.setObject(3, tradingDate); },
+                rs -> rs.next() ? rs.getLong(1) : null);
+        if (existing != null) {
+            jdbc.update(
+                    "UPDATE stock_price_history SET open_price=?, high_price=?, low_price=?, close_price=?, volume=?, close_source=? WHERE id=?",
+                    open, high, low, close, volume == null ? 0L : volume, closeSource, existing);
+        } else {
+            jdbc.update(
+                    "INSERT INTO stock_price_history (stock_code, market, trading_date, open_price, high_price, low_price, close_price, volume, close_source) " +
+                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    stockCode, market, tradingDate,
+                    open, high, low, close, volume == null ? 0L : volume, closeSource);
+        }
+        return true;
+    }
+
+    /** 台股指定日是否已有可信來源的完成收盤。 */
+    public boolean hasTrustedTwClose(String stockCode, LocalDate tradingDate) {
+        Integer count = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM stock_price_history " +
+                        "WHERE stock_code=? AND market='台股' AND trading_date=? " +
+                        "AND close_source IN ('TWSE_MI_INDEX','TPEX_DAILY_CLOSE','FINMIND_TW_CLOSE')",
+                Integer.class, stockCode, tradingDate);
+        return count != null && count > 0;
     }
 
     /**

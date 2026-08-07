@@ -106,6 +106,7 @@ public class PriceCacheWriter {
         // 若跟著 JVM 預設時區跑，切換當下新舊 tick 會是兩種基準，max 恆被先覆寫的那一筆鎖住。
         payload.put("updatedAt", LocalDateTime.now(MarketClock.TW_ZONE).toString());
         payload.put("closed", markClosed);
+        payload.put("quoteStatus", markClosed ? "PREVIOUS_CLOSE" : "LIVE");
 
         try {
             String json = MAPPER.writeValueAsString(payload);
@@ -136,16 +137,16 @@ public class PriceCacheWriter {
     }
 
     /**
-     * 盤後 FinMind 校正用：直接以 FinMind 權威收盤價覆寫 Redis live cache。
+     * 盤後已驗證收盤用：以呼叫端驗證過的來源與交易日覆寫 Redis live cache。
      *
      * 動機：盤中最後一次 cron 通常落在 13:28 / 15:58（盤前 2 分鐘），抓到的是 last tick 而非
-     * 集合競價產生的官方收盤。FinMind 在盤後 1-2 小時發佈官方收盤後，DB 已被覆寫，但 Redis
-     * 仍停在 last tick → 前端讀 Redis 看到的「股價」與「歷年資產管理」(讀 DB) 對不起來。
-     * 本方法把 FinMind 結果寫回 Redis，並 PUBLISH `price-update`，讓 SSE 訂閱者立即拿到。
+     * 集合競價產生的官方收盤。官方來源完成後 DB 已被覆寫，但 Redis 若仍停在 last tick，
+     * 前端看到的「股價」會與歷年資產管理（讀 DB）不一致。本方法同步覆寫並 PUBLISH
+     * `price-update`，讓 SSE 訂閱者立即拿到。
      *
      * US FinMind 不回 previousClose / stockName，從現有 Redis JSON 保留以維持 priceChange 顯示。
      */
-    public void writeVerifiedClose(PriceResult result) {
+    public void writeVerifiedClose(PriceResult result, LocalDate tradingDate) {
         String market = result.market();
         String code = result.stockCode();
         // 非正收盤一律不進 Redis、不推播（Requirement 62 / Task 279）。
@@ -177,9 +178,6 @@ public class PriceCacheWriter {
             } catch (Exception ignore) { /* fallback to FinMind-only values */ }
         }
 
-        LocalDate tradingDate = LocalDate.now(
-                "美股".equals(market) ? MarketClock.US_ZONE : MarketClock.TW_ZONE);
-
         Map<String, Object> payload = new HashMap<>();
         payload.put("stockCode", code);
         payload.put("market", market);
@@ -192,12 +190,13 @@ public class PriceCacheWriter {
         payload.put("lowPrice", result.lowPrice());
         payload.put("volume", result.volume());
         payload.put("stockName", stockName);
-        payload.put("source", "FinMind");
+        payload.put("source", result.source());
         payload.put("tradingDate", tradingDate.toString());
         // Task 252：顯式台北牆鐘。此值前端直接顯示，且 StockPriceService 會跨 key 取 max——
         // 若跟著 JVM 預設時區跑，切換當下新舊 tick 會是兩種基準，max 恆被先覆寫的那一筆鎖住。
         payload.put("updatedAt", LocalDateTime.now(MarketClock.TW_ZONE).toString());
         payload.put("closed", true);
+        payload.put("quoteStatus", "VERIFIED_CLOSE");
 
         try {
             String json = MAPPER.writeValueAsString(payload);
@@ -206,7 +205,7 @@ public class PriceCacheWriter {
             redis.expire(indexKey, LIVE_TTL);
             redis.convertAndSend("price-update", json);
         } catch (Exception e) {
-            log.warn("寫入 Redis FinMind 驗證收盤失敗 {} {}: {}", market, code, e.getMessage());
+            log.warn("寫入 Redis 已驗證收盤失敗 {} {}: {}", market, code, e.getMessage());
         }
     }
 
@@ -269,6 +268,7 @@ public class PriceCacheWriter {
         // 若跟著 JVM 預設時區跑，切換當下新舊 tick 會是兩種基準，max 恆被先覆寫的那一筆鎖住。
         payload.put("updatedAt", LocalDateTime.now(MarketClock.TW_ZONE).toString());
         payload.put("closed", true);
+        payload.put("quoteStatus", "PREVIOUS_CLOSE");
 
         try {
             String json = MAPPER.writeValueAsString(payload);

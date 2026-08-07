@@ -52,7 +52,10 @@ class WatchStockTaiexIntradayTest {
     @BeforeEach
     void setUp() {
         service = new WatchStockService(alertRepo, groupRepo, priceQuery, historyRepo,
-                stockMasterRepo, indicatorService, twseDailyRepo);
+                stockMasterRepo, indicatorService,
+                new TaiexDisplayPriceService(priceQuery, twseDailyRepo));
+        when(priceQuery.displaySession("台股")).thenReturn(new PriceQueryService.DisplaySession(
+                PriceQueryService.DisplayPhase.OPEN, TODAY, TODAY));
         // toIndexResponse 必然走到 computeAll；未 stub 的 mock 回 null，builder 的 ind.monthlyMa() 會 NPE
         when(indicatorService.computeAll("0000", "台股"))
                 .thenReturn(TechnicalIndicatorService.FullIndicators.EMPTY);
@@ -92,7 +95,7 @@ class WatchStockTaiexIntradayTest {
                 high == null ? null : new BigDecimal(high),
                 low == null ? null : new BigDecimal(low),
                 123L,                                             // volume：大盤必須忽略
-                tradingDate, "2026-07-31T13:28:00", false, "TWSE指數(5m)");
+                tradingDate, "2026-07-31T13:28:00", false, "TWSE指數(5m)", "LIVE");
     }
 
     private WatchStockDto.Response findAllFirst() {
@@ -148,17 +151,50 @@ class WatchStockTaiexIntradayTest {
         assertThat(r.previousClose()).isEqualByComparingTo("40039.18");
     }
 
-    /** 完成日 K 已含今日（14:00 之後）：不併 live，且不得呼叫 getLive（等價形短路）。 */
+    /** 開盤中即使異常已有今日 K，仍以當日 live 為準；未收盤的日 K 不得升級成 VERIFIED_CLOSE。 */
     @Test
-    void 盤後_完成日K已含今日_不併live() {
+    void 盤中_完成日K異常已有今日_仍採當日live() {
         when(twseDailyRepo.findTop60ByOrderByTradingDateDesc()).thenReturn(descRows(TODAY));
+        when(priceQuery.getLive("0000", "台股")).thenReturn(Optional.of(
+                live(TODAY.toString(), "43200.1094", "42656.0000", "43214.3600", "41610.4100")));
+
+        WatchStockDto.Response r = findAllFirst();
+
+        assertThat(r.price()).isEqualByComparingTo("43200.1094");
+        assertThat(r.tradingDate()).isEqualTo(TODAY.toString());
+        assertThat(r.closed()).isFalse();
+        assertThat(r.quoteStatus()).isEqualTo("LIVE");
+        assertThat(r.previousClose()).isEqualByComparingTo("40039.18");
+    }
+
+    @Test
+    void 盤後_當日完成日K尚未寫入_回傳待補而非昨日點位() {
+        when(priceQuery.displaySession("台股")).thenReturn(new PriceQueryService.DisplaySession(
+                PriceQueryService.DisplayPhase.AFTER_CLOSE, TODAY, TODAY));
+        when(twseDailyRepo.findTop60ByOrderByTradingDateDesc()).thenReturn(descRows(TODAY.minusDays(1)));
+        when(twseDailyRepo.findById(TODAY)).thenReturn(Optional.empty());
+
+        WatchStockDto.Response r = findAllFirst();
+
+        assertThat(r.price()).isNull();
+        assertThat(r.tradingDate()).isEqualTo(TODAY.toString());
+        assertThat(r.closed()).isFalse();
+        assertThat(r.quoteStatus()).isEqualTo("CLOSE_PENDING");
+    }
+
+    @Test
+    void 盤後_當日完成日K已寫入_回傳已驗證收盤() {
+        List<TwseIndexDailyHistory> rows = descRows(TODAY);
+        when(priceQuery.displaySession("台股")).thenReturn(new PriceQueryService.DisplaySession(
+                PriceQueryService.DisplayPhase.AFTER_CLOSE, TODAY, TODAY));
+        when(twseDailyRepo.findTop60ByOrderByTradingDateDesc()).thenReturn(rows);
+        when(twseDailyRepo.findById(TODAY)).thenReturn(Optional.of(rows.get(0)));
 
         WatchStockDto.Response r = findAllFirst();
 
         assertThat(r.price()).isEqualByComparingTo("39933.30");
-        assertThat(r.tradingDate()).isEqualTo(TODAY.toString());
         assertThat(r.closed()).isTrue();
-        assertThat(r.previousClose()).isEqualByComparingTo("40039.18");   // 次新一筆
+        assertThat(r.quoteStatus()).isEqualTo("VERIFIED_CLOSE");
     }
 
     /** 大盤無買賣盤口、無成交量定義——即使 live payload 帶了這三欄也不得採用。 */

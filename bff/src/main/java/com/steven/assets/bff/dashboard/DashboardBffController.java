@@ -126,7 +126,7 @@ public class DashboardBffController {
                                             // 解決過去 TW 過午夜後美股盤中（TW 凌晨）被誤判為非當日 → 顯示前一交易日收盤的問題。
                                             // frozen（非當日）收盤價 entry 另帶入 changeMap 的當日漲跌，供收盤/週末頁顯示漲跌。
                                             dto.setStockPrices(SnapshotEnricher.mergePerMarketPrices(
-                                                    basedate, prices, cd.closeMap(), cd.changeMap()));
+                                                    basedate, prices, cd.closeMap(), cd.changeMap(), cd.displayRows()));
                                             dto.setMergedStocks(
                                                     enricher.buildMergedStocks(detail, cd.closeMap(), false, true));
                                             return ResponseEntity.ok(dto);

@@ -56,14 +56,19 @@ public class StockPriceService {
 
     @Transactional(readOnly = true)
     public List<StockPriceDto> getAllPrices() {
-        return priceQuery.getAll().stream()
+        Set<PriceQueryService.PriceKey> required = snapshotRepo.findLatestWithStocks()
+                .map(snapshot -> snapshot.getStocks().stream()
+                        .map(row -> new PriceQueryService.PriceKey(row.getStockCode(), row.getMarket()))
+                        .collect(Collectors.toCollection(LinkedHashSet::new)))
+                .orElseGet(LinkedHashSet::new);
+        return priceQuery.getAllDisplayPrices(required).stream()
                 .map(this::toDto)
                 .collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
     public StockPriceDto getPrice(String stockCode, String market) {
-        return priceQuery.getLive(stockCode, market).map(this::toDto).orElse(null);
+        return priceQuery.getDisplayPrice(stockCode, market).map(this::toDto).orElse(null);
     }
 
     /**
@@ -107,7 +112,7 @@ public class StockPriceService {
 
         for (StockHolding sh : snapshot.getStocks()) {
             Optional<PriceQueryService.LivePrice> liveOpt =
-                    priceQuery.getLive(sh.getStockCode(), sh.getMarket());
+                    priceQuery.getDisplayPrice(sh.getStockCode(), sh.getMarket());
             BigDecimal price = null;
             Boolean closed = null;
             String tradingDate = null;
@@ -116,6 +121,7 @@ public class StockPriceService {
             BigDecimal previousClose = null;
             BigDecimal priceChange = null;
             BigDecimal changePercent = null;
+            String quoteStatus = null;
 
             if (liveOpt.isPresent()) {
                 PriceQueryService.LivePrice lp = liveOpt.get();
@@ -125,6 +131,7 @@ public class StockPriceService {
                 previousClose = lp.previousClose();
                 priceChange = lp.priceChange();
                 changePercent = lp.changePercent();
+                quoteStatus = lp.quoteStatus();
                 if (lp.updatedAt() != null) {
                     try {
                         updatedAt = LocalDateTime.parse(lp.updatedAt());
@@ -156,7 +163,7 @@ public class StockPriceService {
             stockItems.add(new LiveStockItem(
                 sh.getStockCode(), shName, sh.getMarket(), sh.getShares(),
                 price, liveValue, closed, tradingDate,
-                previousClose, priceChange, changePercent
+                previousClose, priceChange, changePercent, quoteStatus
             ));
         }
 
@@ -181,14 +188,14 @@ public class StockPriceService {
         return new StockPriceDto(
                 lp.stockCode(), name, lp.market(),
                 lp.price(), lp.priceChange(), lp.changePercent(),
-                lp.tradingDate(), lp.updatedAt(), lp.closed(), lp.source()
+                lp.tradingDate(), lp.updatedAt(), lp.closed(), lp.source(), lp.quoteStatus()
         );
     }
 
     public record StockPriceDto(
         String stockCode, String stockName, String market,
         BigDecimal price, BigDecimal priceChange, BigDecimal changePercent,
-        String tradingDate, String updatedAt, Boolean closed, String source
+        String tradingDate, String updatedAt, Boolean closed, String source, String quoteStatus
     ) {}
 
     public record LiveStockItem(
@@ -196,7 +203,8 @@ public class StockPriceService {
         BigDecimal shares, BigDecimal currentPrice, BigDecimal liveValue,
         Boolean closed, String tradingDate,
         // 即時報價衍生欄（Task 200）：昨收／漲跌／漲跌幅(%)，與 currentPrice 同一 LivePrice tick
-        BigDecimal previousClose, BigDecimal priceChange, BigDecimal changePercent
+        BigDecimal previousClose, BigDecimal priceChange, BigDecimal changePercent,
+        String quoteStatus
     ) {}
 
     public record LiveAssetsResponse(

@@ -252,7 +252,7 @@ public class HistoricalDataService {
     // ═══════════════════════════════════════════════════════════════════════
     //  每日排程：匯率（17:00 收盤後，proxy 至 ext-materials-service + 本地清理舊資料）
     //  股票收盤價排程已搬到 external-materials-service ClosePersister：
-    //    台股 13:32（Redis dump）+ 16:00（FinMind 校驗）；
+    //    台股 14:05 起（TWSE／TPEx 官方對帳）+ 16:00（FinMind 缺漏補抓）；
     //    美股 16:02 ET（Redis dump）+ 18:00 ET（FinMind 校驗）。
     //  啟動 10 年回補已搬到 external-materials-service HistoricalBackfillService.startupBackfill。
     // ═══════════════════════════════════════════════════════════════════════
@@ -325,12 +325,24 @@ public class HistoricalDataService {
             priceHistRepo.findByStockCodeAndMarketAndTradingDateBetweenOrderByTradingDateAsc(stockCode, market, start, end)
         );
 
-        // 若查詢範圍包含今天，從 StockPrice 快取補上今日即時價。
+        PriceQueryService.DisplaySession session = priceQuery.displaySession(market);
+        LocalDate target = session.targetTradingDate();
+        boolean strictTwClose = "台股".equals(market);
+        if (strictTwClose && !target.isBefore(start) && !target.isAfter(end)) {
+            history.removeIf(row -> row.getTradingDate().equals(target)
+                    && session.phase() != PriceQueryService.DisplayPhase.OPEN
+                    && !priceQuery.isTrustedClose(row));
+        }
+
+        // 只有開盤中才從 Redis 補今日實際成交；盤後不得讓最後一筆成交偽裝成官方收盤。
         // 「股價」線必須是實際成交價，因此 source 含括號（如 "TWSE(買賣中價)"、"TWSE(前收)"）
         // 之估算值不予拼入，避免今日這格出現非實際成交價（例：台積電 2262.5 違反 5 元 tick）。
-        ZoneId tz = com.steven.assets.util.MarketZones.resolve(market);
-        LocalDate today = LocalDate.now(tz);
-        if (!end.isBefore(today) && !today.isBefore(start)) {
+        LocalDate today = session.marketToday();
+        if ((!strictTwClose || session.phase() == PriceQueryService.DisplayPhase.OPEN)
+                && !end.isBefore(today) && !today.isBefore(start)) {
+            if (strictTwClose) {
+                history.removeIf(row -> row.getTradingDate().equals(today) && !priceQuery.isTrustedClose(row));
+            }
             boolean alreadyHasToday = history.stream().anyMatch(h -> h.getTradingDate().equals(today));
             if (!alreadyHasToday) {
                 priceQuery.getLive(stockCode, market).ifPresent(sp -> {
@@ -358,7 +370,8 @@ public class HistoricalDataService {
      * 無前一交易日資料時留 null（前端優雅降級為只顯示收盤價）。
      */
     public record SnapshotPriceDto(String stockCode, String market, BigDecimal price, String tradingDate,
-                                   BigDecimal priceChange, BigDecimal changePercent) {}
+                                   BigDecimal priceChange, BigDecimal changePercent,
+                                   String source, String quoteStatus) {}
 
     @Transactional(readOnly = true)
     public List<SnapshotPriceDto> getPricesOnDate(List<Map<String, String>> stocks, LocalDate date) {
@@ -366,6 +379,13 @@ public class HistoricalDataService {
         for (Map<String, String> s : stocks) {
             String code = s.get("code");
             String mktStr = s.get("market");
+            PriceQueryService.DisplaySession session = priceQuery.displaySession(mktStr);
+            if (!date.isBefore(session.targetTradingDate()) && !date.isAfter(session.marketToday())) {
+                priceQuery.getDisplayPrice(code, mktStr).ifPresent(p -> result.add(new SnapshotPriceDto(
+                        code, mktStr, p.price(), p.tradingDate(),
+                        p.priceChange(), p.changePercent(), p.source(), p.quoteStatus())));
+                continue;
+            }
             priceHistRepo.findClosestPrice(code, mktStr, date).ifPresent(h -> {
                 BigDecimal close = h.getClosePrice();
                 BigDecimal priceChange = null;
@@ -384,7 +404,8 @@ public class HistoricalDataService {
                     code, mktStr,
                     close,
                     h.getTradingDate().toString(),
-                    priceChange, changePercent
+                    priceChange, changePercent,
+                    h.getCloseSource(), "PREVIOUS_CLOSE"
                 ));
             });
         }

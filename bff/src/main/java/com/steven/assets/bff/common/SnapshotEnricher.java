@@ -92,6 +92,21 @@ public class SnapshotEnricher {
             List<Map<String, Object>> livePrices,
             Map<String, BigDecimal> closeMap,
             Map<String, Map<String, Object>> changeMap) {
+        return mergePerMarketPrices(
+                basedate, livePrices, closeMap, changeMap, Collections.emptyMap());
+    }
+
+    /**
+     * 同上，並以 prices-on-date 的完整 display row（包含 {@code CLOSE_PENDING + null price}）
+     * 補齊 live prices 短暫失敗或缺 key 的情形。不能只傳 closeMap，因為 null price 不會進 map，
+     * 會讓前端倒退顯示快照中的舊價。
+     */
+    public static List<Map<String, Object>> mergePerMarketPrices(
+            LocalDate basedate,
+            List<Map<String, Object>> livePrices,
+            Map<String, BigDecimal> closeMap,
+            Map<String, Map<String, Object>> changeMap,
+            Map<String, Map<String, Object>> displayRows) {
         List<Map<String, Object>> out = new ArrayList<>();
         Set<String> seen = new HashSet<>();
         for (Map<String, Object> p : livePrices) {
@@ -110,6 +125,14 @@ public class SnapshotEnricher {
             } else {
                 out.add(p);
             }
+        }
+        for (Map.Entry<String, Map<String, Object>> e : displayRows.entrySet()) {
+            if (seen.contains(e.getKey())) continue;
+            Map<String, Object> row = e.getValue();
+            String market = asString(row.get("market"));
+            if (market == null || !isCurrentBasedate(basedate, market)) continue;
+            out.add(row);
+            seen.add(e.getKey());
         }
         for (Map.Entry<String, BigDecimal> e : closeMap.entrySet()) {
             if (seen.contains(e.getKey())) continue;
@@ -137,6 +160,7 @@ public class SnapshotEnricher {
         p.put("changePercent", change != null ? change.get("changePercent") : null);
         p.put("tradingDate", basedate != null ? basedate.toString() : null);
         p.put("closed", true);
+        p.put("quoteStatus", "PREVIOUS_CLOSE");
         return p;
     }
 
@@ -190,12 +214,15 @@ public class SnapshotEnricher {
         return fetchSnapshotPriceRows(detail).map(prices -> {
             Map<String, BigDecimal> closeMap = new HashMap<>();
             Map<String, Map<String, Object>> changeMap = new HashMap<>();
+            Map<String, Map<String, Object>> displayRows = new HashMap<>();
             for (Map<String, Object> p : prices) {
                 String code = asString(p.get("stockCode"));
                 String market = asString(p.get("market"));
                 BigDecimal price = toBigDecimal(p.get("price"));
-                if (code == null || market == null || price == null) continue;
+                if (code == null || market == null) continue;
                 String key = market + "_" + code;
+                displayRows.put(key, new HashMap<>(p));
+                if (price == null) continue;
                 closeMap.put(key, price);
                 BigDecimal pc = toBigDecimal(p.get("priceChange"));
                 BigDecimal cp = toBigDecimal(p.get("changePercent"));
@@ -206,13 +233,14 @@ public class SnapshotEnricher {
                     changeMap.put(key, ch);
                 }
             }
-            return new SnapshotCloseData(closeMap, changeMap);
+            return new SnapshotCloseData(closeMap, changeMap, displayRows);
         });
     }
 
-    /** {@link #fetchSnapshotCloseData} 回傳結構：收盤價 map + 當日漲跌 map。 */
+    /** {@link #fetchSnapshotCloseData} 回傳結構：收盤價、當日漲跌與含空價 status 的完整 display rows。 */
     public record SnapshotCloseData(Map<String, BigDecimal> closeMap,
-                                    Map<String, Map<String, Object>> changeMap) {}
+                                    Map<String, Map<String, Object>> changeMap,
+                                    Map<String, Map<String, Object>> displayRows) {}
 
     /** 內部：POST /history/prices-on-date 取回原始 price rows（含 price / priceChange / changePercent / tradingDate）。 */
     @SuppressWarnings("unchecked")

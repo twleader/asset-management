@@ -1361,7 +1361,8 @@ CREATE TABLE public.stock_price_history (
     open_price numeric(15,4),
     stock_code character varying(20) NOT NULL,
     trading_date date NOT NULL,
-    volume bigint
+    volume bigint,
+    close_source character varying(64)
 );
 
 
@@ -2590,5 +2591,4 @@ ALTER TABLE ONLY public.stock_alert_trigger
 --
 -- PostgreSQL database dump complete
 --
-
 

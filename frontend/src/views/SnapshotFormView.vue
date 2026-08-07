@@ -586,7 +586,8 @@
               <el-table-column label="股價/漲跌(%)" width="190" align="right">
                 <template #default="{ row }">
                   <div class="price-cell">
-                    <span v-if="row.latestPrice" class="price-num">{{ fmtPrice(row.latestPrice) }}</span>
+                    <span v-if="isClosePending(row)" class="price-pending">收盤價待補</span>
+                    <span v-else-if="row.latestPrice" class="price-num">{{ fmtPrice(row.latestPrice) }}</span>
                     <span v-else class="price-empty">-</span>
                     <div v-if="row.priceChange !== null && row.latestPrice"
                       :class="Number(row.priceChange) >= 0 ? 'price-up' : 'price-down'"
@@ -881,7 +882,8 @@
               <el-table-column label="股價/漲跌(%)" width="200" align="right">
                 <template #default="{ row }">
                   <div class="price-cell">
-                    <span v-if="row.latestPrice" class="price-num">{{ fmtPriceUs(row.latestPrice) }}</span>
+                    <span v-if="isClosePending(row)" class="price-pending">收盤價待補</span>
+                    <span v-else-if="row.latestPrice" class="price-num">{{ fmtPriceUs(row.latestPrice) }}</span>
                     <span v-else class="price-empty">-</span>
                     <div v-if="row.priceChange !== null && row.latestPrice"
                       :class="Number(row.priceChange) >= 0 ? 'price-up' : 'price-down'"
@@ -1162,7 +1164,8 @@
               <el-table-column label="股價/漲跌(%)" width="200" align="right">
                 <template #default="{ row }">
                   <div class="price-cell">
-                    <span v-if="row.latestPrice" class="price-num">{{ fmtPriceUs(row.latestPrice) }}</span>
+                    <span v-if="isClosePending(row)" class="price-pending">收盤價待補</span>
+                    <span v-else-if="row.latestPrice" class="price-num">{{ fmtPriceUs(row.latestPrice) }}</span>
                     <span v-else class="price-empty">-</span>
                     <div v-if="row.priceChange !== null && row.latestPrice"
                       :class="Number(row.priceChange) >= 0 ? 'price-up' : 'price-down'"
@@ -1412,6 +1415,7 @@ import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
 import UsFlag from '@/components/UsFlag.vue'
 import Sortable from 'sortablejs'
 import { todayLocal, toLocalDateString } from '@/utils/localDate'
+import { applyEnrichedQuote, isClosePending } from '@/utils/displayQuote'
 
 const route  = useRoute()
 const router = useRouter()
@@ -2085,6 +2089,8 @@ const addStock = (market = '台股') => {
     latestPrice: null,
     priceChange: null,
     priceChangePct: null,
+    quoteStatus: null,
+    priceSource: null,
     _fetchingPrice: false,
     _fetchingDividend: false,
     brokerRows: [newBrokerRow(market)]
@@ -2133,9 +2139,7 @@ function applyEnrichedPrices(prices, rows) {
   for (const row of rows) {
     const p = map[`${row.market}_${row.stockCode}`]
     if (!p) continue
-    if (p.price != null) row.latestPrice = Number(p.price)
-    if (p.priceChange != null) row.priceChange = Number(p.priceChange)
-    if (p.changePercent != null) row.priceChangePct = Number(p.changePercent)
+    applyEnrichedQuote(row, p)
     if (p.stockName && !row.stockName) row.stockName = p.stockName
     if (p.dividendRate != null) row.dividendRate = Number(p.dividendRate)
   }
@@ -2168,9 +2172,7 @@ const fetchPrice = async (row) => {
     const list = await bffApi.snapshotForm.prices(form.snapshotDate,
       [{ code: row.stockCode, market: row.market }])
     const result = list?.[0] ?? {}
-    row.latestPrice    = result.price != null ? Number(result.price) : null
-    row.priceChange    = result.priceChange != null ? Number(result.priceChange) : null
-    row.priceChangePct = result.changePercent != null ? Number(result.changePercent) : null
+    applyEnrichedQuote(row, result)
     if (result.stockName && !row.stockName) row.stockName = result.stockName
     if (result.dividendRate != null) row.dividendRate = Number(result.dividendRate)
     const change = Number(result.priceChange ?? 0)
@@ -2340,6 +2342,8 @@ const groupStocks = (flat) => {
         latestPrice: null,
         priceChange: null,
         priceChangePct: null,
+        quoteStatus: null,
+        priceSource: null,
         _fetchingPrice: false,
         _fetchingDividend: false,
         brokerRows: []
@@ -2505,6 +2509,8 @@ watch(() => form.snapshotDate, async (newDate, oldDate) => {
     row.latestPrice    = null
     row.priceChange    = null
     row.priceChangePct = null
+    row.quoteStatus = null
+    row.priceSource = null
   }
   // 3 + 4. 並行：批次查詢新日期收盤價 + 依基準日重抓 fund_master NAV / 配息（彼此獨立）
   const tasks = [loadFundMasters()]
@@ -2724,6 +2730,7 @@ const submit = async () => {
 .price-main { display: flex; align-items: center; gap: 6px; }
 .price-num  { font-size: 13px; font-weight: 600; color: #1e293b; }
 .price-empty { color: #94a3b8; font-size: 13px; }
+.price-pending { color: #d97706; font-size: 12px; font-weight: 600; }
 .price-change { font-size: 12px; font-weight: 600; }
 .price-up   { color: #dc2626; }  /* 台股漲為紅 */
 .price-down { color: #16a34a; }  /* 台股跌為綠 */

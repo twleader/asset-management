@@ -327,13 +327,17 @@ public class SnapshotFormBffController {
                 // 歷史表（stock_price_history）通常在盤後幾小時才匯入當日資料，
                 // 在那之前 prices-on-date 會 fallback 到前一交易日，造成「基準日 4/28 卻顯示 4/27」。
                 boolean isToday = SnapshotEnricher.isCurrentBasedate(basedate, market);
-                boolean preferLive = isToday && live.get("price") != null;
+                // CLOSE_PENDING 也必須優先；若以 price != null 判斷，pending 會倒退顯示歷史價，
+                // 正是本次要消除的「看似今日收盤」錯覺。
+                boolean preferLive = isToday && !live.isEmpty();
                 row.put("price", preferLive ? live.get("price") : hist.get("price"));
                 row.put("tradingDate", preferLive ? live.get("tradingDate") : hist.get("tradingDate"));
                 // frozen（非該市場當日）改用 hist 的「當日漲跌」（prices-on-date 已算好：該收盤日 vs 前一交易日），
                 // 與 Dashboard 一致，讓收盤/週末頁也顯示漲跌；live 時仍用即時漲跌。
                 row.put("priceChange", preferLive ? live.get("priceChange") : hist.get("priceChange"));
                 row.put("changePercent", preferLive ? live.get("changePercent") : hist.get("changePercent"));
+                row.put("source", preferLive ? live.get("source") : hist.get("source"));
+                row.put("quoteStatus", preferLive ? live.get("quoteStatus") : hist.get("quoteStatus"));
                 row.put("stockName", firstNonNull(div.get("stockName"), live.get("stockName")));
                 BigDecimal dr = SnapshotEnricher.toBigDecimal(div.get("dividendRate"));
                 row.put("dividendRate", dr);

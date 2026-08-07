@@ -4,13 +4,10 @@ import com.steven.assets.dto.WatchStockDto;
 import com.steven.assets.model.StockAlert;
 import com.steven.assets.model.StockAlertGroup;
 import com.steven.assets.model.StockPriceHistory;
-import com.steven.assets.model.TwseIndexDailyHistory;
 import com.steven.assets.repository.StockAlertGroupRepository;
 import com.steven.assets.repository.StockAlertRepository;
 import com.steven.assets.repository.StockPriceHistoryRepository;
 import com.steven.assets.repository.StockRepository;
-import com.steven.assets.repository.TwseIndexDailyHistoryRepository;
-import com.steven.assets.util.MarketZones;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -18,7 +15,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -60,7 +56,7 @@ public class WatchStockService {
     private final StockPriceHistoryRepository historyRepo;
     private final StockRepository stockMasterRepo;
     private final TechnicalIndicatorService indicatorService;
-    private final TwseIndexDailyHistoryRepository twseDailyRepo;
+    private final TaiexDisplayPriceService taiexDisplayPriceService;
 
     private static boolean isTaiex(String code, String market) {
         return TAIEX_INDEX_CODE.equals(code) && "台股".equals(market);
@@ -142,10 +138,10 @@ public class WatchStockService {
                 buyPrice = null, sellPrice = null, openPrice = null, previousClose = null,
                 highPrice = null, lowPrice = null;
         Long volume = null;
-        String tradingDate = null, priceUpdatedAt = null;
+        String tradingDate = null, priceUpdatedAt = null, quoteStatus = null;
         Boolean closed = null;
 
-        Optional<PriceQueryService.LivePrice> priceOpt = priceQuery.getLive(code, market);
+        Optional<PriceQueryService.LivePrice> priceOpt = priceQuery.getDisplayPrice(code, market);
         if (priceOpt.isPresent()) {
             PriceQueryService.LivePrice sp = priceOpt.get();
             price = sp.price();
@@ -161,12 +157,14 @@ public class WatchStockService {
             tradingDate = sp.tradingDate();
             priceUpdatedAt = sp.updatedAt();
             closed = sp.closed();
+            quoteStatus = sp.quoteStatus();
         }
 
         // 對於非交易時間或新加入觀察股票，買賣/開盤/昨收/最高/最低/成交量可能為 null
         // → 用最近的歷史收盤資料（StockPriceHistory）回填
-        if (openPrice == null || highPrice == null || lowPrice == null
-                || volume == null || previousClose == null) {
+        if (!"CLOSE_PENDING".equals(quoteStatus)
+                && (openPrice == null || highPrice == null || lowPrice == null
+                || volume == null || previousClose == null)) {
             List<StockPriceHistory> recent = historyRepo.findRecentN(code, market, 2);
             if (!recent.isEmpty()) {
                 StockPriceHistory latest = recent.get(0);
@@ -227,6 +225,7 @@ public class WatchStockService {
                 .tradingDate(tradingDate)
                 .priceUpdatedAt(priceUpdatedAt)
                 .closed(closed)
+                .quoteStatus(quoteStatus)
                 .conditions(conditions)
                 .lastTriggeredAt(last.triggeredAt())
                 .lastTriggeredPrice(last.price())
@@ -259,61 +258,19 @@ public class WatchStockService {
      * 大盤無買賣盤口、無成交量定義 → buyPrice / sellPrice / volume 為 null。
      */
     private WatchStockDto.Response toIndexResponse(String code, String market) {
-        BigDecimal price = null, priceChange = null, changePercent = null,
-                openPrice = null, previousClose = null, highPrice = null, lowPrice = null;
-        String tradingDate = null;
-        Boolean closed = null;
-
-        List<TwseIndexDailyHistory> recent = twseDailyRepo.findTop60ByOrderByTradingDateDesc();
-        LocalDate today = MarketZones.today("台股");
-        boolean eodHasToday = !recent.isEmpty() && today.equals(recent.get(0).getTradingDate());
-
-        // 與 computeAllForTaiex() 等價的 live 併入條件：完成日 K 未到今日，且 live 的 tradingDate 為今日
-        Optional<PriceQueryService.LivePrice> liveOpt = eodHasToday
-                ? Optional.empty()
-                : priceQuery.getLive(TAIEX_INDEX_CODE, "台股");
-        boolean useLive = liveOpt.isPresent()
-                && liveOpt.get().tradingDate() != null
-                && today.toString().equals(liveOpt.get().tradingDate());
-
-        if (useLive) {
-            // 五欄全部取自 live，不逐欄 fallback 回完成日 K——混搭會讓同一列出現兩個日期的值。
-            // 某欄為 null 就顯示「—」，那是誠實的空值。
-            PriceQueryService.LivePrice live = liveOpt.get();
-            price = live.price();
-            openPrice = live.openPrice();
-            highPrice = live.highPrice();
-            lowPrice = live.lowPrice();
-            tradingDate = live.tradingDate();
-            closed = false;
-        } else if (!recent.isEmpty()) {
-            TwseIndexDailyHistory latest = recent.get(0);
-            price = latest.getClosePoint();
-            openPrice = latest.getOpenPoint();
-            highPrice = latest.getHighPoint();
-            lowPrice = latest.getLowPoint();
-            tradingDate = latest.getTradingDate().toString();
-            closed = true;
-        }
-
-        if (tradingDate != null) {
-            LocalDate displayDate = LocalDate.parse(tradingDate);
-            for (TwseIndexDailyHistory h : recent) {          // recent 為降冪，第一筆嚴格早於顯示日者即昨收
-                if (h.getTradingDate().isBefore(displayDate)) {
-                    previousClose = h.getClosePoint();
-                    break;
-                }
-            }
-        }
-        // priceChange / changePercent 一律現算，不取 Redis payload 內的既算值（那是依它自己那份昨收算的）
-        if (price != null && previousClose != null && previousClose.signum() != 0) {
-            BigDecimal diff = price.subtract(previousClose);
-            priceChange = diff.setScale(4, RoundingMode.HALF_UP);
-            changePercent = diff
-                    .divide(previousClose, 6, RoundingMode.HALF_UP)
-                    .multiply(BigDecimal.valueOf(100))
-                    .setScale(4, RoundingMode.HALF_UP);
-        }
+        TaiexDisplayPriceService.DisplayQuote display = taiexDisplayPriceService.resolve();
+        BigDecimal price = display.price();
+        BigDecimal previousClose = display.previousClose();
+        BigDecimal priceChange = price != null && previousClose != null
+                ? price.subtract(previousClose).setScale(4, RoundingMode.HALF_UP)
+                : null;
+        BigDecimal changePercent = display.changePercent() == null ? null
+                : display.changePercent().setScale(4, RoundingMode.HALF_UP);
+        BigDecimal openPrice = display.open();
+        BigDecimal highPrice = display.high();
+        BigDecimal lowPrice = display.low();
+        String tradingDate = display.tradingDate();
+        Boolean closed = display.closed();
 
         // 警示條件：列出該股票所有 alert 條件 label
         List<StockAlert> alerts = alertRepo.findByStockCodeAndMarket(code, market);
@@ -340,6 +297,8 @@ public class WatchStockService {
                 .lowPrice(lowPrice)
                 .tradingDate(tradingDate)
                 .closed(closed)
+                .priceUpdatedAt(display.updatedAt())
+                .quoteStatus(display.quoteStatus())
                 .conditions(conditions)
                 .lastTriggeredAt(last.triggeredAt())
                 .lastTriggeredPrice(last.price())

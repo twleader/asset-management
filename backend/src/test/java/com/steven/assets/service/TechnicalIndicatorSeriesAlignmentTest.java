@@ -525,7 +525,7 @@ class TechnicalIndicatorSeriesAlignmentTest {
                             "0000", "台股大盤", "台股", BigDecimal.valueOf(20500), null, null, null,
                             null, null, null,
                             BigDecimal.valueOf(20700), BigDecimal.valueOf(20300), null,
-                            today.toString(), "2026-07-20T10:30:00", false, "TWSE指數(5m)")));
+                            today.toString(), "2026-07-20T10:30:00", false, "TWSE指數(5m)", "LIVE")));
         } else {
             when(priceQuery.getLive(anyString(), anyString())).thenReturn(Optional.empty());
         }

@@ -50,6 +50,7 @@ class TradingRadarServiceOwnerScopeTest {
     @Mock private StockPriceHistoryRepository priceHistoryRepo;
     @Mock private StockDividendHistoryRepository dividendHistoryRepo;
     @Mock private PriceQueryService priceQueryService;
+    @Mock private TaiexDisplayPriceService taiexDisplayPriceService;
     @Mock private AssetSnapshotRepository snapshotRepo;
     @Mock private StockAlertRepository alertRepo;
     @Mock private StockRepository stockRepo;
@@ -72,6 +73,7 @@ class TradingRadarServiceOwnerScopeTest {
                 priceHistoryRepo,
                 dividendHistoryRepo,
                 priceQueryService,
+                taiexDisplayPriceService,
                 snapshotRepo,
                 alertRepo,
                 stockRepo,
@@ -84,6 +86,10 @@ class TradingRadarServiceOwnerScopeTest {
 
     /** holdings／watchlist 一律回空（owner／無 owner 兩種查詢都要 stub），只隔離出 owner 分支本身。 */
     private void stubCommon() {
+        lenient().when(taiexDisplayPriceService.resolve()).thenReturn(
+                new TaiexDisplayPriceService.DisplayQuote(
+                        null, null, null, null, null, null,
+                        null, null, true, "CLOSE_PENDING"));
         lenient().when(marketDataService.isTradingDay(anyString(), any(LocalDate.class))).thenReturn(true);
         lenient().when(twseRepo.findTopNByOrderByTradingDateDesc(241)).thenReturn(List.of());
         lenient().when(priceQueryService.getLive(anyString(), anyString())).thenReturn(Optional.empty());

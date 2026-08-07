@@ -50,6 +50,7 @@ class TradingRadarMarketFreshnessTest {
     @Mock private StockPriceHistoryRepository priceHistoryRepo;
     @Mock private StockDividendHistoryRepository dividendHistoryRepo;
     @Mock private PriceQueryService priceQueryService;
+    @Mock private TaiexDisplayPriceService taiexDisplayPriceService;
     @Mock private AssetSnapshotRepository snapshotRepo;
     @Mock private StockAlertRepository alertRepo;
     @Mock private StockRepository stockRepo;
@@ -74,6 +75,7 @@ class TradingRadarMarketFreshnessTest {
                 priceHistoryRepo,
                 dividendHistoryRepo,
                 priceQueryService,
+                taiexDisplayPriceService,
                 snapshotRepo,
                 alertRepo,
                 stockRepo,
@@ -97,6 +99,10 @@ class TradingRadarMarketFreshnessTest {
     }
 
     private void stubCommon() {
+        lenient().when(taiexDisplayPriceService.resolve()).thenReturn(
+                new TaiexDisplayPriceService.DisplayQuote(
+                        null, null, null, null, null, null,
+                        null, null, true, "CLOSE_PENDING"));
         lenient().when(marketDataService.isTradingDay(anyString(), any(LocalDate.class))).thenReturn(true);
         lenient().when(snapshotRepo.findLatestWithStocks()).thenReturn(Optional.empty());
         lenient().when(alertRepo.findDistinctStockCodeMarket()).thenReturn(List.of());
@@ -111,7 +117,7 @@ class TradingRadarMarketFreshnessTest {
         return new PriceQueryService.LivePrice(
                 "0000", "台股大盤", "台股", price, null, null, null,
                 null, null, null, null, null, null,
-                tradingDate.toString(), "2026-07-20T10:30:00", false, "TWSE指數(5m)");
+                tradingDate.toString(), "2026-07-20T10:30:00", false, "TWSE指數(5m)", "LIVE");
     }
 
     @Test
