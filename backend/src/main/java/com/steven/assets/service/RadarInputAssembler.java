@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -34,6 +35,9 @@ public class RadarInputAssembler {
     public static final int FULL_WINDOW = 240;
     /** 9 日高低帶寬度的取樣筆數（窄幅 KD 失效判定，Task 264）。 */
     private static final int KD_BAND_ROWS = 9;
+    /** 相對量分母取先前 20 個正成交量完成日，至少 10 筆才採用（Task 291）。 */
+    private static final int VOLUME_LOOKBACK = 20;
+    private static final int VOLUME_MIN_SAMPLES = 10;
 
     private final TechnicalIndicatorService indicatorService;
     private final DistributionAdjustedPriceService adjustedPriceService;
@@ -48,6 +52,7 @@ public class RadarInputAssembler {
      * @param kdBandWidthPercent   還原序列前 9 筆的高低帶寬度（%）。
      * @param ruleChangePercent    規則內部用的單日漲跌幅（還原價基）；前收缺值時為 null，
      *                             呼叫端自行決定是否 fallback 至市場報價漲跌幅。
+     * @param volumeRatio          最新完成日還原成交量 ÷ 之前 20 個正成交量日中位數；分母排除最新日。
      */
     public record Assembled(
             TechnicalIndicatorService.FullIndicators indicators,
@@ -65,7 +70,8 @@ public class RadarInputAssembler {
             BigDecimal ma60BiasPercent,
             BigDecimal ma240BiasPercent,
             BigDecimal week52Position,
-            BigDecimal ruleChangePercent
+            BigDecimal ruleChangePercent,
+            BigDecimal volumeRatio
     ) {
         public static final Assembled EMPTY = new Assembled(
                 TechnicalIndicatorService.FullIndicators.EMPTY, List.of(), false, List.of(),
@@ -73,7 +79,7 @@ public class RadarInputAssembler {
                 TradingRadarRuleEngine.Confirmation.UNAVAILABLE,
                 TradingRadarRuleEngine.Confirmation.UNAVAILABLE,
                 TradingRadarRuleEngine.Confirmation.UNAVAILABLE,
-                null, null, null, null);
+                null, null, null, null, null);
     }
 
     /**
@@ -143,13 +149,53 @@ public class RadarInputAssembler {
                 biasPercent(price, indicators.quarterlyMa()),
                 biasPercent(price, indicators.annualMa()),
                 week52Position(price, week52High, week52Low),
-                changePercent(price, previousAdjustedClose));
+                changePercent(price, previousAdjustedClose),
+                volumeRatio(adjustedRows, firstCompleted));
     }
 
     /** {@link TechnicalIndicatorService.FullIndicators} → 引擎的 {@code Indicators}。 */
     public TradingRadarRuleEngine.Indicators indicators(TechnicalIndicatorService.FullIndicators ind) {
         return new TradingRadarRuleEngine.Indicators(
                 ind.monthlyMa(), ind.quarterlyMa(), ind.annualMa(), ind.k(), ind.d());
+    }
+
+    /** 指標服務的擴充值只在此轉成規則引擎輸入，production 與回測不各自複製接線。 */
+    public TradingRadarRuleEngine.ExtendedIndicators extendedIndicators(
+            TechnicalIndicatorService.ExtendedIndicators e) {
+        if (e == null) return null;
+        return new TradingRadarRuleEngine.ExtendedIndicators(
+                e.j9(), e.k3d2(), e.rsv(), e.ema12(), e.ema26(), e.dif(), e.macd(), e.osc(),
+                e.rsi5(), e.rsi10(), e.bias10(), e.bias20(), e.b10b20(), e.wr9());
+    }
+
+    /**
+     * 最新完成日相對量。成交量已由 {@link DistributionAdjustedPriceService} 依股數事件還原；
+     * 最新日不得進入自己的基準，中位數可避免單一爆量日拉歪分母。
+     */
+    public BigDecimal volumeRatio(List<StockPriceHistory> adjustedRowsDesc, int latestCompletedIndex) {
+        if (adjustedRowsDesc == null || latestCompletedIndex < 0
+                || latestCompletedIndex >= adjustedRowsDesc.size()) return null;
+        Long current = adjustedRowsDesc.get(latestCompletedIndex).getVolume();
+        if (current == null || current <= 0) return null;
+        List<Long> prior = new ArrayList<>();
+        for (int i = latestCompletedIndex + 1;
+             i < adjustedRowsDesc.size() && prior.size() < VOLUME_LOOKBACK; i++) {
+            Long value = adjustedRowsDesc.get(i).getVolume();
+            if (value != null && value > 0) prior.add(value);
+        }
+        if (prior.size() < VOLUME_MIN_SAMPLES) return null;
+        prior.sort(Comparator.naturalOrder());
+        BigDecimal median;
+        int n = prior.size();
+        if (n % 2 == 1) {
+            median = BigDecimal.valueOf(prior.get(n / 2));
+        } else {
+            median = BigDecimal.valueOf(prior.get(n / 2 - 1))
+                    .add(BigDecimal.valueOf(prior.get(n / 2)))
+                    .divide(BigDecimal.valueOf(2), 8, RoundingMode.HALF_UP);
+        }
+        if (median.signum() <= 0) return null;
+        return BigDecimal.valueOf(current).divide(median, 4, RoundingMode.HALF_UP);
     }
 
     /** 還原序列的最高價；全為 null 時回 null（不得以 0 充當）。 */

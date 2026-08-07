@@ -10,8 +10,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * 排程列表頁的說明文字守門（Requirement 55 / Task 272）。
  *
- * <p>本需求<b>不新增、不移除、不調整任何 {@code @Scheduled} 的 cron</b>，故 {@code JOBS} 的項目數不變；
- * 但九條提及輸出格式的 {@code description} 在雙格式落地後全部變成假的，必須同步改寫。
+ * <p>Task 292 新增一個基本面排程；其餘既有項目不移除。表內任一含輸出格式的
+ * {@code description} 仍必須保持雙格式真實描述。
  *
  * <p>「不動 {@code @Scheduled} ⇒ {@code JOBS} 不必動」這個推論在本專案已被否決過一次
  * （Requirement 48／Task 260：交易雷達那一筆的 description 在改了匯出行為後變成假的）。
@@ -24,11 +24,11 @@ class SchedulePublicBffControllerTest {
     }
 
     @Test
-    @DisplayName("排程清單完整列出 19 個業務與 29 個外部行情工作")
+    @DisplayName("排程清單完整列出 19 個業務與 30 個外部行情工作")
     void 項目數正確() {
-        assertThat(jobs()).hasSize(48);
+        assertThat(jobs()).hasSize(49);
         assertThat(jobs()).filteredOn(j -> "業務服務".equals(j.service())).hasSize(19);
-        assertThat(jobs()).filteredOn(j -> "外部行情服務".equals(j.service())).hasSize(29);
+        assertThat(jobs()).filteredOn(j -> "外部行情服務".equals(j.service())).hasSize(30);
     }
 
     @Test

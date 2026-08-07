@@ -139,9 +139,9 @@ if (oversold && bias != null && bias <= BIAS_EXTREME_LOW) return TimingState.EXT
 
 - [ ] 274.5 `RULE_VERSION` **升版一級**。**版本字串以實作當下 `TradingRadarRuleEngine.RULE_VERSION` 的實際值 +1 為準，本檔刻意不寫死字面值。**
 
-  > **⚠ 為什麼不能寫死 `TW_RULES_V10`（原本的寫法，已更正）**：`spec/tasks/t267_fundamental_factor_wiring.md` 已預約 `TW_RULES_V10`（其 `:1`／`:3`／`:53` 三處）。而 `TradingRadarNotificationService` 是以**字串相等**判斷通知基準是否有效——若 t267 先落地寫入 `TW_RULES_V10`，本任務也叫 `TW_RULES_V10`，則 `baselineValid` 為 `true`、**基準不會重建**，而本任務已改變 `TimingState` 的判定基準，首輪就會對每筆訂閱寄出大量假通知。
+  > **⚠ 為什麼不能寫死字面版號**：t291／t267／t275 可能先落地。`TradingRadarNotificationService` 是以**字串相等**判斷通知基準是否有效；若兩個不同規則共用一個版本名，`baselineValid` 會錯誤地為 true、基準不會重建，而本任務會改變 `TimingState` 判定，首輪可能對每筆訂閱寄出假通知。
   >
-  > **實作前必須先 `grep -ran "RULE_VERSION" backend/src` 讀取當下實際值**，並確認 t267／t275／t276／t277 是否已各自佔用一級。
+  > **實作前必須先 `grep -ran "RULE_VERSION" backend/src` 讀取當下實際值**，並確認 t291／t267／t275 是否已各自佔用一級；t276／t277 已由 t291 取代。
 
   **同步點共五處**，以 `grep -ran "<當下版本字串>"` 取得（`-a` 不可省略：本專案有 `.java` 檔被 `file(1)` 誤判為 data，普通 `grep -r` 會整檔跳過）：
 

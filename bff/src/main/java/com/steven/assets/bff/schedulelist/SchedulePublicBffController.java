@@ -10,10 +10,10 @@ import java.util.List;
  * ScheduleListView 專屬 BFF（「公開資訊」分組，Requirement 36）。
  *
  * <p>回傳系統所有自動排程的**人工維護靜態清單**。排程分屬兩個服務：
- * {@code business-services}（19 個）與 {@code external-materials-service}（29 個）。
+ * {@code business-services}（19 個）與 {@code external-materials-service}（30 個）。
  * 此頁為唯讀資訊展示，故不做跨服務反射探索、不入 DB、不設管理端點。
  *
- * <p><b>計數慣例：以 {@code @Scheduled} 方法計，一法一筆。</b>external 29 筆對應 30 個標註
+ * <p><b>計數慣例：以 {@code @Scheduled} 方法計，一法一筆。</b>external 30 筆對應 31 個標註
  * （{@code TwClosurePoller} 一法兩標，併為一筆；Task 228 直接以 {@code grep '@Scheduled'} 逐檔核對重新校正此數，
  * 修正了 Task 228 之前既已存在、與此清單無關的計數漂移）。
  *
@@ -24,6 +24,7 @@ import java.util.List;
  * <ul>
  *   <li>{@code MarketAnalysisScheduler} → {@code market_analysis_send_time}（「今日股市分析」頁可增減）</li>
  *   <li>{@code NewsPoller} → {@code crawler_schedule}（「爬蟲資訊查詢」頁可增減）</li>
+ *   <li>{@code StockFundamentalPoller} → {@code crawler_schedule[crawler_key=fundamental]}</li>
  * </ul>
  * 每分鐘 tick 但時點屬 per-user 私人設定者（{@code ExportScheduleService}、
  * {@code TradingCalendarExportScheduleService}）則照列其實際 cron {@code 0 * * * * *}。
@@ -35,7 +36,7 @@ import java.util.List;
  *       StockAlertService、MarketAnalysisScheduler、BackupService</li>
 
  *   <li>external-materials-service：TwseIndexPoller、PricePoller、TaiexIndexPoller、TwClosurePoller、
- *       FundDividendPoller、NewsPoller、KrStockPoller、FundNavPoller、DividendPersister、
+ *       FundDividendPoller、NewsPoller、StockFundamentalPoller、KrStockPoller、FundNavPoller、DividendPersister、
  *       IntradayTickRefresher、HistoricalBackfillService、ExchangeRatePoller、ClosePersister</li>
  * </ul>
  */
@@ -49,7 +50,7 @@ public class SchedulePublicBffController {
     private static final String NYC = "America/New_York";
     private static final String LON = "Europe/London";
 
-    /** 全系統排程清單（48 筆）。順序刻意先業務服務、再外部行情服務，前端再依 category 分組。 */
+    /** 全系統排程清單（49 筆）。順序刻意先業務服務、再外部行情服務，前端再依 category 分組。 */
     private static final List<ScheduledJobDto> JOBS = List.of(
             // ===== business-services（19）=====
             new ScheduledJobDto(BUSINESS, "資產快照", "最新快照釘定當日",
@@ -110,7 +111,7 @@ public class SchedulePublicBffController {
                     "每分鐘檢查各使用者的每一筆交易紀錄自動匯出排程（Task 255 起每人可設定多筆，各有自己的時間與輸出資料夾），命中執行時間即同時產出 JSON 與 Excel 兩份（主檔名相同）到該筆指定目錄（Requirement 49）；輸出含 Google Drive 同步（若已啟用）",
                     "每分鐘", "0 * * * * *", TPE),
 
-            // ===== external-materials-service（29）=====
+            // ===== external-materials-service（30）=====
             new ScheduledJobDto(EXTERNAL, "即時行情", "台股個股即時價（盤中）",
                     "盤中每 2 分鐘更新持股與觀察清單「個股」即時價至 Redis（來源 TWSE mis API）；不含大盤 0000，該筆由「台股大盤即時點位（盤中）」負責",
                     "交易日 09:00–13:00 每 2 分鐘", "0 0/2 9-13 * * MON-FRI", TPE),
@@ -196,6 +197,9 @@ public class SchedulePublicBffController {
                             + "亦可於「爬蟲資訊查詢」頁按「立即匯出」（只重產檔案）或「立即抓取並匯出」"
                             + "（完整跑一輪）手動觸發（Requirement 63）",
                     "動態：依「爬蟲資訊查詢」頁設定（預設 08:20 / 11:30 / 18:00）", "動態（crawler_schedule）", TPE),
+            new ScheduledJobDto(EXTERNAL, "個股基本面", "個股基本面與產業營收",
+                    "先使用已入庫的 public_info_* 公開資訊作為質性證據，再依交易所→Yahoo→玩股網→FinMind 固定順序補齊持股與觀察個股的財報、估值與產業營收觀測；雷達請求只讀本地資料，不會現場抓外網",
+                    "動態：依 crawler_schedule 設定（預設 15:30）", "動態（crawler_schedule:fundamental）", TPE),
             new ScheduledJobDto(EXTERNAL, "韓股", "韓股參考個股抓取",
                     "每日抓取韓國三星電子／SK 海力士收盤，供公開資訊韓股快照（KOSPI 另讀既有海外指數）",
                     "每日 16:00", "0 0 16 * * *", TPE),
@@ -204,7 +208,7 @@ public class SchedulePublicBffController {
                     "交易日 05:00–07:00 每 15 分鐘", "0 0/15 5-6 * * MON-FRI；0 0 7 * * MON-FRI", TPE)
     );
 
-    /** GET /api/bff/schedule-list —— 回傳全系統排程清單（48 筆靜態資料）。 */
+    /** GET /api/bff/schedule-list —— 回傳全系統排程清單（49 筆靜態資料）。 */
     @GetMapping
     public List<ScheduledJobDto> list() {
         return JOBS;

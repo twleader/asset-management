@@ -555,27 +555,16 @@ class TechnicalIndicatorSeriesAlignmentTest {
     }
 
     /**
-     * <b>決策釘子，不是行為驗證</b>（比照 {@code WeeklyMaTest.weeklyMaMustNotBeAnInputToTheRuleEngine}）。
-     * Task 281 明訂這 14 個值純揭露、只進匯出檔；要接進評分請走 Task 276 的 SDD 循環，
-     * <b>不得在此放寬斷言</b>——沒有這條就分不出「t276 有意接線」與「有人不小心接了」。
+     * Task 291 的接線釘子：完整擴充指標必須由單一巢狀輸入進入 StockInput，
+     * MarketInput 不重複接一份個股指標。
      */
     @Test
-    void 擴充指標一律不得成為規則引擎的輸入() {
-        // 用**精確欄名**而非寬鬆字根：`bias` 會誤中 Task 264 既有且合法的 ma60BiasPercent／ma240BiasPercent
-        // （那是「現價對季／年線的乖離」，與本任務的 BIAS10／BIAS20 是不同的東西）。
-        String[] banned = {"j9", "k3d2", "rsv", "ema12", "ema26", "dif", "macd", "osc",
-                "rsi5", "rsi10", "bias10", "bias20", "b10b20", "wr9", "extended"};
-        for (Class<?> input : List.of(TradingRadarRuleEngine.StockInput.class,
-                                      TradingRadarRuleEngine.MarketInput.class)) {
-            for (java.lang.reflect.RecordComponent c : input.getRecordComponents()) {
-                String n = c.getName().toLowerCase();
-                for (String b : banned) {
-                    assertThat(n)
-                            .as("%s.%s：Task 281 的擴充指標為純揭露，接進評分須走 t276 的 SDD 循環",
-                                    input.getSimpleName(), c.getName())
-                            .doesNotContain(b);
-                }
-            }
-        }
+    void 擴充指標由單一欄位接入V11規則引擎() {
+        assertThat(List.of(TradingRadarRuleEngine.StockInput.class.getRecordComponents())
+                .stream().map(java.lang.reflect.RecordComponent::getName).toList())
+                .contains("extendedIndicators", "weeklyMa", "volumeRatio");
+        assertThat(List.of(TradingRadarRuleEngine.MarketInput.class.getRecordComponents())
+                .stream().map(java.lang.reflect.RecordComponent::getName).toList())
+                .doesNotContain("extendedIndicators");
     }
 }

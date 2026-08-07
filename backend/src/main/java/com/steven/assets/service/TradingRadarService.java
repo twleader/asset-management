@@ -4,8 +4,6 @@ import com.steven.assets.dto.TradingRadarDto;
 import com.steven.assets.model.AssetSnapshot;
 import com.steven.assets.model.Stock;
 import com.steven.assets.repository.EtfNavHistoryRepository;
-import com.steven.assets.repository.ExchangeRateHistoryRepository;
-import com.steven.assets.model.ExchangeRateHistory;
 import com.steven.assets.model.StockHolding;
 import com.steven.assets.model.StockPriceHistory;
 import com.steven.assets.model.TwseIndexDailyHistory;
@@ -24,9 +22,9 @@ import org.springframework.web.context.request.RequestContextHolder;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
-import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -50,15 +48,6 @@ public class TradingRadarService {
     private static final String TW_MARKET = "台股";
     private static final String TAIEX_CODE = "0000";
 
-    /**
-     * 匯率分位的回看期（Requirement 47）。
-     *
-     * <p>取五年的理由：同一天（2026-07-17、USD/TWD 32.23）在不同回看期的分位差異極大——
-     * 一年 99.2、三年 73.2、五年 83.6、全歷史 91.8。一年過短會使因子在趨勢行情中長期釘在
-     * 極值而失去區辨力；五年（實測 1247 筆、區間 27.53–33.14）涵蓋台幣由強轉弱的完整週期，
-     * 代表性足夠。調整此值須同步更新 Requirement 47 的記載。</p>
-     */
-    private static final int FX_LOOKBACK_YEARS = 5;
     private static final String TWD = "TWD";
 
     /**
@@ -92,7 +81,8 @@ public class TradingRadarService {
     private final StockAlertRepository alertRepo;
     private final StockRepository stockRepo;
     private final MarketDataService marketDataService;
-    private final ExchangeRateHistoryRepository exchangeRateRepo;
+    private final TradingRadarMarketContextService marketContextService;
+    private final FundamentalAnalysisService fundamentalAnalysisService;
     private final EtfNavHistoryRepository etfNavHistoryRepo;
     private final TradingRadarSnapshotStore snapshotStore;
     private final CurrentUserContext currentUserContext;
@@ -110,8 +100,8 @@ public class TradingRadarService {
      * 當前台股交易日：今天是交易日就取今天，否則往回找最近一個交易日。
      * 用於判斷大盤資料是否停在更早的交易日；沿用既有交易日曆，不自建假日表。
      */
-    private LocalDate currentTwTradingDay() {
-        LocalDate day = LocalDate.now(TAIPEI);
+    private LocalDate currentTwTradingDay(Instant decisionInstant) {
+        LocalDate day = decisionInstant.atZone(TAIPEI).toLocalDate();
         for (int i = 0; i < 14; i++) {
             if (marketDataService.isTradingDay(TW_MARKET, day)) return day;
             day = day.minusDays(1);
@@ -153,7 +143,9 @@ public class TradingRadarService {
      *                查詢方法），不得依賴 {@link CurrentUserContext}。
      */
     private TradingRadarDto.Response assemble(Long ownerId) {
-        MarketState market = buildMarket();
+        Instant decisionInstant = Instant.now();
+        TradingRadarMarketContextService.Resolved context = marketContextService.resolve(decisionInstant);
+        MarketState market = buildMarket(context.market(), decisionInstant);
         Map<String, Target> targets = new LinkedHashMap<>();
         Set<String> skippedNonTw = new HashSet<>();
         loadLatestHoldings(targets, skippedNonTw, ownerId);
@@ -161,31 +153,46 @@ public class TradingRadarService {
 
         List<TradingRadarDto.StockDecision> decisions = targets.values().stream()
                 .filter(t -> TW_MARKET.equals(t.market()) && !TAIEX_CODE.equals(t.code()))
-                .sorted(Comparator.comparing(Target::code))
-                .map(t -> buildStock(t, market.regime(), market.stale()))
+                .map(t -> buildStock(t, market.regime(), market.stale(), decisionInstant))
+                .sorted(Comparator
+                        .comparing(TradingRadarService::bestScore,
+                                Comparator.nullsLast(Comparator.reverseOrder()))
+                        .thenComparing(TradingRadarDto.StockDecision::stockCode))
                 .toList();
 
         return new TradingRadarDto.Response(
                 TradingRadarRuleEngine.RULE_VERSION,
-                ZonedDateTime.now(TAIPEI).toOffsetDateTime().toString(),
+                decisionInstant.atZone(TAIPEI).toOffsetDateTime().toString(),
                 market.summary(),
                 decisions,
-                skippedNonTw.size());
+                skippedNonTw.size(),
+                context.publicInformation());
     }
 
-    /** 背景通知評估共用同一份 V4 組裝，不依賴 HTTP owner filter。 */
+    /** 背景通知評估共用同一份 V11 組裝；通知狀態仍只追蹤中期 action。 */
     @Transactional(readOnly = true)
     public TradingRadarDto.StockDecision evaluateForNotification(
             String stockCode, String market, boolean held) {
-        MarketState marketState = buildMarket();
-        return buildStock(new Target(stockCode, market, held), marketState.regime(), marketState.stale());
+        Instant decisionInstant = Instant.now();
+        TradingRadarMarketContextService.Resolved context = marketContextService.resolve(decisionInstant);
+        MarketState marketState = buildMarket(context.market(), decisionInstant);
+        return buildStock(new Target(stockCode, market, held), marketState.regime(), marketState.stale(),
+                decisionInstant);
     }
 
-    private MarketState buildMarket() {
+    private MarketState buildMarket(
+            TradingRadarMarketContextService.MarketContext context,
+            Instant decisionInstant) {
         try {
             List<TwseIndexDailyHistory> rows = twseRepo.findTopNByOrderByTradingDateDesc(241);
+            if (context.marketAsOfDate() != null) {
+                rows = rows.stream()
+                        .filter(r -> !r.getTradingDate().isAfter(context.marketAsOfDate()))
+                        .limit(241)
+                        .toList();
+            }
             List<BigDecimal> closes = rows.stream().map(TwseIndexDailyHistory::getClosePoint).toList();
-            LocalDate currentTradingDay = currentTwTradingDay();
+            LocalDate currentTradingDay = currentTwTradingDay(decisionInstant);
             LocalDate latestEodDate = rows.isEmpty() ? null : rows.get(0).getTradingDate();
             boolean todayEodPresent = latestEodDate != null && latestEodDate.equals(currentTradingDay);
 
@@ -213,7 +220,14 @@ public class TradingRadarService {
                             changePercent,
                             indicators(ind),
                             c60,
-                            c240));
+                            c240,
+                            context.completedMarketChangePercent(),
+                            context.marketVolumeRatio(),
+                            context.marketTurnoverRatio(),
+                            context.nasdaqChangePercent(),
+                            context.soxChangePercent(),
+                            context.usTechCompositePercent(),
+                            context.usTechAvailable()));
 
             // stale＝「完成日 K 未到今日」且「Redis 也無今日即時價」時才成立；任一者成立即非 stale（Task 228）。
             boolean stale = !todayEodPresent && !liveFreshToday;
@@ -242,7 +256,15 @@ public class TradingRadarService {
                     result.risks(),
                     liveFreshToday,
                     liveUpdatedAt,
-                    toDto(ind.extended()));
+                    toDto(ind.extended()),
+                    context.marketVolumeRatio(),
+                    context.marketTurnoverRatio(),
+                    context.marketAsOfDate() == null ? null : context.marketAsOfDate().toString(),
+                    context.nasdaqChangePercent(),
+                    context.soxChangePercent(),
+                    context.usTechCompositePercent(),
+                    context.usTechAsOfDate() == null ? null : context.usTechAsOfDate().toString(),
+                    context.usTechAvailable());
             return new MarketState(summary, result.regime(), stale);
         } catch (Exception e) {
             log.warn("今日交易雷達：大盤資料組裝失敗", e);
@@ -253,7 +275,8 @@ public class TradingRadarService {
     private TradingRadarDto.StockDecision buildStock(
             Target target,
             TradingRadarRuleEngine.MarketRegime marketRegime,
-            boolean marketStale) {
+            boolean marketStale,
+            Instant decisionInstant) {
         Optional<Stock> stock = stockRepo.findByCodeAndMarket(target.code(), target.market());
         String name = stock.map(Stock::getName)
                 .filter(n -> n != null && !n.isBlank())
@@ -272,7 +295,8 @@ public class TradingRadarService {
             // 故先於 prepareTechnicalData 求值（順序調整不改變任何取值，Task 273 的 273.2b）。
             BigDecimal price = liveOpt.map(PriceQueryService.LivePrice::price)
                     .orElseGet(() -> rows.isEmpty() ? null : rows.get(0).getClosePrice());
-            RadarInputAssembler.Assembled technical = prepareTechnicalData(target, rows, liveOpt, price);
+            RadarInputAssembler.Assembled technical = prepareTechnicalData(
+                    target, rows, liveOpt, price, decisionInstant);
             List<BigDecimal> closes = technical.completedCloses();
             BigDecimal displayPrice = displayOpt.map(PriceQueryService.LivePrice::price).orElse(null);
             BigDecimal displayChangePercent = displayOpt.map(PriceQueryService.LivePrice::changePercent)
@@ -290,12 +314,17 @@ public class TradingRadarService {
             TradingRadarRuleEngine.Confirmation c60 = technical.ma60Confirmation();
             TradingRadarRuleEngine.Confirmation c240 = technical.ma240Confirmation();
             String currency = underlyingCurrencyOf(stock.orElse(null), target.market());
-            BigDecimal fxPct = fxPercentile(stock.orElse(null), target.market());
+            TradingRadarMarketContextService.FxContext fx = TWD.equals(currency)
+                    ? TradingRadarMarketContextService.FxContext.EMPTY
+                    : marketContextService.resolveFx(currency, decisionInstant);
+            BigDecimal fxPct = fx.percentile();
             BigDecimal ma60Bias = technical.ma60BiasPercent();
             BigDecimal ma240Bias = technical.ma240BiasPercent();
             BigDecimal week52Pos = technical.week52Position();
-            BigDecimal etfPremiumPct = etfPremiumPct(target.code(), target.market());
+            BigDecimal etfPremiumPct = etfPremiumPct(target.code(), target.market(), decisionInstant);
             BigDecimal etfPremiumPercentile = etfPremiumPercentile(target.code(), target.market(), etfPremiumPct);
+            FundamentalAnalysisService.Resolved fundamental = fundamentalAnalysisService.resolve(
+                    target.code(), name, target.market(), decisionInstant);
             TradingRadarRuleEngine.StockResult result = ruleEngine.evaluateStock(
                     new TradingRadarRuleEngine.StockInput(
                             target.held(),
@@ -317,13 +346,29 @@ public class TradingRadarService {
                             week52Pos,
                             technical.kdBandWidthPercent(),
                             etfPremiumPct,
-                            etfPremiumPercentile));
+                            etfPremiumPercentile,
+                            ind.weeklyMa(),
+                            assembler.extendedIndicators(ind.extended()),
+                            technical.volumeRatio(),
+                            fundamental.input()));
 
             List<String> reasons = new ArrayList<>();
             if (technical.distributionAdjusted()) {
                 reasons.add("MA／KD、兩日確認與規則漲跌已使用還原權息／分割價，避免把配息缺口或分割跳空誤判為趨勢跌破。 ");
             }
             reasons.addAll(result.reasons());
+            List<String> risks = new ArrayList<>(result.risks());
+            List<String> shortReasons = new ArrayList<>();
+            if (technical.distributionAdjusted()) {
+                shortReasons.add("MA／KD、擴充指標與相對量已使用同一份還原權息／分割序列。 ");
+            }
+            shortReasons.addAll(result.shortReasons());
+            List<String> shortRisks = new ArrayList<>(result.shortRisks());
+            if (!TWD.equals(currency) && fx.asOfDate() == null) {
+                String missingFx = "精確完成日匯率不可得，外幣債券 ETF 的匯率因子本日缺值。 ";
+                risks.add(missingFx);
+                shortRisks.add(missingFx);
+            }
 
             String updatedAt = displayOpt.map(PriceQueryService.LivePrice::updatedAt).orElse(null);
             String asOf = displayOpt.map(PriceQueryService.LivePrice::tradingDate)
@@ -360,7 +405,7 @@ public class TradingRadarService {
                     fxPct,
                     currency,
                     List.copyOf(reasons),
-                    result.risks(),
+                    List.copyOf(risks),
                     result.kdHeat().name(),
                     result.timingState().name(),
                     timingLabel(result.timingState()),
@@ -369,7 +414,17 @@ public class TradingRadarService {
                     ind.weeklyMa(),
                     etfPremiumPct,
                     etfPremiumPercentile,
-                    toDto(ind.extended()));
+                    toDto(ind.extended()),
+                    result.shortAction().name(),
+                    actionLabel(result.shortAction()),
+                    result.shortScore(),
+                    List.copyOf(shortReasons),
+                    List.copyOf(shortRisks),
+                    result.horizonConflict(),
+                    technical.volumeRatio(),
+                    fx.asOfDate() == null ? null : fx.asOfDate().toString(),
+                    result.profitTakingConfirmed(),
+                    fundamental.snapshot());
         } catch (Exception e) {
             log.warn("今日交易雷達：{} {} 組裝失敗", target.market(), target.code(), e);
             return incompleteStock(target, name, assetClass, "讀取個股資料失敗，該檔今日不交易。");
@@ -384,9 +439,12 @@ public class TradingRadarService {
             Target target,
             List<StockPriceHistory> completedRows,
             Optional<PriceQueryService.LivePrice> liveOpt,
-            BigDecimal price) {
+            BigDecimal price,
+            Instant decisionInstant) {
         List<StockPriceHistory> combined = new ArrayList<>(completedRows);
-        boolean liveAdded = liveOpt.filter(live -> shouldAddLiveRow(completedRows, live)).isPresent();
+        boolean liveAdded = liveOpt
+                .filter(live -> shouldAddLiveRow(completedRows, live, decisionInstant))
+                .isPresent();
         if (liveAdded) {
             combined.add(0, liveRow(target, liveOpt.orElseThrow()));
         }
@@ -404,7 +462,8 @@ public class TradingRadarService {
 
     private boolean shouldAddLiveRow(
             List<StockPriceHistory> completedRows,
-            PriceQueryService.LivePrice live) {
+            PriceQueryService.LivePrice live,
+            Instant decisionInstant) {
         if (live.tradingDate() == null || live.price() == null) return false;
         LocalDate liveDate;
         try {
@@ -412,7 +471,7 @@ public class TradingRadarService {
         } catch (Exception e) {
             return false;
         }
-        LocalDate today = LocalDate.now(TAIPEI);
+        LocalDate today = decisionInstant.atZone(TAIPEI).toLocalDate();
         return liveDate.equals(today)
                 && (completedRows.isEmpty()
                     || !liveDate.equals(completedRows.get(0).getTradingDate()));
@@ -511,42 +570,6 @@ public class TradingRadarService {
     }
 
     /**
-     * 底層幣別對台幣的五年期分位（0–100）；台幣資產或資料不足時回 null 交由權重重分配吸收。
-     *
-     * <p>中價取 {@code (buy_rate + sell_rate) / 2}。<b>取不到當日匯率時回 null 而非沿用前值</b>——
-     * 匯率在假日不變動，硬代會使分位在連假期間失真。</p>
-     */
-    private BigDecimal fxPercentile(Stock stock, String market) {
-        String currency = underlyingCurrencyOf(stock, market);
-        if (TWD.equals(currency)) return null;
-        try {
-            LocalDate today = LocalDate.now(TAIPEI);
-            List<ExchangeRateHistory> rows = exchangeRateRepo
-                    .findByCurrencyAndRateDateBetweenOrderByRateDateAsc(
-                            currency, today.minusYears(FX_LOOKBACK_YEARS), today);
-            if (rows == null || rows.size() < 60) return null;
-
-            List<BigDecimal> mids = new ArrayList<>();
-            BigDecimal latest = null;
-            for (ExchangeRateHistory r : rows) {
-                BigDecimal mid = midRate(r);
-                if (mid == null) continue;
-                mids.add(mid);
-                latest = mid;
-            }
-            if (latest == null || mids.size() < 60) return null;
-
-            final BigDecimal reference = latest;
-            long atOrBelow = mids.stream().filter(m -> m.compareTo(reference) <= 0).count();
-            return BigDecimal.valueOf(100.0 * atOrBelow / mids.size())
-                    .setScale(1, RoundingMode.HALF_UP);
-        } catch (Exception e) {
-            log.warn("匯率分位計算失敗（{}／{}）：{}", currency, market, e.getMessage());
-            return null;
-        }
-    }
-
-    /**
      * 現行 ETF 折溢價（%）。Redis 即時值優先，但<b>須驗 {@code navAsOf} 為最近一個交易日</b>；
      * 不新鮮則退回 {@code etf_nav_history} 最新一筆。非 ETF 或查無回 {@code null}。
      *
@@ -555,11 +578,11 @@ public class TradingRadarService {
      *
      * <p><b>禁止由市價與淨值反推</b>（Task 259）：{@code premiumDiscountPct} 為 null 就是缺值。</p>
      */
-    private BigDecimal etfPremiumPct(String code, String market) {
+    private BigDecimal etfPremiumPct(String code, String market, Instant decisionInstant) {
         try {
             var live = priceQueryService.getEtfNav(code, market);
             if (live.isPresent() && live.get().premiumDiscountPct() != null
-                    && isFreshNav(live.get().navAsOf())) {
+                    && isFreshNav(live.get().navAsOf(), decisionInstant)) {
                 return live.get().premiumDiscountPct();
             }
             List<BigDecimal> recent = etfNavHistoryRepo.findRecentPremiumPct(
@@ -572,10 +595,10 @@ public class TradingRadarService {
     }
 
     /** Redis 折溢價的 navAsOf 須等於當前台股交易日，否則視為不新鮮。 */
-    private boolean isFreshNav(String navAsOf) {
+    private boolean isFreshNav(String navAsOf, Instant decisionInstant) {
         if (navAsOf == null || navAsOf.isBlank()) return false;
         try {
-            return LocalDate.parse(navAsOf.substring(0, 10)).equals(currentTwTradingDay());
+            return LocalDate.parse(navAsOf.substring(0, 10)).equals(currentTwTradingDay(decisionInstant));
         } catch (Exception e) {
             return false;
         }
@@ -598,16 +621,6 @@ public class TradingRadarService {
         }
     }
 
-    private BigDecimal midRate(ExchangeRateHistory row) {
-        if (row == null) return null;
-        BigDecimal buy = row.getBuyRate();
-        BigDecimal sell = row.getSellRate();
-        if (buy == null && sell == null) return null;
-        if (buy == null) return sell;
-        if (sell == null) return buy;
-        return buy.add(sell).divide(BigDecimal.valueOf(2), 6, RoundingMode.HALF_UP);
-    }
-
     /**
      * 指標服務的擴充指標 → DTO（Task 281）。
      *
@@ -623,6 +636,14 @@ public class TradingRadarService {
                 e.rsi5(), e.rsi10(),
                 e.bias10(), e.bias20(), e.b10b20(),
                 e.wr9());
+    }
+
+    private static Integer bestScore(TradingRadarDto.StockDecision decision) {
+        Integer shortScore = decision.shortScore();
+        Integer mediumScore = decision.score();
+        if (shortScore == null) return mediumScore;
+        if (mediumScore == null) return shortScore;
+        return Math.max(shortScore, mediumScore);
     }
 
     private MarketState incompleteMarket(String message) {

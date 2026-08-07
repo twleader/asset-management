@@ -28,7 +28,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 
 ---
 
-## 任務索引（Task 1–228、264–267、269–290）
+## 任務索引（Task 1–228、264–267、269–292）
 
 | Task | 標題 | 位置 |
 |---|---|---|
@@ -270,17 +270,17 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 228 | 大盤盤中即時判斷（`TW_RULES_V6`，Requirement 43 修訂） | [t228_taiex_intraday_market_signal.md](tasks/t228_taiex_intraday_market_signal.md) |
 | 264 | 交易雷達改為「趨勢品質 × 進場時機」二維決策：均值回歸、高檔轉弱出場、極端超賣不殺低、ETF 折溢價（`TW_RULES_V9`，Requirement 43 修訂；前置 t265）**已通過對抗式審查（3 輪）並完成實作** | [tasks/t264_radar_mean_reversion_and_top_exit.md](tasks/t264_radar_mean_reversion_and_top_exit.md) |
 | 265 | 還原序列補齊股票分割，並新增週線 MA5（Requirement 43；**t264 的前置任務**，取代 t225）**已通過對抗式審查（3 輪）並完成實作** | [tasks/t265_split_adjusted_series.md](tasks/t265_split_adjusted_series.md) |
-| 266 | 台股個股基本面資料每日抓取與歷史落地（取代 t222；只建資料管道、不改評分）**⚠ 尚未送審** | [tasks/t266_stock_fundamental_ingestion.md](tasks/t266_stock_fundamental_ingestion.md) |
-| 267 | 個股基本面因子接進交易雷達（`TW_RULES_V10`，取代 t224；前置 t266 ＋ t264）**⚠ 尚未送審** | [tasks/t267_fundamental_factor_wiring.md](tasks/t267_fundamental_factor_wiring.md) |
+| 266 | 台股個股基本面資料每日抓取與歷史落地 **⛔ 已由 t292 取代** | [tasks/t266_stock_fundamental_ingestion.md](tasks/t266_stock_fundamental_ingestion.md) |
+| 267 | 個股基本面因子接進交易雷達 **⛔ 已由 t292 取代** | [tasks/t267_fundamental_factor_wiring.md](tasks/t267_fundamental_factor_wiring.md) |
 | 269 | 雙格式匯出的地基：`ExportDoc` 中介模型、`ExcelDocRenderer`／`JsonDocRenderer` 兩個 renderer、`DualFormatExportWriter` 雙檔落地（Requirement 55）**已通過對抗式審查（3 輪）並完成實作** | [tasks/t269_dual_format_export_foundation.md](tasks/t269_dual_format_export_foundation.md) |
 | 270 | 五個單表匯出改走 `ExportDoc` 雙格式：已實現損益／匯率／指數／油價金價／交易紀錄（Requirement 55；前置 t269）**已完成實作** | [tasks/t270_dual_format_single_table_exports.md](tasks/t270_dual_format_single_table_exports.md) |
 | 271 | 資產總覽與交易雷達改走 `ExportDoc` 雙格式，交易日曆改為一律兩份（Requirement 55；前置 t269）**已完成實作** | [tasks/t271_dual_format_multi_block_exports.md](tasks/t271_dual_format_multi_block_exports.md) |
 | 272 | 兩份 JSON-primary 匯出加上 Excel（警示觸發、爬蟲公開資訊）＋ 排程列表頁文案收尾（Requirement 55；前置 t270／t271）**已完成實作** | [tasks/t272_dual_format_json_primary_exports.md](tasks/t272_dual_format_json_primary_exports.md) |
-| 273 | 交易雷達規則回測框架：量測各規則述詞在 5／20／60／240 交易日的前瞻報酬分布 vs 同標的同期間基準（Requirement 56；只建工具、不改行為，為 t274／t275／t276／t277 的門檻依據）**⚠ 尚未送審** | [tasks/t273_radar_rule_backtest_framework.md](tasks/t273_radar_rule_backtest_framework.md) |
+| 273 | 交易雷達規則回測框架：量測各規則述詞的前瞻報酬分布 vs 同標的同期間基準（Requirement 56；只建工具、不改行為，供 t291／t274／t275 使用）**已完成實作** | [tasks/t273_radar_rule_backtest_framework.md](tasks/t273_radar_rule_backtest_framework.md) |
 | 274 | 季線乖離改以標的自身波動正規化，修正固定百分比門檻的結構性失效（Requirement 57；前置 t273）**⚠ 尚未送審** | [tasks/t274_volatility_normalized_thresholds.md](tasks/t274_volatility_normalized_thresholds.md) |
 | 275 | 美債殖利率曲線落地 `treasury_yield_daily` 與債券 ETF 的利率因子（Requirement 58；前置 t273）**⚠ 尚未送審** | [tasks/t275_treasury_yield_curve_and_bond_factor.md](tasks/t275_treasury_yield_curve_and_bond_factor.md) |
-| 276 | 把已落地但未使用的技術指標（MACD／RSI／W%R／J9／BIAS 差值）與成交量納入評分（Requirement 59；前置 t273）**⚠ 尚未送審** | [tasks/t276_unused_indicators_and_volume.md](tasks/t276_unused_indicators_and_volume.md) |
-| 277 | 交易雷達的短線與中長線雙軌建議（Requirement 60；前置 t273 ＋ t274 ＋ t276；推翻 t265「MA5 不進評分」的前提） **⚠ 尚未送審** | [tasks/t277_dual_horizon_recommendations.md](tasks/t277_dual_horizon_recommendations.md) |
+| 276 | 把已落地但未使用的技術指標與成交量納入評分（Requirement 59）**⛔ 已由 t291 取代，不得依本檔實作** | [tasks/t276_unused_indicators_and_volume.md](tasks/t276_unused_indicators_and_volume.md) |
+| 277 | 交易雷達的短線與中長線雙軌建議（Requirement 60）**⛔ 已由 t291 取代，不得依本檔實作** | [tasks/t277_dual_horizon_recommendations.md](tasks/t277_dual_horizon_recommendations.md) |
 | 278 | 台股歷史估值回補，推翻 Requirement 46 的「預設不實作」（Requirement 61；前置 t266） **⚠ 尚未送審** | [tasks/t278_twse_valuation_history_backfill.md](tasks/t278_twse_valuation_history_backfill.md) |
 | 279 | 清除 `stock_price_history` 台股 175 列非正收盤，並在 fetch／收盤校正／寫入／Redis／DB 五處擋住復發（Requirement 62）**已通過對抗式審查（3 輪）** | [tasks/t279_nonpositive_close_price_cleanup.md](tasks/t279_nonpositive_close_price_cleanup.md) |
 | 280 | 爬蟲資訊查詢頁補上手動匯出：「立即匯出」（只重產檔案）＋「立即抓取並匯出」（完整跑一輪），兩者都產 JSON ＋ Excel 兩份（Requirement 63） | [tasks/t280_crawler_manual_export.md](tasks/t280_crawler_manual_export.md) |
@@ -294,10 +294,12 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 288 | 股市大盤查詢頁的日線圖下方新增每日成交量柱狀子圖（台股走 TWSE FMTQIK 成交金額／股數、海外走 Yahoo `volume`；Requirement 18） | [tasks/t288_index_daily_volume_chart.md](tasks/t288_index_daily_volume_chart.md) |
 | 289 | 大盤指數日線匯出（Excel／JSON）加「成交股數」「成交金額」兩欄，九欄擴為十一欄（Requirement 45） | [tasks/t289_index_export_volume.md](tasks/t289_index_export_volume.md) |
 | 290 | 台股官方收盤逐檔對帳與盤後顯示防呆（Requirement 7） | [tasks/t290_tw_official_close_reconciliation.md](tasks/t290_tw_official_close_reconciliation.md) |
+| 291 | 今日交易雷達改為一週至六個月的獲利機會雙軌評分，納入完整技術指標、量能、美股科技、台美公開資訊與債券 ETF 匯率（Requirement 43／59／60） | [tasks/t291_trading_radar_profit_horizon.md](tasks/t291_trading_radar_profit_horizon.md) |
+| 292 | 今日交易雷達個股納入財報／基本面與全市場產業營收發展（`TW_RULES_V11`，取代 t266／t267） | [tasks/t292_radar_fundamental_industry.md](tasks/t292_radar_fundamental_industry.md) |
 
-> **註：本索引表僅列至 228、264–267、269–279 與 280–290；Task 229–263 與 268 未登錄於本表，以 `spec/tasks/tNNN_*.md` 檔案本身為準。**
+> **註：本索引表僅列至 228、264–267、269–279 與 280–291；Task 229–263 與 268 未登錄於本表，以 `spec/tasks/tNNN_*.md` 檔案本身為準。**
 
-> **Task 222–225 已全部被 t264–t267 取代（見上表），保留僅作為決策記錄，一律不得依其實作。**
+> **Task 222–225 已全部被 t264／t265／t292 取代（見上表），保留僅作為決策記錄，一律不得依其實作。**
 >
 > 原狀態：全部尚未通過 `/spec-review` 閘門。
 >

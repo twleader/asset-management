@@ -7,12 +7,14 @@ import com.steven.assets.model.Stock;
 import com.steven.assets.model.StockDividendHistory;
 import com.steven.assets.model.StockPriceHistory;
 import com.steven.assets.model.TwseIndexDailyHistory;
+import com.steven.assets.model.UsIndexDailyHistory;
 import com.steven.assets.repository.EtfNavHistoryRepository;
 import com.steven.assets.repository.ExchangeRateHistoryRepository;
 import com.steven.assets.repository.StockDividendHistoryRepository;
 import com.steven.assets.repository.StockPriceHistoryRepository;
 import com.steven.assets.repository.StockRepository;
 import com.steven.assets.repository.TwseIndexDailyHistoryRepository;
+import com.steven.assets.repository.UsIndexDailyHistoryRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -21,6 +23,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.time.LocalTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -30,14 +34,15 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * 交易雷達規則回測框架（Task 273／Requirement 56）。
+ * 交易雷達規則回測框架（Task 273／291）。
  *
- * <p><b>只建工具，不改行為。</b>本服務不修改 {@link TradingRadarRuleEngine} 的任何門檻、權重、
- * 因子組成或動作映射，也不影響「今日交易雷達」頁的任何輸出。</p>
+ * <p>V11 以 production 共用的組裝器、規則引擎、市場 context 與基本面 as-of resolver，
+ * 稽核短期與中期訊號；
+ * 本服務只量測規則輸出，不在回測端另寫第二套判定。</p>
  *
  * <p><b>做法</b>：把歷史序列逐日切成「截至 t 的 241 筆視窗」，餵給
  * {@link RadarInputAssembler}（production 的同一支組裝）再餵給同一支規則引擎，
- * 量測每條述詞成立後 5／20／60／240 個交易日的前瞻報酬分布，並與同標的同期間的
+ * 量測每條述詞成立後 5／20／60／120 個交易日的前瞻報酬分布，並與同標的同期間的
  * 無條件分布（基準）比較。</p>
  *
  * <p><b>輸出一律是「歷史上此條件成立後的報酬分布」</b>，不是預測（273.8.1）。
@@ -63,18 +68,16 @@ public class BacktestService {
     private static final String TW_MARKET = "台股";
     private static final String TAIEX_CODE = "0000";
     private static final String TWD = "TWD";
+    private static final ZoneId TAIPEI = ZoneId.of("Asia/Taipei");
     /** 需要 240 根完成日 K 的因子在此之前不可得；這些日子 production 會回 NO_TRADE，一律排除。 */
     private static final int WARMUP = RadarInputAssembler.FULL_WINDOW;
     /** production 取數視窗（240 根完成日 K ＋ 當日）。回測無 live K，仍取 241 筆使兩日確認可算。 */
     private static final int WINDOW = 241;
-    private static final List<Integer> DEFAULT_HORIZONS = List.of(5, 20, 60, 240);
+    private static final List<Integer> DEFAULT_HORIZONS = List.of(5, 20, 60, 120);
     /** 低於此樣本數的格子一律標記為樣本不足，其數字不得用於決策（273.6.3）。 */
     private static final int MIN_SAMPLES = 30;
-    private static final int FX_LOOKBACK_YEARS = 5;
-    private static final int FX_MIN_SAMPLES = 60;
-    /** 波動度與量能的回看筆數。 */
+    /** 波動度的回看筆數。 */
     private static final int SIGMA_WINDOW = 60;
-    private static final int VOLUME_WINDOW = 60;
     private static final BigDecimal DOWNSIDE = BigDecimal.valueOf(-10);
 
     private final TradingRadarRuleEngine ruleEngine;
@@ -83,22 +86,29 @@ public class BacktestService {
     private final StockPriceHistoryRepository priceHistoryRepo;
     private final StockDividendHistoryRepository dividendHistoryRepo;
     private final TwseIndexDailyHistoryRepository twseRepo;
+    private final UsIndexDailyHistoryRepository usIndexRepo;
     private final ExchangeRateHistoryRepository exchangeRateRepo;
     private final EtfNavHistoryRepository etfNavHistoryRepo;
     private final StockRepository stockRepo;
     private final DistributionAdjustedPriceService adjustedPriceService;
+    private final TradingRadarMarketContextService marketContextService;
+    private final FundamentalAnalysisService fundamentalAnalysisService;
 
     /** 單一交易日的觀察值：述詞判定所需的一切，全部來自截至該日的資料。 */
     private record Obs(
             LocalDate date,
             int index,
             Integer score,
+            Integer shortScore,
             TradingRadarRuleEngine.Action actionHeld,
             TradingRadarRuleEngine.Action actionNotHeld,
+            TradingRadarRuleEngine.Action shortActionHeld,
+            TradingRadarRuleEngine.Action shortActionNotHeld,
             TradingRadarRuleEngine.TimingState timing,
             TradingRadarRuleEngine.KdHeat kdHeat,
             boolean kdDeadCross,
             boolean longTermBroken,
+            boolean profitTakingConfirmed,
             BigDecimal ma60BiasPercent,
             BigDecimal k,
             BigDecimal d,
@@ -106,10 +116,20 @@ public class BacktestService {
             BigDecimal volumeRatio,
             boolean etfPremiumAvailable,
             /** 該標的是否為 ETF（折溢價否決只對 ETF 生效，非 ETF 不該掛 caveat）。 */
-            boolean etfLike
+            boolean etfLike,
+            TradingRadarRuleEngine.FundamentalInput fundamental
     ) {
         TradingRadarRuleEngine.Action action(boolean held) { return held ? actionHeld : actionNotHeld; }
+        TradingRadarRuleEngine.Action shortAction(boolean held) {
+            return held ? shortActionHeld : shortActionNotHeld;
+        }
     }
+
+    /** 同幣別的歷史列與逐訊號日解析結果；避免每檔重複查詢與重算。 */
+    private record FxSeries(
+            List<ExchangeRateHistory> rows,
+            Map<LocalDate, TradingRadarMarketContextService.FxContext> resolved
+    ) {}
 
     /** 具名述詞。{@code held} 由呼叫端帶入，因為述詞 6／7 的動作依 held 而不同。 */
     private record NamedPredicate(String name, java.util.function.BiPredicate<Obs, Boolean> test) {}
@@ -136,7 +156,7 @@ public class BacktestService {
 
         List<String> codes = resolveCodes(req.codes());
         Map<LocalDate, TradingRadarRuleEngine.MarketRegime> regimes = buildMarketRegimes();
-        Map<String, List<BigDecimal>> fxSeriesByCurrency = new HashMap<>();
+        Map<String, FxSeries> fxSeriesByCurrency = new HashMap<>();
 
         List<CodeRun> runs = new ArrayList<>();
         List<String> failedCodes = new ArrayList<>();
@@ -189,7 +209,7 @@ public class BacktestService {
             LocalDate from,
             LocalDate to,
             Map<LocalDate, TradingRadarRuleEngine.MarketRegime> regimes,
-            Map<String, List<BigDecimal>> fxCache) {
+            Map<String, FxSeries> fxCache) {
 
         List<StockPriceHistory> raw =
                 priceHistoryRepo.findAllByStockCodeAndMarketOrderByTradingDateAsc(code, TW_MARKET);
@@ -228,8 +248,17 @@ public class BacktestService {
         // 只有 ETF 才會被折溢價否決影響，故只有 ETF 缺值才需要在統計上掛 caveat。
         boolean etfLike = !premiumByDate.isEmpty() || code.startsWith("00");
         String currency = underlyingCurrency(stock.orElse(null));
-        List<BigDecimal> fxMids = TWD.equals(currency) ? List.of() : fxSeries(currency, fxCache);
-        List<LocalDate> fxDates = TWD.equals(currency) ? List.of() : fxDates(currency, fxCache);
+        FxSeries fxSeries = TWD.equals(currency) ? null : fxSeries(currency, fxCache);
+
+        // 基本面 observation 每檔只查一次；各訊號日的 as-of/revision collapse 由 resolver 在記憶體完成。
+        List<java.time.Instant> fundamentalInstants = rows.stream().skip(WARMUP)
+                .map(StockPriceHistory::getTradingDate)
+                .filter(date -> from == null || !date.isBefore(from))
+                .filter(date -> to == null || !date.isAfter(to))
+                .map(this::signalInstant)
+                .toList();
+        Map<java.time.Instant, TradingRadarRuleEngine.FundamentalInput> fundamentalByInstant =
+                fundamentalAnalysisService.resolveInputsForBacktest(code, TW_MARKET, fundamentalInstants);
 
         List<Obs> observations = new ArrayList<>();
         int warmupExcluded = 0;
@@ -260,23 +289,32 @@ public class BacktestService {
             TradingRadarRuleEngine.MarketRegime regime = regimes.getOrDefault(
                     date, TradingRadarRuleEngine.MarketRegime.DATA_INCOMPLETE);
 
-            BigDecimal fxPct = fxPercentileAt(fxMids, fxDates, date);
+            BigDecimal fxPct = fxSeries == null ? null : fxAt(currency, fxSeries, date).percentile();
+            java.time.Instant decisionInstant = signalInstant(date);
+            TradingRadarRuleEngine.FundamentalInput fundamental = fundamentalByInstant.getOrDefault(
+                    decisionInstant, FundamentalAnalysisService.Resolved.unavailable(true).input());
 
-            TradingRadarRuleEngine.StockResult held = evaluate(a, true, price, instrumentType, regime, fxPct, premium);
-            TradingRadarRuleEngine.StockResult free = evaluate(a, false, price, instrumentType, regime, fxPct, premium);
+            TradingRadarRuleEngine.StockResult held = evaluate(
+                    a, true, price, instrumentType, regime, fxPct, premium, fundamental);
+            TradingRadarRuleEngine.StockResult free = evaluate(
+                    a, false, price, instrumentType, regime, fxPct, premium, fundamental);
 
             observations.add(new Obs(
                     date, t,
                     held.score(),
+                    held.shortScore(),
                     held.action(), free.action(),
+                    held.shortAction(), free.shortAction(),
                     held.timingState(), held.kdHeat(),
                     held.kdDeadCross(), held.longTermBroken(),
+                    held.profitTakingConfirmed(),
                     a.ma60BiasPercent(),
                     a.indicators().k(), a.indicators().d(),
                     sigmaAt(returns, t),
-                    volumeRatioAt(rows, t),
+                    a.volumeRatio(),
                     premium != null,
-                    etfLike));
+                    etfLike,
+                    fundamental));
         }
 
         return new CodeRun(
@@ -294,7 +332,8 @@ public class BacktestService {
             TradingRadarRuleEngine.InstrumentType instrumentType,
             TradingRadarRuleEngine.MarketRegime regime,
             BigDecimal fxPct,
-            BigDecimal premium) {
+            BigDecimal premium,
+            TradingRadarRuleEngine.FundamentalInput fundamental) {
         return ruleEngine.evaluateStock(new TradingRadarRuleEngine.StockInput(
                 held,
                 price,
@@ -315,7 +354,11 @@ public class BacktestService {
                 a.week52Position(),
                 a.kdBandWidthPercent(),
                 premium,
-                null));                // 折溢價「自身歷史分位」需 60 筆樣本，回測期間恆不可得
+                null,                  // 折溢價自身歷史分位在既有回測資料結構下不可得
+                a.indicators().weeklyMa(),
+                assembler.extendedIndicators(a.indicators().extended()),
+                a.volumeRatio(),
+                fundamental));
     }
 
     // ─────────────────────────── 述詞 ───────────────────────────
@@ -355,30 +398,31 @@ public class BacktestService {
         return out;
     }
 
-    /** 273.4 的內建述詞。全部由引擎輸出組成，不含任何門檻的重新實作。 */
+    /** V11 內建述詞。全部由引擎輸出組成，不在回測端複製動作門檻。 */
     private Map<String, java.util.function.BiPredicate<Obs, Boolean>> basePredicates() {
         Map<String, java.util.function.BiPredicate<Obs, Boolean>> m = new LinkedHashMap<>();
         for (TradingRadarRuleEngine.TimingState s : TradingRadarRuleEngine.TimingState.values()) {
             m.put("TIMING_" + s.name(), (o, h) -> o.timing() == s);
         }
-        // 述詞 2：現行「減碼覆寫」的完整觸發條件。
-        m.put("REDUCE_OVERRIDE", (o, h) ->
-                o.timing() == TradingRadarRuleEngine.TimingState.EXTREME_OVERBOUGHT && o.kdDeadCross());
-        // 述詞 3：「阻擋出場」**實際改變動作**的那一組日子。score < 40 不可省略——
-        // 40 ≤ score < 55 時該保護與既有分層回傳相同動作，是 no-op，混進來會稀釋結論。
-        m.put("EXIT_BLOCK_EFFECTIVE", (o, h) ->
+        m.put("PROFIT_TAKING_CONFIRMED", (o, h) -> o.profitTakingConfirmed());
+        m.put("SHORT_BUY", (o, h) -> isBuy(o.shortAction(h)));
+        m.put("MEDIUM_BUY", (o, h) -> isBuy(o.action(h)));
+        m.put("SHORT_PROFIT_TAKING", (o, h) -> o.profitTakingConfirmed() && isSell(o.shortAction(h)));
+        m.put("MEDIUM_PROFIT_TAKING", (o, h) -> o.profitTakingConfirmed() && isSell(o.action(h)));
+        // 極端超賣保護只統計「原分數本會落入賣出組，但實際被改成中性組」的日子。
+        m.put("SHORT_EXTREME_OVERSOLD_PROTECTED", (o, h) ->
                 o.timing() == TradingRadarRuleEngine.TimingState.EXTREME_OVERSOLD
-                        && !o.longTermBroken()
+                        && o.shortScore() != null && o.shortScore() < 40
+                        && isNeutral(o.shortAction(h)));
+        m.put("MEDIUM_EXTREME_OVERSOLD_PROTECTED", (o, h) ->
+                o.timing() == TradingRadarRuleEngine.TimingState.EXTREME_OVERSOLD
                         && o.score() != null && o.score() < 40
-                        && o.action(h) != TradingRadarRuleEngine.Action.TRIAL_BUY);
-        // 述詞 4：被排除保護的崩壞股。
-        m.put("EXIT_BLOCK_EXCLUDED", (o, h) ->
+                        && isNeutral(o.action(h)));
+        m.put("LONG_TERM_BROKEN_OVERSOLD_PROTECTED", (o, h) ->
                 o.timing() == TradingRadarRuleEngine.TimingState.EXTREME_OVERSOLD
-                        && o.longTermBroken()
-                        && o.score() != null && o.score() < 40);
+                        && o.longTermBroken() && isNeutral(o.action(h)));
         m.put("KD_OVERHEATED", (o, h) -> o.kdHeat() == TradingRadarRuleEngine.KdHeat.OVERHEATED);
-        m.put("BUY_GATE", (o, h) -> o.action(h) == TradingRadarRuleEngine.Action.BUY_CANDIDATE
-                || o.action(h) == TradingRadarRuleEngine.Action.ADD_CANDIDATE);
+        m.put("BUY_GATE", (o, h) -> isBuy(o.action(h)));
         m.put("TRIAL_BUY", (o, h) -> o.action(h) == TradingRadarRuleEngine.Action.TRIAL_BUY);
         m.put("SCORE_GTE_75", (o, h) -> o.score() != null && o.score() >= 75);
         m.put("SCORE_55_74", (o, h) -> o.score() != null && o.score() >= 55 && o.score() < 75);
@@ -387,6 +431,25 @@ public class BacktestService {
         m.put("SCORE_LT_25", (o, h) -> o.score() != null && o.score() < 25);
         m.put("SCORE_LT_40", (o, h) -> o.score() != null && o.score() < 40);
         return m;
+    }
+
+    private boolean isBuy(TradingRadarRuleEngine.Action action) {
+        return action == TradingRadarRuleEngine.Action.BUY_CANDIDATE
+                || action == TradingRadarRuleEngine.Action.ADD_CANDIDATE
+                || action == TradingRadarRuleEngine.Action.TRIAL_BUY;
+    }
+
+    private boolean isSell(TradingRadarRuleEngine.Action action) {
+        return action == TradingRadarRuleEngine.Action.REDUCE_CANDIDATE
+                || action == TradingRadarRuleEngine.Action.EXIT_CANDIDATE
+                || action == TradingRadarRuleEngine.Action.AVOID;
+    }
+
+    private boolean isNeutral(TradingRadarRuleEngine.Action action) {
+        return action == TradingRadarRuleEngine.Action.HOLD
+                || action == TradingRadarRuleEngine.Action.WATCH
+                || action == TradingRadarRuleEngine.Action.HOLD_CAUTION
+                || action == TradingRadarRuleEngine.Action.WAIT;
     }
 
     /**
@@ -463,6 +526,8 @@ public class BacktestService {
         // 以及 TRIAL_BUY（qualifiesForTrialBuy 同樣檢查溢價）。
         // 注意 "TIMING_EXTREME_OVERBOUGHT".startsWith("TIMING_OVERBOUGHT") 為 false，不可用 startsWith 判。
         boolean premiumSensitive = "BUY_GATE".equals(p.name())
+                || "SHORT_BUY".equals(p.name())
+                || "MEDIUM_BUY".equals(p.name())
                 || "TRIAL_BUY".equals(p.name())
                 || p.name().endsWith("OVERBOUGHT");
         if (anyEtfWithoutPremium && premiumSensitive) {
@@ -528,11 +593,14 @@ public class BacktestService {
 
     // ─────────────────────────── 逐日環境 ───────────────────────────
 
-    /** 大盤 regime 逐日重算（273.3.3）：不得用最新一日套用到全部歷史。 */
+    /** 大盤 regime 逐日重算，並以該台股日 14:00 截斷美股科技與大盤量能資料。 */
     private Map<LocalDate, TradingRadarRuleEngine.MarketRegime> buildMarketRegimes() {
         List<TwseIndexDailyHistory> asc = twseRepo.findAllByOrderByTradingDateAsc();
         Map<LocalDate, TradingRadarRuleEngine.MarketRegime> out = new HashMap<>();
         if (asc == null || asc.isEmpty()) return out;
+        List<UsIndexDailyHistory> usRows = new ArrayList<>();
+        usRows.addAll(usIndexRepo.findByIndexCodeOrderByTradingDateAsc("IXIC"));
+        usRows.addAll(usIndexRepo.findByIndexCodeOrderByTradingDateAsc("SOX"));
 
         List<StockPriceHistory> asRows = asc.stream()
                 .filter(r -> r.getClosePoint() != null && r.getClosePoint().signum() > 0)
@@ -552,36 +620,31 @@ public class BacktestService {
             RadarInputAssembler.Assembled a = assembler.assemble(
                     windowDesc, List.of(), false, windowDesc.size(),
                     windowDesc.get(0).getClosePrice());
+            LocalDate signalDate = asRows.get(t).getTradingDate();
+            TradingRadarMarketContextService.MarketContext context =
+                    marketContextService.resolveMarketFromRows(signalInstant(signalDate), asc, usRows);
             TradingRadarRuleEngine.MarketResult r = ruleEngine.evaluateMarket(
                     new TradingRadarRuleEngine.MarketInput(
                             windowDesc.get(0).getClosePrice(),
                             a.ruleChangePercent(),
                             assembler.indicators(a.indicators()),
                             a.ma60Confirmation(),
-                            a.ma240Confirmation()));
-            out.put(asRows.get(t).getTradingDate(), r.regime());
+                            a.ma240Confirmation(),
+                            context.completedMarketChangePercent(),
+                            context.marketVolumeRatio(),
+                            context.marketTurnoverRatio(),
+                            context.nasdaqChangePercent(),
+                            context.soxChangePercent(),
+                            context.usTechCompositePercent(),
+                            context.usTechAvailable()));
+            out.put(signalDate, r.regime());
         }
         return out;
     }
 
-    /** 匯率分位以「截至 t 的五年視窗」重算——不得沿用 production 以今日為錨的算法（前視偏誤）。 */
-    private BigDecimal fxPercentileAt(List<BigDecimal> mids, List<LocalDate> dates, LocalDate t) {
-        if (mids.isEmpty()) return null;
-        LocalDate lower = t.minusYears(FX_LOOKBACK_YEARS);
-        List<BigDecimal> window = new ArrayList<>();
-        BigDecimal latest = null;
-        for (int i = 0; i < dates.size(); i++) {
-            LocalDate d = dates.get(i);
-            if (d.isAfter(t)) break;
-            if (d.isBefore(lower)) continue;
-            window.add(mids.get(i));
-            latest = mids.get(i);
-        }
-        if (latest == null || window.size() < FX_MIN_SAMPLES) return null;
-        final BigDecimal reference = latest;
-        long atOrBelow = window.stream().filter(m -> m.compareTo(reference) <= 0).count();
-        return BigDecimal.valueOf(100.0 * atOrBelow / window.size())
-                .setScale(2, RoundingMode.HALF_UP);
+    /** 歷史訊號固定在台北 14:00，當日 17:00 匯率必然仍不可見。 */
+    private java.time.Instant signalInstant(LocalDate date) {
+        return date.atTime(LocalTime.of(14, 0)).atZone(TAIPEI).toInstant();
     }
 
     private BigDecimal sigmaAt(List<BigDecimal> returns, int t) {
@@ -599,31 +662,6 @@ public class BacktestService {
         double var = sum.doubleValue() / (valid.size() - 1);
         if (var <= 0) return null;
         return BigDecimal.valueOf(Math.sqrt(var)).setScale(8, RoundingMode.HALF_UP);
-    }
-
-    /**
-     * 量能相對量 ＝ {@code volume ÷ 近 60 日成交量中位數}。
-     *
-     * <p>用中位數而非平均數：除權息日與法人調節日的爆量會把平均數整個拉高。
-     * <b>已知限制</b>：{@code DistributionAdjustedPriceService} 目前不還原 volume，
-     * 故視窗跨越股票分割時本值會偏高（Task 276 處理），本框架只量測與揭露。</p>
-     */
-    private BigDecimal volumeRatioAt(List<StockPriceHistory> rows, int t) {
-        if (t < VOLUME_WINDOW) return null;
-        Long cur = rows.get(t).getVolume();
-        if (cur == null || cur <= 0) return null;
-        List<Long> w = new ArrayList<>();
-        for (int i = t - VOLUME_WINDOW + 1; i <= t; i++) {
-            Long v = rows.get(i).getVolume();
-            if (v != null && v > 0) w.add(v);
-        }
-        if (w.size() < VOLUME_WINDOW / 2) return null;
-        Collections.sort(w);
-        double med = w.size() % 2 == 1
-                ? w.get(w.size() / 2)
-                : (w.get(w.size() / 2 - 1) + w.get(w.size() / 2)) / 2.0;
-        if (med <= 0) return null;
-        return BigDecimal.valueOf(cur / med).setScale(4, RoundingMode.HALF_UP);
     }
 
     // ─────────────────────────── 資料準備 ───────────────────────────
@@ -697,39 +735,17 @@ public class BacktestService {
         return TWD;
     }
 
-    private List<BigDecimal> fxSeries(String currency, Map<String, List<BigDecimal>> cache) {
-        loadFx(currency, cache);
-        return cache.getOrDefault(currency + ":mids", List.of());
+    private FxSeries fxSeries(String currency, Map<String, FxSeries> cache) {
+        return cache.computeIfAbsent(currency, key -> {
+            List<ExchangeRateHistory> rows = exchangeRateRepo.findByCurrencyOrderByRateDateAsc(key);
+            return new FxSeries(rows == null ? List.of() : List.copyOf(rows), new HashMap<>());
+        });
     }
 
-    @SuppressWarnings("unchecked")
-    private List<LocalDate> fxDates(String currency, Map<String, List<BigDecimal>> cache) {
-        loadFx(currency, cache);
-        return (List<LocalDate>) (List<?>) cache.getOrDefault(currency + ":dates", List.of());
-    }
-
-    @SuppressWarnings("unchecked")
-    private void loadFx(String currency, Map<String, List<BigDecimal>> cache) {
-        if (cache.containsKey(currency + ":mids")) return;
-        List<ExchangeRateHistory> rows = exchangeRateRepo.findByCurrencyOrderByRateDateAsc(currency);
-        List<BigDecimal> mids = new ArrayList<>();
-        List<Object> dates = new ArrayList<>();
-        if (rows != null) {
-            for (ExchangeRateHistory r : rows) {
-                BigDecimal mid = midRate(r);
-                if (mid == null || r.getRateDate() == null) continue;
-                mids.add(mid);
-                dates.add(r.getRateDate());
-            }
-        }
-        cache.put(currency + ":mids", mids);
-        cache.put(currency + ":dates", (List<BigDecimal>) (List<?>) dates);
-    }
-
-    private BigDecimal midRate(ExchangeRateHistory r) {
-        if (r.getBuyRate() == null || r.getSellRate() == null) return null;
-        return r.getBuyRate().add(r.getSellRate())
-                .divide(BigDecimal.valueOf(2), 6, RoundingMode.HALF_UP);
+    private TradingRadarMarketContextService.FxContext fxAt(
+            String currency, FxSeries series, LocalDate signalDate) {
+        return series.resolved().computeIfAbsent(signalDate,
+                date -> marketContextService.resolveFxFromRows(currency, signalInstant(date), series.rows()));
     }
 
     private BacktestDto.CodeCoverage coverage(
@@ -754,14 +770,42 @@ public class BacktestService {
                 "已剔除 close_price <= 0 的髒列共 " + dirty + " 列（既有資料品質問題，另立任務處理）。",
                 "有 " + etfPremiumMissing + " 檔 ETF 在整段回測期間完全沒有折溢價資料；"
                         + "這些標的的 buyGate 與 OVERBOUGHT 統計未含折溢價否決，不得直接當成 production 行為的證據。",
-                "volumeRatio 的視窗若跨越股票分割會偏高（DistributionAdjustedPriceService 目前不還原 volume），"
-                        + "Task 276 處理；本框架只量測與揭露。",
+                "volumeRatio 與 production 共用 20 日中位數，且已按股票股利／分割的股數因子還原成交量。",
                 "n < " + MIN_SAMPLES + " 的格子已標記 sampleInsufficient，其數字不得用於決策。"));
+        out.addAll(fundamentalCoverageNotes(runs));
         if (!failedCodes.isEmpty()) {
             out.add("有 " + failedCodes.size() + " 檔標的因讀取或還原失敗而未納入統計："
                     + String.join("、", failedCodes) + "。codeCount 已排除它們。");
         }
         return out;
+    }
+
+    /** 明示列出各基本面因子的有效訊號日與標的數，零覆蓋不得被誤解為無效。 */
+    private List<String> fundamentalCoverageNotes(List<CodeRun> runs) {
+        record Metric(String label, java.util.function.Function<TradingRadarRuleEngine.FundamentalInput, Double> value) {}
+        List<Metric> metrics = List.of(
+                new Metric("EPS 年增", TradingRadarRuleEngine.FundamentalInput::epsContribution),
+                new Metric("近似 ROE", TradingRadarRuleEngine.FundamentalInput::roeContribution),
+                new Metric("近三月營收年增", TradingRadarRuleEngine.FundamentalInput::revenueContribution),
+                new Metric("PE 自身分位／可信虧損", TradingRadarRuleEngine.FundamentalInput::peContribution),
+                new Metric("產業營收年增", TradingRadarRuleEngine.FundamentalInput::industryContribution));
+        List<String> notes = new ArrayList<>();
+        for (Metric metric : metrics) {
+            int days = 0;
+            int codes = 0;
+            for (CodeRun run : runs) {
+                int codeDays = 0;
+                for (Obs observation : run.observations()) {
+                    TradingRadarRuleEngine.FundamentalInput input = observation.fundamental();
+                    if (input != null && input.applicable() && metric.value().apply(input) != null) codeDays++;
+                }
+                days += codeDays;
+                if (codeDays > 0) codes++;
+            }
+            notes.add("基本面回測覆蓋—" + metric.label() + "：" + days + " 標的日／" + codes
+                    + " 標的；0 覆蓋只代表當時尚無 as-of observation，不代表因子有效或無效。");
+        }
+        return notes;
     }
 
     // ─────────────────────────── CSV ───────────────────────────

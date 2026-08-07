@@ -73,7 +73,7 @@ class TradingRadarSnapshotStoreTest {
         TradingRadarDto.MarketSummary m = new TradingRadarDto.MarketSummary(
                 "NEUTRAL", "中性／等待確認", 40, true, false, "2026-07-20",
                 new BigDecimal("42449.70"), new BigDecimal("-0.52"), "VERIFIED_CLOSE",
-                // Task 265：weeklyMa（僅顯示，不參與評分）
+                // Task 291：weeklyMa 已納入 V11 雙軌評分；本測試只驗快照往返。
                 new BigDecimal("42800.00"),
                 new BigDecimal("45650.14"), new BigDecimal("43601.32"), new BigDecimal("32564.92"),
                 new BigDecimal("22.5"), new BigDecimal("32.0"), "BELOW", "ABOVE",

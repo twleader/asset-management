@@ -56,6 +56,8 @@ class TradingRadarMarketFreshnessTest {
     @Mock private StockRepository stockRepo;
     @Mock private MarketDataService marketDataService;
     @Mock private ExchangeRateHistoryRepository exchangeRateRepo;
+    @Mock private TradingRadarMarketContextService marketContextService;
+    @Mock private FundamentalAnalysisService fundamentalAnalysisService;
     @Mock private EtfNavHistoryRepository etfNavHistoryRepo;
     // Task 230：get() 回應前會 fail-soft 寫一筆 per-owner Redis 快照；本測試無 request context，
     // 該寫入路徑不會被觸發（RequestContextHolder 為 null），mock 僅供建構子。
@@ -80,7 +82,8 @@ class TradingRadarMarketFreshnessTest {
                 alertRepo,
                 stockRepo,
                 marketDataService,
-                exchangeRateRepo,
+                marketContextService,
+                fundamentalAnalysisService,
                 etfNavHistoryRepo,
                 snapshotStore,
                 currentUserContext);
@@ -104,6 +107,9 @@ class TradingRadarMarketFreshnessTest {
                         null, null, null, null, null, null,
                         null, null, true, "CLOSE_PENDING"));
         lenient().when(marketDataService.isTradingDay(anyString(), any(LocalDate.class))).thenReturn(true);
+        lenient().when(marketContextService.resolve(any())).thenReturn(
+                new TradingRadarMarketContextService.Resolved(
+                        TradingRadarMarketContextService.MarketContext.EMPTY, List.of()));
         lenient().when(snapshotRepo.findLatestWithStocks()).thenReturn(Optional.empty());
         lenient().when(alertRepo.findDistinctStockCodeMarket()).thenReturn(List.of());
         lenient().when(indicatorService.computeAll(anyString(), anyString())).thenReturn(

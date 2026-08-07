@@ -17,8 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * 週線 MA5（Task 265）。
  *
- * <p>本檔的第三支測試是<b>決策的釘子</b>而非行為驗證：使用者要求加週線，但同時要求
- * 「獲利期間是數周至兩年，不是極短線」，故 MA5 刻意<b>只顯示、不參與評分</b>。</p>
+ * <p>Task 291 起，MA5 是短期約一週軌的重要輸入，中期軌亦以較低權重採計。</p>
  */
 class WeeklyMaTest {
 
@@ -43,13 +42,10 @@ class WeeklyMaTest {
     }
 
     @Test
-    void weeklyMaMustNotBeAnInputToTheRuleEngine() {
-        for (RecordComponent c : TradingRadarRuleEngine.StockInput.class.getRecordComponents()) {
-            String n = c.getName().toLowerCase();
-            assertTrue(!n.contains("ma5") && !n.contains("weekly"),
-                    "MA5 是 5 個交易日的尺度，納入評分會與「數周至兩年」的持有期需求衝突；"
-                            + "若要改變此決策須另走 SDD 循環。實際發現的欄位：" + c.getName());
-        }
+    void weeklyMaIsAnInputToTheV11RuleEngine() {
+        assertTrue(List.of(TradingRadarRuleEngine.StockInput.class.getRecordComponents()).stream()
+                        .map(RecordComponent::getName).anyMatch("weeklyMa"::equals),
+                "V11 短期軌必須接入 weeklyMa，不得只停留在畫面揭露");
     }
 
     /** 由新到舊、收盤遞減的序列（closes[0] 最新）。 */

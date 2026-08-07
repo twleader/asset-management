@@ -51,6 +51,7 @@ public class InternalPriceController {
     private final com.steven.assets.externalmaterials.service.EtfNavPoller etfNavPoller;
     private final com.steven.assets.externalmaterials.service.TwRadarRefreshService twRadarRefresh;
     private final com.steven.assets.externalmaterials.service.NewsPoller newsPoller;
+    private final com.steven.assets.externalmaterials.service.StockFundamentalPoller stockFundamentalPoller;
 
     /**
      * 同步抓所有持股報價、寫 Redis 後回傳統計。
@@ -139,6 +140,12 @@ public class InternalPriceController {
     @PostMapping("/news-poller/fetch-and-export-now")
     public com.steven.assets.externalmaterials.service.NewsPoller.ManualRunResult fetchAndExportPublicInfoNow() {
         return newsPoller.fetchAndExportNow();
+    }
+
+    /** 手動觸發個股基本面：public_info 證據由既有新聞路徑提供，本端點只刷新結構化來源與 fallback。 */
+    @PostMapping("/fundamentals/refresh")
+    public com.steven.assets.externalmaterials.service.StockFundamentalPoller.RefreshSummary refreshFundamentals() {
+        return stockFundamentalPoller.refreshNow();
     }
 
     /** 手動觸發 FinMind 校正當日台股收盤價（同 16:00 排程），覆寫 stock_price_history。 */

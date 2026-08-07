@@ -4255,7 +4255,7 @@ boolean stale = !todayEodPresent && !liveFreshToday;
 
 **還原價基（Task 265）**：除權息還原**既有已符合**——MA／KD／兩日確認／規則漲跌全走 `DistributionAdjustedPriceService`，且還原涵蓋 `highPrice`／`lowPrice`（`:112-113`）不只 `closePrice`，故 V9 新增的 52 週高低與 9 日帶寬取自 `adjustedRows` 亦為同一價基，**不違反「禁止混用原始／還原價」**。缺陷在**股票分割完全不還原**（`validEvent()` `:84-88` 只接受現金股利與股票股利），0050 於 2025-06-18 有 1:4 分割；視窗內若有分割會使 MA 與 52 週高低混用兩種價基、**方向相反且不拋任何例外**，目前未爆純屬 241 根視窗落在該分割日之後的時間巧合。分割偵測採序列啟發式（`ratio ≥ 2.0`／`≤ 0.5` ＋「接近 `{2,3,4,5,10}` 之一、誤差 ≤ 10%」二次驗證），**門檻不得放寬**——±15% 以上的跳空實測 21 筆中僅 2 筆為真分割，小門檻會把序列改壞，而**改壞序列比不還原更糟**（前者無法從畫面察覺）。另新增週線 MA5，**刻意不納入評分與買進閘門**（5 個交易日尺度與「數周至兩年」需求及 V9 降低短線權重的方向直接衝突）。
 
-**明確不在 V9 範圍**：Fed／台灣央行利率資訊（六個利率識別字全庫零命中；`央行` 僅出現於新聞爬蟲的關鍵字清單與註解、未進入評分鏈。需新資料源）、美股／英股（仍只評估台股）、個股基本面（三張表不存在，須 Task 266 建抓取 → 累積 → Task 267 接線為 `TW_RULES_V10`；來源只給當期快照且 MOPS 禁爬，故 EPS 年增率須累積約 2 年）。**前端不得宣稱雷達已納入利率或央行資訊**〔**部分解除**：Requirement 58／Task 275 落地後，「利率」限於「**債券標的**已納入美債殖利率因子」的範圍內解除；「**央行／政策利率**」維持禁止（台灣央行仍無確認的官方 API）。解除前不得提前宣稱。〕
+**明確不在 V9 範圍**：Fed／台灣央行利率資訊（六個利率識別字全庫零命中；`央行` 僅出現於新聞爬蟲的關鍵字清單與註解、未進入評分鏈。需新資料源）、美股／英股（仍只評估台股）、個股基本面（三張表不存在，須 Task 266 建抓取 → 累積 → Task 267 接線並依實作當下規則版號 +1；來源只給當期快照且 MOPS 禁爬，故 EPS 年增率須累積約 2 年）。**前端不得宣稱雷達已納入利率或央行資訊**〔**部分解除**：Requirement 58／Task 275 落地後，「利率」限於「**債券標的**已納入美債殖利率因子」的範圍內解除；「**央行／政策利率**」維持禁止（台灣央行仍無確認的官方 API）。解除前不得提前宣稱。〕
 
 > **⚠ 上段的三項「不在範圍」中，有兩項已由 Requirement 58（Task 275）與 Requirement 61（Task 278）改變前提；第三項維持不變：**
 >
@@ -4265,7 +4265,7 @@ boolean stale = !todayEodPresent && !liveFreshToday;
 > | **個股基本面的歷史** | 「來源只給當期快照且 MOPS 禁爬」 | **須分兩半看**：EPS／ROE 的部分**記載正確且不變**（`mopsov.twse.com.tw/robots.txt` 實測為 `Disallow: /`，僅 bingbot 例外，只能自上線起累積）；但 **PE／PB／殖利率的歷史可回補**——`www.twse.com.tw/robots.txt` 實測 `/rwd/zh/afterTrading/` 落在 `Allow: /` 之下（僅禁 `/epaper/`、`/FTSE/`），`BWIBBU_d?date=20200102` 實回 941 筆、可回溯至 2005-09-02。由 Requirement 61（t278）落地。 |
 > | 美股／英股 | 仍只評估台股 | **不變。** `TradingRadarService.assemble()` 的 filter 仍只留台股。 |
 >
-> **另：上段「週線 MA5 刻意不納入評分」的決定已由 Requirement 60（t277）推翻**，但推翻的是其**前提**而非其論證——原論證「5 個交易日尺度與數周至兩年的需求衝突」在「雷達只輸出單一持有期建議」的前提下正確；Requirement 60 改為**雙軌輸出**，短線軌有自己的因子與權重、不與中長線軌爭奪同一組權重，故 MA5 進入短線軌不再與中長線軌的方向衝突。**中長線軌維持 V9 以來「中期為最大權重組」不變。**
+> **另：上段「週線 MA5 刻意不納入評分」的決定已由 Requirement 43／59／60（t291）推翻**，但推翻的是其**前提**而非其論證——原論證「5 個交易日尺度與數周至兩年的需求衝突」在「雷達只輸出單一持有期建議」的前提下正確；Task 291 改為**雙軌輸出**，短期軌有自己的因子與權重、不與中期軌爭奪同一組權重，故 MA5 進入短期軌不再與中期軌的方向衝突。**中期軌以一至六個月為目標。**
 
 ### 規則回測框架（Requirement 56／Task 273）
 
@@ -4316,6 +4316,8 @@ POST /internal/backtest/rules（手動觸發，不排程、不進 BFF、不進�
 
 ### 已落地但未使用的指標與量能（Requirement 59／Task 276）
 
+> **⛔ 本節的待辦設計已由 Task 291 取代。** 公式同源與 split-only 成交量因子的問題診斷仍有效；「先量測再決定是否納入」已被使用者最新要求改為指定類別全部納入。
+
 `TechnicalIndicatorService`（Task 261／262）已對每個交易日算出 `EMA12`／`EMA26`／`DIF`／`MACD`／`OSC`、`RSI5`／`RSI10`、`BIAS10`／`BIAS20`／`B10−B20`、`W%R9`、`J9`、`K3D2`、`RSV`、`MA5`，但雷達走的是另一支 `computeFromSeries()` → `FullIndicators`（只有 8 個欄位），**這些指標一個都沒進評分鏈**。`stock_price_history.volume` 有完整資料（實測 null 0 筆、僅 229 筆為 0）而 14 個因子也一個都沒用到。
 
 **三個結構性約束：**
@@ -4332,11 +4334,136 @@ POST /internal/backtest/rules（手動觸發，不排程、不進 BFF、不進�
 
 ### 雙軌決策：短線軌 × 中長線軌（Requirement 60／Task 277）
 
+> **⛔ 本節已由下方 Task 291 設計取代。** 「中長線至兩年」、依個人資金安排仲裁，以及短線通知 DB 擴充均不再適用。
+
 使用者要的是「5 個交易日後可獲利 5% 也是不錯的建議」與「持有期數周至兩年」**同時成立**。兩者的答案可能相反（短線超買、長期結構完好），單一分數無法表達。故改為兩組獨立的 `score` 與 `action`，**各自有獨立的因子集合與權重**——**不得以「同一個分數套兩組門檻」實作**，那只是把一個數字切兩刀。
 
-兩軌衝突時**一律並列呈現、不自動仲裁**：哪一軌該聽取決於使用者當下的資金安排，系統沒有該資訊。既有的單軌 API 欄位語意明確定義為「中長線軌」並保留，避免通知／匯出／快照三個既有消費端靜默改變語意。
+兩軌衝突時**一律並列呈現、不自動仲裁**：差異只表示約一週與一至六個月的市場訊號不同，不讀取、推導或要求使用者的資金安排。既有的單軌 API 欄位語意明確定義為「中期軌」並保留，避免通知／匯出／快照三個既有消費端靜默改變語意。
 
 短線軌的因子須以 Requirement 56 的 `+5` 日 horizon 量測結果挑選（候選：MA5、RSI5、KD 與 J9、W%R9、MACD 的 OSC 轉向、`volumeRatio`、單日漲跌幅），**不得憑直覺挑選**。「不追高殺低」的對稱性論證（買方有「超買否決買進」，賣方就必須有「超賣否決賣出」）**在短線軌同樣成立**，短線軌須有其對應的極端態覆寫。
+
+### 一週至六個月的獲利機會雙軌（Requirement 43／59／60，Task 291，`TW_RULES_V10`）
+
+Task 291 的 request chain 不新增行情／新聞／匯率外部抓取；唯一沿用的跨服務依賴是既有台股假日日曆 proxy：
+
+```text
+TradingRadarView
+  → GET /api/bff/trading-radar（BFF gateway passthrough，不建第二份 DTO）
+    → TradingRadarService
+      ├─ holdings ∪ watchlist（owner-scoped，只有台股）
+      ├─ RadarInputAssembler
+      │   ├─ DistributionAdjustedPriceService（價格：配息＋分割；volume：split-only）
+      │   ├─ TechnicalIndicatorService.computeFromSeries（MA5/20/60/240、KD/J、MACD、RSI、BIAS、W%R）
+      │   └─ 最新完成日 volume ÷ 前 20 個正 volume 日的中位數
+      ├─ TradingRadarMarketContextService（新增，純讀 global market data）
+      │   ├─ twse_index_daily_history：完成日量／值比
+      │   ├─ us_index_daily_history：IXIC／SOX 最新共同完成日
+      │   ├─ news_headline：72 小時內 TW／US 公開資訊
+      │   └─ MarketDataService.isTwTradingDayKnown：既有 external-materials 假日日曆 proxy／快取（Optional fail-closed）
+      ├─ TradingRadarRuleEngine（同一輸入各跑 short／medium Accumulator）
+      └─ TradingRadarSnapshotStore（完整 Response JSON round-trip）
+```
+
+`TradingRadarMarketContextService` 是全域市場資料唯一組裝者，不依賴 `CurrentUserContext`；它的 production／historical API 都接收顯式 `decisionInstant`，內部不得呼叫 `LocalDate.now()`。`MarketDataService` 新增 `Optional<Boolean> isTwTradingDayKnown(LocalDate)`：週末直接 known-false；平日只有年度假日 map 非空才回 known true／false，proxy 失敗或空 map 回 empty，且不得改變既有 `isTradingDay()` 的其他呼叫端語意。context service 只准呼叫這個新方法；遇 empty 立即 fail closed，不得自行以平日或歷史缺列猜測。它不得自行建立 WebClient，也不得注入 `MarketAnalysisService`、crawler 或 LLM client。新聞只做資料選取與 DTO 映射，不做 sentiment。`TradingRadarService` 仍負責 owner-scoped universe，兩種責任不得交換。
+
+#### 規則引擎資料模型
+
+```text
+MarketInput
+  price, intradayChangePercent, Indicators,
+  ma60Confirmation, ma240Confirmation,
+  marketVolumeRatio, marketTurnoverRatio,
+  completedMarketChangePercent,
+  nasdaqChangePercent, soxChangePercent, usTechCompositePercent
+
+StockInput
+  held, price, changePercent, completedChangePercent,
+  Indicators(MA20/60/240,K,D), weeklyMa, ExtendedIndicators,
+  previousK/D, MA20/60/240 confirmations,
+  instrumentType, marketRegime, marketStale,
+  fxPercentile, ma60BiasPercent, ma240BiasPercent,
+  week52Position, kdBandWidthPercent,
+  etfPremiumPct/Percentile, volumeRatio
+
+StockResult
+  score/action/reasons/risks              # medium, backward-compatible
+  shortScore/shortAction/shortReasons/shortRisks
+  horizonConflict, counterTrend, kdHeat, timingState,
+  kdDeadCross, longTermBroken, profitTakingConfirmed
+```
+
+`ExtendedIndicators` 不在引擎內重算；DTO 與 engine 可共用語意相同但 package-owned 的 record，轉換只能發生一次。所有 contribution 皆由純函式回傳 `Double`／`null`，`Accumulator` 是唯一缺值重分配點。短期／中期權重數字只寫在 Requirement 43 Task 291 的權重表與引擎具名常數，design 不複寫，避免第三份數字漂移。
+
+#### 量能與跨市場日期對齊
+
+個股 `volumeRatio` 的分母排除訊號日，使用先前 20 個正值的中位數；最少 10 筆。`DistributionAdjustedPriceService` 將事件值定義為 `shareGrowth=postShares/preShares`，同時保有價格累積因子與 share-only 累積因子。逐列的 `historicalShareScale=cumulativeShareGrowthAtRow/finalShareGrowth`，`adjust(source, priceScale, historicalShareScale)` 以 `volume=round(source.volume/historicalShareScale)` 還原。1:4 分割前的 historical scale 為 0.25，故 volume ×4；股票股利 1 元為 ×1.1；現金股利的 shareGrowth 恆為 1。不得用含現金股利的價格 scale 改 Long volume。
+
+大盤量能一律綁 `decisionInstant` 前已完成的最新日，不得與 Redis 盤中價格拼接。`marketVolumeRatio` 與 `marketTurnoverRatio` 各自缺值；規則層只平均可用者。美股科技先以 `16:00 America/New_York` 判斷 session 是否已完成，再以 IXIC／SOX 的日期交集找共同日，不能各取自己的 latest 再假裝同日；共同日之外還需要各指數嚴格前一筆才能算一日報酬。超過同一 decision instant 的台北日期 5 個日曆日則整組 unavailable。歷史回測固定用 signal date 的 `14:00 Asia/Taipei`，即使 DB 已有未來列也不能讀取。
+
+匯率與跨市場 context 共用同一 as-of 原則：目標日由 `MarketDataService.isTwTradingDayKnown()` 找出 decision instant 前已完成 17:00 的最近台股交易日；任一候選日回 empty 時整組 fail closed。只接受該日精確列；`buyRate/sellRate` 缺值、非正或相等皆無效，五年有效樣本少於 600 回 null，不得用最近值補。DTO 顯示 `fxAsOfDate`，讓使用者能分辨「真的有完成日資料」與「缺值」。
+
+#### 動作與相容性
+
+兩軌分數都代表目前位置的 opportunity score，不是預測值。分數映射後依序套：資料完整性 → 追高／續跌買進閘門 → 低接 trial-buy → 多重轉弱獲利了結 → 極端超賣不殺低。一般 BUY／ADD 與 trial-buy 均要求 `completedChangePercent>=0`；高分但仍下跌只能 HOLD／WATCH。獲利了結至少要在極端高檔且 `kdDeadCross`／`OSC<0`／`下跌爆量` 三項中兩項成立；極端超賣保護最後套用且沒有 long-term-broken 例外。
+
+既有欄位與通知只代表 medium：`StockDecision.score/action/reasons/risks`、`trading_radar_notification_setting.last_action`、`TradingRadarNotificationTransition` 全部維持同一語意。短期欄位只進 API、Vue、snapshot、Excel/JSON；不新增 changeset。通知 dialog 的文案改成「中期建議（1–6 月）」以使邊界可見。
+
+匯出仍由 `TradingRadarExportService` 建唯一 `ExportDoc`：大盤表追加完成日量比與美股科技欄；個股表追加 short score/action、分歧、volume ratio；新公開資訊表逐列輸出 region/time/source/title/url。Excel 與 JSON renderer 不各自拼欄，舊 snapshot 的新增值為 null 時留白。
+
+### 個股基本面與產業發展（Requirement 43／46，Task 292，`TW_RULES_V11`）
+
+Task 292 將原本尚未實作的 t266／t267 合併到雙軌雷達，並增加全市場產業營收：
+
+```text
+news_headline (= public_info_<date> export source)
+  -> PublicInfoEvidenceResolver (exact code / full stock name / industry-name match; evidence only)
+
+missing structured field
+  -> provider chain: TWSE/TPEx -> Yahoo -> WantGoo -> FinMind
+  -> StockFundamentalFetchClient (external; six official financial schemas + bounded fallbacks)
+  -> StockFundamentalPoller (crawler_schedule=fundamental; warmup/manual/scheduled share one run)
+       |-- target individual rows -> valuation / financial quarter / monthly revenue
+       `-- all-market official monthly rows -> industry_monthly_revenue
+  -> PostgreSQL append-only observations (single provider + all source URLs + available + observed instant)
+  -> FundamentalAnalysisService.resolve(code, market, decisionInstant)
+       |-- source availability cut-off and no-future filtering
+       |-- cumulative reports -> standalone quarters -> EPS growth / approximate ROE
+       |-- revenue growth / PE own-history percentile
+       `-- stock industry -> all-market industry YoY
+  -> TradingRadarRuleEngine FundamentalInput (V11 short + medium accumulators)
+```
+
+business 層不新增對外 HTTP client，也不直接讀 `public_info_*` 檔案；`news_headline` 就是該檔的上游同源資料，
+避免檔案日期、匯出失敗或路徑設定讓同義資料分岔。`PublicInfoEvidenceResolver` 只選相關證據，不做情緒或數值
+解析。`FundamentalAnalysisService` 是唯一數值計算者，同時供 production 與 backtest 使用；不得在
+`TradingRadarService`、`BacktestService`、BFF 或 Vue 重算。官方財報與月營收的 availability 來自出表日，
+當日 18:00 Asia/Taipei 才視為已完成；估值日在 14:00 完成。fallback 若沒有發布時間，只能用第一次成功觀測
+時間作保守 availability 並標 `OBSERVED`，不得回填成更早日期。這些時點一律對顯式 `decisionInstant` 比較，
+不讀 system today。
+
+provider resolver 對每個欄位固定使用 `PUBLIC_INFO(證據) -> EXCHANGE -> YAHOO -> WANTGOO -> FINMIND`；
+`PUBLIC_INFO`／`WANTGOO` 只有新聞而無可信結構化數值時不產生數值候選，繼續往後。每筆候選帶 provider rank，
+resolver 以「同期間、同衍生因子、較高順位優先」處理，低順位不得洗掉高順位非 null；同一衍生值所需欄位必須來自
+同 provider family 與同期間，合併端點的全部 URL 存入 `source_urls`、availability 取最晚者，避免混出不存在的財報。
+每次修正值以新 observation append 並帶自己的 `observed_at`，
+同值重跑 no-op；as-of 同時限制 available 與 observed，日後修正版不會倒灌歷史。估值另以 nullable
+`pe_loss_flag` 區分來源證實虧損與欄位缺漏。全市場產業彙總只准使用同輪官方交易所月營收，fallback 僅補
+使用者持有／觀察個股，不得以目標清單充當全市場。
+
+官方損益表是同會計年度累計值；內部先以 `standalone(Q1)=cumulative(Q1)`、
+`standalone(Qn)=cumulative(Qn)-cumulative(Qn-1)` 轉為單季，才能組最近四季與前四季。
+缺前季時該單季是 null，不得把累計數直接當單季。`revenue_yoy_pct` 與產業彙總為快照
+denormalization，保留是為了 as-of 回放；不存衍生 ROE。
+
+ETF 辨識集中在 `FundamentalAnalysisService`：`etf_nav_history` 存在 -> 台股 `00` 開頭；不新增硬編分類欄。
+ETF 回 `fundamentalApplicable=false`，五個新 contribution 全為 null。個股回傳
+`coverage 0..4`、四項值與資料日／逐因子 provider/sourceUrls、產業名與彙總月份，以及個股／產業公開資訊證據；前端與匯出
+只呈現這份 DTO，不從新聞關鍵字推導產業方向。
+
+V11 將基本面與產業作為五個 optional contribution 加入原同一 `Accumulator`；精確權重只存於
+t292 與引擎具名常數，design 不複寫數字。多項基本面惡化只關閉買方門檻，不直接產生賣出；
+這保留 V10 的不殺低、高檔多證據獲利了結與止跌後才低接。正基本面同樣不能繞過任何
+時機否決。
 
 ### 逆勢抄底狀態（獨立第二軌）
 
@@ -4458,7 +4585,7 @@ AppUser (1) ──< TradingRadarNotificationSetting >── Stock(code, market)
                               UNIQUE(setting_id, recipient_id)
 ```
 
-- `trading_radar_notification_setting`：`id`、`owner_user_id`、`stock_code`、`market`、`active`、`initialized`、`last_action`、`last_counter_trend_state`、**`rule_version`**（Task 264／`v1.83.0`：與現行 `RULE_VERSION` 不符即視同未初始化、自動重建通知基準）、timestamps；`UNIQUE(owner_user_id, stock_code, market)`，entity 套 `ownerFilter`。**Task 277 將再新增短線軌的追蹤欄位（`v1.86.0`），並須一併決策 `trading_radar_notification_state` 的 `ck_trn_state_type CHECK (state_type IN ('ACTION','COUNTER_TREND'))` 是否放寬**——沿用 `ACTION` 會讓既有訂閱靜默擴及短線軌。
+- `trading_radar_notification_setting`：`id`、`owner_user_id`、`stock_code`、`market`、`active`、`initialized`、`last_action`、`last_counter_trend_state`、**`rule_version`**（Task 264／`v1.83.0`：與現行 `RULE_VERSION` 不符即視同未初始化、自動重建通知基準）、timestamps；`UNIQUE(owner_user_id, stock_code, market)`，entity 套 `ownerFilter`。Task 291 起 `last_action` 明確只代表中期（1–6 月）action；短期軌不進通知、不新增欄位，原 Task 277 預留的 `v1.86.0` changeset 已取消。
 - `trading_radar_notification_state`：`setting_id`、`state_type`（`ACTION`／`COUNTER_TREND`）、`state_code`；狀態是規則版本契約，不冗存 label。
 - `trading_radar_notification_recipient`：`setting_id`、`recipient_id`，兩端 FK cascade；不冗存 email。
 
@@ -5397,7 +5524,7 @@ POST /api/trading-radar/export?from&to        ← 由 GET 改為 POST（新增�
 - **個股**——`RadarInputAssembler.assemble()` 既有的 `computeFromSeries(adjustedRows.subList(0, indicatorRows))` 自動帶出擴充值，`RadarInputAssembler` 與 `TradingRadarService.prepareTechnicalData()` **一行都不改**；價基與同列 `k`／`d` 天然同源。
 - **大盤**——`computeAllForTaiex()` 把已取得的指數日線 desc 清單映射成 `StockPriceHistory`（`closePrice←closePoint`、`highPrice←highPoint`、`lowPrice←lowPoint`，同 `taiexSeriesAsc` 的既有對應）後算擴充值，填進同一個 `FullIndicators`；`core` 的 8 個既有欄位仍由 `taiexSimpleMa()`／`taiexKd()` 算出、**一個位元都不變**，`buildMarket()` 的 `computeAll(TAIEX_CODE, TW_MARKET)` 呼叫也不必改。新增的計算留在既有的 `try` 內，失敗仍回 `FullIndicators.EMPTY`——讓例外逸出會被 `TradingRadarService` 的 catch 放大成整張大盤卡 `DATA_INCOMPLETE`、全部個股停發訊號。
 
-這條路徑即 `spec/tasks/t276_unused_indicators_and_volume.md` 的 276.1 所規劃的「擴充 `FullIndicators` 的輸出」，故 t276 之後只需把值接進 `StockInput`、不必再長第二份輸出。代價是 `computeAll()` 的所有呼叫端（觀察清單、警示觸發落地、資產 Excel 匯出）也會多算這些值卻不使用——O(n) 且 n ≤ 241，刻意付這個代價換「只有一條取值路徑」，**不得**為此加 `boolean withExtended` 把路徑分岔。**不得改呼叫走勢圖那條 `indicatorSeries()`**（原始價基，會與同列的 `k`／`d` 矛盾）。既有視窗對 MACD／RSI 的單向遞迴已足夠收斂（序列長 241 時 EMA26 seed 殘留權重 `(1−2/27)^215 ≈ 6.5×10⁻⁸`、Wilder RSI10 `0.9^230 ≈ 3×10⁻¹¹`），故**個股維持 241／240、大盤維持 `computeAllForTaiex()` 既有的 240**，兩邊都不延長也不對齊——理由不是「改了會算錯」（240 vs 241 的 `k`／`d` 實測 bit-identical，`taiexSimpleMa(desc,240)` 只讀 `desc[0..239]`），而是那條路徑另有三個非雷達消費端（觀察清單 `0000` KD 欄、Requirement 44 通知門檻、走勢圖同源判準），動它超出範圍且數值上無收益。
+這條路徑即 Task 291 所採用的「擴充 `FullIndicators` 單一路徑」，因此把值接進 `StockInput` 時不得再長第二份輸出。代價是 `computeAll()` 的所有呼叫端（觀察清單、警示觸發落地、資產 Excel 匯出）也會多算這些值，即使部分呼叫端不使用——O(n) 且 n ≤ 241，刻意付這個代價換「只有一條取值路徑」，**不得**為此加 `boolean withExtended` 把路徑分岔。**不得改呼叫走勢圖那條 `indicatorSeries()`**（原始價基，會與同列的 `k`／`d` 矛盾）。既有視窗對 MACD／RSI 的單向遞迴已足夠收斂（序列長 241 時 EMA26 seed 殘留權重 `(1−2/27)^215 ≈ 6.5×10⁻⁸`、Wilder RSI10 `0.9^230 ≈ 3×10⁻¹¹`），故**個股維持 241／240、大盤維持 `computeAllForTaiex()` 既有的 240**，兩邊都不延長也不對齊——理由不是「改了會算錯」（240 vs 241 的 `k`／`d` 實測 bit-identical，`taiexSimpleMa(desc,240)` 只讀 `desc[0..239]`），而是那條路徑另有三個非雷達消費端（觀察清單 `0000` KD 欄、Requirement 44 通知門檻、走勢圖同源判準），動它超出範圍且數值上無收益。
 
 **舊快照留白**：上線前的 Redis 快照沒有 `extendedIndicators`，既有 `num()` 對缺欄位回 `null` → Excel 空白格、JSON `null`，不得補 0。**golden 基準須重產**（`radar.xlsx`／`radar_empty.xlsx`），舊基準另存 `radar_pre_t281.xlsx`／`radar_empty_pre_t281.xlsx` 並以欄索引映射逐格比對，證明既有欄未被改壞。
 

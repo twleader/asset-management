@@ -292,6 +292,25 @@ public class MarketDataService {
         return !getTwHolidays(date.getYear()).containsKey(date.toString());
     }
 
+    /**
+     * 可區分「交易日／休市日／日曆不可得」的台股交易日判定（Task 291）。
+     *
+     * <p>既有 {@link #isTwTradingDay(LocalDate)} 在假日 proxy 失敗時會以空 map 降級，適合原本
+     * 只求不中斷的呼叫端；匯率 as-of 不可把「日曆讀不到」誤當交易日，否則可能選到錯誤日期並
+     * 沿用 stale 匯率。因此本方法在平日拿到空年度日曆時回 {@link Optional#empty()}，由雷達
+     * fail closed。週末不需要查日曆即可確定休市，直接回 {@code Optional.of(false)}。</p>
+     */
+    public Optional<Boolean> isTwTradingDayKnown(LocalDate date) {
+        if (date == null) return Optional.empty();
+        DayOfWeek dow = date.getDayOfWeek();
+        if (dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY) {
+            return Optional.of(false);
+        }
+        Map<String, String> holidays = getTwHolidays(date.getYear());
+        if (holidays == null || holidays.isEmpty()) return Optional.empty();
+        return Optional.of(!holidays.containsKey(date.toString()));
+    }
+
     public boolean isUsTradingDay(LocalDate date) {
         DayOfWeek dow = date.getDayOfWeek();
         if (dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY) return false;

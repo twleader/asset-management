@@ -6,7 +6,7 @@ import java.util.List;
 /**
  * 今日交易雷達（Requirement 43）純讀 response。
  *
- * <p>所有分數／建議皆為 {@code TW_RULES_V9} 即時計算的衍生值，不入庫；
+ * <p>所有分數／建議皆為 {@code TW_RULES_V11} 即時計算的衍生值，不入庫；
  * {@code score=null} 代表必要資料不足，不以 0 分冒充有效判斷。</p>
  */
 public final class TradingRadarDto {
@@ -18,7 +18,70 @@ public final class TradingRadarDto {
             String generatedAt,
             MarketSummary market,
             List<StockDecision> stocks,
-            int skippedNonTwStocks
+            int skippedNonTwStocks,
+            List<PublicInformationItem> publicInformation
+    ) {
+        /** 舊快照／舊測試相容建構式；Task 291 前沒有公開資訊清單。 */
+        public Response(String ruleVersion, String generatedAt, MarketSummary market,
+                        List<StockDecision> stocks, int skippedNonTwStocks) {
+            this(ruleVersion, generatedAt, market, stocks, skippedNonTwStocks, List.of());
+        }
+    }
+
+    /**
+     * 公開財經資訊原文；主頁市場清單使用台灣／美國近 72 小時，個股基本面證據使用台灣近 120 日。
+     * 兩者都只揭露來源，不做關鍵字情緒評分。
+     */
+    public record PublicInformationItem(
+            String region,
+            String title,
+            String source,
+            String url,
+            String publishedAt,
+            String summary
+    ) {
+        /** Task 292 前的建構式；舊市場資訊不一定帶摘要。 */
+        public PublicInformationItem(String region, String title, String source, String url, String publishedAt) {
+            this(region, title, source, url, publishedAt, null);
+        }
+    }
+
+    /**
+     * 個股基本面與產業 observation 的 as-of 解析結果（Task 292）。
+     *
+     * <p>各衍生因子分別揭露 provider／sourceUrls／asOf；不得因為來源順位相同就
+     * 把不同 observation 拼成一筆。{@code coverage} 只數 EPS、近似 ROE、營收、PE 四個
+     * 基本面子因子；產業發展為另一項因子。ETF 整筆 {@code applicable=false}。</p>
+     */
+    public record FundamentalSnapshot(
+            boolean applicable,
+            int coverage,
+            BigDecimal epsYoyPct,
+            BigDecimal approximateRoePct,
+            BigDecimal revenueYoy3mPct,
+            BigDecimal pePercentile,
+            Boolean peLossFlag,
+            String epsProvider,
+            List<String> epsSourceUrls,
+            String epsAsOf,
+            String roeProvider,
+            List<String> roeSourceUrls,
+            String roeAsOf,
+            String revenueProvider,
+            List<String> revenueSourceUrls,
+            String revenueAsOf,
+            String valuationProvider,
+            List<String> valuationSourceUrls,
+            String valuationAsOf,
+            String industryName,
+            BigDecimal industryRevenueYoyPct,
+            Integer industryCompanyCount,
+            String industryPeriod,
+            String industryProvider,
+            List<String> industrySourceUrls,
+            String industryAsOf,
+            List<PublicInformationItem> companyPublicInformation,
+            List<PublicInformationItem> industryPublicInformation
     ) {}
 
     /**
@@ -36,10 +99,8 @@ public final class TradingRadarDto {
     /**
      * 走勢圖指標選單（Task 262）同一組值的雷達版（Task 281）。
      *
-     * <p><b>純揭露：不參與評分</b>——不進 {@code StockInput}／{@code MarketInput}，不影響
-     * {@code action}／{@code score}／{@code regime}／{@code buyGate}／{@code kdHeat}／{@code timingState}，
-     * 故 {@code RULE_VERSION} 不升版（理由是「規則集本身未變」，<b>不援引</b> Task 249 的
-     * 「輸出完全相同」條件——本次輸出結構確有變化）。</p>
+     * <p>Task 291 起，J／MACD／RSI／乖離率／威廉指標會以各自所屬因子組進入短期與中期評分；
+     * EMA12／EMA26 透過 DIF、DIF／MACD 透過 OSC 同源納入，避免代數相依值重複灌權重。</p>
      *
      * <p><b>價基與同一列的 {@code kValue}／{@code dValue} 相同</b>：個股為還原權息序列、
      * 大盤為指數日線序列，與雙擊該列開啟的走勢圖（原始價基）<b>刻意不同</b>，
@@ -83,7 +144,7 @@ public final class TradingRadarDto {
             BigDecimal price,
             BigDecimal changePercent,
             String quoteStatus,
-            /** 週線 MA5（Task 265）；僅供顯示，不參與評分。 */
+            /** 週線 MA5；Task 291 起進入短期與中期的獨立權重。 */
             BigDecimal weeklyMa,
             BigDecimal monthlyMa,
             BigDecimal quarterlyMa,
@@ -98,9 +159,31 @@ public final class TradingRadarDto {
             boolean intraday,
             /** intraday=true 時為 Redis 即時價的 updatedAt（ISO 字串）；否則為 null（Task 228）。 */
             String liveUpdatedAt,
-            /** 走勢圖指標選單同一組值（Task 281）；純揭露、只進匯出檔，畫面不顯示。 */
-            ExtendedIndicators extendedIndicators
-    ) {}
+            /** 走勢圖指標選單同一組值；Task 291 起進入雙軌評分並在展開列顯示。 */
+            ExtendedIndicators extendedIndicators,
+            BigDecimal marketVolumeRatio,
+            BigDecimal marketTurnoverRatio,
+            String marketVolumeAsOfDate,
+            BigDecimal nasdaqChangePercent,
+            BigDecimal soxChangePercent,
+            BigDecimal usTechCompositePercent,
+            String usTechAsOfDate,
+            boolean usTechAvailable
+    ) {
+        /** Task 291 前的欄位形狀，供既有測試與舊快照相容。 */
+        public MarketSummary(
+                String regime, String regimeLabel, Integer score, boolean dataComplete, boolean stale,
+                String asOfDate, BigDecimal price, BigDecimal changePercent, String quoteStatus,
+                BigDecimal weeklyMa, BigDecimal monthlyMa, BigDecimal quarterlyMa, BigDecimal annualMa,
+                BigDecimal kValue, BigDecimal dValue, String quarterlyConfirmation, String annualConfirmation,
+                List<String> reasons, List<String> risks, boolean intraday, String liveUpdatedAt,
+                ExtendedIndicators extendedIndicators) {
+            this(regime, regimeLabel, score, dataComplete, stale, asOfDate, price, changePercent, quoteStatus,
+                    weeklyMa, monthlyMa, quarterlyMa, annualMa, kValue, dValue,
+                    quarterlyConfirmation, annualConfirmation, reasons, risks, intraday, liveUpdatedAt,
+                    extendedIndicators, null, null, null, null, null, null, null, false);
+        }
+    }
 
     public record StockDecision(
             String stockCode,
@@ -144,25 +227,58 @@ public final class TradingRadarDto {
              * KD 短線熱度：{@code OVERHEATED}／{@code ELEVATED}／{@code NORMAL}（Task 232）。
              *
              * <p>供收合列即可辨識——{@code reasons}／{@code risks} 只在展開後顯示，
-             * 使用者於收合狀態看不出 K 已偏高。{@code OVERHEATED} 代表買進閘門已關閉
-             * （動作降級為 HOLD／WATCH，分數不變）；<b>{@code ELEVATED} 純為揭露，
-             * 不影響分數與動作</b>。</p>
+             * 使用者於收合狀態看不出 K 已偏高。KD/J 因子本身已反映在兩軌分數；
+             * {@code OVERHEATED} 另外關閉買進閘門，{@code ELEVATED} 不另加硬閘門。</p>
              */
             String kdHeat,
             /** 進場時機（Task 264）；供收合列辨識，並對動作做雙向覆寫。 */
             String timingState,
             String timingLabel,
-            /** 現價對季線的乖離率（%），V9 的均值回歸主因子。 */
+            /** 現價對季線的乖離率（%），供進場時機判斷。 */
             BigDecimal ma60BiasPercent,
             /** 52 週相對位置 [0,1]（已 clamp）。 */
             BigDecimal week52Position,
-            /** 週線 MA5（Task 265）；僅供顯示，不參與評分與買進閘門。 */
+            /** 週線 MA5；Task 291 起進入短期與中期評分。 */
             BigDecimal weeklyMa,
             /** ETF 折溢價（%）；非 ETF 為 null，畫面不得顯示為 0。 */
             BigDecimal etfPremiumPct,
             /** ETF 折溢價的自身歷史分位（0–100）；樣本不足或非 ETF 為 null。 */
             BigDecimal etfPremiumPercentile,
-            /** 走勢圖指標選單同一組值（Task 281）；純揭露、只進匯出檔，畫面不顯示。 */
-            ExtendedIndicators extendedIndicators
-    ) {}
+            /** 走勢圖指標選單同一組值；Task 291 起進入雙軌評分並在展開列顯示。 */
+            ExtendedIndicators extendedIndicators,
+            String shortAction,
+            String shortActionLabel,
+            Integer shortScore,
+            List<String> shortReasons,
+            List<String> shortRisks,
+            boolean horizonConflict,
+            BigDecimal volumeRatio,
+            String fxAsOfDate,
+            boolean profitTakingConfirmed,
+            FundamentalSnapshot fundamental
+    ) {
+        /** Task 291 前的欄位形狀，供既有測試建構資料。 */
+        public StockDecision(
+                String stockCode, String stockName, String market, String assetClass,
+                boolean distributionAdjusted, boolean held, String action, String actionLabel, Integer score,
+                String counterTrendState, String counterTrendLabel, List<String> counterTrendReasons,
+                List<String> counterTrendRisks, boolean dataComplete, BigDecimal price,
+                BigDecimal changePercent, String quoteStatus, String priceUpdatedAt, String asOfDate,
+                BigDecimal monthlyMa, BigDecimal quarterlyMa, BigDecimal annualMa,
+                BigDecimal kValue, BigDecimal dValue, String monthlyConfirmation,
+                String quarterlyConfirmation, String annualConfirmation, BigDecimal fxPercentile,
+                String underlyingCurrency, List<String> reasons, List<String> risks, String kdHeat,
+                String timingState, String timingLabel, BigDecimal ma60BiasPercent,
+                BigDecimal week52Position, BigDecimal weeklyMa, BigDecimal etfPremiumPct,
+                BigDecimal etfPremiumPercentile, ExtendedIndicators extendedIndicators) {
+            this(stockCode, stockName, market, assetClass, distributionAdjusted, held,
+                    action, actionLabel, score, counterTrendState, counterTrendLabel,
+                    counterTrendReasons, counterTrendRisks, dataComplete, price, changePercent,
+                    quoteStatus, priceUpdatedAt, asOfDate, monthlyMa, quarterlyMa, annualMa,
+                    kValue, dValue, monthlyConfirmation, quarterlyConfirmation, annualConfirmation,
+                    fxPercentile, underlyingCurrency, reasons, risks, kdHeat, timingState, timingLabel,
+                    ma60BiasPercent, week52Position, weeklyMa, etfPremiumPct, etfPremiumPercentile,
+                    extendedIndicators, null, null, null, List.of(), List.of(), false, null, null, false, null);
+        }
+    }
 }

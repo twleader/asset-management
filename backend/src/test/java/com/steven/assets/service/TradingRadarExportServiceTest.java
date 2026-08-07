@@ -25,7 +25,7 @@ import static org.mockito.Mockito.when;
 
 /**
  * TradingRadarExportService 單元測試（Requirement 48）。
- * 覆蓋多快照三分頁、時間欄為文字、缺漏彙總、空區間、from>to。
+ * 覆蓋多快照四分頁、時間欄為文字、缺漏彙總、空區間、from>to。
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -62,7 +62,7 @@ class TradingRadarExportServiceTest {
     }
 
     @Test
-    void 多快照產出三分頁_時間欄為文字_缺漏彙總可見() throws Exception {
+    void 多快照產出四分頁_時間欄為文字_缺漏彙總可見() throws Exception {
         when(currentUserContext.getEffectiveUserId()).thenReturn(1L);
         JsonNode n1 = snap("2026-07-20T10:00:00+08:00", "NEUTRAL", 2);
         JsonNode n2 = snap("2026-07-20T13:30:00+08:00", "RISK_ON", 1);
@@ -74,7 +74,7 @@ class TradingRadarExportServiceTest {
                 service.manualDoc("2026-07-20T00:00:00", "2026-07-20T23:59:59").doc());
 
         try (Workbook wb = new XSSFWorkbook(new ByteArrayInputStream(data))) {
-            assertThat(wb.getNumberOfSheets()).isEqualTo(3);
+            assertThat(wb.getNumberOfSheets()).isEqualTo(4);
             Sheet idx = wb.getSheet("快照索引");
             assertThat(idx).isNotNull();
             assertThat(idx.getRow(0).getCell(0).getStringCellValue()).contains("缺漏 1");
@@ -84,6 +84,7 @@ class TradingRadarExportServiceTest {
             // 快照時間欄為文字（非數值 cell）
             assertThat(stock.getRow(1).getCell(0).getStringCellValue()).isEqualTo("2026-07-20T10:00:00+08:00");
             assertThat(wb.getSheet("大盤總覽")).isNotNull();
+            assertThat(wb.getSheet("台美公開資訊")).isNotNull();
         }
     }
 
@@ -97,7 +98,7 @@ class TradingRadarExportServiceTest {
                 service.manualDoc("2026-07-20T00:00:00", "2026-07-20T23:59:59").doc());
 
         try (Workbook wb = new XSSFWorkbook(new ByteArrayInputStream(data))) {
-            assertThat(wb.getNumberOfSheets()).isEqualTo(3);
+            assertThat(wb.getNumberOfSheets()).isEqualTo(4);
             assertThat(wb.getSheet("快照索引").getRow(0).getCell(0).getStringCellValue()).contains("查無");
         }
     }
