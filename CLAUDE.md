@@ -132,6 +132,15 @@ bash .claude/hooks/spec-review-pass.sh --status # 查目前狀態
 
 ## 架構規範
 
+### Clean Architecture 原則
+程式架構必須遵守 Clean Architecture 原則，核心是**依賴方向一律由外向內**（框架 / IO → 介面轉接 → 業務邏輯 → 領域模型），內層不得知道外層的存在：
+
+- **分層職責**：Controller 只做 HTTP 收發與 DTO 轉換；業務邏輯一律放 Service 層；資料存取一律經 Repository。禁止 Controller 直接注入 Repository、禁止在 Controller 寫業務規則。
+- **依賴反轉**：業務邏輯依賴抽象（interface），不依賴具體實作。外部系統（行情 API、Redis、Excel 解析）以介面隔離，實作放在最外層，方便替換與測試。
+- **領域模型獨立**：Entity / 領域物件不得依賴 Web 層（HttpServletRequest、DTO 等）；DTO 與 Entity 分離，不得把 JPA Entity 直接當 API 回傳格式。
+- **跨層禁令**：前端不得直接呼叫 business service（一律走 BFF，見下方 BFF 規範）；business service 不得直連外部行情 API（即時價走 Redis、收盤價走 `stock_price_history`）。
+- **可測試性**：業務邏輯必須能在不啟動 Spring context、不連資料庫的情況下單元測試。
+
 ### 資料庫完整正規化
 相同的資料只能存一份。禁止：
 - 同一欄位同時以 FK 和字串冗餘儲存（如 `bank_id` + `bank_name`）
