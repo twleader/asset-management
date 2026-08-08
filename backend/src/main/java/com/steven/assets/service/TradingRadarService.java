@@ -7,12 +7,14 @@ import com.steven.assets.repository.EtfNavHistoryRepository;
 import com.steven.assets.model.StockHolding;
 import com.steven.assets.model.StockPriceHistory;
 import com.steven.assets.model.TwseIndexDailyHistory;
+import com.steven.assets.model.UsIndexDailyHistory;
 import com.steven.assets.repository.AssetSnapshotRepository;
 import com.steven.assets.repository.StockAlertRepository;
 import com.steven.assets.repository.StockDividendHistoryRepository;
 import com.steven.assets.repository.StockPriceHistoryRepository;
 import com.steven.assets.repository.StockRepository;
 import com.steven.assets.repository.TwseIndexDailyHistoryRepository;
+import com.steven.assets.repository.UsIndexDailyHistoryRepository;
 import com.steven.assets.security.CurrentUserContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -24,7 +26,9 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -45,8 +49,13 @@ import java.util.Set;
 public class TradingRadarService {
 
     private static final ZoneId TAIPEI = ZoneId.of("Asia/Taipei");
+    private static final ZoneId NEW_YORK = ZoneId.of("America/New_York");
     private static final String TW_MARKET = "台股";
+    private static final String US_MARKET = "美股";
     private static final String TAIEX_CODE = "0000";
+    private static final String IXIC_CODE = "IXIC";
+    /** 美東收盤時刻，供判斷「已完成的最近一個美股交易日」（Task 294.2）；比照 US_MARKET_COMPLETE 既有慣例。 */
+    private static final LocalTime US_MARKET_CLOSE = LocalTime.of(16, 0);
 
     private static final String TWD = "TWD";
 
@@ -73,6 +82,8 @@ public class TradingRadarService {
     private final RadarInputAssembler assembler;
     private final AssetClassifier assetClassifier;
     private final TwseIndexDailyHistoryRepository twseRepo;
+    /** IXIC（那斯達克綜合指數）美股大盤情境的資料來源（Task 294）；台股大盤沿用 twseRepo，兩者分表。 */
+    private final UsIndexDailyHistoryRepository usIndexDailyHistoryRepo;
     private final StockPriceHistoryRepository priceHistoryRepo;
     private final StockDividendHistoryRepository dividendHistoryRepo;
     private final PriceQueryService priceQueryService;
@@ -104,6 +115,23 @@ public class TradingRadarService {
         LocalDate day = decisionInstant.atZone(TAIPEI).toLocalDate();
         for (int i = 0; i < 14; i++) {
             if (marketDataService.isTradingDay(TW_MARKET, day)) return day;
+            day = day.minusDays(1);
+        }
+        return day;
+    }
+
+    /**
+     * 已完成（收盤時刻已過）的最近一個美股交易日，供 {@link #buildUsMarket} 判斷 IXIC 資料是否 stale
+     * （Task 294.2）。IXIC 大盤不像台股組有 Redis 即時價可退回判斷（刻意不併入即時價，見 294.1 背景），
+     * 故改直接用美東收盤時刻界定「已完成」：收盤前，今天尚不能算數，須往前一個交易日找。
+     */
+    private LocalDate mostRecentCompletedUsTradingDay(Instant decisionInstant) {
+        ZonedDateTime nowNy = decisionInstant.atZone(NEW_YORK);
+        LocalDate day = nowNy.toLocalTime().isBefore(US_MARKET_CLOSE)
+                ? nowNy.toLocalDate().minusDays(1)
+                : nowNy.toLocalDate();
+        for (int i = 0; i < 14; i++) {
+            if (marketDataService.isTradingDay(US_MARKET, day)) return day;
             day = day.minusDays(1);
         }
         return day;
@@ -145,15 +173,19 @@ public class TradingRadarService {
     private TradingRadarDto.Response assemble(Long ownerId) {
         Instant decisionInstant = Instant.now();
         TradingRadarMarketContextService.Resolved context = marketContextService.resolve(decisionInstant);
-        MarketState market = buildMarket(context.market(), decisionInstant);
+        MarketState twMarket = buildMarket(context.market(), decisionInstant);
+        // 不論本輪有沒有美股標的都計算（比照台股組現行行為），維持「大盤資料與個股清單解耦」的既有設計。
+        MarketState usMarket = buildUsMarket(decisionInstant);
         Map<String, Target> targets = new LinkedHashMap<>();
         Set<String> skippedNonTw = new HashSet<>();
         loadLatestHoldings(targets, skippedNonTw, ownerId);
         loadWatchList(targets, skippedNonTw, ownerId);
 
         List<TradingRadarDto.StockDecision> decisions = targets.values().stream()
-                .filter(t -> TW_MARKET.equals(t.market()) && !TAIEX_CODE.equals(t.code()))
-                .map(t -> buildStock(t, market.regime(), market.stale(), decisionInstant))
+                .filter(t -> (TW_MARKET.equals(t.market()) || US_MARKET.equals(t.market()))
+                        && !TAIEX_CODE.equals(t.code()))
+                .map(t -> buildStock(t, regimeFor(t.market(), twMarket, usMarket),
+                        staleFor(t.market(), twMarket, usMarket), decisionInstant))
                 .sorted(Comparator
                         .comparing(TradingRadarService::bestScore,
                                 Comparator.nullsLast(Comparator.reverseOrder()))
@@ -163,19 +195,40 @@ public class TradingRadarService {
         return new TradingRadarDto.Response(
                 TradingRadarRuleEngine.RULE_VERSION,
                 decisionInstant.atZone(TAIPEI).toOffsetDateTime().toString(),
-                market.summary(),
+                twMarket.summary(),
                 decisions,
                 skippedNonTw.size(),
                 context.publicInformation());
     }
 
-    /** 背景通知評估共用同一份 V11 組裝；通知狀態仍只追蹤中期 action。 */
+    /** 依標的市場選對應的大盤組別（Task 294.3／294.6）；不得用同一個變數餵給兩種市場的股票。 */
+    private TradingRadarRuleEngine.MarketRegime regimeFor(
+            String market, MarketState twMarket, MarketState usMarket) {
+        return US_MARKET.equals(market) ? usMarket.regime() : twMarket.regime();
+    }
+
+    private boolean staleFor(String market, MarketState twMarket, MarketState usMarket) {
+        return US_MARKET.equals(market) ? usMarket.stale() : twMarket.stale();
+    }
+
+    /**
+     * 背景通知評估共用同一份 V11 組裝；通知狀態仍只追蹤中期 action。
+     *
+     * <p>依傳入的 {@code market} 只組裝對應的那一組大盤（Task 294.6），確保背景通知評估與前景頁面
+     * 對同一檔美股股票算出一致的結果——不像 {@link #assemble} 兩組都要（供其餘標的使用），
+     * 這裡只評估單一標的，另一組大盤用不到。</p>
+     */
     @Transactional(readOnly = true)
     public TradingRadarDto.StockDecision evaluateForNotification(
             String stockCode, String market, boolean held) {
         Instant decisionInstant = Instant.now();
-        TradingRadarMarketContextService.Resolved context = marketContextService.resolve(decisionInstant);
-        MarketState marketState = buildMarket(context.market(), decisionInstant);
+        MarketState marketState;
+        if (US_MARKET.equals(market)) {
+            marketState = buildUsMarket(decisionInstant);
+        } else {
+            TradingRadarMarketContextService.Resolved context = marketContextService.resolve(decisionInstant);
+            marketState = buildMarket(context.market(), decisionInstant);
+        }
         return buildStock(new Target(stockCode, market, held), marketState.regime(), marketState.stale(),
                 decisionInstant);
     }
@@ -269,6 +322,85 @@ public class TradingRadarService {
         } catch (Exception e) {
             log.warn("今日交易雷達：大盤資料組裝失敗", e);
             return incompleteMarket("讀取大盤資料失敗，所有個股暫停產生交易訊號。");
+        }
+    }
+
+    /**
+     * 美股個股的大盤情境（Task 294）：用那斯達克綜合指數（IXIC）自身技術面，而非台股加權指數——
+     * 美股開盤時間與台股加權指數無直接對應關係，用 TAIEX 當美股的大盤沒有意義。
+     *
+     * <p>與 {@link #buildMarket} 各自獨立 try/catch，互不影響（294.2／(e) 的隔離要求）：IXIC 讀取失敗
+     * 只讓美股個股停止產生訊號，不得拖垮台股組。</p>
+     *
+     * <p>{@code MarketInput} 的後六個參數（跨市場量能／美股科技日報酬）全部傳 {@code null}／{@code false}：
+     * 那三欄（nasdaqChangePercent／soxChangePercent／usTechCompositePercent）的語意是「台股股票的跨市場
+     * 領先訊號」，本身即為 IXIC 走勢的一部分，若原封不動餵給「大盤即是 IXIC」的美股組會重複計分。</p>
+     */
+    private MarketState buildUsMarket(Instant decisionInstant) {
+        try {
+            List<UsIndexDailyHistory> rows =
+                    usIndexDailyHistoryRepo.findTopNByIndexCodeOrderByTradingDateDesc(IXIC_CODE, 241);
+            List<BigDecimal> closes = rows.stream().map(UsIndexDailyHistory::getClosePoint).toList();
+            BigDecimal price = closes.isEmpty() ? null : closes.get(0);
+            BigDecimal changePercent = closes.size() >= 2 ? changePercent(closes.get(0), closes.get(1)) : null;
+
+            TechnicalIndicatorService.FullIndicators ind = indicatorService.computeAllForNasdaq();
+            TradingRadarRuleEngine.Confirmation c60 = ruleEngine.confirm(closes, 60);
+            TradingRadarRuleEngine.Confirmation c240 = ruleEngine.confirm(closes, 240);
+            TradingRadarRuleEngine.MarketResult result = ruleEngine.evaluateMarket(
+                    new TradingRadarRuleEngine.MarketInput(
+                            price,
+                            changePercent,
+                            indicators(ind),
+                            c60,
+                            c240,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            false));
+
+            LocalDate latestEodDate = rows.isEmpty() ? null : rows.get(0).getTradingDate();
+            LocalDate mostRecentCompleted = mostRecentCompletedUsTradingDay(decisionInstant);
+            boolean stale = latestEodDate == null || latestEodDate.isBefore(mostRecentCompleted);
+
+            TradingRadarDto.MarketSummary summary = new TradingRadarDto.MarketSummary(
+                    result.regime().name(),
+                    regimeLabel(result.regime()),
+                    result.score(),
+                    result.regime() != TradingRadarRuleEngine.MarketRegime.DATA_INCOMPLETE,
+                    stale,
+                    latestEodDate == null ? null : latestEodDate.toString(),
+                    price,
+                    changePercent,
+                    "CLOSE_PENDING",
+                    ind.weeklyMa(),
+                    ind.monthlyMa(),
+                    ind.quarterlyMa(),
+                    ind.annualMa(),
+                    ind.k(),
+                    ind.d(),
+                    c60.name(),
+                    c240.name(),
+                    result.reasons(),
+                    result.risks(),
+                    false,
+                    null,
+                    toDto(ind.extended()),
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    false);
+            return new MarketState(summary, result.regime(), stale);
+        } catch (Exception e) {
+            log.warn("今日交易雷達：美股（IXIC）大盤資料組裝失敗", e);
+            return incompleteMarket("讀取美股大盤資料失敗，美股個股暫停產生交易訊號。");
         }
     }
 
@@ -534,7 +666,7 @@ public class TradingRadarService {
         String market = rawMarket.trim();
         if (code.isEmpty() || market.isEmpty()) return;
         String key = code + '\0' + market;
-        if (!TW_MARKET.equals(market)) {
+        if (!TW_MARKET.equals(market) && !US_MARKET.equals(market)) {
             skippedNonTw.add(key);
             return;
         }
@@ -579,6 +711,11 @@ public class TradingRadarService {
      * <p><b>禁止由市價與淨值反推</b>（Task 259）：{@code premiumDiscountPct} 為 null 就是缺值。</p>
      */
     private BigDecimal etfPremiumPct(String code, String market, Instant decisionInstant) {
+        // 美股 ETF 折溢價因子明確排除（Task 294.5）：etf_nav_history 現況已有美股列（既有 EtfNavPoller
+        // 對持有／觀察的美股 ETF 逐檔打 Yahoo quoteSummary 寫入），若不加此短路，移除美股 filter 後
+        // 會對美股 ETF 回傳非 null 折溢價，讓 ETF_PREMIUM_EXPENSIVE 硬否決誤套用到美股。
+        // 本次不查 etf_nav_history、不查 Redis，與台股既有查詢路徑完全不重疊。
+        if (US_MARKET.equals(market)) return null;
         try {
             var live = priceQueryService.getEtfNav(code, market);
             if (live.isPresent() && live.get().premiumDiscountPct() != null

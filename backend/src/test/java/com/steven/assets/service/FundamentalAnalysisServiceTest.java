@@ -1,6 +1,9 @@
 package com.steven.assets.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -9,9 +12,17 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
-/** Task 292 基本面公式守門：這些錯誤都會靜默產生「很合理」的假分數。 */
+/** Task 292 基本面公式守門：這些錯誤都會靜默產生「很合理」的假分數。Task 293 新增美股市場閘門守門。 */
 class FundamentalAnalysisServiceTest {
 
     @Test
@@ -107,6 +118,92 @@ class FundamentalAnalysisServiceTest {
         assertEquals("FINMIND", eps.provider());
         assertEquals("FINMIND", revenue.provider());
         assertEquals("FINMIND", pe.provider());
+    }
+
+    // ── Task 293：美股市場閘門守門 ──────────────────────────────────────────
+
+    /** 測試 (d)：market="英股" 或任意非白名單字串維持既有「不適用」行為，不得被誤放行。 */
+    @Test
+    void resolveRejectsNonWhitelistedMarketLikeUkStock() {
+        FundamentalAnalysisService service = new FundamentalAnalysisService(null, null, null);
+
+        var resolved = service.resolve("VOD", "Vodafone", "英股", Instant.parse("2026-08-08T02:00:00Z"));
+
+        assertFalse(resolved.input().applicable());
+        assertFalse(resolved.snapshot().applicable());
+    }
+
+    /**
+     * 測試 (e)＋(i)：美股個股 coverage 上限為 3（EPS／ROE／PE，無月營收／產業因子），且
+     * PROVIDERS 清單確實含 SEC_EDGAR、firstProviderValue() 能選中 provider=SEC_EDGAR 的列
+     * 組出非 null 的 EPS／ROE。revenueContribution／industryContribution 恆為 null，
+     * 不得為了湊滿 coverage=4 虛構假的營收因子。
+     */
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void usMarketCoverageCapsAtThreeAndNeverFabricatesRevenueOrIndustry() {
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        Instant decisionInstant = Instant.parse("2026-08-08T02:00:00Z");
+
+        List<FundamentalAnalysisService.FinancialRow> financials = financialRows("SEC_EDGAR", 2026, 2);
+        List<FundamentalAnalysisService.ValuationRow> valuations = valuationRows("YAHOO", LocalDate.of(2026, 8, 8));
+
+        when(jdbc.query(argThat((String sql) -> sql != null && sql.contains("stock_financial_quarter")),
+                any(RowMapper.class), any(Object[].class))).thenReturn(financials);
+        when(jdbc.query(argThat((String sql) -> sql != null && sql.contains("stock_valuation_daily")),
+                any(RowMapper.class), any(Object[].class))).thenReturn(valuations);
+        // 月營收／產業彙總刻意不 stub：Mockito 對 List 回傳型別的預設值即為空 list，
+        // 藉此同時斷言「美股輪次未曾產生任何營收列」不需要額外程式碼特例。
+
+        var service = new FundamentalAnalysisService(jdbc, new ObjectMapper(), mock(PublicInfoEvidenceResolver.class));
+
+        var resolved = service.resolve("AAPL", "Apple", "美股", decisionInstant);
+
+        assertTrue(resolved.input().applicable());
+        assertNull(resolved.input().revenueContribution());
+        assertNull(resolved.input().industryContribution());
+        assertEquals(3, resolved.snapshot().coverage());
+        assertNull(resolved.snapshot().revenueYoy3mPct());
+        assertNull(resolved.snapshot().industryRevenueYoyPct());
+        assertEquals("SEC_EDGAR", resolved.snapshot().epsProvider());
+    }
+
+    /** 測試 (k)：resolveInputsForBacktest() 對 market="美股" 也能組出非 unavailable 的結果（不再卡在獨立閘門）。 */
+    @Test
+    void resolveInputsForBacktestAllowsUsMarketThroughIndependentGate() {
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        FundamentalAnalysisService service =
+                new FundamentalAnalysisService(jdbc, new ObjectMapper(), mock(PublicInfoEvidenceResolver.class));
+        Instant decision = Instant.parse("2026-08-08T02:00:00Z");
+
+        var result = service.resolveInputsForBacktest("AAPL", "美股", List.of(decision));
+
+        assertTrue(result.get(decision).applicable());
+    }
+
+    /**
+     * 測試 (p)：resolveInputsForBacktest() 對台股與美股的 ETF 代碼皆維持 unavailable，
+     * 且 null stockCode 也維持 unavailable——確認 293.8 只替換了市場判斷子句，
+     * 沒有連帶丟掉 {@code stockCode != null} 與 {@code !isEtf(...)} 兩個既有子句。
+     */
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void resolveInputsForBacktestKeepsNullCodeAndEtfGuardsForBothMarkets() {
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        when(jdbc.queryForObject(anyString(), eq(Boolean.class), any(Object[].class))).thenReturn(true);
+        FundamentalAnalysisService service =
+                new FundamentalAnalysisService(jdbc, new ObjectMapper(), mock(PublicInfoEvidenceResolver.class));
+        Instant decision = Instant.parse("2026-08-08T02:00:00Z");
+
+        // "0050" 靠既有 00 開頭字首捷徑直接判定為 ETF，不必依賴上面的 DB stub。
+        var twEtf = service.resolveInputsForBacktest("0050", "台股", List.of(decision));
+        // "VOO" 走 DB 查詢（上面已 stub 回 true）。
+        var usEtf = service.resolveInputsForBacktest("VOO", "美股", List.of(decision));
+        var nullCode = service.resolveInputsForBacktest(null, "美股", List.of(decision));
+
+        assertFalse(twEtf.get(decision).applicable());
+        assertFalse(usEtf.get(decision).applicable());
+        assertFalse(nullCode.get(decision).applicable());
     }
 
     private record TestRow(

@@ -4257,13 +4257,13 @@ boolean stale = !todayEodPresent && !liveFreshToday;
 
 **明確不在 V9 範圍**：Fed／台灣央行利率資訊（六個利率識別字全庫零命中；`央行` 僅出現於新聞爬蟲的關鍵字清單與註解、未進入評分鏈。需新資料源）、美股／英股（仍只評估台股）、個股基本面（三張表不存在，須 Task 266 建抓取 → 累積 → Task 267 接線並依實作當下規則版號 +1；來源只給當期快照且 MOPS 禁爬，故 EPS 年增率須累積約 2 年）。**前端不得宣稱雷達已納入利率或央行資訊**〔**部分解除**：Requirement 58／Task 275 落地後，「利率」限於「**債券標的**已納入美債殖利率因子」的範圍內解除；「**央行／政策利率**」維持禁止（台灣央行仍無確認的官方 API）。解除前不得提前宣稱。〕
 
-> **⚠ 上段的三項「不在範圍」中，有兩項已由 Requirement 58（Task 275）與 Requirement 61（Task 278）改變前提；第三項維持不變：**
+> **⚠ 上段的三項「不在範圍」中，三項現況皆已不同程度改變前提（此為 Requirement 64 落地後的更新；原文僅記載前兩項由 Requirement 58／61 改變、第三項美股／英股當時維持不變）：**
 >
 > | 項目 | V9 當時的記載 | 現況（2026-08-01 實測） |
 > |---|---|---|
 > | **美債殖利率** | 「需新資料源」 | **資料已確認可得**：`^IRX`／`^FVX`／`^TNX`／`^TYX` 經 Yahoo v8 chart API 各回 **2514 筆**（2016-08-01 ~ 2026-07-31），管道即既有的 `MacroDataFetchClient.fetchUsIndexDaily()`。由 Requirement 58（t275）落地為 `treasury_yield_daily` 並接為 `BOND` 專屬因子。**台灣央行政策利率仍無確認的官方 API，維持不在範圍。** |
 > | **個股基本面的歷史** | 「來源只給當期快照且 MOPS 禁爬」 | **須分兩半看**：EPS／ROE 的部分**記載正確且不變**（`mopsov.twse.com.tw/robots.txt` 實測為 `Disallow: /`，僅 bingbot 例外，只能自上線起累積）；但 **PE／PB／殖利率的歷史可回補**——`www.twse.com.tw/robots.txt` 實測 `/rwd/zh/afterTrading/` 落在 `Allow: /` 之下（僅禁 `/epaper/`、`/FTSE/`），`BWIBBU_d?date=20200102` 實回 941 筆、可回溯至 2005-09-02。由 Requirement 61（t278）落地。 |
-> | 美股／英股 | 仍只評估台股 | **不變。** `TradingRadarService.assemble()` 的 filter 仍只留台股。 |
+> | 美股／英股 | 仍只評估台股 | **美股半推翻、英股不變。** Requirement 64（Task 293／294／295）移除 `TradingRadarService.addTarget()` 對 `"美股"` 的排除，規則引擎、技術面、逆勢抄底狀態全部沿用同一套；新增的是美股專屬的「大盤情境」（IXIC 自身技術面，非台股 regime）與「基本面」（coverage 0..3，無月營收／產業因子）。**英股仍維持不評估**（無對應資料源規劃）。詳見下方新增小節「美股個股支援」。 |
 >
 > **另：上段「週線 MA5 刻意不納入評分」的決定已由 Requirement 43／59／60（t291）推翻**，但推翻的是其**前提**而非其論證——原論證「5 個交易日尺度與數周至兩年的需求衝突」在「雷達只輸出單一持有期建議」的前提下正確；Task 291 改為**雙軌輸出**，短期軌有自己的因子與權重、不與中期軌爭奪同一組權重，故 MA5 進入短期軌不再與中期軌的方向衝突。**中期軌以一至六個月為目標。**
 
@@ -4464,6 +4464,43 @@ V11 將基本面與產業作為五個 optional contribution 加入原同一 `Acc
 t292 與引擎具名常數，design 不複寫數字。多項基本面惡化只關閉買方門檻，不直接產生賣出；
 這保留 V10 的不殺低、高檔多證據獲利了結與止跌後才低接。正基本面同樣不能繞過任何
 時機否決。
+
+### 美股個股支援（Requirement 64，Task 293／294／295）
+
+Task 293／294 把 `TradingRadarService`／`TradingRadarRuleEngine` 從「只評台股」擴大到「評 held／watchlist 範圍內的台股與美股」，Task 295 把前端表格拆成台股／美股兩分頁：
+
+```text
+TradingRadarView（雙分頁：台股／美股，比照 WatchStockView.vue 的 marketTab 模式）
+  → GET /api/bff/trading-radar（不變）
+    → TradingRadarService
+      ├─ holdings ∪ watchlist（owner-scoped，addTarget 白名單改為 {台股, 美股}；英股仍排除）
+      ├─ RadarInputAssembler / TechnicalIndicatorService.computeAll（不變，本就 market-agnostic）
+      ├─ buildMarket() → 兩組 MarketState
+      │   ├─ 台股組：TAIEX 技術面 + TW 量能 + IXIC/SOX 跨市場加減分（不變）
+      │   └─ 美股組（新增）：TechnicalIndicatorService.computeAllForNasdaq()
+      │       讀 us_index_daily_history（index_code='IXIC'，僅完成日），
+      │       跑同一支 ruleEngine.evaluateMarket()；MarketInput 的
+      │       nasdaqChangePercent/soxChangePercent/usTechCompositePercent 全部為 null
+      │       （避免與「本身即 IXIC」的信息重複計分）
+      ├─ 依 target.market() 選對應 MarketState 餵給 buildStock()
+      ├─ FundamentalAnalysisService.resolve()（Task 293 擴大 market 白名單為 {台股, 美股}）
+      │   └─ 美股寫入端新增 SEC_EDGAR／YAHOO 兩個 provider；讀取端 PROVIDERS 優先序清單
+      │       （backend `FundamentalAnalysisService` 單一常數，台股美股共用）插入 SEC_EDGAR，
+      │       coverage 上限 3（不含月營收／產業因子；四張既有表沿用、不新增欄位）
+      ├─ etfPremiumPct()／etfPremiumPercentile()：美股個股明確短路回 null（Task 294）——
+      │   `etf_nav_history` 既有 Task 214/215 的美股 ETF 淨值資料，不加排除會誤套折溢價因子
+      └─ TradingRadarRuleEngine（同一支，EQUITY 美股與台股共用全部判定邏輯）
+```
+
+**為何美股用 IXIC 自身技術面而非「前一美股科技交易日」欄位：** 後者（`usTechCompositePercent` 等）的既有語意是「給台股股票的跨市場領先訊號」——台股開盤晚於美股收盤，故前一日美股表現對台股是有效的領先資訊。但對美股股票本身而言，它與 NASDAQ 同一個交易時段，NASDAQ 自身的 MA／KD 技術面已直接反映這份資訊，若再疊加那三個欄位的加減分，等同對同一份資訊算兩次分數。故美股組 `MarketInput` 的這三欄一律傳空值，兩組 regime 的資料來源正交、互不污染。
+
+**匯率因子不需新程式碼：** `TradingRadarService.underlyingCurrencyOf()` 早已對 `"美股"` 回傳 `"USD"`（Requirement 47 既有邏輯，原為服務外幣債券 ETF 而寫，但實作本身未區分資產類別），`resolveFx()` 對非 TWD 幣別一律計算五年分位。移除 `addTarget` 的市場 filter 後，這條既有路徑對美股個股自然生效，`fxContribution` 加減分與「換匯過貴」買進閘門因此對美股 EQUITY 也成立——這是既有程式碼的自然延伸，不是新設計。
+
+**美股基本面的 coverage 上限為 3，非台股的 4：** 美股上市公司無等同台股 MOPS 的月營收公開揭露義務，故「近三月營收年增」與「產業營收年增」兩項在美股恆為 `null`，由既有的 optional contribution 缺值重分配機制吸收，不新增第二套精度契約。美股基本面資料鏈為 `SEC_EDGAR`（`companyfacts` API，免 key，供 EPS／淨利／權益）→`YAHOO`（既有 `quoteSummary`，供 PE／PB）；`FINMIND` 的 `USStockPrice` dataset 只有 OHLCV、明確排除於美股基本面鏈之外，繼續只作既有收盤校正用途。四張既有表（`stock_valuation_daily`／`stock_financial_quarter`／`stock_monthly_revenue`／`industry_monthly_revenue`）沿用 schema，`market` 欄寫 `"美股"`，後兩張不為美股寫入任何列。**寫入端目前類別內硬編 `TW_MARKET` 常數（`FundamentalObservationStore`）與資料承載 record（`StockFundamentalFetchClient` 的 `Valuation`／`Financial`／`Revenue`）都沒有 market 概念**，需新增 market 欄位／參數貫穿寫入路徑，非僅換一個字串值即可（詳見 t293）。
+
+**抓取範圍沿用「held／watchlist only」的既有心智模型：** 直接沿用既有 `StockSourceQuery.collectHeldStockCodes(twCodes, usCodes, ukCodes)` 的 `usCodes` 輸出（該方法已嚴格以 `market="美股"` 分類 held ∪ watchlist），**不新增平行查詢**——台股既有的 `collectTwRadarCodes` 與 `collectHeldStockCodes` 兩支查詢口徑歷史上刻意不同（Task 249／257），美股沒有對應的歷史包袱，直接用後者的 `usCodes` 輸出即可，不放大 external-materials-service 的抓取負擔。
+
+**明確不在本次範圍：** 英股（無資料源規劃）、美股 ETF 折溢價因子（`etf_nav_history` 現況已有既有 Task 214/215 寫入的美股列，本次**必須明確短路排除**，不是「天生沒資料」）、美股基本面歷史回補（比照台股「自上線起累積」，即使 SEC EDGAR 理論上可一次回補多年歷史）、IXIC 即時盤中報價（美股組市場情境僅用完成日資料）、SOX 作為獨立第二組美股大盤 regime。
 
 ### 逆勢抄底狀態（獨立第二軌）
 

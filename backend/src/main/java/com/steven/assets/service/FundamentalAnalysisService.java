@@ -43,10 +43,14 @@ import java.util.function.Function;
 public class FundamentalAnalysisService {
 
     private static final String TW_MARKET = "台股";
+    private static final String US_MARKET = "美股";
     private static final ZoneId TAIPEI = ZoneId.of("Asia/Taipei");
     private static final int VALUATION_MAX_AGE_DAYS = 10;
     private static final int PE_MIN_SAMPLES = 250;
-    private static final List<String> PROVIDERS = List.of("EXCHANGE", "YAHOO", "WANTGOO", "FINMIND");
+    // SEC_EDGAR 插在 EXCHANGE 之後、YAHOO 之前：與 EXCHANGE 同屬「官方一手資料」優先序，只是分屬不同市場
+    // （EXCHANGE 只會出現在台股列、SEC_EDGAR 只會出現在美股列，兩者不會同時對同一標的出現，插入順序
+    // 不影響台股既有行為）。firstProviderValue() 是通用方法，不需要為市場另建第二份清單。
+    private static final List<String> PROVIDERS = List.of("EXCHANGE", "SEC_EDGAR", "YAHOO", "WANTGOO", "FINMIND");
 
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;
@@ -75,7 +79,8 @@ public class FundamentalAnalysisService {
     }
 
     public Resolved resolve(String stockCode, String stockName, String market, Instant decisionInstant) {
-        if (stockCode == null || decisionInstant == null || !TW_MARKET.equals(market)) {
+        if (stockCode == null || decisionInstant == null
+                || !Set.of(TW_MARKET, US_MARKET).contains(market)) {
             return Resolved.unavailable(false);
         }
         if (isEtf(stockCode, market)) return Resolved.unavailable(false);
@@ -113,7 +118,10 @@ public class FundamentalAnalysisService {
         List<Instant> instants = decisionInstants == null ? List.of() : decisionInstants.stream()
                 .filter(Objects::nonNull).distinct().sorted().toList();
         if (instants.isEmpty()) return Map.of();
-        boolean applicable = stockCode != null && TW_MARKET.equals(market) && !isEtf(stockCode, market);
+        // 只替換市場判斷子句：stockCode != null 與 !isEtf(...) 兩個子句原樣保留，這是與 resolve() 獨立的
+        // 第二道市場閘門，若整句改成只剩市場白名單檢查，會連帶丟掉 null 檢查與 ETF 排除。
+        boolean applicable = stockCode != null && Set.of(TW_MARKET, US_MARKET).contains(market)
+                && !isEtf(stockCode, market);
         if (!applicable) return unavailableInputs(instants, false);
         try {
             PreparedData data = loadPreparedData(stockCode, market, instants.get(instants.size() - 1));

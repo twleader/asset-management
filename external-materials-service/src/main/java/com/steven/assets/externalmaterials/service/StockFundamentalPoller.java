@@ -22,11 +22,12 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * 個股基本面每日抓取（Requirement 46 / Task 292）。
+ * 個股基本面每日抓取（Requirement 46 / Task 292；美股輪次見 Task 293）。
  *
  * <p>每分鐘節拍只讀 {@code crawler_schedule[crawler_key=fundamental]}；命中後在背景執行，
- * warmup、排程、手動端點共用 {@link #run(String)}。先寫官方整批來源，再只對使用者持股／觀察個股
- * 依 Yahoo → 玩股網 → FinMind 補足形成因子所需的歷史。雷達頁面請求不會觸發本 poller。</p>
+ * warmup、排程、手動端點共用 {@link #run(String)}。先寫台股官方整批來源，再只對使用者持股／觀察個股
+ * 依 Yahoo → 玩股網 → FinMind 補足形成因子所需的歷史；同一輪次跑完後接著跑美股輪次，依
+ * SEC EDGAR → Yahoo 補 EPS／ROE／PE。雷達頁面請求不會觸發本 poller。</p>
  */
 @Slf4j
 @Service
@@ -37,6 +38,8 @@ public class StockFundamentalPoller {
     private static final String CRAWLER_KEY = "fundamental";
     private static final int DEFAULT_HOUR = 15;
     private static final int DEFAULT_MINUTE = 30;
+    private static final String TW_MARKET = "台股";
+    private static final String US_MARKET = "美股";
 
     private final StockFundamentalFetchClient client;
     private final FundamentalObservationStore store;
@@ -96,7 +99,7 @@ public class StockFundamentalPoller {
         Instant observedAt = Instant.now();
         Set<String> targetCodes = new LinkedHashSet<>();
         stockSource.collectTwRadarCodes(targetCodes);
-        targetCodes.removeIf(store::isEtf);
+        targetCodes.removeIf(code -> store.isEtf(code, TW_MARKET));
 
         int failures = 0;
         int fallbackStocks = 0;
@@ -131,29 +134,29 @@ public class StockFundamentalPoller {
 
         for (String code : targetCodes) {
             try {
-                FundamentalObservationStore.FallbackNeed need = currentNeed(code);
+                FundamentalObservationStore.FallbackNeed need = currentNeed(code, TW_MARKET);
                 if (!need.any()) continue;
                 fallbackStocks++;
 
                 // 固定順位：Yahoo → WantGoo → FinMind；每一段落庫後都依四個因子重新判斷。
                 // Yahoo 只有估值能力，EPS／ROE／月營收已完整時不得為它們發出無效請求。
                 if (need.valuation()) {
-                    StockFundamentalFetchClient.Bundle yahoo = client.fetchYahoo(code, observedAt);
+                    StockFundamentalFetchClient.Bundle yahoo = client.fetchYahoo(code, TW_MARKET, observedAt);
                     sourceHealth.add(yahoo);
                     total = total.plus(store.append(yahoo));
-                    need = currentNeed(code);
+                    need = currentNeed(code, TW_MARKET);
                 }
                 if (need.any()) {
                     StockFundamentalFetchClient.Bundle wantGoo = client.fetchWantGoo(code, observedAt);
                     sourceHealth.add(wantGoo);
                     total = total.plus(store.append(wantGoo));
-                    need = currentNeed(code);
+                    need = currentNeed(code, TW_MARKET);
                 }
                 if (need.any()) {
                     StockFundamentalFetchClient.Bundle finMind = client.fetchFinMind(code, observedAt);
                     sourceHealth.add(finMind);
                     total = total.plus(store.append(finMind));
-                    need = currentNeed(code);
+                    need = currentNeed(code, TW_MARKET);
                 }
                 if (need.any()) unresolvedStocks++;
             } catch (Exception e) {
@@ -163,11 +166,52 @@ public class StockFundamentalPoller {
             }
         }
 
+        // ---- 美股輪次（Task 293）：與台股共用同一次觸發，抓取邏輯完全分開，互不拖垮對方 ----
+        Set<String> usCodes = new LinkedHashSet<>();
+        try {
+            Set<String> heldTw = new LinkedHashSet<>();
+            Set<String> heldUk = new LinkedHashSet<>();
+            // 只取 usCodes；twCodes／ukCodes 刻意丟棄不用——台股輪次沿用上方既有 collectTwRadarCodes，
+            // 兩者口徑歷史上刻意不同，不得混用（見 StockSourceQuery 既有註解）。
+            stockSource.collectHeldStockCodes(heldTw, usCodes, heldUk);
+            usCodes.removeIf(code -> store.isEtf(code, US_MARKET));
+
+            for (String code : usCodes) {
+                try {
+                    FundamentalObservationStore.FallbackNeed need = currentNeed(code, US_MARKET);
+                    // 美股不產生月營收列，revenue 恆需要 fallback、不得納入本輪的完成度判斷。
+                    if (!need.eps() && !need.roe() && !need.valuation()) continue;
+                    fallbackStocks++;
+
+                    if (need.eps() || need.roe()) {
+                        StockFundamentalFetchClient.Bundle secEdgar = client.fetchSecEdgarFacts(code);
+                        sourceHealth.add(secEdgar);
+                        total = total.plus(store.append(secEdgar));
+                        need = currentNeed(code, US_MARKET);
+                    }
+                    if (need.valuation()) {
+                        StockFundamentalFetchClient.Bundle yahoo = client.fetchYahoo(code, US_MARKET, observedAt);
+                        sourceHealth.add(yahoo);
+                        total = total.plus(store.append(yahoo));
+                        need = currentNeed(code, US_MARKET);
+                    }
+                    if (need.eps() || need.roe() || need.valuation()) unresolvedStocks++;
+                } catch (Exception e) {
+                    failures++;
+                    unresolvedStocks++;
+                    log.warn("美股基本面 fallback {} 失敗：{}", code, e.getMessage());
+                }
+            }
+        } catch (Exception e) {
+            failures++;
+            log.warn("美股基本面輪次整體失敗：{}", e.getMessage());
+        }
+
         failures += sourceHealth.failures.size();
         String status = sourceHealth.attempts > 0 && sourceHealth.successes == 0 ? "FAILED"
                 : failures > 0 || unresolvedStocks > 0 ? "PARTIAL" : "OK";
-        RefreshSummary summary = new RefreshSummary(status, trigger, targetCodes.size(), fallbackStocks,
-                total.valuations(), total.financials(), total.revenues(), total.industries(),
+        RefreshSummary summary = new RefreshSummary(status, trigger, targetCodes.size() + usCodes.size(),
+                fallbackStocks, total.valuations(), total.financials(), total.revenues(), total.industries(),
                 unresolvedStocks, sourceHealth.attempts, sourceHealth.successes, failures,
                 Instant.now().toString());
         log.info("基本面抓取完成：{}", summary);
@@ -220,8 +264,8 @@ public class StockFundamentalPoller {
     }
 
     /** append 使用資料庫 now() 記 observed_at；重算必須晚於該次 INSERT，才看得到本輪剛寫入的 revision。 */
-    private FundamentalObservationStore.FallbackNeed currentNeed(String code) {
-        return store.fallbackNeed(code, Instant.now());
+    private FundamentalObservationStore.FallbackNeed currentNeed(String code, String market) {
+        return store.fallbackNeed(code, market, Instant.now());
     }
 
     private RefreshSummary busy(String trigger) {

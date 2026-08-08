@@ -116,16 +116,45 @@
         <div class="card-head">
           <div>
             <span class="section-title">我的台股決策</span>
-            <span class="stock-count">{{ stocks.length }} 檔</span>
+            <span class="stock-count">{{ currentStocks.length }} 檔</span>
           </div>
-          <span v-if="radar.skippedNonTwStocks" class="as-of">第一版未評分美／英股 {{ radar.skippedNonTwStocks }} 檔</span>
+          <span v-if="radar.skippedNonTwStocks" class="as-of">第一版未評分英股 {{ radar.skippedNonTwStocks }} 檔</span>
         </div>
       </template>
 
+      <el-tabs v-model="marketTab" style="margin-bottom:12px">
+        <el-tab-pane name="台股">
+          <template #label>
+            <span style="display:inline-flex;align-items:center;gap:6px">
+              <TaiwanMap :size="18" />
+              台股 <el-tag size="small" style="margin-left:2px">{{ twStocks.length }}</el-tag>
+            </span>
+          </template>
+        </el-tab-pane>
+        <el-tab-pane name="美股">
+          <template #label>
+            <span style="display:inline-flex;align-items:center;gap:6px">
+              <UsFlag :size="22" />
+              美股 <el-tag size="small" style="margin-left:2px">{{ usStocks.length }}</el-tag>
+            </span>
+          </template>
+        </el-tab-pane>
+      </el-tabs>
+
+      <el-alert
+        v-if="marketTab === '美股'"
+        type="info"
+        :closable="false"
+        show-icon
+        class="us-market-note"
+        title="美股大盤情境採 NASDAQ 綜合指數（IXIC）自身技術面，非台股加權指數"
+        description="本分頁個股的買賣建議依據那斯達克綜合指數自身的均線與 KD 技術面判斷大盤環境，與上方「台股大盤風險」卡片顯示的台股加權指數 regime 為不同的大盤情境、彼此不互相影響，請勿誤以為兩者同源。"
+      />
+
       <el-table
-        v-if="stocks.length"
-        :data="stocks"
-        row-key="stockCode"
+        v-if="currentStocks.length"
+        :data="currentStocks"
+        :row-key="row => `${row.market}_${row.stockCode}`"
         stripe
         style="width:100%"
         @row-dblclick="onStockDblClick"
@@ -179,7 +208,7 @@
                 <div class="fundamental-head">
                   <span class="fundamental-title">基本面與產業</span>
                   <el-tag v-if="row.fundamental?.applicable" size="small" type="info" effect="plain">
-                    基本面 {{ row.fundamental.coverage ?? 0 }}/4
+                    基本面 {{ row.fundamental.coverage ?? 0 }}/{{ row.market === '美股' ? 3 : 4 }}
                   </el-tag>
                 </div>
                 <div v-if="!row.fundamental" class="muted">舊快照尚未含基本面欄位，請重新整理。</div>
@@ -335,7 +364,7 @@
         <el-table-column label="基本面／產業" min-width="150" align="center">
           <template #default="{ row }">
             <template v-if="row.fundamental?.applicable">
-              <el-tag size="small" type="info" effect="plain">基本面 {{ row.fundamental.coverage ?? 0 }}/4</el-tag>
+              <el-tag size="small" type="info" effect="plain">基本面 {{ row.fundamental.coverage ?? 0 }}/{{ row.market === '美股' ? 3 : 4 }}</el-tag>
               <div class="industry-inline">
                 {{ row.fundamental.industryName || '產業累積中' }}
                 <span v-if="row.fundamental.industryRevenueYoyPct != null">{{ fmtPct(row.fundamental.industryRevenueYoyPct) }}</span>
@@ -431,7 +460,7 @@
         </el-table-column>
       </el-table>
 
-      <el-empty v-else description="目前沒有可分析的台股標的">
+      <el-empty v-else :description="`目前沒有可分析的${marketTab}標的`">
         <el-button type="primary" @click="router.push('/stocks')">前往股票觀察新增標的</el-button>
       </el-empty>
     </el-card>
@@ -718,6 +747,8 @@ import { showDualExportResult } from '@/utils/dualExportMessage'
 import { useAuthStore } from '@/stores/authStore'
 import { useRouter } from 'vue-router'
 import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
+import TaiwanMap from '@/components/TaiwanMap.vue'
+import UsFlag from '@/components/UsFlag.vue'
 import { isClosePending, marketToday, mergeSseQuote } from '@/utils/displayQuote'
 
 const router = useRouter()
@@ -786,6 +817,11 @@ let disposed = false
 
 const market = computed(() => radar.value.market || {})
 const stocks = computed(() => radar.value.stocks || [])
+// 我的台股決策改為台股／美股兩個分頁（Requirement 64 / Task 295），比照 WatchStockView.vue 的 marketTab 模式
+const marketTab = ref('台股')
+const twStocks = computed(() => stocks.value.filter(s => s.market === '台股'))
+const usStocks = computed(() => stocks.value.filter(s => s.market === '美股'))
+const currentStocks = computed(() => marketTab.value === '美股' ? usStocks.value : twStocks.value)
 const informationGroups = computed(() => [
   { region: 'TW', label: '台灣', items: (radar.value.publicInformation || []).filter(item => item.region === 'TW') },
   { region: 'US', label: '美國', items: (radar.value.publicInformation || []).filter(item => item.region === 'US') }
@@ -1441,6 +1477,7 @@ onUnmounted(() => {
 .info-item a:hover { text-decoration: underline; }
 .info-item small { color: #64748b; }
 .stocks-card { margin-top: 16px; }
+.us-market-note { margin-bottom: 14px; }
 .stock-code { font-weight: 750; color: #0f172a; }
 .stock-name { margin-top: 2px; color: #64748b; font-size: 12px; }
 .stock-meta { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }

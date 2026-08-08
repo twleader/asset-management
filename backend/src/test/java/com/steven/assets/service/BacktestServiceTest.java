@@ -63,8 +63,10 @@ class BacktestServiceTest {
     private final DistributionAdjustedPriceService adjust = new DistributionAdjustedPriceService();
 
     private RadarInputAssembler assembler() {
+        // 第 4 參數為 Task 294 新增的 usIndexDailyHistoryRepo；重用既有的 usIndexRepo mock
+        // （本檔已為 BacktestService 的建構子注入它），本測試不涉及 IXIC 故不額外 stub。
         return new RadarInputAssembler(
-                new TechnicalIndicatorService(priceHistoryRepo, priceQuery, twseRepo), adjust, engine);
+                new TechnicalIndicatorService(priceHistoryRepo, priceQuery, twseRepo, usIndexRepo), adjust, engine);
     }
 
     private BacktestService service() {

@@ -34,7 +34,8 @@ class TechnicalIndicatorTaiexLiveBlendTest {
     @Mock private TwseIndexDailyHistoryRepository twseDailyRepo;
 
     private TechnicalIndicatorService service() {
-        return new TechnicalIndicatorService(historyRepo, priceQuery, twseDailyRepo);
+        // 第 4 參數為 Task 294 新增的 usIndexDailyHistoryRepo；本測試只涉及 TAIEX 融合，傳 null 即可。
+        return new TechnicalIndicatorService(historyRepo, priceQuery, twseDailyRepo, null);
     }
 
     /** 240 筆「由新到舊」完成日收盤：closePoint = base+i，i=0 為最新一筆。 */
