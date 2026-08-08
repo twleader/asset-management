@@ -901,11 +901,11 @@ async function recalculateRadar() {
 }
 
 function applyPriceUpdate(payload) {
-  if (payload?.market !== '台股' || !payload.stockCode) return
+  if (!['台股', '美股'].includes(payload?.market) || !payload.stockCode) return
 
   let matched = false
   const nextStocks = (radar.value.stocks || []).map(row => {
-    if (row.market !== '台股' || String(row.stockCode) !== String(payload.stockCode)) return row
+    if (row.market !== payload.market || String(row.stockCode).toUpperCase() !== String(payload.stockCode).toUpperCase()) return row
     matched = true
     const incoming = {
       ...row,
@@ -914,7 +914,7 @@ function applyPriceUpdate(payload) {
       changePercent: payload.changePercent ?? payload.changePct ?? row.changePercent,
       priceUpdatedAt: payload.updatedAt ?? row.priceUpdatedAt
     }
-    const merged = mergeSseQuote(row, incoming, marketToday('台股'))
+    const merged = mergeSseQuote(row, incoming)
     if (merged === row) return row
     return {
       ...row,
