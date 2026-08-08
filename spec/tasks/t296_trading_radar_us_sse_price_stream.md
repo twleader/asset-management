@@ -70,7 +70,7 @@ export function mergeSseQuote(current, incoming, today = marketToday(incoming?.m
   改完跑 `/spec-review`（含 `scripts/spec-check.sh` 與 `spec-auditor` 對抗式查證），修完 critical／major 後用 `bash .claude/hooks/spec-review-pass.sh` 記錄通過，才能進行以下步驟。
 
 - [ ] 296.2 **`applyPriceUpdate` 守門條件改為白名單**：第一行 `if (payload?.market !== '台股' || !payload.stockCode) return` 改為 `if (!['台股', '美股'].includes(payload?.market) || !payload.stockCode) return`。
-- [ ] 296.3 **逐列比對條件同步改為依 `payload.market` 比對，不得另建第二個白名單判斷**：`if (row.market !== '台股' || String(row.stockCode) !== String(payload.stockCode)) return row` 改為 `if (row.market !== payload.market || String(row.stockCode).toUpperCase() !== String(payload.stockCode).toUpperCase()) return row`。改用 `payload.market` 而非重複寫白名單，是因為此處執行到時 `payload.market` 已經過 296.2 的白名單守門，保證只會是 `'台股'` 或 `'美股'` 其中之一，直接比對即同時涵蓋兩個市場、不必重複邏輯。`String(...).toUpperCase()` 是防禦性正規化：後端 `TradingRadarService.addTarget()`（`backend/src/main/java/com/steven/assets/service/TradingRadarService.java:665`，`String code = rawCode.trim().toUpperCase();`）組裝 `radar.value.stocks` 時已對代碼正規化為大寫，但 SSE payload 的 `stockCode` 來源（`PricePoller.collectHeldStockCodes()`）是否同樣正規化未經確認，兩側都轉大寫可完全消除大小寫不一致導致比對失敗的風險，對台股純數字代碼（含 `00631L` 這類帶字母後綴的槓桿/反向 ETF）無副作用。
+- [ ] 296.3 **逐列比對條件同步改為依 `payload.market` 比對，不得另建第二個白名單判斷**：`if (row.market !== '台股' || String(row.stockCode) !== String(payload.stockCode)) return row` 改為 `if (row.market !== payload.market || String(row.stockCode).toUpperCase() !== String(payload.stockCode).toUpperCase()) return row`。改用 `payload.market` 而非重複寫白名單，是因為此處執行到時 `payload.market` 已經過 296.2 的白名單守門，保證只會是 `'台股'` 或 `'美股'` 其中之一，直接比對即同時涵蓋兩個市場、不必重複邏輯。`String(...).toUpperCase()` 是防禦性正規化：後端 `TradingRadarService.addTarget()`（`backend/src/main/java/com/steven/assets/service/TradingRadarService.java:665`，`String code = rawCode.trim().toUpperCase();`）組裝 `radar.value.stocks` 時已對代碼正規化為大寫，但 SSE payload 的 `stockCode` 來源（`StockSourceQuery.collectHeldStockCodes()`，`PricePoller` 呼叫端）是否同樣正規化未經確認，兩側都轉大寫可完全消除大小寫不一致導致比對失敗的風險，對台股純數字代碼（含 `00631L` 這類帶字母後綴的槓桿/反向 ETF）無副作用。
 - [ ] 296.4 **移除 `mergeSseQuote` 呼叫的第三個參數**：`const merged = mergeSseQuote(row, incoming, marketToday('台股'))` 改為 `const merged = mergeSseQuote(row, incoming)`，讓函式套用自身 `today = marketToday(incoming?.market)` 的預設值，依 `incoming.market`（即 `row.market`／`payload.market`）自動選對應時區。**不得**改成 `marketToday(row.market)` 或 `marketToday(payload.market)` 手動傳入——效果雖然相同，但等於重複維護一份呼叫端邏輯，未來若 `mergeSseQuote` 的預設值邏輯調整，手動傳參的呼叫點不會跟著變、會重新出現這個 bug 類別；直接省略參數才是與函式簽章本身同步的寫法。
 - [ ] 296.5 **不得修改 `openPriceStream()`、`radar` ref、`stocks`／`twStocks`／`usStocks`／`currentStocks` computed、或複合 `row-key` 綁定**：這些既有邏輯已正確支援多市場（`stocks` computed 本就不分市場、`usStocks` 已用 `market === '美股'` 過濾、row-key 已是 `` `${row.market}_${row.stockCode}` `` 複合鍵），本任務唯一要動的是 `applyPriceUpdate` 內部三處判斷（296.2-296.4），不得因為「順手」而改動其他無關程式碼。
 - [ ] 296.6 **`import` 陳述式不需改動**：`import { isClosePending, marketToday, mergeSseQuote } from '@/utils/displayQuote'`（現行第 752 行）三個具名匯入本次全部沿用，`frontend/src/utils/displayQuote.js` 本身不需要任何修改（`MARKET_ZONES` 已含 `美股: 'America/New_York'`）。
@@ -98,4 +98,27 @@ curl -s http://localhost/ -o /dev/null -w '%{http_code}\n'
 
 ## 完成報告
 
-（實作者做完後回填：實際改了哪些檔、驗證輸出、與原計畫的偏差及原因。）
+**實作日期：** 2026-08-09
+
+### 實際改動檔案
+
+- `spec/requirements.md`：Requirement 64 新增一條 AC（296.1），內容如任務檔背景與 296.1 所述，逐字比對錨點插入位置無誤，已通過獨立 `spec-auditor` 對抗式查證（0 critical／0 major／2 minor）。
+- `spec/tasks/t296_trading_radar_us_sse_price_stream.md`：本檔。另依 spec-auditor 指出的 minor 修正一處引用歸屬錯誤（`collectHeldStockCodes()` 誤植為 `PricePoller` 所屬，已改回其實際定義類別 `StockSourceQuery`）。
+- `frontend/src/views/TradingRadarView.vue`：`applyPriceUpdate(payload)` 三處修改（296.2-296.4）——守門條件改白名單 `!['台股', '美股'].includes(payload?.market)`；逐列比對改用 `row.market !== payload.market` 並對 `stockCode` 兩側加 `.toUpperCase()` 正規化；`mergeSseQuote(row, incoming, marketToday('台股'))` 移除第三個參數，改用函式自身依 `incoming.market` 推算時區的預設值。`openPriceStream()`、`radar`／`stocks`／`twStocks`／`usStocks`／`currentStocks`、row-key、`displayQuote` 的 import 皆未改動（296.5-296.6）。
+
+### spec-review
+
+已依 CLAUDE.md SDD 流程跑 `/spec-review`：`scripts/spec-check.sh` 於本次變更基準（`2542e900`）下 `BLOCK: 0 CHECK: 0`；派獨立 `spec-auditor` 逐維度查證，判定 0 critical／0 major／2 minor（一為上述引用歸屬錯誤已修正；另一為既有裸 `EventSource` 繞過一頁一 BFF 規範的既有技術債，`spec/design.md:524` 已記載並列入另立任務範圍，本次刻意不處理，理由見 spec-auditor 報告的自我挑戰段落）。已用 `bash .claude/hooks/spec-review-pass.sh` 記錄通過（雜湊 `d17002e71927`）後才開始 296.2 起的程式碼修改。
+
+### 驗證輸出
+
+- **Vue 語法／編譯驗證**：本 worktree 未安裝 `frontend/node_modules`（`package-lock.json` 與主 repo `frontend/` 完全一致，`diff` 無差異），臨時建立指向主 repo `frontend/node_modules` 的符號連結（唯讀使用，驗證後已移除），執行 `node ./node_modules/.bin/vite build`：`✓ built in 4.24s`，`TradingRadarView-*.js` 產出正常，無編譯錯誤或警告（僅既有的 chunk size 提醒，與本次改動無關）。
+- **既有單元測試**：`node --test src/utils/displayQuote.test.js` 全數通過（4 pass／0 fail）——涵蓋 `marketToday` 依市場時區換算與 `mergeSseQuote` 的收盤保護邏輯，驗證 296.4 移除手動參數後套用的預設值行為未被破壞。
+- 建置完成後已 `rm -rf dist` 並移除符號連結 `node_modules`，未留下任何建置產物或依賴目錄於本 worktree。
+- Docker rebuild 與瀏覽器實測：留待 `/commit-merge-push` 合併進 main 之後，依本專案慣例（已 merge 須從 main 的 worktree build）於 main 執行，避免從本 feature worktree build 洗掉其他已 merge 的變更。
+
+### 與原計畫的偏差及原因
+
+1. **執行環境比預期更動態。** 動工前確認 t293/294/295 已 commit（`5e44a6ae`），但緊接著發現 `origin/main` 已進一步推進為 `2542e900`（t293-295 的 --no-ff merge commit）且之後還多了一筆與本任務無關的 GDP 圖表 commit；已先 `git merge origin/main`（fast-forward，僅帶入 `GdpTwseView.vue` 的無關變更）同步後才動工，避免在落後的基準上疊加。
+2. **spec-review 進行中發現本 worktree 有其他並行活動**：完成 296.1 的 spec 修改、跑完 spec-auditor 查證並記錄通過之後，發現 `spec/requirements.md` 與本任務檔已被另一個對這個 worktree 有寫入權限的行程（commit `39d64891`）提前 commit——內容經核對與本次審查通過的版本完全一致（含逐字比對），僅缺 spec-auditor 之後才做的一處 minor 修正（`collectHeldStockCodes()` 歸屬類別），已在本次一併補上。這代表本 worktree 在執行期間並非獨佔，後續類似任務建議在動工前後都重新確認 `git log`／`git status`，不要假設兩次查看之間狀態不變。
+3. **296.3 的 `.toUpperCase()` 正規化為任務檔原定範圍內的防禦性寫法，非事後新增**：已依任務檔 296.3 原文實作，未縮減也未擴大範圍。
