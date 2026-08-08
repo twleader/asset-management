@@ -45,7 +45,16 @@
       <el-empty v-else :description="emptyDesc" />
     </el-card>
 
-    <el-card style="margin-top:20px">
+    <div style="margin-top:20px;display:flex;align-items:center;gap:6px">
+      <el-tooltip :content="showGdpCompareCard ? '隱藏台日韓人均 GDP 比較' : '顯示台日韓人均 GDP 比較'" placement="top">
+        <el-icon class="gdp-compare-toggle" @click="showGdpCompareCard = !showGdpCompareCard">
+          <component :is="showGdpCompareCard ? Hide : View" />
+        </el-icon>
+      </el-tooltip>
+      <span v-if="!showGdpCompareCard" class="gdp-compare-toggle-label">台日韓人均 GDP 比較（近 40 年）</span>
+    </div>
+
+    <el-card v-if="showGdpCompareCard" style="margin-top:8px">
       <template #header>
         <div style="display:flex;align-items:center;justify-content:space-between">
           <span class="section-title">台日韓人均 GDP 比較（近 40 年）</span>
@@ -247,6 +256,7 @@ import { showGdriveSelfCheckWarning } from '@/utils/gdriveSelfCheck'
 import { showDualExportResult } from '@/utils/dualExportMessage'
 import { useAuthStore } from '@/stores/authStore'
 import { ElMessage } from 'element-plus'
+import { View, Hide } from '@element-plus/icons-vue'
 
 use([CanvasRenderer, LineChart, BarChart, TitleComponent, TooltipComponent, LegendComponent,
      GridComponent, DataZoomComponent, MarkPointComponent])
@@ -259,6 +269,7 @@ const twGrowth = ref([])
 const jpGrowth = ref([])
 const krGrowth = ref([])
 const refreshing = ref(false)
+const showGdpCompareCard = ref(false) // 台日韓人均 GDP 比較圖預設隱藏，點左側小圖示鍵切換顯示
 
 // 指數日線（近 10 年）— 可切換台股大盤、美股四大指數與海外主要指數（英德韓日）
 const MARKETS = [
@@ -1122,6 +1133,9 @@ const compareChartOption = computed(() => ({
 
 <style scoped>
 .section-title { font-size: 15px; font-weight: 600; }
+.gdp-compare-toggle { cursor: pointer; color: #94a3b8; font-size: 16px; }
+.gdp-compare-toggle:hover { color: #475569; }
+.gdp-compare-toggle-label { font-size: 13px; color: #94a3b8; }
 .dialog-note { font-size: 12px; color: #64748b; line-height: 1.6; }
 .schedule-form { margin-bottom: 4px; }
 .schedule-hint { font-size: 12px; color: #94a3b8; line-height: 1.6; }
