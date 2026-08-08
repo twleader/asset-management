@@ -2,8 +2,10 @@ package com.steven.assets.service;
 
 import com.steven.assets.model.StockPriceHistory;
 import com.steven.assets.model.TwseIndexDailyHistory;
+import com.steven.assets.model.UsIndexDailyHistory;
 import com.steven.assets.repository.StockPriceHistoryRepository;
 import com.steven.assets.repository.TwseIndexDailyHistoryRepository;
+import com.steven.assets.repository.UsIndexDailyHistoryRepository;
 import com.steven.assets.util.MarketZones;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -29,6 +31,7 @@ public class TechnicalIndicatorService {
     private final StockPriceHistoryRepository historyRepo;
     private final PriceQueryService priceQuery;
     private final TwseIndexDailyHistoryRepository twseDailyRepo;
+    private final UsIndexDailyHistoryRepository usIndexDailyHistoryRepo;
 
     /** 0000 = 台股大盤特例：價格 / 指標來源走 twse_index_daily_history（含 OHLC）。 */
     private static boolean isTaiex(String code, String market) {
@@ -605,6 +608,95 @@ public class TechnicalIndicatorService {
         int period = 9;
         for (int i = period - 1; i < asc.size(); i++) {
             List<TwseIndexDailyHistory> window = asc.subList(i - period + 1, i + 1);
+            double highest = window.stream().mapToDouble(h -> h.getHighPoint() != null
+                    ? h.getHighPoint().doubleValue() : h.getClosePoint().doubleValue()).max().orElse(0);
+            double lowest = window.stream().mapToDouble(h -> h.getLowPoint() != null
+                    ? h.getLowPoint().doubleValue() : h.getClosePoint().doubleValue()).min().orElse(0);
+            double close = asc.get(i).getClosePoint().doubleValue();
+            double rsv = (highest == lowest) ? 50 : (close - lowest) / (highest - lowest) * 100;
+            k = k * 2.0 / 3 + rsv / 3.0;
+            d = d * 2.0 / 3 + k / 3.0;
+        }
+        return new KdValues(
+                BigDecimal.valueOf(k).setScale(2, RoundingMode.HALF_UP),
+                BigDecimal.valueOf(d).setScale(2, RoundingMode.HALF_UP));
+    }
+
+    /**
+     * IXIC（那斯達克綜合指數）大盤情境（Task 294）：供美股個股使用，取代台股組的 TAIEX 技術面。
+     *
+     * <p><b>刻意不併入即時價</b>：IXIC 目前無對應的 Redis 即時報價來源，且個股自身的即時價已由既有
+     * {@link PriceQueryService} 路徑處理，不影響個股本身的進出場判斷即時性——純用
+     * {@code us_index_daily_history} 表 {@code index_code='IXIC'} 的完成日序列。</p>
+     *
+     * <p>MA／KD 核心比照 {@link #computeAllForTaiex()} 的既有寫法（{@link #taiexSimpleMa}／
+     * {@link #taiexKd}），<b>不呼叫</b> {@link #computeFromSeries(List)}——該方法吃的是個股用的
+     * {@link StockPriceHistory}，{@code us_index_daily_history} 對應的是 {@link UsIndexDailyHistory}，
+     * 型別不同。擴充指標沿用既有 {@link #toRow}／{@link #extendedOf} 轉型後共用同一份序列核心，
+     * 不新增第四套遞迴。</p>
+     *
+     * <p>本方法為新增的獨立入口，由 {@code TradingRadarService} 直接呼叫——IXIC 不是「個股」，
+     * 沒有 stockCode，故不透過 {@link #computeAll(String, String)} 的 {@code isTaiex(...)} 分支。</p>
+     */
+    @Transactional(readOnly = true)
+    public FullIndicators computeAllForNasdaq() {
+        try {
+            List<UsIndexDailyHistory> desc = new ArrayList<>(
+                    usIndexDailyHistoryRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 240));
+            if (desc.isEmpty()) return FullIndicators.EMPTY;
+
+            BigDecimal ma5   = nasdaqSimpleMa(desc, 5);
+            BigDecimal ma20  = nasdaqSimpleMa(desc, 20);
+            BigDecimal ma60  = nasdaqSimpleMa(desc, 60);
+            BigDecimal ma240 = nasdaqSimpleMa(desc, 240);
+
+            KdValues currentKd = nasdaqKd(desc);
+            KdValues previousKd = desc.size() > 1
+                    ? nasdaqKd(desc.subList(1, desc.size()))
+                    : KdValues.EMPTY;
+            List<StockPriceHistory> ascRows = desc.reversed().stream()
+                    .map(d -> toRow(d, "IXIC", "美股"))
+                    .toList();
+            return new FullIndicators(
+                    ma20, ma60, ma240,
+                    currentKd.k(), currentKd.d(),
+                    previousKd.k(), previousKd.d(),
+                    ma5,
+                    extendedOf(ascRows, kdSeriesAsc(ascRows)));
+        } catch (Exception e) {
+            log.warn("compute NASDAQ (IXIC) indicators failed", e);
+            return FullIndicators.EMPTY;
+        }
+    }
+
+    /**
+     * 指數日線 → {@link StockPriceHistory} 的映射（{@link UsIndexDailyHistory} 版，Task 294）。
+     * 與 {@link #toRow(TwseIndexDailyHistory, String, String)} 同一慣例：只搬 high／low／close，
+     * stockCode／market 僅供序列核心內部運算識別，不對外洩漏。
+     */
+    private static StockPriceHistory toRow(UsIndexDailyHistory d, String stockCode, String market) {
+        return StockPriceHistory.builder()
+                .stockCode(stockCode).market(market).tradingDate(d.getTradingDate())
+                .closePrice(d.getClosePoint())
+                .highPrice(d.getHighPoint())
+                .lowPrice(d.getLowPoint())
+                .build();
+    }
+
+    private static BigDecimal nasdaqSimpleMa(List<UsIndexDailyHistory> desc, int days) {
+        if (desc.size() < days) return null;
+        double sum = 0;
+        for (int i = 0; i < days; i++) sum += desc.get(i).getClosePoint().doubleValue();
+        return BigDecimal.valueOf(sum / days).setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private static KdValues nasdaqKd(List<UsIndexDailyHistory> desc) {
+        if (desc.size() < 9) return KdValues.EMPTY;
+        List<UsIndexDailyHistory> asc = new ArrayList<>(desc).reversed();
+        double k = 50, d = 50;
+        int period = 9;
+        for (int i = period - 1; i < asc.size(); i++) {
+            List<UsIndexDailyHistory> window = asc.subList(i - period + 1, i + 1);
             double highest = window.stream().mapToDouble(h -> h.getHighPoint() != null
                     ? h.getHighPoint().doubleValue() : h.getClosePoint().doubleValue()).max().orElse(0);
             double lowest = window.stream().mapToDouble(h -> h.getLowPoint() != null

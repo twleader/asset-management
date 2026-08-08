@@ -116,7 +116,7 @@ public class TradingRadarExportService {
                 range.missingCount() > 0 ? ExportDoc.LineStyle.WARN : ExportDoc.LineStyle.SECTION_12);
 
         List<String> headers = List.of("快照時間", "規則版本", "大盤 regime", "大盤中文",
-                "大盤分數", "大盤 stale", "個股檔數", "略過非台股檔數");
+                "大盤分數", "大盤 stale", "個股檔數", "略過非台股非美股檔數");
         List<List<Object>> rows = new ArrayList<>();
         for (JsonNode s : range.snapshots()) {
             JsonNode m = s.path("market");

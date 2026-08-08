@@ -41,7 +41,8 @@ class TechnicalIndicatorSeriesAlignmentTest {
     @Mock private TwseIndexDailyHistoryRepository twseDailyRepo;
 
     private TechnicalIndicatorService service() {
-        return new TechnicalIndicatorService(historyRepo, priceQuery, twseDailyRepo);
+        // 第 4 參數為 Task 294 新增的 usIndexDailyHistoryRepo；本測試只涉及台股個股與 TAIEX，傳 null 即可。
+        return new TechnicalIndicatorService(historyRepo, priceQuery, twseDailyRepo, null);
     }
 
     private static final String CODE = "2330";

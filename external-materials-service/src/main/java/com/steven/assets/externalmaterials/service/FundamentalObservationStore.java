@@ -34,7 +34,6 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class FundamentalObservationStore {
 
-    private static final String TW_MARKET = "台股";
     private static final ZoneId TAIPEI = ZoneId.of("Asia/Taipei");
     private static final int VALUATION_MAX_AGE_DAYS = 10;
     private static final int PE_MIN_SAMPLES = 250;
@@ -55,8 +54,8 @@ public class FundamentalObservationStore {
      * {@code null}。這裡使用與 V11 resolver 相同的 as-of／revision 規則，逐因子檢查可形成性；因此
      * Yahoo 只補估值，FinMind 才會在 EPS／ROE／月營收仍不足時接手。</p>
      */
-    public FallbackNeed fallbackNeed(String code, Instant decisionInstant) {
-        if (code == null || code.isBlank() || decisionInstant == null) return FallbackNeed.ALL;
+    public FallbackNeed fallbackNeed(String code, String market, Instant decisionInstant) {
+        if (code == null || code.isBlank() || market == null || decisionInstant == null) return FallbackNeed.ALL;
         List<FinancialCoverage> financials = jdbc.query("""
                 SELECT fiscal_year, fiscal_quarter, eps, net_income_parent, equity_parent, provider
                 FROM (
@@ -72,7 +71,7 @@ public class FundamentalObservationStore {
                 """, (rs, ignored) -> new FinancialCoverage(
                 rs.getInt(1), rs.getInt(2), rs.getBigDecimal(3), rs.getBigDecimal(4),
                 rs.getBigDecimal(5), rs.getString(6)),
-                code, TW_MARKET, java.sql.Timestamp.from(decisionInstant),
+                code, market, java.sql.Timestamp.from(decisionInstant),
                 java.sql.Timestamp.from(decisionInstant));
         List<RevenueCoverage> revenues = jdbc.query("""
                 SELECT revenue_year, revenue_month, revenue_yoy_pct, provider
@@ -87,7 +86,7 @@ public class FundamentalObservationStore {
                 ORDER BY revenue_year DESC, revenue_month DESC
                 """, (rs, ignored) -> new RevenueCoverage(
                 rs.getInt(1), rs.getInt(2), rs.getBigDecimal(3), rs.getString(4)),
-                code, TW_MARKET, java.sql.Timestamp.from(decisionInstant),
+                code, market, java.sql.Timestamp.from(decisionInstant),
                 java.sql.Timestamp.from(decisionInstant));
         List<ValuationCoverage> valuations = jdbc.query("""
                 SELECT trading_date, pe_ratio, pe_loss_flag, provider
@@ -103,7 +102,7 @@ public class FundamentalObservationStore {
                 """, (rs, ignored) -> new ValuationCoverage(
                 rs.getDate(1).toLocalDate(), rs.getBigDecimal(2),
                 (Boolean) rs.getObject(3), rs.getString(4)),
-                code, TW_MARKET, java.sql.Timestamp.from(decisionInstant),
+                code, market, java.sql.Timestamp.from(decisionInstant),
                 java.sql.Timestamp.from(decisionInstant));
         return coverageNeed(financials, revenues, valuations, decisionInstant);
     }
@@ -242,12 +241,12 @@ public class FundamentalObservationStore {
         return Boolean.TRUE.equals(present);
     }
 
-    public boolean isEtf(String code) {
-        if (code == null) return false;
+    public boolean isEtf(String code, String market) {
+        if (code == null || market == null) return false;
         if (code.startsWith("00")) return true;
         Integer count = jdbc.queryForObject(
                 "SELECT count(*) FROM etf_nav_history WHERE stock_code=? AND market=?",
-                Integer.class, code, TW_MARKET);
+                Integer.class, code, market);
         return nz(count) > 0;
     }
 
@@ -308,7 +307,8 @@ public class FundamentalObservationStore {
     }
 
     private int appendValuation(StockFundamentalFetchClient.Valuation row) {
-        if (row.stockCode() == null || row.tradingDate() == null || row.sourceAvailableAt() == null) return 0;
+        if (row.stockCode() == null || row.market() == null || row.tradingDate() == null
+                || row.sourceAvailableAt() == null) return 0;
         ValuationLatest latest = jdbc.query("""
                         SELECT pe_ratio, pb_ratio, dividend_yield_pct, pe_loss_flag,
                                source_urls::text, source_available_at, availability_basis
@@ -317,7 +317,7 @@ public class FundamentalObservationStore {
                         ORDER BY observed_at DESC LIMIT 1
                         """, ps -> {
                     ps.setString(1, row.stockCode());
-                    ps.setString(2, TW_MARKET);
+                    ps.setString(2, row.market());
                     ps.setObject(3, row.tradingDate());
                     ps.setString(4, row.provider());
                 }, rs -> rs.next() ? valuationLatest(rs) : null);
@@ -328,14 +328,15 @@ public class FundamentalObservationStore {
                   (stock_code, market, trading_date, pe_ratio, pb_ratio, dividend_yield_pct,
                    pe_loss_flag, provider, source_urls, source_available_at, availability_basis, observed_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, now())
-                """, row.stockCode(), TW_MARKET, row.tradingDate(), row.peRatio(), row.pbRatio(),
+                """, row.stockCode(), row.market(), row.tradingDate(), row.peRatio(), row.pbRatio(),
                 row.dividendYieldPct(), row.peLossFlag(), row.provider(), urls,
                 Timestamp.from(row.sourceAvailableAt()), row.availabilityBasis());
     }
 
     private int appendFinancial(StockFundamentalFetchClient.Financial row) {
-        if (row.stockCode() == null || row.fiscalYear() <= 0 || row.fiscalQuarter() < 1
-                || row.fiscalQuarter() > 4 || row.sourceAvailableAt() == null) return 0;
+        if (row.stockCode() == null || row.market() == null || row.fiscalYear() <= 0
+                || row.fiscalQuarter() < 1 || row.fiscalQuarter() > 4
+                || row.sourceAvailableAt() == null) return 0;
         FinancialLatest latest = jdbc.query("""
                         SELECT eps, net_income_parent, equity_parent, source_urls::text,
                                source_available_at, availability_basis
@@ -344,7 +345,7 @@ public class FundamentalObservationStore {
                         ORDER BY observed_at DESC LIMIT 1
                         """, ps -> {
                     ps.setString(1, row.stockCode());
-                    ps.setString(2, TW_MARKET);
+                    ps.setString(2, row.market());
                     ps.setInt(3, row.fiscalYear());
                     ps.setInt(4, row.fiscalQuarter());
                     ps.setString(5, row.provider());
@@ -356,14 +357,15 @@ public class FundamentalObservationStore {
                   (stock_code, market, fiscal_year, fiscal_quarter, eps, net_income_parent, equity_parent,
                    provider, source_urls, source_available_at, availability_basis, observed_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, now())
-                """, row.stockCode(), TW_MARKET, row.fiscalYear(), row.fiscalQuarter(), row.cumulativeEps(),
+                """, row.stockCode(), row.market(), row.fiscalYear(), row.fiscalQuarter(), row.cumulativeEps(),
                 row.cumulativeNetIncomeParent(), row.equityParent(), row.provider(), urls,
                 Timestamp.from(row.sourceAvailableAt()), row.availabilityBasis());
     }
 
     private int appendRevenue(StockFundamentalFetchClient.Revenue row) {
-        if (row.stockCode() == null || row.revenueYear() <= 0 || row.revenueMonth() < 1
-                || row.revenueMonth() > 12 || row.sourceAvailableAt() == null) return 0;
+        if (row.stockCode() == null || row.market() == null || row.revenueYear() <= 0
+                || row.revenueMonth() < 1 || row.revenueMonth() > 12
+                || row.sourceAvailableAt() == null) return 0;
         RevenueLatest latest = jdbc.query("""
                         SELECT industry_name, revenue, prior_year_revenue, revenue_yoy_pct,
                                source_urls::text, source_available_at, availability_basis
@@ -372,7 +374,7 @@ public class FundamentalObservationStore {
                         ORDER BY observed_at DESC LIMIT 1
                         """, ps -> {
                     ps.setString(1, row.stockCode());
-                    ps.setString(2, TW_MARKET);
+                    ps.setString(2, row.market());
                     ps.setInt(3, row.revenueYear());
                     ps.setInt(4, row.revenueMonth());
                     ps.setString(5, row.provider());
@@ -385,7 +387,7 @@ public class FundamentalObservationStore {
                    prior_year_revenue, revenue_yoy_pct, provider, source_urls,
                    source_available_at, availability_basis, observed_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, now())
-                """, row.stockCode(), TW_MARKET, row.revenueYear(), row.revenueMonth(), row.industryName(),
+                """, row.stockCode(), row.market(), row.revenueYear(), row.revenueMonth(), row.industryName(),
                 row.revenue(), row.priorYearRevenue(), row.revenueYoyPct(), row.provider(), urls,
                 Timestamp.from(row.sourceAvailableAt()), row.availabilityBasis());
     }

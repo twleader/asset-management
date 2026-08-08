@@ -10,6 +10,7 @@ import com.steven.assets.repository.StockDividendHistoryRepository;
 import com.steven.assets.repository.StockPriceHistoryRepository;
 import com.steven.assets.repository.StockRepository;
 import com.steven.assets.repository.TwseIndexDailyHistoryRepository;
+import com.steven.assets.repository.UsIndexDailyHistoryRepository;
 import com.steven.assets.security.CurrentUserContext;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -29,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
@@ -47,6 +49,7 @@ class TradingRadarMarketFreshnessTest {
     @Mock private DistributionAdjustedPriceService adjustedPriceService;
     @Mock private AssetClassifier assetClassifier;
     @Mock private TwseIndexDailyHistoryRepository twseRepo;
+    @Mock private UsIndexDailyHistoryRepository usIndexDailyHistoryRepo;
     @Mock private StockPriceHistoryRepository priceHistoryRepo;
     @Mock private StockDividendHistoryRepository dividendHistoryRepo;
     @Mock private PriceQueryService priceQueryService;
@@ -74,6 +77,7 @@ class TradingRadarMarketFreshnessTest {
                 new RadarInputAssembler(indicatorService, adjustedPriceService, new TradingRadarRuleEngine()),
                 assetClassifier,
                 twseRepo,
+                usIndexDailyHistoryRepo,
                 priceHistoryRepo,
                 dividendHistoryRepo,
                 priceQueryService,
@@ -117,6 +121,12 @@ class TradingRadarMarketFreshnessTest {
                         BigDecimal.valueOf(20000), BigDecimal.valueOf(20000), BigDecimal.valueOf(20000),
                         BigDecimal.valueOf(60), BigDecimal.valueOf(50),
                         BigDecimal.valueOf(55), BigDecimal.valueOf(52), null, TechnicalIndicatorService.ExtendedIndicators.EMPTY));
+        // Task 294：buildUsMarket() 每輪都會計算（不論本輪有沒有美股標的），需同步 stub 避免 NPE；
+        // 本檔只驗證台股組 stale／intraday，美股組回 EMPTY／空序列即可（走 DATA_INCOMPLETE 分支，不影響斷言）。
+        lenient().when(usIndexDailyHistoryRepo.findTopNByIndexCodeOrderByTradingDateDesc(anyString(), anyInt()))
+                .thenReturn(List.of());
+        lenient().when(indicatorService.computeAllForNasdaq())
+                .thenReturn(TechnicalIndicatorService.FullIndicators.EMPTY);
     }
 
     private PriceQueryService.LivePrice liveOn(LocalDate tradingDate, BigDecimal price) {

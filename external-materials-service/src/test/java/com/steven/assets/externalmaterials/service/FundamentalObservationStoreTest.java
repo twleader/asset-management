@@ -19,6 +19,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -67,6 +68,45 @@ class FundamentalObservationStoreTest {
         assertThat(arguments.getValue()[9]).isEqualTo(Timestamp.from(AVAILABLE_AT));
     }
 
+    // ── 293.4 appendValuation／appendFinancial 對 market="美股" 寫入 market='美股'（測試 h）──
+
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void usMarketRowsWriteMarketColumnInsteadOfHardcodedTwMarket() {
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        when(jdbc.query(anyString(), any(PreparedStatementSetter.class), any(ResultSetExtractor.class)))
+                .thenAnswer(invocation -> null);
+        when(jdbc.update(anyString(), any(Object[].class))).thenReturn(1);
+        FundamentalObservationStore store = new FundamentalObservationStore(jdbc, new ObjectMapper());
+
+        store.append(new StockFundamentalFetchClient.Bundle(
+                List.of(new StockFundamentalFetchClient.Valuation(
+                        "AAPL", "美股", LocalDate.of(2026, 8, 7), new BigDecimal("28.40"),
+                        new BigDecimal("35.10"), new BigDecimal("0.50"), false,
+                        StockFundamentalFetchClient.YAHOO, List.of(SOURCE_URL), AVAILABLE_AT, "OBSERVED")),
+                List.of(new StockFundamentalFetchClient.Financial(
+                        "AAPL", "美股", 2026, 2, new BigDecimal("1.50"), 20_000_000_000L, 60_000_000_000L,
+                        StockFundamentalFetchClient.SEC_EDGAR, List.of(SOURCE_URL), AVAILABLE_AT, "PUBLISHED")),
+                List.of()));
+
+        ArgumentCaptor<Object[]> arguments = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbc, times(2)).update(anyString(), arguments.capture());
+        // 兩個 INSERT 語句的參數順序皆為 (stock_code, market, ...)，index 1 = market 欄位。
+        assertThat(arguments.getAllValues().get(0)[1]).isEqualTo("美股");
+        assertThat(arguments.getAllValues().get(1)[1]).isEqualTo("美股");
+    }
+
+    // ── 293.4 isEtf(code, market) 對既有美股 ETF 列回 true（測試 j）─────────────────
+
+    @Test
+    void isEtfReturnsTrueForExistingUsEtfRowInsteadOfMisjudgingAsNonEtf() {
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        when(jdbc.queryForObject(anyString(), eq(Integer.class), eq("VOO"), eq("美股"))).thenReturn(1);
+        FundamentalObservationStore store = new FundamentalObservationStore(jdbc, new ObjectMapper());
+
+        assertThat(store.isEtf("VOO", "美股")).isTrue();
+    }
+
     @Test
     @SuppressWarnings({"unchecked", "rawtypes"})
     void monthlyRevenueRoundingToStoredPrecisionIsNoOp() throws Exception {
@@ -110,10 +150,10 @@ class FundamentalObservationStoreTest {
         store.append(new StockFundamentalFetchClient.Bundle(
                 List.of(),
                 List.of(new StockFundamentalFetchClient.Financial(
-                        "2330", 2026, 2, new BigDecimal("30.50"), 600_000L, 1_000_000L,
+                        "2330", "台股", 2026, 2, new BigDecimal("30.50"), 600_000L, 1_000_000L,
                         StockFundamentalFetchClient.EXCHANGE, List.of(SOURCE_URL), AVAILABLE_AT, "PUBLISHED")),
                 List.of(new StockFundamentalFetchClient.Revenue(
-                        "2330", 2026, 7, "半導體業", 100_000L, 90_000L, new BigDecimal("11.11"),
+                        "2330", "台股", 2026, 7, "半導體業", 100_000L, 90_000L, new BigDecimal("11.11"),
                         StockFundamentalFetchClient.EXCHANGE, List.of(SOURCE_URL), AVAILABLE_AT, "PUBLISHED"))));
         store.appendIndustry("半導體業", 2026, 7, new BigDecimal("100000"),
                 new BigDecimal("90000"), new BigDecimal("11.11"), 1,
@@ -199,7 +239,7 @@ class FundamentalObservationStoreTest {
 
     private static StockFundamentalFetchClient.Bundle bundle(BigDecimal pe) {
         return new StockFundamentalFetchClient.Bundle(List.of(new StockFundamentalFetchClient.Valuation(
-                "2330", LocalDate.of(2026, 8, 7), pe, new BigDecimal("5.10"),
+                "2330", "台股", LocalDate.of(2026, 8, 7), pe, new BigDecimal("5.10"),
                 new BigDecimal("1.20"), false, StockFundamentalFetchClient.EXCHANGE,
                 List.of(SOURCE_URL), AVAILABLE_AT, "PUBLISHED")), List.of(), List.of());
     }
@@ -207,7 +247,7 @@ class FundamentalObservationStoreTest {
     private static StockFundamentalFetchClient.Bundle revenueBundle(BigDecimal yoy) {
         return new StockFundamentalFetchClient.Bundle(List.of(), List.of(), List.of(
                 new StockFundamentalFetchClient.Revenue(
-                        "2330", 2026, 7, "半導體業", 100_000L, 90_000L, yoy,
+                        "2330", "台股", 2026, 7, "半導體業", 100_000L, 90_000L, yoy,
                         StockFundamentalFetchClient.EXCHANGE,
                         List.of(SOURCE_URL), AVAILABLE_AT, "PUBLISHED")));
     }

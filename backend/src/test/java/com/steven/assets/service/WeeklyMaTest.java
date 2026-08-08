@@ -21,7 +21,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class WeeklyMaTest {
 
-    private final TechnicalIndicatorService service = new TechnicalIndicatorService(null, null, null);
+    // 第 4 參數為 Task 294 新增的 usIndexDailyHistoryRepo；本測試只涉及個股序列，傳 null 即可。
+    private final TechnicalIndicatorService service = new TechnicalIndicatorService(null, null, null, null);
 
     @Test
     void weeklyMaIsNullWhenFewerThanFiveRows() {

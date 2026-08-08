@@ -9,6 +9,7 @@ import com.steven.assets.repository.StockDividendHistoryRepository;
 import com.steven.assets.repository.StockPriceHistoryRepository;
 import com.steven.assets.repository.StockRepository;
 import com.steven.assets.repository.TwseIndexDailyHistoryRepository;
+import com.steven.assets.repository.UsIndexDailyHistoryRepository;
 import com.steven.assets.security.CurrentUserContext;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -21,6 +22,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -47,6 +49,7 @@ class TradingRadarServiceOwnerScopeTest {
     @Mock private DistributionAdjustedPriceService adjustedPriceService;
     @Mock private AssetClassifier assetClassifier;
     @Mock private TwseIndexDailyHistoryRepository twseRepo;
+    @Mock private UsIndexDailyHistoryRepository usIndexDailyHistoryRepo;
     @Mock private StockPriceHistoryRepository priceHistoryRepo;
     @Mock private StockDividendHistoryRepository dividendHistoryRepo;
     @Mock private PriceQueryService priceQueryService;
@@ -72,6 +75,7 @@ class TradingRadarServiceOwnerScopeTest {
                 new RadarInputAssembler(indicatorService, adjustedPriceService, new TradingRadarRuleEngine()),
                 assetClassifier,
                 twseRepo,
+                usIndexDailyHistoryRepo,
                 priceHistoryRepo,
                 dividendHistoryRepo,
                 priceQueryService,
@@ -98,8 +102,13 @@ class TradingRadarServiceOwnerScopeTest {
                 new TradingRadarMarketContextService.Resolved(
                         TradingRadarMarketContextService.MarketContext.EMPTY, List.of()));
         lenient().when(twseRepo.findTopNByOrderByTradingDateDesc(241)).thenReturn(List.of());
+        // Task 294：buildUsMarket() 每輪都會計算（不論本輪有沒有美股標的），需同步 stub 避免 NPE。
+        lenient().when(usIndexDailyHistoryRepo.findTopNByIndexCodeOrderByTradingDateDesc(anyString(), anyInt()))
+                .thenReturn(List.of());
         lenient().when(priceQueryService.getLive(anyString(), anyString())).thenReturn(Optional.empty());
         lenient().when(indicatorService.computeAll(anyString(), anyString()))
+                .thenReturn(TechnicalIndicatorService.FullIndicators.EMPTY);
+        lenient().when(indicatorService.computeAllForNasdaq())
                 .thenReturn(TechnicalIndicatorService.FullIndicators.EMPTY);
         lenient().when(snapshotRepo.findLatestWithStocks()).thenReturn(Optional.empty());
         lenient().when(snapshotRepo.findLatestWithStocksByOwnerUserId(anyLong())).thenReturn(Optional.empty());
