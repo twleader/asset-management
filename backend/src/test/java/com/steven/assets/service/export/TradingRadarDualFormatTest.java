@@ -160,12 +160,12 @@ class TradingRadarDualFormatTest {
         assertThat(signals.get(0).asText()).isEqualTo("均線多頭排列");
 
         // fixture 的 market 沒有 reasons 以外的陣列欄之一 → 缺欄位時 Excel 空字串格、JSON null
-        // index 86＝V11 追加 28 個基本面／產業欄後的「逆勢條件」。
+        // index 87＝基本面／產業欄補上 PE 值後的「逆勢條件」。
         Sheet s = GoldenWorkbooks.read(service.exportForOwner(1L, 0L, 1L)).getSheet("個股決策");
-        assertThat(s.getRow(0).getCell(86).getStringCellValue())
+        assertThat(s.getRow(0).getCell(87).getStringCellValue())
                 .as("鎖住欄序：這個 index 一旦被插欄推移，下面兩條斷言會驗到別的欄位").isEqualTo("逆勢條件");
-        assertThat(s.getRow(1).getCell(86).getCellType()).isEqualTo(CellType.STRING);
-        assertThat(s.getRow(1).getCell(86).getStringCellValue()).isEmpty();
+        assertThat(s.getRow(1).getCell(87).getCellType()).isEqualTo(CellType.STRING);
+        assertThat(s.getRow(1).getCell(87).getStringCellValue()).isEmpty();
         JsonNode stockRows = mapper.readTree(jsonRenderer.render(service.radarDoc(1L, 0L, 1L)))
                 .at("/sheets/2/tables/0/rows");
         assertThat(stockRows.get(0).get("逆勢條件").isNull()).isTrue();
@@ -212,10 +212,28 @@ class TradingRadarDualFormatTest {
             "EPS TTM年增%", "EPS來源", "EPS來源網址", "EPS資料時點",
             "近似ROE%", "ROE來源", "ROE來源網址", "ROE資料時點",
             "近3月營收年增%", "營收來源", "營收來源網址", "營收資料時點",
-            "PE自身分位", "PE可信虧損", "估值來源", "估值來源網址", "估值資料時點",
+            "PE值", "PE自身分位", "PE可信虧損", "估值來源", "估值來源網址", "估值資料時點",
             "產業", "產業營收年增%", "產業公司數", "產業資料年月", "產業來源", "產業來源網址", "產業資料時點",
             "public_info_*個股證據", "public_info_*產業證據",
-            "短期支持訊號", "短期風險提醒", "中期支持訊號", "中期風險提醒", "逆勢條件", "逆勢風險");
+            "短期支持訊號", "短期風險提醒", "中期支持訊號", "中期風險提醒", "逆勢條件", "逆勢風險",
+            "短期證據信心", "中期證據信心", "短期下檔風險", "中期下檔風險",
+            "短期風險覆蓋", "中期風險覆蓋", "中期候選動作", "短期候選動作",
+            "證據閘門原因", "下一配息日", "配息證據狀態", "配息已知時間",
+            "PB值", "殖利率%", "PB自身分位", "殖利率自身分位", "估值Composite", "估值覆蓋",
+            "EPS趨勢", "ROE近似fallback",
+            "資產分類來源", "工具類型", "工具類型來源", "工具類型完整",
+            "股票風格", "股票風格來源", "股票風格完整",
+            "債券期別", "債券期別來源", "債券期別完整",
+            "報價幣別", "報價幣別來源", "報價幣別完整",
+            "輪廓底層幣別", "底層幣別來源", "幣別資料完整",
+            "輪廓完整", "輪廓缺漏",
+            "波動60日標準差比", "波動資料時點", "波動來源",
+            "接受價格時點", "接受價格來源", "接受價格品質", "即時價採用",
+            "折溢價時點", "折溢價來源", "折溢價stale",
+            "利率證據狀態", "利率證據來源", "利率缺漏原因",
+            "利率批次ID", "利率批次完整", "利率Tenor", "利率值%", "利率曲線日",
+            "利率Provider", "利率可得時間", "利率可得基礎", "利率抓取時間",
+            "利率落後日數", "利率時效說明", "利率來源Manifest", "資產分類完整", "底層幣別完整");
 
     private static List<String> headerRow(Sheet sheet) {
         List<String> out = new ArrayList<>();
@@ -250,6 +268,23 @@ class TradingRadarDualFormatTest {
             "J9", "K3D2", "RSV", "EMA12", "EMA26", "DIF", "MACD", "OSC",
             "RSI5", "RSI10", "BIAS10", "BIAS20", "BIAS10-BIAS20", "W%R9");
 
+    private static final List<String> DETAIL_HEADERS_EXPECTED = List.of(
+            "PB值", "殖利率%", "PB自身分位", "殖利率自身分位", "估值Composite", "估值覆蓋",
+            "EPS趨勢", "ROE近似fallback",
+            "資產分類來源", "工具類型", "工具類型來源", "工具類型完整",
+            "股票風格", "股票風格來源", "股票風格完整",
+            "債券期別", "債券期別來源", "債券期別完整",
+            "報價幣別", "報價幣別來源", "報價幣別完整",
+            "輪廓底層幣別", "底層幣別來源", "幣別資料完整",
+            "輪廓完整", "輪廓缺漏",
+            "波動60日標準差比", "波動資料時點", "波動來源",
+            "接受價格時點", "接受價格來源", "接受價格品質", "即時價採用",
+            "折溢價時點", "折溢價來源", "折溢價stale",
+            "利率證據狀態", "利率證據來源", "利率缺漏原因",
+            "利率批次ID", "利率批次完整", "利率Tenor", "利率值%", "利率曲線日",
+            "利率Provider", "利率可得時間", "利率可得基礎", "利率抓取時間",
+            "利率落後日數", "利率時效說明", "利率來源Manifest", "資產分類完整", "底層幣別完整");
+
     @Test
     @DisplayName("兩張分頁的表頭逐字等於預期的 V11 欄位清單")
     void 表頭逐字與欄數() throws Exception {
@@ -260,9 +295,44 @@ class TradingRadarDualFormatTest {
         assertThat(headerRow(wb.getSheet("大盤總覽")))
                 .as("大盤總覽 44 欄").containsExactlyElementsOf(MARKET_HEADERS_V11);
         assertThat(headerRow(wb.getSheet("個股決策")))
-                .as("個股決策 88 欄").containsExactlyElementsOf(STOCK_HEADERS_V11);
+                .as("個股決策 152 欄").containsExactlyElementsOf(STOCK_HEADERS_V11);
+        assertThat(STOCK_HEADERS_V11.subList(STOCK_HEADERS_V11.size() - 12 - DETAIL_HEADERS_EXPECTED.size(),
+                STOCK_HEADERS_V11.size() - DETAIL_HEADERS_EXPECTED.size()))
+                .containsExactly(
+                        "短期證據信心", "中期證據信心", "短期下檔風險", "中期下檔風險",
+                        "短期風險覆蓋", "中期風險覆蓋", "中期候選動作", "短期候選動作",
+                        "證據閘門原因", "下一配息日", "配息證據狀態", "配息已知時間");
+        assertThat(STOCK_HEADERS_V11.subList(STOCK_HEADERS_V11.size() - DETAIL_HEADERS_EXPECTED.size(),
+                STOCK_HEADERS_V11.size())).containsExactlyElementsOf(DETAIL_HEADERS_EXPECTED);
         assertThat(wb.getSheet("快照索引").getRow(1).getLastCellNum())
                 .as("快照索引一欄都不動").isEqualTo((short) 8);
+    }
+
+    @Test
+    @DisplayName("PE 值與完整 Treasury RateContext 同步輸出到 Excel／JSON")
+    void pe與TreasuryContext雙格式() throws Exception {
+        when(store.range(1L, 0L, 1L)).thenReturn(
+                new TradingRadarSnapshotStore.SnapshotRange(List.of(snapshotNodeWithTreasury()), 1, 0));
+
+        Sheet sheet = GoldenWorkbooks.read(service.exportForOwner(1L, 0L, 1L)).getSheet("個股決策");
+        Row row = sheet.getRow(1);
+        assertThat(row.getCell(STOCK_HEADERS_V11.indexOf("PE值")).getNumericCellValue()).isEqualTo(21.75);
+        assertThat(row.getCell(STOCK_HEADERS_V11.indexOf("利率批次ID")).getNumericCellValue()).isEqualTo(42.0);
+        assertThat(row.getCell(STOCK_HEADERS_V11.indexOf("利率批次完整")).getStringCellValue()).isEqualTo("是");
+        assertThat(row.getCell(STOCK_HEADERS_V11.indexOf("利率值%")).getNumericCellValue()).isEqualTo(4.1234);
+        assertThat(row.getCell(STOCK_HEADERS_V11.indexOf("利率來源Manifest")).getStringCellValue())
+                .isEqualTo("M3 ｜ https://treasury.example/m3\nY10 ｜ https://treasury.example/y10");
+
+        JsonNode jsonRow = mapper.readTree(jsonRenderer.render(service.radarDoc(1L, 0L, 1L)))
+                .at("/sheets/2/tables/0/rows").get(0);
+        assertThat(jsonRow.get("PE值").decimalValue()).isEqualByComparingTo("21.75");
+        assertThat(jsonRow.get("利率批次完整").asBoolean()).isTrue();
+        assertThat(jsonRow.get("利率Tenor").asText()).isEqualTo("Y10");
+        assertThat(jsonRow.get("利率值%").decimalValue()).isEqualByComparingTo("4.1234");
+        assertThat(jsonRow.get("利率可得基礎").asText()).isEqualTo("CONSERVATIVE_NEXT_MIDNIGHT_ET");
+        assertThat(jsonRow.get("利率來源Manifest")).containsExactly(
+                mapper.getNodeFactory().textNode("M3 ｜ https://treasury.example/m3"),
+                mapper.getNodeFactory().textNode("Y10 ｜ https://treasury.example/y10"));
     }
 
     @Test
@@ -327,6 +397,22 @@ class TradingRadarDualFormatTest {
         assertThat(json.at("/sheets/1/tables/0/rows").get(0).get("週線MA5").isNull()).isTrue();
         assertThat(json.at("/sheets/1/tables/0/rows").get(0).get("J9").isNull()).isTrue();
         assertThat(json.at("/sheets/2/tables/0/rows").get(0).get("週線MA5").isNull()).isTrue();
+
+        // t309 per-field profile flags are absent from pre-t309 snapshots.  The
+        // appended Excel columns must stay blank and the JSON projection null,
+        // never defaulting an unknown historical profile to complete.
+        Row legacyStock = wb.getSheet("個股決策").getRow(1);
+        assertThat(legacyStock.getCell(STOCK_HEADERS_V11.indexOf("資產分類完整")).getCellType())
+                .isEqualTo(CellType.STRING);
+        assertThat(legacyStock.getCell(STOCK_HEADERS_V11.indexOf("資產分類完整")).getStringCellValue())
+                .isEmpty();
+        assertThat(legacyStock.getCell(STOCK_HEADERS_V11.indexOf("底層幣別完整")).getCellType())
+                .isEqualTo(CellType.STRING);
+        assertThat(legacyStock.getCell(STOCK_HEADERS_V11.indexOf("底層幣別完整")).getStringCellValue())
+                .isEmpty();
+        JsonNode legacyStockRow = json.at("/sheets/2/tables/0/rows").get(0);
+        assertThat(legacyStockRow.get("資產分類完整").isNull()).isTrue();
+        assertThat(legacyStockRow.get("底層幣別完整").isNull()).isTrue();
     }
 
     @Test
@@ -401,6 +487,28 @@ class TradingRadarDualFormatTest {
         ObjectNode m = (ObjectNode) root.path("market");
         m.putArray("reasons").add("均線多頭排列").add("量增");
         m.putArray("risks").add("KD 偏高");
+        return root;
+    }
+
+    private static JsonNode snapshotNodeWithTreasury() {
+        ObjectNode root = (ObjectNode) snapshotNode();
+        ObjectNode stock = (ObjectNode) root.path("stocks").get(0);
+        stock.putObject("fundamental").put("peValue", 21.75);
+        ObjectNode context = stock.putObject("evidence").putObject("treasuryRateContext");
+        context.put("batchId", 42L);
+        context.put("complete", true);
+        context.put("tenor", "Y10");
+        context.put("value", 4.1234);
+        context.put("curveDate", "2026-07-30");
+        context.put("provider", "US_TREASURY");
+        context.put("availableAt", "2026-07-31T04:00:00Z");
+        context.put("availabilityBasis", "CONSERVATIVE_NEXT_MIDNIGHT_ET");
+        context.put("fetchedAt", "2026-07-31T07:00:00Z");
+        context.put("lagDays", 1L);
+        context.put("staleReason", "CURVE_LAG_1D");
+        ObjectNode manifest = context.putObject("sourceManifest");
+        manifest.put("Y10", "https://treasury.example/y10");
+        manifest.put("M3", "https://treasury.example/m3");
         return root;
     }
 

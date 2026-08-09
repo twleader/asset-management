@@ -2114,6 +2114,8 @@ rclone config reconnect GDriveOutput: --drive-auth-url "https://accounts.google.
 
 **User Story:** 作為同時持有台積電與債券 ETF 的投資人，我希望「超買」「超賣」的判定對每一檔標的都同樣有意義，而不是對高波動個股天天成立、對債券 ETF 十年都不成立；讓「極端超賣不殺低」這道保護對我的每一檔持股都真的會啟動。
 
+> **V13 整併修訂（Requirement 65／Task 308 優先於下方歷史落地順序）：** normalized bias 先作 candidate，取代 V12 的 2/98 分位決策路徑但不得與之 OR 疊加；sigma floor 與倍數只能由 calibration 選擇，holdout/walk-forward 未通過就維持 disclosure-only。t274 不單獨升版或部署，最終只升一次 `TW_RULES_V13`。下方 V9 時期的量測表保留為缺口證據，不得當成目前 runtime 版本或直接 promotion 證據。
+
 > **本 Requirement 修正的是已量測到的結構性失效，不是調參。**
 >
 > **量測口徑（必須與 production 同源，否則數字會錯得很嚴重）**：以 `DistributionAdjustedPriceService` 的輸出（**還原權息 ＋ 還原分割**）逐日實算季線乖離 `(adjClose − MA60) / MA60`，先剔除 `close_price <= 0` 的髒列（台股實測 **175 列**，見下方附註），暖機排除前 240 筆（與 Requirement 56 的回測框架一致）。
@@ -2164,7 +2166,7 @@ rclone config reconnect GDriveOutput: --drive-auth-url "https://accounts.google.
   >
   > 正規化本身確實有效：`normalizedBias` 的標準差在各標的間收斂到 **3.37–5.73**（1.7 倍離散），而原始 `bias` 的標準差是 **1.60–21.37**（13 倍離散）。
 
-- [ ] **正規化後的驗收標準（本 Requirement 是否達成目的的客觀判準）**：改動後須重跑上表的十年逐日統計並斷言：
+- [ ] **正規化後的診斷與樣本外驗收**：candidate 須重跑上表的逐日統計並列出觸發率離散，但不得為達成「每檔非零」而選擇過窄門檻；正式 promotion 以 t308 holdout/walk-forward 的 paired/pooled 報酬與 downside 非劣為準。下列兩項改為診斷目標，不可凌駕樣本外結果：
 
   1. **不得再有任何一檔標的的「乖離側極端條件」觸發率為 0.00%**——這是核心目的（消除死碼），實測在 2σ–14σ 的**任一**倍數下皆可達成。
   2. **離散程度須顯著收斂**：最高／最低觸發率的比值，須從現況的「無限大」（有六檔為 0）降到**單一數量級內**（實測 12σ 時為 32 倍、10σ 時為 7.8 倍）。
@@ -2180,12 +2182,12 @@ rclone config reconnect GDriveOutput: --drive-auth-url "https://accounts.google.
   - **不得**在任何文案宣稱本項做完後保護對所有標的全面生效。
   - KD 側的死區是否要處理（以及如何處理），**不在本 Requirement 範圍**——`narrowKdBand` 的存在有其獨立且已實證的理由（見下一條），貿然放寬會讓債券 ETF 大量誤發訊號。若要處理須另立 Requirement，並以 Requirement 56 的框架先量測。
 - [ ] **`kdBandWidthPercent` 的窄幅失效判定維持不變**：現行「9 日高低帶寬度 < 2% 時 KD 全面失效」（`KD_BAND_MIN_PERCENT`）是**同一個問題的另一個面向**，且已有實測依據（00719B 近 60 個交易日的 9 日高低帶平均寬度僅 1.011%，其 `K=90.76` 實質只代表「比 9 日低點高 0.37 元」）。本 Requirement **不改動該機制**，兩者並存：波動度正規化處理「乖離的尺度」，窄幅失效處理「KD 在雜訊上飽和」。**不得**以「已有正規化」為由移除窄幅保護——KD 的飽和是值域被壓縮，不是尺度問題，正規化不會修好它。
-- [ ] **`RULE_VERSION` 升版與通知基準重建**：一般任務一律先讀實作當下 `TradingRadarRuleEngine.RULE_VERSION`，再升一級，不得依歷史 spec 猜測。Task 291 已在開始實作前確認 active baseline 為 `TW_RULES_V9`，故該次升版明定為 `TW_RULES_V10`；Task 292 再以已實作的 V10 為基礎升為 `TW_RULES_V11`。其後 t274／t275 仍須讀當時實際值再 +1。`TradingRadarNotificationService` 以字串相等判斷基準是否有效，不同規則不得共用版本名，否則升級首輪可能寄出假通知。
+- [ ] **`RULE_VERSION` 與通知基準整併至 V13**：t274 不單獨升版。t274／t275／t309／t307 全部完成、t308 promotion 結果確定後，backend/DTO/frontend/tests 一次升為 `TW_RULES_V13`。`TradingRadarNotificationService` 以 rule-version 不同視為未初始化；部署首輪只建新 baseline 不寄信，須實機驗證。
 
   **同步點共五處**（以 `grep -ran "<當下版本字串>"` 取得，`-a` 不可省略）：`TradingRadarRuleEngine.java` 本體常數、`frontend/src/views/TradingRadarView.vue` 的 `radar` ref 初始值與顯示 fallback（兩處）、`backend/.../dto/TradingRadarDto.java` 的 Javadoc、`backend/src/test/.../TradingRadarRuleEngineTest.java` 的斷言（連同其測試方法名一併改）。**grep 另會命中 `TradingRadarRuleEngine.java` 的權重表註解（可不改）與 `db/changelog/changes/v1.83.0-*.sql` 的 `--comment`（絕不可改——Liquibase checksum 含註解，改了會 `ValidationFailed` 並讓 business-services 進入 crash loop）。**
 
-  本次改變了 `TimingState` 的判定基準，新舊版本的 `TimingState` 與動作**不可直接比較**，須揭露。Requirement 44 的通知基準須全部重建——此機制已由 `trading_radar_notification_setting.rule_version` 承接（版本不符即視同未初始化），不需另寫 migration。
-- [ ] **驗證**：測試至少覆蓋——(a) 同一個 `bias` 百分比在高波動與低波動標的上得到不同的 `TimingState`（這是本需求的核心行為，須以兩組 `StockInput` 直接斷言）；(b) `σ` 不可得時回退固定門檻且輸出揭露文案；(c) `σ` 低於下限時以下限代入；(d) 原始 `ma60BiasPercent` 的輸出值未被改動（回歸）；(e) 窄幅 KD 失效機制未被改動（回歸）；(f) 除息事件不使 `σ` 膨脹（以含配息的構造序列斷言）。另須以內部端點對全部台股標的實跑十年統計，實測驗收上述**「無 0.00%」與「離散收斂至單一數量級」**兩條判準（**不是**「無 >5%」——該項已降為參考指標，見上方驗收條）。
+  V13 改變 `TimingState`、證據閘門與多項輸入，新舊分數/動作不可直接比較；通知 baseline 重建沿用既有 rule-version 機制，不另寫 migration。
+- [ ] **驗證**：測試至少覆蓋——(a) 同一 bias 在高/低波動標的得到不同 normalized value；(b) sigma 不可得時只回固定門檻、降低 confidence；(c) sigma floor；(d) raw bias 不變；(e) KD narrow-band 不變；(f) 配息不使 adjusted-return sigma 膨脹；(g) V12 percentile 在 normalized path 啟用後不再影響 action；(h) candidate disabled 時 V12 行為逐位不變。實跑須同時提供觸發率離散與 t308 holdout/walk-forward promotion/rejection，不得只用全期間觸發率宣稱改善。
 
 ---
 
@@ -2193,18 +2195,14 @@ rclone config reconnect GDriveOutput: --drive-auth-url "https://accounts.google.
 
 **User Story:** 作為持有 00679B／00697B／00719B／00865B 等債券 ETF 的投資人，我希望系統評估這些標的時看的是決定其價格的利率因素，而不是只拿股票用的均線與 KD 套上去。
 
-> **本 Requirement 修正的是一個結構性缺口。** 以 `federal_funds`／`policy_rate`／`treasury`／`TNX`／`yieldCurve`／`FOMC` 六個識別字掃 `backend/src/main`、`external-materials-service/src/main`、`db` 三處，**零命中**（唯一的 `treasury` 命中是 `AssetClassifier.java` 的一句中文註解，非資料路徑）。債券 ETF 的價格主要由市場利率決定，而 `TW_RULES_V9` 的 14 個因子中沒有任何一個與利率有關——等同於用股票的均線與 KD 在評債券。此缺口與 Requirement 57 的乖離尺度失效**互相加乘**：債券 ETF 既拿不到利率資訊，其極端態保護又從未啟動過。
+> **本 Requirement 修正的是一個結構性缺口。** 此缺口最早在 `TW_RULES_V9` 盤點時確認，至 V12 仍未有 Treasury rate factor。債券 ETF 的價格受利率與匯率共同影響，只用股票型技術指標會漏掉底層債券風險；此缺口又會與 Requirement 57 的乖離尺度失效互相加乘。
 
 **Acceptance Criteria:**
 
-- [ ] **資料來源與可得性（已實測）**：美國公債殖利率取自 Yahoo Finance v8 chart API，四個代碼 `^IRX`（13 週）、`^FVX`（5 年）、`^TNX`（10 年）、`^TYX`（30 年）。實測（2026-08-01）四者皆回 HTTP 200、**各 2514 筆**、涵蓋 2016-08-01 ~ 2026-07-31，`close` 的 null 比例約 0.04%。管道沿用既有的 `MacroDataFetchClient.fetchUsIndexDaily()`（`external-materials-service/src/main/java/com/steven/assets/externalmaterials/client/MacroDataFetchClient.java`），該方法已處理 `^` 需 URL-encode 為 `%5E`、以 curl 子程序規避 Yahoo 對 Java HTTP/2 fingerprint 的封鎖、以及依 `meta.exchangeTimezoneName` 轉交易日。**User-Agent 必須為短字串 `Mozilla/5.0`**，長 Chrome UA 會被 WAF 回 429。
-- [ ] **殖利率代碼另開一張 Map，不併入 `US_INDEX_YAHOO`**：`US_INDEX_YAHOO` 現以 `Map.of(...)` 建構且**已有 9 對**，而 `java.util.Map.of` 的多載上限為 **10 對**。
-
-  **採「另開 `TREASURY_YAHOO` 並新增 `fetchTreasuryYieldDaily()`」**，理由：(a) 語意分離——指數點數與殖利率百分比是兩種量綱，下游落地表也不同；(b) 兩張表各 ≤ 10 對，**`Map.of` 完全不必改動**；(c) 不會讓 `design.md` 中 `/internal/macro/us-index` 的 `code ∈ {9 個}` 值域敘述靜默失準。
-
-  > **⚠ 若實作者改為併入單一 Map（不建議）**，則會變成 13 對而**編譯必然失敗**，屆時必須改為 `Map.ofEntries(Map.entry(...), ...)`，並同步更新 `design.md` 的 `code` 值域敘述。兩條路徑擇一，**不得**寫成「無論如何都要改 `Map.ofEntries`」——採分表時那是假的約束。
-- [ ] **殖利率獨立建表，不塞進 `us_index_daily_history`**：新增 `treasury_yield_daily`，業務唯一鍵 `(tenor, trading_date)`，欄位 `tenor`（`varchar`，值域 `M3`／`Y5`／`Y10`／`Y30`）、`trading_date`（`date`）、`yield_percent`（`numeric(10,4)`，`4.745` 代表 4.745%）、`updated_at`。**不得**併入既有 `us_index_daily_history`——該表的欄位是 `open_point`／`high_point`／`low_point`／`close_point`，語意為「指數點數」；殖利率是百分比，兩者量綱不同，混存會讓下游無從分辨一個 `4.745` 是點數還是百分率。本表為**全域公開行情資料**，比照 `stock_price_history` 不帶 `owner_user_id`、不套 `@Filter`。寫入採 upsert（重複抓取須冪等）。
-- [ ] **歷史一次補齊，之後每日增量**：首次執行須落地全部 10 年歷史（實測各 2514 筆，四個 tenor 合計約 10,056 筆）。之後每日增量抓取。**須提供手動觸發端點**供部署後驗證與失敗補救。
+- [ ] **資料來源與可得性**：primary source 為美國財政部官方 Daily Treasury Par Yield Curve Rates CSV／XML，取 3 Month／5 Year／10 Year／30 Year。batch 與每個 tenor row 都保存 provider、source URL（Yahoo fallback 為四個各自 URL 的 manifest）、trading date、source available/fetched time。Yahoo `^IRX`／`^FVX`／`^TNX`／`^TYX` 只作官方來源短暫失敗時的整批 fallback；同一日期/批次不得跨 provider 拼 tenor，官方補到後 decision resolver 必須優先官方。
+- [ ] **fallback adapter 與指數語意分離**：Yahoo fallback 另開 `TREASURY_YAHOO` 與獨立 fetch method，不併入 `US_INDEX_YAHOO`；指數點數與殖利率百分比不可共用量綱或落地表。官方 adapter 為主要路徑，不得因既有 Yahoo helper 較方便就倒置優先順序。
+- [ ] **殖利率以完整 curve batch 落地，不塞進指數表**：`treasury_yield_batch` 保存 curve date/provider/source/available-at basis/fetched-at/complete/content hash，`treasury_yield_daily` 以 `(batch_id,tenor)` 保存 M3/Y5/Y10/Y30 與 yield 及每 tenor source URL。batch header 與四 tenor 同一 transaction 原子落地，resolver 另確認四個 distinct tenor 均存在且合法；合法 0 可存，只拒絕 null/<0/>100。相同內容 no-op、修正版 append；resolver 只選 decision instant 前 available 的單一 complete batch，先最新 curve date、同日 official 優先 fallback，四 tenor 禁止混 provider。全域資料不帶 owner。
+- [ ] **歷史一次補齊，之後每日增量**：首次執行透過官方年度資料落地校準期間，之後增量；官方無 publication timestamp，歷史 first ingest 用 curve date 翌日 00:00 New York 的保守 available-at，內容修正版用實際 fetched-at；Yahoo proxy 用 curve date 18:00 New York。任一 tenor null/負值略過，不以前值回填；partial batch 永不進規則。
 
 - [ ] **排程採固定 cron，置於 business-services，比照 `IndexDailyRefreshScheduler`（刻意不走 `crawler_schedule`）**：
 
@@ -2220,13 +2218,8 @@ rclone config reconnect GDriveOutput: --drive-auth-url "https://accounts.google.
   >
   > 「DB 可設定」在沒有設定 UI 的情況下並未帶來實質可設定性，只帶來一個不存在的承諾。**若日後要改為可設定，應連同設定 UI 一併做，並另立 Requirement。**
 
-- [ ] **新增 `@Scheduled` 必須同步五處硬編筆數（本專案的固定漂移缺陷）**：登錄至「公開資訊 → 排程列表」的 `SchedulePublicBffController` 靜態 `JOBS` 清單，並**逐處**更新硬編數字——實測現況為 `:13` 的分組數（business 17／external 29）、`:16` 的 external 29、`:52` 的「全系統排程清單（46 筆）」、`:54` 的 business 分組註解 17、`:107` 的 external 分組註解 29，以及 `spec/design.md` 的「共 **46 筆** ＝ business 17 ＋ external 29」。本項的 `@Scheduled` 落在 business，故 business 17 → 18、總數 46 → 47。
-
-  > **Task 290 現況覆寫本項的計數基準：** 實際方法核對後為 business 19、external 29、合計 48；其中兩個 business fixed-delay job 先前未列入清單。本段的 46→47 僅保留當時任務的歷史決策，不是目前驗收值。
-
-  > **數字一律以 `grep -c "new ScheduledJobDto(" bff/src/main/java/com/steven/assets/bff/schedulelist/SchedulePublicBffController.java` 實查後填入，不得硬抄本文件**（Task 290 前實測現值為 46；Task 290 完成後須為 48）。此清單為手動維護，漏同步即造成該頁與實際排程漂移——本專案已在 Task 195／196／197／228 反覆修正同一類漂移。
-- [ ] **`close` 為 null 的日子不得寫入**：實測 `^TNX` 有約 0.04% 的 `close` 為 null（美股假日對齊造成）。這些日子一律略過不寫，**不得以前一日的值回填**——回填會製造出「利率連續數日不動」的假事實，而利率因子正是要偵測其變動。缺日由下游以「取最近一個有值的交易日」處理。
-- [ ] **利率因子只套用於 `BOND`，且方向須由回測決定**：新增的利率因子只對 `InstrumentType.BOND` 生效；`EQUITY` 該因子回 `null`，權重由 `Accumulator` 按既有機制重分配給其餘因子（**不得以 0 充當中性值**，那會把股票拉向 50 分）。因子的具體形式（用殖利率的水準、變動、或曲線斜率；用哪一個 tenor；正向或反向）與其權重，**須以 Requirement 56 的框架量測後決定**，不得憑「利率漲債券跌」的通則直接寫死——不同存續期間的債券 ETF 對同一段殖利率變動的反應幅度差異極大，而本系統目前**沒有任何欄位承載存續期間（duration）**。
+- [ ] **新增排程須同步清單實際筆數**：以實作當下 `SchedulePublicBffController` 重算，不得硬抄歷史數字。本次盤點為 business 19／external 30／合計 49；本項新增一個 business job 後為 20／30／50，javadoc、分組註解、總數與 design 同步。
+- [ ] **利率因子只套用於 strict BOND profile，且分市場對齊**：EQUITY N/A、BOND缺值回 null。台灣掛牌外幣債以 signal 前最後 available curve 並控制同期 USD/TWD；美國掛牌 USD 債以美股 decision boundary 前 available curve且 beta 不控制 USD/TWD；其他市場/幣別或 term UNKNOWN missing。具體 tenor/形狀/權重須經 calibration、holdout與 walk-forward，不憑通則寫死。
 - [ ] **存續期間缺口以「經驗敏感度迴歸」替代，且迴歸規格必須寫死**：把殖利率變動換算成價格變動的係數是存續期間，而系統無此資料。實測元大投信（`www.yuantaetfs.com/robots.txt` 為 `User-agent: * / Allow: /`）與復華投信（`www.fhtrust.com.tw` 僅擋 `GPTBot`）皆未禁止一般存取，但**尚未找到穩定的產品頁路徑**。本 Requirement **不要求**取得 duration，改以自有資料迴歸出經驗敏感度。**嚴禁寫死任何猜測的 duration 值**——那會讓一個錯誤係數以精確數字的外觀進入評分。
 
   **迴歸規格（已先行實測，實作須複驗並可調整，但不得省略任一項）：**
@@ -2256,9 +2249,9 @@ rclone config reconnect GDriveOutput: --drive-auth-url "https://accounts.google.
   >
   > ⚠ **不得再宣稱「00865B 的利率敏感度是正號」**——那是 FX 混淆造成的假象（單變量 +0.93%，控制 FX 後 −0.01%）。
 
-- [ ] **不得因此改動既有的匯率因子**：債券 ETF 的台幣報價 ≈ 底層外幣價 × 匯率，此曝險已由 Requirement 47 的匯率分位因子承接（實測 00719B 與 USD/TWD 近一年相關係數 0.9737）。利率因子量的是底層資產本身，兩者正交，**不得**以「都是債券的環境因子」為由合併或互相取代。
-- [ ] **`RULE_VERSION` 升版**：`RULE_VERSION` 升版一級（同步點五處，同 Requirement 57 所列），通知基準由 `trading_radar_notification_setting.rule_version` 機制自動重建。
-- [ ] **驗證**：測試至少覆蓋——(a) 四個 tenor 的 JSON 解析與 `%5E` encode；(b) `close` 為 null 的日子不落地；(c) upsert 冪等（同一批重跑兩次筆數不變）；(d) `EQUITY` 的利率因子為 `null` 且權重確實被重分配（斷言分數與「移除該因子」的結果相同）；(e) **兩張 Map 各自可解析**（`US_INDEX_YAHOO` 9 個指數、`TREASURY_YAHOO` 4 個 tenor）；`US_INDEX_YAHOO` 未被改動（回歸）。部署後以手動端點實跑一次，實查 `treasury_yield_daily` 確認四個 tenor 各約 2514 筆、日期範圍符合、且 `yield_percent` 的量級為個位數（若出現 47.45 代表把百分比當點數存了）。
+- [ ] **不得因此改動既有匯率因子語意**：利率與匯率日頻並非正交，但量的是不同風險；回歸須控制 FX，正式 contribution 不得合併或互相取代，也不得雙重吸收同一變化。
+- [ ] **單一 V13 升版**：本 Requirement 的資料管線與 candidate 不單獨升版；只在 Requirement 65／Task 308 完成 promotion 後一次升 `TW_RULES_V13`，通知首輪只建 baseline 不寄信。
+- [ ] **驗證**：至少涵蓋官方 CSV/XML 解析、四 tenor、缺值、provider precedence、整批 fallback 不混源、upsert 冪等、decision-instant lag、EQUITY N/A、構造 regression、holdout promotion/rejection、排程 20/30/50 與實機官方 provenance/量級。
 
 ---
 
@@ -2543,3 +2536,32 @@ FROM stock_price_history WHERE market='台股';
 - [ ] **雙軌因子貢獻一次計算（Task 305）**：`evaluateStock` 現對同一輸入把全部因子貢獻函數跑兩遍（短期軌＋中期軌），產出兩份內容完全相同的因子文案。改為貢獻與因子文案計算一次、兩軌各自以權重累加，horizon 專屬文案（動作閘門、熱度、時機揭露）仍逐軌附加。**輸出 DTO 的 reasons／risks／shortReasons／shortRisks 內容與順序逐位不變**；純重構、不升版。
 - [ ] **新增無量測依據門檻清單（比照 Requirement 56 既有記載方式）**：OSC 全幅 `0.5%`／文案門檻 `0.1%`（t298）、乖離自身分位 `98`／`2` 與最少樣本 `120`（t299）、ROE 斜率 `10`（t300）、通知冷卻 `60` 分鐘（t301）——**皆無回測量測依據，為判斷性取值**；Requirement 56 的回測工具可於日後量測後調整，任何文案不得宣稱這些門檻能提升報酬或降低風險。
 - [ ] **測試**：t297–t305 各自任務檔載明；至少涵蓋——(a) 美股標的於台北 00:30（美東前一日盤中）live K 併入的回歸測試與台股不變性（`shouldAddLiveRow` 改 package-private 後以寫死 `Instant` 直接單元測試——服務入口的 `Instant.now()` 無注入縫，服務層級驗法的判別力會隨執行時刻漂移，不得採用）；(b) 18 因子權重總和斷言不變、W%R 分量與 BIAS 兩分量的貢獻方向；(c) OSC 幅度正規化的零軸連續性（微小 OSC → 貢獻趨近 0）；(d) 乖離分位的樣本門檻、極端判定「絕對或分位」兩路徑、低於 120 樣本回 null；(e) ROE 新標度邊界值；(f) 冷卻窗內同 state 不重寄、窗外重寄、冷卻不阻擋基準更新；(g) 通知路徑每輪每市場只組一次大盤、不發新聞查詢；(h) 同幣別 `resolveFx` 只呼叫一次；(i) TAIEX／IXIC 的 K／D／previous K／D 整併前後 bit-identical；(j) 雙軌文案一次計算後輸出逐位不變。
+
+---
+
+### Requirement 65: 交易雷達 V13——證據完整度、資料時效與樣本外校準
+
+**User Story:** 作為使用者，我希望交易雷達在判斷短期與中期機會時，會使用所有「當時可得、日期一致、來源可信且經歷史驗證」的資訊；資料不足時要降低信心或停止升級為買進，而不是把剩餘因子放大後仍給出看似完整的結論。同時，我希望機會、下檔風險與證據信心分開呈現，避免把防守型高勝率誤稱為最高預期報酬。
+
+> **「使用所有資訊」的定義不是把每個欄位都加進同一個分數。** 每項候選資訊都先經過：時效／來源、可用性、與既有因子的重複性、以及 calibration/holdout 或 walk-forward 樣本外證據。未通過者只能作揭露或風險，不得藉由判斷性權重進入正式分數。全部判斷維持本地 deterministic 規則，禁止呼叫 AI／LLM，也不得讀取成本、可用資金、配置比例或風險承受度。
+
+**Acceptance Criteria:**
+
+- [ ] **同一決策快照的資料日期必須一致**：每一筆規則輸入都須可追溯 `value`、`asOfDate/Instant`、`source` 與 `quality`。個股規則價只可取「符合標的市場當地決策日期且實際併入技術序列的 live K」，或最近一筆可信完成收盤；不得再以未驗證日期的 Redis-first `getLive()` 價格搭配另一日期的 MA／BIAS／52 週位置。資料日期無法解析或不符合時忽略該 live，而非只排除序列卻仍拿它作分子。
+- [ ] **ETF 折溢價 fail-closed**：Redis 與 PostgreSQL fallback 都必須回傳並驗證 `navDate`。只接受決策時點當時已完成、且符合該市場允許完成日的 observation；過期資料不得觸發 3% 買進否決。API 揭露 `premiumAsOfDate`／來源／是否 stale；stale 時因子為 `null` 並顯示風險。
+- [ ] **外幣底層資產不得靜默當 TWD**：`stock.underlying_currency` 是唯一人工 override；美股預設 USD。台股 `BOND` 若名稱／`bond_term`／已知主檔顯示外國債曝險，但 underlying currency 缺漏，該檔的 `currencyDataComplete=false`，短中期 BUY／ADD／TRIAL_BUY 一律關閉並揭露，不得回退 TWD。既有 00695B、00751B、00865B 主檔須補為 USD，並以 migration/seed 與資料完整性測試防止復發。
+- [ ] **機會、風險與證據信心三軌輸出**：保留 `shortScore`／`score` 作短／中期 opportunity score，新增 `shortDownsideRisk`／`mediumDownsideRisk`（0–100，越高越危險）與 `shortEvidenceConfidence`／`mediumEvidenceConfidence`（0–100，只量資料品質與獨立證據覆蓋，不量方向）。API 同時回傳 evidence groups 明細及缺漏原因；不得把 confidence 加入 opportunity score 造成雙重計分。
+- [ ] **買進動作受 deterministic evidence gate 約束**：所有 BUY/ADD/TRIAL_BUY 要 PRICE與MARKET mandatory component fresh、各組 coverage>=70%且總 confidence>=70；中期 EQUITY 的 VALUATION 與 FINANCIAL_OPERATING、以及任何適用的 ASSET_SPECIFIC 也各自須 coverage>=70，N/A 退出分母，避免只靠少數可得因子重配出高分。group coverage 依 fresh component weight/applicable component weight；missing/stale 留在分母；sourceCount 只計獨立 provider。個股缺任何一個中期必要 group 時只到 WATCH/HOLD。asset applicability 為台股 ETF premium、underlying!=quote 的 FX、BOND rate；美股 USD股票 ETF 三者全 N/A 不封鎖。這是所有 V13 candidate 與 production 發布結果都必須套用的不可變安全層：calibration 只能在 confidence threshold `[70,100]` 內選擇，不能降低 mandatory fresh/group/risk coverage；V12 opportunity fallback 也不得繞過 gate。BUY/ADD/TRIAL_BUY 仍只向保守方向降級；REDUCE/EXIT 另須 weakening/downside 條件與適用 risk coverage>=70，缺漏或低 confidence 不得憑空產生 REDUCE/EXIT。
+- [ ] **估值只算一次，納入既有 PB 與殖利率**：現行 PE factor 改為單一 `valuationComposite`，候選分量為 PE、PB 自身歷史分位與股息殖利率自身歷史分位；同 provider、同 as-of、有效樣本至少 250 才可用。PE／PB 越低可為正，殖利率只能作「估值便宜」證據且須受虧損／財務惡化保護：可信虧損或 EPS/ROE 明顯惡化時，高殖利率不得給正分。三者先在 valuation group 內平均，再佔用原 PE 單一權重，禁止把三欄各自新增完整權重造成重複計分。
+- [ ] **財報計算使用可得資訊的正確語意**：近似 ROE 分母改為期初與期末母公司權益平均（兩者皆正才可用；缺期初時回退既有最新權益並降低 confidence、明示 approximate fallback）。EPS 前期 TTM `<=0` 不再一律丟棄：虧轉盈＝正向 turnaround、盈轉虧＝負向 turnaround、持續虧損＝負向，分母為正時才計算百分比 YoY；turnaround 與 EPS YoY 仍合成一個 EPS 因子，不新增第二份權重。
+- [ ] **Strict 資產輪廓參與適用性，不參與個人化**：新增 profile 逐欄回 value/source/complete（assetClass、instrumentKind、stockStyle、bondTerm、quoteCurrency、underlyingCurrency 各自 complete；`currencyDataComplete` 僅為 currency 欄位的彙總，不得掩蓋單欄 UNKNOWN）。`instrumentKind` 的唯一值域為 `STOCK|EQUITY_ETF|BOND_ETF|UNKNOWN`，production/backtest 共用同一 resolver，依 `asset override → code/name ETF/BOND rule → market-default STOCK`，無法唯一判定即 UNKNOWN；正式 production/backtest 不存在可管理的 `instrument override` 欄位或 settings/UI/API，任何相容 overload 不得接線影響結果。不得由 MarketData/Fundamental/Backtest 各自猜。每欄都回 source/complete，bond term 只有 override 或名稱明確命中才為 SHORT/MID/LONG，否則 UNKNOWN，禁用既有 unknown→MID fallback；stock style 只可用 override、具名 ETF規則或 decision-time 公開 valuation yield，且先將 DB `dividend_yield_pct` 百分點以 `movePointLeft(2)` 轉成比例後，才與既有比例 threshold（4%=`0.04`）比較，禁止 3.99/4.00/4.01% 邊界漂移。禁止持股配息率/成本/配置。輪廓只選 factor與分層，不推導個人偏好。
+- [ ] **波動正規化取代 V12 過渡分位處方**：Requirement 57／Task 274 落地後，`timingOf` 與 BIAS contribution 以同源還原序列的 60 日報酬 σ 正規化；V12 `ma60BiasPercentile 2/98` 僅保留 API 揭露與回測特徵，不再與 σ 路徑以 OR 並列決定動作，避免兩份相依處方重複放寬門檻。σ 不可得才 fail-closed 回退固定門檻並降低 confidence。
+- [ ] **債券使用美債殖利率而非只看股票技術指標**：Requirement 58／Task 275 的 M3/Y5/Y10/Y30 歷史、as-of lag、控制 USD/TWD 的經驗利率敏感度與 BOND-only contribution 全部落地。只有樣本數、符號、穩定度與 holdout 門檻通過的標的才啟用；其餘為 `null` 並揭露原因。利率與 FX 量測不同風險，不可互相取代。
+- [ ] **公開資訊依市場可見且不做文字情緒猜測**：台股個股只接受 region `TW`／null，美股只接受 `US`／null；不得讓美股代號只命中台灣區新聞，也不得無條件放寬全部 region。一般新聞維持證據顯示、不以關鍵字或 LLM 情緒打分。`twse-institutional` 等結構化資料只有在具備數值欄、as-of 與足夠歷史可回測後才能成為候選因子；與既有 turnover/FX/index 同義者只計一次。
+- [ ] **已知未來事件採完整 snapshot，支援改期/取消**：immutable dividend snapshot＋event rows保存完整 scope/content，append-only fetch observation 保存每次成功可見時間；相同內容重用 snapshot，partial/failed 不建立成功 observation。resolver 取 decision instant 前最新、scope涵蓋未來45日的單一完整 snapshot；新 snapshot 缺少舊 future event即取消，改期=舊取消＋新 active。event knownAt=max(observedAt,可靠 sourceAvailableAt)。current-state history 加 ACTIVE/CANCELLED供 finalized 還原；回測不得由它倒推當時已知事件。
+- [ ] **市場候選資訊 typed、known-at、去重後才可量測**：IXIC/SOX/SPX/DJI 5-session return、index volume ratio20、台股法人 net/turnover、WTI/BRENT/GOLD return5 皆以 numeric adapter、provider、asOf與 conservative availableAt輸出；法人數值另落 typed table，禁止解析新聞文字。IXIC/SOX若與 regime同義標 duplicate，無法證明 known-at 的資料只揭露。未達 holdout gate 正式 contribution=null。
+- [ ] **回測採唯一可成交索引與全域時間切點**：signal close t、entry adjusted open t+1、exit adjusted open t+1+h；missing open排除主要結果，close只列 sensitivity。每個 market/horizon以所有標的共用 global session-date cutoff切70/30，禁止每檔各切；walk-forward也用全域 expanding blocks，任一 train date須早於 evaluation。成本依 market×instrument type明示並 echo，candidate/baseline只比共同 code/date intersection。
+- [ ] **正式規則只採 practical 樣本外非劣候選**：一般 holdout n>=200/codes>=8，BOND/profile candidate n>=150/codes>=3；至少3個 valid walk-forward folds。return practical delta=max(0.10pp,round-trip cost)，downside practical delta=1pp；須達 return改善或 downside改善且報酬非劣，至少60% folds同方向且無重大反向 fold。未達即 rejected/disclosure，完成報告不得隱藏。
+- [ ] **動作語意重新校準**：`PROFIT_TAKING_CONFIRMED` 若在 holdout 仍代表強勢高波動而非負前瞻報酬，不得直接強迫 REDUCE；應改為「高波動動能／保護獲利觀察」風險，只有獨立轉弱證據與下檔風險同時成立才減碼。短／中期各自校準 score/action threshold，不得共用同一門檻只換權重。
+- [ ] **單一 V13 發布與可解釋 UI**：t274、t275、t307、t308、t309 作為同一 `TW_RULES_V13` 發布，最終才升版一次並重建通知基準；中途不得部署半套規則。交易雷達頁與 Excel/JSON 快照顯示 opportunity、downside risk、confidence、as-of/source、有效 evidence groups、asset profile、下一配息與利率/波動欄；缺值明示「未納入」與原因，不得宣稱已完整評估。
+- [ ] **驗證**：除各任務單元測試外，須通過 backend、external-materials-service、BFF、frontend 全部相關測試與 build；從 feature worktree 重建受影響 Docker images、recreate containers、restart BFF，實際讀取 `/api/trading-radar` 與新回測輸出，確認 ruleVersion、日期一致性、confidence gate、台美 region、PB/殖利率、債券 USD/利率、未來配息與 holdout 報告。完成後依專案兩段式流程 commit、`--no-ff` merge main 並 push。

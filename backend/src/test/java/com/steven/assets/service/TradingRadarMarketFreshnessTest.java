@@ -18,6 +18,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -66,6 +67,8 @@ class TradingRadarMarketFreshnessTest {
     // 該寫入路徑不會被觸發（RequestContextHolder 為 null），mock 僅供建構子。
     @Mock private TradingRadarSnapshotStore snapshotStore;
     @Mock private CurrentUserContext currentUserContext;
+    @Mock private DividendEventEvidenceRepository dividendEventEvidenceRepository;
+    @Mock private TreasuryYieldService treasuryYieldService;
 
     private TradingRadarService newService() {
         return new TradingRadarService(
@@ -90,7 +93,9 @@ class TradingRadarMarketFreshnessTest {
                 fundamentalAnalysisService,
                 etfNavHistoryRepo,
                 snapshotStore,
-                currentUserContext);
+                currentUserContext,
+                dividendEventEvidenceRepository,
+                treasuryYieldService);
     }
 
     /** 建 241 筆「由新到舊」完成日收盤：closes[i] = base+i，i 越大代表越久以前、收盤越高（近期下跌趨勢）。 */
@@ -127,6 +132,33 @@ class TradingRadarMarketFreshnessTest {
                 .thenReturn(List.of());
         lenient().when(indicatorService.computeAllForNasdaq())
                 .thenReturn(TechnicalIndicatorService.FullIndicators.EMPTY);
+    }
+
+    @Test
+    void futureSessionsCalendarUnavailableFailsClosedInsteadOfInferringWeekdays() {
+        when(marketDataService.isTwTradingDayKnown(any(LocalDate.class))).thenReturn(Optional.empty());
+
+        List<LocalDate> sessions = newService().futureSessions(
+                "台股", Instant.parse("2026-08-09T06:00:00Z"));
+
+        assertTrue(sessions.isEmpty());
+    }
+
+    @Test
+    void strictPremiumSessionExcludesIntradayAndUnknownCalendar() {
+        when(marketDataService.isTwTradingDayKnown(any(LocalDate.class)))
+                .thenReturn(Optional.of(true));
+        TradingRadarService service = newService();
+
+        assertEquals(LocalDate.of(2026, 8, 6), service.strictCompletedTaiwanSession(
+                Instant.parse("2026-08-07T04:00:00Z")),
+                "台北中午仍未收盤，不得把當日 NAV 當 completed session");
+        assertEquals(LocalDate.of(2026, 8, 7), service.strictCompletedTaiwanSession(
+                Instant.parse("2026-08-07T06:00:00Z")),
+                "收盤後才可使用當日 completed session");
+
+        when(marketDataService.isTwTradingDayKnown(any(LocalDate.class))).thenReturn(Optional.empty());
+        assertNull(service.strictCompletedTaiwanSession(Instant.parse("2026-08-07T06:00:00Z")));
     }
 
     private PriceQueryService.LivePrice liveOn(LocalDate tradingDate, BigDecimal price) {

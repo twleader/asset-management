@@ -1,241 +1,52 @@
-# [t274] 季線乖離改以標的自身波動正規化——修正固定百分比門檻的結構性失效
+# [t274] V12 季線乖離以自身波動正規化，作為 V13 候選特徵
 
-**對應 Requirements:** Requirement 57（以標的自身波動為尺度的相對門檻——讓「超買」「超賣」的判定對每一檔標的都同樣有意義，使「極端超賣不殺低」的保護對低波動標的真的會啟動）
-**前置任務:** t273（規則回測框架——本任務的 `σ` 下限與門檻倍數必須引用其量測輸出，不得憑直覺設定）
-**Liquibase changeset:** 無（不新增資料表；`σ` 由既有 `stock_price_history` 的還原序列即時計算）
+**對應 Requirements:** Requirement 57／65
+**前置任務:** t273（共用回測框架）、t298／t299（V12 BIAS 分量與 2/98 分位過渡路徑）
+**下游整合:** t308（樣本外 promotion 與單一 V13 發布）
+**Liquibase changeset:** 無
 
 ## 背景
 
-### 已量測到的結構性失效
+V12 已沒有舊版 `extensionOf()`／`BIAS_SATURATION`；乖離由短／中期 BIAS components 評分，`timingOf` 則以固定門檻或 `ma60BiasPercentile` 2/98 路徑判斷極端。舊任務檔以 V9 與已刪除方法描述，不能直接實作。
 
-**量測口徑（必須與 production 同源，否則數字會錯得很嚴重）**：以 `DistributionAdjustedPriceService` 的輸出（**還原權息 ＋ 還原分割**，含大額股票股利不誤判為分割的既有處理）逐日實算 `(adjClose − MA60) / MA60`；先剔除 `close_price <= 0` 的髒列（**台股實測 175 列**，見下方附註）；暖機排除前 **240** 筆（與 t273 回測框架的暖機口徑一致，不是 60 筆）。KD 以 `k=d=50` 為 seed、`rsv=(C−LL9)/(HH9−LL9)×100`、`k=k×2/3+rsv/3`、`d=d×2/3+k/3` 的既有遞迴重建，`narrowKdBand` 以 `(hi9−lo9)/lo9 < 2%` 判定。
+固定百分比對低波動債券 ETF 幾乎永不觸發，對高波動股票又過度頻繁。以既有 `DistributionAdjustedPriceService` 還原權息／分割序列、先排除非正價格、暖機 240 根後量測，bias 標準差約從 00719B 的 1.60 到 2327 的 21.37，顯示同一絕對門檻無法跨標的比較。但 normalized bias 仍不能解決債券 ETF 因窄幅 9 日區間而停用 KD 的獨立死區；不得把這部分改善歸功於本任務。
 
-| 標的 | `\|bias\|>12%` | `\|bias\|>20%` | bias σ | **V9 極端態實際觸發率** | **因窄幅 KD 停用的交易日** | n |
-|---|---|---|---|---|---|---|
-| 00719B（元大美債1-3） | 0.00% | 0.00% | 1.60 | **0.00%** | **91.4%** | 1823 |
-| 00865B（國泰US短期公債） | 0.00% | 0.00% | 1.84 | **0.00%** | **87.4%** | 1378 |
-| 00697B（元大投資級公司債） | 0.00% | 0.00% | 2.05 | **0.00%** | **72.8%** | 1980 |
-| 00695B（富邦美債7-10） | 0.00% | 0.00% | 2.04 | **0.00%** | **70.9%** | 1989 |
-| 2412（中華電） | 0.00% | 0.00% | 2.16 | **0.00%** | 41.6% | 2197 |
-| 00751B（元大AAA至A公司債） | 0.18% | 0.00% | 3.38 | **0.00%** | 25.7% | 1663 |
-| 00679B（元大美債20年） | 0.38% | 0.05% | 3.83 | 0.05% | 21.8% | 2083 |
-| 0050 | 8.30% | 0.68% | 6.07 | 0.59% | 4.8% | 2194 |
-| 2330（台積電） | 15.69% | 2.32% | 7.85 | 1.41% | 0.5% | 2199 |
-| 2383（台光電） | 36.60% | 18.89% | 15.58 | 7.56% | 0.0% | 2197 |
-| 3037（欣興） | 37.93% | 18.58% | 16.47 | 6.10% | 0.0% | 2196 |
-| 2327（國巨） | **40.89%** | **23.45%** | **21.37** | **9.94%** | 0.0% | 2162 |
+本任務只建立 production/backtest 共用的 volatility-normalized candidate，不單獨升版或部署。正式 sigma 下限、倍數、分量形狀與是否啟用，一律由 t308 calibration/holdout 決定。
 
-> **⚠ 「`|bias|>20%` 的比例」與「極端態實際觸發率」是兩個不同的量，上表分列兩欄。** `TimingState` 的極端態是**合取**（`EXTREME_OVERSOLD = KD 深度超賣 ∧ bias ≤ −20%`），而且 KD 側在窄幅時被 `narrowKdBand` 整組停用。拿 `|bias|>20%` 的 23.45% 當「2327 的極端態觸發率」是錯的量——真值是 **9.94%**。
->
-> **附註（既有資料品質問題，不在本任務範圍）**：`stock_price_history` 台股有 **175 列 `close_price <= 0`**（006208 87、7556 67、00865B 6、3036 5、2327 4、3037／9933／00695B／00719B／2303／2317 各 1，**合計 175，可自我驗算**）。這些列會產生 `bias = −100%` 的假訊號並污染 MA60——**上一版的表就是這樣算出來的，其中 00865B 的 bias σ 被高估為 6.53（真值 1.84）、00695B／00719B 的全部觸發率都是零價列造成的**。本任務的量測一律先剔除，並**另立任務處理該資料品質問題，不得靜默略過**。（`DistributionAdjustedPriceService.detectSplits()` 的註解已記載「實測台股有 176 筆」非正收盤，為同一問題。）
-
-### 這造成兩個各自獨立的失效
-
-**(1) 動作層——V9 的核心保護對低波動標的是死碼。**
-
-`TradingRadarRuleEngine.timingOf()` 現行實作：
-
-```java
-if (overheated && bias != null && bias >= BIAS_EXTREME_HIGH) return TimingState.EXTREME_OVERBOUGHT;
-if (oversold && bias != null && bias <= BIAS_EXTREME_LOW) return TimingState.EXTREME_OVERSOLD;
-```
-
-`BIAS_EXTREME_HIGH = 20.0`、`BIAS_EXTREME_LOW = −20.0`。而 `actionFor()` 的兩條動作覆寫**都以這兩個狀態為必要條件**：
-
-- 「極端超買＋KD 高檔死叉 → 減碼」需要 `EXTREME_OVERBOUGHT`
-- 「極端超賣 → 阻擋出場（不殺低）」需要 `EXTREME_OVERSOLD`
-
-**注意 `overheated`／`oversold` 是合取條件**（`kdHeatOf()` 與 `kdOversold()`，兩者在 `narrowKdBand` 成立時一律回 `NORMAL`／`false`）。故極端態需要**乖離側與 KD 側同時成立**。
-
-依上表，**六檔標的的 V9 極端態觸發率為 0.00%**（00719B／00865B／00697B／00695B／2412／00751B）——「極端超賣不殺低」這道保護對它們**十年來從未生效過**。而 2327 為 9.94%，是最高的一檔。
-
-這不是「門檻不夠貼合」，而是**同一條規則在不同標的上分別退化為「永不觸發」與「頻繁觸發」**。
-
-> **⚠ 但本任務單獨修不好這件事，射程邊界必須先講清楚。** 上表最後一欄顯示：四檔債券 ETF 有 **70.9%–91.4%** 的交易日因 9 日帶寬 `< 2%` 而被 `narrowKdBand` 整組停用 KD。**即使乖離側完全正規化，這些日子仍然不可能進入極端態。** 本任務只能讓「乖離側不再是死碼」，保護的復活是**部分的**。
->
-> KD 側的死區**不在本任務範圍**——`narrowKdBand` 有其獨立且已實證的理由（見下方「本任務不改什麼」），貿然放寬會讓債券 ETF 大量誤發訊號。要處理須另立任務並先以 t273 的框架量測。
->
-> **實作須逐檔輸出「因窄幅 KD 而不可能觸發極端態的交易日比例」**，否則實資料驗收會把窄幅造成的殘餘 0.00% 誤記為正規化失敗（或反之）。
-
-**(2) 評分層——`extensionOf()` 的貢獻對低波動標的被壓縮到近乎恆為 0。**
-
-`extensionOf()` 現行實作為 `clampUnit(-bias / BIAS_SATURATION)`，`BIAS_SATURATION = 25.0`。該因子權重 `W_EXTENSION = 0.12`，是 14 個因子中**最大的一個**。其貢獻的標準差 **≤** `bias 標準差 ÷ 25`——**`clampUnit` 會把 `|bias| > 25` 的日子截斷在 ±1**，故高波動標的的實際值低於單純相除的結果（實算含 clamp）：
-
-| 標的 | bias σ | `extensionOf()` 貢獻的 σ（含 clamp 實算） |
-|---|---|---|
-| 00719B | 1.60 | **0.064** |
-| 00697B | 2.05 | 0.082 |
-| 2412 | 2.16 | 0.086 |
-| 2330 | 7.85 | 0.310 |
-| 2327 | 21.37 | **0.557**（非 `21.37/25 = 0.85`——2327 有 **16.74%** 的交易日〔362／2162〕被 clamp 截斷） |
-
-也就是說：**權重最大的那個因子，對 00719B 的實質作用只有對 2327 的 0.115 倍**（0.064／0.557，約八分之一到九分之一）。權重表上寫 `0.12`，實際生效的遠不到。此為既有設計未察覺的第二個失效面，本任務一併修正。
-
-> 論證方向不變（壓縮確實存在），只是幅度沒有「十一分之一」那麼誇張——**不得**因為幅度修正就撤掉這個失效面。
-
-### 本任務不改什麼
-
-- **窄幅 KD 失效（`KD_BAND_MIN_PERCENT = 2.0`）維持不變**。那是**同一個問題的另一個面向**且已有實測依據（00719B 近 60 個交易日的 9 日高低帶平均寬度僅 `1.011%`，其 `K=90.76` 實質只代表「比 9 日低點高 0.37 元」）。兩者並存：波動度正規化處理「乖離的尺度」，窄幅失效處理「KD 在雜訊上飽和」。**不得**以「已有正規化」為由移除窄幅保護——KD 的飽和是**值域被壓縮**，不是尺度問題，正規化不會修好它。
-- **`ma240BiasPercent`（年線乖離）暫不正規化**。它目前只用於 `TRIAL_BUY` 的長線結構門檻（`TRIAL_BUY_MIN_ANNUAL_PREMIUM = 5.0`）與風險文案，不進評分也不進 `TimingState`。本任務範圍限於季線乖離；年線乖離是否需要同樣處理，由 t273 的量測結果決定並另行處理。
-- **`week52Position` 不需正規化**。它本就是 `[0,1]` 的相對位置，天生無尺度問題。
+**依賴邊界：** 本任務先提供不依賴證據 gate 的 `returnStdDev60Ratio` 純函數與 provenance；它不讀 t309 的 confidence/action 結果。t309 只消費本任務的 sigma observation 來計算 downside 與 evidence freshness，故實作順序為 t273 → t274 → t309，沒有 t274↔t309 循環依賴。
 
 ## 要做什麼
 
-### 274.1 新增 `σ`（近 60 日日報酬標準差）的計算
+- [ ] **274.1 共用 realized volatility。** 在 `RadarInputAssembler` 對同一 adjusted completed-price sequence 計算最近 60 個有效日報酬的樣本標準差 `returnStdDev60Ratio`；它採比例口徑，例如日波動 2% 存 `0.02`。不足 61 根、任一非正價、非有限值或原始 sigma `<=0` 時回 null。production 與 backtest 都只能使用這個欄位；移除 `BacktestService.sigmaAt` 等第二份公式。live 價不進 sigma 視窗。
+- [ ] **274.2 Normalized bias candidate。** 先算 `biasRatio=ma60BiasPercent.movePointLeft(2)`，再算 `effectiveSigmaRatio = rawSigmaRatio < sigmaFloorRatio ? sigmaFloorRatio : rawSigmaRatio` 與 `normalizedMa60Bias=biasRatio/effectiveSigmaRatio`。原始 sigma 必須先 `>0`；常數序列的 0 不得被 floor 救回，須走 unavailable/fallback。`sigmaFloorRatio` 不是拍腦袋常數，候選集合須取 calibration 期間 rolling sigma 分布的具名低百分位。固定例 `ma60BiasPercent=10`、`sigma=0.02` 必須等於 `5`，不可算成 500。每筆輸出 raw bias、raw/effective sigma、floor、normalized value、as-of 與 missing reason。
+- [ ] **274.3 取代而非疊加。** t308 若 promotion 通過，`timingOf` 的極端乖離側只使用 normalized path；V12 `ma60BiasPercentile` 保留 API／回測揭露，不得與 normalized path 以 OR 疊加。sigma 缺漏時才回退 V12 固定絕對門檻，標 `volatilityFallback=true`、降低 PRICE evidence confidence；缺漏不得藉分位路徑繞過。
+- [ ] **274.4 BIAS 評分候選。** 短／中期既有 BIAS components 改用 normalized contribution 的候選形狀，但不新增因子、不得與 raw BIAS 雙重計分。candidate parameters 包含 saturation sigma multiple；正式 contribution 在 t308 promotion 前保持現行 V12 值，候選結果只進 backtest/debug report。
+- [ ] **274.5 不改 KD dead-zone。** `narrowKdBand`、K/D 計算與門檻不在本任務射程。回測報告須逐 profile 顯示「因 KD N/A 而無法進極端態」的比例，避免把 normalized bias 未觸發誤判為失效。
+- [ ] **274.6 單一 V13 整合。** 本任務不得改 `RULE_VERSION`、通知 baseline 或前端 fallback；只有 t308 選出 holdout 非劣參數並完成其餘 V13 項目後，才一次升 `TW_RULES_V13`。若候選未通過，欄位仍可揭露，但正式 action/score 保持未啟用並列明原因。
 
-- [ ] 274.1 在 `TradingRadarService` 的 `TechnicalData` 組裝路徑新增 `returnStdDev60`，並經 `StockInput` 傳入引擎。
+### t308 候選與 promotion 契約
 
-  - [ ] 274.1.1 **計算口徑**：`σ` ＝ 近 **60 個交易日**日報酬 `close[i]/close[i−1] − 1` 的**樣本標準差**（分母 `n−1`）。**不年化**——年化會引入 `√252` 的常數而讓門檻倍數失去意義。
-
-    > **⚠ 量綱警告（會讓實作者誤以為自己算錯的地方）**：`bias` 是**現價對 60 日均線的偏離**，`σ` 是**單日**波動，相除帶有約 `√(60/3) ≈ 4.47` 的放大。**故合理的門檻倍數落在十倍量級，不是直覺的 2–3σ**——實測 2σ 會讓 **48.68%–79.43%** 的交易日觸發。看到兩位數的 `σ` 倍數是預期行為，**不是 274.2 的 ×100 對齊寫錯**。
-  - [ ] 274.1.2 **必須用還原權息且還原分割後的序列**，與評分序列同源（`TradingRadarService` 既有的 `adjustedRows`）。用原始序列會讓除息缺口被誤計為波動——對月配息債券 ETF 尤其嚴重，正是本任務要修的那幾檔。
-  - [ ] 274.1.3 **樣本不足 60 筆**（需 61 個收盤價才能算 60 個報酬）、或 `σ` 為 0／不可得時，`returnStdDev60` 傳 `null`。
-  - [ ] 274.1.4 計算須落在既有的 `TechnicalData` 組裝處（`buildStock` 的 `technical` 路徑），**不得**在 BFF 或前端重算——本專案規範「同義欄位、同一 business service API」。
-
-### 274.2 引擎的門檻判定改用正規化乖離
-
-- [ ] 274.2 `TradingRadarRuleEngine.StockInput` 新增 `returnStdDev60`（`BigDecimal`，nullable）。`timingOf()` 的門檻比對改用 `normalizedBias = bias ÷ (σ × 100)`。
-
-  > **量綱對齊（會算錯的地方）**：`ma60BiasPercent` 的單位是**百分比**（`12.0` 代表 12%），而 `σ` 是**比例**（`0.02` 代表 2%）。相除前必須把 `σ` 乘以 100，否則 `normalizedBias` 會差 100 倍。實作時須在該行加註解說明，並有測試釘住（見驗證段 (g)）。
-
-  - [ ] 274.2.1 新增具名常數表示門檻的 `σ` 倍數（例如 `BIAS_EXTREME_SIGMA`／`BIAS_HIGH_SIGMA` 及其超賣對稱項），取代 `BIAS_EXTREME_HIGH`／`BIAS_EXTREME_LOW`／`BIAS_HIGH`／`BIAS_LOW` 在 `timingOf()` 中的角色。**舊常數不得直接刪除**——它們仍是 274.2.3 回退路徑的門檻值。
-  - [ ] 274.2.2 **門檻倍數必須由 t273 的量測決定，不得沿用「換算自 12%／20%」的直覺值。** 須以 t273 的框架量測「各候選倍數下，訊號組相對基準的 5／20／60／240 日報酬分布與下檔風險」後決定，並在程式碼註解與完成報告中列出所依據的數字。
-
-    **先行量測供定位搜尋範圍**（**48 檔**台股、還原序列、暖機 240；正式值仍須由 t273 以報酬分布決定）：
-
-    > **⚠ 量測母體 48 檔 vs 回測母體 49 檔的差異必須交代**：台股非 `0000` 標的共 **49 檔**，本量測排除 **009804**（`close_price>0` 者僅 318 筆，扣 240 暖機後不足以形成穩定的滾動 60 日 `σ`）。**驗收判準「不得再有任何一檔為 0.00%」的母體須明確定義**——建議與量測母體一致（48 檔），並把 009804 這類「暖機後樣本 < 100」的標的獨立列出、標記為樣本不足而非不達標。
-
-    | 門檻 | `\|normalizedBias\|` 超過該值的交易日比例 | 觸發率 0.00% 的標的數 | 超過 5% 的標的數 |
-    |---|---|---|---|
-    | 2σ | 48.68% – 79.43% | 0 | 48（全部） |
-    | 9σ | 2.65% – 15.41% | 0 | 32 |
-    | 10σ | 1.55% – 12.15% | 0 | 17 |
-    | 12σ | 0.27% – 8.59% | 0 | 3 |
-    | 14σ | 0.05% – 5.04% | 0 | 1（00919） |
-
-    **正規化本身確實有效**：`normalizedBias` 的標準差在各標的間收斂到 **3.37–5.73**（1.7 倍離散），而原始 `bias` 的標準差是 **1.60–21.37**（13 倍離散）。
-    > **若量測結果顯示某個方向的最佳倍數與使用者「不追高殺低」的偏好衝突，一律先呈現數據供使用者裁決，不得逕行改動。** 既有先例：`KD_OVERHEAT_K` 的量測結果與直覺相反（過熱組的後續下檔風險反而較低），最終仍依使用者偏好保留該門檻並在 Javadoc 標記為「非實證」。
-  - [ ] 274.2.3 **`σ` 不可得時回退固定百分比門檻**，並於 `risks` 加入揭露文案（大意：「波動樣本不足，本日以固定門檻判定」）。**不得**以全市場平均 `σ` 代入——那會讓債券 ETF 套用股票的尺度，正是本任務要消除的問題。
-  - [ ] 274.2.4 **`σ` 的絕對下限保護**：極低波動標的的 `σ` 很小，除以它會讓極小的價格變動放大成極大的 `normalizedBias`。須設定 `σ` 的絕對下限，低於下限時以下限值代入並於 `risks` 揭露。**下限值同樣由 t273 的量測決定**，不得憑直覺設定。
-
-    **實測日報酬 σ（還原序列；⚠ 以下為 2026-07-31 當日的滾動 60 日快照，非十年代表值）**：00719B `0.00188`（年化 2.98%）、00865B `0.00199`（年化 3.16%）、00697B `0.00295`（4.68%）、00695B `0.00312`（4.95%）、00751B `0.00496`（7.87%）、00679B `0.00587`（9.31%）；對照 2330 `0.02454`（38.95%）、2327 `0.06502`（103.22%）。該快照下最低與最高相差 **35 倍**。
-
-    > **⚠ 單一快照不得直接當成 σ 下限的校準依據**——2026-07-31 前後 60 個交易日的股票波動明顯偏高。下限須以 t273 框架輸出的**十年滾動 σ 分布的低百分位**決定，並在完成報告列出所用的百分位與對應數值。
-
-    > **注意本項與 274.2.2 的先行量測並不衝突**：後者顯示正規化後觸發率已收斂良好（無 0.00%），代表下限在多數情況下不會被觸發；下限的作用是**尾端保護**（防止某段行情中 `σ` 塌到接近 0 時 `normalizedBias` 爆量），不是常態校正。實作須輸出「下限實際被觸發的交易日比例」，若該比例偏高即代表下限設得太鬆或太緊。
-
-### 274.3 評分層 `extensionOf()` 同步正規化
-
-- [ ] 274.3 `extensionOf()` 的飽和點改為以 `σ` 倍數表示（取代固定的 `BIAS_SATURATION = 25.0`），使該因子在低波動標的上的貢獻不再被壓縮到近乎恆為 0（見背景段的第二個失效面）。
-
-  - [ ] 274.3.1 `σ` 不可得或低於下限時，回退為現行的 `clampUnit(-bias / 25.0)`。
-  - [ ] 274.3.2 **理由文案中的乖離數字仍用原始百分比**（`"最新價已明顯偏離季線（乖離 N%）"`）——`σ` 倍數對使用者不直觀。被取代的只有「拿它去比對門檻」這件事，不是顯示。
-
-### 274.4 原始欄位一律照常輸出
-
-- [ ] 274.4 `ma60BiasPercent` 的計算與輸出**完全不變**（`TradingRadarService.biasPercent(price, ind.quarterlyMa())`），API 與畫面繼續使用它。新增的 `normalizedBias` 是否輸出到 API 由實作者決定，但若輸出，須在畫面明示其單位為「幾個標準差」而非百分比，避免與 `ma60BiasPercent` 混淆。
-
-### 274.5 `RULE_VERSION` 升版
-
-- [ ] 274.5 `RULE_VERSION` **升版一級**。**版本字串以實作當下 `TradingRadarRuleEngine.RULE_VERSION` 的實際值 +1 為準，本檔刻意不寫死字面值。**
-
-  > **⚠ 為什麼不能寫死字面版號**：t291／t267／t275 可能先落地。`TradingRadarNotificationService` 是以**字串相等**判斷通知基準是否有效；若兩個不同規則共用一個版本名，`baselineValid` 會錯誤地為 true、基準不會重建，而本任務會改變 `TimingState` 判定，首輪可能對每筆訂閱寄出假通知。
-  >
-  > **實作前必須先 `grep -ran "RULE_VERSION" backend/src` 讀取當下實際值**，並確認 t291／t267／t275 是否已各自佔用一級；t276／t277 已由 t291 取代。
-
-  **同步點共五處**，以 `grep -ran "<當下版本字串>"` 取得（`-a` 不可省略：本專案有 `.java` 檔被 `file(1)` 誤判為 data，普通 `grep -r` 會整檔跳過）：
-
-  | # | 檔案 | 位置 |
-  |---|---|---|
-  | 1 | `backend/src/main/java/com/steven/assets/service/TradingRadarRuleEngine.java` | `RULE_VERSION` 常數本體 |
-  | 2 | `frontend/src/views/TradingRadarView.vue` | `radar` ref 的初始值 |
-  | 3 | `frontend/src/views/TradingRadarView.vue` | 顯示 fallback（`radar.ruleVersion \|\| 'TW_RULES_V9'`） |
-  | 4 | `backend/src/main/java/com/steven/assets/dto/TradingRadarDto.java` | class Javadoc |
-  | 5 | `backend/src/test/java/com/steven/assets/service/TradingRadarRuleEngineTest.java` | `assertEquals("TW_RULES_V9", ...)`，**連同其測試方法名一併改** |
-
-  > **⚠ `grep -ran "TW_RULES_V9"` 實測回 7 個命中、分布在 5 個檔案，但只有上表 5 處該改。** 另外兩個命中是：
-  > 1. `TradingRadarRuleEngine.java` 權重表上方的說明註解（同檔第二個命中）——屬歷史敘述，改不改皆可；
-  > 2. **`backend/src/main/resources/db/changelog/changes/v1.83.0-radar-notification-rule-version.sql` 的 `--comment`——絕對不可改。** Liquibase 的 checksum **包含註解**，改了會 `ValidationFailed`、讓 business-services 進入 crash loop（本專案既有踩坑）。
-  >
-  > **做批次取代的 `sed` 必須排除 `db/changelog/`。**
-
-  另 `spec/design.md` 有數處提及 `TW_RULES_V9`，屬歷史決策記錄，**不需要**跟著改成 V10（那些句子描述的是 V9 當時的決定）；只有描述「現行版本」的句子才須更新。
-
-- [ ] 274.5.1 **升版須揭露不可比性**：本次改變了 `TimingState` 的判定基準與 `extensionOf()` 的飽和尺度，V10 與 V9 的 `TimingState`、分數與動作**不可直接比較**。
-- [ ] 274.5.2 **通知基準會自動重建，不需另寫 migration**：`trading_radar_notification_setting.rule_version` 與現行 `RULE_VERSION` 不符時視同未初始化（該機制已由 Task 264 的 `v1.83.0-radar-notification-rule-version.sql` 建立），升級後首輪評估一律只建基準不寄信。**須實際確認此機制生效**（見驗證段），否則升級首輪會對每筆訂閱狂發假通知。
-
-### 274.6 既有測試的期望值
-
-- [ ] 274.6 改動 `extensionOf()` 的尺度會改變分數，既有測試的期望值必然變動。**須依新尺度重算後更新期望值，並在完成報告列出新舊對照。嚴禁為了讓舊測試通過而回頭改門檻或尺度。**
+- calibration grid 至少涵蓋 sigma floor percentile、extreme upper/lower multiple、BIAS saturation multiple；只能用 calibration 區段選值。
+- holdout 與 expanding walk-forward 使用逐 decision instant 的 rolling inputs，禁止以全期間 sigma 分布選 floor。
+- 候選至少按市場、asset class 與 bond term 分層輸出 n、coverage、paired median、pooled mean、downside；不可只報整體平均。
+- 樣本不足，或 paired median 與 pooled mean 皆惡化且 downside 未改善時，candidate rejected；不得為通過而手調區間。
 
 ## 驗證
-
-### 單元測試（`backend/src/test/java/com/steven/assets/service/TradingRadarRuleEngineTest.java`）
-
-- [ ] **(a) 本任務的核心行為**：同一個 `ma60BiasPercent`（例如 `−8.0`）在低波動標的（`σ` 小）與高波動標的（`σ` 大）上得到**不同的 `TimingState`**——低波動者為 `EXTREME_OVERSOLD`、高波動者為 `NEUTRAL` 或 `OVERSOLD`。這是本任務是否真的做到的直接斷言。
-- [ ] **(b) `σ` 不可得時回退固定門檻**，且 `risks` 含揭露文案；回退後的 `TimingState` 與 V9 在同一輸入下相同。
-- [ ] **(c) `σ` 低於下限時以下限代入**，且 `risks` 含揭露文案。
-- [ ] **(d) 量綱**：以 `bias = 12.0`（百分比）、`σ = 0.02`（比例）構造輸入，斷言 `normalizedBias` 為 `6.0` 而非 `600.0`（守住 274.2 的 ×100 對齊）。
-- [ ] **(e) `ma60BiasPercent` 的輸出值未被改動**（回歸）。
-- [ ] **(f) 窄幅 KD 失效機制未被改動**（回歸）：`kdBandWidthPercent < 2.0` 時 `TimingState` 不由 KD 判定、`kdHeatOf()` 回 `NORMAL`。
-- [ ] **(g) 除息不使 `σ` 膨脹**：以含一次現金配息的構造序列，斷言用還原序列算出的 `σ` 明顯小於用原始序列算出的 `σ`。
-- [ ] **(h) `WEIGHT_SUM` 仍為 `1.00`**（本任務不改權重，只改單一因子的尺度）。
-- [ ] **(i) `RULE_VERSION` 已升版一級**（值為實作當下的實際值 +1；**不得預設為任何字面版號**——見 274.5 的撞號警告），測試方法名已改。
-
-### 建置與部署
 
 ```bash
 /usr/local/apache-maven/apache-maven-3.9.11/bin/mvn -q -f backend/pom.xml -DextraArgLine=-Dnet.bytebuddy.experimental=true test
 ```
 
-> **`-DextraArgLine` 不可寫成 `-DargLine`**：後者會覆蓋掉 pom 中的時區設定，造成大量測試 error 且錯誤訊息會偽裝成 byte-buddy 問題。
+單元測試至少直接證明：
 
-```bash
-cp /Users/steven/Project/asset-management/.env .
-```
-
-```bash
-docker compose -p asset-management build --no-cache business-services frontend
-```
-
-```bash
-docker compose -p asset-management up -d --no-deps --force-recreate business-services frontend
-```
-
-```bash
-docker compose -p asset-management restart bff
-```
-
-> `restart bff` 不可省略：recreate `business-services` 會換 IP，BFF 握舊 IP 會讓每個 `/api/**` 回 500 且 3 分鐘以上不自癒（Docker DNS TTL 600s）；`business-services` 的 log 會是乾淨的，錯誤只在 bff log 的 Connection refused。
-
-### 實資料驗收（本任務是否達成目的的唯一客觀判準）
-
-改動後須以 t273 的回測端點重跑十年逐日統計，斷言「極端」態的觸發率在各標的之間顯著收斂：
-
-- [ ] **「乖離側極端條件」的觸發率不得再有任何一檔為 0.00%**（現況六檔為 0.00%：00719B／00865B／00697B／00695B／2412／00751B）。實測在 2σ–14σ 的**任一**倍數下皆可達成。
-- [ ] **離散程度須顯著收斂**：最高／最低觸發率的比值須從現況的「無限大」（有六檔為 0）降到**單一數量級內**（實測 12σ 為 32 倍、10σ 為 7.8 倍）。
-- [ ] **逐檔輸出「因窄幅 KD 而不可能觸發極端態的交易日比例」**，並在完成報告列出。四檔債券 ETF 現況為 70.9%–91.4%，這部分**本任務修不掉**（見背景段的射程邊界），驗收時不得把它誤記為正規化失敗。
-
-> **⚠ 原先寫的「不得有任何一檔超過 5%」已從硬性判準降為參考指標，理由更正如下。** 48 檔全掃的細掃結果：**14.3σ–14.6σ 這個窗口確實可以同時滿足兩條**（該區間內 0.00% 者為 0 檔、最高為 00919 的 4.59%–4.89%、最低為 2885 的 0.045%）；但 **14.2σ 時 00919 仍為 5.04% 而超標、14.7σ 時 1301 即掉到 0.00%**——**可行窗口只有約 0.4σ 寬**，對資料期間與標的組成極度敏感，不適合當成硬性驗收門檻。標的之間本來就存在真實的波動結構差異（00919 為 2022 年才上市的高股息 ETF，暖機後樣本僅 675 筆且波動叢聚明顯），把絕對上限釘死等於要求抹平真實差異。**故改以「離散收斂」而非「絕對上限」作判準，但不得再宣稱「實測證明無法同時滿足」——那個說法是錯的。**
->
-> **⚠ 另注意驗收的對象是「乖離側條件」，不是完整的 `TimingState` 極端態**——後者含 KD 合取條件，本任務修不掉那一側。
-
-```bash
-docker exec asset-business-services curl -s -X POST "http://localhost:8080/internal/backtest/rules" -H 'Content-Type: application/json' -d '{}' | head -c 4000
-```
-
-### 通知基準重建的驗收
-
-```bash
-docker exec asset-postgres psql -U assets -d assets -c "SELECT rule_version, count(*) FROM trading_radar_notification_setting GROUP BY rule_version;"
-```
-
-- [ ] 升版部署後首輪評估前，既有列的 `rule_version` 應與**新版本字串不同**（舊值或 `NULL`）；首輪評估後應更新為新版本字串且**未寄出任何通知信**。須實際確認 log 中沒有該輪的寄信紀錄。
-
-### 畫面驗收
-
-- [ ] 開啟 `http://localhost/trading-radar`，確認規則版本標籤顯示**新的版本字串**（與升版前不同），且債券 ETF（00679B／00697B／00719B／00865B）的乖離顯示仍為百分比（不是 `σ` 倍數）。
+- adjusted sequence 的 60 日 sample sigma 與手算相同；不足、非正價與常數序列行為明確；
+- production/backtest 使用同一 assembler 值，無第二份 sigma 公式；
+- scale invariance：整段價格乘正常數不改 bias/sigma/normalized result；
+- normalized path 啟用時，2/98 percentile 不再影響 timing/action；
+- sigma 缺漏只回固定門檻且降低 confidence；
+- candidate disabled 時，V12 score/action bit-identical；
+- t308 full-engine rerun 能對每組參數重新產生完整 action，而非只替既有訊號換標籤。
 
 ## 完成報告
 
-（實作者做完後回填：實際改了哪些檔、驗證輸出、與原計畫的偏差及原因。**必須包含**：(1) 門檻倍數與 `σ` 下限所依據的 t273 量測數字；(2) 既有測試期望值的新舊對照表；(3) 改動後重跑的十年觸發率表，與本檔背景段的表格並列對照。）
+（回填各市場／profile sigma coverage、calibration grid、holdout/walk-forward 結果、選定或 rejected 參數、KD dead-zone 比例、V12 對照與 V13 最終啟用狀態。）

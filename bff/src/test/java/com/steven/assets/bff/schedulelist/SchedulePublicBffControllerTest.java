@@ -24,11 +24,24 @@ class SchedulePublicBffControllerTest {
     }
 
     @Test
-    @DisplayName("排程清單完整列出 19 個業務與 30 個外部行情工作")
+    @DisplayName("排程清單完整列出 20 個業務與 30 個外部行情工作")
     void 項目數正確() {
-        assertThat(jobs()).hasSize(49);
-        assertThat(jobs()).filteredOn(j -> "業務服務".equals(j.service())).hasSize(19);
+        assertThat(jobs()).hasSize(50);
+        assertThat(jobs()).filteredOn(j -> "業務服務".equals(j.service())).hasSize(20);
         assertThat(jobs()).filteredOn(j -> "外部行情服務".equals(j.service())).hasSize(30);
+    }
+
+    @Test
+    @DisplayName("Treasury 排程固定為台北週二至週六 07:00，且只新增一個 business job")
+    void Treasury排程契約() {
+        assertThat(jobs()).filteredOn(j -> "官方殖利率曲線刷新".equals(j.name()))
+                .singleElement()
+                .satisfies(job -> {
+                    assertThat(job.service()).isEqualTo("業務服務");
+                    assertThat(job.cron()).isEqualTo("0 0 7 * * TUE-SAT");
+                    assertThat(job.zone()).isEqualTo("Asia/Taipei");
+                    assertThat(job.description()).contains("官方").contains("整批 fallback");
+                });
     }
 
     @Test

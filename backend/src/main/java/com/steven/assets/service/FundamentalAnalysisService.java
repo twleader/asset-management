@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.steven.assets.dto.TradingRadarDto;
 import com.steven.assets.model.News;
+import com.steven.assets.util.MarketZones;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -56,6 +57,16 @@ public class FundamentalAnalysisService {
     private final ObjectMapper mapper;
     private final PublicInfoEvidenceResolver publicInfo;
 
+    /**
+     * 邊界單位轉接器：資料庫欄位固定保存百分點（4.00 代表 4%），只有明確標記為 ratio
+     * 的外部 adapter 輸入才乘 100；避免同一數值在 DB→profile→rule 路徑被重複轉換。
+     */
+    static BigDecimal normalizeDividendYieldPct(BigDecimal raw, boolean ratioInput) {
+        if (raw == null) return null;
+        return ratioInput ? raw.multiply(BigDecimal.valueOf(100)).setScale(4, RoundingMode.HALF_UP)
+                : raw;
+    }
+
     public record Resolved(
             TradingRadarRuleEngine.FundamentalInput input,
             TradingRadarDto.FundamentalSnapshot snapshot) {
@@ -65,8 +76,8 @@ public class FundamentalAnalysisService {
 
         public static Resolved unavailable(
                 boolean applicable, PublicInfoEvidenceResolver.Evidence evidence) {
-            TradingRadarRuleEngine.FundamentalInput input = new TradingRadarRuleEngine.FundamentalInput(
-                    applicable, null, null, null, null, null, false);
+        TradingRadarRuleEngine.FundamentalInput input = new TradingRadarRuleEngine.FundamentalInput(
+                applicable, null, null, null, null, null, false, false);
             TradingRadarDto.FundamentalSnapshot snapshot = new TradingRadarDto.FundamentalSnapshot(
                     applicable, 0, null, null, null, null, null,
                     null, List.of(), null, null, List.of(), null,
@@ -79,11 +90,28 @@ public class FundamentalAnalysisService {
     }
 
     public Resolved resolve(String stockCode, String stockName, String market, Instant decisionInstant) {
+        TradingRadarAssetProfileResolver.AssetProfile strictProfile =
+                TradingRadarAssetProfileResolver.resolve(stockCode, market, stockName,
+                        null, null, null, null, null, null);
+        return resolve(stockCode, stockName, market, decisionInstant, strictProfile);
+    }
+
+    /** Production overload carrying the same strict profile used by the radar decision. */
+    public Resolved resolve(
+            String stockCode, String stockName, String market, Instant decisionInstant,
+            TradingRadarAssetProfileResolver.AssetProfile strictProfile) {
         if (stockCode == null || decisionInstant == null
                 || !Set.of(TW_MARKET, US_MARKET).contains(market)) {
             return Resolved.unavailable(false);
         }
-        if (isEtf(stockCode, market)) return Resolved.unavailable(false);
+        if (strictProfile == null) {
+            strictProfile = TradingRadarAssetProfileResolver.resolve(stockCode, market, stockName,
+                    null, null, null, null, null, null);
+        }
+        if (!strictProfile.equity()
+                || strictProfile.instrumentKind() != TradingRadarAssetProfileResolver.InstrumentKind.STOCK) {
+            return Resolved.unavailable(false);
+        }
 
         // public_info_* 是原文證據第一順位；先載入一次，個股與產業比對共用同一快照。
         List<News> evidenceRows;
@@ -91,7 +119,7 @@ public class FundamentalAnalysisService {
         try {
             evidenceRows = publicInfo.loadForEarliestDecision(decisionInstant);
             initialEvidence = publicInfo.resolveFromRows(
-                    stockCode, stockName, null, decisionInstant, evidenceRows);
+                    stockCode, stockName, null, market, decisionInstant, evidenceRows);
         } catch (Exception e) {
             log.warn("public_info 個股證據讀取失敗（{}）：{}", stockCode, e.getMessage());
             evidenceRows = List.of();
@@ -100,7 +128,10 @@ public class FundamentalAnalysisService {
 
         try {
             PreparedData data = loadPreparedData(stockCode, market, decisionInstant);
-            return resolvePrepared(stockCode, stockName, decisionInstant, data, evidenceRows);
+            // Decision dates are market-local: US/UK/TW observations must not cross a UTC
+            // midnight merely because the old resolver used a Taipei-only zone.
+            return resolvePrepared(stockCode, stockName, market, decisionInstant, data, evidenceRows,
+                    MarketZones.resolve(market));
         } catch (Exception e) {
             // 個別基本面資料失敗不得拖垮技術面；optional 權重會在規則引擎中重分配。
             log.warn("基本面 as-of 解析失敗（{}）：{}", stockCode, e.getMessage());
@@ -115,26 +146,56 @@ public class FundamentalAnalysisService {
      */
     public Map<Instant, TradingRadarRuleEngine.FundamentalInput> resolveInputsForBacktest(
             String stockCode, String market, List<Instant> decisionInstants) {
+        return resolveResolvedInputsForBacktest(stockCode, market, decisionInstants).entrySet().stream()
+                .collect(java.util.stream.Collectors.toUnmodifiableMap(
+                        Map.Entry::getKey, entry -> entry.getValue().input()));
+    }
+
+    /**
+     * 回測 evidence gate 需要與 rule input 同一個 as-of snapshot；保留 Resolved
+     * （而非只回傳 FundamentalInput）避免 V13 用「有分數但無來源／日期」的合成快照冒充完整證據。
+     */
+    public Map<Instant, Resolved> resolveResolvedInputsForBacktest(
+            String stockCode, String market, List<Instant> decisionInstants) {
+        return resolveResolvedInputsForBacktest(stockCode, market, decisionInstants, null);
+    }
+
+    /** Strict-profile batch overload; ETF/bond callers fail closed even when NAV history is empty. */
+    public Map<Instant, Resolved> resolveResolvedInputsForBacktest(
+            String stockCode, String market, List<Instant> decisionInstants,
+            TradingRadarAssetProfileResolver.AssetProfile strictProfile) {
         List<Instant> instants = decisionInstants == null ? List.of() : decisionInstants.stream()
                 .filter(Objects::nonNull).distinct().sorted().toList();
         if (instants.isEmpty()) return Map.of();
-        // 只替換市場判斷子句：stockCode != null 與 !isEtf(...) 兩個子句原樣保留，這是與 resolve() 獨立的
-        // 第二道市場閘門，若整句改成只剩市場白名單檢查，會連帶丟掉 null 檢查與 ETF 排除。
+        boolean profileKnown = strictProfile != null;
         boolean applicable = stockCode != null && Set.of(TW_MARKET, US_MARKET).contains(market)
-                && !isEtf(stockCode, market);
-        if (!applicable) return unavailableInputs(instants, false);
+                && (profileKnown
+                ? strictProfile.equity()
+                        && strictProfile.instrumentKind() == TradingRadarAssetProfileResolver.InstrumentKind.STOCK
+                : !isEtf(stockCode, market));
+        if (!applicable) return unavailableResolvedInputs(instants, false);
         try {
             PreparedData data = loadPreparedData(stockCode, market, instants.get(instants.size() - 1));
-            Map<Instant, TradingRadarRuleEngine.FundamentalInput> result = new LinkedHashMap<>();
+            Map<Instant, Resolved> result = new LinkedHashMap<>();
             for (Instant instant : instants) {
                 result.put(instant, resolvePrepared(
-                        stockCode, stockCode, instant, data, List.of()).input());
+                        stockCode, stockCode, market, instant, data, List.of(),
+                        MarketZones.resolve(market)));
             }
             return Map.copyOf(result);
         } catch (Exception e) {
             log.warn("基本面回測批次解析失敗（{}）：{}", stockCode, e.getMessage());
-            return unavailableInputs(instants, true);
+            return unavailableResolvedInputs(instants, true);
         }
+    }
+
+    public Map<Instant, TradingRadarRuleEngine.FundamentalInput> resolveInputsForBacktest(
+            String stockCode, String market, List<Instant> decisionInstants,
+            TradingRadarAssetProfileResolver.AssetProfile strictProfile) {
+        return resolveResolvedInputsForBacktest(stockCode, market, decisionInstants, strictProfile)
+                .entrySet().stream()
+                .collect(java.util.stream.Collectors.toUnmodifiableMap(
+                        Map.Entry::getKey, entry -> entry.getValue().input()));
     }
 
     private Map<Instant, TradingRadarRuleEngine.FundamentalInput> unavailableInputs(
@@ -145,13 +206,24 @@ public class FundamentalAnalysisService {
         return Map.copyOf(result);
     }
 
+    private Map<Instant, Resolved> unavailableResolvedInputs(
+            List<Instant> instants, boolean applicable) {
+        Map<Instant, Resolved> result = new LinkedHashMap<>();
+        Resolved resolved = Resolved.unavailable(applicable);
+        instants.forEach(instant -> result.put(instant, resolved));
+        return Map.copyOf(result);
+    }
+
     private Resolved resolvePrepared(
             String stockCode,
             String stockName,
+            String market,
             Instant decisionInstant,
             PreparedData data,
-            List<News> evidenceRows) {
-        LocalDate decisionDate = decisionInstant.atZone(TAIPEI).toLocalDate();
+            List<News> evidenceRows,
+            ZoneId decisionZone) {
+        LocalDate decisionDate = decisionInstant.atZone(
+                decisionZone == null ? TAIPEI : decisionZone).toLocalDate();
         List<FinancialRow> financialRows = latestAsOf(
                 data.financials(), decisionInstant,
                 row -> row.provider() + '|' + row.year() + '|' + row.quarter());
@@ -170,11 +242,10 @@ public class FundamentalAnalysisService {
         List<ValuationRow> valuationRows = latestAsOf(
                 data.valuations(), decisionInstant,
                 row -> row.provider() + '|' + row.date());
-        Factor pe = peFactor(valuationRows, decisionDate);
-        if (pe != null && pe.contribution() != null && pe.contribution() > 0
-                && eps != null && eps.contribution() != null && eps.contribution() <= -1.0) {
-            pe = pe.withContribution(null);
-        }
+        boolean severeFinancial = (eps != null && eps.contribution() != null && eps.contribution() <= -0.8)
+                || (roe != null && roe.contribution() != null && roe.contribution() <= -0.8);
+        ValuationComposite valuation = valuationComposite(valuationRows, decisionDate, severeFinancial);
+        Factor pe = valuation == null ? null : valuation.asFactor();
 
         List<IndustryRow> industryRows = latestAsOf(
                 data.industries(), decisionInstant,
@@ -184,23 +255,36 @@ public class FundamentalAnalysisService {
         PublicInfoEvidenceResolver.Evidence evidence = evidenceRows == null || evidenceRows.isEmpty()
                 ? PublicInfoEvidenceResolver.Evidence.EMPTY
                 : publicInfo.resolveFromRows(
-                        stockCode, stockName, industryName, decisionInstant, evidenceRows);
+                        stockCode, stockName, industryName, market, decisionInstant, evidenceRows);
 
         int coverage = count(eps, roe, revenue, pe);
         boolean peLoss = pe != null && pe.loss();
         TradingRadarRuleEngine.FundamentalInput input = new TradingRadarRuleEngine.FundamentalInput(
                 true, contribution(eps), contribution(roe), contribution(revenue), contribution(pe),
-                contribution(industry), peLoss);
+                contribution(industry), peLoss, roe != null && roe.fallback());
         TradingRadarDto.FundamentalSnapshot snapshot = new TradingRadarDto.FundamentalSnapshot(
                 true, coverage,
-                value(eps), value(roe), value(revenue), value(pe), pe == null ? null : pe.loss(),
+                value(eps), value(roe), value(revenue), valuation == null ? null : valuation.pePercentile(),
+                pe == null ? null : pe.loss(),
                 provider(eps), urls(eps), asOf(eps),
                 provider(roe), urls(roe), asOf(roe),
                 provider(revenue), urls(revenue), asOf(revenue),
                 provider(pe), urls(pe), asOf(pe),
                 industryName, value(industry), industry == null ? null : industry.companyCount(),
                 industry == null ? null : industry.period(), provider(industry), urls(industry), asOf(industry),
-                evidence.company(), evidence.industry());
+                evidence.company(), evidence.industry(),
+                valuation == null ? null : valuation.peValue(),
+                valuation == null ? null : valuation.pbValue(),
+                valuation == null ? null : valuation.dividendYieldPct(),
+                valuation == null ? null : valuation.pbPercentile(),
+                valuation == null ? null : valuation.dividendYieldPercentile(),
+                valuation == null ? null : valuation.contribution(),
+                valuation == null ? 0 : valuation.coverage(),
+                eps == null ? null : eps.trendType(),
+                roe == null ? false : roe.fallback(),
+                valuation == null ? null : componentEvidence(valuation.peComponent()),
+                valuation == null ? null : componentEvidence(valuation.pbComponent()),
+                valuation == null ? null : componentEvidence(valuation.dividendYieldComponent()));
         return new Resolved(input, snapshot);
     }
 
@@ -234,7 +318,7 @@ public class FundamentalAnalysisService {
                 """, (rs, ignored) -> revenueRow(rs), code, market,
                 timestamp(latestInstant), timestamp(latestInstant));
         List<ValuationRow> valuations = jdbc.query("""
-                SELECT trading_date, pe_ratio, pe_loss_flag, provider,
+                SELECT trading_date, pe_ratio, pb_ratio, dividend_yield_pct, pe_loss_flag, provider,
                        source_urls::text, source_available_at, observed_at
                 FROM stock_valuation_daily
                 WHERE stock_code=? AND market=?
@@ -304,9 +388,11 @@ public class FundamentalAnalysisService {
         List<FinancialRow> recent = consecutive(rows, 8, FinancialRow::periodIndex);
         if (recent.size() < 8 || !financialFresh(recent.get(0), decisionDate)) return null;
         List<BigDecimal> standalone = recent.stream().map(r -> standalone(r, rows, FinancialRow::eps)).toList();
-        BigDecimal yoy = epsYoyPct(standalone);
-        if (yoy == null) return null;
-        return factor(yoy, clampUnit(yoy.doubleValue() / 20.0), recent);
+        EpsTrend trend = epsTrend(standalone);
+        if (trend == null) return null;
+        return new Factor(trend.yoyPct(), trend.contribution(), recent.get(0).provider(),
+                mergedUrls(recent), latestAvailable(recent), trend.loss(), null,
+                recent.get(0).period(), trend.type(), false);
     }
 
     /**
@@ -319,9 +405,21 @@ public class FundamentalAnalysisService {
                 || recent.get(0).equity() == null || recent.get(0).equity().signum() <= 0) return null;
         List<BigDecimal> standalone = recent.stream()
                 .map(r -> standalone(r, rows, FinancialRow::income)).toList();
-        BigDecimal roe = approximateRoePct(standalone, recent.get(0).equity());
+        FinancialRow endRow = recent.get(0);
+        FinancialRow beginningRow = rows.stream()
+                .filter(r -> r.periodIndex() == endRow.periodIndex() - 4)
+                .findFirst().orElse(null);
+        boolean fallback = beginningRow == null || beginningRow.equity() == null;
+        if (beginningRow != null && !Objects.equals(beginningRow.provider(), endRow.provider())) return null;
+        if (beginningRow != null && beginningRow.equity() != null && beginningRow.equity().signum() <= 0) {
+            return null;
+        }
+        BigDecimal beginningEquity = fallback ? endRow.equity() : beginningRow.equity();
+        BigDecimal roe = approximateRoePct(standalone, beginningEquity, endRow.equity());
         if (roe == null) return null;
-        return factor(roe, clampUnit((roe.doubleValue() - 10.0) / 10.0), recent);
+        double contribution = clampUnit((roe.doubleValue() - 10.0) / 10.0);
+        return new Factor(roe, contribution, recent.get(0).provider(), mergedUrls(recent),
+                latestAvailable(recent), false, null, recent.get(0).period(), null, fallback);
     }
 
     Factor revenueFactor(List<RevenueRow> rows, LocalDate decisionDate) {
@@ -340,14 +438,18 @@ public class FundamentalAnalysisService {
             if (providerRows.isEmpty()) continue;
             ValuationRow latest = providerRows.get(0);
             if (!fresh(latest.date(), decisionDate, VALUATION_MAX_AGE_DAYS)) continue;
+            // A fresh explicit flag (true or false) is authoritative for this
+            // provider.  Do not let a lower-priority provider replace an explicit
+            // non-loss row merely because this provider lacks enough PE history.
+            if (latest.loss() == null) continue;
             if (Boolean.TRUE.equals(latest.loss())) {
                 return new Factor(null, -1.0, provider, latest.urls(), latest.availableAt(), true, null,
                         latest.date().toString());
             }
-            if (!Boolean.FALSE.equals(latest.loss()) || latest.pe() == null || latest.pe().signum() <= 0) continue;
+            if (latest.pe() == null || latest.pe().signum() <= 0) return null;
             List<BigDecimal> history = providerRows.stream().map(ValuationRow::pe)
                     .filter(v -> v != null && v.signum() > 0).toList();
-            if (history.size() < PE_MIN_SAMPLES) continue;
+            if (history.size() < PE_MIN_SAMPLES) return null;
             long atOrBelow = history.stream().filter(v -> v.compareTo(latest.pe()) <= 0).count();
             BigDecimal percentile = BigDecimal.valueOf(100.0 * atOrBelow / history.size())
                     .setScale(1, RoundingMode.HALF_UP);
@@ -356,6 +458,108 @@ public class FundamentalAnalysisService {
                     false, null, latest.date().toString());
         }
         return null;
+    }
+
+    /**
+     * t307.1：同一 provider 的 PE/PB/殖利率 composite。每個 component 都有自己的
+     * 最新 freshness 與至少 250 筆有效歷史；缺一項只降低 coverage，不以 0 補值。
+     */
+    ValuationComposite valuationComposite(
+            List<ValuationRow> rows, LocalDate decisionDate, boolean severeFinancial) {
+        if (rows == null || decisionDate == null) return null;
+        // Each component selects its own latest valid provider observation.  A late
+        // PE revision must not force PB/yield to inherit its date or provenance.
+        Component pe = valuationComponent(rows, ValuationRow::pe, decisionDate, false);
+        Component pb = valuationComponent(rows, ValuationRow::pb, decisionDate, false);
+        Component rawYield = valuationComponent(rows, ValuationRow::dividendYieldPct,
+                decisionDate, true);
+
+        // A provider's explicit PE-loss flag is a hard financial warning.  Keep any
+        // raw yield observation for profile/API disclosure, but never let it rescue
+        // the valuation score (the severe path excludes it from available below).
+        LossDecision loss = latestLoss(rows, decisionDate);
+        if (loss != null && loss.loss()) {
+            // The explicit PE-loss row replaces the PE component; historical
+            // positive PE observations must not leak beside the loss flag.
+            return ValuationComposite.loss(lossComponent(loss.row()), pb, rawYield);
+        }
+        Component yield = severeFinancial ? null : rawYield;
+        List<Component> available = java.util.stream.Stream.of(pe, pb, yield)
+                .filter(java.util.Objects::nonNull).toList();
+        if (available.isEmpty() && rawYield == null) return null;
+        // A severe-financial snapshot may retain a raw dividend-yield observation for
+        // disclosure while PE/PB are both unavailable.  Do not turn that empty score
+        // into a synthetic -1 loss; null must remain an unavailable valuation factor.
+        Double contribution = available.isEmpty()
+                ? null
+                : available.stream().mapToDouble(Component::contribution).average().orElse(0.0);
+        List<Component> all = java.util.stream.Stream.of(pe, pb, rawYield)
+                .filter(java.util.Objects::nonNull).toList();
+        List<String> urls = mergedComponentUrls(all);
+        Instant availableAt = latestComponentAvailable(all);
+        String provider = componentProvider(all);
+        String asOf = latestComponentDate(all);
+        return new ValuationComposite(
+                pe == null ? null : pe.value(), pe == null ? null : pe.percentile(),
+                pb == null ? null : pb.value(), pb == null ? null : pb.percentile(),
+                rawYield == null ? null : rawYield.value(), rawYield == null ? null : rawYield.percentile(),
+                contribution, available.size(), provider, urls, availableAt, false, asOf,
+                pe, pb, rawYield);
+    }
+
+    private Component valuationComponent(
+            List<ValuationRow> rows,
+            Function<ValuationRow, BigDecimal> valueOf,
+            LocalDate decisionDate,
+            boolean yieldComponent) {
+        for (String provider : PROVIDERS) {
+            List<ValuationRow> providerRows = rows.stream()
+                    .filter(r -> provider.equals(r.provider()))
+                    .sorted(ValuationRow.DESC).toList();
+            if (providerRows.isEmpty()) continue;
+            ValuationRow latestRow = providerRows.stream()
+                    .filter(r -> valueOf.apply(r) != null)
+                    .findFirst().orElse(null);
+            if (latestRow == null || !fresh(latestRow.date(), decisionDate, VALUATION_MAX_AGE_DAYS)) continue;
+            List<BigDecimal> history = providerRows.stream().map(valueOf)
+                    .filter(v -> v != null && v.signum() > 0).toList();
+            if (history.size() < PE_MIN_SAMPLES) continue;
+            BigDecimal value = valueOf.apply(latestRow);
+            if (value == null || value.signum() <= 0) continue;
+            BigDecimal percentile = percentile(value, history);
+            double contribution = -(percentile.doubleValue() - 50.0) / 30.0;
+            if (yieldComponent) contribution = Math.max(0.0, contribution * -1.0);
+            return new Component(value, percentile, clampUnit(contribution), latestRow.provider(),
+                    latestRow.urls(), latestRow.availableAt(), latestRow.date(), false);
+        }
+        return null;
+    }
+
+    private static Component lossComponent(ValuationRow row) {
+        return row == null ? null : new Component(null, null, -1.0, row.provider(),
+                row.urls(), row.availableAt(), row.date(), true);
+    }
+
+    /**
+     * Select the first provider with a fresh, explicit PE-loss flag. An explicit
+     * false is authoritative for that provider; only a missing, stale, or null
+     * flag may fall through to the next provider.
+     */
+    private LossDecision latestLoss(List<ValuationRow> rows, LocalDate decisionDate) {
+        for (String provider : PROVIDERS) {
+            ValuationRow latest = rows.stream().filter(r -> provider.equals(r.provider()))
+                    .sorted(ValuationRow.DESC).findFirst().orElse(null);
+            if (latest == null || !fresh(latest.date(), decisionDate, VALUATION_MAX_AGE_DAYS)
+                    || latest.loss() == null) continue;
+            return new LossDecision(latest, latest.loss());
+        }
+        return null;
+    }
+
+    private static BigDecimal percentile(BigDecimal value, List<BigDecimal> history) {
+        long atOrBelow = history.stream().filter(v -> v.compareTo(value) <= 0).count();
+        return BigDecimal.valueOf(100.0 * atOrBelow / history.size())
+                .setScale(1, RoundingMode.HALF_UP);
     }
 
     private RevenueRow latestRevenueBasis(List<RevenueRow> rows, LocalDate decisionDate) {
@@ -448,12 +652,42 @@ public class FundamentalAnalysisService {
                 .divide(priorFour, 4, RoundingMode.HALF_UP);
     }
 
+    /** EPS 四季對四季趨勢；負基期不再被錯誤地當成「無資料」。 */
+    static EpsTrend epsTrend(List<BigDecimal> standaloneDesc) {
+        if (standaloneDesc == null || standaloneDesc.size() < 8
+                || standaloneDesc.subList(0, 8).stream().anyMatch(Objects::isNull)) return null;
+        BigDecimal recent = sum(standaloneDesc.subList(0, 4));
+        BigDecimal prior = sum(standaloneDesc.subList(4, 8));
+        if (recent.signum() > 0 && prior.signum() > 0) {
+            BigDecimal yoy = recent.subtract(prior).multiply(BigDecimal.valueOf(100))
+                    .divide(prior, 4, RoundingMode.HALF_UP);
+            return new EpsTrend(yoy, clampUnit(yoy.doubleValue() / 20.0),
+                    yoy.signum() >= 0 ? "POSITIVE_BASE_IMPROVING" : "POSITIVE_BASE_DETERIORATING", false);
+        }
+        if (recent.signum() > 0) return new EpsTrend(null, 1.0, "TURNAROUND", false);
+        if (prior.signum() > 0) return new EpsTrend(null, -1.0, "TURNED_LOSS", true);
+        return new EpsTrend(null, -1.0, "PERSISTENT_LOSS", true);
+    }
+
     static BigDecimal approximateRoePct(List<BigDecimal> standaloneDesc, BigDecimal latestEquity) {
         if (standaloneDesc == null || standaloneDesc.size() < 4 || latestEquity == null
                 || latestEquity.signum() <= 0
                 || standaloneDesc.subList(0, 4).stream().anyMatch(Objects::isNull)) return null;
         return sum(standaloneDesc.subList(0, 4)).multiply(BigDecimal.valueOf(100))
                 .divide(latestEquity, 4, RoundingMode.HALF_UP);
+    }
+
+    /** 平均期初／期末權益；兩者皆正才可用。 */
+    static BigDecimal approximateRoePct(
+            List<BigDecimal> standaloneDesc, BigDecimal beginningEquity, BigDecimal endingEquity) {
+        if (standaloneDesc == null || standaloneDesc.size() < 4
+                || beginningEquity == null || endingEquity == null
+                || beginningEquity.signum() <= 0 || endingEquity.signum() <= 0
+                || standaloneDesc.subList(0, 4).stream().anyMatch(Objects::isNull)) return null;
+        BigDecimal denominator = beginningEquity.add(endingEquity)
+                .divide(BigDecimal.valueOf(2), 8, RoundingMode.HALF_UP);
+        return sum(standaloneDesc.subList(0, 4)).multiply(BigDecimal.valueOf(100))
+                .divide(denominator, 4, RoundingMode.HALF_UP);
     }
 
     static BigDecimal threeMonthAverage(List<BigDecimal> yoyDesc) {
@@ -496,6 +730,8 @@ public class FundamentalAnalysisService {
 
     private ValuationRow valuationRow(ResultSet rs) throws SQLException {
         return new ValuationRow(rs.getDate("trading_date").toLocalDate(), rs.getBigDecimal("pe_ratio"),
+                rs.getBigDecimal("pb_ratio"),
+                normalizeDividendYieldPct(rs.getBigDecimal("dividend_yield_pct"), false),
                 (Boolean) rs.getObject("pe_loss_flag"), rs.getString("provider"),
                 urls(rs.getString("source_urls")), instant(rs, "source_available_at"),
                 instant(rs, "observed_at"));
@@ -526,7 +762,11 @@ public class FundamentalAnalysisService {
 
     private static int count(Factor... factors) {
         int count = 0;
-        for (Factor factor : factors) if (factor != null) count++;
+        for (Factor factor : factors) {
+            // A factor carrying disclosure values but no usable contribution (for
+            // example severe-financial raw yield only) is not score coverage.
+            if (factor != null && factor.contribution() != null) count++;
+        }
         return count;
     }
 
@@ -549,6 +789,37 @@ public class FundamentalAnalysisService {
                 .max(Instant::compareTo).orElse(null);
     }
 
+    private static TradingRadarDto.ValuationComponentEvidence componentEvidence(Component component) {
+        if (component == null) return null;
+        return new TradingRadarDto.ValuationComponentEvidence(
+                component.value(), component.percentile(), component.provider(), component.urls(),
+                component.availableAt() == null ? null : component.availableAt().toString(),
+                component.asOf() == null ? null : component.asOf().toString(), component.loss());
+    }
+
+    private static List<String> mergedComponentUrls(List<Component> components) {
+        Set<String> urls = new LinkedHashSet<>();
+        components.forEach(component -> urls.addAll(component.urls()));
+        return List.copyOf(urls);
+    }
+
+    private static Instant latestComponentAvailable(List<Component> components) {
+        return components.stream().map(Component::availableAt).filter(Objects::nonNull)
+                .max(Instant::compareTo).orElse(null);
+    }
+
+    private static String latestComponentDate(List<Component> components) {
+        return components.stream().map(Component::asOf).filter(Objects::nonNull)
+                .max(LocalDate::compareTo).map(LocalDate::toString).orElse(null);
+    }
+
+    private static String componentProvider(List<Component> components) {
+        Set<String> providers = components.stream().map(Component::provider)
+                .filter(Objects::nonNull).collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        if (providers.isEmpty()) return null;
+        return providers.size() == 1 ? providers.iterator().next() : "MULTI";
+    }
+
     interface SourcedRow {
         List<String> urls();
         Instant availableAt();
@@ -563,9 +834,73 @@ public class FundamentalAnalysisService {
             Instant availableAt,
             boolean loss,
             Integer companyCount,
-            String period) {
+            String period,
+            String trendType,
+            boolean fallback) {
+        Factor(BigDecimal value, Double contribution, String provider, List<String> urls,
+               Instant availableAt, boolean loss, Integer companyCount, String period) {
+            this(value, contribution, provider, urls, availableAt, loss, companyCount, period, null, false);
+        }
+
         Factor withContribution(Double next) {
-            return new Factor(value, next, provider, urls, availableAt, loss, companyCount, period);
+            return new Factor(value, next, provider, urls, availableAt, loss, companyCount, period,
+                    trendType, fallback);
+        }
+    }
+
+    record Component(
+            BigDecimal value,
+            BigDecimal percentile,
+            Double contribution,
+            String provider,
+            List<String> urls,
+            Instant availableAt,
+            LocalDate asOf,
+            boolean loss) {
+        Component(BigDecimal value, BigDecimal percentile, Double contribution,
+                  String provider, List<String> urls, Instant availableAt, LocalDate asOf) {
+            this(value, percentile, contribution, provider, urls, availableAt, asOf, false);
+        }
+    }
+
+    record LossDecision(ValuationRow row, boolean loss) {}
+
+    record EpsTrend(BigDecimal yoyPct, double contribution, String type, boolean loss) {}
+
+    record ValuationComposite(
+            BigDecimal peValue,
+            BigDecimal pePercentile,
+            BigDecimal pbValue,
+            BigDecimal pbPercentile,
+            BigDecimal dividendYieldPct,
+            BigDecimal dividendYieldPercentile,
+            Double contribution,
+            int coverage,
+            String provider,
+            List<String> urls,
+            Instant availableAt,
+            boolean loss,
+            String asOf,
+            Component peComponent,
+            Component pbComponent,
+            Component dividendYieldComponent) {
+        static ValuationComposite loss(Component peLoss, Component pb, Component rawYield) {
+            // Keep every independently resolved component for disclosure even when
+            // an explicit PE-loss flag fixes the valuation score at -1.
+            List<Component> all = java.util.stream.Stream.of(peLoss, pb, rawYield)
+                    .filter(java.util.Objects::nonNull).toList();
+            return new ValuationComposite(
+                    null, null,
+                    pb == null ? null : pb.value(), pb == null ? null : pb.percentile(),
+                    rawYield == null ? null : rawYield.value(),
+                    rawYield == null ? null : rawYield.percentile(),
+                    -1.0, all.size(), componentProvider(all), mergedComponentUrls(all),
+                    latestComponentAvailable(all), true, latestComponentDate(all), peLoss, pb, rawYield);
+        }
+
+        Factor asFactor() {
+            return new Factor(pePercentile, contribution, provider, urls, availableAt,
+                    loss, null, asOf, null, false);
         }
     }
 
@@ -586,9 +921,14 @@ public class FundamentalAnalysisService {
     }
 
     record ValuationRow(
-            java.time.LocalDate date, BigDecimal pe, Boolean loss,
+            java.time.LocalDate date, BigDecimal pe, BigDecimal pb, BigDecimal dividendYieldPct, Boolean loss,
             String provider, List<String> urls, Instant availableAt, Instant observedAt) implements SourcedRow {
         static final Comparator<ValuationRow> DESC = Comparator.comparing(ValuationRow::date).reversed();
+
+        ValuationRow(java.time.LocalDate date, BigDecimal pe, Boolean loss,
+                     String provider, List<String> urls, Instant availableAt, Instant observedAt) {
+            this(date, pe, null, null, loss, provider, urls, availableAt, observedAt);
+        }
     }
 
     record IndustryRow(

@@ -10,7 +10,7 @@ import java.util.List;
  * ScheduleListView 專屬 BFF（「公開資訊」分組，Requirement 36）。
  *
  * <p>回傳系統所有自動排程的**人工維護靜態清單**。排程分屬兩個服務：
- * {@code business-services}（19 個）與 {@code external-materials-service}（30 個）。
+ * {@code business-services}（20 個）與 {@code external-materials-service}（30 個）。
  * 此頁為唯讀資訊展示，故不做跨服務反射探索、不入 DB、不設管理端點。
  *
  * <p><b>計數慣例：以 {@code @Scheduled} 方法計，一法一筆。</b>external 30 筆對應 31 個標註
@@ -31,7 +31,7 @@ import java.util.List;
  *
  * <p>對照來源：
  * <ul>
- *   <li>business-services：IndexDailyRefreshScheduler、HistoricalDataService、ExportScheduleService、
+ *   <li>business-services：IndexDailyRefreshScheduler、TreasuryYieldRefreshScheduler、HistoricalDataService、ExportScheduleService、
  *       TradingCalendarExportScheduleService、RealizedGainExportScheduleService、SnapshotDateRollScheduler、
  *       StockAlertService、MarketAnalysisScheduler、BackupService</li>
 
@@ -50,9 +50,9 @@ public class SchedulePublicBffController {
     private static final String NYC = "America/New_York";
     private static final String LON = "Europe/London";
 
-    /** 全系統排程清單（49 筆）。順序刻意先業務服務、再外部行情服務，前端再依 category 分組。 */
+    /** 全系統排程清單（50 筆）。順序刻意先業務服務、再外部行情服務，前端再依 category 分組。 */
     private static final List<ScheduledJobDto> JOBS = List.of(
-            // ===== business-services（19）=====
+            // ===== business-services（20）=====
             new ScheduledJobDto(BUSINESS, "資產快照", "最新快照釘定當日",
                     "將每位使用者的最新快照日期釘為當日並重算資產，讓即時股價覆蓋生效",
                     "每日 00:05", "0 5 0 * * *", TPE),
@@ -73,6 +73,9 @@ public class SchedulePublicBffController {
                     "每 2 秒（啟動後延遲 2 秒）", "fixedDelay=2s, initialDelay=2s", ""),
             new ScheduledJobDto(BUSINESS, "大盤指數", "海外指數日線回補",
                     "各國大盤指數收盤後回補日線（最新日線過時才抓）",
+                    "每日 07:00（週二~六）", "0 0 7 * * TUE-SAT", TPE),
+            new ScheduledJobDto(BUSINESS, "美債殖利率", "官方殖利率曲線刷新",
+                    "美股收盤後抓美國財政部官方 3M／5Y／10Y／30Y 完整 curve；官方失敗或 partial 時才以 Yahoo 四 ticker 整批 fallback",
                     "每日 07:00（週二~六）", "0 0 7 * * TUE-SAT", TPE),
             new ScheduledJobDto(BUSINESS, "資產匯出", "每日匯出排程檢查",
                     "每分鐘檢查各使用者的每日自動匯出設定，命中執行時間即同時產出 JSON 與 Excel 兩份（主檔名相同）；輸出含 Google Drive 同步（若已啟用）",
@@ -208,7 +211,7 @@ public class SchedulePublicBffController {
                     "交易日 05:00–07:00 每 15 分鐘", "0 0/15 5-6 * * MON-FRI；0 0 7 * * MON-FRI", TPE)
     );
 
-    /** GET /api/bff/schedule-list —— 回傳全系統排程清單（49 筆靜態資料）。 */
+    /** GET /api/bff/schedule-list —— 回傳全系統排程清單（50 筆靜態資料）。 */
     @GetMapping
     public List<ScheduledJobDto> list() {
         return JOBS;

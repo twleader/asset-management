@@ -6,7 +6,9 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * ETF 淨值／折溢價歷史的唯讀查詢（Task 264）。
@@ -27,6 +29,43 @@ public interface EtfNavHistoryRepository extends JpaRepository<EtfNavHistory, Lo
             """)
     List<BigDecimal> findRecentPremiumPct(
             @Param("code") String code, @Param("market") String market,
+            org.springframework.data.domain.Pageable pageable);
+
+    /** 只取決策目標完成日的 dated observation，避免 DB fallback 把舊 NAV 當成今日。 */
+    @Query("""
+            select e from EtfNavHistory e
+            where e.stockCode = :code and e.market = :market
+              and e.navDate = :navDate and e.premiumDiscountPct is not null
+            order by e.id desc
+            """)
+    Optional<EtfNavHistory> findPremiumObservationOnDate(
+            @Param("code") String code,
+            @Param("market") String market,
+            @Param("navDate") LocalDate navDate);
+
+    /** 只回傳不晚於決策日的最近 observation，供 stale provenance 揭露與歷史分位。 */
+    @Query("""
+            select e from EtfNavHistory e
+            where e.stockCode = :code and e.market = :market
+              and e.navDate <= :asOfDate and e.premiumDiscountPct is not null
+            order by e.navDate desc, e.id desc
+            """)
+    List<EtfNavHistory> findRecentPremiumObservationsAsOf(
+            @Param("code") String code,
+            @Param("market") String market,
+            @Param("asOfDate") LocalDate asOfDate,
+            org.springframework.data.domain.Pageable pageable);
+
+    @Query("""
+            select e.premiumDiscountPct from EtfNavHistory e
+            where e.stockCode = :code and e.market = :market
+              and e.navDate <= :asOfDate and e.premiumDiscountPct is not null
+            order by e.navDate desc
+            """)
+    List<BigDecimal> findRecentPremiumPctAsOf(
+            @Param("code") String code,
+            @Param("market") String market,
+            @Param("asOfDate") LocalDate asOfDate,
             org.springframework.data.domain.Pageable pageable);
 
     /**

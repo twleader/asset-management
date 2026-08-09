@@ -60,8 +60,51 @@ class PublicInfoEvidenceResolverTest {
         assertEquals(List.of("2330 新聞"), result.company().stream().map(v -> v.title()).toList());
     }
 
+    @Test
+    void lateBackfillWithOldPublishedAtIsInvisibleBeforeFetchedAt() {
+        Instant decision = Instant.parse("2026-08-08T04:00:00Z");
+        News late = news(8, "2330 晚到回補", null, "TW",
+                decision.minus(java.time.Duration.ofDays(2)), decision.plusSeconds(1));
+        News known = news(9, "2330 已知新聞", null, "TW",
+                decision.minus(java.time.Duration.ofDays(2)), decision.minusSeconds(1));
+
+        var result = new PublicInfoEvidenceResolver(null)
+                .resolveFromRows("2330", "台積電", null, "台股", decision, List.of(late, known));
+
+        assertEquals(List.of("2330 已知新聞"), result.company().stream().map(v -> v.title()).toList());
+        assertEquals("MAX_PUBLISHED_FETCHED", result.company().getFirst().availabilityBasis());
+        assertEquals(decision.minusSeconds(1).toString(), result.company().getFirst().knownAt());
+    }
+
+    @Test
+    void marketRegionIsolatedAndGlobalRowsRemainVisible() {
+        Instant now = Instant.parse("2026-08-08T04:00:00Z");
+        List<News> rows = List.of(
+                news(1, "ACME 美股公告", null, "US", now.minusSeconds(60)),
+                news(2, "ACME 台股公告", null, "TW", now.minusSeconds(120)),
+                news(3, "ACME 全球公告", null, null, now.minusSeconds(180)));
+        PublicInfoEvidenceResolver resolver = new PublicInfoEvidenceResolver(null);
+
+        var us = resolver.resolveFromRows("ACME", "ACME", null, "美股", now, rows);
+        var tw = resolver.resolveFromRows("ACME", "ACME", null, "台股", now, rows);
+
+        assertEquals(List.of("ACME 美股公告", "ACME 全球公告"),
+                us.company().stream().map(v -> v.title()).toList());
+        assertEquals(List.of("ACME 台股公告", "ACME 全球公告"),
+                tw.company().stream().map(v -> v.title()).toList());
+    }
+
     private static News news(long id, String title, String summary, Instant publishedAt) {
+        return news(id, title, summary, "TW", publishedAt);
+    }
+
+    private static News news(long id, String title, String summary, String region, Instant publishedAt) {
+        return news(id, title, summary, region, publishedAt, publishedAt);
+    }
+
+    private static News news(long id, String title, String summary, String region,
+                             Instant publishedAt, Instant fetchedAt) {
         return new News(id, title, "twse", "https://example.test/" + id,
-                News.CATEGORY_NEWS, "TW", summary, publishedAt, publishedAt, "d" + id);
+                News.CATEGORY_NEWS, region, summary, publishedAt, fetchedAt, "d" + id);
     }
 }

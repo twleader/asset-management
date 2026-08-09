@@ -1,12 +1,14 @@
 package com.steven.assets.externalmaterials.service;
 
 import com.steven.assets.externalmaterials.client.NewsRow;
+import com.steven.assets.externalmaterials.client.TwseInfoFetchClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -364,21 +366,73 @@ public class StockSourceQuery {
                 }));
     }
 
-    /** Upsert 原物料收盤價（同一 commodity_code+price_date 視為覆寫）。 */
-    public void upsertCommodityPrice(String code, LocalDate priceDate, BigDecimal closePrice) {
+    /**
+     * Upsert 原物料收盤價與來源 provenance。
+     *
+     * <p>同值重抓保留最早可得時間，只更新最近抓取時間；價格若修訂，則把可得時間推到本次抓取，
+     * 讓歷史決策在舊值已被 mutable compatibility table 覆寫後 fail closed，而不是看見修訂後數字。
+     * 舊列若尚未有 source_available_at 且本次價格相同，仍維持 null，交由 resolver 使用規格指定的
+     * conservative legacy boundary。</p>
+     */
+    public void upsertCommodityPrice(
+            String code,
+            LocalDate priceDate,
+            BigDecimal closePrice,
+            String provider,
+            String sourceUrl,
+            Instant sourceAvailableAt,
+            Instant fetchedAt) {
         Long existing = jdbc.query(
                 "SELECT id FROM commodity_price_history WHERE commodity_code=? AND price_date=?",
                 ps -> { ps.setString(1, code); ps.setObject(2, priceDate); },
                 rs -> rs.next() ? rs.getLong(1) : null);
         if (existing != null) {
             jdbc.update(
-                    "UPDATE commodity_price_history SET close_price=? WHERE id=?",
-                    closePrice, existing);
+                    "UPDATE commodity_price_history SET "
+                            + "close_price=?, provider=?, source_url=?, "
+                            + "source_available_at=CASE "
+                            + "WHEN close_price IS DISTINCT FROM ? THEN ? "
+                            + "ELSE source_available_at END, "
+                            + "fetched_at=? WHERE id=?",
+                    closePrice, provider, sourceUrl,
+                    closePrice, timestamp(sourceAvailableAt), timestamp(fetchedAt), existing);
         } else {
             jdbc.update(
-                    "INSERT INTO commodity_price_history (commodity_code, price_date, close_price) VALUES (?, ?, ?)",
-                    code, priceDate, closePrice);
+                    "INSERT INTO commodity_price_history "
+                            + "(commodity_code,price_date,close_price,provider,source_url,"
+                            + "source_available_at,fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    code, priceDate, closePrice, provider, sourceUrl,
+                    timestamp(sourceAvailableAt), timestamp(fetchedAt));
         }
+    }
+
+    /** Legacy compatibility for callers that have no provenance. */
+    public void upsertCommodityPrice(String code, LocalDate priceDate, BigDecimal closePrice) {
+        upsertCommodityPrice(code, priceDate, closePrice, null, null, null, null);
+    }
+
+    /** Append one typed BFI82U observation; no UPDATE path exists by design. */
+    public void appendTwseInstitutionalObservation(
+            TwseInfoFetchClient.InstitutionalObservation observation) {
+        if (observation == null || observation.observedAt() == null
+                || observation.provider() == null || observation.status() == null) {
+            throw new IllegalArgumentException("institutional observation identity 缺漏");
+        }
+        jdbc.update(
+                "INSERT INTO twse_institutional_daily "
+                        + "(trading_date,foreign_net,trust_net,dealer_net,total_net,provider,source_url,"
+                        + "observed_at,source_available_at,availability_basis,status,error_reason) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                        + "ON CONFLICT (provider,observed_at) DO NOTHING",
+                observation.tradingDate(), observation.foreignNet(), observation.trustNet(),
+                observation.dealerNet(), observation.totalNet(), observation.provider(),
+                observation.sourceUrl(), timestamp(observation.observedAt()),
+                timestamp(observation.sourceAvailableAt()),
+                observation.availabilityBasis(), observation.status(), observation.errorReason());
+    }
+
+    private static java.sql.Timestamp timestamp(Instant value) {
+        return value == null ? null : java.sql.Timestamp.from(value);
     }
 
     /**
@@ -421,6 +475,40 @@ public class StockSourceQuery {
             jdbc.update("UPDATE etf_nav_history SET nav=?, premium_discount_pct=?, pct_origin=?, source=? WHERE id=?",
                     nav, premiumDiscountPct, pctOrigin, source, existing);
         }
+    }
+
+    /**
+     * Append one immutable ETF NAV observation for decision-time evidence.
+     *
+     * <p>This method intentionally contains no SELECT/UPDATE branch.  A repeated
+     * identity is an idempotent no-op; a later fetch always has a new observed-at
+     * and therefore remains a distinct revision in the audit stream.</p>
+     */
+    public void appendEtfNavObservation(
+            String stockCode,
+            String market,
+            LocalDate navDate,
+            BigDecimal nav,
+            BigDecimal premiumDiscountPct,
+            String pctOrigin,
+            String source,
+            Instant observedAt,
+            Instant availableAt,
+            String availabilityBasis) {
+        if (stockCode == null || stockCode.isBlank() || market == null || market.isBlank()
+                || navDate == null || nav == null || source == null || source.isBlank()
+                || observedAt == null || availableAt == null
+                || availabilityBasis == null || availabilityBasis.isBlank()) {
+            throw new IllegalArgumentException("ETF NAV observation provenance 不完整");
+        }
+        Instant effectiveAvailableAt = availableAt.isBefore(observedAt) ? observedAt : availableAt;
+        jdbc.update("INSERT INTO etf_nav_observation "
+                        + "(stock_code,market,nav_date,nav,premium_discount_pct,pct_origin,source,"
+                        + "observed_at,available_at,availability_basis) "
+                        + "VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",
+                stockCode, market, navDate, nav, premiumDiscountPct, pctOrigin, source,
+                java.sql.Timestamp.from(observedAt), java.sql.Timestamp.from(effectiveAvailableAt),
+                availabilityBasis);
     }
 
     /** 系統需追蹤的非 TWD 計價幣別：強制含 USD（美股），加上 fund_master.active 上的非 TWD 幣別。 */
@@ -612,48 +700,6 @@ public class StockSourceQuery {
 
     public record DividendBasis(BigDecimal previousClose, Integer fillDays) {
         public static final DividendBasis EMPTY = new DividendBasis(null, null);
-    }
-
-    /** Upsert 股利歷史。同一檔某年某 ex-date 視為同一筆覆寫。 */
-    public void upsertDividend(String code, String market, Integer year,
-                               BigDecimal cashDividend, BigDecimal stockDividend,
-                               java.time.LocalDate exDividendDate,
-                               java.time.LocalDate cashPaymentDate,
-                               java.time.LocalDate stockPaymentDate,
-                               BigDecimal yieldPct, Integer fillDays,
-                               BigDecimal previousClose, String source) {
-        Long existing = exDividendDate != null
-                ? jdbc.query(
-                        "SELECT id FROM stock_dividend_history " +
-                                "WHERE stock_code=? AND market=? AND year=? AND ex_dividend_date=?",
-                        ps -> { ps.setString(1, code); ps.setString(2, market);
-                                 ps.setInt(3, year); ps.setObject(4, exDividendDate); },
-                        rs -> rs.next() ? rs.getLong(1) : null)
-                : jdbc.query(
-                        "SELECT id FROM stock_dividend_history " +
-                                "WHERE stock_code=? AND market=? AND year=? AND ex_dividend_date IS NULL",
-                        ps -> { ps.setString(1, code); ps.setString(2, market); ps.setInt(3, year); },
-                        rs -> rs.next() ? rs.getLong(1) : null);
-        if (existing != null) {
-            jdbc.update(
-                    "UPDATE stock_dividend_history SET cash_dividend=?, stock_dividend=?, " +
-                            "ex_dividend_date=?, yield_pct=?, cash_payment_date=?, stock_payment_date=?, " +
-                            "fill_days=?, previous_close=?, source=?, updated_at=NOW() WHERE id=?",
-                    cashDividend, stockDividend,
-                    exDividendDate, yieldPct,
-                    cashPaymentDate, stockPaymentDate,
-                    fillDays, previousClose, source, existing);
-        } else {
-            jdbc.update(
-                    "INSERT INTO stock_dividend_history (stock_code, market, year, cash_dividend, " +
-                            "stock_dividend, ex_dividend_date, yield_pct, cash_payment_date, " +
-                            "stock_payment_date, fill_days, previous_close, source, updated_at) " +
-                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())",
-                    code, market, year, cashDividend, stockDividend,
-                    exDividendDate, yieldPct,
-                    cashPaymentDate, stockPaymentDate,
-                    fillDays, previousClose, source);
-        }
     }
 
     // nz(BigDecimal) 已移除（Requirement 62 / Task 279）：它唯一的使用者是 upsertHistory 的

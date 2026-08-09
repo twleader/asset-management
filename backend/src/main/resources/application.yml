@@ -55,6 +55,9 @@ spring:
 app:
   # Requirement 28：主要管理者必須由部署環境指定，不提供內建帳號或 fallback。
   admin-email: ${ADMIN_EMAIL}
+  internal:
+    # Business → external Treasury API shared credential; secret value only comes from runtime env.
+    treasury-token: ${INTERNAL_TREASURY_TOKEN:}
 
 notification:
   email:

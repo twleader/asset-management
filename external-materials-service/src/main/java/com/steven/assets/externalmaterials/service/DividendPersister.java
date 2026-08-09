@@ -1,7 +1,6 @@
 package com.steven.assets.externalmaterials.service;
 
 import com.steven.assets.externalmaterials.client.DividendFetchClient;
-import com.steven.assets.externalmaterials.client.DividendFetchClient.DividendEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -9,16 +8,14 @@ import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
-import java.math.BigDecimal;
-import java.math.RoundingMode;
-import java.time.LocalDate;
+import java.time.Instant;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
 /**
- * 股利歷史持久化：每日 17:00 TW 全量同步主檔股票，UI 直接讀 stock_dividend_history。
- * 一次性 sync(code, market) 也透過 InternalDividendController 對外暴露給 backend cold-cache fallback。
+ * 股利 evidence 抓取排程。只 append snapshot/event/observation；不維護
+ * {@code stock_dividend_history} current-state，也不做 ACTIVE/CANCELLED 決策。
  */
 @Slf4j
 @Service
@@ -29,6 +26,7 @@ public class DividendPersister {
 
     private final DividendFetchClient client;
     private final StockSourceQuery source;
+    private final DividendSnapshotStore snapshots;
 
     @EventListener(ApplicationReadyEvent.class)
     public void warmupOnStartup() {
@@ -67,38 +65,27 @@ public class DividendPersister {
         log.info("股利歷史同步完成：成功 {} 檔、失敗 {} 檔", ok, fail);
     }
 
-    /** 抓單檔 + 寫 DB。supply by InternalDividendController for backend cold-cache fallback。 */
+    /** 抓單檔並 append immutable evidence；回傳本次所有 observation 的事件筆數。 */
     public int syncOne(String code, String market) {
-        DividendFetchClient.DividendFetchResult fetched = client.fetch(code, market, RETAIN_YEARS);
-        List<DividendEvent> events = fetched.events();
-        int written = 0;
-        for (DividendEvent e : events) {
-            LocalDate exDate = parseDate(e.exDividendDate());
-            BigDecimal previousClose = null;
-            Integer fillDays = null;
-            BigDecimal yieldPct = null;
-            if (exDate != null) {
-                StockSourceQuery.DividendBasis basis = source.calcDividendBasis(code, market, exDate);
-                previousClose = basis.previousClose();
-                fillDays = basis.fillDays();
-                if (e.cashDividend() != null && previousClose != null && previousClose.signum() > 0) {
-                    yieldPct = e.cashDividend().multiply(BigDecimal.valueOf(100))
-                            .divide(previousClose, 4, RoundingMode.HALF_UP);
-                }
-            }
-            source.upsertDividend(code, market, e.year(),
-                    e.cashDividend(), e.stockDividend(),
-                    exDate,
-                    parseDate(e.cashPaymentDate()), parseDate(e.stockPaymentDate()),
-                    yieldPct, fillDays, previousClose,
-                    fetched.source());
-            written++;
+        List<DividendFetchClient.DividendFetchResult> observations =
+                client.fetchObservations(code, market, RETAIN_YEARS);
+        if (observations == null || observations.isEmpty()) {
+            log.warn("股利 evidence 未回任何 observation：{} {}", market, code);
+            return 0;
         }
-        return written;
-    }
-
-    private LocalDate parseDate(String s) {
-        if (s == null || s.isBlank()) return null;
-        try { return LocalDate.parse(s); } catch (Exception e) { return null; }
+        Instant observedAt = Instant.now();
+        int eventCount = 0;
+        for (DividendFetchClient.DividendFetchResult fetched : observations) {
+            DividendSnapshotStore.PersistResult persisted = snapshots.record(
+                    code, market, fetched, observedAt);
+            if (persisted.snapshotId() <= 0 || fetched == null) {
+                log.warn("股利 evidence 未落地：{} {} status={} reason={}", market, code,
+                        fetched == null ? null : fetched.status(),
+                        fetched == null ? null : fetched.errorReason());
+                continue;
+            }
+            eventCount += fetched.events().size();
+        }
+        return eventCount;
     }
 }

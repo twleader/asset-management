@@ -64,6 +64,8 @@ class TradingRadarServiceOwnerScopeTest {
     @Mock private EtfNavHistoryRepository etfNavHistoryRepo;
     @Mock private TradingRadarSnapshotStore snapshotStore;
     @Mock private CurrentUserContext currentUserContext;
+    @Mock private DividendEventEvidenceRepository dividendEventEvidenceRepository;
+    @Mock private TreasuryYieldService treasuryYieldService;
 
     private TradingRadarService newService() {
         return new TradingRadarService(
@@ -88,7 +90,9 @@ class TradingRadarServiceOwnerScopeTest {
                 fundamentalAnalysisService,
                 etfNavHistoryRepo,
                 snapshotStore,
-                currentUserContext);
+                currentUserContext,
+                dividendEventEvidenceRepository,
+                treasuryYieldService);
     }
 
     /** holdings／watchlist 一律回空（owner／無 owner 兩種查詢都要 stub），只隔離出 owner 分支本身。 */

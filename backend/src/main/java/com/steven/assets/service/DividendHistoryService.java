@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.time.Year;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -18,9 +19,10 @@ import java.util.List;
 /**
  * 股利歷史只讀 service。
  *
- * 由 external-materials-service 每日 17:00 TW cron 抓 FinMind / NASDAQ 寫入 stock_dividend_history；
- * 此處對外提供 DB 讀取。DB 沒資料時，呼叫 external-materials-service 的 /internal/dividend/sync
- * 同步觸發抓取（供 cold-cache fallback）。
+ * external-materials-service 每日 17:00 TW cron 只追加 immutable dividend evidence；
+ * backend 在讀取前把最新、完整且涵蓋未來 45 日的 snapshot 投影至 stock_dividend_history。
+ * DB 沒資料時，呼叫 external-materials-service 的 /internal/dividend/sync 同步觸發抓取
+ * （供 cold-cache fallback），再由 backend 重做一次投影。
  */
 @Slf4j
 @Service
@@ -29,17 +31,21 @@ public class DividendHistoryService {
     private static final int RETAIN_YEARS = 10;
 
     private final StockDividendHistoryRepository repo;
+    private final DividendCurrentStateProjectionService projectionService;
     private final WebClient externalClient;
 
     public DividendHistoryService(StockDividendHistoryRepository repo,
+                                  DividendCurrentStateProjectionService projectionService,
                                   @Value("${external-materials.base-url:http://external-materials-service:8080}") String externalUrl) {
         this.repo = repo;
+        this.projectionService = projectionService;
         this.externalClient = WebClient.builder().baseUrl(externalUrl).build();
     }
 
     /** 從 DB 讀股利歷史；DB 沒資料時 fallback 觸發 external-materials-service 同步。 */
     @Transactional
     public DividendHistoryResult findFromDb(String code, String market, int years) {
+        projectionService.projectOne(code, market, Instant.now());
         int sinceYear = Year.now().getValue() - years;
         List<StockDividendHistory> rows = repo.findByStockSinceYear(code, market, sinceYear);
         if (rows.isEmpty()) {
@@ -52,6 +58,7 @@ public class DividendHistoryService {
                         .retrieve()
                         .toBodilessEntity()
                         .block();
+                projectionService.projectOne(code, market, Instant.now());
                 rows = repo.findByStockSinceYear(code, market, sinceYear);
             } catch (Exception e) {
                 log.warn("觸發 external-materials-service /internal/dividend/sync 失敗: {}", e.getMessage());

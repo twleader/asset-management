@@ -16,6 +16,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -170,7 +171,7 @@ class NewsPollerManualExportTest {
         NewsPoller.ManualRunResult r = poller.fetchAndExportNow();
 
         verify(newsClient).fetchAll();
-        verify(twseClient).fetchAll();
+        verify(twseClient).fetchAllTyped();
         verify(snapshotClient).fetchAll();
         verify(krClient).fetchAll();
         verify(maCrossClient).fetchAll();
@@ -178,6 +179,24 @@ class NewsPollerManualExportTest {
         assertThat(r.mode()).isEqualTo("FETCH_AND_EXPORT");
         assertThat(r.upserted()).isEqualTo(1);
         assertThat(r.failed()).isEqualTo(0);
+    }
+
+    @Test
+    void 同一輪Twse抓取只寫入一次typed法人Observation(@TempDir Path dir) {
+        outputTo(dir);
+        Instant observedAt = Instant.parse("2026-08-09T02:00:00Z");
+        var observation = new TwseInfoFetchClient.InstitutionalObservation(
+                TODAY, new BigDecimal("100"), new BigDecimal("-20"),
+                new BigDecimal("15"), new BigDecimal("95"),
+                "TWSE_BFI82U", "https://example.test/BFI82U", observedAt, null,
+                "OBSERVED_AT_NO_PUBLISHED_TIMESTAMP", "AVAILABLE", null, "typed");
+        when(twseClient.fetchAllTyped()).thenReturn(
+                new TwseInfoFetchClient.FetchResult(List.of(), observation));
+
+        poller.fetchAndExportNow();
+
+        verify(twseClient).fetchAllTyped();
+        verify(source).appendTwseInstitutionalObservation(observation);
     }
 
     /** 兩顆的 trigger 標籤不同，且該值同時出現在 JSON 與 xlsx 的 metadata 區。 */

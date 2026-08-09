@@ -13,6 +13,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -53,6 +54,190 @@ class FundamentalAnalysisServiceTest {
                 List.of(bd(5), bd(10), bd(15))));
         assertNull(FundamentalAnalysisService.threeMonthAverage(
                 java.util.Arrays.asList(bd(5), null, bd(15))));
+    }
+
+    @Test
+    void epsTrendKeepsTurnaroundAndLossStatesInsteadOfReturningNull() {
+        assertEquals("TURNAROUND", FundamentalAnalysisService.epsTrend(
+                List.of(bd(1), bd(1), bd(1), bd(1), bd(-1), bd(-1), bd(-1), bd(-1))).type());
+        assertEquals("TURNED_LOSS", FundamentalAnalysisService.epsTrend(
+                List.of(bd(-1), bd(-1), bd(-1), bd(-1), bd(1), bd(1), bd(1), bd(1))).type());
+        assertEquals("PERSISTENT_LOSS", FundamentalAnalysisService.epsTrend(
+                List.of(bd(-1), bd(-1), bd(-1), bd(-1), bd(-2), bd(-2), bd(-2), bd(-2))).type());
+        assertEquals(1.0, FundamentalAnalysisService.epsTrend(
+                List.of(bd(1), bd(1), bd(1), bd(1), bd(-1), bd(-1), bd(-1), bd(-1))).contribution());
+    }
+
+    @Test
+    void roeUsesAverageBeginningAndEndingEquityAndSupportsExplicitFallback() {
+        assertEquals(new BigDecimal("66.6667"), FundamentalAnalysisService.approximateRoePct(
+                List.of(bd(25), bd(25), bd(25), bd(25)), bd(100), bd(200)));
+
+        FundamentalAnalysisService service = new FundamentalAnalysisService(null, null, null);
+        List<FundamentalAnalysisService.FinancialRow> recentWithoutBeginning = new ArrayList<>(List.of(
+                financialRow(2026, 2, 25, 200, "EXCHANGE"),
+                financialRow(2026, 1, 25, 200, "EXCHANGE"),
+                financialRow(2025, 4, 25, 200, "EXCHANGE"),
+                financialRow(2025, 3, 25, 200, "EXCHANGE"),
+                financialRow(2025, 2, 25, 0, "EXCHANGE")));
+        recentWithoutBeginning.set(4, new FundamentalAnalysisService.FinancialRow(
+                2025, 2, bd(0), bd(50), null, "EXCHANGE", List.of("u"), Instant.EPOCH, Instant.EPOCH));
+        FundamentalAnalysisService.Factor fallback = service.roeFactor(
+                recentWithoutBeginning, LocalDate.of(2026, 8, 15));
+        assertTrue(fallback.fallback());
+        assertEquals(50.0000, fallback.value().doubleValue(), 0.00001);
+
+        List<FundamentalAnalysisService.FinancialRow> crossProvider = new ArrayList<>(recentWithoutBeginning);
+        crossProvider.set(4, financialRow(2025, 2, 25, 100, "FINMIND"));
+        assertNull(service.roeFactor(crossProvider, LocalDate.of(2026, 8, 15)),
+                "期初權益不得跨 provider 拼接");
+        assertNull(FundamentalAnalysisService.approximateRoePct(
+                List.of(bd(25), bd(25), bd(25), bd(25)), bd(0), bd(200)));
+    }
+
+    @Test
+    void valuationCompositeUsesSameProviderAndAllPercentagePointComponents() {
+        FundamentalAnalysisService service = new FundamentalAnalysisService(null, null, null);
+        LocalDate latest = LocalDate.of(2026, 8, 8);
+        List<FundamentalAnalysisService.ValuationRow> rows = new ArrayList<>();
+        for (int i = 0; i < 250; i++) {
+            rows.add(new FundamentalAnalysisService.ValuationRow(
+                    latest.minusDays(i),
+                    BigDecimal.valueOf(10 + i),
+                    BigDecimal.valueOf(2 + i / 10.0),
+                    BigDecimal.valueOf(4 + i / 100.0),
+                    false, "EXCHANGE", List.of("u"), Instant.EPOCH, Instant.EPOCH));
+        }
+        var composite = service.valuationComposite(rows, latest, false);
+        assertEquals("EXCHANGE", composite.provider());
+        assertEquals(3, composite.coverage());
+        assertEquals(new BigDecimal("4.0"), composite.dividendYieldPct());
+        assertTrue(composite.contribution() <= 1.0 && composite.contribution() >= -1.0);
+
+        FundamentalAnalysisService.ValuationRow loss = new FundamentalAnalysisService.ValuationRow(
+                latest, null, null, new BigDecimal("4.00"), true, "EXCHANGE", List.of(),
+                Instant.EPOCH, Instant.EPOCH);
+        var lossComposite = service.valuationComposite(List.of(loss), latest, false);
+        assertEquals(-1.0, lossComposite.contribution());
+        assertTrue(lossComposite.peComponent().loss());
+        assertEquals("EXCHANGE", lossComposite.peComponent().provider());
+        assertEquals(latest, lossComposite.peComponent().asOf());
+    }
+
+    @Test
+    void dividendYieldBoundaryConvertsRatioExactlyOnce() {
+        assertEquals(new BigDecimal("4.0000"), FundamentalAnalysisService
+                .normalizeDividendYieldPct(new BigDecimal("0.04"), true));
+        assertEquals(new BigDecimal("4.00"), FundamentalAnalysisService
+                .normalizeDividendYieldPct(new BigDecimal("4.00"), false));
+        assertEquals(new BigDecimal("4.01"), FundamentalAnalysisService
+                .normalizeDividendYieldPct(new BigDecimal("4.01"), false));
+        // A DB value already expressed in percentage points must not be sent through the
+        // ratio adapter a second time.
+        assertEquals(new BigDecimal("4.00"), FundamentalAnalysisService
+                .normalizeDividendYieldPct(new BigDecimal("4.00"), false));
+    }
+
+    @Test
+    void valuationComponentsKeepIndependentProviderDateAndSevereYieldObservation() {
+        FundamentalAnalysisService service = new FundamentalAnalysisService(null, null, null);
+        LocalDate decision = LocalDate.of(2026, 8, 8);
+        List<FundamentalAnalysisService.ValuationRow> rows = new ArrayList<>();
+        for (int i = 0; i < 250; i++) {
+            rows.add(new FundamentalAnalysisService.ValuationRow(
+                    decision.minusDays(i), BigDecimal.valueOf(10 + i), null, null, false,
+                    "EXCHANGE", List.of("pe-url"), Instant.parse("2026-08-08T01:00:00Z"), Instant.EPOCH));
+            rows.add(new FundamentalAnalysisService.ValuationRow(
+                    decision.minusDays(i + 1), null, BigDecimal.valueOf(2 + i / 10.0), null, false,
+                    "YAHOO", List.of("pb-url"), Instant.parse("2026-08-07T01:00:00Z"), Instant.EPOCH));
+            rows.add(new FundamentalAnalysisService.ValuationRow(
+                    decision.minusDays(i + 2), null, null, BigDecimal.valueOf(4 + i / 100.0), false,
+                    "FINMIND", List.of("yield-url"), Instant.parse("2026-08-06T01:00:00Z"), Instant.EPOCH));
+        }
+
+        var composite = service.valuationComposite(rows, decision, true);
+
+        assertEquals("MULTI", composite.provider());
+        assertEquals("EXCHANGE", composite.peComponent().provider());
+        assertEquals("YAHOO", composite.pbComponent().provider());
+        assertEquals("FINMIND", composite.dividendYieldComponent().provider());
+        assertEquals(LocalDate.of(2026, 8, 8), composite.peComponent().asOf());
+        assertEquals(LocalDate.of(2026, 8, 7), composite.pbComponent().asOf());
+        assertEquals(LocalDate.of(2026, 8, 6), composite.dividendYieldComponent().asOf());
+        assertNotNull(composite.dividendYieldPct(), "severe path still exposes raw yield");
+        assertEquals(2, composite.coverage(), "severe path excludes yield from score coverage");
+    }
+
+    @Test
+    void explicitHigherPriorityNonLossDoesNotFallThroughToLowerProviderLoss() {
+        FundamentalAnalysisService service = new FundamentalAnalysisService(null, null, null);
+        LocalDate decision = LocalDate.of(2026, 8, 8);
+        List<FundamentalAnalysisService.ValuationRow> rows = new ArrayList<>();
+        rows.add(new FundamentalAnalysisService.ValuationRow(
+                decision, null, null, null, false, "EXCHANGE", List.of("official"),
+                Instant.EPOCH, Instant.EPOCH));
+        rows.add(new FundamentalAnalysisService.ValuationRow(
+                decision, null, null, null, true, "YAHOO", List.of("fallback"),
+                Instant.EPOCH, Instant.EPOCH));
+
+        assertNull(service.valuationComposite(rows, decision, false));
+        assertNull(service.peFactor(rows, decision));
+    }
+
+    @Test
+    void peLossKeepsItsOwnProvenanceWhenYieldComesFromAnotherProvider() {
+        FundamentalAnalysisService service = new FundamentalAnalysisService(null, null, null);
+        LocalDate decision = LocalDate.of(2026, 8, 8);
+        Instant peAt = Instant.parse("2026-08-08T01:00:00Z");
+        Instant yieldAt = Instant.parse("2026-08-07T01:00:00Z");
+        List<FundamentalAnalysisService.ValuationRow> rows = new ArrayList<>();
+        rows.add(new FundamentalAnalysisService.ValuationRow(
+                decision, null, null, new BigDecimal("5.00"), true, "EXCHANGE",
+                List.of("pe-loss-url"), peAt, peAt));
+        for (int i = 0; i < 250; i++) {
+            rows.add(new FundamentalAnalysisService.ValuationRow(
+                    decision.minusDays(i + 1), BigDecimal.valueOf(10 + i / 10.0), null, null,
+                    false, "EXCHANGE", List.of("old-pe-url"), yieldAt, yieldAt));
+            rows.add(new FundamentalAnalysisService.ValuationRow(
+                    decision.minusDays(i + 1), null, null, BigDecimal.valueOf(4 + i / 100.0),
+                    false, "FINMIND", List.of("yield-url"), yieldAt, yieldAt));
+            rows.add(new FundamentalAnalysisService.ValuationRow(
+                    decision.minusDays(i + 1), null, BigDecimal.valueOf(2 + i / 100.0), null,
+                    false, "YAHOO", List.of("pb-url"), yieldAt, yieldAt));
+        }
+
+        var composite = service.valuationComposite(rows, decision, false);
+
+        assertEquals(-1.0, composite.contribution());
+        assertNull(composite.peValue(), "explicit PE loss replaces historical positive PE disclosure");
+        assertEquals(3, composite.coverage());
+        assertEquals("MULTI", composite.provider());
+        assertTrue(composite.peComponent().loss());
+        assertEquals("EXCHANGE", composite.peComponent().provider());
+        assertEquals(List.of("pe-loss-url"), composite.peComponent().urls());
+        assertEquals("FINMIND", composite.dividendYieldComponent().provider());
+        assertEquals("YAHOO", composite.pbComponent().provider());
+        assertNotNull(composite.pbValue());
+        assertEquals("pe-loss-url", composite.urls().getFirst());
+        assertTrue(composite.urls().contains("yield-url"));
+        assertEquals(decision, LocalDate.parse(composite.asOf()));
+    }
+
+    @Test
+    void severeFinancialYieldOnlyRemainsDisclosureWithoutSyntheticLossScore() {
+        FundamentalAnalysisService service = new FundamentalAnalysisService(null, null, null);
+        LocalDate decision = LocalDate.of(2026, 8, 8);
+        List<FundamentalAnalysisService.ValuationRow> rows = new ArrayList<>();
+        for (int i = 0; i < 250; i++) {
+            rows.add(new FundamentalAnalysisService.ValuationRow(
+                    decision.minusDays(i), null, null, BigDecimal.valueOf(4 + i / 100.0),
+                    false, "FINMIND", List.of("yield-url"), Instant.EPOCH, Instant.EPOCH));
+        }
+        var composite = service.valuationComposite(rows, decision, true);
+        assertNotNull(composite);
+        assertNull(composite.contribution());
+        assertEquals(0, composite.coverage());
+        assertNotNull(composite.dividendYieldPct());
     }
 
     @Test
@@ -143,7 +328,10 @@ class FundamentalAnalysisServiceTest {
     @SuppressWarnings({"unchecked", "rawtypes"})
     void usMarketCoverageCapsAtThreeAndNeverFabricatesRevenueOrIndustry() {
         JdbcTemplate jdbc = mock(JdbcTemplate.class);
-        Instant decisionInstant = Instant.parse("2026-08-08T02:00:00Z");
+        // 14:00Z is after the US market-local date has advanced to 2026-08-08;
+        // a 02:00Z decision is still 2026-08-07 in New York and must not see the
+        // 2026-08-08 valuation row.
+        Instant decisionInstant = Instant.parse("2026-08-08T14:00:00Z");
 
         List<FundamentalAnalysisService.FinancialRow> financials = financialRows("SEC_EDGAR", 2026, 2);
         List<FundamentalAnalysisService.ValuationRow> valuations = valuationRows("YAHOO", LocalDate.of(2026, 8, 8));
@@ -251,6 +439,13 @@ class FundamentalAnalysisServiceTest {
                     provider, List.of("https://example.test/financial"), Instant.EPOCH, Instant.EPOCH));
         }
         return rows;
+    }
+
+    private static FundamentalAnalysisService.FinancialRow financialRow(
+            int year, int quarter, int income, int equity, String provider) {
+        return new FundamentalAnalysisService.FinancialRow(
+                year, quarter, BigDecimal.valueOf(income), BigDecimal.valueOf(income * quarter),
+                BigDecimal.valueOf(equity), provider, List.of("u"), Instant.EPOCH, Instant.EPOCH);
     }
 
     /**

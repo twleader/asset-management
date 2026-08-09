@@ -74,7 +74,9 @@ class TradingRadarNotificationMarketBatchTest {
             mock(FundamentalAnalysisService.class),
             mock(EtfNavHistoryRepository.class),
             mock(TradingRadarSnapshotStore.class),
-            mock(CurrentUserContext.class));
+            mock(CurrentUserContext.class),
+            mock(DividendEventEvidenceRepository.class),
+            mock(TreasuryYieldService.class));
 
     private final TradingRadarNotificationSettingRepository settingRepo =
             mock(TradingRadarNotificationSettingRepository.class);

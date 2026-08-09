@@ -38,8 +38,18 @@ public class PublicInfoEvidenceResolver {
     }
 
     public Evidence resolve(String stockCode, String stockName, String industryName, Instant decisionInstant) {
+        return resolve(stockCode, stockName, industryName, null, decisionInstant);
+    }
+
+    /**
+     * 市場 aware 的公開資訊入口。TW 只接受 TW/null region，US 只接受 US/null；
+     * global(null) 證據可被兩個市場看見，但台美新聞不得互相穿透。
+     */
+    public Evidence resolve(
+            String stockCode, String stockName, String industryName, String market,
+            Instant decisionInstant) {
         if (decisionInstant == null) return Evidence.EMPTY;
-        return resolveFromRows(stockCode, stockName, industryName, decisionInstant,
+        return resolveFromRows(stockCode, stockName, industryName, market, decisionInstant,
                 loadForEarliestDecision(decisionInstant));
     }
 
@@ -57,13 +67,24 @@ public class PublicInfoEvidenceResolver {
             String industryName,
             Instant decisionInstant,
             List<News> rows) {
+        return resolveFromRows(stockCode, stockName, industryName, null, decisionInstant, rows);
+    }
+
+    /** Batch/backtest overload retaining the same market boundary as production. */
+    Evidence resolveFromRows(
+            String stockCode,
+            String stockName,
+            String industryName,
+            String market,
+            Instant decisionInstant,
+            List<News> rows) {
         if (decisionInstant == null) return Evidence.EMPTY;
         if (rows == null || rows.isEmpty()) return Evidence.EMPTY;
 
         Pattern codePattern = exactCodePattern(stockCode);
-        Predicate<News> companyMatch = row -> isVisible(row, decisionInstant)
+        Predicate<News> companyMatch = row -> isVisible(row, market, decisionInstant)
                 && (matches(row, codePattern) || containsExactPhrase(row, stockName));
-        Predicate<News> industryMatch = row -> isVisible(row, decisionInstant)
+        Predicate<News> industryMatch = row -> isVisible(row, market, decisionInstant)
                 && containsExactPhrase(row, industryName);
         return new Evidence(select(rows, companyMatch), select(rows, industryMatch));
     }
@@ -75,19 +96,44 @@ public class PublicInfoEvidenceResolver {
             if (!predicate.test(row) || (row.getId() != null && !seen.add(row.getId()))) continue;
             result.add(new TradingRadarDto.PublicInformationItem(
                     row.getRegion(), row.getTitle(), row.getSource(), row.getUrl(),
-                    row.getPublishedAt() == null ? null : row.getPublishedAt().toString(), row.getSummary()));
+                    row.getPublishedAt() == null ? null : row.getPublishedAt().toString(), row.getSummary(),
+                    knownAt(row) == null ? null : knownAt(row).toString(), availabilityBasis(row)));
             if (result.size() == MAX_EVIDENCE) break;
         }
         return List.copyOf(result);
     }
 
-    private boolean isVisible(News row, Instant decisionInstant) {
+    static boolean isVisible(News row, String market, Instant decisionInstant) {
         return row != null
                 && News.CATEGORY_NEWS.equals(row.getCategory())
-                && (row.getRegion() == null || "TW".equalsIgnoreCase(row.getRegion()))
+                && regionMatchesMarket(row.getRegion(), market)
                 && row.getPublishedAt() != null
+                // A late backfill may carry an old publishedAt but was not known at
+                // the historical decision.  Require the ingestion timestamp too;
+                // otherwise a current run would leak it into past backtests.
+                && row.getFetchedAt() != null
+                && !row.getFetchedAt().isAfter(decisionInstant)
                 && !row.getPublishedAt().isBefore(decisionInstant.minus(LOOKBACK))
                 && !row.getPublishedAt().isAfter(decisionInstant);
+    }
+
+    static Instant knownAt(News row) {
+        if (row == null || row.getPublishedAt() == null || row.getFetchedAt() == null) return null;
+        return row.getPublishedAt().isAfter(row.getFetchedAt())
+                ? row.getPublishedAt() : row.getFetchedAt();
+    }
+
+    static String availabilityBasis(News row) {
+        return row == null || row.getFetchedAt() == null ? null : "MAX_PUBLISHED_FETCHED";
+    }
+
+    private static boolean regionMatchesMarket(String region, String market) {
+        if (region == null || region.isBlank()) return true;
+        if ("台股".equals(market)) return "TW".equalsIgnoreCase(region);
+        if ("美股".equals(market)) return "US".equalsIgnoreCase(region);
+        // Legacy no-market calls retain the original TW/null boundary. New callers must
+        // supply a supported market before using evidence for a decision.
+        return market == null && "TW".equalsIgnoreCase(region);
     }
 
     private boolean matches(News row, Pattern pattern) {

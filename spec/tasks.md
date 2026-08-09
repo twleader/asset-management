@@ -28,7 +28,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 
 ---
 
-## 任務索引（Task 1–228、264–267、269–292、297–306）
+## 任務索引（Task 1–228、264–267、269–292、297–309）
 
 | Task | 標題 | 位置 |
 |---|---|---|
@@ -306,8 +306,11 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 304 | 指數 KD 遞迴整併：taiexKd／nasdaqKd 刪除、統一走 kdSeriesAsc 單趟（Requirement 43） | [tasks/t304_indicator_kd_recursion_unify.md](tasks/t304_indicator_kd_recursion_unify.md) |
 | 305 | 雙軌因子貢獻一次計算（輸出逐位不變）＋整波部署驗證（Requirement 43） | [tasks/t305_radar_factor_compute_once.md](tasks/t305_radar_factor_compute_once.md) |
 | 306 | 台幣兌美元匯率新增兆豐銀行備援層（台銀 → 兆豐 → Yahoo → FinMind，Requirement 10） | [tasks/t306_exchange_rate_mega_bank_fallback.md](tasks/t306_exchange_rate_mega_bank_fallback.md) |
+| 307 | 交易雷達估值合成、資產輪廓、市場別公開資訊與版本化配息事件（Requirement 65） | [tasks/t307_radar_valuation_profile_events.md](tasks/t307_radar_valuation_profile_events.md) |
+| 308 | 交易雷達可成交台美回測、時間外推校準與 `TW_RULES_V13` 發布（Requirement 56／65） | [tasks/t308_radar_walk_forward_v13_calibration.md](tasks/t308_radar_walk_forward_v13_calibration.md) |
+| 309 | 交易雷達 decision-time 資料時效、證據信心與買進完整性閘門（Requirement 65） | [tasks/t309_radar_evidence_integrity_confidence.md](tasks/t309_radar_evidence_integrity_confidence.md) |
 
-> **註：本索引表僅列至 228、264–267、269–279、280–292 與 297–305；Task 229–263、268 與 293–296 未登錄於本表，以 `spec/tasks/tNNN_*.md` 檔案本身為準。**
+> **註：本索引表僅列至 228、264–267、269–292 與 297–309；Task 229–263、268 與 293–296 未登錄於本表，以 `spec/tasks/tNNN_*.md` 檔案本身為準。**
 
 > **Task 222–225 已全部被 t264／t265／t292 取代（見上表），保留僅作為決策記錄，一律不得依其實作。**
 >

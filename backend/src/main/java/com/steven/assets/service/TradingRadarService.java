@@ -1,9 +1,12 @@
 package com.steven.assets.service;
 
 import com.steven.assets.dto.TradingRadarDto;
+import com.steven.assets.dto.TreasuryYieldDto;
 import com.steven.assets.model.AssetSnapshot;
+import com.steven.assets.model.EtfNavObservation;
 import com.steven.assets.model.Stock;
 import com.steven.assets.repository.EtfNavHistoryRepository;
+import com.steven.assets.repository.EtfNavObservationRepository;
 import com.steven.assets.model.StockHolding;
 import com.steven.assets.model.StockPriceHistory;
 import com.steven.assets.model.TwseIndexDailyHistory;
@@ -17,8 +20,8 @@ import com.steven.assets.repository.TwseIndexDailyHistoryRepository;
 import com.steven.assets.repository.UsIndexDailyHistoryRepository;
 import com.steven.assets.security.CurrentUserContext;
 import com.steven.assets.util.MarketZones;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.request.RequestContextHolder;
@@ -45,7 +48,6 @@ import java.util.Set;
  * <p>純讀 PostgreSQL／Redis；刻意不注入 MarketAnalysisService、新聞爬蟲或任何 AI client。</p>
  */
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class TradingRadarService {
 
@@ -96,8 +98,176 @@ public class TradingRadarService {
     private final TradingRadarMarketContextService marketContextService;
     private final FundamentalAnalysisService fundamentalAnalysisService;
     private final EtfNavHistoryRepository etfNavHistoryRepo;
+    private final EtfNavObservationRepository etfNavObservationRepository;
     private final TradingRadarSnapshotStore snapshotStore;
     private final CurrentUserContext currentUserContext;
+    private final DividendEventEvidenceRepository dividendEventEvidenceRepository;
+    private final TreasuryYieldService treasuryYieldService;
+    private final TradingRadarMarketFeaturePort marketFeaturePort;
+    private final BondYieldBetaEvidencePort bondYieldBetaEvidencePort;
+    private final StockStyleThresholdProvider stockStyleThresholdProvider;
+    /** Compatibility constructors are used by legacy unit adapters; Spring production wiring is strict. */
+    private final boolean strictCalendarMode;
+
+    /** Compatibility constructor for existing unit tests/callers before typed V13 ports. */
+    public TradingRadarService(
+            TradingRadarRuleEngine ruleEngine,
+            TechnicalIndicatorService indicatorService,
+            DistributionAdjustedPriceService adjustedPriceService,
+            RadarInputAssembler assembler,
+            AssetClassifier assetClassifier,
+            TwseIndexDailyHistoryRepository twseRepo,
+            UsIndexDailyHistoryRepository usIndexDailyHistoryRepo,
+            StockPriceHistoryRepository priceHistoryRepo,
+            StockDividendHistoryRepository dividendHistoryRepo,
+            PriceQueryService priceQueryService,
+            TaiexDisplayPriceService taiexDisplayPriceService,
+            AssetSnapshotRepository snapshotRepo,
+            StockAlertRepository alertRepo,
+            StockRepository stockRepo,
+            MarketDataService marketDataService,
+            TradingRadarMarketContextService marketContextService,
+            FundamentalAnalysisService fundamentalAnalysisService,
+            EtfNavHistoryRepository etfNavHistoryRepo,
+            TradingRadarSnapshotStore snapshotStore,
+            CurrentUserContext currentUserContext,
+            DividendEventEvidenceRepository dividendEventEvidenceRepository,
+            TreasuryYieldService treasuryYieldService) {
+        this(ruleEngine, indicatorService, adjustedPriceService, assembler, assetClassifier,
+                twseRepo, usIndexDailyHistoryRepo, priceHistoryRepo, dividendHistoryRepo,
+                priceQueryService, taiexDisplayPriceService, snapshotRepo, alertRepo, stockRepo,
+                marketDataService, marketContextService, fundamentalAnalysisService,
+                etfNavHistoryRepo, snapshotStore, currentUserContext,
+                dividendEventEvidenceRepository, treasuryYieldService, null, null);
+    }
+
+    public TradingRadarService(
+            TradingRadarRuleEngine ruleEngine,
+            TechnicalIndicatorService indicatorService,
+            DistributionAdjustedPriceService adjustedPriceService,
+            RadarInputAssembler assembler,
+            AssetClassifier assetClassifier,
+            TwseIndexDailyHistoryRepository twseRepo,
+            UsIndexDailyHistoryRepository usIndexDailyHistoryRepo,
+            StockPriceHistoryRepository priceHistoryRepo,
+            StockDividendHistoryRepository dividendHistoryRepo,
+            PriceQueryService priceQueryService,
+            TaiexDisplayPriceService taiexDisplayPriceService,
+            AssetSnapshotRepository snapshotRepo,
+            StockAlertRepository alertRepo,
+            StockRepository stockRepo,
+            MarketDataService marketDataService,
+            TradingRadarMarketContextService marketContextService,
+            FundamentalAnalysisService fundamentalAnalysisService,
+            EtfNavHistoryRepository etfNavHistoryRepo,
+            TradingRadarSnapshotStore snapshotStore,
+            CurrentUserContext currentUserContext,
+            DividendEventEvidenceRepository dividendEventEvidenceRepository,
+            TreasuryYieldService treasuryYieldService,
+            TradingRadarMarketFeaturePort marketFeaturePort,
+            BondYieldBetaEvidencePort bondYieldBetaEvidencePort) {
+        this(ruleEngine, indicatorService, adjustedPriceService, assembler, assetClassifier,
+                twseRepo, usIndexDailyHistoryRepo, priceHistoryRepo, dividendHistoryRepo,
+                priceQueryService, taiexDisplayPriceService, snapshotRepo, alertRepo, stockRepo,
+                marketDataService, marketContextService, fundamentalAnalysisService,
+                etfNavHistoryRepo, snapshotStore, currentUserContext,
+                dividendEventEvidenceRepository, treasuryYieldService, marketFeaturePort,
+                bondYieldBetaEvidencePort, null);
+    }
+
+    public TradingRadarService(
+            TradingRadarRuleEngine ruleEngine,
+            TechnicalIndicatorService indicatorService,
+            DistributionAdjustedPriceService adjustedPriceService,
+            RadarInputAssembler assembler,
+            AssetClassifier assetClassifier,
+            TwseIndexDailyHistoryRepository twseRepo,
+            UsIndexDailyHistoryRepository usIndexDailyHistoryRepo,
+            StockPriceHistoryRepository priceHistoryRepo,
+            StockDividendHistoryRepository dividendHistoryRepo,
+            PriceQueryService priceQueryService,
+            TaiexDisplayPriceService taiexDisplayPriceService,
+            AssetSnapshotRepository snapshotRepo,
+            StockAlertRepository alertRepo,
+            StockRepository stockRepo,
+            MarketDataService marketDataService,
+            TradingRadarMarketContextService marketContextService,
+            FundamentalAnalysisService fundamentalAnalysisService,
+            EtfNavHistoryRepository etfNavHistoryRepo,
+            TradingRadarSnapshotStore snapshotStore,
+            CurrentUserContext currentUserContext,
+            DividendEventEvidenceRepository dividendEventEvidenceRepository,
+            TreasuryYieldService treasuryYieldService,
+            TradingRadarMarketFeaturePort marketFeaturePort,
+            BondYieldBetaEvidencePort bondYieldBetaEvidencePort,
+            StockStyleThresholdProvider stockStyleThresholdProvider) {
+        this(ruleEngine, indicatorService, adjustedPriceService, assembler, assetClassifier,
+                twseRepo, usIndexDailyHistoryRepo, priceHistoryRepo, dividendHistoryRepo,
+                priceQueryService, taiexDisplayPriceService, snapshotRepo, alertRepo, stockRepo,
+                marketDataService, marketContextService, fundamentalAnalysisService,
+                etfNavHistoryRepo, snapshotStore, currentUserContext,
+                dividendEventEvidenceRepository, treasuryYieldService, marketFeaturePort,
+                bondYieldBetaEvidencePort, stockStyleThresholdProvider, null);
+    }
+
+    @Autowired
+    public TradingRadarService(
+            TradingRadarRuleEngine ruleEngine,
+            TechnicalIndicatorService indicatorService,
+            DistributionAdjustedPriceService adjustedPriceService,
+            RadarInputAssembler assembler,
+            AssetClassifier assetClassifier,
+            TwseIndexDailyHistoryRepository twseRepo,
+            UsIndexDailyHistoryRepository usIndexDailyHistoryRepo,
+            StockPriceHistoryRepository priceHistoryRepo,
+            StockDividendHistoryRepository dividendHistoryRepo,
+            PriceQueryService priceQueryService,
+            TaiexDisplayPriceService taiexDisplayPriceService,
+            AssetSnapshotRepository snapshotRepo,
+            StockAlertRepository alertRepo,
+            StockRepository stockRepo,
+            MarketDataService marketDataService,
+            TradingRadarMarketContextService marketContextService,
+            FundamentalAnalysisService fundamentalAnalysisService,
+            EtfNavHistoryRepository etfNavHistoryRepo,
+            TradingRadarSnapshotStore snapshotStore,
+            CurrentUserContext currentUserContext,
+            DividendEventEvidenceRepository dividendEventEvidenceRepository,
+            TreasuryYieldService treasuryYieldService,
+            TradingRadarMarketFeaturePort marketFeaturePort,
+            BondYieldBetaEvidencePort bondYieldBetaEvidencePort,
+            StockStyleThresholdProvider stockStyleThresholdProvider,
+            EtfNavObservationRepository etfNavObservationRepository) {
+        this.ruleEngine = ruleEngine;
+        this.indicatorService = indicatorService;
+        this.adjustedPriceService = adjustedPriceService;
+        this.assembler = assembler;
+        this.assetClassifier = assetClassifier;
+        this.twseRepo = twseRepo;
+        this.usIndexDailyHistoryRepo = usIndexDailyHistoryRepo;
+        this.priceHistoryRepo = priceHistoryRepo;
+        this.dividendHistoryRepo = dividendHistoryRepo;
+        this.priceQueryService = priceQueryService;
+        this.taiexDisplayPriceService = taiexDisplayPriceService;
+        this.snapshotRepo = snapshotRepo;
+        this.alertRepo = alertRepo;
+        this.stockRepo = stockRepo;
+        this.marketDataService = marketDataService;
+        this.marketContextService = marketContextService;
+        this.fundamentalAnalysisService = fundamentalAnalysisService;
+        this.etfNavHistoryRepo = etfNavHistoryRepo;
+        this.snapshotStore = snapshotStore;
+        this.currentUserContext = currentUserContext;
+        this.dividendEventEvidenceRepository = dividendEventEvidenceRepository;
+        this.treasuryYieldService = treasuryYieldService;
+        this.marketFeaturePort = marketFeaturePort;
+        this.bondYieldBetaEvidencePort = bondYieldBetaEvidencePort;
+        this.stockStyleThresholdProvider = stockStyleThresholdProvider;
+        this.etfNavObservationRepository = etfNavObservationRepository;
+        this.strictCalendarMode = etfNavObservationRepository != null
+                || marketFeaturePort != null || bondYieldBetaEvidencePort != null
+                || stockStyleThresholdProvider != null;
+    }
 
     /** @param stale 大盤最新完成日 K 不是當前台股交易日（Task 217.1）。 */
     private record MarketState(
@@ -106,17 +276,63 @@ public class TradingRadarService {
             boolean stale
     ) {}
 
+    /** ETF 折溢價的日期／來源 provenance；stale observation 不進規則因子。 */
+    private record PremiumObservation(
+            BigDecimal value,
+            LocalDate asOfDate,
+            String source,
+            boolean stale,
+            List<BigDecimal> history
+    ) {
+        static PremiumObservation unavailable(boolean stale) {
+            return new PremiumObservation(null, null, null, stale, List.of());
+        }
+    }
+
+    private BigDecimal stockStyleIncomeThreshold() {
+        return stockStyleThresholdProvider == null
+                ? AssetClassifier.defaultDividendThreshold()
+                : stockStyleThresholdProvider.incomeThreshold();
+    }
+
     /**
      * 通知路徑用的大盤快照（Task 302）：{@link #buildMarketSnapshot} 每輪每個市場只組一次，
      * 供 {@code TradingRadarNotificationService#flushEvaluations} 批次共用，取代逐檔各自
-     * 重建大盤。只帶個股評分需要的三個欄位——不像 {@link MarketState} 還帶頁面用的 DTO summary，
-     * 通知路徑用不到。
+     * 重建大盤。除了 regime/stale/decision time，也保留同一輪完成日的完整 summary；通知個股的
+     * evidence terminal gate 必須使用這份 summary，不能因批次快照而退回 {@code null}。
      */
     public record MarketSnapshot(
             TradingRadarRuleEngine.MarketRegime regime,
             boolean stale,
-            Instant decisionInstant
-    ) {}
+            Instant decisionInstant,
+            TradingRadarDto.MarketSummary summary,
+            RadarObservationResolver.DecisionSessions decisionSessions,
+            boolean authoritativeCalendar,
+            RadarObservationResolver.DecisionSessions usDecisionSessions,
+            boolean usAuthoritativeCalendar
+    ) {
+        /** Compatibility constructor for callers that only supplied regime/staleness. */
+        public MarketSnapshot(
+                TradingRadarRuleEngine.MarketRegime regime,
+                boolean stale,
+                Instant decisionInstant) {
+            this(regime, stale, decisionInstant, null, null, false, null, false);
+        }
+
+        /** Compatibility constructor for callers that supplied a summary only. */
+        public MarketSnapshot(
+                TradingRadarRuleEngine.MarketRegime regime,
+                boolean stale,
+                Instant decisionInstant,
+                TradingRadarDto.MarketSummary summary) {
+            this(regime, stale, decisionInstant, summary, null, false, null, false);
+        }
+    }
+
+    /** One immutable session-clock result shared by accepted price/live-row/premium paths. */
+    private record DecisionClock(
+            RadarObservationResolver.DecisionSessions sessions,
+            boolean authoritative) {}
 
     private record Target(String code, String market, boolean held) {}
 
@@ -184,11 +400,21 @@ public class TradingRadarService {
      *                查詢方法），不得依賴 {@link CurrentUserContext}。
      */
     private TradingRadarDto.Response assemble(Long ownerId) {
-        Instant decisionInstant = Instant.now();
+        return assemble(ownerId, Instant.now());
+    }
+
+    /** Explicit-time assembly hook for deterministic replays and unit tests. */
+    TradingRadarDto.Response assembleAt(Instant decisionInstant) {
+        if (decisionInstant == null) throw new IllegalArgumentException("decisionInstant 不得為空");
+        return assemble(null, decisionInstant);
+    }
+
+    private TradingRadarDto.Response assemble(Long ownerId, Instant decisionInstant) {
         TradingRadarMarketContextService.Resolved context = marketContextService.resolve(decisionInstant);
         MarketState twMarket = buildMarket(context.market(), decisionInstant);
         // 不論本輪有沒有美股標的都計算（比照台股組現行行為），維持「大盤資料與個股清單解耦」的既有設計。
         MarketState usMarket = buildUsMarket(decisionInstant);
+        Map<String, DecisionClock> decisionClocks = resolveDecisionClocks(decisionInstant);
         Map<String, Target> targets = new LinkedHashMap<>();
         Set<String> skippedNonTw = new HashSet<>();
         loadLatestHoldings(targets, skippedNonTw, ownerId);
@@ -201,7 +427,10 @@ public class TradingRadarService {
                 .filter(t -> (TW_MARKET.equals(t.market()) || US_MARKET.equals(t.market()))
                         && !TAIEX_CODE.equals(t.code()))
                 .map(t -> buildStock(t, regimeFor(t.market(), twMarket, usMarket),
-                        staleFor(t.market(), twMarket, usMarket), decisionInstant, fxCache))
+                        staleFor(t.market(), twMarket, usMarket),
+                        marketSummaryFor(t.market(), twMarket, usMarket), decisionInstant, fxCache,
+                        decisionClocks.getOrDefault(t.market(), new DecisionClock(null, false)),
+                        decisionClocks.getOrDefault(US_MARKET, new DecisionClock(null, false))))
                 .sorted(Comparator
                         .comparing(TradingRadarService::bestScore,
                                 Comparator.nullsLast(Comparator.reverseOrder()))
@@ -223,8 +452,38 @@ public class TradingRadarService {
         return US_MARKET.equals(market) ? usMarket.regime() : twMarket.regime();
     }
 
+    private TradingRadarDto.MarketSummary marketSummaryFor(
+            String market, MarketState twMarket, MarketState usMarket) {
+        return US_MARKET.equals(market) ? usMarket.summary() : twMarket.summary();
+    }
+
     private boolean staleFor(String market, MarketState twMarket, MarketState usMarket) {
         return US_MARKET.equals(market) ? usMarket.stale() : twMarket.stale();
+    }
+
+    private Map<String, DecisionClock> resolveDecisionClocks(Instant decisionInstant) {
+        Map<String, DecisionClock> clocks = new LinkedHashMap<>();
+        if (!strictCalendarMode) {
+            clocks.put(TW_MARKET, new DecisionClock(null, false));
+            clocks.put(US_MARKET, new DecisionClock(null, false));
+            return clocks;
+        }
+        for (String market : List.of(TW_MARKET, US_MARKET)) {
+            try {
+                Optional<RadarObservationResolver.DecisionSessions> resolved =
+                        marketContextService.resolveDecisionSessions(market, decisionInstant);
+                // null is reserved for old test/adapters that do not implement
+                // the strict API.  A real Optional.empty is an authoritative
+                // calendar outage and remains fail-closed.
+                clocks.put(market, resolved == null
+                        ? new DecisionClock(null, false)
+                        : new DecisionClock(resolved.orElse(null), true));
+            } catch (RuntimeException unavailable) {
+                log.warn("交易雷達：{} session clock 解析失敗：{}", market, unavailable.getMessage());
+                clocks.put(market, new DecisionClock(null, true));
+            }
+        }
+        return clocks;
     }
 
     /**
@@ -253,7 +512,9 @@ public class TradingRadarService {
     public TradingRadarDto.StockDecision evaluateForNotification(
             String stockCode, String market, boolean held, MarketSnapshot snapshot) {
         return buildStock(new Target(stockCode, market, held), snapshot.regime(), snapshot.stale(),
-                snapshot.decisionInstant(), new java.util.HashMap<>());
+                snapshot.summary(), snapshot.decisionInstant(), new java.util.HashMap<>(),
+                new DecisionClock(snapshot.decisionSessions(), snapshot.authoritativeCalendar()),
+                new DecisionClock(snapshot.usDecisionSessions(), snapshot.usAuthoritativeCalendar()));
     }
 
     /**
@@ -275,7 +536,18 @@ public class TradingRadarService {
             TradingRadarMarketContextService.MarketContext context = marketContextService.resolveMarket(now);
             marketState = buildMarket(context, now);
         }
-        return new MarketSnapshot(marketState.regime(), marketState.stale(), now);
+        java.util.Optional<RadarObservationResolver.DecisionSessions> sessions =
+                strictCalendarMode ? marketContextService.resolveDecisionSessions(market, now) : null;
+        // A null Optional means a legacy compatibility adapter that predates the
+        // strict session API; production implementations return Optional.empty
+        // for an unavailable calendar and must fail closed.
+        boolean authoritative = sessions != null;
+        java.util.Optional<RadarObservationResolver.DecisionSessions> usSessions =
+                strictCalendarMode ? marketContextService.resolveDecisionSessions(US_MARKET, now) : null;
+        boolean usAuthoritative = usSessions != null;
+        return new MarketSnapshot(marketState.regime(), marketState.stale(), now, marketState.summary(),
+                sessions == null ? null : sessions.orElse(null), authoritative,
+                usSessions == null ? null : usSessions.orElse(null), usAuthoritative);
     }
 
     private MarketState buildMarket(
@@ -453,56 +725,98 @@ public class TradingRadarService {
             Target target,
             TradingRadarRuleEngine.MarketRegime marketRegime,
             boolean marketStale,
+            TradingRadarDto.MarketSummary marketSummary,
             Instant decisionInstant,
-            Map<String, TradingRadarMarketContextService.FxContext> fxCache) {
+            Map<String, TradingRadarMarketContextService.FxContext> fxCache,
+            DecisionClock decisionClock,
+            DecisionClock usDecisionClock) {
         Optional<Stock> stock = stockRepo.findByCodeAndMarket(target.code(), target.market());
         String name = stock.map(Stock::getName)
                 .filter(n -> n != null && !n.isBlank())
                 .orElse(target.code());
-        String assetClass = assetClassifier.classifyStock(
-                target.code(), target.market(), stock.map(Stock::getAssetClass).orElse(null));
-        TradingRadarRuleEngine.InstrumentType instrumentType = AssetClassifier.BOND.equals(assetClass)
+        TradingRadarAssetProfileResolver.AssetProfile profile = TradingRadarAssetProfileResolver.resolve(
+                stock.orElse(null), target.code(), target.market(), name,
+                null, stockStyleIncomeThreshold());
+        String assetClass = profile.assetClass();
+        TradingRadarRuleEngine.InstrumentType instrumentType = profile.bond()
                 ? TradingRadarRuleEngine.InstrumentType.BOND
                 : TradingRadarRuleEngine.InstrumentType.EQUITY;
         try {
-            List<StockPriceHistory> rows = priceHistoryRepo.findRecentN(target.code(), target.market(), 241);
-            Optional<PriceQueryService.LivePrice> liveOpt = priceQueryService.getLive(target.code(), target.market());
-            Optional<PriceQueryService.LivePrice> displayOpt =
-                    priceQueryService.getDisplayPrice(target.code(), target.market());
-            // price 只依賴 rows 與 liveOpt，不依賴組裝結果；因組裝需要它作為乖離／52 週位置的分子，
-            // 故先於 prepareTechnicalData 求值（順序調整不改變任何取值，Task 273 的 273.2b）。
-            BigDecimal price = liveOpt.map(PriceQueryService.LivePrice::price)
-                    .orElseGet(() -> rows.isEmpty() ? null : rows.get(0).getClosePrice());
+            // 必須先跑完整 snapshot 的 backend projection，再讀 adjustment history；否則新抓到的
+            // ACTIVE／CANCELLED 會晚一輪才反映在還原權息序列。pipeline 對缺完整證據為 no-op。
+            DividendEventEvidenceResolver.Resolution distribution = dividendEventEvidenceRepository.resolve(
+                    target.code(), target.market(), decisionInstant,
+                    futureSessions(target.market(), decisionInstant));
+            List<StockPriceHistory> rawRows = priceHistoryRepo.findRecentN(target.code(), target.market(), 241);
+            Optional<PriceQueryService.LivePrice> rawLive =
+                    priceQueryService.getLive(target.code(), target.market());
+            RadarObservationResolver.AcceptedPrice acceptedPrice =
+                    decisionClock != null && decisionClock.authoritative()
+                            ? RadarObservationResolver.resolveAcceptedPrice(
+                                    rawRows, rawLive.orElse(null), target.market(), decisionInstant,
+                                    decisionClock.sessions())
+                            : RadarObservationResolver.resolveAcceptedPrice(
+                                    rawRows, rawLive.orElse(null), target.market(), decisionInstant,
+                                    (java.util.function.Predicate<LocalDate>)
+                                            day -> marketDataService.isTradingDay(target.market(), day));
+            // accepted price 與技術序列必須同源：拒絕 future／不可信 closeSource 列，
+            // 避免退回舊 trusted close 後仍把較新的髒列餵進 MA／BIAS。
+            BigDecimal price = acceptedPrice.value();
             RadarInputAssembler.Assembled technical = prepareTechnicalData(
-                    target, rows, liveOpt, price, decisionInstant);
-            List<BigDecimal> closes = technical.completedCloses();
-            BigDecimal displayPrice = displayOpt.map(PriceQueryService.LivePrice::price).orElse(null);
-            BigDecimal displayChangePercent = displayOpt.map(PriceQueryService.LivePrice::changePercent)
-                    .orElse(null);
-            if (displayChangePercent == null && displayPrice != null && closes.size() >= 2) {
-                BigDecimal previous = previousCompletedClose(rows, displayOpt.orElse(null));
-                displayChangePercent = changePercent(displayPrice, previous);
-            }
+                    target, acceptedPrice);
+            BigDecimal displayPrice = acceptedPrice.value();
+            BigDecimal displayChangePercent = acceptedPrice.liveAccepted() && acceptedPrice.live() != null
+                    ? acceptedPrice.live().changePercent() : null;
             // 組裝結果一律取自 RadarInputAssembler，與回測共用同一份（Task 273 的 273.2b）。
             BigDecimal ruleChangePercent = technical.ruleChangePercent();
             if (ruleChangePercent == null) ruleChangePercent = displayChangePercent;
+            // 完成收盤 fallback 沒有第二個 quote source；同源的 adjusted close 漲跌仍可揭露，
+            // 避免 accepted price 已可用卻把 DTO 的 changePercent 無謂留白。
+            if (displayChangePercent == null) displayChangePercent = ruleChangePercent;
 
             TechnicalIndicatorService.FullIndicators ind = technical.indicators();
             TradingRadarRuleEngine.Confirmation c20 = technical.ma20Confirmation();
             TradingRadarRuleEngine.Confirmation c60 = technical.ma60Confirmation();
             TradingRadarRuleEngine.Confirmation c240 = technical.ma240Confirmation();
-            String currency = underlyingCurrencyOf(stock.orElse(null), target.market());
-            TradingRadarMarketContextService.FxContext fx = TWD.equals(currency)
+            String currency = profile.underlyingCurrency();
+            TradingRadarMarketContextService.FxContext fx = currency == null || TWD.equals(currency)
                     ? TradingRadarMarketContextService.FxContext.EMPTY
                     : fxCache.computeIfAbsent(currency, c -> marketContextService.resolveFx(c, decisionInstant));
             BigDecimal fxPct = fx.percentile();
             BigDecimal ma60Bias = technical.ma60BiasPercent();
             BigDecimal ma240Bias = technical.ma240BiasPercent();
             BigDecimal week52Pos = technical.week52Position();
-            BigDecimal etfPremiumPct = etfPremiumPct(target.code(), target.market(), decisionInstant);
-            BigDecimal etfPremiumPercentile = etfPremiumPercentile(target.code(), target.market(), etfPremiumPct);
+            PremiumObservation premium = etfPremiumObservation(
+                    target.code(), target.market(), decisionInstant,
+                    decisionClock == null ? null : decisionClock.sessions(),
+                    decisionClock != null && decisionClock.authoritative());
+            BigDecimal etfPremiumPct = premium.value();
+            BigDecimal etfPremiumPercentile = etfPremiumPercentile(
+                    target.code(), target.market(), etfPremiumPct, premium.asOfDate(), premium.history());
             FundamentalAnalysisService.Resolved fundamental = fundamentalAnalysisService.resolve(
-                    target.code(), name, target.market(), decisionInstant);
+                    target.code(), name, target.market(), decisionInstant, profile);
+            // Keep compatibility with older test/adapters that only implement the four-field
+            // resolver; a null adapter response is never treated as complete evidence.
+            if (fundamental == null) {
+                fundamental = fundamentalAnalysisService.resolve(
+                        target.code(), name, target.market(), decisionInstant);
+            }
+            if (fundamental == null) {
+                fundamental = FundamentalAnalysisService.Resolved.unavailable(profile.equity());
+            }
+            // Style profile may use only decision-time public valuation yield; never use owner snapshot
+            // cashflow/cost/allocation fields. Re-resolve after fundamental as-of selection so the
+            // provenance remains explicit in the evidence payload.
+            profile = TradingRadarAssetProfileResolver.resolve(
+                    stock.orElse(null), target.code(), target.market(), name,
+                    fundamental.snapshot().dividendYieldPct(), stockStyleIncomeThreshold());
+            assetClass = profile.assetClass();
+            instrumentType = profile.bond()
+                    ? TradingRadarRuleEngine.InstrumentType.BOND
+                    : TradingRadarRuleEngine.InstrumentType.EQUITY;
+            // The strict profile is re-resolved after as-of valuation selection;
+            // use its currency/provenance for both the evidence gate and output.
+            currency = profile.underlyingCurrency();
             TradingRadarRuleEngine.StockResult result = ruleEngine.evaluateStock(
                     new TradingRadarRuleEngine.StockInput(
                             target.held(),
@@ -530,12 +844,61 @@ public class TradingRadarService {
                             assembler.extendedIndicators(ind.extended()),
                             technical.volumeRatio(),
                             fundamental.input()));
+            TradingRadarEvidenceConfidenceResolver.MarketContext marketContext = marketSummary == null
+                    ? TradingRadarEvidenceConfidenceResolver.MarketContext.EMPTY
+                    : new TradingRadarEvidenceConfidenceResolver.MarketContext(
+                    parseLocalDate(marketSummary.marketVolumeAsOfDate()),
+                    marketSummary.marketVolumeRatio(), marketSummary.marketTurnoverRatio(),
+                    "MARKET_CONTEXT",
+                    // 台股 TAIEX 與美股 IXIC 都有意義的成交量概念；即使
+                    // 今日 ratio 缺值，也必須以 MISSING 留在 evidence 分母，
+                    // 不可由 nullable ratio 推成 N/A。
+                    true);
+            TradingRadarMarketFeatureResolver.Evidence marketFeatures =
+                    resolveMarketFeatureEvidence(target.market(), decisionInstant,
+                            decisionClock, usDecisionClock);
+            BondYieldBetaResolver.Result bondYieldBeta = resolveBondYieldBeta(
+                    target.code(), target.market(), profile, decisionInstant,
+                    RuleParameters.v12Default());
+            TradingRadarEvidenceConfidenceResolver.RateObservation rateObservation =
+                    resolveTreasuryRateObservation(profile, decisionInstant, bondYieldBeta);
+            // PRICE/TECHNICAL terminal is owned by the accepted quote.  A live quote can be
+            // today's session while the market summary/volume context is still yesterday;
+            // using marketSummary.asOfDate here incorrectly marked the accepted price MISSING.
+            // Market context validates its own as-of date inside EvidenceConfidenceResolver.
+            LocalDate expectedTerminal = acceptedPrice.available()
+                    ? acceptedPrice.tradingDate() : null;
+            TradingRadarEvidenceConfidenceResolver.Evidence evidence =
+                    TradingRadarEvidenceConfidenceResolver.resolve(
+                            new TradingRadarEvidenceConfidenceResolver.Inputs(
+                                    target.market(), decisionInstant, acceptedPrice, technical,
+                                    marketRegime, marketStale, marketContext, fundamental.snapshot(), profile,
+                                    etfPremiumPct, premium.asOfDate(), premium.source(), premium.stale(),
+                                    fxPct, fx.asOfDate(), rateObservation, result.timingState(), distribution,
+                                    marketFeatures),
+                            // Strict terminal-date gate must use the market's completed
+                            // price session, not the optional volume/turnover context.
+                            // US IXIC often has no same-day volume context; using that
+                            // nullable field here would close PRICE/MARKET for every
+                            // otherwise fresh US decision.
+                            expectedTerminal,
+                            decisionClock != null && decisionClock.authoritative()
+                                    ? sessionDate(decisionClock)
+                                    : marketSummary == null ? null : parseLocalDate(marketSummary.asOfDate()));
+            // Production remains the V12 rule identity.  Evidence is resolved and exposed below for
+            // confidence/risk disclosure, but the V13 hard gate belongs only to offline candidate
+            // evaluation/promotion; applying it here would silently rewrite a V12 action whenever a
+            // bond/market observation is incomplete and would make the notification path disagree
+            // with the page/backtest V12 result.
+            TradingRadarEvidenceGate.GatedActions gated = new TradingRadarEvidenceGate.GatedActions(
+                    result.action(), result.shortAction(), List.of());
 
             List<String> reasons = new ArrayList<>();
             if (technical.distributionAdjusted()) {
                 reasons.add("MA／KD、兩日確認與規則漲跌已使用還原權息／分割價，避免把配息缺口或分割跳空誤判為趨勢跌破。 ");
             }
             reasons.addAll(result.reasons());
+            reasons.addAll(gated.reasons());
             List<String> risks = new ArrayList<>(result.risks());
             List<String> shortReasons = new ArrayList<>();
             if (technical.distributionAdjusted()) {
@@ -543,16 +906,17 @@ public class TradingRadarService {
             }
             shortReasons.addAll(result.shortReasons());
             List<String> shortRisks = new ArrayList<>(result.shortRisks());
+            shortRisks.addAll(gated.reasons());
             if (!TWD.equals(currency) && fx.asOfDate() == null) {
                 String missingFx = "精確完成日匯率不可得，外幣債券 ETF 的匯率因子本日缺值。 ";
                 risks.add(missingFx);
                 shortRisks.add(missingFx);
             }
 
-            String updatedAt = displayOpt.map(PriceQueryService.LivePrice::updatedAt).orElse(null);
-            String asOf = displayOpt.map(PriceQueryService.LivePrice::tradingDate)
-                    .orElseGet(() -> rows.isEmpty() ? null : rows.get(0).getTradingDate().toString());
-            String quoteStatus = displayOpt.map(PriceQueryService.LivePrice::quoteStatus).orElse("CLOSE_PENDING");
+            String updatedAt = acceptedPrice.updatedAt();
+            String asOf = acceptedPrice.tradingDate() == null
+                    ? null : acceptedPrice.tradingDate().toString();
+            String quoteStatus = acceptedPrice.quoteStatus();
             return new TradingRadarDto.StockDecision(
                     target.code(),
                     name,
@@ -560,8 +924,8 @@ public class TradingRadarService {
                     assetClass,
                     technical.distributionAdjusted(),
                     target.held(),
-                    result.action().name(),
-                    actionLabel(result.action()),
+                    gated.mediumAction().name(),
+                    actionLabel(gated.mediumAction()),
                     result.score(),
                     result.counterTrend().state().name(),
                     counterTrendLabel(result.counterTrend().state()),
@@ -594,8 +958,8 @@ public class TradingRadarService {
                     etfPremiumPct,
                     etfPremiumPercentile,
                     toDto(ind.extended()),
-                    result.shortAction().name(),
-                    actionLabel(result.shortAction()),
+                    gated.shortAction().name(),
+                    actionLabel(gated.shortAction()),
                     result.shortScore(),
                     List.copyOf(shortReasons),
                     List.copyOf(shortRisks),
@@ -603,11 +967,187 @@ public class TradingRadarService {
                     technical.volumeRatio(),
                     fx.asOfDate() == null ? null : fx.asOfDate().toString(),
                     result.profitTakingConfirmed(),
-                    fundamental.snapshot());
+                    fundamental.snapshot(),
+                    TradingRadarDto.RadarEvidence.withConfidence(
+                            asOf,
+                            acceptedPrice.source(),
+                            acceptedPrice.quality().name(),
+                            acceptedPrice.liveAccepted(),
+                            technical.returnStdDev60Ratio(),
+                            technical.volatility60().asOfDate() == null
+                                    ? null : technical.volatility60().asOfDate().toString(),
+                            technical.volatility60().source(),
+                            premium.asOfDate() == null ? null : premium.asOfDate().toString(),
+                            premium.source(),
+                            premium.stale(),
+                            TradingRadarDto.AssetProfile.from(profile),
+                            gated.reasons(), evidence,
+                            gated.candidateMediumAction().name(), gated.candidateShortAction().name(),
+                            distribution, rateObservation.context(),
+                            TradingRadarDto.NormalizedBiasEvidence.from(result.normalizedBias()),
+                            TradingRadarDto.NormalizedBiasEvidence.from(result.shortNormalizedBias())),
+                    evidence.shortDownsideRisk(),
+                    evidence.mediumDownsideRisk(),
+                    evidence.shortConfidence(),
+                    evidence.mediumConfidence(),
+                    evidence.shortRisk().riskCoverage(),
+                    evidence.mediumRisk().riskCoverage(),
+                    gated.candidateMediumAction().name(),
+                    gated.candidateShortAction().name(),
+                    gated.reasons());
         } catch (Exception e) {
             log.warn("今日交易雷達：{} {} 組裝失敗", target.market(), target.code(), e);
             return incompleteStock(target, name, assetClass, "讀取個股資料失敗，該檔今日不交易。");
         }
+    }
+
+    /**
+     * Resolves the single complete Treasury batch used by this decision.
+     * Raw yield levels are disclosure evidence only until the per-instrument beta
+     * and holdout promotion gates pass; they are deliberately not coerced to zero
+     * or normalized into an invented downside score.
+     */
+    TradingRadarEvidenceConfidenceResolver.RateObservation resolveTreasuryRateObservation(
+            TradingRadarAssetProfileResolver.AssetProfile profile, Instant decisionInstant) {
+        return resolveTreasuryRateObservation(profile, decisionInstant,
+                BondYieldBetaResolver.Result.notApplicable(null));
+    }
+
+    private TradingRadarEvidenceConfidenceResolver.RateObservation resolveTreasuryRateObservation(
+            TradingRadarAssetProfileResolver.AssetProfile profile,
+            Instant decisionInstant,
+            BondYieldBetaResolver.Result bondYieldBeta) {
+        if (profile == null || !profile.bond()) {
+            return TradingRadarEvidenceConfidenceResolver.RateObservation.notApplicable();
+        }
+        if (!profile.profileComplete()) {
+            return TradingRadarEvidenceConfidenceResolver.RateObservation.missing(
+                    "strict bond profile 不完整，Treasury 利率風險不納入");
+        }
+        BondRateQueryResolver.Selection fallback = BondRateQueryResolver.select(
+                profile.bondTerm(), RuleParameters.v12Default());
+        String tenor = bondYieldBeta != null && bondYieldBeta.tenor() != null
+                ? bondYieldBeta.tenor()
+                : fallback == null ? null : fallback.primaryTenor();
+        if (tenor == null) {
+            return TradingRadarEvidenceConfidenceResolver.RateObservation.missing(
+                    "strict bond term 缺漏，禁止猜測 Treasury tenor");
+        }
+        try {
+            return treasuryYieldService.resolveRateContext(decisionInstant, tenor)
+                    .map(context -> rateObservation(context, bondYieldBeta))
+                    .orElseGet(() -> TradingRadarEvidenceConfidenceResolver.RateObservation.missing(
+                            "決策時點前無完整 Treasury curve batch"));
+        } catch (RuntimeException e) {
+            log.warn("今日交易雷達：Treasury context 不可得：{}", e.getMessage());
+            return TradingRadarEvidenceConfidenceResolver.RateObservation.missing(
+                    "Treasury context 解析失敗");
+        }
+    }
+
+    private String betaDisclosureReason(BondYieldBetaResolver.Result beta) {
+        if (beta == null) return "Treasury batch 已知，但 bond beta evidence 缺漏";
+        return "Treasury batch 已知；bond beta status=" + beta.status()
+                + " n=" + beta.n() + "，未經 V13 holdout promotion 不納入分數";
+    }
+
+    private TradingRadarEvidenceConfidenceResolver.RateObservation rateObservation(
+            TreasuryYieldDto.RateContext context, BondYieldBetaResolver.Result beta) {
+        BondYieldBetaContribution.Contributions contribution = BondYieldBetaContribution.from(beta);
+        Double shortContribution = contribution.shortTerm();
+        BigDecimal riskUnit = shortContribution == null ? null
+                : BigDecimal.valueOf(Math.max(0.0, Math.min(1.0, -shortContribution)));
+        return new TradingRadarEvidenceConfidenceResolver.RateObservation(
+                context, riskUnit, betaDisclosureReason(beta));
+    }
+
+    BondYieldBetaResolver.Result resolveBondYieldBeta(
+            String code,
+            String market,
+            TradingRadarAssetProfileResolver.AssetProfile profile,
+            Instant decisionInstant,
+            RuleParameters parameters) {
+        if (profile == null || !profile.bond()) {
+            return BondYieldBetaResolver.Result.notApplicable(null);
+        }
+        BondYieldBetaResolver.Query query = BondRateQueryResolver.query(
+                code, market, profile, decisionInstant, parameters);
+        if (!profile.profileComplete() || query.tenor() == null) {
+            return BondYieldBetaResolver.Result.missing(query,
+                    "strict bond profile／tenor 不完整，禁止猜測 beta");
+        }
+        if (bondYieldBetaEvidencePort == null) {
+            return BondYieldBetaResolver.Result.missing(query,
+                    "bond beta evidence port 未注入");
+        }
+        try {
+            BondYieldBetaResolver.Result resolved = bondYieldBetaEvidencePort.resolve(query);
+            return resolved == null
+                    ? BondYieldBetaResolver.Result.missing(query, "bond beta resolver 回傳空值")
+                    : resolved;
+        } catch (RuntimeException e) {
+            log.warn("交易雷達 bond beta 解析失敗（{}/{}）：{}", market, code, e.getMessage());
+            return BondYieldBetaResolver.Result.missing(query, "bond beta resolver 解析失敗");
+        }
+    }
+
+    /**
+     * 解析決策時點可見的大盤／原物料數值證據。
+     *
+     * <p>正式路徑由 market feature port 載入指數、typed 法人 observation 與帶 provenance 的
+     * 原物料資料，再依完成日與 conservative availability boundary 做 as-of 截斷；只有測試／
+     * 手動建構時未注入 port 才退回指數-only bounded fallback。任何路徑皆不得由新聞文字猜測數值。</p>
+     */
+    private TradingRadarMarketFeatureResolver.Evidence resolveMarketFeatureEvidence(
+            String market,
+            Instant decisionInstant,
+            DecisionClock marketDecisionClock,
+            DecisionClock usDecisionClock) {
+        try {
+            boolean strict = (marketDecisionClock != null && marketDecisionClock.authoritative())
+                    || (usDecisionClock != null && usDecisionClock.authoritative());
+            TradingRadarMarketFeatureResolver.ExpectedSessions expected = strict
+                    ? TradingRadarMarketFeatureResolver.ExpectedSessions.strict(
+                            marketDecisionClock == null || !marketDecisionClock.authoritative()
+                                    ? null : sessionDate(marketDecisionClock),
+                            usDecisionClock == null || !usDecisionClock.authoritative()
+                                    ? null : sessionDate(usDecisionClock),
+                            usDecisionClock == null || !usDecisionClock.authoritative()
+                                    ? null : sessionDate(usDecisionClock))
+                    : TradingRadarMarketFeatureResolver.ExpectedSessions.none();
+            if (marketFeaturePort != null) {
+                TradingRadarMarketFeatureResolver.Evidence resolved =
+                        marketFeaturePort.resolve(market, decisionInstant, expected);
+                return resolved == null
+                        ? TradingRadarMarketFeatureResolver.Evidence.empty(
+                                market, decisionInstant, "市場 feature port 回傳空值")
+                        : resolved;
+            }
+            List<UsIndexDailyHistory> usRows = new ArrayList<>();
+            for (String indexCode : List.of("IXIC", "SOX", "SPX", "DJI")) {
+                List<UsIndexDailyHistory> rows = usIndexDailyHistoryRepo
+                        .findByIndexCodeOrderByTradingDateAsc(indexCode);
+                if (rows != null) usRows.addAll(rows);
+            }
+            List<TwseIndexDailyHistory> twRows = twseRepo.findAllByOrderByTradingDateAsc();
+            return TradingRadarMarketFeatureResolver.resolve(
+                    market,
+                    decisionInstant,
+                    new TradingRadarMarketFeatureResolver.Sources(
+                            usRows,
+                            twRows == null ? List.of() : twRows,
+                            Map.of()),
+                    expected);
+        } catch (RuntimeException e) {
+            log.warn("今日交易雷達：市場 feature evidence 解析失敗（{}）：{}", market, e.getMessage());
+            return TradingRadarMarketFeatureResolver.Evidence.empty(
+                    market, decisionInstant, "市場數值來源讀取失敗");
+        }
+    }
+
+    private static LocalDate sessionDate(DecisionClock clock) {
+        return clock == null || clock.sessions() == null
+                ? null : clock.sessions().targetCompletedSession();
     }
 
     /**
@@ -616,14 +1156,16 @@ public class TradingRadarService {
      */
     private RadarInputAssembler.Assembled prepareTechnicalData(
             Target target,
-            List<StockPriceHistory> completedRows,
-            Optional<PriceQueryService.LivePrice> liveOpt,
-            BigDecimal price,
-            Instant decisionInstant) {
+            RadarObservationResolver.AcceptedPrice acceptedPrice) {
+        if (acceptedPrice == null) return RadarInputAssembler.Assembled.EMPTY;
+        List<StockPriceHistory> completedRows = acceptedPrice.trustedCompletedRows();
+        Optional<PriceQueryService.LivePrice> liveOpt = acceptedPrice.liveAccepted()
+                ? Optional.ofNullable(acceptedPrice.live()) : Optional.empty();
         List<StockPriceHistory> combined = new ArrayList<>(completedRows);
-        boolean liveAdded = liveOpt
-                .filter(live -> shouldAddLiveRow(completedRows, live, decisionInstant, target.market()))
-                .isPresent();
+        // AcceptedPrice is the immutable decision snapshot.  Do not call the calendar/live
+        // predicate again here: a mutable holiday cache or quote state must not make the
+        // accepted display price and technical sequence disagree within one decision.
+        boolean liveAdded = acceptedPrice.liveAccepted() && liveOpt.isPresent();
         if (liveAdded) {
             combined.add(0, liveRow(target, liveOpt.orElseThrow()));
         }
@@ -636,7 +1178,7 @@ public class TradingRadarService {
                 dividendHistoryRepo.findAdjustmentEvents(target.code(), target.market(), fromDate, toDate),
                 liveAdded,
                 completedRows.size(),
-                price);
+                acceptedPrice.value());
     }
 
     /**
@@ -658,17 +1200,8 @@ public class TradingRadarService {
             PriceQueryService.LivePrice live,
             Instant decisionInstant,
             String market) {
-        if (live.tradingDate() == null || live.price() == null) return false;
-        LocalDate liveDate;
-        try {
-            liveDate = LocalDate.parse(live.tradingDate());
-        } catch (Exception e) {
-            return false;
-        }
-        LocalDate today = decisionInstant.atZone(MarketZones.resolve(market)).toLocalDate();
-        return liveDate.equals(today)
-                && (completedRows.isEmpty()
-                    || !liveDate.equals(completedRows.get(0).getTradingDate()));
+        return RadarObservationResolver.shouldAddLiveRow(completedRows, live, decisionInstant, market,
+                (java.util.function.Predicate<LocalDate>) day -> marketDataService.isTradingDay(market, day));
     }
 
     private StockPriceHistory liveRow(Target target, PriceQueryService.LivePrice live) {
@@ -683,21 +1216,6 @@ public class TradingRadarService {
                 .closePrice(price)
                 .volume(live.volume())
                 .build();
-    }
-
-    /**
-     * live tradingDate 若等於最新完成日 K，previous close 應取 rows[1]；
-     * 盤中 live date 尚未入庫時，前一收盤就是 rows[0]。
-     */
-    private BigDecimal previousCompletedClose(List<StockPriceHistory> rows, PriceQueryService.LivePrice live) {
-        if (rows.isEmpty()) return null;
-        // 無 live 時 current=rows[0]，以及 live 已是同一完成日 K 時，前一收盤皆為 rows[1]。
-        if (live == null || (live.tradingDate() != null
-                && live.tradingDate().equals(rows.get(0).getTradingDate().toString()))) {
-            return rows.size() >= 2 ? rows.get(1).getClosePrice() : null;
-        }
-        // live 是尚未入庫的盤中價（或來源未帶日期）時，rows[0] 才是昨收。
-        return rows.get(0).getClosePrice();
     }
 
     private void loadLatestHoldings(Map<String, Target> targets, Set<String> skippedNonTw, Long ownerId) {
@@ -748,70 +1266,91 @@ public class TradingRadarService {
     }
 
     /**
-     * 判定標的的底層資產幣別（Requirement 47）。
-     *
-     * <p>顯式欄位優先，null 時依 market 推斷。<b>刻意不以名稱字串比對</b>（如「含美債二字」）——
-     * 那種做法在標的更名或新增時會靜默失效：匯率因子突然變 null、分數跳動但不報任何錯。</p>
+     * 現行 ETF 折溢價（%）的 dated resolver。Redis 與 PostgreSQL 都必須對上決策日；
+     * stale observation 只保留 provenance，不進規則因子，避免舊 NAV 觸發 3% veto。
      */
-    private String underlyingCurrencyOf(Stock stock, String market) {
-        if (stock != null && stock.getUnderlyingCurrency() != null
-                && !stock.getUnderlyingCurrency().isBlank()) {
-            return stock.getUnderlyingCurrency().trim().toUpperCase();
+    private PremiumObservation etfPremiumObservation(
+            String code,
+            String market,
+            Instant decisionInstant,
+            RadarObservationResolver.DecisionSessions decisionSessions,
+            boolean authoritativeCalendar) {
+        // 美股 ETF 折溢價因子明確排除（Task 294.5）。
+        if (US_MARKET.equals(market)) return PremiumObservation.unavailable(false);
+        // The append-only observation path is strict: before the Taiwan close, today's
+        // NAV is not a completed-session observation and must not enter the premium veto;
+        // an unavailable authoritative calendar is also not permission to guess a weekday.
+        LocalDate targetDate = etfNavObservationRepository != null
+                ? authoritativeCalendar
+                ? decisionSessions == null ? null : decisionSessions.targetCompletedSession()
+                : strictCompletedTaiwanSession(decisionInstant)
+                : currentTwTradingDay(decisionInstant);
+        if (targetDate == null) return PremiumObservation.unavailable(true);
+        try {
+            if (etfNavObservationRepository != null) {
+                List<EtfNavObservation> observations = etfNavObservationRepository
+                        .findObservationStreamThrough(code, market, decisionInstant);
+                TradingRadarPremiumResolver.DecisionObservation resolved =
+                        TradingRadarPremiumResolver.resolveAsOf(
+                                market, targetDate, decisionInstant, observations);
+                List<BigDecimal> history = TradingRadarPremiumResolver.premiumHistoryAsOf(
+                        market, targetDate, decisionInstant, observations, ETF_PREMIUM_LOOKBACK_DAYS);
+                return new PremiumObservation(
+                        resolved.value(), resolved.asOfDate(), resolved.source(), resolved.stale(), history);
+            }
+            // Compatibility fallback for tests/older deployments without the append-only
+            // observation repository.  New production wiring always uses the strict branch.
+            var live = priceQueryService.getEtfNav(code, market);
+            var exact = etfNavHistoryRepo.findPremiumObservationOnDate(code, market, targetDate);
+            List<com.steven.assets.model.EtfNavHistory> prior =
+                    exact.isPresent() ? List.of() : etfNavHistoryRepo.findRecentPremiumObservationsAsOf(
+                            code, market, targetDate,
+                            org.springframework.data.domain.PageRequest.of(0, 1));
+            TradingRadarPremiumResolver.Observation resolved = TradingRadarPremiumResolver.resolve(
+                    targetDate, live.orElse(null), exact.orElse(null), prior);
+            return new PremiumObservation(
+                    resolved.value(), resolved.asOfDate(), resolved.source(), resolved.stale(), List.of());
+        } catch (Exception e) {
+            log.warn("ETF 折溢價取得失敗（{}／{}）：{}", code, market, e.getMessage());
+            return PremiumObservation.unavailable(true);
         }
-        if ("美股".equals(market)) return "USD";
-        if ("英股".equals(market)) return "GBP";
-        return TWD;
     }
 
     /**
-     * 現行 ETF 折溢價（%）。Redis 即時值優先，但<b>須驗 {@code navAsOf} 為最近一個交易日</b>；
-     * 不新鮮則退回 {@code etf_nav_history} 最新一筆。非 ETF 或查無回 {@code null}。
-     *
-     * <p>驗新鮮度的理由：{@code price:etfnav:*} 的 TTL 為 96 小時，不驗日期會讓最多 4 天前的折溢價
-     * 觸發硬否決。本專案剛為同類問題做過修正（大盤即時點位的日期驗證）。</p>
-     *
-     * <p><b>禁止由市價與淨值反推</b>（Task 259）：{@code premiumDiscountPct} 為 null 就是缺值。</p>
+     * Resolve the completed Taiwan session for the dated NAV path.  The calendar is tri-state:
+     * {@code empty} means UNKNOWN and closes the premium evidence gate.  A session that is still
+     * intraday is deliberately excluded, even when Redis/DB already contains a same-date NAV.
      */
-    private BigDecimal etfPremiumPct(String code, String market, Instant decisionInstant) {
-        // 美股 ETF 折溢價因子明確排除（Task 294.5）：etf_nav_history 現況已有美股列（既有 EtfNavPoller
-        // 對持有／觀察的美股 ETF 逐檔打 Yahoo quoteSummary 寫入），若不加此短路，移除美股 filter 後
-        // 會對美股 ETF 回傳非 null 折溢價，讓 ETF_PREMIUM_EXPENSIVE 硬否決誤套用到美股。
-        // 本次不查 etf_nav_history、不查 Redis，與台股既有查詢路徑完全不重疊。
-        if (US_MARKET.equals(market)) return null;
-        try {
-            var live = priceQueryService.getEtfNav(code, market);
-            if (live.isPresent() && live.get().premiumDiscountPct() != null
-                    && isFreshNav(live.get().navAsOf(), decisionInstant)) {
-                return live.get().premiumDiscountPct();
-            }
-            List<BigDecimal> recent = etfNavHistoryRepo.findRecentPremiumPct(
-                    code, market, org.springframework.data.domain.PageRequest.of(0, 1));
-            return recent.isEmpty() ? null : recent.get(0);
-        } catch (Exception e) {
-            log.warn("ETF 折溢價取得失敗（{}／{}）：{}", code, market, e.getMessage());
-            return null;
+    /* package */ LocalDate strictCompletedTaiwanSession(Instant decisionInstant) {
+        if (decisionInstant == null || marketDataService == null) return null;
+        LocalDate current = decisionInstant.atZone(MarketZones.TW_ZONE).toLocalDate();
+        java.util.Optional<Boolean> today = marketDataService.isTwTradingDayKnown(current);
+        if (today == null || today.isEmpty()) return null;
+        if (today.get() && !decisionInstant.atZone(MarketZones.TW_ZONE).toLocalTime()
+                .isBefore(MarketZones.closeTime(TW_MARKET))) return current;
+        for (int i = 1; i <= 14; i++) {
+            LocalDate prior = current.minusDays(i);
+            java.util.Optional<Boolean> known = marketDataService.isTwTradingDayKnown(prior);
+            if (known == null || known.isEmpty()) return null;
+            if (known.get()) return prior;
         }
+        return null;
     }
 
-    /** Redis 折溢價的 navAsOf 須等於當前台股交易日，否則視為不新鮮。 */
-    private boolean isFreshNav(String navAsOf, Instant decisionInstant) {
-        if (navAsOf == null || navAsOf.isBlank()) return false;
+    /** 台股 Redis navAsOf 可能是 yyyyMMdd HH:mm:ss，美股為 ISO date；兩者都轉成 LocalDate。 */
+    /** 現行折溢價在自身歷史分布中的百分位；歷史樣本不得晚於 premium observation date。 */
+    private BigDecimal etfPremiumPercentile(
+            String code, String market, BigDecimal current, LocalDate asOfDate,
+            List<BigDecimal> strictHistory) {
+        if (current == null || asOfDate == null) return null;
         try {
-            return LocalDate.parse(navAsOf.substring(0, 10)).equals(currentTwTradingDay(decisionInstant));
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    /** 現行折溢價在該 ETF 自身歷史分布中的百分位（0–100）；樣本不足或非 ETF 回 null。 */
-    private BigDecimal etfPremiumPercentile(String code, String market, BigDecimal current) {
-        if (current == null) return null;
-        try {
-            List<BigDecimal> history = etfNavHistoryRepo.findRecentPremiumPct(
-                    code, market,
-                    org.springframework.data.domain.PageRequest.of(0, ETF_PREMIUM_LOOKBACK_DAYS));
-            if (history.size() < ETF_PREMIUM_MIN_SAMPLES) return null;
-            long atOrBelow = history.stream().filter(v -> v.compareTo(current) <= 0).count();
+            List<BigDecimal> history = strictHistory == null || strictHistory.isEmpty()
+                    ? etfNavHistoryRepo.findRecentPremiumPctAsOf(
+                            code, market, asOfDate,
+                            org.springframework.data.domain.PageRequest.of(0, ETF_PREMIUM_LOOKBACK_DAYS))
+                    : strictHistory;
+            if (history == null || history.size() < ETF_PREMIUM_MIN_SAMPLES) return null;
+            long atOrBelow = history.stream().filter(v -> v != null && v.compareTo(current) <= 0).count();
             return BigDecimal.valueOf(100.0 * atOrBelow / history.size())
                     .setScale(1, RoundingMode.HALF_UP);
         } catch (Exception e) {
@@ -843,6 +1382,39 @@ public class TradingRadarService {
         if (shortScore == null) return mediumScore;
         if (mediumScore == null) return shortScore;
         return Math.max(shortScore, mediumScore);
+    }
+
+    private static LocalDate parseLocalDate(String value) {
+        if (value == null || value.isBlank()) return null;
+        try { return LocalDate.parse(value.substring(0, Math.min(10, value.length()))); }
+        catch (RuntimeException e) { return null; }
+    }
+
+    /* package */ List<LocalDate> futureSessions(String market, Instant decisionInstant) {
+        LocalDate start = decisionInstant.atZone(MarketZones.resolve(market)).toLocalDate();
+        List<LocalDate> sessions = new ArrayList<>();
+        // Resolver counts sessions strictly after decisionDate; do not spend one
+        // slot on the current session or silently turn the 20th session into a
+        // +20 calendar-day fallback.
+        for (int i = 1; i <= 90 && sessions.size() < 20; i++) {
+            LocalDate date = start.plusDays(i);
+            try {
+                // TW's external holiday calendar has a typed-known API.  An empty
+                // calendar is unavailable, not proof that every weekday is a
+                // session; stop so the downstream resolver returns PARTIAL/MISSING.
+                java.util.Optional<Boolean> known = TW_MARKET.equals(market)
+                        ? marketDataService.isTwTradingDayKnown(date)
+                        : java.util.Optional.of(marketDataService.isTradingDay(market, date));
+                if (known.isEmpty()) return List.of();
+                if (known.get()) sessions.add(date);
+            } catch (Exception unavailable) {
+                // Do not infer calendar-day sessions after a calendar failure.
+                // A short/empty result is deliberately typed as incomplete by
+                // DividendEventEvidenceResolver instead of being a hidden fallback.
+                return List.of();
+            }
+        }
+        return List.copyOf(sessions);
     }
 
     private MarketState incompleteMarket(String message) {
@@ -888,7 +1460,24 @@ public class TradingRadarService {
                 TradingRadarRuleEngine.KdHeat.NORMAL.name(),
                 TradingRadarRuleEngine.TimingState.NEUTRAL.name(),
                 timingLabel(TradingRadarRuleEngine.TimingState.NEUTRAL),
-                null, null, null, null, null, null);
+                null, // ma60BiasPercent
+                null, // week52Position
+                null, // weeklyMa
+                null, // etfPremiumPct
+                null, // etfPremiumPercentile
+                null, // extendedIndicators
+                null, // shortAction
+                null, // shortActionLabel
+                null, // shortScore
+                List.of(), // shortReasons
+                List.of(message), // shortRisks
+                false, // horizonConflict
+                null, // volumeRatio
+                null, // fxAsOfDate
+                false, // profitTakingConfirmed
+                null, // fundamental
+                TradingRadarDto.RadarEvidence.EMPTY,
+                null, null, null, null, null, null, null, null, List.of());
     }
 
     private String regimeLabel(TradingRadarRuleEngine.MarketRegime regime) {

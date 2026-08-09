@@ -220,6 +220,8 @@ public class TradingRadarExportService {
         headers.addAll(FUNDAMENTAL_HEADERS);
         headers.addAll(List.of(
                 "短期支持訊號", "短期風險提醒", "中期支持訊號", "中期風險提醒", "逆勢條件", "逆勢風險"));
+        headers.addAll(EVIDENCE_HEADERS);
+        headers.addAll(DETAIL_EVIDENCE_HEADERS);
 
         List<List<Object>> rows = new ArrayList<>();
         for (JsonNode s : snapshots) {
@@ -251,6 +253,19 @@ public class TradingRadarExportService {
                         listVal(d, "shortReasons"), listVal(d, "shortRisks"),
                         listVal(d, "reasons"), listVal(d, "risks"),
                         listVal(d, "counterTrendReasons"), listVal(d, "counterTrendRisks")));
+                JsonNode evidence = d.path("evidence");
+                row.addAll(Arrays.asList(
+                        num(d, "shortEvidenceConfidence"), num(d, "mediumEvidenceConfidence"),
+                        num(d, "shortDownsideRisk"), num(d, "mediumDownsideRisk"),
+                        num(d, "shortRiskCoverage"), num(d, "mediumRiskCoverage"),
+                        txt(d, "candidateAction"), txt(d, "shortCandidateAction"),
+                        evidenceDisclosureLines(d, evidence), txt(evidence, "nextDistributionDate"),
+                        txt(evidence, "nextDistributionStatus"), txt(evidence, "nextDistributionKnownAt")));
+                JsonNode fundamental = d.path("fundamental");
+                JsonNode profile = evidence.path("assetProfile");
+                JsonNode bondRate = evidenceComponent(evidence, "ASSET_SPECIFIC", "bond_rate");
+                JsonNode treasuryRateContext = evidence.path("treasuryRateContext");
+                row.addAll(detailEvidenceCells(fundamental, evidence, profile, bondRate, treasuryRateContext));
                 rows.add(row);
             }
         }
@@ -285,6 +300,8 @@ public class TradingRadarExportService {
                 ExportDoc.Format.LIST_LINES, ExportDoc.Format.LIST_LINES,
                 ExportDoc.Format.LIST_LINES, ExportDoc.Format.LIST_LINES
         ));
+        formats.addAll(EVIDENCE_FORMATS);
+        formats.addAll(DETAIL_EVIDENCE_FORMATS);
         return new ExportDoc.Sheet("個股決策",
                 List.of(new ExportDoc.Table(null, null, headers, true, false, false, formats, rows)),
                 headers.size());
@@ -347,7 +364,7 @@ public class TradingRadarExportService {
             "EPS TTM年增%", "EPS來源", "EPS來源網址", "EPS資料時點",
             "近似ROE%", "ROE來源", "ROE來源網址", "ROE資料時點",
             "近3月營收年增%", "營收來源", "營收來源網址", "營收資料時點",
-            "PE自身分位", "PE可信虧損", "估值來源", "估值來源網址", "估值資料時點",
+            "PE值", "PE自身分位", "PE可信虧損", "估值來源", "估值來源網址", "估值資料時點",
             "產業", "產業營收年增%", "產業公司數", "產業資料年月", "產業來源", "產業來源網址", "產業資料時點",
             "public_info_*個股證據", "public_info_*產業證據");
 
@@ -356,10 +373,63 @@ public class TradingRadarExportService {
             ExportDoc.Format.NUM2, ExportDoc.Format.TEXT, ExportDoc.Format.LIST_LINES, ExportDoc.Format.TEXT,
             ExportDoc.Format.NUM2, ExportDoc.Format.TEXT, ExportDoc.Format.LIST_LINES, ExportDoc.Format.TEXT,
             ExportDoc.Format.NUM2, ExportDoc.Format.TEXT, ExportDoc.Format.LIST_LINES, ExportDoc.Format.TEXT,
-            ExportDoc.Format.NUM2, ExportDoc.Format.BOOL_ZH, ExportDoc.Format.TEXT, ExportDoc.Format.LIST_LINES, ExportDoc.Format.TEXT,
+            ExportDoc.Format.NUM2, ExportDoc.Format.NUM2, ExportDoc.Format.BOOL_ZH, ExportDoc.Format.TEXT, ExportDoc.Format.LIST_LINES, ExportDoc.Format.TEXT,
             ExportDoc.Format.TEXT, ExportDoc.Format.NUM2, ExportDoc.Format.NUM2, ExportDoc.Format.TEXT,
             ExportDoc.Format.TEXT, ExportDoc.Format.LIST_LINES, ExportDoc.Format.TEXT,
             ExportDoc.Format.LIST_LINES, ExportDoc.Format.LIST_LINES);
+
+    /** V13 evidence/confidence columns appended after legacy decision columns. */
+    private static final List<String> EVIDENCE_HEADERS = List.of(
+            "短期證據信心", "中期證據信心", "短期下檔風險", "中期下檔風險",
+            "短期風險覆蓋", "中期風險覆蓋", "中期候選動作", "短期候選動作",
+            "證據閘門原因", "下一配息日", "配息證據狀態", "配息已知時間");
+
+    private static final List<ExportDoc.Format> EVIDENCE_FORMATS = List.of(
+            ExportDoc.Format.NUM2, ExportDoc.Format.NUM2, ExportDoc.Format.NUM2, ExportDoc.Format.NUM2,
+            ExportDoc.Format.NUM4, ExportDoc.Format.NUM4, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT,
+            ExportDoc.Format.LIST_LINES, ExportDoc.Format.DATE, ExportDoc.Format.TEXT, ExportDoc.Format.TIMESTAMP);
+
+    /**
+     * V13 原始證據欄位：只攤平後端已解析的值，不在匯出端重算 composite、門檻或
+     * profile。這些欄位刻意放在既有欄位之後，讓舊版欄位索引與既有檔案相容。
+     */
+    private static final List<String> DETAIL_EVIDENCE_HEADERS = List.of(
+            "PB值", "殖利率%", "PB自身分位", "殖利率自身分位", "估值Composite", "估值覆蓋",
+            "EPS趨勢", "ROE近似fallback",
+            "資產分類來源", "工具類型", "工具類型來源", "工具類型完整",
+            "股票風格", "股票風格來源", "股票風格完整",
+            "債券期別", "債券期別來源", "債券期別完整",
+            "報價幣別", "報價幣別來源", "報價幣別完整",
+            "輪廓底層幣別", "底層幣別來源", "幣別資料完整",
+            "輪廓完整", "輪廓缺漏",
+            "波動60日標準差比", "波動資料時點", "波動來源",
+            "接受價格時點", "接受價格來源", "接受價格品質", "即時價採用",
+            "折溢價時點", "折溢價來源", "折溢價stale",
+            "利率證據狀態", "利率證據來源", "利率缺漏原因",
+            "利率批次ID", "利率批次完整", "利率Tenor", "利率值%", "利率曲線日",
+            "利率Provider", "利率可得時間", "利率可得基礎", "利率抓取時間",
+            "利率落後日數", "利率時效說明", "利率來源Manifest",
+            // t309 per-field profile completeness is appended so old snapshot column indexes stay stable.
+            "資產分類完整", "底層幣別完整");
+
+    private static final List<ExportDoc.Format> DETAIL_EVIDENCE_FORMATS = List.of(
+            ExportDoc.Format.NUM2, ExportDoc.Format.NUM2, ExportDoc.Format.NUM2, ExportDoc.Format.NUM2,
+            ExportDoc.Format.NUM4, ExportDoc.Format.NUM2, ExportDoc.Format.TEXT, ExportDoc.Format.BOOL_ZH,
+            ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.BOOL_ZH,
+            ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.BOOL_ZH,
+            ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.BOOL_ZH,
+            ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.BOOL_ZH,
+            ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.BOOL_ZH,
+            ExportDoc.Format.BOOL_ZH, ExportDoc.Format.LIST_LINES,
+            ExportDoc.Format.NUM4, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT,
+            ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.BOOL_ZH,
+            ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.BOOL_ZH,
+            ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT,
+            ExportDoc.Format.NUM0, ExportDoc.Format.BOOL_ZH, ExportDoc.Format.TEXT,
+            ExportDoc.Format.NUM4, ExportDoc.Format.DATE, ExportDoc.Format.TEXT,
+            ExportDoc.Format.TIMESTAMP, ExportDoc.Format.TEXT, ExportDoc.Format.TIMESTAMP,
+            ExportDoc.Format.NUM0, ExportDoc.Format.TEXT, ExportDoc.Format.LIST_LINES,
+            ExportDoc.Format.BOOL_ZH, ExportDoc.Format.BOOL_ZH);
 
     /** 依 {@link #EXT_KEYS} 順序取出 14 個值；缺欄位為 null。 */
     private static List<Object> extCells(JsonNode n) {
@@ -374,12 +444,126 @@ public class TradingRadarExportService {
                 num(f, "epsYoyPct"), txt(f, "epsProvider"), listVal(f, "epsSourceUrls"), txt(f, "epsAsOf"),
                 num(f, "approximateRoePct"), txt(f, "roeProvider"), listVal(f, "roeSourceUrls"), txt(f, "roeAsOf"),
                 num(f, "revenueYoy3mPct"), txt(f, "revenueProvider"), listVal(f, "revenueSourceUrls"), txt(f, "revenueAsOf"),
-                num(f, "pePercentile"), boolVal(f, "peLossFlag"), txt(f, "valuationProvider"),
+                num(f, "peValue"), num(f, "pePercentile"), boolVal(f, "peLossFlag"), txt(f, "valuationProvider"),
                 listVal(f, "valuationSourceUrls"), txt(f, "valuationAsOf"),
                 txt(f, "industryName"), num(f, "industryRevenueYoyPct"), num(f, "industryCompanyCount"),
                 txt(f, "industryPeriod"), txt(f, "industryProvider"), listVal(f, "industrySourceUrls"),
                 txt(f, "industryAsOf"), evidenceVal(f, "companyPublicInformation"),
                 evidenceVal(f, "industryPublicInformation"));
+    }
+
+    private static List<Object> detailEvidenceCells(
+            JsonNode f, JsonNode evidence, JsonNode profile, JsonNode bondRate,
+            JsonNode treasuryRateContext) {
+        return Arrays.asList(
+                num(f, "pbValue"), num(f, "dividendYieldPct"), num(f, "pbPercentile"),
+                num(f, "dividendYieldPercentile"), num(f, "valuationContribution"),
+                num(f, "valuationCoverage"), txt(f, "epsTrendType"), boolVal(f, "roeApproximationFallback"),
+                txt(profile, "assetClassSource"), txt(profile, "instrumentKind"),
+                txt(profile, "instrumentKindSource"), boolVal(profile, "instrumentKindComplete"),
+                txt(profile, "stockStyle"), txt(profile, "stockStyleSource"),
+                boolVal(profile, "stockStyleComplete"), txt(profile, "bondTerm"),
+                txt(profile, "bondTermSource"), boolVal(profile, "bondTermComplete"),
+                txt(profile, "quoteCurrency"), txt(profile, "quoteCurrencySource"),
+                boolVal(profile, "quoteCurrencyComplete"), txt(profile, "underlyingCurrency"),
+                txt(profile, "underlyingCurrencySource"), boolVal(profile, "currencyDataComplete"),
+                boolVal(profile, "profileComplete"), listVal(profile, "missingReasons"),
+                num(evidence, "returnStdDev60Ratio"), txt(evidence, "returnStdDev60AsOfDate"),
+                txt(evidence, "returnStdDev60Source"), txt(evidence, "acceptedPriceAsOfDate"),
+                txt(evidence, "acceptedPriceSource"), txt(evidence, "acceptedPriceQuality"),
+                boolVal(evidence, "livePriceAccepted"), txt(evidence, "premiumAsOfDate"),
+                txt(evidence, "premiumSource"), boolVal(evidence, "premiumStale"),
+                txt(bondRate, "applicability"), txt(bondRate, "provider"),
+                txt(bondRate, "missingReason"),
+                num(treasuryRateContext, "batchId"), boolVal(treasuryRateContext, "complete"),
+                txt(treasuryRateContext, "tenor"), num(treasuryRateContext, "value"),
+                txt(treasuryRateContext, "curveDate"), txt(treasuryRateContext, "provider"),
+                txt(treasuryRateContext, "availableAt"), txt(treasuryRateContext, "availabilityBasis"),
+                txt(treasuryRateContext, "fetchedAt"), num(treasuryRateContext, "lagDays"),
+                txt(treasuryRateContext, "staleReason"),
+                mapVal(treasuryRateContext, "sourceManifest"),
+                // These two fields are deliberately appended: pre-t309 snapshots have no
+                // assetProfile node, and boolVal() must keep their Excel cells blank/JSON null.
+                boolVal(profile, "assetClassComplete"), boolVal(profile, "underlyingCurrencyComplete"));
+    }
+
+    /**
+     * Keep the existing Excel/JSON column contract while making every resolved
+     * evidence group and typed market feature auditable.  The cells are an
+     * ordered disclosure list (Excel newline / JSON array); no score or gate is
+     * recomputed by the export layer.  Old snapshots without these nodes return
+     * the original action-gate list unchanged.
+     */
+    private static List<String> evidenceDisclosureLines(JsonNode decision, JsonNode evidence) {
+        List<String> lines = listVal(decision, "actionGateReasons");
+        if (lines == null) lines = new ArrayList<>();
+        else lines = new ArrayList<>(lines);
+        JsonNode groups = evidence.path("evidenceGroups");
+        if (groups.isObject()) {
+            List<String> names = new ArrayList<>();
+            groups.fieldNames().forEachRemaining(names::add);
+            names.sort(String::compareTo);
+            for (String name : names) {
+                JsonNode group = groups.path(name);
+                lines.add("EVIDENCE_GROUP " + name
+                        + " shortCoverage=" + textOrDash(group, "shortCoverage")
+                        + " mediumCoverage=" + textOrDash(group, "mediumCoverage")
+                        + " shortFresh=" + textOrDash(group, "shortFresh")
+                        + " mediumFresh=" + textOrDash(group, "mediumFresh")
+                        + " participates=" + textOrDash(group, "participates"));
+                JsonNode components = group.path("components");
+                if (!components.isArray()) continue;
+                for (JsonNode component : components) {
+                    lines.add("EVIDENCE_COMPONENT " + name + "/" + textOrDash(component, "name")
+                            + " status=" + textOrDash(component, "applicability")
+                            + " provider=" + textOrDash(component, "provider")
+                            + " asOf=" + textOrDash(component, "asOfDate")
+                            + " reason=" + textOrDash(component, "missingReason"));
+                }
+            }
+        }
+        JsonNode features = evidence.path("marketFeatures");
+        if (features.isObject()) {
+            List<String> names = new ArrayList<>();
+            features.fieldNames().forEachRemaining(names::add);
+            names.sort(String::compareTo);
+            for (String name : names) {
+                JsonNode feature = features.path(name);
+                lines.add("MARKET_FEATURE " + name
+                        + " status=" + textOrDash(feature, "status")
+                        + " value=" + textOrDash(feature, "value")
+                        + " provider=" + textOrDash(feature, "provider")
+                        + " asOf=" + textOrDash(feature, "asOfDate")
+                        + " availableAt=" + textOrDash(feature, "availableAt")
+                        + " basis=" + textOrDash(feature, "availabilityBasis")
+                        + " reason=" + textOrDash(feature, "missingReason")
+                        + " source=" + textOrDash(feature, "sourceUrl"));
+            }
+        }
+        if (!evidence.path("nextDistributionStatus").isMissingNode()) {
+            lines.add("DIVIDEND_EVENT status=" + textOrDash(evidence, "nextDistributionStatus")
+                    + " provider=" + textOrDash(evidence, "nextDistributionProvider")
+                    + " sourceUrls=" + textOrDash(evidence, "nextDistributionSourceUrls")
+                    + " knownAt=" + textOrDash(evidence, "nextDistributionKnownAt")
+                    + " within5=" + textOrDash(evidence, "distributionsWithinFiveSessions")
+                    + " within20=" + textOrDash(evidence, "distributionsWithinTwentySessions")
+                    + " reason=" + textOrDash(evidence, "nextDistributionMissingReason"));
+        }
+        return lines.isEmpty() ? null : List.copyOf(lines);
+    }
+
+    private static String textOrDash(JsonNode node, String field) {
+        JsonNode value = node.path(field);
+        return value.isMissingNode() || value.isNull() ? "—" : value.asText();
+    }
+
+    private static JsonNode evidenceComponent(JsonNode evidence, String group, String name) {
+        JsonNode components = evidence.path("evidenceGroups").path(group).path("components");
+        if (!components.isArray()) return com.fasterxml.jackson.databind.node.MissingNode.getInstance();
+        for (JsonNode component : components) {
+            if (name.equals(component.path("name").asText(null))) return component;
+        }
+        return com.fasterxml.jackson.databind.node.MissingNode.getInstance();
     }
 
     /** 公開資訊保留原文與網址，不從標題產生任何數值或情緒欄。 */
@@ -413,6 +597,18 @@ public class TradingRadarExportService {
         if (!v.isArray()) return null;
         List<String> out = new ArrayList<>();
         v.forEach(e -> out.add(e.asText()));
+        return out;
+    }
+
+    /** Map 型 provenance 以排序後的「key ｜ value」清單輸出，JSON 保留陣列、Excel 換行顯示。 */
+    private static List<String> mapVal(JsonNode n, String field) {
+        JsonNode v = n.path(field);
+        if (!v.isObject()) return null;
+        List<String> keys = new ArrayList<>();
+        v.fieldNames().forEachRemaining(keys::add);
+        keys.sort(String::compareTo);
+        List<String> out = new ArrayList<>(keys.size());
+        for (String key : keys) out.add(key + " ｜ " + v.path(key).asText());
         return out;
     }
 
