@@ -1,7 +1,8 @@
 package com.steven.assets.externalmaterials.service;
 
 import com.steven.assets.externalmaterials.client.BotFxFetchClient;
-import com.steven.assets.externalmaterials.client.BotFxFetchClient.SpotQuote;
+import com.steven.assets.externalmaterials.client.FxSpotQuote;
+import com.steven.assets.externalmaterials.client.MegaFxFetchClient;
 import com.steven.assets.externalmaterials.client.YahooFxFetchClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -15,13 +16,14 @@ import java.time.ZonedDateTime;
 import java.util.Optional;
 
 /**
- * 匯率排程：盤中每 5 分鐘 BOT（失敗時 USD fallback Yahoo 當日中間價）、收盤後 17:00 FinMind（T-1 對帳回補）。
+ * 匯率排程：盤中每 5 分鐘 台銀 → 兆豐銀行 → USD 才退 Yahoo 當日中間價；收盤後 17:00 FinMind（T-1 對帳回補）。
  *
  * 從 business-services HistoricalDataService 搬遷至此。所有對外行情 API 集中在 external-materials-service。
  *
- * 來源鏈（見 design.md「匯率來源鏈」、Task 142）：台銀牌告 {@link BotFxFetchClient} 為當日主來源（真實即期買賣）；
- * 台銀 2026/06 起被 Akamai WAF 封鎖而抓不到時，USD 改用 {@link YahooFxFetchClient} 當日中間價暫定（buy=sell=mid），
- * 隔日由 17:00 FinMind 以真實買賣價覆寫同一 (currency, rate_date) 列。
+ * 來源鏈（見 design.md「匯率來源鏈」、Task 142、Task 306）：台銀牌告 {@link BotFxFetchClient} 為當日主來源
+ * （真實即期買賣）；台銀失敗時改抓兆豐銀行牌告 API {@link MegaFxFetchClient}（同樣真實即期買賣、涵蓋所有
+ * 追蹤幣別）；兩者皆失敗時，USD 改用 {@link YahooFxFetchClient} 當日中間價暫定（buy=sell=mid），隔日由
+ * 17:00 FinMind 以真實買賣價覆寫同一 (currency, rate_date) 列。
  */
 @Slf4j
 @Service
@@ -29,19 +31,20 @@ import java.util.Optional;
 public class ExchangeRatePoller {
 
     private final BotFxFetchClient botFx;
+    private final MegaFxFetchClient megaFx;
     private final YahooFxFetchClient yahooFx;
     private final HistoricalBackfillService backfill;
     private final StockSourceQuery store;
 
     /**
-     * 盤中匯率：每 5 分鐘從台銀牌告抓即期匯率，寫入今日 exchange_rate_history（同 currency+rate_date 為覆寫）。
+     * 盤中匯率：每 5 分鐘從台銀牌告抓即期匯率（失敗改兆豐銀行），寫入今日 exchange_rate_history（同 currency+rate_date 為覆寫）。
      * 台灣外匯交易：週一~五 09:00~16:00 Asia/Taipei；09:00 整點跳過避開市場未開盤。
      */
     @Scheduled(cron = "0 0/5 9-15 * * MON-FRI", zone = "Asia/Taipei")
     public void intradayExchangeRateUpdate() {
         ZonedDateTime now = ZonedDateTime.now(ZoneId.of("Asia/Taipei"));
         if (now.getHour() == 9 && now.getMinute() < 5) return;
-        log.info("排程：盤中更新匯率（台灣銀行） ({}:{})", now.getHour(),
+        log.info("排程：盤中更新匯率（台灣銀行 → 兆豐銀行） ({}:{})", now.getHour(),
                 String.format("%02d", now.getMinute()));
         LocalDate today = now.toLocalDate();
         for (String currency : store.collectTrackedCurrencies()) {
@@ -50,7 +53,7 @@ public class ExchangeRatePoller {
     }
 
     /**
-     * 收盤後匯率：17:00 走 FinMind TaiwanExchangeRate 增量補（涵蓋 BOT 沒抓到 / 開盤前缺漏）。
+     * 收盤後匯率：17:00 走 FinMind TaiwanExchangeRate 增量補（涵蓋 BOT/兆豐沒抓到 / 開盤前缺漏）。
      */
     @Scheduled(cron = "0 0 17 * * MON-FRI", zone = "Asia/Taipei")
     public void dailyExchangeRateUpdate() {
@@ -68,16 +71,24 @@ public class ExchangeRatePoller {
 
     /**
      * 抓單一幣別當日即期匯率寫入今日列。
-     * 優先台銀牌告（含真實即期買入/賣出）；台銀被 WAF 擋而失敗時，USD 改用 Yahoo 當日中間價暫定
-     * （buy=sell=mid），隔日 17:00 FinMind 會以真實買賣價覆寫同一 (currency, rate_date) 列。
-     * USD 以外幣別當日缺值不另尋備援，接受沿用 FinMind 的 T-1 值。
+     * 優先台銀牌告（含真實即期買入/賣出）；台銀失敗時改抓兆豐銀行牌告（同樣含真實即期買入/賣出，
+     * 涵蓋所有追蹤幣別）；兩者皆失敗時，USD 才退到 Yahoo 當日中間價暫定（buy=sell=mid），隔日 17:00
+     * FinMind 會以真實買賣價覆寫同一 (currency, rate_date) 列。USD 以外幣別若台銀與兆豐皆缺值，
+     * 不另尋備援，接受沿用 FinMind 的 T-1 值。
      *
-     * @return 是否成功寫入今日列（台銀或 Yahoo 任一）
+     * package-private（非 private）供同套件測試直接呼叫、注入固定日期。
+     *
+     * @return 是否成功寫入今日列（台銀、兆豐、Yahoo 任一）
      */
-    private boolean updateOne(String currency, LocalDate today) {
-        Optional<SpotQuote> bot = botFx.fetchSpot(currency);
+    boolean updateOne(String currency, LocalDate today) {
+        Optional<FxSpotQuote> bot = botFx.fetchSpot(currency);
         if (bot.isPresent()) {
-            upsertSpot(currency, today, bot.get());
+            upsertSpot("台灣銀行", currency, today, bot.get());
+            return true;
+        }
+        Optional<FxSpotQuote> mega = megaFx.fetchSpot(currency);
+        if (mega.isPresent()) {
+            upsertSpot("兆豐銀行", currency, today, mega.get());
             return true;
         }
         if ("USD".equals(currency)) {
@@ -92,8 +103,8 @@ public class ExchangeRatePoller {
         return false;
     }
 
-    private void upsertSpot(String currency, LocalDate today, SpotQuote q) {
+    private void upsertSpot(String sourceName, String currency, LocalDate today, FxSpotQuote q) {
         store.upsertExchangeRate(currency, today, q.spotBuy(), q.spotSell());
-        log.info("台灣銀行 {} 匯率: buy={}, sell={} ({})", currency, q.spotBuy(), q.spotSell(), today);
+        log.info("{} {} 匯率: buy={}, sell={} ({})", sourceName, currency, q.spotBuy(), q.spotSell(), today);
     }
 }

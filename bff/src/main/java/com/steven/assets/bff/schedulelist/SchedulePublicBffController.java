@@ -161,7 +161,7 @@ public class SchedulePublicBffController {
                     "隔日早盤前最後一次 catch-up（開高低收 ＋ 成交股數／成交金額）",
                     "每日 08:30（週二~六）", "0 30 8 * * TUE-SAT", TPE),
             new ScheduledJobDto(EXTERNAL, "匯率", "即期匯率（盤中）",
-                    "盤中每 5 分鐘從台銀牌告抓即期匯率",
+                    "盤中每 5 分鐘抓即期匯率（台銀優先，失敗改兆豐銀行；兩者皆失敗且為 USD 才退回 Yahoo 中間價）",
                     "交易日 09:00–15:55 每 5 分鐘", "0 0/5 9-15 * * MON-FRI", TPE),
             new ScheduledJobDto(EXTERNAL, "匯率", "匯率收盤補抓",
                     "收盤後走 FinMind 增量補匯率（涵蓋盤中漏抓）",
