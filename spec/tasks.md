@@ -28,7 +28,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 
 ---
 
-## 任務索引（Task 1–228、264–267、269–292、297–309）
+## 任務索引（Task 1–228、264–267、269–292、297–309、311）
 
 | Task | 標題 | 位置 |
 |---|---|---|
@@ -309,8 +309,9 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 307 | 交易雷達估值合成、資產輪廓、市場別公開資訊與版本化配息事件（Requirement 65） | [tasks/t307_radar_valuation_profile_events.md](tasks/t307_radar_valuation_profile_events.md) |
 | 308 | 交易雷達可成交台美回測、時間外推校準與 `TW_RULES_V13` 發布（Requirement 56／65） | [tasks/t308_radar_walk_forward_v13_calibration.md](tasks/t308_radar_walk_forward_v13_calibration.md) |
 | 309 | 交易雷達 decision-time 資料時效、證據信心與買進完整性閘門（Requirement 65） | [tasks/t309_radar_evidence_integrity_confidence.md](tasks/t309_radar_evidence_integrity_confidence.md) |
+| 311 | 交易紀錄明細列雙擊開啟股票分析圖（比照已實現損益／今日交易雷達既有模式，Requirement 49） | [tasks/t311_transaction_double_click.md](tasks/t311_transaction_double_click.md) |
 
-> **註：本索引表僅列至 228、264–267、269–292 與 297–309；Task 229–263、268 與 293–296 未登錄於本表，以 `spec/tasks/tNNN_*.md` 檔案本身為準。**
+> **註：本索引表僅列至 228、264–267、269–292、297–309 與 311；Task 229–263、268 與 293–296 未登錄於本表，以 `spec/tasks/tNNN_*.md` 檔案本身為準。**
 
 > **Task 222–225 已全部被 t264／t265／t292 取代（見上表），保留僅作為決策記錄，一律不得依其實作。**
 >
