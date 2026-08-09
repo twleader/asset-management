@@ -28,7 +28,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 
 ---
 
-## 任務索引（Task 1–228、264–267、269–292、297–306）
+## 任務索引（Task 1–228、264–267、269–292、297–307）
 
 | Task | 標題 | 位置 |
 |---|---|---|
@@ -306,8 +306,9 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 304 | 指數 KD 遞迴整併：taiexKd／nasdaqKd 刪除、統一走 kdSeriesAsc 單趟（Requirement 43） | [tasks/t304_indicator_kd_recursion_unify.md](tasks/t304_indicator_kd_recursion_unify.md) |
 | 305 | 雙軌因子貢獻一次計算（輸出逐位不變）＋整波部署驗證（Requirement 43） | [tasks/t305_radar_factor_compute_once.md](tasks/t305_radar_factor_compute_once.md) |
 | 306 | 台幣兌美元匯率新增兆豐銀行備援層（台銀 → 兆豐 → Yahoo → FinMind，Requirement 10） | [tasks/t306_exchange_rate_mega_bank_fallback.md](tasks/t306_exchange_rate_mega_bank_fallback.md) |
+| 307 | 交易紀錄明細列雙擊開啟股票分析圖（比照已實現損益／今日交易雷達既有模式，Requirement 49） | [tasks/t307_transaction_double_click.md](tasks/t307_transaction_double_click.md) |
 
-> **註：本索引表僅列至 228、264–267、269–279、280–292 與 297–305；Task 229–263、268 與 293–296 未登錄於本表，以 `spec/tasks/tNNN_*.md` 檔案本身為準。**
+> **註：本索引表僅列至 228、264–267、269–279、280–292 與 297–307；Task 229–263、268 與 293–296 未登錄於本表，以 `spec/tasks/tNNN_*.md` 檔案本身為準。**
 
 > **Task 222–225 已全部被 t264／t265／t292 取代（見上表），保留僅作為決策記錄，一律不得依其實作。**
 >

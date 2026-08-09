@@ -41,7 +41,8 @@
 
       <el-empty v-if="!filteredRecords.length" description="尚無記錄，請點擊「新增」新增第一筆" />
 
-      <el-table v-else :data="filteredRecords" size="small" stripe class="tx-table">
+      <el-table v-else :data="filteredRecords" size="small" stripe class="tx-table"
+        @row-dblclick="onRowDblClick">
         <el-table-column prop="assetName" label="資產名稱" min-width="170" show-overflow-tooltip />
         <el-table-column prop="assetCode" label="代號" width="80">
           <template #default="{ row }">{{ row.assetCode || '-' }}</template>
@@ -263,6 +264,8 @@
       </template>
     </el-dialog>
 
+    <StockAnalysisDialog v-model="analysisVisible" :stock="analysisStock" />
+
     <!-- 新增/編輯 dialog -->
     <el-dialog v-model="dialogVisible" :title="editingId ? '編輯交易紀錄' : '新增交易紀錄'" width="760px"
       @closed="resetForm">
@@ -411,6 +414,7 @@ import { showGdriveSelfCheckWarning } from '@/utils/gdriveSelfCheck'
 import { showDualExportResult } from '@/utils/dualExportMessage'
 import { useAuthStore } from '@/stores/authStore'
 import { todayLocal } from '@/utils/localDate'
+import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
 
 const TX_TYPES = ['買', '賣']
 const ASSET_TYPES = ['股票', '基金']
@@ -718,6 +722,15 @@ const handleDelete = async (id) => {
   await bffApi.transaction.remove(id)
   await load()
   ElMessage.success('已刪除')
+}
+
+// ===== 雙擊開啟股票走勢分析（僅股票列，Task 307） =====
+const analysisVisible = ref(false)
+const analysisStock = ref(null)
+function onRowDblClick(row) {
+  if (row?.assetType !== '股票' || !row?.assetCode || !row?.market) return
+  analysisStock.value = { stockCode: row.assetCode, stockName: row.assetName, market: row.market }
+  analysisVisible.value = true
 }
 
 async function handleExport() {
