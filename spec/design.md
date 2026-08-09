@@ -186,16 +186,21 @@ com.steven.assets.externalmaterials/
     └── InternalPriceController # POST /internal/refresh、POST /internal/fund-nav/refresh
 ```
 
-**匯率來源鏈（`ExchangeRatePoller` + `BotFxFetchClient` / `YahooFxFetchClient` / `ExchangeRateFetchClient`）：**
-匯率寫入 `exchange_rate_history`（僅 `buy_rate` / `sell_rate` 兩欄，`mid_rate = (buy+sell)/2` 為 `@Transient` 衍生）。`(currency, rate_date)` 為 upsert 覆寫鍵。三層來源依「當日新鮮度 / 是否含真實買賣價」分工：
+**匯率來源鏈（`ExchangeRatePoller` + `BotFxFetchClient` / `MegaFxFetchClient` / `YahooFxFetchClient` / `ExchangeRateFetchClient`）：**
+匯率寫入 `exchange_rate_history`（僅 `buy_rate` / `sell_rate` 兩欄，`mid_rate = (buy+sell)/2` 為 `@Transient` 衍生）。`(currency, rate_date)` 為 upsert 覆寫鍵。四層來源依「當日新鮮度 / 是否含真實買賣價」分工：
 
 | 來源 | client | 角色 | 買賣價 | 觸發 |
 |------|--------|------|--------|------|
 | 台灣銀行牌告 CSV | `BotFxFetchClient`（curl 子程序 + 短 UA `Mozilla/5.0`） | **當日主來源**，真實即期買入/賣出 | ✅ 即期買/賣 | 盤中每 5 分鐘 cron（`0 0/5 9-15 MON-FRI` Asia/Taipei）+ 手動 `refreshBotNow` |
-| Yahoo Finance `TWD=X` | `YahooFxFetchClient`（curl 子程序 + 短 UA） | **當日備援（僅 USD）**：BOT 抓不到時取當日中間價，`buy=sell=mid` 暫定寫入今日列 | ❌ 僅 mid | 同上路徑，BOT `fetchSpot` 回 empty 時 fallback |
+| 兆豐銀行牌告 API | `MegaFxFetchClient`（curl 子程序 + 短 UA，GET 公開 JSON） | **當日第一備援**：台銀抓不到時取代，真實即期買入/賣出，適用所有追蹤幣別（含 ZAR） | ✅ 即期買/賣 | 同上路徑，BOT `fetchSpot` 回 empty 時 fallback |
+| Yahoo Finance `TWD=X` | `YahooFxFetchClient`（curl 子程序 + 短 UA） | **當日第二備援（僅 USD）**：台銀與兆豐皆抓不到時取當日中間價，`buy=sell=mid` 暫定寫入今日列 | ❌ 僅 mid | 同上路徑，BOT 與 Mega `fetchSpot` 皆 empty 時 fallback |
 | FinMind `TaiwanExchangeRate` | `ExchangeRateFetchClient` | **T-1 對帳回補**：以真實即期買/賣覆寫近期列（含 Yahoo 暫定的當日中間價，隔日升級為正式買賣盤） | ✅ spot 買/賣（ZAR cash 恆 0 須改用 spot） | 收盤後 17:00 cron + 手動 refresh 的 `backfillExchangeRate(近 10 日)` |
 
 > **2026/06 台銀 WAF 失效背景**：`rate.bot.com.tw` 全站套上 Akamai SEC-CPT 主動式 JS PoW 挑戰（HTTP 200 但 body 為 "Challenge Validation" HTML + `set-cookie: sec_cpt`），curl 子程序無 JS runtime 無法解題，所有牌告路徑（flcsv / fltxt / 單一幣別 / HTML）皆抓不到 → `BotFxFetchClient.fetchSpot` 對所有幣別回 empty，盤中即時匯率靜默失效，僅 17:00 FinMind 補到 T-1，導致「當日 6/30 缺、最新停 6/29」。故引入 Yahoo `TWD=X` 當日中間價作為 USD 備援（Task 142）。**口徑代價（刻意接受）**：Yahoo 只給中間價，當日列 `buy=sell=mid` 會抹平買賣價差（買入價較真實值高約半個價差 ~0.03），且下游基金贖回現值（`getFundValuationRate` 採 `buyRate`）當日略為高估；此暫定值隔日即被 FinMind 真實買賣價覆寫，屬 1 日內的近似。`buy == sell` 隱含標記該列為中間價來源（未另加 `source` 欄位）。
+>
+> **2026/08 新增兆豐銀行備援層（Task 306）**：台銀 WAF 封鎖後，原本 USD 以外幣別（含 ZAR）完全沒有當日備援、只能等 17:00 FinMind 補 T-1。改抓兆豐銀行牌告 API（`https://www.megabank.com.tw/api/client/ExchangeRate/GetRateData?sc_lang=zh-TW&sc_site=bank-zh-tw&dic_lang=zh-TW`）：公開 GET 端點、免登入免 token，回傳 JSON（`rates[].currKey` 格式如 `"USD|01"`，`spot.bid`/`spot.ask` 即即期買入/賣出），涵蓋所有追蹤幣別（含 ZAR 的 `spot` 有值，僅 `cash` 現金匯率為空），且與台銀同樣是真實買賣價差、非中間價，資料品質同級。插入順序為台銀與 Yahoo 之間：兩家銀行都失敗才退到 Yahoo 中間價，`buy==sell` 隱含標記中間價來源的既有慣例不受影響（兆豐與台銀同屬「真實買賣價」類，未新增資料品質分類，故未加 `source` 欄位）。`BotFxFetchClient` 原本內嵌的 `SpotQuote` record 抽成頂層共用型別 `FxSpotQuote`，供 `MegaFxFetchClient` 共用。
+>
+> **中國信託商業銀行評估未採用**：曾評估納入第三備援層，但其牌告頁面（`ctbcbank.com/content/twrbo/zh_tw/dep_index/dep_ratequery/dep_foreign_rates.html`）為純前端渲染，即期買賣價數字不存在於原始 HTML；且全站（含理應是靜態內容的 JSON）皆套用動態簽章 token（`?IIhfvu=...` 查詢參數）反爬蟲機制，以現有「curl 子程序 + 短 UA」模式實測僅拿到不含匯率數字的空殼 HTML。若要抓取需改用 headless browser 渲染頁面，將為 external-materials-service 引入目前完全沒有的重量級依賴，且盤中 5 分鐘排程每輪都要開瀏覽器渲染，成本與現有輕量 curl 架構落差過大，故暫緩。台灣 Open Banking 第一階段公開資料查詢雖涵蓋匯率，但需向 FISC 註冊為 TSP（第三方服務提供者）取得資格，非匿名公開 URL，留待未來評估。
 
 **Redis key schema：**
 | Key | 內容 | TTL | 寫入者 |

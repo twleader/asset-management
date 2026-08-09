@@ -18,9 +18,7 @@ import java.util.Optional;
 @Component
 public class BotFxFetchClient {
 
-    public record SpotQuote(BigDecimal spotBuy, BigDecimal spotSell) {}
-
-    public Optional<SpotQuote> fetchSpot(String currency) {
+    public Optional<FxSpotQuote> fetchSpot(String currency) {
         try {
             ProcessBuilder pb = new ProcessBuilder("curl", "-s",
                     "-H", "User-Agent: Mozilla/5.0",
@@ -36,7 +34,7 @@ public class BotFxFetchClient {
             }
             csvBody = csvBody.replace("﻿", "");
             // 2026/06 起台銀全站套 Akamai SEC-CPT 反爬挑戰：HTTP 200 但 body 是 HTML 挑戰頁而非 CSV。
-            // 明確辨識以免誤報為「找不到 USD」，並交由上游（ExchangeRatePoller）改用 Yahoo 備援。
+            // 明確辨識以免誤報為「找不到 USD」，並交由上游（ExchangeRatePoller）依序改用兆豐銀行／Yahoo 備援。
             if (csvBody.stripLeading().startsWith("<")) {
                 log.warn("台灣銀行 {} 牌告回傳非 CSV（疑似 WAF 反爬挑戰頁，len={}），改由備援來源處理",
                         currency, csvBody.length());
@@ -56,7 +54,7 @@ public class BotFxFetchClient {
                     log.warn("台灣銀行 CSV {} 即期匯率解析失敗: buy=[{}], sell=[{}]", currency, cols[3], cols[13]);
                     return Optional.empty();
                 }
-                return Optional.of(new SpotQuote(spotBuy, spotSell));
+                return Optional.of(new FxSpotQuote(spotBuy, spotSell));
             }
             log.warn("台灣銀行 CSV 找不到 {} 的匯率資料", currency);
             return Optional.empty();
