@@ -305,3 +305,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/v1.90.0-stock-fundamental-industry.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.91.0-trading-radar-notification-cooldown.sql
+      relativeToChangelogFile: false

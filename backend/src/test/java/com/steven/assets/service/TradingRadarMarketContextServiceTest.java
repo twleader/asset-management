@@ -21,15 +21,19 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /** Task 291 市場脈絡守門：完成日、量能分母、美股共同日與匯率 as-of 不得前視。 */
 class TradingRadarMarketContextServiceTest {
 
+    private final TwseIndexDailyHistoryRepository twseRepo = mock(TwseIndexDailyHistoryRepository.class);
+    private final UsIndexDailyHistoryRepository usIndexRepo = mock(UsIndexDailyHistoryRepository.class);
+    private final ExchangeRateHistoryRepository exchangeRateRepo = mock(ExchangeRateHistoryRepository.class);
+    private final NewsHeadlineRepository newsRepo = mock(NewsHeadlineRepository.class);
     private final MarketDataService marketData = mock(MarketDataService.class);
     private final TradingRadarMarketContextService service = new TradingRadarMarketContextService(
-            mock(TwseIndexDailyHistoryRepository.class), mock(UsIndexDailyHistoryRepository.class),
-            mock(ExchangeRateHistoryRepository.class), mock(NewsHeadlineRepository.class), marketData);
+            twseRepo, usIndexRepo, exchangeRateRepo, newsRepo, marketData);
 
     @Test
     void marketVolumeExcludesLatestFromMedianAndUsTechUsesLatestCompletedCommonDate() {
@@ -68,6 +72,48 @@ class TradingRadarMarketContextServiceTest {
         assertFalse(result.usTechAvailable());
         assertNull(result.usTechCompositePercent());
         assertNull(result.usTechAsOfDate());
+    }
+
+    /**
+     * Task 302：bounded 的 {@code resolveMarket} 與既有 {@code resolve} 在同一組 stub 資料下
+     * 必須算出等值的 {@code MarketContext}——兩者只差查詢範圍，委派的純函數本體相同。
+     */
+    @Test
+    void resolveMarket與resolve在同一組stub資料下市場數字等值() {
+        List<TwseIndexDailyHistory> tw = new ArrayList<>();
+        LocalDate start = LocalDate.of(2026, 7, 28);
+        for (int i = 0; i < 10; i++) tw.add(tw(start.plusDays(i), 100 + i, 1_000L, 1_000));
+        tw.add(tw(LocalDate.of(2026, 8, 7), 110, 2_000L, 3_000));
+
+        List<UsIndexDailyHistory> ixic = List.of(
+                us("IXIC", "2026-08-05", "100"), us("IXIC", "2026-08-06", "102"),
+                us("IXIC", "2026-08-07", "999"));
+        List<UsIndexDailyHistory> sox = List.of(
+                us("SOX", "2026-08-05", "200"), us("SOX", "2026-08-06", "198"),
+                us("SOX", "2026-08-07", "999"));
+
+        when(twseRepo.findAllByOrderByTradingDateAsc()).thenReturn(tw);
+        when(twseRepo.findTopNByOrderByTradingDateDesc(60)).thenReturn(tw);
+        when(usIndexRepo.findByIndexCodeOrderByTradingDateAsc("IXIC")).thenReturn(ixic);
+        when(usIndexRepo.findByIndexCodeOrderByTradingDateAsc("SOX")).thenReturn(sox);
+        when(usIndexRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 15)).thenReturn(ixic);
+        when(usIndexRepo.findTopNByIndexCodeOrderByTradingDateDesc("SOX", 15)).thenReturn(sox);
+
+        Instant now = Instant.parse("2026-08-07T06:00:00Z");
+
+        assertEquals(service.resolve(now).market(), service.resolveMarket(now));
+    }
+
+    /** Task 302：bounded 入口不得像既有 {@code resolve} 一樣附帶抓新聞——通知路徑不需要。 */
+    @Test
+    void resolveMarket不查詢新聞() {
+        when(twseRepo.findTopNByOrderByTradingDateDesc(60)).thenReturn(List.of());
+        when(usIndexRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 15)).thenReturn(List.of());
+        when(usIndexRepo.findTopNByIndexCodeOrderByTradingDateDesc("SOX", 15)).thenReturn(List.of());
+
+        service.resolveMarket(Instant.parse("2026-08-07T06:00:00Z"));
+
+        verifyNoInteractions(newsRepo);
     }
 
     @Test

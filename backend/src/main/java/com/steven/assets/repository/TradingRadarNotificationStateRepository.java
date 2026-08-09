@@ -17,6 +17,9 @@ public interface TradingRadarNotificationStateRepository
     List<String> findStateCodes(@Param("settingId") Long settingId,
                                 @Param("stateType") String stateType);
 
+    /** 通知冷卻判斷用：取整份訂閱狀態列（含 {@code lastNotifiedAt}），供逐狀態比對（Task 301）。 */
+    List<TradingRadarNotificationState> findBySettingId(Long settingId);
+
     @Modifying
     @Transactional
     @Query("DELETE FROM TradingRadarNotificationState s WHERE s.settingId = :settingId")

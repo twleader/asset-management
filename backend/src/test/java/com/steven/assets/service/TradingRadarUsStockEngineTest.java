@@ -1,6 +1,7 @@
 package com.steven.assets.service;
 
 import com.steven.assets.dto.TradingRadarDto;
+import com.steven.assets.model.StockPriceHistory;
 import com.steven.assets.model.TwseIndexDailyHistory;
 import com.steven.assets.model.UsIndexDailyHistory;
 import com.steven.assets.repository.AssetSnapshotRepository;
@@ -20,6 +21,7 @@ import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -167,6 +169,10 @@ class TradingRadarUsStockEngineTest {
         lenient().when(marketContextService.resolve(any())).thenReturn(
                 new TradingRadarMarketContextService.Resolved(
                         TradingRadarMarketContextService.MarketContext.EMPTY, List.of()));
+        // evaluateForNotification／buildMarketSnapshot 的台股分支改走 resolveMarket（Task 302），
+        // 頁面路徑 assemble() 仍走上面的 resolve()；兩者都要 stub。
+        lenient().when(marketContextService.resolveMarket(any()))
+                .thenReturn(TradingRadarMarketContextService.MarketContext.EMPTY);
         lenient().when(marketContextService.resolveFx(anyString(), any()))
                 .thenReturn(TradingRadarMarketContextService.FxContext.EMPTY);
         lenient().when(fundamentalAnalysisService.resolve(any(), any(), any(), any()))
@@ -374,5 +380,80 @@ class TradingRadarUsStockEngineTest {
         assertNull(decision.etfPremiumPercentile());
         verify(priceQueryService, never()).getEtfNav(anyString(), eq("美股"));
         verify(etfNavHistoryRepo, never()).findRecentPremiumPct(anyString(), eq("美股"), any());
+    }
+
+    // ─────────────────────────── (i) shouldAddLiveRow 用標的市場時區判斷「今日」（Task 297） ───────────────────────────
+
+    /**
+     * 冬令時段跨夜點：2026-01-15T16:30:00Z = 台北 2026-01-16 00:30 = 美東 2026-01-15 11:30。
+     * 此時美東日期（D-1）與台北日期（D）錯開一天，是 297 背景所述 bug 的機械重現點。
+     */
+    private static final Instant WINTER_STRADDLE_INSTANT = Instant.parse("2026-01-15T16:30:00Z");
+
+    private static PriceQueryService.LivePrice liveWithTradingDate(String tradingDate) {
+        return new PriceQueryService.LivePrice(
+                "AAPL", null, "美股", BigDecimal.valueOf(100), null, null, null,
+                null, null, null, null, null, null,
+                tradingDate, null, null, null, null);
+    }
+
+    private static StockPriceHistory completedRow(String tradingDate) {
+        return StockPriceHistory.builder()
+                .stockCode("AAPL")
+                .market("美股")
+                .tradingDate(LocalDate.parse(tradingDate))
+                .closePrice(BigDecimal.valueOf(99))
+                .build();
+    }
+
+    @Test
+    void shouldAddLiveRow美股用美東日期判斷今日跨夜情境應併入() {
+        List<StockPriceHistory> rows = List.of(completedRow("2026-01-14"));
+        PriceQueryService.LivePrice live = liveWithTradingDate("2026-01-15");
+
+        boolean result = newService()
+                .shouldAddLiveRow(rows, live, WINTER_STRADDLE_INSTANT, "美股");
+
+        assertTrue(result,
+                "台北 00:30／美東 11:30 時，tradingDate 為美東當日的美股 live 應併入序列（修正前為 false）");
+    }
+
+    @Test
+    void shouldAddLiveRow台股仍用台北日期判斷今日行為不變() {
+        List<StockPriceHistory> rows = List.of(completedRow("2026-01-14"));
+        PriceQueryService.LivePrice live = liveWithTradingDate("2026-01-15");
+
+        boolean result = newService()
+                .shouldAddLiveRow(rows, live, WINTER_STRADDLE_INSTANT, "台股");
+
+        assertFalse(result, "同一 instant 下台北日期為 01-16，live 為 01-15，台股既有行為不得改變");
+    }
+
+    @Test
+    void shouldAddLiveRow美股live等於完成列最新日期時不重複併入() {
+        List<StockPriceHistory> rows = List.of(completedRow("2026-01-15"));
+        PriceQueryService.LivePrice live = liveWithTradingDate("2026-01-15");
+
+        boolean result = newService()
+                .shouldAddLiveRow(rows, live, WINTER_STRADDLE_INSTANT, "美股");
+
+        assertFalse(result, "live tradingDate 已等於完成列最新日期時，既有防重複行為不得改變");
+    }
+
+    // ─────────────────────────── (j) 同一 assemble() 內同幣別 FX 只解析一次（Task 303） ───────────────────────────
+
+    @Test
+    void assemble內兩檔同幣別美股只呼叫一次resolveFx且台股短路不觸發() {
+        stubBaseline();
+        when(alertRepo.findDistinctStockCodeMarket()).thenReturn(List.<Object[]>of(
+                new Object[]{"AAPL", "美股"},
+                new Object[]{"MSFT", "美股"},
+                new Object[]{"2330", "台股"}));
+
+        TradingRadarDto.Response resp = newService().get();
+
+        assertEquals(3, resp.stocks().size());
+        verify(marketContextService, org.mockito.Mockito.times(1)).resolveFx(eq("USD"), any());
+        verify(marketContextService, never()).resolveFx(eq("TWD"), any());
     }
 }

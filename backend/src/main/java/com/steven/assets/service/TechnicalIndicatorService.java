@@ -91,10 +91,6 @@ public class TechnicalIndicatorService {
                 null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
-    private record KdValues(BigDecimal k, BigDecimal d) {
-        private static final KdValues EMPTY = new KdValues(null, null);
-    }
-
     /**
      * 走勢圖用的逐日指標點（Task 261）。視窗／暖機不足的欄位為 null（不是 0）。
      * j9 = 3D − 2K、k3d2 = 3K − 2D（同一對 K/D 的兩種鏡像慣例，畫面兩者都要顯示）。
@@ -338,8 +334,10 @@ public class TechnicalIndicatorService {
     }
 
     /**
-     * 0000 台股大盤：指數日線映射成 StockPriceHistory 後餵同一份序列核心，
-     * 避免為了型別差異再長出第四套 KD／MA 遞迴（taiexKd/taiexSimpleMa 服務 computeAll 的既有路徑，不動）。
+     * 0000 台股大盤：指數日線映射成 StockPriceHistory 後餵同一份序列核心，避免為型別差異另長一套
+     * KD 遞迴——全站 KD 只有 {@link #kdSeriesAsc} 這一份（Task 304 起 {@link #computeAllForTaiex()}
+     * 的當期／前一期 KD 亦改走同一份，taiexKd 已刪除）；taiexSimpleMa 服務 computeAll() 的 MA
+     * 既有路徑，不動。
      */
     private List<StockPriceHistory> taiexSeriesAsc(String stockCode, String market, LocalDate end) {
         List<StockPriceHistory> asc = twseDailyRepo
@@ -571,23 +569,25 @@ public class TechnicalIndicatorService {
             BigDecimal ma60  = taiexSimpleMa(desc, 60);
             BigDecimal ma240 = taiexSimpleMa(desc, 240);
 
-            KdValues currentKd = taiexKd(desc);
-            KdValues previousKd = desc.size() > 1
-                    ? taiexKd(desc.subList(1, desc.size()))
-                    : KdValues.EMPTY;
-            // Task 281：擴充指標把「已含今日 live 合成列」的同一份 desc 映射成 StockPriceHistory 後
-            // 餵同一組序列核心（不新增第四套遞迴）。core 的 8 個欄位仍由 taiexSimpleMa／taiexKd 產生，
-            // 一個位元都不變。整段留在既有的 try 內——例外逸出會被 TradingRadarService 的 catch
-            // 放大成整張大盤卡 DATA_INCOMPLETE、全部個股停發訊號。
+            // Task 304：先把「已含今日 live 合成列」的同一份 desc 映射成 StockPriceHistory，
+            // 單趟 kdSeriesAsc 同時取當期／前一期／擴充指標三者（taiexKd 已刪除，不再各自跑一趟）。
+            // bit-identical 論證見 kdSeriesAsc／computeFromSeries 的方法註解——同一套前綴相依前向
+            // 遞迴，previous 取單趟結果的倒數第二筆與舊版對 subList 重算一趟逐位相同。
+            // 整段留在既有的 try 內——例外逸出會被 TradingRadarService 的 catch 放大成整張大盤卡
+            // DATA_INCOMPLETE、全部個股停發訊號。
             List<StockPriceHistory> ascRows = desc.reversed().stream()
                     .map(d -> toRow(d, "0000", "台股"))
                     .toList();
+            List<KdPoint> kd = kdSeriesAsc(ascRows);
+            int last = ascRows.size() - 1;
+            KdPoint currentKd = kd.get(last);
+            KdPoint previousKd = last >= 1 ? kd.get(last - 1) : KdPoint.EMPTY;
             return new FullIndicators(
                     ma20, ma60, ma240,
                     currentKd.k(), currentKd.d(),
                     previousKd.k(), previousKd.d(),
                     ma5,
-                    extendedOf(ascRows, kdSeriesAsc(ascRows)));
+                    extendedOf(ascRows, kd));
         } catch (Exception e) {
             log.warn("compute TAIEX indicators failed", e);
             return FullIndicators.EMPTY;
@@ -601,27 +601,6 @@ public class TechnicalIndicatorService {
         return BigDecimal.valueOf(sum / days).setScale(2, RoundingMode.HALF_UP);
     }
 
-    private static KdValues taiexKd(List<TwseIndexDailyHistory> desc) {
-        if (desc.size() < 9) return KdValues.EMPTY;
-        List<TwseIndexDailyHistory> asc = new ArrayList<>(desc).reversed();
-        double k = 50, d = 50;
-        int period = 9;
-        for (int i = period - 1; i < asc.size(); i++) {
-            List<TwseIndexDailyHistory> window = asc.subList(i - period + 1, i + 1);
-            double highest = window.stream().mapToDouble(h -> h.getHighPoint() != null
-                    ? h.getHighPoint().doubleValue() : h.getClosePoint().doubleValue()).max().orElse(0);
-            double lowest = window.stream().mapToDouble(h -> h.getLowPoint() != null
-                    ? h.getLowPoint().doubleValue() : h.getClosePoint().doubleValue()).min().orElse(0);
-            double close = asc.get(i).getClosePoint().doubleValue();
-            double rsv = (highest == lowest) ? 50 : (close - lowest) / (highest - lowest) * 100;
-            k = k * 2.0 / 3 + rsv / 3.0;
-            d = d * 2.0 / 3 + k / 3.0;
-        }
-        return new KdValues(
-                BigDecimal.valueOf(k).setScale(2, RoundingMode.HALF_UP),
-                BigDecimal.valueOf(d).setScale(2, RoundingMode.HALF_UP));
-    }
-
     /**
      * IXIC（那斯達克綜合指數）大盤情境（Task 294）：供美股個股使用，取代台股組的 TAIEX 技術面。
      *
@@ -629,11 +608,13 @@ public class TechnicalIndicatorService {
      * {@link PriceQueryService} 路徑處理，不影響個股本身的進出場判斷即時性——純用
      * {@code us_index_daily_history} 表 {@code index_code='IXIC'} 的完成日序列。</p>
      *
-     * <p>MA／KD 核心比照 {@link #computeAllForTaiex()} 的既有寫法（{@link #taiexSimpleMa}／
-     * {@link #taiexKd}），<b>不呼叫</b> {@link #computeFromSeries(List)}——該方法吃的是個股用的
+     * <p>MA 核心比照 {@link #computeAllForTaiex()} 的既有寫法（{@link #nasdaqSimpleMa}），
+     * <b>不呼叫</b> {@link #computeFromSeries(List)}——該方法吃的是個股用的
      * {@link StockPriceHistory}，{@code us_index_daily_history} 對應的是 {@link UsIndexDailyHistory}，
-     * 型別不同。擴充指標沿用既有 {@link #toRow}／{@link #extendedOf} 轉型後共用同一份序列核心，
-     * 不新增第四套遞迴。</p>
+     * 型別不同。KD（當期／前一期）與擴充指標則先以 {@link #toRow(UsIndexDailyHistory, String, String)}
+     * 轉型，共用同一份 {@link #kdSeriesAsc} 單趟結果（Task 304，nasdaqKd 已刪除）：尾筆＝當期、
+     * 倒數第二筆＝前一期，逐筆再餵 {@link #extendedOf}，全站只有這一份 KD 遞迴。
+     * bit-identical 論證見 {@link #kdSeriesAsc} 與 {@link #computeFromSeries(List)} 的方法註解。</p>
      *
      * <p>本方法為新增的獨立入口，由 {@code TradingRadarService} 直接呼叫——IXIC 不是「個股」，
      * 沒有 stockCode，故不透過 {@link #computeAll(String, String)} 的 {@code isTaiex(...)} 分支。</p>
@@ -650,19 +631,21 @@ public class TechnicalIndicatorService {
             BigDecimal ma60  = nasdaqSimpleMa(desc, 60);
             BigDecimal ma240 = nasdaqSimpleMa(desc, 240);
 
-            KdValues currentKd = nasdaqKd(desc);
-            KdValues previousKd = desc.size() > 1
-                    ? nasdaqKd(desc.subList(1, desc.size()))
-                    : KdValues.EMPTY;
+            // Task 304：比照 computeAllForTaiex()——先映射 ascRows 再單趟 kdSeriesAsc，
+            // 同時取當期／前一期／擴充指標三者（nasdaqKd 已刪除，不再各自跑一趟）。
             List<StockPriceHistory> ascRows = desc.reversed().stream()
                     .map(d -> toRow(d, "IXIC", "美股"))
                     .toList();
+            List<KdPoint> kd = kdSeriesAsc(ascRows);
+            int last = ascRows.size() - 1;
+            KdPoint currentKd = kd.get(last);
+            KdPoint previousKd = last >= 1 ? kd.get(last - 1) : KdPoint.EMPTY;
             return new FullIndicators(
                     ma20, ma60, ma240,
                     currentKd.k(), currentKd.d(),
                     previousKd.k(), previousKd.d(),
                     ma5,
-                    extendedOf(ascRows, kdSeriesAsc(ascRows)));
+                    extendedOf(ascRows, kd));
         } catch (Exception e) {
             log.warn("compute NASDAQ (IXIC) indicators failed", e);
             return FullIndicators.EMPTY;
@@ -688,26 +671,5 @@ public class TechnicalIndicatorService {
         double sum = 0;
         for (int i = 0; i < days; i++) sum += desc.get(i).getClosePoint().doubleValue();
         return BigDecimal.valueOf(sum / days).setScale(2, RoundingMode.HALF_UP);
-    }
-
-    private static KdValues nasdaqKd(List<UsIndexDailyHistory> desc) {
-        if (desc.size() < 9) return KdValues.EMPTY;
-        List<UsIndexDailyHistory> asc = new ArrayList<>(desc).reversed();
-        double k = 50, d = 50;
-        int period = 9;
-        for (int i = period - 1; i < asc.size(); i++) {
-            List<UsIndexDailyHistory> window = asc.subList(i - period + 1, i + 1);
-            double highest = window.stream().mapToDouble(h -> h.getHighPoint() != null
-                    ? h.getHighPoint().doubleValue() : h.getClosePoint().doubleValue()).max().orElse(0);
-            double lowest = window.stream().mapToDouble(h -> h.getLowPoint() != null
-                    ? h.getLowPoint().doubleValue() : h.getClosePoint().doubleValue()).min().orElse(0);
-            double close = asc.get(i).getClosePoint().doubleValue();
-            double rsv = (highest == lowest) ? 50 : (close - lowest) / (highest - lowest) * 100;
-            k = k * 2.0 / 3 + rsv / 3.0;
-            d = d * 2.0 / 3 + k / 3.0;
-        }
-        return new KdValues(
-                BigDecimal.valueOf(k).setScale(2, RoundingMode.HALF_UP),
-                BigDecimal.valueOf(d).setScale(2, RoundingMode.HALF_UP));
     }
 }

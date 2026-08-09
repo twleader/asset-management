@@ -180,7 +180,9 @@ class TradingRadarRuleEngineTest {
 
         assertEquals(74, equity.score());
         assertEquals(TradingRadarRuleEngine.Action.HOLD, equity.action());
-        assertEquals(92, bond.score());
+        // V12：MW_KD_J 由 0.04 併入 W%R 權重升為 0.07，本 fixture 的 KD/J 貢獻（0.5）低於其餘
+        // 已飽和的均線分量（1.0），加權後分數由 92 降為 90（Task 298）。
+        assertEquals(90, bond.score());
         assertEquals(TradingRadarRuleEngine.Action.ADD_CANDIDATE, bond.action());
         assertTrue(bond.reasons().stream().anyMatch(reason -> reason.contains("資產類別為債券")));
     }
@@ -198,7 +200,8 @@ class TradingRadarRuleEngineTest {
 
         assertNull(equity.score());
         assertEquals(TradingRadarRuleEngine.Action.NO_TRADE, equity.action());
-        assertEquals(92, bond.score());
+        // V12：同 bondDoesNotUseEquityRiskOffPenaltyOrBuyGate，KD/J 權重上修使分數由 92 降為 90。
+        assertEquals(90, bond.score());
         assertEquals(TradingRadarRuleEngine.Action.ADD_CANDIDATE, bond.action());
     }
 
@@ -421,22 +424,24 @@ class TradingRadarRuleEngineTest {
     void kdHeat_userReportedCase_staysAddCandidateAndIsOnlyMarkedElevated() {
         // 使用者回報的 00882：K 82.3／D 75.2 → avg 78.75 未過 80、K 未過 85。
         // 本任務刻意不改變此案例的動作（門檻取 85 的直接後果），釘住以免日後被誤調為 80。
-        // 動能 +0.71×0.08、位置 −0.575×0.13 → Σ(w×c)=0.63205 → 83.27 → 83。
+        // V12：KD/J 位置 (50-78.75)/50=-0.575，併入 direction +1.0 後平均 0.2125；
+        // MW_KD_J 由 0.04 併入 W%R 權重升為 0.07 後 Σ(w×c)/Σw=0.240875/0.35=0.6882 → 84（Task 298）。
         var held = engine.evaluateStock(strongStockWithKd(true, "82.3", "75.2"));
 
-        assertEquals(87, held.score(), "V11 中期技術面重配後為 87 分");
+        assertEquals(84, held.score(), "V12 KD/J 併入 W%R 且權重上修後為 84 分");
         assertEquals(TradingRadarRuleEngine.Action.ADD_CANDIDATE, held.action());
         assertEquals(TradingRadarRuleEngine.KdHeat.ELEVATED, held.kdHeat());
     }
 
     @Test
     void kdHeat_kAloneOverheated_closesBuyGateWithoutDeductingScore() {
-        // K=86／D=70 → avg 78 未過 80，僅 K 過 85。動能 clamp 為 +1.0、位置 −0.56
-        // → Σ(w×c)=0.6572 → 84.59 → 85。分數仍 ≥ 75，證明降級來自閘門而非扣分。
+        // K=86／D=70 → avg 78 未過 80，僅 K 過 85。KD/J 位置 (50-78)/50=-0.56，
+        // 併入 direction +1.0 後平均 0.22；V12 MW_KD_J 升為 0.07 後 Σ(w×c)/Σw=0.2414/0.35=0.6897
+        // → 84（Task 298）。分數仍 ≥ 75，證明降級來自閘門而非扣分。
         var held = engine.evaluateStock(strongStockWithKd(true, "86", "70"));
         var notHeld = engine.evaluateStock(strongStockWithKd(false, "86", "70"));
 
-        assertEquals(87, held.score(), "過熱硬閘門不在 KD/J 因子之外再重複扣分");
+        assertEquals(84, held.score(), "過熱硬閘門不在 KD/J 因子之外再重複扣分");
         assertEquals(TradingRadarRuleEngine.KdHeat.OVERHEATED, held.kdHeat());
         assertEquals(TradingRadarRuleEngine.Action.HOLD, held.action());
         assertEquals(TradingRadarRuleEngine.Action.WATCH, notHeld.action());
@@ -518,8 +523,8 @@ class TradingRadarRuleEngineTest {
      * 但使用者可觀察行為有實質變化即升版。
      */
     @Test
-    void ruleVersion_isV11() {
-        assertEquals("TW_RULES_V11", TradingRadarRuleEngine.RULE_VERSION);
+    void ruleVersion_isV12() {
+        assertEquals("TW_RULES_V12", TradingRadarRuleEngine.RULE_VERSION);
     }
 
     // ═══ Task 264：使用者四條需求的驗收測試 ═══════════════════════════════════
@@ -622,11 +627,189 @@ class TradingRadarRuleEngineTest {
         assertTrue(narrow.risks().stream().anyMatch(r -> r.contains("高低帶過窄")));
     }
 
-    /** 權重總和以斷言釘住，不靠人工加總。 */
+    /** 權重總和以斷言釘住，不靠人工加總（298.3 的 18 因子權重表機械檢查）。 */
     @Test
     void weightsSumToExactlyOne() {
         assertEquals(1.0, TradingRadarRuleEngine.SHORT_WEIGHT_SUM, 1e-9);
         assertEquals(1.0, TradingRadarRuleEngine.MEDIUM_WEIGHT_SUM, 1e-9);
+    }
+
+    // ═══ Task 298：BIAS／KD-J(W%R)／OSC 因子驗證 ═══════════════════════════════
+    //
+    // 以下測試用 factorIsolationStock 系列 fixture 中性化除受測因子外的所有計分項
+    // （MA20/60/240、KD/J、MACD、RSI、BIAS、大盤、完成日漲跌皆貢獻恰為 0，仍佔權重分母，
+    // 中期權重合計 Σw=0.52），使受測因子造成的分數差異可被精確手算並釘住，不受其他任務
+    // 調整週邊因子時的分數漂移拖累。
+
+    @Test
+    void biasContribution_averagesOnlyBias10AndBias20_ignoringB10b20() {
+        // bias10=+5 → clampUnit(-5/10)=-0.5；bias20=+5 → clampUnit(-5/20)=-0.25；均值 -0.375。
+        // Σ(w×c)=MW_BIAS×(-0.375)=0.08×(-0.375)=-0.03，Σw=0.52 → sigma=-0.057692
+        // → 50-2.8846=47.1154 → 47（Task 298）。
+        var result = engine.evaluateStock(biasIsolationStock("5", "5", "1"));
+        var differentB10b20 = engine.evaluateStock(biasIsolationStock("5", "5", "-40"));
+
+        assertEquals(47, result.score(), "貢獻應等於只平均 bias10／bias20 兩分量");
+        assertEquals(result.score(), differentB10b20.score(),
+                "b10b20 為代數相依值，不得影響 BIAS 因子貢獻");
+    }
+
+    @Test
+    void kdJContribution_wr9PullsPositionAndFallsBackToThreeComponentAverageWhenNull() {
+        // k=60,d=40 → direction=+1.0、KD 均值 50 → position=(50-50)/50=0。
+        var noWr = engine.evaluateStock(kdJIsolationStock("60", "40", null, null, "8.0"));
+        var highWr = engine.evaluateStock(kdJIsolationStock("60", "40", null, "90", "8.0"));
+        var lowWr = engine.evaluateStock(kdJIsolationStock("60", "40", null, "10", "8.0"));
+        var withJ9NoWr = engine.evaluateStock(kdJIsolationStock("60", "40", "50", null, "8.0"));
+
+        // wr9=null → averageAvailable(1.0,0.0)=0.5 → Σ(w×c)=0.07×0.5=0.035
+        // → sigma=0.035/0.52=0.067308 → 53.365 → 53。
+        assertEquals(53, noWr.score());
+        // wr9=90（低檔）→ wrPosition=+0.8，併入平均後 avg(1.0,0.0,0.8)=0.6，應把貢獻往正向拉。
+        assertEquals(54, highWr.score(), "W%R 低檔（貢獻為正）應把 KD/J 貢獻往正向拉");
+        assertTrue(highWr.score() > noWr.score());
+        // wr9=10（高檔）→ wrPosition=-0.8，併入平均後 avg(1.0,0.0,-0.8)=0.0667，應把貢獻往負向拉。
+        assertEquals(50, lowWr.score(), "W%R 高檔（貢獻為負）應把 KD/J 貢獻往負向拉");
+        assertTrue(lowWr.score() < noWr.score());
+        // j9=50、wr9=null → 退回三分量平均 avg(1.0,0.0,0.0)=0.3333，與併入 W%R 前的版本一致。
+        assertEquals(52, withJ9NoWr.score(), "wr9 缺值時應退回三分量（direction／position／J9）平均");
+    }
+
+    @Test
+    void kdJContribution_isNullEntirelyWhenKdBandIsNarrow_regardlessOfWr9() {
+        // 窄幅時 kdJContribution 整體不計，不論 K/D/W%R 多極端，分數都應相同。
+        var narrowHighWr = engine.evaluateStock(kdJIsolationStock("90", "10", null, "90", "1.0"));
+        var narrowLowWr = engine.evaluateStock(kdJIsolationStock("10", "90", null, "10", "1.0"));
+
+        assertEquals(50, narrowHighWr.score());
+        assertEquals(narrowHighWr.score(), narrowLowWr.score(),
+                "窄幅時 KD/J（含 W%R）整因子應為 null，不受任何 K/D/W%R 值影響");
+    }
+
+    @Test
+    void oscContribution_normalizesByPriceAmplitudeInsteadOfHardSign() {
+        // Task 298：oscPct = osc/price×100，貢獻 = clampUnit(oscPct / OSC_FULL_SCALE_PCT(0.5))。
+        var noOsc = engine.evaluateStock(oscIsolationStock(null));            // MACD 因子缺值基準
+        var tinyPositive = engine.evaluateStock(oscIsolationStock("0.01"));   // 0.01% → 貢獻 0.02
+        var saturatedPositive = engine.evaluateStock(oscIsolationStock("1")); // 1% → 貢獻 +1（飽和）
+        var evenLargerPositive = engine.evaluateStock(oscIsolationStock("5")); // 5% → 同樣飽和 +1
+        var saturatedNegative = engine.evaluateStock(oscIsolationStock("-0.6")); // -0.6% → 貢獻 -1（飽和）
+
+        // 貢獻 0.02 太小，不足以移動四捨五入後的整數分數——在此精度下與「無 OSC 訊號」無法區分，
+        // 證明不是舊版 signum(osc) 的硬 +1（若是硬 +1，分數會等於 saturatedPositive）。
+        assertEquals(noOsc.score(), tinyPositive.score(), "0.01% 的 OSC 貢獻應趨近 0");
+        assertNotEquals(saturatedPositive.score(), tinyPositive.score(),
+                "微幅 OSC 不得表現得像舊版硬翻轉的 +1 飽和值");
+
+        assertEquals(55, saturatedPositive.score(), "OSC=1%（達 0.5% 全幅）應飽和為 +1");
+        assertEquals(saturatedPositive.score(), evenLargerPositive.score(), "超過全幅後應維持飽和，不再放大");
+        assertEquals(45, saturatedNegative.score(), "OSC=-0.6%（超過 0.5% 全幅）應飽和為 -1");
+    }
+
+    @Test
+    void oscContribution_belowNarrativeThreshold_omitsDirectionalText() {
+        // 0.05% < OSC_NARRATIVE_PCT(0.1%)：貢獻仍計入分數，但不得輸出動能文案（Task 298）。
+        var result = engine.evaluateStock(oscIsolationStock("0.05"));
+
+        assertTrue(result.reasons().stream().noneMatch(r -> r.contains("MACD 柱狀體 OSC 為正")));
+        assertTrue(result.risks().stream().noneMatch(r -> r.contains("MACD 柱狀體 OSC 為負")));
+    }
+
+    // ── Task 298 測試用 fixture ────────────────────────────────────────────────
+    //
+    // 三者共用同一組中性化底盤：price=ma20=ma60=ma240=100（位置貢獻 0）、三項確認皆 MIXED
+    // （確認貢獻 0）、regime=NEUTRAL（大盤貢獻 0）、completedChangePercent=0（完成日貢獻 0）、
+    // RSI5／RSI10 皆 50（貢獻 0）、weeklyMa／fx／ETF／基本面缺值或 NOT_APPLICABLE（整項排除，
+    // 不佔權重分母）。中期有效權重合計恆為 Σw=0.52（MA20+MA60+MA240+KD_J+MACD+RSI+BIAS+MARKET
+    // +DAY_MOVE = 0.05+0.08+0.07+0.07+0.05+0.04+0.08+0.06+0.02），僅受測因子的分量會變動。
+
+    /** 中性化 BIAS 以外所有計分因子：KD=50/50（J9／W%R 缺值）、OSC=0。 */
+    private TradingRadarRuleEngine.StockInput biasIsolationStock(
+            String bias10, String bias20, String b10b20) {
+        return new TradingRadarRuleEngine.StockInput(
+                false,
+                new BigDecimal("100"), BigDecimal.ZERO, BigDecimal.ZERO,
+                new TradingRadarRuleEngine.Indicators(
+                        new BigDecimal("100"), new BigDecimal("100"), new BigDecimal("100"),
+                        new BigDecimal("50"), new BigDecimal("50")),
+                new BigDecimal("50"), new BigDecimal("50"),
+                TradingRadarRuleEngine.Confirmation.MIXED,
+                TradingRadarRuleEngine.Confirmation.MIXED,
+                TradingRadarRuleEngine.Confirmation.MIXED,
+                TradingRadarRuleEngine.InstrumentType.EQUITY,
+                TradingRadarRuleEngine.MarketRegime.NEUTRAL,
+                false,
+                null,
+                null, null, null, null,
+                new BigDecimal("8.0"), null, null,
+                null,
+                new TradingRadarRuleEngine.ExtendedIndicators(
+                        null, null, null,
+                        null, null, null, null, BigDecimal.ZERO,
+                        new BigDecimal("50"), new BigDecimal("50"),
+                        new BigDecimal(bias10), new BigDecimal(bias20), new BigDecimal(b10b20),
+                        null),
+                null,
+                TradingRadarRuleEngine.FundamentalInput.NOT_APPLICABLE);
+    }
+
+    /** 中性化 KD/J（含 W%R）以外所有計分因子：BIAS 兩分量皆 0、OSC=0。band 為 9 日高低帶寬度（%）。 */
+    private TradingRadarRuleEngine.StockInput kdJIsolationStock(
+            String k, String d, String j9, String wr9, String band) {
+        return new TradingRadarRuleEngine.StockInput(
+                false,
+                new BigDecimal("100"), BigDecimal.ZERO, BigDecimal.ZERO,
+                new TradingRadarRuleEngine.Indicators(
+                        new BigDecimal("100"), new BigDecimal("100"), new BigDecimal("100"),
+                        new BigDecimal(k), new BigDecimal(d)),
+                new BigDecimal("50"), new BigDecimal("50"),
+                TradingRadarRuleEngine.Confirmation.MIXED,
+                TradingRadarRuleEngine.Confirmation.MIXED,
+                TradingRadarRuleEngine.Confirmation.MIXED,
+                TradingRadarRuleEngine.InstrumentType.EQUITY,
+                TradingRadarRuleEngine.MarketRegime.NEUTRAL,
+                false,
+                null,
+                null, null, null, null,
+                new BigDecimal(band), null, null,
+                null,
+                new TradingRadarRuleEngine.ExtendedIndicators(
+                        j9 == null ? null : new BigDecimal(j9), null, null,
+                        null, null, null, null, BigDecimal.ZERO,
+                        new BigDecimal("50"), new BigDecimal("50"),
+                        BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
+                        wr9 == null ? null : new BigDecimal(wr9)),
+                null,
+                TradingRadarRuleEngine.FundamentalInput.NOT_APPLICABLE);
+    }
+
+    /** 中性化 OSC 以外所有計分因子：KD=50/50（J9／W%R 缺值）、BIAS 兩分量皆 0，price 固定 100。 */
+    private TradingRadarRuleEngine.StockInput oscIsolationStock(String osc) {
+        return new TradingRadarRuleEngine.StockInput(
+                false,
+                new BigDecimal("100"), BigDecimal.ZERO, BigDecimal.ZERO,
+                new TradingRadarRuleEngine.Indicators(
+                        new BigDecimal("100"), new BigDecimal("100"), new BigDecimal("100"),
+                        new BigDecimal("50"), new BigDecimal("50")),
+                new BigDecimal("50"), new BigDecimal("50"),
+                TradingRadarRuleEngine.Confirmation.MIXED,
+                TradingRadarRuleEngine.Confirmation.MIXED,
+                TradingRadarRuleEngine.Confirmation.MIXED,
+                TradingRadarRuleEngine.InstrumentType.EQUITY,
+                TradingRadarRuleEngine.MarketRegime.NEUTRAL,
+                false,
+                null,
+                null, null, null, null,
+                new BigDecimal("8.0"), null, null,
+                null,
+                new TradingRadarRuleEngine.ExtendedIndicators(
+                        null, null, null,
+                        null, null, null, null, osc == null ? null : new BigDecimal(osc),
+                        new BigDecimal("50"), new BigDecimal("50"),
+                        BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
+                        null),
+                null,
+                TradingRadarRuleEngine.FundamentalInput.NOT_APPLICABLE);
     }
 
     @Test
@@ -770,7 +953,7 @@ class TradingRadarRuleEngineTest {
                 base.indicators(), base.previousK(), base.previousD(),
                 base.ma20Confirmation(), base.ma60Confirmation(), base.ma240Confirmation(),
                 base.instrumentType(), base.marketRegime(), base.marketStale(), base.fxPercentile(),
-                base.ma60BiasPercent(), base.ma240BiasPercent(), base.week52Position(),
+                base.ma60BiasPercent(), base.ma60BiasPercentile(), base.ma240BiasPercent(), base.week52Position(),
                 base.kdBandWidthPercent(), base.etfPremiumPct(), base.etfPremiumPercentile(),
                 base.weeklyMa(), base.extendedIndicators(), base.volumeRatio(), fundamental);
     }
@@ -1085,6 +1268,172 @@ class TradingRadarRuleEngineTest {
                 biasOf(price.toPlainString(), "22.37"),
                 biasOf(price.toPlainString(), "16.56"),
                 null, null, null, null);
+    }
+
+    // ═══ Task 299：季線乖離自身分位路徑（極端時機二擇一）═══════════════════════
+
+    @Test
+    void extremeOverbought_firesViaPercentilePathWhenAbsoluteThresholdNotReached() {
+        // bias=+8%（未達 20 絕對門檻），KD 過熱（k=88/d=90→avg=89>80），分位=99：
+        // 應由分位路徑升級為 EXTREME_OVERBOUGHT，且風險文案須標明是以自身分布判定。
+        var result = engine.evaluateStock(
+                v9StockWithBiasPercentile(true, "88", "90", "92", "90", "8", "99"));
+
+        assertEquals(TradingRadarRuleEngine.TimingState.EXTREME_OVERBOUGHT, result.timingState());
+        assertTrue(result.risks().stream().anyMatch(r -> r.contains("自身分布判定")));
+    }
+
+    @Test
+    void extremeOversold_firesViaPercentilePathAndDowngradesLowScoreAction() {
+        // bias=-8%（未達 -20 絕對門檻），KD 深度超賣（k=8/d=12→avg=10<20），分位=1：
+        // 沿用 v9CrashStock 的弱勢幾何使分數落在減碼／出場區（<40），藉此驗證分位路徑觸發的
+        // 極端超賣保護確實把動作由 REDUCE_CANDIDATE/EXIT_CANDIDATE 降級為 HOLD_CAUTION/WAIT，
+        // 對稱於買方的「超買否決買進」。
+        var held = engine.evaluateStock(crashStockWithBiasPercentile(true, "-8", "1"));
+        var notHeld = engine.evaluateStock(crashStockWithBiasPercentile(false, "-8", "1"));
+
+        assertTrue(held.score() < 40, "分數誠實反映弱勢（實算落在減碼／出場區），不因保護而灌水");
+        assertEquals(TradingRadarRuleEngine.TimingState.EXTREME_OVERSOLD, held.timingState());
+        assertEquals(TradingRadarRuleEngine.Action.HOLD_CAUTION, held.action());
+        assertEquals(TradingRadarRuleEngine.Action.WAIT, notHeld.action());
+        assertTrue(held.reasons().stream().anyMatch(r -> r.contains("自身分布判定")));
+    }
+
+    @Test
+    void extremeOverbought_doesNotUpgradeWhenPercentileMissing() {
+        // 分位 null＋bias=+8%（未達 20 絕對門檻）：即使 KD 過熱，仍只能判 OVERBOUGHT，
+        // 不得升級為 EXTREME——確保分位路徑缺值時不會意外放行（回歸）。
+        var result = engine.evaluateStock(v9Stock(true, "88", "90", "92", "90", "8", "0.60"));
+
+        assertEquals(TradingRadarRuleEngine.TimingState.OVERBOUGHT, result.timingState());
+    }
+
+    @Test
+    void extremeOverbought_stillFiresViaAbsoluteThresholdWhenPercentileMissing() {
+        // bias=+25%（達 20 絕對門檻）＋分位 null＋KD 過熱：絕對路徑須不受分位路徑新增影響，
+        // 獨立成立（回歸，對照 requirement_kdDeadCrossAloneMustNotProduceReduceAtOverbought）。
+        var result = engine.evaluateStock(v9Stock(true, "88", "90", "92", "90", "25", "0.60"));
+
+        assertEquals(TradingRadarRuleEngine.TimingState.EXTREME_OVERBOUGHT, result.timingState());
+    }
+
+    // ── Task 299 測試用 fixture ────────────────────────────────────────────────
+
+    /** v9Stock 為底，改用指定的季線乖離自身分位（可為 null）。 */
+    private TradingRadarRuleEngine.StockInput v9StockWithBiasPercentile(
+            boolean held, String k, String d, String prevK, String prevD,
+            String ma60Bias, String percentile) {
+        return withBiasAndPercentile(
+                v9Stock(held, k, d, prevK, prevD, ma60Bias, "0.60"), ma60Bias, percentile);
+    }
+
+    /** v9CrashStock 為底（week52=0.20），改用未達絕對門檻的乖離與指定的自身分位。 */
+    private TradingRadarRuleEngine.StockInput crashStockWithBiasPercentile(
+            boolean held, String ma60Bias, String percentile) {
+        return withBiasAndPercentile(v9CrashStock(held, "0.20"), ma60Bias, percentile);
+    }
+
+    /** 覆寫季線乖離與其自身分位，其餘欄位原封不動複製。 */
+    private TradingRadarRuleEngine.StockInput withBiasAndPercentile(
+            TradingRadarRuleEngine.StockInput base, String ma60Bias, String percentile) {
+        return new TradingRadarRuleEngine.StockInput(
+                base.held(), base.price(), base.changePercent(), base.completedChangePercent(),
+                base.indicators(), base.previousK(), base.previousD(),
+                base.ma20Confirmation(), base.ma60Confirmation(), base.ma240Confirmation(),
+                base.instrumentType(), base.marketRegime(), base.marketStale(), base.fxPercentile(),
+                new BigDecimal(ma60Bias), percentile == null ? null : new BigDecimal(percentile),
+                base.ma240BiasPercent(), base.week52Position(),
+                base.kdBandWidthPercent(), base.etfPremiumPct(), base.etfPremiumPercentile(),
+                base.weeklyMa(), base.extendedIndicators(), base.volumeRatio(), base.fundamental());
+    }
+
+    // ═══ Task 305：因子貢獻一次計算，兩軌各自加權 ═══════════════════════════════
+
+    /**
+     * 守護測試：因子齊全（含基本面、外幣、ETF 欄位）情境下，
+     * (a) 因子段文案兩軌必須逐位相同——證明兩軌讀的是同一份 {@code computeFactors} 結果，
+     * 而非各自重算一遍；(b) {@code score}／{@code shortScore} 分別等於以 V12 權重
+     * （t298 298.3）對同一組貢獻值手算的期望值，驗證「一次計算、兩軌加權」。
+     *
+     * <p>fixture 刻意讓 kdHeat=NORMAL、timing=NEUTRAL，且 TRIAL_BUY／profitTaking／
+     * 基本面惡化閘門皆不成立、兩軌分數都落在 HOLD／WATCH 的純分數映射區（不觸發
+     * {@code actionFor} 內任何會附加文案的分支）。此時 {@code describeHeat}、時機分位揭露、
+     * {@code actionFor} 對兩軌都不再附加任何句子，故 reasons()／risks() 應與
+     * shortReasons()／shortRisks() 完全相等，不必再自行切分「因子段」邊界。</p>
+     */
+    @Test
+    void factorContributions_areSharedAcrossBothHorizons() {
+        var input = factorCompleteStock();
+        var result = engine.evaluateStock(input);
+
+        // 前提：horizon 專屬分支（describeHeat／時機分位揭露／actionFor 文案）全數不觸發，
+        // 因子段才會等於兩軌輸出的全部內容，不必另外切分子字串。
+        assertEquals(TradingRadarRuleEngine.KdHeat.NORMAL, result.kdHeat());
+        assertEquals(TradingRadarRuleEngine.TimingState.NEUTRAL, result.timingState());
+        assertEquals(TradingRadarRuleEngine.Action.WATCH, result.action());
+        assertEquals(TradingRadarRuleEngine.Action.WATCH, result.shortAction());
+
+        // (a) 因子段文案兩軌逐位相同。
+        assertEquals(result.reasons(), result.shortReasons(),
+                "因子段 reasons 兩軌必須逐位相同（同一份 computeFactors 結果）");
+        assertEquals(result.risks(), result.shortRisks(),
+                "因子段 risks 兩軌必須逐位相同（同一份 computeFactors 結果）");
+
+        // (b) 18 因子貢獻值固定為下列已知值（由 fixture 的技術面／基本面／外幣／ETF 輸入導出）：
+        //   ma5=+1.0 ma20=+1.0 ma60=+1.0 ma240=+1.0 kdJ=+0.25 macd=+0.5 rsi=+0.5 bias=+0.5
+        //   volume=-1.0 market=+0.5 dayMove=+0.5 fx=+0.4 etfPremium=+0.6
+        //   eps=roe=revenue=pe=industry=+0.5
+        // 18 因子全部有值，兩軌有效權重總和皆為 1.0（即 SHORT/MEDIUM_WEIGHT_SUM），故
+        // sigma＝Σ(w×c)：
+        //   短期 Σ(w×c)＝0.05+0.06+0.04+0.02+0.14×0.25+0.08×0.5+0.06×0.5+0.07×0.5
+        //     +0.08×(-1)+0.09×0.5+0.04×0.5+0.04×0.4+0.03×0.6+0.03×0.5+0.03×0.5+0.04×0.5
+        //     +0.02×0.5+0.08×0.5 = 0.429 → score=round(50+50×0.429)=round(71.45)=71
+        //   中期 Σ(w×c)＝0.02+0.05+0.08+0.07+0.07×0.25+0.05×0.5+0.04×0.5+0.08×0.5
+        //     +0.05×(-1)+0.06×0.5+0.02×0.5+0.03×0.4+0.02×0.6+0.07×0.5+0.07×0.5+0.05×0.5
+        //     +0.05×0.5+0.12×0.5 = 0.5165 → score=round(50+50×0.5165)=round(75.825)=76
+        assertEquals(71, result.shortScore(), "短期軌以 SW_ 權重加權同一組貢獻值");
+        assertEquals(76, result.score(), "中期軌以 MW_ 權重加權同一組貢獻值");
+    }
+
+    /**
+     * Task 305 守護測試用：18 因子全部有值的完整 fixture（含基本面、外幣、ETF）。
+     *
+     * <p>completedChangePercent=-2.5（下跌）刻意使 {@code actionFor} 的 {@code stillFalling}
+     * 為真，讓兩軌買進閘門必然關閉、分數落在 HOLD／WATCH 的純分數映射區——這是讓
+     * {@code actionFor} 對兩軌都不附加任何文案的前提，見
+     * {@link #factorContributions_areSharedAcrossBothHorizons()} 的類上註解。</p>
+     */
+    private TradingRadarRuleEngine.StockInput factorCompleteStock() {
+        return new TradingRadarRuleEngine.StockInput(
+                false,
+                new BigDecimal("120"),
+                new BigDecimal("1"),
+                new BigDecimal("-2.5"),
+                new TradingRadarRuleEngine.Indicators(
+                        new BigDecimal("110"), new BigDecimal("100"), new BigDecimal("90"),
+                        new BigDecimal("60"), new BigDecimal("40")),
+                new BigDecimal("55"),
+                new BigDecimal("45"),
+                TradingRadarRuleEngine.Confirmation.ABOVE,
+                TradingRadarRuleEngine.Confirmation.ABOVE,
+                TradingRadarRuleEngine.Confirmation.ABOVE,
+                TradingRadarRuleEngine.InstrumentType.EQUITY,
+                TradingRadarRuleEngine.MarketRegime.RISK_ON,
+                false,
+                new BigDecimal("30"),
+                new BigDecimal("5"), null,
+                new BigDecimal("15"), new BigDecimal("0.5"),
+                new BigDecimal("8.0"),
+                new BigDecimal("1.0"), new BigDecimal("20"),
+                new BigDecimal("115"),
+                new TradingRadarRuleEngine.ExtendedIndicators(
+                        new BigDecimal("50"), null, null,
+                        null, null, null, null, new BigDecimal("0.3"),
+                        new BigDecimal("20"), new BigDecimal("30"),
+                        new BigDecimal("-6"), new BigDecimal("-8"), new BigDecimal("2"),
+                        new BigDecimal("50")),
+                new BigDecimal("1.5"),
+                new TradingRadarRuleEngine.FundamentalInput(true, 0.5, 0.5, 0.5, 0.5, 0.5, false));
     }
 
     private List<BigDecimal> closesDescending(int size, int start) {

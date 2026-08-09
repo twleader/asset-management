@@ -4502,6 +4502,20 @@ TradingRadarView（雙分頁：台股／美股，比照 WatchStockView.vue 的 m
 
 **明確不在本次範圍：** 英股（無資料源規劃）、美股 ETF 折溢價因子（`etf_nav_history` 現況已有既有 Task 214/215 寫入的美股列，本次**必須明確短路排除**，不是「天生沒資料」）、美股基本面歷史回補（比照台股「自上線起累積」，即使 SEC EDGAR 理論上可一次回補多年歷史）、IXIC 即時盤中報價（美股組市場情境僅用完成日資料）、SOX 作為獨立第二組美股大盤 regime。
 
+### 因子同源修正、極端時機分位化、通知冷卻與評估效能（Requirement 43／44，Task 297–305，`TW_RULES_V12`）
+
+2026-08-09 對雷達分析邏輯全面檢視後的一波修正，單次 `TW_RULES_V12` 升版交付。精確權重與門檻數字只存於 t297–t305 任務檔與引擎具名常數，本節不複寫數字，避免第三份漂移。
+
+**因子同源修正（t297／t298）：** `shouldAddLiveRow` 的「今日」改以 `MarketZones.resolve(market)` 解析標的市場時區後取 `decisionInstant` 當地日期——修正美股下半場（台北凌晨）live K 不併入、`price` 卻已用 live 價的 as-of 混搭（Task 252 同類修正的雷達組裝路徑補完）。BIAS 因子移除代數相依的 `b10b20` 分量；W%R 併入 KD/J 因子作第四分量、獨立權重刪除（`W%R9 = 100 − RSV9` 恆等式，與 KD 同源）；MACD 因子由 `signum(osc)` 改為 OSC 對現價百分比的線性正規化，消除零軸硬翻轉造成的分數抖動。因子貢獻仍全部是純函式回傳 `Double`／`null`，`Accumulator` 仍是唯一缺值重分配點。
+
+**極端時機分位化（t299）：** `RadarInputAssembler` 對同一還原序列逐完成日計算季線乖離分布，輸出現行乖離的自身分位（樣本不足回 null）；`timingOf` 的 `EXTREME_OVERBOUGHT`／`EXTREME_OVERSOLD` 改為「絕對門檻**或**自身分位」二擇一路徑，使高檔獲利了結與極端超賣保護對低波動標的（債券 ETF、大盤型 ETF）真正可達。中層 `OVERBOUGHT`／`OVERSOLD` 維持絕對門檻——中層直接關買進閘門，分位化會讓低波動標的常態性被擋買，與修訂目的相反。分位由 assembler 自動計算；`BacktestService` 的 `StockInput` 是逐參數手動建構，須同步加傳新欄位（t299.5），漏傳即 production 與回測分岔且無報錯。本項與 Requirement 57／t274（σ 正規化門檻，未實作）處理同一缺陷：本項為過渡措施、只動 EXTREME 側，t274 實作時須明訂整併方式，不得兩份處方並立。
+
+**通知冷卻與效能（t301／t302）：** `trading_radar_notification_state` 新增 `last_notified_at`（v1.91.0），同一 setting 同一 state_code 於冷卻窗內不重複寄送；冷卻只擋 email，不影響基準更新——引擎維持純函數，抖動抑制由「OSC 幅度化＋通知冷卻」兩端承擔，刻意不做分數遲滯（遲滯需要前一輪狀態，破壞回測可重現性）。`TradingRadarMarketContextService` 拆出 `resolveMarket(decisionInstant)`（bounded 查詢，委派既有純函數 `resolveMarketFromRows`），`resolve()` = `resolveMarket` ＋ 新聞；`TradingRadarNotificationService.flushEvaluations` 每輪對出現的每個市場只組一次大盤狀態，通知路徑不再發出被棄置的新聞查詢。
+
+**其餘（t300／t303／t304／t305）：** ROE 標度放緩（`fundamentalDeteriorating` 組合門檻不變）；`assemble` 單次請求內以幣別 memoize `FxContext`（不引入跨 request 快取）；`taiexKd`／`nasdaqKd` 刪除、指數 KD 統一走 `kdSeriesAsc` 單趟（bit-identical，前綴相依論證見 `computeFromSeries` 註解）；雙軌因子貢獻與文案一次計算、兩軌各自加權（輸出逐位不變）。
+
+**明確不在本次範圍：** 大盤 `evaluateMarket` 與個股雙軌方法論統一（regime 是全部個股買進閘門的上游，回歸風險不成比例）；K>85 過熱否決門檻（使用者明示的風險偏好取捨，非實證，已明文記載）。新引入的門檻（OSC 全幅與文案門檻、乖離分位與最少樣本、ROE 斜率、冷卻分鐘數）皆無量測依據，比照 Requirement 56 記載為判斷性取值。
+
 ### 逆勢抄底狀態（獨立第二軌）
 
 `CounterTrendState` 為 `NONE`／`OVERSOLD_WATCH`／`TRIAL_CANDIDATE`。`evaluateCounterTrend(StockInput)` 只在個股完整資料通過後執行，不對原分數加減分，也不覆寫主 `Action`：

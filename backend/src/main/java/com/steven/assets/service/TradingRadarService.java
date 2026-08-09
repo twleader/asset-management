@@ -16,6 +16,7 @@ import com.steven.assets.repository.StockRepository;
 import com.steven.assets.repository.TwseIndexDailyHistoryRepository;
 import com.steven.assets.repository.UsIndexDailyHistoryRepository;
 import com.steven.assets.security.CurrentUserContext;
+import com.steven.assets.util.MarketZones;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -105,6 +106,18 @@ public class TradingRadarService {
             boolean stale
     ) {}
 
+    /**
+     * 通知路徑用的大盤快照（Task 302）：{@link #buildMarketSnapshot} 每輪每個市場只組一次，
+     * 供 {@code TradingRadarNotificationService#flushEvaluations} 批次共用，取代逐檔各自
+     * 重建大盤。只帶個股評分需要的三個欄位——不像 {@link MarketState} 還帶頁面用的 DTO summary，
+     * 通知路徑用不到。
+     */
+    public record MarketSnapshot(
+            TradingRadarRuleEngine.MarketRegime regime,
+            boolean stale,
+            Instant decisionInstant
+    ) {}
+
     private record Target(String code, String market, boolean held) {}
 
     /**
@@ -181,11 +194,14 @@ public class TradingRadarService {
         loadLatestHoldings(targets, skippedNonTw, ownerId);
         loadWatchList(targets, skippedNonTw, ownerId);
 
+        // Task 303：同一次 assemble() 內同幣別的 FxContext 只解析一次（20 檔美股原本各自重查 5 年
+        // 匯率）。stream 目前循序執行，但用 ConcurrentHashMap 防未來並行化踩雷。
+        Map<String, TradingRadarMarketContextService.FxContext> fxCache = new java.util.concurrent.ConcurrentHashMap<>();
         List<TradingRadarDto.StockDecision> decisions = targets.values().stream()
                 .filter(t -> (TW_MARKET.equals(t.market()) || US_MARKET.equals(t.market()))
                         && !TAIEX_CODE.equals(t.code()))
                 .map(t -> buildStock(t, regimeFor(t.market(), twMarket, usMarket),
-                        staleFor(t.market(), twMarket, usMarket), decisionInstant))
+                        staleFor(t.market(), twMarket, usMarket), decisionInstant, fxCache))
                 .sorted(Comparator
                         .comparing(TradingRadarService::bestScore,
                                 Comparator.nullsLast(Comparator.reverseOrder()))
@@ -217,20 +233,49 @@ public class TradingRadarService {
      * <p>依傳入的 {@code market} 只組裝對應的那一組大盤（Task 294.6），確保背景通知評估與前景頁面
      * 對同一檔美股股票算出一致的結果——不像 {@link #assemble} 兩組都要（供其餘標的使用），
      * 這裡只評估單一標的，另一組大盤用不到。</p>
+     *
+     * <p>委派 {@link #buildMarketSnapshot} ＋ 四參數 overload（Task 302）：本方法每次呼叫仍各自
+     * 重建一次大盤，供單檔呼叫端（如手動觸發、單檔測試）使用；批次省重算靠呼叫端（見
+     * {@code TradingRadarNotificationService#flushEvaluations}）自行對每個市場只組一次
+     * {@link MarketSnapshot} 後改呼叫四參數版本。</p>
      */
     @Transactional(readOnly = true)
     public TradingRadarDto.StockDecision evaluateForNotification(
             String stockCode, String market, boolean held) {
-        Instant decisionInstant = Instant.now();
+        return evaluateForNotification(stockCode, market, held, buildMarketSnapshot(market));
+    }
+
+    /**
+     * 批次版（Task 302）：呼叫端已組好 {@link MarketSnapshot}（每輪每市場一次），本方法只負責
+     * 組單一標的的個股決策，不再重建大盤。
+     */
+    @Transactional(readOnly = true)
+    public TradingRadarDto.StockDecision evaluateForNotification(
+            String stockCode, String market, boolean held, MarketSnapshot snapshot) {
+        return buildStock(new Target(stockCode, market, held), snapshot.regime(), snapshot.stale(),
+                snapshot.decisionInstant(), new java.util.HashMap<>());
+    }
+
+    /**
+     * 通知路徑的大盤快照組裝入口（Task 302）：依 {@code market} 組對應的那一組大盤，供呼叫端
+     * 對每輪出現的每個市場只呼叫一次，取代逐檔 {@code evaluateForNotification} 各自重建大盤的
+     * 既有浪費。台股改走 bounded 的 {@link TradingRadarMarketContextService#resolveMarket}
+     * （不再抓新聞，見該方法）；美股維持既有 IXIC 組裝。{@link #buildMarket}／{@link #buildUsMarket}
+     * 既有 catch 保證失敗回 {@code DATA_INCOMPLETE + stale=true} 而非拋出，故本方法本身不需要
+     * 額外 try/catch——呼叫端（{@code flushEvaluations} 的 {@code computeIfAbsent}）位於逐檔
+     * catch 之外，不容許例外逸出。
+     */
+    @Transactional(readOnly = true)
+    public MarketSnapshot buildMarketSnapshot(String market) {
+        Instant now = Instant.now();
         MarketState marketState;
         if (US_MARKET.equals(market)) {
-            marketState = buildUsMarket(decisionInstant);
+            marketState = buildUsMarket(now);
         } else {
-            TradingRadarMarketContextService.Resolved context = marketContextService.resolve(decisionInstant);
-            marketState = buildMarket(context.market(), decisionInstant);
+            TradingRadarMarketContextService.MarketContext context = marketContextService.resolveMarket(now);
+            marketState = buildMarket(context, now);
         }
-        return buildStock(new Target(stockCode, market, held), marketState.regime(), marketState.stale(),
-                decisionInstant);
+        return new MarketSnapshot(marketState.regime(), marketState.stale(), now);
     }
 
     private MarketState buildMarket(
@@ -408,7 +453,8 @@ public class TradingRadarService {
             Target target,
             TradingRadarRuleEngine.MarketRegime marketRegime,
             boolean marketStale,
-            Instant decisionInstant) {
+            Instant decisionInstant,
+            Map<String, TradingRadarMarketContextService.FxContext> fxCache) {
         Optional<Stock> stock = stockRepo.findByCodeAndMarket(target.code(), target.market());
         String name = stock.map(Stock::getName)
                 .filter(n -> n != null && !n.isBlank())
@@ -448,7 +494,7 @@ public class TradingRadarService {
             String currency = underlyingCurrencyOf(stock.orElse(null), target.market());
             TradingRadarMarketContextService.FxContext fx = TWD.equals(currency)
                     ? TradingRadarMarketContextService.FxContext.EMPTY
-                    : marketContextService.resolveFx(currency, decisionInstant);
+                    : fxCache.computeIfAbsent(currency, c -> marketContextService.resolveFx(c, decisionInstant));
             BigDecimal fxPct = fx.percentile();
             BigDecimal ma60Bias = technical.ma60BiasPercent();
             BigDecimal ma240Bias = technical.ma240BiasPercent();
@@ -474,6 +520,7 @@ public class TradingRadarService {
                             marketStale,
                             fxPct,
                             ma60Bias,
+                            technical.ma60BiasPercentile(),
                             ma240Bias,
                             week52Pos,
                             technical.kdBandWidthPercent(),
@@ -575,7 +622,7 @@ public class TradingRadarService {
             Instant decisionInstant) {
         List<StockPriceHistory> combined = new ArrayList<>(completedRows);
         boolean liveAdded = liveOpt
-                .filter(live -> shouldAddLiveRow(completedRows, live, decisionInstant))
+                .filter(live -> shouldAddLiveRow(completedRows, live, decisionInstant, target.market()))
                 .isPresent();
         if (liveAdded) {
             combined.add(0, liveRow(target, liveOpt.orElseThrow()));
@@ -592,10 +639,25 @@ public class TradingRadarService {
                 price);
     }
 
-    private boolean shouldAddLiveRow(
+    /**
+     * live K 是否併入序列：tradingDate 須等於「{@code market} 對應時區的今日」，且尚未等於完成列最新一筆。
+     *
+     * <p>「今日」必須以標的市場時區解讀 {@code decisionInstant}，不得用固定台北時區——美股在台北
+     * 00:00–05:00 正是美東前一交易日下半場至收盤，此時美東日期＝台北日期−1，用台北時區比對
+     * 恆失敗（Task 297，同類修法見 {@link TechnicalIndicatorService#computeAll}／Task 252）。
+     * 刻意不用 {@link MarketZones#today}（內部讀系統時鐘）：本方法所有時間判斷須全部來自顯式傳入的
+     * {@code decisionInstant}，維持背景重算（{@code recomputeAndStoreForOwner}）與 HTTP 路徑
+     * 共用同一 {@code decisionInstant} 語意的純度契約。</p>
+     *
+     * <p>package-private 供同 package 測試以寫死的 {@code Instant} 直接呼叫——{@code assemble}／
+     * {@code evaluateForNotification} 的 {@code decisionInstant = Instant.now()} 無 Clock 注入，
+     * 服務層級測試無法控制時刻。</p>
+     */
+    boolean shouldAddLiveRow(
             List<StockPriceHistory> completedRows,
             PriceQueryService.LivePrice live,
-            Instant decisionInstant) {
+            Instant decisionInstant,
+            String market) {
         if (live.tradingDate() == null || live.price() == null) return false;
         LocalDate liveDate;
         try {
@@ -603,7 +665,7 @@ public class TradingRadarService {
         } catch (Exception e) {
             return false;
         }
-        LocalDate today = decisionInstant.atZone(TAIPEI).toLocalDate();
+        LocalDate today = decisionInstant.atZone(MarketZones.resolve(market)).toLocalDate();
         return liveDate.equals(today)
                 && (completedRows.isEmpty()
                     || !liveDate.equals(completedRows.get(0).getTradingDate()));

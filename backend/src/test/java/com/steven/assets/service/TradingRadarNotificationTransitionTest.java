@@ -4,6 +4,8 @@ import com.steven.assets.model.StockHolding;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 
@@ -77,5 +79,34 @@ class TradingRadarNotificationTransitionTest {
         assertTrue(TradingRadarNotificationService.isHeld(holdings, "009804", "台股"));
         assertFalse(TradingRadarNotificationService.isHeld(holdings, "009804", "美股"));
         assertFalse(TradingRadarNotificationService.isHeld(holdings, "2330", "台股"));
+    }
+
+    // --- Task 301：通知冷卻純函式（同一語意群，冷卻只擋 email，不影響本檔既有的轉入語意測試） ---
+
+    @Test
+    void cooldownActiveIsFalseWhenNeverNotified() {
+        assertFalse(TradingRadarNotificationService.cooldownActive(null, Instant.now()));
+    }
+
+    @Test
+    void cooldownActiveWithin59MinutesIsTrue() {
+        Instant now = Instant.now();
+        assertTrue(TradingRadarNotificationService.cooldownActive(
+                now.minus(Duration.ofMinutes(59)), now));
+    }
+
+    @Test
+    void cooldownActiveAfter61MinutesIsFalse() {
+        Instant now = Instant.now();
+        assertFalse(TradingRadarNotificationService.cooldownActive(
+                now.minus(Duration.ofMinutes(61)), now));
+    }
+
+    /** 恰 60 分為邊界：{@code compareTo(NOTIFY_COOLDOWN) < 0} 排除相等，冷卻視為已過。 */
+    @Test
+    void cooldownActiveAtExactly60MinutesIsFalse() {
+        Instant now = Instant.now();
+        assertFalse(TradingRadarNotificationService.cooldownActive(
+                now.minus(Duration.ofMinutes(60)), now));
     }
 }
