@@ -350,6 +350,7 @@ public class BacktestService {
                 false,                 // 歷史日一律非 stale：完成日 K 就是當日的最終值
                 fxPct,
                 a.ma60BiasPercent(),
+                a.ma60BiasPercentile(),
                 a.ma240BiasPercent(),
                 a.week52Position(),
                 a.kdBandWidthPercent(),

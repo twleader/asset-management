@@ -296,8 +296,17 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 290 | 台股官方收盤逐檔對帳與盤後顯示防呆（Requirement 7） | [tasks/t290_tw_official_close_reconciliation.md](tasks/t290_tw_official_close_reconciliation.md) |
 | 291 | 今日交易雷達改為一週至六個月的獲利機會雙軌評分，納入完整技術指標、量能、美股科技、台美公開資訊與債券 ETF 匯率（Requirement 43／59／60） | [tasks/t291_trading_radar_profit_horizon.md](tasks/t291_trading_radar_profit_horizon.md) |
 | 292 | 今日交易雷達個股納入財報／基本面與全市場產業營收發展（`TW_RULES_V11`，取代 t266／t267） | [tasks/t292_radar_fundamental_industry.md](tasks/t292_radar_fundamental_industry.md) |
+| 297 | 交易雷達美股 live K 併入判定改用標的市場時區（`TW_RULES_V12` 波，Requirement 43） | [tasks/t297_radar_us_live_row_market_zone.md](tasks/t297_radar_us_live_row_market_zone.md) |
+| 298 | 規則引擎因子同源修正（BIAS／W%R／OSC）與 `TW_RULES_V12` 升版（Requirement 43） | [tasks/t298_radar_factor_dedup_osc_v12.md](tasks/t298_radar_factor_dedup_osc_v12.md) |
+| 299 | 極端時機門檻增加季線乖離自身分位替代路徑（`TW_RULES_V12` 波，Requirement 43） | [tasks/t299_radar_bias_percentile_extremes.md](tasks/t299_radar_bias_percentile_extremes.md) |
+| 300 | 近似 ROE 標度放緩（斜率 5 → 10；`TW_RULES_V12` 波，Requirement 43／46） | [tasks/t300_fundamental_roe_scale.md](tasks/t300_fundamental_roe_scale.md) |
+| 301 | 交易雷達通知冷卻：同一 setting 同一狀態 60 分鐘內不重複寄送（Requirement 44） | [tasks/t301_radar_notification_cooldown.md](tasks/t301_radar_notification_cooldown.md) |
+| 302 | 通知評估效能：每輪每市場只組一次大盤、市場脈絡 bounded 查詢、通知路徑不抓新聞（Requirement 43／44） | [tasks/t302_radar_notification_market_once.md](tasks/t302_radar_notification_market_once.md) |
+| 303 | 匯率分位 request 內 memoize（Requirement 43／47） | [tasks/t303_radar_fx_memoize.md](tasks/t303_radar_fx_memoize.md) |
+| 304 | 指數 KD 遞迴整併：taiexKd／nasdaqKd 刪除、統一走 kdSeriesAsc 單趟（Requirement 43） | [tasks/t304_indicator_kd_recursion_unify.md](tasks/t304_indicator_kd_recursion_unify.md) |
+| 305 | 雙軌因子貢獻一次計算（輸出逐位不變）＋整波部署驗證（Requirement 43） | [tasks/t305_radar_factor_compute_once.md](tasks/t305_radar_factor_compute_once.md) |
 
-> **註：本索引表僅列至 228、264–267、269–279 與 280–291；Task 229–263 與 268 未登錄於本表，以 `spec/tasks/tNNN_*.md` 檔案本身為準。**
+> **註：本索引表僅列至 228、264–267、269–279、280–292 與 297–305；Task 229–263、268 與 293–296 未登錄於本表，以 `spec/tasks/tNNN_*.md` 檔案本身為準。**
 
 > **Task 222–225 已全部被 t264／t265／t292 取代（見上表），保留僅作為決策記錄，一律不得依其實作。**
 >

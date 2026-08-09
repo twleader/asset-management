@@ -386,9 +386,9 @@ class BacktestServiceTest {
     // ─────────────────────────── (i) 回歸 ───────────────────────────
 
     @Test
-    @DisplayName("Task 292 回測與 production 共用 TW_RULES_V11")
-    void ruleVersionIsV11() {
-        assertThat(TradingRadarRuleEngine.RULE_VERSION).isEqualTo("TW_RULES_V11");
+    @DisplayName("Task 292 回測與 production 共用 TW_RULES_V12")
+    void ruleVersionIsV12() {
+        assertThat(TradingRadarRuleEngine.RULE_VERSION).isEqualTo("TW_RULES_V12");
     }
 
     @Test

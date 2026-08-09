@@ -309,6 +309,10 @@ public class FundamentalAnalysisService {
         return factor(yoy, clampUnit(yoy.doubleValue() / 20.0), recent);
     }
 
+    /**
+     * 斜率 10（Task 300）：±1 對應 ROE 0%／20%，−0.8（deteriorating severe 線）對應 ROE 2%；
+     * 斜率為判斷性取值、無回測依據。中心維持 10%。
+     */
     Factor roeFactor(List<FinancialRow> rows, LocalDate decisionDate) {
         List<FinancialRow> recent = consecutive(rows, 4, FinancialRow::periodIndex);
         if (recent.size() < 4 || !financialFresh(recent.get(0), decisionDate)
@@ -317,7 +321,7 @@ public class FundamentalAnalysisService {
                 .map(r -> standalone(r, rows, FinancialRow::income)).toList();
         BigDecimal roe = approximateRoePct(standalone, recent.get(0).equity());
         if (roe == null) return null;
-        return factor(roe, clampUnit((roe.doubleValue() - 10.0) / 5.0), recent);
+        return factor(roe, clampUnit((roe.doubleValue() - 10.0) / 10.0), recent);
     }
 
     Factor revenueFactor(List<RevenueRow> rows, LocalDate decisionDate) {

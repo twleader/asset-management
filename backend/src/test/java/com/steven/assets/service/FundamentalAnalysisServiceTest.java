@@ -206,6 +206,31 @@ class FundamentalAnalysisServiceTest {
         assertFalse(nullCode.get(decision).applicable());
     }
 
+    // ── Task 300：近似 ROE 標度放緩（斜率 5 → 10）──────────────────────────
+
+    /**
+     * 測試 (a)(b)(c)(d)(e)：roeFactor() 斜率 10 下的 ROE→contribution 映射。
+     * (c) 與 (e) 是門檻邊界值：(c) −0.8 對應 fundamentalDeteriorating() 的 severe 線，
+     * (e) −0.5 對應其 peLoss 組合線；兩門檻本身不變（本任務不動），只有其對應的 ROE 水位變了。
+     */
+    @Test
+    void roeFactorAppliesSlopeOfTenCenteredAtTenPercent() {
+        FundamentalAnalysisService service = new FundamentalAnalysisService(null, null, null);
+        LocalDate decision = LocalDate.of(2025, 12, 31);
+
+        assertEquals(1.0, service.roeFactor(roeQuarters(bd(50), bd(1000)), decision).contribution(), 1e-9,
+                "(a) ROE 20% → +1.0");
+        assertEquals(0.0, service.roeFactor(roeQuarters(bd(25), bd(1000)), decision).contribution(), 1e-9,
+                "(b) ROE 10% → 0.0");
+        assertEquals(-0.8, service.roeFactor(roeQuarters(bd(5), bd(1000)), decision).contribution(), 1e-9,
+                "(c) ROE 2% → -0.8（deteriorating severe 線）");
+        assertEquals(-1.0, service.roeFactor(roeQuarters(bd(0), bd(1000)), decision).contribution(), 1e-9,
+                "(d) ROE 0% → -1.0");
+        assertEquals(-0.5,
+                service.roeFactor(roeQuarters(new BigDecimal("12.5"), bd(1000)), decision).contribution(), 1e-9,
+                "(e) ROE 5% → -0.5（peLoss 組合門檻的新對應水位）");
+    }
+
     private record TestRow(
             String value,
             List<String> urls,
@@ -224,6 +249,23 @@ class FundamentalAnalysisServiceTest {
                     year, quarter, BigDecimal.valueOf(quarter * 2L),
                     BigDecimal.valueOf(quarter * 100L), BigDecimal.valueOf(10_000),
                     provider, List.of("https://example.test/financial"), Instant.EPOCH, Instant.EPOCH));
+        }
+        return rows;
+    }
+
+    /**
+     * 建構單一年度 4 季（Q1–Q4，遞減排序）、每季單季淨利皆為 {@code quarterlyNetIncome} 的
+     * FinancialRow 列表——年度累計值取 quarter × quarterlyNetIncome，使 standalone() 逐季相減
+     * 後每季還原為同一個值，讓 approximateRoePct() 的四季合＝4 × quarterlyNetIncome，方便
+     * 用單一參數精確控制 roeFactor() 要餵入的 ROE 百分比。
+     */
+    private static List<FundamentalAnalysisService.FinancialRow> roeQuarters(
+            BigDecimal quarterlyNetIncome, BigDecimal equity) {
+        List<FundamentalAnalysisService.FinancialRow> rows = new ArrayList<>();
+        for (int quarter = 4; quarter >= 1; quarter--) {
+            rows.add(new FundamentalAnalysisService.FinancialRow(
+                    2025, quarter, BigDecimal.ZERO, quarterlyNetIncome.multiply(BigDecimal.valueOf(quarter)),
+                    equity, "EXCHANGE", List.of("https://example.test/financial"), Instant.EPOCH, Instant.EPOCH));
         }
         return rows;
     }

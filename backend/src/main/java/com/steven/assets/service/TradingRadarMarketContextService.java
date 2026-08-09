@@ -56,6 +56,18 @@ public class TradingRadarMarketContextService {
     private static final int FX_MIN_SAMPLES = 600;
     private static final int FX_LOOKBACK_YEARS = 5;
     private static final int MAX_CALENDAR_LOOKBACK = 20;
+    /**
+     * {@link #resolveMarket} 的台股 bounded 查詢筆數（Task 302，取代舊版全表掃描）。
+     * {@code resolveMarketFromRows} 只用最新一筆＋前 {@link #RATIO_LOOKBACK}（20）個正量能日
+     * 與漲跌用前一列；60 筆為假日與缺量能列留餘裕。
+     */
+    private static final int MARKET_TW_BOUNDED_ROWS = 60;
+    /**
+     * {@link #resolveMarket} 的 IXIC／SOX 各自 bounded 查詢筆數。{@link #resolveUsTech} 只需
+     * 最新共同日＋各自嚴格前一筆，且共同日距 decision instant 超過 5 個日曆日整組即 unavailable，
+     * 15 筆已足夠、遠小於 {@link #MARKET_TW_BOUNDED_ROWS}。
+     */
+    private static final int MARKET_US_BOUNDED_ROWS = 15;
 
     private final TwseIndexDailyHistoryRepository twseRepo;
     private final UsIndexDailyHistoryRepository usIndexRepo;
@@ -92,17 +104,7 @@ public class TradingRadarMarketContextService {
         if (decisionInstant == null) {
             return new Resolved(MarketContext.EMPTY, List.of());
         }
-        MarketContext market;
-        try {
-            List<UsIndexDailyHistory> usRows = new ArrayList<>();
-            usRows.addAll(usIndexRepo.findByIndexCodeOrderByTradingDateAsc("IXIC"));
-            usRows.addAll(usIndexRepo.findByIndexCodeOrderByTradingDateAsc("SOX"));
-            market = resolveMarketFromRows(
-                    decisionInstant, twseRepo.findAllByOrderByTradingDateAsc(), usRows);
-        } catch (Exception e) {
-            log.warn("交易雷達市場脈絡讀取失敗：{}", e.toString());
-            market = MarketContext.EMPTY;
-        }
+        MarketContext market = resolveMarket(decisionInstant);
 
         List<TradingRadarDto.PublicInformationItem> publicInformation;
         try {
@@ -112,6 +114,32 @@ public class TradingRadarMarketContextService {
             publicInformation = List.of();
         }
         return new Resolved(market, publicInformation);
+    }
+
+    /**
+     * Bounded 版市場 as-of 入口（Task 302）：只查最新所需筆數，取代 {@link #resolve} 舊版對台股
+     * 與美股指數全表掃描（10 年 ×250 筆／IXIC／SOX 全史）。委派既有純函數
+     * {@link #resolveMarketFromRows}，本體與簽章不動，故回測（走全表掃描版本）不受影響。
+     *
+     * <p>Fail-soft：bounded 查詢或委派計算失敗一律回 {@link MarketContext#EMPTY} 並記警告，
+     * 不拋出——{@link TradingRadarService#buildMarketSnapshot} 經由本方法組裝通知路徑的批次
+     * 大盤快照，該呼叫站在 {@code TradingRadarNotificationService#flushEvaluations} 逐檔 catch
+     * 之外，DB 例外絕不可逸出整輪 flush。</p>
+     */
+    public MarketContext resolveMarket(Instant decisionInstant) {
+        if (decisionInstant == null) return MarketContext.EMPTY;
+        try {
+            List<UsIndexDailyHistory> usRows = new ArrayList<>();
+            usRows.addAll(usIndexRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", MARKET_US_BOUNDED_ROWS));
+            usRows.addAll(usIndexRepo.findTopNByIndexCodeOrderByTradingDateDesc("SOX", MARKET_US_BOUNDED_ROWS));
+            return resolveMarketFromRows(
+                    decisionInstant,
+                    twseRepo.findTopNByOrderByTradingDateDesc(MARKET_TW_BOUNDED_ROWS),
+                    usRows);
+        } catch (Exception e) {
+            log.warn("交易雷達市場脈絡讀取失敗：{}", e.toString());
+            return MarketContext.EMPTY;
+        }
     }
 
     /**

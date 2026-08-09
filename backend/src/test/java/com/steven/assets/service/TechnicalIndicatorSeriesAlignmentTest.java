@@ -491,7 +491,8 @@ class TechnicalIndicatorSeriesAlignmentTest {
     }
 
     /**
-     * 大盤 core（taiexKd）與 extended（映射後走 kdSeriesAsc）必須自洽。
+     * 大盤 core（{@code FullIndicators.k()/d()}）與 extended（映射後走 kdSeriesAsc）必須自洽；
+     * Task 304 起兩者同源自同一份 kdSeriesAsc 單趟結果（taiexKd 已刪除）。
      * <b>不可只斷言 rsv 非 null 或 100−rsv==wr9</b>：前者在 highest==lowest 時恆回 50、後者是實作定義本身，
      * 兩條都偵測不到「映射漏抄 highPoint／lowPoint」或「餵錯清單」。
      */

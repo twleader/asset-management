@@ -38,6 +38,15 @@ public class RadarInputAssembler {
     /** 相對量分母取先前 20 個正成交量完成日，至少 10 筆才採用（Task 291）。 */
     private static final int VOLUME_LOOKBACK = 20;
     private static final int VOLUME_MIN_SAMPLES = 10;
+    /** 季線乖離分位逐日回算所用的均線視窗天數；與 {@code quarterlyMa} 同義但為獨立計算（Task 299）。 */
+    private static final int MA60_WINDOW = 60;
+    /**
+     * 季線乖離自身分位的最少有效觀測數（Task 299）。
+     *
+     * <p><b>判斷性取值，無回測依據</b>：240 個交易日（近一年）扣掉 60 日暖機後最多約 181 筆觀測，
+     * 120 筆略多於半年，用以避免樣本過少時分位失去統計意義；未曾以回測校準此數字。</p>
+     */
+    private static final int BIAS_PCT_MIN_SAMPLES = 120;
 
     private final TechnicalIndicatorService indicatorService;
     private final DistributionAdjustedPriceService adjustedPriceService;
@@ -53,6 +62,9 @@ public class RadarInputAssembler {
      * @param ruleChangePercent    規則內部用的單日漲跌幅（還原價基）；前收缺值時為 null，
      *                             呼叫端自行決定是否 fallback 至市場報價漲跌幅。
      * @param volumeRatio          最新完成日還原成交量 ÷ 之前 20 個正成交量日中位數；分母排除最新日。
+     * @param ma60BiasPercentile   {@code ma60BiasPercent} 在自身近一年分布中的分位（0–100），
+     *                             供極端超買／超賣的分位路徑使用（Task 299）；有效觀測不足
+     *                             {@link #BIAS_PCT_MIN_SAMPLES} 筆或 {@code ma60BiasPercent} 為 null 時為 null。
      */
     public record Assembled(
             TechnicalIndicatorService.FullIndicators indicators,
@@ -68,6 +80,7 @@ public class RadarInputAssembler {
             TradingRadarRuleEngine.Confirmation ma60Confirmation,
             TradingRadarRuleEngine.Confirmation ma240Confirmation,
             BigDecimal ma60BiasPercent,
+            BigDecimal ma60BiasPercentile,
             BigDecimal ma240BiasPercent,
             BigDecimal week52Position,
             BigDecimal ruleChangePercent,
@@ -79,7 +92,7 @@ public class RadarInputAssembler {
                 TradingRadarRuleEngine.Confirmation.UNAVAILABLE,
                 TradingRadarRuleEngine.Confirmation.UNAVAILABLE,
                 TradingRadarRuleEngine.Confirmation.UNAVAILABLE,
-                null, null, null, null, null);
+                null, null, null, null, null, null);
     }
 
     /**
@@ -133,6 +146,11 @@ public class RadarInputAssembler {
         BigDecimal kdBandWidthPercent = bandWidthPercent(
                 adjustedRows.subList(0, Math.min(adjustedRows.size(), KD_BAND_ROWS)));
 
+        // Task 299：現行乖離＝同一組還原序列算出的 live 價基乖離，分位在此之後才求值，
+        // 使兩者恆為同一輸入的兩種摘要，不會各自漂移。
+        BigDecimal ma60Bias = biasPercent(price, indicators.quarterlyMa());
+        BigDecimal ma60BiasPct = ma60BiasPercentile(adjustedRows, firstCompleted, ma60Bias);
+
         return new Assembled(
                 indicators,
                 adjustedRows,
@@ -146,7 +164,8 @@ public class RadarInputAssembler {
                 ruleEngine.confirm(completedCloses, 20),
                 ruleEngine.confirm(completedCloses, 60),
                 ruleEngine.confirm(completedCloses, FULL_WINDOW),
-                biasPercent(price, indicators.quarterlyMa()),
+                ma60Bias,
+                ma60BiasPct,
                 biasPercent(price, indicators.annualMa()),
                 week52Position(price, week52High, week52Low),
                 changePercent(price, previousAdjustedClose),
@@ -237,6 +256,55 @@ public class RadarInputAssembler {
         return price.subtract(ma)
                 .divide(ma, 8, RoundingMode.HALF_UP)
                 .multiply(BigDecimal.valueOf(100));
+    }
+
+    /**
+     * 季線乖離在自身近一年分布中的分位（0–100），供極端超買／超賣的分位路徑使用（Task 299）。
+     *
+     * <p>逐日回算「當日收盤對當日 MA60 的乖離」：第 i 日（{@code adjustedRowsDesc} 的降序索引）
+     * 的 MA60 取 {@code adjustedRowsDesc[i..i+59]} 共 60 筆收盤均值（與 {@link #biasPercent} 同式，
+     * 含當日自身），不足 60 筆的日子不產生觀測值；{@code firstCompleted} 之前的列（如 live K）
+     * 不進入觀測分布，與 {@code completedCloses} 同一起點。均線以 rolling sum 遞增，全程 O(n)、
+     * 不查 DB。有效觀測數低於 {@link #BIAS_PCT_MIN_SAMPLES} 或現行乖離為 null 時回 null。</p>
+     *
+     * <p>抽成 public 純方法（比照 {@link #volumeRatio}／{@link #bandWidthPercent}）是刻意的：
+     * 測試可直接餵序列驗證，不必為了走 {@link #assemble} 而 stub
+     * {@code DistributionAdjustedPriceService.adjust}／{@code TechnicalIndicatorService.computeFromSeries}。</p>
+     *
+     * @param adjustedRowsDesc   還原後序列（降序，新到舊），與 {@code assemble} 內部同一份。
+     * @param firstCompleted     第一筆完成日的索引（{@code liveAdded ? 1 : 0}）。
+     * @param currentBiasPercent 現行乖離（%），即 {@code assemble} 已算出的 {@code ma60BiasPercent}（live 價基）。
+     */
+    public BigDecimal ma60BiasPercentile(
+            List<StockPriceHistory> adjustedRowsDesc, int firstCompleted, BigDecimal currentBiasPercent) {
+        if (currentBiasPercent == null || adjustedRowsDesc == null) return null;
+        int n = adjustedRowsDesc.size();
+        int lastStart = n - MA60_WINDOW;
+        if (lastStart < firstCompleted) return null;
+
+        BigDecimal sum = BigDecimal.ZERO;
+        for (int j = firstCompleted; j < firstCompleted + MA60_WINDOW; j++) {
+            sum = sum.add(adjustedRowsDesc.get(j).getClosePrice());
+        }
+        List<BigDecimal> observations = new ArrayList<>();
+        for (int i = firstCompleted; i <= lastStart; i++) {
+            if (i > firstCompleted) {
+                sum = sum.subtract(adjustedRowsDesc.get(i - 1).getClosePrice())
+                        .add(adjustedRowsDesc.get(i + MA60_WINDOW - 1).getClosePrice());
+            }
+            BigDecimal ma = sum.divide(BigDecimal.valueOf(MA60_WINDOW), 8, RoundingMode.HALF_UP);
+            BigDecimal bias = biasPercent(adjustedRowsDesc.get(i).getClosePrice(), ma);
+            if (bias != null) observations.add(bias);
+        }
+        if (observations.size() < BIAS_PCT_MIN_SAMPLES) return null;
+
+        long countAtOrBelow = observations.stream()
+                .filter(b -> b.compareTo(currentBiasPercent) <= 0)
+                .count();
+        return BigDecimal.valueOf(100)
+                .multiply(BigDecimal.valueOf(countAtOrBelow))
+                .divide(BigDecimal.valueOf(observations.size()), 8, RoundingMode.HALF_UP)
+                .setScale(1, RoundingMode.HALF_UP);
     }
 
     /** 52 週相對位置，clamp 至 [0,1]；高低缺值或區間為 0 時回 null。 */
