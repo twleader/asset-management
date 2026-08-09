@@ -724,7 +724,7 @@ const handleDelete = async (id) => {
   ElMessage.success('已刪除')
 }
 
-// ===== 雙擊開啟股票走勢分析（僅股票列，Task 307） =====
+// ===== 雙擊開啟股票走勢分析（僅股票列，Task 311） =====
 const analysisVisible = ref(false)
 const analysisStock = ref(null)
 function onRowDblClick(row) {

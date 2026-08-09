@@ -11,7 +11,7 @@ import org.springframework.context.annotation.Configuration;
  *
  * 此元件被 Dashboard / SnapshotForm / WatchStock / StockAlert / RealizedGain / TradingRadar / Transaction
  * 七個 view 同時使用（RealizedGain 為損益明細列雙擊、TradingRadar 為個股決策表列雙擊 Task 234、
- * Transaction 為交易紀錄明細列雙擊 Task 307）。
+ * Transaction 為交易紀錄明細列雙擊 Task 311）。
  * 為符合 CLAUDE.md「同義欄位、同一 business service API」原則 — 七個 view 顯示
  * 同一支股票的歷史價、配息歷史、ETF 持股都應該走同一個入口 — 將其拆為獨立 BFF route，
  * 而非由七個父 view 的 BFF 各自重複代理。
