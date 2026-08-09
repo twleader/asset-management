@@ -35,6 +35,8 @@ import java.util.Map;
 @Component
 public class CommodityFetchClient {
 
+    public static final String PROVIDER = "YAHOO_FINANCE_CHART";
+
     /** commodity_code → Yahoo symbol。新增標的只改這裡。 */
     public static final Map<String, String> SYMBOLS = Map.of(
             "WTI", "CL=F",
@@ -46,8 +48,20 @@ public class CommodityFetchClient {
 
     private final ObjectMapper mapper = new ObjectMapper();
 
-    /** 單日收盤價。 */
-    public record CommodityBar(LocalDate priceDate, BigDecimal closePrice) {}
+    /** 單日收盤價與實際抓取 provenance。 */
+    public record CommodityBar(
+            LocalDate priceDate,
+            BigDecimal closePrice,
+            String provider,
+            String sourceUrl,
+            Instant sourceAvailableAt,
+            Instant fetchedAt) {
+
+        /** Compatibility constructor for isolated tests/callers that intentionally lack provenance. */
+        public CommodityBar(LocalDate priceDate, BigDecimal closePrice) {
+            this(priceDate, closePrice, null, null, null, null);
+        }
+    }
 
     /**
      * 抓指定標的 {@code [start, end]} 區間的每日收盤價（含頭尾）。
@@ -73,6 +87,7 @@ public class CommodityFetchClient {
             Process proc = pb.start();
             String body = new String(proc.getInputStream().readAllBytes());
             proc.waitFor();
+            Instant fetchedAt = Instant.now();
 
             if (body == null || body.isBlank()) {
                 log.warn("Yahoo {} ({}) 回傳空白", code, symbol);
@@ -101,7 +116,13 @@ public class CommodityFetchClient {
                         .atZone(NY).toLocalDate();
                 if (date.isBefore(start) || date.isAfter(end)) continue;
 
-                bars.add(new CommodityBar(date, price.setScale(4, RoundingMode.HALF_UP)));
+                bars.add(new CommodityBar(
+                        date,
+                        price.setScale(4, RoundingMode.HALF_UP),
+                        PROVIDER,
+                        url,
+                        fetchedAt,
+                        fetchedAt));
             }
             return bars;
         } catch (Exception e) {

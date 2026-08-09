@@ -248,17 +248,51 @@ public class MarketDataService {
 
     public Map<String, String> getUsHolidays(int year) {
         Map<String, String> h = new LinkedHashMap<>();
-        addObserved(h, year, 1, 1, "New Year's Day");
+        addNewYearObserved(h, year, "New Year's Day");
         h.put(nthWeekday(year, 1, DayOfWeek.MONDAY, 3), "MLK Day");
         h.put(nthWeekday(year, 2, DayOfWeek.MONDAY, 3), "Presidents' Day");
         h.put(goodFriday(year), "Good Friday");
         h.put(lastWeekday(year, 5, DayOfWeek.MONDAY), "Memorial Day");
-        addObserved(h, year, 6, 19, "Juneteenth");
+        // Juneteenth became a NYSE full-day holiday in 2022.  It was a federal
+        // holiday from 2021, but the exchange remained open on 2021-06-18/21;
+        // applying observed rules to earlier years would shift session windows.
+        if (year >= 2022) addObserved(h, year, 6, 19, "Juneteenth");
         addObserved(h, year, 7, 4, "Independence Day");
         h.put(nthWeekday(year, 9, DayOfWeek.MONDAY, 1), "Labor Day");
         h.put(nthWeekday(year, 11, DayOfWeek.THURSDAY, 4), "Thanksgiving");
         addObserved(h, year, 12, 25, "Christmas");
+        addUsExceptionalClosures(h, year);
         return h;
+    }
+
+    /**
+     * Full-day NYSE closures that are not recurring holidays.  Keep this list
+     * explicit and date-based: a missing exceptional closure must never be
+     * guessed from a weekday, and adding a future date requires an auditable
+     * exchange announcement.
+     */
+    private static void addUsExceptionalClosures(Map<String, String> holidays, int year) {
+        Map<String, String> exceptional = Map.ofEntries(
+                Map.entry("2001-09-11", "NYSE closure - September 11 attacks"),
+                Map.entry("2001-09-12", "NYSE closure - September 11 attacks"),
+                Map.entry("2001-09-13", "NYSE closure - September 11 attacks"),
+                Map.entry("2001-09-14", "NYSE closure - September 11 attacks"),
+                Map.entry("2004-06-11", "NYSE closure - President Reagan funeral"),
+                Map.entry("2007-01-02", "NYSE closure - President Ford funeral"),
+                Map.entry("2012-10-29", "NYSE closure - Hurricane Sandy"),
+                Map.entry("2012-10-30", "NYSE closure - Hurricane Sandy"),
+                Map.entry("2018-12-05", "NYSE closure - President George H.W. Bush funeral"),
+                Map.entry("2025-01-09", "NYSE closure - President Carter funeral"));
+        exceptional.forEach((date, reason) -> {
+            if (date.startsWith(Integer.toString(year) + "-")) holidays.put(date, reason);
+        });
+    }
+
+    /** NYSE New Year's rule: Sunday is observed Monday; Saturday is not observed Friday. */
+    private static void addNewYearObserved(Map<String, String> holidays, int year, String label) {
+        LocalDate date = LocalDate.of(year, 1, 1);
+        if (date.getDayOfWeek() == DayOfWeek.SUNDAY) date = date.plusDays(1);
+        if (date.getDayOfWeek() != DayOfWeek.SATURDAY) holidays.put(date.toString(), label);
     }
 
     /**
@@ -309,6 +343,22 @@ public class MarketDataService {
         Map<String, String> holidays = getTwHolidays(date.getYear());
         if (holidays == null || holidays.isEmpty()) return Optional.empty();
         return Optional.of(!holidays.containsKey(date.toString()));
+    }
+
+    /**
+     * 可區分「交易日／休市日／日曆不可得」的跨市場交易日判定。
+     * 台股沿用 ext-materials 的權威日曆；美股與英股使用本地完整假日表。
+     * 回測與配息 session 計數不得把日曆讀取失敗當成平日，因此台股未知時回空值。
+     */
+    public Optional<Boolean> isTradingDayKnown(String market, LocalDate date) {
+        if (date == null) return Optional.empty();
+        if ("美股".equals(market) || "US".equalsIgnoreCase(String.valueOf(market))) {
+            return Optional.of(isUsTradingDay(date));
+        }
+        if ("英股".equals(market) || "UK".equalsIgnoreCase(String.valueOf(market))) {
+            return Optional.of(isUkTradingDay(date));
+        }
+        return isTwTradingDayKnown(date);
     }
 
     public boolean isUsTradingDay(LocalDate date) {

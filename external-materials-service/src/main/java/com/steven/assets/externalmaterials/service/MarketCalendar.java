@@ -90,17 +90,41 @@ public class MarketCalendar {
 
     private static Set<String> computeUsHolidays(int year) {
         Set<String> h = new LinkedHashSet<>();
-        addObserved(h, year, 1, 1);                          // New Year's Day
+        addNewYearObserved(h, year);                         // New Year's Day
         h.add(nthWeekday(year, 1, DayOfWeek.MONDAY, 3));     // MLK Day
         h.add(nthWeekday(year, 2, DayOfWeek.MONDAY, 3));     // Presidents' Day
         h.add(goodFriday(year));                             // Good Friday
         h.add(lastWeekday(year, 5, DayOfWeek.MONDAY));       // Memorial Day
-        addObserved(h, year, 6, 19);                         // Juneteenth
+        // Juneteenth became a NYSE full-day holiday in 2022.  The 2021 federal
+        // holiday did not close the exchange, so do not add 2021 observed dates.
+        if (year >= 2022) addObserved(h, year, 6, 19);       // Juneteenth
         addObserved(h, year, 7, 4);                          // Independence Day
         h.add(nthWeekday(year, 9, DayOfWeek.MONDAY, 1));     // Labor Day
         h.add(nthWeekday(year, 11, DayOfWeek.THURSDAY, 4));  // Thanksgiving
         addObserved(h, year, 12, 25);                        // Christmas
+        addUsExceptionalClosures(h, year);
         return h;
+    }
+
+    /**
+     * Explicit full-day NYSE closures outside recurring holidays.  Never infer
+     * one from a weekday; each entry is tied to a documented exchange closure.
+     */
+    private static void addUsExceptionalClosures(Set<String> holidays, int year) {
+        Map<String, String> exceptional = Map.ofEntries(
+                Map.entry("2001-09-11", "NYSE closure - September 11 attacks"),
+                Map.entry("2001-09-12", "NYSE closure - September 11 attacks"),
+                Map.entry("2001-09-13", "NYSE closure - September 11 attacks"),
+                Map.entry("2001-09-14", "NYSE closure - September 11 attacks"),
+                Map.entry("2004-06-11", "NYSE closure - President Reagan funeral"),
+                Map.entry("2007-01-02", "NYSE closure - President Ford funeral"),
+                Map.entry("2012-10-29", "NYSE closure - Hurricane Sandy"),
+                Map.entry("2012-10-30", "NYSE closure - Hurricane Sandy"),
+                Map.entry("2018-12-05", "NYSE closure - President George H.W. Bush funeral"),
+                Map.entry("2025-01-09", "NYSE closure - President Carter funeral"));
+        exceptional.forEach((date, reason) -> {
+            if (date.startsWith(Integer.toString(year) + "-")) holidays.add(date);
+        });
     }
 
     // ===== 英股假日（LSE）— 與 backend MarketDataService.getUkHolidays 同一套規則 =====
@@ -132,6 +156,13 @@ public class MarketCalendar {
         if (dow == DayOfWeek.SATURDAY) date = date.minusDays(1);
         else if (dow == DayOfWeek.SUNDAY) date = date.plusDays(1);
         h.add(date.toString());
+    }
+
+    /** NYSE New Year's rule: Sunday is observed Monday; Saturday is not observed Friday. */
+    private static void addNewYearObserved(Set<String> h, int year) {
+        LocalDate date = LocalDate.of(year, 1, 1);
+        if (date.getDayOfWeek() == DayOfWeek.SUNDAY) date = date.plusDays(1);
+        if (date.getDayOfWeek() != DayOfWeek.SATURDAY) h.add(date.toString());
     }
 
     /** UK 銀行假日「下個工作日」順移：週末或已被佔用 → 往後推到非週末且未佔用日（Christmas + Boxing Day 連假相互避撞）。 */

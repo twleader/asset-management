@@ -14,6 +14,7 @@ public interface StockDividendHistoryRepository extends JpaRepository<StockDivid
     @Query("""
         SELECT h FROM StockDividendHistory h
         WHERE h.stockCode = :code AND h.market = :market AND h.year >= :sinceYear
+          AND h.eventStatus = 'ACTIVE'
         ORDER BY h.year DESC, h.exDividendDate DESC NULLS LAST
         """)
     List<StockDividendHistory> findByStockSinceYear(String code, String market, int sinceYear);
@@ -25,6 +26,7 @@ public interface StockDividendHistoryRepository extends JpaRepository<StockDivid
         SELECT h FROM StockDividendHistory h
         WHERE h.stockCode = :code AND h.market = :market
           AND h.exDividendDate BETWEEN :fromDate AND :toDate
+          AND h.eventStatus = 'ACTIVE'
           AND (COALESCE(h.cashDividend, 0) > 0 OR COALESCE(h.stockDividend, 0) > 0)
         ORDER BY h.exDividendDate ASC, h.id ASC
         """)

@@ -35,6 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
@@ -76,6 +77,8 @@ class TradingRadarUsStockEngineTest {
     @Mock private EtfNavHistoryRepository etfNavHistoryRepo;
     @Mock private TradingRadarSnapshotStore snapshotStore;
     @Mock private CurrentUserContext currentUserContext;
+    @Mock private DividendEventEvidenceRepository dividendEventEvidenceRepository;
+    @Mock private TreasuryYieldService treasuryYieldService;
 
     /** 真實 {@link TradingRadarRuleEngine} 包 spy；由 {@link #newService()} 建立並保留參照供 verify 用。 */
     private TradingRadarRuleEngine ruleEngine;
@@ -104,7 +107,9 @@ class TradingRadarUsStockEngineTest {
                 fundamentalAnalysisService,
                 etfNavHistoryRepo,
                 snapshotStore,
-                currentUserContext);
+                currentUserContext,
+                dividendEventEvidenceRepository,
+                treasuryYieldService);
     }
 
     /**
@@ -236,6 +241,57 @@ class TradingRadarUsStockEngineTest {
                 "美股個股的 marketAllowsBuy 不受台股 regime（RISK_OFF）拖累——必須吃到 IXIC 組的 RISK_ON");
         assertFalse(captor.getValue().marketStale());
         assertEquals(1, resp.stocks().size());
+    }
+
+    @Test
+    void 美股完成收盤與marketSummary同日但量能context缺值時PRICE_MARKET仍開閘() {
+        stubBaseline();
+        stubDivergentRegimes();
+        Instant fixedAfterUsClose = Instant.parse("2026-08-10T21:00:00Z");
+        List<UsIndexDailyHistory> indexRows = usUpRowsAt(LocalDate.of(2026, 8, 10));
+        when(usIndexDailyHistoryRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 241))
+                .thenReturn(indexRows);
+        List<StockPriceHistory> stockRows = indexRows.stream()
+                .map(row -> StockPriceHistory.builder()
+                        .stockCode("AAPL").market("美股").tradingDate(row.getTradingDate())
+                        .openPrice(row.getClosePoint()).highPrice(row.getClosePoint())
+                        .lowPrice(row.getClosePoint()).closePrice(row.getClosePoint())
+                        .volume(row.getVolume()).build())
+                .toList();
+        when(priceHistoryRepo.findRecentN("AAPL", "美股", 241)).thenReturn(stockRows);
+        when(adjustedPriceService.adjust(anyList(), anyList()))
+                .thenAnswer(invocation -> new DistributionAdjustedPriceService.Adjustment(
+                        invocation.getArgument(0), false));
+        when(indicatorService.computeFromSeries(anyList())).thenReturn(US_RISK_ON_IND);
+        when(alertRepo.findDistinctStockCodeMarket())
+                .thenReturn(List.<Object[]>of(new Object[]{"AAPL", "美股"}));
+
+        TradingRadarDto.Response response = newService().assembleAt(fixedAfterUsClose);
+        TradingRadarDto.StockDecision decision = response.stocks().stream()
+                .filter(row -> "AAPL".equals(row.stockCode())).findFirst().orElseThrow();
+        TradingRadarDto.EvidenceGroup market = decision.evidence().evidenceGroups()
+                .get("MARKET_LIQUIDITY");
+
+        assertNotNull(market);
+        assertTrue(market.shortFresh(),
+                "US marketSummary.marketVolumeAsOfDate=null 不應取代 asOfDate 關閉 PRICE/MARKET gate");
+        assertTrue(market.mediumFresh());
+        assertEquals(indexRows.get(0).getTradingDate().toString(), decision.asOfDate());
+    }
+
+    private List<UsIndexDailyHistory> usUpRowsAt(LocalDate today) {
+        List<UsIndexDailyHistory> rows = new ArrayList<>();
+        for (int i = 0; i < 241; i++) {
+            UsIndexDailyHistory h = new UsIndexDailyHistory();
+            h.setIndexCode("IXIC");
+            h.setTradingDate(today.minusDays(i));
+            BigDecimal close = BigDecimal.valueOf(19000 - i * 5);
+            h.setClosePoint(close);
+            h.setHighPoint(close.add(BigDecimal.ONE));
+            h.setLowPoint(close.subtract(BigDecimal.ONE));
+            rows.add(h);
+        }
+        return rows;
     }
 
     @Test
@@ -408,6 +464,7 @@ class TradingRadarUsStockEngineTest {
 
     @Test
     void shouldAddLiveRow美股用美東日期判斷今日跨夜情境應併入() {
+        stubBaseline();
         List<StockPriceHistory> rows = List.of(completedRow("2026-01-14"));
         PriceQueryService.LivePrice live = liveWithTradingDate("2026-01-15");
 

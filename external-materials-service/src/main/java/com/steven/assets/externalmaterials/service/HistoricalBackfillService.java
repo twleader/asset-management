@@ -356,7 +356,14 @@ public class HistoricalBackfillService {
     private int upsertCommodities(String code, LocalDate since) {
         int count = 0;
         for (CommodityFetchClient.CommodityBar b : commodityFetch.fetchRange(code, since, LocalDate.now())) {
-            store.upsertCommodityPrice(code, b.priceDate(), b.closePrice());
+            store.upsertCommodityPrice(
+                    code,
+                    b.priceDate(),
+                    b.closePrice(),
+                    b.provider(),
+                    b.sourceUrl(),
+                    b.sourceAvailableAt(),
+                    b.fetchedAt());
             count++;
         }
         if (count > 0) log.info("{} 收盤價匯入 {} 筆", code, count);

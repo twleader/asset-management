@@ -3,7 +3,9 @@ package com.steven.assets.service;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
+import java.util.Locale;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * 資產類別判定（Requirement 25）：把股票/ETF/基金歸入「現金／債券／股票」。
@@ -13,6 +15,9 @@ import java.util.Set;
  */
 @Component
 public class AssetClassifier {
+
+    /** Stateless rule catalog shared by pure/backtest callers that are outside Spring DI. */
+    private static final AssetClassifier DEFAULT = new AssetClassifier();
 
     public static final String CASH = "CASH";
     public static final String BOND = "BOND";
@@ -29,6 +34,29 @@ public class AssetClassifier {
 
     /** 殖利率門檻 fallback（當 stock_style INCOME 列未設 dividend_threshold 時）= 4% */
     private static final BigDecimal DEFAULT_DIVIDEND_THRESHOLD = new BigDecimal("0.04");
+
+    /*
+     * Strict term tokens must be bounded by non-digits.  A substring check such
+     * as contains("20") turns an identifier/year like "2028" into a fake
+     * 20-year bond; contains("中") likewise misclassifies "中國".  Keep the
+     * accepted numeric ranges explicit and require the Chinese term words.
+     */
+    private static final Pattern SHORT_RANGE = Pattern.compile(
+            "(?<!\\d)(?:0\\s*-\\s*1|0\\s*-\\s*3|1\\s*-\\s*3|1\\s*-\\s*5)(?!\\d)");
+    private static final Pattern MID_RANGE = Pattern.compile(
+            "(?<!\\d)(?:3\\s*-\\s*7|3\\s*-\\s*10|5\\s*-\\s*10|7\\s*-\\s*10)(?!\\d)");
+    private static final Pattern LONG_RANGE = Pattern.compile(
+            "(?<!\\d)(?:10\\s*-\\s*20|20\\s*\\+|20|25|30)(?!\\d)");
+
+    /** Return the application rule catalog without making each consumer copy its own rules. */
+    public static AssetClassifier defaultClassifier() {
+        return DEFAULT;
+    }
+
+    /** The configured fallback threshold, expressed as a ratio (0.04 = 4%). */
+    public static BigDecimal defaultDividendThreshold() {
+        return DEFAULT_DIVIDEND_THRESHOLD;
+    }
 
     /**
      * 高股息／收益型 ETF 預設清單（規則推斷用；命中清單一律收益型，不受殖利率波動影響）。
@@ -85,6 +113,11 @@ public class AssetClassifier {
         return US_BOND_ETFS.contains(c) ? BOND : STOCK;
     }
 
+    /** Whether the shared code catalog classifies this instrument as a bond. */
+    public boolean isBondByRule(String code, String market) {
+        return BOND.equals(classifyStockByRule(code, market));
+    }
+
     /** 股票/ETF 有效資產類別：override 優先，否則規則。 */
     public String classifyStock(String code, String market, String override) {
         if (override != null && !override.isBlank()) return override.trim().toUpperCase();
@@ -99,7 +132,7 @@ public class AssetClassifier {
      */
     public String classifyBondTerm(String code, String market, String name, String override) {
         if (override != null && !override.isBlank()) return override.trim().toUpperCase();
-        String n = name == null ? "" : name.toLowerCase();
+        String n = name == null ? "" : name.toLowerCase(Locale.ROOT);
         // 短期：1-3 / 0-3 / 0-1 / 1-5 / 短 / month / 貨幣（貨幣型、超短天期）
         if (n.contains("1-3") || n.contains("0-3") || n.contains("0-1") || n.contains("1-5")
                 || n.contains("短") || n.contains("month") || n.contains("貨幣")) return SHORT;
@@ -110,6 +143,24 @@ public class AssetClassifier {
         if (n.contains("7-10") || n.contains("5-10") || n.contains("3-7") || n.contains("3-10")
                 || n.contains("中")) return MID;
         return MID;  // 無年期資訊（如一般公司債）預設中期，可 override
+    }
+
+    /**
+     * Strict bond-term rule for evidence-bearing consumers. Unknown names remain
+     * unknown; callers must not turn the absence of a term into the legacy MID fallback.
+     */
+    public String classifyBondTermStrict(String name) {
+        String n = name == null ? "" : name.toLowerCase(Locale.ROOT);
+        if (SHORT_RANGE.matcher(n).find()
+                || n.contains("短期") || n.contains("短天期")
+                || n.contains("month") || n.contains("貨幣")) return SHORT;
+        if (LONG_RANGE.matcher(n).find()
+                || n.contains("10年以上") || n.contains("長期") || n.contains("長天期")
+                || n.contains("long term") || n.contains("long-term")) return LONG;
+        if (MID_RANGE.matcher(n).find()
+                || n.contains("中期") || n.contains("中天期")
+                || n.contains("medium term") || n.contains("medium-term")) return MID;
+        return null;
     }
 
     /**
@@ -147,5 +198,14 @@ public class AssetClassifier {
         BigDecimal cutoff = (threshold != null) ? threshold : DEFAULT_DIVIDEND_THRESHOLD;
         if (dividendRate != null && dividendRate.compareTo(cutoff) >= 0) return INCOME;
         return GROWTH;
+    }
+
+    /**
+     * 僅套用具名代碼規則的股票風格；沒有公開殖利率時不得把 GROWTH 當成證據。
+     * 雷達 strict profile 使用此方法，與持股快照殖利率完全隔離。
+     */
+    public String classifyStockStyleByCodeRule(String code) {
+        if (code == null || !HIGH_DIVIDEND_ETFS.contains(code.trim().toUpperCase())) return null;
+        return INCOME;
     }
 }

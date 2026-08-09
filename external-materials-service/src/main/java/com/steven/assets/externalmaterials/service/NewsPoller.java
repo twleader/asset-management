@@ -313,7 +313,19 @@ public class NewsPoller {
     private ManualRunResult run(String trigger) {
         List<NewsRow> rows = new ArrayList<>();
         rows.addAll(newsClient.fetchAll());
-        rows.addAll(twseClient.fetchAll());
+        TwseInfoFetchClient.FetchResult twseResult = twseClient.fetchAllTyped();
+        if (twseResult != null) {
+            rows.addAll(twseResult.newsRows());
+            if (twseResult.institutionalObservation() != null) {
+                try {
+                    // Typed numeric source only. Never parse the NewsRow projection back into values.
+                    source.appendTwseInstitutionalObservation(
+                            twseResult.institutionalObservation());
+                } catch (RuntimeException e) {
+                    log.warn("TWSE 三大法人 observation 寫入失敗：{}", e.getMessage());
+                }
+            }
+        }
         // Task 180：台幣兌美元匯率＋美股主要指數收盤快照（由 DB 既有資料組裝，供 SRPP JSON 與今日股市分析）。
         rows.addAll(snapshotClient.fetchAll());
         // Task 193：韓股盤中快照（即時抓 Yahoo；僅韓股盤中時段＝台北 08:00~14:30 產出，收盤後的輪次自然為空）。

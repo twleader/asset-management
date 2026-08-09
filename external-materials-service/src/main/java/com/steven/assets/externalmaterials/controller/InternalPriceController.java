@@ -74,7 +74,7 @@ public class InternalPriceController {
     }
 
     /**
-     * Backend cold-cache fallback：抓單檔股利 + 寫 stock_dividend_history，回傳寫入筆數。
+     * 抓單檔股利並 append immutable snapshot evidence，回傳 observation 事件筆數。
      */
     @PostMapping("/dividend/sync")
     public Map<String, Object> syncDividend(@RequestParam String code, @RequestParam String market) {

@@ -10,6 +10,8 @@ import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashSet;
@@ -38,6 +40,9 @@ public class EtfNavPoller {
     private final EtfNavCacheWriter writer;
     private final StockSourceQuery source;
     private final MarketClock clock;
+
+    /** Package-visible deterministic time source for observation-boundary tests. */
+    Clock timeSource = Clock.systemUTC();
 
     @Value("${etf-nav.enabled:true}")
     private boolean enabled;
@@ -134,15 +139,39 @@ public class EtfNavPoller {
      * 入庫失敗只記 log，不影響 Redis 寫入與整輪排程（歷史留存不該拖垮即時功能）。
      */
     private void persist(EtfNav nav) {
+        persist(nav, timeSource.instant());
+    }
+
+    /** Same persistence path with an explicit observed-at for deterministic tests. */
+    void persist(EtfNav nav, Instant observedAt) {
         LocalDate navDate = parseNavDate(nav.navAsOf());
-        if (navDate == null || nav.nav() == null) return; // 無資料日或無淨值：不入庫，不臆測日期
+        if (navDate == null || nav.nav() == null || observedAt == null) return;
+        PremiumResult premium;
         try {
-            PremiumResult premium = resolvePremium(nav, navDate,
+            premium = resolvePremium(nav, navDate,
                     (code, date) -> source.findCloseOn(code, nav.market(), date));
+        } catch (Exception e) {
+            log.warn("ETF 折溢價解析失敗 {} {} {}: {}",
+                    nav.market(), nav.stockCode(), navDate, e.getMessage());
+            return;
+        }
+        try {
             source.upsertEtfNav(nav.stockCode(), nav.market(), navDate,
                     nav.nav(), premium.pct(), premium.origin(), nav.source());
         } catch (Exception e) {
             log.warn("ETF 淨值入庫失敗 {} {} {}: {}",
+                    nav.market(), nav.stockCode(), navDate, e.getMessage());
+        }
+        try {
+            // Source feeds expose no independently reliable publication instant.
+            // First observation is therefore the conservative effective known-at.
+            source.appendEtfNavObservation(nav.stockCode(), nav.market(), navDate,
+                    nav.nav(), premium.pct(), premium.origin(), nav.source(),
+                    observedAt, observedAt, "OBSERVED_AT_NO_PUBLISHED_TIMESTAMP");
+        } catch (Exception e) {
+            // Append-only audit failure must be visible, but must not undo the
+            // compatible daily-current write or Redis refresh.
+            log.warn("ETF NAV observation append 失敗 {} {} {}: {}",
                     nav.market(), nav.stockCode(), navDate, e.getMessage());
         }
     }

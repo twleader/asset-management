@@ -28,6 +28,11 @@ import java.util.List;
 public class TwseInfoFetchClient {
 
     private static final ZoneId TW = ZoneId.of("Asia/Taipei");
+    public static final String INSTITUTIONAL_PROVIDER = "TWSE_BFI82U";
+    public static final String INSTITUTIONAL_AVAILABLE = "AVAILABLE";
+    public static final String INSTITUTIONAL_UNAVAILABLE = "UNAVAILABLE";
+    public static final String INSTITUTIONAL_AVAILABILITY_BASIS =
+            "OBSERVED_AT_NO_PUBLISHED_TIMESTAMP";
 
     /** 三大法人買賣金額統計表（www.twse.com.tw RWD 版，支援 ?date=；openapi 版在 2026 維護期會 302→HTML）。 */
     private static final String BFI82U_TPL =
@@ -42,30 +47,97 @@ public class TwseInfoFetchClient {
             .build();
     private final ObjectMapper mapper = new ObjectMapper();
 
+    /**
+     * BFI82U 的 typed numeric 結果。這份 record 是法人數值落庫的唯一來源；新聞標題只是
+     * 同一份結果的顯示 projection，永遠不得再反向解析成數值。
+     */
+    public record InstitutionalObservation(
+            LocalDate tradingDate,
+            BigDecimal foreignNet,
+            BigDecimal trustNet,
+            BigDecimal dealerNet,
+            BigDecimal totalNet,
+            String provider,
+            String sourceUrl,
+            Instant observedAt,
+            Instant sourceAvailableAt,
+            String availabilityBasis,
+            String status,
+            String errorReason,
+            String detail) {
+
+        public boolean available() {
+            return INSTITUTIONAL_AVAILABLE.equals(status)
+                    && tradingDate != null
+                    && foreignNet != null
+                    && trustNet != null
+                    && dealerNet != null
+                    && totalNet != null;
+        }
+    }
+
+    /** One TWSE request bundle so callers can persist typed evidence without re-fetching or parsing news. */
+    public record FetchResult(
+            List<NewsRow> newsRows,
+            InstitutionalObservation institutionalObservation) {
+        public FetchResult {
+            newsRows = newsRows == null ? List.of() : List.copyOf(newsRows);
+        }
+    }
+
     /** 抓 TWSE 公開資訊，逐項 graceful，回合併清單（通常各 1 則）。 */
     public List<NewsRow> fetchAll() {
+        return fetchAllTyped().newsRows();
+    }
+
+    /** 抓同一批公開資訊並同時回傳法人 typed numeric observation。 */
+    public FetchResult fetchAllTyped() {
         List<NewsRow> out = new ArrayList<>();
-        try { NewsRow r = fetchInstitutional(); if (r != null) out.add(r); }
-        catch (Exception e) { log.warn("TWSE 三大法人抓取失敗：{}", e.getMessage()); }
+        InstitutionalObservation observation = fetchInstitutionalObservation();
+        NewsRow institutionalNews = toInstitutionalNews(observation);
+        if (institutionalNews != null) out.add(institutionalNews);
         try { NewsRow r = fetchTurnover(); if (r != null) out.add(r); }
         catch (Exception e) { log.warn("TWSE 大盤成交統計抓取失敗：{}", e.getMessage()); }
-        return out;
+        return new FetchResult(out, observation);
     }
 
     // ===== 三大法人買賣金額（BFI82U）=====
 
-    private NewsRow fetchInstitutional() throws Exception {
+    /** 抓取法人原始數值；任何失敗都回明確 UNAVAILABLE observation，不偽造 0。 */
+    public InstitutionalObservation fetchInstitutionalObservation() {
         String ymd = LocalDate.now(TW).format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE); // yyyyMMdd
-        JsonNode root = mapper.readTree(get(BFI82U_TPL + ymd));
-        if (!"OK".equals(root.path("stat").asText())) return null;
+        String sourceUrl = BFI82U_TPL + ymd;
+        try {
+            String body = get(sourceUrl);
+            return parseInstitutionalResponse(body, Instant.now(), sourceUrl);
+        } catch (Exception e) {
+            Instant observedAt = Instant.now();
+            log.warn("TWSE 三大法人抓取失敗：{}", e.getMessage());
+            return unavailableInstitutional(observedAt, sourceUrl, e.getMessage());
+        }
+    }
+
+    /** package-private for deterministic parser tests; production calls the public fetch method above. */
+    InstitutionalObservation parseInstitutionalResponse(
+            String body, Instant observedAt, String sourceUrl) throws Exception {
+        JsonNode root = mapper.readTree(body);
+        if (!"OK".equals(root.path("stat").asText())) {
+            return unavailableInstitutional(observedAt, sourceUrl,
+                    "TWSE stat=" + root.path("stat").asText("MISSING"));
+        }
         JsonNode data = root.path("data");
-        if (!data.isArray() || data.isEmpty()) return null;
-        String dateStr = root.path("date").asText(ymd); // 實際資料日（假日會回最近交易日）
+        if (!data.isArray() || data.isEmpty()) {
+            return unavailableInstitutional(observedAt, sourceUrl, "TWSE BFI82U data 為空");
+        }
+        String dateStr = root.path("date").asText(""); // 實際資料日（假日會回最近交易日）
         LocalDate tradeDate = parseYyyymmdd(dateStr);
-        if (tradeDate == null) return null;
+        if (tradeDate == null) {
+            return unavailableInstitutional(observedAt, sourceUrl, "TWSE BFI82U date 無效");
+        }
 
         // 依單位名稱累加買賣差額（index 3）
         BigDecimal foreign = BigDecimal.ZERO, trust = BigDecimal.ZERO, dealer = BigDecimal.ZERO, total = null;
+        boolean foreignSeen = false, trustSeen = false, dealerSeen = false, totalSeen = false;
         StringBuilder detail = new StringBuilder();
         for (JsonNode row : data) {
             if (!row.isArray() || row.size() < 4) continue;
@@ -77,18 +149,52 @@ public class TwseInfoFetchClient {
             // 故此列只入 detail、不獨立計入任何桶，避免外資/自營/合計重複計算。用 equals 精確跳過
             // （「外資及陸資(不含外資自營商)」字串亦含「外資自營商」，不可用 contains）。
             if (name.equals("外資自營商")) continue;
-            if (name.contains("外資")) foreign = foreign.add(diff);       // 只命中「外資及陸資(不含外資自營商)」
-            else if (name.contains("投信")) trust = trust.add(diff);
-            else if (name.contains("自營商")) dealer = dealer.add(diff);   // 自行買賣 + 避險（已含外資自營商）
-            else if (name.contains("合計")) total = diff;
+            if (name.contains("外資")) {                                  // 只命中「外資及陸資(不含外資自營商)」
+                foreign = foreign.add(diff);
+                foreignSeen = true;
+            } else if (name.contains("投信")) {
+                trust = trust.add(diff);
+                trustSeen = true;
+            } else if (name.contains("自營商")) {                          // 自行買賣 + 避險（已含外資自營商）
+                dealer = dealer.add(diff);
+                dealerSeen = true;
+            } else if (name.contains("合計")) {
+                total = diff;
+                totalSeen = true;
+            }
         }
-        if (total == null) total = foreign.add(trust).add(dealer);
+        if (!foreignSeen || !trustSeen || !dealerSeen || !totalSeen || total == null) {
+            return unavailableInstitutional(observedAt, sourceUrl,
+                    "TWSE BFI82U 缺少外資／投信／自營商／合計原始數值");
+        }
+        return new InstitutionalObservation(
+                tradeDate, foreign, trust, dealer, total,
+                INSTITUTIONAL_PROVIDER, sourceUrl, observedAt, null,
+                INSTITUTIONAL_AVAILABILITY_BASIS, INSTITUTIONAL_AVAILABLE, null,
+                detail.toString());
+    }
+
+    private static InstitutionalObservation unavailableInstitutional(
+            Instant observedAt, String sourceUrl, String reason) {
+        return new InstitutionalObservation(
+                null, null, null, null, null,
+                INSTITUTIONAL_PROVIDER, sourceUrl, observedAt, null,
+                INSTITUTIONAL_AVAILABILITY_BASIS, INSTITUTIONAL_UNAVAILABLE,
+                reason == null || reason.isBlank() ? "TWSE BFI82U unavailable" : reason,
+                null);
+    }
+
+    private static NewsRow toInstitutionalNews(InstitutionalObservation observation) {
+        if (observation == null || !observation.available()) return null;
+        LocalDate tradeDate = observation.tradingDate();
         String title = String.format("三大法人買賣超（%s）：外資 %s、投信 %s、自營 %s、合計 %s",
-                tradeDate, yi(foreign), yi(trust), yi(dealer), yi(total));
+                tradeDate, yi(observation.foreignNet()), yi(observation.trustNet()),
+                yi(observation.dealerNet()), yi(observation.totalNet()));
+        String dateStr = tradeDate.format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE);
         return new NewsRow(title, "twse",
                 "https://www.twse.com.tw/zh/trading/foreign/bfi82u.html?date=" + dateStr,
                 "twse-institutional", "TW",
-                detail.toString(),
+                observation.detail(),
                 tradeDate.atStartOfDay(TW).toInstant());
     }
 

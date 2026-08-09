@@ -308,3 +308,30 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/v1.91.0-trading-radar-notification-cooldown.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.92.0-treasury-yield-daily.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.93.0-radar-evidence-integrity.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.94.0-radar-event-observations.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.95.0-etf-nav-observation.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.96.0-radar-market-observations.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.97.0-radar-dividend-provider-width.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.98.0-radar-dividend-same-day-amounts.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.99.0-radar-dividend-event-identity.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.100.0-radar-dividend-fetch-attempt.sql
+      relativeToChangelogFile: false

@@ -53,8 +53,15 @@ public class StockDividendHistory {
     @Column(name = "previous_close")
     private BigDecimal previousClose;
 
-    @Column(name = "source", length = 50)
+    @Column(name = "source", length = 128)
     private String source;
+
+    /** Append-only snapshot event identity; nullable for legacy rows. */
+    @Column(name = "event_key", length = 64)
+    private String eventKey;
+
+    @Column(name = "event_status", nullable = false, length = 16)
+    private String eventStatus;
 
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;

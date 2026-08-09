@@ -10,6 +10,7 @@ import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.time.LocalDate;
 
 /**
  * 把「降序 OHLC 序列 ＋ 除權息／分割事件」組裝成 {@link TradingRadarRuleEngine.StockInput} 的技術面欄位。
@@ -52,6 +53,23 @@ public class RadarInputAssembler {
     private final DistributionAdjustedPriceService adjustedPriceService;
     private final TradingRadarRuleEngine ruleEngine;
 
+    /** 還原完成日收盤序列的 realized volatility observation（ratio 口徑，不年化）。 */
+    public record VolatilityObservation(
+            BigDecimal returnStdDev60Ratio,
+            LocalDate asOfDate,
+            String source,
+            String missingReason
+    ) {
+        public boolean available() {
+            return returnStdDev60Ratio != null && returnStdDev60Ratio.signum() > 0;
+        }
+
+        public static VolatilityObservation unavailable(LocalDate asOfDate, String reason) {
+            return new VolatilityObservation(null, asOfDate,
+                    "DISTRIBUTION_ADJUSTED_COMPLETED_CLOSES", reason);
+        }
+    }
+
     /**
      * 組裝結果。除 {@code adjustedRowsDesc} 外，各欄位與 {@code StockInput} 的同名參數一一對應。
      *
@@ -84,15 +102,22 @@ public class RadarInputAssembler {
             BigDecimal ma240BiasPercent,
             BigDecimal week52Position,
             BigDecimal ruleChangePercent,
-            BigDecimal volumeRatio
+            BigDecimal volumeRatio,
+            VolatilityObservation volatility60
     ) {
+        /** t274 primitive 的欄位捷徑；正式 normalized action 尚未在此任務啟用。 */
+        public BigDecimal returnStdDev60Ratio() {
+            return volatility60 == null ? null : volatility60.returnStdDev60Ratio();
+        }
+
         public static final Assembled EMPTY = new Assembled(
                 TechnicalIndicatorService.FullIndicators.EMPTY, List.of(), false, List.of(),
                 null, null, null, null, null,
                 TradingRadarRuleEngine.Confirmation.UNAVAILABLE,
                 TradingRadarRuleEngine.Confirmation.UNAVAILABLE,
                 TradingRadarRuleEngine.Confirmation.UNAVAILABLE,
-                null, null, null, null, null, null);
+                null, null, null, null, null, null,
+                VolatilityObservation.unavailable(null, "沒有可用的 adjusted completed-price 序列"));
     }
 
     /**
@@ -150,6 +175,9 @@ public class RadarInputAssembler {
         // 使兩者恆為同一輸入的兩種摘要，不會各自漂移。
         BigDecimal ma60Bias = biasPercent(price, indicators.quarterlyMa());
         BigDecimal ma60BiasPct = ma60BiasPercentile(adjustedRows, firstCompleted, ma60Bias);
+        LocalDate volatilityAsOf = adjustedRows.size() > firstCompleted
+                ? adjustedRows.get(firstCompleted).getTradingDate() : null;
+        VolatilityObservation volatility60 = returnStdDev60Ratio(completedCloses, volatilityAsOf);
 
         return new Assembled(
                 indicators,
@@ -169,7 +197,59 @@ public class RadarInputAssembler {
                 biasPercent(price, indicators.annualMa()),
                 week52Position(price, week52High, week52Low),
                 changePercent(price, previousAdjustedClose),
-                volumeRatio(adjustedRows, firstCompleted));
+                volumeRatio(adjustedRows, firstCompleted),
+                volatility60);
+    }
+
+    /**
+     * t274 共用 σ primitive：最近 60 個 adjusted completed-price 日報酬的樣本標準差。
+     *
+     * <p>輸入為降序價格（最新在前），故需要 61 根價格。live 列不應傳入；production
+     * 由 {@code completedCloses} 切出，backtest 由同一 assembler 切片。任何非正值、非有限值、
+     * 不足 61 根或常數序列都回 unavailable，不以 sigma floor 偽造可用波動。</p>
+     */
+    public VolatilityObservation returnStdDev60Ratio(
+            List<BigDecimal> completedClosesDesc, LocalDate asOfDate) {
+        final int priceCount = 61;
+        if (completedClosesDesc == null || completedClosesDesc.size() < priceCount) {
+            return VolatilityObservation.unavailable(asOfDate, "sigma_insufficient_prices");
+        }
+        List<BigDecimal> returns = new ArrayList<>(60);
+        for (int i = 0; i < 60; i++) {
+            BigDecimal current = completedClosesDesc.get(i);
+            BigDecimal previous = completedClosesDesc.get(i + 1);
+            if (!positiveFinite(current) || !positiveFinite(previous)) {
+                return VolatilityObservation.unavailable(asOfDate, "sigma_non_positive_or_non_finite_price");
+            }
+            returns.add(current.divide(previous, 16, RoundingMode.HALF_UP)
+                    .subtract(BigDecimal.ONE));
+        }
+        BigDecimal mean = returns.stream().reduce(BigDecimal.ZERO, BigDecimal::add)
+                .divide(BigDecimal.valueOf(returns.size()), 20, RoundingMode.HALF_UP);
+        BigDecimal sumSquares = BigDecimal.ZERO;
+        for (BigDecimal value : returns) {
+            BigDecimal delta = value.subtract(mean);
+            sumSquares = sumSquares.add(delta.multiply(delta));
+        }
+        BigDecimal variance = sumSquares.divide(BigDecimal.valueOf(returns.size() - 1),
+                24, RoundingMode.HALF_UP);
+        double varianceDouble = variance.doubleValue();
+        if (!(varianceDouble > 0.0) || Double.isInfinite(varianceDouble) || Double.isNaN(varianceDouble)) {
+            return VolatilityObservation.unavailable(asOfDate, "sigma_non_positive");
+        }
+        BigDecimal sigma = BigDecimal.valueOf(Math.sqrt(varianceDouble))
+                .setScale(12, RoundingMode.HALF_UP);
+        if (!positiveFinite(sigma)) {
+            return VolatilityObservation.unavailable(asOfDate, "sigma_non_positive");
+        }
+        return new VolatilityObservation(
+                sigma, asOfDate, "DISTRIBUTION_ADJUSTED_COMPLETED_CLOSES", null);
+    }
+
+    private static boolean positiveFinite(BigDecimal value) {
+        if (value == null || value.signum() <= 0) return false;
+        double d = value.doubleValue();
+        return !Double.isNaN(d) && !Double.isInfinite(d);
     }
 
     /** {@link TechnicalIndicatorService.FullIndicators} → 引擎的 {@code Indicators}。 */

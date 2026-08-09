@@ -114,7 +114,7 @@ com.steven.assets/
   - `FundSettingsBffController`：`GET /api/bff/fund-settings/bank-options` → 過濾 active 後的銷售銀行下拉；與 SnapshotForm 的 lookups **同讀 business `/api/settings/banks`**（同義欄位同一來源），fund-settings 頁不再跨頁呼叫 `/api/bff/snapshot-form/lookups`（Task 175：一頁一 BFF 合規化）
   - `RealizedGainBffRoutes`：`/api/realized-gains/**` → business-services。**目前無前端消費者**：原「RealizedGainView 的 Pinia store `gainApi` 共用 CRUD」說法已不成立——該頁已全面走 `RealizedGainBffController` 的 `/api/bff/realized-gain` 聚合端點，前端 `gainApi` wrapper 與 `assetStore` 的三個已實現損益 action 已於 Task 197 移除。route 本身暫留（移除需重建 BFF 服務），**屬待清理項**
   - `MarketDataBffRoutes`：`/api/market-data/**` → business-services。消費者是 DashboardView 與 TradingRadarView 兩頁的 SSE 行情串流（皆為 `new EventSource('/api/market-data/prices/stream')`，見下方 SSE 段落之已知落差）；`marketDataApi` wrapper（歷史/配息/ETF 成分股）無呼叫端，已於 Task 197 移除，該類查詢皆走 `StockAnalysisBffRoutes` 的 `/api/bff/stock-analysis/**`
-  - `SchedulePublicBffController`（ScheduleListView 專屬，「公開資訊」分組，Requirement 36）：`GET /api/bff/schedule-list` → 回傳系統所有自動排程的**人工維護靜態清單**（`ScheduledJobDto` 不可變 record：service / category / name / description / schedule 白話 / cron / zone），共 **48 筆** ＝ `business-services` 19 ＋ `external-materials-service` 29（**以 `@Scheduled` 方法計**；business 另包含 `AlertNotificationDispatcher` 每 60 秒與 `TradingRadarNotificationService` 每 2 秒兩個 fixed-delay job；Task 290 後 external 實際 31 個標註，`TwClosurePoller` 與台股官方收盤對帳各為一法兩標、各併為一筆）。此頁為唯讀資訊展示故不做跨服務反射探索、不入 DB、不設管理端點；**新增／調整任何 `@Scheduled` 須同步更新此清單以免漂移**。**動態排程**（每分鐘 tick 比對 DB 可設定時點：`NewsPoller`→`crawler_schedule`、`MarketAnalysisScheduler`→`market_analysis_send_time`）於清單標「動態：依『X』頁設定（預設 …）」／「動態（表名）」，**不寫死時間**；每分鐘 tick 但時點為 per-user 私人設定者（`ExportScheduleService`／`TradingCalendarExportScheduleService`）則照列 `每分鐘`／`0 * * * * *` 實際 cron。前端 `ScheduleListView` 之服務別／分類計數由 payload 動態算出，故加減筆數無須改前端。無下游呼叫（不需 WebClient），落 BFF `anyExchange().authenticated()`（已登入者皆可讀）。
+  - `SchedulePublicBffController`（ScheduleListView 專屬，「公開資訊」分組，Requirement 36）：`GET /api/bff/schedule-list` → 回傳系統所有自動排程的**人工維護靜態清單**（`ScheduledJobDto` 不可變 record：service / category / name / description / schedule 白話 / cron / zone）。Task 275 加入 Treasury 日殖利率曲線刷新後，共 **50 筆** ＝ `business-services` 20 ＋ `external-materials-service` 30（**以 `@Scheduled` 方法計**；business 另包含 `AlertNotificationDispatcher` 每 60 秒與 `TradingRadarNotificationService` 每 2 秒兩個 fixed-delay job；Task 290 後 external 實際 32 個標註，`TwClosurePoller` 與台股官方收盤對帳各為一法兩標、各併為一筆）。此頁為唯讀資訊展示故不做跨服務反射探索、不入 DB、不設管理端點；**新增／調整任何 `@Scheduled` 須同步更新此清單以免漂移**。**動態排程**（每分鐘 tick 比對 DB 可設定時點：`NewsPoller`→`crawler_schedule`、`MarketAnalysisScheduler`→`market_analysis_send_time`）於清單標「動態：依『X』頁設定（預設 …）」／「動態（表名）」，**不寫死時間**；每分鐘 tick 但時點為 per-user 私人設定者（`ExportScheduleService`／`TradingCalendarExportScheduleService`）則照列 `每分鐘`／`0 * * * * *` 實際 cron。前端 `ScheduleListView` 之服務別／分類計數由 payload 動態算出，故加減筆數無須改前端。無下游呼叫（不需 WebClient），落 BFF `anyExchange().authenticated()`（已登入者皆可讀）。
   - `CrawlerDataBffController`（CrawlerDataView 專屬，「公開資訊」分組，Requirement 38）：爬蟲資訊查詢頁，一頁一 BFF、WebClient 轉呼 business：
     - `GET /api/bff/crawler-data?date=YYYY-MM-DD&dateField=fetched|published&category=` → business `GET /api/news-headlines`：查指定日期爬回的 `news_headline`（與今日股市分析同讀一份表，符合「同義欄位、同一 business API」）。
     - `GET /api/bff/crawler-data/schedule` → business `GET /api/crawler-schedule?crawler=news-poller`：讀 NewsPoller 已設定的執行時間清單。
@@ -603,7 +603,7 @@ POST /internal/repair/history?market=%E5%8F%B0%E8%82%A1&from=2026-06-01&to=2026-
 | GET | `/internal/macro/us-index?code=` | 海外指數近 10 年每日 OHLC **＋成交量**（Yahoo v8 chart，`range=10y`）。`code ∈ {DJI, SPX, SP500TR, IXIC, SOX, FTSE, DAX, KOSPI, N225}`，回 `List<DailyOhlc>`（`volume` 取同一回應的 `indicators.quote[0].volume`，`value` 恆 null——Yahoo 無成交金額欄）。見「Macro History」對應資料表的 `us_index_daily_history` |
 | GET | `/internal/macro/twse-return-index?date=` | TWSE 發行量加權股價報酬指數（含息）單日收盤，回 `TwseReturnIndexPoint`；**非交易日 / 查無回 204 No Content**。見 Task 170「含息（total return）演算法與資料管線」 |
 | GET | `/internal/macro/index-intraday?market=` | 指數「當日」分時（Yahoo 5m，最新交易日；transient 不寫 DB）。`market ∈ {TWSE, DJI, SPX, IXIC, SOX, FTSE, DAX, KOSPI, N225}`，回 `List<IndexIntradayPoint>`。見「Macro History」的「當日」分時資料源段落 |
-| GET | `/internal/macro/treasury-yield?tenor=` | 美國公債殖利率近 10 年每日收盤（Yahoo v8 chart，`range=10y`）。`tenor ∈ {M3, Y5, Y10, Y30}` → `^IRX`／`^FVX`／`^TNX`／`^TYX`，回 `List<TreasuryYieldPoint>`。**Requirement 58／Task 275**，見「Macro History」對應資料表的 `treasury_yield_daily` |
+| GET | `/internal/macro/treasury-yield?year=YYYY` | 美國公債殖利率 M3/Y5/Y10/Y30 的完整 curve batches；美國財政部年度 CSV/XML 為 primary、Yahoo proxy 僅整批 fallback。回 batch id/date/provider/available-at basis/completeness 與四 tenor；tenor 過濾只能在完整 batch 選源後做。此 external-materials 查詢由 `X-Internal-Service-Token`（部署環境 secret）與 `X-User-Role=ADMIN` 的 `TreasuryYieldAdminFilter` 保護；business refresh/proxy 另由 business `AdminGateInterceptor` 的明確 `/internal/macro/treasury-yield/**` pattern 保護，未登入/非 ADMIN/缺 token 一律 fail-closed。此 service-to-service API 不進 BFF、不供瀏覽器直接呼叫。**Requirement 58／Task 275** |
 
 **個股估值（新 client，供 business 編排端 proxy 後 upsert `stock_valuation_daily`；不屬 `MacroDataFetchClient` 那一組）：**
 
@@ -613,14 +613,14 @@ POST /internal/repair/history?market=%E5%8F%B0%E8%82%A1&from=2026-06-01&to=2026-
 
 #### business-services Internal API（手動觸發，不排程、不進 BFF、不進前端）
 
-> **本服務此前沒有這類 `/internal` 抓取／作業端點**——實測 `grep -ran 'RequestMapping("/internal' backend/src` 只有 `UserAdminController` 的 `/internal/users`（受 `AdminGateInterceptor` 限 ADMIN）。下列端點為首批，須**明訂授權立場**：納入 `AdminGateInterceptor.addPathPatterns`，或刻意只靠「容器不對外映射 8080」（實測 `asset-business-services` 只有內部 `8080/tcp`，host 的 8080 是 `asset-bff`）。二選一寫死，因為驗收指令是在容器內裸打、不帶 `X-User-*` header。
+> **本服務此前沒有這類 `/internal` 抓取／作業端點**——實測 `grep -ran 'RequestMapping("/internal' backend/src` 只有 `UserAdminController` 的 `/internal/users`（受 `AdminGateInterceptor` 限 ADMIN）。下列端點分兩種授權拓撲，不能以一個 blanket `AdminGateInterceptor` 描述：估值回補是 business 維運端點，明確納入 `AdminGateInterceptor.addPathPatterns`；Treasury business proxy/refresh 同樣由 business AdminGate 保護，external Treasury 查詢則另由 shared token＋ADMIN role filter 保護。**`/internal/backtest/rules` 是唯一例外：純讀、分鐘級、只在 asset-net 內呼叫，刻意不掛 AdminGate，也不進 BFF；business 8080 不映射 host，故容器內驗收以 network boundary 為授權邊界。若日後對外映射 8080，必須先新增明確 AdminGate/token 保護再開放。**
 
 > ⚠ **本表的端點一律不得自行對外發 HTTP。** `spec/steering/structure.md` 的架構鐵則明訂「❌ business-services 直接打外部行情 / NAV / 配息 API（**一律經 external-materials**）」與「抓價邏輯不寄宿在 business-services」。需要外部資料時一律比照 `MacroHistoryService.refreshUsIndexDaily()` 的既有模式——經 `priceServiceClient` proxy 至 external-materials 的 `/internal/*`，再於 business 端 upsert。
 
 | Method | Path | 說明 |
 |--------|------|------|
 | POST | `/internal/backtest/rules` | 交易雷達規則回測（**Requirement 56／Task 273**）。逐日切片餵給同一支 `TradingRadarRuleEngine`，量測各述詞在 `+5`／`+20`／`+60`／`+240` 交易日的前瞻報酬分布與同標的同期間基準。可指定標的子集與日期區間；同一輸入得同一輸出。**純讀 DB ＋ 記憶體運算，不對外發任何請求**，故不涉上述鐵則。**分鐘級運算，刻意不掛任何使用者請求路徑**（掛上會拖垮交易雷達頁），消費者是「調門檻時的維護者」而非每日使用者 |
-| POST | `/internal/macro/treasury-yield/refresh?tenor=` | 美債殖利率手動回補／補救（**Requirement 58／Task 275**）：proxy 至 ext-materials 的 `/internal/macro/treasury-yield?tenor=` 後 upsert `treasury_yield_daily`。`tenor ∈ {M3, Y5, Y10, Y30}`，不帶參數時四個全跑。形狀比照 `MacroHistoryService.refreshUsIndexDaily()` |
+| POST | `/internal/macro/treasury-yield/refresh?year=YYYY` | 美債殖利率手動回補／補救（**Requirement 58／Task 275**）：proxy 至 ext-materials 的官方優先整批端點後 append/upsert immutable batches；省略 year 刷新 current year，受明確 `/internal/macro/treasury-yield/**` ADMIN gate 保護。 |
 | POST | `/internal/valuation/backfill?from=&to=` | 台股歷史估值回補的**編排端**（**Requirement 61／Task 278**）：逐日呼叫 external-materials 的 `/internal/valuation/twse-daily?date=`（**抓取與短 UA 落在該服務，business 端不得自行 curl TWSE**），取回後 upsert `stock_valuation_daily`。低頻單次、可指定起訖日、可從中斷處續跑。**不得新增 `@Scheduled`**，故排程列表頁不需新增項目 |
 
 ### Frontend Architecture (Vue 3)
@@ -1675,11 +1675,12 @@ GET    /api/bff/gdp-twse/index-intraday?market=TWSE   # 「當日」分時：回
   - 來源 Yahoo Finance v8 chart API（`005930.KS`/`000660.KS`，時區 Asia/Seoul），ext-materials `PriceFetchClient.fetchKrHistoricalRange` 以 curl 子程序（短 UA `Mozilla/5.0`）抓、`KrStockPoller`（每日 16:00 Asia/Taipei ＋開機 warmup）upsert
   - **與 `us_index_daily_history` 分表**（那張語意為「指數」）、**與 `stock_price_history` 分表**（那張為投組個股、market 分類驅動、涉持股/觀察）：本表僅存固定的海外參考個股收盤，語意獨立、不污染既有兩條線
 
-- `treasury_yield_daily`          ((tenor, trading_date) PK, yield_percent NUMERIC(10,4), updated_at) — **Requirement 58／Task 275**
-  - 美國公債殖利率曲線四個天期：`tenor ∈ {M3, Y5, Y10, Y30}`，來源 Yahoo Finance v8 chart API 的 `^IRX`／`^FVX`／`^TNX`／`^TYX`，經既有 `MacroDataFetchClient.fetchUsIndexDaily(code)` 抓取（`^` 須 URL-encode 為 `%5E`；短 UA `Mozilla/5.0`，長 Chrome UA 被 WAF 回 429）。實測（2026-08-01）四者各 **2514 筆**，涵蓋 2016-08-01 ~ 2026-07-31
+- `treasury_yield_batch` + `treasury_yield_daily` — **Requirement 58／Task 275**
+  - batch 保存 `curve_date/provider/source_url/available_at/availability_basis/fetched_at/complete/content_hash`；daily 以 `(batch_id,tenor)` PK 保存 `yield_percent` 與 `source_url`（Yahoo 四個 ticker 各自保留 URL，官方可共用 curve URL）。batch＋四 tenor 同一 transaction 原子落地，resolver 防禦性確認四個 distinct tenor 齊全。合法零利率可存，null/<0/>100 不存。batch-level complete 與 immutable content hash 確保一次 decision 的四 tenor 同 provider、同 revision
+  - 美國公債殖利率四個天期 `M3/Y5/Y10/Y30`；美國財政部 Daily Treasury Par Yield Curve Rates 年度 CSV/XML 為 primary。Yahoo `^IRX/^FVX/^TNX/^TYX` 僅為整批 fallback；partial official 永不進規則，完整 fallback 可用，complete official 到達後同日優先 official
   - **與 `us_index_daily_history` 分表**的理由：那張的欄位為 `open_point`／`high_point`／`low_point`／`close_point`，語意是「指數點數」；殖利率是**百分比**（`4.745` 代表 4.745%），量綱不同，混存會讓下游無從分辨一個 `4.745` 是點數還是百分率。另本表只需收盤殖利率，不需 OHLC
-  - **殖利率代碼另開 `TREASURY_YAHOO` Map ＋ `fetchTreasuryYieldDaily(tenor)`（Task 275 已定案）**：`US_INDEX_YAHOO` 與 `/internal/macro/us-index` 的 `code ∈ {9 個}` 值域**皆不動**。兩張表各 ≤ 10 對，故 `Map.of` 不必改（`java.util.Map.of` 的多載上限為 10 對，該 Map 現有 9 對——**只有**併入單一 Map 變 13 對時才必須改 `Map.ofEntries`，本專案不走該路徑）
-  - **`close` 為 null 的日子一律略過不寫**（實測 `^TNX` 約 0.04% 為 null，美股假日對齊造成），**不得以前一日的值回填**——回填會製造「利率連續數日不動」的假事實，而利率因子正是要偵測其變動；缺日由下游以「取最近一個有值的交易日」處理
+  - Yahoo fallback 代碼另開 `TREASURY_YAHOO`，不污染 `US_INDEX_YAHOO`；官方歷史初次重建 available-at 採 curve date 翌日 00:00 New York，proxy 採 curve date 18:00 New York，修正版採實際 fetched-at，全部明列 basis
+  - 任一 yield null／負值／非有限一律略過，不以前值回填；curve completeness 明示，decision-time resolver 只選當時 available 的單一 complete batch
   - 全域公開行情資料，比照 `stock_price_history` **不帶 `owner_user_id`、不套 `@Filter`**；寫入採 upsert（重複抓取須冪等）
 
 GDP 兩表 seed data 直接寫入 Liquibase changelog（歷史值不變）。
@@ -4261,7 +4262,7 @@ boolean stale = !todayEodPresent && !liveFreshToday;
 >
 > | 項目 | V9 當時的記載 | 現況（2026-08-01 實測） |
 > |---|---|---|
-> | **美債殖利率** | 「需新資料源」 | **資料已確認可得**：`^IRX`／`^FVX`／`^TNX`／`^TYX` 經 Yahoo v8 chart API 各回 **2514 筆**（2016-08-01 ~ 2026-07-31），管道即既有的 `MacroDataFetchClient.fetchUsIndexDaily()`。由 Requirement 58（t275）落地為 `treasury_yield_daily` 並接為 `BOND` 專屬因子。**台灣央行政策利率仍無確認的官方 API，維持不在範圍。** |
+> | **美債殖利率** | 「需新資料源」 | **資料已確認可得**：美國財政部 Daily Treasury Par Yield Curve Rates 為 t275 正式 primary source；先前 Yahoo `^IRX`／`^FVX`／`^TNX`／`^TYX` 各 2514 筆的盤點保留作 fallback 可行性證據。由 Requirement 58（t275）落地為 `treasury_yield_daily` 並先作 `BOND` candidate，只有 t308 樣本外通過才正式啟用。**台灣央行政策利率仍不在範圍。** |
 > | **個股基本面的歷史** | 「來源只給當期快照且 MOPS 禁爬」 | **須分兩半看**：EPS／ROE 的部分**記載正確且不變**（`mopsov.twse.com.tw/robots.txt` 實測為 `Disallow: /`，僅 bingbot 例外，只能自上線起累積）；但 **PE／PB／殖利率的歷史可回補**——`www.twse.com.tw/robots.txt` 實測 `/rwd/zh/afterTrading/` 落在 `Allow: /` 之下（僅禁 `/epaper/`、`/FTSE/`），`BWIBBU_d?date=20200102` 實回 941 筆、可回溯至 2005-09-02。由 Requirement 61（t278）落地。 |
 > | 美股／英股 | 仍只評估台股 | **美股半推翻、英股不變。** Requirement 64（Task 293／294／295）移除 `TradingRadarService.addTarget()` 對 `"美股"` 的排除，規則引擎、技術面、逆勢抄底狀態全部沿用同一套；新增的是美股專屬的「大盤情境」（IXIC 自身技術面，非台股 regime）與「基本面」（coverage 0..3，無月營收／產業因子）。**英股仍維持不評估**（無對應資料源規劃）。詳見下方新增小節「美股個股支援」。 |
 >
@@ -4308,7 +4309,7 @@ POST /internal/backtest/rules（手動觸發，不排程、不進 BFF、不進�
 
 > **⚠ 「`|bias|>20%` 的比例」不等於「極端態實際觸發率」。** `TimingState` 的極端態是**合取**（`EXTREME_OVERSOLD = KD 深度超賣 ∧ bias ≤ −20%`），且 KD 側在窄幅時被 `narrowKdBand` 整組停用。2327 的極端態真值是 **9.94%**，不是 23.45%。
 
-**六檔標的的極端態觸發率為 0.00%**（00719B／00865B／00697B／00695B／2412／00751B）——「極端超賣不殺低」對它們十年來從未生效。改以標的自身近 60 日日報酬標準差 `σ` 正規化：`normalizedBias = bias ÷ (σ × 100)`（`bias` 是百分比、`σ` 是比例，量綱必須對齊），門檻改以 `σ` 倍數表示。`σ` 須以還原序列計算、須有絕對下限、樣本不足時回退固定門檻並揭露。**原始 `ma60BiasPercent` 照常輸出不變**——被取代的只有「拿它比對固定門檻」這件事。
+**六檔標的的極端態觸發率為 0.00%**（00719B／00865B／00697B／00695B／2412／00751B）——「極端超賣不殺低」對它們十年來從未生效。V13 candidate 改以標的自身近 60 日日報酬標準差 `σ` 正規化：`normalizedBias = bias ÷ (σ × 100)`（`bias` 是百分比、`σ` 是比例，量綱必須對齊），門檻改以 `σ` 倍數表示。`σ` 由 `RadarInputAssembler` 對 adjusted completed rows 單一計算、須有 calibration-derived floor，樣本不足時回退固定門檻並降低 confidence。**原始 `ma60BiasPercent` 照常輸出不變**；V12 的 2/98 percentile 保留揭露，但 normalized path 啟用時不得再參與 action。t274 只建立 candidate，t308 holdout/walk-forward 通過後才正式啟用並一次升 V13。
 
 > **量綱**：`bias` 是 60 日尺度、`σ` 是單日尺度，相除帶約 `√(60/3) ≈ 4.47` 的放大，**合理門檻落在十倍量級而非 2–3σ**（實測 2σ 會讓 48.68%–79.43% 的交易日觸發）。正規化確實有效：`normalizedBias` 的 σ 收斂到 3.37–5.73（原始 bias σ 為 1.60–21.37）。
 
@@ -4515,6 +4516,34 @@ TradingRadarView（雙分頁：台股／美股，比照 WatchStockView.vue 的 m
 **其餘（t300／t303／t304／t305）：** ROE 標度放緩（`fundamentalDeteriorating` 組合門檻不變）；`assemble` 單次請求內以幣別 memoize `FxContext`（不引入跨 request 快取）；`taiexKd`／`nasdaqKd` 刪除、指數 KD 統一走 `kdSeriesAsc` 單趟（bit-identical，前綴相依論證見 `computeFromSeries` 註解）；雙軌因子貢獻與文案一次計算、兩軌各自加權（輸出逐位不變）。
 
 **明確不在本次範圍：** 大盤 `evaluateMarket` 與個股雙軌方法論統一（regime 是全部個股買進閘門的上游，回歸風險不成比例）；K>85 過熱否決門檻（使用者明示的風險偏好取捨，非實證，已明文記載）。新引入的門檻（OSC 全幅與文案門檻、乖離分位與最少樣本、ROE 斜率、冷卻分鐘數）皆無量測依據，比照 Requirement 56 記載為判斷性取值。
+
+### V13 證據品質、資產專屬因子與樣本外校準（Requirement 65，t274／t275／t307–t309）
+
+V13 不再把「可計算的 opportunity score」等同於「足以採取行動」。單次評估的資料流分為四層，依賴方向維持由 IO adapter 指向純規則：
+
+```text
+PostgreSQL／Redis adapters
+  → RadarObservationResolver（只決定 value／asOf／source／quality，不打分）
+  → RadarInputAssembler／FundamentalAnalysisService／BondRateFactorService（純特徵）
+  → TradingRadarRuleEngine（opportunity／downside／confidence／action gate）
+  → TradingRadarDto／快照／Excel／Vue（只呈現，不重算）
+```
+
+**觀測時效與同源價格。** `TradingRadarService.buildStock` 不再分別以 raw `getLive()` 當規則價、`getDisplayPrice()` 當顯示價。新的 resolver 先以 `decisionInstant` 與 `MarketZones.resolve(market)` 決定市場當地日期，再接受「日期符合且將被 `shouldAddLiveRow` 併入」的 Redis live；否則只使用最新可信完成列。相同的 accepted price 同時供 `RadarInputAssembler`、MA/BIAS/52 週位置、規則 `price` 與使用者可見價，避免不同日期混搭。pending quote 可顯示空值，但不得借用更舊價冒充當日判斷。
+
+ETF premium 改由 dated observation record 傳遞，Redis 與 repository 都回 `premiumPct/navDate/source`；resolver 以該市場完成日與 decision instant 驗證。`TradingRadarRuleEngine` 只收到已通過時效閘門的值，stale observation 不得進 3% veto。外幣底層台股債券的 `underlying_currency` 缺漏由 master-data validation 標為 `currencyDataComplete=false`，不再 fallback TWD；00695B／00751B／00865B 以 idempotent data migration 補 USD。
+
+**三軌結果。** `TradingRadarRuleEngine.StockResult` 在既有短／中期 opportunity score 之外，新增每軌 `downsideRisk` 與 `evidenceConfidence`。risk 只聚合可獨立驗證的過熱、波動、事件、流動性與資料 stale 風險；confidence 只聚合 evidence group coverage/freshness，不看方向。群組為 `PRICE_TECHNICAL`、`MARKET_LIQUIDITY`、`VALUATION`、`FINANCIAL_OPERATING`、`ASSET_SPECIFIC`、`PUBLIC_EVENT`；不適用群組從分母排除，缺漏群組保持 missing，不以中性代替。`actionFor` 先依 opportunity/timing 形成 candidate，再由 confidence policy 向保守方向降級；不得反向把低信心升級。
+
+**估值與財報。** `FundamentalAnalysisService.ValuationRow` 讀同一 observation 的 PE／PB／`dividend_yield_pct`，各自在同 provider 有效歷史中計算分位，再合成單一 valuation contribution，沿用原 PE 權重位置。可信虧損或營運惡化時殖利率正貢獻失效。ROE 使用 TTM 母公司淨利除以期初／期末平均權益；期初缺漏才可使用最新權益 fallback 並降低 confidence。EPS 以 categorical transition 承接負基期（虧轉盈／盈轉虧／持續虧損），與可計算的 YoY 共用單一 EPS contribution。
+
+**波動與債券。** `RadarInputAssembler` 以還原序列計算近 60 個日報酬的 ratio 樣本標準差；`biasRatio=ma60BiasPercent/100`，只有 raw sigma>0 才可套 calibration floor，normalized=`biasRatio/effectiveSigmaRatio`。t274 路徑啟用時取代 V12 2/98 action 路徑。Treasury 以 batch/daily 兩表保存 complete provider snapshot與 conservative available-at；同一次判斷四 tenor 不混源。台灣掛牌外幣債的 return beta 控制同期 USD/TWD；美國掛牌 USD 債不控制 USD/TWD。strict bond term UNKNOWN、樣本或跨窗穩定度不足皆回 missing，不猜 duration。
+
+**公開資訊與事件。** `PublicInfoEvidenceResolver.resolve` 接收 market，台股只讀 TW/null，美股只讀 US/null；一般新聞只作 evidence。配息採 `stock_dividend_snapshot`＋event rows＋append-only fetch observation：resolver 取 decision instant 前最新完整、scope 足夠的單一 snapshot；新完整 snapshot 未含舊 future event即為取消，改期為舊取消＋新 active。`stock_dividend_history` 是 finalized current-state，另有 ACTIVE/CANCELLED。Upcoming scope 的時間窗固定為 `[decisionDate, decisionDate+45d]`，由 `MarketDividendUpcomingScopeClient` 先查台股 TWSE/TPEx 官方日曆或 Nasdaq；官方結果完整時不得再以其他 provider 覆寫。官方不可用時，才由 `DividendFetchClient.fetchProviderUpcomingScope` 以同一 bounded window 查 FinMind（台股）或 Yahoo（美股）並回傳 provider/source/as-of；provider 必須對該完整範圍明確回覆，不能把歷史請求的 HTTP 200、部分事件或 transport failure 靜默轉成「無事件」。partial／failure 一律保留 incomplete evidence，且不得遞迴呼叫 upcoming-scope router。所有 upcoming observations 與 finalized current-state 分開保存，取消與改期依 append-only event 規則處理。IXIC/SOX/SPX/DJI、index volume、法人與商品先轉 typed numeric `CandidateMarketFeature`，逐項有 conservative available-at；法人數值落 `twse_institutional_daily`，禁止從新聞字串反解析。與既有 regime/turnover/FX 同義者 rejected/disclosure-only。
+
+**回測與啟用閘門。** 訊號在 completed close `t` 形成，主要 execution 為 adjusted open `t+1→t+1+h`；missing open 排除主要結果，close 只作獨立 sensitivity。每個 market/horizon 以所有標的共用的 global session-date cutoff 切 70/30，禁止每檔各切；walk-forward 亦用全域 expanding dates。candidate/baseline 比較使用相同 code/date intersection，echo 完整成本假設與 gross/net。promotion 需 minimum n/codes、practical return 或 downside 改善、至少 3 valid folds與 60% fold 一致性；未達一律 disclosure。舊獲利了結只改列高動能風險，REDUCE 另需結構與 momentum/liquidity 兩類轉弱及 calibrated downside。
+
+**API 與版本。** `StockDecision`／snapshot／Excel／JSON 新增兩軌 opportunity/downside/confidence/riskCoverage、component/evidence groups、accepted price/premium provenance、strict AssetProfile、`returnStdDev60Ratio`／normalized bias、rate batch context、next distribution 與 valuation coverage。Vue 只顯示，不重算。t274、t275、t307–t309 同一 feature 分支，最後只升 `TW_RULES_V13` 一次；通知 mismatch 首輪只建 baseline、不寄信。中途不得部署半套 V13。
 
 ### 逆勢抄底狀態（獨立第二軌）
 

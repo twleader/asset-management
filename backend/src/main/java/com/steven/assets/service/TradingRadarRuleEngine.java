@@ -4,8 +4,10 @@ import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * 今日交易雷達（Requirement 43）的純規則引擎。
@@ -24,6 +26,10 @@ public class TradingRadarRuleEngine {
      * 使低波動標的的保護不再形同虛設（Task 299）。V12 與 V11 分數不可直接比較。
      */
     public static final String RULE_VERSION = "TW_RULES_V12";
+
+    /** 現行 production 分層；candidate API 會改讀不可變 RuleParameters，既有入口仍固定這組。 */
+    private static final RuleParameters.ActionThresholds V12_ACTION_THRESHOLDS =
+            new RuleParameters.ActionThresholds(75, 55, 40, 25);
 
     // ─── V12 雙軌因子權重（Requirement 43／59／60，Task 291／292／298）────────
     private static final double SW_MA5 = 0.05;
@@ -266,8 +272,16 @@ public class TradingRadarRuleEngine {
             Double revenueContribution,
             Double peContribution,
             Double industryContribution,
-            boolean peLoss
+            boolean peLoss,
+            boolean roeApproximationFallback
     ) {
+        public FundamentalInput(boolean applicable, Double epsContribution, Double roeContribution,
+                                Double revenueContribution, Double peContribution,
+                                Double industryContribution, boolean peLoss) {
+            this(applicable, epsContribution, roeContribution, revenueContribution, peContribution,
+                    industryContribution, peLoss, false);
+        }
+
         public static final FundamentalInput NOT_APPLICABLE =
                 new FundamentalInput(false, null, null, null, null, null, false);
     }
@@ -356,6 +370,304 @@ public class TradingRadarRuleEngine {
         }
     }
 
+    /**
+     * Immutable volatility-normalized BIAS observation shared by the candidate
+     * score and candidate timing paths.  {@code rawBiasRatio} is the percentage
+     * BIAS converted to ratio (10% =&gt; 0.10); {@code rawSigmaRatio} remains the
+     * realized daily-return ratio.  A positive but tiny sigma may use the
+     * calibrated floor; a missing/non-positive sigma is never fabricated by the
+     * floor and instead marks the observation as a fixed-threshold fallback.
+     */
+    public record NormalizedBiasObservation(
+            BigDecimal rawBiasRatio,
+            BigDecimal rawSigmaRatio,
+            BigDecimal sigmaFloorRatio,
+            BigDecimal effectiveSigmaRatio,
+            BigDecimal normalizedBias,
+            LocalDate asOfDate,
+            boolean volatilityFallback,
+            String reason) {
+        public NormalizedBiasObservation {
+            sigmaFloorRatio = sigmaFloorRatio == null ? BigDecimal.ZERO : sigmaFloorRatio;
+            if (sigmaFloorRatio.signum() < 0) {
+                throw new IllegalArgumentException("sigmaFloorRatio 不可為負");
+            }
+        }
+
+        public boolean available() {
+            return normalizedBias != null && effectiveSigmaRatio != null
+                    && effectiveSigmaRatio.signum() > 0 && !volatilityFallback;
+        }
+
+        public boolean floorApplied() {
+            return rawSigmaRatio != null && rawSigmaRatio.signum() > 0
+                    && sigmaFloorRatio.signum() > 0
+                    && rawSigmaRatio.compareTo(sigmaFloorRatio) < 0;
+        }
+
+        /** Build from the user-facing percentage BIAS and ratio sigma. */
+        public static NormalizedBiasObservation from(
+                BigDecimal biasPercent,
+                BigDecimal rawSigmaRatio,
+                BigDecimal sigmaFloorRatio,
+                LocalDate asOfDate) {
+            BigDecimal floor = sigmaFloorRatio == null ? BigDecimal.ZERO : sigmaFloorRatio;
+            BigDecimal rawBiasRatio = biasPercent == null
+                    ? null : biasPercent.movePointLeft(2);
+            if (rawBiasRatio == null) {
+                return new NormalizedBiasObservation(rawBiasRatio, rawSigmaRatio, floor, null,
+                        null, asOfDate, true, "bias_missing");
+            }
+            if (rawSigmaRatio == null || rawSigmaRatio.signum() <= 0
+                    || !finite(rawSigmaRatio)) {
+                return new NormalizedBiasObservation(rawBiasRatio, rawSigmaRatio, floor, null,
+                        null, asOfDate, true, "sigma_missing_or_non_positive");
+            }
+            BigDecimal effective = rawSigmaRatio.max(floor);
+            if (effective.signum() <= 0 || !finite(effective)) {
+                return new NormalizedBiasObservation(rawBiasRatio, rawSigmaRatio, floor, null,
+                        null, asOfDate, true, "sigma_effective_non_positive");
+            }
+            BigDecimal normalized = rawBiasRatio.divide(effective, 12, RoundingMode.HALF_UP);
+            String reason = rawSigmaRatio.compareTo(floor) < 0
+                    ? "sigma_floor_applied" : null;
+            return new NormalizedBiasObservation(rawBiasRatio, rawSigmaRatio, floor, effective,
+                    normalized, asOfDate, false, reason);
+        }
+
+        private static boolean finite(BigDecimal value) {
+            if (value == null) return false;
+            double d = value.doubleValue();
+            return !Double.isNaN(d) && !Double.isInfinite(d);
+        }
+    }
+
+    /**
+     * Immutable per-decision provenance for the volatility-normalized BIAS path.  The
+     * observation is deliberately echoed even when unavailable: consumers can distinguish a
+     * missing sigma from an explicitly disabled candidate instead of inferring either state from
+     * a null score or from aggregate calibration metadata.
+     */
+    public record NormalizedBiasProvenance(
+            boolean enabled,
+            BigDecimal rawBiasRatio,
+            BigDecimal rawSigmaRatio,
+            BigDecimal sigmaFloorRatio,
+            BigDecimal effectiveSigmaRatio,
+            BigDecimal normalizedBias,
+            LocalDate asOfDate,
+            boolean volatilityFallback,
+            boolean floorApplied,
+            String reason
+    ) {
+        public static NormalizedBiasProvenance disabled() {
+            return new NormalizedBiasProvenance(false, null, null, null, null, null,
+                    null, false, false, "NORMALIZED_PATH_DISABLED");
+        }
+
+        public static NormalizedBiasProvenance from(
+                boolean enabled, NormalizedBiasObservation observation) {
+            if (!enabled) return disabled();
+            if (observation == null) {
+                return new NormalizedBiasProvenance(true, null, null, null, null, null,
+                        null, true, false, "observation_missing");
+            }
+            return new NormalizedBiasProvenance(true, observation.rawBiasRatio(),
+                    observation.rawSigmaRatio(), observation.sigmaFloorRatio(),
+                    observation.effectiveSigmaRatio(), observation.normalizedBias(),
+                    observation.asOfDate(), observation.volatilityFallback(),
+                    observation.floorApplied(), observation.reason());
+        }
+    }
+
+    /**
+     * Task 308 candidate 的樣本日 context。所有欄位都必須來自 signal instant 前可得資料；
+     * downside 僅能來自 next-open primary calibration，close sensitivity 不得傳入本欄位。
+     * 此型別不被現行 production 入口使用，因此建立 candidate 不會暗中升版。
+     */
+    public record CandidateContext(
+            boolean priceFresh,
+            boolean marketFresh,
+            BigDecimal confidence,
+            BigDecimal shortDownsideRiskPct,
+            BigDecimal mediumDownsideRiskPct,
+            Double shortTreasuryContribution,
+            Double mediumTreasuryContribution,
+            /** signal instant 前 60 日報酬 σ ratio（0.02 代表 2%）；缺值時 normalized bias 不採計。 */
+            BigDecimal normalizedBiasSigmaRatio,
+            /** EvidenceConfidenceResolver 分別計算的短／中期 confidence（0..1）。 */
+            BigDecimal shortConfidence,
+            BigDecimal mediumConfidence,
+            /** full-engine candidate 使用的完整 evidence gate 輸入。 */
+            TradingRadarEvidenceConfidenceResolver.Evidence evidence,
+            /** strict asset profile；用於個股基本面／適用資產 gate。 */
+            TradingRadarAssetProfileResolver.AssetProfile profile,
+            /** typed market candidates；V13 candidate 可依校準權重計分，V12 不受影響。 */
+            TradingRadarMarketFeatureResolver.Evidence marketFeatures,
+            /** per-instrument Treasury beta evidence；MISSING/非穩定時不得轉成分數。 */
+            BondYieldBetaResolver.Result bondYieldBeta,
+            /** candidate-only aggregate of non-duplicate AVAILABLE market features. */
+            Double shortMarketFeatureContribution,
+            /** candidate-only aggregate of non-duplicate AVAILABLE market features. */
+            Double mediumMarketFeatureContribution,
+            /** volatility observation as-of date; kept separate from accepted-price provenance. */
+            LocalDate normalizedBiasAsOfDate,
+            /** train/request sigma profile availability; positive row sigma alone is insufficient. */
+            boolean sigmaProfileAvailable
+    ) {
+        /** Compatibility shape before train-fold sigma-profile provenance was explicit. */
+        public CandidateContext(
+                boolean priceFresh,
+                boolean marketFresh,
+                BigDecimal confidence,
+                BigDecimal shortDownsideRiskPct,
+                BigDecimal mediumDownsideRiskPct,
+                Double shortTreasuryContribution,
+                Double mediumTreasuryContribution,
+                BigDecimal normalizedBiasSigmaRatio,
+                BigDecimal shortConfidence,
+                BigDecimal mediumConfidence,
+                TradingRadarEvidenceConfidenceResolver.Evidence evidence,
+                TradingRadarAssetProfileResolver.AssetProfile profile,
+                TradingRadarMarketFeatureResolver.Evidence marketFeatures,
+                BondYieldBetaResolver.Result bondYieldBeta,
+                Double shortMarketFeatureContribution,
+                Double mediumMarketFeatureContribution,
+                LocalDate normalizedBiasAsOfDate) {
+            this(priceFresh, marketFresh, confidence, shortDownsideRiskPct, mediumDownsideRiskPct,
+                    shortTreasuryContribution, mediumTreasuryContribution, normalizedBiasSigmaRatio,
+                    shortConfidence, mediumConfidence, evidence, profile, marketFeatures,
+                    bondYieldBeta, shortMarketFeatureContribution, mediumMarketFeatureContribution,
+                    normalizedBiasAsOfDate, true);
+        }
+
+        /** Immutable copy with fold-local calibration profile availability. */
+        public CandidateContext withSigmaProfileAvailable(boolean available) {
+            return new CandidateContext(priceFresh, marketFresh, confidence,
+                    shortDownsideRiskPct, mediumDownsideRiskPct, shortTreasuryContribution,
+                    mediumTreasuryContribution, normalizedBiasSigmaRatio, shortConfidence,
+                    mediumConfidence, evidence, profile, marketFeatures, bondYieldBeta,
+                    shortMarketFeatureContribution, mediumMarketFeatureContribution,
+                    normalizedBiasAsOfDate, available);
+        }
+
+        /** Compatibility shape before normalized-bias provenance date was explicit. */
+        public CandidateContext(
+                boolean priceFresh,
+                boolean marketFresh,
+                BigDecimal confidence,
+                BigDecimal shortDownsideRiskPct,
+                BigDecimal mediumDownsideRiskPct,
+                Double shortTreasuryContribution,
+                Double mediumTreasuryContribution,
+                BigDecimal normalizedBiasSigmaRatio,
+                BigDecimal shortConfidence,
+                BigDecimal mediumConfidence,
+                TradingRadarEvidenceConfidenceResolver.Evidence evidence,
+                TradingRadarAssetProfileResolver.AssetProfile profile,
+                TradingRadarMarketFeatureResolver.Evidence marketFeatures,
+                BondYieldBetaResolver.Result bondYieldBeta,
+                Double shortMarketFeatureContribution,
+                Double mediumMarketFeatureContribution) {
+            this(priceFresh, marketFresh, confidence, shortDownsideRiskPct, mediumDownsideRiskPct,
+                    shortTreasuryContribution, mediumTreasuryContribution, normalizedBiasSigmaRatio,
+                    shortConfidence, mediumConfidence, evidence, profile, marketFeatures,
+                    bondYieldBeta, shortMarketFeatureContribution, mediumMarketFeatureContribution, null, true);
+        }
+
+        public CandidateContext(
+                boolean priceFresh,
+                boolean marketFresh,
+                BigDecimal confidence,
+                BigDecimal shortDownsideRiskPct,
+                BigDecimal mediumDownsideRiskPct,
+                Double shortTreasuryContribution,
+                Double mediumTreasuryContribution) {
+            this(priceFresh, marketFresh, confidence, shortDownsideRiskPct, mediumDownsideRiskPct,
+                    shortTreasuryContribution, mediumTreasuryContribution, null,
+                    confidence, confidence, null, null, null, null, null, null, null, true);
+        }
+
+        /** normalized-bias 版本的相容建構式；evidence/profile 未提供時不啟用 evidence gate。 */
+        public CandidateContext(
+                boolean priceFresh,
+                boolean marketFresh,
+                BigDecimal confidence,
+                BigDecimal shortDownsideRiskPct,
+                BigDecimal mediumDownsideRiskPct,
+                Double shortTreasuryContribution,
+                Double mediumTreasuryContribution,
+                BigDecimal normalizedBiasSigmaRatio) {
+            this(priceFresh, marketFresh, confidence, shortDownsideRiskPct, mediumDownsideRiskPct,
+                    shortTreasuryContribution, mediumTreasuryContribution, normalizedBiasSigmaRatio,
+                    confidence, confidence, null, null, null, null, null, null, null, true);
+        }
+
+        /** Compatibility shape before candidate market feature contributions were explicit. */
+        public CandidateContext(
+                boolean priceFresh,
+                boolean marketFresh,
+                BigDecimal confidence,
+                BigDecimal shortDownsideRiskPct,
+                BigDecimal mediumDownsideRiskPct,
+                Double shortTreasuryContribution,
+                Double mediumTreasuryContribution,
+                BigDecimal normalizedBiasSigmaRatio,
+                BigDecimal shortConfidence,
+                BigDecimal mediumConfidence,
+                TradingRadarEvidenceConfidenceResolver.Evidence evidence,
+                TradingRadarAssetProfileResolver.AssetProfile profile,
+                TradingRadarMarketFeatureResolver.Evidence marketFeatures,
+                BondYieldBetaResolver.Result bondYieldBeta) {
+            this(priceFresh, marketFresh, confidence, shortDownsideRiskPct, mediumDownsideRiskPct,
+                    shortTreasuryContribution, mediumTreasuryContribution, normalizedBiasSigmaRatio,
+                    shortConfidence, mediumConfidence, evidence, profile, marketFeatures,
+                    bondYieldBeta, null, null, null, true);
+        }
+
+        public CandidateContext {
+            validateCandidateRange(confidence, BigDecimal.ZERO, BigDecimal.ONE, "confidence");
+            validateCandidateRange(shortConfidence, BigDecimal.ZERO, BigDecimal.ONE, "shortConfidence");
+            validateCandidateRange(mediumConfidence, BigDecimal.ZERO, BigDecimal.ONE, "mediumConfidence");
+            validateCandidateRange(shortDownsideRiskPct, BigDecimal.ZERO, BigDecimal.valueOf(100),
+                    "shortDownsideRiskPct");
+            validateCandidateRange(mediumDownsideRiskPct, BigDecimal.ZERO, BigDecimal.valueOf(100),
+                    "mediumDownsideRiskPct");
+            validateCandidateRange(normalizedBiasSigmaRatio, BigDecimal.ZERO, BigDecimal.TEN,
+                    "normalizedBiasSigmaRatio");
+            validateContribution(shortTreasuryContribution, "shortTreasuryContribution");
+            validateContribution(mediumTreasuryContribution, "mediumTreasuryContribution");
+            marketFeatures = marketFeatures == null
+                    ? TradingRadarMarketFeatureResolver.Evidence.empty(null, null,
+                    "market feature resolver 未建立") : marketFeatures;
+            bondYieldBeta = bondYieldBeta == null
+                    ? BondYieldBetaResolver.Result.missing(null, "bond beta evidence 未建立") : bondYieldBeta;
+            TradingRadarMarketFeatureResolver.AggregatedContribution aggregate =
+                    marketFeatures.aggregateContribution(profile);
+            if (shortMarketFeatureContribution == null) {
+                shortMarketFeatureContribution = aggregate.shortTerm();
+            }
+            if (mediumMarketFeatureContribution == null) {
+                mediumMarketFeatureContribution = aggregate.mediumTerm();
+            }
+            validateContribution(shortMarketFeatureContribution, "shortMarketFeatureContribution");
+            validateContribution(mediumMarketFeatureContribution, "mediumMarketFeatureContribution");
+        }
+
+        private static void validateContribution(Double value, String field) {
+            if (value != null && (!Double.isFinite(value) || value < -1.0 || value > 1.0)) {
+                throw new IllegalArgumentException(field + " 必須介於 -1..1");
+            }
+        }
+
+        private static void validateCandidateRange(
+                BigDecimal value, BigDecimal min, BigDecimal max, String field) {
+            if (value != null && (value.compareTo(min) < 0 || value.compareTo(max) > 0)) {
+                throw new IllegalArgumentException(field + " 必須介於 " + min + ".." + max);
+            }
+        }
+    }
+
     public record MarketResult(
             Integer score,
             MarketRegime regime,
@@ -395,8 +707,34 @@ public class TradingRadarRuleEngine {
             List<String> shortReasons,
             List<String> shortRisks,
             boolean horizonConflict,
-            boolean profitTakingConfirmed
-    ) {}
+            boolean profitTakingConfirmed,
+            /** Per-row medium-horizon normalized-BIAS provenance; null only for legacy callers. */
+            NormalizedBiasProvenance normalizedBias,
+            /** Per-row short-horizon normalized-BIAS provenance; null only for legacy callers. */
+            NormalizedBiasProvenance shortNormalizedBias
+    ) {
+        /** Compatibility constructor for pre-provenance engine/test callers. */
+        public StockResult(
+                Integer score,
+                Action action,
+                CounterTrendResult counterTrend,
+                List<String> reasons,
+                List<String> risks,
+                KdHeat kdHeat,
+                TimingState timingState,
+                boolean kdDeadCross,
+                boolean longTermBroken,
+                Integer shortScore,
+                Action shortAction,
+                List<String> shortReasons,
+                List<String> shortRisks,
+                boolean horizonConflict,
+                boolean profitTakingConfirmed) {
+            this(score, action, counterTrend, reasons, risks, kdHeat, timingState,
+                    kdDeadCross, longTermBroken, shortScore, shortAction, shortReasons,
+                    shortRisks, horizonConflict, profitTakingConfirmed, null, null);
+        }
+    }
 
     public record CounterTrendResult(
             CounterTrendState state,
@@ -502,6 +840,114 @@ public class TradingRadarRuleEngine {
     }
 
     public StockResult evaluateStock(StockInput input) {
+        return evaluateStockInternal(input, null, null);
+    }
+
+    /**
+     * Offline V13 comparison baseline: preserve the exact V12 factor/threshold
+     * output, then apply the same evidence gate used by candidate actions.  This
+     * is deliberately not the production {@link #evaluateStock} path, so missing
+     * evidence cannot alter today's V12 runtime semantics.
+     */
+    public StockResult evaluateBaseline(
+            StockInput input, CandidateContext context) {
+        StockResult raw = evaluateStock(input);
+        if (context == null || context.evidence() == null) return raw;
+        TradingRadarEvidenceGate.GatedActions gated = TradingRadarEvidenceGate.apply(
+                raw.action(), raw.shortAction(), input.held(), context.profile(), context.evidence());
+        List<String> mediumReasons = new ArrayList<>(raw.reasons());
+        List<String> mediumRisks = new ArrayList<>(raw.risks());
+        List<String> shortReasons = new ArrayList<>(raw.shortReasons());
+        List<String> shortRisks = new ArrayList<>(raw.shortRisks());
+        mediumRisks.addAll(gated.reasons());
+        shortRisks.addAll(gated.reasons());
+        return new StockResult(
+                raw.score(), gated.mediumAction(), raw.counterTrend(),
+                List.copyOf(mediumReasons), List.copyOf(mediumRisks), raw.kdHeat(), raw.timingState(),
+                raw.kdDeadCross(), raw.longTermBroken(), raw.shortScore(), gated.shortAction(),
+                List.copyOf(shortReasons), List.copyOf(shortRisks), raw.horizonConflict(),
+                raw.profitTakingConfirmed(), raw.normalizedBias(), raw.shortNormalizedBias());
+    }
+
+    /**
+     * 離線 calibration/holdout 專用：以 candidate 參數重跑完整因子、score、action 與 gate。
+     * production 不得直接呼叫此方法，必須經 {@link #evaluatePromoted} 的 registry fallback。
+     */
+    public StockResult evaluateCandidate(
+            StockInput input, RuleParameters parameters, CandidateContext context) {
+        Objects.requireNonNull(parameters, "parameters");
+        Objects.requireNonNull(context, "context");
+        if (!RuleParameters.V13_VERSION.equals(parameters.ruleVersion())) {
+            throw new IllegalArgumentException("candidate evaluation 必須使用 TW_RULES_V13 參數");
+        }
+        return evaluateStockInternal(input, parameters, context);
+    }
+
+    /**
+     * production 唯一的 V13 入口：registry 未通過或缺 evidence 時 resolve 成 V12，直接走既有引擎。
+     */
+    /**
+     * @deprecated A single production key cannot safely identify both horizons.  This overload is
+     * retained for source compatibility and deliberately delegates the same key to both tracks;
+     * callers must migrate to the five-argument track-scoped overload to prevent cross-horizon
+     * promotion.
+     */
+    @Deprecated(forRemoval = false)
+    public StockResult evaluatePromoted(
+            StockInput input,
+            TradingRadarV13PromotionRegistry registry,
+            TradingRadarV13PromotionRegistry.ProductionKey key,
+            CandidateContext context) {
+        return evaluatePromoted(input, registry, key, key, context);
+    }
+
+    /**
+     * Track-scoped production entry point.  Short and medium promotion keys are
+     * resolved independently: a rejected/missing key falls back to the exact V12
+     * horizon while the other horizon may still use its promoted V13 candidate.
+     * This prevents a medium-track promotion from silently changing short actions
+     * (or vice versa).  When both keys fall back, the original V12 object is
+     * returned directly so all fields remain bit-identical to {@link #evaluateStock}.
+     */
+    public StockResult evaluatePromoted(
+            StockInput input,
+            TradingRadarV13PromotionRegistry registry,
+            TradingRadarV13PromotionRegistry.ProductionKey shortKey,
+            TradingRadarV13PromotionRegistry.ProductionKey mediumKey,
+            CandidateContext context) {
+        Objects.requireNonNull(registry, "registry");
+        Objects.requireNonNull(shortKey, "shortKey");
+        Objects.requireNonNull(mediumKey, "mediumKey");
+
+        boolean shortPromoted = registry.isPromoted(shortKey)
+                && RuleParameters.V13_VERSION.equals(registry.resolve(shortKey).ruleVersion());
+        boolean mediumPromoted = registry.isPromoted(mediumKey)
+                && RuleParameters.V13_VERSION.equals(registry.resolve(mediumKey).ruleVersion());
+        if (!shortPromoted && !mediumPromoted) {
+            return evaluateStock(input);
+        }
+
+        CandidateContext requiredContext = Objects.requireNonNull(context, "context");
+        StockResult medium = mediumPromoted
+                ? evaluateCandidate(input, registry.resolve(mediumKey), requiredContext)
+                : evaluateStock(input);
+        StockResult shortTerm = shortPromoted
+                ? evaluateCandidate(input, registry.resolve(shortKey), requiredContext)
+                : evaluateStock(input);
+        return composeTrackScopedResult(medium, shortTerm);
+    }
+
+    private StockResult composeTrackScopedResult(StockResult medium, StockResult shortTerm) {
+        return new StockResult(
+                medium.score(), medium.action(), medium.counterTrend(), medium.reasons(), medium.risks(),
+                medium.kdHeat(), medium.timingState(), medium.kdDeadCross(), medium.longTermBroken(),
+                shortTerm.shortScore(), shortTerm.shortAction(), shortTerm.shortReasons(), shortTerm.shortRisks(),
+                actionGroup(medium.action()) != actionGroup(shortTerm.shortAction()),
+                medium.profitTakingConfirmed(), medium.normalizedBias(), shortTerm.shortNormalizedBias());
+    }
+
+    private StockResult evaluateStockInternal(
+            StockInput input, RuleParameters candidate, CandidateContext context) {
         if (!complete(input)) {
             // kdDeadCross／longTermBroken 一律填 false：資料不完整代表「無法判定」，
             // 不得改呼叫 kdDeadCross(input)——那在 indicators 為 null 時會回到「偶然的 false」，
@@ -510,27 +956,51 @@ public class TradingRadarRuleEngine {
                     new CounterTrendResult(CounterTrendState.NONE, List.of(), List.of()), List.of(),
                     List.of("個股必要的 MA20／60／240、KD、241 根完成日 K 或大盤資料不足，今日不交易。"),
                     KdHeat.NORMAL, TimingState.NEUTRAL, false, false,
-                    null, Action.NO_TRADE, List.of(),
-                    List.of("必要資料不足，短期軌今日不交易。"), false, false);
+                null, Action.NO_TRADE, List.of(),
+                    List.of("必要資料不足，短期軌今日不交易。"), false, false,
+                    candidate == null || !candidate.normalizedBiasEnabled()
+                            ? NormalizedBiasProvenance.disabled()
+                            : NormalizedBiasProvenance.from(true, null),
+                    candidate == null || !candidate.normalizedBiasEnabled()
+                            ? NormalizedBiasProvenance.disabled()
+                            : NormalizedBiasProvenance.from(true, null));
         }
 
         boolean narrowBand = narrowKdBand(input);
         KdHeat kdHeat = kdHeatOf(input);
-        TimingState timing = timingOf(input);
+        boolean normalizedEnabled = candidate != null && candidate.normalizedBiasEnabled();
+        NormalizedBiasObservation normalizedBias = !normalizedEnabled
+                ? null : normalizedBiasObservation(input, context, candidate);
+        TimingState timing = !normalizedEnabled
+                ? timingOf(input)
+                : timingOf(input, normalizedBias, candidate);
         boolean profitTaking = profitTakingConfirmed(input, timing);
+        boolean deadCross = kdDeadCross(input);
 
         // 因子貢獻與其文案只算一次，兩軌各自加權累加（Task 305）：避免逐檔重算兩遍，
         // 更避免日後只改其中一軌路徑上的貢獻函數呼叫，導致兩軌靜默分岔。
         FactorContributions factors = computeFactors(input, narrowBand, kdHeat);
-        HorizonScore medium = evaluateHorizon(input, false, factors, kdHeat, timing, profitTaking);
-        HorizonScore shortTerm = evaluateHorizon(input, true, factors, kdHeat, timing, profitTaking);
+        HorizonScore medium = evaluateHorizon(input, false, factors, kdHeat, timing, profitTaking,
+                candidate, context == null ? null : context.mediumTreasuryContribution(), context,
+                normalizedBias);
+        HorizonScore shortTerm = evaluateHorizon(input, true, factors, kdHeat, timing, profitTaking,
+                candidate, context == null ? null : context.shortTreasuryContribution(), context,
+                normalizedBias);
+        if (candidate != null) {
+            medium = applyCandidatePolicy(input, medium, candidate, context,
+                    context.mediumDownsideRiskPct(), deadCross, profitTaking, false);
+            shortTerm = applyCandidatePolicy(input, shortTerm, candidate, context,
+                    context.shortDownsideRiskPct(), deadCross, profitTaking, true);
+        }
         CounterTrendResult counterTrend = evaluateCounterTrend(input);
         return new StockResult(
                 medium.score(), medium.action(), counterTrend,
                 medium.reasons(), medium.risks(), kdHeat, timing,
-                kdDeadCross(input), longTermBroken(input),
+                deadCross, longTermBroken(input),
                 shortTerm.score(), shortTerm.action(), shortTerm.reasons(), shortTerm.risks(),
-                actionGroup(medium.action()) != actionGroup(shortTerm.action()), profitTaking);
+                actionGroup(medium.action()) != actionGroup(shortTerm.action()), profitTaking,
+                NormalizedBiasProvenance.from(normalizedEnabled, normalizedBias),
+                NormalizedBiasProvenance.from(normalizedEnabled, normalizedBias));
     }
 
     private record HorizonScore(
@@ -636,6 +1106,9 @@ public class TradingRadarRuleEngine {
             } else if (available < 5) {
                 risks.add("部分個股基本面／產業資料尚在累積，缺值權重已重分配。 ");
             }
+            if (fundamental.roeApproximationFallback()) {
+                risks.add("近似 ROE 缺少期初權益，僅以最新期末權益估算；FINANCIAL 證據信心降低。 ");
+            }
         }
 
         return new FactorContributions(ma5, ma20, ma60, ma240, kdJ, macd, rsi, bias, volume, market,
@@ -656,7 +1129,11 @@ public class TradingRadarRuleEngine {
             FactorContributions factors,
             KdHeat kdHeat,
             TimingState timing,
-            boolean profitTaking) {
+            boolean profitTaking,
+            RuleParameters candidate,
+            Double treasuryContribution,
+            CandidateContext context,
+            NormalizedBiasObservation normalizedBias) {
         List<String> reasons = new ArrayList<>(factors.reasons());
         List<String> risks = new ArrayList<>(factors.risks());
         Accumulator acc = new Accumulator();
@@ -668,9 +1145,59 @@ public class TradingRadarRuleEngine {
         acc.add(shortTerm ? SW_KD_J : MW_KD_J, factors.kdJ());
         acc.add(shortTerm ? SW_MACD : MW_MACD, factors.macd());
         acc.add(shortTerm ? SW_RSI : MW_RSI, factors.rsi());
-        acc.add(shortTerm ? SW_BIAS : MW_BIAS, factors.bias());
+        Double bias = factors.bias();
+        if (candidate != null && candidate.normalizedBiasEnabled()) {
+            // V13 candidate only：同一筆 immutable observation 同時供 timing 與
+            // BIAS；缺 sigma 不偷偷以分位或固定值偽造 normalized score。
+            bias = normalizedBiasCandidate(normalizedBias, candidate, reasons, risks);
+        }
+        acc.add(shortTerm ? SW_BIAS : MW_BIAS, bias);
         acc.add(shortTerm ? SW_VOLUME : MW_VOLUME, factors.volume());
-        acc.add(shortTerm ? SW_MARKET : MW_MARKET, factors.market());
+        double marketWeight = candidateWeight(candidate,
+                shortTerm ? RuleParameters.CandidateWeight.SHORT_MARKET
+                        : RuleParameters.CandidateWeight.MEDIUM_MARKET,
+                shortTerm ? SW_MARKET : MW_MARKET);
+        acc.add(marketWeight, factors.market());
+        // V13 candidate-only typed numeric market features are an additional
+        // factor beside the existing regime market factor.  Baseline/V12 keeps
+        // this path completely inert (candidate == null); missing and
+        // disclosure-only aggregates remain null and therefore do not become a
+        // guessed neutral score.
+        if (candidate != null && context != null) {
+            boolean shortHorizon = shortTerm;
+            Double featureContribution = shortHorizon
+                    ? context.shortMarketFeatureContribution()
+                    : context.mediumMarketFeatureContribution();
+            RuleParameters.CandidateWeight featureKey = shortHorizon
+                    ? RuleParameters.CandidateWeight.SHORT_MARKET_FEATURE
+                    : RuleParameters.CandidateWeight.MEDIUM_MARKET_FEATURE;
+            double featureWeight = candidateWeight(candidate, featureKey, 0.0);
+            TradingRadarMarketFeatureResolver.AggregatedContribution aggregate =
+                    context.marketFeatures().aggregateContribution(context.profile());
+            if (featureContribution == null) {
+                risks.add("V13_MARKET_FEATURE_UNAVAILABLE：typed numeric market feature coverage "
+                        + percent(aggregate.coverage())
+                        + "，缺值／disclosure-only 不進 candidate score。 ");
+                if (!aggregate.unavailableReasons().isEmpty()) {
+                    risks.add("V13_MARKET_FEATURE_REASON："
+                            + String.join("；", aggregate.unavailableReasons()) + "。 ");
+                }
+            } else {
+                acc.add(featureWeight, featureContribution);
+                if (featureWeight > 0) {
+                    reasons.add("V13_MARKET_FEATURE_CONTRIBUTION：coverage "
+                            + percent(aggregate.coverage()) + "，aggregate="
+                            + formatContribution(featureContribution) + "，權重="
+                            + formatContribution(featureWeight) + "。 ");
+                    if (aggregate.coverage() < 1.0 && !aggregate.unavailableReasons().isEmpty()) {
+                        risks.add("V13_MARKET_FEATURE_PARTIAL_COVERAGE："
+                                + String.join("；", aggregate.unavailableReasons()) + "。 ");
+                    }
+                } else {
+                    risks.add("V13_MARKET_FEATURE_DISCLOSURE_ONLY：typed numeric aggregate 可得但本 candidate 未配置分數權重。 ");
+                }
+            }
+        }
         acc.add(shortTerm ? SW_DAY_MOVE : MW_DAY_MOVE, factors.dayMove());
         acc.add(shortTerm ? SW_FX : MW_FX, factors.fx());
         acc.add(shortTerm ? SW_ETF_PREMIUM : MW_ETF_PREMIUM, factors.etfPremium());
@@ -679,12 +1206,154 @@ public class TradingRadarRuleEngine {
         acc.add(shortTerm ? SW_REVENUE : MW_REVENUE, factors.revenue());
         acc.add(shortTerm ? SW_PE : MW_PE, factors.pe());
         acc.add(shortTerm ? SW_INDUSTRY : MW_INDUSTRY, factors.industry());
+        double treasuryWeight = candidateWeight(candidate,
+                shortTerm ? RuleParameters.CandidateWeight.SHORT_TREASURY
+                        : RuleParameters.CandidateWeight.MEDIUM_TREASURY,
+                0.0);
+        acc.add(treasuryWeight, treasuryContribution);
 
         describeHeat(kdHeat, input.indicators().k(), input.indicators().d(), risks);
-        describeBiasPercentileExtreme(timing, input, reasons, risks);
+        // V12 keeps the historical percentile route.  V13 uses it only as a
+        // disclosure field; it must not silently participate in candidate action.
+        if (candidate == null) describeBiasPercentileExtreme(timing, input, reasons, risks);
         int score = acc.score();
-        Action action = actionFor(input, score, timing, profitTaking, risks, reasons);
+        RuleParameters.ActionThresholds thresholds = candidate == null
+                ? V12_ACTION_THRESHOLDS
+                : shortTerm ? candidate.shortThresholds() : candidate.mediumThresholds();
+        Action action = actionFor(input, score, timing, profitTaking, risks, reasons, thresholds);
         return new HorizonScore(score, action, List.copyOf(reasons), List.copyOf(risks));
+    }
+
+    private NormalizedBiasObservation normalizedBiasObservation(
+            StockInput input, CandidateContext context, RuleParameters candidate) {
+        BigDecimal rawSigma = context == null ? null : context.normalizedBiasSigmaRatio();
+        LocalDate asOf = context == null ? null : context.normalizedBiasAsOfDate();
+        return NormalizedBiasObservation.from(
+                input == null ? null : input.ma60BiasPercent(), rawSigma,
+                candidate == null ? BigDecimal.ZERO : candidate.sigmaFloorRatio(), asOf);
+    }
+
+    private Double normalizedBiasCandidate(
+            NormalizedBiasObservation observation,
+            RuleParameters candidate,
+            List<String> reasons,
+            List<String> risks) {
+        if (observation == null || !observation.available()) {
+            String reason = observation == null || observation.reason() == null
+                    ? "observation_missing" : observation.reason();
+            risks.add("V13_NORMALIZED_BIAS_UNAVAILABLE：" + reason
+                    + "；本次不以 sigma floor／分位數偽造 normalized score，confidence 應由呼叫端降低。 ");
+            return null;
+        }
+        if (observation.floorApplied()) {
+            risks.add("V13_NORMALIZED_BIAS_SIGMA_FLOOR：raw sigma 低於校準下限，已使用 effective sigma floor；"
+                    + "normalized 值仍保留並揭露。 ");
+        }
+        BigDecimal normalized = observation.normalizedBias();
+        double contribution = -normalized
+                .divide(candidate.normalizedBiasMultiple(), 12, RoundingMode.HALF_UP)
+                .doubleValue();
+        contribution = Math.max(-1.0, Math.min(1.0, contribution));
+        if (contribution > 0) reasons.add("V13 normalized bias 顯示季線下方且波動調整後具承接空間。 ");
+        if (contribution < 0) risks.add("V13 normalized bias 顯示季線上方且波動調整後追價成本偏高。 ");
+        return contribution;
+    }
+
+    private HorizonScore applyCandidatePolicy(
+            StockInput input,
+            HorizonScore horizon,
+            RuleParameters parameters,
+            CandidateContext context,
+            BigDecimal downsideRiskPct,
+            boolean deadCross,
+            boolean profitTaking,
+            boolean shortTerm) {
+        TradingRadarV13ActionPolicy.Decision decision = TradingRadarV13ActionPolicy.apply(
+                input, horizon.action(), profitTaking, deadCross, downsideRiskPct, parameters, true);
+        // Keep the action produced by the immutable rule policy separate from any
+        // evidence-gate fallback.  Sigma safety is a hard matrix over the original
+        // REDUCE/EXIT opportunity; inspecting only the already-gated HOLD/WATCH
+        // action would lose that fact and could return the wrong sigma fallback.
+        Action policyAction = decision.action();
+        Action action = policyAction;
+        List<String> risks = new ArrayList<>(horizon.risks());
+        risks.addAll(decision.disclosures());
+
+        // V13 candidate 的 action 必須先通過完整 evidence resolver/gate；legacy
+        // 7/8-field CandidateContext 沒有 evidence 時保留既有純規則測試形狀，
+        // BacktestService 的正式 V13 路徑一律傳入非 null evidence。
+        if (context.evidence() != null) {
+            TradingRadarEvidenceGate.GatedActions gated = TradingRadarEvidenceGate.apply(
+                    action, action, input.held(), context.profile(), context.evidence(),
+                    parameters.confidenceThreshold());
+            Action evidenceAction = shortTerm ? gated.shortAction() : gated.mediumAction();
+            if (evidenceAction != action) risks.addAll(gated.reasons());
+            action = evidenceAction;
+        }
+
+        BigDecimal confidence = candidateConfidence(context, shortTerm);
+        // Every V13 candidate (including candidates that disable the normalized-bias
+        // score) needs a train-fold volatility profile.  Otherwise a disabled path
+        // could bypass the same confidence/safety fallback merely by omitting the
+        // normalized factor while still being promoted as V13.
+        boolean sigmaUnavailable = RuleParameters.V13_VERSION.equals(parameters.ruleVersion())
+                && (context == null || !context.sigmaProfileAvailable()
+                || context.normalizedBiasSigmaRatio() == null
+                || context.normalizedBiasSigmaRatio().signum() <= 0);
+        if (sigmaUnavailable) {
+            // Missing realized sigma falls back to fixed absolute timing only;
+            // cap candidate confidence so this fallback cannot masquerade as a
+            // fully observed normalized-BIAS decision.
+            confidence = confidence == null ? null : confidence.min(new BigDecimal("0.50"));
+            risks.add(parameters.normalizedBiasEnabled()
+                    ? "V13_NORMALIZED_BIAS_FALLBACK_FIXED_THRESHOLD：sigma 缺漏，時機改用固定乖離門檻；"
+                    + "candidate confidence 已保守下修。 "
+                    : "V13_SIGMA_PROFILE_GATE：V13 fold sigma profile 缺漏；normalized path 雖停用，"
+                    + "candidate confidence 仍保守下修。 ");
+            // The same missing sigma that closes the buy confidence gate must also
+            // close REDUCE/EXIT.  Otherwise weakening/downside evidence could still
+            // turn a fixed-threshold fallback into an executable sell instruction.
+            if (isRiskAction(policyAction)) {
+                action = input != null && input.held() ? Action.HOLD_CAUTION : Action.WAIT;
+                risks.add("V13_SIGMA_GATE：sigma 缺漏／fold profile 不可用，REDUCE/EXIT 僅保留候選揭露。 ");
+            }
+        }
+        boolean confidenceAllowsBuy = context.priceFresh()
+                && context.marketFresh()
+                && confidence != null
+                && confidence.compareTo(parameters.confidenceThreshold()) >= 0;
+        if (isBuyAction(action) && !confidenceAllowsBuy) {
+            action = input.held() ? Action.HOLD : Action.WATCH;
+            risks.add("V13_CONFIDENCE_GATE：PRICE/MARKET freshness 或 calibrated confidence 不足，"
+                    + "買進動作只向 HOLD/WATCH 降級。 ");
+        }
+        return new HorizonScore(horizon.score(), action, horizon.reasons(), List.copyOf(risks));
+    }
+
+    private BigDecimal candidateConfidence(CandidateContext context, boolean shortTerm) {
+        BigDecimal horizon = shortTerm ? context.shortConfidence() : context.mediumConfidence();
+        return horizon == null ? context.confidence() : horizon;
+    }
+
+    private double candidateWeight(
+            RuleParameters candidate, RuleParameters.CandidateWeight key, double baseline) {
+        if (candidate == null) return baseline;
+        double adjusted = baseline + candidate.candidateWeightDeltas()
+                .getOrDefault(key, BigDecimal.ZERO).doubleValue();
+        if (adjusted < 0.0 || adjusted > 1.0) {
+            throw new IllegalArgumentException(key + " 調整後權重必須介於 0..1");
+        }
+        return adjusted;
+    }
+
+    private boolean isBuyAction(Action action) {
+        return action == Action.BUY_CANDIDATE
+                || action == Action.ADD_CANDIDATE
+                || action == Action.TRIAL_BUY;
+    }
+
+    private boolean isRiskAction(Action action) {
+        return action == Action.REDUCE_CANDIDATE || action == Action.EXIT_CANDIDATE;
     }
 
     private CounterTrendResult evaluateCounterTrend(StockInput input) {
@@ -779,6 +1448,15 @@ public class TradingRadarRuleEngine {
 
     private static double clampUnit(double v) {
         return Math.max(-1.0, Math.min(1.0, v));
+    }
+
+    private static String percent(double value) {
+        return BigDecimal.valueOf(value * 100.0).setScale(1, RoundingMode.HALF_UP)
+                .toPlainString() + "%";
+    }
+
+    private static String formatContribution(double value) {
+        return BigDecimal.valueOf(value).setScale(3, RoundingMode.HALF_UP).toPlainString();
     }
 
     private Double positionOf(BigDecimal price, BigDecimal ma, String label,
@@ -1125,6 +1803,46 @@ public class TradingRadarRuleEngine {
         return TimingState.NEUTRAL;
     }
 
+    /**
+     * Candidate timing path.  When normalized volatility is available, only its
+     * calibrated magnitude decides the extreme BIAS side; the V12 percentile is
+     * deliberately disclosure-only.  Missing sigma falls back to the fixed
+     * absolute thresholds, never to percentile action, and is disclosed by the
+     * shared observation.
+     */
+    private TimingState timingOf(
+            StockInput input, NormalizedBiasObservation observation, RuleParameters candidate) {
+        boolean overheated = kdHeatOf(input) == KdHeat.OVERHEATED;
+        boolean oversold = kdOversold(input);
+        BigDecimal biasValue = input.ma60BiasPercent();
+        double bias = biasValue == null ? 0.0 : biasValue.doubleValue();
+        boolean premiumExpensive = input.etfPremiumPct() != null
+                && input.etfPremiumPct().doubleValue() >= ETF_PREMIUM_EXPENSIVE;
+
+        boolean extremeHigh;
+        boolean extremeLow;
+        if (observation != null && observation.available()) {
+            double normalized = observation.normalizedBias().doubleValue();
+            double upper = candidate.normalizedBiasUpperMultiple().doubleValue();
+            double lower = candidate.normalizedBiasLowerMultiple().doubleValue();
+            extremeHigh = normalized >= upper;
+            extremeLow = normalized <= -lower;
+        } else {
+            // Explicit fixed-threshold fallback; ma60BiasPercentile is never
+            // consulted here because sigma evidence is unavailable.
+            extremeHigh = biasValue != null && bias >= BIAS_EXTREME_HIGH;
+            extremeLow = biasValue != null && bias <= BIAS_EXTREME_LOW;
+        }
+
+        if (overheated && extremeHigh) return TimingState.EXTREME_OVERBOUGHT;
+        if (oversold && extremeLow) return TimingState.EXTREME_OVERSOLD;
+        if (overheated || premiumExpensive || (biasValue != null && bias >= BIAS_HIGH)) {
+            return TimingState.OVERBOUGHT;
+        }
+        if (oversold || (biasValue != null && bias <= BIAS_LOW)) return TimingState.OVERSOLD;
+        return TimingState.NEUTRAL;
+    }
+
     /** 高檔轉弱確認：KD 高檔死亡交叉。**必須要求轉弱，不得只憑超買就賣**——只要超買就出場會在主升段初期砍掉部位。 */
     private boolean kdDeadCross(StockInput input) {
         BigDecimal k = input.indicators() == null ? null : input.indicators().k();
@@ -1285,7 +2003,8 @@ public class TradingRadarRuleEngine {
     /** V11 動作映射：兩軌各自以分數分層，再套止跌／追高／基本面閘門與對稱高低檔保護。 */
     private Action actionFor(StockInput input, int score, TimingState timing,
                              boolean profitTaking,
-                             List<String> risks, List<String> reasons) {
+                             List<String> risks, List<String> reasons,
+                             RuleParameters.ActionThresholds thresholds) {
         // 分批試單優先於分數映射：這類標的的短線分數必然偏低（剛跌深），
         // 若先走分數映射會被判成減碼／出場，與「長線佳、可分批進場」的判斷自相矛盾。
         if (qualifiesForTrialBuy(input)) {
@@ -1335,14 +2054,14 @@ public class TradingRadarRuleEngine {
                 && !chasedDailyMove
                 && !overbought
                 && !fundamentalsBlockBuy;
-        if (score >= 75 && buyGate) {
+        if (score >= thresholds.buy() && buyGate) {
             return input.held() ? Action.ADD_CANDIDATE : Action.BUY_CANDIDATE;
         }
-        if (score >= 55) return input.held() ? Action.HOLD : Action.WATCH;
-        if (score >= 40) return input.held() ? Action.HOLD_CAUTION : Action.WAIT;
+        if (score >= thresholds.hold()) return input.held() ? Action.HOLD : Action.WATCH;
+        if (score >= thresholds.caution()) return input.held() ? Action.HOLD_CAUTION : Action.WAIT;
 
         // ── 第 3 步：不得殺低（需求 3）。對稱於買方的「超買否決買進」。
-        Action mapped = score >= 25
+        Action mapped = score >= thresholds.reduce()
                 ? (input.held() ? Action.REDUCE_CANDIDATE : Action.AVOID)
                 : (input.held() ? Action.EXIT_CANDIDATE : Action.AVOID);
         if (timing == TimingState.EXTREME_OVERSOLD) {

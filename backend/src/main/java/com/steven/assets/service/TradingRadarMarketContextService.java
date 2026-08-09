@@ -84,14 +84,83 @@ public class TradingRadarMarketContextService {
             BigDecimal soxChangePercent,
             BigDecimal usTechCompositePercent,
             LocalDate usTechAsOfDate,
-            boolean usTechAvailable
+            boolean usTechAvailable,
+            /** Explicit capability: true when this market index has meaningful liquidity data. */
+            boolean liquidityApplicable
     ) {
+        /** Compatibility shape used by older callers; known contexts are applicable. */
+        public MarketContext(
+                LocalDate marketAsOfDate,
+                BigDecimal completedMarketChangePercent,
+                BigDecimal marketVolumeRatio,
+                BigDecimal marketTurnoverRatio,
+                BigDecimal nasdaqChangePercent,
+                BigDecimal soxChangePercent,
+                BigDecimal usTechCompositePercent,
+                LocalDate usTechAsOfDate,
+                boolean usTechAvailable) {
+            this(marketAsOfDate, completedMarketChangePercent, marketVolumeRatio,
+                    marketTurnoverRatio, nasdaqChangePercent, soxChangePercent,
+                    usTechCompositePercent, usTechAsOfDate, usTechAvailable, true);
+        }
+
         public static final MarketContext EMPTY = new MarketContext(
-                null, null, null, null, null, null, null, null, false);
+                null, null, null, null, null, null, null, null, false, false);
     }
 
     public record FxContext(BigDecimal percentile, LocalDate asOfDate) {
         public static final FxContext EMPTY = new FxContext(null, null);
+    }
+
+    /**
+     * Request-scoped calendar evidence for session-based historical windows.
+     * {@code known=false} is distinct from a legitimate empty range: callers must
+     * fail closed when the authority cannot prove the calendar for every date.
+     */
+    public record TradingSessions(List<LocalDate> dates, boolean known) {
+        public TradingSessions {
+            dates = dates == null ? List.of() : List.copyOf(dates);
+        }
+
+        public static TradingSessions unavailable() {
+            return new TradingSessions(List.of(), false);
+        }
+    }
+
+    /**
+     * Resolve a bounded inclusive market calendar once for a caller's request.
+     * No weekday approximation is permitted when the TW calendar proxy is
+     * unavailable; an unknown date invalidates the whole range.
+     */
+    public TradingSessions resolveTradingSessions(String market, LocalDate from, LocalDate to) {
+        if (from == null || to == null || from.isAfter(to) || marketDataService == null) {
+            return TradingSessions.unavailable();
+        }
+        List<LocalDate> sessions = new ArrayList<>();
+        for (LocalDate date = from; !date.isAfter(to); date = date.plusDays(1)) {
+            Optional<Boolean> tradingDay = marketDataService.isTradingDayKnown(market, date);
+            if (tradingDay == null || tradingDay.isEmpty()) {
+                return TradingSessions.unavailable();
+            }
+            if (tradingDay.get()) sessions.add(date);
+        }
+        return new TradingSessions(sessions, true);
+    }
+
+    /**
+     * Resolve the two session dates needed by one radar decision from the
+     * authoritative calendar.  {@code Optional.empty()} is a real unknown
+     * state (calendar outage), not permission to infer a weekday.  Returning an
+     * Optional also lets compatibility-only test adapters that predate this
+     * method be distinguished from a production calendar failure.
+     */
+    public Optional<RadarObservationResolver.DecisionSessions> resolveDecisionSessions(
+            String market, Instant decisionInstant) {
+        if (market == null || decisionInstant == null || marketDataService == null) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(RadarObservationResolver.decisionSessionsStrict(
+                market, decisionInstant, date -> marketDataService.isTradingDayKnown(market, date)));
     }
 
     public record Resolved(
@@ -177,7 +246,78 @@ public class TradingRadarMarketContextService {
         UsTech us = resolveUsTech(decisionInstant, usRows);
         return new MarketContext(
                 marketDate, marketChange, volumeRatio, turnoverRatio,
-                us.nasdaqChange(), us.soxChange(), us.composite(), us.asOfDate(), us.available());
+                us.nasdaqChange(), us.soxChange(), us.composite(), us.asOfDate(), us.available(), true);
+    }
+
+    /**
+     * V13 的 market-aware context。台股與美股不可共用同一個 marketAsOf／量能來源：
+     * 美股只使用 IXIC 的完成日與成交量，台股則使用 TAIEX；不存在可用來源時回傳
+     * {@link MarketContext#EMPTY} 欄位，而不是把另一市場的數字代入。
+     *
+     * <p>台股 daily volume/value 沒有 immutable observed-at 欄位，因此 V13 採較保守的
+     * 16:00 completion boundary；14:00 signal 看到的同日 final row 會被排除，避免把收盤後
+     * 知道的全天量能前視帶入。</p>
+     */
+    public MarketContext resolveMarketFromRows(
+            String market,
+            Instant decisionInstant,
+            List<TwseIndexDailyHistory> twRows,
+            List<UsIndexDailyHistory> usRows) {
+        if (decisionInstant == null || market == null) return MarketContext.EMPTY;
+        if ("台股".equals(market)) {
+            return resolveTaiwanV13(decisionInstant, twRows);
+        }
+        if ("美股".equals(market)) {
+            return resolveUsV13(decisionInstant, usRows);
+        }
+        return MarketContext.EMPTY;
+    }
+
+    private MarketContext resolveTaiwanV13(
+            Instant decisionInstant, List<TwseIndexDailyHistory> suppliedRows) {
+        List<TwseIndexDailyHistory> rows = suppliedRows == null ? List.of() : suppliedRows.stream()
+                .filter(r -> r != null && r.getTradingDate() != null
+                        && !twCompletionV13(r.getTradingDate()).isAfter(decisionInstant))
+                .sorted(Comparator.comparing(TwseIndexDailyHistory::getTradingDate))
+                .toList();
+        if (rows.isEmpty()) return MarketContext.EMPTY;
+        int latestIndex = rows.size() - 1;
+        TwseIndexDailyHistory latest = rows.get(latestIndex);
+        BigDecimal change = latestIndex > 0
+                ? percentChange(latest.getClosePoint(), rows.get(latestIndex - 1).getClosePoint()) : null;
+        BigDecimal volume = ratio(latest.getTradeVolume() == null
+                        ? null : BigDecimal.valueOf(latest.getTradeVolume()),
+                priorPositive(rows, latestIndex, true));
+        BigDecimal turnover = ratio(latest.getTradeValue(), priorPositive(rows, latestIndex, false));
+        return new MarketContext(latest.getTradingDate(), change, volume, turnover,
+                null, null, null, null, false, true);
+    }
+
+    private MarketContext resolveUsV13(
+            Instant decisionInstant, List<UsIndexDailyHistory> suppliedRows) {
+        List<UsIndexDailyHistory> ixic = suppliedRows == null ? List.of() : suppliedRows.stream()
+                .filter(r -> r != null && "IXIC".equals(r.getIndexCode())
+                        && r.getTradingDate() != null && r.getClosePoint() != null
+                        && r.getClosePoint().signum() > 0
+                        && !usCompletion(r.getTradingDate()).isAfter(decisionInstant))
+                .sorted(Comparator.comparing(UsIndexDailyHistory::getTradingDate))
+                .toList();
+        if (ixic.isEmpty()) return MarketContext.EMPTY;
+        int latestIndex = ixic.size() - 1;
+        UsIndexDailyHistory latest = ixic.get(latestIndex);
+        BigDecimal change = latestIndex > 0
+                ? percentChange(latest.getClosePoint(), ixic.get(latestIndex - 1).getClosePoint()) : null;
+        List<BigDecimal> prior = new ArrayList<>();
+        for (int i = latestIndex - 1; i >= 0 && prior.size() < RATIO_LOOKBACK; i--) {
+            Long raw = ixic.get(i).getVolume();
+            if (raw != null && raw > 0) prior.add(BigDecimal.valueOf(raw));
+        }
+        BigDecimal volume = ratio(latest.getVolume() == null
+                        ? null : BigDecimal.valueOf(latest.getVolume()), prior);
+        UsTech us = resolveUsTech(decisionInstant,
+                suppliedRows == null ? List.of() : suppliedRows);
+        return new MarketContext(latest.getTradingDate(), change, volume, null,
+                us.nasdaqChange(), us.soxChange(), us.composite(), us.asOfDate(), us.available(), true);
     }
 
     /** Production 匯率入口；只查目標日往前五年，無精確有效目標列就 fail closed。 */
@@ -256,6 +396,9 @@ public class TradingRadarMarketContextService {
         List<News> ordered = rows.stream()
                 .filter(n -> n != null && News.CATEGORY_NEWS.equals(n.getCategory()))
                 .filter(n -> n.getPublishedAt() != null && !n.getPublishedAt().isAfter(decisionInstant))
+                // Historical market evidence must not expose an old article that was
+                // only ingested after the decision boundary (late backfill).
+                .filter(n -> n.getFetchedAt() != null && !n.getFetchedAt().isAfter(decisionInstant))
                 .filter(n -> "TW".equals(n.getRegion()) || "US".equals(n.getRegion()))
                 .sorted(newest)
                 .toList();
@@ -280,7 +423,11 @@ public class TradingRadarMarketContextService {
                     : n.getDedupeKey();
             if (!seen.add(region + "\u0000" + key)) continue;
             out.add(new TradingRadarDto.PublicInformationItem(
-                    region, n.getTitle(), n.getSource(), n.getUrl(), n.getPublishedAt().toString()));
+                    region, n.getTitle(), n.getSource(), n.getUrl(), n.getPublishedAt().toString(),
+                    null,
+                    PublicInfoEvidenceResolver.knownAt(n) == null
+                            ? null : PublicInfoEvidenceResolver.knownAt(n).toString(),
+                    PublicInfoEvidenceResolver.availabilityBasis(n)));
             if (++count == 3) return;
         }
     }
@@ -370,6 +517,11 @@ public class TradingRadarMarketContextService {
 
     private Instant twCompletion(LocalDate date) {
         return date.atTime(TW_MARKET_COMPLETE).atZone(TAIPEI).toInstant();
+    }
+
+    /** V13 conservative boundary for daily TAIEX volume/value without observed_at provenance. */
+    private Instant twCompletionV13(LocalDate date) {
+        return date.atTime(LocalTime.of(16, 0)).atZone(TAIPEI).toInstant();
     }
 
     private Instant usCompletion(LocalDate date) {

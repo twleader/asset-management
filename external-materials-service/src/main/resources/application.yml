@@ -24,6 +24,11 @@ server:
 finmind:
   token: ${FINMIND_TOKEN:}
 
+asset:
+  internal:
+    # Must match business-services; never store the credential in source control.
+    treasury-token: ${INTERNAL_TREASURY_TOKEN:}
+
 # 本地財經新聞爬蟲（Task 149.21）：每日 08:20/11:30/18:00（Asia/Taipei，早上 06→08 Task 177、08→08:20 Task 184；
 # 中午 12:00→11:30 Task 188）抓權威來源＋證交所公開資訊＋量化快照（匯率/美股/韓股）寫入 news_headline，供
 # business-services 今日股市分析餵入 prompt。retention-days=保留天數（清理更舊者）；enabled=false 可整體停用。

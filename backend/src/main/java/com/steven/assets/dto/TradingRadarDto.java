@@ -38,11 +38,19 @@ public final class TradingRadarDto {
             String source,
             String url,
             String publishedAt,
-            String summary
+            String summary,
+            String knownAt,
+            String availabilityBasis
     ) {
         /** Task 292 前的建構式；舊市場資訊不一定帶摘要。 */
         public PublicInformationItem(String region, String title, String source, String url, String publishedAt) {
-            this(region, title, source, url, publishedAt, null);
+            this(region, title, source, url, publishedAt, null, null, null);
+        }
+
+        /** Compatibility constructor for callers that already provide a summary. */
+        public PublicInformationItem(String region, String title, String source, String url,
+                                     String publishedAt, String summary) {
+            this(region, title, source, url, publishedAt, summary, null, null);
         }
     }
 
@@ -53,6 +61,23 @@ public final class TradingRadarDto {
      * 把不同 observation 拼成一筆。{@code coverage} 只數 EPS、近似 ROE、營收、PE 四個
      * 基本面子因子；產業發展為另一項因子。ETF 整筆 {@code applicable=false}。</p>
      */
+    /** Provenance of one valuation component; components may be from different observations/providers. */
+    public record ValuationComponentEvidence(
+            BigDecimal value,
+            BigDecimal percentile,
+            String provider,
+            List<String> sourceUrls,
+            String availableAt,
+            String asOf,
+            boolean loss) {
+        /** Compatibility constructor for pre-categorical valuation evidence. */
+        public ValuationComponentEvidence(
+                BigDecimal value, BigDecimal percentile, String provider,
+                List<String> sourceUrls, String availableAt, String asOf) {
+            this(value, percentile, provider, sourceUrls, availableAt, asOf, false);
+        }
+    }
+
     public record FundamentalSnapshot(
             boolean applicable,
             int coverage,
@@ -81,8 +106,365 @@ public final class TradingRadarDto {
             List<String> industrySourceUrls,
             String industryAsOf,
             List<PublicInformationItem> companyPublicInformation,
-            List<PublicInformationItem> industryPublicInformation
-    ) {}
+            List<PublicInformationItem> industryPublicInformation,
+            /** valuation composite 的三個原始值（百分點／倍數依欄位語意保存）。 */
+            BigDecimal peValue,
+            BigDecimal pbValue,
+            BigDecimal dividendYieldPct,
+            BigDecimal pbPercentile,
+            BigDecimal dividendYieldPercentile,
+            Double valuationContribution,
+            int valuationCoverage,
+            String epsTrendType,
+            boolean roeApproximationFallback,
+            ValuationComponentEvidence peEvidence,
+            ValuationComponentEvidence pbEvidence,
+            ValuationComponentEvidence dividendYieldEvidence
+    ) {
+        /** t307 前舊快照／測試建構式；新證據欄位以缺值保留，不冒充可用。 */
+        public FundamentalSnapshot(
+                boolean applicable, int coverage,
+                BigDecimal epsYoyPct, BigDecimal approximateRoePct, BigDecimal revenueYoy3mPct,
+                BigDecimal pePercentile, Boolean peLossFlag,
+                String epsProvider, List<String> epsSourceUrls, String epsAsOf,
+                String roeProvider, List<String> roeSourceUrls, String roeAsOf,
+                String revenueProvider, List<String> revenueSourceUrls, String revenueAsOf,
+                String valuationProvider, List<String> valuationSourceUrls, String valuationAsOf,
+                String industryName, BigDecimal industryRevenueYoyPct, Integer industryCompanyCount,
+                String industryPeriod, String industryProvider, List<String> industrySourceUrls,
+                String industryAsOf, List<PublicInformationItem> companyPublicInformation,
+                List<PublicInformationItem> industryPublicInformation) {
+            this(applicable, coverage, epsYoyPct, approximateRoePct, revenueYoy3mPct,
+                    pePercentile, peLossFlag, epsProvider, epsSourceUrls, epsAsOf,
+                    roeProvider, roeSourceUrls, roeAsOf, revenueProvider, revenueSourceUrls,
+                    revenueAsOf, valuationProvider, valuationSourceUrls, valuationAsOf,
+                    industryName, industryRevenueYoyPct, industryCompanyCount, industryPeriod,
+                    industryProvider, industrySourceUrls, industryAsOf,
+                    companyPublicInformation, industryPublicInformation,
+                    null, null, null, null, null, null, 0, null, false,
+                    null, null, null);
+        }
+
+        /** Compatibility constructor for callers using the pre-provenance composite fields. */
+        public FundamentalSnapshot(
+                boolean applicable, int coverage,
+                BigDecimal epsYoyPct, BigDecimal approximateRoePct, BigDecimal revenueYoy3mPct,
+                BigDecimal pePercentile, Boolean peLossFlag,
+                String epsProvider, List<String> epsSourceUrls, String epsAsOf,
+                String roeProvider, List<String> roeSourceUrls, String roeAsOf,
+                String revenueProvider, List<String> revenueSourceUrls, String revenueAsOf,
+                String valuationProvider, List<String> valuationSourceUrls, String valuationAsOf,
+                String industryName, BigDecimal industryRevenueYoyPct, Integer industryCompanyCount,
+                String industryPeriod, String industryProvider, List<String> industrySourceUrls,
+                String industryAsOf, List<PublicInformationItem> companyPublicInformation,
+                List<PublicInformationItem> industryPublicInformation,
+                BigDecimal peValue, BigDecimal pbValue, BigDecimal dividendYieldPct,
+                BigDecimal pbPercentile, BigDecimal dividendYieldPercentile,
+                Double valuationContribution, int valuationCoverage,
+                String epsTrendType, boolean roeApproximationFallback) {
+            this(applicable, coverage, epsYoyPct, approximateRoePct, revenueYoy3mPct,
+                    pePercentile, peLossFlag, epsProvider, epsSourceUrls, epsAsOf,
+                    roeProvider, roeSourceUrls, roeAsOf, revenueProvider, revenueSourceUrls,
+                    revenueAsOf, valuationProvider, valuationSourceUrls, valuationAsOf,
+                    industryName, industryRevenueYoyPct, industryCompanyCount, industryPeriod,
+                    industryProvider, industrySourceUrls, industryAsOf,
+                    companyPublicInformation, industryPublicInformation,
+                    peValue, pbValue, dividendYieldPct, pbPercentile, dividendYieldPercentile,
+                    valuationContribution, valuationCoverage, epsTrendType,
+                    roeApproximationFallback, null, null, null);
+        }
+    }
+
+    /** t309 第一階段 strict asset profile 的 API projection；前端只呈現，不自行推斷。 */
+    public record AssetProfile(
+            String assetClass,
+            String assetClassSource,
+            boolean assetClassComplete,
+            String instrumentKind,
+            String instrumentKindSource,
+            boolean instrumentKindComplete,
+            String stockStyle,
+            String stockStyleSource,
+            boolean stockStyleComplete,
+            String bondTerm,
+            String bondTermSource,
+            boolean bondTermComplete,
+            String quoteCurrency,
+            String quoteCurrencySource,
+            boolean quoteCurrencyComplete,
+            String underlyingCurrency,
+            String underlyingCurrencySource,
+            boolean underlyingCurrencyComplete,
+            boolean currencyDataComplete,
+            boolean profileComplete,
+            List<String> missingReasons
+    ) {
+        public static AssetProfile from(
+                com.steven.assets.service.TradingRadarAssetProfileResolver.AssetProfile profile) {
+            if (profile == null) return null;
+            return new AssetProfile(
+                    profile.assetClass(), profile.assetClassSource().name(),
+                    profile.assetClassComplete(), profile.instrumentKind().name(), profile.instrumentKindSource().name(),
+                    profile.instrumentKindComplete(), profile.stockStyle(), profile.stockStyleSource().name(),
+                    profile.stockStyleComplete(), profile.bondTerm(), profile.bondTermSource().name(),
+                    profile.bondTermComplete(), profile.quoteCurrency(), profile.quoteCurrencySource().name(),
+                    profile.quoteCurrencyComplete(), profile.underlyingCurrency(),
+                    profile.underlyingCurrencySource().name(), profile.underlyingCurrencyComplete(),
+                    profile.currencyDataComplete(),
+                    profile.profileComplete(), profile.missingReasons());
+        }
+    }
+
+    /** Immutable API projection of one evidence component/group. */
+    public record EvidenceComponent(
+            String name,
+            String applicability,
+            double weight,
+            double availableWeight,
+            String asOfDate,
+            String provider,
+            String missingReason) {}
+
+    public record EvidenceGroup(
+            String group,
+            List<EvidenceComponent> components,
+            double shortCoverage,
+            double mediumCoverage,
+            boolean shortAvailable,
+            boolean mediumAvailable,
+            boolean shortFresh,
+            boolean mediumFresh,
+            int sourceCount,
+            boolean participates) {}
+
+    /** Immutable API projection of one V13 typed market candidate observation. */
+    public record MarketFeatureEvidence(
+            String code,
+            BigDecimal value,
+            String asOfDate,
+            String availableAt,
+            String availabilityBasis,
+            String provider,
+            String sourceUrl,
+            String profileApplicability,
+            String duplicateOf,
+            String status,
+            String missingReason) {}
+
+    /** API projection of one per-signal normalized-BIAS observation. */
+    public record NormalizedBiasEvidence(
+            boolean enabled,
+            BigDecimal rawBiasRatio,
+            BigDecimal rawSigmaRatio,
+            BigDecimal sigmaFloorRatio,
+            BigDecimal effectiveSigmaRatio,
+            BigDecimal normalizedBias,
+            String asOfDate,
+            boolean volatilityFallback,
+            boolean floorApplied,
+            String reason
+    ) {
+        public static NormalizedBiasEvidence from(
+                com.steven.assets.service.TradingRadarRuleEngine.NormalizedBiasProvenance provenance) {
+            if (provenance == null) return null;
+            return new NormalizedBiasEvidence(provenance.enabled(), provenance.rawBiasRatio(),
+                    provenance.rawSigmaRatio(), provenance.sigmaFloorRatio(),
+                    provenance.effectiveSigmaRatio(), provenance.normalizedBias(),
+                    provenance.asOfDate() == null ? null : provenance.asOfDate().toString(),
+                    provenance.volatilityFallback(), provenance.floorApplied(), provenance.reason());
+        }
+    }
+
+    /** t274/t309 provenance plus V13 confidence/risk projection. */
+    public record RadarEvidence(
+            String acceptedPriceAsOfDate,
+            String acceptedPriceSource,
+            String acceptedPriceQuality,
+            boolean livePriceAccepted,
+            BigDecimal returnStdDev60Ratio,
+            String returnStdDev60AsOfDate,
+            String returnStdDev60Source,
+            String premiumAsOfDate,
+            String premiumSource,
+            boolean premiumStale,
+            AssetProfile assetProfile,
+            List<String> actionGateReasons,
+            java.util.Map<String, EvidenceGroup> evidenceGroups,
+            java.util.Map<String, MarketFeatureEvidence> marketFeatures,
+            Integer shortEvidenceConfidence,
+            Integer mediumEvidenceConfidence,
+            Integer shortDownsideRisk,
+            Integer mediumDownsideRisk,
+            Double shortRiskCoverage,
+            Double mediumRiskCoverage,
+            String candidateAction,
+            String shortCandidateAction,
+            String nextDistributionDate,
+            String nextDistributionKnownAt,
+            String nextDistributionProvider,
+            List<String> nextDistributionSourceUrls,
+            String nextDistributionStatus,
+            String nextDistributionMissingReason,
+            Integer distributionsWithinFiveSessions,
+            Integer distributionsWithinTwentySessions,
+            TreasuryYieldDto.RateContext treasuryRateContext,
+            /** Per-signal medium-horizon normalized-BIAS provenance. */
+            NormalizedBiasEvidence normalizedBias,
+            /** Per-signal short-horizon normalized-BIAS provenance. */
+            NormalizedBiasEvidence shortNormalizedBias
+    ) {
+        public RadarEvidence {
+            actionGateReasons = actionGateReasons == null ? List.of() : List.copyOf(actionGateReasons);
+            evidenceGroups = evidenceGroups == null ? java.util.Map.of() : java.util.Map.copyOf(evidenceGroups);
+            marketFeatures = marketFeatures == null ? java.util.Map.of() : java.util.Map.copyOf(marketFeatures);
+            nextDistributionSourceUrls = nextDistributionSourceUrls == null
+                    ? List.of() : List.copyOf(nextDistributionSourceUrls);
+        }
+
+        public RadarEvidence(
+                String acceptedPriceAsOfDate,
+                String acceptedPriceSource,
+                String acceptedPriceQuality,
+                boolean livePriceAccepted,
+                BigDecimal returnStdDev60Ratio,
+                String returnStdDev60AsOfDate,
+                String returnStdDev60Source,
+                String premiumAsOfDate,
+                String premiumSource,
+                boolean premiumStale,
+                AssetProfile assetProfile,
+                List<String> actionGateReasons) {
+            this(acceptedPriceAsOfDate, acceptedPriceSource, acceptedPriceQuality, livePriceAccepted,
+                    returnStdDev60Ratio, returnStdDev60AsOfDate, returnStdDev60Source,
+                    premiumAsOfDate, premiumSource, premiumStale, assetProfile, actionGateReasons,
+                    java.util.Map.of(), java.util.Map.of(), null, null, null, null, null, null, null, null,
+                    null, null, null, List.of(), null, null, null, null, null, null, null);
+        }
+
+        public static final RadarEvidence EMPTY = new RadarEvidence(
+                null, null, "MISSING", false, null, null, null,
+                null, null, false, null, List.of(), java.util.Map.of(), java.util.Map.of(),
+                null, null, null, null, null, null, null, null,
+                null, null, null, List.of(), null, null, null, null, null, null, null);
+
+        public static RadarEvidence withConfidence(
+                String acceptedPriceAsOfDate,
+                String acceptedPriceSource,
+                String acceptedPriceQuality,
+                boolean livePriceAccepted,
+                BigDecimal returnStdDev60Ratio,
+                String returnStdDev60AsOfDate,
+                String returnStdDev60Source,
+                String premiumAsOfDate,
+                String premiumSource,
+                boolean premiumStale,
+                AssetProfile assetProfile,
+                List<String> actionGateReasons,
+                com.steven.assets.service.TradingRadarEvidenceConfidenceResolver.Evidence evidence,
+                String candidateAction,
+                String shortCandidateAction) {
+            return withConfidence(acceptedPriceAsOfDate, acceptedPriceSource, acceptedPriceQuality,
+                    livePriceAccepted, returnStdDev60Ratio, returnStdDev60AsOfDate, returnStdDev60Source,
+                    premiumAsOfDate, premiumSource, premiumStale, assetProfile, actionGateReasons,
+                    evidence, candidateAction, shortCandidateAction, null, null, null, null);
+        }
+
+        public static RadarEvidence withConfidence(
+                String acceptedPriceAsOfDate,
+                String acceptedPriceSource,
+                String acceptedPriceQuality,
+                boolean livePriceAccepted,
+                BigDecimal returnStdDev60Ratio,
+                String returnStdDev60AsOfDate,
+                String returnStdDev60Source,
+                String premiumAsOfDate,
+                String premiumSource,
+                boolean premiumStale,
+                AssetProfile assetProfile,
+                List<String> actionGateReasons,
+                com.steven.assets.service.TradingRadarEvidenceConfidenceResolver.Evidence evidence,
+                String candidateAction,
+                String shortCandidateAction,
+                com.steven.assets.service.DividendEventEvidenceResolver.Resolution distribution) {
+            return withConfidence(acceptedPriceAsOfDate, acceptedPriceSource, acceptedPriceQuality,
+                    livePriceAccepted, returnStdDev60Ratio, returnStdDev60AsOfDate, returnStdDev60Source,
+                    premiumAsOfDate, premiumSource, premiumStale, assetProfile, actionGateReasons,
+                    evidence, candidateAction, shortCandidateAction, distribution, null, null, null);
+        }
+
+        public static RadarEvidence withConfidence(
+                String acceptedPriceAsOfDate,
+                String acceptedPriceSource,
+                String acceptedPriceQuality,
+                boolean livePriceAccepted,
+                BigDecimal returnStdDev60Ratio,
+                String returnStdDev60AsOfDate,
+                String returnStdDev60Source,
+                String premiumAsOfDate,
+                String premiumSource,
+                boolean premiumStale,
+                AssetProfile assetProfile,
+                List<String> actionGateReasons,
+                com.steven.assets.service.TradingRadarEvidenceConfidenceResolver.Evidence evidence,
+                String candidateAction,
+                String shortCandidateAction,
+                com.steven.assets.service.DividendEventEvidenceResolver.Resolution distribution,
+                TreasuryYieldDto.RateContext treasuryRateContext,
+                NormalizedBiasEvidence normalizedBias,
+                NormalizedBiasEvidence shortNormalizedBias) {
+            java.util.Map<String, EvidenceGroup> groups = new java.util.LinkedHashMap<>();
+            if (evidence != null) {
+                for (var entry : evidence.groups().entrySet()) {
+                    var group = entry.getValue();
+                    List<EvidenceComponent> components = group.components().stream()
+                            .map(c -> new EvidenceComponent(c.name(), c.applicability().name(), c.weight(),
+                                    c.availableWeight(),
+                                    c.asOfDate() == null ? null : c.asOfDate().toString(),
+                                    c.provider(), c.missingReason()))
+                            .toList();
+                    groups.put(entry.getKey().name(), new EvidenceGroup(
+                            entry.getKey().name(), components, group.shortCoverage(), group.mediumCoverage(),
+                            group.shortAvailable(), group.mediumAvailable(), group.shortFresh(),
+                            group.mediumFresh(), group.sourceCount(), group.participates()));
+                }
+            }
+            java.util.Map<String, MarketFeatureEvidence> marketFeatures = new java.util.LinkedHashMap<>();
+            if (evidence != null && evidence.marketFeatures() != null) {
+                for (var entry : evidence.marketFeatures().features().entrySet()) {
+                    var feature = entry.getValue();
+                    marketFeatures.put(entry.getKey(), new MarketFeatureEvidence(
+                            feature.code(), feature.value(),
+                            feature.asOfDate() == null ? null : feature.asOfDate().toString(),
+                            feature.availableAt() == null ? null : feature.availableAt().toString(),
+                            feature.availabilityBasis(), feature.provider(), feature.sourceUrl(),
+                            feature.profileApplicability(), feature.duplicateOf(), feature.status(),
+                            feature.missingReason()));
+                }
+            }
+            return new RadarEvidence(acceptedPriceAsOfDate, acceptedPriceSource, acceptedPriceQuality,
+                    livePriceAccepted, returnStdDev60Ratio, returnStdDev60AsOfDate, returnStdDev60Source,
+                    premiumAsOfDate, premiumSource, premiumStale, assetProfile,
+                    actionGateReasons == null ? List.of() : actionGateReasons, groups, marketFeatures,
+                    evidence == null ? null : evidence.shortConfidence(),
+                    evidence == null ? null : evidence.mediumConfidence(),
+                    evidence == null ? null : evidence.shortDownsideRisk(),
+                    evidence == null ? null : evidence.mediumDownsideRisk(),
+                    evidence == null ? null : evidence.shortRisk().riskCoverage(),
+                    evidence == null ? null : evidence.mediumRisk().riskCoverage(),
+                    candidateAction, shortCandidateAction,
+                    distribution == null || distribution.nextEvent() == null
+                            ? null : distribution.nextEvent().exDividendDate().toString(),
+                    distribution == null || distribution.knownAt() == null
+                            ? null : distribution.knownAt().toString(),
+                    distribution == null ? null : distribution.provider(),
+                    distribution == null ? List.of() : distribution.sourceUrls(),
+                    distribution == null ? null : distribution.status().name(),
+                    distribution == null ? null : distribution.missingReason(),
+                    distribution == null ? null : distribution.eventsWithinFiveSessions(),
+                    distribution == null ? null : distribution.eventsWithinTwentySessions(),
+                    treasuryRateContext, normalizedBias, shortNormalizedBias);
+        }
+    }
 
     /**
      * 手動「重新整理」的行情回補結果（Task 249）。
@@ -255,7 +637,17 @@ public final class TradingRadarDto {
             BigDecimal volumeRatio,
             String fxAsOfDate,
             boolean profitTakingConfirmed,
-            FundamentalSnapshot fundamental
+            FundamentalSnapshot fundamental,
+            RadarEvidence evidence,
+            Integer shortDownsideRisk,
+            Integer mediumDownsideRisk,
+            Integer shortEvidenceConfidence,
+            Integer mediumEvidenceConfidence,
+            Double shortRiskCoverage,
+            Double mediumRiskCoverage,
+            String candidateAction,
+            String shortCandidateAction,
+            List<String> actionGateReasons
     ) {
         /** Task 291 前的欄位形狀，供既有測試建構資料。 */
         public StockDecision(
@@ -278,7 +670,9 @@ public final class TradingRadarDto {
                     kValue, dValue, monthlyConfirmation, quarterlyConfirmation, annualConfirmation,
                     fxPercentile, underlyingCurrency, reasons, risks, kdHeat, timingState, timingLabel,
                     ma60BiasPercent, week52Position, weeklyMa, etfPremiumPct, etfPremiumPercentile,
-                    extendedIndicators, null, null, null, List.of(), List.of(), false, null, null, false, null);
+                    extendedIndicators, null, null, null, List.of(), List.of(), false, null, null, false,
+                    null, RadarEvidence.EMPTY, null, null, null, null, null, null,
+                    null, null, List.of());
         }
     }
 }

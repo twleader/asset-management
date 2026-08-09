@@ -74,6 +74,42 @@ class TradingRadarMarketContextServiceTest {
         assertNull(result.usTechAsOfDate());
     }
 
+    @Test
+    void v13UsContextUsesIxicVolumeAndNeverTaiwanLiquidity() {
+        List<TwseIndexDailyHistory> tw = List.of(
+                tw(LocalDate.of(2026, 8, 7), 100, 9_999L, 8_888));
+        List<UsIndexDailyHistory> us = new ArrayList<>();
+        LocalDate start = LocalDate.of(2026, 7, 18);
+        for (int i = 0; i < 20; i++) {
+            us.add(us("IXIC", start.plusDays(i).toString(), "100", 100L));
+        }
+        us.add(us("IXIC", LocalDate.of(2026, 8, 7).toString(), "110", 400L));
+
+        var result = service.resolveMarketFromRows(
+                "美股", Instant.parse("2026-08-08T00:00:00Z"), tw, us);
+
+        assertEquals(LocalDate.of(2026, 8, 7), result.marketAsOfDate());
+        assertEquals("4.0000", result.marketVolumeRatio().toPlainString());
+        assertNull(result.marketTurnoverRatio());
+    }
+
+    @Test
+    void v13Taiwan14hSignalExcludesSameDayFinalVolumeWithoutObservedAt() {
+        List<TwseIndexDailyHistory> tw = new ArrayList<>();
+        LocalDate start = LocalDate.of(2026, 7, 17);
+        for (int i = 0; i < 21; i++) {
+            tw.add(tw(start.plusDays(i), 100, 100L, 100));
+        }
+        tw.add(tw(LocalDate.of(2026, 8, 7), 110, 900L, 900));
+
+        var result = service.resolveMarketFromRows(
+                "台股", Instant.parse("2026-08-07T06:00:00Z"), tw, List.of());
+
+        assertEquals(LocalDate.of(2026, 8, 6), result.marketAsOfDate());
+        assertEquals("1.0000", result.marketVolumeRatio().toPlainString());
+        assertEquals("1.0000", result.marketTurnoverRatio().toPlainString());
+    }
+
     /**
      * Task 302：bounded 的 {@code resolveMarket} 與既有 {@code resolve} 在同一組 stub 資料下
      * 必須算出等值的 {@code MarketContext}——兩者只差查詢範圍，委派的純函數本體相同。
@@ -142,6 +178,11 @@ class TradingRadarMarketContextServiceTest {
     private static UsIndexDailyHistory us(String code, String date, String close) {
         BigDecimal price = new BigDecimal(close);
         return new UsIndexDailyHistory(code, LocalDate.parse(date), price, price, price, price, null);
+    }
+
+    private static UsIndexDailyHistory us(String code, String date, String close, Long volume) {
+        BigDecimal price = new BigDecimal(close);
+        return new UsIndexDailyHistory(code, LocalDate.parse(date), price, price, price, price, volume);
     }
 
     private static ExchangeRateHistory fx(String currency, LocalDate date, String buy, String sell) {

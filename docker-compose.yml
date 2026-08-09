@@ -66,6 +66,8 @@ services:
       DB_NAME: ${POSTGRES_DB}
       DB_USERNAME: ${POSTGRES_USER}
       DB_PASSWORD: ${POSTGRES_PASSWORD}
+      # Shared internal-service credential is supplied by the deployment environment only.
+      INTERNAL_TREASURY_TOKEN: ${INTERNAL_TREASURY_TOKEN:?請在本機 secret environment 設定 INTERNAL_TREASURY_TOKEN}
       # Requirement 28：散佈版的主要管理者由安裝者指定；缺值時 Compose 直接顯示錯誤。
       ADMIN_EMAIL: ${ADMIN_EMAIL:?請在 .env 設定 ADMIN_EMAIL（主要管理者的 Google 帳號）}
       # 讓 rclone 從固定路徑讀取設定，避免依賴 USER/HOME
@@ -150,6 +152,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # Must be identical to business-services; never commit the secret value.
+      INTERNAL_TREASURY_TOKEN: ${INTERNAL_TREASURY_TOKEN:?請在本機 secret environment 設定 INTERNAL_TREASURY_TOKEN}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       FINMIND_TOKEN: ${FINMIND_TOKEN:-}

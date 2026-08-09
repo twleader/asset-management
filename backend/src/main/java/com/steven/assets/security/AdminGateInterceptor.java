@@ -11,6 +11,7 @@ import org.springframework.web.servlet.HandlerInterceptor;
  * <p>BFF 已在對外層擋過管理端點，這是 business-services 端的縱深防禦，對下列路徑要求 {@code X-User-Role = ADMIN}：
  * <ul>
  *   <li>{@code /api/backups/**}、{@code /internal/users/**}（備份/還原、使用者管理）：所有方法皆限 ADMIN。</li>
+ *   <li>{@code /internal/macro/treasury-yield/**}：查詢、單 tenor context 與 refresh 全部限 ADMIN。</li>
  *   <li>{@code /api/settings/**} 與 {@code /api/funds(/**)}（全域共用參考資料：銀行/券商/存款類型/市場別/資產分類/
  *       信託基金主檔…）：<b>寫入（POST/PUT/PATCH/DELETE）限 ADMIN；讀取（GET/HEAD/OPTIONS）開放給任何已登入者</b>，
  *       因下拉選單等需讀取共用設定，但一般使用者不得竄改影響全體租戶的參考資料（Requirement 29）。
@@ -41,6 +42,9 @@ public class AdminGateInterceptor implements HandlerInterceptor {
         // 全域共用參考資料（設定 + 基金主檔）：讀取開放，寫入才限 ADMIN
         if (path != null && isGlobalReferenceDataPath(path) && isReadOnlyMethod(request.getMethod())) {
             return true;
+        }
+        if (!currentUser.hasUser()) {
+            throw new UnauthenticatedException();
         }
         if (!currentUser.isAdmin()) {
             throw new AdminRequiredException();

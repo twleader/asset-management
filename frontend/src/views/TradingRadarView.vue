@@ -162,6 +162,36 @@
         <el-table-column type="expand">
           <template #default="{ row }">
             <div class="expand-panel">
+              <div class="evidence-summary" v-if="row.shortEvidenceConfidence != null || row.mediumEvidenceConfidence != null">
+                <div class="confirm-grid">
+                  <div class="confirm-item">
+                    <span>短期證據信心</span>
+                    <strong>{{ row.shortEvidenceConfidence == null ? '—' : row.shortEvidenceConfidence + ' / 100' }}</strong>
+                  </div>
+                  <div class="confirm-item">
+                    <span>中期證據信心</span>
+                    <strong>{{ row.mediumEvidenceConfidence == null ? '—' : row.mediumEvidenceConfidence + ' / 100' }}</strong>
+                  </div>
+                  <div class="confirm-item">
+                    <span>短／中期下檔風險</span>
+                    <strong>{{ row.shortDownsideRisk == null ? '—' : row.shortDownsideRisk }} ／ {{ row.mediumDownsideRisk == null ? '—' : row.mediumDownsideRisk }}</strong>
+                    <small>風險覆蓋 {{ row.shortRiskCoverage == null ? '—' : fmtPct(row.shortRiskCoverage * 100) }} ／ {{ row.mediumRiskCoverage == null ? '—' : fmtPct(row.mediumRiskCoverage * 100) }}</small>
+                  </div>
+                  <div class="confirm-item">
+                    <span>候選／實際動作</span>
+                    <strong>{{ row.candidateAction || '—' }} → {{ row.action || '—' }}</strong>
+                    <small v-if="row.evidence?.actionGateReasons?.length">{{ row.evidence.actionGateReasons.join('；') }}</small>
+                  </div>
+                  <div class="confirm-item" v-if="row.evidence?.nextDistributionStatus">
+                    <span>下一配息（已知時點）</span>
+                    <strong>{{ row.evidence.nextDistributionDate || '—' }} · {{ row.evidence.nextDistributionStatus }}</strong>
+                    <small>{{ row.evidence.nextDistributionKnownAt || '—' }} · {{ row.evidence.nextDistributionProvider || '—' }}</small>
+                    <small v-if="row.evidence.nextDistributionSourceUrls?.length">來源：{{ row.evidence.nextDistributionSourceUrls.join('、') }}</small>
+                    <small>5／20 個交易日內：{{ row.evidence.distributionsWithinFiveSessions ?? '—' }}／{{ row.evidence.distributionsWithinTwentySessions ?? '—' }}</small>
+                    <small v-if="row.evidence.nextDistributionMissingReason">證據說明：{{ row.evidence.nextDistributionMissingReason }}</small>
+                  </div>
+                </div>
+              </div>
               <div class="confirm-grid">
                 <div class="confirm-item">
                   <span>週線 MA5</span><strong>{{ fmtNumber(row.weeklyMa, 2) }}</strong>
@@ -218,13 +248,24 @@
                 <template v-else>
                   <div class="fundamental-grid">
                     <div class="fundamental-item">
+                      <span>PE／PB／殖利率</span>
+                      <strong>{{ fmtNumber(row.fundamental.peValue, 2) }} ／ {{ fmtNumber(row.fundamental.pbValue, 2) }} ／ {{ fmtPct(row.fundamental.dividendYieldPct) }}</strong>
+                      <small>PE 分位 {{ row.fundamental.pePercentile == null ? '—' : Math.round(row.fundamental.pePercentile) }} · PB 分位 {{ row.fundamental.pbPercentile == null ? '—' : Math.round(row.fundamental.pbPercentile) }} · 殖利率分位 {{ row.fundamental.dividendYieldPercentile == null ? '—' : Math.round(row.fundamental.dividendYieldPercentile) }}</small>
+                      <small>估值 composite {{ fmtNumber(row.fundamental.valuationContribution, 4) }} · 覆蓋 {{ row.fundamental.valuationCoverage == null ? '—' : row.fundamental.valuationCoverage }}</small>
+                    </div>
+                    <div class="fundamental-item">
+                      <span>EPS 趨勢／ROE fallback</span>
+                      <strong>{{ row.fundamental.epsTrendType || '—' }} ／ {{ boolLabel(row.fundamental.roeApproximationFallback) }}</strong>
+                      <small>僅呈現後端已確認的趨勢與近似 ROE 來源狀態，不在前端重算。</small>
+                    </div>
+                    <div class="fundamental-item">
                       <span>EPS TTM 年增</span><strong>{{ fmtPct(row.fundamental.epsYoyPct) }}</strong>
                       <small>{{ sourceLine(row.fundamental.epsProvider, row.fundamental.epsAsOf) }}</small>
                       <div class="source-links"><a v-for="(url, i) in row.fundamental.epsSourceUrls || []" :key="`eps-${i}`" :href="url" target="_blank" rel="noopener noreferrer">來源 {{ i + 1 }}</a></div>
                     </div>
                     <div class="fundamental-item">
                       <span>近似 ROE</span><strong>{{ fmtPct(row.fundamental.approximateRoePct) }}</strong>
-                      <small>近四季母公司淨利÷最新權益，非正式 ROE</small>
+                      <small>{{ roeBasisLabel(row.fundamental.roeApproximationFallback) }}</small>
                       <small>{{ sourceLine(row.fundamental.roeProvider, row.fundamental.roeAsOf) }}</small>
                       <div class="source-links"><a v-for="(url, i) in row.fundamental.roeSourceUrls || []" :key="`roe-${i}`" :href="url" target="_blank" rel="noopener noreferrer">來源 {{ i + 1 }}</a></div>
                     </div>
@@ -270,6 +311,90 @@
                     </el-col>
                   </el-row>
                 </template>
+              </div>
+
+              <div v-if="row.evidence" class="evidence-detail-panel">
+                <div class="fundamental-head">
+                  <span class="fundamental-title">判斷證據與資料完整性</span>
+                  <el-tag size="small" :type="row.evidence.assetProfile?.profileComplete == null ? 'info' : (row.evidence.assetProfile.profileComplete ? 'success' : 'warning')" effect="plain">
+                    輪廓 {{ row.evidence.assetProfile?.profileComplete == null ? '資料不足' : (row.evidence.assetProfile.profileComplete ? '完整' : '不完整') }}
+                  </el-tag>
+                </div>
+                <div class="confirm-grid">
+                  <div class="confirm-item">
+                    <span>嚴格資產輪廓</span>
+                    <strong>{{ row.evidence.assetProfile?.instrumentKind || '—' }} · {{ row.evidence.assetProfile?.assetClass || '—' }}</strong>
+                    <small>{{ row.evidence.assetProfile?.assetClassSource || 'UNKNOWN' }} · 資產分類完整 {{ boolLabel(row.evidence.assetProfile?.assetClassComplete) }}</small>
+                    <small>工具來源 {{ row.evidence.assetProfile?.instrumentKindSource || 'UNKNOWN' }} · 工具完整 {{ boolLabel(row.evidence.assetProfile?.instrumentKindComplete) }}</small>
+                    <small>風格 {{ row.evidence.assetProfile?.stockStyle || '—' }}／{{ row.evidence.assetProfile?.stockStyleSource || 'UNKNOWN' }}；債券期別 {{ row.evidence.assetProfile?.bondTerm || '—' }}／{{ row.evidence.assetProfile?.bondTermSource || 'UNKNOWN' }}</small>
+                  </div>
+                  <div class="confirm-item">
+                    <span>幣別證據</span>
+                    <strong>{{ row.evidence.assetProfile?.quoteCurrency || '—' }} → {{ row.evidence.assetProfile?.underlyingCurrency || '—' }}</strong>
+                    <small>報價完整 {{ boolLabel(row.evidence.assetProfile?.quoteCurrencyComplete) }} · 底層幣別完整 {{ boolLabel(row.evidence.assetProfile?.underlyingCurrencyComplete) }}</small>
+                    <small>幣別資料完整 {{ boolLabel(row.evidence.assetProfile?.currencyDataComplete) }}</small>
+                    <small v-if="row.evidence.assetProfile?.missingReasons?.length">缺漏：{{ row.evidence.assetProfile.missingReasons.join('；') }}</small>
+                  </div>
+                  <div class="confirm-item">
+                    <span>60 日波動</span>
+                    <strong>{{ fmtNumber(row.evidence.returnStdDev60Ratio, 4) }}</strong>
+                    <small>{{ sourceLine(row.evidence.returnStdDev60Source, row.evidence.returnStdDev60AsOfDate) }}</small>
+                  </div>
+                  <div class="confirm-item">
+                    <span>接受價格證據</span>
+                    <strong>{{ row.evidence.acceptedPriceQuality || '—' }}</strong>
+                    <small>{{ sourceLine(row.evidence.acceptedPriceSource, row.evidence.acceptedPriceAsOfDate) }} · 即時採用 {{ row.evidence.livePriceAccepted ? '是' : '否' }}</small>
+                  </div>
+                  <div class="confirm-item">
+                    <span>折溢價證據</span>
+                    <strong>{{ row.evidence.premiumSource || '—' }} · {{ row.evidence.premiumSource ? (row.evidence.premiumStale ? 'stale' : 'fresh') : '—' }}</strong>
+                    <small>{{ row.evidence.premiumAsOfDate || '—' }}</small>
+                  </div>
+                  <div v-if="bondRateEvidence(row)" class="confirm-item">
+                    <span>債券利率證據</span>
+                    <strong>{{ bondRateEvidence(row).applicability || '—' }} · {{ bondRateEvidence(row).provider || '—' }}</strong>
+                    <small>{{ bondRateEvidence(row).missingReason || '已提供可用 observation' }}</small>
+                  </div>
+                  <div v-if="row.evidence.treasuryRateContext" class="confirm-item">
+                    <span>美債殖利率情境</span>
+                    <strong>{{ row.evidence.treasuryRateContext.tenor || '—' }} · {{ fmtNumber(row.evidence.treasuryRateContext.value, 4) }}%</strong>
+                    <small>曲線日 {{ row.evidence.treasuryRateContext.curveDate || '—' }} · {{ row.evidence.treasuryRateContext.provider || '—' }} · batch #{{ row.evidence.treasuryRateContext.batchId ?? '—' }}</small>
+                    <small>批次完整 {{ boolLabel(row.evidence.treasuryRateContext.complete) }} · 落後 {{ row.evidence.treasuryRateContext.lagDays ?? '—' }} 日</small>
+                    <small>可得 {{ formatTime(row.evidence.treasuryRateContext.availableAt) }} · {{ row.evidence.treasuryRateContext.availabilityBasis || '可得時間基礎未標示' }}</small>
+                    <small>抓取 {{ formatTime(row.evidence.treasuryRateContext.fetchedAt) }}</small>
+                    <small v-if="row.evidence.treasuryRateContext.staleReason">時效說明：{{ row.evidence.treasuryRateContext.staleReason }}</small>
+                    <div v-if="treasurySourceEntries(row.evidence.treasuryRateContext).length" class="source-links">
+                      <a v-for="source in treasurySourceEntries(row.evidence.treasuryRateContext)" :key="`treasury-${source.tenor}`" :href="source.url" target="_blank" rel="noopener noreferrer">{{ source.tenor }} 來源</a>
+                    </div>
+                  </div>
+                </div>
+                <div v-if="evidenceGroups(row).length" class="evidence-groups-panel">
+                  <div class="fundamental-title">證據群組（後端已解析）</div>
+                  <div class="evidence-group-grid">
+                    <div v-for="group in evidenceGroups(row)" :key="`${row.market}-${row.stockCode}-${group.group}`" class="evidence-group-item">
+                      <div class="evidence-group-head">
+                        <strong>{{ group.group }}</strong>
+                        <span>短 {{ fmtPct(group.shortCoverage * 100) }}／中 {{ fmtPct(group.mediumCoverage * 100) }}</span>
+                      </div>
+                      <small>短期 {{ group.shortFresh ? 'fresh' : '缺漏／過期' }} · 中期 {{ group.mediumFresh ? 'fresh' : '缺漏／過期' }} · provider {{ group.sourceCount ?? 0 }}</small>
+                      <ul v-if="group.components?.length" class="evidence-component-list">
+                        <li v-for="component in group.components" :key="`${group.group}-${component.name}`">
+                          <span>{{ component.name }} · {{ component.applicability || '—' }}</span>
+                          <small>{{ component.provider || '來源未標示' }} · {{ component.asOfDate || '日期未標示' }}<template v-if="component.missingReason"> · {{ component.missingReason }}</template></small>
+                        </li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+                <div v-if="marketFeatureEntries(row).length" class="evidence-groups-panel market-feature-panel">
+                  <div class="fundamental-title">市場數值特徵（只呈現，不在前端重算）</div>
+                  <ul class="evidence-component-list">
+                    <li v-for="feature in marketFeatureEntries(row)" :key="`${row.market}-${row.stockCode}-${feature.key}`">
+                      <span>{{ feature.key }} · {{ feature.value ?? '—' }} · {{ feature.status || '—' }}</span>
+                      <small>{{ feature.provider || '來源未標示' }} · as-of {{ feature.asOfDate || '—' }} · availableAt {{ feature.availableAt || '—' }} · {{ feature.availabilityBasis || 'basis 未標示' }}<template v-if="feature.missingReason"> · {{ feature.missingReason }}</template></small>
+                    </li>
+                  </ul>
+                </div>
               </div>
 
               <el-row :gutter="18" class="reason-row">
@@ -1072,6 +1197,41 @@ function sourceLine(provider, asOf) {
   return [provider || '來源未標示', asOf ? formatTime(asOf) : null].filter(Boolean).join(' · ')
 }
 
+function boolLabel(value) {
+  return value == null ? '—' : (value ? '是' : '否')
+}
+
+function roeBasisLabel(fallback) {
+  if (fallback === true) return '期初權益缺漏，採最新期末權益作分母；此 fallback 的證據權重已下修。'
+  if (fallback === false) return '採同一來源的期初與期末權益平均作分母。'
+  return '舊快照未揭露近似 ROE 的權益分母基礎。'
+}
+
+function treasurySourceEntries(context) {
+  if (!context?.sourceManifest || typeof context.sourceManifest !== 'object') return []
+  return Object.entries(context.sourceManifest)
+    .filter(([, url]) => typeof url === 'string' && url.length > 0)
+    .map(([tenor, url]) => ({ tenor, url }))
+}
+
+// 只查找後端 evidenceGroups 已解析的 component；不在畫面推導利率狀態或門檻。
+function bondRateEvidence(row) {
+  return row?.evidence?.evidenceGroups?.ASSET_SPECIFIC?.components?.find(c => c.name === 'bond_rate') || null
+}
+
+function evidenceGroups(row) {
+  const groups = row?.evidence?.evidenceGroups
+  if (!groups || typeof groups !== 'object') return []
+  return Object.values(groups).filter(Boolean).sort((a, b) => String(a.group || '').localeCompare(String(b.group || '')))
+}
+
+function marketFeatureEntries(row) {
+  const features = row?.evidence?.marketFeatures
+  if (!features || typeof features !== 'object') return []
+  return Object.entries(features).map(([key, value]) => ({ key, ...(value || {}) }))
+    .sort((a, b) => a.key.localeCompare(b.key))
+}
+
 function fmtTime(value) {
   if (!value) return '—'
   const d = new Date(value)
@@ -1496,6 +1656,18 @@ onUnmounted(() => {
 .confirm-item { border: 1px solid #e2e8f0; border-radius: 8px; background: white; padding: 12px; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
 .confirm-item span, .confirm-item small { color: #64748b; font-size: 12px; }
 .fundamental-panel { margin-top: 18px; border: 1px solid #cbd5e1; border-radius: 9px; background: #fff; padding: 14px 16px; }
+.evidence-detail-panel { margin-top: 18px; border: 1px solid #cbd5e1; border-radius: 9px; background: #fff; padding: 14px 16px; }
+.evidence-groups-panel { margin-top: 16px; border-top: 1px solid #e2e8f0; padding-top: 12px; }
+.evidence-group-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px; margin-top: 9px; }
+.evidence-group-item { border: 1px solid #e2e8f0; border-radius: 7px; padding: 9px 10px; background: #f8fafc; }
+.evidence-group-head { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; }
+.evidence-group-head span { color: #475569; white-space: nowrap; }
+.evidence-group-item > small { display: block; color: #64748b; margin-top: 4px; }
+.evidence-component-list { margin: 7px 0 0; padding-left: 16px; color: #334155; font-size: 12px; }
+.evidence-component-list li { margin: 4px 0; }
+.evidence-component-list li span, .evidence-component-list li small { display: block; }
+.evidence-component-list li small { color: #64748b; line-height: 1.45; }
+.market-feature-panel { background: #f1f5f9; }
 .fundamental-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
 .fundamental-title { color: #0f172a; font-size: 14px; font-weight: 750; }
 .fundamental-grid { display: grid; grid-template-columns: repeat(5, minmax(145px, 1fr)); gap: 10px; }
