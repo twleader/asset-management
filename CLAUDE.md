@@ -109,6 +109,23 @@ bash .claude/hooks/spec-review-pass.sh --status # 查目前狀態
 > 另注意 `core.hooksPath` 設的是**絕對路徑**、指向主 clone；改 `scripts/git-hooks/`
 > 底下的檔案要 merge 進 main 後才會實際生效。
 
+### 實作一律派 Subagent（模型指定）
+
+**第 5 步「實作程式碼」不得由主 agent 直接動手，一律開 subagent 執行**，模型與
+reasoning effort 指定如下，完成後回到主 agent 彙整結果（驗收、跑閘門、commit）：
+
+- 首選：**Sonnet 5（effort: max）**
+- 替代：**Luna 5.6（effort: max）**（若當前環境可選用）
+
+主 agent 的職責限於：拆解任務、撰寫 subagent prompt、彙整回報、查證 subagent
+宣稱的變更（注意：subagent 回報的絕對路徑常指向主 repo 而非 worktree，
+落地前先用 `git -C <worktree路徑> status/diff` 確認變更真的落在 worktree）。
+
+**`/run-stack` 與 `/commit-merge-push` 也一律派 subagent 執行**，模型同上
+（Sonnet 5 effort max，或 Luna 5.6 max）。主 agent 在 prompt 裡帶入該 skill 的
+完整流程與本次變更脈絡（改了哪個 service、預期驗證點），subagent 執行完回報
+結果（stack 是否 serve、merge commit SHA），由主 agent 向使用者彙整。
+
 ---
 
 ## 技術棧
