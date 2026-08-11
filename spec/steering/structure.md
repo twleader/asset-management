@@ -206,6 +206,7 @@ external-materials-service/src/main/java/com/steven/assets/externalmaterials/
 ### 4.2 設計原則
 
 - **僅內網暴露 `/internal/*`，不對前端開放。** business-services 透過 docker network 呼叫。
+  **唯一具名例外（Requirement 66）：** `/api/quotes`（唯讀最新報價，`docker-compose.yml` 僅綁 `127.0.0.1` host loopback，供 Docker 外直接查詢），刻意不掛 `/internal` 前綴；不對前端／BFF／business-services 開放，後者仍走既有 Redis 直讀。不得援引此例外新增第二個對外端點——新的對外需求另立 Requirement 評估。
 - **抓價邏輯不寄宿在 business-services。** 外部 API 限流／失敗不影響主系統。
 - **寫入端：** Redis（live）+ PostgreSQL（歷史 / NAV / 配息）。
 - **不持有業務邏輯。** 不知道 snapshot、不知道使用者持倉；只負責 fetch & store。
@@ -309,9 +310,9 @@ frontend/
 
 ```
 spec/
-├── requirements.md       # 65 個 Requirements（User Story + AC）
+├── requirements.md       # 66 個 Requirements（User Story + AC）
 ├── design.md             # 架構圖、ERD、Service 職責、Sequence
-├── tasks.md              # 任務索引（Task 1–228、264–267、269–292、297–309）＋ 尚未歸檔的 201 起區段
+├── tasks.md              # 任務索引（Task 1–228、264–267、269–292、297–309、311–312）＋ 尚未歸檔的 201 起區段
 ├── tasks/                # 任務檔
 │   ├── README.md         # 自足任務檔規範
 │   ├── archive/          # Task 1–200 歷史，已凍結
@@ -364,7 +365,7 @@ frontend ──► bff ──► business-services ──► postgres
                           ├──► redis ◄── external-materials-service ──► (external APIs)
                           │              └────────────► postgres (fund_nav / stock_price_history / ...)
                           │
-                          └──► external-materials (僅內網 /internal/*)
+                          └──► external-materials (僅內網 /internal/*；具名例外 /api/quotes 對 host 開放，見 Requirement 66／§4.2)
 ```
 
 **禁止：**

@@ -135,7 +135,8 @@ services:
   # ── External Materials Service ─────────────────────────────
   # 集中所有「向外部抓資料」的邏輯：盤中 2 分鐘抓股價寫 Redis、盤後寫
   # stock_price_history、每日抓股利寫 stock_dividend_history。
-  # 不對外暴露；business-services 透過 docker network 內部呼叫 /internal/*。
+  # /api/quotes 對外唯讀開放（Requirement 66，僅 loopback）；其餘 /internal/* 仍僅 docker network 可達，
+  # business-services 透過 docker network 內部呼叫。
   external-materials-service:
     build:
       context: ./external-materials-service
@@ -172,6 +173,11 @@ services:
       #  每次上傳都會 refresh 並寫回，故可寫副本是必要的，不是保險）。
       GDRIVE_OUTPUT_REMOTE: ${GDRIVE_OUTPUT_REMOTE:-GDriveOutput}
       RCLONE_CONFIG: /etc/rclone/rclone.conf
+    ports:
+      # Requirement 66：/api/quotes 唯讀對外查詢；僅綁 127.0.0.1（比照上方 postgres 既有慣例），
+      # 不對外部網卡暴露。同 port 上既有 /internal/* 端點亦隨之可從 host loopback 連線，
+      # 安全取捨全文見 spec/requirements.md Requirement 66。
+      - "127.0.0.1:${EXTERNAL_MATERIALS_HOST_PORT:-8082}:8080"
     volumes:
       # 公開資訊每輪輸出 JSON（Task 177／212）：host 家目錄掛入容器 /home/steven（可寫），與 business-services
       # 同一份掛載。NewsPoller 以 EXPORT_OUTPUT_DIR 為基底、resolve crawler_export_setting 的相對子路徑

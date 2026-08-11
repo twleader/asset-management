@@ -616,6 +616,25 @@ POST /internal/repair/history?market=%E5%8F%B0%E8%82%A1&from=2026-06-01&to=2026-
 |--------|------|------|
 | GET | `/internal/valuation/twse-daily?date=` | 台股歷史估值單日快照（TWSE `rwd/zh/afterTrading/BWIBBU_d?date=&selectType=ALL&response=json`，短 UA `Mozilla/5.0`），回該日全上市個股的 PE／PB／殖利率。**Requirement 61／Task 278**。**抓取實作與合規 Javadoc 隨新 client 類別落在本服務**（見下方 business `/internal` 表的警語） |
 
+#### external-materials-service 對外公開 API（`PublicQuoteController`，host 可達，Requirement 66）
+
+> **與上方「對外介面」表的關鍵差異：這是本服務唯一刻意對外（docker host）暴露的端點群組**，其餘既有 `/internal/*` 端點維持「僅 docker network 內部」不變（上方「對外介面」段落「不對前端暴露 REST」的既有契約不受本節影響）。新端點刻意不掛在 `/internal` 前綴下，避免與該既有契約混讀。`docker-compose.yml` 的 `external-materials-service` 服務首次新增 `ports` 映射，僅綁 `127.0.0.1`（見下方「Docker Compose Services」）。
+>
+> **安全取捨（完整理由見 `spec/requirements.md` Requirement 66，此處不重複展開）：** port 一經開放，同一 Spring Boot process 的其餘既有 `/internal/*` 端點（含 `/internal/refresh`、`/internal/backfill/*`、`/internal/repair/history` 等有副作用端點）也一併可從 host `127.0.0.1` 連線到——這是「同 process 只有一個 port」的必然結果，非本次獨立引入的漏洞；信任水位等同既有 `postgres` 5432 的 loopback-only 慣例。
+
+`PriceCacheReader`（新 service，與既有 `PriceCacheWriter` 同包、職責相反——只讀不寫）唯讀 Redis `price:{market}:{code}` 與 `price:index:{market}`（見上方「Redis key schema」），不觸發外部抓取、不寫入 Redis、不寫入資料庫、不 `PUBLISH price-update`。
+
+| Method | Path | 說明 |
+|--------|------|------|
+| GET | `/api/quotes?market=` | 列出目前 Redis 快取的所有最新報價；`market` 選填（`台股`／`美股`／`英股`其一），省略時回三市場全部（含 `price:台股:0000` 大盤——與個股共用同一 key schema，見上方「Redis key schema」）。查無快取（Redis 為空）回**空陣列**，非錯誤 |
+| GET | `/api/quotes/one?code=&market=` | 查詢單一標的最新報價，`code`／`market` 皆必填（缺一由 Spring 綁定層回 400）。Redis 命中回 200 + 報價 JSON；cache miss 回 **204 No Content**——**不** fallback 查 DB、**不**觸發抓取，與 `/internal/*` 既有帶 cold-start 副作用的端點（例如 `/internal/intraday-ticks`）刻意不同語意，維持「唯讀當前快取」的單純契約 |
+
+回應 JSON 欄位（`LatestQuote` record）：`stockCode`／`market`／`price`／`previousClose`／`priceChange`／`changePercent`／`buyPrice`／`sellPrice`／`openPrice`／`highPrice`／`lowPrice`／`volume`／`stockName`／`source`／`tradingDate`／`updatedAt`／`closed`／`quoteStatus`，逐欄語意與型別比照 `backend` 端 `PriceQueryService.LivePrice`（同一份 Redis JSON 的另一個消費端；僅欄位集合與型別對齊，`LatestQuote` 宣告順序逐欄比照 `LivePrice` 一致）。解析採手動 `JsonNode` 逐欄讀取（比照 `PriceQueryService.parse()` 的 `text()`/`bd()` helper 風格），不依賴 Jackson record 自動反序列化——本模組 `maven-compiler-plugin` 未開 `-parameters`，直接 `mapper.readValue(json, LatestQuote.class)` 在缺 `ParameterNamesModule` 時無法還原 constructor 參數名而失敗，全庫既有的 Redis JSON 解析（`PriceCacheWriter.writeVerifiedClose`／`syncClosedFromDb`、`PriceQueryService.parse`）也一律採手動解析，本端點沿用同一模式。
+
+**與 `/api/market-data/prices`（business-services，經 BFF，`StockPriceService.getAllPrices` → `PriceQueryService.getAllDisplayPrices`／`getDisplayPrice` 依市場階段解析——台股另有 session-phase 與 `close_source` 信任來源過濾，僅非台股標的才退化為 `getLive`，見「Live 行情（Redis）」段落對 `getLive`／`getDisplayPrice` 分工的既有記載）語意不同**：本端點純讀 Redis、無上述 display-phase 邏輯與 DB fallback，`/api/quotes/one` 的 204 就是唯一的「查無」訊號——維運者查詢兩者查到不同結果是預期行為（display 路徑可能給出信任來源過濾後的收盤值，本端點缺 cache 就是 204），不代表系統異常。
+
+**不需要身份驗證**（唯讀公開市場報價 ＋ 僅 loopback，理由見 Requirement 66，與 `TreasuryYieldController` 的 token／ADMIN 雙重驗證要求不同）。**business-services／BFF／前端不消費此新端點**——既有即時報價路徑繼續走 `PriceQueryService` 直讀 Redis，不改道；本端點只服務 host 端直接查詢（`curl`／維運監看）。
+
 #### business-services Internal API（手動觸發，不排程、不進 BFF、不進前端）
 
 > **本服務此前沒有這類 `/internal` 抓取／作業端點**——實測 `grep -ran 'RequestMapping("/internal' backend/src` 只有 `UserAdminController` 的 `/internal/users`（受 `AdminGateInterceptor` 限 ADMIN）。下列端點分兩種授權拓撲，不能以一個 blanket `AdminGateInterceptor` 描述：估值回補是 business 維運端點，明確納入 `AdminGateInterceptor.addPathPatterns`；Treasury business proxy/refresh 同樣由 business AdminGate 保護，external Treasury 查詢則另由 shared token＋ADMIN role filter 保護。**`/internal/backtest/rules` 是唯一例外：純讀、分鐘級、只在 asset-net 內呼叫，刻意不掛 AdminGate，也不進 BFF；business 8080 不映射 host，故容器內驗收以 network boundary 為授權邊界。若日後對外映射 8080，必須先新增明確 AdminGate/token 保護再開放。**
@@ -2243,7 +2262,7 @@ Task 290 後 47 個帶 `zone` 的 `@Scheduled` annotation（Spring 的 `zone` �
 services:
   postgres:
     image: postgres:16-alpine
-    ports: ["5432:5432"]
+    ports: ["127.0.0.1:5432:5432"]  # Requirement 30：僅 loopback，不對外部網卡暴露
     healthcheck: pg_isready
 
   redis:
@@ -2259,7 +2278,7 @@ services:
 
   external-materials-service:
     build: ./external-materials-service
-    # 不暴露 host port；僅 docker network 可達
+    ports: ["127.0.0.1:${EXTERNAL_MATERIALS_HOST_PORT:-8082}:8080"]  # Requirement 66：僅 loopback，/api/quotes 唯讀對外；/internal/* 隨 port 一併可達（見該 Requirement 安全取捨）
     depends_on: [postgres (healthy), redis (healthy)]
     environment:
       - FINMIND_TOKEN
