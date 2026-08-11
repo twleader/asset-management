@@ -28,7 +28,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 
 ---
 
-## 任務索引（Task 1–228、264–267、269–292、297–309、311–312）
+## 任務索引（Task 1–228、264–267、269–292、297–309、311–316）
 
 | Task | 標題 | 位置 |
 |---|---|---|
@@ -307,12 +307,16 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 305 | 雙軌因子貢獻一次計算（輸出逐位不變）＋整波部署驗證（Requirement 43） | [tasks/t305_radar_factor_compute_once.md](tasks/t305_radar_factor_compute_once.md) |
 | 306 | 台幣兌美元匯率新增兆豐銀行備援層（台銀 → 兆豐 → Yahoo → FinMind，Requirement 10） | [tasks/t306_exchange_rate_mega_bank_fallback.md](tasks/t306_exchange_rate_mega_bank_fallback.md) |
 | 307 | 交易雷達估值合成、資產輪廓、市場別公開資訊與版本化配息事件（Requirement 65） | [tasks/t307_radar_valuation_profile_events.md](tasks/t307_radar_valuation_profile_events.md) |
-| 308 | 交易雷達可成交台美回測、時間外推校準與 `TW_RULES_V13` 發布（Requirement 56／65） | [tasks/t308_radar_walk_forward_v13_calibration.md](tasks/t308_radar_walk_forward_v13_calibration.md) |
+| 308 | 交易雷達可成交台美回測、時間外推校準與 `TW_RULES_V13` 發布判定（Requirement 56／65） | [tasks/t308_radar_walk_forward_v13_calibration.md](tasks/t308_radar_walk_forward_v13_calibration.md) |
 | 309 | 交易雷達 decision-time 資料時效、證據信心與買進完整性閘門（Requirement 65） | [tasks/t309_radar_evidence_integrity_confidence.md](tasks/t309_radar_evidence_integrity_confidence.md) |
 | 311 | 交易紀錄明細列雙擊開啟股票分析圖（比照已實現損益／今日交易雷達既有模式，Requirement 49） | [tasks/t311_transaction_double_click.md](tasks/t311_transaction_double_click.md) |
 | 312 | external-materials-service 最新報價 host 對外唯讀查詢 API（`/api/quotes`，Requirement 66） | [tasks/t312_external_materials_public_quote_api.md](tasks/t312_external_materials_public_quote_api.md) |
+| 313 | `market:status` Redis key 描述訂正：改記載現況（即時運算、無快取，Requirement 7） | [tasks/t313_market_status_no_redis_cache.md](tasks/t313_market_status_no_redis_cache.md) |
+| 314 | 交易雷達 V13 joint-fold 無洩漏與回測成本邊界閉環（Requirement 65） | [tasks/t314_radar_v13_joint_fold_integrity.md](tasks/t314_radar_v13_joint_fold_integrity.md) |
+| 315 | 交易雷達 PE／PB／殖利率逐分量 provenance UI 與匯出閉環（Requirement 65） | [tasks/t315_radar_valuation_provenance_surfaces.md](tasks/t315_radar_valuation_provenance_surfaces.md) |
+| 316 | 交易雷達 Treasury freshness、完整回歸與真實 holdout 結案（Requirement 65） | [tasks/t316_radar_v13_validation_closure.md](tasks/t316_radar_v13_validation_closure.md) |
 
-> **註：本索引表僅列至 228、264–267、269–292、297–309 與 311–312；Task 229–263、268 與 293–296 未登錄於本表，以 `spec/tasks/tNNN_*.md` 檔案本身為準。**
+> **註：Task 229–263、268、293–296 以各自任務檔為準。**
 
 > **Task 222–225 已全部被 t264／t265／t292 取代（見上表），保留僅作為決策記錄，一律不得依其實作。**
 >
