@@ -2,6 +2,7 @@ package com.steven.assets.client;
 
 import com.steven.assets.dto.TreasuryYieldDto;
 import com.steven.assets.service.TreasuryYieldClient;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Component;
@@ -19,6 +20,7 @@ public class ExternalTreasuryYieldClient implements TreasuryYieldClient {
     private final WebClient client;
     private final String treasuryToken;
 
+    @Autowired
     public ExternalTreasuryYieldClient(
             @Value("${external-materials.base-url:http://external-materials-service:8080}") String baseUrl,
             @Value("${asset.internal.treasury-token:}") String treasuryToken) {
