@@ -33,6 +33,8 @@ public class IndexExportScheduleService {
     private static final DateTimeFormatter TS_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final int MAX_RANGE_MONTHS = 120;
     private static final String DEFAULT_MARKET = "TWSE";
+    /** {@code index_export_schedule_time.last_run_status} 的欄位上限（{@code varchar(500)}）。 */
+    private static final int STATUS_MAX = 500;
 
     private final IndexExportScheduleRepository settingRepo;
     private final ExcelExportService excelExportService;
@@ -158,7 +160,8 @@ public class IndexExportScheduleService {
             catch (Exception e) { statuses.add("失敗(" + market + ")：" + e.getMessage()); log.warn("大盤指數排程 owner={} market={} 失敗", s.getOwnerUserId(), market, e); }
         }
         t.setLastRunDate(today); t.setLastRunAt(LocalDateTime.now(TW_ZONE));
-        t.setLastRunStatus(statuses.isEmpty() ? "略過：未選指數" : statuses.stream().filter(Objects::nonNull).collect(Collectors.joining("；")));
+        t.setLastRunStatus(truncate(statuses.isEmpty() ? "略過：未選指數"
+                : statuses.stream().filter(Objects::nonNull).collect(Collectors.joining("；")), STATUS_MAX));
         t.setUpdatedAt(LocalDateTime.now(TW_ZONE)); s.setUpdatedAt(LocalDateTime.now(TW_ZONE)); settingRepo.save(s);
     }
 
@@ -185,6 +188,20 @@ public class IndexExportScheduleService {
         try { return jsonDocRenderer.render(doc); } catch (Exception e) { log.warn("json render 失敗：{}", e.getMessage()); return null; }
     }
     private static long size(Path p) { try { return p == null ? 0 : Files.size(p); } catch (IOException e) { return 0; } }
+
+    /**
+     * 狀態字串寫入前的截斷（對應 {@code varchar(500)}）。
+     *
+     * <p>成功時每則狀態內含兩個絕對路徑、失敗時內含 rclone 的原始錯誤訊息，多指數以「；」串接後
+     * 極易超出欄位長度。<b>寫入失敗會整筆交易回滾</b>，連帶 {@code last_run_date} 這個當日 guard
+     * 也寫不進去，該時間點便從到點起每分鐘重試到午夜——截斷是為了擋掉這條回滾路徑，不只是為了好看。
+     *
+     * <p>截的是<b>合併後</b>的字串（非逐則），如此不論選幾個指數都保證不超過上限。
+     */
+    private static String truncate(String s, int max) {
+        if (s == null) return null;
+        return s.length() <= max ? s : s.substring(0, max - 1) + "…";
+    }
 
     private IndexExportSchedule defaultSchedule(Long owner) {
         IndexExportSchedule s = IndexExportSchedule.builder().ownerUserId(owner).build();
