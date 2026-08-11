@@ -23,7 +23,7 @@ public class ExternalTreasuryYieldClient implements TreasuryYieldClient {
     @Autowired
     public ExternalTreasuryYieldClient(
             @Value("${external-materials.base-url:http://external-materials-service:8080}") String baseUrl,
-            @Value("${asset.internal.treasury-token:}") String treasuryToken) {
+            @Value("${app.internal.treasury-token:}") String treasuryToken) {
         this(WebClient.builder().baseUrl(baseUrl).build(), treasuryToken);
     }
 
