@@ -3,6 +3,7 @@ package com.steven.assets.externalmaterials.client;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -41,6 +42,7 @@ public class DividendFetchClient {
     private final DividendUpcomingScopeClient upcomingScopeClient;
     private final Clock clock;
 
+    @Autowired
     public DividendFetchClient(
             @Value("${finmind.token:${FINMIND_TOKEN:}}") String finmindToken,
             DividendUpcomingScopeClient upcomingScopeClient) {

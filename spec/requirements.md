@@ -2566,3 +2566,24 @@ FROM stock_price_history WHERE market='台股';
 - [ ] **動作語意重新校準**：`PROFIT_TAKING_CONFIRMED` 若在 holdout 仍代表強勢高波動而非負前瞻報酬，不得直接強迫 REDUCE；應改為「高波動動能／保護獲利觀察」風險，只有獨立轉弱證據與下檔風險同時成立才減碼。短／中期各自校準 score/action threshold，不得共用同一門檻只換權重。
 - [ ] **單一 V13 發布與可解釋 UI**：t274、t275、t307、t308、t309 作為同一 `TW_RULES_V13` 發布，最終才升版一次並重建通知基準；中途不得部署半套規則。交易雷達頁與 Excel/JSON 快照顯示 opportunity、downside risk、confidence、as-of/source、有效 evidence groups、asset profile、下一配息與利率/波動欄；缺值明示「未納入」與原因，不得宣稱已完整評估。
 - [ ] **驗證**：除各任務單元測試外，須通過 backend、external-materials-service、BFF、frontend 全部相關測試與 build；從 feature worktree 重建受影響 Docker images、recreate containers、restart BFF，實際讀取 `/api/trading-radar` 與新回測輸出，確認 ruleVersion、日期一致性、confidence gate、台美 region、PB/殖利率、債券 USD/利率、未來配息與 holdout 報告。完成後依專案兩段式流程 commit、`--no-ff` merge main 並 push。
+
+---
+
+### Requirement 66: external-materials-service 最新報價——Docker host 對外唯讀查詢 API
+
+**User Story:** 作為系統維運者，我希望能在 Docker host 端（不進容器、不透過前端登入）直接查詢 external-materials-service 盤中每 2 分鐘輪詢到的最新報價，以便快速確認抓價是否正常運作，或臨時取用某檔股票當下的快取價格。
+
+> **與既有 `/internal/*` 的關係（刻意的架構例外）：** `external-materials-service` 現有 `/internal/*` 端點群（確切支數見 `spec/design.md`「對外介面」表頭當下計數，本 Requirement 不重複宣告以免與該表未來的計數校正各自漂移）的既定契約是「僅 docker network 內由 business-services 呼叫，不對外暴露」，docker-compose 也從未替這個服務開過 host port。本 Requirement 是使用者明確要求的例外：新增一組**獨立命名空間**的唯讀查詢 API，並讓 docker-compose 首次替這個服務開放 host port。既有 `/internal/*` 的「不對外暴露」約定對其餘所有既有端點維持不變——新端點刻意不掛在 `/internal` 前綴下，避免語意混淆成「`/internal` 也對外了」。
+
+**Acceptance Criteria:**
+
+- [ ] **純唯讀，不新增任何寫入或抓取副作用**：新端點只讀既有 Redis 快取（`price:{market}:{code}` 與 `price:index:{market}`，見 design.md「Redis key schema」），不觸發外部 API 抓取、不寫入 Redis、不寫入資料庫、不發送 `price-update` pub/sub 訊息。與既有 `PricePoller`／`PriceCacheWriter`／`ClosePersister` 的寫入路徑完全無關、不共用任何寫入程式碼路徑。
+- [ ] **兩種查詢操作**：
+  - 列出目前所有快取報價，可選 `market` 參數篩選單一市場（`台股`／`美股`／`英股`）；未帶 `market` 時回傳三個市場的全部快取（依 `price:index:{market}` 逐一展開，含 `0000` 大盤——它與個股共用同一 key schema，見 design.md 該段）。
+  - 查詢單一標的最新報價，`code`／`market` 皆為必填；命中回該標的完整報價，Redis 無此 key（cache miss，例如從未抓過、或已超過 24h TTL）回**空結果**、不得 fallback 查資料庫或觸發抓取（維持「唯讀當前快取」的單純語意，與既有 `/internal/*` 帶 fallback／cold-start 副作用的端點明確區隔）。
+- [ ] **回應欄位與既有 Redis payload 一致，不新增衍生計算欄位**：`stockCode`／`market`／`price`／`previousClose`／`priceChange`／`changePercent`／`buyPrice`／`sellPrice`／`openPrice`／`highPrice`／`lowPrice`／`volume`／`stockName`／`source`／`tradingDate`／`updatedAt`／`closed`／`quoteStatus`，逐欄語意與型別比照 `backend` 端 `PriceQueryService.LivePrice`（同一份 Redis JSON 的另一個消費端）。
+- [ ] **docker-compose 新增 port mapping，僅綁定 `127.0.0.1`**：比照現有 `postgres` 服務「本機工具可連、不對外部網卡暴露」的既有慣例（`docker-compose.yml` 現行 `127.0.0.1:5432:5432` 那行），不得綁 `0.0.0.0`（即不得省略 IP 只寫 port）。
+- [ ] **明確記載安全取捨（不得省略）**：`external-materials-service` 與其他業務服務共用同一個 Spring Boot process 與同一個 8080 port，一旦開放 host port，既有 `/internal/*` 的其餘所有端點（含 `/internal/refresh`、`/internal/backfill/*`、`/internal/repair/history` 等有副作用或會覆寫既有資料的維運端點）**也會一併可從 host `127.0.0.1` 連線到**——這是「同一 process 只有一個 port」的必然結果，不是本次新增的獨立漏洞。可接受的理由：僅綁 loopback 時的信任水位等同「已能存取本機的操作者」（能讀 `.env`、能 `docker exec` 進任一容器），與現有 `postgres` 5432 的既有信任模型相同。**若日後要收斂只放行新端點、擋掉 `/internal/*`**，須另立需求評估專屬 filter 或反向代理，不在本 Requirement 範圍。
+- [ ] **不要求身份驗證**：本 API 回傳的是非個人化、非機敏的公開市場報價（股價本身可從 Yahoo Finance 等公開來源免費取得），且已受限於 `127.0.0.1`，故不比照 `TreasuryYieldController` 的 `X-Internal-Service-Token`／`ADMIN` 角色雙重驗證（該端點另有 Task 275 明訂的「即使 docker network 內部也要縱深防守」理由，本次不套用，因為資料敏感度不同——殖利率曲線回補為維運觸發動作，本端點僅唯讀市場報價）。
+- [ ] **不影響既有行為**：不修改任何既有 `/internal/*` 端點的程式碼、路徑或參數；不修改 `PriceCacheWriter` 的任何寫入邏輯；不新增 Redis key schema；不新增資料庫欄位或資料表；business-services／BFF／前端不消費此新端點（既有內部消費路徑繼續走 `PriceQueryService` 直讀 Redis，不改道）。
+- [ ] **測試**：至少涵蓋——(a) 有快取時列出全部與依 market 篩選；(b) 全市場皆無快取時列出回空陣列而非錯誤；(c) 單一查詢命中與 cache miss 兩種情形；(d) 單一查詢缺 `code`／`market` 任一必填參數時的錯誤回應；(e) 讀取邏輯不呼叫任何寫入方法（可用 mock 驗證零互動）。
