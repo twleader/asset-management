@@ -205,7 +205,7 @@ com.steven.assets.externalmaterials/
 **Redis key schema：**
 | Key | 內容 | TTL | 寫入者 |
 |-----|------|-----|--------|
-| `price:{market}:{code}` | JSON `{ price, prevClose, changePercent, open, high, low, volume, tradingDate, source, updatedAt, closed, quoteStatus }`；`quoteStatus ∈ LIVE / VERIFIED_CLOSE / PREVIOUS_CLOSE`，`CLOSE_PENDING` 由 business display query 在當日收盤缺列時合成、不寫 Redis | 24 小時（涵蓋整個交易日 + 跨夜，避免低流動性股票長時間 z='-' 後 TTL 過期退回昨收） | `PriceCacheWriter` 每 2 分鐘及盤後權威收盤回寫；`price:台股:0000`（大盤）自 Task 228 起亦納入同一 key schema，寫入者為 `TaiexIndexPoller`，`source` 標記含括號（如 `TWSE指數(5m)`）故不進 `IntradayTickStore`（那條 tick 序列供個股「今日走勢」用，與大盤既有的 transient `fetchIndexIntraday` 圖表資料源分離，不混用） |
+| `price:{market}:{code}` | JSON `{ stockCode, market, price, previousClose, priceChange, changePercent, buyPrice, sellPrice, openPrice, highPrice, lowPrice, volume, stockName, source, tradingDate, updatedAt, closed, quoteStatus }`；`quoteStatus ∈ LIVE / VERIFIED_CLOSE / PREVIOUS_CLOSE`，`CLOSE_PENDING` 由 business display query 在當日收盤缺列時合成、不寫 Redis | 24 小時（涵蓋整個交易日 + 跨夜，避免低流動性股票長時間 z='-' 後 TTL 過期退回昨收） | `PriceCacheWriter` 每 2 分鐘及盤後權威收盤回寫；`price:台股:0000`（大盤）自 Task 228 起亦納入同一 key schema，寫入者為 `TaiexIndexPoller`，`source` 標記含括號（如 `TWSE指數(5m)`）故不進 `IntradayTickStore`（那條 tick 序列供個股「今日走勢」用，與大盤既有的 transient `fetchIndexIntraday` 圖表資料源分離，不混用） |
 | `price:index:{market}` | Set，紀錄該市場所有有 cache 的 stockCode | 24 小時 | 同上 |
 | `price:dayhl:{market}:{code}:{tradingDate}` | JSON `{ high, low }` 該交易日累積觀察到的最高 / 最低成交價 | 36 小時（跨日 dump 後仍可佐證） | `IntradayHighLowTracker` 每次 cron tick。**大盤 `0000` 自 Task 263 起不在此列**：Yahoo 5 分 K 本就提供整日 high／low，本地聚合的存在理由（外部 API 不給 dayrange）對它不成立，且聚合的 max／min 語意使誤入的極值無法被後續正確值修正 |
 | `market:status` | JSON `{ twMarketOpen, usMarketOpen, twTime, usTime }` | 90s（短於輪詢） | `MarketClock` 每分鐘 |
