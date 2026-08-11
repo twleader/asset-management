@@ -639,7 +639,7 @@ POST /internal/repair/history?market=%E5%8F%B0%E8%82%A1&from=2026-06-01&to=2026-
 
 #### business-services Internal API（手動觸發，不排程、不進 BFF、不進前端）
 
-> **本服務此前沒有這類 `/internal` 抓取／作業端點**——實測 `grep -ran 'RequestMapping("/internal' backend/src` 只有 `UserAdminController` 的 `/internal/users`（受 `AdminGateInterceptor` 限 ADMIN）。下列端點分兩種授權拓撲，不能以一個 blanket `AdminGateInterceptor` 描述：估值回補是 business 維運端點，明確納入 `AdminGateInterceptor.addPathPatterns`；Treasury business proxy/refresh 同樣由 business AdminGate 保護，external Treasury 查詢則另由 shared token＋ADMIN role filter 保護。**`/internal/backtest/rules` 是唯一例外：純讀、分鐘級、只在 asset-net 內呼叫，刻意不掛 AdminGate，也不進 BFF；business 8080 不映射 host，故容器內驗收以 network boundary 為授權邊界。若日後對外映射 8080，必須先新增明確 AdminGate/token 保護再開放。**
+> business-services 的 `/internal` **現有 controller mapping** 包含 `UserAdminController` 的 `/internal/users`、純讀分鐘級的 `/internal/backtest/rules` 與 Treasury proxy/refresh；新增前必須再次以 controller mapping 實查更新本表，不得沿用歷史盤點。現有端點的授權拓撲不能以一個 blanket `AdminGateInterceptor` 描述：Treasury business proxy/refresh 由 business AdminGate 保護，external Treasury 查詢則另由 shared token＋ADMIN role filter 保護；**`/internal/backtest/rules` 是唯一例外：純讀、分鐘級、只在 asset-net 內呼叫，刻意不掛 AdminGate，也不進 BFF；business 8080 不映射 host，故容器內驗收以 network boundary 為授權邊界。若日後對外映射 8080，必須先新增明確 AdminGate/token 保護再開放。** Requirement 61／Task 278 的估值回補目前仍是**規劃端點、尚無 controller mapping**；實作該任務時才可新增路徑，且必須同時把它納入 `AdminGateInterceptor.addPathPatterns`，不得把規劃描述當成已存在的安全保護。
 
 > ⚠ **本表的端點一律不得自行對外發 HTTP。** `spec/steering/structure.md` 的架構鐵則明訂「❌ business-services 直接打外部行情 / NAV / 配息 API（**一律經 external-materials**）」與「抓價邏輯不寄宿在 business-services」。需要外部資料時一律比照 `MacroHistoryService.refreshUsIndexDaily()` 的既有模式——經 `priceServiceClient` proxy 至 external-materials 的 `/internal/*`，再於 business 端 upsert。
 
@@ -647,7 +647,7 @@ POST /internal/repair/history?market=%E5%8F%B0%E8%82%A1&from=2026-06-01&to=2026-
 |--------|------|------|
 | POST | `/internal/backtest/rules` | 交易雷達規則回測（**Requirement 56／Task 273**）。逐日切片餵給同一支 `TradingRadarRuleEngine`，量測各述詞在 `+5`／`+20`／`+60`／`+240` 交易日的前瞻報酬分布與同標的同期間基準。可指定標的子集與日期區間；同一輸入得同一輸出。**純讀 DB ＋ 記憶體運算，不對外發任何請求**，故不涉上述鐵則。**分鐘級運算，刻意不掛任何使用者請求路徑**（掛上會拖垮交易雷達頁），消費者是「調門檻時的維護者」而非每日使用者 |
 | POST | `/internal/macro/treasury-yield/refresh?year=YYYY` | 美債殖利率手動回補／補救（**Requirement 58／Task 275**）：proxy 至 ext-materials 的官方優先整批端點後 append/upsert immutable batches；省略 year 刷新 current year，受明確 `/internal/macro/treasury-yield/**` ADMIN gate 保護。 |
-| POST | `/internal/valuation/backfill?from=&to=` | 台股歷史估值回補的**編排端**（**Requirement 61／Task 278**）：逐日呼叫 external-materials 的 `/internal/valuation/twse-daily?date=`（**抓取與短 UA 落在該服務，business 端不得自行 curl TWSE**），取回後 upsert `stock_valuation_daily`。低頻單次、可指定起訖日、可從中斷處續跑。**不得新增 `@Scheduled`**，故排程列表頁不需新增項目 |
+| POST | `/internal/valuation/backfill?from=&to=` | **規劃中、尚未實作／尚未受 AdminGate 保護**的台股歷史估值回補編排端（**Requirement 61／Task 278**）。實作後逐日呼叫 external-materials 的 `/internal/valuation/twse-daily?date=`（**抓取與短 UA 落在該服務，business 端不得自行 curl TWSE**），取回後 upsert `stock_valuation_daily`；低頻單次、可指定起訖日、可從中斷處續跑，並須同步加入 `AdminGateInterceptor.addPathPatterns`。**不得新增 `@Scheduled`**，故排程列表頁不需新增項目 |
 
 ### Frontend Architecture (Vue 3)
 
@@ -4569,7 +4569,13 @@ ETF premium 改由 dated observation record 傳遞，Redis 與 repository 都回
 
 **回測與啟用閘門。** 訊號在 completed close `t` 形成，主要 execution 為 adjusted open `t+1→t+1+h`；missing open 排除主要結果，close 只作獨立 sensitivity。每個 market/horizon 以所有標的共用的 global session-date cutoff 切 70/30，禁止每檔各切；walk-forward 亦用全域 expanding dates。candidate/baseline 比較使用相同 code/date intersection，echo 完整成本假設與 gross/net。promotion 需 minimum n/codes、practical return 或 downside 改善、至少 3 valid folds與 60% fold 一致性；未達一律 disclosure。舊獲利了結只改列高動能風險，REDUCE 另需結構與 momentum/liquidity 兩類轉弱及 calibrated downside。
 
-**API 與版本。** `StockDecision`／snapshot／Excel／JSON 新增兩軌 opportunity/downside/confidence/riskCoverage、component/evidence groups、accepted price/premium provenance、strict AssetProfile、`returnStdDev60Ratio`／normalized bias、rate batch context、next distribution 與 valuation coverage。Vue 只顯示，不重算。t274、t275、t307–t309 同一 feature 分支，最後只升 `TW_RULES_V13` 一次；通知 mismatch 首輪只建 baseline、不寄信。中途不得部署半套 V13。
+**API 與版本。** `StockDecision`／snapshot／Excel／JSON 新增兩軌 opportunity/downside/confidence/riskCoverage、component/evidence groups、accepted price/premium provenance、strict AssetProfile、`returnStdDev60Ratio`／normalized bias、rate batch context、next distribution 與 valuation coverage。Vue 只顯示，不重算。t274、t275、t307–t309 是同一組 V13 candidate；只有所有欲發布 production key 的 required-horizon gate 通過且另有明確發布核准時，才一次升 `TW_RULES_V13`，通知 mismatch 首輪只建 baseline、不寄信。`REJECTED`／`INSUFFICIENT` 或尚未核准的 `PROMOTED_CANDIDATE` 都維持 `TW_RULES_V12`；不得中途部署半套 V13。
+
+**V13 停止點恢復與證據閉環。** production track 的 fold selection 不得借用 required horizons 清單第一項作 seed。每一個 `(market,instrumentKind,productionProfile,track,foldIndex)` 先把各 required horizon 的 train dates 取排序交集，得到唯一 joint train calendar；sigma floor/multiples 只由該交集與同一 production key 的非 candidate-dependent code universe 建立一次。每個 horizon 仍用自己的 evaluation block，train execution 另須嚴格 `exitDate < evaluationFrom`。任一 required horizon／joint sigma／same-sample intersection 缺漏即該 fold unavailable，不借另一 horizon 補洞。報告同時 echo joint train 範圍、各 horizon evaluation 範圍、purge 計數、共同 sigma profile 與完整 candidate snapshot。
+
+**估值逐分量 provenance。** `FundamentalSnapshot.peEvidence/pbEvidence/dividendYieldEvidence` 是 PE、PB、殖利率各自唯一的 value/percentile/provider/sourceUrls/availableAt/asOf/loss 來源；`RadarEvidence.evidenceGroups.VALUATION.components` 是各自 applicability/missingReason 來源。Vue 與 `TradingRadarExportService` 只依 component name 合併這兩個後端 projection，不得使用 composite 的 generic `valuationProvider/valuationAsOf` 補缺漏分量，也不得在呈現層重算 freshness、250 筆門檻或分位。舊快照缺逐分量欄位時顯示「舊快照未含逐分量證據」並保留空白，不以 PE 來源代填 PB／殖利率。
+
+**Treasury freshness 與發布結論。** Spring production `TreasuryYieldService` 必須注入 `MarketDataService`；completed-session lag 只接受權威美股交易日曆，長假不計 session，任何 UNKNOWN 立即回 stale reason。stale curve 可保留 batch provenance，但 rate evidence 為 STALE、risk unit 為 null。此閉環的完成不等於 V13 必須發布：真實 holdout／walk-forward 若 rejected 或 insufficient，production `TradingRadarRuleEngine.RULE_VERSION` 與通知仍維持 `TW_RULES_V12`，完成報告保留拒絕原因；只有另行核准且全部 production key 通過時才進一次性 V13 發布。
 
 ### 逆勢抄底狀態（獨立第二軌）
 
