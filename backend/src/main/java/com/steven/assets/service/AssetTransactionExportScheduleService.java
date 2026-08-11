@@ -55,6 +55,10 @@ public class AssetTransactionExportScheduleService {
     private static final ZoneId TW_ZONE = ZoneId.of("Asia/Taipei");
     private static final DateTimeFormatter FILE_DATE = DateTimeFormatter.ofPattern("yyyyMMdd");
     private static final DateTimeFormatter TS_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    /** {@code asset_transaction_export_schedule.last_run_status} 的欄位上限（{@code varchar(500)}）。 */
+    private static final int STATUS_MAX = 500;
+    /** {@code asset_transaction_export_schedule.gdrive_last_status} 的欄位上限（{@code varchar(512)}）。 */
+    private static final int GDRIVE_STATUS_MAX = 512;
 
     /**
      * 每人排程數上限：每分鐘 tick 會逐列處理，無上限＝讓單一使用者無限放大背景工作量。
@@ -149,7 +153,7 @@ public class AssetTransactionExportScheduleService {
             // 一次查詢取得 doc，再 render 兩種格式——兩份檔內容一致的唯一保證。
             var r = writeDual(s, ownerId, excelExportService.assetTransactionsDoc());
             s.setLastRunAt(LocalDateTime.now(TW_ZONE));
-            s.setLastRunStatus(r.localStatus());
+            s.setLastRunStatus(truncate(r.localStatus(), STATUS_MAX));
             applyGdriveStatus(s, r);
             settingRepo.save(s);
             return AssetTransactionExportDto.RunNowResponse.builder()
@@ -164,7 +168,7 @@ public class AssetTransactionExportScheduleService {
                     .build();
         } catch (IOException | RuntimeException e) {
             s.setLastRunAt(LocalDateTime.now(TW_ZONE));
-            s.setLastRunStatus("失敗：" + e.getMessage());
+            s.setLastRunStatus(truncate("失敗：" + e.getMessage(), STATUS_MAX));
             syncGdrive(s, null); // 本機失敗＝完全不上傳，但已啟用時仍須寫狀態欄說明原因
             settingRepo.save(s);
             throw new RuntimeException("立即匯出失敗：" + e.getMessage(), e);
@@ -228,12 +232,12 @@ public class AssetTransactionExportScheduleService {
         try {
             var r = writeDual(s, s.getOwnerUserId(),
                     excelExportService.assetTransactionsDocForOwner(s.getOwnerUserId()));
-            s.setLastRunStatus(r.localStatus());
+            s.setLastRunStatus(truncate(r.localStatus(), STATUS_MAX));
             applyGdriveStatus(s, r);
             log.info("交易紀錄排程匯出 owner={} schedule={} → {}",
                     s.getOwnerUserId(), s.getId(), r.localStatus());
         } catch (Exception e) {
-            s.setLastRunStatus("失敗：" + e.getMessage());
+            s.setLastRunStatus(truncate("失敗：" + e.getMessage(), STATUS_MAX));
             log.warn("交易紀錄排程匯出失敗 owner={} schedule={}：{}",
                     s.getOwnerUserId(), s.getId(), e.getMessage(), e);
             syncGdrive(s, null); // 本機失敗＝不上傳；已啟用時仍寫狀態欄，否則會停在上一次的成功
@@ -365,7 +369,7 @@ public class AssetTransactionExportScheduleService {
                                    com.steven.assets.service.export.DualFormatExportWriter.DualResult r) {
         if (r.gdriveStatus() == null) return;
         s.setGdriveLastRunAt(LocalDateTime.now(TW_ZONE));
-        s.setGdriveLastStatus(r.gdriveStatus());
+        s.setGdriveLastStatus(truncate(r.gdriveStatus(), GDRIVE_STATUS_MAX));
     }
 
     /**
@@ -421,7 +425,21 @@ public class AssetTransactionExportScheduleService {
         GdriveOutputSupport.SyncResult r =
                 gdrive.syncQuietly(s.getOwnerUserId(), s.getGdriveSubpath(), localFile);
         s.setGdriveLastRunAt(LocalDateTime.now(TW_ZONE));
-        s.setGdriveLastStatus(r.status());
+        s.setGdriveLastStatus(truncate(r.status(), GDRIVE_STATUS_MAX));
         return r;
+    }
+
+    /**
+     * 狀態字串寫入前的截斷（對應 {@code varchar(500)} 與 {@code varchar(512)}）。
+     *
+     * <p>成功時狀態內含絕對路徑、失敗時內含 rclone 或 IO 的原始錯誤訊息，長度無上限。
+     * <b>寫入失敗會整筆交易回滾</b>，連帶 {@code last_run_date} 這個當日 guard 也寫不進去，
+     * 該排程便從到點起每分鐘重試到午夜——截斷是為了擋掉這條回滾路徑，不只是為了好看。
+     *
+     * <p>{@code null} 進 {@code null} 出：兩欄皆 nullable，既有邏輯靠 null 表達「尚未執行」。
+     */
+    private static String truncate(String s, int max) {
+        if (s == null) return null;
+        return s.length() <= max ? s : s.substring(0, max - 1) + "…";
     }
 }

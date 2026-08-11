@@ -64,6 +64,10 @@ public class TradingRadarExportScheduleService {
     private static final ZoneId TW_ZONE = ZoneId.of("Asia/Taipei");
     private static final DateTimeFormatter FILE_DATE = DateTimeFormatter.ofPattern("yyyyMMdd");
     private static final String TW_MARKET = "台股";
+    /** {@code trading_radar_export_setting.last_run_status} 的欄位上限（{@code varchar(500)}）。 */
+    private static final int STATUS_MAX = 500;
+    /** {@code trading_radar_export_setting.gdrive_last_status} 的欄位上限（{@code varchar(512)}）。 */
+    private static final int GDRIVE_STATUS_MAX = 512;
     /** 背景重算失敗且當日確實零快照時的降級終點（Task 260）。 */
     static final String NO_SNAPSHOT_STATUS = "當日尚無快照，未產檔";
     /** 非台股交易日時的狀態文字（休市日不產檔，Task 260）。 */
@@ -499,7 +503,7 @@ public class TradingRadarExportScheduleService {
                         .outputSubpath(TradingRadarExportSetting.DEFAULT_SUBPATH)
                         .build());
         s.setLastRunAt(LocalDateTime.now(TW_ZONE));
-        s.setLastRunStatus(status);
+        s.setLastRunStatus(truncate(status, STATUS_MAX));
         settingRepo.save(s);
     }
 
@@ -533,7 +537,7 @@ public class TradingRadarExportScheduleService {
             TradingRadarExportSetting s = settingRepo.findByOwnerUserId(ownerId).orElse(null);
             if (s == null) return;
             s.setGdriveLastRunAt(LocalDateTime.now(TW_ZONE));
-            s.setGdriveLastStatus(r.gdriveStatus());
+            s.setGdriveLastStatus(truncate(r.gdriveStatus(), GDRIVE_STATUS_MAX));
             settingRepo.save(s);
         } catch (RuntimeException e) {
             log.error("寫入 Drive 同步狀態失敗 owner={}：{}", ownerId, e.getMessage(), e);
@@ -548,7 +552,7 @@ public class TradingRadarExportScheduleService {
                     ? new GdriveOutputSupport.SyncResult(gdrive.skipped(skipReason), null)
                     : gdrive.syncQuietly(ownerId, s.getGdriveSubpath(), localFile);
             s.setGdriveLastRunAt(LocalDateTime.now(TW_ZONE));
-            s.setGdriveLastStatus(r.status());
+            s.setGdriveLastStatus(truncate(r.status(), GDRIVE_STATUS_MAX));
             settingRepo.save(s);
             return r;
         } catch (RuntimeException e) {
@@ -609,5 +613,19 @@ public class TradingRadarExportScheduleService {
                 s == null || s.getGdriveLastRunAt() == null ? null : s.getGdriveLastRunAt().toString(),
                 s == null ? null : s.getGdriveLastStatus(),
                 gdriveSelfCheckWarning);
+    }
+
+    /**
+     * 狀態字串寫入前的截斷（對應 {@code varchar(500)} 與 {@code varchar(512)}）。
+     *
+     * <p>成功時狀態內含絕對路徑、失敗時內含 rclone 或 IO 的原始錯誤訊息，長度無上限。
+     * <b>寫入失敗會整筆交易回滾</b>，連帶 {@code last_run_date} 這個當日 guard 也寫不進去，
+     * 該排程便從到點起每分鐘重試到午夜——截斷是為了擋掉這條回滾路徑，不只是為了好看。
+     *
+     * <p>{@code null} 進 {@code null} 出：兩欄皆 nullable，既有邏輯靠 null 表達「尚未執行」。
+     */
+    private static String truncate(String s, int max) {
+        if (s == null) return null;
+        return s.length() <= max ? s : s.substring(0, max - 1) + "…";
     }
 }
