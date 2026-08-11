@@ -201,7 +201,8 @@ public class TradingCalendarExportScheduleService {
                     exportService.exportToDir(today.getYear(), s.getOutputSubpath());
             // 一律沿用共用元件算好、已截斷的字串：自組會在兩份都失敗時記成假的「成功：null／null」，
             // 且無截斷會讓 varchar(500) 溢位而把一次本機其實已成功的匯出記成失敗。
-            s.setLastRunStatus(r.localStatus());
+            // 上游那次截斷是跨類別的約定；寫入點自己再截一次，上游算式改動也不會演變成溢位。
+            s.setLastRunStatus(truncate(r.localStatus(), STATUS_MAX));
             log.info("交易日曆排程匯出成功 owner={} → {}／{}",
                     s.getOwnerUserId(), r.path(), r.jsonPath());
             // 本機兩份都寫成功才上傳；狀態欄由下方 finally 既有的 save 一併寫入。
@@ -211,7 +212,9 @@ public class TradingCalendarExportScheduleService {
                 syncGdrive(s, null);   // 未兩份皆成功＝不上傳，但已啟用時仍寫狀態欄
             }
         } catch (Exception e) {
-            s.setLastRunStatus("失敗：" + e.getMessage());
+            // 例外訊息無界（含絕對路徑／IO 原始訊息）：不截會 varchar(500) 溢位→整筆回滾→
+            // last_run_date 這個當日 guard 也寫不進去，該筆排程從到點起每分鐘重試到午夜。
+            s.setLastRunStatus(truncate("失敗：" + e.getMessage(), STATUS_MAX));
             log.warn("交易日曆排程匯出失敗 owner={}：{}", s.getOwnerUserId(), e.getMessage(), e);
             syncGdrive(s, null); // 本機失敗＝不上傳；已啟用時仍寫狀態欄，否則會停在上一次的成功
         } finally {
@@ -243,6 +246,8 @@ public class TradingCalendarExportScheduleService {
      * <p><b>只改記憶體中的欄位、不自行 save</b>：排程路徑由 {@code runScheduled} 的 finally 一併寫入，
      * 手動路徑由 {@link #saveQuietly} 寫入。
      */
+    /** {@code last_run_status} 的欄位上限（實測自運行中 DB，{@code varchar(500)}）。 */
+    private static final int STATUS_MAX = 500;
     /** {@code gdrive_last_status} 的欄位上限（實測自運行中 DB）。 */
     private static final int GDRIVE_STATUS_MAX = 512;
     /** 合併前每半的上限：扣掉 {@code "xlsx "} 與 {@code "／json "} 共 12 字元的固定開銷後對半分。 */

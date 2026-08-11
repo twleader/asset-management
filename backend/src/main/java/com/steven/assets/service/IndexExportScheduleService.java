@@ -35,6 +35,8 @@ public class IndexExportScheduleService {
     private static final String DEFAULT_MARKET = "TWSE";
     /** {@code index_export_schedule_time.last_run_status} 的欄位上限（{@code varchar(500)}）。 */
     private static final int STATUS_MAX = 500;
+    /** {@code index_export_schedule.gdrive_last_status} 的欄位上限（{@code varchar(512)}）。 */
+    private static final int GDRIVE_STATUS_MAX = 512;
 
     private final IndexExportScheduleRepository settingRepo;
     private final ExcelExportService excelExportService;
@@ -119,7 +121,9 @@ public class IndexExportScheduleService {
         for (String market : markets) files.add(exportOne(s, owner, market));
         IndexExportDto.FileResult first = files.get(0);
         if (!transientDefault) {
-            s.setGdriveLastRunAt(LocalDateTime.now(TW_ZONE)); s.setGdriveLastStatus(first.gdriveStatus());
+            // 上游 DualFormatExportWriter 已把合併字串壓在 512 內，但那是跨類別的約定；寫入點自己再截一次，
+            // 上游若改動固定開銷或分半算式也不會演變成 varchar 溢位→整筆回滾。
+            s.setGdriveLastRunAt(LocalDateTime.now(TW_ZONE)); s.setGdriveLastStatus(truncate(first.gdriveStatus(), GDRIVE_STATUS_MAX));
             s.setUpdatedAt(LocalDateTime.now(TW_ZONE)); settingRepo.save(s);
         }
         return new IndexExportDto.RunNowResponse(first.path(), first.sizeBytes(), first.gdrivePath(), first.gdriveStatus(),
