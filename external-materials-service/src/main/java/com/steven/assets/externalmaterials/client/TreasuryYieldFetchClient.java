@@ -3,6 +3,7 @@ package com.steven.assets.externalmaterials.client;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import javax.xml.XMLConstants;
@@ -78,6 +79,7 @@ public class TreasuryYieldFetchClient {
     private final Clock clock;
     private final TextTransport transport;
 
+    @Autowired
     public TreasuryYieldFetchClient(ObjectMapper mapper) {
         this(mapper, Clock.systemUTC(), new JdkTextTransport());
     }
