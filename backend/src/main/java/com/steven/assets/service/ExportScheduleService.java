@@ -46,6 +46,10 @@ public class ExportScheduleService {
     private static final ZoneId TW_ZONE = ZoneId.of("Asia/Taipei");
     private static final DateTimeFormatter FILE_DATE = DateTimeFormatter.ofPattern("yyyyMMdd");
     private static final DateTimeFormatter TS_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    /** {@code export_schedule_setting.last_run_status} 的欄位上限（{@code varchar(500)}）。 */
+    private static final int STATUS_MAX = 500;
+    /** {@code export_schedule_setting.gdrive_last_status} 的欄位上限（{@code varchar(512)}）。 */
+    private static final int GDRIVE_STATUS_MAX = 512;
 
     private final ExportScheduleSettingRepository settingRepo;
     private final ExcelExportService excelExportService;
@@ -133,7 +137,7 @@ public class ExportScheduleService {
             var r = writeDual(s, ownerId, excelExportService.liveAssetsDoc(), subpath);
             s.setOwnerUserId(ownerId);
             s.setLastRunAt(LocalDateTime.now(TW_ZONE));
-            s.setLastRunStatus(r.localStatus());
+            s.setLastRunStatus(truncate(r.localStatus(), STATUS_MAX));
             applyGdriveStatus(s, r);
             settingRepo.save(s);
             return ExportScheduleDto.RunNowResponse.builder()
@@ -149,7 +153,7 @@ public class ExportScheduleService {
         } catch (IOException | RuntimeException e) {
             s.setOwnerUserId(ownerId);
             s.setLastRunAt(LocalDateTime.now(TW_ZONE));
-            s.setLastRunStatus("失敗：" + e.getMessage());
+            s.setLastRunStatus(truncate("失敗：" + e.getMessage(), STATUS_MAX));
             syncGdrive(s, null); // 本機失敗＝完全不上傳，但已啟用時仍須寫狀態欄說明原因
             settingRepo.save(s);
             throw new RuntimeException("立即匯出失敗：" + e.getMessage(), e);
@@ -288,11 +292,11 @@ public class ExportScheduleService {
             var r = writeDual(s, s.getOwnerUserId(),
                     excelExportService.liveAssetsDocForOwner(s.getOwnerUserId()),
                     normalizeSubpath(s.getOutputSubpath()));
-            s.setLastRunStatus(r.localStatus());
+            s.setLastRunStatus(truncate(r.localStatus(), STATUS_MAX));
             applyGdriveStatus(s, r);
             log.info("排程匯出 owner={} → {}", s.getOwnerUserId(), r.localStatus());
         } catch (Exception e) {
-            s.setLastRunStatus("失敗：" + e.getMessage());
+            s.setLastRunStatus(truncate("失敗：" + e.getMessage(), STATUS_MAX));
             log.warn("排程匯出失敗 owner={}：{}", s.getOwnerUserId(), e.getMessage(), e);
             syncGdrive(s, null); // 本機失敗＝不上傳；已啟用時仍寫狀態欄，否則會停在上一次的成功
         } finally {
@@ -362,7 +366,7 @@ public class ExportScheduleService {
                                    com.steven.assets.service.export.DualFormatExportWriter.DualResult r) {
         if (r.gdriveStatus() == null) return;
         s.setGdriveLastRunAt(LocalDateTime.now(TW_ZONE));
-        s.setGdriveLastStatus(r.gdriveStatus());
+        s.setGdriveLastStatus(truncate(r.gdriveStatus(), GDRIVE_STATUS_MAX));
     }
 
     /**
@@ -380,7 +384,7 @@ public class ExportScheduleService {
         GdriveOutputSupport.SyncResult r =
                 gdrive.syncQuietly(s.getOwnerUserId(), s.getGdriveSubpath(), localFile);
         s.setGdriveLastRunAt(LocalDateTime.now(TW_ZONE));
-        s.setGdriveLastStatus(r.status());
+        s.setGdriveLastStatus(truncate(r.status(), GDRIVE_STATUS_MAX));
         return r;
     }
 
@@ -410,5 +414,19 @@ public class ExportScheduleService {
                 .gdriveLastStatus(s.getGdriveLastStatus())
                 .gdriveSelfCheckWarning(gdriveSelfCheckWarning)
                 .build();
+    }
+
+    /**
+     * 狀態字串寫入前的截斷（對應 {@code varchar(500)} 與 {@code varchar(512)}）。
+     *
+     * <p>成功時狀態內含絕對路徑、失敗時內含 rclone 或 IO 的原始錯誤訊息，長度無上限。
+     * <b>寫入失敗會整筆交易回滾</b>，連帶 {@code last_run_date} 這個當日 guard 也寫不進去，
+     * 該排程便從到點起每分鐘重試到午夜——截斷是為了擋掉這條回滾路徑，不只是為了好看。
+     *
+     * <p>{@code null} 進 {@code null} 出：兩欄皆 nullable，既有邏輯靠 null 表達「尚未執行」。
+     */
+    private static String truncate(String s, int max) {
+        if (s == null) return null;
+        return s.length() <= max ? s : s.substring(0, max - 1) + "…";
     }
 }
