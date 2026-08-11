@@ -19,6 +19,7 @@ public class TreasuryYieldService {
     private static final ZoneId NEW_YORK = ZoneId.of("America/New_York");
     private static final java.time.LocalTime US_CLOSE = java.time.LocalTime.of(16, 0);
     private static final int MAX_CURVE_LAG_SESSIONS = 3;
+    private static final String FUTURE_CURVE_DATE_CODE = "FUTURE_CURVE_DATE";
     private final TreasuryYieldBatchRepository repository;
     private final TreasuryYieldClient client;
     private final Clock clock;
@@ -98,16 +99,21 @@ public class TreasuryYieldService {
                 throw new IllegalStateException("Treasury selected batch 不完整：" + batch.batchId());
             }
             LocalDate decisionDateEt = at.atZone(NEW_YORK).toLocalDate();
-            long lagDays = Math.max(0, ChronoUnit.DAYS.between(batch.curveDate(), decisionDateEt));
             LocalDate expected = latestCompletedUsSession(decisionDateEt,
                     at.atZone(NEW_YORK).toLocalTime().isBefore(US_CLOSE));
-            long sessionLag = expected == null ? MAX_CURVE_LAG_SESSIONS + 1
-                    : sessionLag(batch.curveDate(), expected);
-            String staleReason = expected == null
-                    ? "Treasury required completed US session 無法由權威日曆確認"
-                    : sessionLag > MAX_CURVE_LAG_SESSIONS
-                    ? "Treasury curve 落後要求 completed US session " + sessionLag
-                    + " sessions（上限 " + MAX_CURVE_LAG_SESSIONS + "）" : null;
+            String staleReason;
+            if (expected == null) {
+                staleReason = "Treasury required completed US session 無法由權威日曆確認";
+            } else if (batch.curveDate().isAfter(expected)) {
+                staleReason = FUTURE_CURVE_DATE_CODE + ": Treasury curve date "
+                        + batch.curveDate() + " 晚於 decision-time expected completed US session " + expected;
+            } else {
+                long sessionLag = sessionLag(batch.curveDate(), expected);
+                staleReason = sessionLag > MAX_CURVE_LAG_SESSIONS
+                        ? "Treasury curve 落後要求 completed US session " + sessionLag
+                        + " sessions（上限 " + MAX_CURVE_LAG_SESSIONS + "）" : null;
+            }
+            long lagDays = Math.max(0, ChronoUnit.DAYS.between(batch.curveDate(), decisionDateEt));
             return new TreasuryYieldDto.RateContext(batch.batchId(), true, tenor,
                     batch.values().get(tenor), batch.curveDate(), batch.provider(), batch.sourceManifest(),
                     batch.availableAt(), batch.availabilityBasis(), batch.fetchedAt(), lagDays, staleReason);
