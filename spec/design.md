@@ -395,7 +395,7 @@ POST /internal/repair/history?market=%E5%8F%B0%E8%82%A1&from=2026-06-01&to=2026-
 
 `MarketClock.isXxxMarketOpen / isXxxMarketJustClosed` 全部改為「`MarketCalendar.isXxxTradingDay(當日)` && 時段」。連帶效果：`PricePoller` 各 scheduled 抓價（gated on `isXxxMarketOpen`）假日自動 skip；`TradingDateResolver.resolve`（依 `isXxxMarketOpen/isXxxMarketJustClosed` 判 live session，由 `PriceCacheWriter` 呼叫）假日自動退回 DB 最近交易日。`ClosePersister` 各 scheduled today-path dump / verify 與美英 self-heal 另加 `MarketCalendar.isXxxTradingDay(today)` 早退守門（`PricePoller` 假日不抓，但 Redis 仍有前一交易日值且 TTL 24h，若不守門 dump 會把它標成假日當日寫 DB）。Task 290 起台股啟動 self-heal 為明確例外：假日／週末可對「最近完成交易日 target」呼叫帶日期官方對帳，但絕不寫假日日期。`PricePoller.refreshAll`（手動 `/internal/refresh`）的 `markClosed` 亦由 `false` 改為 `!isXxxMarketOpen()`，與 `warmCacheOnStartup` 一致，避免手動刷新在假日 append 假 tick。
 
-**對外介面（`InternalPriceController`，class-level `@RequestMapping("/internal")`，共 35 支）：**
+**對外介面（`InternalPriceController`，class-level `@RequestMapping("/internal")`，共 36 支）：**
 
 > **不對前端暴露 REST**；全部僅在 docker network 內由 `business-services` 呼叫（或維運手動觸發）。前端仍打 `business-services` 的 `/api/market-data/*`，由 `PriceQueryService` 從 Redis 取值。
 > **本表為 `/internal/*` 的「有哪些端點、參數、呼叫端」之唯一出處**——他處提及個別端點時不得自訂另一組參數或呼叫端清單（同「同義欄位、同一來源」之文件版精神）。端點的**語意細節與設計理由**可在各功能設計段展開（例如 `/internal/repair/history` 的守門與冪等理由在「修復路徑設計」段、`/internal/refresh/tw-radar` 的併發與逐檔守門在 Requirement 43 段），但兩邊的參數與呼叫端必須一致；改一邊就要同步另一邊。
@@ -410,6 +410,7 @@ POST /internal/repair/history?market=%E5%8F%B0%E8%82%A1&from=2026-06-01&to=2026-
 | POST | `/internal/fund-nav/backfill` | 基金淨值歷史回補 | `FundNavController` |
 | POST | `/internal/fund-dividend/backfill` | 基金配息歷史回補 | `FundNavController`（proxyBackfill） |
 | POST | `/internal/etf-nav/refresh` | 手動重抓 ETF 淨值／折溢價寫入 Redis，不限交易時段（供部署後驗證與抓取失敗補救）。台股打證交所全市場彙整檔、美股逐檔 Yahoo；個股不會有值（資料驅動判定，非白名單）。回 `EtfNavPoller.RefreshSummary`（Task 214） | **無程式呼叫端**（手動維運） |
+| POST | `/internal/fundamentals/refresh` | 手動觸發個股基本面刷新：只刷新結構化來源與 fallback（`public_info` 證據仍由既有新聞路徑提供），與排程／warmup 共用同一輪。回 `StockFundamentalPoller.RefreshSummary`（見「個股基本面與產業發展」段，Task 292） | **無程式呼叫端**（手動維運） |
 | POST | `/internal/close/verify-tw` | 台股收盤資料驗證 | **無程式呼叫端**（手動維運） |
 | POST | `/internal/close/verify-us` | 美股收盤資料驗證 | **無程式呼叫端**（手動維運） |
 | POST | `/internal/backfill/stock` | 單檔股價歷史回補 | `HistoricalDataService` |
@@ -530,13 +531,15 @@ POST /internal/repair/history?market=%E5%8F%B0%E8%82%A1&from=2026-06-01&to=2026-
 > nginx 對 `/api/market-data/prices/stream` 路徑需設 `proxy_buffering off`，否則 SSE 會被 buffering 卡住（實作見 `frontend/nginx.conf` 的 `location = /api/market-data/prices/stream`）。
 > 前端仍保留初始 GET `/api/bff/dashboard/realtime` 載入第一份 snapshot；之後增量更新走 SSE，不再用 setInterval polling。
 
-#### external-materials-service Internal API（`InternalPriceController`，35 支）
+#### external-materials-service Internal API（`InternalPriceController`，36 支）
 
-**這些是 service 間內部端點，不是公開 API**：不經 BFF、不對前端暴露，僅在 docker network 內由 `business-services` 以 WebClient 呼叫（class 層 `@RequestMapping("/internal")` + method 層路徑；**全部參數皆為 query string，無 request body**）。端點的「有哪些、參數、呼叫端」以上方「對外介面」那張表為**單一事實來源**（35 支全列）；本節依功能分組展開語意細節，設計理由 / 退化行為凡 design.md 已有段落記載者，「說明」欄一律以**段落標題或 Task / Requirement 編號**交叉引用（不用行號，避免引用隨增刪行漂移），不在此重述（避免同一事實兩處記載各自漂移）。
+**這些是 service 間內部端點，不是公開 API**：不經 BFF、不對前端暴露，僅在 docker network 內由 `business-services` 以 WebClient 呼叫（class 層 `@RequestMapping("/internal")` + method 層路徑；**全部參數皆為 query string，無 request body**）。端點的「有哪些、參數、呼叫端」以上方「對外介面」那張表為**單一事實來源**（36 支全列）；本節依功能分組展開語意細節，設計理由 / 退化行為凡 design.md 已有段落記載者，「說明」欄一律以**段落標題或 Task / Requirement 編號**交叉引用（不用行號，避免引用隨增刪行漂移），不在此重述（避免同一事實兩處記載各自漂移）。
 
 > **計數校正（Requirement 63）**：本節標題原寫 28 支、上方「對外介面」表寫 33 支，兩者已漂移；實測 `grep -c '@PostMapping\|@GetMapping'` 為 **33**（本需求新增兩支後為 **35**）。兩處均已校正為 35。**本節下方的分組表刻意不逐支重列**（既有就沒有列全，補齊屬本需求範圍外）——要查完整清單一律看上方「對外介面」那張。
 
-> 例外：`close/verify-tw` / `close/verify-us` / `etf-nav/refresh` / `repair/history` / `health` 五支目前**無 business-services 呼叫端**，為維運手動觸發（container 內 curl）與健康檢查用；其餘皆有 backend caller。
+> **計數再校正**：Task 292 新增 `/internal/fundamentals/refresh` 時漏同步本節標題與上方「對外介面」表，兩處當時仍寫 35、實際（`grep -cE '@(Get|Post|Put|Delete|Patch)Mapping'`）為 **36**。已補上該端點列並校正兩處為 36，`fundamentals/refresh` 併入下方「無 business-services 呼叫端」例外清單。
+
+> 例外：`close/verify-tw` / `close/verify-us` / `etf-nav/refresh` / `repair/history` / `health` / `fundamentals/refresh` 六支目前**無 business-services 呼叫端**，為維運手動觸發（container 內 curl）與健康檢查用；其餘皆有 backend caller。
 
 **行情 / 收盤（`PricePoller` / `ClosePersister` / `MarketClock`）：**
 
