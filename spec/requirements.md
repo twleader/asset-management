@@ -142,7 +142,7 @@
 - [ ] 歷史收盤價保存至少 10 年（透過 FinMind / TWSE 回補；Yahoo Finance 已停用）
 - [ ] 抓價子系統獨立為 `external-materials-service` 微服務（獨立 image / container），盤中 2 分鐘 cron 將 raw live 價寫入 Redis（key `price:{market}:{code}`，TTL 24 小時）；盤後由各市場收盤路徑寫入 `stock_price_history`
 - [ ] `business-services` 不再直接呼叫外部行情 API；內部 raw live 查詢為 Redis-first、miss fallback 最近完成日；使用者可見 display quote 另依市場階段、精確日期與可信來源守門；歷史收盤價直接讀 DB
-- [ ] 市場開收盤狀態由 `external-materials-service` 維護並寫入 Redis（key `market:status`），各 BFF 透過 `business-services` 統一讀取
+- [ ] 市場開收盤狀態由 `business-services` 的 `MarketDataService.isMarketOpenNow`（`MarketZones` 時區/時段 + 交易日曆含國定假日）於 API 呼叫時即時運算；`external-materials-service` 不維護此值、Redis 不快取（純記憶體運算，成本低於快取本身，見 Task 313）。各 BFF 仍透過 `business-services` 的 `StockPriceService.getMarketStatus` 統一讀取
 - [ ] `POST /api/market-data/prices/refresh` 改由 `business-services` 內部呼叫 `external-materials-service` 的觸發端點，價格刷新後再從 Redis 回讀
 - [ ] 股利歷史（FinMind TaiwanStockDividend）每日由 cron 同步寫入 `stock_dividend_history`；`/api/market-data/dividends` 端點直接讀 DB，不再每次開啟對話框都打 FinMind
 - [ ] 凡列入 `stock` 主檔的股票（含曾持有、觀察清單、設有警示）皆自動納入 10 年歷史收盤價回補與每日排程更新範圍；新增觀察股票時即同步寫入 `stock` 主檔
