@@ -248,8 +248,8 @@ class WatchStockTaiexIntradayTest {
      * 昨收規則的單側迴歸錨點：日線表中 trading_date 嚴格早於當列 tradingDate 的最後一筆，
      * 跳日（7/27 → 7/24 跨週末）不影響判定。
      *
-     * <p>「股市大盤查詢」頁的當日卡昨收走另一套獨立實作（`GdpTwseBffController.previousCloseBefore`，
-     * private、字串字典序比對、跑在 bff 模組），判準原文為「tradingDate 嚴格早於 beforeDate 的最後一筆」。
+     * <p>「股市大盤查詢」頁的當日卡昨收走另一套獨立實作（`MarketIndexChartService.previousCloseBefore`，
+     * package-private、字串字典序比對、跑在 bff 模組），判準原文為「tradingDate 嚴格早於 beforeDate 的最後一筆」。
      * 兩者不共用程式碼也不在同一個 Maven 模組，本測試<b>釘不住那一側</b>——此處記下判準僅供日後人工比對。
      */
     @Test

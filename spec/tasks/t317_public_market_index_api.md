@@ -157,7 +157,7 @@ test "$(docker inspect asset-bff --format '{{.Image}}')" = "$built_bff_image"
 
 ## 完成報告
 
-- 實際修改：新增 `MarketIndexChartService`、公開 controller／exception advice、immutable `MarketIndexChartDto` 與對應測試；既有 `GdpTwseBffController` 改為委派共用 service，`SecurityConfig` 只精確放行匿名 GET；同步 Requirement 67、design、structure、長期 BFF 具名例外與任務索引。未修改 frontend、external-materials-service、DB、Redis schema 或 Compose 設定；backend 僅待訂正三處跨模組 Javadoc／測試註解，不改行為。
-- 機械與編譯驗證：舊 feature commit `787aebc8` 曾通過 `scripts/spec-check.sh`（`BLOCK: 0 / CHECK: 0`）、BFF 全測試 47/47 與 `mvn -q -f bff/pom.xml package -DskipTests`；本修正版在 spec 與實作完成後須重新執行，不沿用舊結果冒充新證據。
-- Docker 實機驗證：目前未驗證。原因是本報告回填時新 feature 尚未完成 commit／merge；為避免把未落地主線的工作樹部署到共用 stack，Docker image ID、host／container curl、72 組矩陣、相鄰端點 401、BFF error log 計數須由後續 `/run-stack` 以最終 main merge commit 重建／recreate BFF 後補驗。
-- 與規格偏差：新契約的實作對齊、重新測試與 Docker runtime 均待完成，現階段不作偏差結論，也未以預期命令冒充實際通過。
+- 實際修改：已完成 `MarketIndexChartService` 單一 catalog、9 市場 × 8 期間 normalization、完整十年序列先算 MA 再裁切，以及 `range=d` 分時／水平 MA 組裝；新增 immutable `MarketIndexChartDto`（`LocalDate tradingDate`、`List<BigDecimal> turnovers` 與可含 null 的 defensive copies）、公開 controller、request／malformed typed exception advice。既有 `GdpTwseBffController` 已改為薄委派；transport／HTTP／decode fail-soft 僅留在 WebClient fetch stage，非法 `tradeValue` 分別由 public 502 與 legacy 完整空 body 200 處理，其他 shaping 錯誤維持 5xx。`SecurityConfig` 只精確放行匿名 GET，測試涵蓋同路徑其他 method、descendant 與相鄰 legacy endpoint 的 401。backend 僅訂正 `ExcelExportService` 兩處 Javadoc、`WatchStockTaiexIntradayTest` 一處註解，兩支 BFF legacy test 的 Javadoc 亦已訂正；未修改 frontend、external-materials-service、DB、Redis schema 或 Compose 設定。
+- 實際驗證：`git diff --check` 通過；`bash scripts/spec-check.sh` 為 `BLOCK: 0 / CHECK: 0`；BFF 完整測試 54/54 通過；`mvn -q -f bff/pom.xml package -DskipTests` 通過。架構對抗審查為 critical 0／major 0／minor 0，內容雜湊 `638a63ba7cc4`。
+- Docker 實機驗證：尚未執行，也未宣稱已部署。依整體工作順序，須待所有實作合併後再由 `/run-stack` 從最終 main 重建／recreate BFF，並完成 image provenance、三條網路入口、非空 readiness sentinel、72 組矩陣、匿名負向路徑與 BFF log 檢查。
+- 與規格偏差：目前程式與自動化測試未發現 Task 317 契約偏差；尚待的只有上述合併後 Docker/runtime 證據。
