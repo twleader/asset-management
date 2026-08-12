@@ -161,3 +161,13 @@ test "$(docker inspect asset-bff --format '{{.Image}}')" = "$built_bff_image"
 - 實際驗證：`git diff --check` 通過；`bash scripts/spec-check.sh` 為 `BLOCK: 0 / CHECK: 0`；BFF 完整測試 54/54 通過；`mvn -q -f bff/pom.xml package -DskipTests` 通過。架構對抗審查為 critical 0／major 0／minor 0，內容雜湊 `638a63ba7cc4`。
 - Docker 實機驗證：尚未執行，也未宣稱已部署。依整體工作順序，須待所有實作合併後再由 `/run-stack` 從最終 main 重建／recreate BFF，並完成 image provenance、三條網路入口、非空 readiness sentinel、72 組矩陣、匿名負向路徑與 BFF log 檢查。
 - 與規格偏差：目前程式與自動化測試未發現 Task 317 契約偏差；尚待的只有上述合併後 Docker/runtime 證據。
+
+### Docker runtime 驗證（2026-08-12）
+
+- 由 feature image rebuild／force-recreate BFF 後，direct host `:8080`、frontend nginx `:80`、同 Compose
+  network 的 `bff:8080` 均各自驗到 representative DAILY 與 INTRADAY response：labels 均非空、
+  `closes/ma5/ma20/ma60/ma240/volumes/turnovers` 皆與 labels 等長。
+- catalog 9 markets × 8 ranges 的 72 組全數驗過：所有 DAILY 非空、market/range echo 正確、所有陣列對齊。
+  `market=BAD`、`range=bad` 均回 400 `application/problem+json`，detail 同時含收到值與完整合法 values。
+  未登入精確 GET 為 200；相鄰 authenticated legacy GET、同一路徑 POST/PUT/PATCH/DELETE 與 descendant GET
+  均為 401。未安全誘發 malformed downstream payload，故 502 live mapping 不列為 runtime 證據（由既有契約測試覆蓋）。

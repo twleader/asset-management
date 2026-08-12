@@ -83,3 +83,13 @@ bash scripts/spec-check.sh
 ### 尚待統一 runtime 驗證
 
 尚未進行 Docker image rebuild、container recreate、實際頁面／API／browser 三卡抽查及運行中匯出下載驗證；這些項目會在所有應實作工作完成後由最終一次 `run-stack` 統一執行，因此本報告不把目前成果標示為已部署。
+
+### 整合 runtime（2026-08-12）
+
+- feature image 的 business-services、BFF 與 frontend 已 rebuild／force-recreate；已登入 browser 的首頁與
+  `/trading-radar` 都可載入，同 session `GET /api/bff/trading-radar` 回 200。適用台股個股的
+  PE／PB／殖利率都在同一 response 中有獨立 `FINMIND` provider、`2026-08-11` as-of 與各自 source URL，
+  `VALUATION.components` 以 `pe`／`pb`／`dividend_yield` 各自回 AVAILABLE，未見 generic provenance 串線。
+- **未解項：** 既有排程雙格式檔建於本輪 image rebuild 之前，缺 t315 新欄位；本輪 browser 手動匯出下載逾時且
+  檔案 timestamp 未更新，故不得將舊 JSON/XLSX 當成新 build 的 18 欄 runtime 證據。程式的同一 `ExportDoc`
+  單元／完整回歸仍通過；本輪 runtime 只標示 API/UI provenance PASS、fresh dual-format artifact 為未完成。
