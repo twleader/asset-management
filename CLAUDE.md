@@ -109,13 +109,31 @@ bash .claude/hooks/spec-review-pass.sh --status # 查目前狀態
 > 另注意 `core.hooksPath` 設的是**絕對路徑**、指向主 clone；改 `scripts/git-hooks/`
 > 底下的檔案要 merge 進 main 後才會實際生效。
 
-### Subagent 一律與主 Agent 使用相同模型
+### Subagent 一律與主 Agent 使用相同模型（例外：skill 可自行釘住模型）
 
-**所有 subagent**（包含實作、`spec-auditor`、`arch-auditor`、`/run-stack` 與
-`/commit-merge-push`）一律使用與當前主 agent **完全相同的模型與 reasoning effort**。
+**所有 subagent**（包含實作、`spec-auditor`、`arch-auditor`，以及任何臨時派出的
+subagent）一律使用與當前主 agent **完全相同的模型與 reasoning effort**。
 禁止因任務較簡單、成本、速度或 fallback 而改用較低階模型。執行環境支援繼承時，
 省略 subagent 的 model／effort override；若工具要求明確指定，則兩者必須與主 agent
 一致。相同模型無法使用時應停止並回報，不得靜默降級。
+
+**唯一例外：skill 可在自己的定義檔裡指定特定模型。** skill 自行宣告的模型／effort
+**優先於**上述繼承規則——那是 skill 作者針對該工作負載的刻意選擇，不算降級。
+例外只涵蓋「skill 定義檔裡的宣告」：skill **執行過程中**再派出去的 subagent，
+仍須沿用該 skill 當下的模型，不得再往下降；未宣告模型的 skill 一律繼承主 agent。
+
+目前只有 `/run-stack` 用到這個例外：
+
+| Harness | 宣告位置 | 模型 / effort |
+|---|---|---|
+| Claude Code | `.claude/skills/run-stack/SKILL.md` frontmatter `model:` ／ `effort:` | `sonnet` ／ `high` |
+| Codex | `.agents/skills/run-stack/SKILL.md` 內文（frontmatter 不支援） | `gpt-5.6-luna` ／ `high` |
+
+> **兩邊的強制力不同，別當成同一回事。** Claude Code 的 skill frontmatter 由 harness
+> 直接套用（parser 會驗 `effort`，合法值 `low｜medium｜high｜xhigh｜max`）；Codex 的
+> skill loader 只認得 `name`／`description`／`metadata`／`interface`／`dependencies`／
+> `policy`／`agents`／`assets`，**沒有 `model` 欄位**，寫了也會被忽略，因此只能在內文
+> 要求用 `spawn_agent` 帶 `model` 參數——那是指令引導，不是硬性保證。
 
 **第 5 步「實作程式碼」不得由主 agent 直接動手，一律開 subagent 執行**，完成後
 回到主 agent 彙整結果（驗收、跑閘門、commit）：
@@ -124,10 +142,15 @@ bash .claude/hooks/spec-review-pass.sh --status # 查目前狀態
 宣稱的變更（注意：subagent 回報的絕對路徑常指向主 repo 而非 worktree，
 落地前先用 `git -C <worktree路徑> status/diff` 確認變更真的落在 worktree）。
 
-**`/run-stack` 與 `/commit-merge-push` 也一律派 subagent 執行**，並遵守上述模型與
-reasoning effort 一致規則。主 agent 在 prompt 裡帶入該 skill 的完整流程與本次變更
-脈絡（改了哪個 service、預期驗證點），subagent 執行完回報結果（stack 是否 serve、
-merge commit SHA），由主 agent 向使用者彙整。
+**`/run-stack` 與 `/commit-merge-push` 也一律派 subagent 執行。** 主 agent 在 prompt 裡
+帶入該 skill 的完整流程與本次變更脈絡（改了哪個 service、預期驗證點），subagent 執行完
+回報結果（stack 是否 serve、merge commit SHA），由主 agent 向使用者彙整。模型則看該
+skill 有沒有自己宣告：`/commit-merge-push` 沒宣告 → 繼承主 agent；`/run-stack` 有宣告
+→ 用它宣告的那組。
+
+> **派工工具設不了 effort 時，直接叫 skill、不要硬派。** 部分執行環境的 Agent 工具只有
+> `model` 參數、沒有 effort，這時派出去的 subagent 拿不到 skill 宣告的 effort。與其派一個
+> effort 錯的 subagent，不如由主 agent 直接觸發該 skill——讓 harness 自己套用 frontmatter。
 
 ---
 
