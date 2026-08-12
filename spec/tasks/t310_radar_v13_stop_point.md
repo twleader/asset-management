@@ -2,7 +2,7 @@
 
 **停止日期：** 2026-08-10（Asia/Taipei）
 **恢復日期：** 2026-08-11（Asia/Taipei）
-**狀態：** EVIDENCE_SPEC_DRAFTED／SPEC_REVIEW_LIMIT_REACHED／production V13 仍未核准
+**狀態：** EVIDENCE_SPEC_DRAFTED／SAME_MODEL_SPEC_REVIEW_RESUMED／production V13 仍未核准
 **範圍：** 原停止點仍固定 2026-08-10 的證據邊界；本次只恢復 t314–t316 所定義的 joint-fold、provenance、完整回歸、Docker 與真實 holdout 證據工作，不代表 V13 已核准升版或可發布。
 
 2026-08-11 已依使用者指示恢復對分析有幫助的證據閉環；先通過重新執行的 spec review，再實作與驗證。production `RULE_VERSION` 維持 V12，除非真實 holdout 全部通過且另有明確發布核准；不得把 focused tests 當成完整驗證，也不得用未驗證資料產生交易結論。
@@ -13,6 +13,13 @@
 - Round 2：critical 0／major 2／minor 1；已修正 VALUATION 整組不適用 projection、weakening boolean invariant 與 `Optional.of(false)` 休市語意。
 - Round 3：critical 0／major 2／minor 0；已修正 t309 的逐 component provider/date 契約，以及 Requirement 57／design 的條件式 V13 發布文字。
 - 使用者指定最多三輪，故不執行 Round 4，也不寫入 spec-review pass marker。t314–t316 留作已收斂但**尚未獨立複審通過**的 implementation-ready draft；production code、Docker rebuild 與真實 promotion holdout 維持停止。
+
+## 2026-08-12 同模型重新審查
+
+- 使用者已明確要求依新規範重新解決此停止點；這是新的獨立審查週期，不把舊週期延伸成 Round 4。
+- 本週期的每位唯讀 `spec-auditor` 必須使用與主 agent 完全相同的模型與推理強度；不得降級。每輪修正後換一位全新審查者，仍以最多三輪為上限。
+- 審查範圍固定為 t314–t316、Requirement 65 及其直接引用的 Requirement 57／58 與 design 契約；Task 317 另以獨立切片審查，不得混算 findings 或通過狀態。
+- 在本週期取得無 critical／major 的獨立結論並寫入 pass marker 前，t314–t316 仍只是草稿；production `TW_RULES_V12` 與下方 evidence gate 完全不變。
 
 ## 已取得但有限的驗證
 

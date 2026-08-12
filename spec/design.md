@@ -4543,7 +4543,7 @@ TradingRadarView（雙分頁：台股／美股，比照 WatchStockView.vue 的 m
 
 **明確不在本次範圍：** 大盤 `evaluateMarket` 與個股雙軌方法論統一（regime 是全部個股買進閘門的上游，回歸風險不成比例）；K>85 過熱否決門檻（使用者明示的風險偏好取捨，非實證，已明文記載）。新引入的門檻（OSC 全幅與文案門檻、乖離分位與最少樣本、ROE 斜率、冷卻分鐘數）皆無量測依據，比照 Requirement 56 記載為判斷性取值。
 
-### V13 證據品質、資產專屬因子與樣本外校準（Requirement 65，t274／t275／t307–t309）
+### V13 證據品質、資產專屬因子與樣本外校準（Requirement 65，t274／t275／t307–t309／t314–t316）
 
 V13 不再把「可計算的 opportunity score」等同於「足以採取行動」。單次評估的資料流分為四層，依賴方向維持由 IO adapter 指向純規則：
 
@@ -4569,13 +4569,15 @@ ETF premium 改由 dated observation record 傳遞，Redis 與 repository 都回
 
 **回測與啟用閘門。** 訊號在 completed close `t` 形成，主要 execution 為 adjusted open `t+1→t+1+h`；missing open 排除主要結果，close 只作獨立 sensitivity。每個 market/horizon 以所有標的共用的 global session-date cutoff 切 70/30，禁止每檔各切；walk-forward 亦用全域 expanding dates。candidate/baseline 比較使用相同 code/date intersection，echo 完整成本假設與 gross/net。promotion 需 minimum n/codes、practical return 或 downside 改善、至少 3 valid folds與 60% fold 一致性；未達一律 disclosure。舊獲利了結只改列高動能風險，REDUCE 另需結構與 momentum/liquidity 兩類轉弱及 calibrated downside。
 
-**API 與版本。** `StockDecision`／snapshot／Excel／JSON 新增兩軌 opportunity/downside/confidence/riskCoverage、component/evidence groups、accepted price/premium provenance、strict AssetProfile、`returnStdDev60Ratio`／normalized bias、rate batch context、next distribution 與 valuation coverage。Vue 只顯示，不重算。t274、t275、t307–t309 是同一組 V13 candidate；只有所有欲發布 production key 的 required-horizon gate 通過且另有明確發布核准時，才一次升 `TW_RULES_V13`，通知 mismatch 首輪只建 baseline、不寄信。`REJECTED`／`INSUFFICIENT` 或尚未核准的 `PROMOTED_CANDIDATE` 都維持 `TW_RULES_V12`；不得中途部署半套 V13。
+**API 與版本。** `StockDecision`／snapshot／Excel／JSON 新增兩軌 opportunity/downside/confidence/riskCoverage、component/evidence groups、accepted price/premium provenance、strict AssetProfile、`returnStdDev60Ratio`／normalized bias、rate batch context、next distribution 與 valuation coverage。Vue 只顯示，不重算。t274、t275、t307–t309 是同一組 V13 candidate；只有所有欲發布 production key 的 required-horizon gate 通過且另有明確發布核准時，才一次升 `TW_RULES_V13`，通知 rule-version mismatch 首輪只建 baseline、不寄信。`REJECTED`／`INSUFFICIENT` 或尚未核准的 `PROMOTED_CANDIDATE` 都維持 `TW_RULES_V12`；不得中途部署 V13 scoring、normalized timing、Treasury beta 或 candidate parameters。唯一分段例外是 Requirement 65／t316 的 V12 final-action safety layer：它不改 V12 score/candidate/parameters/ruleVersion，另用 action-policy version 安全重建通知 baseline，不視為發布半套 V13。
 
 **V13 停止點恢復與證據閉環。** production track 的 fold selection 不得借用 required horizons 清單第一項作 seed。每一個 `(market,instrumentKind,productionProfile,track,foldIndex)` 先把各 required horizon 的 train dates 取排序交集，得到唯一 joint train calendar；sigma floor/multiples 只由該交集與同一 production key 的非 candidate-dependent code universe 建立一次。每個 horizon 仍用自己的 evaluation block，train execution 另須嚴格 `exitDate < evaluationFrom`。任一 required horizon／joint sigma／same-sample intersection 缺漏即該 fold unavailable，不借另一 horizon 補洞。報告同時 echo joint train 範圍、各 horizon evaluation 範圍、purge 計數、共同 sigma profile 與完整 candidate snapshot。
 
 **估值逐分量 provenance。** `FundamentalSnapshot.peEvidence/pbEvidence/dividendYieldEvidence` 是 PE、PB、殖利率各自唯一的 value/percentile/provider/sourceUrls/availableAt/asOf/loss 來源；`RadarEvidence.evidenceGroups.VALUATION.components` 是各自 applicability/missingReason 來源。Vue 與 `TradingRadarExportService` 只依 component name 合併這兩個後端 projection，不得使用 composite 的 generic `valuationProvider/valuationAsOf` 補缺漏分量，也不得在呈現層重算 freshness、250 筆門檻或分位。舊快照缺逐分量欄位時顯示「舊快照未含逐分量證據」並保留空白，不以 PE 來源代填 PB／殖利率。
 
-**Treasury freshness 與發布結論。** Spring production `TreasuryYieldService` 必須注入 `MarketDataService`；completed-session lag 只接受權威美股交易日曆，長假不計 session，任何 UNKNOWN 立即回 stale reason。stale curve 可保留 batch provenance，但 rate evidence 為 STALE、risk unit 為 null。此閉環的完成不等於 V13 必須發布：真實 holdout／walk-forward 若 rejected 或 insufficient，production `TradingRadarRuleEngine.RULE_VERSION` 與通知仍維持 `TW_RULES_V12`，完成報告保留拒絕原因；只有另行核准且全部 production key 通過時才進一次性 V13 發布。
+**Treasury freshness、V12 final-action policy 與發布結論。** Task 318 已完成收盤前後、長假、3／4 sessions 與 future curve guard；t316 不重做。其剩餘 production closure 由 `TradingRadarSessionCalendarPort` 隔離 authority：唯一 Spring `MarketDataTradingCalendarAdapter` 把 `MarketDataService.isTradingDayKnown` 的 true／false 映成 OPEN／CLOSED，null／empty／exception 映成 UNKNOWN；`TreasuryYieldService` 尋找 completed session 與計 lag 都只讀此 port，任何 UNKNOWN 立即回 `STALE/UNKNOWN_CALENDAR`，不得 weekday fallback，並保留 batch provenance。
+
+V12 opportunity score、candidate action、`RuleParameters.V12_DEFAULT` 與 `ruleVersion=TW_RULES_V12` 保持不變，但 final action 依 Requirement 65 統一套 `TradingRadarEvidenceGate`；頁面、快照、匯出與通知共用相同 post-gate decision。因 action 語意在 ruleVersion 不變時改變，另以 `actionPolicyVersion=EVIDENCE_GATE_V1` 加入 response/snapshot/export metadata 與 `trading_radar_notification_setting.action_policy_version`（v1.101.0）。通知 baseline 只有在 `initialized=true` 且 rule/action-policy 兩版本都相符時有效；任一條件不符的首輪只保存 gated baseline、兩版本並設 initialized，不 enqueue，也不改 notification-state cooldown。此安全閉環不等於 V13 必須發布：真實 full-universe holdout／walk-forward 若 rejected 或 insufficient，production `TradingRadarRuleEngine.RULE_VERSION` 仍維持 `TW_RULES_V12`，完成報告保留拒絕原因。V13 report 以 typed `universeMode` 區分 FULL_MARKET 與 BOUNDED_DIAGNOSTIC；bounded 在 registry 建立前即 fail closed，promotion count 為 0、頂層 selected maps 為空且逐 key 只可 `INSUFFICIENT_DIAGNOSTIC_ONLY`。只有另行核准且全部 FULL_MARKET production key 通過時才進一次性 V13 發布。
 
 ### 逆勢抄底狀態（獨立第二軌）
 

@@ -21,9 +21,14 @@
 
 - [ ] **315.2 畫面逐分量顯示。** 在既有「基本面與產業」區塊把 PE、PB、殖利率顯示成三個可獨立閱讀的項目；每項至少顯示 value（PE/PB 倍數、殖利率百分點）、自身分位、`AVAILABLE|MISSING|STALE|NOT_APPLICABLE` 中文語意、provider、as-of、available-at、missing reason，以及每個 source URL 的可點擊連結。PE loss 顯示「可信來源顯示虧損」但仍保留該 loss observation 的 provider/date/URL。ETF／其他整組不適用時保留現有整組說明，並顯示三項後端給定的 `NOT_APPLICABLE` 狀態；不得因 `fundamental.applicable=false` 直接跳過三項。舊快照顯示「舊快照未含逐分量證據」。既有 composite/coverage、EPS、ROE、營收、產業與 evidence-group 展開區保留，不在前端重算。
 
-- [ ] **315.3 Excel/JSON 共用表新增固定欄位。** `TradingRadarExportService` 的「個股決策」表在現有 detail evidence 欄位尾端，依 PE、PB、殖利率固定順序，各追加六欄：`適用狀態`、`Provider`、`來源網址`、`可得時間`、`資料日期`、`缺漏原因`，共 18 欄。provider/URL/availableAt/asOf 只取各自 `*Evidence`；status/reason 只取同名 VALUATION evidence component。舊快照空白保留 null/空 list，不使用 generic valuation provenance 代填。xlsx 與 JSON 必須由同一 `ExportDoc` row 產生。
+- [ ] **315.3 Excel/JSON 共用表新增固定欄位。** `TradingRadarExportService` 的「個股決策」表在現有 detail evidence 欄位尾端，依下列固定順序追加 18 個**唯一**欄名，禁止只重複六個 generic 名稱（`ExportDoc` 會拒絕重複 header）：
+  - `PE適用狀態`、`PE Provider`、`PE來源網址`、`PE可得時間`、`PE資料日期`、`PE缺漏原因`
+  - `PB適用狀態`、`PB Provider`、`PB來源網址`、`PB可得時間`、`PB資料日期`、`PB缺漏原因`
+  - `殖利率適用狀態`、`殖利率 Provider`、`殖利率來源網址`、`殖利率可得時間`、`殖利率資料日期`、`殖利率缺漏原因`
 
-- [ ] **315.4 header/format/row lockstep。** 18 個 headers、formats 與每一 row 的 cells 必須同長同序；狀態/provider/time/date/reason 為 TEXT，URLs 為 LIST_LINES。保留既有欄位順序，僅在尾端追加，避免舊索引漂移。可新增 package-private 純 helper 供單元測試，但 production 只能保留一份 mapping。
+  provider/URL/availableAt/asOf 只取各自 `*Evidence`；status/reason 只取同名 VALUATION evidence component。舊快照空白保留 null/空 list，不使用 generic valuation provenance 代填。xlsx 與 JSON 必須由同一 `ExportDoc` row 產生。
+
+- [ ] **315.4 header/format/row lockstep。** 315.3 列出的 18 個 headers 必須逐字鎖進單元測試，且 headers、formats 與每一 row 的 cells 同長同序；狀態/provider/time/date/reason 為 TEXT，URLs 為 LIST_LINES。另斷言整份「個股決策」headers 無重複值，讓 `ExportDoc` 的 fail-fast 在測試中可辨別。保留既有欄位順序，僅在尾端追加，避免舊索引漂移。可新增 package-private 純 helper 供單元測試，但 production 只能保留一份 mapping。
 
 - [ ] **315.5 測試。** 至少涵蓋：
   - 三 component 使用不同 provider/asOf/source URL 時，畫面 helper 與匯出逐項不串線；
