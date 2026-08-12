@@ -226,6 +226,11 @@ public class TradingRadarExportService {
         headers.addAll(EVIDENCE_HEADERS);
         headers.addAll(DETAIL_EVIDENCE_HEADERS);
         headers.addAll(VALUATION_COMPONENT_HEADERS);
+        // Task 320：即時折溢價欄一律附加在<b>整張表的真正最末</b>。
+        // 「折溢價%」（索引 53、值取自 dated 的 etfPremiumPct）看起來像末欄，其實其後尚有 118 欄；
+        // 插在它後面會把「折溢價時點／折溢價來源／折溢價stale」等全部往後推兩格，
+        // 而既有 golden 逐格比對與下游取值皆以欄索引定位（同 Task 285／286 的理由）。
+        headers.addAll(LIVE_PREMIUM_HEADERS);
 
         List<List<Object>> rows = new ArrayList<>();
         for (JsonNode s : snapshots) {
@@ -271,6 +276,10 @@ public class TradingRadarExportService {
                 JsonNode treasuryRateContext = evidence.path("treasuryRateContext");
                 row.addAll(detailEvidenceCells(fundamental, evidence, profile, bondRate, treasuryRateContext));
                 row.addAll(valuationComponentCells(fundamental, evidence));
+                // Task 320：與 headers／formats 同位置（皆為尾端附加）。舊快照缺這兩個 key 時
+                // num()／nullableText() 都回 null → Excel BLANK 格、JSON null，不以 0 或 "" 充數（320.7）。
+                row.addAll(Arrays.asList(
+                        num(d, "etfPremiumLivePct"), nullableText(d, "etfPremiumLiveNavAsOf")));
                 rows.add(row);
             }
         }
@@ -308,6 +317,7 @@ public class TradingRadarExportService {
         formats.addAll(EVIDENCE_FORMATS);
         formats.addAll(DETAIL_EVIDENCE_FORMATS);
         formats.addAll(VALUATION_COMPONENT_FORMATS);
+        formats.addAll(LIVE_PREMIUM_FORMATS); // Task 320：與 headers／rows 同位置（尾端）
         return new ExportDoc.Sheet("個股決策",
                 List.of(new ExportDoc.Table(null, null, headers, true, false, false, formats, rows)),
                 headers.size());
@@ -453,6 +463,18 @@ public class TradingRadarExportService {
             ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT,
             ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.LIST_LINES,
             ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT);
+
+    /**
+     * Task 320 的即時折溢價欄，附加在「個股決策」表的<b>真正最末</b>。
+     *
+     * <p>與索引 53 的「折溢價%」是兩個不同語意的欄，不可互相取代：後者取自 dated 的
+     * {@code etfPremiumPct}（只認已完成交易日、進 buyGate、美股恆為空），本組取自
+     * {@code etfPremiumLivePct}（與該列現價同一 tick 的即時值）。
+     */
+    private static final List<String> LIVE_PREMIUM_HEADERS = List.of("即時折溢價%", "即時淨值時間");
+
+    private static final List<ExportDoc.Format> LIVE_PREMIUM_FORMATS =
+            List.of(ExportDoc.Format.NUM2, ExportDoc.Format.TEXT);
 
     /** 依 {@link #EXT_KEYS} 順序取出 14 個值；缺欄位為 null。 */
     private static List<Object> extCells(JsonNode n) {

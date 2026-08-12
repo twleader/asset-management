@@ -212,7 +212,8 @@
                   <strong>{{ row.week52Position == null ? '—' : Math.round(row.week52Position * 100) + '%' }}</strong>
                 </div>
                 <div v-if="row.etfPremiumPct != null" class="confirm-item">
-                  <span>折溢價</span>
+                  <!-- 主表格另有「折溢價(即時)」欄；此處是進 veto 的完成日值，盤中兩者本來就會不同，必須能分辨 -->
+                  <span>折溢價(完成日)</span>
                   <strong>{{ fmtPct(row.etfPremiumPct) }}<small
                     v-if="row.etfPremiumPercentile != null"> · 自身歷史 {{ Math.round(row.etfPremiumPercentile) }} 分位</small><small
                     v-else> · 分位資料累積中（需滿 60 個交易日）</small></strong>
@@ -568,6 +569,18 @@
               <div class="price-value">{{ fmtNumber(row.price, 2) }}</div>
               <div :style="{ color: priceColor(row.changePercent) }">{{ fmtPct(row.changePercent) }}</div>
             </template>
+          </template>
+        </el-table-column>
+        <!--
+          Task 320：ETF 即時折溢價（純揭露，不進任何規則）。值與該列現價同一 tick，
+          個股與查無淨值者顯示「—」，不補 0。SSE 的 price-update 只帶報價、不帶淨值，
+          故報價跳動後約 2 秒內本欄仍是上一輪 API 的值，由背景 load() 自癒；
+          前端一律不自行以 (price−nav)/nav 重算——台股必須直取證交所權威值。
+        -->
+        <el-table-column label="折溢價(即時)" min-width="120" align="right">
+          <template #default="{ row }">
+            <div>{{ row.etfPremiumLivePct == null ? '—' : fmtPct(row.etfPremiumLivePct) }}</div>
+            <div v-if="row.etfPremiumLiveNavAsOf" style="font-size:12px;color:#909399">{{ row.etfPremiumLiveNavAsOf }}</div>
           </template>
         </el-table-column>
         <el-table-column label="MA5／20／60／240" min-width="250" align="right">

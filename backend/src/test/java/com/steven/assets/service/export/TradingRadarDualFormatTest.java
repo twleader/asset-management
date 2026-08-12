@@ -239,7 +239,12 @@ class TradingRadarDualFormatTest {
             "利率落後日數", "利率時效說明", "利率來源Manifest", "資產分類完整", "底層幣別完整",
             "PE適用狀態", "PE Provider", "PE來源網址", "PE可得時間", "PE資料日期", "PE缺漏原因",
             "PB適用狀態", "PB Provider", "PB來源網址", "PB可得時間", "PB資料日期", "PB缺漏原因",
-            "殖利率適用狀態", "殖利率 Provider", "殖利率來源網址", "殖利率可得時間", "殖利率資料日期", "殖利率缺漏原因");
+            "殖利率適用狀態", "殖利率 Provider", "殖利率來源網址", "殖利率可得時間", "殖利率資料日期", "殖利率缺漏原因",
+            // Task 320：即時折溢價兩欄一律在整張表的<b>真正最末</b>（不是索引 53 的「折溢價%」之後）
+            "即時折溢價%", "即時淨值時間");
+
+    /** Task 320 尾端附加的欄數；下方由 size() 往回推的錨點算式必須扣掉它，否則三條 subList 會一起錯位。 */
+    private static final int LIVE_PREMIUM_COLS = 2;
 
     private static List<String> headerRow(Sheet sheet) {
         List<String> out = new ArrayList<>();
@@ -306,8 +311,11 @@ class TradingRadarDualFormatTest {
         assertThat(headerRow(wb.getSheet("大盤總覽")))
                 .as("大盤總覽 44 欄").containsExactlyElementsOf(MARKET_HEADERS_V11);
         assertThat(headerRow(wb.getSheet("個股決策")))
-                .as("個股決策 172 欄").containsExactlyElementsOf(STOCK_HEADERS_V11);
-        int valuationStart = STOCK_HEADERS_V11.size() - VALUATION_COMPONENT_HEADERS_EXPECTED.size();
+                .as("個股決策 174 欄").containsExactlyElementsOf(STOCK_HEADERS_V11);
+        // 三條錨點都由 size() 往回推，故必須先扣掉 Task 320 在尾端附加的欄數；
+        // 不扣的話三條 subList 會一起紅，而失敗訊息讀起來像是「既有欄整體位移」（實際上沒有）。
+        int valuationStart = STOCK_HEADERS_V11.size() - LIVE_PREMIUM_COLS
+                - VALUATION_COMPONENT_HEADERS_EXPECTED.size();
         int detailStart = valuationStart - DETAIL_HEADERS_EXPECTED.size();
         int evidenceStart = detailStart - 12;
         assertThat(STOCK_HEADERS_V11.subList(evidenceStart, detailStart))
@@ -317,8 +325,12 @@ class TradingRadarDualFormatTest {
                         "證據閘門原因", "下一配息日", "配息證據狀態", "配息已知時間");
         assertThat(STOCK_HEADERS_V11.subList(detailStart, valuationStart))
                 .containsExactlyElementsOf(DETAIL_HEADERS_EXPECTED);
-        assertThat(STOCK_HEADERS_V11.subList(valuationStart, STOCK_HEADERS_V11.size()))
+        assertThat(STOCK_HEADERS_V11.subList(valuationStart, STOCK_HEADERS_V11.size() - LIVE_PREMIUM_COLS))
                 .containsExactlyElementsOf(VALUATION_COMPONENT_HEADERS_EXPECTED);
+        // Task 320：新兩欄就在最末（釘住「尾端附加」而非中段插入）
+        assertThat(STOCK_HEADERS_V11.subList(
+                        STOCK_HEADERS_V11.size() - LIVE_PREMIUM_COLS, STOCK_HEADERS_V11.size()))
+                .containsExactly("即時折溢價%", "即時淨值時間");
         assertThat(new HashSet<>(STOCK_HEADERS_V11)).hasSameSizeAs(STOCK_HEADERS_V11);
         assertThat(wb.getSheet("快照索引").getRow(1).getLastCellNum())
                 .as("快照索引新增動作政策版本 metadata").isEqualTo((short) 9);
@@ -326,6 +338,91 @@ class TradingRadarDualFormatTest {
                 .isEqualTo("動作政策版本");
         assertThat(wb.getSheet("快照索引").getRow(2).getCell(2).getStringCellValue())
                 .isEqualTo("EVIDENCE_GATE_V1");
+    }
+
+    /**
+     * Task 320 驗證 (f)：匯出欄<b>零位移</b>。
+     *
+     * <p>「折溢價%」看起來像末欄（它在索引 53），實際上其後尚有 118 欄。把新欄插在它後面，
+     * 三份清單（headers／formats／rows）就算同步插入、長度仍一致，{@code ExportDoc} 的 fail-fast
+     * 也<b>不會</b>觸發——缺陷會靜默通過，而受害的正好是本任務明文要求不動的
+     * 「折溢價時點／折溢價來源／折溢價stale」。故本項的重點是<b>索引</b>，不是長度。
+     */
+    @Test
+    @DisplayName("Task 320：即時折溢價兩欄附加在整張表最末，既有欄索引一格未移")
+    void 即時折溢價欄零位移() throws Exception {
+        when(store.range(1L, 0L, 1L)).thenReturn(
+                new TradingRadarSnapshotStore.SnapshotRange(List.of(snapshotNode()), 1, 0));
+        List<String> actualHeaders = headerRow(
+                GoldenWorkbooks.read(service.exportForOwner(1L, 0L, 1L)).getSheet("個股決策"));
+
+        // (i)(iii) 既有欄索引維持 Task 320 之前的值（數字寫死才擋得住整體位移）
+        assertThat(actualHeaders.get(53)).as("折溢價% 仍在索引 53").isEqualTo("折溢價%");
+        assertThat(actualHeaders.get(134)).as("折溢價時點").isEqualTo("折溢價時點");
+        assertThat(actualHeaders.get(135)).as("折溢價來源").isEqualTo("折溢價來源");
+        assertThat(actualHeaders.get(136)).as("折溢價stale").isEqualTo("折溢價stale");
+        assertThat(actualHeaders.get(171))
+                .as("Task 320 前的末欄仍在索引 171").isEqualTo("殖利率缺漏原因");
+
+        // (ii) 新兩欄在整張表最末，總欄數 172 → 174
+        assertThat(actualHeaders).hasSize(174);
+        assertThat(actualHeaders.subList(172, 174)).containsExactly("即時折溢價%", "即時淨值時間");
+
+        // (iv) headers／formats／rows 三者長度一致（fail-fast 的補強，不是替代）
+        ExportDoc.Table stockTable = (ExportDoc.Table) service.radarDoc(1L, 0L, 1L)
+                .sheets().stream().filter(s -> "個股決策".equals(s.name())).findFirst().orElseThrow()
+                .blocks().get(0);
+        assertThat(stockTable.headers()).hasSize(174);
+        assertThat(stockTable.columnFormats()).hasSize(174);
+        assertThat(stockTable.rows()).isNotEmpty().allSatisfy(r -> assertThat(r).hasSize(174));
+    }
+
+    /**
+     * Task 320 驗證 (h)：釘住 320.7「舊快照缺這兩欄必須可讀」。
+     *
+     * <p>既有的 {@code 舊快照相容()} 用前錨索引與 {@code indexOf}，尾端附加不會使它變紅，
+     * 故 320.7 若不另補一條就是沒有測試釘子的約束。
+     */
+    @Test
+    @DisplayName("Task 320：舊快照沒有 etfPremiumLivePct／etfPremiumLiveNavAsOf 時為空白格與 JSON null，不擲例外")
+    void 舊快照缺即時折溢價兩欄可讀() throws Exception {
+        // snapshotNode() 本身就沒有這兩個 key，正是「本功能上線前寫入的 Redis 快照」的形狀
+        when(store.range(7L, 0L, 1L)).thenReturn(
+                new TradingRadarSnapshotStore.SnapshotRange(List.of(snapshotNode()), 1, 0));
+
+        assertThatCode(() -> service.exportForOwner(7L, 0L, 1L)).doesNotThrowAnyException();
+        Row legacyStock = GoldenWorkbooks.read(service.exportForOwner(7L, 0L, 1L))
+                .getSheet("個股決策").getRow(1);
+        assertThat(legacyStock.getCell(172).getCellType())
+                .as("即時折溢價% 缺值應為 BLANK 而非 0").isEqualTo(CellType.BLANK);
+        assertThat(legacyStock.getCell(173).getCellType())
+                .as("即時淨值時間 缺值應為 BLANK 而非空字串").isEqualTo(CellType.BLANK);
+
+        JsonNode legacyRow = mapper.readTree(jsonRenderer.render(service.radarDoc(7L, 0L, 1L)))
+                .at("/sheets/2/tables/0/rows").get(0);
+        assertThat(legacyRow.get("即時折溢價%").isNull()).isTrue();
+        assertThat(legacyRow.get("即時淨值時間").isNull()).isTrue();
+    }
+
+    @Test
+    @DisplayName("Task 320：快照有即時折溢價時，Excel 與 JSON 兩份同值且落在最末兩欄")
+    void 即時折溢價雙格式同值() throws Exception {
+        ObjectNode withLive = (ObjectNode) snapshotNode();
+        ObjectNode stock = (ObjectNode) withLive.path("stocks").get(0);
+        stock.put("etfPremiumLivePct", -0.35);
+        stock.put("etfPremiumLiveNavAsOf", "20260812 133000");
+        when(store.range(8L, 0L, 1L)).thenReturn(
+                new TradingRadarSnapshotStore.SnapshotRange(List.of(withLive), 1, 0));
+
+        Row row = GoldenWorkbooks.read(service.exportForOwner(8L, 0L, 1L))
+                .getSheet("個股決策").getRow(1);
+        assertThat(row.getCell(172).getNumericCellValue()).isEqualTo(-0.35);
+        assertThat(row.getCell(173).getStringCellValue()).isEqualTo("20260812 133000");
+
+        JsonNode jsonRow = mapper.readTree(jsonRenderer.render(service.radarDoc(8L, 0L, 1L)))
+                .at("/sheets/2/tables/0/rows").get(0);
+        assertThat(jsonRow.get("即時折溢價%").decimalValue()).isEqualByComparingTo("-0.35");
+        assertThat(jsonRow.get("即時淨值時間").asText()).isEqualTo("20260812 133000");
     }
 
     @Test
@@ -341,14 +438,16 @@ class TradingRadarDualFormatTest {
         ExportDoc.Table table = stockDoc.blocks().stream()
                 .filter(ExportDoc.Table.class::isInstance).map(ExportDoc.Table.class::cast)
                 .findFirst().orElseThrow();
-        assertThat(table.headers()).hasSize(172);
+        assertThat(table.headers()).hasSize(174); // Task 320 尾端附加兩欄後 172 → 174
         assertThat(table.columnFormats()).hasSameSizeAs(table.headers());
         assertThat(table.rows()).allSatisfy(row -> assertThat(row).hasSameSizeAs(table.headers()));
-        assertThat(table.headers().subList(table.headers().size() - 18, table.headers().size()))
+        // 這兩條也是「由 size() 往回推」的錨點，同樣要扣掉 Task 320 新增的欄數才會指到估值分量區
+        assertThat(table.headers().subList(table.headers().size() - LIVE_PREMIUM_COLS - 18,
+                table.headers().size() - LIVE_PREMIUM_COLS))
                 .containsExactlyElementsOf(VALUATION_COMPONENT_HEADERS_EXPECTED);
         assertThat(new HashSet<>(table.headers())).hasSameSizeAs(table.headers());
-        assertThat(table.columnFormats().subList(table.columnFormats().size() - 18,
-                table.columnFormats().size())).containsExactly(
+        assertThat(table.columnFormats().subList(table.columnFormats().size() - LIVE_PREMIUM_COLS - 18,
+                table.columnFormats().size() - LIVE_PREMIUM_COLS)).containsExactly(
                         ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.LIST_LINES,
                         ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT,
                         ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.LIST_LINES,
@@ -372,8 +471,8 @@ class TradingRadarDualFormatTest {
 
         Workbook workbook = GoldenWorkbooks.read(new ExcelDocRenderer().render(doc));
         Sheet sheet = workbook.getSheet("個股決策");
-        assertThat(sheet.getRow(0).getLastCellNum()).isEqualTo((short) 172);
-        assertThat(sheet.getRow(1).getLastCellNum()).isEqualTo((short) 172);
+        assertThat(sheet.getRow(0).getLastCellNum()).isEqualTo((short) 174); // Task 320：172 + 2
+        assertThat(sheet.getRow(1).getLastCellNum()).isEqualTo((short) 174);
         assertThat(sheet.getRow(1).getCell(STOCK_HEADERS_V11.indexOf("PE來源網址"))
                 .getStringCellValue()).isEqualTo("https://example.test/pe-1\nhttps://example.test/pe-2");
         assertThat(sheet.getRow(1).getCell(STOCK_HEADERS_V11.indexOf("PB資料日期"))

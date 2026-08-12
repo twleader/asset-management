@@ -3542,6 +3542,46 @@ GET  /api/bff/asset-history/export                    → GET  /api/snapshots/ex
 pct_origin VARCHAR(20)`。不回填既有 186 列（皆為 `TWSE`／`Yahoo Finance` 抓取當時未記錄此欄，
 無法回溯判斷各列當初是否反推；新列自然帶值，舊列 `pct_origin` 維持 `NULL` 屬誠實狀態）。
 
+#### 交易雷達的即時折溢價欄（Task 320，與既有 dated 折溢價並存）
+
+交易雷達自 Task 309 起，折溢價走的是 `etf_nav_observation` 的 append-only dated 路徑：
+`TradingRadarService.etfPremiumObservation()` 只認**已完成交易日**的 observation，盤中刻意排除當日
+（`:1292`–`:1294` 現有註解為英文，大意為：收盤前今日 NAV 不是 completed-session observation、不得進 premium veto），因為該值會進
+`buyGate` 硬否決（溢價 `>= 3%`）與 `OVERBOUGHT` 判定。使用者要的「盤中隨股價變動的折溢價」是**另一個事實**，
+故新增獨立欄位，兩者並存：
+
+| 欄位 | 語意 | 資料來源 | 進規則？ |
+|---|---|---|---|
+| `etfPremiumPct`（既有） | 已完成交易日的收盤折溢價 | `etf_nav_observation`（as-of decision instant） | **是**——`buyGate` 硬否決 ＋ `OVERBOUGHT` |
+| `etfPremiumPercentile`（既有） | 該值在自身歷史 250 日的分位 | 同上，需滿 60 個交易日樣本 | 是（權重：短期 `SW_ETF_PREMIUM=0.03`／中期 `MW_ETF_PREMIUM=0.02`，見 `TradingRadarRuleEngine:48`／`:68`；Task 264 單軌時代的 `0.06` 在 V11 兩軌拆分後已不成立） |
+| `etfPremiumLivePct`（**新增**） | 盤中即時折溢價，與該列現價同 tick | Redis `price:etfnav:{market}:{code}` | **否**——純揭露 |
+| `etfPremiumLiveNavAsOf`（**新增**） | 該即時淨值的資料時點 | 同上的 `navAsOf` 欄 | 否 |
+
+- **不得合併成一欄**：把即時值餵回 `etfPremiumPct` 等於讓未完成 session 的 NAV 進入 veto，破壞
+  point-in-time 正確性，且盤中每 5 分鐘就讓同一決策日的 veto 結果漂移一次。兩欄在盤中本來就會不同，
+  這是預期行為，畫面上以 `折溢價(即時)`／`折溢價(完成日)` 兩個標題明確區分，不得同名。
+- **取值分流沿用既有那份、不得複製第二份**：「台股直取證交所權威值／美股以該列現價反推／缺值回 null」
+  這組分流已存在於 `ExcelExportService.premiumDiscountPct(nav, livePrice)`（Requirement 34）。Task 320
+  將其抽為單一共用實作，供資產總覽 Excel 與交易雷達兩處呼叫；抽出後資產總覽既有輸出必須逐格不變。
+  兩處各寫一份正是「同義欄位、同一 business service API」要防的事——台股那條紅線只改一處，就會產生
+  「一個頁面對、另一個頁面錯 0.07 個百分點」的靜默分岔。
+- **折溢價必須沿用該列已組好的現價，不得為它再取一次「價」**：即時折溢價一律以該列的
+  `displayPrice`（`acceptedPrice.value()`）計算。「同一 tick」的正確意思是**價只取一次**——現價與淨值
+  本來就讀兩個不同的 key（`PriceQueryService:187` 的 `price:{market}:{code}` vs `:213` 的
+  `price:etfnav:{market}:{code}`）、由兩支方法取得，`LivePrice` 裡沒有 nav 欄位，故讀淨值必然是第二次
+  Redis 讀取、不在禁止之列。若為折溢價再取一次價，兩個數字會落在不同 tick，使用者拿畫面數字驗算
+  `(price−nav)/nav` 會兜不攏——這正是美股改在消費端計算的同一個理由。
+- **匯出附加在整張表的真正最末**：`TradingRadarExportService.stockSheet()` 的個股決策摘要表共 **172** 欄，
+  「折溢價%」是索引 **53**、**不是末欄**（其後尚有 118 欄，含「折溢價時點／折溢價來源／折溢價stale」；
+  真正的末三欄是「殖利率可得時間／殖利率資料日期／殖利率缺漏原因」）。新增的 `即時折溢價%`／`即時淨值時間`
+  附加在 `VALUATION_COMPONENT_HEADERS` 之後（172→174），**不得插在「折溢價%」之後**——那會把其後 118 欄
+  整體位移兩格。理由同 Task 285／286（既有 golden 逐格比對與下游取值皆以欄索引定位）；Task 281 是插在中間
+  並維護欄索引位移函式的相反先例，本追加不走那條。`headers`／`formats`／`rows` 三份清單須同步同位置修改，
+  且 `ExportDoc` 的 fail-fast 只驗長度不驗位置。JSON 與 Excel 由同一份 header 清單產生。
+- **不升版、不落地**：純揭露欄位不進 `StockInput`／`MarketInput`，`RULE_VERSION` 維持 `TW_RULES_V12`
+  （判準同 Task 281 那條先例：規則集本身未變）；即時值只讀 Redis 不入庫，長期留存已由 `etf_nav_history`／
+  `etf_nav_observation` 負責，故無 Liquibase changeset。舊快照缺這兩欄須可讀（反序列化為 `null`）。
+
 ### 資產總覽活頁簿改為「總表 ＋ 每檔持股一張過去一年股價分頁」（Task 206）
 
 - **活頁簿結構**：`liveAssetsDoc()` 在 `liveAssetsSheet`（第一張「當前即時資產」）之後追加 `stockPriceHistorySheets(latest)`，逐檔產生一張股價分頁（Requirement 55／Task 271 起由 `buildLiveWorkbook()`／`writeLiveAssetsSheet`／`writeStockPriceHistorySheets` 改為回傳 `ExportDoc`／`ExportDoc.Sheet`）。run-now 與每日排程共用同一份 `ExportDoc`，故兩條路徑內容一致，且 `.xlsx` 與 `.json` 兩份必然同源；`exportFull()`（歷年多快照活頁簿）不受影響。
@@ -4174,7 +4214,7 @@ TradingRadarView
 
 - `Response`：`ruleVersion`、`generatedAt`、`market`、`stocks`、`skippedNonTwStocks`。
 - `MarketSummary`（Task 281 後 21 個 component）：`regime`、`regimeLabel`、`score`、`dataComplete`、`stale`（Task 217，見下方「大盤新鮮度與盤中即時判斷」）、`intraday`／`liveUpdatedAt`（Task 228，同小節）、`asOfDate`、點位／漲跌幅、`weeklyMa`（Task 265）、MA20／60／240、K／D、MA60／240 兩日確認、`reasons`、`risks`、`extendedIndicators`（Task 281）。
-- `StockDecision`（Task 281 後 39 個 component）：code／name／market、`assetClass`、`distributionAdjusted`、`held`、`action`／`actionLabel`、`score`、`counterTrendState`／`counterTrendLabel`、`counterTrendReasons`／`counterTrendRisks`、`dataComplete`、報價／漲跌幅／更新時間／`asOfDate`、MA20／60／240、K／D、MA20／60／240 兩日確認、`fxPercentile`／`underlyingCurrency`（Requirement 47）、`reasons`、`risks`、`kdHeat`（Task 232）、`timingState`／`timingLabel`／`ma60BiasPercent`／`week52Position`（Task 264）、`weeklyMa`（Task 265）、`etfPremiumPct`／`etfPremiumPercentile`、`extendedIndicators`（Task 281）。
+- `StockDecision`（Task 320 後 62 個 component；下列列舉順序＝record 宣告順序）：code／name／market、`assetClass`、`distributionAdjusted`、`held`、`action`／`actionLabel`、`score`、`counterTrendState`／`counterTrendLabel`、`counterTrendReasons`／`counterTrendRisks`、`dataComplete`、報價／漲跌幅／`quoteStatus`／更新時間／`asOfDate`、MA20／60／240、K／D、MA20／60／240 兩日確認、`fxPercentile`／`underlyingCurrency`（Requirement 47）、`reasons`、`risks`、`kdHeat`（Task 232）、`timingState`／`timingLabel`／`ma60BiasPercent`／`week52Position`（Task 264）、`weeklyMa`（Task 265）、`etfPremiumPct`／`etfPremiumPercentile`、`extendedIndicators`（Task 281）、`shortAction`／`shortActionLabel`／`shortScore`／`shortReasons`／`shortRisks`／`horizonConflict`／`volumeRatio`／`fxAsOfDate`／`profitTakingConfirmed`／`fundamental`／`evidence`／`shortDownsideRisk`／`mediumDownsideRisk`／`shortEvidenceConfidence`／`mediumEvidenceConfidence`／`shortRiskCoverage`／`mediumRiskCoverage`／`candidateAction`／`shortCandidateAction`／`actionGateReasons`（Task 291 起），最末為 `etfPremiumLivePct`／`etfPremiumLiveNavAsOf`（Task 320 新增的兩個純揭露欄位，語意與 `etfPremiumPct` 不同，見上方「交易雷達的即時折溢價欄」）。
 
 無新 entity／table／migration；分數與建議皆為可重算的衍生值，不持久化，符合正規化原則。
 

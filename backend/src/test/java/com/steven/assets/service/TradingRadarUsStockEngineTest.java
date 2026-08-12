@@ -588,7 +588,15 @@ class TradingRadarUsStockEngineTest {
         assertNull(decision.etfPremiumPct(),
                 "294.5：market=\"美股\" 時折溢價恆為 null，不得依賴「查無資料自然為 null」的假設");
         assertNull(decision.etfPremiumPercentile());
-        verify(priceQueryService, never()).getEtfNav(anyString(), eq("美股"));
+        // Task 320：本護欄收窄為「不進 factor 路徑」。美股即時折溢價（etfPremiumLivePct）是明訂的驗收條件，
+        // 而 EtfNav 沒有第二個取得路徑，故 getEtfNav 對美股<b>必然</b>會被呼叫；原本的
+        // verify(never()).getEtfNav(..., "美股") 已不成立。294.5 真正要守的是上面兩條——
+        // etfPremiumObservation() 對 US_MARKET 仍 early-return，dated 折溢價與其分位恆為 null、不進規則。
+        // 反向釘子：不得為了讓上面的斷言綠而乾脆不對美股取 NAV——那會靜默砍掉 Task 320 一半的功能。
+        assertEquals(0, decision.etfPremiumLivePct().compareTo(BigDecimal.valueOf(1.5)),
+                "320：美股必須有即時折溢價（來源已提供權威值時原樣取用）");
+        assertEquals(LocalDate.now(TAIPEI).toString(), decision.etfPremiumLiveNavAsOf());
+        // dated 路徑的護欄維持不動：美股一律不查 etf_nav_history 的折溢價序列。
         verify(etfNavHistoryRepo, never()).findRecentPremiumPct(anyString(), eq("美股"), any());
     }
 
