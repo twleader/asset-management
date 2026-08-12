@@ -1,6 +1,8 @@
 ---
 name: run-stack
 description: Launch and drive the asset-management Docker Compose stack — start it if down, rebuild + recreate the specific service whose source you changed, verify it serves. Use whenever asked to run, start, restart, redeploy, or screenshot the app, or to confirm a code change works in the actually-running stack (this project never uses a dev server — "改好" 必須跑到 image rebuild + container recreate)。
+model: sonnet
+effort: high
 ---
 
 # Run / redeploy the asset-management stack
