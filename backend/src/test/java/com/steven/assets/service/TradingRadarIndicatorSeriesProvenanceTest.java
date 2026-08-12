@@ -32,6 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
@@ -146,6 +147,11 @@ class TradingRadarIndicatorSeriesProvenanceTest {
                 .thenReturn(Optional.empty());
         lenient().when(usIndexDailyHistoryRepo.findTopNByIndexCodeOrderByTradingDateDesc(anyString(), anyInt()))
                 .thenReturn(List.of());
+        // Task 323：buildUsMarket() 改由 resolveMarketFromRows 取得 IXIC 量能 context；
+        // 本檔只驗證台股個股序列，美股組回 EMPTY 即可。
+        lenient().when(marketContextService.resolveMarketFromRows(
+                        anyString(), any(), anyList(), anyList()))
+                .thenReturn(TradingRadarMarketContextService.MarketContext.EMPTY);
         // 大盤必須是可用的（非 DATA_INCOMPLETE），否則個股會因「大盤資料不足」落入同一個
         // NO_TRADE 分支，測試就分不出是本任務的 bug 還是大盤沒 stub。
         lenient().when(twseRepo.findTopNByOrderByTradingDateDesc(241)).thenReturn(twseRows());
