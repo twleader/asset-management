@@ -28,7 +28,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 
 ---
 
-## 任務索引（Task 1–228、264–267、269–292、297–309、311–316、318）
+## 任務索引（Task 1–228、264–267、269–292、297–309、311–318）
 
 | Task | 標題 | 位置 |
 |---|---|---|
@@ -315,6 +315,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 314 | 交易雷達 V13 joint-fold 無洩漏與回測成本邊界閉環（Requirement 65） | [tasks/t314_radar_v13_joint_fold_integrity.md](tasks/t314_radar_v13_joint_fold_integrity.md) |
 | 315 | 交易雷達 PE／PB／殖利率逐分量 provenance UI 與匯出閉環（Requirement 65） | [tasks/t315_radar_valuation_provenance_surfaces.md](tasks/t315_radar_valuation_provenance_surfaces.md) |
 | 316 | 交易雷達 Treasury freshness、完整回歸與真實 holdout 結案（Requirement 65） | [tasks/t316_radar_v13_validation_closure.md](tasks/t316_radar_v13_validation_closure.md) |
+| 317 | 股市大盤查詢 Docker 可呼叫單一唯讀圖表 API（9 市場 × 8 期間，Requirement 67） | [tasks/t317_public_market_index_api.md](tasks/t317_public_market_index_api.md) |
 | 318 | 交易雷達 Treasury 未來曲線 fail-closed（Requirement 65） | [tasks/t318_treasury_future_curve_guard.md](tasks/t318_treasury_future_curve_guard.md) |
 
 > **註：Task 229–263、268、293–296 以各自任務檔為準。**

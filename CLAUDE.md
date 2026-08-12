@@ -188,6 +188,7 @@ reasoning effort 指定如下，完成後回到主 agent 彙整結果（驗收�
 - 前端 view 一律走自己頁面對應的 BFF endpoint，不直接呼叫 business service `/api/{resource}`
 - BFF 負責跨服務 aggregation、預先計算 / 排序 / 過濾，前端只負責 render
 - 範例：`DashboardBffController`、`SnapshotFormBffController`、`AssetHistoryBffController`、`BankSettingsBffRoutes`（純 passthrough 也要有自己的 route）
+- **具名、限縮例外（Requirement 67／Task 317）**：匿名唯讀的精確 `GET /api/public/market-index` 是 Docker host、同 Compose network 與自動化工具使用的**非前端頁面入口**，可不使用 `/api/bff/{page-name}` 前綴。例外只涵蓋這一條 GET：禁止 `/api/public/**` 或 descendant wildcard、禁止開放同路徑其他 HTTP method、禁止前端 view 援引此例外改打 `/api/public/**`。Controller 仍只委派 BFF service，BFF 仍只呼叫既有 business API，不得直連外部行情來源。
 
 **2. 同義欄位、同一 business service API**
 
@@ -217,9 +218,9 @@ cd frontend
 
 | 文件 | 說明 |
 |------|------|
-| `spec/requirements.md` | User Stories + Acceptance Criteria（66 個 Requirements） |
+| `spec/requirements.md` | User Stories + Acceptance Criteria（67 個 Requirements） |
 | `spec/design.md` | 架構圖、ERD、API 端點、關鍵業務邏輯 |
-| `spec/tasks.md` | 任務索引（Task 1–228、264–267、269–292、297–309、311–316、318）＋ 尚未歸檔的 Task 201 起區段；Task 229–263、268、293–296 以各自 `spec/tasks/tNNN_*.md` 為準 |
+| `spec/tasks.md` | 任務索引（Task 1–228、264–267、269–292、297–309、311–318）＋ 尚未歸檔的 Task 201 起區段；Task 229–263、268、293–296 以各自 `spec/tasks/tNNN_*.md` 為準 |
 | `spec/tasks/README.md` | 自足任務檔規範（新任務寫這裡，不再追加 `tasks.md`） |
 | `spec/tasks/tNNN_*.md` | 自足任務檔（Task 201 之後的新任務） |
 | `spec/tasks/archive/` | Task 1–200 歷史，已凍結不再修改 |

@@ -83,6 +83,12 @@ com.steven.assets/
   - `GET /api/bff/gdp-twse/index-daily`：台股大盤／海外指數每日 OHLC ＋ MA5/20/60/240（`ma5` 為 Task 285 新增）
   - `POST /api/bff/gdp-twse/refresh-index-daily`：刷新指數日線
   - `GET /api/bff/gdp-twse/index-intraday`：指數當日分時
+- `PublicMarketIndexController`（Docker／自動化唯讀入口，Requirement 67；`@RequestMapping("/api/public/market-index")`）與 `GdpTwseBffController` 共用 `MarketIndexChartService`，不得形成第二套市場資料或均線算法：
+  - `GET /api/public/market-index?market=&range=`：免 OAuth、唯讀；`market ∈ {TWSE,DJI,SPX,IXIC,SOX,FTSE,DAX,KOSPI,N225}`（預設 `TWSE`），`range ∈ {d,1m,3m,6m,1y,2y,5y,10y}`（預設 `1y`）。回 immutable `MarketIndexChartDto.Response`，其中 `tradingDate` 為 `LocalDate`（JSON ISO `yyyy-MM-dd`）、`turnovers` 為 `List<BigDecimal>`（JSON number 或 null）；另包含正規化 market/range、中文 label、`mode=DAILY|INTRADAY`、固定對齊的 `labels/closes/ma5/ma20/ma60/ma240/volumes/turnovers`、成交量旗標、分時昨收／漲跌欄，以及完整 `supportedMarkets/supportedRanges` 自描述選項。
+  - `MarketIndexChartService` 承接現有 `GdpTwseBffController` 的指數日線抓取、`buildIndexDailyBody`、`movingAverage`、分時＋昨收聚合與 `previousCloseBefore`；既有兩支 authenticated page endpoint 改為薄委派，公開 controller 也只做參數／HTTP DTO 轉換。下游仍只有 `/api/twse-daily-index`、`/api/us-daily-index`、`/api/index-intraday`，Controller 不碰 Repository，BFF 不碰外部行情 API。搬移後同步訂正 `ExcelExportService` 與 `WatchStockTaiexIntradayTest` 對舊 Controller 方法的 Javadoc／註解引用；只改文件文字，不改 backend 行為。
+  - 日線範圍以交易日筆數 `1m=21`、`3m=63`、`6m=125`、`1y=250`、`2y=500`、`5y=1250`、`10y=2500` 裁切。先對完整 10 年收盤序列算四條 MA，再用同一起始 index 裁切所有陣列，確保短區間起點仍帶前置交易日算出的成熟均線。台股 `tradeValue` 在 BFF service 邊界以精確十進位字面轉成 `BigDecimal`：null 保留，整數／浮點 Number 與 numeric String 均不得經 `new BigDecimal(double)`；非法值拋 typed `MalformedMarketIndexPayloadException`。Public advice 將它固定映射為 HTTP 502 `ProblemDetail`，不得捏造 0、靜默丟值或降級為 200 空 public schema；既有 authenticated `getIndexDaily` 邊界只捕捉此 typed exception、記錄後回 HTTP 200 的完整空 legacy body，不得廣域吞其他程式錯誤。WebClient fail-soft 留在 `fetchDailyRows`／分時 fetch 的 transport/HTTP/decode stage，轉型與 shaping 在其後；非 typed mapping／程式錯誤必須傳播為 5xx，並以反例測試防止被誤吞或映射成 400／502。`range=d` 則以分時 `times` 作 labels，並把完整日線的最新非 null 四條 MA 展開為等長水平線；成交量兩陣列等長全 null、`hasVolume=false`。既有 authenticated legacy Map 的 key／JSON shape 不變；相容輸出邊界把 `LocalDate tradingDate` 轉回 ISO String。
+  - Public range 裁切與分時水平線屬 `MarketIndexChartService` 的 response shaping；既有 `GdpTwseView.vue` 的 `RANGE_TRADING_DAYS` 與水平線展開因本任務不改畫面而保留為相容殘留，不宣稱兩者已收斂為單一實作，也不得再新增第三份。BFF 契約測試以獨立期望 map 釘住 `21/63/125/250/500/1250/2500`，避免 server 與既有畫面漂移。
+  - `SecurityConfig` 僅新增 `pathMatchers(HttpMethod.GET, "/api/public/market-index").permitAll()`，不得用 `/**` 放寬；這是 CLAUDE.md／structure.md 明文具名且限縮的 Docker／自動化非頁面例外，前端 view 不得援引。現有 `/api/bff/gdp-twse/**` 與所有寫入／回補／匯出端點仍落既有 authenticated/admin 規則。BFF 已由 Compose 暴露 host `8080` 且位於 `asset-net`，不修改 `docker-compose.yml`：host 用 `localhost:8080`、容器用 `bff:8080`、frontend nginx 用 `localhost/api`。
 - 其他 settings/passthrough（每頁一支 Spring Cloud Gateway route 配置，rewrite `/api/bff/{page}/**` → `/api/{resource}/**`）：BankSettings、BrokerSettings、DepositTypeSettings、MarketTypeSettings、AssetClassSettings（`/api/bff/asset-class-settings/**`）、TransitFundTypeSettings、StockAlert（`/api/bff/stock-alert/**`；**Requirement 54 起另有 `StockAlertBffController` 與此 route 並存**——`GET/PUT /api/bff/stock-alert/export-setting`、`POST .../run-now`、`GET .../browse`、`GET .../browse-gdrive`，後兩者 passthrough 至既有唯一那支 `/api/export-schedule/browse{,-gdrive}`。萬用 route 會把這幾條錯誤 rewrite 成 `/api/stock-alerts/export-setting/...`，靠 WebFlux `RequestMappingHandlerMapping`（order 0）先於 Gateway `RoutePredicateHandlerMapping`（order 1）由 controller 接走；同一模式的既有先例為 `TradingRadarBffController` ＋ `TradingRadarBffRoutes`）、BackupRestore（`/api/bff/backup-restore/**`）、NotificationSettings（`/api/bff/notification-settings/recipients/**` → `/api/notification-recipients/**`）、PaymentAccountSettings（見「Payment Accounts / Categories」段落，Requirement 22）、UserManagement（`/api/bff/user-management/**`，見 Requirement 28「API 端點（新增）」）、TodayMarketAnalysisRecipients（`/api/bff/today-market-analysis/recipients/**` → `/api/notification-recipients/{id}/market-analysis`，見 Task 151）
 - `WatchStockBffRoutes`（WatchStockView 專屬，`/api/bff/watch-stock/**`）：純 Spring Cloud Gateway passthrough route，rewrite `/api/bff/watch-stock(/**)` → `/api/watch-stocks(/**)` 轉至 business-services。觀察清單已改為「`stock_alert` 衍生 view」，**衍生與 enrichment 一律在 business-services（`WatchStockController` / `WatchStockService`）完成，BFF 僅轉發不重算**：
   - `GET /api/bff/watch-stock` → `GET /api/watch-stocks`：business-services 由 `stock_alert` 群組去重衍生清單，對每筆 (stockCode, market) 補上 live 報價、技術指標、最近觸發資訊
@@ -1694,7 +1700,7 @@ GET    /api/bff/gdp-twse/index-intraday?market=TWSE   # 「當日」分時：回
   - **`volume`（成交量，股）— Task 288**：取自既有 Yahoo v8 chart 回應的 `indicators.quote[0].volume`（同一次呼叫即含，不新增外部來源）。nullable。⚠️ **各市場口徑不一致、不得跨指數比較**：實測 2026-08-02，`^SOX` 恆為 `0`（純計算型指數無成交量，前端據此隱藏整個子圖）、`^KS11` 回 275,700 量級（韓國實際成交股數為數億股，該欄顯非股數原值）
   - 美股四大指數（道瓊 DJI / 標普500 SPX / 那斯達克綜合 IXIC / 費城半導體 SOX）+ 海外主要指數（英國富時 FTSE / 德國 DAX / 韓國 KOSPI / 日經 N225）每日 OHLC，供 Requirement 18 日線圖「市場切換」。表名沿用 `us_index_daily_history`（語意已一般化為「海外指數日線」，欄位本以 `index_code` 通用化，新增市場零遷移）
   - 來源 Yahoo Finance v8 chart API（`^DJI`/`^GSPC`/`^IXIC`/`^SOX`/`^FTSE`/`^GDAXI`/`^KS11`/`^N225`，`range=10y&interval=1d`），ext-materials-service `MacroDataFetchClient.fetchUsIndexDaily(code)` 以 curl 子程序抓取（避 Yahoo Java fingerprint 封鎖）；timestamp→交易日依 Yahoo meta `exchangeTimezoneName` 轉當地時區（非寫死 NY，否則亞洲/歐洲指數日期回退一日）；`MacroHistoryService.refreshUsIndexDaily(code)` 經 `/internal/macro/us-index` proxy 後 upsert
-  - **與 `twse_index_daily_history` 分表**的理由：台股大盤為單一指數（無 code 欄）、且已與 Requirement 14 觀察清單 0000 報價/KD 與當年年末回填邏輯耦合，分表可完全不動既有台股流程；兩表由 `GdpTwseBffController` 以**同一套 MA 計算**服務（同義欄位同一來源），確保兩市場版面一致
+  - **與 `twse_index_daily_history` 分表**的理由：台股大盤為單一指數（無 code 欄）、且已與 Requirement 14 觀察清單 0000 報價/KD 與當年年末回填邏輯耦合，分表可完全不動既有台股流程；兩表由 `MarketIndexChartService` 以**同一套 MA 計算**服務（同義欄位同一來源），確保兩市場版面一致
   - Stooq CSV 為原評估來源但實測在部署環境被擋（連 `aapl.us` 都回通用錯誤頁），故改採 Yahoo；來源封裝於單一 fetch 方法，可一處替換
 - `foreign_stock_daily_history`   ((stock_code, trading_date) PK, close_point NUMERIC(18,4)) — **Task 185**（backend Liquibase `v1.55.0-foreign-stock-daily.sql`；ext-materials 以 JdbcTemplate 直寫，無 JPA entity）
   - 海外參考個股每日收盤：韓股三星電子 005930 / SK 海力士 000660，供公開資訊爬蟲組韓股快照（`kr-market`）算漲跌%（只需最新＋前一交易日收盤，故僅存 `close_point`；KRW 幣別可達百萬級，精度放寬 NUMERIC(18,4)）
@@ -3072,7 +3078,7 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
 
 ### 關鍵業務邏輯
 
-- **報酬率正規化（BFF）**：`from = today.minus(range)`、`to = today`。各標的抓 `{date, close}`（股票 `closePrice`／指數 `closePoint`）；建立所有標的區間內交易日的 union 排序軸（ISO 日期字串字典序＝時間序，比照 `GdpTwseBffController.previousCloseBefore`）；各 series `base = 區間內第一筆非空 close`，某日值 `= (該日或之前最近一筆 close / base − 1) × 100`（forward-fill），首資料日前留 null；`totalReturn = 最後一個非空報酬`、`asOfDate = 該最後非空日`。`base == null || base.signum()==0` → 整條 null（除零防呆）。
+- **報酬率正規化（BFF）**：`from = today.minus(range)`、`to = today`。各標的抓 `{date, close}`（股票 `closePrice`／指數 `closePoint`）；建立所有標的區間內交易日的 union 排序軸（ISO 日期字串字典序＝時間序，比照 `MarketIndexChartService.previousCloseBefore`）；各 series `base = 區間內第一筆非空 close`，某日值 `= (該日或之前最近一筆 close / base − 1) × 100`（forward-fill），首資料日前留 null；`totalReturn = 最後一個非空報酬`、`asOfDate = 該最後非空日`。`base == null || base.signum()==0` → 整條 null（除零防呆）。
 - **reactive fan-out（動態 N 標的）**：`Flux.fromIterable(targets).flatMap(t -> fetchCloses(t).timeout(8s).onErrorReturn(empty)...).collectList()`，再依輸入索引重排（flatMap 亂序），確保 series 順序穩定；單一標的失敗只讓該線消失。
 - **不呼叫 `/api/stock-alerts/lookup-name`**：該端點對未知 code 會打外部 API 並 upsert 寫 `stock` 主檔，屬寫副作用，不放進 GET 聚合；label 由前端用 my-stocks 清單（股票）＋固定中文常數（基準）自行組合。
 - **compare 不做 owner 過濾**：`stock_price_history` 與指數表為全域公開行情（非個資），任意 code 讀取不洩漏任何人持倉；下拉限「我的股票」僅為 UX。
@@ -4839,9 +4845,9 @@ Task 285 前為五欄、Task 286 前為六欄、Task 289 前為九欄）。四�
 填入 `volume`，`turnover` 固定回 `null`（`UsIndexDailyHistory` entity 本身就沒有成交金額欄位，Yahoo 無此資料）。
 
 **這不是 §3.2 鐵則第 4 條的「同義值重複實作」，不需要援引 MA5 那組具名例外。** 本頁圖表（BFF
-`GdpTwseBffController.buildIndexDailyBody`）對海外指數的 `turnovers` 也恆回全 `null` 陣列，
-但兩處都只是**單純賦值、無計算邏輯**（backend 端 `entity.getTradeValue()`；BFF 端 `GdpTwseBffController.java:204`
-的 `Object t = tw ? r.get("tradeValue") : null;`，海外指數直接以三元運算式賦 `null`——即使改成呼叫
+`MarketIndexChartService.buildIndexDailyBody`）對海外指數的 `turnovers` 也恆回全 `null` 陣列，
+但兩處都只是**單純賦值、無計算邏輯**（backend 端 `entity.getTradeValue()`；BFF 端
+`MarketIndexChartService.buildIndexDailyBody` 對台股取 `tradeValue` 並精確轉為 `BigDecimal`，海外指數直接賦 `null`——即使改成呼叫
 `r.get("tradeValue")`，因海外指數的 JSON 回應本來就不含該鍵，`Map.get` 對缺鍵一樣回 `null`，結果等價），
 數學上不存在「兩處算出不同值」的可能——如同開/高/低/收四個價格欄同樣是 backend 匯出（JPA repository 直讀）
 與 BFF 圖表（REST GET 轉發同一張表）兩處各自取值，卻從未被視為需要收斂的重複實作。§3.2 鐵則第 4 條與
@@ -4868,7 +4874,7 @@ MA5 那組例外要處理的是「兩處各自**計算**同一個衍生值、實
 
 ### 週線MA5：唯一的計算欄（Task 285 建立；Task 286 擴充為四條均線）
 
-> 標題沿用 Task 285 定案時的原文字面——`ExcelExportService`／`GdpTwseBffController` 等既有 javadoc
+> 標題沿用 Task 285 定案時的原文字面——`ExcelExportService`／`GdpTwseBffControllerMaTest` 等既有 javadoc
 > 與 `spec/steering/structure.md` §3.2 皆以「週線MA5：唯一的計算欄」為錨點文字交叉引用，
 > 改標題會讓那些引用全部失效。內容已擴充涵蓋全部四條均線。
 
@@ -4885,15 +4891,15 @@ MA5 那組例外要處理的是「兩處各自**計算**同一個衍生值、實
 `grep -ran "maAt" backend` 混淆兩種實作。）
 
 **與圖表 MA5 的同值保證（＋這是一筆有意識借下的債）。** 本頁圖表的四條均線一律由 BFF
-`GdpTwseBffController.movingAverage(closes, window)` 算出（BigDecimal 滾動加總、`divide(window, 2, HALF_UP)`），
+`MarketIndexChartService.movingAverage(closes, window)` 算出（BigDecimal 滾動加總、`divide(window, 2, HALF_UP)`），
 匯出端則在 business 的 `ExcelExportService` 重算。**這不是本專案第一次**——台股大盤的 MA 今天就已經有兩份
-實作、且都讀 `twse_index_daily_history`：BFF 的 `movingAverage`（BigDecimal）與
+實作、且都讀 `twse_index_daily_history`：BFF `MarketIndexChartService` 的 `movingAverage`（BigDecimal）與
 `TechnicalIndicatorService.taiexSimpleMa`（`double` 累加後 `setScale(2, HALF_UP)`，經 `computeAllForTaiex()`
 → `TradingRadarService` → `MarketSummary.weeklyMa/monthlyMa/…`）。本次是在這條既有裂縫上再加一道，
 而 t281 的交易雷達匯出走的是相反做法（「`週線MA5`（讀既有的 `weeklyMa`，不新增計算）」）。
 
 **必須寫清楚的是：這不是「無處可放」，是「範圍外」。** business 其實正是兩條流的**共同上游**
-（`GdpTwseBffController` 的 `index-daily` 本來就打 business 的 `/api/twse-daily-index`／`/api/us-daily-index`）。
+（現由 `MarketIndexChartService.fetchDailyRows` 供既有 `index-daily`／`index-intraday` flow 呼叫 business 的 `/api/twse-daily-index`／`/api/us-daily-index`）。
 business 另有逐日 MA5 的既有實作（`TechnicalIndicatorService.IndicatorPoint.ma5`，
 經 `GET /api/market-data/indicators/series` 提供）。
 
@@ -4913,8 +4919,8 @@ business 另有逐日 MA5 的既有實作（`TechnicalIndicatorService.Indicator
 1. **把 MA 塞進既有兩支 GET**（`/api/twse-daily-index`／`/api/us-daily-index`）：兩支目前**直接回 entity list**
    （`MacroHistoryController` 回 `List<TwseIndexDailyHistory>`／`List<UsIndexDailyHistory>`），要帶 MA 就得改回傳型別；
    且 MA 掛在 range query 上會**隨查詢區間變值**——`index-intraday` 用同一支端點只查 40 日 tail，
-   同一個 `ma240` 在兩個呼叫端會是兩種語意。（呼叫端本身不成問題：三處呼叫端
-   `GdpTwseBffController` ×2、`PerformanceComparisonBffController` ×1 皆以 `bodyToMono(LIST_MAP)` 解析，
+   同一個 `ma240` 在兩個呼叫端會是兩種語意。（呼叫端本身不成問題：三條呼叫 flow
+   `MarketIndexChartService.fetchDailyRows` 供日線／分時 ×2、`PerformanceComparisonBffController.fetchIndexRows` ×1 皆以 `bodyToMono(LIST_MAP)` 解析，
    加欄位對它們是 additive。）
 2. **新增一支 business 序列端點回 `{dates, closes, ma5, ma20, ma60, ma240}`、BFF 改為 relay**：
    這是單一實作最便宜的路線，不動任何既有端點契約。放棄的理由是**代價與收益不成比例**——
