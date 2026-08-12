@@ -8,9 +8,10 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * {@link GdpTwseBffController#buildIndexDailyBody(boolean, List)} 的成交量/成交金額欄位（Task 288）。
+ * {@link MarketIndexChartService#buildIndexDailyBody(boolean, List)} 的成交量/成交金額欄位（Task 288／317）。
  *
  * 純函式測試，不涉及 WebClient/Mono，風格比照 {@code ChartSeriesAlignerTest}。
  * 測試方法名以 e/e2/f/g 標註對應 spec 的驗證項目，方便追溯。
@@ -38,7 +39,7 @@ class GdpTwseBffControllerIndexDailyVolumeTest {
     }
 
     private static Map<String, Object> result(boolean tw, List<Map<String, Object>> rows) {
-        return GdpTwseBffController.buildIndexDailyBody(tw, rows);
+        return MarketIndexChartService.buildIndexDailyBody(tw, rows);
     }
 
     // ---------------------------------------------------------------------
@@ -92,6 +93,39 @@ class GdpTwseBffControllerIndexDailyVolumeTest {
         assertThat((Boolean) out.get("hasVolume")).isTrue();
     }
 
+    @Test
+    void tradeValue_acceptsSupportedNumericFormsWithoutBinaryTail() {
+        List<Map<String, Object>> rows = List.of(
+                twRow("2026-07-01", "100", 1000, 12),
+                twRow("2026-07-02", "101", 1000, 13L),
+                twRow("2026-07-03", "102", 1000, new BigDecimal("14.50")),
+                twRow("2026-07-04", "103", 1000, 0.1d),
+                twRow("2026-07-05", "104", 1000, 0.2f),
+                twRow("2026-07-06", "105", 1000, "15.75"),
+                twRow("2026-07-07", "106", 1000, null));
+
+        List<BigDecimal> turnovers = (List<BigDecimal>) result(true, rows).get("turnovers");
+
+        assertThat(turnovers).containsExactly(
+                new BigDecimal("12"),
+                new BigDecimal("13"),
+                new BigDecimal("14.50"),
+                new BigDecimal("0.1"),
+                new BigDecimal("0.2"),
+                new BigDecimal("15.75"),
+                null);
+        assertThat(turnovers.get(3).toPlainString()).isEqualTo("0.1");
+        assertThat(turnovers.get(4).toPlainString()).isEqualTo("0.2");
+    }
+
+    @Test
+    void malformedTradeValueThrowsTypedPayloadException() {
+        assertThatThrownBy(() -> result(true, List.of(
+                twRow("2026-07-01", "100", 1000, "not-a-number"))))
+                .isInstanceOf(MalformedMarketIndexPayloadException.class)
+                .hasMessageContaining("tradeValue", "not-a-number");
+    }
+
     // ---------------------------------------------------------------------
     // (e2) hasVolume must NOT be an OR across tradeVolume/tradeValue for TWSE
     // ---------------------------------------------------------------------
@@ -129,7 +163,7 @@ class GdpTwseBffControllerIndexDailyVolumeTest {
         Map<String, Object> out = result(false, rows);
 
         List<String> dates = (List<String>) out.get("dates");
-        List<Object> turnovers = (List<Object>) out.get("turnovers");
+        List<BigDecimal> turnovers = (List<BigDecimal>) out.get("turnovers");
 
         assertThat(turnovers).hasSize(dates.size());
         assertThat(turnovers).containsOnlyNulls();
@@ -153,7 +187,7 @@ class GdpTwseBffControllerIndexDailyVolumeTest {
         List<String> dates = (List<String>) out.get("dates");
         List<BigDecimal> closes = (List<BigDecimal>) out.get("closes");
         List<Object> volumes = (List<Object>) out.get("volumes");
-        List<Object> turnovers = (List<Object>) out.get("turnovers");
+        List<BigDecimal> turnovers = (List<BigDecimal>) out.get("turnovers");
 
         assertThat(dates).hasSize(4);
         assertThat(closes).hasSize(4);
@@ -164,7 +198,7 @@ class GdpTwseBffControllerIndexDailyVolumeTest {
         assertThat(dates.get(3)).isEqualTo("2026-07-05");
         assertThat(closes.get(3)).isEqualByComparingTo(new BigDecimal("104"));
         assertThat(volumes.get(3)).isEqualTo(1004);
-        assertThat(turnovers.get(3)).isEqualTo(10004);
+        assertThat(turnovers.get(3)).isEqualByComparingTo("10004");
     }
 
     // ---------------------------------------------------------------------
@@ -182,7 +216,7 @@ class GdpTwseBffControllerIndexDailyVolumeTest {
         List<String> dates = (List<String>) out.get("dates");
         List<BigDecimal> closes = (List<BigDecimal>) out.get("closes");
         List<Object> volumes = (List<Object>) out.get("volumes");
-        List<Object> turnovers = (List<Object>) out.get("turnovers");
+        List<BigDecimal> turnovers = (List<BigDecimal>) out.get("turnovers");
 
         assertThat(dates.get(0)).isEqualTo("2026-07-01");
         assertThat(closes.get(0)).isEqualByComparingTo(new BigDecimal("47018.99"));

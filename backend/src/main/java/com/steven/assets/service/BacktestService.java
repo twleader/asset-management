@@ -547,6 +547,39 @@ public class BacktestService {
             CalibrationSigmaProfile sigmaProfile
     ) {}
 
+    /** 一個 exact production key/fold 共用的 joint calendar、sigma 與選值。 */
+    private record JointFoldSelection(
+            RadarWalkForwardPlan.JointTrackFoldResolution resolution,
+            CalibrationSigmaProfile sigmaProfile,
+            RuleParameters selectedCandidate,
+            String status,
+            String reason
+    ) {
+        private JointFoldSelection {
+            status = status == null ? "UNAVAILABLE" : status;
+            reason = reason == null ? "" : reason;
+        }
+
+        boolean available() {
+            return resolution != null && resolution.available()
+                    && sigmaProfile != null && sigmaProfile.available()
+                    && selectedCandidate != null && "AVAILABLE".equals(status);
+        }
+    }
+
+    /** Registry decision 與其使用的 joint-fold evidence 必須由同一次建構產生。 */
+    private record V13RegistryBuild(
+            TradingRadarV13PromotionRegistry registry,
+            Map<TradingRadarV13PromotionRegistry.ProductionKey,
+                    Map<Integer, JointFoldSelection>> jointFoldSelections,
+            List<String> failures
+    ) {
+        private V13RegistryBuild {
+            jointFoldSelections = jointFoldSelections == null ? Map.of() : Map.copyOf(jointFoldSelections);
+            failures = failures == null ? List.of() : List.copyOf(failures);
+        }
+    }
+
     // ─────────────────────────── 對外入口 ───────────────────────────
 
     public BacktestDto.Response run(BacktestDto.Request request) {
@@ -795,6 +828,9 @@ public class BacktestService {
 
     private BacktestDto.V13Report buildV13Report(
             BacktestDto.Request request, List<Integer> legacyNormalizedHorizons) {
+        BacktestDto.UniverseMode universeMode = request.codes() == null || request.codes().isEmpty()
+                ? BacktestDto.UniverseMode.FULL_MARKET
+                : BacktestDto.UniverseMode.BOUNDED_DIAGNOSTIC;
         Set<String> markets = normalizeV13Markets(request.markets());
         List<Integer> horizons = normalizeV13Horizons(request.horizons(), legacyNormalizedHorizons);
         LocalDate from = parseV13Date(request.from(), "from");
@@ -870,7 +906,7 @@ public class BacktestService {
                             (left, right) -> left, LinkedHashMap::new));
             CalibrationSigmaProfile marketSigma = calibrateSigmaProfile(
                     Set.of(market), Map.of(market, codesByMarket.getOrDefault(market, List.of())),
-                    from, to, marketCalendars, ratio);
+                    from, to, marketCalendars, ratio, opportunities);
             sigmaProfilesByMarket.put(market, marketSigma);
             candidateGridsByMarket.put(market, v13CandidateGrid(marketSigma));
         }
@@ -915,38 +951,42 @@ public class BacktestService {
                     sigmaProfilesByMarket.getOrDefault(key.market(), unavailableSigma)));
         }
 
-        // 只將 selected candidate 的 untouched holdout/fold evidence 送進 immutable gate。
-        analyses.values().stream()
-                .filter(V13GroupAnalysis::foldSigmaProfileUnavailable)
-                .map(analysis -> v13GroupLabel(analysis.key()) + ":FOLD_SIGMA_PROFILE_UNAVAILABLE")
-                .forEach(failures::add);
-        TradingRadarV13PromotionRegistry registry = buildV13Registry(
-                analyses, candidateGridsByMarket, sigmaProfilesByMarket);
+        // 只將 selected candidate 的 untouched holdout/fold evidence 送進 immutable gate；
+        // production fold 的可用性由 exact-key joint calendar/sigma 決定，不能再用單一
+        // horizon/diagnostic stratum 的 fold profile 取代。
+        V13RegistryBuild registryBuild = buildV13Evidence(
+                analyses, candidateGridsByMarket, sigmaProfilesByMarket, universeMode);
+        failures.addAll(registryBuild.failures());
+        TradingRadarV13PromotionRegistry registry = registryBuild.registry();
         List<BacktestDto.MarketHorizonExecution> reports = analyses.values().stream()
-                .map(analysis -> toV13GroupReport(analysis, registry))
+                .map(analysis -> toV13GroupReport(
+                        analysis, registry, registryBuild.jointFoldSelections(), universeMode))
                 .sorted(Comparator.comparing(BacktestDto.MarketHorizonExecution::market)
                         .thenComparingInt(BacktestDto.MarketHorizonExecution::horizon)
                         .thenComparing(report -> Objects.toString(report.instrumentKind(), ""))
                         .thenComparing(report -> Objects.toString(report.productionProfile(), "")))
                 .toList();
         Map<String, String> selectedCandidates = new LinkedHashMap<>();
-        analyses.values().stream()
-                .filter(analysis -> analysis.selectedCandidate() != null)
-                .forEach(analysis -> selectedCandidates.put(
-                    v13GroupLabel(analysis.key()),
-                    analysis.selectedCandidate().parameterSetId()));
         Map<String, BacktestDto.RuleParameterSnapshot> selectedParameterSnapshots = new LinkedHashMap<>();
-        analyses.values().stream()
-                .filter(analysis -> analysis.selectedCandidate() != null)
-                .forEach(analysis -> selectedParameterSnapshots.put(
-                        v13GroupLabel(analysis.key()),
-                        parameterSnapshot(analysis.selectedCandidate(), analysis.sigmaProfile())));
+        if (universeMode == BacktestDto.UniverseMode.FULL_MARKET) {
+            analyses.values().stream()
+                    .filter(analysis -> analysis.selectedCandidate() != null)
+                    .forEach(analysis -> selectedCandidates.put(
+                            v13GroupLabel(analysis.key()),
+                            analysis.selectedCandidate().parameterSetId()));
+            analyses.values().stream()
+                    .filter(analysis -> analysis.selectedCandidate() != null)
+                    .forEach(analysis -> selectedParameterSnapshots.put(
+                            v13GroupLabel(analysis.key()),
+                            parameterSnapshot(analysis.selectedCandidate(), analysis.sigmaProfile())));
+        }
         List<String> gridIds = candidateGridsByMarket.values().stream()
                 .flatMap(List::stream).map(RuleParameters::parameterSetId).distinct().toList();
 
         return new BacktestDto.V13Report(
                 TradingRadarRuleEngine.RULE_VERSION,
                 false,
+                universeMode,
                 ratio,
                 requestedFolds,
                 includeSensitivity,
@@ -962,12 +1002,15 @@ public class BacktestService {
                                 .map(entry -> entry.getKey() + ":" + entry.getValue().note())
                                 .toList().toString(),
                         "每個 walk-forward fold 都在 trainTo 重新建立 adjusted completed-close sigma profile/grid；profile 無法由 train-only evidence 建立時，標記 FOLD_SIGMA_PROFILE_UNAVAILABLE 並 fail-closed。",
-                        "registry promotion 僅為本次 report 的 immutable evidence；production runtime 仍明確維持 TW_RULES_V12。",
-                        "report registry promoted key 數=" + registry.promotedParameters().size()
-                                + "；未通過或缺證據的 key 維持 V12 fallback。"),
+                        universeMode == BacktestDto.UniverseMode.FULL_MARKET
+                                ? "registry promotion 僅為本次 report 的 immutable evidence；production runtime 仍明確維持 TW_RULES_V12。"
+                                : "BOUNDED_DIAGNOSTIC 僅保留逐列診斷；在建立 production registry 前 fail closed。",
+                        "report registry promoted key 數="
+                                + (registry == null ? 0 : registry.promotedParameters().size())
+                                + "；未通過、bounded 或缺證據的 key 維持 V12 fallback。"),
                 List.copyOf(gridIds),
                 Map.copyOf(selectedCandidates),
-                registry.promotedParameters().size(),
+                registry == null ? 0 : registry.promotedParameters().size(),
                 Map.copyOf(selectedParameterSnapshots));
     }
 
@@ -1202,10 +1245,11 @@ public class BacktestService {
                         execution, baseline, freeInput, heldInput, context,
                         candidateGrid, Map.copyOf(candidateContexts)));
                 boolean enoughForward = !execution.excludedInsufficientForward();
+                boolean costEffective = !execution.excludedCostOutsideEffectiveRange();
                 opportunities.add(new RadarWalkForwardPlan.TradableOpportunity(
                         market, horizon, code, signalDate,
-                        enoughForward && !execution.excludedMissingEntryOpen(),
-                        enoughForward && !execution.excludedMissingExitOpen()));
+                        enoughForward && costEffective && !execution.excludedMissingEntryOpen(),
+                        enoughForward && costEffective && !execution.excludedMissingExitOpen()));
             }
         }
     }
@@ -1526,13 +1570,6 @@ public class BacktestService {
         Map<Integer, RuleParameters> foldSelections = new LinkedHashMap<>();
         Map<Integer, CalibrationSigmaProfile> foldSigmaProfiles = new LinkedHashMap<>();
         boolean foldSigmaProfileUnavailable = false;
-        // The fold train cutoff is not a license to reach before/after this report group's
-        // requested global calendar.  Keep the same request-boundary semantics as the initial
-        // calibration pass while still allowing each fold to use all dates through its train end.
-        LocalDate foldScopeFrom = split.globalDates().stream()
-                .filter(Objects::nonNull).min(LocalDate::compareTo).orElse(null);
-        LocalDate foldScopeTo = split.globalDates().stream()
-                .filter(Objects::nonNull).max(LocalDate::compareTo).orElse(null);
         for (RadarWalkForwardPlan.Fold fold : folds) {
             List<V13Attempt> train = attempts.stream()
                     .filter(attempt -> fold.trainDates().contains(attempt.execution().signalDate()))
@@ -1542,7 +1579,7 @@ public class BacktestService {
             List<String> foldCodes = train.stream().map(V13Attempt::code)
                     .filter(Objects::nonNull).distinct().sorted().toList();
             CalibrationSigmaProfile foldSigma = calibrateSigmaProfileForFold(
-                    key.market(), foldCodes, foldScopeFrom, foldScopeTo, fold.trainDates());
+                    key.market(), foldCodes, train, fold.trainDates());
             foldSigmaProfiles.put(fold.index(), foldSigma);
             if (!foldSigma.available()) {
                 // A fold with no train-side volatility evidence cannot safely select a
@@ -1567,7 +1604,10 @@ public class BacktestService {
 
     private BacktestDto.MarketHorizonExecution toV13GroupReport(
             V13GroupAnalysis analysis,
-            TradingRadarV13PromotionRegistry registry) {
+            TradingRadarV13PromotionRegistry registry,
+            Map<TradingRadarV13PromotionRegistry.ProductionKey,
+                    Map<Integer, JointFoldSelection>> jointFoldSelections,
+            BacktestDto.UniverseMode universeMode) {
         V13GroupKey key = analysis.key();
         List<V13Attempt> attempts = analysis.attempts();
         RadarWalkForwardPlan.ChronologicalSplit split = analysis.split();
@@ -1588,18 +1628,27 @@ public class BacktestService {
                 .filter(attempt -> attempt.execution().excludedMissingExitOpen()).count();
         int insufficientForward = (int) attempts.stream()
                 .filter(attempt -> attempt.execution().excludedInsufficientForward()).count();
+        int costOutsideEffectiveRange = (int) attempts.stream()
+                .filter(attempt -> attempt.execution().excludedCostOutsideEffectiveRange()).count();
         int sensitivityN = (int) attempts.stream()
                 .filter(attempt -> attempt.execution().closeSensitivity().isPresent()).count();
 
         TradingRadarV13PromotionRegistry.HorizonDecision horizonDecision = null;
         TradingRadarV13PromotionRegistry.PromotionDecision promotionDecision = null;
         TradingRadarV13PromotionRegistry.ProductionKey productionKey = null;
-        if (analysis.track() != null && analysis.instrumentKind() != null && analysis.productionProfile() != null) {
+        if (analysis.track() != null && analysis.instrumentKind() != null
+                && analysis.productionProfile() != null) {
             productionKey = new TradingRadarV13PromotionRegistry.ProductionKey(
                     key.market(), analysis.instrumentKind(), analysis.productionProfile(), analysis.track());
+        }
+        if (universeMode == BacktestDto.UniverseMode.FULL_MARKET
+                && registry != null && productionKey != null) {
             promotionDecision = registry.decision(productionKey);
             horizonDecision = promotionDecision.horizons().get(key.horizon());
         }
+        Map<Integer, JointFoldSelection> productionJointFolds = productionKey == null
+                || jointFoldSelections == null
+                ? Map.of() : jointFoldSelections.getOrDefault(productionKey, Map.of());
         boolean productionKeyPromoted = horizonDecision != null && horizonDecision.promoted();
         String productionCandidateId = productionKeyPromoted && productionKey != null
                 ? registry.resolve(productionKey).parameterSetId() : null;
@@ -1609,7 +1658,11 @@ public class BacktestService {
         String status;
         String reason;
         String promotionEvidenceScope;
-        if (!split.sufficientForCutoff()) {
+        if (universeMode == BacktestDto.UniverseMode.BOUNDED_DIAGNOSTIC) {
+            status = "INSUFFICIENT_DIAGNOSTIC_ONLY";
+            reason = "INSUFFICIENT_DIAGNOSTIC_ONLY";
+            promotionEvidenceScope = "NONE";
+        } else if (!split.sufficientForCutoff()) {
             status = "INSUFFICIENT_RETAIN_V12";
             reason = "INSUFFICIENT_GLOBAL_TRADABLE_DATES";
             promotionEvidenceScope = "NONE";
@@ -1643,9 +1696,16 @@ public class BacktestService {
             String candidateId = analysis.selectedCandidate().parameterSetId();
             V13CandidateStats holdoutStats = candidateStats(holdout, candidateId, key.horizon());
             List<TradingRadarV13PromotionRegistry.FoldMetrics> foldMetrics = folds.stream()
-                    .map(fold -> toFoldMetrics(fold, primary,
-                            analysis.foldSelectedCandidates().get(fold.index()), key.horizon(),
-                            analysis.foldSigmaProfiles().get(fold.index()))).toList();
+                    .map(fold -> {
+                        JointFoldSelection joint = productionJointFolds.get(fold.index());
+                        RuleParameters selected = analysis.track() == null
+                                ? analysis.foldSelectedCandidates().get(fold.index())
+                                : joint == null ? null : joint.selectedCandidate();
+                        CalibrationSigmaProfile sigma = analysis.track() == null
+                                ? analysis.foldSigmaProfiles().get(fold.index())
+                                : joint == null ? null : joint.sigmaProfile();
+                        return toFoldMetrics(fold, primary, selected, key.horizon(), sigma);
+                    }).toList();
             BigDecimal practical = firstRoundTripCost(primary);
             if (practical != null) practical = practical.max(new BigDecimal("0.10"));
             int validFolds = (int) foldMetrics.stream().filter(this::validFoldSample).count();
@@ -1664,16 +1724,25 @@ public class BacktestService {
         return new BacktestDto.MarketHorizonExecution(
                 key.market(), key.horizon(), split.cutoff() == null ? null : split.cutoff().toString(),
                 split.globalDates().size(), split.calibrationDates().size(), split.holdoutDates().size(),
-                folds.stream().map(fold -> foldDto(fold,
-                        analysis.foldSelectedCandidates().get(fold.index()), attempts, key.horizon(),
-                        analysis.foldSigmaProfiles().get(fold.index()))).toList(),
+                folds.stream().map(fold -> {
+                    JointFoldSelection joint = productionJointFolds.get(fold.index());
+                    RuleParameters selected = analysis.track() == null
+                            ? analysis.foldSelectedCandidates().get(fold.index())
+                            : joint == null ? null : joint.selectedCandidate();
+                    CalibrationSigmaProfile sigma = analysis.track() == null
+                            ? analysis.foldSigmaProfiles().get(fold.index())
+                            : joint == null ? null : joint.sigmaProfile();
+                    return foldDto(fold, selected, attempts, key.horizon(), sigma, joint,
+                            analysis.track() != null);
+                }).toList(),
                 splitStat(calibration,
                         analysis.selectedCandidate() == null ? null
                                 : analysis.selectedCandidate().parameterSetId(), key.horizon()),
                 splitStat(holdout,
                         analysis.selectedCandidate() == null ? null
                                 : analysis.selectedCandidate().parameterSetId(), key.horizon()),
-                missingEntry, missingExit, insufficientForward, sensitivityN, firstExecution(primary),
+                missingEntry, missingExit, insufficientForward, costOutsideEffectiveRange,
+                sensitivityN, firstExecution(primary),
                 status, reason, analysis.selectedCandidate() == null ? null
                         : analysis.selectedCandidate().parameterSetId(),
                 analysis.candidateCalibration(), promotionEvidence,
@@ -1684,12 +1753,20 @@ public class BacktestService {
                 purgeEmbargoEvidence(primary, split, folds));
     }
 
-    private TradingRadarV13PromotionRegistry buildV13Registry(
+    private V13RegistryBuild buildV13Evidence(
             Map<V13GroupKey, V13GroupAnalysis> analyses,
             Map<String, List<RuleParameters>> candidateGridsByMarket,
-            Map<String, CalibrationSigmaProfile> sigmaProfilesByMarket) {
+            Map<String, CalibrationSigmaProfile> sigmaProfilesByMarket,
+            BacktestDto.UniverseMode universeMode) {
+        boolean registryAllowed = universeMode == BacktestDto.UniverseMode.FULL_MARKET;
+        // Bounded requests intentionally never allocate a promotion candidate map and never
+        // call TradingRadarV13PromotionRegistry.build(). Joint-fold diagnostics remain visible.
         Map<TradingRadarV13PromotionRegistry.ProductionKey,
-                TradingRadarV13PromotionRegistry.CandidatePromotion> candidates = new LinkedHashMap<>();
+                TradingRadarV13PromotionRegistry.CandidatePromotion> candidates = registryAllowed
+                ? new LinkedHashMap<>() : null;
+        Map<TradingRadarV13PromotionRegistry.ProductionKey,
+                Map<Integer, JointFoldSelection>> jointFoldSelections = new LinkedHashMap<>();
+        List<String> jointFailures = new ArrayList<>();
         Set<String> markets = analyses.keySet().stream().map(V13GroupKey::market)
                 .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
         for (String market : markets) {
@@ -1734,6 +1811,25 @@ public class BacktestService {
                     List<V13GroupAnalysis> groups = required.stream()
                             .map(byHorizon::get).toList();
                     if (groups.stream().anyMatch(Objects::isNull)) continue;
+                    RadarBacktestExecution.InstrumentKind kind = groups.get(0).instrumentKind();
+                    String profile = groups.get(0).productionProfile();
+                    TradingRadarV13PromotionRegistry.ProductionKey key =
+                            new TradingRadarV13PromotionRegistry.ProductionKey(
+                                    market, kind, profile, track);
+                    Map<Integer, JointFoldSelection> jointFolds = buildJointFoldSelections(
+                            groups, required);
+                    jointFoldSelections.put(key, jointFolds);
+                    jointFolds.forEach((foldIndex, selection) -> {
+                        if (selection == null || !selection.available()) {
+                            String reason = selection == null || selection.reason().isBlank()
+                                    ? "JOINT_FOLD_UNAVAILABLE" : selection.reason();
+                            jointFailures.add(market + "/" + kind + "/" + profile + "/"
+                                    + track + "/fold=" + foldIndex + ":" + reason);
+                        }
+                    });
+                    if (!registryAllowed) {
+                        continue;
+                    }
                     /*
                      * Production selection is track-scoped, not horizon-scoped.  The
                      * diagnostic analyses above still select a parameter independently so
@@ -1750,13 +1846,8 @@ public class BacktestService {
                     RuleParameters jointSelected = selectJointV13Candidate(
                             groups, required, productionGrid);
                     if (jointSelected == null) continue;
-                    String candidateId = jointSelected.parameterSetId();
-                    RadarBacktestExecution.InstrumentKind kind = groups.get(0).instrumentKind();
-                    String profile = groups.get(0).productionProfile();
                     RuleParameters parameters = jointSelected;
                     Map<Integer, TradingRadarV13PromotionRegistry.HorizonEvidence> evidence = new LinkedHashMap<>();
-                    Map<Integer, RuleParameters> jointFoldSelections = selectJointFoldCandidates(
-                            groups, required);
                     for (V13GroupAnalysis group : groups) {
                         List<V13Attempt> primary = group.attempts().stream()
                                 .filter(attempt -> attempt.execution().primary().isPresent()).toList();
@@ -1768,21 +1859,24 @@ public class BacktestService {
                                 hs.intersectionN(), hs.intersectionCodes(), hs.pairedMedianDelta(),
                                 pooledDelta(hs), downsideImprovement(hs), firstRoundTripCost(primary));
                         List<TradingRadarV13PromotionRegistry.FoldMetrics> fm = group.folds().stream()
-                                .map(fold -> toFoldMetrics(fold, primary,
-                                        jointFoldSelections.get(fold.index()), group.key().horizon(),
-                                        group.foldSigmaProfiles().get(fold.index()))).toList();
+                                .map(fold -> {
+                                    JointFoldSelection joint = jointFolds.get(fold.index());
+                                    return toFoldMetrics(fold, primary,
+                                            joint == null ? null : joint.selectedCandidate(),
+                                            group.key().horizon(),
+                                            joint == null ? null : joint.sigmaProfile());
+                                }).toList();
                         evidence.put(group.key().horizon(),
                                 new TradingRadarV13PromotionRegistry.HorizonEvidence(
                                         group.key().horizon(), hm, fm));
                     }
-                    TradingRadarV13PromotionRegistry.ProductionKey key =
-                            new TradingRadarV13PromotionRegistry.ProductionKey(
-                                    market, kind, profile, track);
                     candidates.put(key, new TradingRadarV13PromotionRegistry.CandidatePromotion(parameters, evidence));
                 }
             }
         }
-        return TradingRadarV13PromotionRegistry.build(candidates);
+        return new V13RegistryBuild(
+                registryAllowed ? TradingRadarV13PromotionRegistry.build(candidates) : null,
+                Map.copyOf(jointFoldSelections), List.copyOf(jointFailures));
     }
 
     /**
@@ -1838,40 +1932,102 @@ public class BacktestService {
         return TradingRadarCalibrationSelector.select(scores, RuleParameters.v12Default()).orElse(null);
     }
 
-    /** Fold-local counterpart of {@link #selectJointV13Candidate}: one candidate per track/fold. */
-    private Map<Integer, RuleParameters> selectJointFoldCandidates(
+    /**
+     * Fold-local counterpart of {@link #selectJointV13Candidate}: one immutable joint calendar,
+     * one sigma profile/grid and one candidate per exact production key/fold.  Per-horizon
+     * diagnostic sigma profiles are deliberately not accepted as input.
+     */
+    private Map<Integer, JointFoldSelection> buildJointFoldSelections(
             List<V13GroupAnalysis> groups, List<Integer> requiredHorizons) {
         if (groups == null || groups.isEmpty() || requiredHorizons == null
                 || groups.size() != requiredHorizons.size()) return Map.of();
-        V13GroupAnalysis seed = groups.get(0);
-        if (seed == null || seed.folds() == null || seed.folds().isEmpty()) return Map.of();
-        Map<Integer, RuleParameters> selected = new LinkedHashMap<>();
-        for (RadarWalkForwardPlan.Fold fold : seed.folds()) {
-            if (fold == null) continue;
-            CalibrationSigmaProfile sigma = seed.foldSigmaProfiles().get(fold.index());
-            if (sigma == null || !sigma.available()) continue;
+        Map<Integer, V13GroupAnalysis> byHorizon = groups.stream()
+                .filter(Objects::nonNull)
+                .collect(Collectors.toMap(group -> group.key().horizon(), group -> group,
+                        (left, right) -> left, LinkedHashMap::new));
+        if (requiredHorizons.stream().anyMatch(horizon -> !byHorizon.containsKey(horizon))) {
+            return Map.of();
+        }
+        List<Integer> foldIndexes = groups.stream()
+                .flatMap(group -> group.folds().stream())
+                .map(RadarWalkForwardPlan.Fold::index).distinct().sorted().toList();
+        List<String> exactKeyCodes = groups.stream()
+                .flatMap(group -> group.attempts().stream())
+                .map(V13Attempt::code).filter(Objects::nonNull).distinct().sorted().toList();
+        String market = groups.get(0).key().market();
+        Map<Integer, JointFoldSelection> selected = new LinkedHashMap<>();
+        for (Integer foldIndex : foldIndexes) {
+            Map<Integer, RadarWalkForwardPlan.Fold> foldsByHorizon = new LinkedHashMap<>();
+            for (Integer horizon : requiredHorizons) {
+                RadarWalkForwardPlan.Fold horizonFold = byHorizon.get(horizon).folds().stream()
+                        .filter(fold -> fold.index() == foldIndex).findFirst().orElse(null);
+                if (horizonFold != null) foldsByHorizon.put(horizon, horizonFold);
+            }
+            RadarWalkForwardPlan.JointTrackFoldResolution resolution =
+                    RadarWalkForwardPlan.jointTrackFold(requiredHorizons, foldsByHorizon);
+            if (!resolution.available()) {
+                selected.put(foldIndex, new JointFoldSelection(
+                        resolution, CalibrationSigmaProfile.unavailable(resolution.reason()),
+                        null, "UNAVAILABLE", resolution.reason()));
+                continue;
+            }
+            RadarWalkForwardPlan.JointTrackFold jointFold = resolution.fold();
+            Set<LocalDate> jointDateSet = Set.copyOf(jointFold.jointTrainDates());
+            Map<String, Map<Integer, Set<LocalDate>>> primaryDatesByCodeAndHorizon =
+                    new LinkedHashMap<>();
+            for (Integer horizon : jointFold.requiredHorizons()) {
+                for (V13Attempt attempt : byHorizon.get(horizon).attempts()) {
+                    if (attempt == null || attempt.code() == null
+                            || attempt.execution().primary().isEmpty()
+                            || !jointDateSet.contains(attempt.execution().signalDate())) continue;
+                    primaryDatesByCodeAndHorizon
+                            .computeIfAbsent(attempt.code(), ignored -> new LinkedHashMap<>())
+                            .computeIfAbsent(horizon, ignored -> new LinkedHashSet<>())
+                            .add(attempt.execution().signalDate());
+                }
+            }
+            Map<String, Set<LocalDate>> jointEligibleDatesByCode = new LinkedHashMap<>();
+            for (String code : exactKeyCodes) {
+                Map<Integer, Set<LocalDate>> byRequiredHorizon =
+                        primaryDatesByCodeAndHorizon.getOrDefault(code, Map.of());
+                Set<LocalDate> intersection = null;
+                for (Integer horizon : jointFold.requiredHorizons()) {
+                    Set<LocalDate> dates = new LinkedHashSet<>(
+                            byRequiredHorizon.getOrDefault(horizon, Set.of()));
+                    if (intersection == null) intersection = dates;
+                    else intersection.retainAll(dates);
+                }
+                jointEligibleDatesByCode.put(code,
+                        intersection == null ? Set.of() : Set.copyOf(intersection));
+            }
+            CalibrationSigmaProfile sigma = calibrateSigmaProfileForFold(
+                    market, exactKeyCodes, jointEligibleDatesByCode, jointFold.jointTrainDates());
+            if (!sigma.available() || sigma.asOfTo() == null
+                    || sigma.asOfTo().isAfter(jointFold.jointTrainTo())) {
+                selected.put(foldIndex, new JointFoldSelection(
+                        resolution, sigma, null, "UNAVAILABLE",
+                        "JOINT_FOLD_SIGMA_PROFILE_UNAVAILABLE"));
+                continue;
+            }
             List<RuleParameters> foldGrid = v13CandidateGrid(sigma).stream()
                     .filter(candidate -> RuleParameters.V13_VERSION.equals(candidate.ruleVersion()))
                     .toList();
             List<TradingRadarCalibrationSelector.CalibrationScore> scores = new ArrayList<>();
+            Set<LocalDate> jointTrainDates = jointDateSet;
             for (RuleParameters candidate : foldGrid) {
                 List<V13CandidateStats> horizonStats = new ArrayList<>();
                 boolean complete = true;
-                for (int i = 0; i < requiredHorizons.size(); i++) {
-                    V13GroupAnalysis group = groups.get(i);
-                    if (group == null || group.foldSigmaProfiles().get(fold.index()) == null
-                            || !group.foldSigmaProfiles().get(fold.index()).available()) {
-                        complete = false;
-                        break;
-                    }
+                for (Integer horizon : jointFold.requiredHorizons()) {
+                    V13GroupAnalysis group = byHorizon.get(horizon);
+                    RadarWalkForwardPlan.Fold horizonFold = jointFold.horizonFolds().get(horizon);
                     List<V13Attempt> train = group.attempts().stream()
-                            .filter(attempt -> fold.trainDates().contains(
+                            .filter(attempt -> jointTrainDates.contains(
                                     attempt.execution().signalDate()))
                             .filter(attempt -> attempt.execution().primary().isPresent())
                             .filter(attempt -> eligibleBeforeBoundary(
-                                    attempt, fold.evaluationFrom())).toList();
+                                    attempt, horizonFold.evaluationFrom())).toList();
                     V13CandidateStats stats = jointCandidateStats(train, candidate,
-                            requiredHorizons.get(i), group.foldSigmaProfiles().get(fold.index()));
+                            horizon, sigma);
                     if (stats.intersectionN() <= 0) {
                         complete = false;
                         break;
@@ -1883,8 +2039,12 @@ public class BacktestService {
                         candidate, horizonStats);
                 if (score != null) scores.add(score);
             }
-            TradingRadarCalibrationSelector.select(scores, RuleParameters.v12Default())
-                    .ifPresent(candidate -> selected.put(fold.index(), candidate));
+            RuleParameters candidate = TradingRadarCalibrationSelector
+                    .select(scores, RuleParameters.v12Default()).orElse(null);
+            selected.put(foldIndex, candidate == null
+                    ? new JointFoldSelection(resolution, sigma, null, "UNAVAILABLE",
+                            "JOINT_FOLD_INTERSECTION_UNAVAILABLE")
+                    : new JointFoldSelection(resolution, sigma, candidate, "AVAILABLE", ""));
         }
         return Map.copyOf(selected);
     }
@@ -2333,7 +2493,7 @@ public class BacktestService {
                                 RuleParameters.CandidateWeight.SHORT_MARKET_FEATURE, new BigDecimal("0.01"),
                                 RuleParameters.CandidateWeight.MEDIUM_MARKET_FEATURE, new BigDecimal("0.01")),
                         RuleParameters.BondRateCandidate.v12Fallback()));
-        grid.add(RuleParameters.v13DisabledCandidate("V13_TREASURY_BOND_Y5_Y5_Y10_SHAPE25", treasury, treasury,
+        grid.add(RuleParameters.v13DisabledCandidate("V13_TREASURY_BOND_M3_Y5_Y10_SHAPE25", treasury, treasury,
                         new BigDecimal("0.70"), new BigDecimal("25"), Map.of(
                                 RuleParameters.CandidateWeight.SHORT_TREASURY, new BigDecimal("0.05"),
                                 RuleParameters.CandidateWeight.MEDIUM_TREASURY, new BigDecimal("0.05"),
@@ -2487,21 +2647,70 @@ public class BacktestService {
             LocalDate from,
             LocalDate to,
             Map<RadarWalkForwardPlan.MarketHorizon, List<LocalDate>> calendars,
-            BigDecimal calibrationRatio) {
+            BigDecimal calibrationRatio,
+            List<RadarWalkForwardPlan.TradableOpportunity> opportunities) {
         if (calendars == null || calendars.isEmpty()) {
             return CalibrationSigmaProfile.unavailable("no_global_calendar");
         }
         List<LocalDate> cutoffs = new ArrayList<>();
+        Set<LocalDate> calibrationDates = new LinkedHashSet<>();
         for (List<LocalDate> dates : calendars.values()) {
             RadarWalkForwardPlan.ChronologicalSplit split =
                     RadarWalkForwardPlan.chronologicalSplit(dates, calibrationRatio);
-            if (split.sufficientForCutoff() && split.cutoff() != null) cutoffs.add(split.cutoff());
+            if (split.sufficientForCutoff() && split.cutoff() != null) {
+                cutoffs.add(split.cutoff());
+                calibrationDates.addAll(split.calibrationDates());
+            }
         }
         if (cutoffs.isEmpty()) {
             return CalibrationSigmaProfile.unavailable("no_sufficient_calibration_cutoff");
         }
         LocalDate cutoff = cutoffs.stream().min(LocalDate::compareTo).orElse(null);
-        return calibrateSigmaProfileAtCutoff(markets, codesByMarket, from, to, cutoff);
+        calibrationDates.removeIf(date -> date == null || date.isAfter(cutoff));
+        Map<String, Map<Integer, Set<LocalDate>>> datesByCodeAndHorizon = new LinkedHashMap<>();
+        for (RadarWalkForwardPlan.TradableOpportunity opportunity
+                : opportunities == null ? List.<RadarWalkForwardPlan.TradableOpportunity>of()
+                : opportunities) {
+            if (opportunity == null || !markets.contains(opportunity.market())
+                    || !opportunity.validEntryOpen() || !opportunity.validExitOpen()
+                    || !calibrationDates.contains(opportunity.signalDate())) continue;
+            datesByCodeAndHorizon.computeIfAbsent(
+                            sigmaEligibilityKey(opportunity.market(), opportunity.code()),
+                            ignored -> new LinkedHashMap<>())
+                    .computeIfAbsent(opportunity.horizon(), ignored -> new LinkedHashSet<>())
+                    .add(opportunity.signalDate());
+        }
+        Map<String, Set<LocalDate>> eligibleDatesByCode = new LinkedHashMap<>();
+        for (String market : markets) {
+            List<Integer> requiredHorizons = (opportunities == null
+                    ? List.<RadarWalkForwardPlan.TradableOpportunity>of() : opportunities).stream()
+                    .filter(Objects::nonNull)
+                    .filter(opportunity -> market.equals(opportunity.market()))
+                    .map(RadarWalkForwardPlan.TradableOpportunity::horizon)
+                    .distinct().sorted().toList();
+            if (requiredHorizons.isEmpty()) {
+                requiredHorizons = calendars.keySet().stream()
+                        .filter(key -> market.equals(key.market()))
+                        .map(RadarWalkForwardPlan.MarketHorizon::horizon)
+                        .distinct().sorted().toList();
+            }
+            for (String code : codesByMarket.getOrDefault(market, List.of())) {
+                String eligibilityKey = sigmaEligibilityKey(market, code);
+                Map<Integer, Set<LocalDate>> byHorizon = datesByCodeAndHorizon
+                        .getOrDefault(eligibilityKey, Map.of());
+                Set<LocalDate> intersection = null;
+                for (Integer horizon : requiredHorizons) {
+                    Set<LocalDate> dates = new LinkedHashSet<>(
+                            byHorizon.getOrDefault(horizon, Set.of()));
+                    if (intersection == null) intersection = dates;
+                    else intersection.retainAll(dates);
+                }
+                eligibleDatesByCode.put(eligibilityKey,
+                        intersection == null ? Set.of() : Set.copyOf(intersection));
+            }
+        }
+        return calibrateSigmaProfileAtCutoff(
+                markets, codesByMarket, from, to, cutoff, calibrationDates, eligibleDatesByCode);
     }
 
     /**
@@ -2512,8 +2721,25 @@ public class BacktestService {
     private CalibrationSigmaProfile calibrateSigmaProfileForFold(
             String market,
             List<String> codes,
-            LocalDate from,
-            LocalDate to,
+            List<V13Attempt> eligibleAttempts,
+            List<LocalDate> trainDates) {
+        Map<String, Set<LocalDate>> eligibleDatesByCode = new LinkedHashMap<>();
+        Set<LocalDate> allowedDates = trainDates == null
+                ? Set.of() : new LinkedHashSet<>(trainDates);
+        for (V13Attempt attempt : eligibleAttempts == null ? List.<V13Attempt>of() : eligibleAttempts) {
+            if (attempt == null || attempt.code() == null
+                    || attempt.execution().primary().isEmpty()
+                    || !allowedDates.contains(attempt.execution().signalDate())) continue;
+            eligibleDatesByCode.computeIfAbsent(attempt.code(), ignored -> new LinkedHashSet<>())
+                    .add(attempt.execution().signalDate());
+        }
+        return calibrateSigmaProfileForFold(market, codes, eligibleDatesByCode, trainDates);
+    }
+
+    private CalibrationSigmaProfile calibrateSigmaProfileForFold(
+            String market,
+            List<String> codes,
+            Map<String, Set<LocalDate>> eligibleDatesByCode,
             List<LocalDate> trainDates) {
         if (market == null || trainDates == null || trainDates.isEmpty()) {
             return CalibrationSigmaProfile.unavailable("fold_train_dates_missing");
@@ -2521,9 +2747,16 @@ public class BacktestService {
         LocalDate cutoff = trainDates.stream().filter(Objects::nonNull)
                 .max(LocalDate::compareTo).orElse(null);
         if (cutoff == null) return CalibrationSigmaProfile.unavailable("fold_train_cutoff_missing");
+        Set<LocalDate> allowedDates = new LinkedHashSet<>(trainDates);
+        Map<String, Set<LocalDate>> qualifiedDatesByCode = new LinkedHashMap<>();
+        if (eligibleDatesByCode != null) {
+            eligibleDatesByCode.forEach((code, dates) -> qualifiedDatesByCode.put(
+                    sigmaEligibilityKey(market, code),
+                    dates == null ? Set.of() : Set.copyOf(dates)));
+        }
         return calibrateSigmaProfileAtCutoff(
                 Set.of(market), Map.of(market, codes == null ? List.of() : codes),
-                from, to, cutoff, new LinkedHashSet<>(trainDates));
+                null, null, cutoff, allowedDates, qualifiedDatesByCode);
     }
 
     private CalibrationSigmaProfile calibrateSigmaProfileAtCutoff(
@@ -2548,6 +2781,23 @@ public class BacktestService {
             LocalDate to,
             LocalDate cutoff,
             Set<LocalDate> allowedDates) {
+        return calibrateSigmaProfileAtCutoff(
+                markets, codesByMarket, from, to, cutoff, allowedDates, null);
+    }
+
+    /**
+     * Optional per-code date set closes the cost/missing-open boundary: a date made globally
+     * tradable by another code or instrument must not re-admit this code's excluded execution
+     * into sigma calibration.
+     */
+    private CalibrationSigmaProfile calibrateSigmaProfileAtCutoff(
+            Set<String> markets,
+            Map<String, List<String>> codesByMarket,
+            LocalDate from,
+            LocalDate to,
+            LocalDate cutoff,
+            Set<LocalDate> allowedDates,
+            Map<String, Set<LocalDate>> eligibleDatesByCode) {
         if (cutoff == null) return CalibrationSigmaProfile.unavailable("calibration_cutoff_missing");
         List<BigDecimal> values = new ArrayList<>();
         List<BigDecimal> normalizedAbsValues = new ArrayList<>();
@@ -2583,6 +2833,9 @@ public class BacktestService {
                     // provider rows must not be able to truncate another date/code group.
                     if (signalDate.isAfter(cutoff)) continue;
                     if (allowedDates != null && !allowedDates.contains(signalDate)) continue;
+                    if (eligibleDatesByCode != null
+                            && !eligibleDatesByCode.getOrDefault(
+                                    sigmaEligibilityKey(market, code), Set.of()).contains(signalDate)) continue;
                     List<StockPriceHistory> windowDesc = new ArrayList<>(rows.subList(
                             Math.max(0, t - WINDOW + 1), t + 1));
                     Collections.reverse(windowDesc);
@@ -2622,6 +2875,10 @@ public class BacktestService {
                 values.size(), asOfFrom, asOfTo, cutoff,
                 "RadarInputAssembler.adjusted_completed_close_return_stddev60_ratio",
                 saturation, upper, lower);
+    }
+
+    private String sigmaEligibilityKey(String market, String code) {
+        return Objects.toString(market, "") + "\u0000" + Objects.toString(code, "");
     }
 
     private BigDecimal boundedMultiple(BigDecimal value) {
@@ -3222,7 +3479,12 @@ public class BacktestService {
             RuleParameters selectedCandidate,
             List<V13Attempt> attempts,
             int horizon,
-            CalibrationSigmaProfile sigmaProfile) {
+            CalibrationSigmaProfile sigmaProfile,
+            JointFoldSelection jointSelection,
+            boolean jointRequired) {
+        RadarWalkForwardPlan.JointTrackFold jointFold = jointSelection == null
+                || jointSelection.resolution() == null
+                ? null : jointSelection.resolution().fold();
         return new BacktestDto.WalkForwardFold(
                 fold.index(),
                 fold.trainDates().get(0).toString(),
@@ -3231,8 +3493,13 @@ public class BacktestService {
                 fold.evaluationFrom().toString(),
                 fold.evaluationTo().toString(),
                 fold.evaluationDates().size(),
+                jointFold == null ? 0 : jointFold.jointTrainDates().size(),
+                jointFold == null ? null : jointFold.jointTrainFrom(),
+                jointFold == null ? null : jointFold.jointTrainTo(),
+                jointFold == null ? List.of() : jointFold.requiredHorizons(),
                 selectedCandidate == null ? null : selectedCandidate.parameterSetId(),
-                foldExecutionEvidence(fold, attempts, selectedCandidate, horizon, sigmaProfile));
+                foldExecutionEvidence(fold, attempts, selectedCandidate, horizon, sigmaProfile,
+                        jointSelection, jointRequired));
     }
 
     private BacktestDto.FoldExecutionEvidence foldExecutionEvidence(
@@ -3240,55 +3507,77 @@ public class BacktestService {
             List<V13Attempt> attempts,
             RuleParameters selectedCandidate,
             int horizon,
-            CalibrationSigmaProfile sigmaProfile) {
+            CalibrationSigmaProfile sigmaProfile,
+            JointFoldSelection jointSelection,
+            boolean jointRequired) {
+        RadarWalkForwardPlan.JointTrackFold jointFold = jointSelection == null
+                || jointSelection.resolution() == null
+                ? null : jointSelection.resolution().fold();
         String sigmaStatus;
         String sigmaCutoff = null;
         String sigmaSource = null;
         if (sigmaProfile == null || !sigmaProfile.available()) {
-            sigmaStatus = "FOLD_SIGMA_PROFILE_UNAVAILABLE";
+            sigmaStatus = jointRequired
+                    ? "JOINT_FOLD_SIGMA_PROFILE_UNAVAILABLE"
+                    : "FOLD_SIGMA_PROFILE_UNAVAILABLE";
             sigmaSource = sigmaProfile == null ? "null_profile" : sigmaProfile.source();
         } else {
             sigmaCutoff = sigmaProfile.calibrationCutoff() == null
                     ? null : sigmaProfile.calibrationCutoff().toString();
             sigmaSource = sigmaProfile.source();
-            sigmaStatus = sigmaProfile.calibrationCutoff() != null
-                    && fold.trainDates().get(fold.trainDates().size() - 1)
-                    .isBefore(sigmaProfile.calibrationCutoff())
-                    ? "FOLD_SIGMA_PROFILE_UNAVAILABLE" : "FOLD_SIGMA_PROFILE_ASOF_TRAIN";
+            LocalDate expectedCutoff = jointFold == null
+                    ? fold.trainDates().get(fold.trainDates().size() - 1)
+                    : jointFold.jointTrainTo();
+            sigmaStatus = sigmaProfile.calibrationCutoff() == null
+                    || !sigmaProfile.calibrationCutoff().equals(expectedCutoff)
+                    || sigmaProfile.asOfTo() == null
+                    || sigmaProfile.asOfTo().isAfter(expectedCutoff)
+                    ? (jointRequired ? "JOINT_FOLD_SIGMA_PROFILE_UNAVAILABLE"
+                            : "FOLD_SIGMA_PROFILE_UNAVAILABLE")
+                    : (jointRequired ? "JOINT_FOLD_SIGMA_PROFILE_ASOF_TRAIN"
+                            : "FOLD_SIGMA_PROFILE_ASOF_TRAIN");
         }
         List<V13Attempt> block = (attempts == null ? List.<V13Attempt>of() : attempts).stream()
                 .filter(attempt -> fold.evaluationDates().contains(attempt.execution().signalDate()))
                 .filter(attempt -> attempt.execution().primary().isPresent())
                 .toList();
+        Set<LocalDate> eligibleTrainDates = jointRequired
+                ? jointFold == null ? Set.of() : Set.copyOf(jointFold.jointTrainDates())
+                : Set.copyOf(fold.trainDates());
         List<V13Attempt> purgedTrain = (attempts == null ? List.<V13Attempt>of() : attempts).stream()
-                .filter(attempt -> fold.trainDates().contains(attempt.execution().signalDate()))
+                .filter(attempt -> eligibleTrainDates.contains(attempt.execution().signalDate()))
                 .filter(attempt -> attempt.execution().primary().isPresent())
                 .filter(attempt -> !eligibleBeforeBoundary(attempt, fold.evaluationFrom()))
                 .toList();
         Set<String> purgedCodes = purgedTrain.stream().map(V13Attempt::code)
                 .filter(Objects::nonNull).collect(Collectors.toCollection(LinkedHashSet::new));
         String selectedId = selectedCandidate == null ? null : selectedCandidate.parameterSetId();
-        BacktestDto.SplitExecutionStat split = sigmaStatus.equals("FOLD_SIGMA_PROFILE_UNAVAILABLE")
+        boolean sigmaUnavailable = sigmaStatus.endsWith("SIGMA_PROFILE_UNAVAILABLE");
+        boolean jointUnavailable = jointRequired
+                && (jointSelection == null || !jointSelection.available());
+        BacktestDto.SplitExecutionStat split = sigmaUnavailable || jointUnavailable
                 ? splitStat(block, (String) null, horizon)
                 : splitStat(block, selectedCandidate, horizon);
         String purgeReason = purgedTrain.isEmpty() ? null
                 : "PURGED_TRAIN_EXIT_OVERLAP=" + purgedTrain.size();
-        String reason = sigmaStatus.equals("FOLD_SIGMA_PROFILE_UNAVAILABLE")
-                ? "FOLD_SIGMA_PROFILE_UNAVAILABLE"
-                : split.reason();
+        String reason = sigmaUnavailable ? sigmaStatus
+                : jointUnavailable && jointSelection != null && !jointSelection.reason().isBlank()
+                ? jointSelection.reason()
+                : jointUnavailable ? "JOINT_FOLD_UNAVAILABLE" : split.reason();
         if (purgeReason != null) reason = reason == null || reason.isBlank()
                 ? purgeReason : reason + ";" + purgeReason;
         List<BacktestDto.FoldNormalizedBiasProvenance> normalizedBiasRows =
                 foldNormalizedBiasRows(fold, block, selectedCandidate, horizon, sigmaProfile);
         return new BacktestDto.FoldExecutionEvidence(
                 sigmaStatus, sigmaCutoff, sigmaSource,
-                split.status(), reason, sigmaStatus.equals("FOLD_SIGMA_PROFILE_UNAVAILABLE")
+                jointUnavailable ? "UNAVAILABLE" : split.status(), reason,
+                sigmaUnavailable || jointUnavailable
                         ? null : split.selectedCandidateParameterSetId(),
                 split.candidateCoverageN(), split.candidateCoverageCodes(),
                 split.baselineCoverageN(), split.baselineCoverageCodes(),
                 split.intersectionN(), split.intersectionCodes(),
                 split.candidate(), split.baseline(), split.delta(),
-                sigmaStatus.equals("FOLD_SIGMA_PROFILE_UNAVAILABLE")
+                sigmaUnavailable || jointUnavailable
                         ? null : parameterSnapshot(selectedCandidate, sigmaProfile),
                 normalizedBiasRows, purgedTrain.size(), purgedCodes.size(),
                 fold.evaluationFrom().toString());
@@ -3967,6 +4256,7 @@ public class BacktestService {
               .append("v13_metadata,key,value\n")
               .append("v13_metadata,productionRuleVersion,").append(csvCell(r.v13().productionRuleVersion())).append('\n')
               .append("v13_metadata,productionPromoted,").append(r.v13().productionPromoted()).append('\n')
+              .append("v13_metadata,universeMode,").append(r.v13().universeMode()).append('\n')
               .append("v13_metadata,calibrationRatio,").append(csvNum(r.v13().calibrationRatio())).append('\n')
               .append("v13_metadata,walkForwardFolds,").append(r.v13().walkForwardFolds()).append('\n')
               .append("v13_metadata,closeFallbackSensitivityIncluded,")
@@ -3978,7 +4268,7 @@ public class BacktestService {
             sb.append('\n')
               .append("v13_market,horizon,cutoff,globalDateCount,calibrationDateCount,holdoutDateCount,")
               .append("calibrationN,holdoutN,missingEntryOpen,missingExitOpen,insufficientForward,")
-              .append("closeSensitivityN,promotionStatus,rejectionReason,instrumentKind,productionProfile,")
+              .append("excludedCostOutsideEffectiveRange,closeSensitivityN,promotionStatus,rejectionReason,instrumentKind,productionProfile,")
               .append("assetClass,stockStyle,bondTerm,confidenceDecile,selectedCandidateParameterSetId,calibrationCodeCount,calibrationGrossMeanPct,")
               .append("calibrationNetMeanPct,calibrationNetMedianPct,calibrationNetWinRatePct,calibrationNetDownsideRiskPct,")
               .append("calibrationNetP5Pct,calibrationNetP25Pct,calibrationNetP75Pct,calibrationNetP95Pct,")
@@ -3997,6 +4287,7 @@ public class BacktestService {
                   .append(execution.excludedMissingEntryOpen()).append(',')
                   .append(execution.excludedMissingExitOpen()).append(',')
                   .append(execution.excludedInsufficientForward()).append(',')
+                  .append(execution.excludedCostOutsideEffectiveRange()).append(',')
                   .append(execution.closeSensitivityN()).append(',')
                   .append(csvCell(execution.promotionStatus())).append(',')
                   .append(csvCell(execution.rejectionReason())).append(',')
@@ -4051,11 +4342,11 @@ public class BacktestService {
             }
             sb.append('\n')
               .append("v13_fold,market,horizon,fold,instrumentKind,productionProfile,assetClass,stockStyle,bondTerm,confidenceDecile,promotionEvidenceScope,trainFrom,trainTo,trainDateCount,evaluationFrom,evaluationTo,")
-              .append("evaluationDateCount,selectedCandidateParameterSetId,sigmaProfileStatus,sigmaProfileCutoff,sigmaProfileSource,evidenceStatus,evidenceReason,evidenceSelectedCandidateParameterSetId,")
+              .append("evaluationDateCount,jointTrainDateCount,jointTrainFrom,jointTrainTo,jointRequiredHorizons,selectedCandidateParameterSetId,sigmaProfileStatus,sigmaProfileCutoff,sigmaProfileSource,evidenceStatus,evidenceReason,evidenceSelectedCandidateParameterSetId,")
               .append("candidateCoverageN,candidateCoverageCodes,baselineCoverageN,baselineCoverageCodes,intersectionN,intersectionCodes,")
               .append("candidateN,candidateCodeCount,candidateGrossMeanPct,candidateGrossMedianPct,candidateGrossWinRatePct,candidateGrossDownsideRiskPct,candidateGrossP5Pct,candidateGrossP25Pct,candidateGrossP75Pct,candidateGrossP95Pct,candidateNetMeanPct,candidateNetMedianPct,candidateNetWinRatePct,candidateNetDownsideRiskPct,candidateNetP5Pct,candidateNetP25Pct,candidateNetP75Pct,candidateNetP95Pct,candidateCostImpactPct,")
               .append("baselineN,baselineCodeCount,baselineGrossMeanPct,baselineGrossMedianPct,baselineGrossWinRatePct,baselineGrossDownsideRiskPct,baselineGrossP5Pct,baselineGrossP25Pct,baselineGrossP75Pct,baselineGrossP95Pct,baselineNetMeanPct,baselineNetMedianPct,baselineNetWinRatePct,baselineNetDownsideRiskPct,baselineNetP5Pct,baselineNetP25Pct,baselineNetP75Pct,baselineNetP95Pct,baselineCostImpactPct,")
-              .append("deltaGrossMeanPct,deltaGrossMedianPct,deltaGrossWinRatePp,deltaGrossDownsideRiskPp,deltaGrossP5Pct,deltaGrossP25Pct,deltaGrossP75Pct,deltaGrossP95Pct,deltaNetMeanPct,deltaNetMedianPct,deltaNetWinRatePp,deltaNetDownsideRiskPp,deltaNetP5Pct,deltaNetP25Pct,deltaNetP75Pct,deltaNetP95Pct,deltaCostImpactPct\n");
+              .append("deltaGrossMeanPct,deltaGrossMedianPct,deltaGrossWinRatePp,deltaGrossDownsideRiskPp,deltaGrossP5Pct,deltaGrossP25Pct,deltaGrossP75Pct,deltaGrossP95Pct,deltaNetMeanPct,deltaNetMedianPct,deltaNetWinRatePp,deltaNetDownsideRiskPp,deltaNetP5Pct,deltaNetP25Pct,deltaNetP75Pct,deltaNetP95Pct,deltaCostImpactPct,purgedTrainN,purgedTrainCodes,purgeBoundary\n");
             for (BacktestDto.MarketHorizonExecution execution : r.v13().marketHorizons()) {
                 for (BacktestDto.WalkForwardFold fold : execution.folds()) {
                     sb.append("v13_fold,").append(csvCell(execution.market())).append(',').append(execution.horizon()).append(',')
@@ -4065,6 +4356,13 @@ public class BacktestService {
                       .append(csvCell(fold.trainTo())).append(',').append(fold.trainDateCount()).append(',')
                       .append(csvCell(fold.evaluationFrom())).append(',').append(csvCell(fold.evaluationTo())).append(',')
                       .append(fold.evaluationDateCount()).append(',')
+                      .append(fold.jointTrainDateCount()).append(',')
+                      .append(csvCell(fold.jointTrainFrom() == null
+                              ? null : fold.jointTrainFrom().toString())).append(',')
+                      .append(csvCell(fold.jointTrainTo() == null
+                              ? null : fold.jointTrainTo().toString())).append(',')
+                      .append(csvCell(fold.jointRequiredHorizons().stream()
+                              .map(String::valueOf).collect(Collectors.joining(";")))).append(',')
                       .append(csvCell(fold.selectedCandidateParameterSetId()));
                     appendFoldExecutionEvidenceCsv(sb, fold.executionEvidence());
                 }
@@ -4304,7 +4602,7 @@ public class BacktestService {
             StringBuilder sb, BacktestDto.FoldExecutionEvidence evidence) {
         List<String> fields = new ArrayList<>();
         if (evidence == null) {
-            fields.addAll(Collections.nCopies(67, null));
+            fields.addAll(Collections.nCopies(70, null));
         } else {
             fields.add(evidence.sigmaProfileStatus());
             fields.add(evidence.sigmaProfileCutoff());
@@ -4321,6 +4619,9 @@ public class BacktestService {
             appendDistributionFields(fields, evidence.candidate());
             appendDistributionFields(fields, evidence.baseline());
             appendDeltaFields(fields, evidence.delta());
+            fields.add(Integer.toString(evidence.purgedTrainN()));
+            fields.add(Integer.toString(evidence.purgedTrainCodes()));
+            fields.add(evidence.purgeBoundary());
         }
         sb.append(',').append(fields.stream().map(this::csvCell).collect(java.util.stream.Collectors.joining(",")))
           .append('\n');

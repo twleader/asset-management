@@ -78,6 +78,10 @@ class TradingRadarExportServiceTest {
             Sheet idx = wb.getSheet("快照索引");
             assertThat(idx).isNotNull();
             assertThat(idx.getRow(0).getCell(0).getStringCellValue()).contains("缺漏 1");
+            assertThat(idx.getRow(1).getCell(2).getStringCellValue()).isEqualTo("動作政策版本");
+            assertThat(idx.getRow(2).getCell(2).getStringCellValue())
+                    .as("舊快照缺欄必須留空，不得從 ruleVersion 推導")
+                    .isEmpty();
             // 個股決策：表頭 1 列 + 資料 3 列（2+1 檔）
             Sheet stock = wb.getSheet("個股決策");
             assertThat(stock.getLastRowNum()).isEqualTo(3);

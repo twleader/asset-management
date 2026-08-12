@@ -20,6 +20,7 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -57,7 +58,8 @@ class TradingRadarDualFormatTest {
         when(store.range(1L, 0L, 1L)).thenReturn(
                 new TradingRadarSnapshotStore.SnapshotRange(List.of(snapshotNode()), 2, 1));
         Workbook actual = GoldenWorkbooks.read(service.exportForOwner(1L, 0L, 1L));
-        assertSameMapped(GoldenWorkbooks.golden("radar"), actual, "快照索引", c -> c);
+        assertSameMapped(GoldenWorkbooks.golden("radar"), actual, "快照索引",
+                TradingRadarDualFormatTest::mapPreActionPolicyIndex);
         assertThat(actual.getSheet("大盤總覽")).isNotNull();
         assertThat(actual.getSheet("個股決策")).isNotNull();
         assertThat(actual.getSheet("台美公開資訊")).isNotNull();
@@ -69,7 +71,8 @@ class TradingRadarDualFormatTest {
         when(store.range(2L, 0L, 1L)).thenReturn(
                 new TradingRadarSnapshotStore.SnapshotRange(List.of(), 0, 0));
         Workbook actual = GoldenWorkbooks.read(service.exportForOwner(2L, 0L, 1L));
-        assertSameMapped(GoldenWorkbooks.golden("radar_empty"), actual, "快照索引", c -> c);
+        assertSameMapped(GoldenWorkbooks.golden("radar_empty"), actual, "快照索引",
+                TradingRadarDualFormatTest::mapPreActionPolicyIndex);
         assertThat(actual.getSheet("大盤總覽").getRow(0)).isNotNull();
         assertThat(actual.getSheet("個股決策").getRow(0)).isNotNull();
         assertThat(actual.getSheet("台美公開資訊").getRow(0)).isNotNull();
@@ -233,7 +236,10 @@ class TradingRadarDualFormatTest {
             "利率證據狀態", "利率證據來源", "利率缺漏原因",
             "利率批次ID", "利率批次完整", "利率Tenor", "利率值%", "利率曲線日",
             "利率Provider", "利率可得時間", "利率可得基礎", "利率抓取時間",
-            "利率落後日數", "利率時效說明", "利率來源Manifest", "資產分類完整", "底層幣別完整");
+            "利率落後日數", "利率時效說明", "利率來源Manifest", "資產分類完整", "底層幣別完整",
+            "PE適用狀態", "PE Provider", "PE來源網址", "PE可得時間", "PE資料日期", "PE缺漏原因",
+            "PB適用狀態", "PB Provider", "PB來源網址", "PB可得時間", "PB資料日期", "PB缺漏原因",
+            "殖利率適用狀態", "殖利率 Provider", "殖利率來源網址", "殖利率可得時間", "殖利率資料日期", "殖利率缺漏原因");
 
     private static List<String> headerRow(Sheet sheet) {
         List<String> out = new ArrayList<>();
@@ -285,6 +291,11 @@ class TradingRadarDualFormatTest {
             "利率Provider", "利率可得時間", "利率可得基礎", "利率抓取時間",
             "利率落後日數", "利率時效說明", "利率來源Manifest", "資產分類完整", "底層幣別完整");
 
+    private static final List<String> VALUATION_COMPONENT_HEADERS_EXPECTED = List.of(
+            "PE適用狀態", "PE Provider", "PE來源網址", "PE可得時間", "PE資料日期", "PE缺漏原因",
+            "PB適用狀態", "PB Provider", "PB來源網址", "PB可得時間", "PB資料日期", "PB缺漏原因",
+            "殖利率適用狀態", "殖利率 Provider", "殖利率來源網址", "殖利率可得時間", "殖利率資料日期", "殖利率缺漏原因");
+
     @Test
     @DisplayName("兩張分頁的表頭逐字等於預期的 V11 欄位清單")
     void 表頭逐字與欄數() throws Exception {
@@ -295,17 +306,105 @@ class TradingRadarDualFormatTest {
         assertThat(headerRow(wb.getSheet("大盤總覽")))
                 .as("大盤總覽 44 欄").containsExactlyElementsOf(MARKET_HEADERS_V11);
         assertThat(headerRow(wb.getSheet("個股決策")))
-                .as("個股決策 152 欄").containsExactlyElementsOf(STOCK_HEADERS_V11);
-        assertThat(STOCK_HEADERS_V11.subList(STOCK_HEADERS_V11.size() - 12 - DETAIL_HEADERS_EXPECTED.size(),
-                STOCK_HEADERS_V11.size() - DETAIL_HEADERS_EXPECTED.size()))
+                .as("個股決策 172 欄").containsExactlyElementsOf(STOCK_HEADERS_V11);
+        int valuationStart = STOCK_HEADERS_V11.size() - VALUATION_COMPONENT_HEADERS_EXPECTED.size();
+        int detailStart = valuationStart - DETAIL_HEADERS_EXPECTED.size();
+        int evidenceStart = detailStart - 12;
+        assertThat(STOCK_HEADERS_V11.subList(evidenceStart, detailStart))
                 .containsExactly(
                         "短期證據信心", "中期證據信心", "短期下檔風險", "中期下檔風險",
                         "短期風險覆蓋", "中期風險覆蓋", "中期候選動作", "短期候選動作",
                         "證據閘門原因", "下一配息日", "配息證據狀態", "配息已知時間");
-        assertThat(STOCK_HEADERS_V11.subList(STOCK_HEADERS_V11.size() - DETAIL_HEADERS_EXPECTED.size(),
-                STOCK_HEADERS_V11.size())).containsExactlyElementsOf(DETAIL_HEADERS_EXPECTED);
+        assertThat(STOCK_HEADERS_V11.subList(detailStart, valuationStart))
+                .containsExactlyElementsOf(DETAIL_HEADERS_EXPECTED);
+        assertThat(STOCK_HEADERS_V11.subList(valuationStart, STOCK_HEADERS_V11.size()))
+                .containsExactlyElementsOf(VALUATION_COMPONENT_HEADERS_EXPECTED);
+        assertThat(new HashSet<>(STOCK_HEADERS_V11)).hasSameSizeAs(STOCK_HEADERS_V11);
         assertThat(wb.getSheet("快照索引").getRow(1).getLastCellNum())
-                .as("快照索引一欄都不動").isEqualTo((short) 8);
+                .as("快照索引新增動作政策版本 metadata").isEqualTo((short) 9);
+        assertThat(wb.getSheet("快照索引").getRow(1).getCell(2).getStringCellValue())
+                .isEqualTo("動作政策版本");
+        assertThat(wb.getSheet("快照索引").getRow(2).getCell(2).getStringCellValue())
+                .isEqualTo("EVIDENCE_GATE_V1");
+    }
+
+    @Test
+    @DisplayName("Task 315：18 個逐分量欄位在同一 ExportDoc 中保持 header／format／row 對齊並雙格式同值")
+    void 估值逐分量雙格式與欄數鎖步() throws Exception {
+        when(store.range(15L, 0L, 1L)).thenReturn(
+                new TradingRadarSnapshotStore.SnapshotRange(
+                        List.of(snapshotNodeWithValuationProvenance()), 1, 0));
+
+        ExportDoc doc = service.radarDoc(15L, 0L, 1L);
+        ExportDoc.Sheet stockDoc = doc.sheets().stream()
+                .filter(sheet -> "個股決策".equals(sheet.name())).findFirst().orElseThrow();
+        ExportDoc.Table table = stockDoc.blocks().stream()
+                .filter(ExportDoc.Table.class::isInstance).map(ExportDoc.Table.class::cast)
+                .findFirst().orElseThrow();
+        assertThat(table.headers()).hasSize(172);
+        assertThat(table.columnFormats()).hasSameSizeAs(table.headers());
+        assertThat(table.rows()).allSatisfy(row -> assertThat(row).hasSameSizeAs(table.headers()));
+        assertThat(table.headers().subList(table.headers().size() - 18, table.headers().size()))
+                .containsExactlyElementsOf(VALUATION_COMPONENT_HEADERS_EXPECTED);
+        assertThat(new HashSet<>(table.headers())).hasSameSizeAs(table.headers());
+        assertThat(table.columnFormats().subList(table.columnFormats().size() - 18,
+                table.columnFormats().size())).containsExactly(
+                        ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.LIST_LINES,
+                        ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT,
+                        ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.LIST_LINES,
+                        ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT,
+                        ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.LIST_LINES,
+                        ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT);
+
+        JsonNode jsonRow = mapper.readTree(jsonRenderer.render(doc))
+                .at("/sheets/2/tables/0/rows").get(0);
+        assertThat(jsonRow.get("PE適用狀態").asText()).isEqualTo("AVAILABLE");
+        assertThat(jsonRow.get("PE Provider").asText()).isEqualTo("TWSE");
+        assertThat(jsonRow.get("PE來源網址")).containsExactly(
+                mapper.getNodeFactory().textNode("https://example.test/pe-1"),
+                mapper.getNodeFactory().textNode("https://example.test/pe-2"));
+        assertThat(jsonRow.get("PB適用狀態").asText()).isEqualTo("STALE");
+        assertThat(jsonRow.get("PB Provider").asText()).isEqualTo("WANTGOO");
+        assertThat(jsonRow.get("PB缺漏原因").asText()).isEqualTo("PB observation 已過期");
+        assertThat(jsonRow.get("殖利率適用狀態").asText()).isEqualTo("MISSING");
+        assertThat(jsonRow.get("殖利率 Provider").asText()).isEqualTo("FINMIND");
+        assertThat(jsonRow.get("殖利率缺漏原因").asText()).isEqualTo("殖利率歷史不足 250 筆");
+
+        Workbook workbook = GoldenWorkbooks.read(new ExcelDocRenderer().render(doc));
+        Sheet sheet = workbook.getSheet("個股決策");
+        assertThat(sheet.getRow(0).getLastCellNum()).isEqualTo((short) 172);
+        assertThat(sheet.getRow(1).getLastCellNum()).isEqualTo((short) 172);
+        assertThat(sheet.getRow(1).getCell(STOCK_HEADERS_V11.indexOf("PE來源網址"))
+                .getStringCellValue()).isEqualTo("https://example.test/pe-1\nhttps://example.test/pe-2");
+        assertThat(sheet.getRow(1).getCell(STOCK_HEADERS_V11.indexOf("PB資料日期"))
+                .getStringCellValue()).isEqualTo("2026-08-06");
+    }
+
+    @Test
+    @DisplayName("Task 315：VALUATION 整組不適用仍在 JSON／Excel 輸出三個具名狀態")
+    void 估值整組不適用仍輸出三個具名狀態() throws Exception {
+        when(store.range(16L, 0L, 1L)).thenReturn(
+                new TradingRadarSnapshotStore.SnapshotRange(
+                        List.of(snapshotNodeWithNotApplicableValuation()), 1, 0));
+
+        ExportDoc doc = service.radarDoc(16L, 0L, 1L);
+        JsonNode jsonRow = mapper.readTree(jsonRenderer.render(doc))
+                .at("/sheets/2/tables/0/rows").get(0);
+        assertThat(jsonRow.get("PE適用狀態").asText()).isEqualTo("NOT_APPLICABLE");
+        assertThat(jsonRow.get("PB適用狀態").asText()).isEqualTo("NOT_APPLICABLE");
+        assertThat(jsonRow.get("殖利率適用狀態").asText()).isEqualTo("NOT_APPLICABLE");
+        assertThat(jsonRow.get("PE Provider").isNull()).isTrue();
+        assertThat(jsonRow.get("PB Provider").isNull()).isTrue();
+        assertThat(jsonRow.get("殖利率 Provider").isNull()).isTrue();
+
+        Sheet sheet = GoldenWorkbooks.read(new ExcelDocRenderer().render(doc)).getSheet("個股決策");
+        Row row = sheet.getRow(1);
+        assertThat(row.getCell(STOCK_HEADERS_V11.indexOf("PE適用狀態")).getStringCellValue())
+                .isEqualTo("NOT_APPLICABLE");
+        assertThat(row.getCell(STOCK_HEADERS_V11.indexOf("PB適用狀態")).getStringCellValue())
+                .isEqualTo("NOT_APPLICABLE");
+        assertThat(row.getCell(STOCK_HEADERS_V11.indexOf("殖利率適用狀態")).getStringCellValue())
+                .isEqualTo("NOT_APPLICABLE");
     }
 
     @Test
@@ -379,7 +478,11 @@ class TradingRadarDualFormatTest {
     void 舊快照相容() throws Exception {
         ObjectNode legacy = (ObjectNode) snapshotNode();
         ((ObjectNode) legacy.path("market")).remove(List.of("weeklyMa", "extendedIndicators"));
-        ((ObjectNode) legacy.path("stocks").get(0)).remove(List.of("weeklyMa", "extendedIndicators"));
+        ObjectNode legacyStockNode = (ObjectNode) legacy.path("stocks").get(0);
+        legacyStockNode.remove(List.of("weeklyMa", "extendedIndicators"));
+        legacyStockNode.putObject("fundamental")
+                .put("valuationProvider", "GENERIC_MUST_NOT_BE_USED")
+                .put("valuationAsOf", "2026-08-07");
         when(store.range(9L, 0L, 1L)).thenReturn(
                 new TradingRadarSnapshotStore.SnapshotRange(List.of(legacy), 1, 0));
 
@@ -413,6 +516,13 @@ class TradingRadarDualFormatTest {
         JsonNode legacyStockRow = json.at("/sheets/2/tables/0/rows").get(0);
         assertThat(legacyStockRow.get("資產分類完整").isNull()).isTrue();
         assertThat(legacyStockRow.get("底層幣別完整").isNull()).isTrue();
+        assertThat(VALUATION_COMPONENT_HEADERS_EXPECTED)
+                .allSatisfy(header -> assertThat(legacyStockRow.get(header).isNull())
+                        .as("舊快照 %s 應為 null，不得以 generic provenance 代填", header).isTrue());
+        assertThat(legacyStock.getCell(STOCK_HEADERS_V11.indexOf("PE Provider")).getCellType())
+                .isEqualTo(CellType.BLANK);
+        assertThat(legacyStock.getCell(STOCK_HEADERS_V11.indexOf("PE來源網址")).getStringCellValue())
+                .isEmpty();
     }
 
     @Test
@@ -423,7 +533,8 @@ class TradingRadarDualFormatTest {
         Workbook actual = GoldenWorkbooks.read(service.exportForOwner(1L, 0L, 1L));
         Workbook pre = GoldenWorkbooks.golden("radar_pre_t281");
 
-        assertSameMapped(pre, actual, "快照索引", c -> c);
+        assertSameMapped(pre, actual, "快照索引",
+                TradingRadarDualFormatTest::mapPreActionPolicyIndex);
         assertThat(actual.getSheet("大盤總覽")).isNotNull();
         assertThat(actual.getSheet("個股決策")).isNotNull();
 
@@ -432,7 +543,8 @@ class TradingRadarDualFormatTest {
                 new TradingRadarSnapshotStore.SnapshotRange(List.of(), 0, 0));
         Workbook actualEmpty = GoldenWorkbooks.read(service.exportForOwner(2L, 0L, 1L));
         Workbook preEmpty = GoldenWorkbooks.golden("radar_empty_pre_t281");
-        assertSameMapped(preEmpty, actualEmpty, "快照索引", c -> c);
+        assertSameMapped(preEmpty, actualEmpty, "快照索引",
+                TradingRadarDualFormatTest::mapPreActionPolicyIndex);
         assertThat(actualEmpty.getSheet("大盤總覽")).isNotNull();
         assertThat(actualEmpty.getSheet("個股決策")).isNotNull();
     }
@@ -475,6 +587,11 @@ class TradingRadarDualFormatTest {
         }
     }
 
+    /** t316 在規則版本後新增一欄；此前既有欄逐格右移一格。 */
+    private static int mapPreActionPolicyIndex(int oldIndex) {
+        return oldIndex < 2 ? oldIndex : oldIndex + 1;
+    }
+
     // ===== fixture（與 golden 產生器逐字相同）=====
 
     /**
@@ -512,11 +629,75 @@ class TradingRadarDualFormatTest {
         return root;
     }
 
+    private static JsonNode snapshotNodeWithValuationProvenance() {
+        ObjectNode root = (ObjectNode) snapshotNode();
+        ObjectNode stock = (ObjectNode) root.path("stocks").get(0);
+        ObjectNode fundamental = stock.putObject("fundamental");
+        // Generic fields are deliberately contradictory: t315 columns must never read them.
+        fundamental.put("valuationProvider", "GENERIC_MUST_NOT_BE_USED");
+        fundamental.put("valuationAsOf", "1999-01-01");
+        fundamental.putArray("valuationSourceUrls").add("https://generic.invalid");
+        valuationEvidenceNode(fundamental.putObject("peEvidence"), 18.5, 22,
+                "TWSE", "2026-08-08T01:00:00Z", "2026-08-07",
+                List.of("https://example.test/pe-1", "https://example.test/pe-2"), false);
+        valuationEvidenceNode(fundamental.putObject("pbEvidence"), 4.2, 80,
+                "WANTGOO", "2026-08-08T02:00:00Z", "2026-08-06",
+                List.of("https://example.test/pb"), false);
+        valuationEvidenceNode(fundamental.putObject("dividendYieldEvidence"), 2.1, 35,
+                "FINMIND", "2026-08-08T03:00:00Z", "2026-08-05",
+                List.of("https://example.test/yield"), false);
+
+        ObjectNode valuation = stock.putObject("evidence").putObject("evidenceGroups")
+                .putObject("VALUATION");
+        var components = valuation.putArray("components");
+        components.addObject().put("name", "pe").put("applicability", "AVAILABLE")
+                .putNull("missingReason");
+        components.addObject().put("name", "pb").put("applicability", "STALE")
+                .put("missingReason", "PB observation 已過期");
+        components.addObject().put("name", "dividend_yield").put("applicability", "MISSING")
+                .put("missingReason", "殖利率歷史不足 250 筆");
+        return root;
+    }
+
+    private static JsonNode snapshotNodeWithNotApplicableValuation() {
+        ObjectNode root = (ObjectNode) snapshotNode();
+        ObjectNode stock = (ObjectNode) root.path("stocks").get(0);
+        ObjectNode fundamental = stock.putObject("fundamental");
+        fundamental.put("applicable", false);
+        fundamental.putNull("peEvidence");
+        fundamental.putNull("pbEvidence");
+        fundamental.putNull("dividendYieldEvidence");
+        ObjectNode valuation = stock.putObject("evidence").putObject("evidenceGroups")
+                .putObject("VALUATION");
+        var components = valuation.putArray("components");
+        components.addObject().put("name", "pe").put("applicability", "NOT_APPLICABLE")
+                .putNull("missingReason");
+        components.addObject().put("name", "pb").put("applicability", "NOT_APPLICABLE")
+                .putNull("missingReason");
+        components.addObject().put("name", "dividend_yield").put("applicability", "NOT_APPLICABLE")
+                .putNull("missingReason");
+        return root;
+    }
+
+    private static void valuationEvidenceNode(
+            ObjectNode node, double value, double percentile, String provider,
+            String availableAt, String asOf, List<String> urls, boolean loss) {
+        node.put("value", value);
+        node.put("percentile", percentile);
+        node.put("provider", provider);
+        var sourceUrls = node.putArray("sourceUrls");
+        urls.forEach(sourceUrls::add);
+        node.put("availableAt", availableAt);
+        node.put("asOf", asOf);
+        node.put("loss", loss);
+    }
+
     private static com.fasterxml.jackson.databind.JsonNode snapshotNode() {
         ObjectMapper M = new ObjectMapper();
         ObjectNode root = M.createObjectNode();
         root.put("generatedAt", "2026-07-31T13:30:00");
         root.put("ruleVersion", "TW_RULES_V6");
+        root.put("actionPolicyVersion", "EVIDENCE_GATE_V1");
         root.put("skippedNonTwStocks", 1);
         ObjectNode m = root.putObject("market");
         m.put("regime", "BULL"); m.put("regimeLabel", "多頭");

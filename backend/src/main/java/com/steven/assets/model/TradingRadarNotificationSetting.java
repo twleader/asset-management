@@ -64,6 +64,10 @@ public class TradingRadarNotificationSetting {
     @Column(length = 30)
     private String ruleVersion;
 
+    /** V12 score identity不變時，仍以獨立版本追蹤 final-action evidence policy。 */
+    @Column(name = "action_policy_version", length = 40)
+    private String actionPolicyVersion;
+
     @Column(name = "last_action", length = 50)
     private String lastAction;
 

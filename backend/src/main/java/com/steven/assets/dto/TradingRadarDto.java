@@ -15,16 +15,25 @@ public final class TradingRadarDto {
 
     public record Response(
             String ruleVersion,
+            String actionPolicyVersion,
             String generatedAt,
             MarketSummary market,
             List<StockDecision> stocks,
             int skippedNonTwStocks,
             List<PublicInformationItem> publicInformation
     ) {
+        /** t316 前的 response 形狀；舊快照沒有 action policy，不得由 ruleVersion 推導。 */
+        public Response(String ruleVersion, String generatedAt, MarketSummary market,
+                        List<StockDecision> stocks, int skippedNonTwStocks,
+                        List<PublicInformationItem> publicInformation) {
+            this(ruleVersion, null, generatedAt, market, stocks, skippedNonTwStocks,
+                    publicInformation);
+        }
+
         /** 舊快照／舊測試相容建構式；Task 291 前沒有公開資訊清單。 */
         public Response(String ruleVersion, String generatedAt, MarketSummary market,
                         List<StockDecision> stocks, int skippedNonTwStocks) {
-            this(ruleVersion, generatedAt, market, stocks, skippedNonTwStocks, List.of());
+            this(ruleVersion, null, generatedAt, market, stocks, skippedNonTwStocks, List.of());
         }
     }
 

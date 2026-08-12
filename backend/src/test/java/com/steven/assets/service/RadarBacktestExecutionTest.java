@@ -87,6 +87,8 @@ class RadarBacktestExecutionTest {
                     RadarBacktestExecution.US_MARKET, kind));
             assertThat(us.sellTaxPct()).isEqualByComparingTo("0");
             assertThat(us.sourceLabel()).isEqualTo(RadarBacktestExecution.DEFAULT_COST_SOURCE);
+            assertThat(us.effectiveFrom()).isNull();
+            assertThat(us.effectiveTo()).isNull();
         }
         assertThat(defaults.get(new RadarBacktestExecution.CostKey(
                         RadarBacktestExecution.TW_MARKET, RadarBacktestExecution.InstrumentKind.STOCK))
@@ -113,6 +115,44 @@ class RadarBacktestExecutionTest {
         assertThat(cost.netReturnPct(new BigDecimal("100"), new BigDecimal("110")))
                 .isEqualByComparingTo(expected);
         assertThat(cost.returnPracticalDeltaPct()).isGreaterThanOrEqualTo(new BigDecimal("0.10"));
+    }
+
+    @Test
+    void costEffectiveIntervalIsInclusiveAndExcludedIndependentlyFromPriceFailures() {
+        var key = new RadarBacktestExecution.CostKey(
+                RadarBacktestExecution.TW_MARKET, RadarBacktestExecution.InstrumentKind.STOCK);
+        var boundaryInclusive = new RadarBacktestExecution.CostAssumption(
+                BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
+                "OVERRIDE", START.plusDays(1), START.plusDays(2));
+        var included = RadarBacktestExecution.execute(List.of(
+                        bar(0, "10", "10"), bar(1, "11", "11"), bar(2, "12", "12")),
+                0, 1, key, boundaryInclusive, true);
+
+        assertThat(included.primary()).isPresent();
+        assertThat(included.closeSensitivity()).isPresent();
+        assertThat(included.excludedCostOutsideEffectiveRange()).isFalse();
+
+        var startsAfterEntry = new RadarBacktestExecution.CostAssumption(
+                BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
+                "OVERRIDE", START.plusDays(2), null);
+        var beforeRange = RadarBacktestExecution.execute(List.of(
+                        bar(0, "10", "10"), bar(1, null, "11"), bar(2, "12", "12")),
+                0, 1, key, startsAfterEntry, true);
+        assertThat(beforeRange.primary()).isEmpty();
+        assertThat(beforeRange.closeSensitivity()).isEmpty();
+        assertThat(beforeRange.excludedCostOutsideEffectiveRange()).isTrue();
+        assertThat(beforeRange.excludedMissingEntryOpen()).isFalse();
+        assertThat(beforeRange.excludedMissingExitOpen()).isFalse();
+        assertThat(beforeRange.excludedInsufficientForward()).isFalse();
+
+        var endsBeforeExit = new RadarBacktestExecution.CostAssumption(
+                BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
+                "OVERRIDE", null, START.plusDays(1));
+        var afterRange = RadarBacktestExecution.execute(List.of(
+                        bar(0, "10", "10"), bar(1, "11", "11"), bar(2, "12", "12")),
+                0, 1, key, endsBeforeExit, false);
+        assertThat(afterRange.excludedCostOutsideEffectiveRange()).isTrue();
+        assertThat(afterRange.primary()).isEmpty();
     }
 
     @Test

@@ -66,6 +66,9 @@ public final class BacktestDto {
         }
     }
 
+    /** V13 report 的標的範圍；只有完整市場可成為 production promotion 證據。 */
+    public enum UniverseMode { FULL_MARKET, BOUNDED_DIAGNOSTIC }
+
     public enum InstrumentKind { STOCK, EQUITY_ETF, BOND_ETF }
 
     public record CostKey(String market, InstrumentKind instrumentKind) {
@@ -153,6 +156,7 @@ public final class BacktestDto {
     public record V13Report(
             String productionRuleVersion,
             boolean productionPromoted,
+            UniverseMode universeMode,
             BigDecimal calibrationRatio,
             int walkForwardFolds,
             boolean closeFallbackSensitivityIncluded,
@@ -170,8 +174,30 @@ public final class BacktestDto {
             Map<String, RuleParameterSnapshot> selectedParameterSnapshots
     ) {
         public V13Report {
+            universeMode = universeMode == null ? UniverseMode.FULL_MARKET : universeMode;
             selectedParameterSnapshots = selectedParameterSnapshots == null
                     ? Map.of() : Map.copyOf(selectedParameterSnapshots);
+        }
+
+        /** Compatibility shape before universeMode was exposed. */
+        public V13Report(
+                String productionRuleVersion,
+                boolean productionPromoted,
+                BigDecimal calibrationRatio,
+                int walkForwardFolds,
+                boolean closeFallbackSensitivityIncluded,
+                List<ResolvedCostAssumption> assumptions,
+                List<MarketHorizonExecution> marketHorizons,
+                List<String> failures,
+                List<String> notes,
+                List<String> candidateParameterSetIds,
+                Map<String, String> selectedCandidates,
+                int promotedCandidateCount,
+                Map<String, RuleParameterSnapshot> selectedParameterSnapshots) {
+            this(productionRuleVersion, productionPromoted, UniverseMode.FULL_MARKET,
+                    calibrationRatio, walkForwardFolds, closeFallbackSensitivityIncluded,
+                    assumptions, marketHorizons, failures, notes, candidateParameterSetIds,
+                    selectedCandidates, promotedCandidateCount, selectedParameterSnapshots);
         }
 
         /** Compatibility shape before selected parameter snapshots were exposed. */
@@ -188,9 +214,28 @@ public final class BacktestDto {
                 List<String> candidateParameterSetIds,
                 Map<String, String> selectedCandidates,
                 int promotedCandidateCount) {
-            this(productionRuleVersion, productionPromoted, calibrationRatio, walkForwardFolds,
+            this(productionRuleVersion, productionPromoted, UniverseMode.FULL_MARKET,
+                    calibrationRatio, walkForwardFolds,
                     closeFallbackSensitivityIncluded, assumptions, marketHorizons, failures, notes,
                     candidateParameterSetIds, selectedCandidates, promotedCandidateCount, Map.of());
+        }
+
+        /** 舊 JSON／Java 呼叫端形狀保留；新增 evidence 欄位採空集合。 */
+        public V13Report(
+                String productionRuleVersion,
+                boolean productionPromoted,
+                UniverseMode universeMode,
+                BigDecimal calibrationRatio,
+                int walkForwardFolds,
+                boolean closeFallbackSensitivityIncluded,
+                List<ResolvedCostAssumption> assumptions,
+                List<MarketHorizonExecution> marketHorizons,
+                List<String> failures,
+                List<String> notes) {
+            this(productionRuleVersion, productionPromoted, universeMode,
+                    calibrationRatio, walkForwardFolds, closeFallbackSensitivityIncluded,
+                    assumptions, marketHorizons, failures, notes,
+                    List.of(), Map.of(), 0, Map.of());
         }
 
         /** 舊 JSON／Java 呼叫端形狀保留；新增 evidence 欄位採空集合。 */
@@ -204,7 +249,8 @@ public final class BacktestDto {
                 List<MarketHorizonExecution> marketHorizons,
                 List<String> failures,
                 List<String> notes) {
-            this(productionRuleVersion, productionPromoted, calibrationRatio, walkForwardFolds,
+            this(productionRuleVersion, productionPromoted, UniverseMode.FULL_MARKET,
+                    calibrationRatio, walkForwardFolds,
                     closeFallbackSensitivityIncluded, assumptions, marketHorizons, failures, notes,
                     List.of(), Map.of(), 0, Map.of());
         }
@@ -298,6 +344,7 @@ public final class BacktestDto {
             int excludedMissingEntryOpen,
             int excludedMissingExitOpen,
             int excludedInsufficientForward,
+            int excludedCostOutsideEffectiveRange,
             int closeSensitivityN,
             ExecutionDateExample firstPrimaryExecution,
             String promotionStatus,
@@ -341,7 +388,7 @@ public final class BacktestDto {
                 String rejectionReason) {
             this(market, horizon, cutoff, globalDateCount, calibrationDateCount, holdoutDateCount,
                     folds, calibration, holdout, excludedMissingEntryOpen, excludedMissingExitOpen,
-                    excludedInsufficientForward, closeSensitivityN, firstPrimaryExecution,
+                    excludedInsufficientForward, 0, closeSensitivityN, firstPrimaryExecution,
                     promotionStatus, rejectionReason, null, List.of(), null,
                     null, null, null, null, null, null, null, null, null);
         }
@@ -545,11 +592,20 @@ public final class BacktestDto {
             String evaluationFrom,
             String evaluationTo,
             int evaluationDateCount,
+            int jointTrainDateCount,
+            LocalDate jointTrainFrom,
+            LocalDate jointTrainTo,
+            List<Integer> jointRequiredHorizons,
             /** 該 fold train dates 專屬 calibration selector 選出的 candidate。 */
             String selectedCandidateParameterSetId,
             /** same-intersection gross/net distribution and candidate-minus-baseline delta for evaluation block. */
             FoldExecutionEvidence executionEvidence
     ) {
+        public WalkForwardFold {
+            jointRequiredHorizons = jointRequiredHorizons == null
+                    ? List.of() : List.copyOf(jointRequiredHorizons);
+        }
+
         /** 舊 JSON／Java 呼叫形狀保留；fold candidate 尚未揭露時為 null。 */
         public WalkForwardFold(
                 int fold,
@@ -560,7 +616,7 @@ public final class BacktestDto {
                 String evaluationTo,
                 int evaluationDateCount) {
             this(fold, trainFrom, trainTo, trainDateCount, evaluationFrom, evaluationTo,
-                    evaluationDateCount, null, null);
+                    evaluationDateCount, 0, null, null, List.of(), null, null);
         }
 
         /** Compatibility shape before per-fold execution evidence was exposed. */
@@ -574,7 +630,8 @@ public final class BacktestDto {
                 int evaluationDateCount,
                 String selectedCandidateParameterSetId) {
             this(fold, trainFrom, trainTo, trainDateCount, evaluationFrom, evaluationTo,
-                    evaluationDateCount, selectedCandidateParameterSetId, null);
+                    evaluationDateCount, 0, null, null, List.of(),
+                    selectedCandidateParameterSetId, null);
         }
     }
 

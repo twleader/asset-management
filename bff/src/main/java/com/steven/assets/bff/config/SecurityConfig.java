@@ -74,6 +74,7 @@ public class SecurityConfig {
                 .authorizeExchange(ex -> ex
                         .pathMatchers("/oauth2/**", "/login/**",
                                 "/actuator/health", "/actuator/info").permitAll()
+                        .pathMatchers(HttpMethod.GET, "/api/public/market-index").permitAll()
                         .pathMatchers("/api/bff/backup-restore/**").hasAuthority(AuthConstants.AUTHORITY_ADMIN)
                         .pathMatchers("/api/bff/user-management/**").hasAuthority(AuthConstants.AUTHORITY_ADMIN)
                         .pathMatchers("/api/impersonate/**").hasAuthority(AuthConstants.AUTHORITY_ADMIN)

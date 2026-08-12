@@ -564,24 +564,25 @@ public final class TradingRadarEvidenceConfidenceResolver {
         TradingRadarAssetProfileResolver.AssetProfile p = in.profile();
         boolean applicable = p != null && p.equity()
                 && p.instrumentKind() == TradingRadarAssetProfileResolver.InstrumentKind.STOCK;
-        if (!applicable) return notApplicable(Group.VALUATION);
+        if (!applicable) return valuationNotApplicable();
         List<Component> c = new ArrayList<>();
-        c.add(valuationComponent("pe", f == null ? null : f.pePercentile(),
-                f == null ? null : f.peLossFlag(), f == null ? null : f.peEvidence(), f, targetDate));
-        c.add(valuationComponent("pb", f == null ? null : f.pbPercentile(), null,
-                f == null ? null : f.pbEvidence(), f, targetDate));
-        c.add(valuationComponent("dividend_yield", f == null ? null : f.dividendYieldPercentile(), null,
-                f == null ? null : f.dividendYieldEvidence(), f, targetDate));
+        c.add(valuationComponent("pe", f == null ? null : f.peEvidence(), targetDate));
+        c.add(valuationComponent("pb", f == null ? null : f.pbEvidence(), targetDate));
+        c.add(valuationComponent("dividend_yield",
+                f == null ? null : f.dividendYieldEvidence(), targetDate));
         return group(Group.VALUATION, c, true, true);
     }
 
-    private static Component valuationComponent(String name, BigDecimal percentile, Boolean loss,
-                                                TradingRadarDto.ValuationComponentEvidence evidence,
-                                                TradingRadarDto.FundamentalSnapshot f,
-                                                LocalDate targetDate) {
-        boolean available = loss == Boolean.TRUE || (percentile != null && finite(percentile));
-        String asOf = evidence == null ? (f == null ? null : f.valuationAsOf()) : evidence.asOf();
-        String provider = evidence == null ? (f == null ? null : f.valuationProvider()) : evidence.provider();
+    private static Component valuationComponent(
+            String name, TradingRadarDto.ValuationComponentEvidence evidence,
+            LocalDate targetDate) {
+        boolean available = evidence != null && (evidence.loss()
+                || (evidence.percentile() != null && finite(evidence.percentile())));
+        // Each valuation component owns its provenance.  The legacy composite
+        // provider/as-of fields may describe another component and therefore
+        // must never make a missing PE/PB/yield observation look available.
+        String asOf = evidence == null ? null : evidence.asOf();
+        String provider = evidence == null ? null : evidence.provider();
         boolean freshDate = asOf != null && freshDate(parseDate(asOf), targetDate, 10);
         Applicability status = !freshDate ? (asOf == null
                 ? Applicability.MISSING : Applicability.STALE)
@@ -978,6 +979,24 @@ public final class TradingRadarEvidenceConfidenceResolver {
     private static GroupEvidence notApplicable(Group group) {
         return new GroupEvidence(group, List.of(), 0, 0, false, false, false, false,
                 0, false, false);
+    }
+
+    /**
+     * VALUATION is the one not-applicable group whose fixed component identities
+     * are part of the API contract.  Keeping the group out of confidence while
+     * retaining all three named components lets UI/export render the backend
+     * decision directly instead of inferring ETF/asset applicability.
+     */
+    private static GroupEvidence valuationNotApplicable() {
+        List<Component> components = List.of(
+                component("pe", Applicability.NOT_APPLICABLE, 1.0 / 3.0,
+                        null, null, null),
+                component("pb", Applicability.NOT_APPLICABLE, 1.0 / 3.0,
+                        null, null, null),
+                component("dividend_yield", Applicability.NOT_APPLICABLE, 1.0 / 3.0,
+                        null, null, null));
+        return new GroupEvidence(Group.VALUATION, components,
+                0, 0, false, false, false, false, 0, false, false);
     }
 
     private static int confidenceFor(Map<Group, GroupEvidence> groups, Map<Group, Double> weights,

@@ -335,3 +335,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/v1.100.0-radar-dividend-fetch-attempt.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.101.0-radar-notification-action-policy-version.sql
+      relativeToChangelogFile: false

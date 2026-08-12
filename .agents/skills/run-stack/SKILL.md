@@ -7,12 +7,12 @@ description: Launch and drive the asset-management Docker Compose stack — star
 
 This project is **never** "done" until the change is built into the image and the container is recreated. There is no `npm run dev` / `mvn spring-boot:run` workflow — everything runs via Docker Compose.
 
-## Model — run this skill on `gpt-5.6-luna` / effort `high`
+## Model — run this skill on `gpt-5.6-terra` / effort `high`
 
 Per AGENTS.md → CLAUDE.md, this skill pins its own model instead of inheriting the main
-agent's. Dispatch the work with `spawn_agent`, passing `model: "gpt-5.6-luna"` and reasoning
+agent's. Dispatch the work with `spawn_agent`, passing `model: "gpt-5.6-terra"` and reasoning
 effort `high`, then report the result back up. Do not run the steps below inline on the main
-agent's model, and do not substitute a different model — if `gpt-5.6-luna` is unavailable,
+agent's model, and do not substitute a different model — if `gpt-5.6-terra` is unavailable,
 stop and say so rather than silently falling back.
 
 > Codex's skill loader has **no `model` frontmatter field** (it only reads `name`,

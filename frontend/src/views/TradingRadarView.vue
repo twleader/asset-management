@@ -245,13 +245,39 @@
                 <div v-else-if="!row.fundamental.applicable" class="muted">
                   ETF 不適用個股財報與產業營收因子，其權重已重分配至其餘可用因子。
                 </div>
-                <template v-else>
+                <div class="valuation-component-grid">
+                  <div
+                    v-for="component in valuationComponents(row)"
+                    :key="`${row.market}-${row.stockCode}-valuation-${component.key}`"
+                    class="fundamental-item valuation-component-item"
+                  >
+                    <div class="valuation-component-head">
+                      <span>{{ component.label }}</span>
+                      <el-tag size="small" :type="component.tagType" effect="plain">{{ component.statusLabel }}</el-tag>
+                    </div>
+                    <strong v-if="component.key === 'pe' && component.loss === true">可信來源顯示虧損</strong>
+                    <strong v-else>{{ valuationValueLabel(component) }}</strong>
+                    <small v-if="component.legacy">{{ component.legacyMessage }}</small>
+                    <template v-else>
+                      <small>自身分位：{{ component.percentile == null ? '—' : Math.round(component.percentile) + ' 分位' }}</small>
+                      <small>Provider：{{ component.provider || '—' }}</small>
+                      <small>資料日期：{{ component.asOf || '—' }}</small>
+                      <small>可得時間：{{ component.availableAt ? formatTime(component.availableAt) : '—' }}</small>
+                      <small v-if="component.missingReason">缺漏原因：{{ component.missingReason }}</small>
+                      <small v-if="component.key === 'pe' && component.loss === true">該虧損 observation 的來源與日期如上，不以 generic 估值來源代填。</small>
+                      <div v-if="component.sourceUrls.length" class="source-links">
+                        <a v-for="(url, i) in component.sourceUrls" :key="`${component.key}-${i}`" :href="url" target="_blank" rel="noopener noreferrer">來源 {{ i + 1 }}</a>
+                      </div>
+                      <small v-else>來源網址：—</small>
+                    </template>
+                  </div>
+                </div>
+                <template v-if="row.fundamental?.applicable">
                   <div class="fundamental-grid">
                     <div class="fundamental-item">
-                      <span>PE／PB／殖利率</span>
-                      <strong>{{ fmtNumber(row.fundamental.peValue, 2) }} ／ {{ fmtNumber(row.fundamental.pbValue, 2) }} ／ {{ fmtPct(row.fundamental.dividendYieldPct) }}</strong>
-                      <small>PE 分位 {{ row.fundamental.pePercentile == null ? '—' : Math.round(row.fundamental.pePercentile) }} · PB 分位 {{ row.fundamental.pbPercentile == null ? '—' : Math.round(row.fundamental.pbPercentile) }} · 殖利率分位 {{ row.fundamental.dividendYieldPercentile == null ? '—' : Math.round(row.fundamental.dividendYieldPercentile) }}</small>
-                      <small>估值 composite {{ fmtNumber(row.fundamental.valuationContribution, 4) }} · 覆蓋 {{ row.fundamental.valuationCoverage == null ? '—' : row.fundamental.valuationCoverage }}</small>
+                      <span>估值 composite／覆蓋</span>
+                      <strong>{{ fmtNumber(row.fundamental.valuationContribution, 4) }} ／ {{ row.fundamental.valuationCoverage == null ? '—' : row.fundamental.valuationCoverage }}</strong>
+                      <small>沿用後端 composite 與 coverage；畫面不重算分位、freshness 或樣本門檻。</small>
                     </div>
                     <div class="fundamental-item">
                       <span>EPS 趨勢／ROE fallback</span>
@@ -273,13 +299,6 @@
                       <span>近 3 月營收年增</span><strong>{{ fmtPct(row.fundamental.revenueYoy3mPct) }}</strong>
                       <small>{{ sourceLine(row.fundamental.revenueProvider, row.fundamental.revenueAsOf) }}</small>
                       <div class="source-links"><a v-for="(url, i) in row.fundamental.revenueSourceUrls || []" :key="`rev-${i}`" :href="url" target="_blank" rel="noopener noreferrer">來源 {{ i + 1 }}</a></div>
-                    </div>
-                    <div class="fundamental-item">
-                      <span>PE 自身分位</span>
-                      <strong v-if="row.fundamental.peLossFlag === true">可信來源顯示虧損</strong>
-                      <strong v-else>{{ row.fundamental.pePercentile == null ? '—' : Math.round(row.fundamental.pePercentile) + ' 分位' }}</strong>
-                      <small>{{ sourceLine(row.fundamental.valuationProvider, row.fundamental.valuationAsOf) }}</small>
-                      <div class="source-links"><a v-for="(url, i) in row.fundamental.valuationSourceUrls || []" :key="`pe-${i}`" :href="url" target="_blank" rel="noopener noreferrer">來源 {{ i + 1 }}</a></div>
                     </div>
                     <div class="fundamental-item">
                       <span>產業發展</span><strong>{{ row.fundamental.industryName || '—' }} · {{ fmtPct(row.fundamental.industryRevenueYoyPct) }}</strong>
@@ -875,6 +894,7 @@ import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
 import TaiwanMap from '@/components/TaiwanMap.vue'
 import UsFlag from '@/components/UsFlag.vue'
 import { isClosePending, marketToday, mergeSseQuote } from '@/utils/displayQuote'
+import { projectValuationEvidence } from '@/utils/valuationEvidence'
 
 const router = useRouter()
 const loading = ref(false)
@@ -1190,6 +1210,17 @@ function fmtPct(value) {
 function fmtRatio(value) {
   if (value == null || Number.isNaN(Number(value))) return '—'
   return `${Number(value).toFixed(2)} 倍`
+}
+
+function valuationComponents(row) {
+  return projectValuationEvidence(row?.fundamental, row?.evidence)
+}
+
+function valuationValueLabel(component) {
+  if (component?.value == null) return '—'
+  return component.format === 'PERCENT'
+    ? fmtPct(component.value)
+    : `${fmtNumber(component.value, 2)} 倍`
 }
 
 function sourceLine(provider, asOf) {
@@ -1671,9 +1702,11 @@ onUnmounted(() => {
 .fundamental-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
 .fundamental-title { color: #0f172a; font-size: 14px; font-weight: 750; }
 .fundamental-grid { display: grid; grid-template-columns: repeat(5, minmax(145px, 1fr)); gap: 10px; }
+.valuation-component-grid { display: grid; grid-template-columns: repeat(3, minmax(180px, 1fr)); gap: 10px; margin-top: 10px; }
 .fundamental-item { border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; padding: 11px; display: flex; flex-direction: column; gap: 5px; }
 .fundamental-item > span, .fundamental-item small { color: #64748b; font-size: 11px; line-height: 1.45; }
 .fundamental-item strong { color: #0f172a; font-size: 14px; }
+.valuation-component-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #64748b; font-size: 11px; }
 .source-links { display: flex; flex-wrap: wrap; gap: 8px; }
 .source-links a { color: #1d4ed8; font-size: 11px; text-decoration: none; }
 .source-links a:hover { text-decoration: underline; }
@@ -1693,11 +1726,11 @@ onUnmounted(() => {
   .market-layout { grid-template-columns: 1fr; }
   .market-metrics { grid-template-columns: repeat(3, 1fr); }
   .confirm-grid { grid-template-columns: repeat(2, 1fr); }
-  .fundamental-grid { grid-template-columns: repeat(2, 1fr); }
+  .fundamental-grid, .valuation-component-grid { grid-template-columns: repeat(2, 1fr); }
 }
 @media (max-width: 720px) {
   .header-row, .card-head { align-items: flex-start; flex-direction: column; }
-  .market-metrics, .confirm-grid, .fundamental-grid { grid-template-columns: 1fr; }
+  .market-metrics, .confirm-grid, .fundamental-grid, .valuation-component-grid { grid-template-columns: 1fr; }
   .expand-panel { padding-left: 16px; padding-right: 16px; }
   .state-options { grid-template-columns: 1fr; }
 }
