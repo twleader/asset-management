@@ -32,6 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
@@ -132,6 +133,12 @@ class TradingRadarMarketFreshnessTest {
                 .thenReturn(List.of());
         lenient().when(indicatorService.computeAllForNasdaq())
                 .thenReturn(TechnicalIndicatorService.FullIndicators.EMPTY);
+        // Task 323：buildUsMarket() 改由 resolveMarketFromRows 取得 IXIC 量能 context；
+        // 本檔只驗證台股組，美股組回 EMPTY 即可（未 stub 的 mock 回 null，靠 production 端的
+        // null 防護也不會炸，但顯式 stub 讓「美股量能缺值」是刻意的前提而非碰巧）。
+        lenient().when(marketContextService.resolveMarketFromRows(
+                        anyString(), any(), anyList(), anyList()))
+                .thenReturn(TradingRadarMarketContextService.MarketContext.EMPTY);
     }
 
     @Test

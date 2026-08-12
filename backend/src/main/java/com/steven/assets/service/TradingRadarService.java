@@ -653,11 +653,26 @@ public class TradingRadarService {
      * <p>{@code MarketInput} 的後六個參數（跨市場量能／美股科技日報酬）全部傳 {@code null}／{@code false}：
      * 那三欄（nasdaqChangePercent／soxChangePercent／usTechCompositePercent）的語意是「台股股票的跨市場
      * 領先訊號」，本身即為 IXIC 走勢的一部分，若原封不動餵給「大盤即是 IXIC」的美股組會重複計分。</p>
+     *
+     * <p>Task 323：{@code MarketSummary} 的大盤量能三欄改由既有的
+     * {@link TradingRadarMarketContextService#resolveMarketFromRows} 供給（同一支 API 也是
+     * {@code BacktestService} 走的那支），線上雷達與回測因此不會分岔出第二份美股量能計算。
+     * <b>但 {@code MarketInput} 的量能兩欄與 {@code completedChangePercent} 仍維持 {@code null}</b>：
+     * 那三欄在 {@link TradingRadarRuleEngine} 內是<b>進 regime 分數</b>的，本任務只補
+     * evidence／信心度所讀的 {@code MarketSummary}，不動美股的 regime 分數與買進閘門
+     * （台股端 {@link #buildMarket} 是把同一份 context 一併灌進 {@code MarketInput}，
+     * 此處刻意不鏡像照抄）。</p>
      */
     private MarketState buildUsMarket(Instant decisionInstant) {
         try {
             List<UsIndexDailyHistory> rows =
                     usIndexDailyHistoryRepo.findTopNByIndexCodeOrderByTradingDateDesc(IXIC_CODE, 241);
+            // Task 323：用同一批已讀進來的 IXIC 列走既有 V13 解析，不在本類別另寫一份 ratio 計算。
+            // 回傳型別是 TradingRadarMarketContextService.MarketContext（accessor 為 marketVolumeRatio()／
+            // marketAsOfDate()），與 buildStock 內組 evidence 用的 TradingRadarEvidenceConfidenceResolver
+            // .MarketContext 同名不同型，不得混用。
+            TradingRadarMarketContextService.MarketContext usContext =
+                    marketContextService.resolveMarketFromRows(US_MARKET, decisionInstant, List.of(), rows);
             List<BigDecimal> closes = rows.stream().map(UsIndexDailyHistory::getClosePoint).toList();
             BigDecimal price = closes.isEmpty() ? null : closes.get(0);
             BigDecimal changePercent = closes.size() >= 2 ? changePercent(closes.get(0), closes.get(1)) : null;
@@ -672,9 +687,14 @@ public class TradingRadarService {
                             indicators(ind),
                             c60,
                             c240,
+                            // completedChangePercent／marketVolumeRatio／marketTurnoverRatio
+                            // 一律維持 null（Task 323.2）：這三欄在 TradingRadarRuleEngine 內會進 regime
+                            // 分數（averageAvailable(...) → score ±8／±10／±3），把上面解出的 usContext
+                            // 灌進來會直接翻動美股個股的 regime 與買進閘門。本任務只補 MarketSummary。
                             null,
                             null,
                             null,
+                            // 跨市場領先訊號四欄維持 null／false（Task 294 既有理由，見本方法 javadoc）。
                             null,
                             null,
                             null,
@@ -707,9 +727,22 @@ public class TradingRadarService {
                     false,
                     null,
                     toDto(ind.extended()),
+                    // Task 323：大盤量能比來自既有 IXIC context。null 防護是硬性要求——
+                    // 單元測試把 marketContextService 宣告為 @Mock，未 stub 的方法回 null，
+                    // 直接解參考產生的 NPE 會被下方 catch 吞成 incompleteMarket()，
+                    // 不報錯卻讓美股整組變 DATA_INCOMPLETE。
+                    usContext == null ? null : usContext.marketVolumeRatio(),
+                    // marketTurnoverRatio 恆為 null：us_index_daily_history 沒有成交值／週轉率欄位，
+                    // resolveUsV13 也明確傳 null，不得以成交量除以任何數字偽造週轉率。
+                    // TradingRadarEvidenceConfidenceResolver 的 contextValueAvailable 是
+                    // finite(volumeRatio) || finite(turnoverRatio) 的 OR，只有量能比即可成立。
                     null,
-                    null,
-                    null,
+                    usContext == null || usContext.marketAsOfDate() == null
+                            ? null : usContext.marketAsOfDate().toString(),
+                    // 以下五欄（nasdaq／sox／usTechComposite／usTechAsOf／usTechAvailable）本次刻意不填：
+                    // 「美股科技共同完成日」因子的設計語意是**台股列的領先訊號**（台股 14:00 決策時看
+                    // 前一個已完成的美股 session），填進美股列自己使用的 MarketSummary 是自我指涉，
+                    // 屬於另一個需要獨立驗收的決定（Task 323.2），不在本次射程。
                     null,
                     null,
                     null,

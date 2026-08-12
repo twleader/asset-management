@@ -29,7 +29,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 
 ---
 
-## 任務索引（Task 1–228、264–267、269–292、297–309、311–321）
+## 任務索引（Task 1–228、264–267、269–292、297–309、311–321、323–324）
 
 | Task | 標題 | 位置 |
 |---|---|---|
@@ -321,6 +321,8 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 319 | 收盤 provenance 白名單只界定 verified，不得當技術序列納入判準（台股全數「今日不交易」修正，Requirement 65） | [tasks/t319_radar_indicator_series_provenance_scope.md](tasks/t319_radar_indicator_series_provenance_scope.md) |
 | 320 | 交易雷達新增「即時折溢價」欄，表格／JSON／Excel 三處揭露，與既有完成日折溢價並存（Requirement 43） | [tasks/t320_radar_live_etf_premium_column.md](tasks/t320_radar_live_etf_premium_column.md) |
 | 321 | 濾除「中國＋他國國名」的個人刑案雜訊：`EditorialNewsFilter` 規則③收緊 `GEO_REGION` disjunct（Requirement 31） | [tasks/t321_china_branch_personal_crime.md](tasks/t321_china_branch_personal_crime.md) |
+| 323 | 交易雷達美股大盤量能接線：`buildUsMarket()` 補上既有 IXIC 量能，停止線上與回測分岔（Requirement 64） | [tasks/t323_radar_us_market_volume_wiring.md](tasks/t323_radar_us_market_volume_wiring.md) |
+| 324 | 交易雷達證據覆蓋缺口盤點（實測待辦；各子項動工時另開任務檔） | [tasks/t324_radar_evidence_coverage_backlog.md](tasks/t324_radar_evidence_coverage_backlog.md) |
 
 > **註：Task 229–263、268、293–296 以各自任務檔為準。**
 

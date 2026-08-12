@@ -1,0 +1,264 @@
+package com.steven.assets.service;
+
+import com.steven.assets.dto.TradingRadarDto;
+import com.steven.assets.model.TwseIndexDailyHistory;
+import com.steven.assets.model.UsIndexDailyHistory;
+import com.steven.assets.repository.AssetSnapshotRepository;
+import com.steven.assets.repository.EtfNavHistoryRepository;
+import com.steven.assets.repository.ExchangeRateHistoryRepository;
+import com.steven.assets.repository.NewsHeadlineRepository;
+import com.steven.assets.repository.StockAlertRepository;
+import com.steven.assets.repository.StockDividendHistoryRepository;
+import com.steven.assets.repository.StockPriceHistoryRepository;
+import com.steven.assets.repository.StockRepository;
+import com.steven.assets.repository.TwseIndexDailyHistoryRepository;
+import com.steven.assets.repository.UsIndexDailyHistoryRepository;
+import com.steven.assets.security.CurrentUserContext;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mockito;
+
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+/**
+ * Task 323：{@code buildUsMarket()} 把既有 IXIC 量能接進美股列的 {@code MarketSummary}，
+ * 讓 {@code market_volume_turnover} 不再恆為 {@code MISSING}。
+ *
+ * <p><b>{@link TradingRadarMarketContextService} 刻意用真實物件（只 mock 底層 repository），
+ * 不是 {@code @Mock}</b>——本檔的核心守門是「線上雷達與回測不分岔」：兩邊必須是同一支
+ * {@code resolveMarketFromRows} 算出的同一個值。若把 context service 整個 mock 掉，
+ * 期望值與實際值都出自同一顆 stub，斷言恆真、證明不了任何事。作法比照同目錄
+ * {@link TradingRadarNotificationMarketBatchTest}（真實 service ＋ mock repo）。
+ * 外面再包一層 {@link Mockito#spy} 只為了用 {@link ArgumentCaptor} 取得
+ * {@code buildMarketSnapshot()} 內部那個 {@code Instant.now()} 與實際傳入的 rows；
+ * 未 stub 任何方法，每次呼叫都真的落到 production 實作。</p>
+ *
+ * <p>⚠ 觀測入口只能用 {@code buildMarketSnapshot(US_MARKET).summary()}：{@code buildUsMarket}
+ * 是 private，而 {@code assembleAt(Instant)} 的 {@code Response.market} 只帶台股 summary。
+ * {@code buildMarketSnapshot(String)} 第一行即 {@code Instant.now()}、沒有吃 instant 的 overload，
+ * 故所有 fixture 日期一律以「相對於現在」表達（過去日＝已完成、未來日＝晚於完成邊界）。</p>
+ */
+class TradingRadarUsMarketVolumeWiringTest {
+
+    private static final String US_MARKET = "美股";
+    private static final ZoneId NEW_YORK = ZoneId.of("America/New_York");
+
+    private final TwseIndexDailyHistoryRepository twseRepo = mock(TwseIndexDailyHistoryRepository.class);
+    private final UsIndexDailyHistoryRepository usIndexRepo = mock(UsIndexDailyHistoryRepository.class);
+    private final MarketDataService marketDataService = mock(MarketDataService.class);
+    private final TechnicalIndicatorService indicatorService = mock(TechnicalIndicatorService.class);
+
+    /** 真實的 context service（底層 repo 才是 mock）——期望值就從這支算出來。 */
+    private final TradingRadarMarketContextService realContextService = new TradingRadarMarketContextService(
+            twseRepo, usIndexRepo, mock(ExchangeRateHistoryRepository.class),
+            mock(NewsHeadlineRepository.class), marketDataService);
+
+    /** 同一支實作外包一層 spy，只為了捕捉 decisionInstant／rows；不 stub 任何方法。 */
+    private final TradingRadarMarketContextService contextService = Mockito.spy(realContextService);
+
+    private TradingRadarRuleEngine ruleEngine;
+
+    private TradingRadarService newService() {
+        ruleEngine = Mockito.spy(new TradingRadarRuleEngine());
+        return new TradingRadarService(
+                ruleEngine,
+                indicatorService,
+                mock(DistributionAdjustedPriceService.class),
+                mock(RadarInputAssembler.class),
+                mock(AssetClassifier.class),
+                twseRepo,
+                usIndexRepo,
+                mock(StockPriceHistoryRepository.class),
+                mock(StockDividendHistoryRepository.class),
+                mock(PriceQueryService.class),
+                mock(TaiexDisplayPriceService.class),
+                mock(AssetSnapshotRepository.class),
+                mock(StockAlertRepository.class),
+                mock(StockRepository.class),
+                marketDataService,
+                contextService,
+                mock(FundamentalAnalysisService.class),
+                mock(EtfNavHistoryRepository.class),
+                mock(TradingRadarSnapshotStore.class),
+                mock(CurrentUserContext.class),
+                mock(DividendEventEvidenceRepository.class),
+                mock(TreasuryYieldService.class));
+    }
+
+    private void stubBaseline() {
+        when(indicatorService.computeAllForNasdaq())
+                .thenReturn(TechnicalIndicatorService.FullIndicators.EMPTY);
+        when(marketDataService.isTradingDay(anyString(), any(LocalDate.class))).thenReturn(true);
+    }
+
+    private static UsIndexDailyHistory ixic(LocalDate date, String close, Long volume) {
+        BigDecimal price = new BigDecimal(close);
+        return new UsIndexDailyHistory("IXIC", date, price, price, price, price, volume);
+    }
+
+    /**
+     * 21 列 IXIC（新到舊，比照 repository 的 {@code OrderByTradingDateDesc}）：
+     * 最新一列 volume=400，其前 20 列 volume=100 → {@code ratio()} 的中位數分母＝100、量能比＝4.0000。
+     *
+     * <p>⚠ 現成的 {@code TradingRadarUsStockEngineTest.usUpRowsAt(...)} 雖然建了 241 列，
+     * 但從未呼叫 {@code setVolume}，直接沿用會得到 {@code volumeRatio == null}
+     * （{@code ratio()} 要求 {@code prior.size() >= RATIO_MIN_SAMPLES}＝10）。故此處自建 fixture。</p>
+     *
+     * @param latest 最新一個完成交易日；為讓 {@code usCompletion()}（美東 16:00）確定早於
+     *               {@code Instant.now()}，呼叫端一律傳「今天（美東）往前數天」。
+     */
+    private static List<UsIndexDailyHistory> ixicRowsDesc(LocalDate latest) {
+        List<UsIndexDailyHistory> rows = new ArrayList<>();
+        rows.add(ixic(latest, "19000", 400L));
+        for (int i = 1; i <= 20; i++) {
+            rows.add(ixic(latest.minusDays(i), "18000", 100L));
+        }
+        return rows;
+    }
+
+    private static LocalDate completedUsDay(int daysAgo) {
+        return LocalDate.now(NEW_YORK).minusDays(daysAgo);
+    }
+
+    // ─────────── (a) 線上與回測不分岔：值必須與 resolveMarketFromRows 完全相等 ───────────
+
+    @Test
+    void 美股marketSummary的量能比與resolveMarketFromRows完全相等而非另算一份() {
+        stubBaseline();
+        LocalDate latest = completedUsDay(5);
+        List<UsIndexDailyHistory> rows = ixicRowsDesc(latest);
+        when(usIndexRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 241)).thenReturn(rows);
+
+        TradingRadarDto.MarketSummary summary = newService().buildMarketSnapshot(US_MARKET).summary();
+
+        // 捕捉 buildUsMarket() 內部實際使用的 decisionInstant 與 rows（buildMarketSnapshot 用的是
+        // 自己的 Instant.now()，測試無從指定），再用「未被 spy 包住」的同一支實作重算期望值。
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<UsIndexDailyHistory>> usRowsCaptor =
+                ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<Instant> instantCaptor = ArgumentCaptor.forClass(Instant.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<TwseIndexDailyHistory>> twRowsCaptor =
+                ArgumentCaptor.forClass(List.class);
+        verify(contextService, times(1)).resolveMarketFromRows(
+                eq(US_MARKET), instantCaptor.capture(), twRowsCaptor.capture(), usRowsCaptor.capture());
+        assertEquals(List.of(), twRowsCaptor.getValue(),
+                "美股 context 不得夾帶台股列——台股與美股不可共用同一個量能來源");
+
+        TradingRadarMarketContextService.MarketContext expected = realContextService.resolveMarketFromRows(
+                US_MARKET, instantCaptor.getValue(), List.of(), usRowsCaptor.getValue());
+
+        assertNotNull(expected.marketVolumeRatio(), "前提：fixture 必須真的算得出量能比，測試才有意義");
+        assertNotNull(summary.marketVolumeRatio(),
+                "接線後美股 MarketSummary 的量能比不得再是 null（否則 market_volume_turnover 恆 MISSING）");
+        assertEquals(expected.marketVolumeRatio(), summary.marketVolumeRatio(),
+                "線上雷達與回測必須走同一支 resolveMarketFromRows，值要完全相等（含 scale）");
+        assertEquals("4.0000", summary.marketVolumeRatio().toPlainString(),
+                "20 列 volume=100 的中位數為分母、最新列 400 → 4.0000");
+    }
+
+    // ─────────── (b) marketVolumeAsOfDate 等於同一 context 的 marketAsOfDate() ───────────
+
+    @Test
+    void 美股marketVolumeAsOfDate等於同一context的marketAsOfDate字串() {
+        stubBaseline();
+        LocalDate latest = completedUsDay(5);
+        when(usIndexRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 241))
+                .thenReturn(ixicRowsDesc(latest));
+
+        TradingRadarDto.MarketSummary summary = newService().buildMarketSnapshot(US_MARKET).summary();
+
+        assertEquals(latest.toString(), summary.marketVolumeAsOfDate());
+    }
+
+    // ─────────── (c) 無可用 IXIC 完成列時三欄皆 null 且不拋例外 ───────────
+
+    @Test
+    void IXIC列為空時三欄皆為null且不拋例外() {
+        stubBaseline();
+        when(usIndexRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 241)).thenReturn(List.of());
+
+        TradingRadarDto.MarketSummary summary = newService().buildMarketSnapshot(US_MARKET).summary();
+
+        assertNotNull(summary, "美股組裝失敗／無資料都不得拋出（既有 try/catch 的隔離語意不變）");
+        assertNull(summary.marketVolumeRatio());
+        assertNull(summary.marketTurnoverRatio());
+        assertNull(summary.marketVolumeAsOfDate());
+    }
+
+    @Test
+    void IXIC列全部晚於完成邊界時三欄皆為null且不拋例外() {
+        stubBaseline();
+        // 未來日期：usCompletion()（美東 16:00）必定晚於 decisionInstant，整組被 V13 濾掉。
+        when(usIndexRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 241))
+                .thenReturn(ixicRowsDesc(completedUsDay(-30)));
+
+        TradingRadarDto.MarketSummary summary = newService().buildMarketSnapshot(US_MARKET).summary();
+
+        assertNotNull(summary);
+        assertNull(summary.marketVolumeRatio(),
+                "晚於完成邊界的列不得被當成已完成量能（V13 的前視偏誤防線）");
+        assertNull(summary.marketTurnoverRatio());
+        assertNull(summary.marketVolumeAsOfDate());
+    }
+
+    // ─────────── (d) marketTurnoverRatio 恆為 null ───────────
+
+    @Test
+    void 美股marketTurnoverRatio恆為null不得由成交量偽造週轉率() {
+        stubBaseline();
+        when(usIndexRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 241))
+                .thenReturn(ixicRowsDesc(completedUsDay(5)));
+
+        TradingRadarDto.MarketSummary summary = newService().buildMarketSnapshot(US_MARKET).summary();
+
+        assertNotNull(summary.marketVolumeRatio(), "前提：量能比有值，才證明 turnover 的 null 是刻意的");
+        assertNull(summary.marketTurnoverRatio(),
+                "us_index_daily_history 沒有成交值／週轉率欄位，不得以成交量除以任何數字偽造");
+    }
+
+    // ─────────── (e) MarketInput 守門：量能與完成日漲跌幅三欄仍為 null ───────────
+
+    @Test
+    void 美股MarketInput的量能與完成日漲跌幅三欄仍為null不得跟著填() {
+        stubBaseline();
+        when(usIndexRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 241))
+                .thenReturn(ixicRowsDesc(completedUsDay(5)));
+
+        TradingRadarDto.MarketSummary summary = newService().buildMarketSnapshot(US_MARKET).summary();
+
+        assertNotNull(summary.marketVolumeRatio(),
+                "前提：MarketSummary 這端確實已接上，才證明 MarketInput 的 null 是刻意留白");
+        ArgumentCaptor<TradingRadarRuleEngine.MarketInput> captor =
+                ArgumentCaptor.forClass(TradingRadarRuleEngine.MarketInput.class);
+        verify(ruleEngine, times(1)).evaluateMarket(captor.capture());
+        TradingRadarRuleEngine.MarketInput usInput = captor.getValue();
+
+        // 這三欄在 TradingRadarRuleEngine 內是進 regime 分數的（score += 8／-= 10／-= 3／+= 3）。
+        // 台股端 buildMarket() 是把同一份 context 灌進去，鏡像照抄會直接翻動美股的 regime 與買進閘門。
+        assertNull(usInput.marketVolumeRatio(),
+                "Task 323 只改 MarketSummary；MarketInput 的量能比填了會翻動美股 regime 分數");
+        assertNull(usInput.marketTurnoverRatio());
+        assertNull(usInput.completedChangePercent());
+        // 294 既有護欄一併回歸：跨市場領先訊號四欄仍為缺值。
+        assertNull(usInput.nasdaqChangePercent());
+        assertNull(usInput.soxChangePercent());
+        assertNull(usInput.usTechCompositePercent());
+    }
+}

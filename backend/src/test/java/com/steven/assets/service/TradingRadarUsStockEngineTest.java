@@ -187,6 +187,14 @@ class TradingRadarUsStockEngineTest {
         // 頁面路徑 assemble() 仍走上面的 resolve()；兩者都要 stub。
         lenient().when(marketContextService.resolveMarket(any()))
                 .thenReturn(TradingRadarMarketContextService.MarketContext.EMPTY);
+        // Task 323：buildUsMarket() 改由 resolveMarketFromRows 取得 IXIC 量能 context。
+        // 這裡刻意回 EMPTY（＝量能缺值）而不是有值的 context——本檔的
+        // 「美股完成收盤與marketSummary同日但量能context缺值時PRICE_MARKET仍開閘」
+        // 前提正是量能 context 缺值；共用 stub 若統一回有值的 context，該迴歸會名存實亡。
+        // 需要有值 context 的案例請用 per-test stub 覆寫（見 TradingRadarUsMarketVolumeWiringTest）。
+        lenient().when(marketContextService.resolveMarketFromRows(
+                        anyString(), any(), anyList(), anyList()))
+                .thenReturn(TradingRadarMarketContextService.MarketContext.EMPTY);
         lenient().when(marketContextService.resolveFx(anyString(), any()))
                 .thenReturn(TradingRadarMarketContextService.FxContext.EMPTY);
         lenient().when(fundamentalAnalysisService.resolve(any(), any(), any(), any()))

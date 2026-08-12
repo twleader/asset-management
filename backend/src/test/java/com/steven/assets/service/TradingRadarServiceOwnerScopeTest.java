@@ -23,6 +23,7 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -118,6 +119,11 @@ class TradingRadarServiceOwnerScopeTest {
         lenient().when(snapshotRepo.findLatestWithStocksByOwnerUserId(anyLong())).thenReturn(Optional.empty());
         lenient().when(alertRepo.findDistinctStockCodeMarket()).thenReturn(List.of());
         lenient().when(alertRepo.findDistinctStockCodeMarketByOwnerUserId(anyLong())).thenReturn(List.of());
+        // Task 323：buildUsMarket() 改由 resolveMarketFromRows 取得 IXIC 量能 context；
+        // 本檔只驗證 owner 分支，美股組回 EMPTY 即可。
+        lenient().when(marketContextService.resolveMarketFromRows(
+                        anyString(), any(), anyList(), anyList()))
+                .thenReturn(TradingRadarMarketContextService.MarketContext.EMPTY);
     }
 
     @Test
