@@ -109,22 +109,25 @@ bash .claude/hooks/spec-review-pass.sh --status # 查目前狀態
 > 另注意 `core.hooksPath` 設的是**絕對路徑**、指向主 clone；改 `scripts/git-hooks/`
 > 底下的檔案要 merge 進 main 後才會實際生效。
 
-### 實作一律派 Subagent（模型指定）
+### Subagent 一律與主 Agent 使用相同模型
 
-**第 5 步「實作程式碼」不得由主 agent 直接動手，一律開 subagent 執行**，模型與
-reasoning effort 指定如下，完成後回到主 agent 彙整結果（驗收、跑閘門、commit）：
+**所有 subagent**（包含實作、`spec-auditor`、`arch-auditor`、`/run-stack` 與
+`/commit-merge-push`）一律使用與當前主 agent **完全相同的模型與 reasoning effort**。
+禁止因任務較簡單、成本、速度或 fallback 而改用較低階模型。執行環境支援繼承時，
+省略 subagent 的 model／effort override；若工具要求明確指定，則兩者必須與主 agent
+一致。相同模型無法使用時應停止並回報，不得靜默降級。
 
-- 首選：**Sonnet 5（effort: max）**
-- 替代：**Luna 5.6（effort: max）**（若當前環境可選用）
+**第 5 步「實作程式碼」不得由主 agent 直接動手，一律開 subagent 執行**，完成後
+回到主 agent 彙整結果（驗收、跑閘門、commit）：
 
 主 agent 的職責限於：拆解任務、撰寫 subagent prompt、彙整回報、查證 subagent
 宣稱的變更（注意：subagent 回報的絕對路徑常指向主 repo 而非 worktree，
 落地前先用 `git -C <worktree路徑> status/diff` 確認變更真的落在 worktree）。
 
-**`/run-stack` 與 `/commit-merge-push` 也一律派 subagent 執行**，模型同上
-（Sonnet 5 effort max，或 Luna 5.6 max）。主 agent 在 prompt 裡帶入該 skill 的
-完整流程與本次變更脈絡（改了哪個 service、預期驗證點），subagent 執行完回報
-結果（stack 是否 serve、merge commit SHA），由主 agent 向使用者彙整。
+**`/run-stack` 與 `/commit-merge-push` 也一律派 subagent 執行**，並遵守上述模型與
+reasoning effort 一致規則。主 agent 在 prompt 裡帶入該 skill 的完整流程與本次變更
+脈絡（改了哪個 service、預期驗證點），subagent 執行完回報結果（stack 是否 serve、
+merge commit SHA），由主 agent 向使用者彙整。
 
 ---
 
@@ -188,6 +191,7 @@ reasoning effort 指定如下，完成後回到主 agent 彙整結果（驗收�
 - 前端 view 一律走自己頁面對應的 BFF endpoint，不直接呼叫 business service `/api/{resource}`
 - BFF 負責跨服務 aggregation、預先計算 / 排序 / 過濾，前端只負責 render
 - 範例：`DashboardBffController`、`SnapshotFormBffController`、`AssetHistoryBffController`、`BankSettingsBffRoutes`（純 passthrough 也要有自己的 route）
+- **具名、限縮例外（Requirement 67／Task 317）**：匿名唯讀的精確 `GET /api/public/market-index` 是 Docker host、同 Compose network 與自動化工具使用的**非前端頁面入口**，可不使用 `/api/bff/{page-name}` 前綴。例外只涵蓋這一條 GET：禁止 `/api/public/**` 或 descendant wildcard、禁止開放同路徑其他 HTTP method、禁止前端 view 援引此例外改打 `/api/public/**`。Controller 仍只委派 BFF service，BFF 仍只呼叫既有 business API，不得直連外部行情來源。
 
 **2. 同義欄位、同一 business service API**
 
@@ -217,9 +221,9 @@ cd frontend
 
 | 文件 | 說明 |
 |------|------|
-| `spec/requirements.md` | User Stories + Acceptance Criteria（66 個 Requirements） |
+| `spec/requirements.md` | User Stories + Acceptance Criteria（67 個 Requirements） |
 | `spec/design.md` | 架構圖、ERD、API 端點、關鍵業務邏輯 |
-| `spec/tasks.md` | 任務索引（Task 1–228、264–267、269–292、297–309、311–316、318）＋ 尚未歸檔的 Task 201 起區段；Task 229–263、268、293–296 以各自 `spec/tasks/tNNN_*.md` 為準 |
+| `spec/tasks.md` | 任務索引（Task 1–228、264–267、269–292、297–309、311–318）＋ 尚未歸檔的 Task 201 起區段；Task 229–263、268、293–296 以各自 `spec/tasks/tNNN_*.md` 為準 |
 | `spec/tasks/README.md` | 自足任務檔規範（新任務寫這裡，不再追加 `tasks.md`） |
 | `spec/tasks/tNNN_*.md` | 自足任務檔（Task 201 之後的新任務） |
 | `spec/tasks/archive/` | Task 1–200 歷史，已凍結不再修改 |

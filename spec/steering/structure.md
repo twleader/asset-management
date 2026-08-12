@@ -159,11 +159,12 @@ bff/src/main/java/com/steven/assets/bff/
 ### 3.2 BFF 設計鐵則
 
 1. **一個前端頁面 → 一個資料夾 + 一支 Controller（或 Gateway route）。** 即使純 passthrough 也要建立。
-2. **路徑前綴：** `/api/bff/{page-name}/...`。Gateway route 將 `/api/bff/{page}/**` rewrite 為 `/api/{resource}/**`。
+2. **前端頁面 BFF 路徑前綴：** `/api/bff/{page-name}/...`。Gateway route 將 `/api/bff/{page}/**` rewrite 為 `/api/{resource}/**`。
+   - **具名、限縮例外（Requirement 67／Task 317）**：匿名唯讀的精確 `GET /api/public/market-index` 是 Docker／自動化使用的非前端頁面入口，可不採 `/api/bff/{page-name}` 前綴。只允許這一條 GET；禁止 `/api/public/**` 或 descendant wildcard、同路徑其他 HTTP method 與前端 view 援引。Controller 仍只委派 BFF service，且 BFF 仍只呼叫既有 business API。
 3. **跨頁共用邏輯放 `bff/common/`。** 如 `SnapshotEnricher`（注入歷史收盤價、合併 broker rows）。
 4. **同義欄位 → 同一支 business service API。** BFF 不在不同頁重複呼叫不同 endpoint 取同義值。
    - **具名例外（唯一一組，Task 285／286）：台股大盤的均線（MA5/20/60/240）目前有三份實作**——
-     (1) 「股市大盤查詢」頁圖表走 `GdpTwseBffController.movingAverage`（BFF，BigDecimal，只用已落地日線收盤）；
+     (1) 「股市大盤查詢」頁圖表走 `MarketIndexChartService.movingAverage`（BFF，BigDecimal，只用已落地日線收盤）；
      (2) 該頁匯出走 `ExcelExportService.indexMaAt`（backend，BigDecimal，同樣只用已落地日線收盤，
      Task 285 建立 MA5、Task 286 擴為四個視窗）；(3) 交易雷達／走勢圖／觀察清單走
      `TechnicalIndicatorService`（double，**盤中併入 Redis 即時點位**）。(1)(2) 定義相同（皆不含 live），
@@ -309,9 +310,9 @@ frontend/
 
 ```
 spec/
-├── requirements.md       # 66 個 Requirements（User Story + AC）
+├── requirements.md       # 67 個 Requirements（User Story + AC）
 ├── design.md             # 架構圖、ERD、Service 職責、Sequence
-├── tasks.md              # 任務索引（Task 1–228、264–267、269–292、297–309、311–316、318）＋ 尚未歸檔的 201 起區段
+├── tasks.md              # 任務索引（Task 1–228、264–267、269–292、297–309、311–318）＋ 尚未歸檔的 201 起區段
 ├── tasks/                # 任務檔
 │   ├── README.md         # 自足任務檔規範
 │   ├── archive/          # Task 1–200 歷史，已凍結
