@@ -346,6 +346,7 @@ class BacktestServiceTest {
 
         assertThat(csv).contains("coverage,code,market,instrumentType,dataFrom,dataTo")
                 .contains("v13_metadata,key,value")
+                .contains("v13_metadata,universeMode,BOUNDED_DIAGNOSTIC")
                 .contains("v13_fold,market,horizon,fold,instrumentKind,productionProfile,assetClass,stockStyle,bondTerm,confidenceDecile,promotionEvidenceScope")
                 .contains("jointTrainDateCount,jointTrainFrom,jointTrainTo,jointRequiredHorizons")
                 .contains("purgedTrainN,purgedTrainCodes,purgeBoundary")
@@ -365,6 +366,47 @@ class BacktestServiceTest {
                 .contains("v13_selected_candidate,groupKey,parameterSetId")
                 .contains("v13_failure,reason")
                 .contains("v13_cost_market,instrumentKind");
+    }
+
+    @Test
+    @DisplayName("Task 316：null／空 codes 都維持完整市場流程，非空 codes 在 registry 前 fail closed")
+    void v13UniverseModeSeparatesFullMarketFromBoundedDiagnostic() {
+        List<StockPriceHistory> asc = series(330, 100, 0.001, 999, 0.0);
+        stubRepos(asc, List.of());
+        BacktestService candidateService = serviceWithAlwaysTradableCandidate();
+
+        BacktestDto.V13Report missingCodes = candidateService.run(new BacktestDto.Request(
+                null, null, null, List.of(5, 20), null, null,
+                Set.of(TW), new BigDecimal("0.70"), 3, null, false)).v13();
+        BacktestDto.V13Report emptyCodes = candidateService.run(new BacktestDto.Request(
+                List.of(), null, null, List.of(5, 20), null, null,
+                Set.of(TW), new BigDecimal("0.70"), 3, null, false)).v13();
+        BacktestDto.V13Report bounded = candidateService.run(new BacktestDto.Request(
+                List.of(CODE), null, null, List.of(5, 20), null, null,
+                Set.of(TW), new BigDecimal("0.70"), 3, null, false)).v13();
+
+        assertThat(missingCodes.universeMode()).isEqualTo(BacktestDto.UniverseMode.FULL_MARKET);
+        assertThat(emptyCodes.universeMode()).isEqualTo(BacktestDto.UniverseMode.FULL_MARKET);
+        assertThat(emptyCodes.selectedCandidates()).isEqualTo(missingCodes.selectedCandidates());
+        assertThat(emptyCodes.selectedParameterSnapshots())
+                .isEqualTo(missingCodes.selectedParameterSnapshots());
+        assertThat(emptyCodes.promotedCandidateCount())
+                .isEqualTo(missingCodes.promotedCandidateCount());
+
+        assertThat(bounded.universeMode()).isEqualTo(BacktestDto.UniverseMode.BOUNDED_DIAGNOSTIC);
+        assertThat(bounded.productionPromoted()).isFalse();
+        assertThat(bounded.promotedCandidateCount()).isZero();
+        assertThat(bounded.selectedCandidates()).isEmpty();
+        assertThat(bounded.selectedParameterSnapshots()).isEmpty();
+        assertThat(bounded.marketHorizons()).isNotEmpty().allSatisfy(row -> {
+            assertThat(row.promotionStatus()).isEqualTo("INSUFFICIENT_DIAGNOSTIC_ONLY");
+            assertThat(row.rejectionReason()).isEqualTo("INSUFFICIENT_DIAGNOSTIC_ONLY");
+            assertThat(row.promotionEvidenceScope()).isEqualTo("NONE");
+            assertThat(row.candidateCalibration()).isNotEmpty();
+            assertThat(row.folds()).allSatisfy(fold ->
+                    assertThat(fold.jointRequiredHorizons()).containsExactly(5, 20));
+        });
+        assertThat(bounded.notes()).anyMatch(note -> note.contains("registry 前 fail closed"));
     }
 
     @Test
@@ -420,7 +462,7 @@ class BacktestServiceTest {
                 priceHistoryRepo, dividendHistoryRepo, twseRepo, usIndexRepo, exchangeRateRepo,
                 etfNavHistoryRepo, stockRepo, adjust, marketContextService, fundamentalAnalysisService);
         BacktestDto.Response response = candidateService.run(new BacktestDto.Request(
-                List.of(CODE), null, null, List.of(1), null, null,
+                null, null, null, List.of(1), null, null,
                 Set.of(TW), new BigDecimal("0.70"), 3, null, false));
 
         BacktestDto.MarketHorizonExecution report = response.v13().marketHorizons().stream()
@@ -445,6 +487,7 @@ class BacktestServiceTest {
                 .isGreaterThan(BigDecimal.ZERO);
         assertThat(response.v13().selectedCandidates().values())
                 .anyMatch(id -> id.contains("SELECTIVE"));
+        assertThat(response.v13().universeMode()).isEqualTo(BacktestDto.UniverseMode.FULL_MARKET);
         assertThat(report.calibration().status()).isEqualTo("AVAILABLE");
         assertThat(report.calibration().candidate()).isNotNull();
         assertThat(report.calibration().baseline()).isNotNull();
@@ -783,6 +826,10 @@ class BacktestServiceTest {
         BacktestDto.V13Report v13 = response.v13();
         assertThat(v13.productionRuleVersion()).isEqualTo("TW_RULES_V12");
         assertThat(v13.productionPromoted()).isFalse();
+        assertThat(v13.universeMode()).isEqualTo(BacktestDto.UniverseMode.BOUNDED_DIAGNOSTIC);
+        assertThat(v13.promotedCandidateCount()).isZero();
+        assertThat(v13.selectedCandidates()).isEmpty();
+        assertThat(v13.selectedParameterSnapshots()).isEmpty();
         assertThat(v13.assumptions()).hasSize(3);
         assertThat(v13.assumptions()).allSatisfy(assumption -> {
             assertThat(assumption.assumption().effectiveFrom()).isNull();
@@ -859,9 +906,10 @@ class BacktestServiceTest {
                     .isEqualTo(asc.get(241).getTradingDate().toString());
             assertThat(report.firstPrimaryExecution().exitDate())
                     .isEqualTo(asc.get(242).getTradingDate().toString());
-            assertThat(report.promotionStatus()).isEqualTo("INSUFFICIENT_RETAIN_V12");
+            assertThat(report.promotionStatus()).isEqualTo("INSUFFICIENT_DIAGNOSTIC_ONLY");
             assertThat(report.rejectionReason())
-                    .isEqualTo("INSUFFICIENT_CALIBRATION_INTERSECTION");
+                    .isEqualTo("INSUFFICIENT_DIAGNOSTIC_ONLY");
+            assertThat(report.promotionEvidenceScope()).isEqualTo("NONE");
             assertThat(report.candidateCalibration()).hasSize(34)
                     .allSatisfy(candidate -> assertThat(candidate.ruleVersion())
                             .isEqualTo(RuleParameters.V13_VERSION));

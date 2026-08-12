@@ -25,18 +25,18 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
-import static org.mockito.ArgumentMatchers.anySet;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
  * Task 301：通知冷卻只擋 email、不影響 {@code last_action} 基準。
  *
- * <p>{@code transition}／{@code tradingRadarService} 皆為 mock，固定回傳「動作轉入 EXIT_CANDIDATE」
- * 的情境；轉入語意本身已由 {@link TradingRadarNotificationTransitionTest} 覆蓋，這裡只驗證冷卻本身
- * 的抑制／放行與 {@code lastNotifiedAt} 寫入。</p>
+ * <p>{@code tradingRadarService} 以決策 fixture 控制動作；transition 則使用真實
+ * {@link TradingRadarNotificationTransition}，確保 integration test 必須實際從 baseline 轉入
+ * 訂閱狀態，不能由 mock 直接宣告 {@code actionEntered=true}。</p>
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -50,9 +50,10 @@ class TradingRadarNotificationServiceTest {
     @Mock private TradingRadarNotificationStateRepository stateRepo;
     @Mock private AssetSnapshotRepository snapshotRepo;
     @Mock private TradingRadarService tradingRadarService;
-    @Mock private TradingRadarNotificationTransition transition;
     @Mock private TradingRadarNotificationDispatcher dispatcher;
     @Mock private ObjectProvider<TradingRadarNotificationService> self;
+    private final TradingRadarNotificationTransition transition =
+            new TradingRadarNotificationTransition();
 
     /** flushEvaluations() 每輪每市場只組一次（Task 302）；本檔只驗冷卻，snapshot 內容本身不重要。 */
     private static final TradingRadarService.MarketSnapshot SNAPSHOT =
@@ -68,6 +69,7 @@ class TradingRadarNotificationServiceTest {
         setting = TradingRadarNotificationSetting.builder()
                 .id(SETTING_ID).ownerUserId(1L).stockCode(STOCK_CODE).market(MARKET)
                 .active(true).initialized(true).ruleVersion(TradingRadarRuleEngine.RULE_VERSION)
+                .actionPolicyVersion(TradingRadarEvidenceGate.ACTION_POLICY_VERSION)
                 .lastAction("HOLD").lastCounterTrendState("NONE")
                 .build();
         when(settingRepo.findByActiveTrueAndStockCodeAndMarket(STOCK_CODE, MARKET))
@@ -75,15 +77,20 @@ class TradingRadarNotificationServiceTest {
         when(tradingRadarService.buildMarketSnapshot(MARKET)).thenReturn(SNAPSHOT);
         when(tradingRadarService.evaluateForNotification(eq(STOCK_CODE), eq(MARKET), anyBoolean(), eq(SNAPSHOT)))
                 .thenReturn(decision());
-        // actionEntered=true／counterTrendEntered=false：每個案例只需操心單一狀態的冷卻。
-        when(transition.evaluate(anyBoolean(), any(), any(), any(), any(), anySet(), anySet()))
-                .thenReturn(new TradingRadarNotificationTransition.Result(true, false, "EXIT_CANDIDATE", "NONE"));
+        when(stateRepo.findStateCodes(SETTING_ID, TradingRadarNotificationState.TYPE_ACTION))
+                .thenReturn(List.of("EXIT_CANDIDATE"));
+        when(stateRepo.findStateCodes(SETTING_ID, TradingRadarNotificationState.TYPE_COUNTER_TREND))
+                .thenReturn(List.of());
     }
 
     private static TradingRadarDto.StockDecision decision() {
+        return decision("EXIT_CANDIDATE", "出場候選");
+    }
+
+    private static TradingRadarDto.StockDecision decision(String action, String actionLabel) {
         return new TradingRadarDto.StockDecision(
                 STOCK_CODE, "台積電", MARKET, "STOCK", false, false,
-                "EXIT_CANDIDATE", "出場候選", 70,
+                action, actionLabel, 70,
                 "NONE", "無", List.of(), List.of(),
                 true, BigDecimal.TEN, BigDecimal.ONE,
                 "REALTIME", "2026-08-09T10:00:00+08:00", "2026-08-09",
@@ -140,5 +147,77 @@ class TradingRadarNotificationServiceTest {
 
         verify(dispatcher).enqueue(eq(SETTING_ID), any(), eq(List.of("出場候選")));
         assertTrue(row.getLastNotifiedAt().isAfter(longAgo));
+    }
+
+    @Test
+    void v12加nullActionPolicy首輪只重建gatedBaseline且零冷卻寫入() {
+        setting.setActionPolicyVersion(null);
+        setting.setLastAction("BUY_CANDIDATE");
+
+        service.queueEvaluation(STOCK_CODE, MARKET);
+        service.flushEvaluations();
+
+        assertEquals("EXIT_CANDIDATE", setting.getLastAction());
+        assertEquals("NONE", setting.getLastCounterTrendState());
+        assertEquals(TradingRadarRuleEngine.RULE_VERSION, setting.getRuleVersion());
+        assertEquals(TradingRadarEvidenceGate.ACTION_POLICY_VERSION,
+                setting.getActionPolicyVersion());
+        assertTrue(setting.getInitialized());
+        verify(dispatcher, never()).enqueue(any(), any(), any());
+        verify(stateRepo, never()).findBySettingId(any());
+        verify(stateRepo, never()).save(any());
+        verify(settingRepo).save(setting);
+    }
+
+    @Test
+    void 舊ActionPolicy首輪只重建而下一個真實transition才通知() {
+        setting.setActionPolicyVersion("EVIDENCE_GATE_OLD");
+        setting.setLastAction("BUY_CANDIDATE");
+        TradingRadarNotificationState row = actionRow(null);
+        when(stateRepo.findBySettingId(SETTING_ID)).thenReturn(List.of(row));
+        when(tradingRadarService.evaluateForNotification(
+                eq(STOCK_CODE), eq(MARKET), anyBoolean(), eq(SNAPSHOT)))
+                .thenReturn(decision("HOLD", "續抱"), decision("HOLD", "續抱"), decision());
+
+        // 首輪版本不相符：只把當前 HOLD 建成新 baseline。
+        service.queueEvaluation(STOCK_CODE, MARKET);
+        service.flushEvaluations();
+
+        verify(dispatcher, never()).enqueue(any(), any(), any());
+        verify(stateRepo, never()).findBySettingId(any());
+        assertEquals("HOLD", setting.getLastAction());
+
+        // 第二輪仍是 HOLD：真實 transition 判定沒有轉入，不通知也不讀冷卻列。
+        service.queueEvaluation(STOCK_CODE, MARKET);
+        service.flushEvaluations();
+
+        verify(dispatcher, never()).enqueue(any(), any(), any());
+        verify(stateRepo, never()).findBySettingId(any());
+        assertEquals("HOLD", setting.getLastAction());
+
+        // 第三輪真實轉入已訂閱的 EXIT_CANDIDATE，這時才通知並寫 cooldown。
+        service.queueEvaluation(STOCK_CODE, MARKET);
+        service.flushEvaluations();
+
+        verify(dispatcher, times(1)).enqueue(eq(SETTING_ID), any(), eq(List.of("出場候選")));
+        assertNotNull(row.getLastNotifiedAt());
+        assertEquals("EXIT_CANDIDATE", setting.getLastAction());
+    }
+
+    @Test
+    void 兩版本相符但initializedFalse仍只建baseline() {
+        setting.setInitialized(false);
+        setting.setLastAction("BUY_CANDIDATE");
+
+        service.queueEvaluation(STOCK_CODE, MARKET);
+        service.flushEvaluations();
+
+        assertTrue(setting.getInitialized());
+        assertEquals("EXIT_CANDIDATE", setting.getLastAction());
+        assertEquals(TradingRadarEvidenceGate.ACTION_POLICY_VERSION,
+                setting.getActionPolicyVersion());
+        verify(dispatcher, never()).enqueue(any(), any(), any());
+        verify(stateRepo, never()).findBySettingId(any());
+        verify(stateRepo, never()).save(any());
     }
 }

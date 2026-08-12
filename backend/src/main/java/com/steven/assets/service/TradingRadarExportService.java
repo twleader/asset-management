@@ -115,7 +115,7 @@ public class TradingRadarExportService {
         ExportDoc.Line note = new ExportDoc.Line(text,
                 range.missingCount() > 0 ? ExportDoc.LineStyle.WARN : ExportDoc.LineStyle.SECTION_12);
 
-        List<String> headers = List.of("快照時間", "規則版本", "大盤 regime", "大盤中文",
+        List<String> headers = List.of("快照時間", "規則版本", "動作政策版本", "大盤 regime", "大盤中文",
                 "大盤分數", "大盤 stale", "個股檔數", "略過非台股非美股檔數");
         List<List<Object>> rows = new ArrayList<>();
         for (JsonNode s : range.snapshots()) {
@@ -123,13 +123,16 @@ public class TradingRadarExportService {
             JsonNode stocks = s.path("stocks");
             rows.add(Arrays.asList(
                     txt(s, "generatedAt"), txt(s, "ruleVersion"),
+                    nullableText(s, "actionPolicyVersion"),
                     txt(m, "regime"), txt(m, "regimeLabel"),
                     num(m, "score"), boolVal(m, "stale"),
                     stocks.isArray() ? stocks.size() : 0, num(s, "skippedNonTwStocks")));
         }
         return new ExportDoc.Sheet("快照索引",
                 List.of(note, new ExportDoc.Table(null, null, headers, true, false, false,
-                        List.of(ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.NUM2, ExportDoc.Format.BOOL_ZH, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT), rows)),
+                        List.of(ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT,
+                                ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.NUM2,
+                                ExportDoc.Format.BOOL_ZH, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT), rows)),
                 headers.size());
     }
 

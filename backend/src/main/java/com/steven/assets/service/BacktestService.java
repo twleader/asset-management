@@ -828,6 +828,9 @@ public class BacktestService {
 
     private BacktestDto.V13Report buildV13Report(
             BacktestDto.Request request, List<Integer> legacyNormalizedHorizons) {
+        BacktestDto.UniverseMode universeMode = request.codes() == null || request.codes().isEmpty()
+                ? BacktestDto.UniverseMode.FULL_MARKET
+                : BacktestDto.UniverseMode.BOUNDED_DIAGNOSTIC;
         Set<String> markets = normalizeV13Markets(request.markets());
         List<Integer> horizons = normalizeV13Horizons(request.horizons(), legacyNormalizedHorizons);
         LocalDate from = parseV13Date(request.from(), "from");
@@ -951,36 +954,39 @@ public class BacktestService {
         // 只將 selected candidate 的 untouched holdout/fold evidence 送進 immutable gate；
         // production fold 的可用性由 exact-key joint calendar/sigma 決定，不能再用單一
         // horizon/diagnostic stratum 的 fold profile 取代。
-        V13RegistryBuild registryBuild = buildV13Registry(
-                analyses, candidateGridsByMarket, sigmaProfilesByMarket);
+        V13RegistryBuild registryBuild = buildV13Evidence(
+                analyses, candidateGridsByMarket, sigmaProfilesByMarket, universeMode);
         failures.addAll(registryBuild.failures());
         TradingRadarV13PromotionRegistry registry = registryBuild.registry();
         List<BacktestDto.MarketHorizonExecution> reports = analyses.values().stream()
                 .map(analysis -> toV13GroupReport(
-                        analysis, registry, registryBuild.jointFoldSelections()))
+                        analysis, registry, registryBuild.jointFoldSelections(), universeMode))
                 .sorted(Comparator.comparing(BacktestDto.MarketHorizonExecution::market)
                         .thenComparingInt(BacktestDto.MarketHorizonExecution::horizon)
                         .thenComparing(report -> Objects.toString(report.instrumentKind(), ""))
                         .thenComparing(report -> Objects.toString(report.productionProfile(), "")))
                 .toList();
         Map<String, String> selectedCandidates = new LinkedHashMap<>();
-        analyses.values().stream()
-                .filter(analysis -> analysis.selectedCandidate() != null)
-                .forEach(analysis -> selectedCandidates.put(
-                    v13GroupLabel(analysis.key()),
-                    analysis.selectedCandidate().parameterSetId()));
         Map<String, BacktestDto.RuleParameterSnapshot> selectedParameterSnapshots = new LinkedHashMap<>();
-        analyses.values().stream()
-                .filter(analysis -> analysis.selectedCandidate() != null)
-                .forEach(analysis -> selectedParameterSnapshots.put(
-                        v13GroupLabel(analysis.key()),
-                        parameterSnapshot(analysis.selectedCandidate(), analysis.sigmaProfile())));
+        if (universeMode == BacktestDto.UniverseMode.FULL_MARKET) {
+            analyses.values().stream()
+                    .filter(analysis -> analysis.selectedCandidate() != null)
+                    .forEach(analysis -> selectedCandidates.put(
+                            v13GroupLabel(analysis.key()),
+                            analysis.selectedCandidate().parameterSetId()));
+            analyses.values().stream()
+                    .filter(analysis -> analysis.selectedCandidate() != null)
+                    .forEach(analysis -> selectedParameterSnapshots.put(
+                            v13GroupLabel(analysis.key()),
+                            parameterSnapshot(analysis.selectedCandidate(), analysis.sigmaProfile())));
+        }
         List<String> gridIds = candidateGridsByMarket.values().stream()
                 .flatMap(List::stream).map(RuleParameters::parameterSetId).distinct().toList();
 
         return new BacktestDto.V13Report(
                 TradingRadarRuleEngine.RULE_VERSION,
                 false,
+                universeMode,
                 ratio,
                 requestedFolds,
                 includeSensitivity,
@@ -996,12 +1002,15 @@ public class BacktestService {
                                 .map(entry -> entry.getKey() + ":" + entry.getValue().note())
                                 .toList().toString(),
                         "每個 walk-forward fold 都在 trainTo 重新建立 adjusted completed-close sigma profile/grid；profile 無法由 train-only evidence 建立時，標記 FOLD_SIGMA_PROFILE_UNAVAILABLE 並 fail-closed。",
-                        "registry promotion 僅為本次 report 的 immutable evidence；production runtime 仍明確維持 TW_RULES_V12。",
-                        "report registry promoted key 數=" + registry.promotedParameters().size()
-                                + "；未通過或缺證據的 key 維持 V12 fallback。"),
+                        universeMode == BacktestDto.UniverseMode.FULL_MARKET
+                                ? "registry promotion 僅為本次 report 的 immutable evidence；production runtime 仍明確維持 TW_RULES_V12。"
+                                : "BOUNDED_DIAGNOSTIC 僅保留逐列診斷；在建立 production registry 前 fail closed。",
+                        "report registry promoted key 數="
+                                + (registry == null ? 0 : registry.promotedParameters().size())
+                                + "；未通過、bounded 或缺證據的 key 維持 V12 fallback。"),
                 List.copyOf(gridIds),
                 Map.copyOf(selectedCandidates),
-                registry.promotedParameters().size(),
+                registry == null ? 0 : registry.promotedParameters().size(),
                 Map.copyOf(selectedParameterSnapshots));
     }
 
@@ -1597,7 +1606,8 @@ public class BacktestService {
             V13GroupAnalysis analysis,
             TradingRadarV13PromotionRegistry registry,
             Map<TradingRadarV13PromotionRegistry.ProductionKey,
-                    Map<Integer, JointFoldSelection>> jointFoldSelections) {
+                    Map<Integer, JointFoldSelection>> jointFoldSelections,
+            BacktestDto.UniverseMode universeMode) {
         V13GroupKey key = analysis.key();
         List<V13Attempt> attempts = analysis.attempts();
         RadarWalkForwardPlan.ChronologicalSplit split = analysis.split();
@@ -1626,9 +1636,13 @@ public class BacktestService {
         TradingRadarV13PromotionRegistry.HorizonDecision horizonDecision = null;
         TradingRadarV13PromotionRegistry.PromotionDecision promotionDecision = null;
         TradingRadarV13PromotionRegistry.ProductionKey productionKey = null;
-        if (analysis.track() != null && analysis.instrumentKind() != null && analysis.productionProfile() != null) {
+        if (analysis.track() != null && analysis.instrumentKind() != null
+                && analysis.productionProfile() != null) {
             productionKey = new TradingRadarV13PromotionRegistry.ProductionKey(
                     key.market(), analysis.instrumentKind(), analysis.productionProfile(), analysis.track());
+        }
+        if (universeMode == BacktestDto.UniverseMode.FULL_MARKET
+                && registry != null && productionKey != null) {
             promotionDecision = registry.decision(productionKey);
             horizonDecision = promotionDecision.horizons().get(key.horizon());
         }
@@ -1644,7 +1658,11 @@ public class BacktestService {
         String status;
         String reason;
         String promotionEvidenceScope;
-        if (!split.sufficientForCutoff()) {
+        if (universeMode == BacktestDto.UniverseMode.BOUNDED_DIAGNOSTIC) {
+            status = "INSUFFICIENT_DIAGNOSTIC_ONLY";
+            reason = "INSUFFICIENT_DIAGNOSTIC_ONLY";
+            promotionEvidenceScope = "NONE";
+        } else if (!split.sufficientForCutoff()) {
             status = "INSUFFICIENT_RETAIN_V12";
             reason = "INSUFFICIENT_GLOBAL_TRADABLE_DATES";
             promotionEvidenceScope = "NONE";
@@ -1735,12 +1753,17 @@ public class BacktestService {
                 purgeEmbargoEvidence(primary, split, folds));
     }
 
-    private V13RegistryBuild buildV13Registry(
+    private V13RegistryBuild buildV13Evidence(
             Map<V13GroupKey, V13GroupAnalysis> analyses,
             Map<String, List<RuleParameters>> candidateGridsByMarket,
-            Map<String, CalibrationSigmaProfile> sigmaProfilesByMarket) {
+            Map<String, CalibrationSigmaProfile> sigmaProfilesByMarket,
+            BacktestDto.UniverseMode universeMode) {
+        boolean registryAllowed = universeMode == BacktestDto.UniverseMode.FULL_MARKET;
+        // Bounded requests intentionally never allocate a promotion candidate map and never
+        // call TradingRadarV13PromotionRegistry.build(). Joint-fold diagnostics remain visible.
         Map<TradingRadarV13PromotionRegistry.ProductionKey,
-                TradingRadarV13PromotionRegistry.CandidatePromotion> candidates = new LinkedHashMap<>();
+                TradingRadarV13PromotionRegistry.CandidatePromotion> candidates = registryAllowed
+                ? new LinkedHashMap<>() : null;
         Map<TradingRadarV13PromotionRegistry.ProductionKey,
                 Map<Integer, JointFoldSelection>> jointFoldSelections = new LinkedHashMap<>();
         List<String> jointFailures = new ArrayList<>();
@@ -1804,6 +1827,9 @@ public class BacktestService {
                                     + track + "/fold=" + foldIndex + ":" + reason);
                         }
                     });
+                    if (!registryAllowed) {
+                        continue;
+                    }
                     /*
                      * Production selection is track-scoped, not horizon-scoped.  The
                      * diagnostic analyses above still select a parameter independently so
@@ -1849,7 +1875,7 @@ public class BacktestService {
             }
         }
         return new V13RegistryBuild(
-                TradingRadarV13PromotionRegistry.build(candidates),
+                registryAllowed ? TradingRadarV13PromotionRegistry.build(candidates) : null,
                 Map.copyOf(jointFoldSelections), List.copyOf(jointFailures));
     }
 
@@ -4230,6 +4256,7 @@ public class BacktestService {
               .append("v13_metadata,key,value\n")
               .append("v13_metadata,productionRuleVersion,").append(csvCell(r.v13().productionRuleVersion())).append('\n')
               .append("v13_metadata,productionPromoted,").append(r.v13().productionPromoted()).append('\n')
+              .append("v13_metadata,universeMode,").append(r.v13().universeMode()).append('\n')
               .append("v13_metadata,calibrationRatio,").append(csvNum(r.v13().calibrationRatio())).append('\n')
               .append("v13_metadata,walkForwardFolds,").append(r.v13().walkForwardFolds()).append('\n')
               .append("v13_metadata,closeFallbackSensitivityIncluded,")

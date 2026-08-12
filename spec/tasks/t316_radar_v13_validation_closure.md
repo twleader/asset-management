@@ -95,4 +95,67 @@ docker compose -p asset-management exec -T business-services sh -c \
 
 ## 完成報告
 
-（回填 full regression、image/container/health、台美 API／頁面／匯出抽查、真實 request 期間與 universe、逐 production key 結論，以及所有未完成項與原因。若保留 V12，明確寫這是 gate 的正確結果。）
+### 本地實作與契約證據（2026-08-12）
+
+- 316.1 已實作 typed `TradingRadarSessionCalendarPort` 與唯一 Spring production adapter
+  `MarketDataTradingCalendarAdapter`。OPEN／CLOSED／empty／null／delegate exception 均有直接
+  contract test；穩定原因 `MARKET_CALENDAR_UNAVAILABLE` 由 port contract 擁有，
+  `TreasuryYieldService` 不參照 concrete adapter。production constructor 必須注入 port，
+  expected-session 搜尋與
+  lag 中途任一 UNKNOWN 皆回 `UNKNOWN_CALENDAR`，不再有 weekday fallback，並保留
+  batch/provider/manifest/available-at provenance。真實 Spring context wiring test 證明 port 只有一個
+  production bean。Task 318 既有收盤前／後、長假、3／4 sessions、future curve 與
+  provenance regression 維持原結果。
+- 316.2 已把 production `buildStock` 的最終 action 收旂到單一
+  `TradingRadarEvidenceGate.apply(...)`；頁面、快照／匯出與通知共用同一 post-gate
+  `StockDecision`。`TradingRadarRuleEngine.RULE_VERSION` 仍是 `TW_RULES_V12`，score、candidate
+  action 與 V12 parameters 不變。strict BOND fresh／stale／UNKNOWN／missing 已直接驗證
+  AVAILABLE／STALE／MISSING 及 reason/provider 保留；未 promoted beta 的 riskUnit 仍為 null，
+  stale／UNKNOWN／missing 的買進 candidate 只降級最終 action，candidate action 保留。
+  另以真實 production `evaluateForNotification` → `buildStock` mapper 注入 stable AVAILABLE
+  beta 與上升利率 shock：fresh `bond_rate` 仍為 AVAILABLE disclosure，但 V12 一律
+  `contextOnly`、`riskUnit=null`；即使整體 risk coverage 已達 70%，`asset_rate` 仍不是
+  可用風險單位，原 `EXIT_CANDIDATE` 只保留 candidate，最終保守降為 `HOLD`。
+- 已新增 `ACTION_POLICY_VERSION=EVIDENCE_GATE_V1`，Response／快照／JSON／Excel metadata
+  均顯示該版本；舊快照缺欄維持 null，不由 ruleVersion 推導。Liquibase
+  `v1.101.0-radar-notification-action-policy-version.sql` 只新增 nullable
+  `action_policy_version VARCHAR(40)`，無 default／backfill／其他 pending 欄位。通知舊列、
+  舊 policy 與 `initialized=false` 的首輪均只重建 baseline，不 enqueue、不寫 cooldown；
+  integration test 使用真實 `TradingRadarNotificationTransition`：首輪建立 HOLD baseline、
+  下一輪仍 HOLD 時零通知，再真實轉入 `EXIT_CANDIDATE` 才通知並寫 cooldown。
+- 316.6 的 request/report 契約已實作：`codes` 缺欄／null／空陣列為
+  `FULL_MARKET`；非空陣列為 `BOUNDED_DIAGNOSTIC`，並在建 production registry 前
+  fail closed。bounded report 的 `productionPromoted=false`、`promotedCandidateCount=0`、
+  頂層 selected maps 為空，每列為 `INSUFFICIENT_DIAGNOSTIC_ONLY`，且不建立可供
+  production resolver 解析的 registry；JSON／CSV 均 echo `universeMode`。
+
+### 本地 full regression
+
+- backend（含 ByteBuddy flag）：849 tests，0 failures，0 errors，0 skipped。
+- external-materials-service：規格列出的原命令在 Java 25 因 Byte Buddy 1.15.11 只官方
+  支援到 Java 24，311 tests 中 203 個 Mockito instrumentation errors；這是環境／測試
+  runtime 錯誤，不是本變更的 assertion failure。以同 backend 相容旗標
+  `-DextraArgLine=-Dnet.bytebuddy.experimental=true` 重跑後：311 tests，0 failures，
+  0 errors，0 skipped。
+- BFF：54 tests，0 failures，0 errors，0 skipped。
+- frontend：8 tests 全過；production build 完成。此 worktree 原先無 `node_modules`，
+  首次 build 因 `vite: command not found` 無法啟動；執行 `npm ci` 後以同一 build 命令
+  成功，未改 package manifests。
+- focused 契約另覆蓋 typed calendar/wiring、Treasury evidence matrix、final-action gate、
+  notification baseline/cooldown、page/notification bit-identical、snapshot/export backward compatibility、
+  V13 universe mode/zero-map/no-registry invariant。
+
+### 尚未完成，不得宣稱為 runtime／發布證據
+
+- 架構審查 Round 1 的 2 Major／1 Minor 已修正，尚待 fresh Round 2 複審；
+  本報告只是 implementation 與本地測試證據。
+- 316.4 Docker image rebuild／container recreate，image SHA／start time／Compose project，BFF restart／
+  health／log 與容器產物證據尚未執行。
+- 316.5 已登入頁面、台美 API、通知同 snapshot、Treasury／valuation provenance、
+  JSON/XLSX 一致與 browser console 的實機抽查尚未執行。
+- 316.6 真實 DB 只讀 preflight、固定 from/to、request SHA-256 與完整市場
+  70/30＋5-fold holdout 尚未執行；因此目前沒有可回填的真實期間、逐
+  production key 證據或 FULL_MARKET 結論。
+- 316.7 尚不能作 `REJECTED`／`INSUFFICIENT`／`PROMOTED_CANDIDATE` 發布
+  分類。production 仍明確保留 `TW_RULES_V12`，`productionPromoted=false`；在 runtime
+  與真實 FULL_MARKET holdout 證據完整前，保留 V12 是 fail-closed gate 的正確結果。

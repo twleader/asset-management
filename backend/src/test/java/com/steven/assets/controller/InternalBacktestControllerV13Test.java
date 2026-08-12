@@ -42,7 +42,8 @@ class InternalBacktestControllerV13Test {
     @Test
     void endpointDeserializesV13FieldsAndReturnsTypedReport() throws Exception {
         BacktestDto.V13Report v13 = new BacktestDto.V13Report(
-                "TW_RULES_V12", false, new BigDecimal("0.70"), 3, true,
+                "TW_RULES_V12", false, BacktestDto.UniverseMode.BOUNDED_DIAGNOSTIC,
+                new BigDecimal("0.70"), 3, true,
                 List.of(), List.of(), List.of(), List.of("retain V12"));
         when(backtestService.run(any())).thenReturn(new BacktestDto.Response(
                 "TW_RULES_V12", null, null, 0, List.of(1), List.of(), List.of(), List.of(),
@@ -63,6 +64,7 @@ class InternalBacktestControllerV13Test {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.ruleVersion").value("TW_RULES_V12"))
                 .andExpect(jsonPath("$.v13.productionPromoted").value(false))
+                .andExpect(jsonPath("$.v13.universeMode").value("BOUNDED_DIAGNOSTIC"))
                 .andExpect(jsonPath("$.v13.calibrationRatio").value(0.70))
                 .andExpect(jsonPath("$.v13.walkForwardFolds").value(3));
 
@@ -71,6 +73,24 @@ class InternalBacktestControllerV13Test {
         assertThat(captor.getValue().v13Requested()).isTrue();
         assertThat(captor.getValue().markets()).containsExactlyInAnyOrder("台股", "美股");
         assertThat(captor.getValue().horizons()).containsExactly(1);
+    }
+
+    @Test
+    void jacksonKeepsMissingNullAndEmptyCodesDistinctFromNonEmptyWithoutInventingValues() throws Exception {
+        ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
+
+        BacktestDto.Request missing = mapper.readValue("{\"markets\":[\"台股\"]}", BacktestDto.Request.class);
+        BacktestDto.Request explicitNull = mapper.readValue(
+                "{\"codes\":null,\"markets\":[\"台股\"]}", BacktestDto.Request.class);
+        BacktestDto.Request empty = mapper.readValue(
+                "{\"codes\":[],\"markets\":[\"台股\"]}", BacktestDto.Request.class);
+        BacktestDto.Request bounded = mapper.readValue(
+                "{\"codes\":[\"2330\"],\"markets\":[\"台股\"]}", BacktestDto.Request.class);
+
+        assertThat(missing.codes()).isNull();
+        assertThat(explicitNull.codes()).isNull();
+        assertThat(empty.codes()).isEmpty();
+        assertThat(bounded.codes()).containsExactly("2330");
     }
 
     @Test

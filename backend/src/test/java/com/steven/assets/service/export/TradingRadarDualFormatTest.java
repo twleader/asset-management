@@ -58,7 +58,8 @@ class TradingRadarDualFormatTest {
         when(store.range(1L, 0L, 1L)).thenReturn(
                 new TradingRadarSnapshotStore.SnapshotRange(List.of(snapshotNode()), 2, 1));
         Workbook actual = GoldenWorkbooks.read(service.exportForOwner(1L, 0L, 1L));
-        assertSameMapped(GoldenWorkbooks.golden("radar"), actual, "快照索引", c -> c);
+        assertSameMapped(GoldenWorkbooks.golden("radar"), actual, "快照索引",
+                TradingRadarDualFormatTest::mapPreActionPolicyIndex);
         assertThat(actual.getSheet("大盤總覽")).isNotNull();
         assertThat(actual.getSheet("個股決策")).isNotNull();
         assertThat(actual.getSheet("台美公開資訊")).isNotNull();
@@ -70,7 +71,8 @@ class TradingRadarDualFormatTest {
         when(store.range(2L, 0L, 1L)).thenReturn(
                 new TradingRadarSnapshotStore.SnapshotRange(List.of(), 0, 0));
         Workbook actual = GoldenWorkbooks.read(service.exportForOwner(2L, 0L, 1L));
-        assertSameMapped(GoldenWorkbooks.golden("radar_empty"), actual, "快照索引", c -> c);
+        assertSameMapped(GoldenWorkbooks.golden("radar_empty"), actual, "快照索引",
+                TradingRadarDualFormatTest::mapPreActionPolicyIndex);
         assertThat(actual.getSheet("大盤總覽").getRow(0)).isNotNull();
         assertThat(actual.getSheet("個股決策").getRow(0)).isNotNull();
         assertThat(actual.getSheet("台美公開資訊").getRow(0)).isNotNull();
@@ -319,7 +321,11 @@ class TradingRadarDualFormatTest {
                 .containsExactlyElementsOf(VALUATION_COMPONENT_HEADERS_EXPECTED);
         assertThat(new HashSet<>(STOCK_HEADERS_V11)).hasSameSizeAs(STOCK_HEADERS_V11);
         assertThat(wb.getSheet("快照索引").getRow(1).getLastCellNum())
-                .as("快照索引一欄都不動").isEqualTo((short) 8);
+                .as("快照索引新增動作政策版本 metadata").isEqualTo((short) 9);
+        assertThat(wb.getSheet("快照索引").getRow(1).getCell(2).getStringCellValue())
+                .isEqualTo("動作政策版本");
+        assertThat(wb.getSheet("快照索引").getRow(2).getCell(2).getStringCellValue())
+                .isEqualTo("EVIDENCE_GATE_V1");
     }
 
     @Test
@@ -527,7 +533,8 @@ class TradingRadarDualFormatTest {
         Workbook actual = GoldenWorkbooks.read(service.exportForOwner(1L, 0L, 1L));
         Workbook pre = GoldenWorkbooks.golden("radar_pre_t281");
 
-        assertSameMapped(pre, actual, "快照索引", c -> c);
+        assertSameMapped(pre, actual, "快照索引",
+                TradingRadarDualFormatTest::mapPreActionPolicyIndex);
         assertThat(actual.getSheet("大盤總覽")).isNotNull();
         assertThat(actual.getSheet("個股決策")).isNotNull();
 
@@ -536,7 +543,8 @@ class TradingRadarDualFormatTest {
                 new TradingRadarSnapshotStore.SnapshotRange(List.of(), 0, 0));
         Workbook actualEmpty = GoldenWorkbooks.read(service.exportForOwner(2L, 0L, 1L));
         Workbook preEmpty = GoldenWorkbooks.golden("radar_empty_pre_t281");
-        assertSameMapped(preEmpty, actualEmpty, "快照索引", c -> c);
+        assertSameMapped(preEmpty, actualEmpty, "快照索引",
+                TradingRadarDualFormatTest::mapPreActionPolicyIndex);
         assertThat(actualEmpty.getSheet("大盤總覽")).isNotNull();
         assertThat(actualEmpty.getSheet("個股決策")).isNotNull();
     }
@@ -577,6 +585,11 @@ class TradingRadarDualFormatTest {
                 assertThat(af.getFontHeightInPoints()).as("%s 字級", where).isEqualTo(ef.getFontHeightInPoints());
             }
         }
+    }
+
+    /** t316 在規則版本後新增一欄；此前既有欄逐格右移一格。 */
+    private static int mapPreActionPolicyIndex(int oldIndex) {
+        return oldIndex < 2 ? oldIndex : oldIndex + 1;
     }
 
     // ===== fixture（與 golden 產生器逐字相同）=====
@@ -684,6 +697,7 @@ class TradingRadarDualFormatTest {
         ObjectNode root = M.createObjectNode();
         root.put("generatedAt", "2026-07-31T13:30:00");
         root.put("ruleVersion", "TW_RULES_V6");
+        root.put("actionPolicyVersion", "EVIDENCE_GATE_V1");
         root.put("skippedNonTwStocks", 1);
         ObjectNode m = root.putObject("market");
         m.put("regime", "BULL"); m.put("regimeLabel", "多頭");

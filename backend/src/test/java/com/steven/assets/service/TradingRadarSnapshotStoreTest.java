@@ -85,6 +85,14 @@ class TradingRadarSnapshotStoreTest {
         return new TradingRadarDto.Response("TW_RULES_V5", generatedAt, m, List.of(), 0);
     }
 
+    private TradingRadarDto.Response currentPolicyResp(String generatedAt) {
+        TradingRadarDto.Response legacy = resp(generatedAt);
+        return new TradingRadarDto.Response(
+                legacy.ruleVersion(), TradingRadarEvidenceGate.ACTION_POLICY_VERSION,
+                legacy.generatedAt(), legacy.market(), legacy.stocks(),
+                legacy.skippedNonTwStocks(), legacy.publicInformation());
+    }
+
     @Test
     void 節流窗內不重複寫() {
         long ts = epoch("2026-07-20T10:00:00+08:00");
@@ -223,6 +231,22 @@ class TradingRadarSnapshotStoreTest {
         assertThat(r.indexCount()).isEqualTo(2);
         assertThat(r.missingCount()).isEqualTo(1);
         assertThat(r.snapshots().get(0).path("ruleVersion").asText()).isEqualTo("TW_RULES_V5");
+        assertThat(r.snapshots().get(0).path("actionPolicyVersion").isNull()).isTrue();
+    }
+
+    @Test
+    void currentSnapshotRoundTripKeepsExplicitActionPolicyVersion() throws Exception {
+        long ts = 300L;
+        when(zsetOps.rangeByScore(eq(IDX_KEY), anyDouble(), anyDouble()))
+                .thenReturn(new LinkedHashSet<>(List.of(Long.toString(ts))));
+        when(valueOps.get("trading-radar:snap:1:" + ts)).thenReturn(gzipB64(
+                mapper.writeValueAsString(currentPolicyResp("2026-07-20T10:00:00+08:00"))));
+
+        TradingRadarSnapshotStore.SnapshotRange range = store.range(1L, 0L, 400L);
+
+        assertThat(range.snapshots()).singleElement().satisfies(snapshot ->
+                assertThat(snapshot.path("actionPolicyVersion").asText())
+                        .isEqualTo(TradingRadarEvidenceGate.ACTION_POLICY_VERSION));
     }
 
     private static String gzipB64(String json) throws Exception {
