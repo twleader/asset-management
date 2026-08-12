@@ -656,7 +656,19 @@ public final class TradingRadarDto {
             Double mediumRiskCoverage,
             String candidateAction,
             String shortCandidateAction,
-            List<String> actionGateReasons
+            List<String> actionGateReasons,
+            /**
+             * ETF <b>即時</b>折溢價（%）；1.2 表示溢價 1.2%、負值為折價（Task 320）。純揭露、不進任何規則。
+             *
+             * <p><b>與上方 {@code etfPremiumPct} 是兩個不同語意的值，不可互相取代</b>：
+             * {@code etfPremiumPct} 是 dated observation（只認已完成交易日，進 buyGate 硬否決與 OVERBOUGHT 判定，
+             * 美股恆為 null）；本欄是與該列現價同一 tick 的即時值（台股取證交所權威值、美股以該列現價反推），
+             * 盤中兩者本來就會不同。把即時值寫回 {@code etfPremiumPct} 會讓未完成 session 的 NAV 進入決策，
+             * 且盤中每 5 分鐘讓同一決策日的 veto 結果漂移一次。
+             */
+            BigDecimal etfPremiumLivePct,
+            /** 即時折溢價所用淨值的資料時點原樣字串（台股 {@code yyyyMMdd HH:mm:ss}、美股 {@code yyyy-MM-dd}）；無值為 null。 */
+            String etfPremiumLiveNavAsOf
     ) {
         /** Task 291 前的欄位形狀，供既有測試建構資料。 */
         public StockDecision(
@@ -681,7 +693,8 @@ public final class TradingRadarDto {
                     ma60BiasPercent, week52Position, weeklyMa, etfPremiumPct, etfPremiumPercentile,
                     extendedIndicators, null, null, null, List.of(), List.of(), false, null, null, false,
                     null, RadarEvidence.EMPTY, null, null, null, null, null, null,
-                    null, null, List.of());
+                    null, null, List.of(),
+                    null, null); // Task 320：etfPremiumLivePct／etfPremiumLiveNavAsOf
         }
     }
 }
