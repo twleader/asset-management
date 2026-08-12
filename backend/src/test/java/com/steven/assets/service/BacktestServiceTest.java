@@ -93,6 +93,21 @@ class BacktestServiceTest {
                 fundamentalAnalysisService);
     }
 
+    private BacktestService serviceWithAlwaysTradableCandidate() {
+        TradingRadarRuleEngine candidateEngine = spy(new TradingRadarRuleEngine());
+        RadarInputAssembler candidateAssembler = new RadarInputAssembler(
+                new TechnicalIndicatorService(priceHistoryRepo, priceQuery, twseRepo, usIndexRepo),
+                adjust, candidateEngine);
+        TradingRadarRuleEngine.StockResult buy = actionResult(
+                TradingRadarRuleEngine.Action.BUY_CANDIDATE);
+        doReturn(buy).when(candidateEngine).evaluateBaseline(any(), any());
+        doReturn(buy).when(candidateEngine).evaluateCandidate(any(), any(), any());
+        return new BacktestService(
+                candidateEngine, candidateAssembler, new AssetClassifier(),
+                priceHistoryRepo, dividendHistoryRepo, twseRepo, usIndexRepo, exchangeRateRepo,
+                etfNavHistoryRepo, stockRepo, adjust, marketContextService, fundamentalAnalysisService);
+    }
+
     private TradingRadarRuleEngine.StockResult actionResult(TradingRadarRuleEngine.Action action) {
         TradingRadarRuleEngine.CounterTrendResult counterTrend =
                 new TradingRadarRuleEngine.CounterTrendResult(
@@ -332,6 +347,9 @@ class BacktestServiceTest {
         assertThat(csv).contains("coverage,code,market,instrumentType,dataFrom,dataTo")
                 .contains("v13_metadata,key,value")
                 .contains("v13_fold,market,horizon,fold,instrumentKind,productionProfile,assetClass,stockStyle,bondTerm,confidenceDecile,promotionEvidenceScope")
+                .contains("jointTrainDateCount,jointTrainFrom,jointTrainTo,jointRequiredHorizons")
+                .contains("purgedTrainN,purgedTrainCodes,purgeBoundary")
+                .contains("excludedCostOutsideEffectiveRange")
                 .contains("assetClass,stockStyle,bondTerm,confidenceDecile")
                 .contains("promotionEvidenceScope")
                 .contains("calibrationNetP5Pct,calibrationNetP25Pct,calibrationNetP75Pct,calibrationNetP95Pct")
@@ -766,6 +784,10 @@ class BacktestServiceTest {
         assertThat(v13.productionRuleVersion()).isEqualTo("TW_RULES_V12");
         assertThat(v13.productionPromoted()).isFalse();
         assertThat(v13.assumptions()).hasSize(3);
+        assertThat(v13.assumptions()).allSatisfy(assumption -> {
+            assertThat(assumption.assumption().effectiveFrom()).isNull();
+            assertThat(assumption.assumption().effectiveTo()).isNull();
+        });
         assertThat(v13.closeFallbackSensitivityIncluded()).isTrue();
         assertThat(v13.candidateParameterSetIds())
                 .containsExactly("V12_DEFAULT", "V13_BASELINE", "V13_SELECTIVE",
@@ -786,10 +808,10 @@ class BacktestServiceTest {
                         "V13_P25_LOWER_HIGH", "V13_P25_WEAKEN_LOW",
                         "V13_P25_WEAKEN_HIGH", "V13_EVIDENCE_DOWNSIDE",
                         "V13_TREASURY_BOND_M3_Y10_Y30_LEVEL",
-                        "V13_TREASURY_BOND_Y5_Y5_Y10_SHAPE25");
+                        "V13_TREASURY_BOND_M3_Y5_Y10_SHAPE25");
         BacktestDto.RuleParameterSnapshot shapeCandidate = v13.marketHorizons().stream()
                 .flatMap(report -> report.candidateCalibration().stream())
-                .filter(candidate -> "V13_TREASURY_BOND_Y5_Y5_Y10_SHAPE25"
+                .filter(candidate -> "V13_TREASURY_BOND_M3_Y5_Y10_SHAPE25"
                         .equals(candidate.parameterSetId()))
                 .map(BacktestDto.CandidateCalibration::parameterSnapshot)
                 .findFirst()
@@ -859,6 +881,126 @@ class BacktestServiceTest {
                             .as("雙方都沒有 action 的 key 不應偽造 calibration intersection")
                             .isZero());
         });
+    }
+
+    @Test
+    @DisplayName("Task 314 成本 override 僅納入 inclusive 生效區間，區間外不進日曆或 sigma")
+    void costOverrideExclusionDoesNotEnterCalendarCalibrationOrSensitivity() {
+        List<StockPriceHistory> asc = series(270, 100, 0.001, 999, 0.0);
+        stubRepos(asc, List.of());
+        LocalDate effectiveFrom = asc.get(250).getTradingDate();
+        LocalDate effectiveTo = asc.get(260).getTradingDate();
+        BacktestDto.CostKey key = new BacktestDto.CostKey(
+                TW, BacktestDto.InstrumentKind.STOCK);
+        BacktestDto.CostAssumption override = new BacktestDto.CostAssumption(
+                BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
+                "TEST_INTERVAL", effectiveFrom, effectiveTo);
+
+        BacktestDto.MarketHorizonExecution report = service().run(new BacktestDto.Request(
+                List.of(CODE), null, null, List.of(1), null, null,
+                Set.of(TW), new BigDecimal("0.70"), 3, Map.of(key, override), true))
+                .v13().marketHorizons().getFirst();
+
+        assertThat(report.excludedCostOutsideEffectiveRange()).isEqualTo(18);
+        assertThat(report.excludedInsufficientForward()).isEqualTo(2);
+        assertThat(report.excludedMissingEntryOpen()).isZero();
+        assertThat(report.excludedMissingExitOpen()).isZero();
+        assertThat(report.globalDateCount()).isEqualTo(10);
+        assertThat(report.closeSensitivityN()).isEqualTo(10);
+        BacktestDto.SigmaSnapshot sigma = report.candidateCalibration().getFirst()
+                .parameterSnapshot().sigma();
+        assertThat(sigma.asOfFrom()).isEqualTo(asc.get(249).getTradingDate());
+        assertThat(sigma.asOfTo()).isEqualTo(asc.get(255).getTradingDate());
+        assertThat(sigma.asOfTo()).isBeforeOrEqualTo(sigma.calibrationCutoff());
+    }
+
+    @Test
+    @DisplayName("Task 314 5/20 共用 joint 交集 sigma/candidate，但各自保留 evaluation boundary 與 purge")
+    void shortTrackUsesOneJointFoldProfileWithPerHorizonBoundaries() {
+        List<StockPriceHistory> asc = series(330, 100, 0.001, 999, 0.0);
+        stubRepos(asc, List.of());
+        BacktestService candidateService = serviceWithAlwaysTradableCandidate();
+
+        BacktestDto.V13Report forward = candidateService.run(new BacktestDto.Request(
+                List.of(CODE), null, null, List.of(5, 20), null, null,
+                Set.of(TW), new BigDecimal("0.70"), 3, null, false)).v13();
+        BacktestDto.V13Report reversed = candidateService.run(new BacktestDto.Request(
+                List.of(CODE), null, null, List.of(20, 5), null, null,
+                Set.of(TW), new BigDecimal("0.70"), 3, null, false)).v13();
+
+        Map<Integer, BacktestDto.MarketHorizonExecution> byHorizon = forward.marketHorizons().stream()
+                .collect(java.util.stream.Collectors.toMap(
+                        BacktestDto.MarketHorizonExecution::horizon, row -> row));
+        BacktestDto.MarketHorizonExecution h5 = byHorizon.get(5);
+        BacktestDto.MarketHorizonExecution h20 = byHorizon.get(20);
+        assertThat(h5).isNotNull();
+        assertThat(h20).isNotNull();
+        assertThat(h5.folds()).hasSameSizeAs(h20.folds());
+        boolean differentEvaluationBoundary = false;
+        boolean horizonSpecificPurge = false;
+        for (int i = 0; i < h5.folds().size(); i++) {
+            BacktestDto.WalkForwardFold shortFold = h5.folds().get(i);
+            BacktestDto.WalkForwardFold longFold = h20.folds().get(i);
+            assertThat(shortFold.fold()).isEqualTo(longFold.fold());
+            assertThat(shortFold.jointRequiredHorizons()).containsExactly(5, 20);
+            assertThat(shortFold.jointTrainDateCount()).isPositive()
+                    .isEqualTo(longFold.jointTrainDateCount());
+            assertThat(shortFold.jointTrainFrom()).isEqualTo(longFold.jointTrainFrom());
+            assertThat(shortFold.jointTrainTo()).isEqualTo(longFold.jointTrainTo());
+            assertThat(shortFold.selectedCandidateParameterSetId())
+                    .isNotNull().isEqualTo(longFold.selectedCandidateParameterSetId());
+            assertThat(shortFold.executionEvidence().sigmaProfileStatus())
+                    .isEqualTo("JOINT_FOLD_SIGMA_PROFILE_ASOF_TRAIN")
+                    .isEqualTo(longFold.executionEvidence().sigmaProfileStatus());
+            assertThat(shortFold.executionEvidence().sigmaProfileCutoff())
+                    .isEqualTo(shortFold.jointTrainTo().toString())
+                    .isEqualTo(longFold.executionEvidence().sigmaProfileCutoff());
+            assertThat(shortFold.executionEvidence().sigmaProfileSource())
+                    .isEqualTo(longFold.executionEvidence().sigmaProfileSource());
+            assertThat(shortFold.executionEvidence().parameterSnapshot())
+                    .isEqualTo(longFold.executionEvidence().parameterSnapshot());
+            differentEvaluationBoundary |= !shortFold.evaluationFrom().equals(longFold.evaluationFrom());
+            horizonSpecificPurge |= shortFold.executionEvidence().purgedTrainN()
+                    != longFold.executionEvidence().purgedTrainN();
+        }
+        assertThat(differentEvaluationBoundary).isTrue();
+        assertThat(horizonSpecificPurge).isTrue();
+        assertThat(forward.failures()).noneMatch(reason -> reason.contains("JOINT_FOLD_"));
+
+        Map<Integer, List<String>> forwardIds = forward.marketHorizons().stream()
+                .collect(java.util.stream.Collectors.toMap(
+                        BacktestDto.MarketHorizonExecution::horizon,
+                        row -> row.folds().stream()
+                                .map(BacktestDto.WalkForwardFold::selectedCandidateParameterSetId).toList()));
+        Map<Integer, List<String>> reversedIds = reversed.marketHorizons().stream()
+                .collect(java.util.stream.Collectors.toMap(
+                        BacktestDto.MarketHorizonExecution::horizon,
+                        row -> row.folds().stream()
+                                .map(BacktestDto.WalkForwardFold::selectedCandidateParameterSetId).toList()));
+        assertThat(reversedIds).isEqualTo(forwardIds);
+    }
+
+    @Test
+    @DisplayName("Task 314 任一 joint sigma 無觀測時整個 required-horizon fold fail closed")
+    void jointFoldSigmaUnavailableFailsClosedForBothRequiredHorizons() {
+        List<StockPriceHistory> flat = series(330, 100, 0.0, 999, 0.0);
+        stubRepos(flat, List.of());
+
+        BacktestDto.V13Report report = serviceWithAlwaysTradableCandidate().run(
+                new BacktestDto.Request(
+                        List.of(CODE), null, null, List.of(5, 20), null, null,
+                        Set.of(TW), new BigDecimal("0.70"), 3, null, false)).v13();
+
+        assertThat(report.marketHorizons()).allSatisfy(horizon ->
+                assertThat(horizon.folds()).allSatisfy(fold -> {
+                    assertThat(fold.selectedCandidateParameterSetId()).isNull();
+                    assertThat(fold.executionEvidence().sigmaProfileStatus())
+                            .isEqualTo("JOINT_FOLD_SIGMA_PROFILE_UNAVAILABLE");
+                    assertThat(fold.executionEvidence().reason())
+                            .contains("JOINT_FOLD_SIGMA_PROFILE_UNAVAILABLE");
+                }));
+        assertThat(report.failures())
+                .anyMatch(reason -> reason.contains("JOINT_FOLD_SIGMA_PROFILE_UNAVAILABLE"));
     }
 
     @Test

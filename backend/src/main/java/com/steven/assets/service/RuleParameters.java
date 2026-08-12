@@ -388,11 +388,15 @@ public record RuleParameters(
         Objects.requireNonNull(baseline, "baseline");
         BigDecimal distance = BigDecimal.ZERO
                 .add(confidenceThreshold.subtract(baseline.confidenceThreshold).abs())
+                .add(normalizedBiasEnabled == baseline.normalizedBiasEnabled
+                        ? BigDecimal.ZERO : BigDecimal.ONE)
                 .add(nullableDistance(normalizedBiasFloor, baseline.normalizedBiasFloor))
                 .add(nullableDistance(normalizedBiasMultiple, baseline.normalizedBiasMultiple))
                 .add(nullableDistance(normalizedBiasUpperMultiple, baseline.normalizedBiasUpperMultiple))
                 .add(nullableDistance(normalizedBiasLowerMultiple, baseline.normalizedBiasLowerMultiple))
                 .add(downsideActionThresholdPct.subtract(baseline.downsideActionThresholdPct).abs())
+                .add(weakeningCondition.downVolumeRatioFloor()
+                        .subtract(baseline.weakeningCondition().downVolumeRatioFloor()).abs())
                 .add(thresholdDistance(shortThresholds, baseline.shortThresholds))
                 .add(thresholdDistance(mediumThresholds, baseline.mediumThresholds));
         for (CandidateWeight key : CandidateWeight.values()) {
