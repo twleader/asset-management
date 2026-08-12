@@ -53,4 +53,33 @@ bash scripts/spec-check.sh
 
 ## 完成報告
 
-（回填三種 component 的畫面／xlsx／JSON 抽查值、legacy 行為、headers/formats/rows 欄數及測試/build 證據。）
+**實作日期：** 2026-08-12
+**實作狀態：** 程式與本地測試已完成；Docker、runtime 與 browser 驗證留待全部交易雷達實作完成後統一執行，目前不宣稱已部署。
+
+### 實作結果
+
+- 後端在 VALUATION 整組不適用時仍輸出 `pe`、`pb`、`dividend_yield` 三個具名 `NOT_APPLICABLE` component，並維持整組 `participates=false`，不增加 coverage 分母；逐分量解析不再由 generic `valuationProvider/valuationAsOf` 代填。
+- 前端新增唯一的純 projection，`TradingRadarView.vue` 由該 projection 呈現三張獨立卡片；每張卡片包含 value、percentile、中文狀態、provider、as-of、available-at、缺漏原因及逐條來源連結。PE loss 保留 loss observation 的 provider/date/URL，legacy snapshot 明確顯示「舊快照未含逐分量證據」。
+- 「個股決策」共用 `ExportDoc` 在既有 154 欄尾端追加規格指定的 18 個唯一欄位，現在 headers、formats 與每一 row 均為 172 欄；狀態/provider/time/date/reason 使用 TEXT，URL 使用 LIST_LINES，JSON 與 XLSX 共用同一列資料。
+- `FundamentalAnalysisService` 的估值 composite Javadoc 已改為逐 component 可使用不同 provider/date，未變更 selection 行為。
+
+### 固定案例抽查
+
+- 畫面 projection 與匯出定向案例均保持逐項 provenance：PE=`AVAILABLE`／`TWSE`／`2026-08-07`，PB=`STALE`／`WANTGOO`／`2026-08-06`／`PB observation 已過期`，殖利率=`MISSING`／`FINMIND`／`2026-08-05`／`殖利率歷史不足 250 筆`，三者沒有串線。
+- JSON 的 PE 來源為 `https://example.test/pe-1`、`https://example.test/pe-2`；渲染後 XLSX 同欄為兩行文字，PB 資料日期為 `2026-08-06`。
+- PE loss 案例保留 `SEC_EDGAR`／`2026-06-30`／`https://example.test/loss`，並顯示可信來源虧損語意。
+- VALUATION 不適用案例的三項皆為具名 `NOT_APPLICABLE`，provider/value/reason 不造假；legacy 案例的 18 個 JSON 匯出欄位皆為 null、XLSX 為空白，generic valuation provenance 不會回填，也不會把缺值轉成 0 或 `AVAILABLE`。
+
+### 驗證證據
+
+- Backend 完整測試：828/828 通過，0 failures、0 errors、0 skipped。
+- Backend 定向測試：37/37 通過（evidence confidence resolver、export service、dual-format export）。
+- Frontend 測試：8/8 通過（既有 display quote 與新增 valuation evidence mapping）。
+- Frontend production build：通過。
+- `scripts/spec-check.sh`：BLOCK 0、CHECK 0。
+- `git diff --check`：通過。
+- 獨立 arch-auditor：0 critical、0 major、0 minor；審查 code hash=`57be51201722`。
+
+### 尚待統一 runtime 驗證
+
+尚未進行 Docker image rebuild、container recreate、實際頁面／API／browser 三卡抽查及運行中匯出下載驗證；這些項目會在所有應實作工作完成後由最終一次 `run-stack` 統一執行，因此本報告不把目前成果標示為已部署。

@@ -33,9 +33,35 @@ class TradingRadarEvidenceConfidenceResolverTest {
         assertEquals(1.0, price.shortCoverage(), 1e-9);
         assertEquals(1.0, price.mediumCoverage(), 1e-9);
         assertFalse(valuation.participates());
+        assertEquals(List.of("pe", "pb", "dividend_yield"),
+                valuation.components().stream().map(
+                        TradingRadarEvidenceConfidenceResolver.Component::name).toList());
+        assertTrue(valuation.components().stream().allMatch(component ->
+                component.applicability()
+                        == TradingRadarEvidenceConfidenceResolver.Applicability.NOT_APPLICABLE));
+        assertEquals(0.0, valuation.mediumCoverage(), 1e-9,
+                "具名 N/A components 仍必須退出 confidence 分母");
         assertFalse(financial.participates());
         assertTrue(evidence.shortConfidence() >= 0);
         assertNotNull(evidence.shortRisk());
+    }
+
+    @Test
+    void valuationComponentsUseOnlyTheirOwnEvidenceInsteadOfGenericCompositeProvenance() {
+        var profile = TradingRadarAssetProfileResolver.resolve(
+                "2330", "台股", "一般股票", null, null, "GROWTH", null, null, null);
+        var valuation = resolve(profile, fullFundamental(false))
+                .group(TradingRadarEvidenceConfidenceResolver.Group.VALUATION);
+
+        assertEquals(List.of("PE_PROVIDER", "PB_PROVIDER", "YIELD_PROVIDER"),
+                valuation.components().stream().map(
+                        TradingRadarEvidenceConfidenceResolver.Component::provider).toList());
+        assertTrue(valuation.components().stream().allMatch(component ->
+                component.applicability()
+                        == TradingRadarEvidenceConfidenceResolver.Applicability.AVAILABLE));
+        assertFalse(valuation.components().stream().anyMatch(component ->
+                "EXCHANGE".equals(component.provider())),
+                "generic valuationProvider 不得代填逐 component provenance");
     }
 
     @Test
@@ -491,7 +517,16 @@ class TradingRadarEvidenceConfidenceResolverTest {
                 "EXCHANGE", List.of("https://example.test/valuation"), "2026-08-07",
                 "半導體", bd(10), 100, "2026-07", "EXCHANGE", List.of(), "2026-08-07",
                 List.of(), List.of(), bd(20), bd(1.2), bd(4), bd(45), bd(40), .3, 3,
-                "POSITIVE_BASE_IMPROVING", roeFallback);
+                "POSITIVE_BASE_IMPROVING", roeFallback,
+                new TradingRadarDto.ValuationComponentEvidence(
+                        bd(20), bd(45), "PE_PROVIDER", List.of("https://example.test/pe"),
+                        "2026-08-07T01:00:00Z", "2026-08-07", false),
+                new TradingRadarDto.ValuationComponentEvidence(
+                        bd(1.2), bd(45), "PB_PROVIDER", List.of("https://example.test/pb"),
+                        "2026-08-07T02:00:00Z", "2026-08-07", false),
+                new TradingRadarDto.ValuationComponentEvidence(
+                        bd(4), bd(40), "YIELD_PROVIDER", List.of("https://example.test/yield"),
+                        "2026-08-07T03:00:00Z", "2026-08-07", false));
     }
 
     private static RadarInputAssembler.Assembled completeTechnical() {

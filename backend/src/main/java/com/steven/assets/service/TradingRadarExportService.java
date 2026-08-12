@@ -222,6 +222,7 @@ public class TradingRadarExportService {
                 "短期支持訊號", "短期風險提醒", "中期支持訊號", "中期風險提醒", "逆勢條件", "逆勢風險"));
         headers.addAll(EVIDENCE_HEADERS);
         headers.addAll(DETAIL_EVIDENCE_HEADERS);
+        headers.addAll(VALUATION_COMPONENT_HEADERS);
 
         List<List<Object>> rows = new ArrayList<>();
         for (JsonNode s : snapshots) {
@@ -266,6 +267,7 @@ public class TradingRadarExportService {
                 JsonNode bondRate = evidenceComponent(evidence, "ASSET_SPECIFIC", "bond_rate");
                 JsonNode treasuryRateContext = evidence.path("treasuryRateContext");
                 row.addAll(detailEvidenceCells(fundamental, evidence, profile, bondRate, treasuryRateContext));
+                row.addAll(valuationComponentCells(fundamental, evidence));
                 rows.add(row);
             }
         }
@@ -302,6 +304,7 @@ public class TradingRadarExportService {
         ));
         formats.addAll(EVIDENCE_FORMATS);
         formats.addAll(DETAIL_EVIDENCE_FORMATS);
+        formats.addAll(VALUATION_COMPONENT_FORMATS);
         return new ExportDoc.Sheet("個股決策",
                 List.of(new ExportDoc.Table(null, null, headers, true, false, false, formats, rows)),
                 headers.size());
@@ -431,6 +434,23 @@ public class TradingRadarExportService {
             ExportDoc.Format.NUM0, ExportDoc.Format.TEXT, ExportDoc.Format.LIST_LINES,
             ExportDoc.Format.BOOL_ZH, ExportDoc.Format.BOOL_ZH);
 
+    /**
+     * t315：三個估值 component 的完整 provenance 固定追加在個股決策表尾端。
+     * 欄名含 component prefix，因此 JSON object key 與 Excel header 一對一。
+     */
+    private static final List<String> VALUATION_COMPONENT_HEADERS = List.of(
+            "PE適用狀態", "PE Provider", "PE來源網址", "PE可得時間", "PE資料日期", "PE缺漏原因",
+            "PB適用狀態", "PB Provider", "PB來源網址", "PB可得時間", "PB資料日期", "PB缺漏原因",
+            "殖利率適用狀態", "殖利率 Provider", "殖利率來源網址", "殖利率可得時間", "殖利率資料日期", "殖利率缺漏原因");
+
+    private static final List<ExportDoc.Format> VALUATION_COMPONENT_FORMATS = List.of(
+            ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.LIST_LINES,
+            ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT,
+            ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.LIST_LINES,
+            ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT,
+            ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.LIST_LINES,
+            ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT);
+
     /** 依 {@link #EXT_KEYS} 順序取出 14 個值；缺欄位為 null。 */
     private static List<Object> extCells(JsonNode n) {
         List<Object> out = new ArrayList<>(EXT_KEYS.size());
@@ -485,6 +505,32 @@ public class TradingRadarExportService {
                 // These two fields are deliberately appended: pre-t309 snapshots have no
                 // assetProfile node, and boolVal() must keep their Excel cells blank/JSON null.
                 boolVal(profile, "assetClassComplete"), boolVal(profile, "underlyingCurrencyComplete"));
+    }
+
+    /**
+     * 逐 component 合併後端已解析的兩個 projection：status/reason 只讀
+     * VALUATION evidence group，provider/URL/availableAt/asOf 只讀各自
+     * {@code *Evidence}。舊快照沒有這些節點時保留 null，不用 generic valuation 欄位代填。
+     */
+    private static List<Object> valuationComponentCells(JsonNode fundamental, JsonNode evidence) {
+        List<Object> cells = new ArrayList<>(VALUATION_COMPONENT_HEADERS.size());
+        appendValuationComponentCells(cells, fundamental.path("peEvidence"),
+                evidenceComponent(evidence, "VALUATION", "pe"));
+        appendValuationComponentCells(cells, fundamental.path("pbEvidence"),
+                evidenceComponent(evidence, "VALUATION", "pb"));
+        appendValuationComponentCells(cells, fundamental.path("dividendYieldEvidence"),
+                evidenceComponent(evidence, "VALUATION", "dividend_yield"));
+        return cells;
+    }
+
+    private static void appendValuationComponentCells(
+            List<Object> cells, JsonNode componentEvidence, JsonNode applicability) {
+        cells.add(nullableText(applicability, "applicability"));
+        cells.add(nullableText(componentEvidence, "provider"));
+        cells.add(listVal(componentEvidence, "sourceUrls"));
+        cells.add(nullableText(componentEvidence, "availableAt"));
+        cells.add(nullableText(componentEvidence, "asOf"));
+        cells.add(nullableText(applicability, "missingReason"));
     }
 
     /**
@@ -555,6 +601,12 @@ public class TradingRadarExportService {
     private static String textOrDash(JsonNode node, String field) {
         JsonNode value = node.path(field);
         return value.isMissingNode() || value.isNull() ? "—" : value.asText();
+    }
+
+    /** New t315 columns keep missing legacy text as JSON null / an empty Excel cell. */
+    private static String nullableText(JsonNode node, String field) {
+        JsonNode value = node.path(field);
+        return value.isMissingNode() || value.isNull() ? null : value.asText();
     }
 
     private static JsonNode evidenceComponent(JsonNode evidence, String group, String name) {
