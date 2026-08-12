@@ -536,7 +536,7 @@ public class ExcelExportService {
      * <p><b>第六～九欄是本分頁唯一不直接取自 DB 欄位的四欄</b>（Task 285 建立 MA5、Task 286 補齊
      * MA20/60/240）：該日含當日往前 N 個交易日 {@code close} 的簡單移動平均（N ∈ {5,20,60,240}，
      * 交易日非日曆週／月／季／年）。定義與精度**必須**與本頁圖表的四條均線
-     * （BFF {@code GdpTwseBffController.movingAverage(closes, window)}）逐位相同——同為 BigDecimal
+     * （BFF {@code MarketIndexChartService.movingAverage(closes, window)}）逐位相同——同為 BigDecimal
      * 精確加總 ＋ {@code divide(window, 2, HALF_UP)}，故同一指數同一日期，畫面與檔案顯示同一個值。
      * 兩處是兩份實作（不同 Maven 專案、無法共用程式碼），取捨與被放棄的選項見
      * spec/design.md 的 Requirement 45「週線MA5：唯一的計算欄」。
@@ -606,7 +606,7 @@ public class ExcelExportService {
      * （不補前值、不以不足視窗的平均充數）。
      *
      * <p><b>BigDecimal 精確加總、只在最後 {@code divide(window, 2, HALF_UP)} 捨入一次</b>——與 BFF
-     * {@code GdpTwseBffController.movingAverage(closes, window)} 同定義同精度，兩處對同一組收盤逐位相同。
+     * {@code MarketIndexChartService.movingAverage(closes, window)} 同定義同精度，兩處對同一組收盤逐位相同。
      * 不可改用 {@code double} 累加（加法不可結合，會在捨入邊界翻面，讓圖與檔案偶爾差 0.01）。
      *
      * <p>刻意不叫 {@code maAt}：{@code TechnicalIndicatorService.maAt} 是股票路徑的同名同形方法

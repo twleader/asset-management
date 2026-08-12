@@ -79,6 +79,24 @@ class TradingRadarCalibrationSelectorTest {
     }
 
     @Test
+    void distanceTieBreakIncludesWeakeningFloorWhileSafetyBooleansRemainInvariant() {
+        RuleParameters baseline = RuleParameters.v12Default();
+        RuleParameters near = weakeningCandidate("Z_NEAR", "1.50");
+        RuleParameters far = weakeningCandidate("A_FAR", "2.00");
+
+        assertThat(select(baseline,
+                score(far, "9", "0.3", "0.2"),
+                score(near, "9", "0.3", "0.2"))).isEqualTo(near);
+        assertThat(near.distanceFrom(baseline)).isLessThan(far.distanceFrom(baseline));
+        assertThatThrownBy(() -> new RuleParameters.WeakeningCondition(
+                false, true, new BigDecimal("1.50")))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new RuleParameters.WeakeningCondition(
+                true, false, new BigDecimal("1.50")))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void invalidParameterGridFailsBeforeCalibration() {
         assertThatThrownBy(() -> new RuleParameters.ActionThresholds(55, 75, 40, 25))
                 .isInstanceOf(IllegalArgumentException.class);
@@ -124,5 +142,15 @@ class TradingRadarCalibrationSelectorTest {
                 new RuleParameters.ActionThresholds(75, 55, 40, 25),
                 confidence, new BigDecimal("0.01"), new BigDecimal("2"),
                 new BigDecimal("15"), weights);
+    }
+
+    private static RuleParameters weakeningCandidate(String id, String volumeFloor) {
+        var thresholds = new RuleParameters.ActionThresholds(75, 55, 40, 25);
+        return RuleParameters.v13Candidate(id, thresholds, thresholds,
+                new BigDecimal("0.70"), new BigDecimal("0.01"), new BigDecimal("2"),
+                new BigDecimal("2"), new BigDecimal("2"), new BigDecimal("15"), Map.of(),
+                RuleParameters.BondRateCandidate.v12Fallback(),
+                RuleParameters.WeakeningCondition.withDownVolumeRatioFloor(
+                        new BigDecimal(volumeFloor)));
     }
 }

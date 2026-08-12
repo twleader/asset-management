@@ -133,6 +133,48 @@ class TreasuryYieldServiceTest {
     }
 
     @Test
+    void expectedSession搜尋遇日曆未知立即failClosed且保留provenance() {
+        TreasuryYieldBatchRepository repository = mock(TreasuryYieldBatchRepository.class);
+        MarketDataService marketDataService = mock(MarketDataService.class);
+        Instant decision = Instant.parse("2026-08-10T20:00:00Z");
+        when(repository.findSelected(decision))
+                .thenReturn(Optional.of(storedBatch(LocalDate.of(2026, 8, 7))));
+        when(marketDataService.isTradingDayKnown("美股", LocalDate.of(2026, 8, 10)))
+                .thenReturn(Optional.empty());
+
+        var context = serviceFor(repository, decision, marketDataService)
+                .resolveRateContext(decision, "Y10").orElseThrow();
+
+        assertThat(context.staleReason()).contains("UNKNOWN_CALENDAR")
+                .contains("MARKET_CALENDAR_UNAVAILABLE")
+                .contains("MARKET_DATA_SERVICE");
+        assertThat(context.batchId()).isEqualTo(9L);
+        assertThat(context.provider()).isEqualTo("YAHOO_PROXY");
+        assertThat(context.sourceManifest()).containsOnlyKeys("M3", "Y5", "Y10", "Y30");
+    }
+
+    @Test
+    void lag計數中途遇日曆未知立即failClosed而非偽裝超過三日() {
+        TreasuryYieldBatchRepository repository = mock(TreasuryYieldBatchRepository.class);
+        MarketDataService marketDataService = mock(MarketDataService.class);
+        Instant decision = Instant.parse("2026-08-10T20:00:00Z");
+        when(repository.findSelected(decision))
+                .thenReturn(Optional.of(storedBatch(LocalDate.of(2026, 8, 7))));
+        when(marketDataService.isTradingDayKnown("美股", LocalDate.of(2026, 8, 10)))
+                .thenReturn(Optional.of(true));
+        when(marketDataService.isTradingDayKnown("美股", LocalDate.of(2026, 8, 8)))
+                .thenReturn(Optional.empty());
+
+        var context = serviceFor(repository, decision, marketDataService)
+                .resolveRateContext(decision, "Y10").orElseThrow();
+
+        assertThat(context.staleReason()).contains("UNKNOWN_CALENDAR")
+                .contains("date=2026-08-08")
+                .doesNotContain("sessions（上限");
+        assertThat(context.curveDate()).isEqualTo(LocalDate.of(2026, 8, 7));
+    }
+
+    @Test
     void productionRuleVersion與V12Default逐位維持不變() {
         assertThat(TradingRadarRuleEngine.RULE_VERSION).isEqualTo("TW_RULES_V12");
         assertThat(RuleParameters.v12Default().ruleVersion())
@@ -144,7 +186,8 @@ class TreasuryYieldServiceTest {
             Instant decision,
             MarketDataService marketDataService) {
         return new TreasuryYieldService(repository, mock(TreasuryYieldClient.class),
-                Clock.fixed(decision, ZoneOffset.UTC), marketDataService);
+                Clock.fixed(decision, ZoneOffset.UTC),
+                new MarketDataTradingCalendarAdapter(marketDataService));
     }
 
     private static MarketDataService knownUsCalendar(LocalDate... closedDates) {

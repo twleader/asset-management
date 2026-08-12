@@ -6,6 +6,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -63,6 +64,51 @@ class RadarWalkForwardPlanTest {
             assertThat(fold.trainDates()).allMatch(date -> date.isBefore(fold.evaluationFrom()));
             assertThat(fold.evaluationDates()).isSorted();
         }
+    }
+
+    @Test
+    void jointTrackFoldUsesSortedIntersectionAndPreservesEachHorizonBoundary() {
+        var h5 = new RadarWalkForwardPlan.Fold(1,
+                List.of(START, START.plusDays(1), START.plusDays(2), START.plusDays(3)),
+                List.of(START.plusDays(6), START.plusDays(7)));
+        var h20 = new RadarWalkForwardPlan.Fold(1,
+                List.of(START.plusDays(1), START.plusDays(2), START.plusDays(4)),
+                List.of(START.plusDays(5)));
+
+        var forward = RadarWalkForwardPlan.jointTrackFold(
+                List.of(5, 20), Map.of(5, h5, 20, h20));
+        var reversed = RadarWalkForwardPlan.jointTrackFold(
+                List.of(20, 5), Map.of(20, h20, 5, h5));
+
+        assertThat(forward.available()).isTrue();
+        assertThat(forward.fold()).isEqualTo(reversed.fold());
+        assertThat(forward.fold().requiredHorizons()).containsExactly(5, 20);
+        assertThat(forward.fold().jointTrainDates())
+                .containsExactly(START.plusDays(1), START.plusDays(2));
+        assertThat(forward.fold().horizonFolds().get(5).evaluationFrom())
+                .isEqualTo(START.plusDays(6));
+        assertThat(forward.fold().horizonFolds().get(20).evaluationFrom())
+                .isEqualTo(START.plusDays(5));
+    }
+
+    @Test
+    void jointTrackFoldFailsClosedForMissingHorizonIndexDriftAndEmptyIntersection() {
+        var h5 = new RadarWalkForwardPlan.Fold(1,
+                List.of(START), List.of(START.plusDays(2)));
+        var h20DifferentIndex = new RadarWalkForwardPlan.Fold(2,
+                List.of(START), List.of(START.plusDays(3)));
+        var h20Disjoint = new RadarWalkForwardPlan.Fold(1,
+                List.of(START.plusDays(1)), List.of(START.plusDays(3)));
+
+        assertThat(RadarWalkForwardPlan.jointTrackFold(
+                List.of(5, 20), Map.of(5, h5)).reason())
+                .isEqualTo("JOINT_FOLD_REQUIRED_HORIZONS_UNAVAILABLE");
+        assertThat(RadarWalkForwardPlan.jointTrackFold(
+                List.of(5, 20), Map.of(5, h5, 20, h20DifferentIndex)).reason())
+                .isEqualTo("JOINT_FOLD_INDEX_MISMATCH");
+        assertThat(RadarWalkForwardPlan.jointTrackFold(
+                List.of(5, 20), Map.of(5, h5, 20, h20Disjoint)).reason())
+                .isEqualTo("JOINT_FOLD_TRAIN_INTERSECTION_EMPTY");
     }
 
     @Test

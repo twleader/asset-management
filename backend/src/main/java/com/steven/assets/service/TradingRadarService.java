@@ -439,6 +439,7 @@ public class TradingRadarService {
 
         return new TradingRadarDto.Response(
                 TradingRadarRuleEngine.RULE_VERSION,
+                TradingRadarEvidenceGate.ACTION_POLICY_VERSION,
                 decisionInstant.atZone(TAIPEI).toOffsetDateTime().toString(),
                 twMarket.summary(),
                 decisions,
@@ -885,13 +886,11 @@ public class TradingRadarService {
                             decisionClock != null && decisionClock.authoritative()
                                     ? sessionDate(decisionClock)
                                     : marketSummary == null ? null : parseLocalDate(marketSummary.asOfDate()));
-            // Production remains the V12 rule identity.  Evidence is resolved and exposed below for
-            // confidence/risk disclosure, but the V13 hard gate belongs only to offline candidate
-            // evaluation/promotion; applying it here would silently rewrite a V12 action whenever a
-            // bond/market observation is incomplete and would make the notification path disagree
-            // with the page/backtest V12 result.
-            TradingRadarEvidenceGate.GatedActions gated = new TradingRadarEvidenceGate.GatedActions(
-                    result.action(), result.shortAction(), List.of());
+            // V12 score/candidate/parameters and RULE_VERSION stay bit-identical.  Only the final
+            // action passes through the deterministic safety policy, at this single construction
+            // point shared by page, snapshot/export and evaluateForNotification.
+            TradingRadarEvidenceGate.GatedActions gated = TradingRadarEvidenceGate.apply(
+                    result.action(), result.shortAction(), target.held(), profile, evidence);
 
             List<String> reasons = new ArrayList<>();
             if (technical.distributionAdjusted()) {
@@ -1026,9 +1025,9 @@ public class TradingRadarService {
         }
         BondRateQueryResolver.Selection fallback = BondRateQueryResolver.select(
                 profile.bondTerm(), RuleParameters.v12Default());
-        String tenor = bondYieldBeta != null && bondYieldBeta.tenor() != null
-                ? bondYieldBeta.tenor()
-                : fallback == null ? null : fallback.primaryTenor();
+        // Production is still V12: even a stable unpublished beta cannot select a
+        // different Treasury observation and indirectly change the final-action gate.
+        String tenor = fallback == null ? null : fallback.primaryTenor();
         if (tenor == null) {
             return TradingRadarEvidenceConfidenceResolver.RateObservation.missing(
                     "strict bond term 缺漏，禁止猜測 Treasury tenor");
@@ -1051,14 +1050,16 @@ public class TradingRadarService {
                 + " n=" + beta.n() + "，未經 V13 holdout promotion 不納入分數";
     }
 
-    private TradingRadarEvidenceConfidenceResolver.RateObservation rateObservation(
+    /**
+     * Production remains V12 until an exact-key holdout is separately approved and published.
+     * A stable fitted beta may therefore enrich disclosure, but it must not become an actionable
+     * downside unit on this path.  V13 candidate evaluation consumes beta through its own offline
+     * candidate context and is deliberately not wired through this mapper.
+     */
+    TradingRadarEvidenceConfidenceResolver.RateObservation rateObservation(
             TreasuryYieldDto.RateContext context, BondYieldBetaResolver.Result beta) {
-        BondYieldBetaContribution.Contributions contribution = BondYieldBetaContribution.from(beta);
-        Double shortContribution = contribution.shortTerm();
-        BigDecimal riskUnit = shortContribution == null ? null
-                : BigDecimal.valueOf(Math.max(0.0, Math.min(1.0, -shortContribution)));
-        return new TradingRadarEvidenceConfidenceResolver.RateObservation(
-                context, riskUnit, betaDisclosureReason(beta));
+        return TradingRadarEvidenceConfidenceResolver.RateObservation.contextOnly(
+                context, betaDisclosureReason(beta));
     }
 
     BondYieldBetaResolver.Result resolveBondYieldBeta(

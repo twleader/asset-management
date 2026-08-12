@@ -161,7 +161,8 @@ public final class RadarBacktestExecution {
             Optional<ExecutionSample> closeSensitivity,
             boolean excludedMissingEntryOpen,
             boolean excludedMissingExitOpen,
-            boolean excludedInsufficientForward
+            boolean excludedInsufficientForward,
+            boolean excludedCostOutsideEffectiveRange
     ) {
         public ExecutionAttempt {
             primary = primary == null ? Optional.empty() : primary;
@@ -242,11 +243,15 @@ public final class RadarBacktestExecution {
         LocalDate exitDate = exitIndex < barsAsc.size() ? barsAsc.get(exitIndex).date() : null;
         if (entryIndex >= barsAsc.size() || exitIndex >= barsAsc.size()) {
             return new ExecutionAttempt(signal.date(), entryDate, exitDate,
-                    Optional.empty(), Optional.empty(), false, false, true);
+                    Optional.empty(), Optional.empty(), false, false, true, false);
         }
 
         AdjustedBar entryBar = barsAsc.get(entryIndex);
         AdjustedBar exitBar = barsAsc.get(exitIndex);
+        if (!costApplies(cost, entryBar.date(), exitBar.date())) {
+            return new ExecutionAttempt(signal.date(), entryBar.date(), exitBar.date(),
+                    Optional.empty(), Optional.empty(), false, false, false, true);
+        }
         boolean missingEntry = !positive(entryBar.open());
         boolean missingExit = !positive(exitBar.open());
         Optional<ExecutionSample> primary = missingEntry || missingExit
@@ -261,7 +266,7 @@ public final class RadarBacktestExecution {
                     entryBar.close(), exitBar.close(), costKey, cost));
         }
         return new ExecutionAttempt(signal.date(), entryBar.date(), exitBar.date(),
-                primary, sensitivity, missingEntry, missingExit, false);
+                primary, sensitivity, missingEntry, missingExit, false, false);
     }
 
     private static ExecutionSample sample(
@@ -284,7 +289,21 @@ public final class RadarBacktestExecution {
 
     private static CostAssumption assumption(String buy, String sell, String tax, String slip) {
         return new CostAssumption(new BigDecimal(buy), new BigDecimal(sell), new BigDecimal(tax),
-                new BigDecimal(slip), DEFAULT_COST_SOURCE, LocalDate.of(2026, 8, 1), null);
+                new BigDecimal(slip), DEFAULT_COST_SOURCE, null, null);
+    }
+
+    /** Override 生效區間為 inclusive，entry 與 exit 必須同時落在區間內。 */
+    private static boolean costApplies(
+            CostAssumption cost,
+            LocalDate entryDate,
+            LocalDate exitDate) {
+        if (entryDate == null || exitDate == null) return false;
+        if (cost.effectiveFrom() != null
+                && (entryDate.isBefore(cost.effectiveFrom()) || exitDate.isBefore(cost.effectiveFrom()))) {
+            return false;
+        }
+        return cost.effectiveTo() == null
+                || (!entryDate.isAfter(cost.effectiveTo()) && !exitDate.isAfter(cost.effectiveTo()));
     }
 
     private static boolean positive(BigDecimal value) {

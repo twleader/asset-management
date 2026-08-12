@@ -33,9 +33,35 @@ class TradingRadarEvidenceConfidenceResolverTest {
         assertEquals(1.0, price.shortCoverage(), 1e-9);
         assertEquals(1.0, price.mediumCoverage(), 1e-9);
         assertFalse(valuation.participates());
+        assertEquals(List.of("pe", "pb", "dividend_yield"),
+                valuation.components().stream().map(
+                        TradingRadarEvidenceConfidenceResolver.Component::name).toList());
+        assertTrue(valuation.components().stream().allMatch(component ->
+                component.applicability()
+                        == TradingRadarEvidenceConfidenceResolver.Applicability.NOT_APPLICABLE));
+        assertEquals(0.0, valuation.mediumCoverage(), 1e-9,
+                "具名 N/A components 仍必須退出 confidence 分母");
         assertFalse(financial.participates());
         assertTrue(evidence.shortConfidence() >= 0);
         assertNotNull(evidence.shortRisk());
+    }
+
+    @Test
+    void valuationComponentsUseOnlyTheirOwnEvidenceInsteadOfGenericCompositeProvenance() {
+        var profile = TradingRadarAssetProfileResolver.resolve(
+                "2330", "台股", "一般股票", null, null, "GROWTH", null, null, null);
+        var valuation = resolve(profile, fullFundamental(false))
+                .group(TradingRadarEvidenceConfidenceResolver.Group.VALUATION);
+
+        assertEquals(List.of("PE_PROVIDER", "PB_PROVIDER", "YIELD_PROVIDER"),
+                valuation.components().stream().map(
+                        TradingRadarEvidenceConfidenceResolver.Component::provider).toList());
+        assertTrue(valuation.components().stream().allMatch(component ->
+                component.applicability()
+                        == TradingRadarEvidenceConfidenceResolver.Applicability.AVAILABLE));
+        assertFalse(valuation.components().stream().anyMatch(component ->
+                "EXCHANGE".equals(component.provider())),
+                "generic valuationProvider 不得代填逐 component provenance");
     }
 
     @Test
@@ -356,6 +382,75 @@ class TradingRadarEvidenceConfidenceResolverTest {
     }
 
     @Test
+    void strictBondTreasuryFreshStaleUnknownAndMissingRemainDistinctAndFailClosed() {
+        var profile = TradingRadarAssetProfileResolver.resolve(
+                "TLT", "美股", "iShares 20+ Year Treasury Bond ETF",
+                null, null, null, null, null, null);
+        var freshContext = new TreasuryYieldDto.RateContext(
+                17L, true, "Y30", bd(4.3), LAST_SESSION, "US_TREASURY",
+                Map.of("M3", "m3", "Y5", "y5", "Y10", "y10", "Y30", "y30"),
+                Instant.parse("2026-08-08T04:00:00Z"), "CONSERVATIVE_NEXT_MIDNIGHT_ET",
+                Instant.parse("2026-08-08T05:00:00Z"), 1, null);
+        var staleContext = new TreasuryYieldDto.RateContext(
+                18L, true, "Y30", bd(4.2), LAST_SESSION.minusDays(5), "US_TREASURY",
+                freshContext.sourceManifest(), freshContext.availableAt(), freshContext.availabilityBasis(),
+                freshContext.fetchedAt(), 6, "Treasury curve 落後 4 sessions");
+        var unknownContext = new TreasuryYieldDto.RateContext(
+                19L, true, "Y30", bd(4.2), LAST_SESSION, "US_TREASURY",
+                freshContext.sourceManifest(), freshContext.availableAt(), freshContext.availabilityBasis(),
+                freshContext.fetchedAt(), 1,
+                "UNKNOWN_CALENDAR: provider=MARKET_DATA_SERVICE, reason=MARKET_CALENDAR_UNAVAILABLE");
+
+        var fresh = resolve(profile, null, TradingRadarRuleEngine.MarketRegime.RISK_ON,
+                false, TradingRadarRuleEngine.TimingState.NEUTRAL, "美股",
+                TradingRadarEvidenceConfidenceResolver.RateObservation.contextOnly(
+                        freshContext, "beta/holdout 尚未 promoted"));
+        var stale = resolve(profile, null, TradingRadarRuleEngine.MarketRegime.RISK_ON,
+                false, TradingRadarRuleEngine.TimingState.NEUTRAL, "美股",
+                TradingRadarEvidenceConfidenceResolver.RateObservation.contextOnly(
+                        staleContext, "beta/holdout 尚未 promoted"));
+        var unknown = resolve(profile, null, TradingRadarRuleEngine.MarketRegime.RISK_ON,
+                false, TradingRadarRuleEngine.TimingState.NEUTRAL, "美股",
+                TradingRadarEvidenceConfidenceResolver.RateObservation.contextOnly(
+                        unknownContext, "beta/holdout 尚未 promoted"));
+        var missing = resolve(profile, null, TradingRadarRuleEngine.MarketRegime.RISK_ON,
+                false, TradingRadarRuleEngine.TimingState.NEUTRAL, "美股",
+                TradingRadarEvidenceConfidenceResolver.RateObservation.missing(
+                        "決策時點前無完整 Treasury curve batch"));
+
+        var freshRate = bondRate(fresh);
+        var staleRate = bondRate(stale);
+        var unknownRate = bondRate(unknown);
+        var missingRate = bondRate(missing);
+        assertEquals(TradingRadarEvidenceConfidenceResolver.Applicability.AVAILABLE,
+                freshRate.applicability());
+        assertEquals(TradingRadarEvidenceConfidenceResolver.Applicability.STALE,
+                staleRate.applicability());
+        assertTrue(staleRate.missingReason().contains("落後 4 sessions"));
+        assertEquals(TradingRadarEvidenceConfidenceResolver.Applicability.STALE,
+                unknownRate.applicability());
+        assertTrue(unknownRate.missingReason().contains("UNKNOWN_CALENDAR"));
+        assertEquals("US_TREASURY", unknownRate.provider(),
+                "UNKNOWN 不得丟失原 batch/provider provenance");
+        assertEquals(TradingRadarEvidenceConfidenceResolver.Applicability.MISSING,
+                missingRate.applicability());
+        assertTrue(missingRate.missingReason().contains("無完整 Treasury curve batch"));
+
+        for (var evidence : List.of(stale, unknown, missing)) {
+            var gated = TradingRadarEvidenceGate.apply(
+                    TradingRadarRuleEngine.Action.BUY_CANDIDATE,
+                    TradingRadarRuleEngine.Action.TRIAL_BUY,
+                    false, profile, evidence);
+            assertEquals(TradingRadarRuleEngine.Action.WATCH, gated.mediumAction());
+            assertEquals(TradingRadarRuleEngine.Action.WATCH, gated.shortAction());
+            assertEquals(TradingRadarRuleEngine.Action.BUY_CANDIDATE,
+                    gated.candidateMediumAction());
+            assertEquals(TradingRadarRuleEngine.Action.TRIAL_BUY,
+                    gated.candidateShortAction());
+        }
+    }
+
+    @Test
     void dividendEvidenceStatusChangesRiskAndGateReasonButNotOpportunityConfidence() {
         var profile = TradingRadarAssetProfileResolver.resolve(
                 "0050", "台股", "ETF", null, null, null, null, null, null);
@@ -491,7 +586,16 @@ class TradingRadarEvidenceConfidenceResolverTest {
                 "EXCHANGE", List.of("https://example.test/valuation"), "2026-08-07",
                 "半導體", bd(10), 100, "2026-07", "EXCHANGE", List.of(), "2026-08-07",
                 List.of(), List.of(), bd(20), bd(1.2), bd(4), bd(45), bd(40), .3, 3,
-                "POSITIVE_BASE_IMPROVING", roeFallback);
+                "POSITIVE_BASE_IMPROVING", roeFallback,
+                new TradingRadarDto.ValuationComponentEvidence(
+                        bd(20), bd(45), "PE_PROVIDER", List.of("https://example.test/pe"),
+                        "2026-08-07T01:00:00Z", "2026-08-07", false),
+                new TradingRadarDto.ValuationComponentEvidence(
+                        bd(1.2), bd(45), "PB_PROVIDER", List.of("https://example.test/pb"),
+                        "2026-08-07T02:00:00Z", "2026-08-07", false),
+                new TradingRadarDto.ValuationComponentEvidence(
+                        bd(4), bd(40), "YIELD_PROVIDER", List.of("https://example.test/yield"),
+                        "2026-08-07T03:00:00Z", "2026-08-07", false));
     }
 
     private static RadarInputAssembler.Assembled completeTechnical() {
@@ -520,6 +624,14 @@ class TradingRadarEvidenceConfidenceResolverTest {
         return evidence.shortRisk().components().stream()
                 .filter(component -> component.name().equals("dividend_event"))
                 .findFirst().orElseThrow().unit();
+    }
+
+    private static TradingRadarEvidenceConfidenceResolver.Component bondRate(
+            TradingRadarEvidenceConfidenceResolver.Evidence evidence) {
+        return evidence.group(TradingRadarEvidenceConfidenceResolver.Group.ASSET_SPECIFIC)
+                .components().stream()
+                .filter(component -> component.name().equals("bond_rate"))
+                .findFirst().orElseThrow();
     }
 
     private static BigDecimal bd(double value) { return BigDecimal.valueOf(value); }

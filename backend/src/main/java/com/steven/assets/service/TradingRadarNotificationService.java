@@ -120,17 +120,28 @@ public class TradingRadarNotificationService {
             boolean held = isHeld(setting.getOwnerUserId(), setting.getStockCode(), setting.getMarket());
             TradingRadarDto.StockDecision decision = tradingRadarService.evaluateForNotification(
                     setting.getStockCode(), setting.getMarket(), held, snapshot);
+            // Action semantics can change without changing V12 scoring/ruleVersion.  An invalid
+            // baseline is rebuilt from the same post-gate StockDecision used by the page/export,
+            // then exits before transition/cooldown/dispatcher side effects.
+            boolean baselineValid = Boolean.TRUE.equals(setting.getInitialized())
+                    && TradingRadarRuleEngine.RULE_VERSION.equals(setting.getRuleVersion())
+                    && TradingRadarEvidenceGate.ACTION_POLICY_VERSION.equals(
+                    setting.getActionPolicyVersion());
+            if (!baselineValid) {
+                setting.setInitialized(true);
+                setting.setRuleVersion(TradingRadarRuleEngine.RULE_VERSION);
+                setting.setActionPolicyVersion(TradingRadarEvidenceGate.ACTION_POLICY_VERSION);
+                setting.setLastAction(decision.action());
+                setting.setLastCounterTrendState(decision.counterTrendState());
+                settingRepo.save(setting);
+                return;
+            }
             Set<String> actions = Set.copyOf(stateRepo.findStateCodes(
                     setting.getId(), TradingRadarNotificationState.TYPE_ACTION));
             Set<String> counterTrends = Set.copyOf(stateRepo.findStateCodes(
                     setting.getId(), TradingRadarNotificationState.TYPE_COUNTER_TREND));
-            // Task 264：規則版本變更即視同未初始化——本輪只建基準不寄信（Requirement 44）。
-            // 不這樣做的話，V9 的動作會直接與 V8 存下的 lastAction 比對，而本次刻意改了動作映射結構，
-            // 比對必然大量不相等 → 升級當下對每一筆訂閱狂發假通知。
-            boolean baselineValid = Boolean.TRUE.equals(setting.getInitialized())
-                    && TradingRadarRuleEngine.RULE_VERSION.equals(setting.getRuleVersion());
             TradingRadarNotificationTransition.Result result = transition.evaluate(
-                    baselineValid,
+                    true,
                     setting.getLastAction(),
                     setting.getLastCounterTrendState(),
                     decision.action(),
@@ -141,6 +152,7 @@ public class TradingRadarNotificationService {
             // 基準更新與 save 恆執行，不受下面的通知冷卻影響——冷卻只擋 email（Requirement 44）。
             setting.setInitialized(true);
             setting.setRuleVersion(TradingRadarRuleEngine.RULE_VERSION);
+            setting.setActionPolicyVersion(TradingRadarEvidenceGate.ACTION_POLICY_VERSION);
             setting.setLastAction(result.nextAction());
             setting.setLastCounterTrendState(result.nextCounterTrend());
             settingRepo.save(setting);

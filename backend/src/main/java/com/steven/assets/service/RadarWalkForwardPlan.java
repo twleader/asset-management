@@ -5,6 +5,7 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -90,6 +91,121 @@ public final class RadarWalkForwardPlan {
         public LocalDate evaluationFrom() { return evaluationDates.get(0); }
 
         public LocalDate evaluationTo() { return evaluationDates.get(evaluationDates.size() - 1); }
+    }
+
+    /**
+     * 一個 production track/fold 的共同 train calendar，以及每個 required horizon
+     * 原封不動的 fold boundary。共同日期只能是各 horizon train dates 的交集；
+     * evaluation block 永遠留在 {@link #horizonFolds()} 內逐 horizon 取用。
+     */
+    public record JointTrackFold(
+            int index,
+            List<Integer> requiredHorizons,
+            List<LocalDate> jointTrainDates,
+            Map<Integer, Fold> horizonFolds
+    ) {
+        public JointTrackFold {
+            if (index < 1) throw new IllegalArgumentException("joint fold index 從 1 起算");
+            requiredHorizons = requiredHorizons == null ? List.of()
+                    : List.copyOf(new TreeSet<>(requiredHorizons));
+            jointTrainDates = jointTrainDates == null ? List.of()
+                    : List.copyOf(new TreeSet<>(jointTrainDates));
+            Map<Integer, Fold> orderedFolds = new LinkedHashMap<>();
+            if (horizonFolds != null) {
+                for (Integer horizon : requiredHorizons) {
+                    Fold fold = horizonFolds.get(horizon);
+                    if (fold != null) orderedFolds.put(horizon, fold);
+                }
+            }
+            horizonFolds = Collections.unmodifiableMap(orderedFolds);
+            if (requiredHorizons.isEmpty() || jointTrainDates.isEmpty()
+                    || horizonFolds.size() != requiredHorizons.size()) {
+                throw new IllegalArgumentException("joint fold 必須含完整 required horizons 與 train 交集");
+            }
+            for (Fold fold : horizonFolds.values()) {
+                if (fold.index() != index || !fold.trainDates().containsAll(jointTrainDates)
+                        || jointTrainDates.stream().anyMatch(date -> !date.isBefore(fold.evaluationFrom()))) {
+                    throw new IllegalArgumentException("joint fold 與 horizon fold boundary 不一致");
+                }
+            }
+        }
+
+        public LocalDate jointTrainFrom() { return jointTrainDates.get(0); }
+
+        public LocalDate jointTrainTo() { return jointTrainDates.get(jointTrainDates.size() - 1); }
+    }
+
+    /** fail-closed factory 結果；呼叫端不得以第一個 horizon 代替 unavailable joint fold。 */
+    public record JointTrackFoldResolution(
+            String status,
+            String reason,
+            JointTrackFold fold
+    ) {
+        public JointTrackFoldResolution {
+            if (status == null || status.isBlank()) throw new IllegalArgumentException("status 不可空白");
+            reason = reason == null ? "" : reason;
+        }
+
+        public boolean available() { return fold != null && "AVAILABLE".equals(status); }
+
+        private static JointTrackFoldResolution unavailable(String reason) {
+            return new JointTrackFoldResolution("UNAVAILABLE", reason, null);
+        }
+    }
+
+    /**
+     * 建立 deterministic joint fold。required horizon 輸入順序不影響結果；任何缺漏、
+     * index 漂移、空交集或跨 evaluation boundary 都明確 unavailable。
+     */
+    public static JointTrackFoldResolution jointTrackFold(
+            Collection<Integer> requiredHorizons,
+            Map<Integer, Fold> foldsByHorizon) {
+        TreeSet<Integer> orderedHorizons = new TreeSet<>();
+        if (requiredHorizons != null) {
+            for (Integer horizon : requiredHorizons) {
+                if (horizon == null || horizon < 1 || horizon > 240) {
+                    return JointTrackFoldResolution.unavailable(
+                            "JOINT_FOLD_REQUIRED_HORIZONS_UNAVAILABLE");
+                }
+                orderedHorizons.add(horizon);
+            }
+        }
+        if (orderedHorizons.isEmpty() || foldsByHorizon == null) {
+            return JointTrackFoldResolution.unavailable(
+                    "JOINT_FOLD_REQUIRED_HORIZONS_UNAVAILABLE");
+        }
+
+        Map<Integer, Fold> orderedFolds = new LinkedHashMap<>();
+        Integer foldIndex = null;
+        TreeSet<LocalDate> intersection = null;
+        for (Integer horizon : orderedHorizons) {
+            Fold fold = foldsByHorizon.get(horizon);
+            if (fold == null) {
+                return JointTrackFoldResolution.unavailable(
+                        "JOINT_FOLD_REQUIRED_HORIZONS_UNAVAILABLE");
+            }
+            if (foldIndex == null) foldIndex = fold.index();
+            if (!Objects.equals(foldIndex, fold.index())) {
+                return JointTrackFoldResolution.unavailable("JOINT_FOLD_INDEX_MISMATCH");
+            }
+            orderedFolds.put(horizon, fold);
+            TreeSet<LocalDate> dates = new TreeSet<>(fold.trainDates());
+            if (intersection == null) intersection = dates;
+            else intersection.retainAll(dates);
+        }
+        if (intersection == null || intersection.isEmpty()) {
+            return JointTrackFoldResolution.unavailable("JOINT_FOLD_TRAIN_INTERSECTION_EMPTY");
+        }
+        for (LocalDate date : intersection) {
+            for (Fold fold : orderedFolds.values()) {
+                if (date == null || !date.isBefore(fold.evaluationFrom())) {
+                    return JointTrackFoldResolution.unavailable(
+                            "JOINT_FOLD_TRAIN_BOUNDARY_VIOLATION");
+                }
+            }
+        }
+        return new JointTrackFoldResolution("AVAILABLE", "", new JointTrackFold(
+                foldIndex, List.copyOf(orderedHorizons), List.copyOf(intersection), orderedFolds));
     }
 
     /** 先以 market/horizon 分組，再跨 code 去重；不接受 candidate hit 作輸入。 */

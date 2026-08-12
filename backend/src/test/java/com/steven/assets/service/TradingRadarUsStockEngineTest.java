@@ -1,6 +1,8 @@
 package com.steven.assets.service;
 
 import com.steven.assets.dto.TradingRadarDto;
+import com.steven.assets.dto.TreasuryYieldDto;
+import com.steven.assets.model.Stock;
 import com.steven.assets.model.StockPriceHistory;
 import com.steven.assets.model.TwseIndexDailyHistory;
 import com.steven.assets.model.UsIndexDailyHistory;
@@ -27,6 +29,7 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -84,6 +87,10 @@ class TradingRadarUsStockEngineTest {
     private TradingRadarRuleEngine ruleEngine;
 
     private TradingRadarService newService() {
+        return newService(null);
+    }
+
+    private TradingRadarService newService(BondYieldBetaEvidencePort bondYieldBetaEvidencePort) {
         ruleEngine = Mockito.spy(new TradingRadarRuleEngine());
         return new TradingRadarService(
                 ruleEngine,
@@ -109,7 +116,9 @@ class TradingRadarUsStockEngineTest {
                 snapshotStore,
                 currentUserContext,
                 dividendEventEvidenceRepository,
-                treasuryYieldService);
+                treasuryYieldService,
+                null,
+                bondYieldBetaEvidencePort);
     }
 
     /**
@@ -267,6 +276,9 @@ class TradingRadarUsStockEngineTest {
                 .thenReturn(List.<Object[]>of(new Object[]{"AAPL", "美股"}));
 
         TradingRadarDto.Response response = newService().assembleAt(fixedAfterUsClose);
+        assertEquals(TradingRadarRuleEngine.RULE_VERSION, response.ruleVersion());
+        assertEquals(TradingRadarEvidenceGate.ACTION_POLICY_VERSION,
+                response.actionPolicyVersion());
         TradingRadarDto.StockDecision decision = response.stocks().stream()
                 .filter(row -> "AAPL".equals(row.stockCode())).findFirst().orElseThrow();
         TradingRadarDto.EvidenceGroup market = decision.evidence().evidenceGroups()
@@ -277,6 +289,148 @@ class TradingRadarUsStockEngineTest {
                 "US marketSummary.marketVolumeAsOfDate=null 不應取代 asOfDate 關閉 PRICE/MARKET gate");
         assertTrue(market.mediumFresh());
         assertEquals(indexRows.get(0).getTradingDate().toString(), decision.asOfDate());
+    }
+
+    @Test
+    void 頁面與通知共用同一postGateStockDecision() {
+        stubBaseline();
+        stubDivergentRegimes();
+        Instant fixedAfterUsClose = Instant.parse("2026-08-10T21:00:00Z");
+        List<UsIndexDailyHistory> indexRows = usUpRowsAt(LocalDate.of(2026, 8, 10));
+        when(usIndexDailyHistoryRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 241))
+                .thenReturn(indexRows);
+        List<StockPriceHistory> stockRows = indexRows.stream()
+                .map(row -> StockPriceHistory.builder()
+                        .stockCode("AAPL").market("美股").tradingDate(row.getTradingDate())
+                        .openPrice(row.getClosePoint()).highPrice(row.getClosePoint())
+                        .lowPrice(row.getClosePoint()).closePrice(row.getClosePoint())
+                        .volume(row.getVolume()).build())
+                .toList();
+        when(priceHistoryRepo.findRecentN("AAPL", "美股", 241)).thenReturn(stockRows);
+        when(adjustedPriceService.adjust(anyList(), anyList()))
+                .thenAnswer(invocation -> new DistributionAdjustedPriceService.Adjustment(
+                        invocation.getArgument(0), false));
+        when(indicatorService.computeFromSeries(anyList())).thenReturn(US_RISK_ON_IND);
+        when(alertRepo.findDistinctStockCodeMarket())
+                .thenReturn(List.<Object[]>of(new Object[]{"AAPL", "美股"}));
+
+        TradingRadarService service = newService();
+        TradingRadarDto.StockDecision page = service.assembleAt(fixedAfterUsClose).stocks()
+                .stream().filter(row -> "AAPL".equals(row.stockCode())).findFirst().orElseThrow();
+        TradingRadarDto.MarketSummary usSummary = new TradingRadarDto.MarketSummary(
+                "RISK_ON", "多頭", 80, true, false,
+                LocalDate.of(2026, 8, 10).toString(),
+                indexRows.get(0).getClosePoint(), null, "VERIFIED_CLOSE",
+                null, null, null, null, null, null,
+                "ABOVE", "ABOVE", List.of(), List.of(), false, null, null);
+        TradingRadarService.MarketSnapshot sameSnapshot = new TradingRadarService.MarketSnapshot(
+                TradingRadarRuleEngine.MarketRegime.RISK_ON, false, fixedAfterUsClose,
+                usSummary, null, false, null, false);
+        TradingRadarDto.StockDecision notification = service.evaluateForNotification(
+                "AAPL", "美股", false, sameSnapshot);
+
+        assertEquals(page.action(), notification.action());
+        assertEquals(page.shortAction(), notification.shortAction());
+        assertEquals(page.candidateAction(), notification.candidateAction());
+        assertEquals(page.shortCandidateAction(), notification.shortCandidateAction());
+        assertEquals(page.actionGateReasons(), notification.actionGateReasons());
+    }
+
+    @Test
+    void productionV12StableAvailableBetaRemainsDisclosureOnlyAndSellFailsClosed() {
+        stubBaseline();
+        Instant decisionInstant = Instant.parse("2026-08-10T21:00:00Z");
+        LocalDate completedSession = LocalDate.of(2026, 8, 10);
+        List<UsIndexDailyHistory> indexRows = usUpRowsAt(completedSession);
+        List<StockPriceHistory> stockRows = new ArrayList<>();
+        for (int i = 0; i < indexRows.size(); i++) {
+            UsIndexDailyHistory row = indexRows.get(i);
+            stockRows.add(StockPriceHistory.builder()
+                    .stockCode("TLT").market("美股").tradingDate(row.getTradingDate())
+                    .openPrice(row.getClosePoint()).highPrice(row.getHighPoint())
+                    .lowPrice(row.getLowPoint()).closePrice(row.getClosePoint())
+                    .volume(1_000_000L + i).build());
+        }
+        when(priceHistoryRepo.findRecentN("TLT", "美股", 241)).thenReturn(stockRows);
+        when(stockRepo.findByCodeAndMarket("TLT", "美股")).thenReturn(Optional.of(
+                Stock.builder().code("TLT").market("美股")
+                        .name("iShares 20+ Year Treasury Bond ETF")
+                        .assetClass(AssetClassifier.BOND).bondTerm(AssetClassifier.LONG)
+                        .underlyingCurrency("USD").build()));
+        when(adjustedPriceService.adjust(anyList(), anyList()))
+                .thenAnswer(invocation -> new DistributionAdjustedPriceService.Adjustment(
+                        invocation.getArgument(0), false));
+        when(indicatorService.computeFromSeries(anyList())).thenReturn(US_RISK_ON_IND);
+        when(dividendEventEvidenceRepository.resolve(
+                eq("TLT"), eq("美股"), eq(decisionInstant), anyList()))
+                .thenReturn(new DividendEventEvidenceResolver.Resolution(
+                        DividendEventEvidenceResolver.Status.EMPTY_COMPLETE,
+                        null, 0, 0, "DIVIDEND_PROVIDER", List.of(),
+                        decisionInstant.minusSeconds(60), decisionInstant.minusSeconds(60), null));
+        TreasuryYieldDto.RateContext context = new TreasuryYieldDto.RateContext(
+                17L, true, "Y30", new BigDecimal("4.3000"), completedSession,
+                "US_TREASURY", java.util.Map.of(
+                "M3", "m3", "Y5", "y5", "Y10", "y10", "Y30", "y30"),
+                decisionInstant.minusSeconds(120), "CONSERVATIVE_NEXT_MIDNIGHT_ET",
+                decisionInstant.minusSeconds(180), 0, null);
+        when(treasuryYieldService.resolveRateContext(decisionInstant, "Y30"))
+                .thenReturn(Optional.of(context));
+        BondYieldBetaResolver.Result availableBeta = new BondYieldBetaResolver.Result(
+                BondYieldBetaResolver.Status.AVAILABLE, "TLT", "美股", "Y30",
+                BondYieldBetaResolver.FxControl.NONE, new BigDecimal("-5"), null, 750,
+                List.of(), new BondYieldBetaResolver.Stability(3, true, BigDecimal.ONE, true),
+                completedSession, decisionInstant.minusSeconds(60),
+                Set.of("VERIFIED_CLOSE", "US_TREASURY"), null,
+                BondYieldBetaResolver.RateSignalSpec.primaryOnly("Y30"),
+                completedSession, new BigDecimal("0.10"), null,
+                new BigDecimal("0.10"), decisionInstant.minusSeconds(60));
+        BondYieldBetaEvidencePort betaPort = Mockito.mock(BondYieldBetaEvidencePort.class);
+        when(betaPort.resolve(any())).thenReturn(availableBeta);
+
+        TradingRadarService service = newService(betaPort);
+        TradingRadarRuleEngine.StockResult sellCandidate = new TradingRadarRuleEngine.StockResult(
+                20, TradingRadarRuleEngine.Action.EXIT_CANDIDATE,
+                new TradingRadarRuleEngine.CounterTrendResult(
+                        TradingRadarRuleEngine.CounterTrendState.NONE, List.of(), List.of()),
+                List.of(), List.of(), TradingRadarRuleEngine.KdHeat.NORMAL,
+                TradingRadarRuleEngine.TimingState.NEUTRAL, false, false,
+                20, TradingRadarRuleEngine.Action.EXIT_CANDIDATE,
+                List.of(), List.of(), false, false);
+        Mockito.doReturn(sellCandidate).when(ruleEngine).evaluateStock(any());
+        TradingRadarDto.MarketSummary usSummary = new TradingRadarDto.MarketSummary(
+                "RISK_ON", "多頭", 80, true, false, completedSession.toString(),
+                indexRows.get(0).getClosePoint(), null, "VERIFIED_CLOSE",
+                null, null, null, null, null, null,
+                "ABOVE", "ABOVE", List.of(), List.of(), false, null, null);
+        TradingRadarService.MarketSnapshot snapshot = new TradingRadarService.MarketSnapshot(
+                TradingRadarRuleEngine.MarketRegime.RISK_ON, false, decisionInstant,
+                usSummary, null, false, null, false);
+
+        TradingRadarEvidenceConfidenceResolver.RateObservation mapped =
+                service.rateObservation(context, availableBeta);
+        TradingRadarDto.StockDecision actual = service.evaluateForNotification(
+                "TLT", "美股", true, snapshot);
+
+        assertNull(mapped.riskUnit(),
+                "未經 exact holdout promotion 的 stable beta 不得變成 production riskUnit");
+        assertEquals(context, mapped.context());
+        TradingRadarDto.EvidenceComponent bondRate = actual.evidence().evidenceGroups()
+                .get("ASSET_SPECIFIC").components().stream()
+                .filter(component -> component.name().equals("bond_rate"))
+                .findFirst().orElseThrow();
+        assertEquals("AVAILABLE", bondRate.applicability(),
+                "fresh Treasury context 仍是可用的 disclosure evidence");
+        assertTrue(actual.mediumRiskCoverage() >= .70);
+        assertTrue(actual.shortRiskCoverage() >= .70);
+        assertEquals("EXIT_CANDIDATE", actual.candidateAction());
+        assertEquals("EXIT_CANDIDATE", actual.shortCandidateAction());
+        assertEquals("HOLD", actual.action());
+        assertEquals("HOLD", actual.shortAction());
+        assertTrue(actual.actionGateReasons().stream()
+                .anyMatch(reason -> reason.contains("bond beta/riskUnit")),
+                "coverage 已過門檻時仍降級，可證 asset_rate 未成為可用風險單位");
+        verify(betaPort).resolve(any());
+        verify(treasuryYieldService).resolveRateContext(decisionInstant, "Y30");
     }
 
     private List<UsIndexDailyHistory> usUpRowsAt(LocalDate today) {

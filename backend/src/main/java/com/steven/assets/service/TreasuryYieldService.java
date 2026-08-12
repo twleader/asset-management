@@ -20,38 +20,45 @@ public class TreasuryYieldService {
     private static final java.time.LocalTime US_CLOSE = java.time.LocalTime.of(16, 0);
     private static final int MAX_CURVE_LAG_SESSIONS = 3;
     private static final String FUTURE_CURVE_DATE_CODE = "FUTURE_CURVE_DATE";
+    private static final String UNKNOWN_CALENDAR_CODE = "UNKNOWN_CALENDAR";
     private final TreasuryYieldBatchRepository repository;
     private final TreasuryYieldClient client;
     private final Clock clock;
-    /** Optional for legacy constructor callers; Spring production wiring supplies the authoritative US calendar. */
-    private final MarketDataService marketDataService;
+    private final TradingRadarSessionCalendarPort sessionCalendar;
+
+    /** Compatibility callers fail closed; only Spring's typed adapter can supply known sessions. */
+    private static final TradingRadarSessionCalendarPort UNAVAILABLE_CALENDAR = (market, date) ->
+            new TradingRadarSessionCalendarPort.DayResolution(
+                    date, TradingRadarSessionCalendarPort.Status.UNKNOWN,
+                    "UNAVAILABLE_CALENDAR_PORT",
+                    TradingRadarSessionCalendarPort.MARKET_CALENDAR_UNAVAILABLE);
 
     @Autowired
     public TreasuryYieldService(
             TreasuryYieldBatchRepository repository,
             TreasuryYieldClient client,
-            MarketDataService marketDataService) {
-        this(repository, client, Clock.systemUTC(), marketDataService);
+            TradingRadarSessionCalendarPort sessionCalendar) {
+        this(repository, client, Clock.systemUTC(), sessionCalendar);
     }
 
     /** Compatibility constructor for tests/adapters before calendar-aware Treasury freshness. */
     public TreasuryYieldService(TreasuryYieldBatchRepository repository, TreasuryYieldClient client) {
-        this(repository, client, Clock.systemUTC(), null);
+        this(repository, client, Clock.systemUTC(), UNAVAILABLE_CALENDAR);
     }
 
     TreasuryYieldService(TreasuryYieldBatchRepository repository, TreasuryYieldClient client, Clock clock) {
-        this(repository, client, clock, null);
+        this(repository, client, clock, UNAVAILABLE_CALENDAR);
     }
 
     TreasuryYieldService(
             TreasuryYieldBatchRepository repository,
             TreasuryYieldClient client,
             Clock clock,
-            MarketDataService marketDataService) {
+            TradingRadarSessionCalendarPort sessionCalendar) {
         this.repository = repository;
         this.client = client;
         this.clock = clock;
-        this.marketDataService = marketDataService;
+        this.sessionCalendar = java.util.Objects.requireNonNull(sessionCalendar, "sessionCalendar");
     }
 
     /** 省略 year 時供 controller/scheduler 刷新 New York 當地 current year。 */
@@ -99,18 +106,21 @@ public class TreasuryYieldService {
                 throw new IllegalStateException("Treasury selected batch 不完整：" + batch.batchId());
             }
             LocalDate decisionDateEt = at.atZone(NEW_YORK).toLocalDate();
-            LocalDate expected = latestCompletedUsSession(decisionDateEt,
+            CompletedSessionResolution completed = latestCompletedUsSession(decisionDateEt,
                     at.atZone(NEW_YORK).toLocalTime().isBefore(US_CLOSE));
+            LocalDate expected = completed.date();
             String staleReason;
-            if (expected == null) {
-                staleReason = "Treasury required completed US session 無法由權威日曆確認";
+            if (completed.unknown() != null) {
+                staleReason = unknownCalendarReason(completed.unknown());
             } else if (batch.curveDate().isAfter(expected)) {
                 staleReason = FUTURE_CURVE_DATE_CODE + ": Treasury curve date "
                         + batch.curveDate() + " 晚於 decision-time expected completed US session " + expected;
             } else {
-                long sessionLag = sessionLag(batch.curveDate(), expected);
-                staleReason = sessionLag > MAX_CURVE_LAG_SESSIONS
-                        ? "Treasury curve 落後要求 completed US session " + sessionLag
+                SessionLagResolution lag = sessionLag(batch.curveDate(), expected);
+                staleReason = lag.unknown() != null
+                        ? unknownCalendarReason(lag.unknown())
+                        : lag.sessions() > MAX_CURVE_LAG_SESSIONS
+                        ? "Treasury curve 落後要求 completed US session " + lag.sessions()
                         + " sessions（上限 " + MAX_CURVE_LAG_SESSIONS + "）" : null;
             }
             long lagDays = Math.max(0, ChronoUnit.DAYS.between(batch.curveDate(), decisionDateEt));
@@ -120,29 +130,62 @@ public class TreasuryYieldService {
         });
     }
 
-    private LocalDate latestCompletedUsSession(LocalDate date, boolean beforeClose) {
+    private record CompletedSessionResolution(
+            LocalDate date, TradingRadarSessionCalendarPort.DayResolution unknown) {}
+
+    private record SessionLagResolution(
+            long sessions, TradingRadarSessionCalendarPort.DayResolution unknown) {}
+
+    private CompletedSessionResolution latestCompletedUsSession(LocalDate date, boolean beforeClose) {
         LocalDate candidate = beforeClose ? date.minusDays(1) : date;
         for (int i = 0; i < 370; i++, candidate = candidate.minusDays(1)) {
-            java.util.Optional<Boolean> known = marketDataService == null
-                    ? java.util.Optional.of(candidate.getDayOfWeek().getValue() <= 5)
-                    : marketDataService.isTradingDayKnown("美股", candidate);
-            if (known == null || known.isEmpty()) return null;
-            if (known.get()) return candidate;
+            TradingRadarSessionCalendarPort.DayResolution day = resolveDay(candidate);
+            if (day.status() == TradingRadarSessionCalendarPort.Status.UNKNOWN) {
+                return new CompletedSessionResolution(null, day);
+            }
+            if (day.status() == TradingRadarSessionCalendarPort.Status.OPEN) {
+                return new CompletedSessionResolution(candidate, null);
+            }
         }
-        return null;
+        return new CompletedSessionResolution(null, new TradingRadarSessionCalendarPort.DayResolution(
+                candidate, TradingRadarSessionCalendarPort.Status.UNKNOWN,
+                "CALENDAR_SEARCH_BOUND",
+                TradingRadarSessionCalendarPort.MARKET_CALENDAR_UNAVAILABLE));
     }
 
-    private long sessionLag(LocalDate curveDate, LocalDate expected) {
-        if (curveDate == null || expected == null || !curveDate.isBefore(expected)) return 0;
+    private SessionLagResolution sessionLag(LocalDate curveDate, LocalDate expected) {
+        if (curveDate == null || expected == null || !curveDate.isBefore(expected)) {
+            return new SessionLagResolution(0, null);
+        }
         long count = 0;
         for (LocalDate d = curveDate.plusDays(1); !d.isAfter(expected); d = d.plusDays(1)) {
-            java.util.Optional<Boolean> known = marketDataService == null
-                    ? java.util.Optional.of(d.getDayOfWeek().getValue() <= 5)
-                    : marketDataService.isTradingDayKnown("美股", d);
-            if (known == null || known.isEmpty()) return MAX_CURVE_LAG_SESSIONS + 1;
-            if (known.get()) count++;
+            TradingRadarSessionCalendarPort.DayResolution day = resolveDay(d);
+            if (day.status() == TradingRadarSessionCalendarPort.Status.UNKNOWN) {
+                return new SessionLagResolution(count, day);
+            }
+            if (day.status() == TradingRadarSessionCalendarPort.Status.OPEN) count++;
         }
-        return count;
+        return new SessionLagResolution(count, null);
+    }
+
+    private TradingRadarSessionCalendarPort.DayResolution resolveDay(LocalDate date) {
+        try {
+            TradingRadarSessionCalendarPort.DayResolution result = sessionCalendar.resolve("美股", date);
+            if (result != null) return result;
+        } catch (RuntimeException ignored) {
+            // Even a broken custom port must fail closed with the same stable reason.
+        }
+        return new TradingRadarSessionCalendarPort.DayResolution(
+                date, TradingRadarSessionCalendarPort.Status.UNKNOWN,
+                "CALENDAR_PORT", TradingRadarSessionCalendarPort.MARKET_CALENDAR_UNAVAILABLE);
+    }
+
+    private String unknownCalendarReason(TradingRadarSessionCalendarPort.DayResolution resolution) {
+        return UNKNOWN_CALENDAR_CODE + ": provider="
+                + java.util.Objects.toString(resolution.provider(), "UNKNOWN")
+                + ", reason=" + java.util.Objects.toString(
+                resolution.reason(), TradingRadarSessionCalendarPort.MARKET_CALENDAR_UNAVAILABLE)
+                + ", date=" + resolution.date();
     }
 
     private void validateYear(int year) {

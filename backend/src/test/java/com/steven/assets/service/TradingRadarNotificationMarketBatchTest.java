@@ -95,6 +95,7 @@ class TradingRadarNotificationMarketBatchTest {
         return TradingRadarNotificationSetting.builder()
                 .id(id).ownerUserId(1L).stockCode(code).market(market)
                 .active(true).initialized(true).ruleVersion(TradingRadarRuleEngine.RULE_VERSION)
+                .actionPolicyVersion(TradingRadarEvidenceGate.ACTION_POLICY_VERSION)
                 .lastAction("HOLD").lastCounterTrendState("NONE")
                 .build();
     }

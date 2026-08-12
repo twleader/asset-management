@@ -127,7 +127,7 @@ subagent）一律使用與當前主 agent **完全相同的模型與 reasoning e
 | Harness | 宣告位置 | 模型 / effort |
 |---|---|---|
 | Claude Code | `.claude/skills/run-stack/SKILL.md` frontmatter `model:` ／ `effort:` | `sonnet` ／ `high` |
-| Codex | `.agents/skills/run-stack/SKILL.md` 內文（frontmatter 不支援） | `gpt-5.6-luna` ／ `high` |
+| Codex | `.agents/skills/run-stack/SKILL.md` 內文（frontmatter 不支援） | `gpt-5.6-terra` ／ `high` |
 
 > **兩邊的強制力不同，別當成同一回事。** Claude Code 的 skill frontmatter 由 harness
 > 直接套用（parser 會驗 `effort`，合法值 `low｜medium｜high｜xhigh｜max`）；Codex 的

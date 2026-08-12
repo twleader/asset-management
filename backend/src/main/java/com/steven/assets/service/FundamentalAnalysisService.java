@@ -461,8 +461,9 @@ public class FundamentalAnalysisService {
     }
 
     /**
-     * t307.1：同一 provider 的 PE/PB/殖利率 composite。每個 component 都有自己的
-     * 最新 freshness 與至少 250 筆有效歷史；缺一項只降低 coverage，不以 0 補值。
+     * t307.1：PE／PB／殖利率各自在自己的 provider 歷史中選取 component，
+     * 因此可來自不同 provider／date；每項都有自己的最新 freshness 與至少
+     * 250 筆有效歷史。缺一項只降低 coverage，不以 0 補值。
      */
     ValuationComposite valuationComposite(
             List<ValuationRow> rows, LocalDate decisionDate, boolean severeFinancial) {
