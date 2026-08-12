@@ -2,25 +2,31 @@
 
 **對應 Requirements:** Requirement 65（資料時效與樣本外 gate 決定是否發布，拒絕亦須可解釋）
 **前置任務:** t314（joint-fold/cost integrity）、t315（valuation provenance surfaces）
-**Liquibase changeset:** 無
+**Liquibase changeset:** `v1.101.0-radar-notification-action-policy-version.sql`（只新增通知 action-policy version；不改行情／回測資料）
 
 ## 背景
 
-Treasury production constructor 已注入 `MarketDataService` 並以美股 completed sessions 判 freshness，但現有測試主要只驗完整 batch 與單 tenor manifest，沒有直接證明長假、UNKNOWN calendar、超過三個 session 與 V12 production fallback。V13 停止點也只跑過 backend 127 個、external 20 個定向測試，尚未完成全模組回歸、frontend build、由本 feature image recreate 的實機服務、台美 API、逐分量估值輸出或真實 70/30＋walk-forward holdout。
+Task 318 已完成並落地主線：`TreasuryYieldServiceTest` 已直接證明收盤前／後、週末與連續休市、長假、恰 3／第 4 個 completed sessions、future curve fail-closed 與 provenance 保留；本任務不得重做或冒稱那些是待完成工作。真正尚未閉環的是兩條 production 邊界：第一，現行 `MarketDataService.isTradingDayKnown("美股", date)` 對非 null 日期固定回 `Optional.of(...)`，所以 `UNKNOWN_CALENDAR` 只靠 mock 可達，尚無 typed production adapter 把 authority failure 轉成 UNKNOWN；第二，Requirement 65 要求 V12 opportunity fallback 的**最終 action**也套 evidence gate，但 production 現況仍 pass-through，且通知只用 `RULE_VERSION` 判 baseline，若直接改 action 又維持 `TW_RULES_V12`，會把新 action 與舊 baseline 比較而產生假通知。
+
+V13 停止點另只跑過 backend 127 個、external 20 個定向測試，尚未完成全模組回歸、frontend build、由本 feature image recreate 的實機服務、台美 API、逐分量估值輸出或真實 70/30＋walk-forward holdout。
 
 本任務的完成判準是「取得可信結論」，不是「一定發布 V13」。真實 report 若 `REJECTED` 或 `INSUFFICIENT`，production 保留 `TW_RULES_V12` 就是正確結案；不得修改資料、縮小 holdout、降低 n/codes/fold gate 或改 candidate grid 來湊 promotion。
 
 ## 要做什麼
 
-- [ ] **316.1 Treasury 權威日曆 freshness 測試。** 以 package constructor 注入 mock `MarketDataService`，直接驗證：
-  - decision 在美東收盤前時，latest completed session 從前一日往回找；收盤後可含當日。
-  - 週末與連續休市日回 `Optional.of(false)`（已知休市），不增加 session lag；跨長假但 curve 仍是最新 completed session 時 fresh。
-  - curve 到 expected session 之間恰 3 個 completed sessions 仍 fresh，第 4 個為 stale。
-  - `curveDate > expected completed session` 必須 fail closed 為 stale，reason 含穩定 code `FUTURE_CURVE_DATE`；不得用 session lag 0 冒充 fresh，且仍保留原 batch/provider/manifest provenance。
-  - 尋找 expected session 或計算 lag 途中任一 `Optional.empty()` 立即回 stale reason，字串含穩定 code `UNKNOWN_CALENDAR`；production 路徑不得使用 weekday fallback。
-  - complete batch 的四 tenor manifest/batch provenance 即使 stale 仍保留，stale 不得抹成「查無 batch」。
+- [ ] **316.1 建立 production 可達的權威日曆 port，並保留 Task 318 回歸。** 新增純 backend `TradingRadarSessionCalendarPort`（名稱可等價，但不得直接暴露 nullable boolean），回傳 immutable `DayResolution(date,status,provider,reason)`；`status` 只有 `OPEN|CLOSED|UNKNOWN`：
+  - production `MarketDataTradingCalendarAdapter` 是唯一 Spring adapter，委派既有 `MarketDataService.isTradingDayKnown(market,date)`；`Optional.of(true/false)` 分別映成 OPEN/CLOSED，null、`Optional.empty()` 或任何 authority/runtime failure 一律映成 UNKNOWN 並帶穩定 reason `MARKET_CALENDAR_UNAVAILABLE`。不得在 adapter 或 caller 用 weekday 猜測、空假日表當平日或吞錯後回 OPEN。
+  - `TreasuryYieldService` production constructor 改為必要注入此 port；尋找 expected completed session 與計算 lag 的每個日期都只讀同一 port。任一 UNKNOWN 立即回 stale reason `UNKNOWN_CALENDAR`（可附 adapter reason/provider），同時保留 batch/provider/manifest/available-at provenance；不得再走 compatibility constructor 的 weekday fallback。Spring wiring test 必須載入真實 adapter，證明 production constructor 沒有繞過 port。
+  - 新增 adapter contract tests，分別驗 OPEN、已知 CLOSED、empty、null 與 delegate exception；再由真實 `TreasuryYieldService`＋該 port 驗 UNKNOWN 出現在 expected-session 搜尋及 lag 中途時皆 fail closed。這些是 production wiring／failure semantics 測試，不得只在 service 外層 mock 最終 `RateContext`。
+  - Task 318 的收盤前／後、長假、3／4 sessions、`FUTURE_CURVE_DATE` 與 stale provenance 測試全部保留為 regression，不改寫既有結果，也不得把它們重新計入本任務新增完成量。
 
-- [ ] **316.2 Treasury → evidence → V12 fallback 整合測試。** 對 strict BOND profile 構造 fresh、stale、UNKNOWN 與 missing batch：fresh complete context 可為 AVAILABLE，但未 promoted beta 的 riskUnit 仍 null；stale/UNKNOWN 映成 `ASSET_SPECIFIC/bond_rate=STALE` 並保留 reason；missing batch 為 MISSING。各情境的 V12 **opportunity score、`RuleParameters` 與 ruleVersion** 不得被 Treasury beta 改寫；但最終 action 仍須套 Requirement 65／308.6 的不可變 evidence safety layer，stale/UNKNOWN/missing 使 BUY／ADD／TRIAL_BUY 類動作只向 WATCH/HOLD 保守降級，不得把「V12 fallback」當成繞過 safety gate。`TradingRadarRuleEngine.RULE_VERSION`、DTO fallback 與通知 baseline 仍是 `TW_RULES_V12`。registry 缺 key、任一 required horizon rejected/insufficient 時也必須 resolve `V12_DEFAULT`。
+- [ ] **316.2 Treasury → evidence → V12 final-action safety layer 與通知版本閉環。** 對 strict BOND profile 構造 fresh、stale、UNKNOWN 與 missing batch：fresh complete context 可為 AVAILABLE，但未 promoted beta 的 riskUnit 仍 null；stale/UNKNOWN 映成 `ASSET_SPECIFIC/bond_rate=STALE` 並保留 reason；missing batch 為 MISSING。各情境的 V12 **opportunity score、candidate action、`RuleParameters` 與 `ruleVersion`** 不得被 Treasury beta 改寫；registry 缺 key、任一 required horizon rejected/insufficient 時仍 resolve `V12_DEFAULT`。最終 action 則依 Requirement 65 統一呼叫現有 `TradingRadarEvidenceGate.apply(...)`，stale/UNKNOWN/missing 只能把 BUY／ADD／TRIAL_BUY 或缺風險證據的 REDUCE／EXIT 向 WATCH/HOLD 降級；頁面、快照、匯出與 `evaluateForNotification` 必須共用同一個 post-gate `StockDecision`，不得通知另一套 action。
+
+  為避免維持 `TW_RULES_V12` 時把新 gated action 與舊通知 baseline 比較，新增獨立 `TradingRadarEvidenceGate.ACTION_POLICY_VERSION="EVIDENCE_GATE_V1"`（或同義單一常數），並完成以下契約：
+  - `TradingRadarDto.Response`、快照與 JSON/Excel metadata 增加 `actionPolicyVersion`，值與 production gate 常數相同；舊快照缺欄顯示 null，不推導。
+  - `trading_radar_notification_setting` 以 `v1.101.0-radar-notification-action-policy-version.sql` 新增 nullable `action_policy_version VARCHAR(40)`，並在 `db.changelog-master.yaml` 明確 include；entity 同步欄位。既有列保留 null，禁止 migration 猜填目前版本；不新增其他 notification/pending 欄位。
+  - `TradingRadarNotificationService` 只有在 `initialized=true`、persisted `ruleVersion == RULE_VERSION` **且** `actionPolicyVersion == ACTION_POLICY_VERSION` 三者都成立時才把 baseline 視為有效。任一條件不符的首輪只保存目前 gated action/counter-trend、兩個版本並設 `initialized=true`，不 enqueue、不寄信，也不修改 `trading_radar_notification_state.last_notified_at`；下一輪才恢復既有 transition/cooldown 流程。
+  - 測試直接構造舊列（V12＋null／舊 action policy）、新列及「兩版本皆相符但 `initialized=false`」的設定更新情境：首輪均零 enqueue，且 baseline/versions/initialized 正確重建、notification-state cooldown 零寫入；下一個真實 transition 才可通知。另斷言頁面與通知對同一 snapshot 的 final action bit-identical。`TradingRadarRuleEngine.RULE_VERSION` 與 ruleVersion DTO 仍固定 `TW_RULES_V12`，不藉 action-policy 版本偷升 V13。
 
 - [ ] **316.3 全部本地回歸。** 在同一 commit 前依序執行 backend（含 ByteBuddy flag）、external-materials-service、BFF 全測試與 frontend `npm test`＋production build。若失敗，先判斷是否由本變更造成；本變更造成者修到通過，既有／環境失敗則保存完整命令、首個根因與受影響範圍，不得用定向測試冒充 full regression。
 
@@ -28,12 +34,16 @@ Treasury production constructor 已注入 `MarketDataService` 並以美股 compl
 
 - [ ] **316.5 實機資料面抽查。** 優先使用 in-app browser 已登入 session 開啟 `/trading-radar`，並在同一 session 呼叫 `GET /api/bff/trading-radar`；若環境沒有可用 session，才由 business container 呼叫 `GET /api/trading-radar`，顯式帶入由本機既有使用者解析出的 `X-User-Id`／`X-User-Role`／`X-User-Status`，不得硬編或輸出個資，且完成報告須標示未涵蓋 BFF session filter 的限制。抽查台股與美股交易雷達：
   - `ruleVersion=TW_RULES_V12`，除非 316.7 的全部 gate 實際通過且已另行核准發布；
+  - `actionPolicyVersion=EVIDENCE_GATE_V1`，且頁面 final action 與同 snapshot 的通知評估 final action 一致；
   - 至少一檔適用個股的 PE/PB/殖利率逐 component status/provider/asOf/source URL 不串線，缺漏時有 reason；
   - 至少一檔台灣掛牌外幣債與一檔美股債的 Treasury batch/provider/curveDate/staleReason/riskUnit；
   - xlsx 與 JSON 同一快照的 18 個 valuation provenance 欄一致；
   - frontend 首頁與交易雷達頁可載入，瀏覽器 console 無本變更造成的 error。
 
-- [ ] **316.6 真實 70/30＋5-fold holdout。** 先在 DB 執行只讀 preflight，逐市場輸出 `min(trading_date)`、`max(trading_date)`、distinct codes 與每檔日期涵蓋；共同期間固定為兩市場 market-min 的較晚者至 market-max 的較早者，若起訖不存在或反轉即 `INSUFFICIENT`。在執行前把固定 `from/to`、universe 模式與 request SHA-256 寫入完成報告；不得看結果後移動。從 business container 呼叫 `POST /internal/backtest/rules`，request 必須實際帶入 `from`、`to`、`markets=[台股,美股]`、`horizons=[5,20,60,120]`、`calibrationRatio=0.70`、`walkForwardFolds=5`、`includeCloseFallbackSensitivity=false`。第一選擇是省略 `codes`，使用服務按市場解析的完整 universe；不得只挑有利標的。若資源限制必須 bounded，須先以 deterministic sorted list 固定 codes，並用同一個 preflight 分類每個 code 的 `(market,instrumentKind,productionProfile,track)`；每個欲判 promotion 的 exact production key 都須逐 required horizon 達一般 8 codes 或 BOND/profile-specific 3 codes，否則該 key 在執行前即標 `INSUFFICIENT`。完成報告明示 bounded request 不是全市場結論，且保存 exact request JSON，不得以混合「8 codes/market」冒充任一 exact key 已達 gate。
+- [ ] **316.6 真實 70/30＋5-fold holdout。** 先在 DB 執行只讀 preflight，逐市場輸出 `min(trading_date)`、`max(trading_date)`、distinct codes 與每檔日期涵蓋；共同期間固定為兩市場 market-min 的較晚者至 market-max 的較早者，若起訖不存在或反轉即 `INSUFFICIENT`。在執行前把固定 `from/to`、`universe=FULL_MARKET` 與 request SHA-256 寫入完成報告；不得看結果後移動。從 business container 呼叫 `POST /internal/backtest/rules`，request 必須實際帶入 `from`、`to`、`markets=[台股,美股]`、`horizons=[5,20,60,120]`、`calibrationRatio=0.70`、`walkForwardFolds=5`、`includeCloseFallbackSensitivity=false`，並**省略 `codes`**，使用服務按市場解析的完整 universe；不得只挑有利標的。
+
+  `BacktestDto.V13Report` 新增 typed `universeMode=FULL_MARKET|BOUNDED_DIAGNOSTIC`，JSON/CSV 都須 echo。依既有 `BacktestDto.Request` 相容契約，`codes` 缺欄、null 或空陣列皆解析為 FULL_MARKET；非空陣列一律為 BOUNDED_DIAGNOSTIC。本任務不新增第二套 production-profile preflight：canonical `productionProfile(...)` 會依 decision-time valuation/profile evidence 解析，不能靠名稱或一次 SQL 重建。若完整 universe 因 timeout/OOM／資源限制無法完成，可另外保存 deterministic sorted bounded request 作診斷，但必須在建立 report-local promotion registry **之前** fail closed：`productionPromoted=false`、`promotedCandidateCount=0`、頂層 `selectedCandidates`／`selectedParameterSnapshots` 皆為空，每個 production key 一律標 `INSUFFICIENT_DIAGNOSTIC_ONLY`；診斷 candidate 只可留在既有 per-key execution row，不得新增可被 production resolver 解析的 registry/map，也不得補全 full-universe 證據。只有 FULL_MARKET report 可進 316.7 發布判定。
+  - 新增 request/report 契約測試：`codes` 缺欄、null、空陣列三者皆為 FULL_MARKET 且保留原 promotion 流程；非空陣列為 BOUNDED_DIAGNOSTIC，並逐項斷言上述 zero/empty/no-registry invariant。
   - 保存每個 production key 的 required horizons、holdout n/codes、valid/passing folds、catastrophic fold、candidate ID、parameter snapshot、joint train/sigma/purge、status/reason。
   - close sensitivity、全期間統計、單一 horizon 或另一 profile 不得補 promotion 證據。
   - timeout/OOM/資料不足是 `INSUFFICIENT`，不可縮短 horizon、降低 gate 或刪除失敗市場後重稱通過。
