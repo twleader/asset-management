@@ -87,7 +87,7 @@ if (containsAny(t, CHINA)) {
 
 ## 要做什麼
 
-### 321.1 `EditorialNewsFilter.java`：新增兩個常數集與 `isPersonalCrime` helper
+### 321.1 `EditorialNewsFilter.java`：新增三個常數集與 `isPersonalCrime` helper
 
 檔案：`external-materials-service/src/main/java/com/steven/assets/externalmaterials/client/EditorialNewsFilter.java`
 
@@ -144,10 +144,12 @@ if (containsAny(t, CHINA)) {
     // 台媒標準寫法是平鋪直敘（遣返／脫北者／平壤／首爾／河內），一個都不命中。實測無此集合時
     // 「中國強制遣返北韓脫北者 抵達平壤後遭凌虐致死」「中國警方毆打北韓脫北婦女 首爾民間團體
     // 譴責」「越南移工在中國工廠遭毆打 河內要求究責」三則皆被誤殺，加入後全數回到 KEEP。
-    // 9 詞中 8 詞有語料樣本（遣返2／脫北2／難民2／庇護2／究責5／譴責19／召見1／交涉4），
-    // 僅 領事 為零命中——豁免集的零樣本詞誤中方向是「少濾一則」，比照 Task 241 的既有紀律可收。
+    // 8 詞**全部**有語料樣本（遣返2／脫北2／難民2／庇護2／究責5／譴責19／召見1／交涉4），無零樣本詞。
+    // 刻意不收 領事／大使館／外交：它們本來就是 BEIJING_REGIME 成員（見 :112），而 isPersonalCrime()
+    // 只在規則③第一個 if（BEIJING_REGIME／POLITY_STRONG／TW_POLITICS_GENERIC 皆空）之後才被呼叫，
+    // 收了也永遠不可達——是死碼，不是保險（spec-review 第 2 輪指出）。
     private static final Set<String> PERSONAL_CRIME_STATE_ACTION = set(
-            "遣返", "脫北", "難民", "庇護", "究責", "譴責", "召見", "交涉", "領事");
+            "遣返", "脫北", "難民", "庇護", "究責", "譴責", "召見", "交涉");
 ```
 
 在 `isFamilyEstate(...)` 附近（其他 private 判定 helper 旁）新增：
@@ -264,13 +266,26 @@ if (containsAny(t, CHINA)) {
             assertKeep("中國警方毆打北韓脫北婦女 首爾民間團體譴責");                 // 脫北／譴責
             assertKeep("越南移工在中國工廠遭毆打 河內要求究責");                     // 究責
         }
-        // 判準 (c)：規則①FINANCE 先判，財經新聞完全不受影響
+        // 判準 (c)：規則①FINANCE 先判，財經新聞完全不受影響。
+        // ⚠ 前三則在規則①即 KEEP:finance 結案（關稅・鋼鐵／半導體／台積電），對本次守門**零鑑別力**，
+        //    純為文件性錨點（spec-review 第 2 輪指出）；真正驗到「守門必須留在規則③內、不得提升到
+        //    FINANCE 之前」的是第四則——猥褻∈PERSONAL_CRIME 且 億元∈FINANCE（語料實例＝已知殘留 2），
+        //    實測把守門提升到規則①之前，該則即由 KEEP:finance 翻為 DROP。
         @Test void 財經新聞不誤殺() {
             assertKeep("南韓對中國祭出反傾銷關稅 鋼鐵業受衝擊");
             assertKeep("中國在南韓部署間諜網 竊盜半導體技術遭起訴");
             assertKeep("台積電前工程師竊盜營業秘密 檢方起訴求刑");
+            assertKeep("中國商人猥褻韓女被拒絕入境 在濟州島擁7.6億元土地也沒用");   // 語料實例，順序守門
         }
-        // 永久禁用詞的回歸錨點：這些詞若被誤加進 PERSONAL_CRIME，本組會失敗
+        // 永久禁用詞的回歸錨點。
+        // ⚠ 前 7 則是**語料錨點**，全部不含 `CHINA` 成員故走不到規則③，**驗不到**「禁用詞被誤加進
+        //    `PERSONAL_CRIME`」（spec-review 第 2 輪以 mutation 證明：17 個禁用詞全塞進 `PERSONAL_CRIME`
+        //    後這 7 則 0/7 失敗）。它們防的是另一個方向——禁用詞被加進 `LIFESTYLE`／`SOCIAL_ODDITY`
+        //    這類**全域**否決集，該方向確實會失敗，故保留。
+        //    真正驗到 `PERSONAL_CRIME` 誤加的是後 3 則合成案例：三者皆 `CHINA` ∧ `GEO_REGION` 命中，
+        //    且 `BEIJING_REGIME`／`POLITY_STRONG`／`TW_POLITICS_GENERIC`／`GEO_TRIGGER`／`FINANCE`／
+        //    `LIFESTYLE`／`SPORT` 全空，現況判 `KEEP:china-regime`；一旦 踹／命案／家暴 被加進
+        //    `PERSONAL_CRIME` 即翻 `DROP:china-personal-crime`（實測 mutation 3/3 失敗）。
         @Test void 禁用詞不得誤殺政治與財經() {
             assertKeep("自由說新聞》直擊烏軍重創莫斯科命脈！俄國缺油再爆「斷水荒」民怨嗆普廷踹共");  // 踹共，語料實例
             assertKeep("藍營側翼竟是共諜！買全台個資恐嚇  苗博雅要國民黨踹共");                      // 踹共，語料實例
@@ -279,6 +294,10 @@ if (containsAny(t, CHINA)) {
             assertKeep("談論與伊朗談判 川普：我寧願達成協議，因為我不想殺人");                      // 語料實例
             assertKeep("美參議員提「停止跨境鎮壓法案」》學者：台灣應師法美國 設專法反制跨境施暴");  // 語料實例
             assertKeep("李四川：跑遍新北29區 對症下藥才能解決問題");                                // 對症下藥⊃下藥，語料實例
+            // 以下 3 則為合成案例，是本組唯一能驗到「禁用詞誤加進 PERSONAL_CRIME」的錨點
+            assertKeep("中國網友嗆南韓業者踹共");                                                  // 踹
+            assertKeep("中國男子在南韓涉入一起命案 遭當地警方調查");                              // 命案
+            assertKeep("中國女子在南韓遭丈夫家暴 鄰居報警");                                      // 家暴
         }
         // 方案 A（規則③改為 GEO_REGION ∧ GEO_TRIGGER）的否決證據：這 5 則必須維持 KEEP
         @Test void 裸國名新聞仍須保留() {
@@ -310,7 +329,7 @@ if (containsAny(t, CHINA)) {
 cd external-materials-service && /usr/local/apache-maven/apache-maven-3.9.11/bin/mvn -q test -Dtest=EditorialNewsFilterTest
 ```
 
-（斷言 `Failures: 0, Errors: 0`；新增 `@Nested ChinaBranchPersonalCrime` **8 個測試方法／34 條斷言**全過、既有 45 個測試方法／11 個 `@Nested`（`Finance`／`China`／`Geopolitics`／`TwLocal`／`GeneralNews`／`Anecdote`／`SocialOddity`／`SouthChinaSeaSkirmish`／`LotteryAndEstate`／`CivicSoftAndFinanceFeed`／`SportsAndIntlPolitics`）零回歸，合計 53 個測試方法。既有測試檔的 168 條 `assertKeep`／`assertDrop` 已於實作前用最終詞集全量預跑，**168/168 通過**。既有測試中唯一命中 `PERSONAL_CRIME` 詞者為「職棒球員酒駕遭球團暗殺式冷凍」，它在規則①d 即判 `DROP:sport`、走不到規則③，故不受影響。）
+（斷言 `Failures: 0, Errors: 0`；新增 `@Nested ChinaBranchPersonalCrime` **8 個測試方法／38 條斷言**全過、既有 45 個測試方法／11 個 `@Nested`（`Finance`／`China`／`Geopolitics`／`TwLocal`／`GeneralNews`／`Anecdote`／`SocialOddity`／`SouthChinaSeaSkirmish`／`LotteryAndEstate`／`CivicSoftAndFinanceFeed`／`SportsAndIntlPolitics`）零回歸，合計 53 個測試方法。既有測試檔的 168 條 `assertKeep`／`assertDrop` 已於實作前用最終詞集全量預跑，**168/168 通過**。既有測試中唯一命中 `PERSONAL_CRIME` 詞者為「職棒球員酒駕遭球團暗殺式冷凍」，它在規則①d 即判 `DROP:sport`、走不到規則③，故不受影響。）
 
 **整模組建置：**
 
