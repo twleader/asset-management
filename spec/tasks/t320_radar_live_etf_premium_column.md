@@ -363,6 +363,57 @@ Tests run: 872, Failures: 0, Errors: 0, Skipped: 0 — BUILD SUCCESS
    已比照修正為扣掉 `LIVE_PREMIUM_COLS` 後反推、欄數改 174。修正後
    `containsExactly(VALUATION_COMPONENT_HEADERS_EXPECTED)` 的嚴格度不變。
 
-### 尚未執行（由主 agent 統一處理）
+### 建置與部署（由主 agent 執行，2026-08-13 00:04–00:15）
 
-「建置與部署」與「實機驗證」兩段未執行——本階段僅到單元測試全綠為止。
+已 merge 進 main（feature `f8014302` → `--no-ff` merge `60a50614` → push origin/main），
+故依「已 merge 就從 main 的 worktree build」規則，在 `/Users/steven/Project/asset-management-main`
+（已確認在 `main`、工作區乾淨、`--ff-only` 追平 origin/main）執行：
+
+```
+cp /Users/steven/Project/asset-management/.env .                                   # worktree 無 .env
+docker compose -p asset-management build --no-cache business-services frontend      # exit 0
+docker compose -p asset-management up -d --no-deps --force-recreate business-services frontend
+docker compose -p asset-management restart bff                                      # recreate 換 IP，BFF 需重啟
+```
+
+image SHA 確認已更新（非 stale）：business `4b1e736c…` → `f1cedaae…`、frontend `a06a3f64…` → `1f187d81…`。
+運行中產物確認含本次變更：
+
+```
+docker exec asset-business-services sh -c 'unzip -l /app/app.jar | grep -i EtfLivePremium'
+  → BOOT-INF/classes/com/steven/assets/service/EtfLivePremiumCalculator.class
+docker exec asset-frontend sh -c 'grep -l "折溢價(即時)" /usr/share/nginx/html/assets/*.js'
+  → /usr/share/nginx/html/assets/TradingRadarView-DWhesuwA.js（另確認含「折溢價(完成日)」）
+```
+
+六個容器皆 healthy；`curl -sI http://localhost/` → 200、`/actuator/health` → UP；
+`docker logs asset-bff --since 5m | grep -cE "Connection refused|500 Server Error"` → **0**。
+
+### 實機驗證（全部通過）
+
+**API 逐檔比對**（business 容器內帶 `X-User-*` header 打 `/api/trading-radar`，32 檔）：
+
+| 類別 | 結果 |
+|---|---|
+| 台股 ETF 15 檔 | `etfPremiumLivePct` 與 Redis `price:etfnav:台股:{code}` 的 `premiumDiscountPct` **逐位相同**，零不一致（0050 −0.35／0056 −0.25／00878 −0.12／006208 −0.41／00919 −0.56／009816 −0.59 等） |
+| 美股 ETF 4 檔 | 皆有值（VOO −0.09／QQQ 0.47／VT 0.36／SGOV 0.03），以該列現價反推；同列 `etfPremiumPct`（dated）仍為 `null`，符合 Task 294.5 |
+| 個股 13 檔 | 2330／NVDA／AMZN／AVGO／MSFT／2891／2885／2881／GOOGL／TSM／COIN 兩欄皆 `null`，未補 0 |
+
+**匯出（`.xlsx` 與 `.json` 兩份）**：總欄數 **172 → 174**；`折溢價%` 仍在索引 **53**（未位移）；
+`折溢價時點／折溢價來源／折溢價stale` 仍在索引 **134–136**（未位移）；
+末三欄為 `殖利率缺漏原因／即時折溢價%／即時淨值時間`。兩種格式的欄名、欄序、值逐項一致。
+落檔於 `/Users/steven/Project/SRPP/data/input/交易雷達_1_20260813.{xlsx,json}`。
+
+**驗證段那條快照節流警語實測有效，且真的踩到了。** 第一次匯出時新兩欄全空：
+排查發現該快照 `generatedAt` 為 `00:09:29`，而 business 容器啟動於 `00:11:13`（台北時間）——
+快照比容器早 1 分 44 秒，是**舊 image 的產物**（其 `StockDecision` 只有 60 個 key，新版為 62），
+且部署後首次 `GET` 落在 5 分鐘節流窗內故未落新快照。等過節流窗重打一次 `GET` 後，
+新快照 `00:15:05` 的欄位數為 **62**、21 檔帶即時折溢價值，重新匯出即正確。
+**這不是功能失效**——若無此警語，極易誤判為「匯出沒吃到新欄」而回頭改對的程式碼。
+
+### 未由自動化涵蓋、需人工確認的部分
+
+前端畫面本身未經瀏覽器實地點閱（該頁需 Google OAuth session，無法以 header 模擬）。
+已驗證的是：build 產物含新舊兩個文案、欄位在 `.vue` 原始碼中位於「現價／漲跌」與
+「MA5／20／60／240」之間、且該欄純 render 無任何前端計算。實際版面（欄寬、與相鄰欄的
+視覺平衡、次要文字的淨值時點是否過長）建議由使用者開頁確認。
