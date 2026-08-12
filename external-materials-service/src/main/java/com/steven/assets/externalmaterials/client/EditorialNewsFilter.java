@@ -362,6 +362,83 @@ public final class EditorialNewsFilter {
             "國稅局", "財政部", "申報", "稅制", "課稅", "遺產稅", "贈與稅", "節稅",
             "台積電", "股利", "配息", "除息", "董事長", "董座", "經營權", "接班");
 
+    // ===== 個人刑案／社會案件（Task 321）：只用於規則③的 GEO_REGION disjunct 守門 =====
+    // 使用者需求（2026-08-12）：「影響不了兩國外交關係，也沒有對社會造成重大衝擊，更不會影響
+    // 財經、股市的新聞，要過濾」——回報案例「扯！南韓養老院中國女看護 用腳踹輪椅老者致死」
+    // 命中 CHINA(中國) ∧ GEO_REGION(南韓) 而在規則③被判 KEEP:china-regime。
+    //
+    // ⚠ **本集合不是全域否決集，只在規則③內取消「裸國名」這一個最弱的 KEEP 理由。**
+    // 全域化（置於 FINANCE 之後、LIFESTYLE 之前的獨立規則）經實測在語料上零額外收穫，卻誤殺
+    // 「香港民主派人士遭港警毆打」「日本首相遭持刀攻擊」——因為那樣得自建一份國家層級政治守門集，
+    // 而本設計直接沿用 BEIJING_REGIME（已含 民主）與 POLITY_STRONG（已含 日本首相）。
+    //
+    // 詞集全部是**個人層級的人身／財產侵害**，刻意不含國家暴力語彙（鎮壓／屠殺／空襲／砲擊），
+    // 那些本就該由規則③既有 disjunct 或規則④收錄。29 詞中 8 詞有語料樣本（致死／施虐／猥褻／
+    // 性侵／竊盜 各 1，搶劫／酒駕 各 2，偷喝 1）、21 詞為零命中；
+    // ⚠ 已收詞的**非刑案義**曝險（spec-review 第 3 輪；只檢討「未收的詞」是不夠的）：
+    //   致死 ⊂ 致死率／致死性 —— 跨國疫情報導會落 DROP，已由 isPersonalCrime() 先剝除該兩詞解決。
+    //   竊盜 —— 跨國產業間諜報導（「中國企業竊盜南韓造船技術」）的 FINANCE 命中為空，
+    //          已由 PERSONAL_CRIME_ECON_EXEMPT 解決。
+    // 零命中詞的納入是刻意的例外，理由是本規則的爆炸半徑被四重條件夾住（CHINA ∧ GEO_REGION
+    // ∧ ¬BEIJING_REGIME ∧ ¬POLITY_STRONG ∧ ¬TW_POLITICS_GENERIC ∧ ¬GEO_TRIGGER），且
+    // **規則①FINANCE 先於規則③**——財經比喻（融資重傷／不被工作綁架／營運動能）在此之前就已 KEEP，
+    // 誤中**帶 FINANCE 關鍵詞之**財經新聞的路徑不存在。
+    // ⚠ 但這**不等於**「誤中財經不可能」：`FINANCE` 本身有召回缺口，落在缺口內的產業新聞照樣會被
+    //    誤中（審查者反例「中國企業竊盜南韓造船技術」FINANCE 命中為空）。Task 241 的
+    //    `SPORT_ECON_EXEMPT` 註解早已寫明同一件事，本任務以 `PERSONAL_CRIME_ECON_EXEMPT` 比照補上。
+    // 此與 Task 241「否決集不收零樣本詞」的紀律不衝突：該紀律針對的是
+    // 排在 LIFESTYLE 之前、能直接扣掉財經新聞的全域否決集。
+    //
+    // 刻意排除（逐詞實測會誤殺，勿加入）：
+    //   踹  ：台灣政治用語「踹共」（語料 2 則：「民怨嗆普廷踹共」「苗博雅要國民黨踹共」）。
+    //         **使用者回報的標題本身含「踹」，仍不得收**——它由 致死 命中即足夠。
+    //   命案：子字串誤中「真除任**命案**獲參院批准」（美司法部長人事）。
+    //   家暴：子字串誤中「就是國**家暴**力」（蔣萬安談深偽案）。
+    //   殺人：誤中「川普：我寧願達成協議，因為我不想殺人」（美伊談判）。
+    //   施暴：誤中「設專法反制跨境施暴」（跨境鎮壓法案）。
+    //   綁架：財經比喻「想不被工作綁架，要存多少錢才夠？」。
+    //   下藥：子字串誤中「對症**下藥**」。偷吃／霸凌：政治口水固定比喻（「駁斥偷吃」「霸凌國家團隊」）。
+    //   逮捕／落網／嫌犯／身亡／死亡／重傷：語料實測大量命中必保新聞（以色列總理遭紐約市長嗆逮捕、
+    //         中共預測抓人系統、北約間諜案、侵占7億當庭逮捕、解放軍空降兵墜落身亡、融資重傷…）。
+    //   持刀／隨機攻擊：無差別攻擊屬使用者判準 (b)「對社會造成重大衝擊」，本就該保留，故不列入否決。
+    private static final Set<String> PERSONAL_CRIME = set(
+            "致死", "虐待", "虐死", "施虐", "凌虐", "毆打", "痛毆", "圍毆", "掌摑",
+            "猥褻", "性騷擾", "性侵", "偷竊", "行竊", "扒竊", "竊盜", "搶劫", "強盜",
+            "分屍", "棄屍", "縱火", "潑酸", "酒駕", "肇逃", "擄人", "撕票", "迷昏",
+            "偷喝", "偷拿");
+
+    // 重大社會衝擊豁免（Task 321）：對應使用者判準 (b)。命中即**不**視為個人刑案，
+    // 落回原本的 KEEP:china-regime。恐攻／人質／無差別攻擊／暴動戒嚴等已非個人層級事件。
+    // 刻意不用傷亡數字守門（如 `[0-9]+死`）：比照 Task 241 對場館災難的裁示，且「3死角」這類
+    // 子字串誤中在中文標題中確有前例。
+    private static final Set<String> PERSONAL_CRIME_ESCALATION = set(
+            "恐攻", "恐怖攻擊", "恐怖襲擊", "恐怖組織", "恐怖分子", "恐怖份子",
+            "人質", "挾持", "無差別", "隨機殺人", "隨機砍人", "屠殺", "暴動", "騷亂", "戒嚴");
+
+    // 跨境人權／國家層級交涉豁免（Task 321，spec-review 第 1 輪加入）：對應使用者判準 (a)。
+    // BEIJING_REGIME 的 人權／民主／鎮壓／跨境鎮壓 都要求標題**字面出現**該詞，但這類新聞的
+    // 台媒標準寫法是平鋪直敘（遣返／脫北者／平壤／首爾／河內），一個都不命中。實測無此集合時
+    // 「中國強制遣返北韓脫北者 抵達平壤後遭凌虐致死」「中國警方毆打北韓脫北婦女 首爾民間團體
+    // 譴責」「越南移工在中國工廠遭毆打 河內要求究責」三則皆被誤殺，加入後全數回到 KEEP。
+    // 8 詞**全部**有語料樣本（遣返2／脫北2／難民2／庇護2／究責5／譴責19／召見1／交涉4），無零樣本詞。
+    // 刻意不收 領事／大使館／外交：它們本來就是 BEIJING_REGIME 成員（見 :112），而 isPersonalCrime()
+    // 只在規則③第一個 if（BEIJING_REGIME／POLITY_STRONG／TW_POLITICS_GENERIC 皆空）之後才被呼叫，
+    // 收了也永遠不可達——是死碼，不是保險（spec-review 第 2 輪指出）。
+    private static final Set<String> PERSONAL_CRIME_STATE_ACTION = set(
+            "遣返", "脫北", "難民", "庇護", "究責", "譴責", "召見", "交涉");
+
+    // `FINANCE` 白名單在「跨國產業間諜／技術外洩」報導上的已知召回缺口補丁（Task 321，
+    // spec-review 第 3 輪加入）。**只在本規則當豁免用，不改動 `FINANCE` 本身**——與 Task 241 的
+    // `SPORT_ECON_EXEMPT` 同一手法，避免與本任務無關的全域回歸。
+    //
+    // 反例（審查者提出，實測成立）：「中國企業竊盜南韓造船技術 首爾展開調查」的 FINANCE 命中為
+    // **空**（造船／技術／企業 皆非 FINANCE 成員，成員是 `技術面`），規則①攔不住，`竊盜` 直接讓它
+    // 落 DROP。而本任務自己把結構相同的「向中國企業洩露OLED關鍵技術　南韓樂金顯示器3名前員工
+    // 遭判刑」列為方案 A 否決證據的 5 則必保之一——差別只在該則用「洩露」、反例用「竊盜」。
+    // 這同時推翻了「規則①先判 ⇒ 誤中財經的路徑不存在」這個過強的論證（見 PERSONAL_CRIME 註解）。
+    private static final Set<String> PERSONAL_CRIME_ECON_EXEMPT = set(
+            "技術", "營業秘密", "商業機密", "專利", "智慧財產", "產業間諜");
+
     /** 過濾一批新聞，只留符合編輯政策者。 */
     public static List<NewsRow> retain(List<NewsRow> rows) {
         List<NewsRow> out = new ArrayList<>(rows.size());
@@ -427,11 +504,20 @@ public final class EditorialNewsFilter {
         // 2) 全世界生活／消費／娛樂／體育軟文否決——除非上方已判為財經，否則一律濾除；政治/中國/地緣/城市白名單皆不救回
         if (containsAny(t, LIFESTYLE)) return "DROP:lifestyle";
 
-        // 3) 中國相關：財經（已判）／北京政權中央政治／美日台歐盟雙邊／與他國雙邊外交／台灣政黨對中 保留，
-        //    其餘（純社會獵奇）濾除
+        // 3) 中國相關：財經（已判）／北京政權中央政治／美日台歐盟雙邊／台灣政黨對中 保留，
+        //    其餘（純社會獵奇）濾除。
+        //    Task 321：GEO_REGION（裸國名）是四個 disjunct 中唯一**不是政治行為者集合**的一個，
+        //    其原始語意為「中國與他國雙邊外交」，但「標題同時出現中國與南韓」不構成雙邊外交
+        //    （使用者 2026-08-12 回報：「南韓養老院中國女看護 用腳踹輪椅老者致死」）。故個人刑案
+        //    不得單靠裸國名保留，須另有 GEO_TRIGGER——**即規則④對同一份 GEO_REGION 採用的標準**。
+        //    另三個 disjunct 不受影響：新疆凌虐（BEIJING_REGIME）、日相遇襲（POLITY_STRONG）皆照舊保留。
         if (containsAny(t, CHINA)) {
             if (containsAny(t, BEIJING_REGIME) || containsAny(t, POLITY_STRONG)
-                    || containsAny(t, TW_POLITICS_GENERIC) || containsAny(t, GEO_REGION)) return "KEEP:china-regime";
+                    || containsAny(t, TW_POLITICS_GENERIC)) return "KEEP:china-regime";
+            if (containsAny(t, GEO_REGION)) {
+                if (!isPersonalCrime(t) || containsAny(t, GEO_TRIGGER)) return "KEEP:china-regime";
+                return "DROP:china-personal-crime";
+            }
             return "DROP:china-nonfinance";
         }
 
@@ -485,6 +571,30 @@ public final class EditorialNewsFilter {
     /** 家事遺產糾紛判定（Task 240）：主題詞命中且未命中法制／稅制／市場主體豁免詞。 */
     private static boolean isFamilyEstate(String t) {
         return containsAny(t, ESTATE_TOPIC) && !containsAny(t, ESTATE_EXEMPT);
+    }
+
+    /**
+     * 個人刑案判定（Task 321）：個人層級人身／財產侵害詞命中，且未命中三層豁免——
+     * {@link #PERSONAL_CRIME_ESCALATION}（使用者判準 b：對社會造成重大衝擊）、
+     * {@link #PERSONAL_CRIME_STATE_ACTION}（判準 a：跨境人權／國家層級交涉）、
+     * {@link #PERSONAL_CRIME_ECON_EXEMPT}（判準 c：`FINANCE` 在跨國產業間諜報導上的召回缺口）。
+     *
+     * <p><b>本方法只被規則③的 {@code GEO_REGION} disjunct 呼叫</b>，不是獨立的 cascade 規則。
+     * 回傳 true 的效果僅是「裸國名不足以構成保留理由」，並非直接 DROP——同一則若另含
+     * {@code BEIJING_REGIME}／{@code POLITY_STRONG}／{@code TW_POLITICS_GENERIC}／{@code GEO_TRIGGER}
+     * 任一訊號，仍為 {@code KEEP:china-regime}。
+     *
+     * <p><b>先剝除 {@code 致死率}／{@code 致死性} 再比對</b>（spec-review 第 3 輪）：`致死` 是本集合
+     * 唯一有非刑案義的成員，跨國疫情報導「中國H5N1禽流感疫情擴散至南韓 致死率高達5成」的
+     * `疫情`／`病毒`／`禽流感` 都不在 `FINANCE`／`GEO_TRIGGER`／任一豁免集，四重夾擊全部落空而被誤殺。
+     * 手法沿用 {@link #isSouthChinaSeaSkirmish} 對「中南海」的既有處理（Task 229）。
+     */
+    private static boolean isPersonalCrime(String t) {
+        String s = t.replace("致死率", "").replace("致死性", "");
+        return containsAny(s, PERSONAL_CRIME)
+                && !containsAny(s, PERSONAL_CRIME_ESCALATION)
+                && !containsAny(s, PERSONAL_CRIME_STATE_ACTION)
+                && !containsAny(s, PERSONAL_CRIME_ECON_EXEMPT);
     }
 
     /**

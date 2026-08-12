@@ -417,10 +417,17 @@ docker inspect --format '{{.State.Health.Status}}' asset-external-materials-serv
 ## 完成報告
 
 **實際改動檔案：**
-- （待回填）
+- `external-materials-service/src/main/java/com/steven/assets/externalmaterials/client/EditorialNewsFilter.java`（+113／−3）：`ESTATE_EXEMPT` 之後、`retain(...)` 之前新增四個常數集 `PERSONAL_CRIME`（29 詞）／`PERSONAL_CRIME_ESCALATION`（15 詞）／`PERSONAL_CRIME_STATE_ACTION`（8 詞）／`PERSONAL_CRIME_ECON_EXEMPT`（6 詞）；`isFamilyEstate(...)` 附近新增 `isPersonalCrime(String)` helper；`trace()` 規則③連同上方兩行 `// 3)` 舊註解一併取代為附守門版本。
+- `external-materials-service/src/test/java/com/steven/assets/externalmaterials/client/EditorialNewsFilterTest.java`（+94）：`SportsAndIntlPolitics` 之後新增 `@Nested ChinaBranchPersonalCrime`（8 個測試方法／37 條斷言）。
+- 未改 `NewsFetchClient`／`traceFinanceFeed()`／`retainForFinanceFeed()`／backend／bff／frontend／任何既有關鍵詞集；無 Liquibase changeset、無 `@Scheduled` 變更（如計畫）。
 
 **驗證輸出：**
-- （待回填）
+- 單元測試：`mvn test -Dtest=EditorialNewsFilterTest` → `Tests run: 53, Failures: 0, Errors: 0`（既有 45 個零回歸＋新增 `ChinaBranchPersonalCrime` 8 個全過）。
+- 整模組建置：`mvn -q package` → `Tests run: 319, Failures: 0, Errors: 0`（需 `-DextraArgLine=-Dnet.bytebuddy.experimental=true`，見下方偏差 1）。
+- 實作前置的機械驗證（spec-review 過程中已對最終設計逐項確認，實作後程式碼與該設計逐字相符）：線上 7526 則語料 KEEP→DROP 3 則、零反向翻轉；既有 168 條測試斷言於新邏輯下 168/168 通過；任務檔 321.3 的 37 條斷言 37/37 通過。
+- 架構符規查證（`arch-auditor`，diff-scoped）：`critical: 0 major: 0 minor: 0`。逐條確認：變更完全侷限於 `external-materials-service/client/` 純函式層、零 import 增刪、零跨層滲漏；`KEEP:china-regime`／`DROP:china-nonfinance` 適用情境以布林等價驗證完全不變；`traceFinanceFeed()`／`NewsFetchClient` 確認未被觸及；新 label `DROP:china-personal-crime` 全專案零下游消費者；四個新常數集判定為既有 25 個同型集合（Task 199 起）的延伸、不違反「禁止 Enum 寫死」（該規範射程為使用者可管理的業務分類主檔，非編輯政策關鍵詞）。
 
 **與原計畫的偏差：**
-- （待回填）
+1. **`mvn -q package` 的驗證指令需補 byte-buddy 旗標。** 任務檔原驗證段未寫 `-DextraArgLine=-Dnet.bytebuddy.experimental=true`；不加會因 Java 25 環境既有的 Mockito／byte-buddy 問題（與本任務無關，`PricePoller` 相關）冒出 203 個 error。已在此完成報告記錄，供日後重跑參考；不追溯修改驗證段本文（該問題是本專案既有已知事項，見 [feedback_mockito_java25_bytebuddy 記憶](../../../CLAUDE.md)）。
+2. **321.1 標題原寫「新增兩個常數集」，spec-review 第 1／3 輪各加一個集合後，最終為四個。** 標題已於 spec-review 過程中同步更新為「新增三個常數集」再更新為「新增三個」（第 3 輪僅補 `PERSONAL_CRIME_ECON_EXEMPT` 內文與 helper 引用，標題落一輪未同步）；此為文件用字問題，程式碼已依 code block（四個集合）正確實作，`isPersonalCrime()` 本身即引用全部四個集合，少做一個會編譯失敗。
+3. 無其餘偏差；程式碼與 spec 三輪審查後的最終版本逐字相符（實作 agent 已逐區塊 byte-verbatim 比對）。

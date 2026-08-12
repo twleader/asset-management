@@ -380,4 +380,98 @@ class EditorialNewsFilterTest {
             assertThat(EditorialNewsFilter.traceFinanceFeed("俄羅斯重返奧運舞台 國際奧委會暫時解除處罰")).startsWith("KEEP");
         }
     }
+
+    @Nested
+    @DisplayName("中國＋他國國名的個人刑案（Task 321）")
+    class ChinaBranchPersonalCrime {
+        // 使用者 2026-08-12 回報案例與同類語料實例
+        @Test void 個人刑案不得單靠裸國名保留() {
+            assertDrop("扯！南韓養老院中國女看護 用腳踹輪椅老者致死");                    // 語料實例（使用者回報）
+            assertDrop("中國男子在天津搶劫殺人 潛逃29年後於南韓落網");                    // 語料實例
+            assertDrop("犯法秒換國籍！ 中國夫妻搭北捷偷喝水 被抓包硬凹「來自南韓」");      // 語料實例
+            assertDrop("南韓補習班老師猥褻中國學童 遭判刑3年");
+            assertDrop("中國移工在南韓縱火燒毀宿舍 4人受傷");
+        }
+        // 判準 (a)：另三個 disjunct 完全不受影響
+        @Test void 國家層級政治訊號仍保留() {
+            assertKeep("中國新疆再教育營傳出凌虐維吾爾人 美國宣布制裁北京官員");     // BEIJING_REGIME
+            assertKeep("香港民主派人士遭港警毆打 引發國際關注");                     // BEIJING_REGIME(民主)
+            assertKeep("中國異議人士遭凌虐致死 人權團體要求聯合國調查");             // BEIJING_REGIME
+            assertKeep("美國會通過反跨境鎮壓法案 制裁中國施虐官員");                 // BEIJING_REGIME
+            assertKeep("中國駐南韓大使館抗議僑民遭搶劫 要求首爾加強維安");           // BEIJING_REGIME(大使館)
+            assertKeep("中國留學生在日本遭搶劫致死 兩國外交部門展開交涉");           // 三重保護（外交∈BEIJING_REGIME、
+                                                                                    // 外交部∈POLITY_STRONG、交涉∈STATE_ACTION）
+                                                                                    // ⇒ 對本次守門零鑑別力，純文件性錨點
+        }
+        // GEO_TRIGGER 救回：退回規則④「國名＋地緣觸發詞」的同一標準
+        // ⚠ 本組與下兩組的標題都刻意**不含** BEIJING_REGIME／POLITY_STRONG／TW_POLITICS_GENERIC
+        //    任一成員，否則會在規則③第一個 if 就短路 KEEP、根本走不到 GEO_REGION disjunct，
+        //    測試變成空轉錨點（把守門邏輯整條刪掉也照樣通過）。
+        //    spec-review 第 1 輪即抓到三則空轉：「…船員與海警爆發毆打衝突」（海警∈BEIJING_REGIME）、
+        //    「中國籍男子…無差別攻擊」（中國籍∈BEIJING_REGIME 且 攻擊∈GEO_TRIGGER 雙重短路）、
+        //    「中國留學生在南韓遭挾持為人質」（整句無任一 PERSONAL_CRIME 詞，isPersonalCrime 恆 false）。
+        @Test void 地緣觸發詞救回國家層級衝突() {
+            assertKeep("中國與越南邊境爆發衝突 士兵遭毆打送醫");                     // 衝突∈GEO_TRIGGER
+            assertKeep("南韓漁民與中國船員在公海爆發衝突 多人遭毆打");               // 衝突∈GEO_TRIGGER
+        }
+        // 判準 (b)：對社會造成重大衝擊者豁免（三則皆不含 GEO_TRIGGER，確保是 ESCALATION 在起作用）
+        @Test void 重大社會衝擊豁免() {
+            assertKeep("中國男子在南韓縱火燒死30人 當局憂無差別犯案");               // 縱火＋無差別
+            assertKeep("中國留學生在南韓遭擄人挾持為人質 警方攻堅救出");             // 擄人＋挾持／人質
+            assertKeep("中國移工在南韓街頭暴動 多名警察遭毆打");                     // 毆打＋暴動
+        }
+        // 判準 (a)：跨境人權／國家層級交涉豁免（spec-review 第 1 輪加入 PERSONAL_CRIME_STATE_ACTION）
+        // 無此集合時三則實測皆被誤殺為 DROP:china-personal-crime
+        @Test void 跨境人權與國家交涉豁免() {
+            assertKeep("中國強制遣返北韓脫北者 抵達平壤後遭凌虐致死");               // 遣返／脫北
+            assertKeep("中國警方毆打北韓脫北婦女 首爾民間團體譴責");                 // 脫北／譴責
+            assertKeep("越南移工在中國工廠遭毆打 河內要求究責");                     // 究責
+        }
+        // 判準 (c)：規則①FINANCE 先判，財經新聞完全不受影響。
+        // ⚠ 前三則在規則①即 KEEP:finance 結案（關稅・鋼鐵／半導體／台積電），對本次守門**零鑑別力**，
+        //    純為文件性錨點（spec-review 第 2 輪指出）；真正驗到「守門必須留在規則③內、不得提升到
+        //    FINANCE 之前」的是第四則——猥褻∈PERSONAL_CRIME 且 億元∈FINANCE（語料實例＝已知殘留 2），
+        //    實測把守門提升到規則①之前，該則即由 KEEP:finance 翻為 DROP。
+        @Test void 財經新聞不誤殺() {
+            assertKeep("南韓對中國祭出反傾銷關稅 鋼鐵業受衝擊");
+            assertKeep("中國在南韓部署間諜網 竊盜半導體技術遭起訴");
+            assertKeep("台積電前工程師竊盜營業秘密 檢方起訴求刑");
+            assertKeep("中國商人猥褻韓女被拒絕入境 在濟州島擁7.6億元土地也沒用");   // 語料實例，順序守門
+        }
+        // 永久禁用詞的回歸錨點。
+        // ⚠ 前 7 則是**語料錨點**，全部不含 `CHINA` 成員故走不到規則③，**驗不到**「禁用詞被誤加進
+        //    `PERSONAL_CRIME`」（spec-review 第 2 輪以 mutation 證明：17 個禁用詞全塞進 `PERSONAL_CRIME`
+        //    後這 7 則 0/7 失敗）。它們防的是另一個方向——禁用詞被加進 `LIFESTYLE`／`SOCIAL_ODDITY`
+        //    這類**全域**否決集，該方向確實會失敗，故保留。
+        //    真正驗到 `PERSONAL_CRIME` 誤加的是後 3 則合成案例：三者皆 `CHINA` ∧ `GEO_REGION` 命中，
+        //    且 `BEIJING_REGIME`／`POLITY_STRONG`／`TW_POLITICS_GENERIC`／`GEO_TRIGGER`／`FINANCE`／
+        //    `LIFESTYLE`／`SPORT` 全空，現況判 `KEEP:china-regime`；一旦 踹／命案／家暴 被加進
+        //    `PERSONAL_CRIME` 即翻 `DROP:china-personal-crime`（實測 mutation 3/3 失敗）。
+        @Test void 禁用詞不得誤殺政治與財經() {
+            assertKeep("自由說新聞》直擊烏軍重創莫斯科命脈！俄國缺油再爆「斷水荒」民怨嗆普廷踹共");  // 踹共，語料實例
+            assertKeep("藍營側翼竟是共諜！買全台個資恐嚇  苗博雅要國民黨踹共");                      // 踹共，語料實例
+            assertKeep("前川普私人律師、代理司法部長布蘭希 真除任命案獲參院批准");                  // 任命案⊃命案，語料實例
+            assertKeep("韋淳祐深偽總統聲音案被辦 蔣萬安堅稱「就是國家暴力」");                      // 國家暴力⊃家暴，語料實例
+            assertKeep("談論與伊朗談判 川普：我寧願達成協議，因為我不想殺人");                      // 語料實例
+            assertKeep("美參議員提「停止跨境鎮壓法案」》學者：台灣應師法美國 設專法反制跨境施暴");  // 語料實例
+            assertKeep("李四川：跑遍新北29區 對症下藥才能解決問題");                                // 對症下藥⊃下藥，語料實例
+            // 以下 2 則為合成案例，是本組唯一能驗到「禁用詞誤加進 PERSONAL_CRIME」的錨點
+            // （spec-review 第 3 輪換過一次：初版寫「中國男子在南韓涉入一起命案 遭當地警方調查」
+            //  與「中國女子在南韓遭丈夫家暴 鄰居報警」，它們三判準一個都不滿足、依本任務 AC 本來
+            //  就該 DROP，寫成 assertKeep 等於把目標雜訊釘成「必須保留」，與 AC 直接矛盾。改用
+            //  下列兩則——它們是**子字串安全**錨點：本身語意即應收錄，且含 任命案／國家暴力。
+            //  `踹` 沒有對應錨點：`踹共` 是台灣口語，找不到「語意上該保留、又落在 CHINA ∧ GEO_REGION
+            //  ∧ 無其他訊號」剖面的合成案例，其保護仰賴上面兩則語料錨點與詞集註解。）
+            assertKeep("南韓國會通過駐中國大使任命案");                                          // 任命案⊃命案
+            assertKeep("南韓學者批中國對移工的國家暴力");                                        // 國家暴力⊃家暴
+        }
+        // 方案 A（規則③改為 GEO_REGION ∧ GEO_TRIGGER）的否決證據：這 5 則必須維持 KEEP
+        @Test void 裸國名新聞仍須保留() {
+            assertKeep("向中國企業洩露OLED關鍵技術  南韓樂金顯示器3名前員工遭判刑");
+            assertKeep("美跨黨派議員致函立陶宛政府  籲抗拒中國施壓堅定挺台");
+            assertKeep("新聞360》烏克蘭炸伊朗不單純！學者曝「伊俄同盟」雙輸、中國也露餡");
+            assertKeep("74％南韓人不信任中國 逾4成認為對日合作比歷史重要");
+            assertKeep("謠言終結站》網傳中國士兵越境印度並挾持印軍 法新社：不實");
+        }
+    }
 }
