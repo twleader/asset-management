@@ -25,10 +25,11 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 > - **Task 11 不存在** —— 從未建立，非遺漏。
 > - **Task 181、182 物理位置在 001–050 歸檔檔**：兩者原誤編為 Task 39/40，Task 183.6 重編號但未搬動位置。
 > - **Task 14b、60a–60h** 是後補的子編號；**Task 219 排在 220 之後**寫入。索引一律依編號排序，與檔案內順序不同屬正常。
+> - **Task 320 不在本索引** —— 該編號已由另外兩個進行中的 worktree 各自佔用（`t320_radar_live_etf_premium_column.md`／`t320_public_trading_radar_stock_detail_loopback_api.md`，皆尚未進 main），Task 321 刻意跳號避讓。待其中一支 landed 後，另一支需依「已 landed 的保留原號」原則自行改號。
 
 ---
 
-## 任務索引（Task 1–228、264–267、269–292、297–309、311–319）
+## 任務索引（Task 1–228、264–267、269–292、297–309、311–319、321）
 
 | Task | 標題 | 位置 |
 |---|---|---|
@@ -318,6 +319,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 317 | 股市大盤查詢 Docker 可呼叫單一唯讀圖表 API（9 市場 × 8 期間，Requirement 67） | [tasks/t317_public_market_index_api.md](tasks/t317_public_market_index_api.md) |
 | 318 | 交易雷達 Treasury 未來曲線 fail-closed（Requirement 65） | [tasks/t318_treasury_future_curve_guard.md](tasks/t318_treasury_future_curve_guard.md) |
 | 319 | 收盤 provenance 白名單只界定 verified，不得當技術序列納入判準（台股全數「今日不交易」修正，Requirement 65） | [tasks/t319_radar_indicator_series_provenance_scope.md](tasks/t319_radar_indicator_series_provenance_scope.md) |
+| 321 | 濾除「中國＋他國國名」的個人刑案雜訊：`EditorialNewsFilter` 規則③收緊 `GEO_REGION` disjunct（Requirement 31） | [tasks/t321_china_branch_personal_crime.md](tasks/t321_china_branch_personal_crime.md) |
 
 > **註：Task 229–263、268、293–296 以各自任務檔為準。**
 
