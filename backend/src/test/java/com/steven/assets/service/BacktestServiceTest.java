@@ -647,12 +647,13 @@ class BacktestServiceTest {
     // ───────────────── (g) 回測與 production 取同一個視窗 ─────────────────
 
     @Test
-    @DisplayName("(g) 回測在 t=最新日切出的視窗，與 production 的 findRecentN(241) 逐筆相同")
+    @DisplayName("(g) 回測在 t=最新日切出的視窗，與 production 取 N 筆後截斷為 241 逐筆相同")
     void window_matchesProductionRecentN() {
         List<StockPriceHistory> asc = series(400, 100, 0.001, 999, 0.0);
         int t = asc.size() - 1;
 
-        // production：findRecentN(code, market, 241) → 降序最近 241 筆
+        // production：findRecentN(code, market, 250) → 降序，再由 RadarObservationResolver
+        // 截斷為最多 241 筆（Task 319.4）；沒有剔除發生時與舊的「直接抓 241 筆」逐筆相同
         List<StockPriceHistory> production = new ArrayList<>(asc.subList(asc.size() - 241, asc.size()));
         Collections.reverse(production);
 

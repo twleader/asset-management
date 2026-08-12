@@ -83,7 +83,12 @@ public class BacktestService {
     private static final LocalTime US_SIGNAL_BOUNDARY = LocalTime.of(18, 0);
     /** 需要 240 根完成日 K 的因子在此之前不可得；這些日子 production 會回 NO_TRADE，一律排除。 */
     private static final int WARMUP = RadarInputAssembler.FULL_WINDOW;
-    /** production 取數視窗（240 根完成日 K ＋ 當日）。回測無 live K，仍取 241 筆使兩日確認可算。 */
+    /**
+     * production 的技術序列上限（240 根完成日 K ＋ 當日）。回測無 live K，仍取 241 筆使兩日確認可算。
+     *
+     * <p>Task 319 起 production 向 DB 多抓幾筆當剔除緩衝（{@code findRecentN(..., 250)}），但序列本身
+     * 仍由 {@code RadarObservationResolver.INDICATOR_SERIES_MAX_ROWS} 截回 241——兩邊上限維持相同。</p>
+     */
     private static final int WINDOW = 241;
     private static final List<Integer> DEFAULT_HORIZONS = List.of(5, 20, 60, 120);
     /** 低於此樣本數的格子一律標記為樣本不足，其數字不得用於決策（273.6.3）。 */
@@ -727,7 +732,8 @@ public class BacktestService {
             if (from != null && date.isBefore(from)) continue;
             if (to != null && date.isAfter(to)) continue;
 
-            // 截至 t 的 241 筆視窗，降序（新到舊）——與 production 的 findRecentN(…, 241) 同形狀。
+            // 截至 t 的 241 筆視窗，降序（新到舊）——與 production「取 N 筆後截斷為 241」同形狀
+            // （Task 319.4 起 production 抓 250 筆當剔除緩衝，序列上限仍是 241）。
             int lo = Math.max(0, t - WINDOW + 1);
             List<StockPriceHistory> windowDesc = new ArrayList<>(rows.subList(lo, t + 1));
             Collections.reverse(windowDesc);
@@ -1184,9 +1190,12 @@ public class BacktestService {
             TradingRadarEvidenceConfidenceResolver.MarketContext marketContext =
                     marketContextsByDate.getOrDefault(signalDate,
                             TradingRadarEvidenceConfidenceResolver.MarketContext.EMPTY);
+            // verified 與 indicator 兩份都傳 windowDesc（Task 319.6）：回測視窗本來就是完整還原視窗、
+            // 不具 provenance 概念，兩者同值語意正確；漏傳其一會讓 production 與回測分岔。
             RadarObservationResolver.AcceptedPrice acceptedPrice = new RadarObservationResolver.AcceptedPrice(
                     price, signalDate, null, "BACKTEST_COMPLETED_CLOSE",
-                    RadarObservationResolver.Quality.COMPLETED_CLOSE, false, null, windowDesc, null);
+                    RadarObservationResolver.Quality.COMPLETED_CLOSE, false, null,
+                    windowDesc, windowDesc, null);
             TradingRadarDto.FundamentalSnapshot fundamentalSnapshot = resolvedFundamental == null
                     || resolvedFundamental.snapshot() == null
                     ? FundamentalAnalysisService.Resolved.unavailable(
