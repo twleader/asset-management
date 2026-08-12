@@ -57,7 +57,10 @@ public class EtfNavCacheWriter {
         payload.put("stockCode", nav.stockCode());
         payload.put("market", nav.market());
         payload.put("nav", nav.nav());
-        // 台股為證交所已算好的 g 欄；美股為 (市價−淨值)/淨值。兩者皆為百分比數值（1.2 = 溢價 1.2%）
+        // 台股沿用證交所 all_etf.txt 已算好的 g 欄，百分比數值（1.2 = 溢價 1.2%）；
+        // 美股恆為 null（Yahoo 未提供該欄，見 MarketDataFetchService.getUsEtfNav），
+        // 而 MAPPER 設了 NON_NULL，故此欄根本不會出現在美股 payload 裡——
+        // 美股折溢價由取用端 EtfLivePremiumCalculator 以「該列自己顯示的即時價」反推，不在此寫入。
         payload.put("premiumDiscountPct", nav.premiumDiscountPct());
         payload.put("navAsOf", nav.navAsOf());
         payload.put("source", nav.source());
