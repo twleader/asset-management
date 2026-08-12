@@ -4186,7 +4186,7 @@ TradingRadarView
 
 ### 還原權息技術序列（TW_RULES_V3）
 
-交易雷達以 `stock_price_history` 最近 241 根完成日 K 為基礎；若 `PriceQueryService` 有「今日且尚未寫入完成日 K」的 live OHLC，再暫加於序列最前。接著查同一日期區間內 `stock_dividend_history.ex_dividend_date IS NOT NULL` 且現金配息或股票股利為正的事件，由 `DistributionAdjustedPriceService` 以日期升冪套用累積持股因子：
+交易雷達以 `stock_price_history` 最近 241 根完成日 K 為基礎（t319 起實際取數為 250、再把 indicator 序列截斷為 241，以吸收未來列與未 verified 當日列的剔除；**序列上限仍是 241**，不是長窗擴大）；若 `PriceQueryService` 有「今日且尚未寫入完成日 K」的 live OHLC，再暫加於序列最前。接著查同一日期區間內 `stock_dividend_history.ex_dividend_date IS NOT NULL` 且現金配息或股票股利為正的事件，由 `DistributionAdjustedPriceService` 以日期升冪套用累積持股因子：
 
 ```text
 eventFactor = 1 + stockDividend / 10 + cashDividend / eventDayClose
@@ -4562,6 +4562,17 @@ PostgreSQL／Redis adapters
 ```
 
 **觀測時效與同源價格。** `TradingRadarService.buildStock` 不再分別以 raw `getLive()` 當規則價、`getDisplayPrice()` 當顯示價。新的 resolver 先以 `decisionInstant` 與 `MarketZones.resolve(market)` 決定市場當地日期，再接受「日期符合且將被 `shouldAddLiveRow` 併入」的 Redis live；否則只使用最新可信完成列。相同的 accepted price 同時供 `RadarInputAssembler`、MA/BIAS/52 週位置、規則 `price` 與使用者可見價，避免不同日期混搭。pending quote 可顯示空值，但不得借用更舊價冒充當日判斷。
+
+**兩種 trust 不是同一件事（t319）。** resolver 內有兩個不同問題共用了同一個 `trustedCompletedRows`，必須拆開：
+
+| 用途 | 判準 | 理由 |
+|---|---|---|
+| accepted price 取 `completedSession` 當日列；`hasTrustedCompletedDate` 決定是否併 live | 日期 ≤ session ＋ 正價 ＋ **台股須 `close_source ∈ {TWSE_MI_INDEX, TPEX_DAILY_CLOSE, FINMIND_TW_CLOSE}`** | Task 290 的 verified 語意：宣稱「今日收盤已驗證」必須有 provenance，13:32 誤寫列不得冒充 |
+| 餵 `RadarInputAssembler` 的指標歷史序列（MA20/60/240、KD、兩日確認、`ma60BiasPercent` 與分位、52 週位置、60 日報酬 σ） | 日期 ≤ session ＋ 正價；**不看 `close_source`**。唯一例外：等於 `completedSession` 的最新一根，台股仍須命中信任清單 | Task 290 明文禁止回填歷史 provenance，要求歷史列有來源標記＝要求一個依定義不存在的東西 |
+
+把 verified 判準套到整條序列的後果已實測：台股 `close_source` 非空只有 84 列（集中在 2026-08-07 起四個交易日），每檔僅餘 4 根 K，21 檔台股全數落入 `evaluateStockInternal` 的資料不足分支輸出 `NO_TRADE`；美股因 `isTrustedClose` 對非台股直接放行而不受影響，大盤走 `twse_index_daily_history` 亦不受影響。故 `AcceptedPrice` 須提供**兩個具名欄位**（verified 用／indicator 用），呼叫端不得自行再過濾一次——同一判準散兩處日後必然靜默分岔。序列納入放寬後，髒列防線由 Requirement 62 的 `CHECK (close_price > 0)` 與「最新一根仍須 verified」共同承擔，不再依賴 provenance 標記。
+
+**取數放大、序列上限不變。** `confirm(closes, 240)` 需要 241 根完成收盤（`size >= period + 1`），而 `buildStock` 原本只抓 `findRecentN(..., 241)`——零餘裕。序列有兩個獨立的剔除來源會吃掉名額：(1) `tradingDate > completedSession` 的未來列（`findRecentN` 的 query 無日期上界，而盤中 `completedSession` 是前一交易日，DB 已有的當日列會佔一個 LIMIT 名額後被 filter 掉）；(2) `completedSession` 當日存在但未 verified 的那一根。任一觸發就只剩 240 根，`ma240Confirmation` 回 `UNAVAILABLE`、`complete(StockInput)` 失敗，結果仍是 `NO_TRADE`，但五個指標欄位都會是非 null 值而看起來像修好了。故取數放大為 250 並把 indicator 序列**截斷為最多 241 列**——**契約是「序列上限 241」，250 是刻意留的緩衝而非精算餘裕**（照剔除來源數量去精算，只會在下次新增剔除規則時再錯一次）。截斷後常態行為與現行 bit-identical，多出來的列只在實際剔除時遞補，`ma60BiasPercentile` 的觀測數分母不受影響。
 
 ETF premium 改由 dated observation record 傳遞，Redis 與 repository 都回 `premiumPct/navDate/source`；resolver 以該市場完成日與 decision instant 驗證。`TradingRadarRuleEngine` 只收到已通過時效閘門的值，stale observation 不得進 3% veto。外幣底層台股債券的 `underlying_currency` 缺漏由 master-data validation 標為 `currencyDataComplete=false`，不再 fallback TWD；00695B／00751B／00865B 以 idempotent data migration 補 USD。
 
@@ -5266,7 +5277,7 @@ TWSE 舊版 `rwd/BWIBBU_d`（可回溯 2005-09-02）能一次補齊歷史 PE，�
 
 ## Requirement 43 修訂（Task 223）：長期因子併入總分與飽和修正（`TW_RULES_V5`）
 
-> **⛔ Task 223 已由 [t264](tasks/t264_radar_mean_reversion_and_top_exit.md) 取代，本章節不得作為實作依據。** **其問題診斷仍然正確且被 t264 引用**，但解法完全不同：t264 採「扁平權重 ＋ 二維 `TimingState` 動作覆寫」，**不做五組分組正規化、不做三層動作門檻、取數視窗維持 241 根不擴大**。故本章節下方關於「750 根視窗」「五組標準化」「依長期組分數選門檻層」的敘述**全部失效**——照做會實作出 t264 明文禁止的東西。任務順序亦改為 **t265 → t264 →（t266 →）t267**。
+> **⛔ Task 223 已由 [t264](tasks/t264_radar_mean_reversion_and_top_exit.md) 取代，本章節不得作為實作依據。** **其問題診斷仍然正確且被 t264 引用**，但解法完全不同：t264 採「扁平權重 ＋ 二維 `TimingState` 動作覆寫」，**不做五組分組正規化、不做三層動作門檻、取數視窗維持 241 根不擴大（t319 起改抓 250 筆後截斷為 241，序列上限不變，非長窗擴大）**。故本章節下方關於「750 根視窗」「五組標準化」「依長期組分數選門檻層」的敘述**全部失效**——照做會實作出 t264 明文禁止的東西。任務順序亦改為 **t265 → t264 →（t266 →）t267**。
 
 ### 飽和問題是前置條件，不是附帶修正
 

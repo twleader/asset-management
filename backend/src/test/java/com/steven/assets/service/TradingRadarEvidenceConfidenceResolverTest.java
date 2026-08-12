@@ -85,7 +85,7 @@ class TradingRadarEvidenceConfidenceResolverTest {
                 new RadarObservationResolver.AcceptedPrice(
                         bd(100), LAST_SESSION, null, "US_CLOSE",
                         RadarObservationResolver.Quality.COMPLETED_CLOSE,
-                        false, null, List.of(), null),
+                        false, null, List.of(), List.of(), null),
                 completeTechnical(), TradingRadarRuleEngine.MarketRegime.RISK_ON, false,
                 TradingRadarEvidenceConfidenceResolver.MarketContext.EMPTY,
                 null, profile, null, null, null, false, null, null,
@@ -108,7 +108,7 @@ class TradingRadarEvidenceConfidenceResolverTest {
                 new RadarObservationResolver.AcceptedPrice(
                         bd(100), LAST_SESSION, null, "US_CLOSE",
                         RadarObservationResolver.Quality.COMPLETED_CLOSE,
-                        false, null, List.of(), null),
+                        false, null, List.of(), List.of(), null),
                 completeTechnical(), TradingRadarRuleEngine.MarketRegime.RISK_ON, false,
                 new TradingRadarEvidenceConfidenceResolver.MarketContext(
                         LAST_SESSION, null, null, "IXIC", true),
@@ -138,7 +138,7 @@ class TradingRadarEvidenceConfidenceResolverTest {
                 new RadarObservationResolver.AcceptedPrice(
                         bd(100), LocalDate.of(2026, 8, 7), null, "TW_CLOSE",
                         RadarObservationResolver.Quality.COMPLETED_CLOSE,
-                        false, null, List.of(), null),
+                        false, null, List.of(), List.of(), null),
                 completeTechnical(), TradingRadarRuleEngine.MarketRegime.RISK_ON, false,
                 new TradingRadarEvidenceConfidenceResolver.MarketContext(
                         LocalDate.of(2026, 8, 5), bd(1.1), bd(1.1), "TAIEX", true),
@@ -166,7 +166,7 @@ class TradingRadarEvidenceConfidenceResolverTest {
                 new RadarObservationResolver.AcceptedPrice(
                         bd(100), LocalDate.of(2026, 8, 7), null, "TW_CLOSE",
                         RadarObservationResolver.Quality.COMPLETED_CLOSE,
-                        false, null, List.of(), null),
+                        false, null, List.of(), List.of(), null),
                 completeTechnical(), TradingRadarRuleEngine.MarketRegime.RISK_ON, false,
                 new TradingRadarEvidenceConfidenceResolver.MarketContext(
                         LAST_SESSION, bd(1.1), bd(1.1), "TAIEX", true),
@@ -194,7 +194,7 @@ class TradingRadarEvidenceConfidenceResolverTest {
                 new RadarObservationResolver.AcceptedPrice(
                         bd(100), LAST_SESSION, null, "US_CLOSE",
                         RadarObservationResolver.Quality.COMPLETED_CLOSE,
-                        false, null, List.of(), null),
+                        false, null, List.of(), List.of(), null),
                 completeTechnical(), TradingRadarRuleEngine.MarketRegime.RISK_ON, false,
                 TradingRadarEvidenceConfidenceResolver.MarketContext.NOT_APPLICABLE,
                 null, profile, null, null, null, false, null, null,
@@ -301,7 +301,7 @@ class TradingRadarEvidenceConfidenceResolverTest {
                 new RadarObservationResolver.AcceptedPrice(
                         bd(100), LAST_SESSION, null, "TW_CLOSE",
                         RadarObservationResolver.Quality.COMPLETED_CLOSE,
-                        false, null, List.of(), null),
+                        false, null, List.of(), List.of(), null),
                 completeTechnical(), TradingRadarRuleEngine.MarketRegime.RISK_ON, false,
                 TradingRadarEvidenceConfidenceResolver.MarketContext.EMPTY,
                 null, profile, BigDecimal.valueOf(1.5), LAST_SESSION, "ETF_PREMIUM", false,
@@ -337,7 +337,7 @@ class TradingRadarEvidenceConfidenceResolverTest {
                 new RadarObservationResolver.AcceptedPrice(
                         bd(100), LAST_SESSION, null, "TW_CLOSE",
                         RadarObservationResolver.Quality.COMPLETED_CLOSE,
-                        false, null, List.of(), null),
+                        false, null, List.of(), List.of(), null),
                 completeTechnical(), TradingRadarRuleEngine.MarketRegime.RISK_ON, false,
                 TradingRadarEvidenceConfidenceResolver.MarketContext.EMPTY,
                 null, profile, BigDecimal.ZERO, LAST_SESSION, "ETF_PREMIUM", false,
@@ -569,7 +569,7 @@ class TradingRadarEvidenceConfidenceResolverTest {
                 new RadarInputAssembler.VolatilityObservation(bd(.02), LAST_SESSION, "TEST", null));
         var accepted = new RadarObservationResolver.AcceptedPrice(
                 bd(100), LAST_SESSION, null, "TEST_CLOSE", RadarObservationResolver.Quality.COMPLETED_CLOSE,
-                false, null, List.of(), null);
+                false, null, List.of(), List.of(), null);
         return TradingRadarEvidenceConfidenceResolver.resolve(new TradingRadarEvidenceConfidenceResolver.Inputs(
                 market, DECISION, accepted, technical, regime, stale,
                 TradingRadarEvidenceConfidenceResolver.MarketContext.EMPTY,

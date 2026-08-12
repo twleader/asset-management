@@ -312,7 +312,7 @@ frontend/
 spec/
 ├── requirements.md       # 67 個 Requirements（User Story + AC）
 ├── design.md             # 架構圖、ERD、Service 職責、Sequence
-├── tasks.md              # 任務索引（Task 1–228、264–267、269–292、297–309、311–318）＋ 尚未歸檔的 201 起區段
+├── tasks.md              # 任務索引（Task 1–228、264–267、269–292、297–309、311–319）＋ 尚未歸檔的 201 起區段
 ├── tasks/                # 任務檔
 │   ├── README.md         # 自足任務檔規範
 │   ├── archive/          # Task 1–200 歷史，已凍結

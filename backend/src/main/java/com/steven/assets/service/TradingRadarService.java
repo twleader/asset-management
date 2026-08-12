@@ -748,7 +748,13 @@ public class TradingRadarService {
             DividendEventEvidenceResolver.Resolution distribution = dividendEventEvidenceRepository.resolve(
                     target.code(), target.market(), decisionInstant,
                     futureSessions(target.market(), decisionInstant));
-            List<StockPriceHistory> rawRows = priceHistoryRepo.findRecentN(target.code(), target.market(), 241);
+            // 抓 250 是取數緩衝，不是精算出來的餘裕（Task 319.4）：序列的契約上限固定為 241
+            // （confirm(closes, 240) 需要 241 根完成收盤），由 RadarObservationResolver 截斷。
+            // 這裡多抓 9 列是讓兩種剔除有名額可遞補——(1) findRecentN 沒有日期上界，盤中
+            // completedSession 為前一交易日時 DB 的當日列會先佔掉一個名額再被剔除；
+            // (2) completedSession 當日列存在但 close_source 未命中白名單。任一發生就只剩 240 根，
+            // ma240Confirmation 回 UNAVAILABLE 而仍輸出 NO_TRADE，且五個指標欄位全非 null、偽裝成修好。
+            List<StockPriceHistory> rawRows = priceHistoryRepo.findRecentN(target.code(), target.market(), 250);
             Optional<PriceQueryService.LivePrice> rawLive =
                     priceQueryService.getLive(target.code(), target.market());
             RadarObservationResolver.AcceptedPrice acceptedPrice =
@@ -760,8 +766,10 @@ public class TradingRadarService {
                                     rawRows, rawLive.orElse(null), target.market(), decisionInstant,
                                     (java.util.function.Predicate<LocalDate>)
                                             day -> marketDataService.isTradingDay(target.market(), day));
-            // accepted price 與技術序列必須同源：拒絕 future／不可信 closeSource 列，
-            // 避免退回舊 trusted close 後仍把較新的髒列餵進 MA／BIAS。
+            // accepted price 與技術序列出自同一份 AcceptedPrice 快照，但判準各自明確（Task 319）：
+            // 兩者都拒絕 future 列與 completedSession 當日的不可信 closeSource 列（避免把盤中誤寫值
+            // 當成完成收盤 K 餵進 MA／BIAS）；更早的歷史列則<b>不看 closeSource</b>，
+            // 白名單只界定 verified 收盤，不得拿來裁掉技術序列。
             BigDecimal price = acceptedPrice.value();
             RadarInputAssembler.Assembled technical = prepareTechnicalData(
                     target, acceptedPrice);
@@ -1159,7 +1167,10 @@ public class TradingRadarService {
             Target target,
             RadarObservationResolver.AcceptedPrice acceptedPrice) {
         if (acceptedPrice == null) return RadarInputAssembler.Assembled.EMPTY;
-        List<StockPriceHistory> completedRows = acceptedPrice.trustedCompletedRows();
+        // 技術序列一律取 indicatorSeriesRows（Task 319.3）：verifiedCompletedRows 帶著台股
+        // provenance 白名單，那是 accepted price／quoteStatus 的判準，拿來當 MA／KD 的歷史序列
+        // 會讓 close_source 為 null 的歷史列（Task 290 明定不回填）整批消失。
+        List<StockPriceHistory> completedRows = acceptedPrice.indicatorSeriesRows();
         Optional<PriceQueryService.LivePrice> liveOpt = acceptedPrice.liveAccepted()
                 ? Optional.ofNullable(acceptedPrice.live()) : Optional.empty();
         List<StockPriceHistory> combined = new ArrayList<>(completedRows);

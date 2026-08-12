@@ -267,7 +267,7 @@ class TradingRadarUsStockEngineTest {
                         .lowPrice(row.getClosePoint()).closePrice(row.getClosePoint())
                         .volume(row.getVolume()).build())
                 .toList();
-        when(priceHistoryRepo.findRecentN("AAPL", "美股", 241)).thenReturn(stockRows);
+        when(priceHistoryRepo.findRecentN("AAPL", "美股", 250)).thenReturn(stockRows);
         when(adjustedPriceService.adjust(anyList(), anyList()))
                 .thenAnswer(invocation -> new DistributionAdjustedPriceService.Adjustment(
                         invocation.getArgument(0), false));
@@ -306,7 +306,7 @@ class TradingRadarUsStockEngineTest {
                         .lowPrice(row.getClosePoint()).closePrice(row.getClosePoint())
                         .volume(row.getVolume()).build())
                 .toList();
-        when(priceHistoryRepo.findRecentN("AAPL", "美股", 241)).thenReturn(stockRows);
+        when(priceHistoryRepo.findRecentN("AAPL", "美股", 250)).thenReturn(stockRows);
         when(adjustedPriceService.adjust(anyList(), anyList()))
                 .thenAnswer(invocation -> new DistributionAdjustedPriceService.Adjustment(
                         invocation.getArgument(0), false));
@@ -351,7 +351,7 @@ class TradingRadarUsStockEngineTest {
                     .lowPrice(row.getLowPoint()).closePrice(row.getClosePoint())
                     .volume(1_000_000L + i).build());
         }
-        when(priceHistoryRepo.findRecentN("TLT", "美股", 241)).thenReturn(stockRows);
+        when(priceHistoryRepo.findRecentN("TLT", "美股", 250)).thenReturn(stockRows);
         when(stockRepo.findByCodeAndMarket("TLT", "美股")).thenReturn(Optional.of(
                 Stock.builder().code("TLT").market("美股")
                         .name("iShares 20+ Year Treasury Bond ETF")

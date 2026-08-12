@@ -29,6 +29,18 @@ public final class RadarObservationResolver {
     private static final Set<String> TRUSTED_TW_CLOSE_SOURCES = Set.of(
             "TWSE_MI_INDEX", "TPEX_DAILY_CLOSE", "FINMIND_TW_CLOSE");
 
+    /**
+     * indicator 序列的列數上限（Task 319.4）。
+     *
+     * <p>{@code TradingRadarRuleEngine.confirm(closes, 240)} 需要 241 根完成收盤
+     * （{@code size >= period + 1}），故上限就是 241。呼叫端刻意多抓幾列當緩衝
+     * （見 {@code TradingRadarService.buildStock} 的 250），讓「未來列」與「當日 provenance
+     * 未驗證列」這兩種剔除有名額可遞補；<b>但序列本身必須截回 241</b>，否則
+     * {@code RadarInputAssembler.ma60BiasPercentile} 的觀測數會隨取數量浮動，
+     * 在沒有任何剔除的常態下也靜默改掉既有分位值。</p>
+     */
+    private static final int INDICATOR_SERIES_MAX_ROWS = 241;
+
     private RadarObservationResolver() {}
 
     /** Market-aware session pair selected by the explicit decision instant. */
@@ -54,6 +66,22 @@ public final class RadarObservationResolver {
     /**
      * 被規則、技術序列與畫面共同採用的單一價格 observation。
      * {@code live} 只在 {@code liveAccepted=true} 時存在，避免呼叫端重新判斷日期。
+     *
+     * <p><b>兩份列刻意分開（Task 319.1）</b>：provenance 白名單只界定「什麼算 verified 收盤」，
+     * 不是「什麼列可以進技術序列」。兩者原本共用一個欄位，導致台股歷史列（{@code close_source}
+     * 依 Task 290 一律留 null、禁止 migration 猜來源）整批被擋在 MA／KD 之外，每檔只剩下
+     * 官方對帳過的那幾根，全數輸出「今日不交易」。</p>
+     *
+     * @param verifiedCompletedRows verified 語意的完成列（台股須命中 provenance 白名單）：
+     *                              決定 accepted price 取哪一列、{@code quoteStatus} 是否為
+     *                              {@code VERIFIED_CLOSE}，以及「今日已有可信完成列因此不併 live K」。
+     *                              日期由新到舊。
+     * @param indicatorSeriesRows   餵給 {@code RadarInputAssembler} 算 MA20／60／240、KD、兩日確認、
+     *                              季線乖離分位、52 週位置與 60 日 σ 的歷史序列：只要日期不晚於
+     *                              completed session 且收盤為正且有限即納入，<b>不看 close_source</b>；
+     *                              唯一例外是等於 completed session 的最新一根，台股仍須命中白名單
+     *                              （當日尚未官方對帳完成時那根可能是盤中誤寫值，只能由 live K 併入
+     *                              或缺席）。日期由新到舊，最多 {@value #INDICATOR_SERIES_MAX_ROWS} 列。
      */
     public record AcceptedPrice(
             BigDecimal value,
@@ -63,7 +91,8 @@ public final class RadarObservationResolver {
             Quality quality,
             boolean liveAccepted,
             PriceQueryService.LivePrice live,
-            List<StockPriceHistory> trustedCompletedRows,
+            List<StockPriceHistory> verifiedCompletedRows,
+            List<StockPriceHistory> indicatorSeriesRows,
             String missingReason
     ) {
         public boolean available() {
@@ -80,7 +109,8 @@ public final class RadarObservationResolver {
         }
 
         public static AcceptedPrice missing(Quality quality, String reason) {
-            return new AcceptedPrice(null, null, null, null, quality, false, null, List.of(), reason);
+            return new AcceptedPrice(
+                    null, null, null, null, quality, false, null, List.of(), List.of(), reason);
         }
     }
 
@@ -143,6 +173,7 @@ public final class RadarObservationResolver {
 
         LocalDate completedSession = sessions.targetCompletedSession();
         List<StockPriceHistory> trustedRows = trustedCompletedRows(completedRows, market, completedSession);
+        List<StockPriceHistory> indicatorRows = indicatorSeriesRows(completedRows, market, completedSession);
         if (rawLive != null) {
             LocalDate liveDate = parseDate(rawLive.tradingDate());
             boolean validPrice = positiveFinite(rawLive.price());
@@ -153,14 +184,17 @@ public final class RadarObservationResolver {
                 return new AcceptedPrice(
                         rawLive.price(), liveDate, rawLive.updatedAt(),
                         nonBlank(rawLive.source(), "REDIS_LIVE"), Quality.LIVE,
-                        true, rawLive, trustedRows, null);
+                        true, rawLive, trustedRows, indicatorRows, null);
             }
         }
 
         // A completed close is accepted only for the exact market session selected by the
-        // market-aware DecisionMarketClock.  Prior rows remain in trustedCompletedRows for the
-        // indicator window, but never become today's accepted quote when a newer completed
-        // session is expected.
+        // market-aware DecisionMarketClock.  The two row lists have different jobs and are
+        // deliberately not interchangeable: verifiedCompletedRows carries the Task 290 verified
+        // semantics (TW provenance whitelist) and picks today's accepted quote, while
+        // indicatorSeriesRows is the MA/KD history window and ignores close_source except for the
+        // completed-session row itself.  Prior rows never become today's accepted quote when a
+        // newer completed session is expected.
         StockPriceHistory completed = trustedRows.stream()
                 .filter(row -> completedSession.equals(row.getTradingDate()))
                 .findFirst().orElse(null);
@@ -168,7 +202,7 @@ public final class RadarObservationResolver {
             return new AcceptedPrice(
                     completed.getClosePrice(), completed.getTradingDate(), null,
                     nonBlank(completed.getCloseSource(), "COMPLETED_CLOSE"),
-                    Quality.COMPLETED_CLOSE, false, null, trustedRows, null);
+                    Quality.COMPLETED_CLOSE, false, null, trustedRows, indicatorRows, null);
         }
 
         Quality quality = rawLive == null ? Quality.MISSING : classifyRejectedLive(
@@ -285,6 +319,28 @@ public final class RadarObservationResolver {
                         && positiveFinite(row.getClosePrice())
                         && isTrustedClose(row, market))
                 .sorted(Comparator.comparing(StockPriceHistory::getTradingDate).reversed())
+                .toList();
+    }
+
+    /**
+     * 技術序列用的歷史列（Task 319.2）。與 {@link #trustedCompletedRows} 併存、不是取代。
+     *
+     * <p>close_source 白名單只界定 verified 收盤語意，<b>不是</b>技術指標的納入判準：台股歷史列
+     * 依 Task 290 一律留 null，用白名單濾整條序列等於把每檔只剩官方對帳過的那幾根餵進 MA240。
+     * 唯一仍套用白名單的是等於 {@code completedSession} 的那一根——當日尚未官方對帳完成時它可能是
+     * 盤中誤寫值，不得當成完成收盤 K；該日只能由 live K 併入（{@code shouldAddLiveRow} 路徑）或缺席。</p>
+     */
+    private static List<StockPriceHistory> indicatorSeriesRows(
+            List<StockPriceHistory> rows, String market, LocalDate completedSession) {
+        if (rows == null) return List.of();
+        return rows.stream()
+                .filter(row -> row != null && row.getTradingDate() != null
+                        && !row.getTradingDate().isAfter(completedSession)
+                        && positiveFinite(row.getClosePrice())
+                        && (!completedSession.equals(row.getTradingDate())
+                            || isTrustedClose(row, market)))
+                .sorted(Comparator.comparing(StockPriceHistory::getTradingDate).reversed())
+                .limit(INDICATOR_SERIES_MAX_ROWS)
                 .toList();
     }
 
