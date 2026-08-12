@@ -965,15 +965,13 @@ public class ExcelExportService {
      *       故改在此以該列自己的即時價計算，保證列內自洽。</li>
      * </ul>
      * 淨值或即時價任一缺漏即回 null（留白），不以昨收等替代值湊數。
+     *
+     * <p><b>Task 320 起實作已搬到 {@link EtfLivePremiumCalculator}</b>，本方法純委派、行為逐格不變。
+     * 交易雷達的「即時折溢價」欄呼叫的是同一份實作——同義欄位若在兩處各寫一份，會演化成
+     * 「一個頁面對、另一個頁面錯 0.07 個百分點」的靜默分岔。
      */
     static BigDecimal premiumDiscountPct(PriceQueryService.EtfNav nav, BigDecimal livePrice) {
-        if (nav == null) return null;
-        if (nav.premiumDiscountPct() != null) return nav.premiumDiscountPct();
-        if ("台股".equals(nav.market())) return null; // Task 259：台股折溢價缺漏不反推
-        if (livePrice == null || nav.nav() == null || nav.nav().compareTo(BigDecimal.ZERO) == 0) return null;
-        return livePrice.subtract(nav.nav())
-                .multiply(BigDecimal.valueOf(100))
-                .divide(nav.nav(), 2, java.math.RoundingMode.HALF_UP);
+        return EtfLivePremiumCalculator.premiumDiscountPct(nav, livePrice);
     }
 
     /** KD 併為單一「KD值」欄字串 "K {k} / D {d}"；兩者皆 null 回 null（留白），單邊 null 以「—」佔位。 */

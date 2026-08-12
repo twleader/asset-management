@@ -774,6 +774,18 @@ public class TradingRadarService {
             RadarInputAssembler.Assembled technical = prepareTechnicalData(
                     target, acceptedPrice);
             BigDecimal displayPrice = acceptedPrice.value();
+            // ── Task 320：即時折溢價（純揭露欄，不進任何規則） ────────────────────────────
+            // 「同一 tick」在這裡的正確意思是「<b>價只取一次</b>」：現價與淨值本來就是兩個 Redis key
+            // （price:{market}:{code} vs price:etfnav:{market}:{code}），LivePrice 裡沒有 nav 欄位，
+            // 不存在「一次讀到價又讀到淨值」的路徑。讀淨值必然是第二次 Redis 讀取，那不在禁止之列；
+            // 禁止的是為折溢價<b>另打一次取價</b>——那會讓「現價」與「折溢價」落在不同 tick，
+            // 使用者拿畫面數字驗算 (price−nav)/nav 就會兜不攏。故此處一律沿用同一列已組好的 displayPrice。
+            // getEtfNav 查無回 Optional.empty() 是正常情形（個股本來就沒有淨值），不記 warn 洗版。
+            PriceQueryService.EtfNav livePremiumNav =
+                    priceQueryService.getEtfNav(target.code(), target.market()).orElse(null);
+            BigDecimal etfPremiumLivePct =
+                    EtfLivePremiumCalculator.premiumDiscountPct(livePremiumNav, displayPrice);
+            String etfPremiumLiveNavAsOf = livePremiumNav == null ? null : livePremiumNav.navAsOf();
             BigDecimal displayChangePercent = acceptedPrice.liveAccepted() && acceptedPrice.live() != null
                     ? acceptedPrice.live().changePercent() : null;
             // 組裝結果一律取自 RadarInputAssembler，與回測共用同一份（Task 273 的 273.2b）。
@@ -1001,7 +1013,9 @@ public class TradingRadarService {
                     evidence.mediumRisk().riskCoverage(),
                     gated.candidateMediumAction().name(),
                     gated.candidateShortAction().name(),
-                    gated.reasons());
+                    gated.reasons(),
+                    etfPremiumLivePct,
+                    etfPremiumLiveNavAsOf);
         } catch (Exception e) {
             log.warn("今日交易雷達：{} {} 組裝失敗", target.market(), target.code(), e);
             return incompleteStock(target, name, assetClass, "讀取個股資料失敗，該檔今日不交易。");
@@ -1489,7 +1503,9 @@ public class TradingRadarService {
                 false, // profitTakingConfirmed
                 null, // fundamental
                 TradingRadarDto.RadarEvidence.EMPTY,
-                null, null, null, null, null, null, null, null, List.of());
+                null, null, null, null, null, null, null, null, List.of(),
+                null, // etfPremiumLivePct（Task 320）
+                null); // etfPremiumLiveNavAsOf（Task 320）
     }
 
     private String regimeLabel(TradingRadarRuleEngine.MarketRegime regime) {

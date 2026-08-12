@@ -3,6 +3,8 @@ package com.steven.assets.service;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.util.Arrays;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -59,5 +61,40 @@ class ExcelExportPremiumOriginTest {
         BigDecimal result = ExcelExportService.premiumDiscountPct(nav, new BigDecimal("100.00"));
 
         assertThat(result).isNull();
+    }
+
+    // ── Task 320 驗證 (g)：抽出共用實作後既有輸出零回歸 ──────────────
+
+    /**
+     * {@code ExcelExportService.premiumDiscountPct} 自 Task 320 起純委派
+     * {@link EtfLivePremiumCalculator}。上面四條既有斷言已覆蓋四個分支，本條再直接釘住
+     * 「兩支方法對同一組輸入回傳同一個值」——委派若哪天被改回自己算一份（或改成
+     * 「市場二分」那種偏離現行語意的寫法），資產總覽與交易雷達就會靜默分岔。
+     */
+    @Test
+    void 委派共用實作後與交易雷達同一份計算逐格相同() {
+        List<PriceQueryService.EtfNav> navs = Arrays.asList(
+                null,
+                new PriceQueryService.EtfNav("0050", "台股", new BigDecimal("93.50"),
+                        new BigDecimal("0.12"), "20260730 133000", "TWSE"),
+                new PriceQueryService.EtfNav("00713", "台股", new BigDecimal("55.20"),
+                        null, "20260730 133000", "TWSE"),
+                new PriceQueryService.EtfNav("VOO", "美股", new BigDecimal("500.00"),
+                        null, "2026-07-29", "Yahoo Finance"),
+                new PriceQueryService.EtfNav("VOO", "美股", new BigDecimal("500.00"),
+                        new BigDecimal("0.33"), "2026-07-29", "Yahoo Finance"),
+                new PriceQueryService.EtfNav("SGOV", "美股", BigDecimal.ZERO,
+                        null, "2026-07-29", "Yahoo Finance"),
+                new PriceQueryService.EtfNav("VT", "美股", null,
+                        null, "2026-07-29", "Yahoo Finance"));
+        List<BigDecimal> prices = Arrays.asList(null, new BigDecimal("501.00"), new BigDecimal("55.00"));
+
+        for (PriceQueryService.EtfNav nav : navs) {
+            for (BigDecimal price : prices) {
+                assertThat(ExcelExportService.premiumDiscountPct(nav, price))
+                        .as("nav=%s price=%s", nav, price)
+                        .isEqualTo(EtfLivePremiumCalculator.premiumDiscountPct(nav, price));
+            }
+        }
     }
 }
