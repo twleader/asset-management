@@ -28,7 +28,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 
 ---
 
-## 任務索引（Task 1–228、264–267、269–292、297–309、311–318）
+## 任務索引（Task 1–228、264–267、269–292、297–309、311–319）
 
 | Task | 標題 | 位置 |
 |---|---|---|
@@ -317,6 +317,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 316 | 交易雷達 Treasury freshness、完整回歸與真實 holdout 結案（Requirement 65） | [tasks/t316_radar_v13_validation_closure.md](tasks/t316_radar_v13_validation_closure.md) |
 | 317 | 股市大盤查詢 Docker 可呼叫單一唯讀圖表 API（9 市場 × 8 期間，Requirement 67） | [tasks/t317_public_market_index_api.md](tasks/t317_public_market_index_api.md) |
 | 318 | 交易雷達 Treasury 未來曲線 fail-closed（Requirement 65） | [tasks/t318_treasury_future_curve_guard.md](tasks/t318_treasury_future_curve_guard.md) |
+| 319 | 收盤 provenance 白名單只界定 verified，不得當技術序列納入判準（台股全數「今日不交易」修正，Requirement 65） | [tasks/t319_radar_indicator_series_provenance_scope.md](tasks/t319_radar_indicator_series_provenance_scope.md) |
 
 > **註：Task 229–263、268、293–296 以各自任務檔為準。**
 

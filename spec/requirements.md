@@ -1209,7 +1209,7 @@
 
 **Requirement 43 修訂（規則版本 `TW_RULES_V5`，Task 223）—— 長期因子併入總分與分數飽和修正：**
 
-> **⛔ 本段中「五組分組正規化」與「動作門檻依長期趨勢組分數三層分層」兩項從未實作，且已由 Requirement 43 修訂（`TW_RULES_V9`，Task 264）取代為「扁平權重 ＋ 二維 `TimingState` 動作覆寫」（取數視窗亦維持 241 根、不擴大為 750 根）。**
+> **⛔ 本段中「五組分組正規化」與「動作門檻依長期趨勢組分數三層分層」兩項從未實作，且已由 Requirement 43 修訂（`TW_RULES_V9`，Task 264）取代為「扁平權重 ＋ 二維 `TimingState` 動作覆寫」（取數視窗亦維持 241 根、不擴大為 750 根（t319 起改抓 250 筆後截斷為 241，序列上限不變））。**
 >
 > **但本段並非整段作廢——下列各條仍然有效並由後續任務承接，實作時仍須遵守：**
 >
@@ -2549,6 +2549,7 @@ FROM stock_price_history WHERE market='台股';
 **Acceptance Criteria:**
 
 - [ ] **同一決策快照的資料日期必須一致**：每一筆規則輸入都須可追溯 `value`、`asOfDate/Instant`、`source` 與 `quality`。個股規則價只可取「符合標的市場當地決策日期且實際併入技術序列的 live K」，或最近一筆可信完成收盤；不得再以未驗證日期的 Redis-first `getLive()` 價格搭配另一日期的 MA／BIAS／52 週位置。資料日期無法解析或不符合時忽略該 live，而非只排除序列卻仍拿它作分子。
+- [ ] **收盤 provenance 白名單只界定「這一根收盤能不能宣稱 verified」，不得當技術指標歷史序列的納入判準（Task 319，修正既有實作）**：`RadarObservationResolver.isTrustedClose` 現行對 `market="台股"` 要求 `close_source ∈ {TWSE_MI_INDEX, TPEX_DAILY_CLOSE, FINMIND_TW_CLOSE}`，而該過濾後的 `AcceptedPrice.trustedCompletedRows` 同時被 `TradingRadarService.prepareTechnicalData` 當成**整條技術序列**餵給 `RadarInputAssembler`。Requirement 7／Task 290 已明文「既有列一律維持 null，禁止 migration 猜來源」，兩者疊加使台股歷史 K 幾乎全被剔除：2026-08-12 實測運行中 DB，`stock_price_history` 台股 `close_source IS NULL` 共 **106,135 列**，非空僅 **84 列**（`TWSE_MI_INDEX` 68＋`TPEX_DAILY_CLOSE` 16），且只分佈在 2026-08-07／08-10／08-11／08-12 四個交易日、每日 21 檔；即每檔台股只剩 **4 根**可用完成 K，連 MA20 都算不出。同日實測 `GET /api/trading-radar`：台股 21 檔全部 `dataComplete=false`、`action=NO_TRADE`、`monthlyMa`／`quarterlyMa`／`annualMa`／`kValue`／`dValue` 全為 `null`（DB 該 21 檔的日 K 根數為 8–2,438，其中 19 檔 ≥ 326 根、足以計算 MA240，僅 009816 的 124 根與 009826 的 8 根屬真正資料不足），而美股 11 檔（`isTrustedClose` 對非台股直接回 `true`）與大盤（走 `twse_index_daily_history`，`dataComplete=true`、`RISK_ON`）皆正常。**正確語意是把兩種 trust 分開**：(a) accepted price 選 `completedSession` 當日那一列、(b) `hasTrustedCompletedDate` 判「今日已有可信完成列因此不併 live」——這兩者是 Task 290 的 verified 語意，**必須維持白名單**，13:32 誤寫等來源為 null 的列仍不得算 verified；(c) 餵給 `RadarInputAssembler` 計算 MA20／60／240、KD、兩日確認、`ma60BiasPercent`／分位、52 週位置與 60 日報酬 σ 的歷史序列，**不得要求 `close_source`**，納入判準只有「`tradingDate ≤ completedSession`」與「`closePrice` 為正且有限」。唯一例外是序列中**等於 `completedSession` 的最新一根**：台股該根仍須命中信任清單才可納入，未對帳完成前該日只能由 live K 併入或缺席，避免把盤中誤寫值當成完成收盤 K。三個用途須是 `AcceptedPrice` 上**語意分明的兩個具名欄位**（verified 用與 indicator 用），不得讓呼叫端自行再過濾一次而使兩處判準日後靜默分岔。**不得改以回填歷史 `close_source` 解決**——那等於偽造 provenance，與 Requirement 7／Task 290 直接衝突。本項同時適用頁面路徑與 `evaluateForNotification` 通知路徑（兩者共用 `buildStock`），並須有專屬迴歸測試：以「歷史列 `close_source` 全為 null、僅最近 4 個交易日有可信來源」的 fixture 驗證台股個股仍能算出完整 MA／KD 且不落入 `NO_TRADE` 資料不足分支。
 - [ ] **ETF 折溢價 fail-closed**：Redis 與 PostgreSQL fallback 都必須回傳並驗證 `navDate`。只接受決策時點當時已完成、且符合該市場允許完成日的 observation；過期資料不得觸發 3% 買進否決。API 揭露 `premiumAsOfDate`／來源／是否 stale；stale 時因子為 `null` 並顯示風險。
 - [ ] **外幣底層資產不得靜默當 TWD**：`stock.underlying_currency` 是唯一人工 override；美股預設 USD。台股 `BOND` 若名稱／`bond_term`／已知主檔顯示外國債曝險，但 underlying currency 缺漏，該檔的 `currencyDataComplete=false`，短中期 BUY／ADD／TRIAL_BUY 一律關閉並揭露，不得回退 TWD。既有 00695B、00751B、00865B 主檔須補為 USD，並以 migration/seed 與資料完整性測試防止復發。
 - [ ] **機會、風險與證據信心三軌輸出**：保留 `shortScore`／`score` 作短／中期 opportunity score，新增 `shortDownsideRisk`／`mediumDownsideRisk`（0–100，越高越危險）與 `shortEvidenceConfidence`／`mediumEvidenceConfidence`（0–100，只量資料品質與獨立證據覆蓋，不量方向）。API 同時回傳 evidence groups 明細及缺漏原因；不得把 confidence 加入 opportunity score 造成雙重計分。
