@@ -310,7 +310,7 @@ if (containsAny(t, CHINA)) {
 cd external-materials-service && /usr/local/apache-maven/apache-maven-3.9.11/bin/mvn -q test -Dtest=EditorialNewsFilterTest
 ```
 
-（斷言 `Failures: 0, Errors: 0`；新增 `@Nested ChinaBranchPersonalCrime` **8 個測試方法**全過、既有 45 個測試方法／10 個 `@Nested` 零回歸，合計 53。既有測試中唯一命中 `PERSONAL_CRIME` 詞者為「職棒球員酒駕遭球團暗殺式冷凍」，它在規則①d 即判 `DROP:sport`、走不到規則③，故不受影響。）
+（斷言 `Failures: 0, Errors: 0`；新增 `@Nested ChinaBranchPersonalCrime` **8 個測試方法／34 條斷言**全過、既有 45 個測試方法／11 個 `@Nested`（`Finance`／`China`／`Geopolitics`／`TwLocal`／`GeneralNews`／`Anecdote`／`SocialOddity`／`SouthChinaSeaSkirmish`／`LotteryAndEstate`／`CivicSoftAndFinanceFeed`／`SportsAndIntlPolitics`）零回歸，合計 53 個測試方法。既有測試檔的 168 條 `assertKeep`／`assertDrop` 已於實作前用最終詞集全量預跑，**168/168 通過**。既有測試中唯一命中 `PERSONAL_CRIME` 詞者為「職棒球員酒駕遭球團暗殺式冷凍」，它在規則①d 即判 `DROP:sport`、走不到規則③，故不受影響。）
 
 **整模組建置：**
 
