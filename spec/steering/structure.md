@@ -219,7 +219,22 @@ external-materials-service/src/main/java/com/steven/assets/externalmaterials/
 | `price:{market}:{code}` | live JSON | 24h | `PriceCacheWriter` |
 | `price:index:{market}` | Set，紀錄該市場所有有 cache 的 code | 24h | 同上 |
 | `price:dayhl:{market}:{code}:{tradingDate}` | 該日最高/最低聚合 | 36h | `IntradayHighLowTracker` |
+| `price:etfnav:{market}:{code}` | ETF 淨值／折溢價 JSON（Task 214） | 96h | `EtfNavCacheWriter`（由 `EtfNavPoller` 排程觸發） |
 | Channel `price-update` | Pub/Sub 推播 | — | `PriceCacheWriter` |
+
+**`price:etfnav:*` 補充說明**
+
+- **讀取端：** `PriceQueryService.getEtfNav(stockCode, market)`（business-services）。**只讀 Redis、刻意不 fallback DB**；查無回 `Optional.empty()` 是正常情形（個股本來就沒有淨值），不記 warn、不補 0、不做 ETF 白名單。消費端目前兩處——`ExcelExportService`（資產總覽匯出的淨值／折溢價欄）與 `TradingRadarService`（交易雷達「即時折溢價」欄，Task 320）；兩者的折溢價一律經 `EtfLivePremiumCalculator` 這支共用實作換算，不各自重算（CLAUDE.md「同義欄位、同一 business service API」）。
+- **payload 欄位：** `stockCode` / `market` / `nav` / `premiumDiscountPct` / `navAsOf` / `source` / `updatedAt`。序列化設定為 `NON_NULL`，**null 欄位直接不出現於 JSON**（不是寫成 `null`）。`updatedAt` 為台北牆鐘的寫入時刻，讀取端不解析它。
+
+```
+{"stockCode":"0050","market":"台股","nav":105.57,"premiumDiscountPct":-0.35,
+ "navAsOf":"20260812 13:31:00","source":"TWSE","updatedAt":"2026-08-12T13:31:12.345"}
+```
+
+- **`navAsOf` 有兩種格式，解析前先看 `market`：** 台股為 `yyyyMMdd HH:mm:ss`（證交所 `all_etf.txt` 的 `i`＋`j` 欄），美股為 `yyyy-MM-dd`（Yahoo 報價時點轉紐約當地日期）。`source` 對應為 `TWSE`／`Yahoo Finance`。
+- **美股 payload 恆無 `premiumDiscountPct`：** Yahoo 未提供折溢價欄，寫入端刻意留 null 而非用 Yahoo 自己的 `regularMarketPrice` 反推——那與取用端該列顯示的即時價來源／時點不同（實測 VOO 相差 0.11%，使用者自行驗算會兜不攏）。故美股折溢價由取用端以「該列自己的市價」計算，保證列內自洽；台股則直接沿用證交所已算好的 `g` 欄，缺漏時留白**不反推**（Requirement 34／Task 259）。
+- **TTL 96h 而非比照即時價的 24h 是刻意的：** 淨值一天只有一組有意義的值，且只在交易時段抓取。若只留 24h，週末與連假後的第一份匯出會整欄空白（週五最後一筆已過期）；96h 讓資料撐過週末＋一天連假。**代價是「Redis 裡有值」不等於「是今天的值」——判斷新舊一律看 `navAsOf`。**
 
 ---
 
