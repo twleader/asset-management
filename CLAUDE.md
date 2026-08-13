@@ -230,7 +230,7 @@ skill 有沒有自己宣告：`/commit-merge-push` 沒宣告 → 繼承主 agent
   `/api/public/market-index`、`/api/assets/latest`、`/api/public/exchange-rate/usd-twd`。
 - `bff` 與 `external-materials-service` 不發布 host port；`frontend:80` 對上述五條回 `404`，
   瀏覽器登入 API 與 SPA 仍經 frontend → BFF。
-- Tailscale Serve 只以 path-scoped HTTPS `:9090` 掛前四條；USD/TWD 只限本機。
+- Tailscale Serve 只以 path-scoped HTTPS `:9090` 掛相同五條 exact path，包含 USD/TWD 公開匯率。
   禁止 root／`/api/` proxy、Funnel、自簽憑證與另一層 OAuth proxy。
 
 ### 服務啟動

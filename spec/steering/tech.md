@@ -24,7 +24,7 @@ Browser ──► nginx:80 (Frontend) ──► bff:8080 ──► business-serv
                                                                        └─► redis:6379  ◄── external-materials-service
                                                                                        (TWSE / FinMind / NASDAQ / FundClear / IMF)
 Host tools ──► 127.0.0.1:9090 (API Gateway) ─┬──► bff:8080
-Tailscale ──► HTTPS :9090（僅四條 exact path）──┘──► external-materials-service:8080
+Tailscale ──► HTTPS :9090（僅五條 exact path）──┘──► external-materials-service:8080
 ```
 
 ---
@@ -198,7 +198,7 @@ cd frontend
 - **business-services 不打外部行情 API。** 全部委派給 `external-materials-service` 寫 Redis / DB，business-services 只讀。
 - **BFF 為前端唯一入口。** 前端不直接打 business-services；所有 `/api/*` 經 BFF 路由。
 - **Docker 外部 API 只經 9090 exact allowlist。** BFF 與 external service 不發布 host port；
-  Tailscale 只掛 quotes 兩條、market-index 與 assets/latest，USD/TWD 保持 local-only，不使用 Funnel。
+  Tailscale 只掛 quotes 兩條、market-index、assets/latest 與公開 USD/TWD 匯率，不使用 root／`/api/` proxy 或 Funnel。
 - **一個前端頁面對應一個 BFF controller（或 route）。** 即使是純 passthrough 也要有自己的 route（如 BankSettings）。
 
 ### 5.2 Live 行情走 Redis + SSE
