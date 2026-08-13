@@ -11,6 +11,7 @@ asset-management/
 ├── backend/                       # business-services（領域邏輯 + JPA）
 ├── bff/                           # BFF（Spring Cloud Gateway + 聚合 controller）
 ├── external-materials-service/    # 抓價 / NAV / 配息子系統
+├── api-gateway/                   # Docker 外部唯讀 API 的 Nginx exact allowlist
 ├── frontend/                      # Vue 3 SPA
 ├── db/
 │   ├── init/                      # 容器初始化 SQL（01_dump.sql 含真實資料，gitignored）
@@ -206,8 +207,9 @@ external-materials-service/src/main/java/com/steven/assets/externalmaterials/
 
 ### 4.2 設計原則
 
-- **僅內網暴露 `/internal/*`，不對前端開放。** business-services 透過 docker network 呼叫。
-  **唯一具名例外（Requirement 66）：** `/api/quotes`（唯讀最新報價，`docker-compose.yml` 僅綁 `127.0.0.1` host loopback，供 Docker 外直接查詢），刻意不掛 `/internal` 前綴；不對前端／BFF／business-services 開放，後者仍走既有 Redis 直讀。不得援引此例外新增第二個對外端點——新的對外需求另立 Requirement 評估。
+- **僅內網暴露 `/internal/*`，不對前端或 host 開放。** business-services 透過 docker network 呼叫。
+  具名唯讀 operation `/api/quotes` 與 `/api/quotes/one` 可由 `api-gateway:9090` 的 exact allowlist
+  轉送，但 external-materials-service 本身不發布 host port；後端內部消費者仍走既有 Redis 直讀。
 - **抓價邏輯不寄宿在 business-services。** 外部 API 限流／失敗不影響主系統。
 - **寫入端：** Redis（live）+ PostgreSQL（歷史 / NAV / 配息）。
 - **不持有業務邏輯。** 不知道 snapshot、不知道使用者持倉；只負責 fetch & store。
@@ -237,6 +239,13 @@ external-materials-service/src/main/java/com/steven/assets/externalmaterials/
 - **TTL 96h 而非比照即時價的 24h 是刻意的：** 淨值一天只有一組有意義的值，且只在交易時段抓取。若只留 24h，週末與連假後的第一份匯出會整欄空白（週五最後一筆已過期）；96h 讓資料撐過週末＋一天連假。**代價是「Redis 裡有值」不等於「是今天的值」——判斷新舊一律看 `navAsOf`。**
 
 ---
+
+### 4.4 Docker 外部 API Gateway `api-gateway/`
+
+`api-gateway` 是獨立、非 root、deny-by-default 的 Nginx image，host 唯一 mapping 為
+`127.0.0.1:9090:9090`。它只轉送五條 exact GET：quotes 兩條到 external service，
+market-index、assets/latest、USD/TWD 到 BFF；其餘回 `404`，同 exact path 非 GET 回 `405`。
+Tailscale Serve 只掛前四條 path，USD/TWD 僅本機；禁止 root proxy、Funnel、自簽憑證與另加 OAuth。
 
 ## 5. Frontend `frontend/`
 

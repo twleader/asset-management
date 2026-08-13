@@ -88,7 +88,7 @@ com.steven.assets/
   - `MarketIndexChartService` 承接現有 `GdpTwseBffController` 的指數日線抓取、`buildIndexDailyBody`、`movingAverage`、分時＋昨收聚合與 `previousCloseBefore`；既有兩支 authenticated page endpoint 改為薄委派，公開 controller 也只做參數／HTTP DTO 轉換。下游仍只有 `/api/twse-daily-index`、`/api/us-daily-index`、`/api/index-intraday`，Controller 不碰 Repository，BFF 不碰外部行情 API。搬移後同步訂正 `ExcelExportService` 與 `WatchStockTaiexIntradayTest` 對舊 Controller 方法的 Javadoc／註解引用；只改文件文字，不改 backend 行為。
   - 日線範圍以交易日筆數 `1m=21`、`3m=63`、`6m=125`、`1y=250`、`2y=500`、`5y=1250`、`10y=2500` 裁切。先對完整 10 年收盤序列算四條 MA，再用同一起始 index 裁切所有陣列，確保短區間起點仍帶前置交易日算出的成熟均線。台股 `tradeValue` 在 BFF service 邊界以精確十進位字面轉成 `BigDecimal`：null 保留，整數／浮點 Number 與 numeric String 均不得經 `new BigDecimal(double)`；非法值拋 typed `MalformedMarketIndexPayloadException`。Public advice 將它固定映射為 HTTP 502 `ProblemDetail`，不得捏造 0、靜默丟值或降級為 200 空 public schema；既有 authenticated `getIndexDaily` 邊界只捕捉此 typed exception、記錄後回 HTTP 200 的完整空 legacy body，不得廣域吞其他程式錯誤。WebClient fail-soft 留在 `fetchDailyRows`／分時 fetch 的 transport/HTTP/decode stage，轉型與 shaping 在其後；非 typed mapping／程式錯誤必須傳播為 5xx，並以反例測試防止被誤吞或映射成 400／502。`range=d` 則以分時 `times` 作 labels，並把完整日線的最新非 null 四條 MA 展開為等長水平線；成交量兩陣列等長全 null、`hasVolume=false`。既有 authenticated legacy Map 的 key／JSON shape 不變；相容輸出邊界把 `LocalDate tradingDate` 轉回 ISO String。
   - Public range 裁切與分時水平線屬 `MarketIndexChartService` 的 response shaping；既有 `GdpTwseView.vue` 的 `RANGE_TRADING_DAYS` 與水平線展開因本任務不改畫面而保留為相容殘留，不宣稱兩者已收斂為單一實作，也不得再新增第三份。BFF 契約測試以獨立期望 map 釘住 `21/63/125/250/500/1250/2500`，避免 server 與既有畫面漂移。
-  - `SecurityConfig` 僅新增 `pathMatchers(HttpMethod.GET, "/api/public/market-index").permitAll()`，不得用 `/**` 放寬；這是 CLAUDE.md／structure.md 明文具名且限縮的 Docker／自動化非頁面例外，前端 view 不得援引。現有 `/api/bff/gdp-twse/**` 與所有寫入／回補／匯出端點仍落既有 authenticated/admin 規則。BFF 已由 Compose 暴露 host `8080` 且位於 `asset-net`，不修改 `docker-compose.yml`：host 用 `localhost:8080`、容器用 `bff:8080`、frontend nginx 用 `localhost/api`。
+  - `SecurityConfig` 僅新增 `pathMatchers(HttpMethod.GET, "/api/public/market-index").permitAll()`，不得用 `/**` 放寬；這是 CLAUDE.md／structure.md 明文具名且限縮的 Docker／自動化非頁面例外，前端 view 不得援引。現有 `/api/bff/gdp-twse/**` 與所有寫入／回補／匯出端點仍落既有 authenticated/admin 規則。Task 328 後 BFF 不再暴露 host `8080`；container network 仍用 `bff:8080`，Docker host 與 tailnet client 只能經 Nginx `api-gateway` 的 `9090` exact allowlist 存取本 GET，frontend nginx 對此路徑明確回 404。
 - 其他 settings/passthrough（每頁一支 Spring Cloud Gateway route 配置，rewrite `/api/bff/{page}/**` → `/api/{resource}/**`）：BankSettings、BrokerSettings、DepositTypeSettings、MarketTypeSettings、AssetClassSettings（`/api/bff/asset-class-settings/**`）、TransitFundTypeSettings、StockAlert（`/api/bff/stock-alert/**`；**Requirement 54 起另有 `StockAlertBffController` 與此 route 並存**——`GET/PUT /api/bff/stock-alert/export-setting`、`POST .../run-now`、`GET .../browse`、`GET .../browse-gdrive`，後兩者 passthrough 至既有唯一那支 `/api/export-schedule/browse{,-gdrive}`。萬用 route 會把這幾條錯誤 rewrite 成 `/api/stock-alerts/export-setting/...`，靠 WebFlux `RequestMappingHandlerMapping`（order 0）先於 Gateway `RoutePredicateHandlerMapping`（order 1）由 controller 接走；同一模式的既有先例為 `TradingRadarBffController` ＋ `TradingRadarBffRoutes`）、BackupRestore（`/api/bff/backup-restore/**`）、NotificationSettings（`/api/bff/notification-settings/recipients/**` → `/api/notification-recipients/**`）、PaymentAccountSettings（見「Payment Accounts / Categories」段落，Requirement 22）、UserManagement（`/api/bff/user-management/**`，見 Requirement 28「API 端點（新增）」）、TodayMarketAnalysisRecipients（`/api/bff/today-market-analysis/recipients/**` → `/api/notification-recipients/{id}/market-analysis`，見 Task 151）
 - `WatchStockBffRoutes`（WatchStockView 專屬，`/api/bff/watch-stock/**`）：純 Spring Cloud Gateway passthrough route，rewrite `/api/bff/watch-stock(/**)` → `/api/watch-stocks(/**)` 轉至 business-services。觀察清單已改為「`stock_alert` 衍生 view」，**衍生與 enrichment 一律在 business-services（`WatchStockController` / `WatchStockService`）完成，BFF 僅轉發不重算**：
   - `GET /api/bff/watch-stock` → `GET /api/watch-stocks`：business-services 由 `stock_alert` 群組去重衍生清單，對每筆 (stockCode, market) 補上 live 報價、技術指標、最近觸發資訊
@@ -624,11 +624,9 @@ POST /internal/repair/history?market=%E5%8F%B0%E8%82%A1&from=2026-06-01&to=2026-
 |--------|------|------|
 | GET | `/internal/valuation/twse-daily?date=` | 台股歷史估值單日快照（TWSE `rwd/zh/afterTrading/BWIBBU_d?date=&selectType=ALL&response=json`，短 UA `Mozilla/5.0`），回該日全上市個股的 PE／PB／殖利率。**Requirement 61／Task 278**。**抓取實作與合規 Javadoc 隨新 client 類別落在本服務**（見下方 business `/internal` 表的警語） |
 
-#### external-materials-service 對外公開 API（`PublicQuoteController`，host 可達，Requirement 66）
+#### external-materials-service 公開報價 API（`PublicQuoteController`，僅經 api-gateway 對 host 可達，Requirement 66）
 
-> **與上方「對外介面」表的關鍵差異：這是本服務唯一刻意對外（docker host）暴露的端點群組**，其餘既有 `/internal/*` 端點維持「僅 docker network 內部」不變（上方「對外介面」段落「不對前端暴露 REST」的既有契約不受本節影響）。新端點刻意不掛在 `/internal` 前綴下，避免與該既有契約混讀。`docker-compose.yml` 的 `external-materials-service` 服務首次新增 `ports` 映射，僅綁 `127.0.0.1`（見下方「Docker Compose Services」）。
->
-> **安全取捨（完整理由見 `spec/requirements.md` Requirement 66，此處不重複展開）：** port 一經開放，同一 Spring Boot process 的其餘既有 `/internal/*` 端點（含 `/internal/refresh`、`/internal/backfill/*`、`/internal/repair/history` 等有副作用端點）也一併可從 host `127.0.0.1` 連線到——這是「同 process 只有一個 port」的必然結果，非本次獨立引入的漏洞；信任水位等同既有 `postgres` 5432 的 loopback-only 慣例。
+> `PublicQuoteController` 的「公開」只表示 operation 本身不要求 OAuth／session；network topology 仍是內網服務。Task 328 移除 `external-materials-service` 的 host port，故 host 不再能繞過 gateway 直連同 process 的 `/internal/*`。外部工具只能經 `api-gateway:9090` 的兩條 exact quote route，其他 `/internal/*` 永遠不在 allowlist。
 
 `PriceCacheReader`（新 service，與既有 `PriceCacheWriter` 同包、職責相反——只讀不寫）唯讀 Redis `price:{market}:{code}` 與 `price:index:{market}`（見上方「Redis key schema」），不觸發外部抓取、不寫入 Redis、不寫入資料庫、不 `PUBLISH price-update`。
 
@@ -641,7 +639,7 @@ POST /internal/repair/history?market=%E5%8F%B0%E8%82%A1&from=2026-06-01&to=2026-
 
 **與 `/api/market-data/prices`（business-services，經 BFF，`StockPriceService.getAllPrices` → `PriceQueryService.getAllDisplayPrices`／`getDisplayPrice` 依市場階段解析——台股另有 session-phase 與 `close_source` 信任來源過濾，僅非台股標的才退化為 `getLive`，見「Live 行情（Redis）」段落對 `getLive`／`getDisplayPrice` 分工的既有記載）語意不同**：本端點純讀 Redis、無上述 display-phase 邏輯與 DB fallback，`/api/quotes/one` 的 204 就是唯一的「查無」訊號——維運者查詢兩者查到不同結果是預期行為（display 路徑可能給出信任來源過濾後的收盤值，本端點缺 cache 就是 204），不代表系統異常。
 
-**不需要身份驗證**（唯讀公開市場報價 ＋ 僅 loopback，理由見 Requirement 66，與 `TreasuryYieldController` 的 token／ADMIN 雙重驗證要求不同）。**business-services／BFF／前端不消費此新端點**——既有即時報價路徑繼續走 `PriceQueryService` 直讀 Redis，不改道；本端點只服務 host 端直接查詢（`curl`／維運監看）。
+**不需要應用層身份驗證**（唯讀公開市場報價；外層由 Tailscale identity/TLS、loopback bind 與 Nginx allowlist 保護，理由見 Requirement 66，與 `TreasuryYieldController` 的 token／ADMIN 雙重驗證要求不同）。**business-services／BFF／前端不消費此端點**——既有即時報價路徑繼續走 `PriceQueryService` 直讀 Redis，不改道；本端點只服務經 `api-gateway:9090` 的 Docker 外工具／維運監看。
 
 #### business-services Internal API（手動觸發，不排程、不進 BFF、不進前端）
 
@@ -1330,8 +1328,10 @@ Google Drive 上每一份備份檔的本地索引；UI 列表 / 還原選單一�
 ## API Design
 
 ### Base URL
-- Development: `http://localhost:8080/api`
-- Production: `http://localhost:8081/api` (via Nginx proxy `/api`)
+- Browser UI（本機）: `http://localhost/`；登入後頁面 API 由 frontend Nginx 轉至 BFF
+- Docker 外部唯讀 API（本機）: `http://127.0.0.1:9090`（五支 exact GET，含 local-only USD/TWD）
+- Docker 外部唯讀 API（遠端）: `https://<device>.<tailnet>.ts.net:9090`（Tailscale Serve 只掛四支 exact path；不含 USD/TWD、不使用 Funnel）
+- Docker network 內部: `http://bff:8080`／`http://external-materials-service:8080`
 
 ### Endpoints
 
@@ -2288,7 +2288,7 @@ services:
 
   external-materials-service:
     build: ./external-materials-service
-    ports: ["127.0.0.1:${EXTERNAL_MATERIALS_HOST_PORT:-8082}:8080"]  # Requirement 66：僅 loopback，/api/quotes 唯讀對外；/internal/* 隨 port 一併可達（見該 Requirement 安全取捨）
+    # 不暴露 host port；/internal/* 與 /api/quotes 均只在 asset-net 可達
     depends_on: [postgres (healthy), redis (healthy)]
     environment:
       - FINMIND_TOKEN
@@ -2296,8 +2296,17 @@ services:
 
   bff:
     build: ./bff
-    ports: ["8080:8080"]
+    # 不暴露 host port；frontend 與 api-gateway 經 asset-net 存取
     depends_on: [business-services]
+
+  api-gateway:
+    build: ./api-gateway
+    ports: ["127.0.0.1:9090:9090"]
+    depends_on:
+      external-materials-service:
+        condition: service_healthy
+      bff:
+        condition: service_healthy
 
   frontend:
     build: ./frontend
@@ -2305,14 +2314,103 @@ services:
     depends_on: [bff]
 ```
 
-### Nginx Configuration (Frontend)
+對外 API 的連線拓撲只有兩條，最後都落在相同 loopback socket：
+
+```text
+本機工具 ─────────────────────────────────► http://127.0.0.1:9090（五支 exact GET）
+tailnet client ─► HTTPS :9090 ─► Tailscale Serve（只掛四個 exact path）
+                                      │
+                                      ▼
+                         api-gateway (Nginx :9090)
+                         ├─ exact quote routes ─► external-materials-service:8080
+                         └─ exact index/assets/USD-TWD routes ─► bff:8080
+```
+
+Tailscale 不得設定 root proxy。設定腳本先讀 `tailscale serve status --json`：空設定或精確等於本任務四條 handler 才可能由本腳本管理；發現任何其他 handler 即列出並停止。接著在不改 Serve 的前提下，逐一驗證本機五條 API 的既有 payload 契約：quotes list 必須非空並可用首筆驗 quotes/one，market-index 不可為 fail-soft 空 schema，assets/latest 與 USD/TWD 也必須通過各自 status/content-type/payload 守門。任一失敗都在 reset 前停止。因這段 preflight 可能耗時，reset 緊前再讀一次 status、重驗所有權，並比較兩次解析後的 canonical JSON；只要狀態有變就停止，避免以過時判斷誤刪期間新增的 handler。兩次狀態相同且五路健康後才可 reset。安全 reset 後，四條實際命令皆採 `tailscale serve --bg --https=9090 --set-path=<path> http://127.0.0.1:9090<path>`，分別掛載 `/api/quotes`、`/api/quotes/one`、`/api/public/market-index`、`/api/assets/latest`；`--bg` 讓每條命令立即返回並在重啟後持久，target 的同名 path 讓 Nginx 收到原 API path。若設定中途失敗，cleanup 先重讀現況；只有 `{}` 或上述四路 exact handler 的安全子集合／完整集合且 target 相符時才可 reset，遇到任何陌生 handler、target 或無法讀取的狀態都保留並要求人工處理。若實際 Tailscale CLI 不支援 `--set-path`，腳本必須 fail closed 並停止，不建立 remote Serve；不得另猜 listener、改用 root proxy 或另開不同遠端 port。`/api/public/exchange-rate/usd-twd` 明確不掛載，故只可從 host loopback 使用。TLS 與 tailnet identity 在 host 的 Tailscale Serve 終止；Nginx container 不持有私鑰、不產生自簽憑證，也不執行 OAuth。禁止 Tailscale Funnel、公開 DNS 轉發或路由器 port-forward。多人 tailnet 的授權由 tailnet grants/ACL 管理；repo 只提供不含 auth key 的冪等設定腳本。直接走 `127.0.0.1:9090` 的本機請求屬 host-admin 信任邊界，因此 Nginx 不得把可被本機偽造的 `Tailscale-*` header 當作應用授權依據。
+
+### Nginx Configuration (API Gateway)
+
+`api-gateway/nginx.conf` 是 deny-by-default 的獨立設定，不共用 frontend 的 `/api/` wildcard。五個 exact location 均保留 `$request_uri`，因此 query string 與 upstream status/body/content type 不變；`resolver 127.0.0.11` 讓 container recreate 後可重新解析 service name。`/api/assets/latest` 與 USD/TWD 的資料 shaping 全在 BFF/business 的獨立功能內完成；gateway 只透明轉送，不接受也不產生 owner selector。遠端／本機差異由 Tailscale path mounts 決定，不在 Nginx 依 client IP 猜測。
 
 ```nginx
+server_tokens off;
+
+map $request_method $api_allow_header {
+  GET     "";
+  default "GET";
+}
+
+server {
+  listen 9090;
+  resolver 127.0.0.11 valid=10s ipv6=off;
+  proxy_connect_timeout 5s;
+  proxy_send_timeout 30s;
+  proxy_read_timeout 60s;
+  proxy_next_upstream off;
+
+  location = /api/quotes {
+    add_header Allow $api_allow_header always;
+    if ($request_method != GET) { return 405; }
+    set $quotes_upstream external-materials-service:8080;
+    proxy_pass http://$quotes_upstream$request_uri;
+  }
+
+  location = /api/quotes/one {
+    add_header Allow $api_allow_header always;
+    if ($request_method != GET) { return 405; }
+    set $quotes_upstream external-materials-service:8080;
+    proxy_pass http://$quotes_upstream$request_uri;
+  }
+
+  location = /api/public/market-index {
+    add_header Allow $api_allow_header always;
+    if ($request_method != GET) { return 405; }
+    set $market_index_upstream bff:8080;
+    proxy_pass http://$market_index_upstream$request_uri;
+  }
+
+  location = /api/assets/latest {
+    add_header Allow $api_allow_header always;
+    if ($request_method != GET) { return 405; }
+    set $assets_upstream bff:8080;
+    proxy_pass http://$assets_upstream$request_uri;
+  }
+
+  location = /api/public/exchange-rate/usd-twd {
+    add_header Allow $api_allow_header always;
+    if ($request_method != GET) { return 405; }
+    set $exchange_rate_upstream bff:8080;
+    proxy_pass http://$exchange_rate_upstream$request_uri;
+  }
+
+  location / { return 404; }
+}
+```
+
+上游 DNS／連線錯誤保持標準 `502`，read timeout 保持 `504`，不得改成空 `200` 或 fallback 至其他資料源；`proxy_next_upstream off` 明確禁止 Nginx 預設的 error/timeout retry。`map` 讓非 GET 的 405 帶標準 `Allow: GET`，GET 時空值不送 header。可加入保守的全域 rate limit；不可建立 wildcard upstream、rewrites 或 retry。Compose healthcheck 至少須以真正的 GET（不得用 `curl -I` 或 `wget --spider` 的 HEAD）驗證 Nginx listener能透過一條純讀 quote route 命中 healthy upstream，實機 smoke test 再分別驗證兩個 upstream。
+
+### Nginx Configuration (Frontend)
+
+Frontend 仍保留 SPA、OAuth2 與登入後 `/api/` proxy，但在 generic location 之前封鎖五個 external-only API，確保 port 80 不是第二入口：
+
+```nginx
+location = /api/quotes { return 404; }
+location = /api/quotes/one { return 404; }
+location = /api/public/market-index { return 404; }
+location = /api/assets/latest { return 404; }
+location = /api/public/exchange-rate/usd-twd { return 404; }
+
+# WebFlux 可能把 path segment 的 matrix parameter 與 controller path 分開解析；一併封鎖
+# `/api/quotes;x=1` 等變體，避免落入下方 generic `/api/` proxy。
+location ~ "^/api(?:;[^/]*)?/(?:quotes(?:;[^/]*)?(?:/one(?:;[^/]*)?)?|public(?:;[^/]*)?/(?:market-index(?:;[^/]*)?|exchange-rate(?:;[^/]*)?/usd-twd(?:;[^/]*)?)|assets(?:;[^/]*)?/latest(?:;[^/]*)?)$" {
+  return 404;
+}
+
 location /api/ {
-  proxy_pass http://backend:8080/api/;  # 反向代理至後端
+  proxy_pass http://bff:8080$request_uri;
 }
 location / {
-  try_files $uri $uri/ /index.html;     # SPA fallback
+  try_files $uri $uri/ /index.html;
 }
 ```
 
@@ -2464,12 +2562,14 @@ volumes:
 ### 拓樸（OAuth 落點在 BFF，非 backend）
 
 ```
-瀏覽器 → frontend(Nginx) → bff(Spring Cloud Gateway / WebFlux reactive，唯一對外:8080)
-                                → business-services(Spring MVC，內網不對外，靠 X-User-* header 取得身分)
-                                → postgres / redis / external-materials-service
+瀏覽器 → frontend(Nginx :80) ────────────────┐
+Docker 外工具 → api-gateway(Nginx :9090) ───┼→ bff(Spring Cloud Gateway / WebFlux reactive，container :8080)
+                                             └→ external-materials-service（僅兩條 quote exact route）
+                                                bff → business-services（內網，靠 X-User-* header 取得身分）
+                                                    → postgres / redis / external-materials-service
 ```
 
-- 因 BFF 是唯一對外入口且 business-services 不接觸瀏覽器，**OAuth2 Login（Google 重導、session cookie）必須放在 BFF 的 reactive Security（`SecurityWebFilterChain` / `ServerHttpSecurity`）**。
+- 對瀏覽器而言 BFF 仍是唯一應用入口且 business-services 不接觸瀏覽器；對 Docker 外工具則只有 api-gateway 9090 的五條本機唯讀 allowlist，其中 Tailscale 遠端只掛四條、不含 USD/TWD。**OAuth2 Login（Google 重導、session cookie）必須放在 BFF 的 reactive Security（`SecurityWebFilterChain` / `ServerHttpSecurity`）**，不移到 api-gateway。
 - BFF 在呼叫下游時，把目前登入者（或管理者代看的目標）以 header `X-User-Id` / `X-User-Role` / `X-User-Status` 傳給 business-services。
 
 ### BFF 安全層

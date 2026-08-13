@@ -441,7 +441,7 @@ test -f "$HOME/.config/rclone/rclone.conf" && echo "rclone 設定檔存在"
 
 沒有錯誤，並看到後兩行「存在」才繼續。若第一行顯示 `請在 .env 設定 ADMIN_EMAIL`，回第 4 節修正；若顯示 Google 或資料庫設定缺漏，也先修正 `.env`。
 
-### 6.2 建置並啟動六個服務
+### 6.2 建置並啟動七個服務
 
 ```bash
 docker compose -p asset-management up -d --build
@@ -464,6 +464,7 @@ docker compose -p asset-management ps
 | `asset-business-services` | running、healthy |
 | `asset-external-materials-service` | running、healthy |
 | `asset-bff` | running、healthy |
+| `asset-api-gateway` | running、healthy |
 | `asset-frontend` | running；此服務沒有 healthcheck |
 
 第一次空白安裝會由 Liquibase 自動建立資料表與基礎設定，不需要原作者的資料庫 dump。
@@ -471,14 +472,15 @@ docker compose -p asset-management ps
 再檢查入口服務：
 
 ```bash
-curl -fsS http://localhost:8080/actuator/health
+curl -fsS http://127.0.0.1:9090/api/quotes
 ```
 
-看到以下結果代表 BFF 正常：
+看到 JSON array（可為空）代表本機 API gateway 與 quote upstream 正常。
 
-```json
-{"status":"UP"}
-```
+Docker 外部唯讀 API 的唯一本機入口為 `http://127.0.0.1:9090`，只有五條
+exact GET：`/api/quotes`、`/api/quotes/one`、`/api/public/market-index`、
+`/api/assets/latest`、`/api/public/exchange-rate/usd-twd`。BFF 8080 與 external-materials 8082
+不再發布到 host。
 
 ### 6.3 開啟系統並登入
 
@@ -570,6 +572,20 @@ FINMIND_TOKEN=你的Token
 ```
 
 未填時系統仍會使用其他可用資料來源，但部分資料可能受限。
+
+### 8.5 Tailscale 私網 HTTPS（選用）
+
+先安裝 Tailscale 並在 app 中登入同一個 tailnet；macOS 可使用
+`brew install --cask tailscale-app`。確認上述五條本機 API 都健康後執行：
+
+```bash
+scripts/configure-tailscale-api-gateway.sh
+```
+
+腳本只會建立四條 path-scoped HTTPS `:9090`：quotes、quotes/one、market-index、
+assets/latest。USD/TWD 繼續只能由本機 loopback 呼叫。不需要購買憑證、自簽憑證
+或再加 OAuth2；TLS 與 tailnet identity 由 Tailscale 管理。腳本不會啟用 Funnel，
+也不會在看到陌生 Serve handler 時自動 reset。
 
 ---
 
@@ -668,11 +684,11 @@ docker compose -p asset-management logs --tail=200 frontend bff business-service
 
 先找第一個不是 running／healthy 的服務。不要一看到錯誤就刪除 volume。
 
-若 80 或 8080 已被其他程式使用，macOS／Ubuntu 可查：
+若 80 或 9090 已被其他程式使用，macOS／Ubuntu 可查：
 
 ```bash
 lsof -nP -iTCP:80 -sTCP:LISTEN
-lsof -nP -iTCP:8080 -sTCP:LISTEN
+lsof -nP -iTCP:9090 -sTCP:LISTEN
 ```
 
 ### 11.5 Google 顯示 `redirect_uri_mismatch`
@@ -776,7 +792,7 @@ docker compose -p asset-management logs --tail=200 bff
 
 ### 12.3 本機連線安全
 
-預設網址是 `http://localhost`，本手冊以只在自己的電腦使用為前提。請保持作業系統防火牆開啟，不要在路由器或公共網路開放 80、8080、5432。
+預設網址是 `http://localhost`，本機 API 為 `http://127.0.0.1:9090`。請保持作業系統防火牆開啟，不要在路由器或公共網路開放 80、9090、5432；遠端只使用上述 Tailscale Serve，禁止 Funnel。
 
 若要讓其他電腦或網際網路存取，必須另行規劃 HTTPS、網域、防火牆、反向代理、備份與更新責任；不要直接把本機連接埠對外公開。
 
@@ -826,7 +842,7 @@ docker compose -p asset-management down -v
 - [ ] 將 `ADMIN_EMAIL` 設成非原作者 Google 帳號，首次登入即為 `ADMIN/ACTIVE`。
 - [ ] 使用者管理 API 與畫面都以 `protectedAdmin` 標示「主要管理者」，沒有前端 email hard code。
 - [ ] 未設定或誤填 `ADMIN_EMAIL` 時，Compose／服務會清楚拒絕啟動。
-- [ ] 六個主要服務都能啟動，BFF health 為 `UP`。
+- [ ] 七個主要服務都能啟動，api-gateway health 為 `healthy`。
 - [ ] 能建立或匯入第一份安裝者自己的資產資料。
 - [ ] 選用金鑰保持空白時會安全停用，不阻擋啟動。
 - [ ] 至少在預計支援的 macOS、Windows WSL 2、Ubuntu 版本各驗證一次。
