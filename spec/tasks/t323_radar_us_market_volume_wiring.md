@@ -207,5 +207,66 @@ docker compose -p asset-management exec -T postgres sh -c \
 
 ## 完成報告
 
-（實作者做完後回填：實際改了哪些檔、測試輸出、rebuild／recreate 後美股列 `market_volume_turnover`
-實際落到哪一態、當下的 `expectedMarketCompletedSession` 與 context `asOfDate`，以及與本計畫的偏差。）
+**完成日期：** 2026-08-13
+
+### 實際改動
+
+| 檔案 | 改動 |
+|---|---|
+| `backend/.../service/TradingRadarService.java` | `buildUsMarket()` 以既有 `rows` 呼叫 `marketContextService.resolveMarketFromRows(US_MARKET, decisionInstant, List.of(), rows)`，填入 `MarketSummary` 的 `marketVolumeRatio`／`marketVolumeAsOfDate`（皆走 `context == null ? null : …`）；`marketTurnoverRatio` 與其餘五欄維持 null；`MarketInput` 三欄亦維持 null，並於引數處加註理由 |
+| `backend/.../service/TradingRadarUsMarketVolumeWiringTest.java` | **新增**，6 案例（323.3 的 a–e，含 `MarketInput` 守門） |
+| `TradingRadarUsStockEngineTest`／`TradingRadarServiceOwnerScopeTest`／`TradingRadarIndicatorSeriesProvenanceTest`／`TradingRadarMarketFreshnessTest` | 各補一條 `lenient()` stub，**顯式回 `MarketContext.EMPTY`**（不放進共用 `stubBaseline()`，以保住既有「量能 context 缺值仍開閘」迴歸的前提） |
+
+`mvn -f backend/pom.xml -DextraArgLine=-Dnet.bytebuddy.experimental=true test` → **Tests run: 878, Failures: 0, Errors: 0, Skipped: 0**。
+實作者另做兩次 mutation 驗證守門有效（把 `MarketInput` 三欄灌值 → (e) 紅；把 `marketVolumeRatio` 改回 null → (a)(b)(d) 紅），皆已還原。
+`arch-auditor` diff-scoped 查證：critical 0／major 0／minor 0。
+
+### 323.4 實機結果：落在時窗 (b)，為 `STALE`
+
+| 項目 | 值 |
+|---|---|
+| 量測時點 | 2026-08-13 21:57 Asia/Taipei ＝ **ET 09:57**（美股 8/13 盤前，8/12 那盤已收） |
+| `expectedMarketCompletedSession` | 2026-08-12 |
+| context `marketAsOfDate` | **2026-08-11**（`us_index_daily_history` 的 IXIC 最新交易日） |
+| `marketStale` | **true**（`latestEodDate 2026-08-11 < mostRecentCompletedUsTradingDay 2026-08-12`） |
+| `market_volume_turnover` | 部署前 `MISSING` ×11 → 部署後 **`STALE` ×11** |
+
+部署後該 component 實際內容：`applicability=STALE`、`asOfDate=2026-08-11`、`provider=MARKET_CONTEXT`、
+`missingReason=「大盤量能 context 非要求 completed session」`——即**有值、有來源、有日期、有理由**，
+取代原本的「缺漏（適用指數不得視為 N/A）」。符合任務檔時窗 (b) 的預期。
+
+### 323.5 信心度前後比對（**下降不是本變更造成的**）
+
+| 代號 | short | medium | shortAction | action |
+|---|---|---|---|---|
+| AMZN／MSFT／NVDA／COIN／GOOGL | 89→63 | 71→56 | 不變 | 不變 |
+| AVGO | 89→63 | 60→44 | 不變 | 不變 |
+| QQQ／VOO／VT | 89→63 | 88→60 | 不變 | 不變 |
+| SGOV | 91→70 | 90→67 | 不變 | 不變 |
+| TSM | 89→63 | 49→33 | `WATCH`→`WAIT` | 不變 |
+
+**歸因（已查證，非本變更）**：兩次快照之間跨越了美股 8/12 那盤的收盤——
+部署前快照 `generatedAt=2026-08-13T02:35`（＝ET 8/12 14:35，**盤中**）、部署後為 `21:57`（＝ET 8/13 09:57，**已收盤**）。
+`regime` component 因此由 `AVAILABLE`×11 翻為 `STALE`×11（權重 `.70`），
+短期信心度 `(.50×1.0 + .30×0)/.80 = 62.5 → 63`，與實測完全吻合。
+**同一時點若跑舊程式碼，數字會一模一樣**（舊碼下 volume 是 `MISSING`、同樣 0 分子）。
+本次接線的效益要在 IXIC 當日資料入庫後（時窗 (a)）才會顯現為 `AVAILABLE`。
+`TSM` 的 `shortAction` 由 `WATCH` 轉 `WAIT` 同屬 `regime` 轉 stale 的連帶效果，非量能接線所致。
+
+### 部署證據
+
+- 從 **main 的 worktree** `/Users/steven/Project/asset-management-main`（HEAD `481fe32a`）以
+  `-p asset-management` ＋ `--no-cache` 重建 business-services；運行中 image
+  `sha256:c7bf7bbb…`（build 完成後 1 分鐘內啟動），Compose project `asset-management`。
+- stack 全部 healthy：`http://localhost/` → `HTTP/1.1 200 OK`、`http://localhost:8080/actuator/health` → `{"status":"UP"}`。
+- 過程異常（與本變更無關）：Docker daemon 連續兩次在拉 base image 時崩潰（`rpc error: EOF`），
+  engine 對所有 API 回 500；完整重啟 Docker Desktop ＋ 預先 `docker pull` 兩個 base image 後第三次建置成功。
+  期間非 business 的容器一度整組消失（volume `asset-postgres-data`／`asset-redis-data` 完好），
+  以 `docker compose -p asset-management up -d` 重建，Liquibase 顯示 129 個 changeset 皆為 previously run、資料完整。
+
+### 附帶發現（不在本任務範圍，已登記於 t324）
+
+`us_index_daily_history` 的 IXIC 停在 2026-08-11，缺 8/12 那盤；而 `IndexDailyRefreshScheduler`
+的 startup self-heal 在 2026-08-13 21:58 明確輸出「self-heal：海外指數日線皆為最新，略過」——
+**self-heal 的新鮮度判準與交易雷達的 `mostRecentCompletedUsTradingDay` 不一致**。
+這會讓美股列每天有一段時間處於 stale。詳見 t324 的 324.4。
