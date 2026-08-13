@@ -224,6 +224,15 @@ skill 有沒有自己宣告：`/commit-merge-push` 沒宣告 → 繼承主 agent
 - 例：股價收盤值 → 一律從 `stock_price_history` 抓
 - 共用邏輯抽到 `bff/common/`（如 `SnapshotEnricher`），各 BFF controller 注入使用
 
+**3. Docker 外部唯讀 API 一律經 Nginx 9090 gateway**
+
+- Host 只綁 `127.0.0.1:9090`，精確放行 `GET /api/quotes`、`/api/quotes/one`、
+  `/api/public/market-index`、`/api/assets/latest`、`/api/public/exchange-rate/usd-twd`。
+- `bff` 與 `external-materials-service` 不發布 host port；`frontend:80` 對上述五條回 `404`，
+  瀏覽器登入 API 與 SPA 仍經 frontend → BFF。
+- Tailscale Serve 只以 path-scoped HTTPS `:9090` 掛前四條；USD/TWD 只限本機。
+  禁止 root／`/api/` proxy、Funnel、自簽憑證與另一層 OAuth proxy。
+
 ### 服務啟動
 ```bash
 # 後端（port 8080）

@@ -9,7 +9,7 @@ effort: high
 
 This project is **never** "done" until the change is built into the image and the container is recreated. There is no `npm run dev` / `mvn spring-boot:run` workflow — everything runs via Docker Compose.
 
-## Stack shape (5 + 1 services)
+## Stack shape (5 services + 2 datastores)
 
 `docker-compose.yml` at repo root:
 
@@ -19,10 +19,18 @@ This project is **never** "done" until the change is built into the image and th
 | `redis` | — | (none) | 6379 | live prices, technical-indicator cache |
 | `business-services` | `backend/` | (none) | 8080 | Spring Boot, internal only |
 | `external-materials-service` | `external-materials-service/` | (none) | 8080 | scrapers + Redis writer |
-| `bff` | `bff/` | **8080** | 8080 | Spring Cloud Gateway — sole API entry |
+| `bff` | `bff/` | (none) | 8080 | Spring Cloud Gateway — browser application API entry |
+| `api-gateway` | `api-gateway/` | **127.0.0.1:9090** | 9090 | Five exact read-only GET routes; Tailscale mounts only four |
 | `frontend` | `frontend/` | **80** | 80 | Nginx serving Vite build |
 
-User-facing entry: `http://localhost/` (frontend) → proxies `/api/*` to `bff:8080`.
+Browser entry: `http://localhost/` (frontend) → authenticated application APIs at `bff:8080`.
+Docker-external API entry: `http://127.0.0.1:9090` → five exact GET routes. Tailscale Serve
+exposes only quotes, quotes/one, market-index, and assets/latest; USD/TWD stays local-only.
+
+- Local five: `/api/quotes`, `/api/quotes/one`, `/api/public/market-index`, `/api/assets/latest`,
+  `/api/public/exchange-rate/usd-twd`.
+- Tailscale four: the first four paths only. Never mount `/`, `/api/`, or USD/TWD; never use Funnel.
+- Host 8080/8082 must have no listener. Check BFF health from its container and quote/BFF behavior through 9090.
 
 ## Step 1 — Find the real Compose project name (critical)
 
@@ -95,8 +103,9 @@ Edit-target → what to rebuild. **Only rebuild what changed** (don't `docker co
 | `backend/**` (Java / pom.xml / resources / liquibase changelog) | `business-services` | Liquibase auto-runs on startup — schema migrations apply during recreate |
 | `external-materials-service/**` | `external-materials-service` | |
 | `bff/**` | `bff` | |
+| `api-gateway/**` | `api-gateway` | Rebuild and recreate; verify exact allowlist and deny matrix |
 | `db/init/**` | — | Only runs on **fresh** postgres volume; needs full down + volume rm to take effect (rarely the right move — usually do a Liquibase changeset in `backend/` instead) |
-| `docker-compose.yml` env / volume / network changes | — | Full `$DC down && $DC up -d --build` |
+| `docker-compose.yml` env / volume / network changes | affected services | Recreate every service whose container config changed; a new service must be built and created |
 
 ## Step 3 — Rebuild + recreate just that service
 
@@ -152,8 +161,9 @@ docker ps --filter name=asset-<service> --format "{{.Names}}\t{{.Status}}"
 # Frontend health
 curl -sI http://localhost/ | head -1                 # → HTTP/1.1 200 OK
 
-# BFF health (sole external API entry)
-curl -s http://localhost:8080/actuator/health        # → {"status":"UP"}
+# BFF container health + Docker-external API gateway
+docker exec asset-bff wget -qO- http://127.0.0.1:8080/actuator/health  # → {"status":"UP"}
+curl -fsS http://127.0.0.1:9090/api/quotes           # → JSON array through gateway
 
 # End-to-end: BFF → business-services → postgres
 curl -s http://localhost/api/bff/dashboard/summary | python3 -c \

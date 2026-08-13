@@ -4,12 +4,13 @@
 
 ---
 
-## 1. 系統組成（四個 service + 兩個 datastore）
+## 1. 系統組成（五個 service + 兩個 datastore）
 
 | 元件 | 技術 | Port | 對外 | 角色 |
 |------|------|------|------|------|
-| **Frontend** | Vue 3 + Vite 5 + Element Plus + Nginx | 80 | ✅ | SPA，所有 `/api/*` proxy 至 BFF |
-| **BFF** | Spring Boot 3.4.4 + Spring Cloud Gateway | 8080 | ✅ | API Gateway，前端唯一入口；一頁面一 controller |
+| **Frontend** | Vue 3 + Vite 5 + Element Plus + Nginx | 80 | ✅ | SPA；五條 external-only API 明確回 404 |
+| **API Gateway** | Nginx Alpine（non-root） | 9090 | ✅（僅 `127.0.0.1`） | Docker 外部五條 exact GET 唯一入口 |
+| **BFF** | Spring Boot 3.4.4 + Spring Cloud Gateway | 8080 | ❌ 僅內網 | 前端應用 API 入口；一頁面一 controller |
 | **Business Services（backend）** | Spring Boot 3.4.4 + Spring Data JPA | 8080 | ❌ 僅內網 | 領域邏輯、JPA 持久化 |
 | **External Materials Service** | Spring Boot 3.4.4 + WebFlux | 8080 | ❌ 僅內網 | 抓股價／NAV／配息／匯率，寫 Redis & DB |
 | **PostgreSQL** | postgres:16-alpine | 5432 | ✅（debug） | 主資料庫 |
@@ -22,6 +23,8 @@
 Browser ──► nginx:80 (Frontend) ──► bff:8080 ──► business-services:8080 ──► postgres:5432
                                                                        └─► redis:6379  ◄── external-materials-service
                                                                                        (TWSE / FinMind / NASDAQ / FundClear / IMF)
+Host tools ──► 127.0.0.1:9090 (API Gateway) ─┬──► bff:8080
+Tailscale ──► HTTPS :9090（僅四條 exact path）──┘──► external-materials-service:8080
 ```
 
 ---
@@ -194,6 +197,8 @@ cd frontend
 
 - **business-services 不打外部行情 API。** 全部委派給 `external-materials-service` 寫 Redis / DB，business-services 只讀。
 - **BFF 為前端唯一入口。** 前端不直接打 business-services；所有 `/api/*` 經 BFF 路由。
+- **Docker 外部 API 只經 9090 exact allowlist。** BFF 與 external service 不發布 host port；
+  Tailscale 只掛 quotes 兩條、market-index 與 assets/latest，USD/TWD 保持 local-only，不使用 Funnel。
 - **一個前端頁面對應一個 BFF controller（或 route）。** 即使是純 passthrough 也要有自己的 route（如 BankSettings）。
 
 ### 5.2 Live 行情走 Redis + SSE
