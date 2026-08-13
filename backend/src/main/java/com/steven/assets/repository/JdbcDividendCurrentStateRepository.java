@@ -5,6 +5,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
@@ -21,6 +24,7 @@ public class JdbcDividendCurrentStateRepository implements DividendCurrentStateR
     public Optional<Snapshot> findLatestComplete(
             String code, String market, Instant decisionInstant,
             LocalDate requiredFrom, LocalDate requiredTo) {
+        Timestamp decisionTimestamp = toTimestamp(decisionInstant);
         List<SnapshotRef> refs = jdbc.query("""
                 SELECT s.id, s.provider, s.scope_from, s.scope_to, o.observed_at
                   FROM stock_dividend_snapshot s
@@ -47,8 +51,8 @@ public class JdbcDividendCurrentStateRepository implements DividendCurrentStateR
                 rs.getLong("id"), rs.getString("provider"),
                 rs.getObject("scope_from", LocalDate.class),
                 rs.getObject("scope_to", LocalDate.class),
-                rs.getObject("observed_at", Instant.class)),
-                code, market, decisionInstant, decisionInstant, requiredFrom, requiredTo);
+                getInstant(rs, "observed_at")),
+                code, market, decisionTimestamp, decisionTimestamp, requiredFrom, requiredTo);
         if (refs.isEmpty()) return Optional.empty();
         return Optional.of(loadSnapshot(code, market, refs.getFirst()));
     }
@@ -56,6 +60,7 @@ public class JdbcDividendCurrentStateRepository implements DividendCurrentStateR
     @Override
     public Optional<Snapshot> findLatestHistorical(
             String code, String market, Instant decisionInstant, LocalDate throughDate) {
+        Timestamp decisionTimestamp = toTimestamp(decisionInstant);
         List<SnapshotRef> refs = jdbc.query("""
                 SELECT s.id, s.provider, s.scope_from, s.scope_to, o.observed_at
                   FROM stock_dividend_snapshot s
@@ -78,8 +83,8 @@ public class JdbcDividendCurrentStateRepository implements DividendCurrentStateR
                 rs.getLong("id"), rs.getString("provider"),
                 rs.getObject("scope_from", LocalDate.class),
                 rs.getObject("scope_to", LocalDate.class),
-                rs.getObject("observed_at", Instant.class)),
-                code, market, decisionInstant, decisionInstant, throughDate, throughDate);
+                getInstant(rs, "observed_at")),
+                code, market, decisionTimestamp, decisionTimestamp, throughDate, throughDate);
         if (refs.isEmpty()) return Optional.empty();
         return Optional.of(loadSnapshot(code, market, refs.getFirst()));
     }
@@ -168,6 +173,15 @@ public class JdbcDividendCurrentStateRepository implements DividendCurrentStateR
 
     private record SnapshotRef(long id, String provider, LocalDate scopeFrom,
                                LocalDate scopeTo, Instant observedAt) {}
+
+    private static Timestamp toTimestamp(Instant instant) {
+        return instant == null ? null : Timestamp.from(instant);
+    }
+
+    private static Instant getInstant(ResultSet rs, String column) throws SQLException {
+        Timestamp timestamp = rs.getTimestamp(column);
+        return timestamp == null ? null : timestamp.toInstant();
+    }
 
     private List<Long> findMatchingIds(String code, String market, ProjectedEvent event) {
         if (event.eventKey() != null && !event.eventKey().isBlank()) {

@@ -45,11 +45,12 @@ public class DividendHistoryService {
     /** 從 DB 讀股利歷史；DB 沒資料時 fallback 觸發 external-materials-service 同步。 */
     @Transactional
     public DividendHistoryResult findFromDb(String code, String market, int years) {
-        projectionService.projectOne(code, market, Instant.now());
+        projectFailSoft(code, market);
         int sinceYear = Year.now().getValue() - years;
         List<StockDividendHistory> rows = repo.findByStockSinceYear(code, market, sinceYear);
         if (rows.isEmpty()) {
             // cold cache：請 external-materials-service 抓一次，等回應後重新讀 DB
+            boolean synced = false;
             try {
                 externalClient.post()
                         .uri(uri -> uri.path("/internal/dividend/sync")
@@ -58,10 +59,13 @@ public class DividendHistoryService {
                         .retrieve()
                         .toBodilessEntity()
                         .block();
-                projectionService.projectOne(code, market, Instant.now());
-                rows = repo.findByStockSinceYear(code, market, sinceYear);
-            } catch (Exception e) {
+                synced = true;
+            } catch (RuntimeException e) {
                 log.warn("觸發 external-materials-service /internal/dividend/sync 失敗: {}", e.getMessage());
+            }
+            if (synced) {
+                projectFailSoft(code, market);
+                rows = repo.findByStockSinceYear(code, market, sinceYear);
             }
             if (rows.isEmpty()) {
                 return new DividendHistoryResult(code, market, null, "查無資料", List.of());
@@ -86,6 +90,14 @@ public class DividendHistoryService {
                 .thenComparing(r -> r.exDividendDate() == null ? "" : r.exDividendDate(), Comparator.reverseOrder()));
         String source = rows.get(0).getSource();
         return new DividendHistoryResult(code, market, source, null, out);
+    }
+
+    private void projectFailSoft(String code, String market) {
+        try {
+            projectionService.projectOne(code, market, Instant.now());
+        } catch (RuntimeException e) {
+            log.warn("股利 current-state 投影失敗：{} {}: {}", market, code, e.getMessage());
+        }
     }
 
     /**

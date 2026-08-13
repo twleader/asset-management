@@ -1947,7 +1947,9 @@ FinMind 自 2025 年起對匿名呼叫額度收緊，超量會回 `402 Payment R
 
 > NASDAQ 的 `/dividends` 只服務 NASDAQ 自家上市標的，對 NYSEARCA ETF 一律回 N/A（與 Task 69 殖利率遇到的限制同源）。Yahoo chart events=div 對全美股 / ETF 都有完整除息歷史，且與 `MarketDataFetchService.getYahooDividendRate`（殖利率）走同一資料源，符合「同義欄位、同一資料來源」原則。Yahoo 一律以 curl 子程序呼叫，避開 Java HttpClient 被 WAF 擋（同 ETF 持股 / 殖利率既有做法）。**curl 的 User-Agent 必須用短字串 `Mozilla/5.0`**：實測 Yahoo WAF 對「長 Chrome UA + curl TLS 指紋」判為 bot 回 `Too Many Requests`(429)，短 UA 才放行（與 `getYahooDividendRateForTicker` 一致）。
 
-下游 `DividendPersister.syncOne` 對所有來源的 `DividendEvent` 一視同仁：用 `calcDividendBasis` 由除息日回查 `stock_price_history` 算昨收價、填息天數、現金殖利率後 upsert。`source` 不再以市場別硬編，改由 `fetch()` 回傳的 `DividendFetchResult.source`（FinMind / NASDAQ / Yahoo Finance）逐筆寫入，確保 `stock_dividend_history.source` 與實際採用的資料源一致。
+下游已改為 append-only evidence 與 current-state 分層。`external-materials-service` 的 `DividendPersister.syncOne` 只把每次抓取結果交給 `DividendSnapshotStore`：相同 canonical content 重用 immutable `stock_dividend_snapshot`，事件寫 `stock_dividend_snapshot_event`，每次可見時間另 append `stock_dividend_fetch_observation`；失敗／scope 不合法另寫 `stock_dividend_fetch_attempt` 稽核，不直接維護 `stock_dividend_history`。`business-services` 的 `DividendCurrentStateProjectionService` 才依最新完整 snapshot 投影 `ACTIVE/CANCELLED` current-state；`DividendHistoryService.findFromDb` 先嘗試投影，再讀 `stock_dividend_history`，空資料時才呼叫 `/internal/dividend/sync` 並重投影。投影屬非關鍵 enrichment：投影暫時失敗時記 WARN 並沿用既有 history，避免唯讀的股利頁籤全站 500；實際 history 查詢失敗仍應回錯誤，不得假裝成成功空資料。
+
+**JDBC `TIMESTAMPTZ` 邊界（Task 322）**：上述 append-only 三表的 `observed_at`／`source_available_at` 均為 PostgreSQL `TIMESTAMPTZ`，領域與 resolver 對外仍使用 `java.time.Instant`。pgjdbc 42.7.x 不支援 `JdbcTemplate` varargs 直接 `setObject(Instant)`，也不保證 `ResultSet.getObject(column, Instant.class)`；因此寫入／查詢參數一律先轉 `java.sql.Timestamp.from(instant)`（null 保持 null），讀回一律以 nullable `ResultSet.getTimestamp(column)` 後 `toInstant()`，確保 epoch 不變。此規則同時套用 `JdbcDividendCurrentStateRepository`、`JdbcDividendEventEvidenceRepository` 與 `DividendSnapshotStore`；只修 `/dividends` 的第一個查詢不足以恢復 evidence 寫入與 decision-time resolver。
 
 ### 預估配息資料來源（estimatedAnnualDividend）
 
