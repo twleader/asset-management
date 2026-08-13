@@ -7,6 +7,7 @@ readonly -a SERVE_PATHS=(
   '/api/quotes/one'
   '/api/public/market-index'
   '/api/assets/latest'
+  '/api/public/exchange-rate/usd-twd'
 )
 
 die() {
@@ -125,6 +126,7 @@ expected = {
     "/api/quotes/one": "http://127.0.0.1:9090/api/quotes/one",
     "/api/public/market-index": "http://127.0.0.1:9090/api/public/market-index",
     "/api/assets/latest": "http://127.0.0.1:9090/api/assets/latest",
+    "/api/public/exchange-rate/usd-twd": "http://127.0.0.1:9090/api/public/exchange-rate/usd-twd",
 }
 web = data.get("Web")
 expected_host = f"{dns_name}:9090"
@@ -135,7 +137,7 @@ if not isinstance(handlers, dict):
     raise SystemExit("Handlers 必須是 object")
 handler_paths = set(handlers)
 if mode in {"allow-empty", "exact"} and handler_paths != set(expected):
-    raise SystemExit("必須精確只有本任務管理的四條 path handler")
+    raise SystemExit("必須精確只有本任務管理的五條 path handler")
 if mode == "subset" and not handler_paths.issubset(expected):
     raise SystemExit("partial config 含非本任務 path handler")
 for path in handler_paths:
@@ -261,7 +263,7 @@ done
 
 serve_after="$work_dir/serve-after.json"
 "$TAILSCALE_BIN" serve status --json >"$serve_after"
-validate_owned_config "$serve_after" exact || die '建立後的 Serve config 不是預期四條 exact handler。'
+validate_owned_config "$serve_after" exact || die '建立後的 Serve config 不是預期五條 exact handler。'
 cleanup_partial=0
 
 printf 'Tailscale Serve 已安全設定：https://%s:9090\n' "$tail_dns"

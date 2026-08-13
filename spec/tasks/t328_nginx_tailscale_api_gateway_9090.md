@@ -21,7 +21,7 @@ Nginx 的 generic `/api/` 又可代理 BFF public route。第一種做法雖只�
 | GET | `/api/quotes/one?code=&market=` | `external-materials-service:8080` |
 | GET | `/api/public/market-index?market=&range=` | `bff:8080` |
 | GET | `/api/assets/latest` | `bff:8080` |
-| GET | `/api/public/exchange-rate/usd-twd` | `bff:8080`（local-only，不掛 Tailscale） |
+| GET | `/api/public/exchange-rate/usd-twd` | `bff:8080` |
 
 `/api/assets/latest` 與 USD/TWD 的 controller、資料聚合與 payload 契約由各自平行任務實作；本任務只提供
 exact gateway route 與 network boundary，不得複製或猜測該業務邏輯。若 endpoint 尚未落在本 checkout，
@@ -32,7 +32,7 @@ Docker host 的唯一入口固定為 `http://127.0.0.1:9090`。遠端不把 9090
 
 ```text
 本機工具 ───────────────────────────────► http://127.0.0.1:9090
-tailnet client ─► HTTPS :9090 ─► Tailscale Serve（只掛四個 exact path）
+tailnet client ─► HTTPS :9090 ─► Tailscale Serve（只掛五個 exact path）
                                       │
                                       ▼
                          api-gateway (Nginx :9090)
@@ -41,7 +41,7 @@ tailnet client ─► HTTPS :9090 ─► Tailscale Serve（只掛四個 exact pa
 ```
 
 因此不新增 Google OAuth2、API key、自簽憑證或憑證輪替程式。Tailscale 負責 tailnet identity 與
-TLS；Nginx 負責五條本機 exact allowlist；Tailscale 只掛前四條，USD/TWD 保持 local-only。禁止 Tailscale Funnel、公開 Internet listener、路由器 port-forward
+TLS；Nginx 負責五條本機 exact allowlist；Tailscale 掛載相同五條 exact path，包含公開 USD/TWD 匯率。禁止 Tailscale Funnel、公開 Internet listener、路由器 port-forward
 與 wildcard proxy。能直接呼叫 `127.0.0.1` 或操作 Docker 的本機管理者仍屬既有 host-admin 信任邊界。
 
 ## 要做什麼
@@ -92,21 +92,23 @@ TLS；Nginx 負責五條本機 exact allowlist；Tailscale 只掛前四條，USD
       `scripts/configure-tailscale-api-gateway.sh`，行為依序為：(1) 尋找 PATH 中 `tailscale`，必要時也
       支援 macOS app bundle 的 CLI；找不到時顯示 `brew install --cask tailscale-app` 與停止，腳本不得
       自行要求或處理管理員密碼；(2) `tailscale status` 必須成功，未登入時提示開啟 Tailscale 完成
-      browser login 後停止；(3) 先讀 `tailscale serve status --json`，只有空設定或精確等於本任務四條
+      browser login 後停止；(3) 先讀 `tailscale serve status --json`，只有空設定或精確等於本任務五條
       handler 才可繼續，若有其他 handler 就列出後停止；(4) 不改動 Serve，先做五路 endpoint-aware
-      preflight：`/api/quotes` 必須是非空 JSON array，並以首筆合法 `stockCode/market` 驗
-      `/api/quotes/one`；market-index 代表查詢須 `labels` 非空且六圖表陣列等長；assets/latest 須通過
+      preflight：`/api/quotes` 必須固定為 200 application/json 非空 array，並以首筆合法 `stockCode/market` 驗
+      `/api/quotes/one` 固定為 200 application/json；market-index 代表查詢須固定為 200 application/json，
+      且 `labels` 非空、六圖表陣列等長；assets/latest 須通過
       200 application/json、固定 valuation policy 與 snapshot/live id 相同；USD/TWD 須通過其 200
       application/json、固定 pair/currency/interval/timezone、非空 spot/history 與 count 契約。quote list
       無 sentinel 或任一支未健康都須明列後停止，不得 reset/configure；(5) reset 緊前再次讀 machine-readable
       status、重驗所有權，並比較兩次解析後的 canonical JSON，任何變動都停止；只有兩次狀態相同才執行
       `tailscale serve reset`；(6) 對 HTTPS 9090 逐一執行
       `tailscale serve --bg --https=9090 --set-path="$path" "http://127.0.0.1:9090$path"`，其中 `$path`
-      依序為 `/api/quotes`、`/api/quotes/one`、`/api/public/market-index`、`/api/assets/latest`；每條都必須
+      依序為 `/api/quotes`、`/api/quotes/one`、`/api/public/market-index`、`/api/assets/latest`、
+      `/api/public/exchange-rate/usd-twd`；每條都必須
       `--bg`，target 必須保留同名 backend path；若 CLI 不支援 `--set-path`，須 fail closed 停止且不建立 remote Serve，
-      不得另猜 listener、改用 root proxy 或另開不同遠端 port；(7) 顯示 `tailscale serve status --json`，fail closed 驗證無 `/`、`/api/` 或
-      `/api/public/exchange-rate/usd-twd` handler。設定中途失敗時，cleanup 必須先重讀現況；只有空設定或本輪
-      四條 handler 的安全子集合／精確集合且 target 完全相符時才可 reset，任何陌生或無法確認的狀態都不得
+      不得另猜 listener、改用 root proxy 或另開不同遠端 port；(7) 顯示 `tailscale serve status --json`，fail closed 驗證 handler
+      精確等於上述五條，且無 `/`、`/api/` 或額外 handler。設定中途失敗時，cleanup 必須先重讀現況；只有空設定或本輪
+      五條 handler 的安全子集合／精確集合且 target 完全相符時才可 reset，任何陌生或無法確認的狀態都不得
       自動刪除。腳本須可重複執行，不接受／產生／保存 reusable auth key，
       不改 grants/ACL，任何分支都不得呼叫 `tailscale funnel`。多人 tailnet 的 grants/ACL 必須由管理者
       在 tailnet policy 另行限縮 identity。
@@ -115,7 +117,7 @@ TLS；Nginx 負責五條本機 exact allowlist；Tailscale 只掛前四條，USD
       `spec/steering/tech.md`、`INSTALLATION.md`、`.agents/skills/run-stack/SKILL.md` 與
       `.claude/skills/run-stack/SKILL.md`：service 數量加入 api-gateway；BFF/external-materials 的 host port
       改為 none；Docker 外 API entry 改為 9090；列出五個 local exact GET；說明 frontend 80 只供 UI，
-      Tailscale Serve 只把前四個 path 提供遠端 HTTPS、USD/TWD local-only，且不使用 Funnel。兩份 run-stack skill 的內容須同步，但各自既有的
+      Tailscale Serve 只把相同五個 exact path 提供遠端 HTTPS，包含公開 USD/TWD 匯率，且不使用 root／`/api/` proxy 或 Funnel。兩份 run-stack skill 的內容須同步，但各自既有的
       model/effort frontmatter 不得互相覆蓋。刪除「`/internal/*` 隨 external-materials host port 一併
       可達」「BFF 8080 是 host 入口」「frontend 可代理 public market-index」等已被本任務推翻的敘述。
 
@@ -225,21 +227,31 @@ tailscale status
 tail_host=$(tailscale status --json | jq -r '.Self.DNSName | rtrimstr(".")')
 tail_base="https://${tail_host}:9090"
 
-# 1/4 quotes：list 必須是 JSON array；非空才可由首筆建立可複製的 single-quote sentinel。
-curl -fsS "$tail_base/api/quotes" > /tmp/t328-tail-quotes.json
+# 1–2/5 quotes：分離驗固定 status、content-type 與 body；非空才可由首筆建立可複製的 single-quote sentinel。
+quotes_status=$(curl -sS -D /tmp/t328-tail-quotes.headers -o /tmp/t328-tail-quotes.json \
+  -w '%{http_code}' "$tail_base/api/quotes")
+test "$quotes_status" = 200
+grep -Eiq '^content-type: application/json([;[:space:]]|$)' /tmp/t328-tail-quotes.headers
 jq -e 'type == "array"' /tmp/t328-tail-quotes.json
 if jq -e 'length > 0' /tmp/t328-tail-quotes.json >/dev/null; then
   quote_code=$(jq -r '.[0].stockCode' /tmp/t328-tail-quotes.json)
   quote_market=$(jq -r '.[0].market' /tmp/t328-tail-quotes.json)
-  curl -fsS --get --data-urlencode "code=$quote_code" --data-urlencode "market=$quote_market" \
-    "$tail_base/api/quotes/one" | jq -e --arg code "$quote_code" --arg market "$quote_market" \
-    '.stockCode == $code and .market == $market'
+  quote_one_status=$(curl -sS -D /tmp/t328-tail-quote-one.headers -o /tmp/t328-tail-quote-one.json \
+    -w '%{http_code}' --get --data-urlencode "code=$quote_code" --data-urlencode "market=$quote_market" \
+    "$tail_base/api/quotes/one")
+  test "$quote_one_status" = 200
+  grep -Eiq '^content-type: application/json([;[:space:]]|$)' /tmp/t328-tail-quote-one.headers
+  jq -e --arg code "$quote_code" --arg market "$quote_market" \
+    '.stockCode == $code and .market == $market' /tmp/t328-tail-quote-one.json
 else
   echo 'NO_QUOTE_SENTINEL: /api/quotes 為空，/api/quotes/one 遠端 payload 尚無可驗證標的' >&2
 fi
 
-# 3/4 market-index：代表查詢不可用 fail-soft 空 schema 冒充成功。
-curl -fsS "$tail_base/api/public/market-index?market=TWSE&range=1m" > /tmp/t328-tail-index.json
+# 3/5 market-index：分離驗固定 status、content-type 與 body，不可用其他 2xx 或 fail-soft 空 schema 冒充成功。
+market_index_status=$(curl -sS -D /tmp/t328-tail-index.headers -o /tmp/t328-tail-index.json \
+  -w '%{http_code}' "$tail_base/api/public/market-index?market=TWSE&range=1m")
+test "$market_index_status" = 200
+grep -Eiq '^content-type: application/json([;[:space:]]|$)' /tmp/t328-tail-index.headers
 jq -e '(.labels|length) > 0 and
        (.labels|length) == (.closes|length) and
        (.labels|length) == (.ma5|length) and
@@ -247,7 +259,7 @@ jq -e '(.labels|length) > 0 and
        (.labels|length) == (.ma60|length) and
        (.labels|length) == (.ma240|length)' /tmp/t328-tail-index.json
 
-# 4/4 latest assets：驗固定 200、content-type 與已落地契約，不只看 transport 成功。
+# 4/5 latest assets：驗固定 200、content-type 與已落地契約，不只看 transport 成功。
 assets_status=$(curl -sS -D /tmp/t328-tail-assets.headers -o /tmp/t328-tail-assets.json \
   -w '%{http_code}' "$tail_base/api/assets/latest")
 test "$assets_status" = 200
@@ -257,7 +269,22 @@ jq -e '.valuationPolicy == "TARGET_SESSION_WITH_EXPLICIT_FALLBACK" and
        (.liveAssets.snapshotId | type == "number") and
        .snapshot.id == .liveAssets.snapshotId' /tmp/t328-tail-assets.json
 
-test "$(curl -sS -o /dev/null -w '%{http_code}' "https://${tail_host}:9090/api/public/exchange-rate/usd-twd")" = 404
+# 5/5 USD/TWD：公開匯率與另外四路同樣由 tailnet HTTPS 提供，驗完整固定契約。
+usd_twd_status=$(curl -sS -D /tmp/t328-tail-usd-twd.headers -o /tmp/t328-tail-usd-twd.json \
+  -w '%{http_code}' "$tail_base/api/public/exchange-rate/usd-twd")
+test "$usd_twd_status" = 200
+grep -Eiq '^content-type: application/json([;[:space:]]|$)' /tmp/t328-tail-usd-twd.headers
+jq -e '.pair == "USD/TWD" and
+       .baseCurrency == "USD" and
+       .quoteCurrency == "TWD" and
+       .refreshIntervalSeconds == 2 and
+       .timezone == "Asia/Taipei" and
+       (.spot | type == "object") and
+       (.spot | length) > 0 and
+       (.history | type == "array") and
+       (.history | length) > 0 and
+       .count == (.history | length)' /tmp/t328-tail-usd-twd.json
+
 test "$(curl -sS -o /dev/null -w '%{http_code}' "https://${tail_host}:9090/")" = 404
 test "$(curl -sS -o /dev/null -w '%{http_code}' "https://${tail_host}:9090/api/")" = 404
 test "$(curl -sS -o /dev/null -w '%{http_code}' "https://${tail_host}:9090/unknown")" = 404
@@ -293,9 +320,13 @@ git status --short
   `405 + Allow: GET`、gateway deny 11/11 為 404、frontend exact/matrix 25/25 為 404；既有 frontend
   BFF API 仍到 upstream 回 401，未被 deny regex 誤擋。
 - Host 8080／8082 無 listener，9090 僅 `127.0.0.1:9090`；BFF/external 無 published port。
-  `spec-check` 為 `BLOCK: 0 / CHECK: 0`，兩份 Nginx `-t`、Compose config、shell syntax 與
-  `git diff --check` 全通過。最終 spec cross-audit 為 critical 0／major 0／minor 0。
+  原四路契約當時的 `spec-check` 為 `BLOCK: 0 / CHECK: 0`，兩份 Nginx `-t`、Compose config、shell syntax 與
+  `git diff --check` 全通過，spec cross-audit 為 critical 0／major 0／minor 0；這些歷史結果不代表本次五路契約修訂已完成重新審查或 runtime 驗證。
 - Tailscale 已安裝、登入且為 `Running/Online`，DNS `mac-mini-2.tailccc7be.ts.net.`；Serve status 仍為
-  `{}`。本輪刻意不執行設定腳本：腳本依安全規格會先要求 assets/latest 與 USD/TWD 兩支本機 API
+  `{}`。原 2026-08-14 四路契約下刻意不執行設定腳本：腳本依安全規格會先要求 assets/latest 與 USD/TWD 兩支本機 API
   都達正式契約，平行任務尚未合併時必須在任何 reset 前 fail closed。待兩支 API 落到 main 後再執行
-  腳本，即可建立四路 remote HTTPS 並驗 USD/TWD、root、`/api/`、unknown 均為 404。
+  腳本；這段只保留當時未修改 Serve 的歷史事實，不是現行遠端四路契約。
+- 2026-08-14 依使用者最新決策修訂遠端契約：USD/TWD 是公開匯率資訊，Tailscale Serve 白名單由
+  四路改為五路。實作須先把設定腳本、長期／操作文件與驗證矩陣同步成五路，再重跑五支本機 preflight、
+  reset 前 TOCTOU／所有權檢查、安全 cleanup 與五路 tailnet HTTPS payload 驗證；完成前不得宣稱新的
+  五路 Serve 已套用。root、`/api/`、unknown、額外 handler、Funnel、公網 listener、額外 OAuth 與自簽憑證仍禁止。

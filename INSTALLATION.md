@@ -582,10 +582,10 @@ FINMIND_TOKEN=你的Token
 scripts/configure-tailscale-api-gateway.sh
 ```
 
-腳本只會建立四條 path-scoped HTTPS `:9090`：quotes、quotes/one、market-index、
-assets/latest。USD/TWD 繼續只能由本機 loopback 呼叫。不需要購買憑證、自簽憑證
-或再加 OAuth2；TLS 與 tailnet identity 由 Tailscale 管理。腳本不會啟用 Funnel，
-也不會在看到陌生 Serve handler 時自動 reset。
+腳本只會建立五條 path-scoped HTTPS `:9090`：quotes、quotes/one、market-index、
+assets/latest、USD/TWD 公開匯率。不需要購買憑證、自簽憑證或再加 OAuth2；TLS 與
+tailnet identity 由 Tailscale 管理。腳本不會啟用 Funnel，也不會建立 `/`、`/api/`
+萬用代理或額外 handler，看到陌生 Serve handler 時也不會自動 reset。
 
 ---
 

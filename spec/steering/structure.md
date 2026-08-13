@@ -245,7 +245,7 @@ external-materials-service/src/main/java/com/steven/assets/externalmaterials/
 `api-gateway` 是獨立、非 root、deny-by-default 的 Nginx image，host 唯一 mapping 為
 `127.0.0.1:9090:9090`。它只轉送五條 exact GET：quotes 兩條到 external service，
 market-index、assets/latest、USD/TWD 到 BFF；其餘回 `404`，同 exact path 非 GET 回 `405`。
-Tailscale Serve 只掛前四條 path，USD/TWD 僅本機；禁止 root proxy、Funnel、自簽憑證與另加 OAuth。
+Tailscale Serve 只掛相同五條 exact path，包含公開 USD/TWD 匯率；禁止 root／`/api/` proxy、Funnel、自簽憑證與另加 OAuth。
 
 ## 5. Frontend `frontend/`
 

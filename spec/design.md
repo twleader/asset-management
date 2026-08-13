@@ -1329,8 +1329,8 @@ Google Drive 上每一份備份檔的本地索引；UI 列表 / 還原選單一�
 
 ### Base URL
 - Browser UI（本機）: `http://localhost/`；登入後頁面 API 由 frontend Nginx 轉至 BFF
-- Docker 外部唯讀 API（本機）: `http://127.0.0.1:9090`（五支 exact GET，含 local-only USD/TWD）
-- Docker 外部唯讀 API（遠端）: `https://<device>.<tailnet>.ts.net:9090`（Tailscale Serve 只掛四支 exact path；不含 USD/TWD、不使用 Funnel）
+- Docker 外部唯讀 API（本機）: `http://127.0.0.1:9090`（五支 exact GET）
+- Docker 外部唯讀 API（遠端）: `https://<device>.<tailnet>.ts.net:9090`（Tailscale Serve 掛載相同五支 exact path；不使用 Funnel）
 - Docker network 內部: `http://bff:8080`／`http://external-materials-service:8080`
 
 ### Endpoints
@@ -2318,7 +2318,7 @@ services:
 
 ```text
 本機工具 ─────────────────────────────────► http://127.0.0.1:9090（五支 exact GET）
-tailnet client ─► HTTPS :9090 ─► Tailscale Serve（只掛四個 exact path）
+tailnet client ─► HTTPS :9090 ─► Tailscale Serve（只掛五個 exact path）
                                       │
                                       ▼
                          api-gateway (Nginx :9090)
@@ -2326,11 +2326,11 @@ tailnet client ─► HTTPS :9090 ─► Tailscale Serve（只掛四個 exact pa
                          └─ exact index/assets/USD-TWD routes ─► bff:8080
 ```
 
-Tailscale 不得設定 root proxy。設定腳本先讀 `tailscale serve status --json`：空設定或精確等於本任務四條 handler 才可能由本腳本管理；發現任何其他 handler 即列出並停止。接著在不改 Serve 的前提下，逐一驗證本機五條 API 的既有 payload 契約：quotes list 必須非空並可用首筆驗 quotes/one，market-index 不可為 fail-soft 空 schema，assets/latest 與 USD/TWD 也必須通過各自 status/content-type/payload 守門。任一失敗都在 reset 前停止。因這段 preflight 可能耗時，reset 緊前再讀一次 status、重驗所有權，並比較兩次解析後的 canonical JSON；只要狀態有變就停止，避免以過時判斷誤刪期間新增的 handler。兩次狀態相同且五路健康後才可 reset。安全 reset 後，四條實際命令皆採 `tailscale serve --bg --https=9090 --set-path=<path> http://127.0.0.1:9090<path>`，分別掛載 `/api/quotes`、`/api/quotes/one`、`/api/public/market-index`、`/api/assets/latest`；`--bg` 讓每條命令立即返回並在重啟後持久，target 的同名 path 讓 Nginx 收到原 API path。若設定中途失敗，cleanup 先重讀現況；只有 `{}` 或上述四路 exact handler 的安全子集合／完整集合且 target 相符時才可 reset，遇到任何陌生 handler、target 或無法讀取的狀態都保留並要求人工處理。若實際 Tailscale CLI 不支援 `--set-path`，腳本必須 fail closed 並停止，不建立 remote Serve；不得另猜 listener、改用 root proxy 或另開不同遠端 port。`/api/public/exchange-rate/usd-twd` 明確不掛載，故只可從 host loopback 使用。TLS 與 tailnet identity 在 host 的 Tailscale Serve 終止；Nginx container 不持有私鑰、不產生自簽憑證，也不執行 OAuth。禁止 Tailscale Funnel、公開 DNS 轉發或路由器 port-forward。多人 tailnet 的授權由 tailnet grants/ACL 管理；repo 只提供不含 auth key 的冪等設定腳本。直接走 `127.0.0.1:9090` 的本機請求屬 host-admin 信任邊界，因此 Nginx 不得把可被本機偽造的 `Tailscale-*` header 當作應用授權依據。
+Tailscale 不得設定 root proxy。設定腳本先讀 `tailscale serve status --json`：空設定或精確等於本任務五條 handler 才可能由本腳本管理；發現任何其他 handler 即列出並停止。接著在不改 Serve 的前提下，逐一驗證本機五條 API 的既有 payload 契約：quotes list 必須非空並可用首筆驗 quotes/one，market-index 不可為 fail-soft 空 schema，assets/latest 與 USD/TWD 也必須通過各自 status/content-type/payload 守門。任一失敗都在 reset 前停止。因這段 preflight 可能耗時，reset 緊前再讀一次 status、重驗所有權，並比較兩次解析後的 canonical JSON；只要狀態有變就停止，避免以過時判斷誤刪期間新增的 handler。兩次狀態相同且五路健康後才可 reset。安全 reset 後，五條實際命令皆採 `tailscale serve --bg --https=9090 --set-path=<path> http://127.0.0.1:9090<path>`，分別掛載 `/api/quotes`、`/api/quotes/one`、`/api/public/market-index`、`/api/assets/latest`、`/api/public/exchange-rate/usd-twd`；`--bg` 讓每條命令立即返回並在重啟後持久，target 的同名 path 讓 Nginx 收到原 API path。若設定中途失敗，cleanup 先重讀現況；只有 `{}` 或上述五路 exact handler 的安全子集合／完整集合且 target 相符時才可 reset，遇到任何陌生 handler、target 或無法讀取的狀態都保留並要求人工處理。若實際 Tailscale CLI 不支援 `--set-path`，腳本必須 fail closed 並停止，不建立 remote Serve；不得另猜 listener、改用 root proxy 或另開不同遠端 port。TLS 與 tailnet identity 在 host 的 Tailscale Serve 終止；Nginx container 不持有私鑰、不產生自簽憑證，也不執行 OAuth。禁止 Tailscale Funnel、公開 DNS 轉發或路由器 port-forward。多人 tailnet 的授權由 tailnet grants/ACL 管理；repo 只提供不含 auth key 的冪等設定腳本。直接走 `127.0.0.1:9090` 的本機請求屬 host-admin 信任邊界，因此 Nginx 不得把可被本機偽造的 `Tailscale-*` header 當作應用授權依據。
 
 ### Nginx Configuration (API Gateway)
 
-`api-gateway/nginx.conf` 是 deny-by-default 的獨立設定，不共用 frontend 的 `/api/` wildcard。五個 exact location 均保留 `$request_uri`，因此 query string 與 upstream status/body/content type 不變；`resolver 127.0.0.11` 讓 container recreate 後可重新解析 service name。`/api/assets/latest` 與 USD/TWD 的資料 shaping 全在 BFF/business 的獨立功能內完成；gateway 只透明轉送，不接受也不產生 owner selector。遠端／本機差異由 Tailscale path mounts 決定，不在 Nginx 依 client IP 猜測。
+`api-gateway/nginx.conf` 是 deny-by-default 的獨立設定，不共用 frontend 的 `/api/` wildcard。五個 exact location 均保留 `$request_uri`，因此 query string 與 upstream status/body/content type 不變；`resolver 127.0.0.11` 讓 container recreate 後可重新解析 service name。`/api/assets/latest` 與 USD/TWD 的資料 shaping 全在 BFF/business 的獨立功能內完成；gateway 只透明轉送，不接受也不產生 owner selector。遠端存取只由 Tailscale 的五條 path-scoped mounts 建立，不在 Nginx 依 client IP 猜測。
 
 ```nginx
 server_tokens off;
@@ -2569,7 +2569,7 @@ Docker 外工具 → api-gateway(Nginx :9090) ───┼→ bff(Spring Cloud G
                                                     → postgres / redis / external-materials-service
 ```
 
-- 對瀏覽器而言 BFF 仍是唯一應用入口且 business-services 不接觸瀏覽器；對 Docker 外工具則只有 api-gateway 9090 的五條本機唯讀 allowlist，其中 Tailscale 遠端只掛四條、不含 USD/TWD。**OAuth2 Login（Google 重導、session cookie）必須放在 BFF 的 reactive Security（`SecurityWebFilterChain` / `ServerHttpSecurity`）**，不移到 api-gateway。
+- 對瀏覽器而言 BFF 仍是唯一應用入口且 business-services 不接觸瀏覽器；對 Docker 外工具則只有 api-gateway 9090 的五條唯讀 allowlist，本機 loopback 與 Tailscale 遠端皆採相同五條 exact path。**OAuth2 Login（Google 重導、session cookie）必須放在 BFF 的 reactive Security（`SecurityWebFilterChain` / `ServerHttpSecurity`）**，不移到 api-gateway。
 - BFF 在呼叫下游時，把目前登入者（或管理者代看的目標）以 header `X-User-Id` / `X-User-Role` / `X-User-Status` 傳給 business-services。
 
 ### BFF 安全層

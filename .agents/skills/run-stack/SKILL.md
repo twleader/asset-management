@@ -32,16 +32,17 @@ stop and say so rather than silently falling back.
 | `business-services` | `backend/` | (none) | 8080 | Spring Boot, internal only |
 | `external-materials-service` | `external-materials-service/` | (none) | 8080 | scrapers + Redis writer |
 | `bff` | `bff/` | (none) | 8080 | Spring Cloud Gateway — browser application API entry |
-| `api-gateway` | `api-gateway/` | **127.0.0.1:9090** | 9090 | Five exact read-only GET routes; Tailscale mounts only four |
+| `api-gateway` | `api-gateway/` | **127.0.0.1:9090** | 9090 | Five exact read-only GET routes; Tailscale mounts the same five |
 | `frontend` | `frontend/` | **80** | 80 | Nginx serving Vite build |
 
 Browser entry: `http://localhost/` (frontend) → authenticated application APIs at `bff:8080`.
 Docker-external API entry: `http://127.0.0.1:9090` → five exact GET routes. Tailscale Serve
-exposes only quotes, quotes/one, market-index, and assets/latest; USD/TWD stays local-only.
+exposes the same five exact paths, including the public USD/TWD exchange rate.
 
 - Local five: `/api/quotes`, `/api/quotes/one`, `/api/public/market-index`, `/api/assets/latest`,
   `/api/public/exchange-rate/usd-twd`.
-- Tailscale four: the first four paths only. Never mount `/`, `/api/`, or USD/TWD; never use Funnel.
+- Tailscale five: the same five exact paths only. Never mount `/`, `/api/`, or any extra handler;
+  never use Funnel, self-signed certificates, another OAuth proxy, or a public host port.
 - Host 8080/8082 must have no listener. Check BFF health from its container and quote/BFF behavior through 9090.
 
 ## Step 1 — Find the real Compose project name (critical)
