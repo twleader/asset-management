@@ -35,8 +35,9 @@ public class AdminGateInterceptor implements HandlerInterceptor {
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
         String path = request.getRequestURI();
-        if (path != null && (path.startsWith("/internal/users/login-upsert")
-                || path.startsWith("/internal/users/by-email"))) {
+        if (("POST".equalsIgnoreCase(request.getMethod()) && "/internal/users/login-upsert".equals(path))
+                || ("GET".equalsIgnoreCase(request.getMethod()) && "/internal/users/by-email".equals(path))
+                || ("GET".equalsIgnoreCase(request.getMethod()) && "/internal/users/configured-admin".equals(path))) {
             return true;
         }
         // 全域共用參考資料（設定 + 基金主檔）：讀取開放，寫入才限 ADMIN

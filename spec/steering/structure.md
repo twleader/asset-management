@@ -161,7 +161,7 @@ bff/src/main/java/com/steven/assets/bff/
 
 1. **一個前端頁面 → 一個資料夾 + 一支 Controller（或 Gateway route）。** 即使純 passthrough 也要建立。
 2. **前端頁面 BFF 路徑前綴：** `/api/bff/{page-name}/...`。Gateway route 將 `/api/bff/{page}/**` rewrite 為 `/api/{resource}/**`。
-   - **具名、限縮例外（Requirement 67／Task 317）**：匿名唯讀的精確 `GET /api/public/market-index` 是 Docker／自動化使用的非前端頁面入口，可不採 `/api/bff/{page-name}` 前綴。只允許這一條 GET；禁止 `/api/public/**` 或 descendant wildcard、同路徑其他 HTTP method 與前端 view 援引。Controller 仍只委派 BFF service，且 BFF 仍只呼叫既有 business API。
+   - **具名、限縮例外（Requirements 67／68；Tasks 317／325）**：BFF 只對匿名唯讀的 exact `GET /api/public/market-index` 與 `GET /api/assets/latest` 放行；Docker host 必須經 Requirement 66／Task 328 的 Nginx `api-gateway` `127.0.0.1:9090`，BFF 本身不發布 host port。Quotes 由 gateway 直接送 external-materials，不在 BFF 建 route。禁止任何 wildcard／descendant、同路徑其他 method與前端 view 援引；Controller 仍只委派 service，BFF 不直查 DB 或外部行情。
 3. **跨頁共用邏輯放 `bff/common/`。** 如 `SnapshotEnricher`（注入歷史收盤價、合併 broker rows）。
 4. **同義欄位 → 同一支 business service API。** BFF 不在不同頁重複呼叫不同 endpoint 取同義值。
    - **具名例外（唯一一組，Task 285／286）：台股大盤的均線（MA5/20/60/240）目前有三份實作**——
@@ -334,9 +334,9 @@ frontend/
 
 ```
 spec/
-├── requirements.md       # 67 個 Requirements（User Story + AC）
+├── requirements.md       # 69 個 Requirements（User Story + AC）
 ├── design.md             # 架構圖、ERD、Service 職責、Sequence
-├── tasks.md              # 任務索引（Task 1–228、264–267、269–292、297–309、311–321）＋ 尚未歸檔的 201 起區段
+├── tasks.md              # 任務索引（Task 1–228、264–267、269–292、297–309、311–321、323–326、328）＋ 尚未歸檔的 201 起區段
 ├── tasks/                # 任務檔
 │   ├── README.md         # 自足任務檔規範
 │   ├── archive/          # Task 1–200 歷史，已凍結
@@ -389,7 +389,7 @@ frontend ──► bff ──► business-services ──► postgres
                           ├──► redis ◄── external-materials-service ──► (external APIs)
                           │              └────────────► postgres (fund_nav / stock_price_history / ...)
                           │
-                          └──► external-materials (僅內網 /internal/*；具名例外 /api/quotes 對 host 開放，見 Requirement 66／§4.2)
+                          └──► external-materials (僅內網；Docker 外 quotes 由 api-gateway exact route 直達，見 Requirement 66／§4.2)
 ```
 
 **禁止：**

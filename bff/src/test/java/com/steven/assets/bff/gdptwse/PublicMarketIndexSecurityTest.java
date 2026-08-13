@@ -82,6 +82,19 @@ class PublicMarketIndexSecurityTest {
                 .expectStatus().isUnauthorized();
     }
 
+    @Test
+    void latestAssetsExactGetPassesSecurityButOtherMethodsAndDescendantDoNot() {
+        // business client 在本 test 指向 localhost:1，故 exact controller 最後會是 5xx；
+        // 重點是它已通過 SecurityConfig，不可在此被誤擋為 401。
+        client.get().uri("/api/assets/latest").exchange().expectStatus().is5xxServerError();
+
+        client.post().uri("/api/assets/latest").exchange().expectStatus().isUnauthorized();
+        client.put().uri("/api/assets/latest").exchange().expectStatus().isUnauthorized();
+        client.patch().uri("/api/assets/latest").exchange().expectStatus().isUnauthorized();
+        client.delete().uri("/api/assets/latest").exchange().expectStatus().isUnauthorized();
+        client.get().uri("/api/assets/latest/private").exchange().expectStatus().isUnauthorized();
+    }
+
     @TestConfiguration
     static class StubChartServiceConfiguration {
 

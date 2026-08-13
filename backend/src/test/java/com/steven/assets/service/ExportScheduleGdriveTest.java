@@ -26,6 +26,9 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -167,6 +170,86 @@ class ExportScheduleGdriveTest {
         assertThat(resp.gdriveEnabled()).isFalse();
     }
 
+    @Test
+    void 多個時間依時分排序且各自保留相同時間的guard() {
+        givenCurrentUser(ADMIN_ID);
+        ExportScheduleSetting current = setting(ADMIN_ID, false, null);
+        var nineThirty = com.steven.assets.model.ExportScheduleTime.builder()
+                .runHour(9).runMinute(30).enabled(true).lastRunDate(LocalDate.now(TW).minusDays(1)).build();
+        current.addTime(nineThirty);
+        when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.of(current));
+
+        ExportScheduleDto.SettingResponse response = service.updateForCurrentUser(
+                new ExportScheduleDto.SettingRequest(true, "input", null, null,
+                        List.of(new ExportScheduleDto.TimeRequest(12, 0, true),
+                                new ExportScheduleDto.TimeRequest(9, 30, true))));
+
+        assertThat(response.times()).extracting(ExportScheduleDto.TimeResponse::runHour).containsExactly(9, 12);
+        assertThat(current.getTimes()).hasSize(2);
+        assertThat(current.getTimes()).anySatisfy(time -> {
+            assertThat(time.getRunHour()).isEqualTo(9);
+            assertThat(time.getLastRunDate()).isEqualTo(LocalDate.now(TW).minusDays(1));
+        });
+        // rollback representative 也必須是最早 enabled child。
+        assertThat(current.getRunHour()).isEqualTo(9);
+        assertThat(current.getRunMinute()).isEqualTo(30);
+    }
+
+    @Test
+    void 無設定時GET回transient啟用0800且不寫DB() {
+        givenCurrentUser(ADMIN_ID);
+        when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.empty());
+
+        ExportScheduleDto.SettingResponse response = service.getForCurrentUser();
+
+        assertThat(response.enabled()).isFalse();
+        assertThat(response.times()).singleElement().satisfies(time -> {
+            assertThat(time.runHour()).isEqualTo(8);
+            assertThat(time.runMinute()).isZero();
+            assertThat(time.enabled()).isTrue();
+            assertThat(time.lastRunAt()).isNull();
+            assertThat(time.lastRunStatus()).isNull();
+        });
+        verify(settingRepo, never()).save(any());
+    }
+
+    @Test
+    void 儲存拒絕空時間清單() {
+        givenCurrentUser(ADMIN_ID);
+
+        assertThatThrownBy(() -> service.updateForCurrentUser(
+                new ExportScheduleDto.SettingRequest(false, "input", null, null, List.of())))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("至少需要一個執行時間");
+        verify(settingRepo, never()).save(any());
+    }
+
+    @Test
+    void 儲存拒絕重複時間() {
+        givenCurrentUser(ADMIN_ID);
+
+        assertThatThrownBy(() -> service.updateForCurrentUser(
+                new ExportScheduleDto.SettingRequest(false, "input", null, null,
+                        List.of(new ExportScheduleDto.TimeRequest(8, 0, true),
+                                new ExportScheduleDto.TimeRequest(8, 0, false)))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("執行時間不可重複");
+        verify(settingRepo, never()).save(any());
+    }
+
+    @Test
+    void 總排程啟用時拒絕所有時間停用() {
+        givenCurrentUser(ADMIN_ID);
+
+        assertThatThrownBy(() -> service.updateForCurrentUser(
+                new ExportScheduleDto.SettingRequest(true, "input", null, null,
+                        List.of(new ExportScheduleDto.TimeRequest(8, 0, false),
+                                new ExportScheduleDto.TimeRequest(12, 0, false)))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("至少需啟用一個時間");
+        verify(settingRepo, never()).save(any());
+    }
+
     // ===== 243.1.1：未送出的欄位＝不變更 =====
 
     @Test
@@ -284,6 +367,99 @@ class ExportScheduleGdriveTest {
 
         assertThat(r.gdriveStatus()).isNull();
         verify(rcloneClient, never()).copyTo(anyString(), any(), anyString(), anyString());
+    }
+
+    @Test
+    void runNow既有多時間設定不新增也不修改childGuard() throws IOException {
+        givenCurrentUser(ADMIN_ID);
+        ExportScheduleSetting s = setting(ADMIN_ID, false, null);
+        var morning = com.steven.assets.model.ExportScheduleTime.builder().runHour(8).runMinute(0)
+                .enabled(true).lastRunDate(LocalDate.now(TW).minusDays(1)).lastRunStatus("原有狀態").build();
+        s.addTime(morning);
+        when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.of(s));
+        when(excelExportService.liveAssetsDoc()).thenReturn(doc());
+
+        service.runNowForCurrentUser();
+
+        assertThat(s.getTimes()).containsExactly(morning);
+        assertThat(morning.getLastRunDate()).isEqualTo(LocalDate.now(TW).minusDays(1));
+        assertThat(morning.getLastRunStatus()).isEqualTo("原有狀態");
+    }
+
+    @Test
+    void runNow無設定建立disabledParent與未guard的0800child() throws IOException {
+        givenCurrentUser(ADMIN_ID);
+        when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.empty());
+        when(excelExportService.liveAssetsDoc()).thenReturn(doc());
+
+        service.runNowForCurrentUser();
+
+        org.mockito.ArgumentCaptor<ExportScheduleSetting> saved =
+                org.mockito.ArgumentCaptor.forClass(ExportScheduleSetting.class);
+        verify(settingRepo).save(saved.capture());
+        ExportScheduleSetting created = saved.getValue();
+        assertThat(created.getEnabled()).isFalse();
+        assertThat(created.getTimes()).singleElement().satisfies(time -> {
+            assertThat(time.getRunHour()).isEqualTo(8);
+            assertThat(time.getRunMinute()).isZero();
+            assertThat(time.getEnabled()).isTrue();
+            assertThat(time.getLastRunDate()).isNull();
+        });
+    }
+
+    @Test
+    void 多個overdue時間各跑一次_前一失敗不阻斷後一且parent摘要取最後完成child() throws IOException {
+        ExportScheduleSetting s = setting(ADMIN_ID, false, null);
+        var first = com.steven.assets.model.ExportScheduleTime.builder().runHour(0).runMinute(0).enabled(true).build();
+        var second = com.steven.assets.model.ExportScheduleTime.builder().runHour(0).runMinute(1).enabled(true).build();
+        s.addTime(first);
+        s.addTime(second);
+        when(settingRepo.findAll()).thenReturn(List.of(s));
+        when(excelExportService.liveAssetsDocForOwner(ADMIN_ID))
+                .thenThrow(new RuntimeException("第一個失敗"))
+                .thenReturn(doc());
+
+        service.selfHealOnStartup();
+
+        assertThat(first.getLastRunDate()).isEqualTo(LocalDate.now(TW));
+        assertThat(second.getLastRunDate()).isEqualTo(LocalDate.now(TW));
+        assertThat(first.getLastRunStatus()).startsWith("失敗：第一個失敗");
+        assertThat(second.getLastRunStatus()).startsWith("xlsx 成功：");
+        assertThat(s.getRunHour()).isZero();
+        assertThat(s.getRunMinute()).isZero();
+        assertThat(s.getLastRunDate()).isEqualTo(first.getLastRunDate());
+        assertThat(s.getLastRunStatus()).isEqualTo(second.getLastRunStatus());
+        assertThat(s.getLastRunAt()).isEqualTo(second.getLastRunAt());
+        verify(excelExportService, times(2)).liveAssetsDocForOwner(ADMIN_ID);
+    }
+
+    @Test
+    void startup與minuteTick共用同一CAS避免同一時間重入() throws Exception {
+        ExportScheduleSetting s = setting(ADMIN_ID, false, null);
+        var due = com.steven.assets.model.ExportScheduleTime.builder()
+                .runHour(0).runMinute(0).enabled(true).build();
+        s.addTime(due);
+        when(settingRepo.findAll()).thenReturn(List.of(s));
+
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        when(excelExportService.liveAssetsDocForOwner(ADMIN_ID)).thenAnswer(invocation -> {
+            started.countDown();
+            if (!release.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("測試等待逾時");
+            return doc();
+        });
+
+        CompletableFuture<Void> startup = CompletableFuture.runAsync(service::selfHealOnStartup);
+        try {
+            assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();
+            service.tick();
+        } finally {
+            release.countDown();
+        }
+        startup.get(5, TimeUnit.SECONDS);
+
+        verify(excelExportService, times(1)).liveAssetsDocForOwner(ADMIN_ID);
+        assertThat(due.getLastRunDate()).isEqualTo(LocalDate.now(TW));
     }
 
     // ===== 243.4：背景排程逐列複驗 owner =====

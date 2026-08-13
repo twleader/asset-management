@@ -2,6 +2,7 @@ package com.steven.assets.repository;
 
 import com.steven.assets.model.ExportScheduleSetting;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.EntityGraph;
 
 import java.util.Optional;
 
@@ -14,5 +15,10 @@ import java.util.Optional;
  */
 public interface ExportScheduleSettingRepository extends JpaRepository<ExportScheduleSetting, Long> {
 
+    @EntityGraph(attributePaths = "times")
     Optional<ExportScheduleSetting> findByOwnerUserId(Long ownerUserId);
+
+    @Override
+    @EntityGraph(attributePaths = "times")
+    java.util.List<ExportScheduleSetting> findAll();
 }

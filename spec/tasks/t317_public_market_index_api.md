@@ -4,6 +4,8 @@
 **前置任務:** 無（沿用已存在的股市大盤日線／分時聚合）
 **Liquibase changeset:** 無（不動資料庫）
 
+> **現況覆寫（Requirement 66／Task 328）：** 本任務的市場／期間／資料與錯誤契約仍有效；host 改由 Nginx `api-gateway` 的 `http://127.0.0.1:9090/api/public/market-index` 進入，frontend port 80 對此 path 回 404，原 host 8080 與 frontend proxy 入口不再是正式契約。
+
 ## 背景
 
 目前「股市大盤查詢」畫面已能切換 9 個指數與 8 個期間，但資料入口分成兩支需要 Google OAuth session 的頁面 BFF：

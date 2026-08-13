@@ -60,9 +60,10 @@ public class WebClientConfig {
     /**
      * 多租戶身分注入（Requirement 28）：aggregation controller 的下游呼叫從 Reactor context 取出
      * {@link TenantIdentity}（由 {@code TenantWebFilter} 寫入），加上 {@code X-User-*} header。
-     * 引導階段（login-upsert / by-email）context 尚無身分，則不加—— business 端對該兩端點放行。
+     * 引導階段（login-upsert / by-email / configured-admin）context 尚無身分，則不加；business 端再以
+     * 精確 path ＋ method 個別放行。configured-admin 呼叫還會主動清除可能存在的登入／代看 context。
      */
-    private ExchangeFilterFunction tenantHeaderFilter() {
+    static ExchangeFilterFunction tenantHeaderFilter() {
         return (request, next) -> Mono.deferContextual(ctx -> {
             if (ctx.hasKey(AuthConstants.CTX_IDENTITY)) {
                 TenantIdentity id = ctx.get(AuthConstants.CTX_IDENTITY);

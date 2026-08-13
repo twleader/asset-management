@@ -51,6 +51,21 @@ public class BusinessUserClient {
     }
 
     /**
+     * 取得 business 端唯一權威決定的主要管理者。這是 bootstrap lookup，刻意不帶
+     * tenant header；business 只放行 exact GET /internal/users/configured-admin。
+     */
+    public Mono<BffUser> configuredAdmin() {
+        return businessServicesClient.get()
+                .uri("/internal/users/configured-admin")
+                .retrieve()
+                .bodyToMono(MAP)
+                .map(BusinessUserClient::toUser)
+                // 這是取得第一個可信身分前的 bootstrap call；即使呼叫端已有登入者或
+                // 管理者代看 context，也不得讓 shared WebClient filter 加上該身分。
+                .contextWrite(ctx -> ctx.delete(AuthConstants.CTX_IDENTITY));
+    }
+
+    /**
      * 管理者：列出全部使用者。{@code X-User-*} header 由呼叫端（{@link MeController}）以已解析的管理者身分
      * <b>顯式帶入</b>——不依賴 Reactor context 傳遞，確保 business 端 ADMIN 守門必定放行。
      */
