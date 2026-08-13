@@ -5,6 +5,8 @@
 | `db-export.sh` / `db-import.sh` | PostgreSQL 安全匯出／清空現有 volume 後還原 |
 | `git-hooks/commit-msg` | SDD 同步檢查——只驗「`spec/` 有無變更」（見 CLAUDE.md）。用 commit-msg 而非 pre-commit，是因為只有這個階段讀得到本次 commit 訊息，`[skip-spec]` 才判斷得準 |
 | `spec-check.sh` | spec 變更的機械前置檢查：編號撞號／重號、Liquibase changeset 版號碰撞與冪等性、宣稱的測試類是否存在、文件計數漂移。實作前搭配 `/spec-review` 使用 |
+| `configure-tailscale-api-gateway.sh` | 五路本機 API 的 status／Content-Type／payload preflight、Serve 所有權與 TOCTOU 檢查通過後，才設定五條 path-scoped Tailscale HTTPS handler |
+| `tests/configure-tailscale-api-gateway-test.sh` | 以假的 curl／Tailscale CLI 分別驗證 quotes list／one／market-index 的 `200 text/plain` 在 reset 前 fail closed，並驗正常路徑只設定五條 handler |
 
 一般使用者安裝、首次啟動、日常維運與發行前檢查請見 [`../INSTALLATION.md`](../INSTALLATION.md)。
 

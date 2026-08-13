@@ -20,13 +20,13 @@ public class BotFxFetchClient {
 
     public Optional<FxSpotQuote> fetchSpot(String currency) {
         try {
-            ProcessBuilder pb = new ProcessBuilder("curl", "-s",
-                    "-H", "User-Agent: Mozilla/5.0",
+            Optional<String> response = CurlProcessSupport.get(
                     "https://rate.bot.com.tw/xrt/flcsv/0/day");
-            pb.redirectErrorStream(true);
-            Process proc = pb.start();
-            String csvBody = new String(proc.getInputStream().readAllBytes());
-            proc.waitFor();
+            if (response.isEmpty()) {
+                log.warn("台灣銀行 CSV curl 失敗或逾時");
+                return Optional.empty();
+            }
+            String csvBody = response.get();
 
             if (csvBody == null || csvBody.trim().isEmpty()) {
                 log.warn("台灣銀行 CSV 回傳空白");

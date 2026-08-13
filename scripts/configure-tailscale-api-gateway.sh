@@ -19,16 +19,15 @@ get_200() {
   local url=$1
   local output_file=$2
   local label=$3
-  local headers_file=${4:-}
-  local -a curl_args=(-sS -o "$output_file" -w '%{http_code}')
+  local headers_file=$4
+  local -a curl_args=(-sS -D "$headers_file" -o "$output_file" -w '%{http_code}')
   local status
-  if [[ -n "$headers_file" ]]; then
-    curl_args+=(-D "$headers_file")
-  fi
   if ! status="$(curl "${curl_args[@]}" "$url")"; then
     die "$label transport 失敗；不會 reset Serve。"
   fi
   [[ "$status" == 200 ]] || die "$label 必須回 HTTP 200，實際為 ${status}；不會 reset Serve。"
+  grep -Eiq '^content-type:[[:space:]]*application/json([;[:space:]]|$)' "$headers_file" || \
+    die "$label Content-Type 不是 application/json；不會 reset Serve。"
 }
 
 find_tailscale() {
@@ -157,7 +156,8 @@ fi
 
 # Endpoint-aware preflight：任一契約不健康都在 reset 前停止。
 quotes_json="$work_dir/quotes.json"
-get_200 "$LOCAL_BASE/api/quotes" "$quotes_json" '本機 /api/quotes'
+quotes_headers="$work_dir/quotes.headers"
+get_200 "$LOCAL_BASE/api/quotes" "$quotes_json" '本機 /api/quotes' "$quotes_headers"
 read -r quote_code quote_market < <(python3 - "$quotes_json" <<'PY'
 import json, sys
 data = json.load(open(sys.argv[1], encoding="utf-8"))
@@ -174,14 +174,17 @@ PY
 ) || die 'NO_QUOTE_SENTINEL 或 quote list 契約錯誤；不會 reset Serve。'
 
 quote_one_json="$work_dir/quote-one.json"
+quote_one_headers="$work_dir/quote-one.headers"
 quote_one_status=''
 if ! quote_one_status="$(curl -sS --get --data-urlencode "code=$quote_code" \
-  --data-urlencode "market=$quote_market" -o "$quote_one_json" -w '%{http_code}' \
+  --data-urlencode "market=$quote_market" -D "$quote_one_headers" -o "$quote_one_json" -w '%{http_code}' \
   "$LOCAL_BASE/api/quotes/one")"; then
   die '本機 /api/quotes/one transport 失敗；不會 reset Serve。'
 fi
 [[ "$quote_one_status" == 200 ]] || \
   die "本機 /api/quotes/one 必須回 HTTP 200，實際為 ${quote_one_status}；不會 reset Serve。"
+grep -Eiq '^content-type:[[:space:]]*application/json([;[:space:]]|$)' "$quote_one_headers" || \
+  die '本機 /api/quotes/one Content-Type 不是 application/json；不會 reset Serve。'
 python3 - "$quote_one_json" "$quote_code" "$quote_market" <<'PY' || die '/api/quotes/one payload 與 quote list 首筆不一致。'
 import json, sys
 data = json.load(open(sys.argv[1], encoding="utf-8"))
@@ -190,7 +193,8 @@ if not isinstance(data, dict) or data.get("stockCode") != sys.argv[2] or data.ge
 PY
 
 index_json="$work_dir/market-index.json"
-get_200 "$LOCAL_BASE/api/public/market-index?market=TWSE&range=1m" "$index_json" '本機 market-index'
+index_headers="$work_dir/market-index.headers"
+get_200 "$LOCAL_BASE/api/public/market-index?market=TWSE&range=1m" "$index_json" '本機 market-index' "$index_headers"
 python3 - "$index_json" <<'PY' || die 'market-index 必須 labels 非空且六個圖表陣列等長。'
 import json, sys
 data = json.load(open(sys.argv[1], encoding="utf-8"))
@@ -204,7 +208,6 @@ PY
 assets_headers="$work_dir/assets.headers"
 assets_json="$work_dir/assets.json"
 get_200 "$LOCAL_BASE/api/assets/latest" "$assets_json" '本機 assets/latest' "$assets_headers"
-grep -Eiq '^content-type:[[:space:]]*application/json([;[:space:]]|$)' "$assets_headers" || die 'assets/latest Content-Type 不是 application/json。'
 python3 - "$assets_json" <<'PY' || die 'assets/latest payload 不符合已核准契約。'
 import json, sys
 data = json.load(open(sys.argv[1], encoding="utf-8"))
@@ -219,7 +222,6 @@ PY
 usd_headers="$work_dir/usd-twd.headers"
 usd_json="$work_dir/usd-twd.json"
 get_200 "$LOCAL_BASE/api/public/exchange-rate/usd-twd" "$usd_json" '本機 USD/TWD' "$usd_headers"
-grep -Eiq '^content-type:[[:space:]]*application/json([;[:space:]]|$)' "$usd_headers" || die 'USD/TWD Content-Type 不是 application/json。'
 python3 - "$usd_json" <<'PY' || die 'USD/TWD payload 不符合已核准契約。'
 import json, sys
 data = json.load(open(sys.argv[1], encoding="utf-8"))

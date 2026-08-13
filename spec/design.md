@@ -89,6 +89,10 @@ com.steven.assets/
   - 日線範圍以交易日筆數 `1m=21`、`3m=63`、`6m=125`、`1y=250`、`2y=500`、`5y=1250`、`10y=2500` 裁切。先對完整 10 年收盤序列算四條 MA，再用同一起始 index 裁切所有陣列，確保短區間起點仍帶前置交易日算出的成熟均線。台股 `tradeValue` 在 BFF service 邊界以精確十進位字面轉成 `BigDecimal`：null 保留，整數／浮點 Number 與 numeric String 均不得經 `new BigDecimal(double)`；非法值拋 typed `MalformedMarketIndexPayloadException`。Public advice 將它固定映射為 HTTP 502 `ProblemDetail`，不得捏造 0、靜默丟值或降級為 200 空 public schema；既有 authenticated `getIndexDaily` 邊界只捕捉此 typed exception、記錄後回 HTTP 200 的完整空 legacy body，不得廣域吞其他程式錯誤。WebClient fail-soft 留在 `fetchDailyRows`／分時 fetch 的 transport/HTTP/decode stage，轉型與 shaping 在其後；非 typed mapping／程式錯誤必須傳播為 5xx，並以反例測試防止被誤吞或映射成 400／502。`range=d` 則以分時 `times` 作 labels，並把完整日線的最新非 null 四條 MA 展開為等長水平線；成交量兩陣列等長全 null、`hasVolume=false`。既有 authenticated legacy Map 的 key／JSON shape 不變；相容輸出邊界把 `LocalDate tradingDate` 轉回 ISO String。
   - Public range 裁切與分時水平線屬 `MarketIndexChartService` 的 response shaping；既有 `GdpTwseView.vue` 的 `RANGE_TRADING_DAYS` 與水平線展開因本任務不改畫面而保留為相容殘留，不宣稱兩者已收斂為單一實作，也不得再新增第三份。BFF 契約測試以獨立期望 map 釘住 `21/63/125/250/500/1250/2500`，避免 server 與既有畫面漂移。
   - `SecurityConfig` 僅新增 `pathMatchers(HttpMethod.GET, "/api/public/market-index").permitAll()`，不得用 `/**` 放寬；這是 CLAUDE.md／structure.md 明文具名且限縮的 Docker／自動化非頁面例外，前端 view 不得援引。現有 `/api/bff/gdp-twse/**` 與所有寫入／回補／匯出端點仍落既有 authenticated/admin 規則。Task 328 後 BFF 不再暴露 host `8080`；container network 仍用 `bff:8080`，Docker host 與 tailnet client 只能經 Nginx `api-gateway` 的 `9090` exact allowlist 存取本 GET，frontend nginx 對此路徑明確回 404。
+- `PublicUsdTwdController`（Docker／自動化唯讀入口，Requirement 70；`@RequestMapping("/api/public/exchange-rate/usd-twd")`）只委派 `UsdTwdPublicService`：
+  - service 以 `Clock`＋`Asia/Taipei` 決定 inclusive `today.minusYears(1)..today`，並行呼叫 business 的既有 history GET 與新增唯讀 `/api/market-data/exchange-rate/usd-twd/live`；不得重用會先 POST refresh 的頁面 `ExchangeRateBffController.getHistory()`，也不得另查 DB／external service／外部行情。
+  - immutable `UsdTwdPublicDto.Response` 回固定 `USD/TWD` metadata、requested range、2 秒 interval、`liveUpdateStatus`、含 source／polledAt／sourceUpdatedAt／quoteStatus 的 `spot`、`count` 與升冪 `history`；中間價 scale 4。null、重複、超界、未知 enum／非法時間、非正數或 `buyRate>sellRate` 為 malformed downstream，公開 advice 回 502；history 或 spot 完全無資料回 404。
+  - `SecurityConfig` 只新增 exact GET permit；frontend nginx 對同一 exact path 與 matrix 變體回 404。Docker host 只由 Task 328 的 `api-gateway` `127.0.0.1:9090` exact route 進入；tailnet client 由 Tailscale Serve HTTPS `:9090` 的第五條同名 exact path 進入。兩路共用相同 Nginx allowlist，不新增 root／`/api/` wildcard、額外 handler、Funnel、自簽憑證或 OAuth。
 - 其他 settings/passthrough（每頁一支 Spring Cloud Gateway route 配置，rewrite `/api/bff/{page}/**` → `/api/{resource}/**`）：BankSettings、BrokerSettings、DepositTypeSettings、MarketTypeSettings、AssetClassSettings（`/api/bff/asset-class-settings/**`）、TransitFundTypeSettings、StockAlert（`/api/bff/stock-alert/**`；**Requirement 54 起另有 `StockAlertBffController` 與此 route 並存**——`GET/PUT /api/bff/stock-alert/export-setting`、`POST .../run-now`、`GET .../browse`、`GET .../browse-gdrive`，後兩者 passthrough 至既有唯一那支 `/api/export-schedule/browse{,-gdrive}`。萬用 route 會把這幾條錯誤 rewrite 成 `/api/stock-alerts/export-setting/...`，靠 WebFlux `RequestMappingHandlerMapping`（order 0）先於 Gateway `RoutePredicateHandlerMapping`（order 1）由 controller 接走；同一模式的既有先例為 `TradingRadarBffController` ＋ `TradingRadarBffRoutes`）、BackupRestore（`/api/bff/backup-restore/**`）、NotificationSettings（`/api/bff/notification-settings/recipients/**` → `/api/notification-recipients/**`）、PaymentAccountSettings（見「Payment Accounts / Categories」段落，Requirement 22）、UserManagement（`/api/bff/user-management/**`，見 Requirement 28「API 端點（新增）」）、TodayMarketAnalysisRecipients（`/api/bff/today-market-analysis/recipients/**` → `/api/notification-recipients/{id}/market-analysis`，見 Task 151）
 - `WatchStockBffRoutes`（WatchStockView 專屬，`/api/bff/watch-stock/**`）：純 Spring Cloud Gateway passthrough route，rewrite `/api/bff/watch-stock(/**)` → `/api/watch-stocks(/**)` 轉至 business-services。觀察清單已改為「`stock_alert` 衍生 view」，**衍生與 enrichment 一律在 business-services（`WatchStockController` / `WatchStockService`）完成，BFF 僅轉發不重算**：
   - `GET /api/bff/watch-stock` → `GET /api/watch-stocks`：business-services 由 `stock_alert` 群組去重衍生清單，對每筆 (stockCode, market) 補上 live 報價、技術指標、最近觸發資訊
@@ -120,7 +124,7 @@ com.steven.assets/
   - `FundSettingsBffController`：`GET /api/bff/fund-settings/bank-options` → 過濾 active 後的銷售銀行下拉；與 SnapshotForm 的 lookups **同讀 business `/api/settings/banks`**（同義欄位同一來源），fund-settings 頁不再跨頁呼叫 `/api/bff/snapshot-form/lookups`（Task 175：一頁一 BFF 合規化）
   - `RealizedGainBffRoutes`：`/api/realized-gains/**` → business-services。**目前無前端消費者**：原「RealizedGainView 的 Pinia store `gainApi` 共用 CRUD」說法已不成立——該頁已全面走 `RealizedGainBffController` 的 `/api/bff/realized-gain` 聚合端點，前端 `gainApi` wrapper 與 `assetStore` 的三個已實現損益 action 已於 Task 197 移除。route 本身暫留（移除需重建 BFF 服務），**屬待清理項**
   - `MarketDataBffRoutes`：`/api/market-data/**` → business-services。消費者是 DashboardView 與 TradingRadarView 兩頁的 SSE 行情串流（皆為 `new EventSource('/api/market-data/prices/stream')`，見下方 SSE 段落之已知落差）；`marketDataApi` wrapper（歷史/配息/ETF 成分股）無呼叫端，已於 Task 197 移除，該類查詢皆走 `StockAnalysisBffRoutes` 的 `/api/bff/stock-analysis/**`
-  - `SchedulePublicBffController`（ScheduleListView 專屬，「公開資訊」分組，Requirement 36）：`GET /api/bff/schedule-list` → 回傳系統所有自動排程的**人工維護靜態清單**（`ScheduledJobDto` 不可變 record：service / category / name / description / schedule 白話 / cron / zone）。Task 275 加入 Treasury 日殖利率曲線刷新後，共 **50 筆** ＝ `business-services` 20 ＋ `external-materials-service` 30（**以 `@Scheduled` 方法計**；business 另包含 `AlertNotificationDispatcher` 每 60 秒與 `TradingRadarNotificationService` 每 2 秒兩個 fixed-delay job；Task 290 後 external 實際 32 個標註，`TwClosurePoller` 與台股官方收盤對帳各為一法兩標、各併為一筆）。此頁為唯讀資訊展示故不做跨服務反射探索、不入 DB、不設管理端點；**新增／調整任何 `@Scheduled` 須同步更新此清單以免漂移**。**動態排程**（每分鐘 tick 比對 DB 可設定時點：`NewsPoller`→`crawler_schedule`、`MarketAnalysisScheduler`→`market_analysis_send_time`）於清單標「動態：依『X』頁設定（預設 …）」／「動態（表名）」，**不寫死時間**；每分鐘 tick 但時點為 per-user 私人設定者（`ExportScheduleService`／`TradingCalendarExportScheduleService`）則照列 `每分鐘`／`0 * * * * *` 實際 cron。前端 `ScheduleListView` 之服務別／分類計數由 payload 動態算出，故加減筆數無須改前端。無下游呼叫（不需 WebClient），落 BFF `anyExchange().authenticated()`（已登入者皆可讀）。
+  - `SchedulePublicBffController`（ScheduleListView 專屬，「公開資訊」分組，Requirement 36）：`GET /api/bff/schedule-list` → 回傳系統所有自動排程的**人工維護靜態清單**（`ScheduledJobDto` 不可變 record：service / category / name / description / schedule 白話 / cron / zone）。Task 327 新增 USD/TWD 2 秒 live producer 後，共 **51 筆** ＝ `business-services` 20 ＋ `external-materials-service` 31（**以 `@Scheduled` 方法計**；business 另包含 `AlertNotificationDispatcher` 每 60 秒與 `TradingRadarNotificationService` 每 2 秒兩個 fixed-delay job；external 實際 33 個標註，`TwClosurePoller` 與台股官方收盤對帳各為一法兩標、各併為一筆）。此頁為唯讀資訊展示故不做跨服務反射探索、不入 DB、不設管理端點；**新增／調整任何 `@Scheduled` 須同步更新此清單以免漂移**。**動態排程**（每分鐘 tick 比對 DB 可設定時點：`NewsPoller`→`crawler_schedule`、`MarketAnalysisScheduler`→`market_analysis_send_time`）於清單標「動態：依『X』頁設定（預設 …）」／「動態（表名）」，**不寫死時間**；每分鐘 tick 但時點為 per-user 私人設定者（`ExportScheduleService`／`TradingCalendarExportScheduleService`）則照列 `每分鐘`／`0 * * * * *` 實際 cron。前端 `ScheduleListView` 之服務別／分類計數由 payload 動態算出，故加減筆數無須改前端。無下游呼叫（不需 WebClient），落 BFF `anyExchange().authenticated()`（已登入者皆可讀）。
   - `CrawlerDataBffController`（CrawlerDataView 專屬，「公開資訊」分組，Requirement 38）：爬蟲資訊查詢頁，一頁一 BFF、WebClient 轉呼 business：
     - `GET /api/bff/crawler-data?date=YYYY-MM-DD&dateField=fetched|published&category=` → business `GET /api/news-headlines`：查指定日期爬回的 `news_headline`（與今日股市分析同讀一份表，符合「同義欄位、同一 business API」）。
     - `GET /api/bff/crawler-data/schedule` → business `GET /api/crawler-schedule?crawler=news-poller`：讀 NewsPoller 已設定的執行時間清單。
@@ -2328,6 +2332,8 @@ tailnet client ─► HTTPS :9090 ─► Tailscale Serve（只掛五個 exact pa
 ```
 
 Tailscale 不得設定 root proxy。設定腳本先讀 `tailscale serve status --json`：空設定或精確等於本任務五條 handler 才可能由本腳本管理；發現任何其他 handler 即列出並停止。接著在不改 Serve 的前提下，逐一驗證本機五條 API 的既有 payload 契約：quotes list 必須非空並可用首筆驗 quotes/one，market-index 不可為 fail-soft 空 schema，assets/latest 與 USD/TWD 也必須通過各自 status/content-type/payload 守門。任一失敗都在 reset 前停止。因這段 preflight 可能耗時，reset 緊前再讀一次 status、重驗所有權，並比較兩次解析後的 canonical JSON；只要狀態有變就停止，避免以過時判斷誤刪期間新增的 handler。兩次狀態相同且五路健康後才可 reset。安全 reset 後，五條實際命令皆採 `tailscale serve --bg --https=9090 --set-path=<path> http://127.0.0.1:9090<path>`，分別掛載 `/api/quotes`、`/api/quotes/one`、`/api/public/market-index`、`/api/assets/latest`、`/api/public/exchange-rate/usd-twd`；`--bg` 讓每條命令立即返回並在重啟後持久，target 的同名 path 讓 Nginx 收到原 API path。若設定中途失敗，cleanup 先重讀現況；只有 `{}` 或上述五路 exact handler 的安全子集合／完整集合且 target 相符時才可 reset，遇到任何陌生 handler、target 或無法讀取的狀態都保留並要求人工處理。若實際 Tailscale CLI 不支援 `--set-path`，腳本必須 fail closed 並停止，不建立 remote Serve；不得另猜 listener、改用 root proxy 或另開不同遠端 port。TLS 與 tailnet identity 在 host 的 Tailscale Serve 終止；Nginx container 不持有私鑰、不產生自簽憑證，也不執行 OAuth。禁止 Tailscale Funnel、公開 DNS 轉發或路由器 port-forward。多人 tailnet 的授權由 tailnet grants/ACL 管理；repo 只提供不含 auth key 的冪等設定腳本。直接走 `127.0.0.1:9090` 的本機請求屬 host-admin 信任邊界，因此 Nginx 不得把可被本機偽造的 `Tailscale-*` header 當作應用授權依據。
+
+五路 preflight 都各自保存 response headers 與 body，先驗 exact `200` 與 `application/json` media type，再解析 payload；quotes list、quotes/one、market-index 不得只以 JSON body 形狀取代 header 驗證。`scripts/tests/configure-tailscale-api-gateway-test.sh` 以假的 curl/Tailscale CLI 分別注入這三路的 `200 text/plain`，逐案證明 fail closed 且 reset 記錄為零，成功案例則精確建立五條 handler；測試不得繞過兩次 status/canonical ownership、partial cleanup 或 `${status}`／`${quote_one_status}` 分支。
 
 ### Nginx Configuration (API Gateway)
 
@@ -6600,3 +6606,139 @@ Migration 以既有 parent 的時分與 last-run 欄位建立一列 child，copy
 `AssetHistoryView.vue` 將 `scheduleTime` 單值改成帶穩定 client key 的 `scheduleTimes` rows。每列顯示時間 picker、enabled switch、last-run 資訊與移除鈕；卡片有新增時間。儲存前驗證至少一列、時分合法、無重複；總開關開啟時至少一列啟用。載入 `times[]` 為主，僅為 rolling upgrade 將舊 response 的 top-level `runHour/runMinute` 映成一列。共用 output／Drive picker、run-now、整體 last-run、雙格式說明維持原位置與語意。
 
 排程列表只更新既有一筆描述，不增減 job：annotation 仍是同一個每分鐘 poll，時間點是 DB 動態設定。
+
+---
+
+## Requirement 70／Task 327：USD/TWD 即期與近一年歷史唯讀 API
+
+### 邊界與資料流
+
+```text
+所有外部 HTTP 抓取（只在 Compose/module external-materials-service）
+  ExchangeRatePoller.usdTwdLiveUpdate()  @Scheduled 每 2 秒 tick
+    → BankFxTradingSessionPolicy（Asia/Taipei + MarketCalendar known authority）
+    → BotFxFetchClient → MegaFxFetchClient → YahooFxFetchClient（INDICATIVE fallback）
+    → ExchangeRateSpotCacheWriter
+      ├→ Redis exchange-rate:session:USD:TWD（TTL 10s heartbeat）
+      └→ Redis exchange-rate:spot:USD:TWD（TTL 24h；不寫 DB）
+
+既有歷史流程（cadence 不變）
+  ExchangeRatePoller.intradayExchangeRateUpdate() 每 5 分鐘 → exchange_rate_history
+  ExchangeRatePoller.dailyExchangeRateUpdate() 17:00 FinMind 對帳 → exchange_rate_history
+
+Host local tool ──HTTP 127.0.0.1:9090──────────┐
+Tailnet client ──Tailscale Serve HTTPS :9090───┼→ api-gateway exact route
+                                              └→ BFF PublicUsdTwdController
+                                                → UsdTwdPublicService
+                                                  ├→ business USD/TWD live → Redis／DB latest fallback
+                                                  └→ business history → exchange_rate_history
+
+Frontend host :80
+  exact path 與 matrix 變體 → nginx 404（不進 BFF）
+```
+
+這是非 Vue 的具名唯讀 API 例外。外部來源 client、來源優先序、交易時段、2 秒排程與 Redis producer 全部留在 `external-materials-service`；business/BFF 不得直接連台銀、兆豐或 Yahoo。既有頁面 `ExchangeRateBffController.getHistory()` 會先觸發 refresh，具有寫入與外部抓取副作用，因此公開唯讀 service 不得重用。`exchange_rate_history` 仍是唯一歷史資料；兩個 Redis key 只代表一筆易失性 live state，不是第二份歷史，也不需 migration。
+
+### 交易時段、authority retry 與 single-flight
+
+| 來源 | 營業日可抓時段（Asia/Taipei，首尾 inclusive） | 語意 |
+|---|---|---|
+| 台灣銀行 | 本行營業日 09:00–15:30；16:30–23:00 | 台銀 FAQ 定義的兩段交易時間 |
+| 兆豐銀行 | 本行營業日 09:00–15:30；本行營業日 16:30 至次一營業日 08:00 | 夜間段跨午夜、週末與連假 |
+
+全天 cron `*/2 * * * * *` 只提供 tick，方法內 policy 才決定是否外呼；`MON-FRI` 或 09–23 cron 會漏掉兆豐週五 16:30 至週一 08:00 的連續 session。policy 以可注入 `Clock` 往前／往後找最近與次一已知營業日；週末本身 closed，但仍可能落在前一營業日開出的兆豐 session。
+
+`MarketCalendar.isTwTradingDayKnown(LocalDate)` 沿用 TWSE 年度假日與 operator 維護的 `tw_market_closure` 作**保守專案代理**，不可冒稱銀行官方日曆。解析 session 所需的任一平日 authority 空／抓取失敗即為 unknown，所有來源 fail closed；FX known path 以每年份 30 秒節流重試 DB/TWSE transient failure，成功後恢復，不改既有 `getTwHolidays()` 對空結果的 legacy cache/退化。current date 已知休市時，不開當日台銀、一般盤或新的兆豐夜盤；但由前一已知營業日 `16:30` 已開啟的兆豐夜盤仍跨越中間週末／休市日，直到次一已知營業日 `08:00`。代理 closed 即使銀行實際可交易仍可能造成保守 false-negative，禁止 weekday fallback、force-open 或 production bypass。
+
+`MarketCalendar` 保留 package-private `Clock` constructor 供時間測試，production 的單參數 constructor 明確標示 `@Autowired`；Spring context regression 必須以真實 `MarketDataFetchService` bean 建立 component，避免多 constructor 時退回不存在的 no-arg constructor 而造成 container restart loop。
+
+eligible tick 先寫 heartbeat，再以 `AtomicBoolean.compareAndSet(false, true)` 取得 single-flight。scheduled method只做 eligibility／heartbeat／CAS／submit 即返回，實際外部輪詢送到本功能專用、可安全 shutdown 的單工 virtual-thread executor；worker finally 或 submit failure 都釋放 CAS，避免慢 HTTP 佔住全域 scheduler或形成無界排隊。當下 eligible bank 依台銀 → 兆豐；皆失敗才用 Yahoo USD/TWD mid 形成 `buy=sell=mid`。三支 curl client均有 bounded connect/max timeout與 Java bounded wait；無合法結果不覆寫 spot。
+
+### Redis schema、watermark 與 business 狀態
+
+eligible tick 寫 `exchange-rate:session:USD:TWD`（TTL 10 秒）：
+
+```json
+{"heartbeatAt":"2026-08-13T15:10:14.184Z","eligibleSources":["MEGA_BANK"]}
+```
+
+成功 quote 寫 `exchange-rate:spot:USD:TWD`（TTL 24 小時）：
+
+```json
+{
+  "rateDate":"2026-08-13",
+  "buyRate":32.1000,
+  "sellRate":32.2000,
+  "source":"MEGA_BANK",
+  "polledAt":"2026-08-13T15:10:14.236Z",
+  "sourceUpdatedAt":"2026-08-13T15:10:12Z",
+  "sourceUpdatedAtHighWatermarks":{
+    "MEGA_BANK":"2026-08-13T15:10:12Z",
+    "YAHOO":"2026-08-13T13:59:59Z"
+  }
+}
+```
+
+`heartbeatAt/polledAt/sourceUpdatedAt/high-watermark` 在 external domain、Redis、business DTO 與 BFF DTO 一律為 `Instant`，JSON 一律輸出 UTC `Z`；只有 rateDate/session 轉 `Asia/Taipei`。`polledAt` 是本機成功完成時間；兆豐的 `sourceUpdatedAt` 來自 `rates[].update`（台北 `yyyyMMddHHmmss`），Yahoo 來自 `regularMarketTime` epoch seconds，台銀可為 null。Mega/Yahoo 的 rateDate 取 provider time 的台北日期，BOT 才取 polledAt 的台北日期，因此週末 Yahoo fallback 不會冒充週末牌價。
+
+`sourceUpdatedAtHighWatermarks` 在同一 spot key 保存 Mega/Yahoo 各自最大值。incoming 只與自己的 watermark 比較，相等接受、更早拒絕；來源切換仍保留另一來源值，所以 `MEGA@10:00 → YAHOO → MEGA@09:59` 必須拒絕。provider time 不得晚於 `polledAt + 120 秒`。舊 payload 的 current Mega/Yahoo timestamp 若缺少或不等於自己的 watermark，即視為 malformed並拒絕覆寫；不得因舊 map／Redis read 失敗而清空高水位。internal map 不進 business transport DTO、BFF 或公開 JSON。
+
+business 以 `UsdTwdLiveRateCachePort` 隔離 domain service與 Redis；`RedisUsdTwdLiveCacheAdapter` 才負責 key IO、raw JSON decode與 malformed validation。Service 不注入 `StringRedisTemplate`／`ObjectMapper`／`MarketDataService`，不呼叫 external/calendar/refresh/backfill。heartbeat age `0..6s` 為 `ACTIVE`，Redis正常但無 fresh heartbeat為 `INACTIVE`，Redis exception為 `UNAVAILABLE`；spot missing或 Redis unavailable才 fallback DB latest，存在但 malformed必須 fail closed。
+
+- ACTIVE＋fresh bank：`LIVE`
+- ACTIVE＋fresh Yahoo：`INDICATIVE`
+- ACTIVE stale，或 UNAVAILABLE＋DB fallback：`STALE`
+- INACTIVE：`LAST_AVAILABLE`
+
+`LIVE` 表示最近 6 秒成功 poll，不表示牌價每 2 秒改變；來源最後變動看 `sourceUpdatedAt`。DB fallback source=`HISTORY` 且兩個 timestamp為 null，並保留實際 rate date。
+
+### HTTP 契約與授權
+
+```http
+GET /api/public/exchange-rate/usd-twd
+```
+
+成功為 immutable `200 application/json`：
+
+```json
+{
+  "pair":"USD/TWD",
+  "baseCurrency":"USD",
+  "quoteCurrency":"TWD",
+  "requestedStartDate":"2025-08-13",
+  "requestedEndDate":"2026-08-13",
+  "refreshIntervalSeconds":2,
+  "timezone":"Asia/Taipei",
+  "liveUpdateStatus":"ACTIVE",
+  "spot":{
+    "date":"2026-08-13",
+    "buyRate":32.1000,
+    "sellRate":32.2000,
+    "midRate":32.1500,
+    "source":"MEGA_BANK",
+    "polledAt":"2026-08-13T15:10:14.236Z",
+    "sourceUpdatedAt":"2026-08-13T15:10:12Z",
+    "quoteStatus":"LIVE"
+  },
+  "count":267,
+  "history":[{"date":"2025-08-13","buyRate":29.8300,"sellRate":29.9300,"midRate":29.8800}]
+}
+```
+
+範例只展示 shape，不得 seed或寫死。BFF以注入的 `Clock`／台北日期計算 inclusive `today.minusYears(1)..today`，並行呼叫 business live與 history；history升冪、日期不可重複或超界，rates必須正數且 `buy<=sell`，mid scale 4 `HALF_UP`，`count==history.size`。公開 source為 `BANK_OF_TAIWAN/MEGA_BANK/YAHOO/HISTORY`；HISTORY兩時間可 null，BOT只允許 provider time null，Mega/Yahoo兩時間必填。history零列或完全無 spot回404；transport/HTTP/decode/null/malformed回502，不得部分成功、補0、交換買賣或洩漏 watermark。
+
+`SecurityConfig` 同時 permit exact GET `/api/public/market-index`、`/api/assets/latest`與本 path；其他 method、descendant及相鄰 private BFF route仍401，不得使用 `/api/public/**` wildcard。Frontend不新增 API client或 view。
+
+### Nginx、Tailscale 與驗證矩陣
+
+Task 328 的 main gateway是唯一 Docker host listener，仍只綁 `127.0.0.1:9090`；本 path 使用既有 Docker DNS resolver、variable upstream與 `$request_uri`，gateway不做 OAuth、shaping、cache、retry或 fallback。`api-gateway/nginx.conf`、`frontend/nginx.conf` 與 Compose 延續 main 既有設定；Tailscale script 只收緊五路 preflight，使每路都先驗 exact 200 與 `application/json`，並保留 `${status}`／`${quote_one_status}`、兩次 status/canonical ownership 與 partial cleanup。
+
+Tailscale Serve HTTPS `:9090` 掛與 gateway 相同的五條 exact path，USD/TWD是第五條；禁止 root／`/api/` wildcard、額外 handler、Funnel、公網 listener、自簽或額外 OAuth。驗證要求：
+
+- local USD 200；同 path其他 method 405；descendant 404；
+- frontend exact與 matrix變體404；container BFF 的非 GET／descendant／相鄰 private route 401；
+- Tailscale五路正向皆精確200，USD另嚴格驗 metadata、非空spot/history與`count==history.length`；
+- root `/`、`/api/`與unknown path均404，Serve status精確只有五路；
+- 銀行 session內約每2秒連取三次，`polledAt`前進，provider time不晚於`polledAt+120秒`且同來源不倒退。盤外只可證明 fixed-Clock與實際`INACTIVE/LAST_AVAILABLE`，不得新增繞過session的production endpoint。
+
+`SchedulePublicBffController.JOBS` 保留5分鐘歷史job並新增2秒live job。合併後實測 business 20個 scheduled methods、external 31個 methods／33個 annotations、JOBS 51筆；`TwClosurePoller`與台股官方收盤對帳各一法兩標。Requirement 69 assets多時間仍只佔一個每分鐘 annotation，清單保留其「多個每日時間」文案。

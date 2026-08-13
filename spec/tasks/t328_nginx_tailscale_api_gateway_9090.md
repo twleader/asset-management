@@ -111,7 +111,10 @@ TLS；Nginx 負責五條本機 exact allowlist；Tailscale 掛載相同五條 ex
       五條 handler 的安全子集合／精確集合且 target 完全相符時才可 reset，任何陌生或無法確認的狀態都不得
       自動刪除。腳本須可重複執行，不接受／產生／保存 reusable auth key，
       不改 grants/ACL，任何分支都不得呼叫 `tailscale funnel`。多人 tailnet 的 grants/ACL 必須由管理者
-      在 tailnet policy 另行限縮 identity。
+      在 tailnet policy 另行限縮 identity。另新增 shell regression，以假的 curl／Tailscale CLI 分別讓
+      quotes list、quotes/one、market-index 回 `200 text/plain`，每案都須在 reset 前失敗且 reset 次數為零；
+      正常案例須只建立五條 handler。五路都要分開保存 headers/body，先驗 exact 200 與
+      `application/json` media type，再解析 payload；不得只用 JSON body 形狀推定 Content-Type。
 
 - [ ] **328.6 同步長期架構與操作文件。** 更新 `CLAUDE.md`、`spec/steering/structure.md`、
       `spec/steering/tech.md`、`INSTALLATION.md`、`.agents/skills/run-stack/SKILL.md` 與
@@ -330,3 +333,9 @@ git status --short
   四路改為五路。實作須先把設定腳本、長期／操作文件與驗證矩陣同步成五路，再重跑五支本機 preflight、
   reset 前 TOCTOU／所有權檢查、安全 cleanup 與五路 tailnet HTTPS payload 驗證；完成前不得宣稱新的
   五路 Serve 已套用。root、`/api/`、unknown、額外 handler、Funnel、公網 listener、額外 OAuth 與自簽憑證仍禁止。
+- 2026-08-14 已補齊五路 preflight 的 exact 200／`application/json` header 守門：quotes list、
+  quotes/one、market-index 現在與 assets/latest、USD/TWD 一樣各自保存 headers/body 後才做 payload 驗證。
+  新增 `scripts/tests/configure-tailscale-api-gateway-test.sh`，三個 `200 text/plain` 負向案例皆證明 reset 為零，
+  正常案例精確設定五條 handler；`bash -n` 與 shell regression 通過。兩次 status/canonical ownership、
+  `${status}`／`${quote_one_status}` 與 partial cleanup 保持不變。此為本機隔離測試，不代表已修改或驗證
+  真實 Tailscale Serve；五路 tailnet HTTPS runtime 仍須由 run-stack／管理者依上方矩陣完成。

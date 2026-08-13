@@ -1,13 +1,17 @@
 package com.steven.assets.externalmaterials.service;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import java.time.Clock;
 import java.time.DayOfWeek;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -33,19 +37,59 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class MarketCalendar {
 
+    private static final Duration TW_AUTHORITY_RETRY_INTERVAL = Duration.ofSeconds(30);
     private final MarketDataFetchService marketData;
+    private final Clock clock;
+    private final Map<Integer, Instant> twAuthorityRetryNotBefore = new ConcurrentHashMap<>();
 
     /** 美 / 英假日純函式計算結果 per-year 快取（ISO 日期字串集合）。 */
     private final Map<Integer, Set<String>> usHolidayCache = new ConcurrentHashMap<>();
     private final Map<Integer, Set<String>> ukHolidayCache = new ConcurrentHashMap<>();
 
+    @Autowired
+    public MarketCalendar(MarketDataFetchService marketData) {
+        this(marketData, Clock.systemUTC());
+    }
+
+    MarketCalendar(MarketDataFetchService marketData, Clock clock) {
+        this.marketData = marketData;
+        this.clock = clock;
+    }
+
     // ===== 交易日（非週末且非假日）=====
 
     public boolean isTwTradingDay(LocalDate date) {
         return !isWeekend(date) && !isTwHoliday(date);
+    }
+
+    /**
+     * 台股交易日的 fail-closed 判定。週末可直接確定為 closed；平日只有在 TWSE 年度
+     * 休市表成功且非空時才回 true/false，避免 FX session 在日曆抓取失敗時猜測開放。
+     */
+    public synchronized Optional<Boolean> isTwTradingDayKnown(LocalDate date) {
+        if (isWeekend(date)) return Optional.of(false);
+        int year = date.getYear();
+        Instant now = clock.instant();
+        Instant retryNotBefore = twAuthorityRetryNotBefore.get(year);
+        if (retryNotBefore != null && now.isBefore(retryNotBefore)) return Optional.empty();
+        try {
+            Optional<Map<String, String>> known = marketData.getTwHolidaysKnown(year);
+            if (known.isEmpty() || known.get().isEmpty()) {
+                twAuthorityRetryNotBefore.put(year, now.plus(TW_AUTHORITY_RETRY_INTERVAL));
+                log.warn("TWSE/operator 休市 authority {} 不可用，銀行 FX session fail closed；{} 秒後重試",
+                        year, TW_AUTHORITY_RETRY_INTERVAL.toSeconds());
+                return Optional.empty();
+            }
+            Map<String, String> holidays = known.get();
+            twAuthorityRetryNotBefore.remove(year);
+            return Optional.of(!holidays.containsKey(date.toString()));
+        } catch (Exception ex) {
+            twAuthorityRetryNotBefore.put(year, now.plus(TW_AUTHORITY_RETRY_INTERVAL));
+            log.warn("查 TWSE 休市表失敗 {}: {}（銀行 FX session fail closed）", date, ex.getMessage());
+            return Optional.empty();
+        }
     }
 
     public boolean isUsTradingDay(LocalDate date) {

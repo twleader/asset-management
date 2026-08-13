@@ -55,6 +55,8 @@ public class TwTyphoonClosureService {
 
     /** DB 台股臨時休市日快取（{@code yyyy-MM-dd → reason}）；啟動與每次 upsert 後 reload。 */
     private volatile Map<String, String> closures = Map.of();
+    /** 區分「DB 已成功讀到空集合」與「DB 讀取失敗」，供銀行 FX policy fail closed。 */
+    private volatile boolean closureCalendarKnown;
 
     @EventListener(ApplicationReadyEvent.class)
     void onApplicationReady() {
@@ -65,11 +67,19 @@ public class TwTyphoonClosureService {
     void loadFromDb() {
         try {
             closures = store.findAll();
+            closureCalendarKnown = true;
             if (!closures.isEmpty()) log.info("載入台股臨時休市日 {} 筆：{}", closures.size(), closures.keySet());
         } catch (Exception e) {
-            // 冷啟時 backend Liquibase 可能尚未建表 → 保持空集合，poller / self-heal 之後會 reload
-            log.warn("載入 tw_market_closure 失敗（保持空集合）：{}", e.getMessage());
+            closureCalendarKnown = false;
+            // 冷啟時 backend Liquibase 可能尚未建表 → 保留舊快取，poller / self-heal 之後會 reload。
+            // 台股舊流程維持原退化語意；新增的銀行 FX policy 會由 known flag 另行 fail closed。
+            log.warn("載入 tw_market_closure 失敗（保留舊快取、FX session fail closed）：{}", e.getMessage());
         }
+    }
+
+    /** 最近一次 {@code tw_market_closure} 讀取是否成功；空表仍是 known。 */
+    public boolean isClosureCalendarKnown() {
+        return closureCalendarKnown;
     }
 
     /**

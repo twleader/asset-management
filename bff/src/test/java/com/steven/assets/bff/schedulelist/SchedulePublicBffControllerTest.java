@@ -24,11 +24,24 @@ class SchedulePublicBffControllerTest {
     }
 
     @Test
-    @DisplayName("排程清單完整列出 20 個業務與 30 個外部行情工作")
+    @DisplayName("排程清單完整列出 20 個業務與 31 個外部行情工作")
     void 項目數正確() {
-        assertThat(jobs()).hasSize(50);
+        assertThat(jobs()).hasSize(51);
         assertThat(jobs()).filteredOn(j -> "業務服務".equals(j.service())).hasSize(20);
-        assertThat(jobs()).filteredOn(j -> "外部行情服務".equals(j.service())).hasSize(30);
+        assertThat(jobs()).filteredOn(j -> "外部行情服務".equals(j.service())).hasSize(31);
+    }
+
+    @Test
+    @DisplayName("USD/TWD 2 秒排程明列全天 tick、銀行時段、single-flight 與 Redis-only")
+    void 美元台幣即時排程契約() {
+        assertThat(jobs()).filteredOn(j -> "USD/TWD 即時牌告（2 秒）".equals(j.name()))
+                .singleElement()
+                .satisfies(job -> {
+                    assertThat(job.cron()).isEqualTo("*/2 * * * * *");
+                    assertThat(job.zone()).isEqualTo("Asia/Taipei");
+                    assertThat(job.schedule()).contains("全天每 2 秒");
+                    assertThat(job.description()).contains("台銀", "兆豐", "single-flight", "Redis", "不寫歷史 DB");
+                });
     }
 
     @Test

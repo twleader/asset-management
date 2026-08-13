@@ -7,6 +7,7 @@ import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Instant;
 import java.util.Optional;
 
 /**
@@ -32,14 +33,18 @@ public class YahooFxFetchClient {
 
     /** 取 USD/TWD 當日中間價（regularMarketPrice）；失敗回 empty。 */
     public Optional<BigDecimal> fetchUsdTwdMid() {
+        return fetchUsdTwdQuote().map(FxSpotQuote::spotBuy);
+    }
+
+    /** 取 USD/TWD 中間價與 Yahoo provider timestamp。 */
+    public Optional<FxSpotQuote> fetchUsdTwdQuote() {
         try {
-            ProcessBuilder pb = new ProcessBuilder("curl", "-s",
-                    "-H", "User-Agent: Mozilla/5.0",
-                    USD_TWD_URL);
-            pb.redirectErrorStream(true);
-            Process proc = pb.start();
-            String body = new String(proc.getInputStream().readAllBytes());
-            proc.waitFor();
+            Optional<String> response = CurlProcessSupport.get(USD_TWD_URL);
+            if (response.isEmpty()) {
+                log.warn("Yahoo TWD=X curl 失敗或逾時");
+                return Optional.empty();
+            }
+            String body = response.get();
 
             if (body == null || body.isBlank()) {
                 log.warn("Yahoo TWD=X 回傳空白");
@@ -47,14 +52,28 @@ public class YahooFxFetchClient {
             }
             JsonNode meta = mapper.readTree(body)
                     .path("chart").path("result").path(0).path("meta");
+            return parseMeta(meta);
+        } catch (Exception e) {
+            log.warn("Yahoo TWD=X 匯率抓取失敗: {}", e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    static Optional<FxSpotQuote> parseMeta(JsonNode meta) {
+        try {
             BigDecimal mid = decimal(meta.path("regularMarketPrice"));
             if (mid == null || mid.compareTo(BigDecimal.ZERO) <= 0) {
                 log.warn("Yahoo TWD=X 無有效 regularMarketPrice");
                 return Optional.empty();
             }
-            return Optional.of(mid.setScale(4, RoundingMode.HALF_UP));
-        } catch (Exception e) {
-            log.warn("Yahoo TWD=X 匯率抓取失敗: {}", e.getMessage());
+            long epochSeconds = meta.path("regularMarketTime").asLong(0);
+            if (epochSeconds <= 0) {
+                log.warn("Yahoo TWD=X 無有效 regularMarketTime");
+                return Optional.empty();
+            }
+            BigDecimal normalized = mid.setScale(4, RoundingMode.HALF_UP);
+            return Optional.of(new FxSpotQuote(normalized, normalized, Instant.ofEpochSecond(epochSeconds)));
+        } catch (RuntimeException e) {
             return Optional.empty();
         }
     }
