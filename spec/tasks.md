@@ -29,7 +29,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 
 ---
 
-## 任務索引（Task 1–228、264–267、269–292、297–309、311–324）
+## 任務索引（Task 1–228、264–267、269–292、297–309、311–328）
 
 | Task | 標題 | 位置 |
 |---|---|---|
@@ -324,6 +324,10 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 322 | 修正股利歷史全數 500 與 append-only evidence JDBC `Instant`／`TIMESTAMPTZ` 管線失效（Requirement 13／65） | [tasks/t322_dividend_history_instant_binding_500.md](tasks/t322_dividend_history_instant_binding_500.md) |
 | 323 | 交易雷達美股大盤量能接線：`buildUsMarket()` 補上既有 IXIC 量能，停止線上與回測分岔（Requirement 64） | [tasks/t323_radar_us_market_volume_wiring.md](tasks/t323_radar_us_market_volume_wiring.md) |
 | 324 | 交易雷達證據覆蓋缺口盤點（實測待辦；各子項動工時另開任務檔） | [tasks/t324_radar_evidence_coverage_backlog.md](tasks/t324_radar_evidence_coverage_backlog.md) |
+| 325 | 最新全資產唯讀 API 接入 Nginx 9090（Requirement 68） | [tasks/t325_external_api_gateway_9090.md](tasks/t325_external_api_gateway_9090.md) |
+| 326 | 最新資產每日匯出支援多個執行時間（Requirement 69） | [tasks/t326_latest_asset_export_multi_schedule.md](tasks/t326_latest_asset_export_multi_schedule.md) |
+| 327 | USD/TWD 交易時段每 2 秒即期＋近一年歷史唯讀 API（port 9090，Requirement 70） | [tasks/t327_usd_twd_local_api_9090.md](tasks/t327_usd_twd_local_api_9090.md) |
+| 328 | Nginx 9090 統一外部 API 與 Tailscale 私網 HTTPS（Requirement 66／67） | [tasks/t328_nginx_tailscale_api_gateway_9090.md](tasks/t328_nginx_tailscale_api_gateway_9090.md) |
 
 > **註：Task 229–263、268、293–296 以各自任務檔為準。**
 

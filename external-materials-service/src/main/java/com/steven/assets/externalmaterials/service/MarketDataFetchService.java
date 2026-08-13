@@ -908,16 +908,51 @@ public class MarketDataFetchService {
     // ─── TWSE 假日 ─────────────────────────────────────────────────────────────
 
     public Map<String, String> getTwHolidays(int year) {
-        Map<String, String> base = twHolidayCache.computeIfAbsent(year, this::fetchTwHolidaysFromTwse);
+        Map<String, String> base = twHolidayCache.computeIfAbsent(
+                year, this::fetchTwHolidaysFromTwse);
         // union 颱風假 / 臨時休市（不在 TWSE 年度 holidaySchedule 中）：read-time 合併、不污染 TWSE per-year 快取。
         Map<String, String> closures = typhoonClosure.closuresForYear(year);
-        if (closures.isEmpty()) return base;
-        Map<String, String> merged = new LinkedHashMap<>(base);
-        merged.putAll(closures);
-        return merged;
+        return mergeTwHolidays(base, closures);
     }
 
-    private Map<String, String> fetchTwHolidaysFromTwse(int year) {
+    /**
+     * 銀行 FX session 專用的 fail-closed authority read。首次 DB 讀取早於 Liquibase 時允許
+     * 後續重試；TWSE 抓取失敗的空 map 不進年度快取，避免 transient failure 變成全年永久停擺。
+     * 呼叫端 {@link MarketCalendar} 負責節流，本次 DB/HTTP 嘗試仍受既有 timeout 限制。
+     */
+    public Optional<Map<String, String>> getTwHolidaysKnown(int year) {
+        if (!typhoonClosure.isClosureCalendarKnown()) {
+            typhoonClosure.loadFromDb();
+        }
+        if (!typhoonClosure.isClosureCalendarKnown()) return Optional.empty();
+
+        Map<String, String> base = twHolidayCache.get(year);
+        if (base == null || base.isEmpty()) {
+            Map<String, String> refreshed = fetchTwHolidaysFromTwse(year);
+            if (refreshed != null && !refreshed.isEmpty()) {
+                base = Map.copyOf(refreshed);
+                twHolidayCache.put(year, base);
+            }
+        }
+        if (base == null || base.isEmpty()) return Optional.empty();
+        return Optional.of(mergeTwHolidays(base, typhoonClosure.closuresForYear(year)));
+    }
+
+    /** 供健康檢查／測試判定 operator 臨時休市表是否已成功載入。 */
+    public boolean isTwClosureCalendarKnown() {
+        return typhoonClosure.isClosureCalendarKnown();
+    }
+
+    private static Map<String, String> mergeTwHolidays(
+            Map<String, String> base,
+            Map<String, String> closures) {
+        if (closures == null || closures.isEmpty()) return base;
+        Map<String, String> merged = new LinkedHashMap<>(base);
+        merged.putAll(closures);
+        return Map.copyOf(merged);
+    }
+
+    Map<String, String> fetchTwHolidaysFromTwse(int year) {
         int rocYear = year - 1911;
         String rocYearStr = String.valueOf(rocYear);
         try {

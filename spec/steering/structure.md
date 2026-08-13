@@ -161,7 +161,7 @@ bff/src/main/java/com/steven/assets/bff/
 
 1. **一個前端頁面 → 一個資料夾 + 一支 Controller（或 Gateway route）。** 即使純 passthrough 也要建立。
 2. **前端頁面 BFF 路徑前綴：** `/api/bff/{page-name}/...`。Gateway route 將 `/api/bff/{page}/**` rewrite 為 `/api/{resource}/**`。
-   - **具名、限縮例外（Requirements 67／68；Tasks 317／325）**：BFF 只對匿名唯讀的 exact `GET /api/public/market-index` 與 `GET /api/assets/latest` 放行；Docker host 必須經 Requirement 66／Task 328 的 Nginx `api-gateway` `127.0.0.1:9090`，BFF 本身不發布 host port。Quotes 由 gateway 直接送 external-materials，不在 BFF 建 route。禁止任何 wildcard／descendant、同路徑其他 method與前端 view 援引；Controller 仍只委派 service，BFF 不直查 DB 或外部行情。
+   - **具名、限縮例外（Requirements 67／68／70；Tasks 317／325／327）**：BFF 只對匿名唯讀的 exact `GET /api/public/market-index`、`GET /api/assets/latest` 與 `GET /api/public/exchange-rate/usd-twd` 放行；Docker host 必須經 Requirement 66／Task 328 的 Nginx `api-gateway` `127.0.0.1:9090`，BFF 本身不發布 host port。Quotes 由 gateway 直接送 external-materials，不在 BFF 建 route。禁止任何 wildcard／descendant、同路徑其他 method與前端 view 援引；Controller 仍只委派 service，BFF 不直查 DB 或外部行情。USD/TWD 的每 2 秒外部抓取與 live Redis producer只屬於 `external-materials-service`，business/BFF 僅唯讀 cache/DB 與聚合。
 3. **跨頁共用邏輯放 `bff/common/`。** 如 `SnapshotEnricher`（注入歷史收盤價、合併 broker rows）。
 4. **同義欄位 → 同一支 business service API。** BFF 不在不同頁重複呼叫不同 endpoint 取同義值。
    - **具名例外（唯一一組，Task 285／286）：台股大盤的均線（MA5/20/60/240）目前有三份實作**——
@@ -222,6 +222,8 @@ external-materials-service/src/main/java/com/steven/assets/externalmaterials/
 | `price:index:{market}` | Set，紀錄該市場所有有 cache 的 code | 24h | 同上 |
 | `price:dayhl:{market}:{code}:{tradingDate}` | 該日最高/最低聚合 | 36h | `IntradayHighLowTracker` |
 | `price:etfnav:{market}:{code}` | ETF 淨值／折溢價 JSON（Task 214） | 96h | `EtfNavCacheWriter`（由 `EtfNavPoller` 排程觸發） |
+| `exchange-rate:session:USD:TWD` | eligible session heartbeat（UTC `Instant`、來源集合） | 10s | `ExchangeRateSpotCacheWriter`（Task 327） |
+| `exchange-rate:spot:USD:TWD` | USD/TWD 最新買賣價、UTC timestamps 與內部 per-source watermark | 24h | `ExchangeRateSpotCacheWriter`（Task 327） |
 | Channel `price-update` | Pub/Sub 推播 | — | `PriceCacheWriter` |
 
 **`price:etfnav:*` 補充說明**
@@ -334,9 +336,9 @@ frontend/
 
 ```
 spec/
-├── requirements.md       # 69 個 Requirements（User Story + AC）
+├── requirements.md       # 70 個 Requirements（User Story + AC）
 ├── design.md             # 架構圖、ERD、Service 職責、Sequence
-├── tasks.md              # 任務索引（Task 1–228、264–267、269–292、297–309、311–321、323–326、328）＋ 尚未歸檔的 201 起區段
+├── tasks.md              # 任務索引（Task 1–228、264–267、269–292、297–309、311–328）＋ 尚未歸檔的 201 起區段
 ├── tasks/                # 任務檔
 │   ├── README.md         # 自足任務檔規範
 │   ├── archive/          # Task 1–200 歷史，已凍結

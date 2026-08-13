@@ -7,6 +7,11 @@ import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.time.format.ResolverStyle;
 import java.util.Optional;
 
 /**
@@ -22,19 +27,22 @@ public class MegaFxFetchClient {
 
     private static final String RATE_URL =
             "https://www.megabank.com.tw/api/client/ExchangeRate/GetRateData?sc_lang=zh-TW&sc_site=bank-zh-tw&dic_lang=zh-TW";
+    private static final ZoneId TAIPEI = ZoneId.of("Asia/Taipei");
+    private static final DateTimeFormatter UPDATE_FORMAT = DateTimeFormatter
+            .ofPattern("uuuuMMddHHmmss")
+            .withResolverStyle(ResolverStyle.STRICT);
 
     private final ObjectMapper mapper = new ObjectMapper();
 
     /** 取指定幣別當日即期買入/賣出；找不到該幣別或抓取失敗回 empty。 */
     public Optional<FxSpotQuote> fetchSpot(String currency) {
         try {
-            ProcessBuilder pb = new ProcessBuilder("curl", "-s",
-                    "-H", "User-Agent: Mozilla/5.0",
-                    RATE_URL);
-            pb.redirectErrorStream(true);
-            Process proc = pb.start();
-            String body = new String(proc.getInputStream().readAllBytes());
-            proc.waitFor();
+            Optional<String> response = CurlProcessSupport.get(RATE_URL);
+            if (response.isEmpty()) {
+                log.warn("兆豐銀行 API curl 失敗或逾時");
+                return Optional.empty();
+            }
+            String body = response.get();
 
             if (body == null || body.isBlank()) {
                 log.warn("兆豐銀行 API 回傳空白");
@@ -54,13 +62,27 @@ public class MegaFxFetchClient {
                             currency, spot.path("bid"), spot.path("ask"));
                     return Optional.empty();
                 }
-                return Optional.of(new FxSpotQuote(bid, ask));
+                Instant sourceUpdatedAt = parseUpdate(rate.path("update").asText(""));
+                if (sourceUpdatedAt == null) {
+                    log.warn("兆豐銀行 {} 缺少有效 update timestamp", currency);
+                    return Optional.empty();
+                }
+                return Optional.of(new FxSpotQuote(bid, ask, sourceUpdatedAt));
             }
             log.warn("兆豐銀行 API 找不到 {} 的匯率資料", currency);
             return Optional.empty();
         } catch (Exception e) {
             log.warn("兆豐銀行匯率抓取失敗 ({}): {}", currency, e.getMessage());
             return Optional.empty();
+        }
+    }
+
+    static Instant parseUpdate(String raw) {
+        if (raw == null || raw.isBlank()) return null;
+        try {
+            return LocalDateTime.parse(raw.trim(), UPDATE_FORMAT).atZone(TAIPEI).toInstant();
+        } catch (RuntimeException ex) {
+            return null;
         }
     }
 

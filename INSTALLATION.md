@@ -582,6 +582,10 @@ FINMIND_TOKEN=你的Token
 scripts/configure-tailscale-api-gateway.sh
 ```
 
+腳本在任何 Serve reset 前，會為五支本機 API 各自保存 response headers/body，逐支要求 HTTP 200、
+`application/json` 與既定 payload 契約；任一路失敗即停止且不會 reset。可先執行
+`scripts/tests/configure-tailscale-api-gateway-test.sh` 驗證 Content-Type fail-closed 與五路成功流程。
+
 腳本只會建立五條 path-scoped HTTPS `:9090`：quotes、quotes/one、market-index、
 assets/latest、USD/TWD 公開匯率。不需要購買憑證、自簽憑證或再加 OAuth2；TLS 與
 tailnet identity 由 Tailscale 管理。腳本不會啟用 Funnel，也不會建立 `/`、`/api/`

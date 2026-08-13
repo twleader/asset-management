@@ -10,11 +10,11 @@ import java.util.List;
  * ScheduleListView 專屬 BFF（「公開資訊」分組，Requirement 36）。
  *
  * <p>回傳系統所有自動排程的**人工維護靜態清單**。排程分屬兩個服務：
- * {@code business-services}（20 個）與 {@code external-materials-service}（30 個）。
+ * {@code business-services}（20 個）與 {@code external-materials-service}（31 個）。
  * 此頁為唯讀資訊展示，故不做跨服務反射探索、不入 DB、不設管理端點。
  *
- * <p><b>計數慣例：以 {@code @Scheduled} 方法計，一法一筆。</b>external 30 筆對應 31 個標註
- * （{@code TwClosurePoller} 一法兩標，併為一筆；Task 228 直接以 {@code grep '@Scheduled'} 逐檔核對重新校正此數，
+ * <p><b>計數慣例：以 {@code @Scheduled} 方法計，一法一筆。</b>external 31 筆對應 33 個標註
+ * （{@code TwClosurePoller} 與台股官方收盤對帳各為一法兩標、各併為一筆；Task 228 直接以 {@code grep '@Scheduled'} 逐檔核對重新校正此數，
  * 修正了 Task 228 之前既已存在、與此清單無關的計數漂移）。
  *
  * <p><b>維護提醒：新增／調整任何 {@code @Scheduled} 時，務必同步更新下方 {@link #JOBS} 清單，避免與實際 cron 漂移。</b>
@@ -50,7 +50,7 @@ public class SchedulePublicBffController {
     private static final String NYC = "America/New_York";
     private static final String LON = "Europe/London";
 
-    /** 全系統排程清單（50 筆）。順序刻意先業務服務、再外部行情服務，前端再依 category 分組。 */
+    /** 全系統排程清單（51 筆）。順序刻意先業務服務、再外部行情服務，前端再依 category 分組。 */
     private static final List<ScheduledJobDto> JOBS = List.of(
             // ===== business-services（20）=====
             new ScheduledJobDto(BUSINESS, "資產快照", "最新快照釘定當日",
@@ -114,7 +114,7 @@ public class SchedulePublicBffController {
                     "每分鐘檢查各使用者的每一筆交易紀錄自動匯出排程（Task 255 起每人可設定多筆，各有自己的時間與輸出資料夾），命中執行時間即同時產出 JSON 與 Excel 兩份（主檔名相同）到該筆指定目錄（Requirement 49）；輸出含 Google Drive 同步（若已啟用）",
                     "每分鐘", "0 * * * * *", TPE),
 
-            // ===== external-materials-service（30）=====
+            // ===== external-materials-service（31）=====
             new ScheduledJobDto(EXTERNAL, "即時行情", "台股個股即時價（盤中）",
                     "盤中每 2 分鐘更新持股與觀察清單「個股」即時價至 Redis（來源 TWSE mis API）；不含大盤 0000，該筆由「台股大盤即時點位（盤中）」負責",
                     "交易日 09:00–13:00 每 2 分鐘", "0 0/2 9-13 * * MON-FRI", TPE),
@@ -166,6 +166,9 @@ public class SchedulePublicBffController {
             new ScheduledJobDto(EXTERNAL, "匯率", "即期匯率（盤中）",
                     "盤中每 5 分鐘抓即期匯率（台銀優先，失敗改兆豐銀行；兩者皆失敗且為 USD 才退回 Yahoo 中間價）",
                     "交易日 09:00–15:55 每 5 分鐘", "0 0/5 9-15 * * MON-FRI", TPE),
+            new ScheduledJobDto(EXTERNAL, "匯率", "USD/TWD 即時牌告（2 秒）",
+                    "全天每 2 秒 tick；只在台銀營業日 09:00–15:30／16:30–23:00，或兆豐營業日 09:00–15:30 與 16:30 至次一營業日 08:00 依序抓取，銀行皆失敗才用 Yahoo；single-flight 且只寫兩個 Redis live key，不寫歷史 DB",
+                    "全天每 2 秒 tick（各銀行交易時段內外呼）", "*/2 * * * * *", TPE),
             new ScheduledJobDto(EXTERNAL, "匯率", "匯率收盤補抓",
                     "收盤後走 FinMind 增量補匯率（涵蓋盤中漏抓）",
                     "交易日 17:00", "0 0 17 * * MON-FRI", TPE),
@@ -211,7 +214,7 @@ public class SchedulePublicBffController {
                     "交易日 05:00–07:00 每 15 分鐘", "0 0/15 5-6 * * MON-FRI；0 0 7 * * MON-FRI", TPE)
     );
 
-    /** GET /api/bff/schedule-list —— 回傳全系統排程清單（50 筆靜態資料）。 */
+    /** GET /api/bff/schedule-list —— 回傳全系統排程清單（51 筆靜態資料）。 */
     @GetMapping
     public List<ScheduledJobDto> list() {
         return JOBS;

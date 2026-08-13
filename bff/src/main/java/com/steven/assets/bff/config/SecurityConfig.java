@@ -74,10 +74,12 @@ public class SecurityConfig {
                 .authorizeExchange(ex -> ex
                         .pathMatchers("/oauth2/**", "/login/**",
                                 "/actuator/health", "/actuator/info").permitAll()
-                        // Requirements 67/68：只有兩支 BFF 精確 GET 可由 api-gateway 匿名讀取；
+                        // Requirements 67/68/70：只有三支 BFF 精確 GET 可由 api-gateway 匿名讀取；
                         // quotes 由 Nginx 直接轉 external-materials，不在 BFF 放行。
                         .pathMatchers(HttpMethod.GET,
-                                "/api/public/market-index", "/api/assets/latest").permitAll()
+                                "/api/public/market-index",
+                                "/api/assets/latest",
+                                "/api/public/exchange-rate/usd-twd").permitAll()
                         .pathMatchers("/api/bff/backup-restore/**").hasAuthority(AuthConstants.AUTHORITY_ADMIN)
                         .pathMatchers("/api/bff/user-management/**").hasAuthority(AuthConstants.AUTHORITY_ADMIN)
                         .pathMatchers("/api/impersonate/**").hasAuthority(AuthConstants.AUTHORITY_ADMIN)

@@ -25,6 +25,7 @@ Browser ──► nginx:80 (Frontend) ──► bff:8080 ──► business-serv
                                                                                        (TWSE / FinMind / NASDAQ / FundClear / IMF)
 Host tools ──► 127.0.0.1:9090 (API Gateway) ─┬──► bff:8080
 Tailscale ──► HTTPS :9090（僅五條 exact path）──┘──► external-materials-service:8080
+external-materials-service ──銀行交易時段每 2 秒──► redis:6379（USD/TWD session heartbeat + spot）
 ```
 
 ---
@@ -121,7 +122,10 @@ cd frontend
 | **NASDAQ `/dividends`** | 美股股利歷史 | 無 | |
 | **FundClear nav-profit / fund-info** | 信託基金 NAV + 配息（offshore / onshore 兩組 endpoint） | 無 | DTO 欄位名分流（`organizeCode` vs `orgId`） |
 | **MoneyDJ** | FundClear 失敗時的 fallback | 無 | |
-| **央行 / 台銀** | USD/TWD、ZAR/TWD 匯率 | 無 | 沿用 FinMind 為主來源 |
+| **台灣銀行牌告 CSV** | USD/TWD 等即期買賣價 | 無 | external-only；台銀優先，Task 327 於台銀交易時段更新 USD/TWD live cache |
+| **兆豐銀行牌告 API** | USD/TWD 等即期買賣價 | 無 | external-only；台銀失敗時第一備援，Task 327 於兆豐交易時段更新 live cache |
+| **Yahoo FX** | USD/TWD 中間價備援 | 無 | 兩家銀行皆失敗時才用，`buy=sell=mid` 且公開 API 標 `INDICATIVE` |
+| **FinMind TaiwanExchangeRate** | 匯率歷史／收盤後對帳 | `FINMIND_TOKEN`（可匿名但限流） | 17:00 寫 `exchange_rate_history`，不負責 2 秒 live cache |
 | **IMF DataMapper** | 台灣 / 韓國人均 GDP（`NGDPDPC`、`NGDP_RPCH`） | 無 | GDP-TWSE 圖 |
 | **Google Drive（rclone `gdrive-crypt`，crypt 加密）** | DB 備份目的地 | `~/.config/rclone/rclone.conf` 的 `[gdrive-crypt]` | read-only volume 掛入 **business-services**；檔名與內容皆加密 |
 | **Google Drive（rclone `GDriveOutput`，`scope=drive`、未加密）** | 匯出檔案輸出目的地（**附加副本**，本機照寫不變） | **同一份** `~/.config/rclone/rclone.conf` 的 `[GDriveOutput]` | read-only 掛入 **business-services ＋ external-materials-service**；per-process `RCLONE_CONFIG` 指向 `/tmp` 可寫副本（token 續期需寫回）。Requirement 50 / Task 245 |
