@@ -83,7 +83,7 @@ com.steven.assets/
   - `GET /api/bff/gdp-twse/index-daily`：台股大盤／海外指數每日 OHLC ＋ MA5/20/60/240（`ma5` 為 Task 285 新增）
   - `POST /api/bff/gdp-twse/refresh-index-daily`：刷新指數日線
   - `GET /api/bff/gdp-twse/index-intraday`：指數當日分時
-- `PublicMarketIndexController`（Docker／自動化唯讀入口，Requirement 67；`@RequestMapping("/api/public/market-index")`）與 `GdpTwseBffController` 共用 `MarketIndexChartService`，不得形成第二套市場資料或均線算法：
+- `PublicMarketIndexController`（Docker／自動化唯讀入口，Requirement 67；Requirement 66／Task 328 起 host 僅由 Nginx `127.0.0.1:9090` 進入；`@RequestMapping("/api/public/market-index")`）與 `GdpTwseBffController` 共用 `MarketIndexChartService`，不得形成第二套市場資料或均線算法：
   - `GET /api/public/market-index?market=&range=`：免 OAuth、唯讀；`market ∈ {TWSE,DJI,SPX,IXIC,SOX,FTSE,DAX,KOSPI,N225}`（預設 `TWSE`），`range ∈ {d,1m,3m,6m,1y,2y,5y,10y}`（預設 `1y`）。回 immutable `MarketIndexChartDto.Response`，其中 `tradingDate` 為 `LocalDate`（JSON ISO `yyyy-MM-dd`）、`turnovers` 為 `List<BigDecimal>`（JSON number 或 null）；另包含正規化 market/range、中文 label、`mode=DAILY|INTRADAY`、固定對齊的 `labels/closes/ma5/ma20/ma60/ma240/volumes/turnovers`、成交量旗標、分時昨收／漲跌欄，以及完整 `supportedMarkets/supportedRanges` 自描述選項。
   - `MarketIndexChartService` 承接現有 `GdpTwseBffController` 的指數日線抓取、`buildIndexDailyBody`、`movingAverage`、分時＋昨收聚合與 `previousCloseBefore`；既有兩支 authenticated page endpoint 改為薄委派，公開 controller 也只做參數／HTTP DTO 轉換。下游仍只有 `/api/twse-daily-index`、`/api/us-daily-index`、`/api/index-intraday`，Controller 不碰 Repository，BFF 不碰外部行情 API。搬移後同步訂正 `ExcelExportService` 與 `WatchStockTaiexIntradayTest` 對舊 Controller 方法的 Javadoc／註解引用；只改文件文字，不改 backend 行為。
   - 日線範圍以交易日筆數 `1m=21`、`3m=63`、`6m=125`、`1y=250`、`2y=500`、`5y=1250`、`10y=2500` 裁切。先對完整 10 年收盤序列算四條 MA，再用同一起始 index 裁切所有陣列，確保短區間起點仍帶前置交易日算出的成熟均線。台股 `tradeValue` 在 BFF service 邊界以精確十進位字面轉成 `BigDecimal`：null 保留，整數／浮點 Number 與 numeric String 均不得經 `new BigDecimal(double)`；非法值拋 typed `MalformedMarketIndexPayloadException`。Public advice 將它固定映射為 HTTP 502 `ProblemDetail`，不得捏造 0、靜默丟值或降級為 200 空 public schema；既有 authenticated `getIndexDaily` 邊界只捕捉此 typed exception、記錄後回 HTTP 200 的完整空 legacy body，不得廣域吞其他程式錯誤。WebClient fail-soft 留在 `fetchDailyRows`／分時 fetch 的 transport/HTTP/decode stage，轉型與 shaping 在其後；非 typed mapping／程式錯誤必須傳播為 5xx，並以反例測試防止被誤吞或映射成 400／502。`range=d` 則以分時 `times` 作 labels，並把完整日線的最新非 null 四條 MA 展開為等長水平線；成交量兩陣列等長全 null、`hasVolume=false`。既有 authenticated legacy Map 的 key／JSON shape 不變；相容輸出邊界把 `LocalDate tradingDate` 轉回 ISO String。
@@ -820,7 +820,8 @@ PortfolioAdviceSetting   (配置建議設定，單列 id = 1；model / effort / 
 
 # 排程匯出（Requirement 34 / 37 / 39 / 49）
 # 「一功能一張排程表」——刻意不合併，理由見本文件 Requirement 39 之關鍵設計決策
-AppUser (1) ──── (1) ExportScheduleSetting            (owner_user_id UNIQUE；歷年資產每日排程自動匯出設定；Requirement 34)
+AppUser (1) ──── (1) ExportScheduleSetting            (owner_user_id UNIQUE；最新資產匯出的共用路徑／Drive／總開關；Requirement 34／69)
+ExportScheduleSetting (1) ──── (N) ExportScheduleTime (每個每日執行時間各有 enabled／last-run guard；Requirement 69)
 AppUser (1) ──── (1) TradingCalendarExportSchedule    (owner_user_id UNIQUE；交易日曆每日排程匯出設定；比另兩張多一個 format 欄〔json/excel〕；Requirement 37)
 AppUser (1) ──── (1) RealizedGainExportSchedule       (owner_user_id UNIQUE；已實現損益每日排程匯出設定；Requirement 39)
 AppUser (1) ──── (N) AssetTransactionExportSchedule   (每人多筆每日排程；Task 255 起移除 owner_user_id UNIQUE；Requirement 49)
@@ -3229,7 +3230,7 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
 
 ## Requirement 34（Task 171）：歷年資產 Excel 匯出增強與每日排程自動匯出
 
-「歷年資產」頁既有「匯出 Excel」按鈕（`/api/bff/asset-history/export` → `/api/snapshots/export` → `ExcelExportService.exportFull()`）增強為「完整匯出 ＋ 第一張『當前彙總』總表」；並新增每個使用者可各自設定的每日排程，於指定時間把完整匯出寫檔到指定目錄（容器基底目錄 ＋ 使用者相對子路徑，經 docker volume 對映到 host）。
+「歷年資產」頁既有「匯出 Excel」按鈕（`/api/bff/asset-history/export` → `/api/snapshots/export` → `ExcelExportService.exportFull()`）增強為「完整匯出 ＋ 第一張『當前彙總』總表」；並新增每個使用者可各自設定的每日排程，把最新資產寫檔到指定目錄。Requirement 69 起原本的單一時間改為多時間點；輸出路徑、Drive 與總啟用仍為 owner 共用設定。
 
 ### 架構與資料流
 
@@ -3246,31 +3247,50 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
 [背景排程] business ExportScheduleService
   @Scheduled(cron="0 * * * * *", zone=Asia/Taipei)  每分鐘 poll
     for each export_schedule_setting（背景無 request → 讀全部列）:
-      if enabled && last_run_date != today && now >= (run_hour:run_minute):  // >= 到點，非分鐘精確相等
-        byte[] = ExcelExportService.exportLiveAssetsForOwner(ownerUserId)  // 當前即時資產；手動 enableFilter 縮到該 owner
-        Files.write( resolveDir(EXPORT_OUTPUT_DIR=/home/steven, output_subpath) / 資產總覽_{ownerUserId}_YYYYMMDD.xlsx )
-        update last_run_date/last_run_at/last_run_status
-  @EventListener(ApplicationReadyEvent) 開機自癒：補跑「今日已到點但 last_run_date != today」者
+      if parent.enabled:
+        for each export_schedule_time ordered by run_hour/run_minute:
+          if time.enabled && time.last_run_date != today && now >= (time.run_hour:time.run_minute):
+            doc = ExcelExportService.liveAssetsDocForOwner(ownerUserId)  // 當前即時資產；手動 enableFilter
+            render + write 同主檔名的 xlsx/json（同日較晚時間覆寫成最新內容）
+            update time.last_run_date/last_run_at/last_run_status + parent 最近一次摘要
+  @EventListener(ApplicationReadyEvent) 開機自癒：依序補跑「今日已到點但該 child 尚未執行」的所有時間
 ```
 
 ### 資料模型
 
-`export_schedule_setting`（Liquibase `v1.53.0-export-schedule-setting.sql`；每 owner 一列、`@Filter(ownerFilter)` 隔離）：
+`export_schedule_setting`（Liquibase `v1.53.0-export-schedule-setting.sql` 建立；Requirement 69 migration 正規化後；每 owner 一列、`@Filter(ownerFilter)` 隔離）：
 
 ```
 id              BIGSERIAL PK
 owner_user_id   BIGINT      NOT NULL UNIQUE   -- 每使用者一列；@Filter(ownerFilter)
 enabled         BOOLEAN     NOT NULL DEFAULT FALSE
-run_hour        INT         NOT NULL DEFAULT 8    -- 0..23
-run_minute      INT         NOT NULL DEFAULT 0    -- 0..59
+run_hour        INT         NOT NULL DEFAULT 8    -- rollback shadow，不是新 scheduler source
+run_minute      INT         NOT NULL DEFAULT 0    -- rollback shadow
 output_subpath  VARCHAR(255) NOT NULL DEFAULT 'input'  -- 相對基底目錄的子路徑
-last_run_date   DATE                            -- 當日 guard（成功或失敗都設，避免每分鐘重試）
-last_run_at     TIMESTAMP
-last_run_status VARCHAR(500)                    -- 「成功：/path」或「失敗：訊息」
+last_run_date   DATE                            -- rollback representative child guard shadow
+last_run_at     TIMESTAMP                       -- 最近一次任一 scheduled/run-now 摘要
+last_run_status VARCHAR(500)
 updated_at      TIMESTAMP
 ```
 
 > ＋ **`gdrive_enabled` / `gdrive_subpath` / `gdrive_last_run_at` / `gdrive_last_status`**（Requirement 51 / Task 242，changeset `v1.76.0`）——型別與語意見「推廣至其餘八個匯出頁」段的統一定義。
+
+`export_schedule_time`（Requirement 69；parent 一對多）：
+
+```
+id              BIGSERIAL PK
+schedule_id     BIGINT NOT NULL REFERENCES export_schedule_setting(id) ON DELETE CASCADE
+run_hour        INT NOT NULL                    -- CHECK 0..23
+run_minute      INT NOT NULL                    -- CHECK 0..59
+enabled         BOOLEAN NOT NULL DEFAULT TRUE
+last_run_date   DATE                            -- 此時間點自己的當日 guard
+last_run_at     TIMESTAMP
+last_run_status VARCHAR(500)
+updated_at      TIMESTAMP
+UNIQUE (schedule_id, run_hour, run_minute)
+```
+
+> Requirement 34 原本把 `run_hour`／`run_minute`／`last_run_date` 當唯一排程來源；該語意已由 Requirement 69 的 children 取代。Migration 先把每個既有 parent 搬成一個 child 並複製 guard／狀態，但採 expand/contract 保留 parent 三欄作 rollback shadow；新程式 dual-write 最早代表 child，parent `last_run_at/status` 則留作最近一次整體摘要。
 
 - `output_subpath` 只存相對子路徑；實際寫入目錄 = `EXPORT_OUTPUT_DIR`(容器內基底) resolve 子路徑。
 - 背景 cron 無 request context → `ownerFilter` 不自動生效，`ExportScheduleSettingRepository.findAll()` 讀全部列（跨所有 owner）即為所需；產檔時才對「該列 owner」手動 `enableFilter`。
@@ -3510,9 +3530,9 @@ GET  /api/bff/asset-history/export                    → GET  /api/snapshots/ex
   - `exportFullForOwner(Long ownerId)`：`@Transactional(readOnly=true)`，於 session 手動 `entityManager.unwrap(Session.class).enableFilter("ownerFilter").setParameter("ownerId", ownerId)` 後呼叫同一 `buildWorkbook()`（背景排程用；aspect 於背景不啟用、不覆寫）。
 - **當前彙總總表**：讀最新一筆 `asset_snapshot`，欄位：匯出時間、最新快照日期、美元匯率、資產總計、存款總計、股票現值／成本／未實現損益、基金現值／成本／未實現損益、預估年配息、當年度已實現損益。無快照時寫「尚無快照」提示列。
 - **路徑安全**：`resolveDir(sub)` = `base = Path.of(EXPORT_OUTPUT_DIR).toAbsolutePath().normalize()`；`target = base.resolve(sub).normalize()`；若 `!target.startsWith(base)` 則拒（防 `..`／絕對路徑跳脫）。`PUT /settings` 亦驗 `run_hour∈[0,23]`、`run_minute∈[0,59]`、子路徑非空且不含跳脫。
-- **觸發判斷（>= 到點，非精確相等）**：tick 與開機自癒共用同一判斷 `enabled && last_run_date != today && now >= 排程時間`。用 `>=` 而非「分鐘精確相等」，因 Spring 預設排程池僅 1 條執行緒且與其他 `@Scheduled` 共用，長工作可能把某分鐘的 tick 延後跨越目標分鐘；`>=` ＋ `last_run_date` guard 讓任何被延後／跳過的分鐘都能在後續 tick 自動補跑，直到當日成功為止（避免整日靜默漏跑）。
-- **當日 guard 與自癒**：成功或失敗都設 `last_run_date=today`，避免到點後每分鐘重試；重啟以 `ApplicationReadyEvent` 補跑「今日排程時間已到但 `last_run_date != today`」者。`run-now` 不動 `last_run_date`（不影響排程 guard），只更新 `last_run_at/last_run_status`。
-- **失敗隔離**：單一使用者產檔／寫檔失敗記 `last_run_status` ＋ `log.warn`，不影響其他使用者、不中斷 poll。
+- **觸發判斷（>= 到點，非精確相等）**：tick 與開機自癒先檢查 parent 總啟用，再逐 child 共用 `time.enabled && time.last_run_date != today && now >= time` 判斷。用 `>=` 避免 Spring 共用排程執行緒延遲跨分鐘後整日漏跑；每個 child 自己的 guard 確保第一個時間不會擋住同日第二個時間。
+- **當日 guard 與自癒**：成功或失敗都只設該 child `last_run_date=today`；重啟依時分排序補跑所有已到點且未 guard 的 child。`run-now` 不動任何 child guard／狀態，只更新 parent 的最近一次摘要與 Drive 狀態。
+- **失敗隔離**：單一時間產檔／寫檔失敗記該 child 狀態與 parent 摘要，不影響同 owner 後續時間或其他 owner、不中斷 poll。
 
 ### Infrastructure
 
@@ -6487,3 +6507,96 @@ showDualExportResult({ jsonPath, xlsxPath, gdriveStatus, prefix })
 - **不新增 Liquibase changeset**：`format` 欄位保留不刪，狀態欄靠截斷不加長，本需求零 schema 變更。
 - **不把 `BackupService` 的 `*.dump` 納入**（二進位還原檔，無表格語意）。
 - **不為 ext service 與 backend 建共用 module**（Requirement 50 已否決同一提案）。
+
+---
+
+## Requirement 68／Task 325：最新全資產 API 接入 Nginx 9090
+
+### Host 邊界與精確路由
+
+```text
+host automation
+  └─ http://127.0.0.1:9090                     # Requirement 66 / Task 328 的唯一 gateway
+       └─ api-gateway:9090 (Nginx exact allowlist)
+            ├─ GET /api/quotes*                ────────► external-materials-service:8080
+            ├─ GET /api/public/market-index    ────────► bff:8080
+            ├─ GET /api/assets/latest          ────────► LatestAssetsPublicService
+            │                                             ├─ BusinessUserClient.configuredAdmin()
+            │                                             └─ business-services:8080/api/assets/latest
+            └─ GET /api/public/exchange-rate/usd-twd ───► bff:8080
+
+browser ──► frontend:80
+             ├─ gateway 五路 exact／matrix 變體：404
+             └─ 其餘 /api/*：proxy 至 bff:8080（Vue 仍只使用 /api/bff/{page}/...）
+
+tailnet client ──► HTTPS :9090（五條 path-scoped Serve mount）──► 同一 api-gateway:9090
+```
+
+- Gateway topology 只由 Requirement 66／Task 328 維護：獨立 non-root Nginx container 唯一映射 `127.0.0.1:9090:9090`；BFF 與 external-materials-service 均無 host port。本任務只接上已預留的 `/api/assets/latest` exact route，不在 BFF 代理 quotes，也不修改 Tailscale／Nginx ownership。
+- `SecurityConfig` 在既有 public market-index 旁只新增 `/api/assets/latest` 的 `HttpMethod.GET` 為 `permitAll()`；quotes 由 Nginx 直接送 external-materials。Latest 同 path 其他 method、任何 descendant，以及相鄰 `/api/bff/**` 都落回既有 authenticated 規則。`TenantWebFilter` 繼續移除 client 輸入的 `X-User-*`。
+
+### `GET /api/assets/latest` 聚合
+
+`LatestAssetsPublicController` 只委派 `LatestAssetsPublicService`。`ADMIN_EMAIL` 維持只注入 business-services；BFF 不持有 email。Business 在既有 `/internal/users/**` 引導命名空間新增無參數 `GET /internal/users/configured-admin`，由既有 `UserAdminService` 的設定／`isConfiguredAdmin` 唯一權威回既有 user projection；`BusinessUserClient.configuredAdmin()` 呼叫它。這支 lookup 是取得可信身分前的 bootstrap call，故 `AdminGateInterceptor` 僅以 path equality ＋ `GET` method 放行 exact endpoint；不得沿用 `startsWith`，POST、descendant 與其餘 users 管理 API 都維持 ADMIN gate。Public service 必須再驗 `id != null`、`configuredAdmin == true`、`status == ACTIVE`，否則拋 typed unavailable exception，由 advice 回 503 ProblemDetail。通過後由 service 在這一次 WebClient request 明確設定該 user 的 `X-User-Id`／`X-User-Role`／`X-User-Status`；不得採用匿名 request 所帶 header，也不得接受 owner selector。
+
+Business 端 `LatestAssetsController` 同樣只委派 `LatestAssetsService.getLatest()`；service 以單一 `@Transactional(readOnly=true)` 完成：
+
+1. 取 owner-filtered 最新 `AssetSnapshot`，沒有則拋 typed not-found（404）。
+2. 由既有 `AssetService.getSnapshotDetail(id)` 取得 deposits／funds／stocks 完整 detail。
+3. 由既有 `StockPriceService.getLiveAssets()` 取得 Dashboard／匯出同源估值。
+4. 由 `StockPriceService.getMarketStatus()` 取得三市場狀態與 target trading dates。
+5. 驗證 `snapshot.id == liveAssets.snapshotId`，不一致即失敗，不回 200 拼接資料。
+
+BFF 對 business 2xx 不先 decode 成 `Map<String,Object>`：它以原始 JSON bytes relay，避免高精度金融 number 經 `Double` 往返後變值；但成功前仍以 `JsonNode` 唯讀驗證 body 非空、JSON 可解析，且兩個 snapshot id 都是相同整數。空 body、malformed JSON 或 identity mismatch 由 typed exception 映成 502 ProblemDetail；business 非 2xx 的 status/body/content type 原樣保留。
+
+固定 outer response record：
+
+```json
+{
+  "generatedAt": "2026-08-13T14:10:59Z",
+  "valuationPolicy": "TARGET_SESSION_WITH_EXPLICIT_FALLBACK",
+  "targetPriceComplete": false,
+  "marketStatus": {
+    "twMarketOpen": true,
+    "usMarketOpen": false,
+    "ukMarketOpen": false,
+    "twTime": "...",
+    "usTime": "...",
+    "ukTime": "...",
+    "twTradingDate": "2026-08-13",
+    "usTradingDate": "2026-08-12",
+    "ukTradingDate": "2026-08-13"
+  },
+  "snapshot": { "id": 1, "snapshotDate": "...", "deposits": [], "funds": [], "stocks": [] },
+  "liveAssets": { "snapshotId": 1, "stocks": [] }
+}
+```
+
+Market target date 不自行算：三個日期都由 `PriceQueryService.displaySession(market).targetTradingDate()` 取得，規則為開盤中／收盤後用市場當地今日，盤前／週末／休市日用最近前一交易日。`LiveStockItem` 在既有欄位末端加入 `holdingId`、`source`、`targetTradingDate`、`valuationSource`；能解析且 quote `tradingDate` 等於 target 才標 `TARGET_SESSION_PRICE`，能解析且早於 target 才標 `PREVIOUS_SESSION_PRICE`。有價格但日期缺失、無法解析或晚於 target 時，不改既有估值金額，只標 `UNVERIFIED_SESSION_PRICE` 並照實保留欄位；完全無價而沿用 snapshot current value 才標 `SNAPSHOT_VALUE`。`tradingDate`／`quoteStatus`／`source` 一律照實；outer `targetPriceComplete` 是所有 stock item 都為 `TARGET_SESSION_PRICE` 的 conjunction（無股票時為 true）。API 保留完整資產，但呼叫者可對 false fail closed，不能把 fallback 偽裝成 target-date 估值。
+
+### Runtime 驗收
+
+從本 worktree 無快取重建並 recreate `business-services`、`bff`、`frontend`、`api-gateway`；上游 recreate 後重建／recreate BFF，bounded wait 到 healthy。Latest response 必須有非空 snapshot、ID 對齊、原始 JSON 精度與可判讀的 valuation source；逐 method／descendant 驗 BFF 401 與 gateway 405/404，frontend exact/matrix 404，Compose port inspection 只見 api-gateway `127.0.0.1:9090->9090`，host 8080/8082 無 listener。Tailscale Serve 已核准時再跑五路 path-scoped preflight／正向驗證；若一次性 Serve 核准尚未完成，誠實列為需使用者互動，不用本機或 stub 冒充遠端證據。
+
+---
+
+## Requirement 69／Task 326：最新資產匯出多時間點
+
+### Entity 與 migration
+
+`ExportScheduleSetting` 保持 owner-scoped parent；新增 `List<ExportScheduleTime> times` 的一對多關聯（cascade all + orphan removal），並提供 `addTime` helper 維持雙向關係。`ExportScheduleTime` 的 owner 只透過 parent 取得，不重複保存 `owner_user_id`。HTTP 先以 owner 取得 parent，再讀其 children；背景 poll 可讀所有 parent 與 eager/fetch-joined children，不能以 client 傳入的 schedule id 跨 owner 讀取。
+
+Migration 以既有 parent 的時分與 last-run 欄位建立一列 child，copy `last_run_date/at/status`；child 建立唯一鍵、時分 CHECK、FK cascade。採 expand/contract，`v1.102.0` **保留且不放寬** parent `run_hour/run_minute/last_run_date`，供舊 image rollback；新程式不以它們排程，只把「最早啟用 child；若全停用則最早 child」同步為 rollback representative，parent 時分與該 child guard 採 dual-write。額外 children 在 rollback 期間暫停，但舊 image 能啟動且代表時間不重跑。Drop legacy columns 留待後續獨立 changeset。Master 已固定先套用建立 parent 的 `v1.53.0`，故 migration 可直接讀取既有欄位，使用 `CREATE TABLE/INDEX IF NOT EXISTS` 與 `ON CONFLICT DO NOTHING`，並保留 Liquibase 預設逐 statement 切分；不需要 `DO $$` 或 `splitStatements:false`。運行中 `databasechangelog` 仍須先確認版本未碰撞。
+
+### 設定與執行語意
+
+- `SettingResponse` 的排程時間來源唯一為 `times[]`；parent 的 `lastRunAt/lastRunStatus` 是任一 scheduled/run-now 的最近摘要。`TimeItem` 為 `{id,runHour,runMinute,enabled,lastRunAt,lastRunStatus}`；request 的 `TimeRequest` 不接受 id，整包依時分取代。
+- `updateForCurrentUser` 為 transaction：先驗證共用路徑／Drive 與 time 清單，再以 `(hour,minute)` map 對既有 child；相同時分 copy guard/status，新列為 null，移除列由 orphan removal 刪除；最後同步 rollback representative 三欄。回應永遠按時分／id 排序。無設定列時 GET 只回 transient default `08:00 enabled=true`，不寫 DB。
+- Due runner 依 parent、再依 child 時分排序。每個 child 完成（含失敗）後立即保存自己的 guard/status 與 parent 最近摘要；若它是 rollback representative，同步 parent legacy `last_run_date`。同一 parent 多個已到期 child 必須全部嘗試。`tick` 與 `ApplicationReadyEvent` 都先經同一個 `tryRunDueExports` CAS lock；JVM `AtomicBoolean` 只適用 Compose 單 replica且不充當 daily guard，多 replica 另需 DB atomic claim。
+- `runNowForCurrentUser` 沿用共用輸出設定與同一 `writeDual`，不讀 child enabled、不寫既有 child 狀態。若 parent 不存在，延續現行保存執行結果的行為，建立 disabled parent＋一列 `08:00 enabled=true`、guard/status 皆 null的 child，並同步 legacy shadow。檔名仍只有日期；這是刻意的「同日最新檔」語意，較晚排程覆寫同名 local／Drive 兩份。
+
+### UI
+
+`AssetHistoryView.vue` 將 `scheduleTime` 單值改成帶穩定 client key 的 `scheduleTimes` rows。每列顯示時間 picker、enabled switch、last-run 資訊與移除鈕；卡片有新增時間。儲存前驗證至少一列、時分合法、無重複；總開關開啟時至少一列啟用。載入 `times[]` 為主，僅為 rolling upgrade 將舊 response 的 top-level `runHour/runMinute` 映成一列。共用 output／Drive picker、run-now、整體 last-run、雙格式說明維持原位置與語意。
+
+排程列表只更新既有一筆描述，不增減 job：annotation 仍是同一個每分鐘 poll，時間點是 DB 動態設定。

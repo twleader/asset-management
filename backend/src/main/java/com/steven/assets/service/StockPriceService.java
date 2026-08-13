@@ -89,7 +89,11 @@ public class StockPriceService {
             "ukMarketOpen", isUkMarketOpen(),
             "twTime", ZonedDateTime.now(MarketZones.TW_ZONE).toLocalDateTime().toString(),
             "usTime", ZonedDateTime.now(MarketZones.US_ZONE).toLocalDateTime().toString(),
-            "ukTime", ZonedDateTime.now(MarketZones.LON_ZONE).toLocalDateTime().toString()
+            "ukTime", ZonedDateTime.now(MarketZones.LON_ZONE).toLocalDateTime().toString(),
+            // Requirement 68：唯一的 display-session 規則決定「最後交易日；開盤即當日」。
+            "twTradingDate", priceQuery.displaySession("台股").targetTradingDate().toString(),
+            "usTradingDate", priceQuery.displaySession("美股").targetTradingDate().toString(),
+            "ukTradingDate", priceQuery.displaySession("英股").targetTradingDate().toString()
         );
     }
 
@@ -111,6 +115,7 @@ public class StockPriceService {
         LocalDateTime latestUpdate = null;
 
         for (StockHolding sh : snapshot.getStocks()) {
+            LocalDate targetTradingDate = priceQuery.displaySession(sh.getMarket()).targetTradingDate();
             Optional<PriceQueryService.LivePrice> liveOpt =
                     priceQuery.getDisplayPrice(sh.getStockCode(), sh.getMarket());
             BigDecimal price = null;
@@ -122,6 +127,7 @@ public class StockPriceService {
             BigDecimal priceChange = null;
             BigDecimal changePercent = null;
             String quoteStatus = null;
+            String source = null;
 
             if (liveOpt.isPresent()) {
                 PriceQueryService.LivePrice lp = liveOpt.get();
@@ -132,6 +138,7 @@ public class StockPriceService {
                 priceChange = lp.priceChange();
                 changePercent = lp.changePercent();
                 quoteStatus = lp.quoteStatus();
+                source = lp.source();
                 if (lp.updatedAt() != null) {
                     try {
                         updatedAt = LocalDateTime.parse(lp.updatedAt());
@@ -143,6 +150,7 @@ public class StockPriceService {
             }
 
             BigDecimal liveValue = null;
+            String valuationSource;
             if (price != null && sh.getShares() != null) {
                 // 英股 UCITS ETF（CSPX.L 等）為 USD 計價，與美股共用 USD 匯率
                 if ("美股".equals(sh.getMarket()) || "英股".equals(sh.getMarket())) {
@@ -153,9 +161,14 @@ public class StockPriceService {
                             .setScale(0, RoundingMode.HALF_UP);
                 }
                 liveStockValue = liveStockValue.add(liveValue);
+                valuationSource = classifyValuationSource(tradingDate, targetTradingDate);
             } else if (sh.getCurrentValue() != null) {
                 liveValue = sh.getCurrentValue();
                 liveStockValue = liveStockValue.add(liveValue);
+                valuationSource = "SNAPSHOT_VALUE";
+            } else {
+                // 無法估值仍如既有算法不加總；provenance 必須誠實，不假稱 target-date price。
+                valuationSource = "SNAPSHOT_VALUE";
             }
 
             String shName = stockMasterRepo.findByCodeAndMarket(sh.getStockCode(), sh.getMarket())
@@ -164,6 +177,7 @@ public class StockPriceService {
                 sh.getStockCode(), shName, sh.getMarket(), sh.getShares(),
                 price, liveValue, closed, tradingDate,
                 previousClose, priceChange, changePercent, quoteStatus
+                , sh.getId(), source, targetTradingDate.toString(), valuationSource
             ));
         }
 
@@ -179,6 +193,18 @@ public class StockPriceService {
             isTwMarketOpen(), isUsMarketOpen(), isUkMarketOpen(),
             latestUpdate != null ? latestUpdate.toString() : null
         );
+    }
+
+    private static String classifyValuationSource(String tradingDate, LocalDate target) {
+        if (tradingDate == null || tradingDate.isBlank()) return "UNVERIFIED_SESSION_PRICE";
+        try {
+            LocalDate actual = LocalDate.parse(tradingDate);
+            if (actual.equals(target)) return "TARGET_SESSION_PRICE";
+            if (actual.isBefore(target)) return "PREVIOUS_SESSION_PRICE";
+        } catch (RuntimeException ignored) {
+            // 日期 malformed 一律不可冒充 target trading date。
+        }
+        return "UNVERIFIED_SESSION_PRICE";
     }
 
     private StockPriceDto toDto(PriceQueryService.LivePrice lp) {
@@ -204,8 +230,21 @@ public class StockPriceService {
         Boolean closed, String tradingDate,
         // 即時報價衍生欄（Task 200）：昨收／漲跌／漲跌幅(%)，與 currentPrice 同一 LivePrice tick
         BigDecimal previousClose, BigDecimal priceChange, BigDecimal changePercent,
-        String quoteStatus
-    ) {}
+        String quoteStatus,
+        // Requirement 68 provenance：維持舊欄位與金額算法，只在末端向後相容新增。
+        Long holdingId, String source, String targetTradingDate, String valuationSource
+    ) {
+        /** 舊 renderer/tests 的相容建構子；新增 provenance 欄位不影響既有資料金額。 */
+        public LiveStockItem(String stockCode, String stockName, String market,
+                             BigDecimal shares, BigDecimal currentPrice, BigDecimal liveValue,
+                             Boolean closed, String tradingDate,
+                             BigDecimal previousClose, BigDecimal priceChange, BigDecimal changePercent,
+                             String quoteStatus) {
+            this(stockCode, stockName, market, shares, currentPrice, liveValue, closed, tradingDate,
+                    previousClose, priceChange, changePercent, quoteStatus, null, null, null,
+                    currentPrice == null ? "SNAPSHOT_VALUE" : "UNVERIFIED_SESSION_PRICE");
+        }
+    }
 
     public record LiveAssetsResponse(
         Long snapshotId, String snapshotDate, BigDecimal exchangeRate,

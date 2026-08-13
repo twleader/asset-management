@@ -78,6 +78,12 @@ public class UserAdminService {
         return userRepo.findByEmail(normalized).orElse(null);
     }
 
+    /** 只供 network-only bootstrap endpoint 使用，避免 BFF 保存或自行比對 ADMIN_EMAIL。 */
+    @Transactional(readOnly = true)
+    public java.util.Optional<AppUser> configuredAdmin() {
+        return userRepo.findByEmail(adminEmail);
+    }
+
     /** 供所有需要保護主要管理者的路徑共用，避免各層自行保存 email。 */
     public boolean isConfiguredAdmin(String email) {
         return email != null && adminEmail.equals(email.trim().toLowerCase(Locale.ROOT));

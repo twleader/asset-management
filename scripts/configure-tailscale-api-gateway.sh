@@ -28,7 +28,7 @@ get_200() {
   if ! status="$(curl "${curl_args[@]}" "$url")"; then
     die "$label transport 失敗；不會 reset Serve。"
   fi
-  [[ "$status" == 200 ]] || die "$label 必須回 HTTP 200，實際為 $status；不會 reset Serve。"
+  [[ "$status" == 200 ]] || die "$label 必須回 HTTP 200，實際為 ${status}；不會 reset Serve。"
 }
 
 find_tailscale() {
@@ -181,7 +181,7 @@ if ! quote_one_status="$(curl -sS --get --data-urlencode "code=$quote_code" \
   die '本機 /api/quotes/one transport 失敗；不會 reset Serve。'
 fi
 [[ "$quote_one_status" == 200 ]] || \
-  die "本機 /api/quotes/one 必須回 HTTP 200，實際為 $quote_one_status；不會 reset Serve。"
+  die "本機 /api/quotes/one 必須回 HTTP 200，實際為 ${quote_one_status}；不會 reset Serve。"
 python3 - "$quote_one_json" "$quote_code" "$quote_market" <<'PY' || die '/api/quotes/one payload 與 quote list 首筆不一致。'
 import json, sys
 data = json.load(open(sys.argv[1], encoding="utf-8"))

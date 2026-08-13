@@ -2,6 +2,7 @@ package com.steven.assets.service;
 
 import com.steven.assets.dto.ExportScheduleDto;
 import com.steven.assets.model.ExportScheduleSetting;
+import com.steven.assets.model.ExportScheduleTime;
 import com.steven.assets.repository.ExportScheduleSettingRepository;
 import com.steven.assets.security.CurrentUserContext;
 import com.steven.assets.security.UnauthenticatedException;
@@ -12,6 +13,7 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -23,7 +25,10 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -92,16 +97,15 @@ public class ExportScheduleService {
         Long ownerId = requireOwnerId();
         ExportScheduleSetting s = settingRepo.findByOwnerUserId(ownerId).orElseGet(() ->
                 ExportScheduleSetting.builder().ownerUserId(ownerId).build());
+        if (s.getTimes().isEmpty()) s.addTime(legacyTime(s)); // rolling-upgrade fallback；GET 不寫 DB
         return toResponse(s);
     }
 
     /** upsert 當前使用者設定。 */
+    @Transactional
     public ExportScheduleDto.SettingResponse updateForCurrentUser(ExportScheduleDto.SettingRequest req) {
         Long ownerId = requireOwnerId();
-        int hour = req.runHour() == null ? 8 : req.runHour();
-        int minute = req.runMinute() == null ? 0 : req.runMinute();
-        if (hour < 0 || hour > 23) throw new IllegalArgumentException("執行時(hour)必須介於 0～23");
-        if (minute < 0 || minute > 59) throw new IllegalArgumentException("執行分(minute)必須介於 0～59");
+        validateTimes(req.times(), Boolean.TRUE.equals(req.enabled()));
         String subpath = normalizeSubpath(req.outputSubpath());
         resolveDir(subpath); // 驗證不跳脫基底（丟出即擋下）
 
@@ -114,22 +118,42 @@ public class ExportScheduleService {
 
         s.setOwnerUserId(ownerId);
         s.setEnabled(Boolean.TRUE.equals(req.enabled()));
-        s.setRunHour(hour);
-        s.setRunMinute(minute);
         s.setOutputSubpath(subpath);
         s.setGdriveEnabled(drive.enabled());
         s.setGdriveSubpath(drive.subpath());
         // 刻意不碰 gdriveLastRunAt／gdriveLastStatus：那是執行結果，不是使用者設定。
         // 啟用當下的自檢結果同樣不寫那兩欄（Task 247.3.4），只走當次回應。
         s.setUpdatedAt(LocalDateTime.now(TW_ZONE));
+        Map<String, ExportScheduleTime> existing = new HashMap<>();
+        for (ExportScheduleTime time : s.getTimes()) existing.put(timeKey(time.getRunHour(), time.getRunMinute()), time);
+        HashSet<String> requested = new HashSet<>();
+        for (ExportScheduleDto.TimeRequest item : req.times()) {
+            String key = timeKey(item.runHour(), item.runMinute());
+            requested.add(key);
+            ExportScheduleTime time = existing.get(key);
+            if (time == null) {
+                time = ExportScheduleTime.builder().runHour(item.runHour()).runMinute(item.runMinute())
+                        .enabled(Boolean.TRUE.equals(item.enabled())).updatedAt(LocalDateTime.now(TW_ZONE)).build();
+                s.addTime(time);
+            } else {
+                time.setEnabled(Boolean.TRUE.equals(item.enabled()));
+                time.setUpdatedAt(LocalDateTime.now(TW_ZONE));
+            }
+        }
+        s.getTimes().removeIf(time -> !requested.contains(timeKey(time.getRunHour(), time.getRunMinute())));
+        syncRollbackRepresentative(s);
         return toResponse(settingRepo.save(s), drive.selfCheckWarning());
     }
 
     /** 立即以當前使用者身分產檔寫入其設定目錄（供驗證）。不動當日 guard。 */
     public ExportScheduleDto.RunNowResponse runNowForCurrentUser() {
         Long ownerId = requireOwnerId();
-        ExportScheduleSetting s = settingRepo.findByOwnerUserId(ownerId).orElseGet(() ->
-                ExportScheduleSetting.builder().ownerUserId(ownerId).build());
+        ExportScheduleSetting s = settingRepo.findByOwnerUserId(ownerId).orElseGet(() -> {
+            ExportScheduleSetting created = ExportScheduleSetting.builder().ownerUserId(ownerId).enabled(Boolean.FALSE).build();
+            created.addTime(defaultTime());
+            syncRollbackRepresentative(created);
+            return created;
+        });
         String subpath = normalizeSubpath(s.getOutputSubpath());
         try {
             // HTTP 情境：liveAssetsDoc() 由 TenantFilterAspect 自動 owner-scoped 到當前使用者。
@@ -244,16 +268,10 @@ public class ExportScheduleService {
     /** 每分鐘檢查各使用者設定，命中執行時間且當日未跑者即產檔。 */
     @Scheduled(cron = "0 * * * * *", zone = "Asia/Taipei")
     public void tick() {
-        if (!ticking.compareAndSet(false, true)) {
-            log.debug("上一輪排程匯出尚未結束，跳過本次 tick");
-            return;
-        }
         try {
-            runDueExports();
+            tryRunDueExports();
         } catch (RuntimeException e) {
             log.warn("排程匯出 tick 發生例外：{}", e.getMessage(), e);
-        } finally {
-            ticking.set(false);
         }
     }
 
@@ -261,7 +279,7 @@ public class ExportScheduleService {
     @EventListener(ApplicationReadyEvent.class)
     public void selfHealOnStartup() {
         try {
-            runDueExports();
+            tryRunDueExports();
         } catch (RuntimeException e) {
             log.warn("排程匯出開機自癒失敗：{}", e.getMessage(), e);
         }
@@ -274,35 +292,59 @@ public class ExportScheduleService {
      * 延遲／跳過的分鐘（Spring 預設排程池只有 1 條執行緒、與其他 @Scheduled 共用，可能被長工作卡住跨越分鐘），
      * 都會在後續 tick 自動補跑，直到當日成功並把 lastRunDate 設為今日為止，避免整日靜默漏跑。
      */
-    private void runDueExports() {
+    private void tryRunDueExports() {
+        if (!ticking.compareAndSet(false, true)) {
+            log.debug("上一輪排程匯出尚未結束，跳過本次觸發");
+            return;
+        }
+        try {
+            runDueExports();
+        } finally {
+            ticking.set(false);
+        }
+    }
+
+    @Transactional
+    void runDueExports() {
         LocalDate today = LocalDate.now(TW_ZONE);
         LocalTime now = LocalTime.now(TW_ZONE);
         for (ExportScheduleSetting s : settingRepo.findAll()) {
             if (!Boolean.TRUE.equals(s.getEnabled())) continue;
-            if (today.equals(s.getLastRunDate())) continue;
-            if (!now.isBefore(LocalTime.of(s.getRunHour(), s.getRunMinute()))) {
-                runScheduled(s, today);
+            // v1.102 套用前不可能有 real runtime；仍保留一輪 legacy fallback，避免部署中途
+            // 或手動 fixture 因空 children 把既有單時間排程靜默停掉。
+            if (s.getTimes().isEmpty()) s.addTime(legacyTime(s));
+            for (ExportScheduleTime time : s.getTimes()) {
+                if (!Boolean.TRUE.equals(time.getEnabled()) || today.equals(time.getLastRunDate())) continue;
+                if (!now.isBefore(LocalTime.of(time.getRunHour(), time.getRunMinute()))) {
+                    runScheduled(s, time, today);
+                }
             }
         }
     }
 
     /** 背景：對指定 owner 產檔並更新 guard／狀態。單一使用者失敗只記錄、不影響其他人。 */
-    private void runScheduled(ExportScheduleSetting s, LocalDate today) {
+    private void runScheduled(ExportScheduleSetting s, ExportScheduleTime time, LocalDate today) {
         try {
             var r = writeDual(s, s.getOwnerUserId(),
                     excelExportService.liveAssetsDocForOwner(s.getOwnerUserId()),
                     normalizeSubpath(s.getOutputSubpath()));
-            s.setLastRunStatus(truncate(r.localStatus(), STATUS_MAX));
+            time.setLastRunStatus(truncate(r.localStatus(), STATUS_MAX));
+            s.setLastRunStatus(time.getLastRunStatus());
             applyGdriveStatus(s, r);
             log.info("排程匯出 owner={} → {}", s.getOwnerUserId(), r.localStatus());
         } catch (Exception e) {
-            s.setLastRunStatus(truncate("失敗：" + e.getMessage(), STATUS_MAX));
+            time.setLastRunStatus(truncate("失敗：" + e.getMessage(), STATUS_MAX));
+            s.setLastRunStatus(time.getLastRunStatus());
             log.warn("排程匯出失敗 owner={}：{}", s.getOwnerUserId(), e.getMessage(), e);
             syncGdrive(s, null); // 本機失敗＝不上傳；已啟用時仍寫狀態欄，否則會停在上一次的成功
         } finally {
             // 成功或失敗都設 guard，避免命中分鐘後每 poll 重試整天。
-            s.setLastRunDate(today);
-            s.setLastRunAt(LocalDateTime.now(TW_ZONE));
+            LocalDateTime completedAt = LocalDateTime.now(TW_ZONE);
+            time.setLastRunDate(today);
+            time.setLastRunAt(completedAt);
+            time.setUpdatedAt(completedAt);
+            s.setLastRunAt(completedAt);
+            syncRollbackRepresentative(s);
             settingRepo.save(s);
         }
     }
@@ -321,6 +363,63 @@ public class ExportScheduleService {
         String sub = subpath == null ? "" : subpath.trim();
         if (sub.isEmpty()) sub = "input";
         return sub;
+    }
+
+    private static ExportScheduleTime defaultTime() {
+        return ExportScheduleTime.builder().runHour(8).runMinute(0).enabled(Boolean.TRUE).build();
+    }
+
+    private static ExportScheduleTime legacyTime(ExportScheduleSetting schedule) {
+        return ExportScheduleTime.builder()
+                .runHour(schedule.getRunHour() == null ? 8 : schedule.getRunHour())
+                .runMinute(schedule.getRunMinute() == null ? 0 : schedule.getRunMinute())
+                .enabled(Boolean.TRUE)
+                .lastRunDate(schedule.getLastRunDate())
+                .lastRunAt(schedule.getLastRunAt())
+                .lastRunStatus(schedule.getLastRunStatus())
+                .build();
+    }
+
+    private static String timeKey(Integer hour, Integer minute) { return hour + ":" + minute; }
+
+    private static void validateTimes(List<ExportScheduleDto.TimeRequest> times, boolean parentEnabled) {
+        if (times == null || times.isEmpty()) throw new IllegalArgumentException("至少需要一個執行時間");
+        HashSet<String> seen = new HashSet<>();
+        boolean anyEnabled = false;
+        for (ExportScheduleDto.TimeRequest time : times) {
+            if (time == null || time.runHour() == null || time.runMinute() == null
+                    || time.runHour() < 0 || time.runHour() > 23 || time.runMinute() < 0 || time.runMinute() > 59) {
+                throw new IllegalArgumentException("執行時間必須介於 00:00～23:59");
+            }
+            if (!seen.add(timeKey(time.runHour(), time.runMinute()))) throw new IllegalArgumentException("執行時間不可重複");
+            anyEnabled |= Boolean.TRUE.equals(time.enabled());
+        }
+        if (parentEnabled && !anyEnabled) throw new IllegalArgumentException("啟用排程時至少需啟用一個時間");
+    }
+
+    /**
+     * rollback representative = 最早 enabled child；全停用時是最早 child。
+     *
+     * <p>只同步舊 image 真正用來判斷排程的時分與 daily guard。Parent 的
+     * {@code lastRunAt/lastRunStatus} 是新舊 UI 共用的「最近一次整體執行摘要」，必須保留
+     * 最後完成的 child／run-now 結果，不能被較早 representative 的舊狀態覆蓋。
+     */
+    private static void syncRollbackRepresentative(ExportScheduleSetting s) {
+        ExportScheduleTime representative = s.getTimes().stream()
+                .filter(t -> Boolean.TRUE.equals(t.getEnabled())).min(ExportScheduleService::compareTime)
+                .orElseGet(() -> s.getTimes().stream().min(ExportScheduleService::compareTime).orElse(null));
+        if (representative == null) return;
+        s.setRunHour(representative.getRunHour());
+        s.setRunMinute(representative.getRunMinute());
+        s.setLastRunDate(representative.getLastRunDate());
+    }
+
+    private static int compareTime(ExportScheduleTime left, ExportScheduleTime right) {
+        int hour = Integer.compare(left.getRunHour(), right.getRunHour());
+        if (hour != 0) return hour;
+        int minute = Integer.compare(left.getRunMinute(), right.getRunMinute());
+        if (minute != 0) return minute;
+        return Comparator.nullsLast(Long::compareTo).compare(left.getId(), right.getId());
     }
 
     /** 基底 resolve 子路徑並驗證仍在基底內（拒 `..`／絕對路徑跳脫）。 */
@@ -399,8 +498,6 @@ public class ExportScheduleService {
     private ExportScheduleDto.SettingResponse toResponse(ExportScheduleSetting s, String gdriveSelfCheckWarning) {
         return ExportScheduleDto.SettingResponse.builder()
                 .enabled(Boolean.TRUE.equals(s.getEnabled()))
-                .runHour(s.getRunHour())
-                .runMinute(s.getRunMinute())
                 .outputSubpath(s.getOutputSubpath())
                 .lastRunAt(s.getLastRunAt() == null ? null : s.getLastRunAt().format(TS_FMT))
                 .lastRunStatus(s.getLastRunStatus())
@@ -413,6 +510,14 @@ public class ExportScheduleService {
                 .gdriveLastRunAt(s.getGdriveLastRunAt() == null ? null : s.getGdriveLastRunAt().format(TS_FMT))
                 .gdriveLastStatus(s.getGdriveLastStatus())
                 .gdriveSelfCheckWarning(gdriveSelfCheckWarning)
+                .times(s.getTimes().stream()
+                        .sorted(Comparator.comparing(ExportScheduleTime::getRunHour)
+                                .thenComparing(ExportScheduleTime::getRunMinute)
+                                .thenComparing(t -> t.getId() == null ? Long.MAX_VALUE : t.getId()))
+                        .map(t -> new ExportScheduleDto.TimeResponse(t.getId(), t.getRunHour(), t.getRunMinute(),
+                                t.getEnabled(), t.getLastRunAt() == null ? null : t.getLastRunAt().format(TS_FMT),
+                                t.getLastRunStatus()))
+                        .toList())
                 .build();
     }
 

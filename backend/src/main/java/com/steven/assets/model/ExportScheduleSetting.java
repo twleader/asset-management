@@ -9,6 +9,8 @@ import org.hibernate.annotations.Filter;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * 歷年資產每日排程自動匯出設定（Requirement 34 / Task 171）。
@@ -41,12 +43,12 @@ public class ExportScheduleSetting {
     @Builder.Default
     private Boolean enabled = Boolean.FALSE;
 
-    /** 每日執行時（0..23） */
+    /** rollback shadow：新 scheduler 不得作為 due 來源，保留讓舊 image 可 rollback。 */
     @Column(name = "run_hour", nullable = false)
     @Builder.Default
     private Integer runHour = 8;
 
-    /** 每日執行分（0..59） */
+    /** rollback shadow：新 scheduler 不得作為 due 來源。 */
     @Column(name = "run_minute", nullable = false)
     @Builder.Default
     private Integer runMinute = 0;
@@ -56,7 +58,7 @@ public class ExportScheduleSetting {
     @Builder.Default
     private String outputSubpath = "input";
 
-    /** 當日已執行的日期（成功或失敗都設，避免同分鐘每 poll 重跑） */
+    /** rollback representative 的 guard；新 scheduler 以 child guard 為準。 */
     @Column(name = "last_run_date")
     private LocalDate lastRunDate;
 
@@ -98,4 +100,14 @@ public class ExportScheduleSetting {
 
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
+
+    @OneToMany(mappedBy = "schedule", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("runHour ASC, runMinute ASC, id ASC")
+    @Builder.Default
+    private List<ExportScheduleTime> times = new ArrayList<>();
+
+    public void addTime(ExportScheduleTime time) {
+        time.setSchedule(this);
+        times.add(time);
+    }
 }

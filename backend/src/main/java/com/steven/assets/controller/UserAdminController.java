@@ -11,8 +11,9 @@ import java.util.List;
 /**
  * 使用者主檔內部端點（Requirement 28）。
  *
- * <p>路徑前綴 {@code /internal/users}（business-services 內網）。除 {@code login-upsert} 與 {@code by-email} 外皆由
- * {@code AdminGateInterceptor} 限 ADMIN。BFF 經 {@code /api/bff/user-management/**} passthrough。
+ * <p>路徑前綴 {@code /internal/users}（business-services 內網）。只有精確的登入 bootstrap、本人查詢與
+ * configured-admin bootstrap 依各自 HTTP method 免 ADMIN；其餘皆由 {@code AdminGateInterceptor} 限 ADMIN。
+ * BFF 經 {@code /api/bff/user-management/**} passthrough。
  */
 @RestController
 @RequestMapping("/internal/users")
@@ -33,6 +34,14 @@ public class UserAdminController {
     public UserDto.UserResponse byEmail(@RequestParam String email) {
         AppUser user = userAdminService.getByEmail(email);
         return user == null ? null : toResponse(user);
+    }
+
+    /** Requirement 68 bootstrap：BFF 不持有 ADMIN_EMAIL，由 business 唯一權威解析主要管理者。 */
+    @GetMapping("/configured-admin")
+    public UserDto.UserResponse configuredAdmin() {
+        return userAdminService.configuredAdmin()
+                .map(this::toResponse)
+                .orElse(null);
     }
 
     @GetMapping

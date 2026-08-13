@@ -12,8 +12,6 @@ public class ExportScheduleDto {
     @Builder
     public record SettingResponse(
             Boolean enabled,
-            Integer runHour,
-            Integer runMinute,
             String outputSubpath,
             String lastRunAt,      // yyyy-MM-dd HH:mm:ss，無則 null
             String lastRunStatus,  // 「成功：/path」或「失敗：訊息」
@@ -28,18 +26,39 @@ public class ExportScheduleDto {
             // 只有「本次請求把開關從 false 翻成 true」且本地自檢發現問題時才有值，其餘一律 null。
             // 不入庫，也絕不寫進上面那一欄——gdriveLastStatus 的語意是「上次上傳」，
             // 寫進去會永久覆蓋昨晚真正上傳成功的落點與大小（Task 247.3.4）。
-            String gdriveSelfCheckWarning
+            String gdriveSelfCheckWarning,
+            List<TimeResponse> times
+    ) {
+        /** 僅供 rolling-upgrade 的 Java 呼叫端；JSON 新契約不序列化 top-level time。 */
+        @com.fasterxml.jackson.annotation.JsonIgnore
+        public Integer runHour() { return times == null || times.isEmpty() ? null : times.getFirst().runHour(); }
+        @com.fasterxml.jackson.annotation.JsonIgnore
+        public Integer runMinute() { return times == null || times.isEmpty() ? null : times.getFirst().runMinute(); }
+    }
+
+    public record TimeResponse(
+            Long id, Integer runHour, Integer runMinute, Boolean enabled,
+            String lastRunAt, String lastRunStatus
     ) {}
 
     public record SettingRequest(
             Boolean enabled,
-            Integer runHour,
-            Integer runMinute,
             String outputSubpath,
             // null ＝ 該欄整個沒送出＝不變更（不得把已開啟的 Drive 開關靜默關掉，見 Task 243.1.1）
             Boolean gdriveEnabled,
-            String gdriveSubpath
-    ) {}
+            String gdriveSubpath,
+            List<TimeRequest> times
+    ) {
+        /** 舊 Java callers 的 rolling-upgrade convenience constructor；HTTP 新契約仍只接受 times[]。 */
+        public SettingRequest(Boolean enabled, Integer runHour, Integer runMinute, String outputSubpath,
+                              Boolean gdriveEnabled, String gdriveSubpath) {
+            this(enabled, outputSubpath, gdriveEnabled, gdriveSubpath,
+                    List.of(new TimeRequest(runHour == null ? 8 : runHour, runMinute == null ? 0 : runMinute, true)));
+        }
+    }
+
+    /** client 不帶 id，service 以 (hour, minute) 保留既有 child 的 execution guard。 */
+    public record TimeRequest(Integer runHour, Integer runMinute, Boolean enabled) {}
 
     @Builder
     public record RunNowResponse(
