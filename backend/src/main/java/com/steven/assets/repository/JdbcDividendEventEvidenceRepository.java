@@ -9,6 +9,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -95,10 +98,10 @@ public class JdbcDividendEventEvidenceRepository implements DividendEventEvidenc
                     rs.getString("source_url"),
                     rs.getObject("scope_from", LocalDate.class),
                     rs.getObject("scope_to", LocalDate.class),
-                    rs.getObject("observed_at", Instant.class),
-                    rs.getObject("source_available_at", Instant.class),
+                    getInstant(rs, "observed_at"),
+                    getInstant(rs, "source_available_at"),
                     parseStatus(rs.getString("status")), rs.getBoolean("complete")),
-                    key.code(), key.market(), latestDecision);
+                    key.code(), key.market(), toTimestamp(latestDecision));
             if (refs.isEmpty()) return List.of();
 
             List<Long> snapshotIds = refs.stream().map(SnapshotRef::id).distinct().toList();
@@ -114,7 +117,7 @@ public class JdbcDividendEventEvidenceRepository implements DividendEventEvidenc
                     rs.getBigDecimal("cash_dividend"), rs.getBigDecimal("stock_dividend"),
                     rs.getObject("cash_payment_date", LocalDate.class),
                     rs.getObject("stock_payment_date", LocalDate.class),
-                    rs.getObject("source_available_at", Instant.class)), snapshotIds.toArray());
+                    getInstant(rs, "source_available_at")), snapshotIds.toArray());
             Map<Long, List<RawEvent>> eventsBySnapshot = new LinkedHashMap<>();
             for (RawEvent event : rawEvents) {
                 eventsBySnapshot.computeIfAbsent(event.snapshotId(), ignored -> new ArrayList<>())
@@ -172,6 +175,15 @@ public class JdbcDividendEventEvidenceRepository implements DividendEventEvidenc
             LocalDate cashPaymentDate,
             LocalDate stockPaymentDate,
             Instant sourceAvailableAt) {}
+
+    private static Timestamp toTimestamp(Instant instant) {
+        return instant == null ? null : Timestamp.from(instant);
+    }
+
+    private static Instant getInstant(ResultSet rs, String column) throws SQLException {
+        Timestamp timestamp = rs.getTimestamp(column);
+        return timestamp == null ? null : timestamp.toInstant();
+    }
 
     private static DividendEventEvidenceResolver.Status parseStatus(String value) {
         if ("COMPLETE".equals(value)) return DividendEventEvidenceResolver.Status.AVAILABLE;

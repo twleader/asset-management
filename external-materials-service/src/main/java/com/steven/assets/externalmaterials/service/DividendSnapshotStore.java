@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -103,8 +104,8 @@ public class DividendSnapshotStore {
                 "INSERT INTO stock_dividend_fetch_observation "
                         + "(snapshot_id,observed_at,status,complete,scope_from,scope_to,source_available_at,error_reason) "
                         + "VALUES (?,?,?,?,?,?,?,?) ON CONFLICT (snapshot_id,observed_at) DO NOTHING",
-                snapshotId, seen, fetched.status().name(), complete, from, to,
-                fetched.sourceAvailableAt(), fetched.errorReason());
+                snapshotId, toTimestamp(seen), fetched.status().name(), complete, from, to,
+                toTimestamp(fetched.sourceAvailableAt()), fetched.errorReason());
         return new PersistResult(snapshotId, contentHash, complete, fetched.status().name());
     }
 
@@ -119,7 +120,7 @@ public class DividendSnapshotStore {
                             + "VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT (snapshot_id,event_key) DO NOTHING",
                     snapshotId, key, event.year(), parse(event.exDividendDate()), event.cashDividend(),
                     event.stockDividend(), parse(event.cashPaymentDate()), parse(event.stockPaymentDate()),
-                    sourceAvailableAt);
+                    toTimestamp(sourceAvailableAt));
         }
     }
 
@@ -163,7 +164,7 @@ public class DividendSnapshotStore {
                     VALUES (?,?,?,?,?,?,?,?,?,?)
                     """, code, market,
                     fetched == null ? null : fetched.source(),
-                    observedAt == null ? Instant.now() : observedAt,
+                    toTimestamp(observedAt == null ? Instant.now() : observedAt),
                     status,
                     fetched == null ? null : fetched.scopeFrom(),
                     fetched == null ? null : fetched.scopeTo(),
@@ -211,5 +212,9 @@ public class DividendSnapshotStore {
     private static LocalDate parse(String value) {
         if (value == null || value.isBlank()) return null;
         try { return LocalDate.parse(value); } catch (RuntimeException e) { return null; }
+    }
+
+    private static Timestamp toTimestamp(Instant instant) {
+        return instant == null ? null : Timestamp.from(instant);
     }
 }
