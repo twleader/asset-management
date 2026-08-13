@@ -154,6 +154,23 @@ Requirement 65（交易雷達 V13——證據完整度、資料時效與樣本�
       金融保險業 16 檔（含 2884 玉山金、2890 永豐金），**2881／2885／2891 皆為 0 筆**。
       動工前請重新查證同一端點；若屆時三檔已出現而我方仍缺，才是抓取端問題。
 
+- [x] **324.4（已登記） 美股指數日線落後一盤，且 self-heal 的新鮮度判準與交易雷達不一致（動工時另開任務檔）。**
+      2026-08-13 21:58 Asia/Taipei（＝ET 09:58，8/12 那盤早已收盤）實測：
+      `us_index_daily_history` 的 IXIC `max(trading_date)` 仍為 **2026-08-11**，缺 8/12；
+      而同一時刻 `IndexDailyRefreshScheduler` 的 startup self-heal 明確輸出
+      **「self-heal：海外指數日線皆為最新，略過」**。
+      該排程為 `@Scheduled(cron = "0 0 7 * * TUE-SAT", zone = "Asia/Taipei")`，
+      台北 8/13 07:00 ＝ ET 8/12 19:00，**在 8/12 收盤（16:00 ET）之後**，理應已能取得 8/12 的日線。
+      連帶效果：交易雷達美股列的 `marketStale` 判準是
+      `latestEodDate < mostRecentCompletedUsTradingDay`，故只要指數落後一盤，
+      `regime`（權重 `.70`）與 `market_volume_turnover`（權重 `.30`）就會整組轉 stale，
+      美股短期信心度由 89 掉到 63（實測，見 t323 完成報告的前後比對）。
+      **動工者要查的是兩件事**：(i) 8/12 的日線為何沒進來（排程當下服務是否在跑／來源是否回空／是否被
+      self-heal 的判準擋掉）；(ii) self-heal 的「最新」定義為何與雷達的
+      `mostRecentCompletedUsTradingDay` 不一致——兩者對「該有哪一天」的認定必須同源，
+      否則 self-heal 會在真的落後時回報正常。**不得只把 self-heal 的門檻放寬**：
+      那只會讓它更常宣稱正常，不會讓資料變新。
+
 ## 驗證
 
 本檔的驗證＝「上表每個數字都能以下列指令複驗，且每個子項都有可獨立動工的自足描述」。
