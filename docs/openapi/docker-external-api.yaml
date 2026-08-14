@@ -1,0 +1,736 @@
+openapi: 3.1.0
+info:
+  title: 資產管理系統 Docker 外部唯讀 API
+  version: 1.0.0
+  description: |
+    本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的五條精確 GET 路徑。
+
+    本機入口只綁定 loopback `127.0.0.1:9090`；遠端入口由 Tailscale Serve 的私有網路身分與
+    五條逐一路徑規則形成網路邊界。HTTP 層本身沒有 OAuth、API key 或其他應用層認證，因此
+    全域 `security` 為空陣列。不得把任一 server URL 解讀為公開網際網路服務。
+
+    Gateway 只接受下列精確路徑：同一路徑的非 GET method 回 `405 Method Not Allowed` 並帶
+    `Allow: GET`；所有其他路徑、子路徑、尾斜線與 matrix 變體回 `404 Not Found`。
+    Swagger UI 或原始 OpenAPI 文件沒有對外路由；本 YAML 是版本控管文件，不代表 gateway
+    暴露文件端點。
+
+    回應只代表來源或快取當下狀態，排程不可只看 HTTP 200；應另檢查報價的
+    `quoteStatus`／`tradingDate`／`updatedAt`、資產的 `targetPriceComplete`／`valuationSource`，
+    以及匯率的 `liveUpdateStatus`／`spot.quoteStatus`。本 API 不構成交易執行依據。
+servers:
+  - url: http://127.0.0.1:9090
+    description: Docker host 本機 loopback 入口
+  - url: https://mac-mini-2.tailccc7be.ts.net:9090
+    description: Tailscale 私有網路的五條 path-scoped HTTPS 入口
+security: []
+paths:
+  /api/quotes:
+    get:
+      tags: [公開報價]
+      operationId: listLatestQuotes
+      summary: 列出 Redis 中的最新報價
+      description: market 省略時掃描台股、美股、英股；查無資料或 Redis 讀取失敗時回空陣列，不觸發抓價或資料庫 fallback。
+      parameters:
+        - name: market
+          in: query
+          required: false
+          description: 選填的單一市場；省略時回三個市場。
+          schema:
+            type: string
+            enum: [台股, 美股, 英股]
+      responses:
+        '200':
+          description: 最新報價陣列；可能為空。
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LatestQuote'
+              examples:
+                synthetic:
+                  summary: 去識別化合成範例
+                  value:
+                    - stockCode: EXM-TW-001
+                      stockName: 範例科技
+                      market: 台股
+                      price: 100.25
+                      previousClose: 99.50
+                      priceChange: 0.75
+                      changePercent: 0.753769
+                      buyPrice: 100.20
+                      sellPrice: 100.30
+                      openPrice: 99.80
+                      highPrice: 101.00
+                      lowPrice: 99.60
+                      volume: 123456
+                      tradingDate: '2026-01-15'
+                      updatedAt: '2026-01-15T10:15:30'
+                      closed: false
+                      source: SYNTHETIC_EXAMPLE
+                      quoteStatus: LIVE
+        '502':
+          $ref: '#/components/responses/NginxBadGateway'
+        '504':
+          $ref: '#/components/responses/NginxGatewayTimeout'
+  /api/quotes/one:
+    get:
+      tags: [公開報價]
+      operationId: getLatestQuote
+      summary: 查詢單一標的的最新報價
+      description: 只讀目前 Redis cache；cache miss 或讀取、解析失敗皆回 204，不查資料庫且不觸發外部抓取。
+      parameters:
+        - name: code
+          in: query
+          required: true
+          description: 標的代號；controller 僅要求參數存在，不另做格式驗證。
+          schema:
+            type: string
+        - name: market
+          in: query
+          required: true
+          description: 市場。
+          schema:
+            type: string
+            enum: [台股, 美股, 英股]
+      responses:
+        '200':
+          description: Redis 命中的最新報價。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LatestQuote'
+        '204':
+          description: Cache miss、Redis 讀取失敗或 payload 無法解析；沒有 response body。
+        '400':
+          description: code 或 market 缺少時由 Spring 綁定層產生的基本錯誤。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpringBasicError'
+              examples:
+                missingMarket:
+                  value:
+                    timestamp: '2026-01-15T02:15:30.000Z'
+                    status: 400
+                    error: Bad Request
+                    path: /api/quotes/one
+        '502':
+          $ref: '#/components/responses/NginxBadGateway'
+        '504':
+          $ref: '#/components/responses/NginxGatewayTimeout'
+  /api/public/market-index:
+    get:
+      tags: [公開大盤]
+      operationId: getPublicMarketIndex
+      summary: 取得大盤日線或當日分時圖表
+      description: 參數會去除前後空白並忽略大小寫。range=d 為 INTRADAY，其餘為 DAILY；下游 transport、HTTP 或 decode 失敗採完整空資料 200，typed malformed tradeValue 則回 502。
+      parameters:
+        - name: market
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [TWSE, DJI, SPX, IXIC, SOX, FTSE, DAX, KOSPI, N225]
+            default: TWSE
+        - name: range
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [d, 1m, 3m, 6m, 1y, 2y, 5y, 10y]
+            default: 1y
+      responses:
+        '200':
+          description: 完整、陣列彼此對齊的圖表 response；無資料時陣列為空且 nullable 摘要欄位為 null。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarketIndexResponse'
+              examples:
+                syntheticDaily:
+                  value:
+                    market: TWSE
+                    marketLabel: 台股大盤
+                    range: 1m
+                    rangeLabel: 1 個月
+                    mode: DAILY
+                    tradingDate: null
+                    labels: ['2026-01-14', '2026-01-15']
+                    closes: [20100.25, 20200.50]
+                    ma5: [null, 20050.00]
+                    ma20: [null, null]
+                    ma60: [null, null]
+                    ma240: [null, null]
+                    volumes: [1000000, null]
+                    turnovers: [20100250000.00, null]
+                    hasVolume: true
+                    previousClose: null
+                    lastClose: null
+                    change: null
+                    changePercent: null
+                    supportedMarkets:
+                      - {value: TWSE, label: 台股大盤}
+                      - {value: DJI, label: 道瓊工業}
+                      - {value: SPX, label: 標普 500}
+                      - {value: IXIC, label: 那斯達克綜合}
+                      - {value: SOX, label: 費城半導體}
+                      - {value: FTSE, label: 英國富時 100}
+                      - {value: DAX, label: 德國 DAX}
+                      - {value: KOSPI, label: 韓國 KOSPI}
+                      - {value: N225, label: 日經 225}
+                    supportedRanges:
+                      - {value: d, label: 當日}
+                      - {value: 1m, label: 1 個月}
+                      - {value: 3m, label: 3 個月}
+                      - {value: 6m, label: 半年}
+                      - {value: 1y, label: 1 年}
+                      - {value: 2y, label: 2 年}
+                      - {value: 5y, label: 5 年}
+                      - {value: 10y, label: 10 年}
+        '400':
+          description: market 或 range 不在合法集合。
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example:
+                type: 'about:blank'
+                title: Invalid market index request
+                status: 400
+                detail: "未知 market 值 'BAD'；合法 values: [TWSE, DJI, SPX, IXIC, SOX, FTSE, DAX, KOSPI, N225]"
+                instance: /api/public/market-index
+        '500':
+          description: closePoint 為非法數字或發生其他未被 typed 502 捕捉的 shaping error 時，由 Spring WebFlux 基本錯誤處理回傳；不是 ProblemDetail。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpringWebFluxBasicError'
+              example:
+                timestamp: '2026-01-15T02:15:30.000Z'
+                path: /api/public/market-index
+                status: 500
+                error: Internal Server Error
+                requestId: synthetic-request-id
+                message: "Character n is neither a decimal digit number"
+        '502':
+          description: BFF 判定下游 payload 格式錯誤，或 Nginx 無法連上 upstream。
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example:
+                type: 'about:blank'
+                title: Malformed market index payload
+                status: 502
+                detail: "股市大盤 payload 的 tradeValue 'not-a-number' 不是合法數字"
+                instance: /api/public/market-index
+            text/html:
+              schema:
+                $ref: '#/components/schemas/NginxErrorHtml'
+              example: "<html><head><title>502 Bad Gateway</title></head><body><center><h1>502 Bad Gateway</h1></center><hr><center>nginx</center></body></html>"
+        '504':
+          $ref: '#/components/responses/NginxGatewayTimeout'
+  /api/assets/latest:
+    get:
+      tags: [最新資產]
+      operationId: getLatestAssets
+      summary: 取得主要管理者的最新完整資產
+      description: 唯讀聚合完整快照、同源即時估值與三市場狀態。snapshot.id 必須等於 liveAssets.snapshotId；不接受 ownerId、email、cookie 或 X-User-* 作為租戶選擇輸入。
+      responses:
+        '200':
+          description: 自洽且保留原始 BigDecimal JSON 精度的最新資產。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LatestAssetsResponse'
+              examples:
+                synthetic:
+                  $ref: '#/components/examples/LatestAssetsSynthetic'
+        '404':
+          description: 主要管理者尚無資產快照；business 的 ProblemDetail 原樣 relay。
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example: {type: 'about:blank', title: Not Found, status: 404, detail: 尚無資產快照, instance: /api/assets/latest}
+        '500':
+          description: Business 聚合發生未預期錯誤，例如 snapshot identity 不一致。
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example: {type: 'about:blank', title: Internal Server Error, status: 500, detail: 最新快照與即時資產資料不一致, instance: /api/assets/latest}
+        '502':
+          description: BFF 驗證到空、malformed 或 identity 不一致的成功 payload，或 Nginx 無法連上 upstream。
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example: {type: 'about:blank', title: Invalid latest assets payload, status: 502, detail: 最新資產上游 snapshot identity 不一致, instance: /api/assets/latest}
+            text/html:
+              schema:
+                $ref: '#/components/schemas/NginxErrorHtml'
+              example: "<html><head><title>502 Bad Gateway</title></head><body><center><h1>502 Bad Gateway</h1></center><hr><center>nginx</center></body></html>"
+        '503':
+          description: Configured admin 不存在、未啟用或不可用。
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example: {type: 'about:blank', title: Latest assets unavailable, status: 503, detail: 主要管理者不可用, instance: /api/assets/latest}
+        '504':
+          $ref: '#/components/responses/NginxGatewayTimeout'
+  /api/public/exchange-rate/usd-twd:
+    get:
+      tags: [公開匯率]
+      operationId: getPublicUsdTwd
+      summary: 取得 USD/TWD 即期與近一年歷史
+      description: 以 Asia/Taipei 當日計算 inclusive 的 today.minusYears(1)..today；history 日期升冪且不重複，count 必須等於 history 長度，中間價以 HALF_UP 固定計算至小數 4 位。
+      responses:
+        '200':
+          description: 固定 USD/TWD metadata、即期狀態與非空歷史。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UsdTwdResponse'
+              examples:
+                synthetic:
+                  value:
+                    pair: USD/TWD
+                    baseCurrency: USD
+                    quoteCurrency: TWD
+                    requestedStartDate: '2025-01-15'
+                    requestedEndDate: '2026-01-15'
+                    refreshIntervalSeconds: 2
+                    timezone: Asia/Taipei
+                    liveUpdateStatus: ACTIVE
+                    spot:
+                      date: '2026-01-15'
+                      buyRate: 31.1000
+                      sellRate: 31.2000
+                      midRate: 31.1500
+                      source: MEGA_BANK
+                      polledAt: '2026-01-15T02:10:14Z'
+                      sourceUpdatedAt: '2026-01-15T02:10:12Z'
+                      quoteStatus: LIVE
+                    count: 2
+                    history:
+                      - {date: '2025-01-15', buyRate: 30.1000, sellRate: 30.2000, midRate: 30.1500}
+                      - {date: '2026-01-15', buyRate: 31.1000, sellRate: 31.2000, midRate: 31.1500}
+        '404':
+          description: History 為零列，或 live/spot 完全不存在。
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example: {type: 'about:blank', title: USD/TWD data not found, status: 404, detail: USD/TWD 匯率資料暫時不存在, instance: /api/public/exchange-rate/usd-twd}
+        '502':
+          description: 下游 transport、HTTP、decode、null 或資料契約驗證失敗，或 Nginx 無法連上 upstream。
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example: {type: 'about:blank', title: USD/TWD downstream data unavailable, status: 502, detail: USD/TWD 下游資料暫時不可用, instance: /api/public/exchange-rate/usd-twd}
+            text/html:
+              schema:
+                $ref: '#/components/schemas/NginxErrorHtml'
+              example: "<html><head><title>502 Bad Gateway</title></head><body><center><h1>502 Bad Gateway</h1></center><hr><center>nginx</center></body></html>"
+        '504':
+          $ref: '#/components/responses/NginxGatewayTimeout'
+components:
+  schemas:
+    ProblemDetail:
+      type: object
+      description: Spring `ProblemDetail` 的 RFC 7807/9457 JSON；可帶 RFC extension members。
+      required: [type, title, status, detail, instance]
+      properties:
+        type: {type: string, default: 'about:blank', description: 問題類型 URI reference。}
+        title: {type: string, description: 穩定、可讀的錯誤標題。}
+        status: {type: integer, format: int32, minimum: 400, maximum: 599}
+        detail: {type: [string, 'null'], description: 此次錯誤的說明。}
+        instance: {type: [string, 'null'], description: 發生問題的 request path/URI reference。}
+      additionalProperties: true
+    SpringBasicError:
+      type: object
+      description: Spring Boot 預設 `/error` 對缺少必填 request parameter 的 JSON。部署設定可能另加 message、errors 或 trace。
+      required: [timestamp, status, error, path]
+      properties:
+        timestamp: {type: string, format: date-time}
+        status: {type: integer, format: int32, const: 400}
+        error: {type: string, const: Bad Request}
+        path: {type: string, const: /api/quotes/one}
+        message: {type: [string, 'null']}
+        errors: {type: [array, 'null'], items: {type: object}}
+        trace: {type: [string, 'null']}
+      additionalProperties: true
+    SpringWebFluxBasicError:
+      type: object
+      description: Spring WebFlux 預設錯誤 JSON；requestId、message 與其他診斷欄位是否出現取決於部署設定，因此保持彈性。
+      required: [timestamp, status, error, path]
+      properties:
+        timestamp: {type: string, format: date-time}
+        status: {type: integer, format: int32, minimum: 400, maximum: 599}
+        error: {type: string}
+        path: {type: string}
+        requestId: {type: [string, 'null']}
+        message: {type: [string, 'null']}
+      additionalProperties: true
+    NginxErrorHtml:
+      type: string
+      description: Nginx 自行產生的標準 HTML 錯誤頁；不是 JSON，也不保證空白或換行逐字固定。
+    LatestQuote:
+      type: object
+      description: "`PriceCacheReader.LatestQuote` 的 18 個欄位。Redis payload 逐欄解析，故每個 record property 都存在，但來源欄位缺失或不可解析時可為 null；source 與 quoteStatus 刻意是自由字串。"
+      required: [stockCode, stockName, market, price, previousClose, priceChange, changePercent, buyPrice, sellPrice, openPrice, highPrice, lowPrice, volume, tradingDate, updatedAt, closed, source, quoteStatus]
+      properties:
+        stockCode: {type: [string, 'null']}
+        stockName: {type: [string, 'null']}
+        market: {type: [string, 'null'], enum: [台股, 美股, 英股, null]}
+        price: {type: [number, 'null']}
+        previousClose: {type: [number, 'null']}
+        priceChange: {type: [number, 'null']}
+        changePercent: {type: [number, 'null'], description: 百分比數值，例如 1.25 表示 1.25%。}
+        buyPrice: {type: [number, 'null']}
+        sellPrice: {type: [number, 'null']}
+        openPrice: {type: [number, 'null']}
+        highPrice: {type: [number, 'null']}
+        lowPrice: {type: [number, 'null']}
+        volume: {type: [integer, 'null'], format: int64}
+        tradingDate: {type: [string, 'null'], description: 通常為 ISO local date；來源字串會照實保留。}
+        updatedAt:
+          type: [string, 'null']
+          description: ISO local date-time，沒有 UTC offset；因此不宣告 OpenAPI date-time format。
+          pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?$'
+        closed: {type: [boolean, 'null']}
+        source: {type: [string, 'null'], description: 自由字串；不可假設固定 enum。}
+        quoteStatus: {type: [string, 'null'], description: 自由字串；不可假設固定 enum。}
+      additionalProperties: false
+    MarketIndexResponse:
+      type: object
+      description: "`MarketIndexChartDto.Response` 的 21 個 record properties；八組序列等長，序列點允許 null。"
+      required: [market, marketLabel, range, rangeLabel, mode, tradingDate, labels, closes, ma5, ma20, ma60, ma240, volumes, turnovers, hasVolume, previousClose, lastClose, change, changePercent, supportedMarkets, supportedRanges]
+      properties:
+        market: {type: string, enum: [TWSE, DJI, SPX, IXIC, SOX, FTSE, DAX, KOSPI, N225]}
+        marketLabel: {type: string, enum: [台股大盤, 道瓊工業, 標普 500, 那斯達克綜合, 費城半導體, 英國富時 100, 德國 DAX, 韓國 KOSPI, 日經 225]}
+        range: {type: string, enum: [d, 1m, 3m, 6m, 1y, 2y, 5y, 10y]}
+        rangeLabel: {type: string, enum: [當日, 1 個月, 3 個月, 半年, 1 年, 2 年, 5 年, 10 年]}
+        mode: {type: string, enum: [DAILY, INTRADAY]}
+        tradingDate: {type: [string, 'null'], format: date, description: INTRADAY 的交易日；DAILY 固定為 null。}
+        labels:
+          type: array
+          description: DAILY 為 yyyy-MM-dd；INTRADAY 為 HH:mm。
+          items: {type: string}
+        closes: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        ma5: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        ma20: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        ma60: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        ma240: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        volumes:
+          type: array
+          items: {type: [integer, 'null'], format: int64}
+        turnovers: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        hasVolume: {type: boolean}
+        previousClose: {type: [number, 'null'], description: 僅 INTRADAY 可能有值。}
+        lastClose: {type: [number, 'null'], description: 僅 INTRADAY 可能有值。}
+        change: {type: [number, 'null'], description: 僅 INTRADAY 且可比較昨收時有值。}
+        changePercent: {type: [number, 'null'], description: 百分比；僅 INTRADAY 且可比較昨收時有值。}
+        supportedMarkets:
+          type: array
+          minItems: 9
+          maxItems: 9
+          items: {$ref: '#/components/schemas/MarketOption'}
+        supportedRanges:
+          type: array
+          minItems: 8
+          maxItems: 8
+          items: {$ref: '#/components/schemas/RangeOption'}
+      additionalProperties: false
+    NullableDecimalSeries:
+      type: array
+      description: 與 labels 等長；無法計算或不適用的點為 null。
+      items: {type: [number, 'null']}
+    MarketOption:
+      type: object
+      required: [value, label]
+      properties:
+        value: {type: string, enum: [TWSE, DJI, SPX, IXIC, SOX, FTSE, DAX, KOSPI, N225]}
+        label: {type: string, enum: [台股大盤, 道瓊工業, 標普 500, 那斯達克綜合, 費城半導體, 英國富時 100, 德國 DAX, 韓國 KOSPI, 日經 225]}
+      additionalProperties: false
+    RangeOption:
+      type: object
+      required: [value, label]
+      properties:
+        value: {type: string, enum: [d, 1m, 3m, 6m, 1y, 2y, 5y, 10y]}
+        label: {type: string, enum: [當日, 1 個月, 3 個月, 半年, 1 年, 2 年, 5 年, 10 年]}
+      additionalProperties: false
+    LatestAssetsResponse:
+      type: object
+      description: "`LatestAssetsDto.Response`。snapshot.id 與 liveAssets.snapshotId 必須相等；所有股票 valuationSource 都是 TARGET_SESSION_PRICE 時 targetPriceComplete 才為 true，空股票集合的 conjunction 亦為 true。"
+      required: [generatedAt, valuationPolicy, targetPriceComplete, marketStatus, snapshot, liveAssets]
+      properties:
+        generatedAt: {type: string, format: date-time, description: Java Instant，UTC offset/Z 的 ISO-8601 時刻。}
+        valuationPolicy: {type: string, const: TARGET_SESSION_WITH_EXPLICIT_FALLBACK}
+        targetPriceComplete: {type: boolean, description: 每一筆 liveAssets.stocks 的 valuationSource 都等於 TARGET_SESSION_PRICE 時為 true。}
+        marketStatus: {$ref: '#/components/schemas/MarketStatus'}
+        snapshot: {$ref: '#/components/schemas/SnapshotDetail'}
+        liveAssets: {$ref: '#/components/schemas/LiveAssets'}
+      additionalProperties: false
+    MarketStatus:
+      type: object
+      description: "`StockPriceService.getMarketStatus()` 的固定九鍵物件。"
+      required: [twMarketOpen, usMarketOpen, ukMarketOpen, twTime, usTime, ukTime, twTradingDate, usTradingDate, ukTradingDate]
+      properties:
+        twMarketOpen: {type: boolean}
+        usMarketOpen: {type: boolean}
+        ukMarketOpen: {type: boolean}
+        twTime: {$ref: '#/components/schemas/LocalDateTime'}
+        usTime: {$ref: '#/components/schemas/LocalDateTime'}
+        ukTime: {$ref: '#/components/schemas/LocalDateTime'}
+        twTradingDate: {type: string, format: date}
+        usTradingDate: {type: string, format: date}
+        ukTradingDate: {type: string, format: date}
+      additionalProperties: false
+    LocalDateTime:
+      type: string
+      description: Java LocalDateTime 的 ISO 字串，沒有 UTC offset；刻意不使用 date-time format。
+      pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?$'
+    SnapshotDetail:
+      type: object
+      required: [id, snapshotDate, usdExchangeRate, totalDeposit, totalFundValue, totalFundCost, totalStockValue, totalStockCost, totalAssets, estimatedAnnualDividend, realizedGain, notes, deposits, funds, stocks]
+      properties:
+        id: {type: integer, format: int64}
+        snapshotDate: {type: string, format: date}
+        usdExchangeRate: {type: [number, 'null']}
+        totalDeposit: {type: [number, 'null']}
+        totalFundValue: {type: [number, 'null']}
+        totalFundCost: {type: [number, 'null']}
+        totalStockValue: {type: [number, 'null']}
+        totalStockCost: {type: [number, 'null']}
+        totalAssets: {type: [number, 'null']}
+        estimatedAnnualDividend: {type: [number, 'null']}
+        realizedGain: {type: [number, 'null']}
+        notes: {type: [string, 'null']}
+        deposits: {type: array, items: {$ref: '#/components/schemas/DepositSnapshot'}}
+        funds: {type: array, items: {$ref: '#/components/schemas/FundSnapshot'}}
+        stocks: {type: array, items: {$ref: '#/components/schemas/StockSnapshot'}}
+      additionalProperties: false
+    DepositSnapshot:
+      type: object
+      required: [id, bankId, bankDisplayName, depositType, depositDisplayName, amount, originalAmount, currency, annualInterestRate, estimatedAnnualInterest, notes]
+      properties:
+        id: {type: integer, format: int64}
+        bankId: {type: [integer, 'null'], format: int64}
+        bankDisplayName: {type: [string, 'null']}
+        depositType: {type: string}
+        depositDisplayName: {type: string}
+        amount: {type: number, description: 台幣換算金額。}
+        originalAmount: {type: [number, 'null']}
+        currency: {type: [string, 'null']}
+        annualInterestRate: {type: [number, 'null'], description: 百分比，例如 1.5 表示 1.5%。}
+        estimatedAnnualInterest: {type: [number, 'null'], description: 台幣；rate 為 null 或計算結果非正數時為 null。}
+        notes: {type: [string, 'null']}
+      additionalProperties: false
+    FundSnapshot:
+      type: object
+      required: [id, fundName, fundCode, bankId, bankDisplayName, investmentAmount, currentValue, units, estimatedDividend, dividendRate, profit, profitRate]
+      properties:
+        id: {type: integer, format: int64}
+        fundName: {type: string}
+        fundCode: {type: [string, 'null']}
+        bankId: {type: [integer, 'null'], format: int64}
+        bankDisplayName: {type: [string, 'null']}
+        investmentAmount: {type: number}
+        currentValue: {type: number}
+        units: {type: [number, 'null']}
+        estimatedDividend: {type: [number, 'null']}
+        dividendRate: {type: [number, 'null'], description: estimatedDividend/currentValue 的比例值。}
+        profit: {type: number}
+        profitRate: {type: number}
+      additionalProperties: false
+    StockSnapshot:
+      type: object
+      required: [id, stockCode, stockName, market, brokerId, brokerDisplayName, shares, investmentCost, investmentCostTwd, currentValue, profit, profitRate, estimatedDividend, dividendRate, currency, originalCurrencyValue, transactionType, transactionDate, transactionExchangeRate, displayOrder]
+      properties:
+        id: {type: integer, format: int64}
+        stockCode: {type: string}
+        stockName: {type: string}
+        market: {type: string, description: DB 驅動的市場字串，不在 HTTP schema 寫死 enum。}
+        brokerId: {type: [integer, 'null'], format: int64}
+        brokerDisplayName: {type: [string, 'null']}
+        shares: {type: number}
+        investmentCost: {type: number, description: 原始幣別成本。}
+        investmentCostTwd: {type: number}
+        currentValue: {type: number, description: 台幣現值。}
+        profit: {type: number}
+        profitRate: {type: number}
+        estimatedDividend: {type: [number, 'null']}
+        dividendRate: {type: [number, 'null']}
+        currency: {type: [string, 'null']}
+        originalCurrencyValue: {type: [number, 'null']}
+        transactionType: {type: [string, 'null']}
+        transactionDate: {type: [string, 'null'], format: date}
+        transactionExchangeRate: {type: [number, 'null']}
+        displayOrder: {type: [integer, 'null'], format: int32}
+      additionalProperties: false
+    LiveAssets:
+      type: object
+      required: [snapshotId, snapshotDate, exchangeRate, totalDeposit, totalFundValue, liveStockValue, liveTotalAssets, stocks, twMarketOpen, usMarketOpen, ukMarketOpen, priceUpdatedAt]
+      properties:
+        snapshotId: {type: integer, format: int64, description: 必須等於 outer snapshot.id。}
+        snapshotDate: {type: string, format: date}
+        exchangeRate: {type: number}
+        totalDeposit: {type: number}
+        totalFundValue: {type: number}
+        liveStockValue: {type: number}
+        liveTotalAssets: {type: number}
+        stocks: {type: array, items: {$ref: '#/components/schemas/LiveStock'}}
+        twMarketOpen: {type: boolean}
+        usMarketOpen: {type: boolean}
+        ukMarketOpen: {type: boolean}
+        priceUpdatedAt:
+          description: 最新可解析 quote 更新 LocalDateTime；沒有時為 null，無 offset，故不用 date-time format。
+          type: [string, 'null']
+          pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?$'
+      additionalProperties: false
+    LiveStock:
+      type: object
+      required: [stockCode, stockName, market, shares, currentPrice, liveValue, closed, tradingDate, previousClose, priceChange, changePercent, quoteStatus, holdingId, source, targetTradingDate, valuationSource]
+      properties:
+        stockCode: {type: string}
+        stockName: {type: string}
+        market: {type: string}
+        shares: {type: number}
+        currentPrice: {type: [number, 'null']}
+        liveValue: {type: [number, 'null'], description: 台幣估值；無 quote 時可沿用 snapshot currentValue。}
+        closed: {type: [boolean, 'null']}
+        tradingDate: {type: [string, 'null'], description: Quote 原始交易日字串；缺失、malformed 或晚於 target 時照實保留並以 valuationSource 標示。}
+        previousClose: {type: [number, 'null']}
+        priceChange: {type: [number, 'null']}
+        changePercent: {type: [number, 'null']}
+        quoteStatus: {type: [string, 'null'], description: Quote 原始自由字串。}
+        holdingId: {type: integer, format: int64}
+        source: {type: [string, 'null'], description: Quote 原始自由字串。}
+        targetTradingDate: {type: string, format: date}
+        valuationSource: {type: string, enum: [TARGET_SESSION_PRICE, PREVIOUS_SESSION_PRICE, UNVERIFIED_SESSION_PRICE, SNAPSHOT_VALUE]}
+      additionalProperties: false
+    UsdTwdResponse:
+      type: object
+      description: "`UsdTwdPublicDto.Response`。history 日期嚴格升冪、不可重複且介於 requestedStartDate..requestedEndDate（含首尾）；count == history.length。狀態組合：INACTIVE 僅 LAST_AVAILABLE；UNAVAILABLE 僅 HISTORY+STALE；ACTIVE 不得 LAST_AVAILABLE，LIVE 僅銀行來源、INDICATIVE 僅 YAHOO。"
+      required: [pair, baseCurrency, quoteCurrency, requestedStartDate, requestedEndDate, refreshIntervalSeconds, timezone, liveUpdateStatus, spot, count, history]
+      properties:
+        pair: {type: string, const: USD/TWD}
+        baseCurrency: {type: string, const: USD}
+        quoteCurrency: {type: string, const: TWD}
+        requestedStartDate: {type: string, format: date}
+        requestedEndDate: {type: string, format: date}
+        refreshIntervalSeconds: {type: integer, format: int32, const: 2}
+        timezone: {type: string, const: Asia/Taipei}
+        liveUpdateStatus: {type: string, enum: [ACTIVE, INACTIVE, UNAVAILABLE]}
+        spot: {$ref: '#/components/schemas/UsdTwdSpot'}
+        count: {type: integer, format: int32, minimum: 1, description: 必須等於 history 的項目數。}
+        history:
+          type: array
+          minItems: 1
+          description: 日期升冪、無重複且落在 requested range 內。
+          items: {$ref: '#/components/schemas/UsdTwdHistoryPoint'}
+      additionalProperties: false
+    UsdTwdSpot:
+      type: object
+      description: Timestamp 組合固定：HISTORY 的兩個 timestamp 都為 null；BANK_OF_TAIWAN 的 polledAt 必填而 sourceUpdatedAt 為 null；MEGA_BANK/YAHOO 兩者都必填且 sourceUpdatedAt 不得晚於 polledAt 120 秒。
+      required: [date, buyRate, sellRate, midRate, source, polledAt, sourceUpdatedAt, quoteStatus]
+      properties:
+        date: {type: string, format: date}
+        buyRate: {type: number, exclusiveMinimum: 0}
+        sellRate: {type: number, exclusiveMinimum: 0, description: 必須大於等於 buyRate。}
+        midRate: {type: number, exclusiveMinimum: 0, multipleOf: 0.0001, description: (buyRate+sellRate)/2，HALF_UP scale 4。}
+        source: {type: string, enum: [BANK_OF_TAIWAN, MEGA_BANK, YAHOO, HISTORY]}
+        polledAt: {type: [string, 'null'], format: date-time}
+        sourceUpdatedAt: {type: [string, 'null'], format: date-time}
+        quoteStatus: {type: string, enum: [LIVE, INDICATIVE, STALE, LAST_AVAILABLE]}
+      oneOf:
+        - properties:
+            source: {const: HISTORY}
+            polledAt: {type: 'null'}
+            sourceUpdatedAt: {type: 'null'}
+        - properties:
+            source: {const: BANK_OF_TAIWAN}
+            polledAt: {type: string, format: date-time}
+            sourceUpdatedAt: {type: 'null'}
+        - properties:
+            source: {enum: [MEGA_BANK, YAHOO]}
+            polledAt: {type: string, format: date-time}
+            sourceUpdatedAt: {type: string, format: date-time}
+      additionalProperties: false
+    UsdTwdHistoryPoint:
+      type: object
+      required: [date, buyRate, sellRate, midRate]
+      properties:
+        date: {type: string, format: date}
+        buyRate: {type: number, exclusiveMinimum: 0}
+        sellRate: {type: number, exclusiveMinimum: 0, description: 必須大於等於 buyRate。}
+        midRate: {type: number, exclusiveMinimum: 0, multipleOf: 0.0001, description: (buyRate+sellRate)/2，HALF_UP scale 4。}
+      additionalProperties: false
+  responses:
+    NginxBadGateway:
+      description: Nginx 無法連接或取得 upstream 回應；gateway 不攔截、不改寫成 JSON 或空 200。
+      content:
+        text/html:
+          schema: {$ref: '#/components/schemas/NginxErrorHtml'}
+          example: "<html><head><title>502 Bad Gateway</title></head><body><center><h1>502 Bad Gateway</h1></center><hr><center>nginx</center></body></html>"
+    NginxGatewayTimeout:
+      description: Nginx upstream timeout（gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒）；不是 RFC 7807 JSON。
+      content:
+        text/html:
+          schema: {$ref: '#/components/schemas/NginxErrorHtml'}
+          example: "<html><head><title>504 Gateway Time-out</title></head><body><center><h1>504 Gateway Time-out</h1></center><hr><center>nginx</center></body></html>"
+  examples:
+    LatestAssetsSynthetic:
+      summary: 去識別化、非實際持倉的穩定合成範例
+      value:
+        generatedAt: '2026-01-15T02:00:00Z'
+        valuationPolicy: TARGET_SESSION_WITH_EXPLICIT_FALLBACK
+        targetPriceComplete: true
+        marketStatus:
+          twMarketOpen: true
+          usMarketOpen: false
+          ukMarketOpen: false
+          twTime: '2026-01-15T10:00:00'
+          usTime: '2026-01-14T21:00:00'
+          ukTime: '2026-01-14T13:00:00'
+          twTradingDate: '2026-01-15'
+          usTradingDate: '2026-01-14'
+          ukTradingDate: '2026-01-14'
+        snapshot:
+          id: 900001
+          snapshotDate: '2026-01-15'
+          usdExchangeRate: 32.0000
+          totalDeposit: 100000.00
+          totalFundValue: 50000.00
+          totalFundCost: 48000.00
+          totalStockValue: 80000.00
+          totalStockCost: 72000.00
+          totalAssets: 230000.00
+          estimatedAnnualDividend: 2600.00
+          realizedGain: 1200.00
+          notes: 去識別化範例
+          deposits:
+            - {id: 910001, bankId: 501, bankDisplayName: 範例銀行, depositType: DEMAND_TWD, depositDisplayName: DEMAND_TWD, amount: 100000.00, originalAmount: null, currency: TWD, annualInterestRate: 0.8000, estimatedAnnualInterest: 800.00, notes: null}
+          funds:
+            - {id: 920001, fundName: 範例平衡基金, fundCode: EXM-FUND, bankId: 501, bankDisplayName: 範例銀行, investmentAmount: 48000.00, currentValue: 50000.00, units: 100.0000, estimatedDividend: 1000.00, dividendRate: 0.020000, profit: 2000.00, profitRate: 0.041667}
+          stocks:
+            - {id: 930001, stockCode: EXM-TW-001, stockName: 範例科技, market: 台股, brokerId: 601, brokerDisplayName: 範例券商, shares: 1000.00000, investmentCost: 72000.00, investmentCostTwd: 72000.00, currentValue: 80000.00, profit: 8000.00, profitRate: 0.111111, estimatedDividend: 1600.00, dividendRate: 0.020000, currency: TWD, originalCurrencyValue: 80000.0000, transactionType: 買, transactionDate: '2026-01-02', transactionExchangeRate: null, displayOrder: 1}
+        liveAssets:
+          snapshotId: 900001
+          snapshotDate: '2026-01-15'
+          exchangeRate: 32.0000
+          totalDeposit: 100000.00
+          totalFundValue: 50000.00
+          liveStockValue: 80500.00
+          liveTotalAssets: 230500.00
+          stocks:
+            - {stockCode: EXM-TW-001, stockName: 範例科技, market: 台股, shares: 1000.00000, currentPrice: 80.50, liveValue: 80500.00, closed: false, tradingDate: '2026-01-15', previousClose: 79.50, priceChange: 1.00, changePercent: 1.257862, quoteStatus: LIVE, holdingId: 930001, source: SYNTHETIC_EXAMPLE, targetTradingDate: '2026-01-15', valuationSource: TARGET_SESSION_PRICE}
+          twMarketOpen: true
+          usMarketOpen: false
+          ukMarketOpen: false
+          priceUpdatedAt: '2026-01-15T10:00:00'
