@@ -109,7 +109,7 @@ bash .claude/hooks/spec-review-pass.sh --status # 查目前狀態
 > 另注意 `core.hooksPath` 設的是**絕對路徑**、指向主 clone；改 `scripts/git-hooks/`
 > 底下的檔案要 merge 進 main 後才會實際生效。
 
-### Subagent 一律與主 Agent 使用相同模型（例外：skill 可自行釘住模型）
+### Subagent 一律與主 Agent 使用相同模型（例外：skill 可自行釘住模型；前端 Vue 變更固定模型）
 
 **所有 subagent**（包含實作、`spec-auditor`、`arch-auditor`，以及任何臨時派出的
 subagent）一律使用與當前主 agent **完全相同的模型與 reasoning effort**。
@@ -117,7 +117,7 @@ subagent）一律使用與當前主 agent **完全相同的模型與 reasoning e
 省略 subagent 的 model／effort override；若工具要求明確指定，則兩者必須與主 agent
 一致。相同模型無法使用時應停止並回報，不得靜默降級。
 
-**唯一例外：skill 可在自己的定義檔裡指定特定模型。** skill 自行宣告的模型／effort
+**例外一：skill 可在自己的定義檔裡指定特定模型。** skill 自行宣告的模型／effort
 **優先於**上述繼承規則——那是 skill 作者針對該工作負載的刻意選擇，不算降級。
 例外只涵蓋「skill 定義檔裡的宣告」：skill **執行過程中**再派出去的 subagent，
 仍須沿用該 skill 當下的模型，不得再往下降；未宣告模型的 skill 一律繼承主 agent。
@@ -134,6 +134,14 @@ subagent）一律使用與當前主 agent **完全相同的模型與 reasoning e
 > skill loader 只認得 `name`／`description`／`metadata`／`interface`／`dependencies`／
 > `policy`／`agents`／`assets`，**沒有 `model` 欄位**，寫了也會被忽略，因此只能在內文
 > 要求用 `spawn_agent` 帶 `model` 參數——那是指令引導，不是硬性保證。
+
+**例外二：新增、修改、刪除前端程式（Vue）時，開的 subagent 固定使用下列模型，
+不繼承主 agent、不隨主 agent 當下用什麼模型而變動。**
+
+| Harness | 固定模型 / effort |
+|---|---|
+| Claude Code | `sonnet 5` ／ `max` |
+| Codex | `Luna 5.6` ／ `max` |
 
 **第 5 步「實作程式碼」不得由主 agent 直接動手，一律開 subagent 執行**，完成後
 回到主 agent 彙整結果（驗收、跑閘門、commit）：
