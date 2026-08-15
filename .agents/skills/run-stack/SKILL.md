@@ -19,7 +19,8 @@ stop and say so rather than silently falling back.
 > `description`, `metadata`, `interface`, `dependencies`, `policy`, `agents`, `assets`), so
 > this instruction is the only place the pin can live. The Claude Code copy of this skill at
 > `.claude/skills/run-stack/SKILL.md` uses `model:` / `effort:` frontmatter instead, and pins
-> `sonnet` / `high` — the two harnesses deliberately differ. Keep both in sync when either changes.
+> `sonnet 5` / `high` — the two harnesses use different model identifiers by necessity (Codex
+> has no Sonnet), but the effort level matches. Keep both in sync when either changes.
 
 ## Stack shape (5 services + 2 datastores)
 
