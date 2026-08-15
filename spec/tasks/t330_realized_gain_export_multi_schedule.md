@@ -30,7 +30,8 @@ Task 326 已在「歷年資產／最新資產匯出」把同一個問題解掉�
 - [ ] **330.3 DTO 契約：**
   - `RealizedGainExportDto.SettingResponse` 改為 `{enabled,outputSubpath,lastRunAt,lastRunStatus,baseDir,gdriveEnabled,gdriveSubpath,gdriveRemote,gdriveLastRunAt,gdriveLastStatus,gdriveSelfCheckWarning,times}`；`times` 每項 `{id,runHour,runMinute,enabled,lastRunAt,lastRunStatus}`，依時分／id 排序。Top-level `runHour/runMinute` 從 JSON 契約移除（如需保留 Java 端 convenience accessor，比照 `ExportScheduleDto` 加 `@JsonIgnore`）。
   - `SettingRequest` 改為 `{enabled,outputSubpath,gdriveEnabled,gdriveSubpath,times:[{runHour,runMinute,enabled}]}`，不接受 client id，採整包取代。
-  - `RunNowResponse` 七欄與 BFF endpoint paths 全部不變。`RealizedGainBffController` 維持 `Map<String,Object>` passthrough（確認不會漏掉 `times`），不新增 DTO 鏡像。
+  - `RunNowResponse` 七欄與 BFF `/api/bff/realized-gain/**` endpoint paths 全部不變。`RealizedGainBffController` 維持 `Map<String,Object>` passthrough（確認不會漏掉 `times`），不新增 DTO 鏡像。
+  - 範圍聲明：`RealizedGainBffRoutes` 的 `/api/realized-gains/**` 泛用 route 會讓新契約同時從非 `/api/bff/...` 路徑曝光。那是既有的零消費者技術債（CLAUDE.md 已列為待清理項），本次**不動它、也不得新增依賴它的呼叫**。
 - [ ] **330.4 設定讀寫：**
   - `getForCurrentUser()` 無 DB parent 時回 transient default parent ＋一列 `08:00 enabled=true`，不得寫 DB；DB parent 的 `times` 為空時（rolling upgrade／手動 fixture）以 legacy 時分補一列，同樣不寫 DB。
   - `updateForCurrentUser()` 加 `@Transactional`。先完整驗證再異動：times 不得 null/empty（「至少需要一個執行時間」）；hour/minute 合法（「執行時間必須介於 00:00～23:59」）；同 request 無重複時分（「執行時間不可重複」）；parent `enabled=true` 時至少一列 child enabled（「啟用排程時至少需啟用一個時間」）。錯誤訊息與 `ExportScheduleService` 逐字一致。本機路徑（`normalizeSubpath` ＋ `resolveDir` 防跳脫）與 Drive 的 null 解析／主要管理者／必填／self-check 語意不變。
@@ -53,13 +54,14 @@ Task 326 已在「歷年資產／最新資產匯出」把同一個問題解掉�
   - `frontend/src/api/index.js` 的 `realizedGain` 命名空間若對 schedule payload 有形狀假設，一併更新；BFF 路徑不變。
 - [ ] **330.8 排程列表與 active docs：**
   - `SchedulePublicBffController.JOBS` 不增減項目，只把既有「已實現損益匯出」描述改為「每分鐘檢查已實現損益頁設定的多個每日時間，命中即同時產出 JSON 與 Excel 兩份…」；annotation count 與列表總數（51 筆）維持。若該 controller 有計數斷言／測試，須確認仍通過。
-  - Requirement 39、design 舊 schema/guard 段落已就地註記由 Requirement 72 取代（本次 spec 變更已完成）；實作時若發現其他殘留單時間敘述（含 `CLAUDE.md`／`spec/steering/`）一併同步。
+  - Requirement 39 的三條相關 AC（每日排程自動匯出／owner-scoped 設定表／排程執行機制與自癒）與 design R39 段的 schema 表、資料流、API 表，**已在本次 spec 變更就地註記由 Requirement 72 取代**。實作時仍須再掃一次，若發現其他殘留單時間敘述（含 `CLAUDE.md`／`spec/steering/`／其他任務檔對已實現損益排程「每日單一時間」的引用）一併同步——不得假設本次已窮盡。
 - [ ] **330.9 測試：**
   - Migration／repository：舊 parent 轉一 child 且時分、guard、status 無損；FK cascade／unique／checks 存在；parent 舊三欄仍保留既有 nullability 的 rollback shadow、摘要兩欄保留，且 migration 後舊 image schema 仍可啟動。
   - Service：transient default、times 排序、多時間整包取代、重複／空／非法／總啟用但無 active 驗證、相同時分保 guard、新時分無 guard、owner isolation，以及 representative parent shadow 的選擇與同步。
   - Scheduler：第一 child 已 guard 不阻止第二 child；兩個 overdue 都執行；第一個失敗仍執行第二個；disabled parent/child 不執行；每 child 成功失敗都 guard；parent 摘要指向最後完成的一輪；startup self-heal 與 minute tick 共用 CAS 且不重複執行；背景走 `realizedGainsDocForOwner`（owner-scoped）而非全域 doc。
-  - run-now：既有 parent 不修改 child guard/status；無 parent 時只建立 disabled parent ＋未消耗的 `08:00` child；雙格式、本機先行、Drive best-effort 與 self-check 測試不回歸。更新所有手動建構 `RealizedGainExportScheduleService`／`RealizedGainExportDto` 的既有測試（至少 `GdriveSelfCheckTest`、`SingleTableScheduleServiceDualFormatTest`）。
-  - Frontend build／靜態測試釘住 add/remove、times payload、重複驗證與 legacy fallback；BFF passthrough response 不漏 `times`。
+  - run-now：既有 parent 不修改 child guard/status；無 parent 時只建立 disabled parent ＋未消耗的 `08:00` child；雙格式、本機先行、Drive best-effort 與 self-check 測試不回歸。
+  - **唯一需要改的既有測試**是 `backend/src/test/java/com/steven/assets/service/export/SingleTableScheduleServiceDualFormatTest.java`（手動 `new RealizedGainExportScheduleService(...)`，並以 `RealizedGainExportSchedule.builder().runHour(...)` 驅動 parent 級排程）；全樹沒有其他測試手動建構 `RealizedGainExportScheduleService`／`RealizedGainExportDto`（`GdriveSelfCheckTest` 測的是 `GdriveSelfCheck`，與本任務無關，不要動它）。新增的 service／scheduler 測試請比照 Task 326 為 `ExportScheduleService` 新增的那組。
+  - Frontend build／靜態測試釘住 add/remove、times payload、重複驗證與 legacy fallback。BFF 側目前**沒有**任何 realized-gain 測試（`bff/src/test` 無對應檔），故「passthrough 不漏 `times`」是**新建**測試而非更新既有測試。
 - [ ] **330.10 Docker 實機驗證與清理：**
   - 從本 worktree rebuild/recreate `business-services`、`bff`、`frontend`（JVM 服務一律 `--no-cache`），bounded wait healthy；確認 Liquibase changeset 套用一次且 schema／legacy migration 正確。
   - 使用實際登入 owner 先備份原設定（parent 與 child 內容雜湊），再儲存至少 `08:00`／`12:00` 兩列（或以當前時間前後的受控等價時間），GET 讀回排序、per-time status 與 representative parent shadow；以受控 DB guard/time 案例觸發 runner，證明同日兩列各跑一次、產出兩份格式且第二輪更新同名檔。
