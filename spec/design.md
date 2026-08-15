@@ -811,7 +811,7 @@ BackupRecord          (Google Drive 備份檔本地索引，UNIQUE(folder, filen
 
 # AI 市場分析 / 新聞（Requirement 31、36）
 DailyMarketAnalysis      (今日股市分析結果，PK = analysis_date；bias/confidence/summary/key_factors/news_highlights/tw_context/us_context/model/status)
-MarketAnalysisSetting    (市場分析設定，單列 id = 1；model / effort / enabled；web_search 相關欄於 Task 179 移除)
+MarketAnalysisSetting    (市場分析設定，單列 id = 1；engine / model / effort / enabled；web_search 相關欄於 Task 179 移除；engine 於 Requirement 77 / Task 336 新增，值 local｜llm、預設 local，model 與 effort 僅在 engine=llm 時生效)
 News                     (→ news_headline，爬蟲新聞標題，全域參考、無 owner；供今日分析與公開資訊 SRPP JSON)
 CrawlerSchedule          (→ crawler_schedule，公開資訊爬蟲執行時間設定，全域參考、無 owner；一列一時間點〔crawler_key + run_hour + run_minute + enabled〕；由「爬蟲資訊查詢」頁維護、NewsPoller 每分鐘讀取；Requirement 38)
 CrawlerExportSetting     (→ crawler_export_setting，公開資訊爬蟲輸出檔案路徑設定，全域參考、無 owner；一爬蟲一列〔crawler_key UNIQUE + output_subpath〕；由「爬蟲資訊查詢」頁維護、NewsPoller 每輪寫檔前讀取；Requirement 38 / Task 212。Requirement 50 / Task 245 加 gdrive_enabled + gdrive_subpath + gdrive_last_run_at + gdrive_last_status：本機照寫不變，Drive 為附加副本；**後兩欄由 ext 的 NewsPoller 寫入**——刻意的所有權例外，上傳結果只有 ext 知道，但 ext 只碰這兩欄、UPDATE 命中 0 列不得 upsert，列的所有權仍在 backend)
@@ -821,7 +821,7 @@ MarketAnalysisSendTime   (→ market_analysis_send_time，分析寄送時間，�
 AppUser (1) ──── (1) InvestmentProfile           (owner_user_id UNIQUE；理財條件，記住免重填)
 AppUser (1) ──── (N) InvestmentPlannedExpense     (owner_user_id；特定日期大筆花費，一使用者多筆)
 AppUser (1) ──── (N) PortfolioAdvice              (owner_user_id；歷次建議，條件快照刻意 denormalize)
-PortfolioAdviceSetting   (配置建議設定，單列 id = 1；model / effort / web_search_max_uses)
+PortfolioAdviceSetting   (配置建議設定，單列 id = 1；engine / model / effort / web_search_max_uses；engine 於 Requirement 79 / Task 338 新增，值 local｜hybrid｜llm、預設 local——local 完全本機、hybrid 數字本機算而 LLM 只寫敘事且強制關閉 web_search、llm 為現行完整版)
 
 # 排程匯出（Requirement 34 / 37 / 39 / 49 / 69 / 73）
 # 「一功能一張排程表」——刻意不合併，理由見本文件 Requirement 39 之關鍵設計決策
@@ -1336,8 +1336,8 @@ Google Drive 上每一份備份檔的本地索引；UI 列表 / 還原選單一�
 
 ### Base URL
 - Browser UI（本機）: `http://localhost/`；登入後頁面 API 由 frontend Nginx 轉至 BFF
-- Docker 外部 API（本機）: `http://127.0.0.1:9090`（六條路由：五支唯讀 exact GET ＋ Requirement 71 新增的一支寫入 exact `POST /api/public/crawler-data/rescan`）
-- Docker 外部 API（遠端）: `https://<device>.<tailnet>.ts.net:9090`（Tailscale Serve 掛載相同六條 exact path；不使用 Funnel）
+- Docker 外部 API（本機）: `http://127.0.0.1:9090`（八條路由：七支唯讀 exact GET ＋ Requirement 71 新增的一支寫入 exact `POST /api/public/crawler-data/rescan`。唯讀七支＝原始五支 ＋ Requirement 78／Task 337 新增的 `GET /api/public/market-analysis/today`、`GET /api/public/portfolio-advice/latest`）
+- Docker 外部 API（遠端）: `https://<device>.<tailnet>.ts.net:9090`（Tailscale Serve 掛載相同八條 exact path；不使用 Funnel）
 - Docker network 內部: `http://bff:8080`／`http://external-materials-service:8080`
 
 ### Endpoints
@@ -7110,3 +7110,226 @@ Migration `v1.104.0-realized-gain-export-schedule-multi-time.sql`（實作前須
 `RealizedGainView.vue` 將 `scheduleTime` 單值改成帶穩定 client key 的 `scheduleTimes` rows，版面與 `AssetHistoryView.vue` 對齊：每列時間 picker、enabled switch、移除鈕（僅剩一列時 disabled）與該列 last-run 資訊，下方「＋ 新增時間」。儲存前驗證至少一列、時分合法、無重複；總開關開啟時至少一列啟用。載入以 `times[]` 為主，僅為 rolling upgrade 將舊 response 的 top-level `runHour`／`runMinute` 映成一列；新後端回空 `times` 顯示錯誤、不靜默補預設。共用 output／Drive picker、run-now、整體 last-run、雙格式說明維持原位置與語意，說明文字改為「於下列每個啟用時間更新同日最新檔，較晚時間覆寫同名檔」。
 
 排程列表只更新既有一筆「已實現損益匯出」的描述，不增減 job：annotation 仍是同一個每分鐘 poll，時間點是 DB 動態設定，JOBS 總數維持 51 筆。
+
+---
+
+## Requirement 77／Task 336：今日股市分析本機規則引擎（LLM 成本歸零，可切回）
+
+### 為什麼可以本機做
+
+現行 `MarketAnalysisService.submitBatch` 的輸入自 Task 179 移除 `web_search` 後**已是 100% 本地 DB**：`twse_index_daily_history`（台股大盤日線）、`us_index_daily_history`（DJI／SPX／IXIC／SOX）、`news_headline`（本地爬蟲新聞）。程式把這些結構化數值拼成文字 prompt、送給 Opus、再把模型回的 JSON 讀回結構化欄位。其中**技術面與籌碼面本來就是算術**——尤其 `twse_institutional_daily` 已存 typed numeric（`foreign_net`／`trust_net`／`dealer_net`），現行卻是轉成文字塞進 prompt 讓模型讀回來，本機直接算反而更精準且可稽核。
+
+真正需要 LLM 的只有兩件事：`summary` 的自然語言研判，以及跨領域新聞因果推理。兩者的退化是明示接受的代價（見 Requirement 77 ⚠ 段），切換開關即為此存在。
+
+### 分岔點與資料流
+
+```
+generateInternal(date, trigger, skipIfAlreadyOk, resetEmailSent)
+  │  generateLock（既有，兩條路徑共用）
+  │  PROCESSING / skipIfAlreadyOk 守門（既有，兩條路徑共用）
+  ├─ resolveEngine() == "local"  ──▶ generateLocal(...)     ← 新增，同步
+  │       twseCloses() / usCloses() / fetchRecentLocalNews()  ← 既有載入方法，重用
+  │       + TwseInstitutionalDailyRepository（新增輸入）
+  │       + TechnicalIndicatorService.computeFromSeries(純 DB 完成日序列)  ← 見下方「價基一致性」
+  │            ▼
+  │       LocalMarketAnalysisEngine.evaluate(...)  ← 純函式，無 Repository / 無 IO / 無時鐘
+  │            ▼  MarketAnalysisResult（與 LLM 路徑同一個 record）
+  │       applyLocalResult() → STATUS_OK → 寄信判斷（既有條件）→ save
+  │         ↑ 不得用既有 applyResult()：它最後一行是 sanitizeNews(...)，
+  │           會對非 TRUSTED_LOCAL_NEWS_HOSTS 的連結 fetchPublishedDate() 回抓原文
+  │           （news-verify-published-date 預設 true），在號稱零外部呼叫的路徑上發 outbound HTTP
+  │       model = "local-rule-engine:v1"，batch_id 恆為 null
+  └─ resolveEngine() == "llm"   ──▶ submitBatch(...)         ← 既有，一行不改
+          → PROCESSING + batch_id → pollPendingBatches() 收尾
+```
+
+兩條路徑寫入同一張 `daily_market_analysis`、同一組欄位、同一個 `MarketAnalysisResult` record，故前端、BFF、email dispatcher、歷史列表全部無須為引擎分岔而改。`pollPendingBatches()` 只撈 `STATUS_PROCESSING`，本機路徑不產生該狀態，天然不互相干擾。
+
+### `LocalMarketAnalysisEngine` 的邊界
+
+**純函式核心**是這個設計的重點，不是風格偏好：`MarketAnalysisService` 已 1101 行且職責含批次送出、批次收尾、新聞消毒、發布日回抓，評分邏輯再併進去就無法在不啟 Spring context 下測試（CLAUDE.md 明列的可測試性鐵則）。故 IO 全部留在 `MarketAnalysisService`，引擎只接受已載入的值。
+
+**大盤 MA／KD 不得在本引擎重算。** `TechnicalIndicatorService.java:338`（`taiexSeriesAsc(...)` 的方法 javadoc）明載「全站 KD 只有 `kdSeriesAsc` 這一份」。複製第二份會讓同一個大盤 KD 在不同頁面給出不同數字——正是 CLAUDE.md「同義欄位、同一 business service API」要防的情形。
+
+**但入口不能用 `computeAll("0000","台股")`——那會混用價基。** 該路徑內部委派的 `computeAllForTaiex()`（`:546`）在最新日線不是今日時，會從 Redis 取即時價**合成一列今日 bar 併入序列**（`:551-563`）。而本機引擎的收盤／量能訊號取自 `MarketAnalysisService.twseCloses()`（`:744-753`，只讀 `twse_index_daily_history`，今日列要等盤後 poller 才入庫）。兩者相接的後果是：**盤中觸發時 MA／KD 已含今日即時價、收盤卻仍是前一交易日**——本專案已有同類前例（design 觀察清單 Task 263「畫面同時呈現『今天的指標』與『昨天的股價』」）。而分析確實可能在盤中觸發：`MarketAnalysisScheduler` 是每分鐘 tick 比對使用者可自訂的多個 `market_analysis_send_time`，管理者也可隨時手動 `POST /api/market-analysis/generate`。
+
+**正解是既有的 `computeFromSeries(List<StockPriceHistory>)`**（`:176`，**package-private**，而 `MarketAnalysisService` 就在同一個 package `com.steven.assets.service`，可直接呼叫、無須改任何可見性）。它的既有 javadoc 正是為此而寫：
+
+> 對已準備好的降序 OHLC 序列使用同一套 MA／KD 核心。交易雷達會先還原權息再呼叫，**避免在此服務重複資料存取或混用價基**。
+
+故本機路徑餵入**純 DB 完成日序列**（`twse_index_daily_history` 映射成 `StockPriceHistory`，映射邏輯沿用既有 private static `toRow(...)`，`:327-334`；需將其放寬為 package-private——那是純欄位映射、不是計算入口，不會製造繞過 `isTaiex(...)` 的第二條路徑）。如此同時滿足三件事：用同一份 KD 核心、價基與收盤同源、不動任何 public API。
+
+**連帶影響測試斷言**：因為交易雷達走的是會併 live 的 `computeAll(TAIEX_CODE, TW_MARKET)`，「本頁與交易雷達的大盤 KD 數值恆等」在盤中**本來就不成立**，不得如此斷言；正確的斷言是「兩者走同一支 `computeFromSeries`／`kdSeriesAsc` 核心，餵入相同序列時輸出相同」。RSI／MACD／量能若既有實作只適用個股序列，得於本引擎新增，但須註明與 `ExtendedIndicators` 同名指標的參數是否一致。
+
+### 評分結構
+
+| 面向 | 訊號 | 資料來源 |
+|---|---|---|
+| 台股技術面 | 收盤對 MA5／MA20／MA60／MA240 位置與排列、KD 值與交叉、MACD OSC 方向、RSI 超買超賣、量能對 20 日均值比 | `twse_index_daily_history`（含 `trade_value`）、`TechnicalIndicatorService` |
+| 美股連動 | SOX／IXIC／SPX 最新交易日漲跌幅（SOX 權重最高） | `us_index_daily_history` |
+| 籌碼面 | 外資最新日與近三日累計買賣超（外資權重高於投信／自營） | `twse_institutional_daily`（僅 `status='AVAILABLE'` 且四欄完整） |
+
+每個訊號回 `[-2,+2]` 方向分 ＋ 固定權重；命中非零者**必須**在 `keyFactors` 產生一條含實際數值的中文敘述。資料不足的訊號**不計分也不進 keyFactors**——不得以 0 分當中性值，否則「沒資料」與「訊號中性」在總分上不可分辨。
+
+`bias` 由正規化總分過對稱門檻決定（具名常數，不得散落魔術數字）。`confidence` **不由總分絕對值換算**（那會讓單一極端訊號與多訊號一致得到相同信心），而是「與最終 bias 同向訊號的加權占比」再乘上「實際計分訊號數 ÷ 訊號總數」的完整度折減。
+
+### `newsHighlights`：排序挑選，不做語意理解
+
+從既有 `fetchRecentLocalNews()` 的結果挑 3～6 則，排序鍵：(1) 非 `news` category 的量化快照優先（`twse-institutional`／`twse-turnover`／`fx`／`us-market`／`kr-market`／`kr-intraday`／`ma-cross`）——與既有 `buildLocalNewsBlock()` 讓 TWSE 量化資訊排在一般新聞之前是同一個理由；(2) 標題財經關鍵詞權重；(3) `published_at` 由新到舊。各欄照 `news_headline` 原樣填。
+
+**不套 `sanitizeNews()`。** 該方法的三層防護（精確日期驗證、回抓原文校正日期、中港澳地區封鎖）針對的是**模型自報**的不可信輸出；本路徑資料直接來自本地爬蟲，發布日已由 producer 驗證，既有 `buildLocalNewsBlock` 註解已載明本地新聞「不經 sanitizeNews；那層只處理模型輸出」。惟 `url` 仍過 `safeHttpUrl()` 只留 http(s)——那是前端 `<a href>` XSS 的縱深，與資料可信度無關。
+
+### Schema
+
+```sql
+-- v1.105.0-market-analysis-engine.sql（冪等；建檔前先查運行中 databasechangelog 是否已佔用該版號）
+ALTER TABLE market_analysis_setting ADD COLUMN IF NOT EXISTS engine VARCHAR(16) NOT NULL DEFAULT 'local';
+UPDATE market_analysis_setting SET engine = 'local' WHERE engine IS NULL;
+```
+
+既有列一律回填 `local`——若沿用 `llm`，部署後成本毫無變化，本 Requirement 就白做了。
+
+### 不變的部分
+
+`MarketAnalysisScheduler` 每分鐘 tick 比對 `market_analysis_send_time`、交易日閘門、`generateForSend` 的強制重跑與 `email_sent_at` 重置、`MarketAnalysisEmailDispatcher.dispatchDaily`、寄信前的第二次交易日驗證——全部維持既有語意，兩條路徑一致適用。寄信時機在本機路徑由「批次收尾時」變為「產生當下」，但**判斷條件三項不變**（`STATUS_OK`、`email_sent_at == null`、`isTwTradingDay`）。
+
+### 前端
+
+`TodayMarketAnalysisView.vue` 於既有兩個下拉之前新增「分析引擎」下拉。選 `local` 時「分析模型」「思考深度」**停用而非隱藏**——它們仍是 `llm` 模式的有效設定，隱藏會讓使用者以為設定遺失。頁面常駐說明須載明 `confidence` 是訊號一致性、非回測勝率。BFF `Mono.zip` 聚合形狀不變，`settings` 因 DTO 加欄而自然增長。
+
+---
+
+## Requirement 78／Task 337：今日股市分析與資產配置建議唯讀 API（Nginx 9090 第七、八條路由）
+
+### 邊界：這兩條落在 Requirement 66 原始定性之內
+
+與 Requirement 71 的第六條不同（那條是唯一有副作用的 POST，明文修訂了 Requirement 66 的「純唯讀」邊界），本 Requirement 的兩條**純唯讀、零副作用**，不修訂任何既有邊界。9090 gateway 的所有既有規則——唯一 host port `127.0.0.1:9090`、Nginx exact allowlist、`/internal/*` 永不對外、frontend port 80 二次防線、Tailscale path-scoped Serve、不得以 `Tailscale-*` header 做授權——原樣適用。加上這兩條後，allowlist 為**八條：七條唯讀 GET ＋ 一條寫入 POST**。
+
+### 風險等同性聲明（明示，不得因有先例就略過）
+
+`/api/public/portfolio-advice/latest` 回傳主要管理者的**個人化資產配置建議**。其暴露等級與既有第四條 `/api/assets/latest`（Requirement 68，已將全部資產金額匿名放行）相同或更低——後者外洩實際金額，本條外洩配置建議文字。實際的保護只有兩層：9090 只綁 `127.0.0.1`，遠端只經 Tailscale 私網 identity。**路由本身無任何鑑權。**
+
+### 兩條路由的結構差異
+
+| | 第七條 `/api/public/market-analysis/today` | 第八條 `/api/public/portfolio-advice/latest` |
+|---|---|---|
+| 資料 owner 屬性 | 全域參考（`daily_market_analysis` 無 `owner_user_id`、不受 `TenantFilterAspect` 過濾） | **owner-scoped** |
+| owner 解析 | 不需要 | **必須**走 configured-admin bootstrap |
+| 上游 business 端點 | 既有 `GET /api/market-analysis/today` | 既有 `GET /api/portfolio-advice/latest` |
+| 新增 business 端點 | 無 | 無 |
+
+第八條**必須逐項沿用** `LatestAssetsPublicService` 的既有模式：`users.configuredAdmin()` → 檢查 `configuredAdmin()` 與 `isActive()` → 顯式帶 `HDR_USER_ID`／`HDR_USER_ROLE`／`HDR_USER_STATUS` → **`.contextWrite(ctx -> ctx.delete(AuthConstants.CTX_IDENTITY))`**。最後這步遺漏即為安全缺陷：共用 `WebClient` 的 tenant filter 會讀 Reactor context，保留登入者／代看者身分會覆寫上面顯式指定的 header，讓公開資料錯指向呼叫者。須有專屬測試模擬「context 已有另一個登入者」並斷言下游收到的仍是 configured admin。
+
+**第八條只讀，絕不觸發 `POST /api/portfolio-advice/generate`**——那是有 LLM 成本的寫入操作。尚無任何一筆時回 business 既有的「無資料」形狀，不代為產生。
+
+### BFF 類別配置
+
+五個新類別 ＋ 兩個 scoped advice ＋ 一個具名例外，比照既有四組 sibling（其中 `exchangerate/`／`gdptwse/`／`crawlerdata/` 三組都是「頁面 BFF controller ＋ Public controller」**同 package**，只有 `latestassets/` 因無對應頁面 controller 才獨立；本次兩條各自放進既有的 `todaymarketanalysis/` 與 `portfolioadvice/`）（`PublicUsdTwd*`／`PublicMarketIndex*`／`LatestAssetsPublic*`／`PublicCrawlerRescan*`）：
+
+```
+bff/src/main/java/com/steven/assets/bff/todaymarketanalysis/   ← 與該頁面既有 TodayMarketAnalysisBffController 同 package
+  PublicMarketAnalysisController.java      @RequestMapping("/api/public/market-analysis/today")
+  PublicMarketAnalysisService.java         注入既有 businessServicesClient，原樣 relay
+  PublicMarketAnalysisExceptionAdvice.java @RestControllerAdvice(assignableTypes=…) + @Order(HIGHEST_PRECEDENCE)
+bff/src/main/java/com/steven/assets/bff/portfolioadvice/
+  PublicPortfolioAdviceController.java     @RequestMapping("/api/public/portfolio-advice/latest")
+  PublicPortfolioAdviceService.java        configured-admin bootstrap + 顯式 headers + contextWrite delete
+  PublicPortfolioAdviceExceptionAdvice.java 同上
+  PublicPortfolioAdviceUnavailableException.java  具名例外（比照既有 LatestAssetsUnavailableException）
+```
+
+**不得**併進既有 `TodayMarketAnalysisBffController`／`PortfolioAdviceBffController`：那些類別的 class-level `@RequestMapping("/api/bff/…")` 會與方法級路徑串接，產生不出 `/api/public/…` 頂層路徑。這是技術原因，不是風格選擇（Requirement 71 已記載同一理由）。Controller 只委派 Service、不持有 `WebClient`。
+
+**兩支 advice 都必須明確宣告 `@Order(Ordered.HIGHEST_PRECEDENCE)`。** Requirement 71 已逐字記載此教訓：`assignableTypes` 範圍窄**不保證**蓋過全域 `BusinessErrorAdvice`，Spring 跨 `@ControllerAdvice` 解析同一例外型別時依 `@Order`／bean 註冊順序決定。對應測試必須在同一個 `WebTestClient` context 同時註冊 scoped advice 與 `BusinessErrorAdvice`，注入帶特定內部字串的假例外並斷言該字串不出現在回應——照抄既有 sibling「排除全域 advice」的組裝會給假陽性。
+
+### Nginx／Security／frontend
+
+- `api-gateway/nginx.conf`：兩個 `location =` 區塊，逐字沿用既有五條唯讀 GET 的寫法。**重用既有 `map $request_method $api_allow_header`**，不新增第三個 map（本次兩條都是 GET，與第六條需要 `$rescan_allow_header` 的情形不同）。upstream 沿用 `resolver 127.0.0.11` 與變數寫法，不得寫死 `proxy_pass http://bff:8080$request_uri`。
+- `SecurityConfig`：兩條路徑併入既有那個 `.pathMatchers(HttpMethod.GET, …)` 的參數列，不另開新呼叫（method 相同時既有寫法本就是多路徑並列）。相鄰 `/api/bff/today-market-analysis/**`／`/api/bff/portfolio-advice/**` 的 ADMIN 規則不變。
+- `frontend/nginx.conf`：兩條 exact `return 404`，並在既有**單一 anchored** matrix-parameter deny regex 內新增對應分支，不另開獨立 regex。
+
+### Tailscale
+
+`SERVE_PATHS` 與 `validate_owned_config` 的 `expected` dict 各加兩筆。兩條都是唯讀 GET 且預期 200，**直接沿用既有 `get_200()`**（第六條因方法是 POST 才需要專屬的 `get_405_post_only()`）。**第八條在「尚無任何一筆建議」時 business 仍回 HTTP 200 ＋ `{status:"NONE"}`**（`PortfolioAdviceController.latest():45-50` 在 `adviceService.latest()` 回 null 時回 `PortfolioAdviceDto.none()`，不拋例外），故 `get_200()` 天然通過、**不需要任何「無資料」旁路**。若該路徑回非 200，代表 bootstrap 或路由本身有問題，應照既有規則整批 fail closed——**不得**新增接受非 200 的例外分支，那會侵蝕 Requirement 66 的 fail-closed 不變式。
+
+腳本內 operator-facing 寫死路由數的訊息共**三處**（Requirement 71 由「五條」改來時漏列第三處），全部更新為「八條／八路」：`:159`（Python 例外訊息）、`:264`（「本機六路 API preflight 通過」）、`:292`（尾端 `die`）。另 `scripts/tests/configure-tailscale-api-gateway-test.sh` 兩處須同步：`:153` 的 `== 5`（Task 329 漏改、已與 `SERVE_PATHS` 的 6 筆不一致）改為 `== 8`、`:162` 的「五路」改為「八路」。
+
+### 文件同步
+
+`CLAUDE.md`（第 1 節具名例外段落 ＋ 第 3 節標題與內文）、`spec/steering/structure.md`（§3.2 條目 2 ＋ §4.4）須由六條更正為八條並補列新增兩條路徑。另有五份檔案是 Requirement 71 落地時遺漏的既有漂移，本次一併補正：
+
+| 檔案 | 位置 | 現況 |
+|---|---|---|
+| `INSTALLATION.md` | `:480`／`:579`／`:587`／`:589` | 四處「五條／五路」 |
+| **`docs/openapi/docker-external-api.yaml`** | `:6`／`:9`／`:24` 三處計數；`paths:`（`:26` 起）**缺三條**：`POST /api/public/crawler-data/rescan`（Task 329 遺漏）＋本次兩條 | 本專案唯一一份機器可讀的對外 API 契約，漏改則「不得只改程式碼」形同空話 |
+| `spec/steering/tech.md` | `:11`／`:12`／`:27` | 三處「五條」 |
+| `scripts/README.md` | `:8`／`:9` | 兩處「五路／五條」 |
+| 任務索引範圍 | `spec/tasks.md:32`、`spec/tasks/README.md:7`、`spec/steering/structure.md:344` | 三處，缺一不可 |
+
+另 Requirement 66／68／70 與本檔內既有的「實際 handler 集合為六條／精確為六路」callout（`spec/requirements.md:2625`／`:2660`／`:2705`／`:2716`、`spec/design.md:6961`／`:6962`）在第七、八條落地後全部成為錯誤斷言，須逐一更正為八條／八路。
+
+---
+
+## Requirement 79／Task 338：資產配置建議三態引擎（local／hybrid／llm）
+
+### 與 Requirement 77 的動機差異
+
+Requirement 77 止的是**每日無人值守、與寄送時段成正比**的固定成本。本頁不同：`PortfolioAdviceService.generate(...)` 的唯一呼叫點是 `PortfolioAdviceController:87`（POST，使用者手動按），全樹無 `@Scheduled` 觸發，總成本取決於按幾次。故本 Requirement 的定位是**給一個可選的省錢檔位**，而非止血；`llm` 完整版原封不動保留。
+
+### 本機化的基礎已經存在一半
+
+| 已是本機決定性計算 | 位置 |
+|---|---|
+| 現有配置三類的金額與占比 | `PortfolioAdviceService.getCurrentAllocation():242-256`（讀最新 `asset_snapshot` 的 `total_deposit`／`total_fund_value`／`total_stock_value`） |
+| 退休現金流逐年試算 | `getProjection():265-282` → `RetirementProjectionService.project(...)` |
+| `targetAmount` = 資產總額 × `targetPct`、`deltaAmount` = `targetAmount` − `currentValue` | 既有後端回填，`PortfolioAdviceResult` javadoc 明載「金額算術不交給 LLM」 |
+
+LLM 目前實際只貢獻：目標比例的挑選、敘事文字、以及 `web_search` 帶進來的總經環境與 `references`。
+
+### 三檔位
+
+```
+generate(input)
+  ├─ engine=local   同步、零 API
+  │     配置模板(risk_tolerance × 距退休年數) → targetPct
+  │     getCurrentAllocation() → currentValue
+  │     既有算術 → targetAmount / deltaAmount → rebalancePlan（類別層級）
+  │     getProjection() → riskAssessment 敘述
+  │     references = []            model = "local-allocation:v1"
+  │
+  ├─ engine=hybrid  非同步、只打一次小 API
+  │     數字全部同上（本機決定）
+  │     LLM 只改寫 summary + riskAssessment 兩個文字欄位
+  │     不掛 WebSearchTool20260209；maxTokens 遠低於既有 16000
+  │     模型若回數字欄位 → 一律以本機值覆蓋，不採信
+  │     references = []            model = "hybrid-allocation:v1+<model id>"
+  │
+  └─ engine=llm     既有 runGeneration(...)，一行不改
+        ThinkingConfigAdaptive + effort + web_search(resolveWebSearchMaxUses)
+```
+
+三檔位共用同一組狀態常數與同一個 `latest()` 自癒邏輯（`PROCESSING` 卡超過 `PROCESSING_STALE` 判 `FAILED`），**不得為本機檔位新增第二套狀態機**。`local` 因為是毫秒級純計算，直接落終態、不經 `PROCESSING`；`hybrid`／`llm` 維持既有「先落 `PROCESSING`、背景執行緒跑、前端輪詢」形狀。
+
+### 配置模板的邊界
+
+三類**必須**與 `getCurrentAllocation()` 既有三類逐字一致（「存款（現金）」／「信託基金」／「股票」）——本機引擎自創第四類或改名，`currentValue` 就對不上、`deltaAmount` 失去意義。
+
+`rebalancePlan` 在 `local`／`hybrid` 只到**類別層級**：`holding` 一律「整體」、`action` 由 `deltaAmount` 正負決定、`estimatedAmount` 為 `|deltaAmount|`。本機沒有能力判斷該賣哪一檔，產生個股層級建議會是沒有依據的臆測。此限制須在 `warnings` 明示。
+
+`riskAssessment` 得援引 `getProjection()` 的結果組敘述，但**必須呼叫既有方法**——那是 Requirement 32／Task 165 既有的唯一事實來源，不得複製第二份試算。
+
+### ⚠ 定性
+
+`local` 與 `hybrid` 的目標比例來自「風險承受度 × 距退休年數」的明示對照表，屬廣為流傳的資產配置經驗法則，**未經任何回測或個人情境驗證**。此定性須同時出現在程式碼註解與前端常駐說明，且輸出 `warnings` 的**首條固定為該聲明**。
+
+### Schema
+
+```sql
+-- v1.106.0-portfolio-advice-engine.sql（版號建檔前重查；v1.105.0 已由 Requirement 77 佔用）
+ALTER TABLE portfolio_advice_setting ADD COLUMN IF NOT EXISTS engine VARCHAR(16) NOT NULL DEFAULT 'local';
+UPDATE portfolio_advice_setting SET engine = 'local' WHERE engine IS NULL OR engine = '';
+```
+
+### 前端
+
+`AssetAllocationAdviceView.vue` 新增「分析引擎」下拉（三檔）。`local` 時「模型」「思考深度」「搜尋次數」三個既有下拉全部**停用而非隱藏**；`hybrid` 時「模型」「思考深度」可用、「搜尋次數」停用並顯示 0。沿用既有 `PUT /api/bff/portfolio-advice/settings`，不新增端點。

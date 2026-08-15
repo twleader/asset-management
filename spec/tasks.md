@@ -29,7 +29,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 
 ---
 
-## 任務索引（Task 1–228、264–267、269–292、297–309、311–334）
+## 任務索引（Task 1–228、264–267、269–292、297–309、311–338）
 
 | Task | 標題 | 位置 |
 |---|---|---|
@@ -334,6 +334,9 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 332 | 海外指數日線的「新鮮度」判準與交易雷達同源（Requirement 75） | [tasks/t332_index_daily_freshness_alignment.md](tasks/t332_index_daily_freshness_alignment.md) |
 | 333 | 交易雷達證據缺口複驗與剩餘缺口登記（2026-08-15 基準；只登記、不實作） | [tasks/t333_radar_gap_backlog_2026_08_15.md](tasks/t333_radar_gap_backlog_2026_08_15.md) |
 | 334 | 美股歷史估值序列由已入庫官方財報推導落地（`SEC_DERIVED` provider，Requirement 74） | [tasks/t334_us_valuation_history_derivation.md](tasks/t334_us_valuation_history_derivation.md) |
+| 336 | 今日股市分析改由本機規則引擎產生，LLM 成本歸零且可隨時切回（Requirement 77） | [tasks/t336_local_market_analysis_engine.md](tasks/t336_local_market_analysis_engine.md) |
+| 337 | 今日股市分析與資產配置建議的 Docker 外部唯讀 API（Nginx 9090 第七、八條路由，Requirement 78） | [tasks/t337_market_analysis_advice_public_api.md](tasks/t337_market_analysis_advice_public_api.md) |
+| 338 | 資產配置建議三態引擎切換：完全本機／部分打 API／現行全 LLM（Requirement 79） | [tasks/t338_portfolio_advice_engine_switch.md](tasks/t338_portfolio_advice_engine_switch.md) |
 
 > **註：Task 229–263、268、293–296 以各自任務檔為準。**
 
