@@ -142,6 +142,17 @@ public class InternalPriceController {
         return newsPoller.fetchAndExportNow();
     }
 
+    /**
+     * 公開觸發「重新搜尋」（Requirement 71 / Task 329）：{@code fetch-and-export-now} 的免登入版本，
+     * 由 business 端 {@code POST /api/crawler-export-path/public-rescan}（免驗證、30 秒全域 Redis
+     * 冷卻節流）proxy 呼叫。本端點仍只能經 docker network 呼叫，不映射 host port、不經 Nginx 9090
+     * 直接暴露——gateway 只轉送到 business 這一層公開端點。
+     */
+    @PostMapping("/news-poller/public-rescan")
+    public com.steven.assets.externalmaterials.service.NewsPoller.ManualRunResult publicRescanNews() {
+        return newsPoller.publicRescan();
+    }
+
     /** 手動觸發個股基本面：public_info 證據由既有新聞路徑提供，本端點只刷新結構化來源與 fallback。 */
     @PostMapping("/fundamentals/refresh")
     public com.steven.assets.externalmaterials.service.StockFundamentalPoller.RefreshSummary refreshFundamentals() {

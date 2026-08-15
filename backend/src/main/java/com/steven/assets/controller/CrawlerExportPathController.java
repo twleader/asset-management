@@ -77,4 +77,16 @@ public class CrawlerExportPathController {
         }
         return service.fetchAndRunNow(crawler);
     }
+
+    /**
+     * 公開觸發「重新搜尋」（Requirement 71）：免登入版「立即抓取並匯出」。
+     *
+     * <p>不接受 {@code crawler} 參數（固定 news-poller）、<b>不檢查 {@link CurrentUserContext#isAdmin()}</b>——
+     * 這是本端點相對既有兩支 ADMIN 端點的唯一差異，由 {@link CrawlerExportPathService#publicRescan()}
+     * 內建的全域 30 秒 Redis 冷卻取代 ADMIN 驗證作為濫用防護。
+     */
+    @PostMapping("/public-rescan")
+    public CrawlerExportPathDto.RunNowResponse publicRescan() {
+        return service.publicRescan();
+    }
 }
