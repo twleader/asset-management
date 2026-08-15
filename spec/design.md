@@ -822,7 +822,7 @@ AppUser (1) ──── (N) InvestmentPlannedExpense     (owner_user_id；特�
 AppUser (1) ──── (N) PortfolioAdvice              (owner_user_id；歷次建議，條件快照刻意 denormalize)
 PortfolioAdviceSetting   (配置建議設定，單列 id = 1；model / effort / web_search_max_uses)
 
-# 排程匯出（Requirement 34 / 37 / 39 / 49）
+# 排程匯出（Requirement 34 / 37 / 39 / 49 / 69 / 72）
 # 「一功能一張排程表」——刻意不合併，理由見本文件 Requirement 39 之關鍵設計決策
 AppUser (1) ──── (1) ExportScheduleSetting            (owner_user_id UNIQUE；最新資產匯出的共用路徑／Drive／總開關；Requirement 34／69)
 ExportScheduleSetting (1) ──── (N) ExportScheduleTime (每個每日執行時間各有 enabled／last-run guard；Requirement 69)
@@ -3884,15 +3884,15 @@ RealizedGainView「立即匯出到目錄」
   → POST /api/bff/realized-gain/export/run-now
     → business POST /api/realized-gains/export/run-now
       → RealizedGainExportScheduleService.runNowForCurrentUser()
-        → ExcelExportService.exportRealizedGains()      ← HTTP 情境，同上自動 owner-scoped
-        → writeToDir(ownerId, subpath, data)
+        → ExcelExportService.realizedGainsDoc()           ← HTTP 情境，同上自動 owner-scoped
+        → writeDual(...) → DualFormatExportWriter.write(...)（xlsx ＋ json 兩份；R55／Task 270 起）
 
 【每日排程（新增；Requirement 72 起逐 child 判斷，見本文件 Requirement 72 段）】
 @Scheduled(cron="0 * * * * *", zone="Asia/Taipei") tick()
   → runDueExports(): settingRepo.findAll()             ← 背景無 request context，讀全部 owner 列
     → 對每個 enabled 的 parent，再對每個 enabled、今日未跑且已到點的 child：
       → ExcelExportService.realizedGainsDocForOwner(ownerId)   ← 手動 enableFilter 縮到該 owner
-      → writeToDir(ownerId, subpath, data)
+      → writeDual(...) → DualFormatExportWriter.write(...)（xlsx ＋ json 兩份）
 
 【資料夾瀏覽（複用既有 business 端點）】
 RealizedGainView el-tree 懶載入
@@ -6864,7 +6864,7 @@ Migration `v1.103.0-realized-gain-export-schedule-multi-time.sql`（實作前須
 
 - `RealizedGainExportDto.SettingResponse` 的排程時間來源唯一為 `times[]`（`{id,runHour,runMinute,enabled,lastRunAt,lastRunStatus}`，依時分／id 排序）；parent 的 `lastRunAt`／`lastRunStatus` 是任一 scheduled/run-now 的最近整體摘要。`SettingRequest` 的 `TimeRequest` 不接受 id，整包依時分取代。既有共用欄位（`enabled`／`outputSubpath`／`baseDir`／六個 `gdrive*`）與 `RunNowResponse` 七欄不變。
 - `updateForCurrentUser` 為 `@Transactional`：先驗證 time 清單與共用路徑／Drive，再以 `(hour, minute)` map 對既有 child；相同時分沿用該 child 的 guard/status，新列 guard 為 null，未出現在 body 的列由 orphan removal 刪除；最後同步 rollback representative 三欄，並回傳 repository 保存後的完整排序 response。無設定列時 GET 只回 transient `08:00 enabled=true`，不寫 DB。
-- Due runner 依 parent、再依 child 時分排序。每個 child 完成（含失敗）後立即保存自己的 guard/status 與 parent 最近摘要；若它是 rollback representative，同步 parent legacy `last_run_date`。同一 parent 多個已到期 child 必須全部嘗試，一列失敗不阻斷下一列與下一 owner。`tick` 與 `ApplicationReadyEvent` 都先經同一個 `tryRunDueExports` CAS lock；JVM `AtomicBoolean` 只適用 Compose 單 replica 且不充當 daily guard，多 replica 另需 DB atomic claim。背景每列仍走 `realizedGainsDocForOwner(ownerId)`（Requirement 39 的租戶隔離關鍵），再由既有 renderers ＋ `DualFormatExportWriter` 產兩份。
+- Due runner 依 parent、再依 child 時分排序；逐 child 前先做一輪 legacy fallback（`times` 為空時以 parent 舊時分補一列，同 `ExportScheduleService.runDueExports()`），避免 rollback 期間由舊 image 建立的無 child parent 靜默完全停跑。每個 child 完成（含失敗）後立即保存自己的 guard/status 與 parent 最近摘要；若它是 rollback representative，同步 parent legacy `last_run_date`。同一 parent 多個已到期 child 必須全部嘗試，一列失敗不阻斷下一列與下一 owner。`tick` 與 `ApplicationReadyEvent` 都先經同一個 `tryRunDueExports` CAS lock；JVM `AtomicBoolean` 只適用 Compose 單 replica 且不充當 daily guard，多 replica 另需 DB atomic claim。背景每列仍走 `realizedGainsDocForOwner(ownerId)`（Requirement 39 的租戶隔離關鍵），再由既有 renderers ＋ `DualFormatExportWriter` 產兩份。
 - `runNowForCurrentUser` 沿用共用輸出設定與同一 `writeDual`，不讀 child enabled、不寫任何既有 child 狀態。若 parent 不存在，延續現行保存執行結果的行為，建立 disabled parent ＋一列 `08:00 enabled=true`、guard/status 皆 null 的 child，並同步 legacy shadow。檔名仍只有日期（`已實現損益_{ownerId}_yyyyMMdd`）；這是刻意的「同日最新檔」語意，較晚排程覆寫同名 local／Drive 兩份。
 
 ### UI
