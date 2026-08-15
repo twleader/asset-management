@@ -466,4 +466,79 @@ class StockFundamentalFetchClientTest {
                         && f.equityParent() == 52_000_000_000L),
                 "查無對應損益表期間（2025-12-31）的權益時點值須直接捨棄，不得產生孤兒列");
     }
+
+    // ── Task 334 對抗式審查：source_available_at 必須是「首次申報時點」且晚於當日美股收盤 ────────
+
+    /**
+     * 同一期別被兩份申報各報一次（第二份是次年 10-Q 夾帶的比較數字）時，<b>值</b>取 filed 較新的那一筆
+     * （重述後的正確數字），<b>可見時點</b>必須取最早的那一筆。
+     *
+     * <p>做錯不會有任何錯誤訊息，但會讓每個舊期別被推遲整整一年才「可見」——實測 GOOGL 舊季
+     * {@code source_available_at} 距其日曆期末 388–401 天、最新四季只有 23–36 天。這個位移對期別是保序的，
+     * {@code UsValuationDerivationService} 的單調化（min-over-newer）取不掉，結果是推導序列的歷史區段用
+     * 落後約四季的 TTM 分母、最近一年用當期值，成長股必然被判成「現在最便宜」。</p>
+     */
+    @Test
+    void companyFactsAvailabilityUsesTheFirstFilingNotTheLatestRestatement() throws Exception {
+        JsonNode root = mapper.readTree("""
+                {"facts":{"us-gaap":{
+                    "EarningsPerShareDiluted":{"units":{"USD/shares":[
+                        {"start":"2025-01-01","end":"2025-03-31","val":1.50,
+                         "fy":2025,"fp":"Q1","form":"10-Q","filed":"2025-04-25"},
+                        {"start":"2025-01-01","end":"2025-03-31","val":1.55,
+                         "fy":2026,"fp":"Q1","form":"10-Q","filed":"2026-04-24"}
+                    ]}},
+                    "NetIncomeLoss":{"units":{"USD":[
+                        {"start":"2025-01-01","end":"2025-03-31","val":1000000000,
+                         "fy":2025,"fp":"Q1","form":"10-Q","filed":"2025-04-25"},
+                        {"start":"2025-01-01","end":"2025-03-31","val":1050000000,
+                         "fy":2026,"fp":"Q1","form":"10-Q","filed":"2026-04-24"}
+                    ]}}
+                }}}
+                """);
+
+        List<StockFundamentalFetchClient.Financial> financials =
+                StockFundamentalFetchClient.parseCompanyFacts(root, "FIRSTFILED", "https://data.sec.gov/test.json");
+
+        var q1 = financials.stream()
+                .filter(f -> f.fiscalYear() == 2025 && f.fiscalQuarter() == 1).findFirst().orElseThrow();
+        assertEquals(0, new BigDecimal("1.55").compareTo(q1.cumulativeEps()),
+                "值仍取 filed 最新的那一筆（重述後的正確數字）");
+        assertEquals("PUBLISHED", q1.availabilityBasis());
+        assertEquals(LocalDate.of(2025, 4, 25),
+                q1.sourceAvailableAt().atZone(java.time.ZoneId.of("America/New_York")).toLocalDate(),
+                "可見時點必須是首次申報日 2025-04-25，不得跟著次年比較數字被推遲到 2026-04-24");
+    }
+
+    /**
+     * {@code filed} 只有日期精度，換算後必須<b>晚於申報日的美股收盤（16:00 America/New_York）</b>，
+     * 讓該期別從下一個交易日起才可見。寫成當日中午 UTC（＝08:00 ET，開盤前）會讓申報當日的推導列變成
+     * 「盤前價 ÷ 尚未公開的財報」，構成一個交易日的 look-ahead。
+     */
+    @Test
+    void filedInstantLandsAfterTheUsCloseOfTheFilingDay() throws Exception {
+        JsonNode root = mapper.readTree("""
+                {"facts":{"us-gaap":{
+                    "EarningsPerShareDiluted":{"units":{"USD/shares":[
+                        {"start":"2025-01-01","end":"2025-03-31","val":1.50,
+                         "fy":2025,"fp":"Q1","form":"10-Q","filed":"2025-04-25"}
+                    ]}},
+                    "NetIncomeLoss":{"units":{"USD":[
+                        {"start":"2025-01-01","end":"2025-03-31","val":1000000000,
+                         "fy":2025,"fp":"Q1","form":"10-Q","filed":"2025-04-25"}
+                    ]}}
+                }}}
+                """);
+
+        List<StockFundamentalFetchClient.Financial> financials =
+                StockFundamentalFetchClient.parseCompanyFacts(root, "CLOSETIME", "https://data.sec.gov/test.json");
+
+        Instant usClose = LocalDate.of(2025, 4, 25).atTime(16, 0)
+                .atZone(java.time.ZoneId.of("America/New_York")).toInstant();
+        Instant nextDayClose = LocalDate.of(2025, 4, 28).atTime(16, 0)
+                .atZone(java.time.ZoneId.of("America/New_York")).toInstant();
+        Instant available = financials.get(0).sourceAvailableAt();
+        assertTrue(available.isAfter(usClose), "申報日當日收盤時仍不得可見（否則是盤前價 ÷ 未公開財報）");
+        assertTrue(available.isBefore(nextDayClose), "下一個交易日收盤時必須已可見");
+    }
 }

@@ -173,6 +173,17 @@ class TradingRadarUsStockEngineTest {
         return rows;
     }
 
+    /**
+     * 「每日皆為交易日」前提下的最近一個已完成美股交易日：美東當日，收盤（16:00 ET）前退回前一日。
+     * 等價於 {@code isTradingDay} 恆 true 時 {@code MarketDataService.mostRecentCompletedUsTradingDay} 的結果。
+     */
+    private static LocalDate everyDayTradingUsCompletedDay(Instant instant) {
+        java.time.ZonedDateTime nowNy = instant.atZone(ZoneId.of("America/New_York"));
+        return nowNy.toLocalTime().isBefore(java.time.LocalTime.of(16, 0))
+                ? nowNy.toLocalDate().minusDays(1)
+                : nowNy.toLocalDate();
+    }
+
     /** holdings 恆空；watchlist／大盤資料由各測試自行決定。 */
     private void stubBaseline() {
         lenient().when(taiexDisplayPriceService.resolve()).thenReturn(
@@ -180,6 +191,13 @@ class TradingRadarUsStockEngineTest {
                         null, null, null, null, null, null,
                         null, null, true, "CLOSE_PENDING"));
         lenient().when(marketDataService.isTradingDay(anyString(), any(LocalDate.class))).thenReturn(true);
+        // Task 332：mostRecentCompletedUsTradingDay 由 TradingRadarService 的 private 方法提升為
+        // MarketDataService 的共用方法（與 IndexDailyRefreshScheduler 的回補判準同源）。marketDataService
+        // 是 @Mock，未 stub 會回 null，buildUsMarket 的 stale 判斷即 NPE、被 catch 吞成 DATA_INCOMPLETE。
+        // 此處回填的是上一行「每日皆為交易日」stub 的等價語意：往回找永遠第一輪就命中，
+        // 結果即美東當日（收盤前退回前一日）——搬移前後的期望值因此完全一致。
+        lenient().when(marketDataService.mostRecentCompletedUsTradingDay(any(Instant.class)))
+                .thenAnswer(inv -> everyDayTradingUsCompletedDay(inv.getArgument(0)));
         lenient().when(marketContextService.resolve(any())).thenReturn(
                 new TradingRadarMarketContextService.Resolved(
                         TradingRadarMarketContextService.MarketContext.EMPTY, List.of()));

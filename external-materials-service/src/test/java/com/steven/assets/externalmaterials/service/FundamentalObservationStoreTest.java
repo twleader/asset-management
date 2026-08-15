@@ -224,6 +224,38 @@ class FundamentalObservationStoreTest {
         assertThat(need.valuation()).isFalse();
     }
 
+    // ── Task 334.6（測試 h）：估值 coverage 排除 SEC_DERIVED，否則會用推導值把 Yahoo 抓取關掉 ──
+
+    @Test
+    void derivedValuationRowsMustNotSatisfyCoverageAndSilenceTheYahooFallback() {
+        Instant decision = Instant.parse("2026-08-08T02:00:00Z");
+        List<FundamentalObservationStore.RevenueCoverage> revenues = List.of(
+                revenue(2026, 6, "12"), revenue(2026, 5, "8"), revenue(2026, 4, "5"));
+
+        // 路徑 (i)：250 筆全部是推導值，仍必須繼續向 Yahoo 抓一手觀測值。
+        var derivedOnly = FundamentalObservationStore.coverageNeed(completeFinancials(), revenues,
+                completeValuations(StockFundamentalFetchClient.SEC_DERIVED), decision);
+        assertThat(derivedOnly.valuation()).isTrue();
+
+        // 同一組資料只把 provider 換成 YAHOO 就必須判定為不需要——證明上面判 true 的原因是 provider，
+        // 不是筆數、不是新鮮度，也不是 fixture 本身有問題。
+        var observed = FundamentalObservationStore.coverageNeed(completeFinancials(), revenues,
+                completeValuations(StockFundamentalFetchClient.YAHOO), decision);
+        assertThat(observed.valuation()).isFalse();
+
+        // 路徑 (ii)：loss 旗標不需要任何筆數就會讓判定為「已滿足」，同樣不得由推導值觸發。
+        var derivedLoss = FundamentalObservationStore.coverageNeed(completeFinancials(), revenues,
+                List.of(new FundamentalObservationStore.ValuationCoverage(
+                        LocalDate.of(2026, 8, 7), null, true, StockFundamentalFetchClient.SEC_DERIVED)),
+                decision);
+        assertThat(derivedLoss.valuation()).isTrue();
+
+        // EPS／ROE／營收三項的 coverage 判斷不得被本次排除波及。
+        assertThat(derivedOnly.eps()).isFalse();
+        assertThat(derivedOnly.roe()).isFalse();
+        assertThat(derivedOnly.revenue()).isFalse();
+    }
+
     @Test
     void latestExpectedReportingPeriodCannotBeHiddenByManyOlderRows() {
         Instant afterQ2Deadline = Instant.parse("2026-08-15T02:00:00Z");
@@ -278,12 +310,15 @@ class FundamentalObservationStoreTest {
     }
 
     private static List<FundamentalObservationStore.ValuationCoverage> completeValuations() {
+        return completeValuations(StockFundamentalFetchClient.EXCHANGE);
+    }
+
+    private static List<FundamentalObservationStore.ValuationCoverage> completeValuations(String provider) {
         List<FundamentalObservationStore.ValuationCoverage> rows = new ArrayList<>();
         LocalDate latest = LocalDate.of(2026, 8, 7);
         for (int i = 0; i < 250; i++) {
             rows.add(new FundamentalObservationStore.ValuationCoverage(
-                    latest.minusDays(i), BigDecimal.valueOf(15 + i / 100.0), false,
-                    StockFundamentalFetchClient.EXCHANGE));
+                    latest.minusDays(i), BigDecimal.valueOf(15 + i / 100.0), false, provider));
         }
         return rows;
     }

@@ -24,11 +24,38 @@ class SchedulePublicBffControllerTest {
     }
 
     @Test
-    @DisplayName("排程清單完整列出 20 個業務與 31 個外部行情工作")
+    @DisplayName("排程清單完整列出 21 個業務與 32 個外部行情工作")
     void 項目數正確() {
-        assertThat(jobs()).hasSize(51);
-        assertThat(jobs()).filteredOn(j -> "業務服務".equals(j.service())).hasSize(20);
-        assertThat(jobs()).filteredOn(j -> "外部行情服務".equals(j.service())).hasSize(31);
+        assertThat(jobs()).hasSize(53);
+        assertThat(jobs()).filteredOn(j -> "業務服務".equals(j.service())).hasSize(21);
+        assertThat(jobs()).filteredOn(j -> "外部行情服務".equals(j.service())).hasSize(32);
+    }
+
+    @Test
+    @DisplayName("美股歷史估值推導為台北週二至週六 07:30，且說明載明必須晚於美股收盤校正（Task 334）")
+    void 美股歷史估值推導排程契約() {
+        assertThat(jobs()).filteredOn(j -> "美股歷史估值序列推導".equals(j.name()))
+                .singleElement()
+                .satisfies(job -> {
+                    assertThat(job.service()).isEqualTo("外部行情服務");
+                    assertThat(job.cron()).isEqualTo("0 30 7 * * TUE-SAT");
+                    assertThat(job.zone()).isEqualTo("Asia/Taipei");
+                    // 07:30 是硬約束（冬令時只剩 30 分鐘餘裕），說明漏了它就會有人「順手」往前調。
+                    assertThat(job.description()).contains("SEC_DERIVED", "重算最近 30 個交易日", "台北 07:00");
+                });
+    }
+
+    @Test
+    @DisplayName("海外指數日線落後補救檢查為台北週二至週六 09:00／12:00（Task 332）")
+    void 海外指數落後補救檢查契約() {
+        assertThat(jobs()).filteredOn(j -> "海外指數日線落後補救檢查".equals(j.name()))
+                .singleElement()
+                .satisfies(job -> {
+                    assertThat(job.service()).isEqualTo("業務服務");
+                    assertThat(job.cron()).isEqualTo("0 0 9,12 * * TUE-SAT");
+                    assertThat(job.zone()).isEqualTo("Asia/Taipei");
+                    assertThat(job.description()).contains("只回補確實落後");
+                });
     }
 
     @Test

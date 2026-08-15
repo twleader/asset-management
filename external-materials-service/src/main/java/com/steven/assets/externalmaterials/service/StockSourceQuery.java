@@ -272,6 +272,26 @@ public class StockSourceQuery {
     }
 
     /**
+     * 取某個股在該市場的<b>全部</b>日收盤（濾除 null 與非正收盤），由舊到新排序
+     * （Requirement 74 / Task 334：美股歷史估值推導的交易日集合就是這張表的 {@code trading_date}）。
+     *
+     * <p>不設 {@code LIMIT}：推導序列要一次算完整段歷史（美股實測約 2,400 個交易日／檔），
+     * 分頁取回反而會讓「可用區段起點」判斷不到真正的最早日。多列查詢的第三引數必須是
+     * 「void 區塊」lambda（RowCallbackHandler），寫成 expression lambda 會被解析成 ResultSetExtractor。</p>
+     */
+    public List<ClosePoint> loadAllCloses(String stockCode, String market) {
+        List<ClosePoint> rows = new java.util.ArrayList<>();
+        jdbc.query(
+                "SELECT trading_date, close_price FROM stock_price_history " +
+                        "WHERE stock_code=? AND market=? AND close_price IS NOT NULL AND close_price > 0 " +
+                        "ORDER BY trading_date",
+                (java.sql.ResultSet rs) -> {
+                    rows.add(new ClosePoint(rs.getObject(1, LocalDate.class), rs.getBigDecimal(2)));
+                }, stockCode, market);
+        return rows;
+    }
+
+    /**
      * 取台股大盤（0000）最近 n 筆日收盤（{@code twse_index_daily_history.close_point}，濾除 null），
      * <b>由舊到新</b>排序，供均線計算（Task 207）。大盤走指數表、不在 stock_price_history。
      */

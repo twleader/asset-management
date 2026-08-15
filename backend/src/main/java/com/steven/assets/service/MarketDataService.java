@@ -10,8 +10,11 @@ import org.springframework.web.reactive.function.client.WebClient;
 
 import java.math.BigDecimal;
 import java.time.DayOfWeek;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.time.Duration;
+import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -29,6 +32,12 @@ import java.util.concurrent.ConcurrentHashMap;
 @Slf4j
 @Service
 public class MarketDataService {
+
+    /** 美東時區，供 {@link #mostRecentCompletedUsTradingDay(Instant)} 換算「當地今天」。 */
+    private static final ZoneId NEW_YORK = ZoneId.of("America/New_York");
+
+    /** 美東收盤時刻，供判斷「已完成的最近一個美股交易日」（Task 294.2 起，Task 332 隨方法一併移入本類）。 */
+    private static final LocalTime US_MARKET_CLOSE = LocalTime.of(16, 0);
 
     private final WebClient priceServiceClient;
     private final StockRepository stockMasterRepo;
@@ -381,6 +390,30 @@ public class MarketDataService {
         if ("美股".equals(market)) return isUsTradingDay(date);
         if ("英股".equals(market)) return isUkTradingDay(date);
         return isTwTradingDay(date);
+    }
+
+    /**
+     * 已完成（收盤時刻已過）的最近一個美股交易日——「美股日線該有哪一天」的<b>單一</b>權威答案（Task 332）。
+     *
+     * <p>原為 {@code TradingRadarService.mostRecentCompletedUsTradingDay(Instant)} 的 private 方法
+     * （Task 294.2）：IXIC 大盤不像台股組有 Redis 即時價可退回判斷（刻意不併入即時價，見 294.1 背景），
+     * 故直接用美東收盤時刻界定「已完成」——收盤前，今天尚不能算數，須往前一個交易日找。</p>
+     *
+     * <p>Task 332 把它提升為共用方法：交易雷達（判 IXIC 日線是否 stale）與
+     * {@link IndexDailyRefreshScheduler}（判要不要回補）若各持一把尺，就會出現
+     * 「雷達說 stale、自癒說皆為最新」的分歧（Requirement 75 的原始事故）。
+     * <b>兩邊一律呼叫本方法，不得各自複製一份邏輯。</b></p>
+     */
+    public LocalDate mostRecentCompletedUsTradingDay(Instant decisionInstant) {
+        ZonedDateTime nowNy = decisionInstant.atZone(NEW_YORK);
+        LocalDate day = nowNy.toLocalTime().isBefore(US_MARKET_CLOSE)
+                ? nowNy.toLocalDate().minusDays(1)
+                : nowNy.toLocalDate();
+        for (int i = 0; i < 14; i++) {
+            if (isUsTradingDay(day)) return day;
+            day = day.minusDays(1);
+        }
+        return day;
     }
 
     /**

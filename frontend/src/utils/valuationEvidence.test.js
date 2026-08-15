@@ -99,3 +99,29 @@ test('legacy snapshot is explicit and never turns missing values into zero or AV
   assert.ok(projected.every(item => item.value === null && item.percentile === null))
   assert.ok(projected.every(item => item.provider === null && item.sourceUrls.length === 0))
 })
+
+test('SEC_DERIVED 的推導標記以純文字揭露，不得混進可點擊的來源連結', () => {
+  const [pe] = projectValuationEvidence({
+    peEvidence: {
+      value: 31.2, percentile: 44, provider: 'SEC_DERIVED',
+      sourceUrls: [
+        'https://data.sec.gov/api/xbrl/companyfacts/CIK0001018724.json',
+        'derived://sec-edgar-companyfacts/us-valuation'
+      ],
+      availableAt: '2026-08-14T20:00:00Z', asOf: '2026-08-14', loss: false
+    },
+    pbEvidence: null,
+    dividendYieldEvidence: null
+  }, evidenceGroups([
+    { name: 'pe', applicability: 'AVAILABLE', missingReason: null },
+    { name: 'pb', applicability: 'MISSING', missingReason: 'PB 缺漏' },
+    { name: 'dividend_yield', applicability: 'MISSING', missingReason: '殖利率缺漏' }
+  ]))
+
+  // 原始清單保留完整內容（後端契約不變）
+  assert.equal(pe.sourceUrls.length, 2)
+  // 只有 http(s) 才可導覽；derived:// 標記若被 render 成 <a href> 會是一個看起來像官方來源的死連結
+  assert.deepEqual(pe.sourceLinks, ['https://data.sec.gov/api/xbrl/companyfacts/CIK0001018724.json'])
+  assert.deepEqual(pe.sourceNotes, ['derived://sec-edgar-companyfacts/us-valuation'])
+  assert.ok(pe.sourceLinks.every(url => /^https?:\/\//i.test(url)))
+})

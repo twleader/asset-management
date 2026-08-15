@@ -30,9 +30,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.LocalTime;
 import java.time.ZoneId;
-import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -52,13 +50,10 @@ import java.util.Set;
 public class TradingRadarService {
 
     private static final ZoneId TAIPEI = ZoneId.of("Asia/Taipei");
-    private static final ZoneId NEW_YORK = ZoneId.of("America/New_York");
     private static final String TW_MARKET = "台股";
     private static final String US_MARKET = "美股";
     private static final String TAIEX_CODE = "0000";
     private static final String IXIC_CODE = "IXIC";
-    /** 美東收盤時刻，供判斷「已完成的最近一個美股交易日」（Task 294.2）；比照 US_MARKET_COMPLETE 既有慣例。 */
-    private static final LocalTime US_MARKET_CLOSE = LocalTime.of(16, 0);
 
     private static final String TWD = "TWD";
 
@@ -353,17 +348,12 @@ public class TradingRadarService {
      * 已完成（收盤時刻已過）的最近一個美股交易日，供 {@link #buildUsMarket} 判斷 IXIC 資料是否 stale
      * （Task 294.2）。IXIC 大盤不像台股組有 Redis 即時價可退回判斷（刻意不併入即時價，見 294.1 背景），
      * 故改直接用美東收盤時刻界定「已完成」：收盤前，今天尚不能算數，須往前一個交易日找。
+     *
+     * <p>Task 332：實作已提升為 {@link MarketDataService#mostRecentCompletedUsTradingDay(Instant)}，
+     * 與 {@link IndexDailyRefreshScheduler} 的回補判準同源；本方法只做委派、行為不變。</p>
      */
     private LocalDate mostRecentCompletedUsTradingDay(Instant decisionInstant) {
-        ZonedDateTime nowNy = decisionInstant.atZone(NEW_YORK);
-        LocalDate day = nowNy.toLocalTime().isBefore(US_MARKET_CLOSE)
-                ? nowNy.toLocalDate().minusDays(1)
-                : nowNy.toLocalDate();
-        for (int i = 0; i < 14; i++) {
-            if (marketDataService.isTradingDay(US_MARKET, day)) return day;
-            day = day.minusDays(1);
-        }
-        return day;
+        return marketDataService.mostRecentCompletedUsTradingDay(decisionInstant);
     }
 
     @Transactional(readOnly = true)

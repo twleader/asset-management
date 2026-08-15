@@ -37,6 +37,7 @@ public class FundamentalObservationStore {
     private static final ZoneId TAIPEI = ZoneId.of("Asia/Taipei");
     private static final int VALUATION_MAX_AGE_DAYS = 10;
     private static final int PE_MIN_SAMPLES = 250;
+    private static final String US_MARKET = "美股";
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;
 
@@ -151,7 +152,23 @@ public class FundamentalObservationStore {
 
         Map<String, List<ValuationCoverage>> valuationByProvider = byProvider(
                 valuations, ValuationCoverage::provider);
-        boolean valuation = valuationByProvider.values().stream().noneMatch(rows -> {
+        // Task 334.6：估值 coverage 一律排除 SEC_DERIVED。
+        //
+        // 判準：coverageNeed 要回答的是「**還需不需要再向外抓一手觀測值**」，而 SEC_DERIVED 是由已入庫
+        // 官方季報推導出來的值（Requirement 74），在定義上無法回答這個問題——它的存在完全取決於我們自己
+        // 有沒有跑推導，跟「外部來源今天有沒有新的公告估值」無關。
+        //
+        // 不排除的後果是把唯一的一手來源關掉：SEC_DERIVED 每日寫入會讓估值 coverage 恆為「已滿足」，
+        // StockFundamentalPoller 只在 need.valuation() 為真時才 fetchYahoo，於是就此停止向 Yahoo 抓美股
+        // 當期估值快照。兩條都會造成「已滿足」的路徑（(i) fresh 且正 PE 筆數 ≥ PE_MIN_SAMPLES；
+        // (ii) 下方 loss 旗標那條，**不需要任何筆數**）只能靠整個 provider 排除一併堵住。
+        //
+        // EPS／ROE／營收三項刻意不受影響：本任務不寫 stock_financial_quarter 的新 provider，
+        // 那三項的 provider 分組維持原狀。
+        boolean valuation = valuationByProvider.entrySet().stream()
+                .filter(entry -> !StockFundamentalFetchClient.SEC_DERIVED.equals(entry.getKey()))
+                .map(Map.Entry::getValue)
+                .noneMatch(rows -> {
             List<ValuationCoverage> sorted = rows.stream()
                     .sorted(Comparator.comparing(ValuationCoverage::date).reversed()).toList();
             if (sorted.isEmpty() || !fresh(sorted.get(0).date(), decisionDate, VALUATION_MAX_AGE_DAYS)) {
@@ -230,6 +247,114 @@ public class FundamentalObservationStore {
     static int expectedRevenuePeriodIndex(LocalDate decisionDate) {
         YearMonth expected = YearMonth.from(decisionDate).minusMonths(decisionDate.getDayOfMonth() >= 11 ? 1 : 2);
         return expected.getYear() * 12 + expected.getMonthValue();
+    }
+
+    // ── Requirement 74 / Task 334：美股歷史估值推導的唯讀輸入與唯一允許的刪除路徑 ──────────
+
+    /** {@code stock_financial_quarter} 已入庫 SEC EDGAR 官方季報的一組美股代號（資料驅動，不硬編清單）。 */
+    public List<String> secEdgarUsStockCodes() {
+        List<String> codes = new java.util.ArrayList<>();
+        // 多列查詢的第三引數必須是「void 區塊」lambda（RowCallbackHandler，逐列且 rs 已定位）；
+        // 寫成 expression lambda 會被解析成 ResultSetExtractor，rs 停在第一列之前、runtime 才炸。
+        jdbc.query("SELECT DISTINCT stock_code FROM stock_financial_quarter "
+                        + "WHERE market=? AND provider=? ORDER BY 1",
+                (ResultSet rs) -> { codes.add(rs.getString(1)); },
+                US_MARKET, StockFundamentalFetchClient.SEC_EDGAR);
+        return codes;
+    }
+
+    /**
+     * 某美股標的的 SEC EDGAR 季度事實，每個 {@code (fiscal_year, fiscal_quarter)} 取最新 revision。
+     *
+     * <p>刻意<b>不</b>加 {@code source_available_at<=?} 這種 as-of 過濾：point-in-time 由
+     * {@code UsValuationDerivationService} 以「單調化後的 effective_available_at」逐交易日判斷，
+     * 在 SQL 層先砍掉會讓單調化拿不到較新期別、反而做出鋸齒序列。</p>
+     */
+    public List<QuarterFact> secEdgarQuarters(String code) {
+        if (code == null || code.isBlank()) return List.of();
+        return jdbc.query("""
+                SELECT fiscal_year, fiscal_quarter, eps, net_income_parent, equity_parent,
+                       source_available_at, source_urls
+                FROM (
+                    SELECT DISTINCT ON (fiscal_year, fiscal_quarter)
+                           fiscal_year, fiscal_quarter, eps, net_income_parent, equity_parent,
+                           source_available_at, source_urls::text AS source_urls, observed_at
+                    FROM stock_financial_quarter
+                    WHERE stock_code=? AND market=? AND provider=?
+                    ORDER BY fiscal_year DESC, fiscal_quarter DESC, observed_at DESC
+                ) q
+                ORDER BY fiscal_year DESC, fiscal_quarter DESC
+                """, (rs, ignored) -> new QuarterFact(
+                rs.getInt(1), rs.getInt(2), rs.getBigDecimal(3),
+                (Long) rs.getObject(4), (Long) rs.getObject(5),
+                instant(rs, 6), parseUrls(rs.getString(7))),
+                code, US_MARKET, StockFundamentalFetchClient.SEC_EDGAR);
+    }
+
+    /** 該美股標的已落地的 {@code SEC_DERIVED} 交易日集合（判斷缺口用）。 */
+    public java.util.Set<LocalDate> derivedValuationDates(String code) {
+        java.util.Set<LocalDate> dates = new java.util.HashSet<>();
+        if (code == null || code.isBlank()) return dates;
+        jdbc.query("SELECT DISTINCT trading_date FROM stock_valuation_daily "
+                        + "WHERE stock_code=? AND market=? AND provider=?",
+                (ResultSet rs) -> { dates.add(rs.getObject(1, LocalDate.class)); },
+                code, US_MARKET, StockFundamentalFetchClient.SEC_DERIVED);
+        return dates;
+    }
+
+    /** 該美股標的現有 {@code SEC_DERIVED} 序列的最早交易日；無列時回 {@code null}。 */
+    public LocalDate earliestDerivedValuationDate(String code) {
+        if (code == null || code.isBlank()) return null;
+        return jdbc.query("SELECT min(trading_date) FROM stock_valuation_daily "
+                        + "WHERE stock_code=? AND market=? AND provider=?",
+                ps -> {
+                    ps.setString(1, code);
+                    ps.setString(2, US_MARKET);
+                    ps.setString(3, StockFundamentalFetchClient.SEC_DERIVED);
+                },
+                rs -> rs.next() ? rs.getObject(1, LocalDate.class) : null);
+    }
+
+    /**
+     * <b>本專案唯一允許刪除 observation 列的路徑</b>（Task 334.4 (b)）：股票分割發生後，價格序列被
+     * 還原到今日基準、而已落地的 {@code SEC_DERIVED} 列仍是舊基準，整條序列會變成混基準而讓分位失真。
+     * 偵測到「可用區段起點往後移」時只能整段刪除重寫，沒有第二種修法（這三張表沒有 unique index，
+     * append 語意也不允許 UPDATE 過去列）。
+     *
+     * <p>刻意寫死 {@code provider='SEC_DERIVED'} 與 {@code market='美股'}：一手觀測列（EXCHANGE／
+     * YAHOO／FINMIND／SEC_EDGAR）在任何情況下都不得被刪除，把 provider 開成參數等於把這道保險拆掉。</p>
+     *
+     * @return 實際刪除的列數
+     */
+    public int deleteDerivedValuationSeries(String code) {
+        if (code == null || code.isBlank()) return 0;
+        return jdbc.update("DELETE FROM stock_valuation_daily "
+                        + "WHERE stock_code=? AND market=? AND provider=?",
+                code, US_MARKET, StockFundamentalFetchClient.SEC_DERIVED);
+    }
+
+    /**
+     * 一列 SEC EDGAR 季度事實。{@code cumulativeEps}／{@code cumulativeNetIncomeParent} 是<b>會計年度
+     * 累計值</b>（單季值要另行還原），{@code equityParent} 是期末時點值；美股單位為原始 USD，不做千元換算。
+     */
+    public record QuarterFact(
+            int fiscalYear,
+            int fiscalQuarter,
+            BigDecimal cumulativeEps,
+            Long cumulativeNetIncomeParent,
+            Long equityParent,
+            Instant sourceAvailableAt,
+            List<String> sourceUrls) {}
+
+    private List<String> parseUrls(String json) {
+        if (json == null || json.isBlank()) return List.of();
+        try {
+            List<String> urls = mapper.readValue(
+                    json, new com.fasterxml.jackson.core.type.TypeReference<List<String>>() {});
+            return urls == null ? List.of() : List.copyOf(urls);
+        } catch (Exception e) {
+            return List.of();
+        }
     }
 
     public boolean hasObservedToday(LocalDate date) {

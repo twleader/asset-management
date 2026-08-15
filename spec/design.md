@@ -124,7 +124,8 @@ com.steven.assets/
   - `FundSettingsBffController`：`GET /api/bff/fund-settings/bank-options` → 過濾 active 後的銷售銀行下拉；與 SnapshotForm 的 lookups **同讀 business `/api/settings/banks`**（同義欄位同一來源），fund-settings 頁不再跨頁呼叫 `/api/bff/snapshot-form/lookups`（Task 175：一頁一 BFF 合規化）
   - `RealizedGainBffRoutes`：`/api/realized-gains/**` → business-services。**目前無前端消費者**：原「RealizedGainView 的 Pinia store `gainApi` 共用 CRUD」說法已不成立——該頁已全面走 `RealizedGainBffController` 的 `/api/bff/realized-gain` 聚合端點，前端 `gainApi` wrapper 與 `assetStore` 的三個已實現損益 action 已於 Task 197 移除。route 本身暫留（移除需重建 BFF 服務），**屬待清理項**
   - `MarketDataBffRoutes`：`/api/market-data/**` → business-services。消費者是 DashboardView 與 TradingRadarView 兩頁的 SSE 行情串流（皆為 `new EventSource('/api/market-data/prices/stream')`，見下方 SSE 段落之已知落差）；`marketDataApi` wrapper（歷史/配息/ETF 成分股）無呼叫端，已於 Task 197 移除，該類查詢皆走 `StockAnalysisBffRoutes` 的 `/api/bff/stock-analysis/**`
-  - `SchedulePublicBffController`（ScheduleListView 專屬，「公開資訊」分組，Requirement 36）：`GET /api/bff/schedule-list` → 回傳系統所有自動排程的**人工維護靜態清單**（`ScheduledJobDto` 不可變 record：service / category / name / description / schedule 白話 / cron / zone）。Task 327 新增 USD/TWD 2 秒 live producer 後，共 **51 筆** ＝ `business-services` 20 ＋ `external-materials-service` 31（**以 `@Scheduled` 方法計**；business 另包含 `AlertNotificationDispatcher` 每 60 秒與 `TradingRadarNotificationService` 每 2 秒兩個 fixed-delay job；external 實際 33 個標註，`TwClosurePoller` 與台股官方收盤對帳各為一法兩標、各併為一筆）。此頁為唯讀資訊展示故不做跨服務反射探索、不入 DB、不設管理端點；**新增／調整任何 `@Scheduled` 須同步更新此清單以免漂移**。**動態排程**（每分鐘 tick 比對 DB 可設定時點：`NewsPoller`→`crawler_schedule`、`MarketAnalysisScheduler`→`market_analysis_send_time`）於清單標「動態：依『X』頁設定（預設 …）」／「動態（表名）」，**不寫死時間**；每分鐘 tick 但時點為 per-user 私人設定者（`ExportScheduleService`／`TradingCalendarExportScheduleService`）則照列 `每分鐘`／`0 * * * * *` 實際 cron。前端 `ScheduleListView` 之服務別／分類計數由 payload 動態算出，故加減筆數無須改前端。無下游呼叫（不需 WebClient），落 BFF `anyExchange().authenticated()`（已登入者皆可讀）。
+  - `SchedulePublicBffController`（ScheduleListView 專屬，「公開資訊」分組，Requirement 36）：`GET /api/bff/schedule-list` → 回傳系統所有自動排程的**人工維護靜態清單**（`ScheduledJobDto` 不可變 record：service / category / name / description / schedule 白話 / cron / zone）。Task 334（external：美股推導估值每日排程）與 Task 332（business：海外指數日線落後補救檢查）各新增一個 `@Scheduled` 後，共 **53 筆** ＝ `business-services` 21 ＋ `external-materials-service` 32（Task 327 新增 USD/TWD 2 秒 live producer 後為 51 ＝ 20 ＋ 31；**以 `@Scheduled` 方法計**；business 另包含 `AlertNotificationDispatcher` 每 60 秒與 `TradingRadarNotificationService` 每 2 秒兩個 fixed-delay job；external 實際 **34** 個標註，`TwClosurePoller` 與台股官方收盤對帳各為一法兩標、各併為一筆。
+**逐檔核對務必用 `grep -ran`**：`AlertNotificationDispatcher.java` 會被 `file(1)` 判為 data，普通 `grep -r` 整檔跳過，backend 會少算成 20）。此頁為唯讀資訊展示故不做跨服務反射探索、不入 DB、不設管理端點；**新增／調整任何 `@Scheduled` 須同步更新此清單以免漂移**。**動態排程**（每分鐘 tick 比對 DB 可設定時點：`NewsPoller`→`crawler_schedule`、`MarketAnalysisScheduler`→`market_analysis_send_time`）於清單標「動態：依『X』頁設定（預設 …）」／「動態（表名）」，**不寫死時間**；每分鐘 tick 但時點為 per-user 私人設定者（`ExportScheduleService`／`TradingCalendarExportScheduleService`）則照列 `每分鐘`／`0 * * * * *` 實際 cron。前端 `ScheduleListView` 之服務別／分類計數由 payload 動態算出，故加減筆數無須改前端。無下游呼叫（不需 WebClient），落 BFF `anyExchange().authenticated()`（已登入者皆可讀）。
   - `CrawlerDataBffController`（CrawlerDataView 專屬，「公開資訊」分組，Requirement 38）：爬蟲資訊查詢頁，一頁一 BFF、WebClient 轉呼 business：
     - `GET /api/bff/crawler-data?date=YYYY-MM-DD&dateField=fetched|published&category=` → business `GET /api/news-headlines`：查指定日期爬回的 `news_headline`（與今日股市分析同讀一份表，符合「同義欄位、同一 business API」）。
     - `GET /api/bff/crawler-data/schedule` → business `GET /api/crawler-schedule?crawler=news-poller`：讀 NewsPoller 已設定的執行時間清單。
@@ -4736,11 +4737,178 @@ TradingRadarView（雙分頁：台股／美股，比照 WatchStockView.vue 的 m
 
 **匯率因子不需新程式碼：** `TradingRadarService.underlyingCurrencyOf()` 早已對 `"美股"` 回傳 `"USD"`（Requirement 47 既有邏輯，原為服務外幣債券 ETF 而寫，但實作本身未區分資產類別），`resolveFx()` 對非 TWD 幣別一律計算五年分位。移除 `addTarget` 的市場 filter 後，這條既有路徑對美股個股自然生效，`fxContribution` 加減分與「換匯過貴」買進閘門因此對美股 EQUITY 也成立——這是既有程式碼的自然延伸，不是新設計。
 
-**美股基本面的 coverage 上限為 3，非台股的 4：** 美股上市公司無等同台股 MOPS 的月營收公開揭露義務，故「近三月營收年增」與「產業營收年增」兩項在美股恆為 `null`，由既有的 optional contribution 缺值重分配機制吸收，不新增第二套精度契約。美股基本面資料鏈為 `SEC_EDGAR`（`companyfacts` API，免 key，供 EPS／淨利／權益）→`YAHOO`（既有 `quoteSummary`，供 PE／PB）；`FINMIND` 的 `USStockPrice` dataset 只有 OHLCV、明確排除於美股基本面鏈之外，繼續只作既有收盤校正用途。四張既有表（`stock_valuation_daily`／`stock_financial_quarter`／`stock_monthly_revenue`／`industry_monthly_revenue`）沿用 schema，`market` 欄寫 `"美股"`，後兩張不為美股寫入任何列。**寫入端目前類別內硬編 `TW_MARKET` 常數（`FundamentalObservationStore`）與資料承載 record（`StockFundamentalFetchClient` 的 `Valuation`／`Financial`／`Revenue`）都沒有 market 概念**，需新增 market 欄位／參數貫穿寫入路徑，非僅換一個字串值即可（詳見 t293）。
+**美股基本面的 coverage 上限為 3，非台股的 4：** 美股上市公司無等同台股 MOPS 的月營收公開揭露義務，故「近三月營收年增」與「產業營收年增」兩項在美股恆為 `null`，由既有的 optional contribution 缺值重分配機制吸收，不新增第二套精度契約。美股基本面資料鏈為 `SEC_EDGAR`（`companyfacts` API，免 key，供 EPS／淨利／權益）→`YAHOO`（既有 `quoteSummary`，供 PE／PB）→（Requirement 74／Task 334 追加）`SEC_DERIVED`（由前兩者已入庫的資料推導出的歷史估值序列，優先序最低）；`FINMIND` 的 `USStockPrice` dataset 只有 OHLCV、明確排除於美股基本面鏈之外，繼續只作既有收盤校正用途。四張既有表（`stock_valuation_daily`／`stock_financial_quarter`／`stock_monthly_revenue`／`industry_monthly_revenue`）沿用 schema，`market` 欄寫 `"美股"`，後兩張不為美股寫入任何列。~~寫入端目前類別內硬編 `TW_MARKET` 常數（`FundamentalObservationStore`）與資料承載 record（`StockFundamentalFetchClient` 的 `Valuation`／`Financial`／`Revenue`）都沒有 market 概念，需新增 market 欄位／參數貫穿寫入路徑~~【**t293 已 landed，此描述為 t293 之前的狀態**：三個 record 皆已有 `String market` 欄位並貫穿寫入路徑，市場常數現位於 `StockFundamentalPoller`，`FundamentalObservationStore` 全檔已無 `TW_MARKET`】。
 
 **抓取範圍沿用「held／watchlist only」的既有心智模型：** 直接沿用既有 `StockSourceQuery.collectHeldStockCodes(twCodes, usCodes, ukCodes)` 的 `usCodes` 輸出（該方法已嚴格以 `market="美股"` 分類 held ∪ watchlist），**不新增平行查詢**——台股既有的 `collectTwRadarCodes` 與 `collectHeldStockCodes` 兩支查詢口徑歷史上刻意不同（Task 249／257），美股沒有對應的歷史包袱，直接用後者的 `usCodes` 輸出即可，不放大 external-materials-service 的抓取負擔。
 
-**明確不在本次範圍：** 英股（無資料源規劃）、美股 ETF 折溢價因子（`etf_nav_history` 現況已有既有 Task 214/215 寫入的美股列，本次**必須明確短路排除**，不是「天生沒資料」）、美股基本面歷史回補（比照台股「自上線起累積」，即使 SEC EDGAR 理論上可一次回補多年歷史）、IXIC 即時盤中報價（美股組市場情境僅用完成日資料）、SOX 作為獨立第二組美股大盤 regime。
+**明確不在本次範圍：** 英股（無資料源規劃）、美股 ETF 折溢價因子（`etf_nav_history` 現況已有既有 Task 214/215 寫入的美股列，本次**必須明確短路排除**，不是「天生沒資料」）、~~美股基本面歷史回補（比照台股「自上線起累積」，即使 SEC EDGAR 理論上可一次回補多年歷史）~~【**已由 Requirement 74／Task 334 推翻**，見下方「美股歷史估值序列推導落地」段；推翻的是「不回補」這個決定，不是資料來源判斷】、IXIC 即時盤中報價（美股組市場情境僅用完成日資料）、SOX 作為獨立第二組美股大盤 regime。
+
+### 美股歷史估值序列推導落地（Requirement 74，Task 334，`SEC_DERIVED` provider）
+
+**要解決的現象。** 2026-08-15 13:53 Asia/Taipei 實測 `GET /api/trading-radar`：`VALUATION` 三個 component
+（`pe`／`pb`／`dividend_yield`）各為 AVAILABLE 4／NOT_APPLICABLE 21／MISSING 7，MISSING 的七檔
+（AMZN／NVDA／AVGO／MSFT／TSM／GOOGL／COIN）`missingReason` 一律是「估值欄位／250 筆歷史不足」。
+成因單純是歷史深度：`stock_valuation_daily` 美股只有 7 檔 56 列（起 2026-08-09，來源 Yahoo `quoteSummary`
+的當期快照、無歷史），而 `FundamentalAnalysisService.PE_MIN_SAMPLES = 250` 對**每個 provider**
+都要求 250 筆。台股同期為 4 檔 34,007 列（起 2021-08-09）故三項皆 AVAILABLE——實測逐 provider 為
+`FINMIND` 33,979 列／`EXCHANGE` 24 列／`YAHOO` 4 列，深度**來自 FinMind 的 `TaiwanStockPER`**，
+**不是** Requirement 61／Task 278 的 TWSE 回補（該任務至今未實作，見本檔 `/internal/valuation/backfill` 一列
+逐字仍記「規劃中、尚未實作」）。
+
+**資料流（全部在 `external-materials-service`，business 端只讀）：**
+
+```
+每日排程（美股收盤後，Asia/Taipei）＋ 開機自癒
+  └─ UsValuationDerivationService.run()
+       ├─ ① 確保 EDGAR 季報歷史足夠
+       │     StockFundamentalFetchClient.fetchSecEdgarFacts(code)   ← 不受 coverageNeed 短路影響
+       │     → FundamentalObservationStore.append(...)              ← append-only 去重
+       ├─ ② 讀三張既有表（同一個 JdbcTemplate，無外部 HTTP）
+       │     stock_financial_quarter (provider='SEC_EDGAR')  累計 EPS／淨利／權益
+       │     stock_price_history     (market='美股')          收盤
+       │     stock_dividend_history  (market='美股')          除息現金股利
+       └─ ③ 逐交易日推導 → stock_valuation_daily
+             provider='SEC_DERIVED'，availability_basis='RECONSTRUCTED'
+```
+
+**推導口徑（單季還原與 TTM 沿用 backend `FundamentalAnalysisService.standaloneValue(...)` 同一套語意）：**
+
+| 欄位 | 算式 | 不可得時 |
+|---|---|---|
+| `pe_ratio` | 收盤 ÷ TTM EPS | TTM EPS ≤ 0 → `NULL` ＋ `pe_loss_flag=true`（**仍寫入該列**） |
+| `pb_ratio` | 收盤 ÷（母公司權益 ÷ 推導股數）；推導股數＝TTM 母公司淨利 ÷ TTM EPS | 每股淨值 ≤ 0 或股數不可得 → `NULL` |
+| `dividend_yield_pct` | 近 365 日現金股利加總 ÷ 收盤 × 100 | D 之前查無任何除息紀錄 → `NULL`（**不得寫 0 冒充「不配息」**） |
+
+**point-in-time：** 交易日 D 只能使用當日已公開的季度列；落地列的 `source_available_at` 取「所用季報的
+有效可見時點」與「D 當日美股收盤時刻」的較晚者。用「最新已知財報」回頭套用到公布前的日期會讓歷史分位
+含未來資訊，直接毀掉 Requirement 65 的 walk-forward／holdout 語意。
+
+**但 `source_available_at` 不能直接當「首次公布時點」用。** 它的真實語意是「**最後一次提及該期別的申報
+時點**」——寫入端 `selectCumulative`／`selectInstant` 對同一期間取 `filed` 最新的一筆，而 SEC 申報會夾帶
+前期比較數字。實測：`MSFT` 的 2024Q4／2025Q4／2026Q4 三個會計年度共用 `2026-07-29`（同一份三年比較欄的
+10-K）；`AMZN` 甚至**非單調**——2025Q2 為 `2026-07-31`、更新的 2025Q3 卻是 `2025-10-31`。直接套
+「≤ D」會讓 (i) 歷史區段被迫用 12–15 個月前的 EPS、最近區段用 1.5 個月前的 EPS，**同一條序列的 TTM 分母
+在某天跨季跳階**（AMZN 推算：2026-07-31 當天由 `6.14` 跳到 `12.43`），成長股的「今天」因而落在自身歷史
+PE 的極低分位、輸出「現在最便宜」；(ii) 非單調日期讓「4 連續季」時有時無。
+
+故先單調化：`effective_available_at(Q) = min{ source_available_at(Q') | Q' ≥ Q }`
+（較新期別既已公開，較舊期別必然早已公開，故此式是真實首次公布時點的**上界**、不引入未來資訊），
+再以它套「≤ D 當日美股收盤時刻」與「4 連續季」。
+
+**每股基準閘門（做錯完全不會報錯的一項）：** `stock_price_history` 的美股收盤**已還原股票分割**
+（實測 AMZN 2022-06-03→06-06 `122.35`→`124.79`、NVDA 2024-06-07→06-10 `120.888`→`121.79` 皆無倍數跳空；
+全表 40,593 列相鄰日比值 `>1.8` 或 `<0.55` 者 0 列，同一支查詢對台股會命中未還原列），
+而 SEC `companyfacts` 的每股值是**申報當下的基準**（`extractFacts` 只收原始 10-Q／10-K 事實，
+只有落在比較年度視窗內、被分割後申報重報過的期別才是還原值）。兩者相除，跨分割點的區段會整段錯一個
+分割倍數，PB 同步錯（EPS 偏大→推導股數偏小→每股淨值偏大→PB 偏小），而分位是在整條被污染的序列上算的，
+被壓低數倍的舊 PE 會把「今天」推到接近 100 分位、輸出「現在最貴」的錯誤訊號。
+
+閘門：以**單季推導股數序列**（單季 `net_income_parent` ÷ 單季 EPS）偵測基準變動——相鄰季度比值 ≥ `1.8`
+即為變動點，只有比**最新**變動點更新的季度可用；**口徑必須是單季、不得用 TTM**：`net_income_parent` 不隨
+分割改變而 EPS 會，TTM 口徑會把一次分割攤平成四個小台階（k=2 時相鄰比值僅 1.14／1.17／1.20／1.25，
+k=4 時 1.23／1.30／1.43／1.75，**全部低於 1.8**），單季口徑則比值恰為 k。門檻 `1.8`（與股利去重共用）
+及容差 `0.10` 皆為判斷性取值、無回測依據，已登記於 requirements.md 的「無量測依據門檻清單」體例；
+取 1.8 而非所比照的 `DistributionAdjustedPriceService.SPLIT_FORWARD_MIN=2.0`，是為吸收 EPS 兩位小數
+造成的約 ±1% 推導股數雜訊。
+`net_income_parent` 為 null 使推導股數無法計算的季度，一律視為基準不可驗證、等同變動點（fail closed）。
+TTM 視窗跨越變動點的交易日不落列。代價是可用歷史可能短於資料深度、部分標的仍湊不滿 250 筆
+（實測 AVGO 的 `net_income_parent` 10 季只有 1 季非 null、`equity_parent` 全 null，多半會落在此列），
+**那是正確結果**；以 rebase 延長覆蓋屬後續獨立任務。
+
+**股利去重（同一根因的另一面）：** `stock_dividend_history` 美股同一除息日存在重複列（實測 AVGO 30 列、
+NVDA 29 列、QQQ 36 列），且**重複有兩種型態**：
+
+| 型態 | 例證 | 比值 | 處理 |
+|---|---|---|---|
+| 一：同一筆、兩個精度 | `QQQ｜2023-03-20｜0.472000／0.472200`（QQQ 從未分割） | `1.0004` | 比值 ≤ `1.01` → 視為同一筆，取有效位數較多者、只計一次 |
+| 二：同一筆、兩個每股基準 | `AVGO｜2023-06-21｜0.46／4.60`、`NVDA｜2023-06-07｜0.004／0.040`（帶 `previous_close` 的那列**列內兩欄基準不一致**） | `10` | 比值 ≥ `1.8` 且**與同標的鄰近除息日解出的倍數一致**才取較小值 |
+| 其他 | 無法判定 | — | 該日 `dividend_yield_pct` 寫 `NULL`（fail closed） |
+
+**「正向分割下較小者必為已還原值」單獨作為判準會出錯，實測已被推翻**：AVGO 僅有的一次分割是 2024 年 10:1
+（還原倍數必為 10），但 `2018-03-21`／`2018-06-19` 各為 `0.35` 與 `1.75`（比值 **5**），而相鄰的
+`2017-12-18`／`2018-09-18` 為 `0.175` 與 `1.75`（比值 10）——只看「取最小值」會採 `0.35`，是正確值
+`0.175` 的兩倍且不會報錯。故須加上「與鄰近除息日倍數一致」這一層。根本解是取得可查證的分割事件來源。
+
+**兩個會讓「資料入庫但永不生效」的接線點（漏掉不會有任何日誌）：**
+
+1. `FundamentalAnalysisService.PROVIDERS` 須加入 `"SEC_DERIVED"` 且**置於清單最末**（優先序最低，只在所有
+   實際觀測來源都湊不到 250 筆時才被採用）。該清單以 `provider.equals(...)` 過濾，清單外的 provider 靜默丟棄。
+2. `FundamentalObservationStore.coverageNeed(...)` 判斷 valuation 是否仍需 fallback 時**須排除 `SEC_DERIVED`**。
+   否則推導值每日寫入會讓 coverage 恆為「已滿足」，`StockFundamentalPoller` 就此停止向 Yahoo 抓當期估值
+   快照——等於用自己推導的值把唯一的一手觀測來源關掉。EPS／ROE／營收三項的 coverage 判斷不受影響。
+
+**兩條落地後才確立的邊界（as-built，2026-08-15 實機驗證）：**
+
+1. **`source_available_at` 改記「首次申報時點」，不再是「最後一次提及該期別的申報時點」。** 單調化本身
+   **消不掉** SEC 比較期別造成的系統性位移——該位移對期別是保序的，`min` 取不掉。實測 GOOGL 各季
+   `source_available_at` 距其日曆期末達 388–401 天（只有最新四季是 23–36 天），照原樣過濾會讓歷史區段
+   的 TTM 分母整段落後約 4 季、最近一年卻是當期值，成長股的「今天」必然落在極低分位、輸出「現在最便宜」。
+   修法落在**寫入端**：`selectCumulative`／`selectInstant` 同時追蹤該期間的**最早** `filed`，
+   值仍取最新 `filed` 那一筆（維持重述後的正確數字），但 `availableAt` 改寫最早 `filed`。
+   單調化因此退回它原本該扮演的角色（只修 AMZN 2025Q2／2025Q3 那種真正倒置、與 MSFT 三個 Q4 塌成同一天）。
+   **副作用**：既有 `SEC_EDGAR` 列 `availability_basis='PUBLISHED'` 會逐列比對 instant，
+   下一輪重抓會為每個 (stock, quarter) append 一列修正版 observation，方向是「可見時點變早」。
+2. **`filedInstant` 由當日 12:00 UTC 改為當日 16:30 America/New_York。** 12:00 UTC ＝ 08:00 ET 是**開盤前**，
+   而美股大型股多在收盤後申報，會讓「申報當日」的推導列變成「盤前價 ÷ 尚未公開的財報」——每季一天的
+   look-ahead。改為收盤後 30 分即可維持「≤ D 當日美股收盤時刻」這個比較基準不變，同時讓某季
+   **從申報日的下一個交易日起**才可見。（該常數原 Javadoc 的「當日中午 UTC 是保守估計」只對台股成立
+   ——12:00 UTC ＝ 20:00 台北、晚於 13:30 收盤；對美股方向相反。）
+
+**已知限制（不在本設計可解範圍，落地後查證確認）：** `stock_valuation_daily.observed_at` 由寫入端填
+`now()`，整段回補共用同一個時點；backend 的 as-of 過濾同時看 `source_available_at` 與 `observed_at`，
+故**早於回補時點的 walk-forward／holdout 仍會整組取不到 `SEC_DERIVED` 列**。方向是保守的
+（只缺值、不給錯值），production 決策路徑（decisionInstant ＝ 現在）不受影響。要讓回測看見這段歷史，
+必須另案處理 `observed_at` 的語意，**不得靜默放寬 backend 那道 as-of 檢查**。
+
+**新增的跨邊界唯讀依賴（spec 原本沒記，落地時補記）：** `stock_dividend_history` 的 current-state
+原本由 business-services 的 `DividendPersister` 獨佔寫入、external-materials-service 端零讀寫。
+本設計的殖利率推導需要它，故新增唯讀元件 `DividendHistoryQuery`（**只讀、且強制
+`event_status='ACTIVE'`**，與既有兩個讀取端一致——不濾會把已撤回的事件算進殖利率）。
+寫入端仍在 business-services，本服務不得對該表寫入。
+
+**覆蓋範圍的硬限制：** `companyfacts` 只涵蓋以 10-K／10-Q 申報的美國國內發行人。實測 `stock_financial_quarter`
+`market='美股'` 只有 **6 檔**（AMZN／AVGO／COIN／GOOGL／MSFT／NVDA，共 61 列），**TSM 完全無列**
+（外國發行人走 20-F），故 TSM 不在覆蓋範圍、三個 component 維持 MISSING；
+AMZN 與 COIN 在 `stock_dividend_history` 零列，`dividend_yield` 維持 MISSING（誠實揭露「未知」而非捏造 0）。
+美股 ETF 本就無個股財報，`VALUATION` 對它們維持既有 `NOT_APPLICABLE`。
+
+**denormalization 的豁免理由（須同時寫進落地類別 Javadoc）：** 三項算式的輸入表都在庫，直接牴觸
+CLAUDE.md「禁止存入可從其他欄位計算得出的衍生值」。比照 `asset_snapshot.total_*` 的既有加註體例予以豁免——
+**分位計算需要一條固定且可重現的觀測序列**，逐次即時重算會讓同一個歷史日期的分位隨財報事後重述與價格
+還原權息調整而漂移，使回測與 production 的同一個因子失去可比性。
+
+**本段不改的東西：** `PE_MIN_SAMPLES=250`、Requirement 65 的 evidence gate 門檻、`TradingRadarRuleEngine.RULE_VERSION`、
+Yahoo 當期估值抓取路徑、`stock_valuation_daily` 的 schema（`provider` 與 `availability_basis` 皆 `varchar(20)`，
+`SEC_DERIVED`／`RECONSTRUCTED` 長度足夠，**無 Liquibase changeset**）。
+
+### 海外指數日線新鮮度判準與交易雷達同源（Requirement 75，Task 332）
+
+**原始事故（t324.4 登記）：** 2026-08-13 21:58 Asia/Taipei（＝ET 09:58，8/12 那盤早已收盤），
+`us_index_daily_history` 的 IXIC `max(trading_date)` 仍為 2026-08-11、缺 8/12，而同一時刻
+`IndexDailyRefreshScheduler` 的開機自癒輸出「self-heal：海外指數日線皆為最新，略過」。
+
+**成因是兩把尺：**
+
+| 判斷者 | 判準 | 「落後 1～3 盤」時的結論 |
+|---|---|---|
+| `IndexDailyRefreshScheduler` | `latestTradingDate < now − STALE_DAYS(4 日曆天)` | 正常 |
+| `TradingRadarService`（美股大盤） | `latestEodDate < mostRecentCompletedUsTradingDay(decisionInstant)` | stale |
+
+連帶效果：美股列的 `regime`（權重 `.70`）與 `market_volume_turnover`（權重 `.30`）整組轉 stale，
+美股短期信心度由 89 掉到 63（Task 323 完成報告實測）。
+
+**修正方向是收緊自癒去對齊雷達，不是反向對齊**（t324.4 逐字：放寬只會讓它更常宣稱正常，不會讓資料變新）：
+
+- `mostRecentCompletedUsTradingDay(Instant)` 由 `TradingRadarService` 的 private 方法提升為兩邊共用的具名方法，
+  `TradingRadarService` 改委派、行為不變。
+- 美股指數（IXIC／SPX／DJI／SOX ＋ `TOTAL_RETURN_US_INDEX_CODES` 的 SP500TR）改用逐盤判準；
+  **非美股指數（N225／KOSPI／FTSE／DAX）維持既有 `STALE_DAYS = 4` 日曆天容忍**——本專案未維護這些市場的
+  交易日曆，套用美股逐盤判準會因當地假日恆判過時、每次啟動全量回補。判準分岔須在程式碼註明理由。
+- 每日 07:00 回補完成後再驗收一次，未追上即以 **WARN** 記錄「哪個指數／目前最新／應該要有哪一天」。
+- 新增 09:00 與 12:00（TUE-SAT，`Asia/Taipei`）補救檢查，**只有確實落後時才觸發回補**，追上即不動作。
+
+回補行為本身不變（仍走 `MacroHistoryService.refreshUsIndexDaily(code)`、Yahoo `range=10y`、idempotent upsert、
+指數間禮貌間隔，含息報酬指數與 TWSE 報酬指數增量收尾步驟照舊）；不改雷達 stale 判定、不改任何規則參數。
 
 ### 因子同源修正、極端時機分位化、通知冷卻與評估效能（Requirement 43／44，Task 297–305，`TW_RULES_V12`）
 
@@ -5388,7 +5556,7 @@ run-now 不動任何時間點 guard——全部同 R41／R42 的既有安全邊�
 
 ## Requirement 46（Task 222）：台股基本面資料抓取與歷史落地
 
-> **⛔ Task 222 已由 [t266](tasks/t266_stock_fundamental_ingestion.md) 取代，本章節不得作為實作依據。** 資料來源限制、三張表的欄位設計、虧損公司仍須寫入一列等分析仍然有效並已移入 t266；changeset 版號改為 `v1.83.0-stock-fundamental`（見下方更正）。
+> **⛔ Task 222 已由 [t266](tasks/t266_stock_fundamental_ingestion.md) 取代，本章節不得作為實作依據。** 資料來源限制、三張表的欄位設計、虧損公司仍須寫入一列等分析仍然有效並已移入 t266；changeset 實際落地為 `v1.90.0-stock-fundamental-industry.sql`（見下方更正）。
 
 ### 為什麼這件事必須先做，且愈早愈好
 
@@ -5428,19 +5596,29 @@ PostgreSQL               stock_valuation_daily / stock_financial_quarter / stock
 
 ### 資料模型
 
-三張表皆為**全域公開行情**，比照 `stock_price_history` 不帶 `owner_user_id`、不套 `@Filter`。changeset `v1.83.0-stock-fundamental`（**原記 `v1.68.0-stock-fundamentals`，已隨 Task 222 → t266 的取代一併更正；`v1.82.0-etf-nav-pct-origin.sql` 為現存最高版號**）（**刻意避開 `v1.67.0`——該版號已由 Task 218 的通知去抖欄位預定，雖檔案尚未建立**）。
+三張表皆為**全域公開行情**，比照 `stock_price_history` 不帶 `owner_user_id`、不套 `@Filter`。**實際建表的 changeset 是 `v1.90.0-stock-fundamental-industry.sql`**（該檔內含四個 `CREATE TABLE`）——規劃期間先後記為 `v1.68.0-stock-fundamentals`、再更正為 `v1.83.0-stock-fundamental`，兩者**都不是最終落地的檔名**（`v1.83.0` 這個版號實際被 `v1.83.0-radar-notification-rule-version.sql` 佔用）。此處不再記載「現存最高版號」——那個數字註定漂移，要查請直接 `ls backend/src/main/resources/db/changelog/changes/`。
 
 ```text
-stock_valuation_daily     UK(stock_code, market, trading_date)
+stock_valuation_daily     業務唯一鍵 (stock_code, market, trading_date, provider)
                           pe_ratio / pb_ratio / dividend_yield_pct   numeric(12,4) NULL
 
-stock_financial_quarter   UK(stock_code, market, fiscal_year, fiscal_quarter)
+stock_financial_quarter   業務唯一鍵 (stock_code, market, fiscal_year, fiscal_quarter, provider)
                           eps numeric(12,4) NULL
-                          net_income_parent / equity_parent  bigint NULL（千元，同來源單位）
+                          net_income_parent / equity_parent  bigint NULL（單位隨來源：台股為千元，
+                          美股 SEC_EDGAR 為 USD 元。同一列的 eps 與 net_income 必為同來源，
+                          故「淨利 ÷ EPS」在該市場自身單位下自洽——台股得到千股、美股得到股——
+                          再與同單位的 equity_parent 相除即得正確的每股淨值；跨市場不可比）
 
-stock_monthly_revenue     UK(stock_code, market, revenue_year, revenue_month)
+stock_monthly_revenue     業務唯一鍵 (stock_code, market, revenue_year, revenue_month, provider)
                           revenue bigint NULL（千元） / revenue_yoy_pct numeric(12,4) NULL
 ```
+
+> **上面三行寫的是「業務唯一鍵」，不是 DB unique index。** 實測運行中 DB，這三張表**只有 PK(id)**，
+> 沒有任何 unique 約束——它們是 append-only 觀測表，去重由寫入端 `FundamentalObservationStore`
+> 以「取該 key 最新一列比對，值相同就不寫」達成。同一個 `(stock_code, market, trading_date)`
+> 因此**允許**同時存在多個 provider 的列（Requirement 74 的 `SEC_DERIVED` 與既有 `YAHOO` 即為此例），
+> 這是設計如此、不是破壞唯一性；下游一律逐 provider 分組計分（Requirement 65：不得跨 provider
+> 拼出單一 component）。
 
 **不存 ROE**：`ROE = net_income_parent ÷ equity_parent` 為可從其他欄位算出的衍生值，儲存即違反本專案正規化規範（同 `realized_gain` 不存 profit 的既有決策）。近四季 EPS 合計、營收成長均值等聚合同理不存，一律於評分時計算。TWSE／TPEx 亦**未提供任何現成 ROE 欄位**（兩站 swagger 搜尋「報酬率」皆無命中），此為已確認事實。
 

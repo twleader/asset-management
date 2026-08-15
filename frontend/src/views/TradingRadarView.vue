@@ -266,10 +266,13 @@
                       <small>可得時間：{{ component.availableAt ? formatTime(component.availableAt) : '—' }}</small>
                       <small v-if="component.missingReason">缺漏原因：{{ component.missingReason }}</small>
                       <small v-if="component.key === 'pe' && component.loss === true">該虧損 observation 的來源與日期如上，不以 generic 估值來源代填。</small>
-                      <div v-if="component.sourceUrls.length" class="source-links">
-                        <a v-for="(url, i) in component.sourceUrls" :key="`${component.key}-${i}`" :href="url" target="_blank" rel="noopener noreferrer">來源 {{ i + 1 }}</a>
+                      <div v-if="component.sourceLinks.length" class="source-links">
+                        <a v-for="(url, i) in component.sourceLinks" :key="`${component.key}-${i}`" :href="url" target="_blank" rel="noopener noreferrer">來源 {{ i + 1 }}</a>
                       </div>
-                      <small v-else>來源網址：—</small>
+                      <small v-else-if="!component.sourceNotes.length">來源網址：—</small>
+                      <!-- 非 http(s) 的項目（如 SEC_DERIVED 的 derived://... 推導標記）以純文字揭露，
+                           不得 render 成超連結：那會是一個看起來像官方來源、點下去卻是死連結的「來源 N」。 -->
+                      <small v-for="(note, i) in component.sourceNotes" :key="`${component.key}-note-${i}`">來源標記：{{ note }}</small>
                     </template>
                   </div>
                 </div>

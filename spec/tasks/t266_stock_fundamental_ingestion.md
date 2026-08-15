@@ -47,6 +47,11 @@
 
 - [ ] 建表（欄位皆 nullable，`NULL` 代表無資料或虧損，**絕不會是 `0` 代表缺值**）：
 
+  > 〔**Task 292／Requirement 74 後修正**：下方三行標示的 `UK(...)` 實際上不是 DB unique index——
+  > 三張表在 DB 只有 `PRIMARY KEY (id)`，為 append-on-change 觀測表，去重由寫入端
+  > `FundamentalObservationStore` 以「取該鍵最新一列比對、值相同即不寫」達成，且**業務鍵含 `provider`**，
+  > 同一 `(code, market, date)` 允許多 provider 並存。本段保留原文以存查。〕
+
   ```text
   stock_valuation_daily     UK(stock_code, market, trading_date)
                             pe_ratio / pb_ratio / dividend_yield_pct  numeric(12,4)

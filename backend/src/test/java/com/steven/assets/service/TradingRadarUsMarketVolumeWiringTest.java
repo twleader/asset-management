@@ -105,6 +105,21 @@ class TradingRadarUsMarketVolumeWiringTest {
         when(indicatorService.computeAllForNasdaq())
                 .thenReturn(TechnicalIndicatorService.FullIndicators.EMPTY);
         when(marketDataService.isTradingDay(anyString(), any(LocalDate.class))).thenReturn(true);
+        // Task 332：mostRecentCompletedUsTradingDay 由 TradingRadarService 的 private 方法提升為
+        // MarketDataService 的共用方法（與 IndexDailyRefreshScheduler 的回補判準同源）。marketDataService
+        // 是 mock，未 stub 會回 null，buildUsMarket 的 stale 判斷即 NPE、被 catch 吞成 incompleteMarket()
+        // （整組欄位變 null）。此處回填的是上一行「每日皆為交易日」stub 的等價語意：往回找永遠第一輪就命中，
+        // 結果即美東當日（收盤前退回前一日）——搬移前後的期望值因此完全一致。
+        when(marketDataService.mostRecentCompletedUsTradingDay(any(Instant.class)))
+                .thenAnswer(inv -> everyDayTradingUsCompletedDay(inv.getArgument(0)));
+    }
+
+    /** 「每日皆為交易日」前提下的最近一個已完成美股交易日：美東當日，收盤（16:00 ET）前退回前一日。 */
+    private static LocalDate everyDayTradingUsCompletedDay(Instant instant) {
+        java.time.ZonedDateTime nowNy = instant.atZone(NEW_YORK);
+        return nowNy.toLocalTime().isBefore(java.time.LocalTime.of(16, 0))
+                ? nowNy.toLocalDate().minusDays(1)
+                : nowNy.toLocalDate();
     }
 
     private static UsIndexDailyHistory ixic(LocalDate date, String close, Long volume) {
