@@ -177,7 +177,27 @@ bff/src/main/java/com/steven/assets/bff/
      故實際差異只出現在盤中、且來自 live 併入。**收斂的正解**是先決定「MA 要不要併 live」
      再統一 `TechnicalIndicatorService` 的算術路徑，屬獨立任務。
      詳見 `spec/design.md` 的 Requirement 45「週線MA5：唯一的計算欄」。
-   - **這條例外只涵蓋上述 (1)(2)(3) 三份，不得被引用來新增第四份實作**：新的同義值一律回到本鐵則。
+   - **具名例外之二（Task 335 登記，狀態：待收斂）：IXIC（那斯達克綜合指數）的均線 MA5/20/60/240
+     有兩份實作，且不適用上面 (3) 的免罪理由。** (a)「股市大盤查詢」頁走 `MarketIndexChartService
+     .movingAverage`（BFF，BigDecimal 精確和後 `divide(2, HALF_UP)`）；(b) 交易雷達美股大盤分頁走
+     `TechnicalIndicatorService.computeAllForNasdaq()` → `nasdaqSimpleMa`（backend，**double 累加**
+     後 `setScale(2, HALF_UP)`）。**(3) 的免罪理由（語意不同、含 live）在此不成立**——
+     `computeAllForNasdaq()` 刻意不併即時價（IXIC 無對應 Redis 即時報價來源，見
+     `TechnicalIndicatorNasdaqTest` 的同名斷言），兩份都只用已落地日線收盤，本應同值。
+     **也不能沿用 (1)(2) 的「算術上逐位相同」論證**：那個論證的前提是台股收盤為 `numeric(12,2)`、
+     和除以 5 恆為第三位小數為偶數的三位小數而碰不到 HALF_UP 邊界；`us_index_daily_history
+     .close_point` 是 **`numeric(14,4)`**，四個視窗的平均值都可能恰好落在 `x.xx5`，此時 double
+     累加的微小誤差會決定進位方向，兩份結果可差 **0.01**。
+     **為什麼 Task 335 沒有順手收斂：** 兩份實作都早於 t335（`nasdaqSimpleMa` 為 Task 294.1、
+     `movingAverage` 為既有），t335 只是讓 (b) 的輸出**首次上畫面**，使「同義值在兩頁顯示」的
+     條件成立。收斂必然要改 `computeAllForNasdaq()` 的輸出，而該輸出經 `indicators(ind)` 進
+     `MarketInput` → 直接影響美股 regime 與買進閘門；t335 的 Requirement 76 明文以「純揭露、
+     `action`／`score`／`regime` 逐位不變」為不升版（Task 281 先例）的前提，順手改會使該前提失效。
+     **收斂的正解**是另立任務：決定以哪一份的算術路徑為準（建議收斂到 BigDecimal 精確路徑，
+     double 累加本就是精度較差的一方），跑美股 regime 回歸，並評估是否需要升版。
+   - **上述兩組具名例外之外，不得再新增任何一份同義值的獨立實作**：新的同義值一律回到本鐵則。
+     引用例外時須逐條核對免罪理由是否真的適用——Task 335 的 arch 稽核正是發現「(3) 的『含 live』
+     理由對 IXIC 不成立」才揭出這一組。
 5. **前端只 render，BFF 預先聚合 / 排序 / 過濾 / 計算 profit / profitRate 等衍生值。**
 
 ---
@@ -339,7 +359,7 @@ frontend/
 
 ```
 spec/
-├── requirements.md       # 78 個 Requirements（User Story + AC）
+├── requirements.md       # 79 個 Requirements（User Story + AC）
 ├── design.md             # 架構圖、ERD、Service 職責、Sequence
 ├── tasks.md              # 任務索引（Task 1–228、264–267、269–292、297–309、311–338）＋ 尚未歸檔的 201 起區段
 ├── tasks/                # 任務檔

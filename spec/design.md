@@ -4381,8 +4381,8 @@ TradingRadarView
 
 新增 `TradingRadarDto` 純 response records：
 
-- `Response`：`ruleVersion`、`generatedAt`、`market`、`stocks`、`skippedNonTwStocks`。
-- `MarketSummary`（Task 281 後 21 個 component）：`regime`、`regimeLabel`、`score`、`dataComplete`、`stale`（Task 217，見下方「大盤新鮮度與盤中即時判斷」）、`intraday`／`liveUpdatedAt`（Task 228，同小節）、`asOfDate`、點位／漲跌幅、`weeklyMa`（Task 265）、MA20／60／240、K／D、MA60／240 兩日確認、`reasons`、`risks`、`extendedIndicators`（Task 281）。
+- `Response`：`ruleVersion`、`actionPolicyVersion`（Task 316）、`generatedAt`、`market`、`usMarket`（Task 335）、`stocks`、`skippedNonTwStocks`、`publicInformation`（Task 291）。`market` 是台股（TAIEX）那一組大盤，`usMarket` 是美股（IXIC）那一組，兩者**同為 `MarketSummary` 型別**；`usMarket` 的值即 `buildUsMarket()` 餵給美股個股評分的同一份 summary，不另算一次（見下方「美股個股支援」的大盤分頁段落）。舊 Redis 快照缺 `usMarket` 時為 `null`，既有讀取端行為不變。
+- `MarketSummary`（**現為 30 個 component**；舊記「Task 281 後 21 個」已漂移，該數字停在 Task 281，未計入其後追加的 `quoteStatus`（Task 290）與量能 3 欄、跨市場 5 欄，合計 +9）：`regime`、`regimeLabel`、`score`、`dataComplete`、`stale`（Task 217，見下方「大盤新鮮度與盤中即時判斷」）、`asOfDate`、點位／漲跌幅／`quoteStatus`、`weeklyMa`（Task 265）、MA20／60／240、K／D、MA60／240 兩日確認、`reasons`、`risks`、`intraday`／`liveUpdatedAt`（Task 228，同小節）、`extendedIndicators`（Task 281），末 8 欄為 `marketVolumeRatio`／`marketTurnoverRatio`／`marketVolumeAsOfDate`／`nasdaqChangePercent`／`soxChangePercent`／`usTechCompositePercent`／`usTechAsOfDate`／`usTechAvailable`。**前 25 個無市場專屬語意**（`buildUsMarket()` 即直接複用同一型別組出美股那一份）；**最後 5 個是給台股列的跨市場領先訊號**，美股組固定填 `null`／`false`，故 Task 335 新增 `usMarket` 時 `MarketSummary` 一個欄位都不必動。
 - `StockDecision`（Task 320 後 62 個 component；下列列舉順序＝record 宣告順序）：code／name／market、`assetClass`、`distributionAdjusted`、`held`、`action`／`actionLabel`、`score`、`counterTrendState`／`counterTrendLabel`、`counterTrendReasons`／`counterTrendRisks`、`dataComplete`、報價／漲跌幅／`quoteStatus`／更新時間／`asOfDate`、MA20／60／240、K／D、MA20／60／240 兩日確認、`fxPercentile`／`underlyingCurrency`（Requirement 47）、`reasons`、`risks`、`kdHeat`（Task 232）、`timingState`／`timingLabel`／`ma60BiasPercent`／`week52Position`（Task 264）、`weeklyMa`（Task 265）、`etfPremiumPct`／`etfPremiumPercentile`、`extendedIndicators`（Task 281）、`shortAction`／`shortActionLabel`／`shortScore`／`shortReasons`／`shortRisks`／`horizonConflict`／`volumeRatio`／`fxAsOfDate`／`profitTakingConfirmed`／`fundamental`／`evidence`／`shortDownsideRisk`／`mediumDownsideRisk`／`shortEvidenceConfidence`／`mediumEvidenceConfidence`／`shortRiskCoverage`／`mediumRiskCoverage`／`candidateAction`／`shortCandidateAction`／`actionGateReasons`（Task 291 起），最末為 `etfPremiumLivePct`／`etfPremiumLiveNavAsOf`（Task 320 新增的兩個純揭露欄位，語意與 `etfPremiumPct` 不同，見上方「交易雷達的即時折溢價欄」）。
 
 無新 entity／table／migration；分數與建議皆為可重算的衍生值，不持久化，符合正規化原則。
@@ -4742,7 +4742,37 @@ TradingRadarView（雙分頁：台股／美股，比照 WatchStockView.vue 的 m
 
 **抓取範圍沿用「held／watchlist only」的既有心智模型：** 直接沿用既有 `StockSourceQuery.collectHeldStockCodes(twCodes, usCodes, ukCodes)` 的 `usCodes` 輸出（該方法已嚴格以 `market="美股"` 分類 held ∪ watchlist），**不新增平行查詢**——台股既有的 `collectTwRadarCodes` 與 `collectHeldStockCodes` 兩支查詢口徑歷史上刻意不同（Task 249／257），美股沒有對應的歷史包袱，直接用後者的 `usCodes` 輸出即可，不放大 external-materials-service 的抓取負擔。
 
-**明確不在本次範圍：** 英股（無資料源規劃）、美股 ETF 折溢價因子（`etf_nav_history` 現況已有既有 Task 214/215 寫入的美股列，本次**必須明確短路排除**，不是「天生沒資料」）、~~美股基本面歷史回補（比照台股「自上線起累積」，即使 SEC EDGAR 理論上可一次回補多年歷史）~~【**已由 Requirement 74／Task 334 推翻**，見下方「美股歷史估值序列推導落地」段；推翻的是「不回補」這個決定，不是資料來源判斷】、IXIC 即時盤中報價（美股組市場情境僅用完成日資料）、SOX 作為獨立第二組美股大盤 regime。
+**明確不在本次範圍：** 英股（無資料源規劃）、美股 ETF 折溢價因子（`etf_nav_history` 現況已有既有 Task 214/215 寫入的美股列，本次**必須明確短路排除**，不是「天生沒資料」）、~~美股基本面歷史回補（比照台股「自上線起累積」，即使 SEC EDGAR 理論上可一次回補多年歷史）~~【**已由 Requirement 74／Task 334 推翻**，見下方「美股歷史估值序列推導落地」段；推翻的是「不回補」這個決定，不是資料來源判斷】、IXIC 即時盤中報價（美股組市場情境僅用完成日資料）、SOX 作為獨立第二組美股大盤 regime、~~獨立的「美股大盤」畫面卡片（Task 295.9 明文排除，理由是「須為此在 `MarketSummary` 新增巢狀欄位」）~~【**已由 Requirement 76／Task 335 推翻**，見下方「大盤風險卡片的台股／美股分頁」段；推翻理由是該成本估計本身有誤——`MarketSummary` 本就 market-agnostic、一個欄位都不必動】。
+
+#### 大盤風險卡片的台股／美股分頁（Requirement 76，Task 335）
+
+Task 294 起 `assemble()` 就**無條件**呼叫 `buildUsMarket(decisionInstant)`（註解逐字：「不論本輪有沒有美股標的都計算」），產出的 `MarketState usMarket` 含 `summary()`／`regime()`／`stale()` 三者；但組 `Response` 時只帶 `twMarket.summary()`，美股那份 summary **除了經 `marketSummaryFor()` 餵給美股個股評分之外整份被丟棄**。Task 335 只做一件事：把已算出的那份多回傳一個 component，並讓畫面頂部卡片可切換檢視。
+
+```text
+TradingRadarService.assemble()
+  ├─ twMarket = buildMarket(...)   → Response.market    （既有，TAIEX）
+  └─ usMarket = buildUsMarket(...) → Response.usMarket  （Task 335 新增，IXIC）
+        │                            ↑ 同一個物件，不重算
+        └─ marketSummaryFor(market, tw, us) → buildStock(...)（既有路徑不變）
+
+TradingRadarView 頂部 .market-card
+  → el-tabs（台股／美股）＋ 單一份 .market-layout／.market-metrics／.reason-row markup
+  → computed 依當前分頁回傳 radar.market 或 radar.usMarket
+```
+
+**`usMarket` 必須是同一個物件，不得各算一次。** 兩次呼叫之間 Redis／DB 狀態可能改變，會讓「個股評分依據的美股 regime」與「畫面顯示的美股 regime」對不上——正是 BFF 規範「同義欄位、同一 business service API」要防的情境。既有 `market` component **不改名為 `twMarket`**：該名稱已被 Redis 快照、`TradingRadarExportService` 與前端多處讀取，改名是無償的破壞性變更。
+
+**`buildUsMarket()` 的 `quoteStatus` 是既有缺陷，本次一併修正。** 該方法對 `MarketSummary.quoteStatus` 一律傳字面值 `"CLOSE_PENDING"`，但其 `price` 取自 `us_index_daily_history` 的已完成日官方收盤價，語意上是已驗證收盤。此缺陷在欄位未回傳前端時不可見，一旦上畫面即顯形：前端 `isClosePending()` 判準為 `quoteStatus === 'CLOSE_PENDING'`，會讓美股分頁「最新點位」永遠顯示「收盤價待補」而看不到 IXIC 點位。改為**含完成日邊界的三段判準**（`incompleteMarket()` 佔位不變）：`price == null` → `CLOSE_PENDING`；`latestEodDate` 等於 `mostRecentCompleted`（方法內既有的兩個區域變數）→ `VERIFIED_CLOSE`；否則 → `PREVIOUS_CLOSE`。**不得簡化成「`price` 非 null 就 `VERIFIED_CLOSE`」**——那會在兩個實際會發生的狀態下說謊：(i) IXIC 日線落後一盤（`stale=true` 但 `price` 非 null，Requirement 75／Task 332 處理的正是這個穩態）把舊收盤標成已驗證；(ii) `findTopNByIndexCodeOrderByTradingDateDesc(...)` 無完成日過濾，Yahoo 盤中抓取可能寫入當日未完成 bar，把未收盤價標成官方收盤。`PREVIOUS_CLOSE` 是既有語彙（`TaiexDisplayPriceService` 的 `AFTER_CLOSE ? VERIFIED_CLOSE : PREVIOUS_CLOSE`），此舉即讓美股組對齊 Requirement 7／Task 290 已要求的「Trading Radar `MarketSummary` 與 `WatchStockService.toIndexResponse` 共用相同階段語意」。
+
+**一個本次刻意不動、但落地後會變成可見現象的既有不一致：** `asOfDate` 用未過濾的 `latestEodDate`，而 `marketVolumeAsOfDate` 用 `resolveUsV13()` 已過濾的 `usContext.marketAsOfDate()`（邊界紐約 16:00），盤中可能差一日，卡片會同時出現「完成日 K＝今日」與「量比小字＝前一日」。改 `asOfDate` 會連動個股評分讀的 `marketSummary.asOfDate()`，超出 Task 335 射程，須另立任務。**對評分與匯出皆零影響**：`buildStock()` 只讀 `marketSummary` 的 `marketVolumeAsOfDate`／`marketVolumeRatio`／`marketTurnoverRatio`／`asOfDate` 四個 accessor，`MarketSummary.quoteStatus()` 這支 Java accessor 全樹零呼叫端；大盤 `quoteStatus` 唯一的消費端是 `TradingRadarExportService` 大盤總覽工作表的「行情狀態」欄，它走 JSON path 讀 `market`（台股）而非 `usMarket`，故匯出與 golden 檔不受影響。
+
+**美股組三個 metric 恆為 null，畫面不渲染而非渲染成 `—`：** `marketTurnoverRatio`（`us_index_daily_history` 無成交值欄，且明文不得以成交量偽造週轉率）、`nasdaqChangePercent`／`soxChangePercent`／`usTechCompositePercent`／`usTechAsOfDate`（＋`usTechAvailable=false`；「美股科技共同完成日」的設計語意是**台股列的領先訊號**，填進美股列屬自我指涉。`usTechCompositePercent` 前端無渲染點，故畫面上受影響的是三格）。渲染成空欄會讓使用者誤以為抓取失敗。`marketVolumeRatio` 美股組**有值**（Task 323 已接上 IXIC 成交量），照常顯示。`intraday`／`liveUpdatedAt` 美股組恆 `false`／`null`（未為 IXIC 建 Redis 即時報價來源），故不顯示「即時更新」。
+
+**分頁化引入的可見性退化須以分頁標籤上的 stale 標記補回：** stale 警示由現行「無條件掛在唯一那張卡」改綁當前分頁後，「台股 stale 但使用者停在美股分頁」時警示不渲染。故兩個分頁標籤各自須在該組 `stale=true` 時帶視覺標記（`el-badge` 或等效；同 repo 既有先例見 `SnapshotFormView.vue` 的 `el-tab-pane` 自訂 `#label`）。此為硬性要求，不得留給實作者判斷。
+
+**不升 `RULE_VERSION`，援引的是 Task 281 先例。** 本次為純揭露：不進 `StockInput`／`MarketInput`，個股與台股大盤的一切輸出逐位不變；但 response 結構多一個 component、快照 content hash 會變，故**不**符合 Task 249 的「同一輸入產生完全相同輸出」，符合的是 Task 281 的「新增欄位純揭露，輸出結構有變但規則集未變」。兩條先例互斥、不得混用。規則版本標籤兩個分頁顯示同一個 `TW_RULES_V12`：該常數是兩市場共用的同一支引擎版本、非台股專屬，不得為美股另編 `US_RULES_V12` 這種不存在的字串。
+
+**本次不做：** Excel／JSON 匯出的大盤工作表維持只寫台股那組（比照 Task 295.10 的既有取向——該處原文防的是「不得因為加了分頁而誤改為只匯出當前分頁」、方向是不得**縮小**；本次延伸為同樣不因加分頁而**擴大**，屬 Task 335 自訂決定，非 295.10 原文）、IXIC 即時盤中報價、SOX 第二組大盤、美股大盤的 Email 通知（通知仍只針對個股狀態轉換）。
 
 ### 美股歷史估值序列推導落地（Requirement 74，Task 334，`SEC_DERIVED` provider）
 
