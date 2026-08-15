@@ -24,66 +24,89 @@
       <template #header>
         <div class="card-head">
           <div>
-            <span class="section-title">台股大盤風險</span>
+            <span class="section-title">{{ marketCardTab }}大盤風險</span>
             <el-tag size="small" effect="plain" type="info" class="rule-tag">{{ radar.ruleVersion || 'TW_RULES_V12' }}</el-tag>
           </div>
           <div class="as-of-group">
-            <span class="as-of">完成日 K：{{ market.asOfDate || '資料不足' }}</span>
-            <span v-if="market.intraday" class="as-of live-as-of">即時更新：{{ fmtTime(market.liveUpdatedAt) }}</span>
+            <span class="as-of">完成日 K：{{ currentMarket.asOfDate || '資料不足' }}</span>
+            <span v-if="currentMarket.intraday" class="as-of live-as-of">即時更新：{{ fmtTime(currentMarket.liveUpdatedAt) }}</span>
           </div>
         </div>
       </template>
 
+      <el-tabs v-model="marketCardTab" style="margin-bottom:12px">
+        <el-tab-pane name="台股">
+          <template #label>
+            <span style="display:inline-flex;align-items:center;gap:6px">
+              <TaiwanMap :size="18" />
+              台股
+              <el-badge v-if="twStale" is-dot type="warning" />
+            </span>
+          </template>
+        </el-tab-pane>
+        <el-tab-pane name="美股">
+          <template #label>
+            <span style="display:inline-flex;align-items:center;gap:6px">
+              <UsFlag :size="22" />
+              美股
+              <el-badge v-if="usStale" is-dot type="warning" />
+            </span>
+          </template>
+        </el-tab-pane>
+      </el-tabs>
+
       <el-alert
-        v-if="market.stale"
+        v-if="currentMarket.stale"
         class="stale-alert"
         type="warning"
         show-icon
         :closable="false"
-        title="大盤資料非最新，今日買進訊號暫停"
-        description="本次未能取得即時大盤點位，已退回前一交易日資料；為避免以昨日的環境替今日背書，此期間不採計大盤加分，也不產生買進／加碼候選。偏空環境的扣分與限制仍照常生效。" />
+        :title="`${marketCardTab}大盤資料非最新，今日買進訊號暫停`"
+        :description="marketCardTab === '美股'
+          ? '最近一個已完成美股交易日的日線尚未回補，已退回前一交易日資料；為避免以昨日的環境替今日背書，此期間不採計大盤加分，也不產生買進／加碼候選。偏空環境的扣分與限制仍照常生效。'
+          : '本次未能取得即時大盤點位，已退回前一交易日資料；為避免以昨日的環境替今日背書，此期間不採計大盤加分，也不產生買進／加碼候選。偏空環境的扣分與限制仍照常生效。'" />
 
       <div class="market-layout">
         <div class="regime-panel">
-          <div class="regime-label">{{ market.regimeLabel || '載入中' }}</div>
+          <div class="regime-label">{{ currentMarket.regimeLabel || '載入中' }}</div>
           <div class="score-row">
-            <span class="score-value">{{ market.score == null ? '—' : market.score }}</span>
+            <span class="score-value">{{ currentMarket.score == null ? '—' : currentMarket.score }}</span>
             <span class="score-unit">/ 100</span>
           </div>
-          <div class="regime-code">{{ market.regime || '—' }}</div>
+          <div class="regime-code">{{ currentMarket.regime || '—' }}</div>
         </div>
 
         <div class="market-metrics">
           <div class="metric">
             <span class="metric-label">最新點位</span>
-            <strong v-if="isClosePending(market)" style="color:#d97706;font-size:13px">收盤價待補</strong>
-            <strong v-else>{{ fmtNumber(market.price, 2) }}</strong>
-            <span :style="{ color: priceColor(market.changePercent) }">{{ fmtPct(market.changePercent) }}</span>
+            <strong v-if="isClosePending(currentMarket)" style="color:#d97706;font-size:13px">收盤價待補</strong>
+            <strong v-else>{{ fmtNumber(currentMarket.price, 2) }}</strong>
+            <span :style="{ color: priceColor(currentMarket.changePercent) }">{{ fmtPct(currentMarket.changePercent) }}</span>
           </div>
-          <div class="metric"><span class="metric-label">週線 MA5</span><strong>{{ fmtNumber(market.weeklyMa, 2) }}</strong></div>
-          <div class="metric"><span class="metric-label">月線 MA20</span><strong>{{ fmtNumber(market.monthlyMa, 2) }}</strong></div>
-          <div class="metric"><span class="metric-label">季線 MA60</span><strong>{{ fmtNumber(market.quarterlyMa, 2) }}</strong><small>{{ confirmationLabel(market.quarterlyConfirmation) }}</small></div>
-          <div class="metric"><span class="metric-label">年線 MA240</span><strong>{{ fmtNumber(market.annualMa, 2) }}</strong><small>{{ confirmationLabel(market.annualConfirmation) }}</small></div>
-          <div class="metric"><span class="metric-label">KD</span><strong>K {{ fmtNumber(market.kValue, 1) }} / D {{ fmtNumber(market.dValue, 1) }}</strong></div>
-          <div class="metric"><span class="metric-label">大盤完成日量比</span><strong>{{ fmtRatio(market.marketVolumeRatio) }}</strong><small>{{ market.marketVolumeAsOfDate || '資料不足' }}</small></div>
-          <div class="metric"><span class="metric-label">成交金額比</span><strong>{{ fmtRatio(market.marketTurnoverRatio) }}</strong></div>
-          <div class="metric"><span class="metric-label">NASDAQ 前一日</span><strong :style="{ color: priceColor(market.nasdaqChangePercent) }">{{ fmtPct(market.nasdaqChangePercent) }}</strong></div>
-          <div class="metric"><span class="metric-label">SOX 前一日</span><strong :style="{ color: priceColor(market.soxChangePercent) }">{{ fmtPct(market.soxChangePercent) }}</strong><small>{{ market.usTechAsOfDate || '資料不足' }}</small></div>
+          <div class="metric"><span class="metric-label">週線 MA5</span><strong>{{ fmtNumber(currentMarket.weeklyMa, 2) }}</strong></div>
+          <div class="metric"><span class="metric-label">月線 MA20</span><strong>{{ fmtNumber(currentMarket.monthlyMa, 2) }}</strong></div>
+          <div class="metric"><span class="metric-label">季線 MA60</span><strong>{{ fmtNumber(currentMarket.quarterlyMa, 2) }}</strong><small>{{ confirmationLabel(currentMarket.quarterlyConfirmation) }}</small></div>
+          <div class="metric"><span class="metric-label">年線 MA240</span><strong>{{ fmtNumber(currentMarket.annualMa, 2) }}</strong><small>{{ confirmationLabel(currentMarket.annualConfirmation) }}</small></div>
+          <div class="metric"><span class="metric-label">KD</span><strong>K {{ fmtNumber(currentMarket.kValue, 1) }} / D {{ fmtNumber(currentMarket.dValue, 1) }}</strong></div>
+          <div class="metric"><span class="metric-label">大盤完成日量比</span><strong>{{ fmtRatio(currentMarket.marketVolumeRatio) }}</strong><small>{{ currentMarket.marketVolumeAsOfDate || '資料不足' }}</small></div>
+          <div v-if="marketCardTab === '台股'" class="metric"><span class="metric-label">成交金額比</span><strong>{{ fmtRatio(currentMarket.marketTurnoverRatio) }}</strong></div>
+          <div v-if="marketCardTab === '台股'" class="metric"><span class="metric-label">NASDAQ 前一日</span><strong :style="{ color: priceColor(currentMarket.nasdaqChangePercent) }">{{ fmtPct(currentMarket.nasdaqChangePercent) }}</strong></div>
+          <div v-if="marketCardTab === '台股'" class="metric"><span class="metric-label">SOX 前一日</span><strong :style="{ color: priceColor(currentMarket.soxChangePercent) }">{{ fmtPct(currentMarket.soxChangePercent) }}</strong><small>{{ currentMarket.usTechAsOfDate || '資料不足' }}</small></div>
         </div>
       </div>
 
       <el-row :gutter="18" class="reason-row">
         <el-col :xs="24" :md="12">
           <div class="reason-title positive">支持訊號</div>
-          <ul v-if="market.reasons?.length" class="reason-list">
-            <li v-for="(item, i) in market.reasons" :key="`mr-${i}`">{{ item }}</li>
+          <ul v-if="currentMarket.reasons?.length" class="reason-list">
+            <li v-for="(item, i) in currentMarket.reasons" :key="`mr-${i}`">{{ item }}</li>
           </ul>
           <div v-else class="muted">目前沒有足夠的正向確認。</div>
         </el-col>
         <el-col :xs="24" :md="12">
           <div class="reason-title risk">風險提醒</div>
-          <ul v-if="market.risks?.length" class="reason-list">
-            <li v-for="(item, i) in market.risks" :key="`mk-${i}`">{{ item }}</li>
+          <ul v-if="currentMarket.risks?.length" class="reason-list">
+            <li v-for="(item, i) in currentMarket.risks" :key="`mk-${i}`">{{ item }}</li>
           </ul>
           <div v-else class="muted">目前沒有額外風險提醒。</div>
         </el-col>
@@ -148,7 +171,7 @@
         show-icon
         class="us-market-note"
         title="美股大盤情境採 NASDAQ 綜合指數（IXIC）自身技術面，非台股加權指數"
-        description="本分頁個股的買賣建議依據那斯達克綜合指數自身的均線與 KD 技術面判斷大盤環境，與上方「台股大盤風險」卡片顯示的台股加權指數 regime 為不同的大盤情境、彼此不互相影響，請勿誤以為兩者同源。"
+        description="本分頁個股的買賣建議依據那斯達克綜合指數（IXIC）自身的均線與 KD 技術面判斷大盤環境，與台股加權指數 regime 為不同的大盤情境、彼此不互相影響，請勿誤以為兩者同源；IXIC 的完整 regime、分數與各項指標可至頁面頂部「美股大盤風險」分頁檢視。"
       />
 
       <el-table
@@ -952,7 +975,7 @@ const dirPickerPreview = computed(() => {
   if (!joined) return base
   return isGdrive ? base + joined : base + '/' + joined
 })
-const radar = ref({ market: {}, stocks: [], publicInformation: [], skippedNonTwStocks: 0, ruleVersion: 'TW_RULES_V12' })
+const radar = ref({ market: {}, usMarket: {}, stocks: [], publicInformation: [], skippedNonTwStocks: 0, ruleVersion: 'TW_RULES_V12' })
 const notificationVisible = ref(false)
 const notificationLoading = ref(false)
 const notificationSaving = ref(false)
@@ -977,6 +1000,14 @@ let recalculationPending = false
 let disposed = false
 
 const market = computed(() => radar.value.market || {})
+// 大盤卡片的台股／美股分頁（Requirement 76 / Task 335）。與下方個股表格的 marketTab 是
+// 兩個獨立狀態：使用者可以在看台股大盤的同時看美股個股清單，不得合併成同一個 ref。
+const marketCardTab = ref('台股')
+const usMarket = computed(() => radar.value.usMarket || {})
+const currentMarket = computed(() => marketCardTab.value === '美股' ? usMarket.value : market.value)
+// 335.10：分頁標籤上的 stale 標記必須各自反映該組狀態，故刻意不走 currentMarket。
+const twStale = computed(() => !!market.value.stale)
+const usStale = computed(() => !!usMarket.value.stale)
 const stocks = computed(() => radar.value.stocks || [])
 // 我的台股決策改為台股／美股兩個分頁（Requirement 64 / Task 295），比照 WatchStockView.vue 的 marketTab 模式
 const marketTab = ref('台股')
@@ -987,7 +1018,7 @@ const informationGroups = computed(() => [
   { region: 'TW', label: '台灣', items: (radar.value.publicInformation || []).filter(item => item.region === 'TW') },
   { region: 'US', label: '美國', items: (radar.value.publicInformation || []).filter(item => item.region === 'US') }
 ])
-const marketClass = computed(() => `regime-${String(market.value.regime || 'DATA_INCOMPLETE').toLowerCase().replace('_', '-')}`)
+const marketClass = computed(() => `regime-${String(currentMarket.value.regime || 'DATA_INCOMPLETE').toLowerCase().replace('_', '-')}`)
 
 // 純讀重算。初次載入與 SSE 背景重算都走這裡；不觸發任何外部行情抓取。
 async function load(manual = false, silent = false) {

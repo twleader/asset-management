@@ -701,4 +701,155 @@ class TradingRadarUsStockEngineTest {
         verify(marketContextService, org.mockito.Mockito.times(1)).resolveFx(eq("USD"), any());
         verify(marketContextService, never()).resolveFx(eq("TWD"), any());
     }
+
+    // ─────────────────────────── (k) Response.usMarket 回傳美股大盤（Task 335） ───────────────────────────
+
+    /** {@code incompleteMarket()} 走 catch 時放進 risks 的唯一可辨識訊息（TradingRadarService 內逐字相同）。 */
+    private static final String US_MARKET_INCOMPLETE_RISK =
+            "讀取美股大盤資料失敗，美股個股暫停產生交易訊號。";
+
+    /** 美股（IXIC）那一組的最新收盤點位；用來從兩次 {@code evaluateMarket()} 中辨識出美股那一次。 */
+    private static final BigDecimal US_LATEST_CLOSE = BigDecimal.valueOf(19000);
+
+    @Test
+    void usMarket回傳的就是餵給美股個股評分的同一份大盤而非另算一次() {
+        stubBaseline();
+        stubDivergentRegimes();
+        when(alertRepo.findDistinctStockCodeMarket())
+                .thenReturn(List.<Object[]>of(new Object[]{"AAPL", "美股"}));
+
+        TradingRadarService service = newService();
+        // spy 上掛 doAnswer 保留真實回傳值：MarketResult.score() 是唯一能對照 usMarket().score() 的來源。
+        List<TradingRadarRuleEngine.MarketInput> marketInputs = new ArrayList<>();
+        List<TradingRadarRuleEngine.MarketResult> marketResults = new ArrayList<>();
+        Mockito.doAnswer(invocation -> {
+            TradingRadarRuleEngine.MarketResult result =
+                    (TradingRadarRuleEngine.MarketResult) invocation.callRealMethod();
+            marketInputs.add(invocation.getArgument(0));
+            marketResults.add(result);
+            return result;
+        }).when(ruleEngine).evaluateMarket(any());
+
+        TradingRadarDto.Response resp = service.get();
+
+        assertNotNull(resp.usMarket(), "335.3：usMarket 必須回傳，不得再整份丟棄");
+        assertEquals("RISK_OFF", resp.market().regime(),
+                "前提：台股組必須真的是 RISK_OFF，兩組才有辨識度");
+
+        // (1) regime：攔 evaluateStock() 實際吃到的大盤 regime。
+        // StockInput.marketRegime 是 MarketRegime enum、MarketSummary.regime 是 String，
+        // 直接比對會編譯過但恆為 false，必須 .name()。
+        ArgumentCaptor<TradingRadarRuleEngine.StockInput> stockCaptor =
+                ArgumentCaptor.forClass(TradingRadarRuleEngine.StockInput.class);
+        verify(ruleEngine).evaluateStock(stockCaptor.capture());
+        assertEquals(TradingRadarRuleEngine.MarketRegime.RISK_ON,
+                stockCaptor.getValue().marketRegime(), "前提：美股個股吃到的必須是 IXIC 組的 RISK_ON");
+        assertEquals(stockCaptor.getValue().marketRegime().name(), resp.usMarket().regime(),
+                "usMarket.regime 必須就是美股個股評分吃到的那一個，不得是另算的第二份");
+
+        // (2) score：StockInput 共 25 個 component，與大盤相關的只有 marketRegime／marketStale，
+        // 沒有任何大盤分數欄位，所以 score 攔 evaluateStock() 是攔不到的；改比對 evaluateMarket()
+        // 美股那一次的回傳。evaluateMarket() 每次 assemble() 會被呼叫兩次（台股先、美股後），
+        // 必須依 MarketInput 內容辨識，不得取「最後一次」——那只是目前呼叫順序的巧合。
+        assertEquals(2, marketInputs.size(), "每次 assemble() 應各為台股／美股呼叫一次 evaluateMarket()");
+        int usIndex = -1;
+        for (int i = 0; i < marketInputs.size(); i++) {
+            BigDecimal price = marketInputs.get(i).price();
+            if (price != null && price.compareTo(US_LATEST_CLOSE) == 0) usIndex = i;
+        }
+        assertTrue(usIndex >= 0, "找不到美股（IXIC，現價 19000）那組 MarketInput");
+        assertNotNull(resp.usMarket().score(), "前提：美股組本應算得出分數，null 會讓下一條斷言失去意義");
+        assertEquals(marketResults.get(usIndex).score(), resp.usMarket().score(),
+                "usMarket.score 必須就是美股那次 evaluateMarket() 的分數");
+        assertEquals(0, US_LATEST_CLOSE.compareTo(resp.usMarket().price()),
+                "usMarket.price 必須是 IXIC 的最新收盤，不是台股那一份");
+    }
+
+    @Test
+    void usMarket與market各自獨立可同時為不同regime() {
+        stubBaseline();
+        stubDivergentRegimes();
+
+        TradingRadarDto.Response resp = newService().get();
+
+        assertEquals("RISK_OFF", resp.market().regime());
+        assertEquals("RISK_ON", resp.usMarket().regime());
+        assertFalse(resp.market().regime().equals(resp.usMarket().regime()),
+                "兩個 component 必須各自獨立，不得是同一份 summary 被塞了兩次");
+    }
+
+    // ── 335.4：quoteStatus 的四個分支各自獨立驗 ──
+
+    /** 2026-08-10T21:00:00Z＝美東 17:00（EDT），已過 16:00 收盤邊界，故最近完成日為 2026-08-10。 */
+    private static final Instant AFTER_US_CLOSE_2026_08_10 = Instant.parse("2026-08-10T21:00:00Z");
+
+    @Test
+    void usMarket最新日線等於最近完成美股交易日時quoteStatus為VERIFIED_CLOSE() {
+        stubBaseline();
+        when(usIndexDailyHistoryRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 241))
+                .thenReturn(usUpRowsAt(LocalDate.of(2026, 8, 10)));
+        when(indicatorService.computeAllForNasdaq()).thenReturn(US_RISK_ON_IND);
+
+        TradingRadarDto.MarketSummary us =
+                newService().assembleAt(AFTER_US_CLOSE_2026_08_10).usMarket();
+
+        assertEquals("VERIFIED_CLOSE", us.quoteStatus(),
+                "最新日線就是最近一個已完成美股交易日，語意上是已驗證收盤");
+        assertFalse(us.stale());
+        assertNotNull(us.price());
+    }
+
+    @Test
+    void usMarket日線落後一盤時quoteStatus為PREVIOUS_CLOSE且stale為true價格仍非null() {
+        stubBaseline();
+        // 最新日線停在 08-07、最近完成日為 08-10：t324 實測過的穩態（stale=true 而 price!=null）。
+        when(usIndexDailyHistoryRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 241))
+                .thenReturn(usUpRowsAt(LocalDate.of(2026, 8, 7)));
+        when(indicatorService.computeAllForNasdaq()).thenReturn(US_RISK_ON_IND);
+
+        TradingRadarDto.MarketSummary us =
+                newService().assembleAt(AFTER_US_CLOSE_2026_08_10).usMarket();
+
+        assertEquals("PREVIOUS_CLOSE", us.quoteStatus(),
+                "回補落後時是更舊的昨收，不得標成 VERIFIED_CLOSE（Requirement 7：不得拿更舊昨收冒充）");
+        assertTrue(us.stale(), "落後一盤本來就該是 stale");
+        assertNotNull(us.price(), "這正是「price 非 null 卻不是已驗證收盤」的分支，price 為 null 即測錯情境");
+        assertEquals("2026-08-07", us.asOfDate());
+    }
+
+    @Test
+    void usMarket在日線為空的正常路徑quoteStatus為CLOSE_PENDING且未落進incompleteMarket() {
+        stubBaseline();
+        // stubBaseline() 本來就把 IXIC repo stub 成空 list，但它「沒有」stub computeAllForNasdaq()
+        // （那個 stub 只在 stubDivergentRegimes()）。未 stub 時 mock 回 null，求值順序上
+        // indicators(ind) 會先解參考（實際擲出點在 RadarInputAssembler，本檔注入的是真的 assembler），
+        // NPE 被 catch 吞成 incompleteMarket()——而該分支的期望值同樣是 CLOSE_PENDING，
+        // 會綠燈卻驗錯路徑。故此處必須另外 stub，並以 risks 做互斥斷言。
+        when(indicatorService.computeAllForNasdaq()).thenReturn(US_RISK_ON_IND);
+
+        TradingRadarDto.MarketSummary us =
+                newService().assembleAt(AFTER_US_CLOSE_2026_08_10).usMarket();
+
+        assertEquals("CLOSE_PENDING", us.quoteStatus());
+        assertNull(us.price(), "空 list 只會讓 price 為 null，不會擲例外");
+        assertFalse(us.risks().contains(US_MARKET_INCOMPLETE_RISK),
+                "必須走正常路徑；含此訊息代表被 catch 吞成 incompleteMarket()，驗到的是另一個分支");
+    }
+
+    @Test
+    void usMarket走incompleteMarket時quoteStatus維持CLOSE_PENDING() {
+        stubBaseline();
+        // 明確 thenThrow，不靠未 stub 的 NPE 意外觸發。
+        when(usIndexDailyHistoryRepo.findTopNByIndexCodeOrderByTradingDateDesc(anyString(), anyInt()))
+                .thenThrow(new RuntimeException("IXIC 讀取失敗（模擬）"));
+
+        TradingRadarDto.MarketSummary us =
+                newService().assembleAt(AFTER_US_CLOSE_2026_08_10).usMarket();
+
+        assertEquals("CLOSE_PENDING", us.quoteStatus(), "incompleteMarket() 的佔位維持不變");
+        assertEquals(TradingRadarRuleEngine.MarketRegime.DATA_INCOMPLETE.name(), us.regime());
+        assertNull(us.price());
+        assertTrue(us.risks().contains(US_MARKET_INCOMPLETE_RISK),
+                "正向釘住：這一條驗的必須是 incompleteMarket() 分支，與上一條互斥");
+    }
 }

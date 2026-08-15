@@ -432,6 +432,10 @@ public class TradingRadarService {
                 TradingRadarEvidenceGate.ACTION_POLICY_VERSION,
                 decisionInstant.atZone(TAIPEI).toOffsetDateTime().toString(),
                 twMarket.summary(),
+                // Task 335：直接帶上面那個已算出的 usMarket，嚴禁在此重呼叫 buildUsMarket() 或
+                // 另做任何 repository／indicator／evaluateMarket() 查詢——兩次計算之間 Redis／DB
+                // 狀態可能改變，會讓「美股個股評分依據的 regime」與「畫面顯示的 regime」對不上。
+                usMarket.summary(),
                 decisions,
                 skippedNonTw.size(),
                 context.publicInformation());
@@ -703,7 +707,18 @@ public class TradingRadarService {
                     latestEodDate == null ? null : latestEodDate.toString(),
                     price,
                     changePercent,
-                    "CLOSE_PENDING",
+                    // Task 335：原本寫死 "CLOSE_PENDING"，該欄從未回傳前端故不可見；usMarket 上畫面後
+                    // 會讓「最新點位」永遠顯示橘字「收盤價待補」（前端 isClosePending() 只認這個值）。
+                    // 判準必須含完成日邊界，不得簡化成「price != null 就 VERIFIED_CLOSE」——兩側都會實際發生：
+                    //  (i) latestEodDate < mostRecentCompleted（日線回補落後一盤）時 stale=true 而 price 仍非
+                    //      null，那是「更舊的昨收」，標成已驗證即違反 Requirement 7 的「不得拿更舊昨收冒充」。
+                    //  (ii) findTopN...(IXIC_CODE, 241) 沒有任何完成日過濾，Yahoo range=10y&interval=1d 在盤中
+                    //      會回傳當日的部分 bar，此時 latestEodDate 會「晚於」mostRecentCompleted。
+                    // 用 equals 而非 !isBefore 正是為了同時擋掉 (ii) 這一側。
+                    // PREVIOUS_CLOSE 是本專案既有語彙（TaiexDisplayPriceService／PriceQueryService 同一組）。
+                    price == null ? "CLOSE_PENDING"
+                            : latestEodDate.equals(mostRecentCompleted) ? "VERIFIED_CLOSE"
+                            : "PREVIOUS_CLOSE",
                     ind.weeklyMa(),
                     ind.monthlyMa(),
                     ind.quarterlyMa(),

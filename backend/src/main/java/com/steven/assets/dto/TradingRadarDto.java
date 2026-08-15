@@ -13,27 +13,45 @@ public final class TradingRadarDto {
 
     private TradingRadarDto() {}
 
+    /**
+     * @param market   台股（TAIEX）組大盤 summary。<b>欄位名一律不得改為 {@code twMarket}</b>——
+     *                 該名稱已被 Redis 快照 JSON、{@code TradingRadarExportService} 與前端多處讀取。
+     * @param usMarket 美股（IXIC）組大盤 summary（t335），與 {@code market} <b>同型別</b>。
+     *                 其值即 {@code TradingRadarService.buildUsMarket()} 餵給美股個股評分的
+     *                 <b>同一份</b> summary，非另算——兩次計算之間 Redis／DB 狀態可能改變，
+     *                 會讓「個股評分依據的美股 regime」與「畫面顯示的美股 regime」對不上。
+     *                 舊快照／相容建構式建立的 response 此欄為 {@code null}。
+     */
     public record Response(
             String ruleVersion,
             String actionPolicyVersion,
             String generatedAt,
             MarketSummary market,
+            MarketSummary usMarket,
             List<StockDecision> stocks,
             int skippedNonTwStocks,
             List<PublicInformationItem> publicInformation
     ) {
+        /** t335 前的 canonical 形狀；舊快照沒有美股大盤組，不得以台股那份冒充。 */
+        public Response(String ruleVersion, String actionPolicyVersion, String generatedAt,
+                        MarketSummary market, List<StockDecision> stocks, int skippedNonTwStocks,
+                        List<PublicInformationItem> publicInformation) {
+            this(ruleVersion, actionPolicyVersion, generatedAt, market, null, stocks,
+                    skippedNonTwStocks, publicInformation);
+        }
+
         /** t316 前的 response 形狀；舊快照沒有 action policy，不得由 ruleVersion 推導。 */
         public Response(String ruleVersion, String generatedAt, MarketSummary market,
                         List<StockDecision> stocks, int skippedNonTwStocks,
                         List<PublicInformationItem> publicInformation) {
-            this(ruleVersion, null, generatedAt, market, stocks, skippedNonTwStocks,
+            this(ruleVersion, null, generatedAt, market, null, stocks, skippedNonTwStocks,
                     publicInformation);
         }
 
         /** 舊快照／舊測試相容建構式；Task 291 前沒有公開資訊清單。 */
         public Response(String ruleVersion, String generatedAt, MarketSummary market,
                         List<StockDecision> stocks, int skippedNonTwStocks) {
-            this(ruleVersion, null, generatedAt, market, stocks, skippedNonTwStocks, List.of());
+            this(ruleVersion, null, generatedAt, market, null, stocks, skippedNonTwStocks, List.of());
         }
     }
 
