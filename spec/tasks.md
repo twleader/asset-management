@@ -29,7 +29,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 
 ---
 
-## 任務索引（Task 1–228、264–267、269–292、297–309、311–335）
+## 任務索引（Task 1–228、264–267、269–292、297–309、311–336）
 
 | Task | 標題 | 位置 |
 |---|---|---|
@@ -335,6 +335,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 333 | 交易雷達證據缺口複驗與剩餘缺口登記（2026-08-15 基準；只登記、不實作） | [tasks/t333_radar_gap_backlog_2026_08_15.md](tasks/t333_radar_gap_backlog_2026_08_15.md) |
 | 334 | 美股歷史估值序列由已入庫官方財報推導落地（`SEC_DERIVED` provider，Requirement 74） | [tasks/t334_us_valuation_history_derivation.md](tasks/t334_us_valuation_history_derivation.md) |
 | 335 | 交易雷達大盤風險卡片改為「台股」「美股」兩個分頁（Requirement 76） | [tasks/t335_radar_us_market_card_tabs.md](tasks/t335_radar_us_market_card_tabs.md) |
+| 336 | 收斂 IXIC 均線 MA5／20／60／240 的兩條算術路徑——交易雷達美股組改用 BigDecimal 精確路徑（Requirement 77） | [tasks/t336_ixic_ma_arithmetic_convergence.md](tasks/t336_ixic_ma_arithmetic_convergence.md) |
 
 > **註：Task 229–263、268、293–296 以各自任務檔為準。**
 
