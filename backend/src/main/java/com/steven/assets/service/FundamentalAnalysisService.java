@@ -51,7 +51,11 @@ public class FundamentalAnalysisService {
     // SEC_EDGAR 插在 EXCHANGE 之後、YAHOO 之前：與 EXCHANGE 同屬「官方一手資料」優先序，只是分屬不同市場
     // （EXCHANGE 只會出現在台股列、SEC_EDGAR 只會出現在美股列，兩者不會同時對同一標的出現，插入順序
     // 不影響台股既有行為）。firstProviderValue() 是通用方法，不需要為市場另建第二份清單。
-    private static final List<String> PROVIDERS = List.of("EXCHANGE", "SEC_EDGAR", "YAHOO", "WANTGOO", "FINMIND");
+    // SEC_DERIVED（Requirement 74 / Task 334.5）一律排在**最末**：它是由已入庫官方季報推導出來的估值序列，
+    // 不是任何來源觀測到的公告值，只有在所有實際觀測來源都湊不到 PE_MIN_SAMPLES 筆時才輪得到它。
+    private static final String DERIVED_PROVIDER = "SEC_DERIVED";
+    private static final List<String> PROVIDERS =
+            List.of("EXCHANGE", "SEC_EDGAR", "YAHOO", "WANTGOO", "FINMIND", DERIVED_PROVIDER);
 
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;
@@ -545,9 +549,18 @@ public class FundamentalAnalysisService {
      * Select the first provider with a fresh, explicit PE-loss flag. An explicit
      * false is authoritative for that provider; only a missing, stale, or null
      * flag may fall through to the next provider.
+     *
+     * <p><b>{@link #DERIVED_PROVIDER} 一律排除（Task 334.5）</b>：虧損與否是一手觀測事實，不接受由自家
+     * 推導值認定。這條路徑<b>沒有任何筆數門檻</b>——只要該 provider 的最新一列 fresh 且 loss 非 null 就
+     * 命中，而 {@code valuationComposite} 拿到 loss 決策就直接回 {@link ValuationComposite#loss}，把 PE
+     * component 換成 contribution 寫死 {@code -1.0} 的 {@link #lossComponent}。SEC_DERIVED 的每一列都會
+     * 寫 {@code pe_loss_flag}（TRUE／FALSE 二選一），只要 YAHOO 當期列的旗標為 null 或已過期，推導出的
+     * 虧損旗標就會繞過 {@link #PE_MIN_SAMPLES} 門檻把整組 VALUATION 打成 -1.0，與「推導值只在所有實際
+     * 觀測來源都湊不到 250 筆時才被採用」直接抵觸。</p>
      */
     private LossDecision latestLoss(List<ValuationRow> rows, LocalDate decisionDate) {
         for (String provider : PROVIDERS) {
+            if (DERIVED_PROVIDER.equals(provider)) continue;
             ValuationRow latest = rows.stream().filter(r -> provider.equals(r.provider()))
                     .sorted(ValuationRow.DESC).findFirst().orElse(null);
             if (latest == null || !fresh(latest.date(), decisionDate, VALUATION_MAX_AGE_DAYS)

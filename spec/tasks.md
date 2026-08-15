@@ -29,7 +29,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 
 ---
 
-## 任務索引（Task 1–228、264–267、269–292、297–309、311–331）
+## 任務索引（Task 1–228、264–267、269–292、297–309、311–334）
 
 | Task | 標題 | 位置 |
 |---|---|---|
@@ -331,6 +331,9 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 329 | 「爬蟲資訊查詢」頁公開觸發重新搜尋 API（Nginx 9090 第六條路由，Requirement 71） | [tasks/t329_crawler_public_rescan_api.md](tasks/t329_crawler_public_rescan_api.md) |
 | 330 | 油價金價每日匯出支援多個執行時間（Requirement 72） | [tasks/t330_commodity_export_multi_schedule.md](tasks/t330_commodity_export_multi_schedule.md) |
 | 331 | 已實現損益每日匯出支援多個執行時間（Requirement 73） | [tasks/t331_realized_gain_export_multi_schedule.md](tasks/t331_realized_gain_export_multi_schedule.md) |
+| 332 | 海外指數日線的「新鮮度」判準與交易雷達同源（Requirement 75） | [tasks/t332_index_daily_freshness_alignment.md](tasks/t332_index_daily_freshness_alignment.md) |
+| 333 | 交易雷達證據缺口複驗與剩餘缺口登記（2026-08-15 基準；只登記、不實作） | [tasks/t333_radar_gap_backlog_2026_08_15.md](tasks/t333_radar_gap_backlog_2026_08_15.md) |
+| 334 | 美股歷史估值序列由已入庫官方財報推導落地（`SEC_DERIVED` provider，Requirement 74） | [tasks/t334_us_valuation_history_derivation.md](tasks/t334_us_valuation_history_derivation.md) |
 
 > **註：Task 229–263、268、293–296 以各自任務檔為準。**
 

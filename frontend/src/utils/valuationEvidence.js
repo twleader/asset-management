@@ -17,6 +17,17 @@ function own(object, key) {
   return object != null && Object.prototype.hasOwnProperty.call(object, key)
 }
 
+/**
+ * source_urls 不保證每一項都是可導覽的網址。SEC_DERIVED（Requirement 74）的每一列都會多帶一個
+ * derived://... 標記，用來標明「這是由官方季報推導出來的值、不是觀測到的公告值」。
+ * 把它一併 render 成 <a href> 會做出一個看起來像官方來源、點下去卻是死連結的「來源 N」。
+ * 故在這裡就分成兩堆：可導覽的走超連結，其餘一律以純文字標籤呈現（不得直接丟掉——那等於把推導性質
+ * 的揭露也一起丟掉）。
+ */
+function isNavigable(url) {
+  return typeof url === 'string' && /^https?:\/\//i.test(url.trim())
+}
+
 function emptyProjection(definition) {
   return {
     key: definition.key,
@@ -29,6 +40,8 @@ function emptyProjection(definition) {
     tagType: 'info',
     provider: null,
     sourceUrls: [],
+    sourceLinks: [],
+    sourceNotes: [],
     availableAt: null,
     asOf: null,
     missingReason: null,
@@ -59,6 +72,7 @@ export function projectValuationEvidence(fundamental, radarEvidence) {
     const evidence = rawEvidence && typeof rawEvidence === 'object' ? rawEvidence : null
     const status = component.applicability ?? null
     const statusPresentation = STATUS[status] || { label: status || '狀態未標示', tagType: 'info' }
+    const sourceUrls = Array.isArray(evidence?.sourceUrls) ? [...evidence.sourceUrls] : []
 
     return {
       key: definition.key,
@@ -70,7 +84,9 @@ export function projectValuationEvidence(fundamental, radarEvidence) {
       statusLabel: statusPresentation.label,
       tagType: statusPresentation.tagType,
       provider: evidence?.provider ?? null,
-      sourceUrls: Array.isArray(evidence?.sourceUrls) ? [...evidence.sourceUrls] : [],
+      sourceUrls,
+      sourceLinks: sourceUrls.filter(isNavigable),
+      sourceNotes: sourceUrls.filter(url => !isNavigable(url)).map(url => String(url)),
       availableAt: evidence?.availableAt ?? null,
       asOf: evidence?.asOf ?? null,
       missingReason: component.missingReason ?? null,

@@ -124,6 +124,72 @@ class FundamentalAnalysisServiceTest {
         assertEquals(latest, lossComposite.peComponent().asOf());
     }
 
+    // ── Task 334.5：SEC_DERIVED 進 provider 白名單（最末順位），但虧損旗標仍只認一手觀測 ──────
+
+    @Test
+    void derivedProviderWithEnoughHistoryProducesPercentileAndKeepsItsOwnProvenance() {
+        FundamentalAnalysisService service = new FundamentalAnalysisService(null, null, null);
+        LocalDate decision = LocalDate.of(2026, 8, 8);
+        List<FundamentalAnalysisService.ValuationRow> rows = new ArrayList<>();
+        for (int i = 0; i < 250; i++) {
+            rows.add(new FundamentalAnalysisService.ValuationRow(
+                    decision.minusDays(i),
+                    BigDecimal.valueOf(10 + i),
+                    BigDecimal.valueOf(2 + i / 10.0),
+                    BigDecimal.valueOf(4 + i / 100.0),
+                    false, "SEC_DERIVED", List.of("derived-url"), Instant.EPOCH, Instant.EPOCH));
+        }
+
+        var composite = service.valuationComposite(rows, decision, false);
+
+        assertNotNull(composite, "白名單漏了 SEC_DERIVED 時整組會被靜默丟棄，連日誌都沒有");
+        assertEquals("SEC_DERIVED", composite.provider());
+        assertEquals("SEC_DERIVED", composite.peComponent().provider());
+        assertEquals(3, composite.coverage());
+        assertNotNull(composite.pePercentile());
+        assertNotNull(composite.pbPercentile());
+        assertFalse(composite.peComponent().loss());
+        assertTrue(composite.contribution() <= 1.0 && composite.contribution() >= -1.0);
+
+        // 推導值同樣受 250 筆門檻約束，不得因為是自家推導就放行。
+        assertNull(service.valuationComposite(rows.subList(0, 249), decision, false));
+    }
+
+    @Test
+    void derivedLossFlagMustNotBypassTheSampleThresholdAndForceLossValuation() {
+        FundamentalAnalysisService service = new FundamentalAnalysisService(null, null, null);
+        LocalDate decision = LocalDate.of(2026, 8, 8);
+        List<FundamentalAnalysisService.ValuationRow> rows = new ArrayList<>();
+        // Yahoo 當期快照沒有旗標（美股列的實際常見狀態），loss 決策因此會往後面的 provider 掉。
+        rows.add(new FundamentalAnalysisService.ValuationRow(
+                decision, new BigDecimal("30.00"), null, "YAHOO", List.of("yahoo-url"),
+                Instant.EPOCH, Instant.EPOCH));
+        rows.add(new FundamentalAnalysisService.ValuationRow(
+                decision, null, true, "SEC_DERIVED", List.of("derived-url"), Instant.EPOCH, Instant.EPOCH));
+        for (int i = 1; i <= 250; i++) {
+            rows.add(new FundamentalAnalysisService.ValuationRow(
+                    decision.minusDays(i), BigDecimal.valueOf(10 + i), false, "SEC_DERIVED",
+                    List.of("derived-url"), Instant.EPOCH, Instant.EPOCH));
+        }
+
+        var composite = service.valuationComposite(rows, decision, false);
+
+        // latestLoss 沒有筆數門檻：不排除 SEC_DERIVED 的話，推導出的虧損旗標會直接把整組 VALUATION
+        // 換成 contribution 寫死 -1.0 的 lossComponent。
+        assertNotNull(composite);
+        assertFalse(composite.peComponent().loss());
+        assertEquals("SEC_DERIVED", composite.peComponent().provider());
+        assertEquals(1.0, composite.contribution());
+
+        // 控制組：同一組資料只把虧損旗標換成一手觀測 provider，既有的 -1.0 行為必須原封不動。
+        List<FundamentalAnalysisService.ValuationRow> observedLoss = new ArrayList<>(rows);
+        observedLoss.set(1, new FundamentalAnalysisService.ValuationRow(
+                decision, null, true, "FINMIND", List.of("finmind-url"), Instant.EPOCH, Instant.EPOCH));
+        var lossComposite = service.valuationComposite(observedLoss, decision, false);
+        assertEquals(-1.0, lossComposite.contribution());
+        assertTrue(lossComposite.peComponent().loss());
+    }
+
     @Test
     void dividendYieldBoundaryConvertsRatioExactlyOnce() {
         assertEquals(new BigDecimal("4.0000"), FundamentalAnalysisService

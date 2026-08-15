@@ -20,7 +20,6 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
-import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -55,6 +54,13 @@ public class StockFundamentalFetchClient {
     public static final String WANTGOO = "WANTGOO";
     public static final String FINMIND = "FINMIND";
     public static final String SEC_EDGAR = "SEC_EDGAR";
+    /**
+     * 由已入庫 SEC 官方季報「推導」出的美股歷史估值（Requirement 74 / Task 334），**不是任何來源
+     * 觀測到的公告值**。本 client 不產生這個 provider 的列（沒有對應的外部端點）；常數放在這裡是
+     * 因為其餘 provider 標籤都在這裡，且 {@code stock_valuation_daily.provider} 是 varchar(20)，
+     * 11 字元在長度上限內。產生者為 {@code UsValuationDerivationService}。
+     */
+    public static final String SEC_DERIVED = "SEC_DERIVED";
     private static final String TW_MARKET = "台股";
     private static final String US_MARKET = "美股";
     private static final ZoneId TAIPEI = ZoneId.of("Asia/Taipei");
@@ -67,7 +73,28 @@ public class StockFundamentalFetchClient {
     private static final Duration SEC_TIMEOUT = Duration.ofSeconds(15);
     /** ticker→CIK 映射只在記憶體快取、不落 DB；TTL 約束「單一抓取輪次」的粒度，不跨輪次持久化。 */
     private static final Duration SEC_TICKER_CACHE_TTL = Duration.ofMinutes(30);
-    private static final int SEC_LOOKBACK_YEARS = 3;
+    /**
+     * SEC {@code companyfacts} 只保留 {@code end} 落在最近幾年內的事實（Task 334.2 由 3 改為 11）。
+     *
+     * <p>歷史深度不再是「順便多抓一點」，而是 Requirement 74 推導序列的**必要輸入**：
+     * {@code UsValuationDerivationService} 以已入庫季報逐交易日推導 PE／PB／殖利率，序列長度直接
+     * 決定 {@code FundamentalAnalysisService} 的 250 筆分位門檻能不能被滿足。11 年對齊
+     * {@code stock_price_history} 美股實際覆蓋區間（實測 2016-08-15～2026-08-14），再往前拉也沒有
+     * 對應的收盤價可配對。</p>
+     */
+    private static final int SEC_LOOKBACK_YEARS = 11;
+    /** SEC 申報的可見時點以美東交易時區換算（{@link #filedInstant}）。 */
+    private static final ZoneId US_EXCHANGE_ZONE = ZoneId.of("America/New_York");
+    /**
+     * {@code filed} 只有日期精度，一律以「當日美股收盤之後」作為公開時點的保守估計（16:30 America/New_York）。
+     *
+     * <p>大型股的 10-Q／10-K 慣例在收盤後申報，取 16:30 ET 讓該期別<b>從申報日的下一個交易日起</b>才可見。
+     * 舊值是「當日中午 UTC」＝08:00 ET，對台股消費端（20:00 台北，晚於 13:30 收盤）確實保守，但對美股是
+     * <b>開盤前</b>——{@code UsValuationDerivationService} 以「≤ D 當日美股收盤時刻」判可見性，會讓申報當日
+     * 的推導列變成「盤前價 ÷ 尚未公開的財報」，構成一個交易日的 look-ahead（每季一天，且恰好落在財報公布
+     * 日這種最敏感的一天）。</p>
+     */
+    private static final LocalTime SEC_FILING_VISIBLE_TIME = LocalTime.of(16, 30);
 
     private final ObjectMapper mapper = new ObjectMapper();
     private final HttpClient http = HttpClient.newBuilder()
@@ -224,7 +251,15 @@ public class StockFundamentalFetchClient {
      * <p>ticker→CIK 映射只在記憶體快取一段時間（不落 DB、不跨輪次持久化），新股上市會在下次快取到期後
      * 自然更新。只抓 {@code EarningsPerShareDiluted}（缺則退回 {@code EarningsPerShareBasic}）、
      * {@code NetIncomeLoss}、{@code StockholdersEquity} 三個 concept，且只保留 {@code end} 落在最近
-     * {@value #SEC_LOOKBACK_YEARS} 年內的列，避免一次抓出過量歷史。</p>
+     * {@value #SEC_LOOKBACK_YEARS} 年內的列。<b>視窗長度（Task 334.2 由 3 年改為 11 年）不是抓取量
+     * 的偏好，而是 Requirement 74 的必要輸入</b>：美股歷史估值序列由這些季報逐交易日推導而來
+     * （{@code UsValuationDerivationService}），季報深度不足就湊不出 250 筆分位樣本，整組 VALUATION
+     * 證據會維持 MISSING。11 年對齊 {@code stock_price_history} 美股實際覆蓋的 2016-08-15～2026-08-14，
+     * 更早的季報沒有對應收盤價可配對。</p>
+     *
+     * <p><b>放寬視窗不等於放寬解析防線。</b>{@link #extractFacts} 仍只收 {@code form ∈ {10-Q, 10-K}}，
+     * {@link #buildPeriodMap}／{@link #selectCumulative} 的比較年度標籤陷阱與累計口徑陷阱防護一律不變——
+     * 舊年度的申報文件有同樣的污染，放寬只會讓錯誤數字靜默入庫。</p>
      */
     public Bundle fetchSecEdgarFacts(String stockCode) {
         if (stockCode == null || stockCode.isBlank()) return Bundle.EMPTY;
@@ -360,12 +395,14 @@ public class StockFundamentalFetchClient {
             Long income = incomeFact == null ? null : toLong(incomeFact.val());
             Long equity = equityFact == null ? null : toLong(equityFact.val());
             if (eps == null && income == null && equity == null) continue;
-            Instant filed = firstNonNull(
-                    epsFact == null ? null : epsFact.filed(),
-                    incomeFact == null ? null : incomeFact.filed(),
-                    equityFact == null ? null : equityFact.filed());
-            Instant availableAt = filed != null ? filed : Instant.now();
-            String basis = filed != null ? "PUBLISHED" : "OBSERVED";
+            // source_available_at 一律取「首次申報時點」（最早 filed），不是被選中那筆的 filed（最新 filed）。
+            // 值仍取最新 filed 的那一筆（重述後的正確數字），兩者刻意分開追蹤，理由見 selectCumulative。
+            Instant firstFiled = earliest(
+                    epsFact == null ? null : epsFact.firstFiled(),
+                    incomeFact == null ? null : incomeFact.firstFiled(),
+                    equityFact == null ? null : equityFact.firstFiled());
+            Instant availableAt = firstFiled != null ? firstFiled : Instant.now();
+            String basis = firstFiled != null ? "PUBLISHED" : "OBSERVED";
             out.add(new Financial(stockCode, US_MARKET, fq.year(), fq.quarter(), eps, income, equity,
                     SEC_EDGAR, List.of(sourceUrl), availableAt, basis));
         }
@@ -463,18 +500,31 @@ public class StockFundamentalFetchClient {
      * 累計 {@code start=1/1,end=6/30} 與 Q2 單季 {@code start=4/1,end=6/30} 共用同一個
      * {@code end}），重新引入本次要修的同一類「取到錯誤期間值」問題。查無對應期間或 {@code start}
      * 不符的事實直接捨棄；同一期間有多筆候選時取 {@code filed} 最新的一筆。
+     *
+     * <p><b>「取哪個值」與「什麼時候可見」是兩件事，必須分開追蹤（Task 334 對抗式審查追加）</b>：值取
+     * {@code filed} <b>最新</b>的一筆（申報重述之後的正確數字），但 {@code source_available_at} 取同一期間
+     * 全部候選中<b>最早</b>的 {@code filed}（＝真實首次申報時點）。每一份 10-Q／10-K 都夾帶去年同季的比較
+     * 數字，若把「最新 filed」當成可見時點，每一個舊期別都會被推遲整整一年才「可見」，只有還沒被下一年
+     * 申報提及的最新四季例外——實測 GOOGL 每季 {@code source_available_at} 距其日曆期末 388–401 天，最新
+     * 四季卻只有 23–36 天。這個位移對期別是保序的，{@code UsValuationDerivationService} 的
+     * {@code effective_available_at} 單調化（取 min-over-newer）<b>取不掉</b>，結果是同一條推導序列的
+     * 歷史區段用落後約四季的 TTM 分母、最近一年用當期值，成長股的「今天」因此必然落在自身歷史 PE 的極低
+     * 分位而輸出「現在最便宜」。單調化只該負責修真正倒置的日期（AMZN 2025Q2／2025Q3），不該被拿來當這個
+     * 系統性位移的補償。</p>
      */
     private static Map<FyQuarter, ChosenFact> selectCumulative(
             List<XbrlFact> facts, Map<LocalDate, ValidatedPeriod> periodByEnd) {
         Map<FyQuarter, XbrlFact> chosen = new HashMap<>();
+        Map<FyQuarter, Instant> firstFiled = new HashMap<>();
         for (XbrlFact f : facts) {
             if (f.start() == null || f.end() == null) continue;
             ValidatedPeriod period = periodByEnd.get(f.end());
             if (period == null || !period.start().equals(f.start())) continue;
+            rememberFirstFiled(firstFiled, period.fyQuarter(), f.filed());
             XbrlFact existing = chosen.get(period.fyQuarter());
             if (existing == null || isNewer(f.filed(), existing.filed())) chosen.put(period.fyQuarter(), f);
         }
-        return toChosenMap(chosen);
+        return toChosenMap(chosen, firstFiled);
     }
 
     /**
@@ -487,22 +537,33 @@ public class StockFundamentalFetchClient {
     private static Map<FyQuarter, ChosenFact> selectInstant(
             List<XbrlFact> facts, Map<LocalDate, ValidatedPeriod> periodByEnd) {
         Map<FyQuarter, XbrlFact> chosen = new HashMap<>();
+        Map<FyQuarter, Instant> firstFiled = new HashMap<>();
         for (XbrlFact f : facts) {
             if (f.end() == null) continue;
             ValidatedPeriod period = periodByEnd.get(f.end());
             if (period == null) continue;
+            rememberFirstFiled(firstFiled, period.fyQuarter(), f.filed());
             XbrlFact existing = chosen.get(period.fyQuarter());
             if (existing == null || isNewer(f.filed(), existing.filed())) chosen.put(period.fyQuarter(), f);
         }
-        return toChosenMap(chosen);
+        return toChosenMap(chosen, firstFiled);
     }
 
     private record ValidatedPeriod(LocalDate start, FyQuarter fyQuarter) {}
 
-    private static Map<FyQuarter, ChosenFact> toChosenMap(Map<FyQuarter, XbrlFact> chosen) {
+    private static Map<FyQuarter, ChosenFact> toChosenMap(
+            Map<FyQuarter, XbrlFact> chosen, Map<FyQuarter, Instant> firstFiled) {
         Map<FyQuarter, ChosenFact> result = new HashMap<>();
-        chosen.forEach((k, v) -> result.put(k, new ChosenFact(v.val(), v.filed())));
+        chosen.forEach((k, v) -> result.put(k, new ChosenFact(v.val(), v.filed(), firstFiled.get(k))));
         return result;
+    }
+
+    /** 記住某期間曾被提及的<b>最早</b> {@code filed}；null（無申報日）不參與比較。 */
+    private static void rememberFirstFiled(
+            Map<FyQuarter, Instant> firstFiled, FyQuarter period, Instant filed) {
+        if (filed == null) return;
+        Instant known = firstFiled.get(period);
+        if (known == null || filed.isBefore(known)) firstFiled.put(period, filed);
     }
 
     /** {@code FY}（10-K 年報）視同第 4 季累計值，與台股「年度累計至 Q4」語意一致。 */
@@ -545,23 +606,30 @@ public class StockFundamentalFetchClient {
         return value == null ? null : value.setScale(0, RoundingMode.HALF_UP).longValue();
     }
 
-    @SafeVarargs
-    private static <T> T firstNonNull(T... values) {
-        for (T v : values) if (v != null) return v;
-        return null;
+    /** 三個 concept 各自的首次申報時點中最早的一個；全為 null 時回 null。 */
+    private static Instant earliest(Instant... values) {
+        Instant best = null;
+        for (Instant v : values) {
+            if (v != null && (best == null || v.isBefore(best))) best = v;
+        }
+        return best;
     }
 
-    /** SEC EDGAR {@code filed} 只有日期精度；以當日中午（UTC）作為公開時點的保守估計。 */
+    /** SEC EDGAR {@code filed} 只有日期精度；見 {@link #SEC_FILING_VISIBLE_TIME}（當日美股收盤之後）。 */
     private static Instant filedInstant(String raw) {
         LocalDate date = isoDate(raw);
-        return date == null ? null : date.atTime(LocalTime.NOON).atZone(ZoneOffset.UTC).toInstant();
+        return date == null ? null : date.atTime(SEC_FILING_VISIBLE_TIME).atZone(US_EXCHANGE_ZONE).toInstant();
     }
 
     private record XbrlFact(LocalDate start, LocalDate end, BigDecimal val, int fy, String fp, Instant filed) {}
 
     private record FyQuarter(int year, int quarter) {}
 
-    private record ChosenFact(BigDecimal val, Instant filed) {}
+    /**
+     * 被選中的事實。{@code filed} 是被選中那一筆（最新 filed）的申報日，{@code firstFiled} 是<b>同一期間
+     * 曾被任何一份申報提及過的最早</b> filed——後者才是 {@code source_available_at} 的正確語意。
+     */
+    private record ChosenFact(BigDecimal val, Instant filed, Instant firstFiled) {}
 
     /** 玩股網結構化 fallback：目前無可信數值端點；新聞證據由 public_info/news_headline 路徑提供。 */
     public Bundle fetchWantGoo(String code, Instant observedAt) {
