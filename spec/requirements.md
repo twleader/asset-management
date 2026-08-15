@@ -2766,13 +2766,36 @@ FROM stock_price_history WHERE market='台股';
 
 ---
 
+### Requirement 72: 油價金價每日匯出支援多個執行時間
+
+**User Story:** 作為使用者，我希望「油價金價」頁的「排程自動匯出」能在同一天設定多個執行時間，讓同一份油價金價檔可在早、中、晚依序刷新，而不必建立多套輸出資料夾或 Google Drive 設定。
+
+> **編號說明：** Requirement 71／Task 329 已被另一支並行 worktree（「爬蟲資訊查詢」頁公開觸發重新搜尋 API）先行佔用，本需求依編號避讓慣例改用 Requirement 72／Task 330；Liquibase `v1.103.0` 不受影響（對方該任務未新增 changeset）。
+
+> **本 Requirement 只把 Requirement 41 的單一每日時間改為多時間點，資料模型與執行語意比照 Requirement 69（歷年資產）。** 匯出內容仍是同一支 `ExcelExportService.commodityPricesDoc(start, end)`、每次仍同時產出 `.xlsx` 與 `.json`、滾動匯出範圍（`range_months`）、輸出資料夾與 Google Drive 設定仍為每位使用者共用一份，手動「立即匯出到目錄」與頁面既有「匯出 Excel」（Requirement 40）語意均不變。檔名仍為 `油價金價_{使用者ID}_yyyyMMdd`；同一日期的較晚排程會更新同名的「當日最新」兩份檔，不因多時間點新增時間戳或累積多份歷史檔。
+
+**Acceptance Criteria:**
+
+- [ ] **每位 owner 一份共用設定、多個正規化時間點**：`commodity_export_schedule` 繼續保存 `owner_user_id`、總啟用、輸出子路徑、匯出範圍（`range_months`）、Google Drive 欄位與最近一次整體執行結果；新增 `commodity_export_schedule_time` 子表，每列保存 `schedule_id`、`run_hour`、`run_minute`、`enabled`、`last_run_date`、`last_run_at`、`last_run_status`、`updated_at`，並以 `UNIQUE(schedule_id, run_hour, run_minute)` 禁止同一 owner 重複時分。多時間不得塞入逗號字串、JSON 或 array 欄位。Parent 既有 `run_hour/run_minute/last_run_date` 在本 Requirement 只作舊 image rollback shadow，不再是新程式的排程來源；`range_months` 維持 parent-only、不下放至 child——匯出範圍是「整份設定」的屬性，不因執行時段而異。
+- [ ] **採 expand/contract 的可回退 migration**：把既有每一列 parent 的 `run_hour`／`run_minute` 搬成一列啟用中的 child，並把原 `last_run_date`／`last_run_at`／`last_run_status` 複製到該 child，確保部署當天不會重跑；**本次不得 drop 或改變既有 nullability**：parent `run_hour/run_minute` 繼續 NOT NULL，`last_run_date` 繼續可為 null。新程式每次儲存以「最早啟用 child；若全停用則最早 child」為 rollback representative，同步 parent 時分與該 child 的 `last_run_date`；該 representative 執行時也同步 legacy guard。如此 rollback 至舊 image 仍可啟動並執行一個代表時間，額外時間只在 rollback 期間暫停而不會 schema crash。真正 drop legacy 欄位必須在後續獨立 Requirement／changeset，確認不再需要舊 image 後才做。Migration 需有 child FK `ON DELETE CASCADE`、hour/minute CHECK、`UNIQUE(schedule_id,run_hour,run_minute)`、`schedule_id` index、冪等防護（`IF NOT EXISTS`／`ON CONFLICT DO NOTHING`）並在 master 最尾端註冊；建檔前先查運行中 `databasechangelog`，若版號已被佔用，須連同檔名、changeset id、task 與 design 一次調整。
+- [ ] **DTO 改為明確的 `times[]` 契約**：`GET /api/commodity-export/schedule` 回傳既有共用欄位（含 `rangeMonths`／Drive 四欄／`baseDir`）加上按時分排序的 `times:[{id,runHour,runMinute,enabled,lastRunAt,lastRunStatus}]`；不再以 top-level `runHour`／`runMinute` 表示排程時間。`PUT /api/commodity-export/schedule` body 改為 `{enabled,outputSubpath,rangeMonths,times:[{runHour,runMinute,enabled}],gdriveEnabled,gdriveSubpath}`，採整包取代語意；`RunNowResponse` 既有七欄（`path/sizeBytes/gdrivePath/gdriveStatus/jsonPath/jsonSizeBytes/jsonGdrivePath`）不變。BFF 既有 `/api/bff/commodity-price/export/schedule` GET／PUT 與 `/api/bff/commodity-price/export/run-now` 維持 Map passthrough，不建立會漏欄位的鏡像 DTO。
+- [ ] **儲存驗證與 guard 保留**：每次儲存至少要有一個時間點；時、分分別限 0–23／0–59；同一 request 不得重複時分；總開關開啟時至少一個 child 也須啟用；`rangeMonths` 驗證（`1..120` 或 `null`＝全部十年）與輸出子路徑跳脫檢查維持不變。整批替換必須在同一 transaction 完成，並依 `(runHour,runMinute)` 沿用既有 child 的 `lastRunDate`／`lastRunAt`／`lastRunStatus`，不得因單純修改資料夾、匯出範圍、Drive 或其他時間點而清除當日 guard。無 DB 列時 GET 回一個 transient `08:00` 啟用時間點但不寫 DB。
+- [ ] **每個時間點各自判斷、各自防重複**：既有單一 `@Scheduled(cron="0 * * * * *", zone="Asia/Taipei")` 與 `ApplicationReadyEvent` 自癒入口維持不增不減，兩者都必須經同一個 `tryRunDueExports`／`AtomicBoolean.compareAndSet` 入口後才可呼叫 due runner，避免啟動瞬間跨分鐘併發執行同一 child。先檢查 parent 總啟用，再逐 child 檢查 child 啟用、`now >= LocalTime` 與該 child 的 `last_run_date != today`；每個到點 child 成功或失敗都只更新自己的 guard／狀態，並同步更新 parent 最近一次摘要（含 Drive 狀態欄）。單一時間失敗不得阻止同 owner 其餘到點時間或其他 owner。Compose 維持 business-services 單 replica；若未來擴成多 replica，須另加 DB atomic claim／row lock，不得宣稱 JVM `AtomicBoolean` 可跨 replica 防重。
+- [ ] **同日多時段都必須真的執行**：第一個時間點執行後，只能擋住該 child，不能用 parent guard 擋住同日後續 child。若服務在多個時間都已過後才啟動，開機自癒須依時間排序逐一補跑所有仍未 guard 的啟用 child；同一日後一輪繼續用既有同名檔（依當次執行時的 `rangeMonths` 滾動範圍重新計算起訖日）覆寫成較新內容，Drive 亦沿用既有同名落點與 best-effort 規則。成功或失敗都設該 child 當日 guard，避免每分鐘重試整天。
+- [ ] **run-now 不消耗任何時間點，初次使用仍保存合法預設**：`POST /api/commodity-export/run-now` 忽略 parent／child enabled 並立即依共用設定（含當前 `rangeMonths`）產出雙格式檔，維持既有七欄 response。它只更新 parent 最近一次摘要與 Drive 最近一次狀態，不得修改任何既有 child 的 `last_run_date`／`last_run_at`／`last_run_status`。若 DB 尚無 parent，延續現行「run-now 會保存設定／結果」語意，建立 `enabled=false` 的預設 parent 與一列 `08:00 enabled=true` child；該 child 的 guard/status 保持 null，並同步 parent legacy shadow 時分，故不會因手動驗證消耗或啟用正式排程。
+- [ ] **前端改成可增刪的時間清單**：`CommodityPriceView.vue` 將單一 `el-time-picker`（`scheduleTime`）改為時間點列（`scheduleTimes`，比照 `AssetHistoryView.vue` 的 `key/value/enabled/lastRunAt/lastRunStatus` 結構）；每列包含 `el-time-picker`、啟用開關、移除按鈕與該列上次執行資訊，另有「新增時間」按鈕。載入時優先使用 `times[]`，並只為舊後端回應提供一次性的 `runHour/runMinute` fallback；新後端回應空 `times` 視為異常，不靜默補預設。儲存前擋空清單、非法／重複時間及總啟用但全列停用，成功後以後端完整 response 重建畫面。匯出範圍下拉、本機／Drive 資料夾選擇器、立即匯出、雙格式提示與卡片整體「上次執行」均保留原位置與語意，提示文字改為「於下列每個啟用時間更新同日最新檔」。
+- [ ] **排程列表與文件同步**：此功能只改既有 `CommodityExportScheduleService` 每分鐘 poll 的資料驅動時間，不新增 `@Scheduled` annotation，故「排程列表」（`SchedulePublicBffController.JOBS`）維持同一筆「油價金價匯出」且總筆數不變；描述更新為「每分鐘檢查頁面設定的多個每日時間」（比照 Requirement 69 為「資產匯出」項目所做的文案更新）。Requirement 41／design 的單一 `run_hour/run_minute/last_run_date` 現況描述須就地註記由 Requirement 72 取代，避免後續照舊模型維護；不得把其他單時間匯出模組（R42／R37／R39／R45／R48／R49）順便改成多時間。
+- [ ] **測試與實機驗證**：至少涵蓋——(a) migration 把原單一時間與 guard 無損搬到一個 child、legacy 三欄保留且 representative dual-write 正確；(b) GET transient `08:00` 預設與初次 run-now 建立 disabled parent＋unguarded default child；(c) 多時間整包替換、排序、重複／空清單／總啟用但全 child 停用驗證，以及 `rangeMonths` 驗證不受影響；(d) 相同時分保留 guard；(e) 第一時間已 guard 時第二時間仍執行；(f) 開機時兩個過期時間都依序補跑，且 startup 與 tick 併發只執行一次；(g) 一個時間失敗不阻止下一個；(h) run-now 不改既有 child guard；(i) owner 隔離、雙格式與 Drive 行為不回歸；(j) BFF passthrough、前端 build 與 UI 靜態契約；(k) Docker 重建/recreate `business-services`、`bff`、`frontend` 後，以實際登入 owner 儲存至少兩個時間、GET 讀回順序與狀態，並以受控資料庫 guard／到點案例證明同日兩個時間都會執行；驗證後恢復原設定，不留下測試排程。
+
+---
+
 ### Requirement 73: 已實現損益每日匯出支援多個執行時間
 
 **User Story:** 作為使用者，我希望「已實現損益」頁的「排程自動匯出」能在同一天設定多個執行時間，讓同一份已實現損益檔可在早、中、晚依序刷新，而不必建立多套輸出資料夾或 Google Drive 設定。
 
 > **本 Requirement 只把 Requirement 39 的單一每日時間改為多時間點，且刻意與 Requirement 69（最新資產）採完全相同的做法**，讓兩頁的資料模型、DTO 契約、驗證訊息與 UI 操作方式一致。匯出內容仍是同一支 `ExcelExportService.realizedGainsDoc*()`、每次仍同時產出 `.xlsx` 與 `.json`、輸出資料夾與 Google Drive 設定仍為每位使用者共用一份，手動「匯出 Excel」下載語意不變。檔名仍為 `已實現損益_{ownerId}_yyyyMMdd`；同一日期的較晚排程會更新同名的「當日最新」兩份檔，不因多時間點新增時間戳或累積多份歷史檔。
 >
-> **編號說明：** Requirement 70／Task 327、Requirement 71／Task 329、Requirement 72／Task 330 與 Task 328 已先行使用；本需求使用 Requirement 73／Task 331。本需求**只改已實現損益一頁**，不得順手把交易日曆（R37）／油價金價（R41）／匯率（R42）等其餘**仍為單時間**的匯出頁一併改為多時間；也不得去動已各自有多時間／多列模型的 GDP-TWSE（R45，`index_export_schedule_time`）、交易雷達（R48，`trading_radar_export_time`）與交易紀錄（R49，Task 255 起每人多列排程）。
+> **編號說明：** Requirement 70／Task 327、Requirement 71／Task 329、Requirement 72／Task 330 與 Task 328 已先行使用；本需求使用 Requirement 73／Task 331。本需求**只改已實現損益一頁**，不得順手把交易日曆（R37）／台幣兌美元匯率（R42）這兩個**仍為單時間**的匯出頁一併改為多時間；也不得去動已各自有多時間／多列模型的最新資產（R69，`export_schedule_time`）、油價金價（R72，`commodity_export_schedule_time`）、GDP-TWSE（R45，`index_export_schedule_time`）、交易雷達（R48，`trading_radar_export_time`）與交易紀錄（R49，Task 255 起每人多列排程）。
 
 **Acceptance Criteria:**
 

@@ -2,7 +2,7 @@
 
 **對應 Requirements:** Requirement 73（擴充 Requirement 39 的已實現損益排程匯出）
 **前置任務:** Task 196（單一時間排程）、Task 242／243（Google Drive）、Task 270（雙格式匯出）、Task 326（最新資產多時間點——本任務的參照實作）
-**Liquibase changeset:** `v1.103.0-realized-gain-export-schedule-multi-time.sql`（實作前須查運行中 `databasechangelog`；若已佔用則整套改號）
+**Liquibase changeset:** `v1.104.0-realized-gain-export-schedule-multi-time.sql`（實作前須查運行中 `databasechangelog`；若已佔用則整套改號）
 
 ## 背景
 
@@ -12,20 +12,21 @@ Task 326 已在「歷年資產／最新資產匯出」把同一個問題解掉�
 
 輸出路徑、總啟用、Google Drive 與最近一次整體執行摘要仍由 parent 共用；每個時間各自 enabled、guard 與 status。每次仍查一次 `realizedGainsDoc*()` 後產出同主檔名 `.xlsx/.json`，後一時段覆寫同日檔案成較新的內容。
 
-**匯出排程頁**在本任務之前已有三套「一個排程多個執行時間」的實作，本頁是第四套：
+**匯出排程頁**在本任務之前已有四套「一個排程多個執行時間」的實作，本頁是第五套：
 
 | 頁面 | 模型 | 形狀 |
 |---|---|---|
 | 最新資產（R34／69、Task 326） | `export_schedule_setting` ＋ `export_schedule_time` | parent/child，child 各自 enabled／guard／status ← **本任務的參照實作** |
+| 油價金價（R41／72、Task 330） | `commodity_export_schedule` ＋ `commodity_export_schedule_time` | 同形，剛於 main landed（`v1.103.0`）——與本任務幾乎完全平行，可交叉參照 |
 | GDP-TWSE（R45、Task 287） | `index_export_schedule` ＋ `index_export_schedule_time`（＋ `_time_market`） | parent/child，另有每時間點複選指數 |
 | 交易雷達（R48、Task 231） | `trading_radar_export_setting` ＋ `trading_radar_export_time` | 一列一時間點，`lastRunDate` 刻意放時間點列 |
 | 交易紀錄（R49、Task 255） | `asset_transaction_export_schedule` 每人多列 | 不同形（整包排程多列，非時間 child） |
 
-**選 Task 326 當參照**：它與本頁同為「一份共用輸出設定（路徑／Drive／總開關）＋多個純時間 child」，欄位與 UI 幾乎一對一；R45 多了指數複選、R48 的 parent 語意不同、R49 是多排程而非多時間。（另有兩套非匯出類的多時點排程：`crawler_schedule`、`market_analysis_send_time`，形狀不同，不列入對照。）
+**選 Task 326 當參照**：它與本頁同為「一份共用輸出設定（路徑／Drive／總開關）＋多個純時間 child」，欄位與 UI 幾乎一對一；R45 多了指數複選、R48 的 parent 語意不同、R49 是多排程而非多時間。Task 330（油價金價）同樣照抄 326、且時間更近，實作時值得一併對照其 diff——但**它的資料本身是全域行情、背景產檔不需 `enableFilter`**，本頁是 per-user 損益、必須逐列縮 owner，這一點不可跟著抄。（另有兩套非匯出類的多時點排程：`crawler_schedule`、`market_analysis_send_time`，形狀不同，不列入對照。）
 
-> **刻意不抽共用父類別／泛型 service。** 已有三套同形實作卻仍不抽，是因為各頁的 doc 來源、租戶隔離方式與附加維度（指數複選、format 欄）各自演進，抽出的共同分母只剩「時分＋guard」四個欄位，抽象成本高於收益；一致性以「相同結構與相同命名」維持，不以繼承維持。
+> **刻意不抽共用父類別／泛型 service。** 已有四套同形實作卻仍不抽，是因為各頁的 doc 來源、租戶隔離方式與附加維度（指數複選、format 欄）各自演進，抽出的共同分母只剩「時分＋guard」四個欄位，抽象成本高於收益；一致性以「相同結構與相同命名」維持，不以繼承維持。
 >
-> **不得順手改動其他頁**：仍為單時間的交易日曆（R37）／油價金價（R41）／匯率（R42）不在本次範圍；已是多時間／多列的 R45／R48／R49 更不得順手「統一」或合併。
+> **不得順手改動其他頁**：仍為單時間的交易日曆（R37）與台幣兌美元匯率（R42）不在本次範圍；已是多時間／多列的 R69／R72／R45／R48／R49 更不得順手「統一」或合併。
 
 ## 要做什麼
 
@@ -35,7 +36,7 @@ Task 326 已在「歷年資產／最新資產匯出」把同一個問題解掉�
   - 對每一筆既有 parent 以原 `run_hour/run_minute` 建一列 child，`enabled=true`，並複製 parent `last_run_date/last_run_at/last_run_status/updated_at`。如此部署當天若原排程已跑過，新 child 仍被 guard，不會重跑。
   - 採 expand/contract：搬移後仍保留 parent 的 hour/minute CHECK 與三個 legacy 欄位作 rollback shadow；`run_hour/run_minute` 維持 NOT NULL，`last_run_date` 維持 nullable，新 scheduler 不再以它們判斷 due。真正 drop 留待後續獨立 Requirement／changeset。
   - SQL 需以 `CREATE TABLE/INDEX IF NOT EXISTS` 與 `ON CONFLICT DO NOTHING` 保護重複建立；`v1.59.0`（建 parent）與 `v1.76.0`（Drive 欄位）都是 master 中已固定先套用的 prerequisite，可直接讀取 parent 既有欄位，保留 Liquibase 預設逐 statement 切分，不需 `DO $$` 或 `splitStatements:false`。在 `db.changelog-master.yaml` 最尾端 include。
-  - 先以運行中 DB 的 `databasechangelog`、`\d realized_gain_export_schedule` 確認 parent 現況與 `v1.103.0` 未被佔用（撰寫本任務時最後一筆為 `v1.102.0-export-schedule-multi-time`）；若版本被佔用，檔名、changeset id、本 task 與 design 同步改號。
+  - 先以運行中 DB 的 `databasechangelog`、`\d realized_gain_export_schedule` 確認 parent 現況與 `v1.104.0` 未被佔用（撰寫本任務時最後一筆為 `v1.103.0-commodity-export-schedule-multi-time`）；若版本被佔用，檔名、changeset id、本 task 與 design 同步改號。
 - [ ] **331.2 Entity／Repository：**
   - `RealizedGainExportSchedule` 保留 `runHour/runMinute/lastRunDate`，但 javadoc 明確標記為 rollback shadow、不得作新 scheduler 的 due 來源；保留 parent `lastRunAt/lastRunStatus` 作整體摘要；新增 `@OneToMany(mappedBy="schedule", cascade=CascadeType.ALL, orphanRemoval=true)` ＋ `@OrderBy("runHour ASC, runMinute ASC, id ASC")` 的 `times`，並提供 `addTime` 維持雙向關係（比照 `ExportScheduleSetting`）。`times` 必須加 `@Builder.Default` 初始為 `new ArrayList<>()`（見 `ExportScheduleSetting.java:106`）——漏掉會讓 331.9 那些以 `RealizedGainExportSchedule.builder()` 建構的既有測試在 `getTimes().isEmpty()` 直接 NPE，且錯誤現象與多時間點毫無關聯、難以回推。
   - 新增 `RealizedGainExportScheduleTime` entity（比照 `ExportScheduleTime`）：`@ManyToOne(fetch = LAZY, optional = false)` 指向 parent，不另存 owner id。

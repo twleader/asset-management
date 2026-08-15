@@ -9,9 +9,11 @@ import org.hibernate.annotations.Filter;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
- * 油價金價每日排程自動匯出設定（Requirement 41 / Task 203）。
+ * 油價金價每日排程自動匯出設定（Requirement 41 / Task 203；多時間點 Requirement 72 / Task 330）。
  *
  * <p>每個使用者一列（{@code owner_user_id} UNIQUE），以 {@code @Filter(ownerFilter)} 隔離設定本身。
  * HTTP 情境（BFF→business）由 {@link com.steven.assets.security.TenantFilterAspect} 自動 owner-scoped；
@@ -45,12 +47,16 @@ public class CommodityExportSchedule {
     @Builder.Default
     private Boolean enabled = Boolean.FALSE;
 
-    /** 每日執行時（0..23） */
+    /**
+     * rollback shadow（Requirement 72 / Task 330 起）：新 scheduler 不得以此欄判斷 due，
+     * 只在每次設定儲存／representative child 執行時由 {@code syncRollbackRepresentative} 同步，
+     * 供舊 image rollback 時仍可啟動並執行一個代表時間。真正的排程來源是 {@link #times}。
+     */
     @Column(name = "run_hour", nullable = false)
     @Builder.Default
     private Integer runHour = 8;
 
-    /** 每日執行分（0..59） */
+    /** rollback shadow（Requirement 72 / Task 330 起）：新 scheduler 不得作為 due 來源，理由同 {@link #runHour}。 */
     @Column(name = "run_minute", nullable = false)
     @Builder.Default
     private Integer runMinute = 0;
@@ -67,7 +73,10 @@ public class CommodityExportSchedule {
     @Column(name = "range_months")
     private Integer rangeMonths;
 
-    /** 當日已執行的日期（成功或失敗都設，避免同分鐘每 poll 重跑） */
+    /**
+     * rollback representative 的當日 guard shadow（Requirement 72 / Task 330 起）：新 scheduler
+     * 以 {@link #times} 各自的 {@code lastRunDate} 為準，此欄只同步「目前代表 child」的值供舊 image rollback。
+     */
     @Column(name = "last_run_date")
     private LocalDate lastRunDate;
 
@@ -109,4 +118,19 @@ public class CommodityExportSchedule {
 
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
+
+    /**
+     * 正規化每日執行時間（Requirement 72 / Task 330）：一個 parent 對多個各自
+     * enabled／guard／status 的時間點。{@code range_months}／輸出資料夾／Drive 設定仍為 parent-only，
+     * 不下放至 child——匯出範圍是「整份設定」的屬性，不因執行時段而異。
+     */
+    @OneToMany(mappedBy = "schedule", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("runHour ASC, runMinute ASC, id ASC")
+    @Builder.Default
+    private List<CommodityExportScheduleTime> times = new ArrayList<>();
+
+    public void addTime(CommodityExportScheduleTime time) {
+        time.setSchedule(this);
+        times.add(time);
+    }
 }
