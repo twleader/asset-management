@@ -274,6 +274,32 @@ public class NewsPoller {
     }
 
     /**
+     * 公開觸發「重新搜尋」（Requirement 71 / Task 329）：{@link #fetchAndExportNow()} 的免登入版本，
+     * 供 business 端 {@code POST /api/crawler-export-path/public-rescan}（免驗證、由 business 端
+     * 30 秒全域 Redis 冷卻節流）proxy 呼叫。行為與 {@link #fetchAndExportNow()} <b>完全一致</b>——
+     * 同樣的 {@code enabled} 檢查、同樣的 {@link #running} 互斥鎖、同樣呼叫 {@link #run(String)}
+     * （{@code mode} 仍為 {@link #MODE_FETCH_AND_EXPORT}：這欄代表「執行的動作」與既有按鈕相同，
+     * 真正區分呼叫來源的是 {@code trigger}）。<b>唯一差異是 {@code trigger} 標籤</b>：
+     * {@code public-rescan}，而非 {@code manual}——不得複製 {@link #run(String)} 或
+     * {@link #exportPublicInfoJson(String)} 的第二份實作。
+     */
+    public ManualRunResult publicRescan() {
+        if (!enabled) {
+            return busyOrDisabled("DISABLED", MODE_FETCH_AND_EXPORT,
+                    "爬蟲已停用（news-scraper.enabled=false），未執行");
+        }
+        if (!running.compareAndSet(false, true)) {
+            log.info("本地新聞抓取（public-rescan）略過：上一輪尚未結束");
+            return busyOrDisabled("BUSY", MODE_FETCH_AND_EXPORT, "上一輪抓取尚未結束，本次未啟動；請稍候再試");
+        }
+        try {
+            return run("public-rescan");
+        } finally {
+            running.set(false);
+        }
+    }
+
+    /**
      * 手動「立即匯出」（Requirement 63 / Task 280）：<b>只重產檔案</b>——不抓取、不寫 {@code news_headline}，
      * 直接由 DB 現有資料走 {@link #exportPublicInfoJson(String)} 產出兩份檔案並（啟用時）同步 Drive，
      * {@code trigger} 標為 {@code manual-export}。用途是改完輸出資料夾／Drive 設定後立刻驗證落點。

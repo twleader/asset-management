@@ -1335,8 +1335,8 @@ Google Drive 上每一份備份檔的本地索引；UI 列表 / 還原選單一�
 
 ### Base URL
 - Browser UI（本機）: `http://localhost/`；登入後頁面 API 由 frontend Nginx 轉至 BFF
-- Docker 外部唯讀 API（本機）: `http://127.0.0.1:9090`（五支 exact GET）
-- Docker 外部唯讀 API（遠端）: `https://<device>.<tailnet>.ts.net:9090`（Tailscale Serve 掛載相同五支 exact path；不使用 Funnel）
+- Docker 外部 API（本機）: `http://127.0.0.1:9090`（六條路由：五支唯讀 exact GET ＋ Requirement 71 新增的一支寫入 exact `POST /api/public/crawler-data/rescan`）
+- Docker 外部 API（遠端）: `https://<device>.<tailnet>.ts.net:9090`（Tailscale Serve 掛載相同六條 exact path；不使用 Funnel）
 - Docker network 內部: `http://bff:8080`／`http://external-materials-service:8080`
 
 ### Endpoints
@@ -2332,13 +2332,17 @@ tailnet client ─► HTTPS :9090 ─► Tailscale Serve（只掛五個 exact pa
                          └─ exact index/assets/USD-TWD routes ─► bff:8080
 ```
 
-Tailscale 不得設定 root proxy。設定腳本先讀 `tailscale serve status --json`：空設定或精確等於本任務五條 handler 才可能由本腳本管理；發現任何其他 handler 即列出並停止。接著在不改 Serve 的前提下，逐一驗證本機五條 API 的既有 payload 契約：quotes list 必須非空並可用首筆驗 quotes/one，market-index 不可為 fail-soft 空 schema，assets/latest 與 USD/TWD 也必須通過各自 status/content-type/payload 守門。任一失敗都在 reset 前停止。因這段 preflight 可能耗時，reset 緊前再讀一次 status、重驗所有權，並比較兩次解析後的 canonical JSON；只要狀態有變就停止，避免以過時判斷誤刪期間新增的 handler。兩次狀態相同且五路健康後才可 reset。安全 reset 後，五條實際命令皆採 `tailscale serve --bg --https=9090 --set-path=<path> http://127.0.0.1:9090<path>`，分別掛載 `/api/quotes`、`/api/quotes/one`、`/api/public/market-index`、`/api/assets/latest`、`/api/public/exchange-rate/usd-twd`；`--bg` 讓每條命令立即返回並在重啟後持久，target 的同名 path 讓 Nginx 收到原 API path。若設定中途失敗，cleanup 先重讀現況；只有 `{}` 或上述五路 exact handler 的安全子集合／完整集合且 target 相符時才可 reset，遇到任何陌生 handler、target 或無法讀取的狀態都保留並要求人工處理。若實際 Tailscale CLI 不支援 `--set-path`，腳本必須 fail closed 並停止，不建立 remote Serve；不得另猜 listener、改用 root proxy 或另開不同遠端 port。TLS 與 tailnet identity 在 host 的 Tailscale Serve 終止；Nginx container 不持有私鑰、不產生自簽憑證，也不執行 OAuth。禁止 Tailscale Funnel、公開 DNS 轉發或路由器 port-forward。多人 tailnet 的授權由 tailnet grants/ACL 管理；repo 只提供不含 auth key 的冪等設定腳本。直接走 `127.0.0.1:9090` 的本機請求屬 host-admin 信任邊界，因此 Nginx 不得把可被本機偽造的 `Tailscale-*` header 當作應用授權依據。
+> 以上為 Task 328 落地時的原始拓撲（五條唯讀 GET）。Requirement 71／Task 329 另增第六條 exact
+> `POST /api/public/crawler-data/rescan` → `bff:8080`，是唯一有外部抓取副作用的例外，詳見本檔
+> 「邊界：五條唯讀 GET 之外的第六條」一節，此處不重複展開。
 
-五路 preflight 都各自保存 response headers 與 body，先驗 exact `200` 與 `application/json` media type，再解析 payload；quotes list、quotes/one、market-index 不得只以 JSON body 形狀取代 header 驗證。`scripts/tests/configure-tailscale-api-gateway-test.sh` 以假的 curl/Tailscale CLI 分別注入這三路的 `200 text/plain`，逐案證明 fail closed 且 reset 記錄為零，成功案例則精確建立五條 handler；測試不得繞過兩次 status/canonical ownership、partial cleanup 或 `${status}`／`${quote_one_status}` 分支。
+Tailscale 不得設定 root proxy。（以下描述 Task 328 落地時的原始五條 handler 拓撲；Requirement 71／Task 329 新增第六條 handler 後，「精確等於」的比較基準變成六條，見本檔「邊界：五條唯讀 GET 之外的第六條」一節。）設定腳本先讀 `tailscale serve status --json`：空設定或精確等於本任務五條 handler 才可能由本腳本管理；發現任何其他 handler 即列出並停止。接著在不改 Serve 的前提下，逐一驗證本機五條 API 的既有 payload 契約：quotes list 必須非空並可用首筆驗 quotes/one，market-index 不可為 fail-soft 空 schema，assets/latest 與 USD/TWD 也必須通過各自 status/content-type/payload 守門。任一失敗都在 reset 前停止。因這段 preflight 可能耗時，reset 緊前再讀一次 status、重驗所有權，並比較兩次解析後的 canonical JSON；只要狀態有變就停止，避免以過時判斷誤刪期間新增的 handler。兩次狀態相同且五路健康後才可 reset。安全 reset 後，五條實際命令皆採 `tailscale serve --bg --https=9090 --set-path=<path> http://127.0.0.1:9090<path>`，分別掛載 `/api/quotes`、`/api/quotes/one`、`/api/public/market-index`、`/api/assets/latest`、`/api/public/exchange-rate/usd-twd`；`--bg` 讓每條命令立即返回並在重啟後持久，target 的同名 path 讓 Nginx 收到原 API path。若設定中途失敗，cleanup 先重讀現況；只有 `{}` 或上述五路 exact handler 的安全子集合／完整集合且 target 相符時才可 reset，遇到任何陌生 handler、target 或無法讀取的狀態都保留並要求人工處理。若實際 Tailscale CLI 不支援 `--set-path`，腳本必須 fail closed 並停止，不建立 remote Serve；不得另猜 listener、改用 root proxy 或另開不同遠端 port。TLS 與 tailnet identity 在 host 的 Tailscale Serve 終止；Nginx container 不持有私鑰、不產生自簽憑證，也不執行 OAuth。禁止 Tailscale Funnel、公開 DNS 轉發或路由器 port-forward。多人 tailnet 的授權由 tailnet grants/ACL 管理；repo 只提供不含 auth key 的冪等設定腳本。直接走 `127.0.0.1:9090` 的本機請求屬 host-admin 信任邊界，因此 Nginx 不得把可被本機偽造的 `Tailscale-*` header 當作應用授權依據。
+
+五路 preflight 都各自保存 response headers 與 body，先驗 exact `200` 與 `application/json` media type，再解析 payload；quotes list、quotes/one、market-index 不得只以 JSON body 形狀取代 header 驗證。`scripts/tests/configure-tailscale-api-gateway-test.sh` 以假的 curl/Tailscale CLI 分別注入這三路的 `200 text/plain`，逐案證明 fail closed 且 reset 記錄為零，成功案例則精確建立五條 handler；測試不得繞過兩次 status/canonical ownership、partial cleanup 或 `${status}`／`${quote_one_status}` 分支。（以上為 Task 328 原始五路 preflight；Requirement 71／Task 329 新增的第六路改走專屬 `get_405_post_only()`，不沿用 `get_200()`，詳見本檔「邊界：五條唯讀 GET 之外的第六條」一節。）
 
 ### Nginx Configuration (API Gateway)
 
-`api-gateway/nginx.conf` 是 deny-by-default 的獨立設定，不共用 frontend 的 `/api/` wildcard。五個 exact location 均保留 `$request_uri`，因此 query string 與 upstream status/body/content type 不變；`resolver 127.0.0.11` 讓 container recreate 後可重新解析 service name。`/api/assets/latest` 與 USD/TWD 的資料 shaping 全在 BFF/business 的獨立功能內完成；gateway 只透明轉送，不接受也不產生 owner selector。遠端存取只由 Tailscale 的五條 path-scoped mounts 建立，不在 Nginx 依 client IP 猜測。
+`api-gateway/nginx.conf` 是 deny-by-default 的獨立設定，不共用 frontend 的 `/api/` wildcard。五個 exact location 均保留 `$request_uri`，因此 query string 與 upstream status/body/content type 不變；`resolver 127.0.0.11` 讓 container recreate 後可重新解析 service name。`/api/assets/latest` 與 USD/TWD 的資料 shaping 全在 BFF/business 的獨立功能內完成；gateway 只透明轉送，不接受也不產生 owner selector。遠端存取只由 Tailscale 的五條 path-scoped mounts 建立，不在 Nginx 依 client IP 猜測。（下方程式碼為 Task 328 落地時的原始五條設定；Requirement 71／Task 329 新增的第六條 `location` 與對稱的 `$rescan_allow_header` map 見本檔「邊界：五條唯讀 GET 之外的第六條」一節，不在此重複貼出。）
 
 ```nginx
 server_tokens off;
@@ -2399,7 +2403,7 @@ server {
 
 ### Nginx Configuration (Frontend)
 
-Frontend 仍保留 SPA、OAuth2 與登入後 `/api/` proxy，但在 generic location 之前封鎖五個 external-only API，確保 port 80 不是第二入口：
+Frontend 仍保留 SPA、OAuth2 與登入後 `/api/` proxy，但在 generic location 之前封鎖五個 external-only API，確保 port 80 不是第二入口（Requirement 71／Task 329 另增第六條 exact deny location，見本檔「邊界：五條唯讀 GET 之外的第六條」一節）：
 
 ```nginx
 location = /api/quotes { return 404; }
@@ -2577,7 +2581,7 @@ Docker 外工具 → api-gateway(Nginx :9090) ───┼→ bff(Spring Cloud G
                                                     → postgres / redis / external-materials-service
 ```
 
-- 對瀏覽器而言 BFF 仍是唯一應用入口且 business-services 不接觸瀏覽器；對 Docker 外工具則只有 api-gateway 9090 的五條唯讀 allowlist，本機 loopback 與 Tailscale 遠端皆採相同五條 exact path。**OAuth2 Login（Google 重導、session cookie）必須放在 BFF 的 reactive Security（`SecurityWebFilterChain` / `ServerHttpSecurity`）**，不移到 api-gateway。
+- 對瀏覽器而言 BFF 仍是唯一應用入口且 business-services 不接觸瀏覽器；對 Docker 外工具則只有 api-gateway 9090 的 allowlist（Task 328 落地時為五條唯讀，Requirement 71／Task 329 新增第六條寫入路由後為六條，見本檔「邊界：五條唯讀 GET 之外的第六條」一節），本機 loopback 與 Tailscale 遠端皆採相同 exact path 集合。**OAuth2 Login（Google 重導、session cookie）必須放在 BFF 的 reactive Security（`SecurityWebFilterChain` / `ServerHttpSecurity`）**，不移到 api-gateway。
 - BFF 在呼叫下游時，把目前登入者（或管理者代看的目標）以 header `X-User-Id` / `X-User-Role` / `X-User-Status` 傳給 business-services。
 
 ### BFF 安全層
@@ -6539,6 +6543,9 @@ browser ──► frontend:80
 tailnet client ──► HTTPS :9090（五條 path-scoped Serve mount）──► 同一 api-gateway:9090
 ```
 
+> 以上為 Requirement 68 落地時的拓撲快照（五條）。Requirement 71／Task 329 新增第六條 exact
+> `POST /api/public/crawler-data/rescan`，見本檔「邊界：五條唯讀 GET 之外的第六條」一節。
+
 - Gateway topology 只由 Requirement 66／Task 328 維護：獨立 non-root Nginx container 唯一映射 `127.0.0.1:9090:9090`；BFF 與 external-materials-service 均無 host port。本任務只接上已預留的 `/api/assets/latest` exact route，不在 BFF 代理 quotes，也不修改 Tailscale／Nginx ownership。
 - `SecurityConfig` 在既有 public market-index 旁只新增 `/api/assets/latest` 的 `HttpMethod.GET` 為 `permitAll()`；quotes 由 Nginx 直接送 external-materials。Latest 同 path 其他 method、任何 descendant，以及相鄰 `/api/bff/**` 都落回既有 authenticated 規則。`TenantWebFilter` 繼續移除 client 輸入的 `X-User-*`。
 
@@ -6583,7 +6590,7 @@ Market target date 不自行算：三個日期都由 `PriceQueryService.displayS
 
 ### Runtime 驗收
 
-從本 worktree 無快取重建並 recreate `business-services`、`bff`、`frontend`、`api-gateway`；上游 recreate 後重建／recreate BFF，bounded wait 到 healthy。Latest response 必須有非空 snapshot、ID 對齊、原始 JSON 精度與可判讀的 valuation source；逐 method／descendant 驗 BFF 401 與 gateway 405/404，frontend exact/matrix 404，Compose port inspection 只見 api-gateway `127.0.0.1:9090->9090`，host 8080/8082 無 listener。Tailscale Serve 已核准時再跑五路 path-scoped preflight／正向驗證；若一次性 Serve 核准尚未完成，誠實列為需使用者互動，不用本機或 stub 冒充遠端證據。
+從本 worktree 無快取重建並 recreate `business-services`、`bff`、`frontend`、`api-gateway`；上游 recreate 後重建／recreate BFF，bounded wait 到 healthy。Latest response 必須有非空 snapshot、ID 對齊、原始 JSON 精度與可判讀的 valuation source；逐 method／descendant 驗 BFF 401 與 gateway 405/404，frontend exact/matrix 404，Compose port inspection 只見 api-gateway `127.0.0.1:9090->9090`，host 8080/8082 無 listener。Tailscale Serve 已核准時再跑五路 path-scoped preflight／正向驗證（Requirement 71／Task 329 落地後併入該 Requirement 新增的第六路一併驗證，見本檔「邊界：五條唯讀 GET 之外的第六條」一節）；若一次性 Serve 核准尚未完成，誠實列為需使用者互動，不用本機或 stub 冒充遠端證據。
 
 ---
 
@@ -6732,17 +6739,114 @@ GET /api/public/exchange-rate/usd-twd
 
 ### Nginx、Tailscale 與驗證矩陣
 
-Task 328 的 main gateway是唯一 Docker host listener，仍只綁 `127.0.0.1:9090`；本 path 使用既有 Docker DNS resolver、variable upstream與 `$request_uri`，gateway不做 OAuth、shaping、cache、retry或 fallback。`api-gateway/nginx.conf`、`frontend/nginx.conf` 與 Compose 延續 main 既有設定；Tailscale script 只收緊五路 preflight，使每路都先驗 exact 200 與 `application/json`，並保留 `${status}`／`${quote_one_status}`、兩次 status/canonical ownership 與 partial cleanup。
+Task 328 的 main gateway是唯一 Docker host listener，仍只綁 `127.0.0.1:9090`；本 path 使用既有 Docker DNS resolver、variable upstream與 `$request_uri`，gateway不做 OAuth、shaping、cache、retry或 fallback。`api-gateway/nginx.conf`、`frontend/nginx.conf` 與 Compose 延續 main 既有設定；Tailscale script 只收緊五路 preflight，使每路都先驗 exact 200 與 `application/json`，並保留 `${status}`／`${quote_one_status}`、兩次 status/canonical ownership 與 partial cleanup。（以上為 Requirement 70 落地時的五路快照；Requirement 71／Task 329 新增第六條後見本檔「邊界：五條唯讀 GET 之外的第六條」一節。）
 
 Tailscale Serve HTTPS `:9090` 掛與 gateway 相同的五條 exact path，USD/TWD是第五條；禁止 root／`/api/` wildcard、額外 handler、Funnel、公網 listener、自簽或額外 OAuth。驗證要求：
 
 - local USD 200；同 path其他 method 405；descendant 404；
 - frontend exact與 matrix變體404；container BFF 的非 GET／descendant／相鄰 private route 401；
-- Tailscale五路正向皆精確200，USD另嚴格驗 metadata、非空spot/history與`count==history.length`；
-- root `/`、`/api/`與unknown path均404，Serve status精確只有五路；
+- Tailscale五路正向皆精確200，USD另嚴格驗 metadata、非空spot/history與`count==history.length`（Requirement 71 落地後為六路正向驗證，見該節）；
+- root `/`、`/api/`與unknown path均404，Serve status精確只有五路（Requirement 71 落地後精確只有六路）；
 - 銀行 session內約每2秒連取三次，`polledAt`前進，provider time不晚於`polledAt+120秒`且同來源不倒退。盤外只可證明 fixed-Clock與實際`INACTIVE/LAST_AVAILABLE`，不得新增繞過session的production endpoint。
 
 `SchedulePublicBffController.JOBS` 保留5分鐘歷史job並新增2秒live job。合併後實測 business 20個 scheduled methods、external 31個 methods／33個 annotations、JOBS 51筆；`TwClosurePoller`與台股官方收盤對帳各一法兩標。Requirement 69 assets多時間仍只佔一個每分鐘 annotation，清單保留其「多個每日時間」文案。
+
+---
+
+## Requirement 71／Task 329：爬蟲重新搜尋公開觸發 API（Nginx 9090 第六條路由）
+
+### 邊界：五條唯讀 GET 之外的第六條，唯一有外部抓取副作用
+
+```text
+host automation / tailnet client
+  └─ POST http://127.0.0.1:9090/api/public/crawler-data/rescan   # 第六條，POST-only，非既有 GET 五條
+       └─ api-gateway:9090（新 location，方法檢查與既有 map $api_allow_header 相反）
+            └─ bff:8080
+                 └─ PublicCrawlerRescanController（獨立類別，只委派 Service，同三支既有 sibling 慣例）
+                      └─ PublicCrawlerRescanService（新 Service，注入 businessServicesClient，
+                      │    與 CrawlerDataBffController 共用同一顆 Bean；本身零 HTTP 邏輯以外的職責）
+                      │    ── 例外皆由 PublicCrawlerRescanExceptionAdvice 消毒後回固定文案 502／503
+                      └─ business POST /api/crawler-export-path/public-rescan（不驗 ADMIN）
+                                ├─ Redis SETNX crawler:news-poller:public-rescan:cooldown（30s，單一全域鍵）
+                                │    未取得 → 直接回 status=COOLDOWN，不呼叫 ext
+                                └─ 取得 → proxyManualRun(NEWS_POLLER, "/internal/news-poller/public-rescan", "重新搜尋")
+                                     └─ ext POST /internal/news-poller/public-rescan（僅 docker network，永不對外）
+                                          └─ NewsPoller.publicRescan()
+                                               ├─ 共用既有 AtomicBoolean running 互斥鎖
+                                               │    （與排程輪／warmup／兩顆既有 ADMIN 按鈕同一把鎖）
+                                               └─ run("public-rescan")  ← 與 fetchAndExportNow() 只差 trigger 字串
+                                                    └─ 抓取全部既有來源 → upsert news_headline
+                                                         → exportPublicInfoJson("public-rescan")
+                                                              → public_info_<今日>.json + .xlsx（trigger 欄位為 public-rescan）
+                                                              → Drive 同步（沿用既有邏輯，未新增）
+
+frontend :80  ── exact + matrix 變體 → 404（同既有五條的第二防線）
+```
+
+此圖與 Requirement 68 的 Host 邊界圖（design.md 6521 行附近）同構：第六條同樣只由 BFF 承接 gateway 呼叫，business 本身不對外曝露（無 host port），故 business 端不需要另一層「permitAll」機制——**唯一新增的權限決策**是 `CrawlerExportPathController.publicRescan()` 刻意不呼叫 `CurrentUserContext.isAdmin()`，這是本任務相對既有兩支 ADMIN 端點的唯一差異點。
+
+**風險與確認**：把一個原本 ADMIN 限定、有外部抓取副作用的動作開放給任何連得到 9090（含 Tailscale 私網）的匿名呼叫端，直接牴觸 Requirement 66 原定「純唯讀、不觸發外部抓取」的邊界；此為使用者已確認的刻意決策（見 Requirement 71 開頭 callout），以 30 秒全域 Redis 冷卻降低被連續觸發打爆對外新聞來源的風險，而非要求登入或共享密鑰（用意是維持「和其餘五支一樣，Docker 外可呼叫到」的呼叫體驗）。
+
+### 為何獨立成 `PublicCrawlerRescanController`，不塞進既有 `CrawlerDataBffController`
+
+`CrawlerDataBffController` 的 class-level `@RequestMapping("/api/bff/crawler-data")` 會與方法級路徑相串接（Spring 不支援方法級路徑以 `/` 開頭時「覆蓋」class-level prefix）；若在該類別內宣告 `@PostMapping("/api/public/crawler-data/rescan")`，實際生效路徑會是 `/api/bff/crawler-data/api/public/crawler-data/rescan`，不是預期的頂層路徑。這正是既有 `PublicUsdTwdController`／`PublicMarketIndexController` 都各自獨立成類別的技術原因（不是風格選擇），本任務沿用同一結構。
+
+### Controller 只委派 Service；獨立 ExceptionAdvice 消毒錯誤，不沿用全域 `BusinessErrorAdvice`
+
+**Controller 不得直接持有 `WebClient`。** 三支既有 sibling（`PublicUsdTwdController`／`PublicMarketIndexController`／`LatestAssetsPublicController`）全部只委派各自的 `XxxPublicService`，無一在 controller 內直接發 HTTP 呼叫；`CLAUDE.md`「Controller 仍只委派 service，BFF 不直查 DB／外部行情」是這個公開匿名端點家族的專屬規則。因此新增 `PublicCrawlerRescanService`（`bff/src/main/java/com/steven/assets/bff/crawlerdata/PublicCrawlerRescanService.java`），把 `businessServicesClient.post()...` 的呼叫搬進去，Controller 只呼叫 `service.rescan()`。
+
+**匿名端點不得沿用全域 `BusinessErrorAdvice` 的「原樣轉發」行為。** `bff/src/main/java/com/steven/assets/bff/common/BusinessErrorAdvice.java` 把 business 任何非 2xx 回應的 body 原樣轉發給呼叫端（Requirement 51／Task 243.5.5 的既有設計，服務對象是**已登入**使用者）；而 business 端 `GlobalExceptionHandler` 對未分類例外的兜底 `@ExceptionHandler(Exception.class)` 會把 `ex.getMessage()`（可能含內部細節的原始例外訊息）放進 `ProblemDetail.detail` 回 500。本端點完全匿名，這條路徑若原樣沿用等於把 business 內部例外訊息開放給任何連得到 9090 的人。新增 `PublicCrawlerRescanExceptionAdvice`（`@RestControllerAdvice(assignableTypes = PublicCrawlerRescanController.class)`，比照 `PublicUsdTwdExceptionAdvice`／`LatestAssetsPublicExceptionAdvice` 既有的 scoped-advice 命名模式），對 `WebClientResponseException`／`WebClientException` 各回一個**固定文案**的 502／503 `ProblemDetail`，不帶 business 原始 body 或例外訊息。
+
+**`assignableTypes` 範圍窄不保證蓋過全域 advice——這件事本專案從未被任何既有測試證明過。** 兩者對同一個 `WebClientResponseException` 各自宣告 handler，Spring 跨 `@ControllerAdvice` bean 解析同一例外型別時依 `@Order`／bean 註冊順序決定，不是依 `assignableTypes` 範圍窄自動優先；三支既有 sibling（`PublicUsdTwdExceptionAdvice`／`PublicMarketIndexExceptionAdvice`／`LatestAssetsPublicExceptionAdvice`）全樹皆未宣告 `@Order`；其中 `PublicUsdTwdExceptionAdvice`／`PublicMarketIndexExceptionAdvice` 的既有測試只用 `WebTestClient.bindToController(...).controllerAdvice(僅自己)` 組裝，從未把 `BusinessErrorAdvice` 一起放進同一個測試 context，`LatestAssetsPublicExceptionAdvice`（三支裡唯一真正會與 `BusinessErrorAdvice` 競爭同一個 `WebClientResponseException` handler 的一支）則連任何既有測試都沒有——換言之「scoped advice 會蓋過全域 advice」這個被反覆引用的既有慣例，實際上只是「語法慣例存在」，不是「已驗證的行為保證」。故 `PublicCrawlerRescanExceptionAdvice` **必須明確宣告 `@Order(Ordered.HIGHEST_PRECEDENCE)`**，不依賴未定義的 bean 註冊順序去「碰運氣蓋過」全域 advice；對應測試也必須在同一個 `WebTestClient` context 裡同時註冊兩者，驗證兩者都在場時消毒版本仍勝出（見 Requirement 71 測試 AC 與 Task 329 測試情境清單），不能沿用三支既有 sibling「排除全域 advice」的測試組裝方式。
+
+**與 `LatestAssetsPublicExceptionAdvice.downstream()` 刻意不同**：後者對 business 的 404 是「原樣 relay」——因為那個 404 是 business 對「查無可信 owner」這個**合法結構化訊號**的既定回應，relay 給呼叫端是必要資訊。本端點的 business 端 `POST /api/crawler-export-path/public-rescan` 設計上一律回 200（見下方 Redis 冷卻小節，所有結果皆表達在 `RunNowResponse.status` 欄位），故本端點出現非 2xx **本身即代表未預期的失敗**，沒有「合法可安全 relay 的結構化錯誤」這個前提，一律消毒。
+
+### Redis 冷卻：單鍵、非雙鍵，且非全部終態都保留
+
+比較 `TradingRadarRefreshService`（Requirement 43 修訂／Task 249）：
+
+| | TradingRadarRefreshService | 本任務 |
+|---|---|---|
+| 鍵數 | per-owner ＋ 全域雙鍵 | 單一全域鍵 |
+| 為何 | 已登入使用者各自有身分，需防止單一使用者霸占、也防止不同使用者互相排擠 | 呼叫者全部匿名、無身分可分，雙鍵只會多一把恆定失敗的 owner 鍵 |
+| TTL | 30 秒 | 30 秒（沿用同一常數值，使用者已確認） |
+| Redis 例外 | fail-open | fail-open（同一理由：不因 Redis 抖動就永遠擋住入口） |
+| 提前釋放 | 全域鍵搶輸時刪除 owner 鍵（「沒真的抓，不燒冷卻」） | `BUSY`／`DISABLED`／`ERROR` 三種終態立即刪鍵；`OK`／`FAILED`／`RUNNING` 以 `SET` 重新起算全新 30 秒 TTL（非沿用呼叫前的舊 TTL） |
+
+`CrawlerExportPathService` 新增建構子相依 `StringRedisTemplate`（backend 既有 Bean，`TradingRadarRefreshService` 已在用同一顆）；`publicRescan()` 呼叫 `proxyManualRun` 前先過冷卻閘門，取得後透傳既有 50 秒逾時／`RUNNING`／`ERROR` 語意，不重寫。
+
+**TTL 必須在呼叫返回後重新起算，不能沿用呼叫前設下的舊 TTL。** `proxyManualRun` 本身可阻塞至 50 秒，而 ext 單輪抓取「典型 3–5 秒，最壞可達數分鐘」（`CrawlerExportPathService.java:94-98` 既有 javadoc 自承）。若冷卻鍵沿用呼叫前 `SETNX` 設下、與呼叫本身耗時脫鉤的固定 30 秒 TTL，任何耗時超過 30 秒的一輪都會讓冷卻鍵在抓取仍進行中提前自然到期——一旦該輪真的結束（`running` 釋放），下一個匿名呼叫端幾乎可以零延遲地立刻觸發下一輪真實抓取，「連續觸發間至少 30 秒」的防護形同虛設。修法：`OK`／`FAILED`／`RUNNING` 三種結果都在 `proxyManualRun` **返回後**以 `redis.opsForValue().set(key, "1", Duration.ofSeconds(30))`（**`SET`，不是 `EXPIRE`**——後者對已自然過期、不存在的 key 無效，前者才能保證無論舊 key 是否還在都重建一個全新 30 秒窗口）重新起算。
+
+**殘餘落差是明確接受的，不是這個修法的缺陷：** 最壞情境（單輪達數分鐘）下，`proxyManualRun` 最長只阻塞 50 秒即以 `RUNNING` 提前返回，此時重新起算的 30 秒窗口至多覆蓋呼叫返回後的 80 秒，仍可能無法完全覆蓋整輪抓取剩餘的時間。但 ext 既有的 `AtomicBoolean running` 互斥鎖在任何時刻都成立、不受冷卻鍵狀態影響——期間任何匿名探測都只會撞上 `BUSY`（依規則立即刪冷卻鍵，但不消耗任何抓取資源，因為 `running.compareAndSet` 失敗是近乎零成本的檢查）。唯一未被冷卻鍵覆蓋的窗口是該輪真正結束、`running` 剛釋放的那一刻，理論上可被立即觸發下一輪，但觸發後又重新起算 30 秒，不可能被無限連續觸發。
+
+**renewal 的 `SET` 本身若拋例外，是與上述計時落差性質不同的另一種失敗**：比照 `acquirePublicRescanCooldown()` 同一條 fail-open 哲學，僅 log warn、不影響本次呼叫的回應結果——此時冷卻鍵可能維持在已自然過期的狀態，等同這次呼叫沒有冷卻保護（而非「保護窗口不夠長」），是明確接受、與「Redis 抖動就永遠擋住公開入口」同一取捨方向的風險。
+
+### Nginx／frontend／SecurityConfig 三層放行，一律新增、不修改既有五條
+
+- `api-gateway/nginx.conf`：新增 `location = /api/public/crawler-data/rescan`，`if ($request_method != POST) { return 405; }` ＋ 一個對稱的第二個 `map $request_method $rescan_allow_header { POST ""; default "POST"; }` 搭配 `add_header Allow $rescan_allow_header always;`——**不得**沿用既有 `map $request_method $api_allow_header`（該 map 硬編碼「合法方法是 GET」，語意與本路由相反），也不寫死 `add_header Allow POST always;`（會讓 POST 成功回應也帶上既有五條都沒有的 `Allow` header，與既有「只在方法不合法時才帶」的行為不一致）。
+- `bff` `SecurityConfig`：新增 `.pathMatchers(HttpMethod.POST, "/api/public/crawler-data/rescan").permitAll()`，與既有 `HttpMethod.GET` 三條分開宣告（method 不同、不可合併同一次 `pathMatchers` 呼叫）。
+- `frontend/nginx.conf`：新增 exact `location = /api/public/crawler-data/rescan { return 404; }`；既有 matrix-parameter deny regex 的 `public(?:;[^/]*)?/(...)` 分支內插入新分支：
+  ```
+  ^/api(?:;[^/]*)?/(?:quotes(?:;[^/]*)?(?:/one(?:;[^/]*)?)?|public(?:;[^/]*)?/(?:market-index(?:;[^/]*)?|exchange-rate(?:;[^/]*)?/usd-twd(?:;[^/]*)?|crawler-data(?:;[^/]*)?/rescan(?:;[^/]*)?)|assets(?:;[^/]*)?/latest(?:;[^/]*)?)$
+  ```
+  （只在既有 `public(?:;[^/]*)?/(...)` 群組內新增一個 `|` 分支，其餘五條的既有分支不變。）
+
+### Tailscale script：第六條 preflight 不得真的送出 POST
+
+`scripts/configure-tailscale-api-gateway.sh` 現有 `get_200()` 假設「合法方法是 GET、預期 200」，對本路徑完全不適用——GET 對本路徑的正確回應是 405。若照抄既有 `get_200()` 對本路徑發 `POST` 來驗證契約，會讓**每一次執行這支設定腳本**都真的觸發一輪對外抓取（腳本可能因人工重跑、CI 排程等原因多次執行），形成「自己的維運工具造成的濫用」，恰是本任務要以 30 秒冷卻防範的同一件事。
+
+新增函式 `get_405_post_only()`：對本路徑發 `GET`，斷言狀態碼精確 `405` 且 response header 含 `Allow: POST`，藉此只驗證「路由存在、方法限制生效」，全程不對本路徑送出 `POST`。`SERVE_PATHS` 陣列與 `validate_owned_config` 的 Python `expected` dict 都新增本路徑 → `http://127.0.0.1:9090/api/public/crawler-data/rescan` 映射；此路徑的健康檢查併入既有「任一契約不健康就整批 fail closed、不 reset」判斷，與五條讀取型 preflight 同一組 gate、不單獨放寬。
+
+### 文件同步
+
+**「五條 exact GET」這句話在本專案至少有五個獨立出處，逐一列出、全部要改，不是改一處就代表改完：**
+
+1. `CLAUDE.md`「BFF 與資料來源規範」第 3 節「Docker 外部唯讀 API 一律經 Nginx 9090 gateway」現載「精確放行五條 GET」，須更正為「六條路由（五條唯讀 GET ＋ 一條寫入 POST `/api/public/crawler-data/rescan`）」，並註明第六條的例外性質（有外部抓取副作用、經 30 秒全域冷卻節流）。
+2. `spec/steering/structure.md` §3.2「BFF 設計鐵則」條目 2 的具名例外段落（現列 `Requirements 67／68／70；Tasks 317／325／327`）與 §4.4「Docker 外部 API Gateway」段落（現載「它只轉送五條 exact GET…Tailscale Serve 只掛相同五條 exact path」）——兩處都要改成六條並補上 Requirement 71／Task 329。
+3. `spec/tasks/README.md` 的 `spec/` 目錄樹註解裡的任務索引範圍「311–328」須同步改成「311–329」（`spec/tasks.md`／`CLAUDE.md`／`spec/steering/structure.md` 三處已在本次 spec 撰寫階段先行更正，這一份容易被漏掉）。
+4. `scripts/configure-tailscale-api-gateway.sh` 除了 `SERVE_PATHS` 陣列與 `expected` dict（程式邏輯，見 Tailscale 小節）外，還有兩處純文字錯誤訊息寫死「五條」：`validate_owned_config()` 內 Python 例外訊息、腳本尾端 `die` 訊息，都要改成「六條」，否則驗證失敗時的訊息會與實際上下文不符。
+5. `spec/requirements.md` 裡 Requirement 66 第一條 AC（「純唯讀，不新增任何寫入或抓取副作用」）已在本次 spec 撰寫階段插入指向 Requirement 71 的行內 callout（比照 Requirement 43 修訂既有的「⚠ 部分修訂」慣例），供未來只讀 Requirement 66 的稽核者能看到反向指標。
+6. **範圍聲明**：Requirement 66／68／70 自身其餘既有 AC（含「五路 preflight」「Tailscale HTTPS 五路正向皆須精確 200」「Serve status 精確只有五路」等可執行測試斷言）與 `spec/design.md` 敘述性段落裡同義的「五條／五路」殘留提及，**不在本次 spec 撰寫階段修正範圍**——那些描述的是已上線的既有契約，統一留到 Task 329 落地、第六條真正存在時再逐一改為六條或就地插入行內 callout，避免本次搶先描述一個尚未存在的狀態。具體位置清單見 Task 329 的 329.17。
 
 ---
 

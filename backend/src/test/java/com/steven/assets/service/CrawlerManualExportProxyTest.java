@@ -7,6 +7,7 @@ import com.steven.assets.security.AdminRequiredException;
 import com.steven.assets.security.CurrentUserContext;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.redis.core.StringRedisTemplate;
 
 import java.io.IOException;
 import java.net.ServerSocket;
@@ -41,6 +42,8 @@ class CrawlerManualExportProxyTest {
 
     private final CrawlerExportSettingRepository repo = mock(CrawlerExportSettingRepository.class);
     private final GdriveOutputSupport gdrive = mock(GdriveOutputSupport.class);
+    /** Task 329 公開重新搜尋冷卻所需；本測試涵蓋的 runNow／fetchAndRunNow 都不觸及它。 */
+    private final StringRedisTemplate redis = mock(StringRedisTemplate.class);
 
     private ServerSocket silentServer;
 
@@ -50,7 +53,7 @@ class CrawlerManualExportProxyTest {
     }
 
     private CrawlerExportPathService serviceAt(String baseUrl, long timeoutSeconds) {
-        return new CrawlerExportPathService(repo, "/home/steven", gdrive, baseUrl, timeoutSeconds);
+        return new CrawlerExportPathService(repo, "/home/steven", gdrive, baseUrl, timeoutSeconds, redis);
     }
 
     /** 未被監聽的埠：連線一定失敗（不是逾時）。 */
@@ -86,6 +89,26 @@ class CrawlerManualExportProxyTest {
                 .isInstanceOf(AdminRequiredException.class);
 
         verify(service, never()).fetchAndRunNow(org.mockito.ArgumentMatchers.anyString());
+    }
+
+    /**
+     * 公開觸發「重新搜尋」（Requirement 71 / Task 329）：與上面兩支既有 ADMIN 端點的唯一差異——
+     * controller 層<b>不檢查</b> {@link CurrentUserContext#isAdmin()}，直接委派 service。
+     * 全域 30 秒冷卻節流在 service 層負責（見 {@code CrawlerExportPathServicePublicRescanTest}）。
+     */
+    @Test
+    void publicRescan不檢查Admin直接委派service() {
+        CrawlerExportPathService service = mock(CrawlerExportPathService.class);
+        CurrentUserContext user = mock(CurrentUserContext.class);
+        CrawlerExportPathDto.RunNowResponse expected = new CrawlerExportPathDto.RunNowResponse(
+                "OK", "FETCH_AND_EXPORT", null, null, null, null, 1, 0, 1, null, null, null, "完成");
+        when(service.publicRescan()).thenReturn(expected);
+        CrawlerExportPathController controller = new CrawlerExportPathController(service, user);
+
+        CrawlerExportPathDto.RunNowResponse actual = controller.publicRescan();
+
+        assertThat(actual).isEqualTo(expected);
+        verify(user, never()).isAdmin();
     }
 
     // ===== 參數驗證 =====
