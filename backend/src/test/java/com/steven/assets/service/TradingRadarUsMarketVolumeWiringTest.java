@@ -49,10 +49,12 @@ import static org.mockito.Mockito.when;
  * {@code buildMarketSnapshot()} 內部那個 {@code Instant.now()} 與實際傳入的 rows；
  * 未 stub 任何方法，每次呼叫都真的落到 production 實作。</p>
  *
- * <p>⚠ 觀測入口只能用 {@code buildMarketSnapshot(US_MARKET).summary()}：{@code buildUsMarket}
- * 是 private，而 {@code assembleAt(Instant)} 的 {@code Response.market} 只帶台股 summary。
- * {@code buildMarketSnapshot(String)} 第一行即 {@code Instant.now()}、沒有吃 instant 的 overload，
- * 故所有 fixture 日期一律以「相對於現在」表達（過去日＝已完成、未來日＝晚於完成邊界）。</p>
+ * <p>⚠ 本檔的觀測入口是 {@code buildMarketSnapshot(US_MARKET).summary()}：{@code buildUsMarket}
+ * 本身是 private。（Task 335 起 {@code assembleAt(Instant).usMarket()} 是第二個等價觀測入口——
+ * {@code Response.usMarket} 帶的就是同一份 summary；本檔沿用 {@code buildMarketSnapshot}，
+ * 因為它不需要組裝整份個股清單。）{@code buildMarketSnapshot(String)} 第一行即 {@code Instant.now()}、
+ * 沒有吃 instant 的 overload，故所有 fixture 日期一律以「相對於現在」表達
+ * （過去日＝已完成、未來日＝晚於完成邊界）。</p>
  */
 class TradingRadarUsMarketVolumeWiringTest {
 

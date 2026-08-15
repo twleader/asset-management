@@ -249,6 +249,29 @@ class TradingRadarSnapshotStoreTest {
                         .isEqualTo(TradingRadarEvidenceGate.ACTION_POLICY_VERSION));
     }
 
+    /**
+     * Task 335：{@code Response} 新增 {@code usMarket} component 後，三個相容建構式（7／6／5 參數）
+     * 必須把該欄留成 {@code null}，不得以台股那份冒充，也不得拋例外。
+     *
+     * <p>本檔的 {@link #resp} 走 5 參數、{@link #currentPolicyResp} 走 7 參數，兩者都是
+     * 既有呼叫端（335.5 判定「不改」），這裡再直接釘住第 6 參數那一個。</p>
+     */
+    @Test
+    void 相容建構式建立的response其usMarket為null且不拋例外() {
+        TradingRadarDto.Response fiveArg = resp("2026-07-20T10:00:00+08:00");
+        TradingRadarDto.Response sevenArg = currentPolicyResp("2026-07-20T10:00:00+08:00");
+        TradingRadarDto.Response sixArg = new TradingRadarDto.Response(
+                fiveArg.ruleVersion(), fiveArg.generatedAt(), fiveArg.market(),
+                fiveArg.stocks(), fiveArg.skippedNonTwStocks(), List.of());
+
+        assertThat(fiveArg.usMarket()).isNull();
+        assertThat(sixArg.usMarket()).isNull();
+        assertThat(sevenArg.usMarket()).isNull();
+        // 既有讀取端行為逐位不變的最小釘子：台股那份仍在原欄位、內容不因新增 component 而位移。
+        assertThat(sevenArg.market()).isEqualTo(fiveArg.market());
+        assertThat(sixArg.market()).isEqualTo(fiveArg.market());
+    }
+
     private static String gzipB64(String json) throws Exception {
         ByteArrayOutputStream bos = new ByteArrayOutputStream();
         try (GZIPOutputStream gz = new GZIPOutputStream(bos)) {
