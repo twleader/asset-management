@@ -29,7 +29,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 
 ---
 
-## 任務索引（Task 1–228、264–267、269–292、297–309、311–330）
+## 任務索引（Task 1–228、264–267、269–292、297–309、311–331）
 
 | Task | 標題 | 位置 |
 |---|---|---|
@@ -330,7 +330,9 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 328 | Nginx 9090 統一外部 API 與 Tailscale 私網 HTTPS（Requirement 66／67） | [tasks/t328_nginx_tailscale_api_gateway_9090.md](tasks/t328_nginx_tailscale_api_gateway_9090.md) |
 | 329 | 「爬蟲資訊查詢」頁公開觸發重新搜尋 API（Nginx 9090 第六條路由，Requirement 71） | [tasks/t329_crawler_public_rescan_api.md](tasks/t329_crawler_public_rescan_api.md) |
 | 330 | 油價金價每日匯出支援多個執行時間（Requirement 72） | [tasks/t330_commodity_export_multi_schedule.md](tasks/t330_commodity_export_multi_schedule.md) |
-> **註：Task 229–263、268、293–296 以各自任務檔為準。Task 329 由另一並行 worktree（「爬蟲資訊查詢」頁公開觸發重新搜尋 API）先行佔用、尚未合併進本分支，故本檔索引跳過 329。**
+| 331 | 已實現損益每日匯出支援多個執行時間（Requirement 73） | [tasks/t331_realized_gain_export_multi_schedule.md](tasks/t331_realized_gain_export_multi_schedule.md) |
+
+> **註：Task 229–263、268、293–296 以各自任務檔為準。**
 
 > **Task 222–225 已全部被 t264／t265／t292 取代（見上表），保留僅作為決策記錄，一律不得依其實作。**
 >

@@ -156,8 +156,15 @@
           <el-switch v-model="schedule.enabled" />
         </el-form-item>
         <el-form-item label="每日執行時間">
-          <el-time-picker v-model="scheduleTime" format="HH:mm" value-format="HH:mm"
-            placeholder="時:分" style="width:130px" />
+          <div style="display:flex; flex-direction:column; gap:6px">
+            <div v-for="item in scheduleTimes" :key="item.key" style="display:flex; gap:8px; align-items:center">
+              <el-time-picker v-model="item.value" format="HH:mm" value-format="HH:mm" placeholder="時:分" style="width:130px" />
+              <el-switch v-model="item.enabled" active-text="啟用" inactive-text="停用" />
+              <el-button text type="danger" :disabled="scheduleTimes.length === 1" @click="removeScheduleTime(item.key)">移除</el-button>
+              <small v-if="item.lastRunAt" style="color:var(--el-text-color-secondary)">{{ item.lastRunAt }} {{ item.lastRunStatus || '' }}</small>
+            </div>
+            <el-button text type="primary" style="align-self:flex-start" @click="addScheduleTime">＋ 新增時間</el-button>
+          </div>
         </el-form-item>
         <el-form-item label="輸出資料夾">
           <el-input v-model="schedule.outputSubpath" readonly placeholder="（家目錄根）" style="width:240px">
@@ -205,8 +212,8 @@
       <div class="schedule-hint">
         以主機家目錄 <code>{{ schedule.baseDir || '/home/steven' }}</code> 為根（對映主機
         <code>/Users/steven</code>）。按上方「選擇」開啟檔案總管式選擇器挑選子資料夾；例如選 <code>input</code> →
-        主機 <code>/Users/steven/input</code>。每日於指定時間匯出已實現損益為
-        <code>已實現損益_{使用者ID}_YYYYMMDD.xlsx</code> 與 <code>.json</code> <strong>兩份</strong>（主檔名相同、只差副檔名；內容同上方「匯出 Excel」，涵蓋全部年度）。
+        主機 <code>/Users/steven/input</code>。於下列每個啟用時間更新同日最新檔為
+        <code>已實現損益_{使用者ID}_YYYYMMDD.xlsx</code> 與 <code>.json</code> <strong>兩份</strong>（主檔名相同、只差副檔名；內容同上方「匯出 Excel」，涵蓋全部年度），較晚時段會覆寫同名檔為較新內容。
       </div>
       <div v-if="schedule.lastRunAt || schedule.lastRunStatus" class="schedule-status">
         上次執行：{{ schedule.lastRunAt || '—' }}　{{ schedule.lastRunStatus || '' }}
@@ -364,13 +371,14 @@ const exporting = ref(false)
 const selectedYear = ref(null)
 const editingId = ref(null)
 
-// 排程自動匯出設定（Requirement 39 / Task 196）
+// 排程自動匯出設定（Requirement 39 / Task 196；多時間點 Requirement 73 / Task 331）
 const schedule = reactive({
   // Drive 同步（Task 243）；gdriveRemote 是後端給的顯示值，不入庫
   gdriveEnabled: false, gdriveSubpath: '', gdriveRemote: '',
   gdriveLastRunAt: null, gdriveLastStatus: '',
-  enabled: false, runHour: 8, runMinute: 0, outputSubpath: 'input', lastRunAt: null, lastRunStatus: null, baseDir: '' })
-const scheduleTime = ref('08:00')
+  enabled: false, outputSubpath: 'input', lastRunAt: null, lastRunStatus: null, baseDir: '' })
+const scheduleTimes = ref([{ key: 1, value: '08:00', enabled: true, lastRunAt: null, lastRunStatus: null }])
+let nextScheduleTimeKey = 2
 const savingSchedule = ref(false)
 const runningNow = ref(false)
 
@@ -385,14 +393,22 @@ const dirTreeProps = { label: 'name', isLeaf: 'leaf' }
 async function loadSchedule() {
   const s = await bffApi.realizedGain.getExportSchedule()
   schedule.enabled = !!s.enabled
-  schedule.runHour = s.runHour ?? 8
-  schedule.runMinute = s.runMinute ?? 0
   schedule.outputSubpath = s.outputSubpath ?? 'input'
   schedule.lastRunAt = s.lastRunAt ?? null
   schedule.lastRunStatus = s.lastRunStatus ?? null
   schedule.baseDir = s.baseDir ?? ''
   applyGdrive(s)
-  scheduleTime.value = `${String(schedule.runHour).padStart(2, '0')}:${String(schedule.runMinute).padStart(2, '0')}`
+  if (Array.isArray(s.times) && s.times.length) {
+    scheduleTimes.value = s.times
+      .slice().sort((a, b) => (a.runHour - b.runHour) || (a.runMinute - b.runMinute))
+      .map(t => ({ key: nextScheduleTimeKey++, value: `${String(t.runHour).padStart(2, '0')}:${String(t.runMinute).padStart(2, '0')}`,
+        enabled: !!t.enabled, lastRunAt: t.lastRunAt || null, lastRunStatus: t.lastRunStatus || null }))
+  } else if (!Array.isArray(s.times)) {
+    // rolling upgrade only：舊後端才讀 legacy single time；新後端回空 times 是異常，不能靜默補預設。
+    scheduleTimes.value = [{ key: nextScheduleTimeKey++, value: `${String(s.runHour ?? 8).padStart(2, '0')}:${String(s.runMinute ?? 0).padStart(2, '0')}`, enabled: true }]
+  } else {
+    ElMessage.error('排程時間資料異常，請重新載入後再試')
+  }
 }
 
 async function saveSchedule() {
@@ -403,20 +419,30 @@ async function saveSchedule() {
   }
   savingSchedule.value = true
   try {
-    const [h, m] = (scheduleTime.value || '08:00').split(':').map(Number)
+    if (!scheduleTimes.value.length) { ElMessage.warning('至少需要一個執行時間'); return }
+    const times = []
+    const seen = new Set()
+    for (const item of scheduleTimes.value) {
+      const [h, m] = String(item.value || '').split(':').map(Number)
+      if (!Number.isInteger(h) || !Number.isInteger(m) || h < 0 || h > 23 || m < 0 || m > 59) {
+        ElMessage.warning('請輸入有效的執行時間'); return
+      }
+      const key = `${h}:${m}`
+      if (seen.has(key)) { ElMessage.warning('執行時間不可重複'); return }
+      seen.add(key); times.push({ runHour: h, runMinute: m, enabled: !!item.enabled })
+    }
+    if (schedule.enabled && !times.some(t => t.enabled)) { ElMessage.warning('啟用排程時至少需啟用一個時間'); return }
     const s = await bffApi.realizedGain.updateExportSchedule({
       enabled: schedule.enabled,
       gdriveEnabled: schedule.gdriveEnabled,
       gdriveSubpath: (schedule.gdriveSubpath || '').trim(),
-      runHour: h,
-      runMinute: m,
+      times,
       outputSubpath: (schedule.outputSubpath || 'input').trim()
     })
-    schedule.runHour = s.runHour ?? h
-    schedule.runMinute = s.runMinute ?? m
     schedule.outputSubpath = s.outputSubpath ?? schedule.outputSubpath
     schedule.baseDir = s.baseDir ?? schedule.baseDir
     applyGdrive(s)
+    await loadSchedule()
     ElMessage.success('排程設定已儲存')
     // 剛把 Drive 同步打開時後端會附一則自檢警告；正常時為 null，不顯示（Task 247.3.5）
     showGdriveSelfCheckWarning(s.gdriveSelfCheckWarning)
@@ -425,6 +451,13 @@ async function saveSchedule() {
   } finally {
     savingSchedule.value = false
   }
+}
+
+function addScheduleTime() {
+  scheduleTimes.value.push({ key: nextScheduleTimeKey++, value: '08:00', enabled: true, lastRunAt: null, lastRunStatus: null })
+}
+function removeScheduleTime(key) {
+  if (scheduleTimes.value.length > 1) scheduleTimes.value = scheduleTimes.value.filter(item => item.key !== key)
 }
 
 async function handleRunNow() {

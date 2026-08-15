@@ -84,7 +84,7 @@ public class SchedulePublicBffController {
                     "每分鐘檢查各使用者的交易日曆自動匯出設定，命中執行時間即同時產出 JSON 與 Excel 兩份（主檔名相同）的當前年度交易日曆（Requirement 37）；輸出含 Google Drive 同步（若已啟用）",
                     "每分鐘", "0 * * * * *", TPE),
             new ScheduledJobDto(BUSINESS, "已實現損益匯出", "每日匯出排程檢查",
-                    "每分鐘檢查各使用者的已實現損益自動匯出設定，命中執行時間即同時產出 JSON 與 Excel 兩份（主檔名相同）到指定目錄（Requirement 39）；輸出含 Google Drive 同步（若已啟用）",
+                    "每分鐘檢查已實現損益頁設定的多個每日時間，命中每個啟用時間即同時產出 JSON 與 Excel 兩份（主檔名相同）到指定目錄（Requirement 73）；較晚時段覆寫同日最新檔，輸出含 Google Drive 同步（若已啟用）",
                     "每分鐘", "0 * * * * *", TPE),
             new ScheduledJobDto(BUSINESS, "油價金價匯出", "每日匯出排程檢查",
                     "每分鐘檢查頁面設定的多個每日時間，命中每個啟用時間即同時產出 JSON 與 Excel 兩份（主檔名相同）到指定目錄（Requirement 72）；輸出含 Google Drive 同步（若已啟用）",
