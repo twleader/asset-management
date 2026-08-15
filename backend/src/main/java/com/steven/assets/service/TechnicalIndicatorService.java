@@ -608,8 +608,10 @@ public class TechnicalIndicatorService {
      * {@link PriceQueryService} 路徑處理，不影響個股本身的進出場判斷即時性——純用
      * {@code us_index_daily_history} 表 {@code index_code='IXIC'} 的完成日序列。</p>
      *
-     * <p>MA 核心比照 {@link #computeAllForTaiex()} 的既有寫法（{@link #nasdaqSimpleMa}），
-     * <b>不呼叫</b> {@link #computeFromSeries(List)}——該方法吃的是個股用的
+     * <p>MA 核心比照 {@link #computeAllForTaiex()} 的<b>呼叫形狀</b>（專屬 desc-list helper
+     * {@link #nasdaqSimpleMa}），<b>算術路徑自 Task 336 起刻意不同</b>——本支為 BigDecimal 精確和，
+     * {@link #taiexSimpleMa} 仍為 double 累加，理由見 {@link #nasdaqSimpleMa} 的方法註解。
+     * 同樣<b>不呼叫</b> {@link #computeFromSeries(List)}——該方法吃的是個股用的
      * {@link StockPriceHistory}，{@code us_index_daily_history} 對應的是 {@link UsIndexDailyHistory}，
      * 型別不同。KD（當期／前一期）與擴充指標則先以 {@link #toRow(UsIndexDailyHistory, String, String)}
      * 轉型，共用同一份 {@link #kdSeriesAsc} 單趟結果（Task 304，nasdaqKd 已刪除）：尾筆＝當期、
@@ -666,10 +668,29 @@ public class TechnicalIndicatorService {
                 .build();
     }
 
+    /**
+     * IXIC 均線：BigDecimal 精確和後 divide(days, 2, HALF_UP)（Task 336）。
+     *
+     * <p><b>刻意與同類別的 {@link #simpleMa}／{@link #taiexSimpleMa}／{@link #maAt} 三支 double
+     * 累加版不同，不是漏改。</b>IXIC 的同一個顯示值全站有三份實作——本支、BFF 的
+     * {@code MarketIndexChartService.movingAverage(...)}、以及匯出的
+     * {@code ExcelExportService.indexMaAt(...)}（同讀 {@code us_index_daily_history} 的 IXIC
+     * 已落地日線收盤、都不併即時價），另外兩份本就是精確路徑。double 累加會在精確商恰為
+     * {@code x.xx5} 時與精確路徑差 0.01——實測 2016-06-10~2026-08-14 的 2559 筆 IXIC 日線中，
+     * MA20 有 2 日（2018-07-17、2025-12-22）命中。改為精確路徑後三份等值<b>由構造保證</b>
+     * （同一批收盤、同一視窗、同樣 divide(w, 2, HALF_UP)；BigDecimal 加法可結合，故累加方向
+     * 不影響結果），不需抽樣論證。</p>
+     *
+     * <p>另外三支 helper 服務台股大盤與個股、屬 structure.md §3.2 鐵則 4 具名例外 (3)（含 live）
+     * 的範圍，其收斂前提是先決定「MA 要不要併 live」，屬獨立任務；本次不得一併改動。連帶地
+     * {@code BacktestService.buildUsMarketRegimes()} 走的 {@link #simpleMa} 仍是 double，故本支
+     * 改動後 live 與回測的 IXIC 均線由 bit-identical 變為存在 0.01 上限的分歧（歷史重放 0 日
+     * 翻動 regime），該殘餘為刻意保留、已登記於 structure.md。</p>
+     */
     private static BigDecimal nasdaqSimpleMa(List<UsIndexDailyHistory> desc, int days) {
         if (desc.size() < days) return null;
-        double sum = 0;
-        for (int i = 0; i < days; i++) sum += desc.get(i).getClosePoint().doubleValue();
-        return BigDecimal.valueOf(sum / days).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal sum = BigDecimal.ZERO;
+        for (int i = 0; i < days; i++) sum = sum.add(desc.get(i).getClosePoint());
+        return sum.divide(BigDecimal.valueOf(days), 2, RoundingMode.HALF_UP);
     }
 }

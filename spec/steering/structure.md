@@ -164,7 +164,7 @@ bff/src/main/java/com/steven/assets/bff/
    - **具名、限縮例外（Requirements 67／68／70／71；Tasks 317／325／327／329）**：BFF 只對匿名唯讀的 exact `GET /api/public/market-index`、`GET /api/assets/latest`、`GET /api/public/exchange-rate/usd-twd`，以及 Requirement 71／Task 329 新增的 exact `POST /api/public/crawler-data/rescan`（唯一有外部抓取副作用的例外，經 business 端 30 秒全域 Redis 冷卻節流，語意等同既有 ADMIN 端點「立即抓取並匯出」的匿名版本）放行；Docker host 必須經 Requirement 66／Task 328 的 Nginx `api-gateway` `127.0.0.1:9090`，BFF 本身不發布 host port。Quotes 由 gateway 直接送 external-materials，不在 BFF 建 route。禁止任何 wildcard／descendant、同路徑其他 method與前端 view 援引；Controller 仍只委派 service，BFF 不直查 DB 或外部行情。USD/TWD 的每 2 秒外部抓取與 live Redis producer只屬於 `external-materials-service`，business/BFF 僅唯讀 cache/DB 與聚合。
 3. **跨頁共用邏輯放 `bff/common/`。** 如 `SnapshotEnricher`（注入歷史收盤價、合併 broker rows）。
 4. **同義欄位 → 同一支 business service API。** BFF 不在不同頁重複呼叫不同 endpoint 取同義值。
-   - **具名例外（唯一一組，Task 285／286）：台股大盤的均線（MA5/20/60/240）目前有三份實作**——
+   - **具名例外第一組（Task 285／286）：台股大盤的均線（MA5/20/60/240）目前有三份實作**——
      (1) 「股市大盤查詢」頁圖表走 `MarketIndexChartService.movingAverage`（BFF，BigDecimal，只用已落地日線收盤）；
      (2) 該頁匯出走 `ExcelExportService.indexMaAt`（backend，BigDecimal，同樣只用已落地日線收盤，
      Task 285 建立 MA5、Task 286 擴為四個視窗）；(3) 交易雷達／走勢圖／觀察清單走
@@ -177,24 +177,55 @@ bff/src/main/java/com/steven/assets/bff/
      故實際差異只出現在盤中、且來自 live 併入。**收斂的正解**是先決定「MA 要不要併 live」
      再統一 `TechnicalIndicatorService` 的算術路徑，屬獨立任務。
      詳見 `spec/design.md` 的 Requirement 45「週線MA5：唯一的計算欄」。
-   - **具名例外之二（Task 335 登記，狀態：待收斂）：IXIC（那斯達克綜合指數）的均線 MA5/20/60/240
-     有兩份實作，且不適用上面 (3) 的免罪理由。** (a)「股市大盤查詢」頁走 `MarketIndexChartService
-     .movingAverage`（BFF，BigDecimal 精確和後 `divide(2, HALF_UP)`）；(b) 交易雷達美股大盤分頁走
-     `TechnicalIndicatorService.computeAllForNasdaq()` → `nasdaqSimpleMa`（backend，**double 累加**
-     後 `setScale(2, HALF_UP)`）。**(3) 的免罪理由（語意不同、含 live）在此不成立**——
+   - **具名例外之二（Task 335 登記，Task 336 收斂，狀態：已收斂）：IXIC（那斯達克綜合指數）的
+     均線 MA5/20/60/240 有三份顯示用實作。** (a)「股市大盤查詢」頁圖表走 `MarketIndexChartService
+     .movingAverage`（BFF）；(b) 交易雷達美股大盤分頁走
+     `TechnicalIndicatorService.computeAllForNasdaq()` → `nasdaqSimpleMa`（backend）；(c) 該頁匯出的
+     四條均線欄走 `ExcelExportService.indexMaAt`（backend——`findIndexDaily` 只有 `TWSE` 一條分支，
+     其餘一律走 `us_index_daily_history`，`MacroHistoryService.DAILY_INDEX_CODES` 含 IXIC，
+     **它確實會產出 IXIC 均線，不要誤記成只有台股**）。三者同讀 `us_index_daily_history` 的
+     `index_code='IXIC'` 已落地日線收盤、都不併即時價。
+     **免罪理由與 (1)(2) 同類——同定義同精度、分屬三處各自實作；但每一對的理由必須各自成立。**
+     (a) 對 {(b),(c)} 是**建置結構**：`bff` 是獨立 Maven artifact `asset-management-bff`、`pom.xml`
+     不依賴 backend，全 repo 三個 `pom.xml` 無 aggregator、無共用程式模組，跨不過去。
+     **(b) 對 (c) 不適用建置結構這個理由**——兩者同在 `backend` 這一個 module、同一個 Spring
+     context，寫成「無共用模組故無法收斂」是錯的（本鐵則最下方那句「引用例外時須逐條核對免罪理由
+     是否真的適用」指的就是這種事）。(b)–(c) 真正的理由是**呼叫形狀與型別不同**：(b) 吃
+     `List<UsIndexDailyHistory>`（desc）只回最新一期單值、(c) 吃 `List<IndexDailyRow>`（asc）
+     逐點回整段序列；抽成共用 `List<BigDecimal>` primitive 技術上可行，**本組明文登記為已知技術債**，
+     不是結構限制。（原本擋住 backend 內部合併的兩個理由中，「live 併入語意」那一半在 (b) 收斂後不再適用；「覆蓋率」那一半仍成立（(b) 只覆蓋 IXIC、(c) 覆蓋 9 個指數），已含在上述呼叫形狀理由內。）
+     **本組的等值強度高於 (1)(2)**：
+     (a)(c) 本就是 BigDecimal 精確和後 `divide(window, 2, HALF_UP)`，Task 336 把 (b) 也改成同一路徑，
+     三者等值**由構造保證**（同一批收盤、同一視窗、同一捨入；BigDecimal 加法可結合，累加方向不影響
+     結果），不像 (1)(2) 仰賴「50 萬組樣本實測 0 次不一致」的抽樣論證。
+     **另有一份非顯示用的第四處，刻意未收斂：** `BacktestService.buildUsMarketRegimes()` 也以 IXIC
+     日線算 MA 餵進同一支 `evaluateMarket()`，但走 `RadarInputAssembler.assemble` →
+     `computeFromSeries` → **`simpleMa`（double）**。收斂它必須改 `simpleMa`，而那一支服務全部個股、
+     會翻動所有個股的 `action`／`score`，故 Task 336 明文留為範圍外。**殘餘分歧已量化**：兩條路徑
+     double 累加方向相同（皆 desc、新→舊），故下段的重放結果直接適用——`price.compareTo(ma)`
+     正負號翻動 0 日，2319 個可重放交易日中回測與 live 的美股 `regime` 0 日不同，分歧上限為 MA 的 0.01。
+     **查這一組時 grep 必須用 `grep -ran "IXIC" backend/src/main/java/ bff/src/main/java/`**：
+     只 grep `nasdaqSimpleMa`／`computeAllForNasdaq` 找不到 `BacktestService`（兩個識別字都沒有），
+     而不加 `-a` 的 `grep -r` 會把部分 `.java` 判為 data 整檔靜默跳過。
+     **不得沿用 (3) 或 (1)(2) 的原理由。** (3) 的「語意不同、含 live」在此不成立——
      `computeAllForNasdaq()` 刻意不併即時價（IXIC 無對應 Redis 即時報價來源，見
-     `TechnicalIndicatorNasdaqTest` 的同名斷言），兩份都只用已落地日線收盤，本應同值。
-     **也不能沿用 (1)(2) 的「算術上逐位相同」論證**：那個論證的前提是台股收盤為 `numeric(12,2)`、
-     和除以 5 恆為第三位小數為偶數的三位小數而碰不到 HALF_UP 邊界；`us_index_daily_history
-     .close_point` 是 **`numeric(14,4)`**，四個視窗的平均值都可能恰好落在 `x.xx5`，此時 double
-     累加的微小誤差會決定進位方向，兩份結果可差 **0.01**。
-     **為什麼 Task 335 沒有順手收斂：** 兩份實作都早於 t335（`nasdaqSimpleMa` 為 Task 294.1、
-     `movingAverage` 為既有），t335 只是讓 (b) 的輸出**首次上畫面**，使「同義值在兩頁顯示」的
-     條件成立。收斂必然要改 `computeAllForNasdaq()` 的輸出，而該輸出經 `indicators(ind)` 進
-     `MarketInput` → 直接影響美股 regime 與買進閘門；t335 的 Requirement 76 明文以「純揭露、
-     `action`／`score`／`regime` 逐位不變」為不升版（Task 281 先例）的前提，順手改會使該前提失效。
-     **收斂的正解**是另立任務：決定以哪一份的算術路徑為準（建議收斂到 BigDecimal 精確路徑，
-     double 累加本就是精度較差的一方），跑美股 regime 回歸，並評估是否需要升版。
+     `TechnicalIndicatorNasdaqTest` 的同名斷言）；(1)(2) 的「和除以 5 恆為第三位小數為偶數而碰不到
+     HALF_UP 邊界」前提是台股收盤 `numeric(12,2)`，而 `us_index_daily_history.close_point` 是
+     **`numeric(14,4)`** 且四位小數不是名目（實測 2559 筆 IXIC 日線中 2248 筆帶滿 4 位）。
+     **收斂前的實際分歧（Task 336 實測，留作歷史證據）：** 收斂前 (b) 是 double 累加後
+     `BigDecimal.valueOf(sum/days).setScale(2, HALF_UP)`，精確商恰為 `x.xx5` 時會與 (a) 差 **0.01**；
+     2016-06-10~2026-08-14 的 2559 筆 IXIC 日線中 MA20 命中 2 日（2018-07-17、2025-12-22），
+     MA5／60／240 各 0 日。因收盤價從未落在兩個候選 MA 之間（歷史最小 `|收盤 − MA|` 為 MA20
+     `0.1502`／MA60 `0.2901`／MA240 `1.6999`，均為 0.01 的 15 倍以上），2319 個可重放交易日的
+     `score` 與 `regime` 皆 0 日翻動，故 Task 336 不升 `RULE_VERSION`——但**援引的不是 Task 249**：
+     顯示值 `usMarket.monthlyMa` 那 2 日確實會變，不滿足 Task 249 的「輸出完全相同」，也不滿足
+     Task 281 的「不進 `MarketInput`」。Task 336 因此在 `spec/design.md` 的先例清單新增**第三條**
+     判準（規則引擎輸出逐位不變、變動的僅是顯示值本身的捨入缺陷修正）。三條互斥、不得混用。
+     **不得因此推論翻面「不可能」**：收盤價為 4 位小數而 MA 為 2 位小數，若某日收盤落在兩候選之間，
+     `priceVsMa` 差值是 2×權重（MA240 達 30 分）、足以翻動 regime；那是經驗上未發生，不是結構上不可能。
+     **台股那組（(1)(2)(3)）仍未收斂**，其正解仍是先決定「MA 要不要併 live」再統一
+     `TechnicalIndicatorService` 的算術路徑，屬獨立任務——Task 336 刻意只改 `nasdaqSimpleMa` 一支，
+     同類別的 `simpleMa`／`taiexSimpleMa`／`maAt` 三支 double 累加版維持不動。
    - **上述兩組具名例外之外，不得再新增任何一份同義值的獨立實作**：新的同義值一律回到本鐵則。
      引用例外時須逐條核對免罪理由是否真的適用——Task 335 的 arch 稽核正是發現「(3) 的『含 live』
      理由對 IXIC 不成立」才揭出這一組。
@@ -359,9 +390,9 @@ frontend/
 
 ```
 spec/
-├── requirements.md       # 76 個 Requirements（User Story + AC）
+├── requirements.md       # 77 個 Requirements（User Story + AC）
 ├── design.md             # 架構圖、ERD、Service 職責、Sequence
-├── tasks.md              # 任務索引（Task 1–228、264–267、269–292、297–309、311–335）＋ 尚未歸檔的 201 起區段
+├── tasks.md              # 任務索引（Task 1–228、264–267、269–292、297–309、311–336）＋ 尚未歸檔的 201 起區段
 ├── tasks/                # 任務檔
 │   ├── README.md         # 自足任務檔規範
 │   ├── archive/          # Task 1–200 歷史，已凍結
