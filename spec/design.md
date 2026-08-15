@@ -4107,17 +4107,19 @@ CommodityPriceView.vue
 
 ### 資料模型
 
+`commodity_export_schedule`（parent；每 owner 一列、`@Filter(ownerFilter)` 隔離）：
+
 ```sql
 CREATE TABLE commodity_export_schedule (
     id              BIGSERIAL PRIMARY KEY,
     owner_user_id   BIGINT       NOT NULL,      -- @Filter(ownerFilter)，每人一列
     enabled         BOOLEAN      NOT NULL DEFAULT FALSE,
-    run_hour        INT          NOT NULL DEFAULT 8,
-    run_minute      INT          NOT NULL DEFAULT 0,
+    run_hour        INT          NOT NULL DEFAULT 8,   -- rollback shadow，不是新 scheduler source
+    run_minute      INT          NOT NULL DEFAULT 0,   -- rollback shadow
     output_subpath  VARCHAR(255) NOT NULL DEFAULT 'input',
-    range_months    INT,                        -- NULL ＝ 全部十年
-    last_run_date   DATE,                       -- 當日 guard
-    last_run_at     TIMESTAMP,
+    range_months    INT,                        -- NULL ＝ 全部十年；parent-only，不下放至 child
+    last_run_date   DATE,                       -- rollback representative child guard shadow
+    last_run_at     TIMESTAMP,                  -- 最近一次任一 scheduled/run-now 摘要
     last_run_status VARCHAR(500),
     updated_at      TIMESTAMP,
     CONSTRAINT uq_commodity_export_schedule_owner UNIQUE (owner_user_id),
@@ -4128,6 +4130,25 @@ CREATE TABLE commodity_export_schedule (
 ```
 
 > ＋ **`gdrive_enabled` / `gdrive_subpath` / `gdrive_last_run_at` / `gdrive_last_status`**（Requirement 51 / Task 242，changeset `v1.76.0`）——型別與語意見「推廣至其餘八個匯出頁」段的統一定義。
+
+`commodity_export_schedule_time`（Requirement 72／Task 330；parent 一對多）：
+
+```sql
+CREATE TABLE commodity_export_schedule_time (
+    id              BIGSERIAL PRIMARY KEY,
+    schedule_id     BIGINT NOT NULL REFERENCES commodity_export_schedule(id) ON DELETE CASCADE,
+    run_hour        INT NOT NULL,                -- CHECK 0..23
+    run_minute      INT NOT NULL,                -- CHECK 0..59
+    enabled         BOOLEAN NOT NULL DEFAULT TRUE,
+    last_run_date   DATE,                        -- 此時間點自己的當日 guard
+    last_run_at     TIMESTAMP,
+    last_run_status VARCHAR(500),
+    updated_at      TIMESTAMP,
+    UNIQUE (schedule_id, run_hour, run_minute)
+);
+```
+
+> **Requirement 41 原本把 `run_hour`／`run_minute`／`last_run_date` 當唯一排程來源；該語意已由 Requirement 72 的 children 取代**，模式與作法完全比照 Requirement 69（歷年資產）。Migration 先把每個既有 parent 搬成一個 child 並複製 guard／狀態，但採 expand/contract 保留 parent 三欄作 rollback shadow；新程式 dual-write 最早代表 child，parent `last_run_at/status` 則留作最近一次整體摘要。`range_months` 與 Google Drive 四欄維持 parent-only——它們是「整份設定」的屬性，不因執行時段而異。
 
 ### 滾動時間範圍
 
@@ -4160,24 +4181,25 @@ empty value（`DEFAULT_EMPTY_VALUES` 含 `null`），綁 `null` 時 `hasModelVal
 
 ### 排程執行機制
 
-比照 R34／37／39：
+比照 R34／37／39；**Requirement 72 起，判斷主體由 parent 改為逐 child**（模式比照 Requirement 69）：
 
-- `@Scheduled(cron = "0 * * * * *", zone = "Asia/Taipei")` 每分鐘 poll
-- 判斷式為 `now >= 設定時分` ＋ `last_run_date != today`，**非分鐘精確相等**——
+- `@Scheduled(cron = "0 * * * * *", zone = "Asia/Taipei")` 每分鐘 poll（不增不減，仍是同一個 annotation）
+- 先查 parent 總開關 `enabled`，再依 `run_hour/run_minute` 排序逐 child 判斷
+- 每個 child 判斷式為 `now >= 該 child 時分` ＋ 該 child `last_run_date != today`，**非分鐘精確相等**——
   排程執行緒被長工作卡住跨分鐘時，精確相等會整日靜默漏跑
-- `AtomicBoolean ticking` 防重入
-- `@EventListener(ApplicationReadyEvent.class)` 重啟自癒，補跑當日已到點未執行者
-- 單一使用者失敗只記 `last_run_status` ＋ log，不中斷其他使用者；成功或失敗**都**設當日 guard，
-  避免失敗後整天每分鐘重試
-- run-now 不動當日 guard（驗證路徑用，不應吃掉當日排程）
+- `tick` 與 `ApplicationReadyEvent` 都先經同一個 `tryRunDueExports`／`AtomicBoolean.compareAndSet` 入口，防止啟動瞬間與跨分鐘 tick 重入
+- `@EventListener(ApplicationReadyEvent.class)` 重啟自癒，依時間排序補跑當日已到點但尚未執行的所有 child（不是只補一個代表值）
+- 單一 child 失敗只記該 child 的 `last_run_status` ＋ log，不中斷同 owner 其餘到點 child 或其他 owner；成功或失敗**都**設該 child 當日 guard，
+  避免失敗後整天每分鐘重試；同步更新 parent 最近一次整體摘要（含 Drive 狀態欄）
+- run-now 不動任何 child 當日 guard（驗證路徑用，不應吃掉當日排程）
 
 ### API 端點
 
 | 層 | 端點 | 說明 |
 |---|---|---|
-| business | `GET /api/commodity-export/schedule` | 讀當前使用者排程設定（無則回預設值） |
-| business | `PUT /api/commodity-export/schedule` | upsert（驗證時分範圍、range_months、子路徑不跳脫） |
-| business | `POST /api/commodity-export/run-now` | 立即產檔到設定目錄，回 `{path, sizeBytes}`；不動當日 guard |
+| business | `GET /api/commodity-export/schedule` | 讀當前使用者排程設定（無則回 transient `08:00` 預設，不寫 DB）；response 含按時分排序的 `times[]` |
+| business | `PUT /api/commodity-export/schedule` | upsert（驗證 `times[]` 非空／時分合法／不重複／總啟用需至少一 child 啟用、`range_months`、子路徑不跳脫），整包取代語意 |
+| business | `POST /api/commodity-export/run-now` | 立即產檔到設定目錄，回 `{path,sizeBytes,gdrivePath,gdriveStatus,jsonPath,jsonSizeBytes,jsonGdrivePath}`；不動任何 child 當日 guard |
 | business | `GET /api/export-schedule/browse?subpath=` | （既有，複用）列出基底下子目錄 |
 | BFF | `GET /api/bff/commodity-price/export/schedule` | passthrough |
 | BFF | `PUT /api/bff/commodity-price/export/schedule` | passthrough |
@@ -4186,7 +4208,7 @@ empty value（`DEFAULT_EMPTY_VALUES` 含 `null`），綁 `null` 時 `hasModelVal
 
 ### 新增／異動檔案
 
-**新增**
+**新增（Requirement 41／Task 203）**
 - `backend/.../model/CommodityExportSchedule.java`
 - `backend/.../repository/CommodityExportScheduleRepository.java`
 - `backend/.../service/CommodityExportScheduleService.java`（tick／self-heal／run-now／設定 CRUD／路徑驗證／atomic write）
@@ -4194,7 +4216,20 @@ empty value（`DEFAULT_EMPTY_VALUES` 含 `null`），綁 `null` 時 `hasModelVal
 - `backend/.../dto/CommodityExportDto.java`
 - `backend/src/main/resources/db/changelog/changes/v1.61.0-commodity-export-schedule.sql`
 
-**異動**
+**新增（Requirement 72／Task 330，多時間點）**
+- `backend/.../model/CommodityExportScheduleTime.java`（child entity；owner 只透過 parent 取得，不重複保存 `owner_user_id`）
+- `backend/src/main/resources/db/changelog/changes/v1.103.0-commodity-export-schedule-multi-time.sql`（實作前須先查運行中 `databasechangelog`；若已佔用則整套改號）
+
+**異動（Requirement 72／Task 330）**
+- `CommodityExportSchedule.java`：新增 `@OneToMany(mappedBy="schedule", cascade=ALL, orphanRemoval=true)` times、`addTime` helper；既有 `runHour/runMinute/lastRunDate` 標記為 rollback shadow
+- `CommodityExportDto.java`：`SettingResponse` 移除 top-level `runHour/runMinute`、新增排序後 `times[]`；`SettingRequest` 改收 `times:[{runHour,runMinute,enabled}]`
+- `CommodityExportScheduleService.java`：`updateForCurrentUser` 改整包取代＋依 `(hour,minute)` 保留既有 child guard；`runDueExports`／`runScheduled` 改為先驗 parent 再逐 child；`runNowForCurrentUser` 不修改 child
+- `CommodityExportScheduleRepository.java`：`findByOwnerUserId`／新覆寫的 `findAll()` 加 `@EntityGraph(attributePaths = "times")`（比照 `ExportScheduleSettingRepository`）
+- `db.changelog-master.yaml`：註冊 v1.103.0（master 最尾端）
+- `frontend/src/views/CommodityPriceView.vue`：單值 `scheduleTime` 改為可增刪的 `scheduleTimes` 列表（比照 `AssetHistoryView.vue`）
+- `SchedulePublicBffController.java`：「油價金價匯出」描述改為「每分鐘檢查頁面設定的多個每日時間」（項目數不變）
+
+**異動（Requirement 41／Task 203，原始）**
 - `db.changelog-master.yaml`：註冊 v1.61.0
 - `CommodityPriceBffController.java`：新增 schedule／run-now／browse 四支 passthrough
 - `frontend/src/api/index.js`：`commodityPrice` 命名空間新增 4 支
@@ -6603,7 +6638,7 @@ Migration 以既有 parent 的時分與 last-run 欄位建立一列 child，copy
 
 ### 設定與執行語意
 
-- `SettingResponse` 的排程時間來源唯一為 `times[]`；parent 的 `lastRunAt/lastRunStatus` 是任一 scheduled/run-now 的最近摘要。`TimeItem` 為 `{id,runHour,runMinute,enabled,lastRunAt,lastRunStatus}`；request 的 `TimeRequest` 不接受 id，整包依時分取代。
+- `SettingResponse` 的排程時間來源唯一為 `times[]`；parent 的 `lastRunAt/lastRunStatus` 是任一 scheduled/run-now 的最近摘要。`TimeResponse` 為 `{id,runHour,runMinute,enabled,lastRunAt,lastRunStatus}`；request 的 `TimeRequest` 不接受 id，整包依時分取代。
 - `updateForCurrentUser` 為 transaction：先驗證共用路徑／Drive 與 time 清單，再以 `(hour,minute)` map 對既有 child；相同時分 copy guard/status，新列為 null，移除列由 orphan removal 刪除；最後同步 rollback representative 三欄。回應永遠按時分／id 排序。無設定列時 GET 只回 transient default `08:00 enabled=true`，不寫 DB。
 - Due runner 依 parent、再依 child 時分排序。每個 child 完成（含失敗）後立即保存自己的 guard/status 與 parent 最近摘要；若它是 rollback representative，同步 parent legacy `last_run_date`。同一 parent 多個已到期 child 必須全部嘗試。`tick` 與 `ApplicationReadyEvent` 都先經同一個 `tryRunDueExports` CAS lock；JVM `AtomicBoolean` 只適用 Compose 單 replica且不充當 daily guard，多 replica 另需 DB atomic claim。
 - `runNowForCurrentUser` 沿用共用輸出設定與同一 `writeDual`，不讀 child enabled、不寫既有 child 狀態。若 parent 不存在，延續現行保存執行結果的行為，建立 disabled parent＋一列 `08:00 enabled=true`、guard/status 皆 null的 child，並同步 legacy shadow。檔名仍只有日期；這是刻意的「同日最新檔」語意，較晚排程覆寫同名 local／Drive 兩份。
@@ -6846,3 +6881,28 @@ frontend :80  ── exact + matrix 變體 → 404（同既有五條的第二防
 4. `scripts/configure-tailscale-api-gateway.sh` 除了 `SERVE_PATHS` 陣列與 `expected` dict（程式邏輯，見 Tailscale 小節）外，還有兩處純文字錯誤訊息寫死「五條」：`validate_owned_config()` 內 Python 例外訊息、腳本尾端 `die` 訊息，都要改成「六條」，否則驗證失敗時的訊息會與實際上下文不符。
 5. `spec/requirements.md` 裡 Requirement 66 第一條 AC（「純唯讀，不新增任何寫入或抓取副作用」）已在本次 spec 撰寫階段插入指向 Requirement 71 的行內 callout（比照 Requirement 43 修訂既有的「⚠ 部分修訂」慣例），供未來只讀 Requirement 66 的稽核者能看到反向指標。
 6. **範圍聲明**：Requirement 66／68／70 自身其餘既有 AC（含「五路 preflight」「Tailscale HTTPS 五路正向皆須精確 200」「Serve status 精確只有五路」等可執行測試斷言）與 `spec/design.md` 敘述性段落裡同義的「五條／五路」殘留提及，**不在本次 spec 撰寫階段修正範圍**——那些描述的是已上線的既有契約，統一留到 Task 329 落地、第六條真正存在時再逐一改為六條或就地插入行內 callout，避免本次搶先描述一個尚未存在的狀態。具體位置清單見 Task 329 的 329.17。
+
+---
+
+## Requirement 72／Task 330：油價金價匯出多時間點
+
+模式與作法完全比照 Requirement 69（歷年資產），差異只在本頁多出的 `range_months` 滾動範圍與既有雙格式／Drive 欄位——這兩者維持 parent-only、不受本次影響。
+
+### Entity 與 migration
+
+`CommodityExportSchedule` 保持 owner-scoped parent；新增 `List<CommodityExportScheduleTime> times` 的一對多關聯（cascade all + orphan removal），並提供 `addTime` helper 維持雙向關係。`CommodityExportScheduleTime` 的 owner 只透過 parent 取得，不重複保存 `owner_user_id`。HTTP 先以 owner 取得 parent，再讀其 children；背景 poll 讀所有 parent 與 children，不能以 client 傳入的 schedule id 跨 owner 讀取。
+
+Migration 以既有 parent 的時分與 last-run 欄位建立一列 child，copy `last_run_date/at/status`；child 建立唯一鍵、時分 CHECK、FK cascade。採 expand/contract，`v1.103.0` **保留且不放寬** parent `run_hour/run_minute/last_run_date`，供舊 image rollback；新程式不以它們排程，只把「最早啟用 child；若全停用則最早 child」同步為 rollback representative，parent 時分與該 child guard 採 dual-write。額外 children 在 rollback 期間暫停，但舊 image 能啟動且代表時間不重跑。Drop legacy columns 留待後續獨立 changeset。Master 已固定先套用建立 parent 的 `v1.61.0` 與加 Drive 欄位的 `v1.76.0`，故 migration 可直接讀取既有欄位，使用 `CREATE TABLE/INDEX IF NOT EXISTS` 與 `ON CONFLICT DO NOTHING`，並保留 Liquibase 預設逐 statement 切分；不需要 `DO $$` 或 `splitStatements:false`。運行中 `databasechangelog` 仍須先確認版本未碰撞。
+
+### 設定與執行語意
+
+- `SettingResponse` 的排程時間來源唯一為 `times[]`；`rangeMonths`／`outputSubpath`／Drive 四欄／`baseDir` 仍是 parent-only 共用欄位，不隨 `times[]` 複製。`TimeResponse` 為 `{id,runHour,runMinute,enabled,lastRunAt,lastRunStatus}`；request 的 `TimeRequest` 不接受 id，整包依時分取代。
+- `updateForCurrentUser` 為 transaction：先驗證共用路徑／`rangeMonths`／Drive 與 time 清單，再以 `(hour,minute)` map 對既有 child；相同時分 copy guard/status，新列為 null，移除列由 orphan removal 刪除；最後同步 rollback representative 三欄。回應永遠按時分／id 排序。無設定列時 GET 只回 transient default `08:00 enabled=true`，不寫 DB。
+- Due runner 依 parent、再依 child 時分排序。每個 child 完成（含失敗）後立即保存自己的 guard/status 與 parent 最近摘要（含 Drive 狀態欄）；若它是 rollback representative，同步 parent legacy `last_run_date`。同一 parent 多個已到期 child 必須全部嘗試，且每次執行都以「執行當下」重新計算 `rangeMonths` 滾動起訖日（與 R41 既有語意一致，不因多時間點而固定成 child 建立當下的區間）。`tick` 與 `ApplicationReadyEvent` 都先經同一個 `tryRunDueExports` CAS lock；JVM `AtomicBoolean` 只適用 Compose 單 replica 且不充當 daily guard，多 replica 另需 DB atomic claim。
+- `runNowForCurrentUser` 沿用共用輸出設定（含當前 `rangeMonths`）與同一 `writeDual`，不讀 child enabled、不寫既有 child 狀態。若 parent 不存在，延續現行保存執行結果的行為，建立 disabled parent＋一列 `08:00 enabled=true`、guard/status 皆 null 的 child，並同步 legacy shadow。檔名仍只有日期；這是刻意的「同日最新檔」語意，較晚排程覆寫同名 local／Drive 兩份。
+
+### UI
+
+`CommodityPriceView.vue` 將 `scheduleTime` 單值改成帶穩定 client key 的 `scheduleTimes` rows（結構、驗證與新增/移除函式比照 `AssetHistoryView.vue`）。每列顯示時間 picker、enabled switch、last-run 資訊與移除鈕；卡片有新增時間按鈕。儲存前驗證至少一列、時分合法、無重複；總開關開啟時至少一列啟用。載入 `times[]` 為主，僅為 rolling upgrade 將舊 response 的 top-level `runHour/runMinute` 映成一列。匯出範圍下拉、共用 output／Drive picker、run-now、整體 last-run、雙格式說明維持原位置與語意不變。
+
+排程列表只更新既有一筆描述，不增減 job：annotation 仍是同一個每分鐘 poll，時間點是 DB 動態設定。
