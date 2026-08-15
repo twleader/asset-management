@@ -117,17 +117,28 @@ subagent）一律使用與當前主 agent **完全相同的模型與 reasoning e
 省略 subagent 的 model／effort override；若工具要求明確指定，則兩者必須與主 agent
 一致。相同模型無法使用時應停止並回報，不得靜默降級。
 
+**例外一、例外二共用同一組固定模型，全專案的「模型例外」只有一種標準，不分開
+各自維護一組值：**
+
+| Harness | 固定模型 / effort |
+|---|---|
+| Claude Code | `sonnet 5` ／ `high` |
+| Codex | `gpt-5.6-terra` ／ `high` |
+
+**這組固定值本質上是刻意的降規格，目的就是省錢，不是妥協。** 若跟著主 agent 當下
+用的模型連動調整，例外就失去意義——兩項例外的重點正是「不論主 agent 開多高規格，
+這類工作一律固定用這組較低規格」。與最上方「禁止因成本考量而降階」不衝突：那條
+規則管的是任意、未宣告的降級，這裡是全專案唯一、白紙黑字寫明的降規格標準，套用
+時不得再各自加碼或減碼。
+
 **例外一：skill 可在自己的定義檔裡指定特定模型。** skill 自行宣告的模型／effort
 **優先於**上述繼承規則——那是 skill 作者針對該工作負載的刻意選擇，不算降級。
 例外只涵蓋「skill 定義檔裡的宣告」：skill **執行過程中**再派出去的 subagent，
 仍須沿用該 skill 當下的模型，不得再往下降；未宣告模型的 skill 一律繼承主 agent。
 
-目前只有 `/run-stack` 用到這個例外：
-
-| Harness | 宣告位置 | 模型 / effort |
-|---|---|---|
-| Claude Code | `.claude/skills/run-stack/SKILL.md` frontmatter `model:` ／ `effort:` | `sonnet` ／ `high` |
-| Codex | `.agents/skills/run-stack/SKILL.md` 內文（frontmatter 不支援） | `gpt-5.6-terra` ／ `high` |
+目前只有 `/run-stack` 用到這個例外，宣告位置：
+- Claude Code：`.claude/skills/run-stack/SKILL.md` frontmatter `model:` ／ `effort:`
+- Codex：`.agents/skills/run-stack/SKILL.md` 內文（frontmatter 不支援）
 
 > **兩邊的強制力不同，別當成同一回事。** Claude Code 的 skill frontmatter 由 harness
 > 直接套用（parser 會驗 `effort`，合法值 `low｜medium｜high｜xhigh｜max`）；Codex 的
@@ -135,13 +146,8 @@ subagent）一律使用與當前主 agent **完全相同的模型與 reasoning e
 > `policy`／`agents`／`assets`，**沒有 `model` 欄位**，寫了也會被忽略，因此只能在內文
 > 要求用 `spawn_agent` 帶 `model` 參數——那是指令引導，不是硬性保證。
 
-**例外二：新增、修改、刪除前端程式（Vue）時，開的 subagent 固定使用下列模型，
+**例外二：新增、修改、刪除前端程式（Vue）時，開的 subagent 固定使用上表的模型，
 不繼承主 agent、不隨主 agent 當下用什麼模型而變動。**
-
-| Harness | 固定模型 / effort |
-|---|---|
-| Claude Code | `sonnet 5` ／ `max` |
-| Codex | `Luna 5.6` ／ `max` |
 
 **第 5 步「實作程式碼」不得由主 agent 直接動手，一律開 subagent 執行**，完成後
 回到主 agent 彙整結果（驗收、跑閘門、commit）：
