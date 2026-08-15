@@ -146,6 +146,12 @@ subagent）一律使用與當前主 agent **完全相同的模型與 reasoning e
 **第 5 步「實作程式碼」不得由主 agent 直接動手，一律開 subagent 執行**，完成後
 回到主 agent 彙整結果（驗收、跑閘門、commit）：
 
+**唯一的例外是驗收失敗的收尾。** 例外一／例外二派出的 subagent，模型可能低於主
+agent（取決於主 agent 當下實際跑哪個模型）。這類較低模型 subagent 做完後，若主
+agent 驗收沒過，不得重新派工給同一顆（較低模型）subagent 反覆重試——問題很可能
+出在模型能力，重試不會有不同結果——應由主 agent 直接接手重做。同模型繼承的一般
+subagent 驗收不過，仍應改進 prompt 後重新派工，不得由主 agent 代勞。
+
 主 agent 的職責限於：拆解任務、撰寫 subagent prompt、彙整回報、查證 subagent
 宣稱的變更（注意：subagent 回報的絕對路徑常指向主 repo 而非 worktree，
 落地前先用 `git -C <worktree路徑> status/diff` 確認變更真的落在 worktree）。
