@@ -2,8 +2,10 @@ package com.steven.assets.dto;
 
 import lombok.Builder;
 
+import java.util.List;
+
 /**
- * 油價金價每日排程自動匯出設定 DTO（Requirement 41 / Task 203）。
+ * 油價金價每日排程自動匯出設定 DTO（Requirement 41 / Task 203；多時間點 Requirement 72 / Task 330）。
  *
  * <p>資料夾瀏覽沿用 Requirement 34 既有的 {@code GET /api/export-schedule/browse}
  * （語意相同＝列出基底家目錄下子目錄），故本 DTO 不重複定義 Browse／DirEntry。
@@ -13,11 +15,10 @@ public class CommodityExportDto {
     @Builder
     public record SettingResponse(
             Boolean enabled,
-            Integer runHour,
-            Integer runMinute,
             String outputSubpath,
-            Integer rangeMonths,   // null ＝ 全部十年
-            String lastRunAt,      // yyyy-MM-dd HH:mm:ss，無則 null
+            Integer rangeMonths,   // null ＝ 全部十年；parent-only，不下放至 times[]
+            List<TimeResponse> times,   // 依 (runHour,runMinute,id) 排序
+            String lastRunAt,      // yyyy-MM-dd HH:mm:ss，無則 null（最近一次任一 scheduled/run-now 摘要）
             String lastRunStatus,  // 「成功：/path」或「失敗：訊息」
             String baseDir,        // 容器內基底目錄（供 UI 顯示完整落點提示）
             // ── Google Drive 同步（Requirement 51 / Task 243）─────────────────
@@ -33,16 +34,24 @@ public class CommodityExportDto {
             String gdriveSelfCheckWarning
     ) {}
 
+    /** 一個每日執行時間點與其獨立的當日 guard／狀態（Requirement 72 / Task 330）。 */
+    public record TimeResponse(
+            Long id, Integer runHour, Integer runMinute, Boolean enabled,
+            String lastRunAt, String lastRunStatus
+    ) {}
+
     public record SettingRequest(
             Boolean enabled,
-            Integer runHour,
-            Integer runMinute,
             String outputSubpath,
             Integer rangeMonths,
+            List<TimeRequest> times,   // 整包取代語意，見 CommodityExportScheduleService#updateForCurrentUser
             // null ＝ 該欄整個沒送出＝不變更（不得把已開啟的 Drive 開關靜默關掉，見 Task 243.1.1）
             Boolean gdriveEnabled,
             String gdriveSubpath
     ) {}
+
+    /** client 不帶 id，service 以 (runHour, runMinute) 保留既有 child 的 execution guard。 */
+    public record TimeRequest(Integer runHour, Integer runMinute, Boolean enabled) {}
 
     @Builder
     public record RunNowResponse(
