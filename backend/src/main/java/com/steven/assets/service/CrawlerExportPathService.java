@@ -4,7 +4,9 @@ import com.steven.assets.dto.CrawlerExportPathDto;
 import com.steven.assets.model.CrawlerExportSetting;
 import com.steven.assets.model.CrawlerSchedule;
 import com.steven.assets.repository.CrawlerExportSettingRepository;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -29,6 +31,7 @@ import java.util.concurrent.TimeoutException;
  * （{@link IllegalArgumentException} → 400）。ext 端寫檔前會再驗一次（縱深防禦：實際持有檔案系統寫入權的是
  * ext，不能只信上游驗過）。
  */
+@Slf4j
 @Service
 public class CrawlerExportPathService {
 
@@ -36,7 +39,15 @@ public class CrawlerExportPathService {
     private static final DateTimeFormatter TS_FMT =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(TW_ZONE);
 
+    /** 公開觸發「重新搜尋」的全域冷卻秒數（Requirement 71 / Task 329）。呼叫者匿名，無法做 per-owner 區分。 */
+    private static final long PUBLIC_RESCAN_COOLDOWN_SECONDS = 30;
+
+    private static final String PUBLIC_RESCAN_COOLDOWN_KEY = "crawler:news-poller:public-rescan:cooldown";
+
     private final CrawlerExportSettingRepository repo;
+
+    /** 公開觸發「重新搜尋」的冷卻閘門；backend 既有 Bean，{@code TradingRadarRefreshService} 已注入同一顆。 */
+    private final StringRedisTemplate redis;
 
     /** 容器內基底輸出目錄，經 docker volume 對映到 host 家目錄（與 business 的排程匯出共用同一基底）。 */
     private final String baseDir;
@@ -64,13 +75,15 @@ public class CrawlerExportPathService {
                                     GdriveOutputSupport gdrive,
                                     @Value("${external-materials.base-url:http://external-materials-service:8080}")
                                     String externalUrl,
-                                    @Value("${crawler.run-now.timeout-seconds:50}") long runNowTimeoutSeconds) {
+                                    @Value("${crawler.run-now.timeout-seconds:50}") long runNowTimeoutSeconds,
+                                    StringRedisTemplate redis) {
         this.repo = repo;
         this.baseDir = baseDir;
         this.gdrive = gdrive;
         // 靜態 WebClient.builder()——與 backend 其餘 6 處呼叫 ext 的寫法一致（全樹零處注入 WebClient.Builder）
         this.externalClient = WebClient.builder().baseUrl(externalUrl).build();
         this.runNowTimeoutSeconds = runNowTimeoutSeconds;
+        this.redis = redis;
     }
 
     /**
@@ -87,6 +100,50 @@ public class CrawlerExportPathService {
      */
     public CrawlerExportPathDto.RunNowResponse fetchAndRunNow(String crawlerKey) {
         return proxyManualRun(crawlerKey, "/internal/news-poller/fetch-and-export-now", "抓取");
+    }
+
+    /**
+     * 公開觸發「重新搜尋」（Requirement 71）：免登入版「立即抓取並匯出」，供 Nginx 9090 gateway
+     * 對外／Tailscale 呼叫。全域 30 秒冷卻（單一鍵，呼叫者匿名無法做 per-owner 區分）；
+     * proxy 目標固定為 news-poller，不接受 crawler 參數。
+     */
+    public CrawlerExportPathDto.RunNowResponse publicRescan() {
+        if (!acquirePublicRescanCooldown()) {
+            return new CrawlerExportPathDto.RunNowResponse(
+                    "COOLDOWN", null, null, null, null, null, null, null, null, null, null, null,
+                    "冷卻中，請 " + PUBLIC_RESCAN_COOLDOWN_SECONDS + " 秒後再試");
+        }
+        CrawlerExportPathDto.RunNowResponse result = proxyManualRun(
+                CrawlerSchedule.CRAWLER_NEWS_POLLER, "/internal/news-poller/public-rescan", "重新搜尋");
+        String status = result.status();
+        if ("BUSY".equals(status) || "DISABLED".equals(status) || "ERROR".equals(status)) {
+            // 這三種結果代表本次呼叫沒有真的促成一輪對外抓取（或根本沒連到 ext），
+            // 不強迫下一個匿名呼叫端等滿 30 秒——比照 TradingRadarRefreshService「沒真的抓，不燒冷卻」。
+            redis.delete(PUBLIC_RESCAN_COOLDOWN_KEY);
+        } else {
+            // OK／FAILED／RUNNING：proxyManualRun 可阻塞至 runNowTimeoutSeconds（預設 50 秒），
+            // 呼叫前設下的舊 30 秒 TTL 可能已在等待期間自然到期——這裡必須用 SET（不是 EXPIRE）
+            // 從「呼叫已返回」的當下重新起算一個全新 30 秒窗口，EXPIRE 對已過期、不存在的 key 無效，
+            // 無法重建。詳見 Requirement 71 對應 AC 與 design.md 的完整理由（含明確接受的殘餘落差）。
+            try {
+                redis.opsForValue().set(PUBLIC_RESCAN_COOLDOWN_KEY, "1",
+                        java.time.Duration.ofSeconds(PUBLIC_RESCAN_COOLDOWN_SECONDS));
+            } catch (Exception e) {
+                log.warn("爬蟲公開重新搜尋冷卻鍵重新起算失敗（不影響本次呼叫結果）：{}", e.toString());
+            }
+        }
+        return result;
+    }
+
+    /** Redis 例外時 fail-open（視為取得鎖），不因 Redis 抖動就永遠擋住這個公開入口。 */
+    private boolean acquirePublicRescanCooldown() {
+        try {
+            return Boolean.TRUE.equals(redis.opsForValue().setIfAbsent(
+                    PUBLIC_RESCAN_COOLDOWN_KEY, "1", java.time.Duration.ofSeconds(PUBLIC_RESCAN_COOLDOWN_SECONDS)));
+        } catch (Exception e) {
+            log.warn("爬蟲公開重新搜尋冷卻閘門讀寫失敗，本次放行：{}", e.toString());
+            return true;
+        }
     }
 
     /**

@@ -214,7 +214,7 @@ skill 有沒有自己宣告：`/commit-merge-push` 沒宣告 → 繼承主 agent
 - 前端 view 一律走自己頁面對應的 BFF endpoint，不直接呼叫 business service `/api/{resource}`
 - BFF 負責跨服務 aggregation、預先計算 / 排序 / 過濾，前端只負責 render
 - 範例：`DashboardBffController`、`SnapshotFormBffController`、`AssetHistoryBffController`、`BankSettingsBffRoutes`（純 passthrough 也要有自己的 route）
-- **具名、限縮例外（Requirements 66–68／70；Tasks 317、325、327、328）**：Docker 外部 HTTP 只能從 non-root Nginx `api-gateway` 的 loopback `127.0.0.1:9090` 五條 exact GET 進入；BFF 與 external-materials-service 都不映射 host port。BFF 只對 `GET /api/public/market-index`、`GET /api/assets/latest` 與 `GET /api/public/exchange-rate/usd-twd` 匿名放行，quotes 由 Nginx 直接送 external-materials；禁止 `/api/**`／descendant wildcard與同路徑其他 method。Frontend 對五路 exact／matrix 變體回 404，view 不得援引此例外。Controller 仍只委派 service，BFF 不直查 DB／外部行情。USD/TWD 的台銀／兆豐／Yahoo 外部抓取、交易時段判定與每 2 秒 Redis producer 只能位於 `external-materials-service`；business/BFF 只做唯讀 cache/DB 與聚合。
+- **具名、限縮例外（Requirements 66–68／70／71；Tasks 317、325、327、328、329）**：Docker 外部 HTTP 只能從 non-root Nginx `api-gateway` 的 loopback `127.0.0.1:9090` 六條路由（五條唯讀 GET ＋ 一條寫入 POST `/api/public/crawler-data/rescan`，見 Requirement 71）進入；BFF 與 external-materials-service 都不映射 host port。BFF 只對 `GET /api/public/market-index`、`GET /api/assets/latest`、`GET /api/public/exchange-rate/usd-twd` 與 `POST /api/public/crawler-data/rescan` 匿名放行，quotes 由 Nginx 直接送 external-materials；禁止 `/api/**`／descendant wildcard與同路徑其他 method。`/api/public/crawler-data/rescan` 是唯一有外部抓取副作用的例外，經 business 端 30 秒全域 Redis 冷卻節流，語意等同 `fetchAndExportNow()` 的匿名版本。Frontend 對六路 exact／matrix 變體回 404，view 不得援引此例外。Controller 仍只委派 service，BFF 不直查 DB／外部行情。USD/TWD 的台銀／兆豐／Yahoo 外部抓取、交易時段判定與每 2 秒 Redis producer 只能位於 `external-materials-service`；business/BFF 只做唯讀 cache/DB 與聚合。
 
 **2. 同義欄位、同一 business service API**
 
@@ -224,14 +224,16 @@ skill 有沒有自己宣告：`/commit-merge-push` 沒宣告 → 繼承主 agent
 - 例：股價收盤值 → 一律從 `stock_price_history` 抓
 - 共用邏輯抽到 `bff/common/`（如 `SnapshotEnricher`），各 BFF controller 注入使用
 
-**3. Docker 外部唯讀 API 一律經 Nginx 9090 gateway**
+**3. Docker 外部 API 一律經 Nginx 9090 gateway（五條唯讀 GET ＋ 一條寫入 POST）**
 
 - Host 只綁 `127.0.0.1:9090`，精確放行 `GET /api/quotes`、`/api/quotes/one`、
-  `/api/public/market-index`、`/api/assets/latest`、`/api/public/exchange-rate/usd-twd`。
-- `bff` 與 `external-materials-service` 不發布 host port；`frontend:80` 對上述五條回 `404`，
+  `/api/public/market-index`、`/api/assets/latest`、`/api/public/exchange-rate/usd-twd`，
+  以及第六條 `POST /api/public/crawler-data/rescan`（Requirement 71 / Task 329；唯一有外部
+  抓取副作用的例外，免登入觸發 NewsPoller 重新搜尋，經 business 端 30 秒全域 Redis 冷卻節流）。
+- `bff` 與 `external-materials-service` 不發布 host port；`frontend:80` 對上述六條回 `404`，
   瀏覽器登入 API 與 SPA 仍經 frontend → BFF。
-- Tailscale Serve 只以 path-scoped HTTPS `:9090` 掛相同五條 exact path，包含 USD/TWD 公開匯率。
-  禁止 root／`/api/` proxy、Funnel、自簽憑證與另一層 OAuth proxy。
+- Tailscale Serve 只以 path-scoped HTTPS `:9090` 掛相同六條 exact path，包含 USD/TWD 公開匯率
+  與第六條寫入路由。禁止 root／`/api/` proxy、Funnel、自簽憑證與另一層 OAuth proxy。
 
 ### 服務啟動
 ```bash
@@ -253,9 +255,9 @@ cd frontend
 
 | 文件 | 說明 |
 |------|------|
-| `spec/requirements.md` | User Stories + Acceptance Criteria（70 個 Requirements） |
+| `spec/requirements.md` | User Stories + Acceptance Criteria（71 個 Requirements） |
 | `spec/design.md` | 架構圖、ERD、API 端點、關鍵業務邏輯 |
-| `spec/tasks.md` | 任務索引（Task 1–228、264–267、269–292、297–309、311–328）＋ 尚未歸檔的 Task 201 起區段；Task 229–263、268、293–296 以各自 `spec/tasks/tNNN_*.md` 為準 |
+| `spec/tasks.md` | 任務索引（Task 1–228、264–267、269–292、297–309、311–329）＋ 尚未歸檔的 Task 201 起區段；Task 229–263、268、293–296 以各自 `spec/tasks/tNNN_*.md` 為準 |
 | `spec/tasks/README.md` | 自足任務檔規範（新任務寫這裡，不再追加 `tasks.md`） |
 | `spec/tasks/tNNN_*.md` | 自足任務檔（Task 201 之後的新任務） |
 | `spec/tasks/archive/` | Task 1–200 歷史，已凍結不再修改 |

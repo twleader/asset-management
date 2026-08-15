@@ -80,6 +80,9 @@ public class SecurityConfig {
                                 "/api/public/market-index",
                                 "/api/assets/latest",
                                 "/api/public/exchange-rate/usd-twd").permitAll()
+                        // Requirement 71：公開觸發重新搜尋，第六條 Nginx 9090 路由，唯一有寫入副作用的匿名端點；
+                        // 30 秒全域冷卻在 business 端（CrawlerExportPathService.publicRescan()），BFF 層不重複防護。
+                        .pathMatchers(HttpMethod.POST, "/api/public/crawler-data/rescan").permitAll()
                         .pathMatchers("/api/bff/backup-restore/**").hasAuthority(AuthConstants.AUTHORITY_ADMIN)
                         .pathMatchers("/api/bff/user-management/**").hasAuthority(AuthConstants.AUTHORITY_ADMIN)
                         .pathMatchers("/api/impersonate/**").hasAuthority(AuthConstants.AUTHORITY_ADMIN)

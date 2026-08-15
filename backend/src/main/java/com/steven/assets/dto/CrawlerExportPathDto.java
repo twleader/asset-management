@@ -63,6 +63,8 @@ public class CrawlerExportPathDto {
      *   <li>{@code DISABLED} —— 功能被關閉。「完整跑一輪」看 {@code news-scraper.enabled}；
      *       「只重產檔案」只看 {@code news-scraper.export-enabled}。</li>
      *   <li>{@code ERROR} —— 呼叫 ext 失敗（連線不通、5xx），即<b>根本沒跑到 ext</b>。</li>
+     *   <li>{@code COOLDOWN} —— 僅 {@link com.steven.assets.service.CrawlerExportPathService#publicRescan()}
+     *       （Requirement 71）會產生：全域 30 秒冷卻中，未呼叫 ext，本次未啟動。</li>
      * </ul>
      *
      * <p><b>欄位形狀刻意與其餘八支 {@code XxxExportDto.RunNowResponse} 不同</b>：其中六支是

@@ -8,6 +8,7 @@ readonly -a SERVE_PATHS=(
   '/api/public/market-index'
   '/api/assets/latest'
   '/api/public/exchange-rate/usd-twd'
+  '/api/public/crawler-data/rescan'
 )
 
 die() {
@@ -28,6 +29,24 @@ get_200() {
   [[ "$status" == 200 ]] || die "$label 必須回 HTTP 200，實際為 ${status}；不會 reset Serve。"
   grep -Eiq '^content-type:[[:space:]]*application/json([;[:space:]]|$)' "$headers_file" || \
     die "$label Content-Type 不是 application/json；不會 reset Serve。"
+}
+
+# 第六條路由（POST /api/public/crawler-data/rescan）語意是「立即抓取並匯出」的免登入版本，
+# 對 GET 的正確回應是 405，不是 200——刻意不沿用 get_200()，且全程不對本路徑發送任何 POST，
+# 否則每次執行本腳本都會真的觸發一輪對外爬蟲抓取。
+get_405_post_only() {
+  local url=$1
+  local output_file=$2
+  local label=$3
+  local headers_file=$4
+  local -a curl_args=(-sS -D "$headers_file" -o "$output_file" -w '%{http_code}')
+  local status
+  if ! status="$(curl "${curl_args[@]}" "$url")"; then
+    die "$label transport 失敗；不會 reset Serve。"
+  fi
+  [[ "$status" == 405 ]] || die "$label 對 GET 必須回 HTTP 405（避免真的觸發爬蟲），實際為 ${status}；不會 reset Serve。"
+  grep -Eiq '^allow:[[:space:]]*POST[[:space:]]*$' "$headers_file" || \
+    die "$label 缺少 Allow: POST header；不會 reset Serve。"
 }
 
 find_tailscale() {
@@ -126,6 +145,7 @@ expected = {
     "/api/public/market-index": "http://127.0.0.1:9090/api/public/market-index",
     "/api/assets/latest": "http://127.0.0.1:9090/api/assets/latest",
     "/api/public/exchange-rate/usd-twd": "http://127.0.0.1:9090/api/public/exchange-rate/usd-twd",
+    "/api/public/crawler-data/rescan": "http://127.0.0.1:9090/api/public/crawler-data/rescan",
 }
 web = data.get("Web")
 expected_host = f"{dns_name}:9090"
@@ -136,7 +156,7 @@ if not isinstance(handlers, dict):
     raise SystemExit("Handlers 必須是 object")
 handler_paths = set(handlers)
 if mode in {"allow-empty", "exact"} and handler_paths != set(expected):
-    raise SystemExit("必須精確只有本任務管理的五條 path handler")
+    raise SystemExit("必須精確只有本任務管理的六條 path handler")
 if mode == "subset" and not handler_paths.issubset(expected):
     raise SystemExit("partial config 含非本任務 path handler")
 for path in handler_paths:
@@ -237,7 +257,11 @@ if not isinstance(spot, dict) or not spot:
     raise SystemExit(1)
 PY
 
-printf '現有 Serve 設定所有權與本機五路 API preflight 通過，開始更新 path-scoped Serve…\n'
+rescan_json="$work_dir/rescan.json"
+rescan_headers="$work_dir/rescan.headers"
+get_405_post_only "$LOCAL_BASE/api/public/crawler-data/rescan" "$rescan_json" '本機爬蟲重新搜尋' "$rescan_headers"
+
+printf '現有 Serve 設定所有權與本機六路 API preflight 通過，開始更新 path-scoped Serve…\n'
 
 # Preflight 可能耗時；reset 前重新讀取並比較解析後 JSON，避免期間有人新增 handler
 # 卻被本腳本用過時的所有權判斷刪除。
@@ -265,7 +289,7 @@ done
 
 serve_after="$work_dir/serve-after.json"
 "$TAILSCALE_BIN" serve status --json >"$serve_after"
-validate_owned_config "$serve_after" exact || die '建立後的 Serve config 不是預期五條 exact handler。'
+validate_owned_config "$serve_after" exact || die '建立後的 Serve config 不是預期六條 exact handler。'
 cleanup_partial=0
 
 printf 'Tailscale Serve 已安全設定：https://%s:9090\n' "$tail_dns"

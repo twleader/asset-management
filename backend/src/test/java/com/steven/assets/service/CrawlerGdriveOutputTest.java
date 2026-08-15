@@ -10,6 +10,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.springframework.data.redis.core.StringRedisTemplate;
 
 import java.util.Optional;
 
@@ -41,6 +42,8 @@ class CrawlerGdriveOutputTest {
     @Mock private UserAdminService userAdminService;
     /** 啟用當下的自檢（Task 247）；替身預設回 null＝自檢正常，要測警告時再 stub。 */
     @Mock private GdriveSelfCheck selfCheck;
+    /** Task 329 公開重新搜尋冷卻所需；本測試不觸及 run-now／public-rescan，給不會被用到的替身。 */
+    @Mock private StringRedisTemplate redis;
 
     private CrawlerExportPathService service;
 
@@ -49,9 +52,9 @@ class CrawlerGdriveOutputTest {
         // Task 242 起驗證規則遷入 GdriveOutputSupport；注入真實元件（rclone 等相依在本測試用不到）。
         GdriveOutputSupport gdrive = new GdriveOutputSupport(
                 rcloneClient, appUserRepo, userAdminService, selfCheck, "GDriveOutput");
-        // 後兩個參數為 Task 280 手動匯出 proxy 所需（本測試不觸及 run-now，給不會被用到的值）
+        // 後三個參數為 Task 280 手動匯出 proxy／Task 329 公開重新搜尋所需（本測試不觸及，給不會被用到的值）
         service = new CrawlerExportPathService(repo, "/home/steven", gdrive,
-                "http://external-materials-service:8080", 50);
+                "http://external-materials-service:8080", 50, redis);
         // save 回傳被存進去的那個 entity，讓 assert 能直接看寫入結果
         when(repo.save(any(CrawlerExportSetting.class))).thenAnswer(inv -> inv.getArgument(0));
     }
