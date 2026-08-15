@@ -822,13 +822,13 @@ AppUser (1) ──── (N) InvestmentPlannedExpense     (owner_user_id；特�
 AppUser (1) ──── (N) PortfolioAdvice              (owner_user_id；歷次建議，條件快照刻意 denormalize)
 PortfolioAdviceSetting   (配置建議設定，單列 id = 1；model / effort / web_search_max_uses)
 
-# 排程匯出（Requirement 34 / 37 / 39 / 49 / 69 / 72）
+# 排程匯出（Requirement 34 / 37 / 39 / 49 / 69 / 73）
 # 「一功能一張排程表」——刻意不合併，理由見本文件 Requirement 39 之關鍵設計決策
 AppUser (1) ──── (1) ExportScheduleSetting            (owner_user_id UNIQUE；最新資產匯出的共用路徑／Drive／總開關；Requirement 34／69)
 ExportScheduleSetting (1) ──── (N) ExportScheduleTime (每個每日執行時間各有 enabled／last-run guard；Requirement 69)
 AppUser (1) ──── (1) TradingCalendarExportSchedule    (owner_user_id UNIQUE；交易日曆每日排程匯出設定；比另兩張多一個 format 欄〔json/excel〕；Requirement 37)
-AppUser (1) ──── (1) RealizedGainExportSchedule       (owner_user_id UNIQUE；已實現損益匯出的共用路徑／Drive／總開關；Requirement 39／72)
-RealizedGainExportSchedule (1) ──── (N) RealizedGainExportScheduleTime (每個每日執行時間各有 enabled／last-run guard；Requirement 72)
+AppUser (1) ──── (1) RealizedGainExportSchedule       (owner_user_id UNIQUE；已實現損益匯出的共用路徑／Drive／總開關；Requirement 39／73)
+RealizedGainExportSchedule (1) ──── (N) RealizedGainExportScheduleTime (每個每日執行時間各有 enabled／last-run guard；Requirement 73)
 AppUser (1) ──── (N) AssetTransactionExportSchedule   (每人多筆每日排程；Task 255 起移除 owner_user_id UNIQUE；Requirement 49)
 
 # 台股臨時休市（颱風假；Requirement 7）
@@ -3887,7 +3887,7 @@ RealizedGainView「立即匯出到目錄」
         → ExcelExportService.realizedGainsDoc()           ← HTTP 情境，同上自動 owner-scoped
         → writeDual(...) → DualFormatExportWriter.write(...)（xlsx ＋ json 兩份；R55／Task 270 起）
 
-【每日排程（新增；Requirement 72 起逐 child 判斷，見本文件 Requirement 72 段）】
+【每日排程（新增；Requirement 73 起逐 child 判斷，見本文件 Requirement 73 段）】
 @Scheduled(cron="0 * * * * *", zone="Asia/Taipei") tick()
   → runDueExports(): settingRepo.findAll()             ← 背景無 request context，讀全部 owner 列
     → 對每個 enabled 的 parent，再對每個 enabled、今日未跑且已到點的 child：
@@ -3919,10 +3919,10 @@ RealizedGainView el-tree 懶載入
 | `id` | BIGSERIAL PK | |
 | `owner_user_id` | BIGINT NOT NULL | 擁有者；UNIQUE `uq_rg_export_schedule_owner`（每人一列） |
 | `enabled` | BOOLEAN NOT NULL DEFAULT FALSE | 是否啟用每日排程（總開關） |
-| `run_hour` | INT NOT NULL DEFAULT 8 | ~~每日執行時~~，CHECK 0..23；**Requirement 72 起只作 rollback shadow**，排程來源改為子表 |
+| `run_hour` | INT NOT NULL DEFAULT 8 | ~~每日執行時~~，CHECK 0..23；**Requirement 73 起只作 rollback shadow**，排程來源改為子表 |
 | `run_minute` | INT NOT NULL DEFAULT 0 | ~~每日執行分~~，CHECK 0..59；同上，只作 rollback shadow |
 | `output_subpath` | VARCHAR(255) NOT NULL DEFAULT 'input' | 相對家目錄基底的輸出子路徑 |
-| `last_run_date` | DATE | ~~當日已執行 guard~~；**Requirement 72 起改由子表逐時間各自 guard**，本欄只同步 rollback representative 的 guard |
+| `last_run_date` | DATE | ~~當日已執行 guard~~；**Requirement 73 起改由子表逐時間各自 guard**，本欄只同步 rollback representative 的 guard |
 | `last_run_at` | TIMESTAMP | 上次執行時間 |
 | `last_run_status` | VARCHAR(500) | 「成功：/path」或「失敗：訊息」 |
 | `updated_at` | TIMESTAMP | |
@@ -3934,8 +3934,8 @@ RealizedGainView el-tree 懶載入
 | 層 | 方法 路徑 | 說明 |
 |----|-----------|------|
 | business | `GET /api/realized-gains/export` | （既有）下載 xlsx |
-| business | `GET /api/realized-gains/export/schedule` | 取當前使用者排程設定（無則回預設，不寫 DB）；Requirement 72 起含 `times[]` |
-| business | `PUT /api/realized-gains/export/schedule` | upsert 當前使用者排程設定（驗證時分範圍與子路徑不跳脫）；Requirement 72 起 body 帶 `times[]`、整包取代 |
+| business | `GET /api/realized-gains/export/schedule` | 取當前使用者排程設定（無則回預設，不寫 DB）；Requirement 73 起含 `times[]` |
+| business | `PUT /api/realized-gains/export/schedule` | upsert 當前使用者排程設定（驗證時分範圍與子路徑不跳脫）；Requirement 73 起 body 帶 `times[]`、整包取代 |
 | business | `POST /api/realized-gains/export/run-now` | 立即產檔到設定目錄，回七欄（`path`／`sizeBytes`／`gdrivePath`／`gdriveStatus`／`jsonPath`／`jsonSizeBytes`／`jsonGdrivePath`）；不動當日 guard |
 | business | `GET /api/export-schedule/browse?subpath=` | （既有，複用）列出基底下子目錄 |
 | BFF | `GET /api/bff/realized-gain/export` | （既有）passthrough 下載 |
@@ -6850,7 +6850,7 @@ frontend :80  ── exact + matrix 變體 → 404（同既有五條的第二防
 
 ---
 
-## Requirement 72／Task 330：已實現損益匯出多時間點
+## Requirement 73／Task 331：已實現損益匯出多時間點
 
 本段是 Requirement 69／Task 326（最新資產多時間點）在已實現損益頁的**同形套用**：資料模型、DTO 欄位名、驗證訊息、rollback 策略與 UI 互動一律沿用同一套做法，兩頁差別只有表名、entity 名、端點前綴與匯出內容。刻意不抽共用父類別／泛型 service——兩支 service 的檔名、doc 來源、租戶隔離方式與 Drive 欄位語意雖相近但各自獨立演進（例如本頁背景產檔必須 `enableFilter`、最新資產頁則走 live 估值），過早抽象會讓兩邊互相牽制；一致性以「相同結構與相同命名」維持，不以繼承維持。
 
