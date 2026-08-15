@@ -2,6 +2,7 @@ package com.steven.assets.service;
 
 import com.steven.assets.dto.RealizedGainExportDto;
 import com.steven.assets.model.RealizedGainExportSchedule;
+import com.steven.assets.model.RealizedGainExportScheduleTime;
 import com.steven.assets.repository.RealizedGainExportScheduleRepository;
 import com.steven.assets.security.CurrentUserContext;
 import com.steven.assets.security.UnauthenticatedException;
@@ -12,6 +13,7 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -21,17 +23,23 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * 已實現損益每日排程自動匯出（Requirement 39 / Task 196）。
+ * 已實現損益每日排程自動匯出（Requirement 39 / Task 196；多時間點 Requirement 73 / Task 331）。
  *
- * <p>每個使用者可各自設定啟用開關、每日執行時分、輸出相對子路徑。因 {@code @Scheduled} 的 cron 於啟動期固定、
+ * <p>每個使用者可各自設定啟用開關、多個每日執行時分、輸出相對子路徑。因 {@code @Scheduled} 的 cron 於啟動期固定、
  * 無法吃 DB 可調時間，改採「每分鐘 poll ＋ 當日 guard ＋ 開機自癒補跑」（比照 {@link ExportScheduleService}）。
+ * 每個時間點各自 enabled／當日 guard／狀態，第一個時間點跑完不會擋住同日後續時間點。
  *
  * <p>租戶隔離：GET/PUT/run-now 走 HTTP（BFF→business），由 {@code TenantFilterAspect} 自動 owner-scoped 到本人；
  * 背景 poll 無 request context → {@code ownerFilter} 不啟用，{@code findAll()} 讀全部 owner 列，
- * 產檔時才以 {@link ExcelExportService#exportRealizedGainsForOwner(Long)} 對該列 owner 手動 {@code enableFilter}。
+ * 產檔時才以 {@link ExcelExportService#realizedGainsDocForOwner(Long)} 對該列 owner 手動 {@code enableFilter}。
  * （已實現損益為 per-user 資料，若不逐列縮 owner 會把所有人的損益寫進每個人的檔案。）
  *
  * <p>路徑安全：使用者只設定「相對子路徑」，實際寫入 = 容器基底 {@code EXPORT_OUTPUT_DIR} resolve 子路徑，
@@ -64,7 +72,7 @@ public class RealizedGainExportScheduleService {
     /** 容器內基底輸出目錄，經 docker volume 對映到 host（見 docker-compose.yml）。 */
     private final String baseDir;
 
-    /** 避免每分鐘 poll 在上一輪尚未跑完時重入。 */
+    /** 避免每分鐘 poll 在上一輪尚未跑完時重入；startup 自癒與 tick 共用同一把鎖（見 {@link #tryRunDueExports()}）。 */
     private final AtomicBoolean ticking = new AtomicBoolean(false);
 
     public RealizedGainExportScheduleService(RealizedGainExportScheduleRepository settingRepo,
@@ -92,16 +100,15 @@ public class RealizedGainExportScheduleService {
         Long ownerId = requireOwnerId();
         RealizedGainExportSchedule s = settingRepo.findByOwnerUserId(ownerId).orElseGet(() ->
                 RealizedGainExportSchedule.builder().ownerUserId(ownerId).build());
+        if (s.getTimes().isEmpty()) s.addTime(legacyTime(s)); // rolling-upgrade fallback；GET 不寫 DB
         return toResponse(s);
     }
 
-    /** upsert 當前使用者設定。 */
+    /** upsert 當前使用者設定；times 為整包取代（相同時分沿用既有 child 的 guard）。 */
+    @Transactional
     public RealizedGainExportDto.SettingResponse updateForCurrentUser(RealizedGainExportDto.SettingRequest req) {
         Long ownerId = requireOwnerId();
-        int hour = req.runHour() == null ? 8 : req.runHour();
-        int minute = req.runMinute() == null ? 0 : req.runMinute();
-        if (hour < 0 || hour > 23) throw new IllegalArgumentException("執行時(hour)必須介於 0～23");
-        if (minute < 0 || minute > 59) throw new IllegalArgumentException("執行分(minute)必須介於 0～59");
+        validateTimes(req.times(), Boolean.TRUE.equals(req.enabled()));
         String subpath = normalizeSubpath(req.outputSubpath());
         resolveDir(subpath); // 驗證不跳脫基底（丟出即擋下）
 
@@ -114,22 +121,46 @@ public class RealizedGainExportScheduleService {
 
         s.setOwnerUserId(ownerId);
         s.setEnabled(Boolean.TRUE.equals(req.enabled()));
-        s.setRunHour(hour);
-        s.setRunMinute(minute);
         s.setOutputSubpath(subpath);
         s.setGdriveEnabled(drive.enabled());
         s.setGdriveSubpath(drive.subpath());
         // 刻意不碰 gdriveLastRunAt／gdriveLastStatus：那是執行結果，不是使用者設定。
         // 啟用當下的自檢結果同樣不寫那兩欄（Task 247.3.4），只走當次回應。
         s.setUpdatedAt(LocalDateTime.now(TW_ZONE));
+
+        // 以 (時,分) 對映舊 child：相同時分保留該 child 的 guard／狀態，新時分 guard 為 null，
+        // 不在 body 內的 child 由 orphanRemoval 刪除。child 的 status 一律不接受使用者輸入。
+        Map<String, RealizedGainExportScheduleTime> existing = new HashMap<>();
+        for (RealizedGainExportScheduleTime time : s.getTimes()) existing.put(timeKey(time.getRunHour(), time.getRunMinute()), time);
+        HashSet<String> requested = new HashSet<>();
+        for (RealizedGainExportDto.TimeRequest item : req.times()) {
+            String key = timeKey(item.runHour(), item.runMinute());
+            requested.add(key);
+            RealizedGainExportScheduleTime time = existing.get(key);
+            if (time == null) {
+                time = RealizedGainExportScheduleTime.builder().runHour(item.runHour()).runMinute(item.runMinute())
+                        .enabled(Boolean.TRUE.equals(item.enabled())).updatedAt(LocalDateTime.now(TW_ZONE)).build();
+                s.addTime(time);
+            } else {
+                time.setEnabled(Boolean.TRUE.equals(item.enabled()));
+                time.setUpdatedAt(LocalDateTime.now(TW_ZONE));
+            }
+        }
+        s.getTimes().removeIf(time -> !requested.contains(timeKey(time.getRunHour(), time.getRunMinute())));
+        syncRollbackRepresentative(s);
         return toResponse(settingRepo.save(s), drive.selfCheckWarning());
     }
 
-    /** 立即以當前使用者身分產檔寫入其設定目錄（供驗證）。不動當日 guard。 */
+    /** 立即以當前使用者身分產檔寫入其設定目錄（供驗證）。不動任何時間點的當日 guard。 */
     public RealizedGainExportDto.RunNowResponse runNowForCurrentUser() {
         Long ownerId = requireOwnerId();
-        RealizedGainExportSchedule s = settingRepo.findByOwnerUserId(ownerId).orElseGet(() ->
-                RealizedGainExportSchedule.builder().ownerUserId(ownerId).build());
+        RealizedGainExportSchedule s = settingRepo.findByOwnerUserId(ownerId).orElseGet(() -> {
+            RealizedGainExportSchedule created = RealizedGainExportSchedule.builder()
+                    .ownerUserId(ownerId).enabled(Boolean.FALSE).build();
+            created.addTime(defaultTime());   // 本次 run-now 不消耗它：guard 保持 null
+            syncRollbackRepresentative(created);
+            return created;
+        });
         String subpath = normalizeSubpath(s.getOutputSubpath());
         try {
             // HTTP 情境：realizedGainsDoc() 由 TenantFilterAspect 自動 owner-scoped 到當前使用者。
@@ -165,16 +196,10 @@ public class RealizedGainExportScheduleService {
     /** 每分鐘檢查各使用者設定，命中執行時間且當日未跑者即產檔。 */
     @Scheduled(cron = "0 * * * * *", zone = "Asia/Taipei")
     public void tick() {
-        if (!ticking.compareAndSet(false, true)) {
-            log.debug("上一輪已實現損益排程匯出尚未結束，跳過本次 tick");
-            return;
-        }
         try {
-            runDueExports();
+            tryRunDueExports();
         } catch (RuntimeException e) {
             log.warn("已實現損益排程匯出 tick 發生例外：{}", e.getMessage(), e);
-        } finally {
-            ticking.set(false);
         }
     }
 
@@ -182,48 +207,87 @@ public class RealizedGainExportScheduleService {
     @EventListener(ApplicationReadyEvent.class)
     public void selfHealOnStartup() {
         try {
-            runDueExports();
+            tryRunDueExports();
         } catch (RuntimeException e) {
             log.warn("已實現損益排程匯出開機自癒失敗：{}", e.getMessage(), e);
         }
     }
 
     /**
-     * 掃所有啟用中的設定，對「今日尚未執行且排程時間已到」者產檔。
+     * {@code tick} 與 {@code selfHealOnStartup} 共用的守門入口，防止啟動瞬間與跨分鐘 tick 重入同一輪。
      *
-     * <p>用 {@code now >= 排程時間}（而非「分鐘精確相等」）＋ {@code lastRunDate} 當日 guard：任何被排程執行緒
-     * 延遲／跳過的分鐘（Spring 預設排程池只有 1 條執行緒、與其他 @Scheduled 共用，可能被長工作卡住跨越分鐘），
-     * 都會在後續 tick 自動補跑，直到當日成功並把 lastRunDate 設為今日為止，避免整日靜默漏跑。
+     * <p>CAS 只在 JVM 內有效，前提是 Compose 維持 business-services 單 replica；它也<b>不是</b>
+     * 當日 guard——重複執行的最終防線仍是各 child 的 {@code lastRunDate}。多 replica 時另需
+     * DB atomic claim／row lock。
      */
-    private void runDueExports() {
+    private void tryRunDueExports() {
+        if (!ticking.compareAndSet(false, true)) {
+            log.debug("上一輪已實現損益排程匯出尚未結束，跳過本次觸發");
+            return;
+        }
+        try {
+            runDueExports();
+        } finally {
+            ticking.set(false);
+        }
+    }
+
+    /**
+     * 掃所有啟用中的設定，對每個「今日尚未執行且排程時間已到」的時間點產檔。
+     *
+     * <p>用 {@code now >= 排程時間}（而非「分鐘精確相等」）＋ child 各自的 {@code lastRunDate} 當日 guard：
+     * 任何被排程執行緒延遲／跳過的分鐘（Spring 預設排程池只有 1 條執行緒、與其他 @Scheduled 共用，可能被
+     * 長工作卡住跨越分鐘），都會在後續 tick 自動補跑，直到當日成功並把該時間點的 lastRunDate 設為今日為止，
+     * 避免整日靜默漏跑。判斷主體先 parent 總開關、再逐 child——第一個時間點執行完只會擋住該 child，
+     * 不會用 parent guard 擋住同日後續 child。
+     */
+    @Transactional
+    void runDueExports() {
         LocalDate today = LocalDate.now(TW_ZONE);
         LocalTime now = LocalTime.now(TW_ZONE);
         for (RealizedGainExportSchedule s : settingRepo.findAll()) {
             if (!Boolean.TRUE.equals(s.getEnabled())) continue;
-            if (today.equals(s.getLastRunDate())) continue;
-            if (!now.isBefore(LocalTime.of(s.getRunHour(), s.getRunMinute()))) {
-                runScheduled(s, today);
+            // v1.104 套用前不可能有 real runtime；仍保留一輪 legacy fallback，避免部署中途
+            // 或手動 fixture 因空 children 把既有單時間排程靜默停掉。
+            if (s.getTimes().isEmpty()) s.addTime(legacyTime(s));
+            for (RealizedGainExportScheduleTime time : s.getTimes()) {
+                if (!Boolean.TRUE.equals(time.getEnabled()) || today.equals(time.getLastRunDate())) continue;
+                if (!now.isBefore(LocalTime.of(time.getRunHour(), time.getRunMinute()))) {
+                    runScheduled(s, time, today);
+                }
             }
         }
     }
 
-    /** 背景：對指定 owner 產檔並更新 guard／狀態。單一使用者失敗只記錄、不影響其他人。 */
-    private void runScheduled(RealizedGainExportSchedule s, LocalDate today) {
+    /**
+     * 背景：對指定時間點產檔並更新該 child 的 guard／狀態，同步 parent 最近一次整體摘要。
+     * 單一時間點失敗只記錄、不影響同 owner 的其他時間點或其他 owner。
+     */
+    private void runScheduled(RealizedGainExportSchedule s, RealizedGainExportScheduleTime time, LocalDate today) {
         try {
+            // 背景無 request context：必須走 owner-scoped 版，否則會把所有人的損益寫進每個人的檔案。
             var r = writeDual(s, s.getOwnerUserId(),
                     excelExportService.realizedGainsDocForOwner(s.getOwnerUserId()),
                     normalizeSubpath(s.getOutputSubpath()));
-            s.setLastRunStatus(truncate(r.localStatus(), STATUS_MAX));
+            time.setLastRunStatus(truncate(r.localStatus(), STATUS_MAX));
+            s.setLastRunStatus(time.getLastRunStatus());
             applyGdriveStatus(s, r);
-            log.info("已實現損益排程匯出 owner={} → {}", s.getOwnerUserId(), r.localStatus());
+            log.info("已實現損益排程匯出 owner={} {}:{} → {}",
+                    s.getOwnerUserId(), time.getRunHour(), time.getRunMinute(), r.localStatus());
         } catch (Exception e) {
-            s.setLastRunStatus(truncate("失敗：" + e.getMessage(), STATUS_MAX));
-            log.warn("已實現損益排程匯出失敗 owner={}：{}", s.getOwnerUserId(), e.getMessage(), e);
+            time.setLastRunStatus(truncate("失敗：" + e.getMessage(), STATUS_MAX));
+            s.setLastRunStatus(time.getLastRunStatus());
+            log.warn("已實現損益排程匯出失敗 owner={} {}:{}：{}",
+                    s.getOwnerUserId(), time.getRunHour(), time.getRunMinute(), e.getMessage(), e);
             syncGdrive(s, null); // 本機失敗＝不上傳；已啟用時仍寫狀態欄，否則會停在上一次的成功
         } finally {
-            // 成功或失敗都設 guard，避免命中分鐘後每 poll 重試整天。
-            s.setLastRunDate(today);
-            s.setLastRunAt(LocalDateTime.now(TW_ZONE));
+            // 成功或失敗都設該時間點的當日 guard，避免命中分鐘後每 poll 重試整天。
+            LocalDateTime completedAt = LocalDateTime.now(TW_ZONE);
+            time.setLastRunDate(today);
+            time.setLastRunAt(completedAt);
+            time.setUpdatedAt(completedAt);
+            s.setLastRunAt(completedAt);
+            syncRollbackRepresentative(s);
             settingRepo.save(s);
         }
     }
@@ -242,6 +306,67 @@ public class RealizedGainExportScheduleService {
         String sub = subpath == null ? "" : subpath.trim();
         if (sub.isEmpty()) sub = "input";
         return sub;
+    }
+
+    private static RealizedGainExportScheduleTime defaultTime() {
+        return RealizedGainExportScheduleTime.builder().runHour(8).runMinute(0).enabled(Boolean.TRUE).build();
+    }
+
+    /** rolling-upgrade fallback：以 parent 既有的 legacy 三欄重建一個等價 child（不寫 DB，呼叫端決定是否 persist）。 */
+    private static RealizedGainExportScheduleTime legacyTime(RealizedGainExportSchedule schedule) {
+        return RealizedGainExportScheduleTime.builder()
+                .runHour(schedule.getRunHour() == null ? 8 : schedule.getRunHour())
+                .runMinute(schedule.getRunMinute() == null ? 0 : schedule.getRunMinute())
+                .enabled(Boolean.TRUE)
+                .lastRunDate(schedule.getLastRunDate())
+                .lastRunAt(schedule.getLastRunAt())
+                .lastRunStatus(schedule.getLastRunStatus())
+                .build();
+    }
+
+    private static String timeKey(Integer hour, Integer minute) { return hour + ":" + minute; }
+
+    /** 先完整驗證再異動：錯誤訊息與 {@link ExportScheduleService} 逐字一致（同一套 UI 文案）。 */
+    private static void validateTimes(List<RealizedGainExportDto.TimeRequest> times, boolean parentEnabled) {
+        if (times == null || times.isEmpty()) throw new IllegalArgumentException("至少需要一個執行時間");
+        HashSet<String> seen = new HashSet<>();
+        boolean anyEnabled = false;
+        for (RealizedGainExportDto.TimeRequest time : times) {
+            if (time == null || time.runHour() == null || time.runMinute() == null
+                    || time.runHour() < 0 || time.runHour() > 23 || time.runMinute() < 0 || time.runMinute() > 59) {
+                throw new IllegalArgumentException("執行時間必須介於 00:00～23:59");
+            }
+            if (!seen.add(timeKey(time.runHour(), time.runMinute()))) throw new IllegalArgumentException("執行時間不可重複");
+            anyEnabled |= Boolean.TRUE.equals(time.enabled());
+        }
+        if (parentEnabled && !anyEnabled) throw new IllegalArgumentException("啟用排程時至少需啟用一個時間");
+    }
+
+    /**
+     * rollback representative = 最早 enabled child；全停用時是最早 child。
+     *
+     * <p>只同步舊 image 真正用來判斷排程的時分與 daily guard。Parent 的
+     * {@code lastRunAt/lastRunStatus} 是新舊 UI 共用的「最近一次整體執行摘要」，必須保留
+     * 最後完成的 child／run-now 結果，不能被較早 representative 的舊狀態覆蓋。
+     */
+    private static void syncRollbackRepresentative(RealizedGainExportSchedule s) {
+        RealizedGainExportScheduleTime representative = s.getTimes().stream()
+                .filter(t -> Boolean.TRUE.equals(t.getEnabled()))
+                .min(RealizedGainExportScheduleService::compareTime)
+                .orElseGet(() -> s.getTimes().stream()
+                        .min(RealizedGainExportScheduleService::compareTime).orElse(null));
+        if (representative == null) return;
+        s.setRunHour(representative.getRunHour());
+        s.setRunMinute(representative.getRunMinute());
+        s.setLastRunDate(representative.getLastRunDate());
+    }
+
+    private static int compareTime(RealizedGainExportScheduleTime left, RealizedGainExportScheduleTime right) {
+        int hour = Integer.compare(left.getRunHour(), right.getRunHour());
+        if (hour != 0) return hour;
+        int minute = Integer.compare(left.getRunMinute(), right.getRunMinute());
+        if (minute != 0) return minute;
+        return Comparator.nullsLast(Long::compareTo).compare(left.getId(), right.getId());
     }
 
     /** 基底 resolve 子路徑並驗證仍在基底內（拒 `..`／絕對路徑跳脫）。 */
@@ -304,8 +429,6 @@ public class RealizedGainExportScheduleService {
                                                              String gdriveSelfCheckWarning) {
         return RealizedGainExportDto.SettingResponse.builder()
                 .enabled(Boolean.TRUE.equals(s.getEnabled()))
-                .runHour(s.getRunHour())
-                .runMinute(s.getRunMinute())
                 .outputSubpath(s.getOutputSubpath())
                 .lastRunAt(s.getLastRunAt() == null ? null : s.getLastRunAt().format(TS_FMT))
                 .lastRunStatus(s.getLastRunStatus())
@@ -318,6 +441,15 @@ public class RealizedGainExportScheduleService {
                 .gdriveLastRunAt(s.getGdriveLastRunAt() == null ? null : s.getGdriveLastRunAt().format(TS_FMT))
                 .gdriveLastStatus(s.getGdriveLastStatus())
                 .gdriveSelfCheckWarning(gdriveSelfCheckWarning)
+                // 排序不能只靠 @OrderBy：transient default 與同一 transaction 內新增的 child 都還沒經過 DB 排序。
+                .times(s.getTimes().stream()
+                        .sorted(Comparator.comparing(RealizedGainExportScheduleTime::getRunHour)
+                                .thenComparing(RealizedGainExportScheduleTime::getRunMinute)
+                                .thenComparing(t -> t.getId() == null ? Long.MAX_VALUE : t.getId()))
+                        .map(t -> new RealizedGainExportDto.TimeResponse(t.getId(), t.getRunHour(), t.getRunMinute(),
+                                t.getEnabled(), t.getLastRunAt() == null ? null : t.getLastRunAt().format(TS_FMT),
+                                t.getLastRunStatus()))
+                        .toList())
                 .build();
     }
 

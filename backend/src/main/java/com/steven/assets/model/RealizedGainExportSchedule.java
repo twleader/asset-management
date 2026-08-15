@@ -9,15 +9,20 @@ import org.hibernate.annotations.Filter;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
- * 已實現損益每日排程自動匯出設定（Requirement 39 / Task 196）。
+ * 已實現損益每日排程自動匯出設定（Requirement 39 / Task 196；多時間點 Requirement 73 / Task 331）。
  *
  * <p>每個使用者一列（{@code owner_user_id} UNIQUE），以 {@code @Filter(ownerFilter)} 隔離設定本身。
  * HTTP 情境（BFF→business）由 {@link com.steven.assets.security.TenantFilterAspect} 自動 owner-scoped；
  * 背景排程 {@code RealizedGainExportScheduleService} 無 request context → filter 不啟用，
  * {@code findAll()} 讀全部列（跨所有 owner），產檔時才對「該列 owner」手動 {@code enableFilter}
- * （見 {@code ExcelExportService.exportRealizedGainsForOwner}）。
+ * （見 {@code ExcelExportService.realizedGainsDocForOwner}）。
+ *
+ * <p>每日執行時間自 Requirement 73 起改由子表 {@link RealizedGainExportScheduleTime} 承載，
+ * 每個時間各自 enabled／當日 guard／狀態；parent 只保留共用輸出設定、總開關與最近一次整體摘要。
  */
 @Entity
 @Table(name = "realized_gain_export_schedule", uniqueConstraints = @UniqueConstraint(
@@ -42,12 +47,12 @@ public class RealizedGainExportSchedule {
     @Builder.Default
     private Boolean enabled = Boolean.FALSE;
 
-    /** 每日執行時（0..23） */
+    /** rollback shadow：新 scheduler 不得作為 due 來源，保留讓舊 image 可 rollback。 */
     @Column(name = "run_hour", nullable = false)
     @Builder.Default
     private Integer runHour = 8;
 
-    /** 每日執行分（0..59） */
+    /** rollback shadow：新 scheduler 不得作為 due 來源。 */
     @Column(name = "run_minute", nullable = false)
     @Builder.Default
     private Integer runMinute = 0;
@@ -57,15 +62,15 @@ public class RealizedGainExportSchedule {
     @Builder.Default
     private String outputSubpath = "input";
 
-    /** 當日已執行的日期（成功或失敗都設，避免同分鐘每 poll 重跑） */
+    /** rollback representative 的 guard；新 scheduler 以 child guard 為準。 */
     @Column(name = "last_run_date")
     private LocalDate lastRunDate;
 
-    /** 上次執行時間 */
+    /** 上次執行時間（最近一次任一 child／run-now 的整體摘要） */
     @Column(name = "last_run_at")
     private LocalDateTime lastRunAt;
 
-    /** 上次執行結果（「成功：/path」或「失敗：訊息」） */
+    /** 上次執行結果（「成功：/path」或「失敗：訊息」），同為最近一次整體摘要 */
     @Column(name = "last_run_status", length = 500)
     private String lastRunStatus;
 
@@ -99,4 +104,20 @@ public class RealizedGainExportSchedule {
 
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
+
+    /**
+     * 每日執行時間清單（Requirement 73）。
+     *
+     * <p>{@code @Builder.Default} 不可省略：{@code builder()} 建構的 parent 若讓本欄停在 {@code null}，
+     * 所有 {@code getTimes().isEmpty()} 的檢查都會直接 NPE，而錯誤現象與多時間點毫無關聯、難以回推。
+     */
+    @OneToMany(mappedBy = "schedule", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("runHour ASC, runMinute ASC, id ASC")
+    @Builder.Default
+    private List<RealizedGainExportScheduleTime> times = new ArrayList<>();
+
+    public void addTime(RealizedGainExportScheduleTime time) {
+        time.setSchedule(this);
+        times.add(time);
+    }
 }
