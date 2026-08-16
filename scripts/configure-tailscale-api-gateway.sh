@@ -9,6 +9,8 @@ readonly -a SERVE_PATHS=(
   '/api/assets/latest'
   '/api/public/exchange-rate/usd-twd'
   '/api/public/crawler-data/rescan'
+  '/api/public/market-analysis/today'
+  '/api/public/portfolio-advice/latest'
 )
 
 die() {
@@ -146,6 +148,8 @@ expected = {
     "/api/assets/latest": "http://127.0.0.1:9090/api/assets/latest",
     "/api/public/exchange-rate/usd-twd": "http://127.0.0.1:9090/api/public/exchange-rate/usd-twd",
     "/api/public/crawler-data/rescan": "http://127.0.0.1:9090/api/public/crawler-data/rescan",
+    "/api/public/market-analysis/today": "http://127.0.0.1:9090/api/public/market-analysis/today",
+    "/api/public/portfolio-advice/latest": "http://127.0.0.1:9090/api/public/portfolio-advice/latest",
 }
 web = data.get("Web")
 expected_host = f"{dns_name}:9090"
@@ -156,7 +160,7 @@ if not isinstance(handlers, dict):
     raise SystemExit("Handlers 必須是 object")
 handler_paths = set(handlers)
 if mode in {"allow-empty", "exact"} and handler_paths != set(expected):
-    raise SystemExit("必須精確只有本任務管理的六條 path handler")
+    raise SystemExit("必須精確只有本任務管理的八條 path handler")
 if mode == "subset" and not handler_paths.issubset(expected):
     raise SystemExit("partial config 含非本任務 path handler")
 for path in handler_paths:
@@ -261,7 +265,21 @@ rescan_json="$work_dir/rescan.json"
 rescan_headers="$work_dir/rescan.headers"
 get_405_post_only "$LOCAL_BASE/api/public/crawler-data/rescan" "$rescan_json" '本機爬蟲重新搜尋' "$rescan_headers"
 
-printf '現有 Serve 設定所有權與本機六路 API preflight 通過，開始更新 path-scoped Serve…\n'
+# 第七、八條都是唯讀 GET 且預期 200，沿用 get_200()。第八條在「尚無任何一筆建議」時 business 仍回
+# HTTP 200（PortfolioAdviceController.latest() 回 PortfolioAdviceDto.none()，status="NONE" 的普通
+# JSON DTO），故不需要任何「無資料」旁路；若回非 200 代表 configured-admin bootstrap 或路由本身有
+# 問題，照既有「任一契約不健康即整批 fail closed」規則處理。
+market_analysis_json="$work_dir/market-analysis.json"
+market_analysis_headers="$work_dir/market-analysis.headers"
+get_200 "$LOCAL_BASE/api/public/market-analysis/today" "$market_analysis_json" \
+  '本機今日股市分析' "$market_analysis_headers"
+
+portfolio_advice_json="$work_dir/portfolio-advice.json"
+portfolio_advice_headers="$work_dir/portfolio-advice.headers"
+get_200 "$LOCAL_BASE/api/public/portfolio-advice/latest" "$portfolio_advice_json" \
+  '本機資產配置建議' "$portfolio_advice_headers"
+
+printf '現有 Serve 設定所有權與本機八路 API preflight 通過，開始更新 path-scoped Serve…\n'
 
 # Preflight 可能耗時；reset 前重新讀取並比較解析後 JSON，避免期間有人新增 handler
 # 卻被本腳本用過時的所有權判斷刪除。
@@ -289,7 +307,7 @@ done
 
 serve_after="$work_dir/serve-after.json"
 "$TAILSCALE_BIN" serve status --json >"$serve_after"
-validate_owned_config "$serve_after" exact || die '建立後的 Serve config 不是預期六條 exact handler。'
+validate_owned_config "$serve_after" exact || die '建立後的 Serve config 不是預期八條 exact handler。'
 cleanup_partial=0
 
 printf 'Tailscale Serve 已安全設定：https://%s:9090\n' "$tail_dns"

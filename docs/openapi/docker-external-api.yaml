@@ -3,14 +3,17 @@ info:
   title: 資產管理系統 Docker 外部唯讀 API
   version: 1.0.0
   description: |
-    本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的五條精確 GET 路徑。
+    本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的八條精確路徑：
+    七條唯讀 GET ＋ 一條寫入 POST（`/api/public/crawler-data/rescan`，唯一有外部抓取副作用者，
+    經 business 端 30 秒全域 Redis 冷卻節流）。
 
     本機入口只綁定 loopback `127.0.0.1:9090`；遠端入口由 Tailscale Serve 的私有網路身分與
-    五條逐一路徑規則形成網路邊界。HTTP 層本身沒有 OAuth、API key 或其他應用層認證，因此
+    八條逐一路徑規則形成網路邊界。HTTP 層本身沒有 OAuth、API key 或其他應用層認證，因此
     全域 `security` 為空陣列。不得把任一 server URL 解讀為公開網際網路服務。
 
-    Gateway 只接受下列精確路徑：同一路徑的非 GET method 回 `405 Method Not Allowed` 並帶
-    `Allow: GET`；所有其他路徑、子路徑、尾斜線與 matrix 變體回 `404 Not Found`。
+    Gateway 只接受下列精確路徑：同一路徑的非合法 method 回 `405 Method Not Allowed`，
+    七條唯讀路徑帶 `Allow: GET`、`/api/public/crawler-data/rescan` 帶 `Allow: POST`；
+    所有其他路徑、子路徑、尾斜線與 matrix 變體回 `404 Not Found`。
     Swagger UI 或原始 OpenAPI 文件沒有對外路由；本 YAML 是版本控管文件，不代表 gateway
     暴露文件端點。
 
@@ -21,7 +24,7 @@ servers:
   - url: http://127.0.0.1:9090
     description: Docker host 本機 loopback 入口
   - url: https://mac-mini-2.tailccc7be.ts.net:9090
-    description: Tailscale 私有網路的五條 path-scoped HTTPS 入口
+    description: Tailscale 私有網路的八條 path-scoped HTTPS 入口
 security: []
 paths:
   /api/quotes:
@@ -336,6 +339,187 @@ paths:
               schema:
                 $ref: '#/components/schemas/NginxErrorHtml'
               example: "<html><head><title>502 Bad Gateway</title></head><body><center><h1>502 Bad Gateway</h1></center><hr><center>nginx</center></body></html>"
+        '504':
+          $ref: '#/components/responses/NginxGatewayTimeout'
+  /api/public/crawler-data/rescan:
+    post:
+      tags: [公開爬蟲]
+      operationId: triggerPublicCrawlerRescan
+      summary: 免登入觸發爬蟲重新搜尋
+      description: |
+        八條路由中唯一有外部抓取副作用者（Requirement 71／Task 329），語意等同既有 ADMIN 端點
+        「立即抓取並匯出」的匿名版本。由 business 端 30 秒全域 Redis 冷卻節流：冷卻窗口內回
+        HTTP 200 但 `status=COOLDOWN`，不會真的觸發抓取。呼叫端必須看 `status` 而不是只看 200。
+        本路徑只接受 POST；GET 等其他 method 回 `405` 並帶 `Allow: POST`。
+      responses:
+        '200':
+          description: 觸發結果；所有情形（含冷卻中與失敗）都以 status 表達，不改用非 200。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CrawlerRescanResponse'
+              examples:
+                cooldown:
+                  summary: 冷卻窗口內，未真的觸發抓取
+                  value: {status: COOLDOWN, mode: null, jsonPath: null, jsonSizeBytes: null, xlsxPath: null, xlsxSizeBytes: null, upserted: null, failed: null, exported: null, jsonGdrivePath: null, xlsxGdrivePath: null, gdriveStatus: null, message: 冷卻中，請 30 秒後再試}
+        '405':
+          description: "非 POST method；帶 `Allow: POST`。"
+          headers:
+            Allow:
+              schema: {type: string, const: POST}
+          content:
+            text/html:
+              schema: {$ref: '#/components/schemas/NginxErrorHtml'}
+        '502':
+          description: BFF 的 scoped advice 把 business 非 2xx 消毒成固定文案，或 Nginx 無法連上 upstream。
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example: {type: 'about:blank', title: Crawler rescan downstream failure, status: 502, detail: 重新搜尋觸發暫時失敗，請稍後再試, instance: /api/public/crawler-data/rescan}
+            text/html:
+              schema:
+                $ref: '#/components/schemas/NginxErrorHtml'
+              example: "<html><head><title>502 Bad Gateway</title></head><body><center><h1>502 Bad Gateway</h1></center><hr><center>nginx</center></body></html>"
+        '503':
+          description: BFF 連不上 business（transport 失敗）；固定文案，不帶出下游訊息。
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example: {type: 'about:blank', title: Crawler rescan service unavailable, status: 503, detail: 重新搜尋服務暫時無法連線, instance: /api/public/crawler-data/rescan}
+        '504':
+          $ref: '#/components/responses/NginxGatewayTimeout'
+  /api/public/market-analysis/today:
+    get:
+      tags: [公開分析]
+      operationId: getPublicMarketAnalysisToday
+      summary: 取得最近一筆今日股市分析
+      description: |
+        純唯讀、零副作用（Requirement 79／Task 338），**不會**觸發任何 LLM 產生流程。
+        `daily_market_analysis` 是全域參考資料（無 owner），故 BFF 不做 configured-admin bootstrap、
+        也不帶 `X-User-*`。尚無任何一筆分析時回 HTTP 200 的 `{"status":"NONE"}` 占位物件。
+        BFF 走 `.retrieve().bodyToMono(...)`，故 business 的非 2xx 一律由 scoped advice
+        消毒成固定文案（502／503），**不會**把 business 原始 body 交給匿名呼叫端。
+        另注意 `status` 可能是 `PROCESSING`／`FAILED`，排程不可只看 HTTP 200。
+      responses:
+        '200':
+          description: 最近一筆分析；尚無資料時為 status=NONE 的占位物件。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarketAnalysisResponse'
+              examples:
+                synthetic:
+                  summary: 去識別化合成範例
+                  value:
+                    analysisDate: '2026-01-15'
+                    bias: NEUTRAL
+                    confidence: 60
+                    summary: 合成範例摘要，不構成投資建議。
+                    keyFactors: [合成因子一, 合成因子二]
+                    newsHighlights:
+                      - {title: 合成新聞標題, source: SYNTHETIC_EXAMPLE, url: 'https://example.invalid/news', publishedAt: '2026-01-15T01:00:00Z'}
+                    twContext: 合成台股背景描述。
+                    usContext: 合成美股背景描述。
+                    model: synthetic-model
+                    status: OK
+                    errorMessage: null
+                    generatedAt: '2026-01-15T02:00:00Z'
+                none:
+                  summary: 尚無任何一筆分析
+                  value: {analysisDate: null, bias: null, confidence: null, summary: null, keyFactors: [], newsHighlights: [], twContext: null, usContext: null, model: null, status: NONE, errorMessage: null, generatedAt: null}
+        '502':
+          description: BFF 的 scoped advice 把 business 非 2xx 消毒成固定文案，或 Nginx 無法連上 upstream。
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example: {type: 'about:blank', title: Market analysis downstream failure, status: 502, detail: 今日股市分析暫時無法取得，請稍後再試, instance: /api/public/market-analysis/today}
+            text/html:
+              schema:
+                $ref: '#/components/schemas/NginxErrorHtml'
+              example: "<html><head><title>502 Bad Gateway</title></head><body><center><h1>502 Bad Gateway</h1></center><hr><center>nginx</center></body></html>"
+        '503':
+          description: BFF 連不上 business（transport 失敗）；固定文案，不帶出下游訊息。
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example: {type: 'about:blank', title: Market analysis service unavailable, status: 503, detail: 今日股市分析服務暫時無法連線, instance: /api/public/market-analysis/today}
+        '504':
+          $ref: '#/components/responses/NginxGatewayTimeout'
+  /api/public/portfolio-advice/latest:
+    get:
+      tags: [公開分析]
+      operationId: getPublicPortfolioAdviceLatest
+      summary: 取得主要管理者的最新資產配置建議
+      description: |
+        純唯讀、零副作用（Requirement 79／Task 338），**絕不**觸發 `POST /api/portfolio-advice/generate`
+        那條有 LLM 成本的寫入流程。資料是 owner-scoped，owner 只能是 business 唯一解析出的
+        configured admin：BFF 走 configured-admin bootstrap 並顯式帶 `X-User-*`，同時清除 Reactor
+        context 身分，故不接受 ownerId、email、cookie 或 `X-User-*` 作為租戶選擇輸入。
+        成功與下游非 2xx 都採 byte-relay（金融數值不經 Map/Double round-trip，狀態碼與 body 原樣傳回）；
+        只有 bootstrap 階段的失敗才由 scoped advice 消毒。尚無任何一筆建議時回 HTTP 200 的
+        `{"status":"NONE"}` 占位物件，`status` 亦可能是 `PROCESSING`／`FAILED`。
+      responses:
+        '200':
+          description: 最新一筆建議；尚無資料時為 status=NONE 的占位物件。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PortfolioAdviceResponse'
+              examples:
+                synthetic:
+                  summary: 去識別化、非實際持倉的穩定合成範例
+                  value:
+                    id: 940001
+                    status: OK
+                    model: synthetic-model
+                    createdAt: '2026-01-15T02:00:00Z'
+                    completedAt: '2026-01-15T02:01:00Z'
+                    errorMessage: null
+                    age: 40
+                    investmentHorizonYears: 20
+                    monthlyInvestment: 30000.00
+                    goals: [退休, 教育金]
+                    riskTolerance: MODERATE
+                    expectedAnnualReturn: 6%
+                    basedOnSnapshotId: 900001
+                    basedOnSnapshotDate: '2026-01-15'
+                    basedOnTotalAssets: 230000.00
+                    summary: 合成範例摘要，不構成投資建議。
+                    riskAssessment: 合成風險評估描述。
+                    targetAllocation:
+                      - {assetClass: 台股, targetPct: 40.00, currentValue: 80000.00, targetAmount: 92000.00, deltaAmount: 12000.00, rationale: 合成理由}
+                    rebalancePlan:
+                      - {assetClass: 台股, holding: 整體, action: BUY, estimatedAmount: 12000.00, rationale: 合成理由}
+                    actions:
+                      - {title: 合成動作, detail: 合成說明, priority: MEDIUM}
+                    warnings: [合成提醒]
+                    references:
+                      - {title: 合成參考, url: 'https://example.invalid/ref'}
+                none:
+                  summary: 尚無任何一筆建議
+                  value: {id: null, status: NONE, model: null, createdAt: null, completedAt: null, errorMessage: null, age: null, investmentHorizonYears: null, monthlyInvestment: null, goals: [], riskTolerance: null, expectedAnnualReturn: null, basedOnSnapshotId: null, basedOnSnapshotDate: null, basedOnTotalAssets: null, summary: null, riskAssessment: null, targetAllocation: [], rebalancePlan: [], actions: [], warnings: [], references: []}
+        '502':
+          description: bootstrap lookup 的 business 非 2xx 被 scoped advice 消毒成固定文案，或 Nginx 無法連上 upstream。
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example: {type: 'about:blank', title: Portfolio advice downstream failure, status: 502, detail: 資產配置建議暫時無法取得，請稍後再試, instance: /api/public/portfolio-advice/latest}
+            text/html:
+              schema:
+                $ref: '#/components/schemas/NginxErrorHtml'
+              example: "<html><head><title>502 Bad Gateway</title></head><body><center><h1>502 Bad Gateway</h1></center><hr><center>nginx</center></body></html>"
+        '503':
+          description: Configured admin 不存在、未啟用或不可用（具名 503，不是 404），或 BFF 連不上 business。
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example: {type: 'about:blank', title: Portfolio advice unavailable, status: 503, detail: 主要管理者不可用, instance: /api/public/portfolio-advice/latest}
         '504':
           $ref: '#/components/responses/NginxGatewayTimeout'
 components:
@@ -670,6 +854,140 @@ components:
         buyRate: {type: number, exclusiveMinimum: 0}
         sellRate: {type: number, exclusiveMinimum: 0, description: 必須大於等於 buyRate。}
         midRate: {type: number, exclusiveMinimum: 0, multipleOf: 0.0001, description: (buyRate+sellRate)/2，HALF_UP scale 4。}
+      additionalProperties: false
+    CrawlerRescanResponse:
+      type: object
+      description: "`CrawlerExportPathDto.RunNowResponse` 的 13 個 record properties；所有結果（含冷卻中與失敗）都以 status 表達，HTTP 一律 200。"
+      required: [status, mode, jsonPath, jsonSizeBytes, xlsxPath, xlsxSizeBytes, upserted, failed, exported, jsonGdrivePath, xlsxGdrivePath, gdriveStatus, message]
+      properties:
+        status: {type: [string, 'null'], description: "OK／FAILED／RUNNING／BUSY／DISABLED／ERROR／COOLDOWN；COOLDOWN 代表 30 秒全域冷卻窗口內、未真的觸發抓取。"}
+        mode: {type: [string, 'null'], description: 自證是哪一顆按鈕；公開重新搜尋為 FETCH_AND_EXPORT，未跑成時為 null。}
+        jsonPath: {type: [string, 'null']}
+        jsonSizeBytes: {type: [integer, 'null'], format: int64}
+        xlsxPath: {type: [string, 'null']}
+        xlsxSizeBytes: {type: [integer, 'null'], format: int64}
+        upserted: {type: [integer, 'null'], format: int32, description: 只有 mode=FETCH_AND_EXPORT 有值。}
+        failed: {type: [integer, 'null'], format: int32, description: 同 upserted。}
+        exported: {type: [integer, 'null'], format: int32}
+        jsonGdrivePath: {type: [string, 'null']}
+        xlsxGdrivePath: {type: [string, 'null']}
+        gdriveStatus: {type: [string, 'null'], description: 未啟用 Drive 同步時為 null。}
+        message: {type: [string, 'null']}
+      additionalProperties: false
+    MarketAnalysisResponse:
+      type: object
+      description: "`MarketAnalysisDto` 的 12 個 record properties。status=NONE 的占位物件所有值皆為 null，兩個陣列為空。"
+      required: [analysisDate, bias, confidence, summary, keyFactors, newsHighlights, twContext, usContext, model, status, errorMessage, generatedAt]
+      properties:
+        analysisDate: {type: [string, 'null'], format: date}
+        bias: {type: [string, 'null'], description: 自由字串；不可假設固定 enum。}
+        confidence: {type: [integer, 'null'], format: int32}
+        summary: {type: [string, 'null']}
+        keyFactors:
+          type: array
+          description: 由 DB 的 JSON 字串欄位解析而來；解析失敗或空字串時為空陣列，不會是 null。
+          items: {type: string}
+        newsHighlights:
+          type: array
+          description: 同 keyFactors，解析失敗時為空陣列。
+          items: {$ref: '#/components/schemas/NewsHighlight'}
+        twContext: {type: [string, 'null']}
+        usContext: {type: [string, 'null']}
+        model: {type: [string, 'null']}
+        status: {type: string, description: "NONE（尚無資料的占位物件）／PROCESSING／OK／FAILED 等；不可只看 HTTP 200。"}
+        errorMessage: {type: [string, 'null']}
+        generatedAt: {type: [string, 'null'], format: date-time, description: Java Instant，UTC offset/Z 的 ISO-8601 時刻。}
+      additionalProperties: false
+    NewsHighlight:
+      type: object
+      description: "`MarketAnalysisResult.NewsHighlight`；四個欄位皆為自由字串，publishedAt 照來源保留、不保證 ISO 格式。"
+      required: [title, source, url, publishedAt]
+      properties:
+        title: {type: [string, 'null']}
+        source: {type: [string, 'null']}
+        url: {type: [string, 'null']}
+        publishedAt: {type: [string, 'null']}
+      additionalProperties: false
+    PortfolioAdviceResponse:
+      type: object
+      description: "`PortfolioAdviceDto` 的 22 個 record properties。status=NONE 的占位物件只有 status 有值，五個陣列為空。金額欄位為 BigDecimal，byte-relay 保留原始 JSON 精度。"
+      required: [id, status, model, createdAt, completedAt, errorMessage, age, investmentHorizonYears, monthlyInvestment, goals, riskTolerance, expectedAnnualReturn, basedOnSnapshotId, basedOnSnapshotDate, basedOnTotalAssets, summary, riskAssessment, targetAllocation, rebalancePlan, actions, warnings, references]
+      properties:
+        id: {type: [integer, 'null'], format: int64}
+        status: {type: string, description: "NONE（尚無資料的占位物件）／PROCESSING／OK／FAILED 等；不可只看 HTTP 200。"}
+        model: {type: [string, 'null']}
+        createdAt: {type: [string, 'null'], format: date-time}
+        completedAt: {type: [string, 'null'], format: date-time}
+        errorMessage: {type: [string, 'null']}
+        age: {type: [integer, 'null'], format: int32}
+        investmentHorizonYears: {type: [integer, 'null'], format: int32}
+        monthlyInvestment: {type: [number, 'null']}
+        goals:
+          type: array
+          description: DB 的逗號分隔字串切開並去除空白；無值時為空陣列。
+          items: {type: string}
+        riskTolerance: {type: [string, 'null'], description: 自由字串；不可假設固定 enum。}
+        expectedAnnualReturn: {type: [string, 'null'], description: 字串而非數值（可能是 "6%" 之類的區間描述）。}
+        basedOnSnapshotId: {type: [integer, 'null'], format: int64}
+        basedOnSnapshotDate: {type: [string, 'null'], format: date}
+        basedOnTotalAssets: {type: [number, 'null']}
+        summary: {type: [string, 'null'], description: result_json 無法解析時為 null。}
+        riskAssessment: {type: [string, 'null']}
+        targetAllocation:
+          type: array
+          items: {$ref: '#/components/schemas/TargetAllocation'}
+        rebalancePlan:
+          type: array
+          items: {$ref: '#/components/schemas/RebalanceItem'}
+        actions:
+          type: array
+          items: {$ref: '#/components/schemas/AdviceAction'}
+        warnings:
+          type: array
+          items: {type: string}
+        references:
+          type: array
+          items: {$ref: '#/components/schemas/AdviceReference'}
+      additionalProperties: false
+    TargetAllocation:
+      type: object
+      description: "`PortfolioAdviceResult.TargetAllocation`。targetAmount ＝ 資產總額 × targetPct、deltaAmount ＝ targetAmount − currentValue，兩者由後端決定性回填。"
+      required: [assetClass, targetPct, currentValue, targetAmount, deltaAmount, rationale]
+      properties:
+        assetClass: {type: [string, 'null'], description: 資產類別；DB／LLM 驅動的自由字串。}
+        targetPct: {type: [number, 'null'], description: 建議目標比例，百分比數值（40.00 表示 40%）。}
+        currentValue: {type: [number, 'null']}
+        targetAmount: {type: [number, 'null']}
+        deltaAmount: {type: [number, 'null'], description: 正為增碼、負為減碼。}
+        rationale: {type: [string, 'null']}
+      additionalProperties: false
+    RebalanceItem:
+      type: object
+      description: "`PortfolioAdviceResult.Rebalance`。"
+      required: [assetClass, holding, action, estimatedAmount, rationale]
+      properties:
+        assetClass: {type: [string, 'null']}
+        holding: {type: [string, 'null'], description: 標的（個股代號／基金名稱／存款；或「整體」）。}
+        action: {type: [string, 'null'], description: BUY／SELL／HOLD；LLM 產出的自由字串，不宣告 enum。}
+        estimatedAmount: {type: [number, 'null'], description: 估計操作金額（新台幣，正數）。}
+        rationale: {type: [string, 'null']}
+      additionalProperties: false
+    AdviceAction:
+      type: object
+      description: "`PortfolioAdviceResult.Action`。"
+      required: [title, detail, priority]
+      properties:
+        title: {type: [string, 'null']}
+        detail: {type: [string, 'null']}
+        priority: {type: [string, 'null'], description: HIGH／MEDIUM／LOW；LLM 產出的自由字串，不宣告 enum。}
+      additionalProperties: false
+    AdviceReference:
+      type: object
+      description: "`PortfolioAdviceResult.Reference`。"
+      required: [title, url]
+      properties:
+        title: {type: [string, 'null']}
+        url: {type: [string, 'null']}
       additionalProperties: false
   responses:
     NginxBadGateway:

@@ -323,8 +323,13 @@ public class TechnicalIndicatorService {
      * <p>{@code high}／{@code low} 直接進 KD 的 RSV 分母與 MACD 的 DI 價基，漏抄不會報錯只會算錯；
      * 舊資料為 null 時由序列核心自行 fallback close（既有慣例，不在此補值）。
      * Task 276 之後要加成交量時，只要改這一支。</p>
+     *
+     * <p>Task 337 起放寬為 package-private，供同 package 的 {@code MarketAnalysisService} 把
+     * 「純 DB 完成日序列」映射後餵給 {@link #computeFromSeries(List)}。這只是純欄位映射、
+     * <b>不是計算入口</b>，故不會製造繞過 {@link #isTaiex(String, String)} 的第二條計算路徑
+     * （與放寬 {@link #computeAllForTaiex()} 的性質完全不同——後者一律不得放寬）。</p>
      */
-    private static StockPriceHistory toRow(TwseIndexDailyHistory d, String stockCode, String market) {
+    static StockPriceHistory toRow(TwseIndexDailyHistory d, String stockCode, String market) {
         return StockPriceHistory.builder()
                 .stockCode(stockCode).market(market).tradingDate(d.getTradingDate())
                 .closePrice(d.getClosePoint())

@@ -149,6 +149,46 @@ class TechnicalIndicatorSeriesAlignmentTest {
         assertThat(prev.d()).isEqualByComparingTo(single.previousD());
     }
 
+    /**
+     * Task 337：本機規則引擎的「前一期 OSC」由 {@code MarketAnalysisService.generateLocal} 以
+     * {@code computeFromSeries(desc.subList(1, n))} 取得——引擎不得自建第二份 MACD／RSI 實作。
+     *
+     * 這個測試釘住該取法的等價性：MACD 一族（EMA→DIF→MACD）與 RSI 都是對 asc 序列的
+     * <b>前綴相依前向遞迴</b>（SMA seed 取自序列開頭、out[i] 只依賴 asc[0..i]），與
+     * {@code computeFromSeries()} 對 kdSeriesAsc 的既有論證同一性質，故「砍掉最新一筆的子序列
+     * 取尾筆」恆等於「完整序列的倒數第二筆」。
+     *
+     * 比對對象刻意用 {@code indicatorSeries()}（吃另一支 repository 方法、走另一條取數路徑），
+     * 不是拿同一份輸入再跑一次 computeFromSeries——那樣恆等，測不到差異。
+     */
+    @Test
+    void 砍掉最新一筆的子序列尾筆必須等於完整序列的倒數第二筆() {
+        List<StockPriceHistory> asc = ascRows(300);
+        givenSeries(asc);
+        TechnicalIndicatorService svc = service();
+
+        List<StockPriceHistory> desc = new ArrayList<>(asc).reversed();
+        TechnicalIndicatorService.ExtendedIndicators prevExt =
+                svc.computeFromSeries(desc.subList(1, desc.size())).extended();
+
+        List<TechnicalIndicatorService.IndicatorPoint> series =
+                svc.indicatorSeries(CODE, MARKET, END.minusDays(60), END);
+        TechnicalIndicatorService.IndicatorPoint secondLast = series.get(series.size() - 2);
+
+        // 先確認比較對象不是空殼，否則 null == null 會讓斷言空過
+        assertThat(prevExt.osc()).isNotNull();
+        assertThat(prevExt.rsi10()).isNotNull();
+
+        assertThat(prevExt.osc()).isEqualByComparingTo(secondLast.osc());
+        assertThat(prevExt.dif()).isEqualByComparingTo(secondLast.dif());
+        assertThat(prevExt.macd()).isEqualByComparingTo(secondLast.macd());
+        assertThat(prevExt.rsi10()).isEqualByComparingTo(secondLast.rsi10());
+
+        // 且確實退了一期：與完整序列的尾筆不同（否則上面四條斷言等於空過）
+        TechnicalIndicatorService.ExtendedIndicators curExt = svc.computeFromSeries(desc).extended();
+        assertThat(curExt.osc()).isNotEqualByComparingTo(prevExt.osc());
+    }
+
     @Test
     void J9與K3D2為K與D的兩種鏡像慣例() {
         List<StockPriceHistory> asc = ascRows(300);

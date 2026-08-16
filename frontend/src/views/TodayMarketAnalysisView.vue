@@ -17,13 +17,29 @@
           title="停用後各寄送時間皆不自動分析（零花費）；仍可手動按「重新分析」"
           @change="onEnabledChange"
         />
+        <span class="model-label">分析引擎</span>
+        <el-select
+          v-model="selectedEngine"
+          size="default"
+          style="width: 190px"
+          :disabled="busy"
+          title="切換分析引擎（下次分析生效）；本機引擎免費、Claude 需 API 金鑰"
+          @change="onEngineChange"
+        >
+          <el-option
+            v-for="en in availableEngines"
+            :key="en.id"
+            :label="en.label"
+            :value="en.id"
+          />
+        </el-select>
         <span class="model-label">分析模型</span>
         <el-select
           v-model="selectedModel"
           size="default"
           style="width: 210px"
-          :disabled="busy"
-          title="切換分析模型（下次分析生效）"
+          :disabled="busy || selectedEngine === 'local'"
+          title="切換分析模型（下次分析生效）；選用本機引擎時停用（仍為 Claude 模式的有效設定）"
           @change="onModelChange"
         >
           <el-option
@@ -38,8 +54,8 @@
           v-model="selectedEffort"
           size="default"
           style="width: 170px"
-          :disabled="busy"
-          title="切換思考深度 effort（越低越省，下次分析生效）"
+          :disabled="busy || selectedEngine === 'local'"
+          title="切換思考深度 effort（越低越省，下次分析生效）；選用本機引擎時停用（仍為 Claude 模式的有效設定）"
           @change="onEffortChange"
         >
           <el-option
@@ -57,6 +73,13 @@
         >重新分析</el-button>
       </div>
     </div>
+
+    <!-- 常駐說明（Task 337）：本機規則引擎的 confidence 定性，不論當前引擎為何皆顯示 -->
+    <el-alert
+      type="info" show-icon :closable="false" style="margin-bottom:16px"
+      title="關於「本機規則引擎」的信心指數"
+      description="本機規則引擎（免費）的 confidence 是技術訊號之間的一致性程度，並非經回測驗證的歷史勝率，僅供參考；如需 AI 綜合新聞與市場脈絡的完整判斷，請切換為 Claude（付費）。"
+    />
 
     <!-- 未設定金鑰 -->
     <el-alert
@@ -255,7 +278,9 @@ const savingEffort = ref(false)
 const savingEnabled = ref(false)
 const today = ref(null)
 const history = ref([])
-const settings = ref({ model: '', effort: '', enabled: true, availableModels: [], availableEfforts: [] })
+const settings = ref({ engine: '', model: '', effort: '', enabled: true, availableModels: [], availableEfforts: [], availableEngines: [] })
+const selectedEngine = ref('')
+const savingEngine = ref(false)
 const selectedModel = ref('')
 const selectedEffort = ref('')
 const enabledFlag = ref(true)
@@ -272,8 +297,9 @@ const isOk = computed(() => today.value && today.value.status === 'OK')
 const activeSendTimes = computed(() => sendTimes.value.filter(t => t.active).map(t => t.time))
 const availableModels = computed(() => settings.value.availableModels || [])
 const availableEfforts = computed(() => settings.value.availableEfforts || [])
+const availableEngines = computed(() => settings.value.availableEngines || [])
 // 任一設定儲存中或分析中 → 所有控制項停用，避免併發覆蓋
-const busy = computed(() => generating.value || savingModel.value || savingEffort.value || savingEnabled.value)
+const busy = computed(() => generating.value || savingEngine.value || savingModel.value || savingEffort.value || savingEnabled.value)
 // 尚無資料時的說明文字：停用中則點明「已停用、需手動」
 const emptyDesc = computed(() => settings.value.enabled === false
   ? '每日自動分析已停用；由管理者按「重新分析」手動產生'
@@ -334,7 +360,8 @@ async function load() {
     history.value = data.history || []
     settings.value = data.settings && data.settings.availableModels
       ? data.settings
-      : { model: '', effort: '', enabled: true, availableModels: [], availableEfforts: [], sendTimes: [] }
+      : { engine: '', model: '', effort: '', enabled: true, availableModels: [], availableEfforts: [], availableEngines: [], sendTimes: [] }
+    selectedEngine.value = settings.value.engine || ''
     selectedModel.value = settings.value.model || ''
     selectedEffort.value = settings.value.effort || ''
     enabledFlag.value = settings.value.enabled !== false
@@ -418,6 +445,25 @@ async function toggleSendTime(row) {
     row.active = prev   // 還原（錯誤 toast 由 api 攔截器統一處理）
   } finally {
     togglingSendTimeId.value = null
+  }
+}
+
+// 管理者切換分析引擎（本機規則引擎／Claude）→ 持久化；成功後下次分析生效。失敗則還原選項。
+async function onEngineChange(engine) {
+  savingEngine.value = true
+  try {
+    const res = await bffApi.todayMarketAnalysis.updateSettings({ engine })
+    if (res && res.engine) {
+      settings.value = res
+      selectedEngine.value = res.engine
+      selectedModel.value = res.model || ''
+      selectedEffort.value = res.effort || ''
+    }
+    ElMessage.success('已切換分析引擎，下次分析生效')
+  } catch (e) {
+    selectedEngine.value = settings.value.engine || ''  // 還原
+  } finally {
+    savingEngine.value = false
   }
 }
 

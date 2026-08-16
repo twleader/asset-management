@@ -26,7 +26,7 @@ elif [[ "$*" == 'status --json' ]]; then
   printf '%s\n' '{"BackendState":"Running","Self":{"Online":true,"DNSName":"mock-device.example.ts.net."}}'
 elif [[ "$*" == 'serve status --json' ]]; then
   if [[ -f "$MOCK_TAILSCALE_STATE" ]]; then
-    printf '%s\n' '{"TCP":{"9090":{"HTTPS":true}},"Web":{"mock-device.example.ts.net:9090":{"Handlers":{"/api/quotes":{"Proxy":"http://127.0.0.1:9090/api/quotes"},"/api/quotes/one":{"Proxy":"http://127.0.0.1:9090/api/quotes/one"},"/api/public/market-index":{"Proxy":"http://127.0.0.1:9090/api/public/market-index"},"/api/assets/latest":{"Proxy":"http://127.0.0.1:9090/api/assets/latest"},"/api/public/exchange-rate/usd-twd":{"Proxy":"http://127.0.0.1:9090/api/public/exchange-rate/usd-twd"}}}}}'
+    printf '%s\n' '{"TCP":{"9090":{"HTTPS":true}},"Web":{"mock-device.example.ts.net:9090":{"Handlers":{"/api/quotes":{"Proxy":"http://127.0.0.1:9090/api/quotes"},"/api/quotes/one":{"Proxy":"http://127.0.0.1:9090/api/quotes/one"},"/api/public/market-index":{"Proxy":"http://127.0.0.1:9090/api/public/market-index"},"/api/assets/latest":{"Proxy":"http://127.0.0.1:9090/api/assets/latest"},"/api/public/exchange-rate/usd-twd":{"Proxy":"http://127.0.0.1:9090/api/public/exchange-rate/usd-twd"},"/api/public/crawler-data/rescan":{"Proxy":"http://127.0.0.1:9090/api/public/crawler-data/rescan"},"/api/public/market-analysis/today":{"Proxy":"http://127.0.0.1:9090/api/public/market-analysis/today"},"/api/public/portfolio-advice/latest":{"Proxy":"http://127.0.0.1:9090/api/public/portfolio-advice/latest"}}}}}'
   else
     printf '%s\n' '{}'
   fi
@@ -97,11 +97,32 @@ case "$url" in
     endpoint=usd-twd
     body='{"pair":"USD/TWD","baseCurrency":"USD","quoteCurrency":"TWD","refreshIntervalSeconds":2,"timezone":"Asia/Taipei","spot":{"source":"HISTORY"},"history":[{"date":"2026-08-13"}],"count":1}'
     ;;
+  # 第六條是 POST-only，腳本刻意只對它發 GET 並預期 405 + Allow: POST（不真的觸發爬蟲）。
+  */api/public/crawler-data/rescan)
+    endpoint=rescan
+    body=''
+    ;;
+  */api/public/market-analysis/today)
+    endpoint=market-analysis
+    body='{"status":"OK","analysisDate":"2026-08-16"}'
+    ;;
+  # 尚無任何一筆建議時 business 仍回 HTTP 200 的 {"status":"NONE"}；腳本沿用 get_200()，無「無資料」旁路。
+  */api/public/portfolio-advice/latest)
+    endpoint=portfolio-advice
+    body='{"status":"NONE"}'
+    ;;
   *)
     printf 'unexpected URL: %s\n' "$url" >&2
     exit 2
     ;;
 esac
+
+if [[ "$endpoint" == rescan ]]; then
+  printf '%s' "$body" >"$output_file"
+  printf 'HTTP/1.1 405 Method Not Allowed\r\nAllow: POST\r\n\r\n' >"$headers_file"
+  printf '405'
+  exit 0
+fi
 
 content_type=application/json
 if [[ "${FAIL_CONTENT_TYPE:-}" == "$endpoint" ]]; then
@@ -150,7 +171,7 @@ run_success() {
     "$SCRIPT" >"$case_dir/stdout" 2>"$case_dir/stderr"
 
   [[ "$(grep -Fxc reset "$case_dir/tailscale.log")" == 1 ]]
-  [[ "$(grep -c '^serve ' "$case_dir/tailscale.log")" == 5 ]]
+  [[ "$(grep -c '^serve ' "$case_dir/tailscale.log")" == 8 ]]
   grep -Fq 'Tailscale Serve 已安全設定' "$case_dir/stdout"
 }
 
@@ -159,4 +180,4 @@ run_content_type_failure quote-one '本機 /api/quotes/one Content-Type 不是 a
 run_content_type_failure market-index '本機 market-index Content-Type 不是 application/json；不會 reset Serve。'
 run_success
 
-printf '%s\n' 'PASS: 五路 preflight Content-Type／reset fail-closed regression'
+printf '%s\n' 'PASS: 八路 preflight Content-Type／reset fail-closed regression'

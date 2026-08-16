@@ -71,7 +71,7 @@ public class MarketAnalysisController {
         return analysisService.getSettings();
     }
 
-    /** 更新分析模型／思考深度／每日自動分析開關（限管理者；白名單驗證於 service，非法值 → 400）。body 可含 model、effort、enabled 之任意組合。 */
+    /** 更新分析引擎／模型／思考深度／每日自動分析開關（限管理者；白名單驗證於 service，非法值 → 400）。body 可含 engine、model、effort、enabled 之任意組合。 */
     @PutMapping("/settings")
     public MarketAnalysisSettingsDto updateSettings(@RequestBody Map<String, Object> body) {
         if (!currentUser.isAdmin()) {
@@ -80,7 +80,8 @@ public class MarketAnalysisController {
         return analysisService.updateSettings(
                 str(body, "model"),
                 str(body, "effort"),
-                boolOrNull(body, "enabled"));
+                boolOrNull(body, "enabled"),
+                str(body, "engine"));
     }
 
     // ===== 分析寄送時間（Task 191）：GET 開放已登入者；新增／刪除／切換啟用限管理者（縱深防禦） =====

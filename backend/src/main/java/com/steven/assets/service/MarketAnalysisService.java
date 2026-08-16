@@ -18,12 +18,15 @@ import com.steven.assets.dto.MarketAnalysisSettingsDto;
 import com.steven.assets.model.DailyMarketAnalysis;
 import com.steven.assets.model.MarketAnalysisSetting;
 import com.steven.assets.model.News;
+import com.steven.assets.model.StockPriceHistory;
 import com.steven.assets.model.TwseIndexDailyHistory;
+import com.steven.assets.model.TwseInstitutionalDaily;
 import com.steven.assets.model.UsIndexDailyHistory;
 import com.steven.assets.repository.DailyMarketAnalysisRepository;
 import com.steven.assets.repository.MarketAnalysisSettingRepository;
 import com.steven.assets.repository.NewsHeadlineRepository;
 import com.steven.assets.repository.TwseIndexDailyHistoryRepository;
+import com.steven.assets.repository.TwseInstitutionalDailyRepository;
 import com.steven.assets.repository.UsIndexDailyHistoryRepository;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
@@ -44,7 +47,9 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Matcher;
@@ -61,6 +66,11 @@ import java.util.regex.Pattern;
  *
  * <p>優雅降級：{@code ANTHROPIC_API_KEY} 未設定 → {@code NOT_CONFIGURED}；呼叫／解析失敗 →
  * {@code FAILED} + 錯誤摘要 + 原始回覆，皆不拋出中斷排程。
+ *
+ * <p><b>Task 337（Requirement 78）起有兩條路徑</b>，由 {@code market_analysis_setting.engine} 決定：
+ * {@code local}（預設）走 {@link LocalMarketAnalysisEngine} 同步產出、零 LLM 成本、不經
+ * {@code PROCESSING}、不檢查金鑰；{@code llm} 走上述既有 Batch API 路徑。兩者的
+ * {@code PROCESSING}／{@code skipIfAlreadyOk} 守門、{@code generateLock} 與寄信條件完全一致。
  */
 @Slf4j
 @Service
@@ -97,6 +107,38 @@ public class MarketAnalysisService {
 
     /** 設定表未設或後備時使用的思考深度。medium＝成本/品質平衡（較未指定時的 API 預設 high 省）。 */
     private static final String DEFAULT_EFFORT = "medium";
+
+    /** 本機規則引擎。 */
+    public static final String ENGINE_LOCAL = "local";
+    /** 既有 Claude Batch API 路徑。 */
+    public static final String ENGINE_LLM = "llm";
+
+    /**
+     * 可選分析引擎白名單——技術白名單（非使用者可自訂之業務分類），比照 {@link #AVAILABLE_MODELS}，
+     * 不套用「Enum 必須入庫由 /api/settings 管理」規範。
+     */
+    private static final List<MarketAnalysisSettingsDto.EngineOption> AVAILABLE_ENGINES = List.of(
+            new MarketAnalysisSettingsDto.EngineOption(ENGINE_LOCAL, "本機規則引擎（免費）"),
+            new MarketAnalysisSettingsDto.EngineOption(ENGINE_LLM, "Claude（付費）")
+    );
+
+    /** 設定表未設或後備時使用的分析引擎。local＝零 LLM 成本（Task 337 起的預設）。 */
+    private static final String DEFAULT_ENGINE = ENGINE_LOCAL;
+
+    /**
+     * 本機路徑餵給指標核心與各訊號的完成日序列長度上限（交易日）。
+     * 與 {@code TechnicalIndicatorService.computeAllForTaiex()} 的 240 筆視窗一致，足夠 MA240 暖機。
+     */
+    private static final int LOCAL_TAIEX_SERIES_MAX = 240;
+
+    /** 本機路徑載入台股／美股日線的回溯年數：需 ≥ {@link #LOCAL_TAIEX_SERIES_MAX} 個交易日，取 2 年有餘裕。 */
+    private static final int LOCAL_SERIES_LOOKBACK_YEARS = 2;
+
+    /** 本機路徑法人買賣超的回溯天數：足以涵蓋三個交易日 ＋ 連假。 */
+    private static final int LOCAL_INSTITUTIONAL_LOOKBACK_DAYS = 14;
+
+    /** 本機路徑取用的法人交易日數（最新日 ＋ 往前共三個交易日的累計）。 */
+    private static final int LOCAL_INSTITUTIONAL_DAYS = 3;
 
     // ===== 參考新聞時效驗證（Task 149.17）=====
     /** 自報 / 原文日期的精確 YYYY-MM-DD 前綴（錨定開頭；"2026-06"／"2026" 因缺日不匹配 → 剔除）。 */
@@ -159,6 +201,10 @@ public class MarketAnalysisService {
     private final MarketAnalysisEmailDispatcher emailDispatcher;
     private final MarketDataService marketDataService;
     private final MarketAnalysisSendTimeService sendTimeService;
+    /** 大盤 MA／KD 一律取自同一份既有核心（Task 337）——本服務不自行重算均線與 KD。 */
+    private final TechnicalIndicatorService technicalIndicatorService;
+    private final TwseInstitutionalDailyRepository institutionalRepo;
+    private final LocalMarketAnalysisEngine localEngine;
 
     @Value("${anthropic.api-key:}")
     private String apiKey;
@@ -222,6 +268,18 @@ public class MarketAnalysisService {
                 .orElse(DEFAULT_EFFORT);
     }
 
+    /**
+     * 解析要用的分析引擎：設定表 engine（白名單內）→ 否則 {@link #DEFAULT_ENGINE}（{@code local}）。
+     * 寫法比照 {@link #resolveEffort()} 的三段式（讀單列設定 → 白名單過濾 → 後備常數），
+     * <b>不比照 {@link #resolveModel()}</b>——後者只驗非空、沒有白名單。
+     */
+    public String resolveEngine() {
+        return settingRepo.findById(MarketAnalysisSetting.SINGLETON_ID)
+                .map(MarketAnalysisSetting::getEngine)
+                .filter(e -> e != null && AVAILABLE_ENGINES.stream().anyMatch(o -> o.id().equals(e)))
+                .orElse(DEFAULT_ENGINE);
+    }
+
     /** 每日自動分析是否啟用：設定表 enabled → 否則預設 true（維持既有行為）。手動觸發不受此限。 */
     public boolean isEnabled() {
         return settingRepo.findById(MarketAnalysisSetting.SINGLETON_ID)
@@ -229,8 +287,9 @@ public class MarketAnalysisService {
                 .orElse(Boolean.TRUE);
     }
 
-    /** 目前設定 + 可選模型／思考深度清單（若現值不在白名單則補入，確保下拉恆含現值）。 */
+    /** 目前設定 + 可選引擎／模型／思考深度清單（若現值不在白名單則補入，確保下拉恆含現值）。 */
     public MarketAnalysisSettingsDto getSettings() {
+        String currentEngine = resolveEngine();
         String currentModel = resolveModel();
         String currentEffort = resolveEffort();
         boolean currentEnabled = isEnabled();
@@ -243,23 +302,30 @@ public class MarketAnalysisService {
         if (efforts.stream().noneMatch(o -> o.id().equals(currentEffort))) {
             efforts.add(0, new MarketAnalysisSettingsDto.EffortOption(currentEffort, currentEffort));
         }
-        return new MarketAnalysisSettingsDto(currentModel, currentEffort, currentEnabled, models, efforts,
-                sendTimeService.list());
+        List<MarketAnalysisSettingsDto.EngineOption> engines = new ArrayList<>(AVAILABLE_ENGINES);
+        if (engines.stream().noneMatch(o -> o.id().equals(currentEngine))) {
+            engines.add(0, new MarketAnalysisSettingsDto.EngineOption(currentEngine, currentEngine));
+        }
+        return new MarketAnalysisSettingsDto(currentEngine, currentModel, currentEffort, currentEnabled,
+                models, efforts, engines, sendTimeService.list());
     }
 
     /**
-     * 更新分析設定（模型／思考深度限白名單；enabled 為開關）：null 表示該欄不變；至少須提供一項。
+     * 更新分析設定（引擎／模型／思考深度限白名單；enabled 為開關）：null 表示該欄不變；至少須提供一項。
      * 回傳更新後設定。
      */
-    public MarketAnalysisSettingsDto updateSettings(String model, String effort, Boolean enabled) {
-        if (model == null && effort == null && enabled == null) {
-            throw new IllegalArgumentException("未提供任何可更新的設定（model / effort / enabled）");
+    public MarketAnalysisSettingsDto updateSettings(String model, String effort, Boolean enabled, String engine) {
+        if (model == null && effort == null && enabled == null && engine == null) {
+            throw new IllegalArgumentException("未提供任何可更新的設定（model / effort / enabled / engine）");
         }
         if (model != null && AVAILABLE_MODELS.stream().noneMatch(o -> o.id().equals(model))) {
             throw new IllegalArgumentException("不支援的分析模型：" + model);
         }
         if (effort != null && AVAILABLE_EFFORTS.stream().noneMatch(o -> o.id().equals(effort))) {
             throw new IllegalArgumentException("不支援的思考深度：" + effort);
+        }
+        if (engine != null && AVAILABLE_ENGINES.stream().noneMatch(o -> o.id().equals(engine))) {
+            throw new IllegalArgumentException("不支援的分析引擎：" + engine);
         }
         MarketAnalysisSetting s = settingRepo.findById(MarketAnalysisSetting.SINGLETON_ID)
                 .orElseGet(MarketAnalysisSetting::new);
@@ -270,6 +336,9 @@ public class MarketAnalysisService {
         }
         if (s.getEffort() == null || s.getEffort().isBlank()) {
             s.setEffort(resolveEffort());
+        }
+        if (s.getEngine() == null || s.getEngine().isBlank()) {
+            s.setEngine(resolveEngine());
         }
         if (s.getEnabled() == null) {
             s.setEnabled(isEnabled());
@@ -283,10 +352,13 @@ public class MarketAnalysisService {
         if (enabled != null) {
             s.setEnabled(enabled);
         }
+        if (engine != null) {
+            s.setEngine(engine);
+        }
         s.setUpdatedAt(LocalDateTime.now());
         settingRepo.save(s);
-        log.info("今日股市分析：設定更新（model={}, effort={}, enabled={}）",
-                s.getModel(), s.getEffort(), s.getEnabled());
+        log.info("今日股市分析：設定更新（engine={}, model={}, effort={}, enabled={}）",
+                s.getEngine(), s.getModel(), s.getEffort(), s.getEnabled());
         return getSettings();
     }
 
@@ -342,10 +414,199 @@ public class MarketAnalysisService {
                 log.info("今日股市分析：{} 已有成功分析，略過（trigger={}）", date, trigger);
                 return existing;
             }
+            // Task 337：兩道守門與 generateLock 對兩條路徑一致適用，守門之後才依設定分岔。
+            String engine = resolveEngine();
+            if (ENGINE_LOCAL.equals(engine)) {
+                return generateLocal(date, trigger, existing, resetEmailSent);
+            }
             return submitBatch(date, trigger, existing, resetEmailSent);
         } finally {
             generateLock.unlock();
         }
+    }
+
+    // ===== 本機規則引擎路徑（Task 337）=====
+
+    /**
+     * 本機規則引擎路徑：載入本地 DB 資料 → {@link LocalMarketAnalysisEngine#evaluate} → 直接落
+     * {@code OK}（同步、<b>不經 {@code PROCESSING}</b>、不設 {@code batch_id}，故
+     * {@link #pollPendingBatches()} 永遠撈不到它——本來就沒有批次要收尾）。
+     *
+     * <p><b>不檢查 {@code ANTHROPIC_API_KEY}</b>：本路徑零 LLM 呼叫，拔掉金鑰仍應每日正常產出；
+     * {@code NOT_CONFIGURED} 只在 {@code engine=llm} 且無金鑰時出現。</p>
+     *
+     * <p>引擎拋例外時落 {@code FAILED} ＋ 錯誤摘要，<b>不往外拋</b>，維持既有「不中斷排程／手動觸發」契約。</p>
+     */
+    private DailyMarketAnalysis generateLocal(LocalDate date, String trigger, DailyMarketAnalysis existing,
+                                              boolean resetEmailSent) {
+        DailyMarketAnalysis row = existing != null ? existing : new DailyMarketAnalysis();
+        row.setAnalysisDate(date);
+        row.setModel(truncate(LocalMarketAnalysisEngine.RULE_VERSION, 64));
+        row.setGeneratedAt(Instant.now());
+        row.setBatchId(null);
+        // 重跑既有 OK 筆時，先清掉上一次成功內容（沿用既有語意）
+        clearContent(row);
+        if (resetEmailSent) {
+            row.setEmailSentAt(null);
+        }
+
+        try {
+            // 價基一致性（Task 337）：收盤、量能與 MA／KD 皆由這一份「純 DB 完成日序列」導出。
+            // 刻意不用 technicalIndicatorService.computeAll("0000","台股")——那條路徑會從 Redis 取即時價
+            // 合成一列今日 bar 併入，盤中觸發（每分鐘 tick 的多個寄送時點／管理者手動）時就會變成
+            // 「今天的指標配昨天的收盤」，同一份判斷混用兩個價基。
+            LocalDate since = date.minusYears(LOCAL_SERIES_LOOKBACK_YEARS);
+            List<TwseIndexDailyHistory> twseRows = tailOf(twseRows(since), LOCAL_TAIEX_SERIES_MAX);
+            List<double[]> closes = closesOf(twseRows);
+            List<double[]> tradeValues = tradeValuesOf(twseRows);
+            List<StockPriceHistory> desc = taiexSeriesDesc(twseRows);
+            TechnicalIndicatorService.FullIndicators indicators =
+                    technicalIndicatorService.computeFromSeries(desc);
+            // 為什麼要算兩次：引擎的 MACD OSC 訊號要的是「方向」（當期 vs 前一期），而
+            // FullIndicators 只給單點。全站唯一一份 MACD／RSI 實作在 TechnicalIndicatorService，
+            // 引擎不得自建第二份（structure.md §3.2 鐵則 4），故改由這裡把「前一期」也算出來。
+            //
+            // 子序列取尾筆 ≡ 完整序列的倒數第二筆：MACD 一族（EMA→DIF→MACD）與 RSI 都是對 asc 序列
+            // 的前綴相依前向遞迴——SMA seed 取自序列開頭、out[i] 只依賴 asc[0..i]——與
+            // TechnicalIndicatorService.computeFromSeries() 對 kdSeriesAsc 的既有論證同一性質。
+            // desc 為降序（最新在前），故砍掉 index 0 即砍掉最新那個交易日。
+            // 序列 ≤ 240 筆，多跑一趟的成本可忽略。
+            TechnicalIndicatorService.FullIndicators previousIndicators = desc.size() < 2
+                    ? TechnicalIndicatorService.FullIndicators.EMPTY
+                    : technicalIndicatorService.computeFromSeries(desc.subList(1, desc.size()));
+
+            Map<String, List<double[]>> us = new LinkedHashMap<>();
+            for (String code : US_INDEX_CODES) {
+                us.put(code, usCloses(code, since));
+            }
+
+            List<LocalMarketAnalysisEngine.InstitutionalNet> institutional = institutionalRecent(date);
+            LocalMarketAnalysisEngine.InstitutionalNet latestNet =
+                    institutional.isEmpty() ? null : institutional.get(institutional.size() - 1);
+
+            List<News> recentNews = fetchRecentLocalNews(date);
+            log.info("今日股市分析：本機規則引擎產生（date={}, trigger={}, taiexRows={}, localNews={}, 法人交易日={}）",
+                    date, trigger, twseRows.size(), recentNews.size(), institutional.size());
+
+            MarketAnalysisResult result = localEngine.evaluate(date, closes, tradeValues, us,
+                    indicators, previousIndicators, latestNet, institutional, recentNews);
+            // 不得用既有 applyResult(...)——它內含 sanitizeNews()，會對非白名單網域發 outbound HTTP 回抓原文
+            applyLocalResult(row, result);
+            row.setStatus(DailyMarketAnalysis.STATUS_OK);
+            row.setErrorMessage(null);
+            log.info("今日股市分析：本機規則引擎完成（date={}, bias={}, confidence={}）",
+                    date, row.getBias(), row.getConfidence());
+        } catch (Exception e) {
+            log.warn("今日股市分析：本機規則引擎失敗（date={}）: {}", date, e.getMessage(), e);
+            clearContent(row);
+            row.setStatus(DailyMarketAnalysis.STATUS_FAILED);
+            row.setErrorMessage(truncate(e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage(), 1000));
+        }
+
+        // 寄信判斷三項與 LLM 路徑（finalizeIfReady）完全一致：OK ＋ 未寄過 ＋ 該日確為台股交易日。
+        // 第 3 項（颱風假／臨時休市的第二次驗證）在本機路徑其實不存在「送出後、收尾前」的時間差，
+        // 但保留可確保兩條路徑寄信條件一致、日後不會因單邊修改而分歧。
+        if (DailyMarketAnalysis.STATUS_OK.equals(row.getStatus()) && row.getEmailSentAt() == null) {
+            if (!marketDataService.isTwTradingDay(date)) {
+                log.info("今日股市分析：{} 非台股交易日（颱風假 / 臨時休市），本機路徑不寄每日 email（分析仍保留供查閱）", date);
+            } else {
+                try {
+                    if (emailDispatcher.dispatchDaily(MarketAnalysisDto.from(row, objectMapper))) {
+                        row.setEmailSentAt(Instant.now());
+                    }
+                } catch (Exception e) {
+                    log.warn("今日股市分析：寄送每日 email 失敗（date={}）: {}", date, e.getMessage());
+                }
+            }
+        }
+        return save(row, date);
+    }
+
+    /**
+     * 本機路徑的落庫轉換：內容與 {@link #applyResult} 相同，<b>惟 {@code newsHighlights} 不過
+     * {@link #sanitizeNews}</b>。
+     *
+     * <p>{@code sanitizeNews()} 會對不在 {@link #TRUSTED_LOCAL_NEWS_HOSTS} 的連結呼叫
+     * {@link #fetchPublishedDate} <b>回抓原文網頁</b>，而 {@code fx}／{@code us-market}／
+     * {@code kr-market}／{@code kr-intraday} 這幾類量化快照的來源網域不在白名單內——照用會讓一條
+     * 宣稱「100% 本地 DB、零外部呼叫」的路徑偷偷發 outbound HTTP，並以 {@code date.toString()}
+     * 覆寫 {@code publishedAt}、甚至整筆剔除。既有 {@link #applyResult} 保持原樣供 LLM 路徑使用。</p>
+     */
+    private void applyLocalResult(DailyMarketAnalysis row, MarketAnalysisResult r) throws Exception {
+        row.setBias(normalizeBias(r.bias()));
+        row.setConfidence(clampConfidence(r.confidence()));
+        row.setSummary(r.summary());
+        row.setTwContext(r.twContext());
+        row.setUsContext(r.usContext());
+        row.setKeyFactors(objectMapper.writeValueAsString(
+                r.keyFactors() != null ? r.keyFactors() : List.of()));
+        row.setNewsHighlights(objectMapper.writeValueAsString(
+                r.newsHighlights() != null ? r.newsHighlights() : List.of()));
+    }
+
+    /**
+     * 本機路徑的法人籌碼選列：重用既有 {@link TwseInstitutionalDailyRepository#findVisibleRange} 這一支
+     * 查詢（不新增第二個查詢方法），選列判準與 {@code TradingRadarMarketFeatureResolver.completeInstitutional}
+     * 相同（八欄完整 ＋ {@code status=AVAILABLE} ＋ {@code tradingDate} 不晚於分析日）。
+     *
+     * <p>{@code twse_institutional_daily} 是 append-only observation 表，同一 {@code trading_date}
+     * 會有多列；{@code findVisibleRange} 已按 {@code observedAt ASC} 排序，故同日以 LinkedHashMap
+     * 覆寫後留下的即為 {@code observedAt} 最大的那列。</p>
+     *
+     * <p>{@code decisionInstant} 取 {@link Instant#now()}，語意是「此刻可見的 observation」＝
+     * <b>不做 point-in-time 回溯</b>（本功能是產生「今天」的判斷，不是回測）。
+     * <b>不得</b>改成交易日邊界——那會改變可見列。</p>
+     *
+     * @return 由舊到新、最多 {@value #LOCAL_INSTITUTIONAL_DAYS} 個交易日；查詢失敗回空清單（該面向的訊號不計分）
+     */
+    private List<LocalMarketAnalysisEngine.InstitutionalNet> institutionalRecent(LocalDate analysisDate) {
+        try {
+            List<TwseInstitutionalDaily> rows = institutionalRepo.findVisibleRange(
+                    analysisDate.minusDays(LOCAL_INSTITUTIONAL_LOOKBACK_DAYS), analysisDate, Instant.now());
+            LinkedHashMap<LocalDate, TwseInstitutionalDaily> byDate = new LinkedHashMap<>();
+            for (TwseInstitutionalDaily r : rows) {
+                if (completeInstitutional(r, analysisDate)) {
+                    byDate.put(r.getTradingDate(), r);
+                }
+            }
+            List<LocalMarketAnalysisEngine.InstitutionalNet> asc = new ArrayList<>();
+            for (TwseInstitutionalDaily r : byDate.values()) {
+                asc.add(new LocalMarketAnalysisEngine.InstitutionalNet(
+                        r.getTradingDate(), r.getForeignNet(), r.getTrustNet(),
+                        r.getDealerNet(), r.getTotalNet()));
+            }
+            return tailOf(asc, LOCAL_INSTITUTIONAL_DAYS);
+        } catch (Exception e) {
+            log.warn("今日股市分析：讀法人買賣超失敗（籌碼面訊號不計分）：{}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    /**
+     * 與 {@code TradingRadarMarketFeatureResolver.completeInstitutional} 同判準的完整性守門：
+     * {@code status=AVAILABLE} 且 tradingDate／observedAt／foreignNet／trustNet／dealerNet／totalNet／
+     * provider／sourceUrl 八欄皆非 null，且 {@code tradingDate} 不晚於分析日。
+     *
+     * <p><b>嚴禁</b>由 {@code news_headline} 的 title／summary 反向解析法人數值——
+     * {@link TwseInstitutionalDaily} 的 class javadoc 明文禁止。</p>
+     */
+    private static boolean completeInstitutional(TwseInstitutionalDaily row, LocalDate target) {
+        return row != null
+                && CandidateMarketFeature.AVAILABLE.equals(row.getStatus())
+                && row.getTradingDate() != null
+                && !row.getTradingDate().isAfter(target)
+                && row.getObservedAt() != null
+                && row.getForeignNet() != null
+                && row.getTrustNet() != null
+                && row.getDealerNet() != null
+                && row.getTotalNet() != null
+                && row.getProvider() != null
+                && row.getSourceUrl() != null;
+    }
+
+    /** 取序列尾端最多 max 筆（不足則全給）。 */
+    private static <T> List<T> tailOf(List<T> list, int max) {
+        return list.size() <= max ? list : new ArrayList<>(list.subList(list.size() - max, list.size()));
     }
 
     /**
@@ -740,16 +1001,57 @@ public class MarketAnalysisService {
         }
     }
 
+    /**
+     * 台股大盤日線原始列（由舊到新）。LLM 與本機兩條路徑共用<b>同一支既有</b> repository 查詢，
+     * 不新增第二個查詢方法（Task 337）。
+     */
+    private List<TwseIndexDailyHistory> twseRows(LocalDate since) {
+        return twseRepo.findByTradingDateGreaterThanEqualOrderByTradingDateAsc(since);
+    }
+
     /** 台股大盤（tradingDate → double[]{epochDay, close}）由舊到新。 */
     private List<double[]> twseCloses(LocalDate since) {
-        List<TwseIndexDailyHistory> rows =
-                twseRepo.findByTradingDateGreaterThanEqualOrderByTradingDateAsc(since);
+        return closesOf(twseRows(since));
+    }
+
+    private static List<double[]> closesOf(List<TwseIndexDailyHistory> rows) {
         List<double[]> out = new ArrayList<>(rows.size());
         for (TwseIndexDailyHistory r : rows) {
             if (r.getClosePoint() == null) continue;
             out.add(new double[]{r.getTradingDate().toEpochDay(), r.getClosePoint().doubleValue()});
         }
         return out;
+    }
+
+    /**
+     * 台股大盤成交金額（{@code double[]{epochDay, tradeValue}}，單位為<b>元</b>）由舊到新。
+     * {@code trade_value} 可為 null（舊列尚未回補）——該列略過，量能訊號依「資料不足不計分」處理。
+     */
+    private static List<double[]> tradeValuesOf(List<TwseIndexDailyHistory> rows) {
+        List<double[]> out = new ArrayList<>(rows.size());
+        for (TwseIndexDailyHistory r : rows) {
+            if (r.getTradeValue() == null) continue;
+            out.add(new double[]{r.getTradingDate().toEpochDay(), r.getTradeValue().doubleValue()});
+        }
+        return out;
+    }
+
+    /**
+     * 台股大盤日線 → {@link StockPriceHistory} <b>降序</b>序列（最新在前），供
+     * {@link TechnicalIndicatorService#computeFromSeries(List)} 使用。
+     *
+     * <p>映射沿用 {@code TechnicalIndicatorService.toRow(TwseIndexDailyHistory, String, String)}
+     * 這一份唯一的欄位映射（Task 337 起放寬為 package-private），確保 high／low 不漏抄——
+     * 它們直接進 KD 的 RSV 分母。</p>
+     */
+    private static List<StockPriceHistory> taiexSeriesDesc(List<TwseIndexDailyHistory> rows) {
+        List<StockPriceHistory> desc = new ArrayList<>(rows.size());
+        for (int i = rows.size() - 1; i >= 0; i--) {
+            TwseIndexDailyHistory r = rows.get(i);
+            if (r.getClosePoint() == null) continue;
+            desc.add(TechnicalIndicatorService.toRow(r, "0000", "台股"));
+        }
+        return desc;
     }
 
     private List<double[]> usCloses(String code, LocalDate since) {
@@ -913,8 +1215,12 @@ public class MarketAnalysisService {
         return out;
     }
 
-    /** 僅接受 http/https，其餘（含 null）回 null。 */
-    private String safeHttpUrl(String url) {
+    /**
+     * 僅接受 http/https，其餘（含 null）回 null。
+     * Task 337 起放寬為 package-private static，供 {@link LocalMarketAnalysisEngine} 共用同一份
+     * {@code <a href>} XSS 防禦縱深（本機路徑不套 {@link #sanitizeNews}，但 url 仍須過這一層）。
+     */
+    static String safeHttpUrl(String url) {
         if (url == null) return null;
         String u = url.trim().toLowerCase();
         return (u.startsWith("http://") || u.startsWith("https://")) ? url.trim() : null;

@@ -7,23 +7,35 @@
         <span class="page-sub">填好你的理財條件，AI 會結合你目前持有的資產給出個人化的資產配置建議</span>
       </div>
       <div v-if="auth.isAdmin" class="header-actions">
+        <span class="model-label">分析引擎</span>
+        <el-select v-model="selectedEngine" size="default" style="width: 190px" :disabled="busy"
+          title="切換分析引擎（下次產生生效）" @change="onEngineChange">
+          <el-option v-for="en in availableEngines" :key="en.id" :label="en.label" :value="en.id" />
+        </el-select>
         <span class="model-label">分析模型</span>
-        <el-select v-model="selectedModel" size="default" style="width: 200px" :disabled="busy"
-          title="切換分析模型（下次產生生效）" @change="onModelChange">
+        <el-select v-model="selectedModel" size="default" style="width: 200px" :disabled="modelEffortDisabled"
+          title="切換分析模型（下次產生生效）；本機引擎時停用（仍為 hybrid／llm 模式的有效設定）" @change="onModelChange">
           <el-option v-for="m in availableModels" :key="m.id" :label="m.label" :value="m.id" />
         </el-select>
         <span class="model-label">思考深度</span>
-        <el-select v-model="selectedEffort" size="default" style="width: 160px" :disabled="busy"
-          title="切換思考深度（越低越省，下次產生生效）" @change="onEffortChange">
+        <el-select v-model="selectedEffort" size="default" style="width: 160px" :disabled="modelEffortDisabled"
+          title="切換思考深度（越低越省，下次產生生效）；本機引擎時停用（仍為 hybrid／llm 模式的有效設定）" @change="onEffortChange">
           <el-option v-for="e in availableEfforts" :key="e.id" :label="e.label" :value="e.id" />
         </el-select>
         <span class="model-label">市場搜尋</span>
-        <el-select v-model="selectedWebSearch" size="default" style="width: 200px" :disabled="busy"
-          title="切換 web 搜尋次數（0＝僅依個人資產與條件，下次產生生效）" @change="onWebSearchChange">
+        <el-select v-model="webSearchDisplay" size="default" style="width: 200px" :disabled="webSearchDisabled"
+          title="切換 web 搜尋次數（0＝僅依個人資產與條件，下次產生生效）；本機引擎時停用，混合引擎強制不搜尋並顯示為 0" @change="onWebSearchChange">
           <el-option v-for="w in availableWebSearches" :key="w.value" :label="w.label" :value="w.value" />
         </el-select>
       </div>
     </div>
+
+    <!-- 常駐說明（Task 339）：本機配置模板的定性，不論當前引擎為何皆顯示 -->
+    <el-alert
+      type="info" show-icon :closable="false" style="margin-bottom:16px"
+      title="關於「本機配置模板」"
+      description="本機配置模板（local／hybrid 檔位使用）依可忍受風險與距退休年數套用常見經驗法則比例，未經回測或個人情境驗證，不構成個人化投資建議；如需 AI 結合你的資產與市場脈絡產生完整建議，請切換為 llm 引擎。"
+    />
 
     <!-- 條件設定表單 -->
     <el-card shadow="never" class="section-card">
@@ -410,6 +422,7 @@ const auth = useAuthStore()
 const loading = ref(false)
 const generating = ref(false)
 const savingProfile = ref(false)
+const savingEngine = ref(false)
 const savingModel = ref(false)
 const savingEffort = ref(false)
 const savingWebSearch = ref(false)
@@ -444,7 +457,8 @@ const latest = ref(null)
 const history = ref([])
 const allocation = ref({ snapshotId: null, snapshotDate: null, totalAssets: null, items: [] })
 const projection = ref(null)
-const settings = ref({ model: '', effort: '', webSearchMaxUses: null, availableModels: [], availableEfforts: [], availableWebSearches: [] })
+const settings = ref({ engine: '', model: '', effort: '', webSearchMaxUses: null, availableModels: [], availableEfforts: [], availableWebSearches: [], availableEngines: [] })
+const selectedEngine = ref('')
 const selectedModel = ref('')
 const selectedEffort = ref('')
 const selectedWebSearch = ref(null)
@@ -509,7 +523,16 @@ const allocationItems = computed(() => allocation.value.items || [])
 const availableModels = computed(() => settings.value.availableModels || [])
 const availableEfforts = computed(() => settings.value.availableEfforts || [])
 const availableWebSearches = computed(() => settings.value.availableWebSearches || [])
-const busy = computed(() => generating.value || isProcessing.value || savingProfile.value || savingModel.value || savingEffort.value || savingWebSearch.value)
+const availableEngines = computed(() => settings.value.availableEngines || [])
+const busy = computed(() => generating.value || isProcessing.value || savingProfile.value || savingEngine.value || savingModel.value || savingEffort.value || savingWebSearch.value)
+// local 檔位：模型／思考深度／搜尋次數全部停用；hybrid 檔位：搜尋次數另外停用（強制不搜尋）
+const modelEffortDisabled = computed(() => busy.value || selectedEngine.value === 'local')
+const webSearchDisabled = computed(() => busy.value || selectedEngine.value === 'local' || selectedEngine.value === 'hybrid')
+// hybrid 檔位強制不搜尋，顯示層強制為 0；不覆寫底層 selectedWebSearch，切回 llm 時原值仍在
+const webSearchDisplay = computed({
+  get: () => (selectedEngine.value === 'hybrid' ? 0 : selectedWebSearch.value),
+  set: (v) => { selectedWebSearch.value = v }
+})
 
 // 報酬率預設（與後端 RetirementProjectionService.returnDefault 對齊）——留空時 placeholder 顯示帶入值
 const RETURN_DEFAULTS = {
@@ -709,7 +732,8 @@ async function load(silent = false) {
     // settings
     settings.value = data.settings && data.settings.availableModels
       ? data.settings
-      : { model: '', effort: '', webSearchMaxUses: null, availableModels: [], availableEfforts: [], availableWebSearches: [] }
+      : { engine: '', model: '', effort: '', webSearchMaxUses: null, availableModels: [], availableEfforts: [], availableWebSearches: [], availableEngines: [] }
+    selectedEngine.value = settings.value.engine || ''
     selectedModel.value = settings.value.model || ''
     selectedEffort.value = settings.value.effort || ''
     selectedWebSearch.value = settings.value.webSearchMaxUses ?? null
@@ -798,6 +822,19 @@ watch(() => latest.value && latest.value.status, (status) => {
   }
 })
 
+// 管理者切換分析引擎（local／hybrid／llm）→ 持久化，下次產生生效。失敗還原。
+async function onEngineChange(engine) {
+  savingEngine.value = true
+  try {
+    const res = await bffApi.portfolioAdvice.updateSettings({ engine })
+    if (res && res.engine) { settings.value = res; syncSettingSelects(res) }
+    ElMessage.success('已切換分析引擎，下次產生生效')
+  } catch (e) {
+    selectedEngine.value = settings.value.engine || ''
+  } finally {
+    savingEngine.value = false
+  }
+}
 // 管理者切換模型 / 思考深度 / web 搜尋（成本控管）→ 持久化，下次產生生效。失敗還原。
 async function onModelChange(model) {
   savingModel.value = true
@@ -836,6 +873,7 @@ async function onWebSearchChange(webSearchMaxUses) {
   }
 }
 function syncSettingSelects(res) {
+  selectedEngine.value = res.engine || ''
   selectedModel.value = res.model || ''
   selectedEffort.value = res.effort || ''
   selectedWebSearch.value = res.webSearchMaxUses ?? null
