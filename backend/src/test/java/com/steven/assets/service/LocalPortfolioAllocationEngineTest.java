@@ -13,6 +13,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -268,6 +269,144 @@ class LocalPortfolioAllocationEngineTest {
                 "無金額（無快照）時不產生調整動作");
     }
 
+    // ===== Requirement 82 / Task 341：子分配對照表（SUB_TEMPLATES）=====
+
+    @Test
+    void subTemplate_everyOfTwelveCellsSumsTo100ForBothStockAndFund() {
+        for (String risk : List.of(LocalPortfolioAllocationEngine.RISK_CONSERVATIVE,
+                LocalPortfolioAllocationEngine.RISK_BALANCED,
+                LocalPortfolioAllocationEngine.RISK_AGGRESSIVE)) {
+            for (Integer years : List.of(30, 15, 5, 0)) {
+                LocalPortfolioAllocationEngine.SubTemplate st = engine.subTemplateOf(risk, years);
+                assertNotNull(st, risk + "/" + years + " 缺子分配格");
+                BigDecimal stockSum = st.stockGrowthPct().add(st.stockIncomePct())
+                        .add(st.stockBondShortPct()).add(st.stockBondMidPct()).add(st.stockBondLongPct());
+                BigDecimal fundSum = st.fundGrowthPct().add(st.fundIncomePct())
+                        .add(st.fundBondShortPct()).add(st.fundBondMidPct()).add(st.fundBondLongPct());
+                assertEquals(0, new BigDecimal("100").compareTo(stockSum),
+                        "股票子分配加總須為 100：" + risk + "/" + years);
+                assertEquals(0, new BigDecimal("100").compareTo(fundSum),
+                        "基金子分配加總須為 100：" + risk + "/" + years);
+            }
+        }
+    }
+
+    @Test
+    void subTemplate_stockBondPctsAreAlwaysZero() {
+        // 設計原則：債券曝險一律經由信託基金達成，股票桶目標次分配的三個債券期別固定為 0
+        for (String risk : List.of(LocalPortfolioAllocationEngine.RISK_CONSERVATIVE,
+                LocalPortfolioAllocationEngine.RISK_BALANCED,
+                LocalPortfolioAllocationEngine.RISK_AGGRESSIVE)) {
+            for (Integer years : List.of(30, 15, 5, 0)) {
+                LocalPortfolioAllocationEngine.SubTemplate st = engine.subTemplateOf(risk, years);
+                assertEquals(0, BigDecimal.ZERO.compareTo(st.stockBondShortPct()));
+                assertEquals(0, BigDecimal.ZERO.compareTo(st.stockBondMidPct()));
+                assertEquals(0, BigDecimal.ZERO.compareTo(st.stockBondLongPct()));
+            }
+        }
+    }
+
+    // ===== Requirement 82 / Task 341：withSubAllocationAmounts =====
+
+    @Test
+    void withSubAllocationAmounts_producesFiveSubItemsPerBucketWithCorrectAmounts() {
+        PortfolioAdviceResult enriched = new PortfolioAdviceResult(
+                "s", "r",
+                List.of(
+                        alloc(LocalPortfolioAllocationEngine.CLASS_CASH, "20", "2000000", "2000000", "0"),
+                        alloc(LocalPortfolioAllocationEngine.CLASS_FUND, "30", "3000000", "3000000", "0"),
+                        alloc(LocalPortfolioAllocationEngine.CLASS_STOCK, "50", "5000000", "5000000", "0")),
+                List.of(), List.of(), List.of("w"), List.of());
+
+        // RISK_BALANCED / 距退休 15 年（MEDIUM）：股票 65/35/0/0/0、基金 35/25/15/15/10
+        PortfolioAdviceResult out = engine.withSubAllocationAmounts(
+                enriched, currentAllocationWithSubItems(), LocalPortfolioAllocationEngine.RISK_BALANCED, 15);
+
+        PortfolioAdviceResult.TargetAllocation cash = findByClass(out, LocalPortfolioAllocationEngine.CLASS_CASH);
+        assertTrue(cash.subAllocations().isEmpty(), "存款（現金）不細分子類別");
+
+        PortfolioAdviceResult.TargetAllocation stock = findByClass(out, LocalPortfolioAllocationEngine.CLASS_STOCK);
+        assertEquals(5, stock.subAllocations().size(), "目標比例為 0 的子類別仍須輸出一筆");
+        assertEquals(List.of(LocalPortfolioAllocationEngine.SUBCLASS_GROWTH,
+                        LocalPortfolioAllocationEngine.SUBCLASS_INCOME,
+                        LocalPortfolioAllocationEngine.SUBCLASS_BOND_SHORT,
+                        LocalPortfolioAllocationEngine.SUBCLASS_BOND_MID,
+                        LocalPortfolioAllocationEngine.SUBCLASS_BOND_LONG),
+                stock.subAllocations().stream().map(PortfolioAdviceResult.SubAllocation::subClass).toList());
+        BigDecimal stockSubSum = stock.subAllocations().stream()
+                .map(PortfolioAdviceResult.SubAllocation::targetAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        assertTrue(stockSubSum.subtract(stock.targetAmount()).abs().compareTo(BigDecimal.ONE) <= 0,
+                "股票子分配 targetAmount 之和應約等於頂層 targetAmount（尾差 ≤ 1 元）：" + stockSubSum);
+
+        PortfolioAdviceResult.SubAllocation stockGrowth = findBySubClass(stock, LocalPortfolioAllocationEngine.SUBCLASS_GROWTH);
+        assertEquals(0, new BigDecimal("3250000").compareTo(stockGrowth.targetAmount()));
+        assertEquals(0, new BigDecimal("2000000").compareTo(stockGrowth.currentValue()));
+        assertEquals(0, new BigDecimal("1250000").compareTo(stockGrowth.deltaAmount()),
+                "deltaAmount = targetAmount − currentValue");
+
+        PortfolioAdviceResult.SubAllocation stockBondShort = findBySubClass(stock, LocalPortfolioAllocationEngine.SUBCLASS_BOND_SHORT);
+        assertEquals(0, BigDecimal.ZERO.compareTo(stockBondShort.targetPct()));
+        assertEquals(0, BigDecimal.ZERO.compareTo(stockBondShort.targetAmount()));
+        assertEquals(0, BigDecimal.ZERO.compareTo(stockBondShort.currentValue()), "現況查無該子類別時視為 0");
+
+        PortfolioAdviceResult.TargetAllocation fund = findByClass(out, LocalPortfolioAllocationEngine.CLASS_FUND);
+        assertEquals(5, fund.subAllocations().size());
+        BigDecimal fundSubSum = fund.subAllocations().stream()
+                .map(PortfolioAdviceResult.SubAllocation::targetAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        assertTrue(fundSubSum.subtract(fund.targetAmount()).abs().compareTo(BigDecimal.ONE) <= 0,
+                "信託基金子分配 targetAmount 之和應約等於頂層 targetAmount（尾差 ≤ 1 元）：" + fundSubSum);
+
+        PortfolioAdviceResult.SubAllocation fundBondShort = findBySubClass(fund, LocalPortfolioAllocationEngine.SUBCLASS_BOND_SHORT);
+        assertEquals(0, new BigDecimal("450000").compareTo(fundBondShort.targetAmount()));
+        assertEquals(0, new BigDecimal("300000").compareTo(fundBondShort.currentValue()));
+        assertEquals(0, new BigDecimal("150000").compareTo(fundBondShort.deltaAmount()));
+    }
+
+    // ===== Requirement 82 / Task 341：STOCK_BOND_HOLDING_WARNING =====
+
+    @Test
+    void evaluate_triggersStockBondHoldingWarningWhenStockBucketHoldsBondSubclasses() {
+        PortfolioAdviceResult r = engine.evaluate(
+                LocalPortfolioAllocationEngine.RISK_BALANCED, 20,
+                currentAllocationWithStockBondHolding(new BigDecimal("100000"), new BigDecimal("50000"), new BigDecimal("50000")),
+                availableProjection());
+
+        assertTrue(r.warnings().stream().anyMatch(w -> w.contains("200,000")),
+                "股票桶三個債券期別金額加總（100,000+50,000+50,000=200,000）須出現在提醒文案：" + r.warnings());
+    }
+
+    @Test
+    void evaluate_doesNotTriggerStockBondHoldingWarningWhenNoBondSubclassInStockBucket() {
+        PortfolioAdviceResult r = engine.evaluate(
+                LocalPortfolioAllocationEngine.RISK_BALANCED, 20, currentAllocation(), availableProjection());
+
+        assertFalse(r.warnings().stream().anyMatch(w -> w.contains("被歸類為債券型標的")),
+                "股票桶無債券子類別時不得觸發提醒：" + r.warnings());
+    }
+
+    @Test
+    void evaluate_fundBucketBondHoldingsDoNotTriggerTheStockOnlyWarning() {
+        // 信託基金桶本就允許債券部位（非例外情況），僅股票桶才觸發此則提醒
+        List<CurrentAllocationDto.Item> items = new ArrayList<>();
+        items.add(new CurrentAllocationDto.Item(LocalPortfolioAllocationEngine.CLASS_CASH,
+                new BigDecimal("4000000"), new BigDecimal("40.0"), List.of()));
+        items.add(new CurrentAllocationDto.Item(LocalPortfolioAllocationEngine.CLASS_FUND,
+                new BigDecimal("1000000"), new BigDecimal("10.0"), List.of(
+                        new CurrentAllocationDto.SubItem(LocalPortfolioAllocationEngine.SUBCLASS_BOND_MID,
+                                new BigDecimal("500000"), new BigDecimal("50.0")))));
+        items.add(new CurrentAllocationDto.Item(LocalPortfolioAllocationEngine.CLASS_STOCK,
+                new BigDecimal("5000000"), new BigDecimal("50.0"), List.of()));
+        CurrentAllocationDto current = new CurrentAllocationDto(1L, LocalDate.of(2026, 8, 15), new BigDecimal("10000000"), items);
+
+        PortfolioAdviceResult r = engine.evaluate(
+                LocalPortfolioAllocationEngine.RISK_BALANCED, 20, current, availableProjection());
+
+        assertFalse(r.warnings().stream().anyMatch(w -> w.contains("被歸類為債券型標的")),
+                "信託基金桶持有債券不觸發股票專屬的提醒：" + r.warnings());
+    }
+
     // ===== 測試資料工具 =====
 
     private static PortfolioAdviceResult.TargetAllocation alloc(String assetClass, String pct,
@@ -277,18 +416,64 @@ class LocalPortfolioAllocationEngineTest {
                 current == null ? null : new BigDecimal(current),
                 target == null ? null : new BigDecimal(target),
                 delta == null ? null : new BigDecimal(delta),
-                "r");
+                "r", List.of());
     }
 
     private static CurrentAllocationDto currentAllocation() {
         List<CurrentAllocationDto.Item> items = new ArrayList<>();
         items.add(new CurrentAllocationDto.Item(LocalPortfolioAllocationEngine.CLASS_CASH,
-                new BigDecimal("4000000"), new BigDecimal("40.0")));
+                new BigDecimal("4000000"), new BigDecimal("40.0"), List.of()));
         items.add(new CurrentAllocationDto.Item(LocalPortfolioAllocationEngine.CLASS_FUND,
-                new BigDecimal("1000000"), new BigDecimal("10.0")));
+                new BigDecimal("1000000"), new BigDecimal("10.0"), List.of()));
         items.add(new CurrentAllocationDto.Item(LocalPortfolioAllocationEngine.CLASS_STOCK,
-                new BigDecimal("5000000"), new BigDecimal("50.0")));
+                new BigDecimal("5000000"), new BigDecimal("50.0"), List.of()));
         return new CurrentAllocationDto(1L, LocalDate.of(2026, 8, 15), new BigDecimal("10000000"), items);
+    }
+
+    /** 股票桶含成長/收益兩類、信託基金桶含五類皆非 0 的現況（供 withSubAllocationAmounts 測試）。 */
+    private static CurrentAllocationDto currentAllocationWithSubItems() {
+        List<CurrentAllocationDto.Item> items = new ArrayList<>();
+        items.add(new CurrentAllocationDto.Item(LocalPortfolioAllocationEngine.CLASS_CASH,
+                new BigDecimal("2000000"), new BigDecimal("20.0"), List.of()));
+        items.add(new CurrentAllocationDto.Item(LocalPortfolioAllocationEngine.CLASS_FUND,
+                new BigDecimal("1600000"), new BigDecimal("16.0"), List.of(
+                        new CurrentAllocationDto.SubItem(LocalPortfolioAllocationEngine.SUBCLASS_GROWTH, new BigDecimal("500000"), new BigDecimal("31.3")),
+                        new CurrentAllocationDto.SubItem(LocalPortfolioAllocationEngine.SUBCLASS_INCOME, new BigDecimal("500000"), new BigDecimal("31.3")),
+                        new CurrentAllocationDto.SubItem(LocalPortfolioAllocationEngine.SUBCLASS_BOND_SHORT, new BigDecimal("300000"), new BigDecimal("18.8")),
+                        new CurrentAllocationDto.SubItem(LocalPortfolioAllocationEngine.SUBCLASS_BOND_MID, new BigDecimal("200000"), new BigDecimal("12.5")),
+                        new CurrentAllocationDto.SubItem(LocalPortfolioAllocationEngine.SUBCLASS_BOND_LONG, new BigDecimal("100000"), new BigDecimal("6.3")))));
+        items.add(new CurrentAllocationDto.Item(LocalPortfolioAllocationEngine.CLASS_STOCK,
+                new BigDecimal("3000000"), new BigDecimal("30.0"), List.of(
+                        new CurrentAllocationDto.SubItem(LocalPortfolioAllocationEngine.SUBCLASS_GROWTH, new BigDecimal("2000000"), new BigDecimal("66.7")),
+                        new CurrentAllocationDto.SubItem(LocalPortfolioAllocationEngine.SUBCLASS_INCOME, new BigDecimal("1000000"), new BigDecimal("33.3")))));
+        return new CurrentAllocationDto(1L, LocalDate.of(2026, 8, 15), new BigDecimal("10000000"), items);
+    }
+
+    /** 股票桶含指定短/中/長期債金額（供 STOCK_BOND_HOLDING_WARNING 觸發測試）。 */
+    private static CurrentAllocationDto currentAllocationWithStockBondHolding(
+            BigDecimal shortAmt, BigDecimal midAmt, BigDecimal longAmt) {
+        List<CurrentAllocationDto.Item> items = new ArrayList<>();
+        items.add(new CurrentAllocationDto.Item(LocalPortfolioAllocationEngine.CLASS_CASH,
+                new BigDecimal("4000000"), new BigDecimal("40.0"), List.of()));
+        items.add(new CurrentAllocationDto.Item(LocalPortfolioAllocationEngine.CLASS_FUND,
+                new BigDecimal("1000000"), new BigDecimal("10.0"), List.of()));
+        items.add(new CurrentAllocationDto.Item(LocalPortfolioAllocationEngine.CLASS_STOCK,
+                new BigDecimal("5000000"), new BigDecimal("50.0"), List.of(
+                        new CurrentAllocationDto.SubItem(LocalPortfolioAllocationEngine.SUBCLASS_BOND_SHORT, shortAmt, new BigDecimal("2.0")),
+                        new CurrentAllocationDto.SubItem(LocalPortfolioAllocationEngine.SUBCLASS_BOND_MID, midAmt, new BigDecimal("1.0")),
+                        new CurrentAllocationDto.SubItem(LocalPortfolioAllocationEngine.SUBCLASS_BOND_LONG, longAmt, new BigDecimal("1.0")))));
+        return new CurrentAllocationDto(1L, LocalDate.of(2026, 8, 15), new BigDecimal("10000000"), items);
+    }
+
+    private static PortfolioAdviceResult.TargetAllocation findByClass(PortfolioAdviceResult r, String assetClass) {
+        return r.targetAllocation().stream().filter(t -> assetClass.equals(t.assetClass())).findFirst()
+                .orElseThrow(() -> new AssertionError("找不到類別：" + assetClass));
+    }
+
+    private static PortfolioAdviceResult.SubAllocation findBySubClass(
+            PortfolioAdviceResult.TargetAllocation t, String subClass) {
+        return t.subAllocations().stream().filter(s -> subClass.equals(s.subClass())).findFirst()
+                .orElseThrow(() -> new AssertionError("找不到子類別：" + subClass));
     }
 
     private static RetirementProjectionDto availableProjection() {

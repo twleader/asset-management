@@ -7595,3 +7595,97 @@ business／BFF 一律不直連 Yahoo；Controller 只委派 service。
 既有「油價金價／油金價每日回補」那一筆維持不動。另須一併同步：該類別 javadoc 的總筆數與 `business-services（21）`／`external-materials-service（32）` 兩個分組註解（→ 55 ＝ 21 ＋ 34）、其 javadoc 的 external 對照來源清單（`CommodityPricePoller` **與 `EtfNavPoller` 目前都不在該清單內**，須一併補入——後者與本需求無關，是清單本身既有的漂移，既然要動這段順手清掉）、`SchedulePublicBffControllerTest` 的**三個** `hasSize` 斷言（53→55、21 不動、32→34），以及本文件上方 `SchedulePublicBffController` 段落的筆數記載（本次已同步改為 55 ＝ 21 ＋ 34）。
 
 `commodity.enabled`（`external-materials-service/src/main/resources/application.yml`）**同時控制三個排程**——既有每日回補、本次新增的每分鐘即時報價與 17:05 收盤校正；該設定檔的既有註解（目前只提「每日增量」）須一併更新為涵蓋三者。
+
+---
+
+## Requirement 82／Task 341：資產配置建議「股票」「信託基金」子類別細分
+
+### 為什麼是「接上既有骨架」而不是新設計一套分類
+
+`AssetClassifier`（`backend/src/main/java/com/steven/assets/service/AssetClassifier.java`）已提供 `classifyStock`／`classifyFund`（現金/債券/股票）、`classifyStockStyle`（成長/收益型，殖利率門檻可調）、`classifyBondTerm`（短/中/長期）三層規則，個股 override 存 `stock.asset_class`／`stock_style`／`bond_term`、基金 override 存 `fund_class_override`（key=基金名稱）。此套骨架被 `AssetService.getAssetHistory()` 與 `getHoldingsClassified()` 用在「資產配置分佈」圓餅圖（Requirement 25/26/27），但 `PortfolioAdviceService.getCurrentAllocation()` 至今只讀 `AssetSnapshot` 的三個彙總欄位，未 join 任何分類表：
+
+```java
+// 現況（backend/src/main/java/com/steven/assets/service/PortfolioAdviceService.java:291-306）
+public CurrentAllocationDto getCurrentAllocation() {
+    AssetSnapshot s = snapshotRepo.findLatest().orElse(null);
+    ...
+    items.add(new CurrentAllocationDto.Item("存款（現金）", deposit, pct(deposit, total)));
+    items.add(new CurrentAllocationDto.Item("信託基金", fund, pct(fund, total)));
+    items.add(new CurrentAllocationDto.Item("股票", stock, pct(stock, total)));
+    return new CurrentAllocationDto(s.getId(), s.getSnapshotDate(), total, items);
+}
+```
+
+本 Requirement 把這支方法改為逐筆分類（比照 `getHoldingsClassified()` 的查表模式），但**頂層三類金額不變**——這是 Requirement 80 的既有保證（三類須與既有三類逐字一致，`currentValue`／`targetAmount`／`deltaAmount` 才對得上）。子類別是掛在頂層桶底下的第二層資訊。
+
+### 子類別集合：兩個頂層桶用同一套五類
+
+「股票」桶＝`AssetSnapshot.getStocks()`（`StockHolding` 表現值加總）；「信託基金」桶＝`getFunds()`（`FundHolding` 表現值加總）——這是 Requirement 32/80 既有的「桶」定義，**依持有表歸類，不是依 `AssetClass`**。一檔債券型 ETF（如 `00679B`）若被使用者直接持有於股票帳戶（`StockHolding` 一列），在「股票」頂層桶裡仍算「股票」金額（頂層不變），但子分類要如實反映它是債券——故兩個頂層桶的子分類統一走 `classifyStock`/`classifyFund` → `STOCK` 則 `classifyStockStyle`、`BOND` 則 `classifyBondTerm`，五類：**成長型／收益型（高股息）／短期債／中期債／長期債**。多數使用者的股票部位不含債券型標的，此時「股票」桶只有成長/收益兩列非 0。
+
+```
+classifySub(holding, isStock):
+  isStock:
+    cls = classifyStock(code, market, override)
+    cls == BOND → classifyBondTerm(code, market, name, termOverride)   # 短/中/長期
+    cls == STOCK → classifyStockStyle(code, market, styleOverride, dividendRate, threshold)  # 成長/收益
+  !isStock（基金）:
+    cls = classifyFund(fundName, override)
+    cls == BOND → classifyBondTerm(null, null, fundName, termOverride)
+    cls == STOCK → classifyStockStyle(null, null, styleOverride, null, threshold)  # 基金無殖利率，同既有慣例
+```
+
+`getCurrentAllocation()` 的查表建 Map 部分與 `getHoldingsClassified()`（`AssetService.java:531-587`）完全同構，直接複用同一個 `assetClassifier`／`stockMasterRepo`／`fundClassOverrideRepo`／`stockStyleRepo` 注入（`PortfolioAdviceService` 需新增這四個既有 Repository/Component 的注入，皆為現有 bean，非新建）。
+
+### DTO 契約
+
+```java
+// CurrentAllocationDto.java
+public record Item(String assetClass, BigDecimal value, BigDecimal pct, List<SubItem> subItems) {}
+public record SubItem(String subClass, BigDecimal value, BigDecimal pct) {}  // pct = 占該 Item.value 之比例
+```
+
+```java
+// PortfolioAdviceResult.java
+public record TargetAllocation(
+        String assetClass, BigDecimal targetPct, BigDecimal currentValue,
+        BigDecimal targetAmount, BigDecimal deltaAmount, String rationale,
+        List<SubAllocation> subAllocations) {}   // 新增最後一欄
+public record SubAllocation(String subClass, BigDecimal targetPct, BigDecimal currentValue,
+        BigDecimal targetAmount, BigDecimal deltaAmount, String rationale) {}
+```
+
+兩個 nested record 皆加 `@JsonIgnoreProperties(ignoreUnknown = true)`（沿用外層慣例）。`llm` 檔位的 `runGeneration(...)` 一行不改——完整 AI 版現行 prompt 要求輸出「現金/存款、債券/固定收益、台股、海外股票、其他（基金/REITs等）」五類自由分類，與本 Requirement「股票/信託基金」二分下的五個具名子類別是不同分類體系，`subAllocations` 在 `llm` 檔位固定為 `null`（Jackson 反序列化時缺欄位即 null，不拋錯）。
+
+### 次分配對照表（`local`／`hybrid` 專用）
+
+`LocalPortfolioAllocationEngine` 新增 `SubTemplate` record 與 `SUB_TEMPLATES`（鍵沿用既有 `TemplateKey(riskTolerance, horizon)`，與頂層 `TEMPLATES` 同一組 12 格）：
+
+```java
+public record SubTemplate(
+    BigDecimal stockGrowthPct, BigDecimal stockIncomePct,
+    BigDecimal stockBondShortPct, BigDecimal stockBondMidPct, BigDecimal stockBondLongPct,
+    BigDecimal fundGrowthPct, BigDecimal fundIncomePct,
+    BigDecimal fundBondShortPct, BigDecimal fundBondMidPct, BigDecimal fundBondLongPct) {}
+```
+
+設計原則：**債券曝險一律經由信託基金**——股票桶的目標次分配固定只在成長/收益二者分配（`stockBondShort/Mid/LongPct` 恆為 0）；現況若仍有股票帳戶持有債券型標的，子分類照實顯示、目標給 0，形成「建議減碼」的落差並觸發 `STOCK_BOND_HOLDING_WARNING`。完整 12 格數值見 `spec/requirements.md` Requirement 82 表格（風險承受度 × 距退休年數，方向性：距退休年數縮短或風險承受度降低時，成長比重下降、收益比重上升；基金債券期別隨距退休年數縮短由長轉短）。建表時 `put()` 比照既有慣例 assert 兩組加總（股票 2 欄=100、基金 5 欄=100），失敗即 `IllegalStateException`。
+
+`evaluate()` 產生頂層 `targetAllocation` 時，「股票」「信託基金」兩筆的 `subAllocations` 由 `SUB_TEMPLATES` 對應格與 `currentValuesOf(currentAllocation)`（改讀新版 `Item.subItems`）組出；「存款（現金）」固定空陣列。子分配的 `targetAmount`／`deltaAmount` 依賴頂層 `targetAmount`（`PortfolioAdviceService.enrich(...)` 回填後才知道），故新增 `withSubAllocationAmounts(...)`，比照既有 `withRebalancePlan(...)` 在 `enrich` 之後串接：
+
+```
+generate(local/hybrid)
+  ...既有: evaluate() → enrich(result, totalAssets) → withRebalancePlan(enriched)
+  + withSubAllocationAmounts(...)：對「股票」「信託基金」兩筆 TargetAllocation，
+    subAllocation.targetAmount = 該頂層 targetAmount × subTargetPct / 100
+    subAllocation.deltaAmount  = targetAmount − subItems 對應子類 currentValue
+```
+
+`rebalancePlan` **不擴充到子類別層級**——維持 Requirement 80 既有的類別層級限制，子類別落差只透過 `subAllocations[].deltaAmount` 呈現，不產生 BUY/SELL 物件（本機規則同樣沒有依據判斷該減碼哪一檔短債基金）。
+
+### 前端：既有純 CSS bar 巢狀化，不引入 echarts
+
+`AssetAllocationAdviceView.vue` 的「② 我目前的資產配置」（`:212-232`）與「建議目標配置」（`:309-326`）兩處既有單層 `.alloc-row` list：「股票」「信託基金」兩列新增可展開子列（沿用 `.alloc-row`／`.bar-wrap`／`.bar.cur`／`.bar.tgt` 樣式，新增 `.alloc-row.sub` 縮排＋較細字級），預設收合、點擊展開；金額為 0 的子類別不渲染；「存款（現金）」不顯示展開箭頭。不新增元件庫依賴（`ref` 開關即可，不必上 `el-collapse`）。
+
+### 不在本次範圍
+
+不新增資料庫欄位或 Liquibase changeset（完全複用既有 `asset_class`／`stock_style`／`bond_term`／`fund_class_override`）；`llm` 完整版不輸出本 Requirement 的子分類；`rebalancePlan` 不新增子類別/個股層級操作建議。

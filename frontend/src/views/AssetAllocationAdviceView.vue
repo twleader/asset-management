@@ -220,12 +220,27 @@
         </div>
       </template>
       <div v-if="allocationItems.length && Number(allocation.totalAssets) > 0" class="alloc-list">
-        <div v-for="it in allocationItems" :key="it.assetClass" class="alloc-row">
-          <span class="alloc-name">{{ it.assetClass }}</span>
-          <div class="bar-wrap">
-            <div class="bar cur" :style="{ width: barWidth(it.pct) }"></div>
+        <div v-for="it in allocationItems" :key="it.assetClass" class="alloc-block">
+          <div class="alloc-row" :class="{ clickable: hasSubItems(it) }"
+            @click="hasSubItems(it) && toggleCurrentSub(it.assetClass)">
+            <span class="alloc-name">
+              <span v-if="hasSubItems(it)" class="expand-caret">{{ currentSubExpanded[it.assetClass] ? '▾' : '▸' }}</span>
+              {{ it.assetClass }}
+            </span>
+            <div class="bar-wrap">
+              <div class="bar cur" :style="{ width: barWidth(it.pct) }"></div>
+            </div>
+            <span class="alloc-val">{{ fmtPct(it.pct) }}<span class="alloc-amt">（{{ money(it.value) }} 元）</span></span>
           </div>
-          <span class="alloc-val">{{ fmtPct(it.pct) }}<span class="alloc-amt">（{{ money(it.value) }} 元）</span></span>
+          <template v-if="hasSubItems(it) && currentSubExpanded[it.assetClass]">
+            <div v-for="sub in it.subItems" :key="sub.subClass" class="alloc-row sub">
+              <span class="alloc-name">{{ sub.subClass }}</span>
+              <div class="bar-wrap">
+                <div class="bar cur" :style="{ width: barWidth(sub.pct) }"></div>
+              </div>
+              <span class="alloc-val">{{ fmtPct(sub.pct) }}<span class="alloc-amt">（{{ money(sub.value) }} 元）</span></span>
+            </div>
+          </template>
         </div>
       </div>
       <el-empty v-else :image-size="70" description="尚無資產快照——請先於「總覽儀表板／管理資產」建立快照，建議會更貼合你的實際持有" />
@@ -309,8 +324,12 @@
         <div class="block-title">建議目標配置</div>
         <div v-if="latest.targetAllocation && latest.targetAllocation.length" class="alloc-list target">
           <div v-for="(t, i) in latest.targetAllocation" :key="i" class="alloc-block">
-            <div class="alloc-row">
-              <span class="alloc-name">{{ t.assetClass }}</span>
+            <div class="alloc-row" :class="{ clickable: visibleSubAllocations(t).length }"
+              @click="visibleSubAllocations(t).length && toggleTargetSub(t.assetClass)">
+              <span class="alloc-name">
+                <span v-if="visibleSubAllocations(t).length" class="expand-caret">{{ targetSubExpanded[t.assetClass] ? '▾' : '▸' }}</span>
+                {{ t.assetClass }}
+              </span>
               <div class="bar-wrap">
                 <div class="bar tgt" :style="{ width: barWidth(t.targetPct) }"></div>
               </div>
@@ -321,6 +340,23 @@
               <span v-if="t.deltaAmount != null" class="delta" :class="deltaClass(t.deltaAmount)">（{{ deltaText(t.deltaAmount) }}）</span>
             </div>
             <div v-if="t.rationale" class="alloc-rationale">{{ t.rationale }}</div>
+
+            <template v-if="visibleSubAllocations(t).length && targetSubExpanded[t.assetClass]">
+              <div v-for="sub in visibleSubAllocations(t)" :key="sub.subClass" class="alloc-sub-block">
+                <div class="alloc-row sub">
+                  <span class="alloc-name">{{ sub.subClass }}</span>
+                  <div class="bar-wrap">
+                    <div class="bar tgt" :style="{ width: barWidth(sub.targetPct) }"></div>
+                  </div>
+                  <span class="alloc-val">{{ fmtPct(sub.targetPct) }}</span>
+                </div>
+                <div v-if="sub.targetAmount != null" class="alloc-amounts sub">
+                  目前約 {{ money(sub.currentValue) }} 元 → 目標約 {{ money(sub.targetAmount) }} 元
+                  <span v-if="sub.deltaAmount != null" class="delta" :class="deltaClass(sub.deltaAmount)">（{{ deltaText(sub.deltaAmount) }}）</span>
+                </div>
+                <div v-if="sub.rationale" class="alloc-rationale sub">{{ sub.rationale }}</div>
+              </div>
+            </template>
           </div>
         </div>
         <div v-else class="muted">—</div>
@@ -520,6 +556,23 @@ const ageHint = computed(() => {
 })
 
 const allocationItems = computed(() => allocation.value.items || [])
+// 子類別展開狀態（以 assetClass 為 key），現況／目標配置各自獨立展開，不引入 el-collapse
+const currentSubExpanded = ref({})
+const targetSubExpanded = ref({})
+function toggleCurrentSub(assetClass) {
+  currentSubExpanded.value[assetClass] = !currentSubExpanded.value[assetClass]
+}
+function toggleTargetSub(assetClass) {
+  targetSubExpanded.value[assetClass] = !targetSubExpanded.value[assetClass]
+}
+function hasSubItems(it) {
+  return !!(it && Array.isArray(it.subItems) && it.subItems.length)
+}
+// targetPct=0 且 currentValue 亦為 0（或未出現）的子類別不渲染；targetPct=0 但 currentValue>0（建議減碼）須渲染
+function visibleSubAllocations(t) {
+  const subs = t && Array.isArray(t.subAllocations) ? t.subAllocations : []
+  return subs.filter(s => Number(s.targetPct) !== 0 || Number(s.currentValue) > 0)
+}
 const availableModels = computed(() => settings.value.availableModels || [])
 const availableEfforts = computed(() => settings.value.availableEfforts || [])
 const availableWebSearches = computed(() => settings.value.availableWebSearches || [])
@@ -931,6 +984,20 @@ onUnmounted(stopPoll)
 .alloc-amounts .delta.flat { color: #94a3b8; }
 @media (max-width: 768px) {
   .alloc-rationale, .alloc-amounts { margin-left: 0; }
+}
+
+/* 子類別展開列（成長型／收益型（高股息）／短中長期債） */
+.alloc-row.clickable { cursor: pointer; }
+.alloc-row .expand-caret { display: inline-block; width: 12px; color: #94a3b8; font-size: 11px; }
+.alloc-row.sub { padding-left: 24px; }
+.alloc-row.sub .alloc-name { width: 126px; font-size: 13px; font-weight: 500; color: #64748b; }
+.alloc-row.sub .bar-wrap { height: 14px; }
+.alloc-row.sub .alloc-val { font-size: 13px; }
+.alloc-sub-block { display: flex; flex-direction: column; gap: 2px; }
+.alloc-amounts.sub { margin-left: 186px; font-size: 12px; }
+.alloc-rationale.sub { margin-left: 186px; font-size: 12px; }
+@media (max-width: 768px) {
+  .alloc-amounts.sub, .alloc-rationale.sub { margin-left: 24px; }
 }
 
 /* 退休現金流試算 */

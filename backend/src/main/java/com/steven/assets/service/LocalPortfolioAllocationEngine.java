@@ -57,6 +57,18 @@ public class LocalPortfolioAllocationEngine {
     public static final String CLASS_FUND = "信託基金";
     public static final String CLASS_STOCK = "股票";
 
+    /**
+     * 子類別名稱（Requirement 82）：「股票」「信託基金」兩桶再細分的五個子類別，套在
+     * {@link AssetClassifier#classifyStockStyle}／{@link AssetClassifier#classifyBondTerm} 的值域之上。
+     * <b>本類是這 5 個子類別字面字串的唯一宣告處</b>——{@code PortfolioAdviceService} 一律引用這幾個常數，
+     * 不得另宣告一份同字面值的常數（避免兩邊打字不一致）。
+     */
+    public static final String SUBCLASS_GROWTH = "成長型";
+    public static final String SUBCLASS_INCOME = "收益型（高股息）";
+    public static final String SUBCLASS_BOND_SHORT = "短期債";
+    public static final String SUBCLASS_BOND_MID = "中期債";
+    public static final String SUBCLASS_BOND_LONG = "長期債";
+
     /** {@code rebalancePlan.holding} 的固定值：本機檔位只到類別層級。 */
     public static final String HOLDING_OVERALL = "整體";
 
@@ -87,6 +99,16 @@ public class LocalPortfolioAllocationEngine {
     static final String NO_SNAPSHOT_WARNING =
             "尚無資產快照（或資產總額為 0），本次只給目標比例，未計算各類目標金額與調整金額；"
                     + "請先於「管理資產」建立快照。";
+
+    /**
+     * 股票桶內持有債券型標的的提醒（Requirement 82 / Task 341.8）：本機的目標子分配假設債券曝險
+     * 一律經由信託基金達成（見 {@link #SUB_TEMPLATES} 的設計原則），股票桶目標子分配的三個債券期別
+     * 固定為 0；若使用者股票帳戶仍持有債券型標的（如直接持有 00679B），現況金額仍如實顯示，
+     * 目標給 0 便會呈現「建議減碼」的落差，此提醒說明原因、避免使用者誤以為系統算錯。
+     */
+    static final String STOCK_BOND_HOLDING_WARNING_TEMPLATE =
+            "你的股票部位中有 %s 元被歸類為債券型標的（如債券 ETF），本模型的目標配置假設債券曝險一律經由信託基金達成，"
+                    + "故此處目標次分配為 0、會顯示為建議減碼；若為刻意持有可忽略此提示。";
 
     // ===== 風險承受度代碼（與 PortfolioAdviceService.RISK_OPTIONS 逐字一致；不是 LOW/MEDIUM/HIGH）=====
 
@@ -183,6 +205,59 @@ public class LocalPortfolioAllocationEngine {
                         BigDecimal.valueOf(stockPct), rationale));
     }
 
+    /**
+     * 「股票」「信託基金」兩桶各自的子分配比例（Requirement 82）：五欄（成長/收益/短債/中債/長債）
+     * 各自加總恆為 100。與 {@link #TEMPLATES} 同一組 {@link TemplateKey}（風險承受度 × 距退休年數）。
+     */
+    public record SubTemplate(
+        BigDecimal stockGrowthPct, BigDecimal stockIncomePct,
+        BigDecimal stockBondShortPct, BigDecimal stockBondMidPct, BigDecimal stockBondLongPct,
+        BigDecimal fundGrowthPct, BigDecimal fundIncomePct,
+        BigDecimal fundBondShortPct, BigDecimal fundBondMidPct, BigDecimal fundBondLongPct) {}
+
+    /**
+     * <b>子分配對照表（經驗法則，未經回測）</b>：<b>設計原則</b>——債券曝險一律經由信託基金達成，
+     * 股票桶目標次分配固定只在成長/收益二者分配（{@code stockBondShort/Mid/LongPct} 全部為 0）；
+     * 若使用者股票帳戶仍持有債券型標的（如直接持有 00679B），現況子分類（見
+     * {@code PortfolioAdviceService.getCurrentAllocation()}）仍如實顯示非 0 金額，目標給 0，形成建議
+     * 減碼的落差（見 {@link #STOCK_BOND_HOLDING_WARNING_TEMPLATE}）。方向性：距退休年數縮短或風險
+     * 承受度降低時，成長比重下降、收益比重上升；基金債券期別隨距退休年數縮短由長轉短（降低利率存續期風險）。
+     */
+    private static final Map<TemplateKey, SubTemplate> SUB_TEMPLATES = buildSubTemplates();
+
+    private static Map<TemplateKey, SubTemplate> buildSubTemplates() {
+        Map<TemplateKey, SubTemplate> m = new LinkedHashMap<>();
+        putSub(m, RISK_AGGRESSIVE, Horizon.LONG,      85, 15,  0, 0, 0,   55, 15, 10, 10, 10);
+        putSub(m, RISK_AGGRESSIVE, Horizon.MEDIUM,    80, 20,  0, 0, 0,   45, 20, 10, 15, 10);
+        putSub(m, RISK_AGGRESSIVE, Horizon.SHORT,     70, 30,  0, 0, 0,   35, 25, 15, 15, 10);
+        putSub(m, RISK_AGGRESSIVE, Horizon.IMMINENT,  60, 40,  0, 0, 0,   25, 30, 25, 15, 5);
+        putSub(m, RISK_BALANCED,   Horizon.LONG,      75, 25,  0, 0, 0,   45, 20, 10, 15, 10);
+        putSub(m, RISK_BALANCED,   Horizon.MEDIUM,    65, 35,  0, 0, 0,   35, 25, 15, 15, 10);
+        putSub(m, RISK_BALANCED,   Horizon.SHORT,     55, 45,  0, 0, 0,   25, 30, 20, 15, 10);
+        putSub(m, RISK_BALANCED,   Horizon.IMMINENT,  45, 55,  0, 0, 0,   15, 30, 35, 15, 5);
+        putSub(m, RISK_CONSERVATIVE, Horizon.LONG,    60, 40,  0, 0, 0,   35, 25, 15, 15, 10);
+        putSub(m, RISK_CONSERVATIVE, Horizon.MEDIUM,  50, 50,  0, 0, 0,   25, 30, 20, 15, 10);
+        putSub(m, RISK_CONSERVATIVE, Horizon.SHORT,   40, 60,  0, 0, 0,   20, 30, 25, 20, 5);
+        putSub(m, RISK_CONSERVATIVE, Horizon.IMMINENT,30, 70,  0, 0, 0,   10, 30, 40, 15, 5);
+        return Map.copyOf(m);
+    }
+
+    private static void putSub(Map<TemplateKey, SubTemplate> m, String risk, Horizon horizon,
+                                int sGrowth, int sIncome, int sShort, int sMid, int sLong,
+                                int fGrowth, int fIncome, int fShort, int fMid, int fLong) {
+        if (sGrowth + sIncome + sShort + sMid + sLong != 100) {
+            throw new IllegalStateException("股票次分配比例加總須為 100：" + risk + "/" + horizon);
+        }
+        if (fGrowth + fIncome + fShort + fMid + fLong != 100) {
+            throw new IllegalStateException("基金次分配比例加總須為 100：" + risk + "/" + horizon);
+        }
+        m.put(new TemplateKey(risk, horizon), new SubTemplate(
+            BigDecimal.valueOf(sGrowth), BigDecimal.valueOf(sIncome),
+            BigDecimal.valueOf(sShort), BigDecimal.valueOf(sMid), BigDecimal.valueOf(sLong),
+            BigDecimal.valueOf(fGrowth), BigDecimal.valueOf(fIncome),
+            BigDecimal.valueOf(fShort), BigDecimal.valueOf(fMid), BigDecimal.valueOf(fLong)));
+    }
+
     /** 各類別在配置中扮演的角色（組 {@code rationale} 用；與對照表理由拼成一句）。 */
     private static final String ROLE_CASH = "存款（現金）是緊急預備金與近年提領的緩衝，比重越高越不會在低點被迫變現";
     private static final String ROLE_FUND = "信託基金是分散度較高的中間部位，波動介於存款與個股之間";
@@ -199,6 +274,14 @@ public class LocalPortfolioAllocationEngine {
      */
     public Template templateOf(String riskTolerance, Integer yearsToRetirement) {
         return TEMPLATES.get(new TemplateKey(normalizeRisk(riskTolerance), horizonOf(yearsToRetirement)));
+    }
+
+    /**
+     * 子分配模板核心（<b>純函式</b>，Requirement 82）：風險承受度 × 距退休年數 → 「股票」「信託基金」
+     * 兩桶各自的五類子分配比例。與 {@link #templateOf} 同一組 {@link TemplateKey}。
+     */
+    public SubTemplate subTemplateOf(String riskTolerance, Integer yearsToRetirement) {
+        return SUB_TEMPLATES.get(new TemplateKey(normalizeRisk(riskTolerance), horizonOf(yearsToRetirement)));
     }
 
     /** 風險承受度正規化：不在白名單（含 null）→ 最保守檔 {@value #RISK_CONSERVATIVE}。 */
@@ -290,6 +373,10 @@ public class LocalPortfolioAllocationEngine {
             warnings.add("退休現金流試算目前無法進行（" + safe(projection == null ? null : projection.unavailableReason())
                     + "），本次的風險評估未能納入退休提領是否足夠。");
         }
+        BigDecimal stockBondHolding = stockBondHoldingAmount(currentAllocation);
+        if (stockBondHolding.signum() > 0) {
+            warnings.add(String.format(STOCK_BOND_HOLDING_WARNING_TEMPLATE, money(stockBondHolding)));
+        }
 
         return new PortfolioAdviceResult(
                 buildSummary(risk, horizon, yearsToRetirement, t, currentValues, total),
@@ -331,6 +418,125 @@ public class LocalPortfolioAllocationEngine {
                 List.copyOf(plan), enriched.actions(), enriched.warnings(), enriched.references());
     }
 
+    /**
+     * 依子分配對照表（{@link #SUB_TEMPLATES}）補上「股票」「信託基金」兩桶的 {@code subAllocations}
+     * （<b>純函式</b>，Requirement 82 / Task 341.9）：須在 {@link #withRebalancePlan} 之後或之前皆可，
+     * 但一律要在 {@code enrich(...)} 之後（依賴頂層 {@code targetAmount}）。
+     *
+     * <p>目標比例為 0 的子類別（股票的三個債券期別）仍輸出一筆 {@code SubAllocation}（{@code targetPct=0}），
+     * 不省略——否則使用者持有債券型股票時，落差呈現會缺一列。「存款（現金）」桶固定
+     * {@code subAllocations = List.of()}。</p>
+     *
+     * @param currentAllocation 既有 {@code getCurrentAllocation()} 的輸出（子分配 {@code currentValue} 的唯一來源）
+     */
+    public PortfolioAdviceResult withSubAllocationAmounts(PortfolioAdviceResult enriched,
+                                                          CurrentAllocationDto currentAllocation,
+                                                          String riskTolerance, Integer yearsToRetirement) {
+        if (enriched == null) {
+            return null;
+        }
+        SubTemplate st = SUB_TEMPLATES.get(new TemplateKey(normalizeRisk(riskTolerance), horizonOf(yearsToRetirement)));
+        Map<String, Map<String, BigDecimal>> currentSubValues = currentSubValuesOf(currentAllocation);
+
+        List<PortfolioAdviceResult.TargetAllocation> out = new ArrayList<>();
+        if (enriched.targetAllocation() != null) {
+            for (PortfolioAdviceResult.TargetAllocation t : enriched.targetAllocation()) {
+                if (t == null) {
+                    continue;
+                }
+                List<PortfolioAdviceResult.SubAllocation> subs;
+                if (CLASS_STOCK.equals(t.assetClass())) {
+                    subs = buildSubAllocations(t, currentSubValues.get(CLASS_STOCK),
+                            st.stockGrowthPct(), st.stockIncomePct(),
+                            st.stockBondShortPct(), st.stockBondMidPct(), st.stockBondLongPct());
+                } else if (CLASS_FUND.equals(t.assetClass())) {
+                    subs = buildSubAllocations(t, currentSubValues.get(CLASS_FUND),
+                            st.fundGrowthPct(), st.fundIncomePct(),
+                            st.fundBondShortPct(), st.fundBondMidPct(), st.fundBondLongPct());
+                } else {
+                    subs = List.of();  // 存款（現金）不細分子類別
+                }
+                out.add(new PortfolioAdviceResult.TargetAllocation(
+                        t.assetClass(), t.targetPct(), t.currentValue(), t.targetAmount(), t.deltaAmount(),
+                        t.rationale(), subs));
+            }
+        }
+        return new PortfolioAdviceResult(
+                enriched.summary(), enriched.riskAssessment(), out, enriched.rebalancePlan(),
+                enriched.actions(), enriched.warnings(), enriched.references());
+    }
+
+    private static List<PortfolioAdviceResult.SubAllocation> buildSubAllocations(
+            PortfolioAdviceResult.TargetAllocation t, Map<String, BigDecimal> currentSub,
+            BigDecimal growthPct, BigDecimal incomePct, BigDecimal shortPct, BigDecimal midPct, BigDecimal longPct) {
+        List<PortfolioAdviceResult.SubAllocation> out = new ArrayList<>();
+        out.add(subAllocation(t, SUBCLASS_GROWTH, growthPct, currentSub));
+        out.add(subAllocation(t, SUBCLASS_INCOME, incomePct, currentSub));
+        out.add(subAllocation(t, SUBCLASS_BOND_SHORT, shortPct, currentSub));
+        out.add(subAllocation(t, SUBCLASS_BOND_MID, midPct, currentSub));
+        out.add(subAllocation(t, SUBCLASS_BOND_LONG, longPct, currentSub));
+        return out;
+    }
+
+    private static PortfolioAdviceResult.SubAllocation subAllocation(
+            PortfolioAdviceResult.TargetAllocation t, String subClass, BigDecimal subPct,
+            Map<String, BigDecimal> currentSub) {
+        BigDecimal targetAmount = t.targetAmount() == null ? null
+                : t.targetAmount().multiply(subPct).divide(BigDecimal.valueOf(100), 0, RoundingMode.HALF_UP);
+        BigDecimal currentValue = (currentSub == null) ? BigDecimal.ZERO
+                : currentSub.getOrDefault(subClass, BigDecimal.ZERO);
+        BigDecimal delta = targetAmount == null ? null : targetAmount.subtract(currentValue);
+        String rationale = t.assetClass() + "－" + subClass + "本次目標 " + plain(subPct) + "%"
+                + (targetAmount != null ? "（約 " + money(targetAmount) + " 元，現況 " + money(currentValue) + " 元）" : "") + "。";
+        return new PortfolioAdviceResult.SubAllocation(subClass, subPct, currentValue, targetAmount, delta, rationale);
+    }
+
+    /** 由既有 {@code getCurrentAllocation()} 的 items 取「頂層桶 → (子類別 → 金額)」（不重查快照）。 */
+    private static Map<String, Map<String, BigDecimal>> currentSubValuesOf(CurrentAllocationDto current) {
+        Map<String, Map<String, BigDecimal>> m = new LinkedHashMap<>();
+        if (current != null && current.items() != null) {
+            for (CurrentAllocationDto.Item item : current.items()) {
+                if (item == null || item.assetClass() == null) {
+                    continue;
+                }
+                Map<String, BigDecimal> subMap = new LinkedHashMap<>();
+                if (item.subItems() != null) {
+                    for (CurrentAllocationDto.SubItem sub : item.subItems()) {
+                        if (sub != null && sub.subClass() != null) {
+                            subMap.put(sub.subClass(), sub.value());
+                        }
+                    }
+                }
+                m.put(item.assetClass(), subMap);
+            }
+        }
+        return m;
+    }
+
+    /** 「股票」桶內三個債券期別子類別的金額加總（供 {@link #STOCK_BOND_HOLDING_WARNING_TEMPLATE} 判斷是否觸發）。 */
+    private static BigDecimal stockBondHoldingAmount(CurrentAllocationDto currentAllocation) {
+        if (currentAllocation == null || currentAllocation.items() == null) {
+            return BigDecimal.ZERO;
+        }
+        for (CurrentAllocationDto.Item item : currentAllocation.items()) {
+            if (item == null || !CLASS_STOCK.equals(item.assetClass()) || item.subItems() == null) {
+                continue;
+            }
+            BigDecimal sum = BigDecimal.ZERO;
+            for (CurrentAllocationDto.SubItem sub : item.subItems()) {
+                if (sub == null || sub.subClass() == null || sub.value() == null) {
+                    continue;
+                }
+                if (SUBCLASS_BOND_SHORT.equals(sub.subClass()) || SUBCLASS_BOND_MID.equals(sub.subClass())
+                        || SUBCLASS_BOND_LONG.equals(sub.subClass())) {
+                    sum = sum.add(sub.value());
+                }
+            }
+            return sum;
+        }
+        return BigDecimal.ZERO;
+    }
+
     // ===== 敘述組裝 =====
 
     private static PortfolioAdviceResult.TargetAllocation allocation(
@@ -342,7 +548,8 @@ public class LocalPortfolioAllocationEngine {
                 currentValues.get(assetClass),
                 null,   // targetAmount：由既有 enrich() 回填
                 null,   // deltaAmount：由既有 enrich() 回填
-                role + "。本次目標 " + plain(targetPct) + "%：" + cellRationale);
+                role + "。本次目標 " + plain(targetPct) + "%：" + cellRationale,
+                List.of());   // subAllocations：由 withSubAllocationAmounts 於 enrich 之後補上
     }
 
     private static String rebalanceRationale(PortfolioAdviceResult.TargetAllocation t, String action) {

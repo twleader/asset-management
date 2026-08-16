@@ -3095,6 +3095,56 @@ FROM stock_price_history WHERE market='台股';
   - 以上都查不到 → 退用 payload 的 `sourcePreviousClose`；再無值則 `change`／`changePercent` 皆為 null（前端顯示「—」而非 0）。
 
   後三條規則的存在理由：Globex 的夜盤（ET 18:00 之後）在日曆日上早於它所屬的交易日，而**本需求所有 Yahoo 實測都取自週六休市時段，沒有任何盤中樣本能證明來源此時把 `timestamp[0]` 歸給哪一天**。上述規則對兩種歸屬都得到正確的前收，因此不必先確定來源行為就能實作。以 DB 收盤為主而非來源自帶前收的理由則是本專案的「同義欄位、同一 business service API」：圖表與匯出都讀 `commodity_price_history`，漲跌若改用來源前收，KPI 與圖表會出現對不上的兩套基準。**衍生值一律不入庫、不入 Redis payload**（CLAUDE.md 禁止存衍生值）。
+
+---
+
+### Requirement 82／Task 341：資產配置建議「股票」「信託基金」子類別細分（成長型／收益型／短中長期債）
+
+**User Story:** 作為使用者，我希望「資產配置建議」頁不要只把建議壓縮成「存款／信託基金／股票」三個數字，因為信託基金與股票內部其實有很多種——成長型、高股息（收益型）、短債、中期債、長期債——組成差很多的兩檔「股票 55%」意義完全不同。我希望在「股票」與「信託基金」這兩大類底下，再看到子類別的現況與建議占比，才知道具體該怎麼配置，而不是只知道總金額。
+
+> **本 Requirement 不新增分類規則、不新增資料表。** 系統早在 Requirement 25／26／27 就建了一套完整、可設定（非寫死 enum）的分類骨架——`AssetClassifier`（`classifyStock`／`classifyFund` 判定現金/債券/股票、`classifyStockStyle` 判定成長/收益型、`classifyBondTerm` 判定短/中/長期）＋ 個股 override（`stock.asset_class`／`stock_style`／`bond_term`）＋ 基金 override（`fund_class_override`，key=基金名稱）＋ 可調殖利率門檻（`stock_style.dividend_threshold`）。這套骨架目前只用在「資產配置分佈」圓餅圖（`AssetService.getAssetHistory()`／`getHoldingsClassified()`），**完全沒有接到「資產配置建議」**（`PortfolioAdviceService.getCurrentAllocation()` 至今只讀 `AssetSnapshot` 的三個彙總欄位 `totalDeposit`／`totalFundValue`／`totalStockValue`，不 join 任何分類表）。本 Requirement 要做的是**把既有骨架接上資產配置建議**，不是重新設計一套分類法。
+>
+> **頂層三類（存款／信託基金／股票）的金額與語意完全不變，這是 Requirement 80 的既有保證，本 Requirement 不得破壞。** Requirement 80 明文要求本機引擎的三類「須與 `getCurrentAllocation()` 既有三類完全一致，不得自創第四類或改名，否則 `currentValue` 對不上、`deltaAmount` 失去意義」。本 Requirement 新增的子類別是**掛在既有三類底下的第二層資訊**，不改變頂層金額算術（`targetAmount`／`deltaAmount` 仍只在頂層三類計算），對「存款」不細分（現金沒有成長/收益之分）。
+>
+> **子類別集合對「股票」與「信託基金」兩個頂層桶採同一套五類，理由是與 Requirement 25／26／27 的既有語意保持一致。** 「股票」頂層桶＝所有存在 `StockHolding` 表的持股現值（含個別使用者把債券型 ETF，如 `00679B`／`TLT`，直接持有於股票帳戶的情況）；「信託基金」頂層桶＝所有 `FundHolding` 表的持有現值。若「股票」子分類只做成長/收益二分、忽略持股本身可能被 Requirement 25 規則判為 `BOND`，會讓同一檔標的在「資產配置分佈」頁顯示為債券、在「資產配置建議」頁卻被硬套成長/收益風格，兩頁分類不一致。故兩個頂層桶的子類別**統一使用 `classifyStock`／`classifyFund` 先判定 `STOCK`/`BOND`，`STOCK` 再套 `classifyStockStyle`（成長型／收益型），`BOND` 再套 `classifyBondTerm`（短期債／中期債／長期債）**，五類為：成長型、收益型（高股息）、短期債、中期債、長期債。多數使用者的股票部位不會出現債券型 ETF，此時「股票」桶底下就只有成長型／收益型兩列有金額，其餘三列為 0，符合直覺。
+
+**Acceptance Criteria:**
+
+- [ ] **`getCurrentAllocation()` 改寫為逐筆分類，不再只讀彙總欄位**：`PortfolioAdviceService.getCurrentAllocation()` 現況（`backend/src/main/java/com/steven/assets/service/PortfolioAdviceService.java:291-306`）直接讀 `AssetSnapshot.totalDeposit`／`totalFundValue`／`totalStockValue` 三個彙總欄位，完全不知道逐筆持股的分類。須改為在既有三類金額不變的前提下，比照 `AssetService.getHoldingsClassified()`（`backend/src/main/java/com/steven/assets/service/AssetService.java:531-587`）與 `getAssetHistory()`（`:385-486`）既有的「一次查表、逐筆分類」模式：一次呼叫 `stockMasterRepo.findAll()`／`fundClassOverrideRepo.findAll()` 建好 `Map<market|code, …>`／`Map<fundName, FundClassOverride>`，`stockStyleRepo.findByCode(AssetClassifier.INCOME)` 取殖利率門檻，再對最新快照的 `s.getStocks()`（`StockHolding`）逐筆呼叫 `assetClassifier.classifyStock(...)` → `STOCK` 則 `classifyStockStyle(...)`、`BOND` 則 `classifyBondTerm(...)`，累加進「股票」桶底下對應子類別；對 `s.getFunds()`（`FundHolding`）逐筆呼叫 `assetClassifier.classifyFund(...)` → 同樣邏輯累加進「信託基金」桶。**不得新增第二次查詢資產快照**——沿用既有 `snapshotRepo.findLatest()` 取到的同一個 `AssetSnapshot`（`s.getStocks()`／`s.getFunds()` 為既有 `@OneToMany(mappedBy="snapshot")`，同一次 transaction 內取用不觸發額外 N+1）。「存款（現金）」桶不細分。
+- [ ] **`CurrentAllocationDto` 契約擴充**：`CurrentAllocationDto.Item`（`backend/src/main/java/com/steven/assets/dto/CurrentAllocationDto.java`）新增巢狀欄位 `List<SubItem> subItems`，新增 nested record `SubItem(String subClass, BigDecimal value, BigDecimal pct)`。`subClass` 為五個具名常數之一（比照 `LocalPortfolioAllocationEngine.CLASS_CASH`／`CLASS_FUND`／`CLASS_STOCK` 命名慣例，新增於同一類別）：`SUBCLASS_GROWTH = "成長型"`、`SUBCLASS_INCOME = "收益型（高股息）"`、`SUBCLASS_BOND_SHORT = "短期債"`、`SUBCLASS_BOND_MID = "中期債"`、`SUBCLASS_BOND_LONG = "長期債"`。`pct` 為該子類金額占**該頂層桶金額**（非資產總額）之比例，四捨五入 1 位小數（與既有 `pct(value, total)` 同慣例，但分母改傳該桶金額）。「存款（現金）」項目的 `subItems` 為空陣列（非 null，前端不必額外判 null）。**不變式**：Σ 該桶 `subItems[].value` == 該桶 `Item.value`（誤差僅容許 `BigDecimal` 尾差，來源加總本身用同一組 `currentValue` 逐筆相加，理論上零誤差）。
+- [ ] **本機／hybrid 引擎新增次分配對照表，llm 完整版不變動**：`LocalPortfolioAllocationEngine` 新增 `SubTemplate` record 與 `SUB_TEMPLATES`（`Map<TemplateKey, SubTemplate>`，鍵與既有 `TEMPLATES` 共用同一組 `TemplateKey(riskTolerance, horizon)`）：
+  ```java
+  public record SubTemplate(
+      BigDecimal stockGrowthPct, BigDecimal stockIncomePct,
+      BigDecimal stockBondShortPct, BigDecimal stockBondMidPct, BigDecimal stockBondLongPct,
+      BigDecimal fundGrowthPct, BigDecimal fundIncomePct,
+      BigDecimal fundBondShortPct, BigDecimal fundBondMidPct, BigDecimal fundBondLongPct) {}
+  ```
+  `stock*` 五欄加總恆為 100（「股票」桶的次分配）、`fund*` 五欄加總恆為 100（「信託基金」桶的次分配），比照既有 `put()` 於建表時 assert 並 `throw IllegalStateException`。**本模型的目標配置設定為：債券曝險一律經由信託基金達成，股票部位的目標次分配固定只在成長/收益兩者分配（`stockBondShortPct`／`stockBondMidPct`／`stockBondLongPct` 恆為 0）**——多數使用者的股票部位不會、也不建議透過個股/ETF 帳戶承接債券曝險；若使用者現況仍有此類持股（如直接持有 `00679B`），其**現況**子分類仍如實顯示非 0 金額，只是**目標**次分配對該子類給 0（形成「建議減碼」的落差，見下一條）。以下為完整 12 格數值（風險承受度 × 距退休年數分段，與既有 `TEMPLATES` 同一組 12 格），數值方向性：**距退休年數縮短或風險承受度降低時，成長型比重下降、收益型比重上升；信託基金的債券期別隨距退休年數縮短由長轉短（降低利率存續期風險，呼應既有「臨退休避免順序報酬風險」的既有理由）**：
+
+  | 風險×距退休 | 股票-成長 | 股票-收益 | 基金-成長 | 基金-收益 | 基金-短債 | 基金-中債 | 基金-長債 |
+  |---|---|---|---|---|---|---|---|
+  | 積極×長期(LONG) | 85 | 15 | 55 | 15 | 10 | 10 | 10 |
+  | 積極×中期(MEDIUM) | 80 | 20 | 45 | 20 | 10 | 15 | 10 |
+  | 積極×短期(SHORT) | 70 | 30 | 35 | 25 | 15 | 15 | 10 |
+  | 積極×臨退(IMMINENT) | 60 | 40 | 25 | 30 | 25 | 15 | 5 |
+  | 穩健×長期(LONG) | 75 | 25 | 45 | 20 | 10 | 15 | 10 |
+  | 穩健×中期(MEDIUM) | 65 | 35 | 35 | 25 | 15 | 15 | 10 |
+  | 穩健×短期(SHORT) | 55 | 45 | 25 | 30 | 20 | 15 | 10 |
+  | 穩健×臨退(IMMINENT) | 45 | 55 | 15 | 30 | 35 | 15 | 5 |
+  | 保守×長期(LONG) | 60 | 40 | 35 | 25 | 15 | 15 | 10 |
+  | 保守×中期(MEDIUM) | 50 | 50 | 25 | 30 | 20 | 15 | 10 |
+  | 保守×短期(SHORT) | 40 | 60 | 20 | 30 | 25 | 20 | 5 |
+  | 保守×臨退(IMMINENT) | 30 | 70 | 10 | 30 | 40 | 15 | 5 |
+
+  每格 `股票-成長+股票-收益=100`、`基金-成長+基金-收益+基金-短債+基金-中債+基金-長債=100`，實作須以單元測試逐格驗證加總（同既有 `TEMPLATES` 的 `put()` assert 慣例）。
+- [ ] **`PortfolioAdviceResult.TargetAllocation` 契約擴充**：新增巢狀欄位 `List<SubAllocation> subAllocations`，新增 nested record `SubAllocation(String subClass, BigDecimal targetPct, BigDecimal currentValue, BigDecimal targetAmount, BigDecimal deltaAmount, String rationale)`——欄位語意與頂層 `TargetAllocation` 對應欄位一致（`targetPct` 為占**該頂層桶**目標金額之比例、`currentValue` 來自上述 `CurrentAllocationDto.Item.subItems`、`targetAmount = 該頂層桶 targetAmount × targetPct / 100`、`deltaAmount = targetAmount − currentValue`，四捨五入慣例與既有 `enrich()` 一致）。`@JsonIgnoreProperties(ignoreUnknown = true)` 已存在於外層 record，新 nested record 需比照加註（供 `llm` 檔位回傳未知欄位時忽略、`local`/`hybrid` 檔位序列化時 Jackson 正常處理）。**`llm` 檔位不填此欄位（維持 null），`runGeneration(...)` 既有程式碼一行不改**——完整 AI 版的 `targetAllocation.assetClass` 是自由字串（現行 prompt 要求輸出「現金/存款、債券/固定收益、台股、海外股票、其他（基金/REITs等）」五類，與本 Requirement 的「股票/信託基金」二分不同分類體系），沒有依據把 LLM 的自由分類套進本 Requirement 的五個子類別，勉強套會是臆測；只有 `local`／`hybrid` 兩檔位由 `LocalPortfolioAllocationEngine.evaluate()` 依 `SUB_TEMPLATES` 決定性回填。
+- [ ] **`local`／`hybrid` 檔位的子分配回填時機與既有頂層算術同一段落**：`LocalPortfolioAllocationEngine.evaluate()` 產生頂層 `targetAllocation` 時，「股票」與「信託基金」兩個 `TargetAllocation` 的 `subAllocations` 直接由 `SUB_TEMPLATES` 對應的 `SubTemplate` 與 `currentValuesOf(currentAllocation)`（改讀新的 `subItems`）組出；「存款（現金）」的 `subAllocations` 為空陣列。子分配的 `targetAmount`／`deltaAmount` 待既有 `PortfolioAdviceService.enrich(result, totalAssets)` 完成頂層 `targetAmount` 回填後才能算（依賴頂層金額），故新增一支 `withSubAllocationAmounts(...)`（比照既有 `withRebalancePlan(...)` 在 `enrich` 之後串接的既有形狀），**不得**在 `evaluate()` 內部提前假設頂層 `targetAmount` 已知。
+- [ ] **`rebalancePlan` 不擴充到子類別層級，維持既有類別層級限制**：Requirement 80 既有限制——`rebalancePlan.holding` 一律「整體」、只到「存款（現金）／信託基金／股票」類別層級，本 Requirement **不新增**子類別層級的 `rebalancePlan` 項目。子類別的落差呈現只透過 `subAllocations[].deltaAmount`（供頁面顯示「目前→目標」的子類別落差），不產生對應的 BUY/SELL 動作物件——避免子類別層級的臆測（本機規則同樣沒有依據判斷「該減碼哪一檔短債基金」）。
+- [ ] **股票部位持有債券型標的時的提醒**：`LocalPortfolioAllocationEngine` 新增 `warnings` 項目：當「股票」桶的 `subItems` 中短期債／中期債／長期債三者之一金額 > 0 時，加入固定文案（具名常數 `STOCK_BOND_HOLDING_WARNING`）——「你的股票部位中有 {金額} 元被歸類為債券型標的（如債券 ETF），本模型的目標配置假設債券曝險一律經由信託基金達成，故此處目標次分配為 0、會顯示為建議減碼；若為刻意持有可忽略此提示。」金額為三者加總，四捨五入至元。
+- [ ] **前端巢狀呈現，沿用既有純 CSS bar（不用 echarts）**：`AssetAllocationAdviceView.vue` 的「② 我目前的資產配置」（`:212-232`）與「建議目標配置」（`:309-326`）兩處既有的單層 `alloc-row` bar list，「股票」與「信託基金」兩列改為可展開——沿用既有 `.alloc-row`／`.bar-wrap`／`.bar.cur`／`.bar.tgt` 樣式，子類別列縮排並使用較細的 bar（例如新增 `.alloc-row.sub` class，`.alloc-name` 寬度縮減、字級調小），預設收合、點擊父列展開（`el-collapse` 或簡單的 `ref` 開關皆可，不引入新元件庫）。子類別金額為 0 的列**不渲染**（五類裡通常只有 2 類有值，全部渲染會顯得雜亂）。「存款（現金）」列不顯示展開箭頭（`subItems` 恆空）。
+- [ ] **測試**：至少涵蓋——(a) `getCurrentAllocation()` 子分類與 `getHoldingsClassified()` 對同一快照的分類結果一致（同一組 `AssetClassifier` 呼叫，不得出現兩套邏輯分岔）；(b) 子類別金額加總 == 頂層桶金額（股票、信託基金分別驗證）；(c) `SUB_TEMPLATES` 12 格皆通過「股票 2 欄加總 100、基金 5 欄加總 100」的建表期 assert；(d) `local`／`hybrid` 檔位 `subAllocations` 的 `targetAmount`／`deltaAmount` 與頂層 `targetAmount × targetPct/100` 一致（純函式，不啟 Spring context）；(e) `llm` 檔位既有行為不回歸（`subAllocations` 為 null 或缺欄位，反序列化不拋錯，既有 `runGeneration` 測試全數通過）；(f) 股票桶含債券型標的時 `STOCK_BOND_HOLDING_WARNING` 正確觸發、不含時不觸發；(g) 「存款（現金）」桶 `subItems` 恆為空陣列。
+- [ ] **不在本次範圍**：不新增資料庫欄位或 Liquibase changeset（完全複用既有 `asset_class`／`stock_style`／`bond_term`／`fund_class_override` 分類骨架與其 override 機制，使用者仍在既有「資產類別歸類」設定頁調整個股/基金分類，本 Requirement 不新增設定頁）；不讓 `llm` 完整版輸出比照本 Requirement 的子分類（範圍限定 `local`／`hybrid`，`llm` 的 prompt／解析／`runGeneration` 一行不改）；不在 `rebalancePlan` 新增子類別或個股層級操作建議。
 - [ ] **KPI 的時間標示一律用 `quoteTime`，不用 `sessionDate`**：`sessionDate` 只用於兩件事——上一條的前收挑選，以及圖表附加點的判斷。KPI 卡上顯示的時間一律是 `quoteTime`（來源報價時間，轉台北時制顯示），**不得**顯示 `sessionDate`。理由同上：來源在夜盤的日期歸屬未經實測證實，把它當成「這是哪一天的價格」印在畫面上，等於對使用者宣稱一個我們無法證明的事實；`quoteTime` 是來源直接給的時間戳，永遠為真。
 - [ ] **落地後補一次盤中實測並回填規格**：本需求的來源行為實測全部取自 2026-08-15（週六、Globex 休市）。實作落地後的**第一個盤中時段**（週日 18:00 ET 之後、即台北週一 06:00 之後任一時點）須實查一次 `range=1d&interval=1d` 的回應，把當下 `timestamp[0]` 與 `meta.regularMarketTime` 的實際日期歸屬記錄進 Task 340 的完成報告。這是**驗證項目而非實作前置**——上面的二分規則對兩種歸屬都成立，不必等這筆實測才能開工。
 - [ ] **收盤後 5 分鐘校正**：新增 `@Scheduled(cron = "0 5 17 * * MON-FRI", zone = "America/New_York")`。動作為：對三個標的各抓一次日線區間（見下條的回看窗），**強制覆寫**（不走 `max(price_date)+1` 的增量路徑）落進 `commodity_price_history`；再把當盤那一列的收盤價寫回 `commodity:spot:{code}`、`status=SETTLED`、`sessionDate` 為該列的 `price_date`。**來源沒有回傳當盤 bar 時（CME 假日／提前收盤／抓取失敗）一律不寫**：不寫 DB、不改 Redis 價格、只留 `log.warn`，維持上一個值。

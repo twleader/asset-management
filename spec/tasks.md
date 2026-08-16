@@ -29,7 +29,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 
 ---
 
-## 任務索引（Task 1–228、264–267、269–292、297–309、311–340）
+## 任務索引（Task 1–228、264–267、269–292、297–309、311–341）
 
 | Task | 標題 | 位置 |
 |---|---|---|
@@ -340,6 +340,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 338 | 今日股市分析與資產配置建議的 Docker 外部唯讀 API（Nginx 9090 第七、八條路由，Requirement 79） | [tasks/t338_market_analysis_advice_public_api.md](tasks/t338_market_analysis_advice_public_api.md) |
 | 339 | 資產配置建議三態引擎切換：完全本機／部分打 API／現行全 LLM（Requirement 80） | [tasks/t339_portfolio_advice_engine_switch.md](tasks/t339_portfolio_advice_engine_switch.md) |
 | 340 | 油價金價交易時段每分鐘即時報價、收盤後 5 分鐘取回收盤價校正（Requirement 81；規劃階段原為 335，因與其他尚未落地的 worktree 撞號主動避讓至 337、再至 340，335／336／337／338／339 皆已被佔用） | [tasks/t340_commodity_intraday_live_quote.md](tasks/t340_commodity_intraday_live_quote.md) |
+| 341 | 資產配置建議「股票」「信託基金」子類別細分：成長型／收益型／短中長期債（Requirement 82） | [tasks/t341_portfolio_advice_subclass_breakdown.md](tasks/t341_portfolio_advice_subclass_breakdown.md) |
 
 > **註：Task 229–263、268、293–296 以各自任務檔為準。**
 
