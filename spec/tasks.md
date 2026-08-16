@@ -29,7 +29,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 
 ---
 
-## 任務索引（Task 1–228、264–267、269–292、297–309、311–334）
+## 任務索引（Task 1–228、264–267、269–292、297–309、311–334、337）
 
 | Task | 標題 | 位置 |
 |---|---|---|
@@ -334,6 +334,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 332 | 海外指數日線的「新鮮度」判準與交易雷達同源（Requirement 75） | [tasks/t332_index_daily_freshness_alignment.md](tasks/t332_index_daily_freshness_alignment.md) |
 | 333 | 交易雷達證據缺口複驗與剩餘缺口登記（2026-08-15 基準；只登記、不實作） | [tasks/t333_radar_gap_backlog_2026_08_15.md](tasks/t333_radar_gap_backlog_2026_08_15.md) |
 | 334 | 美股歷史估值序列由已入庫官方財報推導落地（`SEC_DERIVED` provider，Requirement 74） | [tasks/t334_us_valuation_history_derivation.md](tasks/t334_us_valuation_history_derivation.md) |
+| 337 | 油價金價交易時段每分鐘即時報價、收盤後 5 分鐘取回收盤價校正（Requirement 77；規劃階段原為 335，因與其他尚未落地的 worktree 撞號主動避讓至 337，336 亦已被佔用） | [tasks/t337_commodity_intraday_live_quote.md](tasks/t337_commodity_intraday_live_quote.md) |
 
 > **註：Task 229–263、268、293–296 以各自任務檔為準。**
 

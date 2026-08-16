@@ -3,6 +3,7 @@ package com.steven.assets.externalmaterials.controller;
 import com.steven.assets.externalmaterials.client.MacroDataFetchClient;
 import com.steven.assets.externalmaterials.client.PriceFetchClient;
 import com.steven.assets.externalmaterials.service.ClosePersister;
+import com.steven.assets.externalmaterials.service.CommodityPricePoller;
 import com.steven.assets.externalmaterials.service.DividendPersister;
 import com.steven.assets.externalmaterials.service.EtfNavPoller;
 import com.steven.assets.externalmaterials.service.ExchangeRatePoller;
@@ -68,7 +69,8 @@ class InternalPriceControllerPublicRescanTest {
                 mock(EtfNavPoller.class),
                 mock(TwRadarRefreshService.class),
                 newsPoller,
-                mock(StockFundamentalPoller.class));
+                mock(StockFundamentalPoller.class),
+                mock(CommodityPricePoller.class));
         mvc = MockMvcBuilders.standaloneSetup(controller).build();
     }
 

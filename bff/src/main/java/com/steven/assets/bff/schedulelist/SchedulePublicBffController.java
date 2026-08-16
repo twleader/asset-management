@@ -10,12 +10,13 @@ import java.util.List;
  * ScheduleListView 專屬 BFF（「公開資訊」分組，Requirement 36）。
  *
  * <p>回傳系統所有自動排程的**人工維護靜態清單**。排程分屬兩個服務：
- * {@code business-services}（21 個）與 {@code external-materials-service}（32 個）。
+ * {@code business-services}（21 個）與 {@code external-materials-service}（34 個）。
  * 此頁為唯讀資訊展示，故不做跨服務反射探索、不入 DB、不設管理端點。
  *
- * <p><b>計數慣例：以 {@code @Scheduled} 方法計，一法一筆。</b>external 32 筆對應 34 個標註
+ * <p><b>計數慣例：以 {@code @Scheduled} 方法計，一法一筆。</b>external 34 筆對應 36 個標註
  * （{@code TwClosurePoller} 與台股官方收盤對帳各為一法兩標、各併為一筆；Task 228 直接以 {@code grep '@Scheduled'} 逐檔核對重新校正此數，
- * 修正了 Task 228 之前既已存在、與此清單無關的計數漂移）。
+ * 修正了 Task 228 之前既已存在、與此清單無關的計數漂移；Task 337 新增 {@code CommodityPricePoller} 的
+ * 每分鐘即時報價與收盤後校正兩筆，各一法一筆，不套用一法兩標的合併規則）。
  *
  * <p><b>維護提醒：新增／調整任何 {@code @Scheduled} 時，務必同步更新下方 {@link #JOBS} 清單，避免與實際 cron 漂移。</b>
  * 已非「cron 皆為編譯期常數」——部分排程改為「每分鐘 tick ＋ 比對 DB 可設定時點」，
@@ -38,8 +39,12 @@ import java.util.List;
  *   <li>external-materials-service：TwseIndexPoller、PricePoller、TaiexIndexPoller、TwClosurePoller、
  *       FundDividendPoller、NewsPoller、StockFundamentalPoller、KrStockPoller、FundNavPoller、DividendPersister、
  *       IntradayTickRefresher、HistoricalBackfillService、ExchangeRatePoller、ClosePersister、
- *       UsValuationDerivationScheduler</li>
+ *       UsValuationDerivationScheduler、CommodityPricePoller、EtfNavPoller</li>
  * </ul>
+ *
+ * <p>{@code CommodityPricePoller} 與 {@code EtfNavPoller} 為 Task 337 補入——前者是本次新增的
+ * 兩筆（盤中即時報價／收盤後校正），後者是既有清單本就漏列的標的（與本任務無關的既有漂移，
+ * 既然要動這段就順手清掉，不必另開任務）。
  */
 @RestController
 @RequestMapping("/api/bff/schedule-list")
@@ -51,7 +56,7 @@ public class SchedulePublicBffController {
     private static final String NYC = "America/New_York";
     private static final String LON = "Europe/London";
 
-    /** 全系統排程清單（53 筆）。順序刻意先業務服務、再外部行情服務，前端再依 category 分組。 */
+    /** 全系統排程清單（55 筆）。順序刻意先業務服務、再外部行情服務，前端再依 category 分組。 */
     private static final List<ScheduledJobDto> JOBS = List.of(
             // ===== business-services（21）=====
             new ScheduledJobDto(BUSINESS, "資產快照", "最新快照釘定當日",
@@ -118,7 +123,7 @@ public class SchedulePublicBffController {
                     "每分鐘檢查各使用者的每一筆交易紀錄自動匯出排程（Task 255 起每人可設定多筆，各有自己的時間與輸出資料夾），命中執行時間即同時產出 JSON 與 Excel 兩份（主檔名相同）到該筆指定目錄（Requirement 49）；輸出含 Google Drive 同步（若已啟用）",
                     "每分鐘", "0 * * * * *", TPE),
 
-            // ===== external-materials-service（32）=====
+            // ===== external-materials-service（34）=====
             new ScheduledJobDto(EXTERNAL, "即時行情", "台股個股即時價（盤中）",
                     "盤中每 2 分鐘更新持股與觀察清單「個股」即時價至 Redis（來源 TWSE mis API）；不含大盤 0000，該筆由「台股大盤即時點位（盤中）」負責",
                     "交易日 09:00–13:00 每 2 分鐘", "0 0/2 9-13 * * MON-FRI", TPE),
@@ -179,6 +184,12 @@ public class SchedulePublicBffController {
             new ScheduledJobDto(EXTERNAL, "油價金價", "油金價每日回補",
                     "每日補 WTI／布蘭特原油／COMEX 黃金前一交易日收盤（紐約收盤落在台北前一夜）",
                     "每日 06:30（週日不跑）", "0 30 6 * * MON-SAT", TPE),
+            new ScheduledJobDto(EXTERNAL, "油價金價", "盤中即時報價",
+                    "交易時段內每分鐘更新 WTI／布蘭特／COMEX 黃金即時價至 Redis（非交易時段不外呼）",
+                    "每分鐘", "0 * * * * *", NYC),
+            new ScheduledJobDto(EXTERNAL, "油價金價", "收盤後校正",
+                    "收盤後 5 分鐘取回當盤收盤價寫入日線表，並回看 5 天讓結算價修訂落地",
+                    "交易日 17:05", "0 5 17 * * MON-FRI", NYC),
             new ScheduledJobDto(EXTERNAL, "ETF淨值", "台股 ETF 淨值折溢價",
                     "盤中每 5 分鐘打證交所全市場 ETF 彙整檔，取即時預估淨值與折溢價寫入 Redis（Task 214）",
                     "交易日 09:02–13:57 每 5 分鐘", "0 2/5 9-13 * * MON-FRI", TPE),
@@ -221,7 +232,7 @@ public class SchedulePublicBffController {
                     "交易日 05:00–07:00 每 15 分鐘", "0 0/15 5-6 * * MON-FRI；0 0 7 * * MON-FRI", TPE)
     );
 
-    /** GET /api/bff/schedule-list —— 回傳全系統排程清單（53 筆靜態資料）。 */
+    /** GET /api/bff/schedule-list —— 回傳全系統排程清單（55 筆靜態資料）。 */
     @GetMapping
     public List<ScheduledJobDto> list() {
         return JOBS;

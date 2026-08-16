@@ -46,9 +46,12 @@ news-scraper:
 kr-stock:
   enabled: ${KR_STOCK_ENABLED:true}
 
-# 油價／金價每日回補（Task 202）：每日 06:30（Asia/Taipei）增量補 WTI／Brent／COMEX 黃金前一交易日收盤
-# 至 commodity_price_history，供「公開資訊 → 油價金價」十年曲線與 Excel 匯出。
-# 十年歷史首補由 HistoricalBackfillService.startupBackfill 負責；enabled=false 可停用每日增量。
+# 油價／金價（Task 202 / Task 337）：本開關同時控制三個排程——
+#   1. 每日 06:30（Asia/Taipei）增量補 WTI／Brent／COMEX 黃金前一交易日收盤至 commodity_price_history；
+#   2. CME Globex 交易時段內每分鐘更新三標的即時價至 Redis（commodity:spot:*／commodity:session）；
+#   3. 收盤後 5 分鐘（17:05 America/New_York）取回當盤收盤價校正、回看 5 天讓結算價修訂落地。
+# 供「公開資訊 → 油價金價」KPI 即時卡、十年曲線與 Excel 匯出。十年歷史首補由
+# HistoricalBackfillService.startupBackfill 負責；enabled=false 會同時停用上述三者，不只影響每日增量。
 commodity:
   enabled: ${COMMODITY_ENABLED:true}
 

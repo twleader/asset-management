@@ -68,13 +68,45 @@ public class CommodityPriceBffController {
                 }));
     }
 
-    /** POST /api/bff/commodity-price/refresh — 手動刷新（三標的增量回補 ＋ 十年清理）。 */
+    /**
+     * POST /api/bff/commodity-price/refresh — 手動「更新資料」按鈕。
+     *
+     * <p>依序（非平行）呼叫 business 的兩支端點並合併回應（337.13b）：先
+     * {@code POST /api/market-data/commodity/refresh}（三標的增量回補 ＋ 十年清理），
+     * 再 {@code POST /api/market-data/commodity/live-refresh}（跑一輪即時報價抓取），
+     * 合併為 {@code {backfilled: …, live: …}}。開頁的 {@code GET /api/bff/commodity-price}
+     * 維持現狀、不追加即時刷新（理由見 337.12：避免每次開頁多打 3 個 Yahoo curl 子程序）。
+     */
     @PostMapping("/refresh")
     public Mono<ResponseEntity<Map<String, Object>>> refresh() {
         return businessServicesClient.post()
                 .uri("/api/market-data/commodity/refresh")
                 .retrieve()
-                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .bodyToMono(MAP)
+                .flatMap(backfillResp -> businessServicesClient.post()
+                        .uri("/api/market-data/commodity/live-refresh")
+                        .retrieve()
+                        .bodyToMono(MAP)
+                        .map(liveResp -> {
+                            Map<String, Object> merged = new HashMap<>();
+                            merged.put("backfilled", backfillResp.get("backfilled"));
+                            merged.put("live", liveResp);
+                            return ResponseEntity.ok(merged);
+                        }));
+    }
+
+    /**
+     * GET /api/bff/commodity-price/live — 三標的盤中即時報價 passthrough（337.13）。
+     * 不直查 DB 或直連外部行情；business 端失敗時降級回空 quotes 而非 5xx
+     * （頁面顯示既有 DB 收盤比整頁錯誤好，比照本控制器既有慣例）。
+     */
+    @GetMapping("/live")
+    public Mono<ResponseEntity<Map<String, Object>>> getLive() {
+        return businessServicesClient.get()
+                .uri("/api/market-data/commodity/live")
+                .retrieve()
+                .bodyToMono(MAP)
+                .onErrorReturn(Map.of("marketOpen", false, "quotes", Map.of()))
                 .map(ResponseEntity::ok);
     }
 
