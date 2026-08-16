@@ -14,8 +14,16 @@ public record CurrentAllocationDto(
         BigDecimal totalAssets,
         List<Item> items
 ) {
-    /** 一個資產類別的現況：金額（台幣）與占比（%）。 */
-    public record Item(String assetClass, BigDecimal value, BigDecimal pct) {}
+    /**
+     * 一個資產類別的現況：金額（台幣）與占比（%）。
+     *
+     * <p>{@code subItems}（Requirement 82）：「股票」「信託基金」兩桶再細分成長型／收益型／短中長期債
+     * 子類別（只含金額 &gt; 0 者）；「存款（現金）」恆為空陣列。</p>
+     */
+    public record Item(String assetClass, BigDecimal value, BigDecimal pct, List<SubItem> subItems) {}
+
+    /** 一個子類別的現況：金額（台幣）與占「所屬頂層桶」的占比（%），非占資產總額。 */
+    public record SubItem(String subClass, BigDecimal value, BigDecimal pct) {}
 
     /** 尚無任何快照時的占位。 */
     public static CurrentAllocationDto empty() {

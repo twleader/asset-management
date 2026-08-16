@@ -24,6 +24,11 @@ public record PortfolioAdviceResult(
         List<String> warnings,                   // 風險提醒
         List<Reference> references               // 參考來源（web_search）
 ) {
+    /**
+     * Requirement 82：{@code local}／{@code hybrid} 檔位的「股票」「信託基金」兩類另附子分配
+     * （成長型／收益型（高股息）／短期債／中期債／長期債）；{@code llm} 檔位的 JSON 不含此欄位，
+     * Jackson 反序列化為 {@code null}（既定行為，不拋錯）。
+     */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record TargetAllocation(
             String assetClass,      // 資產類別（如 現金/存款、債券、台股、海外股票、基金）
@@ -31,6 +36,18 @@ public record PortfolioAdviceResult(
             BigDecimal currentValue,// 目前歸屬此類的資產金額（LLM 依持有明細分類；估）
             BigDecimal targetAmount,// 目標金額（後端＝資產總額 × targetPct，決定性回填）
             BigDecimal deltaAmount, // 差額＝targetAmount − currentValue（後端回填；正=增碼、負=減碼）
+            String rationale,       // 理由
+            List<SubAllocation> subAllocations // 子分配（僅 local／hybrid 檔位的「股票」「信託基金」有值；其餘 null 或空陣列）
+    ) {}
+
+    /** 子分配（Requirement 82）：成長型／收益型（高股息）／短期債／中期債／長期債之一。 */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record SubAllocation(
+            String subClass,        // 子類別（LocalPortfolioAllocationEngine.SUBCLASS_* 之一）
+            BigDecimal targetPct,   // 建議目標比例（%，占所屬頂層桶，非占資產總額）
+            BigDecimal currentValue,// 目前歸屬此子類的資產金額（來自 CurrentAllocationDto.SubItem，找不到視為 0）
+            BigDecimal targetAmount,// 目標金額（＝頂層 targetAmount × subPct / 100）
+            BigDecimal deltaAmount, // 差額＝targetAmount − currentValue
             String rationale        // 理由
     ) {}
 

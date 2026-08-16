@@ -21,17 +21,23 @@ import com.steven.assets.model.BankDeposit;
 import com.steven.assets.model.FundHolding;
 import com.steven.assets.model.InvestmentPlannedExpense;
 import com.steven.assets.model.InvestmentProfile;
+import com.steven.assets.model.FundClassOverride;
 import com.steven.assets.model.PortfolioAdvice;
 import com.steven.assets.model.PortfolioAdviceSetting;
+import com.steven.assets.model.Stock;
 import com.steven.assets.model.StockHolding;
+import com.steven.assets.model.StockStyle;
 import com.steven.assets.repository.AssetSnapshotRepository;
 import com.steven.assets.repository.BankDepositRepository;
+import com.steven.assets.repository.FundClassOverrideRepository;
 import com.steven.assets.repository.FundHoldingRepository;
 import com.steven.assets.repository.InvestmentPlannedExpenseRepository;
 import com.steven.assets.repository.InvestmentProfileRepository;
 import com.steven.assets.repository.PortfolioAdviceRepository;
 import com.steven.assets.repository.PortfolioAdviceSettingRepository;
 import com.steven.assets.repository.StockHoldingRepository;
+import com.steven.assets.repository.StockRepository;
+import com.steven.assets.repository.StockStyleRepository;
 import com.steven.assets.security.TenantGuard;
 import com.steven.assets.security.UnauthenticatedException;
 import jakarta.annotation.PreDestroy;
@@ -51,6 +57,7 @@ import java.time.LocalDate;
 import java.time.Period;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -194,6 +201,14 @@ public class PortfolioAdviceService {
     private final RetirementProjectionService projectionService;
     private final ObjectMapper objectMapper;
     private final TenantGuard tenantGuard;
+    /**
+     * 現況子分類（Requirement 82 / Task 341）——與 {@code AssetService.getHoldingsClassified()} 共用同一組
+     * {@link AssetClassifier} 呼叫，不另寫一套分類邏輯。皆為既有 Spring bean，非新建。
+     */
+    private final AssetClassifier assetClassifier;
+    private final StockRepository stockMasterRepo;
+    private final FundClassOverrideRepository fundClassOverrideRepo;
+    private final StockStyleRepository stockStyleRepo;
     /** 本機配置模板引擎（Task 339）：{@code local} 與 {@code hybrid} 兩檔位的目標比例來源。 */
     private final LocalPortfolioAllocationEngine localEngine;
 
@@ -288,7 +303,15 @@ public class PortfolioAdviceService {
 
     // ===== 現況配置 =====
 
-    /** 目前使用者最新快照的資產配置概覽（存款／基金／股票占比）；無快照回 empty。 */
+    /**
+     * 目前使用者最新快照的資產配置概覽（存款／基金／股票占比，Requirement 82 起「信託基金」「股票」
+     * 兩桶另附成長型／收益型（高股息）／短期債／中期債／長期債子分類）；無快照回 empty。
+     *
+     * <p>子分類邏輯完全比照既有 {@code AssetService.getHoldingsClassified()}（同一組 {@link AssetClassifier}
+     * 呼叫、同一套 override 查表模式，不另開一套分類邏輯分岔）。頂層三類的金額／占比語意不變
+     * （Requirement 80 既有保證）。</p>
+     */
+    @Transactional(readOnly = true)
     public CurrentAllocationDto getCurrentAllocation() {
         AssetSnapshot s = snapshotRepo.findLatest().orElse(null);
         if (s == null) {
@@ -298,11 +321,99 @@ public class PortfolioAdviceService {
         BigDecimal fund = nz(s.getTotalFundValue());
         BigDecimal stock = nz(s.getTotalStockValue());
         BigDecimal total = s.getTotalAssets() != null ? s.getTotalAssets() : deposit.add(fund).add(stock);
+
+        // 一次查表建 Map（比照 AssetService.getHoldingsClassified 既有模式，不逐筆查 DB）
+        Map<String, String> stockClassOverride = new HashMap<>();
+        Map<String, String> stockStyleOverride = new HashMap<>();
+        Map<String, String> bondTermOverride = new HashMap<>();
+        Map<String, String> stockNameMap = new HashMap<>();
+        for (Stock sm : stockMasterRepo.findAll()) {
+            String key = sm.getMarket() + "|" + sm.getCode();
+            stockNameMap.put(key, sm.getName());
+            if (sm.getAssetClass() != null && !sm.getAssetClass().isBlank()) stockClassOverride.put(key, sm.getAssetClass());
+            if (sm.getStockStyle() != null && !sm.getStockStyle().isBlank()) stockStyleOverride.put(key, sm.getStockStyle());
+            if (sm.getBondTerm() != null && !sm.getBondTerm().isBlank()) bondTermOverride.put(key, sm.getBondTerm());
+        }
+        Map<String, FundClassOverride> fundOverride = new HashMap<>();
+        for (FundClassOverride fo : fundClassOverrideRepo.findAll()) {
+            fundOverride.put(fo.getFundName(), fo);
+        }
+        BigDecimal incomeThreshold = stockStyleRepo.findByCode(AssetClassifier.INCOME)
+                .map(StockStyle::getDividendThreshold).orElse(null);
+
+        // 股票桶：逐筆分類累加
+        Map<String, BigDecimal> stockSub = newSubMap();
+        for (StockHolding st : s.getStocks()) {
+            BigDecimal val = st.getCurrentValue() != null ? st.getCurrentValue() : BigDecimal.ZERO;
+            String key = st.getMarket() + "|" + st.getStockCode();
+            String cls = assetClassifier.classifyStock(st.getStockCode(), st.getMarket(), stockClassOverride.get(key));
+            if (AssetClassifier.BOND.equals(cls)) {
+                String term = assetClassifier.classifyBondTerm(st.getStockCode(), st.getMarket(),
+                        stockNameMap.get(key), bondTermOverride.get(key));
+                addToSub(stockSub, term, val);
+            } else {
+                String style = assetClassifier.classifyStockStyle(st.getStockCode(), st.getMarket(),
+                        stockStyleOverride.get(key), st.getDividendRate(), incomeThreshold);
+                addToSub(stockSub, style, val);
+            }
+        }
+        // 信託基金桶：逐筆分類累加
+        Map<String, BigDecimal> fundSub = newSubMap();
+        for (FundHolding fh : s.getFunds()) {
+            BigDecimal val = fh.getCurrentValue() != null ? fh.getCurrentValue() : BigDecimal.ZERO;
+            String fname = fh.getFundName();
+            FundClassOverride ov = fundOverride.get(fname);
+            String cls = assetClassifier.classifyFund(fname, ov != null ? ov.getAssetClass() : null);
+            if (AssetClassifier.BOND.equals(cls)) {
+                String term = assetClassifier.classifyBondTerm(null, null, fname, ov != null ? ov.getBondTerm() : null);
+                addToSub(fundSub, term, val);
+            } else {
+                String style = assetClassifier.classifyStockStyle(null, null,
+                        ov != null ? ov.getStockStyle() : null, null, incomeThreshold);
+                addToSub(fundSub, style, val);
+            }
+        }
+
         List<CurrentAllocationDto.Item> items = new ArrayList<>();
-        items.add(new CurrentAllocationDto.Item("存款（現金）", deposit, pct(deposit, total)));
-        items.add(new CurrentAllocationDto.Item("信託基金", fund, pct(fund, total)));
-        items.add(new CurrentAllocationDto.Item("股票", stock, pct(stock, total)));
+        items.add(new CurrentAllocationDto.Item("存款（現金）", deposit, pct(deposit, total), List.of()));
+        items.add(new CurrentAllocationDto.Item("信託基金", fund, pct(fund, total), toSubItems(fundSub, fund)));
+        items.add(new CurrentAllocationDto.Item("股票", stock, pct(stock, total), toSubItems(stockSub, stock)));
         return new CurrentAllocationDto(s.getId(), s.getSnapshotDate(), total, items);
+    }
+
+    /** 五個子類別的累加容器，鍵一律 {@link LocalPortfolioAllocationEngine} 的 {@code SUBCLASS_*} 常數。 */
+    private static Map<String, BigDecimal> newSubMap() {
+        Map<String, BigDecimal> m = new LinkedHashMap<>();
+        m.put(LocalPortfolioAllocationEngine.SUBCLASS_GROWTH, BigDecimal.ZERO);
+        m.put(LocalPortfolioAllocationEngine.SUBCLASS_INCOME, BigDecimal.ZERO);
+        m.put(LocalPortfolioAllocationEngine.SUBCLASS_BOND_SHORT, BigDecimal.ZERO);
+        m.put(LocalPortfolioAllocationEngine.SUBCLASS_BOND_MID, BigDecimal.ZERO);
+        m.put(LocalPortfolioAllocationEngine.SUBCLASS_BOND_LONG, BigDecimal.ZERO);
+        return m;
+    }
+
+    /** {@link AssetClassifier} 的分類代碼（GROWTH/INCOME/SHORT/MID/LONG）→ 中文子類別名稱後累加金額。 */
+    private static void addToSub(Map<String, BigDecimal> m, String classifierCode, BigDecimal val) {
+        String label = switch (classifierCode) {
+            case AssetClassifier.GROWTH -> LocalPortfolioAllocationEngine.SUBCLASS_GROWTH;
+            case AssetClassifier.INCOME -> LocalPortfolioAllocationEngine.SUBCLASS_INCOME;
+            case AssetClassifier.SHORT -> LocalPortfolioAllocationEngine.SUBCLASS_BOND_SHORT;
+            case AssetClassifier.MID -> LocalPortfolioAllocationEngine.SUBCLASS_BOND_MID;
+            case AssetClassifier.LONG -> LocalPortfolioAllocationEngine.SUBCLASS_BOND_LONG;
+            default -> LocalPortfolioAllocationEngine.SUBCLASS_GROWTH; // 理論不可達，classifyStockStyle/classifyBondTerm 值域固定
+        };
+        m.merge(label, val, BigDecimal::add);
+    }
+
+    /** 累加結果 → 只保留金額 &gt; 0 的子類別 SubItem 清單；{@code pct} 為占「所屬頂層桶」的占比，非占資產總額。 */
+    private static List<CurrentAllocationDto.SubItem> toSubItems(Map<String, BigDecimal> sub, BigDecimal bucketTotal) {
+        List<CurrentAllocationDto.SubItem> result = new ArrayList<>();
+        for (Map.Entry<String, BigDecimal> e : sub.entrySet()) {
+            if (e.getValue().signum() > 0) {
+                result.add(new CurrentAllocationDto.SubItem(e.getKey(), e.getValue(), pct(e.getValue(), bucketTotal)));
+            }
+        }
+        return result;
     }
 
     // ===== 退休現金流試算 =====
@@ -587,7 +698,8 @@ public class PortfolioAdviceService {
                 LocalDate.now(), profile.getRetirementDate(), profile.getBirthDate());
         PortfolioAdviceResult base = localEngine.evaluate(
                 profile.getRiskTolerance(), years, current, projection);
-        return localEngine.withRebalancePlan(enrich(base, totalAssets));
+        PortfolioAdviceResult withPlan = localEngine.withRebalancePlan(enrich(base, totalAssets));
+        return localEngine.withSubAllocationAmounts(withPlan, current, profile.getRiskTolerance(), years);
     }
 
     /**
@@ -1288,7 +1400,8 @@ public class PortfolioAdviceService {
                     ? targetAmount.subtract(t.currentValue()).setScale(0, RoundingMode.HALF_UP)
                     : null;
             out.add(new PortfolioAdviceResult.TargetAllocation(
-                    t.assetClass(), t.targetPct(), t.currentValue(), targetAmount, delta, t.rationale()));
+                    t.assetClass(), t.targetPct(), t.currentValue(), targetAmount, delta, t.rationale(),
+                    t.subAllocations()));
         }
         return new PortfolioAdviceResult(
                 r.summary(), r.riskAssessment(), out, r.rebalancePlan(), r.actions(), r.warnings(), r.references());
