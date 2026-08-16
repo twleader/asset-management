@@ -13,6 +13,7 @@
 3. spec/tasks/tNNN_*.md     → 建立自足任務檔（規範見 spec/tasks/README.md）
 4. spec 對抗式審查          → /spec-review（找出問題並修，不打分數、不設通過門檻）
 5. 實作程式碼
+6. 收尾提交                 → /commit-merge-push（驗收通過後自動執行，不必等使用者開口）
 ```
 
 > **第 3→4→5 步之間有機器閘門把關，不靠自律。** 寫完 `spec/` 會**立刻**收到跑
@@ -34,6 +35,40 @@
 > 包含：新 Entity、新 API endpoint、新頁面、新業務邏輯，以及修正既有商業邏輯的 bug fix。
 >
 > 唯一例外（可不更新 spec）：純樣式 / CSS 微調、純 typo、純 import 整理等不影響功能契約的變更。
+
+### 第 6 步：變更完成後自動 `/commit-merge-push`
+
+**每個 session 只要動過檔案、且變更已驗收通過，就自動執行 `/commit-merge-push` 收尾，
+不必等使用者再下一次「commit」「推上去」的指令。** 使用者要的是把事情做完；
+留在 worktree 沒進 main 的變更不算做完。
+
+> **這條規則的成因是實際事故，不是潔癖。** 本專案同時有 30+ 個 worktree，寫完沒 commit
+> 的實作會躺在某個 worktree 的 `git status` 裡；下次在 main 或別的 worktree 找不到該功能，
+> 極容易被誤判成「還沒做」而整套重寫。自動收尾就是讓「寫完」與「進 main」不脫鉤。
+
+**執行方式沿用既有規範**：派 subagent 跑 `/commit-merge-push`（見下方〈Subagent 一律與主
+Agent 使用相同模型〉一節，該 skill 沒宣告模型 → 繼承主 agent），主 agent 只負責彙整並向
+使用者回報 merge commit SHA。
+
+**先驗收、再收尾。** 順序固定為：實作 → 驗收（涉及可執行的變更就先跑 `/run-stack`，確認
+image rebuild + container recreate 後真的 serve）→ `/commit-merge-push`。**驗收沒過不准
+merge 進 main**：main 是所有 worktree 共用的分支，壞掉的變更會擴散出去。
+
+**不自動執行的例外（僅此四種）：**
+
+1. 使用者明說「先不要 commit」「暫時不推」——以當下指令為準。
+2. 本 session 沒有任何檔案變更（純問答、純查證、純唯讀分析）。
+3. 驗收未通過，或 SDD 閘門未過（spec 未審、arch 未查、測試紅燈）——先修好再收尾，不得繞過。
+4. 變更明顯只做到一半，且下一步仍在同一 session 內接續——做完整個工作單元再一次收尾，
+   不要把半成品推上 main。
+
+> **第 6 步沒有機器閘門，只有這條規範。** 下面的 commit-msg hook 只在「你已經決定要 commit」
+> 之後才有話語權，它擋不了「乾脆不 commit」。要硬擋只能攔 `git commit` 或掛 Stop hook，
+> 前者會干擾其他 worktree 的提交流程，後者會在多輪對話中每一輪都重複提示——皆不採用。
+
+> **這一步會連帶推上 origin，這是刻意的。** `/commit-merge-push` 的第三段就是 `git push`；
+> 且多個 worktree 共用同一份 local `main` ref，變更一旦 merge 進 main，別的 session 推 main
+> 時也會一併帶上去。因此「只想留在本機」的變更不要走這條流程，停在 feature 分支 commit 即可。
 
 ### Commit-msg Hook（強制 SDD 同步）
 
