@@ -1,5 +1,5 @@
 <template>
-  <div v-loading="loading" :element-loading-text="generating ? '送出批次分析中…' : '載入中…'">
+  <div v-loading="loading" :element-loading-text="generating ? '分析產生中…' : '載入中…'">
     <!-- 頂列：標題 + 重新分析 -->
     <div class="header-row">
       <div>
@@ -524,8 +524,16 @@ async function regenerate() {
   generating.value = true
   loading.value = true
   try {
-    await bffApi.todayMarketAnalysis.generate()
-    ElMessage.success('已送出分析（批次處理中，完成後自動更新）')
+    const res = await bffApi.todayMarketAnalysis.generate()
+    if (res && res.status === 'OK') {
+      ElMessage.success('已完成本機分析')
+    } else if (res && res.status === 'PROCESSING') {
+      ElMessage.success('已送出分析（批次處理中，完成後自動更新）')
+    } else if (res && res.status === 'NOT_CONFIGURED') {
+      ElMessage.warning('尚未設定 Anthropic API 金鑰')
+    } else if (res && res.status === 'FAILED') {
+      ElMessage.error(res.errorMessage || '分析產生失敗，請再試一次')
+    }
     await load()
   } catch (e) {
     // 錯誤 toast 由 api 攔截器統一處理
