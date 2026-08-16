@@ -185,6 +185,8 @@ export const bffApi = {
     // 開頁載入：BFF 先 refresh 再回近十年三序列，故 timeout 放寬
     getHistory: () => api.get('/bff/commodity-price', { timeout: 120000 }),
     refresh: () => api.post('/bff/commodity-price/refresh', null, { timeout: 120000 }),
+    // 盤中即時報價（Requirement 77 / Task 337）：每分鐘輪詢，失敗不得洗版錯誤 toast
+    getLive: () => api.get('/bff/commodity-price/live', { skipErrorToast: true }),
     exportExcel: (start, end) =>
       api.get('/bff/commodity-price/export', {
         params: { ...(start && { start }), ...(end && { end }) },

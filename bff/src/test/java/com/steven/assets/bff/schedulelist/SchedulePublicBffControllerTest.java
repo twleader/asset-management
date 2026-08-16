@@ -24,11 +24,11 @@ class SchedulePublicBffControllerTest {
     }
 
     @Test
-    @DisplayName("排程清單完整列出 21 個業務與 32 個外部行情工作")
+    @DisplayName("排程清單完整列出 21 個業務與 34 個外部行情工作")
     void 項目數正確() {
-        assertThat(jobs()).hasSize(53);
+        assertThat(jobs()).hasSize(55);
         assertThat(jobs()).filteredOn(j -> "業務服務".equals(j.service())).hasSize(21);
-        assertThat(jobs()).filteredOn(j -> "外部行情服務".equals(j.service())).hasSize(32);
+        assertThat(jobs()).filteredOn(j -> "外部行情服務".equals(j.service())).hasSize(34);
     }
 
     @Test

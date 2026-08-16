@@ -52,6 +52,7 @@ public class InternalPriceController {
     private final com.steven.assets.externalmaterials.service.TwRadarRefreshService twRadarRefresh;
     private final com.steven.assets.externalmaterials.service.NewsPoller newsPoller;
     private final com.steven.assets.externalmaterials.service.StockFundamentalPoller stockFundamentalPoller;
+    private final com.steven.assets.externalmaterials.service.CommodityPricePoller commodityPricePoller;
 
     /**
      * 同步抓所有持股報價、寫 Redis 後回傳統計。
@@ -250,6 +251,17 @@ public class InternalPriceController {
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate since) {
         int n = historicalBackfill.backfillCommodityFrom(code, since);
         return Map.of("code", code, "records", n);
+    }
+
+    /**
+     * 手動觸發一輪油金價即時報價（Requirement 77），與每分鐘排程共用同一段抓取邏輯。
+     * 仍受交易時段判定約束：非交易時段回 {@code inSession=false} 且不改 Redis。
+     * business 端 {@code POST /api/market-data/commodity/live-refresh} proxy 至此。
+     */
+    @PostMapping("/commodity/live-refresh")
+    public com.steven.assets.externalmaterials.service.CommodityPricePoller.LiveRefreshResult
+            liveRefreshCommodity() {
+        return commodityPricePoller.liveRefreshNow();
     }
 
     /** IMF DataMapper 指標查詢（NGDPDPC 人均 GDP / NGDP_RPCH GDP 成長率）。 */

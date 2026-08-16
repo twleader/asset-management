@@ -447,6 +447,37 @@ public class HistoricalDataService {
         return result;
     }
 
+    /** 對應 ext-materials-service /internal/commodity/live-refresh 回應格式。 */
+    private record LiveRefreshDto(boolean inSession, List<String> updated) {
+    }
+
+    /** POST /api/market-data/commodity/live-refresh 回應（Requirement 77 / Task 337，不可變 record）。 */
+    public record LiveRefreshResult(boolean inSession, List<String> updated) {
+    }
+
+    /**
+     * 手動觸發油金價即時報價刷新：proxy 至 ext-materials-service
+     * {@code POST /internal/commodity/live-refresh}（337.12）。
+     *
+     * <p>刻意<b>不</b>掛進既有 {@link #refreshCommodities()}——那支被 {@code GET /api/bff/commodity-price}
+     * 每次開頁呼叫，掛進去等於每開一次頁就多打 3 個 Yahoo curl 子程序、與每分鐘 poller 疊加。
+     */
+    public LiveRefreshResult liveRefreshCommodities() {
+        try {
+            LiveRefreshDto resp = priceServiceClient.post()
+                    .uri("/internal/commodity/live-refresh")
+                    .retrieve()
+                    .bodyToMono(LiveRefreshDto.class)
+                    .block();
+            if (resp == null) return new LiveRefreshResult(false, List.of());
+            return new LiveRefreshResult(resp.inSession(),
+                    resp.updated() == null ? List.of() : resp.updated());
+        } catch (Exception e) {
+            log.warn("呼叫 ext-materials-service /internal/commodity/live-refresh 失敗: {}", e.getMessage());
+            return new LiveRefreshResult(false, List.of());
+        }
+    }
+
     @Transactional(readOnly = true)
     public java.util.Optional<ExchangeRateHistory> getLatestExchangeRate(String currency) {
         return rateHistRepo.findClosestRate(currency, LocalDate.now());

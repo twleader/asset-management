@@ -124,7 +124,7 @@ com.steven.assets/
   - `FundSettingsBffController`：`GET /api/bff/fund-settings/bank-options` → 過濾 active 後的銷售銀行下拉；與 SnapshotForm 的 lookups **同讀 business `/api/settings/banks`**（同義欄位同一來源），fund-settings 頁不再跨頁呼叫 `/api/bff/snapshot-form/lookups`（Task 175：一頁一 BFF 合規化）
   - `RealizedGainBffRoutes`：`/api/realized-gains/**` → business-services。**目前無前端消費者**：原「RealizedGainView 的 Pinia store `gainApi` 共用 CRUD」說法已不成立——該頁已全面走 `RealizedGainBffController` 的 `/api/bff/realized-gain` 聚合端點，前端 `gainApi` wrapper 與 `assetStore` 的三個已實現損益 action 已於 Task 197 移除。route 本身暫留（移除需重建 BFF 服務），**屬待清理項**
   - `MarketDataBffRoutes`：`/api/market-data/**` → business-services。消費者是 DashboardView 與 TradingRadarView 兩頁的 SSE 行情串流（皆為 `new EventSource('/api/market-data/prices/stream')`，見下方 SSE 段落之已知落差）；`marketDataApi` wrapper（歷史/配息/ETF 成分股）無呼叫端，已於 Task 197 移除，該類查詢皆走 `StockAnalysisBffRoutes` 的 `/api/bff/stock-analysis/**`
-  - `SchedulePublicBffController`（ScheduleListView 專屬，「公開資訊」分組，Requirement 36）：`GET /api/bff/schedule-list` → 回傳系統所有自動排程的**人工維護靜態清單**（`ScheduledJobDto` 不可變 record：service / category / name / description / schedule 白話 / cron / zone）。Task 334（external：美股推導估值每日排程）與 Task 332（business：海外指數日線落後補救檢查）各新增一個 `@Scheduled` 後，共 **53 筆** ＝ `business-services` 21 ＋ `external-materials-service` 32（Task 327 新增 USD/TWD 2 秒 live producer 後為 51 ＝ 20 ＋ 31；**以 `@Scheduled` 方法計**；business 另包含 `AlertNotificationDispatcher` 每 60 秒與 `TradingRadarNotificationService` 每 2 秒兩個 fixed-delay job；external 實際 **34** 個標註，`TwClosurePoller` 與台股官方收盤對帳各為一法兩標、各併為一筆。
+  - `SchedulePublicBffController`（ScheduleListView 專屬，「公開資訊」分組，Requirement 36）：`GET /api/bff/schedule-list` → 回傳系統所有自動排程的**人工維護靜態清單**（`ScheduledJobDto` 不可變 record：service / category / name / description / schedule 白話 / cron / zone）。Task 334（external：美股推導估值每日排程）與 Task 332（business：海外指數日線落後補救檢查）各新增一個 `@Scheduled` 後為 53 筆；**Task 340（external：油價金價盤中每分鐘即時報價、收盤後 17:05 校正）再新增兩個後，共 55 筆** ＝ `business-services` 21 ＋ `external-materials-service` 34（Task 327 新增 USD/TWD 2 秒 live producer 後為 51 ＝ 20 ＋ 31；**以 `@Scheduled` 方法計**；business 另包含 `AlertNotificationDispatcher` 每 60 秒與 `TradingRadarNotificationService` 每 2 秒兩個 fixed-delay job；external 實際 **36** 個標註，`TwClosurePoller` 與台股官方收盤對帳各為一法兩標、各併為一筆。
 **逐檔核對務必用 `grep -ran`**：`AlertNotificationDispatcher.java` 會被 `file(1)` 判為 data，普通 `grep -r` 整檔跳過，backend 會少算成 20）。此頁為唯讀資訊展示故不做跨服務反射探索、不入 DB、不設管理端點；**新增／調整任何 `@Scheduled` 須同步更新此清單以免漂移**。**動態排程**（每分鐘 tick 比對 DB 可設定時點：`NewsPoller`→`crawler_schedule`、`MarketAnalysisScheduler`→`market_analysis_send_time`）於清單標「動態：依『X』頁設定（預設 …）」／「動態（表名）」，**不寫死時間**；每分鐘 tick 但時點為 per-user 私人設定者（`ExportScheduleService`／`TradingCalendarExportScheduleService`）則照列 `每分鐘`／`0 * * * * *` 實際 cron。前端 `ScheduleListView` 之服務別／分類計數由 payload 動態算出，故加減筆數無須改前端。無下游呼叫（不需 WebClient），落 BFF `anyExchange().authenticated()`（已登入者皆可讀）。
   - `CrawlerDataBffController`（CrawlerDataView 專屬，「公開資訊」分組，Requirement 38）：爬蟲資訊查詢頁，一頁一 BFF、WebClient 轉呼 business：
     - `GET /api/bff/crawler-data?date=YYYY-MM-DD&dateField=fetched|published&category=` → business `GET /api/news-headlines`：查指定日期爬回的 `news_headline`（與今日股市分析同讀一份表，符合「同義欄位、同一 business API」）。
@@ -7423,3 +7423,175 @@ UPDATE portfolio_advice_setting SET engine = 'local' WHERE engine IS NULL OR eng
 ### 前端
 
 `AssetAllocationAdviceView.vue` 新增「分析引擎」下拉（三檔）。`local` 時「模型」「思考深度」「搜尋次數」三個既有下拉全部**停用而非隱藏**；`hybrid` 時「模型」「思考深度」可用、「搜尋次數」停用並顯示 0。沿用既有 `PUT /api/bff/portfolio-advice/settings`，不新增端點。
+
+---
+
+## Requirement 81／Task 340：油價金價盤中每分鐘即時報價與收盤後校正
+
+### 為什麼是「Redis 盤中、DB 收盤」而不是把盤中價寫進日線表
+
+`commodity_price_history` 有兩個下游：本頁的十年曲線／Excel 匯出，以及**交易雷達的 `WTI_RET5`／`BRENT_RET5`／`GOLD_RET5`**（`JpaTradingRadarMarketFeatureAdapter` 直接讀該表，再由 `TradingRadarMarketFeatureResolver` 依 `source_available_at` 套 decision-time 可見性）。把每分鐘的盤中價寫成 `close_price`，等於讓 5 盤報酬率建立在未定案的值上，且每分鐘都會改變一次歷史特徵。故盤中價**只進 Redis**，DB 只在收盤校正時被寫一次（外加來源後續修訂結算價時的覆寫），與本專案既有的「即時價走 Redis、收盤價走 DB」完全一致。
+
+### 交易時段與收盤時刻
+
+| 事實 | 值 |
+|---|---|
+| 標的 | NYMEX `CL=F`（WTI）／NYMEX `BZ=F`（BRENT）／COMEX `GC=F`（GOLD） |
+| Globex 週期 | 週日 18:00 ET 開盤 → 週五 17:00 ET 收盤 |
+| 每日維護休息 | 17:00–18:00 ET |
+| 「收盤」 | 每個交易日 17:00 ET |
+| 「收盤後 5 分鐘」 | 17:05 ET（cron `0 5 17 * * MON-FRI`，zone `America/New_York`） |
+
+判定函式只存在於 external-materials-service（外部行情與時段判定的單一歸屬）。**不建 CME 假日行事曆**：既有 `MarketCalendar` 是台／美／英**股市**行事曆，期貨在多數美股假日照常交易（僅提前收盤），挪用會判錯；假日照 tick 但來源時間戳不推進，由 freshness 守門自然吸收。
+
+### Redis key schema
+
+```
+commodity:session                 {"heartbeatAt":"<Instant>","inSession":true}          TTL 150s
+commodity:spot:{WTI|BRENT|GOLD}   單一標的最近一筆報價 JSON                              TTL 72h
+```
+
+- `commodity:session` 比照 USD/TWD 的 `exchange-rate:session:USD:TWD` 心跳：**只有 producer 知道時段，consumer 一律以 key 是否存在判斷「現在是不是盤中」**，避免 business／BFF／前端各自複寫一份時段判定而漂移。TTL 150s ＝ 2.5 個 tick 週期，容忍單次漏跳。
+- `commodity:spot:*` TTL **72 小時**而非既有股價的 24 小時：週五 17:00 ET 收盤到週日 18:00 ET 開盤有 **49 小時**，24h TTL 會讓週末整組掉光，退化成「週末看不到最後收盤」。
+
+報價 payload：
+
+```json
+{
+  "commodityCode": "WTI",
+  "price": 82.4000,
+  "sourcePreviousClose": 81.2500,
+  "dayHigh": 82.9900,
+  "dayLow": 80.7100,
+  "sessionDate": "2026-08-14",
+  "quoteTime": "2026-08-14T20:59:59Z",
+  "lastAdvancedAt": "2026-08-14T20:59:31Z",
+  "polledAt": "2026-08-14T20:59:31Z",
+  "provider": "YAHOO_FINANCE_CHART",
+  "sourceUrl": "https://query1.finance.yahoo.com/v8/finance/chart/CL%3DF?range=1d&interval=1d",
+  "status": "LIVE"
+}
+```
+
+`lastAdvancedAt`＝`quoteTime` 上次真正推進時的 `polledAt`（freshness 守門用它判定 STALE，見下）；`quoteTime` 沒推進時 `lastAdvancedAt` 也不動。`status`：`LIVE`（盤中且 `regularMarketTime` 有推進）／`STALE`（盤中但連續 5 分鐘未推進，價格保留上一筆）／`SETTLED`（17:05 校正寫入）／`CLOSED`（保留值，本需求不主動寫）。**「非交易時段不寫入」只約束每分鐘 tick；17:05 校正是獨立排程，即使它自己落在非交易時段內也照常寫 `SETTLED`。** **漲跌／漲跌幅不入 payload**——衍生值由 business 以 DB 前一交易日收盤即時算（見下）。
+
+### 來源 API 與 freshness 守門
+
+每分鐘每個標的抓一次：
+
+```
+https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=1d&interval=1d      # symbol 的 '=' 須編為 %3D
+```
+
+實測（2026-08-15 週六，Globex 休市中）payload 1,164 bytes，`meta` 內含 `regularMarketPrice`／`regularMarketTime`／`chartPreviousClose`／`regularMarketDayHigh`／`regularMarketDayLow`；本次實測 `timestamp` 陣列只有一個元素、為該交易日 **00:00 ET**。**取值時須取「陣列中最後一根有非 null close 的 bar」，不得寫死索引 `[0]`**——本需求沒有盤中樣本能證明陣列恆長度為 1，既有 `CommodityFetchClient.fetchRange` 本身就是逐根迭代處理任意長度陣列，新方法必須同樣寫法，成本為零、對單 bar 情境行為完全相同。`sessionDate` 採 `Instant.ofEpochSecond(該 bar 的 timestamp).atZone(NY).toLocalDate()`——**採用來源自己的日期歸屬，不自行推導「18:00 後算隔日」**（本專案無可證明該推導與來源一致的實測）。`interval=1m` 版本會多回 1,437 根分鐘 bar，本需求用不到。
+
+呼叫方式沿用既有 `ProcessBuilder("curl", "-s", "--max-time", "10", "-H", "User-Agent: Mozilla/5.0", url)`：Yahoo 對 Java `HttpClient` 的 HTTP/2 fingerprint 會回 RST_STREAM／429，**長 Chrome UA 反而被 WAF 擋**。逾時 ≤10 秒（既有區間抓取的 30 秒會讓單一標的吃掉半個 tick 週期）；三標的並行（virtual thread，同 `PricePoller.updatePrices`）；`AtomicBoolean` in-flight 守門，前一輪未結束本輪 skip（同 `ExchangeRatePoller.liveUpdateInFlight`）。
+
+**freshness 守門**：本輪 `regularMarketTime` ≤ 既有 payload 的 `quoteTime` → 不改價格、`quoteTime`、`lastAdvancedAt`（可更新 `polledAt` 與 TTL）；`regularMarketTime` 真的推進時才把 `quoteTime` 更新為新值、`lastAdvancedAt` 更新為本輪 `polledAt`。STALE 判定式：`status = STALE ⇔ status ≠ SETTLED 且 polledAt − lastAdvancedAt ≥ 5 分鐘`。**這個判定必須靠 payload 裡的 `lastAdvancedAt` 欄位、不能靠 poller 內部計數器**——`@Scheduled` 方法每次觸發都是無狀態呼叫，服務重啟後任何記憶體計數會歸零。**任何情況都不得回寫補值**（同「抓不到就維持上一個 tick」的既有紀律）。
+
+**既有 payload 損毀時的政策與 `ExchangeRateSpotCacheWriter` 刻意相反，不可照抄**：後者 javadoc 明訂「任一舊資料／Redis／序列化錯誤都 fail closed，不得以空 map 重建覆寫」（其測試方法名即 `malformedExistingPayloadAndInvalidQuoteNeverOverwriteLastTruth`），因為它必須保護 per-source high-watermark 的單調性——讀不到舊值就無法驗證單調。commodity 沒有這個結構：新鮮度只靠單一 `quoteTime` 比較，舊值不可解析時採用本輪值不會造成回退。故本需求為「**舊 payload 解析失敗 → 視為無既有值，直接寫入本輪結果並 log.warn**」。引用 `ExchangeRateSpotCacheWriter` 時只借用四件事：只寫 Redis、不寫 DB、不 publish、寫入失敗只 log.warn 回 false。
+
+### 收盤校正（17:05 ET）
+
+```
+for code in [WTI, BRENT, GOLD]:
+    bars = CommodityFetchClient.fetchRange(code, today.minusDays(5), today)   # 既有方法，interval=1d
+    for b in bars: StockSourceQuery.upsertCommodityPrice(code, b.priceDate, b.closePrice, provider, url, availableAt, fetchedAt)
+    當盤 bar 存在 → 以其 close 覆寫 commodity:spot:{code}：
+        status = SETTLED
+        sessionDate = 該 bar 的 price_date
+        quoteTime = 該 bar 所屬回應的 meta.regularMarketTime（即收盤當下時刻，不是本次校正的抓取時刻）
+        lastAdvancedAt = 本次校正的 polledAt
+    當盤 bar 不存在 → 不寫 DB、不改 Redis 價格，只 log.warn
+```
+
+`quoteTime` 取「收盤當下時刻」而非「校正抓取時刻」，理由是本需求要求 `quoteTime` 永遠是來源自己給的時間戳、KPI 顯示的時間必須站得住腳——若填成 17:05 的抓取時刻，KPI 會顯示「收盤 · 17:05」而非真正的 17:00 收盤時刻。既有 `CommodityFetchClient.fetchRange` 是 `period1`／`period2` 區間查詢，回應雖然也帶 `meta`，但職責是回傳多筆歷史 bar，不適合拿來當「當盤收盤時刻」的來源。故 17:05 校正對每個標的**兩次呼叫**、職責分開：先呼叫 337.2 新增的 `fetchLiveQuote(code)`（每分鐘 tick 用的同一支輕量方法）取得 `meta.regularMarketTime` 當 `quoteTime`；再呼叫既有 `fetchRange(code, today.minusDays(5), today)` 取回看窗內所有要 upsert 到 DB 的 bar。一天一次的排程，兩次 HTTP 呼叫的成本可以接受，不像每分鐘 tick 需要在意逾時與並發。
+
+**為什麼要回看 5 天而不是只寫當日**——實測（2026-08-15 取得）：`CL=F` 最近一盤（8/14）的日線收盤 82.40 與 `meta.regularMarketPrice`、與 16:59 那根分鐘 bar 完全相同（＝收盤當下最後成交價）；而更早四盤的日線收盤與當日任何一根分鐘 bar 都對不起來（8/10 日線 82.13 vs 14:29 82.17／14:30 82.28／16:59 82.30／23:58 82.12；8/11 日線 83.20 vs 14:30 83.23；8/12 日線 83.27 vs 14:30 83.26；8/13 日線 81.25 vs 14:30 81.06），與「交易所結算價盤後才發布、並回頭取代最後成交價」一致。只寫當日、不回看，該列會永遠停在最後成交價。
+
+回看覆寫**不需要改** `upsertCommodityPrice`：它既有的行為正是為此設計——同值重抓只更新 `fetched_at`，**價格真被修訂才把 `source_available_at` 推到本次抓取時間**，讓交易雷達的 decision-time resolver 對被改動過的舊值 fail closed。
+
+**這代表歷史 decision-time 可見性會改變，必須寫明而非宣稱「行為不變」**：`TradingRadarMarketFeatureResolver` 會剔除 `source_available_at` 晚於 decision instant 的列，因此每一次結算價修訂都會讓該列對過去某些 decision instant 變成不可見（回測／快照重算看到的 `WTI/BRENT/GOLD_RET5` 可得性與今天不同）。方向是**變得更保守**（寧可讓被改過的舊值消失，也不讓歷史決策看見未來才知道的數字），屬既有 fail-closed 設計的用意，不是缺陷；但驗收須對同一組歷史 decision instant 做前後對照並記錄。
+
+**「5 天」是保守預設值、不是實證結論**：上方實測只證明存在修訂，未證明修訂在幾天後落地；且 5 個**日曆**天在週一 17:05 只涵蓋 4 個交易盤。落地一週後須對同一組 `price_date` 再查一次 `close_price` 是否還在變，仍在變即為窗口不足、須加大天數。
+
+既有 `CommodityPricePoller.dailyCommodityUpdate`（每日 06:30 Asia/Taipei）**保留為安全網**，語意不變；17:05 已寫入當盤列時它自然 no-op（`max(price_date)+1` 已不早於今天）。
+
+### 分層與資料流
+
+```
+CommodityFetchClient（既有；新增 fetchLiveQuote(code) → meta 快照）
+    ↓
+CommodityPricePoller（每分鐘 tick＋17:05 校正；時段判定＋in-flight 守門）
+    ├─ 盤中 → CommoditySpotCacheWriter → Redis commodity:spot:*／commodity:session
+    └─ 17:05 → StockSourceQuery.upsertCommodityPrice → [commodity_price_history] ＋ Redis（SETTLED）
+                                                              ↑
+business：RedisCommodityLiveCacheAdapter（唯讀 Redis）＋ CommodityPriceHistoryRepository（前一交易日收盤）
+    → GET /api/market-data/commodity/live
+    ↑
+BFF：GET /api/bff/commodity-price/live（passthrough）
+    ↑
+CommodityPriceView.vue（60 秒輪詢，document.hidden 暫停）
+```
+
+### 漲跌計算（business，衍生值不入庫）
+
+前收的挑選**先依 `status` 分流，再取值**，不是單一句「嚴格早於 `sessionDate`」，也不是只看「DB 是否已有 `sessionDate` 該列」：
+
+```
+if status == SETTLED:
+        # 這一列剛好是校正排程自己寫的，price 就等於它的 close_price，
+        # 若照下面的二分規則會拿自己當自己的前收，change 恆為 0 —— 必須跳過它、往前找
+        prevClose = price_date < sessionDate 的最後一筆 close_price
+elif 存在 commodity_price_history[code, price_date = sessionDate]:
+        # status 為 LIVE/STALE，但該筆 sessionDate 已有 DB 列（校正排程寫的）、報價仍在動
+        # → 這筆屬其後的夜盤，且此列 close_price 必然 ≠ 當前 price（否則 freshness 守門早已判定未推進）
+        prevClose = 該列的 close_price
+else:
+        prevClose = price_date < sessionDate 的最後一筆 close_price   # 該盤仍在進行中
+prevClose 缺 → 退用 payload.sourcePreviousClose；再無值 → change / changePct 皆 null
+change    = price − prevClose
+changePct = change / prevClose × 100            # BigDecimal 須指定 scale 與 RoundingMode，否則除不盡拋 ArithmeticException
+```
+
+**為什麼要分 `SETTLED` 與 `LIVE`／`STALE` 兩層**：17:05 校正把當盤收盤價**同時**寫進 `commodity_price_history`（`price_date = sessionDate`）與 `commodity:spot:{code}`（`price = 該收盤價`）。若不先判斷 `status`，單純用「DB 是否已有 `sessionDate` 列」判斷，`SETTLED` 那一刻會命中「已有該列」分支、`prevClose` 等於自己的 `close_price`，`change` 恆為 0——這正是 `SETTLED` 狀態最重要的漲跌顯示，不能算錯。分出 `SETTLED` 分支後，才輪到「為什麼要對 `LIVE`／`STALE` 二分」：Globex 夜盤（ET 18:00 之後）在日曆日上早於它所屬的交易日，而本需求所有 Yahoo 實測都取自週六休市時段，**沒有盤中樣本能證明來源此時把回應歸給哪一天**。上式對兩種歸屬都取到正確的前收，故不需先確定來源行為即可實作。連帶規則：**KPI 卡的時間標示一律用 `quoteTime`、不用 `sessionDate`**——後者的歸屬未經實測證實，印在畫面上等於宣稱一個無法證明的事實。`sessionDate` 只用於前收挑選與圖表附加點判斷。
+
+以 DB 收盤為主而非來源自帶前收，理由是「同義欄位、同一 business service API」：圖表與匯出都讀 `commodity_price_history`，若 KPI 改用來源前收，同一頁會出現兩套基準。
+
+### API 端點
+
+| 層 | 端點 | 說明 |
+|---|---|---|
+| ext | `POST /internal/commodity/live-refresh` | 手動觸發一輪即時抓取＋Redis 寫入；**仍受交易時段判定約束**，非交易時段只回報不在時段、不改 Redis |
+| business | `GET /api/market-data/commodity/live` | 唯讀 Redis ＋ DB 前收聚合，回 `{marketOpen, quotes:{WTI,BRENT,GOLD}}`；缺 key 該標的為 `null`，不回 5xx |
+| business | `POST /api/market-data/commodity/live-refresh` | **新端點**，proxy 至上面的 ext internal 端點 |
+| business | `POST /api/market-data/commodity/refresh` | **既有端點，行為與回傳結構一律不動** |
+| BFF | `GET /api/bff/commodity-price/live` | passthrough 給頁面 |
+| BFF | `POST /api/bff/commodity-price/refresh` | **既有端點改為**依序呼叫 business 的 `/commodity/refresh` 與 `/commodity/live-refresh`，合併回 `{backfilled, live}` |
+| BFF | `GET /api/bff/commodity-price` | **維持現狀**（開頁：先 `POST /commodity/refresh` 再取歷史），**不得**追加即時刷新 |
+
+business／BFF 一律不直連 Yahoo；Controller 只委派 service。
+
+**為什麼不把 live-refresh 掛進既有 `/commodity/refresh`**：那支端點有兩個呼叫端——BFF 的手動 `POST /refresh`，**以及每次開頁的 `GET /api/bff/commodity-price`**（`CommodityPriceBffController.getHistory()` 會先 post 一次 refresh 再取歷史）。掛進去等於「每有人開一次這頁就多打 3 個 Yahoo curl」，與每分鐘 poller 疊加。另一個理由是回傳結構：`MarketDataController.refreshCommodities()` 目前把 `HistoricalDataService.refreshCommodities()` 的回傳**整包**當成 `backfilled`（內容為 code→筆數的 map），在裡面加 `live` 欄位會污染該 map，要做成 `{backfilled, live}` 就得改動既有 controller 的組裝。改由 BFF 合併兩支端點，兩個問題一次避開，且既有 business 端點零改動。
+
+### 前端
+
+- `onMounted`：既有歷史載入與即時報價**並行**（`Promise.allSettled`，同本專案多 panel 慣例），不得序列 await。
+- 60 秒 `setInterval` 輪詢即時報價；`visibilitychange` → `document.hidden` 暫停、恢復可見時**立即補抓一次**再重啟 interval；`onUnmounted` 清 timer。
+- 輪詢失敗保留前一次顯示值、不清空、不跳 toast。
+- **KPI 的即時值走獨立 state，不寫進歷史序列**：新增一個獨立 ref（例如 `liveQuotes`，鍵為標的代碼）承接 `GET .../live` 的結果，與既有裝載 `commodity_price_history` 的 `series` 完全分開。KPI 卡渲染：`liveQuotes[code]` 存在時顯示其 `price`／`change`／`changePercent` 與狀態徽章，時間一律取 `quoteTime` 轉台北時制（`LIVE`「盤中 · HH:mm:ss」／`STALE`「盤中（來源未更新）· HH:mm:ss」／`SETTLED`「收盤 · HH:mm:ss」）、不顯示 `sessionDate`；不存在時**完全維持現行**（讀 `series` 算出的 DB 最後一筆收盤與其 `price_date`）。**`series`（以及由它推導的 `filtered`／`axisDates`／`latest`／`statsRows`／`totalRows`／`dateSpan`）永遠只放 DB 資料，即時報價一律不得寫入這些既有 computed／ref**——這是下一條白名單能成立的前提。
+- 圖表：`sessionDate` 晚於 `series` 最後一筆 DB 日期時，把即時價當該日的點附加到曲線末端；17:05 校正後 DB 已有該日列，附加點自然由收盤值取代。
+- **盤中點的污染界線是白名單，且延伸動作不得改動共用 computed 本身**：准許進入的只有**畫給 ECharts 的圖表設定物件內部**（例如 `mainChartOption` 建構時現算一份 `chartDates = [...axisDates.value, sessionDate]` 與對應的 `chartSeries`），**不得**改動 `axisDates`／`filtered` 這兩個共用 computed 的回傳值——`axisDates` 同時被 `openExport()` 用來決定匯出對話框的預設起訖日期，若直接放大 `axisDates` 本身，會連帶把匯出對話框的預設區間也帶進盤中日期，而匯出必須維持與現行完全一致的行為。以下皆**一律只計 DB 列**：`totalRows`／`dateSpan`（「資料筆數／日期區間」卡）、**`statsRows`（「區間統計」表的最新／最高／最低／平均／區間漲跌幅五欄）**、`openExport()` 的預設起訖、所有匯出檔。`statsRows` 與 `openExport()` 是最容易被靜默污染的兩處——若圖表延伸誤改了 `filtered`／`axisDates` 本身，這兩處會在毫無警訊下跟著變。
+
+### 排程列表登錄
+
+`SchedulePublicBffController.JOBS` 新增兩筆（`EXTERNAL`），並更新該類別內所有寫死的筆數字樣。`ScheduledJobDto` 是 7 參數 record（`service`／`category`／`name`／`description`／`schedule`／`cron`／`zone`），以下表頭直接對應這些參數名（`category` 是既有「油價金價」那一筆共用的分類字串，不是新概念）：
+
+| service | category | name | description | schedule | cron | zone |
+|---|---|---|---|---|---|---|
+| `EXTERNAL` | 油價金價 | 盤中即時報價 | 交易時段內每分鐘更新 WTI／布蘭特／COMEX 黃金即時價至 Redis（非交易時段不外呼） | 每分鐘 | `0 * * * * *` | `America/New_York` |
+| `EXTERNAL` | 油價金價 | 收盤後校正 | 收盤後 5 分鐘取回當盤收盤價寫入日線表，並回看 5 天讓結算價修訂落地 | 交易日 17:05 | `0 5 17 * * MON-FRI` | `America/New_York` |
+
+既有「油價金價／油金價每日回補」那一筆維持不動。另須一併同步：該類別 javadoc 的總筆數與 `business-services（21）`／`external-materials-service（32）` 兩個分組註解（→ 55 ＝ 21 ＋ 34）、其 javadoc 的 external 對照來源清單（`CommodityPricePoller` **與 `EtfNavPoller` 目前都不在該清單內**，須一併補入——後者與本需求無關，是清單本身既有的漂移，既然要動這段順手清掉）、`SchedulePublicBffControllerTest` 的**三個** `hasSize` 斷言（53→55、21 不動、32→34），以及本文件上方 `SchedulePublicBffController` 段落的筆數記載（本次已同步改為 55 ＝ 21 ＋ 34）。
+
+`commodity.enabled`（`external-materials-service/src/main/resources/application.yml`）**同時控制三個排程**——既有每日回補、本次新增的每分鐘即時報價與 17:05 收盤校正；該設定檔的既有註解（目前只提「每日增量」）須一併更新為涵蓋三者。

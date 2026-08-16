@@ -5,8 +5,13 @@
       <el-col :span="6" v-for="c in COMMODITIES" :key="c.code">
         <el-card class="kpi-card">
           <div class="kpi-label">{{ c.label }}</div>
-          <div class="kpi-value">{{ latest[c.code] ? latest[c.code].close.toFixed(2) : '-' }}</div>
-          <div class="kpi-sub" v-if="latest[c.code]">
+          <div class="kpi-value">{{ kpiValue(c.code) }}</div>
+          <!-- 即時報價存在時優先顯示（Requirement 77 / Task 337）；不存在時完全維持現行歷史收盤顯示 -->
+          <div class="kpi-sub" v-if="liveQuotes[c.code]">
+            <span :style="{ color: liveChangeColor(c.code) }">{{ liveChangeText(c.code) }}</span>
+            ｜{{ liveTimeLabel(c.code) }}
+          </div>
+          <div class="kpi-sub" v-else-if="latest[c.code]">
             <span :style="{ color: latest[c.code].change >= 0 ? '#dc2626' : '#16a34a' }">
               {{ latest[c.code].change >= 0 ? '▲' : '▼' }}
               {{ Math.abs(latest[c.code].change).toFixed(2) }}
@@ -245,6 +250,11 @@ import { showGdriveSelfCheckWarning } from '@/utils/gdriveSelfCheck'
 import { showDualExportResult } from '@/utils/dualExportMessage'
 import { useAuthStore } from '@/stores/authStore'
 import dayjs from 'dayjs'
+import dayjsUtc from 'dayjs/plugin/utc'
+import dayjsTimezone from 'dayjs/plugin/timezone'
+
+dayjs.extend(dayjsUtc)
+dayjs.extend(dayjsTimezone)
 
 use([CanvasRenderer, LineChart, TitleComponent, TooltipComponent, LegendComponent,
      GridComponent, DataZoomComponent])
@@ -272,6 +282,16 @@ const loading = ref(false)
 const refreshing = ref(false)
 const exporting = ref(false)
 const exportDialog = reactive({ visible: false, range: [] })
+
+// 盤中即時報價（Requirement 77 / Task 337）：獨立 state，與上面裝載 commodity_price_history
+// 的 series ref 完全分開，絕不可寫入 series／filtered，避免污染區間統計與匯出預設區間。
+// { WTI: {commodityCode, price, change, changePercent, sessionDate, quoteTime, polledAt,
+//         status, dayHigh, dayLow, provider} | undefined, ... }
+const liveQuotes = ref({})
+const TAIPEI_TZ = 'Asia/Taipei'
+const LIVE_QUOTE_POLL_INTERVAL_MS = 60_000
+const LIVE_STATUS_PREFIX = { LIVE: '盤中', STALE: '盤中（來源未更新）', SETTLED: '收盤' }
+let liveQuoteTimer = null
 
 // File System Access API：可讓使用者自選存檔目錄；Safari／舊版瀏覽器沒有，退回一般下載
 const canPickDirectory = typeof window !== 'undefined' && 'showSaveFilePicker' in window
@@ -314,9 +334,16 @@ const auth = useAuthStore()
 const dirTreeProps = { label: 'name', isLeaf: 'leaf' }
 
 onMounted(() => {
-  fetchData()
-  // 排程設定與行情各自獨立，並行載入；設定讀取失敗不影響圖表
-  loadSchedule().catch(() => {})
+  // 既有歷史載入、排程設定載入、新的即時報價載入三者並行啟動，不序列 await
+  // （本專案多 panel 一律並行的既有慣例）；三者各自吞掉自己的錯誤，互不影響。
+  Promise.allSettled([fetchData(), loadSchedule().catch(() => {}), fetchLiveQuotes()])
+  document.addEventListener('visibilitychange', handleLiveQuoteVisibilityChange)
+  startLiveQuotePolling()
+})
+
+onUnmounted(() => {
+  stopLiveQuotePolling()
+  document.removeEventListener('visibilitychange', handleLiveQuoteVisibilityChange)
 })
 
 async function fetchData() {
@@ -328,6 +355,78 @@ async function fetchData() {
   } finally {
     loading.value = false
   }
+}
+
+/** 每分鐘輪詢即時報價；失敗保留前一次顯示值，不清空、不跳錯誤 toast（getLive 已 skipErrorToast）。 */
+async function fetchLiveQuotes() {
+  try {
+    const res = await bffApi.commodityPrice.getLive()
+    const quotes = res?.quotes || {}
+    const next = {}
+    for (const c of COMMODITIES) {
+      if (quotes[c.code]) next[c.code] = quotes[c.code]
+    }
+    liveQuotes.value = next
+  } catch {
+    // 輪詢失敗：什麼都不做，liveQuotes 維持上一輪的值
+  }
+}
+
+function startLiveQuotePolling() {
+  stopLiveQuotePolling()
+  liveQuoteTimer = setInterval(fetchLiveQuotes, LIVE_QUOTE_POLL_INTERVAL_MS)
+}
+
+function stopLiveQuotePolling() {
+  if (liveQuoteTimer) {
+    clearInterval(liveQuoteTimer)
+    liveQuoteTimer = null
+  }
+}
+
+/** 分頁切到背景時暫停輪詢；恢復可見時立即補抓一次再重啟 interval。 */
+function handleLiveQuoteVisibilityChange() {
+  if (document.hidden) {
+    stopLiveQuotePolling()
+  } else {
+    fetchLiveQuotes()
+    startLiveQuotePolling()
+  }
+}
+
+/** KPI 卡即時值優先；不存在時 fallback 到歷史收盤（見下方 latest computed，行為不變）。 */
+function kpiValue(code) {
+  const live = liveQuotes.value[code]
+  if (live && live.price != null) return Number(live.price).toFixed(2)
+  return latest.value[code] ? latest.value[code].close.toFixed(2) : '-'
+}
+
+function liveChangeColor(code) {
+  const live = liveQuotes.value[code]
+  if (!live || live.change == null) return undefined
+  return Number(live.change) >= 0 ? '#dc2626' : '#16a34a'
+}
+
+/** change 為 null 時顯示「—」，不得顯示成 0。 */
+function liveChangeText(code) {
+  const live = liveQuotes.value[code]
+  if (!live) return ''
+  if (live.change == null || live.changePercent == null) return '—'
+  const change = Number(live.change)
+  const pct = Number(live.changePercent)
+  return `${change >= 0 ? '▲' : '▼'} ${Math.abs(change).toFixed(2)} (${pct.toFixed(2)}%)`
+}
+
+/**
+ * 三種狀態一律取 quoteTime 轉台北時制，不顯示 sessionDate
+ * （夜盤的日期歸屬未經實測證實，quoteTime 是來源直接給的時間戳，永遠為真）。
+ */
+function liveTimeLabel(code) {
+  const live = liveQuotes.value[code]
+  if (!live?.quoteTime) return ''
+  const prefix = LIVE_STATUS_PREFIX[live.status] || live.status || ''
+  const time = dayjs(live.quoteTime).tz(TAIPEI_TZ).format('HH:mm:ss')
+  return `${prefix} · ${time}`
 }
 
 /** 後端 BigDecimal 序列化為字串／數字皆有可能，統一轉 Number。 */
@@ -419,11 +518,34 @@ const statsRows = computed(() => COMMODITIES.map(c => {
 const mainChartOption = computed(() => {
   const dates = axisDates.value
   if (!dates.length) return {}
+
+  // 盤中點只能在此 computed 函式內部現算局部變數，不得改動 axisDates／filtered 本身
+  // ——openExport() 直接讀 axisDates.value 決定匯出對話框預設區間，若動了 axisDates
+  // 本身會把盤中日期一併帶進匯出（Requirement 77 / Task 337，匯出行為不得變動）。
+  // 只在「sessionDate 晚於該標的序列最後一筆 DB 日期」且「該日期尚未存在於聯集軸上」時附加，
+  // 已存在於 DB 序列的日期一律不覆蓋。
+  const extraDates = new Set()
+  for (const c of COMMODITIES) {
+    const live = liveQuotes.value[c.code]
+    if (!live?.sessionDate || live.price == null) continue
+    if (dates.includes(live.sessionDate)) continue
+    const codeRows = filtered.value[c.code]
+    const lastCodeDate = codeRows.length ? codeRows[codeRows.length - 1].date : null
+    if (lastCodeDate && live.sessionDate <= lastCodeDate) continue
+    extraDates.add(live.sessionDate)
+  }
+  const chartDates = extraDates.size ? [...dates, ...[...extraDates].sort()] : dates
+
   // 依聯集日期軸對齊；缺報價的日子放 null，ECharts 會斷點而非畫成 0
   const byDate = {}
   for (const c of COMMODITIES) {
     const map = new Map(filtered.value[c.code].map(d => [d.date, d.close]))
-    byDate[c.code] = dates.map(d => (map.has(d) ? map.get(d) : null))
+    const live = liveQuotes.value[c.code]
+    byDate[c.code] = chartDates.map(d => {
+      if (map.has(d)) return map.get(d)
+      if (live && live.sessionDate === d && live.price != null) return Number(live.price)
+      return null
+    })
   }
   return {
     tooltip: {
@@ -439,7 +561,7 @@ const mainChartOption = computed(() => {
     },
     legend: { data: COMMODITIES.map(c => c.label), top: 0 },
     grid: { left: 60, right: 70, top: 40, bottom: 70 },
-    xAxis: { type: 'category', data: dates, axisLabel: { rotate: 30, fontSize: 11 } },
+    xAxis: { type: 'category', data: chartDates, axisLabel: { rotate: 30, fontSize: 11 } },
     yAxis: [
       {
         type: 'value', scale: true, name: '原油 USD/桶',

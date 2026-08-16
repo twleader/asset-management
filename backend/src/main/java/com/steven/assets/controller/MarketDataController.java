@@ -43,6 +43,7 @@ public class MarketDataController {
     private final DividendHistoryService dividendHistoryService;
     private final com.steven.assets.service.ExcelExportService excelExportService;
     private final com.steven.assets.service.TechnicalIndicatorService technicalIndicatorService;
+    private final com.steven.assets.service.CommodityLiveQuoteService commodityLiveQuoteService;
 
     /**
      * 取得交易日曆假日（台股：TWSE Open API；美股：NYSE 規則計算）
@@ -360,6 +361,26 @@ public class MarketDataController {
     public Map<String, Object> refreshCommodities() {
         Map<String, Object> backfilled = historicalDataService.refreshCommodities();
         return Map.of("backfilled", backfilled);
+    }
+
+    /**
+     * 三標的盤中即時報價（Requirement 77 / Task 337）：唯讀 Redis cache ＋ DB 前收聚合出漲跌。
+     * GET /api/market-data/commodity/live
+     * 非交易時段或缺 key 時 marketOpen=false／該標的為 null，不代表錯誤。
+     */
+    @GetMapping("/commodity/live")
+    public com.steven.assets.service.CommodityLiveQuoteService.LiveQuotesResponse getCommodityLive() {
+        return commodityLiveQuoteService.getLiveQuotes();
+    }
+
+    /**
+     * 手動觸發油金價「即時報價」刷新（與既有 {@code /commodity/refresh} 分開，見 337.12 理由）：
+     * proxy 至 ext-materials-service {@code POST /internal/commodity/live-refresh} 跑一輪即時抓取。
+     * POST /api/market-data/commodity/live-refresh
+     */
+    @PostMapping("/commodity/live-refresh")
+    public com.steven.assets.service.HistoricalDataService.LiveRefreshResult liveRefreshCommodities() {
+        return historicalDataService.liveRefreshCommodities();
     }
 
     /**
