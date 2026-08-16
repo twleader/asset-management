@@ -1,5 +1,5 @@
 <template>
-  <div v-loading="loading" :element-loading-text="generating ? 'AI 產生配置建議中（可能需數十秒）…' : '載入中…'">
+  <div v-loading="loading" :element-loading-text="generating ? '配置建議產生中…' : '載入中…'">
     <!-- 頂列：標題 + （管理者）成本設定 -->
     <div class="header-row">
       <div>
@@ -792,7 +792,9 @@ async function generate() {
   generating.value = true
   try {
     const res = await bffApi.portfolioAdvice.generate(profilePayload())
-    if (res && res.status === 'PROCESSING') {
+    if (res && res.status === 'OK') {
+      ElMessage.success('已完成本機配置建議')
+    } else if (res && res.status === 'PROCESSING') {
       ElMessage.success('已送出，AI 產生中，完成後自動更新')
     } else if (res && res.status === 'NOT_CONFIGURED') {
       ElMessage.warning('尚未設定 Anthropic API 金鑰')

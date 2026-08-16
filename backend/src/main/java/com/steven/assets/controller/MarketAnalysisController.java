@@ -54,7 +54,7 @@ public class MarketAnalysisController {
                 .toList();
     }
 
-    /** 管理者手動重跑當日分析（非同步；送出 Batch 後立即回傳 PROCESSING 列，結果由 pollPendingBatches() 收尾）。 */
+    /** 管理者手動重跑當日分析（local 檔位同步回終態；hybrid/llm 送出 Batch 後立即回傳 PROCESSING 列，結果由 pollPendingBatches() 收尾）。 */
     @PostMapping("/generate")
     public MarketAnalysisDto generate() {
         if (!currentUser.isAdmin()) {

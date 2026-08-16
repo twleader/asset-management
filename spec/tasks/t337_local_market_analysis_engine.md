@@ -341,6 +341,21 @@ LLM 目前提供兩件本機規則引擎做不到的事：
 
     > **前端變更依 CLAUDE.md 規定由固定模型的 subagent 執行**（Claude Code：`sonnet 5` / `high`）。
 
+- [x] **337.17b 完成回饋必須依實際 `status` 分支，不得沿用非同步文案**
+
+    `frontend/src/views/TodayMarketAnalysisView.vue` 的 `regenerate()`（約 `:523-536`）目前**無條件**顯示：
+
+    ```js
+    ElMessage.success('已送出分析（批次處理中，完成後自動更新）')
+    ```
+
+    這對 `local` 路徑是**錯誤敘述**——本機引擎同步完成，沒有任何批次。須改為依 `bffApi.todayMarketAnalysis.generate()` 的回傳 `status` 分支：
+    `OK` → 完成類文案（例如「已完成本機分析」）；`PROCESSING` → 維持既有批次文案；`FAILED` → 錯誤；`NOT_CONFIGURED` → 警告。
+
+    **射程涵蓋畫面上所有非同步文案，不只 toast**：兩支 view 的 `v-loading` 覆蓋層文案（`element-loading-text`）同樣寫死——`TodayMarketAnalysisView.vue:2` 的 `'送出批次分析中…'` 與 `AssetAllocationAdviceView.vue:2` 的 `'AI 產生配置建議中（可能需數十秒）…'`——且在 `local` 路徑**確實會顯示**（前者 `regenerate():524-525` 同時設 `generating` 與 `loading`；後者 `generate():803` 走非 silent 的 `load()`，`load():691` 設 `loading`）。兩者皆須改為不預設批次／AI 的中性敘述（或依當前引擎切換）。
+
+    **順帶更正兩處已成假斷言的既有註解**：`frontend/src/api/index.js:329`（「產生建議（非同步）：立即回一筆 PROCESSING」）與 `backend/src/main/java/com/steven/assets/controller/MarketAnalysisController.java:57`（「非同步；送出 Batch 後立即回傳 PROCESSING 列」）對預設的 `local` 檔位皆為假，改為「`local` 同步回終態；`hybrid`／`llm` 回 `PROCESSING` 後輪詢」。
+
 - [x] **337.18 BFF 契約不變**
 
     `TodayMarketAnalysisBffController` 既有 `Mono.zip` 聚合（`{today, history, settings}`）維持原形狀，`settings` 內容因 DTO 新增欄位而自然增長。既有 `SecurityConfig` 對 `/api/bff/today-market-analysis/**` 的 ADMIN 規則不變。**本任務不新增任何 BFF endpoint。**
