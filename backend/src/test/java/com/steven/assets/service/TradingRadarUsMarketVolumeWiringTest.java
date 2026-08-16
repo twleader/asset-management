@@ -255,7 +255,7 @@ class TradingRadarUsMarketVolumeWiringTest {
     // ─────────── (e) MarketInput 守門：量能兩欄與 MarketSummary 同源、不得各算一份 ───────────
 
     /**
-     * Task 341（推翻 Task 323.2 的刻意留白）：{@code MarketInput} 的量能比與完成日漲跌幅
+     * Task 342（推翻 Task 323.2 的刻意留白）：{@code MarketInput} 的量能比與完成日漲跌幅
      * 自本版起真正進 regime 分數。斷言從「仍為 null」翻轉為「守同源」而非直接刪除——
      * 刪掉就失去「這兩欄為何一度刻意留白、後來又為何補上」的稽核痕跡。
      *

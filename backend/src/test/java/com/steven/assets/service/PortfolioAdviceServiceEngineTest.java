@@ -20,8 +20,11 @@ import com.steven.assets.repository.FundHoldingRepository;
 import com.steven.assets.repository.InvestmentPlannedExpenseRepository;
 import com.steven.assets.repository.InvestmentProfileRepository;
 import com.steven.assets.repository.PortfolioAdviceRepository;
+import com.steven.assets.repository.FundClassOverrideRepository;
 import com.steven.assets.repository.PortfolioAdviceSettingRepository;
 import com.steven.assets.repository.StockHoldingRepository;
+import com.steven.assets.repository.StockRepository;
+import com.steven.assets.repository.StockStyleRepository;
 import com.steven.assets.security.TenantGuard;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -76,6 +79,10 @@ class PortfolioAdviceServiceEngineTest {
     private StockHoldingRepository stockRepo;
     private RetirementProjectionService projectionService;
     private TenantGuard tenantGuard;
+    private AssetClassifier assetClassifier;
+    private StockRepository stockMasterRepo;
+    private FundClassOverrideRepository fundClassOverrideRepo;
+    private StockStyleRepository stockStyleRepo;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /** 模擬 portfolio_advice 表：save 指派 id、findById 取回同一筆（背景執行緒收尾用得到）。 */
@@ -95,6 +102,10 @@ class PortfolioAdviceServiceEngineTest {
         stockRepo = mock(StockHoldingRepository.class);
         projectionService = mock(RetirementProjectionService.class);
         tenantGuard = mock(TenantGuard.class);
+        assetClassifier = mock(AssetClassifier.class);
+        stockMasterRepo = mock(StockRepository.class);
+        fundClassOverrideRepo = mock(FundClassOverrideRepository.class);
+        stockStyleRepo = mock(StockStyleRepository.class);
 
         when(tenantGuard.requireCurrentUserId()).thenReturn(OWNER_ID);
         when(profileRepo.findByOwnerUserId(OWNER_ID)).thenReturn(Optional.of(profile()));
@@ -120,7 +131,8 @@ class PortfolioAdviceServiceEngineTest {
     private PortfolioAdviceService newService(LocalPortfolioAllocationEngine engine, String apiKey) {
         PortfolioAdviceService svc = new PortfolioAdviceService(
                 profileRepo, expenseRepo, adviceRepo, settingRepo, snapshotRepo,
-                depositRepo, fundRepo, stockRepo, projectionService, objectMapper, tenantGuard, engine);
+                depositRepo, fundRepo, stockRepo, projectionService, objectMapper, tenantGuard,
+                assetClassifier, stockMasterRepo, fundClassOverrideRepo, stockStyleRepo, engine);
         ReflectionTestUtils.setField(svc, "apiKey", apiKey);
         ReflectionTestUtils.setField(svc, "defaultModel", "claude-opus-4-8");
         return svc;
@@ -196,15 +208,17 @@ class PortfolioAdviceServiceEngineTest {
                     t.assetClass() + " 的 deltaAmount 應為 targetAmount − currentValue");
         }
 
-        // 直接餵本機引擎的原始輸出給既有 enrich()，結果必須逐項相同 → 證明走的是同一段算術，沒有第二份實作
+        // 直接餵本機引擎的原始輸出走「enrich → withRebalancePlan → withSubAllocationAmounts」
+        // 這一整段既有的共用管線，結果必須逐項相同 → 證明 buildLocalResult 沒有第二份實作
+        Integer years = LocalPortfolioAllocationEngine.yearsToRetirement(
+                LocalDate.now(), LocalDate.of(2045, 6, 30), LocalDate.of(1980, 1, 1));
         PortfolioAdviceResult base = engine.evaluate(
-                "BALANCED",
-                LocalPortfolioAllocationEngine.yearsToRetirement(
-                        LocalDate.now(), LocalDate.of(2045, 6, 30), LocalDate.of(1980, 1, 1)),
-                svc.getCurrentAllocation(), depletingProjection());
+                "BALANCED", years, svc.getCurrentAllocation(), depletingProjection());
         PortfolioAdviceResult viaEnrich = ReflectionTestUtils.invokeMethod(svc, "enrich", base, TOTAL_ASSETS);
         assertNotNull(viaEnrich);
-        assertEquals(viaEnrich.targetAllocation(), produced.targetAllocation());
+        PortfolioAdviceResult viaFullChain = engine.withSubAllocationAmounts(
+                engine.withRebalancePlan(viaEnrich), svc.getCurrentAllocation(), "BALANCED", years);
+        assertEquals(viaFullChain.targetAllocation(), produced.targetAllocation());
     }
 
     // ===== (g) 本機檔位的 rebalancePlan 只到類別層級 =====

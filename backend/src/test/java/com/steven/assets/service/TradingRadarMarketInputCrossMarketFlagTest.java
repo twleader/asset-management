@@ -39,7 +39,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Task 341（Requirement 82）：{@code MarketInput.crossMarketApplicable} 的兩個方向，
+ * Task 342（Requirement 82）：{@code MarketInput.crossMarketApplicable} 的兩個方向，
  * 以及「production 與回測的美股 {@code MarketInput} 在本次接線的四欄同源」。
  *
  * <p><b>為什麼非測回測那一側不可：</b>回測的 {@code buildUsMarketRegimes} 現在就已經與
@@ -169,7 +169,7 @@ class TradingRadarMarketInputCrossMarketFlagTest {
         return (java.util.Map<LocalDate, TradingRadarRuleEngine.MarketRegime>) method.invoke(service);
     }
 
-    // ─────────── (a) 341.10.5 四欄同源 ───────────
+    // ─────────── (a) 342.10.5 四欄同源 ───────────
 
     @Test
     void production與回測的美股MarketInput在本次接線的四欄同源() throws Exception {
@@ -222,7 +222,7 @@ class TradingRadarMarketInputCrossMarketFlagTest {
                 "兩側必須落在同一個 as-of 日，否則漲跌方向與量比會跨日拼接");
     }
 
-    // ─────────── (b) 341.10.3 台股的跨市場旗標必須為 true ───────────
+    // ─────────── (b) 342.10.3 台股的跨市場旗標必須為 true ───────────
 
     @Test
     void 台股組的跨市場旗標必須為適用() {

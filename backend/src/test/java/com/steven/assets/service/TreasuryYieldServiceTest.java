@@ -175,7 +175,7 @@ class TreasuryYieldServiceTest {
     }
 
     /**
-     * Task 341：production 版號升為 {@code TW_RULES_V14}（美股大盤接上量價環境因子），
+     * Task 342：production 版號升為 {@code TW_RULES_V14}（美股大盤接上量價環境因子），
      * 與 {@link RuleParameters} 的 calibration／candidate 命名空間就此分家。
      *
      * <p>{@code v12Default()} 仍是 {@code TW_RULES_V12}——那是回測 baseline 參數集，

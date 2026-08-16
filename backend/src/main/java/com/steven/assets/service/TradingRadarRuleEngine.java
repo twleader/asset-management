@@ -19,7 +19,7 @@ public class TradingRadarRuleEngine {
 
     /**
      * V14：延續 V12 的短期／中期雙軌權重架構與全部因子權重（本次未改動任何個股參數值），
-     * 只改大盤 regime 的量價環境因子輸入面（Task 341／Requirement 82）——美股大盤自本版起
+     * 只改大盤 regime 的量價環境因子輸入面（Task 342／Requirement 82）——美股大盤自本版起
      * 把既有的 IXIC 完成日量能比與完成日漲跌幅真正接進 {@code MarketInput}，
      * 不再算了卻不用；同時 {@code MarketInput} 新增 {@code crossMarketApplicable}，
      * 讓「跨市場因子不適用（美股）」與「跨市場資料真的缺（台股）」不再共用同一則風險提醒。
@@ -265,7 +265,7 @@ public class TradingRadarRuleEngine {
         /**
          * V10 前的呼叫形狀；量能與美股資料缺值時不加減分。
          *
-         * <p>{@code crossMarketApplicable} 一律填 {@code true}（Task 341）：讓「漏改呼叫端」的
+         * <p>{@code crossMarketApplicable} 一律填 {@code true}（Task 342）：讓「漏改呼叫端」的
          * 後果是多一則正當的「資料不足」提醒，而不是靜默吞掉一則真提醒。</p>
          */
         public MarketInput(BigDecimal price, BigDecimal changePercent, Indicators indicators,
@@ -813,7 +813,7 @@ public class TradingRadarRuleEngine {
 
         Double marketActivity = averageAvailable(
                 decimal(input.marketVolumeRatio()), decimal(input.marketTurnoverRatio()));
-        // Task 341：文案只能列舉本次 marketActivity 實際採用的分量。美股結構性沒有成交金額
+        // Task 342：文案只能列舉本次 marketActivity 實際採用的分量。美股結構性沒有成交金額
         // （us_index_daily_history 無成交值欄），台股也可能因樣本不足而 turnover 為 null；
         // 寫死「量能／成交金額」等於在講一個不存在的值。
         String activityLabel = activityLabel(input.marketVolumeRatio(), input.marketTurnoverRatio());
@@ -833,7 +833,7 @@ public class TradingRadarRuleEngine {
             reasons.add("大盤完成日下跌但量能收斂，賣壓未擴大。 ");
         }
 
-        // Task 341：三段而非兩段。「不適用」（美股大盤即 IXIC，跨市場因子會重複計分，
+        // Task 342：三段而非兩段。「不適用」（美股大盤即 IXIC，跨市場因子會重複計分，
         // Requirement 64 的排除維持有效）必須沉默，不得謊報成「資料不足」；中間那段是台股的
         // 正當提醒（美股科技共同完成日有 5 個日曆日上限，超過即整組 unavailable），不得一起關掉。
         if (!input.crossMarketApplicable()) {
@@ -1719,7 +1719,7 @@ public class TradingRadarRuleEngine {
     }
 
     /**
-     * 大盤量價文案的分量標籤（Task 341）——依本次 {@code marketActivity} 實際由哪幾個 ratio
+     * 大盤量價文案的分量標籤（Task 342）——依本次 {@code marketActivity} 實際由哪幾個 ratio
      * 構成內插，不得列舉不存在的欄位。
      *
      * <p><b>必須是輸入的純函數</b>：不讀任何外部狀態、不新增第二個旗標欄位。引擎的

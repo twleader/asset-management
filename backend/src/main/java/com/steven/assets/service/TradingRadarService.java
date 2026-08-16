@@ -594,7 +594,7 @@ public class TradingRadarService {
                             context.usTechCompositePercent(),
                             context.usTechAvailable(),
                             // 台股的跨市場因子確實適用（前一美股科技交易日是台股的領先訊號），
-                            // 故 crossMarketApplicable=true，行為逐位不變（Task 341.6）。
+                            // 故 crossMarketApplicable=true，行為逐位不變（Task 342.6）。
                             true));
 
             // stale＝「完成日 K 未到今日」且「Redis 也無今日即時價」時才成立；任一者成立即非 stale（Task 228）。
@@ -650,13 +650,13 @@ public class TradingRadarService {
      * <p>{@code MarketInput} 的跨市場三欄（nasdaqChangePercent／soxChangePercent／
      * usTechCompositePercent）與 {@code usTechAvailable} 全部傳 {@code null}／{@code false}：
      * 那三欄的語意是「台股股票的跨市場領先訊號」，本身即為 IXIC 走勢的一部分，若原封不動餵給
-     * 「大盤即是 IXIC」的美股組會重複計分（Requirement 64 的排除，Task 341 未推翻）。</p>
+     * 「大盤即是 IXIC」的美股組會重複計分（Requirement 64 的排除，Task 342 未推翻）。</p>
      *
      * <p>Task 323：{@code MarketSummary} 的大盤量能三欄改由既有的
      * {@link TradingRadarMarketContextService#resolveMarketFromRows} 供給（同一支 API 也是
      * {@code BacktestService} 走的那支），線上雷達與回測因此不會分岔出第二份美股量能計算。</p>
      *
-     * <p>Task 341（Requirement 82）：{@code MarketInput} 的 {@code completedChangePercent} 與
+     * <p>Task 342（Requirement 82）：{@code MarketInput} 的 {@code completedChangePercent} 與
      * {@code marketVolumeRatio} <b>自本版起接上同一份 {@code usContext}</b>，真正參與 regime 計分——
      * 原本「算了卻不用」的中間狀態在 Task 335 把 usMarket 送上畫面後，變成使用者直接看得到的矛盾
      * （卡片顯示量比 0.79、風險提醒卻說「資料不足」）。{@code marketTurnoverRatio} 仍為 {@code null}
@@ -688,7 +688,7 @@ public class TradingRadarService {
                             indicators(ind),
                             c60,
                             c240,
-                            // Task 341（推翻 Task 323.2 的刻意留白）：完成日漲跌幅與量能比真正接進
+                            // Task 342（推翻 Task 323.2 的刻意留白）：完成日漲跌幅與量能比真正接進
                             // regime 分數（averageAvailable(...) → score ±8／±10／±3）。使用者已知情
                             // 並接受「美股個股 regime 與買進閘門會因此變動」的代價，RULE_VERSION 同步升
                             // TW_RULES_V14。
@@ -708,7 +708,7 @@ public class TradingRadarService {
                             // 不得以成交量除以任何數字偽造週轉率。
                             null,
                             // 跨市場領先訊號三欄維持 null（Task 294 既有理由，見本方法 javadoc），
-                            // usTechAvailable 維持 false；crossMarketApplicable=false（Task 341.2）讓引擎
+                            // usTechAvailable 維持 false；crossMarketApplicable=false（Task 342.2）讓引擎
                             // 沉默，不再把「不適用」謊報成「資料不足」。
                             null,
                             null,

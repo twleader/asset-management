@@ -221,6 +221,25 @@
 
     > **前端變更依 CLAUDE.md 規定由固定模型的 subagent 執行**（Claude Code：`sonnet 5` / `high`）。
 
+- [x] **339.11b `generate()` 必須補 `OK` 分支（本次實測缺陷）**
+
+    `frontend/src/views/AssetAllocationAdviceView.vue` 的 `generate()`（約 `:783-810`）目前只有三個分支：
+
+    ```js
+    if (res.status === 'PROCESSING')      { /* 已送出，AI 產生中 */ }
+    else if (res.status === 'NOT_CONFIGURED') { /* 警告 */ }
+    else if (res.status === 'FAILED')     { /* 錯誤 */ }
+    // OK 沒有分支 → 靜默
+    ```
+
+    `local` 檔位同步完成、直接回 `OK`，落入無分支的縫隙 → **產生成功但零提示**。2026-08-16 實測：使用者按「產生建議」後以為沒反應而連按三次，DB 產生 id 9／10／11 三筆重複建議（各 3 毫秒完成、狀態皆 OK）。
+
+    須補 `OK` 分支顯示完成提示。`hybrid`／`llm` 仍走 `PROCESSING`，既有文案對它們成立、不動。
+
+    **射程涵蓋畫面上所有非同步文案，不只 toast**：兩支 view 的 `v-loading` 覆蓋層文案（`element-loading-text`）同樣寫死——`TodayMarketAnalysisView.vue:2` 的 `'送出批次分析中…'` 與 `AssetAllocationAdviceView.vue:2` 的 `'AI 產生配置建議中（可能需數十秒）…'`——且在 `local` 路徑**確實會顯示**（前者 `regenerate():524-525` 同時設 `generating` 與 `loading`；後者 `generate():803` 走非 silent 的 `load()`，`load():691` 設 `loading`）。兩者皆須改為不預設批次／AI 的中性敘述（或依當前引擎切換）。
+
+    **順帶更正兩處已成假斷言的既有註解**：`frontend/src/api/index.js:329`（「產生建議（非同步）：立即回一筆 PROCESSING」）與 `backend/src/main/java/com/steven/assets/controller/MarketAnalysisController.java:57`（「非同步；送出 Batch 後立即回傳 PROCESSING 列」）對預設的 `local` 檔位皆為假，改為「`local` 同步回終態；`hybrid`／`llm` 回 `PROCESSING` 後輪詢」。
+
 - [x] **339.12 與 Requirement 79／Task 338 的第八條相容**
 
     `GET /api/public/portfolio-advice/latest`（Task 338 新增的 9090 第八條路由）只讀最新一筆，**不因引擎檔位而改變行為**；三檔位產出的列都經同一個 `PortfolioAdviceDto` 序列化。本任務**不得**讓該公開端點觸發任何產生動作。

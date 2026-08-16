@@ -2932,7 +2932,7 @@ public class BacktestService {
                     new TradingRadarRuleEngine.MarketInput(
                             windowDesc.get(0).getClosePrice(), change, assembler.indicators(a.indicators()),
                             a.ma60Confirmation(), a.ma240Confirmation(), change,
-                            // Task 341.7：量比必須與 production 的 buildUsMarket() 同源。
+                            // Task 342.7：量比必須與 production 的 buildUsMarket() 同源。
                             // RadarInputAssembler.volumeRatio 與 TradingRadarMarketContextService.ratio()
                             // 演算法逐項相同（前 20 個正成交量日的中位數為分母、至少 10 筆樣本、scale 4
                             // HALF_UP），且本方法已把 us_index_daily_history 的 volume 映射進轉型後的列。

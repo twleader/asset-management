@@ -326,7 +326,7 @@ export const bffApi = {
     // 儲存理財條件（免重填）；payload：{ birthDate, preRetirementAnnualSalary, preRetirementAnnualExpense, retirementDate, retirementAnnualExpense, longTermCareAnnualExpense, longTermCareStartAge, 報酬率/通膨/勞保勞退/大筆花費, goals[], riskTolerance, expectedAnnualReturn }
     saveProfile: (payload) =>
       api.put('/bff/portfolio-advice/profile', payload),
-    // 產生建議（非同步）：立即回一筆 PROCESSING，背景跑 Claude，前端輪詢至完成；payload 同 saveProfile，會一併儲存為 profile
+    // 產生建議：local 檔位同步回終態（OK/FAILED/NOT_CONFIGURED）；hybrid/llm 立即回 PROCESSING，背景跑 Claude，前端輪詢至完成；payload 同 saveProfile，會一併儲存為 profile
     generate: (payload) =>
       api.post('/bff/portfolio-advice/generate', payload, { timeout: 60000 }),
     // 更新成本控管設定（模型／思考深度／web 搜尋，限管理者）；payload 例：{ model } 或 { effort } 或 { webSearchMaxUses }
