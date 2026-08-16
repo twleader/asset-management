@@ -94,6 +94,9 @@ new TradingRadarEvidenceConfidenceResolver.MarketContext(
       裝的是台股 summary，美股的 `MarketSummary` 從未序列化給前端（前端只有一張大盤卡、
       美股分頁僅有一則說明用 `el-alert`）。唯一可見變化在 evidence 與信心度。
   - ⚠ **`MarketInput` 的量能兩欄也必須維持 `null`，只改 `MarketSummary`。**
+
+    > 【**已由 Requirement 83／Task 342 推翻（2026-08-16）**：`marketVolumeRatio` 與 `completedChangePercent` 已接進美股組 `MarketInput`，`RULE_VERSION` 同步升為 `TW_RULES_V14`。`marketTurnoverRatio` **仍維持 `null`**（`us_index_daily_history` 無成交值欄，「不得偽造週轉率」那條約束原封有效）。推翻理由：本項當初是正確的範圍控制（t323 射程只到 DTO），不是「資料取不到」；但 Task 335 把 `usMarket` 送上畫面後，「算了但不用」變成使用者直接看得到的自相矛盾——metric 顯示量比 0.79，風險提醒卻說「資料不足」。以下原文保留作為決策軌跡，**不得再據此實作**。】
+
     `buildUsMarket` 內 `evaluateMarket(new MarketInput(...))` 目前傳 `marketVolumeRatio=null`、
     `marketTurnoverRatio=null`、`completedMarketChangePercent=null`；台股端則是把同一份 context
     灌進去，**實作者鏡像照做是最自然的錯誤**。這兩欄在 `TradingRadarRuleEngine` 內是**進分數的**

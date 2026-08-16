@@ -94,7 +94,7 @@ class TradingRadarV13ActionPolicyTest {
     }
 
     @Test
-    void unpromotedPolicyAndEmptyRegistryRetainExactV12Result() {
+    void unpromotedPolicyAndEmptyRegistryRetainExactBaselineResult() {
         var input = neutralMarketInput(false);
         var baseline = engine.evaluateStock(input);
         var policy = TradingRadarV13ActionPolicy.apply(input, baseline.action(),
@@ -109,7 +109,13 @@ class TradingRadarV13ActionPolicyTest {
         assertThat(policy.v13Active()).isFalse();
         assertThat(policy.action()).isEqualTo(baseline.action());
         assertThat(production).isEqualTo(baseline);
-        assertThat(TradingRadarRuleEngine.RULE_VERSION).isEqualTo(RuleParameters.V12_VERSION);
+        // Task 342：production 版號已升 TW_RULES_V14，不再等於 RuleParameters 的任何一個標籤。
+        // RuleParameters 的 V12／V13 是 calibration／candidate 命名空間，production 不得竊用——
+        // 尤其 V13_VERSION 是 evaluateCandidate() 的 guard（不符即 throw），
+        // 把它當 production 版號會讓「這是不是 candidate」的判別式失效。
+        assertThat(TradingRadarRuleEngine.RULE_VERSION)
+                .isNotEqualTo(RuleParameters.V12_VERSION)
+                .isNotEqualTo(RuleParameters.V13_VERSION);
     }
 
     @Test

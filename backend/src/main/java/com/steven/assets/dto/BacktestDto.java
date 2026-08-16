@@ -168,7 +168,7 @@ public final class BacktestDto {
             List<String> candidateParameterSetIds,
             /** key 為 market/horizon；只記錄 calibration 選出的 candidate，不代表 runtime 已升版。 */
             Map<String, String> selectedCandidates,
-            /** report-only registry 目前通過的 key 數；production runtime 仍由 V12 fallback 保護。 */
+            /** report-only registry 目前通過的 key 數；production runtime 仍由 baseline fallback 保護。 */
             int promotedCandidateCount,
             /** selected key -> complete immutable parameter snapshot. */
             Map<String, RuleParameterSnapshot> selectedParameterSnapshots

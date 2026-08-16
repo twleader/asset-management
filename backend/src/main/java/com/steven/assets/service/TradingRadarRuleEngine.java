@@ -18,14 +18,24 @@ import java.util.Objects;
 public class TradingRadarRuleEngine {
 
     /**
-     * V12：延續 V11 的短期／中期雙軌權重架構，修正三個因子同源／抖動缺陷並擴大極端保護涵蓋範圍
-     * （Task 298）。W%R 併入 KD/J 因子計分，不再獨立佔權重（W%R9 ≡ 100−RSV9 與 K 同源於 9 日高低帶）；
-     * BIAS 因子改為只平均 bias10／bias20 兩分量（b10b20 為代數相依值，不重複計分）；
+     * V14：延續 V12 的短期／中期雙軌權重架構與全部因子權重（本次未改動任何個股參數值），
+     * 只改大盤 regime 的量價環境因子輸入面（Task 342／Requirement 82）——美股大盤自本版起
+     * 把既有的 IXIC 完成日量能比與完成日漲跌幅真正接進 {@code MarketInput}，
+     * 不再算了卻不用；同時 {@code MarketInput} 新增 {@code crossMarketApplicable}，
+     * 讓「跨市場因子不適用（美股）」與「跨市場資料真的缺（台股）」不再共用同一則風險提醒。
+     * 美股 regime 分數因此會與 V12 不同，兩版分數不可直接比較。
+     *
+     * <p>V13 保留給離線 calibration／candidate 參數集（{@link RuleParameters#V13_VERSION}），
+     * production 版號故意跳過 13，不得竊用該標籤。</p>
+     *
+     * <p>V12（歷史）：延續 V11 的短期／中期雙軌權重架構，修正三個因子同源／抖動缺陷並擴大極端保護
+     * 涵蓋範圍（Task 298）。W%R 併入 KD/J 因子計分，不再獨立佔權重（W%R9 ≡ 100−RSV9 與 K 同源於
+     * 9 日高低帶）；BIAS 因子改為只平均 bias10／bias20 兩分量（b10b20 為代數相依值，不重複計分）；
      * MACD 因子改為 OSC 相對現價的幅度正規化，取代零軸附近逐日硬翻面造成的分數抖動。
      * 另外，極端時機（EXTREME_OVERBOUGHT／EXTREME_OVERSOLD）新增季線乖離自身分位替代路徑，
-     * 使低波動標的的保護不再形同虛設（Task 299）。V12 與 V11 分數不可直接比較。
+     * 使低波動標的的保護不再形同虛設（Task 299）。</p>
      */
-    public static final String RULE_VERSION = "TW_RULES_V12";
+    public static final String RULE_VERSION = "TW_RULES_V14";
 
     /** 現行 production 分層；candidate API 會改讀不可變 RuleParameters，既有入口仍固定這組。 */
     private static final RuleParameters.ActionThresholds V12_ACTION_THRESHOLDS =
@@ -249,13 +259,19 @@ public class TradingRadarRuleEngine {
             BigDecimal nasdaqChangePercent,
             BigDecimal soxChangePercent,
             BigDecimal usTechCompositePercent,
-            boolean usTechAvailable
+            boolean usTechAvailable,
+            boolean crossMarketApplicable
     ) {
-        /** V10 前的呼叫形狀；量能與美股資料缺值時不加減分。 */
+        /**
+         * V10 前的呼叫形狀；量能與美股資料缺值時不加減分。
+         *
+         * <p>{@code crossMarketApplicable} 一律填 {@code true}（Task 342）：讓「漏改呼叫端」的
+         * 後果是多一則正當的「資料不足」提醒，而不是靜默吞掉一則真提醒。</p>
+         */
         public MarketInput(BigDecimal price, BigDecimal changePercent, Indicators indicators,
                            Confirmation ma60Confirmation, Confirmation ma240Confirmation) {
             this(price, changePercent, indicators, ma60Confirmation, ma240Confirmation,
-                    changePercent, null, null, null, null, null, false);
+                    changePercent, null, null, null, null, null, false, true);
         }
     }
 
@@ -797,14 +813,18 @@ public class TradingRadarRuleEngine {
 
         Double marketActivity = averageAvailable(
                 decimal(input.marketVolumeRatio()), decimal(input.marketTurnoverRatio()));
+        // Task 342：文案只能列舉本次 marketActivity 實際採用的分量。美股結構性沒有成交金額
+        // （us_index_daily_history 無成交值欄），台股也可能因樣本不足而 turnover 為 null；
+        // 寫死「量能／成交金額」等於在講一個不存在的值。
+        String activityLabel = activityLabel(input.marketVolumeRatio(), input.marketTurnoverRatio());
         if (marketActivity == null || input.completedChangePercent() == null) {
-            risks.add("大盤完成日成交量或成交金額資料不足，本日不採計量價環境分數。 ");
+            risks.add("大盤完成日量價資料不足，本日不採計量價環境分數。 ");
         } else if (input.completedChangePercent().signum() > 0 && marketActivity >= 1.1) {
             score += 8;
-            reasons.add("大盤完成日上漲且量能／成交金額同步放大，需求獲得確認。 ");
+            reasons.add("大盤完成日上漲且" + activityLabel + "同步放大，需求獲得確認。 ");
         } else if (input.completedChangePercent().signum() < 0 && marketActivity >= 1.1) {
             score -= 10;
-            risks.add("大盤完成日下跌且量能／成交金額放大，市場賣壓升高。 ");
+            risks.add("大盤完成日下跌且" + activityLabel + "放大，市場賣壓升高。 ");
         } else if (input.completedChangePercent().signum() > 0 && marketActivity <= 0.8) {
             score -= 3;
             risks.add("大盤完成日上漲但量能不足，漲勢確認偏弱。 ");
@@ -813,7 +833,12 @@ public class TradingRadarRuleEngine {
             reasons.add("大盤完成日下跌但量能收斂，賣壓未擴大。 ");
         }
 
-        if (!input.usTechAvailable() || input.usTechCompositePercent() == null) {
+        // Task 342：三段而非兩段。「不適用」（美股大盤即 IXIC，跨市場因子會重複計分，
+        // Requirement 64 的排除維持有效）必須沉默，不得謊報成「資料不足」；中間那段是台股的
+        // 正當提醒（美股科技共同完成日有 5 個日曆日上限，超過即整組 unavailable），不得一起關掉。
+        if (!input.crossMarketApplicable()) {
+            // 沉默：不加任何 reasons／risks。
+        } else if (!input.usTechAvailable() || input.usTechCompositePercent() == null) {
             risks.add("前一個已完成的美股科技共同交易日資料不足，本日不採計跨市場分數。 ");
         } else {
             double us = input.usTechCompositePercent().doubleValue();
@@ -1691,6 +1716,23 @@ public class TradingRadarRuleEngine {
 
     private static Double decimal(BigDecimal value) {
         return value == null ? null : value.doubleValue();
+    }
+
+    /**
+     * 大盤量價文案的分量標籤（Task 342）——依本次 {@code marketActivity} 實際由哪幾個 ratio
+     * 構成內插，不得列舉不存在的欄位。
+     *
+     * <p><b>必須是輸入的純函數</b>：不讀任何外部狀態、不新增第二個旗標欄位。引擎的
+     * 「同一輸入永遠同一輸出」契約是回測可重現性的基礎。</p>
+     *
+     * <p>兩者皆 null 時回傳的標籤不會被使用（該情況下 {@code marketActivity} 為 null，
+     * 走的是「資料不足」那一段），此處仍回傳中性字串以維持全函數。</p>
+     */
+    private static String activityLabel(BigDecimal volumeRatio, BigDecimal turnoverRatio) {
+        if (volumeRatio != null && turnoverRatio != null) return "量能與成交金額";
+        if (volumeRatio != null) return "量能";
+        if (turnoverRatio != null) return "成交金額";
+        return "量價";
     }
 
     private static Double averageAvailable(Double... values) {

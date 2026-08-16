@@ -592,7 +592,10 @@ public class TradingRadarService {
                             context.nasdaqChangePercent(),
                             context.soxChangePercent(),
                             context.usTechCompositePercent(),
-                            context.usTechAvailable()));
+                            context.usTechAvailable(),
+                            // 台股的跨市場因子確實適用（前一美股科技交易日是台股的領先訊號），
+                            // 故 crossMarketApplicable=true，行為逐位不變（Task 342.6）。
+                            true));
 
             // stale＝「完成日 K 未到今日」且「Redis 也無今日即時價」時才成立；任一者成立即非 stale（Task 228）。
             boolean stale = !todayEodPresent && !liveFreshToday;
@@ -644,18 +647,22 @@ public class TradingRadarService {
      * <p>與 {@link #buildMarket} 各自獨立 try/catch，互不影響（294.2／(e) 的隔離要求）：IXIC 讀取失敗
      * 只讓美股個股停止產生訊號，不得拖垮台股組。</p>
      *
-     * <p>{@code MarketInput} 的後六個參數（跨市場量能／美股科技日報酬）全部傳 {@code null}／{@code false}：
-     * 那三欄（nasdaqChangePercent／soxChangePercent／usTechCompositePercent）的語意是「台股股票的跨市場
-     * 領先訊號」，本身即為 IXIC 走勢的一部分，若原封不動餵給「大盤即是 IXIC」的美股組會重複計分。</p>
+     * <p>{@code MarketInput} 的跨市場三欄（nasdaqChangePercent／soxChangePercent／
+     * usTechCompositePercent）與 {@code usTechAvailable} 全部傳 {@code null}／{@code false}：
+     * 那三欄的語意是「台股股票的跨市場領先訊號」，本身即為 IXIC 走勢的一部分，若原封不動餵給
+     * 「大盤即是 IXIC」的美股組會重複計分（Requirement 64 的排除，Task 342 未推翻）。</p>
      *
      * <p>Task 323：{@code MarketSummary} 的大盤量能三欄改由既有的
      * {@link TradingRadarMarketContextService#resolveMarketFromRows} 供給（同一支 API 也是
-     * {@code BacktestService} 走的那支），線上雷達與回測因此不會分岔出第二份美股量能計算。
-     * <b>但 {@code MarketInput} 的量能兩欄與 {@code completedChangePercent} 仍維持 {@code null}</b>：
-     * 那三欄在 {@link TradingRadarRuleEngine} 內是<b>進 regime 分數</b>的，本任務只補
-     * evidence／信心度所讀的 {@code MarketSummary}，不動美股的 regime 分數與買進閘門
-     * （台股端 {@link #buildMarket} 是把同一份 context 一併灌進 {@code MarketInput}，
-     * 此處刻意不鏡像照抄）。</p>
+     * {@code BacktestService} 走的那支），線上雷達與回測因此不會分岔出第二份美股量能計算。</p>
+     *
+     * <p>Task 342（Requirement 82）：{@code MarketInput} 的 {@code completedChangePercent} 與
+     * {@code marketVolumeRatio} <b>自本版起接上同一份 {@code usContext}</b>，真正參與 regime 計分——
+     * 原本「算了卻不用」的中間狀態在 Task 335 把 usMarket 送上畫面後，變成使用者直接看得到的矛盾
+     * （卡片顯示量比 0.79、風險提醒卻說「資料不足」）。{@code marketTurnoverRatio} 仍為 {@code null}
+     * （{@code us_index_daily_history} 無成交值欄，不得偽造）。新增的 {@code crossMarketApplicable}
+     * 傳 {@code false}，使跨市場那則「資料不足」提醒改為沉默——那個因子對美股是<b>不適用</b>，
+     * 不是資料缺失。</p>
      */
     private MarketState buildUsMarket(Instant decisionInstant) {
         try {
@@ -681,17 +688,32 @@ public class TradingRadarService {
                             indicators(ind),
                             c60,
                             c240,
-                            // completedChangePercent／marketVolumeRatio／marketTurnoverRatio
-                            // 一律維持 null（Task 323.2）：這三欄在 TradingRadarRuleEngine 內會進 regime
-                            // 分數（averageAvailable(...) → score ±8／±10／±3），把上面解出的 usContext
-                            // 灌進來會直接翻動美股個股的 regime 與買進閘門。本任務只補 MarketSummary。
+                            // Task 342（推翻 Task 323.2 的刻意留白）：完成日漲跌幅與量能比真正接進
+                            // regime 分數（averageAvailable(...) → score ±8／±10／±3）。使用者已知情
+                            // 並接受「美股個股 regime 與買進閘門會因此變動」的代價，RULE_VERSION 同步升
+                            // TW_RULES_V14。
+                            //
+                            // ⚠ completedChangePercent 必須取 usContext 這一份，不得改用本方法上面的區域
+                            // 變數 changePercent：後者算自 findTopN...(IXIC_CODE, 241)，該查詢沒有任何完成日
+                            // 過濾（Yahoo range=10y&interval=1d 盤中會回傳當日的部分 bar），而 usContext 在
+                            // resolveMarketFromRows 內套了美東 16:00 的完成日邊界。盤中兩者會落在不同 as-of 日，
+                            // 讓「漲跌方向」與「量比」跨日拼接，直接把引擎四個計分分支的正負號判錯。
+                            //
+                            // ⚠ usContext == null 的三元防護不可省：單元測試把 marketContextService 宣告為
+                            // @Mock，未 stub 的方法回 null，直接解參考產生的 NPE 會被本方法的 catch 吞成
+                            // incompleteMarket()——不報錯卻讓美股整組變 DATA_INCOMPLETE。
+                            usContext == null ? null : usContext.completedMarketChangePercent(),
+                            usContext == null ? null : usContext.marketVolumeRatio(),
+                            // marketTurnoverRatio：us_index_daily_history 無成交值／週轉率欄，
+                            // 不得以成交量除以任何數字偽造週轉率。
+                            null,
+                            // 跨市場領先訊號三欄維持 null（Task 294 既有理由，見本方法 javadoc），
+                            // usTechAvailable 維持 false；crossMarketApplicable=false（Task 342.2）讓引擎
+                            // 沉默，不再把「不適用」謊報成「資料不足」。
                             null,
                             null,
                             null,
-                            // 跨市場領先訊號四欄維持 null／false（Task 294 既有理由，見本方法 javadoc）。
-                            null,
-                            null,
-                            null,
+                            false,
                             false));
 
             LocalDate latestEodDate = rows.isEmpty() ? null : rows.get(0).getTradingDate();
