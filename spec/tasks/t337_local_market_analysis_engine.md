@@ -1,6 +1,6 @@
-# [t336] 今日股市分析改由本機規則引擎產生，LLM 成本歸零且可隨時切回
+# [t337] 今日股市分析改由本機規則引擎產生，LLM 成本歸零且可隨時切回
 
-**對應 Requirements:** Requirement 77（今日股市分析改由本機規則引擎產生——LLM 成本歸零，且隨時可切回）
+**對應 Requirements:** Requirement 78（今日股市分析改由本機規則引擎產生——LLM 成本歸零，且隨時可切回）
 **前置任務:** 無
 **Liquibase changeset:** `v1.105.0-market-analysis-engine.sql`
 
@@ -79,7 +79,7 @@ LLM 目前提供兩件本機規則引擎做不到的事：
 
 `us_index_daily_history`：`index_code` (varchar(16))、`trading_date` (date)、`close_point` (numeric(14,4), NOT NULL)。
 
-- [ ] **336.1 Liquibase changeset `v1.105.0-market-analysis-engine.sql`**：新增 `engine` 欄位並回填。須冪等，並在 `backend/src/main/resources/db/changelog/db.changelog-master.yaml` **最尾端**註冊（沿用既有 `- include: { file: db/changelog/changes/<檔名>, relativeToChangelogFile: false }` 格式）。
+- [x] **337.1 Liquibase changeset `v1.105.0-market-analysis-engine.sql`**：新增 `engine` 欄位並回填。須冪等，並在 `backend/src/main/resources/db/changelog/db.changelog-master.yaml` **最尾端**註冊（沿用既有 `- include: { file: db/changelog/changes/<檔名>, relativeToChangelogFile: false }` 格式）。
 
     ```sql
     ALTER TABLE market_analysis_setting ADD COLUMN IF NOT EXISTS engine VARCHAR(16) NOT NULL DEFAULT 'local';
@@ -89,9 +89,9 @@ LLM 目前提供兩件本機規則引擎做不到的事：
     **既有列一律回填 `local`。** 若沿用 `llm`，部署後成本毫無變化，本任務就白做了。
     **不得**修改 changeset 內的任何字元（含註解）後又重跑——Liquibase checksum 含註解，改了會 `ValidationFailed` 導致 business crash loop。
 
-- [ ] **336.2 `MarketAnalysisSetting` entity 加 `engine` 欄位**：`backend/src/main/java/com/steven/assets/model/MarketAnalysisSetting.java` 新增 `@Column(name = "engine", length = 16, nullable = false) private String engine;`，比照既有 `model` / `effort` 的寫法。
+- [x] **337.2 `MarketAnalysisSetting` entity 加 `engine` 欄位**：`backend/src/main/java/com/steven/assets/model/MarketAnalysisSetting.java` 新增 `@Column(name = "engine", length = 16, nullable = false) private String engine;`，比照既有 `model` / `effort` 的寫法。
 
-- [ ] **336.3 `MarketAnalysisService.resolveEngine()`**：範本是既有 `resolveEffort()`（`:218-223`）的三段式寫法（讀單列設定 → 白名單過濾 → 後備常數）。**不要照 `resolveModel()`**——後者（`:210-215`）只有 `.filter(m -> m != null && !m.isBlank())` 驗非空、**沒有白名單**：
+- [x] **337.3 `MarketAnalysisService.resolveEngine()`**：範本是既有 `resolveEffort()`（`:218-223`）的三段式寫法（讀單列設定 → 白名單過濾 → 後備常數）。**不要照 `resolveModel()`**——後者（`:210-215`）只有 `.filter(m -> m != null && !m.isBlank())` 驗非空、**沒有白名單**：
 
     ```java
     /** 可選分析引擎白名單——技術白名單（非使用者可自訂之業務分類），比照 AVAILABLE_MODELS，不套用「Enum 必須入庫由 /api/settings 管理」規範。 */
@@ -104,7 +104,7 @@ LLM 目前提供兩件本機規則引擎做不到的事：
 
     `resolveEngine()` 後備值為 `local`。
 
-- [ ] **336.4 `MarketAnalysisSettingsDto` 加 `engine` 與 `availableEngines`**：現有 record 定義為
+- [x] **337.4 `MarketAnalysisSettingsDto` 加 `engine` 與 `availableEngines`**：現有 record 定義為
 
     ```java
     public record MarketAnalysisSettingsDto(
@@ -115,9 +115,9 @@ LLM 目前提供兩件本機規則引擎做不到的事：
 
     改為在最前面加 `String engine`、在 `availableEfforts` 之後加 `List<EngineOption> availableEngines`，並新增巢狀 `public record EngineOption(String id, String label) {}`。所有建構呼叫端一併更新。
 
-- [ ] **336.5 `getSettings()` / `updateSettings(...)` 支援 engine**：`getSettings()` 沿用既有「現值若不在白名單則補入清單開頭」防呆（既有 `models` / `efforts` 兩處已有此寫法，照抄）。`updateSettings(String model, String effort, Boolean enabled, String engine)` 新增第四個參數，維持既有語意：**null 表示該欄不變、四者至少須提供一項**（既有訊息「未提供任何可更新的設定（model / effort / enabled）」須同步補上 engine）；不支援的 engine 值拋 `IllegalArgumentException("不支援的分析引擎：" + engine)`。新建列時比照既有寫法先以 `resolveEngine()` 補齊未指定欄，避免 NOT NULL 違反。`MarketAnalysisController.updateSettings(@RequestBody Map<String, Object> body)`（`backend/.../controller/MarketAnalysisController.java:75`）一併解析 `engine` 欄位。
+- [x] **337.5 `getSettings()` / `updateSettings(...)` 支援 engine**：`getSettings()` 沿用既有「現值若不在白名單則補入清單開頭」防呆（既有 `models` / `efforts` 兩處已有此寫法，照抄）。`updateSettings(String model, String effort, Boolean enabled, String engine)` 新增第四個參數，維持既有語意：**null 表示該欄不變、四者至少須提供一項**（既有訊息「未提供任何可更新的設定（model / effort / enabled）」須同步補上 engine）；不支援的 engine 值拋 `IllegalArgumentException("不支援的分析引擎：" + engine)`。新建列時比照既有寫法先以 `resolveEngine()` 補齊未指定欄，避免 NOT NULL 違反。`MarketAnalysisController.updateSettings(@RequestBody Map<String, Object> body)`（`backend/.../controller/MarketAnalysisController.java:75`）一併解析 `engine` 欄位。
 
-- [ ] **336.6 新增 `LocalMarketAnalysisEngine`（`backend/src/main/java/com/steven/assets/service/LocalMarketAnalysisEngine.java`）**
+- [x] **337.6 新增 `LocalMarketAnalysisEngine`（`backend/src/main/java/com/steven/assets/service/LocalMarketAnalysisEngine.java`）**
 
     **這是本任務的核心，邊界不得妥協：評分核心必須是純函式。**
     `MarketAnalysisService` 已 1101 行、職責已含批次送出／批次收尾／新聞消毒／發布日回抓，評分邏輯再併進去就無法在不啟 Spring context 下測試（CLAUDE.md 明列「業務邏輯必須能在不啟動 Spring context、不連資料庫的情況下單元測試」）。
@@ -133,9 +133,9 @@ LLM 目前提供兩件本機規則引擎做不到的事：
     public MarketAnalysisResult evaluate(
             LocalDate analysisDate,
             List<double[]> taiexCloses,        // {epochDay, close} 由舊到新，來自既有 twseCloses()
-            List<double[]> taiexTradeValues,   // {epochDay, tradeValue} 由舊到新，見 336.6b
+            List<double[]> taiexTradeValues,   // {epochDay, tradeValue} 由舊到新，見 337.6b
             Map<String, List<double[]>> usCloses,   // key = DJI/SPX/IXIC/SOX，來自既有 usCloses()
-            TechnicalIndicatorService.FullIndicators taiexIndicators,  // 既有大盤 MA/KD，見 336.7
+            TechnicalIndicatorService.FullIndicators taiexIndicators,  // 既有大盤 MA/KD，見 337.7
             InstitutionalNet institutionalLatest,   // 可為 null（當日法人資料尚未產生）
             List<InstitutionalNet> institutionalRecent3,
             List<News> recentNews)
@@ -153,13 +153,13 @@ LLM 目前提供兩件本機規則引擎做不到的事：
             java.math.BigDecimal totalNet) {}
     ```
 
-- [ ] **336.6b `taiexTradeValues` 的載入方式**
+- [x] **337.6b `taiexTradeValues` 的載入方式**
 
-    既有 `twseCloses()`（`MarketAnalysisService.java:744-753`）只回 `{epochDay, close}`，不含成交金額。於 `MarketAnalysisService` 新增一支**私有**載入方法回 `{epochDay, tradeValue}`，**重用既有的 repository 查詢** `twseRepo.findByTradingDateGreaterThanEqualOrderByTradingDateAsc(since)`（`twseCloses()` 用的同一支），**不得新增第二個 repository 查詢方法**。`trade_value` 可為 null（該列略過，量能訊號依 336.9 邊界不計分）。
+    既有 `twseCloses()`（`MarketAnalysisService.java:744-753`）只回 `{epochDay, close}`，不含成交金額。於 `MarketAnalysisService` 新增一支**私有**載入方法回 `{epochDay, tradeValue}`，**重用既有的 repository 查詢** `twseRepo.findByTradingDateGreaterThanEqualOrderByTradingDateAsc(since)`（`twseCloses()` 用的同一支），**不得新增第二個 repository 查詢方法**。`trade_value` 可為 null（該列略過，量能訊號依 337.9 邊界不計分）。
 
     為避免兩次查詢，亦可把 `twseCloses()` 改為一次讀出後同時回收盤與成交金額——**若採此法，須確保 LLM 路徑用到的既有 `twseCloses()` 行為與輸出完全不變**。
 
-- [ ] **336.7 大盤 MA／KD 一律取自 `TechnicalIndicatorService`，不得重算**
+- [x] **337.7 大盤 MA／KD 一律取自 `TechnicalIndicatorService`，不得重算**
 
     `backend/src/main/java/com/steven/assets/service/TechnicalIndicatorService.java` 已有大盤專用路徑 `computeAllForTaiex()`（private，由 `computeAll(stockCode, market)` 在 `isTaiex(...)` 為真時委派），回傳 `FullIndicators`：
 
@@ -204,7 +204,7 @@ LLM 目前提供兩件本機規則引擎做不到的事：
 
     RSI／MACD／量能若既有實作只適用個股序列（`computeFromSeries(List<StockPriceHistory>)`），得於本引擎新增實作，但**須在註解指明其與 `TechnicalIndicatorService.ExtendedIndicators` 同名指標（`rsi5` / `rsi10` / `dif` / `macd` / `osc`）的參數是否一致**，避免日後被誤認為同一組值。
 
-- [ ] **336.8 法人籌碼的讀取與選列規則**
+- [x] **337.8 法人籌碼的讀取與選列規則**
 
     `backend/src/main/java/com/steven/assets/repository/TwseInstitutionalDailyRepository.java` 目前**只有一個查詢方法**：
 
@@ -225,7 +225,7 @@ LLM 目前提供兩件本機規則引擎做不到的事：
 
     **單位換算務必正確**：`foreign_net` 等欄位單位為**元**。`keyFactors` 顯示為「億元」時須除以 1e8。實測 2026-08-14 `foreign_net = 45351330421.00` → 顯示「453.5 億」。寫錯會差 8 個數量級。
 
-- [ ] **336.9 評分規則：每個訊號都要能對應到一條 `keyFactors`**
+- [x] **337.9 評分規則：每個訊號都要能對應到一條 `keyFactors`**
 
     加權總分由下列訊號累加，每個訊號回傳 `[-2, +2]` 的方向分 ＋ 一個具名常數權重。**命中非零方向分者必須在 `keyFactors` 產生一條含實際數值的中文敘述**——這是本引擎相對 LLM 的核心優勢（可稽核），不得只輸出結論。
 
@@ -233,7 +233,7 @@ LLM 目前提供兩件本機規則引擎做不到的事：
     |---|---|---|
     | 台股技術面 | (a) 收盤對 MA5／MA20／MA60／MA240 的位置與均線排列 | `taiexCloses` ＋ `FullIndicators` |
     | | (b) K／D 值與金叉／死叉（用 `k`/`d`/`previousK`/`previousD`） | `FullIndicators` |
-    | | (c) MACD OSC 方向 | 本引擎計算（見 336.7 註解要求） |
+    | | (c) MACD OSC 方向 | 本引擎計算（見 337.7 註解要求） |
     | | (d) RSI 超買超賣 | 同上 |
     | | (e) 量能：當日 `trade_value` 對近 20 交易日均值的比值 | `taiexTradeValues` |
     | 美股連動 | `SOX`／`IXIC`／`SPX` 最新交易日對前一交易日漲跌幅 | `usCloses` |
@@ -245,16 +245,16 @@ LLM 目前提供兩件本機規則引擎做不到的事：
 
     **邊界一（資料不足）：** 任一訊號因資料不足（暖機不足、當日法人資料尚未產生、序列為空）而無法計算時，該訊號**不計分也不進 `keyFactors`**。**不得以 0 分或 null 當作中性值混入**——那會讓「沒有資料」與「訊號中性」在總分上不可分辨。
 
-    **邊界二（價基一致性，見 336.7）：** (a)(b)(c)(d)(e) 五個台股訊號所用的收盤、量能與 MA／KD **必須來自同一份完成日序列**。實作上這由 336.7 指定的 `computeFromSeries(純 DB 降序序列)` 保證——**不得**一邊用會併入 Redis live 的 `computeAll(...)` 算 MA／KD、一邊用只讀 DB 的 `twseCloses()` 取收盤，那在盤中觸發時會產生「今天的指標配昨天的股價」。此約束須在程式碼註解寫明理由。
+    **邊界二（價基一致性，見 337.7）：** (a)(b)(c)(d)(e) 五個台股訊號所用的收盤、量能與 MA／KD **必須來自同一份完成日序列**。實作上這由 337.7 指定的 `computeFromSeries(純 DB 降序序列)` 保證——**不得**一邊用會併入 Redis live 的 `computeAll(...)` 算 MA／KD、一邊用只讀 DB 的 `twseCloses()` 取收盤，那在盤中觸發時會產生「今天的指標配昨天的股價」。此約束須在程式碼註解寫明理由。
 
-- [ ] **336.10 `bias` 與 `confidence` 的產生規則**
+- [x] **337.10 `bias` 與 `confidence` 的產生規則**
 
     - 加權總分正規化到 `[-100, +100]`，以**對稱門檻**決定 `bias`（`BULLISH` / `BEARISH` / `NEUTRAL`）。門檻為具名常數，不得散落魔術數字。
     - `confidence` **不得由總分絕對值直接換算**——那會讓「單一極端訊號」與「多訊號一致」得到相同信心。須為：
       「實際參與計分的訊號中，方向與最終 `bias` 相同者的加權占比」× 「實際參與計分訊號數 ÷ 訊號總數」（資料完整度折減）
     - 值域維持 `[0, 100]` 整數，沿用既有 `clampConfidence`
 
-- [ ] **336.11 `newsHighlights`：排序挑選，不做語意理解，不套 `sanitizeNews()`**
+- [x] **337.11 `newsHighlights`：排序挑選，不做語意理解，不套 `sanitizeNews()`**
 
     從既有 `fetchRecentLocalNews(date)` 的結果中挑 **3～6 則**，排序鍵依序：
 
@@ -268,19 +268,19 @@ LLM 目前提供兩件本機規則引擎做不到的事：
 
     **惟 `url` 仍須經既有 `safeHttpUrl()` 只留 http(s)**——那是前端 `<a href>` XSS 的防禦縱深，與資料是否可信無關。
 
-- [ ] **336.12 `summary` / `twContext` / `usContext` 模板拼接，且須自我標示為機器產生**
+- [x] **337.12 `summary` / `twContext` / `usContext` 模板拼接，且須自我標示為機器產生**
 
     三個欄位由命中的訊號組出中文敘述（例如「台股收盤 45,811.01 點，位於季線之上、月線之下；KD 於 K=62.3／D=58.1 呈黃金交叉；外資近三日累計買超 453.5 億元」）。
 
     `summary` **開頭或結尾須明確標示本次判斷由本機規則引擎產生、非 LLM 研判**——使歷史列表與每日 email 在純文字閱讀時即可分辨兩種來源，不必回查 `model` 欄位。
 
-- [ ] **336.13 `generateInternal` 分岔：本機路徑同步、不經 `PROCESSING`**
+- [x] **337.13 `generateInternal` 分岔：本機路徑同步、不經 `PROCESSING`**
 
     現有簽章 `private DailyMarketAnalysis generateInternal(LocalDate date, String trigger, boolean skipIfAlreadyOk, boolean resetEmailSent)`，內部已用 `generateLock`（`ReentrantLock`）序列化，並有兩道守門：`PROCESSING` 即略過、`skipIfAlreadyOk && STATUS_OK` 即略過。
 
     **這兩道守門與 `generateLock` 對兩條路徑一致適用**，不得只在 LLM 路徑保留。守門之後依 `resolveEngine()` 分岔：
 
-    - `"local"` → 新增 `generateLocal(date, trigger, existing, resetEmailSent)`：載入資料 → 呼叫引擎 → **`applyLocalResult(row, result)`（見 336.13b，不得用既有 `applyResult`）** → 直接落 `STATUS_OK` → 寄信判斷 → `save`
+    - `"local"` → 新增 `generateLocal(date, trigger, existing, resetEmailSent)`：載入資料 → 呼叫引擎 → **`applyLocalResult(row, result)`（見 337.13b，不得用既有 `applyResult`）** → 直接落 `STATUS_OK` → 寄信判斷 → `save`
     - `"llm"` → 既有 `submitBatch(...)`，**一行不改**
 
     本機路徑：
@@ -288,7 +288,7 @@ LLM 目前提供兩件本機規則引擎做不到的事：
     - 引擎拋例外時落 `STATUS_FAILED` ＋ `errorMessage`（沿用既有 `truncate(msg, 1000)`），**不得往外拋**，維持既有「不中斷排程／手動觸發」契約
     - 沿用既有 `clearContent(row)`（重跑既有 OK 列時先清上一次內容）與 `resetEmailSent` 語意
 
-- [ ] **336.13b 本機路徑不得呼叫既有 `applyResult(...)`——它內含 `sanitizeNews()`，會在號稱零外部呼叫的路徑上發 outbound HTTP**
+- [x] **337.13b 本機路徑不得呼叫既有 `applyResult(...)`——它內含 `sanitizeNews()`，會在號稱零外部呼叫的路徑上發 outbound HTTP**
 
     既有 `applyResult(row, r)`（`MarketAnalysisService.java:840-850`）最後一行是：
 
@@ -300,25 +300,25 @@ LLM 目前提供兩件本機規則引擎做不到的事：
     而 `sanitizeNews()`（`:866-914`）在第 `:898-903` 行對**不在** `TRUSTED_LOCAL_NEWS_HOSTS`（`:947-948`，只有 `twse.com.tw`／`wantgoo.com`／`moneydj.com`／`ltn.com.tw`／`udn.com`）的連結呼叫 `fetchPublishedDate(url)` **回抓原文網頁**。而 `fx`／`us-market`／`kr-market`／`kr-intraday` 這幾類量化快照的來源網域**不在該白名單內**。
 
     照既有 `applyResult` 實作的後果有三個，每一個都會使本任務失敗：
-    1. 336.11 明文禁止的 `sanitizeNews` 一定會執行
-    2. 336.20(g) 的欄位對應斷言必定失敗（`:910-911` 會用 `date.toString()` 覆寫 `publishedAt`、用 `safeHttpUrl` 覆寫 `url`，且可能整筆剔除）
-    3. 一條被宣稱「100% 本地 DB、零外部呼叫」的路徑會偷偷發 outbound HTTP——這會直接讓 335 的驗證段第 7 步（斷言日誌無外部呼叫）失去意義
+    1. 337.11 明文禁止的 `sanitizeNews` 一定會執行
+    2. 337.20(g) 的欄位對應斷言必定失敗（`:910-911` 會用 `date.toString()` 覆寫 `publishedAt`、用 `safeHttpUrl` 覆寫 `url`，且可能整筆剔除）
+    3. 一條被宣稱「100% 本地 DB、零外部呼叫」的路徑會偷偷發 outbound HTTP——這會直接讓本檔驗證段第 7 步（斷言日誌無外部呼叫）失去意義
 
     **本任務指定的做法**：新增 `applyLocalResult(DailyMarketAnalysis row, MarketAnalysisResult r)`，內容與 `applyResult` 相同（`normalizeBias`／`clampConfidence`／`summary`／`twContext`／`usContext`／`keyFactors` 序列化皆照舊），**惟 `newsHighlights` 直接 `objectMapper.writeValueAsString(r.newsHighlights())`、不過 `sanitizeNews`**。既有 `applyResult` 保持原樣供 LLM 路徑使用，**一行不改**。
 
-- [ ] **336.14 `model` 欄位寫 `local-rule-engine:v1`**
+- [x] **337.14 `model` 欄位寫 `local-rule-engine:v1`**
 
     本機路徑將 `daily_market_analysis.model` 設為 `local-rule-engine:v1`（沿用既有 `truncate(model, 64)`）。
 
     **規則權重或門檻日後調整時須提升此版本號**，理由與 `TradingRadarRuleEngine.RULE_VERSION` 相同：否則歷史紀錄無法分辨是哪一版規則產生的判斷。前端歷史列表既有的模型顯示欄位因而自然顯示引擎來源，無須新增欄位。
 
-- [ ] **336.15 `ANTHROPIC_API_KEY` 未設定時，`local` 引擎必須正常運作**
+- [x] **337.15 `ANTHROPIC_API_KEY` 未設定時，`local` 引擎必須正常運作**
 
     現行 `submitBatch` 在 `apiKey == null || apiKey.isBlank()` 時落 `STATUS_NOT_CONFIGURED`。**本機路徑不得檢查金鑰。**
 
     這是本任務最實際的驗收點之一：拔掉金鑰後今日股市分析仍應每日正常產出。`NOT_CONFIGURED` 只在 `engine=llm` 且無金鑰時出現。
 
-- [ ] **336.16 email 與排程行為完全不變**
+- [x] **337.16 email 與排程行為完全不變**
 
     `MarketAnalysisEmailDispatcher.dispatchDaily`、`email_sent_at` 冪等記號、`market_analysis_send_time` 多時段各跑一次各寄一封、`MarketAnalysisScheduler` 每分鐘 tick 與交易日閘門——全部維持既有語意，**不得為本任務修改**。
 
@@ -329,7 +329,7 @@ LLM 目前提供兩件本機規則引擎做不到的事：
 
     第 3 項（颱風假／臨時休市的第二次交易日驗證）在本機路徑仍須保留。雖然本機路徑不存在「送出後、收尾前」的時間差，但保留可確保兩條路徑寄信條件完全一致、日後不會因單邊修改而分歧。
 
-- [ ] **336.17 前端：`TodayMarketAnalysisView.vue` 新增引擎下拉**
+- [x] **337.17 前端：`TodayMarketAnalysisView.vue` 新增引擎下拉**
 
     檔案：`frontend/src/views/TodayMarketAnalysisView.vue`
 
@@ -341,25 +341,25 @@ LLM 目前提供兩件本機規則引擎做不到的事：
 
     > **前端變更依 CLAUDE.md 規定由固定模型的 subagent 執行**（Claude Code：`sonnet 5` / `high`）。
 
-- [ ] **336.18 BFF 契約不變**
+- [x] **337.18 BFF 契約不變**
 
     `TodayMarketAnalysisBffController` 既有 `Mono.zip` 聚合（`{today, history, settings}`）維持原形狀，`settings` 內容因 DTO 新增欄位而自然增長。既有 `SecurityConfig` 對 `/api/bff/today-market-analysis/**` 的 ADMIN 規則不變。**本任務不新增任何 BFF endpoint。**
 
-- [ ] **336.19 不新增 `@Scheduled`**
+- [x] **337.19 不新增 `@Scheduled`**
 
     本任務只改既有觸發路徑的分岔，不新增任何排程。故 `SchedulePublicBffController.JOBS` 筆數不變，`SchedulePublicBffControllerTest` 的 `hasSize` 斷言不需更動。
 
-- [ ] **336.20 測試**
+- [x] **337.20 測試**
 
     本專案目前**沒有** `MarketAnalysisService` 的既有測試類（`backend/src/test/java/com/steven/assets/service/` 下無對應檔案），本任務須新建。至少涵蓋：
 
-    - (a) 引擎純函式在固定輸入下產出確定的 `bias` / `confidence` / `keyFactors`——**測試不得啟動 Spring context、不得連 DB**（這同時證明 336.6 的可測試性約束真的成立）
+    - (a) 引擎純函式在固定輸入下產出確定的 `bias` / `confidence` / `keyFactors`——**測試不得啟動 Spring context、不得連 DB**（這同時證明 337.6 的可測試性約束真的成立）
     - (b) 訊號因資料不足而缺席時不計分、不進 `keyFactors`，且 `confidence` 因完整度折減而下降
     - (c) 單一極端訊號的 `confidence` **低於**多訊號一致的 `confidence`（證明未由總分絕對值直接換算）
     - (d) `engine=local` 且 `apiKey` 為空字串時仍落 `STATUS_OK`、不落 `NOT_CONFIGURED`，且全程**零 Anthropic client 互動**（以替身斷言）
     - (e) `engine=llm` 時既有批次路徑行為不回歸
     - (f) `engine` 白名單驗證與 `updateSettings` 的「null 不變」語意
-    - (g) 本機路徑產出的 `newsHighlights` 與來源 `news_headline` 的對應關係為：`title`／`source` **逐字相等**、`url` 等於 `safeHttpUrl(來源 url)`、`publishedAt` 等於 `來源 publishedAt.atZone(Asia/Taipei).toLocalDate().toString()`（**不得**斷言四欄全部逐字相等——後兩欄依 336.11 本就有規定的轉換），且未經 `sanitizeNews()` 的日期覆寫或整筆剔除；另斷言量化快照 category 排在一般新聞之前
+    - (g) 本機路徑產出的 `newsHighlights` 與來源 `news_headline` 的對應關係為：`title`／`source` **逐字相等**、`url` 等於 `safeHttpUrl(來源 url)`、`publishedAt` 等於 `來源 publishedAt.atZone(Asia/Taipei).toLocalDate().toString()`（**不得**斷言四欄全部逐字相等——後兩欄依 337.11 本就有規定的轉換），且未經 `sanitizeNews()` 的日期覆寫或整筆剔除；另斷言量化快照 category 排在一般新聞之前
     - (h) 本機路徑寄信條件與 LLM 路徑一致（非交易日不寄、`email_sent_at` 已設不重寄）
     - (i) 大盤 MA／KD 取自 `TechnicalIndicatorService.computeFromSeries(...)` 這一份既有核心（證明未複製第二份實作）。**不得**斷言「與交易雷達讀到的數值恆等」——交易雷達走的是會併入 Redis live 合成列的 `computeAll(TAIEX_CODE, TW_MARKET)`，盤中兩者價基本就不同，那樣斷言會是假的。正確斷言是「餵入相同序列時，本路徑與 `computeFromSeries` 輸出相同」
     - (j) **價基一致性**：以「最新 DB 日線為前一交易日、Redis 有今日即時價」的情境驅動，斷言本機引擎用到的 MA／KD 與收盤／量能來自**同一份完成日序列**（即 MA／KD 不含今日 live 合成列）
@@ -421,4 +421,41 @@ docker logs --tail 200 asset-business-services 2>&1 | grep -i "批次已送出\|
 
 ## 完成報告
 
-（實作者做完後回填：實際改了哪些檔、驗證輸出、與原計畫的偏差及原因。）
+### 後端（337.1–337.16、337.18–337.20）已完成
+
+**新增檔案**
+
+| 檔案 | 內容 |
+|---|---|
+| `backend/src/main/resources/db/changelog/changes/v1.105.0-market-analysis-engine.sql` | `engine` 欄（`VARCHAR(16) NOT NULL DEFAULT 'local'`）＋回填 `local`；冪等 |
+| `backend/src/main/java/com/steven/assets/service/LocalMarketAnalysisEngine.java` | 純函式評分核心（12 個訊號、具名權重／門檻、`InstitutionalNet` 巢狀 record、`RULE_VERSION`） |
+| `backend/src/test/java/com/steven/assets/service/LocalMarketAnalysisEngineTest.java` | 12 個純函式測試（不啟 Spring context、不連 DB） |
+| `backend/src/test/java/com/steven/assets/service/MarketAnalysisServiceLocalEngineTest.java` | 19 個服務層測試（引擎分岔、寄信條件、價基一致性、籌碼選列） |
+
+**修改檔案**
+
+| 檔案 | 變更 |
+|---|---|
+| `backend/src/main/resources/db/changelog/db.changelog-master.yaml` | 尾端註冊 v1.105.0 |
+| `backend/src/main/java/com/steven/assets/model/MarketAnalysisSetting.java` | 新增 `engine` 欄位 |
+| `backend/src/main/java/com/steven/assets/dto/MarketAnalysisSettingsDto.java` | 新增 `engine`／`availableEngines` ＋巢狀 `EngineOption` |
+| `backend/src/main/java/com/steven/assets/service/MarketAnalysisService.java` | `AVAILABLE_ENGINES`／`resolveEngine()`／`getSettings()`／4 參數 `updateSettings(...)`／`generateInternal` 分岔／`generateLocal(...)`／`applyLocalResult(...)`／`institutionalRecent(...)`／`twseRows`＋`closesOf`＋`tradeValuesOf`＋`taiexSeriesDesc`；`safeHttpUrl` 放寬為 package-private static |
+| `backend/src/main/java/com/steven/assets/controller/MarketAnalysisController.java` | `updateSettings` 解析 `engine` |
+| `backend/src/main/java/com/steven/assets/service/TechnicalIndicatorService.java` | `toRow(TwseIndexDailyHistory,…)` 放寬為 package-private（純欄位映射，非計算入口） |
+
+**驗證**：`mvn -f backend/pom.xml test -DextraArgLine=-Dnet.bytebuddy.experimental=true`
+→ `Tests run: 1049, Failures: 0, Errors: 0, Skipped: 0`（實作前基準線為 1018，新增 31 個）。
+
+### 與原計畫的偏差
+
+1. **本機路徑的日線視窗為 2 年後取尾端 240 筆**，非 LLM 路徑的 `date.minusYears(1)`。
+   理由：MA240 需要 240 個交易日暖機，一年（約 245 個交易日）沒有餘裕；240 筆亦與
+   `computeAllForTaiex()` 的既有視窗一致。`twseCloses()` 本身的簽章與輸出<b>完全未變</b>，
+   LLM 路徑行為不受影響（337.6b 允許此作法）。
+2. **籌碼面除外資外另加投信／自營兩個訊號**（權重 0.6／0.4）。
+   337.9 的權重約束明文要求「外資權重須高於投信與自營」，該約束必須有對應訊號才成立。
+3. **337.9(c) MACD 由本引擎以收盤價為價基自算**，與
+   `TechnicalIndicatorService.ExtendedIndicators.osc`（DI ＝ (H+L+2C)/4 價基）<b>參數不一致</b>，
+   已依 337.7 要求在 `macdSignal` 的 javadoc 寫明；RSI10 則與既有 `rsi10` 參數完全相同
+   （收盤價基、Wilder 平滑、10 期），亦已註明。
+4. **337.17（前端）未做**——依派工範圍由專責前端的 subagent 處理，checkbox 保持未勾。

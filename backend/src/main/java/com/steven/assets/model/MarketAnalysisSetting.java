@@ -38,6 +38,13 @@ public class MarketAnalysisSetting {
     @Column(name = "enabled", nullable = false)
     private Boolean enabled;
 
+    /**
+     * 分析引擎（Requirement 78 / Task 337）：{@code local}＝本機規則引擎（零 LLM 成本、同步產出）、
+     * {@code llm}＝既有 Claude Batch API 路徑。預設 {@code local}。
+     */
+    @Column(name = "engine", length = 16, nullable = false)
+    private String engine;
+
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 }

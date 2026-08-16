@@ -1,6 +1,6 @@
-# [t337] 今日股市分析與資產配置建議的 Docker 外部唯讀 API（Nginx 9090 第七、八條路由）
+# [t338] 今日股市分析與資產配置建議的 Docker 外部唯讀 API（Nginx 9090 第七、八條路由）
 
-**對應 Requirements:** Requirement 78（今日股市分析與資產配置建議的 Docker 外部唯讀 API，Nginx 9090 第七、八條路由）
+**對應 Requirements:** Requirement 79（今日股市分析與資產配置建議的 Docker 外部唯讀 API，Nginx 9090 第七、八條路由）
 **前置任務:** 無（與 t336 可並行；t336 改的是分析怎麼產生，本任務改的是怎麼被外部讀取，兩者不重疊）
 **Liquibase changeset:** 無
 
@@ -46,13 +46,13 @@
 | 上游 business 端點 | 既有 `GET /api/market-analysis/today`（`MarketAnalysisController:43`） | 既有 `GET /api/portfolio-advice/latest`（`PortfolioAdviceController:46`） |
 | 需新增 business 端點 | **無** | **無** |
 
-- [ ] **337.1 BFF：第七條 `/api/public/market-analysis/today`**
+- [x] **338.1 BFF：第七條 `/api/public/market-analysis/today`**
 
     新增三個檔案於 `bff/src/main/java/com/steven/assets/bff/todaymarketanalysis/`（**與該頁面既有的 `TodayMarketAnalysisBffController` 同 package**——既有四組 sibling 中有三組採此慣例：`exchangerate/`、`gdptwse/`、`crawlerdata/` 各自都是「頁面 BFF controller ＋ Public controller」同 package；只有 `latestassets/` 因為沒有對應頁面 controller 才獨立。第八條同理放進既有的 `portfolioadvice/`）：
 
     - `PublicMarketAnalysisController.java` — `@RestController` ＋ `@RequestMapping("/api/public/market-analysis/today")` ＋ `@GetMapping`，**只委派 Service**
-    - `PublicMarketAnalysisService.java` — 注入既有 `businessServicesClient`（`WebClient` bean），呼叫 business `GET /api/market-analysis/today`。**取用方式寫死為 `.retrieve().bodyToMono(...)`**（與 `bff/src/main/java/com/steven/assets/bff/crawlerdata/PublicCrawlerRescanService.java:30-33` 同型）。**不得用 `exchangeToMono` 的 byte-relay**——本專案這兩種寫法互斥：byte-relay（`LatestAssetsPublicService.java:44-45`）在非 2xx 時**不擲例外**，body 會原樣送到匿名呼叫者手上，導致 337.3 要求的 scoped exception advice 的 `WebClientResponseException` handler 永遠不會被觸發（形同死碼），且與 337.3「非 2xx 一律消毒成固定文案」直接衝突，337.9(c) 的跨 advice 競爭測試也會變成測不到真實路徑的假驗證。「原樣 relay」在第七條僅限縮為 **2xx 時 body 內容不改寫**
-    - `PublicMarketAnalysisExceptionAdvice.java` — 見 337.3
+    - `PublicMarketAnalysisService.java` — 注入既有 `businessServicesClient`（`WebClient` bean），呼叫 business `GET /api/market-analysis/today`。**取用方式寫死為 `.retrieve().bodyToMono(...)`**（與 `bff/src/main/java/com/steven/assets/bff/crawlerdata/PublicCrawlerRescanService.java:30-33` 同型）。**不得用 `exchangeToMono` 的 byte-relay**——本專案這兩種寫法互斥：byte-relay（`LatestAssetsPublicService.java:44-45`）在非 2xx 時**不擲例外**，body 會原樣送到匿名呼叫者手上，導致 338.3 要求的 scoped exception advice 的 `WebClientResponseException` handler 永遠不會被觸發（形同死碼），且與 338.3「非 2xx 一律消毒成固定文案」直接衝突，338.9(c) 的跨 advice 競爭測試也會變成測不到真實路徑的假驗證。「原樣 relay」在第七條僅限縮為 **2xx 時 body 內容不改寫**
+    - `PublicMarketAnalysisExceptionAdvice.java` — 見 338.3
 
     **不得把此方法加進既有 `TodayMarketAnalysisBffController`。** 該類別的 class-level `@RequestMapping("/api/bff/today-market-analysis")` 會與方法級路徑串接，**產生不出 `/api/public/...` 這個頂層路徑**。這是技術原因，不是風格選擇——既有四組 sibling（`PublicUsdTwdController`／`PublicMarketIndexController`／`LatestAssetsPublicController`／`PublicCrawlerRescanController`）全都各自獨立成類別，正是同一個原因。
 
@@ -74,9 +74,9 @@
 
     **不做 `onErrorReturn` 降級**——呼叫端需要看到真實失敗，不能被吞成 200 空物件。
 
-- [ ] **337.2 BFF：第八條 `/api/public/portfolio-advice/latest`（owner-scoped，務必逐項照做）**
+- [x] **338.2 BFF：第八條 `/api/public/portfolio-advice/latest`（owner-scoped，務必逐項照做）**
 
-    新增**四個**檔案於既有的 `bff/src/main/java/com/steven/assets/bff/portfolioadvice/`（該 package 已有 `PortfolioAdviceBffController.java`）：`PublicPortfolioAdviceController.java`、`PublicPortfolioAdviceService.java`、`PublicPortfolioAdviceExceptionAdvice.java`，以及**具名例外類** `PublicPortfolioAdviceUnavailableException.java`（比照既有 `bff/.../latestassets/LatestAssetsUnavailableException.java`，用來表達「主要管理者不可用」——Requirement 78 明文要求「以具名 exception 表達」，既有先例也是獨立檔案）。Controller 結構同 337.1。
+    新增**四個**檔案於既有的 `bff/src/main/java/com/steven/assets/bff/portfolioadvice/`（該 package 已有 `PortfolioAdviceBffController.java`）：`PublicPortfolioAdviceController.java`、`PublicPortfolioAdviceService.java`、`PublicPortfolioAdviceExceptionAdvice.java`，以及**具名例外類** `PublicPortfolioAdviceUnavailableException.java`（比照既有 `bff/.../latestassets/LatestAssetsUnavailableException.java`，用來表達「主要管理者不可用」——Requirement 79 明文要求「以具名 exception 表達」，既有先例也是獨立檔案）。Controller 結構同 338.1。
 
     **Service 必須逐項沿用 `LatestAssetsPublicService` 的既有模式。** 該檔案完整內容如下（`bff/src/main/java/com/steven/assets/bff/latestassets/LatestAssetsPublicService.java`），四個關鍵步驟都不可省：
 
@@ -105,7 +105,7 @@
 
     > 這支對外匿名 API 的 owner 僅能是 business 唯一解析出的 configured admin。shared WebClient 的 tenant filter 會讀取 Reactor context；若保留登入者／代看者身分，會覆寫下面明確指定的 header，讓公開資料錯指向呼叫者。只對這個 downstream publisher 清掉 context，bootstrap lookup 仍維持既有行為。
 
-    本任務須有專屬測試模擬「context 中已有另一個登入者身分」，斷言下游收到的仍是 configured admin 的 header（見 337.9(d)）。
+    本任務須有專屬測試模擬「context 中已有另一個登入者身分」，斷言下游收到的仍是 configured admin 的 header（見 338.9(d)）。
 
     `LatestAssetsPublicService` 另有的 `validateSuccessPayload`（驗證 snapshot identity 一致）是 latest-assets 專屬的 payload 語意，**本任務不需要**，原樣 relay 即可。
 
@@ -113,7 +113,7 @@
 
     **絕不觸發 `POST /api/portfolio-advice/generate`**——那是有 LLM 成本的寫入操作。本任務只讀既有最新一筆；若尚無任何一筆，回傳 business 既有的「無資料」回應形狀，**不代為產生**。
 
-- [ ] **337.3 兩支 scoped exception advice，都必須明確宣告 `@Order(Ordered.HIGHEST_PRECEDENCE)`**
+- [x] **338.3 兩支 scoped exception advice，都必須明確宣告 `@Order(Ordered.HIGHEST_PRECEDENCE)`**
 
     `@RestControllerAdvice(assignableTypes = PublicMarketAnalysisController.class)` / `(... = PublicPortfolioAdviceController.class)`，比照既有四支 sibling advice 的命名。
 
@@ -125,7 +125,7 @@
 
     **例外**：第八條的「主要管理者不可用」是合法的結構化訊號，比照 `LatestAssetsPublicExceptionAdvice.unavailable()`（`bff/.../latestassets/LatestAssetsPublicExceptionAdvice.java:13-18`，既有回 **`503 SERVICE_UNAVAILABLE`**）回**具名的 503**，不在消毒範圍。**不是 404**——該檔的 `downstream()`（`:28-34`）只做上游狀態原樣 relay、不處理此情境，不得引用為本條範本。
 
-- [ ] **337.4 `api-gateway/nginx.conf` 新增兩個 `location =`**
+- [x] **338.4 `api-gateway/nginx.conf` 新增兩個 `location =`**
 
     現有檔案（`api-gateway/nginx.conf`）的既有唯讀 GET location 寫法如下，**逐字沿用**：
 
@@ -161,7 +161,7 @@
     - 兩個 location 都放在既有 `location / { return 404; }` catch-all **之前**。
     - 非 GET 回 `405` 帶 `Allow: GET`；descendant（如 `/api/public/market-analysis/today/x`）落 catch-all 回 404。
 
-- [ ] **337.5 `bff/.../config/SecurityConfig.java` 兩條 `permitAll` 併入既有 GET 群組**
+- [x] **338.5 `bff/.../config/SecurityConfig.java` 兩條 `permitAll` 併入既有 GET 群組**
 
     現有寫法（第 79–82 行）：
 
@@ -174,7 +174,7 @@
             "/api/public/exchange-rate/usd-twd").permitAll()
     ```
 
-    改為在同一個呼叫的參數列加入兩條新路徑（**不另開新的 `pathMatchers` 呼叫**——method 相同時既有寫法本就是多路徑並列），並更新該註解的 Requirements 清單為 `67/68/70/77`、把「三支」改為「五支」：
+    改為在同一個呼叫的參數列加入兩條新路徑（**不另開新的 `pathMatchers` 呼叫**——method 相同時既有寫法本就是多路徑並列），並更新該註解的 Requirements 清單為 `67/68/70/78`、把「三支」改為「五支」：
 
     ```java
     .pathMatchers(HttpMethod.GET,
@@ -187,7 +187,7 @@
 
     同路徑其他 method、descendant，以及相鄰 `/api/bff/today-market-analysis/**`（既有 ADMIN 規則在第 90–99 行）與 `/api/bff/portfolio-advice/**`（第 103 行）**維持不變，不得放寬**。
 
-- [ ] **337.6 `frontend/nginx.conf` 二次防線：exact ＋ matrix 雙重**
+- [x] **338.6 `frontend/nginx.conf` 二次防線：exact ＋ matrix 雙重**
 
     現有內容（第 54–65 行）：
 
@@ -212,7 +212,7 @@
 
     **不得另開一條獨立 regex**——維持「單一 anchored regex 涵蓋全部路由」的既有結構。須擋下的變體例如 `/api/public;x=1/market-analysis/today`、`/api/public/market-analysis;x=1/today`、`/api;x=1/public/portfolio-advice/latest`。
 
-- [ ] **337.7 `scripts/configure-tailscale-api-gateway.sh` 掛第七、八條**
+- [x] **338.7 `scripts/configure-tailscale-api-gateway.sh` 掛第七、八條**
 
     現有 `SERVE_PATHS` 陣列（第 5–11 行）：
 
@@ -243,13 +243,13 @@
     - `:153` — 目前是 `[[ "$(grep -c '^serve ' …)" == 5 ]]`，**Task 329 新增第六條時漏改、與 `SERVE_PATHS` 的 6 筆已經不一致**，本次直接改為 `== 8`
     - `:162` — 「五路」改為「八路」
 
-- [ ] **337.8 文件同步（逐檔逐處，不得只改其中一份）**
+- [x] **338.8 文件同步（逐檔逐處，不得只改其中一份）**
 
     - **`CLAUDE.md`**
-      - 第 237 行「BFF 與資料來源規範」第 1 節具名例外段落：現載「Requirements 66–68／70／71；Tasks 317、325、327、328、329」須併入 `77`／`78` 與 `336`／`337`；「**六條路由**（五條唯讀 GET ＋ 一條寫入 POST…）」改為「**八條路由**（七條唯讀 GET ＋ 一條寫入 POST…）」；BFF 匿名放行的三條 GET 列舉須補上新增兩條；「Frontend 對**六路** exact／matrix 變體回 404」改為「八路」
+      - 第 237 行「BFF 與資料來源規範」第 1 節具名例外段落：現載「Requirements 66–68／70／71；Tasks 317、325、327、328、329」須併入 `78`／`79` 與 `337`／`338`；「**六條路由**（五條唯讀 GET ＋ 一條寫入 POST…）」改為「**八條路由**（七條唯讀 GET ＋ 一條寫入 POST…）」；BFF 匿名放行的三條 GET 列舉須補上新增兩條；「Frontend 對**六路** exact／matrix 變體回 404」改為「八路」
       - 第 247 行第 3 節標題「**五條唯讀 GET ＋ 一條寫入 POST**」改為「七條唯讀 GET ＋ 一條寫入 POST」
       - 第 248–256 行內文的路由列舉須補上第七、八條；「`frontend:80` 對上述**六條**回 404」與「Tailscale Serve 只以 path-scoped HTTPS `:9090` 掛相同**六條** exact path」皆改為八條
-      - 「Spec 文件位置」表格的 Requirements 總數與 `spec/steering/structure.md:342` 的同一數字，**本次 spec 撰寫階段已同步為 78**（Requirement 77／77／78 一併新增）。實作時只需複驗 `grep -c "^### Requirement " spec/requirements.md` 的輸出與該二處一致，**不需要再改**；`spec/tasks.md` 索引範圍同理已為 `311–337`
+      - 「Spec 文件位置」表格的 Requirements 總數與 `spec/steering/structure.md:342` 的同一數字，**本次 spec 撰寫階段已同步為 79**（Requirement 78／78／79 一併新增）。實作時只需複驗 `grep -c "^### Requirement " spec/requirements.md` 的輸出與該二處一致，**不需要再改**；`spec/tasks.md` 索引範圍同理已為 `311–338`
     - **`spec/steering/structure.md`**
       - §3.2「BFF 設計鐵則」條目 2 的具名例外段落（現列 Requirements／Tasks 清單與匿名唯讀 exact GET 的列舉）
       - §4.4「Docker 外部 API Gateway」段落，第 248 行「它轉送**六條** exact route：五條唯讀 GET…」與第 252 行「Tailscale Serve 只掛相同**六條** exact path」
@@ -264,12 +264,12 @@
       - 漏掉這一份，本節「不得只改程式碼」即為空話
     - **`spec/steering/tech.md` 三處**：`:11`（「SPA；**五條** external-only API 明確回 404」）、`:12`（「Docker 外部**五條** exact GET 唯一入口」）、`:27`（「Tailscale ──► HTTPS :9090（僅**五條** exact path）」）。該檔與 `structure.md` 同屬 `spec/steering/` 長期 context、敘述幾乎重複，只改一份即製造新漂移
     - **`scripts/README.md` 兩處**：`:8`（「**五路**本機 API 的 status／Content-Type／payload preflight…才設定**五條** path-scoped Tailscale HTTPS handler」）、`:9`（「並驗正常路徑只設定**五條** handler」）
-    - **任務索引範圍共三處具名位置，缺一不可**：`spec/tasks.md:32`、`spec/tasks/README.md:7`、**`spec/steering/structure.md:344`**（後者與同檔 `:342` 的 Requirements 計數相隔兩行，最容易只改一行漏另一行）
-    - **Requirement 66／68／70 與 `spec/design.md` 內既有的「實際 handler 集合為六條／精確為六路」callout，在第七、八條落地後全部成為錯誤斷言，須逐一更正為八條／八路**：`spec/requirements.md:2625`、`:2660`、`:2705`、`:2716`，以及 `spec/design.md:6961`、`:6962`
+    - **任務索引範圍共三處具名位置，缺一不可**：`spec/tasks.md:32`、`spec/tasks/README.md:7`、**`spec/steering/structure.md` 目錄樹裡的 `tasks.md` 那一行**（撰寫當下 `:364`；與同檔含「個 Requirements（User Story + AC）」的計數行相隔兩行，最容易只改一行漏另一行）
+    - **Requirement 66／68／70 與 `spec/design.md` 內既有的「實際 handler 集合為六條／精確為六路」callout，在第七、八條落地後全部成為錯誤斷言，須逐一更正為八條／八路**：`spec/requirements.md:2625`、`:2660`、`:2705`、`:2716`，以及 `spec/design.md` 內含「Serve status精確只有五路」與「五路正向皆精確200」的那兩行（撰寫當下為 `:6991`／`:6992`——**行號會隨其他 worktree 併版漂移，實作時請以這兩個字串 grep 定位，不要照行號跳**）
 
     **不得**只改程式碼、留著任何一份文件描述舊有的六條白名單。
 
-- [ ] **337.9 測試**
+- [x] **338.9 測試**
 
     既有可照抄的最新範本是 `bff/src/test/java/com/steven/assets/bff/crawlerdata/` 目錄下那四支公開 rescan 端點的測試（controller、service、security、exception advice 各一支，檔名皆以 `PublicCrawlerRescan` 開頭），以及 `bff/src/test/java/com/steven/assets/bff/config/LatestAssetsConfiguredAdminContextTest.java`。至少涵蓋：
 
@@ -282,7 +282,7 @@
     - (g) Nginx：本機 9090 對兩條路徑 GET 200 命中 `bff:8080`、非 GET 回 405 帶 `Allow: GET`、descendant 回 404
     - (h) frontend port 80 對兩條路徑之 exact 與**至少兩種 matrix 變體**均回 404
 
-- [ ] **337.10 不新增排程、不新增資料表、不新增 changeset**
+- [x] **338.10 不新增排程、不新增資料表、不新增 changeset**
 
     兩條路由都只讀既有資料。不新增 `@Scheduled`，`SchedulePublicBffController.JOBS` 筆數不變，`SchedulePublicBffControllerTest` 的 `hasSize` 斷言不需更動。
 
@@ -352,4 +352,56 @@ docker compose -p asset-management ps --format '{{.Service}} {{.Ports}}'
 
 ## 完成報告
 
-（實作者做完後回填：實際改了哪些檔、驗證輸出、與原計畫的偏差及原因。）
+### 新增檔案（7 支 main ＋ 7 支 test）
+
+**BFF main**
+- `bff/src/main/java/com/steven/assets/bff/todaymarketanalysis/PublicMarketAnalysisController.java`
+- `bff/src/main/java/com/steven/assets/bff/todaymarketanalysis/PublicMarketAnalysisService.java`（`.retrieve().bodyToMono(MAP)`）
+- `bff/src/main/java/com/steven/assets/bff/todaymarketanalysis/PublicMarketAnalysisExceptionAdvice.java`（`@Order(HIGHEST_PRECEDENCE)`）
+- `bff/src/main/java/com/steven/assets/bff/portfolioadvice/PublicPortfolioAdviceController.java`
+- `bff/src/main/java/com/steven/assets/bff/portfolioadvice/PublicPortfolioAdviceService.java`（configured-admin bootstrap ＋ 三個顯式 tenant header ＋ `exchangeToMono` byte-relay ＋ `contextWrite(ctx -> ctx.delete(CTX_IDENTITY))`）
+- `bff/src/main/java/com/steven/assets/bff/portfolioadvice/PublicPortfolioAdviceExceptionAdvice.java`（`@Order(HIGHEST_PRECEDENCE)`；unavailable→具名 503、bootstrap 非 2xx→502、transport→503）
+- `bff/src/main/java/com/steven/assets/bff/portfolioadvice/PublicPortfolioAdviceUnavailableException.java`
+
+**BFF test**
+- `todaymarketanalysis/PublicMarketAnalysisServiceTest.java`（3）
+- `todaymarketanalysis/PublicMarketAnalysisControllerTest.java`（4；2xx 只做逐欄語意等價）
+- `todaymarketanalysis/PublicMarketAnalysisExceptionAdviceTest.java`（3；與 `BusinessErrorAdvice` 同場競爭）
+- `portfolioadvice/PublicPortfolioAdviceControllerTest.java`（4；byte 級斷言）
+- `portfolioadvice/PublicPortfolioAdviceExceptionAdviceTest.java`（4；含具名 503）
+- `config/PublicPortfolioAdviceConfiguredAdminContextTest.java`（7；含「context 已有另一登入者／代看者」的 header 隔離）
+- `config/PublicMarketAnalysisAndAdviceSecurityTest.java`（3）
+
+### 修改檔案
+
+- `bff/src/main/java/com/steven/assets/bff/config/SecurityConfig.java`：既有 GET `permitAll` 群組加兩條路徑，註解改為 `67/68/70/78`、「三支」→「五支」
+- `api-gateway/nginx.conf`：新增兩個 `location =`（重用 `$api_allow_header`、變數 upstream ＋ resolver，置於 catch-all 之前）
+- `frontend/nginx.conf`：新增兩條 exact `404`；在既有單一 anchored regex 的 `public/` 分支內加兩個替代分支
+- `scripts/configure-tailscale-api-gateway.sh`：`SERVE_PATHS` ＋2、`expected` dict ＋2、兩支新 `get_200()` preflight、三處 operator 訊息改八條／八路
+- `scripts/tests/configure-tailscale-api-gateway-test.sh`：`== 5` → `== 8`、「五路」→「八路」，**另修好假 curl／假 tailscale 的 mock**（見偏差 1）
+- 文件：`CLAUDE.md`（2 段）、`spec/steering/structure.md`（§3.2、§4.4）、`spec/steering/tech.md`（3 處）、`scripts/README.md`（2 處）、`INSTALLATION.md`（5 處）、`docs/openapi/docker-external-api.yaml`（3 處計數 ＋ 補齊第六、七、八條 path 與 8 個新 schema）、`spec/requirements.md`（`:2625`／`:2660`／`:2705`／`:2716` 四處 callout）、`spec/design.md`（「五路正向皆精確200」「Serve status精確只有五路」兩行）
+
+### 驗證輸出
+
+```
+mvn -f bff/pom.xml test -DextraArgLine=-Dnet.bytebuddy.experimental=true
+  baseline（動工前）：Tests run: 92,  Failures: 0, Errors: 0, Skipped: 0 — BUILD SUCCESS
+  完成後：            Tests run: 120, Failures: 0, Errors: 0, Skipped: 0 — BUILD SUCCESS（+28）
+
+bash scripts/tests/configure-tailscale-api-gateway-test.sh
+  → PASS: 八路 preflight Content-Type／reset fail-closed regression（exit 0）
+  （動工前以 HEAD 版本重跑同一測試為 exit 1，見偏差 1）
+
+ruby -ryaml：docs/openapi/docker-external-api.yaml 可解析，paths = 8，$ref 全部可解析、無孤兒 schema
+```
+
+驗證段第 2–10 步（Docker 重建、9090／port 80 實機 curl、port 綁定盤點）由主 agent 於 stack 重建時統一執行，本任務未跑。
+
+### 與原計畫的偏差
+
+1. **（超出 338.7 所列兩處）`scripts/tests/configure-tailscale-api-gateway-test.sh` 的 mock 一併修好。**
+   任務檔只要求改 `:153` 的 `== 5` → `== 8` 與 `:162` 的文案。但實測該測試在**動工前的 HEAD 就已經是 exit 1**：Task 329 新增第六條時沒有同步更新假 curl（收到 `/api/public/crawler-data/rescan` 會走 `unexpected URL` exit 2）與假 tailscale 的 `serve status --json`（只回 5 個 handler，過不了 `exact` 驗證）。只改計數會留下一個「斷言 8 但根本跑不起來」的測試，等同沒有測試。故一併補上三個 curl mock 分支（rescan 回 `405` ＋ `Allow: POST`、market-analysis 與 portfolio-advice 回 `200 application/json`）與 8 handler 的 serve status JSON。
+2. **（超出 338.8 所列四處）`INSTALLATION.md` 第五處「為五支本機 API 各自保存 response headers/body」一併改為八支**，並補述第六條只以 GET 驗 `405`／`Allow: POST`、不發 POST。同段落內其餘四處都改了卻留這一處，會直接自相矛盾。
+3. **（超出 338.8 明列）`docs/openapi/docker-external-api.yaml` 的 `info.description` 另修了「非 GET 一律 `Allow: GET`」這句。** 第六條是 POST-only、回 `Allow: POST`，該句自 Task 329 起即為錯誤斷言；補齊第六條 path 卻留著這句會前後打架。`info.title` 仍為「Docker 外部唯讀 API」未動（它不含計數，且屬文件識別名）。
+4. **第七條未加 `contextWrite(ctx -> ctx.delete(CTX_IDENTITY))`**，與任務檔一致：`daily_market_analysis` 無 owner、不受 `TenantFilterAspect` 過濾，帶不帶 tenant header 都取到同一筆全域資料。已在 `PublicMarketAnalysisServiceTest` 以斷言固定「服務層不自行帶入任何身分 header」這個契約差異。
+5. **338.9(g)(h) 無對應的自動化測試檔可擴充**（全樹沒有任何靜態檢查 `api-gateway/nginx.conf`／`frontend/nginx.conf` 內容的測試），故這兩項仍屬 Docker 實機驗證，落在上述第 2–10 步。

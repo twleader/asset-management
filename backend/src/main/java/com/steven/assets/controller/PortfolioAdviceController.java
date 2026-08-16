@@ -94,7 +94,7 @@ public class PortfolioAdviceController {
         return adviceService.getSettings();
     }
 
-    /** 更新模型／思考深度／web 搜尋次數（限管理者；白名單驗證於 service）。 */
+    /** 更新分析引擎／模型／思考深度／web 搜尋次數（限管理者；白名單驗證於 service）。 */
     @PutMapping("/settings")
     public PortfolioAdviceSettingsDto updateSettings(@RequestBody Map<String, Object> body) {
         if (!currentUser.isAdmin()) {
@@ -103,7 +103,8 @@ public class PortfolioAdviceController {
         return adviceService.updateSettings(
                 str(body, "model"),
                 str(body, "effort"),
-                intOrNull(body, "webSearchMaxUses"));
+                intOrNull(body, "webSearchMaxUses"),
+                str(body, "engine"));
     }
 
     // ===== body 解析小工具 =====

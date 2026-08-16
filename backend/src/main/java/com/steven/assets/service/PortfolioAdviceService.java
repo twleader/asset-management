@@ -69,6 +69,18 @@ import java.util.concurrent.TimeUnit;
  * <p>與「今日股市分析」的差異：分析是每日排程、走 Batch API（省 50%、可等）；本功能是互動式即時需求，故走
  * 同步 Messages API（點按鈕即等結果）。同步在 request 執行緒內 owner context 已綁定，{@code @Filter}／
  * {@link TenantGuard} 正常運作。金鑰未設定或呼叫／解析失敗 → 落 {@code NOT_CONFIGURED}／{@code FAILED}，不拋出。
+ *
+ * <p><b>Requirement 80 / Task 339 起有三條路徑</b>，由 {@code portfolio_advice_setting.engine} 決定：
+ * <ul>
+ *   <li>{@link #ENGINE_LOCAL}（預設）：全部欄位由 {@link LocalPortfolioAllocationEngine} 的配置模板產生，
+ *       <b>不建 {@code AnthropicClient}、不發任何外部請求、不檢查金鑰</b>，同步落終態（不經 {@code PROCESSING}）。</li>
+ *   <li>{@link #ENGINE_HYBRID}：所有數字仍由本機決定，LLM 只把結果改寫成 {@code summary} 與
+ *       {@code riskAssessment} 兩段文字；<b>強制停用 {@code web_search}</b>、{@code references} 固定空陣列，
+ *       維持既有非同步形狀。</li>
+ *   <li>{@link #ENGINE_LLM}：既有完整路徑（adaptive thinking ＋ effort ＋ {@code web_search} ＋ references 淨化）。</li>
+ * </ul>
+ * 三檔位共用同一組狀態常數與同一個 {@link #latest()} 自癒邏輯，也共用同一支
+ * {@link #enrich(PortfolioAdviceResult, BigDecimal)} 做金額算術——不得為本機檔位另寫一份。
  */
 @Slf4j
 @Service
@@ -106,6 +118,42 @@ public class PortfolioAdviceService {
     );
 
     private static final int DEFAULT_WEB_SEARCH = 4;
+
+    // ===== 分析引擎（Requirement 80 / Task 339）=====
+
+    /** 完全本機：零 API 呼叫、同步落終態。 */
+    public static final String ENGINE_LOCAL = "local";
+    /** 部分打 API：數字全本機，LLM 只寫 summary／riskAssessment 兩段文字，強制不搜尋。 */
+    public static final String ENGINE_HYBRID = "hybrid";
+    /** 現行完整版：既有 {@link #runGeneration} 路徑（含 web_search 與 references 淨化）。 */
+    public static final String ENGINE_LLM = "llm";
+
+    /**
+     * 可選分析引擎白名單——技術白名單（非使用者可自訂之業務分類），比照 {@link #AVAILABLE_MODELS}／
+     * {@link #AVAILABLE_EFFORTS}／{@link #AVAILABLE_WEB_SEARCHES}，不套用「Enum 必須入庫由
+     * {@code /api/settings} 管理」規範。
+     */
+    private static final List<PortfolioAdviceSettingsDto.EngineOption> AVAILABLE_ENGINES = List.of(
+            new PortfolioAdviceSettingsDto.EngineOption(ENGINE_LOCAL, "完全本機（免費）"),
+            new PortfolioAdviceSettingsDto.EngineOption(ENGINE_HYBRID, "本機計算 ＋ AI 撰寫敘述（省錢）"),
+            new PortfolioAdviceSettingsDto.EngineOption(ENGINE_LLM, "完整 AI 分析（含網路搜尋，最貴）")
+    );
+
+    /** 設定表未設或後備時使用的分析引擎。local＝零 API 成本（Task 339 起的預設）。 */
+    private static final String DEFAULT_ENGINE = ENGINE_LOCAL;
+
+    /**
+     * hybrid 檔位寫入 {@code portfolio_advice.model} 的前綴，後接實際 Claude model id
+     * （例：{@code hybrid-allocation:v1+claude-haiku-4-5}）。欄位長度 varchar(64)，仍過既有 truncate。
+     * <b>配置模板調整時須連同 {@link LocalPortfolioAllocationEngine#ENGINE_VERSION} 一起提升版本號。</b>
+     */
+    public static final String HYBRID_MODEL_PREFIX = "hybrid-allocation:v1+";
+
+    /**
+     * hybrid 檔位的 maxTokens：本檔位只產 {@code summary} 與 {@code riskAssessment} 兩段文字
+     * （數字與清單都已由本機算好、不由模型輸出），故顯著低於完整版的 {@link #MAX_TOKENS}。
+     */
+    private static final int HYBRID_MAX_TOKENS = 4000;
 
     /** 假設年通膨率預設值（%）：使用者未填時，大筆花費「今日幣值 → 未來名目值」以此換算（台灣長期 CPI 目標約 2%）。 */
     private static final BigDecimal DEFAULT_INFLATION_RATE = new BigDecimal("2");
@@ -146,6 +194,8 @@ public class PortfolioAdviceService {
     private final RetirementProjectionService projectionService;
     private final ObjectMapper objectMapper;
     private final TenantGuard tenantGuard;
+    /** 本機配置模板引擎（Task 339）：{@code local} 與 {@code hybrid} 兩檔位的目標比例來源。 */
+    private final LocalPortfolioAllocationEngine localEngine;
 
     @Value("${anthropic.api-key:}")
     private String apiKey;
@@ -323,6 +373,18 @@ public class PortfolioAdviceService {
                 .orElse(DEFAULT_EFFORT);
     }
 
+    /**
+     * 解析要用的分析引擎：設定表 engine（白名單內）→ 否則 {@link #DEFAULT_ENGINE}（{@code local}）。
+     * 三段式寫法比照 {@link #resolveEffort()}（讀單列設定 → 白名單過濾 → 後備常數），
+     * <b>不比照 {@link #resolveModel()}</b>——後者只驗非空、沒有白名單。
+     */
+    public String resolveEngine() {
+        return settingRepo.findById(PortfolioAdviceSetting.SINGLETON_ID)
+                .map(PortfolioAdviceSetting::getEngine)
+                .filter(e -> e != null && AVAILABLE_ENGINES.stream().anyMatch(o -> o.id().equals(e)))
+                .orElse(DEFAULT_ENGINE);
+    }
+
     public int resolveWebSearchMaxUses() {
         return settingRepo.findById(PortfolioAdviceSetting.SINGLETON_ID)
                 .map(PortfolioAdviceSetting::getWebSearchMaxUses)
@@ -331,6 +393,7 @@ public class PortfolioAdviceService {
     }
 
     public PortfolioAdviceSettingsDto getSettings() {
+        String currentEngine = resolveEngine();
         String currentModel = resolveModel();
         String currentEffort = resolveEffort();
         int currentWebSearch = resolveWebSearchMaxUses();
@@ -347,12 +410,21 @@ public class PortfolioAdviceService {
         if (webSearches.stream().noneMatch(o -> o.value().equals(currentWebSearch))) {
             webSearches.add(0, new PortfolioAdviceSettingsDto.WebSearchOption(currentWebSearch, currentWebSearch + " 次"));
         }
-        return new PortfolioAdviceSettingsDto(currentModel, currentEffort, currentWebSearch, models, efforts, webSearches);
+        List<PortfolioAdviceSettingsDto.EngineOption> engines = new ArrayList<>(AVAILABLE_ENGINES);
+        if (engines.stream().noneMatch(o -> o.id().equals(currentEngine))) {
+            engines.add(0, new PortfolioAdviceSettingsDto.EngineOption(currentEngine, currentEngine));
+        }
+        return new PortfolioAdviceSettingsDto(currentEngine, currentModel, currentEffort, currentWebSearch,
+                models, efforts, webSearches, engines);
     }
 
-    public PortfolioAdviceSettingsDto updateSettings(String model, String effort, Integer webSearchMaxUses) {
-        if (model == null && effort == null && webSearchMaxUses == null) {
-            throw new IllegalArgumentException("未提供任何可更新的設定（model / effort / webSearchMaxUses）");
+    /**
+     * 更新成本控管設定（引擎／模型／思考深度／web 搜尋次數限白名單）：null 表示該欄不變；至少須提供一項。
+     */
+    public PortfolioAdviceSettingsDto updateSettings(String model, String effort, Integer webSearchMaxUses,
+                                                    String engine) {
+        if (model == null && effort == null && webSearchMaxUses == null && engine == null) {
+            throw new IllegalArgumentException("未提供任何可更新的設定（model / effort / webSearchMaxUses / engine）");
         }
         if (model != null && AVAILABLE_MODELS.stream().noneMatch(o -> o.id().equals(model))) {
             throw new IllegalArgumentException("不支援的分析模型：" + model);
@@ -363,9 +435,15 @@ public class PortfolioAdviceService {
         if (webSearchMaxUses != null && AVAILABLE_WEB_SEARCHES.stream().noneMatch(o -> o.value().equals(webSearchMaxUses))) {
             throw new IllegalArgumentException("不支援的 web 搜尋次數：" + webSearchMaxUses);
         }
+        if (engine != null && AVAILABLE_ENGINES.stream().noneMatch(o -> o.id().equals(engine))) {
+            throw new IllegalArgumentException("不支援的分析引擎：" + engine);
+        }
         PortfolioAdviceSetting s = settingRepo.findById(PortfolioAdviceSetting.SINGLETON_ID)
                 .orElseGet(PortfolioAdviceSetting::new);
         s.setId(PortfolioAdviceSetting.SINGLETON_ID);
+        if (s.getEngine() == null || s.getEngine().isBlank()) {
+            s.setEngine(resolveEngine());
+        }
         if (s.getModel() == null || s.getModel().isBlank()) {
             s.setModel(resolveModel());
         }
@@ -384,10 +462,13 @@ public class PortfolioAdviceService {
         if (webSearchMaxUses != null) {
             s.setWebSearchMaxUses(webSearchMaxUses);
         }
+        if (engine != null) {
+            s.setEngine(engine);
+        }
         s.setUpdatedAt(Instant.now());
         settingRepo.save(s);
-        log.info("資產配置建議：設定更新（model={}, effort={}, webSearchMaxUses={}）",
-                s.getModel(), s.getEffort(), s.getWebSearchMaxUses());
+        log.info("資產配置建議：設定更新（engine={}, model={}, effort={}, webSearchMaxUses={}）",
+                s.getEngine(), s.getModel(), s.getEffort(), s.getWebSearchMaxUses());
         return getSettings();
     }
 
@@ -401,6 +482,10 @@ public class PortfolioAdviceService {
      * 多租戶：**在本（request）執行緒內**組好 system/user prompt（此時 owner filter 生效，取到正確的自己快照與明細），
      * 背景執行緒只做 Claude 呼叫並以 {@code adviceId} by-id 更新（不觸及 owner-scoped 查詢），
      * 避開背景執行緒 {@code TenantFilterAspect} 不啟用的坑。不拋出。
+     *
+     * <p><b>Task 339</b>：{@code engine} 分岔<b>置於 {@code ANTHROPIC_API_KEY} 檢查之前</b>——
+     * {@link #ENGINE_LOCAL} 零 API 呼叫，拔掉金鑰仍須正常產出；金鑰檢查只保留在
+     * {@link #ENGINE_HYBRID}／{@link #ENGINE_LLM} 兩個分支內。
      */
     public PortfolioAdvice generate(InvestmentProfileInput in) {
         Long ownerId = tenantGuard.requireCurrentUserId();
@@ -412,6 +497,7 @@ public class PortfolioAdviceService {
         InvestmentProfile profile = profileRepo.findByOwnerUserId(ownerId).orElseThrow();
         List<InvestmentPlannedExpense> expenses = expenseRepo.findByOwnerUserIdOrderByExpenseDate(ownerId);
 
+        String engine = resolveEngine();
         String model = resolveModel();
         int webSearchMaxUses = resolveWebSearchMaxUses();
         boolean webSearchOn = webSearchMaxUses > 0;
@@ -436,6 +522,14 @@ public class PortfolioAdviceService {
             row.setBasedOnSnapshotId(snapshot.getId());
             row.setBasedOnSnapshotDate(snapshot.getSnapshotDate());
             row.setBasedOnTotalAssets(totalAssets);
+        }
+
+        // Task 339 的引擎分岔——**務必在下方金鑰檢查之前**（local 檔位無金鑰時仍須成功）
+        if (!ENGINE_LLM.equals(engine)) {
+            PortfolioAdviceResult localResult = buildLocalResult(profile, totalAssets);
+            return ENGINE_LOCAL.equals(engine)
+                    ? completeLocal(row, localResult, ownerId)
+                    : startHybrid(row, localResult, ownerId, model, effort);
         }
 
         if (apiKey == null || apiKey.isBlank()) {
@@ -469,6 +563,285 @@ public class PortfolioAdviceService {
             return save(saved);
         }
         return saved;
+    }
+
+    // ===== 本機配置模板路徑（Task 339：local 與 hybrid 共用的計算階段）=====
+
+    /**
+     * 以本機配置模板算出一份完整建議（{@code local} 與 {@code hybrid} <b>共用同一段計算</b>）。
+     *
+     * <p>三處刻意複用既有唯一事實來源，不另寫一份：
+     * <ul>
+     *   <li>現況金額：既有 {@link #getCurrentAllocation()}（本機引擎<b>不重查</b> {@code asset_snapshot}）</li>
+     *   <li>退休試算：既有 {@link #getProjection()} →
+     *       {@link RetirementProjectionService#project}（Requirement 32 / Task 165 的唯一事實來源）</li>
+     *   <li>金額算術：既有 {@link #enrich(PortfolioAdviceResult, BigDecimal)}（三檔位同一支）</li>
+     * </ul>
+     * {@code rebalancePlan} 在 enrich 之後才由
+     * {@link LocalPortfolioAllocationEngine#withRebalancePlan} 依回填好的 {@code deltaAmount} 產生。
+     */
+    private PortfolioAdviceResult buildLocalResult(InvestmentProfile profile, BigDecimal totalAssets) {
+        CurrentAllocationDto current = getCurrentAllocation();
+        RetirementProjectionDto projection = getProjection();
+        Integer years = LocalPortfolioAllocationEngine.yearsToRetirement(
+                LocalDate.now(), profile.getRetirementDate(), profile.getBirthDate());
+        PortfolioAdviceResult base = localEngine.evaluate(
+                profile.getRiskTolerance(), years, current, projection);
+        return localEngine.withRebalancePlan(enrich(base, totalAssets));
+    }
+
+    /**
+     * {@code local} 檔位：純計算（毫秒級），故<b>同步直接落終態、不經 {@code PROCESSING}</b>
+     * ——但仍用同一組 {@code PortfolioAdvice.STATUS_*} 常數，不新增第二套狀態機（Task 339.10）。
+     */
+    private PortfolioAdvice completeLocal(PortfolioAdvice row, PortfolioAdviceResult result, Long ownerId) {
+        row.setModel(truncate(LocalPortfolioAllocationEngine.ENGINE_VERSION, 64));
+        row.setCompletedAt(Instant.now());
+        try {
+            row.setResultJson(objectMapper.writeValueAsString(result));
+            row.setStatus(PortfolioAdvice.STATUS_OK);
+            log.info("資產配置建議：本機配置模板完成（owner={}, engine={}, allocations={}, rebalance={}）",
+                    ownerId, ENGINE_LOCAL,
+                    result.targetAllocation() == null ? 0 : result.targetAllocation().size(),
+                    result.rebalancePlan() == null ? 0 : result.rebalancePlan().size());
+        } catch (Exception e) {
+            log.warn("資產配置建議：本機結果序列化失敗（owner={}）: {}", ownerId, e.getMessage(), e);
+            row.setStatus(PortfolioAdvice.STATUS_FAILED);
+            row.setErrorMessage(truncate(e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage(), 1000));
+        }
+        return save(row);
+    }
+
+    /**
+     * {@code hybrid} 檔位：數字全部已由本機算好，只把它交給 LLM 改寫成兩段文字。
+     * 維持既有非同步形狀（{@code PROCESSING} → 背景執行緒 → 前端輪詢），金鑰檢查保留於本分支。
+     */
+    private PortfolioAdvice startHybrid(PortfolioAdvice row, PortfolioAdviceResult localResult,
+                                        Long ownerId, String model, String effort) {
+        row.setModel(truncate(HYBRID_MODEL_PREFIX + model, 64));
+        if (apiKey == null || apiKey.isBlank()) {
+            log.warn("資產配置建議：hybrid 檔位未設定 ANTHROPIC_API_KEY，跳過（NOT_CONFIGURED）");
+            row.setStatus(PortfolioAdvice.STATUS_NOT_CONFIGURED);
+            row.setCompletedAt(Instant.now());
+            row.setErrorMessage("尚未設定 Anthropic API 金鑰（ANTHROPIC_API_KEY）；改用「完全本機」檔位可免金鑰產生建議");
+            return save(row);
+        }
+        String systemPrompt = buildHybridSystemPrompt();
+        String userPrompt = buildHybridUserPrompt(localResult);
+
+        row.setStatus(PortfolioAdvice.STATUS_PROCESSING);
+        PortfolioAdvice saved = save(row);
+        final Long adviceId = saved.getId();
+        log.info("資產配置建議：hybrid 送出（owner={}, adviceId={}, model={}, effort={}, webSearch=停用）",
+                ownerId, adviceId, model, effort);
+        try {
+            generationExecutor.submit(() ->
+                    runHybridGeneration(adviceId, ownerId, model, effort, systemPrompt, userPrompt, localResult));
+        } catch (Exception e) {
+            log.warn("資產配置建議：hybrid 背景任務提交失敗（adviceId={}）: {}", adviceId, e.getMessage());
+            saved.setStatus(PortfolioAdvice.STATUS_FAILED);
+            saved.setCompletedAt(Instant.now());
+            saved.setErrorMessage("背景任務提交失敗：" + truncate(e.getMessage(), 900));
+            return save(saved);
+        }
+        return saved;
+    }
+
+    /**
+     * {@code hybrid} 的背景執行緒：呼叫 Claude 只取 {@code summary}／{@code riskAssessment} 兩段文字。
+     *
+     * <p><b>不重跑 {@link #enrich}</b>——金額已在 {@link #buildLocalResult} 階段由那一支既有方法填好，
+     * 再跑一次會對已正確的值重複覆寫。<b>也不走既有 {@link #parseResult}／{@link #sanitize}</b>：
+     * 本檔位的請求／回應契約自成一套，且 {@code references} 固定空陣列（無搜尋來源可淨化）。</p>
+     *
+     * <p>呼叫或解析失敗時<b>退回本機模板文字並落 {@code OK}</b>（另在 {@code warnings} 附記退化原因）——
+     * 建議本體已完整算出，不因文字潤飾失敗而讓整筆失敗。</p>
+     */
+    private void runHybridGeneration(Long adviceId, Long ownerId, String model, String effort,
+                                     String systemPrompt, String userPrompt, PortfolioAdviceResult localResult) {
+        String rawText = null;
+        PortfolioAdviceResult result;
+        try {
+            Message resp = client().messages().create(buildHybridParams(model, effort, systemPrompt, userPrompt));
+            rawText = extractText(resp);
+            result = mergeRefinement(localResult, rawText);
+            log.info("資產配置建議：hybrid 完成（owner={}, adviceId={}）", ownerId, adviceId);
+        } catch (Exception e) {
+            log.warn("資產配置建議：hybrid 文字潤飾失敗，改用本機模板文字（owner={}, adviceId={}）: {}",
+                    ownerId, adviceId, e.getMessage(), e);
+            result = withExtraWarning(localResult, hybridDegradedWarning(e.getMessage()));
+        }
+
+        String status = PortfolioAdvice.STATUS_OK;
+        String error = null;
+        String resultJson = null;
+        try {
+            resultJson = objectMapper.writeValueAsString(result);
+        } catch (Exception e) {
+            log.warn("資產配置建議：hybrid 結果序列化失敗（adviceId={}）: {}", adviceId, e.getMessage(), e);
+            status = PortfolioAdvice.STATUS_FAILED;
+            error = truncate(e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage(), 1000);
+        }
+        try {
+            PortfolioAdvice row = adviceRepo.findById(adviceId).orElse(null);
+            if (row == null) {
+                log.warn("資產配置建議：找不到待更新列（adviceId={}）", adviceId);
+                return;
+            }
+            row.setStatus(status);
+            row.setCompletedAt(Instant.now());
+            row.setRawResponse(truncate(rawText, 20000));
+            row.setResultJson(resultJson);
+            row.setErrorMessage(error);
+            adviceRepo.save(row);
+        } catch (Exception e) {
+            log.error("資產配置建議：更新結果落庫失敗（adviceId={}）: {}", adviceId, e.getMessage(), e);
+        }
+    }
+
+    /**
+     * {@code hybrid} 的請求參數：<b>刻意不加 {@code WebSearchTool20260209}</b>（該檔位強制不搜尋，
+     * 故也沒有 {@code references} 可帶），且 {@code maxTokens} 為顯著較低的 {@value #HYBRID_MAX_TOKENS}
+     * ——只產兩段文字。thinking 與 effort 沿用既有慣例（前端該檔位的「思考深度」下拉仍可用）。
+     */
+    MessageCreateParams buildHybridParams(String model, String effort, String systemPrompt, String userPrompt) {
+        return MessageCreateParams.builder()
+                .model(model)
+                .maxTokens((long) HYBRID_MAX_TOKENS)
+                .thinking(ThinkingConfigAdaptive.builder().build())
+                .outputConfig(OutputConfig.builder().effort(mapEffort(effort)).build())
+                .system(systemPrompt)
+                .addUserMessage(userPrompt)
+                .build();
+    }
+
+    private String buildHybridSystemPrompt() {
+        return """
+            你是一位專業的個人理財顧問的「文字編輯」。系統已用固定規則算好一份資產配置建議，
+            你的唯一任務是把它改寫成兩段通順、好讀的繁體中文敘述。
+
+            嚴格規則：
+            1. 以下數字（各類目標比例、目前金額、目標金額、調整金額、退休試算年齡與年份）**已由系統算好，一律不得更動、不得重算、不得四捨五入成別的值**。
+            2. **不得新增任何系統沒給的數字**（含報酬率、勝率、目標價、個股代號與買賣時點）。沒有的資訊就不要寫。
+            3. 不得推薦個股買賣時點、不得保證報酬。本建議只到「存款（現金）／信託基金／股票」三個類別層級。
+            4. 本次沒有網路搜尋，**不得引用任何新聞、行情或總經數據**，也不要提供任何連結。
+            5. 全程使用台灣繁體中文；提到金額時單位為新台幣元。
+            6. 必須明確讓讀者知道：目標比例來自固定的經驗法則對照表，未經回測，不是個人化投資建議。
+
+            你的輸出「只包含一個 JSON 物件」，不要有任何多餘文字、不要用 markdown 反引號包裹，且**只有以下兩個字串欄位**：
+            {
+              "summary": "整體評析與核心建議方向（繁體中文，一段）",
+              "riskAssessment": "現況配置的風險評估，含退休現金流試算的結論（繁體中文，一段）"
+            }
+            """;
+    }
+
+    /** hybrid 的 user prompt：把本機算好的配置、調整金額與退休試算摘要原封餵給模型，要求只改寫文字。 */
+    private String buildHybridUserPrompt(PortfolioAdviceResult local) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("== 系統已算好的目標配置（比例與金額皆為定案，不得更動）==\n");
+        if (local.targetAllocation() != null) {
+            for (PortfolioAdviceResult.TargetAllocation t : local.targetAllocation()) {
+                if (t == null) continue;
+                sb.append("  - ").append(safe(t.assetClass()))
+                        .append("：目標 ").append(t.targetPct() == null ? "—" : t.targetPct().toPlainString())
+                        .append("%、目前 ").append(money(t.currentValue()))
+                        .append(" 元、目標金額 ").append(money(t.targetAmount()))
+                        .append(" 元、差額 ").append(signedMoney(t.deltaAmount()))
+                        .append(" 元（理由：").append(safe(t.rationale())).append("）\n");
+            }
+        }
+        sb.append("\n== 系統已算好的調整動作（類別層級，金額為定案）==\n");
+        if (local.rebalancePlan() == null || local.rebalancePlan().isEmpty()) {
+            sb.append("  （無資產快照，本次沒有金額層級的調整動作）\n");
+        } else {
+            for (PortfolioAdviceResult.Rebalance r : local.rebalancePlan()) {
+                if (r == null) continue;
+                sb.append("  - ").append(safe(r.assetClass())).append("（").append(safe(r.holding()))
+                        .append("）：").append(safe(r.action())).append(" 約 ")
+                        .append(money(r.estimatedAmount())).append(" 元\n");
+            }
+        }
+        sb.append("\n== 系統的本機版敘述（可作為改寫素材，事實以此為準）==\n");
+        sb.append("整體評析：").append(safe(local.summary())).append("\n");
+        sb.append("風險評估：").append(safe(local.riskAssessment())).append("\n");
+        sb.append("\n== 必須保留的提醒（可換句話說，但語意不得減弱）==\n");
+        if (local.warnings() != null) {
+            for (String w : local.warnings()) {
+                sb.append("  - ").append(safe(w)).append("\n");
+            }
+        }
+        sb.append("\n請只輸出含 summary 與 riskAssessment 兩個字串欄位的 JSON 物件。");
+        return sb.toString();
+    }
+
+    /**
+     * 合併 LLM 潤飾結果：<b>只取 {@code summary} 與 {@code riskAssessment} 兩個字串欄位</b>，
+     * 其餘（目標比例、各項金額、調整動作、提醒）一律沿用本機值——模型若回了數字欄位，
+     * 在此連讀都不讀，等同以本機值覆蓋、不採信。{@code references} 固定空陣列。
+     *
+     * <p>兩欄都取不到（回覆非 JSON／欄位缺漏）時退回本機模板文字，並在 {@code warnings} 附記退化原因。</p>
+     */
+    PortfolioAdviceResult mergeRefinement(PortfolioAdviceResult local, String rawText) {
+        String summary = null;
+        String riskAssessment = null;
+        try {
+            com.fasterxml.jackson.databind.JsonNode node = parseJsonObject(rawText);
+            summary = textField(node, "summary");
+            riskAssessment = textField(node, "riskAssessment");
+        } catch (Exception e) {
+            log.warn("資產配置建議：hybrid 回覆解析失敗，改用本機模板文字: {}", e.getMessage());
+        }
+        if (summary == null && riskAssessment == null) {
+            return withExtraWarning(local, hybridDegradedWarning("模型回覆未含可用的 summary／riskAssessment 欄位"));
+        }
+        return new PortfolioAdviceResult(
+                summary != null ? summary : local.summary(),
+                riskAssessment != null ? riskAssessment : local.riskAssessment(),
+                local.targetAllocation(),   // 以下一律本機值，不採信模型回傳的任何數字
+                local.rebalancePlan(),
+                local.actions(),
+                local.warnings(),
+                List.of());                 // hybrid 不搜尋 → references 固定空陣列
+    }
+
+    /** 取首個 {@code &#123;} 至末個 {@code &#125;} 再以 Jackson 解析（沿用既有 {@link #parseResult} 的容錯手法）。 */
+    private com.fasterxml.jackson.databind.JsonNode parseJsonObject(String text) throws Exception {
+        if (text == null) {
+            throw new IllegalStateException("模型回覆為空");
+        }
+        int start = text.indexOf('{');
+        int end = text.lastIndexOf('}');
+        if (start < 0 || end < 0 || end <= start) {
+            throw new IllegalStateException("模型回覆不含 JSON 物件");
+        }
+        return objectMapper.readTree(text.substring(start, end + 1));
+    }
+
+    /** 只接受非空白的字串欄位（數字／物件／陣列一律視為缺欄，避免把模型亂帶的型別當文字用）。 */
+    private static String textField(com.fasterxml.jackson.databind.JsonNode node, String name) {
+        if (node == null) {
+            return null;
+        }
+        com.fasterxml.jackson.databind.JsonNode v = node.get(name);
+        return (v != null && v.isTextual() && !v.asText().isBlank()) ? v.asText().trim() : null;
+    }
+
+    private static String hybridDegradedWarning(String reason) {
+        return "本次的文字敘述由本機模板產生（AI 潤飾未成功："
+                + (reason == null || reason.isBlank() ? "原因未提供" : truncate(reason, 200))
+                + "）；所有比例與金額不受影響，皆為本機計算結果。";
+    }
+
+    /** 在既有 {@code warnings} 後追加一條（首條的模板聲明維持在最前）。 */
+    private static PortfolioAdviceResult withExtraWarning(PortfolioAdviceResult r, String warning) {
+        List<String> warnings = new ArrayList<>();
+        if (r.warnings() != null) {
+            warnings.addAll(r.warnings());
+        }
+        warnings.add(warning);
+        return new PortfolioAdviceResult(r.summary(), r.riskAssessment(), r.targetAllocation(),
+                r.rebalancePlan(), r.actions(), List.copyOf(warnings), List.of());
     }
 
     /**

@@ -477,9 +477,12 @@ curl -fsS http://127.0.0.1:9090/api/quotes
 
 看到 JSON array（可為空）代表本機 API gateway 與 quote upstream 正常。
 
-Docker 外部唯讀 API 的唯一本機入口為 `http://127.0.0.1:9090`，只有五條
-exact GET：`/api/quotes`、`/api/quotes/one`、`/api/public/market-index`、
-`/api/assets/latest`、`/api/public/exchange-rate/usd-twd`。BFF 8080 與 external-materials 8082
+Docker 外部 API 的唯一本機入口為 `http://127.0.0.1:9090`，只有八條 exact route——
+七條唯讀 GET：`/api/quotes`、`/api/quotes/one`、`/api/public/market-index`、
+`/api/assets/latest`、`/api/public/exchange-rate/usd-twd`、
+`/api/public/market-analysis/today`、`/api/public/portfolio-advice/latest`，
+以及一條寫入 POST：`/api/public/crawler-data/rescan`（免登入觸發重新搜尋，
+經 business 端 30 秒全域冷卻節流）。BFF 8080 與 external-materials 8082
 不再發布到 host。
 
 ### 6.3 開啟系統並登入
@@ -576,18 +579,21 @@ FINMIND_TOKEN=你的Token
 ### 8.5 Tailscale 私網 HTTPS（選用）
 
 先安裝 Tailscale 並在 app 中登入同一個 tailnet；macOS 可使用
-`brew install --cask tailscale-app`。確認上述五條本機 API 都健康後執行：
+`brew install --cask tailscale-app`。確認上述八條本機 API 都健康後執行：
 
 ```bash
 scripts/configure-tailscale-api-gateway.sh
 ```
 
-腳本在任何 Serve reset 前，會為五支本機 API 各自保存 response headers/body，逐支要求 HTTP 200、
-`application/json` 與既定 payload 契約；任一路失敗即停止且不會 reset。可先執行
-`scripts/tests/configure-tailscale-api-gateway-test.sh` 驗證 Content-Type fail-closed 與五路成功流程。
+腳本在任何 Serve reset 前，會為八支本機 API 各自保存 response headers/body：七條唯讀 GET 逐支
+要求 HTTP 200、`application/json` 與既定 payload 契約，寫入用的 `crawler-data/rescan` 則只以 GET
+驗證回 `405` 帶 `Allow: POST`（刻意不發 POST，避免每次執行都真的觸發一輪對外抓取）；任一路失敗即
+停止且不會 reset。可先執行
+`scripts/tests/configure-tailscale-api-gateway-test.sh` 驗證 Content-Type fail-closed 與八路成功流程。
 
-腳本只會建立五條 path-scoped HTTPS `:9090`：quotes、quotes/one、market-index、
-assets/latest、USD/TWD 公開匯率。不需要購買憑證、自簽憑證或再加 OAuth2；TLS 與
+腳本只會建立八條 path-scoped HTTPS `:9090`：quotes、quotes/one、market-index、
+assets/latest、USD/TWD 公開匯率、crawler-data/rescan、market-analysis/today、
+portfolio-advice/latest。不需要購買憑證、自簽憑證或再加 OAuth2；TLS 與
 tailnet identity 由 Tailscale 管理。腳本不會啟用 Funnel，也不會建立 `/`、`/api/`
 萬用代理或額外 handler，看到陌生 Serve handler 時也不會自動 reset。
 

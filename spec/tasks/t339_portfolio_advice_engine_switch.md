@@ -1,6 +1,6 @@
-# [t338] 資產配置建議三態引擎切換：完全本機／部分打 API／現行全 LLM
+# [t339] 資產配置建議三態引擎切換：完全本機／部分打 API／現行全 LLM
 
-**對應 Requirements:** Requirement 79（資產配置建議的三態引擎切換——完全本機、部分打 API、或維持現行全 LLM）
+**對應 Requirements:** Requirement 80（資產配置建議的三態引擎切換——完全本機、部分打 API、或維持現行全 LLM）
 **前置任務:** 無（與 t336、t337 可並行。t336 改的是「今日股市分析」，本任務改的是「資產配置建議」，兩支 service 完全獨立）
 **Liquibase changeset:** `v1.106.0-portfolio-advice-engine.sql`（`v1.105.0` 已由 t336 佔用）
 
@@ -69,7 +69,7 @@
 
 **Liquibase**：運行中 `databasechangelog` 最新為 `v1.104.0-realized-gain-export-schedule-multi-time`；`v1.105.0` 由 t336 佔用，故本任務用 **`v1.106.0`**。建檔前重查一次，若已被其他 worktree 佔用，須連同檔名、changeset id 與本檔一次調整。
 
-- [ ] **338.1 Liquibase changeset `v1.106.0-portfolio-advice-engine.sql`**
+- [x] **339.1 Liquibase changeset `v1.106.0-portfolio-advice-engine.sql`**
 
     ```sql
     ALTER TABLE portfolio_advice_setting ADD COLUMN IF NOT EXISTS engine VARCHAR(16) NOT NULL DEFAULT 'local';
@@ -78,7 +78,7 @@
 
     在 `backend/src/main/resources/db/changelog/db.changelog-master.yaml` **最尾端**註冊（格式：`- include: { file: db/changelog/changes/<檔名>, relativeToChangelogFile: false }`）。**changeset 落地後不得再修改其內容（含註解）**——Liquibase checksum 含註解，改了會 `ValidationFailed` 導致 business crash loop。
 
-- [ ] **338.2 `PortfolioAdviceSetting` entity 與白名單常數**
+- [x] **339.2 `PortfolioAdviceSetting` entity 與白名單常數**
 
     `backend/src/main/java/com/steven/assets/model/PortfolioAdviceSetting.java` 新增 `@Column(name = "engine", length = 16, nullable = false) private String engine;`。
 
@@ -95,7 +95,7 @@
 
     新增 `resolveEngine()`，比照既有 `resolveEffort():319` 的三段式（讀單列設定 → 白名單過濾 → 後備常數）。
 
-- [ ] **338.3 `PortfolioAdviceSettingsDto` 契約擴充**
+- [x] **339.3 `PortfolioAdviceSettingsDto` 契約擴充**
 
     現有 record 為 `PortfolioAdviceSettingsDto(String model, String effort, Integer webSearchMaxUses, List<ModelOption> availableModels, List<EffortOption> availableEfforts, List<WebSearchOption> availableWebSearches)`（由 `getSettings():333-350` 的建構呼叫確認）。新增 `String engine` 與 `List<EngineOption> availableEngines`，並新增巢狀 `public record EngineOption(String id, String label) {}`。所有建構呼叫端一併更新。
 
@@ -112,7 +112,7 @@
 
     `getSettings()` 沿用既有「現值若不在白名單則補入清單開頭」防呆（既有三處已有此寫法，照抄）。`updateSettings(String model, String effort, Integer webSearchMaxUses, String engine)` 新增第四個參數，維持既有「null 表示該欄不變、至少須提供一項」語意（既有訊息「未提供任何可更新的設定（model / effort / webSearchMaxUses）」須同步補上 engine）；不支援的 engine 值拋 `IllegalArgumentException("不支援的分析引擎：" + engine)`。
 
-- [ ] **338.4 新增 `LocalPortfolioAllocationEngine`（`backend/src/main/java/com/steven/assets/service/LocalPortfolioAllocationEngine.java`）**
+- [x] **339.4 新增 `LocalPortfolioAllocationEngine`（`backend/src/main/java/com/steven/assets/service/LocalPortfolioAllocationEngine.java`）**
 
     **配置模板核心必須是純函式**：接受 `riskTolerance`（String）與 `yearsToRetirement`（Integer，可為 null），回傳三類的目標比例。
 
@@ -132,7 +132,7 @@
 
     距退休年數的推算：`investment_profile.retirement_date` 減今日；`retirement_date` 為 null 時退回以 `birth_date` 推算（假設退休年齡為具名常數）；兩者皆 null 則採**最保守檔**。
 
-- [ ] **338.5 三檔位的語意，逐檔明確且互不重疊**
+- [x] **339.5 三檔位的語意，逐檔明確且互不重疊**
 
     - **`local`（完全本機、零 API）**
       - 全部欄位由本機規則產生，**不建立 `AnthropicClient`、不發任何外部請求**
@@ -150,7 +150,7 @@
         }
         ```
 
-        這與 t336 的情形**不同**——`MarketAnalysisService` 的金鑰檢查在 `submitBatch`（LLM 分支）內部，天然不影響 local。本頁若把 engine 分岔放在 `:441` **之後**，`local` 檔位在無金鑰時會落 `NOT_CONFIGURED`，338.14(d) 必定不過。**engine 分岔須置於該金鑰檢查之前；檢查只保留在 `hybrid`／`llm` 分支。**
+        這與 t336 的情形**不同**——`MarketAnalysisService` 的金鑰檢查在 `submitBatch`（LLM 分支）內部，天然不影響 local。本頁若把 engine 分岔放在 `:441` **之後**，`local` 檔位在無金鑰時會落 `NOT_CONFIGURED`，339.14(d) 必定不過。**engine 分岔須置於該金鑰檢查之前；檢查只保留在 `hybrid`／`llm` 分支。**
       - **同步完成**（純計算、毫秒級）：直接落終態，**不經 `PROCESSING`**
 
     - **`hybrid`（部分打 API）**
@@ -165,19 +165,19 @@
         - user prompt 帶入本機算好的 `targetAllocation`／`rebalancePlan`／退休試算摘要
         - 要求模型只回 `{"summary": "...", "riskAssessment": "..."}` 兩個字串欄位
         - 以**專屬的解析路徑**取這兩欄（沿用既有「取首個 `{` 至末個 `}` 再 Jackson 解析」的容錯手法即可），解析失敗時**退回本機模板文字並落成功狀態**，不因文字潤飾失敗而讓整筆建議失敗
-        - **不走既有的金額 `enrich()` 回填**（數字已由本機填好，再跑一次會重複覆寫）；`references` 直接設空陣列，不走既有 `references` 淨化
+        - **LLM 回應解析後不得再跑第二次 `enrich()`**——金額已在本機計算階段由**同一支既有的** `enrich(result, totalAssets)`（`PortfolioAdviceService.java:900-918`）填好（見 338.6／本檔 338.6 對應項），再跑一次會對已正確的值重複覆寫。**這不是「hybrid 不用 enrich」**：三檔位的金額算術一律走那一支，只是 hybrid 在 LLM 潤飾之後不重複呼叫；`references` 直接設空陣列，不走既有 `references` 淨化
 
     - **`llm`（現行完整版）**
       - 既有 `runGeneration(...)` 路徑，**程式碼一行不改**
       - 含 `ThinkingConfigAdaptive`、`outputConfig.effort`、`web_search`（次數沿用 `resolveWebSearchMaxUses()`）與既有 `references` 淨化
 
-- [ ] **338.6 金額算術一律沿用既有的後端決定性回填**
+- [x] **339.6 金額算術一律沿用既有的後端決定性回填**
 
     `targetAmount = 資產總額 × targetPct`、`deltaAmount = targetAmount − currentValue` 這兩條既有算術在**三檔位下走同一段程式碼**，不得為本機檔位另寫一份。
 
     `currentValue` 一律取自既有 `getCurrentAllocation()`，**不得**由本機引擎重新查 `asset_snapshot`。
 
-- [ ] **338.7 `rebalancePlan` 在本機檔位只到「類別」層級**
+- [x] **339.7 `rebalancePlan` 在本機檔位只到「類別」層級**
 
     `PortfolioAdviceResult.Rebalance` 的欄位為 `(String assetClass, String holding, String action, BigDecimal estimatedAmount, String rationale)`。
 
@@ -188,13 +188,13 @@
 
     **不得在本機檔位產生個股層級的買賣建議**——那會是沒有依據的臆測。此限制須在 `warnings` 中明示。
 
-- [ ] **338.8 `riskAssessment` 得援引既有退休試算，但不得重算**
+- [x] **339.8 `riskAssessment` 得援引既有退休試算，但不得重算**
 
     本機版的 `riskAssessment` 可引用 `getProjection()`（既有 `RetirementProjectionService.project(...)`，完全決定性）的結果組出敘述（例如資產耗盡年齡、缺口）。
 
     **必須呼叫既有方法，不得在本引擎複製一份試算邏輯**——那是 Requirement 32／Task 165 既有的唯一事實來源。
 
-- [ ] **338.9 `model` 欄位記錄檔位與版本**
+- [x] **339.9 `model` 欄位記錄檔位與版本**
 
     - `local` → `local-allocation:v1`
     - `hybrid` → `hybrid-allocation:v1+<實際 Claude model id>`（例如 `hybrid-allocation:v1+claude-haiku-4-5`）
@@ -202,11 +202,11 @@
 
     欄位長度為 `varchar(64)`，`hybrid` 的組合字串須確認不超長（沿用既有 truncate 慣例）。**配置模板調整時須提升版本號**（同 t336 對 `local-rule-engine:v1` 的理由）。
 
-- [ ] **338.10 狀態機三檔共用，不得新增第二套**
+- [x] **339.10 狀態機三檔共用，不得新增第二套**
 
     既有 `latest():284-299` 有 `PROCESSING` 卡超過 `PROCESSING_STALE` 即自癒判 `FAILED` 的邏輯。三檔位共用同一組狀態常數（`PortfolioAdvice.STATUS_*`）與同一個 `latest()` 自癒邏輯。`local` 因為同步完成而不經 `PROCESSING`，但**不得**為它新增第二套狀態常數或第二個自癒路徑。
 
-- [ ] **338.11 前端：`AssetAllocationAdviceView.vue` 新增引擎下拉**
+- [x] **339.11 前端：`AssetAllocationAdviceView.vue` 新增引擎下拉**
 
     檔案：`frontend/src/views/AssetAllocationAdviceView.vue`
 
@@ -221,15 +221,15 @@
 
     > **前端變更依 CLAUDE.md 規定由固定模型的 subagent 執行**（Claude Code：`sonnet 5` / `high`）。
 
-- [ ] **338.12 與 Requirement 78／Task 337 的第八條相容**
+- [x] **339.12 與 Requirement 79／Task 338 的第八條相容**
 
-    `GET /api/public/portfolio-advice/latest`（Task 337 新增的 9090 第八條路由）只讀最新一筆，**不因引擎檔位而改變行為**；三檔位產出的列都經同一個 `PortfolioAdviceDto` 序列化。本任務**不得**讓該公開端點觸發任何產生動作。
+    `GET /api/public/portfolio-advice/latest`（Task 338 新增的 9090 第八條路由）只讀最新一筆，**不因引擎檔位而改變行為**；三檔位產出的列都經同一個 `PortfolioAdviceDto` 序列化。本任務**不得**讓該公開端點觸發任何產生動作。
 
-- [ ] **338.13 不新增排程**
+- [x] **339.13 不新增排程**
 
     本頁維持純手動觸發，不新增 `@Scheduled`。`SchedulePublicBffController.JOBS` 筆數不變，`SchedulePublicBffControllerTest` 的 `hasSize` 斷言不需更動。
 
-- [ ] **338.14 測試**
+- [x] **339.14 測試**
 
     至少涵蓋：
 
@@ -300,4 +300,34 @@ docker logs --tail 200 asset-business-services 2>&1 | grep -i "anthropic\|web_se
 
 ## 完成報告
 
-（實作者做完後回填：實際改了哪些檔、驗證輸出、與原計畫的偏差及原因。）
+### 後端（339.1–339.10、339.12–339.14）與前端（339.11）皆已完成
+
+實作由兩支 subagent 分別執行（後端一支、前端一支依 CLAUDE.md 前端例外用固定模型），完成報告由主 agent 統一回填——刻意不讓實作 subagent 寫 `spec/`，避免並行 agent 互相讓 SDD 內容雜湊失效（Task 337 實作期間已發生過一次，導致該 agent 被迫繞過閘門）。
+
+**新增檔案**
+- `backend/src/main/resources/db/changelog/changes/v1.106.0-portfolio-advice-engine.sql`（冪等，註冊於 master 尾端、v1.105.0 之後）
+- `backend/src/main/java/com/steven/assets/service/LocalPortfolioAllocationEngine.java`（純函式配置模板）
+- `backend/src/test/java/com/steven/assets/service/LocalPortfolioAllocationEngineTest.java`（16 tests）
+- `backend/src/test/java/com/steven/assets/service/PortfolioAdviceServiceEngineTest.java`（19 tests）
+
+**修改檔案**
+- `db.changelog-master.yaml`、`PortfolioAdviceSetting.java`、`PortfolioAdviceSettingsDto.java`、`PortfolioAdviceController.java`（`updateSettings` 補第四個引數 `str(body, "engine")`）、`PortfolioAdviceService.java`（三檔分岔 ＋ `resolveEngine()` ＋ `buildLocalResult`／`completeLocal`／`startHybrid`／`runHybridGeneration`／`buildHybridParams`／`mergeRefinement`）
+- `frontend/src/views/AssetAllocationAdviceView.vue`（三態下拉、`local` 停用三個既有下拉、`hybrid` 停用搜尋次數並顯示 0、常駐免責說明）
+
+**驗證輸出（主 agent 獨立複跑，非採信 subagent 回報）**
+- `mvn -f backend/pom.xml test -DextraArgLine=-Dnet.bytebuddy.experimental=true` → exit 0；surefire 報告統計 **Tests=1084 Failures=0 Errors=0 Skipped=0**（動工前 baseline 1049，本任務 +35）
+- `LocalPortfolioAllocationEngineTest` 16／`PortfolioAdviceServiceEngineTest` 19，皆 0 failures
+- 分岔點查證：`resolveEngine()` 於 `PortfolioAdviceService:500`、`ENGINE_LOCAL` 判斷於 `:530`、既有金鑰檢查於 `:535` —— 分岔確實在金鑰檢查**之前**（339.5 硬約束）
+- `buildHybridParams` 內零 `WebSearchTool`／`addTool`；`HYBRID_MAX_TOKENS = 4000`（既有 `MAX_TOKENS = 16000` 的 1/4）
+- 三類名稱查證：引擎內僅出現 `"存款（現金）"`／`"信託基金"`／`"股票"` 三個字串，與 `getCurrentAllocation()` 逐字一致
+- `npm run build` exit 0
+
+**與原計畫的偏差（4 項）**
+
+1. **hybrid 無金鑰 → `NOT_CONFIGURED`，不退回本機文字。** 依 339.5「檢查只保留在 hybrid／llm 分支」的字面語意；spec 所述「退回本機模板」只針對*解析失敗*。錯誤訊息提示改用「完全本機」檔位。
+2. **hybrid 保留 `ThinkingConfigAdaptive` ＋ `outputConfig.effort`**，只拿掉 `web_search` 並把 maxTokens 降至 4000。理由：339.11 要求 hybrid 的「思考深度」下拉可用，effort 必須真的生效。
+3. **hybrid 的 LLM 呼叫失敗（不只解析失敗）亦退回本機文字並落 `OK`**，並於 `warnings` 追加一條退化說明（⚠ 首條聲明維持在最前）。理由同 spec「不因文字潤飾失敗而讓整筆建議失敗」，且不靜默。
+4. `buildHybridParams` 與 `mergeRefinement` 設為 package-private 供同套件測試直接斷言，未對外曝露。
+
+**mergeRefinement 比規格更嚴**：規格要求「模型若回數字欄位一律以本機值覆蓋」，實作上這些欄位**根本不讀**，測試以含 `targetPct:99`／`estimatedAmount`／`references` 的假回覆驗證 `targetAllocation`／`rebalancePlan` 逐項等於本機值、`references` 為空。
+

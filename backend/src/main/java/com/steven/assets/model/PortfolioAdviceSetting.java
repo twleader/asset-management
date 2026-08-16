@@ -8,8 +8,9 @@ import lombok.NoArgsConstructor;
 import java.time.Instant;
 
 /**
- * 資產配置建議（Requirement 32）成本控管設定：單列（{@code id=1}），存管理者選擇的分析模型、
- * 思考深度（effort）、web 搜尋次數。全域（不分租戶），比照 {@link MarketAnalysisSetting}。
+ * 資產配置建議（Requirement 32）成本控管設定：單列（{@code id=1}），存管理者選擇的分析引擎（engine，
+ * Requirement 80 / Task 339）、分析模型、思考深度（effort）、web 搜尋次數。
+ * 全域（不分租戶），比照 {@link MarketAnalysisSetting}。
  */
 @Entity
 @Table(name = "portfolio_advice_setting")
@@ -23,6 +24,14 @@ public class PortfolioAdviceSetting {
 
     @Id
     private Integer id;
+
+    /**
+     * 分析引擎（Requirement 80 / Task 339）：{@code local}＝完全本機（零 API）、
+     * {@code hybrid}＝本機計算＋AI 撰寫敘述、{@code llm}＝現行完整 AI 分析。預設 local。
+     * {@code local} 時 {@code model}／{@code effort}／{@code webSearchMaxUses} 仍保留為 llm 模式的有效設定值，只是本次不生效。
+     */
+    @Column(name = "engine", length = 16, nullable = false)
+    private String engine;
 
     /** 建議所用 Claude model id（如 claude-opus-4-8）。 */
     @Column(name = "model", length = 64, nullable = false)
