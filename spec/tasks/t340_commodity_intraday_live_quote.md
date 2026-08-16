@@ -1,6 +1,6 @@
-# [t337] 油價金價交易時段每分鐘即時報價，收盤後 5 分鐘取回收盤價校正
+# [t340] 油價金價交易時段每分鐘即時報價，收盤後 5 分鐘取回收盤價校正
 
-**對應 Requirements:** Requirement 77（油價金價頁在 CME Globex 交易時段內每分鐘更新 WTI／布蘭特／COMEX 黃金即時價，收盤後 5 分鐘取回該盤收盤價校正最後價格）
+**對應 Requirements:** Requirement 81（油價金價頁在 CME Globex 交易時段內每分鐘更新 WTI／布蘭特／COMEX 黃金即時價，收盤後 5 分鐘取回該盤收盤價校正最後價格）
 **前置任務:** 無（建立於既有 Requirement 40／Task 202 的油金價資料鏈之上）
 **Liquibase changeset:** 無（盤中價只進 Redis，DB 沿用既有 `commodity_price_history`，不改 schema）
 
@@ -354,7 +354,7 @@ docker exec asset-frontend sh -c "grep -rl 'commodity-price/live' /usr/share/ngi
 
 ### 實作分工
 
-由三支平行 subagent 分別實作（目錄樹互不重疊）：external-materials-service（A–D、337.16b、337.18–337.20）、backend＋bff（E–F、337.16、337.17、337.21）、frontend（G）。實作前 `spec-auditor` 對 Requirement 77／本任務檔做過兩輪對抗式審查（第一輪 critical 0／major 8／minor 6，第二輪 critical 0／major 9／minor 5，全部修正後第三輪通過並鎖定雜湊），實作完成後另派 `arch-auditor` 對完整 diff 做架構符規查核，結果 **critical 0／major 0／minor 0**。
+由三支平行 subagent 分別實作（目錄樹互不重疊）：external-materials-service（A–D、337.16b、337.18–337.20）、backend＋bff（E–F、337.16、337.17、337.21）、frontend（G）。實作前 `spec-auditor` 對 Requirement 81／本任務檔做過兩輪對抗式審查（第一輪 critical 0／major 8／minor 6，第二輪 critical 0／major 9／minor 5，全部修正後第三輪通過並鎖定雜湊），實作完成後另派 `arch-auditor` 對完整 diff 做架構符規查核，結果 **critical 0／major 0／minor 0**。
 
 ### 變更檔案
 
@@ -364,7 +364,7 @@ docker exec asset-frontend sh -c "grep -rl 'commodity-price/live' /usr/share/ngi
 - `backend/.../service/CommoditySpotCachePort.java`、`RedisCommoditySpotCacheAdapter.java`、`CommodityLiveQuoteService.java`（337.9／337.10）
 - `bff/src/test/.../commodityprice/CommodityPriceBffLiveTest.java`
 - 六支測試檔（ext 三支、backend 兩支）
-- `spec/tasks/t337_commodity_intraday_live_quote.md`（本檔）
+- `spec/tasks/t340_commodity_intraday_live_quote.md`（本檔）
 
 **修改**：
 - `external-materials-service/.../client/CommodityFetchClient.java`（新增 `fetchLiveQuote`，337.2）

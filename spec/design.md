@@ -124,7 +124,7 @@ com.steven.assets/
   - `FundSettingsBffController`：`GET /api/bff/fund-settings/bank-options` → 過濾 active 後的銷售銀行下拉；與 SnapshotForm 的 lookups **同讀 business `/api/settings/banks`**（同義欄位同一來源），fund-settings 頁不再跨頁呼叫 `/api/bff/snapshot-form/lookups`（Task 175：一頁一 BFF 合規化）
   - `RealizedGainBffRoutes`：`/api/realized-gains/**` → business-services。**目前無前端消費者**：原「RealizedGainView 的 Pinia store `gainApi` 共用 CRUD」說法已不成立——該頁已全面走 `RealizedGainBffController` 的 `/api/bff/realized-gain` 聚合端點，前端 `gainApi` wrapper 與 `assetStore` 的三個已實現損益 action 已於 Task 197 移除。route 本身暫留（移除需重建 BFF 服務），**屬待清理項**
   - `MarketDataBffRoutes`：`/api/market-data/**` → business-services。消費者是 DashboardView 與 TradingRadarView 兩頁的 SSE 行情串流（皆為 `new EventSource('/api/market-data/prices/stream')`，見下方 SSE 段落之已知落差）；`marketDataApi` wrapper（歷史/配息/ETF 成分股）無呼叫端，已於 Task 197 移除，該類查詢皆走 `StockAnalysisBffRoutes` 的 `/api/bff/stock-analysis/**`
-  - `SchedulePublicBffController`（ScheduleListView 專屬，「公開資訊」分組，Requirement 36）：`GET /api/bff/schedule-list` → 回傳系統所有自動排程的**人工維護靜態清單**（`ScheduledJobDto` 不可變 record：service / category / name / description / schedule 白話 / cron / zone）。Task 334（external：美股推導估值每日排程）與 Task 332（business：海外指數日線落後補救檢查）各新增一個 `@Scheduled` 後為 53 筆；**Task 337（external：油價金價盤中每分鐘即時報價、收盤後 17:05 校正）再新增兩個後，共 55 筆** ＝ `business-services` 21 ＋ `external-materials-service` 34（Task 327 新增 USD/TWD 2 秒 live producer 後為 51 ＝ 20 ＋ 31；**以 `@Scheduled` 方法計**；business 另包含 `AlertNotificationDispatcher` 每 60 秒與 `TradingRadarNotificationService` 每 2 秒兩個 fixed-delay job；external 實際 **36** 個標註，`TwClosurePoller` 與台股官方收盤對帳各為一法兩標、各併為一筆。
+  - `SchedulePublicBffController`（ScheduleListView 專屬，「公開資訊」分組，Requirement 36）：`GET /api/bff/schedule-list` → 回傳系統所有自動排程的**人工維護靜態清單**（`ScheduledJobDto` 不可變 record：service / category / name / description / schedule 白話 / cron / zone）。Task 334（external：美股推導估值每日排程）與 Task 332（business：海外指數日線落後補救檢查）各新增一個 `@Scheduled` 後為 53 筆；**Task 340（external：油價金價盤中每分鐘即時報價、收盤後 17:05 校正）再新增兩個後，共 55 筆** ＝ `business-services` 21 ＋ `external-materials-service` 34（Task 327 新增 USD/TWD 2 秒 live producer 後為 51 ＝ 20 ＋ 31；**以 `@Scheduled` 方法計**；business 另包含 `AlertNotificationDispatcher` 每 60 秒與 `TradingRadarNotificationService` 每 2 秒兩個 fixed-delay job；external 實際 **36** 個標註，`TwClosurePoller` 與台股官方收盤對帳各為一法兩標、各併為一筆。
 **逐檔核對務必用 `grep -ran`**：`AlertNotificationDispatcher.java` 會被 `file(1)` 判為 data，普通 `grep -r` 整檔跳過，backend 會少算成 20）。此頁為唯讀資訊展示故不做跨服務反射探索、不入 DB、不設管理端點；**新增／調整任何 `@Scheduled` 須同步更新此清單以免漂移**。**動態排程**（每分鐘 tick 比對 DB 可設定時點：`NewsPoller`→`crawler_schedule`、`MarketAnalysisScheduler`→`market_analysis_send_time`）於清單標「動態：依『X』頁設定（預設 …）」／「動態（表名）」，**不寫死時間**；每分鐘 tick 但時點為 per-user 私人設定者（`ExportScheduleService`／`TradingCalendarExportScheduleService`）則照列 `每分鐘`／`0 * * * * *` 實際 cron。前端 `ScheduleListView` 之服務別／分類計數由 payload 動態算出，故加減筆數無須改前端。無下游呼叫（不需 WebClient），落 BFF `anyExchange().authenticated()`（已登入者皆可讀）。
   - `CrawlerDataBffController`（CrawlerDataView 專屬，「公開資訊」分組，Requirement 38）：爬蟲資訊查詢頁，一頁一 BFF、WebClient 轉呼 business：
     - `GET /api/bff/crawler-data?date=YYYY-MM-DD&dateField=fetched|published&category=` → business `GET /api/news-headlines`：查指定日期爬回的 `news_headline`（與今日股市分析同讀一份表，符合「同義欄位、同一 business API」）。
@@ -7113,7 +7113,7 @@ Migration `v1.104.0-realized-gain-export-schedule-multi-time.sql`（實作前須
 
 ---
 
-## Requirement 77／Task 337：油價金價盤中每分鐘即時報價與收盤後校正
+## Requirement 81／Task 340：油價金價盤中每分鐘即時報價與收盤後校正
 
 ### 為什麼是「Redis 盤中、DB 收盤」而不是把盤中價寫進日線表
 
