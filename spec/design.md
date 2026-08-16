@@ -4451,7 +4451,7 @@ TaiexIndexPoller（週一～五 09:00–13:30 Asia/Taipei，每 2 分鐘，Marke
 
 `TechnicalIndicatorService.computeAllForTaiex()` 比照既有 `computeAll()` 對一般個股的既有作法：完成日序列最新一筆非今日時，查 `PriceQueryService.getLive("0000","台股")`，若其 `tradingDate` 為今日則暫加一筆合成列（`close/high/low` 取自 live price，缺值以 close 補）到序列最前，MA20／60／240 與當期 KD 皆含這筆；`taiexKd` 算前一期時排除這筆，維持既有「當期 vs 前一期」語意。
 
-> **Task 263 改變了這筆合成列的 high／low 取值，盤中 TAIEX 的 K／D 因此與修正前不同（是修正，非 regression）。** Task 228 的 `TaiexIndexPoller` 傳 `highPrice`／`lowPrice = null`，`PriceCacheWriter` 的 `mergeHigh(null, agg)` 回退為聚合值，故 `price:台股:0000` 的 high／low 實際上是**「5 分格收盤價」的本地 max/min**；Task 263 起改為 Yahoo **「5 分格 high／low 陣列」的 max/min**，區間必然變寬（實測 2026-07-31：low 由 39933.30 變 41610.41）。這兩欄直接進 KD 的 RSV 分母，連帶影響三處：本方法的合成今日列 → 觀察清單 `0000` 的 K／D 欄；`taiexSeriesAsc` 的今日點（Task 261）→ 走勢圖 KD 子圖；以及經 `MarketSummary.kValue`／`dValue` → 交易雷達的 regime／score，並可能連動 Requirement 44 的狀態轉換寄信。故 **`RULE_VERSION` 由 `TW_RULES_V7` 升為 `TW_RULES_V8`**（`TradingRadarView.vue` 的顯示 fallback 與 `radar` ref 初始值兩處 hardcode 同步）：本專案的升版判準不是「公式有沒有變」——Task 228（V6）與 Task 232（V7）的 AC 都明文寫著「因子組成、權重與正規化方式完全相同」卻照樣升版，理由都是「使用者可觀察行為有實質變化」；不升版的先例有**兩個**：Task 249 成立的關鍵是「同一份輸入前後產生完全相同的輸出」（本次不符合）；**Task 281 為第二個先例**，成立條件是「新增欄位**純揭露**——不進 `StockInput`／`MarketInput`，`action`／`score`／`regime`／`reasons`／`risks` 逐位不變」，其輸出**結構**確有變化（DTO 多一個巢狀欄位、匯出檔多 15 欄、快照雜湊改變）但**規則集本身未變**，故不升版。**這兩條互斥、不得混用**：Task 281 不滿足 Task 249 的條件，援引錯了會得到相反結論。V8 與 V7 的因子組成、權重、正規化方式相同，**不另訂不可比性揭露**。`RULE_VERSION` 在程式碼裡只是標籤（`TradingRadarService` 塞進 DTO、`TradingRadarExportService` 寫進 Excel，`trading_radar_notification_state` 無該欄），升版不觸發 Requirement 44 的通知基準重建。
+> **Task 263 改變了這筆合成列的 high／low 取值，盤中 TAIEX 的 K／D 因此與修正前不同（是修正，非 regression）。** Task 228 的 `TaiexIndexPoller` 傳 `highPrice`／`lowPrice = null`，`PriceCacheWriter` 的 `mergeHigh(null, agg)` 回退為聚合值，故 `price:台股:0000` 的 high／low 實際上是**「5 分格收盤價」的本地 max/min**；Task 263 起改為 Yahoo **「5 分格 high／low 陣列」的 max/min**，區間必然變寬（實測 2026-07-31：low 由 39933.30 變 41610.41）。這兩欄直接進 KD 的 RSV 分母，連帶影響三處：本方法的合成今日列 → 觀察清單 `0000` 的 K／D 欄；`taiexSeriesAsc` 的今日點（Task 261）→ 走勢圖 KD 子圖；以及經 `MarketSummary.kValue`／`dValue` → 交易雷達的 regime／score，並可能連動 Requirement 44 的狀態轉換寄信。故 **`RULE_VERSION` 由 `TW_RULES_V7` 升為 `TW_RULES_V8`**（`TradingRadarView.vue` 的顯示 fallback 與 `radar` ref 初始值兩處 hardcode 同步）：本專案的升版判準不是「公式有沒有變」——Task 228（V6）與 Task 232（V7）的 AC 都明文寫著「因子組成、權重與正規化方式完全相同」卻照樣升版，理由都是「使用者可觀察行為有實質變化」；不升版的先例有**三個**（Task 336 之前為兩個）：Task 249 成立的關鍵是「同一份輸入前後產生完全相同的輸出」（本次不符合）；**Task 281 為第二個先例**，成立條件是「新增欄位**純揭露**——不進 `StockInput`／`MarketInput`，`action`／`score`／`regime`／`reasons`／`risks` 逐位不變」，其輸出**結構**確有變化（DTO 多一個巢狀欄位、匯出檔多 15 欄、快照雜湊改變）但**規則集本身未變**，故不升版。**Task 336 追加第三個先例**，成立條件是「**規則引擎輸出（`action`／`score`／`regime`／`reasons`／`risks`）逐位不變，且變動的僅是顯示值本身的捨入缺陷修正——該修正使既有實作彼此趨於一致、不引入任何新值**」：Task 336 把 IXIC 均線的 double 累加改為 BigDecimal 精確路徑，`MarketSummary.monthlyMa` 在 2/2540 個交易日會由 `7667.67`／`23293.77` 變為 `7667.68`／`23293.78`，故**不**滿足 Task 249 的「輸出完全相同」（顯示值有變），也**不**滿足 Task 281 的「不進 `MarketInput`」（MA 確實進 `priceVsMa` 的分數）；但 2319 個可重放交易日的 `score`／`regime` 逐位不變，且變動後的值正是「股市大盤查詢」頁**早已對使用者發布**的那一個，屬缺陷修正而非規則變更。**這三條互斥、不得混用**：Task 281 不滿足 Task 249 的條件，Task 336 兩者皆不滿足，援引錯了會得到相反結論。V8 與 V7 的因子組成、權重、正規化方式相同，**不另訂不可比性揭露**。`RULE_VERSION` 在程式碼裡只是標籤（`TradingRadarService` 塞進 DTO、`TradingRadarExportService` 寫進 Excel，`trading_radar_notification_state` 無該欄），升版不觸發 Requirement 44 的通知基準重建。
 
 `TradingRadarService.buildMarket()` 的 `stale` 判定改為：
 
@@ -4770,9 +4770,64 @@ TradingRadarView 頂部 .market-card
 
 **分頁化引入的可見性退化須以分頁標籤上的 stale 標記補回：** stale 警示由現行「無條件掛在唯一那張卡」改綁當前分頁後，「台股 stale 但使用者停在美股分頁」時警示不渲染。故兩個分頁標籤各自須在該組 `stale=true` 時帶視覺標記（`el-badge` 或等效；同 repo 既有先例見 `SnapshotFormView.vue` 的 `el-tab-pane` 自訂 `#label`）。此為硬性要求，不得留給實作者判斷。
 
-**不升 `RULE_VERSION`，援引的是 Task 281 先例。** 本次為純揭露：不進 `StockInput`／`MarketInput`，個股與台股大盤的一切輸出逐位不變；但 response 結構多一個 component、快照 content hash 會變，故**不**符合 Task 249 的「同一輸入產生完全相同輸出」，符合的是 Task 281 的「新增欄位純揭露，輸出結構有變但規則集未變」。兩條先例互斥、不得混用。規則版本標籤兩個分頁顯示同一個 `TW_RULES_V12`：該常數是兩市場共用的同一支引擎版本、非台股專屬，不得為美股另編 `US_RULES_V12` 這種不存在的字串。
+**不升 `RULE_VERSION`，援引的是 Task 281 先例。** 本次為純揭露：不進 `StockInput`／`MarketInput`，個股與台股大盤的一切輸出逐位不變；但 response 結構多一個 component、快照 content hash 會變，故**不**符合 Task 249 的「同一輸入產生完全相同輸出」，符合的是 Task 281 的「新增欄位純揭露，輸出結構有變但規則集未變」。兩條先例互斥、不得混用（**Task 336 起該清單為三條**，見上方 Task 263 段落的先例清單）。規則版本標籤兩個分頁顯示同一個 `TW_RULES_V12`：該常數是兩市場共用的同一支引擎版本、非台股專屬，不得為美股另編 `US_RULES_V12` 這種不存在的字串。
 
 **本次不做：** Excel／JSON 匯出的大盤工作表維持只寫台股那組（比照 Task 295.10 的既有取向——該處原文防的是「不得因為加了分頁而誤改為只匯出當前分頁」、方向是不得**縮小**；本次延伸為同樣不因加分頁而**擴大**，屬 Task 335 自訂決定，非 295.10 原文）、IXIC 即時盤中報價、SOX 第二組大盤、美股大盤的 Email 通知（通知仍只針對個股狀態轉換）。
+
+#### IXIC 均線兩條算術路徑的收斂（Requirement 77，Task 336）
+
+Task 335 讓 IXIC 的 MA5／20／60／240 **首次上畫面**，「同義值在兩頁顯示」的條件因此成立，觸發鐵則 4。**分歧的是 (a) 與 (b) 這一對**——兩者讀同一張 `us_index_daily_history`（`index_code='IXIC'`）、同樣只用已落地日線收盤、都不併即時價，差別純粹在算術路徑（第三份 (c) `ExcelExportService.indexMaAt` 同讀該表、也產出 IXIC 均線，但本就是精確路徑，見下方四產出點表）：
+
+```text
+(a) BFF   MarketIndexChartService.movingAverage(closes, w)
+          BigDecimal 精確滾動和 → sum.divide(valueOf(w), 2, HALF_UP)
+          服務「股市大盤查詢」頁 9 個市場的整段序列
+
+(b) BE    TechnicalIndicatorService.nasdaqSimpleMa(desc, days)      ← Task 336 改這一支
+          double 累加（新→舊） → BigDecimal.valueOf(sum/days).setScale(2, HALF_UP)
+          → computeAllForNasdaq() → TradingRadarService.buildUsMarket()
+          → indicators(ind) → MarketInput → evaluateMarket() 的 priceVsMa(±8/±12/±15)
+```
+
+**既有的兩組免罪理由都不適用**——這是本任務成立的關鍵，也是 Task 335 的 `arch-auditor` 稽核揭出它的方式。具名例外 (3) 的理由是「語意不同（含 live）」，但 `computeAllForNasdaq()` 刻意不併即時價（`TechnicalIndicatorNasdaqTest` 有同名斷言）；具名例外 (1)(2) 的「算術上逐位相同」論證前提是台股收盤 `numeric(12,2)`、和除以 5 恆為第三位小數為偶數而碰不到 HALF_UP 邊界，但 `close_point` 是 `numeric(14,4)`，且運行中 DB 實測 2559 筆 IXIC 日線中 **2248 筆（87.8%）帶滿 4 位有效小數**，該前提在此不成立。
+
+**收斂方向是 (b) → (a) 的精確路徑，不得反向。** double 累加本就是精度較差的一方；(a) 的輸出已經在「股市大盤查詢」頁對使用者發布，收斂到 (a) 等於讓雷達採用使用者已看得到的值，屬缺陷修正而非新行為；且 (a) 服務 9 個市場的整段序列，改成 double 會把分歧擴散到另外 8 個市場。收斂後兩份的等值**由構造保證**（同一批收盤、同一視窗、同樣 `divide(w, 2, HALF_UP)`；BigDecimal 加法可結合，累加方向不影響結果），強度高於具名例外 (1)(2) 現行那種抽樣論證。
+
+**只改 `nasdaqSimpleMa` 一支。** 同類別另有三支同族 double helper：`simpleMa`（個股）、`taiexSimpleMa`（台股大盤 `0000`）、`maAt`（走勢圖整段序列）。它們服務台股與個股，屬具名例外 (3)（含 live）的範圍，收斂前提是先決定「MA 要不要併 live」，屬另一個獨立任務；動了會翻動台股大盤 regime 與全部個股的 `action`／`score`。`maAt` 的既有 javadoc 契約「累加方向必須是『新→舊』，與 `simpleMa`／`taiexSimpleMa` 一致」**列舉對象不含** `nasdaqSimpleMa`，`TechnicalIndicatorSeriesAlignmentTest` 的對齊斷言也只涵蓋個股與 `0000`、無 IXIC 案例，故該契約不受本次波及。
+
+**IXIC 均線在全樹有四個產出點，不是一個。** 不得寫成「backend 只有 `nasdaqSimpleMa`」——那可被 grep 直接推翻：
+
+| # | 產出點 | 算術路徑 | 用途 | Task 336 |
+|---|---|---|---|---|
+| (a) | `bff` `MarketIndexChartService.movingAverage` | BigDecimal 精確 | 「股市大盤查詢」頁圖表 | 不動（收斂目標） |
+| (b) | `backend` `TechnicalIndicatorService.nasdaqSimpleMa` | **double** | 交易雷達美股分頁 | **改為精確** |
+| (c) | `backend` `ExcelExportService.indexMaAt` | BigDecimal 精確 | 該頁匯出的四條均線欄 | 不動（本就精確） |
+| (d) | `backend` `BacktestService.buildUsMarketRegimes()` → `RadarInputAssembler.assemble` → `computeFromSeries` → `simpleMa` | **double** | 回測的美股 as-of regime | **範圍外**（見下） |
+
+(c) 確實會產出 IXIC 均線——`ExcelExportService.findIndexDaily(market, ...)` 只有 `"TWSE".equalsIgnoreCase(market)` 一條分支，其餘一律走 `usIndexHistRepo.findByIndexCodeAndTradingDateBetweenOrderByTradingDateAsc(market, ...)`，而 `MacroHistoryService.DAILY_INDEX_CODES` 含 IXIC；但它本就是「BigDecimal 精確加總、只在最後 `divide(window, 2, HALF_UP)` 捨入一次」（javadoc 已明文與 BFF 那份對齊），收斂後與 (a)(b) 三者同值。`TechnicalIndicatorService.indicatorSeries(...)`（走勢圖整段序列、用 `maAt`）則**確實沒有** IXIC 分支（只有 `isTaiex(...) ? taiexSeriesAsc : stockSeriesAsc`，HTTP 入口 `MarketDataController` 以股票代號取值），不在此清單內。
+
+**(d) 回測路徑刻意留為範圍外，殘餘分歧已量化。** `buildUsMarketRegimes()` 同樣以 IXIC 日線算 MA 並餵進**同一支** `evaluateMarket()`，但走 `simpleMa`（double）。收斂它必須改 `simpleMa`，而那一支服務全部個股，會翻動所有個股的 `action`／`score`——遠超本任務的爆炸半徑。故落地後存在一個**已知且刻意保留**的狀態：live 雷達美股 regime 走精確路徑、回測美股 regime 仍走 double。**分歧上限是 MA 值的 0.01**；因兩條路徑的 double 累加方向相同（皆 desc、新→舊），下表的重放結果直接適用——`price.compareTo(ma)` 正負號翻動 0 日，故 2319 個可重放交易日中回測與 live 的美股 `regime` **0 日不同**。真正的解與台股那組相同：先決定「MA 要不要併 live」再統一 `TechnicalIndicatorService` 四支 helper 的算術路徑，屬獨立任務。**復驗指令必須是 `grep -ran "IXIC" backend/src/main/java/ bff/src/main/java/`**（`-a` 不可省——本專案 `grep -r` 會把部分 `.java` 判為 data 而整檔靜默跳過）：只 grep `nasdaqSimpleMa`／`computeAllForNasdaq` 在結構上就找不到 `BacktestService`，那兩個識別字它都沒有。
+
+**不升 `RULE_VERSION`，但既有兩條先例都不適用——本任務新增第三條判準。** Task 281 成立於「純揭露、不進 `StockInput`／`MarketInput`」，但本次改的 MA 確實經 `indicators(ind)` 進 `MarketInput` 再進 `priceVsMa` 的分數；Task 249 的字面條件（「同一份輸入前後產生完全相同的輸出」）**也不滿足**——`buildUsMarket()` 把四個 MA 直接寫進 `MarketSummary` 回傳前端，`usMarket.monthlyMa` 在 2 個交易日會變。本專案的先例清單已兩度以嚴格解讀使用（Task 335 就是以「response 結構多一個 component、快照 content hash 會變」判定自己不符 Task 249），若在此改用寬鬆解讀套 Task 249，正是那份清單「互斥、不得混用」所要防的事。故本任務在上方那份清單新增**第三條**：「規則引擎輸出逐位不變，且變動的僅是顯示值本身的捨入缺陷修正——該修正使既有實作彼此趨於一致、不引入任何新值」。其成立以運行中 DB 的實資料逐日重放驗證，不是只憑論證：
+
+| 量測項 | 結果 |
+|---|---|
+| 資料範圍 | IXIC 2559 筆日線，2016-06-10 ~ 2026-08-14 |
+| MA 值不同的交易日 | MA20 **2 日**／2540（0.08%）；MA5 0／2555、MA60 0／2500、MA240 0／2320 |
+| 那兩日 | 2018-07-17（精確和 153353.5000 → 商 7667.675 → `7667.68` vs double 和 153353.49999999997 → `7667.67`）、2025-12-22（465875.5000 → 23293.775 → `23293.78` vs `23293.77`） |
+| `price.compareTo(ma)` 翻動 | MA20／MA60／MA240 各 **0 日** |
+| `score` 差異／`regime` 翻動 | 2319 個可重放交易日中各 **0 日** |
+| 邊界餘裕 `min｜收盤 − MA｜` | MA20 `0.1502`、MA60 `0.2901`、MA240 `1.6999` — 均為 0.01 分歧上限的 **15 倍以上** |
+
+重放涵蓋美股分支的完整計分（該分支的量能三欄與跨市場四欄恆為 `null`／`false`，不進分數，故可完整重放）；計分前另有 `complete(input)` 前置檢查，任一必要欄（`price`／`changePercent`／`ma20`／`ma60`／`ma240`／`k`／`d`／`c60`／`c240`）為 null 即回 `DATA_INCOMPLETE`、`score=null`，不進計分。升版在此會是**假的不可比性訊號**，正是 Task 249 那條先例原文所防的情境——本次的規則引擎輸出逐位不變。
+
+**殘餘風險據實記載，不寫成「不可能」。** 翻面在結構上並非不可能：`close_point` 4 位小數而 MA 2 位小數，若某日收盤恰好落在兩個候選 MA **之間**（例如 `7667.6750`），精確路徑判 BELOW、double 路徑判 ABOVE，`priceVsMa` 差值為 **2×權重**（MA240 達 30 分），足以翻動 regime 與買進閘門。本節立論是「十年實測 0 次且邊界餘裕 15 倍」這個經驗事實，不是數學上的不可能；收斂本身正是消除該風險的手段——**但僅限 (a)(b)(c) 三份顯示用實作**。**(d) 回測那份是本次新造出來的分歧，方向要說清楚**：改動**前**，live 的 `nasdaqSimpleMa` 與回測的 `simpleMa` 同為 double、同為 desc 新→舊、同一批未調整收盤，兩者 **bit-identical**；改動**後**，live 走精確、回測仍走 double，兩者出現上限 0.01 的分歧（歷史重放 0 日翻動 regime）。這是刻意保留的**新增**殘餘，不是原本就有的舊帳，日後評估 V13 candidate 回測可信度時須把這一點算進去。
+
+**`TW_RULES_V13` 已被佔用。** `RuleParameters.V13_VERSION = "TW_RULES_V13"` 是**離線 calibration／candidate 參數集**的版本字串（`evaluateCandidate()` 明文校驗 `"candidate evaluation 必須使用 TW_RULES_V13 參數"`）。故 `TradingRadarRuleEngine.RULE_VERSION` 日後若真要升版，**必須跳到 `TW_RULES_V14`**——用 V13 會讓 production 標籤與離線 candidate 參數集同名。本次不升版，此處只留紀錄。
+
+**三份顯示用實作在實體上仍然存在，而且免罪理由對每一對都要各自成立。** (a) 與 {(b),(c)} 之間是建置結構——`bff` 是獨立 Maven artifact `asset-management-bff`，其 `pom.xml` 不依賴 backend，全 repo 三個 `pom.xml` 無 aggregator、無共用程式模組，跨不過去。**但 (b) 與 (c) 同在 `backend` 這一個 module、同一個 Spring context，Maven 分離對這一對完全不成立**，不得拿來當理由（本節上方那份先例清單的教訓正是「沿用了一個不適用的免罪理由」）。(b)–(c) 真正的理由是**呼叫形狀與型別不同**：(b) 吃 `List<UsIndexDailyHistory>`（desc）只回最新一期的單值，(c) 吃 `List<IndexDailyRow>`（asc）逐點回整段序列。抽成共用的 `List<BigDecimal>` primitive 技術上完全可行，本次明文登記為**已知技術債**而非結構限制——順帶一提，本檔下方「backend 內部直接注入 `TechnicalIndicatorService` 也不是本次的解……擋住的一樣是 live 併入語意與覆蓋率」那兩個理由中，**「live 併入語意」那一半在 (b) 收斂後不再適用**（(b) 刻意不併 live 且與 (c) 同為精確路徑）；**「覆蓋率」那一半仍成立**——(b) 的 `computeAllForNasdaq()` 寫死 `findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 240)` 只覆蓋 IXIC，(c) 的 `findIndexDaily` 服務 `DAILY_INDEX_CODES` 全部 9 個指數。該覆蓋率差異已含在上述「呼叫形狀與型別不同」的理由裡。`spec/steering/structure.md` §3.2 鐵則 4 的「具名例外之二」因此由「待收斂」改為**已收斂**、並改列三份，而非整段刪除。
+
+**本次不做：** 台股大盤與個股的 MA（`taiexSimpleMa`／`simpleMa`／`maAt`，沿用具名例外 (3)）、`ExcelExportService.indexMaAt`（確實產出 IXIC 均線，但本就是精確路徑、收斂後同值）、`BacktestService.buildUsMarketRegimes()`（見上方 (d)）、把這幾份合併成單一實作（(a) 側是建置結構、(b)–(c) 側是已知技術債，兩側理由不同，見上段）、IXIC 即時盤中報價（沿用 Requirement 64 排除項 (e)）、`confirm()` 的 scale-8 內部平均（兩收盤日確認用的內部比較值，不對外顯示，語意不同）。
 
 ### 美股歷史估值序列推導落地（Requirement 74，Task 334，`SEC_DERIVED` provider）
 
@@ -5325,7 +5380,11 @@ business 另有逐日 MA5 的既有實作（`TechnicalIndicatorService.Indicator
 > **不可用「那支不是現成解」搪塞。** 它確實**只覆蓋 `0000`＋`台股`**（`TechnicalIndicatorService.isTaiex`
 > 只認這一組，本頁另外 8 個海外指數在該服務沒有分支，走 `stockSeriesAsc` 只會查 `stock_price_history`
 > 得到空序列）——但**唯一會與別處撞值的正好就是 TWSE**，而那正是它已覆蓋的那一個；
-> 另外 8 個指數全站沒有同義競品，怎麼算都不會不一致。真正擋住它的是**語意**不是覆蓋率：
+> 另外 8 個指數全站沒有同義競品，怎麼算都不會不一致。
+> ⚠️ **「另外 8 個沒有同義競品」這句對 IXIC 自 Task 294 起已不成立**（`nasdaqSimpleMa` 建立了第二份，
+> Task 335 讓它首次上畫面，實測 MA20 有 2 日差 0.01），詳見本檔「IXIC 均線兩條算術路徑的收斂
+> （Requirement 77，Task 336）」；其餘 7 個指數維持成立。本段其餘論證（live 語意、被放棄的三個選項）不受影響。
+> 真正擋住它的是**語意**不是覆蓋率：
 > 它會**併入 Redis 今日盤中即時點位**，而本圖的 MA20/60/240 與本匯出一律只用已落地的日線收盤。
 > 只把 MA5 換成它，會讓**同一張圖上的五條線有兩種口徑**（週線含盤中、其餘不含），
 > 那比現在的分裂更糟；匯出更不能用（匯出是已落地收盤的檔案留存）。
