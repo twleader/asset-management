@@ -523,8 +523,107 @@ class TradingRadarRuleEngineTest {
      * 但使用者可觀察行為有實質變化即升版。
      */
     @Test
-    void ruleVersion_isV12() {
-        assertEquals("TW_RULES_V12", TradingRadarRuleEngine.RULE_VERSION);
+    void ruleVersion_isV14() {
+        assertEquals("TW_RULES_V14", TradingRadarRuleEngine.RULE_VERSION);
+    }
+
+    // ═══ Task 341：跨市場「不適用」與「資料不足」分家、量價文案只列舉實際採用的分量 ═══
+
+    /** 跨市場那則提醒的專屬片段；不得用泛用詞「資料不足」——量價那句也含這四字。 */
+    private static final String CROSS_MARKET_FRAGMENT = "美股科技共同交易日";
+
+    /**
+     * 341.10.2：{@code crossMarketApplicable=false}（美股大盤即 IXIC，跨市場因子會重複計分）
+     * 必須<b>沉默</b>；但旗標為 {@code true} 而資料真的缺（台股確實會遇到，美股科技共同完成日
+     * 有 5 個日曆日上限）時<b>仍要提醒</b>。這是台股方向的護欄，防止日後被順手兩邊都關掉。
+     */
+    @Test
+    void 跨市場不適用時沉默但適用而資料缺時仍提醒() {
+        var notApplicable = engine.evaluateMarket(
+                crossMarketInput(false, false)).risks();
+        var applicableButMissing = engine.evaluateMarket(
+                crossMarketInput(true, false)).risks();
+
+        assertTrue(notApplicable.stream().noneMatch(r -> r.contains(CROSS_MARKET_FRAGMENT)),
+                "跨市場因子對美股是『不適用』，不得謊報成『資料不足』");
+        assertTrue(applicableButMissing.stream().anyMatch(r -> r.contains(CROSS_MARKET_FRAGMENT)),
+                "台股的跨市場資料真的缺時，這則正當提醒不得一起被關掉");
+    }
+
+    /**
+     * 341.10.4：量價文案只能列舉本次 {@code marketActivity} 實際由哪幾個 ratio 構成。
+     * 美股結構性沒有成交金額（{@code us_index_daily_history} 無成交值欄），台股也可能因
+     * 樣本不足而 turnover 為 null——寫死「量能／成交金額」等於在講一個不存在的值。
+     */
+    @Test
+    void 量價理由只列舉實際採用的分量() {
+        var volumeOnly = engine.evaluateMarket(volumeActivityInput(
+                new BigDecimal("1.5"), null)).reasons();
+        assertTrue(volumeOnly.stream().anyMatch(r -> r.contains("大盤完成日上漲且量能同步放大")),
+                "僅量比可用時應內插「量能」");
+        assertTrue(volumeOnly.stream().noneMatch(r -> r.contains("成交金額")),
+                "marketTurnoverRatio 為 null 時，理由文案不得出現「成交金額」字樣");
+
+        var bothRatios = engine.evaluateMarket(volumeActivityInput(
+                new BigDecimal("1.5"), new BigDecimal("1.5"))).reasons();
+        assertTrue(bothRatios.stream().anyMatch(r -> r.contains("大盤完成日上漲且量能與成交金額同步放大")),
+                "兩個 ratio 都可用時才列舉兩者");
+    }
+
+    /** 341.3：量價缺值那句不得再列舉美股結構性不存在的「成交金額」欄位。 */
+    @Test
+    void 量價缺值提醒不列舉不存在的欄位() {
+        var risks = engine.evaluateMarket(volumeActivityInput(null, null)).risks();
+        assertTrue(risks.stream().anyMatch(r -> r.contains("大盤完成日量價資料不足")));
+        assertTrue(risks.stream().noneMatch(r -> r.contains("成交量或成交金額")),
+                "列舉「成交金額」等於暗示美股本來該有卻沒有");
+    }
+
+    /** V10 前的 5 參數相容建構式必須把 crossMarketApplicable 填 true（漏改＝多一則正當提醒）。 */
+    @Test
+    void 相容建構式的跨市場旗標預設為適用() {
+        var compat = new TradingRadarRuleEngine.MarketInput(
+                new BigDecimal("100"), BigDecimal.ZERO,
+                new TradingRadarRuleEngine.Indicators(
+                        new BigDecimal("100"), new BigDecimal("100"), new BigDecimal("100"),
+                        new BigDecimal("50"), new BigDecimal("50")),
+                TradingRadarRuleEngine.Confirmation.ABOVE,
+                TradingRadarRuleEngine.Confirmation.ABOVE);
+
+        assertTrue(compat.crossMarketApplicable());
+        assertTrue(engine.evaluateMarket(compat).risks().stream()
+                        .anyMatch(r -> r.contains(CROSS_MARKET_FRAGMENT)),
+                "漏改呼叫端的後果必須是多一則正當提醒，而不是靜默吞掉一則真提醒");
+    }
+
+    private TradingRadarRuleEngine.MarketInput crossMarketInput(
+            boolean crossMarketApplicable, boolean usTechAvailable) {
+        return fullMarketInput(null, null, null, null, usTechAvailable, crossMarketApplicable);
+    }
+
+    private TradingRadarRuleEngine.MarketInput volumeActivityInput(
+            BigDecimal volumeRatio, BigDecimal turnoverRatio) {
+        // completedChangePercent 為正 → 命中「上漲且…放大／不足」那兩個分支。
+        return fullMarketInput(new BigDecimal("1.20"), volumeRatio, turnoverRatio,
+                null, false, false);
+    }
+
+    private TradingRadarRuleEngine.MarketInput fullMarketInput(
+            BigDecimal completedChangePercent,
+            BigDecimal volumeRatio,
+            BigDecimal turnoverRatio,
+            BigDecimal usTechCompositePercent,
+            boolean usTechAvailable,
+            boolean crossMarketApplicable) {
+        return new TradingRadarRuleEngine.MarketInput(
+                new BigDecimal("100"), BigDecimal.ZERO,
+                new TradingRadarRuleEngine.Indicators(
+                        new BigDecimal("100"), new BigDecimal("100"), new BigDecimal("100"),
+                        new BigDecimal("50"), new BigDecimal("50")),
+                TradingRadarRuleEngine.Confirmation.ABOVE,
+                TradingRadarRuleEngine.Confirmation.ABOVE,
+                completedChangePercent, volumeRatio, turnoverRatio,
+                null, null, usTechCompositePercent, usTechAvailable, crossMarketApplicable);
     }
 
     // ═══ Task 264：使用者四條需求的驗收測試 ═══════════════════════════════════

@@ -174,11 +174,21 @@ class TreasuryYieldServiceTest {
         assertThat(context.curveDate()).isEqualTo(LocalDate.of(2026, 8, 7));
     }
 
+    /**
+     * Task 341：production 版號升為 {@code TW_RULES_V14}（美股大盤接上量價環境因子），
+     * 與 {@link RuleParameters} 的 calibration／candidate 命名空間就此分家。
+     *
+     * <p>{@code v12Default()} 仍是 {@code TW_RULES_V12}——那是回測 baseline 參數集，
+     * 本次未改動任何個股參數值，故不得跟著改（改了會擴散到十餘個呼叫點且零語意收益）。
+     * 兩者都不得等於 {@code V13_VERSION}：那是 {@code evaluateCandidate()} 的 guard 標籤，
+     * production 竊用會讓「這是不是 candidate」的判別式失效。</p>
+     */
     @Test
-    void productionRuleVersion與V12Default逐位維持不變() {
-        assertThat(TradingRadarRuleEngine.RULE_VERSION).isEqualTo("TW_RULES_V12");
-        assertThat(RuleParameters.v12Default().ruleVersion())
-                .isEqualTo(TradingRadarRuleEngine.RULE_VERSION);
+    void productionRuleVersion升V14而v12Default仍為回測baseline標籤() {
+        assertThat(TradingRadarRuleEngine.RULE_VERSION).isEqualTo("TW_RULES_V14");
+        assertThat(RuleParameters.v12Default().ruleVersion()).isEqualTo("TW_RULES_V12");
+        assertThat(TradingRadarRuleEngine.RULE_VERSION).isNotEqualTo(RuleParameters.V13_VERSION);
+        assertThat(RuleParameters.v12Default().ruleVersion()).isNotEqualTo(RuleParameters.V13_VERSION);
     }
 
     private static TreasuryYieldService serviceFor(

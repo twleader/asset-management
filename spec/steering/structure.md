@@ -203,7 +203,7 @@ bff/src/main/java/com/steven/assets/bff/
      `computeFromSeries` → **`simpleMa`（double）**。收斂它必須改 `simpleMa`，而那一支服務全部個股、
      會翻動所有個股的 `action`／`score`，故 Task 336 明文留為範圍外。**殘餘分歧已量化**：兩條路徑
      double 累加方向相同（皆 desc、新→舊），故下段的重放結果直接適用——`price.compareTo(ma)`
-     正負號翻動 0 日，2319 個可重放交易日中回測與 live 的美股 `regime` 0 日不同，分歧上限為 MA 的 0.01。
+     正負號翻動 0 日，2319 個可重放交易日中回測與 live 的美股 `regime` 0 日不同【**Requirement 82／Task 341 起不再成立**：量能兩欄已於該任務接進 production 與回測兩側，跨市場再多一個 applicability component。此結論只涵蓋 MA 路徑、**不再涵蓋量價欄**；後續重放或重跑 V13 校準須以升版後的實際欄位重新界定範圍】，分歧上限為 MA 的 0.01。
      **查這一組時 grep 必須用 `grep -ran "IXIC" backend/src/main/java/ bff/src/main/java/`**：
      只 grep `nasdaqSimpleMa`／`computeAllForNasdaq` 找不到 `BacktestService`（兩個識別字都沒有），
      而不加 `-a` 的 `grep -r` 會把部分 `.java` 判為 data 整檔靜默跳過。
@@ -226,9 +226,19 @@ bff/src/main/java/com/steven/assets/bff/
      **台股那組（(1)(2)(3)）仍未收斂**，其正解仍是先決定「MA 要不要併 live」再統一
      `TechnicalIndicatorService` 的算術路徑，屬獨立任務——Task 336 刻意只改 `nasdaqSimpleMa` 一支，
      同類別的 `simpleMa`／`taiexSimpleMa`／`maAt` 三支 double 累加版維持不動。
-   - **上述兩組具名例外之外，不得再新增任何一份同義值的獨立實作**：新的同義值一律回到本鐵則。
+   - **具名例外之三（Task 341 登記，狀態：併存，已量化確認同值）：IXIC 大盤「完成日量比」
+     （`MarketInput.marketVolumeRatio`）有兩份實作。** production 走
+     `TradingRadarMarketContextService.ratio()`，回測（`BacktestService.buildUsMarketRegimes()`）
+     走 `RadarInputAssembler.volumeRatio()`。**兩支演算法已逐項比對確認相同**：lookback 20、
+     最少 10 筆正成交量樣本、取中位數（偶數筆時 `divide(2, 8, HALF_UP)`）、最終
+     `divide(median, 4, HALF_UP)`、分母一律排除最新日。IXIC 為指數、不存在股票分割還原問題，
+     故無正確性風險。**為何 Task 341 沒有收斂：** 該任務的射程是「把已算出的量比接進評分」，
+     其 spec 明文禁止把回測改呼叫 `resolveMarketFromRows`（不在授權範圍），且反向要求回測
+     沿用既有的 `a.volumeRatio()`——那是為了同批消除「production 有值、回測傳 null」這個**更嚴重**
+     的分岔（回測分支會在線上生效、回測不生效且無測試可抓）。收斂兩支 helper 屬獨立任務。
+   - **上述三組具名例外之外，不得再新增任何一份同義值的獨立實作**：新的同義值一律回到本鐵則。
      引用例外時須逐條核對免罪理由是否真的適用——Task 335 的 arch 稽核正是發現「(3) 的『含 live』
-     理由對 IXIC 不成立」才揭出這一組。
+     理由對 IXIC 不成立」才揭出第二組；Task 341 的稽核則是發現量比欄同時被兩支 helper 餵養。
 5. **前端只 render，BFF 預先聚合 / 排序 / 過濾 / 計算 profit / profitRate 等衍生值。**
 
 ---
@@ -391,9 +401,9 @@ frontend/
 
 ```
 spec/
-├── requirements.md       # 81 個 Requirements（User Story + AC）
+├── requirements.md       # 82 個 Requirements（User Story + AC）
 ├── design.md             # 架構圖、ERD、Service 職責、Sequence
-├── tasks.md              # 任務索引（Task 1–228、264–267、269–292、297–309、311–340）＋ 尚未歸檔的 201 起區段
+├── tasks.md              # 任務索引（Task 1–228、264–267、269–292、297–309、311–341）＋ 尚未歸檔的 201 起區段
 ├── tasks/                # 任務檔
 │   ├── README.md         # 自足任務檔規範
 │   ├── archive/          # Task 1–200 歷史，已凍結

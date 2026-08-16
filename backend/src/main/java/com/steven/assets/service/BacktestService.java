@@ -1009,11 +1009,12 @@ public class BacktestService {
                                 .toList().toString(),
                         "每個 walk-forward fold 都在 trainTo 重新建立 adjusted completed-close sigma profile/grid；profile 無法由 train-only evidence 建立時，標記 FOLD_SIGMA_PROFILE_UNAVAILABLE 並 fail-closed。",
                         universeMode == BacktestDto.UniverseMode.FULL_MARKET
-                                ? "registry promotion 僅為本次 report 的 immutable evidence；production runtime 仍明確維持 TW_RULES_V12。"
+                                ? "registry promotion 僅為本次 report 的 immutable evidence；production runtime 仍明確維持 "
+                                        + TradingRadarRuleEngine.RULE_VERSION + "。"
                                 : "BOUNDED_DIAGNOSTIC 僅保留逐列診斷；在建立 production registry 前 fail closed。",
                         "report registry promoted key 數="
                                 + (registry == null ? 0 : registry.promotedParameters().size())
-                                + "；未通過、bounded 或缺證據的 key 維持 V12 fallback。"),
+                                + "；未通過、bounded 或缺證據的 key 維持 baseline fallback。"),
                 List.copyOf(gridIds),
                 Map.copyOf(selectedCandidates),
                 registry == null ? 0 : registry.promotedParameters().size(),
@@ -2931,7 +2932,18 @@ public class BacktestService {
                     new TradingRadarRuleEngine.MarketInput(
                             windowDesc.get(0).getClosePrice(), change, assembler.indicators(a.indicators()),
                             a.ma60Confirmation(), a.ma240Confirmation(), change,
-                            null, null, null, null, null, false));
+                            // Task 341.7：量比必須與 production 的 buildUsMarket() 同源。
+                            // RadarInputAssembler.volumeRatio 與 TradingRadarMarketContextService.ratio()
+                            // 演算法逐項相同（前 20 個正成交量日的中位數為分母、至少 10 筆樣本、scale 4
+                            // HALF_UP），且本方法已把 us_index_daily_history 的 volume 映射進轉型後的列。
+                            // 這裡若維持 null，production 補上量比後該計分分支會「線上生效、回測不生效」，
+                            // 且沒有任何測試抓得到——正是 Task 323 標題所說的「停止線上與回測分岔」。
+                            a.volumeRatio(),
+                            // marketTurnoverRatio：無成交值來源，與 production 一致維持 null。
+                            null,
+                            null, null, null, false,
+                            // crossMarketApplicable=false：美股大盤即 IXIC，跨市場因子不適用（同 production）。
+                            false));
             out.put(rows.get(t).getTradingDate(), result.regime());
         }
         return Map.copyOf(out);
@@ -4026,7 +4038,9 @@ public class BacktestService {
                             context.nasdaqChangePercent(),
                             context.soxChangePercent(),
                             context.usTechCompositePercent(),
-                            context.usTechAvailable()));
+                            context.usTechAvailable(),
+                            // 台股跨市場因子適用（同 production 的 buildMarket()），行為逐位不變。
+                            true));
             out.put(signalDate, r.regime());
         }
         return out;

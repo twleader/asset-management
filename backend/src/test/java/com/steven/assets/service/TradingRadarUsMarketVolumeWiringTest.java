@@ -26,8 +26,10 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -250,32 +252,78 @@ class TradingRadarUsMarketVolumeWiringTest {
                 "us_index_daily_history 沒有成交值／週轉率欄位，不得以成交量除以任何數字偽造");
     }
 
-    // ─────────── (e) MarketInput 守門：量能與完成日漲跌幅三欄仍為 null ───────────
+    // ─────────── (e) MarketInput 守門：量能兩欄與 MarketSummary 同源、不得各算一份 ───────────
 
+    /**
+     * Task 341（推翻 Task 323.2 的刻意留白）：{@code MarketInput} 的量能比與完成日漲跌幅
+     * 自本版起真正進 regime 分數。斷言從「仍為 null」翻轉為「守同源」而非直接刪除——
+     * 刪掉就失去「這兩欄為何一度刻意留白、後來又為何補上」的稽核痕跡。
+     *
+     * <p>{@code marketTurnoverRatio} 的 {@code assertNull} 是「不得偽造週轉率」的守門，不得動；
+     * 294 的跨市場三欄 {@code assertNull} 亦原封保留。</p>
+     */
     @Test
-    void 美股MarketInput的量能與完成日漲跌幅三欄仍為null不得跟著填() {
+    void 美股MarketInput的量能與完成日漲跌幅必須與同一份context同源() {
+        stubBaseline();
+        List<UsIndexDailyHistory> rows = ixicRowsDesc(completedUsDay(5));
+        when(usIndexRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 241)).thenReturn(rows);
+
+        TradingRadarDto.MarketSummary summary = newService().buildMarketSnapshot(US_MARKET).summary();
+
+        // 用「未被 spy 包住」的同一支實作、同一個 decisionInstant 與同一批 rows 重算期望值。
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<UsIndexDailyHistory>> usRowsCaptor = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<Instant> instantCaptor = ArgumentCaptor.forClass(Instant.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<TwseIndexDailyHistory>> twRowsCaptor = ArgumentCaptor.forClass(List.class);
+        verify(contextService, times(1)).resolveMarketFromRows(
+                eq(US_MARKET), instantCaptor.capture(), twRowsCaptor.capture(), usRowsCaptor.capture());
+        TradingRadarMarketContextService.MarketContext expected = realContextService.resolveMarketFromRows(
+                US_MARKET, instantCaptor.getValue(), List.of(), usRowsCaptor.getValue());
+
+        ArgumentCaptor<TradingRadarRuleEngine.MarketInput> captor =
+                ArgumentCaptor.forClass(TradingRadarRuleEngine.MarketInput.class);
+        verify(ruleEngine, times(1)).evaluateMarket(captor.capture());
+        TradingRadarRuleEngine.MarketInput usInput = captor.getValue();
+
+        assertNotNull(expected.marketVolumeRatio(), "前提：fixture 必須真的算得出量能比，測試才有意義");
+        assertNotNull(expected.completedMarketChangePercent(),
+                "前提：fixture 必須真的算得出完成日漲跌幅，測試才有意義");
+        assertEquals(expected.marketVolumeRatio(), usInput.marketVolumeRatio(),
+                "MarketInput 的量能比必須就是 resolveMarketFromRows 那一份，不得各算一份");
+        assertEquals(summary.marketVolumeRatio(), usInput.marketVolumeRatio(),
+                "MarketInput 與 MarketSummary 必須吃同一個 context（畫面顯示值與計分值不得分岔）");
+        assertEquals(expected.completedMarketChangePercent(), usInput.completedChangePercent(),
+                "完成日漲跌幅必須取 usContext 這一份；用未經完成日過濾的區域變數 changePercent "
+                        + "會與量比落在不同 as-of 日，把四個計分分支的正負號判錯");
+
+        assertNull(usInput.marketTurnoverRatio(),
+                "us_index_daily_history 沒有成交值／週轉率欄位，不得以成交量除以任何數字偽造");
+        // 294 既有護欄一併回歸：跨市場領先訊號三欄仍為缺值，且改以「不適用」表達而非「資料不足」。
+        assertNull(usInput.nasdaqChangePercent());
+        assertNull(usInput.soxChangePercent());
+        assertNull(usInput.usTechCompositePercent());
+        assertFalse(usInput.crossMarketApplicable(),
+                "美股大盤即 IXIC，跨市場因子不適用（Requirement 64 的排除未被推翻）");
+    }
+
+    // ─────────── (f) 假風險提醒消失 ───────────
+
+    /**
+     * Requirement 82 的可觀察行為：卡片顯示得出量比時，兩則假的「資料不足」提醒都不得再出現。
+     */
+    @Test
+    void 美股風險提醒不再出現量價與跨市場的假資料不足() {
         stubBaseline();
         when(usIndexRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 241))
                 .thenReturn(ixicRowsDesc(completedUsDay(5)));
 
         TradingRadarDto.MarketSummary summary = newService().buildMarketSnapshot(US_MARKET).summary();
 
-        assertNotNull(summary.marketVolumeRatio(),
-                "前提：MarketSummary 這端確實已接上，才證明 MarketInput 的 null 是刻意留白");
-        ArgumentCaptor<TradingRadarRuleEngine.MarketInput> captor =
-                ArgumentCaptor.forClass(TradingRadarRuleEngine.MarketInput.class);
-        verify(ruleEngine, times(1)).evaluateMarket(captor.capture());
-        TradingRadarRuleEngine.MarketInput usInput = captor.getValue();
-
-        // 這三欄在 TradingRadarRuleEngine 內是進 regime 分數的（score += 8／-= 10／-= 3／+= 3）。
-        // 台股端 buildMarket() 是把同一份 context 灌進去，鏡像照抄會直接翻動美股的 regime 與買進閘門。
-        assertNull(usInput.marketVolumeRatio(),
-                "Task 323 只改 MarketSummary；MarketInput 的量能比填了會翻動美股 regime 分數");
-        assertNull(usInput.marketTurnoverRatio());
-        assertNull(usInput.completedChangePercent());
-        // 294 既有護欄一併回歸：跨市場領先訊號四欄仍為缺值。
-        assertNull(usInput.nasdaqChangePercent());
-        assertNull(usInput.soxChangePercent());
-        assertNull(usInput.usTechCompositePercent());
+        assertNotNull(summary.marketVolumeRatio(), "前提：量比確實算得出來，否則本測試不成立");
+        assertTrue(summary.risks().stream().noneMatch(r -> r.contains("量價資料不足")),
+                "量比已接進 MarketInput，量價那則「資料不足」必須消失");
+        assertTrue(summary.risks().stream().noneMatch(r -> r.contains("美股科技共同交易日")),
+                "跨市場因子對美股是不適用，不得謊報成資料不足");
     }
 }

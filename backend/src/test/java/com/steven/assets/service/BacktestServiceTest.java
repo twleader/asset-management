@@ -794,9 +794,9 @@ class BacktestServiceTest {
     // ─────────────────────────── (i) 回歸 ───────────────────────────
 
     @Test
-    @DisplayName("Task 292 回測與 production 共用 TW_RULES_V12")
-    void ruleVersionIsV12() {
-        assertThat(TradingRadarRuleEngine.RULE_VERSION).isEqualTo("TW_RULES_V12");
+    @DisplayName("Task 292／341 回測與 production 共用 TW_RULES_V14")
+    void ruleVersionIsV14() {
+        assertThat(TradingRadarRuleEngine.RULE_VERSION).isEqualTo("TW_RULES_V14");
     }
 
     @Test
@@ -809,12 +809,12 @@ class BacktestServiceTest {
                 List.of(CODE), null, null, List.of(1), null, null));
 
         assertThat(response.v13()).isNull();
-        assertThat(response.ruleVersion()).isEqualTo("TW_RULES_V12");
+        assertThat(response.ruleVersion()).isEqualTo("TW_RULES_V14");
         assertThat(response.results()).isNotEmpty();
     }
 
     @Test
-    @DisplayName("Task 308 V13 request 產生真實 next-open 70/30 與 walk-forward 報告但維持 V12")
+    @DisplayName("Task 308 V13 request 產生真實 next-open 70/30 與 walk-forward 報告但 production 不升 V13")
     void v13RequestBuildsTradableGlobalSplitAndExplicitRejection() {
         List<StockPriceHistory> asc = series(270, 100, 0.001, 999, 0.0);
         stubRepos(asc, List.of());
@@ -825,7 +825,7 @@ class BacktestServiceTest {
 
         assertThat(response.v13()).isNotNull();
         BacktestDto.V13Report v13 = response.v13();
-        assertThat(v13.productionRuleVersion()).isEqualTo("TW_RULES_V12");
+        assertThat(v13.productionRuleVersion()).isEqualTo("TW_RULES_V14");
         assertThat(v13.productionPromoted()).isFalse();
         assertThat(v13.universeMode()).isEqualTo(BacktestDto.UniverseMode.BOUNDED_DIAGNOSTIC);
         assertThat(v13.promotedCandidateCount()).isZero();
