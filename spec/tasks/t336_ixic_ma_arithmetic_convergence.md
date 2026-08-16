@@ -294,6 +294,23 @@ org.opentest4j.AssertionFailedError: 精確和 153353.5000 / 20 = 7667.675，HAL
 3. **本次新造出一個殘餘分歧（非舊帳）**：live 雷達的美股 regime 走精確路徑、回測 `BacktestService.buildUsMarketRegimes()` 仍走 double，兩者由原本的 **bit-identical** 變成存在 0.01 上限的差異（歷史重放 0 日翻動 regime）。此為 336.3 明文刻意保留、已登記於 `spec/steering/structure.md` §3.2 具名例外之二。
 4. **`computeAllForNasdaq()` 的既有 javadoc（`:611`）在實作 subagent 交件時未修，由 `arch-auditor` 的 minor finding 揭出，主 agent 補修。** 該處原寫「MA 核心比照 `computeAllForTaiex()` 的既有寫法」，改動後在算術層已不成立（`taiexSimpleMa` 仍是 double）。已把「比照」限縮為**呼叫形狀**並明寫算術自 Task 336 起刻意不同。**只改註解文字、未動任何程式行為**，補修後重跑 `Nasdaq,SeriesAlignment,UsStockEngine,DualFormatSingleTable` 四支共 70 tests 全綠（BUILD SUCCESS）。此項已回寫為 336.2 的一個 checklist 條目。
 
+### 部署與驗證步驟 7（實機比對）
+
+依「已 merge 就從 main 的 worktree 建」的規則，於 `/Users/steven/Project/asset-management-main`（已確認在 `main`、工作區乾淨、無 `MERGE_HEAD`、已追平 `origin/main` 至 `d4c4d7cb`）執行 `docker compose -p asset-management build --no-cache business-services`（`BUILD_EXIT=0`，image `c35c27e5c201`），再 `up -d --no-deps --force-recreate business-services` ＋ `restart bff`。
+
+**兩頁的 IXIC 四條均線逐位相同：**
+
+| 來源 | MA5 | MA20 | MA60 | MA240 |
+|---|---|---|---|---|
+| 交易雷達美股組（`GET /api/trading-radar` → `usMarket`） | `26634.3` | `25848.52` | `26041.57` | `23898.84` |
+| 股市大盤查詢頁（`GET /api/public/market-index?market=IXIC&range=1y` 末筆） | `26634.3` | `25848.52` | `26041.57` | `23898.84` |
+
+同時確認美股組其他欄位正常：`asOfDate=2026-08-14`、`price=26729.1641`、`quoteStatus=VERIFIED_CLOSE`（**不是**「收盤價待補」）、`regime=RISK_ON`、`score=100`、`ruleVersion=TW_RULES_V12`（未升版）。兩份的 `closes` 末筆同為 `26729.1641`，確認取的是同一批列。
+
+`docker logs asset-bff --since 10m | grep -cE "Connection refused|500 Server Error"` → **0**；七個容器皆 `Up`／`(healthy)`；`curl -sI http://localhost/` → `HTTP/1.1 200 OK`。
+
+> **兩點部署期間的實況記錄。** (1) 首兩次 build 卡在 base image `resolve` 逾 25 分鐘無進展，查證後為**另一個 session 同時對同一個 compose project 跑 `--no-cache` build**（全機共用一組 buildkit 與一套 image tag）；停掉自己那次、等對方結束後重建即正常，與本次變更無關。(2) 驗證期間 `postgres`／`frontend` 被其他 session 重啟過，故依規定在下結論**前**重新 `docker inspect` 一次，確認運行中 image 仍是 `c35c27e5c201`、未被洗掉，上表數據對應的就是現行映像。
+
 ### 稽核紀錄
 
 - **spec 對抗式審查**：三輪，findings 逐輪收斂（2 critical／4 major → 0／2 → 0／1），critical 與 major 全數修完。第一輪揪出兩個事實錯誤（`ExcelExportService.indexMaAt` 其實會產出 IXIC 均線；`BacktestService.buildUsMarketRegimes()` 是第四個產出點），皆已改寫並重驗。
