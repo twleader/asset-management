@@ -221,6 +221,138 @@ class DividendCurrentStateProjectionServiceTest {
     }
 
     @Test
+    void collapseMergesEnrichmentOntoKeeperAndCancelsBareDuplicate() {
+        DividendCurrentStateRepository repository = mock(DividendCurrentStateRepository.class);
+        when(repository.findActiveEventDetails("00881", "台股")).thenReturn(List.of(
+                new DividendCurrentStateRepository.ActiveEventDetail(
+                        151L, null, 2026, LocalDate.of(2026, 1, 20), new BigDecimal("2.65"),
+                        null, LocalDate.of(2026, 2, 12), null, new BigDecimal("7.3878"),
+                        new BigDecimal("35.87"), 3),
+                new DividendCurrentStateRepository.ActiveEventDetail(
+                        1024L, "2b6394", 2026, LocalDate.of(2026, 1, 20),
+                        new BigDecimal("2.650000"), new BigDecimal("0.000000"),
+                        null, null, null, null, null)));
+        when(repository.findLatestHistorical(any(), any(), any(), any()))
+                .thenReturn(Optional.empty());
+        when(repository.findLatestComplete(any(), any(), any(), any(), any()))
+                .thenReturn(Optional.empty());
+
+        new DividendCurrentStateProjectionService(repository)
+                .projectOne("00881", "台股", DECISION);
+
+        verify(repository).cancelActiveEvent(1024L);
+        verify(repository, never()).cancelActiveEvent(151L);
+        verify(repository).applyMergedEnrichment(151L, "2b6394", LocalDate.of(2026, 2, 12),
+                null, new BigDecimal("7.3878"), new BigDecimal("35.87"), 3);
+    }
+
+    @Test
+    void collapseCancelsEveryBareDuplicateInAThreeRowGroup() {
+        DividendCurrentStateRepository repository = mock(DividendCurrentStateRepository.class);
+        when(repository.findActiveEventDetails("00881", "台股")).thenReturn(List.of(
+                new DividendCurrentStateRepository.ActiveEventDetail(
+                        153L, null, 2025, LocalDate.of(2025, 1, 17), new BigDecimal("0.75"),
+                        null, LocalDate.of(2025, 2, 18), null, new BigDecimal("3.0475"),
+                        null, null),
+                new DividendCurrentStateRepository.ActiveEventDetail(
+                        1023L, "1ab2dc", 2025, LocalDate.of(2025, 1, 17),
+                        new BigDecimal("0.750000"), new BigDecimal("0.000000"),
+                        null, null, null, null, null),
+                new DividendCurrentStateRepository.ActiveEventDetail(
+                        1030L, "9f00aa", 2025, LocalDate.of(2025, 1, 17),
+                        new BigDecimal("0.75"), null, null, null, null, null, null)));
+        when(repository.findLatestHistorical(any(), any(), any(), any()))
+                .thenReturn(Optional.empty());
+        when(repository.findLatestComplete(any(), any(), any(), any(), any()))
+                .thenReturn(Optional.empty());
+
+        new DividendCurrentStateProjectionService(repository)
+                .projectOne("00881", "台股", DECISION);
+
+        verify(repository).cancelActiveEvent(1023L);
+        verify(repository).cancelActiveEvent(1030L);
+        verify(repository, never()).cancelActiveEvent(153L);
+        verify(repository).applyMergedEnrichment(153L, "1ab2dc", LocalDate.of(2025, 2, 18),
+                null, new BigDecimal("3.0475"), null, null);
+    }
+
+    @Test
+    void collapseRunsEvenWhenNoSnapshotEvidenceExists() {
+        DividendCurrentStateRepository repository = mock(DividendCurrentStateRepository.class);
+        when(repository.findActiveEventDetails("00881", "台股")).thenReturn(List.of(
+                new DividendCurrentStateRepository.ActiveEventDetail(
+                        151L, null, 2026, LocalDate.of(2026, 1, 20), new BigDecimal("2.65"),
+                        null, LocalDate.of(2026, 2, 12), null, null, null, null),
+                new DividendCurrentStateRepository.ActiveEventDetail(
+                        1024L, "2b6394", 2026, LocalDate.of(2026, 1, 20),
+                        new BigDecimal("2.65"), null, null, null, null, null, null)));
+        when(repository.findLatestHistorical(any(), any(), any(), any()))
+                .thenReturn(Optional.empty());
+        when(repository.findLatestComplete(any(), any(), any(), any(), any()))
+                .thenReturn(Optional.empty());
+
+        boolean projected = new DividendCurrentStateProjectionService(repository)
+                .projectOne("00881", "台股", DECISION);
+
+        assertThat(projected).isFalse();
+        verify(repository).cancelActiveEvent(1024L);
+        verify(repository).applyMergedEnrichment(
+                eq(151L), eq("2b6394"), eq(LocalDate.of(2026, 2, 12)), any(), any(), any(), any());
+    }
+
+    @Test
+    void cancelPassKeepsSameDateSameAmountRowDespiteDifferentKeyAndPaymentDate() {
+        DividendCurrentStateRepository repository = mock(DividendCurrentStateRepository.class);
+        LocalDate decisionDate = LocalDate.of(2026, 8, 9);
+        LocalDate horizon = decisionDate.plusDays(45);
+        var authoritative = new DividendCurrentStateRepository.Event(
+                "a31f09", 2026, LocalDate.of(2026, 8, 18), new BigDecimal("4.60"),
+                BigDecimal.ZERO, null, null);
+        var snapshot = new DividendCurrentStateRepository.Snapshot(
+                15L, "00881", "台股", "FinMind", decisionDate, horizon, DECISION,
+                List.of(authoritative));
+        when(repository.findLatestHistorical(any(), any(), any(), any()))
+                .thenReturn(Optional.empty());
+        when(repository.findLatestComplete(any(), any(), any(), any(), any()))
+                .thenReturn(Optional.of(snapshot));
+        when(repository.findActiveFutureEvents(any(), any(), any(), any(), any()))
+                .thenReturn(List.of(new DividendCurrentStateRepository.ActiveFutureEvent(
+                        1122L, "d448df", 2026, LocalDate.of(2026, 8, 18),
+                        new BigDecimal("4.600000"), null, LocalDate.of(2026, 9, 11), null)));
+
+        assertThat(new DividendCurrentStateProjectionService(repository)
+                .projectOne("00881", "台股", DECISION)).isTrue();
+
+        verify(repository, never()).cancelActiveEvent(anyLong());
+    }
+
+    @Test
+    void cancelPassStillCancelsDifferentAmountOnTheSameExDate() {
+        DividendCurrentStateRepository repository = mock(DividendCurrentStateRepository.class);
+        LocalDate decisionDate = LocalDate.of(2026, 8, 9);
+        LocalDate horizon = decisionDate.plusDays(45);
+        var authoritative = new DividendCurrentStateRepository.Event(
+                "a31f09", 2026, LocalDate.of(2026, 8, 18), new BigDecimal("4.60"),
+                BigDecimal.ZERO, null, null);
+        var snapshot = new DividendCurrentStateRepository.Snapshot(
+                16L, "00881", "台股", "FinMind", decisionDate, horizon, DECISION,
+                List.of(authoritative));
+        when(repository.findLatestHistorical(any(), any(), any(), any()))
+                .thenReturn(Optional.empty());
+        when(repository.findLatestComplete(any(), any(), any(), any(), any()))
+                .thenReturn(Optional.of(snapshot));
+        when(repository.findActiveFutureEvents(any(), any(), any(), any(), any()))
+                .thenReturn(List.of(new DividendCurrentStateRepository.ActiveFutureEvent(
+                        999L, null, 2026, LocalDate.of(2026, 8, 18),
+                        new BigDecimal("2.00"), BigDecimal.ZERO, null, null)));
+
+        assertThat(new DividendCurrentStateProjectionService(repository)
+                .projectOne("00881", "台股", DECISION)).isTrue();
+
+        verify(repository).cancelActiveEvent(999L);
+    }
+
+    @Test
     void missingCompleteAndHistoricalEvidenceLeavesCurrentStateUntouched() {
         DividendCurrentStateRepository repository = mock(DividendCurrentStateRepository.class);
         when(repository.findLatestHistorical(any(), any(), any(), any()))

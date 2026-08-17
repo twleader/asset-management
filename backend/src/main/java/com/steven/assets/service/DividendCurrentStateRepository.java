@@ -78,6 +78,11 @@ public interface DividendCurrentStateRepository {
         }
     }
 
+    record ActiveEventDetail(long id, String eventKey, Integer year, LocalDate exDividendDate,
+            BigDecimal cashDividend, BigDecimal stockDividend, LocalDate cashPaymentDate,
+            LocalDate stockPaymentDate, BigDecimal yieldPct, BigDecimal previousClose,
+            Integer fillDays) {}
+
     Optional<Snapshot> findLatestComplete(
             String code, String market, Instant decisionInstant,
             LocalDate requiredFrom, LocalDate requiredTo);
@@ -88,6 +93,14 @@ public interface DividendCurrentStateRepository {
     List<ActiveFutureEvent> findActiveFutureEvents(
             String code, String market, LocalDate afterDate,
             LocalDate scopeFrom, LocalDate scopeTo);
+
+    /** 某檔全部 ACTIVE 且除息日非 null 的事件列（含 enrichment 欄位），id 升冪。 */
+    List<ActiveEventDetail> findActiveEventDetails(String code, String market);
+
+    /** 把合併後的 metadata/enrichment 寫回 keeper 列（不改金額、除息日、狀態）。 */
+    void applyMergedEnrichment(long id, String eventKey, LocalDate cashPaymentDate,
+            LocalDate stockPaymentDate, BigDecimal yieldPct, BigDecimal previousClose,
+            Integer fillDays);
 
     /** Apply an event from a complete, authoritative future calendar. */
     void upsertActiveEvent(String code, String market, String provider, ProjectedEvent event);
