@@ -214,6 +214,9 @@ public class InstitutionService {
                 .code(req.code())
                 .displayName(req.displayName())
                 .sortOrder(req.sortOrder() != null ? req.sortOrder() : 0)
+                // 未指定提領優先序 → 沿用 deposit_type.withdrawal_order 的 DB DEFAULT（中位數 50，介於活存與定存之間）
+                .withdrawalOrder(req.withdrawalOrder() != null
+                        ? req.withdrawalOrder() : DepositTypeEntity.DEFAULT_WITHDRAWAL_ORDER)
                 .active(true)
                 .build();
         return toDepositTypeResponse(depositTypeRepo.save(entity));
@@ -225,6 +228,7 @@ public class InstitutionService {
                 .orElseThrow(() -> new java.util.NoSuchElementException("找不到存款類型 ID: " + id));
         entity.setDisplayName(req.displayName());
         if (req.sortOrder() != null) entity.setSortOrder(req.sortOrder());
+        if (req.withdrawalOrder() != null) entity.setWithdrawalOrder(req.withdrawalOrder());
         return toDepositTypeResponse(depositTypeRepo.save(entity));
     }
 
@@ -591,7 +595,8 @@ public class InstitutionService {
     }
 
     private InstitutionDto.DepositTypeResponse toDepositTypeResponse(DepositTypeEntity d) {
-        return new InstitutionDto.DepositTypeResponse(d.getId(), d.getCode(), d.getDisplayName(), d.getSortOrder(), d.getActive());
+        return new InstitutionDto.DepositTypeResponse(d.getId(), d.getCode(), d.getDisplayName(), d.getSortOrder(),
+                d.getWithdrawalOrder(), d.getActive());
     }
 
     private InstitutionDto.MarketTypeResponse toMarketTypeResponse(MarketType m) {

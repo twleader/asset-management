@@ -10,6 +10,11 @@
         <el-table-column prop="sortOrder" label="排序" width="70" align="center" />
         <el-table-column prop="code" label="代碼（存入資料庫的值）" width="160" />
         <el-table-column prop="displayName" label="顯示名稱" min-width="160" />
+        <el-table-column prop="withdrawalOrder" label="提領優先序" width="110" align="center">
+          <template #default="{ row }">
+            <span :title="'越小越優先被提領（資產配置建議的存款減碼順序）'">{{ row.withdrawalOrder ?? 50 }}</span>
+          </template>
+        </el-table-column>
         <el-table-column label="狀態" width="90" align="center">
           <template #default="{ row }">
             <el-tag :type="row.active ? 'success' : 'danger'" size="small">
@@ -43,6 +48,13 @@
         <el-form-item label="排序">
           <el-input-number v-model="form.sortOrder" :min="0" :max="999" />
         </el-form-item>
+        <el-form-item label="提領優先序">
+          <el-input-number v-model="form.withdrawalOrder" :min="0" :max="999" />
+          <div class="field-hint">
+            越小越優先被提領。資產配置建議的存款減碼會依此順序逐筆抽取，優先動活存以避開定存中途解約的利息損失
+            （活存 10、美元活存 20、定存 90、美元定存 91）。
+          </div>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
@@ -64,7 +76,7 @@ const dialogVisible = ref(false)
 const editing = ref(null)
 const formRef = ref()
 
-const form = reactive({ code: '', displayName: '', sortOrder: 0 })
+const form = reactive({ code: '', displayName: '', sortOrder: 0, withdrawalOrder: 50 })
 const rules = {
   code:        [{ required: true, message: '請輸入代碼' }],
   displayName: [{ required: true, message: '請輸入顯示名稱' }]
@@ -82,10 +94,12 @@ function openDialog(item = null) {
     form.code = item.code
     form.displayName = item.displayName
     form.sortOrder = item.sortOrder ?? 0
+    form.withdrawalOrder = item.withdrawalOrder ?? 50
   } else {
     form.code = ''
     form.displayName = ''
     form.sortOrder = 0
+    form.withdrawalOrder = 50
   }
   dialogVisible.value = true
 }
@@ -97,14 +111,16 @@ async function save() {
     if (editing.value) {
       await bffApi.depositTypeSettings.update(editing.value.id, {
         displayName: form.displayName,
-        sortOrder: form.sortOrder
+        sortOrder: form.sortOrder,
+        withdrawalOrder: form.withdrawalOrder
       })
       ElMessage.success('已更新')
     } else {
       await bffApi.depositTypeSettings.create({
         code: form.code,
         displayName: form.displayName,
-        sortOrder: form.sortOrder
+        sortOrder: form.sortOrder,
+        withdrawalOrder: form.withdrawalOrder
       })
       ElMessage.success('已新增')
     }
@@ -129,4 +145,5 @@ onMounted(load)
 <style scoped>
 .page-header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
 .page-header h2 { margin: 0; flex: 1; }
+.field-hint { font-size: 12px; color: #909399; line-height: 1.5; margin-top: 4px; }
 </style>

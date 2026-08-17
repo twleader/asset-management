@@ -51,11 +51,21 @@ public record PortfolioAdviceResult(
             String rationale        // 理由
     ) {}
 
+    /**
+     * 再平衡的一筆操作。
+     *
+     * <p>Requirement 84 / Task 344 起新增 {@code subClass}：標的層級明細帶上所屬子類別
+     * （{@code LocalPortfolioAllocationEngine.SUBCLASS_*} 之一），供前端在同一個 {@code assetClass}
+     * 分組底下再以子類別小標分段（344.23(b)）。<b>類別層級的三筆（{@code holding} 為「整體」）
+     * 與 {@code llm} 檔位一律為 null</b>——前者橫跨整桶、後者由 LLM 產生且不含子類別概念；
+     * 前端須把 null 視為「不分段」而非空分組（344.23(d) 的向後相容）。</p>
+     */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record Rebalance(
             String assetClass,        // 所屬類別
+            String subClass,          // 所屬子類別（僅標的層級明細有值；類別層級與 llm 檔位為 null）
             String holding,           // 標的（個股代號／基金名稱／存款；或「整體」）
-            String action,            // BUY（增碼/買進）/ SELL（減碼/賣出）/ HOLD（維持）
+            String action,            // BUY（增碼/買進）/ SELL（減碼/賣出）/ HOLD（維持）/ UNSPECIFIED（知道金額但無法指名標的）
             BigDecimal estimatedAmount,// 估計操作金額（新台幣，正數）
             String rationale          // 理由
     ) {}

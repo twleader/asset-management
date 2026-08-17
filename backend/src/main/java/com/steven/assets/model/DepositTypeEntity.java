@@ -19,6 +19,12 @@ import lombok.NoArgsConstructor;
 @Builder
 public class DepositTypeEntity {
 
+    /**
+     * {@code withdrawal_order} 的預設值，與 Liquibase 欄位 DEFAULT 一致（中位數，介於活存與定存之間）。
+     * 使用者新增自己的存款類型時若未指定，即落在此值。
+     */
+    public static final int DEFAULT_WITHDRAWAL_ORDER = 50;
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -35,6 +41,11 @@ public class DepositTypeEntity {
     @Column(nullable = false)
     @Builder.Default
     private Integer sortOrder = 0;
+
+    /** 提領優先序：越小越優先被提領（資產配置建議的存款減碼 waterfall 用）。 */
+    @Column(name = "withdrawal_order", nullable = false)
+    @Builder.Default
+    private Integer withdrawalOrder = DEFAULT_WITHDRAWAL_ORDER;
 
     /** 是否啟用 */
     @Column(nullable = false)

@@ -60,6 +60,7 @@ class PortfolioAdviceServiceCurrentAllocationTest {
     @Mock private PortfolioAdviceSettingRepository settingRepo;
     @Mock private AssetSnapshotRepository snapshotRepo;
     @Mock private BankDepositRepository depositRepo;
+    @Mock private com.steven.assets.repository.DepositTypeRepository depositTypeRepo;
     @Mock private FundHoldingRepository fundRepo;
     @Mock private StockHoldingRepository stockRepo;
     @Mock private RetirementProjectionService projectionService;
@@ -91,7 +92,7 @@ class PortfolioAdviceServiceCurrentAllocationTest {
     void setUp() {
         portfolioAdviceService = new PortfolioAdviceService(
                 profileRepo, expenseRepo, adviceRepo, settingRepo, snapshotRepo,
-                depositRepo, fundRepo, stockRepo, projectionService, objectMapper, tenantGuard,
+                depositRepo, depositTypeRepo, fundRepo, stockRepo, projectionService, objectMapper, tenantGuard,
                 assetClassifier, stockMasterRepo, fundClassOverrideRepo, stockStyleRepo, localEngine);
 
         assetService = new AssetService(

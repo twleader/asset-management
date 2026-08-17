@@ -364,13 +364,43 @@
         <template v-if="latest.rebalancePlan && latest.rebalancePlan.length">
           <div class="block-title">再平衡操作明細（估計新台幣金額）</div>
           <ul class="action-list rebalance-list">
-            <li v-for="(r, i) in latest.rebalancePlan" :key="i">
-              <el-tag :type="rebalanceType(r.action)" size="small" effect="dark" class="prio-tag">{{ rebalanceLabel(r.action) }}</el-tag>
-              <span class="action-title">{{ r.holding || r.assetClass }}</span>
-              <span v-if="r.holding && r.assetClass" class="reb-class">（{{ r.assetClass }}）</span>
-              <span v-if="r.estimatedAmount != null" class="reb-amount" :class="rebalanceAmountClass(r.action)">約 {{ money(r.estimatedAmount) }} 元</span>
-              <div v-if="r.rationale" class="action-detail">{{ r.rationale }}</div>
-            </li>
+            <!-- Task 344.23(2)：分組（assetClass）／分段（subClass）／排序全部由 BFF 的
+                 latest.rebalanceGroups 預先算好，前端只負責 render（CLAUDE.md BFF 規範第 1 節）。 -->
+            <template v-if="latest.rebalanceGroups && latest.rebalanceGroups.length">
+              <li v-for="(g, gi) in latest.rebalanceGroups" :key="gi" class="reb-group">
+                <!-- 組標題＝BFF 判定出的類別層級那一筆（判定用的字面值只存在於 BFF） -->
+                <div v-if="g.header" class="reb-group-header">
+                  <el-tag :type="rebalanceType(g.header.action)" size="small" effect="dark" class="prio-tag">{{ rebalanceLabel(g.header.action) }}</el-tag>
+                  <span class="action-title">{{ g.header.holding || g.header.assetClass }}</span>
+                  <span v-if="g.header.holding && g.header.assetClass" class="reb-class">（{{ g.header.assetClass }}）</span>
+                  <span v-if="g.header.estimatedAmount != null" class="reb-amount" :class="rebalanceAmountClass(g.header.action)">約 {{ money(g.header.estimatedAmount) }} 元</span>
+                  <div v-if="g.header.rationale" class="action-detail">{{ g.header.rationale }}</div>
+                </div>
+                <!-- 無小標段落（BFF 給 subClass: null，如存款群組明細）不印標題，照順序列出 -->
+                <div v-for="(sec, si) in g.sections" :key="si" class="reb-sub-section">
+                  <div v-if="sec.subClass" class="reb-sub-title">{{ sec.subClass }}</div>
+                  <ul class="reb-detail-list">
+                    <li v-for="(r, ri) in sec.rows" :key="ri" class="reb-detail-item">
+                      <el-tag :type="rebalanceType(r.action)" size="small" effect="dark" class="prio-tag">{{ rebalanceLabel(r.action) }}</el-tag>
+                      <span class="action-title">{{ r.holding || r.assetClass }}</span>
+                      <span v-if="r.estimatedAmount != null" class="reb-amount" :class="rebalanceAmountClass(r.action)">約 {{ money(r.estimatedAmount) }} 元</span>
+                      <div v-if="r.rationale" class="action-detail">{{ r.rationale }}</div>
+                    </li>
+                  </ul>
+                </div>
+              </li>
+            </template>
+            <!-- rebalanceGroups 缺漏或為空：llm 檔位、本任務落地前的舊建議，或 BFF 尚未升版。
+                 退回既有扁平渲染，逐字維持現況、不重排 LLM 的輸出順序（344.23(1)(2) 向後相容） -->
+            <template v-else>
+              <li v-for="(r, i) in latest.rebalancePlan" :key="i">
+                <el-tag :type="rebalanceType(r.action)" size="small" effect="dark" class="prio-tag">{{ rebalanceLabel(r.action) }}</el-tag>
+                <span class="action-title">{{ r.holding || r.assetClass }}</span>
+                <span v-if="r.holding && r.assetClass" class="reb-class">（{{ r.assetClass }}）</span>
+                <span v-if="r.estimatedAmount != null" class="reb-amount" :class="rebalanceAmountClass(r.action)">約 {{ money(r.estimatedAmount) }} 元</span>
+                <div v-if="r.rationale" class="action-detail">{{ r.rationale }}</div>
+              </li>
+            </template>
           </ul>
         </template>
 
@@ -573,6 +603,11 @@ function visibleSubAllocations(t) {
   const subs = t && Array.isArray(t.subAllocations) ? t.subAllocations : []
   return subs.filter(s => Number(s.targetPct) !== 0 || Number(s.currentValue) > 0)
 }
+
+// Task 344.23(2)：「再平衡操作明細」的分組（assetClass）／分段（subClass）／排序全部搬進 BFF
+// （RebalanceGrouper → latest.rebalanceGroups），前端只 render，故此處不再有任何分組邏輯，
+// 也不再手抄後端的類別層級標記與五個子類別字面值（兩份手抄必然漂移）。
+// rebalanceGroups 缺漏或為空時（llm 檔位、本任務落地前的舊建議），template 退回扁平 rebalancePlan 渲染。
 const availableModels = computed(() => settings.value.availableModels || [])
 const availableEfforts = computed(() => settings.value.availableEfforts || [])
 const availableWebSearches = computed(() => settings.value.availableWebSearches || [])
@@ -654,6 +689,9 @@ function rebalanceType(a) {
     case 'BUY': return 'success'
     case 'SELL': return 'danger'
     case 'HOLD': return 'info'
+    // 344.16：本機引擎判斷「該子類別沒有可分攤的持有標的、無法指名該買哪一檔」時輸出的第四種 action。
+    // 用 warning（非 success）避免看起來像可直接執行的綠色「增碼」——那會誤導使用者去下一張根本沒有標的的單。
+    case 'UNSPECIFIED': return 'warning'
     default: return 'info'
   }
 }
@@ -662,6 +700,7 @@ function rebalanceLabel(a) {
     case 'BUY': return '增碼'
     case 'SELL': return '減碼'
     case 'HOLD': return '維持'
+    case 'UNSPECIFIED': return '無法指名'
     default: return a || '—'
   }
 }
@@ -1014,6 +1053,32 @@ onUnmounted(stopPoll)
 .rebalance-list .reb-amount { margin-left: 8px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .rebalance-list .reb-amount.buy { color: #059669; }
 .rebalance-list .reb-amount.sell { color: #dc2626; }
+
+/* Task 344.23：以 assetClass 分組——組標題（.reb-group-header）沿用 .action-list li 原本的
+   間距／分隔線，外層 <li class="reb-group"> 本身歸零，讓「只有組標題、無標的層級明細」的舊資料
+   （本任務落地前的建議）渲染結果與改動前一致；標的層級明細（.reb-detail-list）縮排並用較淺的
+   分隔線呈現次一層級。 */
+.rebalance-list li.reb-group { padding: 0; border-bottom: none; }
+.rebalance-list .reb-group-header { padding: 8px 0; border-bottom: 1px dashed #f1f5f9; }
+.rebalance-list .reb-detail-list { list-style: none; margin: 0; padding-left: 20px; }
+.rebalance-list .reb-detail-list .reb-detail-item { padding: 6px 0; border-bottom: 1px dashed #f8fafc; }
+.rebalance-list .reb-detail-list .reb-detail-item:last-child { border-bottom: none; }
+.rebalance-list .reb-detail-list .action-title { font-weight: 500; }
+
+/* Task 344.23：子類別小標——股票桶內同時有賣（成長型減碼）有買（收益型增碼）時，
+   沒有小標會像系統自相矛盾，所以刻意做成有底色的識別標籤，不做成不起眼的灰字。
+   無小標段落（.reb-sub-title 不存在，如存款群組）維持原本間距不受影響。 */
+.rebalance-list .reb-sub-section + .reb-sub-section { margin-top: 4px; }
+.rebalance-list .reb-sub-title {
+  display: inline-block;
+  margin: 6px 0 4px 20px;
+  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #1e3a8a;
+  background: #e0e7ff;
+  border-radius: 4px;
+}
 
 .disclaimer-top {
   background: #fffbeb; border: 1px solid #fde68a; color: #92400e;

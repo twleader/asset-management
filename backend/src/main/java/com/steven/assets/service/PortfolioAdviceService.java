@@ -18,6 +18,7 @@ import com.steven.assets.dto.PortfolioAdviceSettingsDto;
 import com.steven.assets.dto.RetirementProjectionDto;
 import com.steven.assets.model.AssetSnapshot;
 import com.steven.assets.model.BankDeposit;
+import com.steven.assets.model.DepositTypeEntity;
 import com.steven.assets.model.FundHolding;
 import com.steven.assets.model.InvestmentPlannedExpense;
 import com.steven.assets.model.InvestmentProfile;
@@ -29,6 +30,7 @@ import com.steven.assets.model.StockHolding;
 import com.steven.assets.model.StockStyle;
 import com.steven.assets.repository.AssetSnapshotRepository;
 import com.steven.assets.repository.BankDepositRepository;
+import com.steven.assets.repository.DepositTypeRepository;
 import com.steven.assets.repository.FundClassOverrideRepository;
 import com.steven.assets.repository.FundHoldingRepository;
 import com.steven.assets.repository.InvestmentPlannedExpenseRepository;
@@ -196,6 +198,11 @@ public class PortfolioAdviceService {
     private final PortfolioAdviceSettingRepository settingRepo;
     private final AssetSnapshotRepository snapshotRepo;
     private final BankDepositRepository depositRepo;
+    /**
+     * 提領優先序（{@code deposit_type.withdrawal_order}）的來源，供存款減碼 waterfall 用（Task 344.4）。
+     * <b>禁止 Enum 寫死</b>：存款類型是使用者可自行新增的業務分類，判準必須入庫。
+     */
+    private final DepositTypeRepository depositTypeRepo;
     private final FundHoldingRepository fundRepo;
     private final StockHoldingRepository stockRepo;
     private final RetirementProjectionService projectionService;
@@ -313,9 +320,34 @@ public class PortfolioAdviceService {
      */
     @Transactional(readOnly = true)
     public CurrentAllocationDto getCurrentAllocation() {
+        return allocationContext().dto();
+    }
+
+    /**
+     * {@link #getCurrentAllocation()} 的計算素材（Task 344.20）：除了對外的 {@link CurrentAllocationDto}，
+     * 另帶出建 DTO 時<b>順手查好的</b> {@code stockNameMap}、四份 override Map 與 {@code incomeThreshold}。
+     *
+     * <p>存在的理由：{@code buildLocalResult} 要把差額攤到逐筆持有時，需要對同一批股票／基金做<b>完全相同的</b>
+     * 子類別分類與顯示名稱查表。這些原本全是 {@code getCurrentAllocation()} 的區域變數、
+     * 而 {@code CurrentAllocationDto} 不含其中任何一份；在「不得改 public 簽章／DTO 形狀」的前提下，
+     * 不抽這一層就只剩「再 {@code findAll()} 一次」或「複製那 15 行」兩條路——後者正是
+     * 「兩套分類會漂移」要避免的情形（「② 我目前的資產配置」與「再平衡明細」對同一檔股票歸到不同子類別）。</p>
+     */
+    private record AllocationContext(
+            CurrentAllocationDto dto,
+            Map<String, String> stockNameMap,
+            Map<String, String> stockClassOverride,
+            Map<String, String> stockStyleOverride,
+            Map<String, String> bondTermOverride,
+            Map<String, FundClassOverride> fundOverride,
+            BigDecimal incomeThreshold) {}
+
+    /** {@link #getCurrentAllocation()} 的本體；public 方法只是委派並回傳其中的 DTO（對外契約完全不變）。 */
+    private AllocationContext allocationContext() {
         AssetSnapshot s = snapshotRepo.findLatest().orElse(null);
         if (s == null) {
-            return CurrentAllocationDto.empty();
+            return new AllocationContext(CurrentAllocationDto.empty(),
+                    Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), null);
         }
         BigDecimal deposit = nz(s.getTotalDeposit());
         BigDecimal fund = nz(s.getTotalFundValue());
@@ -378,7 +410,9 @@ public class PortfolioAdviceService {
         items.add(new CurrentAllocationDto.Item("存款（現金）", deposit, pct(deposit, total), List.of()));
         items.add(new CurrentAllocationDto.Item("信託基金", fund, pct(fund, total), toSubItems(fundSub, fund)));
         items.add(new CurrentAllocationDto.Item("股票", stock, pct(stock, total), toSubItems(stockSub, stock)));
-        return new CurrentAllocationDto(s.getId(), s.getSnapshotDate(), total, items);
+        return new AllocationContext(
+                new CurrentAllocationDto(s.getId(), s.getSnapshotDate(), total, items),
+                stockNameMap, stockClassOverride, stockStyleOverride, bondTermOverride, fundOverride, incomeThreshold);
     }
 
     /** 五個子類別的累加容器，鍵一律 {@link LocalPortfolioAllocationEngine} 的 {@code SUBCLASS_*} 常數。 */
@@ -394,7 +428,16 @@ public class PortfolioAdviceService {
 
     /** {@link AssetClassifier} 的分類代碼（GROWTH/INCOME/SHORT/MID/LONG）→ 中文子類別名稱後累加金額。 */
     private static void addToSub(Map<String, BigDecimal> m, String classifierCode, BigDecimal val) {
-        String label = switch (classifierCode) {
+        m.merge(subClassLabel(classifierCode), val, BigDecimal::add);
+    }
+
+    /**
+     * {@link AssetClassifier} 的分類代碼 → 中文子類別名稱。
+     * Task 344 的逐筆持有明細與「② 我目前的資產配置」共用這一支，<b>不得寫第二套對照</b>
+     * ——兩套一定會漂移，同一檔股票會在兩個區塊被歸到不同子類別。
+     */
+    private static String subClassLabel(String classifierCode) {
+        return switch (classifierCode) {
             case AssetClassifier.GROWTH -> LocalPortfolioAllocationEngine.SUBCLASS_GROWTH;
             case AssetClassifier.INCOME -> LocalPortfolioAllocationEngine.SUBCLASS_INCOME;
             case AssetClassifier.SHORT -> LocalPortfolioAllocationEngine.SUBCLASS_BOND_SHORT;
@@ -402,7 +445,6 @@ public class PortfolioAdviceService {
             case AssetClassifier.LONG -> LocalPortfolioAllocationEngine.SUBCLASS_BOND_LONG;
             default -> LocalPortfolioAllocationEngine.SUBCLASS_GROWTH; // 理論不可達，classifyStockStyle/classifyBondTerm 值域固定
         };
-        m.merge(label, val, BigDecimal::add);
     }
 
     /** 累加結果 → 只保留金額 &gt; 0 的子類別 SubItem 清單；{@code pct} 為占「所屬頂層桶」的占比，非占資產總額。 */
@@ -637,7 +679,7 @@ public class PortfolioAdviceService {
 
         // Task 339 的引擎分岔——**務必在下方金鑰檢查之前**（local 檔位無金鑰時仍須成功）
         if (!ENGINE_LLM.equals(engine)) {
-            PortfolioAdviceResult localResult = buildLocalResult(profile, totalAssets);
+            PortfolioAdviceResult localResult = buildLocalResult(profile, totalAssets, snapshot);
             return ENGINE_LOCAL.equals(engine)
                     ? completeLocal(row, localResult, ownerId)
                     : startHybrid(row, localResult, ownerId, model, effort);
@@ -689,17 +731,104 @@ public class PortfolioAdviceService {
      *   <li>金額算術：既有 {@link #enrich(PortfolioAdviceResult, BigDecimal)}（三檔位同一支）</li>
      * </ul>
      * {@code rebalancePlan} 在 enrich 之後才由
-     * {@link LocalPortfolioAllocationEngine#withRebalancePlan} 依回填好的 {@code deltaAmount} 產生。
+     * {@link LocalPortfolioAllocationEngine#withRebalancePlan} 依回填好的 {@code deltaAmount} 產生，
+     * 最後再由 {@link LocalPortfolioAllocationEngine#withHoldingLevelRebalance} 把各子類別的差額
+     * 攤到逐筆持有標的（Requirement 84 / Task 344）。
+     *
+     * @param snapshot {@code generate()} 已取得的最新快照（逐筆持有明細的來源；
+     *                 {@code getCurrentAllocation()} 回傳的 DTO <b>不含任何逐筆持有列</b>，故必須另外傳入。
+     *                 為 null（無快照）時 {@code deltaAmount} 亦全為 null，標的層級整組略過）
      */
-    private PortfolioAdviceResult buildLocalResult(InvestmentProfile profile, BigDecimal totalAssets) {
-        CurrentAllocationDto current = getCurrentAllocation();
+    private PortfolioAdviceResult buildLocalResult(InvestmentProfile profile, BigDecimal totalAssets,
+                                                   AssetSnapshot snapshot) {
+        AllocationContext ctx = allocationContext();
+        CurrentAllocationDto current = ctx.dto();
         RetirementProjectionDto projection = getProjection();
         Integer years = LocalPortfolioAllocationEngine.yearsToRetirement(
                 LocalDate.now(), profile.getRetirementDate(), profile.getBirthDate());
         PortfolioAdviceResult base = localEngine.evaluate(
                 profile.getRiskTolerance(), years, current, projection);
         PortfolioAdviceResult withPlan = localEngine.withRebalancePlan(enrich(base, totalAssets));
-        return localEngine.withSubAllocationAmounts(withPlan, current, profile.getRiskTolerance(), years);
+        PortfolioAdviceResult withSub = localEngine.withSubAllocationAmounts(
+                withPlan, current, profile.getRiskTolerance(), years);
+        return localEngine.withHoldingLevelRebalance(withSub, holdingBreakdown(snapshot, ctx));
+    }
+
+    /**
+     * 組出交給 {@link LocalPortfolioAllocationEngine#withHoldingLevelRebalance} 的逐筆持有明細
+     * （Task 344.5／344.15／344.20）。
+     *
+     * <p>三類的來源：股票／基金取自 {@code snapshot.getStocks()}／{@code getFunds()}（{@code generate()} 已取得的
+     * 同一個快照，不重查）；存款走既有 {@link BankDepositRepository#findWithBankBySnapshotId}
+     * （已 {@code LEFT JOIN FETCH d.bank}，否則取 {@code bank.getDisplayName()} 會觸發 N 次 lazy load）。</p>
+     *
+     * <p>子類別判定<b>複用 {@link #allocationContext()} 的同一組 {@link AssetClassifier} 呼叫與同一份 override Map</b>，
+     * 不寫第二套分類邏輯。提領優先序取自 {@code deposit_type.withdrawal_order}（CLAUDE.md「禁止 Enum 寫死」）
+     * ——判準<b>不得</b>改用「名稱含定存」或「利率 &gt; 0」：實測「美元定存」利率為 NULL、「優利活存 1.5%」為 1.5%，
+     * 兩種判法都判錯。</p>
+     */
+    private LocalPortfolioAllocationEngine.HoldingBreakdown holdingBreakdown(
+            AssetSnapshot snapshot, AllocationContext ctx) {
+        if (snapshot == null) {
+            return new LocalPortfolioAllocationEngine.HoldingBreakdown(List.of());
+        }
+        List<LocalPortfolioAllocationEngine.Holding> holdings = new ArrayList<>();
+
+        for (StockHolding st : snapshot.getStocks()) {
+            String key = st.getMarket() + "|" + st.getStockCode();
+            String cls = assetClassifier.classifyStock(st.getStockCode(), st.getMarket(),
+                    ctx.stockClassOverride().get(key));
+            String subClass = AssetClassifier.BOND.equals(cls)
+                    ? subClassLabel(assetClassifier.classifyBondTerm(st.getStockCode(), st.getMarket(),
+                            ctx.stockNameMap().get(key), ctx.bondTermOverride().get(key)))
+                    : subClassLabel(assetClassifier.classifyStockStyle(st.getStockCode(), st.getMarket(),
+                            ctx.stockStyleOverride().get(key), st.getDividendRate(), ctx.incomeThreshold()));
+            holdings.add(new LocalPortfolioAllocationEngine.Holding(
+                    LocalPortfolioAllocationEngine.CLASS_STOCK, subClass,
+                    stockDisplayName(ctx.stockNameMap().get(key), st.getStockCode()),
+                    nz(st.getCurrentValue()), null, null, null, key));
+        }
+
+        for (FundHolding fh : snapshot.getFunds()) {
+            String fname = fh.getFundName();
+            FundClassOverride ov = ctx.fundOverride().get(fname);
+            String cls = assetClassifier.classifyFund(fname, ov != null ? ov.getAssetClass() : null);
+            String subClass = AssetClassifier.BOND.equals(cls)
+                    ? subClassLabel(assetClassifier.classifyBondTerm(null, null, fname,
+                            ov != null ? ov.getBondTerm() : null))
+                    : subClassLabel(assetClassifier.classifyStockStyle(null, null,
+                            ov != null ? ov.getStockStyle() : null, null, ctx.incomeThreshold()));
+            holdings.add(new LocalPortfolioAllocationEngine.Holding(
+                    LocalPortfolioAllocationEngine.CLASS_FUND, subClass, fname,
+                    nz(fh.getCurrentValue()), null, null, null, fname));
+        }
+
+        Map<String, Integer> withdrawalOrders = new HashMap<>();
+        for (DepositTypeEntity dt : depositTypeRepo.findAll()) {
+            withdrawalOrders.put(dt.getCode(), dt.getWithdrawalOrder());
+        }
+        for (BankDeposit d : depositRepo.findWithBankBySnapshotId(snapshot.getId())) {
+            String bankName = d.getBank() == null ? null : d.getBank().getDisplayName();
+            String displayName = (bankName == null || bankName.isBlank())
+                    ? String.valueOf(d.getDepositType()) : bankName + " " + d.getDepositType();
+            // 存款不合併（一列 bank_deposit 即一個標的）→ stableKey 含列 id
+            String stableKey = (d.getBank() == null ? "-" : String.valueOf(d.getBank().getId()))
+                    + "|" + d.getDepositType() + "|" + d.getCurrency() + "|" + d.getId();
+            holdings.add(new LocalPortfolioAllocationEngine.Holding(
+                    LocalPortfolioAllocationEngine.CLASS_CASH, null, displayName,
+                    nz(d.getAmount()), withdrawalOrders.get(d.getDepositType()),
+                    d.getAnnualInterestRate(), d.getCurrency(), stableKey));
+        }
+        return new LocalPortfolioAllocationEngine.HoldingBreakdown(List.copyOf(holdings));
+    }
+
+    /**
+     * 標的顯示名稱（344.15）：{@code {stock 主檔 name}（{stockCode}）}；查不到 {@code name} 時<b>只顯示代號</b>
+     * ——不得輸出 {@code null（0050）}。使用者下單要打代號故代號不能拿掉，但清單會出現 00865B／00697B
+     * 這類他不見得記得住的代號，只給代號等於要他自己再去查。
+     */
+    static String stockDisplayName(String name, String stockCode) {
+        return (name == null || name.isBlank()) ? String.valueOf(stockCode) : name + "（" + stockCode + "）";
     }
 
     /**
