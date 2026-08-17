@@ -76,7 +76,13 @@ public class PortfolioAdviceBffController {
 
         return Mono.zip(latestMono, historyMono, profileMono, settingsMono, allocationMono, projectionMono).map(t -> {
             Map<String, Object> body = new HashMap<>();
-            body.put("latest", t.getT1());
+            // Task 344.23(1)：再平衡明細的分組／分段／排序在 BFF 做完，前端只 render。
+            // 必須先複製再 put——上方 latestMono 的 onErrorReturn 回的是不可變的 Collections.emptyMap()，
+            // 直接對它 put 會拋 UnsupportedOperationException，把「200 ＋ 空資料」降級路徑變成 500。
+            // 既有先例：SnapshotDetailBffController、DashboardBffController 皆複製後再 put。
+            Map<String, Object> latest = new HashMap<>(t.getT1());
+            latest.put("rebalanceGroups", RebalanceGrouper.group(t.getT1()));
+            body.put("latest", latest);
             body.put("history", t.getT2());
             body.put("profile", t.getT3());
             body.put("settings", t.getT4());

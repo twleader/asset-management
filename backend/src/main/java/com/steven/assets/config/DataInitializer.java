@@ -180,24 +180,35 @@ public class DataInitializer implements ApplicationRunner {
         }
     }
 
+    /** 存款類型的產品 seed 一列；{@code withdrawalOrder} 為提領優先序（越小越優先被提領，Task 344.3）。 */
+    record DepositTypeSeed(String code, String displayName, int sortOrder, int withdrawalOrder) {}
+
+    /**
+     * <b>產品 seed（供全新 DB 建立時用）</b>——只放本專案內建的六個類型。
+     *
+     * <p><b>使用者自建的私有分類（如運行中 DB 的「優利活存 1.5%」）一律不得列入</b>：那不是產品的一部分，
+     * 寫進來等於在任何乾淨 DB 上憑空建出別人的分類（名稱還內含會過期的利率字面值）。
+     * 既有已部署 DB 的 {@code withdrawal_order} 回填是另一件事，寫在
+     * {@code v1.107.0-deposit-type-withdrawal-order.sql} 的一次性 UPDATE——下方迴圈
+     * <b>只 INSERT、從不 UPDATE</b>，光改這份常數一列都回填不到。</p>
+     */
+    static final List<DepositTypeSeed> DEPOSIT_TYPE_SEEDS = List.of(
+        new DepositTypeSeed("活存",         "台幣活存",       1, 10),
+        new DepositTypeSeed("定存",         "台幣定存",       2, 90),
+        new DepositTypeSeed("美元活存",     "美元活存",       3, 20),
+        new DepositTypeSeed("美元定存",     "美元定存",       4, 91),
+        new DepositTypeSeed("證券戶",       "證券戶",         5, 50),
+        new DepositTypeSeed("信用卡待付款", "信用卡待付款",   6, 50)
+    );
+
     private void seedDepositTypes() {
-        record DepositTypeSeed(String code, String displayName, int sortOrder) {}
-
-        List<DepositTypeSeed> seeds = List.of(
-            new DepositTypeSeed("活存",         "台幣活存",       1),
-            new DepositTypeSeed("定存",         "台幣定存",       2),
-            new DepositTypeSeed("美元活存",     "美元活存",       3),
-            new DepositTypeSeed("美元定存",     "美元定存",       4),
-            new DepositTypeSeed("證券戶",       "證券戶",         5),
-            new DepositTypeSeed("信用卡待付款", "信用卡待付款",   6)
-        );
-
-        for (DepositTypeSeed s : seeds) {
+        for (DepositTypeSeed s : DEPOSIT_TYPE_SEEDS) {
             if (depositTypeRepo.findByCode(s.code()).isEmpty()) {
                 depositTypeRepo.save(DepositTypeEntity.builder()
                         .code(s.code())
                         .displayName(s.displayName())
                         .sortOrder(s.sortOrder())
+                        .withdrawalOrder(s.withdrawalOrder())
                         .active(true)
                         .build());
                 log.info("初始化存款類型: {}", s.displayName());

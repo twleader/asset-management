@@ -186,8 +186,8 @@ class LocalPortfolioAllocationEngineTest {
         assertTrue(r.references().isEmpty(), "本機路徑不搜尋網路 → references 固定空陣列");
         assertEquals(LocalPortfolioAllocationEngine.TEMPLATE_DISCLAIMER, r.warnings().get(0),
                 "warnings 首條固定為「經驗法則、未經回測、非個人化投資建議」聲明");
-        assertTrue(r.warnings().contains(LocalPortfolioAllocationEngine.NO_HOLDING_LEVEL_WARNING),
-                "不產生個股層級建議的限制須在 warnings 明示");
+        assertTrue(r.warnings().contains(LocalPortfolioAllocationEngine.HOLDING_LEVEL_SCOPE_WARNING),
+                "本檔位標的層級「做到哪、做不到哪」的範圍須在 warnings 明示");
         assertTrue(r.rebalancePlan().isEmpty(), "rebalancePlan 待 enrich 之後才由 withRebalancePlan 產生");
         assertFalse(r.actions().isEmpty());
     }

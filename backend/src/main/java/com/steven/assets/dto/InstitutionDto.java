@@ -50,23 +50,27 @@ public class InstitutionDto {
 
     // ===== DepositType =====
 
+    /** {@code withdrawalOrder}：提領優先序，越小越優先被提領（資產配置建議的存款減碼 waterfall 用，Task 344.4）。 */
     public record DepositTypeResponse(
             Long id,
             String code,
             String displayName,
             Integer sortOrder,
+            Integer withdrawalOrder,
             Boolean active
     ) {}
 
     public record CreateDepositTypeRequest(
             @NotBlank String code,
             @NotBlank String displayName,
-            Integer sortOrder
+            Integer sortOrder,
+            Integer withdrawalOrder
     ) {}
 
     public record UpdateDepositTypeRequest(
             @NotBlank String displayName,
-            Integer sortOrder
+            Integer sortOrder,
+            Integer withdrawalOrder
     ) {}
 
     // ===== MarketType =====

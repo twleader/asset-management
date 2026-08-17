@@ -7415,7 +7415,7 @@ generate(input)
   ├─ engine=local   同步、零 API
   │     配置模板(risk_tolerance × 距退休年數) → targetPct
   │     getCurrentAllocation() → currentValue
-  │     既有算術 → targetAmount / deltaAmount → rebalancePlan（類別層級）
+  │     既有算術 → targetAmount / deltaAmount → rebalancePlan（類別層級三筆＋標的層級明細，見 Requirement 84）
   │     getProjection() → riskAssessment 敘述
   │     references = []            model = "local-allocation:v1"
   │
@@ -7436,7 +7436,7 @@ generate(input)
 
 三類**必須**與 `getCurrentAllocation()` 既有三類逐字一致（「存款（現金）」／「信託基金」／「股票」）——本機引擎自創第四類或改名，`currentValue` 就對不上、`deltaAmount` 失去意義。
 
-`rebalancePlan` 在 `local`／`hybrid` 只到**類別層級**：`holding` 一律「整體」、`action` 由 `deltaAmount` 正負決定、`estimatedAmount` 為 `|deltaAmount|`。本機沒有能力判斷該賣哪一檔，產生個股層級建議會是沒有依據的臆測。此限制須在 `warnings` 明示。
+`rebalancePlan` 在 `local`／`hybrid` 只到**類別層級**：`holding` 一律「整體」、`action` 由 `deltaAmount` 正負決定、`estimatedAmount` 為 `|deltaAmount|`。本機沒有能力判斷該賣哪一檔，產生個股層級建議會是沒有依據的臆測。**（Requirement 84／Task 344 起已推翻：本機確實沒有能力判斷「該買哪一檔你沒持有的新標的」，但「把已定好的金額按既有部位現值比重攤下去」是算術、不需要市場觀點。現況為類別層級三筆仍在，標的層級明細掛在其下。詳見下方 Requirement 84 段落。）**此限制須在 `warnings` 明示。
 
 `riskAssessment` 得援引 `getProjection()` 的結果組敘述，但**必須呼叫既有方法**——那是 Requirement 32／Task 165 既有的唯一事實來源，不得複製第二份試算。
 
@@ -7712,7 +7712,7 @@ generate(local/hybrid)
     subAllocation.deltaAmount  = targetAmount − subItems 對應子類 currentValue
 ```
 
-`rebalancePlan` **不擴充到子類別層級**——維持 Requirement 80 既有的類別層級限制，子類別落差只透過 `subAllocations[].deltaAmount` 呈現，不產生 BUY/SELL 物件（本機規則同樣沒有依據判斷該減碼哪一檔短債基金）。
+`rebalancePlan` **不擴充到子類別層級**——維持 Requirement 80 既有的類別層級限制**（Requirement 84／Task 344 起已推翻：標的層級明細改以 `(assetClass, subClass)` 為分攤群組，類別層級三筆保留為分組標題。詳見下方 Requirement 84 段落。）**，子類別落差只透過 `subAllocations[].deltaAmount` 呈現，不產生 BUY/SELL 物件（本機規則同樣沒有依據判斷該減碼哪一檔短債基金）。
 
 ### 前端：既有純 CSS bar 巢狀化，不引入 echarts
 
@@ -7720,4 +7720,176 @@ generate(local/hybrid)
 
 ### 不在本次範圍
 
-不新增資料庫欄位或 Liquibase changeset（完全複用既有 `asset_class`／`stock_style`／`bond_term`／`fund_class_override`）；`llm` 完整版不輸出本 Requirement 的子分類；`rebalancePlan` 不新增子類別/個股層級操作建議。
+不新增資料庫欄位或 Liquibase changeset（完全複用既有 `asset_class`／`stock_style`／`bond_term`／`fund_class_override`）；`llm` 完整版不輸出本 Requirement 的子分類；`rebalancePlan` 不新增子類別/個股層級操作建議**（此項已於 Requirement 84／Task 344 推翻，見該段落）**。
+
+---
+
+## Requirement 84／Task 344：資產配置建議的標的層級再平衡
+
+### 為什麼可以推翻 Requirement 80／82 的「只到類別層級」限制
+
+當初的限制把兩件事混為一談：
+
+| | 需要什麼 | 本機規則有沒有依據 | 本次 |
+|---|---|---|---|
+| 指名該買**你沒持有的新標的** | 選股、估值、時機判斷 | 沒有 → 硬給是臆測 | **維持禁止** |
+| 把已定好的類別金額按**你既有部位的現值比重**攤下去 | 只需要分母（你的持股）與分子（上層算好的差額） | 純算術，零市場觀點 | **本次解禁** |
+
+但「按比重攤」不是完全中性的——它預設同一子類別內每一檔一樣好，未考慮套牢／獲利狀態、交易成本與最低手續費、稅務、基本面差異。此預設逐字寫進 `warnings`（見 Requirement 84；該常數同時由 `NO_HOLDING_LEVEL_WARNING` 改名為 `HOLDING_LEVEL_SCOPE_WARNING`，舊名語意已反），不得只留在 spec 裡。
+
+### 分攤群組與資料流
+
+```
+buildLocalResult()                                    ← local／hybrid 唯一入口，llm 不經過
+  evaluate()                                          ← 既有：三類目標比例（Req 80）＋ 子類別次分配（Req 82）
+  → enrich(result, totalAssets)                       ← 既有：targetAmount／deltaAmount 決定性回填
+  → withRebalancePlan(enriched)                       ← 既有：類別層級三筆，holding="整體"（保留，成為分組標題）
+  → withSubAllocationAmounts(...)                     ← 既有（Req 82）：子類別金額
+  → withHoldingLevelRebalance(enriched, breakdown)    ← 【本次新增】標的層級明細
+```
+
+分攤群組鍵 `(assetClass, subClass)`：
+
+```
+股票桶      → 依 subAllocations 五個子類別各自成組（成長型／收益型／短中長期債）
+信託基金桶  → 同上
+存款（現金）→ subItems 恆空（Req 82 明訂）→ 整桶單一群組，subClass = null
+```
+
+**必須用子類別 delta 而非桶 delta**：頁面上方已印出「股票－收益型 增碼 363,839」，用桶 delta（−5,739,699）分攤會讓 8 檔高股息全被要求減碼，與上方直接矛盾。使用者已確認接受「同桶同時買賣」（賣 0050、買 00919 並列）。
+
+### 兩套分攤規則，各有各的正當性
+
+```
+股票／基金（所有方向）＋ 存款（BUY）── 等比例（FLOOR + 最大餘額法）
+存款（SELL）───────────────────── 提領優先序 waterfall（逐筆抽滿再動下一筆）
+```
+
+waterfall 只用於存款減碼，理由是**賣出成本不對稱**（定存中途解約按實際存期折算利息，活存沒有這個問題），不是投資判斷。買入沒有對應成本，故存款 BUY 回到等比例。
+
+**等比例（每群組獨立）：**
+```
+v_i    = 標的現值.setScale(0, HALF_UP)
+P      = { i : 通過過濾 且 v_i > 0 }，V = Σ v_i
+T_g    = |subAllocation.deltaAmount.setScale(0, HALF_UP)|     ← 必須先捨入，見下
+floor_i= v_i.multiply(T_g).divide(V, 0, FLOOR)                 ← 一次乘除，不先算權重
+rem_i  = v_i × T_g − floor_i × V                               ← 整數，零誤差
+R      = T_g − Σ floor_i                                       ← 保證 0 ≤ R < |P|
+排序 (rem_i ↓, v_i ↓, stableKey ↑) 前 R 筆各 +1
+不變式：Σ estimatedAmount == T_g   ← 等價於「照做就會到達目標配置」，不得放寬容差
+        （例外：clamp 全數觸頂的 shortfall 群組為 Σ == V 且 |T_g|−V == S，S 只進 rationale）
+```
+
+`T_g` 先捨入是必要的：Req 82 的 `subAllocation()` 只對 `targetAmount` 捨入，`currentValue` 是 scale=2 的逐筆加總，故 delta 帶小數（實測長期債 `345929.51`）。捨入後五格 Σ = 8,077,733 恰等於桶 delta；不捨入為 8,077,732.51。
+
+**waterfall（存款 SELL）：**
+```
+依 (withdrawalOrder ↑, annualInterestRate ↑ NULLS FIRST, currentValue ↓, stableKey ↑) 排序   ← currentValue 來源為 bank_deposit.amount
+逐筆抽滿 v_i，最後一筆部分抽取；未抽到的列完全不輸出（不是 HOLD）
+```
+
+實測（snapshot 15，需減 2,338,033）：活存 202,854 → 美元活存 64,797 → 優利活存 82,372 → 富邦定存部分 1,988,010。**只動到一筆定存**，國泰／台新定存與兩筆美元定存完全不動；等比例則會讓三筆定存同時解約約 219 萬。
+
+### 提領優先序入庫（禁止 Enum 寫死）
+
+```sql
+-- v1.107.0-deposit-type-withdrawal-order.sql（版號已重查運行中 databasechangelog，最新為 v1.106.0）
+ALTER TABLE deposit_type ADD COLUMN IF NOT EXISTS withdrawal_order INTEGER NOT NULL DEFAULT 50;
+```
+
+預設值拆成兩件事：**(a) 產品 seed**（`DataInitializer.seedDepositTypes()`，供全新 DB）只填既有六個 code——`活存`=10、`美元活存`=20、`定存`=90、`美元定存`=91、`證券戶`／`信用卡待付款`=50；**(b) 既有資料回填**（供已部署 DB）寫進同一支 changeset 的一次性 `UPDATE ... WHERE code=? AND withdrawal_order = 50`，`優利活存 1.5%`=30 **只在這裡**。
+
+`優利活存 1.5%` 不能進產品 seed：實查 `deposit_type` 有 7 列，`id=7` 那筆**不在 `DataInitializer` 的 seed 名單裡、是使用者自建的私有分類**，寫進去等於在乾淨 DB 憑空建出別人的分類。而既有 seed 迴圈是 `if (findByCode(...).isEmpty()) { save(...) }`（`DataInitializer.java:195-205`）**只 INSERT 從不 UPDATE**，光加 seed 常數五個既有類型一個都回填不到——這正是必須拆成 (b) 的原因。設定頁沿用既有 `sortOrder` 的編輯形式新增此欄。
+
+**判準不能用名稱或利率，兩者實測都判錯：**
+
+| 存款列 | `annual_interest_rate` | 用利率判 | 用名稱判 | 正確 |
+|---|---|---|---|---|
+| 美元定存（國泰 131,557／富邦 64,174） | **NULL** | 無息→優先抽 ✗ | 定存 ✓ | 定存 |
+| 優利活存 1.5%（Line Bank 82,372） | 1.5000 | 計息→最後抽 ✗ | 活存 ✓ | 活存 |
+| 定存（富邦／國泰／台新） | 1.7150 | 計息 ✓ | 定存 ✓ | 定存 |
+
+名稱比對在當前資料上碰巧全對，但 `deposit_type` 是使用者可自行新增的業務分類——新增「三個月期存款」就失效。故存進表裡。
+
+### 過濾、合併與 clamp
+
+```
+過濾（順序不可換）：
+  (a) currency 以 "TRANSIT_" 開頭 → 排除（判 currency 不是 depositType；沿用既有兩字面值全等寫法 AssetService.java:220/:239/:251，不得改前綴比對）
+  (b) 現值 setScale(0,HALF_UP) ≤ 0 → 排除
+合併鍵：股票 (market, stockCode)｜基金 fundName｜存款不合併（一列一標的）
+clamp：SELL 時 min(分攤所得, v_i)；溢出在未觸頂者間重跑同一套，最多 |P| 輪；
+       全部觸頂仍有缺口 → 記為 shortfall 寫進該群組最後一列 rationale，不跨群組轉嫁
+門檻：分攤金額 < MIN_REBALANCE_AMOUNT(10,000) 者合併為一列「其餘 N 檔」；N==1 不合併、改附提示
+       （提示措辭分股票/基金與存款兩種，見 Requirement 84）
+```
+
+合併鍵**不含 broker／bank**：實測加上 broker 仍有 6 組重複（00919 在富邦 3 列），那是分批買入沒併帳的雜訊；不合併會讓 00919 出現 4 行建議。
+
+存款群組的分子分母**刻意不同源**：`T_g` 是含在途款的桶 delta（−2,338,033），`V` 是排除在途款後的正值合計（8,544,212）。不回頭改上層金額（會讓 Req 25 現金口徑漂移），差額由 clamp 與條件式 warning 承擔。
+
+### 從零建倉：第四種 action
+
+某群組 `P_g = ∅` 且 `T_g != null` 且 `T_g ≠ 0`（`T_g == null` 代表無快照，整組略過、不輸出任何列；實測：信託基金四個子類別合計 7,731,803 元，占 `Σ|群組 T_g|` 16,883,143 的約 46%）：
+
+```
+assetClass = 桶名
+holding    = "{子類別}：尚無持有標的"
+action     = ACTION_UNSPECIFIED = "UNSPECIFIED"      ← 新常數
+estimatedAmount = |T_g|
+rationale  = 「…本機引擎只能把金額按比重分攤到你已持有的標的，此子類別沒有部位可分攤，
+              無法指名該買哪一檔；需要具名建議請切換為「完整 AI 分析」。」
+```
+
+三個被否決的替代方案與理由：**略過** → 守恆破功、畫面憑空少掉約 46%（占 Σ|群組 T_g| 16,883,143）；**`HOLDING_OVERALL`** → render 結果與本次改動前一模一樣，使用者分不出「做不到」與「沒做」；**沿用 `BUY`** → 綠色「增碼」tag 是可執行動作的視覺語意，套在他無從執行的 773 萬上會誤導。
+
+`holding` 寫成自我說明字串（而非只寫子類別名）是因為這筆會經 `GET /api/public/portfolio-advice/latest`（Req 79）以純 JSON 被讀走，脫離 tag 的視覺語境仍須成立。
+
+### 純函式邊界：持有明細由呼叫端傳入
+
+`LocalPortfolioAllocationEngine` 維持「不注入 Repository、不做 IO、不讀時鐘」：
+
+```java
+public record HoldingBreakdown(List<Holding> holdings) {}
+public record Holding(
+    String assetClass, String subClass,      // subClass 存款恆 null
+    String displayName, BigDecimal currentValue,
+    Integer withdrawalOrder,                  // 僅存款
+    BigDecimal annualInterestRate,            // 僅存款
+    String currency,                          // 僅存款；供在途款過濾（見上方分攤過濾規則）與 warning 使用
+    String stableKey) {}
+```
+
+採**扁平清單**而非「群組→清單」的 Map：分組是引擎的事，輸入端扁平才不可能組出「同一標的出現在兩個群組」。**不放 `note` 或預組文案**——service 只送資料，`rationale` 由引擎組。
+
+資料來源：`getCurrentAllocation()` 裡的 `AssetSnapshot s` 是**區域變數**（`PortfolioAdviceService.java:316`），`CurrentAllocationDto` 不含逐筆持有列，呼叫端拿不到。故 `buildLocalResult(...)` **新增第三參數 `AssetSnapshot snapshot`**，由 `generate()` 已於 `:617` 取得者傳入 → `snapshot.getStocks()`／`getFunds()`；存款走 `depositRepo.findWithBankBySnapshotId(...)`（已 join fetch bank）。`stockNameMap` 與三份 override Map 須與 `getCurrentAllocation()` 取自**同一次** `stockMasterRepo.findAll()`／`fundClassOverrideRepo.findAll()`。
+
+但那些 Map 目前全是 `getCurrentAllocation()` 的**區域變數**（`:326-329`／`:330`／`:338`／`:341`），`CurrentAllocationDto` 不含其中任何一份——在「不得改 public 簽章／DTO」前提下不重構就無解。故指定：把該方法本體抽成 private `allocationContext()`，回傳「DTO ＋ `stockNameMap` ＋ 三份 override Map ＋ `incomeThreshold`」的內部 record；**public `getCurrentAllocation()` 改為單純委派、只回傳 DTO，簽章與形狀完全不變**；`buildLocalResult` 改呼叫 private 那支。
+
+**不得改動 `getCurrentAllocation()` 簽章或 `CurrentAllocationDto`**（`GET /api/portfolio-advice/current-allocation` 為對外契約）；也**不得宣稱「零額外查詢／同一 `@Transactional` session」**——`buildLocalResult` → `getCurrentAllocation()` 是自我呼叫、proxy 被繞過，實際靠 OSIV 預設值。
+
+### 分組在 BFF、前端只 render
+
+`structure.md` §3.2 第 5 條與 CLAUDE.md BFF 規範第 1 節都明文「BFF 預先聚合／排序／過濾，前端只負責 render」。故分組不放 view：
+
+```
+PortfolioAdviceBffController（既有 Mono.zip 之後追加一步）
+  latest.rebalancePlan（扁平）
+    → latest.rebalanceGroups: [{ assetClass, header, sections: [{ subClass, rows }] }]
+       header  = 該 assetClass 的類別層級那筆（holding == "整體"）
+       整份 rebalancePlan 無任何「整體」列（llm／舊建議）→ rebalanceGroups 直接輸出空陣列，前端走扁平 fallback
+       （不得產生 header:null 群組，否則 LLM 交錯輸出會被依 assetClass 重排）
+       sections 順序 = 由同一份回應的 targetAllocation[].subAllocations[].subClass 出現順序推導
+                       （引擎產生的正規順序，非寫死清單）
+       subClass == null 者（存款群組明細）→ 併為單一無小標段落，置於最後
+       rows 為空的 section 不輸出；groups 依 assetClass 首次出現序；清單外的 subClass 不得丟棄
+       須先 new HashMap<>(latest) 複製再 put（onErrorReturn 回的是不可變 Map）
+```
+
+**字面值的複製從六個降到一個**：BFF 只需 `"整體"`（鏡像 `LocalPortfolioAllocationEngine.HOLDING_OVERALL`，須加註解），五個子類別名稱完全不複製——順序既由 `subAllocations` 推導，名稱就直接取自資料本身。日後引擎調整子類別順序或改名，BFF 與前端都不必動。
+
+前端 `AssetAllocationAdviceView.vue` 只做三件事：(1) `v-for` 走 `rebalanceGroups`；(2) `rebalanceLabel()`／`rebalanceType()` 各補 `UNSPECIFIED` case（標籤「無法指名」、tag `warning`——**不得用 `success`**，綠色「增碼」是可執行動作的語意，套在無從執行的項目上會誤導）；(3) 預設全部展開、不摺疊（使用者要拿這份清單去下單，漏看部位的風險大於版面風險）。`rebalanceGroups` 缺漏或為空時退回既有扁平 `rebalancePlan` 渲染（舊建議與 `llm` 檔位走此路，逐字維持現況）。
+
+### 不處理
+
+不推薦未持有的新標的（本機檔位的定義性限制）；不做個股優劣／套牢／稅務／交易成本判斷（僅在 warnings 明示未考慮）；`llm` 檔位一行不改；不新增 API endpoint 與排程。

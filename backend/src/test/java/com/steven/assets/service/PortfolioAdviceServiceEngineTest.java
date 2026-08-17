@@ -16,6 +16,7 @@ import com.steven.assets.model.PortfolioAdvice;
 import com.steven.assets.model.PortfolioAdviceSetting;
 import com.steven.assets.repository.AssetSnapshotRepository;
 import com.steven.assets.repository.BankDepositRepository;
+import com.steven.assets.repository.DepositTypeRepository;
 import com.steven.assets.repository.FundHoldingRepository;
 import com.steven.assets.repository.InvestmentPlannedExpenseRepository;
 import com.steven.assets.repository.InvestmentProfileRepository;
@@ -75,6 +76,7 @@ class PortfolioAdviceServiceEngineTest {
     private PortfolioAdviceSettingRepository settingRepo;
     private AssetSnapshotRepository snapshotRepo;
     private BankDepositRepository depositRepo;
+    private DepositTypeRepository depositTypeRepo;
     private FundHoldingRepository fundRepo;
     private StockHoldingRepository stockRepo;
     private RetirementProjectionService projectionService;
@@ -98,6 +100,7 @@ class PortfolioAdviceServiceEngineTest {
         settingRepo = mock(PortfolioAdviceSettingRepository.class);
         snapshotRepo = mock(AssetSnapshotRepository.class);
         depositRepo = mock(BankDepositRepository.class);
+        depositTypeRepo = mock(DepositTypeRepository.class);
         fundRepo = mock(FundHoldingRepository.class);
         stockRepo = mock(StockHoldingRepository.class);
         projectionService = mock(RetirementProjectionService.class);
@@ -131,7 +134,7 @@ class PortfolioAdviceServiceEngineTest {
     private PortfolioAdviceService newService(LocalPortfolioAllocationEngine engine, String apiKey) {
         PortfolioAdviceService svc = new PortfolioAdviceService(
                 profileRepo, expenseRepo, adviceRepo, settingRepo, snapshotRepo,
-                depositRepo, fundRepo, stockRepo, projectionService, objectMapper, tenantGuard,
+                depositRepo, depositTypeRepo, fundRepo, stockRepo, projectionService, objectMapper, tenantGuard,
                 assetClassifier, stockMasterRepo, fundClassOverrideRepo, stockStyleRepo, engine);
         ReflectionTestUtils.setField(svc, "apiKey", apiKey);
         ReflectionTestUtils.setField(svc, "defaultModel", "claude-opus-4-8");
@@ -221,24 +224,64 @@ class PortfolioAdviceServiceEngineTest {
         assertEquals(viaFullChain.targetAllocation(), produced.targetAllocation());
     }
 
-    // ===== (g) 本機檔位的 rebalancePlan 只到類別層級 =====
+    // ===== (g) 本機檔位的 rebalancePlan：類別層級三筆保留、標的層級明細掛在其下（Task 344）=====
 
     @Test
-    void localRebalancePlan_isClassLevelOnly() {
+    void localRebalancePlan_keepsClassLevelThreeAndAppendsHoldingLevelDetail() {
         engineSetting(PortfolioAdviceService.ENGINE_LOCAL);
         PortfolioAdviceService svc = newService(new LocalPortfolioAllocationEngine(), "");
 
         PortfolioAdviceResult result = resultOf(svc.generate(input()));
 
-        assertEquals(3, result.rebalancePlan().size());
-        for (PortfolioAdviceResult.Rebalance r : result.rebalancePlan()) {
-            assertEquals("整體", r.holding(), "不得出現個股代號或基金名稱");
+        List<PortfolioAdviceResult.Rebalance> classLevel = result.rebalancePlan().stream()
+                .filter(r -> LocalPortfolioAllocationEngine.HOLDING_OVERALL.equals(r.holding())).toList();
+        assertEquals(3, classLevel.size(), "類別層級三筆必須保留（Task 344.19），移除會破壞既有行為");
+        for (PortfolioAdviceResult.Rebalance r : classLevel) {
             assertTrue(List.of("BUY", "SELL", "HOLD").contains(r.action()));
+            assertNull(r.subClass(), "類別層級橫跨整桶，不屬於任何子類別");
+        }
+
+        // 本測試的 fixture 只有三個彙總金額、沒有 stocks／funds，depositRepo 亦 stub 為空清單
+        // → 三桶所有「T_g ≠ 0」的群組全部走 344.16／344.17 的 P_g = ∅ 分支，各多產一筆 UNSPECIFIED
+        long expectedDetail = nonZeroGroupCount(result);
+        List<PortfolioAdviceResult.Rebalance> detail = result.rebalancePlan().stream()
+                .filter(r -> !LocalPortfolioAllocationEngine.HOLDING_OVERALL.equals(r.holding())).toList();
+        assertEquals(expectedDetail, detail.size(), "每個 T_g ≠ 0 的群組各一筆");
+        assertEquals(3 + expectedDetail, result.rebalancePlan().size());
+        for (PortfolioAdviceResult.Rebalance r : detail) {
+            assertEquals(LocalPortfolioAllocationEngine.ACTION_UNSPECIFIED, r.action(),
+                    "零部位群組不得偽裝成可執行的 BUY");
+            assertTrue(r.holding().endsWith("：尚無持有標的"), r.holding());
+        }
+        for (PortfolioAdviceResult.Rebalance r : result.rebalancePlan()) {
+            assertTrue(List.of("BUY", "SELL", "HOLD", "UNSPECIFIED").contains(r.action()));
             assertTrue(r.estimatedAmount().signum() >= 0, "estimatedAmount 為差額絕對值");
         }
         assertEquals(LocalPortfolioAllocationEngine.TEMPLATE_DISCLAIMER, result.warnings().get(0));
-        assertTrue(result.warnings().contains(LocalPortfolioAllocationEngine.NO_HOLDING_LEVEL_WARNING));
+        assertTrue(result.warnings().contains(LocalPortfolioAllocationEngine.HOLDING_LEVEL_SCOPE_WARNING));
         assertTrue(result.references().isEmpty(), "local 的 references 固定為空陣列");
+    }
+
+    /**
+     * 「T_g ≠ 0（捨入後）」的群組數——依當下模板比例實際數出，不寫死：
+     * 存款桶為單一群組，股票／基金各依 {@code subAllocations} 的五個子類別成組。
+     */
+    private static long nonZeroGroupCount(PortfolioAdviceResult r) {
+        long n = 0;
+        for (PortfolioAdviceResult.TargetAllocation t : r.targetAllocation()) {
+            if (LocalPortfolioAllocationEngine.CLASS_CASH.equals(t.assetClass())) {
+                if (nonZero(t.deltaAmount())) n++;
+            } else {
+                for (PortfolioAdviceResult.SubAllocation sa : t.subAllocations()) {
+                    if (nonZero(sa.deltaAmount())) n++;
+                }
+            }
+        }
+        return n;
+    }
+
+    private static boolean nonZero(BigDecimal delta) {
+        return delta != null && delta.setScale(0, RoundingMode.HALF_UP).signum() != 0;
     }
 
     // ===== (h) riskAssessment 走既有 getProjection()，未複製第二份試算 =====
@@ -401,6 +444,49 @@ class PortfolioAdviceServiceEngineTest {
         assertEquals(2, out.references().size());
         assertNull(out.references().get(0).url(), "非 http(s) 來源須被淨化為 null");
         assertEquals("https://example.com/a", out.references().get(1).url());
+    }
+
+    // ===== (k) 標的顯示名稱：查不到主檔 name 時只顯示代號，不得輸出 null（0050）=====
+
+    @Test
+    void stockDisplayName_fallsBackToTheCodeAloneWhenTheMasterNameIsMissing() {
+        assertEquals("元大台灣50（0050）", PortfolioAdviceService.stockDisplayName("元大台灣50", "0050"));
+        assertEquals("0050", PortfolioAdviceService.stockDisplayName(null, "0050"));
+        assertEquals("00865B", PortfolioAdviceService.stockDisplayName("   ", "00865B"));
+        assertFalse(PortfolioAdviceService.stockDisplayName(null, "0050").contains("null"),
+                "不得輸出 null（0050）");
+    }
+
+    // ===== (l) llm 檔位不受 Task 344 影響：既有 JSON 無 subClass 欄位仍正常解析，且不產生 UNSPECIFIED =====
+
+    @Test
+    void llmRebalancePlan_isUnaffectedByHoldingLevelRebalance() throws Exception {
+        String llmJson = """
+                {"summary":"s","riskAssessment":"r","targetAllocation":[],
+                 "rebalancePlan":[{"assetClass":"股票","holding":"0050","action":"BUY",
+                                   "estimatedAmount":500000,"rationale":"r"}],
+                 "actions":[],"warnings":[],"references":[]}
+                """;
+
+        PortfolioAdviceResult parsed = objectMapper.readValue(llmJson, PortfolioAdviceResult.class);
+
+        assertEquals(1, parsed.rebalancePlan().size());
+        assertNull(parsed.rebalancePlan().get(0).subClass(),
+                "llm 產生的 JSON 沒有 subClass 欄位，須反序列化為 null 而非拋錯");
+        assertEquals("BUY", parsed.rebalancePlan().get(0).action());
+        assertEquals("0050", parsed.rebalancePlan().get(0).holding());
+    }
+
+    @Test
+    void llmEngine_neverTouchesTheLocalEngineAtAll() {
+        engineSetting(PortfolioAdviceService.ENGINE_LLM);
+        LocalPortfolioAllocationEngine engine = mock(LocalPortfolioAllocationEngine.class);
+        PortfolioAdviceService svc = newService(engine, "");
+
+        svc.generate(input());
+
+        // 標的層級再平衡（Task 344）只在 local／hybrid 兩檔位生效，llm 一行不改
+        verifyNoInteractions(engine);
     }
 
     // ===== (i) engine 白名單、null 不變語意、getSettings 曝露清單 =====
