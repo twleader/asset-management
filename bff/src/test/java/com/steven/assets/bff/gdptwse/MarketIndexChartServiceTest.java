@@ -28,13 +28,13 @@ class MarketIndexChartServiceTest {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     @Test
-    void catalogNormalizationAndAllSeventyTwoCombinationsAreAccepted() {
+    void catalogNormalizationAndAllEightyCombinationsAreAccepted() {
         assertThat(MarketIndexChartService.supportedMarkets())
                 .extracting(MarketIndexChartDto.Option::value)
-                .containsExactly("TWSE", "DJI", "SPX", "IXIC", "SOX", "FTSE", "DAX", "KOSPI", "N225");
+                .containsExactly("TWSE", "TPEX", "DJI", "SPX", "IXIC", "SOX", "FTSE", "DAX", "KOSPI", "N225");
         assertThat(MarketIndexChartService.supportedMarkets())
                 .extracting(MarketIndexChartDto.Option::label)
-                .containsExactly("台股大盤", "道瓊工業", "標普 500", "那斯達克綜合", "費城半導體",
+                .containsExactly("台股集中市場", "台股櫃買市場", "道瓊工業", "標普 500", "那斯達克綜合", "費城半導體",
                         "英國富時 100", "德國 DAX", "韓國 KOSPI", "日經 225");
         assertThat(MarketIndexChartService.supportedRanges())
                 .extracting(MarketIndexChartDto.Option::value)
@@ -59,7 +59,7 @@ class MarketIndexChartServiceTest {
                 validPairs++;
             }
         }
-        assertThat(validPairs).isEqualTo(72);
+        assertThat(validPairs).isEqualTo(80);
 
         assertThat(MarketIndexChartService.normalizeMarket(null)).isEqualTo("TWSE");
         assertThat(MarketIndexChartService.normalizeMarket("   ")).isEqualTo("TWSE");
@@ -194,7 +194,7 @@ class MarketIndexChartServiceTest {
         assertThat(daily).isNotNull();
         assertThat(daily.market()).isEqualTo("TWSE");
         assertThat(daily.range()).isEqualTo("1y");
-        assertThat(daily.supportedMarkets()).hasSize(9);
+        assertThat(daily.supportedMarkets()).hasSize(10);
         assertThat(daily.supportedRanges()).hasSize(8);
         assertAligned(daily, 0);
         assertThat(daily.hasVolume()).isFalse();
@@ -219,14 +219,14 @@ class MarketIndexChartServiceTest {
         });
 
         service.getIndexDaily("TWSE", 10).block();
-        service.getIndexDaily("SPX", 3).block();
-        service.getIndexIntraday("IXIC").block();
+        service.getIndexDaily("TPEX", 3).block();
+        service.getIndexIntraday("TPEX").block();
 
         assertThat(requests).anyMatch(uri -> "/api/twse-daily-index".equals(uri.getPath()));
         assertThat(requests).anyMatch(uri -> "/api/us-daily-index".equals(uri.getPath())
-                && uri.getQuery().contains("code=SPX"));
+                && uri.getQuery().contains("code=TPEX"));
         assertThat(requests).anyMatch(uri -> "/api/index-intraday".equals(uri.getPath())
-                && uri.getQuery().contains("market=IXIC"));
+                && uri.getQuery().contains("market=TPEX"));
 
         MarketIndexChartService failing = service(request -> {
             throw new IllegalStateException("downstream unavailable");
@@ -247,7 +247,7 @@ class MarketIndexChartServiceTest {
         List<Object> volumes = new ArrayList<>(Arrays.asList(null, 10L));
         List<BigDecimal> turnovers = new ArrayList<>(Arrays.asList(null, new BigDecimal("20.00")));
         MarketIndexChartDto.Response response = new MarketIndexChartDto.Response(
-                "TWSE", "台股大盤", "d", "當日", "INTRADAY", LocalDate.of(2026, 8, 11),
+                "TWSE", "台股集中市場", "d", "當日", "INTRADAY", LocalDate.of(2026, 8, 11),
                 new ArrayList<>(List.of("09:00", "09:05")),
                 closes, closes, closes, closes, closes, volumes, turnovers, false,
                 null, null, null, null,

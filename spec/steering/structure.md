@@ -171,7 +171,7 @@ bff/src/main/java/com/steven/assets/bff/
      `TechnicalIndicatorService`（double，**盤中併入 Redis 即時點位**）。(1)(2) 定義相同（皆不含 live），
      彼此以「同定義同精度」保證同值，只是分屬 BFF／backend 兩處各自實作；(3) 因語意不同（含 live）另計。
      **擋住把 (1)(2) 收斂進 (3) 的是語意不是技術**：`TechnicalIndicatorService` 只覆蓋 `0000`＋`台股`
-     （本頁另 8 個海外指數無分支），且會併 live——本頁圖表的另外三條線與匯出檔一律不含 live，
+     （本頁另 9 個 code-keyed 指數：TPEX＋8 個海外指數，皆無分支），且會併 live——本頁圖表的另外三條線與匯出檔一律不含 live，
      換過去會讓同一張圖上出現兩種口徑。兩路徑對 `numeric(12,2)` 的台股收盤**算術上逐位相同**
      （和除以 5 恆為第三位小數為偶數的三位小數，碰不到 HALF_UP 邊界；50 萬組樣本實測 0 次不一致），
      故實際差異只出現在盤中、且來自 live 併入。**收斂的正解**是先決定「MA 要不要併 live」
@@ -193,7 +193,7 @@ bff/src/main/java/com/steven/assets/bff/
      是否真的適用」指的就是這種事）。(b)–(c) 真正的理由是**呼叫形狀與型別不同**：(b) 吃
      `List<UsIndexDailyHistory>`（desc）只回最新一期單值、(c) 吃 `List<IndexDailyRow>`（asc）
      逐點回整段序列；抽成共用 `List<BigDecimal>` primitive 技術上可行，**本組明文登記為已知技術債**，
-     不是結構限制。（原本擋住 backend 內部合併的兩個理由中，「live 併入語意」那一半在 (b) 收斂後不再適用；「覆蓋率」那一半仍成立（(b) 只覆蓋 IXIC、(c) 覆蓋 9 個指數），已含在上述呼叫形狀理由內。）
+     不是結構限制。（原本擋住 backend 內部合併的兩個理由中，「live 併入語意」那一半在 (b) 收斂後不再適用；「覆蓋率」那一半仍成立（(b) 只覆蓋 IXIC、(c) 現覆蓋 10 個指數），已含在上述呼叫形狀理由內。）
      **本組的等值強度高於 (1)(2)**：
      (a)(c) 本就是 BigDecimal 精確和後 `divide(window, 2, HALF_UP)`，Task 336 把 (b) 也改成同一路徑，
      三者等值**由構造保證**（同一批收盤、同一視窗、同一捨入；BigDecimal 加法可結合，累加方向不影響
@@ -401,9 +401,9 @@ frontend/
 
 ```
 spec/
-├── requirements.md       # 84 個 Requirements（User Story + AC）
+├── requirements.md       # 85 個 Requirements（User Story + AC）
 ├── design.md             # 架構圖、ERD、Service 職責、Sequence
-├── tasks.md              # 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344）＋ 尚未歸檔的 201 起區段
+├── tasks.md              # 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–345）＋ 尚未歸檔的 201 起區段
 ├── tasks/                # 任務檔
 │   ├── README.md         # 自足任務檔規範
 │   ├── archive/          # Task 1–200 歷史，已凍結

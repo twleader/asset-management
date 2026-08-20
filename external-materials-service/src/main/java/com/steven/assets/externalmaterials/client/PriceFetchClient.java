@@ -39,12 +39,22 @@ public class PriceFetchClient {
     private final ObjectMapper mapper = new ObjectMapper();
     private final String finmindToken;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public PriceFetchClient(@Value("${finmind.token:${FINMIND_TOKEN:}}") String finmindToken) {
+        this(finmindToken, defaultHttpClient());
+    }
+
+    /** 套件內建構子僅供 MIS fixture 注入可控 HTTP client。 */
+    PriceFetchClient(String finmindToken, HttpClient httpClient) {
         this.finmindToken = finmindToken == null ? "" : finmindToken.trim();
+        this.httpClient = httpClient;
+    }
+
+    private static HttpClient defaultHttpClient() {
         CookieManager cm = new CookieManager(null, CookiePolicy.ACCEPT_ALL);
         // 強制 HTTP/1.1：NASDAQ / Cloudflare 對 Java 的 HTTP/2 fingerprint 偵測會回 RST_STREAM。
         // 用 HTTP/1.1 才能穩定取到資料。
-        this.httpClient = HttpClient.newBuilder()
+        return HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
                 .followRedirects(HttpClient.Redirect.NORMAL)
                 .cookieHandler(cm)
@@ -349,8 +359,7 @@ public class PriceFetchClient {
                 String prevStr = item.path("y").asText("").trim();
                 String name = item.path("n").asText("").trim();
 
-                BigDecimal prevClose = (prevStr.isEmpty() || prevStr.startsWith("-"))
-                        ? null : new BigDecimal(prevStr);
+                BigDecimal prevClose = parseDecimal(prevStr);
 
                 BigDecimal buyPrice = parseFirstQuote(item.path("b").asText(""));
                 BigDecimal sellPrice = parseFirstQuote(item.path("a").asText(""));
@@ -370,7 +379,11 @@ public class PriceFetchClient {
                     return Optional.empty();
                 }
 
-                BigDecimal price = new BigDecimal(priceStr);
+                BigDecimal price = parseDecimal(priceStr);
+                if (price == null || price.signum() <= 0) {
+                    log.debug("台股 {} z 非法，略過寫入", stockCode);
+                    return Optional.empty();
+                }
                 BigDecimal change = prevClose != null ? price.subtract(prevClose) : BigDecimal.ZERO;
                 BigDecimal changePct = (prevClose != null && prevClose.compareTo(BigDecimal.ZERO) != 0)
                         ? change.multiply(BigDecimal.valueOf(100)).divide(prevClose, 6, RoundingMode.HALF_UP)

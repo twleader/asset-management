@@ -80,11 +80,11 @@ com.steven.assets/
 - `GdpTwseBffController`（GdpTwseView 專屬，`@RequestMapping("/api/bff/gdp-twse")`）：股市大盤查詢頁的指數日線／當日＋台韓人均 GDP 聚合（Requirement 18）：
   - `GET /api/bff/gdp-twse`：台／韓人均 GDP + 實質成長率歷史
   - `POST /api/bff/gdp-twse/refresh`：自 IMF 刷新人均 GDP
-  - `GET /api/bff/gdp-twse/index-daily`：台股大盤／海外指數每日 OHLC ＋ MA5/20/60/240（`ma5` 為 Task 285 新增）
+  - `GET /api/bff/gdp-twse/index-daily`：台股集中市場／台股櫃買市場／海外指數每日 OHLC ＋ MA5/20/60/240（`ma5` 為 Task 285 新增）
   - `POST /api/bff/gdp-twse/refresh-index-daily`：刷新指數日線
   - `GET /api/bff/gdp-twse/index-intraday`：指數當日分時
 - `PublicMarketIndexController`（Docker／自動化唯讀入口，Requirement 67；Requirement 66／Task 328 起 host 僅由 Nginx `127.0.0.1:9090` 進入；`@RequestMapping("/api/public/market-index")`）與 `GdpTwseBffController` 共用 `MarketIndexChartService`，不得形成第二套市場資料或均線算法：
-  - `GET /api/public/market-index?market=&range=`：免 OAuth、唯讀；`market ∈ {TWSE,DJI,SPX,IXIC,SOX,FTSE,DAX,KOSPI,N225}`（預設 `TWSE`），`range ∈ {d,1m,3m,6m,1y,2y,5y,10y}`（預設 `1y`）。回 immutable `MarketIndexChartDto.Response`，其中 `tradingDate` 為 `LocalDate`（JSON ISO `yyyy-MM-dd`）、`turnovers` 為 `List<BigDecimal>`（JSON number 或 null）；另包含正規化 market/range、中文 label、`mode=DAILY|INTRADAY`、固定對齊的 `labels/closes/ma5/ma20/ma60/ma240/volumes/turnovers`、成交量旗標、分時昨收／漲跌欄，以及完整 `supportedMarkets/supportedRanges` 自描述選項。
+  - `GET /api/public/market-index?market=&range=`：免 OAuth、唯讀；`market ∈ {TWSE,TPEX,DJI,SPX,IXIC,SOX,FTSE,DAX,KOSPI,N225}`（預設 `TWSE`），`range ∈ {d,1m,3m,6m,1y,2y,5y,10y}`（預設 `1y`）。回 immutable `MarketIndexChartDto.Response`，其中 `tradingDate` 為 `LocalDate`（JSON ISO `yyyy-MM-dd`）、`turnovers` 為 `List<BigDecimal>`（JSON number 或 null）；另包含正規化 market/range、中文 label、`mode=DAILY|INTRADAY`、固定對齊的 `labels/closes/ma5/ma20/ma60/ma240/volumes/turnovers`、成交量旗標、分時昨收／漲跌欄，以及完整 `supportedMarkets/supportedRanges` 自描述選項。市場 catalog 的前兩項固定為 `TWSE/台股集中市場`、`TPEX/台股櫃買市場`，其後才是既有八個海外指數。
   - `MarketIndexChartService` 承接現有 `GdpTwseBffController` 的指數日線抓取、`buildIndexDailyBody`、`movingAverage`、分時＋昨收聚合與 `previousCloseBefore`；既有兩支 authenticated page endpoint 改為薄委派，公開 controller 也只做參數／HTTP DTO 轉換。下游仍只有 `/api/twse-daily-index`、`/api/us-daily-index`、`/api/index-intraday`，Controller 不碰 Repository，BFF 不碰外部行情 API。搬移後同步訂正 `ExcelExportService` 與 `WatchStockTaiexIntradayTest` 對舊 Controller 方法的 Javadoc／註解引用；只改文件文字，不改 backend 行為。
   - 日線範圍以交易日筆數 `1m=21`、`3m=63`、`6m=125`、`1y=250`、`2y=500`、`5y=1250`、`10y=2500` 裁切。先對完整 10 年收盤序列算四條 MA，再用同一起始 index 裁切所有陣列，確保短區間起點仍帶前置交易日算出的成熟均線。台股 `tradeValue` 在 BFF service 邊界以精確十進位字面轉成 `BigDecimal`：null 保留，整數／浮點 Number 與 numeric String 均不得經 `new BigDecimal(double)`；非法值拋 typed `MalformedMarketIndexPayloadException`。Public advice 將它固定映射為 HTTP 502 `ProblemDetail`，不得捏造 0、靜默丟值或降級為 200 空 public schema；既有 authenticated `getIndexDaily` 邊界只捕捉此 typed exception、記錄後回 HTTP 200 的完整空 legacy body，不得廣域吞其他程式錯誤。WebClient fail-soft 留在 `fetchDailyRows`／分時 fetch 的 transport/HTTP/decode stage，轉型與 shaping 在其後；非 typed mapping／程式錯誤必須傳播為 5xx，並以反例測試防止被誤吞或映射成 400／502。`range=d` 則以分時 `times` 作 labels，並把完整日線的最新非 null 四條 MA 展開為等長水平線；成交量兩陣列等長全 null、`hasVolume=false`。既有 authenticated legacy Map 的 key／JSON shape 不變；相容輸出邊界把 `LocalDate tradingDate` 轉回 ISO String。
   - Public range 裁切與分時水平線屬 `MarketIndexChartService` 的 response shaping；既有 `GdpTwseView.vue` 的 `RANGE_TRADING_DAYS` 與水平線展開因本任務不改畫面而保留為相容殘留，不宣稱兩者已收斂為單一實作，也不得再新增第三份。BFF 契約測試以獨立期望 map 釘住 `21/63/125/250/500/1250/2500`，避免 server 與既有畫面漂移。
@@ -165,7 +165,7 @@ com.steven.assets/
 - `PaymentCategoryRepository` / `PaymentAccountRepository`（代繳分類／記錄；Requirement 22）
 - `NotificationRecipientRepository`（警示通知收件人；Requirement 23）
 - `StockAlertRecipientRepository`（警示 ↔ 收件人多對多 join；每條警示挑選收件人；Requirement 23 / Task 125）
-- `TwseIndexDailyHistoryRepository` / `UsIndexDailyHistoryRepository`（台股大盤／海外指數日線；Requirement 18，亦供 Requirement 14 觀察清單 `0000` KD）
+- `TwseIndexDailyHistoryRepository` / `UsIndexDailyHistoryRepository`（TWSE 單一特例表／其餘 code-keyed 指數日線；Requirement 18，亦供 Requirement 14 觀察清單 `0000` KD；TPEX 寫入後者但不因此歸類為海外市場）
 - `TaiwanGdpPerCapitaHistoryRepository` / `JapanGdpPerCapitaHistoryRepository` / `KoreaGdpPerCapitaHistoryRepository`（台／日／韓人均 GDP；Requirement 18）
 - `AssetClassRepository` / `StockStyleRepository` / `BondTermRepository`（資產類別／股票風格／債券期別分類主檔；Requirement 25–27）
 - `FundClassOverrideRepository`（基金分類人工指定，PK = fund_name；Requirement 27）
@@ -618,9 +618,9 @@ POST /internal/repair/history?market=%E5%8F%B0%E8%82%A1&from=2026-06-01&to=2026-
 | GET | `/internal/macro/imf?indicator=&country=&scale=2` | IMF DataMapper 指標（`NGDPDPC` 人均 GDP / `NGDP_RPCH` GDP 成長率；`scale` 預設 2），回 `{year: value}`。作為 DGBAS 之備援，見「台灣人均 GDP / 實質成長率資料來源（DGBAS 優先、IMF 備援）」段落 |
 | GET | `/internal/macro/dgbas` | 主計總處 DGBAS 國民所得常用資料（台灣官方，優先於 IMF），回 `{growth:{year:val}, gdpUsd:{year:val}}`；失敗回空 map 降級至 IMF。見「台灣人均 GDP / 實質成長率資料來源（DGBAS 優先、IMF 備援）」段落 |
 | GET | `/internal/macro/twse-monthly?year=&month=` | TWSE 加權指數月線 OHLC **＋成交量**（整月），回 `List<DailyOhlc>`＝`{tradingDate, open, high, low, close, volume, value}`。**兩支來源 API 併抓後以交易日 join**：OHLC 取 `MI_5MINS_HIST`（`rwd/zh/TAIEX/MI_5MINS_HIST?date=YYYYMM01`），`volume`（成交股數）／`value`（成交金額）取 `FMTQIK`（`rwd/zh/afterTrading/FMTQIK?date=YYYYMM01`）——`MI_5MINS_HIST` 沒有量欄。FMTQIK 失敗時量欄留 null、OHLC 照回，**不得整月回空**。供 `refreshTwseDaily` upsert `twse_index_daily_history`，見「Macro History」對應資料表的 `twse_index_daily_history` |
-| GET | `/internal/macro/us-index?code=` | 海外指數近 10 年每日 OHLC **＋成交量**（Yahoo v8 chart，`range=10y`）。`code ∈ {DJI, SPX, SP500TR, IXIC, SOX, FTSE, DAX, KOSPI, N225}`，回 `List<DailyOhlc>`（`volume` 取同一回應的 `indicators.quote[0].volume`，`value` 恆 null——Yahoo 無成交金額欄）。見「Macro History」對應資料表的 `us_index_daily_history` |
+| GET | `/internal/macro/us-index?code=` | 除 TWSE 外的 code-keyed 指數近 10 年每日 OHLC **＋成交量**。`code ∈ {TPEX, DJI, SPX, SP500TR, IXIC, SOX, FTSE, DAX, KOSPI, N225}`；TPEX 逐月取 TPEx 官方 `indexInfo/inx` OHLC 與 `st41_result` 新欄「成交張數」／舊欄「成交股數（仟股）」（均×1,000 轉股），其餘維持 Yahoo v8 chart `range=10y`。兩支 TPEx JSON 都是 root `stat/tables[]`，parser 從唯一 target table 的 `fields/data` 依欄名解析。回 `List<DailyOhlc>`；TPEX 與海外指數的 `value` 均為 null，量能失敗不丟 OHLC。見「Macro History」對應資料表的 `us_index_daily_history` |
 | GET | `/internal/macro/twse-return-index?date=` | TWSE 發行量加權股價報酬指數（含息）單日收盤，回 `TwseReturnIndexPoint`；**非交易日 / 查無回 204 No Content**。見 Task 170「含息（total return）演算法與資料管線」 |
-| GET | `/internal/macro/index-intraday?market=` | 指數「當日」分時（Yahoo 5m，最新交易日；transient 不寫 DB）。`market ∈ {TWSE, DJI, SPX, IXIC, SOX, FTSE, DAX, KOSPI, N225}`，回 `List<IndexIntradayPoint>`。見「Macro History」的「當日」分時資料源段落 |
+| GET | `/internal/macro/index-intraday?market=` | 指數「當日」分時（transient 不寫 DB）。`market ∈ {TWSE, TPEX, DJI, SPX, IXIC, SOX, FTSE, DAX, KOSPI, N225}`；TPEX 取官方 MIS `ex=otc&ch=o00.tw` 一分 K 並聚合成 09:00–13:30 五分格，其餘維持 Yahoo 5m。回 `List<IndexIntradayPoint>`。見「Macro History」的「當日」分時資料源段落 |
 | GET | `/internal/macro/treasury-yield?year=YYYY` | 美國公債殖利率 M3/Y5/Y10/Y30 的完整 curve batches；美國財政部年度 CSV/XML 為 primary、Yahoo proxy 僅整批 fallback。回 batch id/date/provider/available-at basis/completeness 與四 tenor；tenor 過濾只能在完整 batch 選源後做。此 external-materials 查詢由 `X-Internal-Service-Token`（部署環境 secret）與 `X-User-Role=ADMIN` 的 `TreasuryYieldAdminFilter` 保護；business refresh/proxy 另由 business `AdminGateInterceptor` 的明確 `/internal/macro/treasury-yield/**` pattern 保護，未登入/非 ADMIN/缺 token 一律 fail-closed。此 service-to-service API 不進 BFF、不供瀏覽器直接呼叫。**Requirement 58／Task 275** |
 
 **個股估值（新 client，供 business 編排端 proxy 後 upsert `stock_valuation_daily`；不屬 `MacroDataFetchClient` 那一組）：**
@@ -1617,14 +1617,14 @@ GET    /api/twse-daily-index?from=YYYY-MM-DD&to=YYYY-MM-DD
 POST   /api/twse-daily-index/refresh?years=10  # 逐月呼叫 TWSE MI_5MINS_HIST（OHLC）＋ FMTQIK（成交股數/金額）抓所有交易日 upsert
 POST   /api/twse-daily-index/refresh-tr?years=10 # 背景回補台股「含息報酬指數」close_point_tr（Task 170），立即回 {started, pending}
 # 已移除（Task 97）：/api/twse-year-end-index(GET/refresh)、/api/twse-daily-index/latest（年末走勢圖卡移除）
-GET    /api/us-daily-index?code=SPX&from=&to=  # 海外指數每日 OHLC（code ∈ DJI/SPX/IXIC/SOX/FTSE/DAX/KOSPI/N225）
-POST   /api/us-daily-index/refresh?code=SPX    # Yahoo v8 chart range=10y 抓單一指數 upsert（一次呼叫）
-GET    /api/index-intraday?market=TWSE         # 指數「當日」分時（Yahoo 5m，取最新交易日；transient，不寫 DB）
+GET    /api/us-daily-index?code=SPX&from=&to=  # code-keyed 指數每日 OHLC（TPEX／8 頁面指數／SP500TR 均可查；依 Requirement 33 相容 GET 不新增 code 白名單）
+POST   /api/us-daily-index/refresh?code=SPX    # code-keyed 指數 upsert：TPEX 官方逐月，其餘 Yahoo v8 chart range=10y 單次
+GET    /api/index-intraday?market=TWSE         # 指數「當日」分時（TPEX 官方 MIS 一分 K聚合五分格，其餘 Yahoo 5m；transient，不寫 DB）
 
 GET    /api/bff/gdp-twse?years=40              # 前端 view 專用，回傳近 N 年彙整資料
 POST   /api/bff/gdp-twse/refresh?years=40      # 並行觸發 TWN+JPN+KOR 人均 GDP 回補（見下方說明）
 GET    /api/bff/gdp-twse/index-daily?market=TWSE&years=10
-                                               # 指數日線 + MA5/20/60/240 + 成交量（market=TWSE 或 DJI/SPX/IXIC/SOX/FTSE/DAX/KOSPI/N225；一次載入，前端 dataZoom 切區間）
+                                               # 指數日線 + MA5/20/60/240 + 成交量（market=TWSE/TPEX 或 DJI/SPX/IXIC/SOX/FTSE/DAX/KOSPI/N225；一次載入，前端 dataZoom 切區間）
 POST   /api/bff/gdp-twse/refresh-index-daily?market=TWSE&years=10  # 觸發「當前選取」指數日線回補
        # 逾時三處必須一致放寬（Task 288）：nginx location（frontend/nginx.conf，預設 /api/ 為 60s——**這才是真正生效的上限**）、
        # BFF Duration、前端 axios timeout，皆 360s。台股逐月 120 次序列呼叫實測 250s+，只改 BFF/axios 仍會在第 60 秒被 nginx 切斷回 504
@@ -1632,17 +1632,17 @@ GET    /api/bff/gdp-twse/index-intraday?market=TWSE   # 「當日」分時：回
 ```
 
 「當日」分時資料源（Requirement 18，比照股票分析 Task 87/88 版型但不走 tick store）：
-- 指數（大盤＋美股四大＋海外四指數）不在 Redis tick 輪詢名單，故 ext-materials `MacroDataFetchClient.fetchIndexIntraday(market)` 即時向 Yahoo v8 chart（`interval=5m&range=5d`）抓取，依 `exchangeTimezoneName` 轉當地時區、group by 當地日期取「最新交易日」回傳；盤中＝今日部分 bar（即時）、盤後＝最後完整交易日 → 自動滿足需求。transient 不寫 DB。
+- 指數（TWSE＋TPEX＋美股四大＋海外四指數）不在 Redis 個股 tick 輪詢名單。ext-materials `MacroDataFetchClient.fetchIndexIntraday(market)` 對 TPEX 走具名官方 MIS 分支，其餘才調 Yahoo v8 chart（`interval=5m&range=5d`）。TPEX 從 `staticObj.key=otc_yyyyMMdd` 取最新交易日，只接受 `rtmessage=OK`；`ohlcArray[].t/c` 為必填，將 epoch milliseconds 轉 `Asia/Taipei` 並驗日期等於 key，再以本地時間 floor 成五分格後取格內最後 close。`ts=HHmmss` 僅為可選交叉驗證，官方最後收盤競價點可缺 `ts`（13:33 仍落入 13:30 格）。補齊台北 09:00–13:30，未到或缺格為 null。盤中＝當日部分點、盤後＝最後完整交易日；transient 不寫 DB。
 
-> **「最新交易日」不等於「今日」。** 開盤瞬間 Yahoo 尚未產生今日第一根 5 分格時，`byDate.lastKey()` 取到的是**昨日**；本方法供圖表用故無妨（x 軸本就顯示最後一個有資料的交易日），但**任何拿它的值當「今日即時報價」的呼叫端都必須自行驗證日期**。Task 228 的 `TaiexIndexPoller` 漏了這一步，實測導致昨日點位被寫成今日 tick（見「大盤新鮮度與盤中即時判斷」節）。Task 263 因此另加 `fetchIndexIntradayDay(market)`：同一個 URL、同一個 `curlGetWithRetry`，但回傳 `DayQuote{date, open, high, low, latestClose}`——`date` 為該批點位所屬的當地日期（呼叫端據此守門）、`open`／`high`／`low` 取自 `indicators.quote[0]` 的對應陣列（當日首格開盤、各格最高之最大、各格最低之最小）。**既有 `fetchIndexIntraday` 一行不動**：它的回傳型別 `IndexIntradayPoint` 只有 `time`／`close` 且補滿整個交易時段的 5 分格（未到者 `close=null`）以固定 x 軸，改它會動到「股市大盤查詢」頁
-- market→Yahoo symbol：TWSE→`^TWII`、DJI→`^DJI`、SPX→`^GSPC`、IXIC→`^IXIC`、SOX→`^SOX`、FTSE→`^FTSE`、DAX→`^GDAXI`、KOSPI→`^KS11`、N225→`^N225`
-- 各市場交易時段（補滿 5 分格用，當地時區）：TWSE 09:00–13:30、美股四大 09:30–16:00、FTSE 08:00–16:30、DAX 09:00–17:30、KOSPI 09:00–15:30、N225 09:00–15:30（東京 2024-11-05 收盤由 15:00 延至 15:30；前場 09:00–11:30、後場 12:30–15:30，午休 11:30–12:30 無 bar→留 null）。以 `INDEX_TRADING_HOURS` map 查詢，未知市場 fallback 09:30–16:00
+> **「最新交易日」不等於「今日」。** 開盤瞬間 Yahoo 尚未產生今日第一根 5 分格時，`byDate.lastKey()` 取到的是**昨日**；本方法供圖表用故無妨（x 軸本就顯示最後一個有資料的交易日），但**任何拿它的值當「今日即時報價」的呼叫端都必須自行驗證日期**。Task 228 的 `TaiexIndexPoller` 漏了這一步，實測導致昨日點位被寫成今日 tick（見「大盤新鮮度與盤中即時判斷」節）。Task 263 因此另加 `fetchIndexIntradayDay(market)`：同一個 URL、同一個 `curlGetWithRetry`，但回傳 `DayQuote{date, open, high, low, latestClose}`——`date` 為該批點位所屬的當地日期（呼叫端據此守門）、`open`／`high`／`low` 取自 `indicators.quote[0]` 的對應陣列（當日首格開盤、各格最高之最大、各格最低之最小）。Task 263 當時的 **「既有 `fetchIndexIntraday` 一行不動」自 Task 346 起只保留為 TWSE/Yahoo 分支、`IndexIntradayPoint` 型別、五分格與重試逾時不變**；允許在同 method 前置加入 TPEX 官方 MIS dispatch/parser，且不得影響 `fetchIndexIntradayDay("TWSE")`。它的回傳型別仍只有 `time`／`close` 且補滿整個交易時段的 5 分格（未到者 `close=null`）以固定 x 軸
+- market→Yahoo symbol：TWSE→`^TWII`、DJI→`^DJI`、SPX→`^GSPC`、IXIC→`^IXIC`、SOX→`^SOX`、FTSE→`^FTSE`、DAX→`^GDAXI`、KOSPI→`^KS11`、N225→`^N225`；TPEX 不存在於 Yahoo map，官方 MIS request 參數必須拆為 `ex=otc`、`ch=o00.tw`（response `staticObj.key` 才以 `otc_` 開頭），不得把 composite `otc_o00.tw` 整串塞入 `ch`
+- 各市場交易時段（補滿 5 分格用，當地時區）：TWSE／TPEX 09:00–13:30、美股四大 09:30–16:00、FTSE 08:00–16:30、DAX 09:00–17:30、KOSPI 09:00–15:30、N225 09:00–15:30（東京 2024-11-05 收盤由 15:00 延至 15:30；前場 09:00–11:30、後場 12:30–15:30，午休 11:30–12:30 無 bar→留 null）。以 `INDEX_TRADING_HOURS` map 查詢，未知市場 fallback 09:30–16:00
 - 前端「當日」模式 x 軸改 HH:mm、收盤單線；週/月/季/年線改畫水平參考線（取日線最新 MA5/20/60/240，`ma5` 那條為 Task 285 新增、與另外三條同一分支），與其他期間同口徑
-- 「當日」卡片標題列另顯示**昨收 / 漲跌 / 漲跌%**，由 BFF 計算（前端只 render，符合「計算放 BFF」）：`previousClose` ＝該指數日線表（`twse_index_daily_history` / `us_index_daily_history`）中 `tradingDate` **之前**最後一筆收盤——與觀察清單 0000 報價 `WatchStockService.toIndexResponse` 讀**同一張日線表**、且自 Task 263 起兩處**共用同一條「嚴格早於顯示日的最後一筆」規則**（該任務讓觀察清單的 `price`／OHLC 在盤中改讀 Redis 即時點位，但 `previousClose` 刻意**不**改讀 Redis payload，正是為了維持這裡的同源保證），昨收為同一事實來源、值一致；`lastClose` ＝分時 `closes` 末筆非 null（盤中即時 / 盤後收盤）；`change = lastClose − previousClose`、`changePercent = change / previousClose ×100`（HALF_UP 2 位）。BFF 以 `Mono.zip` 並行抓 intraday 與「近 40 日日線 tail」（台股 `/api/twse-daily-index`、美股 `/api/us-daily-index`，與 `index-daily` 同一支 business API，同義欄位同一來源；40 日涵蓋最長連假確保含前一交易日）；日線 asc，取「`tradingDate` 嚴格小於當日」的最後一筆。日線未回補導致昨收缺值時 `change/changePercent` 回 null，前端整段不顯示
+- 「當日」卡片標題列另顯示**昨收 / 漲跌 / 漲跌%**，由 BFF 計算（前端只 render，符合「計算放 BFF」）：`previousClose` ＝該指數日線表（`twse_index_daily_history` / `us_index_daily_history`）中 `tradingDate` **之前**最後一筆收盤——與觀察清單 0000 報價 `WatchStockService.toIndexResponse` 讀**同一張日線表**、且自 Task 263 起兩處**共用同一條「嚴格早於顯示日的最後一筆」規則**（該任務讓觀察清單的 `price`／OHLC 在盤中改讀 Redis 即時點位，但 `previousClose` 刻意**不**改讀 Redis payload，正是為了維持這裡的同源保證），昨收為同一事實來源、值一致；`lastClose` ＝分時 `closes` 末筆非 null（盤中即時 / 盤後收盤）；`change = lastClose − previousClose`、`changePercent = change / previousClose ×100`（HALF_UP 2 位）。BFF 以 `Mono.zip` 並行抓 intraday 與「近 40 日日線 tail」：僅 `TWSE` 走 `/api/twse-daily-index`，TPEX 與其餘 code-keyed 指數走 `/api/us-daily-index?code=`；與 `index-daily` 同一支 business API，同義欄位同一來源，40 日涵蓋最長連假確保含前一交易日。日線 asc，取「`tradingDate` 嚴格小於當日」的最後一筆。日線未回補導致昨收缺值時 `change/changePercent` 回 null，前端整段不顯示
 - **昨收新鮮度 — 海外指數日線自動回補（Task 105）**：上述昨收讀日線表，前提是日線表「最新」（含前一交易日）。`us_index_daily_history` 原本只靠前端「回補日線（10 年）」按鈕手動觸發、無排程，久未點擊的指數會停在舊日期；當日走勢點位是即時 Yahoo（最新交易日），昨收卻退回數日前舊收盤 → 漲跌% 失真（實機 SOX 顯示 +13.88%，實際 ~+5%）。注意失效模式是「過時但**非空**→昨收為錯的舊值」，非「缺值→null」，故 BFF 的 null 守門擋不住。修法：business-services 新增 `IndexDailyRefreshScheduler` 讓日線表恆保最新（昨收不變更事實來源），角色比照台股大盤的 ext-materials `TwseIndexPoller`：
-  - `@Scheduled(cron = "0 0 7 * * TUE-SAT", zone = "Asia/Taipei")`：美股 16:00 ET 收盤後（≈隔日 04~05:00 台北）足夠緩衝，07:00 對 8 指數逐一呼叫 `MacroHistoryService.refreshUsIndexDaily(code)`（＝手動按鈕同一條 Yahoo `range=10y` idempotent upsert，500ms 間隔）；此時亞/歐/美最新交易日皆已收
+  - `@Scheduled(cron = "0 0 7 * * TUE-SAT", zone = "Asia/Taipei")`：美股 16:00 ET 收盤後（≈隔日 04~05:00 台北）足夠緩衝，07:00 對 TPEX＋8 個海外指數＋SP500TR 逐一呼叫 `MacroHistoryService.refreshUsIndexDaily(code)`（TPEX 走 TPEx 官方逐月，其餘走 Yahoo `range=10y`；均 idempotent upsert，指數間 500ms 間隔），最後執行既有 TWSE 報酬指數增量；此時亞/歐/美最新交易日皆已收
   - `@EventListener(ApplicationReadyEvent)` self-heal：開機延遲 30s（待 external-materials 就緒）後，任一指數最新日期過時（> 4 日，容忍週末+1 假日）即補一次，處理「服務於排程時點未運行（restart/crash）」
-  - 8 指數代碼收斂為單一來源 `MacroHistoryService.OVERSEAS_INDEX_CODES`，`MacroHistoryController` refresh 守門白名單改引用之（去重）；新增 repo `findTopByIndexCodeOrderByTradingDateDesc` 供 self-heal 取各指數最新日期
+  - 既有 8 個海外指數仍由 `MacroHistoryService.OVERSEAS_INDEX_CODES` 表達；頁面 code-keyed 集合另以 `PAGE_CODED_INDEX_CODES = {TPEX} ∪ OVERSEAS_INDEX_CODES` 為單一來源，全量 self-heal 引用後者。`MacroHistoryController.US_INDEX_REFRESH_CODES = PAGE_CODED_INDEX_CODES ∪ TOTAL_RETURN_US_INDEX_CODES`，以保留 SP500TR 既有回補；頁面/public/export 的 `DAILY_INDEX_CODES = {TWSE} ∪ PAGE_CODED_INDEX_CODES`，不含 SP500TR。美股 gap-check 僅引用 `US_INDEX_CODES={DJI,SPX,IXIC,SOX,SP500TR}`，TPEX 正面列入 `NON_US_INDEX_CODES={TPEX,FTSE,DAX,KOSPI,N225}`；新增 repo `findTopByIndexCodeOrderByTradingDateDesc` 供 self-heal 取各指數最新日期
 
 回傳格式（BFF `/api/bff/gdp-twse`，服務「台日韓人均 GDP 比較」圖）：
 ```json
@@ -1658,7 +1658,7 @@ GET    /api/bff/gdp-twse/index-intraday?market=TWSE   # 「當日」分時：回
 ```
 （X 軸年份取 TW/JP/KR 三國 GDP 的聯集並過濾 `> 當年`。Task 97 起不再回 `twseYearEndClose` / `currentYearLastTradingDate`——「人均 GDP vs 台股大盤年末收盤」卡已移除。`POST /api/bff/gdp-twse/refresh` 亦簡化為只觸發 TWN+JPN+KOR GDP 回補，回 `{gdp, japan, korea}` 三國回補結果）
 
-回傳格式（BFF `/api/bff/gdp-twse/index-daily`，`market=TWSE` 或 DJI/SPX/IXIC/SOX/FTSE/DAX/KOSPI/N225 皆同一格式）：
+回傳格式（BFF `/api/bff/gdp-twse/index-daily`，`market=TWSE`、`TPEX` 或 DJI/SPX/IXIC/SOX/FTSE/DAX/KOSPI/N225 皆同一格式）：
 ```json
 {
   "dates":     ["2016-05-05", ..., "2026-05-05"],
@@ -1675,9 +1675,9 @@ GET    /api/bff/gdp-twse/index-intraday?market=TWSE   # 「當日」分時：回
 （`null` 代表移動平均尚未滿視窗的早期資料點。`ma5` 為 Task 285 新增的**週線**——台股慣例的 5 個交易日 SMA、非日曆週，與另外三條走同一支 `movingAverage(closes, window)`，只差視窗長度；四條 MA 皆為 BigDecimal 精確加總後 `divide(window, 2, HALF_UP)`。同一組 `ma5` 定義另由 business 端 `ExcelExportService` 於「週線MA5」匯出欄重算一次——兩處刻意同定義同精度，確保圖上的值與檔案裡的值逐位相同，見 Requirement 45 章節）
 
 成交量三欄（Task 288，供日線圖的成交量柱狀子圖）：
-- `volumes` — 成交股數（股）。台股取 `twse_index_daily_history.trade_volume`、海外指數取 `us_index_daily_history.volume`；該日缺值填 `null`
-- `turnovers` — 成交金額（元），**僅台股**（`market=TWSE`）非空，取 `twse_index_daily_history.trade_value`；海外指數 Yahoo 無此欄位，一律回長度相同的全 `null` 陣列（不回缺欄，避免前端分支）
-- `hasVolume` — 該指數整段是否有任何「非 null 且非 0」的量值，**只看該市場實際繪製的那一欄**：台股看 `turnovers`（畫的是成交金額）、海外指數看 `volumes`。**不採 OR 邏輯**（`volumes` 或 `turnovers` 任一），否則會允許「`volumes` 有值、`turnovers` 全 null」這種台股實際不會發生、卻讓子圖畫出一整排空柱的組合。**由 BFF 判定、前端只 render**：`false` 時前端隱藏整個子圖並顯示「本指數無成交量資料」。費城半導體 SOX 的 Yahoo `volume` 恆為 `0`（非 null），故判定條件不可只判 null
+- `volumes` — 成交股數（股）。TWSE 取 `twse_index_daily_history.trade_volume`；TPEX 取 TPEx 官方新欄「成交張數」或舊欄「成交股數（仟股）」×1,000；八個海外指數取 Yahoo volume，後二者皆落 `us_index_daily_history.volume`；該日缺值填 `null`
+- `turnovers` — 成交金額（元），**僅 TWSE**（`market=TWSE`）非空，取 `twse_index_daily_history.trade_value`；TPEX 雖有官方金額來源，既有 code-keyed 表無此欄，本任務不擴 schema，故它與海外指數一律回長度相同的全 `null` 陣列（不回缺欄，避免前端分支）
+- `hasVolume` — 該指數整段是否有任何「非 null 且非 0」的量值，**只看該市場實際繪製的那一欄**：TWSE 看 `turnovers`（畫的是成交金額），TPEX 與海外指數看 `volumes`。**不採 OR 邏輯**（`volumes` 或 `turnovers` 任一），否則會允許「`volumes` 有值、`turnovers` 全 null」這種 TWSE 實際不會發生、卻讓子圖畫出一整排空柱的組合。**由 BFF 判定、前端只 render**：`false` 時前端隱藏整個子圖並顯示「本指數無成交量資料」。費城半導體 SOX 的 Yahoo `volume` 恆為 `0`（非 null），故判定條件不可只判 null
 - 三欄長度恆等於 `dates`，與 `closes`／`ma*` 逐格對齊；顯示單位（億元／億股／萬股）於前端換算，**BFF 不回衍生值**
 
 台灣人均 GDP / 實質成長率資料來源（**DGBAS 優先、IMF 備援**）：
@@ -1704,9 +1704,9 @@ GET    /api/bff/gdp-twse/index-intraday?market=TWSE   # 「當日」分時：回
   - `MacroHistoryService.refreshTwseDaily` 從 TWSE `MI_5MINS_HIST` 月報抓取四欄（`開盤指數` / `最高指數` / `最低指數` / `收盤指數`），同步 upsert
   - **`trade_volume`（成交股數，股）／`trade_value`（成交金額，元）— Task 288**：供 Requirement 18 日線圖的成交量柱狀子圖。來源為**另一支** TWSE 月報 `FMTQIK`（`https://www.twse.com.tw/rwd/zh/afterTrading/FMTQIK?date=YYYYMM01&response=json`，欄位 `日期／成交股數／成交金額／成交筆數／發行量加權股價指數／漲跌點數`）——`MI_5MINS_HIST` **沒有量欄**，故 `/internal/macro/twse-monthly` 同月份併抓兩支 API 後以交易日 join。兩欄 nullable：FMTQIK 該月失敗時量欄留 null 但 OHLC 照寫；**回補時必須保留 DB 既有值**（與 `close_point_tr` 同一條反覆蓋規則，JPA merge 全欄寫入會靜默洗成 null）。億元／億股換算一律於前端顯示時計算，**不入庫**（禁存衍生值）
 - `us_index_daily_history`        ((index_code, trading_date) PK, open_point / high_point / low_point / close_point 皆 NUMERIC(14,4)、**volume BIGINT**)
-  - **`volume`（成交量，股）— Task 288**：取自既有 Yahoo v8 chart 回應的 `indicators.quote[0].volume`（同一次呼叫即含，不新增外部來源）。nullable。⚠️ **各市場口徑不一致、不得跨指數比較**：實測 2026-08-02，`^SOX` 恆為 `0`（純計算型指數無成交量，前端據此隱藏整個子圖）、`^KS11` 回 275,700 量級（韓國實際成交股數為數億股，該欄顯非股數原值）
-  - 美股四大指數（道瓊 DJI / 標普500 SPX / 那斯達克綜合 IXIC / 費城半導體 SOX）+ 海外主要指數（英國富時 FTSE / 德國 DAX / 韓國 KOSPI / 日經 N225）每日 OHLC，供 Requirement 18 日線圖「市場切換」。表名沿用 `us_index_daily_history`（語意已一般化為「海外指數日線」，欄位本以 `index_code` 通用化，新增市場零遷移）
-  - 來源 Yahoo Finance v8 chart API（`^DJI`/`^GSPC`/`^IXIC`/`^SOX`/`^FTSE`/`^GDAXI`/`^KS11`/`^N225`，`range=10y&interval=1d`），ext-materials-service `MacroDataFetchClient.fetchUsIndexDaily(code)` 以 curl 子程序抓取（避 Yahoo Java fingerprint 封鎖）；timestamp→交易日依 Yahoo meta `exchangeTimezoneName` 轉當地時區（非寫死 NY，否則亞洲/歐洲指數日期回退一日）；`MacroHistoryService.refreshUsIndexDaily(code)` 經 `/internal/macro/us-index` proxy 後 upsert
+  - **`volume`（成交量，股）— Task 288／346**：TPEX 取 TPEx 官方日成交量值新欄「成交張數」或舊欄「成交股數（仟股）」×1,000；八個海外指數取 Yahoo v8 chart `indicators.quote[0].volume`。nullable；TPEX 本次 incoming volume 為 null 時，business upsert 須保留 DB 同日期既有非 null volume，只有 incoming 非 null 才更新，且量能資料失敗不得清掉或丟棄同日已驗證 OHLC。⚠️ **各市場口徑不一致、不得跨指數比較**：實測 2026-08-02，`^SOX` 恆為 `0`（純計算型指數無成交量，前端據此隱藏整個子圖）、`^KS11` 回 275,700 量級（韓國實際成交股數為數億股，該欄顯非股數原值）
+  - 台股櫃買指數 TPEX＋美股四大指數（道瓊 DJI / 標普500 SPX / 那斯達克綜合 IXIC / 費城半導體 SOX）＋海外主要指數（英國富時 FTSE / 德國 DAX / 韓國 KOSPI / 日經 N225）每日 OHLC，供 Requirement 18 日線圖「市場切換」。表名沿用 `us_index_daily_history` 作為相容名稱，實際語意為「除 TWSE 單一特例表外的 code-keyed 指數日線」，欄位本以 `index_code` 通用化，新增市場零遷移
+  - 來源依 code 分流：TPEX 逐月抓 TPEx 官方 `indexInfo/inx` OHLC，並以官方 `st41_result` 同日 join 新／舊量欄；兩者都先驗 root `stat="ok"`，再從 `tables[]` 中唯一具備必要欄位的 target table 取 `fields/data`，不得套用 TWSE root parser。八個海外指數維持 Yahoo Finance v8 chart API（`^DJI`/`^GSPC`/`^IXIC`/`^SOX`/`^FTSE`/`^GDAXI`/`^KS11`/`^N225`，`range=10y&interval=1d`），ext-materials-service `MacroDataFetchClient.fetchUsIndexDaily(code)` 以具名 TPEX 分支封裝來源差異；`MacroHistoryService.refreshUsIndexDaily(code)` 經 `/internal/macro/us-index` proxy 後 upsert。Yahoo `^TWOII` 已停止有效更新，不得是 TPEX mapping 或 fallback
   - **與 `twse_index_daily_history` 分表**的理由：台股大盤為單一指數（無 code 欄）、且已與 Requirement 14 觀察清單 0000 報價/KD 與當年年末回填邏輯耦合，分表可完全不動既有台股流程；兩表由 `MarketIndexChartService` 以**同一套 MA 計算**服務（同義欄位同一來源），確保兩市場版面一致
   - Stooq CSV 為原評估來源但實測在部署環境被擋（連 `aapl.us` 都回通用錯誤頁），故改採 Yahoo；來源封裝於單一 fetch 方法，可一處替換
 - `foreign_stock_daily_history`   ((stock_code, trading_date) PK, close_point NUMERIC(18,4)) — **Task 185**（backend Liquibase `v1.55.0-foreign-stock-daily.sql`；ext-materials 以 JdbcTemplate 直寫，無 JPA entity）
@@ -4815,7 +4815,7 @@ Task 335 讓 IXIC 的 MA5／20／60／240 **首次上畫面**，「同義值在�
 ```text
 (a) BFF   MarketIndexChartService.movingAverage(closes, w)
           BigDecimal 精確滾動和 → sum.divide(valueOf(w), 2, HALF_UP)
-          服務「股市大盤查詢」頁 9 個市場的整段序列
+          服務「股市大盤查詢」頁 10 個市場的整段序列
 
 (b) BE    TechnicalIndicatorService.nasdaqSimpleMa(desc, days)      ← Task 336 改這一支
           double 累加（新→舊） → BigDecimal.valueOf(sum/days).setScale(2, HALF_UP)
@@ -4825,7 +4825,7 @@ Task 335 讓 IXIC 的 MA5／20／60／240 **首次上畫面**，「同義值在�
 
 **既有的兩組免罪理由都不適用**——這是本任務成立的關鍵，也是 Task 335 的 `arch-auditor` 稽核揭出它的方式。具名例外 (3) 的理由是「語意不同（含 live）」，但 `computeAllForNasdaq()` 刻意不併即時價（`TechnicalIndicatorNasdaqTest` 有同名斷言）；具名例外 (1)(2) 的「算術上逐位相同」論證前提是台股收盤 `numeric(12,2)`、和除以 5 恆為第三位小數為偶數而碰不到 HALF_UP 邊界，但 `close_point` 是 `numeric(14,4)`，且運行中 DB 實測 2559 筆 IXIC 日線中 **2248 筆（87.8%）帶滿 4 位有效小數**，該前提在此不成立。
 
-**收斂方向是 (b) → (a) 的精確路徑，不得反向。** double 累加本就是精度較差的一方；(a) 的輸出已經在「股市大盤查詢」頁對使用者發布，收斂到 (a) 等於讓雷達採用使用者已看得到的值，屬缺陷修正而非新行為；且 (a) 服務 9 個市場的整段序列，改成 double 會把分歧擴散到另外 8 個市場。收斂後兩份的等值**由構造保證**（同一批收盤、同一視窗、同樣 `divide(w, 2, HALF_UP)`；BigDecimal 加法可結合，累加方向不影響結果），強度高於具名例外 (1)(2) 現行那種抽樣論證。
+**收斂方向是 (b) → (a) 的精確路徑，不得反向。** double 累加本就是精度較差的一方；(a) 的輸出已經在「股市大盤查詢」頁對使用者發布，收斂到 (a) 等於讓雷達採用使用者已看得到的值，屬缺陷修正而非新行為；且 (a) 現服務 10 個市場的整段序列，改成 double 會把分歧擴散到 IXIC 以外的另外 9 個市場。收斂後兩份的等值**由構造保證**（同一批收盤、同一視窗、同樣 `divide(w, 2, HALF_UP)`；BigDecimal 加法可結合，累加方向不影響結果），強度高於具名例外 (1)(2) 現行那種抽樣論證。
 
 **只改 `nasdaqSimpleMa` 一支。** 同類別另有三支同族 double helper：`simpleMa`（個股）、`taiexSimpleMa`（台股大盤 `0000`）、`maAt`（走勢圖整段序列）。它們服務台股與個股，屬具名例外 (3)（含 live）的範圍，收斂前提是先決定「MA 要不要併 live」，屬另一個獨立任務；動了會翻動台股大盤 regime 與全部個股的 `action`／`score`。`maAt` 的既有 javadoc 契約「累加方向必須是『新→舊』，與 `simpleMa`／`taiexSimpleMa` 一致」**列舉對象不含** `nasdaqSimpleMa`，`TechnicalIndicatorSeriesAlignmentTest` 的對齊斷言也只涵蓋個股與 `0000`、無 IXIC 案例，故該契約不受本次波及。
 
@@ -4859,7 +4859,7 @@ Task 335 讓 IXIC 的 MA5／20／60／240 **首次上畫面**，「同義值在�
 
 **`TW_RULES_V13` 已被佔用。** `RuleParameters.V13_VERSION = "TW_RULES_V13"` 是**離線 calibration／candidate 參數集**的版本字串（`evaluateCandidate()` 明文校驗 `"candidate evaluation 必須使用 TW_RULES_V13 參數"`）。故 `TradingRadarRuleEngine.RULE_VERSION` 日後若真要升版，**必須跳到 `TW_RULES_V14`**——用 V13 會讓 production 標籤與離線 candidate 參數集同名。本次不升版，此處只留紀錄。
 
-**三份顯示用實作在實體上仍然存在，而且免罪理由對每一對都要各自成立。** (a) 與 {(b),(c)} 之間是建置結構——`bff` 是獨立 Maven artifact `asset-management-bff`，其 `pom.xml` 不依賴 backend，全 repo 三個 `pom.xml` 無 aggregator、無共用程式模組，跨不過去。**但 (b) 與 (c) 同在 `backend` 這一個 module、同一個 Spring context，Maven 分離對這一對完全不成立**，不得拿來當理由（本節上方那份先例清單的教訓正是「沿用了一個不適用的免罪理由」）。(b)–(c) 真正的理由是**呼叫形狀與型別不同**：(b) 吃 `List<UsIndexDailyHistory>`（desc）只回最新一期的單值，(c) 吃 `List<IndexDailyRow>`（asc）逐點回整段序列。抽成共用的 `List<BigDecimal>` primitive 技術上完全可行，本次明文登記為**已知技術債**而非結構限制——順帶一提，本檔下方「backend 內部直接注入 `TechnicalIndicatorService` 也不是本次的解……擋住的一樣是 live 併入語意與覆蓋率」那兩個理由中，**「live 併入語意」那一半在 (b) 收斂後不再適用**（(b) 刻意不併 live 且與 (c) 同為精確路徑）；**「覆蓋率」那一半仍成立**——(b) 的 `computeAllForNasdaq()` 寫死 `findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 240)` 只覆蓋 IXIC，(c) 的 `findIndexDaily` 服務 `DAILY_INDEX_CODES` 全部 9 個指數。該覆蓋率差異已含在上述「呼叫形狀與型別不同」的理由裡。`spec/steering/structure.md` §3.2 鐵則 4 的「具名例外之二」因此由「待收斂」改為**已收斂**、並改列三份，而非整段刪除。
+**三份顯示用實作在實體上仍然存在，而且免罪理由對每一對都要各自成立。** (a) 與 {(b),(c)} 之間是建置結構——`bff` 是獨立 Maven artifact `asset-management-bff`，其 `pom.xml` 不依賴 backend，全 repo 三個 `pom.xml` 無 aggregator、無共用程式模組，跨不過去。**但 (b) 與 (c) 同在 `backend` 這一個 module、同一個 Spring context，Maven 分離對這一對完全不成立**，不得拿來當理由（本節上方那份先例清單的教訓正是「沿用了一個不適用的免罪理由」）。(b)–(c) 真正的理由是**呼叫形狀與型別不同**：(b) 吃 `List<UsIndexDailyHistory>`（desc）只回最新一期的單值，(c) 吃 `List<IndexDailyRow>`（asc）逐點回整段序列。抽成共用的 `List<BigDecimal>` primitive 技術上完全可行，本次明文登記為**已知技術債**而非結構限制——順帶一提，本檔下方「backend 內部直接注入 `TechnicalIndicatorService` 也不是本次的解……擋住的一樣是 live 併入語意與覆蓋率」那兩個理由中，**「live 併入語意」那一半在 (b) 收斂後不再適用**（(b) 刻意不併 live 且與 (c) 同為精確路徑）；**「覆蓋率」那一半仍成立**——(b) 的 `computeAllForNasdaq()` 寫死 `findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 240)` 只覆蓋 IXIC，(c) 的 `findIndexDaily` 現服務 `DAILY_INDEX_CODES` 全部 10 個指數。該覆蓋率差異已含在上述「呼叫形狀與型別不同」的理由裡。`spec/steering/structure.md` §3.2 鐵則 4 的「具名例外之二」因此由「待收斂」改為**已收斂**、並改列三份，而非整段刪除。
 
 **本次不做：** 台股大盤與個股的 MA（`taiexSimpleMa`／`simpleMa`／`maAt`，沿用具名例外 (3)）、`ExcelExportService.indexMaAt`（確實產出 IXIC 均線，但本就是精確路徑、收斂後同值）、`BacktestService.buildUsMarketRegimes()`（見上方 (d)）、把這幾份合併成單一實作（(a) 側是建置結構、(b)–(c) 側是已知技術債，兩側理由不同，見上段）、IXIC 即時盤中報價（沿用 Requirement 64 排除項 (e)）、`confirm()` 的 scale-8 內部平均（兩收盤日確認用的內部比較值，不對外顯示，語意不同）。
 
@@ -5412,12 +5412,12 @@ business 另有逐日 MA5 的既有實作（`TechnicalIndicatorService.Indicator
 經 `GET /api/market-data/indicators/series` 提供）。
 
 > **不可用「那支不是現成解」搪塞。** 它確實**只覆蓋 `0000`＋`台股`**（`TechnicalIndicatorService.isTaiex`
-> 只認這一組，本頁另外 8 個海外指數在該服務沒有分支，走 `stockSeriesAsc` 只會查 `stock_price_history`
+> 只認這一組，本頁另外 9 個 code-keyed 指數（TPEX＋8 個海外指數）在該服務沒有分支，走 `stockSeriesAsc` 只會查 `stock_price_history`
 > 得到空序列）——但**唯一會與別處撞值的正好就是 TWSE**，而那正是它已覆蓋的那一個；
-> 另外 8 個指數全站沒有同義競品，怎麼算都不會不一致。
-> ⚠️ **「另外 8 個沒有同義競品」這句對 IXIC 自 Task 294 起已不成立**（`nasdaqSimpleMa` 建立了第二份，
+> 另外 9 個 code-keyed 指數全站原本沒有同義競品，怎麼算都不會不一致。
+> ⚠️ **「另外 9 個沒有同義競品」這句對 IXIC 自 Task 294 起已不成立**（`nasdaqSimpleMa` 建立了第二份，
 > Task 335 讓它首次上畫面，實測 MA20 有 2 日差 0.01），詳見本檔「IXIC 均線兩條算術路徑的收斂
-> （Requirement 77，Task 336）」；其餘 7 個指數維持成立。本段其餘論證（live 語意、被放棄的三個選項）不受影響。
+> （Requirement 77，Task 336）」；其餘 8 個 code-keyed 指數維持成立。本段其餘論證（live 語意、被放棄的三個選項）不受影響。
 > 真正擋住它的是**語意**不是覆蓋率：
 > 它會**併入 Redis 今日盤中即時點位**，而本圖的 MA20/60/240 與本匯出一律只用已落地的日線收盤。
 > 只把 MA5 換成它，會讓**同一張圖上的五條線有兩種口徑**（週線含盤中、其餘不含），
@@ -5464,7 +5464,7 @@ business 另有逐日 MA5 的既有實作（`TechnicalIndicatorService.Indicator
 >      （`n/500 = 2n/1000`），永遠碰不到 `.xxx5` 的 HALF_UP 邊界；而 double 累加對 ~2×10⁵ 量級的誤差約
 >      10⁻¹⁰，距最近邊界 ≥ 5×10⁻⁴，**跨不過去**。50 萬組隨機 2 位小數樣本實測：兩路徑不一致 **0 次**。
 >      故對 TWSE，`double` 版與 `BigDecimal` 版**逐位相同**。（4 位小數的海外指數理論上可能出現平手，
->      但那 8 個指數在 `TechnicalIndicatorService` 根本沒有分支、沒有競品，不構成不一致。）
+>      但那 9 個 code-keyed 指數在 `TechnicalIndicatorService` 根本沒有分支；除另有具名收斂說明的 IXIC 外，其餘 8 個沒有競品，不構成不一致。）
 >    - **是 live 併入語意差。** 交易雷達／走勢圖走 `computeAllForTaiex`／`indicatorSeries`，
 >      盤中會把 Redis 今日即時點位併成今日列；本匯出只用已落地收盤。**盤中同日兩個檔案本來就該不同**
 >      （一個是即時快照、一個是收盤留存），這不是 bug。
@@ -5517,16 +5517,16 @@ JSON 那一份（R55 雙格式）欄名同為 `週線MA5`／`月線MA20`／`季�
 （同一支 API 供手動與排程共用，見 CLAUDE.md「同義欄位、同一 business service API」）。
 
 **`SP500TR` 不列入白名單**：該代碼雖存在於 `us_index_daily_history`，但屬績效比較頁（R33）的
-含息報酬指數，不在本頁 9 個可選指數內。白名單取 `DAILY_INDEX_CODES`（其值為 `OVERSEAS_INDEX_CODES ∪ {TWSE}`），
+含息報酬指數，不在本頁 10 個可選指數內。白名單取 `DAILY_INDEX_CODES`（其值為 `{TWSE} ∪ PAGE_CODED_INDEX_CODES`，且 `PAGE_CODED_INDEX_CODES={TPEX} ∪ OVERSEAS_INDEX_CODES`），
 與頁面下拉一致；`MacroHistoryController` 另有 `US_INDEX_REFRESH_CODES`（含 `SP500TR`）是回補守門用，語意不同，不可誤用。
 
 ### 指數維度：本頁與 R42 的關鍵差異
 
 R42 刻意不設 `currency` 欄（單一幣別頁，加欄＝為不存在的需求預留）。
-**R45 相反**：本頁下拉本來就有 9 個指數，且不同時間點可能要匯出不同市場；因此排程不把單一
+**R45 相反**：本頁下拉共有 10 個指數，且不同時間點可能要匯出不同市場；因此排程不把單一
 `market` 塞在 owner 設定列，而是在每個時間點的 `index_export_schedule_time_market` 以一列一指數保存，設定卡以 checkbox 多選。
 
-標籤同 R42 走單一來源 `ExcelExportService.indexLabel(market)`（`TWSE`→`台股大盤`、`DJI`→`道瓊工業`…），
+標籤同 R42 走單一來源 `ExcelExportService.indexLabel(market)`（`TWSE`→`台股集中市場`、`TPEX`→`台股櫃買市場`、`DJI`→`道瓊工業`…），
 工作表名／手動匯出檔名／排程檔名三處共用。未知代碼回傳代碼本身，不臆造名稱。
 （前端 `GdpTwseView.MARKETS` 的 label 是 render 用，後端不可依賴前端字串。）
 
@@ -7895,3 +7895,77 @@ PortfolioAdviceBffController（既有 Mono.zip 之後追加一步）
 ### 不處理
 
 不推薦未持有的新標的（本機檔位的定義性限制）；不做個股優劣／套牢／稅務／交易成本判斷（僅在 warnings 明示未考慮）；`llm` 檔位一行不改；不新增 API endpoint 與排程。
+
+## Requirement 85／Task 346：台股集中／櫃買市場指數與上市櫃個股兩分鐘報價契約
+
+### 決策摘要
+
+「股市大盤查詢」的市場 catalog 由 9 個擴為 10 個：`TWSE/台股集中市場`、`TPEX/台股櫃買市場` 置前，其後依既有順序保留 8 個海外指數。`TWSE` 只改這個頁面分類與匯出標籤，不全域取代觀察清單 `0000`、交易雷達與新聞中原本表示 TAIEX 的「台股大盤」。`TPEX` 是頁面指數代碼，不新增 `0000` 類型的假個股。
+
+個股需求不建立新 producer。既有 `external-materials-service` 已有正確邊界：台股與美股各自以市場時區的 cron 每 2 分鐘執行，成功報價經同一個 `PriceCacheWriter` 寫 Redis；台股 client 對同一代碼依序嘗試 `tse` 與 `otc`。本任務只補齊上櫃反回歸證據與排程清單文案，**不改 cron、不新增 `@Scheduled`、不把任何路徑改成 2 秒**。
+
+### 指數代碼與資料表分派
+
+```text
+OVERSEAS_INDEX_CODES = [DJI, SPX, IXIC, SOX, FTSE, DAX, KOSPI, N225]
+PAGE_CODED_INDEX_CODES = [TPEX] + OVERSEAS_INDEX_CODES
+DAILY_INDEX_CODES = {TWSE} + PAGE_CODED_INDEX_CODES
+
+TWSE  ───────────────→ twse_index_daily_history
+TPEX／海外頁面指數 ─→ us_index_daily_history(index_code, trading_date)
+SP500TR ─────────────→ 同一 code-keyed 表，但只屬績效比較，不進頁面 catalog
+```
+
+保留 `OVERSEAS_INDEX_CODES` 的原語意，不能為了重用清單把 TPEX 說成海外市場。新增 `PAGE_CODED_INDEX_CODES` 作為頁面 code-keyed 指數與每日完整回補的單一來源；`DAILY_INDEX_CODES={TWSE}∪PAGE_CODED_INDEX_CODES` 供頁面、public API、當日分時、手動／排程匯出及其各自 controller 驗證共用。既有 business `GET /api/us-daily-index` 依 Requirement 33 維持不驗 code，不能新增會誤擋績效比較 `SP500TR` 的 GET 守門；相容 refresh controller 另使用 `US_INDEX_REFRESH_CODES=PAGE_CODED_INDEX_CODES∪TOTAL_RETURN_US_INDEX_CODES`，確保 TPEX 與 SP500TR 皆可回補但 SP500TR 不進本頁。既有表名 `us_index_daily_history` 與 `/api/us-daily-index` 路由名為相容契約，不做 schema 或 endpoint rename；entity／controller javadoc 改成「除 TWSE 單一特例外的 code-keyed 指數」。
+
+### TPEX 十年日線與當日分時
+
+Yahoo `^TWOII` 實查在 2026-07-17 後 OHLC 全為 null且無 5 分 K，因此 TPEX 禁止進入 `US_INDEX_YAHOO`與 `INDEX_INTRADAY_YAHOO`，也不能當 fallback。`MacroDataFetchClient.fetchUsIndexDaily("TPEX")` 保留相容 method 但在內部走官方來源分支：從台北今日往前十年按月調用 TPEx `https://www.tpex.org.tw/www/zh-tw/indexInfo/inx?date=YYYY/MM/01&response=json`。官方 payload 為 `{stat:"ok",tables:[{title,fields,data,totalCount}]}`，不是 root `fields/data`；先驗 lowercase `stat="ok"`，再要求 `tables[]` 中恰一張 target table 的 `fields` 包含「日期／開市／最高／最低／收市」，只從該 table 的 `fields/data` 依欄名解析並驗證正數 OHLC 與 high/low 關係。零張或多張 target table、row width 不符都屬 schema failure。過去完整月任一 HTTP／schema／OHLC 失敗使整次 fetch 失敗，不讓不完整十年被當成成功；當月尚無交易日可為空。
+
+同月另取 `https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_index/st41_result.php?l=zh-tw&d=YYY/MM&o=json`。它同樣先驗 root `stat="ok"`，再從 `tables[]` 中唯一具備「日期／櫃買指數」與精確量欄 alias 的 target table 取 `fields/data`；日期為民國年。量欄只接受新 schema「成交張數」或舊 schema「成交股數（仟股）」兩個精確 alias，兩者均×1,000；轉公元日期後 join OHLC 寫 `DailyOhlc.volume`。2016/08–2024/12 實際回舊 alias，2025/01 起回新 alias，故 parser 與 fixture 必須同時覆蓋 nested shape。量能整月請求失敗時本次該月 volume 全 null；單日缺列、數值非法，或該列櫃買指數與主 OHLC 收市不同，僅該日 volume null 並 WARN，不丟棄有效 OHLC。`MacroHistoryService.refreshUsIndexDaily("TPEX")` 在 saveAll 前依日期載入既有列：incoming volume 為 null 且 DB 已有非 null 值時，把既有 volume 帶回待存 entity；incoming 非 null 才覆寫，OHLC 仍使用本次已驗證值。`DailyOhlc.value` 恆 null，因 code-keyed 表沒有 turnover 欄，本任務不擴 schema。兩支 JSON URL 是 data.gov.tw 資料集 11391／17248 提供的 TPEx 官方資源，屬 Requirement 46 的具名官方開放資料例外，不開放任意 HTML scraping。BFF `MarketIndexChartService.fetchDailyRows` 對 `TWSE` 保留 `/api/twse-daily-index` 特例，`TPEX` 與其餘 code-keyed 指數走 `/api/us-daily-index`，原有 MA5/20/60/240、volume、range 裁切與十年 shaping 不分叉；TPEX `turnovers` 與其餘 code-keyed 指數一樣為等長 null。
+
+手動 `refresh-index-daily?market=TPEX&years=10` 沿用 code-keyed refresh。`IndexDailyRefreshScheduler` 的每日 07:00 全量回補與開機 self-heal 遍歷 `PAGE_CODED_INDEX_CODES`；逐盤精準判準的 `US_INDEX_CODES` 仍只含美股四大與 `SP500TR`，09:00／12:00 gap-check 不查 TPEX。`NON_US_INDEX_CODES` 加入 TPEX，沿用四日曆天容忍；static initializer 驗證 `US_INDEX_CODES ∪ NON_US_INDEX_CODES == PAGE_CODED_INDEX_CODES ∪ TOTAL_RETURN_US_INDEX_CODES`。
+
+當日圖由 `fetchIndexIntraday("TPEX")` 具名分支調用官方 MIS `https://mis.twse.com.tw/stock/api/getChartOhlcStatis.jsp?ex=otc&ch=o00.tw&fqy=1`。只接受 `rtmessage="OK"`、`staticObj.key=otc_yyyyMMdd` 且 `ohlcArray` 合法；以 key 取交易日，每點必須有可解析的 `t` epoch milliseconds 與正數 `c`，將 `t` 轉 `Asia/Taipei` 並驗日期等於 key，再依本地時間 floor 到五分格後取格內最後 close。`ts=HHmmss` 僅為可選交叉驗證，存在時才驗它等於 `t` 的本地時間；官方最後收盤競價點可能只有 `t/c`，例如 13:33 必須保留並歸入 13:30 格。補齊 09:00–13:30，未到或缺格為 null。它仍是 request-time transient 回應，不寫 DB、不寫個股 Redis tick store。`previousClose` 僅從 `us_index_daily_history` 中嚴格早於分時 `tradingDate` 的最後一列取得。
+
+### 上市、上櫃與美股個股的唯一兩分鐘 producer
+
+```text
+PricePoller.scheduledTwIntradayUpdate
+  cron 0 0/2 9-13 * * MON-FRI, Asia/Taipei
+  → MarketClock.isTwMarketOpen()
+  → collectHeldStockCodes（每位 owner 最新快照持股 ∪ stock_alert）
+  → tw.remove("0000")（排程端顯式排除；collector 的快照持股側目前不排除）
+  → PriceFetchClient.getTwseRealTimePrice(code)
+       tse_{code}.tw 查無 → otc_{code}.tw
+  → 僅 code 相符且 z 為可解析成交價時回 PriceResult
+  → PriceCacheWriter.write(result, false)
+
+PricePoller.scheduledUsIntradayUpdate
+  cron 0 0/2 9-16 * * MON-FRI, America/New_York
+  → MarketClock.isUsMarketOpen()
+  → 同一 writer
+```
+
+持股資料模型中的上市與上櫃皆為 `market="台股"`，exchange discovery 留在 TWSE MIS client 的 `tse → otc` fallback，不新增 tse/otc schema 欄。`collectHeldStockCodes` 現況只在 `stock_alert` SQL 排除 `0000`，快照持股側仍可能帶入，因此 `scheduledTwIntradayUpdate` 必須在收集後、呼叫 `updatePrices` 前顯式移除並以快照 fixture 測試。`z='-'`、code 不符、空陣列、非 200、解析失敗皆回 `Optional.empty()`；poller 不呼叫 writer，因此保留上一輪 Redis 值。不得以昨收 `y`、開盤 `o` 或買賣價補成 live。
+
+成功結果沿用既有 Redis schema：`price:{market}:{code}`、`price:index:{market}`、24 小時 TTL 與 `price-update` publish；台股成交另由既有 `IntradayTickStore` 累積。OTC 不建第二套 key，也不直接落 `stock_price_history`。business-services、BFF、frontend 只讀這份 cache／SSE，不新增任何對外抓價排程。
+
+### Catalog、匯出與排程清單
+
+`GdpTwseView.vue` 中所有現行分類文字也要同步：頂部 catalog 註解改為集中／櫃買／海外市場；匯出對話框「海外指數無成交金額」改為「除 TWSE 外的 code-keyed 指數無落地成交金額」；`pickVolumeUnit` 附近的註解也不再把 TPEX 誤稱海外。這些是當前契約清理，不全域改寫歷史說明。
+
+`GdpTwseView.MARKETS`、`MarketIndexChartService.MARKET_CATALOG` 與 public `supportedMarkets` 均固定 10 個且順序相同；前端物件鍵為 `{value,label}`，主圖單選與排程匯出多選都綁 `m.value`，不得寫成無效的 `code`。TWSE fallback label 也為「台股集中市場」。`ExcelExportService.indexLabel` 同步 `TWSE/TPEX` 兩個 label，`DAILY_INDEX_CODES` 使手動匯出與多選排程接受 TPEX。`GdpTwseView.vue` 的頂部註解以及 `GdpTwseBffController` 的日線／refresh javadoc 也要改成「TWSE 單一特例／TPEX 官方逐月／其餘 code-keyed」的現行事實，不保留「其餘全是海外 Yahoo 單次」的過期文案。
+
+`SchedulePublicBffController.JOBS` 改三處既有文字：(1) 台股個股項明說「上市／上櫃持股與觀察清單、每 2 分鐘查 TWSE MIS、寫 Redis」，friendly schedule 訂正為實際守門的「交易日 09:00–13:30 每 2 分鐘」；(2) 每日全量項改稱「櫃買／海外 code-keyed 指數日線回補」，描述 TPEX＋8 檔海外指數＋SP500TR＋TWSE 報酬指數增量；(3) 09:00／12:00 項改稱「美股指數日線落後補救檢查」，不暗示會逐盤檢查 TPEX。cron 與美股個股項不變，總數仍為 55（business 21、external 34）。同步更新 `IndexDailyRefreshScheduler`、`MacroHistoryService`、`MacroHistoryController`、`MacroDataFetchClient`、`InternalPriceController`、`UsIndexDailyHistory`、`ExcelExportService` 中會把 TPEX 錯稱海外或仍寫 8 檔的 javadoc／log；相容方法、表與路由名稱不改。
+
+### 驗證邊界
+
+測試分四層：
+
+1. external：可控 HTTP fixture 證明 `tse` miss 後命中 `otc`、完整欄位 mapping、`z='-'` 零寫入、快照持股 `0000` 不進 MIS、TW／US `@Scheduled` cron 均為每 2 分鐘；同 module 以 `{stat,tables:[{fields,data}]}` fixture 驗證 TPEx 月 OHLC、新「成交張數」與舊「成交股數（仟股）」兩 alias join、民國年轉換、兩者×1,000、OHLC／volume 失敗邊界，以及 MIS 必填 `t/c`、末點缺 `ts` 仍保留的一分 K 聚合五分格與台北 09:00–13:30；並負向驗證兩個 Yahoo map 均無 TPEX。
+2. backend：TPEX 可經相容 GET 讀取、refresh／export 白名單接受 TPEX、相容 GET 仍可查 SP500TR、SP500TR 仍可 refresh 但不進 page/public/export、TPEX incoming null volume 保留 DB 既有非 null 值、全量 scheduler 管理 TPEX 而美股 gap-check 不查 TPEX、static 分類全覆蓋。
+3. BFF／frontend：10 個 catalog 的順序與中文 label、TPEX daily/intraday/public 形狀，以及原 8 個 range 共 80 組 public contract。
+4. Docker：無快取重建並 recreate external、business、BFF、frontend；上游重建後 restart BFF。畫面查證主圖與排程匯出兩個下拉的前兩項，並查證 TPEX 10 年非空。Authenticated legacy endpoint 驗非空等長陣列、起訖日、`hasVolume=true`、至少一筆 `volume>0` 且 `turnovers` 全 null（它無 market/range/label）；host public API 另查 `market`、`range`、`marketLabel`、相同量能不變式、起訖日與筆數，DB 的 TPEX 亦至少一列正 volume。
+
+若部署驗收時台股或美股已休市，不繞過 `MarketClock` 製造 LIVE 寫入；兩分鐘 producer 的時段行為以 cron reflection、fixture 與既有 Redis writer 測試為證，實機只做官方路由唯讀查詢並明載時段限制。

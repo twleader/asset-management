@@ -46,16 +46,31 @@ class SchedulePublicBffControllerTest {
     }
 
     @Test
-    @DisplayName("海外指數日線落後補救檢查為台北週二至週六 09:00／12:00（Task 332）")
-    void 海外指數落後補救檢查契約() {
-        assertThat(jobs()).filteredOn(j -> "海外指數日線落後補救檢查".equals(j.name()))
+    @DisplayName("美股指數日線落後補救檢查為台北週二至週六 09:00／12:00，且不暗示檢查 TPEX（Task 346）")
+    void 美股指數落後補救檢查契約() {
+        assertThat(jobs()).filteredOn(j -> "美股指數日線落後補救檢查".equals(j.name()))
                 .singleElement()
                 .satisfies(job -> {
                     assertThat(job.service()).isEqualTo("業務服務");
                     assertThat(job.cron()).isEqualTo("0 0 9,12 * * TUE-SAT");
                     assertThat(job.zone()).isEqualTo("Asia/Taipei");
                     assertThat(job.description()).contains("只回補確實落後");
+                    assertThat(job.description()).doesNotContain("TPEX");
                 });
+    }
+
+    @Test
+    @DisplayName("台股個股與全量 code-keyed 回補文案精確反映兩分鐘與 TPEX 範圍")
+    void 台股個股與全量回補契約() {
+        assertThat(jobs()).filteredOn(j -> "台股個股即時價（盤中）".equals(j.name()))
+                .singleElement().satisfies(job -> {
+                    assertThat(job.schedule()).isEqualTo("交易日 09:00–13:30 每 2 分鐘");
+                    assertThat(job.cron()).isEqualTo("0 0/2 9-13 * * MON-FRI");
+                    assertThat(job.description()).contains("上市／上櫃", "TWSE MIS", "Redis");
+                });
+        assertThat(jobs()).filteredOn(j -> "櫃買／海外 code-keyed 指數日線回補".equals(j.name()))
+                .singleElement().satisfies(job ->
+                        assertThat(job.description()).contains("TPEX＋8 檔海外指數＋SP500TR＋TWSE 報酬指數增量"));
     }
 
     @Test

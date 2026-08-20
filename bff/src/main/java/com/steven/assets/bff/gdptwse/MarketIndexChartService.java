@@ -27,7 +27,8 @@ public class MarketIndexChartService {
             new ParameterizedTypeReference<>() {};
 
     private static final List<MarketDefinition> MARKET_CATALOG = List.of(
-            new MarketDefinition("TWSE", "台股大盤"),
+            new MarketDefinition("TWSE", "台股集中市場"),
+            new MarketDefinition("TPEX", "台股櫃買市場"),
             new MarketDefinition("DJI", "道瓊工業"),
             new MarketDefinition("SPX", "標普 500"),
             new MarketDefinition("IXIC", "那斯達克綜合"),

@@ -35,7 +35,7 @@ class PublicMarketIndexControllerTest {
                 .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_JSON)
                 .expectBody()
                 .jsonPath("$.market").isEqualTo("TWSE")
-                .jsonPath("$.marketLabel").isEqualTo("台股大盤")
+                .jsonPath("$.marketLabel").isEqualTo("台股集中市場")
                 .jsonPath("$.range").isEqualTo("1y")
                 .jsonPath("$.rangeLabel").isEqualTo("1 年")
                 .jsonPath("$.mode").isEqualTo("DAILY")
@@ -48,7 +48,7 @@ class PublicMarketIndexControllerTest {
                 .jsonPath("$.volumes.length()").isEqualTo(0)
                 .jsonPath("$.turnovers.length()").isEqualTo(0)
                 .jsonPath("$.hasVolume").isEqualTo(false)
-                .jsonPath("$.supportedMarkets.length()").isEqualTo(9)
+                .jsonPath("$.supportedMarkets.length()").isEqualTo(10)
                 .jsonPath("$.supportedRanges.length()").isEqualTo(8);
 
         assertThat(MarketIndexChartDto.Response.class.isRecord()).isTrue();
@@ -67,7 +67,7 @@ class PublicMarketIndexControllerTest {
                 .expectBody()
                 .jsonPath("$.status").isEqualTo(400)
                 .jsonPath("$.detail").value(value -> assertThat(value.toString())
-                        .contains("BAD", "[TWSE, DJI, SPX, IXIC, SOX, FTSE, DAX, KOSPI, N225]"));
+                        .contains("BAD", "[TWSE, TPEX, DJI, SPX, IXIC, SOX, FTSE, DAX, KOSPI, N225]"));
 
         client.get()
                 .uri(uri -> uri.path("/api/public/market-index")
@@ -188,6 +188,46 @@ class PublicMarketIndexControllerTest {
                 .jsonPath("$.closes[1]").isEqualTo(102.0);
     }
 
+    @Test
+    void tpexDailyAndIntradayUseCodeKeyedShapeWithVolume() {
+        List<Map<String, Object>> daily = List.of(codeKeyedDailyRow("2026-08-10", "100.00", 1_000L));
+        List<Map<String, Object>> intraday = List.of(intradayRow("2026-08-11T13:30:00", "102.00"));
+        WebTestClient fixture = controllerClient(request -> Mono.just(
+                "/api/index-intraday".equals(request.url().getPath())
+                        ? jsonResponse(intraday) : jsonResponse(daily)));
+
+        fixture.get().uri("/api/public/market-index?market=TPEX&range=1m").exchange()
+                .expectStatus().isOk().expectBody()
+                .jsonPath("$.market").isEqualTo("TPEX")
+                .jsonPath("$.marketLabel").isEqualTo("台股櫃買市場")
+                .jsonPath("$.range").isEqualTo("1m")
+                .jsonPath("$.hasVolume").isEqualTo(true)
+                .jsonPath("$.volumes[0]").isEqualTo(1000)
+                .jsonPath("$.turnovers[0]").isEmpty();
+        fixture.get().uri("/api/public/market-index?market=TPEX&range=d").exchange()
+                .expectStatus().isOk().expectBody()
+                .jsonPath("$.market").isEqualTo("TPEX")
+                .jsonPath("$.range").isEqualTo("d")
+                .jsonPath("$.marketLabel").isEqualTo("台股櫃買市場");
+    }
+
+    @Test
+    void refreshUsesTpexCodeKeyedRouteAndRejectsUnknownMarketBeforeCallingBusiness() {
+        List<String> paths = new java.util.concurrent.CopyOnWriteArrayList<>();
+        WebTestClient fixture = controllerClient(request -> {
+            paths.add(request.url().getPath() + "?" + request.url().getQuery());
+            return Mono.just(jsonResponse(Map.of("upserted", 1)));
+        });
+
+        fixture.post().uri("/api/bff/gdp-twse/refresh-index-daily?market=TPEX&years=10").exchange()
+                .expectStatus().isOk();
+        assertThat(paths).containsExactly("/api/us-daily-index/refresh?code=TPEX");
+
+        fixture.post().uri("/api/bff/gdp-twse/refresh-index-daily?market=BAD&years=10").exchange()
+                .expectStatus().isBadRequest();
+        assertThat(paths).hasSize(1);
+    }
+
     private static void assertPublicDailyEmpty(WebTestClient fixture) {
         fixture.get()
                 .uri("/api/public/market-index?market=TWSE&range=1y")
@@ -276,6 +316,14 @@ class PublicMarketIndexControllerTest {
         row.put("closePoint", close);
         row.put("tradeVolume", 100L);
         row.put("tradeValue", tradeValue);
+        return row;
+    }
+
+    private static Map<String, Object> codeKeyedDailyRow(String date, Object close, Object volume) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("tradingDate", date);
+        row.put("closePoint", close);
+        row.put("volume", volume);
         return row;
     }
 

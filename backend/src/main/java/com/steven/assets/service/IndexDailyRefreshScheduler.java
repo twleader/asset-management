@@ -17,18 +17,17 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * 海外指數日線（{@code us_index_daily_history}）自動回補排程（Task 105）。
+ * 除 TWSE 外的 code-keyed 指數日線（{@code us_index_daily_history}）自動回補排程（Task 105）。
  *
  * <p>背景：Task 102 的「當日走勢昨收 / 漲跌%」與 Task 95/96 的日線圖 + MA20/60/240 都讀
  * {@code us_index_daily_history}，但該表原本只靠前端「回補日線（10 年）」按鈕手動觸發、**無排程**。
  * 久未點擊的指數日線會停在舊日期；當日走勢的點位是即時抓 Yahoo（最新交易日），昨收卻退回數日前的
  * 舊收盤，導致漲跌% 爆量失真（實機：SOX 走勢 ~14,041 卻拿 5 日前 12,330 當昨收 → +13.88%）。
- * 台股大盤日線由 external-materials 的 {@code TwseIndexPoller} 顧著、故一直最新；海外 8 指數缺對應排程
+ * 台股集中市場日線由 external-materials 的 {@code TwseIndexPoller} 顧著、故一直最新；code-keyed 指數原本缺對應排程
  * ——本類補上，讓昨收恆為「真正的前一交易日」。
  *
- * <p>設計：重用 {@link MacroHistoryService#refreshUsIndexDaily(String)}（即手動按鈕同一條路徑，Yahoo
- * {@code range=10y} 一次抓整段、idempotent upsert），對 {@link MacroHistoryService#OVERSEAS_INDEX_CODES}
- * 逐一回補。
+ * <p>設計：重用 {@link MacroHistoryService#refreshUsIndexDaily(String)}，對
+ * {@link MacroHistoryService#PAGE_CODED_INDEX_CODES} 逐一回補。TPEX 是官方逐月例外，其餘既有代碼維持 Yahoo 整段抓取。
  * <ul>
  *   <li>每日排程：美股收盤後（隔日 07:00 Asia/Taipei，TUE-SAT）。美股 16:00 ET ≈ 隔日 04~05:00 台北，
  *       07:00 留足 Yahoo daily bar 發佈緩衝；此時 8 市場（亞 / 歐 / 美）最新交易日皆已收。
@@ -62,7 +61,7 @@ public class IndexDailyRefreshScheduler {
     static final List<String> US_INDEX_CODES = List.of("DJI", "SPX", "IXIC", "SOX", "SP500TR");
 
     /**
-     * <b>維持 {@link #STALE_DAYS} 日曆天容忍</b>的非美股指數：英國富時100 / 德國DAX / 韓國KOSPI / 日經225。
+     * <b>維持 {@link #STALE_DAYS} 日曆天容忍</b>的非美股指數：櫃買、英國富時100 / 德國DAX / 韓國KOSPI / 日經225。
      *
      * <p><b>判準為什麼要分岔（不要「統一一下比較乾淨」）：</b>交易雷達只讀 IXIC。本專案的交易日曆涵蓋
      * <b>台、美、英三個市場</b>——{@link MarketDataService#isTradingDay(String, LocalDate)} 對
@@ -77,17 +76,17 @@ public class IndexDailyRefreshScheduler {
      * 兩份清單刻意都寫成正面列舉（而非「不在美股清單裡就算非美股」的反向判斷），
      * 新增指數時才能一眼看出它屬於哪一類；漏分類會由下方 static 區塊在啟動時直接擋下。
      */
-    static final List<String> NON_US_INDEX_CODES = List.of("FTSE", "DAX", "KOSPI", "N225");
+    static final List<String> NON_US_INDEX_CODES = List.of("TPEX", "FTSE", "DAX", "KOSPI", "N225");
 
     static {
         Set<String> classified = new LinkedHashSet<>(US_INDEX_CODES);
         classified.addAll(NON_US_INDEX_CODES);
-        Set<String> managed = new LinkedHashSet<>(MacroHistoryService.OVERSEAS_INDEX_CODES);
+        Set<String> managed = new LinkedHashSet<>(MacroHistoryService.PAGE_CODED_INDEX_CODES);
         managed.addAll(MacroHistoryService.TOTAL_RETURN_US_INDEX_CODES);
         if (!classified.equals(managed)) {
             throw new IllegalStateException(
-                    "海外指數新鮮度判準未分類：US_INDEX_CODES ∪ NON_US_INDEX_CODES 必須恰等於 "
-                            + "OVERSEAS_INDEX_CODES ∪ TOTAL_RETURN_US_INDEX_CODES，實際 "
+                    "code-keyed 指數新鮮度判準未分類：US_INDEX_CODES ∪ NON_US_INDEX_CODES 必須恰等於 "
+                            + "PAGE_CODED_INDEX_CODES ∪ TOTAL_RETURN_US_INDEX_CODES，實際 "
                             + classified + " vs " + managed);
         }
     }
@@ -96,10 +95,10 @@ public class IndexDailyRefreshScheduler {
     private final UsIndexDailyHistoryRepository usDailyRepo;
     private final MarketDataService marketDataService;
 
-    /** 海外指數收盤後回補：每日 07:00 Asia/Taipei（TUE-SAT，涵蓋週一~週五各市場交易日）。 */
+    /** 櫃買／海外 code-keyed 指數收盤後回補：每日 07:00 Asia/Taipei（TUE-SAT，涵蓋週一~週五各市場交易日）。 */
     @Scheduled(cron = "0 0 7 * * TUE-SAT", zone = "Asia/Taipei")
     public void scheduledRefreshAll() {
-        log.info("排程：回補海外指數日線（{} 檔）", MacroHistoryService.OVERSEAS_INDEX_CODES.size());
+        log.info("排程：回補櫃買／海外 code-keyed 指數日線（{} 檔）", MacroHistoryService.PAGE_CODED_INDEX_CODES.size());
         refreshAll("scheduled");
         warnIfUsIndexStillStale("scheduled", Instant.now());
     }
@@ -141,7 +140,7 @@ public class IndexDailyRefreshScheduler {
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             } catch (Exception e) {
-                log.warn("海外指數日線 self-heal 失敗: {}", e.getMessage());
+                log.warn("code-keyed 指數日線 self-heal 失敗: {}", e.getMessage());
             }
         }, "index-daily-self-heal").start();
     }
@@ -156,7 +155,7 @@ public class IndexDailyRefreshScheduler {
         List<StaleIndex> staleUs = staleUsIndexes(now);
         List<StaleIndex> staleNonUs = staleNonUsIndexes(today);
         if (staleUs.isEmpty() && staleNonUs.isEmpty()) {
-            log.info("self-heal：海外指數日線皆為最新，略過");
+            log.info("self-heal：code-keyed 指數日線皆為最新，略過");
             return;
         }
         LocalDate expected = marketDataService.mostRecentCompletedUsTradingDay(now);
@@ -169,7 +168,7 @@ public class IndexDailyRefreshScheduler {
         }
         List<String> codes = new ArrayList<>(staleUs.stream().map(StaleIndex::code).toList());
         codes.addAll(staleNonUs.stream().map(StaleIndex::code).toList());
-        log.info("self-heal：偵測到海外指數日線落後 {} 檔，啟動回補", codes.size());
+        log.info("self-heal：偵測到 code-keyed 指數日線落後 {} 檔，啟動回補", codes.size());
         refreshCodes(codes, "self-heal");
     }
 
@@ -224,8 +223,8 @@ public class IndexDailyRefreshScheduler {
 
     private void refreshAll(String tag) {
         int ok = 0;
-        int total = MacroHistoryService.OVERSEAS_INDEX_CODES.size();
-        for (String code : MacroHistoryService.OVERSEAS_INDEX_CODES) {
+        int total = MacroHistoryService.PAGE_CODED_INDEX_CODES.size();
+        for (String code : MacroHistoryService.PAGE_CODED_INDEX_CODES) {
             try {
                 macroHistoryService.refreshUsIndexDaily(code);
                 ok++;
@@ -234,10 +233,10 @@ public class IndexDailyRefreshScheduler {
                 Thread.currentThread().interrupt();
                 break;
             } catch (Exception e) {
-                log.warn("回補海外指數日線 {} 失敗 [{}]: {}", code, tag, e.getMessage());
+                log.warn("回補 code-keyed 指數日線 {} 失敗 [{}]: {}", code, tag, e.getMessage());
             }
         }
-        log.info("海外指數日線回補完成 [{}]：成功 {}/{} 檔", tag, ok, total);
+        log.info("櫃買／海外 code-keyed 指數日線回補完成 [{}]：成功 {}/{} 檔", tag, ok, total);
         if (Thread.currentThread().isInterrupted()) return;   // 已被中斷（服務關閉中）就不再續做 TR
 
         // 含息報酬指數（績效比較頁 Requirement 33）：SP500TR 走 Yahoo ^SP500TR 日線回補
@@ -268,7 +267,8 @@ public class IndexDailyRefreshScheduler {
      * 只回補指定代碼（自癒與落後補救檢查專用，Task 332.5），與 {@link #refreshAll(String)} 刻意分開：
      * <ul>
      *   <li>判準由 4 日容忍收緊為逐盤後，觸發頻率明顯上升（凌晨重啟、來源延遲發布時的兩次補救檢查都可能觸發）。
-     *       若沿用全量回補，等於每次都對 Yahoo 打 9 次 {@code range=10y} 請求——<b>不得放大外部請求量</b>。</li>
+     *       美股 gap-check 只會選出實際落後的美股／含息報酬代碼；若改走全量回補，會連同 TPEX 官方逐月
+     *       與其餘 page code-keyed 指數重跑，徒增外部請求——<b>不得放大外部請求量</b>。</li>
      *   <li>含息報酬指數與 TWSE 報酬指數增量兩個收尾步驟只屬每日全量回補，落後補救不重複跑
      *       （SP500TR 若自己落後，會以一般代碼身分出現在 {@code codes} 裡）。</li>
      * </ul>
@@ -285,10 +285,10 @@ public class IndexDailyRefreshScheduler {
                 Thread.currentThread().interrupt();
                 break;
             } catch (Exception e) {
-                log.warn("回補海外指數日線 {} 失敗 [{}]: {}", code, tag, e.getMessage());
+                log.warn("回補 code-keyed 指數日線 {} 失敗 [{}]: {}", code, tag, e.getMessage());
             }
         }
-        log.info("海外指數日線回補完成 [{}]：成功 {}/{} 檔（{}）", tag, ok, codes.size(), codes);
+        log.info("code-keyed 指數日線回補完成 [{}]：成功 {}/{} 檔（{}）", tag, ok, codes.size(), codes);
     }
 
     private Optional<LocalDate> latestTradingDate(String code) {

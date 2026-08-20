@@ -112,7 +112,7 @@ class SingleTableScheduleServiceDualFormatTest {
         when(excelExportService.realizedGainsDocForOwner(anyLong())).thenReturn(doc("已實現損益"));
         when(excelExportService.commodityPricesDoc(any(), any())).thenReturn(doc("油價金價"));
         when(excelExportService.exchangeRatesDoc(anyString(), any(), any())).thenReturn(doc("台幣兌美元"));
-        when(excelExportService.indexDailyDoc(anyString(), any(), any())).thenReturn(doc("台股大盤"));
+        when(excelExportService.indexDailyDoc(anyString(), any(), any())).thenReturn(doc("台股集中市場"));
     }
 
     private static ExportDoc doc(String title) {
@@ -198,7 +198,7 @@ class SingleTableScheduleServiceDualFormatTest {
 
         indexService.tick();
 
-        assertBothFormats("out", "台股大盤_1_" + today());
+        assertBothFormats("out", "台股集中市場_1_" + today());
         verify(excelExportService, times(1)).indexDailyDoc(anyString(), any(), any());
         verify(excelExportService, never()).exportIndexDaily(anyString(), any(), any());
     }

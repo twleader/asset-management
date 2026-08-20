@@ -12,7 +12,12 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.YearMonth;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
@@ -27,6 +32,8 @@ import java.util.Map;
 @Slf4j
 @Component
 public class MacroDataFetchClient {
+
+    private static final ZoneId TAIPEI = ZoneId.of("Asia/Taipei");
 
     private static final String IMF_API_TPL = "https://www.imf.org/external/datamapper/api/v1/";
     /**
@@ -55,16 +62,28 @@ public class MacroDataFetchClient {
             "<Obs><Item>(.*?)</Item><TIME_PERIOD>(.*?)</TIME_PERIOD><FREQ>.*?</FREQ><TYPE>(.*?)</TYPE>\\s*<Item_VALUE>(.*?)</Item_VALUE></Obs>",
             java.util.regex.Pattern.DOTALL);
 
-    private final HttpClient http = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(10))
-            .followRedirects(HttpClient.Redirect.NORMAL)
-            .build();
+    private final HttpClient http;
     /**
      * DGBAS 專屬 HttpClient（Requirement 30）：ws.dgbas.gov.tw 伺服器漏送中繼憑證，
      * 以打包的 TWCA 中繼憑證為信任錨建鏈、主機名驗證維持啟用；僅此 client 使用，不影響其他抓取。
      */
-    private final HttpClient dgbasHttp = buildDgbasHttpClient();
-    private final ObjectMapper mapper = new ObjectMapper();
+    private final HttpClient dgbasHttp;
+    private final ObjectMapper mapper;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public MacroDataFetchClient() {
+        this(HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(10))
+                .followRedirects(HttpClient.Redirect.NORMAL)
+                .build());
+    }
+
+    /** 套件內建構子僅供官方資料 fixture 測試注入可控 HTTP client。 */
+    MacroDataFetchClient(HttpClient http) {
+        this.http = http;
+        this.dgbasHttp = buildDgbasHttpClient();
+        this.mapper = new ObjectMapper();
+    }
 
     /**
      * IMF DataMapper API。後面是 Akamai WAF；UA 設 Mozilla 或 Java-http-client 會被 403。
@@ -192,7 +211,7 @@ public class MacroDataFetchClient {
 
     /**
      * 大盤/指數每日 OHLC ＋成交量（從 MI_5MINS_HIST 月報拆出 OHLC，FMTQIK 月報拆出成交量）。
-     * volume=成交股數(股)；value=成交金額(元)，僅台股有（Yahoo 無此欄，海外指數恆 null）。
+     * volume=成交股數(股)；value=成交金額(元)，僅 TWSE 有 turnover；TPEX 與其餘 code-keyed 指數的 value 恆 null。
      */
     public record DailyOhlc(LocalDate tradingDate,
                              BigDecimal open, BigDecimal high, BigDecimal low, BigDecimal close,
@@ -410,7 +429,7 @@ public class MacroDataFetchClient {
     }
 
     /**
-     * 海外指數代碼 → Yahoo symbol。
+     * Yahoo 來源的 code-keyed 指數代碼 → symbol（TPEX 刻意不在此 map）。
      * 美股四大：道瓊 / 標普500 / 那斯達克綜合 / 費城半導體；
      * 海外主要：英國富時100 / 德國DAX / 韓國KOSPI / 日經225。
      */
@@ -425,17 +444,25 @@ public class MacroDataFetchClient {
             "KOSPI", "^KS11",
             "N225", "^N225");
 
+    private static final String TPEX_DAILY_OHLC_URL =
+            "https://www.tpex.org.tw/www/zh-tw/indexInfo/inx?date=";
+    private static final String TPEX_DAILY_VOLUME_URL =
+            "https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_index/st41_result.php?l=zh-tw&d=";
+    private static final String TPEX_REFERER = "https://www.tpex.org.tw/";
+
     /**
-     * 海外指數（美股四大 + 英德韓日）近 10 年每日 OHLC（Yahoo Finance v8 chart API，range=10y&interval=1d）。
-     * 用 curl 子程序避開 Yahoo 對 Java HTTP/2 fingerprint 的封鎖（與 PriceFetchClient.fetchUsHistoricalRange 同 pattern）。
-     * timestamp → 交易日依 Yahoo meta exchangeTimezoneName 轉當地時區（美股 daily bar 在開盤時刻，轉 NY 與交易所
-     * 時區同結果；但亞洲/歐洲指數 daily bar 在 UTC 午夜＝當地開盤，用 NY 會把日期回退一日，故一律讀交易所時區）。
-     * 無資料 / 不認得 code 回空 list（呼叫端略過）。
+     * 除 TWSE 外的 code-keyed 指數近 10 年每日 OHLC。TPEX 走 TPEx 官方逐月 OHLC／成交量；
+     * 其餘合法 code（DJI、SPX、SP500TR、IXIC、SOX、FTSE、DAX、KOSPI、N225）走 Yahoo Finance v8 chart
+     * API（range=10y&interval=1d）。Yahoo 用 curl 子程序避開 Java HTTP/2 fingerprint 封鎖，timestamp 依
+     * exchangeTimezoneName 轉交易日，避免亞洲／歐洲指數在 UTC 午夜被錯退一天。無資料／不認得 code 回空 list。
      */
     public List<DailyOhlc> fetchUsIndexDaily(String indexCode) {
+        if ("TPEX".equals(indexCode)) {
+            return fetchTpexIndexDaily();
+        }
         String symbol = US_INDEX_YAHOO.get(indexCode);
         if (symbol == null) {
-            log.warn("未知海外指數代碼: {}", indexCode);
+            log.warn("未知 code-keyed 指數代碼: {}", indexCode);
             return Collections.emptyList();
         }
         try {
@@ -477,12 +504,178 @@ public class MacroDataFetchClient {
         }
     }
 
+    /**
+     * TPEx 櫃買指數近十年日線。官方端點每次僅回一個月，OHLC 為主資料：任何已結束月份
+     * 失敗都回空，避免把缺月資料當成完整十年；成交量則是 fail-soft，單月失敗只留下 null。
+     */
+    private List<DailyOhlc> fetchTpexIndexDaily() {
+        YearMonth current = YearMonth.now(TAIPEI);
+        YearMonth first = current.minusYears(10);
+        List<DailyOhlc> out = new ArrayList<>();
+        for (YearMonth month = first; !month.isAfter(current); month = month.plusMonths(1)) {
+            List<DailyOhlc> ohlc;
+            try {
+                String date = String.format("%04d%%2F%02d%%2F01", month.getYear(), month.getMonthValue());
+                JsonNode root = getTpexOfficialJson(TPEX_DAILY_OHLC_URL + date + "&response=json");
+                ohlc = parseTpexMonthlyOhlc(root, month);
+            } catch (Exception e) {
+                log.warn("TPEx 指數 OHLC {}/{} 抓取失敗：{}", month.getYear(), month.getMonthValue(), e.getMessage());
+                ohlc = null;
+            }
+            if (ohlc == null) return Collections.emptyList();
+            if (ohlc.isEmpty()) {
+                if (!month.equals(current)) return Collections.emptyList();
+                continue; // 僅當月官方完整空表可略過；schema 非法已在上方 fail closed。
+            }
+
+            Map<LocalDate, Long> volumes = Collections.emptyMap();
+            try {
+                String rocMonth = String.format("%03d%%2F%02d", month.getYear() - 1911, month.getMonthValue());
+                JsonNode root = getTpexOfficialJson(TPEX_DAILY_VOLUME_URL + rocMonth + "&o=json");
+                Map<LocalDate, BigDecimal> closes = ohlc.stream().collect(java.util.stream.Collectors.toMap(
+                        DailyOhlc::tradingDate, DailyOhlc::close));
+                volumes = parseTpexMonthlyVolumes(root, month, closes);
+            } catch (Exception e) {
+                log.warn("TPEx 指數成交量 {}/{} 抓取失敗，該月量欄留空：{}",
+                        month.getYear(), month.getMonthValue(), e.getMessage());
+            }
+            for (DailyOhlc row : ohlc) {
+                out.add(new DailyOhlc(row.tradingDate(), row.open(), row.high(), row.low(), row.close(),
+                        volumes.get(row.tradingDate()), null));
+            }
+        }
+        return out;
+    }
+
+    private JsonNode getOfficialJson(String url) throws Exception {
+        HttpRequest request = HttpRequest.newBuilder(URI.create(url))
+                .header("Accept", "application/json")
+                .header("User-Agent", "Mozilla/5.0")
+                .timeout(Duration.ofSeconds(20)).GET().build();
+        HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() / 100 != 2) throw new IllegalStateException("HTTP " + response.statusCode());
+        return mapper.readTree(response.body());
+    }
+
+    /** 僅 TPEx 的官方月報使用 browser-compatible headers；不改動其他 provider 的 HTTP policy。 */
+    private JsonNode getTpexOfficialJson(String url) throws Exception {
+        HttpRequest request = tpexOfficialRequest(url);
+        HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() / 100 != 2) throw new IllegalStateException("HTTP " + response.statusCode());
+        return mapper.readTree(response.body());
+    }
+
+    static HttpRequest tpexOfficialRequest(String url) {
+        return HttpRequest.newBuilder(URI.create(url))
+                .header("Accept", "application/json, text/plain, */*")
+                .header("Accept-Language", "zh-TW,zh;q=0.9")
+                .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+                .header("Referer", TPEX_REFERER)
+                .timeout(Duration.ofSeconds(20)).GET().build();
+    }
+
+    /** 官方 TPEx indexInfo tables[] 的唯一 OHLC target；不接受 root fields/data 或欄位位置猜測。 */
+    static List<DailyOhlc> parseTpexMonthlyOhlc(JsonNode root, YearMonth requestedMonth) {
+        JsonNode table = findExactlyOneTable(root, List.of("日期", "開市", "最高", "最低", "收市"));
+        if (table == null) return null;
+        Map<String, Integer> columns = fieldIndexes(table.path("fields"));
+        JsonNode data = table.path("data");
+        List<DailyOhlc> out = new ArrayList<>();
+        for (JsonNode row : data) {
+            if (!row.isArray() || row.size() != columns.size()) return null;
+            LocalDate date = parseOfficialDate(row.get(columns.get("日期")).asText(""));
+            BigDecimal open = parsePositiveDecimal(row.get(columns.get("開市")).asText(""));
+            BigDecimal high = parsePositiveDecimal(row.get(columns.get("最高")).asText(""));
+            BigDecimal low = parsePositiveDecimal(row.get(columns.get("最低")).asText(""));
+            BigDecimal close = parsePositiveDecimal(row.get(columns.get("收市")).asText(""));
+            if (date == null || !YearMonth.from(date).equals(requestedMonth) || open == null || high == null
+                    || low == null || close == null || high.compareTo(open.max(close)) < 0
+                    || low.compareTo(open.min(close)) > 0 || high.compareTo(low) < 0) return null;
+            out.add(new DailyOhlc(date, open, high, low, close, null, null));
+        }
+        return out;
+    }
+
+    /** 成交張數及舊制成交股數（仟股）都換算為股；單筆缺漏只使該日量欄為 null。 */
+    static Map<LocalDate, Long> parseTpexMonthlyVolumes(JsonNode root, YearMonth requestedMonth,
+                                                          Map<LocalDate, BigDecimal> ohlcCloses) {
+        JsonNode table = findExactlyOneTable(root, List.of("日期", "櫃買指數"), List.of("成交張數", "成交股數（仟股）"));
+        if (table == null) return Collections.emptyMap();
+        Map<String, Integer> columns = fieldIndexes(table.path("fields"));
+        String volumeField = columns.containsKey("成交張數") ? "成交張數" : "成交股數（仟股）";
+        JsonNode data = table.path("data");
+        Map<LocalDate, Long> out = new LinkedHashMap<>();
+        for (JsonNode row : data) {
+            if (!row.isArray() || row.size() != columns.size()) return Collections.emptyMap();
+            LocalDate date = parseOfficialDate(row.get(columns.get("日期")).asText(""));
+            Long lots = parsePositiveLong(row.get(columns.get(volumeField)).asText(""));
+            BigDecimal indexClose = parsePositiveDecimal(row.get(columns.get("櫃買指數")).asText(""));
+            BigDecimal ohlcClose = date == null ? null : ohlcCloses.get(date);
+            if (date == null || !YearMonth.from(date).equals(requestedMonth) || lots == null || indexClose == null
+                    || ohlcClose == null || indexClose.compareTo(ohlcClose) != 0) {
+                log.warn("TPEx 指數成交量列無法對齊 OHLC，該日量欄留空");
+                continue;
+            }
+            try { out.put(date, Math.multiplyExact(lots, 1_000L)); }
+            catch (ArithmeticException e) { log.warn("TPEx 指數成交量超出 long 範圍，{} 留空", date); }
+        }
+        return out;
+    }
+
+    private static JsonNode findExactlyOneTable(JsonNode root, List<String> required) {
+        return findExactlyOneTable(root, required, List.of());
+    }
+
+    private static JsonNode findExactlyOneTable(JsonNode root, List<String> required, List<String> oneOf) {
+        if (!"ok".equals(root.path("stat").asText()) || !root.path("tables").isArray()) return null;
+        JsonNode match = null;
+        for (JsonNode table : root.path("tables")) {
+            Map<String, Integer> columns = fieldIndexes(table.path("fields"));
+            boolean matches = !columns.isEmpty() && required.stream().allMatch(columns::containsKey)
+                    && (oneOf.isEmpty() || oneOf.stream().anyMatch(columns::containsKey)) && table.path("data").isArray();
+            if (!matches) continue;
+            if (match != null) return null;
+            match = table;
+        }
+        return match;
+    }
+
+    private static Map<String, Integer> fieldIndexes(JsonNode fields) {
+        if (!fields.isArray() || fields.isEmpty()) return Collections.emptyMap();
+        Map<String, Integer> out = new LinkedHashMap<>();
+        for (int i = 0; i < fields.size(); i++) {
+            String field = fields.get(i).asText("").trim();
+            if (field.isEmpty() || out.putIfAbsent(field, i) != null) return Collections.emptyMap();
+        }
+        return out;
+    }
+
+    private static LocalDate parseOfficialDate(String raw) {
+        String[] parts = raw == null ? new String[0] : raw.trim().split("/");
+        if (parts.length != 3) return null;
+        try {
+            int year = Integer.parseInt(parts[0].trim());
+            if (year < 1911) year += 1911;
+            return LocalDate.of(year, Integer.parseInt(parts[1].trim()), Integer.parseInt(parts[2].trim()));
+        } catch (RuntimeException e) { return null; }
+    }
+
+    private static BigDecimal parsePositiveDecimal(String raw) {
+        BigDecimal value = parseIndex(raw);
+        return value != null && value.signum() > 0 ? value : null;
+    }
+
+    private static Long parsePositiveLong(String raw) {
+        Long value = parseLong(raw);
+        return value != null && value >= 0 ? value : null;
+    }
+
     private static BigDecimal jsonDecimal4(JsonNode v) {
         if (v == null || v.isNull() || v.isMissingNode()) return null;
         return BigDecimal.valueOf(v.asDouble()).setScale(4, RoundingMode.HALF_UP);
     }
 
-    /** 指數市場代碼 → Yahoo symbol（含台股大盤 ^TWII 與海外指數，供「當日」分時）。 */
+    /** 指數市場代碼 → Yahoo symbol（含 TWSE 與海外指數，供「當日」分時；TPEX 刻意不在此 map，改走官方 MIS）。 */
     private static final Map<String, String> INDEX_INTRADAY_YAHOO = Map.of(
             "TWSE", "^TWII",
             "DJI", "^DJI",
@@ -498,6 +691,7 @@ public class MacroDataFetchClient {
     private record TradingHours(java.time.LocalTime open, java.time.LocalTime close) {}
     private static final Map<String, TradingHours> INDEX_TRADING_HOURS = Map.of(
             "TWSE",  new TradingHours(java.time.LocalTime.of(9, 0),  java.time.LocalTime.of(13, 30)),
+            "TPEX",  new TradingHours(java.time.LocalTime.of(9, 0),  java.time.LocalTime.of(13, 30)),
             "DJI",   new TradingHours(java.time.LocalTime.of(9, 30), java.time.LocalTime.of(16, 0)),
             "SPX",   new TradingHours(java.time.LocalTime.of(9, 30), java.time.LocalTime.of(16, 0)),
             "IXIC",  new TradingHours(java.time.LocalTime.of(9, 30), java.time.LocalTime.of(16, 0)),
@@ -518,6 +712,9 @@ public class MacroDataFetchClient {
      * transient（不寫 DB）；指數不在 Redis tick 輪詢名單，故不走 Task 88 tick store。
      */
     public List<IndexIntradayPoint> fetchIndexIntraday(String market) {
+        if ("TPEX".equals(market)) {
+            return fetchTpexIndexIntraday();
+        }
         String symbol = INDEX_INTRADAY_YAHOO.get(market);
         if (symbol == null) {
             log.warn("未知指數市場: {}", market);
@@ -574,6 +771,78 @@ public class MacroDataFetchClient {
             log.warn("Yahoo 指數 {} 分時抓取失敗: {}", market, e.getMessage());
             return Collections.emptyList();
         }
+    }
+
+    /** TPEx MIS 分時以 epoch milliseconds 為唯一時間基準；ts 僅在提供時交叉驗證。 */
+    private List<IndexIntradayPoint> fetchTpexIndexIntraday() {
+        try {
+            JsonNode root = getOfficialJson("https://mis.twse.com.tw/stock/api/getChartOhlcStatis.jsp?ex=otc&ch=o00.tw&fqy=1");
+            List<IndexIntradayPoint> points = parseTpexIndexIntraday(root);
+            if (points == null) {
+                log.warn("TPEx MIS 分時回應不符契約");
+                return Collections.emptyList();
+            }
+            return points;
+        } catch (Exception e) {
+            log.warn("TPEx MIS 分時抓取失敗：{}", e.getMessage());
+            return Collections.emptyList();
+        }
+    }
+
+    static List<IndexIntradayPoint> parseTpexIndexIntraday(JsonNode root) {
+        if (!"OK".equals(root.path("rtmessage").asText())) return null;
+        LocalDate day = parseMisTradingDate(root.path("staticObj").path("key").asText(""));
+        JsonNode bars = root.path("ohlcArray");
+        if (day == null || !bars.isArray()) return null;
+
+        Map<LocalDateTime, TimedClose> bySlot = new LinkedHashMap<>();
+        for (JsonNode bar : bars) {
+            Long epochMs = parseEpochMillis(bar.path("t"));
+            BigDecimal close = parsePositiveDecimal(bar.path("c").asText(""));
+            if (epochMs == null || epochMs <= 0 || close == null) return null;
+            LocalDateTime time;
+            try { time = Instant.ofEpochMilli(epochMs).atZone(TAIPEI).toLocalDateTime(); }
+            catch (RuntimeException e) { return null; }
+            if (!day.equals(time.toLocalDate())) return null;
+            String ts = bar.path("ts").asText("").trim();
+            if (!ts.isEmpty() && !matchesTaipeiTs(time, ts)) return null;
+            LocalDateTime slot = time.withSecond(0).withNano(0).withMinute((time.getMinute() / 5) * 5);
+            TimedClose existing = bySlot.get(slot);
+            if (existing == null || epochMs >= existing.epochMs()) bySlot.put(slot, new TimedClose(epochMs, close));
+        }
+        List<IndexIntradayPoint> out = new ArrayList<>();
+        for (LocalDateTime slot = day.atTime(9, 0), end = day.atTime(13, 30);
+             !slot.isAfter(end); slot = slot.plusMinutes(5)) {
+            TimedClose close = bySlot.get(slot);
+            out.add(new IndexIntradayPoint(slot.toString(), close == null ? null : close.close()));
+        }
+        return out;
+    }
+
+    private record TimedClose(long epochMs, BigDecimal close) {}
+
+    /** MIS 現行 key 為 otc_YYYYMMDD；保留舊民國 YYYY/MM/DD fixture 以相容官方格式變動。 */
+    private static LocalDate parseMisTradingDate(String key) {
+        String raw = key == null ? "" : key.trim();
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile(".*_(\\d{8})$").matcher(raw);
+        if (matcher.matches()) {
+            try { return LocalDate.parse(matcher.group(1), java.time.format.DateTimeFormatter.BASIC_ISO_DATE); }
+            catch (RuntimeException ignored) { return null; }
+        }
+        return parseOfficialDate(raw);
+    }
+
+    private static Long parseEpochMillis(JsonNode node) {
+        String raw = node.isIntegralNumber() ? node.asText() : node.isTextual() ? node.textValue() : null;
+        if (raw == null || !raw.matches("\\d+")) return null;
+        try { return Long.parseLong(raw); }
+        catch (NumberFormatException e) { return null; }
+    }
+
+    private static boolean matchesTaipeiTs(LocalDateTime time, String ts) {
+        if (!ts.matches("\\d{6}")) return false;
+        String expected = String.format("%02d%02d%02d", time.getHour(), time.getMinute(), time.getSecond());
+        return expected.equals(ts);
     }
 
     /**

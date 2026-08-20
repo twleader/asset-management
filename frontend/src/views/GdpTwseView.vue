@@ -220,7 +220,7 @@
             單一 Excel 檔、一張工作表（{{ marketLabel }}），欄位為
             <b>日期／開盤／最高／最低／收盤／週線MA5／月線MA20／季線MA60／年線MA240／成交股數／成交金額</b>，依日期遞增；當日該欄無資料則留空。
             四條均線＝該日含當日往前對應交易日數（5／20／60／240）的收盤均價（與上方圖表的四條線同值）。
-            成交股數／成交金額直接取自資料庫既有欄位（不重算）；海外指數無成交金額資料，該欄留空。
+            成交股數／成交金額直接取自資料庫既有欄位（不重算）；除集中市場外的 code-keyed 指數無落地成交金額資料，該欄留空。
           </div>
         </el-form-item>
         <el-form-item label="存檔位置">
@@ -271,9 +271,10 @@ const krGrowth = ref([])
 const refreshing = ref(false)
 const showGdpCompareCard = ref(false) // 台日韓人均 GDP 比較圖預設隱藏，點左側小圖示鍵切換顯示
 
-// 指數日線（近 10 年）— 可切換台股大盤、美股四大指數與海外主要指數（英德韓日）
+// 指數日線（近 10 年）— 可切換台股集中／櫃買市場與海外市場
 const MARKETS = [
-  { value: 'TWSE',  label: '台股大盤' },
+  { value: 'TWSE',  label: '台股集中市場' },
+  { value: 'TPEX',  label: '台股櫃買市場' },
   { value: 'DJI',   label: '道瓊工業' },
   { value: 'SPX',   label: '標普 500' },
   { value: 'IXIC',  label: '那斯達克綜合' },
@@ -284,15 +285,15 @@ const MARKETS = [
   { value: 'N225',  label: '日經 225' }
 ]
 const market = ref('TWSE')
-const marketLabel = computed(() => MARKETS.find(m => m.value === market.value)?.label ?? '台股大盤')
+const marketLabel = computed(() => MARKETS.find(m => m.value === market.value)?.label ?? '台股集中市場')
 const dailyDates = ref([])
 const dailyCloses = ref([])
 const dailyMa5 = ref([])      // 週線（MA5＝台股慣例的 5 個交易日，非日曆週；Task 285）
 const dailyMa20 = ref([])
 const dailyMa60 = ref([])
 const dailyMa240 = ref([])
-const dailyVolumes = ref([])      // 成交量（股）：台股=成交股數、海外=成交量（Task 288）
-const dailyTurnovers = ref([])    // 成交金額（元）：僅台股非空，海外恆全 null
+const dailyVolumes = ref([])      // 成交量（股）：TWSE=成交股數；其餘 code-keyed（含 TPEX）=成交量（Task 288）
+const dailyTurnovers = ref([])    // 成交金額（元）：僅 TWSE 非空；其餘 code-keyed 恆全 null
 const dailyHasVolume = ref(false) // 該指數整段是否有成交量資料（由 BFF 判定，決定成交量子圖顯示與否）
 const dailyRange = ref('1y')
 const dailyRefreshing = ref(false)
@@ -758,7 +759,7 @@ function barColorAt(closeData, i) {
   return '#94a3b8'
 }
 
-// 海外指數成交量依整段最大值自動選單位：≥1e8→億股、≥1e4→萬股、其餘原值（Task 288）
+// 除 TWSE 外的 code-keyed 指數成交量依整段最大值自動選單位：≥1e8→億股、≥1e4→萬股、其餘原值（Task 288）
 function pickVolumeUnit(values) {
   const absVals = values.filter(v => v != null).map(v => Math.abs(Number(v)))
   const maxV = absVals.length ? Math.max(...absVals) : 0

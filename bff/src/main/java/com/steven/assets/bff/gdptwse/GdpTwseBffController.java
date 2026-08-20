@@ -150,7 +150,7 @@ public class GdpTwseBffController {
     /**
      * 指數日線（近 N 年）+ MA5 / MA20 / MA60 / MA240（MA5＝週線，Task 285）+ 成交量
      * （volumes/turnovers/hasVolume，Task 288）。一次回傳完整資料；前端切換區間僅用 dataZoom 不重打 API。
-     * market=TWSE 走台股大盤（/api/twse-daily-index），其餘（DJI/SPX/IXIC/SOX/FTSE/DAX/KOSPI/N225）走海外指數（/api/us-daily-index）。
+     * market=TWSE 走台股集中市場（/api/twse-daily-index），其餘 code-keyed 指數（含 TPEX）走 /api/us-daily-index。
      * 兩市場回傳格式與 MA 計算完全相同（同義欄位同一來源），確保版面一致。
      */
     @GetMapping("/index-daily")
@@ -162,18 +162,19 @@ public class GdpTwseBffController {
 
     /**
      * 觸發「當前選取」指數的日線回補。market=TWSE → 台股逐月 TWSE 月報（實測近 10 年約 250 秒以上，
-     * Task 288 起併抓 FMTQIK 補成交量後更長）；其餘 → 海外指數 Yahoo v8 chart（range=10y，一次呼叫即整段）。
+     * Task 288 起併抓 FMTQIK 補成交量後更長）；TPEX → 官方逐月資料；其餘既有 code-keyed 指數維持 Yahoo v8 chart 整段抓取。
      */
     @PostMapping("/refresh-index-daily")
     public Mono<ResponseEntity<Map<String, Object>>> refreshIndexDaily(
             @RequestParam(defaultValue = "TWSE") String market,
             @RequestParam(defaultValue = "10") int years) {
         ParameterizedTypeReference<Map<String, Object>> mapRef = new ParameterizedTypeReference<>() {};
-        boolean tw = "TWSE".equalsIgnoreCase(market);
+        String normalizedMarket = MarketIndexChartService.normalizeMarket(market);
+        boolean tw = "TWSE".equals(normalizedMarket);
         return businessServicesClient.post()
                 .uri(uri -> tw
                         ? uri.path("/api/twse-daily-index/refresh").queryParam("years", years).build()
-                        : uri.path("/api/us-daily-index/refresh").queryParam("code", market).build())
+                        : uri.path("/api/us-daily-index/refresh").queryParam("code", normalizedMarket).build())
                 .retrieve().bodyToMono(mapRef)
                 // 台股逐月 120 次序列呼叫，實測 MI_5MINS_HIST 單次 ~1.3s ＋ 每月 800ms 間隔 ≈ 250s，
                 // 併抓 FMTQIK 後更長（Task 288）。這裡放寬到 360s 只是其中一關——
@@ -184,7 +185,7 @@ public class GdpTwseBffController {
     }
 
     /**
-     * 指數「當日」分時走勢。market=TWSE→^TWII、其餘→對應海外指數；回最新交易日整天 5 分 K 收盤。
+     * 指數「當日」分時走勢。market=TWSE 走既有來源、TPEX 走官方 MIS、其餘走對應海外指數；回最新交易日整天 5 分 K 收盤。
      * 回 tradingDate（YYYY-MM-DD）+ times（HH:mm）+ closes；另回昨收/漲跌/漲跌%供標題列顯示。
      *
      * 昨收（previousClose）＝該指數日線表中「tradingDate 之前最後一個交易日」收盤——與觀察清單 0000
