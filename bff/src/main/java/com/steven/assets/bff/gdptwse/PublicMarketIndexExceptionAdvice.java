@@ -6,8 +6,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
-/** 只處理公開股市大盤 API 的 validation／typed payload 錯誤，不介入既有 business error passthrough。 */
-@RestControllerAdvice(assignableTypes = PublicMarketIndexController.class)
+/** 處理公開與頁面股市大盤 API 的 validation／typed payload 錯誤，不介入既有 business error passthrough。 */
+@RestControllerAdvice(assignableTypes = {PublicMarketIndexController.class, GdpTwseBffController.class})
 public class PublicMarketIndexExceptionAdvice {
 
     @ExceptionHandler(PublicMarketIndexRequestException.class)

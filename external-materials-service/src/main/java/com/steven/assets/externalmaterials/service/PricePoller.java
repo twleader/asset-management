@@ -56,6 +56,9 @@ public class PricePoller {
         if (!clock.isTwMarketOpen()) return;
         Set<String> tw = new LinkedHashSet<>(), us = new LinkedHashSet<>(), uk = new LinkedHashSet<>();
         source.collectHeldStockCodes(tw, us, uk);
+        // collectHeldStockCodes 的 alert SQL 已排除 0000，但 snapshot 持股側未排除；
+        // 台股大盤不是個股，不能交給個股 MIS/Redis writer。
+        tw.remove("0000");
         if (tw.isEmpty()) return;
         log.info("更新台股即時價格 ({} 檔)", tw.size());
         updatePrices(tw, "台股", false);

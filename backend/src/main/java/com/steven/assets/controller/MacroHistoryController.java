@@ -21,22 +21,22 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * 股市分析頁（Requirement 18）資料來源：台/日/韓人均 GDP、台股大盤日線、海外指數日線、指數當日分時。
+ * 股市分析頁（Requirement 18）資料來源：台/日/韓人均 GDP、台股集中市場日線、除 TWSE 外的 code-keyed 指數日線與當日分時。
  */
 @RestController
 @RequestMapping("/api")
 @RequiredArgsConstructor
 public class MacroHistoryController {
 
-    /** 海外指數合法代碼（當日分時 refresh 守門）；單一清單由 {@link MacroHistoryService#OVERSEAS_INDEX_CODES} 提供（與自動回補排程共用）。 */
-    private static final Set<String> US_INDEX_CODES = Set.copyOf(MacroHistoryService.OVERSEAS_INDEX_CODES);
+    /** 除 TWSE 外可查當日分時的 code-keyed 指數；含 TPEX 官方分時。 */
+    private static final Set<String> CODED_INDEX_CODES = Set.copyOf(MacroHistoryService.PAGE_CODED_INDEX_CODES);
 
     /**
-     * 日線回補 refresh 守門集合：純價格海外指數 ∪ 含息報酬指數（SP500TR）。
-     * 讓績效比較頁（Requirement 33）的 SP500TR 也能經 /us-daily-index/refresh 觸發 Yahoo ^SP500TR 回補。
+     * 日線回補 refresh 守門集合：頁面 code-keyed 指數 ∪ 含息報酬指數（SP500TR）。
+     * TPEX 走官方逐月回補；SP500TR 仍可經相容路由回補，卻不屬於本頁白名單。
      */
     private static final Set<String> US_INDEX_REFRESH_CODES = java.util.stream.Stream
-            .concat(MacroHistoryService.OVERSEAS_INDEX_CODES.stream(),
+            .concat(MacroHistoryService.PAGE_CODED_INDEX_CODES.stream(),
                     MacroHistoryService.TOTAL_RETURN_US_INDEX_CODES.stream())
             .collect(java.util.stream.Collectors.toUnmodifiableSet());
 
@@ -90,7 +90,7 @@ public class MacroHistoryController {
         return macroHistoryService.refreshTwseDaily(years);
     }
 
-    /** 海外指數每日 OHLC（Requirement 18：日線圖市場切換）。code ∈ {DJI,SPX,IXIC,SOX,FTSE,DAX,KOSPI,N225}。 */
+    /** 除 TWSE 外的 code-keyed 指數每日 OHLC。GET 相容契約刻意不驗 code，供績效比較頁 SP500TR 使用。 */
     @GetMapping("/us-daily-index")
     public List<UsIndexDailyHistory> getUsDaily(
             @RequestParam String code,
@@ -125,7 +125,7 @@ public class MacroHistoryController {
      * GET /api/index-daily/export?market=TWSE&start=2020-01-01&end=2026-07-18
      * 預設回近 10 年。全域公開行情，無 owner 過濾。
      *
-     * <p>白名單用 {@link MacroHistoryService#DAILY_INDEX_CODES}（＝頁面下拉的 9 個指數），
+     * <p>白名單用 {@link MacroHistoryService#DAILY_INDEX_CODES}（＝頁面下拉的 10 個指數），
      * <b>不可</b>誤用 {@link #US_INDEX_REFRESH_CODES}——那含績效比較頁的 SP500TR，不在本頁可選範圍。
      * 資安（Requirement 29）：market 會流入查詢與產出檔名，未知代碼直接擋為 400。
      */
@@ -158,11 +158,11 @@ public class MacroHistoryController {
                 .body(new org.springframework.core.io.ByteArrayResource(data));
     }
 
-    /** 指數「當日」分時走勢（Yahoo 5m，最新交易日；transient）。market ∈ {TWSE,DJI,SPX,IXIC,SOX,FTSE,DAX,KOSPI,N225}。 */
+    /** 指數「當日」分時走勢（TPEX 為官方 MIS，其餘為既有來源；transient）。market 含 TWSE、TPEX 與八檔海外指數。 */
     @GetMapping("/index-intraday")
     public List<MacroHistoryService.IntradayPoint> getIndexIntraday(@RequestParam String market) {
-        // 資安（Requirement 29）：market 會流入 external-materials-service 打 Yahoo；以已知指數白名單擋參數注入
-        if (!"TWSE".equals(market) && !US_INDEX_CODES.contains(market)) {
+        // 資安（Requirement 29）：market 會流入 external-materials-service；以已知指數白名單擋參數注入
+        if (!"TWSE".equals(market) && !CODED_INDEX_CODES.contains(market)) {
             throw new IllegalArgumentException("未知指數代碼: " + market);
         }
         return macroHistoryService.fetchIndexIntraday(market);

@@ -164,6 +164,8 @@ class IndexDailyFreshnessAlignmentTest {
                 .doesNotContainAnyElementsOf(IndexDailyRefreshScheduler.NON_US_INDEX_CODES);
         assertThat(IndexDailyRefreshScheduler.US_INDEX_CODES)
                 .containsExactlyInAnyOrder("DJI", "SPX", "IXIC", "SOX", "SP500TR");
+        assertThat(IndexDailyRefreshScheduler.NON_US_INDEX_CODES)
+                .containsExactly("TPEX", "FTSE", "DAX", "KOSPI", "N225");
     }
 
     // ---------- (c) 補救檢查：追上就不打外部來源 ----------
@@ -193,6 +195,7 @@ class IndexDailyFreshnessAlignmentTest {
         verify(macroHistoryService, never()).refreshUsIndexDaily("DJI");
         verify(macroHistoryService, never()).refreshUsIndexDaily("SPX");
         verify(macroHistoryService, never()).refreshUsIndexDaily("SP500TR");
+        verify(macroHistoryService, never()).refreshUsIndexDaily("TPEX");
         // 落後補救不重複跑 TWSE 報酬指數增量（那是每日全量回補的收尾步驟）
         verify(macroHistoryService, never()).fillRecentTwseReturnIndexGaps(org.mockito.ArgumentMatchers.anyInt());
 
@@ -225,7 +228,7 @@ class IndexDailyFreshnessAlignmentTest {
         scheduler.runSelfHeal(INCIDENT_INSTANT, INCIDENT_TODAY_TPE);
 
         verify(macroHistoryService, never()).refreshUsIndexDaily(anyString());
-        assertThat(messages(Level.INFO)).containsExactly("self-heal：海外指數日線皆為最新，略過");
+        assertThat(messages(Level.INFO)).containsExactly("self-heal：code-keyed 指數日線皆為最新，略過");
     }
 
     // ---------- (d) 回補後仍落後要留下可查的 WARN ----------

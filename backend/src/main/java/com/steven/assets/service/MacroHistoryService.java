@@ -22,6 +22,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -40,22 +41,27 @@ public class MacroHistoryService {
     private static final String IMF_GDP_INDICATOR = "NGDPDPC";
     private static final String IMF_GROWTH_INDICATOR = "NGDP_RPCH";
 
-    /**
-     * 海外指數合法代碼（日線回補 refresh 守門 + 自動回補排程共用單一清單）。
-     * 美股四大：道瓊 / 標普500 / 那斯達克綜合 / 費城半導體；海外主要：英國富時100 / 德國DAX / 韓國KOSPI / 日經225。
-     */
+    /** 美股四大與英德韓日八個既有海外指數；不含 TPEX，避免市場語意混淆。 */
     public static final List<String> OVERSEAS_INDEX_CODES =
             List.of("DJI", "SPX", "IXIC", "SOX", "FTSE", "DAX", "KOSPI", "N225");
 
     /**
-     * 「股市大盤查詢」頁可選指數＝海外指數 ∪ 台股大盤（Requirement 45 / Task 216 匯出白名單的單一來源）。
+     * 本頁走 {@code us_index_daily_history} 的 code-keyed 指數：先櫃買、後維持既有海外八檔順序。
+     * TPEX 由官方逐月來源回補；其餘八檔維持既有 Yahoo 路徑。
+     */
+    public static final List<String> PAGE_CODED_INDEX_CODES = java.util.stream.Stream
+            .concat(java.util.stream.Stream.of("TPEX"), OVERSEAS_INDEX_CODES.stream())
+            .toList();
+
+    /**
+     * 「股市大盤查詢」頁可選指數＝TWSE ∪ code-keyed 指數（Requirement 45 / Task 216 匯出白名單的單一來源）。
      *
      * <p>刻意<b>不含 {@code SP500TR}</b>：該代碼雖存在於 {@code us_index_daily_history}，
      * 但屬績效比較頁（Requirement 33）的含息報酬指數，不在本頁下拉中。
      * 與 {@code MacroHistoryController.US_INDEX_REFRESH_CODES}（回補守門，含 SP500TR）語意不同，不可互用。
      */
     public static final java.util.Set<String> DAILY_INDEX_CODES =
-            java.util.stream.Stream.concat(java.util.stream.Stream.of("TWSE"), OVERSEAS_INDEX_CODES.stream())
+            java.util.stream.Stream.concat(java.util.stream.Stream.of("TWSE"), PAGE_CODED_INDEX_CODES.stream())
                     .collect(java.util.stream.Collectors.toUnmodifiableSet());
 
     /**
@@ -137,7 +143,7 @@ public class MacroHistoryService {
         return twseDailyRepo.findAllByOrderByTradingDateAsc();
     }
 
-    /** 海外指數日線（升冪）；from/to 皆有回區間、僅 from 回該日起、皆無回該 code 全部。 */
+    /** 除 TWSE 外的 code-keyed 指數日線（升冪）；from/to 皆有回區間、僅 from 回該日起、皆無回該 code 全部。 */
     @Transactional(readOnly = true)
     public List<UsIndexDailyHistory> getUsDaily(String code, LocalDate from, LocalDate to) {
         if (from != null && to != null) {
@@ -476,17 +482,46 @@ public class MacroHistoryService {
     }
 
     /**
-     * 海外單一指數（DJI/SPX/IXIC/SOX/FTSE/DAX/KOSPI/N225）近 10 年日線回補。
-     * 經 /internal/macro/us-index proxy 取 Yahoo v8 chart（range=10y，一次呼叫即整段），upsert 至 us_index_daily_history。
+     * 除 TWSE 外的 code-keyed 指數近十年日線回補。TPEX 經 proxy 走官方逐月來源；其餘既有代碼維持
+     * Yahoo 整段抓取，相容 method 與 table 名稱不變。
      */
     @Transactional
     public Map<String, Object> refreshUsIndexDaily(String code) {
         List<UsIndexDailyHistory> rows = fetchUsIndexDailyProxy(code);
-        if (!rows.isEmpty()) usDailyRepo.saveAll(rows);
+        if (!rows.isEmpty()) {
+            if (isTpexCode(code)) {
+                preserveExistingTpexVolumes(code, rows);
+            }
+            usDailyRepo.saveAll(rows);
+        }
         String from = rows.isEmpty() ? "" : rows.get(0).getTradingDate().toString();
         String to = rows.isEmpty() ? "" : rows.get(rows.size() - 1).getTradingDate().toString();
         log.info("US index {} daily refresh: upserted={} rows ({}~{})", code, rows.size(), from, to);
         return Map.of("code", code, "upserted", rows.size(), "from", from, "to", to);
+    }
+
+    /**
+     * TPEX 官方量能端可 fail-soft；若本次同日 incoming volume 為 null，保留 DB 已有的非 null 值，
+     * 但 OHLC 始終以本次已驗證資料覆寫。以回傳日期範圍一次載入，而非每列 N+1 查詢。
+     */
+    static boolean isTpexCode(String code) {
+        return "TPEX".equalsIgnoreCase(code == null ? "" : code.trim());
+    }
+
+    void preserveExistingTpexVolumes(String code, List<UsIndexDailyHistory> rows) {
+        if (!isTpexCode(code) || rows.isEmpty()) return;
+        LocalDate from = rows.stream().map(UsIndexDailyHistory::getTradingDate).min(LocalDate::compareTo).orElseThrow();
+        LocalDate to = rows.stream().map(UsIndexDailyHistory::getTradingDate).max(LocalDate::compareTo).orElseThrow();
+        Map<LocalDate, UsIndexDailyHistory> existing = new HashMap<>();
+        for (UsIndexDailyHistory row : usDailyRepo.findByIndexCodeAndTradingDateBetweenOrderByTradingDateAsc(code, from, to)) {
+            existing.put(row.getTradingDate(), row);
+        }
+        for (UsIndexDailyHistory incoming : rows) {
+            UsIndexDailyHistory prior = existing.get(incoming.getTradingDate());
+            if (incoming.getVolume() == null && prior != null && prior.getVolume() != null) {
+                incoming.setVolume(prior.getVolume());
+            }
+        }
     }
 
     private List<UsIndexDailyHistory> fetchUsIndexDailyProxy(String code) {
@@ -516,7 +551,7 @@ public class MacroHistoryService {
 
     /**
      * 指數「當日」分時走勢 proxy（transient，不寫 DB）。
-     * market ∈ {TWSE,DJI,SPX,IXIC,SOX,FTSE,DAX,KOSPI,N225}；回最新交易日整天的 5 分 K 收盤序列。
+     * market ∈ {TWSE,TPEX,DJI,SPX,IXIC,SOX,FTSE,DAX,KOSPI,N225}；回最新交易日整天的 5 分 K 收盤序列。
      */
     public List<IntradayPoint> fetchIndexIntraday(String market) {
         try {

@@ -1,6 +1,7 @@
 package com.steven.assets.service;
 
 import com.steven.assets.model.TwseIndexDailyHistory;
+import com.steven.assets.model.UsIndexDailyHistory;
 import com.steven.assets.repository.JapanGdpPerCapitaHistoryRepository;
 import com.steven.assets.repository.KoreaGdpPerCapitaHistoryRepository;
 import com.steven.assets.repository.TaiwanGdpPerCapitaHistoryRepository;
@@ -123,5 +124,50 @@ class MacroHistoryServicePreserveVolumeFieldsTest {
         assertThat(fresh.getTradeVolume()).isEqualTo(5000000000L);
         assertThat(fresh.getTradeValue()).isEqualByComparingTo("500000000000");
         assertThat(fresh.getClosePointTr()).isNull();
+    }
+
+    @Test
+    void TPEX本次量能為null時保留同日既有量能但OHLC仍由本次覆寫() {
+        LocalDate date = LocalDate.of(2026, 8, 3);
+        UsIndexDailyHistory incoming = usRow("TPEX", date, new BigDecimal("321.00"), null);
+        UsIndexDailyHistory existing = usRow("TPEX", date, new BigDecimal("300.00"), 998_000L);
+        when(usDailyRepo.findByIndexCodeAndTradingDateBetweenOrderByTradingDateAsc("TPEX", date, date))
+                .thenReturn(List.of(existing));
+
+        service.preserveExistingTpexVolumes("TPEX", List.of(incoming));
+
+        assertThat(incoming.getVolume()).isEqualTo(998_000L);
+        assertThat(incoming.getClosePoint()).isEqualByComparingTo("321.00");
+    }
+
+    @Test
+    void TPEX本次抓到非null量能時不得被舊值覆蓋() {
+        LocalDate date = LocalDate.of(2026, 8, 4);
+        UsIndexDailyHistory incoming = usRow("TPEX", date, new BigDecimal("322.00"), 1_001_000L);
+        UsIndexDailyHistory existing = usRow("TPEX", date, new BigDecimal("300.00"), 998_000L);
+        when(usDailyRepo.findByIndexCodeAndTradingDateBetweenOrderByTradingDateAsc("TPEX", date, date))
+                .thenReturn(List.of(existing));
+
+        service.preserveExistingTpexVolumes("TPEX", List.of(incoming));
+
+        assertThat(incoming.getVolume()).isEqualTo(1_001_000L);
+    }
+
+    @Test
+    void 非TPEX不得套用保值合併或查既有rows() {
+        UsIndexDailyHistory incoming = usRow("DJI", LocalDate.of(2026, 8, 5),
+                new BigDecimal("41000.00"), null);
+
+        service.preserveExistingTpexVolumes("DJI", List.of(incoming));
+
+        assertThat(incoming.getVolume()).isNull();
+        org.mockito.Mockito.verifyNoInteractions(usDailyRepo);
+        assertThat(MacroHistoryService.isTpexCode(" tpex ")).isTrue();
+        assertThat(MacroHistoryService.isTpexCode("DJI")).isFalse();
+    }
+
+    private UsIndexDailyHistory usRow(String code, LocalDate date, BigDecimal close, Long volume) {
+        return new UsIndexDailyHistory(code, date, new BigDecimal("300.00"), new BigDecimal("330.00"),
+                new BigDecimal("290.00"), close, volume);
     }
 }

@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "test": "node --test src/utils/displayQuote.test.js src/utils/valuationEvidence.test.js",
+    "test": "node --test src/utils/displayQuote.test.js src/utils/valuationEvidence.test.js src/utils/gdpTwseMarketCatalog.test.js",
     "build": "vite build",
     "preview": "vite preview"
   },

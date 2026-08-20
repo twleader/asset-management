@@ -286,7 +286,10 @@ public class InternalPriceController {
         return macro.fetchTwseMonthlyDaily(year, month);
     }
 
-    /** 海外指數近 10 年每日 OHLC（Yahoo v8 chart，range=10y）。code ∈ {DJI,SPX,SP500TR,IXIC,SOX,FTSE,DAX,KOSPI,N225}。 */
+    /**
+     * 除 TWSE 外的 code-keyed 指數近十年每日 OHLC。code ∈ {TPEX,DJI,SPX,SP500TR,IXIC,SOX,FTSE,DAX,KOSPI,N225}；
+     * TPEX 為 TPEx 官方逐月 OHLC／成交量例外，其餘代碼走 Yahoo v8 chart（range=10y）。
+     */
     @GetMapping("/macro/us-index")
     public java.util.List<com.steven.assets.externalmaterials.client.MacroDataFetchClient.DailyOhlc>
         usIndex(@RequestParam String code) {
@@ -304,7 +307,10 @@ public class InternalPriceController {
                 : org.springframework.http.ResponseEntity.ok(point);
     }
 
-    /** 指數「當日」分時（Yahoo 5m，最新交易日）。market ∈ {TWSE,DJI,SPX,IXIC,SOX,FTSE,DAX,KOSPI,N225}。 */
+    /**
+     * 指數「當日」分時（最新交易日）。market ∈ {TWSE,TPEX,DJI,SPX,IXIC,SOX,FTSE,DAX,KOSPI,N225}；
+     * TPEX 走官方 MIS，其餘市場走 Yahoo 5m。
+     */
     @GetMapping("/macro/index-intraday")
     public java.util.List<com.steven.assets.externalmaterials.client.MacroDataFetchClient.IndexIntradayPoint>
         indexIntraday(@RequestParam String market) {

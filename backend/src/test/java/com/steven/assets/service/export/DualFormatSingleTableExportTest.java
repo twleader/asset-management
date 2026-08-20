@@ -261,7 +261,12 @@ class DualFormatSingleTableExportTest {
         @Test
         void 大盤指數日線() throws Exception {
             stubAll();
-            assertSameWorkbook(golden("index_twse"), read(service.exportIndexDaily("TWSE", D1, D2)));
+            Workbook expected = golden("index_twse");
+            Workbook actual = read(service.exportIndexDaily("TWSE", D1, D2));
+            assertThat(actual.getSheetAt(0).getSheetName()).isEqualTo("台股集中市場");
+            // Task 346 僅更新 public label；既有 golden 保留其歷史名稱，逐格零回歸仍須比較。
+            actual.setSheetName(0, expected.getSheetAt(0).getSheetName());
+            assertSameWorkbook(expected, actual);
         }
     }
 
@@ -391,6 +396,8 @@ class DualFormatSingleTableExportTest {
             stubAll();
             Workbook actual = read(service.exportIndexDaily("TWSE", D1, D2));
             Workbook pre = golden("index_twse_pre_t285");
+            assertThat(actual.getSheetAt(0).getSheetName()).isEqualTo("台股集中市場");
+            actual.setSheetName(0, pre.getSheetAt(0).getSheetName());
 
             // 附加在最末 → 欄索引不位移，映射即 identity（t281 插在中間時才需要位移函式）
             assertSameMapped(pre, actual, c -> c);
@@ -411,6 +418,8 @@ class DualFormatSingleTableExportTest {
             stubAll();
             Workbook actual = read(service.exportIndexDaily("TWSE", D1, D2));
             Workbook pre = golden("index_twse_pre_t286");
+            assertThat(actual.getSheetAt(0).getSheetName()).isEqualTo("台股集中市場");
+            actual.setSheetName(0, pre.getSheetAt(0).getSheetName());
 
             // 附加在最末 → 欄索引不位移，映射即 identity
             assertSameMapped(pre, actual, c -> c);
@@ -538,6 +547,8 @@ class DualFormatSingleTableExportTest {
             stubAll();
             Workbook actual = read(service.exportIndexDaily("TWSE", D1, D2));
             Workbook pre = golden("index_twse_pre_t289");
+            assertThat(actual.getSheetAt(0).getSheetName()).isEqualTo("台股集中市場");
+            actual.setSheetName(0, pre.getSheetAt(0).getSheetName());
 
             // 附加在最末 → 欄索引不位移，映射即 identity；驗到欄索引 0–8（日期～年線MA240）逐格未變
             assertSameMapped(pre, actual, c -> c);

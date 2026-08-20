@@ -494,7 +494,8 @@ public class ExcelExportService {
      */
     public static String indexLabel(String market) {
         return switch (market == null ? "" : market.toUpperCase()) {
-            case "TWSE" -> "台股大盤";
+            case "TWSE" -> "台股集中市場";
+            case "TPEX" -> "台股櫃買市場";
             case "DJI" -> "道瓊工業";
             case "SPX" -> "標普500";
             case "IXIC" -> "那斯達克綜合";
@@ -542,7 +543,7 @@ public class ExcelExportService {
      * spec/design.md 的 Requirement 45「週線MA5：唯一的計算欄」。
      *
      * <p><b>第十～十一欄（成交股數／成交金額，Task 289）直接取 entity 既有欄位，不計算</b>：
-     * TWSE 讀 {@code tradeVolume}／{@code tradeValue}；海外指數讀 {@code volume}，
+     * TWSE 讀 {@code tradeVolume}／{@code tradeValue}；其餘 code-keyed 指數（含 TPEX）讀 {@code volume}，
      * {@code turnover}（成交金額）固定 {@code null}（無此資料，非計算值）。
      *
      * <p>{@code TWSE} 走 {@code twse_index_daily_history}、其餘走 {@code us_index_daily_history}；
@@ -584,7 +585,7 @@ public class ExcelExportService {
     /**
      * 兩張日線表正規化後的單日行情（僅供匯出寫表使用，不入庫）。
      * {@code volume}／{@code turnover} 直接取自 entity 既有欄位、不計算（Task 289）：
-     * TWSE 讀 {@code tradeVolume}／{@code tradeValue}；海外指數讀 {@code volume}，
+     * TWSE 讀 {@code tradeVolume}／{@code tradeValue}；其餘 code-keyed 指數（含 TPEX）讀 {@code volume}，
      * {@code turnover} 固定 {@code null}（無成交金額資料，非計算值）。
      */
     private record IndexDailyRow(java.time.LocalDate date, BigDecimal open, BigDecimal high,
