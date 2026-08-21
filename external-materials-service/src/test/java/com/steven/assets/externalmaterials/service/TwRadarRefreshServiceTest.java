@@ -23,6 +23,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -69,15 +70,22 @@ class TwRadarRefreshServiceTest {
         }).when(source).collectTwRadarCodes(any());
     }
 
+    private void marketOpen(boolean open) {
+        TwLiveQuoteDispatcher.Authorization authorization = mock(TwLiveQuoteDispatcher.Authorization.class);
+        when(authorization.marketOpen()).thenReturn(open);
+        when(authorization.marketUnknown()).thenReturn(false);
+        when(poller.authorizeTwLive()).thenReturn(authorization);
+    }
+
     // ── 開盤中 ────────────────────────────────────────────────
 
     @Test
     void 開盤中個股與大盤都抓() {
-        when(clock.isTwMarketOpen()).thenReturn(true);
+        marketOpen(true);
 
         TwRadarRefreshService.Summary s = service.refresh();
 
-        verify(poller).updatePrices(any(), eq(TW), eq(false));
+        verify(poller).updateTwPrices(any(), any());
         verify(taiex).updateOnce();
         verify(poller, never()).syncClosedFromDb(any(), anyString());
         assertTrue(s.performed());
@@ -89,26 +97,26 @@ class TwRadarRefreshServiceTest {
      */
     @Test
     void 大盤代號不得混進個股抓取清單() {
-        when(clock.isTwMarketOpen()).thenReturn(true);
+        marketOpen(true);
         stockCodes("2330", "0000", "0050");
 
         service.refresh();
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Set<String>> captor = ArgumentCaptor.forClass(Set.class);
-        verify(poller).updatePrices(captor.capture(), eq(TW), eq(false));
+        verify(poller).updateTwPrices(captor.capture(), any());
         assertFalse(captor.getValue().contains("0000"));
         assertTrue(captor.getValue().contains("2330"));
     }
 
     @Test
     void 大盤失敗不連累個股() {
-        when(clock.isTwMarketOpen()).thenReturn(true);
+        marketOpen(true);
         doAnswer(inv -> { throw new RuntimeException("Yahoo 429"); }).when(taiex).updateOnce();
 
         TwRadarRefreshService.Summary s = service.refresh();
 
-        verify(poller).updatePrices(any(), eq(TW), eq(false));
+        verify(poller).updateTwPrices(any(), any());
         assertTrue(s.performed());
         assertEquals(0, s.indexUpdated());
     }
@@ -121,7 +129,7 @@ class TwRadarRefreshServiceTest {
      */
     @Test
     void 大盤逾時不得拖住整體() throws Exception {
-        when(clock.isTwMarketOpen()).thenReturn(true);
+        marketOpen(true);
         service.taiexWaitSeconds = 1;
         doAnswer(inv -> {
             Thread.sleep(5000);
@@ -133,21 +141,21 @@ class TwRadarRefreshServiceTest {
         long elapsedMs = (System.nanoTime() - t0) / 1_000_000;
 
         assertTrue(elapsedMs < 3000, "大盤逾時後不得繼續等待，實測 " + elapsedMs + " ms");
-        verify(poller).updatePrices(any(), eq(TW), eq(false));
+        verify(poller).updateTwPrices(any(), any());
         assertTrue(s.performed());
         assertEquals(0, s.indexUpdated());
     }
 
     @Test
     void 併發時立即回busy不抓取() throws Exception {
-        when(clock.isTwMarketOpen()).thenReturn(true);
+        marketOpen(true);
         java.util.concurrent.CountDownLatch inFlight = new java.util.concurrent.CountDownLatch(1);
         java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
         doAnswer(inv -> {
             inFlight.countDown();
             release.await();
             return null;
-        }).when(poller).updatePrices(any(), anyString(), org.mockito.ArgumentMatchers.anyBoolean());
+        }).when(poller).updateTwPrices(any(), any());
 
         Thread first = new Thread(service::refresh);
         first.start();
@@ -159,14 +167,14 @@ class TwRadarRefreshServiceTest {
 
         assertTrue(second.busy());
         assertFalse(second.performed());
-        verify(poller, org.mockito.Mockito.times(1)).updatePrices(any(), eq(TW), eq(false));
+        verify(poller, org.mockito.Mockito.times(1)).updateTwPrices(any(), any());
     }
 
     // ── 休市 ─────────────────────────────────────────────────
 
     @Test
     void 非交易日照常同步收盤價() {
-        when(clock.isTwMarketOpen()).thenReturn(false);
+        marketOpen(false);
         when(clock.isTradingDay(TW, TODAY)).thenReturn(false);
 
         TwRadarRefreshService.Summary s = service.refresh();
@@ -179,7 +187,7 @@ class TwRadarRefreshServiceTest {
     /** 13:30–13:32：DB 還沒有今日收盤，同步會把昨收寫回 Redis 並被 13:32 dump 當成今日收盤。 */
     @Test
     void 收盤未落檔的空窗不得同步() {
-        when(clock.isTwMarketOpen()).thenReturn(false);
+        marketOpen(false);
         when(clock.isTradingDay(TW, TODAY)).thenReturn(true);
         at(LocalTime.of(13, 31));
         when(source.findMaxTradingDate(anyString(), eq(TW))).thenReturn(Optional.of(TODAY.minusDays(1)));
@@ -192,7 +200,7 @@ class TwRadarRefreshServiceTest {
 
     @Test
     void 收盤已落檔後恢復同步() {
-        when(clock.isTwMarketOpen()).thenReturn(false);
+        marketOpen(false);
         when(clock.isTradingDay(TW, TODAY)).thenReturn(true);
         at(LocalTime.of(13, 35));
         when(source.findMaxTradingDate(anyString(), eq(TW))).thenReturn(Optional.of(TODAY));
@@ -209,7 +217,7 @@ class TwRadarRefreshServiceTest {
      */
     @Test
     void 盤前照常同步不得誤判為空窗() {
-        when(clock.isTwMarketOpen()).thenReturn(false);
+        marketOpen(false);
         when(clock.isTradingDay(TW, TODAY)).thenReturn(true);
         at(LocalTime.of(8, 30));
         when(source.findMaxTradingDate(anyString(), eq(TW))).thenReturn(Optional.of(TODAY.minusDays(1)));
@@ -223,7 +231,7 @@ class TwRadarRefreshServiceTest {
     /** 無任何歷史列（新掛牌／剛加入觀察清單）不得被當成「已有今日收盤」而納入同步。 */
     @Test
     void 無歷史列的代號不納入同步() {
-        when(clock.isTwMarketOpen()).thenReturn(false);
+        marketOpen(false);
         when(clock.isTradingDay(TW, TODAY)).thenReturn(true);
         at(LocalTime.of(14, 0));
         when(source.findMaxTradingDate(eq("2330"), eq(TW))).thenReturn(Optional.of(TODAY));
@@ -241,7 +249,7 @@ class TwRadarRefreshServiceTest {
     /** 全庫無台股標的時不得回出「今日收盤價尚未落檔」的假訊息。 */
     @Test
     void 無台股標的時不回報空窗() {
-        when(clock.isTwMarketOpen()).thenReturn(false);
+        marketOpen(false);
         when(clock.isTradingDay(TW, TODAY)).thenReturn(true);
         at(LocalTime.of(14, 0));
         doAnswer(inv -> null).when(source).collectTwRadarCodes(any());

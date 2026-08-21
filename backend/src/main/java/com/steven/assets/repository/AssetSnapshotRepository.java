@@ -1,8 +1,11 @@
 package com.steven.assets.repository;
 
 import com.steven.assets.model.AssetSnapshot;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDate;
@@ -13,6 +16,16 @@ import java.util.Optional;
 public interface AssetSnapshotRepository extends JpaRepository<AssetSnapshot, Long> {
 
     Optional<AssetSnapshot> findBySnapshotDate(LocalDate date);
+
+    /** Snapshot mutation 的唯一 by-id row lock；必須在 active transaction 內呼叫。 */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT s FROM AssetSnapshot s WHERE s.id = :id")
+    Optional<AssetSnapshot> findByIdForUpdate(@Param("id") Long id);
+
+    /** Bulk maintenance 依固定 id 次序一次鎖住所有 snapshot，避免與局部 replace 交錯。 */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT s FROM AssetSnapshot s ORDER BY s.id ASC")
+    List<AssetSnapshot> findAllForUpdateOrderById();
 
     boolean existsBySnapshotDate(LocalDate date);
 
@@ -39,6 +52,13 @@ public interface AssetSnapshotRepository extends JpaRepository<AssetSnapshot, Lo
      * derived name 等同 {@code ORDER BY snapshot_date DESC LIMIT 1}。
      */
     Optional<AssetSnapshot> findFirstByOwnerUserIdOrderBySnapshotDateDesc(Long ownerUserId);
+
+    /** 背景 mutation 專用 owner-latest row lock；owner/date unique 保證最多一列。 */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT s FROM AssetSnapshot s WHERE s.ownerUserId = :ownerUserId " +
+            "AND s.snapshotDate = (SELECT MAX(s2.snapshotDate) FROM AssetSnapshot s2 " +
+            "WHERE s2.ownerUserId = :ownerUserId)")
+    Optional<AssetSnapshot> findLatestByOwnerUserIdForUpdate(@Param("ownerUserId") Long ownerUserId);
 
     /** 背景交易雷達通知專用：明確 owner 條件並一併載入最新快照持股。 */
     @Query("SELECT s FROM AssetSnapshot s LEFT JOIN FETCH s.stocks " +

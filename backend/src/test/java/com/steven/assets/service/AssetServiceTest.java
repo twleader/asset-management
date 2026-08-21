@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
@@ -45,6 +46,8 @@ class AssetServiceTest {
     @Mock StockStyleRepository stockStyleRepo;
     @Mock FundClassOverrideRepository fundClassOverrideRepo;
     @Mock com.steven.assets.security.TenantGuard tenantGuard;
+    @Mock AssetSnapshotMutationLock snapshotMutationLock;
+    @Spy SnapshotAggregateCalculator aggregateCalculator = new SnapshotAggregateCalculator();
 
     @InjectMocks AssetService service;
 
@@ -64,8 +67,7 @@ class AssetServiceTest {
 
     @Test
     void deleteSnapshot_存在時先驗歸屬再刪除() {
-        // deleteSnapshot 先 findSnapshot（findById + tenantGuard 驗歸屬）再 delete 該實體
-        when(snapshotRepo.findById(1L)).thenReturn(Optional.of(snapshot));
+        when(snapshotMutationLock.lockById(1L)).thenReturn(snapshot);
 
         service.deleteSnapshot(1L);
 
@@ -76,7 +78,8 @@ class AssetServiceTest {
     @Test
     void deleteSnapshot_不存在時拋NoSuchElementException() {
         // findSnapshot 找不到即拋例外，不呼叫 delete
-        when(snapshotRepo.findById(99L)).thenReturn(Optional.empty());
+        when(snapshotMutationLock.lockById(99L))
+                .thenThrow(new NoSuchElementException("找不到快照 ID: 99"));
 
         assertThatThrownBy(() -> service.deleteSnapshot(99L))
                 .isInstanceOf(NoSuchElementException.class)
@@ -95,7 +98,7 @@ class AssetServiceTest {
         stock.setEstimatedDividend(BigDecimal.ZERO);
         snapshot.getStocks().add(stock);
 
-        when(snapshotRepo.findAllByOrderBySnapshotDateAsc()).thenReturn(List.of(snapshot));
+        when(snapshotMutationLock.lockAllInIdOrder()).thenReturn(List.of(snapshot));
         when(snapshotRepo.save(any())).thenReturn(snapshot);
 
         int updated = service.recalcAllDividends();
@@ -112,7 +115,7 @@ class AssetServiceTest {
         snapshot.getStocks().add(stock);
         snapshot.setEstimatedAnnualDividend(BigDecimal.ZERO);
 
-        when(snapshotRepo.findAllByOrderBySnapshotDateAsc()).thenReturn(List.of(snapshot));
+        when(snapshotMutationLock.lockAllInIdOrder()).thenReturn(List.of(snapshot));
 
         int updated = service.recalcAllDividends();
 
@@ -128,7 +131,7 @@ class AssetServiceTest {
         snapshot.getStocks().add(stock);
         snapshot.setEstimatedAnnualDividend(BigDecimal.ZERO);
 
-        when(snapshotRepo.findAllByOrderBySnapshotDateAsc()).thenReturn(List.of(snapshot));
+        when(snapshotMutationLock.lockAllInIdOrder()).thenReturn(List.of(snapshot));
 
         int updated = service.recalcAllDividends();
 
@@ -190,7 +193,7 @@ class AssetServiceTest {
     void roll_最新快照為過去日期_釘成當日並save回true() {
         LocalDate today = LocalDate.of(2026, 7, 12);
         snapshot.setSnapshotDate(LocalDate.of(2026, 7, 10));
-        when(snapshotRepo.findFirstByOwnerUserIdOrderBySnapshotDateDesc(1L))
+        when(snapshotMutationLock.lockLatestForOwner(1L))
                 .thenReturn(Optional.of(snapshot));
         when(snapshotRepo.save(any())).thenReturn(snapshot);
 
@@ -205,7 +208,7 @@ class AssetServiceTest {
     void roll_最新快照已是當日_skip不save() {
         LocalDate today = LocalDate.of(2026, 7, 12);
         snapshot.setSnapshotDate(today);
-        when(snapshotRepo.findFirstByOwnerUserIdOrderBySnapshotDateDesc(1L))
+        when(snapshotMutationLock.lockLatestForOwner(1L))
                 .thenReturn(Optional.of(snapshot));
 
         boolean rolled = service.rollLatestSnapshotToTodayForOwner(1L, today);
@@ -220,7 +223,7 @@ class AssetServiceTest {
         LocalDate today = LocalDate.of(2026, 7, 12);
         LocalDate future = today.plusDays(1);
         snapshot.setSnapshotDate(future);
-        when(snapshotRepo.findFirstByOwnerUserIdOrderBySnapshotDateDesc(1L))
+        when(snapshotMutationLock.lockLatestForOwner(1L))
                 .thenReturn(Optional.of(snapshot));
 
         boolean rolled = service.rollLatestSnapshotToTodayForOwner(1L, today);
@@ -233,7 +236,7 @@ class AssetServiceTest {
     @Test
     void roll_owner無快照_回false() {
         LocalDate today = LocalDate.of(2026, 7, 12);
-        when(snapshotRepo.findFirstByOwnerUserIdOrderBySnapshotDateDesc(99L))
+        when(snapshotMutationLock.lockLatestForOwner(99L))
                 .thenReturn(Optional.empty());
 
         boolean rolled = service.rollLatestSnapshotToTodayForOwner(99L, today);

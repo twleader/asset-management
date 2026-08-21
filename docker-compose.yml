@@ -47,6 +47,44 @@ services:
       timeout: 3s
       retries: 10
 
+  # ── Fubon Broker Adapter (Python / official x86_64 SDK) ─────
+  # Optional, network-internal and read-only. Process liveness remains healthy when disabled.
+  fubon-broker-service:
+    platform: linux/amd64
+    build:
+      context: ./fubon-broker-service
+      dockerfile: Dockerfile
+    container_name: asset-fubon-broker-service
+    restart: unless-stopped
+    environment:
+      FUBON_ENABLED: ${FUBON_ENABLED:-false}
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - ${FUBON_SECRETS_DIR_HOST:-./secrets/fubon}:/run/secrets/fubon:ro
+    networks:
+      - asset-net
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import json,urllib.request;
+          data=json.load(urllib.request.urlopen('http://127.0.0.1:8080/internal/health',timeout=3));
+          assert data['status']=='UP'
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
   # ── Business Services (Spring Boot MVC) ────────────────────
   # Internal only — not exposed to host. BFF is the sole entry point.
   business-services:
@@ -84,6 +122,8 @@ services:
       # 未設定 ANTHROPIC_API_KEY 時 MarketAnalysisService 安全跳過（status=NOT_CONFIGURED），不報錯。
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-4-8}
+      FUBON_ENABLED: ${FUBON_ENABLED:-false}
+      FUBON_BASE_URL: http://fubon-broker-service:8080
       MARKET_ANALYSIS_NEWS_MAX_AGE_DAYS: ${MARKET_ANALYSIS_NEWS_MAX_AGE_DAYS:-5}
       MARKET_ANALYSIS_NEWS_VERIFY_PUBLISHED_DATE: ${MARKET_ANALYSIS_NEWS_VERIFY_PUBLISHED_DATE:-true}
       MARKET_ANALYSIS_NEWS_REGION_BLOCK_ENABLED: ${MARKET_ANALYSIS_NEWS_REGION_BLOCK_ENABLED:-true}
@@ -118,6 +158,8 @@ services:
       # 排程匯出根目錄：host 家目錄掛入容器 /home/steven（可寫）。
       # 預設對映目前使用者的家目錄；子資料夾 input → 主機家目錄/input。
       - ${EXPORT_OUTPUT_DIR_HOST:-/Users/steven}:/home/steven
+      # Task 352: Java sees only the shared service token, never SDK identity/key/PFX files.
+      - ${FUBON_SECRETS_DIR_HOST:-./secrets/fubon}/shared:/run/secrets/fubon/shared:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -158,6 +200,9 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       FINMIND_TOKEN: ${FINMIND_TOKEN:-}
+      FUBON_ENABLED: ${FUBON_ENABLED:-false}
+      FUBON_BASE_URL: http://fubon-broker-service:8080
+      FUBON_SHARED_TOKEN_PATH: /run/secrets/fubon/shared/internal-service-token
       NEWS_SCRAPER_ENABLED: ${NEWS_SCRAPER_ENABLED:-true}
       NEWS_SCRAPER_RETENTION_DAYS: ${NEWS_SCRAPER_RETENTION_DAYS:-30}
       NEWS_EXPORT_ENABLED: ${NEWS_EXPORT_ENABLED:-true}
@@ -206,6 +251,8 @@ services:
       # 與 rclone.conf.bak-before-merge。**這不擴大權限面**：上述共用主檔的取捨已使本服務讀得到
       # 備份憑證，多掛入的兩檔是同一組憑證的舊副本。
       - ${HOME}/.config/rclone:/etc/rclone:ro
+      # Task 352 secret-layer boundary; Task 353 will consume this token without SDK credentials.
+      - ${FUBON_SECRETS_DIR_HOST:-./secrets/fubon}/shared:/run/secrets/fubon/shared:ro
     depends_on:
       postgres:
         condition: service_healthy

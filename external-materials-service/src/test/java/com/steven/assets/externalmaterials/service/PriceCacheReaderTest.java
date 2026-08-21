@@ -58,6 +58,41 @@ class PriceCacheReaderTest {
     }
 
     @Test
+    void findOne_fubonPayloadPreservesProviderTimestampAndEveryMappedField() {
+        when(values.get("price:台股:2330")).thenReturn(
+                "{\"stockCode\":\"2330\",\"market\":\"台股\",\"price\":100.1,"
+                + "\"previousClose\":99.5,\"priceChange\":0.6,\"changePercent\":0.603015,"
+                + "\"buyPrice\":100.0,\"sellPrice\":100.2,\"openPrice\":100.0,"
+                + "\"highPrice\":101.0,\"lowPrice\":99.0,\"volume\":54538,"
+                + "\"stockName\":\"台積電\",\"source\":\"FUBON_INTRADAY\","
+                + "\"tradingDate\":\"2026-08-21\",\"updatedAt\":\"2026-08-21T13:00:00.123456\","
+                + "\"closed\":false,\"quoteStatus\":\"LIVE\"}");
+        when(values.get("price:etfnav:台股:2330")).thenReturn(null);
+
+        PriceCacheReader.LatestQuote quote = reader.findOne("2330", "台股").orElseThrow();
+
+        assertThat(quote.stockCode()).isEqualTo("2330");
+        assertThat(quote.stockName()).isEqualTo("台積電");
+        assertThat(quote.market()).isEqualTo("台股");
+        assertThat(quote.price()).isEqualByComparingTo("100.1");
+        assertThat(quote.previousClose()).isEqualByComparingTo("99.5");
+        assertThat(quote.priceChange()).isEqualByComparingTo("0.6");
+        assertThat(quote.changePercent()).isEqualByComparingTo("0.603015");
+        assertThat(quote.buyPrice()).isEqualByComparingTo("100.0");
+        assertThat(quote.sellPrice()).isEqualByComparingTo("100.2");
+        assertThat(quote.openPrice()).isEqualByComparingTo("100.0");
+        assertThat(quote.highPrice()).isEqualByComparingTo("101.0");
+        assertThat(quote.lowPrice()).isEqualByComparingTo("99.0");
+        assertThat(quote.volume()).isEqualTo(54_538L);
+        assertThat(quote.tradingDate()).isEqualTo("2026-08-21");
+        assertThat(quote.updatedAt()).isEqualTo("2026-08-21T13:00:00.123456");
+        assertThat(quote.closed()).isFalse();
+        assertThat(quote.source()).isEqualTo("FUBON_INTRADAY");
+        assertThat(quote.quoteStatus()).isEqualTo("LIVE");
+        assertThat(quote.premiumDiscountPct()).isNull();
+    }
+
+    @Test
     void findOne_matchingNavCache_returnsOfficialPremiumDiscountUnchanged() {
         when(values.get("price:台股:0050")).thenReturn(priceJson("0050", "台股", "100.00"));
         when(values.get("price:etfnav:台股:0050")).thenReturn(

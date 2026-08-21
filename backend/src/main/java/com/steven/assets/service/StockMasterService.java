@@ -2,8 +2,11 @@ package com.steven.assets.service;
 
 import com.steven.assets.repository.StockRepository;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDate;
 import java.util.Map;
@@ -35,15 +38,19 @@ public class StockMasterService {
      * 把多檔回補排隊逐一打 ext-materials / Yahoo，避免並發觸發 Yahoo 429（與 startupBackfill
      * 逐檔 sleep 的精神一致）。
      */
-    private final ExecutorService backfillExecutor = Executors.newSingleThreadExecutor(r -> {
-        Thread t = new Thread(r, "new-stock-backfill");
-        t.setDaemon(true);
-        return t;
-    });
+    private final ExecutorService backfillExecutor;
 
+    @Autowired
     public StockMasterService(StockRepository stockMasterRepo, HistoricalDataService historicalDataService) {
+        this(stockMasterRepo, historicalDataService, newBackfillExecutor());
+    }
+
+    StockMasterService(StockRepository stockMasterRepo,
+                       HistoricalDataService historicalDataService,
+                       ExecutorService backfillExecutor) {
         this.stockMasterRepo = stockMasterRepo;
         this.historicalDataService = historicalDataService;
+        this.backfillExecutor = backfillExecutor;
     }
 
     /**
@@ -55,7 +62,7 @@ public class StockMasterService {
         boolean isNew = !stockMasterRepo.existsByCodeAndMarket(code, market);
         stockMasterRepo.upsert(code, market, name);
         if (isNew && !isTaiex(code, market)) {
-            scheduleBackfill(code, market);
+            scheduleBackfillAfterCommit(code, market);
         }
     }
 
@@ -139,6 +146,32 @@ public class StockMasterService {
                 log.warn("新增標的 {} ({}) 自動回補失敗（下次服務重啟 startupBackfill 會補救）：{}",
                         code, market, e.getMessage());
             }
+        });
+    }
+
+    /**
+     * stock upsert 與外層 transaction 一起 rollback 時不得留下幽靈回補；沒有 active transaction
+     * 的既有呼叫維持立即送入同一 executor。
+     */
+    private void scheduleBackfillAfterCommit(String code, String market) {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()
+                || !TransactionSynchronizationManager.isSynchronizationActive()) {
+            scheduleBackfill(code, market);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                scheduleBackfill(code, market);
+            }
+        });
+    }
+
+    private static ExecutorService newBackfillExecutor() {
+        return Executors.newSingleThreadExecutor(r -> {
+            Thread thread = new Thread(r, "new-stock-backfill");
+            thread.setDaemon(true);
+            return thread;
         });
     }
 

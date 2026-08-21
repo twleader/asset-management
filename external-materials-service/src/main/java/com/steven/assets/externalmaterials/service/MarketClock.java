@@ -1,12 +1,14 @@
 package com.steven.assets.externalmaterials.service;
 
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
+import java.util.Optional;
 
 /**
  * 市場開收盤時段判斷。
@@ -18,7 +20,6 @@ import java.time.ZonedDateTime;
  * 平日的國定假日（如美股 Juneteenth 6/19 為週五）被誤判為開盤，照抓價污染 Redis（2026/06 修正）。
  */
 @Component
-@RequiredArgsConstructor
 public class MarketClock {
 
     public static final ZoneId TW_ZONE = ZoneId.of("Asia/Taipei");
@@ -26,6 +27,17 @@ public class MarketClock {
     public static final ZoneId LON_ZONE = ZoneId.of("Europe/London");
 
     private final MarketCalendar calendar;
+    private final Clock clock;
+
+    @Autowired
+    public MarketClock(MarketCalendar calendar) {
+        this(calendar, Clock.systemUTC());
+    }
+
+    MarketClock(MarketCalendar calendar, Clock clock) {
+        this.calendar = calendar;
+        this.clock = clock;
+    }
 
     /** 市場別 → 該市場時區。 */
     public static ZoneId zoneOf(String market) {
@@ -44,42 +56,62 @@ public class MarketClock {
     }
 
     public boolean isTwMarketOpen() {
-        ZonedDateTime now = ZonedDateTime.now(TW_ZONE);
+        ZonedDateTime now = ZonedDateTime.now(clock.withZone(TW_ZONE));
         if (!calendar.isTwTradingDay(now.toLocalDate())) return false;
         LocalTime t = now.toLocalTime();
         return !t.isBefore(LocalTime.of(9, 0)) && !t.isAfter(LocalTime.of(13, 30));
     }
 
+    /**
+     * 台股 LIVE 外呼唯一可用的 fail-closed 授權。
+     *
+     * <p>盤外時間不需要日曆即可確定為 closed；盤中則只接受 TWSE authority 明確回傳
+     * {@code true}。authority 不可用或丟例外時回 {@link Optional#empty()}，絕不借用上方
+     * legacy fail-open boolean。</p>
+     */
+    public Optional<Boolean> isTwMarketOpenKnown() {
+        ZonedDateTime now = ZonedDateTime.now(clock.withZone(TW_ZONE));
+        LocalTime time = now.toLocalTime();
+        if (time.isBefore(LocalTime.of(9, 0)) || !time.isBefore(LocalTime.of(13, 30))) {
+            return Optional.of(false);
+        }
+        try {
+            return calendar.isTwTradingDayKnown(now.toLocalDate());
+        } catch (Exception ignored) {
+            return Optional.empty();
+        }
+    }
+
     public boolean isUsMarketOpen() {
-        ZonedDateTime now = ZonedDateTime.now(US_ZONE);
+        ZonedDateTime now = ZonedDateTime.now(clock.withZone(US_ZONE));
         if (!calendar.isUsTradingDay(now.toLocalDate())) return false;
         LocalTime t = now.toLocalTime();
         return !t.isBefore(LocalTime.of(9, 30)) && !t.isAfter(LocalTime.of(16, 0));
     }
 
     public boolean isUkMarketOpen() {
-        ZonedDateTime now = ZonedDateTime.now(LON_ZONE);
+        ZonedDateTime now = ZonedDateTime.now(clock.withZone(LON_ZONE));
         if (!calendar.isUkTradingDay(now.toLocalDate())) return false;
         LocalTime t = now.toLocalTime();
         return !t.isBefore(LocalTime.of(8, 0)) && !t.isAfter(LocalTime.of(16, 30));
     }
 
     public boolean isTwMarketJustClosed() {
-        ZonedDateTime now = ZonedDateTime.now(TW_ZONE);
+        ZonedDateTime now = ZonedDateTime.now(clock.withZone(TW_ZONE));
         if (!calendar.isTwTradingDay(now.toLocalDate())) return false;
         LocalTime t = now.toLocalTime();
         return t.isAfter(LocalTime.of(13, 30)) && t.isBefore(LocalTime.of(13, 50));
     }
 
     public boolean isUsMarketJustClosed() {
-        ZonedDateTime now = ZonedDateTime.now(US_ZONE);
+        ZonedDateTime now = ZonedDateTime.now(clock.withZone(US_ZONE));
         if (!calendar.isUsTradingDay(now.toLocalDate())) return false;
         LocalTime t = now.toLocalTime();
         return t.isAfter(LocalTime.of(16, 0)) && t.isBefore(LocalTime.of(16, 20));
     }
 
     public boolean isUkMarketJustClosed() {
-        ZonedDateTime now = ZonedDateTime.now(LON_ZONE);
+        ZonedDateTime now = ZonedDateTime.now(clock.withZone(LON_ZONE));
         if (!calendar.isUkTradingDay(now.toLocalDate())) return false;
         LocalTime t = now.toLocalTime();
         return t.isAfter(LocalTime.of(16, 30)) && t.isBefore(LocalTime.of(16, 50));

@@ -201,8 +201,7 @@ public class ExcelImportService {
         final LocalDate finalDate = date;
         snapshotRepo.findBySnapshotDate(finalDate).ifPresent(existing -> {
             log.info("快照 {} 已存在，刪除後重新匯入", finalDate);
-            snapshotRepo.deleteById(existing.getId());
-            snapshotRepo.flush();
+            assetService.deleteSnapshot(existing.getId());
         });
         assetService.createSnapshot(req);
     }

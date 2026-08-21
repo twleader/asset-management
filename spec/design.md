@@ -124,7 +124,7 @@ com.steven.assets/
   - `FundSettingsBffController`：`GET /api/bff/fund-settings/bank-options` → 過濾 active 後的銷售銀行下拉；與 SnapshotForm 的 lookups **同讀 business `/api/settings/banks`**（同義欄位同一來源），fund-settings 頁不再跨頁呼叫 `/api/bff/snapshot-form/lookups`（Task 175：一頁一 BFF 合規化）
   - `RealizedGainBffRoutes`：`/api/realized-gains/**` → business-services。**目前無前端消費者**：原「RealizedGainView 的 Pinia store `gainApi` 共用 CRUD」說法已不成立——該頁已全面走 `RealizedGainBffController` 的 `/api/bff/realized-gain` 聚合端點，前端 `gainApi` wrapper 與 `assetStore` 的三個已實現損益 action 已於 Task 197 移除。route 本身暫留（移除需重建 BFF 服務），**屬待清理項**
   - `MarketDataBffRoutes`：`/api/market-data/**` → business-services。消費者是 DashboardView 與 TradingRadarView 兩頁的 SSE 行情串流（皆為 `new EventSource('/api/market-data/prices/stream')`，見下方 SSE 段落之已知落差）；`marketDataApi` wrapper（歷史/配息/ETF 成分股）無呼叫端，已於 Task 197 移除，該類查詢皆走 `StockAnalysisBffRoutes` 的 `/api/bff/stock-analysis/**`
-  - `SchedulePublicBffController`（ScheduleListView 專屬，「公開資訊」分組，Requirement 36）：`GET /api/bff/schedule-list` → 回傳系統所有自動排程的**人工維護靜態清單**（`ScheduledJobDto` 不可變 record：service / category / name / description / schedule 白話 / cron / zone）。Task 334（external：美股推導估值每日排程）與 Task 332（business：海外指數日線落後補救檢查）各新增一個 `@Scheduled` 後為 53 筆；**Task 340（external：油價金價盤中每分鐘即時報價、收盤後 17:05 校正）再新增兩個後，共 55 筆** ＝ `business-services` 21 ＋ `external-materials-service` 34（Task 327 新增 USD/TWD 2 秒 live producer 後為 51 ＝ 20 ＋ 31；**以 `@Scheduled` 方法計**；business 另包含 `AlertNotificationDispatcher` 每 60 秒與 `TradingRadarNotificationService` 每 2 秒兩個 fixed-delay job；external 實際 **36** 個標註，`TwClosurePoller` 與台股官方收盤對帳各為一法兩標、各併為一筆。
+  - `SchedulePublicBffController`（ScheduleListView 專屬，「公開資訊」分組，Requirement 36）：`GET /api/bff/schedule-list` → 回傳系統所有自動排程的**人工維護靜態清單**（`ScheduledJobDto` 不可變 record：service / category / name / description / schedule 白話 / cron / zone）。Task 334（external：美股推導估值每日排程）與 Task 332（business：海外指數日線落後補救檢查）各新增一個 `@Scheduled` 後為 53 筆；Task 340（external：油價金價盤中每分鐘即時報價、收盤後 17:05 校正）再新增兩個後為 55 筆；main Task 351 只調整交易日曆年份描述、不新增 job；**Task 352（business：富邦台股現股庫存同步）再新增一個後，共 56 筆** ＝ `business-services` 22 ＋ `external-materials-service` 34（Task 327 新增 USD/TWD 2 秒 live producer 後為 51 ＝ 20 ＋ 31；**以 `@Scheduled` 方法計**；business 另包含 `AlertNotificationDispatcher` 每 60 秒與 `TradingRadarNotificationService` 每 2 秒兩個 fixed-delay job；external 實際 **36** 個標註，`TwClosurePoller` 與台股官方收盤對帳各為一法兩標、各併為一筆。
 **逐檔核對務必用 `grep -ran`**：`AlertNotificationDispatcher.java` 會被 `file(1)` 判為 data，普通 `grep -r` 整檔跳過，backend 會少算成 20）。此頁為唯讀資訊展示故不做跨服務反射探索、不入 DB、不設管理端點；**新增／調整任何 `@Scheduled` 須同步更新此清單以免漂移**。**動態排程**（每分鐘 tick 比對 DB 可設定時點：`NewsPoller`→`crawler_schedule`、`MarketAnalysisScheduler`→`market_analysis_send_time`）於清單標「動態：依『X』頁設定（預設 …）」／「動態（表名）」，**不寫死時間**；每分鐘 tick 但時點為 per-user 私人設定者（`ExportScheduleService`／`TradingCalendarExportScheduleService`）則照列 `每分鐘`／`0 * * * * *` 實際 cron。前端 `ScheduleListView` 之服務別／分類計數由 payload 動態算出，故加減筆數無須改前端。無下游呼叫（不需 WebClient），落 BFF `anyExchange().authenticated()`（已登入者皆可讀）。
   - `CrawlerDataBffController`（CrawlerDataView 專屬，「公開資訊」分組，Requirement 38）：爬蟲資訊查詢頁，一頁一 BFF、WebClient 轉呼 business：
     - `GET /api/bff/crawler-data?date=YYYY-MM-DD&dateField=fetched|published&category=` → business `GET /api/news-headlines`：查指定日期爬回的 `news_headline`（與今日股市分析同讀一份表，符合「同義欄位、同一 business API」）。
@@ -8142,7 +8142,7 @@ PublicTradingRadarExceptionAdvice.java
 
 ### 文件與驗收
 
-Current-state 文件統一為九條／九路／八 GET＋一 POST：`CLAUDE.md`、`spec/steering/tech.md`、`spec/steering/structure.md`、`INSTALLATION.md`、`scripts/README.md`、`run-stack` Codex skill、Tailscale script/test 訊息與 OpenAPI top-level 說明。歷史章節明確標示「Task 328 當時五條」者保留；未標歷史且聲稱現在仍為八條者必須修正。任務索引加入 Task 346／347並保留 Task 349，current range 為 `344–347、349`，Task 348 由在途 worktree 保留；Requirements 實際為 87 個，Requirement 87 由在途 worktree 保留，最新編號為 88。
+Current-state 文件統一為九條／九路／八 GET＋一 POST：`CLAUDE.md`、`spec/steering/tech.md`、`spec/steering/structure.md`、`INSTALLATION.md`、`scripts/README.md`、`run-stack` Codex skill、Tailscale script/test 訊息與 OpenAPI top-level 說明。歷史章節明確標示「Task 328 當時五條」者保留；未標歷史且聲稱現在仍為八條者必須修正。任務索引保留 Task 346／347／349 與 main Task 351（交易日曆），Task 348／350 由在途 worktree 保留，Fubon Task 352／353 採各自自足任務檔；Requirements 實際為 89 個，Requirement 87／89 由在途 worktree 保留，最新編號為 91。
 
 驗收依序證明 backend/BFF 測試、OpenAPI parity／record field-type-nullability parity、Tailscale fake regression、Nginx config 與 frontend build；再從 feature worktree rebuild/recreate business-services、BFF、api-gateway、frontend，restart BFF，實際讀 JSON 語意與 deny matrix。公開 response 至少要有 `ruleVersion=TW_RULES_V14`、可解析 `generatedAt`、兩個 market object、非空 stocks 且代表列含 evidence，以及 array 型 publicInformation。Docker listener 邊界必須用 fail-closed assertion 驗 api-gateway 的唯一 binding 精確為 `127.0.0.1:9090->9090`、BFF／business／external 的 `PortBindings` 為空，並以 `! lsof ...` 驗 host 8080/8082 無 listener；不能只列印 ports 或直接執行預期 exit 1 的裸 `lsof`。驗證結論必須區分本機 loopback 與 Tailscale：Tailscale 需要互動授權時列待辦，不以本機 200 冒充。
 
@@ -8201,3 +8201,181 @@ OpenAPI 3.1 的 `LatestQuote.required` 加入 `premiumDiscountPct`，property �
 external 單元測試以 reflection 釘住 `scheduledTwUpdate` 的 cron／zone，並為 `PriceCacheReader` 提供 matching、missing、malformed、missing field、非數字與 Redis exception fixtures；其中「price 與 nav 皆存在、premium 缺失」必須斷言 null，直接證明沒有反推。controller 測試同時釘住 list／one 的 property presence 與正確值。BFF 測試釘住排程 catalog 的 cron、friendly schedule、描述及總數。OpenAPI 以 YAML parse 與 schema assertions 驗 19 欄／nullable required property。
 
 runtime 無快取重建並 recreate external 與 BFF，external 換容器後 restart BFF。開盤中跨兩輪觀察約 2 分鐘節拍；休市時不可越過 `MarketClock`，只驗 cron、既有 official cache 與兩支 host API 的 shape，並將無法觀察 live cadence 列為時段限制。
+
+---
+
+## Requirement 90／Task 352：Fubon Linux adapter 與富邦現股庫存原子同步
+
+### 邊界與部署拓樸
+
+富邦官方 SDK 是 proprietary Python binary，且 2.2.9 官方 Linux 包只有 x86_64。它不得進入任何 Spring module；新增獨立 `fubon-broker-service/`，用 HTTP normalized adapter 隔離 SDK 與憑證：
+
+```text
+                                              ┌──────────────────────────────┐
+business-services ── X-Internal-Service-Token ─▶ fubon-broker-service        │
+       │                                      │ Python 3.13 / linux/amd64    │
+       │                                      │ FubonSDK 2.2.9（唯讀）       │
+       │                                      └───────────────┬──────────────┘
+       │                                                      │ HTTPS / SDK
+       ▼                                                      ▼
+PostgreSQL                                              Fubon Trade API
+  asset_snapshot / stock_holding
+
+external-materials-service ──同一 internal adapter（只取台股 quote；Req 91）
+```
+
+Compose service 固定 `platform: linux/amd64`，無 host port且只連 `asset-net`；runtime user 非 root、root filesystem read-only、`/tmp` 為 tmpfs、`cap_drop: [ALL]`、`no-new-privileges:true`。build stage 下載
+`https://www.fbs.com.tw/TradeAPI_SDK/fubon_binary/fubon_neo-2.2.9-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.zip`，依序驗 zip SHA-256 `9592e7afb9eba2412ac4a5852df0a138850f6c9803136e7dae503d3606d3b432` 與 wheel SHA-256 `6cf623a601e4b42d4255e79e72d0cf60ac4d20247784bbeb8a478adfcb1864e3`，固定安裝 wheel 與 `fugle-marketdata==2.5.0rc5` 並跑 `pip check`。官方 zip/wheel 安裝媒介不得 commit 或進 build context，且 multi-stage final image 不保留下載 archive/wheel；hash 驗證後安裝出的 Python runtime package 則可且必須複製進 final image供服務執行。憑證、API key、密碼、personal id與account identity不得進任何 image layer或log。
+
+秘密分層掛載，避免 Java services 看見交易憑證：
+
+```text
+host secrets/fubon/
+├── sdk/                         # 只掛給 Python
+│   ├── personal-id
+│   ├── api-key
+│   ├── certificate.pfx
+│   ├── certificate-password
+│   ├── account-branch-no        # 可選 selector
+│   └── account-number           # 可選 selector
+└── shared/
+    └── internal-service-token   # Python + backend + external 共用
+```
+
+Python 掛 `${FUBON_SECRETS_DIR_HOST:-./secrets/fubon}:/run/secrets/fubon:ro`；backend/external 只掛 `shared/`。`.env.example` 只可出現 `FUBON_ENABLED=false` 與 `FUBON_SECRETS_DIR_HOST=./secrets/fubon`，不得出現 token／personal id／key／password 的 literal。上述 host 目錄與秘密檔必須被 Git 忽略；build context 亦須排除。
+
+`secrets/fubon/README.md` 只列檔名、權限、掛載關係與官方先決步驟，不放 example secret value；空白模板也只顯示檔名，不建立帶假值的 credential file。README 必須要求使用者在 API key 第一次使用前，先依富邦官方流程以一般帳密＋憑證完成首次連線測試。本服務沒有「一般登入密碼」設定或檔名，永不接收、保存或使用下單帳戶登入密碼；只接受已啟用且具必要唯讀權限的 API key、personal id、PFX 與 PFX password。官方先決流程未完成或權限不足皆視為 functional misconfiguration，503/no-write。
+
+`GET /internal/health` 是唯一不需 token 的 process liveness；只回 `status=UP`、`configState=NOT_CONFIGURED|READY|MISCONFIGURED`、SDK version 與 platform，不讀回或顯示 secret path。disabled 或未設定環境維持 HTTP 200/`NOT_CONFIGURED`，讓既有 stack healthy；enabled 且秘密缺漏/權限錯誤為 HTTP 200/`MISCONFIGURED`，但下面所有 functional endpoint 固定 503。這個區分同時滿足「可選服務不拖垮 stack」與「功能啟用後 fail closed」。
+
+相同原則延伸到兩個Java consumer：不得以constructor、`@Value` file expression或eager bean init直接讀必須存在的token。client持有lazy `FubonConfigState`，每次呼叫前才檢查enabled與`shared/internal-service-token`可讀/非空；缺漏時回typed`MISCONFIGURED`並zero HTTP/SDK/DB/Redis side effect。故`FUBON_ENABLED=true`但shared token遺失時，backend與external本身仍可startup/healthy，只有Fubon feature fail closed。
+
+### Adapter API 與 session 狀態機
+
+所有 functional endpoint 都只在 Docker network 暴露並驗 exact header `X-Internal-Service-Token`；使用 constant-time 比較。回應為自有 immutable schema，禁止序列化 SDK raw object。
+
+| Method/path | Request | 成功回應 | 失敗語意 |
+|---|---|---|---|
+| `GET /internal/config` | 無 | presence boolean、configState、可用功能；不回值/路徑 | 401/403 或 503 |
+| `POST /internal/portfolio/read` | `{dryRun:true}` | `batchId/queryDate/accountFingerprint/emptyConfirmed/positions[]` | 400/401/403/503；永遠不寫資料 |
+| `POST /internal/market-data/tw-quotes` | `{codes:[...]}` | provider timestamp 完整的逐檔 success/failure | 400/401/403/503 |
+
+若使用FastAPI，production app必須設定`docs_url=None, redoc_url=None, openapi_url=None`；route allowlist精確只有上述health/config/portfolio/tw-quotes，其他path/method一律404/405，不得因framework預設多曝露`/docs`、`/redoc`或`/openapi.json`。
+
+normalized wire不傳Python float。SDK每個decimal-like值先用`Decimal(str(value))`驗finite，再輸出不含`e/E`的canonical decimal string；Java typed DTO只從`^(0|[1-9][0-9]*)(\.[0-9]+)?$`建`BigDecimal`，JSON number/float、scientific notation、NaN/Infinity一律拒絕。型別界線在Python與Java兩層相同：(a) portfolio normalized `costPrice`、quote normalized `actualPrice`，以及Fubon raw quote精確key `previousClose/openPrice/highPrice/lowPrice`與非null `bids[].price/asks[].price`皆須>0、`precision<=20`、`0<=scale<=10`（`"9999999999.9999999999"`接受，`"10000000000.0000000000"`與`"0.00000000001"`分別因precision21／scale11拒絕）；raw只出現`open/high/low` alias而缺官方price-suffixed keys時拒絕，不得猜測。(b) raw quantity須是`0..9,999,999,999` exact integer，兩側完成守恆後可持久化shares才是`1..9,999,999,999`，對應`stock_holding NUMERIC(15,5)`的10位整數容量；(c) volume是`0..9,223,372,036,854,775,807` exact integer，對應Java `Long`。所有range在做任何乘法／mapping前驗證；public quote writer仍保留既有BigDecimal欄位與numeric JSON，不把adapter值轉double或預先round。這可避免SDK float `0.1`變成binary artifact，並讓precision/scale/overflow拒絕可測。
+
+SDK client 採單一 instance、login-on-demand 與 single reconnect mutex。登入呼叫 `apikey_login(personal_id,key,cert_path,cert_pass)`；從回傳 accounts 只選 `account_type=stock`。兩個 selector 檔皆有值時必須精確匹配 branch/account；未配置 selector 時只允許恰好一個 stock account；selector 只設一半、零個或多個候選都拒絕。raw account 只在 Python process 記憶體使用；normalized fingerprint 可用 `HMAC-SHA256(internal-token, branch_no + ":" + account)` 的截短 hex，嚴禁可逆遮罩或裸末碼。
+
+行情 client 不能在 `FubonSDK()` constructor 後直接讀取：乾淨 Linux SDK 2.2.9 實測此時尚無 `marketdata` attribute。session 狀態機必須先完成 API-key login，再在同一 reconnect mutex 中呼叫 `sdk.init_realtime()`；成功後才建立／refresh `sdk.marketdata.rest_client.stock` normalized boundary。quote request 只能經這個已初始化 client。login、`init_realtime()`、REST client refresh任一步失敗都 invalidate行情session、回503並保留上游舊cache；不得改呼 snapshot/MIS/Yahoo。reconnect只允許一次完整的「login → init_realtime → 取得 stock client」，不能單獨重用前一個半初始化物件。
+
+ASGI/process shutdown hook必須取得同一session mutex，以bounded timeout依序best-effort呼叫SDK `logout()`／`shutdown()` cleanup，並以idempotent flag保證每個已建立session只清理一次；cleanup例外經redactor後記錄，不阻塞容器退出。disabled或從未login不得呼叫cleanup。reconnect/recreate不得留下無界舊session。
+
+帳務 API 限速是 5 calls/sec。每輪在一個 bounded executor 內依序呼叫：
+
+```text
+capture queryDate = LocalDate.now(Asia/Taipei)
+  → sdk.accounting.inventories(selectedAccount)
+  → sdk.accounting.unrealized_gains_and_loses(selectedAccount)
+  → assert LocalDate.now(Asia/Taipei) == queryDate
+  → validate every raw row date/account/branch against queryDate/selectedAccount
+  → normalize + reconcile（全有或全無）
+```
+
+每次外呼有明確 connect/read/wall timeout；一般 transport/5xx 不無界重試，429 遵守 retry-after/backoff。只有可辨識的 auth/session invalid 可在鎖內 invalidate、重新登入一次，再把**整對**帳務查詢重跑一次；不得只重跑其中一支後與舊結果拼接。log/exception/body 先經 redactor，personal id、account、API key、certificate path/password 與 request header 不得出現。
+
+### 帳務 reconciliation 與空帳戶證明
+
+兩支 API 都必須 `is_success=true` 且 data 為非 null list。對每一個非空raw row，adapter先解析來源自己的`date/account/branch_no`：`date`必須精確等於captured台北`queryDate`，`account`與`branch_no`必須分別精確等於login選出的selected account raw值。此驗證發生在HMAC fingerprint與normalized identity之前；禁止把本地queryDate／selected account／fingerprint直接代入row而掩蓋stale date或wrong account。通過後才建立`(sourceDate,accountFingerprint,branchNo,stockNo,orderType)` identity；每側同identity最多一列、集合完全相等。只允許`orderType=Stock`與unrealized `buySell=Buy`，發現Margin／Short／SBL／DayTrade或未知enum時不是略過，而是整批`UNSUPPORTED_POSITION_TYPE`。
+
+```text
+shares = exactInteger(inventory.today_qty) + exactInteger(inventory.odd.today_qty)
+shares == exactInteger(unrealized.today_qty)
+investmentCost = decimal(unrealized.cost_price) × shares
+```
+
+raw quantity每欄須為`0..9,999,999,999` exact integer，且加總用checked arithmetic；matched正持倉shares須為`1..9,999,999,999`，costPrice須符合positive precision20/scale10 wire界線。零數量row只有在雙側identity/quantity都匹配時才可丟棄。任一duplicate、unmatched、raw date/account/branch/code/order type不符、數量不守恆或range/precision違規都不產生positions。
+
+空 payload 的唯一可寫語意是：(a) 同一 selected account 的兩支 API 都成功且兩個 data 都是明確空 list；或 (b) 雙側非空 identity 全部匹配且全部明確為零。此時 `emptyConfirmed=true`。一空一非空、null data、日期跨日、API success flag 不明或 adapter 解析失敗都不是空庫存證明。
+
+### Business transaction 與估值
+
+`FubonInventorySyncScheduler` 使用 `@Scheduled(cron="0 5,35 9-13 * * MON-FRI", zone="Asia/Taipei")`，每次先以 process-local in-flight guard 防重入，再以 `MarketDataService.isTwTradingDayKnown(LocalDate.now(Asia/Taipei))` 守門；只有 `Optional.of(true)` 可執行，empty/false 都不 call adapter。背景 owner 不是「第一位使用者」：固定由 `UserAdminService.configuredAdmin()` 取得 ACTIVE configured admin，缺少或不唯一即 no-write。
+
+另提供 network-internal `POST /internal/brokers/fubon/inventory-sync?dryRun=true|false`，以backend exact-path internal-token filter保護，預設`dryRun=true`。dry-run可查帳務adapter並reconcile，但永遠不開寫入transaction；calendar不是明確true時不得呼叫quote或回可提交估值。dry-run要估值及`dryRun=false` commit都要求TWSE-backed calendar為true，且每筆quote actual Instant的台北日期精確等於portfolio captured queryDate；13:35盤後五分鐘可接受同一交易日actual trade，禁止前一交易日值。commit另走和scheduler相同owner/snapshot/today gate。此路徑不加BFF/frontend/Nginx/host route。Schedule catalog新增一筆，總數56=22+34。
+
+提交前在 transaction 外先驗完整 batch與同次 quotes。為避免Fubon局部replace與既有完整snapshot update互相lost-update，零schema新增共用`AssetSnapshotMutationLock`（命名可等價），底層repository提供真正`PESSIMISTIC_WRITE`的`findByIdForUpdate`及owner-latest lock query。`AssetService.updateSnapshot`、Fubon sync以及任何直接改同一snapshot child／aggregate的既有路徑，都必須在transaction第一個DB動作依snapshot id相同順序經此入口鎖住`asset_snapshot` row，取得後才讀children／clear／rebuild／aggregate；普通`findById`、先讀children再鎖、只靠process mutex都不符合。transaction 內：
+
+1. 透過上述owner-latest pessimistic query鎖定configured admin最新snapshot；要求存在、`snapshotDate == 台北今日`，不自動建立或roll date。完整update取得同一row lock後，Fubon scope視為server-owned：用locked current Fubon rows覆蓋／排除較早request或persistence-context帶來的Fubon rows，禁止clear/rebuild復活舊部位；非Fubon payload仍維持既有完整update語意。create新snapshot因row尚不存在不假裝鎖，但既有同日期unique/gate不變。
+2. 要求 active broker `code='fubon'` 已存在；找不到 seed 則 rollback/no-write。
+3. 僅定位該 snapshot 中 `(broker.code='fubon', market='台股')` 的 rows；先保留可一對一沿用欄位，再局部 replace。不得觸碰不同 broker、不同 market、fund/deposit，也不得呼叫 `AssetService.updateSnapshot()` 的全量 clear 路徑。
+4. 新rows的`shares`為已對帳exact integer。以未捨入BigDecimal先算`costPrice.multiply(shares)`與`trustedFubonTradePrice.multiply(shares)`，各自最後才`setScale(2, HALF_UP)`成TWD `investmentCost/currentValue`，之後要求result `precision<=20`才可寫`NUMERIC(20,2)`；不得先round operand，operand各自合法但乘積overflow仍rollback。`originalCurrencyValue`、`transactionType`、`transactionDate`及StockHolding實際欄名`transactionExchangeRate`皆精確設null，mapping test逐欄斷言。
+5. dividend metadata只在replace前舊scope中同code恰有一列時可一對一沿用。舊`dividendRate`為合法正值且可存現有precision時保留rate，但`estimatedDividend`不得原樣保留：依新`currentValue.multiply(dividendRate).setScale(0,HALF_UP)`重算，與既有`AssetService.recalcAllDividends`公式完全相同。若舊rate為null/非正，只有old shares與old currentValue都和新值以數值比較相等時，才保留既有manual estimatedDividend；任何部位/估值變化都設null。replace前同code多列為`DIVIDEND_METADATA_AMBIGUOUS`，rate/amount皆null而非任選一列。display order先保留一對一舊列；無舊列時可沿用同snapshot同code的另一broker order，仍無則按code排序追加，不得隨API順序抖動。
+6. quote name合法時仍只走唯一`StockMasterService.upsert(code,"台股",name)`；quote name缺失則要求既有stock master有非空name，不得用code當假名稱。現行`StockMasterService.upsert`對首次新增會同步呼叫`scheduleBackfill`，本流程若之後rollback會造成幽靈外呼；因此必須把該service內的backfill dispatch改成：`TransactionSynchronizationManager.isActualTransactionActive()`時註冊transaction synchronization並只在`afterCommit` submit既有single-thread executor，rollback不submit；無active transaction的既有呼叫可立即submit。每個首次新增code成功commit恰排一次，所有repository寫入仍封裝在同一service，禁止為富邦另開直寫路徑。
+7. 把 `AssetService` 既有 aggregate formulas 抽成單一可共用 calculator，原 CRUD 與 sync 都呼叫它；replace 與 aggregate update 同一 transaction commit。禁止複製另一套 total formula。
+
+目前運行 DB 與 master changelog 已確認 `asset_snapshot`、`stock_holding` 與 broker FK 足以表達結果，且 `DataInitializer` 已有 `fubon/富邦證券` seed。本需求不新增 audit/provenance table或衍生欄位，不產生 Liquibase changeset；account fingerprint 只屬 transient correlation，不落 DB。backend/external目前沒有MeterRegistry/Actuator基線，本需求不為此擴依賴；以固定enum reason、每輪structured summary與process-local`EnumMap<Outcome,LongAdder>`（Python為固定key counter）觀測，counter只由既有internal health/config或manual sanitized summary揭露，不新增host/public metrics endpoint。
+
+---
+
+## Requirement 91／Task 353：Fubon 台股 LIVE quote provider
+
+### Provider 選擇與來源責任
+
+`external-materials-service` 保持台股 live cache 的唯一 producer。`PricePoller` 只依啟動時設定選一支 `TwLiveQuoteProvider`：
+
+```text
+FUBON_ENABLED=false                         FUBON_ENABLED=true
+PricePoller ──▶ existing TWSE MIS provider  PricePoller ──▶ FubonTwLiveQuoteProvider
+                         │                                      │
+                         └──────────▶ PriceCacheWriter ◀─────────┘
+                                            │
+                                            ▼
+                                  existing Redis schema/pubsub
+```
+
+enabled mode 的 Fubon transport/HTTP/auth/schema/partial failure 不得觸發 TWSE MIS、Yahoo或 scrape fallback；該 symbol 保留上一筆 cache，並以`FubonQuoteOutcomeCounters`固定enum/LongAdder與每輪structured summary記reason。disabled mode 完全不建立/呼叫 Fubon client，沿用現況。切換只涵蓋 `market='台股'` 的 LIVE quote；美股、英股、FX、ETF iNAV/premium、official close reconciliation、歷史、基本面、新聞皆不變。
+
+Fubon只是**盤中**LIVE producer。現行四個台股入口是：(a)`PricePoller.scheduledTwIntradayUpdate`、(b)`PricePoller.warmCacheOnStartup`、(c)`POST /internal/refresh → PricePoller.refreshAll`、(d)`POST /internal/refresh/tw-radar → TwRadarRefreshService.refresh → PricePoller.updatePrices`。四者的台股live分支都先委派同一個例如`refreshTwLiveThroughSelectedProvider(codes)`的窄入口；`updatePrices`即使保留既有public visibility，其`market='台股'`分支也只能轉呼該入口，tw-radar不得直接碰`PriceFetchClient`／MIS。該入口不能用現行calendar失敗時fail-open的`isTwMarketOpen()`授權，而須新增tri-state `isTwMarketOpenKnown()`：Asia/Taipei today只交給`MarketCalendar.isTwTradingDayKnown(today)`判日期；authority true且`09:00 <= localTime < 13:30`回true，非交易日／盤外回false，empty或exception回empty。四入口與enabled/disabled provider都只在known true發selected-provider HTTP並進writer；false/unknown時Fubon/MIS live HTTP、Redis SET/index/TTL/PUBLISH/tick皆0，即使current missing亦同。盤外DB/history與official reconcile走既有非live流程。Task352 inventory估值不寫Redis，可於13:35在TWSE-backed trading-day gate下使用同一交易日actual trade，兩用途不得混淆。
+
+### 為何採 per-code intraday 而不是 snapshot
+
+目前納管約 35 codes、每 2 分鐘一輪。官方 intraday/snapshot 限額 300 requests/min，因此逐檔 intraday 在現況遠低於上限；adapter 另把單批硬上限設 100 並用 operational budget 收斂。`intraday/quote/{symbol}` 的raw payload提供既有 quote schema 需要的 `previousClose/openPrice/highPrice/lowPrice`、bids/asks、`total.tradeVolume`、`lastTrade.time`、`isTrial`、`lastUpdated`。TSE/OTC snapshot 雖只需兩 call，卻缺 bid/ask/previousClose且範例未證明 trial flag，會令現有 19 欄契約系統性退化，故本需求不用 snapshot。SDK 的 `query_symbol_snapshot` 官方另明示沒有即時更新，也禁止使用。
+
+`POST /internal/market-data/tw-quotes` 接受去重後 `codes` 1..100；非法 code、duplicate normalized collision或超限回 400。Python 以 concurrency 20 上限逐檔呼叫，per-call timeout 不超過 5 秒、endpoint wall timeout 不超過 30 秒；每 code 成功 response cache 30 秒且 single-flight，讓 PricePoller 與 inventory sync 交疊時共享。process-global token bucket operational cap 240/min（保留官方 300/min 餘裕）；429 遵守 retry-after並開 60 秒 circuit，不無界 retry。partial failure 以 per-code stable reason 回傳，成功 code 不被連坐，但 Java writer仍逐筆嚴格驗證。
+
+### 成交價與 provider timestamp 正規化
+
+每筆成功資料先驗 exact symbol、非空 name、正值 `previousClose`，且 exchange/market 只接受兩個一致 pair：上市 `(exchange='TWSE',market='TSE')`、上櫃 `(exchange='TPEx',market='OTC')`；任何錯配都拒絕。`isTrial=true` 必拒；false 或欄位 omitted 才進下一步。來源價仍只允許明示 actual pair：
+
+1. `lastTrade.price > 0` 且 `lastTrade.time` 存在；或
+2. `closePrice > 0` 且 `closeTime` 存在。
+
+兩組同時存在時，價格與解析後 Instant 必須一致，否則 `CONFLICTING_ACTUAL_TRADE`。官方 16 位 epoch 是 microseconds，不是 milliseconds；依位數／range 嚴格解析後轉 `Instant`，再以 `Asia/Taipei` 導出 `tradingDate`。來源時間不得超前 adapter Clock 30 秒，日期不得與來源交易日/請求市場 session 衝突。raw `lastPrice`、lastTrial、`previousClose`、`openPrice/highPrice/lowPrice`、bid、ask 或中價都不是成交價，永不 fallback。官方正常／收盤範例可省略 `isTrial`；省略只代表繼續驗 actual pair，不代表任何非actual欄位可用。
+
+normalized quote 映射：
+
+| 現有欄位 | Fubon 欄位／規則 |
+|---|---|
+| `stockCode/stockName/market` | symbol/name/`台股` |
+| `price` | 上述 actual trade price |
+| normalized/public `previousClose/openPrice/highPrice/lowPrice` | Fubon raw `previousClose/openPrice/highPrice/lowPrice`一對一映射；四值都必須正，且`lowPrice ≤ min(openPrice,actualPrice)`、`highPrice ≥ max(openPrice,actualPrice)`、`lowPrice ≤ highPrice`，缺漏／非法或只有`open/high/low` alias時整筆拒絕 |
+| `buyPrice/sellPrice` | bids/asks 第一個合法正值 price；來源明確為空 book 時可 null |
+| `volume` | `total.tradeVolume`原始非負整數；官方2330範例為54,538，與現行MIS`volumeLots`同為live「張」口徑，不乘1,000 |
+| `priceChange/changePercent` | 由 `price` 與同筆 `previousClose` 以既有 BigDecimal 算式產生 |
+| `source/closed/quoteStatus` | `FUBON_INTRADAY` / `false` / `LIVE` |
+| `updatedAt/tradingDate` | actual trade Instant／由同一 Instant 轉 Taipei date |
+| `premiumDiscountPct` | 不由 Fubon 填；reader 仍 join `price:etfnav:*` |
+
+表內actual/previousClose/OHLC與非null bid/ask皆套用positive precision20/scale0..10的adapter界線；volume套用nonnegative signed-64-bit exact integer。`priceChange/changePercent`仍由既有writer以BigDecimal計算並輸出既有public numeric JSON，不是Python wire欄位，也不得先轉double。`lastUpdated`只可作response consistency/diagnostic；live freshness的canonical Instant是last actual trade的`lastTrade.time`或`closeTime`，不是receipt time。低流動標的數分鐘無新成交合法，不用固定5分鐘憑空判死；是否能覆寫由provider timestamp與下節atomic watermark決定。
+
+### Redis 原子 freshness 與相容性
+
+Java `FubonTwLiveQuoteProvider`將sanitized DTO轉為immutable observation；`tradingDate/providerUpdatedAt`來自同一actual trade event，另帶只可由同輪`MarketClock.isTwMarketOpenKnown()==Optional.of(true)`產生的`marketOpenAuthorized`，再委派唯一`PriceCacheWriter` provider-timestamp overload；legacy boolean clock、authority empty/throw都不能產生true。本Task自足新增Redis Lua：script第一步驗該flag，false/missing即回`MARKET_CLOSED`且不讀寫任何key；因此current missing也不能盤外寫。通過才在同一次server-side operation解析current的`stockCode/market/source/closed/quoteStatus/tradingDate/updatedAt`。current missing可寫；malformed/identity不符fail closed；current Fubon嚴格比較tuple，older/equal不改value/index TTL、不publish，strictly newer才寫。
+
+跨provider切換另有一次性takeover，因舊MIS的`updatedAt`是Java receipt wall time，首筆Fubon provider trade time常早幾秒。Java只有在`FUBON_ENABLED=true`、`marketOpenAuthorized=true`且本輪normalized actual batch通過時才傳`allowProviderTakeover=true`。Lua除先驗market-open flag，仍要求(a)incoming tradingDate晚於current date；或(b)同日current精確為`source='TWSE' AND closed=false AND quoteStatus='LIVE'`，才可忽略一次跨provider timestamp差並回`PROVIDER_TAKEOVER`。同日official close、PREVIOUS_CLOSE、unknown/non-TWSE-live source不得takeover；current一旦是Fubon即永遠strict tuple。禁止JVM`GET→compare→SET`，Python不得寫Redis；既有provider繼續舊writer path。本契約與保留中的Task350相容，但不依賴它。
+
+公開 `/api/quotes` 與 `/api/quotes/one` 的 19 欄 JSON、HTTP status、Redis key、TTL與 `price-update` channel 不變。enabled/no-config、adapter timeout、trial、wrong-date、malformed、older/equal等失敗只保留上一筆 cache；若完全沒有 cache，consumer 依既有 missing 語意處理，不拿 MIS/Yahoo/昨收冒充。Task 352 同次估值必須直接從 normalized batch 的成功 actual-trade quote 建值，不以 Redis 舊值繞過全批 no-write。
+
+### 驗證設計
+
+adapter fixture要用官方raw `previousClose/openPrice/highPrice/lowPrice`，並明確製造只有錯誤`open/high/low` alias時拒絕；另涵蓋合法市場pair、raw帳務stale date/wrong account/branch、16位microsecond、trial/actual衝突、wrong symbol/date、future、429/timeout/partial/101 codes/併發；numeric預期釘住`"9999999999.9999999999"`接受、precision21／scale11拒絕、shares上下界、volume 0/Long.MAX_VALUE/overflow，以及金額`12.345×3→37.04`、`999999999999999999.99×1`可寫、`1000000000×9999999999→9999999999000000000.00`因scale2後precision21而rollback。backend mapping精確斷言`transactionExchangeRate==null`；StockMaster rollback零backfill、commit後恰一次，無transaction立即排程。真Postgres兩transaction/latch須驗Fubon先鎖與full update先鎖，兩序列最終均保留非Fubon、舊Fubon不復活、aggregates等於final children；mock/H2不算。external對四入口×enabled/disabled逐一驗known true success/provider failure、known false、calendar authority empty/throw，並精確計Fubon/MIS HTTP、Redis writer/tick/pubsub；false/empty/throw皆全0，enabled failure零MIS/Yahoo fallback、disabled零Fubon。production Lua integration必驗current missing＋`marketOpenAuthorized=false`仍`MARKET_CLOSED`且value/index TTL/pubsub/tick不變，open時才驗missing/newer/takeover；另釘住同日MIS receipt較新只接管一次、後續Fubon older/equal拒絕及official/unknown不可接管。Docker先disabled/no-secret驗stack healthy、image/config provenance、amd64/import/no-host-port；真secret只在開盤驗normalized→Redis→public API與零scrape。休市或缺secret明列live stage未驗，fixture不能冒充production evidence。

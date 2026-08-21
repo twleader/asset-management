@@ -10,7 +10,7 @@ import java.util.List;
  * ScheduleListView 專屬 BFF（「公開資訊」分組，Requirement 36）。
  *
  * <p>回傳系統所有自動排程的**人工維護靜態清單**。排程分屬兩個服務：
- * {@code business-services}（21 個）與 {@code external-materials-service}（34 個）。
+ * {@code business-services}（22 個）與 {@code external-materials-service}（34 個）。
  * 此頁為唯讀資訊展示，故不做跨服務反射探索、不入 DB、不設管理端點。
  *
  * <p><b>計數慣例：以 {@code @Scheduled} 方法計，一法一筆。</b>external 34 筆對應 36 個標註
@@ -56,9 +56,9 @@ public class SchedulePublicBffController {
     private static final String NYC = "America/New_York";
     private static final String LON = "Europe/London";
 
-    /** 全系統排程清單（55 筆）。順序刻意先業務服務、再外部行情服務，前端再依 category 分組。 */
+    /** 全系統排程清單（56 筆）。順序刻意先業務服務、再外部行情服務，前端再依 category 分組。 */
     private static final List<ScheduledJobDto> JOBS = List.of(
-            // ===== business-services（21）=====
+            // ===== business-services（22）=====
             new ScheduledJobDto(BUSINESS, "資產快照", "最新快照釘定當日",
                     "將每位使用者的最新快照日期釘為當日並重算資產，讓即時股價覆蓋生效",
                     "每日 00:05", "0 5 0 * * *", TPE),
@@ -122,6 +122,9 @@ public class SchedulePublicBffController {
             new ScheduledJobDto(BUSINESS, "交易紀錄匯出", "每日匯出排程檢查",
                     "每分鐘檢查各使用者的每一筆交易紀錄自動匯出排程（Task 255 起每人可設定多筆，各有自己的時間與輸出資料夾），命中執行時間即同時產出 JSON 與 Excel 兩份（主檔名相同）到該筆指定目錄（Requirement 49）；輸出含 Google Drive 同步（若已啟用）",
                     "每分鐘", "0 * * * * *", TPE),
+            new ScheduledJobDto(BUSINESS, "券商庫存", "富邦台股現股庫存同步",
+                    "以隔離的富邦官方 Linux SDK 唯讀對帳 configured admin 現股庫存，交易日內只局部替換最新快照的富邦台股持股",
+                    "交易日 09:05–13:35 每 30 分鐘", "0 5,35 9-13 * * MON-FRI", TPE),
 
             // ===== external-materials-service（34）=====
             new ScheduledJobDto(EXTERNAL, "即時行情", "台股個股即時價（盤中）",
@@ -232,7 +235,7 @@ public class SchedulePublicBffController {
                     "交易日 05:00–07:00 每 15 分鐘", "0 0/15 5-6 * * MON-FRI；0 0 7 * * MON-FRI", TPE)
     );
 
-    /** GET /api/bff/schedule-list —— 回傳全系統排程清單（55 筆靜態資料）。 */
+    /** GET /api/bff/schedule-list —— 回傳全系統排程清單（56 筆靜態資料）。 */
     @GetMapping
     public List<ScheduledJobDto> list() {
         return JOBS;

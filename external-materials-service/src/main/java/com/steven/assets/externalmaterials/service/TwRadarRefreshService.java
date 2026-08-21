@@ -69,18 +69,21 @@ public class TwRadarRefreshService {
      * @param skippedPendingClose 今日收盤尚未落 DB 的空窗，刻意跳過同步（見休市分支）
      */
     public record Summary(boolean performed, boolean busy, boolean twMarketOpen,
-                          boolean skippedPendingClose, int twStocks, int indexUpdated) {
+                          boolean twMarketUnknown, boolean skippedPendingClose,
+                          int twStocks, int indexUpdated) {
 
-        static Summary busy(boolean twMarketOpen) {
-            return new Summary(false, true, twMarketOpen, false, 0, 0);
+        static Summary busy(boolean twMarketOpen, boolean twMarketUnknown) {
+            return new Summary(false, true, twMarketOpen, twMarketUnknown, false, 0, 0);
         }
     }
 
     public Summary refresh() {
-        boolean open = clock.isTwMarketOpen();
+        TwLiveQuoteDispatcher.Authorization authorization = poller.authorizeTwLive();
+        boolean open = authorization.marketOpen();
+        boolean unknown = authorization.marketUnknown();
         if (!gate.tryAcquire()) {
             log.info("[tw-radar-refresh] 已有一輪進行中，直接回 busy");
-            return Summary.busy(open);
+            return Summary.busy(open, unknown);
         }
 
         long t0 = System.nanoTime();
@@ -94,13 +97,13 @@ public class TwRadarRefreshService {
             tw.remove(TAIEX_CODE);   // 防禦性：收集器已排除，這裡不倚賴它
             log.info("[tw-radar-refresh] 開始：台股 {} 檔，開盤中={}", tw.size(), open);
 
-            int indexUpdated = open ? refreshOpenMarket(tw) : 0;
-            boolean skippedPendingClose = open ? false : syncClosedGuarded(tw);
+            int indexUpdated = open ? refreshOpenMarket(tw, authorization) : 0;
+            boolean skippedPendingClose = open || unknown ? false : syncClosedGuarded(tw);
 
             long ms = (System.nanoTime() - t0) / 1_000_000;
             log.info("[tw-radar-refresh] 完成：台股 {} 檔，大盤更新={}，跳過待收盤={}，耗時 {} ms",
                     tw.size(), indexUpdated, skippedPendingClose, ms);
-            return new Summary(true, false, open, skippedPendingClose, tw.size(), indexUpdated);
+            return new Summary(true, false, open, unknown, skippedPendingClose, tw.size(), indexUpdated);
         } finally {
             gate.release();
         }
@@ -119,8 +122,10 @@ public class TwRadarRefreshService {
      *
      * @return 大盤是否更新成功（1／0）
      */
-    private int refreshOpenMarket(Set<String> tw) {
-        Future<?> stocks = pool.submit(() -> poller.updatePrices(tw, TW_MARKET, false));
+    private int refreshOpenMarket(
+            Set<String> tw,
+            TwLiveQuoteDispatcher.Authorization authorization) {
+        Future<?> stocks = pool.submit(() -> poller.updateTwPrices(tw, authorization));
         Future<?> index = pool.submit(taiex::updateOnce);
 
         int indexUpdated = 0;
