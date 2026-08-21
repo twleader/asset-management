@@ -27,7 +27,6 @@
         </div>
         <template v-else>
           <div class="analysis-meta">
-            <el-tag size="small" type="info">雙擊任意股票可開啟分析</el-tag>
             <div class="chart-controls">
               <div class="chart-control-row">
                 <div class="chart-control-group">
