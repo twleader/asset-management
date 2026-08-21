@@ -3867,6 +3867,68 @@ PUT  /api/bff/trading-calendar/export/schedule  → PUT /api/trading-calendar-ex
 
 **新增檔案**：`model/TradingCalendarExportSchedule`、`repository/TradingCalendarExportScheduleRepository`、`service/TradingCalendarExportScheduleService`（CRUD＋`@Scheduled` tick＋selfHeal）、`TradingCalendarExportDto` 加 `ScheduleSettingRequest`／`ScheduleSettingResponse`、`TradingCalendarExportController` 加 `GET/PUT /schedule`；BFF 加 2 passthrough；前端匯出對話框加排程區塊（`getExportSchedule`／`updateExportSchedule`）。
 
+### Task 351：三年查詢窗口與今年＋明年雙年度匯出（現行契約）
+
+上方 Task 189／190 的任意年度輸入與單一「當前年度」產檔敘述保留為歷史；現行頁面契約由本段覆寫。Requirement 55 建立的「同一年固定同時產 JSON＋Excel」不變，因此本次雙年度完整成功的產物是 `2 年 × 2 格式 = 4` 個本機檔，而不是把兩年塞進同一份檔案。
+
+#### 查詢年份窗口
+
+```
+TradingCalendarView 初始載入
+  → GET /api/bff/trading-calendar                    # 不帶 year，由伺服器決定今年
+    → TradingCalendarYearWindow（Clock.system(Asia/Taipei)）
+       currentYear / availableYears=[Y-1,Y,Y+1] / minYear / maxYear
+    → GET business /api/market-data/holidays?year=Y  # 只查通過窗口驗證的年份
+    → holidays + marketStatus + year + availableYears + minYear + maxYear
+      + availability={tw/us/uk: AVAILABLE|UNAVAILABLE}
+
+使用者切換年度或跨月
+  → GET /api/bff/trading-calendar?year=Y-1|Y|Y+1
+  → 範圍外：BFF 400，零 downstream
+```
+
+`TradingCalendarYearWindow` 是 BFF 內的頁面邊界元件，持有可注入的 `Clock` 以固定年度邊界測試；production constructor 使用 `Clock.system(ZoneId.of("Asia/Taipei"))`。Controller 只委派它取得／驗證窗口，再沿用既有 business `/api/market-data/holidays` 與 `/market-status` aggregation，不把頁面範圍下沉到通用的 `MarketDataController`，避免其他交易日曆 consumer 被三年 UI 邊界誤限縮。
+
+前端首次呼叫不帶 `year`，以 BFF 回傳的 `year` 初始化畫面，以 `availableYears` 建立恰三項年度選擇器。`prevMonth`／`nextMonth` 先算目標年月再檢查 `minYear`／`maxYear`，不可只靠按鈕 disabled（程式呼叫仍可能越界）；去年 1 月與明年 12 月分別為硬邊界。「今天」使用 BFF 回傳的 current year，月份取當下台北月份；若 browser 與台北跨日／跨年不同，年份仍以 BFF 為準。前端 cache entry 改為 year-keyed `{ holidays, availability }`（或等價的兩份 year-keyed cache），computed 日格與警示永遠以目前 `calendarYear` 取 entry；cache hit 不發 HTTP，但也不可沿用最近一次請求的全域 availability。
+
+`holidays.tw/us/uk` 的空 map 是 unavailable 訊號，不是「該年度零假日」。TW authority 必須從現有鏈路源頭修正：`MarketDataFetchService.fetchTwHolidaysFromTwse(year)` 改用 TWSE 官方歷年報表 `https://www.twse.com.tw/holidaySchedule/holidaySchedule?response=json&date={year}`，取代目前無年份參數、實際只供當年度的 OpenAPI。只有 HTTP 成功、`stat=ok`、頂層 `date` 以要求的西元年開頭、`title` 含對應 ROC 年，且 `data` 非空、每筆日期皆屬要求年份，才解析為完整 base；錯年、空列或格式錯誤回空。資料列仍排除「開始交易日／最後交易日」，其餘開休市列依既有規則轉成 `yyyy-MM-dd → 名稱`。
+
+external-materials 的既有 `GET /internal/tw-holidays` 再改用 `MarketDataFetchService.getTwHolidaysKnown(year).orElse(Map.of())`（或完全同等語意），不新增另一支 business API。`getTwHolidaysKnown` 只有在 operator closure calendar 已知且 TWSE 年度 base 非空時才回完整 union；TWSE base 空時必須重抓且不得快取空值，base 空但 closure-only 非空仍回 unknown，closure calendar 未知也回 unknown。如此 backend `MarketDataService.getTwHolidays`、BFF 查詢與匯出 preflight 才共用同一份完整性訊號，而不是以合併後「剛好非空」誤認 authority 完整。明年官方 `data=[]` 時維持 unavailable；不以今年資料、週末公式或人工清單補造。
+
+BFF 逐市場回 `availability`；前端日格只有在對應市場為 `AVAILABLE` 時才計算 `!holiday[date]`，否則該市場旗標為 `null` 且顯示市場別警示。`dayClass` 只有在 `tw/us/uk` 全為 boolean 時，才可進入「全 true＝both」或「全 false＝holiday」分支；任何一個 `null` 都回 neutral/unknown，避免 JavaScript 的 `!null === true` 把三市未知畫成全市場休市。這特別防止尚未公告的明年 TWSE 日曆或 external-materials 瞬斷，被既有 graceful 空 map 路徑誤升格成全年平日皆交易或誤降格成全年休市。通用 `MarketDataService.isTwTradingDay` 不改公開簽章；匯出 preflight 直接要求同一 known endpoint 傳回的該年 TW map 非空，空值以該年度失敗結果結束且不建立任何檔。
+
+#### 雙年度匯出資料流
+
+```
+[手動]
+POST /api/bff/trading-calendar/export?subpath=
+  → POST business /api/trading-calendar-export/run?subpath=   # 無 year
+    → TradingCalendarExportScheduleService.runManualForCurrentUser(subpath)
+      → anchorYear = LocalDate.now(Asia/Taipei).year
+      → TradingCalendarExportService.exportYearPairToDir(anchorYear, subpath)
+        → exportToDir(anchorYear, subpath)       # JSON + Excel
+        → exportToDir(anchorYear + 1, subpath)   # JSON + Excel
+      → 若 Drive enabled，逐年先驗 JSON+xlsx 皆成功，再成對 best-effort 上傳，回 batch
+
+[每日排程]
+runScheduled(setting, today)
+  → exportYearPairToDir(today.year, setting.outputSubpath)
+  → 逐年先驗 JSON+xlsx 皆成功，再成對 best-effort Drive 上傳
+  → 以年份標籤聚合 last_run_status / gdrive_last_status，再套欄位長度上限
+```
+
+`TradingCalendarExportDto` 新增不可變 `RangeRunResponse(List<Integer> years, List<RunResponse> results, String localStatus, String gdriveStatus)`；`years` 與 `results` 均固定升冪且恰兩筆，`results[i].year == years[i]`。既有 `RunResponse` 保留逐年度的 `path/jsonPath/gdrivePath/jsonGdrivePath/localStatus/gdriveStatus/year/totalDays`，讓 Requirement 55 的每年部分成功語意不被 batch 吞掉。前端 `bffApi.tradingCalendar.exportToDir(subpath)` 不再傳 `year`；完成區 `v-for` 顯示兩筆的 `localStatus` 與實際存在的落點，只有至少一個 path 存在才顯示成功標記。每筆仍呼叫共用 `showDualExportResult`，`prefix` 為「{year} 年」，並為該 helper 新增向後相容的 optional `localStatus`：雙 path 為空時優先使用後端原因，不再固定顯示「請檢查輸出資料夾權限與磁碟空間」；其他八個呼叫頁與既有部分成功／Drive 判準不變。
+
+`exportYearPairToDir(anchorYear, subpath)` 只組合既有單年度 primitive，不複製 JSON／Excel builder。入口先在任何年度 authority read 與逐年 `try/catch` 之外呼叫既有 `requireValidSubpath(subpath)`；非法 `..` 跳脫維持由 `GlobalExceptionHandler` 映成 400，零查詢、零檔案。合法路徑才固定對兩年各執行一次窄 `try/catch`：先以同一 known 鏈路取得的 `getTwHolidays(year)` 非空作 authority preflight，再呼叫單年度 primitive；空 map 或 authority／產檔執行期 `RuntimeException` 轉成該年 null paths、`totalDays=0`、含年份的失敗 `localStatus`，接著仍嘗試另一年。故合法 batch 永遠含兩筆逐年結果並以 200 回報，不會出現第一年檔已落地卻因第二年例外只回整批 5xx，也不會吞掉既有路徑安全 400。
+
+Drive 沿用 Requirement 55 的年度雙檔守門：只有某年 `path` 與 `jsonPath` 都非空才把該年兩份交給 `syncGdriveBoth`；缺任一份時該年兩份都回 `xlsx 略過：…／json 略過：…`，絕不逐檔上傳或從檔名撿舊檔。另一年完整成功仍可成對上傳。聚合狀態先把可用長度公平分配給兩年（Drive 再分配到每年兩種格式），各片段保留 `{year} xlsx`／`{year} json` 前綴後再合併，最後做防禦性總長度截斷。
+
+四次 Drive copy 維持同步串行；`ProcessRcloneClient.copyTo` 每次 45 秒上限，故手動鏈路需保留超過 180 秒的可證明預算。`frontend/nginx.conf` 在通用 `location /api/` 之前新增 exact `location = /api/bff/trading-calendar/export`，proxy headers 與 `$bff_upstream$request_uri` 完全同通用區塊，只把 `proxy_read_timeout` 設 240 秒；`bffApi.tradingCalendar.exportToDir` 的 Axios timeout 設 250000 ms。其餘 API 的 60 秒不變。BFF business WebClient 現況無 response timeout，本次不另加較短 gate。
+
+`SchedulePublicBffController.JOBS` 的既有「當前年度交易日曆」說明同步改為「命中執行時間即為今年與明年各自同時產出 JSON 與 Excel 兩份（主檔名相同），共四檔」；只改描述，cron、friendly schedule、service 分類與 job 總數不變。`SchedulePublicBffControllerTest` 同時釘住「今年與明年」、「同時產出 JSON 與 Excel 兩份」、「共四檔」，並拒絕舊單年度字串，既有 Requirement 55 全體 Excel 描述守門不得放寬。
+
+無資料庫模型、設定欄位或 Liquibase 變更。排程仍是一人一列、每日單一時間；本次只改每次命中後的產檔範圍。
+
 ---
 
 ## Requirement 39（Task 196）：已實現損益 Excel 匯出到指定目錄與每日排程自動匯出

@@ -24,7 +24,7 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>假日來源：
  * <ul>
- *   <li>台股：委派 {@link MarketDataFetchService#getTwHolidays(int)}（TWSE OpenAPI holidaySchedule，
+ *   <li>台股：委派 {@link MarketDataFetchService#getTwHolidays(int)}（TWSE 官方歷年 holidaySchedule JSON，
  *       已是台股假日的唯一來源；抓不到時保守視為交易日，與 business-services 既有退化一致）。</li>
  *   <li>美股 / 英股：NYSE / LSE 法定規則純函式計算。</li>
  * </ul>

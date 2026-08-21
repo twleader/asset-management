@@ -138,4 +138,14 @@ class SchedulePublicBffControllerTest {
         assertThat(jobs()).noneMatch(j -> j.description() != null
                 && j.description().contains("以其格式（JSON／Excel）"));
     }
+
+    @Test
+    @DisplayName("交易日曆排程固定產出今年與明年各雙格式共四檔")
+    void 交易日曆雙年度四檔契約() {
+        assertThat(jobs()).filteredOn(j -> "交易日曆每日匯出排程檢查".equals(j.name()))
+                .singleElement()
+                .satisfies(job -> assertThat(job.description())
+                        .contains("今年與明年", "同時產出 JSON 與 Excel 兩份", "共四檔")
+                        .doesNotContain("當前年度交易日曆"));
+    }
 }
