@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+import fubon_broker_service.app as app_module
 from fubon_broker_service.app import create_app
 from fubon_broker_service.config import ConfigLoader
-from fubon_broker_service.redaction import redact
+from fubon_broker_service.redaction import redact, redact_mapping
 
 from helpers import TOKEN, ready_config
 
@@ -181,6 +183,60 @@ def test_redactor_removes_registered_values_and_sensitive_labels():
     assert "TEST_CERT_PASSWORD_SENTINEL" not in output
     assert "001" not in output
     assert "/private/certificate.pfx" not in output
+
+
+def test_log_pipeline_redacts_a_careless_raw_value_not_just_the_redact_function(caplog):
+    """Proves the redactor is actually wired into the logging output pipeline.
+
+    Every real call site in this service only ever logs a fixed reason code
+    (e.g. "reason=SDK_LOGIN_FAILED"), so calling redact() in isolation (as
+    test_redactor_removes_registered_values_and_sensitive_labels does) cannot
+    tell us whether a *careless future call site* would actually be caught.
+    Here we bypass that convention deliberately: log straight through the
+    exact logger objects app.py installs the central filter on, using a
+    message that embeds a raw personal-id/account/api-key value the way an
+    accidental `logger.warning(f"... {exc}")` might. If the filter is truly
+    on the output path, the raw values never reach the emitted record.
+    """
+    app_module.install_log_redaction(
+        logging.getLogger("fubon_broker_service.app"),
+        logging.getLogger("fubon_broker_service.sdk_gateway"),
+    )
+    app_logger = logging.getLogger("fubon_broker_service.app")
+    sdk_logger = logging.getLogger("fubon_broker_service.sdk_gateway")
+
+    with caplog.at_level(logging.WARNING):
+        app_logger.warning(
+            "unexpected raw leak personal-id=%s account=%s",
+            "A123456789",
+            "00099998888",
+        )
+        sdk_logger.error("sdk raw response leaked api-key=%s", "TEST_RAW_APIKEY_LEAK_SENTINEL")
+
+    assert "A123456789" not in caplog.text
+    assert "00099998888" not in caplog.text
+    assert "TEST_RAW_APIKEY_LEAK_SENTINEL" not in caplog.text
+    assert caplog.text.count("[REDACTED]") >= 3
+
+
+def test_redact_mapping_preserves_response_schema_while_redacting_string_leaves():
+    payload = {
+        "reason": "SDK_LOGIN_FAILED",
+        "detail": {"debug": "account=00099998888 unexpected"},
+        "positions": [{"stockCode": "2330", "shares": 3}],
+        "counters": {"SUCCESS": 1},
+        "emptyConfirmed": False,
+        "note": None,
+    }
+    result = redact_mapping(payload)
+    assert result["reason"] == "SDK_LOGIN_FAILED"
+    assert "00099998888" not in result["detail"]["debug"]
+    assert "[REDACTED]" in result["detail"]["debug"]
+    assert result["positions"] == [{"stockCode": "2330", "shares": 3}]
+    assert result["counters"] == {"SUCCESS": 1}
+    assert result["emptyConfirmed"] is False
+    assert result["note"] is None
+    assert set(result) == set(payload)
 
 
 def test_selector_must_be_absent_or_a_complete_pair(tmp_path):

@@ -130,6 +130,22 @@ class FubonNormalizedQuoteClientTest {
     }
 
     @Test
+    void volumeLowerBoundZeroIsAcceptedAsValidObservation() throws Exception {
+        Path token = tokenFile();
+        ObjectNode root = responseRoot();
+        ObjectNode row = successRow("2330");
+        ((ObjectNode) row.get("quote")).put("volume", 0);
+        root.withArray("quotes").add(row);
+
+        var result = client(token, new FubonNormalizedQuoteClient.RawResponse(200, root.toString()))
+                .fetch(List.of("2330"));
+
+        assertThat(result.status()).isEqualTo(BatchStatus.SUCCESS);
+        assertThat(result.observations()).hasSize(1);
+        assertThat(result.observations().get(0).result().volume()).isEqualTo(0L);
+    }
+
+    @Test
     void non200MalformedCoverageAndDuplicateRowsRejectWholeBatch() throws Exception {
         Path token = tokenFile();
         assertThat(client(token, new FubonNormalizedQuoteClient.RawResponse(503, "{}"))
