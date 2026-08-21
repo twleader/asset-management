@@ -2,7 +2,7 @@
   <el-dialog
     :model-value="modelValue"
     @update:model-value="$emit('update:modelValue', $event)"
-    width="1100px"
+    width="min(1100px, calc(100vw - 32px))"
     destroy-on-close
     draggable
     @open="onOpen">
@@ -28,22 +28,39 @@
         <template v-else>
           <div class="analysis-meta">
             <el-tag size="small" type="info">雙擊任意股票可開啟分析</el-tag>
-            <div style="display:flex;align-items:center;gap:6px;margin-left:auto">
-              <span style="color:#64748b;font-size:12px">指標：</span>
-              <el-select v-model="selectedIndicator" size="small" style="width:104px">
-                <el-option v-for="o in INDICATOR_OPTIONS" :key="o" :label="o" :value="o" />
-              </el-select>
-              <span style="color:#64748b;font-size:12px;margin-left:8px">期間：</span>
-              <el-button-group>
-                <el-button
-                  v-for="opt in rangeOptions" :key="opt.label"
-                  size="small"
-                  :type="months === opt.months ? 'primary' : 'default'"
-                  @click="months = opt.months">
-                  {{ opt.label }}
-                </el-button>
-              </el-button-group>
-              <span style="color:#64748b;font-size:12px;margin-left:8px">滾輪縮放 / 拖曳平移</span>
+            <div class="chart-controls">
+              <div class="chart-control-row">
+                <div class="chart-control-group">
+                  <span class="chart-control-label">圖型：</span>
+                  <el-button-group>
+                    <el-button size="small" :type="chartMode === 'line' ? 'primary' : 'default'" @click="setChartMode('line')">走勢線</el-button>
+                    <el-button size="small" :type="chartMode === 'daily-candle' ? 'primary' : 'default'" @click="setChartMode('daily-candle')">日 K</el-button>
+                    <el-button size="small" :type="chartMode === 'weekly-candle' ? 'primary' : 'default'" @click="setChartMode('weekly-candle')">週 K</el-button>
+                  </el-button-group>
+                </div>
+                <div class="chart-control-group">
+                  <span class="chart-control-label">指標：</span>
+                  <el-select v-model="selectedIndicator" size="small" class="indicator-select">
+                    <el-option v-for="o in INDICATOR_OPTIONS" :key="o" :label="o" :value="o" />
+                  </el-select>
+                </div>
+                <span v-if="chartMode === 'weekly-candle'" class="weekly-candle-hint">週 K；技術指標為日線值的週末取樣</span>
+              </div>
+              <div class="chart-control-row">
+                <div class="chart-control-group">
+                  <span class="chart-control-label">期間：</span>
+                  <el-button-group class="period-control-group">
+                    <el-button
+                      v-for="opt in visibleRangeOptions" :key="opt.label"
+                      size="small"
+                      :type="months === opt.months ? 'primary' : 'default'"
+                      @click="selectRange(opt.months)">
+                      {{ opt.label }}
+                    </el-button>
+                  </el-button-group>
+                </div>
+                <span class="chart-zoom-hint">滾輪縮放 / 拖曳平移</span>
+              </div>
             </div>
           </div>
           <div v-if="isIntraday && intradayQuote" class="intraday-quote">
@@ -64,11 +81,26 @@
           <div v-else-if="isIntraday && !intradayTicks.length" class="analysis-empty" style="height:580px">
             無當日分時資料
           </div>
+          <div v-else-if="isCandle && !activeFrame.dates?.length" class="analysis-empty" style="height:580px">無完整 OHLC 資料</div>
           <!-- notMerge 必要：切換指標時子圖 series 數量會變（KD,J 五個 vs 威廉指標一個），
                vue-echarts 預設 merge 不會移除多餘的舊 series，舊指標的線會殘留在畫面上。
                dataZoom 的 start/end 本就由 option 明確指定（ez），故 notMerge 不會丟失縮放狀態。 -->
           <v-chart v-else ref="chartRef" :option="chartOption" :update-options="{ notMerge: true }"
                    style="height:580px" autoresize @datazoom="onZoom" />
+        </template>
+      </el-tab-pane>
+
+      <el-tab-pane v-if="stock?.market === '台股' && stock?.stockCode !== '0000'" label="行情五檔" name="quote-detail">
+        <div class="quote-detail-head"><span>Yahoo 股市 · {{ quoteSourceTime }}</span><el-tag size="small" :type="quoteStatusType">{{ quoteStatusText }}</el-tag><el-button size="small" :loading="quoteDetailLoading" @click="refreshQuoteDetail">重新整理</el-button></div>
+        <div v-if="quoteDetailLoading" class="analysis-loading"><el-icon class="is-loading" size="36"><Loading /></el-icon><div>載入行情五檔中…</div></div>
+        <div v-else-if="!quoteDetail?.available" class="analysis-empty">{{ quoteDetail?.message || '暫時無法取得行情五檔' }}<br><el-button size="small" style="margin-top:12px" @click="refreshQuoteDetail">重新整理</el-button></div>
+        <template v-else>
+          <div class="quote-summary">
+            <div v-for="item in quoteSummary" :key="item.label" class="quote-item"><span>{{ item.label }}</span><b :style="{ color: item.color }">{{ item.value }}</b></div>
+          </div>
+          <div v-if="quoteDetail.innerPercent == null && quoteDetail.outerPercent == null" class="quote-flow-empty">無分類資料</div>
+          <div v-else class="quote-flow"><span class="inner">內盤 {{ fmtLots(quoteDetail.innerVolumeLots) }}（{{ fmtPct(quoteDetail.innerPercent) }}）</span><span class="outer">外盤 {{ fmtLots(quoteDetail.outerVolumeLots) }}（{{ fmtPct(quoteDetail.outerPercent) }}）</span><div class="flow-bar"><i :style="{ width: `${quoteDetail.innerPercent ?? 0}%` }"></i><em :style="{ width: `${quoteDetail.outerPercent ?? 0}%` }"></em></div></div>
+          <div class="orderbook"><div class="order-head"><span>量</span><span>委買價</span><span>委賣價</span><span>量</span></div><div v-for="row in quoteLevels" :key="row.level" class="order-row"><span class="volume"><i :style="{width: bidWidth(row)}"></i><span>{{ fmtLots(row.bidVolumeLots) }}</span></span><span>{{ fmtQuote(row.bidPrice) }}</span><span>{{ fmtQuote(row.askPrice) }}</span><span class="volume"><i :style="{width: askWidth(row)}"></i><span>{{ fmtLots(row.askVolumeLots) }}</span></span></div><div class="order-total"><span>委買小計 {{ fmtLots(quoteDetail.bidTotalLots) }}</span><span>委賣小計 {{ fmtLots(quoteDetail.askTotalLots) }}</span></div></div>
         </template>
       </el-tab-pane>
 
@@ -167,7 +199,7 @@
 <script setup>
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
-import { BarChart, LineChart } from 'echarts/charts'
+import { BarChart, LineChart, CandlestickChart } from 'echarts/charts'
 import { TitleComponent, TooltipComponent, LegendComponent, GridComponent, DataZoomComponent, MarkLineComponent, MarkPointComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
 import { Loading } from '@element-plus/icons-vue'
@@ -175,7 +207,7 @@ import { bffApi } from '@/api/index.js'
 
 // 注意：tree-shaking 版 echarts 必須顯式註冊元件才生效。MarkPointComponent 漏註冊時，
 // 收盤線的 markPoint（最高/最低標記）會被 ECharts 靜默忽略、完全不畫（markLine 有註冊故 KD 80/20 正常）。
-use([CanvasRenderer, LineChart, BarChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent, DataZoomComponent, MarkLineComponent, MarkPointComponent])
+use([CanvasRenderer, LineChart, BarChart, CandlestickChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent, DataZoomComponent, MarkLineComponent, MarkPointComponent])
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -196,6 +228,11 @@ const chartPrices = computed(() => series.value?.prices ?? [])
 // 不是對齊後陣列的最後一筆——0000 大盤盤中兩者不同（股價側不併 live、指標側併）
 const latestIndicators = computed(() => series.value?.latest ?? null)
 const months = ref(12)
+const chartMode = ref('line')
+const isCandle = computed(() => chartMode.value !== 'line')
+const activeFrame = computed(() => chartMode.value === 'daily-candle' ? (series.value?.daily ?? { dates: [] }) : chartMode.value === 'weekly-candle' ? (series.value?.weekly ?? { dates: [] }) : (series.value ?? { dates: [] }))
+// K 線的收盤與漲跌基準由 BFF 的 frame-local 欄位定義；不可自行從 closes 回推。
+const activeClose = computed(() => isCandle.value ? activeFrame.value.currentClose : lastNonNull(chartPrices.value))
 const intradayTicks = ref([])
 const intradayLoading = ref(false)
 const dividendHistory = ref({ rows: [] })
@@ -205,12 +242,13 @@ const chartRef = ref(null)
 const zoomPct = ref(null)
 
 const isIntraday = computed(() => months.value === 0)
+const visibleRangeOptions = computed(() => isCandle.value ? rangeOptions.filter(x => x.months !== 0) : rangeOptions)
 
 // 期間按鈕的預設縮放窗（日線：以 months 換算 ~21 個交易日/月；當日：整段全顯示）
 const defaultZoomRange = computed(() => {
   if (isIntraday.value) return { start: 0, end: 100 }
-  const total = chartDates.value.length
-  const want = Math.max(20, Math.round(months.value * 21))
+  const total = isCandle.value ? (activeFrame.value.dates?.length ?? 0) : chartDates.value.length
+  const want = chartMode.value === 'weekly-candle' ? Math.max(4, Math.ceil(months.value * 52 / 12)) : Math.max(20, Math.round(months.value * 21))
   const start = total > 0 ? Math.max(0, 100 * (total - want) / total) : 0
   return { start, end: 100 }
 })
@@ -233,7 +271,7 @@ const latestTradingDate = computed(() => {
     const t = intradayTicks.value[intradayTicks.value.length - 1]?.time
     return t ? String(t).substring(0, 10) : null
   }
-  const d = chartDates.value
+  const d = isCandle.value ? (activeFrame.value.dates ?? []) : chartDates.value
   return d.length ? d[d.length - 1] : null
 })
 
@@ -286,6 +324,19 @@ const rangeOptions = [
   { label: '5年',   months: 60 },
   { label: '10年',  months: 120 },
 ]
+
+function setChartMode(mode) {
+  chartMode.value = mode
+  if (mode !== 'line' && months.value === 0) months.value = 12
+  zoomPct.value = null
+}
+
+function selectRange(value) {
+  // 當日沒有完整 OHLC，從 K 線切回當日時明確回到既有分時走勢線。
+  if (value === 0) chartMode.value = 'line'
+  months.value = value
+  zoomPct.value = null
+}
 
 async function fetchHistory() {
   if (!props.stock) return
@@ -349,9 +400,14 @@ watch(months, (m) => {
 function onOpen() {
   activeTab.value = 'chart'
   months.value = 12
+  chartMode.value = 'line'
   intradayTicks.value = []
   zoomPct.value = null
   dividendHistory.value = { rows: [] }
+  quoteDetail.value = null
+  quoteRequestToken.value++
+  quoteDetailLoading.value = false
+  quoteDetailAttempted.value = false
   fetchHistory()
 }
 
@@ -371,7 +427,48 @@ async function onTabChange(name) {
   if (name === 'dividends' && !dividendHistory.value.rows?.length && !dividendsLoading.value) {
     await fetchDividendHistory()
   }
+  if (name === 'quote-detail' && !quoteDetailAttempted.value && !quoteDetailLoading.value) {
+    quoteDetailAttempted.value = true
+    await fetchQuoteDetail()
+  }
 }
+
+const quoteDetail = ref(null)
+const quoteDetailLoading = ref(false)
+const quoteDetailAttempted = ref(false)
+const quoteRequestToken = ref(0)
+function refreshQuoteDetail() {
+  quoteDetailAttempted.value = true
+  return fetchQuoteDetail()
+}
+async function fetchQuoteDetail() {
+  if (!props.stock || quoteDetailLoading.value) return
+  const stockCode = props.stock.stockCode
+  const market = props.stock.market
+  const token = ++quoteRequestToken.value
+  quoteDetailLoading.value = true
+  try {
+    const result = await bffApi.stockAnalysis.getQuoteDetail(stockCode, market)
+    if (token === quoteRequestToken.value && props.stock?.stockCode === stockCode && props.stock?.market === market) quoteDetail.value = result
+  } catch (e) {
+    if (token === quoteRequestToken.value && props.stock?.stockCode === stockCode && props.stock?.market === market) quoteDetail.value = { available: false, message: '暫時無法取得行情五檔' }
+  } finally {
+    if (token === quoteRequestToken.value) quoteDetailLoading.value = false
+  }
+}
+const quoteStatusText = computed(() => quoteDetail.value?.marketStatus === 'OPEN' ? '盤中' : quoteDetail.value?.marketStatus === 'CLOSED' ? '收盤' : '狀態未知')
+const quoteStatusType = computed(() => quoteDetail.value?.marketStatus === 'OPEN' ? 'danger' : quoteDetail.value?.marketStatus === 'CLOSED' ? 'info' : 'warning')
+const quoteSourceTime = computed(() => { const v = quoteDetail.value?.sourceTime; const date = v ? new Date(v) : null; return date && !Number.isNaN(date.getTime()) ? new Intl.DateTimeFormat('zh-TW',{ timeZone:'Asia/Taipei',dateStyle:'short',timeStyle:'medium' }).format(date) : '時間不明' })
+const fmtLots = v => v == null ? '—' : Number(v).toLocaleString('zh-TW')
+const fmtPct = v => v == null ? '—' : `${Number(v).toFixed(2)}%`
+const quoteValueColor = v => quoteDetail.value?.previousClose == null || v == null ? '#1e293b' : Number(v) > Number(quoteDetail.value.previousClose) ? '#dc2626' : Number(v) < Number(quoteDetail.value.previousClose) ? '#16a34a' : '#475569'
+const signed = v => v == null ? '—' : `${Number(v)>0?'▲':Number(v)<0?'▼':''}${fmtQuote(Math.abs(Number(v)))}`
+const quoteSummary = computed(() => { const q=quoteDetail.value||{}; return [
+  ['成交',fmtQuote(q.price),quoteValueColor(q.price)],['昨收',fmtQuote(q.previousClose),'#1e293b'],['開盤',fmtQuote(q.openPrice),quoteValueColor(q.openPrice)],['漲跌幅',q.changePercent==null?'—':`${Number(q.changePercent)>0?'▲':Number(q.changePercent)<0?'▼':''}${Math.abs(Number(q.changePercent)).toFixed(2)}%`,quoteColor(q.changePercent)],['最高',fmtQuote(q.highPrice),quoteValueColor(q.highPrice)],['漲跌',signed(q.change),quoteColor(q.change)],['最低',fmtQuote(q.lowPrice),quoteValueColor(q.lowPrice)],['總量',fmtLots(q.volumeLots),'#1e293b'],['均價',fmtQuote(q.averagePrice),'#1e293b'],['昨量',fmtLots(q.previousVolumeLots),'#1e293b'],['成交金額(億)',fmtQuote(q.turnoverYi),'#1e293b'],['振幅',fmtPct(q.amplitudePercent),'#1e293b']
+].map(([label,value,color])=>({label,value,color})) })
+const quoteLevels = computed(() => Array.from({length:5},(_,i)=>quoteDetail.value?.levels?.[i] ?? {level:i+1,bidPrice:null,bidVolumeLots:null,askPrice:null,askVolumeLots:null}))
+const bookWidth = (key,row) => { const m=Math.max(0,...quoteLevels.value.map(x=>Number(x[key]??0))); return m ? `${100*Number(row[key]??0)/m}%` : '0%' }
+const bidWidth = row => bookWidth('bidVolumeLots',row); const askWidth = row => bookWidth('askVolumeLots',row)
 
 // 股利歷史：將原始事件依年度分組，年度小計列插在每年事件之上
 const dividendDisplayRows = computed(() => {
@@ -561,6 +658,9 @@ const chartOption = computed(() => {
   const sr = series.value
   if (!sr?.dates?.length) return {}
   const s = props.stock || {}
+  const candleMode = isCandle.value
+  const frame = candleMode ? activeFrame.value : null
+  if (candleMode && !frame?.dates?.length) return {}
 
   // 日線基礎：BFF chart-series 已聯集對齊，直接取用（前端不再計算 MA / KD）
   const num = v => (v == null ? null : Number(v))
@@ -573,7 +673,7 @@ const chartOption = computed(() => {
   const dailyMa240  = col('ma240')
   // legend／「當日」水平線的最新值一律取 BFF 挑好的「指標序列本身最後一筆」，
   // 不可取對齊後陣列的末格——0000 大盤盤中末格是「有指標、無股價」，兩者不同
-  const lt = latestIndicators.value || {}
+  const lt = candleMode ? (frame.latest || {}) : (latestIndicators.value || {})
 
   const intraday = isIntraday.value
   // intraday 模式但 tick 序列還沒抓到 → 暫時不畫，由外層 v-if 的 loading 處理
@@ -583,7 +683,7 @@ const chartOption = computed(() => {
   // 子圖要用到的所有欄位（畫線的、畫柱的、只顯示數值的）
   const subKeys = [...spec.lines, ...(spec.bars || []), ...(spec.legendOnly || [])].map(x => x[1])
 
-  let dates, prices, ma5, ma20, ma60, ma240, xLabelFormatter
+  let dates, prices, ma5, ma20, ma60, ma240, xLabelFormatter, candleValues = null, candleHighs = null, candleLows = null
   const subVals = {}
   // subYAxis 的可視區間切片以子圖 x 軸長度為準（intraday 為分鐘網格、日線為交易日）
   let subDates = []
@@ -623,16 +723,24 @@ const chartOption = computed(() => {
     // 整段分鐘網格：軸標籤只在整點 / 半點顯示，避免數百格 HH:mm 全擠上
     xLabelFormatter = v => v
   } else {
-    dates  = dailyDates
-    prices = dailyPrices
-    ma5    = dailyMa5
-    ma20   = dailyMa20
-    ma60   = dailyMa60
-    ma240  = dailyMa240
-    for (const key of subKeys) subVals[key] = col(key)
+    const source = candleMode ? frame : sr
+    dates  = source.dates ?? []
+    prices = candleMode ? (source.closes ?? []).map(num) : dailyPrices
+    ma5    = (source.ma5 ?? []).map(num)
+    ma20   = (source.ma20 ?? []).map(num)
+    ma60   = (source.ma60 ?? []).map(num)
+    ma240  = (source.ma240 ?? []).map(num)
+    if (candleMode) {
+      candleHighs = (source.highs ?? []).map(num)
+      candleLows = (source.lows ?? []).map(num)
+      candleValues = dates.map((_, i) => [num(source.opens?.[i]), num(source.closes?.[i]), num(source.lows?.[i]), num(source.highs?.[i])])
+    }
+    for (const key of subKeys) subVals[key] = (source[key] ?? []).map(num)
     xLabelFormatter = v => v.substring(0, 7)
     subDates = dates
   }
+  const priceCurrent = candleMode ? frame.currentClose : activeClose.value
+  const pricePrevious = candleMode ? frame.previousClose : null
 
   // 成本均價 = 買入均價（原幣，交易當下匯率鎖定）。一律取 BFF 已算好的 avgCostOriginal，
   // 與 Dashboard 表格「買入均價」同義同源；禁止用「台幣成本 ÷ 今日即時匯率」反推（今日匯率每日
@@ -719,7 +827,12 @@ const chartOption = computed(() => {
   if (totalPts > 0) {
     const loIdx = Math.max(0, Math.floor((ez.start / 100) * (totalPts - 1)))
     const hiIdx = Math.min(totalPts - 1, Math.ceil((ez.end / 100) * (totalPts - 1)))
-    markData = maxMinMarkPoints(prices, dates, loIdx, hiIdx)
+    if (candleMode) {
+      const hi = candleHighs.map((v, i) => v == null ? null : { high: v, low: candleLows[i] })
+      markData = maxMinMarkPoints(hi.map(v => v?.high), dates, loIdx, hiIdx)
+      const lows = maxMinMarkPoints(hi.map(v => v?.low == null ? null : -v.low), dates, loIdx, hiIdx)
+      if (lows.length) { const low = lows.find(x => x.name === '最高'); if (low) { low.name='最低'; low.value=Number(-Number(low.value.replace(/,/g,''))).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); low.coord=[low.xlabel,-Number(low.coord[1])]; low.itemStyle={color:'#16a34a'}; low.label={...low.label,backgroundColor:'#16a34a'}; markData = markData.filter(x=>x.name!=='最低').concat(low) } }
+    } else markData = maxMinMarkPoints(prices, dates, loIdx, hiIdx)
   }
 
   // 「當日」模式 Y 軸鎖定當日股價區間（+10% padding），避免被遠離現價的均線水平線（尤其年線 MA240
@@ -748,7 +861,7 @@ const chartOption = computed(() => {
       axisPointer: { type: 'cross', link: [{ xAxisIndex: 'all' }] },
       formatter: params => {
         let html = `<strong>${params[0].axisValue}</strong><br/>`
-        params.forEach(p => { if (p.value != null) html += `${p.marker} ${p.seriesName}: <b>${p.value}</b><br/>` })
+        params.forEach(p => { if (p.value != null) { if (p.seriesName === '股價' && candleMode && Array.isArray(p.value)) html += `${p.marker} 股價：開 <b>${p.value[0]}</b>／高 <b>${p.value[3]}</b>／低 <b>${p.value[2]}</b>／收 <b>${p.value[1]}</b><br/>`; else html += `${p.marker} ${p.seriesName}: <b>${p.value}</b><br/>` } })
         return html
       }
     },
@@ -762,7 +875,7 @@ const chartOption = computed(() => {
       const subLegend = [...spec.lines, ...(spec.legendOnly || [])]
       const map = {
         // 當日網格末格恆為未來 null → 取最後一筆非 null 分時價（日線模式 == 末格，行為不變）
-        '股價':       fmt(lastNonNull(prices)),
+        '股價':       fmt(priceCurrent),
         '週線MA5':    fmt(num(lt.ma5)),
         '月線MA20':   fmt(num(lt.ma20)),
         '季線MA60':   fmt(num(lt.ma60)),
@@ -779,6 +892,7 @@ const chartOption = computed(() => {
       }
       // BFF 的 latest 帶了每個欄位的 prev*（欄名為 prev + 首字大寫）
       const arrowMap = {}
+      arrowMap['股價'] = arrowOf(priceCurrent, pricePrevious)
       for (const [name, key] of subLegend) {
         arrowMap[name] = arrowOf(lt[key], lt['prev' + key.charAt(0).toUpperCase() + key.slice(1)])
       }
@@ -856,8 +970,8 @@ const chartOption = computed(() => {
       { type: 'slider', xAxisIndex: [0, 1], start: ez.start, end: ez.end, height: 20, bottom: 8 }
     ],
     xAxis: [
-      { gridIndex: 0, type: 'category', data: dates, boundaryGap: false, axisLabel: { show: false }, axisLine: { onZero: false } },
-      { gridIndex: 1, type: 'category', data: dates, boundaryGap: false,
+      { gridIndex: 0, type: 'category', data: dates, boundaryGap: candleMode, axisLabel: { show: false }, axisLine: { onZero: false } },
+      { gridIndex: 1, type: 'category', data: dates, boundaryGap: candleMode,
         axisLabel: { rotate: 0, fontSize: 10, margin: 12, hideOverlap: true,
           formatter: xLabelFormatter, interval: xLabelInterval } }
     ],
@@ -866,14 +980,15 @@ const chartOption = computed(() => {
       subYAxis
     ],
     series: [
-      { name: '股價', type: 'line', xAxisIndex: 0, yAxisIndex: 0, data: prices, labelLayout: SHIFT_Y,
+      { name: '股價', type: candleMode ? 'candlestick' : 'line', xAxisIndex: 0, yAxisIndex: 0, data: candleMode ? candleValues : prices, labelLayout: SHIFT_Y,
         // 當日：稀疏 tick 落在整段分鐘網格上，connectNulls 讓 2 分輪詢 / 5 分 K 之間連成連續線；
         // 末端未來時段的 trailing null 無後續點不會被橋接，故線正確止於最新一筆
         connectNulls: intraday,
-        lineStyle: { width: 2, color: '#3b82f6' }, itemStyle: { color: '#3b82f6' }, showSymbol: false,
-        endLabel: { show: true, formatter: '{c}', fontSize: 11, color: '#3b82f6', fontWeight: 700 },
-        areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+        lineStyle: { width: 2, color: '#3b82f6' }, itemStyle: candleMode ? { color: '#dc2626', borderColor: '#dc2626', color0: '#16a34a', borderColor0: '#16a34a' } : { color: '#3b82f6' }, showSymbol: false,
+        endLabel: { show: !candleMode, formatter: '{c}', fontSize: 11, color: '#3b82f6', fontWeight: 700 },
+        ...(candleMode ? {} : { areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
           colorStops: [{ offset: 0, color: 'rgba(59,130,246,0.12)' }, { offset: 1, color: 'rgba(59,130,246,0)' }] } },
+        }),
         markPoint: {
           symbol: 'circle',
           symbolSize: 9,
@@ -905,7 +1020,7 @@ const chartOption = computed(() => {
         itemStyle: { color: '#64748b' }, showSymbol: false,
         endLabel: {
           show: true, formatter: '成本 {c}', fontSize: 11,
-          color: lastNonNull(prices) >= cost ? '#16a34a' : '#ef4444'
+          color: priceCurrent != null && priceCurrent >= cost ? '#16a34a' : '#ef4444'
         }
       }] : []),
       // ── 子圖：依指標選單動態產生 ──────────────────────────────
@@ -945,7 +1060,12 @@ const chartOption = computed(() => {
 .analysis-empty   { text-align:center;padding:60px 0;color:#94a3b8;font-size:14px }
 /* 右邊保留的空間要對齊 echarts grid.right (96px)，這樣 period selector / 資料截止 才會
    和 chart 內容（endLabels 落點）的右緣切齊，不會越界到圖外。 */
-.analysis-meta    { display:flex;align-items:center;margin-bottom:8px;padding-right:96px }
+.analysis-meta    { display:flex;align-items:flex-start;gap:12px;margin-bottom:8px;padding-right:96px }
+.chart-controls { display:flex;flex:0 1 auto;flex-direction:column;align-items:flex-end;gap:4px;margin-left:auto;min-width:0 }
+.chart-control-row { display:flex;align-items:center;gap:10px;white-space:nowrap }
+.chart-control-group { display:flex;align-items:center;gap:6px;flex:none;white-space:nowrap }
+.chart-control-label,.weekly-candle-hint,.chart-zoom-hint { color:#64748b;font-size:12px;white-space:nowrap }
+.indicator-select { width:104px;flex:none }
 /* 「當日」昨收 / 今日漲跌資訊列（僅當日期間顯示） */
 .intraday-quote   { display:flex;align-items:baseline;gap:8px;margin:0 0 4px 2px;font-size:13px;line-height:1.4 }
 .intraday-quote .iq-label { color:#64748b }
@@ -960,6 +1080,13 @@ const chartOption = computed(() => {
   font-weight: 600;
   z-index: 1;
 }
+.quote-detail-head { display:flex;align-items:center;justify-content:flex-end;gap:8px;margin:4px 0 12px;color:#64748b;font-size:12px }
+.quote-summary { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;background:#e2e8f0;border:1px solid #e2e8f0 }
+.quote-item { display:flex;justify-content:space-between;padding:10px 12px;background:#fff;font-size:14px }.quote-item span{color:#64748b}.quote-item b{font-variant-numeric:tabular-nums}
+.quote-flow { margin:16px 0;color:#475569;font-size:13px;display:flex;gap:14px;flex-wrap:wrap }.quote-flow .inner{color:#16a34a}.quote-flow .outer{color:#dc2626}.flow-bar{display:flex;width:100%;height:8px;background:#e2e8f0;border-radius:4px;overflow:hidden}.flow-bar i{background:#16a34a}.flow-bar em{background:#dc2626}
+.quote-flow-empty { margin:16px 0;color:#94a3b8;font-size:13px }
+.orderbook { border:1px solid #e2e8f0;font-size:13px }.order-head,.order-row { display:grid;grid-template-columns:repeat(4,1fr);text-align:right;gap:8px;padding:8px 10px }.order-head{background:#f8fafc;color:#64748b}.order-row{border-top:1px solid #f1f5f9}.volume{position:relative;overflow:hidden;isolation:isolate;font-variant-numeric:tabular-nums}.volume i{position:absolute;inset:2px auto 2px 0;background:#dbeafe;z-index:0;pointer-events:none}.volume>span{position:relative;z-index:1}.order-total{display:flex;justify-content:space-between;padding:9px 10px;background:#f8fafc;font-weight:600}
+@media (max-width:800px){.analysis-meta{flex-wrap:wrap;padding-right:0}.chart-controls{width:100%;align-items:flex-start;margin-left:0}.chart-control-row{max-width:100%;overflow-x:auto;padding-bottom:2px}.quote-summary{grid-template-columns:1fr}.quote-detail-head{justify-content:flex-start;flex-wrap:wrap}.order-head,.order-row{grid-template-columns:repeat(4,minmax(58px,1fr));overflow:auto}.tabs-trailing{display:none}}
 </style>
 
 <style>

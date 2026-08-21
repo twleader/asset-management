@@ -1,6 +1,7 @@
 package com.steven.assets.bff.stockanalysis.dto;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 
 /**
@@ -34,7 +35,38 @@ public record ChartSeriesDto(
         List<BigDecimal> bias20,
         List<BigDecimal> b10b20,
         List<BigDecimal> wr9,
-        Latest latest) {
+        Latest latest,
+        DailyFrame daily,
+        WeeklyFrame weekly) {
+
+    public ChartSeriesDto(List<String> dates, List<BigDecimal> prices, List<BigDecimal> ma5, List<BigDecimal> ma20,
+                          List<BigDecimal> ma60, List<BigDecimal> ma240, List<BigDecimal> k, List<BigDecimal> d,
+                          List<BigDecimal> j9, List<BigDecimal> k3d2, List<BigDecimal> rsv, List<BigDecimal> ema12,
+                          List<BigDecimal> ema26, List<BigDecimal> dif, List<BigDecimal> macd, List<BigDecimal> osc,
+                          List<BigDecimal> rsi5, List<BigDecimal> rsi10, List<BigDecimal> bias10, List<BigDecimal> bias20,
+                          List<BigDecimal> b10b20, List<BigDecimal> wr9, Latest latest) {
+        this(dates, prices, ma5, ma20, ma60, ma240, k, d, j9, k3d2, rsv, ema12, ema26, dif, macd, osc,
+                rsi5, rsi10, bias10, bias20, b10b20, wr9, latest, DailyFrame.empty(), WeeklyFrame.empty());
+    }
+
+    public record DailyFrame(List<LocalDate> dates, List<BigDecimal> opens, List<BigDecimal> highs, List<BigDecimal> lows,
+                             List<BigDecimal> closes, List<BigDecimal> ma5, List<BigDecimal> ma20, List<BigDecimal> ma60,
+                             List<BigDecimal> ma240, List<BigDecimal> k, List<BigDecimal> d, List<BigDecimal> j9,
+                             List<BigDecimal> k3d2, List<BigDecimal> rsv, List<BigDecimal> ema12, List<BigDecimal> ema26,
+                             List<BigDecimal> dif, List<BigDecimal> macd, List<BigDecimal> osc, List<BigDecimal> rsi5,
+                             List<BigDecimal> rsi10, List<BigDecimal> bias10, List<BigDecimal> bias20, List<BigDecimal> b10b20,
+                             List<BigDecimal> wr9, BigDecimal currentClose, BigDecimal previousClose, Latest latest) {
+        public static DailyFrame empty() { return new DailyFrame(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), null, null, null); }
+    }
+    public record WeeklyFrame(List<LocalDate> dates, List<BigDecimal> opens, List<BigDecimal> highs, List<BigDecimal> lows,
+                              List<BigDecimal> closes, List<BigDecimal> ma5, List<BigDecimal> ma20, List<BigDecimal> ma60,
+                              List<BigDecimal> ma240, List<BigDecimal> k, List<BigDecimal> d, List<BigDecimal> j9,
+                              List<BigDecimal> k3d2, List<BigDecimal> rsv, List<BigDecimal> ema12, List<BigDecimal> ema26,
+                              List<BigDecimal> dif, List<BigDecimal> macd, List<BigDecimal> osc, List<BigDecimal> rsi5,
+                              List<BigDecimal> rsi10, List<BigDecimal> bias10, List<BigDecimal> bias20, List<BigDecimal> b10b20,
+                              List<BigDecimal> wr9, BigDecimal currentClose, BigDecimal previousClose, Latest latest) {
+        public static WeeklyFrame empty() { return new WeeklyFrame(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), null, null, null); }
+    }
 
     /**
      * legend 與「當日」水平參考線用的最新值。
