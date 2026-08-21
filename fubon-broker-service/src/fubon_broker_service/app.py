@@ -16,11 +16,19 @@ from .config import ConfigLoader, ConfigSnapshot
 from .counters import Outcome, OutcomeCounters
 from .portfolio import PortfolioError, PortfolioService
 from .quotes import QuoteError, QuoteService
+from .redaction import install_log_redaction, redact_mapping
 from .sdk_gateway import SdkCallError, SdkGateway
 
 
 logger = logging.getLogger(__name__)
 INTERNAL_TOKEN_HEADER = "X-Internal-Service-Token"
+
+# Central last line of defense: even if a future call site logs a raw SDK
+# exception or stringifies a credential field, the record is redacted before
+# it reaches any handler. Installed on every logger this service actually
+# uses (module-level loggers are per-module and do not inherit filters from
+# ancestors during propagation, so each one is attached explicitly).
+install_log_redaction(logger, logging.getLogger("fubon_broker_service.sdk_gateway"))
 
 
 class PortfolioReadRequest(BaseModel):
@@ -84,11 +92,11 @@ def create_app(
         except Exception:
             # Never let an SDK/raw provider exception reach the ASGI server logger or response.
             logger.error("Fubon request failed reason=INTERNAL_FAILURE")
-            return JSONResponse(status_code=503, content={"reason": "INTERNAL_FAILURE"})
+            return JSONResponse(status_code=503, content=redact_mapping({"reason": "INTERNAL_FAILURE"}))
 
     @application.exception_handler(RequestValidationError)
     async def validation_error_handler(_request, _exc):
-        return JSONResponse(status_code=400, content={"reason": "INVALID_REQUEST"})
+        return JSONResponse(status_code=400, content=redact_mapping({"reason": "INVALID_REQUEST"}))
 
     def runtime_misconfigured(config: ConfigSnapshot) -> bool:
         checker = getattr(sdk_gateway, "runtime_misconfigured_for", None)
@@ -102,23 +110,27 @@ def create_app(
         config = loader.load()
         if config.state == "MISCONFIGURED":
             outcome_counters.increment(Outcome.MISCONFIGURED)
-            raise HTTPException(status_code=503, detail={"reason": config.reason or "MISCONFIGURED"})
+            raise HTTPException(
+                status_code=503, detail=redact_mapping({"reason": config.reason or "MISCONFIGURED"})
+            )
         if not config.enabled:
             outcome_counters.increment(Outcome.DISABLED)
-            raise HTTPException(status_code=503, detail={"reason": "DISABLED"})
+            raise HTTPException(status_code=503, detail=redact_mapping({"reason": "DISABLED"}))
         if config.state != "READY" or not config.internal_service_token:
             outcome_counters.increment(Outcome.MISCONFIGURED)
-            raise HTTPException(status_code=503, detail={"reason": config.reason or "MISCONFIGURED"})
+            raise HTTPException(
+                status_code=503, detail=redact_mapping({"reason": config.reason or "MISCONFIGURED"})
+            )
         if tokens is None or len(tokens) != 1 or not tokens[0]:
-            raise HTTPException(status_code=401, detail={"reason": "TOKEN_REQUIRED"})
+            raise HTTPException(status_code=401, detail=redact_mapping({"reason": "TOKEN_REQUIRED"}))
         token = tokens[0]
         if not secrets.compare_digest(
             config.internal_service_token.encode("utf-8"), token.encode("utf-8")
         ):
-            raise HTTPException(status_code=403, detail={"reason": "TOKEN_INVALID"})
+            raise HTTPException(status_code=403, detail=redact_mapping({"reason": "TOKEN_INVALID"}))
         if runtime_misconfigured(config):
             outcome_counters.increment(Outcome.MISCONFIGURED)
-            raise HTTPException(status_code=503, detail={"reason": "RUNTIME_MISCONFIGURED"})
+            raise HTTPException(status_code=503, detail=redact_mapping({"reason": "RUNTIME_MISCONFIGURED"}))
         return config
 
     @application.get("/internal/health")
@@ -163,11 +175,11 @@ def create_app(
             outcome = Outcome.MISCONFIGURED if exc.misconfigured else Outcome.ACCOUNTING_FAILED
             outcome_counters.increment(outcome)
             logger.warning("Fubon portfolio dry-read failed reason=%s", exc.reason)
-            raise HTTPException(status_code=503, detail={"reason": exc.reason}) from None
+            raise HTTPException(status_code=503, detail=redact_mapping({"reason": exc.reason})) from None
         except PortfolioError as exc:
             outcome_counters.increment(Outcome.RECONCILE_FAILED)
             logger.warning("Fubon portfolio reconciliation rejected reason=%s", exc.reason)
-            raise HTTPException(status_code=503, detail={"reason": exc.reason}) from None
+            raise HTTPException(status_code=503, detail=redact_mapping({"reason": exc.reason})) from None
 
     @application.post("/internal/market-data/tw-quotes")
     async def tw_quotes(
@@ -180,10 +192,10 @@ def create_app(
             outcome = Outcome.MISCONFIGURED if exc.misconfigured else Outcome.QUOTE_FAILED
             outcome_counters.increment(outcome)
             logger.warning("Fubon quote session failed reason=%s", exc.reason)
-            raise HTTPException(status_code=503, detail={"reason": exc.reason}) from None
+            raise HTTPException(status_code=503, detail=redact_mapping({"reason": exc.reason})) from None
         except QuoteError as exc:
             outcome_counters.increment(Outcome.QUOTE_FAILED)
-            raise HTTPException(status_code=400, detail={"reason": exc.reason}) from None
+            raise HTTPException(status_code=400, detail=redact_mapping({"reason": exc.reason})) from None
         successes = sum(1 for row in result["quotes"] if row.get("status") == "SUCCESS")
         if successes != len(result["quotes"]):
             outcome_counters.increment(Outcome.QUOTE_FAILED)

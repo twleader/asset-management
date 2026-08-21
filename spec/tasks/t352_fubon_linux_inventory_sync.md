@@ -16,37 +16,37 @@
 
 ## 要做什麼
 
-- [ ] **352.1 建立可重現的 Linux/amd64 SDK image。**新增 `fubon-broker-service/`，至少含 multi-stage `Dockerfile`、`.dockerignore`、exact-pinned Python requirements、`src/fubon_broker_service/` 與 `tests/`。base 為 Python 3.13 slim Debian、Compose 精確設定 `platform: linux/amd64`。builder 下載唯一 URL：
+- [x] **352.1 建立可重現的 Linux/amd64 SDK image。**新增 `fubon-broker-service/`，至少含 multi-stage `Dockerfile`、`.dockerignore`、exact-pinned Python requirements、`src/fubon_broker_service/` 與 `tests/`。base 為 Python 3.13 slim Debian、Compose 精確設定 `platform: linux/amd64`。builder 下載唯一 URL：
   `https://www.fbs.com.tw/TradeAPI_SDK/fubon_binary/fubon_neo-2.2.9-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.zip`；下載後先驗 zip SHA-256 `9592e7afb9eba2412ac4a5852df0a138850f6c9803136e7dae503d3606d3b432`，解壓後再驗 wheel SHA-256 `6cf623a601e4b42d4255e79e72d0cf60ac4d20247784bbeb8a478adfcb1864e3`。固定安裝該 wheel、`fugle-marketdata==2.5.0rc5` 與 web runtime exact versions，執行 `pip check`。官方 zip/wheel 安裝媒介不得 commit 或進 build context；final image 不保留下載 archive/wheel，但必須保留 hash 驗證後安裝出的 `fubon_neo` runtime package。不得把 SDK archive、憑證或任何 secret `COPY` 進 image。
 
-- [ ] **352.2 Compose 安全邊界。**`docker-compose.yml` 新增 `fubon-broker-service`（container `asset-fubon-broker-service`），只連 `asset-net`、不宣告 `ports`，non-root user、`read_only:true`、`tmpfs:/tmp`、`cap_drop: ALL`、`security_opt:no-new-privileges:true`、`PYTHONDONTWRITEBYTECODE=1`。健康檢查只用 Python stdlib打容器內 `GET /internal/health`。`FUBON_ENABLED=false` 是預設；service liveness 在 disabled 時仍 healthy，business/BFF/external/postgres/redis 不得因它沒有 credentials 而 unhealthy或restart。其他 services 不得以「Fubon functional READY」作啟動必需條件。
+- [x] **352.2 Compose 安全邊界。**`docker-compose.yml` 新增 `fubon-broker-service`（container `asset-fubon-broker-service`），只連 `asset-net`、不宣告 `ports`，non-root user、`read_only:true`、`tmpfs:/tmp`、`cap_drop: ALL`、`security_opt:no-new-privileges:true`、`PYTHONDONTWRITEBYTECODE=1`。健康檢查只用 Python stdlib打容器內 `GET /internal/health`。`FUBON_ENABLED=false` 是預設；service liveness 在 disabled 時仍 healthy，business/BFF/external/postgres/redis 不得因它沒有 credentials 而 unhealthy或restart。其他 services 不得以「Fubon functional READY」作啟動必需條件。
 
-- [ ] **352.3 secret 目錄、說明與空白模板。**新增可 commit 的 `secrets/fubon/README.md` 與必要 `.gitignore`/空目錄 marker；README 只列官方首次連線測試步驟、檔名、檔案權限與掛載關係，不放 example value。模板只列下列檔名，**不得建立帶假值的 secret file**：
+- [x] **352.3 secret 目錄、說明與空白模板。**新增可 commit 的 `secrets/fubon/README.md` 與必要 `.gitignore`/空目錄 marker；README 只列官方首次連線測試步驟、檔名、檔案權限與掛載關係，不放 example value。模板只列下列檔名，**不得建立帶假值的 secret file**：
   `sdk/personal-id`、`sdk/api-key`、`sdk/certificate.pfx`、`sdk/certificate-password`、可選且必須成對的 `sdk/account-branch-no`＋`sdk/account-number`、`shared/internal-service-token`。Python 唯讀掛整個 `${FUBON_SECRETS_DIR_HOST:-./secrets/fubon}` 至 `/run/secrets/fubon`；backend 與 external 最多只掛 `shared/`，不可看 `sdk/`。`.env.example` 只新增 `FUBON_ENABLED=false` 與 `FUBON_SECRETS_DIR_HOST=./secrets/fubon`，不得有 personal id/key/password/token literal。README 明文：使用者先在富邦官方工具以一般帳密＋憑證完成 API key 首次連線測試；本服務永不要求、讀取、保存或使用一般下單帳戶登入密碼。
 
-- [ ] **352.4 config、redaction、exact routes與internal auth。**Python config只讀mounted files，不從request body接受secret。`GET /internal/health`是唯一免token endpoint；`GET /internal/config`、`POST /internal/portfolio/read`、`POST /internal/market-data/tw-quotes`驗exact header/constant-time token。production若用FastAPI必須`docs_url=None,redoc_url=None,openapi_url=None`；精確route set只有這四支，`/docs`、`/redoc`、`/openapi.json`及未列path 404，錯method 405。health只回status/configState/sdkVersion/platform；config只回presence/capability。disabled→NOT_CONFIGURED/功能503；enabled但secret/selector/權限問題→MISCONFIGURED/503且零SDK。Python/backend client皆lazy讀config；missing shared token不能讓startup fail，由typed state保證zero HTTP/SDK/DB write。中央redactor禁止personal id、raw account、key、PFX path/password、token、SDK raw response/exception repr進response/log/metric。
+- [x] **352.4 config、redaction、exact routes與internal auth。**Python config只讀mounted files，不從request body接受secret。`GET /internal/health`是唯一免token endpoint；`GET /internal/config`、`POST /internal/portfolio/read`、`POST /internal/market-data/tw-quotes`驗exact header/constant-time token。production若用FastAPI必須`docs_url=None,redoc_url=None,openapi_url=None`；精確route set只有這四支，`/docs`、`/redoc`、`/openapi.json`及未列path 404，錯method 405。health只回status/configState/sdkVersion/platform；config只回presence/capability。disabled→NOT_CONFIGURED/功能503；enabled但secret/selector/權限問題→MISCONFIGURED/503且零SDK。Python/backend client皆lazy讀config；missing shared token不能讓startup fail，由typed state保證zero HTTP/SDK/DB write。中央redactor禁止personal id、raw account、key、PFX path/password、token、SDK raw response/exception repr進response/log/metric。
 
-- [ ] **352.5 唯讀 SDK gateway、account selection與session lifecycle。**SDK gateway只能import login/accounting/marketdata所需symbols，不得import/暴露order APIs。單一`FubonSDK` instance採login-on-demand與single reconnect mutex。`apikey_login`後只選stock account：selector成對精確match，無selector只允許恰好一個。raw account只留memory，response只回HMAC fingerprint。乾淨2.2.9 constructor後無marketdata；login後在同mutex呼叫`sdk.init_realtime()`，成功才取得`sdk.marketdata.rest_client.stock`；失敗invalidate/503。timeouts bounded、帳務≤5/sec；auth invalid最多一次完整relogin/rerun，不能拼輪次。ASGI/process shutdown hook取得同mutex，以bounded timeout依序best-effort呼叫SDK`logout()`/`shutdown()`；idempotent保證已login session只cleanup一次、redact例外、不阻塞退出，disabled/從未login不呼叫。reconnect時舊session也先bounded cleanup，避免recreate累積連線。
+- [x] **352.5 唯讀 SDK gateway、account selection與session lifecycle。**SDK gateway只能import login/accounting/marketdata所需symbols，不得import/暴露order APIs。單一`FubonSDK` instance採login-on-demand與single reconnect mutex。`apikey_login`後只選stock account：selector成對精確match，無selector只允許恰好一個。raw account只留memory，response只回HMAC fingerprint。乾淨2.2.9 constructor後無marketdata；login後在同mutex呼叫`sdk.init_realtime()`，成功才取得`sdk.marketdata.rest_client.stock`；失敗invalidate/503。timeouts bounded、帳務≤5/sec；auth invalid最多一次完整relogin/rerun，不能拼輪次。ASGI/process shutdown hook取得同mutex，以bounded timeout依序best-effort呼叫SDK`logout()`/`shutdown()`；idempotent保證已login session只cleanup一次、redact例外、不阻塞退出，disabled/從未login不呼叫。reconnect時舊session也先bounded cleanup，避免recreate累積連線。
 
-- [ ] **352.6 normalized portfolio dry-read endpoint與raw身份先驗。**新增token-protected `POST /internal/portfolio/read`；request固定唯讀`{"dryRun":true}`，不存在commit mode。先capture `queryDate=LocalDate.now(Asia/Taipei)`，對同一selected account依序呼叫兩支帳務API，完成後要求仍同日且兩邊success/data為concrete list。對每個非空raw row，必須在HMAC fingerprint、normalized identity或DTO之前解析來源自己的`date/account/branch_no`，逐列驗`date==queryDate`，且`account/branch_no`分別與login選出的selected account raw值精確相等；不得用本地queryDate、selected account或fingerprint回填來源欄。通過後才建立`(sourceDate,accountFingerprint,branchNo,stockCode,orderType)`並驗兩側唯一／集合相等。stale date、wrong account/branch、missing raw identity任一發生即整批invalid/no-write。只接受Stock/Buy；數量守恆後正持倉shares/costPrice皆>0。response只回sanitized batch/fingerprint/positions/reason，不回raw identity。
+- [x] **352.6 normalized portfolio dry-read endpoint與raw身份先驗。**新增token-protected `POST /internal/portfolio/read`；request固定唯讀`{"dryRun":true}`，不存在commit mode。先capture `queryDate=LocalDate.now(Asia/Taipei)`，對同一selected account依序呼叫兩支帳務API，完成後要求仍同日且兩邊success/data為concrete list。對每個非空raw row，必須在HMAC fingerprint、normalized identity或DTO之前解析來源自己的`date/account/branch_no`，逐列驗`date==queryDate`，且`account/branch_no`分別與login選出的selected account raw值精確相等；不得用本地queryDate、selected account或fingerprint回填來源欄。通過後才建立`(sourceDate,accountFingerprint,branchNo,stockCode,orderType)`並驗兩側唯一／集合相等。stale date、wrong account/branch、missing raw identity任一發生即整批invalid/no-write。只接受Stock/Buy；數量守恆後正持倉shares/costPrice皆>0。response只回sanitized batch/fingerprint/positions/reason，不回raw identity。
 
-- [ ] **352.7 空庫存語意。**只有兩支API確實以selected account呼叫、同輪成功且data都明確空list，或所有非空raw rows先通過上述source date/account/branch驗證、兩側identity匹配且數量皆明確為0，才回`emptyConfirmed=true,positions=[]`。一邊空一邊非空、null data、stale source date、wrong account/branch、日期rollover、success不明或schema不完整都回invalid batch；不得以本地欄位製造空帳戶證明。
+- [x] **352.7 空庫存語意。**只有兩支API確實以selected account呼叫、同輪成功且data都明確空list，或所有非空raw rows先通過上述source date/account/branch驗證、兩側identity匹配且數量皆明確為0，才回`emptyConfirmed=true,positions=[]`。一邊空一邊非空、null data、stale source date、wrong account/branch、日期rollover、success不明或schema不完整都回invalid batch；不得以本地欄位製造空帳戶證明。
 
-- [ ] **352.7a decimal wire精度與range。**Python對SDK decimal-like值先做`Decimal(str(value))`並驗finite；cost、actual price與Fubon raw `previousClose/openPrice/highPrice/lowPrice/bids[].price/asks[].price`映射出的normalized欄皆用無`e/E`canonical decimal string，要求正值、precision≤20、scale 0..10；raw只有`open/high/low` alias時拒絕。raw quantity只接受`0..9,999,999,999` exact integer並用checked add；matched可持久化shares為`1..9,999,999,999`（`stock_holding NUMERIC(15,5)`），零只供matched empty proof。volume只接受`0..9,223,372,036,854,775,807` exact integer。Java DTO只從canonical regex string建BigDecimal，重驗相同precision/scale/range，拒絕JSON float/scientific/non-finite。fixture釘住`"0.1"`無binary artifact、`"9999999999.9999999999"`（precision20/scale10）與shares/Long上下界接受；`"10000000000.0000000000"`（precision21）、`"0.00000000001"`（scale11）、shares 10,000,000,000、negative/Long overflow拒絕。
+- [x] **352.7a decimal wire精度與range。**Python對SDK decimal-like值先做`Decimal(str(value))`並驗finite；cost、actual price與Fubon raw `previousClose/openPrice/highPrice/lowPrice/bids[].price/asks[].price`映射出的normalized欄皆用無`e/E`canonical decimal string，要求正值、precision≤20、scale 0..10；raw只有`open/high/low` alias時拒絕。raw quantity只接受`0..9,999,999,999` exact integer並用checked add；matched可持久化shares為`1..9,999,999,999`（`stock_holding NUMERIC(15,5)`），零只供matched empty proof。volume只接受`0..9,223,372,036,854,775,807` exact integer。Java DTO只從canonical regex string建BigDecimal，重驗相同precision/scale/range，拒絕JSON float/scientific/non-finite。fixture釘住`"0.1"`無binary artifact、`"9999999999.9999999999"`（precision20/scale10）與shares/Long上下界接受；`"10000000000.0000000000"`（precision21）、`"0.00000000001"`（scale11）、shares 10,000,000,000、negative/Long overflow拒絕。
 
-- [ ] **352.8 production quote dry-read供同批估值。**新增token-protected `POST /internal/market-data/tw-quotes`，request為去重codes 1..100；逐code走已初始化`stock.intraday.quote`，不用snapshot。timeout/concurrency/cache/single-flight/240-min budget/429 circuit維持明確上限。每筆驗symbol/name、市場pair、trial/actual pair、16位microseconds及官方raw `previousClose/openPrice/highPrice/lowPrice`，再映射同名normalized欄並驗positive precision20/scale10與完整OHLC關係；只有錯誤raw `open/high/low`時整筆拒絕。actual Instant轉Asia/Taipei的source date必須精確等於portfolio captured queryDate。backend只有在 shared known calendar（TWSE primary → 完整 DGPA provisional → unknown，再 union operator closure）對該queryDate明確true時才可把quote用於inventory估值；13:35可接受同交易日actual trade，但前一交易日quote整批拒絕。partial可逐檔回，inventory仍要求每個position同批恰一success，缺一檔no-write且不以Redis/MIS/Yahoo補值。Task353只把此adapter接成external盤中LIVE producer，不是本任務可執行前置。
+- [x] **352.8 production quote dry-read供同批估值。**新增token-protected `POST /internal/market-data/tw-quotes`，request為去重codes 1..100；逐code走已初始化`stock.intraday.quote`，不用snapshot。timeout/concurrency/cache/single-flight/240-min budget/429 circuit維持明確上限。每筆驗symbol/name、市場pair、trial/actual pair、16位microseconds及官方raw `previousClose/openPrice/highPrice/lowPrice`，再映射同名normalized欄並驗positive precision20/scale10與完整OHLC關係；只有錯誤raw `open/high/low`時整筆拒絕。actual Instant轉Asia/Taipei的source date必須精確等於portfolio captured queryDate。backend只有在 shared known calendar（TWSE primary → 完整 DGPA provisional → unknown，再 union operator closure）對該queryDate明確true時才可把quote用於inventory估值；13:35可接受同交易日actual trade，但前一交易日quote整批拒絕。partial可逐檔回，inventory仍要求每個position同批恰一success，缺一檔no-write且不以Redis/MIS/Yahoo補值。Task353只把此adapter接成external盤中LIVE producer，不是本任務可執行前置。
 
-- [ ] **352.9 backend internal client與安全端點。**在`backend`建立單一`integration/fubon`package：typed config/DTO/WebClient/sync service/scheduler/fixed-outcome counters/internal controller。client從mounted shared token讀header；timeout/4xx/5xx/invalid JSON回typed failure，不lograw body。新增exact internal`POST /internal/brokers/fubon/inventory-sync?dryRun=true|false`，token filter保護、預設true；response僅`{outcome,dryRun,batchId,positionCount,replaceCount,snapshotId?,reason,counters?}`。不加BFF/frontend/Nginx/gateway/host route。
+- [x] **352.9 backend internal client與安全端點。**在`backend`建立單一`integration/fubon`package：typed config/DTO/WebClient/sync service/scheduler/fixed-outcome counters/internal controller。client從mounted shared token讀header；timeout/4xx/5xx/invalid JSON回typed failure，不lograw body。新增exact internal`POST /internal/brokers/fubon/inventory-sync?dryRun=true|false`，token filter保護、預設true；response僅`{outcome,dryRun,batchId,positionCount,replaceCount,snapshotId?,reason,counters?}`。不加BFF/frontend/Nginx/gateway/host route。
 
-- [ ] **352.10 tenant、calendar與排程。**owner固定configured ACTIVE admin。scheduler cron/zone/in-flight不變，先呼叫`MarketDataService.isTwTradingDayKnown(today)`，只有`Optional.of(true)`才call adapter。manual `dryRun=false`同一owner/snapshot/calendar/today gate；dryRun=true可做帳務連線/對帳且永不寫，但calendar非明確true時不得呼叫quote或回可提交估值。任何使用quote的輪次都須驗actual source date==captured queryDate。Schedule catalog維持精確新增後56=22+34。
+- [x] **352.10 tenant、calendar與排程。**owner固定configured ACTIVE admin。scheduler cron/zone/in-flight不變，先呼叫`MarketDataService.isTwTradingDayKnown(today)`，只有`Optional.of(true)`才call adapter。manual `dryRun=false`同一owner/snapshot/calendar/today gate；dryRun=true可做帳務連線/對帳且永不寫，但calendar非明確true時不得呼叫quote或回可提交估值。任何使用quote的輪次都須驗actual source date==captured queryDate。Schedule catalog維持精確新增後56=22+34。
 
-- [ ] **352.11 共用pessimistic lock後局部transaction replace。**transaction外先完成portfolio、quotes、owner、today snapshot、active broker與names驗證。零schema新增共用snapshot mutation lock service與repository真正`PESSIMISTIC_WRITE`的`findByIdForUpdate`／owner-latest query；Fubon commit、`AssetService.updateSnapshot`及任何直接修改同snapshot children/aggregate的既有transaction，都須在transaction第一個DB動作依snapshot id同一順序取row lock後才讀／clear／rebuild／aggregate，普通`findById`不算。Fubon透過owner-latest lock重新取得configured admin最新今日snapshot，只replace `broker.code='fubon' AND market='台股'` rows。完整update在lock內保留當下server-owned Fubon scope並排除stale request/persistence-context的舊Fubon rows，不得復活；非Fubon仍按既有完整update語意。明確empty才可刪Fubon scope。create新snapshot無row可鎖但同日期unique/gate不變。任一insert/upsert/aggregate失敗整批rollback。
+- [x] **352.11 共用pessimistic lock後局部transaction replace。**transaction外先完成portfolio、quotes、owner、today snapshot、active broker與names驗證。零schema新增共用snapshot mutation lock service與repository真正`PESSIMISTIC_WRITE`的`findByIdForUpdate`／owner-latest query；Fubon commit、`AssetService.updateSnapshot`及任何直接修改同snapshot children/aggregate的既有transaction，都須在transaction第一個DB動作依snapshot id同一順序取row lock後才讀／clear／rebuild／aggregate，普通`findById`不算。Fubon透過owner-latest lock重新取得configured admin最新今日snapshot，只replace `broker.code='fubon' AND market='台股'` rows。完整update在lock內保留當下server-owned Fubon scope並排除stale request/persistence-context的舊Fubon rows，不得復活；非Fubon仍按既有完整update語意。明確empty才可刪Fubon scope。create新snapshot無row可鎖但同日期unique/gate不變。任一insert/upsert/aggregate失敗整批rollback。
 
-- [ ] **352.12 欄位映射、afterCommit backfill與aggregate。**shares依對帳值；先以未捨入BigDecimal算`costPrice.multiply(shares)`與`actualTradePrice.multiply(shares)`，最後各`setScale(2,HALF_UP)`，再要求result precision≤20才寫`NUMERIC(20,2)`；operand合法但乘積overflow整批rollback，禁止先round operand。`originalCurrencyValue/transactionType/transactionDate/transactionExchangeRate`精確為null並由mapping test逐欄斷言。dividend沿用／重算、displayOrder與唯一aggregate calculator維持既定規則。quote name仍只走唯一`StockMasterService.upsert`；必須把其既有`scheduleBackfill` dispatch改為：active transaction時註冊transaction synchronization並在afterCommit才submit既有executor，rollback零submit、成功commit每個新code恰一次；無active transaction才可立即submit。不得新增繞過service的repository路徑。
+- [x] **352.12 欄位映射、afterCommit backfill與aggregate。**shares依對帳值；先以未捨入BigDecimal算`costPrice.multiply(shares)`與`actualTradePrice.multiply(shares)`，最後各`setScale(2,HALF_UP)`，再要求result precision≤20才寫`NUMERIC(20,2)`；operand合法但乘積overflow整批rollback，禁止先round operand。`originalCurrencyValue/transactionType/transactionDate/transactionExchangeRate`精確為null並由mapping test逐欄斷言。dividend沿用／重算、displayOrder與唯一aggregate calculator維持既定規則。quote name仍只走唯一`StockMasterService.upsert`；必須把其既有`scheduleBackfill` dispatch改為：active transaction時註冊transaction synchronization並在afterCommit才submit既有executor，rollback零submit、成功commit每個新code恰一次；無active transaction才可立即submit。不得新增繞過service的repository路徑。
 
-- [ ] **352.13 零schema、零新observability dependency。**不得新增DB/Liquibase，也不新增Actuator/Micrometer依賴。broker FK為provenance、fingerprint不持久化。用固定enum outcomes `DISABLED/MISCONFIGURED/CALENDAR_UNKNOWN/ACCOUNTING_FAILED/RECONCILE_FAILED/QUOTE_FAILED/NO_OWNER/NO_TODAY_SNAPSHOT/BROKER_MISSING/DRY_RUN/SUCCESS/EMPTY_CLEARED/ROLLED_BACK`；Java以`EnumMap<Outcome,LongAdder>`、Python以固定key counter作process-local累計，每輪structured summary/manual response可讀。不得動態以account/code建key；log最多batch/fingerprint/count/snapshot/reason。
+- [x] **352.13 零schema、零新observability dependency。**不得新增DB/Liquibase，也不新增Actuator/Micrometer依賴。broker FK為provenance、fingerprint不持久化。用固定enum outcomes `DISABLED/MISCONFIGURED/CALENDAR_UNKNOWN/ACCOUNTING_FAILED/RECONCILE_FAILED/QUOTE_FAILED/NO_OWNER/NO_TODAY_SNAPSHOT/BROKER_MISSING/DRY_RUN/SUCCESS/EMPTY_CLEARED/ROLLED_BACK`；Java以`EnumMap<Outcome,LongAdder>`、Python以固定key counter作process-local累計，每輪structured summary/manual response可讀。不得動態以account/code建key；log最多batch/fingerprint/count/snapshot/reason。
 
-- [ ] **352.14 自動測試矩陣。**Python fake SDK除既有auth/session/route/trial/cache cases，quote fixture使用官方raw `previousClose/openPrice/highPrice/lowPrice`並驗只有`open/high/low` alias時拒絕；逐側釘住raw stale date、wrong account、wrong branch在fingerprint/normalize前拒絕。decimal含precision20/scale10、precision21/scale11、shares 1/9,999,999,999/overflow、volume 0/Long.MAX/overflow與`0.1`。backend calendar/queryDate quote gate須分別驗TWSE base與完整DGPA provisional base皆可形成known true並依交易日結果授權，雙來源皆無仍unknown且零quote／零寫入；另涵蓋partial replace/empty/dividend/aggregate，mapping精確斷言`transactionExchangeRate==null`；金額 fixture 必須精確斷言`12.345×3→37.04`、`999999999999999999.99×1→999999999999999999.99`可寫，以及兩個各自合法的operand `1000000000×9999999999→9999999999000000000.00`在scale2後precision21而整批rollback。另用真PostgreSQL、兩個獨立transaction與latch（不得mock repository/H2）分別讓Fubon sync先鎖、完整update先鎖；兩序列皆斷言非Fubon rows不遺失、stale舊Fubon不復活、totals等於final children。StockMaster測試用可控transaction證明rollback backfill call=0、commit後=1且發生在commit後、無transaction立即=1。其餘redaction、session cleanup、missing token healthy與schedule catalog不回歸。
+- [x] **352.14 自動測試矩陣。**Python fake SDK除既有auth/session/route/trial/cache cases，quote fixture使用官方raw `previousClose/openPrice/highPrice/lowPrice`並驗只有`open/high/low` alias時拒絕；逐側釘住raw stale date、wrong account、wrong branch在fingerprint/normalize前拒絕。decimal含precision20/scale10、precision21/scale11、shares 1/9,999,999,999/overflow、volume 0/Long.MAX/overflow與`0.1`。backend calendar/queryDate quote gate須分別驗TWSE base與完整DGPA provisional base皆可形成known true並依交易日結果授權，雙來源皆無仍unknown且零quote／零寫入；另涵蓋partial replace/empty/dividend/aggregate，mapping精確斷言`transactionExchangeRate==null`；金額 fixture 必須精確斷言`12.345×3→37.04`、`999999999999999999.99×1→999999999999999999.99`可寫，以及兩個各自合法的operand `1000000000×9999999999→9999999999000000000.00`在scale2後precision21而整批rollback。另用真PostgreSQL、兩個獨立transaction與latch（不得mock repository/H2）分別讓Fubon sync先鎖、完整update先鎖；兩序列皆斷言非Fubon rows不遺失、stale舊Fubon不復活、totals等於final children。StockMaster測試用可控transaction證明rollback backfill call=0、commit後=1且發生在commit後、無transaction立即=1。其餘redaction、session cleanup、missing token healthy與schedule catalog不回歸。
 
 ## 驗證
 
@@ -143,9 +143,72 @@ fi
 
 ## 完成報告
 
-**完成日期：** 待實作後填寫
-**變更檔案：** 待實作後逐檔列出
-**測試結果：** 待填寫（Python/backend/BFF，tests/failures/errors/skipped）
-**Docker 證據：** 待填寫（image digest/amd64/x86_64/import/health/no host port）
-**真實富邦 dry-read／局部同步：** 待填寫；若缺secret、非交易日或無今日snapshot，明列限制，不得寫「已驗證」
-**與規格偏差：** 待填寫
+**完成日期：** 2026-08-22
+
+**變更檔案：** 主要落地已於前一輪（commit `6e3f6bb8`「完成富邦庫存同步與台股行情整合」，merge `1e1cf5cc`）
+完成，涵蓋 `fubon-broker-service/`（Dockerfile、`.dockerignore`、`requirements*.txt`、
+`src/fubon_broker_service/{app,config,sdk_gateway,portfolio,quotes,numeric,redaction,counters}.py`、
+`tests/`）、`backend/src/main/java/com/steven/assets/integration/fubon/*`（連同對應 test）、
+`backend/src/main/java/com/steven/assets/service/{AssetSnapshotMutationLock,SnapshotAggregateCalculator,
+StockMasterService,AssetService}.java`、`docker-compose.yml`、`secrets/fubon/`、`.env.example`。
+本輪（本次 session）只補當時稽核發現的兩個真實缺口，逐檔如下：
+- `fubon-broker-service/src/fubon_broker_service/redaction.py`：新增 `redact_mapping()`（遞迴 redact
+  JSON-like 結構的字串 leaf，保留 dict key／list 順序／非字串型別）、`RedactingLogFilter`
+  （`logging.Filter`，在 log record 真正 emit 前呼叫 `redact()`）、`install_log_redaction()`。
+- `fubon-broker-service/src/fubon_broker_service/app.py`：module load 時對本服務實際使用的兩個 logger
+  （`fubon_broker_service.app`／`fubon_broker_service.sdk_gateway`）安裝該 filter；全部 9 處組成
+  `JSONResponse`/`HTTPException` response body 的字典改用 `redact_mapping(...)` 包一層。
+- `fubon-broker-service/tests/test_app_routes.py`：新增
+  `test_log_pipeline_redacts_a_careless_raw_value_not_just_the_redact_function`（繞過「只 log 固定
+  reason 字串」慣例、直接對真實 logger 帶 raw personal-id/account/api-key 值，證明 filter 真的掛在
+  輸出管線上）與 `test_redact_mapping_preserves_response_schema_while_redacting_string_leaves`。
+
+**測試結果：**
+- `docker buildx build --no-cache --platform linux/amd64 --target test -f fubon-broker-service/Dockerfile fubon-broker-service` → `docker run ... pytest -q`：**92 passed, 0 failed, 0 errors**（`--no-cache` 重build 後再跑，排除 layer cache 造成的偽陽性）。
+- `mvn -f backend/pom.xml test`：**1216 run / 0 failures / 0 errors / 0 skipped**。
+- `mvn -f bff/pom.xml test`：**156 run / 0 failures / 0 errors / 0 skipped**（含
+  `SchedulePublicBffControllerTest.項目數正確()` 對 56=22+34 的非回歸斷言）。
+- `mvn -f external-materials-service/pom.xml test`：**539 run / 0 failures / 0 errors / 0 skipped**
+  （t353 與 t352 共用同一 external 模組，一併驗證）。
+- `bash scripts/spec-check.sh`：PASS（BLOCK 0 / CHECK 0）。
+
+**Docker 證據：**
+- `docker image inspect asset-fubon-broker-service:test --format '{{.Architecture}}'` → `amd64`（透過
+  `--platform linux/amd64` buildx 產出，非開發機原生 arch）。
+- image 內 `unzip -p ... | grep fubon_neo` 確認 hash 驗證安裝出的 `fubon_neo` runtime package 存在；
+  repo 內 `git ls-files fubon-broker-service secrets` 無任何 `.whl/.zip/.pfx` 被追蹤。
+- `docker-compose.yml` 的 `fubon-broker-service` 服務區塊：無 `ports:`、`platform: linux/amd64`、
+  `read_only: true`、`cap_drop: ALL`、`security_opt: no-new-privileges:true`、healthcheck 只用
+  Python stdlib 打容器內 `/internal/health`；`FUBON_ENABLED` 預設 `false`；其他服務 `depends_on` 未
+  引用 `fubon-broker-service`。
+
+**真實富邦 dry-read／局部同步：** **未執行。** 本次未安裝真實 Fubon `sdk/personal-id`／`sdk/api-key`／
+`sdk/certificate.pfx`／`sdk/certificate-password` 等 secret（`secrets/fubon/sdk/` 目前仍只有
+`.gitkeep`），也未在真實台股交易日對 configured admin 執行 `dryRun=false` 的實際庫存同步。t352 底部
+「有安裝真實 secrets 時的受控驗收」四項checkbox維持未勾選，待使用者實際完成官方首次連線測試並提供
+secret 後再另行驗收，不得以本次 fixture/deterministic test 結果宣稱已取得真實庫存。
+
+**與規格偏差：**
+1. **352.4（本輪修復重點）**：稽核發現 `redaction.py` 的 `redact()` 原本是已寫且有單元測試、但從未
+   接進 `app.py`/`sdk_gateway.py`/`portfolio.py`/`quotes.py` 任何實際 log/response 輸出路徑的死碼——
+   安全性原本完全仰賴「所有 log 呼叫恰好只帶固定 reason 字串」的程式慣例。本輪已將其接成真正的中央
+   防線（見上方變更檔案），並新增測試證明「即使有人不慎在 log 裡帶 raw 值，也會被攔截」而非只測
+   `redact()` 這個函式本身。
+2. **352.14（TWSE base／DGPA provisional base 分別驗證 known-true）**：backend 端
+   `MarketDataService.isTwTradingDayKnown()` 只讀取 `/internal/tw-holidays` 回傳的單一已合併 map，
+   結構上無法從 backend 層分辨該次 known-true 究竟來自 TWSE 還是 DGPA provisional 來源——這是刻意的
+   分層設計（backend 不需要也不應該知道日曆的內部來源）。「TWSE 來源本身可獨立形成 known-true」與
+   「DGPA provisional 來源本身可獨立形成 known-true」這兩條路徑，實際驗證落在
+   `external-materials-service` 的
+   `MarketDataFetchServiceTwAuthorityRetryTest.twseSuccessNeverTouchesDgpaAndBothPublicReadsShareInstalledEntry()`
+   與 `.dgpaProvisionalDrivesSharedKnownCalendarWhileDualSourceFailureStaysUnknown()`；Fubon 側
+   `FubonInventorySyncSchedulerTest.knownTradingDayCallsAdapterOrchestrationOnce()` 與
+   `realDgpaProxyAuthorizesWorkdayButHolidayAndUnknownStopBeforeQuoteWritePath()` 則驗證「不論來源，
+   只要 known-true 就會授權排程往下走；holiday/unknown 則不會」。兩層合起來才是完整證明鏈，未在
+   Fubon 測試檔內重覆造一組backend層無法區分來源的假測試。
+3. **schedule catalog 56=22+34 非回歸**：先前稽核誤判此項 MISSING（該次稽核只搜了
+   `backend/src/test/java/`），實際上此斷言在 `bff/src/test/java/.../SchedulePublicBffControllerTest.
+   項目數正確()` 中已存在且持續通過，本次已重新確認（見上方 bff 測試結果）。
+4. 除上述兩點外，稽核逐條核對 352.1–352.13 與 352.14 其餘子項（decimal/shares/volume 邊界、raw
+   身份先驗、pessimistic lock、afterCommit backfill、固定 enum outcomes、零 schema/observability
+   依賴等）均與現有程式碼/測試相符，無其他偏差。
