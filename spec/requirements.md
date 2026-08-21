@@ -3341,9 +3341,9 @@ FROM stock_price_history WHERE market='台股';
 
 ---
 
-### Requirement 89／Task 350: 股票分析價格圖新增日 K／週 K 圖型
+### Requirement 92／Task 355: 股票分析價格圖新增日 K／週 K 圖型
 
-> Requirement 88／Task 349 已由主線 ETF 官方折溢價功能使用；本功能同步主線後固定續編為 Requirement 89／Task 350。
+> Requirement 89／Task 350 已由主線「台股 Redis 最新價快取新鮮度」功能使用；本功能併入主線時固定續編為 Requirement 92／Task 355。
 
 **User Story:** 作為投資人，我希望股票分析 popup 的價格走勢圖除了既有折線，也能切換為日 K 與週 K，直接比較每個交易日或交易週的開、高、低、收，而不需要離開既有技術指標與期間操作介面。
 

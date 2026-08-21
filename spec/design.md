@@ -110,7 +110,7 @@ com.steven.assets/
   - `POST /api/bff/snapshot-form/fund-nav/refresh`：觸發後端 → external-materials-service 立即刷新所有基金 NAV，回 `{ success, failed, total }`
 - `StockAnalysisBffRoutes` ＋ `StockAnalysisChartBffController`（Task 261 新增的 aggregation controller，與同前綴的 exact-path route 並存；WebFlux `RequestMappingHandlerMapping`（order 0）先於 Gateway `RoutePredicateHandlerMapping`（order 1），且六條 Gateway route 皆為精確路徑、不含萬用，故不衝突——同一模式的既有先例為 `StockAlertBffController` ＋ `StockAlertBffRoutes`）（StockAnalysisDialog 跨 view 共用元件專屬）：對話框被 Dashboard / SnapshotForm / WatchStock / StockAlert / RealizedGain / TradingRadar / Transaction **七個** view 同時使用（損益明細列雙擊開啟為既有；交易雷達個股決策表列雙擊為 Task 234 加入；交易紀錄明細列雙擊為 Task 311 加入），依「同義欄位、同一 business service API」原則拆為獨立 BFF route，避免在七個父 view 的 BFF 各自重複代理。Dashboard 開啟此 dialog 的觸發點有三：持股表格列雙擊（`onStockDblClick`）、個股 bar 圖雙擊（`onBarDblClick`）、以及「資產配置分佈」tab 2/3 個股穿透圓餅圖 segment 單擊（`onLookthroughPieClick(params, market)`，「其它」聚合段無代號不開；命中當前快照 `mergedStocks` 同 `stockCode`+`market` 的直接持股則沿用完整列以保留 `avgCostOriginal` 成本欄位、否則僅帶 `{stockCode, stockName, market}`）。提供：
   - `GET /api/bff/stock-analysis/history/stock` → `/api/market-data/history/stock`
-  - `GET /api/bff/stock-analysis/chart-series`（Task 261，由 **`StockAnalysisChartBffController`** 提供，**非 Gateway passthrough**）：BFF 並行呼叫 business history 與 indicator series。top-level 仍以 `tradingDate` 聯集對齊，保留折線既有等長陣列與 indicator-only 尾日語意；Requirement 89／Task 350 另加 BFF 已完成 cutoff／ISO 週聚合／latest 的非 null `daily`、`weekly` server-ready frame，frontend 只 render。兩支上游的今日格條件不同，故 top-level 必須取聯集
+  - `GET /api/bff/stock-analysis/chart-series`（Task 261，由 **`StockAnalysisChartBffController`** 提供，**非 Gateway passthrough**）：BFF 並行呼叫 business history 與 indicator series。top-level 仍以 `tradingDate` 聯集對齊，保留折線既有等長陣列與 indicator-only 尾日語意；Requirement 92／Task 355 另加 BFF 已完成 cutoff／ISO 週聚合／latest 的非 null `daily`、`weekly` server-ready frame，frontend 只 render。兩支上游的今日格條件不同，故 top-level 必須取聯集
   - `GET /api/bff/stock-analysis/quote-detail` → `/api/market-data/quote-detail`（Requirement 87／Task 348）：登入後「行情五檔」exact passthrough；只供共用 dialog 展示單次 Yahoo 台股摘要＋orderbook snapshot，不供估值、quotes、SSE 或其他 consumer
   - `GET /api/bff/stock-analysis/dividends` → `/api/market-data/dividends`
   - `GET /api/bff/stock-analysis/etf-holdings` → `/api/market-data/etf-holdings`
@@ -8163,7 +8163,7 @@ external parser 測試使用完整 script fixture，其中 marker 外保留 `und
 
 runtime 依 external → business → BFF → frontend 順序重建／recreate，上游每次換 IP 後 restart BFF。瀏覽器以 `00697B`、一檔 `TAI`、一檔 `TWO` 實際開 tab，核對 12 格、內外盤與五檔小計；再驗美股／英股沒有 tab、原走勢圖仍能切指標／期間。驗證期間釘住四個 image SHA，結論前再確認未被其他 worktree 重建覆蓋。
 
-## Requirement 89／Task 350：股票分析價格圖的日 K／週 K
+## Requirement 92／Task 355：股票分析價格圖的日 K／週 K
 
 ### UI 模式與既有行為邊界
 
