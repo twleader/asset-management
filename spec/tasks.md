@@ -29,7 +29,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 
 ---
 
-## 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–347、349–350）
+## 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–347、349–350、355）
 
 | Task | 標題 | 位置 |
 |---|---|---|
@@ -348,6 +348,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 347 | 今日交易雷達 9090 公開 API 與 OpenAPI 3 全覆蓋硬規則（Requirement 86） | [tasks/t347_trading_radar_public_api_openapi.md](tasks/t347_trading_radar_public_api_openapi.md) |
 | 349 | 台股 ETF 官方折溢價改為每 2 分鐘更新，並以 nullable 欄位併入 Docker 外部 quote API（Requirement 88；Task 348 由其他在途 worktree 保留） | [tasks/t349_etf_premium_quotes_2min.md](tasks/t349_etf_premium_quotes_2min.md) |
 | 350 | 台股 Redis 最新價日期時間單調守門、MIS 批次重試與每輪可觀測統計（Requirement 89） | [tasks/t350_tw_quote_cache_freshness.md](tasks/t350_tw_quote_cache_freshness.md) |
+| 355 | 今日交易雷達拆為「一周」「1周~1月」「1月~6月」三軌，並把日K 棒與真正的週K 聚合指標納入評分（Requirement 92；Task 351／352／353／354 各自為獨立任務檔） | [tasks/t355_radar_three_horizon_weekly_k.md](tasks/t355_radar_three_horizon_weekly_k.md) |
 
 > **註：Task 229–263、268、293–296 以各自任務檔為準。**
 

@@ -3431,3 +3431,36 @@ FROM stock_price_history WHERE market='台股';
 - [ ] **相容、邊界與禁止 fallback 測試：**fake adapter/HTTP fixture使用官方raw keys `previousClose/openPrice/highPrice/lowPrice`，並釘住只有錯誤`open/high/low` alias時整筆拒絕；另至少涵蓋合法市場pair、16位microseconds、trial/actual衝突、wrong symbol/date、future/older/equal、429/timeout/partial/>100/cache/single-flight，以及decimal `"9999999999.9999999999"`接受、`"10000000000.0000000000"`／`"0.00000000001"`拒絕、volume `0/9,223,372,036,854,775,807`接受與負值/9,223,372,036,854,775,808拒絕。四入口×enabled/disabled strategy都要分別驗known true下盤中success/provider failure、known false、calendar authority empty與authority throw，逐案精確斷言Fubon/MIS HTTP及Redis writer/tick/pubsub call count；false/empty/throw全為0，enabled任何失敗零MIS/Yahoo fallback，disabled零Fubon。真Redis Lua另以current missing＋`marketOpenAuthorized=false`驗`MARKET_CLOSED`且value/index TTL/pubsub/tick完全不變，再驗open時newer/takeover契約；並直接執行production script覆蓋wrong-type latest/index、非法TTL、malformed或JSON/ARGV不一致，以及FUBON來源同日VERIFIED_CLOSE遭較新LIVE防降級，逐案驗payload bytes、index type/member、兩種TTL、publish count與tick均不變，證明錯誤後沒有partial mutation。公開 `/api/quotes`／`one` 19欄與ETF enrichment不回歸。
 - [ ] **Docker 實機驗證：**無秘密且 disabled 的正式 Compose 可健康啟動；amd64 Python image 內 `from fubon_neo.sdk import FubonSDK` 成功、`uname -m` 為 x86_64、無 host port。安裝真實 secrets 後，開盤中須以同代號查 normalized endpoint與 Redis/API，證明來源為 `FUBON_INTRADAY`、`isTrial`不為true且使用actual pair、provider timestamp前進，並證明MIS/Yahoo沒有被呼叫；若休市或無secrets，完成報告必須明列live證據未取得，不得以fixture／舊cache冒充。
 - [ ] **不在本次範圍：**不把富邦當成美股、英股或 FX provider；不替換官方盤後收盤、歷史序列、ETF NAV／折溢價、基本面或新聞來源；不新增公開 endpoint、Redis key/schema、DB schema或 Liquibase，也不把 `closePrice` 的欄名誤解成盤後官方定案收盤。
+
+---
+
+### Requirement 92／Task 355: 今日交易雷達由兩軌拆為「一周」「1周~1月」「1月~6月」三軌，並把日K棒與週K真正納入分析
+
+**User Story:** 作為投資人，我希望交易雷達的持有期建議從現在的「短期／中期」兩軌拆成三軌——**一周**、**1周~1月**、**1月~6月**——因為「五個交易日」與「六個月」中間隔著一整個波段尺度，被硬塞進其中一軌時兩邊都不準；同時我希望分析真的看**日K**與**週K**，而不是只看收盤價序列算出來的均線與指標。
+
+> **本 Requirement 推翻 Requirement 60（Task 291 修訂）的「兩軌收斂」決定。** 該決定當時寫的是「短期固定約 5 個交易日；中期以 20／60／120 個交易日檢視，最長約 6 個月」。推翻的理由不是回測結論，而是使用者明確的需求方向：兩軌之間存在一段沒有被任何一軌代表的持有期（約 5–20 個交易日）。處理方式是**新增第三軌**，不是重新定義既有兩軌的邊界——既有「一周」與「1月~6月」兩軌的持有期定義維持不變，避免既有消費端（通知、匯出、快照）語意漂移。
+>
+> **本 Requirement 也推翻「週線 MA5 就是週K」這個既有的措辭錯誤。** 現行 `TechnicalIndicatorService.FullIndicators.weeklyMa` 與 `StockDecision.weeklyMa` 命名為「週線」，實際上是**日K 序列的 5 日簡單移動平均**，不是週 OHLC 聚合。全專案 active code 中**不存在任何真正的週K**。本 Requirement 新增之，且**不改動 `weeklyMa` 的既有定義與欄位名**（改名會讓既有快照與匯出語意漂移），改以獨立命名的新欄位承載真正的週K。
+>
+> **同樣要澄清「日K 已經在用了」這件事並不完整。** 現行評分讀的是還原後的**收盤價序列**與由其導出的 MA／KD／MACD／RSI／BIAS／W%R，以及「收盤 vs 前一收盤」的 `completedChangePercent`。`stock_price_history` 的 `open_price`／`high_price`／`low_price` 除了餵給 KD 的 RSV 與 52 週高低之外，**從未以「K 棒本身」的形式進入任何因子**——沒有實體方向（收 vs 開）、沒有收盤在當日高低區間的位置、沒有上下影線。本 Requirement 補上這一組。
+
+**Acceptance Criteria:**
+
+- [ ] **三軌的持有期定義固定，且既有兩軌不得改變語意**：三軌為 **`一周`（約 5 個交易日）**、**`1周~1月`（約 5–20 個交易日）**、**`1月~6月`（約 20–120 個交易日）**。既有 `shortScore`／`shortAction`／`shortActionLabel`／`shortReasons`／`shortRisks` 一律保留原名並固定為**一周**軌；既有 `score`／`action`／`actionLabel`／`reasons`／`risks` 一律保留原名並固定為 **1月~6月** 軌。新增的中間軌以 `swing` 前綴命名（`swingScore`／`swingAction`／`swingActionLabel`／`swingReasons`／`swingRisks` 等），**不得**改名或位移既有兩軌的任何欄位。畫面必須明白標示每一軌的持有期，使用者不得需要猜測。
+- [ ] **三軌各自獨立評分，不得由單一分數切三刀**：三軌各自建立累加器、各自使用一組權重、各自加總為 `1.00`，缺值因子由可用因子重新正規化（不得以 `0` 冒充缺值）。**不得**以「同一個分數套三組門檻」實作——那無法表達「一周超買、1周~1月中性、1月~6月結構完好」這種三軌不同向的狀態，而能表達它正是本 Requirement 的目的。權重必須是具名常數，完整的 23 因子 × 3 軌權重表以自足任務檔 `spec/tasks/t355_radar_three_horizon_weekly_k.md` 為**唯一契約**，本文件刻意不複寫（沿用本專案「設計／需求文件不複寫權重數字，避免兩處數字漂移」的既有慣例）。
+- [ ] **權重須跨軌單調，且此性質須被測試釘住**：對每一個因子，其權重在「一周 → 1周~1月 → 1月~6月」三軌之間必須是單調（不遞增或不遞減）的，不得出現中間軌高於或低於兩端的非單調鋸齒。這不是美觀要求：中間軌的存在理由就是「介於兩者之間」，非單調的權重等於宣告該軌不是插值而是第三套獨立直覺，那需要各自的回測依據，本 Requirement 沒有提供。
+- [ ] **週K 是真正的週 OHLC 聚合，且完成週的判定不依賴日曆**：週的單位為 `trading_date` 的 **ISO-8601 週（週一為週首）**，與市場時區無關（`trading_date` 已是該市場的當地交易日期）。一根週K 由該週所有完成日 K 聚合：`open` 取該週最早交易日的開盤、`high` 取最大值、`low` 取最小值、`close` 取該週最晚交易日的收盤、`volume` 取加總。**序列中 ISO 週最晚的那一根一律視為「進行中週」**，不進入任何指標與評分——完成週的判定完全由序列自身決定，不查交易日曆、不讀系統時間，因此回測可重現且同一週內週K 因子不會逐日抖動。進行中週得以獨立欄位純揭露，但**不得**進入 `StockInput`／`MarketInput`。
+- [ ] **週K 與日K 必須同一還原基準**：週K 一律由**還原權息／分割後**的日 K 聚合，價格用既有 price scale、成交量用既有 share-only `historicalShareScale`，不得混用原始價基。禁止只還原日K 不還原週K，也禁止對週K 另立一套還原規則。
+- [ ] **取數視窗擴大不得改變既有日K 任何一位輸出**：週K 指標（週MACD 需 EMA26＋MACD9 暖機、週MA20 需 20 根完成週）需要遠多於現行 241 根日K 的歷史。取數視窗因此擴大，但**日K 路徑必須收到與擴大前逐位相同的輸入**：由同一次查詢取回長視窗後，切出最新的既有筆數餵給既有日K 組裝，長視窗只供週K 聚合使用。須有回歸測試以固定資料斷言擴窗前後日K 因子、`score`、`action`、`reasons`、`risks` 逐位不變；**不得**以「應該不會變」作為結論。
+- [ ] **日K 棒本身成為一個因子**：新增以最新**完成日** K 棒為輸入的因子，分量為（a）收盤在當日 `high–low` 區間的相對位置、（b）實體方向 `sign(close − open)`、（c）下影線相對全幅的比例（下影線長＝低檔有承接，正貢獻）。任一分量缺 `open`／`high`／`low` 或當日 `high == low` 時該分量缺值，全部缺值時整個因子缺值並重分配權重。此因子與既有 `completedChangePercent`（收盤 vs 前一收盤）**正交**：後者量「相對昨天走到哪」，前者量「當天這根 K 棒內部誰主導」。
+- [ ] **週K 因子適用台股個股、台股大盤、美股個股與美股大盤**：四者都必須實際吃到週K，不得只做個股而讓大盤 regime 停在純日K——那會讓同一頁上「個股說週線轉強、大盤卡片對此毫無反應」。大盤側的週K 影響須反映在 `MarketSummary` 的可見欄位與理由／風險文字，資料不足時誠實揭露為「不採計」，**不得**寫成中性結論。
+- [ ] **不追高殺低的三個閘門在三軌各自成立**：既有的買進閘門（過熱關閉買進、`completedChangePercent < 0` 不得買進、極端超買不追價）、逢低承接（止跌才低接）、極端超賣阻擋殺低、以及「高檔獲利了結至少要有兩類轉弱確認」四項保護，必須在三軌**各自**成立，不得只在其中兩軌實作。
+- [ ] **三軌分歧只揭露、不合成**：任兩軌的動作分組不同即 `horizonConflict=true`，畫面收合列即可看出。系統**不得**自行合成單一建議，也不得隱藏其中任一軌——「哪一軌該聽」取決於使用者當下的資金安排，系統沒有該資訊。
+- [ ] **通知邊界維持在「1月~6月」軌，且不新增 DB 欄位**：`trading_radar_notification_setting.last_action` 與通知選單維持既有的最長軌語意；**不新增**一周軌或 1周~1月 軌的通知、不新增資料表或欄位。通知設定 UI 的文案由「中期建議（1–6 月）」改為「1 月~6 月建議」，避免使用者誤認另兩軌的變化會寄信。`RULE_VERSION` 升版後由既有 `rule_version` 機制重建通知基準、首輪不寄信。
+- [ ] **`RULE_VERSION` 必須升版**：因子集合、權重與可觀察輸出全部改變，`TW_RULES_V14` → `TW_RULES_V15`。V14 與 V15 的分數**不可直接比較**，此不可比性須明文揭露於 Javadoc 與畫面免責文字。V13 candidate 標籤仍保留給離線 calibration，production 版號不得竊用。
+- [ ] **1周~1月 軌不納入 V13 candidate／promotion 機制**：現行 promotion registry 的候選參數是以 `5／20／60／120` horizon 對**兩軌**做樣本外校準選出的，沒有任何針對 1周~1月 軌的 holdout 證據。該軌一律走 V15 baseline，`evaluatePromoted` 不得讓任一 promoted key 影響它。此限制須寫進 Javadoc 並以測試釘住，**不得**因為「反正 registry 現在是空的」而留下會在未來靜默生效的路徑。
+- [ ] **回測必須涵蓋三軌，且與 production 共用同一份組裝與引擎**：前瞻報酬 horizon 由 `5／20／60／120` 改為 `5／10／20／60／120`；一周軌對應 `5`、1周~1月 軌對應 `10` 與 `20`、1月~6月 軌對應 `60` 與 `120`。完成報告須列出三軌各述詞在各 horizon 的樣本數、平均／中位報酬、勝率、跌逾 10% 比例與同標的同期間基準差額。**回測是稽核，結果不好也必須如實揭露，不得因此隱藏或事後調參**；要改本 Requirement 的權重或門檻必須先改規格再重審。
+- [ ] **API、快照、匯出、OpenAPI 與畫面同步**：`/api/trading-radar`、`/api/bff/trading-radar/**` 與 `GET /api/public/trading-radar/today` 三處新增三軌與週K／日K 棒欄位；`docs/openapi/docker-external-api.yaml` 必須在**同一個 commit** 內補齊全部新欄位（含 `required` 清單與可達巢狀 schema），依 Requirement 86 的硬規則，文件不完整即視為功能未完成。快照以 DTO round-trip 證明新欄位保存，舊快照缺欄位反序列化為 `null`／`false` 而非讀檔失敗。匯出（Excel 與 JSON 同一份 `ExportDoc`）新增 1周~1月 軌欄與週K 指標欄，舊快照該欄留白。
+- [ ] **不得表述為預測**：三軌的文案一律描述「當前位置與狀態」，不得出現「一周內會漲」「1周~1月必獲利」「機率」等語句。分數代表「目前位置的相對獲利機會」，不是獲利機率或報酬預測。
+- [ ] **不在本次範圍**：不新增排程、不新增資料表與 Liquibase changeset、不直接呼叫外部行情／新聞／匯率 API、不觸發爬蟲、不使用 AI／LLM、不擴大評分標的集合、不自動下單、不新增 9090 路由（既有第九條 `GET /api/public/trading-radar/today` 的回應內容擴充不算新增路由）。
+- [ ] **驗證**：測試至少涵蓋——(a) 三軌權重各自精確為 `1.00` 且跨軌單調；(b) 任一 optional 因子缺值時確實重分配而非計 `0`；(c) 構造「一周超買、1月~6月結構完好」的輸入，斷言三軌動作確實不同（若退化為單一分數切三刀，此測試必失敗）；(d) 擴窗前後日K 路徑逐位不變；(e) 週K 聚合的 open／high／low／close／volume 正確，且最晚 ISO 週恆被排除；(f) 跨年 ISO 週（第 52／53 週與次年第 1 週）不得被聚成同一根；(g) 週K 樣本不足時整組週K 因子缺值而非以短序列硬算；(h) 日K 棒因子在缺 OHL、`high == low` 與十字線三種情形下的行為；(i) 三軌各自的買進閘門、低接、極端超賣保護與多證據獲利了結；(j) promoted registry 不影響 1周~1月 軌；(k) 通知 transition 只看 1月~6月 軌；(l) 快照 round-trip 與 OpenAPI／gateway 雙向對齊。部署後於實機確認頁面可同時看到三軌、三軌分歧標示、以及展開列的日K 棒與週K 指標數值。
