@@ -79,6 +79,8 @@ class PortfolioAdviceServiceCurrentAllocationTest {
     @Mock private TransitFundTypeRepository transitFundTypeRepo;
     @Mock private FundNavService fundNavService;
     @Mock private FundDividendService fundDividendService;
+    @Mock private AssetSnapshotMutationLock snapshotMutationLock;
+    @Mock private SnapshotAggregateCalculator snapshotAggregateCalculator;
 
     private final AssetClassifier assetClassifier = new AssetClassifier();
     private final LocalPortfolioAllocationEngine localEngine = new LocalPortfolioAllocationEngine();
@@ -98,7 +100,8 @@ class PortfolioAdviceServiceCurrentAllocationTest {
         assetService = new AssetService(
                 snapshotRepo, depositRepo, fundRepo, stockRepo, gainRepo, rateHistRepo, marketDataService,
                 bankRepo, brokerRepo, stockMasterRepo, stockMasterService, transitFundTypeRepo, fundNavService,
-                fundDividendService, assetClassifier, stockStyleRepo, fundClassOverrideRepo, tenantGuard);
+                fundDividendService, assetClassifier, stockStyleRepo, fundClassOverrideRepo, tenantGuard,
+                snapshotMutationLock, snapshotAggregateCalculator);
 
         // 股票主檔 override：0056（高股息 ETF，命中規則清單 → 收益型）、00679B（債券 ETF，名稱含「20」→ 長期債）、2330（無 override，走規則）
         when(stockMasterRepo.findAll()).thenReturn(List.of(

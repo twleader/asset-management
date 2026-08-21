@@ -24,11 +24,24 @@ class SchedulePublicBffControllerTest {
     }
 
     @Test
-    @DisplayName("排程清單完整列出 21 個業務與 34 個外部行情工作")
+    @DisplayName("排程清單完整列出 22 個業務與 34 個外部行情工作")
     void 項目數正確() {
-        assertThat(jobs()).hasSize(55);
-        assertThat(jobs()).filteredOn(j -> "業務服務".equals(j.service())).hasSize(21);
+        assertThat(jobs()).hasSize(56);
+        assertThat(jobs()).filteredOn(j -> "業務服務".equals(j.service())).hasSize(22);
         assertThat(jobs()).filteredOn(j -> "外部行情服務".equals(j.service())).hasSize(34);
+    }
+
+    @Test
+    @DisplayName("富邦庫存同步精確登錄 cron、時區與內網唯讀語意")
+    void 富邦庫存同步排程契約() {
+        assertThat(jobs()).filteredOn(j -> "富邦台股現股庫存同步".equals(j.name()))
+                .singleElement()
+                .satisfies(job -> {
+                    assertThat(job.service()).isEqualTo("業務服務");
+                    assertThat(job.cron()).isEqualTo("0 5,35 9-13 * * MON-FRI");
+                    assertThat(job.zone()).isEqualTo("Asia/Taipei");
+                    assertThat(job.description()).contains("唯讀", "局部替換", "configured admin");
+                });
     }
 
     @Test

@@ -1,0 +1,17 @@
+package com.steven.assets.integration.fubon;
+
+public enum FubonOutcome {
+    DISABLED,
+    MISCONFIGURED,
+    CALENDAR_UNKNOWN,
+    ACCOUNTING_FAILED,
+    RECONCILE_FAILED,
+    QUOTE_FAILED,
+    NO_OWNER,
+    NO_TODAY_SNAPSHOT,
+    BROKER_MISSING,
+    DRY_RUN,
+    SUCCESS,
+    EMPTY_CLEARED,
+    ROLLED_BACK
+}

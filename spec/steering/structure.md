@@ -11,6 +11,7 @@ asset-management/
 ├── backend/                       # business-services（領域邏輯 + JPA）
 ├── bff/                           # BFF（Spring Cloud Gateway + 聚合 controller）
 ├── external-materials-service/    # 抓價 / NAV / 配息子系統
+├── fubon-broker-service/          # 富邦 proprietary SDK 的 Python/Linux 唯讀 adapter
 ├── api-gateway/                   # Docker 外部唯讀 API 的 Nginx exact allowlist
 ├── frontend/                      # Vue 3 SPA
 ├── db/
@@ -316,6 +317,28 @@ Tailscale Serve 只掛相同九條 exact path，包含公開 USD/TWD 匯率與�
 root／`/api/` proxy、Funnel、自簽憑證與另加 OAuth。九條 path/method 必須與版本控管的完整
 OpenAPI 3 契約機械對齊；Swagger 文件本身不新增 9090 route。
 
+### 4.5 Fubon Broker Service `fubon-broker-service/`
+
+```
+fubon-broker-service/
+├── Dockerfile                 # Python 3.13 multi-stage；runtime platform linux/amd64
+├── .dockerignore              # 排除 SDK 安裝媒介與 secrets
+├── requirements.txt           # exact-pinned runtime dependencies
+├── src/fubon_broker_service/
+│   ├── app.py                 # exact internal routes；關閉 docs/redoc/openapi
+│   ├── config.py              # mounted-file config state（lazy、fail closed）
+│   ├── security.py            # internal token constant-time verify＋redaction
+│   ├── sdk_gateway.py         # login/accounting/init_realtime/session lifecycle
+│   └── models.py              # normalized decimal-string wire DTO
+└── tests/                     # fake SDK/adapter；永不需要真實憑證
+```
+
+- proprietary SDK 只存在這個 Python service；Spring modules 經 `X-Internal-Service-Token` 主動 pull normalized internal API，不直接 import SDK。
+- 服務唯讀：只允許 health/config、portfolio dry-read、台股 intraday quote；不提供下單／改單／刪單，不連 PostgreSQL／Redis、不反向呼叫 business。
+- Compose 固定 `platform: linux/amd64`、無 host port、只接 `asset-net`、non-root/read-only/tmpfs/drop capabilities。官方 zip/wheel 安裝媒介不入 Git/build context/final image；hash 驗證後安裝的 runtime package可存在final image。
+- `secrets/fubon/sdk/` 只掛Python；Java services只可掛`secrets/fubon/shared/`。disabled或misconfigured時process/service仍healthy，functional feature回typed failure、零外呼/零寫入。
+- business-services 是庫存 persistence與tenant/transaction owner；external-materials-service是Redis live quote唯一writer。Python不得跨越這兩個責任邊界。
+
 ## 5. Frontend `frontend/`
 
 ### 5.1 目錄結構
@@ -403,9 +426,9 @@ frontend/
 
 ```
 spec/
-├── requirements.md       # 87 個 Requirements（User Story + AC；Requirement 87 由在途 worktree 保留，最新為 88）
+├── requirements.md       # 89 個 Requirements（Requirement 87／89 由在途 worktree 保留，最新為 91）
 ├── design.md             # 架構圖、ERD、Service 職責、Sequence
-├── tasks.md              # 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–347、349）＋ 尚未歸檔的 201 起區段
+├── tasks.md              # 現有索引含 Task 347／349；Task 348／350 在途保留，main Task 351 與 Fubon 352–353 採下方一檔一任務
 ├── tasks/                # 任務檔
 │   ├── README.md         # 自足任務檔規範
 │   ├── archive/          # Task 1–200 歷史，已凍結
@@ -457,12 +480,15 @@ frontend ──► bff ──► business-services ──► postgres
                           │
                           ├──► redis ◄── external-materials-service ──► (external APIs)
                           │              └────────────► postgres (fund_nav / stock_price_history / ...)
-                          │
-                          └──► external-materials (僅內網；Docker 外 quotes 由 api-gateway exact route 直達，見 Requirement 66／§4.2)
+                          ├──► external-materials (僅內網；Docker 外 quotes 由 api-gateway exact route 直達，見 Requirement 66／§4.2)
+                          └──► fubon-broker-service ◄── external-materials-service
+                                      │                 （兩者只主動 pull normalized API）
+                                      └──► Fubon API
 ```
 
 **禁止：**
-- ❌ frontend 直接打 business-services 或 external-materials-service
+- ❌ frontend 直接打 business-services、external-materials-service 或 fubon-broker-service
 - ❌ business-services 直接打外部行情 / NAV / 配息 API（一律經 external-materials）
 - ❌ external-materials-service 反向呼叫 business-services
+- ❌ fubon-broker-service 下單、寫 PostgreSQL／Redis或反向呼叫任一Spring service
 - ❌ 任何 service 跨層直接讀對方資料庫表（除非由 SDD 明確設計）

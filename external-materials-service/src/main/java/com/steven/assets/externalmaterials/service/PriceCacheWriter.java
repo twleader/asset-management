@@ -7,6 +7,9 @@ import com.steven.assets.externalmaterials.client.PriceFetchClient.PriceResult;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.data.redis.core.script.RedisScript;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -14,6 +17,7 @@ import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -40,6 +44,8 @@ public class PriceCacheWriter {
 
     private static final ObjectMapper MAPPER = new ObjectMapper()
             .setSerializationInclusion(JsonInclude.Include.NON_NULL);
+    private static final RedisScript<String> PROVIDER_TIMED_WRITE_SCRIPT = providerTimedWriteScript();
+    private static final String PRICE_UPDATE_CHANNEL = "price-update";
 
     // TTL = 24 小時：確保「今日撈到過真實 z 一次後，該值就在 Redis 內持續活著」直到被下一個真實 z 覆寫。
     // 舊值 600s（10 分鐘）對流動性低的 ETF / 個股（盤中可連續 10+ 分鐘 z='-'）撐不夠長 — TTL 過期就退回
@@ -84,29 +90,16 @@ public class PriceCacheWriter {
             mergedLow  = result.lowPrice();
         }
 
-        Map<String, Object> payload = new HashMap<>();
-        payload.put("stockCode", code);
-        payload.put("market", market);
-        payload.put("price", result.price());
-        BigDecimal previousClose = result.previousClose();
-        payload.put("previousClose", previousClose);
-        // 使用前端 / business-services DTO 一致的欄位名（priceChange / changePercent），SSE / /prices 介面對得上
-        payload.put("priceChange", changeOrNull(result.price(), previousClose, result.change()));
-        payload.put("changePercent", changePctOrNull(result.price(), previousClose, result.changePct()));
-        payload.put("buyPrice", result.buyPrice());
-        payload.put("sellPrice", result.sellPrice());
-        payload.put("openPrice", result.openPrice());
-        payload.put("highPrice", mergedHigh);
-        payload.put("lowPrice", mergedLow);
-        payload.put("volume", result.volume());
-        payload.put("stockName", result.stockName());
-        payload.put("source", result.source());
-        payload.put("tradingDate", tradingDate.toString());
         // Task 252：顯式台北牆鐘。此值前端直接顯示，且 StockPriceService 會跨 key 取 max——
         // 若跟著 JVM 預設時區跑，切換當下新舊 tick 會是兩種基準，max 恆被先覆寫的那一筆鎖住。
-        payload.put("updatedAt", LocalDateTime.now(MarketClock.TW_ZONE).toString());
-        payload.put("closed", markClosed);
-        payload.put("quoteStatus", markClosed ? "PREVIOUS_CLOSE" : "LIVE");
+        Map<String, Object> payload = buildPayload(
+                result,
+                tradingDate,
+                LocalDateTime.now(MarketClock.TW_ZONE),
+                markClosed,
+                markClosed ? "PREVIOUS_CLOSE" : "LIVE",
+                mergedHigh,
+                mergedLow);
 
         try {
             String json = MAPPER.writeValueAsString(payload);
@@ -114,7 +107,7 @@ public class PriceCacheWriter {
             redis.opsForSet().add(indexKey, code);
             redis.expire(indexKey, LIVE_TTL);
             // 發布到 pub/sub channel，business-services 訂閱後 SSE 推到前端
-            redis.convertAndSend("price-update", json);
+            redis.convertAndSend(PRICE_UPDATE_CHANNEL, json);
         } catch (Exception e) {
             log.warn("寫入 Redis 失敗 {} {}: {}", market, code, e.getMessage());
         }
@@ -133,6 +126,67 @@ public class PriceCacheWriter {
                     : MarketClock.TW_ZONE;
             LocalDateTime tickTime = LocalDateTime.now(zone).withNano(0);
             tickStore.appendTick(code, market, tradingDate, tickTime, result.price());
+        }
+    }
+
+    /**
+     * Fubon-only atomic path. The Lua script checks market authorization before even reading the
+     * current value, then compares the provider tuple and performs value/index/TTL/pubsub together.
+     * Tick append intentionally follows only a successful main write and is a separate Redis-key boundary.
+     */
+    public ProviderWriteResult writeProviderTimed(
+            ProviderTimedPriceObservation observation,
+            boolean marketOpenAuthorized,
+            boolean allowProviderTakeover) {
+        if (!validProviderObservation(observation)) {
+            return new ProviderWriteResult(ProviderWriteOutcome.WRITE_FAILED, false);
+        }
+        PriceResult result = observation.result();
+        String code = result.stockCode();
+        String market = result.market();
+        String key = "price:" + market + ":" + code;
+        String indexKey = "price:index:" + market;
+        LocalDateTime providerLocalTime = observation.providerUpdatedAt()
+                .atZone(MarketClock.TW_ZONE)
+                .toLocalDateTime();
+
+        try {
+            Map<String, Object> payload = buildPayload(
+                    result,
+                    observation.tradingDate(),
+                    providerLocalTime,
+                    false,
+                    "LIVE",
+                    result.highPrice(),
+                    result.lowPrice());
+            String json = MAPPER.writeValueAsString(payload);
+            String rawOutcome = redis.execute(
+                    PROVIDER_TIMED_WRITE_SCRIPT,
+                    List.of(key, indexKey),
+                    marketOpenAuthorized ? "1" : "0",
+                    marketOpenAuthorized && allowProviderTakeover ? "1" : "0",
+                    json,
+                    code,
+                    market,
+                    observation.tradingDate().toString(),
+                    providerLocalTime.toString(),
+                    Long.toString(LIVE_TTL.toSeconds()),
+                    PRICE_UPDATE_CHANNEL);
+            ProviderWriteOutcome outcome = parseProviderOutcome(rawOutcome);
+            if (outcome != ProviderWriteOutcome.WRITTEN
+                    && outcome != ProviderWriteOutcome.PROVIDER_TAKEOVER) {
+                return new ProviderWriteResult(outcome, false);
+            }
+            boolean tickWritten = tickStore.appendTickWithOutcome(
+                    code,
+                    market,
+                    observation.tradingDate(),
+                    providerLocalTime,
+                    result.price());
+            return new ProviderWriteResult(outcome, !tickWritten);
+        } catch (Exception ex) {
+            log.warn("provider-timed Redis write failed market={} code={} reason=WRITE_FAILED", market, code);
+            return new ProviderWriteResult(ProviderWriteOutcome.WRITE_FAILED, false);
         }
     }
 
@@ -305,6 +359,70 @@ public class PriceCacheWriter {
                     .divide(prev, 6, java.math.RoundingMode.HALF_UP);
         }
         return fallback;
+    }
+
+    private Map<String, Object> buildPayload(
+            PriceResult result,
+            LocalDate tradingDate,
+            LocalDateTime updatedAt,
+            boolean closed,
+            String quoteStatus,
+            BigDecimal highPrice,
+            BigDecimal lowPrice) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("stockCode", result.stockCode());
+        payload.put("market", result.market());
+        payload.put("price", result.price());
+        BigDecimal previousClose = result.previousClose();
+        payload.put("previousClose", previousClose);
+        payload.put("priceChange", changeOrNull(result.price(), previousClose, result.change()));
+        payload.put("changePercent", changePctOrNull(result.price(), previousClose, result.changePct()));
+        payload.put("buyPrice", result.buyPrice());
+        payload.put("sellPrice", result.sellPrice());
+        payload.put("openPrice", result.openPrice());
+        payload.put("highPrice", highPrice);
+        payload.put("lowPrice", lowPrice);
+        payload.put("volume", result.volume());
+        payload.put("stockName", result.stockName());
+        payload.put("source", result.source());
+        payload.put("tradingDate", tradingDate.toString());
+        payload.put("updatedAt", updatedAt.toString());
+        payload.put("closed", closed);
+        payload.put("quoteStatus", quoteStatus);
+        return payload;
+    }
+
+    private static boolean validProviderObservation(ProviderTimedPriceObservation observation) {
+        if (observation == null || observation.result() == null
+                || observation.tradingDate() == null || observation.providerUpdatedAt() == null) return false;
+        PriceResult result = observation.result();
+        if (!"台股".equals(result.market()) || !"FUBON_INTRADAY".equals(result.source())
+                || result.stockCode() == null || result.stockCode().isBlank()
+                || result.stockName() == null || result.stockName().isBlank()
+                || result.price() == null || result.price().signum() <= 0
+                || result.previousClose() == null || result.previousClose().signum() <= 0
+                || result.openPrice() == null || result.openPrice().signum() <= 0
+                || result.highPrice() == null || result.highPrice().signum() <= 0
+                || result.lowPrice() == null || result.lowPrice().signum() <= 0
+                || result.volume() == null || result.volume() < 0) return false;
+        return observation.tradingDate().equals(
+                observation.providerUpdatedAt().atZone(MarketClock.TW_ZONE).toLocalDate());
+    }
+
+    private static ProviderWriteOutcome parseProviderOutcome(String raw) {
+        if (raw == null) return ProviderWriteOutcome.WRITE_FAILED;
+        try {
+            return ProviderWriteOutcome.valueOf(raw);
+        } catch (IllegalArgumentException ex) {
+            return ProviderWriteOutcome.WRITE_FAILED;
+        }
+    }
+
+    private static RedisScript<String> providerTimedWriteScript() {
+        DefaultRedisScript<String> script = new DefaultRedisScript<>();
+        script.setLocation(new ClassPathResource("redis/provider-timed-price-write.lua"));
+        script.setResultType(String.class);
+        return script;
     }
 
 }

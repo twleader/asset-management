@@ -40,6 +40,8 @@ public class AssetService {
     private final StockStyleRepository stockStyleRepo;
     private final FundClassOverrideRepository fundClassOverrideRepo;
     private final com.steven.assets.security.TenantGuard tenantGuard;
+    private final AssetSnapshotMutationLock snapshotMutationLock;
+    private final SnapshotAggregateCalculator aggregateCalculator;
 
     /**
      * 算 FundHolding currentValue：若 units 非空 → 嘗試 NAV(basedate) × FX(basedate) 自動算
@@ -102,17 +104,7 @@ public class AssetService {
             }
         }
         if (updated) {
-            // 重算快照合計（stocks + funds + deposit interest）
-            BigDecimal totalStockDiv = snapshot.getStocks().stream()
-                    .filter(st -> st.getEstimatedDividend() != null)
-                    .map(StockHolding::getEstimatedDividend)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-            BigDecimal totalFundDiv = snapshot.getFunds().stream()
-                    .filter(fh -> fh.getEstimatedDividend() != null)
-                    .map(FundHolding::getEstimatedDividend)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-            snapshot.setEstimatedAnnualDividend(
-                    totalStockDiv.add(totalFundDiv).add(sumDepositInterest(snapshot)));
+            aggregateCalculator.recalculate(snapshot);
             snapshotRepo.save(snapshot);
         }
     }
@@ -245,19 +237,7 @@ public class AssetService {
      * rate null / 非正 → 0；TRANSIT_* 即使誤帶 rate 也不計入。
      */
     private BigDecimal depositEstimatedInterest(BankDeposit d) {
-        BigDecimal rate = d.getAnnualInterestRate();
-        if (rate == null || rate.compareTo(BigDecimal.ZERO) <= 0) return BigDecimal.ZERO;
-        String cur = d.getCurrency();
-        if ("TRANSIT_TWD".equals(cur) || "TRANSIT_USD".equals(cur)) return BigDecimal.ZERO;
-        BigDecimal amt = d.getAmount() != null ? d.getAmount() : BigDecimal.ZERO;
-        return amt.multiply(rate).divide(BigDecimal.valueOf(100), 0, RoundingMode.HALF_UP);
-    }
-
-    /** 快照存款預估年利息合計 */
-    private BigDecimal sumDepositInterest(AssetSnapshot snapshot) {
-        return snapshot.getDeposits().stream()
-                .map(this::depositEstimatedInterest)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        return aggregateCalculator.depositEstimatedInterest(d);
     }
 
     private boolean isTransitPayable(String depositType) {
@@ -286,7 +266,9 @@ public class AssetService {
 
     @Transactional
     public AssetSnapshotDto.SnapshotSummaryResponse updateSnapshot(Long id, AssetSnapshotDto.CreateSnapshotRequest req) {
-        AssetSnapshot snapshot = findSnapshot(id);
+        // 必須是 transaction 第一個 DB operation；之後才可讀 children 或 reference data。
+        AssetSnapshot snapshot = snapshotMutationLock.lockById(id);
+        tenantGuard.assertOwned(snapshot.getOwnerUserId());
         if (req.snapshotDate() != null && !req.snapshotDate().equals(snapshot.getSnapshotDate())) {
             if (snapshotRepo.existsBySnapshotDate(req.snapshotDate())) {
                 throw new IllegalArgumentException("該日期的快照已存在: " + req.snapshotDate());
@@ -298,7 +280,8 @@ public class AssetService {
 
         snapshot.getDeposits().clear();
         snapshot.getFunds().clear();
-        snapshot.getStocks().clear();
+        // Fubon 台股 scope 是 server-owned。保留 lock 後的真實 rows，忽略前端較舊 payload 的同 scope。
+        snapshot.getStocks().removeIf(stock -> !isFubonTw(stock));
 
         if (req.deposits() != null) {
             req.deposits().forEach(d -> {
@@ -327,6 +310,9 @@ public class AssetService {
             java.util.Map<String, Integer> displayOrderMap = assignDisplayOrder(req.stocks());
             req.stocks().forEach(st -> {
                 BrokerEntity broker = st.brokerId() != null ? brokerRepo.findById(st.brokerId()).orElse(null) : null;
+                if ("台股".equals(st.market()) && broker != null && "fubon".equals(broker.getCode())) {
+                    return;
+                }
                 snapshot.getStocks().add(StockHolding.builder()
                     .snapshot(snapshot).stockCode(st.stockCode())
                     .market(st.market()).broker(broker).shares(st.shares())
@@ -353,7 +339,9 @@ public class AssetService {
 
     @Transactional
     public void deleteSnapshot(Long id) {
-        snapshotRepo.delete(findSnapshot(id)); // findSnapshot 已驗證歸屬
+        AssetSnapshot snapshot = snapshotMutationLock.lockById(id);
+        tenantGuard.assertOwned(snapshot.getOwnerUserId());
+        snapshotRepo.delete(snapshot);
     }
 
     // ===================== Asset History =====================
@@ -694,7 +682,7 @@ public class AssetService {
      */
     @Transactional
     public void enrichAllSnapshotDividendRates() {
-        List<AssetSnapshot> all = snapshotRepo.findAllByOrderBySnapshotDateAsc();
+        List<AssetSnapshot> all = snapshotMutationLock.lockAllInIdOrder();
         // 先蒐集所有缺少配息率的 (code, market) 組合，避免重複呼叫 API
         java.util.Map<String, BigDecimal> rateCache = new java.util.HashMap<>();
 
@@ -720,16 +708,7 @@ public class AssetService {
                 }
             }
             if (updated) {
-                BigDecimal totalStockDiv = snapshot.getStocks().stream()
-                        .filter(st -> st.getEstimatedDividend() != null)
-                        .map(StockHolding::getEstimatedDividend)
-                        .reduce(BigDecimal.ZERO, BigDecimal::add);
-                BigDecimal totalFundDiv = snapshot.getFunds().stream()
-                        .filter(fh -> fh.getEstimatedDividend() != null)
-                        .map(FundHolding::getEstimatedDividend)
-                        .reduce(BigDecimal.ZERO, BigDecimal::add);
-                snapshot.setEstimatedAnnualDividend(
-                        totalStockDiv.add(totalFundDiv).add(sumDepositInterest(snapshot)));
+                aggregateCalculator.recalculate(snapshot);
                 snapshotRepo.save(snapshot);
                 log.info("快照 {} {} 配息率補齊完成", snapshot.getId(), snapshot.getSnapshotDate());
             }
@@ -745,10 +724,11 @@ public class AssetService {
      */
     @Transactional
     public int recalcAllDividends() {
-        List<AssetSnapshot> all = snapshotRepo.findAllByOrderBySnapshotDateAsc();
+        List<AssetSnapshot> all = snapshotMutationLock.lockAllInIdOrder();
         int updatedCount = 0;
         for (AssetSnapshot snapshot : all) {
             boolean changed = false;
+            BigDecimal priorTotalDividend = snapshot.getEstimatedAnnualDividend();
             for (StockHolding st : snapshot.getStocks()) {
                 if (st.getDividendRate() == null || st.getDividendRate().compareTo(BigDecimal.ZERO) <= 0) continue;
                 if (st.getCurrentValue() == null || st.getCurrentValue().compareTo(BigDecimal.ZERO) <= 0) continue;
@@ -782,23 +762,14 @@ public class AssetService {
                     changed = true;
                 }
             }
-            // Always resum (stocks + funds) in case individual dividends were updated externally
-            BigDecimal totalStockDiv = snapshot.getStocks().stream()
-                    .filter(st -> st.getEstimatedDividend() != null)
-                    .map(StockHolding::getEstimatedDividend)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-            BigDecimal totalFundDiv = snapshot.getFunds().stream()
-                    .filter(fh -> fh.getEstimatedDividend() != null)
-                    .map(FundHolding::getEstimatedDividend)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-            BigDecimal totalDepositInterest = sumDepositInterest(snapshot);
-            BigDecimal totalDiv = totalStockDiv.add(totalFundDiv).add(totalDepositInterest);
-            if (changed || !totalDiv.equals(snapshot.getEstimatedAnnualDividend())) {
-                snapshot.setEstimatedAnnualDividend(totalDiv);
+            // Always recalculate through the single aggregate authority in case children changed externally.
+            aggregateCalculator.recalculate(snapshot);
+            BigDecimal totalDiv = snapshot.getEstimatedAnnualDividend();
+            if (changed || priorTotalDividend == null || totalDiv.compareTo(priorTotalDividend) != 0) {
                 snapshotRepo.save(snapshot);
                 updatedCount++;
-                log.info("重算配息完成: 快照 {} {} estimatedAnnualDividend={} (stock={}, fund={}, depositInterest={})",
-                        snapshot.getId(), snapshot.getSnapshotDate(), totalDiv, totalStockDiv, totalFundDiv, totalDepositInterest);
+                log.info("重算配息完成: 快照 {} {} estimatedAnnualDividend={}",
+                        snapshot.getId(), snapshot.getSnapshotDate(), totalDiv);
             }
         }
         return updatedCount;
@@ -813,7 +784,8 @@ public class AssetService {
     @Transactional
     public void updateStockDisplayOrder(Long snapshotId,
                                         java.util.List<AssetSnapshotDto.StockOrderRequest> orders) {
-        findSnapshot(snapshotId); // 確認快照存在
+        AssetSnapshot snapshot = snapshotMutationLock.lockById(snapshotId);
+        tenantGuard.assertOwned(snapshot.getOwnerUserId());
         for (AssetSnapshotDto.StockOrderRequest order : orders) {
             stockRepo.updateDisplayOrder(
                 snapshotId, order.stockCode(), order.market(), order.displayOrder());
@@ -827,7 +799,8 @@ public class AssetService {
     @Transactional
     public void updateSnapshotDividendRates(Long snapshotId, java.util.Map<String, BigDecimal> rates) {
         if (rates == null || rates.isEmpty()) return;
-        AssetSnapshot snapshot = findSnapshot(snapshotId);
+        AssetSnapshot snapshot = snapshotMutationLock.lockById(snapshotId);
+        tenantGuard.assertOwned(snapshot.getOwnerUserId());
 
         for (StockHolding st : snapshot.getStocks()) {
             BigDecimal rate = rates.get(st.getStockCode());
@@ -839,17 +812,7 @@ public class AssetService {
             }
         }
 
-        // 重算快照層級的 estimatedAnnualDividend（stocks + funds + deposit interest，與 recalcAllDividends 行為一致）
-        BigDecimal totalStockDiv = snapshot.getStocks().stream()
-                .filter(st -> st.getEstimatedDividend() != null)
-                .map(StockHolding::getEstimatedDividend)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal totalFundDiv = snapshot.getFunds().stream()
-                .filter(fh -> fh.getEstimatedDividend() != null)
-                .map(FundHolding::getEstimatedDividend)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        snapshot.setEstimatedAnnualDividend(
-                totalStockDiv.add(totalFundDiv).add(sumDepositInterest(snapshot)));
+        aggregateCalculator.recalculate(snapshot);
 
         snapshotRepo.save(snapshot);
     }
@@ -871,14 +834,7 @@ public class AssetService {
      * 確保「total_stock_cost == Σ 各列 investmentCostTwd」（同義欄位同一邏輯）。
      */
     private BigDecimal stockInvestmentCostTwd(StockHolding st, BigDecimal snapshotRate) {
-        BigDecimal cost = st.getInvestmentCost() != null ? st.getInvestmentCost() : BigDecimal.ZERO;
-        if ("USD".equals(st.getCurrency())) {
-            BigDecimal rate = st.getTransactionExchangeRate() != null
-                    ? st.getTransactionExchangeRate()
-                    : (snapshotRate != null ? snapshotRate : BigDecimal.ONE);
-            return cost.multiply(rate).setScale(0, RoundingMode.HALF_UP);
-        }
-        return cost.setScale(0, RoundingMode.HALF_UP);
+        return aggregateCalculator.stockInvestmentCostTwd(st, snapshotRate);
     }
 
     /**
@@ -888,7 +844,7 @@ public class AssetService {
      */
     @Transactional
     public int recalcAllTotals() {
-        List<AssetSnapshot> all = snapshotRepo.findAll();
+        List<AssetSnapshot> all = snapshotMutationLock.lockAllInIdOrder();
         for (AssetSnapshot s : all) {
             recalcTotals(s);
             snapshotRepo.save(s);
@@ -897,40 +853,7 @@ public class AssetService {
     }
 
     private void recalcTotals(AssetSnapshot s) {
-        BigDecimal totalDeposit = s.getDeposits().stream()
-                .map(BankDeposit::getAmount)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal totalFundValue = s.getFunds().stream()
-                .map(FundHolding::getCurrentValue)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal totalFundCost = s.getFunds().stream()
-                .map(FundHolding::getInvestmentAmount)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal totalStockValue = s.getStocks().stream()
-                .map(StockHolding::getCurrentValue)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal snapshotRate = s.getUsdExchangeRate() != null ? s.getUsdExchangeRate() : BigDecimal.ONE;
-        BigDecimal totalStockCost = s.getStocks().stream()
-                .map(st -> stockInvestmentCostTwd(st, snapshotRate))
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal totalStockDividend = s.getStocks().stream()
-                .filter(st -> st.getEstimatedDividend() != null)
-                .map(StockHolding::getEstimatedDividend)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal totalFundDividend = s.getFunds().stream()
-                .filter(fh -> fh.getEstimatedDividend() != null)
-                .map(FundHolding::getEstimatedDividend)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal totalDepositInterest = sumDepositInterest(s);
-        BigDecimal totalDividend = totalStockDividend.add(totalFundDividend).add(totalDepositInterest);
-
-        s.setTotalDeposit(totalDeposit);
-        s.setTotalFundValue(totalFundValue);
-        s.setTotalFundCost(totalFundCost);
-        s.setTotalStockValue(totalStockValue);
-        s.setTotalStockCost(totalStockCost);
-        s.setTotalAssets(totalDeposit.add(totalFundValue).add(totalStockValue));
-        s.setEstimatedAnnualDividend(totalDividend);
+        aggregateCalculator.recalculate(s);
     }
 
     /**
@@ -952,7 +875,7 @@ public class AssetService {
      */
     @Transactional
     public boolean rollLatestSnapshotToTodayForOwner(Long ownerId, java.time.LocalDate today) {
-        AssetSnapshot latest = snapshotRepo.findFirstByOwnerUserIdOrderBySnapshotDateDesc(ownerId).orElse(null);
+        AssetSnapshot latest = snapshotMutationLock.lockLatestForOwner(ownerId).orElse(null);
         if (latest == null) return false;
         if (!latest.getSnapshotDate().isBefore(today)) return false; // == today／未來 → skip（兼唯一鍵防護）
         java.time.LocalDate old = latest.getSnapshotDate();
@@ -961,6 +884,12 @@ public class AssetService {
         snapshotRepo.save(latest);
         log.info("roll 最新快照 owner={} id={} {} → {}", ownerId, latest.getId(), old, today);
         return true;
+    }
+
+    private boolean isFubonTw(StockHolding stock) {
+        return "台股".equals(stock.getMarket())
+                && stock.getBroker() != null
+                && "fubon".equals(stock.getBroker().getCode());
     }
 
     private AssetSnapshotDto.SnapshotSummaryResponse toSummaryResponse(AssetSnapshot s) {

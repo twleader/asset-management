@@ -20,7 +20,7 @@ class PricePollerTpexContractTest {
         PriceCacheWriter writer = mock(PriceCacheWriter.class);
         StockSourceQuery source = mock(StockSourceQuery.class);
         MarketClock clock = mock(MarketClock.class);
-        when(clock.isTwMarketOpen()).thenReturn(true);
+        when(clock.isTwMarketOpenKnown()).thenReturn(Optional.of(true));
         doAnswer(invocation -> {
             @SuppressWarnings("unchecked") java.util.Set<String> tw = invocation.getArgument(0);
             tw.add("0000");
@@ -32,7 +32,10 @@ class PricePollerTpexContractTest {
                 null, new BigDecimal("120"), null, null, 456L);
         when(client.getStockPrice("6488", "台股")).thenReturn(Optional.of(otc));
 
-        new PricePoller(client, writer, source, clock).scheduledTwIntradayUpdate();
+        TwLiveQuoteOutcomeCounters counters = new TwLiveQuoteOutcomeCounters();
+        ExistingTwLiveQuoteProvider provider = new ExistingTwLiveQuoteProvider(client, writer, source, counters);
+        TwLiveQuoteDispatcher dispatcher = new TwLiveQuoteDispatcher(clock, provider, counters);
+        new PricePoller(client, writer, source, clock, dispatcher).scheduledTwIntradayUpdate();
 
         verify(client, never()).getStockPrice("0000", "台股");
         verify(writer).write(otc, false);
@@ -54,7 +57,7 @@ class PricePollerTpexContractTest {
         PriceCacheWriter writer = mock(PriceCacheWriter.class);
         StockSourceQuery source = mock(StockSourceQuery.class);
         MarketClock clock = mock(MarketClock.class);
-        when(clock.isTwMarketOpen()).thenReturn(true);
+        when(clock.isTwMarketOpenKnown()).thenReturn(Optional.of(true));
         doAnswer(invocation -> {
             @SuppressWarnings("unchecked") java.util.Set<String> tw = invocation.getArgument(0);
             tw.add("6488");
@@ -62,7 +65,10 @@ class PricePollerTpexContractTest {
         }).when(source).collectHeldStockCodes(any(), any(), any());
         when(client.getStockPrice("6488", "台股")).thenReturn(Optional.empty());
 
-        new PricePoller(client, writer, source, clock).scheduledTwIntradayUpdate();
+        TwLiveQuoteOutcomeCounters counters = new TwLiveQuoteOutcomeCounters();
+        ExistingTwLiveQuoteProvider provider = new ExistingTwLiveQuoteProvider(client, writer, source, counters);
+        TwLiveQuoteDispatcher dispatcher = new TwLiveQuoteDispatcher(clock, provider, counters);
+        new PricePoller(client, writer, source, clock, dispatcher).scheduledTwIntradayUpdate();
 
         verify(writer, never()).write(any(), anyBoolean());
     }

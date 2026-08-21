@@ -43,7 +43,16 @@ public class IntradayTickStore {
     /** 盤中 polling：append 一筆真實成交 tick。 */
     public void appendTick(String code, String market, LocalDate tradingDate,
                            LocalDateTime time, BigDecimal price) {
-        if (price == null || price.signum() <= 0) return;
+        appendTickWithOutcome(code, market, tradingDate, time, price);
+    }
+
+    /**
+     * Provider-timestamp writer 使用的可觀測版本。主 price Lua 已成功後才呼叫；回 false 時不回滾
+     * 主 price，讓呼叫端只記固定的 TICK_APPEND_FAILED counter。
+     */
+    boolean appendTickWithOutcome(String code, String market, LocalDate tradingDate,
+                                  LocalDateTime time, BigDecimal price) {
+        if (price == null || price.signum() <= 0) return false;
         String key = key(code, market, tradingDate);
         try {
             String json = MAPPER.writeValueAsString(java.util.Map.of(
@@ -51,8 +60,10 @@ public class IntradayTickStore {
                     "p", price.toPlainString()));
             redis.opsForList().rightPush(key, json);
             redis.expire(key, TTL);
+            return true;
         } catch (Exception e) {
             log.warn("appendTick {} {}: {}", market, code, e.getMessage());
+            return false;
         }
     }
 
