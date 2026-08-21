@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.time.Duration;
+import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -47,6 +48,11 @@ public class ClosePersister {
     private final PriceCacheWriter cacheWriter;
     private final MarketCalendar calendar;
     private final TwOfficialCloseClient twOfficialCloseClient;
+    /** Captured once when a source row/bar is accepted; package-visible for deterministic tests. */
+    Clock timeSource = Clock.systemUTC();
+    @FunctionalInterface
+    interface Sleeper { void sleep(long millis) throws InterruptedException; }
+    Sleeper sleeper = Thread::sleep;
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
     static final String FINMIND_US_CLOSE = "FINMIND_US_CLOSE";
@@ -201,6 +207,10 @@ public class ClosePersister {
     }
 
     public TwCloseReconciliation reconcileTwOfficialClose(LocalDate targetDate) {
+        return reconcileTwOfficialClose(targetDate, true);
+    }
+
+    TwCloseReconciliation reconcileTwOfficialClose(LocalDate targetDate, boolean publishLatest) {
         Set<String> tw = new LinkedHashSet<>(), us = new LinkedHashSet<>(), uk = new LinkedHashSet<>();
         source.collectHeldStockCodes(tw, us, uk);
         tw.remove("0000");
@@ -216,8 +226,9 @@ public class ClosePersister {
                 PriceResult verified = new PriceResult(
                         code, "台股", row.close(), null, null, row.source(),
                         row.name(), null, null,
-                        row.open(), null, row.high(), row.low(), row.volume());
-                cacheWriter.writeVerifiedClose(verified, targetDate);
+                        row.open(), null, row.high(), row.low(), row.volume(),
+                        targetDate, timeSource.instant());
+                if (publishLatest) cacheWriter.writeVerifiedClose(verified);
             }
         }
 
@@ -242,6 +253,10 @@ public class ClosePersister {
     }
 
     int verifyTwCloseWithFinMind(LocalDate targetDate) {
+        return verifyTwCloseWithFinMind(targetDate, true);
+    }
+
+    int verifyTwCloseWithFinMind(LocalDate targetDate, boolean publishLatest) {
         log.info("FinMind 補台股官方收盤缺漏 ({})", targetDate);
         Set<String> tw = new LinkedHashSet<>(), us = new LinkedHashSet<>(), uk = new LinkedHashSet<>();
         source.collectHeldStockCodes(tw, us, uk);
@@ -257,10 +272,10 @@ public class ClosePersister {
                         pr.openPrice(), pr.highPrice(), pr.lowPrice(),
                         pr.price(), pr.volume(), StockSourceQuery.FINMIND_TW_CLOSE);
                 if (wrote) {
-                    cacheWriter.writeVerifiedClose(pr, targetDate);
+                    if (publishLatest) cacheWriter.writeVerifiedClose(pr);
                     ok++;
                 }
-                Thread.sleep(300);
+                sleeper.sleep(300);
             } catch (Exception e) {
                 log.warn("FinMind 校正台股 {} 收盤失敗: {}", code, e.getMessage());
                 miss++;
@@ -277,11 +292,23 @@ public class ClosePersister {
         ZonedDateTime officialReady = tradingDate.atTime(14, 5).atZone(MarketClock.TW_ZONE);
         if (nowTw.isBefore(officialReady)) return;
 
-        TwCloseReconciliation result = reconcileTwOfficialClose(tradingDate);
+        boolean publishLatest = shouldPublishHistoricalCloseToLatest(
+                tradingDate, nowTw, calendar.isTwTradingDay(nowTw.toLocalDate()));
+        TwCloseReconciliation result = reconcileTwOfficialClose(tradingDate, publishLatest);
         ZonedDateTime fallbackReady = tradingDate.atTime(16, 0).atZone(MarketClock.TW_ZONE);
         if (result.verified() < result.expected() && !nowTw.isBefore(fallbackReady)) {
-            verifyTwCloseWithFinMind(tradingDate);
+            verifyTwCloseWithFinMind(tradingDate, publishLatest);
         }
+    }
+
+    static boolean shouldPublishHistoricalCloseToLatest(
+            LocalDate targetDate, ZonedDateTime nowTw, boolean todayIsTradingDay) {
+        if (targetDate == null || nowTw == null) return false;
+        LocalDate today = nowTw.withZoneSameInstant(MarketClock.TW_ZONE).toLocalDate();
+        LocalTime time = nowTw.withZoneSameInstant(MarketClock.TW_ZONE).toLocalTime();
+        return !targetDate.isBefore(today)
+                || !todayIsTradingDay
+                || time.isBefore(LocalTime.of(9, 0));
     }
 
     Optional<LocalDate> latestCompletedTwTarget(ZonedDateTime nowTw) {
@@ -335,9 +362,9 @@ public class ClosePersister {
                         pr.openPrice(), pr.highPrice(), pr.lowPrice(),
                         pr.price(), pr.volume(), FINMIND_US_CLOSE);
                 // FinMind 為權威收盤，同步覆寫 Redis live cache 以與 DB 一致
-                cacheWriter.writeVerifiedClose(pr, today);
+                cacheWriter.writeVerifiedClose(pr);
                 if (wrote) ok++;   // 同台股：被拒的列不計入（Task 279）
-                Thread.sleep(300);
+                sleeper.sleep(300);
             } catch (Exception e) {
                 log.warn("FinMind 校正美股 {} 收盤失敗: {}", code, e.getMessage());
                 miss++;
@@ -389,10 +416,11 @@ public class ClosePersister {
                 // 同步覆寫 Redis live cache 以與 DB 一致
                 PriceResult pr = new PriceResult(code, "英股", bar.close(), null, null, YAHOO_UK_CLOSE,
                         null, null, null,
-                        bar.open(), null, bar.high(), bar.low(), bar.volume());
-                cacheWriter.writeVerifiedClose(pr, today);
+                        bar.open(), null, bar.high(), bar.low(), bar.volume(),
+                        bar.tradingDate(), timeSource.instant());
+                cacheWriter.writeVerifiedClose(pr);
                 if (wrote) ok++;   // 同台股：被拒的列不計入（Task 279）
-                Thread.sleep(500);
+                sleeper.sleep(500);
             } catch (Exception e) {
                 log.warn("Yahoo 校正英股 {} 收盤失敗: {}", code, e.getMessage());
                 miss++;
@@ -453,12 +481,7 @@ public class ClosePersister {
     }
 
     private static PriceResult withSource(PriceResult result, String stableSource) {
-        return new PriceResult(
-                result.stockCode(), result.market(), result.price(),
-                result.change(), result.changePct(), stableSource,
-                result.stockName(), result.buyPrice(), result.sellPrice(),
-                result.openPrice(), result.previousClose(), result.highPrice(),
-                result.lowPrice(), result.volume());
+        return result.withSource(stableSource);
     }
 
     private boolean hasAnyHistoryFor(LocalDate date, String market) {

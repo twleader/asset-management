@@ -76,7 +76,7 @@ paths:
                       lowPrice: 99.60
                       volume: 123456
                       tradingDate: '2026-01-15'
-                      updatedAt: '2026-01-15T10:15:30'
+                      updatedAt: '2026-01-15T10:15:30.123456789'
                       closed: false
                       source: SYNTHETIC_EXAMPLE
                       quoteStatus: LIVE
@@ -121,7 +121,7 @@ paths:
               examples:
                 synthetic:
                   summary: 去識別化合成範例
-                  value: {stockCode: EXM-TW-001, stockName: 範例科技, market: 台股, price: 100.25, previousClose: 99.50, priceChange: 0.75, changePercent: 0.753769, buyPrice: 100.20, sellPrice: 100.30, openPrice: 99.80, highPrice: 101.00, lowPrice: 99.60, volume: 123456, tradingDate: '2026-01-15', updatedAt: '2026-01-15T10:15:30', closed: false, source: SYNTHETIC_EXAMPLE, quoteStatus: LIVE, premiumDiscountPct: null}
+                  value: {stockCode: EXM-TW-001, stockName: 範例科技, market: 台股, price: 100.25, previousClose: 99.50, priceChange: 0.75, changePercent: 0.753769, buyPrice: 100.20, sellPrice: 100.30, openPrice: 99.80, highPrice: 101.00, lowPrice: 99.60, volume: 123456, tradingDate: '2026-01-15', updatedAt: '2026-01-15T10:15:30.123456789', closed: false, source: SYNTHETIC_EXAMPLE, quoteStatus: LIVE, premiumDiscountPct: null}
         '204':
           description: Price cache miss、price Redis 讀取失敗或 price payload 無法解析；沒有 response body。NAV enrichment 失敗不會產生 204。
         '400':
@@ -672,7 +672,7 @@ components:
         tradingDate: {type: [string, 'null'], description: 通常為 ISO local date；來源字串會照實保留。}
         updatedAt:
           type: [string, 'null']
-          description: ISO local date-time，沒有 UTC offset；因此不宣告 OpenAPI date-time format。
+          description: 可信來源 quote timestamp；來源無 timestamp 時為本機成功取得 response／DB row 的時間，統一轉為台北 ISO local date-time且沒有 UTC offset。它不是 Redis SET 完成時間；新 producer 固定輸出 9 位奈秒，reader仍相容舊有分鐘／秒／1–9位小數格式。
           pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?$'
         closed: {type: [boolean, 'null']}
         source: {type: [string, 'null'], description: 自由字串；不可假設固定 enum。}

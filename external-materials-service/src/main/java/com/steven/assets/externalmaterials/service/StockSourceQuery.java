@@ -228,6 +228,26 @@ public class StockSourceQuery {
                 }));
     }
 
+    /**
+     * Latest date and close from the same database row. Quote-cache synchronization must use this
+     * single query so a concurrent official repair cannot pair an old price with a newly read date.
+     */
+    public record DatedClose(LocalDate date, BigDecimal close) {}
+
+    public Optional<DatedClose> findLatestDatedClose(String stockCode, String market) {
+        return Optional.ofNullable(jdbc.query(
+                "SELECT trading_date, close_price FROM stock_price_history "
+                        + "WHERE stock_code=? AND market=? AND close_price IS NOT NULL "
+                        + "ORDER BY trading_date DESC LIMIT 1",
+                ps -> {
+                    ps.setString(1, stockCode);
+                    ps.setString(2, market);
+                },
+                rs -> rs.next()
+                        ? new DatedClose(rs.getObject(1, LocalDate.class), rs.getBigDecimal(2))
+                        : null));
+    }
+
     /** 取指定日期之前最近一個交易日的收盤價（休市 DB→Redis 同步的昨收權威來源）。 */
     public Optional<BigDecimal> findPreviousCloseBefore(
             String stockCode, String market, LocalDate beforeDate) {

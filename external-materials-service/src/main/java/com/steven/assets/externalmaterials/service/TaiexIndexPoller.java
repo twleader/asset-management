@@ -61,7 +61,7 @@ public class TaiexIndexPoller {
         //
         // 查無有效點位／非今日：本輪不寫，保留 Redis 上一輪真實值（比照個股 TWSE z='-' 的既有
         // 慣例，不得以昨收或空值覆寫；見 PricePoller.updatePrices 對 Optional.empty() 的處理）。
-        if (quote == null || quote.latestClose() == null) return;
+        if (quote == null || quote.latestClose() == null || quote.freshnessInstant() == null) return;
         LocalDate today = LocalDate.now(MarketClock.TW_ZONE);
         if (!today.equals(quote.date())) {
             log.debug("大盤點位屬 {} 非今日 {}，本輪不寫入", quote.date(), today);
@@ -90,7 +90,8 @@ public class TaiexIndexPoller {
                 quote.open(),               // 當日第一格開盤（Task 263：原本留 null，觀察清單「開盤」欄因此恆為空白）
                 previousClose,
                 quote.high(), quote.low(),  // 來源當日全部 5 分格的最高／最低
-                null);                      // volume：指數無成交量概念
+                null,                       // volume：指數無成交量概念
+                quote.date(), quote.freshnessInstant());
 
         // aggregateHighLow=false：來源已給當日權威 high/low，不再與 price:dayhl:* 的本地累計 merge。
         // 本地聚合的存在理由是「外部 API 不提供 dayrange」（NASDAQ 對 ETF 的 keyStats 為 null），

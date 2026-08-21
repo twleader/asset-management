@@ -62,6 +62,21 @@ class PriceFetchClientClosingDateTest {
         assertThat(PriceFetchClient.parseTwClosingRow("2885", row, EXPECTED)).isEmpty();
     }
 
+    @Test
+    void usFinalRowMustMatchExpectedTargetDate() throws Exception {
+        JsonNode matching = MAPPER.readTree("""
+                {"date":"2026-07-23","Close":689.20,"Open":684.00,"High":691.00,
+                 "Low":682.50,"Volume":12345}
+                """);
+        JsonNode previous = MAPPER.readTree("""
+                {"date":"2026-07-22","Close":688.11,"Open":680.00,"High":690.00,
+                 "Low":679.50,"Volume":12345}
+                """);
+
+        assertThat(PriceFetchClient.parseUsClosingRow("VOO", matching, EXPECTED)).isPresent();
+        assertThat(PriceFetchClient.parseUsClosingRow("VOO", previous, EXPECTED)).isEmpty();
+    }
+
     private JsonNode row(String date) throws Exception {
         return MAPPER.readTree("""
                 {"date":"%s","close":63.1,"open":61.4,"max":63.2,"min":61.3,

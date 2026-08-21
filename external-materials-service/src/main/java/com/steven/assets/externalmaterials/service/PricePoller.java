@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import java.util.LinkedHashSet;
 import java.util.Optional;
 import java.util.Set;
+import java.time.Clock;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -32,6 +33,8 @@ public class PricePoller {
     private final PriceCacheWriter writer;
     private final StockSourceQuery source;
     private final MarketClock clock;
+    /** Row-retrieval timestamp source; package-visible for deterministic unit tests. */
+    Clock timeSource = Clock.systemUTC();
 
     @EventListener(ApplicationReadyEvent.class)
     public void warmCacheOnStartup() {
@@ -118,8 +121,9 @@ public class PricePoller {
         if (codes.isEmpty()) return;
         for (String code : codes) {
             try {
-                source.findRecentClose(code, market)
-                        .ifPresent(close -> writer.syncClosedFromDb(code, market, close));
+                source.findLatestDatedClose(code, market)
+                        .ifPresent(close -> writer.syncClosedFromDb(
+                                code, market, close, timeSource.instant()));
             } catch (Exception e) {
                 log.warn("休市 DB→Redis 同步 {} {} 失敗: {}", market, code, e.getMessage());
             }
@@ -128,6 +132,10 @@ public class PricePoller {
 
     void updatePrices(Set<String> codes, String market, boolean markClosed) {
         if (codes.isEmpty()) return;
+        if ("台股".equals(market)) {
+            updateTwPrices(codes, markClosed);
+            return;
+        }
         try (ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor()) {
             for (String code : codes) {
                 pool.submit(() -> {
@@ -138,8 +146,9 @@ public class PricePoller {
                         if (opt.isEmpty()) return;
                         PriceResult r = opt.get();
                         if (r.price() == null) return;
-                        writer.write(r, markClosed);
-                        if (r.stockName() != null && !r.stockName().isBlank()) {
+                        PriceCacheWriter.CacheWriteOutcome outcome = writer.write(r, markClosed);
+                        if (outcome == PriceCacheWriter.CacheWriteOutcome.WRITTEN
+                                && r.stockName() != null && !r.stockName().isBlank()) {
                             source.upsertStockName(code, market, r.stockName());
                         }
                     } catch (Exception e) {
@@ -148,5 +157,34 @@ public class PricePoller {
                 });
             }
         } // executor.close() 等所有 task 完成
+    }
+
+    private void updateTwPrices(Set<String> codes, boolean markClosed) {
+        PriceFetchClient.TwQuoteBatchSummary summary = client.fetchTwBatch(codes);
+        int written = 0;
+        int staleRejected = 0;
+        int writeFailures = 0;
+        for (var entry : summary.resolved().entrySet()) {
+            PriceResult result = entry.getValue();
+            PriceCacheWriter.CacheWriteOutcome outcome = writer.write(result, markClosed);
+            switch (outcome) {
+                case WRITTEN -> {
+                    written++;
+                    if (result.stockName() != null && !result.stockName().isBlank()) {
+                        source.upsertStockName(entry.getKey(), "台股", result.stockName());
+                    }
+                }
+                case REJECTED_STALE -> staleRejected++;
+                case FAILED, SKIPPED_INVALID_PRICE -> writeFailures++;
+            }
+        }
+        log.info("台股MIS batch requested={} resolved={} noTrade={} missing={} invalid={} "
+                        + "httpRequests={} requestFailures={} written={} staleRejected={} writeFailures={} "
+                        + "foreignCodes={} schemaAnomalies={} sourceTimeAnomalyCodes={} capacityRejectedCodes={}",
+                summary.requestedCount(), summary.resolved().size(), summary.noTradeCodes().size(),
+                summary.missingCodes().size(), summary.invalidCodes().size(),
+                summary.httpRequests(), summary.requestFailures(), written, staleRejected, writeFailures,
+                summary.foreignCodes(), summary.schemaAnomalies(), summary.sourceTimeAnomalyCodes(),
+                summary.capacityRejectedCodes());
     }
 }

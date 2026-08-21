@@ -850,7 +850,15 @@ public class MacroDataFetchClient {
      * 四個數值欄各自獨立判 null（某陣列整日皆 null 時該欄為 null，不影響其餘欄位）。
      */
     public record DayQuote(java.time.LocalDate date, BigDecimal open, BigDecimal high,
-                           BigDecimal low, BigDecimal latestClose) {}
+                           BigDecimal low, BigDecimal latestClose,
+                           java.time.Instant freshnessInstant) {
+        /** Source-compatible fixture constructor; production always supplies the final 5m timestamp. */
+        public DayQuote(java.time.LocalDate date, BigDecimal open, BigDecimal high,
+                        BigDecimal low, BigDecimal latestClose) {
+            this(date, open, high, low, latestClose,
+                    date == null ? null : date.atStartOfDay(java.time.ZoneId.of("Asia/Taipei")).toInstant());
+        }
+    }
 
     /**
      * 指數「當日」OHLC 摘要（Task 263）。與 {@link #fetchIndexIntraday} 打同一個 Yahoo URL
@@ -905,6 +913,7 @@ public class MacroDataFetchClient {
             if (day == null) return null;
 
             BigDecimal open = null, high = null, low = null, latestClose = null;
+            java.time.Instant latestCloseInstant = null;
             for (int i : idx) {
                 BigDecimal o = jsonDecimal4(quotes.path("open").path(i));
                 BigDecimal h = jsonDecimal4(quotes.path("high").path(i));
@@ -913,9 +922,16 @@ public class MacroDataFetchClient {
                 if (open == null && o != null) open = o;                     // 當日第一格的開盤
                 if (h != null && (high == null || h.compareTo(high) > 0)) high = h;
                 if (l != null && (low == null || l.compareTo(low) < 0)) low = l;
-                if (c != null) latestClose = c;                              // 當日最後一格的收盤
+                if (c != null) {
+                    long epochSeconds = timestamps.get(i).asLong(0);
+                    if (epochSeconds <= 0) return null;
+                    latestClose = c;                                         // 當日最後一格的收盤
+                    latestCloseInstant = java.time.Instant.ofEpochSecond(epochSeconds);
+                }
             }
-            return new DayQuote(day, open, high, low, latestClose);
+            if (latestCloseInstant != null
+                    && !latestCloseInstant.atZone(zone).toLocalDate().equals(day)) return null;
+            return new DayQuote(day, open, high, low, latestClose, latestCloseInstant);
         } catch (Exception e) {
             log.warn("Yahoo 指數 {} 當日摘要抓取失敗: {}", market, e.getMessage());
             return null;
