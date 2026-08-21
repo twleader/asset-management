@@ -32,13 +32,26 @@ test('quote-detail contract reads server totals directly, is once-per-open, and 
   assert.doesNotMatch(api, /quotes\/.*quote-detail|quote-detail.*quotes\//)
 })
 
-test('chart controls keep two no-wrap rows at dialog width and degrade by horizontal row scrolling', () => {
+test('chart controls merge into a single no-wrap row at dialog width and degrade by horizontal row scrolling when squeezed', () => {
   assert.match(dialog, /width="min\(1100px, calc\(100vw - 32px\)\)"/)
   for (const token of ['chart-controls', 'chart-control-row', 'chart-control-group', 'chart-control-label', 'period-control-group', 'weekly-candle-hint', 'chart-zoom-hint']) assert.ok(dialog.includes(token))
-  assert.match(dialog, /\.chart-controls \{ display:flex;flex:0 1 auto;flex-direction:column;align-items:flex-end;gap:4px;margin-left:auto;min-width:0 \}/)
-  assert.match(dialog, /\.chart-control-row \{ display:flex;align-items:center;gap:10px;white-space:nowrap \}/)
-  assert.match(dialog, /\.chart-control-group \{ display:flex;align-items:center;gap:6px;flex:none;white-space:nowrap \}/)
+  assert.match(dialog, /\.chart-controls \{ display:flex;flex:0 1 auto;align-items:center;margin-left:auto;min-width:0 \}/)
+  // 常駐（非只在 media query 內）overflow-x:auto：合併成一排後，~800~1093px 寬度區間單靠 gap 塞不下，
+  // 這排要能自行橫向捲動，別讓內容溢出 analysis-meta 保留給 echarts 的 96px 區塊。
+  assert.match(dialog, /\.chart-control-row \{ display:flex;align-items:center;gap:5px;white-space:nowrap;max-width:100%;overflow-x:auto;padding-bottom:2px \}/)
+  assert.match(dialog, /\.chart-control-group \{ display:flex;align-items:center;gap:4px;flex:none;white-space:nowrap \}/)
+  // 11 顆按鈕擠進同一排，靠收緊 small 按鈕左右 padding 換空間（字級與按鈕/文字內容不變）
+  assert.match(dialog, /\.chart-control-row :deep\(\.el-button\) \{ padding:5px \}/)
   assert.match(dialog, /@media \(max-width:800px\)\{\.analysis-meta\{flex-wrap:wrap;padding-right:0\}\.chart-controls\{width:100%;align-items:flex-start;margin-left:0\}\.chart-control-row\{max-width:100%;overflow-x:auto/)
+  // 結構面：兩排已合併為一個 chart-control-row 容器
+  const rowOpenCount = (dialog.match(/class="chart-control-row"/g) || []).length
+  assert.equal(rowOpenCount, 1)
+  // 排序面：圖型／指標／週K提示／期間／滾輪縮放提示由左到右排在同一排內
+  const controlsBlock = dialog.slice(dialog.indexOf('<div class="chart-controls">'), dialog.indexOf('intraday-quote'))
+  const order = ['圖型：', '指標：', 'weekly-candle-hint', '期間：', 'chart-zoom-hint']
+  const positions = order.map(token => controlsBlock.indexOf(token))
+  assert.ok(positions.every(p => p !== -1), 'all control tokens must exist inside the merged row')
+  for (let i = 1; i < positions.length; i++) assert.ok(positions[i] > positions[i - 1], `expected ${order[i - 1]} before ${order[i]}`)
 })
 
 test('K branches use only BFF daily or weekly frames with frame-local close state', () => {

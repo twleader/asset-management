@@ -44,8 +44,6 @@
                   </el-select>
                 </div>
                 <span v-if="chartMode === 'weekly-candle'" class="weekly-candle-hint">週 K；技術指標為日線值的週末取樣</span>
-              </div>
-              <div class="chart-control-row">
                 <div class="chart-control-group">
                   <span class="chart-control-label">期間：</span>
                   <el-button-group class="period-control-group">
@@ -1060,11 +1058,18 @@ const chartOption = computed(() => {
 /* 右邊保留的空間要對齊 echarts grid.right (96px)，這樣 period selector / 資料截止 才會
    和 chart 內容（endLabels 落點）的右緣切齊，不會越界到圖外。 */
 .analysis-meta    { display:flex;align-items:flex-start;gap:12px;margin-bottom:8px;padding-right:96px }
-.chart-controls { display:flex;flex:0 1 auto;flex-direction:column;align-items:flex-end;gap:4px;margin-left:auto;min-width:0 }
-.chart-control-row { display:flex;align-items:center;gap:10px;white-space:nowrap }
-.chart-control-group { display:flex;align-items:center;gap:6px;flex:none;white-space:nowrap }
+.chart-controls { display:flex;flex:0 1 auto;align-items:center;margin-left:auto;min-width:0 }
+/* max-width/overflow-x 常駐（非只在 <800px media query 內）：合併成一排後，寬度介於
+   ~800~1093px 之間時（尚未觸發下方 media query，但已窄於 1100px 上限）单靠 gap 已擠不下，
+   讓這排本身可橫向捲動，避免內容溢出 analysis-meta 的 96px 保留區、撞上對話框邊緣。
+   ≥1093px（含 1100px 上限）時內容本就塞得下，不會出現捲軸。 */
+.chart-control-row { display:flex;align-items:center;gap:5px;white-space:nowrap;max-width:100%;overflow-x:auto;padding-bottom:2px }
+.chart-control-group { display:flex;align-items:center;gap:4px;flex:none;white-space:nowrap }
 .chart-control-label,.weekly-candle-hint,.chart-zoom-hint { color:#64748b;font-size:12px;white-space:nowrap }
 .indicator-select { width:104px;flex:none }
+/* 合併兩排後單排要塞下 11 顆按鈕＋下拉＋兩段提示文字，把 small 按鈕預設的左右 padding
+   (11px) 收緊，換回排面空間；字級與按鈕/文字內容本身不變。 */
+.chart-control-row :deep(.el-button) { padding:5px }
 /* 「當日」昨收 / 今日漲跌資訊列（僅當日期間顯示） */
 .intraday-quote   { display:flex;align-items:baseline;gap:8px;margin:0 0 4px 2px;font-size:13px;line-height:1.4 }
 .intraday-quote .iq-label { color:#64748b }
