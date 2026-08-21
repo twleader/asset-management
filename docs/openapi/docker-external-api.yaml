@@ -18,7 +18,7 @@ info:
     暴露文件端點。
 
     回應只代表來源或快取當下狀態，排程不可只看 HTTP 200；應另檢查報價的
-    `quoteStatus`／`tradingDate`／`updatedAt`、資產的 `targetPriceComplete`／`valuationSource`，
+    `quoteStatus`／`tradingDate`／`updatedAt`、ETF 的 `premiumDiscountPct`、資產的 `targetPriceComplete`／`valuationSource`，
     以及匯率的 `liveUpdateStatus`／`spot.quoteStatus`。本 API 不構成交易執行依據。
 servers:
   - url: http://127.0.0.1:9090
@@ -32,7 +32,12 @@ paths:
       tags: [公開報價]
       operationId: listLatestQuotes
       summary: 列出 Redis 中的最新報價
-      description: market 省略時掃描台股、美股、英股；查無資料或 Redis 讀取失敗時回空陣列，不觸發抓價或資料庫 fallback。
+      description: |
+        market 省略時掃描台股、美股、英股；price index 讀取失敗時該市場沒有結果，個別 price key
+        missing／malformed／讀取失敗時只省略該筆，不觸發抓價或資料庫 fallback。價格有效後會 best-effort
+        讀 matching `price:etfnav:*`；NAV enrichment missing／malformed／讀取失敗只讓
+        `premiumDiscountPct=null`，不會省略有效報價。price 的 `tradingDate`／`updatedAt` 不是 NAV 時點，
+        NAV key TTL 為 96 小時且與 price producer 並非同一個 tick。
       parameters:
         - name: market
           in: query
@@ -54,8 +59,8 @@ paths:
                 synthetic:
                   summary: 去識別化合成範例
                   value:
-                    - stockCode: EXM-TW-001
-                      stockName: 範例科技
+                    - stockCode: EXM-TW-ETF
+                      stockName: 範例 ETF
                       market: 台股
                       price: 100.25
                       previousClose: 99.50
@@ -72,6 +77,7 @@ paths:
                       closed: false
                       source: SYNTHETIC_EXAMPLE
                       quoteStatus: LIVE
+                      premiumDiscountPct: 0.07
         '502':
           $ref: '#/components/responses/NginxBadGateway'
         '504':
@@ -81,7 +87,11 @@ paths:
       tags: [公開報價]
       operationId: getLatestQuote
       summary: 查詢單一標的的最新報價
-      description: 只讀目前 Redis cache；cache miss 或讀取、解析失敗皆回 204，不查資料庫且不觸發外部抓取。
+      description: |
+        只讀目前 Redis cache；price key cache miss 或 price 讀取、解析失敗回 204，不查資料庫且不觸發外部抓取。
+        價格有效後會 best-effort 讀 matching `price:etfnav:*`；NAV enrichment missing／malformed／讀取失敗
+        仍回 200，只讓 `premiumDiscountPct=null`。price 的 `tradingDate`／`updatedAt` 不是 NAV 時點，
+        NAV key TTL 為 96 小時且與 price producer 並非同一個 tick。
       parameters:
         - name: code
           in: query
@@ -104,7 +114,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/LatestQuote'
         '204':
-          description: Cache miss、Redis 讀取失敗或 payload 無法解析；沒有 response body。
+          description: Price cache miss、price Redis 讀取失敗或 price payload 無法解析；沒有 response body。NAV enrichment 失敗不會產生 204。
         '400':
           description: code 或 market 缺少時由 Spring 綁定層產生的基本錯誤。
           content:
@@ -565,8 +575,8 @@ components:
       description: Nginx 自行產生的標準 HTML 錯誤頁；不是 JSON，也不保證空白或換行逐字固定。
     LatestQuote:
       type: object
-      description: "`PriceCacheReader.LatestQuote` 的 18 個欄位。Redis payload 逐欄解析，故每個 record property 都存在，但來源欄位缺失或不可解析時可為 null；source 與 quoteStatus 刻意是自由字串。"
-      required: [stockCode, stockName, market, price, previousClose, priceChange, changePercent, buyPrice, sellPrice, openPrice, highPrice, lowPrice, volume, tradingDate, updatedAt, closed, source, quoteStatus]
+      description: "`PriceCacheReader.LatestQuote` 的 19 個欄位。前 18 欄逐欄解析 price payload，`premiumDiscountPct` 則從獨立 ETF NAV cache best-effort 併入；每個 record property 都固定存在，但來源欄位缺失或不可解析時可為 null。source 與 quoteStatus 刻意是自由字串。"
+      required: [stockCode, stockName, market, price, previousClose, priceChange, changePercent, buyPrice, sellPrice, openPrice, highPrice, lowPrice, volume, tradingDate, updatedAt, closed, source, quoteStatus, premiumDiscountPct]
       properties:
         stockCode: {type: [string, 'null']}
         stockName: {type: [string, 'null']}
@@ -589,6 +599,9 @@ components:
         closed: {type: [boolean, 'null']}
         source: {type: [string, 'null'], description: 自由字串；不可假設固定 enum。}
         quoteStatus: {type: [string, 'null'], description: 自由字串；不可假設固定 enum。}
+        premiumDiscountPct:
+          type: [number, 'null']
+          description: 百分點數值，正值為溢價、負值為折價，例如 0.07 表示溢價 0.07%。只轉交 `price:etfnav:*` 的同名來源欄位；缺值時不以 price 與 nav 反推。一般股票與目前不帶官方折溢價的美股 ETF 為 null。required 僅表示 property 固定出現，不代表非 null；price 的 updatedAt／tradingDate 不是 NAV 時點，NAV key TTL 為 96 小時且與 price producer 非同 tick。本 API 不另提供 nav／navAsOf。
       additionalProperties: false
     MarketIndexResponse:
       type: object

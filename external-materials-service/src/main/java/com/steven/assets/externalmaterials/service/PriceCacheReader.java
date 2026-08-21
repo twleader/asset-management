@@ -19,7 +19,8 @@ import java.util.Set;
  * ({@link com.steven.assets.externalmaterials.controller.PublicQuoteController}) 使用。
  *
  * 與 {@link PriceCacheWriter} 職責相反：只讀不寫，不觸發外部抓取、不寫入 Redis、不 PUBLISH。
- * Key schema 與寫入者見 {@link PriceCacheWriter} class Javadoc（Requirement 66）。
+ * Price key schema 與寫入者見 {@link PriceCacheWriter} class Javadoc（Requirement 66）；
+ * ETF 官方折溢價另以 best-effort 方式讀既有 {@code price:etfnav:{market}:{code}}（Requirement 88）。
  */
 @Slf4j
 @Component
@@ -33,8 +34,8 @@ public class PriceCacheReader {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     /**
-     * Redis JSON payload 的唯讀 DTO；欄位集合、型別與宣告順序逐一比照 backend 端
-     * {@code PriceQueryService.LivePrice}（同一份 Redis JSON 的另一個消費端）。
+     * Redis JSON payload 的唯讀 DTO；前 18 欄逐一比照 backend 端
+     * {@code PriceQueryService.LivePrice}，最後一欄是從獨立 ETF NAV cache best-effort 併入的官方折溢價。
      */
     public record LatestQuote(
             String stockCode,
@@ -54,7 +55,8 @@ public class PriceCacheReader {
             String updatedAt,
             Boolean closed,
             String source,
-            String quoteStatus
+            String quoteStatus,
+            BigDecimal premiumDiscountPct
     ) {}
 
     /**
@@ -74,15 +76,25 @@ public class PriceCacheReader {
 
     /** 查詢單一標的最新報價；Redis cache miss 回 empty（不 fallback 查 DB、不觸發抓取）。 */
     public Optional<LatestQuote> findOne(String code, String market) {
-        String key = "price:" + market + ":" + code;
+        String priceKey = "price:" + market + ":" + code;
+        String json;
         try {
-            String json = redis.opsForValue().get(key);
-            if (json == null) return Optional.empty();
-            return Optional.of(parse(json));
+            json = redis.opsForValue().get(priceKey);
         } catch (Exception e) {
-            log.warn("Redis 讀取或解析失敗 {}: {}", key, e.getMessage());
+            log.warn("Redis 讀取失敗 {}: {}", priceKey, e.getMessage());
             return Optional.empty();
         }
+        if (json == null) return Optional.empty();
+
+        LatestQuote quote;
+        try {
+            quote = parsePrice(json);
+        } catch (Exception e) {
+            log.warn("Redis payload 解析失敗 {}: {}", priceKey, e.getMessage());
+            return Optional.empty();
+        }
+
+        return Optional.of(withPremiumDiscountPct(quote, readPremiumDiscountPct(code, market)));
     }
 
     private Set<String> indexCodes(String market) {
@@ -95,7 +107,7 @@ public class PriceCacheReader {
         }
     }
 
-    private LatestQuote parse(String json) throws Exception {
+    private LatestQuote parsePrice(String json) throws Exception {
         JsonNode n = MAPPER.readTree(json);
         return new LatestQuote(
                 text(n, "stockCode"),
@@ -115,7 +127,34 @@ public class PriceCacheReader {
                 text(n, "updatedAt"),
                 n.hasNonNull("closed") ? n.get("closed").asBoolean() : null,
                 text(n, "source"),
-                text(n, "quoteStatus")
+                text(n, "quoteStatus"),
+                null
+        );
+    }
+
+    /**
+     * 從獨立 ETF NAV key 只轉交來源提供的官方折溢價。任何局部失敗都回 null，
+     * 不得影響已成功解析的價格，也不從 price 與 nav 自行反推。
+     */
+    private BigDecimal readPremiumDiscountPct(String code, String market) {
+        String navKey = EtfNavCacheWriter.key(market, code);
+        try {
+            String json = redis.opsForValue().get(navKey);
+            if (json == null) return null;
+            JsonNode value = MAPPER.readTree(json).get("premiumDiscountPct");
+            return value != null && value.isNumber() ? value.decimalValue() : null;
+        } catch (Exception e) {
+            log.warn("ETF NAV cache 讀取或解析失敗 {}: {}", navKey, e.getMessage());
+            return null;
+        }
+    }
+
+    private static LatestQuote withPremiumDiscountPct(LatestQuote quote, BigDecimal premiumDiscountPct) {
+        return new LatestQuote(
+                quote.stockCode(), quote.stockName(), quote.market(), quote.price(), quote.previousClose(),
+                quote.priceChange(), quote.changePercent(), quote.buyPrice(), quote.sellPrice(), quote.openPrice(),
+                quote.highPrice(), quote.lowPrice(), quote.volume(), quote.tradingDate(), quote.updatedAt(),
+                quote.closed(), quote.source(), quote.quoteStatus(), premiumDiscountPct
         );
     }
 

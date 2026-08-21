@@ -289,7 +289,7 @@ external-materials-service/src/main/java/com/steven/assets/externalmaterials/
 
 **`price:etfnav:*` 補充說明**
 
-- **讀取端：** `PriceQueryService.getEtfNav(stockCode, market)`（business-services）。**只讀 Redis、刻意不 fallback DB**；查無回 `Optional.empty()` 是正常情形（個股本來就沒有淨值），不記 warn、不補 0、不做 ETF 白名單。消費端目前兩處——`ExcelExportService`（資產總覽匯出的淨值／折溢價欄）與 `TradingRadarService`（交易雷達「即時折溢價」欄，Task 320）；兩者的折溢價一律經 `EtfLivePremiumCalculator` 這支共用實作換算，不各自重算（CLAUDE.md「同義欄位、同一 business service API」）。
+- **讀取端：** business-services 的 `PriceQueryService.getEtfNav(stockCode, market)` **只讀 Redis、刻意不 fallback DB**；查無回 `Optional.empty()` 是正常情形（個股本來就沒有淨值），不記 warn、不補 0、不做 ETF 白名單。其兩個業務消費端為 `ExcelExportService`（資產總覽匯出的淨值／折溢價欄）與 `TradingRadarService`（交易雷達「即時折溢價」欄，Task 320），兩者的美股衍生計算一律經 `EtfLivePremiumCalculator`。Task 349 另增加第三個**外部契約消費端**：external-materials-service 的 `PriceCacheReader` 為 `/api/quotes` 唯讀 join 同一 key，但只原樣轉交來源 `premiumDiscountPct`，不取 `nav`、不做美股反推；這是「官方來源欄位」而非上述 business 畫面衍生語意，兩者不得混用。
 - **payload 欄位：** `stockCode` / `market` / `nav` / `premiumDiscountPct` / `navAsOf` / `source` / `updatedAt`。序列化設定為 `NON_NULL`，**null 欄位直接不出現於 JSON**（不是寫成 `null`）。`updatedAt` 為台北牆鐘的寫入時刻，讀取端不解析它。
 
 ```
@@ -300,6 +300,7 @@ external-materials-service/src/main/java/com/steven/assets/externalmaterials/
 - **`navAsOf` 有兩種格式，解析前先看 `market`：** 台股為 `yyyyMMdd HH:mm:ss`（證交所 `all_etf.txt` 的 `i`＋`j` 欄），美股為 `yyyy-MM-dd`（Yahoo 報價時點轉紐約當地日期）。`source` 對應為 `TWSE`／`Yahoo Finance`。
 - **美股 payload 恆無 `premiumDiscountPct`：** Yahoo 未提供折溢價欄，寫入端刻意留 null 而非用 Yahoo 自己的 `regularMarketPrice` 反推——那與取用端該列顯示的即時價來源／時點不同（實測 VOO 相差 0.11%，使用者自行驗算會兜不攏）。故美股折溢價由取用端以「該列自己的市價」計算，保證列內自洽；台股則直接沿用證交所已算好的 `g` 欄，缺漏時留白**不反推**（Requirement 34／Task 259）。
 - **TTL 96h 而非比照即時價的 24h 是刻意的：** 淨值一天只有一組有意義的值，且只在交易時段抓取。若只留 24h，週末與連假後的第一份匯出會整欄空白（週五最後一筆已過期）；96h 讓資料撐過週末＋一天連假。**代價是「Redis 裡有值」不等於「是今天的值」——判斷新舊一律看 `navAsOf`。**
+- **排程節拍：** Task 349 起台股 `EtfNavPoller` 為 `0 1/2 9-13 * * MON-FRI`（Asia/Taipei），以奇數分鐘和偶數分鐘股價 producer 錯開；兩者都每 2 分鐘，且各自受 `MarketClock` 守門。公開 quote API 只新增 `premiumDiscountPct`，不輸出 `navAsOf`，所以其 `updatedAt` 仍只能解讀為 price 時點，不能推論折溢價新鮮度。
 
 ---
 
@@ -401,9 +402,9 @@ frontend/
 
 ```
 spec/
-├── requirements.md       # 85 個 Requirements（User Story + AC）
+├── requirements.md       # 86 個 Requirements（User Story + AC；Requirement 86／87 由在途 worktree 保留，最新為 88）
 ├── design.md             # 架構圖、ERD、Service 職責、Sequence
-├── tasks.md              # 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–345）＋ 尚未歸檔的 201 起區段
+├── tasks.md              # 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–345、349）＋ 尚未歸檔的 201 起區段
 ├── tasks/                # 任務檔
 │   ├── README.md         # 自足任務檔規範
 │   ├── archive/          # Task 1–200 歷史，已凍結

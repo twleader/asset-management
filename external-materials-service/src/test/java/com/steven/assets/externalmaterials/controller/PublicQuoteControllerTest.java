@@ -14,6 +14,7 @@ import java.util.Optional;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -31,19 +32,27 @@ class PublicQuoteControllerTest {
     }
 
     private static LatestQuote quote(String code, String market) {
+        return quote(code, market, null);
+    }
+
+    private static LatestQuote quote(String code, String market, BigDecimal premiumDiscountPct) {
         return new LatestQuote(code, "測試股", market, new BigDecimal("100.00"), new BigDecimal("99.00"),
                 new BigDecimal("1.00"), new BigDecimal("1.01"), null, null,
                 new BigDecimal("99.50"), new BigDecimal("101.00"), new BigDecimal("98.50"),
-                12345L, "2026-08-10", "2026-08-10T10:00:00", false, "TWSE", "LIVE");
+                12345L, "2026-08-10", "2026-08-10T10:00:00", false, "TWSE", "LIVE",
+                premiumDiscountPct);
     }
 
     @Test
     void list_noMarketFilter_passesNullToReader() throws Exception {
-        when(reader.listAll(null)).thenReturn(List.of(quote("2330", "台股")));
+        when(reader.listAll(null)).thenReturn(List.of(
+                quote("0050", "台股", new BigDecimal("0.07")),
+                quote("2330", "台股")));
 
         mvc.perform(get("/api/quotes"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].stockCode").value("2330"));
+                .andExpect(jsonPath("$[0].premiumDiscountPct").value(0.07))
+                .andExpect(jsonPath("$[1].premiumDiscountPct").value(nullValue()));
 
         verify(reader).listAll(null);
     }
@@ -61,12 +70,23 @@ class PublicQuoteControllerTest {
 
     @Test
     void one_cacheHit_returns200WithBody() throws Exception {
+        when(reader.findOne("0050", "台股")).thenReturn(Optional.of(
+                quote("0050", "台股", new BigDecimal("0.07"))));
+
+        mvc.perform(get("/api/quotes/one").param("code", "0050").param("market", "台股"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.stockCode").value("0050"))
+                .andExpect(jsonPath("$.quoteStatus").value("LIVE"))
+                .andExpect(jsonPath("$.premiumDiscountPct").value(0.07));
+    }
+
+    @Test
+    void one_navMissing_returns200WithExplicitNullProperty() throws Exception {
         when(reader.findOne("2330", "台股")).thenReturn(Optional.of(quote("2330", "台股")));
 
         mvc.perform(get("/api/quotes/one").param("code", "2330").param("market", "台股"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.stockCode").value("2330"))
-                .andExpect(jsonPath("$.quoteStatus").value("LIVE"));
+                .andExpect(jsonPath("$.premiumDiscountPct").value(nullValue()));
     }
 
     @Test

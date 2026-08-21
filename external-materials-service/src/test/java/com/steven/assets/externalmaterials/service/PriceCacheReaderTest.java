@@ -54,6 +54,87 @@ class PriceCacheReaderTest {
         assertThat(q.volume()).isEqualTo(12345L);
         assertThat(q.closed()).isFalse();
         assertThat(q.quoteStatus()).isEqualTo("LIVE");
+        assertThat(q.premiumDiscountPct()).isNull();
+    }
+
+    @Test
+    void findOne_matchingNavCache_returnsOfficialPremiumDiscountUnchanged() {
+        when(values.get("price:台股:0050")).thenReturn(priceJson("0050", "台股", "100.00"));
+        when(values.get("price:etfnav:台股:0050")).thenReturn(
+                "{\"nav\":99.93,\"premiumDiscountPct\":0.07}");
+
+        assertThat(reader.findOne("0050", "台股"))
+                .isPresent()
+                .get()
+                .extracting(PriceCacheReader.LatestQuote::premiumDiscountPct)
+                .isEqualTo(new BigDecimal("0.07"));
+    }
+
+    @Test
+    void findOne_missingNavCache_keepsValidPriceWithNullPremium() {
+        when(values.get("price:台股:2330")).thenReturn(priceJson("2330", "台股", "1000.00"));
+        when(values.get("price:etfnav:台股:2330")).thenReturn(null);
+
+        assertThat(reader.findOne("2330", "台股"))
+                .isPresent()
+                .get()
+                .extracting(PriceCacheReader.LatestQuote::premiumDiscountPct)
+                .isNull();
+    }
+
+    @Test
+    void findOne_malformedNavJson_keepsValidPriceWithNullPremium() {
+        when(values.get("price:台股:0050")).thenReturn(priceJson("0050", "台股", "100.00"));
+        when(values.get("price:etfnav:台股:0050")).thenReturn("not-json");
+
+        assertThat(reader.findOne("0050", "台股"))
+                .isPresent()
+                .get()
+                .extracting(PriceCacheReader.LatestQuote::premiumDiscountPct)
+                .isNull();
+    }
+
+    @Test
+    void findOne_navPayloadMissingPremiumField_keepsNullPremium() {
+        when(values.get("price:台股:0050")).thenReturn(priceJson("0050", "台股", "100.00"));
+        when(values.get("price:etfnav:台股:0050")).thenReturn("{\"navAsOf\":\"20260821 10:01:00\"}");
+
+        assertThat(reader.findOne("0050", "台股")).get()
+                .extracting(PriceCacheReader.LatestQuote::premiumDiscountPct)
+                .isNull();
+    }
+
+    @Test
+    void findOne_nonNumericPremiumField_keepsNullPremium() {
+        when(values.get("price:台股:0050")).thenReturn(priceJson("0050", "台股", "100.00"));
+        when(values.get("price:etfnav:台股:0050")).thenReturn("{\"premiumDiscountPct\":\"0.07\"}");
+
+        assertThat(reader.findOne("0050", "台股")).get()
+                .extracting(PriceCacheReader.LatestQuote::premiumDiscountPct)
+                .isNull();
+    }
+
+    @Test
+    void findOne_navRedisException_keepsValidPriceWithNullPremium() {
+        when(values.get("price:台股:0050")).thenReturn(priceJson("0050", "台股", "100.00"));
+        when(values.get("price:etfnav:台股:0050")).thenThrow(new IllegalStateException("redis timeout"));
+
+        assertThat(reader.findOne("0050", "台股"))
+                .isPresent()
+                .get()
+                .extracting(PriceCacheReader.LatestQuote::premiumDiscountPct)
+                .isNull();
+    }
+
+    @Test
+    void findOne_priceAndNavWithoutOfficialPremium_doesNotRecompute() {
+        when(values.get("price:台股:0050")).thenReturn(priceJson("0050", "台股", "100.00"));
+        when(values.get("price:etfnav:台股:0050")).thenReturn("{\"nav\":80.00}");
+
+        assertThat(reader.findOne("0050", "台股")).get()
+                .extracting(PriceCacheReader.LatestQuote::premiumDiscountPct)
+                .as("不得以 (price-nav)/nav 反推折溢價")
+                .isNull();
     }
 
     @Test
@@ -61,6 +142,7 @@ class PriceCacheReaderTest {
         when(values.get("price:台股:9999")).thenReturn(null);
 
         assertThat(reader.findOne("9999", "台股")).isEmpty();
+        verify(values, never()).get("price:etfnav:台股:9999");
     }
 
     @Test
@@ -68,6 +150,7 @@ class PriceCacheReaderTest {
         when(values.get("price:台股:BAD")).thenReturn("not-json");
 
         assertThat(reader.findOne("BAD", "台股")).isEmpty();
+        verify(values, never()).get("price:etfnav:台股:BAD");
     }
 
     @Test
@@ -100,6 +183,20 @@ class PriceCacheReaderTest {
     }
 
     @Test
+    void listAll_navEnrichmentFailure_doesNotDropValidPrice() {
+        when(sets.members("price:index:台股")).thenReturn(Set.of("0050"));
+        when(values.get("price:台股:0050")).thenReturn(priceJson("0050", "台股", "100.00"));
+        when(values.get("price:etfnav:台股:0050")).thenReturn("malformed");
+
+        assertThat(reader.listAll("台股"))
+                .singleElement()
+                .satisfies(quote -> {
+                    assertThat(quote.stockCode()).isEqualTo("0050");
+                    assertThat(quote.premiumDiscountPct()).isNull();
+                });
+    }
+
+    @Test
     void listAll_emptyIndex_returnsEmptyListNotError() {
         when(sets.members("price:index:台股")).thenReturn(Set.of());
         when(sets.members("price:index:美股")).thenReturn(Set.of());
@@ -119,5 +216,9 @@ class PriceCacheReaderTest {
 
         verify(values, never()).set(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString());
         verify(redis, never()).convertAndSend(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any());
+    }
+
+    private static String priceJson(String code, String market, String price) {
+        return "{\"stockCode\":\"" + code + "\",\"market\":\"" + market + "\",\"price\":" + price + "}";
     }
 }

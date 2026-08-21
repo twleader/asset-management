@@ -344,6 +344,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 342 | 交易雷達美股大盤接上量價環境因子，跨市場改為「不適用」語意，`RULE_VERSION` 升 `TW_RULES_V14`（Requirement 83；規劃階段原為 339／R80，再避讓至 341／R82，因與其他尚未落地的 worktree 撞號主動避讓） | [tasks/t342_radar_us_market_volume_regime_wiring.md](tasks/t342_radar_us_market_volume_regime_wiring.md) |
 | 344 | 資產配置建議的標的層級再平衡：本機／hybrid 檔位把加減碼金額落到具體銀行／基金／個股（Requirement 84；規劃階段原為 342／R83，因 main 已佔用而避讓；Task 343 讓給另一個在途 worktree） | [tasks/t344_portfolio_advice_holding_level_rebalance.md](tasks/t344_portfolio_advice_holding_level_rebalance.md) |
 | 345 | 股利歷史重複事件去重：同除息日同金額不得因發放日 metadata 分裂成兩列，年度小計與還原權息不再灌水（Requirement 13／65 bug fix） | [tasks/t345_dividend_history_duplicate_event_dedup.md](tasks/t345_dividend_history_duplicate_event_dedup.md) |
+| 349 | 台股 ETF 官方折溢價改為每 2 分鐘更新，並以 nullable 欄位併入 Docker 外部 quote API（Requirement 88；Task 347／348 已由其他在途 worktree 保留） | [tasks/t349_etf_premium_quotes_2min.md](tasks/t349_etf_premium_quotes_2min.md) |
 
 > **註：Task 229–263、268、293–296 以各自任務檔為準。**
 
@@ -683,7 +684,7 @@ security property，直接 `-D` 讀不到——雙重靜默無效）、改用 JD
       取 `summaryDetail.navPrice`，`regularMarketTime` 轉紐約日期為資料時點；**折溢價刻意留 null 交由匯出端算**（見 214.6）；
       無 `navPrice`（個股）回 null；401/429 清空 crumb 快取比照既有慣例。
 - [x] 214.4 **ext 寫入與排程**：新增 `service/EtfNavCacheWriter`（`price:etfnav:{market}:{code}`、TTL 96h、失敗只 log）
-      與 `service/EtfNavPoller`（台股 `0 2/5 9-13 * * MON-FRI` TPE ＋交易時段 guard、美股 `0 30 18 * * MON-FRI` NYC、
+      與 `service/EtfNavPoller`（Task 214 原始台股排程為 `0 2/5 9-13 * * MON-FRI`；**Task 349 起已由 `0 1/2 9-13 * * MON-FRI` 每 2 分鐘契約取代**；交易時段 guard、美股 `0 30 18 * * MON-FRI` NYC、
       開機 warmup 不阻塞、`refreshAll()` 供手動觸發）；`application.yml` 加 `etf-nav.enabled`；
       `InternalPriceController` 加 `POST /internal/etf-nav/refresh`。
 - [x] 214.5 **business 讀取**：`PriceQueryService` 新增 `EtfNav` record 與 `getEtfNav(code, market)`（讀 Redis、
