@@ -24,8 +24,8 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>假日來源：
  * <ul>
- *   <li>台股：委派 {@link MarketDataFetchService#getTwHolidays(int)}（TWSE 官方歷年 holidaySchedule JSON，
- *       已是台股假日的唯一來源；抓不到時保守視為交易日，與 business-services 既有退化一致）。</li>
+ *   <li>台股：委派 {@link MarketDataFetchService#getTwHolidays(int)}（TWSE 官方年度表優先；
+ *       尚未公布時使用完整 DGPA 行事曆暫行；兩者都不可用時保守視為交易日）。</li>
  *   <li>美股 / 英股：NYSE / LSE 法定規則純函式計算。</li>
  * </ul>
  *
@@ -65,8 +65,8 @@ public class MarketCalendar {
     }
 
     /**
-     * 台股交易日的 fail-closed 判定。週末可直接確定為 closed；平日只有在 TWSE 年度
-     * 休市表成功且非空時才回 true/false，避免 FX session 在日曆抓取失敗時猜測開放。
+     * 台股交易日的 fail-closed 判定。週末可直接確定為 closed；平日只有在 TWSE primary 或完整
+     * DGPA provisional 年度 authority 成功且非空時才回 true/false，避免 FX session 猜測開放。
      */
     public synchronized Optional<Boolean> isTwTradingDayKnown(LocalDate date) {
         if (isWeekend(date)) return Optional.of(false);
@@ -78,7 +78,7 @@ public class MarketCalendar {
             Optional<Map<String, String>> known = marketData.getTwHolidaysKnown(year);
             if (known.isEmpty() || known.get().isEmpty()) {
                 twAuthorityRetryNotBefore.put(year, now.plus(TW_AUTHORITY_RETRY_INTERVAL));
-                log.warn("TWSE/operator 休市 authority {} 不可用，銀行 FX session fail closed；{} 秒後重試",
+                log.warn("台股年度/operator 休市 authority {} 不可用，銀行 FX session fail closed；{} 秒後重試",
                         year, TW_AUTHORITY_RETRY_INTERVAL.toSeconds());
                 return Optional.empty();
             }
@@ -87,7 +87,7 @@ public class MarketCalendar {
             return Optional.of(!holidays.containsKey(date.toString()));
         } catch (Exception ex) {
             twAuthorityRetryNotBefore.put(year, now.plus(TW_AUTHORITY_RETRY_INTERVAL));
-            log.warn("查 TWSE 休市表失敗 {}: {}（銀行 FX session fail closed）", date, ex.getMessage());
+            log.warn("查台股年度休市 authority 失敗 {}: {}（銀行 FX session fail closed）", date, ex.getMessage());
             return Optional.empty();
         }
     }
@@ -107,8 +107,8 @@ public class MarketCalendar {
             Map<String, String> h = marketData.getTwHolidays(date.getYear());
             return h != null && h.containsKey(date.toString());
         } catch (Exception e) {
-            // TWSE 假日表抓取失敗 → 保守視為交易日（不擋抓價），與 business-services 既有退化一致
-            log.warn("查 TWSE 假日表失敗 {}: {}（保守視為交易日）", date, e.getMessage());
+            // TWSE 與 DGPA 年度 authority 都不可用 → 保守視為交易日（不擋抓價），與 business 既有退化一致
+            log.warn("查台股年度休市 authority 失敗 {}: {}（保守視為交易日）", date, e.getMessage());
             return false;
         }
     }

@@ -428,7 +428,7 @@ frontend/
 spec/
 ├── requirements.md       # 89 個 Requirements（Requirement 87／89 由在途 worktree 保留，最新為 91）
 ├── design.md             # 架構圖、ERD、Service 職責、Sequence
-├── tasks.md              # 現有索引含 Task 347／349；Task 348／350 在途保留，main Task 351 與 Fubon 352–353 採下方一檔一任務
+├── tasks.md              # 現有索引含 Task 347／349；Task 348／350 在途保留，main Task 351、Fubon 352–353 與 Task 354 採下方一檔一任務
 ├── tasks/                # 任務檔
 │   ├── README.md         # 自足任務檔規範
 │   ├── archive/          # Task 1–200 歷史，已凍結

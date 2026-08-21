@@ -4,7 +4,7 @@ Task 201 之後的新任務，一律建立**獨立的自足任務檔** `spec/tas
 
 ```
 spec/
-├── tasks.md              # 現有索引含 Task 347／349；Task 348／350 在途保留，main Task 351 與 Fubon 352–353 採一檔一任務
+├── tasks.md              # 現有索引含 Task 347／349；Task 348／350 在途保留，Task 351–354 採一檔一任務（352–353 為 Fubon）
 └── tasks/
     ├── README.md         # 本檔
     ├── archive/          # Task 1–200 歷史，已凍結

@@ -46,7 +46,7 @@ public class MarketDataController {
     private final com.steven.assets.service.CommodityLiveQuoteService commodityLiveQuoteService;
 
     /**
-     * 取得交易日曆假日（台股：TWSE Open API；美股：NYSE 規則計算）
+     * 取得交易日曆假日（台股：TWSE 優先、完整 DGPA 行事曆暫行；美股：NYSE 規則計算）
      * GET /api/market-data/holidays?year=2026
      */
     @GetMapping("/holidays")

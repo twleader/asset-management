@@ -18,6 +18,7 @@ import org.mockito.quality.Strictness;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.stream.Stream;
 
@@ -34,7 +35,7 @@ import static org.mockito.Mockito.when;
  * <p><b>本匯出點是十個裡唯一不接 {@link ExportDoc} 的</b>：它本來就有兩個 builder、且共吃同一份
  * {@code buildDays}，而 {@code buildJson} 的輸出是<b>對外契約</b>、形狀不得改變。故這裡驗的是
  * (1) 兩份都產出且主檔名相同、(2) JSON 結構未變、(3) format 殘留值不影響行為、
- * (4) 單次查詢探針必須用既有的 2 次而非 1 次。
+ * (4) 三市場各精確查一次，兩格式與每日旗標共用同一 immutable snapshot。
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -107,13 +108,38 @@ class TradingCalendarDualFormatTest {
     }
 
     @Test
-    @DisplayName("單次查詢探針：getTwHolidays 改動前後都是 2 次（buildDays 一次、buildJson 一次）")
-    void 假日查詢次數維持既有的兩次() {
+    @DisplayName("單次查詢探針：每個市場精確一次，且不再逐日呼叫交易日 primitive")
+    void 每市場只查一次() {
         service.exportToDir(2026, "out");
-        // 寫成 times(1) 會永遠紅，逼實作者去改 buildJson——而那正是本任務明文保護的對外契約。
-        verify(marketDataService, times(2)).getTwHolidays(2026);
-        verify(marketDataService, times(2)).getUsHolidays(2026);
-        verify(marketDataService, times(2)).getUkHolidays(2026);
+        verify(marketDataService, times(1)).getTwHolidays(2026);
+        verify(marketDataService, times(1)).getUsHolidays(2026);
+        verify(marketDataService, times(1)).getUkHolidays(2026);
+        verify(marketDataService, org.mockito.Mockito.never()).isTwTradingDay(any());
+        verify(marketDataService, org.mockito.Mockito.never()).isUsTradingDay(any());
+        verify(marketDataService, org.mockito.Mockito.never()).isUkTradingDay(any());
+    }
+
+    @Test
+    @DisplayName("authority 回傳物件後續被修改或再次查詢失敗，都不會讓同份 JSON／Excel 混版")
+    void 年度快照立即防禦複製且不做第二次查詢() throws Exception {
+        Map<String, String> mutableTw = new LinkedHashMap<>();
+        mutableTw.put("2026-01-01", "第一版");
+        when(marketDataService.getTwHolidays(2026))
+                .thenReturn(mutableTw)
+                .thenThrow(new IllegalStateException("後續 transport failure"));
+        when(marketDataService.getUsHolidays(2026)).thenAnswer(invocation -> {
+            mutableTw.clear();
+            mutableTw.put("2026-02-02", "第二版");
+            return Map.of();
+        });
+
+        TradingCalendarExportDto.RunResponse response = service.exportToDir(2026, "out");
+        JsonNode root = mapper.readTree(Files.readAllBytes(Path.of(response.jsonPath())));
+
+        assertThat(root.at("/holidays/tw/2026-01-01").asText()).isEqualTo("第一版");
+        assertThat(root.at("/holidays/tw/2026-02-02").isMissingNode()).isTrue();
+        assertThat(root.at("/days/0/tw").asBoolean()).isFalse();
+        verify(marketDataService, times(1)).getTwHolidays(2026);
     }
 
     @Test

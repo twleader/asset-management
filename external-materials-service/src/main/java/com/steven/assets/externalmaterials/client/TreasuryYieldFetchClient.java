@@ -157,7 +157,7 @@ public class TreasuryYieldFetchClient {
         for (int i = 0; i < lines.length; i++) {
             if (!lines[i].isBlank()) {
                 headerLine = i;
-                header = parseCsvLine(lines[i]);
+                header = QuotedCsvRowParser.parse(lines[i]);
                 break;
             }
         }
@@ -171,7 +171,7 @@ public class TreasuryYieldFetchClient {
         List<CurveBatch> batches = new ArrayList<>();
         for (int i = headerLine + 1; i < lines.length; i++) {
             if (lines[i].isBlank()) continue;
-            List<String> cells = parseCsvLine(lines[i]);
+            List<String> cells = QuotedCsvRowParser.parse(lines[i]);
             LocalDate curveDate = parseDate(cell(cells, dateIndex));
             if (curveDate == null || curveDate.getYear() != year) continue;
             Map<String, BigDecimal> values = new LinkedHashMap<>();
@@ -322,27 +322,7 @@ public class TreasuryYieldFetchClient {
     }
 
     static List<String> parseCsvLine(String line) {
-        List<String> cells = new ArrayList<>();
-        StringBuilder cell = new StringBuilder();
-        boolean quoted = false;
-        for (int i = 0; i < line.length(); i++) {
-            char ch = line.charAt(i);
-            if (ch == '"') {
-                if (quoted && i + 1 < line.length() && line.charAt(i + 1) == '"') {
-                    cell.append('"');
-                    i++;
-                } else {
-                    quoted = !quoted;
-                }
-            } else if (ch == ',' && !quoted) {
-                cells.add(cell.toString().trim());
-                cell.setLength(0);
-            } else {
-                cell.append(ch);
-            }
-        }
-        cells.add(cell.toString().trim());
-        return cells;
+        return QuotedCsvRowParser.parse(line);
     }
 
     private static String cell(List<String> cells, Integer index) {

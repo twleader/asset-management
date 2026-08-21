@@ -339,7 +339,7 @@ public class InternalPriceController {
         return marketData.getDividendHistory(code, market, years);
     }
 
-    /** TWSE 假日表（依年份快取，已 union 颱風假 / 臨時休市）。 */
+    /** 台股年度休市表（TWSE primary／完整 DGPA provisional，已 union 颱風假 / 臨時休市）。 */
     @GetMapping("/tw-holidays")
     public Map<String, String> twHolidays(@RequestParam int year) {
         // 空 map 代表 authority／closure calendar 未知；不能以 closure-only 或週末公式猜成完整年度。

@@ -23,14 +23,14 @@ import java.util.regex.Pattern;
 /**
  * 台股颱風假 / 臨時休市偵測（Requirement 7 / Task 160）。
  *
- * <p>證交所颱風天是否休市，法規上取決於「臺北市政府是否宣布停止上班」；此類臨時休市**不在** TWSE 年度
- * holidaySchedule（年初即公告的固定假期）中，故由本服務每早爬行政院人事行政總處（DGPA）「天然災害停止
+ * <p>證交所颱風天是否休市，法規上取決於「臺北市政府是否宣布停止上班」；此類臨時休市**不在**年度
+ * 固定休市 authority（TWSE primary／完整 DGPA provisional）中，故由本服務每早爬 DGPA「天然災害停止
  * 上班及上課情形」公告，判臺北市當日是否停止上班（且涵蓋 09:00–13:30 交易時段），命中即 upsert 至
  * {@code tw_market_closure}，並由 {@link MarketDataFetchService#getTwHolidays} read-time union 進台股假日
  * 唯一入口，令 market-status / 抓價 / 收盤 / 警示 / 備份 / 分析 / 交易日曆與國定假日同一 cascade 一體休市。
  *
- * <p>退化：DGPA 抓取失敗 / 查無臺北市狀態 → 保守維持交易日（與 TWSE 假日抓取失敗一致）；只新增臨時休市、
- * 不覆寫既有 TWSE 固定假日。
+ * <p>退化：DGPA 災防公告抓取失敗 / 查無臺北市狀態 → 保守維持交易日；只新增臨時休市、
+ * 不覆寫既有年度固定休市。
  */
 @Slf4j
 @Service
