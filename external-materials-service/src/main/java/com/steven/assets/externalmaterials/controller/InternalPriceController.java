@@ -342,7 +342,8 @@ public class InternalPriceController {
     /** TWSE 假日表（依年份快取，已 union 颱風假 / 臨時休市）。 */
     @GetMapping("/tw-holidays")
     public Map<String, String> twHolidays(@RequestParam int year) {
-        return marketData.getTwHolidays(year);
+        // 空 map 代表 authority／closure calendar 未知；不能以 closure-only 或週末公式猜成完整年度。
+        return marketData.getTwHolidaysKnown(year).orElse(Map.of());
     }
 
     /** 手動 / 驗證即時偵測台股颱風假（DGPA 停班公告），命中即寫入 tw_market_closure。回傳今日是否休市。 */

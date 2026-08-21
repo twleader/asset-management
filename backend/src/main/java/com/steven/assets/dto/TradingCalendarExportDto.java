@@ -9,6 +9,25 @@ import java.util.List;
  */
 public class TradingCalendarExportDto {
 
+    /** 固定今年與明年兩筆的批次結果；每筆仍保留原本逐年度雙格式語意。 */
+    public record RangeRunResponse(
+            List<Integer> years,
+            List<RunResponse> results,
+            String localStatus,
+            String gdriveStatus
+    ) {
+        public RangeRunResponse {
+            years = List.copyOf(years);
+            results = List.copyOf(results);
+            if (years.size() != 2 || results.size() != 2
+                    || !years.get(0).equals(results.get(0).year())
+                    || !years.get(1).equals(results.get(1).year())
+                    || years.get(1) != years.get(0) + 1) {
+                throw new IllegalArgumentException("交易日曆年度批次必須為今年與明年兩筆且結果對應年度");
+            }
+        }
+    }
+
     /**
      * 匯出結果：實際落點、大小、格式、年度、天數。
      *

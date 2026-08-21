@@ -88,10 +88,14 @@
             <el-tag v-if="holidaysLoading" type="info" size="small" style="margin-left:8px">載入假日中…</el-tag>
           </span>
           <div style="display:flex;gap:8px;align-items:center">
-            <el-button size="small" type="primary" :icon="Download" @click="openExportDialog">匯出</el-button>
-            <el-button size="small" @click="prevMonth">上月</el-button>
+            <el-button size="small" type="primary" :icon="Download"
+              :disabled="exportYears.length !== 2" @click="openExportDialog">匯出</el-button>
+            <el-select v-model="calendarYear" size="small" style="width:110px" aria-label="年度">
+              <el-option v-for="year in availableYears" :key="year" :label="`${year} 年`" :value="year" />
+            </el-select>
+            <el-button size="small" :disabled="atMinMonth" @click="prevMonth">上月</el-button>
             <el-button size="small" @click="goToday">今天</el-button>
-            <el-button size="small" @click="nextMonth">下月</el-button>
+            <el-button size="small" :disabled="atMaxMonth" @click="nextMonth">下月</el-button>
           </div>
         </div>
       </template>
@@ -107,6 +111,9 @@
         </span>
         <span class="legend-item"><span class="legend-dot holiday" /> 假日/休市</span>
       </div>
+      <el-alert v-for="market in unavailableMarkets" :key="market"
+        type="warning" :closable="false" show-icon style="margin-bottom:8px"
+        :title="`${marketLabels[market]} ${calendarYear} 年度日曆尚未取得`" />
       <table class="cal-table">
         <thead>
           <tr>
@@ -116,7 +123,7 @@
         <tbody>
           <tr v-for="(week, wi) in calendarWeeks" :key="wi">
             <td v-for="(day, di) in week" :key="di"
-              :class="dayClass(day)"
+              :class="calendarDayClass(day)"
               @click="day.date && (selectedDate = day.date)">
               <div v-if="day.day" class="cal-cell">
                 <span class="cal-day" :class="{ today: day.isToday }">{{ day.day }}</span>
@@ -137,12 +144,9 @@
       </table>
     </el-card>
 
-    <!-- 匯出對話框（Requirement 37）：年度 / 格式 / 輸出資料夾 -->
+    <!-- 匯出對話框：固定伺服器定義的今年與明年 -->
     <el-dialog v-model="exportDialog.visible" title="匯出交易日曆" width="560px">
       <el-form label-width="90px">
-        <el-form-item label="年度">
-          <el-input-number v-model="exportDialog.year" :min="1970" :max="2100" :step="1" controls-position="right" style="width:160px" />
-        </el-form-item>
         <el-form-item label="輸出資料夾">
           <el-input v-model="exportDialog.subpath" readonly placeholder="（家目錄根）" style="width:300px">
             <template #append>
@@ -153,8 +157,8 @@
       </el-form>
       <div class="export-hint">
         以主機家目錄 <code>{{ exportDialog.baseDir || '/home/steven' }}</code> 為根（對映主機 <code>/Users/steven</code>）。
-        匯出該年度整年交易日曆（台／美／英三市每日交易日 ＋ 各市場國定假日）為
-        <code>交易日曆_{{ exportDialog.year }}.json</code> 與 <code>交易日曆_{{ exportDialog.year }}.xlsx</code> <strong>兩份</strong>（主檔名相同、只差副檔名）。
+        固定匯出今年與明年各自的整年交易日曆，共四份：
+        <template v-for="year in exportYears" :key="year"><code>交易日曆_{{ year }}.json</code>、<code>交易日曆_{{ year }}.xlsx</code>　</template>
       </div>
       <!--
         兩個落點都列出（Requirement 55 / Task 282）：這一列留在畫面上，比一閃即逝的 toast
@@ -162,12 +166,12 @@
         不再顯示 KB——sizeBytes 只有 xlsx 那一份，配上兩個落點會變成「兩個檔案、一個大小」。
       -->
       <div v-if="exportDialog.lastResult" class="export-status">
-        ✅ 已匯出：
-        <!-- 兩個落點各自 v-if：任一份 render 失敗時該欄為 null，裸印會變成「已匯出： 與 x.json」 -->
-        <code v-if="exportDialog.lastResult.path">{{ exportDialog.lastResult.path }}</code>
-        <template v-if="exportDialog.lastResult.path && exportDialog.lastResult.jsonPath"> 與 </template>
-        <code v-if="exportDialog.lastResult.jsonPath">{{ exportDialog.lastResult.jsonPath }}</code>
-        （{{ exportDialog.lastResult.totalDays }} 天）
+        <div v-for="result in exportDialog.lastResult.results || []" :key="result.year" style="margin-top:6px">
+          <strong>{{ result.year }} 年</strong>：{{ result.localStatus || '未產出' }}
+          <template v-if="hasLocalExport(result)"> ✅ 已匯出：
+            <code v-if="result.path">{{ result.path }}</code><template v-if="result.path && result.jsonPath"> 與 </template><code v-if="result.jsonPath">{{ result.jsonPath }}</code>
+          </template>
+        </div>
       </div>
 
       <!-- 每日排程自動匯出（Task 185）：共用上方格式／資料夾 -->
@@ -217,8 +221,7 @@
         <template v-else>—（尚未執行過）</template>
       </div>
       <div class="export-hint">
-        啟用後每日於指定時間，自動以上方選定的<strong>格式與資料夾</strong>匯出「當前年度」交易日曆
-        （<code>交易日曆_{當前年}.json</code> 與 <code>.xlsx</code> <strong>兩份</strong>），隨年度與臨時休市更新保持最新。
+        啟用後每日於指定時間，自動匯出今年與明年各自同時產出 JSON 與 Excel 兩份，共四檔。
       </div>
       <div v-if="exportDialog.scheduleLastRunAt || exportDialog.scheduleLastRunStatus" class="export-status">
         上次排程執行：{{ exportDialog.scheduleLastRunAt || '—' }}　{{ exportDialog.scheduleLastRunStatus || '' }}
@@ -287,6 +290,18 @@
 import { bffApi } from '@/api'
 import { showGdriveSelfCheckWarning } from '@/utils/gdriveSelfCheck'
 import { showDualExportResult } from '@/utils/dualExportMessage'
+import {
+  calendarDayClass,
+  calendarEntry,
+  calendarExportYears,
+  hasLocalExport,
+  isMaxMonth,
+  isMinMonth,
+  marketTradingFlag,
+  moveCalendarMonth,
+  taipeiDateParts,
+  unavailableMarketKeys
+} from '@/utils/tradingCalendarYearWindow'
 import { useAuthStore } from '@/stores/authStore'
 import dayjs from 'dayjs'
 import { ElMessage } from 'element-plus'
@@ -295,13 +310,18 @@ import TaiwanMap from '@/components/TaiwanMap.vue'
 import UsFlag from '@/components/UsFlag.vue'
 
 const status = ref({ twMarketOpen: false, usMarketOpen: false, ukMarketOpen: false, twTime: '', usTime: '', ukTime: '' })
-const calendarYear = ref(dayjs().year())
-const calendarMonth = ref(dayjs().month() + 1)
+const initialTaipeiDate = taipeiDateParts()
+const serverYear = ref(initialTaipeiDate.year)
+const availableYears = ref([])
+const minYear = ref(null)
+const maxYear = ref(null)
+const calendarYear = ref(serverYear.value)
+const calendarMonth = ref(initialTaipeiDate.month)
 const selectedDate = ref(null)
 
 // 匯出到指定路徑（Requirement 37）＋每日排程（Task 185）
 const exportDialog = reactive({
-  visible: false, year: dayjs().year(), subpath: 'input', baseDir: '', exporting: false, lastResult: null,
+  visible: false, subpath: 'input', baseDir: '', exporting: false, lastResult: null,
   scheduleEnabled: false, scheduleTime: '08:00', savingSchedule: false, scheduleLastRunAt: null, scheduleLastRunStatus: null,
   // Drive 同步（Task 244）：目的地存在排程設定列上，與上方 subpath（本次匯出到哪）刻意不同
   gdriveEnabled: false, gdriveSubpath: '', gdriveRemote: '',
@@ -331,20 +351,42 @@ const dirPickerPreview = computed(() => {
 })
 const dirTreeProps = { label: 'name', isLeaf: 'leaf' }
 
-// Holiday cache by year: { 2026: { tw: {...}, us: {...} }, ... }
+// 每年同時保存 holidays 與 authority availability，不能把最近一次請求的資料套到另一年。
 const holidayCache = ref({})
 const holidaysLoading = ref(false)
+const marketLabels = { tw: '台股', us: '美股', uk: '英股' }
+const currentCalendarEntry = computed(() => calendarEntry(holidayCache.value, calendarYear.value))
+const unavailableMarkets = computed(() => unavailableMarketKeys(currentCalendarEntry.value))
+const atMinMonth = computed(() => isMinMonth(calendarYear.value, calendarMonth.value, minYear.value))
+const atMaxMonth = computed(() => isMaxMonth(calendarYear.value, calendarMonth.value, maxYear.value))
+const exportYears = computed(() => calendarExportYears(availableYears.value, serverYear.value))
 
-async function loadHolidays(year) {
-  if (holidayCache.value[year]) return
+async function loadHolidays(year, initial = false) {
+  if (year != null && holidayCache.value[year]) return
   holidaysLoading.value = true
   try {
     // BFF 一支端點：holidays + marketStatus
-    const res = await bffApi.tradingCalendar.get(year)
-    holidayCache.value = { ...holidayCache.value, [year]: res.holidays ?? { tw: {}, us: {}, uk: {} } }
+    const res = await bffApi.tradingCalendar.get(initial ? undefined : year)
+    const resolvedYear = res.year ?? year
+    serverYear.value = initial ? resolvedYear : serverYear.value
+    if (Array.isArray(res.availableYears)) availableYears.value = res.availableYears
+    minYear.value = res.minYear ?? availableYears.value[0] ?? resolvedYear - 1
+    maxYear.value = res.maxYear ?? availableYears.value.at(-1) ?? resolvedYear + 1
+    if (initial) {
+      calendarYear.value = resolvedYear
+      calendarMonth.value = taipeiDateParts().month
+    }
+    holidayCache.value = { ...holidayCache.value, [resolvedYear]: {
+      holidays: res.holidays ?? { tw: {}, us: {}, uk: {} },
+      availability: res.availability ?? { tw: 'UNAVAILABLE', us: 'UNAVAILABLE', uk: 'UNAVAILABLE' }
+    } }
     if (res.marketStatus) status.value = res.marketStatus
   } catch (e) {
-    holidayCache.value = { ...holidayCache.value, [year]: { tw: {}, us: {}, uk: {} } }
+    const failedYear = year ?? calendarYear.value
+    holidayCache.value = { ...holidayCache.value, [failedYear]: {
+      holidays: { tw: {}, us: {}, uk: {} },
+      availability: { tw: 'UNAVAILABLE', us: 'UNAVAILABLE', uk: 'UNAVAILABLE' }
+    } }
   } finally {
     holidaysLoading.value = false
   }
@@ -353,7 +395,7 @@ async function loadHolidays(year) {
 watch(calendarYear, (y) => loadHolidays(y), { immediate: false })
 
 onMounted(async () => {
-  loadHolidays(calendarYear.value)
+  await loadHolidays(undefined, true)
   setInterval(async () => {
     try { status.value = await bffApi.tradingCalendar.marketStatus() } catch {}
   }, 60000)
@@ -423,11 +465,11 @@ const calendarWeeks = computed(() => {
   const daysInMonth = firstDay.daysInMonth()
   const startDow = firstDay.day() // 0=Sun
 
-  const cached = holidayCache.value[y] || { tw: {}, us: {}, uk: {} }
-  const twHolidays = cached.tw
-  const usHolidays = cached.us
-  const ukHolidays = cached.uk || {}
-  const today = dayjs().format('YYYY-MM-DD')
+  const cached = currentCalendarEntry.value
+  const twHolidays = cached.holidays?.tw || {}
+  const usHolidays = cached.holidays?.us || {}
+  const ukHolidays = cached.holidays?.uk || {}
+  const today = taipeiDateParts().date
 
   const weeks = []
   let week = []
@@ -444,11 +486,11 @@ const calendarWeeks = computed(() => {
     const isWeekend = dow === 0 || dow === 6
 
     // 台股交易日: 週一～五，非台灣假日
-    const tw = !isWeekend && !twHolidays[dateStr]
+    const tw = marketTradingFlag(cached, 'tw', isWeekend, dateStr)
     // 美股交易日: 週一～五，非美國假日
-    const us = !isWeekend && !usHolidays[dateStr]
+    const us = marketTradingFlag(cached, 'us', isWeekend, dateStr)
     // 英股交易日: 週一～五，非英國銀行假日（LSE）
-    const uk = !isWeekend && !ukHolidays[dateStr]
+    const uk = marketTradingFlag(cached, 'uk', isWeekend, dateStr)
 
     week.push({
       day: d,
@@ -479,40 +521,27 @@ const calendarWeeks = computed(() => {
   return weeks
 })
 
-function dayClass(day) {
-  if (!day.day) return 'empty'
-  if (day.isWeekend) return 'weekend'
-  if (day.tw && day.us && day.uk) return 'both'
-  if (!day.tw && !day.us && !day.uk) return 'holiday'
-  return ''
-}
-
 function prevMonth() {
-  if (calendarMonth.value === 1) {
-    calendarYear.value--
-    calendarMonth.value = 12
-  } else {
-    calendarMonth.value--
-  }
+  const target = moveCalendarMonth(
+    calendarYear.value, calendarMonth.value, -1, minYear.value, maxYear.value)
+  calendarYear.value = target.year
+  calendarMonth.value = target.month
 }
 
 function nextMonth() {
-  if (calendarMonth.value === 12) {
-    calendarYear.value++
-    calendarMonth.value = 1
-  } else {
-    calendarMonth.value++
-  }
+  const target = moveCalendarMonth(
+    calendarYear.value, calendarMonth.value, 1, minYear.value, maxYear.value)
+  calendarYear.value = target.year
+  calendarMonth.value = target.month
 }
 
 function goToday() {
-  calendarYear.value = dayjs().year()
-  calendarMonth.value = dayjs().month() + 1
+  calendarYear.value = serverYear.value
+  calendarMonth.value = taipeiDateParts().month
 }
 
 // ===== 匯出到指定路徑（Requirement 37）＋每日排程（Task 185）=====
 async function openExportDialog() {
-  exportDialog.year = calendarYear.value
   exportDialog.lastResult = null
   exportDialog.visible = true
   try {
@@ -625,17 +654,19 @@ function confirmDirPick() {
 async function doExport() {
   exportDialog.exporting = true
   try {
-    const r = await bffApi.tradingCalendar.exportToDir(exportDialog.year, exportDialog.subpath)
+    const r = await bffApi.tradingCalendar.exportToDir(exportDialog.subpath)
     exportDialog.lastResult = r
     // 手動匯出也會同步 Drive（Task 244.5.1）；狀態即時反映在「上次上傳」
     if (r.gdriveStatus) {
       exportDialog.gdriveLastStatus = r.gdriveStatus
       exportDialog.gdriveLastRunAt = dayjs().format('YYYY-MM-DD HH:mm:ss')
     }
-    // path 依契約一律指 xlsx、jsonPath 指 json（Requirement 55 / Task 282）
-    showDualExportResult({ jsonPath: r.jsonPath, xlsxPath: r.path, gdriveStatus: r.gdriveStatus })
+    for (const result of r.results || []) {
+      showDualExportResult({ jsonPath: result.jsonPath, xlsxPath: result.path,
+        gdriveStatus: result.gdriveStatus, localStatus: result.localStatus, prefix: `${result.year} 年` })
+    }
   } catch (e) {
-    ElMessage.error('匯出失敗，請確認年度、格式與目錄權限')
+    ElMessage.error('匯出失敗，請確認輸出資料夾')
   } finally {
     exportDialog.exporting = false
   }

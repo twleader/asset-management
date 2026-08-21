@@ -1,6 +1,5 @@
 package com.steven.assets.bff.tradingcalendar;
 
-import lombok.RequiredArgsConstructor;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -13,7 +12,6 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
-import java.time.LocalDate;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -23,10 +21,20 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/bff/trading-calendar")
-@RequiredArgsConstructor
 public class TradingCalendarBffController {
 
     private final WebClient businessServicesClient;
+    private final TradingCalendarYearWindow yearWindow;
+
+    public TradingCalendarBffController(WebClient businessServicesClient) {
+        this(businessServicesClient, new TradingCalendarYearWindow());
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public TradingCalendarBffController(WebClient businessServicesClient, TradingCalendarYearWindow yearWindow) {
+        this.businessServicesClient = businessServicesClient;
+        this.yearWindow = yearWindow;
+    }
 
     private static final ParameterizedTypeReference<Map<String, Object>> MAP =
             new ParameterizedTypeReference<>() {};
@@ -38,7 +46,15 @@ public class TradingCalendarBffController {
     @GetMapping
     public Mono<ResponseEntity<Map<String, Object>>> get(
             @RequestParam(required = false) Integer year) {
-        int targetYear = year != null ? year : LocalDate.now().getYear();
+        TradingCalendarYearWindow.Window window = yearWindow.snapshot();
+        int targetYear = year != null ? year : window.currentYear();
+        if (!window.accepts(targetYear)) {
+            return Mono.just(ResponseEntity.badRequest().body(Map.of(
+                    "message", "年度僅可查詢去年、今年或明年",
+                    "availableYears", window.availableYears(),
+                    "minYear", window.minYear(),
+                    "maxYear", window.maxYear())));
+        }
         return Mono.zip(
                 businessServicesClient.get()
                         .uri(uri -> uri.path("/api/market-data/holidays")
@@ -52,8 +68,23 @@ public class TradingCalendarBffController {
             body.put("holidays", t.getT1());
             body.put("marketStatus", t.getT2());
             body.put("year", targetYear);
+            body.put("availableYears", window.availableYears());
+            body.put("minYear", window.minYear());
+            body.put("maxYear", window.maxYear());
+            body.put("availability", availability(t.getT1()));
             return ResponseEntity.ok(body);
         });
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, String> availability(Map<String, Object> holidays) {
+        Map<String, String> result = new HashMap<>();
+        for (String market : new String[]{"tw", "us", "uk"}) {
+            Object value = holidays.get(market);
+            boolean present = value instanceof Map<?, ?> map && !map.isEmpty();
+            result.put(market, present ? "AVAILABLE" : "UNAVAILABLE");
+        }
+        return result;
     }
 
     @GetMapping("/market-status")
@@ -67,18 +98,16 @@ public class TradingCalendarBffController {
     // ===== 交易日曆匯出到指定路徑（Requirement 37 / Task 184）=====
 
     /**
-     * POST /api/bff/trading-calendar/export?year=&subpath=
+     * POST /api/bff/trading-calendar/export?subpath=
      * 產出整年交易日曆並寫檔到指定目錄，<b>一律同時產 JSON 與 Excel 兩份</b>（Requirement 55 / Task 271）；
      * 回 {path,sizeBytes,jsonPath,jsonSizeBytes,jsonGdrivePath,year,totalDays,…}。
      * {@code format} 參數自 Requirement 55 起移除——使用者不再需要二選一。
      */
     @PostMapping("/export")
     public Mono<ResponseEntity<Map<String, Object>>> export(
-            @RequestParam(required = false) Integer year,
             @RequestParam(required = false, defaultValue = "") String subpath) {
         return businessServicesClient.post()
                 .uri(uri -> uri.path("/api/trading-calendar-export/run")
-                        .queryParamIfPresent("year", java.util.Optional.ofNullable(year))
                         .queryParam("subpath", subpath)
                         .build())
                 .retrieve().bodyToMono(MAP)

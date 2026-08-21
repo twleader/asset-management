@@ -30,6 +30,7 @@ import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -276,26 +277,40 @@ class TradingExportGdriveTest {
                 .gdriveEnabled(gdriveEnabled).gdriveSubpath(gdriveSubpath).build();
     }
 
-    /** 讓 exportToDir 真的把檔案落在它收到的子路徑，回傳與正式實作同形狀的 RunResponse。 */
+    /** 讓雙年度 primitive 真的把四個檔案落在它收到的子路徑。 */
     private void givenCalendarExportWrites() {
-        when(calendarExportService.exportToDir(anyInt(), anyString()))
-                .thenAnswer(inv -> {
-                    int year = inv.getArgument(0);
-                    String sub = inv.getArgument(1);
-                    Path dir = baseDir.resolve(sub);
-                    Files.createDirectories(dir);
-                    // Task 271 起一律兩份、主檔名相同
-                    Path xlsx = dir.resolve("交易日曆_" + year + ".xlsx");
-                    Path json = dir.resolve("交易日曆_" + year + ".json");
-                    Files.writeString(xlsx, "xlsx");
-                    Files.writeString(json, "{}");
-                    return TradingCalendarExportDto.RunResponse.builder()
-                            .path(xlsx.toString()).sizeBytes(4)
-                            .jsonPath(json.toString()).jsonSizeBytes(2)
-                            // Task 271 起狀態字串由共用元件算好帶回，排程端一律沿用、不自組
-                            .localStatus("成功：" + xlsx + "／json 成功：" + json)
-                            .year(year).totalDays(365).build();
-                });
+        when(calendarExportService.exportYearPairToDir(anyInt(), anyString()))
+                .thenAnswer(inv -> calendarRange(inv.getArgument(0), inv.getArgument(1), true));
+    }
+
+    private TradingCalendarExportDto.RangeRunResponse calendarRange(
+            int anchorYear, String subpath, boolean secondYearSucceeds) throws IOException {
+        List<Integer> years = List.of(anchorYear, anchorYear + 1);
+        List<TradingCalendarExportDto.RunResponse> results = new ArrayList<>(2);
+        for (int year : years) {
+            if (year == anchorYear + 1 && !secondYearSucceeds) {
+                results.add(TradingCalendarExportDto.RunResponse.builder()
+                        .year(year).totalDays(0)
+                        .localStatus("xlsx 略過：" + year + " 年 authority unavailable／json 略過："
+                                + year + " 年 authority unavailable")
+                        .build());
+                continue;
+            }
+            Path dir = baseDir.resolve(subpath);
+            Files.createDirectories(dir);
+            Path xlsx = dir.resolve("交易日曆_" + year + ".xlsx");
+            Path json = dir.resolve("交易日曆_" + year + ".json");
+            Files.writeString(xlsx, "xlsx");
+            Files.writeString(json, "{}");
+            results.add(TradingCalendarExportDto.RunResponse.builder()
+                    .path(xlsx.toString()).sizeBytes(4)
+                    .jsonPath(json.toString()).jsonSizeBytes(2)
+                    .localStatus("xlsx 成功：" + xlsx + "／json 成功：" + json)
+                    .year(year).totalDays(java.time.Year.isLeap(year) ? 366 : 365).build());
+        }
+        return new TradingCalendarExportDto.RangeRunResponse(years, results,
+                TradingCalendarExportService.aggregateStatus(
+                        results, TradingCalendarExportDto.RunResponse::localStatus, 500), null);
     }
 
     @Test
@@ -310,13 +325,15 @@ class TradingExportGdriveTest {
         when(rcloneClient.copyTo(anyString(), any(), anyString(), anyString()))
                 .thenReturn("GDriveOutput:" + DRIVE_DIR + "/交易日曆_2026.json");
 
-        TradingCalendarExportDto.RunResponse r =
-                calendar.runManualForCurrentUser(2026, "Downloads");
+        TradingCalendarExportDto.RangeRunResponse r =
+                calendar.runManualForCurrentUser("Downloads");
 
-        assertThat(r.path()).contains("Downloads");                       // 本機落在 query param 指定處
-        // Task 271 起一律上傳兩份（xlsx ＋ json），兩份都落在設定列指定的 Drive 目錄
-        verify(rcloneClient, times(2)).copyTo(anyString(), any(), eq(DRIVE_DIR), anyString());
-        assertThat(r.gdriveStatus()).startsWith("xlsx 成功：").contains("／json ");
+        assertThat(r.results()).allSatisfy(result -> assertThat(result.path()).contains("Downloads"));
+        verify(calendarExportService).exportYearPairToDir(eq(today().getYear()), eq("Downloads"));
+        verify(calendarExportService, never()).exportToDir(anyInt(), anyString());
+        verify(rcloneClient, times(4)).copyTo(anyString(), any(), eq(DRIVE_DIR), anyString());
+        assertThat(r.gdriveStatus())
+                .contains(String.valueOf(r.years().get(0)), String.valueOf(r.years().get(1)), "xlsx", "json");
     }
 
     @Test
@@ -325,8 +342,8 @@ class TradingExportGdriveTest {
         when(calendarRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.empty());
         givenCalendarExportWrites();
 
-        TradingCalendarExportDto.RunResponse r =
-                calendar.runManualForCurrentUser(2026, "Downloads");
+        TradingCalendarExportDto.RangeRunResponse r =
+                calendar.runManualForCurrentUser("Downloads");
 
         assertThat(r.gdriveStatus()).isNull();
         verify(rcloneClient, never()).copyTo(anyString(), any(), anyString(), anyString());
@@ -344,10 +361,11 @@ class TradingExportGdriveTest {
 
         calendar.selfHealOnStartup();
 
-        assertThat(s.getLastRunStatus()).startsWith("成功：");
-        assertThat(s.getGdriveLastStatus()).startsWith("xlsx 成功：").contains("／json ");
-        // Task 271 起一律上傳兩份（xlsx ＋ json）
-        verify(rcloneClient, times(2)).copyTo(anyString(), any(), eq(DRIVE_DIR), anyString());
+        assertThat(s.getLastRunStatus()).contains("xlsx", "json", "年");
+        assertThat(s.getGdriveLastStatus()).contains("xlsx", "json", "年");
+        verify(calendarExportService).exportYearPairToDir(eq(today().getYear()), eq("input"));
+        verify(calendarExportService, never()).exportToDir(anyInt(), anyString());
+        verify(rcloneClient, times(4)).copyTo(anyString(), any(), eq(DRIVE_DIR), anyString());
     }
 
     @Test
@@ -355,7 +373,7 @@ class TradingExportGdriveTest {
         givenUser(ADMIN_ID, "tw.leader@gmail.com", true);
         TradingCalendarExportSchedule s = calendarSetting(ADMIN_ID, true, DRIVE_DIR);
         when(calendarRepo.findAll()).thenReturn(List.of(s));
-        when(calendarExportService.exportToDir(anyInt(), anyString()))
+        when(calendarExportService.exportYearPairToDir(anyInt(), anyString()))
                 .thenThrow(new RuntimeException("產檔失敗"));
 
         calendar.selfHealOnStartup();
@@ -363,6 +381,26 @@ class TradingExportGdriveTest {
         assertThat(s.getLastRunStatus()).startsWith("失敗：");
         assertThat(s.getGdriveLastStatus()).startsWith("跳過：");
         verify(rcloneClient, never()).copyTo(anyString(), any(), anyString(), anyString());
+    }
+
+    @Test
+    void 日曆_次年authority失敗時只上傳今年雙檔且狀態保留兩年與格式() throws Exception {
+        givenCurrentUser(ADMIN_ID);
+        givenUser(ADMIN_ID, "tw.leader@gmail.com", true);
+        when(calendarRepo.findByOwnerUserId(ADMIN_ID))
+                .thenReturn(Optional.of(calendarSetting(ADMIN_ID, true, DRIVE_DIR)));
+        when(calendarExportService.exportYearPairToDir(anyInt(), anyString()))
+                .thenAnswer(inv -> calendarRange(inv.getArgument(0), inv.getArgument(1), false));
+        when(rcloneClient.copyTo(anyString(), any(), anyString(), anyString()))
+                .thenReturn("GDriveOutput:" + DRIVE_DIR + "/交易日曆.json");
+
+        TradingCalendarExportDto.RangeRunResponse r = calendar.runManualForCurrentUser("Downloads");
+
+        verify(rcloneClient, times(2)).copyTo(anyString(), any(), eq(DRIVE_DIR), anyString());
+        assertThat(r.results().get(1).gdriveStatus()).contains("xlsx 略過", "json 略過");
+        assertThat(r.gdriveStatus())
+                .contains(String.valueOf(r.years().get(0)), String.valueOf(r.years().get(1)), "xlsx", "json")
+                .hasSizeLessThanOrEqualTo(512);
     }
 
     @Test

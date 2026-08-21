@@ -35,8 +35,15 @@ import { ElMessage } from 'element-plus'
  * @param {string?} r.xlsxPath     `.xlsx` 那一份的落點（同上）
  * @param {string?} r.gdriveStatus 後端合併好的 Drive 狀態；Drive 未啟用時為 null
  * @param {string?} r.prefix       呼叫端自己的前綴資訊（警示觸發頁的 r.message），預設無
+ * @param {string?} r.localStatus  本機兩份皆未產出時的後端原因；省略時維持舊頁面訊息
  */
-export function showDualExportResult({ jsonPath, xlsxPath, gdriveStatus, prefix = '' } = {}) {
+export function showDualExportResult({ jsonPath, xlsxPath, gdriveStatus, localStatus, prefix = '' } = {}) {
+  const notice = dualExportNotice({ jsonPath, xlsxPath, gdriveStatus, localStatus, prefix })
+  return show(notice.type, notice.message)
+}
+
+/** 純函式版本供自動測試與畫面共用；不得在呼叫頁另造一套成功／失敗判準。 */
+export function dualExportNotice({ jsonPath, xlsxPath, gdriveStatus, localStatus, prefix = '' } = {}) {
   // 判空一律走 trim 後為空字串，一次涵蓋 null／undefined／''——任何分支都不得把 null 印進訊息
   const json = String(jsonPath ?? '').trim()
   const xlsx = String(xlsxPath ?? '').trim()
@@ -44,10 +51,13 @@ export function showDualExportResult({ jsonPath, xlsxPath, gdriveStatus, prefix 
   const head = String(prefix ?? '').trim() ? `${String(prefix).trim()}；` : ''
 
   if (!json && !xlsx) {
-    return show('warning', `${head}本輪未產出任何檔案，請檢查輸出資料夾權限與磁碟空間`)
+    const reason = String(localStatus ?? '').trim()
+    return notice('warning', reason
+      ? `${head}${reason}`
+      : `${head}本輪未產出任何檔案，請檢查輸出資料夾權限與磁碟空間`)
   }
   if (!json || !xlsx) {
-    return show('warning',
+    return notice('warning',
       `${head}已匯出 ${json || xlsx}，但 ${json ? 'Excel' : 'JSON'} 那一份本輪未產出`)
   }
 
@@ -59,13 +69,17 @@ export function showDualExportResult({ jsonPath, xlsxPath, gdriveStatus, prefix 
   const bothOk = /^xlsx 成功：/.test(gd) && gd.includes('／json 成功：')
   if (gd && !bothOk) {
     return gd.includes('失敗') || gd.includes('略過') || gd.includes('跳過')
-      ? show('warning', `${head}本機兩份已寫出，但 Google Drive 同步未全部成功：${gd}`)
-      : show('info', `${head}本機兩份已寫出；Google Drive：${gd}`)
+      ? notice('warning', `${head}本機兩份已寫出，但 Google Drive 同步未全部成功：${gd}`)
+      : notice('info', `${head}本機兩份已寫出；Google Drive：${gd}`)
   }
 
   // Drive 成功時也附上狀態：警示觸發頁原本的 ElMessage.info 是全庫唯一會顯示 Drive 落點的地方，
   // 收斂到這裡後若成功分支不附，那一頁的 Drive 落點就在畫面上消失了。
-  return show('success', `${head}已匯出 ${json} 與 ${xlsx}${gd ? `；Google Drive：${gd}` : ''}`)
+  return notice('success', `${head}已匯出 ${json} 與 ${xlsx}${gd ? `；Google Drive：${gd}` : ''}`)
+}
+
+function notice(type, message) {
+  return { type, message }
 }
 
 /** 訊息含兩個絕對路徑（中文檔名 ＋ 深層子路徑），預設 3 秒讀不完，故延長並開放手動關閉。 */

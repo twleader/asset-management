@@ -34,7 +34,8 @@ import java.util.regex.Pattern;
  * 殖利率 / ETF 持股 / 股利歷史 / TWSE 假日 / 股票名稱對外抓取（從 backend MarketDataService 搬遷至此）。
  *
  * 對外 API：
- *  - TWSE OpenAPI: https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL（殖利率）/ holidaySchedule（假日）
+ *  - TWSE OpenAPI: https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL（殖利率）
+ *  - TWSE 歷年開休市 JSON: https://www.twse.com.tw/holidaySchedule/holidaySchedule（假日）
  *  - TWSE BWIBBU per stock: https://www.twse.com.tw/exchangeReport/BWIBBU
  *  - FinMind: TaiwanStockDividend / TaiwanStockDividendResult / TaiwanETFHoldings / TaiwanStockInfo
  *  - NASDAQ: /api/quote/{code}/dividends, /api/quote/{code}/info
@@ -953,32 +954,68 @@ public class MarketDataFetchService {
     }
 
     Map<String, String> fetchTwHolidaysFromTwse(int year) {
-        int rocYear = year - 1911;
-        String rocYearStr = String.valueOf(rocYear);
         try {
             HttpRequest req = HttpRequest.newBuilder()
-                    .uri(URI.create("https://openapi.twse.com.tw/v1/holidaySchedule/holidaySchedule"))
+                    .uri(URI.create("https://www.twse.com.tw/holidaySchedule/holidaySchedule?response=json&date=" + year))
                     .timeout(Duration.ofSeconds(15))
                     .header("User-Agent", UA).header("Accept", "application/json").GET().build();
             HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
-            JsonNode root = mapper.readTree(resp.body());
-            Map<String, String> holidays = new LinkedHashMap<>();
-            for (JsonNode item : root) {
-                String date = item.path("Date").asText();
-                String name = item.path("Name").asText();
-                if (name.contains("開始交易日") || name.contains("最後交易日")) continue;
-                if (!date.startsWith(rocYearStr)) continue;
-                String mmdd = date.substring(rocYearStr.length());
-                int month = Integer.parseInt(mmdd.substring(0, 2));
-                int day = Integer.parseInt(mmdd.substring(2, 4));
-                holidays.put(String.format("%04d-%02d-%02d", year, month, day), name);
-            }
+            if (resp.statusCode() != 200) return Map.of();
+            Map<String, String> holidays = parseTwseHolidayReport(year, resp.body());
             log.info("TWSE holidays fetched for {}: {} entries", year, holidays.size());
             return holidays;
         } catch (Exception e) {
             log.warn("Failed to fetch TWSE holidays for {}: {}", year, e.getMessage());
             return Map.of();
         }
+    }
+
+    /**
+     * 解析 TWSE 歷年開休市報表。報表的 {@code title} 使用民國年，但 {@code date} 與每列日期都是西元年；
+     * 任一 identity／schema 不吻合即整份 fail closed，避免把另一年度或部分 payload 當完整 authority。
+     */
+    Map<String, String> parseTwseHolidayReport(int year, String body) {
+        int rocYear = year - 1911;
+        try {
+            JsonNode root = mapper.readTree(body);
+            if (!"OK".equalsIgnoreCase(root.path("stat").asText("").trim())) return Map.of();
+
+            LocalDate reportDate = LocalDate.parse(
+                    root.path("date").asText("").trim(),
+                    java.time.format.DateTimeFormatter.BASIC_ISO_DATE);
+            if (reportDate.getYear() != year) return Map.of();
+
+            String normalizedTitle = root.path("title").asText("").trim().replaceAll("\\s+", " ");
+            if (!normalizedTitle.startsWith(rocYear + " 年市場開休市日期")) return Map.of();
+
+            JsonNode fields = root.path("fields");
+            if (!fields.isArray()) return Map.of();
+            int dateIndex = findFieldIndex(fields, "日期");
+            int nameIndex = findFieldIndex(fields, "名稱");
+            if (dateIndex < 0 || nameIndex < 0) return Map.of();
+
+            JsonNode rows = root.path("data");
+            if (!rows.isArray() || rows.isEmpty()) return Map.of();
+            Map<String, String> holidays = new LinkedHashMap<>();
+            for (JsonNode item : rows) {
+                if (!item.isArray() || item.size() <= Math.max(dateIndex, nameIndex)) return Map.of();
+                LocalDate date = LocalDate.parse(item.get(dateIndex).asText("").trim());
+                String name = item.get(nameIndex).asText("").trim();
+                if (date.getYear() != year || name.isEmpty()) return Map.of();
+                if (name.contains("開始交易日") || name.contains("最後交易日")) continue;
+                holidays.put(date.toString(), name);
+            }
+            return holidays.isEmpty() ? Map.of() : Map.copyOf(holidays);
+        } catch (Exception e) {
+            return Map.of();
+        }
+    }
+
+    private static int findFieldIndex(JsonNode fields, String expected) {
+        for (int i = 0; i < fields.size(); i++) {
+            if (fields.get(i).asText("").contains(expected)) return i;
+        }
+        return -1;
     }
 
     // ─── 股票名稱 ──────────────────────────────────────────────────────────────

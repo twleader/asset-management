@@ -26,6 +26,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.function.Function;
 
 /**
  * 交易日曆匯出到指定路徑（Requirement 37 / Task 184）。
@@ -111,6 +112,75 @@ public class TradingCalendarExportService {
         } catch (IOException e) {
             throw new RuntimeException("交易日曆匯出失敗：" + e.getMessage(), e);
         }
+    }
+
+    /**
+     * 固定嘗試錨定年度與下一年。路徑驗證刻意在逐年 catch 之外，非法路徑必須維持 HTTP 400 且零 authority query。
+     */
+    public TradingCalendarExportDto.RangeRunResponse exportYearPairToDir(int anchorYear, String subpath) {
+        String validSubpath = requireValidSubpath(subpath);
+        List<Integer> years = List.of(anchorYear, anchorYear + 1);
+        List<TradingCalendarExportDto.RunResponse> results = new ArrayList<>(2);
+        for (int year : years) {
+            try {
+                // 空 map 的語意是 authority unavailable，絕不能讓 primitive 把它當「全年無假日」。
+                if (marketDataService.getTwHolidays(year).isEmpty()) {
+                    results.add(failedYear(year, "TWSE 年度假日曆尚未取得"));
+                    continue;
+                }
+                results.add(exportToDir(year, validSubpath));
+            } catch (RuntimeException e) {
+                results.add(failedYear(year, e.getMessage()));
+            }
+        }
+        return new TradingCalendarExportDto.RangeRunResponse(years, results,
+                aggregateStatus(results, TradingCalendarExportDto.RunResponse::localStatus, 500), null);
+    }
+
+    private static TradingCalendarExportDto.RunResponse failedYear(int year, String reason) {
+        String detail = reason == null || reason.isBlank() ? "年度日曆不可用" : reason;
+        return TradingCalendarExportDto.RunResponse.builder()
+                .year(year).totalDays(0)
+                .localStatus("xlsx 略過：%d 年%s／json 略過：%d 年%s"
+                        .formatted(year, detail, year, detail))
+                .build();
+    }
+
+    /**
+     * 把兩個年度的雙格式狀態公平壓進 DB 欄位；先分年度、再分 xlsx/json，避免長路徑把第二年或 json 截掉。
+     */
+    static String aggregateStatus(List<TradingCalendarExportDto.RunResponse> results,
+                                  Function<TradingCalendarExportDto.RunResponse, String> status,
+                                  int max) {
+        if (results == null || results.isEmpty() || max <= 0) return "";
+        String separator = "；";
+        int perYear = Math.max(1, (max - separator.length() * (results.size() - 1)) / results.size());
+        List<String> entries = new ArrayList<>(results.size());
+        for (TradingCalendarExportDto.RunResponse result : results) {
+            String prefix = result.year() + " 年：";
+            String value = status.apply(result);
+            if (value == null || value.isBlank()) value = "xlsx 未產出／json 未產出";
+            entries.add(prefix + truncateDualStatus(value, Math.max(1, perYear - prefix.length())));
+        }
+        String joined = String.join(separator, entries);
+        return truncate(joined, max);
+    }
+
+    private static String truncateDualStatus(String value, int max) {
+        if (value.length() <= max) return value;
+        int split = value.indexOf('／');
+        if (split < 0 || max < 3) return truncate(value, max);
+        String left = value.substring(0, split);
+        String right = value.substring(split + 1);
+        int leftMax = (max - 1) / 2;
+        int rightMax = max - 1 - leftMax;
+        return truncate(left, leftMax) + "／" + truncate(right, rightMax);
+    }
+
+    private static String truncate(String value, int max) {
+        if (value == null || value.length() <= max) return value;
+        if (max <= 1) return "…".substring(0, max);
+        return value.substring(0, max - 1) + "…";
     }
 
     /** 逐日建整年交易日曆（資料單一來源＝MarketDataService）。 */
