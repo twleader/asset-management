@@ -1,30 +1,32 @@
 openapi: 3.1.0
 info:
-  title: 資產管理系統 Docker 外部唯讀 API
-  version: 1.0.0
+  title: 資產管理系統 Docker 外部 API
+  version: 1.1.0
   description: |
-    本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的八條精確路徑：
-    七條唯讀 GET ＋ 一條寫入 POST（`/api/public/crawler-data/rescan`，唯一有外部抓取副作用者，
+    本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的九條精確路徑：
+    八條唯讀 GET ＋ 一條寫入 POST（`/api/public/crawler-data/rescan`，唯一有外部抓取副作用者，
     經 business 端 30 秒全域 Redis 冷卻節流）。
 
     本機入口只綁定 loopback `127.0.0.1:9090`；遠端入口由 Tailscale Serve 的私有網路身分與
-    八條逐一路徑規則形成網路邊界。HTTP 層本身沒有 OAuth、API key 或其他應用層認證，因此
+    九條逐一路徑規則形成網路邊界。HTTP 層本身沒有 OAuth、API key 或其他應用層認證，因此
     全域 `security` 為空陣列。不得把任一 server URL 解讀為公開網際網路服務。
 
     Gateway 只接受下列精確路徑：同一路徑的非合法 method 回 `405 Method Not Allowed`，
-    七條唯讀路徑帶 `Allow: GET`、`/api/public/crawler-data/rescan` 帶 `Allow: POST`；
+    八條唯讀路徑帶 `Allow: GET`、`/api/public/crawler-data/rescan` 帶 `Allow: POST`；
     所有其他路徑、子路徑、尾斜線與 matrix 變體回 `404 Not Found`。
     Swagger UI 或原始 OpenAPI 文件沒有對外路由；本 YAML 是版本控管文件，不代表 gateway
     暴露文件端點。
 
     回應只代表來源或快取當下狀態，排程不可只看 HTTP 200；應另檢查報價的
     `quoteStatus`／`tradingDate`／`updatedAt`、ETF 的 `premiumDiscountPct`、資產的 `targetPriceComplete`／`valuationSource`，
-    以及匯率的 `liveUpdateStatus`／`spot.quoteStatus`。本 API 不構成交易執行依據。
+    匯率的 `liveUpdateStatus`／`spot.quoteStatus`，以及交易雷達的 `generatedAt` 與各項證據。
+    交易雷達會揭露 configured admin 的持倉／觀察清單與決策證據；只能透過本機 loopback
+    或獲准 Tailscale identity 讀取，不可開成公網。本 API 不構成交易執行依據。
 servers:
   - url: http://127.0.0.1:9090
     description: Docker host 本機 loopback 入口
   - url: https://mac-mini-2.tailccc7be.ts.net:9090
-    description: Tailscale 私有網路的八條 path-scoped HTTPS 入口
+    description: Tailscale 私有網路的九條 path-scoped HTTPS 入口
 security: []
 paths:
   /api/quotes:
@@ -46,6 +48,7 @@ paths:
           schema:
             type: string
             enum: [台股, 美股, 英股]
+          example: 台股
       responses:
         '200':
           description: 最新報價陣列；可能為空。
@@ -99,6 +102,7 @@ paths:
           description: 標的代號；controller 僅要求參數存在，不另做格式驗證。
           schema:
             type: string
+          example: EXM-TW-001
         - name: market
           in: query
           required: true
@@ -106,6 +110,7 @@ paths:
           schema:
             type: string
             enum: [台股, 美股, 英股]
+          example: 台股
       responses:
         '200':
           description: Redis 命中的最新報價。
@@ -113,6 +118,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/LatestQuote'
+              examples:
+                synthetic:
+                  summary: 去識別化合成範例
+                  value: {stockCode: EXM-TW-001, stockName: 範例科技, market: 台股, price: 100.25, previousClose: 99.50, priceChange: 0.75, changePercent: 0.753769, buyPrice: 100.20, sellPrice: 100.30, openPrice: 99.80, highPrice: 101.00, lowPrice: 99.60, volume: 123456, tradingDate: '2026-01-15', updatedAt: '2026-01-15T10:15:30', closed: false, source: SYNTHETIC_EXAMPLE, quoteStatus: LIVE, premiumDiscountPct: null}
         '204':
           description: Price cache miss、price Redis 讀取失敗或 price payload 無法解析；沒有 response body。NAV enrichment 失敗不會產生 204。
         '400':
@@ -142,17 +151,21 @@ paths:
         - name: market
           in: query
           required: false
+          description: 指數 catalog code；空白或省略時預設 TWSE。
           schema:
             type: string
-            enum: [TWSE, DJI, SPX, IXIC, SOX, FTSE, DAX, KOSPI, N225]
+            enum: [TWSE, TPEX, DJI, SPX, IXIC, SOX, FTSE, DAX, KOSPI, N225]
             default: TWSE
+          example: TPEX
         - name: range
           in: query
           required: false
+          description: 圖表區間；d 表示當日分時，其餘為日線回看。
           schema:
             type: string
             enum: [d, 1m, 3m, 6m, 1y, 2y, 5y, 10y]
             default: 1y
+          example: 1m
       responses:
         '200':
           description: 完整、陣列彼此對齊的圖表 response；無資料時陣列為空且 nullable 摘要欄位為 null。
@@ -164,7 +177,7 @@ paths:
                 syntheticDaily:
                   value:
                     market: TWSE
-                    marketLabel: 台股大盤
+                    marketLabel: 台股集中市場
                     range: 1m
                     rangeLabel: 1 個月
                     mode: DAILY
@@ -183,7 +196,8 @@ paths:
                     change: null
                     changePercent: null
                     supportedMarkets:
-                      - {value: TWSE, label: 台股大盤}
+                      - {value: TWSE, label: 台股集中市場}
+                      - {value: TPEX, label: 台股櫃買市場}
                       - {value: DJI, label: 道瓊工業}
                       - {value: SPX, label: 標普 500}
                       - {value: IXIC, label: 那斯達克綜合}
@@ -211,7 +225,7 @@ paths:
                 type: 'about:blank'
                 title: Invalid market index request
                 status: 400
-                detail: "未知 market 值 'BAD'；合法 values: [TWSE, DJI, SPX, IXIC, SOX, FTSE, DAX, KOSPI, N225]"
+                detail: "未知 market 值 'BAD'；合法 values: [TWSE, TPEX, DJI, SPX, IXIC, SOX, FTSE, DAX, KOSPI, N225]"
                 instance: /api/public/market-index
         '500':
           description: closePoint 為非法數字或發生其他未被 typed 502 捕捉的 shaping error 時，由 Spring WebFlux 基本錯誤處理回傳；不是 ProblemDetail。
@@ -357,7 +371,7 @@ paths:
       operationId: triggerPublicCrawlerRescan
       summary: 免登入觸發爬蟲重新搜尋
       description: |
-        八條路由中唯一有外部抓取副作用者（Requirement 71／Task 329），語意等同既有 ADMIN 端點
+        九條路由中唯一有外部抓取副作用者（Requirement 71／Task 329），語意等同既有 ADMIN 端點
         「立即抓取並匯出」的匿名版本。由 business 端 30 秒全域 Redis 冷卻節流：冷卻窗口內回
         HTTP 200 但 `status=COOLDOWN`，不會真的觸發抓取。呼叫端必須看 `status` 而不是只看 200。
         本路徑只接受 POST；GET 等其他 method 回 `405` 並帶 `Allow: POST`。
@@ -532,6 +546,70 @@ paths:
               example: {type: 'about:blank', title: Portfolio advice unavailable, status: 503, detail: 主要管理者不可用, instance: /api/public/portfolio-advice/latest}
         '504':
           $ref: '#/components/responses/NginxGatewayTimeout'
+  /api/public/trading-radar/today:
+    get:
+      tags: [公開交易雷達]
+      operationId: getPublicTradingRadarToday
+      summary: 取得主要管理者的今日交易雷達
+      description: |
+        純唯讀、零副作用（Requirement 86／Task 347）。owner 只能是 business 唯一解析的
+        configured admin；不接受 owner selector、email、cookie、匿名 caller 的 `X-User-*`
+        或 Tailscale header 作為租戶輸入。BFF 顯式傳遞 configured-admin tenant headers，
+        並清除 Reactor 內可能存在的登入者／代看身分。
+
+        本路徑只呼叫 business 的 current read；不會 refresh、export、發通知，也不會寫入
+        交易雷達 snapshot、Redis 或 DB。成功回應的 JSON bytes、status 與 Content-Type
+        原樣 relay；business 的任何 3xx／4xx／5xx 都固定消毒為 502，transport 或
+        configured-admin bootstrap 失敗固定為 503。
+
+        HTTP 層本身沒有應用層認證；只能經 `127.0.0.1:9090` loopback 或獲准的
+        Tailscale 私網 identity 讀取，禁止 Funnel 或公網 listener。Swagger UI 與本 YAML
+        都沒有掛在 9090。
+      responses:
+        '200':
+          description: 與登入後交易雷達同一 DTO 形狀的即時組裝結果。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TradingRadarResponse'
+              examples:
+                synthetic:
+                  summary: 去識別化、無實際持倉的合成範例
+                  value:
+                    ruleVersion: TW_RULES_V14
+                    actionPolicyVersion: EVIDENCE_GATE_V1
+                    generatedAt: '2026-01-15T02:15:30Z'
+                    market:
+                      {regime: NEUTRAL, regimeLabel: 合成中性, score: 0, dataComplete: false, stale: true, asOfDate: '2026-01-14', price: 100.00, changePercent: 0.00, quoteStatus: SYNTHETIC, weeklyMa: null, monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, quarterlyConfirmation: null, annualConfirmation: null, reasons: [], risks: [], intraday: false, liveUpdatedAt: null, extendedIndicators: null, marketVolumeRatio: null, marketTurnoverRatio: null, marketVolumeAsOfDate: null, nasdaqChangePercent: null, soxChangePercent: null, usTechCompositePercent: null, usTechAsOfDate: null, usTechAvailable: false}
+                    usMarket:
+                      {regime: NEUTRAL, regimeLabel: 合成中性, score: 0, dataComplete: false, stale: true, asOfDate: '2026-01-14', price: 100.00, changePercent: 0.00, quoteStatus: SYNTHETIC, weeklyMa: null, monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, quarterlyConfirmation: null, annualConfirmation: null, reasons: [], risks: [], intraday: false, liveUpdatedAt: null, extendedIndicators: null, marketVolumeRatio: null, marketTurnoverRatio: null, marketVolumeAsOfDate: null, nasdaqChangePercent: null, soxChangePercent: null, usTechCompositePercent: null, usTechAsOfDate: null, usTechAvailable: false}
+                    stocks: []
+                    skippedNonTwStocks: 0
+                    publicInformation: []
+        '502':
+          description: Business 的任何非 2xx 被 scoped advice 消毒，或 Nginx 無法連上 upstream。
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example: {type: 'about:blank', title: Trading radar downstream failure, status: 502, detail: 今日交易雷達暫時無法取得，請稍後再試, instance: /api/public/trading-radar/today}
+            text/html:
+              schema:
+                $ref: '#/components/schemas/NginxErrorHtml'
+              example: "<html><head><title>502 Bad Gateway</title></head><body><center><h1>502 Bad Gateway</h1></center><hr><center>nginx</center></body></html>"
+        '503':
+          description: Configured admin 不存在、不合法或 bootstrap／downstream transport 失敗。
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              examples:
+                unavailable:
+                  value: {type: 'about:blank', title: Trading radar unavailable, status: 503, detail: 主要管理者不可用, instance: /api/public/trading-radar/today}
+                transport:
+                  value: {type: 'about:blank', title: Trading radar service unavailable, status: 503, detail: 今日交易雷達服務暫時無法連線, instance: /api/public/trading-radar/today}
+        '504':
+          $ref: '#/components/responses/NginxGatewayTimeout'
 components:
   schemas:
     ProblemDetail:
@@ -608,8 +686,8 @@ components:
       description: "`MarketIndexChartDto.Response` 的 21 個 record properties；八組序列等長，序列點允許 null。"
       required: [market, marketLabel, range, rangeLabel, mode, tradingDate, labels, closes, ma5, ma20, ma60, ma240, volumes, turnovers, hasVolume, previousClose, lastClose, change, changePercent, supportedMarkets, supportedRanges]
       properties:
-        market: {type: string, enum: [TWSE, DJI, SPX, IXIC, SOX, FTSE, DAX, KOSPI, N225]}
-        marketLabel: {type: string, enum: [台股大盤, 道瓊工業, 標普 500, 那斯達克綜合, 費城半導體, 英國富時 100, 德國 DAX, 韓國 KOSPI, 日經 225]}
+        market: {type: string, enum: [TWSE, TPEX, DJI, SPX, IXIC, SOX, FTSE, DAX, KOSPI, N225]}
+        marketLabel: {type: string, enum: [台股集中市場, 台股櫃買市場, 道瓊工業, 標普 500, 那斯達克綜合, 費城半導體, 英國富時 100, 德國 DAX, 韓國 KOSPI, 日經 225]}
         range: {type: string, enum: [d, 1m, 3m, 6m, 1y, 2y, 5y, 10y]}
         rangeLabel: {type: string, enum: [當日, 1 個月, 3 個月, 半年, 1 年, 2 年, 5 年, 10 年]}
         mode: {type: string, enum: [DAILY, INTRADAY]}
@@ -634,8 +712,8 @@ components:
         changePercent: {type: [number, 'null'], description: 百分比；僅 INTRADAY 且可比較昨收時有值。}
         supportedMarkets:
           type: array
-          minItems: 9
-          maxItems: 9
+          minItems: 10
+          maxItems: 10
           items: {$ref: '#/components/schemas/MarketOption'}
         supportedRanges:
           type: array
@@ -651,8 +729,8 @@ components:
       type: object
       required: [value, label]
       properties:
-        value: {type: string, enum: [TWSE, DJI, SPX, IXIC, SOX, FTSE, DAX, KOSPI, N225]}
-        label: {type: string, enum: [台股大盤, 道瓊工業, 標普 500, 那斯達克綜合, 費城半導體, 英國富時 100, 德國 DAX, 韓國 KOSPI, 日經 225]}
+        value: {type: string, enum: [TWSE, TPEX, DJI, SPX, IXIC, SOX, FTSE, DAX, KOSPI, N225]}
+        label: {type: string, enum: [台股集中市場, 台股櫃買市場, 道瓊工業, 標普 500, 那斯達克綜合, 費城半導體, 英國富時 100, 德國 DAX, 韓國 KOSPI, 日經 225]}
       additionalProperties: false
     RangeOption:
       type: object
@@ -1001,6 +1079,404 @@ components:
       properties:
         title: {type: [string, 'null']}
         url: {type: [string, 'null']}
+      additionalProperties: false
+    TradingRadarResponse:
+      type: object
+      description: "`TradingRadarDto.Response` 的八個固定 record properties；公開路徑與登入後畫面共用此 DTO。"
+      required: [ruleVersion, actionPolicyVersion, generatedAt, market, usMarket, stocks, skippedNonTwStocks, publicInformation]
+      properties:
+        ruleVersion: {type: string, description: 當前規則版本。}
+        actionPolicyVersion: {type: string, description: 當前動作政策版本。}
+        generatedAt: {type: string, format: date-time}
+        market: {$ref: '#/components/schemas/MarketSummary'}
+        usMarket: {$ref: '#/components/schemas/MarketSummary'}
+        stocks:
+          type: array
+          items: {$ref: '#/components/schemas/StockDecision'}
+        skippedNonTwStocks: {type: integer, format: int32, minimum: 0}
+        publicInformation:
+          type: array
+          items: {$ref: '#/components/schemas/PublicInformationItem'}
+      additionalProperties: false
+    MarketSummary:
+      type: object
+      required: [regime, regimeLabel, score, dataComplete, stale, asOfDate, price, changePercent, quoteStatus, weeklyMa, monthlyMa, quarterlyMa, annualMa, kValue, dValue, quarterlyConfirmation, annualConfirmation, reasons, risks, intraday, liveUpdatedAt, extendedIndicators, marketVolumeRatio, marketTurnoverRatio, marketVolumeAsOfDate, nasdaqChangePercent, soxChangePercent, usTechCompositePercent, usTechAsOfDate, usTechAvailable]
+      properties:
+        regime: {type: [string, 'null']}
+        regimeLabel: {type: [string, 'null']}
+        score: {type: [integer, 'null'], format: int32}
+        dataComplete: {type: boolean}
+        stale: {type: boolean}
+        asOfDate: {type: [string, 'null'], format: date}
+        price: {type: [number, 'null']}
+        changePercent: {type: [number, 'null']}
+        quoteStatus: {type: [string, 'null'], description: 行情來源狀態自由字串。}
+        weeklyMa: {type: [number, 'null']}
+        monthlyMa: {type: [number, 'null']}
+        quarterlyMa: {type: [number, 'null']}
+        annualMa: {type: [number, 'null']}
+        kValue: {type: [number, 'null']}
+        dValue: {type: [number, 'null']}
+        quarterlyConfirmation: {type: [string, 'null']}
+        annualConfirmation: {type: [string, 'null']}
+        reasons: {type: array, items: {type: string}}
+        risks: {type: array, items: {type: string}}
+        intraday: {type: boolean}
+        liveUpdatedAt:
+          type: [string, 'null']
+          description: >-
+            PriceCacheWriter 產生的 Asia/Taipei local wall-clock ISO LocalDateTime 字串，
+            不含 UTC offset，因此刻意不宣告 OpenAPI date-time；null 表示無盤中時間。
+        extendedIndicators:
+          anyOf:
+            - {$ref: '#/components/schemas/ExtendedIndicators'}
+            - {type: 'null'}
+        marketVolumeRatio: {type: [number, 'null']}
+        marketTurnoverRatio: {type: [number, 'null']}
+        marketVolumeAsOfDate: {type: [string, 'null'], format: date}
+        nasdaqChangePercent: {type: [number, 'null']}
+        soxChangePercent: {type: [number, 'null']}
+        usTechCompositePercent: {type: [number, 'null']}
+        usTechAsOfDate: {type: [string, 'null'], format: date}
+        usTechAvailable: {type: boolean}
+      additionalProperties: false
+    ExtendedIndicators:
+      type: object
+      required: [j9, k3d2, rsv, ema12, ema26, dif, macd, osc, rsi5, rsi10, bias10, bias20, b10b20, wr9]
+      properties:
+        j9: {type: [number, 'null']}
+        k3d2: {type: [number, 'null']}
+        rsv: {type: [number, 'null']}
+        ema12: {type: [number, 'null']}
+        ema26: {type: [number, 'null']}
+        dif: {type: [number, 'null']}
+        macd: {type: [number, 'null']}
+        osc: {type: [number, 'null']}
+        rsi5: {type: [number, 'null']}
+        rsi10: {type: [number, 'null']}
+        bias10: {type: [number, 'null']}
+        bias20: {type: [number, 'null']}
+        b10b20: {type: [number, 'null']}
+        wr9: {type: [number, 'null']}
+      additionalProperties: false
+    StockDecision:
+      type: object
+      description: "`TradingRadarDto.StockDecision` 的固定 record projection；分數、價格、指標與證據不足時以 null 表示，不以 0 冒充。"
+      required: [stockCode, stockName, market, assetClass, distributionAdjusted, held, action, actionLabel, score, counterTrendState, counterTrendLabel, counterTrendReasons, counterTrendRisks, dataComplete, price, changePercent, quoteStatus, priceUpdatedAt, asOfDate, monthlyMa, quarterlyMa, annualMa, kValue, dValue, monthlyConfirmation, quarterlyConfirmation, annualConfirmation, fxPercentile, underlyingCurrency, reasons, risks, kdHeat, timingState, timingLabel, ma60BiasPercent, week52Position, weeklyMa, etfPremiumPct, etfPremiumPercentile, extendedIndicators, shortAction, shortActionLabel, shortScore, shortReasons, shortRisks, horizonConflict, volumeRatio, fxAsOfDate, profitTakingConfirmed, fundamental, evidence, shortDownsideRisk, mediumDownsideRisk, shortEvidenceConfidence, mediumEvidenceConfidence, shortRiskCoverage, mediumRiskCoverage, candidateAction, shortCandidateAction, actionGateReasons, etfPremiumLivePct, etfPremiumLiveNavAsOf]
+      properties:
+        stockCode: {type: [string, 'null']}
+        stockName: {type: [string, 'null']}
+        market: {type: [string, 'null'], description: DB 驅動的市場字串。}
+        assetClass: {type: [string, 'null']}
+        distributionAdjusted: {type: boolean}
+        held: {type: boolean}
+        action: {type: [string, 'null'], description: 規則引擎動作自由字串。}
+        actionLabel: {type: [string, 'null']}
+        score: {type: [integer, 'null'], format: int32}
+        counterTrendState: {type: [string, 'null']}
+        counterTrendLabel: {type: [string, 'null']}
+        counterTrendReasons: {type: array, items: {type: string}}
+        counterTrendRisks: {type: array, items: {type: string}}
+        dataComplete: {type: boolean}
+        price: {type: [number, 'null']}
+        changePercent: {type: [number, 'null']}
+        quoteStatus: {type: [string, 'null']}
+        priceUpdatedAt: {type: [string, 'null'], description: 行情原始時點字串，不保證有 UTC offset。}
+        asOfDate: {type: [string, 'null'], format: date}
+        monthlyMa: {type: [number, 'null']}
+        quarterlyMa: {type: [number, 'null']}
+        annualMa: {type: [number, 'null']}
+        kValue: {type: [number, 'null']}
+        dValue: {type: [number, 'null']}
+        monthlyConfirmation: {type: [string, 'null']}
+        quarterlyConfirmation: {type: [string, 'null']}
+        annualConfirmation: {type: [string, 'null']}
+        fxPercentile: {type: [number, 'null']}
+        underlyingCurrency: {type: [string, 'null']}
+        reasons: {type: array, items: {type: string}}
+        risks: {type: array, items: {type: string}}
+        kdHeat: {type: [string, 'null']}
+        timingState: {type: [string, 'null']}
+        timingLabel: {type: [string, 'null']}
+        ma60BiasPercent: {type: [number, 'null']}
+        week52Position: {type: [number, 'null']}
+        weeklyMa: {type: [number, 'null']}
+        etfPremiumPct: {type: [number, 'null']}
+        etfPremiumPercentile: {type: [number, 'null']}
+        extendedIndicators:
+          anyOf:
+            - {$ref: '#/components/schemas/ExtendedIndicators'}
+            - {type: 'null'}
+        shortAction: {type: [string, 'null']}
+        shortActionLabel: {type: [string, 'null']}
+        shortScore: {type: [integer, 'null'], format: int32}
+        shortReasons: {type: array, items: {type: string}}
+        shortRisks: {type: array, items: {type: string}}
+        horizonConflict: {type: boolean}
+        volumeRatio: {type: [number, 'null']}
+        fxAsOfDate: {type: [string, 'null'], format: date}
+        profitTakingConfirmed: {type: boolean}
+        fundamental:
+          anyOf:
+            - {$ref: '#/components/schemas/FundamentalSnapshot'}
+            - {type: 'null'}
+        evidence:
+          anyOf:
+            - {$ref: '#/components/schemas/RadarEvidence'}
+            - {type: 'null'}
+        shortDownsideRisk: {type: [integer, 'null'], format: int32}
+        mediumDownsideRisk: {type: [integer, 'null'], format: int32}
+        shortEvidenceConfidence: {type: [integer, 'null'], format: int32}
+        mediumEvidenceConfidence: {type: [integer, 'null'], format: int32}
+        shortRiskCoverage: {type: [number, 'null'], format: double}
+        mediumRiskCoverage: {type: [number, 'null'], format: double}
+        candidateAction: {type: [string, 'null']}
+        shortCandidateAction: {type: [string, 'null']}
+        actionGateReasons: {type: array, items: {type: string}}
+        etfPremiumLivePct: {type: [number, 'null']}
+        etfPremiumLiveNavAsOf: {type: [string, 'null'], description: 台股與美股來源格式不同，不宣告 date-time format。}
+      additionalProperties: false
+    FundamentalSnapshot:
+      type: object
+      required: [applicable, coverage, epsYoyPct, approximateRoePct, revenueYoy3mPct, pePercentile, peLossFlag, epsProvider, epsSourceUrls, epsAsOf, roeProvider, roeSourceUrls, roeAsOf, revenueProvider, revenueSourceUrls, revenueAsOf, valuationProvider, valuationSourceUrls, valuationAsOf, industryName, industryRevenueYoyPct, industryCompanyCount, industryPeriod, industryProvider, industrySourceUrls, industryAsOf, companyPublicInformation, industryPublicInformation, peValue, pbValue, dividendYieldPct, pbPercentile, dividendYieldPercentile, valuationContribution, valuationCoverage, epsTrendType, roeApproximationFallback, peEvidence, pbEvidence, dividendYieldEvidence]
+      properties:
+        applicable: {type: boolean}
+        coverage: {type: integer, format: int32}
+        epsYoyPct: {type: [number, 'null']}
+        approximateRoePct: {type: [number, 'null']}
+        revenueYoy3mPct: {type: [number, 'null']}
+        pePercentile: {type: [number, 'null']}
+        peLossFlag: {type: [boolean, 'null']}
+        epsProvider: {type: [string, 'null']}
+        epsSourceUrls: {type: array, items: {type: string}}
+        epsAsOf: {type: [string, 'null'], format: date}
+        roeProvider: {type: [string, 'null']}
+        roeSourceUrls: {type: array, items: {type: string}}
+        roeAsOf: {type: [string, 'null'], format: date}
+        revenueProvider: {type: [string, 'null']}
+        revenueSourceUrls: {type: array, items: {type: string}}
+        revenueAsOf: {type: [string, 'null'], format: date}
+        valuationProvider: {type: [string, 'null']}
+        valuationSourceUrls: {type: array, items: {type: string}}
+        valuationAsOf: {type: [string, 'null'], format: date}
+        industryName: {type: [string, 'null']}
+        industryRevenueYoyPct: {type: [number, 'null']}
+        industryCompanyCount: {type: [integer, 'null'], format: int32}
+        industryPeriod: {type: [string, 'null']}
+        industryProvider: {type: [string, 'null']}
+        industrySourceUrls: {type: array, items: {type: string}}
+        industryAsOf: {type: [string, 'null'], format: date}
+        companyPublicInformation:
+          type: array
+          items: {$ref: '#/components/schemas/PublicInformationItem'}
+        industryPublicInformation:
+          type: array
+          items: {$ref: '#/components/schemas/PublicInformationItem'}
+        peValue: {type: [number, 'null']}
+        pbValue: {type: [number, 'null']}
+        dividendYieldPct: {type: [number, 'null']}
+        pbPercentile: {type: [number, 'null']}
+        dividendYieldPercentile: {type: [number, 'null']}
+        valuationContribution: {type: [number, 'null'], format: double}
+        valuationCoverage: {type: integer, format: int32}
+        epsTrendType: {type: [string, 'null']}
+        roeApproximationFallback: {type: boolean}
+        peEvidence:
+          anyOf:
+            - {$ref: '#/components/schemas/ValuationComponentEvidence'}
+            - {type: 'null'}
+        pbEvidence:
+          anyOf:
+            - {$ref: '#/components/schemas/ValuationComponentEvidence'}
+            - {type: 'null'}
+        dividendYieldEvidence:
+          anyOf:
+            - {$ref: '#/components/schemas/ValuationComponentEvidence'}
+            - {type: 'null'}
+      additionalProperties: false
+    ValuationComponentEvidence:
+      type: object
+      required: [value, percentile, provider, sourceUrls, availableAt, asOf, loss]
+      properties:
+        value: {type: [number, 'null']}
+        percentile: {type: [number, 'null']}
+        provider: {type: [string, 'null']}
+        sourceUrls: {type: array, items: {type: string}}
+        availableAt: {type: [string, 'null'], format: date-time}
+        asOf: {type: [string, 'null'], format: date}
+        loss: {type: boolean}
+      additionalProperties: false
+    RadarEvidence:
+      type: object
+      required: [acceptedPriceAsOfDate, acceptedPriceSource, acceptedPriceQuality, livePriceAccepted, returnStdDev60Ratio, returnStdDev60AsOfDate, returnStdDev60Source, premiumAsOfDate, premiumSource, premiumStale, assetProfile, actionGateReasons, evidenceGroups, marketFeatures, shortEvidenceConfidence, mediumEvidenceConfidence, shortDownsideRisk, mediumDownsideRisk, shortRiskCoverage, mediumRiskCoverage, candidateAction, shortCandidateAction, nextDistributionDate, nextDistributionKnownAt, nextDistributionProvider, nextDistributionSourceUrls, nextDistributionStatus, nextDistributionMissingReason, distributionsWithinFiveSessions, distributionsWithinTwentySessions, treasuryRateContext, normalizedBias, shortNormalizedBias]
+      properties:
+        acceptedPriceAsOfDate: {type: [string, 'null'], format: date}
+        acceptedPriceSource: {type: [string, 'null']}
+        acceptedPriceQuality: {type: [string, 'null']}
+        livePriceAccepted: {type: boolean}
+        returnStdDev60Ratio: {type: [number, 'null']}
+        returnStdDev60AsOfDate: {type: [string, 'null'], format: date}
+        returnStdDev60Source: {type: [string, 'null']}
+        premiumAsOfDate: {type: [string, 'null'], format: date}
+        premiumSource: {type: [string, 'null']}
+        premiumStale: {type: boolean}
+        assetProfile:
+          anyOf:
+            - {$ref: '#/components/schemas/AssetProfile'}
+            - {type: 'null'}
+        actionGateReasons: {type: array, items: {type: string}}
+        evidenceGroups:
+          type: object
+          additionalProperties: {$ref: '#/components/schemas/EvidenceGroup'}
+        marketFeatures:
+          type: object
+          additionalProperties: {$ref: '#/components/schemas/MarketFeatureEvidence'}
+        shortEvidenceConfidence: {type: [integer, 'null'], format: int32}
+        mediumEvidenceConfidence: {type: [integer, 'null'], format: int32}
+        shortDownsideRisk: {type: [integer, 'null'], format: int32}
+        mediumDownsideRisk: {type: [integer, 'null'], format: int32}
+        shortRiskCoverage: {type: [number, 'null'], format: double}
+        mediumRiskCoverage: {type: [number, 'null'], format: double}
+        candidateAction: {type: [string, 'null']}
+        shortCandidateAction: {type: [string, 'null']}
+        nextDistributionDate: {type: [string, 'null'], format: date}
+        nextDistributionKnownAt: {type: [string, 'null'], format: date-time}
+        nextDistributionProvider: {type: [string, 'null']}
+        nextDistributionSourceUrls: {type: array, items: {type: string}}
+        nextDistributionStatus: {type: [string, 'null']}
+        nextDistributionMissingReason: {type: [string, 'null']}
+        distributionsWithinFiveSessions: {type: [integer, 'null'], format: int32}
+        distributionsWithinTwentySessions: {type: [integer, 'null'], format: int32}
+        treasuryRateContext:
+          anyOf:
+            - {$ref: '#/components/schemas/TreasuryRateContext'}
+            - {type: 'null'}
+        normalizedBias:
+          anyOf:
+            - {$ref: '#/components/schemas/NormalizedBiasEvidence'}
+            - {type: 'null'}
+        shortNormalizedBias:
+          anyOf:
+            - {$ref: '#/components/schemas/NormalizedBiasEvidence'}
+            - {type: 'null'}
+      additionalProperties: false
+    AssetProfile:
+      type: object
+      required: [assetClass, assetClassSource, assetClassComplete, instrumentKind, instrumentKindSource, instrumentKindComplete, stockStyle, stockStyleSource, stockStyleComplete, bondTerm, bondTermSource, bondTermComplete, quoteCurrency, quoteCurrencySource, quoteCurrencyComplete, underlyingCurrency, underlyingCurrencySource, underlyingCurrencyComplete, currencyDataComplete, profileComplete, missingReasons]
+      properties:
+        assetClass: {type: [string, 'null']}
+        assetClassSource: {type: [string, 'null']}
+        assetClassComplete: {type: boolean}
+        instrumentKind: {type: [string, 'null']}
+        instrumentKindSource: {type: [string, 'null']}
+        instrumentKindComplete: {type: boolean}
+        stockStyle: {type: [string, 'null']}
+        stockStyleSource: {type: [string, 'null']}
+        stockStyleComplete: {type: boolean}
+        bondTerm: {type: [string, 'null']}
+        bondTermSource: {type: [string, 'null']}
+        bondTermComplete: {type: boolean}
+        quoteCurrency: {type: [string, 'null']}
+        quoteCurrencySource: {type: [string, 'null']}
+        quoteCurrencyComplete: {type: boolean}
+        underlyingCurrency: {type: [string, 'null']}
+        underlyingCurrencySource: {type: [string, 'null']}
+        underlyingCurrencyComplete: {type: boolean}
+        currencyDataComplete: {type: boolean}
+        profileComplete: {type: boolean}
+        missingReasons: {type: array, items: {type: string}}
+      additionalProperties: false
+    EvidenceGroup:
+      type: object
+      required: [group, components, shortCoverage, mediumCoverage, shortAvailable, mediumAvailable, shortFresh, mediumFresh, sourceCount, participates]
+      properties:
+        group: {type: [string, 'null']}
+        components:
+          type: array
+          items: {$ref: '#/components/schemas/EvidenceComponent'}
+        shortCoverage: {type: number, format: double}
+        mediumCoverage: {type: number, format: double}
+        shortAvailable: {type: boolean}
+        mediumAvailable: {type: boolean}
+        shortFresh: {type: boolean}
+        mediumFresh: {type: boolean}
+        sourceCount: {type: integer, format: int32}
+        participates: {type: boolean}
+      additionalProperties: false
+    EvidenceComponent:
+      type: object
+      required: [name, applicability, weight, availableWeight, asOfDate, provider, missingReason]
+      properties:
+        name: {type: [string, 'null']}
+        applicability: {type: [string, 'null']}
+        weight: {type: number, format: double}
+        availableWeight: {type: number, format: double}
+        asOfDate: {type: [string, 'null'], format: date}
+        provider: {type: [string, 'null']}
+        missingReason: {type: [string, 'null']}
+      additionalProperties: false
+    MarketFeatureEvidence:
+      type: object
+      required: [code, value, asOfDate, availableAt, availabilityBasis, provider, sourceUrl, profileApplicability, duplicateOf, status, missingReason]
+      properties:
+        code: {type: [string, 'null']}
+        value: {type: [number, 'null']}
+        asOfDate: {type: [string, 'null'], format: date}
+        availableAt: {type: [string, 'null'], format: date-time}
+        availabilityBasis: {type: [string, 'null']}
+        provider: {type: [string, 'null']}
+        sourceUrl: {type: [string, 'null']}
+        profileApplicability: {type: [string, 'null']}
+        duplicateOf: {type: [string, 'null']}
+        status: {type: [string, 'null']}
+        missingReason: {type: [string, 'null']}
+      additionalProperties: false
+    NormalizedBiasEvidence:
+      type: object
+      required: [enabled, rawBiasRatio, rawSigmaRatio, sigmaFloorRatio, effectiveSigmaRatio, normalizedBias, asOfDate, volatilityFallback, floorApplied, reason]
+      properties:
+        enabled: {type: boolean}
+        rawBiasRatio: {type: [number, 'null']}
+        rawSigmaRatio: {type: [number, 'null']}
+        sigmaFloorRatio: {type: [number, 'null']}
+        effectiveSigmaRatio: {type: [number, 'null']}
+        normalizedBias: {type: [number, 'null']}
+        asOfDate: {type: [string, 'null'], format: date}
+        volatilityFallback: {type: boolean}
+        floorApplied: {type: boolean}
+        reason: {type: [string, 'null']}
+      additionalProperties: false
+    TreasuryRateContext:
+      type: object
+      required: [batchId, complete, tenor, value, curveDate, provider, sourceManifest, availableAt, availabilityBasis, fetchedAt, lagDays, staleReason]
+      properties:
+        batchId: {type: integer, format: int64}
+        complete: {type: boolean}
+        tenor: {type: string}
+        value: {type: number}
+        curveDate: {type: string, format: date}
+        provider: {type: string}
+        sourceManifest:
+          type: object
+          additionalProperties: {type: string}
+        availableAt: {type: string, format: date-time}
+        availabilityBasis: {type: string}
+        fetchedAt: {type: string, format: date-time}
+        lagDays: {type: integer, format: int64}
+        staleReason: {type: [string, 'null']}
+      additionalProperties: false
+    PublicInformationItem:
+      type: object
+      required: [region, title, source, url, publishedAt, summary, knownAt, availabilityBasis]
+      properties:
+        region: {type: [string, 'null']}
+        title: {type: [string, 'null']}
+        source: {type: [string, 'null']}
+        url: {type: [string, 'null']}
+        publishedAt: {type: [string, 'null'], description: 來源原始時間字串，不強制 ISO format。}
+        summary: {type: [string, 'null']}
+        knownAt: {type: [string, 'null'], format: date-time}
+        availabilityBasis: {type: [string, 'null']}
       additionalProperties: false
   responses:
     NginxBadGateway:

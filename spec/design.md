@@ -1336,8 +1336,8 @@ Google Drive 上每一份備份檔的本地索引；UI 列表 / 還原選單一�
 
 ### Base URL
 - Browser UI（本機）: `http://localhost/`；登入後頁面 API 由 frontend Nginx 轉至 BFF
-- Docker 外部 API（本機）: `http://127.0.0.1:9090`（八條路由：七支唯讀 exact GET ＋ Requirement 71 新增的一支寫入 exact `POST /api/public/crawler-data/rescan`。唯讀七支＝原始五支 ＋ Requirement 79／Task 338 新增的 `GET /api/public/market-analysis/today`、`GET /api/public/portfolio-advice/latest`）
-- Docker 外部 API（遠端）: `https://<device>.<tailnet>.ts.net:9090`（Tailscale Serve 掛載相同八條 exact path；不使用 Funnel）
+- Docker 外部 API（本機）: `http://127.0.0.1:9090`（九條路由：八支唯讀 exact GET ＋ Requirement 71 新增的一支寫入 exact `POST /api/public/crawler-data/rescan`。唯讀八支＝原始五支 ＋ Requirement 79／Task 338 新增的 `GET /api/public/market-analysis/today`、`GET /api/public/portfolio-advice/latest` ＋ Requirement 86／Task 347 新增的 `GET /api/public/trading-radar/today`）
+- Docker 外部 API（遠端）: `https://<device>.<tailnet>.ts.net:9090`（Tailscale Serve 掛載相同九條 exact path；不使用 Funnel；path/method 與完整 OpenAPI 3 契約機械對齊）
 - Docker network 內部: `http://bff:8080`／`http://external-materials-service:8080`
 
 ### Endpoints
@@ -7081,8 +7081,8 @@ Tailscale Serve HTTPS `:9090` 掛與 gateway 相同的五條 exact path，USD/TW
 
 - local USD 200；同 path其他 method 405；descendant 404；
 - frontend exact與 matrix變體404；container BFF 的非 GET／descendant／相鄰 private route 401；
-- Tailscale五路正向皆精確200，USD另嚴格驗 metadata、非空spot/history與`count==history.length`（Requirement 71 落地後為六路驗證、其中第六路以 GET 驗 405＋`Allow: POST`；Requirement 79 落地後為八路，第七、八路唯讀 GET 皆精確200，見該二節）；
-- root `/`、`/api/`與unknown path均404，Serve status精確只有五路（Requirement 71 落地後精確只有六路；Requirement 79 落地後精確只有八路）；
+- Tailscale五路正向皆精確200，USD另嚴格驗 metadata、非空spot/history與`count==history.length`（Requirement 71 落地後為六路驗證、其中第六路以 GET 驗 405＋`Allow: POST`；Requirement 79 落地後為八路；Requirement 86 落地後為九路，第九路交易雷達唯讀 GET 精確200，見各節）；
+- root `/`、`/api/`與unknown path均404，Serve status精確只有五路（Requirement 71 落地後精確只有六路；Requirement 79 落地後精確只有八路；Requirement 86 落地後精確只有九路）；
 - 銀行 session內約每2秒連取三次，`polledAt`前進，provider time不晚於`polledAt+120秒`且同來源不倒退。盤外只可證明 fixed-Clock與實際`INACTIVE/LAST_AVAILABLE`，不得新增繞過session的production endpoint。
 
 `SchedulePublicBffController.JOBS` 保留5分鐘歷史job並新增2秒live job。合併後實測 business 20個 scheduled methods、external 31個 methods／33個 annotations、JOBS 51筆；`TwClosurePoller`與台股官方收盤對帳各一法兩標。Requirement 69 assets多時間仍只佔一個每分鐘 annotation，清單保留其「多個每日時間」文案。
@@ -7969,6 +7969,122 @@ PricePoller.scheduledUsIntradayUpdate
 4. Docker：無快取重建並 recreate external、business、BFF、frontend；上游重建後 restart BFF。畫面查證主圖與排程匯出兩個下拉的前兩項，並查證 TPEX 10 年非空。Authenticated legacy endpoint 驗非空等長陣列、起訖日、`hasVolume=true`、至少一筆 `volume>0` 且 `turnovers` 全 null（它無 market/range/label）；host public API 另查 `market`、`range`、`marketLabel`、相同量能不變式、起訖日與筆數，DB 的 TPEX 亦至少一列正 volume。
 
 若部署驗收時台股或美股已休市，不繞過 `MarketClock` 製造 LIVE 寫入；兩分鐘 producer 的時段行為以 cron reflection、fixture 與既有 Redis writer 測試為證，實機只做官方路由唯讀查詢並明載時段限制。
+
+---
+
+## Requirement 86／Task 347：今日交易雷達 9090 公開 API 與 OpenAPI 3 全覆蓋硬規則
+
+### 對外契約與信任邊界
+
+新增第九條 exact route：
+
+```text
+host tool / tailnet identity
+  └─ GET /api/public/trading-radar/today
+       └─ api-gateway:9090（exact GET；其他 method 405；其餘 path 404）
+            └─ bff PublicTradingRadarController
+                 └─ BusinessUserClient.configuredAdmin()
+                 └─ GET business-services:/api/trading-radar/current
+                      X-User-Id / X-User-Role / X-User-Status = configured admin
+                      └─ TradingRadarService.getCurrent()
+                           └─ assemble(null)，只讀、無 export snapshot
+```
+
+9090 的 current-state allowlist 因此為九條：
+
+| Method | Path | Upstream | Owner／副作用 |
+|---|---|---|---|
+| GET | `/api/quotes` | external-materials-service | 全域 Redis，只讀 |
+| GET | `/api/quotes/one` | external-materials-service | 全域 Redis，只讀 |
+| GET | `/api/public/market-index` | BFF | 全域，只讀 |
+| GET | `/api/assets/latest` | BFF | configured admin，只讀 |
+| GET | `/api/public/exchange-rate/usd-twd` | BFF | 全域，只讀 |
+| POST | `/api/public/crawler-data/rescan` | BFF | 唯一寫入／外部抓取例外，30 秒全域 cooldown |
+| GET | `/api/public/market-analysis/today` | BFF | 全域，只讀 |
+| GET | `/api/public/portfolio-advice/latest` | BFF | configured admin，只讀 |
+| GET | `/api/public/trading-radar/today` | BFF | configured admin，只讀；不存交易雷達 export snapshot |
+
+Nginx host mapping 維持 `127.0.0.1:9090:9090`；Tailscale Serve 只掛同九條 path-scoped HTTPS handler。路由自身 `security: []`，表示沒有應用層 OAuth/API key，不表示公網公開；loopback 與 tailnet identity/grants 是實際安全邊界。交易雷達會揭露 configured admin 的持股／觀察清單與決策證據，風險不低於 latest-assets，故不提供 `ownerId` query、header passthrough 或 Tailscale header 授權。
+
+### Business：同一組裝核心，公開讀取不污染快照
+
+既有 `TradingRadarController.GET /api/trading-radar` 呼叫 `TradingRadarService.get()`，完成組裝後在 HTTP request 有 owner 時，依 Requirement 48 以五分鐘節流與內容 hash 去重保存 Redis export snapshot。外部自動化可能高頻 polling，直接重用這個方法會把讀取行為混入匯出快照時間軸。
+
+因此新增：
+
+```java
+@GetMapping("/current")
+public TradingRadarDto.Response getCurrent() {
+    return service.getCurrent();
+}
+
+@Transactional(readOnly = true)
+public TradingRadarDto.Response getCurrent() {
+    return assemble(null);
+}
+```
+
+`assemble(null)` 仍走 request-scoped `TenantFilterAspect`，owner 由 BFF 顯式注入的 configured-admin headers 決定；它與頁面使用完全相同的 market context、指標、規則引擎與 DTO。差別僅是不呼叫 `snapshotStore.save()`／`saveRecomputed()`。不得抽出或複製第二份規則，不觸發 `TradingRadarRefreshService`、外部行情 API、通知或任何 DB/Redis write。既有 root GET 行為不變。
+
+### BFF：configured-admin bootstrap 與成功 bytes relay
+
+新類別都放在既有 `bff/.../tradingradar/` package：
+
+```text
+PublicTradingRadarController.java
+  @RequestMapping("/api/public/trading-radar/today")
+  GET 只委派 PublicTradingRadarService.today()
+
+PublicTradingRadarService.java
+  users.configuredAdmin()
+  → id/configuredAdmin/ACTIVE guard
+  → GET /api/trading-radar/current
+  → explicit HDR_USER_ID/HDR_USER_ROLE/HDR_USER_STATUS
+  → retrieve()
+    .onStatus(status -> !status.is2xxSuccessful(), ClientResponse::createException)
+    .toEntity(byte[].class)
+  → contextWrite(delete CTX_IDENTITY)
+
+PublicTradingRadarUnavailableException.java
+PublicTradingRadarExceptionAdvice.java
+  @RestControllerAdvice(assignableTypes = PublicTradingRadarController.class)
+  @Order(Ordered.HIGHEST_PRECEDENCE)
+```
+
+成功回應以 byte[] relay，避免大量 BigDecimal 先被 BFF decode/re-encode。`.retrieve()` 後必須顯式加 `onStatus(status -> !status.is2xxSuccessful(), ClientResponse::createException)` 或等價分流：Spring 預設只把 4xx/5xx 轉例外，若省略此 gate，3xx 會被 `toEntity` 原樣 relay，可能洩漏 `Location` 與內部 body。所有 downstream 3xx/4xx/5xx 必須進 scoped advice 消毒為固定 502，不像 `PublicPortfolioAdviceService` 的既有 `exchangeToMono` 會原樣 relay error body。`users.configuredAdmin()` 必須先形成獨立 bootstrap publisher，並在進入 downstream `flatMap` 前把它產生的所有 error signal（包含 HTTP／transport、malformed JSON 的 `CodecException`／`DecodingException`、`toUser()` 因錯型別 id 產生的 projection mapping failure）映射為不帶 cause message 的 `PublicTradingRadarUnavailableException`；如此 bootstrap 全部固定 503，不會讓非 `WebClientException` 漏成 500。取得可信 admin 後，交易雷達 downstream transport 錯誤回固定 503；configured admin 為空、非 configured admin 或非 ACTIVE 亦回具名 503。測試 context 必須同時註冊 scoped advice 與全域 `BusinessErrorAdvice`，用 malformed JSON、錯型別 id，以及同時帶 sentinel body 和內部 `Location` URL 的 3xx fixture，證明 order 生效、固定 status 且 body/header/內部字串不外洩。
+
+### Gateway、BFF Security、frontend 與 Tailscale
+
+- `api-gateway/nginx.conf` 新增 `location = /api/public/trading-radar/today`，重用 `$api_allow_header`、Docker DNS resolver、變數 `$bff_upstream` 與 `$request_uri`。
+- `SecurityConfig` 把 exact path 併入同一個 `HttpMethod.GET` permitAll 清單；不放行 wildcard。Direct BFF 的 POST/descendant 仍落 authenticated。
+- `frontend/nginx.conf` 加 exact 404，並只在既有 anchored matrix deny regex 的 `public` alternatives 中加入 `trading-radar/.../today`；不得另開寬鬆 wildcard。
+- Tailscale `SERVE_PATHS`、expected dict、preflight、owner-count messages、fake status 與 success handler count 全部改九條。交易雷達 preflight 除 status/Content-Type 外驗頂層固定形狀，任一失敗都在 reset 前 fail closed。
+
+### OpenAPI 3 是 9090 allowlist 的同 commit 前置條件
+
+`docs/openapi/docker-external-api.yaml` 是 9090 唯一 machine-readable 契約。從本 Requirement 起，變更 `api-gateway/nginx.conf` 的 exact location／合法 method 時，必須在同一 task 與 commit 同步變更 OpenAPI；反向也成立，OpenAPI 不得宣告 gateway 未掛載的 operation。
+
+「完整」的機械判準：
+
+1. `openapi` 為 3.x（現行 3.1.0），全域 `security: []`，servers 明示 loopback 與 Tailscale 私網語意。
+2. 每個 operation 有唯一 `operationId`、tag、summary、description；列出所有輸入與可預期 response，所有有 body 的 response 具 media type／schema且與實作一致，每個有 body 的成功 response 直接帶去識別化 example。
+3. 固定 object 必須逐欄列 `properties`、`required`、nullability、格式／單位／時區與 enum 或自由字串語意；只對真正 map 使用 schema-typed `additionalProperties`。
+4. 所有 `$ref` 可解析，parameters 完整列 name／in／required／description／schema／適用 example；examples 使用去識別化合成資料，不複製真實持股或財務資訊。
+5. Swagger YAML／UI 本身不新增 gateway route；「有文件」不等於擴張 API surface。
+
+新增 `scripts/tests/docker-external-api-openapi-test.rb`（Ruby stdlib `YAML`，不新增 runtime dependency）解析 Nginx exact blocks 與 YAML，驗 path+method set equality、OpenAPI 版本／security／servers、operation metadata、unique operationId 與 refs。測試內要有九個 operation 的 expected response-status manifest，逐一比對完整 status 集合；每個 parameter 的必要 metadata／schema、所有 body response 的 media type/schema、每個 body-bearing success 的直接 example 亦是硬 assertion。先稽核並補齊既有八個 operations，包含目前已知 `/api/quotes/one` 200 缺 example。另新增 backend JUnit 的交易雷達 OpenAPI schema contract，用 Java record reflection 逐一比較以下 schema 的 `properties`／`required` 與 record component 精確集合：`Response`、`MarketSummary`、`StockDecision`、`ExtendedIndicators`、`FundamentalSnapshot`、`ValuationComponentEvidence`、`RadarEvidence`、`AssetProfile`、`EvidenceGroup`、`EvidenceComponent`、`MarketFeatureEvidence`、`NormalizedBiasEvidence`、`TreasuryYieldDto.RateContext`、`PublicInformationItem`。此外必須比較 Java type family、list element／map value type、nested `$ref` 與日期時間 format，並以測試內顯式 nullable manifest（或等價可執行契約）釘住 OpenAPI 3.1 union nullability；DTO 增刪欄、改型別或 nullability 漂移都會直接紅燈。
+
+交易雷達 OpenAPI 200 schema 使用上述巢狀 components；所有 Jackson 固定輸出的 record property 都列為 required，可為 null 的值用 OpenAPI 3.1 `type: [<type>, 'null']`。`evidenceGroups`、`marketFeatures`、`sourceManifest` 是唯三類 map-shaped 欄位，使用 typed `additionalProperties`。新 operation 同時列 502（business 非 2xx）、503（bootstrap／transport）、504（Nginx upstream timeout）。`info.version` 升版，title 改為不含「唯讀」，因第六條 POST 已存在。
+
+本次亦修正已上線的 market-index 文件漂移：catalog 已有 10 個 market，OpenAPI 卻仍只有 9 個。`TPEX／台股櫃買市場` 加入 query enum、response enum、option、example 與 min/max items；`TWSE` label 改為「台股集中市場」。這只修契約文件，不改 runtime。
+
+### 文件與驗收
+
+Current-state 文件統一為九條／九路／八 GET＋一 POST：`CLAUDE.md`、`spec/steering/tech.md`、`spec/steering/structure.md`、`INSTALLATION.md`、`scripts/README.md`、`run-stack` Codex skill、Tailscale script/test 訊息與 OpenAPI top-level 說明。歷史章節明確標示「Task 328 當時五條」者保留；未標歷史且聲稱現在仍為八條者必須修正。任務索引加入 Task 346／347並保留 Task 349，current range 為 `344–347、349`，Task 348 由在途 worktree 保留；Requirements 實際為 87 個，Requirement 87 由在途 worktree 保留，最新編號為 88。
+
+驗收依序證明 backend/BFF 測試、OpenAPI parity／record field-type-nullability parity、Tailscale fake regression、Nginx config 與 frontend build；再從 feature worktree rebuild/recreate business-services、BFF、api-gateway、frontend，restart BFF，實際讀 JSON 語意與 deny matrix。公開 response 至少要有 `ruleVersion=TW_RULES_V14`、可解析 `generatedAt`、兩個 market object、非空 stocks 且代表列含 evidence，以及 array 型 publicInformation。Docker listener 邊界必須用 fail-closed assertion 驗 api-gateway 的唯一 binding 精確為 `127.0.0.1:9090->9090`、BFF／business／external 的 `PortBindings` 為空，並以 `! lsof ...` 驗 host 8080/8082 無 listener；不能只列印 ports 或直接執行預期 exit 1 的裸 `lsof`。驗證結論必須區分本機 loopback 與 Tailscale：Tailscale 需要互動授權時列待辦，不以本機 200 冒充。
+
+---
 
 ## Requirement 88／Task 349：ETF 官方折溢價兩分鐘排程與 quote API 唯讀 join
 
