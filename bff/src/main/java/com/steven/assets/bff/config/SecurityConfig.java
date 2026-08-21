@@ -74,14 +74,15 @@ public class SecurityConfig {
                 .authorizeExchange(ex -> ex
                         .pathMatchers("/oauth2/**", "/login/**",
                                 "/actuator/health", "/actuator/info").permitAll()
-                        // Requirements 67/68/70/78：只有五支 BFF 精確 GET 可由 api-gateway 匿名讀取；
+                        // Requirements 67/68/70/78/79/86：只有六支 BFF 精確 GET 可由 api-gateway 匿名讀取；
                         // quotes 由 Nginx 直接轉 external-materials，不在 BFF 放行。
                         .pathMatchers(HttpMethod.GET,
                                 "/api/public/market-index",
                                 "/api/assets/latest",
                                 "/api/public/exchange-rate/usd-twd",
                                 "/api/public/market-analysis/today",
-                                "/api/public/portfolio-advice/latest").permitAll()
+                                "/api/public/portfolio-advice/latest",
+                                "/api/public/trading-radar/today").permitAll()
                         // Requirement 71：公開觸發重新搜尋，第六條 Nginx 9090 路由，唯一有寫入副作用的匿名端點；
                         // 30 秒全域冷卻在 business 端（CrawlerExportPathService.publicRescan()），BFF 層不重複防護。
                         .pathMatchers(HttpMethod.POST, "/api/public/crawler-data/rescan").permitAll()

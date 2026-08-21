@@ -269,7 +269,7 @@ skill 有沒有自己宣告：`/commit-merge-push` 沒宣告 → 繼承主 agent
 - 前端 view 一律走自己頁面對應的 BFF endpoint，不直接呼叫 business service `/api/{resource}`
 - BFF 負責跨服務 aggregation、預先計算 / 排序 / 過濾，前端只負責 render
 - 範例：`DashboardBffController`、`SnapshotFormBffController`、`AssetHistoryBffController`、`BankSettingsBffRoutes`（純 passthrough 也要有自己的 route）
-- **具名、限縮例外（Requirements 66–68／70／71／77／78；Tasks 317、325、327、328、329、336、337）**：Docker 外部 HTTP 只能從 non-root Nginx `api-gateway` 的 loopback `127.0.0.1:9090` 八條路由（七條唯讀 GET ＋ 一條寫入 POST `/api/public/crawler-data/rescan`，見 Requirement 71）進入；BFF 與 external-materials-service 都不映射 host port。BFF 只對 `GET /api/public/market-index`、`GET /api/assets/latest`、`GET /api/public/exchange-rate/usd-twd`、`GET /api/public/market-analysis/today`、`GET /api/public/portfolio-advice/latest` 與 `POST /api/public/crawler-data/rescan` 匿名放行，quotes 由 Nginx 直接送 external-materials；禁止 `/api/**`／descendant wildcard與同路徑其他 method。`/api/public/crawler-data/rescan` 是唯一有外部抓取副作用的例外，經 business 端 30 秒全域 Redis 冷卻節流，語意等同 `fetchAndExportNow()` 的匿名版本。Frontend 對八路 exact／matrix 變體回 404，view 不得援引此例外。Controller 仍只委派 service，BFF 不直查 DB／外部行情。USD/TWD 的台銀／兆豐／Yahoo 外部抓取、交易時段判定與每 2 秒 Redis producer 只能位於 `external-materials-service`；business/BFF 只做唯讀 cache/DB 與聚合。
+- **具名、限縮例外（Requirements 66–68／70／71／77／78／79／86；Tasks 317、325、327、328、329、336、337、338、347）**：Docker 外部 HTTP 只能從 non-root Nginx `api-gateway` 的 loopback `127.0.0.1:9090` 九條路由（八條唯讀 GET ＋ 一條寫入 POST `/api/public/crawler-data/rescan`，見 Requirement 71）進入；BFF 與 external-materials-service 都不映射 host port。BFF 只對 `GET /api/public/market-index`、`GET /api/assets/latest`、`GET /api/public/exchange-rate/usd-twd`、`GET /api/public/market-analysis/today`、`GET /api/public/portfolio-advice/latest`、`GET /api/public/trading-radar/today` 與 `POST /api/public/crawler-data/rescan` 匿名放行，quotes 由 Nginx 直接送 external-materials；禁止 `/api/**`／descendant wildcard 與同路徑其他 method。`/api/public/crawler-data/rescan` 是唯一有外部抓取副作用的例外，經 business 端 30 秒全域 Redis 冷卻節流，語意等同 `fetchAndExportNow()` 的匿名版本。交易雷達公開端點固定以 configured-admin 為 owner，必須清除 Reactor 呼叫者身分並顯式傳遞 tenant headers，只能走不寫入 snapshot／Redis／DB 的 current-read 路徑。Frontend 對九路 exact／matrix 變體回 404，view 不得援引此例外。Controller 仍只委派 service，BFF 不直查 DB／外部行情。USD/TWD 的台銀／兆豐／Yahoo 外部抓取、交易時段判定與每 2 秒 Redis producer 只能位於 `external-materials-service`；business/BFF 只做唯讀 cache/DB 與聚合。
 
 **2. 同義欄位、同一 business service API**
 
@@ -279,7 +279,7 @@ skill 有沒有自己宣告：`/commit-merge-push` 沒宣告 → 繼承主 agent
 - 例：股價收盤值 → 一律從 `stock_price_history` 抓
 - 共用邏輯抽到 `bff/common/`（如 `SnapshotEnricher`），各 BFF controller 注入使用
 
-**3. Docker 外部 API 一律經 Nginx 9090 gateway（七條唯讀 GET ＋ 一條寫入 POST）**
+**3. Docker 外部 API 一律經 Nginx 9090 gateway（八條唯讀 GET ＋ 一條寫入 POST）**
 
 - Host 只綁 `127.0.0.1:9090`，精確放行 `GET /api/quotes`、`/api/quotes/one`、
   `/api/public/market-index`、`/api/assets/latest`、`/api/public/exchange-rate/usd-twd`，
@@ -287,11 +287,16 @@ skill 有沒有自己宣告：`/commit-merge-push` 沒宣告 → 繼承主 agent
   抓取副作用的例外，免登入觸發 NewsPoller 重新搜尋，經 business 端 30 秒全域 Redis 冷卻節流），
   以及第七條 `GET /api/public/market-analysis/today` 與第八條
   `GET /api/public/portfolio-advice/latest`（Requirement 79 / Task 338；純唯讀零副作用，
-  後者 owner 走 configured-admin bootstrap）。
-- `bff` 與 `external-materials-service` 不發布 host port；`frontend:80` 對上述八條回 `404`，
+  owner 走 configured-admin bootstrap），以及第九條 `GET /api/public/trading-radar/today`
+  （Requirement 86 / Task 347；owner 同樣走 configured-admin，且不得寫入匯出 snapshot）。
+- `bff` 與 `external-materials-service` 不發布 host port；`frontend:80` 對上述九條回 `404`，
   瀏覽器登入 API 與 SPA 仍經 frontend → BFF。
-- Tailscale Serve 只以 path-scoped HTTPS `:9090` 掛相同八條 exact path，包含 USD/TWD 公開匯率
+- Tailscale Serve 只以 path-scoped HTTPS `:9090` 掛相同九條 exact path，包含 USD/TWD 公開匯率
   與第六條寫入路由。禁止 root／`/api/` proxy、Funnel、自簽憑證與另一層 OAuth proxy。
+- 每一條掛載到 9090 的 API 都必須在 `docs/openapi/docker-external-api.yaml` 提供完整、可驗證的
+  OpenAPI 3 契約；路徑、HTTP method、參數、成功與錯誤回應、所有可達巢狀 schema、必填／nullable
+  語意與安全邊界都不得省略。Gateway allowlist 與 OpenAPI paths 必須由自動化 contract test 雙向比對，
+  禁止先上線再留下缺漏或過期 Swagger。
 
 ### 服務啟動
 ```bash
@@ -313,9 +318,9 @@ cd frontend
 
 | 文件 | 說明 |
 |------|------|
-| `spec/requirements.md` | User Stories + Acceptance Criteria（86 個 Requirements；Requirement 86／87 由在途 worktree 保留，最新為 88） |
+| `spec/requirements.md` | User Stories + Acceptance Criteria（87 個 Requirements；Requirement 87 由在途 worktree 保留，最新為 88） |
 | `spec/design.md` | 架構圖、ERD、API 端點、關鍵業務邏輯 |
-| `spec/tasks.md` | 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–345、349）＋ 尚未歸檔的 Task 201 起區段；Task 229–263、268、293–296 以各自 `spec/tasks/tNNN_*.md` 為準 |
+| `spec/tasks.md` | 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–347、349）＋ 尚未歸檔的 Task 201 起區段；Task 229–263、268、293–296 以各自 `spec/tasks/tNNN_*.md` 為準 |
 | `spec/tasks/README.md` | 自足任務檔規範（新任務寫這裡，不再追加 `tasks.md`） |
 | `spec/tasks/tNNN_*.md` | 自足任務檔（Task 201 之後的新任務） |
 | `spec/tasks/archive/` | Task 1–200 歷史，已凍結不再修改 |

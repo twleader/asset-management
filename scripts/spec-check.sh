@@ -13,6 +13,7 @@
 #   B5 spec 宣稱的測試類不存在          ← Task 160「單元驗證」但無該測試檔
 #   B6 @Scheduled 變更未同步排程登錄表  ← Task 195 兩處漂移的根因
 #   B7 文件計數宣告漂移
+#   B9 9090 gateway/OpenAPI 契約漂移 ← Task 347 將 runtime/Swagger 同步升為機械閘門
 #
 # 用法：
 #   scripts/spec-check.sh [base-ref]      # base-ref 預設 origin/main
@@ -201,6 +202,20 @@ if added_lines 'spec/**' | grep -qE 'db/changelog/.*\.sql'; then
 fi
 
 # ── 摘要 ──────────────────────────────────────────────────────────
+# B9. Docker 外部 9090 gateway / OpenAPI 契約是 current-state 不變條件；
+# 單改 Nginx allowlist、Swagger status/schema/example 或 market catalog 都必須 BLOCK。
+OPENAPI_TEST='scripts/tests/docker-external-api-openapi-test.rb'
+if ! command -v ruby >/dev/null 2>&1; then
+  block "找不到 ruby，無法執行 9090 gateway/OpenAPI contract"
+elif [ ! -f "$OPENAPI_TEST" ]; then
+  block "缺 $OPENAPI_TEST，9090 gateway/OpenAPI parity 無機械防漂移"
+else
+  openapi_output=$(ruby "$OPENAPI_TEST" 2>&1)
+  openapi_status=$?
+  printf '%s\n' "$openapi_output"
+  [ "$openapi_status" -eq 0 ] || block "9090 gateway/OpenAPI contract 失敗（完整訊息如上）"
+fi
+
 echo
 echo "════ 結果 ════"
 echo "BLOCK: $BLOCKS   CHECK: $CHECKS"

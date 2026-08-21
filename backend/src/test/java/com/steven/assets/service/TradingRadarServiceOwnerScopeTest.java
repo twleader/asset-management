@@ -160,4 +160,24 @@ class TradingRadarServiceOwnerScopeTest {
         verify(alertRepo, never()).findDistinctStockCodeMarketByOwnerUserId(anyLong());
         verify(snapshotStore, never()).saveRecomputed(anyLong(), any());
     }
+
+    /**
+     * Requirement 86：公開 current read 與 HTTP 頁面共用 request-scoped owner 分支，
+     * 但無論 request context 是否存在都不得建立任何匯出 snapshot。
+     */
+    @Test
+    void 公開current走無owner查詢且完全不寫入snapshot() {
+        stubCommon();
+
+        TradingRadarDto.Response response = newService().getCurrent();
+
+        assertNotNull(response);
+        verify(snapshotRepo).findLatestWithStocks();
+        verify(alertRepo).findDistinctStockCodeMarket();
+        verify(snapshotRepo, never()).findLatestWithStocksByOwnerUserId(anyLong());
+        verify(alertRepo, never()).findDistinctStockCodeMarketByOwnerUserId(anyLong());
+        verify(snapshotStore, never()).save(anyLong(), any());
+        verify(snapshotStore, never()).saveRecomputed(anyLong(), any());
+        verify(currentUserContext, never()).getEffectiveUserId();
+    }
 }

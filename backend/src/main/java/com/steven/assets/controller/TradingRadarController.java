@@ -48,6 +48,12 @@ public class TradingRadarController {
         return service.get();
     }
 
+    /** 公開 configured-admin 邊界專用的純讀入口；不保存交易雷達匯出快照。 */
+    @GetMapping("/current")
+    public TradingRadarDto.Response getCurrent() {
+        return service.getCurrent();
+    }
+
     /**
      * 手動「重新整理」：先同步回補台股行情再重算（Task 249）。
      *

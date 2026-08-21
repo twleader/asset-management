@@ -372,6 +372,18 @@ public class TradingRadarService {
     }
 
     /**
+     * 公開「今日交易雷達」的純 current read（Requirement 86 / Task 347）。
+     *
+     * <p>與頁面用 {@link #get()} 共用完全相同的 request-scoped owner 查詢與 DTO 組裝，
+     * 但外部輪詢不得推進匯出快照時間軸，因此這個入口刻意只呼叫 {@code assemble(null)}，
+     * 不保存 Redis snapshot，也不觸發 refresh、通知或匯出。</p>
+     */
+    @Transactional(readOnly = true)
+    public TradingRadarDto.Response getCurrent() {
+        return assemble(null);
+    }
+
+    /**
      * 背景產檔前的重算（Task 260）：顯式 owner、不觸碰 request-scoped 的 CurrentUserContext，
      * 重算後 append 一筆快照供當日匯出。
      */
