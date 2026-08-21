@@ -65,9 +65,10 @@ public class MarketClock {
     /**
      * 台股 LIVE 外呼唯一可用的 fail-closed 授權。
      *
-     * <p>盤外時間不需要日曆即可確定為 closed；盤中則只接受 TWSE authority 明確回傳
-     * {@code true}。authority 不可用或丟例外時回 {@link Optional#empty()}，絕不借用上方
-     * legacy fail-open boolean。</p>
+     * <p>盤外時間不需要日曆即可確定為 closed；盤中則只接受 shared known calendar 明確回傳
+     * {@code true}。年度 authority 依序採用 TWSE primary、完整 DGPA provisional，並於讀取時
+     * union operator closure；兩個年度來源都不可用或查詢丟例外時回 {@link Optional#empty()}，
+     * 絕不借用上方 legacy fail-open boolean。</p>
      */
     public Optional<Boolean> isTwMarketOpenKnown() {
         ZonedDateTime now = ZonedDateTime.now(clock.withZone(TW_ZONE));

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.steven.assets.externalmaterials.client.EtfNavFetchClient;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
@@ -19,6 +20,8 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.DayOfWeek;
 import java.time.Duration;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -31,11 +34,11 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 殖利率 / ETF 持股 / 股利歷史 / TWSE 假日 / 股票名稱對外抓取（從 backend MarketDataService 搬遷至此）。
+ * 殖利率 / ETF 持股 / 股利歷史 / 台股年度休市 / 股票名稱對外抓取（從 backend MarketDataService 搬遷至此）。
  *
  * 對外 API：
  *  - TWSE OpenAPI: https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL（殖利率）
- *  - TWSE 歷年開休市 JSON: https://www.twse.com.tw/holidaySchedule/holidaySchedule（假日）
+ *  - 台股年度休市：TWSE 歷年開休市 JSON 優先；尚未公布時以 DGPA 完整辦公日曆暫行
  *  - TWSE BWIBBU per stock: https://www.twse.com.tw/exchangeReport/BWIBBU
  *  - FinMind: TaiwanStockDividend / TaiwanStockDividendResult / TaiwanETFHoldings / TaiwanStockInfo
  *  - NASDAQ: /api/quote/{code}/dividends, /api/quote/{code}/info
@@ -61,6 +64,8 @@ public class MarketDataFetchService {
     private final StockSourceQuery store;
     // 颱風假 / 台股臨時休市 override（Task 160）：getTwHolidays 於回傳前 union 進台股假日唯一入口。
     private final TwTyphoonClosureService typhoonClosure;
+    private final DgpaCalendarAuthority dgpaCalendarAuthority;
+    private final Clock clock;
 
     private volatile String yahooCrumb = null;
     private volatile long yahooCrumbBlockedUntil = 0L;
@@ -80,13 +85,47 @@ public class MarketDataFetchService {
     private volatile long twNameToCodeExpiresAt = 0L;
     private static final long TW_NAME_MAP_TTL_MS = 24 * 60 * 60 * 1000L;
 
-    private final Map<Integer, Map<String, String>> twHolidayCache = new ConcurrentHashMap<>();
+    private enum TwHolidaySource { DGPA_PROVISIONAL, TWSE }
 
+    private record TwHolidayCacheEntry(
+            Map<String, String> holidays,
+            TwHolidaySource source,
+            Instant expiresAt) {
+        private TwHolidayCacheEntry {
+            holidays = Map.copyOf(holidays);
+        }
+    }
+
+    private record TwHolidayCandidate(Map<String, String> holidays, TwHolidaySource source) {}
+
+    private final Map<Integer, TwHolidayCacheEntry> twHolidayCache = new ConcurrentHashMap<>();
+    private static final Duration DGPA_PROVISIONAL_TTL = Duration.ofHours(6);
+    private static final Duration DGPA_RETRY_BACKOFF = Duration.ofMinutes(10);
+
+    @Autowired
     public MarketDataFetchService(StockSourceQuery store,
                                   TwTyphoonClosureService typhoonClosure,
-                                  @Value("${finmind.token:${FINMIND_TOKEN:}}") String finmindToken) {
+                                  @Value("${finmind.token:${FINMIND_TOKEN:}}") String finmindToken,
+                                  DgpaCalendarAuthority dgpaCalendarAuthority) {
+        this(store, typhoonClosure, finmindToken, dgpaCalendarAuthority, Clock.systemUTC());
+    }
+
+    /** 舊有純單元測試相容入口；正式 Spring wiring 一律使用可注入的 DGPA port。 */
+    public MarketDataFetchService(StockSourceQuery store,
+                                  TwTyphoonClosureService typhoonClosure,
+                                  String finmindToken) {
+        this(store, typhoonClosure, finmindToken, year -> Optional.empty(), Clock.systemUTC());
+    }
+
+    MarketDataFetchService(StockSourceQuery store,
+                           TwTyphoonClosureService typhoonClosure,
+                           String finmindToken,
+                           DgpaCalendarAuthority dgpaCalendarAuthority,
+                           Clock clock) {
         this.store = store;
         this.typhoonClosure = typhoonClosure;
+        this.dgpaCalendarAuthority = dgpaCalendarAuthority;
+        this.clock = clock;
         this.finmindToken = finmindToken == null ? "" : finmindToken.trim();
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
@@ -906,19 +945,18 @@ public class MarketDataFetchService {
         return new DividendHistoryResult(stockCode, "美股", "NASDAQ", "查無股利資料", List.of());
     }
 
-    // ─── TWSE 假日 ─────────────────────────────────────────────────────────────
+    // ─── 台股年度休市（TWSE primary / DGPA provisional）────────────────────────
 
     public Map<String, String> getTwHolidays(int year) {
-        Map<String, String> base = twHolidayCache.computeIfAbsent(
-                year, this::fetchTwHolidaysFromTwse);
-        // union 颱風假 / 臨時休市（不在 TWSE 年度 holidaySchedule 中）：read-time 合併、不污染 TWSE per-year 快取。
+        Map<String, String> base = loadTwHolidayBase(year).orElse(Map.of());
+        // union 颱風假 / 臨時休市：read-time 合併，不污染 TWSE/DGPA 年度 authority cache。
         Map<String, String> closures = typhoonClosure.closuresForYear(year);
         return mergeTwHolidays(base, closures);
     }
 
     /**
      * 銀行 FX session 專用的 fail-closed authority read。首次 DB 讀取早於 Liquibase 時允許
-     * 後續重試；TWSE 抓取失敗的空 map 不進年度快取，避免 transient failure 變成全年永久停擺。
+     * 後續重試；TWSE 與 DGPA 都失敗的空值不進年度快取，避免 transient failure 變成全年永久停擺。
      * 呼叫端 {@link MarketCalendar} 負責節流，本次 DB/HTTP 嘗試仍受既有 timeout 限制。
      */
     public Optional<Map<String, String>> getTwHolidaysKnown(int year) {
@@ -927,16 +965,9 @@ public class MarketDataFetchService {
         }
         if (!typhoonClosure.isClosureCalendarKnown()) return Optional.empty();
 
-        Map<String, String> base = twHolidayCache.get(year);
-        if (base == null || base.isEmpty()) {
-            Map<String, String> refreshed = fetchTwHolidaysFromTwse(year);
-            if (refreshed != null && !refreshed.isEmpty()) {
-                base = Map.copyOf(refreshed);
-                twHolidayCache.put(year, base);
-            }
-        }
-        if (base == null || base.isEmpty()) return Optional.empty();
-        return Optional.of(mergeTwHolidays(base, typhoonClosure.closuresForYear(year)));
+        Optional<Map<String, String>> base = loadTwHolidayBase(year);
+        if (base.isEmpty()) return Optional.empty();
+        return Optional.of(mergeTwHolidays(base.get(), typhoonClosure.closuresForYear(year)));
     }
 
     /** 供健康檢查／測試判定 operator 臨時休市表是否已成功載入。 */
@@ -951,6 +982,82 @@ public class MarketDataFetchService {
         Map<String, String> merged = new LinkedHashMap<>(base);
         merged.putAll(closures);
         return Map.copyOf(merged);
+    }
+
+    /**
+     * Shared per-year loader。TWSE entry 永久有效；DGPA entry 最多六小時，過期時重試 TWSE。
+     * 更新只以 immutable observed entry 做 optimistic CAS，不使用同年或全域鎖。
+     */
+    private Optional<Map<String, String>> loadTwHolidayBase(int year) {
+        while (true) {
+            Instant now = clock.instant();
+            TwHolidayCacheEntry observed = twHolidayCache.get(year);
+            if (observed != null
+                    && (observed.source() == TwHolidaySource.TWSE || now.isBefore(observed.expiresAt()))) {
+                return Optional.of(observed.holidays());
+            }
+
+            TwHolidayCandidate candidate = fetchTwHolidayCandidate(year).orElse(null);
+            if (candidate != null) {
+                TwHolidayCacheEntry proposed = new TwHolidayCacheEntry(
+                        candidate.holidays(),
+                        candidate.source(),
+                        candidate.source() == TwHolidaySource.TWSE
+                                ? Instant.MAX
+                                : now.plus(DGPA_PROVISIONAL_TTL));
+                return Optional.of(installTwHolidayCandidate(year, observed, proposed).holidays());
+            }
+
+            if (observed == null) return Optional.empty();
+            TwHolidayCacheEntry incumbent = twHolidayCache.get(year);
+            if (incumbent != observed) continue;
+            if (incumbent.source() == TwHolidaySource.TWSE) return Optional.of(incumbent.holidays());
+
+            TwHolidayCacheEntry backedOff = new TwHolidayCacheEntry(
+                    incumbent.holidays(), incumbent.source(), now.plus(DGPA_RETRY_BACKOFF));
+            if (twHolidayCache.replace(year, incumbent, backedOff)) {
+                return Optional.of(backedOff.holidays());
+            }
+        }
+    }
+
+    private Optional<TwHolidayCandidate> fetchTwHolidayCandidate(int year) {
+        Map<String, String> twse = fetchTwHolidaysFromTwse(year);
+        if (twse != null && !twse.isEmpty()) {
+            return Optional.of(new TwHolidayCandidate(Map.copyOf(twse), TwHolidaySource.TWSE));
+        }
+        try {
+            Optional<Map<String, String>> dgpa = dgpaCalendarAuthority.fetchHolidays(year);
+            if (dgpa.isPresent() && !dgpa.get().isEmpty()) {
+                return Optional.of(new TwHolidayCandidate(Map.copyOf(dgpa.get()), TwHolidaySource.DGPA_PROVISIONAL));
+            }
+        } catch (Exception e) {
+            log.warn("DGPA provisional calendar fetch failed for {}: {}", year, e.getMessage());
+        }
+        return Optional.empty();
+    }
+
+    private TwHolidayCacheEntry installTwHolidayCandidate(
+            int year,
+            TwHolidayCacheEntry observed,
+            TwHolidayCacheEntry proposed) {
+        while (true) {
+            TwHolidayCacheEntry incumbent = twHolidayCache.get(year);
+            if (incumbent == null) {
+                if (twHolidayCache.putIfAbsent(year, proposed) == null) return proposed;
+                continue;
+            }
+            if (incumbent.source() == TwHolidaySource.TWSE) return incumbent;
+
+            if (proposed.source() == TwHolidaySource.TWSE) {
+                if (twHolidayCache.replace(year, incumbent, proposed)) return proposed;
+                continue;
+            }
+
+            // DGPA 永不覆蓋另一個已完成 refresh 的 incumbent；更不能蓋過 TWSE。
+            if (incumbent != observed) return incumbent;
+            if (twHolidayCache.replace(year, incumbent, proposed)) return proposed;
+        }
     }
 
     Map<String, String> fetchTwHolidaysFromTwse(int year) {

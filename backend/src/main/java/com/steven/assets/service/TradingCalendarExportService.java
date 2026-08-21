@@ -78,7 +78,7 @@ public class TradingCalendarExportService {
      * 使用者不再需要二選一。
      *
      * <p><b>本匯出點刻意不接 {@code ExportDoc}</b>：它本來就有兩個 builder、且共吃同一份
-     * {@link #buildDays}，而 {@link #buildJson} 的輸出是對外契約、形狀不得改變。改接中介模型
+     * {@link #buildDays(int, CalendarAuthoritySnapshot)}，而 {@link #buildJson} 的輸出是對外契約、形狀不得改變。改接中介模型
      * 只會改變既有輸出、沒有任何好處。只把落檔換成共用元件（取得 tmp＋atomic move 與統一狀態字串）。
      *
      * <p>Drive 上傳<b>不在此處</b>：本方法沒有 owner 與 Drive 設定，由排程服務負責上傳兩份。
@@ -90,14 +90,21 @@ public class TradingCalendarExportService {
         if (year < 1970 || year > 2100) {
             throw new IllegalArgumentException("年度必須介於 1970～2100：" + year);
         }
-        String sub = normalizeSubpath(subpath);
+        String sub = requireValidSubpath(subpath);
+        CalendarAuthoritySnapshot snapshot = authoritySnapshot(year);
+        return exportToDir(year, sub, snapshot);
+    }
 
-        List<DayRow> days = buildDays(year);
+    private TradingCalendarExportDto.RunResponse exportToDir(
+            int year,
+            String validSubpath,
+            CalendarAuthoritySnapshot snapshot) {
+        List<DayRow> days = buildDays(year, snapshot);
         try {
-            byte[] json = buildJson(year, days);
+            byte[] json = buildJson(year, days, snapshot);
             byte[] xlsx = buildExcel(year, days);
             // gdriveEnabled=false：本方法只寫本機兩份，Drive 由排程服務處理（見 271.3.2.1）
-            var r = dualWriter.write(null, resolveDir(sub), "交易日曆_" + year, json, xlsx, false, null);
+            var r = dualWriter.write(null, resolveDir(validSubpath), "交易日曆_" + year, json, xlsx, false, null);
             log.info("交易日曆匯出 year={} → {}", year, r.localStatus());
             return TradingCalendarExportDto.RunResponse.builder()
                     // 既有欄位語意不變：指 xlsx 那一份
@@ -123,12 +130,8 @@ public class TradingCalendarExportService {
         List<TradingCalendarExportDto.RunResponse> results = new ArrayList<>(2);
         for (int year : years) {
             try {
-                // 空 map 的語意是 authority unavailable，絕不能讓 primitive 把它當「全年無假日」。
-                if (marketDataService.getTwHolidays(year).isEmpty()) {
-                    results.add(failedYear(year, "TWSE 年度假日曆尚未取得"));
-                    continue;
-                }
-                results.add(exportToDir(year, validSubpath));
+                CalendarAuthoritySnapshot snapshot = authoritySnapshot(year);
+                results.add(exportToDir(year, validSubpath, snapshot));
             } catch (RuntimeException e) {
                 results.add(failedYear(year, e.getMessage()));
             }
@@ -183,23 +186,36 @@ public class TradingCalendarExportService {
         return value.substring(0, max - 1) + "…";
     }
 
-    /** 逐日建整年交易日曆（資料單一來源＝MarketDataService）。 */
-    private List<DayRow> buildDays(int year) {
-        Map<String, String> tw = marketDataService.getTwHolidays(year);
-        Map<String, String> us = marketDataService.getUsHolidays(year);
-        Map<String, String> uk = marketDataService.getUkHolidays(year);
+    private CalendarAuthoritySnapshot authoritySnapshot(int year) {
+        // 各市場查詢後立即 defensive copy；後續 transport/cache 升級不可混入同一份匯出。
+        Map<String, String> tw = Map.copyOf(marketDataService.getTwHolidays(year));
+        Map<String, String> us = Map.copyOf(marketDataService.getUsHolidays(year));
+        Map<String, String> uk = Map.copyOf(marketDataService.getUkHolidays(year));
+        if (tw.isEmpty()) {
+            throw new IllegalStateException(year + " 年台股年度日曆尚未取得");
+        }
+        return new CalendarAuthoritySnapshot(tw, us, uk);
+    }
+
+    /** 逐日建整年交易日曆；只讀本年度 immutable snapshot，不再逐日回查 service。 */
+    private List<DayRow> buildDays(int year, CalendarAuthoritySnapshot snapshot) {
+        Map<String, String> tw = snapshot.tw();
+        Map<String, String> us = snapshot.us();
+        Map<String, String> uk = snapshot.uk();
 
         List<DayRow> rows = new ArrayList<>(366);
         LocalDate d = LocalDate.of(year, 1, 1);
         LocalDate end = LocalDate.of(year, 12, 31);
         while (!d.isAfter(end)) {
             String date = d.toString();
+            boolean weekday = d.getDayOfWeek() != DayOfWeek.SATURDAY
+                    && d.getDayOfWeek() != DayOfWeek.SUNDAY;
             rows.add(new DayRow(
                     date,
                     WEEKDAY_ZH[d.getDayOfWeek().getValue() - 1],
-                    marketDataService.isTwTradingDay(d),
-                    marketDataService.isUsTradingDay(d),
-                    marketDataService.isUkTradingDay(d),
+                    weekday && !tw.containsKey(date),
+                    weekday && !us.containsKey(date),
+                    weekday && !uk.containsKey(date),
                     tw.get(date),
                     us.get(date),
                     uk.get(date)));
@@ -209,7 +225,10 @@ public class TradingCalendarExportService {
     }
 
     /** 組 JSON 結構（UTF-8 pretty-print）；holidays 以 TreeMap 依日期排序、確保輸出穩定。 */
-    private byte[] buildJson(int year, List<DayRow> days) throws IOException {
+    private byte[] buildJson(
+            int year,
+            List<DayRow> days,
+            CalendarAuthoritySnapshot snapshot) throws IOException {
         long twCount = days.stream().filter(DayRow::tw).count();
         long usCount = days.stream().filter(DayRow::us).count();
         long ukCount = days.stream().filter(DayRow::uk).count();
@@ -220,9 +239,9 @@ public class TradingCalendarExportService {
         count.put("uk", ukCount);
 
         Map<String, Object> holidays = new LinkedHashMap<>();
-        holidays.put("tw", new TreeMap<>(marketDataService.getTwHolidays(year)));
-        holidays.put("us", new TreeMap<>(marketDataService.getUsHolidays(year)));
-        holidays.put("uk", new TreeMap<>(marketDataService.getUkHolidays(year)));
+        holidays.put("tw", new TreeMap<>(snapshot.tw()));
+        holidays.put("us", new TreeMap<>(snapshot.us()));
+        holidays.put("uk", new TreeMap<>(snapshot.uk()));
 
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("year", year);
@@ -344,6 +363,17 @@ public class TradingCalendarExportService {
             throw new IllegalArgumentException("輸出子路徑不可跳脫基底目錄：" + subpath);
         }
         return target;
+    }
+
+    private record CalendarAuthoritySnapshot(
+            Map<String, String> tw,
+            Map<String, String> us,
+            Map<String, String> uk) {
+        private CalendarAuthoritySnapshot {
+            tw = Map.copyOf(tw);
+            us = Map.copyOf(us);
+            uk = Map.copyOf(uk);
+        }
     }
 
 

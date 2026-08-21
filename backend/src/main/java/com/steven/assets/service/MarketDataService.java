@@ -23,10 +23,10 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 市場資料代理層：殖利率 / ETF 持股 / 股利歷史 / TWSE 假日 全數透過 ext-materials-service `/internal/*` 取得。
+ * 市場資料代理層：殖利率 / ETF 持股 / 股利歷史 / 台股年度休市全數透過 ext-materials-service `/internal/*` 取得。
  *
  * 對外 API（外部行情 API）已集中在 ext-materials-service `MarketDataFetchService`，
- * 本服務僅保留：(1) 公開 record 類型；(2) 1 小時殖利率快取；(3) per-year 假日快取；
+ * 本服務僅保留：(1) 公開 record 類型；(2) 1 小時殖利率快取；(3) 當年度短期假日快取；
  *            (4) 美股 / 英股假日純計算（無外部 API）；(5) ETF 白名單判斷（純計算）。
  */
 @Slf4j
@@ -174,10 +174,8 @@ public class MarketDataService {
                 "external-materials-service 不可用", List.of());
     }
 
-    // ─── 假日 / 交易日（TWSE 從 ext-materials proxy；NYSE 純計算） ─────────────
+    // ─── 假日 / 交易日（台股 TWSE primary / DGPA provisional proxy；NYSE 純計算） ──
 
-    // 過去 / 未來年度：固定假日、無臨時休市傳播需求 → 永久快取。
-    private final Map<Integer, Map<String, String>> twHolidayCache = new ConcurrentHashMap<>();
     // 當年度：颱風假 / 臨時休市可能於「任何時刻」由 ext-materials 偵測寫入（早盤排程 / 開機 self-heal /
     // 手動 detect），故不能永久快取；改以短 TTL，確保同日新偵測到的休市在 TTL 內傳播至 business 側
     // （market-status / 07:30 分析 / 警示 / 備份 / 交易日曆），不受限於任何固定時窗。
@@ -188,13 +186,9 @@ public class MarketDataService {
     public Map<String, String> getTwHolidays(int year) {
         int currentYear = ZonedDateTime.now(MarketZones.TW_ZONE).getYear();
         if (year != currentYear) {
-            Map<String, String> cached = twHolidayCache.get(year);
-            if (cached != null) return cached;
-            // 同樣不以空表毒化永久快取：ext 一次瞬斷（如切到他年度日曆時）不得讓該年度整年假日
-            // 被鎖成零筆（連國定假日一起漏）；只快取成功值，失敗此次降級、下次重抓。
-            Map<String, String> fresh = fetchTwHolidaysFromExt(year);
-            if (!fresh.isEmpty()) twHolidayCache.put(year, fresh);
-            return fresh;
+            // 非當年度每次 proxy，由 external 的 source-aware cache 唯一管理 DGPA 暫行 → TWSE 升級。
+            // business 端不可永久短路，否則先讀到的 DGPA 會遮蔽後續發布的 TWSE。
+            return fetchTwHolidaysFromExt(year);
         }
         long now = System.currentTimeMillis();
         TimedHolidays cached = twHolidayCurrentYearCache.get(year);

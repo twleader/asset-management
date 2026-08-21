@@ -1,10 +1,13 @@
 package com.steven.assets.integration.fubon;
 
 import com.steven.assets.service.MarketDataService;
+import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
 import org.springframework.scheduling.annotation.Scheduled;
 
 import java.lang.reflect.Method;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -12,10 +15,12 @@ import java.time.ZoneOffset;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -77,6 +82,49 @@ class FubonInventorySyncSchedulerTest {
         new FubonInventorySyncScheduler(config, calendar, sync, CLOCK).scheduledInventorySync();
 
         verify(sync).syncScheduledAfterCalendar(TODAY);
+    }
+
+    @Test
+    void realDgpaProxyAuthorizesWorkdayButHolidayAndUnknownStopBeforeQuoteWritePath() throws Exception {
+        LocalDate dgpaWorkday = LocalDate.of(2027, 1, 4);
+        LocalDate dgpaHoliday = LocalDate.of(2027, 1, 1);
+        LocalDate unknownDay = LocalDate.of(2027, 1, 5);
+        AtomicReference<String> responseBody = new AtomicReference<>(
+                "{\"2027-01-01\":\"DGPA provisional holiday\"}");
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/internal/tw-holidays", exchange -> {
+            byte[] bytes = responseBody.get().getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        server.start();
+        try {
+            MarketDataService realCalendar = new MarketDataService(
+                    "http://127.0.0.1:" + server.getAddress().getPort(), null);
+            FubonConfigState config = config(FubonConfigState.State.READY);
+            FubonInventorySyncService sync = mock(FubonInventorySyncService.class);
+
+            new FubonInventorySyncScheduler(config, realCalendar, sync,
+                    Clock.fixed(Instant.parse("2027-01-04T04:00:00Z"), ZoneOffset.UTC))
+                    .scheduledInventorySync();
+            verify(sync).syncScheduledAfterCalendar(dgpaWorkday);
+
+            new FubonInventorySyncScheduler(config, realCalendar, sync,
+                    Clock.fixed(Instant.parse("2027-01-01T04:00:00Z"), ZoneOffset.UTC))
+                    .scheduledInventorySync();
+            verify(sync, never()).syncScheduledAfterCalendar(dgpaHoliday);
+
+            responseBody.set("{}");
+            new FubonInventorySyncScheduler(config, realCalendar, sync,
+                    Clock.fixed(Instant.parse("2027-01-05T04:00:00Z"), ZoneOffset.UTC))
+                    .scheduledInventorySync();
+            verify(sync, never()).syncScheduledAfterCalendar(unknownDay);
+            verify(sync, times(2)).calendarUnknown(false);
+        } finally {
+            server.stop(0);
+        }
     }
 
     @Test

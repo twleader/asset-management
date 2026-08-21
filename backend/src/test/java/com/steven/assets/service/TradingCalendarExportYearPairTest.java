@@ -50,6 +50,11 @@ class TradingCalendarExportYearPairTest {
         assertThat(output.resolve("out/交易日曆_2024.json")).exists();
         assertThat(output.resolve("out/交易日曆_2025.xlsx")).exists();
         assertThat(output.resolve("out/交易日曆_2025.json")).exists();
+        for (int year : List.of(2024, 2025)) {
+            verify(market, times(1)).getTwHolidays(year);
+            verify(market, times(1)).getUsHolidays(year);
+            verify(market, times(1)).getUkHolidays(year);
+        }
     }
 
     @Test
