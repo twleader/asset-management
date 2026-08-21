@@ -108,9 +108,10 @@ com.steven.assets/
   - `GET /api/bff/snapshot-form/lookups`：表單下拉一次取齊（banks / brokers / depositTypes / transitFundTypes，皆已過濾 active）
   - `GET /api/bff/snapshot-form/funds`：信託基金主檔（passthrough 至 `/api/funds`），每筆已含 latestNav / latestFxRate / twdPerUnit；`?date=` 時改用該基準日（Requirement 19/21）
   - `POST /api/bff/snapshot-form/fund-nav/refresh`：觸發後端 → external-materials-service 立即刷新所有基金 NAV，回 `{ success, failed, total }`
-- `StockAnalysisBffRoutes` ＋ `StockAnalysisChartBffController`（Task 261 新增的 aggregation controller，與同前綴的 exact-path route 並存；WebFlux `RequestMappingHandlerMapping`（order 0）先於 Gateway `RoutePredicateHandlerMapping`（order 1），且既有五條 route 皆為精確路徑、不含萬用，故不衝突——同一模式的既有先例為 `StockAlertBffController` ＋ `StockAlertBffRoutes`）（StockAnalysisDialog 跨 view 共用元件專屬）：對話框被 Dashboard / SnapshotForm / WatchStock / StockAlert / RealizedGain / TradingRadar / Transaction **七個** view 同時使用（損益明細列雙擊開啟為既有；交易雷達個股決策表列雙擊為 Task 234 加入；交易紀錄明細列雙擊為 Task 311 加入），依「同義欄位、同一 business service API」原則拆為獨立 BFF route，避免在七個父 view 的 BFF 各自重複代理。Dashboard 開啟此 dialog 的觸發點有三：持股表格列雙擊（`onStockDblClick`）、個股 bar 圖雙擊（`onBarDblClick`）、以及「資產配置分佈」tab 2/3 個股穿透圓餅圖 segment 單擊（`onLookthroughPieClick(params, market)`，「其它」聚合段無代號不開；命中當前快照 `mergedStocks` 同 `stockCode`+`market` 的直接持股則沿用完整列以保留 `avgCostOriginal` 成本欄位、否則僅帶 `{stockCode, stockName, market}`）。提供：
+- `StockAnalysisBffRoutes` ＋ `StockAnalysisChartBffController`（Task 261 新增的 aggregation controller，與同前綴的 exact-path route 並存；WebFlux `RequestMappingHandlerMapping`（order 0）先於 Gateway `RoutePredicateHandlerMapping`（order 1），且六條 Gateway route 皆為精確路徑、不含萬用，故不衝突——同一模式的既有先例為 `StockAlertBffController` ＋ `StockAlertBffRoutes`）（StockAnalysisDialog 跨 view 共用元件專屬）：對話框被 Dashboard / SnapshotForm / WatchStock / StockAlert / RealizedGain / TradingRadar / Transaction **七個** view 同時使用（損益明細列雙擊開啟為既有；交易雷達個股決策表列雙擊為 Task 234 加入；交易紀錄明細列雙擊為 Task 311 加入），依「同義欄位、同一 business service API」原則拆為獨立 BFF route，避免在七個父 view 的 BFF 各自重複代理。Dashboard 開啟此 dialog 的觸發點有三：持股表格列雙擊（`onStockDblClick`）、個股 bar 圖雙擊（`onBarDblClick`）、以及「資產配置分佈」tab 2/3 個股穿透圓餅圖 segment 單擊（`onLookthroughPieClick(params, market)`，「其它」聚合段無代號不開；命中當前快照 `mergedStocks` 同 `stockCode`+`market` 的直接持股則沿用完整列以保留 `avgCostOriginal` 成本欄位、否則僅帶 `{stockCode, stockName, market}`）。提供：
   - `GET /api/bff/stock-analysis/history/stock` → `/api/market-data/history/stock`
-  - `GET /api/bff/stock-analysis/chart-series`（Task 261，由 **`StockAnalysisChartBffController`** 提供，**非 Gateway passthrough**）：走勢圖上下兩個 pane 的完整資料，由 BFF 並行呼叫 business 的 `/api/market-data/history/stock`（股價 OHLC）與 `/api/market-data/indicators/series`（逐日的 MA20／MA60／MA240 ＋ KD 五值 ＋ MACD／RSI／乖離率／威廉指標共 20 個指標欄位（Task 265 新增週線 MA5），完整清單見「API Design」的 `/api/market-data/indicators/series`），**以 `tradingDate` 聯集對齊後**回傳前端可直接 render 的等長陣列。走勢圖原本在前端自算 KD／MA，與觀察清單顯示的後端 `computeAll()` 值在盤中不一致；上收後同源。兩支上游的今日格條件不同（股價要求 `source` 不含括號、`0000` 更不併 live；指標比照 `computeAll` 併 live），故**必須取聯集**——取股價側日期會把今日的指標點靜默丟掉，legend 顯示前一日的值，等於沒修
+  - `GET /api/bff/stock-analysis/chart-series`（Task 261，由 **`StockAnalysisChartBffController`** 提供，**非 Gateway passthrough**）：BFF 並行呼叫 business history 與 indicator series。top-level 仍以 `tradingDate` 聯集對齊，保留折線既有等長陣列與 indicator-only 尾日語意；Requirement 92／Task 355 另加 BFF 已完成 cutoff／ISO 週聚合／latest 的非 null `daily`、`weekly` server-ready frame，frontend 只 render。兩支上游的今日格條件不同，故 top-level 必須取聯集
+  - `GET /api/bff/stock-analysis/quote-detail` → `/api/market-data/quote-detail`（Requirement 87／Task 348）：登入後「行情五檔」exact passthrough；只供共用 dialog 展示單次 Yahoo 台股摘要＋orderbook snapshot，不供估值、quotes、SSE 或其他 consumer
   - `GET /api/bff/stock-analysis/dividends` → `/api/market-data/dividends`
   - `GET /api/bff/stock-analysis/etf-holdings` → `/api/market-data/etf-holdings`
   - `POST /api/bff/stock-analysis/backfill-stock` → `/api/market-data/history/backfill-stock`（Task 136 lazy 回補：走勢圖無歷史時即時觸發單檔 10 年回補後重載；只寫 `stock_price_history` 不入主檔、今日列獨佔給 `ClosePersister`）
@@ -603,6 +604,7 @@ POST /internal/repair/history?market=%E5%8F%B0%E8%82%A1&from=2026-06-01&to=2026-
 | GET | `/internal/stock-name?code=&market=` | 股票名稱查詢（台股 FinMind / 美股 Yahoo / 英股 Yahoo `.L`），回 `{name}`（查無回空字串）。為警示建立時的 canonical name 權威來源，見 Service 層 `StockAlertService` 的 `assertNameMatchesCode` 守門 |
 | GET | `/internal/intraday-5m?code=&market=&daysBack=5` | 盤中 5 分鐘 K 線（`daysBack` 預設 5），回 `List<IntradayBar>`。供 `StockAlertService` 警示觸發補抓 |
 | GET | `/internal/intraday-ticks?code=&market=&date=` | 「當日」走勢圖分時 tick 序列，回 `List<TickPoint>`。`date` 選填；省略時的預設 bucket 規則、cold-start refresh 與非交易日不 cold-start 的守則，見「StockAnalysisBffRoutes」的 `/api/bff/stock-analysis/intraday-ticks`（Task 153） |
+| GET | `/internal/quote-detail?code=&market=` | Requirement 87／Task 348 行情五檔展示 snapshot；request-time 解析 Yahoo 台股 `quote.data`，回 typed available/unavailable，不寫 Redis／DB |
 
 **交易日 / 休市：**
 
@@ -1393,6 +1395,7 @@ GET    /api/market-data/dividend-rate?code=0050&market=台股    # 取得股利�
 GET    /api/market-data/prices                                 # 列出所有快取股價（live 即時股價統一走此端點，無單數 /price）
 GET    /api/market-data/prices/stream                          # SSE 即時推價（text/event-stream，取代輪詢）
 GET    /api/market-data/intraday-ticks?code=&market=&date=     # 走勢圖「當日」分時 tick（proxy 至 external-materials Redis LIST；date 省略時預設今天（該市場時區）若為交易日且今日 tick 已有資料，否則退回最近有收盤的交易日 — 見 Task 153）。回傳恆為「真實成交 tick 原始序列（升冪、不含未來 padding）」；前端 `StockAnalysisDialog.vue`「當日」模式再以該市場交易時段（鏡射 MarketZones）建「開盤→收盤」每分鐘網格對齊、未來留 null、股價線 connectNulls，使 X 軸延伸到收盤（與指數當日圖 Task 96 同視覺行為，Task 157）
+GET    /api/market-data/quote-detail?code=&market=              # Requirement 87／Task 348：proxy external /internal/quote-detail；只供登入後行情五檔展示
 POST   /api/market-data/prices/refresh                         # 刷新所有持股現價
 GET    /api/market-data/market-status                          # 開盤狀態（台股/美股）
 GET    /api/market-data/holidays?year=2026                     # 台股 / 美股 / 英股假日清單
@@ -8466,3 +8469,242 @@ Java `FubonTwLiveQuoteProvider`將sanitized DTO轉為immutable observation；`tr
 ### 驗證設計
 
 adapter fixture要用官方raw `previousClose/openPrice/highPrice/lowPrice`，並明確製造只有錯誤`open/high/low` alias時拒絕；另涵蓋合法市場pair、raw帳務stale date/wrong account/branch、16位microsecond、trial/actual衝突、wrong symbol/date、future、429/timeout/partial/101 codes/併發；numeric預期釘住`"9999999999.9999999999"`接受、precision21／scale11拒絕、shares上下界、volume 0/Long.MAX_VALUE/overflow，以及金額`12.345×3→37.04`、`999999999999999999.99×1`可寫、`1000000000×9999999999→9999999999000000000.00`因scale2後precision21而rollback。backend mapping精確斷言`transactionExchangeRate==null`；StockMaster rollback零backfill、commit後恰一次，無transaction立即排程。真Postgres兩transaction/latch須驗Fubon先鎖與full update先鎖，兩序列最終均保留非Fubon、舊Fubon不復活、aggregates等於final children；mock/H2不算。external對四入口×enabled/disabled逐一驗known true success/provider failure、known false、calendar authority empty/throw，並精確計Fubon/MIS HTTP、Redis writer/tick/pubsub；false/empty/throw皆全0，enabled failure零MIS/Yahoo fallback、disabled零Fubon。production Lua integration必驗current missing＋`marketOpenAuthorized=false`仍`MARKET_CLOSED`且value/index TTL/pubsub/tick不變，open時才驗missing/newer/takeover；另釘住同日MIS receipt較新只接管一次、後續Fubon older/equal拒絕及official/unknown不可接管。preflight integration須用production script直接製造wrong-type latest/index、非法TTL、malformed與JSON/ARGV mismatch，並驗每案payload bytes、index member/type、兩種TTL、pubsub與tick全不變；另以FUBON來源VERIFIED_CLOSE＋較新LIVE證明status防降級仍零副作用。Docker先disabled/no-secret驗stack healthy、image/config provenance、amd64/import/no-host-port；真secret只在開盤驗normalized→Redis→public API與零scrape。休市或缺secret明列live stage未驗，fixture不能冒充production evidence。
+---
+
+## Requirement 87／Task 348：股票分析 popup 台股行情五檔
+
+### 範圍與來源決策
+
+這個功能直接擴充跨頁共用的 `StockAnalysisDialog`，不在 Dashboard、交易雷達或其他父 view 各做一套。頁籤名稱為「行情五檔」，排列在「走勢圖」之後，只對 `market="台股"` 且 `stockCode!="0000"` 顯示。美股、英股與指數沒有同一份可比較的台股五檔資料契約，故不顯示空頁籤。
+
+既有 `price:{market}:{code}` Redis payload 只有一檔 `buyPrice/sellPrice`，沒有五檔量、內外盤、均價、昨量或成交金額；若把它與另一來源的 orderbook 拼在一起，摘要與委託簿會落在不同時間點。因此新頁籤使用 Yahoo 台股 server-rendered quote page 的**單一 request-time snapshot**，同一 payload 一次取得摘要、內外盤與 `orderbook`。這是已同步登記在 `CLAUDE.md` 與 `spec/steering/structure.md` 的「登入後行情五檔展示 snapshot」具名、限縮例外：它不是權威即時價，不能供估值、損益、下單、警示、SSE、`/api/quotes*`、9090 公開 API 或其他 consumer 使用。此資料只在該頁籤顯示，不寫 Redis／DB、不 publish SSE、不新增排程。第一次切入頁籤才抓；同一次 dialog 已成功載入後切走再切回不重抓，只有「重新整理」明確重抓。其他即時價仍只走 Redis，收盤價仍只走 `stock_price_history`。
+
+### 分層與 sequence
+
+```text
+StockAnalysisDialog「行情五檔」
+  └─ GET /api/bff/stock-analysis/quote-detail?code=00697B&market=台股
+       └─ StockAnalysisBffRoutes（exact path rewrite）
+            └─ GET business-services /api/market-data/quote-detail
+                 └─ MarketDataController（@Pattern 驗證，只委派）
+                      └─ MarketDataService.getQuoteDetail(code, market)
+                           └─ GET external-materials-service /internal/quote-detail
+                                └─ TwQuoteDetailFetchClient
+                                     └─ GET https://tw.stock.yahoo.com/quote/{code}.TW
+```
+
+BFF route 必須精確到 `/quote-detail`，不建立 `/api/bff/stock-analysis/**` wildcard。business 延用 `MarketDataController.CODE_PATTERN` 與 `MARKET_PATTERN`；external internal controller 再驗一次 `market=台股`、code 白名單且 code 非 `0000`。非台股呼叫在 external 邊界直接回 `supported=false`，且在建立 HTTP request 前結束。business 只 proxy／fail-soft，不解析 HTML、不直連 Yahoo；外部 IO 僅位於 `external-materials-service`。
+
+### External client 與安全解析
+
+`TwQuoteDetailFetchClient` 使用可注入的 Java `HttpClient`：HTTP/1.1、follow redirects、connect timeout 5 秒；每個 request timeout 12 秒，固定 `User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36 AssetManagementQuoteDetail/1.0`，並帶 `Accept-Encoding: identity`，便於 fixture 精確驗證。最大接受 body 為 2 MiB，超過即 unavailable。
+
+Yahoo 頁面中的 `root.App.main` 是 JavaScript object，不是合法 JSON：頁面 layout 會含 `tableConfigKey:undefined`。解析器不可把整段交 Jackson，更不可 eval。只做以下固定流程：
+
+1. 在 HTML 中定位唯一 marker `"quote":{"data":`，取 `data` value 的第一個 `{`。
+2. 以單次線性掃描維護 `depth`、`inString`、`escaped`；只有不在字串內的 `{`／`}` 才改變 depth。
+3. depth 第一次回到 0 時切出完整 object；EOF 前未閉合即失敗。
+4. 只把切出的 object 交 Jackson `readTree`。
+5. 驗 `systexId == requested code`、`currency == TWD`、`exchange ∈ {TAI,TWO}`；任一不符整份 unavailable。
+
+這個方法能忽略 marker 外的 `undefined`，也不會被 JSON 字串中的 braces 或 escaped quote 提前截斷。不得用數字 regex 逐欄抓值；schema 漂移時應顯式 unavailable，而不是把相鄰文字誤認成價格。
+
+`available=true` 只有一條升格路徑：身分守門通過後，`price` 與 `regularMarketPreviousClose` 節點都必須是 object 且各自的 `raw` 為正數，`orderbook` 節點必須存在且為 array；任一核心 container/key 缺失、型別不符或核心價無效，都視為 schema drift，整份 typed unavailable。核心結構完整後，其他摘要欄可依 mapping 留 null，orderbook array 可為空／不足五列並 padding，array 內單一 cell 非法也只令該 cell null。
+
+### 端到端 DTO 與算術
+
+external、business 與 browser 的 JSON 形狀一致（各 module 可各自宣告相同 record，business 只做 proxy）：
+
+```text
+QuoteDetailResult
+  stockCode: String
+  stockName: String?
+  market: String
+  supported: boolean
+  available: boolean
+  source: String?                 // YAHOO_TW
+  message: String?
+  sourceTime: String?             // quote.data.regularMarketTime ISO-8601
+  fetchedAt: String?              // external 完成解析的台北牆鐘／ISO-8601
+  marketStatus: String?           // OPEN / CLOSED / UNKNOWN
+  price, previousClose, openPrice, highPrice, lowPrice, averagePrice: BigDecimal?
+  change, changePercent, turnoverYi, amplitudePercent: BigDecimal?
+  volumeLots, previousVolumeLots: Long?
+  innerVolumeLots, outerVolumeLots: Long?
+  innerPercent, outerPercent: BigDecimal?
+  bidTotalLots, askTotalLots: Long? // server-side 五檔小計；該側全 null 才為 null
+  levels: List<OrderBookLevel>    // available 時固定 5 筆
+
+OrderBookLevel
+  level: int                      // 1..5
+  bidPrice: BigDecimal?
+  bidVolumeLots: Long?
+  askPrice: BigDecimal?
+  askVolumeLots: Long?
+```
+
+欄位 mapping 與單位：
+
+| DTO | Yahoo `quote.data` | 規則 |
+|---|---|---|
+| `stockName` | `symbolName` | 空白時為 null |
+| `sourceTime` | `regularMarketTime` | ISO-8601 原值；缺失時為 null，不以抓取時間代替 |
+| `marketStatus` | `marketStatus` | `open` → `OPEN`；正式收盤 token `close` → `CLOSED`；相容接受 `closed` → `CLOSED`；其餘 `UNKNOWN` |
+| `price` | `price.raw` | 正數 |
+| `previousClose` | `regularMarketPreviousClose.raw` | 正數 |
+| `open/high/low` | 各 `raw` | 正數 |
+| `averagePrice` | `avgPrice` | 正數 |
+| `change` | `change.raw` | 保留正負，可為 0 |
+| `changePercent` | `changePercent` | 去 `%`，保留正負 |
+| `turnoverYi` | `turnoverM` | `turnoverM / 100`；百萬元轉億元 |
+| `volumeLots` | `volumeK` | 非負整數，單位張 |
+| `previousVolumeLots` | `previousVolumeK` | 非負整數，單位張 |
+| `inner/outerVolumeLots` | `inMarket/outMarket` | 非負整數，單位張 |
+| 五檔價量 | `orderbook[0..4]` | `bid/ask` 正數；`bidVolK/askVolK` 非負 |
+
+`amplitudePercent = (highPrice - lowPrice) / previousClose * 100`，僅三值齊全、昨收正數且 high≥low 時計算，scale 2、`HALF_UP`。內外盤百分比只用可分類成交：`classified = inner + outer`；`innerPercent = inner/classified*100`、`outerPercent = outer/classified*100`，scale 2、`HALF_UP`。因此兩者加總為 100.00（四捨五入尾差由 outer 可用 `100-innerPercent` 收斂），而 `classified` 可以小於總量；不得把中性成交硬分配進內盤或外盤。來源 orderbook 少於五筆時 pad 成五筆；單一 cell 違規只令該 cell null，不把 null 變 0。external mapper 在固定五列完成後，分別計算 `bidTotalLots/askTotalLots`：該側五格全 null 回 null，否則只加總非 null 值。兩個 server-ready 小計隨同一 DTO 經 business／exact BFF 原樣轉交，frontend 不再從陣列衍生。
+
+`fetchedAt` 是 external 完成解析時記錄的台北牆鐘 ISO-8601，只供診斷抓取時點。Yahoo 現行正式收盤 token 是 `close`；`closed` 僅作相容輸入，兩者都映為 `CLOSED`。`sourceTime` 原樣回 ISO-8601，frontend 用瀏覽器 `Asia/Taipei` 格式化。休市資料仍顯示來源最後時點，但徽章明確為「收盤」；時間缺失顯示「時間不明」，不能以 `fetchedAt` 或瀏覽器現在時間替代來源時間。
+
+### Fail-soft 回應
+
+非台股／`0000`：`supported=false, available=false, levels=[]`，不外呼。在 BFF 與 business 仍可服務時，支援標的遇 Yahoo timeout／HTTP、body size、marker、balanced scan、Jackson、身分驗證或 external upstream 服務錯誤，端到端維持 HTTP 200：
+
+```json
+{
+  "stockCode": "00697B",
+  "market": "台股",
+  "supported": true,
+  "available": false,
+  "source": "YAHOO_TW",
+  "message": "暫時無法取得行情五檔",
+  "levels": []
+}
+```
+
+純 Gateway passthrough 不承諾在 business 或 BFF 本身失聯時仍產生 HTTP 200；這兩種基礎服務故障維持標準 5xx／網路失敗。`bffApi.stockAnalysis.getQuoteDetail` 必須帶 `skipErrorToast: true`，讓所有 HTTP／decode 錯誤只在新頁籤的局部 state 顯示可重試錯誤，不觸發全域 `ElMessage.error`。log 可記 exception 類型與 code，但 browser message 不包含 raw HTML、完整外部 URL、stack trace 或 exception message。任何失敗都只更新 `quoteDetail` state，不清空 `series`、`intradayTicks` 或 `dividendHistory`。
+
+### Frontend layout 與狀態
+
+新增獨立 `quoteDetail`／`quoteDetailLoading` state；`onOpen()` 重設它，仍以 `chart` 為預設 tab。`onTabChange('quote-detail')` 只在尚未成功／尚未 loading 時抓一次；重新整理按鈕直接重抓。摘要為 CSS grid 兩欄，窄螢幕降為一欄。固定 label 順序如下：
+
+```text
+成交       昨收
+開盤       漲跌幅
+最高       漲跌
+最低       總量
+均價       昨量
+成交金額(億) 振幅
+```
+
+成交／開／高／低以昨收比較決定紅綠；均價、昨收中性。漲跌／漲跌幅依 sign 顯示 `▲`／`▼`。格式化 helper 必須用 `value == null` 判缺，不能用 `!value`，以免 0 顯示成 `—`。
+
+內外盤條用 `innerPercent/outerPercent`，兩者皆 null 時顯示無分類資料。orderbook header 為「量／委買價／委賣價／量」，五列固定。bid 與 ask 各自取自身五檔最大量作 bar denominator；denominator 0 時 bar width 0，這個百分比寬度只屬畫面呈現。小計直接顯示 response 的 `bidTotalLots/askTotalLots`；null 顯示 `—`，frontend 不從 `levels[]` 聚合。頁籤上方顯示來源、狀態、source time 與重新整理入口。
+
+### 驗證
+
+external parser 測試使用完整 script fixture，其中 marker 外保留 `undefined`，marker 內含字串 braces／escaped quote；另涵蓋 TAI、TWO、mapping／算術／padding、`bidTotalLots/askTotalLots` 的全 null、局部 null 與合法 0、`open/close/closed/unknown` 四種 status、身分 mismatch、oversize、missing marker、unbalanced／malformed JSON、非台股零外呼。client 注入固定 `Clock`，釘住 `fetchedAt` 的台北 ISO-8601 值；缺 `regularMarketTime` 時 `sourceTime` 必須維持 null，不得以 `fetchedAt` 代替。backend 成功 passthrough fixture 以不同的兩側 totals 證明原值不變，另驗失敗 typed unavailable、controller constraint；BFF 釘住 exact route rewrite。frontend 新增可直接執行的 Node 測試 `frontend/src/utils/stockAnalysisDialog.contract.test.js`，由 `npm test` source-contract assert 兩個 Requirements 的 tab、資料來源禁用邊界、五檔與 K 圖契約；其中五檔小計必須直接讀 response `bidTotalLots/askTotalLots`，並以限縮於 quote-detail 小計分支的 assertion 禁止從 `levels[]` 呼叫 `reduce`。production build 亦須通過；不為單一元件引進另一套 runner。
+
+runtime 依 external → business → BFF → frontend 順序重建／recreate，上游每次換 IP 後 restart BFF。瀏覽器以 `00697B`、一檔 `TAI`、一檔 `TWO` 實際開 tab，核對 12 格、內外盤與五檔小計；再驗美股／英股沒有 tab、原走勢圖仍能切指標／期間。驗證期間釘住四個 image SHA，結論前再確認未被其他 worktree 重建覆蓋。
+
+## Requirement 92／Task 355：股票分析價格圖的日 K／週 K
+
+### UI 模式與既有行為邊界
+
+走勢圖控制列新增 `chartMode = line | daily-candle | weekly-candle`，顯示「走勢線／日 K／週 K」，預設 `line`。不新增 tab 或 popup。`line` 的現有分時、日線、MA、技術指標、最高最低與成本線全部維持；K 模式只替換資料 frame 與上圖的價格 series。
+
+「當日」是分鐘 tick 折線的專屬期間：
+
+```text
+line          → 期間可選 當日、1月、3月、1年、2年、3年、5年、10年
+daily-candle  → 期間可選      1月、3月、1年、2年、3年、5年、10年
+weekly-candle → 期間可選      1月、3月、1年、2年、3年、5年、10年
+```
+
+從 `months=0` 切到任一 K 模式時把 months 設為 12；切 K 模式時清除 `zoomPct`。切回 line 不自動跳當日，保留目前非零期間；使用者主動點「當日」時 line 模式維持／恢復。這避免把分鐘 tick 假聚合成未要求的分鐘 K，也避免 0 月範圍在日／週 frame 產生空窗。
+
+### chart-series 契約
+
+business `/api/market-data/history/stock` 本來已回 `StockPriceHistory` 的 O/H/L/C。BFF `PricePointDto` 從只讀 `(tradingDate,closePrice)` 擴為：
+
+```java
+record PricePointDto(
+    String tradingDate,
+    BigDecimal openPrice,
+    BigDecimal highPrice,
+    BigDecimal lowPrice,
+    BigDecimal closePrice) {}
+```
+
+既有 `ChartSeriesDto` top-level 原封保留 `dates/prices/ma*/indicator*/latest`，`prices` 仍是 close 的相容名稱，走勢線 consumer 不變；新增兩個 BFF server-ready frame：`DailyFrame daily` 與 `WeeklyFrame weekly`。兩者都是自足同軸 frame：
+
+```text
+dates, opens, highs, lows, closes
+ma5, ma20, ma60, ma240
+k, d, j9, k3d2, rsv
+ema12, ema26, dif, macd, osc
+rsi5, rsi10, bias10, bias20, b10b20, wr9
+currentClose, previousClose
+latest
+```
+
+兩個 frame 的 `currentClose/previousClose` 由各自最後兩根有效 candle 產生。`latest` 沿用既有 `ChartSeriesDto.Latest` 的**實際欄位**：MA5/20/60/240 只有 current；K/D/J9/K3D2/RSV、EMA12/26、DIF、MACD、RSI5/10、BIAS10/20、B10B20、WR9 才有既有 `prev*`；OSC 只有 current 且不進 legend。`daily.latest` 的 current 取 cutoff date 同欄，prev 各自向前找最後 non-null；`weekly.latest` 的 current/prev 取最後／前一 weekly row 同欄。line 繼續用 top-level `latest`，保留 indicator-only 尾日語意。frontend 只讀 frame，不計算 cutoff、date join 或 latest/prev。
+
+### 日 candle 正規化
+
+`ChartSeriesAligner.align(prices, indicators, requestedStart)` 先建立相容的 top-level line frame，再對每個 `PricePointDto` 做單一純函式 `validCandle` 以建立 `daily`：
+
+```text
+O,H,L,C != null
+O,H,L,C > 0
+H >= max(O,C)
+L <= min(O,C)
+H >= L
+```
+
+合法時 `daily` O/H/L/C 寫值；不合法時四欄全 null。BFF 找最後 valid candle index，`daily` 的 dates、OHLC、MA 與所有 indicator columns 一併截到該 index；中段 invalid 可保留 null 格，尾端 close-only／indicator-only row 不進 daily。`daily.currentClose/previousClose` 與 `daily.latest` 同步在 BFF 產生。若沒有任何有效 candle（prices 空、全 close-only 或全 invalid），`daily` 與 `weekly` 都必須是非 null record：所有 list 為空，`currentClose/previousClose/latest=null`。top-level `prices` 仍原樣保留 close。禁止以 close、昨收或鄰日價格補 O/H/L。
+
+### ISO 週聚合與 fail-closed
+
+週聚合只看 `priceByDate` 中實際存在且 date≥`requestedStart` 的 price rows，先按日期升冪，再以 `WeekFields.ISO.weekBasedYear()` 與 `weekOfWeekBasedYear()` 組 key。跨年週由 week-based-year 決定，不用 calendar year。若 `requestedStart` 不是星期一，與 requestedStart 相同 ISO key 的第一組一律省略；這是 query boundary 的 fail-closed 規則，避免任意十年起點截掉週一／二後把週三誤當週開。start 是星期一但當日休市時，週二起的合法短週仍可保留。
+
+每一週只有在**該週所有 price rows 都通過 `validCandle`**時才輸出：
+
+```text
+weekly.open  = first.open
+weekly.high  = max(all high)
+weekly.low   = min(all low)
+weekly.close = last.close
+weekly.date  = last.tradingDate  // 實際最後交易日，不硬填週五
+```
+
+假期短週可以只有 1–4 個有效交易日；只要所有 row 完整就合法。若盤中 history 附加 close-only today，整個當週暫不輸出，而不是忽略今天後顯示一根貌似「本週完成」的 K。資料截止因此自然停在上一個完整週。這個守門也適用歷史缺 OHLC：寧可少一週，不以子集合低估 high／高估 low。
+
+週 frame 的指標不是 weekly 公式。對每個合法週、每一個 top-level indicator column，只在該週實際 price rows 的閉區間 `[firstPriceDate, weekly.date]` 取最後一個 non-null 的**日線值**；沒有則 null。即使 indicator-only 日期仍屬同一 ISO 週，只要晚於 candle 的實際 `weekly.date` 就不得取樣。MA 亦同，`weekly.latest` 只能由這些已封頂 weekly columns 產生。這些值與 candle date 對齊後放進 weekly frame，frontend 只 render。畫面在 weekly 模式控制列顯示「技術指標為日線值的週末取樣」，防止使用者把 K9 誤認成以週 OHLC 重算 9 週 stochastic。
+
+### ECharts 組裝
+
+tree-shaking 註冊加 `CandlestickChart`。mode 決定 active frame：
+
+| mode | x/data frame | 價格 series | 指標 |
+|---|---|---|---|
+| line + 當日 | intraday minute grid | line | latest 水平值 |
+| line + 非當日 | top-level line | line | top-level line |
+| daily-candle | `daily` | candlestick | `daily` |
+| weekly-candle | `weekly` | candlestick | weekly sampled |
+
+Candlestick 的 value 固定 `[open, close, low, high]`。item style：`color/borderColor=#dc2626`（close≥open）、`color0/borderColor0=#16a34a`（close<open）。`xAxis.boundaryGap` 在 candle mode 為 true、line 為 false。tooltip 遇到「股價」candlestick 時拆成開／高／低／收四行；其餘 MA、成本與 indicator 沿用 scalar formatter。
+
+上圖的 MA5/20/60/240 與成本均價仍是 line series。daily／weekly active-frame 分支直接使用 BFF `daily`／`weekly`，不得從 candle-frame arrays 另做 cutoff、date join、valid-candle 或 prev 推導，只把 O/H/L/C 映成 ECharts value。這項禁令不影響既有 intraday 昨收搜尋、line legend `lastNonNull`、以及可視區間 Y 軸的 `.slice(lo,hi+1)`。成本均價是 dialog prop 的水平呈現線，只依 active frame x 軸 render。下圖 indicator 同理。空 frame 時 K 模式局部顯示「無完整 OHLC 資料」、資料截止留空；line／intraday 照常可用，不能 null dereference。
+
+### 縮放、極值與 legend
+
+`defaultZoomRange` 改以 active frame 的總筆數計算：line/daily-candle `want=max(20,round(months*21))`；weekly-candle `want=max(4,ceil(months*52/12))`。mode 或 months 改變即 `zoomPct=null`，之後手動 dataZoom 才覆蓋 default。
+
+line 的 mark point 繼續掃 visible close。candle mode 分別掃 active frame 的 highs 與 lows；最高 marker coord `[date, high]`，最低 `[date, low]`。資料截止取 active frame 最後 date。日／週 K 股價 legend 直接讀 frame `currentClose/previousClose`，MA／指標直接讀 frame `latest`；不得回看 top-level。成本水平線值不隨 mode 改變。
+
+### 測試與 runtime
+
+`ChartSeriesAlignerTest` 新增 table-driven daily／weekly tests：合法日、中段 invalid、尾端 close-only/indicator-only、daily 全欄 cutoff、兩個 frame 的 currentClose/previousClose 與 `Latest` 實際 current/prev 欄位、一般週、假期短週、ISO 跨年週、壞日省略、D＋同週 indicator-only D+1 封頂、requestedStart 週三省略首個截斷週且下一週正常、requestedStart 週一休市仍保留合法短週，以及 empty prices／全 close-only／全 invalid 都回兩個非 null 空 frame；既有 top-level 日期聯集與 latest 測試照跑。`stockAnalysisDialog.contract.test.js` source assert daily/weekly 分支直接讀 `series.daily/weekly.currentClose/previousClose/latest`、空 frame 顯示局部訊息，且只禁止 K 分支從 frame arrays 推導 cutoff/join/prev；明文 allowlist 既有 intraday 昨收、line `lastNonNull` 與可視 Y 軸 slice。另檢查三模式、Candlestick/value order、紅綠、當日互斥、tooltip 與週末取樣提示；由 `npm test` 執行，另跑 production build。
+
+runtime 只需重建 BFF／frontend；若與 Task 348 同批交付，依共同 diff 一次重建 external、business、BFF、frontend。實際以 `00697B`、一般股票與 `0000` 切三模式，抽一根日 K 對照 history O/H/L/C、抽一根週 K 手算週開高低收；再切當日，確認仍為分鐘折線。

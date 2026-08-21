@@ -29,7 +29,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 
 ---
 
-## 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–347、349–350）
+## 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–355）
 
 | Task | 標題 | 位置 |
 |---|---|---|
@@ -346,8 +346,10 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 345 | 股利歷史重複事件去重：同除息日同金額不得因發放日 metadata 分裂成兩列，年度小計與還原權息不再灌水（Requirement 13／65 bug fix） | [tasks/t345_dividend_history_duplicate_event_dedup.md](tasks/t345_dividend_history_duplicate_event_dedup.md) |
 | 346 | 台股集中／櫃買市場指數與上市櫃個股兩分鐘 Redis 報價契約（Requirement 85） | [tasks/t346_tpex_market_index.md](tasks/t346_tpex_market_index.md) |
 | 347 | 今日交易雷達 9090 公開 API 與 OpenAPI 3 全覆蓋硬規則（Requirement 86） | [tasks/t347_trading_radar_public_api_openapi.md](tasks/t347_trading_radar_public_api_openapi.md) |
+| 348 | 股票分析 popup 新增台股行情五檔頁籤（Requirement 87；Task 347 已由在途 worktree 占用） | [tasks/t348_stock_analysis_quote_depth.md](tasks/t348_stock_analysis_quote_depth.md) |
 | 349 | 台股 ETF 官方折溢價改為每 2 分鐘更新，並以 nullable 欄位併入 Docker 外部 quote API（Requirement 88；Task 348 由其他在途 worktree 保留） | [tasks/t349_etf_premium_quotes_2min.md](tasks/t349_etf_premium_quotes_2min.md) |
 | 350 | 台股 Redis 最新價日期時間單調守門、MIS 批次重試與每輪可觀測統計（Requirement 89） | [tasks/t350_tw_quote_cache_freshness.md](tasks/t350_tw_quote_cache_freshness.md) |
+| 355 | 股票分析價格圖新增日 K／週 K（Requirement 92） | [tasks/t355_stock_analysis_daily_weekly_candles.md](tasks/t355_stock_analysis_daily_weekly_candles.md) |
 
 > **註：Task 229–263、268、293–296 以各自任務檔為準。**
 

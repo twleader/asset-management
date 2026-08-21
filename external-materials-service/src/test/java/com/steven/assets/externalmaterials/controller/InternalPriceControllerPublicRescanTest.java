@@ -2,6 +2,7 @@ package com.steven.assets.externalmaterials.controller;
 
 import com.steven.assets.externalmaterials.client.MacroDataFetchClient;
 import com.steven.assets.externalmaterials.client.PriceFetchClient;
+import com.steven.assets.externalmaterials.client.TwQuoteDetailFetchClient;
 import com.steven.assets.externalmaterials.service.ClosePersister;
 import com.steven.assets.externalmaterials.service.CommodityPricePoller;
 import com.steven.assets.externalmaterials.service.DividendPersister;
@@ -43,11 +44,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class InternalPriceControllerPublicRescanTest {
 
     private NewsPoller newsPoller;
+    private TwQuoteDetailFetchClient quoteDetailClient;
     private MockMvc mvc;
 
     @BeforeEach
     void setUp() {
         newsPoller = mock(NewsPoller.class);
+        quoteDetailClient = mock(TwQuoteDetailFetchClient.class);
         InternalPriceController controller = new InternalPriceController(
                 mock(PricePoller.class),
                 mock(MarketClock.class),
@@ -70,7 +73,7 @@ class InternalPriceControllerPublicRescanTest {
                 mock(TwRadarRefreshService.class),
                 newsPoller,
                 mock(StockFundamentalPoller.class),
-                mock(CommodityPricePoller.class));
+                mock(CommodityPricePoller.class), quoteDetailClient);
         mvc = MockMvcBuilders.standaloneSetup(controller).build();
     }
 
@@ -89,5 +92,22 @@ class InternalPriceControllerPublicRescanTest {
 
         verify(newsPoller).publicRescan();
         verifyNoMoreInteractions(newsPoller);
+    }
+
+    @Test
+    void quoteDetail端點只委派client並保留typedUnavailable的200() throws Exception {
+        TwQuoteDetailFetchClient.QuoteDetailResult unavailable = new TwQuoteDetailFetchClient.QuoteDetailResult(
+                "2330", null, "台股", true, false, "YAHOO_TW", "暫時無法取得行情五檔",
+                null, null, "UNKNOWN", null, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, java.util.List.of());
+        when(quoteDetailClient.fetch("2330", "台股")).thenReturn(unavailable);
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/internal/quote-detail")
+                        .param("code", "2330").param("market", "台股"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.supported").value(true))
+                .andExpect(jsonPath("$.available").value(false))
+                .andExpect(jsonPath("$.levels").isArray());
+        verify(quoteDetailClient).fetch("2330", "台股");
     }
 }

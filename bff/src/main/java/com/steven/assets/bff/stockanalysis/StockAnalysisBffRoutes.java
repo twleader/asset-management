@@ -18,7 +18,7 @@ import org.springframework.context.annotation.Configuration;
  *
  * 走勢圖本身的資料不在這裡：它要把股價與技術指標兩支上游 join 起來（aggregation），
  * 由 {@link StockAnalysisChartBffController} 的 /api/bff/stock-analysis/chart-series 提供（Task 261）。
- * 本檔的五條 route 皆為精確路徑、不含萬用，不會攔截到該 controller。
+ * 本檔的六條 route 皆為精確路徑、不含萬用，不會攔截到該 controller。
  */
 @Configuration
 public class StockAnalysisBffRoutes {
@@ -61,6 +61,12 @@ public class StockAnalysisBffRoutes {
                         .filters(f -> f.rewritePath(
                                 "/api/bff/stock-analysis/backfill-stock",
                                 "/api/market-data/history/backfill-stock"))
+                        .uri(businessServicesUrl))
+                .route("stock-analysis-quote-detail", r -> r
+                        .path("/api/bff/stock-analysis/quote-detail")
+                        .filters(f -> f.rewritePath(
+                                "/api/bff/stock-analysis/quote-detail",
+                                "/api/market-data/quote-detail"))
                         .uri(businessServicesUrl))
                 .build();
     }
