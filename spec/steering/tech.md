@@ -217,6 +217,7 @@ cd frontend
 | Cron | 時區 | 內容 | 所在 service |
 |------|------|------|--------------|
 | 每 2 分鐘（TW 09:00–13:30 週一～五） | Asia/Taipei | 台股 live → Redis | external-materials |
+| `0 1/2 9-13 * * MON-FRI`（實際守門 09:01–13:29） | Asia/Taipei | 台股 ETF 官方 iNAV／折溢價 → `price:etfnav:*`（與股價錯開，仍為每 2 分鐘） | external-materials |
 | 每 2 分鐘（US 09:30–16:00 週一～五） | America/New_York | 美股 live → Redis（含 EST/EDT 切換） | external-materials |
 | 13:35 收盤後 | Asia/Taipei | 台股收盤寫 `stock_price_history` | external-materials |
 | 16:05 收盤後 | America/New_York | 美股收盤寫 `stock_price_history` | external-materials |

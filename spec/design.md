@@ -633,14 +633,14 @@ POST /internal/repair/history?market=%E5%8F%B0%E8%82%A1&from=2026-06-01&to=2026-
 
 > `PublicQuoteController` 的「公開」只表示 operation 本身不要求 OAuth／session；network topology 仍是內網服務。Task 328 移除 `external-materials-service` 的 host port，故 host 不再能繞過 gateway 直連同 process 的 `/internal/*`。外部工具只能經 `api-gateway:9090` 的兩條 exact quote route，其他 `/internal/*` 永遠不在 allowlist。
 
-`PriceCacheReader`（新 service，與既有 `PriceCacheWriter` 同包、職責相反——只讀不寫）唯讀 Redis `price:{market}:{code}` 與 `price:index:{market}`（見上方「Redis key schema」），不觸發外部抓取、不寫入 Redis、不寫入資料庫、不 `PUBLISH price-update`。
+`PriceCacheReader`（與既有 `PriceCacheWriter` 同包、職責相反——只讀不寫）唯讀 Redis `price:{market}:{code}` 與 `price:index:{market}`；Task 349 起在價格 payload 合法後，再 best-effort join 相同代號的既有 `price:etfnav:{market}:{code}`，只轉交其中來源直接提供的 `premiumDiscountPct`。任何 NAV key 缺失、格式錯誤或局部讀取失敗都只令新欄為 `null`，不丟棄有效報價。整條路徑不觸發外部抓取、不寫入 Redis、不寫入資料庫、不 `PUBLISH price-update`。
 
 | Method | Path | 說明 |
 |--------|------|------|
 | GET | `/api/quotes?market=` | 列出目前 Redis 快取的所有最新報價；`market` 選填（`台股`／`美股`／`英股`其一），省略時回三市場全部（含 `price:台股:0000` 大盤——與個股共用同一 key schema，見上方「Redis key schema」）。查無快取（Redis 為空）回**空陣列**，非錯誤 |
-| GET | `/api/quotes/one?code=&market=` | 查詢單一標的最新報價，`code`／`market` 皆必填（缺一由 Spring 綁定層回 400）。Redis 命中回 200 + 報價 JSON；cache miss 回 **204 No Content**——**不** fallback 查 DB、**不**觸發抓取，與 `/internal/*` 既有帶 cold-start 副作用的端點（例如 `/internal/intraday-ticks`）刻意不同語意，維持「唯讀當前快取」的單純契約 |
+| GET | `/api/quotes/one?code=&market=` | 查詢單一標的最新報價，`code`／`market` 皆必填（缺一由 Spring 綁定層回 400）。價格 Redis 命中回 200 + 報價 JSON；價格 cache miss 回 **204 No Content**。matching ETF NAV cache miss／錯誤不改 status，只讓 `premiumDiscountPct=null`。全程**不** fallback 查 DB、**不**觸發抓取，與 `/internal/*` 既有帶 cold-start 副作用的端點（例如 `/internal/intraday-ticks`）刻意不同語意 |
 
-回應 JSON 欄位（`LatestQuote` record）：`stockCode`／`market`／`price`／`previousClose`／`priceChange`／`changePercent`／`buyPrice`／`sellPrice`／`openPrice`／`highPrice`／`lowPrice`／`volume`／`stockName`／`source`／`tradingDate`／`updatedAt`／`closed`／`quoteStatus`，逐欄語意與型別比照 `backend` 端 `PriceQueryService.LivePrice`（同一份 Redis JSON 的另一個消費端；僅欄位集合與型別對齊，`LatestQuote` 宣告順序逐欄比照 `LivePrice` 一致）。解析採手動 `JsonNode` 逐欄讀取（比照 `PriceQueryService.parse()` 的 `text()`/`bd()` helper 風格），不依賴 Jackson record 自動反序列化——本模組 `maven-compiler-plugin` 未開 `-parameters`，直接 `mapper.readValue(json, LatestQuote.class)` 在缺 `ParameterNamesModule` 時無法還原 constructor 參數名而失敗，全庫既有的 Redis JSON 解析（`PriceCacheWriter.writeVerifiedClose`／`syncClosedFromDb`、`PriceQueryService.parse`）也一律採手動解析，本端點沿用同一模式。
+回應 JSON 欄位（`LatestQuote` record）共 19 欄：`stockCode`／`market`／`price`／`previousClose`／`priceChange`／`changePercent`／`buyPrice`／`sellPrice`／`openPrice`／`highPrice`／`lowPrice`／`volume`／`stockName`／`source`／`tradingDate`／`updatedAt`／`closed`／`quoteStatus`／`premiumDiscountPct`。前 18 欄語意與型別比照 `backend` 端 `PriceQueryService.LivePrice`；最後一欄是 nullable `BigDecimal` 百分點，只取 matching `price:etfnav:*` payload 的同名來源欄位，正數為溢價、負數為折價，不由 quote price 與 NAV 重算。即使值為 `null`，property 仍固定出現在 list／one JSON。解析維持手動 `JsonNode` helper，不依賴 Jackson record 自動反序列化。
 
 **與 `/api/market-data/prices`（business-services，經 BFF，`StockPriceService.getAllPrices` → `PriceQueryService.getAllDisplayPrices`／`getDisplayPrice` 依市場階段解析——台股另有 session-phase 與 `close_source` 信任來源過濾，僅非台股標的才退化為 `getLive`，見「Live 行情（Redis）」段落對 `getLive`／`getDisplayPrice` 分工的既有記載）語意不同**：本端點純讀 Redis、無上述 display-phase 邏輯與 DB fallback，`/api/quotes/one` 的 204 就是唯一的「查無」訊號——維運者查詢兩者查到不同結果是預期行為（display 路徑可能給出信任來源過濾後的收盤值，本端點缺 cache 就是 204），不代表系統異常。
 
@@ -3575,7 +3575,7 @@ GET  /api/bff/asset-history/export                    → GET  /api/snapshots/ex
   | 抓取（台股） | `client/EtfNavFetchClient.fetchTwAll()` | 一次 GET 證交所 `all_etf.txt`（全市場約 350 檔，含上市＋上櫃），Java HttpClient ＋ `Referer`，比照 `PriceFetchClient` |
   | 抓取（美股） | `MarketDataFetchService.getUsEtfNav(symbol)` | Yahoo `quoteSummary?modules=summaryDetail,price`；**沿用既有 `getYahooCrumb()` 單一入口**，不另取 crumb（各處自取會互相打成 429） |
   | 寫入 | `service/EtfNavCacheWriter` | `price:etfnav:{market}:{code}`，String JSON，**TTL 96h** |
-  | 排程 | `service/EtfNavPoller` | 台股交易時段每 5 分鐘（`0 2/5 9-13 * * MON-FRI` TPE）；美股 `0 30 18 * * MON-FRI` NYC；＋開機 warmup ＋ `POST /internal/etf-nav/refresh` |
+  | 排程 | `service/EtfNavPoller` | 台股交易時段每 2 分鐘（`0 1/2 9-13 * * MON-FRI` TPE，與偶數分鐘股價 producer 錯開）；美股 `0 30 18 * * MON-FRI` NYC；＋開機 warmup ＋ `POST /internal/etf-nav/refresh` |
   | 讀取 | `PriceQueryService.getEtfNav()` | 回 `Optional<EtfNav>`；**刻意不 fallback DB**（淨值不在 `stock_price_history`，且「查無」是個股的正常狀態） |
   | 呈現 | `ExcelExportService.writeLiveAssetsSheet` | 欄 18 淨值(`num4`)／19 折溢價(%)(`num2`)／20 淨值時間(字串)；`autoSizeColumn` 上界 18→**21** |
 
@@ -3694,7 +3694,7 @@ pct_origin VARCHAR(20)`。不回填既有 186 列（皆為 `TWSE`／`Yahoo Finan
 | `etfPremiumLiveNavAsOf`（**新增**） | 該即時淨值的資料時點 | 同上的 `navAsOf` 欄 | 否 |
 
 - **不得合併成一欄**：把即時值餵回 `etfPremiumPct` 等於讓未完成 session 的 NAV 進入 veto，破壞
-  point-in-time 正確性，且盤中每 5 分鐘就讓同一決策日的 veto 結果漂移一次。兩欄在盤中本來就會不同，
+  point-in-time 正確性，且 Task 349 起盤中每 2 分鐘就會讓同一決策日的 veto 結果漂移一次。兩欄在盤中本來就會不同，
   這是預期行為，畫面上以 `折溢價(即時)`／`折溢價(完成日)` 兩個標題明確區分，不得同名。
 - **取值分流沿用既有那份、不得複製第二份**：「台股直取證交所權威值／美股以該列現價反推／缺值回 null」
   這組分流已存在於 `ExcelExportService.premiumDiscountPct(nav, livePrice)`（Requirement 34）。Task 320
@@ -7969,3 +7969,57 @@ PricePoller.scheduledUsIntradayUpdate
 4. Docker：無快取重建並 recreate external、business、BFF、frontend；上游重建後 restart BFF。畫面查證主圖與排程匯出兩個下拉的前兩項，並查證 TPEX 10 年非空。Authenticated legacy endpoint 驗非空等長陣列、起訖日、`hasVolume=true`、至少一筆 `volume>0` 且 `turnovers` 全 null（它無 market/range/label）；host public API 另查 `market`、`range`、`marketLabel`、相同量能不變式、起訖日與筆數，DB 的 TPEX 亦至少一列正 volume。
 
 若部署驗收時台股或美股已休市，不繞過 `MarketClock` 製造 LIVE 寫入；兩分鐘 producer 的時段行為以 cron reflection、fixture 與既有 Redis writer 測試為證，實機只做官方路由唯讀查詢並明載時段限制。
+
+## Requirement 88／Task 349：ETF 官方折溢價兩分鐘排程與 quote API 唯讀 join
+
+### 排程與來源
+
+台股 ETF NAV producer 保留既有「一輪一個全市場 request」架構，只調整觸發節拍：
+
+```text
+EtfNavPoller.scheduledTwUpdate
+  cron 0 1/2 9-13 * * MON-FRI, Asia/Taipei
+  → MarketClock.isTwMarketOpen()
+  → EtfNavFetchClient.fetchTwAll() 一次 GET all_etf.txt
+  → collectHeldStockCodes 過濾持股／觀察代碼
+  → EtfNavCacheWriter.write
+       price:etfnav:台股:{code}, TTL 96h
+       premiumDiscountPct = 官方 g 欄原值或 null
+```
+
+`0 1/2` 代表奇數分鐘，實際成功時窗為交易日 09:01–13:29；偶數分鐘的 `PricePoller` 維持 `0 0/2`。錯開一分鐘只是降低同秒外部工作競爭，不改變兩支 producer 各自「每 2 分鐘」的頻率，也不宣稱 price tick 與 NAV tick 同時點。`MarketClock` 仍是國定假日、臨時休市與 13:30 邊界的真實守門。美股、17:30 台股收盤後補抓、warmup 與手動 refresh 不變。`SchedulePublicBffController.JOBS` 同步成相同 cron 與「交易日 09:01–13:29 每 2 分鐘」；job 筆數不變。
+
+來源資料只認 `all_etf.txt` 的 `g`。`f` 的 iNAV 可正常存在而 `g` 缺漏，此時 cache 的 `premiumDiscountPct` 缺欄／為 null 都是合法狀態；任何 consumer 都不得用 `price`、`f` 或 T-1 NAV 重建它。上市與上櫃由同一份全市場檔涵蓋，不新增另一支 TPEX request。
+
+### `LatestQuote` 的 fail-soft enrichment
+
+`PriceCacheReader.findOne(code, market)` 分成兩個錯誤邊界：
+
+```text
+讀 price:{market}:{code}
+  ├─ missing／malformed ─→ Optional.empty（one=204；list 略過）
+  └─ valid
+       └─ best-effort 讀 price:etfnav:{market}:{code}
+            ├─ valid numeric premiumDiscountPct ─→ 原值
+            └─ missing／malformed／missing field／Redis exception ─→ null
+       → LatestQuote（有效報價永遠保留）
+```
+
+NAV enrichment 使用獨立的窄 `try/catch`，不得把 price 解析與 NAV 解析包成同一個失敗域。它只讀同名欄位，不讀 `nav` 做算術，也不呼叫 `EtfLivePremiumCalculator`；後者是 business-services 的畫面／匯出語意，公開 external quote API 的契約則是「來源欄位原樣揭露」。因此一般股票為 null；Yahoo payload 沒有官方折溢價，美股 ETF 也為 null。
+
+`LatestQuote` 在既有 18 欄後加入 `BigDecimal premiumDiscountPct`。Jackson 對 record 的 null member 必須維持 property 輸出，讓 clients 能區分「契約沒有這個欄」與「本筆沒有來源值」。list 與 one 共用 `findOne`，不得在 controller 複製 join。這個變更不碰 `PriceCacheWriter`、`price-update`、DB、Nginx route 或 gateway。
+
+### OpenAPI 與 freshness
+
+OpenAPI 3.1 的 `LatestQuote.required` 加入 `premiumDiscountPct`，property 為 `type: [number, 'null']`。說明與 examples 必須明記：
+
+- 數值單位是百分點，`0.07` 表示溢價 0.07%，負值表示折價。
+- 它只轉交既有 ETF NAV cache 的來源值，缺值不重算。
+- ETF NAV cache TTL 為 96 小時，而價格 cache TTL 為 24 小時；兩個 producer 亦錯開執行。
+- `updatedAt` 與 `tradingDate` 仍屬 price payload，不能當作折溢價的 as-of。因需求只核准新增一欄，本次不再擴 `navAsOf`。
+
+### 驗證設計
+
+external 單元測試以 reflection 釘住 `scheduledTwUpdate` 的 cron／zone，並為 `PriceCacheReader` 提供 matching、missing、malformed、missing field、非數字與 Redis exception fixtures；其中「price 與 nav 皆存在、premium 缺失」必須斷言 null，直接證明沒有反推。controller 測試同時釘住 list／one 的 property presence 與正確值。BFF 測試釘住排程 catalog 的 cron、friendly schedule、描述及總數。OpenAPI 以 YAML parse 與 schema assertions 驗 19 欄／nullable required property。
+
+runtime 無快取重建並 recreate external 與 BFF，external 換容器後 restart BFF。開盤中跨兩輪觀察約 2 分鐘節拍；休市時不可越過 `MarketClock`，只驗 cron、既有 official cache 與兩支 host API 的 shape，並將無法觀察 live cadence 列為時段限制。

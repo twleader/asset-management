@@ -19,9 +19,9 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * ETF 淨值／折溢價排程抓取（Task 214）：抓外部 → 寫 Redis，供 business-services 的資產總覽匯出取用。
+ * ETF 淨值／折溢價排程抓取（Task 214／349）：抓外部 → 寫 Redis，供資產總覽匯出與公開 quote API 取用。
  *
- * <p><b>台股</b>：每 5 分鐘（09-13 時、交易時段 guard）打證交所 {@code all_etf.txt}。該檔一次回全市場 350 檔，
+ * <p><b>台股</b>：每 2 分鐘（09-13 時、交易時段 guard）打證交所 {@code all_etf.txt}。該檔一次回全市場 350 檔，
  * 故不論持有幾檔都只是<b>一個 request</b>——刻意不逐檔查詢，對來源最友善。
  *
  * <p><b>美股</b>：淨值一天只公告一次（收盤後），故只在美東 18:30 抓一次，逐檔打 Yahoo quoteSummary。
@@ -60,8 +60,8 @@ public class EtfNavPoller {
         }, "etf-nav-warmup").start();
     }
 
-    /** 台股盤中每 5 分鐘：證交所 iNAV 每 15 秒更新，5 分鐘一次足夠且對來源友善。 */
-    @Scheduled(cron = "0 2/5 9-13 * * MON-FRI", zone = "Asia/Taipei")
+    /** 台股盤中每 2 分鐘：奇數分鐘執行，與偶數分鐘的股價排程錯開。 */
+    @Scheduled(cron = "0 1/2 9-13 * * MON-FRI", zone = "Asia/Taipei")
     public void scheduledTwUpdate() {
         if (!enabled || !clock.isTwMarketOpen()) return;
         refreshTw();

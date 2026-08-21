@@ -74,6 +74,23 @@ class SchedulePublicBffControllerTest {
     }
 
     @Test
+    @DisplayName("台股 ETF 淨值折溢價與股價錯開，每兩分鐘只打一個全市場 request（Task 349）")
+    void 台股ETF淨值折溢價排程契約() {
+        assertThat(jobs()).filteredOn(j -> "台股 ETF 淨值折溢價".equals(j.name()))
+                .singleElement()
+                .satisfies(job -> {
+                    assertThat(job.service()).isEqualTo("外部行情服務");
+                    assertThat(job.category()).isEqualTo("ETF淨值");
+                    assertThat(job.name()).isEqualTo("台股 ETF 淨值折溢價");
+                    assertThat(job.description()).isEqualTo(
+                            "盤中每 2 分鐘以一個證交所全市場 ETF 彙整檔 request，取即時預估淨值與折溢價寫入 Redis（Task 214／349）");
+                    assertThat(job.schedule()).isEqualTo("交易日 09:01–13:29 每 2 分鐘");
+                    assertThat(job.cron()).isEqualTo("0 1/2 9-13 * * MON-FRI");
+                    assertThat(job.zone()).isEqualTo("Asia/Taipei");
+                });
+    }
+
+    @Test
     @DisplayName("USD/TWD 2 秒排程明列全天 tick、銀行時段、single-flight 與 Redis-only")
     void 美元台幣即時排程契約() {
         assertThat(jobs()).filteredOn(j -> "USD/TWD 即時牌告（2 秒）".equals(j.name()))
