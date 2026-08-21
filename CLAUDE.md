@@ -291,6 +291,9 @@ skill 有沒有自己宣告：`/commit-merge-push` 沒宣告 → 繼承主 agent
   （Requirement 86 / Task 347；owner 同樣走 configured-admin，且不得寫入匯出 snapshot）。
 - `bff` 與 `external-materials-service` 不發布 host port；`frontend:80` 對上述九條回 `404`，
   瀏覽器登入 API 與 SPA 仍經 frontend → BFF。
+- **9090／Tailscale 同步鐵則：**凡掛載到 Nginx `api-gateway:9090` 的 API，都必須在同一變更中
+  掛載到 Tailscale Serve HTTPS `:9090` 的同名 exact path；新增、修改或移除 9090 路由時，必須同步
+  更新 Tailscale 設定腳本與回歸測試，禁止存在只供 loopback 9090 使用、未掛到 Tailscale 的 API。
 - Tailscale Serve 只以 path-scoped HTTPS `:9090` 掛相同九條 exact path，包含 USD/TWD 公開匯率
   與第六條寫入路由。禁止 root／`/api/` proxy、Funnel、自簽憑證與另一層 OAuth proxy。
 - 每一條掛載到 9090 的 API 都必須在 `docs/openapi/docker-external-api.yaml` 提供完整、可驗證的
