@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
+import java.time.LocalDate;
 import java.util.Collections;
 import java.util.List;
 
@@ -24,7 +25,7 @@ import java.util.List;
  * 指標側則比照 computeAll() 併入）。此跨來源 join 屬 aggregation，依 CLAUDE.md
  * 「BFF 負責跨服務 aggregation、預先計算，前端只負責 render」必須在這裡完成。
  *
- * 與同前綴的 {@link StockAnalysisBffRoutes} 五條 Gateway route 並存不衝突：那些 route
+ * 與同前綴的 {@link StockAnalysisBffRoutes} 六條 Gateway route 並存不衝突：那些 route
  * 皆為精確路徑（無萬用），且 WebFlux RequestMappingHandlerMapping（order 0）本就先於
  * Gateway RoutePredicateHandlerMapping（order 1）。同一模式的既有先例為
  * StockAlertBffController ＋ StockAlertBffRoutes。
@@ -85,7 +86,8 @@ public class StockAnalysisChartBffController {
                     return Mono.just(Collections.emptyList());
                 });
 
+        LocalDate requestedStart = LocalDate.parse(start);
         return Mono.zip(pricesMono, indicatorsMono)
-                .map(t -> ChartSeriesAligner.align(t.getT1(), t.getT2()));
+                .map(t -> ChartSeriesAligner.align(t.getT1(), t.getT2(), requestedStart));
     }
 }

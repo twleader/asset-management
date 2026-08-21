@@ -237,6 +237,7 @@ skill 有沒有自己宣告：`/commit-merge-push` 沒宣告 → 繼承主 agent
 - **依賴反轉**：業務邏輯依賴抽象（interface），不依賴具體實作。外部系統（行情 API、Redis、Excel 解析）以介面隔離，實作放在最外層，方便替換與測試。
 - **領域模型獨立**：Entity / 領域物件不得依賴 Web 層（HttpServletRequest、DTO 等）；DTO 與 Entity 分離，不得把 JPA Entity 直接當 API 回傳格式。
 - **跨層禁令**：前端不得直接呼叫 business service（一律走 BFF，見下方 BFF 規範）；business service 不得直連外部行情 API（即時價走 Redis、收盤價走 `stock_price_history`）。
+- **具名、限縮的行情五檔資料來源例外（Requirement 87／Task 348）**：登入後跨頁共用 `StockAnalysisDialog` 的「行情五檔」可由使用者第一次切頁或按「重新整理」時，經頁面專屬 exact BFF → business proxy → `external-materials-service` request-time 抓一份 Yahoo 台股摘要＋orderbook 的同時間點展示 snapshot。這份資料**不是本系統的權威即時價**，不得供估值、損益、下單、警示、SSE、`/api/quotes*`、9090 公開 API 或其他 consumer 使用；business 只 proxy／fail-soft，不直連 Yahoo，外部 IO 仍只在 external。此展示 snapshot 不進 Redis／DB、不背景輪詢；其 `price` 只在該頁籤內與同一份五檔一起呈現，不得取代既有 Redis 即時價或 `stock_price_history` 收盤價。
 - **可測試性**：業務邏輯必須能在不啟動 Spring context、不連資料庫的情況下單元測試。
 
 ### 資料庫完整正規化
@@ -321,9 +322,9 @@ cd frontend
 
 | 文件 | 說明 |
 |------|------|
-| `spec/requirements.md` | User Stories + Acceptance Criteria（91 個 Requirements；Requirement 87 由在途 worktree 保留，最新為 92） |
+| `spec/requirements.md` | User Stories + Acceptance Criteria（93 個 Requirements；最新為 93） |
 | `spec/design.md` | 架構圖、ERD、API 端點、關鍵業務邏輯 |
-| `spec/tasks.md` | 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–347、349–350、355）＋尚未歸檔的 Task 201 起區段；Task 229–263、268、293–296 以各自 `spec/tasks/tNNN_*.md` 為準；Task 348 仍由在途 worktree 保留，Task 351（交易日曆）、Fubon Task 352–353、Task 354（DGPA 暫行日曆）與 Task 355（雷達三軌＋週K）均採一檔一任務 |
+| `spec/tasks.md` | 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–356）＋尚未歸檔的 Task 201 起區段；Task 229–263、268、293–296 以各自 `spec/tasks/tNNN_*.md` 為準 |
 | `spec/tasks/README.md` | 自足任務檔規範（新任務寫這裡，不再追加 `tasks.md`） |
 | `spec/tasks/tNNN_*.md` | 自足任務檔（Task 201 之後的新任務） |
 | `spec/tasks/archive/` | Task 1–200 歷史，已凍結不再修改 |

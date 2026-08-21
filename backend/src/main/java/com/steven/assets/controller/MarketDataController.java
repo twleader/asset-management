@@ -6,6 +6,7 @@ import com.steven.assets.model.StockPriceHistory;
 import com.steven.assets.service.DividendHistoryService;
 import com.steven.assets.service.HistoricalDataService;
 import com.steven.assets.service.MarketDataService;
+import com.steven.assets.dto.QuoteDetailDto;
 import com.steven.assets.service.PriceStreamService;
 import com.steven.assets.service.StockPriceService;
 import jakarta.validation.constraints.Pattern;
@@ -67,6 +68,14 @@ public class MarketDataController {
             @RequestParam @Pattern(regexp = CODE_PATTERN, message = "股票代號格式不合法") String code,
             @RequestParam @Pattern(regexp = MARKET_PATTERN, message = "市場別格式不合法") String market) {
         return ResponseEntity.ok(marketDataService.getDividendRate(code, market));
+    }
+
+    /** 行情五檔展示的 Yahoo 同時間點 snapshot；controller 僅驗參數並代理。 */
+    @GetMapping("/quote-detail")
+    public ResponseEntity<QuoteDetailDto.Response> getQuoteDetail(
+            @RequestParam @Pattern(regexp = CODE_PATTERN, message = "股票代號格式不合法") String code,
+            @RequestParam @Pattern(regexp = MARKET_PATTERN, message = "市場別格式不合法") String market) {
+        return ResponseEntity.ok(marketDataService.getQuoteDetail(code, market));
     }
 
     /**

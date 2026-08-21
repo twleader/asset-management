@@ -1,6 +1,7 @@
 package com.steven.assets.service;
 
 import com.steven.assets.repository.StockRepository;
+import com.steven.assets.dto.QuoteDetailDto;
 import com.steven.assets.util.MarketZones;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -95,6 +96,20 @@ public class MarketDataService {
             this(stockCode, market, price, change, changePct, source, stockName,
                     null, null, null, null, null, null, null);
         }
+    }
+
+    public QuoteDetailDto.Response getQuoteDetail(String stockCode, String market) {
+        try {
+            QuoteDetailDto.Response result = priceServiceClient.get().uri(uriBuilder -> uriBuilder.path("/internal/quote-detail")
+                            .queryParam("code", stockCode).queryParam("market", market).build())
+                    .retrieve().bodyToMono(QuoteDetailDto.Response.class).block();
+            if (result != null) return result;
+        } catch (Exception e) {
+            log.warn("呼叫 /internal/quote-detail 失敗 {} {}: {}", market, stockCode, e.getClass().getSimpleName());
+        }
+        return new QuoteDetailDto.Response(stockCode, null, market, true, false, "YAHOO_TW", "暫時無法取得行情五檔",
+                null, null, "UNKNOWN", null, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, List.<QuoteDetailDto.OrderBookLevel>of());
     }
 
     // ─── 殖利率（1 小時 in-memory cache + proxy）───────────────────────────────

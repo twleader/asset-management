@@ -12,6 +12,7 @@ import com.steven.assets.externalmaterials.service.MarketDataFetchService;
 import com.steven.assets.externalmaterials.service.MarketClock;
 import com.steven.assets.externalmaterials.service.PricePoller;
 import com.steven.assets.externalmaterials.service.PricePoller.RefreshSummary;
+import com.steven.assets.externalmaterials.client.TwQuoteDetailFetchClient;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -53,6 +54,14 @@ public class InternalPriceController {
     private final com.steven.assets.externalmaterials.service.NewsPoller newsPoller;
     private final com.steven.assets.externalmaterials.service.StockFundamentalPoller stockFundamentalPoller;
     private final com.steven.assets.externalmaterials.service.CommodityPricePoller commodityPricePoller;
+    private final TwQuoteDetailFetchClient twQuoteDetailFetchClient;
+
+    /** 台股 Yahoo 同時點五檔展示 snapshot；失敗由 client 回 typed unavailable。 */
+    @GetMapping("/quote-detail")
+    public TwQuoteDetailFetchClient.QuoteDetailResult quoteDetail(
+            @RequestParam String code, @RequestParam String market) {
+        return twQuoteDetailFetchClient.fetch(code, market);
+    }
 
     /**
      * 同步抓所有持股報價、寫 Redis 後回傳統計。
