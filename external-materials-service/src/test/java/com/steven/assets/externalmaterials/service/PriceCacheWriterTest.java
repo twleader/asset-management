@@ -2,160 +2,184 @@ package com.steven.assets.externalmaterials.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.steven.assets.externalmaterials.client.PriceFetchClient;
+import com.steven.assets.externalmaterials.client.PriceFetchClient.PriceResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.springframework.data.redis.core.SetOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.ValueOperations;
+import org.springframework.data.redis.core.script.RedisScript;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class PriceCacheWriterTest {
 
-    private static final LocalDate LATEST = LocalDate.of(2026, 7, 23);
+    private static final LocalDate DATE = LocalDate.of(2026, 8, 21);
+    private static final Instant INSTANT = Instant.parse("2026-08-21T05:30:00.123456789Z");
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private StringRedisTemplate redis;
-    private ValueOperations<String, String> values;
     private StockSourceQuery source;
-    /** Task 263：write(..., aggregateHighLow) 的兩條路徑要能 verify，故提為欄位（原為建構時的匿名 mock）。 */
-    private IntradayHighLowTracker hlTracker;
+    private IntradayHighLowTracker highLow;
+    private IntradayTickStore ticks;
     private PriceCacheWriter writer;
 
     @BeforeEach
-    @SuppressWarnings("unchecked")
     void setUp() {
         redis = mock(StringRedisTemplate.class);
-        values = mock(ValueOperations.class);
-        SetOperations<String, String> sets = mock(SetOperations.class);
         source = mock(StockSourceQuery.class);
-        hlTracker = mock(IntradayHighLowTracker.class);
-        when(redis.opsForValue()).thenReturn(values);
-        when(redis.opsForSet()).thenReturn(sets);
-        when(source.findMaxTradingDate(anyString(), anyString())).thenReturn(Optional.of(LATEST));
-        // trading date 的決策已抽到 TradingDateResolver（其自身邏輯由 MarketClock 驅動，另行涵蓋）；
-        // 這裡固定回 LATEST，讓本測試專注在 Redis payload 與 previousClose 的組裝。
-        TradingDateResolver tradingDateResolver = mock(TradingDateResolver.class);
-        when(tradingDateResolver.resolve(anyString(), anyString())).thenReturn(LATEST);
-        writer = new PriceCacheWriter(redis, source,
-                hlTracker, mock(IntradayTickStore.class), tradingDateResolver);
+        highLow = mock(IntradayHighLowTracker.class);
+        ticks = mock(IntradayTickStore.class);
+        writer = new PriceCacheWriter(redis, source, highLow, ticks);
+        scriptReply(List.of(1L, "", "", ""));
     }
 
     @Test
-    void coldCache_usesPreviousDbCloseAndCalculatesChange() throws Exception {
-        when(values.get("price:台股:009804")).thenReturn(null);
-        when(source.findPreviousCloseBefore("009804", "台股", LATEST))
+    void liveWrite_usesSingleLuaAndFixedNineDigitSourceTime() throws Exception {
+        when(highLow.observe("2330", "台股", DATE, new BigDecimal("100.00")))
+                .thenReturn(new IntradayHighLowTracker.HighLow(
+                        new BigDecimal("101.00"), new BigDecimal("99.00")));
+
+        assertThat(writer.write(result("2330", "TWSE"), false))
+                .isEqualTo(PriceCacheWriter.CacheWriteOutcome.WRITTEN);
+
+        JsonNode payload = capturedPayload();
+        assertThat(payload.path("tradingDate").asText()).isEqualTo("2026-08-21");
+        assertThat(payload.path("updatedAt").asText())
+                .isEqualTo("2026-08-21T13:30:00.123456789");
+        assertThat(payload.path("quoteStatus").asText()).isEqualTo("LIVE");
+        assertThat(payload.path("highPrice").decimalValue()).isEqualByComparingTo("101.00");
+        assertThat(payload.path("lowPrice").decimalValue()).isEqualByComparingTo("99.00");
+        verify(ticks).appendTick("2330", "台股", DATE,
+                java.time.LocalDateTime.of(2026, 8, 21, 13, 30, 0, 123456789),
+                new BigDecimal("100.00"));
+        verify(redis, never()).opsForValue();
+        verify(redis, never()).opsForSet();
+        verify(redis, never()).convertAndSend(anyString(), any());
+    }
+
+    @Test
+    void staleWrite_stillUpdatesOwnDayHighLowButNeverTicks() {
+        scriptReply(List.of(0L, "2026-08-21", "2026-08-21T13:31:00", "LIVE"));
+        when(highLow.observe(anyString(), anyString(), any(), any()))
+                .thenReturn(new IntradayHighLowTracker.HighLow(
+                        new BigDecimal("100.00"), new BigDecimal("100.00")));
+
+        assertThat(writer.write(result("2330", "TWSE"), false))
+                .isEqualTo(PriceCacheWriter.CacheWriteOutcome.REJECTED_STALE);
+
+        verify(highLow).observe("2330", "台股", DATE, new BigDecimal("100.00"));
+        verifyNoInteractions(ticks);
+    }
+
+    @Test
+    void nonActualSource_neverTouchesDayHighLowOrTicks() {
+        PriceResult index = result("0000", "TWSE指數(5m)");
+
+        assertThat(writer.write(index, false, false))
+                .isEqualTo(PriceCacheWriter.CacheWriteOutcome.WRITTEN);
+
+        verifyNoInteractions(highLow, ticks);
+    }
+
+    @Test
+    void nonPositivePriceSkipsAllRedisBeforeHighLow() {
+        PriceResult invalid = new PriceResult(
+                "2330", "台股", BigDecimal.ZERO, null, null, "TWSE", null,
+                null, null, null, null, null, null, null, DATE, INSTANT);
+
+        assertThat(writer.write(invalid, false))
+                .isEqualTo(PriceCacheWriter.CacheWriteOutcome.SKIPPED_INVALID_PRICE);
+
+        verifyNoInteractions(redis, highLow, ticks);
+    }
+
+    @Test
+    void verifiedCompatibilityDateMismatchFailsWithoutRedis() {
+        assertThat(writer.writeVerifiedClose(result("2330", "TWSE"), DATE.minusDays(1)))
+                .isEqualTo(PriceCacheWriter.CacheWriteOutcome.FAILED);
+        verifyNoInteractions(redis, highLow, ticks);
+    }
+
+    @Test
+    void verifiedCloseLeavesMissingPreviousCloseAndNameForAtomicLuaPreservation() throws Exception {
+        PriceResult close = new PriceResult(
+                "2330", "台股", new BigDecimal("101.00"), null, null, "TWSE_MI_INDEX", null,
+                null, null, new BigDecimal("100.00"), null,
+                new BigDecimal("102.00"), new BigDecimal("99.00"), 2000L, DATE, INSTANT);
+
+        assertThat(writer.writeVerifiedClose(close))
+                .isEqualTo(PriceCacheWriter.CacheWriteOutcome.WRITTEN);
+
+        Object[] args = capturedArgs();
+        assertThat(args).hasSize(4); // Task 350 Lua contract remains exactly ARGV[1..4].
+        JsonNode payload = MAPPER.readTree((String) args[0]);
+        assertThat(payload.has("previousClose")).isFalse();
+        assertThat(payload.has("stockName")).isFalse();
+        assertThat(payload.path("quoteStatus").asText()).isEqualTo("VERIFIED_CLOSE");
+        verifyNoInteractions(highLow, ticks);
+    }
+
+    @Test
+    void dbSyncUsesSameRowDateAndPreviousClose() throws Exception {
+        when(source.findPreviousCloseBefore("009804", "台股", DATE))
                 .thenReturn(Optional.of(new BigDecimal("21.20")));
 
-        JsonNode payload = syncAndCapture("009804", "21.70");
+        assertThat(writer.syncClosedFromDb("009804", "台股",
+                new StockSourceQuery.DatedClose(DATE, new BigDecimal("21.70")), INSTANT))
+                .isEqualTo(PriceCacheWriter.CacheWriteOutcome.WRITTEN);
 
+        Object[] args = capturedArgs();
+        assertThat(args).hasSize(4); // metadata preservation is inferred from PREVIOUS_CLOSE in Lua.
+        JsonNode payload = MAPPER.readTree((String) args[0]);
+        assertThat(payload.path("tradingDate").asText()).isEqualTo(DATE.toString());
         assertThat(payload.path("previousClose").decimalValue()).isEqualByComparingTo("21.20");
         assertThat(payload.path("priceChange").decimalValue()).isEqualByComparingTo("0.50");
         assertThat(payload.path("changePercent").decimalValue()).isEqualByComparingTo("2.358491");
+        assertThat(payload.path("quoteStatus").asText()).isEqualTo("PREVIOUS_CLOSE");
+        assertThat(payload.has("stockName")).isFalse();
+        assertThat(payload.has("openPrice")).isFalse();
+        assertThat(payload.has("highPrice")).isFalse();
+        assertThat(payload.has("lowPrice")).isFalse();
+        assertThat(payload.has("volume")).isFalse();
+        verifyNoInteractions(highLow, ticks);
     }
 
-    @Test
-    void flatClose_writesNumericZeros() throws Exception {
-        when(source.findPreviousCloseBefore("2885", "台股", LATEST))
-                .thenReturn(Optional.of(new BigDecimal("63.10")));
-
-        JsonNode payload = syncAndCapture("2885", "63.10");
-
-        assertThat(payload.path("priceChange").decimalValue()).isEqualByComparingTo("0");
-        assertThat(payload.path("changePercent").decimalValue()).isEqualByComparingTo("0");
+    private PriceResult result(String code, String sourceName) {
+        return new PriceResult(
+                code, "台股", new BigDecimal("100.00"), null, null, sourceName, "測試",
+                null, null, new BigDecimal("99.50"), new BigDecimal("98.00"),
+                new BigDecimal("100.50"), new BigDecimal("99.00"), 1000L, DATE, INSTANT);
     }
 
-    @Test
-    void staleRedisPreviousClose_isIgnoredInFavorOfDb() throws Exception {
-        when(values.get("price:台股:2885")).thenReturn(
-                "{\"tradingDate\":\"2026-07-22\",\"previousClose\":59.90}");
-        when(source.findPreviousCloseBefore("2885", "台股", LATEST))
-                .thenReturn(Optional.of(new BigDecimal("61.30")));
-
-        JsonNode payload = syncAndCapture("2885", "63.10");
-
-        assertThat(payload.path("previousClose").decimalValue()).isEqualByComparingTo("61.30");
-        assertThat(payload.path("priceChange").decimalValue()).isEqualByComparingTo("1.80");
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private void scriptReply(List<?> reply) {
+        when(redis.execute(any(RedisScript.class), anyList(), any(Object[].class)))
+                .thenReturn((List) reply);
     }
 
-    @Test
-    void noPreviousHistory_omitsDerivedFields() throws Exception {
-        when(source.findPreviousCloseBefore("NEW", "台股", LATEST)).thenReturn(Optional.empty());
-
-        JsonNode payload = syncAndCapture("NEW", "10.00");
-
-        assertThat(payload.has("previousClose")).isFalse();
-        assertThat(payload.has("priceChange")).isFalse();
-        assertThat(payload.has("changePercent")).isFalse();
-        assertThat(payload.path("price").decimalValue()).isEqualByComparingTo("10.00");
+    @SuppressWarnings("rawtypes")
+    private JsonNode capturedPayload() throws Exception {
+        return MAPPER.readTree((String) capturedArgs()[0]);
     }
 
-    /**
-     * 個股路徑（兩參數版 → aggregateHighLow=true）：外部值與當日本地聚合取 max(high)/min(low)。
-     * 動機見 {@link IntradayHighLowTracker}：NASDAQ info API 對 ETF 的 keyStats 為 null，
-     * 沒有這層聚合的話 VOO/VT 等的 high/low 永遠抓不到。
-     */
-    @Test
-    void write_defaultPath_mergesWithLocalAggregate() throws Exception {
-        when(hlTracker.observe(anyString(), anyString(), any(), any()))
-                .thenReturn(new IntradayHighLowTracker.HighLow(
-                        new BigDecimal("12.50"), new BigDecimal("11.00")));
-
-        JsonNode payload = writeAndCapture(priceResult("2330", "12.00", "12.20", "11.50"), null);
-
-        verify(hlTracker).observe(anyString(), anyString(), any(), any());
-        assertThat(payload.path("highPrice").decimalValue()).isEqualByComparingTo("12.50");  // 聚合值較高
-        assertThat(payload.path("lowPrice").decimalValue()).isEqualByComparingTo("11.00");   // 聚合值較低
-    }
-
-    /**
-     * 大盤路徑（Task 263，aggregateHighLow=false）：來源已給當日權威 high/low，
-     * 不得碰 price:dayhl:* —— 聚合是 max/min 的單向累積，誤入的極值無法被後續正確值修正。
-     */
-    @Test
-    void write_noAggregatePath_usesResultHighLowAndSkipsTracker() throws Exception {
-        JsonNode payload = writeAndCapture(priceResult("0000", "20050.00", "20180.00", "19870.00"), false);
-
-        verify(hlTracker, never()).observe(any(), any(), any(), any());
-        assertThat(payload.path("highPrice").decimalValue()).isEqualByComparingTo("20180.00");
-        assertThat(payload.path("lowPrice").decimalValue()).isEqualByComparingTo("19870.00");
-    }
-
-    private static PriceFetchClient.PriceResult priceResult(String code, String price, String high, String low) {
-        return new PriceFetchClient.PriceResult(
-                code, "台股", new BigDecimal(price),
-                null, null, "TWSE", "測試", null, null, null,
-                new BigDecimal("10.00"), new BigDecimal(high), new BigDecimal(low), null);
-    }
-
-    /** aggregateHighLow 為 null 時走兩參數版（既有呼叫端形狀）。 */
-    private JsonNode writeAndCapture(PriceFetchClient.PriceResult result, Boolean aggregateHighLow) throws Exception {
-        if (aggregateHighLow == null) {
-            writer.write(result, false);
-        } else {
-            writer.write(result, false, aggregateHighLow);
-        }
-        ArgumentCaptor<String> json = ArgumentCaptor.forClass(String.class);
-        verify(values).set(anyString(), json.capture(), any());
-        return MAPPER.readTree(json.getValue());
-    }
-
-    private JsonNode syncAndCapture(String code, String close) throws Exception {
-        writer.syncClosedFromDb(code, "台股", new BigDecimal(close));
-        ArgumentCaptor<String> json = ArgumentCaptor.forClass(String.class);
-        verify(values).set(anyString(), json.capture(), any());
-        return MAPPER.readTree(json.getValue());
+    @SuppressWarnings("rawtypes")
+    private Object[] capturedArgs() {
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(redis).execute(any(RedisScript.class), anyList(), args.capture());
+        return args.getValue();
     }
 }

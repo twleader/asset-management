@@ -6,12 +6,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
-import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.atomic.AtomicInteger;
 
-/** Disabled-mode compatibility strategy: the existing public MIS client and legacy writer. */
+/** Disabled-mode strategy backed by the bounded two-wave Task 350 MIS batch client. */
 @Slf4j
 @Component
 @ConditionalOnProperty(prefix = "fubon", name = "enabled", havingValue = "false", matchIfMissing = true)
@@ -39,42 +36,57 @@ public class ExistingTwLiveQuoteProvider implements TwLiveQuoteProvider {
         if (!marketOpenAuthorized) return TwLiveQuoteBatchResult.closed(requested);
         if (codes == null || codes.isEmpty()) return TwLiveQuoteBatchResult.open(0, 0, 0, 0);
 
-        AtomicInteger succeeded = new AtomicInteger();
-        AtomicInteger written = new AtomicInteger();
-        AtomicInteger failed = new AtomicInteger();
-        try (ExecutorService pool = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
-            for (String code : codes) {
-                pool.submit(() -> refreshOne(code, succeeded, written, failed));
-            }
-        }
-        if (failed.get() == 0) counters.increment(TwLiveQuoteOutcomeCounters.Outcome.SUCCESS);
-        else counters.increment(TwLiveQuoteOutcomeCounters.Outcome.PARTIAL_FAILURE);
-        log.info("tw-live-round provider=TWSE requested={} succeeded={} written={} failed={}",
-                requested, succeeded.get(), written.get(), failed.get());
-        return TwLiveQuoteBatchResult.open(
-                requested, succeeded.get(), written.get(), failed.get());
-    }
-
-    private void refreshOne(
-            String code,
-            AtomicInteger succeeded,
-            AtomicInteger written,
-            AtomicInteger failed) {
+        PriceFetchClient.TwQuoteBatchSummary summary;
         try {
-            Optional<PriceResult> optional = client.getStockPrice(code, "台股");
-            if (optional.isEmpty() || optional.get().price() == null) {
-                failed.incrementAndGet();
-                return;
-            }
-            PriceResult result = optional.get();
-            succeeded.incrementAndGet();
-            writer.write(result, false);
-            written.incrementAndGet();
-            if (result.stockName() != null && !result.stockName().isBlank()) {
-                source.upsertStockName(code, "台股", result.stockName());
-            }
+            summary = client.fetchTwBatch(codes);
         } catch (Exception ex) {
-            failed.incrementAndGet();
+            counters.increment(TwLiveQuoteOutcomeCounters.Outcome.PROVIDER_FAILED);
+            log.warn("tw-live-round provider=TWSE status=PROVIDER_FAILED requested={} written=0", requested);
+            return TwLiveQuoteBatchResult.open(requested, 0, 0, requested);
         }
+
+        int written = 0;
+        int staleRejected = 0;
+        int writeFailures = 0;
+        for (var entry : summary.resolved().entrySet()) {
+            PriceResult result = entry.getValue();
+            PriceCacheWriter.CacheWriteOutcome outcome = writer.write(result, false);
+            switch (outcome) {
+                case WRITTEN -> {
+                    written++;
+                    if (result.stockName() != null && !result.stockName().isBlank()) {
+                        try {
+                            source.upsertStockName(entry.getKey(), "台股", result.stockName());
+                        } catch (Exception ex) {
+                            log.warn("tw-live stock-name update failed provider=TWSE reason=LOCAL_WRITE_FAILED");
+                        }
+                    }
+                }
+                case REJECTED_STALE -> {
+                    staleRejected++;
+                    counters.increment(TwLiveQuoteOutcomeCounters.Outcome.STALE_OR_EQUAL);
+                }
+                case FAILED, SKIPPED_INVALID_PRICE -> {
+                    writeFailures++;
+                    counters.increment(TwLiveQuoteOutcomeCounters.Outcome.WRITE_FAILED);
+                }
+            }
+        }
+
+        int failed = summary.missingCodes().size() + summary.invalidCodes().size() + writeFailures;
+        boolean partialFailure = failed > 0 || summary.requestFailures() > 0
+                || !summary.capacityRejectedCodes().isEmpty();
+        counters.increment(partialFailure
+                ? TwLiveQuoteOutcomeCounters.Outcome.PARTIAL_FAILURE
+                : TwLiveQuoteOutcomeCounters.Outcome.SUCCESS);
+        log.info("台股MIS batch requested={} resolved={} noTrade={} missing={} invalid={} "
+                        + "httpRequests={} requestFailures={} written={} staleRejected={} writeFailures={} "
+                        + "foreignCodes={} schemaAnomalies={} sourceTimeAnomalyCodes={} capacityRejectedCodes={}",
+                summary.requestedCount(), summary.resolved().size(), summary.noTradeCodes().size(),
+                summary.missingCodes().size(), summary.invalidCodes().size(),
+                summary.httpRequests(), summary.requestFailures(), written, staleRejected, writeFailures,
+                summary.foreignCodes(), summary.schemaAnomalies(), summary.sourceTimeAnomalyCodes(),
+                summary.capacityRejectedCodes());
+        return TwLiveQuoteBatchResult.open(requested, summary.resolved().size(), written, failed);
     }
 }

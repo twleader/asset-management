@@ -13,6 +13,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Stream;
@@ -67,8 +68,10 @@ class TwLiveFourEntryMatrixTest {
         MarketClock clock = spy(new MarketClock(calendar, Clock.fixed(now, ZoneOffset.UTC)));
         TaiexIndexPoller taiex = mock(TaiexIndexPoller.class);
         TwLiveQuoteOutcomeCounters counters = new TwLiveQuoteOutcomeCounters();
-        PriceFetchClient.PriceResult price = priceResult();
-        ProviderTimedPriceObservation observation = observation(price);
+        PriceFetchClient.PriceResult fubonPrice = priceResult("FUBON_INTRADAY");
+        PriceFetchClient.PriceResult misPrice = priceResult("TWSE").withTiming(
+                LocalDate.of(2026, 8, 21), Instant.parse("2026-08-21T02:00:00Z"));
+        ProviderTimedPriceObservation observation = observation(fubonPrice);
 
         switch (scenario) {
             case OPEN_SUCCESS, OPEN_PROVIDER_FAILURE ->
@@ -83,17 +86,23 @@ class TwLiveFourEntryMatrixTest {
         }
         when(source.findRecentClose(anyString(), anyString())).thenReturn(Optional.empty());
         when(source.findMaxTradingDate(anyString(), anyString())).thenReturn(Optional.empty());
+        when(source.findLatestDatedClose(anyString(), anyString())).thenReturn(Optional.empty());
         addCodeForEveryCollector(source);
 
         if (scenario == Scenario.OPEN_SUCCESS) {
-            when(mis.getStockPrice("2330", "台股")).thenReturn(Optional.of(price));
+            when(mis.fetchTwBatch(any())).thenReturn(new PriceFetchClient.TwQuoteBatchSummary(
+                    Map.of("2330", misPrice), Set.of(), Set.of(), Set.of(), Set.of(), Set.of(),
+                    Set.of(), Set.of(), 1, 0));
+            when(writer.write(misPrice, false)).thenReturn(PriceCacheWriter.CacheWriteOutcome.WRITTEN);
             when(fubon.fetch(anyList())).thenReturn(new FubonNormalizedQuoteClient.BatchResult(
                     FubonNormalizedQuoteClient.BatchStatus.SUCCESS,
                     List.of(observation), 1, 0));
             when(writer.writeProviderTimed(any(), eq(true), eq(true)))
                     .thenReturn(new ProviderWriteResult(ProviderWriteOutcome.WRITTEN, false));
         } else if (scenario == Scenario.OPEN_PROVIDER_FAILURE) {
-            when(mis.getStockPrice("2330", "台股")).thenReturn(Optional.empty());
+            when(mis.fetchTwBatch(any())).thenReturn(new PriceFetchClient.TwQuoteBatchSummary(
+                    Map.of(), Set.of(), Set.of("2330"), Set.of(), Set.of(), Set.of(),
+                    Set.of(), Set.of(), 2, 2));
             when(fubon.fetch(anyList())).thenReturn(new FubonNormalizedQuoteClient.BatchResult(
                     FubonNormalizedQuoteClient.BatchStatus.SERVICE_UNAVAILABLE,
                     List.of(), 1, 1));
@@ -110,14 +119,15 @@ class TwLiveFourEntryMatrixTest {
         boolean open = scenario == Scenario.OPEN_SUCCESS || scenario == Scenario.OPEN_PROVIDER_FAILURE;
         if (mode == Mode.ENABLED && open) verify(fubon).fetch(List.of("2330"));
         else verify(fubon, never()).fetch(anyList());
-        if (mode == Mode.DISABLED && open) verify(mis).getStockPrice("2330", "台股");
-        else verify(mis, never()).getStockPrice(anyString(), eq("台股"));
+        if (mode == Mode.DISABLED && open) verify(mis).fetchTwBatch(Set.of("2330"));
+        else verify(mis, never()).fetchTwBatch(any());
+        verify(mis, never()).getStockPrice(anyString(), eq("台股"));
 
         if (scenario == Scenario.OPEN_SUCCESS && mode == Mode.ENABLED) {
             verify(writer).writeProviderTimed(observation, true, true);
             verify(writer, never()).write(any(), eq(false));
         } else if (scenario == Scenario.OPEN_SUCCESS) {
-            verify(writer).write(price, false);
+            verify(writer).write(misPrice, false);
             verify(writer, never()).writeProviderTimed(any(), eq(true), eq(true));
         } else {
             verify(writer, never()).write(any(), eq(false));
@@ -171,10 +181,10 @@ class TwLiveFourEntryMatrixTest {
         }).when(source).collectTwRadarCodes(any());
     }
 
-    private static PriceFetchClient.PriceResult priceResult() {
+    private static PriceFetchClient.PriceResult priceResult(String source) {
         return new PriceFetchClient.PriceResult(
                 "2330", "台股", new BigDecimal("100.1"), null, null,
-                "FUBON_INTRADAY", "台積電", new BigDecimal("100.0"), new BigDecimal("100.2"),
+                source, "台積電", new BigDecimal("100.0"), new BigDecimal("100.2"),
                 new BigDecimal("100.0"), new BigDecimal("99.5"),
                 new BigDecimal("101.0"), new BigDecimal("99.0"), 54_538L);
     }

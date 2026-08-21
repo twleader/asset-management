@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.Instant;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -73,9 +74,10 @@ class TaiexIndexPollerTest {
 
     @Test
     void dayQuoteIsToday_writesOhlcFromSource() {
+        Instant finalBar = TODAY.atTime(13, 30).atZone(MarketClock.TW_ZONE).toInstant();
         when(macroClient.fetchIndexIntradayDay("TWSE")).thenReturn(
                 new DayQuote(TODAY, new BigDecimal("20000.00"), new BigDecimal("20180.00"),
-                        new BigDecimal("19870.00"), new BigDecimal("20050.00")));
+                        new BigDecimal("19870.00"), new BigDecimal("20050.00"), finalBar));
         when(source.loadRecentTaiexCloses(2)).thenReturn(
                 List.of(new StockSourceQuery.ClosePoint(TODAY.minusDays(4), new BigDecimal("19700.00")),
                         new StockSourceQuery.ClosePoint(TODAY.minusDays(1), new BigDecimal("19800.00"))));
@@ -92,6 +94,8 @@ class TaiexIndexPollerTest {
         assertThat(result.highPrice()).isEqualByComparingTo("20180.00");
         assertThat(result.lowPrice()).isEqualByComparingTo("19870.00");
         assertThat(result.previousClose()).isEqualByComparingTo("19800.00");
+        assertThat(result.tradingDate()).isEqualTo(TODAY);
+        assertThat(result.freshnessInstant()).isEqualTo(finalBar);
         assertThat(result.source()).contains("(");
         // 大盤無買賣盤口、無成交量定義
         assertThat(result.buyPrice()).isNull();

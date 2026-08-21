@@ -7,10 +7,14 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.data.redis.connection.DataType;
 import org.springframework.data.redis.connection.Message;
 import org.springframework.data.redis.connection.RedisConnection;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.data.redis.listener.ChannelTopic;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
 import org.testcontainers.containers.GenericContainer;
@@ -45,6 +49,7 @@ class PriceCacheWriterFubonRedisIntegrationTest {
 
     private static final LocalDate DATE = LocalDate.of(2026, 8, 21);
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final RedisScript<String> PROVIDER_TIMED_WRITE = providerTimedWriteScript();
 
     @Container
     private static final GenericContainer<?> REDIS = new GenericContainer<>(DockerImageName.parse("redis:7-alpine"))
@@ -96,8 +101,7 @@ class PriceCacheWriterFubonRedisIntegrationTest {
                 redis,
                 mock(StockSourceQuery.class),
                 highLowTracker,
-                ticks,
-                mock(TradingDateResolver.class));
+                ticks);
     }
 
     @Test
@@ -111,6 +115,165 @@ class PriceCacheWriterFubonRedisIntegrationTest {
         assertThat(redis.getExpire(indexKey(), TimeUnit.MILLISECONDS)).isEqualTo(-2);
         assertThat(ticks()).isEmpty();
         assertNoMessage();
+    }
+
+    @Test
+    void marketClosedAuthorizationPrecedesArityAndWrongTypePreflight() throws Exception {
+        redis.opsForList().rightPush(priceKey(), "sentinel-latest-list");
+        redis.expire(priceKey(), Duration.ofMinutes(25));
+        Long ttlBefore = redis.getExpire(priceKey(), TimeUnit.MILLISECONDS);
+
+        String outcome = redis.execute(PROVIDER_TIMED_WRITE, List.of(priceKey()), "0");
+
+        assertThat(outcome).isEqualTo("MARKET_CLOSED");
+        assertThat(redis.type(priceKey())).isEqualTo(DataType.LIST);
+        assertThat(redis.opsForList().range(priceKey(), 0, -1))
+                .containsExactly("sentinel-latest-list");
+        assertThat(redis.getExpire(priceKey(), TimeUnit.MILLISECONDS))
+                .isPositive()
+                .isLessThanOrEqualTo(ttlBefore);
+        assertThat(redis.hasKey(indexKey())).isFalse();
+        assertThat(ticks()).isEmpty();
+        assertNoMessage();
+    }
+
+    @Test
+    void preflightRejectsWrongLatestOrIndexTypeWithoutPartialMutation() throws Exception {
+        String valid = providerPayload(
+                "2330", "台股", DATE.toString(), "2026-08-21T13:01:00.000000000",
+                "FUBON_INTRADAY", "LIVE", false);
+
+        redis.opsForList().rightPush(priceKey(), "sentinel-latest-list");
+        redis.expire(priceKey(), Duration.ofMinutes(25));
+        redis.opsForSet().add(indexKey(), "sentinel-index-member");
+        redis.expire(indexKey(), Duration.ofMinutes(20));
+        Long latestTtlBefore = redis.getExpire(priceKey(), TimeUnit.MILLISECONDS);
+        Long indexTtlBefore = redis.getExpire(indexKey(), TimeUnit.MILLISECONDS);
+
+        assertThat(rawAuthorizedWrite(valid, "86400")).isEqualTo("WRITE_FAILED");
+        assertThat(redis.type(priceKey())).isEqualTo(DataType.LIST);
+        assertThat(redis.opsForList().range(priceKey(), 0, -1))
+                .containsExactly("sentinel-latest-list");
+        assertThat(redis.type(indexKey())).isEqualTo(DataType.SET);
+        assertThat(redis.opsForSet().members(indexKey())).containsExactly("sentinel-index-member");
+        assertThat(redis.getExpire(priceKey(), TimeUnit.MILLISECONDS))
+                .isPositive()
+                .isLessThanOrEqualTo(latestTtlBefore);
+        assertThat(redis.getExpire(indexKey(), TimeUnit.MILLISECONDS))
+                .isPositive()
+                .isLessThanOrEqualTo(indexTtlBefore);
+        assertThat(ticks()).isEmpty();
+        assertNoMessage();
+
+        setUp();
+        String existing = currentPayload(
+                "FUBON_INTRADAY", false, "LIVE", DATE.toString(), "2026-08-21T13:00:00");
+        redis.opsForValue().set(priceKey(), existing, Duration.ofMinutes(25));
+        redis.opsForValue().set(indexKey(), "sentinel-index-string", Duration.ofMinutes(20));
+        latestTtlBefore = redis.getExpire(priceKey(), TimeUnit.MILLISECONDS);
+        indexTtlBefore = redis.getExpire(indexKey(), TimeUnit.MILLISECONDS);
+
+        assertThat(rawAuthorizedWrite(valid, "86400")).isEqualTo("WRITE_FAILED");
+        assertThat(redis.type(priceKey())).isEqualTo(DataType.STRING);
+        assertThat(redis.opsForValue().get(priceKey())).isEqualTo(existing);
+        assertThat(redis.type(indexKey())).isEqualTo(DataType.STRING);
+        assertThat(redis.opsForValue().get(indexKey())).isEqualTo("sentinel-index-string");
+        assertThat(redis.getExpire(priceKey(), TimeUnit.MILLISECONDS))
+                .isPositive()
+                .isLessThanOrEqualTo(latestTtlBefore);
+        assertThat(redis.getExpire(indexKey(), TimeUnit.MILLISECONDS))
+                .isPositive()
+                .isLessThanOrEqualTo(indexTtlBefore);
+        assertThat(ticks()).isEmpty();
+        assertNoMessage();
+    }
+
+    @Test
+    void preflightRejectsInvalidArityAliasedKeysAndTtlWithoutMutation() throws Exception {
+        String valid = providerPayload(
+                "2330", "台股", DATE.toString(), "2026-08-21T13:01:00.000000000",
+                "FUBON_INTRADAY", "LIVE", false);
+        for (String invalidTtl : List.of("0", "-1", "1.5", "abc", "99999999999999999")) {
+            assertPreflightRejected(valid, invalidTtl);
+        }
+        for (List<String> invalidArgs : List.of(
+                List.of("1", " ", "台股", "price-update"),
+                List.of("1", "2330", " ", "price-update"),
+                List.of("1", "2330", "台股", " "),
+                List.of("2", "2330", "台股", "price-update"))) {
+            setUp();
+            preparePreflightSentinels();
+            assertThat(redis.execute(
+                    PROVIDER_TIMED_WRITE,
+                    List.of(priceKey(), indexKey()),
+                    "1", invalidArgs.get(0), valid, invalidArgs.get(1), invalidArgs.get(2), DATE.toString(),
+                    "2026-08-21T13:01:00.000000000", "86400", invalidArgs.get(3)))
+                    .isEqualTo("WRITE_FAILED");
+            assertPreflightSentinelsUnchanged();
+        }
+
+        preparePreflightSentinels();
+        assertThat(redis.execute(
+                PROVIDER_TIMED_WRITE,
+                List.of(priceKey()),
+                "1", "1", valid, "2330", "台股", DATE.toString(),
+                "2026-08-21T13:01:00.000000000", "86400", "price-update"))
+                .isEqualTo("WRITE_FAILED");
+        assertPreflightSentinelsUnchanged();
+
+        setUp();
+        preparePreflightSentinels();
+        assertThat(redis.execute(
+                PROVIDER_TIMED_WRITE,
+                List.of(priceKey(), indexKey()),
+                "1", "1", valid, "2330", "台股", DATE.toString(),
+                "2026-08-21T13:01:00.000000000", "86400"))
+                .isEqualTo("WRITE_FAILED");
+        assertPreflightSentinelsUnchanged();
+
+        setUp();
+        redis.opsForValue().set(priceKey(), "alias-sentinel", Duration.ofMinutes(25));
+        Long aliasTtlBefore = redis.getExpire(priceKey(), TimeUnit.MILLISECONDS);
+        assertThat(redis.execute(
+                PROVIDER_TIMED_WRITE,
+                List.of(priceKey(), priceKey()),
+                "1", "1", valid, "2330", "台股", DATE.toString(),
+                "2026-08-21T13:01:00.000000000", "86400", "price-update"))
+                .isEqualTo("WRITE_FAILED");
+        assertThat(redis.opsForValue().get(priceKey())).isEqualTo("alias-sentinel");
+        assertThat(redis.getExpire(priceKey(), TimeUnit.MILLISECONDS))
+                .isPositive()
+                .isLessThanOrEqualTo(aliasTtlBefore);
+        assertThat(ticks()).isEmpty();
+        assertNoMessage();
+    }
+
+    @Test
+    void preflightRejectsMalformedOrJsonArgvMismatchedIncomingWithoutMutation() throws Exception {
+        String updatedAt = "2026-08-21T13:01:00.000000000";
+        List<String> invalidPayloads = List.of(
+                "not-json",
+                "{broken}",
+                "[]",
+                "{}",
+                providerPayload("2317", "台股", DATE.toString(), updatedAt,
+                        "FUBON_INTRADAY", "LIVE", false),
+                providerPayload("2330", "美股", DATE.toString(), updatedAt,
+                        "FUBON_INTRADAY", "LIVE", false),
+                providerPayload("2330", "台股", "2026-08-20", updatedAt,
+                        "FUBON_INTRADAY", "LIVE", false),
+                providerPayload("2330", "台股", DATE.toString(), "2026-08-21T13:02:00.000000000",
+                        "FUBON_INTRADAY", "LIVE", false),
+                providerPayload("2330", "台股", DATE.toString(), updatedAt,
+                        "TWSE", "LIVE", false),
+                providerPayload("2330", "台股", DATE.toString(), updatedAt,
+                        "FUBON_INTRADAY", "VERIFIED_CLOSE", false),
+                providerPayload("2330", "台股", DATE.toString(), updatedAt,
+                        "FUBON_INTRADAY", "LIVE", true));
+
+        for (String invalidPayload : invalidPayloads) {
+            assertPreflightRejected(invalidPayload, "86400");
+        }
     }
 
     @Test
@@ -139,7 +302,7 @@ class PriceCacheWriterFubonRedisIntegrationTest {
         assertThat(result).isEqualTo(new ProviderWriteResult(ProviderWriteOutcome.WRITTEN, false));
         JsonNode payload = MAPPER.readTree(redis.opsForValue().get(priceKey()));
         assertThat(payload.path("source").asText()).isEqualTo("FUBON_INTRADAY");
-        assertThat(payload.path("updatedAt").asText()).isEqualTo("2026-08-21T13:00:00.123456");
+        assertThat(payload.path("updatedAt").asText()).isEqualTo("2026-08-21T13:00:00.123456000");
         assertThat(payload.path("price").decimalValue()).isEqualByComparingTo("100.1");
         assertThat(payload.path("priceChange").decimalValue()).isEqualByComparingTo("0.6");
         assertThat(payload.path("changePercent").decimalValue()).isEqualByComparingTo("0.603015");
@@ -203,7 +366,35 @@ class PriceCacheWriterFubonRedisIntegrationTest {
     }
 
     @Test
-    void sameDayMisTakeoverRequiresBothFlagsAndExactOpenLiveIdentityOnlyOnce() throws Exception {
+    void sameDayFubonVerifiedCloseCannotBeDowngradedByNewerLive() throws Exception {
+        String verified = currentPayload(
+                "FUBON_INTRADAY", true, "VERIFIED_CLOSE",
+                DATE.toString(), "2026-08-21T13:00:00");
+        redis.opsForValue().set(priceKey(), verified, Duration.ofMinutes(25));
+        redis.opsForSet().add(indexKey(), "2330");
+        redis.expire(indexKey(), Duration.ofMinutes(20));
+        Long latestTtlBefore = redis.getExpire(priceKey(), TimeUnit.MILLISECONDS);
+        Long indexTtlBefore = redis.getExpire(indexKey(), TimeUnit.MILLISECONDS);
+
+        ProviderWriteResult result = writer.writeProviderTimed(
+                observation("2026-08-21T05:01:00Z"), true, true);
+
+        assertThat(result.outcome()).isEqualTo(ProviderWriteOutcome.STALE_OR_EQUAL);
+        assertThat(redis.opsForValue().get(priceKey())).isEqualTo(verified);
+        assertThat(redis.type(indexKey())).isEqualTo(DataType.SET);
+        assertThat(redis.opsForSet().members(indexKey())).containsExactly("2330");
+        assertThat(redis.getExpire(priceKey(), TimeUnit.MILLISECONDS))
+                .isPositive()
+                .isLessThanOrEqualTo(latestTtlBefore);
+        assertThat(redis.getExpire(indexKey(), TimeUnit.MILLISECONDS))
+                .isPositive()
+                .isLessThanOrEqualTo(indexTtlBefore);
+        assertThat(ticks()).isEmpty();
+        assertNoMessage();
+    }
+
+    @Test
+    void sameDayMisTakeoverRequiresBothFlagsExactOpenLiveIdentityAndStrictlyNewerTime() throws Exception {
         redis.opsForValue().set(priceKey(),
                 currentPayload("TWSE", false, "LIVE", "2026-08-21", "2026-08-21T13:10:00"),
                 Duration.ofHours(1));
@@ -211,6 +402,11 @@ class PriceCacheWriterFubonRedisIntegrationTest {
         assertThat(writer.writeProviderTimed(observation("2026-08-21T05:00:00Z"), true, false).outcome())
                 .isEqualTo(ProviderWriteOutcome.STALE_OR_EQUAL);
         assertThat(writer.writeProviderTimed(observation("2026-08-21T05:00:00Z"), true, true).outcome())
+                .isEqualTo(ProviderWriteOutcome.STALE_OR_EQUAL);
+        assertThat(writer.writeProviderTimed(observation("2026-08-21T05:10:00Z"), true, true).outcome())
+                .isEqualTo(ProviderWriteOutcome.STALE_OR_EQUAL);
+        assertThat(writer.writeProviderTimed(
+                observation("2026-08-21T05:10:00.000000001Z"), true, true).outcome())
                 .isEqualTo(ProviderWriteOutcome.PROVIDER_TAKEOVER);
         assertThat(writer.writeProviderTimed(observation("2026-08-21T04:59:00Z"), true, true).outcome())
                 .isEqualTo(ProviderWriteOutcome.STALE_OR_EQUAL);
@@ -220,6 +416,7 @@ class PriceCacheWriterFubonRedisIntegrationTest {
         for (String payload : List.of(
                 currentPayload("TWSE", true, "VERIFIED_CLOSE", "2026-08-21", "2026-08-21T13:10:00"),
                 currentPayload("DB-close", false, "LIVE", "2026-08-21", "2026-08-21T13:10:00"),
+                currentPayload("TWSE", false, " LIVE ", "2026-08-21", "2026-08-21T13:10:00"),
                 currentPayload("TWSE", false, "PREVIOUS_CLOSE", "2026-08-21", "2026-08-21T13:10:00"))) {
             setUp();
             redis.opsForValue().set(priceKey(), payload, Duration.ofHours(1));
@@ -259,7 +456,7 @@ class PriceCacheWriterFubonRedisIntegrationTest {
         }
 
         JsonNode finalPayload = MAPPER.readTree(redis.opsForValue().get(priceKey()));
-        assertThat(finalPayload.path("updatedAt").asText()).isEqualTo("2026-08-21T13:19");
+        assertThat(finalPayload.path("updatedAt").asText()).isEqualTo("2026-08-21T13:19:00.000000000");
         long successful = outcomes.stream().filter(outcome -> outcome == ProviderWriteOutcome.WRITTEN).count();
         assertThat(ticks()).hasSize((int) successful);
         assertThat(awaitMessages((int) successful)).hasSize((int) successful);
@@ -279,10 +476,76 @@ class PriceCacheWriterFubonRedisIntegrationTest {
 
         assertThat(result.outcome()).isEqualTo(ProviderWriteOutcome.WRITTEN);
         assertThat(MAPPER.readTree(redis.opsForValue().get(priceKey())).path("updatedAt").asText())
-                .isEqualTo("2026-08-21T13:01");
+                .isEqualTo("2026-08-21T13:01:00.000000000");
         assertThat(redis.opsForSet().isMember(indexKey(), "2330")).isTrue();
         assertThat(ticks()).hasSize(2);
         assertThat(awaitMessages(1)).hasSize(1);
+    }
+
+    private static RedisScript<String> providerTimedWriteScript() {
+        DefaultRedisScript<String> script = new DefaultRedisScript<>();
+        script.setLocation(new ClassPathResource("redis/provider-timed-price-write.lua"));
+        script.setResultType(String.class);
+        return script;
+    }
+
+    private static String rawAuthorizedWrite(String payload, String ttl) {
+        return redis.execute(
+                PROVIDER_TIMED_WRITE,
+                List.of(priceKey(), indexKey()),
+                "1", "1", payload, "2330", "台股", DATE.toString(),
+                "2026-08-21T13:01:00.000000000", ttl, "price-update");
+    }
+
+    private void assertPreflightRejected(String payload, String ttl) throws Exception {
+        setUp();
+        preparePreflightSentinels();
+
+        assertThat(rawAuthorizedWrite(payload, ttl)).isEqualTo("WRITE_FAILED");
+        assertPreflightSentinelsUnchanged();
+    }
+
+    private static void preparePreflightSentinels() throws Exception {
+        redis.opsForValue().set(
+                priceKey(),
+                currentPayload(
+                        "FUBON_INTRADAY", false, "LIVE",
+                        DATE.toString(), "2026-08-21T13:00:00"),
+                Duration.ofMinutes(25));
+        redis.opsForSet().add(indexKey(), "sentinel-index-member");
+        redis.expire(indexKey(), Duration.ofMinutes(20));
+    }
+
+    private static void assertPreflightSentinelsUnchanged() throws Exception {
+        assertThat(redis.opsForValue().get(priceKey())).isEqualTo(currentPayload(
+                "FUBON_INTRADAY", false, "LIVE",
+                DATE.toString(), "2026-08-21T13:00:00"));
+        assertThat(redis.type(priceKey())).isEqualTo(DataType.STRING);
+        assertThat(redis.type(indexKey())).isEqualTo(DataType.SET);
+        assertThat(redis.opsForSet().members(indexKey())).containsExactly("sentinel-index-member");
+        assertThat(redis.getExpire(priceKey(), TimeUnit.SECONDS)).isBetween(1_490L, 1_500L);
+        assertThat(redis.getExpire(indexKey(), TimeUnit.SECONDS)).isBetween(1_190L, 1_200L);
+        assertThat(ticks()).isEmpty();
+        assertNoMessage();
+    }
+
+    private static String providerPayload(
+            String code,
+            String market,
+            String tradingDate,
+            String updatedAt,
+            String source,
+            String quoteStatus,
+            boolean closed) throws Exception {
+        return MAPPER.writeValueAsString(java.util.Map.ofEntries(
+                java.util.Map.entry("stockCode", code),
+                java.util.Map.entry("market", market),
+                java.util.Map.entry("price", new BigDecimal("100.1")),
+                java.util.Map.entry("source", source),
+                java.util.Map.entry("tradingDate", tradingDate),
+                java.util.Map.entry("updatedAt", updatedAt),
+                java.util.Map.entry("closed", closed),
+                java.util.Map.entry("quoteStatus", quoteStatus)));
     }
 
     private static ProviderTimedPriceObservation observation(String timestamp) {

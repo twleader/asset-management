@@ -9,11 +9,13 @@ import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.time.Clock;
 import java.util.LinkedHashSet;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 /**
@@ -21,8 +23,8 @@ import java.util.function.Consumer;
  * - 台股：週一～五 09:00–13:30 Asia/Taipei，每 2 分鐘
  * - 美股：週一～五 09:30–16:00 America/New_York，每 2 分鐘
  *
- * 啟動時補抓主檔中尚無 Redis cache 的股票（盤外則僅抓一次當作 cold start）。
- * 盤後 close cron 由 ClosePersister 處理。
+ * <p>台股四個入口都經同一 known-open dispatcher。Disabled mode 使用 Task 350 的 MIS
+ * 批次 provider；enabled mode 使用 Fubon provider。其他市場維持逐檔 virtual thread。</p>
  */
 @Slf4j
 @Service
@@ -34,6 +36,9 @@ public class PricePoller {
     private final MarketClock clock;
     private final TwLiveQuoteDispatcher twLiveDispatcher;
     private final Consumer<Runnable> warmupLauncher;
+
+    /** Row-retrieval timestamp source; package-visible for deterministic unit tests. */
+    Clock timeSource = Clock.systemUTC();
 
     @Autowired
     public PricePoller(
@@ -73,14 +78,14 @@ public class PricePoller {
         log.info("price-service 啟動，背景補抓 cold cache：台股 {} 檔，美股 {} 檔，英股 {} 檔",
                 twCodes.size(), usCodes.size(), ukCodes.size());
         warmupLauncher.accept(() -> {
-            // 開盤中：外部抓即時價。休市：改以 DB 收盤同步 Redis（不重抓 last-tick 覆寫，
-            // 否則會蓋掉 FinMind 權威收盤 → Redis↔DB 不一致，spec Task 111）。
             TwLiveQuoteBatchResult twResult = updatePrices(twCodes, "台股", false);
             if (twResult.marketState() == TwLiveQuoteBatchResult.MarketState.MARKET_CLOSED) {
                 syncClosedFromDb(twCodes, "台股");
             }
-            if (clock.isUsMarketOpen()) updatePrices(usCodes, "美股", false); else syncClosedFromDb(usCodes, "美股");
-            if (clock.isUkMarketOpen()) updatePrices(ukCodes, "英股", false); else syncClosedFromDb(ukCodes, "英股");
+            if (clock.isUsMarketOpen()) updatePrices(usCodes, "美股", false);
+            else syncClosedFromDb(usCodes, "美股");
+            if (clock.isUkMarketOpen()) updatePrices(ukCodes, "英股", false);
+            else syncClosedFromDb(ukCodes, "英股");
         });
     }
 
@@ -88,8 +93,6 @@ public class PricePoller {
     public void scheduledTwIntradayUpdate() {
         Set<String> tw = new LinkedHashSet<>(), us = new LinkedHashSet<>(), uk = new LinkedHashSet<>();
         source.collectHeldStockCodes(tw, us, uk);
-        // collectHeldStockCodes 的 alert SQL 已排除 0000，但 snapshot 持股側未排除；
-        // 台股大盤不是個股，不能交給個股 MIS/Redis writer。
         tw.remove("0000");
         if (!tw.isEmpty()) log.info("更新台股即時價格 ({} 檔)", tw.size());
         updatePrices(tw, "台股", false);
@@ -115,16 +118,12 @@ public class PricePoller {
         updatePrices(uk, "英股", false);
     }
 
-    /**
-     * 同步抓所有持股價格寫 Redis（不限交易時段）。供 /internal/refresh 端點使用。
-     */
+    /** 同步抓所有持股價格寫 Redis。供 /internal/refresh 端點使用。 */
     public RefreshSummary refreshAll() {
         Set<String> tw = new LinkedHashSet<>(), us = new LinkedHashSet<>(), uk = new LinkedHashSet<>();
         source.collectHeldStockCodes(tw, us, uk);
         boolean usOpen = clock.isUsMarketOpen();
         boolean ukOpen = clock.isUkMarketOpen();
-        // 開盤中：外部抓即時價。休市 / 國定假日：改以 DB 收盤同步 Redis，不重抓 last-tick 覆寫
-        //（否則會把 FinMind 權威收盤蓋成盤前 last-tick → Dashboard/歷年 與 SnapshotForm 不一致，spec Task 111）。
         TwLiveQuoteBatchResult twResult = updatePrices(tw, "台股", false);
         boolean twOpen = twResult.marketOpen();
         if (twResult.marketState() == TwLiveQuoteBatchResult.MarketState.MARKET_CLOSED) {
@@ -138,22 +137,14 @@ public class PricePoller {
     public record RefreshSummary(int twUpdated, int usUpdated, int ukUpdated,
                                  boolean twMarketOpen, boolean usMarketOpen, boolean ukMarketOpen) {}
 
-    /**
-     * 並行抓價：每檔一個 virtual thread。
-     * 對 23 檔股票（每檔 HTTP RTT 約 300ms~10s 含 fallback）總時間從 sequential 數十秒降到 ≈ 最慢一檔的耗時。
-     * 用 try-with-resources 的 ExecutorService 在區塊結束時等待所有任務完成。
-     */
-    /**
-     * 休市時以 DB（stock_price_history）最近一筆收盤同步 Redis，取代外部重抓。
-     * 確保 Redis 收盤 == DB 收盤（FinMind 權威），避免盤外刷新 / 假日抓到的 last-tick
-     * 蓋掉已校正的官方收盤（spec Task 111）。DB 無收盤者略過（getLive 自然 fallback）。
-     */
+    /** DB row price/date are fetched together; one Instant is captured only after that row returns. */
     void syncClosedFromDb(Set<String> codes, String market) {
         if (codes.isEmpty()) return;
         for (String code : codes) {
             try {
-                source.findRecentClose(code, market)
-                        .ifPresent(close -> writer.syncClosedFromDb(code, market, close));
+                source.findLatestDatedClose(code, market)
+                        .ifPresent(close -> writer.syncClosedFromDb(
+                                code, market, close, timeSource.instant()));
             } catch (Exception e) {
                 log.warn("休市 DB→Redis 同步 {} {} 失敗: {}", market, code, e.getMessage());
             }
@@ -165,22 +156,27 @@ public class PricePoller {
             return twLiveDispatcher.refresh(codes);
         }
         if (codes.isEmpty()) return TwLiveQuoteBatchResult.open(0, 0, 0, 0);
-        java.util.concurrent.atomic.AtomicInteger succeeded = new java.util.concurrent.atomic.AtomicInteger();
-        java.util.concurrent.atomic.AtomicInteger failed = new java.util.concurrent.atomic.AtomicInteger();
+
+        AtomicInteger succeeded = new AtomicInteger();
+        AtomicInteger written = new AtomicInteger();
+        AtomicInteger failed = new AtomicInteger();
         try (ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor()) {
             for (String code : codes) {
                 pool.submit(() -> {
                     try {
-                        // empty 代表「本輪不更新」：台股 z='-'（兩 tick 之間無成交）或外部 API 查無資料；
-                        // 略過寫入 Redis 以保留上一輪成功 poll 的當日 intraday 成交價（spec Task 79）。
-                        Optional<PriceResult> opt = client.getStockPrice(code, market);
-                        if (opt.isEmpty()) return;
-                        PriceResult r = opt.get();
-                        if (r.price() == null) return;
-                        writer.write(r, markClosed);
+                        Optional<PriceResult> optional = client.getStockPrice(code, market);
+                        if (optional.isEmpty() || optional.get().price() == null) return;
+                        PriceResult result = optional.get();
                         succeeded.incrementAndGet();
-                        if (r.stockName() != null && !r.stockName().isBlank()) {
-                            source.upsertStockName(code, market, r.stockName());
+                        PriceCacheWriter.CacheWriteOutcome outcome = writer.write(result, markClosed);
+                        if (outcome == PriceCacheWriter.CacheWriteOutcome.WRITTEN) {
+                            written.incrementAndGet();
+                            if (result.stockName() != null && !result.stockName().isBlank()) {
+                                source.upsertStockName(code, market, result.stockName());
+                            }
+                        } else if (outcome == PriceCacheWriter.CacheWriteOutcome.FAILED
+                                || outcome == PriceCacheWriter.CacheWriteOutcome.SKIPPED_INVALID_PRICE) {
+                            failed.incrementAndGet();
                         }
                     } catch (Exception e) {
                         failed.incrementAndGet();
@@ -188,8 +184,9 @@ public class PricePoller {
                     }
                 });
             }
-        } // executor.close() 等所有 task 完成
-        return TwLiveQuoteBatchResult.open(codes.size(), succeeded.get(), succeeded.get(), failed.get());
+        }
+        return TwLiveQuoteBatchResult.open(
+                codes.size(), succeeded.get(), written.get(), failed.get());
     }
 
     TwLiveQuoteDispatcher.Authorization authorizeTwLive() {

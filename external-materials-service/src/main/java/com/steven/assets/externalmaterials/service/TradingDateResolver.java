@@ -4,6 +4,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
+import java.time.LocalTime;
+import java.time.Instant;
 import java.util.Optional;
 
 /**
@@ -27,18 +29,35 @@ public class TradingDateResolver {
     private final MarketClock clock;
     private final StockSourceQuery source;
 
-    public LocalDate resolve(String stockCode, String market) {
-        boolean isUs = "美股".equals(market);
-        boolean isUk = "英股".equals(market);
-        boolean liveSession = isUs
-                ? (clock.isUsMarketOpen() || clock.isUsMarketJustClosed())
-                : isUk
-                    ? (clock.isUkMarketOpen() || clock.isUkMarketJustClosed())
-                    : (clock.isTwMarketOpen() || clock.isTwMarketJustClosed());
+    public LocalDate resolve(String stockCode, String market, Instant observationInstant) {
+        if (observationInstant == null) {
+            throw new IllegalArgumentException("observationInstant is required");
+        }
+        var observed = observationInstant.atZone(MarketClock.zoneOf(market));
+        LocalDate localDate = observed.toLocalDate();
+        LocalTime localTime = observed.toLocalTime();
+        boolean tradingDay = clock.isTradingDay(market, localDate);
+        boolean liveSession = tradingDay && isLiveOrJustClosed(market, localTime);
         if (liveSession) {
-            return LocalDate.now(MarketClock.zoneOf(market));
+            return localDate;
         }
         Optional<LocalDate> latest = source.findMaxTradingDate(stockCode, market);
-        return latest.orElseGet(() -> LocalDate.now(MarketClock.zoneOf(market)));
+        return latest.orElse(localDate);
+    }
+
+    private static boolean isLiveOrJustClosed(String market, LocalTime time) {
+        if ("美股".equals(market)) {
+            return !time.isBefore(LocalTime.of(9, 30)) && time.isBefore(LocalTime.of(16, 20));
+        }
+        if ("英股".equals(market)) {
+            return !time.isBefore(LocalTime.of(8, 0)) && time.isBefore(LocalTime.of(16, 50));
+        }
+        return !time.isBefore(LocalTime.of(9, 0)) && time.isBefore(LocalTime.of(13, 50));
+    }
+
+    /** Legacy convenience only; Task 350 production producers pass their captured Instant explicitly. */
+    @Deprecated(forRemoval = false)
+    public LocalDate resolve(String stockCode, String market) {
+        return resolve(stockCode, market, Instant.now());
     }
 }
