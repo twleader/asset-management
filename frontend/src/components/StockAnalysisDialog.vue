@@ -936,8 +936,8 @@ const chartOption = computed(() => {
       const textStyle = { fontSize: 12, color: '#475569', rich: richStyles }
       // 兩組 legend，各自貼著自己的 pane：股價／均線在上圖頂端，子圖指標移到
       // 兩張圖中間（＝KD 子圖正上方）。十項全擠在頂端一列會過密且與股價無關聯。
-      // KD 那組用 bottom 定位（不依賴容器總高）：grid[1] 頂端距底部 = bottom 60 + height 145 = 205，
-      // legend 兩行約 36px，加上下各 16px 間隙 → bottom 221，落在 221~257，grid[0] 則收在 273。
+      // KD 那組用 bottom 定位（不依賴容器總高）：grid[1] 頂端距底部 = bottom 60 + height 135 = 195，
+      // legend 兩行約 36px，加上下各 16px 間隙 → bottom 211，落在 211~247，grid[0] 則收在 263。
       return [
         {
           data: cost != null
@@ -949,7 +949,7 @@ const chartOption = computed(() => {
         },
         {
           data: subLegend.map(([name]) => name),
-          bottom: 221,
+          bottom: 211,
           itemGap: 30,
           formatter, textStyle
         }
@@ -958,13 +958,15 @@ const chartOption = computed(() => {
     axisPointer: { link: [{ xAxisIndex: 'all' }] },
     grid: [
       // 容器總高 500（Task：850px 視窗下彈窗需捲動 63px，把高度預算收緊到不必捲動；
-      // 原本 580／225／155 的分配見 git history）。上下 pane 約 167/145（54:46）——
-      // 子圖過矮時三條 KD 線會擠成一團看不出交叉，故只從 155 微降到 145（貼著允許下限），
-      // 大部分高度差改從上圖繪圖區（225→167）與頂部留白（72→60）擠出來。
-      // bottom 273 = grid[1] 頂端(205) + 16 + KD legend 一列(36) + 16，
+      // 原本 580／225／155 的分配見 git history）。上下 pane 約 177/135（57:43）——
+      // 145 原本已是 KD,J 五線模式（K9/D9/J9/K3D2/RSV）貼著驗證過的下限；這次依威廉指標
+      // （單線模式）的要求再降 10px 到 135，freed 的高度全數挪給上圖繪圖區（167→177），
+      // grid[1] 底部留白(60，x 軸標籤＋dataZoom 空間)不變。KD,J 模式下線條密度已逼近可辨識
+      // 下限，若之後還要再縮，需先切回 KD,J 肉眼複查交叉是否仍清楚。
+      // bottom 263 = grid[1] 頂端(195) + 16 + KD legend 一列(36) + 16，
       // legend 上下各留 16px 呼吸空間（維持原本數字不動）；只留 6~8px 時它會緊貼上圖底軸，實機看起來很擠。
-      { left: 64, right: 96, top: 60, bottom: 273 },
-      { left: 64, right: 96, top: 'auto', height: 145, bottom: 60 }
+      { left: 64, right: 96, top: 60, bottom: 263 },
+      { left: 64, right: 96, top: 'auto', height: 135, bottom: 60 }
     ],
     dataZoom: [
       // 期間按鈕只調 dataZoom 窗（不 roundtrip）；ez 合成自手動拖曳(zoomPct)優先、否則期間預設，最高/最低標記同窗
