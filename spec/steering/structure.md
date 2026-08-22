@@ -351,7 +351,7 @@ fubon-broker-service/
 ```
 
 - proprietary SDK 只存在這個 Python service；Spring modules 經 `X-Internal-Service-Token` 主動 pull normalized internal API，不直接 import SDK。
-- 服務唯讀：只允許 health/config、portfolio dry-read、台股 intraday quote；不提供下單／改單／刪單，不連 PostgreSQL／Redis、不反向呼叫 business。
+- 服務唯讀：只允許 health/config、portfolio dry-read、台股 intraday quote；不提供下單／改單／刪單（全專案鐵則，見 CLAUDE.md〈券商 API 只能查詢，不得交易〉），不連 PostgreSQL／Redis、不反向呼叫 business。
 - Compose 固定 `platform: linux/amd64`、無 host port、只接 `asset-net`、non-root/read-only/tmpfs/drop capabilities。官方 zip/wheel 安裝媒介不入 Git/build context/final image；hash 驗證後安裝的 runtime package可存在final image。
 - `secrets/fubon/sdk/` 只掛Python；Java services只可掛`secrets/fubon/shared/`。disabled或misconfigured時process/service仍healthy，functional feature回typed failure、零外呼/零寫入。
 - business-services 是庫存 persistence與tenant/transaction owner；external-materials-service是Redis live quote唯一writer。Python不得跨越這兩個責任邊界。
@@ -507,5 +507,6 @@ frontend ──► bff ──► business-services ──► postgres
 - ❌ frontend 直接打 business-services、external-materials-service 或 fubon-broker-service
 - ❌ business-services 直接打外部行情 / NAV / 配息 API（一律經 external-materials）
 - ❌ external-materials-service 反向呼叫 business-services
-- ❌ fubon-broker-service 下單、寫 PostgreSQL／Redis或反向呼叫任一Spring service
+- ❌ **任何 service** 呼叫券商 API／SDK 的下單／改單／刪單或任何具金融副作用的寫入（見 CLAUDE.md〈券商 API 只能查詢，不得交易〉，全專案鐵則）
+- ❌ fubon-broker-service 寫 PostgreSQL／Redis或反向呼叫任一Spring service
 - ❌ 任何 service 跨層直接讀對方資料庫表（除非由 SDD 明確設計）
