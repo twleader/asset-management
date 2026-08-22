@@ -12,7 +12,7 @@
 
 `backend/src/main/java/com/steven/assets/service/PortfolioAdviceService.java`（1053 行）的 `generate(InvestmentProfileInput in)` 走同步 Messages API（**非 Batch，無 50% 折扣**）：
 
-- `model` 預設 `claude-opus-4-8`、`MAX_TOKENS = 16000`、`ThinkingConfigAdaptive`、`OutputConfig.effort` 預設 `medium`
+- `model` 預設 `claude-opus-5`、`MAX_TOKENS = 16000`、`ThinkingConfigAdaptive`、`OutputConfig.effort` 預設 `medium`
 - 掛 `WebSearchTool20260209`，`maxUses` 預設 4（`DEFAULT_WEB_SEARCH = 4`），**每次搜尋另計費**
 - 形狀為非同步：先落 `PROCESSING` 列 → 背景執行緒跑 `runGeneration(...)` → 前端輪詢
 
@@ -197,7 +197,7 @@
 - [x] **339.9 `model` 欄位記錄檔位與版本**
 
     - `local` → `local-allocation:v1`
-    - `hybrid` → `hybrid-allocation:v1+<實際 Claude model id>`（例如 `hybrid-allocation:v1+claude-haiku-4-5`）
+    - `hybrid` → `hybrid-allocation:v1+<實際 Claude model id>`（例如 `hybrid-allocation:v1+claude-fable-5`）
     - `llm` → 既有行為（實際 model id）
 
     欄位長度為 `varchar(64)`，`hybrid` 的組合字串須確認不超長（沿用既有 truncate 慣例）。**配置模板調整時須提升版本號**（同 t336 對 `local-rule-engine:v1` 的理由）。

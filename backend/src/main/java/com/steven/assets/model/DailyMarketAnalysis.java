@@ -67,7 +67,7 @@ public class DailyMarketAnalysis {
     @Column(name = "us_context", columnDefinition = "TEXT")
     private String usContext;
 
-    /** 所用模型（claude-opus-4-8）。 */
+    /** 所用模型（claude-opus-5）。 */
     @Column(name = "model", length = 64)
     private String model;
 

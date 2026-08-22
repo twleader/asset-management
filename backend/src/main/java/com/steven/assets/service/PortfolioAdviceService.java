@@ -106,9 +106,9 @@ public class PortfolioAdviceService {
     // ===== 成本控管白名單（技術白名單，非業務分類，不入 /api/settings；比照 MarketAnalysisService）=====
 
     private static final List<PortfolioAdviceSettingsDto.ModelOption> AVAILABLE_MODELS = List.of(
-            new PortfolioAdviceSettingsDto.ModelOption("claude-opus-4-8", "Opus 4.8（最佳品質）"),
-            new PortfolioAdviceSettingsDto.ModelOption("claude-sonnet-5", "Sonnet 5（品質接近、較省）"),
-            new PortfolioAdviceSettingsDto.ModelOption("claude-haiku-4-5", "Haiku 4.5（最省、較粗略）")
+            new PortfolioAdviceSettingsDto.ModelOption("claude-opus-5", "Opus 5（最佳品質）"),
+            new PortfolioAdviceSettingsDto.ModelOption("claude-fable-5", "Fable 5（品質接近、較省）"),
+            new PortfolioAdviceSettingsDto.ModelOption("claude-sonnet-5", "Sonnet 5（最省、較粗略）")
     );
 
     private static final List<PortfolioAdviceSettingsDto.EffortOption> AVAILABLE_EFFORTS = List.of(
@@ -153,7 +153,7 @@ public class PortfolioAdviceService {
 
     /**
      * hybrid 檔位寫入 {@code portfolio_advice.model} 的前綴，後接實際 Claude model id
-     * （例：{@code hybrid-allocation:v1+claude-haiku-4-5}）。欄位長度 varchar(64)，仍過既有 truncate。
+     * （例：{@code hybrid-allocation:v1+claude-fable-5}）。欄位長度 varchar(64)，仍過既有 truncate。
      * <b>配置模板調整時須連同 {@link LocalPortfolioAllocationEngine#ENGINE_VERSION} 一起提升版本號。</b>
      */
     public static final String HYBRID_MODEL_PREFIX = "hybrid-allocation:v1+";
@@ -222,7 +222,7 @@ public class PortfolioAdviceService {
     @Value("${anthropic.api-key:}")
     private String apiKey;
 
-    @Value("${anthropic.model:claude-opus-4-8}")
+    @Value("${anthropic.model:claude-opus-5}")
     private String defaultModel;
 
     private volatile AnthropicClient anthropicClient;
