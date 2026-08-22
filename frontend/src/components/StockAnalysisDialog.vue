@@ -2,6 +2,7 @@
   <el-dialog
     :model-value="modelValue"
     @update:model-value="$emit('update:modelValue', $event)"
+    class="stock-analysis-dialog"
     width="min(1100px, calc(100vw - 32px))"
     top="calc(15vh - 25px)"
     destroy-on-close
@@ -1101,4 +1102,25 @@ const chartOption = computed(() => {
   font-weight: 700;
   color: #0f172a;
 }
+
+/* 對話框高度上限＋內部捲動：與 top="calc(15vh - 25px)"、Element Plus 預設 dialog 底部
+   margin 50px 同一份預算算出可用高度，避免矮視窗下內容（尤其走勢圖底部的 KD/MACD 等子圖
+   x 軸）被裁掉看不到。flex-column 讓 header 保持原生尺寸、不參與捲動（天然固定，不必
+   position:sticky），只有 body 在超出上限時捲動。
+   .el-dialog__body 的 min-height:0 是必要項：flex 子元素預設 min-height:auto 會被內容
+   撐開到原始高度，沒有這行 overflow-y:auto 會形同虛設、根本不會出現捲軸。
+   放在全域 style（而非 scoped 的 :deep()）：實測 :deep(.stock-analysis-dialog) 不生效——
+   el-dialog 的實際內容（.el-dialog／.el-dialog__header／.el-dialog__body）是 ElDialog 經
+   Teleport＋ElOverlay／ElFocusTrap／ElDialogContent 多層元件轉手才渲染出來，scoped 的
+   data-v-* attribute 沒有一路傳到那麼深（class 有傳到是因為 Element Plus 自己手動轉發
+   $attrs，屬性含義不同），與下面 dividend-year-summary 是同一類問題，故同樣改走全域 style。
+   用獨立 class .stock-analysis-dialog（而非裸 .el-dialog）限定只影響這個對話框，
+   不外溢到全站其它 el-dialog。 */
+.stock-analysis-dialog {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - (15vh - 25px) - 50px);
+}
+.stock-analysis-dialog .el-dialog__header { flex: none }
+.stock-analysis-dialog .el-dialog__body { flex: 1; overflow-y: auto; min-height: 0 }
 </style>
