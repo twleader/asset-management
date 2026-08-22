@@ -29,7 +29,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 
 ---
 
-## 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–357）
+## 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–358）
 
 | Task | 標題 | 位置 |
 |---|---|---|
@@ -355,6 +355,8 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 354 | TWSE 未公布時以 DGPA 完整行事曆暫行推導台股交易日（Requirement 37） | [tasks/t354_dgpa_calendar_fallback.md](tasks/t354_dgpa_calendar_fallback.md) |
 | 355 | 股票分析價格圖新增日 K／週 K（Requirement 92） | [tasks/t355_stock_analysis_daily_weekly_candles.md](tasks/t355_stock_analysis_daily_weekly_candles.md) |
 | 356 | 今日交易雷達拆為「一周」「1周~1月」「1月~6月」三軌，並把日K 棒與週K 重新計算的指標納入評分（Requirement 93） | [tasks/t356_radar_three_horizon_weekly_k.md](tasks/t356_radar_three_horizon_weekly_k.md) |
+| 357 | 配息事件的四個日期各自獨立落地與顯示：除息／除權／發放股息／發放股權，格式 `yyyy-MM-dd`（Requirement 94） | [tasks/t357_dividend_four_dates.md](tasks/t357_dividend_four_dates.md) |
+| 358 | 今日股市分析頁面改為分類分點呈現：技術面／量能面／美股連動／籌碼面各自獨立、台股與美股分開區塊（Requirement 95） | [tasks/t358_market_analysis_structured_sections.md](tasks/t358_market_analysis_structured_sections.md) |
 
 > **註：Task 229–263、268、293–296 以各自任務檔為準。**
 

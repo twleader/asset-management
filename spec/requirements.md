@@ -3523,7 +3523,31 @@ FROM stock_price_history WHERE market='台股';
 
 ---
 
-### Requirement 94／Task 357: 今日股市分析頁面改為分類分點呈現——技術面／量能面／美股連動／籌碼面各自獨立、台股與美股分開區塊
+### Requirement 94／Task 357: 配息事件的四個日期各自獨立落地與顯示（除息／除權／發放股息／發放股權）
+
+**User Story:** 作為投資人，我希望在交易雷達的「下一配息」區塊看到**四個**日期——除息日、除權日、發放股息日、發放股權日——而且一律是 `yyyy-MM-dd`，因為除息與除權是兩件不同的事（一個扣現金、一個增股數），發放日又各自不同；現在只給我一個日期加一串 ISO timestamp，我沒辦法據此安排。
+
+> **本 Requirement 的成因是一個沉默的資料遺失，不只是顯示問題。** FinMind 的 `TaiwanStockDividend` 同時提供 `CashExDividendTradingDate`（除息）與 `StockExDividendTradingDate`（除權），但本專案有**三處**抓取路徑都寫成「先取現金除息日，空的才退而取除權日」，再一起存進單一欄 `ex_dividend_date`。**因此只要一檔同時配息又配股，除權日就在入庫當下被丟棄**，且無任何錯誤或警示。DB 的 `stock_dividend_snapshot_event` 與 `stock_dividend_history` 都只有 `ex_dividend_date`／`cash_payment_date`／`stock_payment_date` 三個日期欄，沒有除權日欄位。要滿足本 Requirement 必須先補回這個欄位並停止壓合。
+>
+> **同一個缺陷已經在畫面上輸出錯誤資訊：**「股票分析 → 股利歷史」的「除息日」欄，對純配股標的顯示的其實是除權日（`2881` 於 2021–2025 現金股利皆為 0，該欄卻有日期）。
+>
+> **四個日期中只有三個取得得到。** 2026-08-22 經既有 `GET /internal/dividend-history` 實打 FinMind 驗證：除息日、除權日、發放股息日皆有值；**發放股權日（`StockDividendPaymentDate`）恆為 `null`**——`7556` 連續六年、`2881` 五年皆然，DB 9968 筆 snapshot event 中 343 筆有股票股利、`stock_payment_date` 0 筆有值，另一資料集 `TaiwanStockDividendResult` 也不含任何日期欄。本 Requirement 因此交付「三個可得日期 ＋ 一個誠實標示為『資料源未提供』的缺值」，**不得推估、不得以發放股息日冒充**；是否另尋來源為獨立任務。
+
+**Acceptance Criteria:**
+
+- [ ] **四個日期各自獨立儲存，不得再壓合**：`stock_dividend_snapshot_event` 與 `stock_dividend_history` 各新增 `ex_rights_date`（除權日）欄，與既有 `ex_dividend_date`（除息日）、`cash_payment_date`（發放股息日）、`stock_payment_date`（發放股權日）並列。抓取端**一律**把 `CashExDividendTradingDate` 寫入 `ex_dividend_date`、`StockExDividendTradingDate` 寫入 `ex_rights_date`，**禁止**任何「其一為空就拿另一個頂替」的 fallback——那正是本 Requirement 要修的缺陷。只配現金的事件其 `ex_rights_date` 為 `null`，只配股的事件其 `ex_dividend_date` 為 `null`。
+- [ ] **既有欄位語意不得偷偷改變**：`ex_dividend_date` 在本 Requirement 之後**只代表除息日**。但既有資料中它可能存的是除權日（當年該事件沒有現金除息日時）。因此**必須連同歷史一併重抓回補**，不得只改欄位定義而讓舊資料以新語意被解讀——那會讓還原權息的價格序列與畫面同時說謊。回補完成前，任何以 `ex_dividend_date` 為「除息日」的新增斷言都不得成立。
+- [ ] **還原權息的行為不得因此改變**：`DistributionAdjustedPriceService` 目前以 `ex_dividend_date` 作為事件套用日。新增 `ex_rights_date` 後，**還原邏輯必須明確定義每一種事件用哪一個日期**，並以固定資料的回歸測試證明：在回補前後，既有標的的還原後價格序列與交易雷達的 `score`／`action` 逐位不變（除非該標的的資料確實被回補修正，那種情形必須逐檔列出並說明）。**不得**在沒有回歸證據的情況下宣稱「只是加欄位、不影響評分」。
+- [ ] **「下一配息」呈現的是同一次事件的四個日期**：找出最近一次尚未發生的配息事件，把它的四個日期一併列出；不得四個日期各自往後找最近的一個而拼成一筆不存在的事件。事件不含某一類時該日期顯示 `—`，**不得顯示 0、不得留白到看不出是缺值**。
+- [ ] **全部日期一律 `yyyy-MM-dd`**：畫面、匯出與 API 的四個日期欄一律為 `yyyy-MM-dd`。現行「下一配息（已知時點）」區塊顯示的 `2026-08-21T21:05:57.205074Z` 是 observation 的**取得時點**、不是配息日期，**僅前端呈現**改為 `yyyy-MM-dd`；**API 與匯出維持 ISO-8601 date-time**（既有 OpenAPI 契約即 `format: date-time`，`knownAt` 是 as-of 稽核時點，截成日期會破壞 Requirement 86 的證據可稽核性）。
+- [ ] **資料來源與跨層邊界不變**：四個日期只由既有 `external-materials-service` 的 FinMind 抓取路徑取得並落地；business-services 不得為此直連任何外部 API。歷史回補走既有的重抓機制，不新增排程、不新增對外端點。
+- [ ] **API、匯出與 OpenAPI 同步**：交易雷達的 dividend evidence（`TradingRadarDto.RadarEvidence`）新增**四個**日期欄（除息／除權／發放股息／發放股權各一），既有 `nextDistributionDate` 保留並重新定義為 `anchorDate`（兩個除息除權日中較早且非 null 者），其語意變更須於 Javadoc 明寫，`docs/openapi/docker-external-api.yaml` 必須在**同一個 commit** 內補齊 properties 與 `required`，依 Requirement 86 的硬規則，文件不完整即視為功能未完成。匯出檔同步新增對應欄位。
+- [ ] **不得表述為預測**：四個日期只描述**已由官方或資料源公布**的既定時點；尚未公布者一律為缺值並揭露「尚未公布」，**不得**以往年同期推估、不得以任何方式填補。
+- [ ] **驗證**：測試至少涵蓋——(a) 同時有現金與股票除息除權的事件，兩個日期各自落到正確欄位且互不覆蓋；(b) 只有其中一種時另一種為 `null` 而非被頂替；(c) 「下一配息」取的是同一次事件的四個日期；(d) 四個日期的格式為 `yyyy-MM-dd`；(e) 還原權息在回補前後的逐位回歸；(f) Liquibase changeset 冪等、可重複執行；(g) OpenAPI 與 gateway 雙向對齊。部署後於實機確認至少一檔同時配息配股的台股，其四個日期與官方公告一致。
+
+---
+
+### Requirement 95／Task 358: 今日股市分析頁面改為分類分點呈現——技術面／量能面／美股連動／籌碼面各自獨立、台股與美股分開區塊
 
 **User Story:** 作為使用者，我希望「今日股市分析」頁面把研判文字拆成一條一條的重點，而且台股與美股的重點要分開顯示，不要再全部黏成一大坨文字要我自己找重點。
 
@@ -3538,7 +3562,7 @@ FROM stock_price_history WHERE market='台股';
 - [ ] **新增一個結構化欄位 `factorGroups`，把既有四類 fragment 分開暴露，不得與 `keyFactors` 的評分因子清單混為一談**：`MarketAnalysisResult`（`backend/src/main/java/com/steven/assets/dto/MarketAnalysisResult.java`）新增巢狀 record `FactorGroups(List<String> twTechnical, List<String> twVolume, List<String> us, List<String> chip)` 與一個欄位 `FactorGroups factorGroups`。四個清單的內容**直接**取自 `LocalMarketAnalysisEngine.evaluate()` 既有的四個區域 fragment list（`twFragments` 拆分後只留 MA／KD／MACD／RSI 四項敘述給 `twTechnical`、`volumeSignal()` 新增的獨立 `volumeFragments` 給 `twVolume`、既有 `usFragments` 給 `us`、既有 `chipFragments` 給 `chip`），**不得**重新組一份新文字或重新跑一次規則——每一條字串必須與既有 `twContext`／`usContext`／`summary` 對應段落內用分號串接的那些子句逐字相同（只是不再串接、不再加句尾句號），使新舊欄位在語意上可互相驗證。`factorGroups` 是 `MarketAnalysisResult` 的可選欄位（LLM 回傳的 JSON 沒有這個 key，Jackson 依既有 `@JsonIgnoreProperties(ignoreUnknown = true)` 與 record 的缺欄位為 null 語意自然留空，**不需要**在 LLM 的 system prompt schema 裡新增這個欄位、也不得要求模型輸出它——LLM 路徑本來就沒有四個 fragment list 可分類，勉強要模型自行分類文字歸屬四類，只會製造不可驗證的分類幻覺）。
 - [ ] **`volumeSignal()` 改用獨立的 `volumeFragments`，這是償還既有技術債，不是行為變更**：`LocalMarketAnalysisEngine.volumeSignal(List<double[]> closes, List<double[]> volumes, List<String> twFragments)`（`:444`）的第三個參數改名並改用為 `List<String> volumeFragments`，方法內 `twFragments.add(desc)`（`:486`）改為 `volumeFragments.add(desc)`。呼叫端 `evaluate()`（`:227`）改傳入新的 `List<String> volumeFragments = new ArrayList<>()`，不再共用 `twFragments`。**既有 `twContext` 欄位的組成邏輯必須同步調整為 `twFragments` 與 `volumeFragments` 兩者合併字串**（例如 `String.join("；", concat(twFragments, volumeFragments))`），使 `twContext` 的最終文字內容與拆分前逐字相同——這是「不得破壞既有欄位」的具體驗收點，不能因為內部拆分就讓 `twContext` 少了量能面那一句。`buildSummary()`（`:624-648`）的「技術面：」段落同理，須合併 `twFragments` 與 `volumeFragments` 兩者才能維持既有 `summary` 文字不變。
 - [ ] **既有 `summary`／`twContext`／`usContext`／`keyFactors`／`model` 欄位一律原樣保留，不得刪除、改名、改變既有內容**：這四個既有欄位是 `MarketAnalysisEmailDispatcher.buildHtml()`（`:107-110`，由 `dispatchDaily()`〔`:45-75`，於 `:61` 呼叫〕組出 HTML 信件內文）寄送 email 內文、以及歷史列表 `el-table` 的 `summary` 欄（`TodayMarketAnalysisView.vue:176-178`）僅有的資料來源，本 Requirement **不修改 email 版式**（見下方排除範圍），故這四個既有欄位的既有 consumer 一個字都不能改。新的 `factorGroups` 是**額外新增**的欄位，`MarketAnalysisResult`／`MarketAnalysisDto`／DB 皆為新增而非替換。
-- [ ] **DB 新增一個 JSON 字串欄位 `factor_groups`，沿用既有 `key_factors`／`news_highlights` 的「TEXT 欄位存 JSON 字串、DTO 層解析」既有慣例，不新增巢狀資料表**：`DailyMarketAnalysis` entity（`backend/src/main/java/com/steven/assets/model/DailyMarketAnalysis.java`）新增 `@Column(name = "factor_groups", columnDefinition = "TEXT") private String factorGroups;`（nullable，比照既有 `summary`／`keyFactors`／`newsHighlights`／`twContext`／`usContext` 皆為 `TEXT` 且無 `NOT NULL`）。新增 Liquibase changeset `v1.108.0-market-analysis-factor-groups.sql`（建檔前須先查運行中 `databasechangelog`，若 `v1.108.0` 已被其他 worktree 佔用，須連同檔名、changeset id、本 Requirement 與 Task 357 一次調整版號）：
+- [ ] **DB 新增一個 JSON 字串欄位 `factor_groups`，沿用既有 `key_factors`／`news_highlights` 的「TEXT 欄位存 JSON 字串、DTO 層解析」既有慣例，不新增巢狀資料表**：`DailyMarketAnalysis` entity（`backend/src/main/java/com/steven/assets/model/DailyMarketAnalysis.java`）新增 `@Column(name = "factor_groups", columnDefinition = "TEXT") private String factorGroups;`（nullable，比照既有 `summary`／`keyFactors`／`newsHighlights`／`twContext`／`usContext` 皆為 `TEXT` 且無 `NOT NULL`）。新增 Liquibase changeset `v1.108.0-market-analysis-factor-groups.sql`（建檔前須先查運行中 `databasechangelog`，若 `v1.108.0` 已被其他 worktree 佔用，須連同檔名、changeset id、本 Requirement 與 Task 358 一次調整版號）：
   ```sql
   ALTER TABLE daily_market_analysis ADD COLUMN IF NOT EXISTS factor_groups TEXT;
   ```
@@ -3555,4 +3579,3 @@ FROM stock_price_history WHERE market='台股';
 - [ ] **測試（後端）**：至少涵蓋——(a) `LocalMarketAnalysisEngine.evaluate()` 在固定輸入下，`factorGroups.twTechnical`／`twVolume`／`us`／`chip` 四個清單的內容與既有 `twContext`（拆分 `twFragments`＋`volumeFragments` 後合併字串）／`usContext` 語意一致（逐條比對子句，而非整段字串相等——`twContext` 是分號串接後的單一字串，`factorGroups.twTechnical`／`twVolume` 是拆分後的陣列，須斷言「`twContext` 由這兩個陣列依序合併並以「；」分號串接而成」）；(b) `volumeSignal()` 的敘述**不再**出現在 `twFragments`、只出現在 `volumeFragments`；(c) 量能訊號因資料不足而不計分時，`factorGroups.twVolume` 為空陣列而非缺失整個物件；(d) LLM 路徑（`engine=llm`）產生的 `MarketAnalysisResult.factorGroups()` 恆為 `null`，`applyResult` 寫入的 `daily_market_analysis.factor_groups` 恆為 `NULL`；(e) `MarketAnalysisDto.from()` 對 `factor_groups` 為 `NULL`／空白／損毀 JSON 三種情形皆回傳 `factorGroups=null`（不拋例外、不回傳空物件）；(f) `applyLocalResult` 正確序列化 `factorGroups` 並可經 `MarketAnalysisDto.from()` round-trip 還原為與原始 `FactorGroups` 逐欄相等；(g) 既有 `MarketAnalysisService`／`LocalMarketAnalysisEngine`／`TechnicalIndicatorService` 既有測試不得因本次改動而回歸（尤其 `twContext`／`summary` 的既有字串斷言須逐字通過，證明拆分 `twFragments`／`volumeFragments` 未改變既有輸出內容）。
 - [ ] **驗證（前端，無自動化測試框架前例可援引）**：本專案前端目前僅有 `frontend/src/utils/*.test.js` 這類工具函式層級的 contract test（例如 `stockAnalysisDialog.contract.test.js`），**沒有**任何 view 元件層級的既有測試可援引，`TodayMarketAnalysisView.vue` 本身亦無既有測試檔。故本 Requirement 不新增前端自動化測試，改以 `/run-stack` 實機驗證：`--no-cache` 重建並 recreate `business-services`／`bff`／`frontend`，登入後於「今日股市分析」頁分別驗證：(a) `engine=local` 觸發一次分析後，卡片同時顯示四個分類區塊與既有 `summary`／`keyFactors`／`twContext`／`usContext`，且台股（技術面＋量能面）與美股連動視覺上分屬不同區塊；(b) 切回 `engine=llm` 或檢視既有歷史（`factorGroups` 為 `null`）的舊資料時，畫面不顯示四個分類區塊、不報錯、既有呈現方式正常；(c) 歷史列表 `summary` 欄維持既有整段文字顯示，未被本 Requirement 更動。
 - [ ] **不在本次範圍**：不修改規則引擎評分邏輯、權重或門檻；不修改 `MarketAnalysisEmailDispatcher` email 版式；不修改 `/api/market-analysis/today`／`/api/bff/today-market-analysis`／`/api/public/market-analysis/today` 的路徑或既有必填欄位；不修改歷史列表的呈現方式；不新增 `@Scheduled`；不變更 `RULE_VERSION`（`local-rule-engine:v1` 不變——本 Requirement 不改變任何訊號的計算結果，只改變既有結果的呈現分類）。
-

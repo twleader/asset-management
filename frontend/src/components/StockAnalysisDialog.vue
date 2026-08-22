@@ -73,19 +73,19 @@
               </span>
             </template>
           </div>
-          <div v-if="isIntraday && intradayLoading" class="analysis-loading" style="height:580px">
+          <div v-if="isIntraday && intradayLoading" class="analysis-loading" style="height:500px">
             <el-icon class="is-loading" size="36"><Loading /></el-icon>
             <div>載入當日分時資料中…</div>
           </div>
-          <div v-else-if="isIntraday && !intradayTicks.length" class="analysis-empty" style="height:580px">
+          <div v-else-if="isIntraday && !intradayTicks.length" class="analysis-empty" style="height:500px">
             無當日分時資料
           </div>
-          <div v-else-if="isCandle && !activeFrame.dates?.length" class="analysis-empty" style="height:580px">無完整 OHLC 資料</div>
+          <div v-else-if="isCandle && !activeFrame.dates?.length" class="analysis-empty" style="height:500px">無完整 OHLC 資料</div>
           <!-- notMerge 必要：切換指標時子圖 series 數量會變（KD,J 五個 vs 威廉指標一個），
                vue-echarts 預設 merge 不會移除多餘的舊 series，舊指標的線會殘留在畫面上。
                dataZoom 的 start/end 本就由 option 明確指定（ez），故 notMerge 不會丟失縮放狀態。 -->
           <v-chart v-else ref="chartRef" :option="chartOption" :update-options="{ notMerge: true }"
-                   style="height:580px" autoresize @datazoom="onZoom" />
+                   style="height:500px" autoresize @datazoom="onZoom" />
         </template>
       </el-tab-pane>
 
@@ -936,8 +936,8 @@ const chartOption = computed(() => {
       const textStyle = { fontSize: 12, color: '#475569', rich: richStyles }
       // 兩組 legend，各自貼著自己的 pane：股價／均線在上圖頂端，子圖指標移到
       // 兩張圖中間（＝KD 子圖正上方）。十項全擠在頂端一列會過密且與股價無關聯。
-      // KD 那組用 bottom 定位（不依賴容器總高）：grid[1] 頂端距底部 = bottom 60 + height 155 = 215，
-      // legend 兩行約 36px，加上下各 16px 間隙 → bottom 231，落在 231~267，grid[0] 則收在 283。
+      // KD 那組用 bottom 定位（不依賴容器總高）：grid[1] 頂端距底部 = bottom 60 + height 145 = 205，
+      // legend 兩行約 36px，加上下各 16px 間隙 → bottom 221，落在 221~257，grid[0] 則收在 273。
       return [
         {
           data: cost != null
@@ -949,7 +949,7 @@ const chartOption = computed(() => {
         },
         {
           data: subLegend.map(([name]) => name),
-          bottom: 231,
+          bottom: 221,
           itemGap: 30,
           formatter, textStyle
         }
@@ -957,11 +957,14 @@ const chartOption = computed(() => {
     })(),
     axisPointer: { link: [{ xAxisIndex: 'all' }] },
     grid: [
-      // 容器總高 580。上下 pane 約 58:42（225 / 155）——子圖過矮時三條 KD 線會擠成一團看不出交叉。
-      // bottom 283 = grid[1] 頂端(215) + 16 + KD legend 一列(36) + 16，
-      // legend 上下各留 16px 呼吸空間；只留 6~8px 時它會緊貼上圖底軸，實機看起來很擠。
-      { left: 64, right: 96, top: 72, bottom: 283 },
-      { left: 64, right: 96, top: 'auto', height: 155, bottom: 60 }
+      // 容器總高 500（Task：850px 視窗下彈窗需捲動 63px，把高度預算收緊到不必捲動；
+      // 原本 580／225／155 的分配見 git history）。上下 pane 約 167/145（54:46）——
+      // 子圖過矮時三條 KD 線會擠成一團看不出交叉，故只從 155 微降到 145（貼著允許下限），
+      // 大部分高度差改從上圖繪圖區（225→167）與頂部留白（72→60）擠出來。
+      // bottom 273 = grid[1] 頂端(205) + 16 + KD legend 一列(36) + 16，
+      // legend 上下各留 16px 呼吸空間（維持原本數字不動）；只留 6~8px 時它會緊貼上圖底軸，實機看起來很擠。
+      { left: 64, right: 96, top: 60, bottom: 273 },
+      { left: 64, right: 96, top: 'auto', height: 145, bottom: 60 }
     ],
     dataZoom: [
       // 期間按鈕只調 dataZoom 窗（不 roundtrip）；ez 合成自手動拖曳(zoomPct)優先、否則期間預設，最高/最低標記同窗
@@ -1119,7 +1122,7 @@ const chartOption = computed(() => {
 .stock-analysis-dialog {
   display: flex;
   flex-direction: column;
-  max-height: calc(100vh - (15vh - 25px) - 50px);
+  max-height: calc(100vh - (15vh - 25px) - 50px - 20px);
 }
 .stock-analysis-dialog .el-dialog__header { flex: none }
 .stock-analysis-dialog .el-dialog__body { flex: 1; overflow-y: auto; min-height: 0 }

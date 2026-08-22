@@ -1930,6 +1930,10 @@ FinMind 自 2025 年起對匿名呼叫額度收緊，超量會回 `402 Payment R
 
 #### 股利歷史資料來源（stock_dividend_history）
 
+> **Task 357 起：除息日與除權日拆為兩個獨立欄位。** FinMind 的 `CashExDividendTradingDate`（除息）與 `StockExDividendTradingDate`（除權）在此之前被**三處**抓取路徑壓成單一 `ex_dividend_date`（先取現金、空的才退取除權），只要一檔同時配息又配股、除權日即在入庫當下被丟棄；純配股的標的其「除息日」欄顯示的實際上是除權日（`2881` 2021–2025 現金股利皆為 0 卻有除息日）。Task 357 新增 `ex_rights_date`、停止壓合，並定義 `anchorDate = min(除息日, 除權日)` 供區間過濾與年度推導使用；落地值仍必須是各自的真實日期，不得以 anchorDate 回填。
+>
+> **發放股權日（`StockDividendPaymentDate`）FinMind 恆為空**——2026-08-22 經 `GET /internal/dividend-history` 實測 `7556` 連續六年、`2881` 五年皆為 `null`；DB 9968 筆 `stock_dividend_snapshot_event` 中 343 筆有股票股利、`stock_payment_date` 0 筆有值；另一資料集 `TaiwanStockDividendResult` 不含任何日期欄。故一律揭露為「資料源未提供」，**不得推估、不得以發放股息日冒充**。
+
 `external-materials-service` 的 `DividendFetchClient.fetchTw` 抓台股股利歷史，台股採兩段資料源：
 
 ```
@@ -3155,7 +3159,7 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
   - `stock_price_history`（個股每日收盤，欄位 `stockCode/market/tradingDate/closePrice`；全域非隔離表）。
   - `twse_index_daily_history`（台股大盤，PK `tradingDate`，欄位 `closePoint`）。
   - `us_index_daily_history`（海外指數，複合 PK `(indexCode, tradingDate)`，`indexCode ∈ {DJI,SPX,IXIC,SOX,...}`，欄位 `closePoint`）。
-  - `stock_dividend_history`（既有股利事件表，`stockCode/market/year/cashDividend/stockDividend/exDividendDate/previousClose/...`；全域非隔離）。
+  - `stock_dividend_history`（既有股利事件表，`stockCode/market/year/cashDividend/stockDividend/exDividendDate/exRightsDate（Task 357 新增）/cashPaymentDate/stockPaymentDate/previousClose/...`；全域非隔離）。
 - **含息（total return）新增（Task 170，Liquibase `v1.52.0`）**：
   - `twse_index_daily_history` 新增 nullable 欄位 `close_point_tr`（發行量加權股價報酬指數收盤）。與同日 `close_point`（價格指數）同列共存——兩者為「同一交易日、不同指數」的獨立量測事實（非由彼此計算得出的衍生值），由 TWSE poller 同次抓寫，屬刻意 co-location（比照 open/close 同列）。
   - `us_index_daily_history` **不改結構**，以新增 `index_code='SP500TR'` 資料列承載 S&P 500 Total Return（Yahoo `^SP500TR`），沿用既有實體／refresh／`/api/us-daily-index` 端點。
@@ -4478,7 +4482,7 @@ TradingRadarView
 
 ### 還原權息技術序列（TW_RULES_V3）
 
-交易雷達以 `stock_price_history` 最近 241 根完成日 K 為基礎（t319 起實際取數為 250、再把 indicator 序列截斷為 241，以吸收未來列與未 verified 當日列的剔除；**序列上限仍是 241**，不是長窗擴大）；若 `PriceQueryService` 有「今日且尚未寫入完成日 K」的 live OHLC，再暫加於序列最前。接著查同一日期區間內 `stock_dividend_history.ex_dividend_date IS NOT NULL` 且現金配息或股票股利為正的事件，由 `DistributionAdjustedPriceService` 以日期升冪套用累積持股因子：
+交易雷達以 `stock_price_history` 最近 241 根完成日 K 為基礎（t319 起實際取數為 250、再把 indicator 序列截斷為 241，以吸收未來列與未 verified 當日列的剔除；**序列上限仍是 241**，不是長窗擴大）；若 `PriceQueryService` 有「今日且尚未寫入完成日 K」的 live OHLC，再暫加於序列最前。接著查同一日期區間內 `COALESCE(stock_dividend_history.ex_dividend_date, ex_rights_date) IS NOT NULL` 且現金配息或股票股利為正的事件（**Task 357 起**：除息日與除權日拆為兩欄，只配股的事件其 `ex_dividend_date` 為 `null`、日期在 `ex_rights_date`，故不得再只看 `ex_dividend_date`），由 `DistributionAdjustedPriceService` 以日期升冪套用累積持股因子：
 
 ```text
 eventFactor = 1 + stockDividend / 10 + cashDividend / eventDayClose
@@ -8751,7 +8755,7 @@ line 的 mark point 繼續掃 visible close。candle mode 分別掃 active frame
 
 runtime 只需重建 BFF／frontend；若與 Task 348 同批交付，依共同 diff 一次重建 external、business、BFF、frontend。實際以 `00697B`、一般股票與 `0000` 切三模式，抽一根日 K 對照 history O/H/L/C、抽一根週 K 手算週開高低收；再切當日，確認仍為分鐘折線。
 
-## Requirement 94／Task 357：今日股市分析頁面分類分點呈現
+## Requirement 95／Task 358：今日股市分析頁面分類分點呈現
 
 ### 問題與既有結構
 
