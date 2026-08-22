@@ -89,9 +89,9 @@ public class MarketAnalysisService {
      * 故不套用「Enum 必須入庫由 /api/settings 管理」規範）。頁面下拉即由此提供。
      */
     private static final List<MarketAnalysisSettingsDto.ModelOption> AVAILABLE_MODELS = List.of(
-            new MarketAnalysisSettingsDto.ModelOption("claude-opus-5", "Opus 5（最佳品質）"),
-            new MarketAnalysisSettingsDto.ModelOption("claude-fable-5", "Fable 5（品質接近、較省）"),
-            new MarketAnalysisSettingsDto.ModelOption("claude-sonnet-5", "Sonnet 5（最省、較粗略）")
+            new MarketAnalysisSettingsDto.ModelOption("claude-fable-5", "Fable 5（最佳品質）"),
+            new MarketAnalysisSettingsDto.ModelOption("claude-opus-5", "Opus 5（居中）"),
+            new MarketAnalysisSettingsDto.ModelOption("claude-sonnet-5", "Sonnet 5（最省）")
     );
 
     /**
