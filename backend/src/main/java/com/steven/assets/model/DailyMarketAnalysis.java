@@ -68,7 +68,7 @@ public class DailyMarketAnalysis {
     private String usContext;
 
     /**
-     * 分類分點 fragment（{@code MarketAnalysisResult.FactorGroups} 的 JSON 序列化，Requirement 94／Task 357）。
+     * 分類分點 fragment（{@code MarketAnalysisResult.FactorGroups} 的 JSON 序列化，Requirement 95／Task 358）。
      * 只有本機規則引擎路徑會寫入；LLM 路徑與既有列一律維持 {@code null}。
      */
     @Column(name = "factor_groups", columnDefinition = "TEXT")

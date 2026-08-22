@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
- * Task 357（Requirement 94）{@code MarketAnalysisDto.factorGroups} 的解析語意測試。
+ * Task 358（Requirement 95）{@code MarketAnalysisDto.factorGroups} 的解析語意測試。
  *
  * <p>{@code parseFactorGroups} 與既有 {@code parse()}（失敗時回 {@code List.of()}）刻意不同：
  * 失敗或空白時回 {@code null}，代表「本次分析沒有分類資料」，與「有分類、剛好零命中」的

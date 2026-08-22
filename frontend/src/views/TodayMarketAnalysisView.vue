@@ -154,7 +154,7 @@
         </el-col>
       </el-row>
 
-      <!-- 分類分點呈現（Requirement 94／Task 357）：本機規則引擎結果才有此欄，LLM 路徑為 null 時整塊不顯示 -->
+      <!-- 分類分點呈現（Requirement 95／Task 358）：本機規則引擎結果才有此欄，LLM 路徑為 null 時整塊不顯示 -->
       <template v-if="today.factorGroups">
         <el-row :gutter="16" style="margin-top:8px">
           <el-col :xs="24" :md="12">
