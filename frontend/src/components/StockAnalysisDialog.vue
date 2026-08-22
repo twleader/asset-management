@@ -1119,7 +1119,7 @@ const chartOption = computed(() => {
 .stock-analysis-dialog {
   display: flex;
   flex-direction: column;
-  max-height: calc(100vh - (15vh - 25px) - 50px);
+  max-height: calc(100vh - (15vh - 25px) - 50px - 20px);
 }
 .stock-analysis-dialog .el-dialog__header { flex: none }
 .stock-analysis-dialog .el-dialog__body { flex: 1; overflow-y: auto; min-height: 0 }
