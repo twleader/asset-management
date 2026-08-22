@@ -119,8 +119,9 @@ export const bffApi = {
       api.get('/bff/stock-analysis/history/stock', { params: { code, market, start, end } }),
     getDividendHistory: (code, market, years = 10) =>
       api.get('/bff/stock-analysis/dividends', { params: { code, market, years } }),
+    // Task 359：與 getQuoteDetail 同一慣例——失敗時不跳全域 toast，改由 dialog 局部降級到既有靜態連結 fallback。
     getEtfHoldings: (code, market) =>
-      api.get('/bff/stock-analysis/etf-holdings', { params: { code, market } }),
+      api.get('/bff/stock-analysis/etf-holdings', { params: { code, market }, skipErrorToast: true }),
     getIntradayTicks: (code, market, date) =>
       api.get('/bff/stock-analysis/intraday-ticks', { params: { code, market, ...(date && { date }) } }),
     // Yahoo 台股同時間點五檔展示 snapshot；錯誤由 dialog 的局部狀態處理。

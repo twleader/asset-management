@@ -105,7 +105,17 @@
 
       <!-- 持股明細（ETF only） -->
       <el-tab-pane v-if="isEtf" label="持股明細" name="holdings">
-        <div style="padding:24px 8px">
+        <div v-if="holdingsLoading" class="analysis-loading">
+          <el-icon class="is-loading" size="36"><Loading /></el-icon>
+          <div>載入持股明細中…</div>
+        </div>
+        <template v-else-if="holdingsData?.holdings?.length">
+          <div style="margin-bottom:8px;color:#64748b;font-size:12px">
+            資料來源：{{ holdingsData.source }}．{{ holdingsData.asOfDate || '時間不明' }}
+          </div>
+          <v-chart :option="holdingsPieOption" style="height:400px" autoresize />
+        </template>
+        <div v-else style="padding:24px 8px">
           <div style="color:#475569;font-size:14px;line-height:1.8;margin-bottom:16px">
             ETF 成分股資料目前免費資料源都有限制（TWSE 無此 API、FinMind 需付費方案、發行商官網為 SPA）。
             <br>點擊以下外部連結可查看最新完整成分股：
@@ -198,15 +208,18 @@
 <script setup>
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
-import { BarChart, LineChart, CandlestickChart } from 'echarts/charts'
+import { BarChart, LineChart, CandlestickChart, PieChart } from 'echarts/charts'
 import { TitleComponent, TooltipComponent, LegendComponent, GridComponent, DataZoomComponent, MarkLineComponent, MarkPointComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
 import { Loading } from '@element-plus/icons-vue'
 import { bffApi } from '@/api/index.js'
+import { escapeHtml } from '@/utils/escapeHtml'
 
 // 注意：tree-shaking 版 echarts 必須顯式註冊元件才生效。MarkPointComponent 漏註冊時，
 // 收盤線的 markPoint（最高/最低標記）會被 ECharts 靜默忽略、完全不畫（markLine 有註冊故 KD 80/20 正常）。
-use([CanvasRenderer, LineChart, BarChart, CandlestickChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent, DataZoomComponent, MarkLineComponent, MarkPointComponent])
+// Task 359：持股明細圓餅圖同一類陷阱——PieChart 未在此 use() 清單註冊會靜默不畫、無錯誤訊息，
+// 這是獨立於 DashboardView.vue 的 <script setup>，不會繼承後者的註冊（比照該檔 392、407 行寫法）。
+use([CanvasRenderer, LineChart, BarChart, CandlestickChart, PieChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent, DataZoomComponent, MarkLineComponent, MarkPointComponent])
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -407,6 +420,9 @@ function onOpen() {
   quoteRequestToken.value++
   quoteDetailLoading.value = false
   quoteDetailAttempted.value = false
+  holdingsData.value = null
+  holdingsLoading.value = false
+  holdingsAttempted.value = false
   fetchHistory()
 }
 
@@ -429,6 +445,10 @@ async function onTabChange(name) {
   if (name === 'quote-detail' && !quoteDetailAttempted.value && !quoteDetailLoading.value) {
     quoteDetailAttempted.value = true
     await fetchQuoteDetail()
+  }
+  if (name === 'holdings' && !holdingsAttempted.value && !holdingsLoading.value) {
+    holdingsAttempted.value = true
+    await fetchHoldings()
   }
 }
 
@@ -557,6 +577,68 @@ const etfExternalLinks = computed(() => {
     ]
   }
   return []
+})
+
+// Task 359：ETF 成分股圓餅圖。lazy-fetch（見 onTabChange，比照 quoteDetailAttempted 模式），
+// holdingsAttempted 避免每次切回本頁籤都重打 API；onOpen() 另外做一輪手動 reset（同 quoteDetail 慣例），
+// 確保切換股票後舊資料不殘留在畫面上。fetch 失敗、或 API 回傳 supported=false／holdings 為空陣列時，
+// holdingsData.holdings 為空／null，模板降級回上面 etfExternalLinks 既有的靜態連結 fallback，
+// 不顯示空白圖表、不拋出未捕捉例外（getEtfHoldings 呼叫已加 skipErrorToast:true，比照 getQuoteDetail
+// 慣例，避免全域 toast 汙染其他頁籤）。
+const holdingsData = ref(null)
+const holdingsLoading = ref(false)
+const holdingsAttempted = ref(false)
+async function fetchHoldings() {
+  if (!props.stock) return
+  holdingsLoading.value = true
+  try {
+    holdingsData.value = await bffApi.stockAnalysis.getEtfHoldings(props.stock.stockCode, props.stock.market)
+  } catch (e) {
+    holdingsData.value = null
+  } finally {
+    holdingsLoading.value = false
+  }
+}
+
+// 配色比照 DashboardView.vue 的 TW_PIE_COLORS（該檔 <script setup> 頂層綁定不會被匯出，無法跨檔
+// import，故在此重複定義同一組色階以維持視覺一致）；不含 Dashboard 版本保留給「其它」桶的灰色——
+// 本頁 holdings 是 API 回傳的明確持股清單，不合成「其它」分類。
+const ETF_HOLDINGS_PIE_COLORS = ['#2563eb', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#84cc16', '#ec4899', '#0ea5e9']
+const holdingsPieOption = computed(() => {
+  const list = holdingsData.value?.holdings || []
+  const data = list
+    .filter(h => Number(h.weight) > 0)
+    .map((h, i) => ({
+      value: Number(h.weight),
+      name: h.stockName || h.stockCode || '',
+      code: h.stockCode || '',
+      shares: h.shares,
+      itemStyle: { color: ETF_HOLDINGS_PIE_COLORS[i % ETF_HOLDINGS_PIE_COLORS.length] }
+    }))
+  return {
+    tooltip: {
+      trigger: 'item',
+      // weight 已是 API 回傳的百分比數值，直接格式化顯示，不透過 ECharts {d} 的自動歸一化——
+      // Yahoo「前 10 大」來源（359.3c）可視 slice 總和恆小於 100%，{d} 會相對可視總和重新換算，
+      // 失真放大單一持股的顯示比例，與真實權重不符。
+      formatter: p => {
+        const code = p.data?.code ? `${escapeHtml(p.data.code)} ` : ''
+        const sharesTxt = p.data?.shares == null ? '—' : `${Number(p.data.shares).toLocaleString('zh-TW')} 股`
+        return `${code}${escapeHtml(p.name)}<br/>${Number(p.value).toFixed(2)}%（${sharesTxt}）`
+      }
+    },
+    legend: { show: false },
+    series: [{
+      type: 'pie',
+      radius: ['46%', '78%'],
+      center: ['50%', '50%'],
+      data,
+      // 同上：不用 {d}，理由同 tooltip formatter 註解
+      label: { formatter: p => `${p.name}\n${Number(p.value).toFixed(2)}%`, fontSize: 11 },
+      labelLayout: { hideOverlap: true },
+      itemStyle: { borderRadius: 6 }
+    }]
+  }
 })
 
 // Task 261：MA 與 KD 一律由後端 TechnicalIndicatorService 供給（經 BFF chart-series 對齊），

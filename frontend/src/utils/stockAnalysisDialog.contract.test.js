@@ -6,6 +6,9 @@ const dialog = readFileSync(new URL('../components/StockAnalysisDialog.vue', imp
 const api = readFileSync(new URL('../api/index.js', import.meta.url), 'utf8')
 const quoteSection = dialog.slice(dialog.indexOf('const quoteLevels'), dialog.indexOf('// 股利歷史'))
 const chartSection = dialog.slice(dialog.indexOf('const chartOption'), dialog.indexOf('</script>'))
+const holdingsTemplate = dialog.slice(dialog.indexOf('<!-- 持股明細'), dialog.indexOf('<!-- 股利歷史'))
+const holdingsSection = dialog.slice(dialog.indexOf('const holdingsData'), dialog.indexOf('// Task 261'))
+const fetchHoldingsBody = dialog.slice(dialog.indexOf('async function fetchHoldings'), dialog.indexOf('// 配色比照'))
 
 test('quote-detail contract reads server totals directly, is once-per-open, and guards stale requests', () => {
   assert.match(dialog, /stock\?\.market === '台股' && stock\?\.stockCode !== '0000'/)
@@ -74,4 +77,64 @@ test('line and intraday implementations intentionally retain their own last-clos
   assert.match(dialog, /lastNonNull\(chartPrices\.value\)/)
   assert.match(dialog, /let previousClose = null/)
   assert.match(chartSection, /const vals = prices\.filter\(v => v != null\)/)
+})
+
+test('etf holdings tab lazy-fetches the existing API into a pie chart and keeps weight as-is', () => {
+  // Task 359.1a：頁籤啟用時（onTabChange）才 lazy-fetch，走 props.stock（本檔沒有解構出裸 stock）
+  assert.match(dialog, /if \(name === 'holdings' && !holdingsAttempted\.value && !holdingsLoading\.value\) \{\s*holdingsAttempted\.value = true\s*await fetchHoldings\(\)/)
+  assert.match(fetchHoldingsBody, /bffApi\.stockAnalysis\.getEtfHoldings\(props\.stock\.stockCode, props\.stock\.market\)/)
+  assert.doesNotMatch(dialog, /const \{ stock \}/)
+  // 不是走勢圖 tab 的 eager-fetch 模式——onOpen() 本身不得直接呼叫 fetchHoldings
+  const onOpenBody = dialog.slice(dialog.indexOf('function onOpen()'), dialog.indexOf('async function fetchDividendHistory'))
+  assert.doesNotMatch(onOpenBody, /fetchHoldings\(\)/)
+
+  // Task 359.1a／359.1b：holdings 有資料時渲染圓餅圖，視覺風格比照 DashboardView 的台股個股穿透圖
+  assert.match(holdingsTemplate, /v-else-if="holdingsData\?\.holdings\?\.length"/)
+  assert.match(holdingsTemplate, /<v-chart :option="holdingsPieOption"/)
+  assert.match(holdingsSection, /radius: \['46%', '78%'\]/)
+  assert.match(holdingsSection, /center: \['50%', '50%'\]/)
+  assert.match(holdingsSection, /labelLayout: \{ hideOverlap: true \}/)
+  assert.match(holdingsSection, /itemStyle: \{ borderRadius: 6 \}/)
+  // PieChart 是 tree-shaking echarts 陷阱（同檔 MarkPointComponent 註解記錄的同一類問題）：漏 use() 會靜默不畫
+  assert.match(dialog, /import \{ BarChart, LineChart, CandlestickChart, PieChart \} from 'echarts\/charts'/)
+  assert.match(dialog, /use\(\[CanvasRenderer, LineChart, BarChart, CandlestickChart, PieChart,/)
+
+  // Task 359.1c：圖例/hover 顯示代號、名稱、比例、股數；weight 直接當百分比使用，不做多餘的 ×100 / ÷100；
+  // shares 為 null（Yahoo／FinMind 路徑）時比照 fmtLots 的既有 null-safe 慣例顯示「—」
+  assert.match(holdingsSection, /value: Number\(h\.weight\)/)
+  assert.doesNotMatch(holdingsSection, /weight\s*\*\s*100/)
+  assert.doesNotMatch(holdingsSection, /weight\s*\/\s*100/)
+  assert.match(holdingsSection, /code: h\.stockCode \|\| ''/)
+  assert.match(holdingsSection, /name: h\.stockName \|\| h\.stockCode \|\| ''/)
+  assert.match(holdingsSection, /shares: h\.shares/)
+  assert.match(holdingsSection, /p\.data\?\.shares == null \? '—'/)
+  // 不透過 ECharts {d} 的自動歸一化——Yahoo「前 10 大」來源可視 slice 總和恆小於 100%，{d} 會失真放大比例
+  assert.doesNotMatch(holdingsSection, /\{d\}%/)
+
+  // Task 359.1d：資料來源與時間標示（asOfDate／source）
+  assert.match(holdingsTemplate, /資料來源：\{\{ holdingsData\.source \}\}．\{\{ holdingsData\.asOfDate \|\| '時間不明' \}\}/)
+
+  // Task 359.2a：supported=false 或 holdings 為空陣列時，落回既有靜態連結 fallback（文案與 etfExternalLinks 原封不動）
+  assert.match(holdingsTemplate, /v-else style="padding:24px 8px"/)
+  assert.match(holdingsTemplate, /ETF 成分股資料目前免費資料源都有限制（TWSE 無此 API、FinMind 需付費方案、發行商官網為 SPA）。/)
+  assert.match(holdingsTemplate, /v-for="link in etfExternalLinks"/)
+  assert.match(dialog, /const etfExternalLinks = computed/)
+
+  // Task 359.2b／359.3a：getEtfHoldings 呼叫比照 getQuoteDetail 帶 skipErrorToast:true，避免全域 toast
+  // 汙染其他頁籤；契約路徑／參數本身不動（359.3a 範圍界定：不新增不修改後端／BFF API）
+  assert.match(api, /getEtfHoldings[\s\S]*skipErrorToast: true/)
+  assert.match(api, /api\.get\('\/bff\/stock-analysis\/etf-holdings', \{ params: \{ code, market \}, skipErrorToast: true \}\)/)
+  // catch 只動 holdingsData 自己這組 state，不污染 quoteDetail／dividendHistory／series 等其它頁籤的既有 state
+  assert.match(fetchHoldingsBody, /catch \(e\) \{\s*holdingsData\.value = null\s*\}/)
+  assert.doesNotMatch(fetchHoldingsBody, /quoteDetail\.value|dividendHistory\.value|series\.value/)
+
+  // Task 359.2c：holdingsAttempted 旗標避免重複打 API（同 quoteDetailAttempted 模式）
+  assert.match(dialog, /const holdingsData = ref\(null\)/)
+  assert.match(dialog, /const holdingsLoading = ref\(false\)/)
+  assert.match(dialog, /const holdingsAttempted = ref\(false\)/)
+  // 切換股票後舊資料不殘留：onOpen()（destroy-on-close 重開對話框時的手動 reset 保險）一併清空 holdings state
+  assert.match(dialog, /function onOpen\(\)[\s\S]*holdingsData\.value = null\s*holdingsLoading\.value = false\s*holdingsAttempted\.value = false\s*fetchHistory\(\)/)
+  // reset 不是走 watch(() => props.stock, ...)——本檔唯一的 watch 是監看 months
+  assert.doesNotMatch(dialog, /watch\(\(\) => props\.stock/)
+  assert.match(dialog, /watch\(months, \(m\) => \{/)
 })
