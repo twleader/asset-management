@@ -601,9 +601,12 @@ async function fetchHoldings() {
 }
 
 // 配色比照 DashboardView.vue 的 TW_PIE_COLORS（該檔 <script setup> 頂層綁定不會被匯出，無法跨檔
-// import，故在此重複定義同一組色階以維持視覺一致）；不含 Dashboard 版本保留給「其它」桶的灰色——
-// 本頁 holdings 是 API 回傳的明確持股清單，不合成「其它」分類。
+// import，故在此重複定義同一組色階以維持視覺一致）。Task 359.4 起 holdings 陣列可能含 BFF
+// 端聚合出的「其它」列（stockCode 為 null，見 EtfHoldingsAggregator）：「其它」固定套用灰階
+// ETF_HOLDINGS_OTHERS_COLOR（同 Dashboard TW_PIE_COLORS 陣列最後一色），不進入下方迴圈色票，
+// 避免與前 10 大的實際持股撞色。排序／截斷本身已下放到 BFF 完成，本檔只單純映射陣列。
 const ETF_HOLDINGS_PIE_COLORS = ['#2563eb', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#84cc16', '#ec4899', '#0ea5e9']
+const ETF_HOLDINGS_OTHERS_COLOR = '#94a3b8'
 const holdingsPieOption = computed(() => {
   const list = holdingsData.value?.holdings || []
   const data = list
@@ -613,7 +616,7 @@ const holdingsPieOption = computed(() => {
       name: h.stockName || h.stockCode || '',
       code: h.stockCode || '',
       shares: h.shares,
-      itemStyle: { color: ETF_HOLDINGS_PIE_COLORS[i % ETF_HOLDINGS_PIE_COLORS.length] }
+      itemStyle: { color: h.stockCode == null ? ETF_HOLDINGS_OTHERS_COLOR : ETF_HOLDINGS_PIE_COLORS[i % ETF_HOLDINGS_PIE_COLORS.length] }
     }))
   return {
     tooltip: {

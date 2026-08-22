@@ -138,3 +138,25 @@ test('etf holdings tab lazy-fetches the existing API into a pie chart and keeps 
   assert.doesNotMatch(dialog, /watch\(\(\) => props\.stock/)
   assert.match(dialog, /watch\(months, \(m\) => \{/)
 })
+
+test('etf holdings pie maps BFF-provided top10+others as-is and colors the others slice gray', () => {
+  // Task 359.4e：holdings 現在由 BFF 保證已是「前 10 大 + 其它」，前端只單純映射，
+  // 不應再自己排序／截斷（排序／截斷邏輯已下放到 BFF EtfHoldingsAggregator）
+  assert.doesNotMatch(holdingsSection, /\.sort\(/)
+
+  // stockCode 為 null（「其它」聚合列）時走固定灰階 ETF_HOLDINGS_OTHERS_COLOR，
+  // 不進入 ETF_HOLDINGS_PIE_COLORS 迴圈色票；灰色值比照 Dashboard TW_PIE_COLORS 最後一色
+  assert.match(dialog, /const ETF_HOLDINGS_OTHERS_COLOR = '#94a3b8'/)
+  assert.match(holdingsSection,
+    /itemStyle: \{ color: h\.stockCode == null \? ETF_HOLDINGS_OTHERS_COLOR : ETF_HOLDINGS_PIE_COLORS\[i % ETF_HOLDINGS_PIE_COLORS\.length\] \}/)
+
+  // 既有欄位映射（value／code／name／shares）不因 359.4 變動——沿用既有 null-safe 慣例即可，
+  // 不需要為「其它」列（stockCode/shares 為 null）另寫特例
+  assert.match(holdingsSection, /value: Number\(h\.weight\)/)
+  assert.match(holdingsSection, /code: h\.stockCode \|\| ''/)
+  assert.match(holdingsSection, /name: h\.stockName \|\| h\.stockCode \|\| ''/)
+  assert.match(holdingsSection, /shares: h\.shares/)
+
+  // Task 359.4f：舊註解宣稱「不合成其它分類」在 359.4 之後不再成立，不得留下矛盾註解
+  assert.doesNotMatch(dialog, /不合成「其它」分類/)
+})
