@@ -13,7 +13,7 @@
 `backend/src/main/java/com/steven/assets/service/MarketAnalysisService.java`（1101 行）每次觸發「今日股市分析」時，走 `submitBatch(...)`：
 
 1. 讀本地 DB 組成文字 prompt（`buildSystemPrompt` / `buildUserPrompt`）
-2. 送 Anthropic **Batch API**：`model` 預設 `claude-opus-4-8`、`ThinkingConfigAdaptive`、`MAX_TOKENS = 16000`、`OutputConfig.effort` 預設 `medium`
+2. 送 Anthropic **Batch API**：`model` 預設 `claude-opus-5`、`ThinkingConfigAdaptive`、`MAX_TOKENS = 16000`、`OutputConfig.effort` 預設 `medium`
 3. 落 `daily_market_analysis` 狀態 `PROCESSING` ＋ `batch_id`，由 `pollPendingBatches()` 在批次 `ENDED` 後收尾、解析 JSON、落 `OK`、寄每日 email
 
 觸發來源是 `MarketAnalysisScheduler` 每分鐘 tick 比對 `market_analysis_send_time` 表的**每個啟用時點各觸發一次**（`generateForSend`，強制重跑），亦即成本與「設了幾個寄送時段」成正比，且完全無人值守。
@@ -54,7 +54,7 @@ LLM 目前提供兩件本機規則引擎做不到的事：
 | Column | Type | Nullable | Default |
 |---|---|---|---|
 | `id` | integer | not null | 1 |
-| `model` | varchar(64) | not null | `'claude-opus-4-8'` |
+| `model` | varchar(64) | not null | `'claude-opus-5'` |
 | `updated_at` | timestamp without time zone | not null | `now()` |
 | `effort` | varchar(16) | not null | `'medium'` |
 | `enabled` | boolean | not null | true |

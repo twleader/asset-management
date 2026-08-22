@@ -2832,7 +2832,7 @@ Task 129 把「ETF 透視 top10 成份股」（如 `2383` 台光電，使用者�
 
 ### 概觀
 
-每個台股交易日開盤前（08:45 Asia/Taipei），business-services 呼叫 Claude Opus 4.8 一次，綜合「台股大盤＋美股主要指數近一年日線走勢」（本地 DB）與「近期國內外財經新聞」（由 `external-materials-service` 爬蟲寫入的本地 `news_headline`，分析時讀近 `news-max-age-days` 天注入 prompt；**Task 179 起已移除 `web_search`，不再上網搜尋**），對當天台股走向做多空判斷並存入 `daily_market_analysis`。前端「今日股市分析」頁顯示當日判斷＋歷史。此為**全域參考資料**（不分租戶、無 `owner_user_id`，比照指數日線／交易日曆）。
+每個台股交易日開盤前（08:45 Asia/Taipei），business-services 呼叫 Claude Opus 5 一次，綜合「台股大盤＋美股主要指數近一年日線走勢」（本地 DB）與「近期國內外財經新聞」（由 `external-materials-service` 爬蟲寫入的本地 `news_headline`，分析時讀近 `news-max-age-days` 天注入 prompt；**Task 179 起已移除 `web_search`，不再上網搜尋**），對當天台股走向做多空判斷並存入 `daily_market_analysis`。前端「今日股市分析」頁顯示當日判斷＋歷史。此為**全域參考資料**（不分租戶、無 `owner_user_id`，比照指數日線／交易日曆）。
 
 ### 架構與模組落點
 
@@ -2846,7 +2846,7 @@ Scheduler(每分鐘 tick, MON-FRI, Asia/Taipei) ──命中 market_analysis_sen
                                                                 │  讀 news_headline（近 N 天本地爬蟲新聞）
                                                                 │  組 prompt（近期加權 + 注入本地新聞清單）
                                                                 ▼
-                                                     Anthropic Batch API（Opus 4.8 + adaptive thinking，Task 179 起不掛 web_search）
+                                                     Anthropic Batch API（Opus 5 + adaptive thinking，Task 179 起不掛 web_search）
                                                                 │  依走勢量化 + 本地新聞清單 → 產生 JSON 判斷
                                                                 ▼
                                                      解析 JSON → upsert daily_market_analysis
@@ -2866,7 +2866,7 @@ CREATE TABLE daily_market_analysis (
     news_highlights  TEXT,                           -- JSON array 字串：[{title,source,url,publishedAt}]
     tw_context       TEXT,                           -- 台股近期走勢摘要
     us_context       TEXT,                           -- 美股近期走勢摘要
-    model            VARCHAR(64),                    -- claude-opus-4-8（或設定切換之模型）
+    model            VARCHAR(64),                    -- claude-opus-5（或設定切換之模型）
     status           VARCHAR(16)   NOT NULL,         -- OK / FAILED / NOT_CONFIGURED / PROCESSING
     error_message    TEXT,                           -- status=FAILED 時的錯誤摘要
     raw_response     TEXT,                           -- 模型原始回覆（除錯用）
@@ -2929,7 +2929,7 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
 - **排程**（`MarketAnalysisScheduler`，Task 191 起改每分鐘 tick 比對可設定的多個寄送時間）：`@Scheduled(cron="0 * * * * MON-FRI", zone="Asia/Taipei")` → 取 `nowHm = LocalTime.now(TW_ZONE)` 截到分，比對 `sendTimeService.activeTimes()`（`market_analysis_send_time` 之 `active=true`、截到分）是否含 `nowHm`；**不含即零成本 return**（不查 `enabled`、不做颱風假偵測、不呼叫 LLM）。命中才 `analysisService.isEnabled()` 為真時繼續 → 交易日閘門（`refreshTwClosureToday()` 權威即時颱風假偵測；`closedToday || !isTwTradingDay(today)` 為真則 log skip return）→ `analysisService.generateForSend(today, "scheduled@"+nowHm)`。**`generateForSend`＝強制重跑（不 skip-if-OK）＋送批次時重置 `email_sent_at=null`**，使該時段批次於 `finalizeIfReady` 收尾時重新寄一封（收尾仍先再驗一次交易日，Task 162 縱深守門不變）；同日已 `PROCESSING` 之守門保留（時段過近時不堆疊批次）。**開機 self-heal**：`@EventListener(ApplicationReadyEvent.class)` 延遲後，取 `activeTimes()` 之**最早時點**，若 today 為交易日、現在已過該最早時點、且今日尚無 OK 筆 → `generateIfAbsent` 補跑一次（背景執行緒，比照 `IndexDailyRefreshScheduler`；**不逐時段補寄**，避免重啟洗版；無任何啟用時間則不補）。背景 cron 無 HTTP request → `CurrentUserContext`（`@RequestScope`）取不到，不套 owner 過濾（本就全域）。
 - **分析寄送時間 CRUD**（`MarketAnalysisSendTimeService`／`MarketAnalysisController`，Task 191）：`list()`／`add(time)`（`LocalTime.parse` 解析 `HH:mm`、截到分、唯一性檢查，重複或非法格式拋 `IllegalArgumentException` → 400）／`delete(id)`／`toggleActive(id)`，皆回更新後 `List<SendTime>{id,time,active}`。`getSettings()` 併帶 `sendTimes` 供頁面聚合。寫入端限管理者（BFF `SecurityConfig` 對 `POST/DELETE/PATCH /api/bff/today-market-analysis/send-times/**` 限 `AUTHORITY_ADMIN` + backend `CurrentUserContext.isAdmin()` 縱深）。全域設定、無 owner 過濾。
 - **提示詞與近期加權**（`MarketAnalysisService.buildUserPrompt`／`buildSystemPrompt`，Task 179 起兩態）：TAIEX 近一年日線（date,close，由舊到新）＋近 20 日另附；美股 `DJI/SPX/IXIC/SOX` 近一年日線同格。system prompt 指派「資深台股策略分析師」角色、**越近期的走勢與新聞權重越高**、最後**只輸出 JSON**（schema：`bias/confidence/summary/keyFactors[]/newsHighlights[]/twContext/usContext`）、全程繁體中文。新聞面依「本地新聞是否存在」**二態**切換（不再有 `web_search` 開關）：**有本地新聞**＝注入 `news_headline` 近 N 天清單，指示模型只從此清單挑 3～6 則對今日走向最相關者列入 `newsHighlights`（`title`／`source`／`url`／`publishedAt` 照清單原樣、不得杜撰清單外新聞）；**無本地新聞**＝純技術面，`newsHighlights` 回空陣列、不得杜撰。本地新聞由爬蟲端（`NewsPoller`）已做地區／個股過濾且發布日精準，故毋須提示詞再引導 `web_search` 來源清單。
-- **模型呼叫（Batch API，非同步；Task 179 起不掛 `web_search`）**：`claude-opus-4-8`（或設定切換之模型）、`ThinkingConfigAdaptive`、`OutputConfig.effort`（思考深度）——皆見「模型頁面可調」、`maxTokens≈16000`。**新聞來源改為本地 `news_headline`，`submitBatch` 不再 `addTool(WebSearchTool…)`**（`WebSearchTool20250305`／`ToolUnion` import 一併移除）；歷史上批次曾因動態版 `WebSearchTool20260209` 的 `code_execution` 在 Batch API `detection_timeout` 而改基本版（Task 149.20），現整條 `web_search` 已退場。請求以 **Message Batches API**（`client.messages().batches()`）送出，省 50% token 成本。收結果時收集回覆中所有 `text` 區塊（無 `web_search_tool_result` 需忽略），取首個 `{` 至末個 `}` 以 Jackson 解析（`@JsonIgnoreProperties(ignoreUnknown=true)`）。`PortfolioAdviceService` 的背景產生流程仍保有自己的 `web_search`，不受本次影響。
+- **模型呼叫（Batch API，非同步；Task 179 起不掛 `web_search`）**：`claude-opus-5`（或設定切換之模型）、`ThinkingConfigAdaptive`、`OutputConfig.effort`（思考深度）——皆見「模型頁面可調」、`maxTokens≈16000`。**新聞來源改為本地 `news_headline`，`submitBatch` 不再 `addTool(WebSearchTool…)`**（`WebSearchTool20250305`／`ToolUnion` import 一併移除）；歷史上批次曾因動態版 `WebSearchTool20260209` 的 `code_execution` 在 Batch API `detection_timeout` 而改基本版（Task 149.20），現整條 `web_search` 已退場。請求以 **Message Batches API**（`client.messages().batches()`）送出，省 50% token 成本。收結果時收集回覆中所有 `text` 區塊（無 `web_search_tool_result` 需忽略），取首個 `{` 至末個 `}` 以 Jackson 解析（`@JsonIgnoreProperties(ignoreUnknown=true)`）。`PortfolioAdviceService` 的背景產生流程仍保有自己的 `web_search`，不受本次影響。
 - **Batch 非同步流程**（`MarketAnalysisService.submitBatch` / `pollPendingBatches`）：`generateInternal` 於鎖內先查當日列——已 `PROCESSING` 即不重複送出（排程與手動皆然，避免重複花費）；否則 `submitBatch`：組 `BatchCreateParams.Request.Params`（1 request，`customId="ma-"+date`）→ `batches().create` → 落 `status=PROCESSING`＋`batch_id`＋`generated_at=now`（送出時間）→ 立即返回。**背景 poller** `MarketAnalysisScheduler.pollBatches`（`@Scheduled(fixedDelay=90s, initialDelay=60s)`，**不受 `enabled` 限**）→ `pollPendingBatches()` 撈 `findByStatus(PROCESSING)`；逐列 `batches().retrieve`：非 `ENDED` 則等下輪（超過 `BATCH_MAX_AGE=12h` 判 FAILED 逾時保護）；`ENDED` 則 `resultsStreaming` 以 `customId` 取本列結果，`isSucceeded()` → `asSucceeded().message()` 解析落 `OK`、其餘（errored/canceled/expired）落 `FAILED`，並清 `batch_id`。retrieve/results 暫時性例外不改狀態、下輪重試（逾時才判 FAILED）。**ENDED 判定務必以 `processingStatus().value()`（其巢狀 `Value` 才是真 Java `enum`）與 `ProcessingStatus.Value.ENDED` 比較，不可對 `ProcessingStatus` 本體用 `==`/`!=`**——它是 SDK enum-like 值類別（覆寫 `equals`、反序列化每次產生新實例），參考比較恆「不相等」會讓 poller 永遠認不出已完成的批次而空轉到 12h 逾時（Task 149.16 修正）。
 - **參考新聞時效驗證**（`MarketAnalysisService.sanitizeNews`，Task 149.17 bug fix）：`web_search` 會撈到主題相關但已數月的舊文，且**模型自報的 `publishedAt` 不可信**（實測把 2025-09-18 的 UDN 文章標成「2026-06」），舊聞若原封顯示即被使用者當「近期重點」誤讀。故 `applyResult` 呼叫 `sanitizeNews(list, analysisDate)` 做三層把關，與既有 http(s) 白名單（XSS）併存：
   1. **格式＋自報時效硬過濾**：`parseIsoDatePrefix()` 要求 `publishedAt` 為精確 `YYYY-MM-DD`（`2026-06`／`null`／雜訊 → `null` → 剔除）；日期須在 `[analysisDate - newsMaxAgeDays, analysisDate + 1d]` 內，否則剔除。`newsMaxAgeDays` 由 `@Value("${market-analysis.news-max-age-days:5}")` 提供（**Task 149.18 由 30 收斂為 5 天**——只要「這幾天」的新聞、越近越重要；`sanitizeNews` 時效區間與 system/user prompt 皆同步套用此值）。
@@ -2987,19 +2987,19 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
   - ~~**web_search 三態語意升級**~~（**Task 179 起改為二態、`web_search` 已移除**）：新聞面只依「本地新聞是否存在」切換——**有**＝注入本地清單、指示只從清單挑 `newsHighlights`；**無**＝純技術面、`newsHighlights` 回空。`submitBatch` 不再依 `web_search_max_uses` 加任何 tool（該欄與 `AVAILABLE_WEB_SEARCHES` 白名單皆移除）。
 - **排程執行緒（`SchedulingConfig`，Task 246 bug fix）**：本服務 `spring.threads.virtual.enabled=true`，Boot 預設為 `@Scheduled` 配置以 virtual thread 執行的 `SimpleAsyncTaskScheduler`；實測 `fixedDelay` 的 `pollBatches` 在此組態下**不週期執行**（收尾 poller 靜默、批次卡 `PROCESSING`，重啟仍複現；其餘 7 個 `@Scheduled` 皆 cron、症狀不明顯）。故定義名為 `taskScheduler` 的 `ThreadPoolTaskScheduler` bean（pool=3）使 Boot virtual 排程器 auto-config 退讓（`@ConditionalOnMissingBean(TaskScheduler.class)`），全部 `@Scheduled` 改於平台執行緒固定池執行（一舉解 fixedDelay 不重排、SDK 呼叫在 VT 阻塞、8 個排程共用單執行緒互相餓死三種可能）。加固：`client()` 建 `AnthropicOkHttpClient` 時設 `timeout(Duration.ofSeconds(90))`，避免單次收尾呼叫長時間阻塞排程執行緒。
 - **優雅降級**：`ANTHROPIC_API_KEY` 空 → 不建 client、upsert `status=NOT_CONFIGURED`；送出批次例外 → `status=FAILED` + `error_message`；批次結果 errored/expired/解析失敗 → `status=FAILED`（保留 `raw_response` 供除錯）。皆不拋出中斷排程／poller。`OK` 筆才視為有效分析。
-- **設定**：`application.yml` 新增 `anthropic.api-key: ${ANTHROPIC_API_KEY:}`、`anthropic.model: ${ANTHROPIC_MODEL:claude-opus-4-8}`；`docker-compose.yml` business-services 透傳 `ANTHROPIC_API_KEY`；`.env.example` 補金鑰取得說明；金鑰不入版控。新聞政策參數：`market-analysis.news-max-age-days`（預設 **5**，Task 149.18 由 30 收斂）、`market-analysis.news-verify-published-date`（預設 true，Task 149.17）、`market-analysis.news-region-block-enabled`（預設 true，Task 149.18 中港澳地區封鎖總開關）；皆可由環境變數覆寫、有預設值故非必設。
+- **設定**：`application.yml` 新增 `anthropic.api-key: ${ANTHROPIC_API_KEY:}`、`anthropic.model: ${ANTHROPIC_MODEL:claude-opus-5}`；`docker-compose.yml` business-services 透傳 `ANTHROPIC_API_KEY`；`.env.example` 補金鑰取得說明；金鑰不入版控。新聞政策參數：`market-analysis.news-max-age-days`（預設 **5**，Task 149.18 由 30 收斂）、`market-analysis.news-verify-published-date`（預設 true，Task 149.17）、`market-analysis.news-region-block-enabled`（預設 true，Task 149.18 中港澳地區封鎖總開關）；皆可由環境變數覆寫、有預設值故非必設。
 - **前端配色**：偏多（BULLISH）紅、偏空（BEARISH）綠、中性（NEUTRAL）灰——遵循台股「漲紅跌綠」慣例（與 Dashboard Task 147 一致）。
 - **前端 PROCESSING 狀態**（Batch 非同步）：`today.status==='PROCESSING'` 顯示 info alert「分析中（批次處理中）」，並 `watch` 狀態每 30 秒自動 `load()` 直到改變（`onUnmounted` 清 timer）；手動「重新分析」送出後提示「已送出分析（批次處理中，完成後自動更新）」。歷史表 `statusLabel` 加 `PROCESSING → （分析中）`。
 
 ### 模型頁面可調（成本控管）
 
-分析**模型**與**思考深度（effort）**可由管理者在頁面切換（模型：Opus 4.8 / Sonnet 5 / Haiku 4.5；effort：low / medium / high），另有**每日自動分析開關（enabled）**可停用各啟用中寄送時點的自動分析（停用時所有時段皆不觸發，省整筆花費），皆持久化、下次分析生效、免改環境變數或重啟。（**Task 179 起「新聞搜尋次數（web search）」下拉已移除**，新聞固定讀本地 `news_headline`。）
+分析**模型**與**思考深度（effort）**可由管理者在頁面切換（模型：Opus 5 / Fable 5 / Sonnet 5；effort：low / medium / high），另有**每日自動分析開關（enabled）**可停用各啟用中寄送時點的自動分析（停用時所有時段皆不觸發，省整筆花費），皆持久化、下次分析生效、免改環境變數或重啟。（**Task 179 起「新聞搜尋次數（web search）」下拉已移除**，新聞固定讀本地 `news_headline`。）
 
 - **資料模型**（Liquibase `v1.38.0-market-analysis-setting.sql` 建表；`v1.39.0` 增 `effort`、`v1.40.0` 增 `web_search_max_uses`、`v1.41.0` 增 `enabled`；**`v1.54.0` `DROP` `web_search_max_uses`（Task 179）**。單列設定表，比照 `backup_setting`）：
   ```sql
   CREATE TABLE market_analysis_setting (
       id          INTEGER PRIMARY KEY DEFAULT 1,
-      model       VARCHAR(64) NOT NULL DEFAULT 'claude-opus-4-8',
+      model       VARCHAR(64) NOT NULL DEFAULT 'claude-opus-5',
       updated_at  TIMESTAMP   NOT NULL DEFAULT NOW(),
       CONSTRAINT market_analysis_setting_single_row CHECK (id = 1)
   );
@@ -3014,8 +3014,8 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
   ALTER TABLE market_analysis_setting DROP COLUMN web_search_max_uses;
   ```
   Entity `MarketAnalysisSetting`（`@Id Integer id`、`model`、`effort`、`enabled`；**`webSearchMaxUses` 於 Task 179 移除**）＋ `MarketAnalysisSettingRepository`。
-- **解析**：`resolveModel()` = 設定表 `model`（非空）→ 否則 `@Value("${anthropic.model:claude-opus-4-8}")` 環境預設；`resolveEffort()` = `effort`（白名單內）→ 否則 `medium`；`isEnabled()` = `enabled` → 否則 `true`。`submitBatch` 每次呼叫前各取一次（故切換即時生效）；effort 以 `OutputConfig.builder().effort(...)`。**新聞來源固定本地 `news_headline`：不再有 `resolveWebSearchMaxUses()`、不再 `addTool(WebSearchTool…)`**；有本地新聞則 prompt 指示據清單列 `newsHighlights`、無則切為「不得杜撰新聞、`newsHighlights` 回空」。`isEnabled()` 則由 **`MarketAnalysisScheduler`** 於**每分鐘 tick 命中啟用寄送時點之後**檢查（未命中即零成本 return、根本不查 `enabled`，見 Requirement 31「關鍵業務邏輯」的排程段落），以及開機 self-heal 開頭檢查：`false` 即 return 略過（不呼叫 LLM），手動 `generate()` 不檢查此旗標。
-- **可選白名單／開關**：後端 curated 常數 `AVAILABLE_MODELS`（Opus 4.8／Sonnet 5／Haiku 4.5）、`AVAILABLE_EFFORTS`（`low`／`medium`／`high`）皆為「技術白名單」而非使用者可自訂的業務分類，故**不**套用「Enum 必須入庫由 `/api/settings/*` 管理」規範；`enabled` 為布林開關（非白名單）。`effort` 不列 `xhigh`／`max`（更貴、與省錢目的相反）。（`AVAILABLE_WEB_SEARCHES` 白名單於 Task 179 移除。）`updateSettings(model, effort, enabled)` 對有帶的白名單欄各自驗證（非法 → 400），`enabled` 直接設值，未帶之欄不變；至少須一項；回傳清單時若現值不在白名單則補入（下拉恆含現值）。
+- **解析**：`resolveModel()` = 設定表 `model`（非空）→ 否則 `@Value("${anthropic.model:claude-opus-5}")` 環境預設；`resolveEffort()` = `effort`（白名單內）→ 否則 `medium`；`isEnabled()` = `enabled` → 否則 `true`。`submitBatch` 每次呼叫前各取一次（故切換即時生效）；effort 以 `OutputConfig.builder().effort(...)`。**新聞來源固定本地 `news_headline`：不再有 `resolveWebSearchMaxUses()`、不再 `addTool(WebSearchTool…)`**；有本地新聞則 prompt 指示據清單列 `newsHighlights`、無則切為「不得杜撰新聞、`newsHighlights` 回空」。`isEnabled()` 則由 **`MarketAnalysisScheduler`** 於**每分鐘 tick 命中啟用寄送時點之後**檢查（未命中即零成本 return、根本不查 `enabled`，見 Requirement 31「關鍵業務邏輯」的排程段落），以及開機 self-heal 開頭檢查：`false` 即 return 略過（不呼叫 LLM），手動 `generate()` 不檢查此旗標。
+- **可選白名單／開關**：後端 curated 常數 `AVAILABLE_MODELS`（Opus 5／Fable 5／Sonnet 5）、`AVAILABLE_EFFORTS`（`low`／`medium`／`high`）皆為「技術白名單」而非使用者可自訂的業務分類，故**不**套用「Enum 必須入庫由 `/api/settings/*` 管理」規範；`enabled` 為布林開關（非白名單）。`effort` 不列 `xhigh`／`max`（更貴、與省錢目的相反）。（`AVAILABLE_WEB_SEARCHES` 白名單於 Task 179 移除。）`updateSettings(model, effort, enabled)` 對有帶的白名單欄各自驗證（非法 → 400），`enabled` 直接設值，未帶之欄不變；至少須一項；回傳清單時若現值不在白名單則補入（下拉恆含現值）。
   - **成本觀點**：`enabled` 是最粗的槓桿——停用即當天完全不跑、零花費；`effort` 是主要槓桿（thinking 按 output token 計價，Opus $25/1M 最貴，`medium` 較隱含 `high` 省且對方向判斷足夠）。（新聞改讀本地 `news_headline`，已無付費 `web_search` 成本。）
 - **API**：
   | Method | Path | 說明 |
@@ -3103,7 +3103,7 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
   CREATE TABLE portfolio_advice_setting (
       id INTEGER PRIMARY KEY, model VARCHAR(64) NOT NULL, effort VARCHAR(16) NOT NULL,
       web_search_max_uses INTEGER NOT NULL, updated_at TIMESTAMPTZ NOT NULL);
-  INSERT INTO portfolio_advice_setting VALUES (1, 'claude-opus-4-8', 'medium', 4, now());
+  INSERT INTO portfolio_advice_setting VALUES (1, 'claude-opus-5', 'medium', 4, now());
   ```
   Entity `InvestmentProfile`／`PortfolioAdvice`（皆 `@Filter(name="ownerFilter")`，多租戶 Requirement 28）／`PortfolioAdviceSetting`。`goals` 為理財目標複選 code 逗號分隔；`based_on_snapshot_id` 正規化參照 asset_snapshot，`based_on_snapshot_date`／`based_on_total_assets` 為歷史快照（回顧不失真，比照 `realized_gain` 名稱字串例外）。
 

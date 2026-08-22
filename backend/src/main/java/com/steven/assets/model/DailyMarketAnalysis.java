@@ -74,7 +74,7 @@ public class DailyMarketAnalysis {
     @Column(name = "factor_groups", columnDefinition = "TEXT")
     private String factorGroups;
 
-    /** 所用模型（claude-opus-4-8）。 */
+    /** 所用模型（claude-opus-5）。 */
     @Column(name = "model", length = 64)
     private String model;
 

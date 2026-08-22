@@ -89,9 +89,9 @@ public class MarketAnalysisService {
      * 故不套用「Enum 必須入庫由 /api/settings 管理」規範）。頁面下拉即由此提供。
      */
     private static final List<MarketAnalysisSettingsDto.ModelOption> AVAILABLE_MODELS = List.of(
-            new MarketAnalysisSettingsDto.ModelOption("claude-opus-4-8", "Opus 4.8（最佳品質）"),
-            new MarketAnalysisSettingsDto.ModelOption("claude-sonnet-5", "Sonnet 5（品質接近、較省）"),
-            new MarketAnalysisSettingsDto.ModelOption("claude-haiku-4-5", "Haiku 4.5（最省、較粗略）")
+            new MarketAnalysisSettingsDto.ModelOption("claude-opus-5", "Opus 5（最佳品質）"),
+            new MarketAnalysisSettingsDto.ModelOption("claude-fable-5", "Fable 5（品質接近、較省）"),
+            new MarketAnalysisSettingsDto.ModelOption("claude-sonnet-5", "Sonnet 5（最省、較粗略）")
     );
 
     /**
@@ -210,7 +210,7 @@ public class MarketAnalysisService {
     private String apiKey;
 
     /** 環境預設模型（設定表未設或後備時使用）。 */
-    @Value("${anthropic.model:claude-opus-4-8}")
+    @Value("${anthropic.model:claude-opus-5}")
     private String defaultModel;
 
     /** 參考新聞時效上限（天）：publishedAt 早於「分析日 − 此值」即剔除。預設 5（Task 149.18 由 30 收斂——只要這幾天的新聞、越近越重要）。 */

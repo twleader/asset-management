@@ -26,7 +26,7 @@ public class MarketAnalysisSetting {
     @Id
     private Integer id;
 
-    /** 分析所用 Claude model id（如 claude-opus-4-8）。 */
+    /** 分析所用 Claude model id（如 claude-opus-5）。 */
     @Column(name = "model", length = 64, nullable = false)
     private String model;
 

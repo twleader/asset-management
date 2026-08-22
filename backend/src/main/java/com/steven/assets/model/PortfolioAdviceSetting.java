@@ -33,7 +33,7 @@ public class PortfolioAdviceSetting {
     @Column(name = "engine", length = 16, nullable = false)
     private String engine;
 
-    /** 建議所用 Claude model id（如 claude-opus-4-8）。 */
+    /** 建議所用 Claude model id（如 claude-opus-5）。 */
     @Column(name = "model", length = 64, nullable = false)
     private String model;
 
