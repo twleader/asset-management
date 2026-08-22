@@ -3,6 +3,7 @@
     :model-value="modelValue"
     @update:model-value="$emit('update:modelValue', $event)"
     width="min(1100px, calc(100vw - 32px))"
+    top="calc(15vh - 25px)"
     destroy-on-close
     draggable
     @open="onOpen">
