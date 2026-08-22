@@ -3521,3 +3521,27 @@ FROM stock_price_history WHERE market='台股';
 - [ ] **不在本次範圍**：不新增排程、不新增資料表與 Liquibase changeset、不直接呼叫外部行情／新聞／匯率 API、不觸發爬蟲、不使用 AI／LLM、不擴大評分標的集合、不自動下單、不新增 9090 路由（既有第九條 `GET /api/public/trading-radar/today` 的回應內容擴充不算新增路由）。
 - [ ] **驗證**：測試至少涵蓋——(a) 三軌權重各自精確為 `1.00` 且跨軌單調；(b) 任一 optional 因子缺值時確實重分配而非計 `0`；(c) 構造「一周超買、1月~6月結構完好」的輸入，斷言三軌動作確實不同（若退化為單一分數切三刀，此測試必失敗）；(d) 擴窗前後日K 路徑逐位不變；(e) 週K 聚合的 open／high／low／close／volume 正確，且最晚 ISO 週恆被排除；(f) 跨年 ISO 週（第 52／53 週與次年第 1 週）不得被聚成同一根；(g) 週K 樣本不足時整組週K 因子缺值而非以短序列硬算；(h) 日K 棒因子在缺 OHL、全幅非正（`high == low` 與 `high < low`）與十字線（`high > low` 且 `close == open`）三種情形下的行為；(i) 三軌各自的買進閘門、低接、極端超賣保護與多證據獲利了結；(j) promoted registry 不影響 1周~1月 軌；(k) 通知 transition 只看 1月~6月 軌；(l) 快照 round-trip 與 OpenAPI／gateway 雙向對齊。部署後於實機確認頁面可同時看到三軌、三軌分歧標示、以及展開列的日K 棒與週K 指標數值。
 
+
+---
+
+### Requirement 94／Task 357: 配息事件的四個日期各自獨立落地與顯示（除息／除權／發放股息／發放股權）
+
+**User Story:** 作為投資人，我希望在交易雷達的「下一配息」區塊看到**四個**日期——除息日、除權日、發放股息日、發放股權日——而且一律是 `yyyy-MM-dd`，因為除息與除權是兩件不同的事（一個扣現金、一個增股數），發放日又各自不同；現在只給我一個日期加一串 ISO timestamp，我沒辦法據此安排。
+
+> **本 Requirement 的成因是一個沉默的資料遺失，不只是顯示問題。** FinMind 的 `TaiwanStockDividend` 同時提供 `CashExDividendTradingDate`（除息）與 `StockExDividendTradingDate`（除權），但本專案有**三處**抓取路徑都寫成「先取現金除息日，空的才退而取除權日」，再一起存進單一欄 `ex_dividend_date`。**因此只要一檔同時配息又配股，除權日就在入庫當下被丟棄**，且無任何錯誤或警示。DB 的 `stock_dividend_snapshot_event` 與 `stock_dividend_history` 都只有 `ex_dividend_date`／`cash_payment_date`／`stock_payment_date` 三個日期欄，沒有除權日欄位。要滿足本 Requirement 必須先補回這個欄位並停止壓合。
+>
+> **同一個缺陷已經在畫面上輸出錯誤資訊：**「股票分析 → 股利歷史」的「除息日」欄，對純配股標的顯示的其實是除權日（`2881` 於 2021–2025 現金股利皆為 0，該欄卻有日期）。
+>
+> **四個日期中只有三個取得得到。** 2026-08-22 經既有 `GET /internal/dividend-history` 實打 FinMind 驗證：除息日、除權日、發放股息日皆有值；**發放股權日（`StockDividendPaymentDate`）恆為 `null`**——`7556` 連續六年、`2881` 五年皆然，DB 9968 筆 snapshot event 中 343 筆有股票股利、`stock_payment_date` 0 筆有值，另一資料集 `TaiwanStockDividendResult` 也不含任何日期欄。本 Requirement 因此交付「三個可得日期 ＋ 一個誠實標示為『資料源未提供』的缺值」，**不得推估、不得以發放股息日冒充**；是否另尋來源為獨立任務。
+
+**Acceptance Criteria:**
+
+- [ ] **四個日期各自獨立儲存，不得再壓合**：`stock_dividend_snapshot_event` 與 `stock_dividend_history` 各新增 `ex_rights_date`（除權日）欄，與既有 `ex_dividend_date`（除息日）、`cash_payment_date`（發放股息日）、`stock_payment_date`（發放股權日）並列。抓取端**一律**把 `CashExDividendTradingDate` 寫入 `ex_dividend_date`、`StockExDividendTradingDate` 寫入 `ex_rights_date`，**禁止**任何「其一為空就拿另一個頂替」的 fallback——那正是本 Requirement 要修的缺陷。只配現金的事件其 `ex_rights_date` 為 `null`，只配股的事件其 `ex_dividend_date` 為 `null`。
+- [ ] **既有欄位語意不得偷偷改變**：`ex_dividend_date` 在本 Requirement 之後**只代表除息日**。但既有資料中它可能存的是除權日（當年該事件沒有現金除息日時）。因此**必須連同歷史一併重抓回補**，不得只改欄位定義而讓舊資料以新語意被解讀——那會讓還原權息的價格序列與畫面同時說謊。回補完成前，任何以 `ex_dividend_date` 為「除息日」的新增斷言都不得成立。
+- [ ] **還原權息的行為不得因此改變**：`DistributionAdjustedPriceService` 目前以 `ex_dividend_date` 作為事件套用日。新增 `ex_rights_date` 後，**還原邏輯必須明確定義每一種事件用哪一個日期**，並以固定資料的回歸測試證明：在回補前後，既有標的的還原後價格序列與交易雷達的 `score`／`action` 逐位不變（除非該標的的資料確實被回補修正，那種情形必須逐檔列出並說明）。**不得**在沒有回歸證據的情況下宣稱「只是加欄位、不影響評分」。
+- [ ] **「下一配息」呈現的是同一次事件的四個日期**：找出最近一次尚未發生的配息事件，把它的四個日期一併列出；不得四個日期各自往後找最近的一個而拼成一筆不存在的事件。事件不含某一類時該日期顯示 `—`，**不得顯示 0、不得留白到看不出是缺值**。
+- [ ] **全部日期一律 `yyyy-MM-dd`**：畫面、匯出與 API 的四個日期欄一律為 `yyyy-MM-dd`。現行「下一配息（已知時點）」區塊顯示的 `2026-08-21T21:05:57.205074Z` 是 observation 的**取得時點**、不是配息日期，**僅前端呈現**改為 `yyyy-MM-dd`；**API 與匯出維持 ISO-8601 date-time**（既有 OpenAPI 契約即 `format: date-time`，`knownAt` 是 as-of 稽核時點，截成日期會破壞 Requirement 86 的證據可稽核性）。
+- [ ] **資料來源與跨層邊界不變**：四個日期只由既有 `external-materials-service` 的 FinMind 抓取路徑取得並落地；business-services 不得為此直連任何外部 API。歷史回補走既有的重抓機制，不新增排程、不新增對外端點。
+- [ ] **API、匯出與 OpenAPI 同步**：交易雷達的 dividend evidence（`TradingRadarDto.RadarEvidence`）新增**四個**日期欄（除息／除權／發放股息／發放股權各一），既有 `nextDistributionDate` 保留並重新定義為 `anchorDate`（兩個除息除權日中較早且非 null 者），其語意變更須於 Javadoc 明寫，`docs/openapi/docker-external-api.yaml` 必須在**同一個 commit** 內補齊 properties 與 `required`，依 Requirement 86 的硬規則，文件不完整即視為功能未完成。匯出檔同步新增對應欄位。
+- [ ] **不得表述為預測**：四個日期只描述**已由官方或資料源公布**的既定時點；尚未公布者一律為缺值並揭露「尚未公布」，**不得**以往年同期推估、不得以任何方式填補。
+- [ ] **驗證**：測試至少涵蓋——(a) 同時有現金與股票除息除權的事件，兩個日期各自落到正確欄位且互不覆蓋；(b) 只有其中一種時另一種為 `null` 而非被頂替；(c) 「下一配息」取的是同一次事件的四個日期；(d) 四個日期的格式為 `yyyy-MM-dd`；(e) 還原權息在回補前後的逐位回歸；(f) Liquibase changeset 冪等、可重複執行；(g) OpenAPI 與 gateway 雙向對齊。部署後於實機確認至少一檔同時配息配股的台股，其四個日期與官方公告一致。
