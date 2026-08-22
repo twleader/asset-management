@@ -150,6 +150,8 @@ public class TradingRadarExportService {
         headers.addAll(List.of("大盤量比", "大盤成交金額比", "量能完成日",
                 "NASDAQ漲跌%", "SOX漲跌%", "美股科技綜合%", "美股科技完成日", "美股科技可用",
                 "支持訊號", "風險提醒"));
+        // Task 356.12a：大盤總覽的週線欄一律附加在真正最末（理由同個股決策）。
+        headers.addAll(MARKET_WEEKLY_HEADERS);
 
         List<List<Object>> rows = new ArrayList<>();
         for (JsonNode s : snapshots) {
@@ -169,6 +171,7 @@ public class TradingRadarExportService {
                     num(m, "nasdaqChangePercent"), num(m, "soxChangePercent"),
                     num(m, "usTechCompositePercent"), txt(m, "usTechAsOfDate"), boolVal(m, "usTechAvailable"),
                     listVal(m, "reasons"), listVal(m, "risks")));
+            row.addAll(marketWeeklyCells(m));
             rows.add(row);
         }
 
@@ -202,6 +205,7 @@ public class TradingRadarExportService {
                 ExportDoc.Format.TEXT, ExportDoc.Format.BOOL_ZH));
         formats.add(ExportDoc.Format.LIST_LINES);
         formats.add(ExportDoc.Format.LIST_LINES);
+        formats.addAll(MARKET_WEEKLY_FORMATS); // Task 356.12a：與 headers／rows 同位置（真正最末）
 
         return new ExportDoc.Sheet("大盤總覽",
                 List.of(new ExportDoc.Table(null, null, headers, true, false, false, formats, rows)),
@@ -213,7 +217,11 @@ public class TradingRadarExportService {
         // V11 同時保留短／中期欄位，並追加逐因子可稽核的基本面／產業來源。
         List<String> headers = new ArrayList<>(List.of("快照時間", "代碼", "名稱", "市場", "資產類別", "持有", "還原權息",
                 "短期動作", "短期動作中文", "短期分數",
-                "中期動作", "中期動作中文", "中期分數", "短中期分歧", "獲利了結確認",
+                // Task 356.12a：1周~1月 兩欄緊接既有短期欄之後；既有短期／中期欄名一律不動。
+                "1周~1月 動作", "1周~1月 分數",
+                // Task 356.14b：「短中期分歧」在 V15 之後是錯誤陳述（現在描述的是三軌），
+                // 一律改為「持有期分歧」；既有測試對該字串的斷言同步更新。
+                "中期動作", "中期動作中文", "中期分數", "持有期分歧", "獲利了結確認",
                 "逆勢狀態", "逆勢中文", "現價", "漲跌%", "行情狀態", "行情更新", "完成日K",
                 "週線MA5",
                 "MA20", "MA60", "MA240", "月線確認", "季線確認", "年線確認", "K", "D"));
@@ -231,6 +239,8 @@ public class TradingRadarExportService {
         // 插在它後面會把「折溢價時點／折溢價來源／折溢價stale」等全部往後推兩格，
         // 而既有 golden 逐格比對與下游取值皆以欄索引定位（同 Task 285／286 的理由）。
         headers.addAll(LIVE_PREMIUM_HEADERS);
+        // Task 356.12a：週K 摘要 7 欄 ＋ 日K 棒 3 欄同樣附加在真正最末（即時折溢價之後）。
+        headers.addAll(WEEKLY_CANDLE_HEADERS);
 
         List<List<Object>> rows = new ArrayList<>();
         for (JsonNode s : snapshots) {
@@ -242,6 +252,9 @@ public class TradingRadarExportService {
                         gen, txt(d, "stockCode"), txt(d, "stockName"), txt(d, "market"),
                         txt(d, "assetClass"), boolVal(d, "held"), boolVal(d, "distributionAdjusted"),
                         txt(d, "shortAction"), txt(d, "shortActionLabel"), num(d, "shortScore"),
+                        // Task 356.12a：舊快照缺這兩個 key 時 txt() 回空字串、num() 回 null，
+                        // 得到空白格而不是讀檔失敗（Task 356.11e）。
+                        txt(d, "swingAction"), num(d, "swingScore"),
                         txt(d, "action"), txt(d, "actionLabel"), num(d, "score"),
                         boolVal(d, "horizonConflict"), boolVal(d, "profitTakingConfirmed"),
                         txt(d, "counterTrendState"), txt(d, "counterTrendLabel"),
@@ -264,10 +277,14 @@ public class TradingRadarExportService {
                         listVal(d, "counterTrendReasons"), listVal(d, "counterTrendRisks")));
                 JsonNode evidence = d.path("evidence");
                 row.addAll(Arrays.asList(
-                        num(d, "shortEvidenceConfidence"), num(d, "mediumEvidenceConfidence"),
-                        num(d, "shortDownsideRisk"), num(d, "mediumDownsideRisk"),
-                        num(d, "shortRiskCoverage"), num(d, "mediumRiskCoverage"),
+                        num(d, "shortEvidenceConfidence"), num(d, "swingEvidenceConfidence"),
+                        num(d, "mediumEvidenceConfidence"),
+                        num(d, "shortDownsideRisk"), num(d, "swingDownsideRisk"),
+                        num(d, "mediumDownsideRisk"),
+                        num(d, "shortRiskCoverage"), num(d, "swingRiskCoverage"),
+                        num(d, "mediumRiskCoverage"),
                         txt(d, "candidateAction"), txt(d, "shortCandidateAction"),
+                        txt(d, "swingCandidateAction"),
                         evidenceDisclosureLines(d, evidence), txt(evidence, "nextDistributionDate"),
                         txt(evidence, "nextDistributionStatus"), txt(evidence, "nextDistributionKnownAt")));
                 JsonNode fundamental = d.path("fundamental");
@@ -280,6 +297,7 @@ public class TradingRadarExportService {
                 // num()／nullableText() 都回 null → Excel BLANK 格、JSON null，不以 0 或 "" 充數（320.7）。
                 row.addAll(Arrays.asList(
                         num(d, "etfPremiumLivePct"), nullableText(d, "etfPremiumLiveNavAsOf")));
+                row.addAll(weeklyCandleCells(d));
                 rows.add(row);
             }
         }
@@ -293,6 +311,7 @@ public class TradingRadarExportService {
                 ExportDoc.Format.BOOL_ZH,   // 5  持有
                 ExportDoc.Format.BOOL_ZH,   // 6  還原權息
                 ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.NUM2, // 短期
+                ExportDoc.Format.TEXT, ExportDoc.Format.NUM2,                        // 1周~1月（Task 356.12a）
                 ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.NUM2, // 中期
                 ExportDoc.Format.BOOL_ZH, ExportDoc.Format.BOOL_ZH,
                 ExportDoc.Format.TEXT, ExportDoc.Format.TEXT,
@@ -318,6 +337,7 @@ public class TradingRadarExportService {
         formats.addAll(DETAIL_EVIDENCE_FORMATS);
         formats.addAll(VALUATION_COMPONENT_FORMATS);
         formats.addAll(LIVE_PREMIUM_FORMATS); // Task 320：與 headers／rows 同位置（尾端）
+        formats.addAll(WEEKLY_CANDLE_FORMATS); // Task 356.12a：與 headers／rows 同位置（真正最末）
         return new ExportDoc.Sheet("個股決策",
                 List.of(new ExportDoc.Table(null, null, headers, true, false, false, formats, rows)),
                 headers.size());
@@ -394,15 +414,69 @@ public class TradingRadarExportService {
             ExportDoc.Format.TEXT, ExportDoc.Format.LIST_LINES, ExportDoc.Format.TEXT,
             ExportDoc.Format.LIST_LINES, ExportDoc.Format.LIST_LINES);
 
+    /**
+     * Task 356.12a：週K 摘要 7 欄 ＋ 日K 棒 3 欄，一律附加在<b>整張表的真正最末</b>
+     * （即時折溢價兩欄之後），理由同 Task 320——既有 golden 逐格比對與下游取值以欄索引定位。
+     *
+     * <p>取值全部來自快照 JSON 的 {@code weeklyIndicators}／{@code dailyCandle} 巢狀節點；
+     * <b>舊快照沒有這兩個節點</b>，{@code JsonNode.path()} 對 MissingNode 與 NullNode 都回
+     * MissingNode，故舊快照自然留白（Excel BLANK 格、JSON null），不得補 0 或 "-"。</p>
+     *
+     * <p>週K 與同一列的「週線MA5」是<b>兩個不同的量</b>：後者是日K 收盤序列的 5 日 SMA，
+     * 本組才是由週 OHLC 聚合、在週K 序列上重算的指標。文案不得讓使用者以為是同一個值。</p>
+     */
+    private static final List<String> WEEKLY_CANDLE_HEADERS = List.of(
+            "週結束日", "週MA10", "週K", "週D", "週OSC", "週量比", "週漲跌%",
+            "日K收盤位置", "日K實體", "日K下影線比");
+
+    private static final List<ExportDoc.Format> WEEKLY_CANDLE_FORMATS = List.of(
+            ExportDoc.Format.TEXT, ExportDoc.Format.NUM2, ExportDoc.Format.NUM2,
+            ExportDoc.Format.NUM2, ExportDoc.Format.NUM2, ExportDoc.Format.NUM2,
+            ExportDoc.Format.NUM2,
+            ExportDoc.Format.NUM4, ExportDoc.Format.NUM2, ExportDoc.Format.NUM4);
+
+    /** 週K 摘要 7 欄 ＋ 日K 棒 3 欄的 cell；順序必須與 {@link #WEEKLY_CANDLE_HEADERS} 逐欄相同。 */
+    private static List<Object> weeklyCandleCells(JsonNode decision) {
+        JsonNode weekly = decision.path("weeklyIndicators");
+        JsonNode candle = decision.path("dailyCandle");
+        return Arrays.asList(
+                nullableText(weekly, "weekEndDate"),
+                num(weekly, "ma10"), num(weekly, "k"), num(weekly, "d"), num(weekly, "osc"),
+                num(weekly, "volumeRatio"), num(weekly, "changePercent"),
+                num(candle, "closePosition"), num(candle, "bodyDirection"),
+                num(candle, "lowerShadowRatio"));
+    }
+
+    /** 大盤總覽的週線欄（Task 356.12a）；與個股決策同名同序，只是取自 {@code market} 節點。 */
+    private static final List<String> MARKET_WEEKLY_HEADERS = List.of(
+            "週結束日", "週MA10", "週K", "週D", "週OSC", "週量比", "週漲跌%");
+
+    private static final List<ExportDoc.Format> MARKET_WEEKLY_FORMATS = List.of(
+            ExportDoc.Format.TEXT, ExportDoc.Format.NUM2, ExportDoc.Format.NUM2,
+            ExportDoc.Format.NUM2, ExportDoc.Format.NUM2, ExportDoc.Format.NUM2,
+            ExportDoc.Format.NUM2);
+
+    private static List<Object> marketWeeklyCells(JsonNode market) {
+        JsonNode weekly = market.path("weeklyIndicators");
+        return Arrays.asList(
+                nullableText(weekly, "weekEndDate"),
+                num(weekly, "ma10"), num(weekly, "k"), num(weekly, "d"), num(weekly, "osc"),
+                num(weekly, "volumeRatio"), num(weekly, "changePercent"));
+    }
+
     /** V13 evidence/confidence columns appended after legacy decision columns. */
     private static final List<String> EVIDENCE_HEADERS = List.of(
-            "短期證據信心", "中期證據信心", "短期下檔風險", "中期下檔風險",
-            "短期風險覆蓋", "中期風險覆蓋", "中期候選動作", "短期候選動作",
+            "短期證據信心", "1周~1月證據信心", "中期證據信心",
+            "短期下檔風險", "1周~1月下檔風險", "中期下檔風險",
+            "短期風險覆蓋", "1周~1月風險覆蓋", "中期風險覆蓋",
+            "中期候選動作", "短期候選動作", "1周~1月候選動作",
             "證據閘門原因", "下一配息日", "配息證據狀態", "配息已知時間");
 
     private static final List<ExportDoc.Format> EVIDENCE_FORMATS = List.of(
-            ExportDoc.Format.NUM2, ExportDoc.Format.NUM2, ExportDoc.Format.NUM2, ExportDoc.Format.NUM2,
-            ExportDoc.Format.NUM4, ExportDoc.Format.NUM4, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT,
+            ExportDoc.Format.NUM2, ExportDoc.Format.NUM2, ExportDoc.Format.NUM2,
+            ExportDoc.Format.NUM2, ExportDoc.Format.NUM2, ExportDoc.Format.NUM2,
+            ExportDoc.Format.NUM4, ExportDoc.Format.NUM4, ExportDoc.Format.NUM4,
+            ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT,
             ExportDoc.Format.LIST_LINES, ExportDoc.Format.DATE, ExportDoc.Format.TEXT, ExportDoc.Format.TIMESTAMP);
 
     /**

@@ -6,7 +6,7 @@ import java.util.List;
 /**
  * 今日交易雷達（Requirement 43）純讀 response。
  *
- * <p>所有分數／建議皆為 {@code TW_RULES_V14} 即時計算的衍生值，不入庫；
+ * <p>所有分數／建議皆為 {@code TW_RULES_V15} 即時計算的衍生值，不入庫；
  * {@code score=null} 代表必要資料不足，不以 0 分冒充有效判斷。</p>
  */
 public final class TradingRadarDto {
@@ -252,14 +252,24 @@ public final class TradingRadarDto {
             String provider,
             String missingReason) {}
 
+    /**
+     * 一組證據的 API projection（Task 356.11c 起為<b>三軌</b>）。
+     *
+     * <p>{@code swingCoverage}／{@code swingAvailable}／{@code swingFresh} 來自
+     * {@code TradingRadarEvidenceConfidenceResolver.GroupEvidence} 的第三份獨立欄位，
+     * <b>不是 medium 的複本</b>——各 group 為 SWING 另組一份 {@code swingComponents} 與其權重。</p>
+     */
     public record EvidenceGroup(
             String group,
             List<EvidenceComponent> components,
             double shortCoverage,
+            double swingCoverage,
             double mediumCoverage,
             boolean shortAvailable,
+            boolean swingAvailable,
             boolean mediumAvailable,
             boolean shortFresh,
+            boolean swingFresh,
             boolean mediumFresh,
             int sourceCount,
             boolean participates) {}
@@ -338,7 +348,18 @@ public final class TradingRadarDto {
             /** Per-signal medium-horizon normalized-BIAS provenance. */
             NormalizedBiasEvidence normalizedBias,
             /** Per-signal short-horizon normalized-BIAS provenance. */
-            NormalizedBiasEvidence shortNormalizedBias
+            NormalizedBiasEvidence shortNormalizedBias,
+            /**
+             * 1周~1月 軌的證據投影（Task 356.11c）。
+             *
+             * <p>四欄一律追加在既有欄位<b>之後</b>，既有兩軌的 component 順序與名稱不動。
+             * 值來自 {@code TradingRadarEvidenceConfidenceResolver} 的 SWING horizon，
+             * <b>不得</b>由 medium 複製——那正是 Task 356.9a-2 要消滅的假證據鏈。</p>
+             */
+            Integer swingDownsideRisk,
+            Integer swingEvidenceConfidence,
+            Double swingRiskCoverage,
+            String swingCandidateAction
     ) {
         public RadarEvidence {
             actionGateReasons = actionGateReasons == null ? List.of() : List.copyOf(actionGateReasons);
@@ -365,14 +386,16 @@ public final class TradingRadarDto {
                     returnStdDev60Ratio, returnStdDev60AsOfDate, returnStdDev60Source,
                     premiumAsOfDate, premiumSource, premiumStale, assetProfile, actionGateReasons,
                     java.util.Map.of(), java.util.Map.of(), null, null, null, null, null, null, null, null,
-                    null, null, null, List.of(), null, null, null, null, null, null, null);
+                    null, null, null, List.of(), null, null, null, null, null, null, null,
+                    null, null, null, null);
         }
 
         public static final RadarEvidence EMPTY = new RadarEvidence(
                 null, null, "MISSING", false, null, null, null,
                 null, null, false, null, List.of(), java.util.Map.of(), java.util.Map.of(),
                 null, null, null, null, null, null, null, null,
-                null, null, null, List.of(), null, null, null, null, null, null, null);
+                null, null, null, List.of(), null, null, null, null, null, null, null,
+                null, null, null, null);
 
         public static RadarEvidence withConfidence(
                 String acceptedPriceAsOfDate,
@@ -393,7 +416,7 @@ public final class TradingRadarDto {
             return withConfidence(acceptedPriceAsOfDate, acceptedPriceSource, acceptedPriceQuality,
                     livePriceAccepted, returnStdDev60Ratio, returnStdDev60AsOfDate, returnStdDev60Source,
                     premiumAsOfDate, premiumSource, premiumStale, assetProfile, actionGateReasons,
-                    evidence, candidateAction, shortCandidateAction, null, null, null, null);
+                    evidence, candidateAction, shortCandidateAction, null, null, null, null, null);
         }
 
         public static RadarEvidence withConfidence(
@@ -416,7 +439,7 @@ public final class TradingRadarDto {
             return withConfidence(acceptedPriceAsOfDate, acceptedPriceSource, acceptedPriceQuality,
                     livePriceAccepted, returnStdDev60Ratio, returnStdDev60AsOfDate, returnStdDev60Source,
                     premiumAsOfDate, premiumSource, premiumStale, assetProfile, actionGateReasons,
-                    evidence, candidateAction, shortCandidateAction, distribution, null, null, null);
+                    evidence, candidateAction, shortCandidateAction, distribution, null, null, null, null);
         }
 
         public static RadarEvidence withConfidence(
@@ -438,7 +461,8 @@ public final class TradingRadarDto {
                 com.steven.assets.service.DividendEventEvidenceResolver.Resolution distribution,
                 TreasuryYieldDto.RateContext treasuryRateContext,
                 NormalizedBiasEvidence normalizedBias,
-                NormalizedBiasEvidence shortNormalizedBias) {
+                NormalizedBiasEvidence shortNormalizedBias,
+                String swingCandidateAction) {
             java.util.Map<String, EvidenceGroup> groups = new java.util.LinkedHashMap<>();
             if (evidence != null) {
                 for (var entry : evidence.groups().entrySet()) {
@@ -450,9 +474,11 @@ public final class TradingRadarDto {
                                     c.provider(), c.missingReason()))
                             .toList();
                     groups.put(entry.getKey().name(), new EvidenceGroup(
-                            entry.getKey().name(), components, group.shortCoverage(), group.mediumCoverage(),
-                            group.shortAvailable(), group.mediumAvailable(), group.shortFresh(),
-                            group.mediumFresh(), group.sourceCount(), group.participates()));
+                            entry.getKey().name(), components,
+                            group.shortCoverage(), group.swingCoverage(), group.mediumCoverage(),
+                            group.shortAvailable(), group.swingAvailable(), group.mediumAvailable(),
+                            group.shortFresh(), group.swingFresh(), group.mediumFresh(),
+                            group.sourceCount(), group.participates()));
                 }
             }
             java.util.Map<String, MarketFeatureEvidence> marketFeatures = new java.util.LinkedHashMap<>();
@@ -489,7 +515,11 @@ public final class TradingRadarDto {
                     distribution == null ? null : distribution.missingReason(),
                     distribution == null ? null : distribution.eventsWithinFiveSessions(),
                     distribution == null ? null : distribution.eventsWithinTwentySessions(),
-                    treasuryRateContext, normalizedBias, shortNormalizedBias);
+                    treasuryRateContext, normalizedBias, shortNormalizedBias,
+                    evidence == null ? null : evidence.swingDownsideRisk(),
+                    evidence == null ? null : evidence.swingConfidence(),
+                    evidence == null ? null : evidence.swingRisk().riskCoverage(),
+                    swingCandidateAction);
         }
     }
 
@@ -508,7 +538,8 @@ public final class TradingRadarDto {
     /**
      * 走勢圖指標選單（Task 262）同一組值的雷達版（Task 281）。
      *
-     * <p>Task 291 起，J／MACD／RSI／乖離率／威廉指標會以各自所屬因子組進入短期與中期評分；
+     * <p>Task 291 起，J／MACD／RSI／乖離率／威廉指標會以各自所屬因子組進入評分
+     * （Task 356 起為一周／1周~1月／1月~6月<b>三軌</b>各自加權）；
      * EMA12／EMA26 透過 DIF、DIF／MACD 透過 OSC 同源納入，避免代數相依值重複灌權重。</p>
      *
      * <p><b>價基與同一列的 {@code kValue}／{@code dValue} 相同</b>：個股為還原權息序列、
@@ -535,6 +566,73 @@ public final class TradingRadarDto {
     ) {}
 
     /**
+     * 最新<b>完成日</b>的還原 K 棒與其三個分量（Task 356.11a）。
+     *
+     * <p>{@code closePosition}／{@code bodyDirection}／{@code lowerShadowRatio} 一律是
+     * {@code TradingRadarRuleEngine} 三支 public static 純函數的<b>原值</b>（未 clamp、未線性轉換），
+     * 與引擎計分共用同一支實作。全幅非正（漲跌停鎖死、整日單一成交價或倒置髒列）時三者皆為
+     * {@code null}，畫面顯示 {@code —}，<b>不得顯示 0</b>——{@code 0} 是十字線（{@code high > low}
+     * 且 {@code close == open}），與「沒有價格區間」是完全不同的狀態。</p>
+     *
+     * <p>{@code asOfDate} 即該列最新完成日的交易日，與
+     * {@code RadarEvidence.returnStdDev60AsOfDate} 同源。</p>
+     */
+    public record DailyCandle(
+            BigDecimal open,
+            BigDecimal high,
+            BigDecimal low,
+            BigDecimal close,
+            BigDecimal closePosition,
+            BigDecimal bodyDirection,
+            BigDecimal lowerShadowRatio,
+            String asOfDate
+    ) {}
+
+    /**
+     * 最新<b>完成週</b>的週K 棒與週K 指標（Task 356.11a）。
+     *
+     * <p><b>與同一列的 {@code weeklyMa} 是兩個不同的量</b>：{@code weeklyMa} 是<b>日K 收盤序列的
+     * 5 日簡單移動平均</b>（命名沿革，Task 356 刻意不改名以免既有 Redis 快照、Excel 匯出與
+     * OpenAPI {@code required} 清單同時靜默改變語意）；本 record 才是真正由週 OHLC 聚合、
+     * 在週K 序列上重算的指標。</p>
+     *
+     * <p><b>與股票分析走勢圖的週K 也是兩個不同的量</b>（{@code ChartSeriesAligner.weekly}）：
+     * 週界分桶規則逐字相同，但 (1) 本 record 的價基是<b>還原權息／分割後</b>的日K 聚合、
+     * (2) 一律排除進行中週、(3) 壞資料週的處理不同。畫面與匯出文案不得讓使用者以為是同一個值。</p>
+     *
+     * <p>{@code weekEndDate} 為<b>上一個完成週</b>的最後交易日（不是本週任何一天）；
+     * {@code completedWeeks} 不足 {@code RadarInputAssembler.MIN_COMPLETED_WEEKS} 時整組指標為
+     * {@code null} 而 {@code completedWeeks} 仍如實回報，供揭露文案寫出「目前 N 根」。
+     * 全部 2 位小數，缺值為 {@code null}，<b>不得顯示 0</b>。</p>
+     */
+    public record WeeklyIndicators(
+            String weekEndDate,
+            Integer completedWeeks,
+            BigDecimal open,
+            BigDecimal high,
+            BigDecimal low,
+            BigDecimal close,
+            Long volume,
+            BigDecimal ma5,
+            BigDecimal ma10,
+            BigDecimal ma20,
+            BigDecimal k,
+            BigDecimal d,
+            BigDecimal j9,
+            BigDecimal dif,
+            BigDecimal macd,
+            BigDecimal osc,
+            BigDecimal rsi5,
+            BigDecimal rsi10,
+            BigDecimal bias10,
+            BigDecimal bias20,
+            BigDecimal volumeRatio,
+            BigDecimal changePercent,
+            BigDecimal closePosition,
+            BigDecimal bodyDirection
+    ) {}
+
+    /**
      * {@code POST /api/trading-radar/refresh} 的回應（Task 249）。
      *
      * <p>{@code radar} 與 {@code GET} 完全同形——{@link Response} 不得為此新增欄位，
@@ -553,7 +651,7 @@ public final class TradingRadarDto {
             BigDecimal price,
             BigDecimal changePercent,
             String quoteStatus,
-            /** 週線 MA5；Task 291 起進入短期與中期的獨立權重。 */
+            /** 週線 MA5（日K 收盤序列的 5 日 SMA，不是週K）；Task 356 起進入三軌各自的獨立權重。 */
             BigDecimal weeklyMa,
             BigDecimal monthlyMa,
             BigDecimal quarterlyMa,
@@ -568,7 +666,7 @@ public final class TradingRadarDto {
             boolean intraday,
             /** intraday=true 時為 Redis 即時價的 updatedAt（ISO 字串）；否則為 null（Task 228）。 */
             String liveUpdatedAt,
-            /** 走勢圖指標選單同一組值；Task 291 起進入雙軌評分並在展開列顯示。 */
+            /** 走勢圖指標選單同一組值；Task 356 起進入三軌評分並在展開列顯示。 */
             ExtendedIndicators extendedIndicators,
             BigDecimal marketVolumeRatio,
             BigDecimal marketTurnoverRatio,
@@ -577,7 +675,16 @@ public final class TradingRadarDto {
             BigDecimal soxChangePercent,
             BigDecimal usTechCompositePercent,
             String usTechAsOfDate,
-            boolean usTechAvailable
+            boolean usTechAvailable,
+            /**
+             * 大盤自己那一份週K（Task 356.10c）：台股組由 {@code twse_index_daily_history}、
+             * 美股組由 {@code us_index_daily_history} <b>各自</b>聚合，兩者數值不相同。
+             *
+             * <p>週K 缺值<b>不影響</b> {@code dataComplete}（Task 356.10a-2）——若把 weekly 併進
+             * 完整性判定，完成週不足 60 的大盤會整組變 {@code DATA_INCOMPLETE}，
+             * 連帶關掉<b>全部個股</b>的買進閘門。舊快照此欄為 {@code null}。</p>
+             */
+            WeeklyIndicators weeklyIndicators
     ) {
         /** Task 291 前的欄位形狀，供既有測試與舊快照相容。 */
         public MarketSummary(
@@ -590,7 +697,7 @@ public final class TradingRadarDto {
             this(regime, regimeLabel, score, dataComplete, stale, asOfDate, price, changePercent, quoteStatus,
                     weeklyMa, monthlyMa, quarterlyMa, annualMa, kValue, dValue,
                     quarterlyConfirmation, annualConfirmation, reasons, risks, intraday, liveUpdatedAt,
-                    extendedIndicators, null, null, null, null, null, null, null, false);
+                    extendedIndicators, null, null, null, null, null, null, null, false, null);
         }
     }
 
@@ -636,7 +743,7 @@ public final class TradingRadarDto {
              * KD 短線熱度：{@code OVERHEATED}／{@code ELEVATED}／{@code NORMAL}（Task 232）。
              *
              * <p>供收合列即可辨識——{@code reasons}／{@code risks} 只在展開後顯示，
-             * 使用者於收合狀態看不出 K 已偏高。KD/J 因子本身已反映在兩軌分數；
+             * 使用者於收合狀態看不出 K 已偏高。KD/J 因子本身已反映在三軌分數；
              * {@code OVERHEATED} 另外關閉買進閘門，{@code ELEVATED} 不另加硬閘門。</p>
              */
             String kdHeat,
@@ -647,13 +754,13 @@ public final class TradingRadarDto {
             BigDecimal ma60BiasPercent,
             /** 52 週相對位置 [0,1]（已 clamp）。 */
             BigDecimal week52Position,
-            /** 週線 MA5；Task 291 起進入短期與中期評分。 */
+            /** 週線 MA5（日K 收盤序列的 5 日 SMA，不是週K；真正的週K 見 {@code weeklyIndicators}）。 */
             BigDecimal weeklyMa,
             /** ETF 折溢價（%）；非 ETF 為 null，畫面不得顯示為 0。 */
             BigDecimal etfPremiumPct,
             /** ETF 折溢價的自身歷史分位（0–100）；樣本不足或非 ETF 為 null。 */
             BigDecimal etfPremiumPercentile,
-            /** 走勢圖指標選單同一組值；Task 291 起進入雙軌評分並在展開列顯示。 */
+            /** 走勢圖指標選單同一組值；Task 356 起進入三軌評分並在展開列顯示。 */
             ExtendedIndicators extendedIndicators,
             String shortAction,
             String shortActionLabel,
@@ -686,7 +793,31 @@ public final class TradingRadarDto {
              */
             BigDecimal etfPremiumLivePct,
             /** 即時折溢價所用淨值的資料時點原樣字串（台股 {@code yyyyMMdd HH:mm:ss}、美股 {@code yyyy-MM-dd}）；無值為 null。 */
-            String etfPremiumLiveNavAsOf
+            String etfPremiumLiveNavAsOf,
+            // ─── Task 356.11b：1周~1月 軌與兩組新指標，一律追加在既有 62 個 component 之後 ───
+            //
+            // 既有欄位名一律不動：shortXxx 固定為「一周」軌、無前綴的 score／action／reasons／risks
+            // 固定為「1月~6月」軌。四個既有消費端直接讀那兩組名稱
+            // （trading_radar_notification_setting.last_action、Redis 快照 JSON、
+            // TradingRadarExportService 的既有欄、docs/openapi 的 required 清單）。
+            //
+            // ⚠ 舊快照缺這 11 欄時 Jackson 一律給 null——本 record <b>沒有</b> compact constructor
+            // 做正規化，故缺值的 List 欄位是 {@code null} 而<b>不是</b> {@code List.of()}。
+            // 前端、匯出與 TradingRadarExportService 必須自行容忍 null，不得讀檔失敗（Task 356.11e）。
+            /** 1周~1月 軌的最終動作（已過 evidence gate）。 */
+            String swingAction,
+            String swingActionLabel,
+            Integer swingScore,
+            List<String> swingReasons,
+            List<String> swingRisks,
+            Integer swingDownsideRisk,
+            Integer swingEvidenceConfidence,
+            Double swingRiskCoverage,
+            String swingCandidateAction,
+            /** 最新完成日的還原 K 棒與三分量（Task 356.5）。 */
+            DailyCandle dailyCandle,
+            /** 最新完成週的週K 棒與週K 指標（Task 356.6）；與 {@code weeklyMa} 是兩個不同的量。 */
+            WeeklyIndicators weeklyIndicators
     ) {
         /** Task 291 前的欄位形狀，供既有測試建構資料。 */
         public StockDecision(
@@ -712,7 +843,9 @@ public final class TradingRadarDto {
                     extendedIndicators, null, null, null, List.of(), List.of(), false, null, null, false,
                     null, RadarEvidence.EMPTY, null, null, null, null, null, null,
                     null, null, List.of(),
-                    null, null); // Task 320：etfPremiumLivePct／etfPremiumLiveNavAsOf
+                    null, null, // Task 320：etfPremiumLivePct／etfPremiumLiveNavAsOf
+                    // Task 356.11b：既有相容建構式一律補新欄位的預設值，不得刪除該建構式。
+                    null, null, null, List.of(), List.of(), null, null, null, null, null, null);
         }
     }
 }

@@ -45,7 +45,32 @@ public class DistributionAdjustedPriceService {
     /** 二次驗證比對的標準分割比例（含其倒數）。 */
     private static final int[] SPLIT_CANONICAL_RATIOS = {2, 3, 4, 5, 10};
 
-    public record Adjustment(List<StockPriceHistory> rowsDesc, boolean adjusted) {}
+    /**
+     * 還原結果。
+     *
+     * @param rowsDesc          還原後的序列（降序）；無事件時為原物件（scale 維持
+     *                          {@code numeric(15,4)} 的 4），走縮放路徑時 scale 為 8。
+     *                          <b>兩者數值可能相同但 {@code equals} 不同，比對一律用
+     *                          {@code compareTo}。</b>
+     * @param adjusted          序列是否真的被縮放過（存在 growth ≠ 1 的事件）。
+     * @param appliedEventDates growth ≠ 1 的事件日期，<b>升冪</b>（Task 356.4e）。
+     *                          呼叫端據此判斷「事件是否落在自己的視窗內」——
+     *                          {@code priceScale(i) = cumulative(i) / finalPriceGrowth}，
+     *                          若視窗內最舊一列的日期已晚於（或等於）全部事件日，視窗內每一列的
+     *                          {@code cumulative} 都等於 {@code final}、{@code priceScale} 恆為 1，
+     *                          此時宣稱「已使用還原權息價」是對使用者的假陳述。判準因此必須是
+     *                          「事件日期<b>嚴格晚於</b>視窗最舊一列」而不是「視窗日期區間內有事件」。
+     */
+    public record Adjustment(
+            List<StockPriceHistory> rowsDesc,
+            boolean adjusted,
+            List<LocalDate> appliedEventDates) {
+
+        /** 既有兩參數形狀的相容建構式（呼叫端尚未關心事件日期時使用）。 */
+        public Adjustment(List<StockPriceHistory> rowsDesc, boolean adjusted) {
+            this(rowsDesc, adjusted, List.of());
+        }
+    }
 
     /**
      * 內部統一事件。{@code priceGrowth} 含現金股利、股票股利與分割；{@code shareGrowth}
@@ -100,6 +125,7 @@ public class DistributionAdjustedPriceService {
         BigDecimal cumulativeShareGrowth = BigDecimal.ONE;
         int eventIndex = 0;
         boolean applied = false;
+        List<LocalDate> appliedEventDates = new ArrayList<>();
 
         for (StockPriceHistory row : rowsAsc) {
             while (eventIndex < events.size()
@@ -117,6 +143,8 @@ public class DistributionAdjustedPriceService {
                 if ((priceGrowth != null && priceGrowth.compareTo(BigDecimal.ONE) != 0)
                         || (shareGrowth != null && shareGrowth.compareTo(BigDecimal.ONE) != 0)) {
                     applied = true;
+                    // events 已依日期升冪排序，故此清單天然為升冪（Task 356.4e）。
+                    appliedEventDates.add(event.date());
                 }
                 eventIndex++;
             }
@@ -140,7 +168,7 @@ public class DistributionAdjustedPriceService {
             adjustedAsc.add(adjust(rowsAsc.get(i), priceScale, historicalShareScale));
         }
         adjustedAsc.sort(Comparator.comparing(StockPriceHistory::getTradingDate).reversed());
-        return new Adjustment(List.copyOf(adjustedAsc), true);
+        return new Adjustment(List.copyOf(adjustedAsc), true, List.copyOf(appliedEventDates));
     }
 
     /**

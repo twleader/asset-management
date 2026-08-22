@@ -65,10 +65,10 @@ class TradingRadarEvidenceGateTest {
                 "TLT", "美股", "iShares 20+ Year Treasury Bond ETF", null, null, null, null, null, null);
         var completeGroup = new TradingRadarEvidenceConfidenceResolver.GroupEvidence(
                 TradingRadarEvidenceConfidenceResolver.Group.PRICE_TECHNICAL, List.of(),
-                1.0, 1.0, true, true, true, true, 1, false, false);
+                1.0, 1.0, 1.0, true, true, true, true, true, true, 1, false, false);
         var marketGroup = new TradingRadarEvidenceConfidenceResolver.GroupEvidence(
                 TradingRadarEvidenceConfidenceResolver.Group.MARKET_LIQUIDITY, List.of(),
-                1.0, 1.0, true, true, true, true, 1, false, false);
+                1.0, 1.0, 1.0, true, true, true, true, true, true, 1, false, false);
         var missingRate = new TradingRadarEvidenceConfidenceResolver.Risk(
                 20, .80, List.of(new TradingRadarEvidenceConfidenceResolver.RiskComponent(
                         "asset_rate", TradingRadarEvidenceConfidenceResolver.Applicability.MISSING,
@@ -76,7 +76,7 @@ class TradingRadarEvidenceGateTest {
         var evidence = new TradingRadarEvidenceConfidenceResolver.Evidence(
                 Map.of(TradingRadarEvidenceConfidenceResolver.Group.PRICE_TECHNICAL, completeGroup,
                         TradingRadarEvidenceConfidenceResolver.Group.MARKET_LIQUIDITY, marketGroup),
-                100, 100, missingRate, missingRate, List.of());
+                100, 100, 100, missingRate, missingRate, missingRate, List.of());
 
         TradingRadarEvidenceGate.GatedActions result = TradingRadarEvidenceGate.apply(
                 TradingRadarRuleEngine.Action.EXIT_CANDIDATE,

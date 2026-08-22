@@ -66,8 +66,15 @@ class TradingRadarMarketInputCrossMarketFlagTest {
     private static final String TW_MARKET = "台股";
     private static final String US_MARKET = "美股";
     private static final ZoneId NEW_YORK = ZoneId.of("America/New_York");
-    /** {@code BacktestService.WARMUP}（＝{@code RadarInputAssembler.FULL_WINDOW}）＋1，恰好跑一輪。 */
-    private static final int IXIC_ROWS = RadarInputAssembler.FULL_WINDOW + 1;
+    /**
+     * {@code BacktestService.WARMUP} ＋1，恰好跑一輪。
+     *
+     * <p>Task 356.13a-2 起 {@code WARMUP} 由 {@code FULL_WINDOW}(240) 放大為
+     * 「240 根完成日 K」與「60 根完成週」的較大者，故此處必須直接引用該常數；
+     * 沿用 {@code FULL_WINDOW + 1} 會讓回測迴圈一輪都跑不到，
+     * {@code evaluateMarket} 從未被呼叫而測試以「Wanted but not invoked」失敗。</p>
+     */
+    private static final int IXIC_ROWS = BacktestService.WARMUP + 1;
 
     private final TwseIndexDailyHistoryRepository twseRepo = mock(TwseIndexDailyHistoryRepository.class);
     private final UsIndexDailyHistoryRepository usIndexRepo = mock(UsIndexDailyHistoryRepository.class);
@@ -174,7 +181,7 @@ class TradingRadarMarketInputCrossMarketFlagTest {
     @Test
     void production與回測的美股MarketInput在本次接線的四欄同源() throws Exception {
         List<UsIndexDailyHistory> asc = ixicAscending();
-        when(usIndexRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 241))
+        when(usIndexRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 500))
                 .thenReturn(descending(asc));
         when(usIndexRepo.findByIndexCodeOrderByTradingDateAsc("IXIC")).thenReturn(asc);
         when(indicatorService.computeAllForNasdaq())

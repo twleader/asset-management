@@ -109,7 +109,7 @@ class TradingRadarV13ActionPolicyTest {
         assertThat(policy.v13Active()).isFalse();
         assertThat(policy.action()).isEqualTo(baseline.action());
         assertThat(production).isEqualTo(baseline);
-        // Task 342：production 版號已升 TW_RULES_V14，不再等於 RuleParameters 的任何一個標籤。
+        // Task 356：production 版號已升 TW_RULES_V15，不再等於 RuleParameters 的任何一個標籤。
         // RuleParameters 的 V12／V13 是 calibration／candidate 命名空間，production 不得竊用——
         // 尤其 V13_VERSION 是 evaluateCandidate() 的 guard（不符即 throw），
         // 把它當 production 版號會讓「這是不是 candidate」的判別式失效。
@@ -164,6 +164,74 @@ class TradingRadarV13ActionPolicyTest {
         assertThat(result.action()).isEqualTo(expectedMedium.action());
         assertThat(result.shortScore()).isEqualTo(expectedShort.shortScore());
         assertThat(result.shortAction()).isEqualTo(expectedShort.shortAction());
+    }
+
+    @Test
+    void promotedRegistryNeverReachesTheSwingTrack() {
+        // Task 356.9c 最容易錯的一支：**兩把 key 都 promoted** 時，現行程式碼根本不會呼叫
+        // evaluateStock，若照「從 medium 取 swing」的字面實作，promoted 參數會靜默污染 swing 軌。
+        var input = neutralMarketInput(false);
+        var shortKey = key(TradingRadarV13PromotionRegistry.Track.SHORT);
+        var mediumKey = key(TradingRadarV13PromotionRegistry.Track.MEDIUM);
+        RuleParameters shortCandidate = candidate(Map.of(
+                RuleParameters.CandidateWeight.SHORT_MARKET, new BigDecimal("0.50")));
+        RuleParameters mediumCandidate = candidate(Map.of(
+                RuleParameters.CandidateWeight.MEDIUM_MARKET, new BigDecimal("0.50")));
+        TradingRadarV13PromotionRegistry bothPromoted = TradingRadarV13PromotionRegistry.build(Map.of(
+                shortKey, new TradingRadarV13PromotionRegistry.CandidatePromotion(
+                        shortCandidate, passingEvidence()),
+                mediumKey, new TradingRadarV13PromotionRegistry.CandidatePromotion(
+                        mediumCandidate, passingEvidence())));
+        var context = context("0", "0");
+
+        var baseline = engine.evaluateStock(input);
+        var result = engine.evaluatePromoted(input, bothPromoted, shortKey, mediumKey, context);
+
+        assertThat(result.swingScore()).isEqualTo(baseline.swingScore());
+        assertThat(result.swingAction()).isEqualTo(baseline.swingAction());
+        assertThat(result.swingReasons()).isEqualTo(baseline.swingReasons());
+        assertThat(result.swingRisks()).isEqualTo(baseline.swingRisks());
+        // 兩軌確實被 promote（否則本測試會因為「根本沒 promote」而假通過）。
+        assertThat(result.score())
+                .isEqualTo(engine.evaluateCandidate(input, mediumCandidate, context).score());
+        assertThat(result.shortScore())
+                .isEqualTo(engine.evaluateCandidate(input, shortCandidate, context).shortScore());
+    }
+
+    @Test
+    void singlePromotedKeyAlsoLeavesTheSwingTrackOnBaseline() {
+        var input = neutralMarketInput(false);
+        var shortKey = key(TradingRadarV13PromotionRegistry.Track.SHORT);
+        var mediumKey = key(TradingRadarV13PromotionRegistry.Track.MEDIUM);
+        RuleParameters mediumCandidate = candidate(Map.of(
+                RuleParameters.CandidateWeight.MEDIUM_MARKET, new BigDecimal("0.50")));
+        TradingRadarV13PromotionRegistry registry = TradingRadarV13PromotionRegistry.build(Map.of(
+                mediumKey, new TradingRadarV13PromotionRegistry.CandidatePromotion(
+                        mediumCandidate, passingEvidence())));
+
+        var baseline = engine.evaluateStock(input);
+        var result = engine.evaluatePromoted(
+                input, registry, shortKey, mediumKey, context("0", "0"));
+
+        assertThat(result.swingScore()).isEqualTo(baseline.swingScore());
+        assertThat(result.swingAction()).isEqualTo(baseline.swingAction());
+    }
+
+    @Test
+    void evaluateCandidateKeepsTheSwingTrackOnBaselineParameters() {
+        // Task 356.9d：RuleParameters 不新增任何 swing 的 ActionThresholds／CandidateWeight，
+        // 故即使直接呼叫 evaluateCandidate，swing 四欄也必須與純 baseline 相同。
+        var input = neutralMarketInput(false);
+        RuleParameters bothWeighted = candidate(Map.of(
+                RuleParameters.CandidateWeight.SHORT_MARKET, new BigDecimal("0.50"),
+                RuleParameters.CandidateWeight.MEDIUM_MARKET, new BigDecimal("0.50")));
+
+        var baseline = engine.evaluateStock(input);
+        var candidateResult = engine.evaluateCandidate(input, bothWeighted, context("0", "0"));
+
+        assertThat(candidateResult.swingScore()).isEqualTo(baseline.swingScore());
+        assertThat(candidateResult.swingAction()).isEqualTo(baseline.swingAction());
+        assertThat(candidateResult.swingReasons()).isEqualTo(baseline.swingReasons());
     }
 
     @Test

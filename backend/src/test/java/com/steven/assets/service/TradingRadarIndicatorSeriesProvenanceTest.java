@@ -96,7 +96,7 @@ class TradingRadarIndicatorSeriesProvenanceTest {
                     BigDecimal.valueOf(15000), BigDecimal.valueOf(15000), BigDecimal.valueOf(15000),
                     BigDecimal.valueOf(60), BigDecimal.valueOf(50),
                     BigDecimal.valueOf(60), BigDecimal.valueOf(50),
-                    BigDecimal.valueOf(15000), TechnicalIndicatorService.ExtendedIndicators.EMPTY);
+                    BigDecimal.valueOf(15000), TechnicalIndicatorService.ExtendedIndicators.EMPTY, null);
 
     private TradingRadarService newService() {
         TradingRadarRuleEngine ruleEngine = new TradingRadarRuleEngine();
@@ -154,7 +154,7 @@ class TradingRadarIndicatorSeriesProvenanceTest {
                 .thenReturn(TradingRadarMarketContextService.MarketContext.EMPTY);
         // 大盤必須是可用的（非 DATA_INCOMPLETE），否則個股會因「大盤資料不足」落入同一個
         // NO_TRADE 分支，測試就分不出是本任務的 bug 還是大盤沒 stub。
-        lenient().when(twseRepo.findTopNByOrderByTradingDateDesc(241)).thenReturn(twseRows());
+        lenient().when(twseRepo.findTopNByOrderByTradingDateDesc(500)).thenReturn(twseRows());
         lenient().when(marketIndicatorService.computeAll("0000", TW)).thenReturn(TW_MARKET_IND);
     }
 
@@ -166,7 +166,7 @@ class TradingRadarIndicatorSeriesProvenanceTest {
         // 242 根：最近 4 個交易日帶 TWSE_MI_INDEX（＝線上實測的形狀，四天官方對帳），
         // 其餘 238 根 close_source 為 null。最新一根即 completedSession 且已驗證，故無剔除，
         // 序列截斷後為 241 根，剛好滿足 confirm(closes, 240) 的 241 根需求。
-        when(priceHistoryRepo.findRecentN(CODE, TW, 250)).thenReturn(twStockRows(
+        when(priceHistoryRepo.findRecentN(CODE, TW, 500)).thenReturn(twStockRows(
                 TODAY, 242, Set.of(TODAY, TODAY.minusDays(1), TODAY.minusDays(2), TODAY.minusDays(3))));
 
         TradingRadarDto.StockDecision decision = decisionAt(AFTER_CLOSE);
@@ -195,7 +195,7 @@ class TradingRadarIndicatorSeriesProvenanceTest {
         // 13:32 誤寫列），該根不得進技術序列。242 − 1 = 241，正好夠 confirm(closes, 240)。
         // 只斷言五個指標欄位會漏掉這個 bug——含 live 的序列照樣算得出 MA／KD，
         // 唯一露餡的是 ma240Confirmation 退回 UNAVAILABLE 後的 NO_TRADE。
-        when(priceHistoryRepo.findRecentN(CODE, TW, 250)).thenReturn(twStockRows(TODAY, 242, Set.of()));
+        when(priceHistoryRepo.findRecentN(CODE, TW, 500)).thenReturn(twStockRows(TODAY, 242, Set.of()));
         when(priceQueryService.getLive(CODE, TW)).thenReturn(Optional.of(live(TODAY, "101")));
 
         TradingRadarDto.StockDecision decision = decisionAt(AFTER_CLOSE);
@@ -217,7 +217,7 @@ class TradingRadarIndicatorSeriesProvenanceTest {
         //   (1) 盤中 completedSession 為 2026-08-11，DB 已有 08-12 當日列 → 未來列，剔除 1 根；
         //   (2) 08-11（completedSession 當日）close_source 為 null → provenance 剔除 1 根。
         // 243 − 2 = 241。findRecentN 沒有日期上界，正是這一路吃掉 LIMIT 名額的來源。
-        when(priceHistoryRepo.findRecentN(CODE, TW, 250)).thenReturn(twStockRows(TODAY, 243, Set.of()));
+        when(priceHistoryRepo.findRecentN(CODE, TW, 500)).thenReturn(twStockRows(TODAY, 243, Set.of()));
         when(priceQueryService.getLive(CODE, TW)).thenReturn(Optional.of(live(TODAY, "101")));
 
         TradingRadarDto.StockDecision decision = decisionAt(INTRADAY);

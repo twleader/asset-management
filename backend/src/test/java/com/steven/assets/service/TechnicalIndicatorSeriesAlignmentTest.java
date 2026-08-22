@@ -492,7 +492,7 @@ class TechnicalIndicatorSeriesAlignmentTest {
         assertThat(ascAll).isNotEmpty();
         return new TechnicalIndicatorService.FullIndicators(
                 cur.monthlyMa(), cur.quarterlyMa(), cur.annualMa(),
-                cur.k(), cur.d(), prev.k(), prev.d(), cur.weeklyMa(), cur.extended());
+                cur.k(), cur.d(), prev.k(), prev.d(), cur.weeklyMa(), cur.extended(), cur.ma10());
     }
 
     @Test

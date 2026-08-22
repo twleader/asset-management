@@ -18,27 +18,49 @@ public final class TradingRadarEvidenceGate {
 
     private TradingRadarEvidenceGate() {}
 
+    /**
+     * 三軌 gate 結果（Task 356.9b）。
+     *
+     * <p>{@code swingAction} 緊接 {@code shortAction}、{@code candidateSwingAction} 緊接
+     * {@code candidateShortAction}，命名與既有兩軌對稱（不得寫成 {@code rawSwingAction}）。
+     * {@code swingAction} 為 {@code null} 代表呼叫端<b>沒有提供</b> 1周~1月 軌，
+     * 此時本 gate 完全不對該軌做任何判定、也不加任何 reasons——既有兩軌的行為逐位不變。</p>
+     */
     public record GatedActions(
             TradingRadarRuleEngine.Action mediumAction,
             TradingRadarRuleEngine.Action shortAction,
+            TradingRadarRuleEngine.Action swingAction,
             List<String> reasons,
             TradingRadarRuleEngine.Action candidateMediumAction,
-            TradingRadarRuleEngine.Action candidateShortAction
+            TradingRadarRuleEngine.Action candidateShortAction,
+            TradingRadarRuleEngine.Action candidateSwingAction
     ) {
         public GatedActions(TradingRadarRuleEngine.Action mediumAction,
                             TradingRadarRuleEngine.Action shortAction,
+                            TradingRadarRuleEngine.Action swingAction,
                             List<String> reasons) {
-            this(mediumAction, shortAction, reasons, mediumAction, shortAction);
+            this(mediumAction, shortAction, swingAction, reasons,
+                    mediumAction, shortAction, swingAction);
         }
     }
 
+    /** 兩軌相容入口；1周~1月 軌未提供（{@code null}），本 gate 不對其做任何判定。 */
     public static GatedActions apply(
             TradingRadarRuleEngine.Action mediumAction,
             TradingRadarRuleEngine.Action shortAction,
             boolean held,
             TradingRadarAssetProfileResolver.AssetProfile profile) {
+        return apply(mediumAction, shortAction, null, held, profile);
+    }
+
+    public static GatedActions apply(
+            TradingRadarRuleEngine.Action mediumAction,
+            TradingRadarRuleEngine.Action shortAction,
+            TradingRadarRuleEngine.Action swingAction,
+            boolean held,
+            TradingRadarAssetProfileResolver.AssetProfile profile) {
         if (profile == null || !profile.bond() || profile.currencyDataComplete()) {
-            return new GatedActions(mediumAction, shortAction, List.of());
+            return new GatedActions(mediumAction, shortAction, swingAction, List.of());
         }
         List<String> reasons = new ArrayList<>();
         TradingRadarRuleEngine.Action fallback = held
@@ -46,12 +68,15 @@ public final class TradingRadarEvidenceGate {
                 : TradingRadarRuleEngine.Action.WATCH;
         TradingRadarRuleEngine.Action gatedMedium = downgradeBuy(mediumAction, fallback, reasons);
         TradingRadarRuleEngine.Action gatedShort = downgradeBuy(shortAction, fallback, reasons);
+        TradingRadarRuleEngine.Action gatedSwing = downgradeBuy(swingAction, fallback, reasons);
         gatedMedium = downgradeRiskExit(gatedMedium, fallback, reasons);
         gatedShort = downgradeRiskExit(gatedShort, fallback, reasons);
+        gatedSwing = downgradeRiskExit(gatedSwing, fallback, reasons);
         if (!reasons.isEmpty()) {
-            reasons.add("底層外幣債券幣別資料不完整，兩軌買進／加碼／試單閘門關閉；不以 TWD 猜測。 ");
+            reasons.add("底層外幣債券幣別資料不完整，三軌買進／加碼／試單閘門關閉；不以 TWD 猜測。 ");
         }
-        return new GatedActions(gatedMedium, gatedShort, List.copyOf(reasons), mediumAction, shortAction);
+        return new GatedActions(gatedMedium, gatedShort, gatedSwing, List.copyOf(reasons),
+                mediumAction, shortAction, swingAction);
     }
 
     /** Apply confidence/group coverage after the rule engine has formed candidates. */
@@ -61,7 +86,19 @@ public final class TradingRadarEvidenceGate {
             boolean held,
             TradingRadarAssetProfileResolver.AssetProfile profile,
             TradingRadarEvidenceConfidenceResolver.Evidence evidence) {
-        return apply(mediumAction, shortAction, held, profile, evidence, BigDecimal.valueOf(.70));
+        return apply(mediumAction, shortAction, null, held, profile, evidence,
+                BigDecimal.valueOf(.70));
+    }
+
+    public static GatedActions apply(
+            TradingRadarRuleEngine.Action mediumAction,
+            TradingRadarRuleEngine.Action shortAction,
+            TradingRadarRuleEngine.Action swingAction,
+            boolean held,
+            TradingRadarAssetProfileResolver.AssetProfile profile,
+            TradingRadarEvidenceConfidenceResolver.Evidence evidence) {
+        return apply(mediumAction, shortAction, swingAction, held, profile, evidence,
+                BigDecimal.valueOf(.70));
     }
 
     /** Candidate path may calibrate confidence threshold; structural coverage stays mandatory. */
@@ -72,18 +109,32 @@ public final class TradingRadarEvidenceGate {
             TradingRadarAssetProfileResolver.AssetProfile profile,
             TradingRadarEvidenceConfidenceResolver.Evidence evidence,
             BigDecimal confidenceThreshold) {
-        GatedActions currencyGated = apply(mediumAction, shortAction, held, profile);
+        return apply(mediumAction, shortAction, null, held, profile, evidence, confidenceThreshold);
+    }
+
+    public static GatedActions apply(
+            TradingRadarRuleEngine.Action mediumAction,
+            TradingRadarRuleEngine.Action shortAction,
+            TradingRadarRuleEngine.Action swingAction,
+            boolean held,
+            TradingRadarAssetProfileResolver.AssetProfile profile,
+            TradingRadarEvidenceConfidenceResolver.Evidence evidence,
+            BigDecimal confidenceThreshold) {
+        GatedActions currencyGated = apply(mediumAction, shortAction, swingAction, held, profile);
         List<String> reasons = new ArrayList<>(currencyGated.reasons());
         TradingRadarRuleEngine.Action fallback = held
                 ? TradingRadarRuleEngine.Action.HOLD : TradingRadarRuleEngine.Action.WATCH;
         TradingRadarRuleEngine.Action gatedMedium = currencyGated.mediumAction();
         TradingRadarRuleEngine.Action gatedShort = currencyGated.shortAction();
+        TradingRadarRuleEngine.Action gatedSwing = currencyGated.swingAction();
         if (evidence == null) {
             reasons.add("證據 confidence 未建立，買進／減碼／出場候選保守降級。 ");
             gatedMedium = downgradeBuy(gatedMedium, fallback, reasons);
             gatedShort = downgradeBuy(gatedShort, fallback, reasons);
+            gatedSwing = downgradeBuy(gatedSwing, fallback, reasons);
             gatedMedium = downgradeRiskExit(gatedMedium, fallback, reasons);
             gatedShort = downgradeRiskExit(gatedShort, fallback, reasons);
+            gatedSwing = downgradeRiskExit(gatedSwing, fallback, reasons);
         } else {
             if (!evidence.dividendEventComplete()) {
                 // Public-event/dividend evidence contributes to risk/disclosure;
@@ -127,8 +178,27 @@ public final class TradingRadarEvidenceGate {
                         + "短期減碼／出場僅保留候選揭露。 ");
                 gatedShort = downgradeRiskExit(gatedShort, fallback, reasons);
             }
+            // 1周~1月 軌：呼叫端沒有提供時完全不判定，既有兩軌的 reasons 逐位不變。
+            if (swingAction != null) {
+                boolean swingEvidenceOpen = swingOpen(evidence, profile, threshold);
+                if (isBuy(gatedSwing) && !swingEvidenceOpen) {
+                    reasons.addAll(evidence.reasons());
+                    reasons.add("1周~1月 evidence gate 未達 PRICE／MARKET／適用資產完整度或候選 confidence 門檻。 ");
+                    gatedSwing = fallback;
+                }
+                if (!swingEvidenceOpen) {
+                    gatedSwing = downgradeRiskExit(gatedSwing, fallback, reasons);
+                }
+                if (!riskEvidenceOpen(evidence,
+                        TradingRadarEvidenceConfidenceResolver.Horizon.SWING, profile)) {
+                    reasons.add("必要下檔風險 evidence 不完整（risk coverage 或 bond beta/riskUnit 未達標），"
+                            + "1周~1月 減碼／出場僅保留候選揭露。 ");
+                    gatedSwing = downgradeRiskExit(gatedSwing, fallback, reasons);
+                }
+            }
         }
-        return new GatedActions(gatedMedium, gatedShort, dedupe(reasons), mediumAction, shortAction);
+        return new GatedActions(gatedMedium, gatedShort, gatedSwing, dedupe(reasons),
+                mediumAction, shortAction, swingAction);
     }
 
     /**
@@ -142,9 +212,8 @@ public final class TradingRadarEvidenceGate {
             TradingRadarAssetProfileResolver.AssetProfile profile) {
         if (evidence == null || evidence.riskCoverage(horizon) < .70) return false;
         if (profile == null || !profile.bond()) return true;
-        TradingRadarEvidenceConfidenceResolver.Risk risk = horizon
-                == TradingRadarEvidenceConfidenceResolver.Horizon.SHORT
-                ? evidence.shortRisk() : evidence.mediumRisk();
+        // Task 356.9a-2：三軌各自取自己那一份 Risk，禁止以三元運算把 SWING 靜默落到 medium。
+        TradingRadarEvidenceConfidenceResolver.Risk risk = evidence.risk(horizon);
         return risk != null && risk.components().stream()
                 .filter(component -> "asset_rate".equals(component.name()))
                 .anyMatch(component -> component.applicability()
@@ -159,6 +228,26 @@ public final class TradingRadarEvidenceGate {
         return evidence.gateOpen(TradingRadarEvidenceConfidenceResolver.Horizon.SHORT, confidenceThreshold)
                 && (asset == null || !asset.participates()
                 || asset.meets(TradingRadarEvidenceConfidenceResolver.Horizon.SHORT, .70));
+    }
+
+    /**
+     * 1周~1月 軌的結構性 gate（Task 356.9b）。
+     *
+     * <p>採與 SHORT <b>相同形狀</b>（confidence gate ＋ ASSET_SPECIFIC），而不是 MEDIUM 的
+     * 「個股必須有 VALUATION／FINANCIAL」：一個月尺度的決策不應該因為財報季尚未更新而
+     * 整軌關閉，那是 1月~6月 軌才需要的要求。SWING 的估值／財務仍以 group 權重
+     * （各 {@code .10}）計入 {@code swingConfidence}，並非完全不看。<b>此選擇為判斷性取值、
+     * 無回測依據。</b></p>
+     */
+    private static boolean swingOpen(
+            TradingRadarEvidenceConfidenceResolver.Evidence evidence,
+            TradingRadarAssetProfileResolver.AssetProfile profile,
+            double confidenceThreshold) {
+        TradingRadarEvidenceConfidenceResolver.Horizon h =
+                TradingRadarEvidenceConfidenceResolver.Horizon.SWING;
+        if (!evidence.gateOpen(h, confidenceThreshold)) return false;
+        var asset = evidence.group(TradingRadarEvidenceConfidenceResolver.Group.ASSET_SPECIFIC);
+        return asset == null || !asset.participates() || asset.meets(h, .70);
     }
 
     private static boolean mediumOpen(

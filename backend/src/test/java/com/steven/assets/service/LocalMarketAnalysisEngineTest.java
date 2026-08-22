@@ -157,7 +157,7 @@ class LocalMarketAnalysisEngineTest {
         TechnicalIndicatorService.FullIndicators ind = new TechnicalIndicatorService.FullIndicators(
                 bd("45600"), bd("45300"), bd("44000"), bd("62.30"), bd("58.10"),
                 bd("55.00"), bd("56.00"), bd("45800"),
-                extended("18.44", "58.20"));
+                extended("18.44", "58.20"), null);
         // 前一期：OSC 較小 → 動能轉強
         TechnicalIndicatorService.FullIndicators prev = withExtended(extended("12.10", "55.00"));
 
@@ -327,7 +327,7 @@ class LocalMarketAnalysisEngineTest {
     private static TechnicalIndicatorService.FullIndicators withExtended(
             TechnicalIndicatorService.ExtendedIndicators ext) {
         return new TechnicalIndicatorService.FullIndicators(
-                null, null, null, null, null, null, null, null, ext);
+                null, null, null, null, null, null, null, null, ext, null);
     }
 
     private static List<double[]> closes(LocalDate end, double... values) {

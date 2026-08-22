@@ -249,6 +249,59 @@ class RadarObservationResolverTest {
                 "截斷須從最舊的一端砍，最新一根必須保留");
     }
 
+    @Test
+    void weeklySeriesKeepsEveryEligibleRowAndIndicatorSeriesIsItsPrefix() {
+        // Task 356.4b：兩份序列套用<b>完全相同</b>的過濾，唯一差別是週K 那份不做 241 截斷。
+        List<StockPriceHistory> rows = new java.util.ArrayList<>();
+        LocalDate session = LocalDate.of(2026, 8, 7);
+        for (int i = 0; i < 500; i++) {
+            rows.add(row(session.minusDays(i).toString(), "100", i == 0 ? "TWSE_MI_INDEX" : null));
+        }
+
+        RadarObservationResolver.AcceptedPrice accepted =
+                RadarObservationResolver.resolveAcceptedPrice(
+                        rows, null, "台股", TW_AFTER_CLOSE);
+
+        assertEquals(500, accepted.weeklySeriesRows().size());
+        assertEquals(RadarObservationResolver.INDICATOR_SERIES_MAX_ROWS,
+                accepted.indicatorSeriesRows().size());
+        assertEquals(dates(accepted.indicatorSeriesRows()),
+                dates(accepted.weeklySeriesRows().subList(
+                        0, RadarObservationResolver.INDICATOR_SERIES_MAX_ROWS)),
+                "日K 契約序列必須恆為週K 長序列的前綴，兩者不可能分歧");
+    }
+
+    @Test
+    void weeklySeriesAppliesTheSameProvenanceAndFutureRowFiltersAsTheIndicatorSeries() {
+        // 盤中決策：completedSession 為前一交易日，當日那一根盤中誤寫值兩份序列都必須剔除；
+        // 更早的歷史列則一律不看 close_source（Task 290 明定台股歷史列留 null）。
+        List<StockPriceHistory> rows = List.of(
+                row("2026-08-07", "999", null),
+                row("2026-08-06", "100", "TWSE_MI_INDEX"),
+                row("2026-08-05", "101", null));
+
+        RadarObservationResolver.AcceptedPrice accepted =
+                RadarObservationResolver.resolveAcceptedPrice(
+                        rows, null, "台股", TW_DECISION);
+
+        assertEquals(dates(accepted.indicatorSeriesRows()), dates(accepted.weeklySeriesRows()));
+        assertEquals(List.of(LocalDate.of(2026, 8, 6), LocalDate.of(2026, 8, 5)),
+                dates(accepted.weeklySeriesRows()));
+    }
+
+    @Test
+    void compatibilityConstructorMirrorsIndicatorRowsIntoTheWeeklySeries() {
+        // 自組 snapshot 的呼叫端（回測）只備妥一份序列，週K 序列即該序列，行為與擴窗前相同。
+        List<StockPriceHistory> series = List.of(row("2026-08-06", "100", "TWSE_MI_INDEX"));
+
+        RadarObservationResolver.AcceptedPrice accepted = new RadarObservationResolver.AcceptedPrice(
+                new BigDecimal("100"), LocalDate.of(2026, 8, 6), null, "TEST",
+                RadarObservationResolver.Quality.COMPLETED_CLOSE, false, null,
+                series, series, null);
+
+        assertEquals(series, accepted.weeklySeriesRows());
+    }
+
     private static List<LocalDate> dates(List<StockPriceHistory> rows) {
         return rows.stream().map(StockPriceHistory::getTradingDate).toList();
     }

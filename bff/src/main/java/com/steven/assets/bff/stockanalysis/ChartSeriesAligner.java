@@ -10,7 +10,23 @@ import java.time.temporal.WeekFields;
 import java.util.*;
 import java.util.function.Function;
 
-/** 保留 line 聯集相容，並在 BFF 完成日／ISO 週 candle 正規化。 */
+/**
+ * 保留 line 聯集相容，並在 BFF 完成日／ISO 週 candle 正規化。
+ *
+ * <p><b>對應實作（必須同步）：{@code com.steven.assets.service.WeeklyBarAggregator}</b>（Task 356.2）。
+ * {@link #weekly} 的<b>分桶規則與它逐字一致</b>（同一組 {@code WeekFields.ISO} 的
+ * {@code weekBasedYear} ＋ {@code weekOfWeekBasedYear}、{@code open} 取該週最早交易日、
+ * {@code high}／{@code low} 取極值、{@code close} 取最晚交易日、週日期取最晚交易日）——同一檔股票在
+ * 「股票分析走勢圖的週K」與「交易雷達的週K」若連哪幾天算同一週、哪一天是週收盤都不一樣，
+ * 使用者無從解釋。改動任何一邊的週界都必須同步改另一邊。</p>
+ *
+ * <p><b>五處刻意不同，不得當成同一個量</b>：(1) 本側的週 KD／MACD／RSI 是「該週最後一個交易日的
+ * <b>日K</b>指標值」，雷達那側是在週K 序列上重算；(2) 本側吃走勢圖的原始價基，雷達那側吃還原
+ * 權息／分割後的日K；(3) 本側會畫出進行中週（圖本來就該畫到今天），雷達那側一律排除；
+ * (4) {@code requestedStart} 起始週丟棄只有本側有；(5) <b>壞資料週</b>本側只要任一日 candle 不合法
+ * 就丟掉整週，雷達那側改採逐欄 null、只有 {@code close} 缺值才丟整根。第 (5) 點在雙邊測試都有
+ * 明確斷言（{@code ChartSeriesAlignerTest} 與 {@code WeeklyBarAggregatorTest}）。</p>
+ */
 public final class ChartSeriesAligner {
  private ChartSeriesAligner() {}
  public static ChartSeriesDto align(List<PricePointDto> p,List<IndicatorPointDto> i){return align(p,i,null);}

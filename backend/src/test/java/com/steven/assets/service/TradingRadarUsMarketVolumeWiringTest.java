@@ -162,7 +162,7 @@ class TradingRadarUsMarketVolumeWiringTest {
         stubBaseline();
         LocalDate latest = completedUsDay(5);
         List<UsIndexDailyHistory> rows = ixicRowsDesc(latest);
-        when(usIndexRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 241)).thenReturn(rows);
+        when(usIndexRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 500)).thenReturn(rows);
 
         TradingRadarDto.MarketSummary summary = newService().buildMarketSnapshot(US_MARKET).summary();
 
@@ -198,7 +198,7 @@ class TradingRadarUsMarketVolumeWiringTest {
     void 美股marketVolumeAsOfDate等於同一context的marketAsOfDate字串() {
         stubBaseline();
         LocalDate latest = completedUsDay(5);
-        when(usIndexRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 241))
+        when(usIndexRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 500))
                 .thenReturn(ixicRowsDesc(latest));
 
         TradingRadarDto.MarketSummary summary = newService().buildMarketSnapshot(US_MARKET).summary();
@@ -211,7 +211,7 @@ class TradingRadarUsMarketVolumeWiringTest {
     @Test
     void IXIC列為空時三欄皆為null且不拋例外() {
         stubBaseline();
-        when(usIndexRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 241)).thenReturn(List.of());
+        when(usIndexRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 500)).thenReturn(List.of());
 
         TradingRadarDto.MarketSummary summary = newService().buildMarketSnapshot(US_MARKET).summary();
 
@@ -225,7 +225,7 @@ class TradingRadarUsMarketVolumeWiringTest {
     void IXIC列全部晚於完成邊界時三欄皆為null且不拋例外() {
         stubBaseline();
         // 未來日期：usCompletion()（美東 16:00）必定晚於 decisionInstant，整組被 V13 濾掉。
-        when(usIndexRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 241))
+        when(usIndexRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 500))
                 .thenReturn(ixicRowsDesc(completedUsDay(-30)));
 
         TradingRadarDto.MarketSummary summary = newService().buildMarketSnapshot(US_MARKET).summary();
@@ -242,7 +242,7 @@ class TradingRadarUsMarketVolumeWiringTest {
     @Test
     void 美股marketTurnoverRatio恆為null不得由成交量偽造週轉率() {
         stubBaseline();
-        when(usIndexRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 241))
+        when(usIndexRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 500))
                 .thenReturn(ixicRowsDesc(completedUsDay(5)));
 
         TradingRadarDto.MarketSummary summary = newService().buildMarketSnapshot(US_MARKET).summary();
@@ -266,7 +266,7 @@ class TradingRadarUsMarketVolumeWiringTest {
     void 美股MarketInput的量能與完成日漲跌幅必須與同一份context同源() {
         stubBaseline();
         List<UsIndexDailyHistory> rows = ixicRowsDesc(completedUsDay(5));
-        when(usIndexRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 241)).thenReturn(rows);
+        when(usIndexRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 500)).thenReturn(rows);
 
         TradingRadarDto.MarketSummary summary = newService().buildMarketSnapshot(US_MARKET).summary();
 
@@ -315,7 +315,7 @@ class TradingRadarUsMarketVolumeWiringTest {
     @Test
     void 美股風險提醒不再出現量價與跨市場的假資料不足() {
         stubBaseline();
-        when(usIndexRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 241))
+        when(usIndexRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 500))
                 .thenReturn(ixicRowsDesc(completedUsDay(5)));
 
         TradingRadarDto.MarketSummary summary = newService().buildMarketSnapshot(US_MARKET).summary();

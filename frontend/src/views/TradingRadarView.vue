@@ -3,7 +3,7 @@
     <div class="header-row">
       <div>
         <div class="page-heading">今日交易雷達</div>
-        <div class="page-sub">短期約一週、中期一至六個月；綜合技術面、量能、美股科技、匯率、個股基本面與產業發展</div>
+        <div class="page-sub">一周、1周~1月、1月~6月三種持有期；新增日K 棒與週K 指標，並綜合技術面、量能、美股科技、匯率、個股基本面與產業發展</div>
       </div>
       <div class="header-actions">
         <el-button :icon="Download" @click="openExport">匯出 Excel</el-button>
@@ -25,7 +25,7 @@
         <div class="card-head">
           <div>
             <span class="section-title">{{ marketCardTab }}大盤風險</span>
-            <el-tag size="small" effect="plain" type="info" class="rule-tag">{{ radar.ruleVersion || 'TW_RULES_V14' }}</el-tag>
+            <el-tag size="small" effect="plain" type="info" class="rule-tag">{{ radar.ruleVersion || 'TW_RULES_V15' }}</el-tag>
           </div>
           <div class="as-of-group">
             <span class="as-of">完成日 K：{{ currentMarket.asOfDate || '資料不足' }}</span>
@@ -83,7 +83,7 @@
             <strong v-else>{{ fmtNumber(currentMarket.price, 2) }}</strong>
             <span :style="{ color: priceColor(currentMarket.changePercent) }">{{ fmtPct(currentMarket.changePercent) }}</span>
           </div>
-          <div class="metric"><span class="metric-label">週線 MA5</span><strong>{{ fmtNumber(currentMarket.weeklyMa, 2) }}</strong></div>
+          <div class="metric"><span class="metric-label">日線 MA5</span><strong>{{ fmtNumber(currentMarket.weeklyMa, 2) }}</strong></div>
           <div class="metric"><span class="metric-label">月線 MA20</span><strong>{{ fmtNumber(currentMarket.monthlyMa, 2) }}</strong></div>
           <div class="metric"><span class="metric-label">季線 MA60</span><strong>{{ fmtNumber(currentMarket.quarterlyMa, 2) }}</strong><small>{{ confirmationLabel(currentMarket.quarterlyConfirmation) }}</small></div>
           <div class="metric"><span class="metric-label">年線 MA240</span><strong>{{ fmtNumber(currentMarket.annualMa, 2) }}</strong><small>{{ confirmationLabel(currentMarket.annualConfirmation) }}</small></div>
@@ -93,6 +93,28 @@
           <div v-if="marketCardTab === '台股'" class="metric"><span class="metric-label">NASDAQ 前一日</span><strong :style="{ color: priceColor(currentMarket.nasdaqChangePercent) }">{{ fmtPct(currentMarket.nasdaqChangePercent) }}</strong></div>
           <div v-if="marketCardTab === '台股'" class="metric"><span class="metric-label">SOX 前一日</span><strong :style="{ color: priceColor(currentMarket.soxChangePercent) }">{{ fmtPct(currentMarket.soxChangePercent) }}</strong><small>{{ currentMarket.usTechAsOfDate || '資料不足' }}</small></div>
         </div>
+      </div>
+
+      <div class="fundamental-panel">
+        <div class="fundamental-head">
+          <span class="fundamental-title">{{ marketCardTab }}週線</span>
+          <span v-if="currentMarket.weeklyIndicators?.weekEndDate" class="as-of">
+            上一完成週：{{ currentMarket.weeklyIndicators.weekEndDate }}（{{ currentMarket.weeklyIndicators.completedWeeks ?? '—' }} 根完成週）
+          </span>
+        </div>
+        <div v-if="currentMarket.weeklyIndicators" class="market-metrics">
+          <div class="metric"><span class="metric-label">週開／高／低／收</span><strong>{{ fmtNumber(currentMarket.weeklyIndicators.open, 2) }}／{{ fmtNumber(currentMarket.weeklyIndicators.high, 2) }}／{{ fmtNumber(currentMarket.weeklyIndicators.low, 2) }}／{{ fmtNumber(currentMarket.weeklyIndicators.close, 2) }}</strong></div>
+          <div class="metric"><span class="metric-label">週MA5／10／20</span><strong>{{ fmtNumber(currentMarket.weeklyIndicators.ma5, 2) }}／{{ fmtNumber(currentMarket.weeklyIndicators.ma10, 2) }}／{{ fmtNumber(currentMarket.weeklyIndicators.ma20, 2) }}</strong></div>
+          <div class="metric"><span class="metric-label">週KD／J9</span><strong>K {{ fmtNumber(currentMarket.weeklyIndicators.k, 1) }} / D {{ fmtNumber(currentMarket.weeklyIndicators.d, 1) }} / J {{ fmtNumber(currentMarket.weeklyIndicators.j9, 1) }}</strong></div>
+          <div class="metric"><span class="metric-label">週DIF／MACD／OSC</span><strong>{{ fmtNumber(currentMarket.weeklyIndicators.dif, 2) }}／{{ fmtNumber(currentMarket.weeklyIndicators.macd, 2) }}／{{ fmtNumber(currentMarket.weeklyIndicators.osc, 2) }}</strong></div>
+          <div class="metric"><span class="metric-label">週RSI5／10</span><strong>{{ fmtNumber(currentMarket.weeklyIndicators.rsi5, 2) }}／{{ fmtNumber(currentMarket.weeklyIndicators.rsi10, 2) }}</strong></div>
+          <div class="metric"><span class="metric-label">週BIAS10／20</span><strong>{{ fmtNumber(currentMarket.weeklyIndicators.bias10, 2) }}／{{ fmtNumber(currentMarket.weeklyIndicators.bias20, 2) }}</strong></div>
+          <div class="metric"><span class="metric-label">週量比</span><strong>{{ fmtRatio(currentMarket.weeklyIndicators.volumeRatio) }}</strong></div>
+          <div class="metric"><span class="metric-label">週漲跌</span><strong :style="{ color: priceColor(currentMarket.weeklyIndicators.changePercent) }">{{ fmtPct(currentMarket.weeklyIndicators.changePercent) }}</strong></div>
+          <div class="metric"><span class="metric-label">週收盤區間位置</span><strong>{{ currentMarket.weeklyIndicators.closePosition == null ? '—' : Math.round(currentMarket.weeklyIndicators.closePosition * 100) + '%' }}</strong></div>
+          <div class="metric"><span class="metric-label">週實體方向</span><strong>{{ candleDirectionLabel(currentMarket.weeklyIndicators.bodyDirection) }}</strong></div>
+        </div>
+        <div v-else class="muted">完成週不足 60 根或舊快照未含週線欄位，本次不採計{{ marketCardTab }}大盤週線因子。</div>
       </div>
 
       <el-row :gutter="18" class="reason-row">
@@ -185,23 +207,31 @@
         <el-table-column type="expand">
           <template #default="{ row }">
             <div class="expand-panel">
-              <div class="evidence-summary" v-if="row.shortEvidenceConfidence != null || row.mediumEvidenceConfidence != null">
+              <div class="evidence-summary" v-if="row.shortEvidenceConfidence != null || row.swingEvidenceConfidence != null || row.mediumEvidenceConfidence != null">
                 <div class="confirm-grid">
                   <div class="confirm-item">
-                    <span>短期證據信心</span>
+                    <span>一周證據信心</span>
                     <strong>{{ row.shortEvidenceConfidence == null ? '—' : row.shortEvidenceConfidence + ' / 100' }}</strong>
                   </div>
                   <div class="confirm-item">
-                    <span>中期證據信心</span>
+                    <span>1周~1月 證據信心</span>
+                    <strong>{{ row.swingEvidenceConfidence == null ? '—' : row.swingEvidenceConfidence + ' / 100' }}</strong>
+                  </div>
+                  <div class="confirm-item">
+                    <span>1月~6月 證據信心</span>
                     <strong>{{ row.mediumEvidenceConfidence == null ? '—' : row.mediumEvidenceConfidence + ' / 100' }}</strong>
                   </div>
                   <div class="confirm-item">
-                    <span>短／中期下檔風險</span>
-                    <strong>{{ row.shortDownsideRisk == null ? '—' : row.shortDownsideRisk }} ／ {{ row.mediumDownsideRisk == null ? '—' : row.mediumDownsideRisk }}</strong>
-                    <small>風險覆蓋 {{ row.shortRiskCoverage == null ? '—' : fmtPct(row.shortRiskCoverage * 100) }} ／ {{ row.mediumRiskCoverage == null ? '—' : fmtPct(row.mediumRiskCoverage * 100) }}</small>
+                    <span>三軌下檔風險</span>
+                    <strong>{{ row.shortDownsideRisk == null ? '—' : row.shortDownsideRisk }} ／ {{ row.swingDownsideRisk == null ? '—' : row.swingDownsideRisk }} ／ {{ row.mediumDownsideRisk == null ? '—' : row.mediumDownsideRisk }}</strong>
+                    <small>風險覆蓋 {{ row.shortRiskCoverage == null ? '—' : fmtPct(row.shortRiskCoverage * 100) }} ／ {{ row.swingRiskCoverage == null ? '—' : fmtPct(row.swingRiskCoverage * 100) }} ／ {{ row.mediumRiskCoverage == null ? '—' : fmtPct(row.mediumRiskCoverage * 100) }}</small>
                   </div>
                   <div class="confirm-item">
-                    <span>候選／實際動作</span>
+                    <span>1周~1月 候選／實際動作</span>
+                    <strong>{{ row.swingCandidateAction || '—' }} → {{ row.swingAction || '—' }}</strong>
+                  </div>
+                  <div class="confirm-item">
+                    <span>1月~6月 候選／實際動作</span>
                     <strong>{{ row.candidateAction || '—' }} → {{ row.action || '—' }}</strong>
                     <small v-if="row.evidence?.actionGateReasons?.length">{{ row.evidence.actionGateReasons.join('；') }}</small>
                   </div>
@@ -217,7 +247,7 @@
               </div>
               <div class="confirm-grid">
                 <div class="confirm-item">
-                  <span>週線 MA5</span><strong>{{ fmtNumber(row.weeklyMa, 2) }}</strong>
+                  <span>日線 MA5</span><strong>{{ fmtNumber(row.weeklyMa, 2) }}</strong>
                 </div>
                 <div class="confirm-item">
                   <span>月線 MA20</span><strong>{{ fmtNumber(row.monthlyMa, 2) }}</strong>
@@ -256,6 +286,88 @@
                 <div class="confirm-item"><span>W%R9</span><strong>{{ fmtNumber(row.extendedIndicators?.wr9, 2) }}</strong></div>
                 <div class="confirm-item"><span>個股完成日量比</span><strong>{{ fmtRatio(row.volumeRatio) }}</strong></div>
                 <div v-if="row.underlyingCurrency && row.underlyingCurrency !== 'TWD'" class="confirm-item"><span>匯率完成日</span><strong>{{ row.fxAsOfDate || '精確資料不可得' }}</strong></div>
+              </div>
+
+              <div class="fundamental-panel">
+                <div class="fundamental-head">
+                  <span class="fundamental-title">日K 棒</span>
+                  <span v-if="row.dailyCandle?.asOfDate" class="as-of">完成日 K：{{ row.dailyCandle.asOfDate }}</span>
+                </div>
+                <div v-if="row.dailyCandle" class="confirm-grid">
+                  <div class="confirm-item">
+                    <span>開／高／低／收</span>
+                    <strong>{{ fmtNumber(row.dailyCandle.open, 2) }}／{{ fmtNumber(row.dailyCandle.high, 2) }}／{{ fmtNumber(row.dailyCandle.low, 2) }}／{{ fmtNumber(row.dailyCandle.close, 2) }}</strong>
+                  </div>
+                  <div class="confirm-item">
+                    <span>收盤區間位置</span>
+                    <strong>{{ row.dailyCandle.closePosition == null ? '—' : Math.round(row.dailyCandle.closePosition * 100) + '%' }}</strong>
+                  </div>
+                  <div class="confirm-item">
+                    <span>實體方向</span>
+                    <strong>{{ candleDirectionLabel(row.dailyCandle.bodyDirection) }}</strong>
+                  </div>
+                  <div class="confirm-item">
+                    <span>下影線比例</span>
+                    <strong>{{ row.dailyCandle.lowerShadowRatio == null ? '—' : Math.round(row.dailyCandle.lowerShadowRatio * 100) + '%' }}</strong>
+                  </div>
+                </div>
+                <div v-else class="muted">舊快照尚未含日K 棒欄位，請重新整理。</div>
+              </div>
+
+              <div class="fundamental-panel">
+                <div class="fundamental-head">
+                  <span class="fundamental-title">週K</span>
+                  <span v-if="row.weeklyIndicators?.weekEndDate" class="as-of">
+                    上一完成週：{{ row.weeklyIndicators.weekEndDate }}（{{ row.weeklyIndicators.completedWeeks ?? '—' }} 根完成週）
+                  </span>
+                </div>
+                <div v-if="row.weeklyIndicators" class="confirm-grid">
+                  <div class="confirm-item">
+                    <span>週開／高／低／收</span>
+                    <strong>{{ fmtNumber(row.weeklyIndicators.open, 2) }}／{{ fmtNumber(row.weeklyIndicators.high, 2) }}／{{ fmtNumber(row.weeklyIndicators.low, 2) }}／{{ fmtNumber(row.weeklyIndicators.close, 2) }}</strong>
+                  </div>
+                  <div class="confirm-item">
+                    <span>週量</span>
+                    <strong>{{ row.weeklyIndicators.volume == null ? '—' : Number(row.weeklyIndicators.volume).toLocaleString('zh-TW') }}</strong>
+                  </div>
+                  <div class="confirm-item">
+                    <span>週MA5／10／20</span>
+                    <strong>{{ fmtNumber(row.weeklyIndicators.ma5, 2) }}／{{ fmtNumber(row.weeklyIndicators.ma10, 2) }}／{{ fmtNumber(row.weeklyIndicators.ma20, 2) }}</strong>
+                  </div>
+                  <div class="confirm-item">
+                    <span>週KD／J9</span>
+                    <strong>K {{ fmtNumber(row.weeklyIndicators.k, 1) }} / D {{ fmtNumber(row.weeklyIndicators.d, 1) }} / J {{ fmtNumber(row.weeklyIndicators.j9, 1) }}</strong>
+                  </div>
+                  <div class="confirm-item">
+                    <span>週DIF／MACD／OSC</span>
+                    <strong>{{ fmtNumber(row.weeklyIndicators.dif, 2) }}／{{ fmtNumber(row.weeklyIndicators.macd, 2) }}／{{ fmtNumber(row.weeklyIndicators.osc, 2) }}</strong>
+                  </div>
+                  <div class="confirm-item">
+                    <span>週RSI5／10</span>
+                    <strong>{{ fmtNumber(row.weeklyIndicators.rsi5, 2) }}／{{ fmtNumber(row.weeklyIndicators.rsi10, 2) }}</strong>
+                  </div>
+                  <div class="confirm-item">
+                    <span>週BIAS10／20</span>
+                    <strong>{{ fmtNumber(row.weeklyIndicators.bias10, 2) }}／{{ fmtNumber(row.weeklyIndicators.bias20, 2) }}</strong>
+                  </div>
+                  <div class="confirm-item">
+                    <span>週量比</span>
+                    <strong>{{ fmtRatio(row.weeklyIndicators.volumeRatio) }}</strong>
+                  </div>
+                  <div class="confirm-item">
+                    <span>週漲跌</span>
+                    <strong :style="{ color: priceColor(row.weeklyIndicators.changePercent) }">{{ fmtPct(row.weeklyIndicators.changePercent) }}</strong>
+                  </div>
+                  <div class="confirm-item">
+                    <span>週收盤區間位置</span>
+                    <strong>{{ row.weeklyIndicators.closePosition == null ? '—' : Math.round(row.weeklyIndicators.closePosition * 100) + '%' }}</strong>
+                  </div>
+                  <div class="confirm-item">
+                    <span>週實體方向</span>
+                    <strong>{{ candleDirectionLabel(row.weeklyIndicators.bodyDirection) }}</strong>
+                  </div>
+                </div>
+                <div v-else class="muted">完成週不足 60 根或舊快照未含週K 欄位，本檔今日不採計週線因子。</div>
               </div>
 
               <div class="fundamental-panel">
@@ -420,9 +532,9 @@
                     <div v-for="group in evidenceGroups(row)" :key="`${row.market}-${row.stockCode}-${group.group}`" class="evidence-group-item">
                       <div class="evidence-group-head">
                         <strong>{{ group.group }}</strong>
-                        <span>短 {{ fmtPct(group.shortCoverage * 100) }}／中 {{ fmtPct(group.mediumCoverage * 100) }}</span>
+                        <span>一周 {{ fmtPct(group.shortCoverage * 100) }}／1周~1月 {{ fmtPct(group.swingCoverage * 100) }}／1月~6月 {{ fmtPct(group.mediumCoverage * 100) }}</span>
                       </div>
-                      <small>短期 {{ group.shortFresh ? 'fresh' : '缺漏／過期' }} · 中期 {{ group.mediumFresh ? 'fresh' : '缺漏／過期' }} · provider {{ group.sourceCount ?? 0 }}</small>
+                      <small>一周 {{ group.shortFresh ? 'fresh' : '缺漏／過期' }} · 1周~1月 {{ group.swingFresh ? 'fresh' : '缺漏／過期' }} · 1月~6月 {{ group.mediumFresh ? 'fresh' : '缺漏／過期' }} · provider {{ group.sourceCount ?? 0 }}</small>
                       <ul v-if="group.components?.length" class="evidence-component-list">
                         <li v-for="component in group.components" :key="`${group.group}-${component.name}`">
                           <span>{{ component.name }} · {{ component.applicability || '—' }}</span>
@@ -445,14 +557,14 @@
 
               <el-row :gutter="18" class="reason-row">
                 <el-col :xs="24" :md="12">
-                  <div class="reason-title positive">短期（約一週）支持訊號</div>
+                  <div class="reason-title positive">一周支持訊號</div>
                   <ul v-if="row.shortReasons?.length" class="reason-list">
                     <li v-for="(item, i) in row.shortReasons" :key="`ssr-${row.stockCode}-${i}`">{{ item }}</li>
                   </ul>
                   <div v-else class="muted">沒有足夠的支持訊號。</div>
                 </el-col>
                 <el-col :xs="24" :md="12">
-                  <div class="reason-title risk">短期（約一週）風險提醒</div>
+                  <div class="reason-title risk">一周風險提醒</div>
                   <ul v-if="row.shortRisks?.length" class="reason-list">
                     <li v-for="(item, i) in row.shortRisks" :key="`ssk-${row.stockCode}-${i}`">{{ item }}</li>
                   </ul>
@@ -461,14 +573,30 @@
               </el-row>
               <el-row :gutter="18" class="reason-row">
                 <el-col :xs="24" :md="12">
-                  <div class="reason-title positive">中期（1–6 月）支持訊號</div>
+                  <div class="reason-title positive">1周~1月 支持訊號</div>
+                  <ul v-if="row.swingReasons?.length" class="reason-list">
+                    <li v-for="(item, i) in row.swingReasons" :key="`swr-${row.stockCode}-${i}`">{{ item }}</li>
+                  </ul>
+                  <div v-else class="muted">沒有足夠的支持訊號。</div>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <div class="reason-title risk">1周~1月 風險提醒</div>
+                  <ul v-if="row.swingRisks?.length" class="reason-list">
+                    <li v-for="(item, i) in row.swingRisks" :key="`swk-${row.stockCode}-${i}`">{{ item }}</li>
+                  </ul>
+                  <div v-else class="muted">目前沒有額外風險提醒。</div>
+                </el-col>
+              </el-row>
+              <el-row :gutter="18" class="reason-row">
+                <el-col :xs="24" :md="12">
+                  <div class="reason-title positive">1月~6月 支持訊號</div>
                   <ul v-if="row.reasons?.length" class="reason-list">
                     <li v-for="(item, i) in row.reasons" :key="`mr-${row.stockCode}-${i}`">{{ item }}</li>
                   </ul>
                   <div v-else class="muted">沒有足夠的支持訊號。</div>
                 </el-col>
                 <el-col :xs="24" :md="12">
-                  <div class="reason-title risk">中期（1–6 月）風險提醒</div>
+                  <div class="reason-title risk">1月~6月 風險提醒</div>
                   <ul v-if="row.risks?.length" class="reason-list">
                     <li v-for="(item, i) in row.risks" :key="`mk-${row.stockCode}-${i}`">{{ item }}</li>
                   </ul>
@@ -545,7 +673,7 @@
             <span v-else class="muted">資料尚未提供</span>
           </template>
         </el-table-column>
-        <el-table-column label="短期（約一週）" min-width="150" align="center">
+        <el-table-column label="一周" min-width="104" align="center">
           <template #default="{ row }">
             <el-tooltip v-if="row.shortAction === 'TRIAL_BUY'" placement="top" :content="trialBuyHint">
               <el-tag :type="actionType(row.shortAction)" effect="dark">{{ row.shortActionLabel }}</el-tag>
@@ -554,7 +682,16 @@
             <div class="score-inline" :style="{ color: scoreColor(row.shortScore) }">{{ row.shortScore == null ? '—' : row.shortScore + ' 分' }}</div>
           </template>
         </el-table-column>
-        <el-table-column label="中期（1–6 月）" min-width="150" align="center">
+        <el-table-column label="1周~1月" min-width="108" align="center">
+          <template #default="{ row }">
+            <el-tooltip v-if="row.swingAction === 'TRIAL_BUY'" placement="top" :content="trialBuyHint">
+              <el-tag :type="actionType(row.swingAction)" effect="dark">{{ row.swingActionLabel }}</el-tag>
+            </el-tooltip>
+            <el-tag v-else :type="actionType(row.swingAction)" effect="dark">{{ row.swingActionLabel || '今日不交易' }}</el-tag>
+            <div class="score-inline" :style="{ color: scoreColor(row.swingScore) }">{{ row.swingScore == null ? '—' : row.swingScore + ' 分' }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column label="1月~6月" min-width="108" align="center">
           <template #default="{ row }">
             <el-tooltip v-if="row.action === 'TRIAL_BUY'" placement="top" :content="trialBuyHint">
               <el-tag :type="actionType(row.action)" effect="dark">{{ row.actionLabel }}</el-tag>
@@ -563,8 +700,8 @@
             <div class="score-inline" :style="{ color: scoreColor(row.score) }">{{ row.score == null ? '—' : row.score + ' 分' }}</div>
           </template>
         </el-table-column>
-        <el-table-column label="分歧" width="82" align="center">
-          <template #default="{ row }"><el-tag v-if="row.horizonConflict" type="warning" effect="dark">短中分歧</el-tag><span v-else class="muted">—</span></template>
+        <el-table-column label="持有期分歧" width="112" align="center">
+          <template #default="{ row }"><el-tag v-if="row.horizonConflict" type="warning" effect="dark">持有期分歧</el-tag><span v-else class="muted">—</span></template>
         </el-table-column>
         <el-table-column label="時機" width="104" align="center">
           <template #default="{ row }">
@@ -635,6 +772,16 @@
             </el-tag>
           </template>
         </el-table-column>
+        <!--
+          Task 356.12c：收合列「週K」欄，僅摘要週KD／週漲跌；完整週K 數值仍在展開列。
+          weeklyIndicators 為 null（舊快照或完成週不足 60 根）時整欄顯示「—」，不得補 0。
+        -->
+        <el-table-column label="週K" width="168" align="center">
+          <template #default="{ row }">
+            <span>K {{ fmtNumber(row.weeklyIndicators?.k, 1) }} / D {{ fmtNumber(row.weeklyIndicators?.d, 1) }}</span>
+            <div class="score-inline" :style="{ color: priceColor(row.weeklyIndicators?.changePercent) }">{{ fmtPct(row.weeklyIndicators?.changePercent) }}</div>
+          </template>
+        </el-table-column>
         <el-table-column prop="asOfDate" label="完成日 K" width="115" />
         <el-table-column label="通知" width="105" align="center" fixed="right">
           <template #default="{ row }">
@@ -654,7 +801,7 @@
       :closable="false"
       show-icon
       title="規則式決策輔助，不是獲利保證"
-      description="評分只比較市場上的獲利機會，不納入成本價、可用資金、配置或其他個人理財需求。財報、估值與產業歷史自上線後累積；缺值權重會重分配，因此不同標的的分數組成可能不同。系統不保證獲利、不會自動下單；資料不足時以「今日不交易」為準。"
+      description="評分只比較市場上的獲利機會，不納入成本價、可用資金、配置或其他個人理財需求。財報、估值與產業歷史自上線後累積；缺值權重會重分配，因此不同標的的分數組成可能不同。系統不保證獲利、不會自動下單；資料不足時以「今日不交易」為準。一周、1周~1月、1月~6月三軌分數只描述目前位置相對於自身歷史的獲利機會，不是獲利機率，也不是報酬預測；TW_RULES_V14 與 TW_RULES_V15 為不同規則版本，兩者的分數不可直接比較。"
     />
 
     <el-card shadow="never" class="sched-card">
@@ -814,7 +961,7 @@
         />
 
         <el-form label-position="top">
-          <el-form-item label="中期建議（1–6 月）">
+          <el-form-item label="1 月~6 月建議">
             <el-checkbox-group v-model="notificationForm.actionStates" class="state-options">
               <el-checkbox
                 v-for="option in notificationOptions.actions"
@@ -975,7 +1122,7 @@ const dirPickerPreview = computed(() => {
   if (!joined) return base
   return isGdrive ? base + joined : base + '/' + joined
 })
-const radar = ref({ market: {}, usMarket: {}, stocks: [], publicInformation: [], skippedNonTwStocks: 0, ruleVersion: 'TW_RULES_V14' })
+const radar = ref({ market: {}, usMarket: {}, stocks: [], publicInformation: [], skippedNonTwStocks: 0, ruleVersion: 'TW_RULES_V15' })
 const notificationVisible = ref(false)
 const notificationLoading = ref(false)
 const notificationSaving = ref(false)
@@ -1257,6 +1404,16 @@ function fmtPct(value) {
 function fmtRatio(value) {
   if (value == null || Number.isNaN(Number(value))) return '—'
   return `${Number(value).toFixed(2)} 倍`
+}
+
+// 日K 棒／週K 的實體方向：bodyDirection ∈ {-1,0,1}，缺值不得顯示 0（Task 356.5b／356.6d）。
+function candleDirectionLabel(value) {
+  if (value == null) return '—'
+  const n = Number(value)
+  if (Number.isNaN(n)) return '—'
+  if (n > 0) return '陽線'
+  if (n < 0) return '陰線'
+  return '平盤'
 }
 
 function valuationComponents(row) {

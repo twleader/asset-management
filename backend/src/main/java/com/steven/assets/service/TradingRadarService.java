@@ -67,6 +67,15 @@ public class TradingRadarService {
      * 約 3 個月內對每一檔 ETF 恆為 {@code null}（由權重重分配吸收）；絕對硬否決不受此限、即刻生效。</p>
      */
     private static final int ETF_PREMIUM_LOOKBACK_DAYS = 250;
+    /**
+     * 個股與大盤日 K 的取數視窗（Task 356.4a）：約 100 個 ISO 週，扣掉 provenance／未來列剔除後
+     * 仍足以取得 {@link RadarInputAssembler#MIN_COMPLETED_WEEKS} 根完成週。
+     *
+     * <p><b>擴窗只服務週K 聚合，日K 路徑一律仍由 {@link RadarObservationResolver#INDICATOR_SERIES_MAX_ROWS}
+     * （241 完成列）界定</b>——凡是「沒有自帶列數上限」的既有計算都必須釘回那個視窗，
+     * 否則會被長視窗靜默改值（見 {@code RadarInputAssembler.assemble} 的 {@code dailyContractRows}）。</p>
+     */
+    private static final int SERIES_FETCH_ROWS = 500;
     private static final int ETF_PREMIUM_MIN_SAMPLES = 60;
 
     private final TradingRadarRuleEngine ruleEngine;
@@ -561,16 +570,23 @@ public class TradingRadarService {
             TradingRadarMarketContextService.MarketContext context,
             Instant decisionInstant) {
         try {
-            List<TwseIndexDailyHistory> rows = twseRepo.findTopNByOrderByTradingDateDesc(241);
+            // Task 356.4a：查詢與 as-of 截斷<b>兩處都</b>放大到 500——只改查詢那個等於沒改，
+            // 序列仍會被第二個 limit 截回 241 列 ≈ 48 個 ISO 週 < 60 根完成週，
+            // 台股大盤的週K 因子會永遠缺值，畫面只多一則「不採計」風險句、沒有任何錯誤訊息。
+            List<TwseIndexDailyHistory> rows = twseRepo.findTopNByOrderByTradingDateDesc(SERIES_FETCH_ROWS);
             if (context.marketAsOfDate() != null) {
                 rows = rows.stream()
                         .filter(r -> !r.getTradingDate().isAfter(context.marketAsOfDate()))
-                        .limit(241)
+                        .limit(SERIES_FETCH_ROWS)
                         .toList();
             }
-            List<BigDecimal> closes = rows.stream().map(TwseIndexDailyHistory::getClosePoint).toList();
+            // 既有日K 路徑一律只吃最新 241 列，長清單只供週K 聚合（Task 356.4b）。
+            List<TwseIndexDailyHistory> contractRows = rows.size() <= RadarObservationResolver.INDICATOR_SERIES_MAX_ROWS
+                    ? rows
+                    : rows.subList(0, RadarObservationResolver.INDICATOR_SERIES_MAX_ROWS);
+            List<BigDecimal> closes = contractRows.stream().map(TwseIndexDailyHistory::getClosePoint).toList();
             LocalDate currentTradingDay = currentTwTradingDay(decisionInstant);
-            LocalDate latestEodDate = rows.isEmpty() ? null : rows.get(0).getTradingDate();
+            LocalDate latestEodDate = contractRows.isEmpty() ? null : contractRows.get(0).getTradingDate();
             boolean todayEodPresent = latestEodDate != null && latestEodDate.equals(currentTradingDay);
 
             Optional<PriceQueryService.LivePrice> liveOpt = priceQueryService.getLive(TAIEX_CODE, TW_MARKET);
@@ -591,6 +607,13 @@ public class TradingRadarService {
             TechnicalIndicatorService.FullIndicators ind = indicatorService.computeAll(TAIEX_CODE, TW_MARKET);
             TradingRadarRuleEngine.Confirmation c60 = ruleEngine.confirm(closes, 60);
             TradingRadarRuleEngine.Confirmation c240 = ruleEngine.confirm(closes, 240);
+            // Task 356.10b：台股大盤週K 由 open_point／high_point／low_point／close_point／
+            // trade_volume 映射成中性 OHLCV 後聚合，與美股大盤共用同一支 WeeklyBarAggregator。
+            // 必須餵**長清單**（500 列）而非上面那份 241 列的 contractRows——241 列 ≈ 48 個 ISO 週
+            // < 60 根完成週，餵契約列等於讓台股大盤四組週K 因子永遠缺值。
+            List<StockPriceHistory> twIndexRowsDesc = twIndexOhlcvDesc(rows);
+            RadarInputAssembler.MarketWeekly weekly =
+                    nonNullWeekly(assembler.marketWeekly(twIndexRowsDesc, price));
             TradingRadarRuleEngine.MarketResult result = ruleEngine.evaluateMarket(
                     new TradingRadarRuleEngine.MarketInput(
                             price,
@@ -607,7 +630,11 @@ public class TradingRadarService {
                             context.usTechAvailable(),
                             // 台股的跨市場因子確實適用（前一美股科技交易日是台股的領先訊號），
                             // 故 crossMarketApplicable=true，行為逐位不變（Task 342.6）。
-                            true));
+                            true,
+                            // Task 356.10a：最新完成日的大盤 K 棒取序列第 0 筆（完成日 K），
+                            // 不取 live 點位——live 沒有當日 OHLC，只有一個成交點。
+                            marketCandle(twIndexRowsDesc),
+                            weekly.weekly()));
 
             // stale＝「完成日 K 未到今日」且「Redis 也無今日即時價」時才成立；任一者成立即非 stale（Task 228）。
             boolean stale = !todayEodPresent && !liveFreshToday;
@@ -644,7 +671,9 @@ public class TradingRadarService {
                     context.soxChangePercent(),
                     context.usTechCompositePercent(),
                     context.usTechAsOfDate() == null ? null : context.usTechAsOfDate().toString(),
-                    context.usTechAvailable());
+                    context.usTechAvailable(),
+                    // Task 356.10c：台股組的第 31 個 component，與美股組各算各的。
+                    toWeeklyDto(weekly.weekly(), weekly.barsDesc(), weekly.indicators()));
             return new MarketState(summary, result.regime(), stale);
         } catch (Exception e) {
             log.warn("今日交易雷達：大盤資料組裝失敗", e);
@@ -679,20 +708,37 @@ public class TradingRadarService {
     private MarketState buildUsMarket(Instant decisionInstant) {
         try {
             List<UsIndexDailyHistory> rows =
-                    usIndexDailyHistoryRepo.findTopNByIndexCodeOrderByTradingDateDesc(IXIC_CODE, 241);
+                    usIndexDailyHistoryRepo.findTopNByIndexCodeOrderByTradingDateDesc(
+                            IXIC_CODE, SERIES_FETCH_ROWS);
+            // 既有日K 路徑一律只吃最新 241 列，長清單只供週K 聚合（Task 356.4a／356.4b）。
+            List<UsIndexDailyHistory> contractRows = rows.size() <= RadarObservationResolver.INDICATOR_SERIES_MAX_ROWS
+                    ? rows
+                    : rows.subList(0, RadarObservationResolver.INDICATOR_SERIES_MAX_ROWS);
             // Task 323：用同一批已讀進來的 IXIC 列走既有 V13 解析，不在本類別另寫一份 ratio 計算。
             // 回傳型別是 TradingRadarMarketContextService.MarketContext（accessor 為 marketVolumeRatio()／
             // marketAsOfDate()），與 buildStock 內組 evidence 用的 TradingRadarEvidenceConfidenceResolver
             // .MarketContext 同名不同型，不得混用。
             TradingRadarMarketContextService.MarketContext usContext =
-                    marketContextService.resolveMarketFromRows(US_MARKET, decisionInstant, List.of(), rows);
-            List<BigDecimal> closes = rows.stream().map(UsIndexDailyHistory::getClosePoint).toList();
+                    marketContextService.resolveMarketFromRows(
+                            US_MARKET, decisionInstant, List.of(), contractRows);
+            List<BigDecimal> closes = contractRows.stream().map(UsIndexDailyHistory::getClosePoint).toList();
             BigDecimal price = closes.isEmpty() ? null : closes.get(0);
             BigDecimal changePercent = closes.size() >= 2 ? changePercent(closes.get(0), closes.get(1)) : null;
 
             TechnicalIndicatorService.FullIndicators ind = indicatorService.computeAllForNasdaq();
             TradingRadarRuleEngine.Confirmation c60 = ruleEngine.confirm(closes, 60);
             TradingRadarRuleEngine.Confirmation c240 = ruleEngine.confirm(closes, 240);
+            // Task 356.10b：美股大盤週K 由 us_index_daily_history 的 OHLC＋volume 映射後聚合，
+            // 與台股大盤共用同一支 WeeklyBarAggregator。
+            //
+            // ⚠ 必須餵**長清單** rows（500 列）而不是上面釘回 241 列的 contractRows：
+            // 241 列 ≈ 48 個 ISO 週 < RadarInputAssembler.MIN_COMPLETED_WEEKS(60)，
+            // 餵契約列會讓美股大盤四組週K 因子永遠缺值，且不會有任何錯誤訊息。
+            // 既有日K 路徑（resolveMarketFromRows／closes／confirm）仍只吃 contractRows，
+            // 故擴窗對既有輸出逐位無影響。
+            List<StockPriceHistory> usIndexRowsDesc = usIndexOhlcvDesc(rows);
+            RadarInputAssembler.MarketWeekly weekly =
+                    nonNullWeekly(assembler.marketWeekly(usIndexRowsDesc, price));
             TradingRadarRuleEngine.MarketResult result = ruleEngine.evaluateMarket(
                     new TradingRadarRuleEngine.MarketInput(
                             price,
@@ -702,8 +748,8 @@ public class TradingRadarService {
                             c240,
                             // Task 342（推翻 Task 323.2 的刻意留白）：完成日漲跌幅與量能比真正接進
                             // regime 分數（averageAvailable(...) → score ±8／±10／±3）。使用者已知情
-                            // 並接受「美股個股 regime 與買進閘門會因此變動」的代價，RULE_VERSION 同步升
-                            // TW_RULES_V14。
+                            // 並接受「美股個股 regime 與買進閘門會因此變動」的代價，RULE_VERSION 於該次
+                            // 同步升版；現行 production 版號為 TW_RULES_V15（Task 356，三軌＋週K）。
                             //
                             // ⚠ completedChangePercent 必須取 usContext 這一份，不得改用本方法上面的區域
                             // 變數 changePercent：後者算自 findTopN...(IXIC_CODE, 241)，該查詢沒有任何完成日
@@ -726,9 +772,12 @@ public class TradingRadarService {
                             null,
                             null,
                             false,
-                            false));
+                            false,
+                            // Task 356.10a：最新完成日的大盤 K 棒（美股無 live 列，序列第 0 筆即最新）。
+                            marketCandle(usIndexRowsDesc),
+                            weekly.weekly()));
 
-            LocalDate latestEodDate = rows.isEmpty() ? null : rows.get(0).getTradingDate();
+            LocalDate latestEodDate = contractRows.isEmpty() ? null : contractRows.get(0).getTradingDate();
             LocalDate mostRecentCompleted = mostRecentCompletedUsTradingDay(decisionInstant);
             boolean stale = latestEodDate == null || latestEodDate.isBefore(mostRecentCompleted);
 
@@ -786,7 +835,9 @@ public class TradingRadarService {
                     null,
                     null,
                     null,
-                    false);
+                    false,
+                    // Task 356.10c：美股組自己的週K，與台股組各算各的（兩張卡的數值必然不同）。
+                    toWeeklyDto(weekly.weekly(), weekly.barsDesc(), weekly.indicators()));
             return new MarketState(summary, result.regime(), stale);
         } catch (Exception e) {
             log.warn("今日交易雷達：美股（IXIC）大盤資料組裝失敗", e);
@@ -820,13 +871,15 @@ public class TradingRadarService {
             DividendEventEvidenceResolver.Resolution distribution = dividendEventEvidenceRepository.resolve(
                     target.code(), target.market(), decisionInstant,
                     futureSessions(target.market(), decisionInstant));
-            // 抓 250 是取數緩衝，不是精算出來的餘裕（Task 319.4）：序列的契約上限固定為 241
+            // Task 356.4a 起改抓 500（≈100 個 ISO 週）供週K 聚合；緩衝的理由不變（Task 319.4）：
+            // 日 K 序列的契約上限仍固定為 241
             // （confirm(closes, 240) 需要 241 根完成收盤），由 RadarObservationResolver 截斷。
             // 這裡多抓 9 列是讓兩種剔除有名額可遞補——(1) findRecentN 沒有日期上界，盤中
             // completedSession 為前一交易日時 DB 的當日列會先佔掉一個名額再被剔除；
             // (2) completedSession 當日列存在但 close_source 未命中白名單。任一發生就只剩 240 根，
             // ma240Confirmation 回 UNAVAILABLE 而仍輸出 NO_TRADE，且五個指標欄位全非 null、偽裝成修好。
-            List<StockPriceHistory> rawRows = priceHistoryRepo.findRecentN(target.code(), target.market(), 250);
+            List<StockPriceHistory> rawRows = priceHistoryRepo.findRecentN(
+                    target.code(), target.market(), SERIES_FETCH_ROWS);
             Optional<PriceQueryService.LivePrice> rawLive =
                     priceQueryService.getLive(target.code(), target.market());
             RadarObservationResolver.AcceptedPrice acceptedPrice =
@@ -936,7 +989,15 @@ public class TradingRadarService {
                             ind.weeklyMa(),
                             assembler.extendedIndicators(ind.extended()),
                             technical.volumeRatio(),
-                            fundamental.input()));
+                            fundamental.input(),
+                            // Task 356.5a／356.6：日K 棒與週K 必須顯式傳入，否則會命中 Task 356
+                            // 之前的相容建構式（少傳引數不會編譯失敗），兩欄被填成 null →
+                            // 五個新因子在 production 恆為缺值、權重被重分配掉，而 BacktestService
+                            // 有正確傳入 → 線上與回測分岔且完全靜默。
+                            // 兩者與 DTO 揭露欄（toDailyCandleDto／toWeeklyDto）同源，皆取自這一份
+                            // Assembled，不得為了接線再算第二次。
+                            technical.dailyCandle(),
+                            technical.weekly()));
             TradingRadarEvidenceConfidenceResolver.MarketContext marketContext = marketSummary == null
                     ? TradingRadarEvidenceConfidenceResolver.MarketContext.EMPTY
                     : new TradingRadarEvidenceConfidenceResolver.MarketContext(
@@ -981,8 +1042,11 @@ public class TradingRadarService {
             // V12 score/candidate/parameters and RULE_VERSION stay bit-identical.  Only the final
             // action passes through the deterministic safety policy, at this single construction
             // point shared by page, snapshot/export and evaluateForNotification.
+            // Task 356.9b：gate 擴為三軌；既有兩軌的 gate 行為逐位不變，swing 軌套用同一組
+            // buy 降級與 risk-evidence 判定（不得只讓其中兩軌通過閘門）。
             TradingRadarEvidenceGate.GatedActions gated = TradingRadarEvidenceGate.apply(
-                    result.action(), result.shortAction(), target.held(), profile, evidence);
+                    result.action(), result.shortAction(), result.swingAction(),
+                    target.held(), profile, evidence);
 
             List<String> reasons = new ArrayList<>();
             if (technical.distributionAdjusted()) {
@@ -998,10 +1062,25 @@ public class TradingRadarService {
             shortReasons.addAll(result.shortReasons());
             List<String> shortRisks = new ArrayList<>(result.shortRisks());
             shortRisks.addAll(gated.reasons());
+            // Task 356.1b-2：swing 軌必須比照既有兩軌加入還原權息揭露句，否則同一頁三軌
+            // 中兩軌有揭露、一軌沒有。
+            // 出處就是這裡——**引擎不產生任何還原字串**：evaluateStock 的三軌 reasons 只寫
+            // 均線位置／指標方向，「已使用還原權息序列」這件事只有本方法知道（判準是
+            // technical.distributionAdjusted()，由 RadarInputAssembler 依事件日與日K 契約視窗
+            // 決定）。三軌的揭露句因此一律在此加上，不得指望 result.swingReasons() 自帶。
+            List<String> swingReasons = new ArrayList<>();
+            if (technical.distributionAdjusted()) {
+                swingReasons.add("MA／KD、週K 聚合與相對量已使用同一份還原權息／分割序列，"
+                        + "1周~1月 的波段位置不受配息缺口或分割跳空影響。 ");
+            }
+            swingReasons.addAll(nullSafe(result.swingReasons()));
+            List<String> swingRisks = new ArrayList<>(nullSafe(result.swingRisks()));
+            swingRisks.addAll(gated.reasons());
             if (!TWD.equals(currency) && fx.asOfDate() == null) {
                 String missingFx = "精確完成日匯率不可得，外幣債券 ETF 的匯率因子本日缺值。 ";
                 risks.add(missingFx);
                 shortRisks.add(missingFx);
+                swingRisks.add(missingFx);
             }
 
             String updatedAt = acceptedPrice.updatedAt();
@@ -1076,7 +1155,8 @@ public class TradingRadarService {
                             gated.candidateMediumAction().name(), gated.candidateShortAction().name(),
                             distribution, rateObservation.context(),
                             TradingRadarDto.NormalizedBiasEvidence.from(result.normalizedBias()),
-                            TradingRadarDto.NormalizedBiasEvidence.from(result.shortNormalizedBias())),
+                            TradingRadarDto.NormalizedBiasEvidence.from(result.shortNormalizedBias()),
+                            actionName(gated.candidateSwingAction())),
                     evidence.shortDownsideRisk(),
                     evidence.mediumDownsideRisk(),
                     evidence.shortConfidence(),
@@ -1087,7 +1167,20 @@ public class TradingRadarService {
                     gated.candidateShortAction().name(),
                     gated.reasons(),
                     etfPremiumLivePct,
-                    etfPremiumLiveNavAsOf);
+                    etfPremiumLiveNavAsOf,
+                    // ─── Task 356.11b：1周~1月 軌與兩組新指標（追加在既有 62 個之後）───
+                    actionName(gated.swingAction()),
+                    gated.swingAction() == null ? null : actionLabel(gated.swingAction()),
+                    result.swingScore(),
+                    List.copyOf(swingReasons),
+                    List.copyOf(swingRisks),
+                    evidence.swingDownsideRisk(),
+                    evidence.swingConfidence(),
+                    evidence.swingRisk().riskCoverage(),
+                    actionName(gated.candidateSwingAction()),
+                    toDailyCandleDto(technical.dailyCandle(), technical.volatility60().asOfDate()),
+                    toWeeklyDto(technical.weekly(), technical.weeklyBarsDesc(),
+                            technical.weeklyIndicators()));
         } catch (Exception e) {
             log.warn("今日交易雷達：{} {} 組裝失敗", target.market(), target.code(), e);
             return incompleteStock(target, name, assetClass, "讀取個股資料失敗，該檔今日不交易。");
@@ -1257,9 +1350,12 @@ public class TradingRadarService {
         // provenance 白名單，那是 accepted price／quoteStatus 的判準，拿來當 MA／KD 的歷史序列
         // 會讓 close_source 為 null 的歷史列（Task 290 明定不回填）整批消失。
         List<StockPriceHistory> completedRows = acceptedPrice.indicatorSeriesRows();
+        // Task 356.4b／356.4c：長序列（未做 241 截斷）供週K 聚合，日K 契約由下方顯式列數界定；
+        // 只查一次、只還原一次，日K 與週K 共用同一份還原結果，不得分成兩次查詢或兩次還原。
+        List<StockPriceHistory> seriesRows = acceptedPrice.weeklySeriesRows();
         Optional<PriceQueryService.LivePrice> liveOpt = acceptedPrice.liveAccepted()
                 ? Optional.ofNullable(acceptedPrice.live()) : Optional.empty();
-        List<StockPriceHistory> combined = new ArrayList<>(completedRows);
+        List<StockPriceHistory> combined = new ArrayList<>(seriesRows);
         // AcceptedPrice is the immutable decision snapshot.  Do not call the calendar/live
         // predicate again here: a mutable holiday cache or quote state must not make the
         // accepted display price and technical sequence disagree within one decision.
@@ -1275,7 +1371,11 @@ public class TradingRadarService {
                 combined,
                 dividendHistoryRepo.findAdjustmentEvents(target.code(), target.market(), fromDate, toDate),
                 liveAdded,
+                // Task 356.4d-3：completedRowCount 仍是「日K 契約的完成列數」（上限 241），
+                // 不得因為 combined 改成長序列就順手改傳長序列長度——那會讓 completedCloses
+                // 由 ≤241 變成 ~499，撞上擴窗逐位不變的回歸斷言。
                 completedRows.size(),
+                RadarObservationResolver.INDICATOR_SERIES_MAX_ROWS,
                 acceptedPrice.value());
     }
 
@@ -1458,6 +1558,147 @@ public class TradingRadarService {
     }
 
     /**
+     * {@code marketWeekly(...)} 的 null 防護——與既有 {@code usContext == null} 三元防護同一理由，
+     * 不可省：單元測試把 {@code RadarInputAssembler} 宣告為 {@code mock(...)}，未 stub 的方法回
+     * {@code null}，直接解參考產生的 NPE 會被 {@code buildMarket}／{@code buildUsMarket} 的 catch
+     * 吞成 {@code incompleteMarket()}——<b>不報錯卻讓整組大盤變 DATA_INCOMPLETE</b>，
+     * 連帶關掉全部個股的買進閘門。
+     */
+    private static RadarInputAssembler.MarketWeekly nonNullWeekly(
+            RadarInputAssembler.MarketWeekly weekly) {
+        return weekly == null ? RadarInputAssembler.MarketWeekly.EMPTY : weekly;
+    }
+
+    /** {@code null} action 代表該軌未供給；不得以 {@code NO_TRADE} 冒充「已判定不交易」。 */
+    private static String actionName(TradingRadarRuleEngine.Action action) {
+        return action == null ? null : action.name();
+    }
+
+    /**
+     * 引擎回傳的 List 欄位防護：舊相容建構式建立的 {@code StockResult} 其 swing 兩個 List 為
+     * {@code null}（record 無 compact constructor 正規化），直接 {@code new ArrayList<>(null)} 會 NPE。
+     */
+    private static List<String> nullSafe(List<String> values) {
+        return values == null ? List.of() : values;
+    }
+
+    // ─── Task 356.10b／356.10c／356.11a：大盤週K 與日K 棒的中性映射與 DTO 投影 ───────────
+
+    /**
+     * 台股大盤列 → 中性 OHLCV（Task 356.10b）。
+     *
+     * <p>{@code trade_volume} 必須帶上，否則大盤週量比恆為 null，而個股路徑算得出值——
+     * 那正是 Task 323 修過的「線上生效、回測不生效」同型缺陷。</p>
+     */
+    private static List<StockPriceHistory> twIndexOhlcvDesc(List<TwseIndexDailyHistory> rowsDesc) {
+        if (rowsDesc == null) return List.of();
+        return rowsDesc.stream()
+                .filter(r -> r != null && r.getTradingDate() != null)
+                .map(r -> StockPriceHistory.builder()
+                        .stockCode(TAIEX_CODE).market(TW_MARKET)
+                        .tradingDate(r.getTradingDate())
+                        .openPrice(r.getOpenPoint()).highPrice(r.getHighPoint())
+                        .lowPrice(r.getLowPoint()).closePrice(r.getClosePoint())
+                        .volume(r.getTradeVolume())
+                        .build())
+                .toList();
+    }
+
+    /** 美股大盤列 → 中性 OHLCV（Task 356.10b）；與台股共用同一支週K 聚合。 */
+    private static List<StockPriceHistory> usIndexOhlcvDesc(List<UsIndexDailyHistory> rowsDesc) {
+        if (rowsDesc == null) return List.of();
+        return rowsDesc.stream()
+                .filter(r -> r != null && r.getTradingDate() != null)
+                .map(r -> StockPriceHistory.builder()
+                        .stockCode(IXIC_CODE).market(US_MARKET)
+                        .tradingDate(r.getTradingDate())
+                        .openPrice(r.getOpenPoint()).highPrice(r.getHighPoint())
+                        .lowPrice(r.getLowPoint()).closePrice(r.getClosePoint())
+                        .volume(r.getVolume())
+                        .build())
+                .toList();
+    }
+
+    /** 序列第 0 筆（最新完成日）的大盤 K 棒；序列為空時回 null（引擎會揭露不採計）。 */
+    private static TradingRadarRuleEngine.CandleInput marketCandle(List<StockPriceHistory> rowsDesc) {
+        if (rowsDesc == null || rowsDesc.isEmpty()) return null;
+        StockPriceHistory row = rowsDesc.get(0);
+        return new TradingRadarRuleEngine.CandleInput(
+                row.getOpenPrice(), row.getHighPrice(), row.getLowPrice(), row.getClosePrice());
+    }
+
+    /**
+     * 最新完成日 K 棒 → DTO（Task 356.11a）。
+     *
+     * <p>三個分量一律呼叫 {@code TradingRadarRuleEngine} 的 public static 純函數，
+     * <b>與引擎計分共用同一支實作</b>，不得在此另寫一份公式。回傳的是<b>原值</b>
+     * （未 clamp、未線性轉換）；全幅非正時三者皆為 null，畫面顯示 {@code —}。</p>
+     */
+    private static TradingRadarDto.DailyCandle toDailyCandleDto(
+            TradingRadarRuleEngine.CandleInput candle, LocalDate asOfDate) {
+        if (candle == null) return null;
+        return new TradingRadarDto.DailyCandle(
+                scale2(candle.open()), scale2(candle.high()),
+                scale2(candle.low()), scale2(candle.close()),
+                TradingRadarRuleEngine.closePosition(candle.high(), candle.low(), candle.close()),
+                TradingRadarRuleEngine.bodyDirection(
+                        candle.open(), candle.high(), candle.low(), candle.close()),
+                TradingRadarRuleEngine.lowerShadowRatio(
+                        candle.open(), candle.high(), candle.low(), candle.close()),
+                asOfDate == null ? null : asOfDate.toString());
+    }
+
+    /**
+     * 週K → DTO（Task 356.11a）；個股與兩組大盤共用同一支，不得各寫一份。
+     *
+     * <p>{@code dif}／{@code macd} 是<b>純揭露欄</b>，唯一來源為同一次
+     * {@code computeFromSeries(週K 序列)} 產出的 {@code FullIndicators}（Task 356.4h）——
+     * {@code WeeklyInput} 刻意只帶 {@code osc}（進評分的只有它），不得為了揭露再算第二次。</p>
+     *
+     * <p>完成週不足 {@code MIN_COMPLETED_WEEKS} 時 {@code weekly.candle()} 為 null：
+     * 此時整組指標與週K 棒欄位一律留白，只保留 {@code weekEndDate} 與 {@code completedWeeks}，
+     * 供畫面與匯出寫出「目前 N 根」。<b>不得以 0 冒充缺值。</b></p>
+     */
+    private static TradingRadarDto.WeeklyIndicators toWeeklyDto(
+            TradingRadarRuleEngine.WeeklyInput weekly,
+            List<WeeklyBarAggregator.WeeklyBar> barsDesc,
+            TechnicalIndicatorService.FullIndicators weeklyIndicators) {
+        if (weekly == null) return null;
+        TradingRadarRuleEngine.CandleInput candle = weekly.candle();
+        TechnicalIndicatorService.ExtendedIndicators extended =
+                weeklyIndicators == null ? null : weeklyIndicators.extended();
+        Long volume = candle == null || barsDesc == null || barsDesc.isEmpty()
+                ? null : barsDesc.get(0).volume();
+        return new TradingRadarDto.WeeklyIndicators(
+                weekly.weekEndDate() == null ? null : weekly.weekEndDate().toString(),
+                weekly.completedWeeks(),
+                candle == null ? null : scale2(candle.open()),
+                candle == null ? null : scale2(candle.high()),
+                candle == null ? null : scale2(candle.low()),
+                candle == null ? null : scale2(candle.close()),
+                volume,
+                weekly.ma5(), weekly.ma10(), weekly.ma20(),
+                weekly.k(), weekly.d(), weekly.j9(),
+                candle == null || extended == null ? null : scale2(extended.dif()),
+                candle == null || extended == null ? null : scale2(extended.macd()),
+                weekly.osc(),
+                weekly.rsi5(), weekly.rsi10(),
+                weekly.bias10(), weekly.bias20(),
+                weekly.volumeRatio(), weekly.changePercent(),
+                candle == null ? null
+                        : TradingRadarRuleEngine.closePosition(
+                                candle.high(), candle.low(), candle.close()),
+                candle == null ? null
+                        : TradingRadarRuleEngine.bodyDirection(
+                                candle.open(), candle.high(), candle.low(), candle.close()));
+    }
+
+    /** 顯示／匯出一律 2 位小數；缺值為 null，不得顯示 0（Task 356.11d）。 */
+    private static BigDecimal scale2(BigDecimal value) {
+        return value == null ? null : value.setScale(2, RoundingMode.HALF_UP);
+    }
+
+    /**
      * 指標服務的擴充指標 → DTO（Task 281）。
      *
      * <p><b>只搬這 14 個值。</b>{@code FullIndicators} 的 MA／K／D 一律維持既有取法
@@ -1474,12 +1715,30 @@ public class TradingRadarService {
                 e.wr9());
     }
 
-    private static Integer bestScore(TradingRadarDto.StockDecision decision) {
-        Integer shortScore = decision.shortScore();
-        Integer mediumScore = decision.score();
-        if (shortScore == null) return mediumScore;
-        if (mediumScore == null) return shortScore;
-        return Math.max(shortScore, mediumScore);
+    /**
+     * 清單排序 key（Task 356.1d）：三軌分數取最大值——V15 起由
+     * {@code max(shortScore, score)} 改為 {@code max(shortScore, swingScore, score)}。
+     *
+     * <p>缺值排最後（呼叫端以 {@code Comparator.nullsLast(reverseOrder())} 套用），
+     * 再以股票代碼穩定排序；「缺值排最後」的既有語意不變。三軌<b>全部</b>缺值才回 null，
+     * 只要任一軌有分數就以該分數參與排序——否則新增中間軌反而會讓
+     * 「只有 swing 軌算得出分數」的標的整批沉到清單最後。</p>
+     *
+     * <p>package-private 供同 package 測試直接呼叫（比照 {@code shouldAddLiveRow}）：
+     * 走整條 {@code assemble()} 才能觀測排序，得先鋪一整份個股 fixture，
+     * 與本方法要守的不變式無關。</p>
+     */
+    /* package */ static Integer bestScore(TradingRadarDto.StockDecision decision) {
+        // 不得寫成 List.of(...)：三軌分數皆可為 null，List.of 對 null 元素直接擲 NPE。
+        Integer best = maxScore(decision.shortScore(), decision.swingScore());
+        return maxScore(best, decision.score());
+    }
+
+    /** 兩個可為 null 的分數取大者；兩者皆 null 時回 null（缺值不得以 0 冒充）。 */
+    private static Integer maxScore(Integer left, Integer right) {
+        if (left == null) return right;
+        if (right == null) return left;
+        return Math.max(left, right);
     }
 
     private static LocalDate parseLocalDate(String value) {
@@ -1577,7 +1836,19 @@ public class TradingRadarService {
                 TradingRadarDto.RadarEvidence.EMPTY,
                 null, null, null, null, null, null, null, null, List.of(),
                 null, // etfPremiumLivePct（Task 320）
-                null); // etfPremiumLiveNavAsOf（Task 320）
+                null, // etfPremiumLiveNavAsOf（Task 320）
+                // Task 356.11b：早退分支的 swing 四欄與兩組新指標一律缺值——三軌都不交易。
+                null, // swingAction
+                null, // swingActionLabel
+                null, // swingScore
+                List.of(), // swingReasons
+                List.of(message), // swingRisks
+                null, // swingDownsideRisk
+                null, // swingEvidenceConfidence
+                null, // swingRiskCoverage
+                null, // swingCandidateAction
+                null, // dailyCandle
+                null); // weeklyIndicators
     }
 
     private String regimeLabel(TradingRadarRuleEngine.MarketRegime regime) {

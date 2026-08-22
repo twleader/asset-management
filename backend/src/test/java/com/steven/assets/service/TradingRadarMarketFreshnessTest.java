@@ -126,7 +126,8 @@ class TradingRadarMarketFreshnessTest {
                 new TechnicalIndicatorService.FullIndicators(
                         BigDecimal.valueOf(20000), BigDecimal.valueOf(20000), BigDecimal.valueOf(20000),
                         BigDecimal.valueOf(60), BigDecimal.valueOf(50),
-                        BigDecimal.valueOf(55), BigDecimal.valueOf(52), null, TechnicalIndicatorService.ExtendedIndicators.EMPTY));
+                        BigDecimal.valueOf(55), BigDecimal.valueOf(52), null,
+                        TechnicalIndicatorService.ExtendedIndicators.EMPTY, null));
         // Task 294：buildUsMarket() 每輪都會計算（不論本輪有沒有美股標的），需同步 stub 避免 NPE；
         // 本檔只驗證台股組 stale／intraday，美股組回 EMPTY／空序列即可（走 DATA_INCOMPLETE 分支，不影響斷言）。
         lenient().when(usIndexDailyHistoryRepo.findTopNByIndexCodeOrderByTradingDateDesc(anyString(), anyInt()))
@@ -179,7 +180,7 @@ class TradingRadarMarketFreshnessTest {
     void completedKNotToday_liveFreshToday_stale_false_intraday_true() {
         stubCommon();
         LocalDate today = LocalDate.now(TAIPEI);
-        when(twseRepo.findTopNByOrderByTradingDateDesc(241)).thenReturn(descRows(today.minusDays(1), 20000));
+        when(twseRepo.findTopNByOrderByTradingDateDesc(500)).thenReturn(descRows(today.minusDays(1), 20000));
         when(priceQueryService.getLive("0000", "台股")).thenReturn(Optional.of(liveOn(today, BigDecimal.valueOf(20500))));
 
         TradingRadarDto.Response resp = newService().get();
@@ -193,7 +194,7 @@ class TradingRadarMarketFreshnessTest {
     void completedKNotToday_liveMissing_stale_true_intraday_false() {
         stubCommon();
         LocalDate today = LocalDate.now(TAIPEI);
-        when(twseRepo.findTopNByOrderByTradingDateDesc(241)).thenReturn(descRows(today.minusDays(1), 20000));
+        when(twseRepo.findTopNByOrderByTradingDateDesc(500)).thenReturn(descRows(today.minusDays(1), 20000));
         when(priceQueryService.getLive("0000", "台股")).thenReturn(Optional.empty());
 
         TradingRadarDto.Response resp = newService().get();
@@ -207,7 +208,7 @@ class TradingRadarMarketFreshnessTest {
     void completedKAlreadyToday_eodWins_stale_false_intraday_false() {
         stubCommon();
         LocalDate today = LocalDate.now(TAIPEI);
-        when(twseRepo.findTopNByOrderByTradingDateDesc(241)).thenReturn(descRows(today, 20000));
+        when(twseRepo.findTopNByOrderByTradingDateDesc(500)).thenReturn(descRows(today, 20000));
         // Redis 也剛好留著今天的即時價：完成日 K 優先，不得誤判成 intraday。
         when(priceQueryService.getLive("0000", "台股")).thenReturn(Optional.of(liveOn(today, BigDecimal.valueOf(20500))));
 
@@ -223,7 +224,7 @@ class TradingRadarMarketFreshnessTest {
         stubCommon();
         LocalDate today = LocalDate.now(TAIPEI);
         // 完成日序列：近期收盤持續低於遠期（下跌趨勢），兩收盤日確認理論值＝BELOW。
-        when(twseRepo.findTopNByOrderByTradingDateDesc(241)).thenReturn(descRows(today.minusDays(1), 20000));
+        when(twseRepo.findTopNByOrderByTradingDateDesc(500)).thenReturn(descRows(today.minusDays(1), 20000));
         // 即時價刻意設得遠高於所有均線；若被誤併入 confirm() 的 closes，確認狀態會被拉成 ABOVE／MIXED。
         when(priceQueryService.getLive("0000", "台股")).thenReturn(Optional.of(liveOn(today, BigDecimal.valueOf(99999))));
 

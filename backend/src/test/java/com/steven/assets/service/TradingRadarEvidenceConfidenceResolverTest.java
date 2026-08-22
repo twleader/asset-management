@@ -12,6 +12,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -508,6 +509,132 @@ class TradingRadarEvidenceConfidenceResolverTest {
                 TradingRadarEvidenceConfidenceResolver.RateObservation.notApplicable(), twentyFirst)), 1e-9);
     }
 
+    // ═══ Task 356.9a／356.9a-2：SWING 不是 MEDIUM 的複本 ══════════════════════
+
+    @Test
+    void swingIsAThirdIndependentHorizonAndNotACopyOfMedium() {
+        // 只加 enum 值不會有編譯錯誤，而且會靜默落到 medium。此測試刻意構造一組
+        // 「MA5 有、MA20/60/240 沒有、量比沒有」的證據：三軌的 PRICE_TECHNICAL 權重不同，
+        // 三個 coverage 因此必須是三個不同的值。
+        var evidence = resolveWithPartialTechnical();
+        var price = evidence.group(
+                TradingRadarEvidenceConfidenceResolver.Group.PRICE_TECHNICAL);
+
+        assertEquals(0.80, price.shortCoverage(), 1e-9);
+        assertEquals(0.60, price.swingCoverage(), 1e-9);
+        assertEquals(0.50, price.mediumCoverage(), 1e-9);
+        assertNotEquals(price.mediumCoverage(), price.swingCoverage(),
+                "swingCoverage 不得恆等於 mediumCoverage（那代表分派靜默落到 medium）");
+        assertEquals(price.swingCoverage(),
+                price.coverage(TradingRadarEvidenceConfidenceResolver.Horizon.SWING), 1e-9);
+        assertNotEquals(evidence.mediumConfidence(), evidence.swingConfidence(),
+                "swingConfidence 不得恆等於 mediumConfidence");
+    }
+
+    @Test
+    void groupEvidenceAccessorsReturnTheSwingFieldsNotTheMediumOnes() {
+        // 直接構造三軌值互異的 GroupEvidence：若 coverage/available/fresh 仍是二元三元運算，
+        // SWING 會回 medium 的值而這三條全部失敗。
+        var group = new TradingRadarEvidenceConfidenceResolver.GroupEvidence(
+                TradingRadarEvidenceConfidenceResolver.Group.PRICE_TECHNICAL, List.of(),
+                0.9, 0.8, 0.7, true, true, false, true, false, false, 1, false, true);
+
+        assertEquals(0.8,
+                group.coverage(TradingRadarEvidenceConfidenceResolver.Horizon.SWING), 1e-9);
+        assertTrue(group.available(TradingRadarEvidenceConfidenceResolver.Horizon.SWING));
+        assertFalse(group.fresh(TradingRadarEvidenceConfidenceResolver.Horizon.SWING));
+        assertFalse(group.meets(TradingRadarEvidenceConfidenceResolver.Horizon.SWING, .70),
+                "SWING 的 fresh 為 false，meets 必須跟著 false，不得沿用 medium 的判定");
+    }
+
+    @Test
+    void swingRiskIsItsOwnObjectWithAnExplicitTwentySessionDividendWindow() {
+        var profile = TradingRadarAssetProfileResolver.resolve(
+                "2330", "台股", "一般股票", null, null, "GROWTH", null, null, null);
+        var evidence = resolve(profile, fullFundamental(false),
+                TradingRadarRuleEngine.MarketRegime.RISK_ON, false,
+                TradingRadarRuleEngine.TimingState.NEUTRAL, "台股",
+                TradingRadarEvidenceConfidenceResolver.RateObservation.notApplicable(),
+                dividendResolution(2, 3));
+
+        String swingReason = evidence.swingRisk().components().stream()
+                .filter(component -> component.name().equals("dividend_event"))
+                .findFirst().orElseThrow().missingReason();
+        String shortReason = evidence.shortRisk().components().stream()
+                .filter(component -> component.name().equals("dividend_event"))
+                .findFirst().orElseThrow().missingReason();
+
+        assertTrue(swingReason.contains("20 個交易日內"),
+                "SWING 的配息視窗必須是顯式的 20 個交易日 case，實得：" + swingReason);
+        assertTrue(shortReason.contains("5 個交易日內"), shortReason);
+        assertEquals(evidence.swingRisk().riskCoverage(),
+                evidence.riskCoverage(TradingRadarEvidenceConfidenceResolver.Horizon.SWING), 1e-9);
+        assertEquals(evidence.swingRisk(),
+                evidence.risk(TradingRadarEvidenceConfidenceResolver.Horizon.SWING));
+    }
+
+    @Test
+    void allThreeHorizonGroupWeightSetsSumToOne() {
+        // Task 356.9a：三軌的 group 權重各自合計 1.00。直接加總常數本身，
+        // 不從 confidence 反推——confidence 是正規化過的加權平均，權重合計寫錯也看不出來。
+        assertEquals(1.00, TradingRadarEvidenceConfidenceResolver.SHORT_PRICE
+                + TradingRadarEvidenceConfidenceResolver.SHORT_MARKET
+                + TradingRadarEvidenceConfidenceResolver.SHORT_ASSET, 1e-9);
+        assertEquals(1.00, TradingRadarEvidenceConfidenceResolver.SWING_PRICE
+                + TradingRadarEvidenceConfidenceResolver.SWING_MARKET
+                + TradingRadarEvidenceConfidenceResolver.SWING_VALUATION
+                + TradingRadarEvidenceConfidenceResolver.SWING_FINANCIAL
+                + TradingRadarEvidenceConfidenceResolver.SWING_ASSET, 1e-9);
+        assertEquals(1.00, TradingRadarEvidenceConfidenceResolver.MEDIUM_PRICE
+                + TradingRadarEvidenceConfidenceResolver.MEDIUM_MARKET
+                + TradingRadarEvidenceConfidenceResolver.MEDIUM_VALUATION
+                + TradingRadarEvidenceConfidenceResolver.MEDIUM_FINANCIAL
+                + TradingRadarEvidenceConfidenceResolver.MEDIUM_ASSET, 1e-9);
+        // SWING 的每一項都必須落在 SHORT 與 MEDIUM 之間（它的存在理由就是介於兩者之間）。
+        assertTrue(TradingRadarEvidenceConfidenceResolver.SWING_PRICE
+                < TradingRadarEvidenceConfidenceResolver.SHORT_PRICE
+                && TradingRadarEvidenceConfidenceResolver.SWING_PRICE
+                > TradingRadarEvidenceConfidenceResolver.MEDIUM_PRICE);
+        assertTrue(TradingRadarEvidenceConfidenceResolver.SWING_MARKET
+                < TradingRadarEvidenceConfidenceResolver.SHORT_MARKET
+                && TradingRadarEvidenceConfidenceResolver.SWING_MARKET
+                > TradingRadarEvidenceConfidenceResolver.MEDIUM_MARKET);
+    }
+
+    /** MA5 有、MA20/60/240 缺、個股量比缺：三軌 PRICE_TECHNICAL coverage 因此三個值互異。 */
+    private static TradingRadarEvidenceConfidenceResolver.Evidence resolveWithPartialTechnical() {
+        var ind = new TechnicalIndicatorService.FullIndicators(
+                null, null, null, bd(50), bd(50), bd(45), bd(45), bd(10),
+                new TechnicalIndicatorService.ExtendedIndicators(
+                        bd(50), bd(50), bd(1), bd(1), bd(1), bd(1), bd(1), bd(1),
+                        bd(50), bd(50), bd(1), bd(1), bd(1), bd(1)), null);
+        var technical = new RadarInputAssembler.Assembled(
+                ind, List.of(), false, List.of(bd(100), bd(99)), bd(99), bd(1),
+                bd(101), bd(90), bd(2), TradingRadarRuleEngine.Confirmation.ABOVE,
+                TradingRadarRuleEngine.Confirmation.ABOVE, TradingRadarRuleEngine.Confirmation.ABOVE,
+                bd(1), bd(1), bd(1), bd(.5), bd(1), null,
+                new RadarInputAssembler.VolatilityObservation(bd(.02), LAST_SESSION, "TEST", null),
+                null, null, List.of(), TechnicalIndicatorService.FullIndicators.EMPTY);
+        var accepted = new RadarObservationResolver.AcceptedPrice(
+                bd(100), LAST_SESSION, null, "TEST_CLOSE",
+                RadarObservationResolver.Quality.COMPLETED_CLOSE,
+                false, null, List.of(), List.of(), null);
+        return TradingRadarEvidenceConfidenceResolver.resolve(
+                new TradingRadarEvidenceConfidenceResolver.Inputs(
+                        "台股", DECISION, accepted, technical,
+                        TradingRadarRuleEngine.MarketRegime.RISK_ON, false,
+                        TradingRadarEvidenceConfidenceResolver.MarketContext.EMPTY,
+                        fullFundamental(false),
+                        TradingRadarAssetProfileResolver.resolve("2330", "台股", "一般股票", null,
+                                null, "GROWTH", null, null, null),
+                        null, null, null, false, null, null,
+                        TradingRadarEvidenceConfidenceResolver.RateObservation.notApplicable(),
+                        TradingRadarRuleEngine.TimingState.NEUTRAL,
+                        new DividendEventEvidenceResolver.Resolution(
+                                DividendEventEvidenceResolver.Status.MISSING, null, 0, 0,
+                                null, null, null, "test resolver omitted dividend evidence")));
+    }
+
     private static TradingRadarEvidenceConfidenceResolver.Evidence resolve(
             TradingRadarAssetProfileResolver.AssetProfile profile,
             TradingRadarDto.FundamentalSnapshot fundamental) {
@@ -560,13 +687,15 @@ class TradingRadarEvidenceConfidenceResolverTest {
                 bd(10), bd(10), bd(10), bd(50), bd(50), bd(45), bd(45), bd(10),
                 new TechnicalIndicatorService.ExtendedIndicators(
                         bd(50), bd(50), bd(1), bd(1), bd(1), bd(1), bd(1), bd(1),
-                        bd(50), bd(50), bd(1), bd(1), bd(1), bd(1)));
+                        bd(50), bd(50), bd(1), bd(1), bd(1), bd(1)), null);
         var technical = new RadarInputAssembler.Assembled(
                 ind, List.of(), false, List.of(bd(100), bd(99)), bd(99), bd(1),
                 bd(101), bd(90), bd(2), TradingRadarRuleEngine.Confirmation.ABOVE,
                 TradingRadarRuleEngine.Confirmation.ABOVE, TradingRadarRuleEngine.Confirmation.ABOVE,
                 bd(1), bd(1), bd(1), bd(.5), bd(1), bd(1),
-                new RadarInputAssembler.VolatilityObservation(bd(.02), LAST_SESSION, "TEST", null));
+                new RadarInputAssembler.VolatilityObservation(bd(.02), LAST_SESSION, "TEST", null),
+                // Task 356 第一階段：日K 棒／週K 欄位尚未進評分，本檔只驗證證據信心，一律留空。
+                null, null, List.of(), TechnicalIndicatorService.FullIndicators.EMPTY);
         var accepted = new RadarObservationResolver.AcceptedPrice(
                 bd(100), LAST_SESSION, null, "TEST_CLOSE", RadarObservationResolver.Quality.COMPLETED_CLOSE,
                 false, null, List.of(), List.of(), null);
@@ -603,13 +732,15 @@ class TradingRadarEvidenceConfidenceResolverTest {
                 bd(10), bd(10), bd(10), bd(50), bd(50), bd(45), bd(45), bd(10),
                 new TechnicalIndicatorService.ExtendedIndicators(
                         bd(50), bd(50), bd(1), bd(1), bd(1), bd(1), bd(1), bd(1),
-                        bd(50), bd(50), bd(1), bd(1), bd(1), bd(1)));
+                        bd(50), bd(50), bd(1), bd(1), bd(1), bd(1)), null);
         return new RadarInputAssembler.Assembled(
                 ind, List.of(), false, List.of(bd(100), bd(99)), bd(99), bd(1),
                 bd(101), bd(90), bd(2), TradingRadarRuleEngine.Confirmation.ABOVE,
                 TradingRadarRuleEngine.Confirmation.ABOVE, TradingRadarRuleEngine.Confirmation.ABOVE,
                 bd(1), bd(1), bd(1), bd(.5), bd(1), bd(1),
-                new RadarInputAssembler.VolatilityObservation(bd(.02), LAST_SESSION, "TEST", null));
+                new RadarInputAssembler.VolatilityObservation(bd(.02), LAST_SESSION, "TEST", null),
+                // Task 356 第一階段：日K 棒／週K 欄位尚未進評分，本檔只驗證證據信心，一律留空。
+                null, null, List.of(), TechnicalIndicatorService.FullIndicators.EMPTY);
     }
 
     private static DividendEventEvidenceResolver.Resolution dividendResolution(

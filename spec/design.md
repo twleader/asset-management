@@ -3694,7 +3694,7 @@ pct_origin VARCHAR(20)`。不回填既有 186 列（皆為 `TWSE`／`Yahoo Finan
 | 欄位 | 語意 | 資料來源 | 進規則？ |
 |---|---|---|---|
 | `etfPremiumPct`（既有） | 已完成交易日的收盤折溢價 | `etf_nav_observation`（as-of decision instant） | **是**——`buyGate` 硬否決 ＋ `OVERBOUGHT` |
-| `etfPremiumPercentile`（既有） | 該值在自身歷史 250 日的分位 | 同上，需滿 60 個交易日樣本 | 是（權重：短期 `SW_ETF_PREMIUM=0.03`／中期 `MW_ETF_PREMIUM=0.02`，見 `TradingRadarRuleEngine:48`／`:68`；Task 264 單軌時代的 `0.06` 在 V11 兩軌拆分後已不成立） |
+| `etfPremiumPercentile`（既有） | 該值在自身歷史 250 日的分位 | 同上，需滿 60 個交易日樣本 | 是（權重見 `spec/tasks/t356_radar_three_horizon_weekly_k.md` 的三軌權重表——**本文件依既有慣例不複寫權重數字**；此處原記的 `SW_ETF_PREMIUM=0.03`／`MW_ETF_PREMIUM=0.02` 與行號 `:48`／`:68` 皆已漂移，Task 356 起三軌一律為 `0.02`。Task 264 單軌時代的 `0.06` 在 V11 兩軌拆分後即已不成立） |
 | `etfPremiumLivePct`（**新增**） | 盤中即時折溢價，與該列現價同 tick | Redis `price:etfnav:{market}:{code}` | **否**——純揭露 |
 | `etfPremiumLiveNavAsOf`（**新增**） | 該即時淨值的資料時點 | 同上的 `navAsOf` 欄 | 否 |
 
@@ -4451,7 +4451,7 @@ TradingRadarView
        ├─ AssetSnapshotRepository.findLatestWithStocks（當前持股，owner-scoped）
        ├─ StockAlertRepository.findDistinctStockCodeMarket（觀察，owner-scoped）
        ├─ PriceQueryService（只讀 Redis；miss → stock_price_history；`0000/台股` 自 Task 228 起亦可命中）
-       └─ TradingRadarRuleEngine（TW_RULES_V3 分數規則不變，RULE_VERSION 現為 TW_RULES_V9，見 Task 264 的二維決策段落）
+       └─ TradingRadarRuleEngine（TW_RULES_V3 分數規則不變，RULE_VERSION 為 TW_RULES_V15（Task 356 起）；見 Task 264 的二維決策段落與下方「三軌持有期與真正的週K／日K 棒」小節）
 ```
 
 `GET /api/trading-radar` 這條請求鏈**刻意不注入** `MarketAnalysisService`、LLM SDK、新聞爬蟲或任何 refresh endpoint，只重讀既有資料，不對外抓行情、不送出 Batch、不產生 AI 費用；SSE 盤中自動更新走的也是這條。**Task 249 起，使用者手動按下「重新整理」改走 `POST /api/trading-radar/refresh`，會同步觸發一次台股行情回補後才重算**（見下方「手動重新整理觸發行情回補」小節）；該路徑仍不注入任何 LLM client、不觸發新聞爬蟲、不送出 Batch、不產生 AI 費用。大盤即時點位在 `GET` 路徑上同樣只由獨立背景排程（`TaiexIndexPoller`，見「大盤新鮮度與盤中即時判斷」小節）寫入 Redis。現有行情／大盤排程若在背景更新 PostgreSQL 或 Redis，雷達下次讀取自然看見新值；兩者生命週期分離。
@@ -4465,8 +4465,8 @@ TradingRadarView
 新增 `TradingRadarDto` 純 response records：
 
 - `Response`：`ruleVersion`、`actionPolicyVersion`（Task 316）、`generatedAt`、`market`、`usMarket`（Task 335）、`stocks`、`skippedNonTwStocks`、`publicInformation`（Task 291）。`market` 是台股（TAIEX）那一組大盤，`usMarket` 是美股（IXIC）那一組，兩者**同為 `MarketSummary` 型別**；`usMarket` 的值即 `buildUsMarket()` 餵給美股個股評分的同一份 summary，不另算一次（見下方「美股個股支援」的大盤分頁段落）。舊 Redis 快照缺 `usMarket` 時為 `null`，既有讀取端行為不變。
-- `MarketSummary`（**現為 30 個 component**；舊記「Task 281 後 21 個」已漂移，該數字停在 Task 281，未計入其後追加的 `quoteStatus`（Task 290）與量能 3 欄、跨市場 5 欄，合計 +9）：`regime`、`regimeLabel`、`score`、`dataComplete`、`stale`（Task 217，見下方「大盤新鮮度與盤中即時判斷」）、`asOfDate`、點位／漲跌幅／`quoteStatus`、`weeklyMa`（Task 265）、MA20／60／240、K／D、MA60／240 兩日確認、`reasons`、`risks`、`intraday`／`liveUpdatedAt`（Task 228，同小節）、`extendedIndicators`（Task 281），末 8 欄為 `marketVolumeRatio`／`marketTurnoverRatio`／`marketVolumeAsOfDate`／`nasdaqChangePercent`／`soxChangePercent`／`usTechCompositePercent`／`usTechAsOfDate`／`usTechAvailable`。**前 25 個無市場專屬語意**（`buildUsMarket()` 即直接複用同一型別組出美股那一份）；**最後 5 個是給台股列的跨市場領先訊號**，美股組固定填 `null`／`false`，故 Task 335 新增 `usMarket` 時 `MarketSummary` 一個欄位都不必動。
-- `StockDecision`（Task 320 後 62 個 component；下列列舉順序＝record 宣告順序）：code／name／market、`assetClass`、`distributionAdjusted`、`held`、`action`／`actionLabel`、`score`、`counterTrendState`／`counterTrendLabel`、`counterTrendReasons`／`counterTrendRisks`、`dataComplete`、報價／漲跌幅／`quoteStatus`／更新時間／`asOfDate`、MA20／60／240、K／D、MA20／60／240 兩日確認、`fxPercentile`／`underlyingCurrency`（Requirement 47）、`reasons`、`risks`、`kdHeat`（Task 232）、`timingState`／`timingLabel`／`ma60BiasPercent`／`week52Position`（Task 264）、`weeklyMa`（Task 265）、`etfPremiumPct`／`etfPremiumPercentile`、`extendedIndicators`（Task 281）、`shortAction`／`shortActionLabel`／`shortScore`／`shortReasons`／`shortRisks`／`horizonConflict`／`volumeRatio`／`fxAsOfDate`／`profitTakingConfirmed`／`fundamental`／`evidence`／`shortDownsideRisk`／`mediumDownsideRisk`／`shortEvidenceConfidence`／`mediumEvidenceConfidence`／`shortRiskCoverage`／`mediumRiskCoverage`／`candidateAction`／`shortCandidateAction`／`actionGateReasons`（Task 291 起），最末為 `etfPremiumLivePct`／`etfPremiumLiveNavAsOf`（Task 320 新增的兩個純揭露欄位，語意與 `etfPremiumPct` 不同，見上方「交易雷達的即時折溢價欄」）。
+- `MarketSummary`（**31 個 component**，Task 356 起（該任務之前為 30 個）；舊記「Task 281 後 21 個」已漂移，該數字停在 Task 281，未計入其後追加的 `quoteStatus`（Task 290）與量能 3 欄、跨市場 5 欄，合計 +9）：`regime`、`regimeLabel`、`score`、`dataComplete`、`stale`（Task 217，見下方「大盤新鮮度與盤中即時判斷」）、`asOfDate`、點位／漲跌幅／`quoteStatus`、`weeklyMa`（Task 265）、MA20／60／240、K／D、MA60／240 兩日確認、`reasons`、`risks`、`intraday`／`liveUpdatedAt`（Task 228，同小節）、`extendedIndicators`（Task 281），接著 8 欄為 `marketVolumeRatio`／`marketTurnoverRatio`／`marketVolumeAsOfDate`／`nasdaqChangePercent`／`soxChangePercent`／`usTechCompositePercent`／`usTechAsOfDate`／`usTechAvailable`，末欄為 Task 356 新增的 `weeklyIndicators`（大盤自身的週K 聚合指標；台股組與美股組各自算自己那一份，資料不足時整組為 `null` 並於 risks 揭露不採計）。**前 25 個無市場專屬語意**（`buildUsMarket()` 即直接複用同一型別組出美股那一份）；**第 26–30 個（`nasdaqChangePercent`／`soxChangePercent`／`usTechCompositePercent`／`usTechAsOfDate`／`usTechAvailable`）是給台股列的跨市場領先訊號**，美股組固定填 `null`／`false`，故 Task 335 新增 `usMarket` 時 `MarketSummary` 一個欄位都不必動。**第 31 個 `weeklyIndicators` 不屬這一組**——台股與美股兩組各算各的，不得比照填 `null`。
+- `StockDecision`（**73 個 component**，Task 356 起（該任務之前為 62 個）；下列列舉順序＝record 宣告順序）：code／name／market、`assetClass`、`distributionAdjusted`、`held`、`action`／`actionLabel`、`score`、`counterTrendState`／`counterTrendLabel`、`counterTrendReasons`／`counterTrendRisks`、`dataComplete`、報價／漲跌幅／`quoteStatus`／更新時間／`asOfDate`、MA20／60／240、K／D、MA20／60／240 兩日確認、`fxPercentile`／`underlyingCurrency`（Requirement 47）、`reasons`、`risks`、`kdHeat`（Task 232）、`timingState`／`timingLabel`／`ma60BiasPercent`／`week52Position`（Task 264）、`weeklyMa`（Task 265）、`etfPremiumPct`／`etfPremiumPercentile`、`extendedIndicators`（Task 281）、`shortAction`／`shortActionLabel`／`shortScore`／`shortReasons`／`shortRisks`／`horizonConflict`／`volumeRatio`／`fxAsOfDate`／`profitTakingConfirmed`／`fundamental`／`evidence`／`shortDownsideRisk`／`mediumDownsideRisk`／`shortEvidenceConfidence`／`mediumEvidenceConfidence`／`shortRiskCoverage`／`mediumRiskCoverage`／`candidateAction`／`shortCandidateAction`／`actionGateReasons`（Task 291 起），`etfPremiumLivePct`／`etfPremiumLiveNavAsOf`（Task 320 新增的兩個純揭露欄位，語意與 `etfPremiumPct` 不同，見上方「交易雷達的即時折溢價欄」），最末為 Task 356 新增的三軌與 K 棒欄位：`swingAction`／`swingActionLabel`／`swingScore`／`swingReasons`／`swingRisks`／`swingDownsideRisk`／`swingEvidenceConfidence`／`swingRiskCoverage`／`swingCandidateAction`（1周~1月 軌），以及 `dailyCandle`（最新完成日 K 棒的 open／high／low／close 與三個衍生分量）與 `weeklyIndicators`（真正的週K 聚合指標，見下方「三軌持有期與真正的週K／日K 棒」小節）。**`shortXxx` 一律是「一周」軌、無前綴的 `score`／`action` 一律是「1月~6月」軌**，Task 356 不改動這兩組既有欄位的語意。
 
 無新 entity／table／migration；分數與建議皆為可重算的衍生值，不持久化，符合正規化原則。
 
@@ -4592,9 +4592,49 @@ boolean stale = !todayEodPresent && !liveFreshToday;
 >
 > **另：上段「週線 MA5 刻意不納入評分」的決定已由 Requirement 43／59／60（t291）推翻**，但推翻的是其**前提**而非其論證——原論證「5 個交易日尺度與數周至兩年的需求衝突」在「雷達只輸出單一持有期建議」的前提下正確；Task 291 改為**雙軌輸出**，短期軌有自己的因子與權重、不與中期軌爭奪同一組權重，故 MA5 進入短期軌不再與中期軌的方向衝突。**中期軌以一至六個月為目標。**
 
+### 三軌持有期與真正的週K／日K 棒（`TW_RULES_V15`，Requirement 93／Task 356）
+
+> **V15 推翻兩件事。** 其一是 Task 291 建立的「兩軌收斂」——短期 5 日、中期 20／60／120——中間約 5–20 個交易日的波段尺度沒有任何一軌代表；其二是「`weeklyMa` 就是週線」這個措辭。`weeklyMa` 實際上是**日K 序列的 5 日 SMA**。**business-services 側**在 V15 之前不存在任何週 OHLC 聚合；BFF 側自 Requirement 92／Task 355 起已有一份（`ChartSeriesAligner.weekly`），但其「週指標」是該週的日K 指標值、不是在週K 上重算——見下方與 Task 355 的關係段。
+
+**三軌與既有欄位的固定對應（不得更動）：**
+
+| 軌 | 持有期 | DTO 欄位前綴 | 回測 horizon | 通知 |
+|---|---|---|---|---|
+| 一周 | 約 5 個交易日 | `shortXxx`（沿用，語意不變） | `5` | 否 |
+| 1周~1月 | 約 5–20 個交易日 | `swingXxx`（V15 新增） | `10`、`20` | 否 |
+| 1月~6月 | 約 20–120 個交易日 | 無前綴 `score`／`action`／`reasons`／`risks`（沿用，語意不變） | `60`、`120` | **是**（唯一寄信軌） |
+
+沿用而非重新命名是刻意的：`trading_radar_notification_setting.last_action`、Redis 快照 JSON、`TradingRadarExportService` 的既有欄位與 `docs/openapi/docker-external-api.yaml` 的 `required` 清單都直接讀這兩組名稱，改名等於讓四個既有消費端同時靜默改變語意。
+
+**與 Requirement 92／Task 355（股票分析價格圖的日K／週K）的關係。** 那次已在 **BFF** 的 `ChartSeriesAligner.weekly(...)` 加了週 OHLC 聚合，供走勢圖畫週K 蠟燭。**兩者的週分桶規則必須逐字一致**（同為 `WeekFields.ISO` 的 `weekBasedYear`＋`weekOfWeekBasedYear`，`open` 取該週最早交易日、`high`／`low` 取極值、`close` 取最晚交易日）——同一檔股票在走勢圖與雷達若連「哪幾天算同一週」都不同，使用者無從解釋。但**五處**刻意不同，不得當成同一個值：(a) Task 355 的「週指標」是**該週最後一個交易日的日K 指標值**，其任務檔已把「weekly 重新計算的 KD/MACD/RSI」明列為不在範圍，V15 做的正是那件被排除的事——在還原後的週K 序列上**重算**；(b) 價基不同（走勢圖原始價基 vs 雷達還原價基，本檔既有段落已記載此分歧為刻意）；(c) 進行中週的處理不同（圖表要畫到今天，評分不能逐日抖動）；(d) `requestedStart` 起始週丟棄是 BFF 專有（`start` 非週一時整週丟掉，避免圖表首週被截斷），business 無此概念、不適用；(e) 壞資料週的處理不同——BFF 只要該週任一日 candle 不合法即丟整週，business 採逐欄 null ＋ `close` 缺值才丟整根，再把 `high`／`low` 為 null 的週排除在指標序列之外。**(d)(e) 都不影響週界本身**（哪幾天算同一週、哪一天是週收盤仍完全相同），兩邊測試須各自斷言此刻意分歧。兩份實作**不合併**：`ChartSeriesAligner` 在 BFF 且吃 display DTO，抽成共用會讓 business-services 依賴 BFF 的 DTO、違反依賴方向；改以相同的週界測試案例雙邊釘住，並在 Javadoc 互相指名。
+
+**週K 的聚合契約。** 週的單位是 `trading_date` 的 **ISO-8601 週（週一為週首）**，與市場時區無關——`trading_date` 本來就是該市場的當地交易日期，故同一段程式碼同時適用台股與美股。一根週K 由該週全部完成日 K 聚合：`open` 取該週最早交易日的開盤、`high` 取最大、`low` 取最小、`close` 取該週最晚交易日的收盤、`volume` 加總。
+
+> **序列中 ISO 週最晚的那一根一律視為「進行中週」並排除在指標之外。** 完成週的判定因此完全由序列自身決定：不查交易日曆、不讀系統時間、不做「今天是不是週五」的推論。這帶來三個必要性質——(a) 回測可重現；(b) 同一週之內週K 因子不會逐日抖動，符合「週K 本來就是慢變數」；(c) 半天交易日、臨時休市與颱風假都不需要特例。代價是最新一週的資訊延遲最多五個交易日，這是刻意接受的取捨，不得為了「即時」而改用進行中週。
+
+**取數視窗擴大，但日K 路徑必須逐位不變。** 週MACD 需 EMA26＋MACD9 暖機、週MA20 需 20 根完成週，遠多於現行日K 的 241 根視窗（≈48 週）。作法固定為：**同一次查詢取長視窗 → 切出最新的既有筆數餵給既有日K 組裝 → 長視窗只供週K 聚合**。不得改為兩次查詢（兩份序列各自跑一次還原，分割偵測結果可能分歧，會讓日K 與週K 用上兩種價基）。日K 路徑收到的 `List` 內容與擴窗前逐位相同，故其**中間值**必須逐位相同，並以固定資料的回歸測試釘住——此處的「輸出」僅指日K 路徑的中間值；最終 `score`／`action`／`reasons`／`risks` 本來就會因週K 因子生效而改變，見 Requirement 93 同段說明。
+
+**週K 與日K 同一還原基準。** 週K 一律由**還原權息／分割後**的日 K 聚合：價格用既有 price scale、成交量用既有 share-only `historicalShareScale`。這是既有鐵則「禁止在同一筆決策中混用兩種價基」的直接延伸。
+
+**新增的五個因子（三軌各自有獨立權重，完整權重表以 `spec/tasks/t356_radar_three_horizon_weekly_k.md` 為唯一契約，本文件依既有慣例不複寫數字）：**
+
+| 因子 | 分量 | 為什麼是獨立因子 |
+|---|---|---|
+| 日K 棒 | 收盤在當日 `high–low` 的相對位置、實體方向 `sign(close−open)`、下影線佔全幅比例 | 與 `completedChangePercent` **正交**：後者量「相對昨天走到哪」，前者量「當天這根 K 棒內部誰主導」。`open`／`high`／`low` 在 V15 之前只餵 KD 的 RSV 與 52 週高低，從未以 K 棒形式進入任何因子 |
+| 週線趨勢 | 現價相對 週MA5／週MA10／週MA20 的位置平均 | 週均線的尺度（5 週≈一個月、10 週≈一季、20 週≈半年）與日K 的 MA20／60／240 不同源，不是同一組值的換算 |
+| 週線動能 | 週KD／J、週MACD OSC、週RSI 三個可用值平均 | 同組平均而非三份獨立權重，沿用 V12 建立的「代數相依值不重複灌權重」紀律 |
+| 週線乖離 | 現價相對 週MA10、週MA20 的乖離平均（負乖離為正貢獻） | 量「以週尺度看現在進場貴不貴」 |
+| 週K 棒與量能 | 最新完成週的收盤區間位置、週實體方向、週漲跌 × 週量比四象限 | 週量比＝最新完成週量 ÷ 之前 20 根完成週量的中位數，分母排除最新週，與日K 量比同形 |
+
+**四個消費端都必須吃到週K**：台股個股、台股大盤、美股個股、美股大盤。只做個股會讓同一頁上「個股說週線轉強、大盤卡片對此毫無反應」。
+
+**1周~1月 軌不納入 V13 candidate／promotion 機制。** promotion registry 的候選參數是以 `5／20／60／120` 對**兩軌**做樣本外校準選出的，沒有任何針對該軌的 holdout 證據；硬套等於未經校準就上線。該軌一律走 V15 baseline，`evaluatePromoted` 的任一 promoted key 都不得影響它，並以測試釘住——不得因為「registry 現在是空的」就留下未來會靜默生效的路徑。
+
+**升版判準。** 因子集合、權重與可觀察輸出全部改變，`TW_RULES_V14` → `TW_RULES_V15`，這是本檔既有升版判準（「使用者可觀察行為有實質變化」）下最無爭議的一類，三個不升版先例（Task 249 輸出完全相同／Task 281 純揭露／Task 336 顯示值捨入修正）**一個都不適用**。V14 與 V15 的分數不可直接比較，須明文揭露；既有 `rule_version` 機制會重建通知基準、首輪不寄信。
+
 ### 規則回測框架（Requirement 56／Task 273）
 
-`TradingRadarRuleEngine` 是純函數（`import` 只有 `BigDecimal`／`RoundingMode`／`ArrayList`／`List`／`Component`，不碰 repository／網路／時間），而 `stock_price_history` 有 154,834 筆／71 檔／2016-08-01 ~ 2026-07-31（各標的交易日數自 318 至 2439 不等，49 檔中 12 檔不足 2400 筆；扣掉 240 筆暖機後最短者只剩約 78 個可用交易日，須逐標的揭露樣本數）。**這兩件事合起來使回測在技術上是現成的**——把歷史序列逐日切片餵給同一支引擎即可，不需要模擬器，也不需要第二份規則實作。
+`TradingRadarRuleEngine` 是純函數（`import` 只有 `BigDecimal`／`RoundingMode`／`ArrayList`／`List`／`Component`，不碰 repository／網路／時間），而 `stock_price_history` 有 154,834 筆／71 檔／2016-08-01 ~ 2026-07-31（各標的交易日數自 318 至 2439 不等，49 檔中 12 檔不足 2400 筆；扣掉暖機後最短者只剩下極少的可用交易日，須逐標的揭露樣本數——Task 356 把暖機由 240 放大到 305 之後，318 筆的標的只剩約 13 個可用訊號日、低於 `MIN_SAMPLES = 30` 而整檔標記為樣本不足，該清單須在完成報告中列出）。**這兩件事合起來使回測在技術上是現成的**——把歷史序列逐日切片餵給同一支引擎即可，不需要模擬器，也不需要第二份規則實作。
 
 ```text
 POST /internal/backtest/rules（手動觸發，不排程、不進 BFF、不進前端）
@@ -4610,7 +4650,7 @@ POST /internal/backtest/rules（手動觸發，不排程、不進 BFF、不進�
 1. **前視偏誤的真正來源是「全期統計量」，不是還原切片。** 第 `t` 日的判定只能用 `≤ t` 的資料——52 週高低、任何 `max`／`min`／分位數一律只能取自 `[t−239, t]`，不得掃全序列。
    > **⚠ 還原權息的切片經分析確認不構成前視偏誤（初版記載有誤，已更正）**：back-adjustment 為 `adj[i] = raw[i] × shares[i] / shares_final`，逐 `t` 重錨得 `raw[i] × shares[i] / shares[t]`，兩者在視窗內只差一個**與 `i` 無關的常數倍率**；而引擎的全部價格導出輸入皆為**尺度不變量**（`confirm()`、`ma60BiasPercent`、`week52Position`、`kdBandWidthPercent`、KD 的 `rsv`、`changePercent`），乘上正常數全部不變。故切片不改變任何判定，**不得宣稱逐 `t` 重錨修正了前視偏誤**，也不需要為此付出 O(n²)。仍建議採固定基期正向還原，理由是語意清楚而非正確性。
 2. **前瞻報酬必須用還原序列**：用原始收盤價會讓除息日產生假跌幅，月配息債券 ETF 在 240 日視窗內尤其嚴重。
-3. **暖機期排除**：需要 240 根完成日 K 的因子在序列前 240 筆不可得，這些日子 production 會回 `NO_TRADE`，回測一律排除而非以 `null` 當中性值放行。
+3. **暖機期排除**：Task 356 起 `WARMUP = max(FULL_WINDOW, (MIN_COMPLETED_WEEKS + 1) × 5) = max(240, 305) = 305`（週K 因子需要 60 根完成週），該筆數之前的因子不可得，這些日子 production 會回 `NO_TRADE`，回測一律排除而非以 `null` 當中性值放行。
 
 **基準的定義是「同標的同期間所有具備完整前瞻報酬的交易日」**，不是零。只報訊號組的絕對報酬在多頭十年裡沒有資訊量。
 
@@ -4668,6 +4708,8 @@ POST /internal/backtest/rules（手動觸發，不排程、不進 BFF、不進�
 短線軌的因子須以 Requirement 56 的 `+5` 日 horizon 量測結果挑選（候選：MA5、RSI5、KD 與 J9、W%R9、MACD 的 OSC 轉向、`volumeRatio`、單日漲跌幅），**不得憑直覺挑選**。「不追高殺低」的對稱性論證（買方有「超買否決買進」，賣方就必須有「超賣否決賣出」）**在短線軌同樣成立**，短線軌須有其對應的極端態覆寫。
 
 ### 一週至六個月的獲利機會雙軌（Requirement 43／59／60，Task 291，`TW_RULES_V10`）
+
+> **本節的「兩軌」已由上方「三軌持有期與真正的週K／日K 棒」（Requirement 93／Task 356）擴充為三軌（一周／1周~1月／1月~6月）。** 本節的因子論證、閘門對稱性與「不得表述為預測」等紀律仍然有效；**軌數、欄位前綴與權重一律以該節與 `spec/tasks/t356_radar_three_horizon_weekly_k.md` 為準**，本節的「雙軌」「短期／中期」措辭不得再依原文實作。
 
 Task 291 的 request chain 不新增行情／新聞／匯率外部抓取；唯一沿用的跨服務依賴是既有台股假日日曆 proxy：
 
@@ -5152,7 +5194,7 @@ PostgreSQL／Redis adapters
 
 ETF premium 改由 dated observation record 傳遞，Redis 與 repository 都回 `premiumPct/navDate/source`；resolver 以該市場完成日與 decision instant 驗證。`TradingRadarRuleEngine` 只收到已通過時效閘門的值，stale observation 不得進 3% veto。外幣底層台股債券的 `underlying_currency` 缺漏由 master-data validation 標為 `currencyDataComplete=false`，不再 fallback TWD；00695B／00751B／00865B 以 idempotent data migration 補 USD。
 
-**三軌結果。** `TradingRadarRuleEngine.StockResult` 在既有短／中期 opportunity score 之外，新增每軌 `downsideRisk` 與 `evidenceConfidence`。risk 只聚合可獨立驗證的過熱、波動、事件、流動性與資料 stale 風險；confidence 只聚合 evidence group coverage/freshness，不看方向。群組為 `PRICE_TECHNICAL`、`MARKET_LIQUIDITY`、`VALUATION`、`FINANCIAL_OPERATING`、`ASSET_SPECIFIC`、`PUBLIC_EVENT`；不適用群組從分母排除，缺漏群組保持 missing，不以中性代替。`actionFor` 先依 opportunity/timing 形成 candidate，再由 confidence policy 向保守方向降級；不得反向把低信心升級。
+**三類結果。**（此處的「三類」指 opportunity／downside／confidence **三種輸出**，與 Task 356 之後「三軌＝三個持有期」是不同的東西，不要混用。）`TradingRadarRuleEngine.StockResult` 在既有短／中期 opportunity score 之外，新增每軌 `downsideRisk` 與 `evidenceConfidence`。risk 只聚合可獨立驗證的過熱、波動、事件、流動性與資料 stale 風險；confidence 只聚合 evidence group coverage/freshness，不看方向。群組為 `PRICE_TECHNICAL`、`MARKET_LIQUIDITY`、`VALUATION`、`FINANCIAL_OPERATING`、`ASSET_SPECIFIC`、`PUBLIC_EVENT`；不適用群組從分母排除，缺漏群組保持 missing，不以中性代替。`actionFor` 先依 opportunity/timing 形成 candidate，再由 confidence policy 向保守方向降級；不得反向把低信心升級。
 
 **估值與財報。** `FundamentalAnalysisService.ValuationRow` 讀同一 observation 的 PE／PB／`dividend_yield_pct`，各自在同 provider 有效歷史中計算分位，再合成單一 valuation contribution，沿用原 PE 權重位置。可信虧損或營運惡化時殖利率正貢獻失效。ROE 使用 TTM 母公司淨利除以期初／期末平均權益；期初缺漏才可使用最新權益 fallback 並降低 confidence。EPS 以 categorical transition 承接負基期（虧轉盈／盈轉虧／持續虧損），與可計算的 YoY 共用單一 EPS contribution。
 

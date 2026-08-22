@@ -123,7 +123,7 @@ class TradingRadarNotificationMarketBatchTest {
 
         // 兩檔台股 setting 只換來一次 bounded 查詢，證明大盤按市場批次、不隨 setting 數量重算。
         verify(twseRepo, times(1)).findTopNByOrderByTradingDateDesc(60);
-        verify(usIndexRepo, times(1)).findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 241);
+        verify(usIndexRepo, times(1)).findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 500);
         verifyNoInteractions(newsRepo);
     }
 }

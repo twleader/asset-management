@@ -81,16 +81,48 @@ public class BacktestService {
     private static final ZoneId NEW_YORK = ZoneId.of("America/New_York");
     /** 美股 completed close 後的固定 evidence boundary；不取用下一交易日盤前資料。 */
     private static final LocalTime US_SIGNAL_BOUNDARY = LocalTime.of(18, 0);
-    /** 需要 240 根完成日 K 的因子在此之前不可得；這些日子 production 會回 NO_TRADE，一律排除。 */
-    private static final int WARMUP = RadarInputAssembler.FULL_WINDOW;
     /**
-     * production 的技術序列上限（240 根完成日 K ＋ 當日）。回測無 live K，仍取 241 筆使兩日確認可算。
+     * 60 根完成週所需的最少完成日 K（Task 356.13a-2）：60 完成週 × 每週約 5 個交易日，
+     * 另留一週給「最晚 ISO 週恆被視為進行中週」的排除。
      *
-     * <p>Task 319 起 production 向 DB 多抓幾筆當剔除緩衝（{@code findRecentN(..., 250)}），但序列本身
-     * 仍由 {@code RadarObservationResolver.INDICATOR_SERIES_MAX_ROWS} 截回 241——兩邊上限維持相同。</p>
+     * <p>這個數字必須跟著 {@link RadarInputAssembler#MIN_COMPLETED_WEEKS} 走，
+     * 寫死 300 或 305 會在該常數調整時靜默失準。</p>
+     *
+     * <p>本組視窗常數一律為 package-private（不是 private）：同 package 的測試必須能直接斷言
+     * 「{@code WINDOW} 已放大且 {@code DAILY_CONTRACT_ROWS} 仍為 241」，
+     * 用反射或複製一份字面值都會讓斷言與實作各自漂移。</p>
      */
-    private static final int WINDOW = 241;
-    private static final List<Integer> DEFAULT_HORIZONS = List.of(5, 20, 60, 120);
+    static final int WEEKLY_WARMUP_ROWS = (RadarInputAssembler.MIN_COMPLETED_WEEKS + 1) * 5;
+    /**
+     * 需要 240 根完成日 K 的因子在此之前不可得；這些日子 production 會回 NO_TRADE，一律排除。
+     *
+     * <p><b>Task 356.13a-2 起同時要滿足「60 根完成週」</b>，故取兩者的較大者（目前為
+     * {@link #WEEKLY_WARMUP_ROWS} = 305）。維持 240 的話 {@code completedWeeks} 永遠不足 60，
+     * 四組週K 因子在回測中恆為缺值並重分配權重，量到的是一組<b>沒有週K 的規則</b>，
+     * 卻要拿來當新權重的稽核。</p>
+     *
+     * <p><b>代價必須如實揭露而不是靜默少掉幾檔</b>（Task 356.13a-3）：交易日數僅 318 的標的
+     * 扣掉暖機後只剩約 13 個可用訊號日，低於 {@link #MIN_SAMPLES} 而整檔被標記為樣本不足。</p>
+     */
+    static final int WARMUP = Math.max(RadarInputAssembler.FULL_WINDOW, WEEKLY_WARMUP_ROWS);
+    /**
+     * 回測取數視窗，與 production 的 {@code SERIES_FETCH_ROWS} 一致（Task 356.4a／356.13a-2）。
+     *
+     * <p><b>這不是日K 契約</b>：日K 契約仍固定為 {@link #DAILY_CONTRACT_ROWS}（241），
+     * 由 {@code RadarInputAssembler.assemble} 的顯式參數界定。長視窗只供週K 聚合取得
+     * 足夠的完成週；維持 241 的話 ≈ 48 個 ISO 週 &lt; 60，回測是空跑。</p>
+     */
+    static final int WINDOW = 500;
+    /**
+     * 日K 契約的<b>完成列</b>數，與 production 共用同一個值（Task 356.4d）。
+     * 回測無 live K，故實際視窗長度即此值。
+     */
+    static final int DAILY_CONTRACT_ROWS = RadarObservationResolver.INDICATOR_SERIES_MAX_ROWS;
+    /**
+     * 五個持有期（Task 356.13a）：{@code 5} 對應一周軌、{@code 10}／{@code 20} 對應 1周~1月 軌、
+     * {@code 60}／{@code 120} 對應 1月~6月 軌。
+     */
+    private static final List<Integer> DEFAULT_HORIZONS = List.of(5, 10, 20, 60, 120);
     /** 低於此樣本數的格子一律標記為樣本不足，其數字不得用於決策（273.6.3）。 */
     private static final int MIN_SAMPLES = 30;
     private static final BigDecimal DOWNSIDE = BigDecimal.valueOf(-10);
@@ -264,10 +296,14 @@ public class BacktestService {
             int index,
             Integer score,
             Integer shortScore,
+            /** 1周~1月 軌分數（Task 356.13b）；與 {@code score}／{@code shortScore} 平行，不得互相頂替。 */
+            Integer swingScore,
             TradingRadarRuleEngine.Action actionHeld,
             TradingRadarRuleEngine.Action actionNotHeld,
             TradingRadarRuleEngine.Action shortActionHeld,
             TradingRadarRuleEngine.Action shortActionNotHeld,
+            TradingRadarRuleEngine.Action swingActionHeld,
+            TradingRadarRuleEngine.Action swingActionNotHeld,
             TradingRadarRuleEngine.TimingState timing,
             TradingRadarRuleEngine.KdHeat kdHeat,
             boolean kdDeadCross,
@@ -286,6 +322,9 @@ public class BacktestService {
         TradingRadarRuleEngine.Action action(boolean held) { return held ? actionHeld : actionNotHeld; }
         TradingRadarRuleEngine.Action shortAction(boolean held) {
             return held ? shortActionHeld : shortActionNotHeld;
+        }
+        TradingRadarRuleEngine.Action swingAction(boolean held) {
+            return held ? swingActionHeld : swingActionNotHeld;
         }
     }
 
@@ -743,8 +782,11 @@ public class BacktestService {
 
             // 視窗最新一筆的還原收盤價恆等於其原始收盤價（該筆的 scale 必為 1），故直接取原始值。
             BigDecimal price = windowDesc.get(0).getClosePrice();
-            RadarInputAssembler.Assembled a =
-                    assembler.assemble(windowDesc, events, false, windowDesc.size(), price);
+            // Task 356.4d／356.4d-3：completedRowCount 與 dailyContractRows 一律顯式傳入日K 契約
+            // （241），不得因為 WINDOW 放大成 500 就順手傳 windowDesc.size()。
+            RadarInputAssembler.Assembled a = assembler.assemble(
+                    windowDesc, events, false,
+                    Math.min(windowDesc.size(), DAILY_CONTRACT_ROWS), DAILY_CONTRACT_ROWS, price);
 
             java.time.Instant decisionInstant = signalInstant(date);
             TradingRadarPremiumResolver.DecisionObservation premiumObservation =
@@ -770,8 +812,10 @@ public class BacktestService {
                     date, t,
                     held.score(),
                     held.shortScore(),
+                    held.swingScore(),
                     held.action(), free.action(),
                     held.shortAction(), free.shortAction(),
+                    held.swingAction(), free.swingAction(),
                     held.timingState(), held.kdHeat(),
                     held.kdDeadCross(), held.longTermBroken(),
                     held.profitTakingConfirmed(),
@@ -827,7 +871,12 @@ public class BacktestService {
                 a.indicators().weeklyMa(),
                 assembler.extendedIndicators(a.indicators().extended()),
                 a.volumeRatio(),
-                fundamental));
+                fundamental,
+                // Task 356.13a-2：個股回測的 StockInput 同樣必須接上日K 棒與週K。少傳這兩個引數
+                // 會靜默命中 Task 356 之前的相容建構式（不會編譯失敗），五個新因子在回測中恆為
+                // 缺值並重分配權重 → 356.13b 量到的是一組沒有週K 的規則，回測是空跑。
+                a.dailyCandle(),
+                a.weekly()));
     }
 
     // ─────────────────────────── Task 308 可成交報告 ───────────────────────────
@@ -1148,7 +1197,8 @@ public class BacktestService {
                     windowDesc.get(windowDesc.size() - 1).getTradingDate(), signalDate);
             BigDecimal price = windowDesc.get(0).getClosePrice();
             RadarInputAssembler.Assembled assembled = assembler.assemble(
-                    windowDesc, windowEvents, false, windowDesc.size(), price);
+                    windowDesc, windowEvents, false,
+                    Math.min(windowDesc.size(), DAILY_CONTRACT_ROWS), DAILY_CONTRACT_ROWS, price);
             TradingRadarRuleEngine.MarketRegime regime = regimes.getOrDefault(
                     signalDate, TradingRadarRuleEngine.MarketRegime.DATA_INCOMPLETE);
             TradingRadarMarketContextService.FxContext fx = fxSeries == null
@@ -2852,7 +2902,8 @@ public class BacktestService {
                     List<StockDividendHistory> windowEvents = eventsWithin(
                             events, windowDesc.get(windowDesc.size() - 1).getTradingDate(), signalDate);
                     RadarInputAssembler.Assembled assembled = assembler.assemble(
-                            windowDesc, windowEvents, false, windowDesc.size(),
+                            windowDesc, windowEvents, false,
+                            Math.min(windowDesc.size(), DAILY_CONTRACT_ROWS), DAILY_CONTRACT_ROWS,
                             windowDesc.get(0).getClosePrice());
                     BigDecimal sigma = assembled.returnStdDev60Ratio();
                     if (sigma == null || sigma.signum() <= 0) continue;
@@ -2926,7 +2977,9 @@ public class BacktestService {
                     rows.subList(Math.max(0, t - WINDOW + 1), t + 1));
             Collections.reverse(windowDesc);
             RadarInputAssembler.Assembled a = assembler.assemble(
-                    windowDesc, List.of(), false, windowDesc.size(), windowDesc.get(0).getClosePrice());
+                    windowDesc, List.of(), false,
+                    Math.min(windowDesc.size(), DAILY_CONTRACT_ROWS), DAILY_CONTRACT_ROWS,
+                    windowDesc.get(0).getClosePrice());
             BigDecimal change = percentChange(rows.get(t).getClosePrice(), rows.get(t - 1).getClosePrice());
             TradingRadarRuleEngine.MarketResult result = ruleEngine.evaluateMarket(
                     new TradingRadarRuleEngine.MarketInput(
@@ -2943,7 +2996,11 @@ public class BacktestService {
                             null,
                             null, null, null, false,
                             // crossMarketApplicable=false：美股大盤即 IXIC，跨市場因子不適用（同 production）。
-                            false));
+                            false,
+                            // Task 356.13b-2：回測自行組建的 MarketInput 必須接上週K 與日K 棒，
+                            // 否則大盤那五項加減分「線上生效、回測不生效」，且沒有任何測試抓得到。
+                            a.dailyCandle(),
+                            a.weekly()));
             out.put(rows.get(t).getTradingDate(), result.regime());
         }
         return Map.copyOf(out);
@@ -2968,7 +3025,10 @@ public class BacktestService {
                 a.ma20Confirmation(), a.ma60Confirmation(), a.ma240Confirmation(), instrumentType, regime,
                 false, fxPct, a.ma60BiasPercent(), a.ma60BiasPercentile(), a.ma240BiasPercent(),
                 a.week52Position(), a.kdBandWidthPercent(), premium, premiumPercentile, a.indicators().weeklyMa(),
-                assembler.extendedIndicators(a.indicators().extended()), a.volumeRatio(), fundamental);
+                assembler.extendedIndicators(a.indicators().extended()), a.volumeRatio(), fundamental,
+                // Task 356.13a-2：V13 candidate 回測路徑同樣必須接上日K 棒與週K，否則 promotion
+                // 稽核比較的是「有週K 的 production」與「沒有週K 的回測」，兩者根本不同一組規則。
+                a.dailyCandle(), a.weekly());
     }
 
     private TradingRadarRuleEngine.CandidateContext v13Context(
@@ -3807,15 +3867,24 @@ public class BacktestService {
             m.put("TIMING_" + s.name(), (o, h) -> o.timing() == s);
         }
         m.put("PROFIT_TAKING_CONFIRMED", (o, h) -> o.profitTakingConfirmed());
+        // Task 356.13b：三軌述詞必須對稱且各讀各自的引擎輸出——SWING_* 一律走 swingAction()／
+        // swingScore()，**不得**以 medium 的 action()／score() 冒充。三軌的動作分組在多數日子相同，
+        // 拿 medium 頂替不會讓任何既有斷言變紅，卻會讓 356.13b 的稽核量到同一軌兩次。
         m.put("SHORT_BUY", (o, h) -> isBuy(o.shortAction(h)));
+        m.put("SWING_BUY", (o, h) -> isBuy(o.swingAction(h)));
         m.put("MEDIUM_BUY", (o, h) -> isBuy(o.action(h)));
         m.put("SHORT_PROFIT_TAKING", (o, h) -> o.profitTakingConfirmed() && isSell(o.shortAction(h)));
+        m.put("SWING_PROFIT_TAKING", (o, h) -> o.profitTakingConfirmed() && isSell(o.swingAction(h)));
         m.put("MEDIUM_PROFIT_TAKING", (o, h) -> o.profitTakingConfirmed() && isSell(o.action(h)));
         // 極端超賣保護只統計「原分數本會落入賣出組，但實際被改成中性組」的日子。
         m.put("SHORT_EXTREME_OVERSOLD_PROTECTED", (o, h) ->
                 o.timing() == TradingRadarRuleEngine.TimingState.EXTREME_OVERSOLD
                         && o.shortScore() != null && o.shortScore() < 40
                         && isNeutral(o.shortAction(h)));
+        m.put("SWING_EXTREME_OVERSOLD_PROTECTED", (o, h) ->
+                o.timing() == TradingRadarRuleEngine.TimingState.EXTREME_OVERSOLD
+                        && o.swingScore() != null && o.swingScore() < 40
+                        && isNeutral(o.swingAction(h)));
         m.put("MEDIUM_EXTREME_OVERSOLD_PROTECTED", (o, h) ->
                 o.timing() == TradingRadarRuleEngine.TimingState.EXTREME_OVERSOLD
                         && o.score() != null && o.score() < 40
@@ -3927,8 +3996,11 @@ public class BacktestService {
         // 受 ETF 折溢價否決影響的述詞：buyGate（硬否決）、OVERBOUGHT／EXTREME_OVERBOUGHT（參與 timingOf）、
         // 以及 TRIAL_BUY（qualifiesForTrialBuy 同樣檢查溢價）。
         // 注意 "TIMING_EXTREME_OVERBOUGHT".startsWith("TIMING_OVERBOUGHT") 為 false，不可用 startsWith 判。
+        // Task 356.13b：SWING_BUY 與另外兩軌同樣經過 actionFor() 的 premiumExpensive 硬否決
+        //（三軌共用同一支動作映射，見 TradingRadarRuleEngine.evaluateHorizon），故一併納入。
         boolean premiumSensitive = "BUY_GATE".equals(p.name())
                 || "SHORT_BUY".equals(p.name())
+                || "SWING_BUY".equals(p.name())
                 || "MEDIUM_BUY".equals(p.name())
                 || "TRIAL_BUY".equals(p.name())
                 || p.name().endsWith("OVERBOUGHT");
@@ -4011,6 +4083,10 @@ public class BacktestService {
                         .tradingDate(r.getTradingDate())
                         .openPrice(r.getOpenPoint()).highPrice(r.getHighPoint())
                         .lowPrice(r.getLowPoint()).closePrice(r.getClosePoint())
+                        // Task 356.13b-2：trade_volume 必須帶上。缺了它回測的台股大盤週量比恆為
+                        // null，而 production 由同一欄算得出值——正是 BacktestService 既有註解記載的
+                        // 舊病「線上生效、回測不生效，且沒有任何測試抓得到」（Task 323 的標題）。
+                        .volume(r.getTradeVolume())
                         .build())
                 .toList();
 
@@ -4020,7 +4096,8 @@ public class BacktestService {
             Collections.reverse(windowDesc);
             // 大盤無除權息事件，events 傳空 list；assemble 會原樣回傳序列。
             RadarInputAssembler.Assembled a = assembler.assemble(
-                    windowDesc, List.of(), false, windowDesc.size(),
+                    windowDesc, List.of(), false,
+                    Math.min(windowDesc.size(), DAILY_CONTRACT_ROWS), DAILY_CONTRACT_ROWS,
                     windowDesc.get(0).getClosePrice());
             LocalDate signalDate = asRows.get(t).getTradingDate();
             TradingRadarMarketContextService.MarketContext context =
@@ -4040,7 +4117,10 @@ public class BacktestService {
                             context.usTechCompositePercent(),
                             context.usTechAvailable(),
                             // 台股跨市場因子適用（同 production 的 buildMarket()），行為逐位不變。
-                            true));
+                            true,
+                            // Task 356.13b-2：同 IXIC 那處，週K 與日K 棒一律接上同一份 Assembled。
+                            a.dailyCandle(),
+                            a.weekly()));
             out.put(signalDate, r.regime());
         }
         return out;
