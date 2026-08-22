@@ -238,7 +238,23 @@ bff/src/main/java/com/steven/assets/bff/
      其 spec 明文禁止把回測改呼叫 `resolveMarketFromRows`（不在授權範圍），且反向要求回測
      沿用既有的 `a.volumeRatio()`——那是為了同批消除「production 有值、回測傳 null」這個**更嚴重**
      的分岔（回測分支會在線上生效、回測不生效且無測試可抓）。收斂兩支 helper 屬獨立任務。
-   - **上述三組具名例外之外，不得再新增任何一份同義值的獨立實作**：新的同義值一律回到本鐵則。
+   - **具名例外之四（Task 356 登記，狀態：併存、刻意不合併）：ISO 週分桶有兩份實作**——
+     `bff/.../stockanalysis/ChartSeriesAligner#weekly`（走勢圖週K，Task 355）與
+     `backend/.../service/WeeklyBarAggregator#aggregate`（交易雷達週K，Task 356）。兩者的
+     **分桶鍵逐字相同**（`WeekFields.ISO` 的 `weekBasedYear` ＋ `weekOfWeekBasedYear`，
+     `open` 取該週最早交易日、`high`／`low` 取極值、`close` 與週日期取最晚交易日）。
+     **免罪理由：** `bff` 是獨立 Maven artifact、其 `pom.xml` 不依賴 `backend`，兩者之間
+     沒有共用程式模組；把 `ChartSeriesAligner` 抽成共用會讓 business-services 依賴 BFF 的
+     display DTO（`PricePointDto`），違反本檔 §8 的相依方向——**收斂方向比重複更糟**。
+     **五處刻意分歧**（不影響週界本身）：(a) BFF 的「週指標」是該週最後一個交易日的**日K**
+     指標值，雷達是在週K 序列上**重算**；(b) 價基不同（走勢圖原始價、雷達還原權息）；
+     (c) 進行中週：圖表要畫、評分排除；(d) `requestedStart` 起始週丟棄為 BFF 專有；
+     (e) 壞資料週：BFF 整週丟棄，雷達逐欄 null ＋ `close` 缺值才丟整根。
+     **同步機制：** 雙邊 Javadoc 互相指名為「必須同步的對應實作」，並由
+     `WeeklyBarAggregatorTest` 與 `ChartSeriesAlignerTest` 各自以相同的週界案例
+     （一般週、短週、ISO 跨年、單日成週）釘住，壞週案例則各自斷言刻意不同。
+     完整脈絡見 `spec/design.md` 的「三軌持有期與真正的週K／日K 棒」小節。
+   - **上述四組具名例外之外，不得再新增任何一份同義值的獨立實作**：新的同義值一律回到本鐵則。
      引用例外時須逐條核對免罪理由是否真的適用——Task 335 的 arch 稽核正是發現「(3) 的『含 live』
      理由對 IXIC 不成立」才揭出第二組；Task 342 的稽核則是發現量比欄同時被兩支 helper 餵養。
 5. **前端只 render，BFF 預先聚合 / 排序 / 過濾 / 計算 profit / profitRate 等衍生值。**

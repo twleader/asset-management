@@ -55,10 +55,24 @@ public class TechnicalIndicatorService {
             BigDecimal previousK,
             BigDecimal previousD,
             BigDecimal weeklyMa,
-            /** 走勢圖指標選單同一組值；Task 291 起由 RadarInputAssembler 接入雙軌評分。 */
-            ExtendedIndicators extended) {
+            /** 走勢圖指標選單同一組值；Task 291 起由 RadarInputAssembler 接入評分，Task 356 起為三軌。 */
+            ExtendedIndicators extended,
+            /**
+             * 10 期簡單移動平均（Task 356.3b）。
+             *
+             * <p><b>純追加的輸出欄，不改動任何既有公式、既有欄位與精度。</b>本 record 原本
+             * 只有 MA5／MA20／MA60／MA240，10 期只以 {@code ExtendedIndicators.bias10} 的中間值
+             * 形式存在於 {@code biasRaw()} 內、從未外露；而 Task 356 的週MA10 因子需要它。
+             * 週K 路徑餵的 {@code series} 是週K，故此欄即週MA10；日K 路徑因此多出一個值
+             * 但無人讀取（{@code StockInput} 不接、DTO 不揭露），既有輸出逐位不變。</p>
+             *
+             * <p><b>不得改以 {@code ma10 = close / (1 + bias10/100)} 反推</b>——那是把顯示用的
+             * 四捨五入值當成算術來源。{@link #computeAllForTaiex()}／{@link #computeAllForNasdaq()}
+             * 兩條大盤路徑不需要 MA10，一律填 {@code null}。</p>
+             */
+            BigDecimal ma10) {
         public static final FullIndicators EMPTY = new FullIndicators(
-                null, null, null, null, null, null, null, null, ExtendedIndicators.EMPTY);
+                null, null, null, null, null, null, null, null, ExtendedIndicators.EMPTY, null);
     }
 
     /**
@@ -177,6 +191,8 @@ public class TechnicalIndicatorService {
         if (series == null || series.isEmpty()) return FullIndicators.EMPTY;
 
         BigDecimal ma5   = simpleMa(series, 5);
+        // Task 356.3b：純追加輸出欄，與既有 MA 同一支 simpleMa、同一累加方向與精度。
+        BigDecimal ma10  = simpleMa(series, 10);
         BigDecimal ma20  = simpleMa(series, 20);
         BigDecimal ma60  = simpleMa(series, 60);
         BigDecimal ma240 = simpleMa(series, 240);
@@ -200,7 +216,8 @@ public class TechnicalIndicatorService {
                 currentKd.k(), currentKd.d(),
                 previousKd.k(), previousKd.d(),
                 ma5,
-                extendedOf(asc, kd));
+                extendedOf(asc, kd),
+                ma10);
     }
 
     /**
@@ -592,7 +609,10 @@ public class TechnicalIndicatorService {
                     currentKd.k(), currentKd.d(),
                     previousKd.k(), previousKd.d(),
                     ma5,
-                    extendedOf(ascRows, kd));
+                    extendedOf(ascRows, kd),
+                    // Task 356.3b：大盤路徑不需要 MA10（週K 因子的大盤側另由 MarketInput 供給），
+                    // 一律填 null，不得以 ma5／ma20 冒充。
+                    null);
         } catch (Exception e) {
             log.warn("compute TAIEX indicators failed", e);
             return FullIndicators.EMPTY;
@@ -652,7 +672,10 @@ public class TechnicalIndicatorService {
                     currentKd.k(), currentKd.d(),
                     previousKd.k(), previousKd.d(),
                     ma5,
-                    extendedOf(ascRows, kd));
+                    extendedOf(ascRows, kd),
+                    // Task 356.3b：大盤路徑不需要 MA10（週K 因子的大盤側另由 MarketInput 供給），
+                    // 一律填 null，不得以 ma5／ma20 冒充。
+                    null);
         } catch (Exception e) {
             log.warn("compute NASDAQ (IXIC) indicators failed", e);
             return FullIndicators.EMPTY;

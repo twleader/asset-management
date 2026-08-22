@@ -7,6 +7,7 @@ import com.steven.assets.repository.AssetSnapshotRepository;
 import com.steven.assets.repository.TradingRadarNotificationSettingRepository;
 import com.steven.assets.repository.TradingRadarNotificationStateRepository;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -98,6 +99,63 @@ class TradingRadarNotificationServiceTest {
                 null, null, null, null, null,
                 List.of(), List.of(), null, null, null,
                 null, null, null, null, null, null);
+    }
+
+    /**
+     * 三軌決策：{@code action} 是 1月~6月 軌（唯一寄信的那一軌），
+     * {@code shortAction}／{@code swingAction} 只是同一筆決策的另外兩軌。
+     */
+    private static TradingRadarDto.StockDecision threeTrackDecision(
+            String mediumAction, String shortAction, String swingAction) {
+        return new TradingRadarDto.StockDecision(
+                STOCK_CODE, "台積電", MARKET, "STOCK", false, false,
+                mediumAction, mediumAction, 70,
+                "NONE", "無", List.of(), List.of(),
+                true, BigDecimal.TEN, BigDecimal.ONE,
+                "REALTIME", "2026-08-09T10:00:00+08:00", "2026-08-09",
+                null, null, null, null, null, null, null, null, null, null,
+                List.of(), List.of(), null, null, null,
+                null, null, null, null, null, null,
+                shortAction, shortAction, 88, List.of(), List.of(), true,
+                null, null, false, null, TradingRadarDto.RadarEvidence.EMPTY,
+                null, null, null, null, null, null, null, null, List.of(),
+                null, null,
+                swingAction, swingAction, 79, List.of(), List.of(),
+                null, null, null, null, null, null);
+    }
+
+    @Test
+    @DisplayName("Task 356.12b：只有一周／1周~1月 軌變動時不得寄信（transition 只看 1月~6月 軌）")
+    void 只有短期或波段軌變動時不寄信() {
+        // 1月~6月 軌維持 HOLD（＝ setting.lastAction 基準），另外兩軌轉成買進候選。
+        when(tradingRadarService.evaluateForNotification(
+                eq(STOCK_CODE), eq(MARKET), anyBoolean(), eq(SNAPSHOT)))
+                .thenReturn(threeTrackDecision("HOLD", "BUY_CANDIDATE", "ADD_CANDIDATE"));
+        when(stateRepo.findStateCodes(SETTING_ID, TradingRadarNotificationState.TYPE_ACTION))
+                .thenReturn(List.of("HOLD"));
+
+        service.queueEvaluation(STOCK_CODE, MARKET);
+        service.flushEvaluations();
+
+        verify(dispatcher, never()).enqueue(any(), any(), any());
+        assertEquals("HOLD", setting.getLastAction(),
+                "last_action 只記錄 1月~6月 軌；不得因為另外兩軌變動而被覆寫");
+    }
+
+    @Test
+    @DisplayName("Task 356.12b：1月~6月 軌真的變動時照常寄信，另外兩軌不影響判定")
+    void 中長期軌變動時照常寄信() {
+        when(tradingRadarService.evaluateForNotification(
+                eq(STOCK_CODE), eq(MARKET), anyBoolean(), eq(SNAPSHOT)))
+                .thenReturn(threeTrackDecision("EXIT_CANDIDATE", "HOLD", "HOLD"));
+        TradingRadarNotificationState row = actionRow(null);
+        when(stateRepo.findBySettingId(SETTING_ID)).thenReturn(List.of(row));
+
+        service.queueEvaluation(STOCK_CODE, MARKET);
+        service.flushEvaluations();
+
+        verify(dispatcher).enqueue(eq(SETTING_ID), any(), eq(List.of("EXIT_CANDIDATE")));
+        assertEquals("EXIT_CANDIDATE", setting.getLastAction());
     }
 
     private static TradingRadarNotificationState actionRow(Instant lastNotifiedAt) {

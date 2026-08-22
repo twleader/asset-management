@@ -37,7 +37,16 @@ public final class TradingRadarEvidenceConfidenceResolver {
         AVAILABLE, MISSING, STALE, NOT_APPLICABLE
     }
 
-    public enum Horizon { SHORT, MEDIUM }
+    /**
+     * 三軌持有期（Task 356.9a）：{@code SHORT}＝一周、{@code SWING}＝1周~1月、{@code MEDIUM}＝1月~6月。
+     *
+     * <p><b>本 enum 的每一處分派一律是 {@code switch (horizon)} 且不得有 {@code default}。</b>
+     * 原本全部是二元三元運算（{@code horizon == Horizon.SHORT ? shortXxx : mediumXxx}），
+     * 新增第三個值時<b>不會有編譯錯誤、會靜默落到 medium</b>，結果是整條 swing 證據鏈與 medium
+     * 逐位相同——看起來有做，其實是假的。改為窮盡 switch 之後，日後新增第四個 horizon
+     * 一定編譯失敗，這正是要的行為。</p>
+     */
+    public enum Horizon { SHORT, SWING, MEDIUM }
 
     /**
      * Treasury observation selected as-of the decision instant.
@@ -239,14 +248,25 @@ public final class TradingRadarEvidenceConfidenceResolver {
         public boolean fresh() { return applicability == Applicability.AVAILABLE; }
     }
 
+    /**
+     * 單一 group 的三軌證據（Task 356.9a-2）。
+     *
+     * <p>三套 coverage／available／fresh 欄位<b>各自獨立</b>，swing 不是 medium 的複本：
+     * {@link #priceGroup} 為 SWING 另組一份 {@code swingComponents} 與其權重，
+     * 其餘 group 的三軌共用同一份 component 清單（那些 group 本來就不隨持有期改變觀測項目），
+     * 但仍走同一組三軌欄位，避免呼叫端誤以為只有兩軌。</p>
+     */
     public record GroupEvidence(
             Group group,
             List<Component> components,
             double shortCoverage,
+            double swingCoverage,
             double mediumCoverage,
             boolean shortAvailable,
+            boolean swingAvailable,
             boolean mediumAvailable,
             boolean shortFresh,
+            boolean swingFresh,
             boolean mediumFresh,
             int sourceCount,
             boolean downsideRisk,
@@ -254,19 +274,32 @@ public final class TradingRadarEvidenceConfidenceResolver {
         public GroupEvidence {
             components = components == null ? List.of() : List.copyOf(components);
             shortCoverage = clamp01(shortCoverage);
+            swingCoverage = clamp01(swingCoverage);
             mediumCoverage = clamp01(mediumCoverage);
         }
 
         public double coverage(Horizon horizon) {
-            return horizon == Horizon.SHORT ? shortCoverage : mediumCoverage;
+            return switch (horizon) {
+                case SHORT -> shortCoverage;
+                case SWING -> swingCoverage;
+                case MEDIUM -> mediumCoverage;
+            };
         }
 
         public boolean available(Horizon horizon) {
-            return horizon == Horizon.SHORT ? shortAvailable : mediumAvailable;
+            return switch (horizon) {
+                case SHORT -> shortAvailable;
+                case SWING -> swingAvailable;
+                case MEDIUM -> mediumAvailable;
+            };
         }
 
         public boolean fresh(Horizon horizon) {
-            return horizon == Horizon.SHORT ? shortFresh : mediumFresh;
+            return switch (horizon) {
+                case SHORT -> shortFresh;
+                case SWING -> swingFresh;
+                case MEDIUM -> mediumFresh;
+            };
         }
 
         public boolean meets(Horizon horizon, double threshold) {
@@ -295,8 +328,10 @@ public final class TradingRadarEvidenceConfidenceResolver {
     public record Evidence(
             Map<Group, GroupEvidence> groups,
             int shortConfidence,
+            int swingConfidence,
             int mediumConfidence,
             Risk shortRisk,
+            Risk swingRisk,
             Risk mediumRisk,
             List<String> reasons,
             DividendEventEvidenceResolver.Resolution dividendEvent,
@@ -304,8 +339,10 @@ public final class TradingRadarEvidenceConfidenceResolver {
         public Evidence {
             groups = groups == null ? Map.of() : Map.copyOf(groups);
             shortConfidence = clampInt(shortConfidence, 0, 100);
+            swingConfidence = clampInt(swingConfidence, 0, 100);
             mediumConfidence = clampInt(mediumConfidence, 0, 100);
             shortRisk = shortRisk == null ? new Risk(null, 0, List.of()) : shortRisk;
+            swingRisk = swingRisk == null ? new Risk(null, 0, List.of()) : swingRisk;
             mediumRisk = mediumRisk == null ? new Risk(null, 0, List.of()) : mediumRisk;
             reasons = reasons == null ? List.of() : List.copyOf(reasons);
             dividendEvent = dividendEvent == null
@@ -315,22 +352,31 @@ public final class TradingRadarEvidenceConfidenceResolver {
                     "market feature resolver 未建立") : marketFeatures;
         }
 
-        /** Compatibility shape before dividend event evidence became explicit. */
+        /**
+         * Compatibility shape before dividend event evidence became explicit.
+         *
+         * <p>Task 356.9a-2 起 swing 必須<b>顯式傳入</b>：讓相容建構式把 medium 複製給 swing
+         * 正是本任務明文要消滅的靜默 fallback。</p>
+         */
         public Evidence(
                 Map<Group, GroupEvidence> groups,
                 int shortConfidence,
+                int swingConfidence,
                 int mediumConfidence,
                 Risk shortRisk,
+                Risk swingRisk,
                 Risk mediumRisk,
                 List<String> reasons) {
-            this(groups, shortConfidence, mediumConfidence, shortRisk, mediumRisk, reasons,
+            this(groups, shortConfidence, swingConfidence, mediumConfidence,
+                    shortRisk, swingRisk, mediumRisk, reasons,
                     DividendEventEvidenceResolver.Resolution.MISSING,
                     TradingRadarMarketFeatureResolver.Evidence.empty(null, null,
                             "market feature resolver 未建立"));
         }
 
-        public static final Evidence EMPTY = new Evidence(Map.of(), 0, 0,
-                new Risk(null, 0, List.of()), new Risk(null, 0, List.of()), List.of());
+        public static final Evidence EMPTY = new Evidence(Map.of(), 0, 0, 0,
+                new Risk(null, 0, List.of()), new Risk(null, 0, List.of()),
+                new Risk(null, 0, List.of()), List.of());
 
         public GroupEvidence group(Group group) { return groups.get(group); }
 
@@ -340,7 +386,11 @@ public final class TradingRadarEvidenceConfidenceResolver {
 
         /** Candidate-specific confidence threshold; structural group coverage remains 70%. */
         public boolean gateOpen(Horizon horizon, double confidenceThreshold) {
-            int confidence = horizon == Horizon.SHORT ? shortConfidence : mediumConfidence;
+            int confidence = switch (horizon) {
+                case SHORT -> shortConfidence;
+                case SWING -> swingConfidence;
+                case MEDIUM -> mediumConfidence;
+            };
             GroupEvidence price = group(Group.PRICE_TECHNICAL);
             GroupEvidence market = group(Group.MARKET_LIQUIDITY);
             int threshold = (int) Math.ceil(Math.max(0.0, Math.min(1.0, confidenceThreshold)) * 100.0);
@@ -348,15 +398,25 @@ public final class TradingRadarEvidenceConfidenceResolver {
                     && price.meets(horizon, .70) && market.meets(horizon, .70);
         }
 
+        public Risk risk(Horizon horizon) {
+            return switch (horizon) {
+                case SHORT -> shortRisk;
+                case SWING -> swingRisk;
+                case MEDIUM -> mediumRisk;
+            };
+        }
+
         public double riskCoverage(Horizon horizon) {
-            return (horizon == Horizon.SHORT ? shortRisk : mediumRisk).riskCoverage();
+            return risk(horizon).riskCoverage();
         }
 
         public Integer downsideRisk(Horizon horizon) {
-            return (horizon == Horizon.SHORT ? shortRisk : mediumRisk).downsideRisk();
+            return risk(horizon).downsideRisk();
         }
 
         public Integer shortDownsideRisk() { return shortRisk.downsideRisk(); }
+
+        public Integer swingDownsideRisk() { return swingRisk.downsideRisk(); }
 
         public Integer mediumDownsideRisk() { return mediumRisk.downsideRisk(); }
 
@@ -367,14 +427,26 @@ public final class TradingRadarEvidenceConfidenceResolver {
         }
     }
 
-    private static final double SHORT_PRICE = .50;
-    private static final double SHORT_MARKET = .30;
-    private static final double SHORT_ASSET = .20;
-    private static final double MEDIUM_PRICE = .30;
-    private static final double MEDIUM_MARKET = .20;
-    private static final double MEDIUM_VALUATION = .20;
-    private static final double MEDIUM_FINANCIAL = .20;
-    private static final double MEDIUM_ASSET = .10;
+    static final double SHORT_PRICE = .50;
+    static final double SHORT_MARKET = .30;
+    static final double SHORT_ASSET = .20;
+    /**
+     * SWING（1周~1月）group 權重（Task 356.9a），合計 {@code 1.00}，介於既有 SHORT 與 MEDIUM 之間。
+     *
+     * <p>與 SHORT 的差別是把 20 個百分點由 PRICE／MARKET 讓給 VALUATION／FINANCIAL：
+     * 一個月尺度的決策已經會碰到財報與估值，但仍以價格結構為主。<b>此組取值為判斷性取值、
+     * 無回測依據</b>，不得於任何文案宣稱它能提高準確度。</p>
+     */
+    static final double SWING_PRICE = .40;
+    static final double SWING_MARKET = .25;
+    static final double SWING_VALUATION = .10;
+    static final double SWING_FINANCIAL = .10;
+    static final double SWING_ASSET = .15;
+    static final double MEDIUM_PRICE = .30;
+    static final double MEDIUM_MARKET = .20;
+    static final double MEDIUM_VALUATION = .20;
+    static final double MEDIUM_FINANCIAL = .20;
+    static final double MEDIUM_ASSET = .10;
 
     private TradingRadarEvidenceConfidenceResolver() {}
 
@@ -435,6 +507,12 @@ public final class TradingRadarEvidenceConfidenceResolver {
                 Group.PRICE_TECHNICAL, SHORT_PRICE,
                 Group.MARKET_LIQUIDITY, SHORT_MARKET,
                 Group.ASSET_SPECIFIC, SHORT_ASSET), Horizon.SHORT);
+        int swingConfidence = confidenceFor(groups, Map.of(
+                Group.PRICE_TECHNICAL, SWING_PRICE,
+                Group.MARKET_LIQUIDITY, SWING_MARKET,
+                Group.VALUATION, SWING_VALUATION,
+                Group.FINANCIAL_OPERATING, SWING_FINANCIAL,
+                Group.ASSET_SPECIFIC, SWING_ASSET), Horizon.SWING);
         int mediumConfidence = confidenceFor(groups, Map.of(
                 Group.PRICE_TECHNICAL, MEDIUM_PRICE,
                 Group.MARKET_LIQUIDITY, MEDIUM_MARKET,
@@ -442,6 +520,7 @@ public final class TradingRadarEvidenceConfidenceResolver {
                 Group.FINANCIAL_OPERATING, MEDIUM_FINANCIAL,
                 Group.ASSET_SPECIFIC, MEDIUM_ASSET), Horizon.MEDIUM);
         Risk shortRisk = risk(input, targetDate, Horizon.SHORT);
+        Risk swingRisk = risk(input, targetDate, Horizon.SWING);
         Risk mediumRisk = risk(input, targetDate, Horizon.MEDIUM);
         List<String> reasons = new ArrayList<>();
         for (Group group : List.of(Group.PRICE_TECHNICAL, Group.MARKET_LIQUIDITY,
@@ -449,13 +528,17 @@ public final class TradingRadarEvidenceConfidenceResolver {
             GroupEvidence evidence = groups.get(group);
             if (evidence != null && evidence.participates()
                     && (!evidence.meets(Horizon.SHORT, .70)
+                    || !evidence.meets(Horizon.SWING, .70)
                     || !evidence.meets(Horizon.MEDIUM, .70))) {
                 reasons.add(group.name() + " coverage/freshness 未達 70%，不支持買進候選。 ");
             }
         }
         addDividendReason(reasons, input.dividendEvent(), Horizon.SHORT);
+        // SWING 與 MEDIUM 共用同一個 20 個交易日視窗，dividendReason 逐字相同；
+        // 再加一次只會在同一份清單裡出現兩則一模一樣的句子，故刻意不加。
         addDividendReason(reasons, input.dividendEvent(), Horizon.MEDIUM);
-        return new Evidence(groups, shortConfidence, mediumConfidence, shortRisk, mediumRisk,
+        return new Evidence(groups, shortConfidence, swingConfidence, mediumConfidence,
+                shortRisk, swingRisk, mediumRisk,
                 reasons, input.dividendEvent(), input.marketFeatures());
     }
 
@@ -473,14 +556,29 @@ public final class TradingRadarEvidenceConfidenceResolver {
                 marketRegime, marketStale, fundamental, profile));
     }
 
+    /**
+     * PRICE_TECHNICAL 是唯一一個 component 清單隨持有期改變的 group（Task 356.9a-2）。
+     *
+     * <p>SWING 的第三份 {@code swingComponents} 刻意介於兩者之間：一個月尺度既不像一周那樣
+     * 只看 MA5／KD，也不像半年那樣以 MA20／60／240 為主，故 {@code ma20_60_240} 取 {@code .20}
+     * （SHORT 完全不看、MEDIUM 取 {@code .35}），{@code macd_rsi_bias} 維持 {@code .25}。
+     * <b>此組權重為判斷性取值、無回測依據。</b></p>
+     *
+     * <p>沒有這第三份清單的話 {@code swingCoverage} 會與 {@code mediumCoverage} 逐位相同，
+     * 整條 swing 證據鏈就只是 medium 的複本。</p>
+     */
     private static GroupEvidence priceGroup(Inputs in, LocalDate targetDate) {
         List<Component> shortComponents = new ArrayList<>();
+        List<Component> swingComponents = new ArrayList<>();
         List<Component> mediumComponents = new ArrayList<>();
         RadarObservationResolver.AcceptedPrice accepted = in.acceptedPrice();
         Applicability priceStatus = accepted != null && accepted.available()
                 && sameTerminalDate(accepted.tradingDate(), targetDate)
                 ? Applicability.AVAILABLE : Applicability.MISSING;
         shortComponents.add(component("accepted_price", priceStatus, .25, date(accepted),
+                accepted == null ? null : accepted.source(),
+                priceStatus == Applicability.AVAILABLE ? null : "缺少符合市場日期的 accepted price"));
+        swingComponents.add(component("accepted_price", priceStatus, .20, date(accepted),
                 accepted == null ? null : accepted.source(),
                 priceStatus == Applicability.AVAILABLE ? null : "缺少符合市場日期的 accepted price"));
         mediumComponents.add(component("accepted_price", priceStatus, .20, date(accepted),
@@ -517,8 +615,23 @@ public final class TradingRadarEvidenceConfidenceResolver {
                 "TECHNICAL_INDICATORS", "MACD/RSI/BIAS 任一缺漏"));
         mediumComponents.add(component("volume_ratio", available(in.technical().volumeRatio()), .15, asOf,
                 "PRICE_HISTORY", "個股量比缺漏"));
-        return horizonGroup(Group.PRICE_TECHNICAL, shortComponents, mediumComponents,
-                true, true, true);
+        swingComponents.add(component("ma20_60_240", allAvailable(
+                ind == null ? null : ind.monthlyMa(), ind == null ? null : ind.quarterlyMa(),
+                ind == null ? null : ind.annualMa()), .20, asOf,
+                "TECHNICAL_INDICATORS", "MA20/MA60/MA240 任一缺漏"));
+        swingComponents.add(component("kd_j_wr", allAvailable(
+                ind == null ? null : ind.k(), ind == null ? null : ind.d(),
+                ext == null ? null : ext.j9(), ext == null ? null : ext.wr9()), .15, asOf,
+                "TECHNICAL_INDICATORS", "KD/J/W%R 任一缺漏"));
+        swingComponents.add(component("macd_rsi_bias", allAvailable(
+                ext == null ? null : ext.macd(), ext == null ? null : ext.rsi5(),
+                ext == null ? null : ext.rsi10(), ext == null ? null : ext.bias10(),
+                ext == null ? null : ext.bias20()), .25, asOf,
+                "TECHNICAL_INDICATORS", "MACD/RSI/BIAS 任一缺漏"));
+        swingComponents.add(component("volume_ratio", available(in.technical().volumeRatio()), .20, asOf,
+                "PRICE_HISTORY", "個股量比缺漏"));
+        return horizonGroup(Group.PRICE_TECHNICAL, shortComponents, swingComponents, mediumComponents,
+                true, true, true, true);
     }
 
     private static GroupEvidence marketGroup(
@@ -740,15 +853,30 @@ public final class TradingRadarEvidenceConfidenceResolver {
         };
     }
 
+    /**
+     * 配息事件的持有期視窗（Task 356.9a-2）。
+     *
+     * <p>SWING 用 20 個交易日，但<b>必須是顯式的 case</b>：寫成 default 的話，日後新增第四個
+     * horizon 會靜默沿用 20 天而不編譯失敗。{@code horizon == null} 是 {@code publicEventGroup}
+     * 的既有用法（不分持有期的 component 描述），維持既有語意。</p>
+     */
     private static String dividendReason(
             DividendEventEvidenceResolver.Resolution resolution, Horizon horizon) {
         if (resolution == null) return "配息事件 evidence 未建立，禁止猜測無事件";
-        int count = horizon == null ? 0 : horizon == Horizon.SHORT
-                ? resolution.eventsWithinFiveSessions() : resolution.eventsWithinTwentySessions();
+        int count = horizon == null ? 0 : switch (horizon) {
+            case SHORT -> resolution.eventsWithinFiveSessions();
+            case SWING -> resolution.eventsWithinTwentySessions();
+            case MEDIUM -> resolution.eventsWithinTwentySessions();
+        };
+        String window = horizon == null ? "20" : switch (horizon) {
+            case SHORT -> "5";
+            case SWING -> "20";
+            case MEDIUM -> "20";
+        };
         return switch (resolution.status()) {
             case AVAILABLE -> count > 0
                     ? "決策時點前已知未來 " + count + " 個配息事件（"
-                    + (horizon == Horizon.SHORT ? "5" : "20") + " 個交易日內）。" : null;
+                    + window + " 個交易日內）。" : null;
             case EMPTY_COMPLETE -> "決策時點已查無 scope 內未來配息事件（EMPTY_COMPLETE）。";
             case STALE -> resolution.missingReason() == null
                     ? "配息事件 snapshot 已過期，禁止猜測無事件。" : resolution.missingReason();
@@ -767,6 +895,16 @@ public final class TradingRadarEvidenceConfidenceResolver {
         if (reason != null && !reason.isBlank()) reasons.add(reason);
     }
 
+    /**
+     * 下檔風險證據。三軌各自求值（Task 356.9a-2），SWING 的配息視窗由
+     * {@link #dividendReason} 的顯式 {@code case SWING} 定義為 20 個交易日。
+     *
+     * <p><b>既有限制、本任務刻意不改</b>：{@code eventRisk} 的數值本來就同時看 5／20 個交易日
+     * 兩個計數，與 {@code horizon} 無關，故 SHORT 與 MEDIUM 的 {@code downsideRisk} 數值
+     * 在改版前就一律相同；SWING 沿用同一公式，數值因此也與 MEDIUM 相同。要讓三軌的
+     * 下檔風險數值真正分岔，需要新的 horizon-specific 風險語意與其校準依據，
+     * 那不在本任務範圍（本任務明文禁止在沒有回測依據時改動既有兩軌行為）。</p>
+     */
     private static Risk risk(Inputs in, LocalDate targetDate, Horizon horizon) {
         List<RiskComponent> c = new ArrayList<>();
         double availableWeight = 0;
@@ -938,33 +1076,46 @@ public final class TradingRadarEvidenceConfidenceResolver {
         return new Risk(score, coverage, c);
     }
 
+    /** 三軌共用同一份 component 清單的 group（PRICE_TECHNICAL 以外全部）。 */
     private static GroupEvidence group(Group group, List<Component> components,
                                        boolean mandatory, boolean participates) {
-        return horizonGroup(group, components, components, mandatory, mandatory, participates);
+        return horizonGroup(group, components, components, components,
+                mandatory, mandatory, mandatory, participates);
     }
 
     private static GroupEvidence horizonGroup(Group group,
                                               List<Component> shortComponents,
+                                              List<Component> swingComponents,
                                               List<Component> mediumComponents,
                                               boolean shortMandatory,
+                                              boolean swingMandatory,
                                               boolean mediumMandatory,
                                               boolean participates) {
         double shortCoverage = weightedCoverage(shortComponents);
+        double swingCoverage = weightedCoverage(swingComponents);
         double mediumCoverage = weightedCoverage(mediumComponents);
         boolean shortAvailable = shortComponents.stream().anyMatch(Component::available);
+        boolean swingAvailable = swingComponents.stream().anyMatch(Component::available);
         boolean mediumAvailable = mediumComponents.stream().anyMatch(Component::available);
         boolean shortFresh = shortMandatory && shortCoverage >= .70
                 && fresh(shortComponents, mandatoryName(group));
+        boolean swingFresh = swingMandatory && swingCoverage >= .70
+                && fresh(swingComponents, mandatoryName(group));
         boolean mediumFresh = mediumMandatory && mediumCoverage >= .70
                 && fresh(mediumComponents, mandatoryName(group));
         if (!shortMandatory) shortFresh = shortCoverage >= .70;
+        if (!swingMandatory) swingFresh = swingCoverage >= .70;
         if (!mediumMandatory) mediumFresh = mediumCoverage >= .70;
         List<Component> all = new ArrayList<>(shortComponents);
+        for (Component component : swingComponents) {
+            if (all.stream().noneMatch(x -> x.name().equals(component.name()))) all.add(component);
+        }
         for (Component component : mediumComponents) {
             if (all.stream().noneMatch(x -> x.name().equals(component.name()))) all.add(component);
         }
-        return new GroupEvidence(group, all, shortCoverage, mediumCoverage,
-                shortAvailable, mediumAvailable, shortFresh, mediumFresh,
+        return new GroupEvidence(group, all, shortCoverage, swingCoverage, mediumCoverage,
+                shortAvailable, swingAvailable, mediumAvailable,
+                shortFresh, swingFresh, mediumFresh,
                 sourceCount(all), false, participates);
     }
 
@@ -977,8 +1128,8 @@ public final class TradingRadarEvidenceConfidenceResolver {
     }
 
     private static GroupEvidence notApplicable(Group group) {
-        return new GroupEvidence(group, List.of(), 0, 0, false, false, false, false,
-                0, false, false);
+        return new GroupEvidence(group, List.of(), 0, 0, 0, false, false, false,
+                false, false, false, 0, false, false);
     }
 
     /**
@@ -996,7 +1147,7 @@ public final class TradingRadarEvidenceConfidenceResolver {
                 component("dividend_yield", Applicability.NOT_APPLICABLE, 1.0 / 3.0,
                         null, null, null));
         return new GroupEvidence(Group.VALUATION, components,
-                0, 0, false, false, false, false, 0, false, false);
+                0, 0, 0, false, false, false, false, false, false, 0, false, false);
     }
 
     private static int confidenceFor(Map<Group, GroupEvidence> groups, Map<Group, Double> weights,

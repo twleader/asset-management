@@ -323,6 +323,51 @@ class DistributionAdjustedPriceServiceTest {
                 .build();
     }
 
+    // ─── Task 356.4e：appliedEventDates ────────────────────────────────────
+
+    /**
+     * {@code appliedEventDates} 是呼叫端判斷「事件是否落在自己的視窗內」的唯一依據：
+     * {@code adjusted()} 只說「整段序列有沒有被縮放」，不說事件在哪一天。
+     */
+    @Test
+    void appliedEventDatesListsEveryGrowthChangingEventAscending() {
+        LocalDate splitDate = LocalDate.of(2026, 2, 2);
+        LocalDate exDate = LocalDate.of(2026, 3, 2);
+        List<StockPriceHistory> rows = List.of(
+                row(exDate, new BigDecimal("45.00")),
+                row(exDate.minusDays(1), new BigDecimal("50.00")),
+                row(splitDate, new BigDecimal("50.00")),
+                row(splitDate.minusDays(1), new BigDecimal("200.00")));
+        StockDividendHistory dividend = StockDividendHistory.builder()
+                .id(31L).stockCode("00751B").market("台股")
+                .exDividendDate(exDate).cashDividend(new BigDecimal("5.00")).build();
+
+        var adjusted = service.adjust(rows, List.of(dividend));
+
+        assertTrue(adjusted.adjusted());
+        assertEquals(List.of(splitDate, exDate), adjusted.appliedEventDates(),
+                "分割與除息都會改動 growth，且必須依日期升冪");
+    }
+
+    @Test
+    void appliedEventDatesIsEmptyWhenNothingWasActuallyScaled() {
+        List<StockPriceHistory> rows = List.of(
+                row(LocalDate.of(2026, 4, 2), new BigDecimal("100.00")),
+                row(LocalDate.of(2026, 4, 1), new BigDecimal("100.00")));
+
+        var adjusted = service.adjust(rows, List.of());
+
+        assertFalse(adjusted.adjusted());
+        assertTrue(adjusted.appliedEventDates().isEmpty());
+    }
+
+    @Test
+    void compatibilityConstructorLeavesAppliedEventDatesEmpty() {
+        var adjustment = new DistributionAdjustedPriceService.Adjustment(List.of(), true);
+
+        assertTrue(adjustment.appliedEventDates().isEmpty());
+    }
+
     private StockPriceHistory row(LocalDate date, BigDecimal close) {
         return StockPriceHistory.builder()
                 .stockCode("00751B")

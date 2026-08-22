@@ -48,6 +48,17 @@ public class RadarInputAssembler {
      * 120 筆略多於半年，用以避免樣本過少時分位失去統計意義；未曾以回測校準此數字。</p>
      */
     private static final int BIAS_PCT_MIN_SAMPLES = 120;
+    /**
+     * 週K 指標成立的最少完成週根數（Task 356.3d）。
+     *
+     * <p>完成週不足此數時<b>整組</b>週K 指標為 {@code null}——不是部分算、不是以短序列硬算。
+     * 下界來自週MACD：OSC 要到第 34 根完成週才有第一個值（EMA26 以 26 根 SMA 作 seed
+     * → 第 26 根才有 DIF；signal 以 9 根 DIF 的 SMA 作 seed → 第 34 根才有 MACD），
+     * 60 根留了 26 根的 EMA 收斂餘裕。</p>
+     *
+     * <p><b>此數字為判斷性取值、無回測依據</b>，不得於任何文案宣稱它能提高準確度。</p>
+     */
+    public static final int MIN_COMPLETED_WEEKS = 60;
 
     private final TechnicalIndicatorService indicatorService;
     private final DistributionAdjustedPriceService adjustedPriceService;
@@ -83,6 +94,18 @@ public class RadarInputAssembler {
      * @param ma60BiasPercentile   {@code ma60BiasPercent} 在自身近一年分布中的分位（0–100），
      *                             供極端超買／超賣的分位路徑使用（Task 299）；有效觀測不足
      *                             {@link #BIAS_PCT_MIN_SAMPLES} 筆或 {@code ma60BiasPercent} 為 null 時為 null。
+     * @param dailyCandle          最新完成日的還原 OHLC（Task 356.5a）；as-of 日與
+     *                             {@code volatility60().asOfDate()} 同源（皆為
+     *                             {@code adjustedRows.get(firstCompleted)} 的交易日）。
+     * @param weekly               週K 因子輸入（Task 356.6）；完全沒有完成週時為 null，
+     *                             完成週不足 {@link #MIN_COMPLETED_WEEKS} 時各指標欄為 null 但
+     *                             {@code completedWeeks} 仍如實回報，供揭露文案寫出「目前 N 根」。
+     * @param weeklyBarsDesc       實際進入週K 指標序列的完成週（降序，新到舊）：已排除進行中週，
+     *                             也已排除 {@code high}／{@code low} 缺值的週（Task 356.3c-2）。
+     * @param weeklyIndicators     週K 的 {@link TechnicalIndicatorService.FullIndicators}，是
+     *                             {@code WeeklyIndicators.dif}／{@code macd} 純揭露欄的<b>唯一來源</b>
+     *                             （Task 356.4h）；與 {@code weekly.osc()} 出自<b>同一次</b>
+     *                             {@code computeFromSeries(週K 序列)} 呼叫，不得為了揭露再算第二次。
      */
     public record Assembled(
             TechnicalIndicatorService.FullIndicators indicators,
@@ -103,7 +126,11 @@ public class RadarInputAssembler {
             BigDecimal week52Position,
             BigDecimal ruleChangePercent,
             BigDecimal volumeRatio,
-            VolatilityObservation volatility60
+            VolatilityObservation volatility60,
+            TradingRadarRuleEngine.CandleInput dailyCandle,
+            TradingRadarRuleEngine.WeeklyInput weekly,
+            List<WeeklyBarAggregator.WeeklyBar> weeklyBarsDesc,
+            TechnicalIndicatorService.FullIndicators weeklyIndicators
     ) {
         /** t274 primitive 的欄位捷徑；正式 normalized action 尚未在此任務啟用。 */
         public BigDecimal returnStdDev60Ratio() {
@@ -117,14 +144,29 @@ public class RadarInputAssembler {
                 TradingRadarRuleEngine.Confirmation.UNAVAILABLE,
                 TradingRadarRuleEngine.Confirmation.UNAVAILABLE,
                 null, null, null, null, null, null,
-                VolatilityObservation.unavailable(null, "沒有可用的 adjusted completed-price 序列"));
+                VolatilityObservation.unavailable(null, "沒有可用的 adjusted completed-price 序列"),
+                null, null, List.of(), TechnicalIndicatorService.FullIndicators.EMPTY);
     }
 
     /**
      * @param combinedDesc      降序（新到舊）的 OHLC 序列；production 會在最前面插入當日 live K。
+     *                          Task 356.4a 起這是<b>長視窗</b>（約 500 列），供週K 聚合取得
+     *                          足夠的完成週；日K 路徑一律由 {@code dailyContractRows} 界定。
      * @param events            該序列日期區間內的除權息事件（分割由 adjust 自行以序列偵測）。
      * @param liveAdded         {@code combinedDesc} 的第 0 筆是否為尚未收盤的 live K。
      * @param completedRowCount 完成日 K 的筆數（用於切出 {@code completedCloses}）。
+     *                          <b>仍以日K 契約的完成列數傳入</b>（上限 241），不得因為
+     *                          {@code combinedDesc} 改成長序列就順手改傳長序列長度（Task 356.4d-3）。
+     * @param dailyContractRows 日K 契約的<b>完成列</b>數（{@code RadarObservationResolver
+     *                          .INDICATOR_SERIES_MAX_ROWS}，即 241）。
+     *                          <b>⚠ live K 不計入</b>：實際視窗長度是
+     *                          {@code dailyContractRows + (liveAdded ? 1 : 0)}。
+     *                          寫成 {@code min(size, 241)} 會讓盤中 {@code ma60BiasPercentile}
+     *                          的觀測數由 182 掉成 181（{@code i} 由 {@code firstCompleted=1} 跑到
+     *                          {@code lastStart=242−60=182}），分位改值 → {@code TimingState} 改變
+     *                          → {@code action} 改變，正好破壞這個參數原本要保護的不變式。
+     *                          收盤後（{@code liveAdded=false}、{@code n=241}、{@code firstCompleted=0}）
+     *                          觀測數同樣是 182，兩種情形必須都是 182。
      * @param price             規則所用的現價。production 傳 live 價、回測傳該日還原收盤價。
      */
     public Assembled assemble(
@@ -132,13 +174,22 @@ public class RadarInputAssembler {
             List<StockDividendHistory> events,
             boolean liveAdded,
             int completedRowCount,
+            int dailyContractRows,
             BigDecimal price) {
 
         if (combinedDesc == null || combinedDesc.isEmpty()) return Assembled.EMPTY;
 
+        // Task 356.4c：長視窗只查一次、只還原一次，日K 與週K 共用這一份還原結果。
+        // 不得改為兩次查詢或兩次還原——兩份長度不同的序列各自跑分割偵測啟發式，結果可能分歧，
+        // 會讓日K 與週K 在同一筆決策中用上兩種價基（既有鐵則明文禁止）。
         DistributionAdjustedPriceService.Adjustment adjustment =
                 adjustedPriceService.adjust(new ArrayList<>(combinedDesc), events);
         List<StockPriceHistory> adjustedRows = adjustment.rowsDesc();
+        // 日K 契約視窗：完成列 + live K（若有）。凡是「沒有自帶列數上限」的既有計算都必須吃這一份，
+        // 否則會被長視窗靜默改值且不會有任何編譯錯誤或執行期例外。
+        List<StockPriceHistory> dailyContractRowsDesc = adjustedRows.subList(0,
+                Math.min(adjustedRows.size(),
+                        Math.max(0, dailyContractRows) + (liveAdded ? 1 : 0)));
 
         int completedStart = liveAdded ? 1 : 0;
         int completedEnd = Math.min(completedStart + completedRowCount, adjustedRows.size());
@@ -174,15 +225,25 @@ public class RadarInputAssembler {
         // Task 299：現行乖離＝同一組還原序列算出的 live 價基乖離，分位在此之後才求值，
         // 使兩者恆為同一輸入的兩種摘要，不會各自漂移。
         BigDecimal ma60Bias = biasPercent(price, indicators.quarterlyMa());
-        BigDecimal ma60BiasPct = ma60BiasPercentile(adjustedRows, firstCompleted, ma60Bias);
+        BigDecimal ma60BiasPct = ma60BiasPercentile(dailyContractRowsDesc, firstCompleted, ma60Bias);
         LocalDate volatilityAsOf = adjustedRows.size() > firstCompleted
                 ? adjustedRows.get(firstCompleted).getTradingDate() : null;
         VolatilityObservation volatility60 = returnStdDev60Ratio(completedCloses, volatilityAsOf);
 
+        // ── Task 356.2／356.3：週K 聚合與週K 指標（長視窗才有足夠完成週） ───────────────
+        WeeklyBarAggregator.Aggregation weeklyAggregation = WeeklyBarAggregator.aggregate(adjustedRows);
+        List<WeeklyBarAggregator.WeeklyBar> weeklyBarsDesc =
+                weeklyIndicatorBars(weeklyAggregation.completedDesc());
+        List<StockPriceHistory> weeklySeriesDesc = weeklySeriesDesc(weeklyBarsDesc);
+        TechnicalIndicatorService.FullIndicators weeklyIndicators =
+                weeklyBarsDesc.size() < MIN_COMPLETED_WEEKS
+                        ? TechnicalIndicatorService.FullIndicators.EMPTY
+                        : nonNull(indicatorService.computeFromSeries(weeklySeriesDesc));
+
         return new Assembled(
                 indicators,
                 adjustedRows,
-                adjustment.adjusted(),
+                distributionAdjusted(adjustment, dailyContractRowsDesc),
                 completedCloses,
                 previousAdjustedClose,
                 completedChangePercent,
@@ -197,8 +258,189 @@ public class RadarInputAssembler {
                 biasPercent(price, indicators.annualMa()),
                 week52Position(price, week52High, week52Low),
                 changePercent(price, previousAdjustedClose),
-                volumeRatio(adjustedRows, firstCompleted),
-                volatility60);
+                volumeRatio(dailyContractRowsDesc, firstCompleted),
+                volatility60,
+                candleAt(adjustedRows, firstCompleted),
+                weeklyInput(weeklyBarsDesc, weeklySeriesDesc, weeklyIndicators, price),
+                weeklyBarsDesc,
+                weeklyIndicators);
+    }
+
+    /**
+     * 大盤週K 的組裝結果（Task 356.10b）。
+     *
+     * @param weekly     餵給 {@code MarketInput.weekly()} 的因子輸入；完全沒有完成週時為 null。
+     * @param barsDesc   實際進入指標序列的完成週（降序）；供 DTO 取最新完成週的成交量。
+     * @param indicators 週K 的 {@link TechnicalIndicatorService.FullIndicators}，是
+     *                   {@code WeeklyIndicators.dif}／{@code macd} 純揭露欄的唯一來源。
+     */
+    public record MarketWeekly(
+            TradingRadarRuleEngine.WeeklyInput weekly,
+            List<WeeklyBarAggregator.WeeklyBar> barsDesc,
+            TechnicalIndicatorService.FullIndicators indicators
+    ) {
+        public static final MarketWeekly EMPTY =
+                new MarketWeekly(null, List.of(), TechnicalIndicatorService.FullIndicators.EMPTY);
+    }
+
+    /**
+     * 大盤（台股 TAIEX／美股 IXIC）的週K 聚合與週K 指標（Task 356.10b／356.10c）。
+     *
+     * <p><b>兩個市場共用這一支</b>：呼叫端先把各自的來源列（{@code twse_index_daily_history} 的
+     * {@code open_point}／{@code high_point}／{@code low_point}／{@code close_point}／
+     * {@code trade_volume}，或 {@code us_index_daily_history} 的同義欄）映射成中性的
+     * {@link StockPriceHistory} OHLCV 形狀，再交給本方法；<b>不得為每個來源各寫一份聚合</b>。</p>
+     *
+     * <p><b>必須餵長清單（約 500 列）</b>：日K 契約的 241 列 ≈ 48 個 ISO 週 &lt;
+     * {@link #MIN_COMPLETED_WEEKS}，餵契約列等於讓大盤週K 因子永遠缺值，
+     * 而畫面只會多一則「不採計」風險句、沒有任何錯誤訊息。</p>
+     *
+     * <p>個股走的是 {@link #assemble} 內同一組私有 helper（{@code weeklyIndicatorBars}／
+     * {@code weeklySeriesDesc}／{@code weeklyInput}），故大盤與個股的週界、丟棄規則、
+     * 最少樣本與精度<b>逐項相同</b>。大盤序列不做還原（指數無除權息），
+     * 這與個股的價基差異是既有且刻意的。</p>
+     *
+     * @param rowsDesc 降序（新到舊）的中性 OHLCV 長序列。
+     * @param price    大盤現價，供 {@code bias10}／{@code bias20} 以「現價 vs 週均線」求值
+     *                 （與日K 路徑的 {@code ma60BiasPercent} 同一慣例）。
+     */
+    public MarketWeekly marketWeekly(List<StockPriceHistory> rowsDesc, BigDecimal price) {
+        if (rowsDesc == null || rowsDesc.isEmpty()) return MarketWeekly.EMPTY;
+        WeeklyBarAggregator.Aggregation aggregation = WeeklyBarAggregator.aggregate(rowsDesc);
+        List<WeeklyBarAggregator.WeeklyBar> barsDesc = weeklyIndicatorBars(aggregation.completedDesc());
+        List<StockPriceHistory> seriesDesc = weeklySeriesDesc(barsDesc);
+        TechnicalIndicatorService.FullIndicators indicators =
+                barsDesc.size() < MIN_COMPLETED_WEEKS
+                        ? TechnicalIndicatorService.FullIndicators.EMPTY
+                        : nonNull(indicatorService.computeFromSeries(seriesDesc));
+        return new MarketWeekly(
+                weeklyInput(barsDesc, seriesDesc, indicators, price), barsDesc, indicators);
+    }
+
+    /**
+     * 序列是否真的被還原過——判準是「<b>存在事件日期嚴格晚於日K 契約視窗最舊一列的交易日</b>」
+     * （Task 356.4e），不是 {@code Adjustment.adjusted()}。
+     *
+     * <p>{@code priceScale(i) = cumulative(i) / finalPriceGrowth}：若視窗內最舊一列的日期已晚於
+     * （或等於）全部事件日，視窗內每一列的 {@code cumulative} 都等於 {@code final}、
+     * {@code priceScale} 恆為 1，還原後的價格在<b>數值上</b>與原始價相同。此時宣稱
+     * 「MA／KD 已使用還原權息價」是對使用者的假陳述——實際上什麼都沒還原。</p>
+     *
+     * <p>「嚴格晚於」不是筆誤：事件日恰等於最舊一列時，該事件在該列即已計入 {@code cumulative}，
+     * 視窗內仍無任何一列被縮放。擴窗（250 → 500）之後若沿用「{@code adjusted()} 為真即為真」，
+     * 除息日落在 12–24 個月前的標的會由 {@code false} 翻 {@code true}，
+     * {@code reasons}／{@code shortReasons} 因此各多一則還原揭露句、
+     * {@code StockDecision.distributionAdjusted}（OpenAPI {@code required} 欄）也跟著翻面。</p>
+     */
+    private static boolean distributionAdjusted(
+            DistributionAdjustedPriceService.Adjustment adjustment,
+            List<StockPriceHistory> dailyContractRowsDesc) {
+        if (adjustment == null || !adjustment.adjusted() || dailyContractRowsDesc.isEmpty()) return false;
+        LocalDate oldest = dailyContractRowsDesc.get(dailyContractRowsDesc.size() - 1).getTradingDate();
+        if (oldest == null) return adjustment.adjusted();
+        return adjustment.appliedEventDates().stream()
+                .anyMatch(date -> date != null && date.isAfter(oldest));
+    }
+
+    /** 指定索引那一根還原 K 棒的 OHLC；索引越界時回 null。 */
+    private static TradingRadarRuleEngine.CandleInput candleAt(
+            List<StockPriceHistory> adjustedRowsDesc, int index) {
+        if (adjustedRowsDesc == null || index < 0 || index >= adjustedRowsDesc.size()) return null;
+        StockPriceHistory row = adjustedRowsDesc.get(index);
+        return new TradingRadarRuleEngine.CandleInput(
+                row.getOpenPrice(), row.getHighPrice(), row.getLowPrice(), row.getClosePrice());
+    }
+
+    /**
+     * 進入週K 指標序列的完成週（Task 356.3c-2）：{@code high}／{@code low} 為 null 的週<b>整根丟棄</b>。
+     *
+     * <p>理由：{@code TechnicalIndicatorService} 的 KD 與 DI 價基 MACD 內部都有「{@code high}／
+     * {@code low} 缺值時 fallback 用 {@code close}」的既有慣例（其 Javadoc 自述是為了 {@code 0000}
+     * 大盤舊資料）。若把 {@code high}／{@code low} 為 null 的週K 直接丟進 {@code computeFromSeries}，
+     * 那條 fallback 會<b>靜默</b>把它變成一根收盤價＝最高＝最低的退化偽K，與
+     * {@code WeeklyBarAggregator} 明訂的「不得以 close 冒充 open／high／low」完全相反且無任何揭露。
+     * {@code stock_price_history} 與 {@code twse_index_daily_history} 的高低欄都是 nullable，
+     * 舊列確實有 null，這不是理論風險。</p>
+     */
+    private static List<WeeklyBarAggregator.WeeklyBar> weeklyIndicatorBars(
+            List<WeeklyBarAggregator.WeeklyBar> completedDesc) {
+        if (completedDesc == null || completedDesc.isEmpty()) return List.of();
+        return completedDesc.stream()
+                .filter(bar -> bar != null && bar.high() != null && bar.low() != null)
+                .toList();
+    }
+
+    /** 週K → {@link StockPriceHistory} 的中性映射，供既有 {@code computeFromSeries} 直接取用。 */
+    private static List<StockPriceHistory> weeklySeriesDesc(
+            List<WeeklyBarAggregator.WeeklyBar> barsDesc) {
+        return barsDesc.stream()
+                .map(bar -> StockPriceHistory.builder()
+                        .tradingDate(bar.weekEndDate())
+                        .openPrice(bar.open())
+                        .highPrice(bar.high())
+                        .lowPrice(bar.low())
+                        .closePrice(bar.close())
+                        .volume(bar.volume())
+                        .build())
+                .toList();
+    }
+
+    /**
+     * 週K 因子輸入（Task 356.3c／356.3d／356.3e／356.3f）。
+     *
+     * <p>指標一律取自<b>同一次</b> {@code computeFromSeries(週K 序列)}——換序列不換公式，
+     * 禁止為週K 另寫一份 KD／MACD／RSI／SMA。{@code bias10}／{@code bias20} 例外：一律以
+     * {@code biasPercent(現價, 週MA10／週MA20)} 另算，<b>不得</b>取用
+     * {@code ExtendedIndicators.bias10}／{@code bias20}——後者的分子是序列最新一根的收盤，
+     * 對週K 而言是「上一個完成週的最後交易日收盤」，拿它算乖離等於用一週前的價格判斷
+     * 「現在進場貴不貴」。日K 路徑的 {@code ma60BiasPercent} 早已是同一作法。</p>
+     *
+     * <p>{@code volumeRatio} 直接重用日K 的 {@link #volumeRatio}（最新完成週 ÷ 之前 20 根正成交量
+     * 完成週的中位數、分母排除最新週、正樣本少於 10 回 null），<b>不另立規則</b>。</p>
+     */
+    private TradingRadarRuleEngine.WeeklyInput weeklyInput(
+            List<WeeklyBarAggregator.WeeklyBar> barsDesc,
+            List<StockPriceHistory> seriesDesc,
+            TechnicalIndicatorService.FullIndicators ind,
+            BigDecimal price) {
+        if (barsDesc.isEmpty()) return null;
+        WeeklyBarAggregator.WeeklyBar latest = barsDesc.get(0);
+        int completedWeeks = barsDesc.size();
+        if (completedWeeks < MIN_COMPLETED_WEEKS) {
+            // 整組指標缺值，但 completedWeeks 仍如實回報：揭露文案要寫得出「目前 N 根」。
+            return new TradingRadarRuleEngine.WeeklyInput(
+                    null, null, null, null, null, null, null, null, null, null, null, null,
+                    null, null, latest.weekEndDate(), completedWeeks);
+        }
+        TechnicalIndicatorService.ExtendedIndicators extended = ind.extended();
+        return new TradingRadarRuleEngine.WeeklyInput(
+                new TradingRadarRuleEngine.CandleInput(
+                        latest.open(), latest.high(), latest.low(), latest.close()),
+                scale2(ind.weeklyMa()),
+                scale2(ind.ma10()),
+                scale2(ind.monthlyMa()),
+                scale2(ind.k()),
+                scale2(ind.d()),
+                extended == null ? null : scale2(extended.j9()),
+                extended == null ? null : scale2(extended.osc()),
+                extended == null ? null : scale2(extended.rsi5()),
+                extended == null ? null : scale2(extended.rsi10()),
+                scale2(biasPercent(price, ind.ma10())),
+                scale2(biasPercent(price, ind.monthlyMa())),
+                scale2(volumeRatio(seriesDesc, 0)),
+                scale2(changePercent(latest.close(), barsDesc.get(1).close())),
+                latest.weekEndDate(),
+                completedWeeks);
+    }
+
+    /** 週K 指標一律 2 位小數；缺值為 null，不得以 0 冒充（Task 356.3f）。 */
+    private static BigDecimal scale2(BigDecimal value) {
+        return value == null ? null : value.setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private static TechnicalIndicatorService.FullIndicators nonNull(
+            TechnicalIndicatorService.FullIndicators value) {
+        return value == null ? TechnicalIndicatorService.FullIndicators.EMPTY : value;
     }
 
     /**

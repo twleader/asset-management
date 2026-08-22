@@ -576,13 +576,13 @@ paths:
                 synthetic:
                   summary: 去識別化、無實際持倉的合成範例
                   value:
-                    ruleVersion: TW_RULES_V14
+                    ruleVersion: TW_RULES_V15
                     actionPolicyVersion: EVIDENCE_GATE_V1
                     generatedAt: '2026-01-15T02:15:30Z'
                     market:
-                      {regime: NEUTRAL, regimeLabel: 合成中性, score: 0, dataComplete: false, stale: true, asOfDate: '2026-01-14', price: 100.00, changePercent: 0.00, quoteStatus: SYNTHETIC, weeklyMa: null, monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, quarterlyConfirmation: null, annualConfirmation: null, reasons: [], risks: [], intraday: false, liveUpdatedAt: null, extendedIndicators: null, marketVolumeRatio: null, marketTurnoverRatio: null, marketVolumeAsOfDate: null, nasdaqChangePercent: null, soxChangePercent: null, usTechCompositePercent: null, usTechAsOfDate: null, usTechAvailable: false}
+                      {regime: NEUTRAL, regimeLabel: 合成中性, score: 0, dataComplete: false, stale: true, asOfDate: '2026-01-14', price: 100.00, changePercent: 0.00, quoteStatus: SYNTHETIC, weeklyMa: null, monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, quarterlyConfirmation: null, annualConfirmation: null, reasons: [], risks: [], intraday: false, liveUpdatedAt: null, extendedIndicators: null, marketVolumeRatio: null, marketTurnoverRatio: null, marketVolumeAsOfDate: null, nasdaqChangePercent: null, soxChangePercent: null, usTechCompositePercent: null, usTechAsOfDate: null, usTechAvailable: false, weeklyIndicators: null}
                     usMarket:
-                      {regime: NEUTRAL, regimeLabel: 合成中性, score: 0, dataComplete: false, stale: true, asOfDate: '2026-01-14', price: 100.00, changePercent: 0.00, quoteStatus: SYNTHETIC, weeklyMa: null, monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, quarterlyConfirmation: null, annualConfirmation: null, reasons: [], risks: [], intraday: false, liveUpdatedAt: null, extendedIndicators: null, marketVolumeRatio: null, marketTurnoverRatio: null, marketVolumeAsOfDate: null, nasdaqChangePercent: null, soxChangePercent: null, usTechCompositePercent: null, usTechAsOfDate: null, usTechAvailable: false}
+                      {regime: NEUTRAL, regimeLabel: 合成中性, score: 0, dataComplete: false, stale: true, asOfDate: '2026-01-14', price: 100.00, changePercent: 0.00, quoteStatus: SYNTHETIC, weeklyMa: null, monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, quarterlyConfirmation: null, annualConfirmation: null, reasons: [], risks: [], intraday: false, liveUpdatedAt: null, extendedIndicators: null, marketVolumeRatio: null, marketTurnoverRatio: null, marketVolumeAsOfDate: null, nasdaqChangePercent: null, soxChangePercent: null, usTechCompositePercent: null, usTechAsOfDate: null, usTechAvailable: false, weeklyIndicators: null}
                     stocks: []
                     skippedNonTwStocks: 0
                     publicInformation: []
@@ -1100,7 +1100,7 @@ components:
       additionalProperties: false
     MarketSummary:
       type: object
-      required: [regime, regimeLabel, score, dataComplete, stale, asOfDate, price, changePercent, quoteStatus, weeklyMa, monthlyMa, quarterlyMa, annualMa, kValue, dValue, quarterlyConfirmation, annualConfirmation, reasons, risks, intraday, liveUpdatedAt, extendedIndicators, marketVolumeRatio, marketTurnoverRatio, marketVolumeAsOfDate, nasdaqChangePercent, soxChangePercent, usTechCompositePercent, usTechAsOfDate, usTechAvailable]
+      required: [regime, regimeLabel, score, dataComplete, stale, asOfDate, price, changePercent, quoteStatus, weeklyMa, monthlyMa, quarterlyMa, annualMa, kValue, dValue, quarterlyConfirmation, annualConfirmation, reasons, risks, intraday, liveUpdatedAt, extendedIndicators, marketVolumeRatio, marketTurnoverRatio, marketVolumeAsOfDate, nasdaqChangePercent, soxChangePercent, usTechCompositePercent, usTechAsOfDate, usTechAvailable, weeklyIndicators]
       properties:
         regime: {type: [string, 'null']}
         regimeLabel: {type: [string, 'null']}
@@ -1139,6 +1139,10 @@ components:
         usTechCompositePercent: {type: [number, 'null']}
         usTechAsOfDate: {type: [string, 'null'], format: date}
         usTechAvailable: {type: boolean}
+        weeklyIndicators:
+          anyOf:
+            - {$ref: '#/components/schemas/WeeklyIndicators'}
+            - {type: 'null'}
       additionalProperties: false
     ExtendedIndicators:
       type: object
@@ -1162,7 +1166,7 @@ components:
     StockDecision:
       type: object
       description: "`TradingRadarDto.StockDecision` 的固定 record projection；分數、價格、指標與證據不足時以 null 表示，不以 0 冒充。"
-      required: [stockCode, stockName, market, assetClass, distributionAdjusted, held, action, actionLabel, score, counterTrendState, counterTrendLabel, counterTrendReasons, counterTrendRisks, dataComplete, price, changePercent, quoteStatus, priceUpdatedAt, asOfDate, monthlyMa, quarterlyMa, annualMa, kValue, dValue, monthlyConfirmation, quarterlyConfirmation, annualConfirmation, fxPercentile, underlyingCurrency, reasons, risks, kdHeat, timingState, timingLabel, ma60BiasPercent, week52Position, weeklyMa, etfPremiumPct, etfPremiumPercentile, extendedIndicators, shortAction, shortActionLabel, shortScore, shortReasons, shortRisks, horizonConflict, volumeRatio, fxAsOfDate, profitTakingConfirmed, fundamental, evidence, shortDownsideRisk, mediumDownsideRisk, shortEvidenceConfidence, mediumEvidenceConfidence, shortRiskCoverage, mediumRiskCoverage, candidateAction, shortCandidateAction, actionGateReasons, etfPremiumLivePct, etfPremiumLiveNavAsOf]
+      required: [stockCode, stockName, market, assetClass, distributionAdjusted, held, action, actionLabel, score, counterTrendState, counterTrendLabel, counterTrendReasons, counterTrendRisks, dataComplete, price, changePercent, quoteStatus, priceUpdatedAt, asOfDate, monthlyMa, quarterlyMa, annualMa, kValue, dValue, monthlyConfirmation, quarterlyConfirmation, annualConfirmation, fxPercentile, underlyingCurrency, reasons, risks, kdHeat, timingState, timingLabel, ma60BiasPercent, week52Position, weeklyMa, etfPremiumPct, etfPremiumPercentile, extendedIndicators, shortAction, shortActionLabel, shortScore, shortReasons, shortRisks, horizonConflict, volumeRatio, fxAsOfDate, profitTakingConfirmed, fundamental, evidence, shortDownsideRisk, mediumDownsideRisk, shortEvidenceConfidence, mediumEvidenceConfidence, shortRiskCoverage, mediumRiskCoverage, candidateAction, shortCandidateAction, actionGateReasons, etfPremiumLivePct, etfPremiumLiveNavAsOf, swingAction, swingActionLabel, swingScore, swingReasons, swingRisks, swingDownsideRisk, swingEvidenceConfidence, swingRiskCoverage, swingCandidateAction, dailyCandle, weeklyIndicators]
       properties:
         stockCode: {type: [string, 'null']}
         stockName: {type: [string, 'null']}
@@ -1235,6 +1239,73 @@ components:
         actionGateReasons: {type: array, items: {type: string}}
         etfPremiumLivePct: {type: [number, 'null']}
         etfPremiumLiveNavAsOf: {type: [string, 'null'], description: 台股與美股來源格式不同，不宣告 date-time format。}
+        swingAction: {type: [string, 'null'], description: 1周~1月 軌動作自由字串；未供給該軌時為 null。}
+        swingActionLabel: {type: [string, 'null']}
+        swingScore: {type: [integer, 'null'], format: int32}
+        swingReasons: {type: array, items: {type: string}}
+        swingRisks: {type: array, items: {type: string}}
+        swingDownsideRisk: {type: [integer, 'null'], format: int32}
+        swingEvidenceConfidence: {type: [integer, 'null'], format: int32}
+        swingRiskCoverage: {type: [number, 'null'], format: double}
+        swingCandidateAction: {type: [string, 'null']}
+        dailyCandle:
+          anyOf:
+            - {$ref: '#/components/schemas/DailyCandle'}
+            - {type: 'null'}
+        weeklyIndicators:
+          anyOf:
+            - {$ref: '#/components/schemas/WeeklyIndicators'}
+            - {type: 'null'}
+      additionalProperties: false
+    DailyCandle:
+      type: object
+      description: >-
+        最新完成日的還原 K 棒與其三個分量（closePosition／bodyDirection／lowerShadowRatio 為未 clamp 的原值）。
+        全幅非正（漲跌停鎖死、整日單一成交價或倒置髒列）時三個分量皆為 null，不得以 0 或 0.5 冒充；
+        bodyDirection 的 0 是十字線（high > low 且 close == open），與「沒有價格區間」是不同狀態。
+      required: [open, high, low, close, closePosition, bodyDirection, lowerShadowRatio, asOfDate]
+      properties:
+        open: {type: [number, 'null']}
+        high: {type: [number, 'null']}
+        low: {type: [number, 'null']}
+        close: {type: [number, 'null']}
+        closePosition: {type: [number, 'null'], description: '(close − low) / (high − low)，值域 [0,1]。'}
+        bodyDirection: {type: [number, 'null'], description: 'sign(close − open) ∈ {-1, 0, 1}。'}
+        lowerShadowRatio: {type: [number, 'null'], description: '(min(open, close) − low) / (high − low)，值域 [0,1]。'}
+        asOfDate: {type: [string, 'null'], format: date}
+      additionalProperties: false
+    WeeklyIndicators:
+      type: object
+      description: >-
+        最新完成週的週 OHLC 聚合與在週K 序列上重算的指標。與同一物件的 weeklyMa 是兩個不同的量
+        （後者為日K 收盤序列的 5 日 SMA，命名沿革）。weekEndDate 為上一個完成週的最後交易日，不是本週任何一天；
+        completedWeeks 不足 60 根時整組指標為 null 而 completedWeeks 仍如實回報。
+      required: [weekEndDate, completedWeeks, open, high, low, close, volume, ma5, ma10, ma20, k, d, j9, dif, macd, osc, rsi5, rsi10, bias10, bias20, volumeRatio, changePercent, closePosition, bodyDirection]
+      properties:
+        weekEndDate: {type: [string, 'null'], format: date}
+        completedWeeks: {type: [integer, 'null'], format: int32}
+        open: {type: [number, 'null']}
+        high: {type: [number, 'null']}
+        low: {type: [number, 'null']}
+        close: {type: [number, 'null']}
+        volume: {type: [integer, 'null'], format: int64}
+        ma5: {type: [number, 'null']}
+        ma10: {type: [number, 'null']}
+        ma20: {type: [number, 'null']}
+        k: {type: [number, 'null']}
+        d: {type: [number, 'null']}
+        j9: {type: [number, 'null']}
+        dif: {type: [number, 'null']}
+        macd: {type: [number, 'null']}
+        osc: {type: [number, 'null']}
+        rsi5: {type: [number, 'null']}
+        rsi10: {type: [number, 'null']}
+        bias10: {type: [number, 'null']}
+        bias20: {type: [number, 'null']}
+        volumeRatio: {type: [number, 'null']}
+        changePercent: {type: [number, 'null']}
+        closePosition: {type: [number, 'null']}
+        bodyDirection: {type: [number, 'null']}
       additionalProperties: false
     FundamentalSnapshot:
       type: object
@@ -1308,7 +1379,7 @@ components:
       additionalProperties: false
     RadarEvidence:
       type: object
-      required: [acceptedPriceAsOfDate, acceptedPriceSource, acceptedPriceQuality, livePriceAccepted, returnStdDev60Ratio, returnStdDev60AsOfDate, returnStdDev60Source, premiumAsOfDate, premiumSource, premiumStale, assetProfile, actionGateReasons, evidenceGroups, marketFeatures, shortEvidenceConfidence, mediumEvidenceConfidence, shortDownsideRisk, mediumDownsideRisk, shortRiskCoverage, mediumRiskCoverage, candidateAction, shortCandidateAction, nextDistributionDate, nextDistributionKnownAt, nextDistributionProvider, nextDistributionSourceUrls, nextDistributionStatus, nextDistributionMissingReason, distributionsWithinFiveSessions, distributionsWithinTwentySessions, treasuryRateContext, normalizedBias, shortNormalizedBias]
+      required: [acceptedPriceAsOfDate, acceptedPriceSource, acceptedPriceQuality, livePriceAccepted, returnStdDev60Ratio, returnStdDev60AsOfDate, returnStdDev60Source, premiumAsOfDate, premiumSource, premiumStale, assetProfile, actionGateReasons, evidenceGroups, marketFeatures, shortEvidenceConfidence, mediumEvidenceConfidence, shortDownsideRisk, mediumDownsideRisk, shortRiskCoverage, mediumRiskCoverage, candidateAction, shortCandidateAction, nextDistributionDate, nextDistributionKnownAt, nextDistributionProvider, nextDistributionSourceUrls, nextDistributionStatus, nextDistributionMissingReason, distributionsWithinFiveSessions, distributionsWithinTwentySessions, treasuryRateContext, normalizedBias, shortNormalizedBias, swingDownsideRisk, swingEvidenceConfidence, swingRiskCoverage, swingCandidateAction]
       properties:
         acceptedPriceAsOfDate: {type: [string, 'null'], format: date}
         acceptedPriceSource: {type: [string, 'null']}
@@ -1359,6 +1430,10 @@ components:
           anyOf:
             - {$ref: '#/components/schemas/NormalizedBiasEvidence'}
             - {type: 'null'}
+        swingDownsideRisk: {type: [integer, 'null'], format: int32}
+        swingEvidenceConfidence: {type: [integer, 'null'], format: int32}
+        swingRiskCoverage: {type: [number, 'null'], format: double}
+        swingCandidateAction: {type: [string, 'null']}
       additionalProperties: false
     AssetProfile:
       type: object
@@ -1388,17 +1463,20 @@ components:
       additionalProperties: false
     EvidenceGroup:
       type: object
-      required: [group, components, shortCoverage, mediumCoverage, shortAvailable, mediumAvailable, shortFresh, mediumFresh, sourceCount, participates]
+      required: [group, components, shortCoverage, swingCoverage, mediumCoverage, shortAvailable, swingAvailable, mediumAvailable, shortFresh, swingFresh, mediumFresh, sourceCount, participates]
       properties:
         group: {type: [string, 'null']}
         components:
           type: array
           items: {$ref: '#/components/schemas/EvidenceComponent'}
         shortCoverage: {type: number, format: double}
+        swingCoverage: {type: number, format: double}
         mediumCoverage: {type: number, format: double}
         shortAvailable: {type: boolean}
+        swingAvailable: {type: boolean}
         mediumAvailable: {type: boolean}
         shortFresh: {type: boolean}
+        swingFresh: {type: boolean}
         mediumFresh: {type: boolean}
         sourceCount: {type: integer, format: int32}
         participates: {type: boolean}

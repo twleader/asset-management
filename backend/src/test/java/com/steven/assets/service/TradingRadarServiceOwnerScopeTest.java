@@ -106,7 +106,7 @@ class TradingRadarServiceOwnerScopeTest {
         lenient().when(marketContextService.resolve(any())).thenReturn(
                 new TradingRadarMarketContextService.Resolved(
                         TradingRadarMarketContextService.MarketContext.EMPTY, List.of()));
-        lenient().when(twseRepo.findTopNByOrderByTradingDateDesc(241)).thenReturn(List.of());
+        lenient().when(twseRepo.findTopNByOrderByTradingDateDesc(500)).thenReturn(List.of());
         // Task 294：buildUsMarket() 每輪都會計算（不論本輪有沒有美股標的），需同步 stub 避免 NPE。
         lenient().when(usIndexDailyHistoryRepo.findTopNByIndexCodeOrderByTradingDateDesc(anyString(), anyInt()))
                 .thenReturn(List.of());

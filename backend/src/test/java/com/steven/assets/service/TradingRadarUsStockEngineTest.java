@@ -130,7 +130,7 @@ class TradingRadarUsStockEngineTest {
                     BigDecimal.valueOf(20000), BigDecimal.valueOf(20000), BigDecimal.valueOf(20000),
                     BigDecimal.valueOf(30), BigDecimal.valueOf(70),
                     BigDecimal.valueOf(30), BigDecimal.valueOf(70),
-                    null, TechnicalIndicatorService.ExtendedIndicators.EMPTY);
+                    null, TechnicalIndicatorService.ExtendedIndicators.EMPTY, null);
 
     /**
      * US（IXIC）組 FullIndicators：ma20/60/240 皆設 15000（遠低於 usUpRows() 的現價 19000）、K(70)&gt;D(50)。
@@ -141,7 +141,7 @@ class TradingRadarUsStockEngineTest {
                     BigDecimal.valueOf(15000), BigDecimal.valueOf(15000), BigDecimal.valueOf(15000),
                     BigDecimal.valueOf(70), BigDecimal.valueOf(50),
                     BigDecimal.valueOf(70), BigDecimal.valueOf(50),
-                    null, TechnicalIndicatorService.ExtendedIndicators.EMPTY);
+                    null, TechnicalIndicatorService.ExtendedIndicators.EMPTY, null);
 
     /** 241 筆「由新到舊」台股加權指數收盤：closes[i] = 15000+5i，近期最低（下跌趨勢）。 */
     private List<TwseIndexDailyHistory> twDownRows() {
@@ -222,7 +222,7 @@ class TradingRadarUsStockEngineTest {
         lenient().when(priceHistoryRepo.findRecentN(anyString(), anyString(), anyInt())).thenReturn(List.of());
         lenient().when(priceQueryService.getLive(anyString(), anyString())).thenReturn(Optional.empty());
         lenient().when(priceQueryService.getDisplayPrice(anyString(), anyString())).thenReturn(Optional.empty());
-        lenient().when(twseRepo.findTopNByOrderByTradingDateDesc(241)).thenReturn(List.of());
+        lenient().when(twseRepo.findTopNByOrderByTradingDateDesc(500)).thenReturn(List.of());
         lenient().when(usIndexDailyHistoryRepo.findTopNByIndexCodeOrderByTradingDateDesc(anyString(), anyInt()))
                 .thenReturn(List.of());
     }
@@ -231,9 +231,9 @@ class TradingRadarUsStockEngineTest {
     private void stubDivergentRegimes() {
         // lenient：evaluateForNotification() 依 market 只組裝其中一組（Task 294.6），
         // 另一組的 stub 在那些測試裡本來就不會被用到，屬預期行為。
-        lenient().when(twseRepo.findTopNByOrderByTradingDateDesc(241)).thenReturn(twDownRows());
+        lenient().when(twseRepo.findTopNByOrderByTradingDateDesc(500)).thenReturn(twDownRows());
         lenient().when(indicatorService.computeAll("0000", "台股")).thenReturn(TW_RISK_OFF_IND);
-        lenient().when(usIndexDailyHistoryRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 241))
+        lenient().when(usIndexDailyHistoryRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 500))
                 .thenReturn(usUpRows());
         lenient().when(indicatorService.computeAllForNasdaq()).thenReturn(US_RISK_ON_IND);
     }
@@ -284,7 +284,7 @@ class TradingRadarUsStockEngineTest {
         stubDivergentRegimes();
         Instant fixedAfterUsClose = Instant.parse("2026-08-10T21:00:00Z");
         List<UsIndexDailyHistory> indexRows = usUpRowsAt(LocalDate.of(2026, 8, 10));
-        when(usIndexDailyHistoryRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 241))
+        when(usIndexDailyHistoryRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 500))
                 .thenReturn(indexRows);
         List<StockPriceHistory> stockRows = indexRows.stream()
                 .map(row -> StockPriceHistory.builder()
@@ -293,7 +293,7 @@ class TradingRadarUsStockEngineTest {
                         .lowPrice(row.getClosePoint()).closePrice(row.getClosePoint())
                         .volume(row.getVolume()).build())
                 .toList();
-        when(priceHistoryRepo.findRecentN("AAPL", "美股", 250)).thenReturn(stockRows);
+        when(priceHistoryRepo.findRecentN("AAPL", "美股", 500)).thenReturn(stockRows);
         when(adjustedPriceService.adjust(anyList(), anyList()))
                 .thenAnswer(invocation -> new DistributionAdjustedPriceService.Adjustment(
                         invocation.getArgument(0), false));
@@ -323,7 +323,7 @@ class TradingRadarUsStockEngineTest {
         stubDivergentRegimes();
         Instant fixedAfterUsClose = Instant.parse("2026-08-10T21:00:00Z");
         List<UsIndexDailyHistory> indexRows = usUpRowsAt(LocalDate.of(2026, 8, 10));
-        when(usIndexDailyHistoryRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 241))
+        when(usIndexDailyHistoryRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 500))
                 .thenReturn(indexRows);
         List<StockPriceHistory> stockRows = indexRows.stream()
                 .map(row -> StockPriceHistory.builder()
@@ -332,7 +332,7 @@ class TradingRadarUsStockEngineTest {
                         .lowPrice(row.getClosePoint()).closePrice(row.getClosePoint())
                         .volume(row.getVolume()).build())
                 .toList();
-        when(priceHistoryRepo.findRecentN("AAPL", "美股", 250)).thenReturn(stockRows);
+        when(priceHistoryRepo.findRecentN("AAPL", "美股", 500)).thenReturn(stockRows);
         when(adjustedPriceService.adjust(anyList(), anyList()))
                 .thenAnswer(invocation -> new DistributionAdjustedPriceService.Adjustment(
                         invocation.getArgument(0), false));
@@ -377,7 +377,7 @@ class TradingRadarUsStockEngineTest {
                     .lowPrice(row.getLowPoint()).closePrice(row.getClosePoint())
                     .volume(1_000_000L + i).build());
         }
-        when(priceHistoryRepo.findRecentN("TLT", "美股", 250)).thenReturn(stockRows);
+        when(priceHistoryRepo.findRecentN("TLT", "美股", 500)).thenReturn(stockRows);
         when(stockRepo.findByCodeAndMarket("TLT", "美股")).thenReturn(Optional.of(
                 Stock.builder().code("TLT").market("美股")
                         .name("iShares 20+ Year Treasury Bond ETF")
@@ -520,7 +520,7 @@ class TradingRadarUsStockEngineTest {
     @Test
     void buildUsMarket例外時不影響buildMarket的台股組正常回傳且美股個股優雅降級() {
         stubBaseline();
-        when(twseRepo.findTopNByOrderByTradingDateDesc(241)).thenReturn(twDownRows());
+        when(twseRepo.findTopNByOrderByTradingDateDesc(500)).thenReturn(twDownRows());
         when(indicatorService.computeAll("0000", "台股")).thenReturn(TW_RISK_OFF_IND);
         when(usIndexDailyHistoryRepo.findTopNByIndexCodeOrderByTradingDateDesc(anyString(), anyInt()))
                 .thenThrow(new RuntimeException("IXIC 讀取失敗（模擬）"));
@@ -786,7 +786,7 @@ class TradingRadarUsStockEngineTest {
     @Test
     void usMarket最新日線等於最近完成美股交易日時quoteStatus為VERIFIED_CLOSE() {
         stubBaseline();
-        when(usIndexDailyHistoryRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 241))
+        when(usIndexDailyHistoryRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 500))
                 .thenReturn(usUpRowsAt(LocalDate.of(2026, 8, 10)));
         when(indicatorService.computeAllForNasdaq()).thenReturn(US_RISK_ON_IND);
 
@@ -803,7 +803,7 @@ class TradingRadarUsStockEngineTest {
     void usMarket日線落後一盤時quoteStatus為PREVIOUS_CLOSE且stale為true價格仍非null() {
         stubBaseline();
         // 最新日線停在 08-07、最近完成日為 08-10：t324 實測過的穩態（stale=true 而 price!=null）。
-        when(usIndexDailyHistoryRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 241))
+        when(usIndexDailyHistoryRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 500))
                 .thenReturn(usUpRowsAt(LocalDate.of(2026, 8, 7)));
         when(indicatorService.computeAllForNasdaq()).thenReturn(US_RISK_ON_IND);
 

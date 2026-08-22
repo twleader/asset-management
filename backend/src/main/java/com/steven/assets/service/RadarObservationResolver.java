@@ -38,8 +38,13 @@ public final class RadarObservationResolver {
      * 未驗證列」這兩種剔除有名額可遞補；<b>但序列本身必須截回 241</b>，否則
      * {@code RadarInputAssembler.ma60BiasPercentile} 的觀測數會隨取數量浮動，
      * 在沒有任何剔除的常態下也靜默改掉既有分位值。</p>
+     *
+     * <p><b>Task 356.4d-2：可見性由 private 放寬為 public，值與截斷行為一律不動。</b>擴窗之後
+     * {@code RadarInputAssembler.assemble} 需要一個<b>顯式的</b>日K 契約列數參數
+     * （{@code dailyContractRows}），而那個數字就是這個常數；讓呼叫端引用同一份常數，
+     * 才不會在服務層再寫死一個 241。</p>
      */
-    private static final int INDICATOR_SERIES_MAX_ROWS = 241;
+    public static final int INDICATOR_SERIES_MAX_ROWS = 241;
 
     private RadarObservationResolver() {}
 
@@ -82,6 +87,12 @@ public final class RadarObservationResolver {
      *                              唯一例外是等於 completed session 的最新一根，台股仍須命中白名單
      *                              （當日尚未官方對帳完成時那根可能是盤中誤寫值，只能由 live K 併入
      *                              或缺席）。日期由新到舊，最多 {@value #INDICATOR_SERIES_MAX_ROWS} 列。
+     * @param weeklySeriesRows      週K 聚合用的歷史序列（Task 356.4b）：<b>與
+     *                              {@code indicatorSeriesRows} 套用完全相同的過濾，唯一差別是
+     *                              不做 {@value #INDICATOR_SERIES_MAX_ROWS} 截斷</b>，因此
+     *                              {@code indicatorSeriesRows} 恆為本清單的前綴。
+     *                              日K 路徑一律只吃 {@code indicatorSeriesRows}——兩份分開才能讓
+     *                              「取數視窗擴大」與「日K 契約不變」同時成立。日期由新到舊。
      */
     public record AcceptedPrice(
             BigDecimal value,
@@ -93,8 +104,28 @@ public final class RadarObservationResolver {
             PriceQueryService.LivePrice live,
             List<StockPriceHistory> verifiedCompletedRows,
             List<StockPriceHistory> indicatorSeriesRows,
+            List<StockPriceHistory> weeklySeriesRows,
             String missingReason
     ) {
+        /**
+         * 既有十參數形狀的相容建構式：呼叫端只備妥一份序列時，週K 序列即該序列
+         * （回測等自組 snapshot 的路徑走這裡，行為與擴窗前完全相同）。
+         */
+        public AcceptedPrice(
+                BigDecimal value,
+                LocalDate tradingDate,
+                String updatedAt,
+                String source,
+                Quality quality,
+                boolean liveAccepted,
+                PriceQueryService.LivePrice live,
+                List<StockPriceHistory> verifiedCompletedRows,
+                List<StockPriceHistory> indicatorSeriesRows,
+                String missingReason) {
+            this(value, tradingDate, updatedAt, source, quality, liveAccepted, live,
+                    verifiedCompletedRows, indicatorSeriesRows, indicatorSeriesRows, missingReason);
+        }
+
         public boolean available() {
             return value != null && tradingDate != null
                     && (quality == Quality.LIVE || quality == Quality.COMPLETED_CLOSE);
@@ -110,7 +141,8 @@ public final class RadarObservationResolver {
 
         public static AcceptedPrice missing(Quality quality, String reason) {
             return new AcceptedPrice(
-                    null, null, null, null, quality, false, null, List.of(), List.of(), reason);
+                    null, null, null, null, quality, false, null,
+                    List.of(), List.of(), List.of(), reason);
         }
     }
 
@@ -173,7 +205,11 @@ public final class RadarObservationResolver {
 
         LocalDate completedSession = sessions.targetCompletedSession();
         List<StockPriceHistory> trustedRows = trustedCompletedRows(completedRows, market, completedSession);
-        List<StockPriceHistory> indicatorRows = indicatorSeriesRows(completedRows, market, completedSession);
+        // Task 356.4b：同一份過濾只跑一次；日K 契約序列是週K 長序列的前綴，兩者不可能分歧。
+        List<StockPriceHistory> weeklyRows = eligibleSeriesRows(completedRows, market, completedSession);
+        List<StockPriceHistory> indicatorRows = weeklyRows.size() <= INDICATOR_SERIES_MAX_ROWS
+                ? weeklyRows
+                : List.copyOf(weeklyRows.subList(0, INDICATOR_SERIES_MAX_ROWS));
         if (rawLive != null) {
             LocalDate liveDate = parseDate(rawLive.tradingDate());
             boolean validPrice = positiveFinite(rawLive.price());
@@ -184,7 +220,7 @@ public final class RadarObservationResolver {
                 return new AcceptedPrice(
                         rawLive.price(), liveDate, rawLive.updatedAt(),
                         nonBlank(rawLive.source(), "REDIS_LIVE"), Quality.LIVE,
-                        true, rawLive, trustedRows, indicatorRows, null);
+                        true, rawLive, trustedRows, indicatorRows, weeklyRows, null);
             }
         }
 
@@ -202,7 +238,8 @@ public final class RadarObservationResolver {
             return new AcceptedPrice(
                     completed.getClosePrice(), completed.getTradingDate(), null,
                     nonBlank(completed.getCloseSource(), "COMPLETED_CLOSE"),
-                    Quality.COMPLETED_CLOSE, false, null, trustedRows, indicatorRows, null);
+                    Quality.COMPLETED_CLOSE, false, null,
+                    trustedRows, indicatorRows, weeklyRows, null);
         }
 
         Quality quality = rawLive == null ? Quality.MISSING : classifyRejectedLive(
@@ -330,7 +367,7 @@ public final class RadarObservationResolver {
      * 唯一仍套用白名單的是等於 {@code completedSession} 的那一根——當日尚未官方對帳完成時它可能是
      * 盤中誤寫值，不得當成完成收盤 K；該日只能由 live K 併入（{@code shouldAddLiveRow} 路徑）或缺席。</p>
      */
-    private static List<StockPriceHistory> indicatorSeriesRows(
+    private static List<StockPriceHistory> eligibleSeriesRows(
             List<StockPriceHistory> rows, String market, LocalDate completedSession) {
         if (rows == null) return List.of();
         return rows.stream()
@@ -340,7 +377,6 @@ public final class RadarObservationResolver {
                         && (!completedSession.equals(row.getTradingDate())
                             || isTrustedClose(row, market)))
                 .sorted(Comparator.comparing(StockPriceHistory::getTradingDate).reversed())
-                .limit(INDICATOR_SERIES_MAX_ROWS)
                 .toList();
     }
 

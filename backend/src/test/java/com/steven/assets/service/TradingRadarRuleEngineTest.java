@@ -178,11 +178,15 @@ class TradingRadarRuleEngineTest {
                 TradingRadarRuleEngine.InstrumentType.BOND,
                 TradingRadarRuleEngine.MarketRegime.RISK_OFF));
 
-        assertEquals(74, equity.score());
+        // V15：本 fixture 的 weekly／dailyCandle 皆為 null，五個新因子一律缺值、**不進 sumW**，
+        // 故分數變動完全來自既有 18 個因子的權重改配（Task 356.7）。
+        // 債券不套大盤因子，可用因子為 MA20 .04／MA60 .06／MA240 .06／KD_J .05／完成日漲跌 .01，
+        // Σw=0.22、Σ(w×c)=0.183 → 0.8318 → 92；個股再加上 MARKET .05 × (−1.0)，
+        // Σw=0.27、Σ(w×c)=0.133 → 0.4926 → 75。兩者都遠離 50，可反證新因子沒有被以 0 冒充缺值
+        //（若被冒充，sumW 會變大而把分數往 50 拉）。
+        assertEquals(75, equity.score());
         assertEquals(TradingRadarRuleEngine.Action.HOLD, equity.action());
-        // V12：MW_KD_J 由 0.04 併入 W%R 權重升為 0.07，本 fixture 的 KD/J 貢獻（0.5）低於其餘
-        // 已飽和的均線分量（1.0），加權後分數由 92 降為 90（Task 298）。
-        assertEquals(90, bond.score());
+        assertEquals(92, bond.score());
         assertEquals(TradingRadarRuleEngine.Action.ADD_CANDIDATE, bond.action());
         assertTrue(bond.reasons().stream().anyMatch(reason -> reason.contains("資產類別為債券")));
     }
@@ -200,8 +204,8 @@ class TradingRadarRuleEngineTest {
 
         assertNull(equity.score());
         assertEquals(TradingRadarRuleEngine.Action.NO_TRADE, equity.action());
-        // V12：同 bondDoesNotUseEquityRiskOffPenaltyOrBuyGate，KD/J 權重上修使分數由 92 降為 90。
-        assertEquals(90, bond.score());
+        // V15：同 bondDoesNotUseEquityRiskOffPenaltyOrBuyGate 的權重改配，由 90 回到 92。
+        assertEquals(92, bond.score());
         assertEquals(TradingRadarRuleEngine.Action.ADD_CANDIDATE, bond.action());
     }
 
@@ -424,11 +428,13 @@ class TradingRadarRuleEngineTest {
     void kdHeat_userReportedCase_staysAddCandidateAndIsOnlyMarkedElevated() {
         // 使用者回報的 00882：K 82.3／D 75.2 → avg 78.75 未過 80、K 未過 85。
         // 本任務刻意不改變此案例的動作（門檻取 85 的直接後果），釘住以免日後被誤調為 80。
-        // V12：KD/J 位置 (50-78.75)/50=-0.575，併入 direction +1.0 後平均 0.2125；
-        // MW_KD_J 由 0.04 併入 W%R 權重升為 0.07 後 Σ(w×c)/Σw=0.240875/0.35=0.6882 → 84（Task 298）。
+        // KD/J 位置 (50-78.75)/50=-0.575，併入 direction +1.0 後平均 0.2125。
+        // V15（Task 356.7）：可用因子為 MA20 .04／MA60 .06／MA240 .06／KD_J .05／MARKET .05／
+        // 完成日漲跌 .01，Σw=0.27、Σ(w×c)=0.193625 → 0.71713 → 86。
+        // 五個新因子（日K 棒／週線趨勢／動能／乖離／週K 量能）在本 fixture 全部缺值而不進 sumW。
         var held = engine.evaluateStock(strongStockWithKd(true, "82.3", "75.2"));
 
-        assertEquals(84, held.score(), "V12 KD/J 併入 W%R 且權重上修後為 84 分");
+        assertEquals(86, held.score(), "V15 三軌權重改配後為 86 分");
         assertEquals(TradingRadarRuleEngine.Action.ADD_CANDIDATE, held.action());
         assertEquals(TradingRadarRuleEngine.KdHeat.ELEVATED, held.kdHeat());
     }
@@ -436,12 +442,12 @@ class TradingRadarRuleEngineTest {
     @Test
     void kdHeat_kAloneOverheated_closesBuyGateWithoutDeductingScore() {
         // K=86／D=70 → avg 78 未過 80，僅 K 過 85。KD/J 位置 (50-78)/50=-0.56，
-        // 併入 direction +1.0 後平均 0.22；V12 MW_KD_J 升為 0.07 後 Σ(w×c)/Σw=0.2414/0.35=0.6897
-        // → 84（Task 298）。分數仍 ≥ 75，證明降級來自閘門而非扣分。
+        // 併入 direction +1.0 後平均 0.22；V15 權重下 Σ(w×c)/Σw=0.194/0.27=0.71852
+        // → 86（Task 356.7）。分數仍 ≥ 75，證明降級來自閘門而非扣分。
         var held = engine.evaluateStock(strongStockWithKd(true, "86", "70"));
         var notHeld = engine.evaluateStock(strongStockWithKd(false, "86", "70"));
 
-        assertEquals(84, held.score(), "過熱硬閘門不在 KD/J 因子之外再重複扣分");
+        assertEquals(86, held.score(), "過熱硬閘門不在 KD/J 因子之外再重複扣分");
         assertEquals(TradingRadarRuleEngine.KdHeat.OVERHEATED, held.kdHeat());
         assertEquals(TradingRadarRuleEngine.Action.HOLD, held.action());
         assertEquals(TradingRadarRuleEngine.Action.WATCH, notHeld.action());
@@ -523,8 +529,8 @@ class TradingRadarRuleEngineTest {
      * 但使用者可觀察行為有實質變化即升版。
      */
     @Test
-    void ruleVersion_isV14() {
-        assertEquals("TW_RULES_V14", TradingRadarRuleEngine.RULE_VERSION);
+    void ruleVersion_isV15() {
+        assertEquals("TW_RULES_V15", TradingRadarRuleEngine.RULE_VERSION);
     }
 
     // ═══ Task 342：跨市場「不適用」與「資料不足」分家、量價文案只列舉實際採用的分量 ═══

@@ -349,6 +349,10 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 348 | 股票分析 popup 新增台股行情五檔頁籤（Requirement 87；Task 347 已由在途 worktree 占用） | [tasks/t348_stock_analysis_quote_depth.md](tasks/t348_stock_analysis_quote_depth.md) |
 | 349 | 台股 ETF 官方折溢價改為每 2 分鐘更新，並以 nullable 欄位併入 Docker 外部 quote API（Requirement 88；Task 348 由其他在途 worktree 保留） | [tasks/t349_etf_premium_quotes_2min.md](tasks/t349_etf_premium_quotes_2min.md) |
 | 350 | 台股 Redis 最新價日期時間單調守門、MIS 批次重試與每輪可觀測統計（Requirement 89） | [tasks/t350_tw_quote_cache_freshness.md](tasks/t350_tw_quote_cache_freshness.md) |
+| 351 | 交易日曆三年查詢窗口與今年明年雙年度匯出（Requirement 37） | [tasks/t351_trading_calendar_year_window.md](tasks/t351_trading_calendar_year_window.md) |
+| 352 | Docker Linux 富邦證券庫存同步至管理者最新資產快照（Requirement 90） | [tasks/t352_fubon_linux_inventory_sync.md](tasks/t352_fubon_linux_inventory_sync.md) |
+| 353 | 富邦台股逐檔 intraday quote 作為可切換的 LIVE provider（Requirement 91） | [tasks/t353_fubon_tw_marketdata_provider.md](tasks/t353_fubon_tw_marketdata_provider.md) |
+| 354 | TWSE 未公布時以 DGPA 完整行事曆暫行推導台股交易日（Requirement 37） | [tasks/t354_dgpa_calendar_fallback.md](tasks/t354_dgpa_calendar_fallback.md) |
 | 355 | 股票分析價格圖新增日 K／週 K（Requirement 92） | [tasks/t355_stock_analysis_daily_weekly_candles.md](tasks/t355_stock_analysis_daily_weekly_candles.md) |
 | 356 | 今日交易雷達拆為「一周」「1周~1月」「1月~6月」三軌，並把日K 棒與週K 重新計算的指標納入評分（Requirement 93） | [tasks/t356_radar_three_horizon_weekly_k.md](tasks/t356_radar_three_horizon_weekly_k.md) |
 

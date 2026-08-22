@@ -35,6 +35,9 @@ class TradingRadarOpenApiSchemaContractTest {
             new Binding(TradingRadarDto.MarketSummary.class, "MarketSummary"),
             new Binding(TradingRadarDto.StockDecision.class, "StockDecision"),
             new Binding(TradingRadarDto.ExtendedIndicators.class, "ExtendedIndicators"),
+            // Task 356.11f：兩個新 schema 必須登錄在此，否則它們不受本測試保護。
+            new Binding(TradingRadarDto.DailyCandle.class, "DailyCandle"),
+            new Binding(TradingRadarDto.WeeklyIndicators.class, "WeeklyIndicators"),
             new Binding(TradingRadarDto.FundamentalSnapshot.class, "FundamentalSnapshot"),
             new Binding(TradingRadarDto.ValuationComponentEvidence.class, "ValuationComponentEvidence"),
             new Binding(TradingRadarDto.RadarEvidence.class, "RadarEvidence"),
@@ -52,13 +55,21 @@ class TradingRadarOpenApiSchemaContractTest {
     /** 明示可為 null 的 wire fields；未列者必須是非 nullable schema。 */
     private static final Map<String, Set<String>> NULLABLE = Map.ofEntries(
             Map.entry("TradingRadarResponse", set()),
+            Map.entry("DailyCandle", set(
+                    "open", "high", "low", "close", "closePosition", "bodyDirection",
+                    "lowerShadowRatio", "asOfDate")),
+            Map.entry("WeeklyIndicators", set(
+                    "weekEndDate", "completedWeeks", "open", "high", "low", "close", "volume",
+                    "ma5", "ma10", "ma20", "k", "d", "j9", "dif", "macd", "osc", "rsi5", "rsi10",
+                    "bias10", "bias20", "volumeRatio", "changePercent", "closePosition",
+                    "bodyDirection")),
             Map.entry("MarketSummary", set(
                     "regime", "regimeLabel", "score", "asOfDate", "price", "changePercent",
                     "quoteStatus", "weeklyMa", "monthlyMa", "quarterlyMa", "annualMa", "kValue",
                     "dValue", "quarterlyConfirmation", "annualConfirmation", "liveUpdatedAt",
                     "extendedIndicators", "marketVolumeRatio", "marketTurnoverRatio",
                     "marketVolumeAsOfDate", "nasdaqChangePercent", "soxChangePercent",
-                    "usTechCompositePercent", "usTechAsOfDate")),
+                    "usTechCompositePercent", "usTechAsOfDate", "weeklyIndicators")),
             Map.entry("StockDecision", set(
                     "stockCode", "stockName", "market", "assetClass", "action", "actionLabel", "score",
                     "counterTrendState", "counterTrendLabel", "price", "changePercent", "quoteStatus",
@@ -70,7 +81,12 @@ class TradingRadarOpenApiSchemaContractTest {
                     "shortScore", "volumeRatio", "fxAsOfDate", "fundamental", "evidence",
                     "shortDownsideRisk", "mediumDownsideRisk", "shortEvidenceConfidence",
                     "mediumEvidenceConfidence", "shortRiskCoverage", "mediumRiskCoverage",
-                    "candidateAction", "shortCandidateAction", "etfPremiumLivePct", "etfPremiumLiveNavAsOf")),
+                    "candidateAction", "shortCandidateAction", "etfPremiumLivePct", "etfPremiumLiveNavAsOf",
+                    // Task 356.11b：1周~1月 軌與兩組新指標；List 欄（swingReasons／swingRisks）
+                    // 與 boolean 欄不列入，其餘一律 nullable。
+                    "swingAction", "swingActionLabel", "swingScore", "swingDownsideRisk",
+                    "swingEvidenceConfidence", "swingRiskCoverage", "swingCandidateAction",
+                    "dailyCandle", "weeklyIndicators")),
             Map.entry("ExtendedIndicators", set(
                     "j9", "k3d2", "rsv", "ema12", "ema26", "dif", "macd", "osc",
                     "rsi5", "rsi10", "bias10", "bias20", "b10b20", "wr9")),
@@ -93,7 +109,9 @@ class TradingRadarOpenApiSchemaContractTest {
                     "nextDistributionDate", "nextDistributionKnownAt", "nextDistributionProvider",
                     "nextDistributionStatus", "nextDistributionMissingReason",
                     "distributionsWithinFiveSessions", "distributionsWithinTwentySessions",
-                    "treasuryRateContext", "normalizedBias", "shortNormalizedBias")),
+                    "treasuryRateContext", "normalizedBias", "shortNormalizedBias",
+                    "swingDownsideRisk", "swingEvidenceConfidence", "swingRiskCoverage",
+                    "swingCandidateAction")),
             Map.entry("AssetProfile", set(
                     "assetClass", "assetClassSource", "instrumentKind", "instrumentKindSource",
                     "stockStyle", "stockStyleSource", "bondTerm", "bondTermSource", "quoteCurrency",
@@ -118,6 +136,8 @@ class TradingRadarOpenApiSchemaContractTest {
             Map.entry("MarketSummary", formats(
                     "asOfDate", "date", "marketVolumeAsOfDate", "date", "usTechAsOfDate", "date")),
             Map.entry("StockDecision", formats("asOfDate", "date", "fxAsOfDate", "date")),
+            Map.entry("DailyCandle", formats("asOfDate", "date")),
+            Map.entry("WeeklyIndicators", formats("weekEndDate", "date")),
             Map.entry("FundamentalSnapshot", formats(
                     "epsAsOf", "date", "roeAsOf", "date", "revenueAsOf", "date",
                     "valuationAsOf", "date", "industryAsOf", "date")),
@@ -134,7 +154,7 @@ class TradingRadarOpenApiSchemaContractTest {
             Map.entry("PublicInformationItem", formats("knownAt", "date-time")));
 
     @Test
-    void allFourteenRecordSchemasMatchFieldsTypesGenericsRefsFormatsAndNullability() throws IOException {
+    void allSixteenRecordSchemasMatchFieldsTypesGenericsRefsFormatsAndNullability() throws IOException {
         Map<String, Object> document = loadOpenApi();
         Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
 

@@ -122,6 +122,15 @@ class BacktestServiceTest {
     // ─────────────────────────── 測試資料 ───────────────────────────
 
     /** 產生 n 筆升序序列；第 i 筆收盤 = base × (1 + drift)^i，另可注入一段大漲。 */
+    /**
+     * 回測暖機列數（Task 356.13a-2 起為「240 根完成日 K」與「60 根完成週」的較大者）。
+     *
+     * <p>fixture 長度一律寫成 {@code WARMUP_ROWS + n}（n＝預期可評估的訊號日數），
+     * 不得寫死 270／280／330——{@code WARMUP} 一放大，寫死的 fixture 會整批跑不到任何訊號日，
+     * 失敗訊息看起來像「回測邏輯壞了」，實際上只是樣本不足。</p>
+     */
+    private static final int WARMUP_ROWS = BacktestService.WARMUP;
+
     private List<StockPriceHistory> series(int n, double base, double drift, int rallyFrom, double rallyPct) {
         List<StockPriceHistory> out = new ArrayList<>(n);
         double px = base;
@@ -186,7 +195,7 @@ class BacktestServiceTest {
     @Test
     @DisplayName("基本面回測每檔只呼叫一次批次 resolver，不逐日查詢")
     void fundamentalsAreResolvedOncePerCode() {
-        List<StockPriceHistory> asc = series(280, 100, 0.001, 999, 0.0);
+        List<StockPriceHistory> asc = series(WARMUP_ROWS + 40, 100, 0.001, 999, 0.0);
         stubRepos(asc, List.of());
 
         service().run(new BacktestDto.Request(List.of(CODE), null, null, List.of(5), null, null));
@@ -198,7 +207,7 @@ class BacktestServiceTest {
     @Test
     @DisplayName("回測 ETF premium 只接受 signal instant 前已知的 append-only NAV；同日 18:30 才可用在 18:00 仍排除")
     void backtestPremiumUsesObservationAvailabilityBoundary() {
-        List<StockPriceHistory> rows = withCode(series(270, 100, 0.001, 999, 0.0), ETF_CODE);
+        List<StockPriceHistory> rows = withCode(series(WARMUP_ROWS + 30, 100, 0.001, 999, 0.0), ETF_CODE);
         LocalDate signalDate = rows.get(RadarInputAssembler.FULL_WINDOW).getTradingDate();
         Instant observedAt = signalDate.atTime(12, 0).atZone(TAIPEI).toInstant();
         Instant availableAt = signalDate.atTime(18, 30).atZone(TAIPEI).toInstant();
@@ -258,7 +267,7 @@ class BacktestServiceTest {
     @Test
     @DisplayName("V13 request 真的逐訊號呼叫完整 candidate engine，而非只替既有訊號換標籤")
     void v13RequestEvaluatesCandidateGridThroughRuleEngine() {
-        List<StockPriceHistory> asc = series(270, 100, 0.001, 999, 0.0);
+        List<StockPriceHistory> asc = series(WARMUP_ROWS + 30, 100, 0.001, 999, 0.0);
         stubRepos(asc, List.of());
         TradingRadarRuleEngine candidateEngine = spy(new TradingRadarRuleEngine());
         RadarInputAssembler candidateAssembler = new RadarInputAssembler(
@@ -280,7 +289,7 @@ class BacktestServiceTest {
     @Test
     @DisplayName("V13 歷史市場 feature 以每訊號 terminal session 呼叫 batch port，且不逐訊號 load")
     void v13HistoricalMarketFeaturesUseStrictPerInstantBatchPort() {
-        List<StockPriceHistory> asc = series(270, 100, 0.001, 999, 0.0);
+        List<StockPriceHistory> asc = series(WARMUP_ROWS + 30, 100, 0.001, 999, 0.0);
         stubRepos(asc, List.of());
         AtomicInteger batchCalls = new AtomicInteger();
         AtomicInteger rangeLoads = new AtomicInteger();
@@ -337,7 +346,7 @@ class BacktestServiceTest {
     @Test
     @DisplayName("V13 CSV 與 JSON 同步揭露 metadata、coverage、fold、failure、selected candidate 與 assumptions")
     void v13CsvContainsJsonParitySections() {
-        List<StockPriceHistory> asc = series(270, 100, 0.001, 999, 0.0);
+        List<StockPriceHistory> asc = series(WARMUP_ROWS + 30, 100, 0.001, 999, 0.0);
         stubRepos(asc, List.of());
 
         String csv = service().toCsv(new BacktestDto.Request(
@@ -371,7 +380,7 @@ class BacktestServiceTest {
     @Test
     @DisplayName("Task 316：null／空 codes 都維持完整市場流程，非空 codes 在 registry 前 fail closed")
     void v13UniverseModeSeparatesFullMarketFromBoundedDiagnostic() {
-        List<StockPriceHistory> asc = series(330, 100, 0.001, 999, 0.0);
+        List<StockPriceHistory> asc = series(WARMUP_ROWS + 90, 100, 0.001, 999, 0.0);
         stubRepos(asc, List.of());
         BacktestService candidateService = serviceWithAlwaysTradableCandidate();
 
@@ -429,7 +438,7 @@ class BacktestServiceTest {
     @DisplayName("V13 同鍵比較排除雙無 action，單邊 action 與持有部位減碼使用實際 next-open 報酬")
     void v13IntersectionUsesSingleSideActionAndHeldAvoidedLoss() {
         // 下跌序列讓「持有部位 REDUCE」的 avoided-loss 報酬為正；它不能被當成 short P&L。
-        List<StockPriceHistory> descending = series(270, 100, -0.001, 999, 0.0);
+        List<StockPriceHistory> descending = series(WARMUP_ROWS + 30, 100, -0.001, 999, 0.0);
         stubRepos(descending, List.of());
         TradingRadarRuleEngine candidateEngine = spy(new TradingRadarRuleEngine());
         RadarInputAssembler candidateAssembler = new RadarInputAssembler(
@@ -514,7 +523,7 @@ class BacktestServiceTest {
 
         // 同一組 action 改用上漲樣本，entry BUY 對 baseline free WATCH 的差額
         // 必須使用 entry 報酬；baseline held HOLD 不得再被加進同一 key。
-        List<StockPriceHistory> ascending = series(270, 100, 0.01, 999, 0.0);
+        List<StockPriceHistory> ascending = series(WARMUP_ROWS + 30, 100, 0.01, 999, 0.0);
         when(priceHistoryRepo.findAllByStockCodeAndMarketOrderByTradingDateAsc(CODE, TW))
                 .thenReturn(ascending);
         BacktestDto.Response entryResponse = candidateService.run(new BacktestDto.Request(
@@ -538,7 +547,7 @@ class BacktestServiceTest {
         // appear superior merely because the old held path charged baseline a fictional
         // buy fee while assigning the sell action a free zero return.
         when(priceHistoryRepo.findAllByStockCodeAndMarketOrderByTradingDateAsc(CODE, TW))
-                .thenReturn(series(270, 100, 0.0, 999, 0.0));
+                .thenReturn(series(WARMUP_ROWS + 30, 100, 0.0, 999, 0.0));
         BacktestDto.CandidateCalibration flatSelective = candidateService.run(new BacktestDto.Request(
                 List.of(CODE), null, null, List.of(1), null, null,
                 Set.of(TW), new BigDecimal("0.70"), 3, null, false))
@@ -564,9 +573,9 @@ class BacktestServiceTest {
         List<StockDividendHistory> events = List.of(cashDividend(full.get(t - 30).getTradingDate(), 2.0));
 
         RadarInputAssembler a = assembler();
-        var fromFull = a.assemble(desc(full, t - 240, t), events, false, 241,
+        var fromFull = a.assemble(desc(full, t - 240, t), events, false, 241, 241,
                 full.get(t).getClosePrice());
-        var fromTruncated = a.assemble(desc(truncated, t - 240, t), events, false, 241,
+        var fromTruncated = a.assemble(desc(truncated, t - 240, t), events, false, 241, 241,
                 truncated.get(t).getClosePrice());
 
         assertThat(fromFull.week52Position()).isEqualTo(fromTruncated.week52Position());
@@ -594,7 +603,7 @@ class BacktestServiceTest {
                 .lowPrice(spike.getLowPrice()).closePrice(spike.getClosePrice())
                 .volume(spike.getVolume()).build());
 
-        var a = assembler().assemble(desc(asc, t - 240, t), List.of(), false, 241,
+        var a = assembler().assemble(desc(asc, t - 240, t), List.of(), false, 241, 241,
                 asc.get(t).getClosePrice());
 
         assertThat(a.week52High()).isNotNull();
@@ -607,7 +616,7 @@ class BacktestServiceTest {
     @DisplayName("(b) 無事件時還原序列與原始序列逐筆相同")
     void adjustment_noEventsKeepsSeriesIdentical() {
         List<StockPriceHistory> asc = series(300, 50, 0.0005, 999, 0.0);
-        var a = assembler().assemble(desc(asc, 59, 299), List.of(), false, 241,
+        var a = assembler().assemble(desc(asc, 59, 299), List.of(), false, 241, 241,
                 asc.get(299).getClosePrice());
         assertThat(a.distributionAdjusted()).isFalse();
         List<StockPriceHistory> expected = desc(asc, 59, 299);
@@ -665,8 +674,8 @@ class BacktestServiceTest {
 
         // 同一個視窗 → 同一支 assembler → 逐欄相同（守住 273.2b 的「不得複製組裝」）
         RadarInputAssembler a = assembler();
-        var p = a.assemble(production, List.of(), false, 241, production.get(0).getClosePrice());
-        var b = a.assemble(backtest, List.of(), false, 241, backtest.get(0).getClosePrice());
+        var p = a.assemble(production, List.of(), false, 241, 241, production.get(0).getClosePrice());
+        var b = a.assemble(backtest, List.of(), false, 241, 241, backtest.get(0).getClosePrice());
         assertThat(b.indicators()).isEqualTo(p.indicators());
         assertThat(b.ma60BiasPercent()).isEqualTo(p.ma60BiasPercent());
         assertThat(b.week52Position()).isEqualTo(p.week52Position());
@@ -677,7 +686,7 @@ class BacktestServiceTest {
     // ─────────────────────────── (d)(e)(f) 服務層 ───────────────────────────
 
     @Test
-    @DisplayName("(e) 暖機期：前 240 筆一律排除，且被排除天數有輸出")
+    @DisplayName("(e) 暖機期：前 WARMUP 筆一律排除，且被排除天數有輸出")
     void warmup_excludedAndReported() {
         List<StockPriceHistory> asc = series(400, 100, 0.001, 999, 0.0);
         stubRepos(asc, List.of());
@@ -687,8 +696,8 @@ class BacktestServiceTest {
 
         assertThat(r.perCode()).hasSize(1);
         BacktestDto.CodeCoverage c = r.perCode().get(0);
-        assertThat(c.warmupExcluded()).isEqualTo(240);
-        assertThat(c.evaluated()).isEqualTo(400 - 240);
+        assertThat(c.warmupExcluded()).isEqualTo(WARMUP_ROWS);
+        assertThat(c.evaluated()).isEqualTo(400 - WARMUP_ROWS);
         assertThat(c.rows()).isEqualTo(400);
     }
 
@@ -794,29 +803,29 @@ class BacktestServiceTest {
     // ─────────────────────────── (i) 回歸 ───────────────────────────
 
     @Test
-    @DisplayName("Task 292／341 回測與 production 共用 TW_RULES_V14")
-    void ruleVersionIsV14() {
-        assertThat(TradingRadarRuleEngine.RULE_VERSION).isEqualTo("TW_RULES_V14");
+    @DisplayName("Task 292／341／356 回測與 production 共用 TW_RULES_V15")
+    void ruleVersionIsV15() {
+        assertThat(TradingRadarRuleEngine.RULE_VERSION).isEqualTo("TW_RULES_V15");
     }
 
     @Test
     @DisplayName("Task 308 legacy 六欄 Request 維持原回應且不暗中產生 V13")
     void legacyRequestRemainsDescriptiveOnly() {
-        List<StockPriceHistory> asc = series(270, 100, 0.001, 999, 0.0);
+        List<StockPriceHistory> asc = series(WARMUP_ROWS + 30, 100, 0.001, 999, 0.0);
         stubRepos(asc, List.of());
 
         BacktestDto.Response response = service().run(new BacktestDto.Request(
                 List.of(CODE), null, null, List.of(1), null, null));
 
         assertThat(response.v13()).isNull();
-        assertThat(response.ruleVersion()).isEqualTo("TW_RULES_V14");
+        assertThat(response.ruleVersion()).isEqualTo("TW_RULES_V15");
         assertThat(response.results()).isNotEmpty();
     }
 
     @Test
     @DisplayName("Task 308 V13 request 產生真實 next-open 70/30 與 walk-forward 報告但 production 不升 V13")
     void v13RequestBuildsTradableGlobalSplitAndExplicitRejection() {
-        List<StockPriceHistory> asc = series(270, 100, 0.001, 999, 0.0);
+        List<StockPriceHistory> asc = series(WARMUP_ROWS + 30, 100, 0.001, 999, 0.0);
         stubRepos(asc, List.of());
 
         BacktestDto.Response response = service().run(new BacktestDto.Request(
@@ -825,7 +834,7 @@ class BacktestServiceTest {
 
         assertThat(response.v13()).isNotNull();
         BacktestDto.V13Report v13 = response.v13();
-        assertThat(v13.productionRuleVersion()).isEqualTo("TW_RULES_V14");
+        assertThat(v13.productionRuleVersion()).isEqualTo("TW_RULES_V15");
         assertThat(v13.productionPromoted()).isFalse();
         assertThat(v13.universeMode()).isEqualTo(BacktestDto.UniverseMode.BOUNDED_DIAGNOSTIC);
         assertThat(v13.promotedCandidateCount()).isZero();
@@ -902,11 +911,11 @@ class BacktestServiceTest {
                     assertThat(fold.executionEvidence().sigmaProfileStatus())
                             .isEqualTo("FOLD_SIGMA_PROFILE_ASOF_TRAIN"));
             assertThat(report.firstPrimaryExecution().signalDate())
-                    .isEqualTo(asc.get(240).getTradingDate().toString());
+                    .isEqualTo(asc.get(WARMUP_ROWS).getTradingDate().toString());
             assertThat(report.firstPrimaryExecution().entryDate())
-                    .isEqualTo(asc.get(241).getTradingDate().toString());
+                    .isEqualTo(asc.get(WARMUP_ROWS + 1).getTradingDate().toString());
             assertThat(report.firstPrimaryExecution().exitDate())
-                    .isEqualTo(asc.get(242).getTradingDate().toString());
+                    .isEqualTo(asc.get(WARMUP_ROWS + 2).getTradingDate().toString());
             assertThat(report.promotionStatus()).isEqualTo("INSUFFICIENT_DIAGNOSTIC_ONLY");
             assertThat(report.rejectionReason())
                     .isEqualTo("INSUFFICIENT_DIAGNOSTIC_ONLY");
@@ -935,10 +944,12 @@ class BacktestServiceTest {
     @Test
     @DisplayName("Task 314 成本 override 僅納入 inclusive 生效區間，區間外不進日曆或 sigma")
     void costOverrideExclusionDoesNotEnterCalendarCalibrationOrSensitivity() {
-        List<StockPriceHistory> asc = series(270, 100, 0.001, 999, 0.0);
+        List<StockPriceHistory> asc = series(WARMUP_ROWS + 30, 100, 0.001, 999, 0.0);
         stubRepos(asc, List.of());
-        LocalDate effectiveFrom = asc.get(250).getTradingDate();
-        LocalDate effectiveTo = asc.get(260).getTradingDate();
+        // 生效區間必須落在暖機之後的可評估視窗內（WARMUP..WARMUP+29）；
+        // 寫死 250／260 會在 WARMUP 放大後整段落到暖機期，使 30 個訊號日全部「區間外」。
+        LocalDate effectiveFrom = asc.get(WARMUP_ROWS + 10).getTradingDate();
+        LocalDate effectiveTo = asc.get(WARMUP_ROWS + 20).getTradingDate();
         BacktestDto.CostKey key = new BacktestDto.CostKey(
                 TW, BacktestDto.InstrumentKind.STOCK);
         BacktestDto.CostAssumption override = new BacktestDto.CostAssumption(
@@ -958,15 +969,15 @@ class BacktestServiceTest {
         assertThat(report.closeSensitivityN()).isEqualTo(10);
         BacktestDto.SigmaSnapshot sigma = report.candidateCalibration().getFirst()
                 .parameterSnapshot().sigma();
-        assertThat(sigma.asOfFrom()).isEqualTo(asc.get(249).getTradingDate());
-        assertThat(sigma.asOfTo()).isEqualTo(asc.get(255).getTradingDate());
+        assertThat(sigma.asOfFrom()).isEqualTo(asc.get(WARMUP_ROWS + 9).getTradingDate());
+        assertThat(sigma.asOfTo()).isEqualTo(asc.get(WARMUP_ROWS + 15).getTradingDate());
         assertThat(sigma.asOfTo()).isBeforeOrEqualTo(sigma.calibrationCutoff());
     }
 
     @Test
     @DisplayName("Task 314 5/20 共用 joint 交集 sigma/candidate，但各自保留 evaluation boundary 與 purge")
     void shortTrackUsesOneJointFoldProfileWithPerHorizonBoundaries() {
-        List<StockPriceHistory> asc = series(330, 100, 0.001, 999, 0.0);
+        List<StockPriceHistory> asc = series(WARMUP_ROWS + 90, 100, 0.001, 999, 0.0);
         stubRepos(asc, List.of());
         BacktestService candidateService = serviceWithAlwaysTradableCandidate();
 
@@ -1032,7 +1043,7 @@ class BacktestServiceTest {
     @Test
     @DisplayName("Task 314 任一 joint sigma 無觀測時整個 required-horizon fold fail closed")
     void jointFoldSigmaUnavailableFailsClosedForBothRequiredHorizons() {
-        List<StockPriceHistory> flat = series(330, 100, 0.0, 999, 0.0);
+        List<StockPriceHistory> flat = series(WARMUP_ROWS + 90, 100, 0.0, 999, 0.0);
         stubRepos(flat, List.of());
 
         BacktestDto.V13Report report = serviceWithAlwaysTradableCandidate().run(
@@ -1055,7 +1066,7 @@ class BacktestServiceTest {
     @Test
     @DisplayName("Task 308 default 五 folds 每一折都以 train boundary 建立 sigma profile，不跳過前三折")
     void defaultWalkForwardUsesTrainLocalSigmaForEveryFold() {
-        List<StockPriceHistory> asc = series(270, 100, 0.001, 999, 0.0);
+        List<StockPriceHistory> asc = series(WARMUP_ROWS + 30, 100, 0.001, 999, 0.0);
         stubRepos(asc, List.of());
 
         BacktestDto.Response response = service().run(new BacktestDto.Request(
@@ -1079,7 +1090,7 @@ class BacktestServiceTest {
     @Test
     @DisplayName("Task 308 台美市場各自建立全域 cutoff，不混用另一市場日曆")
     void v13MarketsHaveIndependentGlobalCalendars() {
-        List<StockPriceHistory> tw = series(270, 100, 0.001, 999, 0.0);
+        List<StockPriceHistory> tw = series(WARMUP_ROWS + 30, 100, 0.001, 999, 0.0);
         List<StockPriceHistory> us = tw.stream().map(row -> StockPriceHistory.builder()
                 .stockCode(row.getStockCode()).market("美股").tradingDate(row.getTradingDate().plusDays(10))
                 .openPrice(row.getOpenPrice()).highPrice(row.getHighPrice())
@@ -1107,7 +1118,7 @@ class BacktestServiceTest {
     @Test
     @DisplayName("V13 calibration sigma 會完整涵蓋每一市場/代碼，且 request 市場順序不改變結果")
     void v13CalibrationIsDeterministicAcrossMarketOrderAndPreservesAllGroups() {
-        List<StockPriceHistory> tw = series(270, 100, 0.001, 999, 0.0);
+        List<StockPriceHistory> tw = series(WARMUP_ROWS + 30, 100, 0.001, 999, 0.0);
         List<StockPriceHistory> us = tw.stream().map(row -> StockPriceHistory.builder()
                 .stockCode(row.getStockCode()).market("美股").tradingDate(row.getTradingDate().plusDays(10))
                 .openPrice(row.getOpenPrice()).highPrice(row.getHighPrice())
@@ -1172,5 +1183,144 @@ class BacktestServiceTest {
         assertThat(r.action()).isEqualTo(TradingRadarRuleEngine.Action.NO_TRADE);
         assertThat(r.kdDeadCross()).isFalse();
         assertThat(r.longTermBroken()).isFalse();
+    }
+
+    // ─────────────── Task 356.13b 三軌述詞 ───────────────
+
+    /**
+     * 以 spy 直接釘住引擎輸出，讓三軌的動作／分數<b>刻意互相不同</b>。
+     *
+     * <p>不用價格 fixture 誘導三軌分岔，是因為三軌在多數合成序列上會落進同一個動作分組——
+     * 那種測試即使 {@code SWING_*} 誤讀 medium 也照樣綠燈，等於沒測到。</p>
+     */
+    private BacktestService serviceWithFixedResult(TradingRadarRuleEngine.StockResult fixed) {
+        TradingRadarRuleEngine spyEngine = spy(new TradingRadarRuleEngine());
+        doReturn(fixed).when(spyEngine).evaluateStock(any());
+        RadarInputAssembler spyAssembler = new RadarInputAssembler(
+                new TechnicalIndicatorService(priceHistoryRepo, priceQuery, twseRepo, usIndexRepo),
+                adjust, spyEngine);
+        return new BacktestService(
+                spyEngine, spyAssembler, new AssetClassifier(),
+                priceHistoryRepo, dividendHistoryRepo, twseRepo, usIndexRepo, exchangeRateRepo,
+                etfNavHistoryRepo, stockRepo, adjust, marketContextService, fundamentalAnalysisService);
+    }
+
+    /** 三軌各給一組獨立的分數／動作；其餘欄位一律取無害預設。 */
+    private TradingRadarRuleEngine.StockResult threeTrackResult(
+            int mediumScore, TradingRadarRuleEngine.Action mediumAction,
+            int shortScore, TradingRadarRuleEngine.Action shortAction,
+            int swingScore, TradingRadarRuleEngine.Action swingAction,
+            TradingRadarRuleEngine.TimingState timing, boolean profitTakingConfirmed) {
+        TradingRadarRuleEngine.CounterTrendResult counterTrend =
+                new TradingRadarRuleEngine.CounterTrendResult(
+                        TradingRadarRuleEngine.CounterTrendState.NONE, List.of(), List.of());
+        return new TradingRadarRuleEngine.StockResult(
+                mediumScore, mediumAction, counterTrend, List.of(), List.of(),
+                TradingRadarRuleEngine.KdHeat.NORMAL, timing,
+                false, false,
+                shortScore, shortAction, List.of(), List.of(),
+                true, profitTakingConfirmed, null, null,
+                swingScore, swingAction, List.of(), List.of());
+    }
+
+    private int predicateN(BacktestDto.Response r, String predicate, boolean held) {
+        return r.results().stream()
+                .filter(s -> s.predicate().equals(predicate) && s.held() == held && s.horizon() == 5)
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("述詞不存在：" + predicate + "／held=" + held))
+                .n();
+    }
+
+    @Test
+    @DisplayName("356.13b 述詞集合含三軌對稱述詞（買進／獲利了結／極端超賣保護）")
+    void predicateSetCoversAllThreeHorizonsSymmetrically() {
+        List<StockPriceHistory> asc = series(WARMUP_ROWS + 40, 100, 0.001, 999, 0.0);
+        stubRepos(asc, List.of());
+
+        BacktestDto.Response r = service().run(new BacktestDto.Request(
+                List.of(CODE), null, null, List.of(5), null, null));
+
+        assertThat(r.results().stream().map(BacktestDto.PredicateStat::predicate).distinct())
+                .as("三軌述詞必須成組出現，缺 SWING_* 等於新增的那一軌零稽核覆蓋")
+                .contains("SHORT_BUY", "SWING_BUY", "MEDIUM_BUY",
+                        "SHORT_PROFIT_TAKING", "SWING_PROFIT_TAKING", "MEDIUM_PROFIT_TAKING",
+                        "SHORT_EXTREME_OVERSOLD_PROTECTED", "SWING_EXTREME_OVERSOLD_PROTECTED",
+                        "MEDIUM_EXTREME_OVERSOLD_PROTECTED");
+        // 五個 horizon 全開（356.13a）時，每個述詞都要有 5／10／20／60／120 各兩組（held／free）。
+        BacktestDto.Response all = service().run(new BacktestDto.Request(
+                List.of(CODE), null, null, null, null, null));
+        assertThat(all.results().stream()
+                .filter(s -> s.predicate().equals("SWING_BUY"))
+                .map(BacktestDto.PredicateStat::horizon).distinct().sorted())
+                .containsExactly(5, 10, 20, 60, 120);
+    }
+
+    @Test
+    @DisplayName("356.13b SWING_BUY 讀 swingAction，不得以 medium 的 action 冒充")
+    void swingBuyPredicateReadsSwingActionNotMediumAction() {
+        List<StockPriceHistory> asc = series(WARMUP_ROWS + 40, 100, 0.001, 999, 0.0);
+        stubRepos(asc, List.of());
+
+        // swing 是唯一的買進軌；medium／short 同時落在賣出組。
+        BacktestDto.Response r = serviceWithFixedResult(threeTrackResult(
+                10, TradingRadarRuleEngine.Action.AVOID,
+                10, TradingRadarRuleEngine.Action.AVOID,
+                80, TradingRadarRuleEngine.Action.BUY_CANDIDATE,
+                TradingRadarRuleEngine.TimingState.NEUTRAL, false))
+                .run(new BacktestDto.Request(List.of(CODE), null, null, List.of(5), null, null));
+
+        for (boolean held : new boolean[]{true, false}) {
+            assertThat(predicateN(r, "SWING_BUY", held))
+                    .as("SWING_BUY 必須採計 swingAction=BUY_CANDIDATE 的日子（held=%s）", held)
+                    .isPositive();
+            assertThat(predicateN(r, "MEDIUM_BUY", held))
+                    .as("medium 是 AVOID，MEDIUM_BUY 不得有樣本（held=%s）", held)
+                    .isZero();
+            assertThat(predicateN(r, "SHORT_BUY", held))
+                    .as("short 是 AVOID，SHORT_BUY 不得有樣本（held=%s）", held)
+                    .isZero();
+        }
+    }
+
+    @Test
+    @DisplayName("356.13b SWING_PROFIT_TAKING 讀 swingAction，不得以 medium 的 action 冒充")
+    void swingProfitTakingPredicateReadsSwingAction() {
+        List<StockPriceHistory> asc = series(WARMUP_ROWS + 40, 100, 0.001, 999, 0.0);
+        stubRepos(asc, List.of());
+
+        // 三軌都確認獲利了結，但只有 swing 真的落在賣出組。
+        BacktestDto.Response r = serviceWithFixedResult(threeTrackResult(
+                60, TradingRadarRuleEngine.Action.HOLD,
+                60, TradingRadarRuleEngine.Action.HOLD,
+                30, TradingRadarRuleEngine.Action.REDUCE_CANDIDATE,
+                TradingRadarRuleEngine.TimingState.EXTREME_OVERBOUGHT, true))
+                .run(new BacktestDto.Request(List.of(CODE), null, null, List.of(5), null, null));
+
+        for (boolean held : new boolean[]{true, false}) {
+            assertThat(predicateN(r, "SWING_PROFIT_TAKING", held)).isPositive();
+            assertThat(predicateN(r, "MEDIUM_PROFIT_TAKING", held)).isZero();
+            assertThat(predicateN(r, "SHORT_PROFIT_TAKING", held)).isZero();
+        }
+    }
+
+    @Test
+    @DisplayName("356.13b SWING_EXTREME_OVERSOLD_PROTECTED 讀 swingScore／swingAction")
+    void swingExtremeOversoldPredicateReadsSwingTrack() {
+        List<StockPriceHistory> asc = series(WARMUP_ROWS + 40, 100, 0.001, 999, 0.0);
+        stubRepos(asc, List.of());
+
+        // 只有 swing 同時滿足「分數 < 40」與「動作被改成中性組」；medium／short 分數都在 40 以上。
+        BacktestDto.Response r = serviceWithFixedResult(threeTrackResult(
+                80, TradingRadarRuleEngine.Action.HOLD,
+                80, TradingRadarRuleEngine.Action.HOLD,
+                30, TradingRadarRuleEngine.Action.HOLD_CAUTION,
+                TradingRadarRuleEngine.TimingState.EXTREME_OVERSOLD, false))
+                .run(new BacktestDto.Request(List.of(CODE), null, null, List.of(5), null, null));
+
+        for (boolean held : new boolean[]{true, false}) {
+            assertThat(predicateN(r, "SWING_EXTREME_OVERSOLD_PROTECTED", held)).isPositive();
+            assertThat(predicateN(r, "MEDIUM_EXTREME_OVERSOLD_PROTECTED", held)).isZero();
+            assertThat(predicateN(r, "SHORT_EXTREME_OVERSOLD_PROTECTED", held)).isZero();
+        }
     }
 }

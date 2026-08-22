@@ -18,7 +18,18 @@ import java.util.Objects;
 public class TradingRadarRuleEngine {
 
     /**
-     * V14：延續 V12 的短期／中期雙軌權重架構與全部因子權重（本次未改動任何個股參數值），
+     * V15：持有期由兩軌拆為<b>三軌</b>——一周（{@link Horizon#SHORT}）、1周~1月
+     * （{@link Horizon#SWING}）、1月~6月（{@link Horizon#MEDIUM}），並新增五個因子：
+     * 日K 棒、週線趨勢、週線動能、週線乖離、週K 棒與量能（Task 356／Requirement 93）。
+     * 因子數由 18 增為 23，<b>23 × 3 個權重全部重新給值</b>（含既有 18 個因子的新值），
+     * 三軌各自合計 {@code 1.00}。
+     *
+     * <p><b>這組權重全部是判斷性取值、無回測依據</b>：改動來源是「為 5 個新因子讓出
+     * 0.16–0.19 的權重，並讓每一列跨軌單調」，不是任何量測結果。
+     * <b>不得於任何 Javadoc、UI 或匯出文案宣稱這組權重能提高準確度或降低風險。</b>
+     * V14 與 V15 的分數不可直接比較。</p>
+     *
+     * <p>V14（歷史）：延續 V12 的短期／中期雙軌權重架構與全部因子權重（該次未改動任何個股參數值），
      * 只改大盤 regime 的量價環境因子輸入面（Task 342／Requirement 82）——美股大盤自本版起
      * 把既有的 IXIC 完成日量能比與完成日漲跌幅真正接進 {@code MarketInput}，
      * 不再算了卻不用；同時 {@code MarketInput} 新增 {@code crossMarketApplicable}，
@@ -35,61 +46,174 @@ public class TradingRadarRuleEngine {
      * 另外，極端時機（EXTREME_OVERBOUGHT／EXTREME_OVERSOLD）新增季線乖離自身分位替代路徑，
      * 使低波動標的的保護不再形同虛設（Task 299）。</p>
      */
-    public static final String RULE_VERSION = "TW_RULES_V14";
+    public static final String RULE_VERSION = "TW_RULES_V15";
+
+    /**
+     * 三軌持有期（Task 356.1a）。
+     *
+     * <p>{@code SHORT}＝一周（約 5 個交易日、DTO 前綴 {@code shortXxx}）、
+     * {@code SWING}＝1周~1月（約 5–20 個交易日、DTO 前綴 {@code swingXxx}）、
+     * {@code MEDIUM}＝1月~6月（約 20–120 個交易日、DTO 無前綴，唯一會寄信的一軌）。</p>
+     *
+     * <p>取代原本貫穿 {@code evaluateHorizon}／{@code applyCandidatePolicy} 的
+     * {@code boolean shortTerm}。<b>刻意不保留 boolean overload 與 enum 版本並存</b>——
+     * 兩條路徑會隨演進分歧。</p>
+     */
+    public enum Horizon { SHORT, SWING, MEDIUM }
 
     /** 現行 production 分層；candidate API 會改讀不可變 RuleParameters，既有入口仍固定這組。 */
+    /*
+     * 名稱刻意維持 V12_*：它指的是 V12 **參數集**，不是 {@link #RULE_VERSION}。
+     * V13／V14／V15 三次升版都沒動過這四個數字（75／55／40／25），三軌共用同一組。
+     * 改名為 V15_* 會讓「參數集版本」與「production 規則版號」共用同一組前綴卻指不同東西。
+     */
     private static final RuleParameters.ActionThresholds V12_ACTION_THRESHOLDS =
             new RuleParameters.ActionThresholds(75, 55, 40, 25);
 
-    // ─── V12 雙軌因子權重（Requirement 43／59／60，Task 291／292／298）────────
+    // ─── V15 三軌 × 23 因子權重（Requirement 93，Task 356.7）────────────────────
+    //
+    // 命名：SW_*（一周）／SWG_*（1周~1月）／MW_*（1月~6月）。三軌各自合計 1.00
+    // （由 SHORT_WEIGHT_SUM／SWING_WEIGHT_SUM／MEDIUM_WEIGHT_SUM 以編譯期加總表示並由測試釘住）。
+    //
+    // **跨軌單調**：每一列的 SW → SWG → MW 必須單調不增或單調不減，不得出現中間軌高於或低於
+    // 兩端的鋸齒。理由：中間軌的存在理由就是「介於兩者之間」，非單調等於宣告它是第三套獨立直覺，
+    // 那需要各自的回測依據，本任務沒有提供。此不變式由資料驅動測試逐列斷言。
+    //
+    // **全部 69 個數字都是判斷性取值、無回測依據**，包含既有 18 個因子的新值。
+    // 不得於任何 Javadoc、UI 或匯出文案宣稱這組權重能提高準確度或降低風險。
     private static final double SW_MA5 = 0.05;
-    private static final double SW_MA20 = 0.06;
-    private static final double SW_MA60 = 0.04;
+    private static final double SW_MA20 = 0.05;
+    private static final double SW_MA60 = 0.03;
     private static final double SW_MA240 = 0.02;
     /** 含 W%R 分量（Task 298 併入；W%R9 與 K 同源於 9 日高低帶，不再獨立佔權重）。 */
-    private static final double SW_KD_J = 0.14;
-    private static final double SW_MACD = 0.08;
-    private static final double SW_RSI = 0.06;
-    private static final double SW_BIAS = 0.07;
-    private static final double SW_VOLUME = 0.08;
-    private static final double SW_MARKET = 0.09;
-    private static final double SW_DAY_MOVE = 0.04;
-    private static final double SW_FX = 0.04;
-    private static final double SW_ETF_PREMIUM = 0.03;
-    private static final double SW_EPS = 0.03;
-    private static final double SW_ROE = 0.03;
-    private static final double SW_REVENUE = 0.04;
+    private static final double SW_KD_J = 0.12;
+    private static final double SW_MACD = 0.07;
+    private static final double SW_RSI = 0.05;
+    private static final double SW_BIAS = 0.06;
+    private static final double SW_VOLUME = 0.07;
+    private static final double SW_MARKET = 0.08;
+    private static final double SW_DAY_MOVE = 0.03;
+    private static final double SW_FX = 0.03;
+    private static final double SW_ETF_PREMIUM = 0.02;
+    private static final double SW_EPS = 0.02;
+    private static final double SW_ROE = 0.02;
+    private static final double SW_REVENUE = 0.03;
     private static final double SW_PE = 0.02;
-    private static final double SW_INDUSTRY = 0.08;
+    private static final double SW_INDUSTRY = 0.07;
+    /** 日K 棒（Task 356.5）：一周軌最重視當天這根 K 棒內部誰主導。 */
+    private static final double SW_DAILY_CANDLE = 0.06;
+    private static final double SW_WEEKLY_TREND = 0.03;
+    private static final double SW_WEEKLY_MOMENTUM = 0.03;
+    private static final double SW_WEEKLY_BIAS = 0.02;
+    private static final double SW_WEEKLY_CANDLE_VOLUME = 0.02;
+
+    private static final double SWG_MA5 = 0.04;
+    private static final double SWG_MA20 = 0.05;
+    private static final double SWG_MA60 = 0.05;
+    private static final double SWG_MA240 = 0.03;
+    /** 含 W%R 分量（理由同 {@link #SW_KD_J}）。 */
+    private static final double SWG_KD_J = 0.08;
+    private static final double SWG_MACD = 0.06;
+    private static final double SWG_RSI = 0.04;
+    private static final double SWG_BIAS = 0.06;
+    private static final double SWG_VOLUME = 0.06;
+    private static final double SWG_MARKET = 0.06;
+    private static final double SWG_DAY_MOVE = 0.02;
+    private static final double SWG_FX = 0.03;
+    private static final double SWG_ETF_PREMIUM = 0.02;
+    private static final double SWG_EPS = 0.04;
+    private static final double SWG_ROE = 0.04;
+    private static final double SWG_REVENUE = 0.03;
+    private static final double SWG_PE = 0.03;
+    private static final double SWG_INDUSTRY = 0.08;
+    private static final double SWG_DAILY_CANDLE = 0.03;
+    private static final double SWG_WEEKLY_TREND = 0.06;
+    private static final double SWG_WEEKLY_MOMENTUM = 0.05;
+    private static final double SWG_WEEKLY_BIAS = 0.02;
+    private static final double SWG_WEEKLY_CANDLE_VOLUME = 0.02;
 
     private static final double MW_MA5 = 0.02;
-    private static final double MW_MA20 = 0.05;
-    private static final double MW_MA60 = 0.08;
-    private static final double MW_MA240 = 0.07;
+    private static final double MW_MA20 = 0.04;
+    private static final double MW_MA60 = 0.06;
+    private static final double MW_MA240 = 0.06;
     /** 含 W%R 分量（Task 298 併入，理由同 {@link #SW_KD_J}）。 */
-    private static final double MW_KD_J = 0.07;
-    private static final double MW_MACD = 0.05;
-    private static final double MW_RSI = 0.04;
-    private static final double MW_BIAS = 0.08;
-    private static final double MW_VOLUME = 0.05;
-    private static final double MW_MARKET = 0.06;
-    private static final double MW_DAY_MOVE = 0.02;
+    private static final double MW_KD_J = 0.05;
+    private static final double MW_MACD = 0.04;
+    private static final double MW_RSI = 0.03;
+    private static final double MW_BIAS = 0.06;
+    private static final double MW_VOLUME = 0.04;
+    private static final double MW_MARKET = 0.05;
+    private static final double MW_DAY_MOVE = 0.01;
     private static final double MW_FX = 0.03;
     private static final double MW_ETF_PREMIUM = 0.02;
-    private static final double MW_EPS = 0.07;
-    private static final double MW_ROE = 0.07;
-    private static final double MW_REVENUE = 0.05;
-    private static final double MW_PE = 0.05;
-    private static final double MW_INDUSTRY = 0.12;
+    private static final double MW_EPS = 0.06;
+    private static final double MW_ROE = 0.06;
+    private static final double MW_REVENUE = 0.04;
+    private static final double MW_PE = 0.04;
+    private static final double MW_INDUSTRY = 0.10;
+    private static final double MW_DAILY_CANDLE = 0.01;
+    private static final double MW_WEEKLY_TREND = 0.07;
+    private static final double MW_WEEKLY_MOMENTUM = 0.05;
+    private static final double MW_WEEKLY_BIAS = 0.03;
+    private static final double MW_WEEKLY_CANDLE_VOLUME = 0.03;
 
     static final double SHORT_WEIGHT_SUM = SW_MA5 + SW_MA20 + SW_MA60 + SW_MA240 + SW_KD_J
             + SW_MACD + SW_RSI + SW_BIAS + SW_VOLUME + SW_MARKET + SW_DAY_MOVE + SW_FX
-            + SW_ETF_PREMIUM + SW_EPS + SW_ROE + SW_REVENUE + SW_PE + SW_INDUSTRY;
+            + SW_ETF_PREMIUM + SW_EPS + SW_ROE + SW_REVENUE + SW_PE + SW_INDUSTRY
+            + SW_DAILY_CANDLE + SW_WEEKLY_TREND + SW_WEEKLY_MOMENTUM + SW_WEEKLY_BIAS
+            + SW_WEEKLY_CANDLE_VOLUME;
+    static final double SWING_WEIGHT_SUM = SWG_MA5 + SWG_MA20 + SWG_MA60 + SWG_MA240 + SWG_KD_J
+            + SWG_MACD + SWG_RSI + SWG_BIAS + SWG_VOLUME + SWG_MARKET + SWG_DAY_MOVE + SWG_FX
+            + SWG_ETF_PREMIUM + SWG_EPS + SWG_ROE + SWG_REVENUE + SWG_PE + SWG_INDUSTRY
+            + SWG_DAILY_CANDLE + SWG_WEEKLY_TREND + SWG_WEEKLY_MOMENTUM + SWG_WEEKLY_BIAS
+            + SWG_WEEKLY_CANDLE_VOLUME;
     static final double MEDIUM_WEIGHT_SUM = MW_MA5 + MW_MA20 + MW_MA60 + MW_MA240 + MW_KD_J
             + MW_MACD + MW_RSI + MW_BIAS + MW_VOLUME + MW_MARKET + MW_DAY_MOVE + MW_FX
-            + MW_ETF_PREMIUM + MW_EPS + MW_ROE + MW_REVENUE + MW_PE + MW_INDUSTRY;
+            + MW_ETF_PREMIUM + MW_EPS + MW_ROE + MW_REVENUE + MW_PE + MW_INDUSTRY
+            + MW_DAILY_CANDLE + MW_WEEKLY_TREND + MW_WEEKLY_MOMENTUM + MW_WEEKLY_BIAS
+            + MW_WEEKLY_CANDLE_VOLUME;
     /** 舊測試名稱相容；V11 起主欄位是中期分數。 */
     static final double WEIGHT_SUM = MEDIUM_WEIGHT_SUM;
+
+    /**
+     * 23 × 3 權重表的<b>唯一可列舉表示</b>，供跨軌單調性測試逐列斷言（Task 356.7c）。
+     *
+     * <p>每一列為 {@code {一周, 1周~1月, 1月~6月}}，順序與 {@link FactorContributions}
+     * 的欄位順序、{@link #evaluateHorizon} 內 {@code acc.add} 的順序一致。</p>
+     */
+    static final double[][] WEIGHT_TABLE = {
+            { SW_MA5, SWG_MA5, MW_MA5 },
+            { SW_MA20, SWG_MA20, MW_MA20 },
+            { SW_MA60, SWG_MA60, MW_MA60 },
+            { SW_MA240, SWG_MA240, MW_MA240 },
+            { SW_KD_J, SWG_KD_J, MW_KD_J },
+            { SW_MACD, SWG_MACD, MW_MACD },
+            { SW_RSI, SWG_RSI, MW_RSI },
+            { SW_BIAS, SWG_BIAS, MW_BIAS },
+            { SW_VOLUME, SWG_VOLUME, MW_VOLUME },
+            { SW_MARKET, SWG_MARKET, MW_MARKET },
+            { SW_DAY_MOVE, SWG_DAY_MOVE, MW_DAY_MOVE },
+            { SW_FX, SWG_FX, MW_FX },
+            { SW_ETF_PREMIUM, SWG_ETF_PREMIUM, MW_ETF_PREMIUM },
+            { SW_EPS, SWG_EPS, MW_EPS },
+            { SW_ROE, SWG_ROE, MW_ROE },
+            { SW_REVENUE, SWG_REVENUE, MW_REVENUE },
+            { SW_PE, SWG_PE, MW_PE },
+            { SW_INDUSTRY, SWG_INDUSTRY, MW_INDUSTRY },
+            { SW_DAILY_CANDLE, SWG_DAILY_CANDLE, MW_DAILY_CANDLE },
+            { SW_WEEKLY_TREND, SWG_WEEKLY_TREND, MW_WEEKLY_TREND },
+            { SW_WEEKLY_MOMENTUM, SWG_WEEKLY_MOMENTUM, MW_WEEKLY_MOMENTUM },
+            { SW_WEEKLY_BIAS, SWG_WEEKLY_BIAS, MW_WEEKLY_BIAS },
+            { SW_WEEKLY_CANDLE_VOLUME, SWG_WEEKLY_CANDLE_VOLUME, MW_WEEKLY_CANDLE_VOLUME },
+    };
+
+    /** 23 個因子的中文名，僅供測試失敗訊息指出是哪一列（順序同 {@link #WEIGHT_TABLE}）。 */
+    static final String[] WEIGHT_TABLE_LABELS = {
+            "週線 MA5", "月線 MA20", "季線 MA60", "年線 MA240", "KD／J", "MACD", "RSI",
+            "乖離率 BIAS", "個股相對量", "市場環境", "完成日漲跌", "匯率", "ETF 折溢價",
+            "EPS 年增", "近似 ROE", "近三月營收年增", "PE 自身分位", "產業營收年增",
+            "日K 棒", "週線趨勢", "週線動能", "週線乖離", "週K 棒與量能",
+    };
 
     /** 極端超買／超賣的季線乖離門檻（%）。 */
     private static final double BIAS_EXTREME_HIGH = 20.0;
@@ -229,7 +353,7 @@ public class TradingRadarRuleEngine {
             BigDecimal d
     ) {}
 
-    /** Task 281 已落地的完整技術指標；Task 291 起納入雙軌評分。 */
+    /** Task 281 已落地的完整技術指標；Task 291 起納入評分，Task 356 起為三軌各自加權。 */
     public record ExtendedIndicators(
             BigDecimal j9,
             BigDecimal k3d2,
@@ -247,6 +371,138 @@ public class TradingRadarRuleEngine {
             BigDecimal wr9
     ) {}
 
+    /**
+     * 一根 K 棒的還原 OHLC（Task 356.5a）。日K 用最新完成日、週K 用最新完成週。
+     *
+     * <p>本 record 只承載價格，不含日期：日K 的 as-of 日與 {@code RadarInputAssembler
+     * .Assembled.volatility60().asOfDate()} 同源（皆為 {@code adjustedRows.get(firstCompleted)}
+     * 的交易日），週K 的 as-of 日由 {@link WeeklyInput#weekEndDate()} 承載。</p>
+     */
+    public record CandleInput(
+            BigDecimal open,
+            BigDecimal high,
+            BigDecimal low,
+            BigDecimal close
+    ) {}
+
+    /**
+     * 週K 因子輸入（Task 356.6）：由 {@code RadarInputAssembler} 以還原後日K 聚合出的週K 序列
+     * 求值，公式一律沿用 {@code TechnicalIndicatorService} 既有的日K 公式（換序列不換公式）。
+     *
+     * <p>{@code dif}／{@code macd} <b>刻意不在此</b>：進評分的只有 {@code osc}，那兩個是純揭露欄，
+     * 由 {@code Assembled} 的週K {@code FullIndicators} 供給，兩者出自同一次
+     * {@code computeFromSeries(週K 序列)} 呼叫。</p>
+     *
+     * @param completedWeeks 完成週根數（已排除進行中週，且已排除 {@code high}／{@code low} 缺值週）。
+     *                       不足 60 根時全部指標欄為 {@code null}，四組週K 因子一律缺值。
+     */
+    public record WeeklyInput(
+            CandleInput candle,
+            BigDecimal ma5,
+            BigDecimal ma10,
+            BigDecimal ma20,
+            BigDecimal k,
+            BigDecimal d,
+            BigDecimal j9,
+            BigDecimal osc,
+            BigDecimal rsi5,
+            BigDecimal rsi10,
+            BigDecimal bias10,
+            BigDecimal bias20,
+            BigDecimal volumeRatio,
+            BigDecimal changePercent,
+            LocalDate weekEndDate,
+            int completedWeeks
+    ) {}
+
+    // ───────────────────────── K 棒三分量的純函數（Task 356.5c） ─────────────────────────
+    //
+    // 三支一律為 public static 無狀態純函數（{@code RadarInputAssembler.volumeRatio}／
+    // {@code bandWidthPercent} 雖然也是為了測試而抽出，但它們是 @Component 上的 instance 方法，
+    // 這裡刻意不照抄那個形狀）。引擎的因子計算與 DTO 的 DailyCandle／WeeklyIndicators 映射
+    // 共用同一支，不得各寫一份：三支<b>回傳未經 clamp、未經線性轉換的原值</b>（DTO 要的），
+    // 由呼叫端自行轉成 contribution（引擎要的）。
+    //
+    // 本組分量與 {@code completedChangePercent} <b>正交</b>：後者量「相對昨天走到哪」，
+    // 本組量「當天這根 K 棒內部誰主導」。兩者不得合併計分，也不得因為「都跟當日漲跌有關」
+    // 而互相取代。
+
+    /** K 棒分量的除法精度；與 {@code RadarInputAssembler.week52Position} 等既有比例欄一致。 */
+    private static final int CANDLE_SCALE = 8;
+
+    /**
+     * 三支 K 棒純函數<b>共用的全幅判準</b>（Task 356.5b-2）：{@code high − low}，
+     * 缺值或<b>非正</b>時回 {@code null}。
+     *
+     * <p><b>必須是「非正」而不是「相等」</b>：{@code high < low} 的倒置髒列若只判相等，
+     * {@code bodyDirection} 會回 {@code ±1}，讓一根確定無效的 K 棒拿到滿貢獻，且完全靜默。
+     * 本專案<b>沒有</b>「{@code high >= max(open, close)}、{@code low <= min(open, close)}」
+     * 的資料保證：{@code stock_price_history} 的 {@code open_price}／{@code high_price}／
+     * {@code low_price} 三欄皆 nullable 且沒有任何 CHECK（唯一的 CHECK 是
+     * {@code ck_sph_close_price_positive}），寫入端也只擋非正收盤。BFF 之所以有
+     * {@code ChartSeriesAligner.validCandle}，正是因為髒列真的存在。</p>
+     *
+     * <p><b>一律用 {@code compareTo} 語意、不得用 {@code equals}</b>：還原後 BigDecimal 的
+     * scale 會由 4 變 8，{@code equals} 會把數值相同的兩個值判成不相等。</p>
+     */
+    private static BigDecimal candleRange(BigDecimal high, BigDecimal low) {
+        if (high == null || low == null) return null;
+        BigDecimal range = high.subtract(low);
+        return range.signum() <= 0 ? null : range;
+    }
+
+    /**
+     * 收盤在當日高低區間的位置，{@code (close − low) / (high − low)}，值域 {@code [0,1]}。
+     *
+     * <p>收在上緣代表買方主導、下緣代表賣方主導。全幅非正（無波動、漲跌停鎖死或倒置髒列）時
+     * 此分量<b>缺值</b>（回 {@code null}），不得以 0.5 冒充中性。</p>
+     */
+    public static BigDecimal closePosition(BigDecimal high, BigDecimal low, BigDecimal close) {
+        BigDecimal range = candleRange(high, low);
+        if (range == null || close == null) return null;
+        return close.subtract(low).divide(range, CANDLE_SCALE, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * 實體方向 {@code sign(close − open)}：{@code +1}／{@code −1}／{@code 0}（十字線）。
+     *
+     * <p>缺值條件有二：(a) 四個輸入任一缺值；(b) <b>全幅非正</b>（{@code high − low <= 0}，
+     * 見 {@link #candleRange}）。</p>
+     *
+     * <p><b>(b) 是本任務唯一一處「缺值判準不只看該分量自己的輸入」，理由必須留在這裡</b>：
+     * 正常來源資料下 {@code high >= max(open, close)}、{@code low <= min(open, close)}，
+     * 全幅為零就代表這根 K 棒是一個<b>沒有價格區間的點</b>，不是十字線。若只判「缺 open」，
+     * {@code sign(close − open)} 會回 {@code 0}，整個因子得到一個<b>看似有效的中性讀數</b>
+     * （{@code 0} 會進 {@code Accumulator} 的 {@code sumW}），使用者與後續稽核都會讀成
+     * 「十字線＝多空平衡」，那是完全不同的狀態。台股漲跌停鎖死、極低流動性標的整日只有一筆
+     * 成交，都會走到這一條；{@code TechnicalIndicatorService} 的「{@code high}／{@code low}
+     * 缺值時 fallback 用 {@code close}」既有慣例更會自己產生 {@code high == low} 的退化 K 棒。</p>
+     *
+     * <p>真正的十字線是 <b>{@code high > low} 且 {@code close == open}</b>，此時回 {@code 0}。</p>
+     */
+    public static BigDecimal bodyDirection(
+            BigDecimal open, BigDecimal high, BigDecimal low, BigDecimal close) {
+        if (open == null || close == null) return null;
+        if (candleRange(high, low) == null) return null;
+        return BigDecimal.valueOf(close.compareTo(open));
+    }
+
+    /**
+     * 下影線占全幅的比例，{@code (min(open, close) − low) / (high − low)}，值域 {@code [0,1]}。
+     *
+     * <p>長下影線代表低檔有承接。缺 {@code open}／{@code high}／{@code low}／{@code close}
+     * 或全幅非正時缺值。</p>
+     *
+     * <p><b>轉成貢獻時的中性點 0.25（四分之一全幅）留在呼叫端</b>，且該值為<b>判斷性取值、
+     * 無回測依據</b>，不得於任何文案宣稱它能提高準確度。</p>
+     */
+    public static BigDecimal lowerShadowRatio(
+            BigDecimal open, BigDecimal high, BigDecimal low, BigDecimal close) {
+        BigDecimal range = candleRange(high, low);
+        if (range == null || open == null || close == null) return null;
+        return open.min(close).subtract(low).divide(range, CANDLE_SCALE, RoundingMode.HALF_UP);
+    }
+
     public record MarketInput(
             BigDecimal price,
             BigDecimal changePercent,
@@ -260,7 +516,11 @@ public class TradingRadarRuleEngine {
             BigDecimal soxChangePercent,
             BigDecimal usTechCompositePercent,
             boolean usTechAvailable,
-            boolean crossMarketApplicable
+            boolean crossMarketApplicable,
+            /** 最新完成日的大盤 K 棒（Task 356.5a／356.10a）；缺值時該項計 0 並揭露不採計。 */
+            CandleInput dailyCandle,
+            /** 大盤週K（Task 356.6／356.10a）；缺值時四項週線加減分一律不採計並揭露。 */
+            WeeklyInput weekly
     ) {
         /**
          * V10 前的呼叫形狀；量能與美股資料缺值時不加減分。
@@ -271,7 +531,35 @@ public class TradingRadarRuleEngine {
         public MarketInput(BigDecimal price, BigDecimal changePercent, Indicators indicators,
                            Confirmation ma60Confirmation, Confirmation ma240Confirmation) {
             this(price, changePercent, indicators, ma60Confirmation, ma240Confirmation,
-                    changePercent, null, null, null, null, null, false, true);
+                    changePercent, null, null, null, null, null, false, true, null, null);
+        }
+
+        /**
+         * Task 356 之前的完整形狀；週K 與日K 棒缺值時該五項一律不採計並於 risks 揭露。
+         *
+         * <p><b>⚠ 一律不得用於 production 或回測路徑</b>，理由與 {@link StockInput} 的同名警告
+         * 相同：少傳引數會靜默把 {@code dailyCandle}／{@code weekly} 填成 {@code null}。
+         * 兩條 production 大盤路徑（{@code buildMarket}／{@code buildUsMarket}）與
+         * {@code BacktestService} 的兩處大盤 {@code MarketInput} 一律走 15 參數的正式建構式。</p>
+         */
+        public MarketInput(
+                BigDecimal price,
+                BigDecimal changePercent,
+                Indicators indicators,
+                Confirmation ma60Confirmation,
+                Confirmation ma240Confirmation,
+                BigDecimal completedChangePercent,
+                BigDecimal marketVolumeRatio,
+                BigDecimal marketTurnoverRatio,
+                BigDecimal nasdaqChangePercent,
+                BigDecimal soxChangePercent,
+                BigDecimal usTechCompositePercent,
+                boolean usTechAvailable,
+                boolean crossMarketApplicable) {
+            this(price, changePercent, indicators, ma60Confirmation, ma240Confirmation,
+                    completedChangePercent, marketVolumeRatio, marketTurnoverRatio,
+                    nasdaqChangePercent, soxChangePercent, usTechCompositePercent,
+                    usTechAvailable, crossMarketApplicable, null, null);
         }
     }
 
@@ -350,8 +638,47 @@ public class TradingRadarRuleEngine {
             BigDecimal weeklyMa,
             ExtendedIndicators extendedIndicators,
             BigDecimal volumeRatio,
-            FundamentalInput fundamental
+            FundamentalInput fundamental,
+            /**
+             * 最新完成日的還原 OHLC（Task 356.5a）。缺值時 {@code DAILY_CANDLE} 因子為 null、
+             * 權重重分配，並於 risks 揭露；<b>不得以 0 冒充</b>。
+             */
+            CandleInput dailyCandle,
+            /**
+             * 週K 因子輸入（Task 356.6）。{@code null} 或 {@code completedWeeks < 60} 時
+             * 四組週K 因子<b>全部</b>缺值、權重重分配，並於 risks 揭露。
+             */
+            WeeklyInput weekly
     ) {
+        /**
+         * Task 356 之前的完整形狀；日K 棒與週K 缺值時五個新因子一律不採計。
+         *
+         * <p><b>⚠ 一律不得用於 production 或回測路徑。</b>本建構式只保留給歷史快照重算與
+         * Task 356 之前就存在的測試。少傳兩個引數<b>不會編譯失敗、不會拋例外、不會有任何 log</b>，
+         * 於是五個新因子（日K 棒、週線趨勢、週線動能、週線乖離、週K 棒與量能）恆為缺值、
+         * 權重被重分配掉——這正是本任務實作期間真的發生過的缺陷（{@code TradingRadarService
+         * .buildStock} 只傳 25 個引數，線上五因子全空、回測卻有值，兩邊靜默分岔）。
+         * 凡是自己組 {@code Assembled} 的呼叫端，一律走 27 參數的正式建構式並傳入
+         * {@code assembled.dailyCandle()} 與 {@code assembled.weekly()}；由
+         * {@code TradingRadarStockWeeklyWiringTest} 釘住。</p>
+         */
+        public StockInput(
+                boolean held, BigDecimal price, BigDecimal changePercent, BigDecimal completedChangePercent,
+                Indicators indicators, BigDecimal previousK, BigDecimal previousD,
+                Confirmation ma20Confirmation, Confirmation ma60Confirmation, Confirmation ma240Confirmation,
+                InstrumentType instrumentType, MarketRegime marketRegime, boolean marketStale,
+                BigDecimal fxPercentile, BigDecimal ma60BiasPercent, BigDecimal ma60BiasPercentile,
+                BigDecimal ma240BiasPercent, BigDecimal week52Position, BigDecimal kdBandWidthPercent,
+                BigDecimal etfPremiumPct, BigDecimal etfPremiumPercentile, BigDecimal weeklyMa,
+                ExtendedIndicators extendedIndicators, BigDecimal volumeRatio,
+                FundamentalInput fundamental) {
+            this(held, price, changePercent, completedChangePercent, indicators, previousK, previousD,
+                    ma20Confirmation, ma60Confirmation, ma240Confirmation, instrumentType, marketRegime,
+                    marketStale, fxPercentile, ma60BiasPercent, ma60BiasPercentile, ma240BiasPercent,
+                    week52Position, kdBandWidthPercent, etfPremiumPct, etfPremiumPercentile, weeklyMa,
+                    extendedIndicators, volumeRatio, fundamental, null, null);
+        }
+
         /** V10 的完整技術面建構式；舊回測／測試沒有基本面 observation。 */
         public StockInput(
                 boolean held, BigDecimal price, BigDecimal changePercent, BigDecimal completedChangePercent,
@@ -722,12 +1049,23 @@ public class TradingRadarRuleEngine {
             Action shortAction,
             List<String> shortReasons,
             List<String> shortRisks,
+            /**
+             * 三軌的動作分組<b>不全相同</b>（Task 356.1c）。
+             *
+             * <p>V15 起由「短 vs 中兩軌分組不同」改為三軌比較；分組沿用既有定義
+             * （買進／中性／賣出／無法判定）。</p>
+             */
             boolean horizonConflict,
             boolean profitTakingConfirmed,
             /** Per-row medium-horizon normalized-BIAS provenance; null only for legacy callers. */
             NormalizedBiasProvenance normalizedBias,
             /** Per-row short-horizon normalized-BIAS provenance; null only for legacy callers. */
-            NormalizedBiasProvenance shortNormalizedBias
+            NormalizedBiasProvenance shortNormalizedBias,
+            /** 1周~1月 軌（Task 356.1b）；既有 component 的順序與名稱一律不動，新欄位一律追加在後。 */
+            Integer swingScore,
+            Action swingAction,
+            List<String> swingReasons,
+            List<String> swingRisks
     ) {
         /** Compatibility constructor for pre-provenance engine/test callers. */
         public StockResult(
@@ -749,6 +1087,33 @@ public class TradingRadarRuleEngine {
             this(score, action, counterTrend, reasons, risks, kdHeat, timingState,
                     kdDeadCross, longTermBroken, shortScore, shortAction, shortReasons,
                     shortRisks, horizonConflict, profitTakingConfirmed, null, null);
+        }
+
+        /** Task 356 之前的完整形狀；1周~1月 軌未供給時為 {@code NO_TRADE}／{@code null} 分數。 */
+        public StockResult(
+                Integer score,
+                Action action,
+                CounterTrendResult counterTrend,
+                List<String> reasons,
+                List<String> risks,
+                KdHeat kdHeat,
+                TimingState timingState,
+                boolean kdDeadCross,
+                boolean longTermBroken,
+                Integer shortScore,
+                Action shortAction,
+                List<String> shortReasons,
+                List<String> shortRisks,
+                boolean horizonConflict,
+                boolean profitTakingConfirmed,
+                NormalizedBiasProvenance normalizedBias,
+                NormalizedBiasProvenance shortNormalizedBias) {
+            this(score, action, counterTrend, reasons, risks, kdHeat, timingState,
+                    kdDeadCross, longTermBroken, shortScore, shortAction, shortReasons,
+                    shortRisks, horizonConflict, profitTakingConfirmed,
+                    normalizedBias, shortNormalizedBias,
+                    null, Action.NO_TRADE, List.of(),
+                    List.of("1周~1月 軌未由本呼叫端供給，今日不交易。"));
         }
     }
 
@@ -857,11 +1222,145 @@ public class TradingRadarRuleEngine {
             }
         }
 
+        score += weeklyMarketScore(input, reasons, risks);
+        score += dailyCandleMarketScore(input, reasons, risks);
+
         score = clamp(score);
         MarketRegime regime = score >= 65
                 ? MarketRegime.RISK_ON
                 : score >= 40 ? MarketRegime.NEUTRAL : MarketRegime.RISK_OFF;
         return new MarketResult(score, regime, List.copyOf(reasons), List.copyOf(risks));
+    }
+
+    // ─── 大盤週K 與日K 棒的加減分（Task 356.10a）─────────────────────────────────
+    //
+    // 下列全部幅度與門檻**一律為判斷性取值、無回測依據**（比照 OSC_FULL_SCALE_PCT 的既有揭露
+    // 慣例）。不得於任何文案宣稱它們能提高準確度或降低風險。
+    /** 現價相對週MA10 的加減分。 */
+    private static final int MARKET_WEEKLY_MA10_POINTS = 6;
+    /** 現價相對週MA20 的加減分。 */
+    private static final int MARKET_WEEKLY_MA20_POINTS = 5;
+    /** 週KD 方向的加減分。 */
+    private static final int MARKET_WEEKLY_KD_POINTS = 4;
+    /** 週 OSC 正負的加減分。 */
+    private static final int MARKET_WEEKLY_OSC_POINTS = 4;
+    /** 最新完成週上漲且放量的加分。 */
+    private static final int MARKET_WEEKLY_VOLUME_UP_POINTS = 4;
+    /** 最新完成週下跌且放量的扣分（不對稱是刻意的：只收緊不放寬）。 */
+    private static final int MARKET_WEEKLY_VOLUME_DOWN_POINTS = 5;
+    /** 上漲但量能收斂的扣分。 */
+    private static final int MARKET_WEEKLY_THIN_UP_PENALTY = 2;
+    /** 下跌但量能收斂的加分。 */
+    private static final int MARKET_WEEKLY_THIN_DOWN_BONUS = 2;
+    private static final double MARKET_WEEKLY_VOLUME_HIGH = 1.1;
+    private static final double MARKET_WEEKLY_VOLUME_LOW = 0.8;
+    /** 日K 棒收盤區間位置的加減分。 */
+    private static final int MARKET_DAILY_CANDLE_POINTS = 3;
+    private static final double MARKET_CANDLE_STRONG_CLOSE = 0.7;
+    private static final double MARKET_CANDLE_WEAK_CLOSE = 0.3;
+
+    /**
+     * 大盤週線加減分（Task 356.10a）。任一資料缺值即<b>該項計 0 並於 risks 揭露「不採計」</b>，
+     * 不得寫成中性結論。
+     *
+     * <p>週K 缺值<b>不影響</b> {@code complete(MarketInput)}／{@code dataComplete}
+     * （Task 356.10a-2）——若把 weekly 併進完整性判定，完成週不足 60 的大盤會整組變
+     * {@code DATA_INCOMPLETE}，連帶關掉<b>全部個股</b>的買進閘門。</p>
+     */
+    private int weeklyMarketScore(MarketInput input, List<String> reasons, List<String> risks) {
+        WeeklyInput weekly = input.weekly();
+        if (weekly == null) {
+            risks.add("大盤週K 尚未建立（完成週不足或序列不可得），本日不採計週線方向與週量價。 ");
+            return 0;
+        }
+        int score = 0;
+        score += marketPriceVsWeeklyMa(input.price(), weekly.ma10(), MARKET_WEEKLY_MA10_POINTS,
+                "週MA10", reasons, risks);
+        score += marketPriceVsWeeklyMa(input.price(), weekly.ma20(), MARKET_WEEKLY_MA20_POINTS,
+                "週MA20", reasons, risks);
+
+        if (weekly.k() == null || weekly.d() == null) {
+            risks.add("大盤週KD 資料不足，本日不採計週線動能方向。 ");
+        } else if (weekly.k().compareTo(weekly.d()) > 0) {
+            score += MARKET_WEEKLY_KD_POINTS;
+            reasons.add("大盤週KD 為 K>D，週線動能偏正向。 ");
+        } else if (weekly.k().compareTo(weekly.d()) < 0) {
+            score -= MARKET_WEEKLY_KD_POINTS;
+            risks.add("大盤週KD 未呈 K>D，週線動能偏弱。 ");
+        }
+
+        if (weekly.osc() == null) {
+            risks.add("大盤週 MACD 柱狀體資料不足，本日不採計。 ");
+        } else if (weekly.osc().signum() > 0) {
+            score += MARKET_WEEKLY_OSC_POINTS;
+            reasons.add("大盤週 OSC 為正，週線動能仍在多方。 ");
+        } else if (weekly.osc().signum() < 0) {
+            score -= MARKET_WEEKLY_OSC_POINTS;
+            risks.add("大盤週 OSC 為負，週線動能偏空。 ");
+        }
+
+        BigDecimal weekChange = weekly.changePercent();
+        BigDecimal weekVolumeRatio = weekly.volumeRatio();
+        if (weekChange == null || weekVolumeRatio == null) {
+            risks.add("大盤最新完成週的漲跌或量比資料不足，本日不採計週量價確認。 ");
+        } else {
+            double ratio = weekVolumeRatio.doubleValue();
+            if (weekChange.signum() > 0 && ratio >= MARKET_WEEKLY_VOLUME_HIGH) {
+                score += MARKET_WEEKLY_VOLUME_UP_POINTS;
+                reasons.add("大盤最新完成週上漲且週量能放大，週線需求獲得確認。 ");
+            } else if (weekChange.signum() < 0 && ratio >= MARKET_WEEKLY_VOLUME_HIGH) {
+                score -= MARKET_WEEKLY_VOLUME_DOWN_POINTS;
+                risks.add("大盤最新完成週下跌且週量能放大，週線賣壓升高。 ");
+            } else if (weekChange.signum() > 0 && ratio <= MARKET_WEEKLY_VOLUME_LOW) {
+                score -= MARKET_WEEKLY_THIN_UP_PENALTY;
+                risks.add("大盤最新完成週上漲但週量能不足，漲勢確認偏弱。 ");
+            } else if (weekChange.signum() < 0 && ratio <= MARKET_WEEKLY_VOLUME_LOW) {
+                score += MARKET_WEEKLY_THIN_DOWN_BONUS;
+                reasons.add("大盤最新完成週下跌但週量能收斂，賣壓未擴大。 ");
+            }
+        }
+        return score;
+    }
+
+    /** 大盤日K 棒的收盤區間位置加減分（Task 356.10a）；全幅非正或 OHLC 缺漏時不採計。 */
+    private int dailyCandleMarketScore(MarketInput input, List<String> reasons, List<String> risks) {
+        CandleInput candle = input.dailyCandle();
+        BigDecimal position = candle == null ? null
+                : closePosition(candle.high(), candle.low(), candle.close());
+        if (position == null) {
+            risks.add("大盤最新完成日 K 棒沒有價格區間或 OHLC 缺漏，本日不採計日K 棒收盤位置。 ");
+            return 0;
+        }
+        double value = position.doubleValue();
+        if (value >= MARKET_CANDLE_STRONG_CLOSE) {
+            reasons.add("大盤最新完成日收在當日區間上緣，買方主導。 ");
+            return MARKET_DAILY_CANDLE_POINTS;
+        }
+        if (value <= MARKET_CANDLE_WEAK_CLOSE) {
+            risks.add("大盤最新完成日收在當日區間下緣，賣方主導。 ");
+            return -MARKET_DAILY_CANDLE_POINTS;
+        }
+        return 0;
+    }
+
+    /** 大盤現價相對某條週均線的加減分；均線缺值時揭露不採計（不得寫成中性）。 */
+    private int marketPriceVsWeeklyMa(BigDecimal price, BigDecimal ma, int weight, String label,
+                                      List<String> reasons, List<String> risks) {
+        if (price == null || ma == null) {
+            risks.add("大盤" + label + "資料不足，本日不採計該項週線位置。 ");
+            return 0;
+        }
+        int cmp = price.compareTo(ma);
+        if (cmp > 0) {
+            reasons.add("大盤最新價位於" + label + "之上。 ");
+            return weight;
+        }
+        if (cmp < 0) {
+            risks.add("大盤最新價位於" + label + "之下。 ");
+            return -weight;
+        }
+        risks.add("大盤最新價貼近" + label + "，方向尚未拉開。 ");
+        return 0;
     }
 
     public StockResult evaluateStock(StockInput input) {
@@ -879,19 +1378,26 @@ public class TradingRadarRuleEngine {
         StockResult raw = evaluateStock(input);
         if (context == null || context.evidence() == null) return raw;
         TradingRadarEvidenceGate.GatedActions gated = TradingRadarEvidenceGate.apply(
-                raw.action(), raw.shortAction(), input.held(), context.profile(), context.evidence());
+                raw.action(), raw.shortAction(), raw.swingAction(), input.held(),
+                context.profile(), context.evidence());
         List<String> mediumReasons = new ArrayList<>(raw.reasons());
         List<String> mediumRisks = new ArrayList<>(raw.risks());
         List<String> shortReasons = new ArrayList<>(raw.shortReasons());
         List<String> shortRisks = new ArrayList<>(raw.shortRisks());
+        List<String> swingReasons = new ArrayList<>(raw.swingReasons());
+        List<String> swingRisks = new ArrayList<>(raw.swingRisks());
         mediumRisks.addAll(gated.reasons());
         shortRisks.addAll(gated.reasons());
+        swingRisks.addAll(gated.reasons());
         return new StockResult(
                 raw.score(), gated.mediumAction(), raw.counterTrend(),
                 List.copyOf(mediumReasons), List.copyOf(mediumRisks), raw.kdHeat(), raw.timingState(),
                 raw.kdDeadCross(), raw.longTermBroken(), raw.shortScore(), gated.shortAction(),
-                List.copyOf(shortReasons), List.copyOf(shortRisks), raw.horizonConflict(),
-                raw.profitTakingConfirmed(), raw.normalizedBias(), raw.shortNormalizedBias());
+                List.copyOf(shortReasons), List.copyOf(shortRisks),
+                horizonConflict(gated.mediumAction(), gated.swingAction(), gated.shortAction()),
+                raw.profitTakingConfirmed(), raw.normalizedBias(), raw.shortNormalizedBias(),
+                raw.swingScore(), gated.swingAction(),
+                List.copyOf(swingReasons), List.copyOf(swingRisks));
     }
 
     /**
@@ -953,22 +1459,38 @@ public class TradingRadarRuleEngine {
         }
 
         CandidateContext requiredContext = Objects.requireNonNull(context, "context");
+        // Task 356.9c：swing 軌一律走 V15 baseline，故只要**任一** key promoted 就必須額外跑一次
+        // baseline。不能省：現行程式在**兩把 key 都 promoted** 時完全不會呼叫 evaluateStock，
+        // 若照「從 medium 取 swing」的字面實作，promoted 參數會靜默污染 swing 軌。
+        StockResult baseline = evaluateStock(input);
         StockResult medium = mediumPromoted
                 ? evaluateCandidate(input, registry.resolve(mediumKey), requiredContext)
-                : evaluateStock(input);
+                : baseline;
         StockResult shortTerm = shortPromoted
                 ? evaluateCandidate(input, registry.resolve(shortKey), requiredContext)
-                : evaluateStock(input);
-        return composeTrackScopedResult(medium, shortTerm);
+                : baseline;
+        return composeTrackScopedResult(medium, shortTerm, baseline);
     }
 
-    private StockResult composeTrackScopedResult(StockResult medium, StockResult shortTerm) {
+    /**
+     * 三軌組合（Task 356.9c）。
+     *
+     * <p><b>1周~1月 軌不納入 V13 candidate／promotion 機制</b>：{@code evaluateCandidate}／
+     * {@code evaluatePromoted} 只解析 short／medium 兩把 key，swing 四欄與三軌
+     * {@code horizonConflict} 一律由 {@code baseline}（純 {@link #evaluateStock}）供給。
+     * 理由：promotion registry 的候選參數是以 {@code 5／20／60／120} 對兩軌做樣本外校準選出的，
+     * 沒有針對 swing 軌的 holdout 證據，硬套等於未經校準就上線。</p>
+     */
+    private StockResult composeTrackScopedResult(
+            StockResult medium, StockResult shortTerm, StockResult baseline) {
         return new StockResult(
                 medium.score(), medium.action(), medium.counterTrend(), medium.reasons(), medium.risks(),
                 medium.kdHeat(), medium.timingState(), medium.kdDeadCross(), medium.longTermBroken(),
                 shortTerm.shortScore(), shortTerm.shortAction(), shortTerm.shortReasons(), shortTerm.shortRisks(),
-                actionGroup(medium.action()) != actionGroup(shortTerm.shortAction()),
-                medium.profitTakingConfirmed(), medium.normalizedBias(), shortTerm.shortNormalizedBias());
+                horizonConflict(medium.action(), baseline.swingAction(), shortTerm.shortAction()),
+                medium.profitTakingConfirmed(), medium.normalizedBias(), shortTerm.shortNormalizedBias(),
+                baseline.swingScore(), baseline.swingAction(),
+                baseline.swingReasons(), baseline.swingRisks());
     }
 
     private StockResult evaluateStockInternal(
@@ -977,6 +1499,8 @@ public class TradingRadarRuleEngine {
             // kdDeadCross／longTermBroken 一律填 false：資料不完整代表「無法判定」，
             // 不得改呼叫 kdDeadCross(input)——那在 indicators 為 null 時會回到「偶然的 false」，
             // 表面相同但語意不同（Task 273）。
+            // Task 356.1e：三軌都必須填成 NO_TRADE／score=null，不得只填兩軌而讓 swing 欄位
+            // 為 null 物件——消費端會分不出「無法判定」與「這一軌不存在」。
             return new StockResult(null, Action.NO_TRADE,
                     new CounterTrendResult(CounterTrendState.NONE, List.of(), List.of()), List.of(),
                     List.of("個股必要的 MA20／60／240、KD、241 根完成日 K 或大盤資料不足，今日不交易。"),
@@ -988,7 +1512,9 @@ public class TradingRadarRuleEngine {
                             : NormalizedBiasProvenance.from(true, null),
                     candidate == null || !candidate.normalizedBiasEnabled()
                             ? NormalizedBiasProvenance.disabled()
-                            : NormalizedBiasProvenance.from(true, null));
+                            : NormalizedBiasProvenance.from(true, null),
+                    null, Action.NO_TRADE, List.of(),
+                    List.of("必要資料不足，1周~1月 軌今日不交易。"));
         }
 
         boolean narrowBand = narrowKdBand(input);
@@ -1002,20 +1528,30 @@ public class TradingRadarRuleEngine {
         boolean profitTaking = profitTakingConfirmed(input, timing);
         boolean deadCross = kdDeadCross(input);
 
-        // 因子貢獻與其文案只算一次，兩軌各自加權累加（Task 305）：避免逐檔重算兩遍，
-        // 更避免日後只改其中一軌路徑上的貢獻函數呼叫，導致兩軌靜默分岔。
+        // 因子貢獻與其文案只算一次，三軌各自加權累加（Task 305／356.7a）：避免逐檔重算三遍，
+        // 更避免日後只改其中一軌路徑上的貢獻函數呼叫，導致三軌靜默分岔。
         FactorContributions factors = computeFactors(input, narrowBand, kdHeat);
-        HorizonScore medium = evaluateHorizon(input, false, factors, kdHeat, timing, profitTaking,
-                candidate, context == null ? null : context.mediumTreasuryContribution(), context,
+        HorizonScore medium = evaluateHorizon(input, Horizon.MEDIUM, factors, kdHeat, timing,
+                profitTaking, candidate,
+                context == null ? null : context.mediumTreasuryContribution(), context,
                 normalizedBias);
-        HorizonScore shortTerm = evaluateHorizon(input, true, factors, kdHeat, timing, profitTaking,
-                candidate, context == null ? null : context.shortTreasuryContribution(), context,
+        HorizonScore shortTerm = evaluateHorizon(input, Horizon.SHORT, factors, kdHeat, timing,
+                profitTaking, candidate,
+                context == null ? null : context.shortTreasuryContribution(), context,
                 normalizedBias);
+        // Task 356.9c／356.9d：swing 軌一律走 V15 baseline，連 candidate 參數集都不套用
+        // （RuleParameters 沒有、也不得新增 swing 的 ActionThresholds／CandidateWeight）。
+        // 因此 candidate 路徑下也要用 baseline 的 timing 與 profitTaking 重算這一軌。
+        TimingState baselineTiming = normalizedEnabled ? timingOf(input) : timing;
+        boolean baselineProfitTaking = normalizedEnabled
+                ? profitTakingConfirmed(input, baselineTiming) : profitTaking;
+        HorizonScore swing = evaluateHorizon(input, Horizon.SWING, factors, kdHeat, baselineTiming,
+                baselineProfitTaking, null, null, null, null);
         if (candidate != null) {
             medium = applyCandidatePolicy(input, medium, candidate, context,
-                    context.mediumDownsideRiskPct(), deadCross, profitTaking, false);
+                    context.mediumDownsideRiskPct(), deadCross, profitTaking, Horizon.MEDIUM);
             shortTerm = applyCandidatePolicy(input, shortTerm, candidate, context,
-                    context.shortDownsideRiskPct(), deadCross, profitTaking, true);
+                    context.shortDownsideRiskPct(), deadCross, profitTaking, Horizon.SHORT);
         }
         CounterTrendResult counterTrend = evaluateCounterTrend(input);
         return new StockResult(
@@ -1023,9 +1559,10 @@ public class TradingRadarRuleEngine {
                 medium.reasons(), medium.risks(), kdHeat, timing,
                 deadCross, longTermBroken(input),
                 shortTerm.score(), shortTerm.action(), shortTerm.reasons(), shortTerm.risks(),
-                actionGroup(medium.action()) != actionGroup(shortTerm.action()), profitTaking,
+                horizonConflict(medium.action(), swing.action(), shortTerm.action()), profitTaking,
                 NormalizedBiasProvenance.from(normalizedEnabled, normalizedBias),
-                NormalizedBiasProvenance.from(normalizedEnabled, normalizedBias));
+                NormalizedBiasProvenance.from(normalizedEnabled, normalizedBias),
+                swing.score(), swing.action(), swing.reasons(), swing.risks());
     }
 
     private record HorizonScore(
@@ -1036,10 +1573,11 @@ public class TradingRadarRuleEngine {
     ) {}
 
     /**
-     * 18 因子貢獻值＋共用文案的求值結果（Task 305）；不適用的因子為 {@code null}。
+     * 23 因子貢獻值＋共用文案的求值結果（Task 305／356.7d）；不適用的因子為 {@code null}。
      *
      * <p>欄位順序與 {@link #computeFactors} 內的求值順序一致，也與既有
-     * {@link #evaluateHorizon} 內 {@code acc.add} 的既有順序一致。</p>
+     * {@link #evaluateHorizon} 內 {@code acc.add} 的既有順序一致。Task 356 新增的五欄
+     * 一律追加在 {@code industry} 之後、{@code reasons}／{@code risks} 之前。</p>
      */
     private record FactorContributions(
             Double ma5,
@@ -1060,13 +1598,18 @@ public class TradingRadarRuleEngine {
             Double revenue,
             Double pe,
             Double industry,
+            Double dailyCandle,
+            Double weeklyTrend,
+            Double weeklyMomentum,
+            Double weeklyBias,
+            Double weeklyCandleVolume,
             List<String> reasons,
             List<String> risks
     ) {}
 
     /**
-     * 因子貢獻與其文案的共用求值：短期／中期兩軌輸入相同、只有權重不同，故只算一次，
-     * 交由 {@link #evaluateHorizon} 各自加權（Task 305）。
+     * 因子貢獻與其文案的共用求值：三軌輸入相同、只有權重不同，故只算一次，
+     * 交由 {@link #evaluateHorizon} 各自加權（Task 305／356.7d）。
      *
      * <p><b>呼叫順序刻意與重構前 {@code evaluateHorizon} 內 {@code acc.add} 的既有順序逐一對應</b>，
      * 既有貢獻函數（{@code positionOf}／{@code maWithConfirmation}／{@code kdJContribution}／
@@ -1082,7 +1625,11 @@ public class TradingRadarRuleEngine {
         List<String> reasons = new ArrayList<>();
         List<String> risks = new ArrayList<>();
 
-        Double ma5 = positionOf(input.price(), input.weeklyMa(), "週線", reasons, risks);
+        // Task 356.6a：標籤由「週線」改為「日線 MA5」。input.weeklyMa() 實際上是**日K 收盤序列的
+        // 5 日 SMA**，不是週K；不改的話同一份 reasons 會同時出現「最新價位於週線之上」與
+        // 「最新價位於週MA5 之上」兩則、卻是兩個不同的量，而那個措辭錯誤正是 Requirement 93 的
+        // 立案理由之一。欄位名 weeklyMa 依 356.14c 不得更動（改名會同時改變既有快照與匯出語意）。
+        Double ma5 = positionOf(input.price(), input.weeklyMa(), "日線 MA5", reasons, risks);
         Double ma20 = maWithConfirmation(input.price(), input.indicators().ma20(), input.ma20Confirmation(),
                 "月線", reasons, risks);
         Double ma60 = maWithConfirmation(input.price(), input.indicators().ma60(), input.ma60Confirmation(),
@@ -1136,21 +1683,286 @@ public class TradingRadarRuleEngine {
             }
         }
 
+        Double dailyCandle = dailyCandleContribution(input.dailyCandle(), risks);
+        WeeklyInput weekly = usableWeekly(input.weekly(), risks);
+        Double weeklyTrend = weeklyTrendContribution(weekly, input.price(), reasons, risks);
+        Double weeklyMomentum = weeklyMomentumContribution(weekly, input.price(), reasons, risks);
+        Double weeklyBias = weeklyBiasContribution(weekly, reasons, risks);
+        Double weeklyCandleVolume = weeklyCandleVolumeContribution(weekly, reasons, risks);
+
         return new FactorContributions(ma5, ma20, ma60, ma240, kdJ, macd, rsi, bias, volume, market,
                 dayMove, fx, etfPremium, eps, roe, revenue, pe, industry,
+                dailyCandle, weeklyTrend, weeklyMomentum, weeklyBias, weeklyCandleVolume,
                 List.copyOf(reasons), List.copyOf(risks));
     }
 
+    // ───────────────────────── Task 356.5／356.6 的五個新因子 ─────────────────────────
+    //
+    // 五者**只進分數，不進 TimingState／KdHeat／profitTakingConfirmed／kdDeadCross／
+    // longTermBroken 五個判定**（Task 356.8c）：把新指標接進極端態判定會同時改動保護門檻，
+    // 本任務沒有回測依據支持那麼做。
+
+    /** 收盤區間位置的中性點：收在正中央為 0 貢獻，上緣 +1、下緣 −1。 */
+    private static final double CLOSE_POSITION_NEUTRAL = 0.5;
     /**
-     * 單一持有期的動作映射；兩軌各自建立 Accumulator 並各自加權累加，不共用分數再切門檻。
+     * 下影線比例的中性點（四分之一全幅）。<b>判斷性取值、無回測依據</b>，
+     * 不得於任何文案宣稱它能提高準確度。
+     */
+    private static final double LOWER_SHADOW_NEUTRAL = 0.25;
+
+    /**
+     * 缺值原因 (B)：{@code open}／{@code high}／{@code low}／{@code close} 任一缺漏
+     * （四欄在 {@code stock_price_history} 皆 nullable，歷史列常見）。
+     */
+    private static final String DAILY_CANDLE_OHLC_MISSING_RISK =
+            "最新完成日 K 棒的 OHLC 資料缺漏，日K 棒因子不採計，缺值權重已重分配。 ";
+
+    /**
+     * 缺值原因 (A)：四欄俱全但<b>全幅非正</b>（漲跌停鎖死、整日單一成交價，或
+     * {@code high < low} 的倒置髒列）。
+     */
+    private static final String DAILY_CANDLE_NO_RANGE_RISK =
+            "最新完成日 K 棒沒有價格區間（漲跌停鎖死或整日單一成交價），"
+                    + "日K 棒因子不採計，缺值權重已重分配。 ";
+
+    /**
+     * 日K 棒因子（Task 356.5b）：收盤區間位置、實體方向、下影線比例三個分量各自 clamp 在
+     * {@code [-1,1]} 後<b>取可用值的平均</b>（缺值不計入平均、不以 0 冒充）。
+     *
+     * <p><b>與 {@code completedChangePercent} 正交</b>：後者量「相對昨天走到哪」，本因子量
+     * 「當天這根 K 棒內部誰主導」。兩者不得合併計分，也不得因為「都跟當日漲跌有關」而互相取代。</p>
+     *
+     * <p>三個分量全部缺值時整個因子為 {@code null}、權重由 {@link Accumulator} 重分配，
+     * 並在 {@code risks} 加一則揭露——<b>不得沉默</b>。全幅非正在台股是每天都可能命中的實際路徑
+     * （漲跌停鎖死、極低流動性標的整日單一成交價），不是理論案例。</p>
+     *
+     * <p><b>兩種缺值原因的文案不得互相冒充（Task 356.5d）</b>：{@code candle == null} 不是
+     * 「OHLC 缺漏」的唯一入口——{@code RadarInputAssembler.candleAt} 只在索引越界時回
+     * {@code null}，「該列存在但 {@code high}／{@code low} 為 null」拿到的是一個<b>非 null</b>
+     * 的 {@link CandleInput}，三個分量同樣全缺。若一律歸因為「沒有價格區間」，使用者會讀到
+     * 一句<b>可查證為假</b>的話（那天既沒有漲跌停鎖死，也不是只成交一筆）。故判準是：四欄
+     * 任一為 null → {@link #DAILY_CANDLE_OHLC_MISSING_RISK}；四欄俱全而全幅非正 →
+     * {@link #DAILY_CANDLE_NO_RANGE_RISK}。</p>
+     */
+    private Double dailyCandleContribution(CandleInput candle, List<String> risks) {
+        if (candle == null) {
+            risks.add(DAILY_CANDLE_OHLC_MISSING_RISK);
+            return null;
+        }
+        Double value = candleComponents(candle);
+        if (value == null) {
+            risks.add(hasFullOhlc(candle)
+                    ? DAILY_CANDLE_NO_RANGE_RISK
+                    : DAILY_CANDLE_OHLC_MISSING_RISK);
+        }
+        return value;
+    }
+
+    /** 四欄是否俱全；缺值原因分岔的唯一判準（見 {@link #dailyCandleContribution}）。 */
+    private static boolean hasFullOhlc(CandleInput candle) {
+        return candle.open() != null && candle.high() != null
+                && candle.low() != null && candle.close() != null;
+    }
+
+    /** 一根 K 棒的三分量平均；日K 與週K 共用同一支，不得各寫一份。 */
+    private Double candleComponents(CandleInput candle) {
+        BigDecimal position = closePosition(candle.high(), candle.low(), candle.close());
+        BigDecimal body = bodyDirection(candle.open(), candle.high(), candle.low(), candle.close());
+        BigDecimal shadow = lowerShadowRatio(
+                candle.open(), candle.high(), candle.low(), candle.close());
+        return averageAvailable(
+                position == null ? null
+                        : clampUnit((position.doubleValue() - CLOSE_POSITION_NEUTRAL) * 2.0),
+                body == null ? null : clampUnit(body.doubleValue()),
+                shadow == null ? null
+                        : clampUnit((shadow.doubleValue() - LOWER_SHADOW_NEUTRAL) * 4.0));
+    }
+
+    /**
+     * 週K 因子的共用前置（Task 356.6）：{@code weekly == null} 或完成週不足
+     * {@code MIN_COMPLETED_WEEKS}（由 assembler 以「指標欄全 null」表示）時，四組週K 因子
+     * <b>全部</b>缺值並在 {@code risks} 揭露一次——不得沉默，也不得寫成「週線中性」。
+     */
+    private WeeklyInput usableWeekly(WeeklyInput weekly, List<String> risks) {
+        int completedWeeks = weekly == null ? 0 : weekly.completedWeeks();
+        if (weekly == null || completedWeeks < WEEKLY_MIN_COMPLETED_WEEKS) {
+            risks.add("週K 完成週不足 " + WEEKLY_MIN_COMPLETED_WEEKS + " 根（目前 " + completedWeeks
+                    + " 根），本日不採計週線因子，缺值權重已重分配。 ");
+            return null;
+        }
+        return weekly;
+    }
+
+    /**
+     * 週K 指標成立的最少完成週根數（Task 356.3d／356.6）。
+     *
+     * <p><b>必須與 {@code RadarInputAssembler.MIN_COMPLETED_WEEKS} 保持同值</b>（由測試釘住）：
+     * assembler 以它決定要不要把指標欄填成 {@code null}，引擎以它決定要不要採計四組週K 因子。
+     * 引擎刻意不直接引用 assembler 的常數——引擎是純函數、不得反向依賴 {@code @Component}。</p>
+     *
+     * <p>下界來自週MACD：OSC 要到第 34 根完成週才有第一個值，60 根留了 26 根的 EMA 收斂餘裕。
+     * <b>此數字為判斷性取值、無回測依據。</b></p>
+     */
+    static final int WEEKLY_MIN_COMPLETED_WEEKS = 60;
+
+    /**
+     * 週線趨勢（Task 356.6a）：現價相對週 {@code ma5}／{@code ma10}／{@code ma20} 的位置，
+     * 沿用既有 {@link #positionOf} 的語意與文案，不另立規則。
+     */
+    private Double weeklyTrendContribution(
+            WeeklyInput weekly, BigDecimal price, List<String> reasons, List<String> risks) {
+        if (weekly == null) return null;
+        return averageAvailable(
+                positionOf(price, weekly.ma5(), "週MA5", reasons, risks),
+                positionOf(price, weekly.ma10(), "週MA10", reasons, risks),
+                positionOf(price, weekly.ma20(), "週MA20", reasons, risks));
+    }
+
+    /**
+     * 週 OSC 幅度正規化的全幅比例（現價 %），與日K 的 {@link #OSC_FULL_SCALE_PCT}
+     * <b>刻意是兩個獨立常數</b>（Task 356.6b）。
+     *
+     * <p>週 OSC 的幅度本來就大於日 OSC，沿用日K 的 {@code 0.5} 會讓幾乎每一根週K 都打到
+     * clamp 邊界而失去解析度。<b>{@code 2.0} 為判斷性取值、無回測依據</b>，
+     * 不得於任何文案宣稱它能提高準確度或降低風險。</p>
+     */
+    private static final double WEEKLY_OSC_FULL_SCALE_PCT = 2.0;
+
+    /**
+     * 週線動能（Task 356.6b）：週KD、週MACD、週RSI 三個分量取可用值平均。
+     *
+     * <p>週MACD 沿用 V12 建立的「OSC 相對現價幅度正規化」而非零軸硬翻面，避免零軸附近逐週抖動。</p>
+     */
+    private Double weeklyMomentumContribution(
+            WeeklyInput weekly, BigDecimal price, List<String> reasons, List<String> risks) {
+        if (weekly == null) return null;
+        Double direction = null;
+        Double position = null;
+        if (weekly.k() != null && weekly.d() != null) {
+            direction = (double) Integer.signum(weekly.k().compareTo(weekly.d()));
+            double average = weekly.k().add(weekly.d()).doubleValue() / 2.0;
+            position = clampUnit((50.0 - average) / 50.0);
+            if (direction > 0) reasons.add("週KD 為 K>D，週線動能轉強。 ");
+            if (direction < 0) risks.add("週KD 為 K<D，週線動能轉弱。 ");
+        }
+        Double jPosition = weekly.j9() == null
+                ? null : clampUnit((50.0 - weekly.j9().doubleValue()) / 50.0);
+        Double kd = averageAvailable(direction, position, jPosition);
+
+        Double macd = null;
+        if (weekly.osc() != null && price != null && price.signum() > 0) {
+            double oscPct = weekly.osc().doubleValue() / price.doubleValue() * 100.0;
+            macd = clampUnit(oscPct / WEEKLY_OSC_FULL_SCALE_PCT);
+            if (oscPct >= OSC_NARRATIVE_PCT) reasons.add("週 MACD 柱狀體 OSC 為正，週線動能偏多。 ");
+            if (oscPct <= -OSC_NARRATIVE_PCT) risks.add("週 MACD 柱狀體 OSC 為負，週線動能偏弱。 ");
+        }
+
+        Double rsiAverage = averageAvailable(decimal(weekly.rsi5()), decimal(weekly.rsi10()));
+        Double rsi = null;
+        if (rsiAverage != null) {
+            if (rsiAverage <= 30) reasons.add("週RSI 位於低檔，週線位置有利逢低觀察。 ");
+            if (rsiAverage >= 70) risks.add("週RSI 位於高檔，週線位置不利追價。 ");
+            rsi = clampUnit((50.0 - rsiAverage) / 50.0);
+        }
+        return averageAvailable(kd, macd, rsi);
+    }
+
+    /**
+     * 週MA10 乖離的全幅分母（%）。日K 的 {@code bias10} 用 {@code 10}，此處放寬為
+     * {@code 15}——週MA10 ≈ 一季尺度，乖離量級大於日MA10。<b>判斷性取值、無回測依據。</b>
+     */
+    private static final double WEEKLY_BIAS10_FULL_SCALE_PCT = 15.0;
+    /**
+     * 週MA20 乖離的全幅分母（%）。<b>維持 {@code 20} 不變、與日K 相同</b>——週MA20 ≈ 半年尺度，
+     * 實測乖離量級與日MA20 相近，刻意不放寬（<b>這不是筆誤</b>）。
+     * 同為判斷性取值、無回測依據。
+     */
+    private static final double WEEKLY_BIAS20_FULL_SCALE_PCT = 20.0;
+
+    /**
+     * 週線乖離（Task 356.6c）：負乖離（現價在週均線下方）為正貢獻＝低接位置，
+     * 正乖離為負貢獻＝追價成本。
+     */
+    private Double weeklyBiasContribution(
+            WeeklyInput weekly, List<String> reasons, List<String> risks) {
+        if (weekly == null) return null;
+        Double value = averageAvailable(
+                weekly.bias10() == null ? null
+                        : clampUnit(-weekly.bias10().doubleValue() / WEEKLY_BIAS10_FULL_SCALE_PCT),
+                weekly.bias20() == null ? null
+                        : clampUnit(-weekly.bias20().doubleValue() / WEEKLY_BIAS20_FULL_SCALE_PCT));
+        if (value != null && value > 0.4) reasons.add("週線乖離偏低，週尺度具均值回歸與逢低承接空間。 ");
+        if (value != null && value < -0.4) risks.add("週線乖離偏高，週尺度追價成本升高。 ");
+        return value;
+    }
+
+    /** 週量價確認的放量門檻，沿用日K 四象限的同一組數字。 */
+    private static final double WEEKLY_VOLUME_HIGH_RATIO = 1.2;
+    /** 週量價確認的量縮門檻，沿用日K 四象限的同一組數字。 */
+    private static final double WEEKLY_VOLUME_LOW_RATIO = 0.7;
+
+    /**
+     * 週K 棒與量能（Task 356.6d）：週收盤區間位置、週實體方向、週量價確認三個分量取可用值平均。
+     *
+     * <p>前兩者的缺值判準與日K <b>完全相同</b>（見 {@link #bodyDirection}）：週全幅非正代表
+     * 整週沒有任何價格區間，不是十字線。</p>
+     */
+    private Double weeklyCandleVolumeContribution(
+            WeeklyInput weekly, List<String> reasons, List<String> risks) {
+        if (weekly == null) return null;
+        CandleInput candle = weekly.candle();
+        Double position = null;
+        Double body = null;
+        if (candle != null) {
+            BigDecimal rawPosition = closePosition(candle.high(), candle.low(), candle.close());
+            position = rawPosition == null ? null
+                    : clampUnit((rawPosition.doubleValue() - CLOSE_POSITION_NEUTRAL) * 2.0);
+            BigDecimal rawBody = bodyDirection(
+                    candle.open(), candle.high(), candle.low(), candle.close());
+            body = rawBody == null ? null : clampUnit(rawBody.doubleValue());
+        }
+        Double confirmation = weeklyVolumeConfirmation(
+                weekly.changePercent(), weekly.volumeRatio(), reasons, risks);
+        return averageAvailable(position, body, confirmation);
+    }
+
+    /** 週量價四象限；與日K 的 {@link #volumeContribution} 同式，只有文案改為週尺度。 */
+    private Double weeklyVolumeConfirmation(BigDecimal changePercent, BigDecimal volumeRatio,
+                                            List<String> reasons, List<String> risks) {
+        if (changePercent == null || volumeRatio == null) return null;
+        int direction = changePercent.signum();
+        double ratio = volumeRatio.doubleValue();
+        if (direction > 0 && ratio >= WEEKLY_VOLUME_HIGH_RATIO) {
+            reasons.add("最新完成週帶量上漲，週線需求獲得成交量確認。 ");
+            return 1.0;
+        }
+        if (direction < 0 && ratio >= WEEKLY_VOLUME_HIGH_RATIO) {
+            risks.add("最新完成週爆量下跌，週線籌碼賣壓升高。 ");
+            return -1.0;
+        }
+        if (direction > 0 && ratio <= WEEKLY_VOLUME_LOW_RATIO) {
+            risks.add("最新完成週上漲但週量能不足，漲勢確認偏弱。 ");
+            return -0.4;
+        }
+        if (direction < 0 && ratio <= WEEKLY_VOLUME_LOW_RATIO) {
+            reasons.add("最新完成週下跌但週量能收斂，賣壓未擴大。 ");
+            return 0.4;
+        }
+        return 0.0;
+    }
+
+    /**
+     * 單一持有期的動作映射；<b>三軌各自建立 {@link Accumulator} 並各自加權累加</b>，
+     * 不得以「同一個分數套三組門檻」實作（Task 356.7a）。缺值因子不進 {@code sumW}，
+     * 其權重由可用因子重新正規化，<b>不得以 0 冒充缺值</b>。
      *
      * <p>因子貢獻與其文案改由呼叫端算好一次傳入（{@link #computeFactors}，Task 305），
      * 本方法只負責依權重加總與 horizon 專屬文案（{@code describeHeat}、時機分位揭露、
-     * {@code actionFor} 內產生的句子）——這些仍逐軌各自執行，會分別出現在兩軌各自的清單。</p>
+     * {@code actionFor} 內產生的句子）——這些仍逐軌各自執行，會分別出現在三軌各自的清單。</p>
      */
     private HorizonScore evaluateHorizon(
             StockInput input,
-            boolean shortTerm,
+            Horizon horizon,
             FactorContributions factors,
             KdHeat kdHeat,
             TimingState timing,
@@ -1162,26 +1974,34 @@ public class TradingRadarRuleEngine {
         List<String> reasons = new ArrayList<>(factors.reasons());
         List<String> risks = new ArrayList<>(factors.risks());
         Accumulator acc = new Accumulator();
+        boolean shortTerm = horizon == Horizon.SHORT;
+        // Task 356.9c／356.9d 的不變式，寫成硬失敗而不是註解：SWING 沒有任何 candidate 校準依據，
+        // 若日後有人把 candidate 傳進 SWING，下面的 CandidateWeight 分派會靜默把它當成 MEDIUM。
+        if (horizon == Horizon.SWING && candidate != null) {
+            throw new IllegalArgumentException("1周~1月 軌不得套用 V13 candidate 參數集");
+        }
 
-        acc.add(shortTerm ? SW_MA5 : MW_MA5, factors.ma5());
-        acc.add(shortTerm ? SW_MA20 : MW_MA20, factors.ma20());
-        acc.add(shortTerm ? SW_MA60 : MW_MA60, factors.ma60());
-        acc.add(shortTerm ? SW_MA240 : MW_MA240, factors.ma240());
-        acc.add(shortTerm ? SW_KD_J : MW_KD_J, factors.kdJ());
-        acc.add(shortTerm ? SW_MACD : MW_MACD, factors.macd());
-        acc.add(shortTerm ? SW_RSI : MW_RSI, factors.rsi());
+        acc.add(weightOf(horizon, SW_MA5, SWG_MA5, MW_MA5), factors.ma5());
+        acc.add(weightOf(horizon, SW_MA20, SWG_MA20, MW_MA20), factors.ma20());
+        acc.add(weightOf(horizon, SW_MA60, SWG_MA60, MW_MA60), factors.ma60());
+        acc.add(weightOf(horizon, SW_MA240, SWG_MA240, MW_MA240), factors.ma240());
+        acc.add(weightOf(horizon, SW_KD_J, SWG_KD_J, MW_KD_J), factors.kdJ());
+        acc.add(weightOf(horizon, SW_MACD, SWG_MACD, MW_MACD), factors.macd());
+        acc.add(weightOf(horizon, SW_RSI, SWG_RSI, MW_RSI), factors.rsi());
         Double bias = factors.bias();
         if (candidate != null && candidate.normalizedBiasEnabled()) {
             // V13 candidate only：同一筆 immutable observation 同時供 timing 與
             // BIAS；缺 sigma 不偷偷以分位或固定值偽造 normalized score。
             bias = normalizedBiasCandidate(normalizedBias, candidate, reasons, risks);
         }
-        acc.add(shortTerm ? SW_BIAS : MW_BIAS, bias);
-        acc.add(shortTerm ? SW_VOLUME : MW_VOLUME, factors.volume());
+        acc.add(weightOf(horizon, SW_BIAS, SWG_BIAS, MW_BIAS), bias);
+        acc.add(weightOf(horizon, SW_VOLUME, SWG_VOLUME, MW_VOLUME), factors.volume());
+        // SWING 一律以 candidate == null 呼叫（Task 356.9c／356.9d），故永遠拿 baseline 權重；
+        // RuleParameters 沒有、也不得新增 SWING_MARKET 這類 candidate 權重 key。
         double marketWeight = candidateWeight(candidate,
                 shortTerm ? RuleParameters.CandidateWeight.SHORT_MARKET
                         : RuleParameters.CandidateWeight.MEDIUM_MARKET,
-                shortTerm ? SW_MARKET : MW_MARKET);
+                weightOf(horizon, SW_MARKET, SWG_MARKET, MW_MARKET));
         acc.add(marketWeight, factors.market());
         // V13 candidate-only typed numeric market features are an additional
         // factor beside the existing regime market factor.  Baseline/V12 keeps
@@ -1223,14 +2043,25 @@ public class TradingRadarRuleEngine {
                 }
             }
         }
-        acc.add(shortTerm ? SW_DAY_MOVE : MW_DAY_MOVE, factors.dayMove());
-        acc.add(shortTerm ? SW_FX : MW_FX, factors.fx());
-        acc.add(shortTerm ? SW_ETF_PREMIUM : MW_ETF_PREMIUM, factors.etfPremium());
-        acc.add(shortTerm ? SW_EPS : MW_EPS, factors.eps());
-        acc.add(shortTerm ? SW_ROE : MW_ROE, factors.roe());
-        acc.add(shortTerm ? SW_REVENUE : MW_REVENUE, factors.revenue());
-        acc.add(shortTerm ? SW_PE : MW_PE, factors.pe());
-        acc.add(shortTerm ? SW_INDUSTRY : MW_INDUSTRY, factors.industry());
+        acc.add(weightOf(horizon, SW_DAY_MOVE, SWG_DAY_MOVE, MW_DAY_MOVE), factors.dayMove());
+        acc.add(weightOf(horizon, SW_FX, SWG_FX, MW_FX), factors.fx());
+        acc.add(weightOf(horizon, SW_ETF_PREMIUM, SWG_ETF_PREMIUM, MW_ETF_PREMIUM),
+                factors.etfPremium());
+        acc.add(weightOf(horizon, SW_EPS, SWG_EPS, MW_EPS), factors.eps());
+        acc.add(weightOf(horizon, SW_ROE, SWG_ROE, MW_ROE), factors.roe());
+        acc.add(weightOf(horizon, SW_REVENUE, SWG_REVENUE, MW_REVENUE), factors.revenue());
+        acc.add(weightOf(horizon, SW_PE, SWG_PE, MW_PE), factors.pe());
+        acc.add(weightOf(horizon, SW_INDUSTRY, SWG_INDUSTRY, MW_INDUSTRY), factors.industry());
+        acc.add(weightOf(horizon, SW_DAILY_CANDLE, SWG_DAILY_CANDLE, MW_DAILY_CANDLE),
+                factors.dailyCandle());
+        acc.add(weightOf(horizon, SW_WEEKLY_TREND, SWG_WEEKLY_TREND, MW_WEEKLY_TREND),
+                factors.weeklyTrend());
+        acc.add(weightOf(horizon, SW_WEEKLY_MOMENTUM, SWG_WEEKLY_MOMENTUM, MW_WEEKLY_MOMENTUM),
+                factors.weeklyMomentum());
+        acc.add(weightOf(horizon, SW_WEEKLY_BIAS, SWG_WEEKLY_BIAS, MW_WEEKLY_BIAS),
+                factors.weeklyBias());
+        acc.add(weightOf(horizon, SW_WEEKLY_CANDLE_VOLUME, SWG_WEEKLY_CANDLE_VOLUME,
+                MW_WEEKLY_CANDLE_VOLUME), factors.weeklyCandleVolume());
         double treasuryWeight = candidateWeight(candidate,
                 shortTerm ? RuleParameters.CandidateWeight.SHORT_TREASURY
                         : RuleParameters.CandidateWeight.MEDIUM_TREASURY,
@@ -1242,11 +2073,22 @@ public class TradingRadarRuleEngine {
         // disclosure field; it must not silently participate in candidate action.
         if (candidate == null) describeBiasPercentileExtreme(timing, input, reasons, risks);
         int score = acc.score();
+        // Task 356.8a：三軌共用同一組 V12_ACTION_THRESHOLDS（75／55／40／25）。
         RuleParameters.ActionThresholds thresholds = candidate == null
                 ? V12_ACTION_THRESHOLDS
                 : shortTerm ? candidate.shortThresholds() : candidate.mediumThresholds();
         Action action = actionFor(input, score, timing, profitTaking, risks, reasons, thresholds);
         return new HorizonScore(score, action, List.copyOf(reasons), List.copyOf(risks));
+    }
+
+    /** 三軌權重選擇的<b>唯一分派點</b>；窮盡 switch，新增第四個 horizon 時必須編譯失敗。 */
+    private static double weightOf(Horizon horizon, double shortWeight, double swingWeight,
+                                  double mediumWeight) {
+        return switch (horizon) {
+            case SHORT -> shortWeight;
+            case SWING -> swingWeight;
+            case MEDIUM -> mediumWeight;
+        };
     }
 
     private NormalizedBiasObservation normalizedBiasObservation(
@@ -1292,7 +2134,11 @@ public class TradingRadarRuleEngine {
             BigDecimal downsideRiskPct,
             boolean deadCross,
             boolean profitTaking,
-            boolean shortTerm) {
+            Horizon track) {
+        if (track == Horizon.SWING) {
+            throw new IllegalArgumentException("1周~1月 軌不納入 V13 candidate／promotion 機制");
+        }
+        boolean shortTerm = track == Horizon.SHORT;
         TradingRadarV13ActionPolicy.Decision decision = TradingRadarV13ActionPolicy.apply(
                 input, horizon.action(), profitTaking, deadCross, downsideRiskPct, parameters, true);
         // Keep the action produced by the immutable rule policy separate from any
@@ -1703,7 +2549,17 @@ public class TradingRadarRuleEngine {
         return evidence >= 2;
     }
 
-    /** 短中期分歧只比較買進／中性／賣出／無法判定四個方向群組。 */
+    /**
+     * 持有期分歧（Task 356.1c）：<b>三軌的動作分組不全相同</b>即為分歧。
+     *
+     * <p>V15 之前是「短 vs 中兩軌分組不同」；分組定義沿用 {@link #actionGroup}。</p>
+     */
+    private boolean horizonConflict(Action medium, Action swing, Action shortTerm) {
+        int mediumGroup = actionGroup(medium);
+        return mediumGroup != actionGroup(swing) || mediumGroup != actionGroup(shortTerm);
+    }
+
+    /** 持有期分歧只比較買進／中性／賣出／無法判定四個方向群組。 */
     private int actionGroup(Action action) {
         if (action == null || action == Action.NO_TRADE) return 4;
         return switch (action) {
@@ -2042,7 +2898,15 @@ public class TradingRadarRuleEngine {
         return !equityMarketApplies(input) || !input.marketStale();
     }
 
-    /** V11 動作映射：兩軌各自以分數分層，再套止跌／追高／基本面閘門與對稱高低檔保護。 */
+    /**
+     * 動作映射：<b>三軌各自</b>以自己的分數分層，再套止跌／追高／基本面閘門與對稱高低檔保護
+     * （Task 356.8a／356.8b）。四項保護在三軌各自成立，不得只在其中兩軌實作。
+     *
+     * <p>{@code TimingState}／{@code KdHeat}／{@code profitTakingConfirmed}／
+     * {@code kdDeadCross}／{@code longTermBroken} 五個判定<b>維持每檔只算一次、三軌共用</b>，
+     * 公式與門檻一律不改；Task 356 新增的日K 棒與週K 因子<b>只進分數，不進這五個判定</b>
+     * ——把新指標接進極端態判定會同時改動保護門檻，本任務沒有回測依據支持那麼做（356.8c）。</p>
+     */
     private Action actionFor(StockInput input, int score, TimingState timing,
                              boolean profitTaking,
                              List<String> risks, List<String> reasons,
@@ -2083,7 +2947,7 @@ public class TradingRadarRuleEngine {
                 || timing == TimingState.EXTREME_OVERBOUGHT;
         boolean fundamentalsBlockBuy = fundamentalDeteriorating(input);
         if (fundamentalsBlockBuy) {
-            risks.add("基本面多項惡化，兩軌的買進／加碼／試單閘門關閉；本條件不直接產生賣出。 ");
+            risks.add("基本面多項惡化，三軌的買進／加碼／試單閘門關閉；本條件不直接產生賣出。 ");
         }
 
         boolean buyGate = marketAllowsBuy

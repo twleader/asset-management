@@ -312,7 +312,8 @@ class LiveAssetsDualFormatTest {
         // StockAlertTriggerExportService.buildCondition——「當前即時資產」分頁不讀週線，產出不變。
         return new TechnicalIndicatorService.FullIndicators(
                 new BigDecimal("1080.00"), new BigDecimal("1050.00"), new BigDecimal("990.00"),
-                new BigDecimal("75.12"), new BigDecimal("68.34"), null, null, null, TechnicalIndicatorService.ExtendedIndicators.EMPTY);
+                new BigDecimal("75.12"), new BigDecimal("68.34"), null, null, null,
+                TechnicalIndicatorService.ExtendedIndicators.EMPTY, null);
     }
 
     private static PriceQueryService.EtfNav nav() {
