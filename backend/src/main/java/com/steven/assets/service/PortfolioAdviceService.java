@@ -106,9 +106,9 @@ public class PortfolioAdviceService {
     // ===== 成本控管白名單（技術白名單，非業務分類，不入 /api/settings；比照 MarketAnalysisService）=====
 
     private static final List<PortfolioAdviceSettingsDto.ModelOption> AVAILABLE_MODELS = List.of(
-            new PortfolioAdviceSettingsDto.ModelOption("claude-opus-5", "Opus 5（最佳品質）"),
-            new PortfolioAdviceSettingsDto.ModelOption("claude-fable-5", "Fable 5（品質接近、較省）"),
-            new PortfolioAdviceSettingsDto.ModelOption("claude-sonnet-5", "Sonnet 5（最省、較粗略）")
+            new PortfolioAdviceSettingsDto.ModelOption("claude-fable-5", "Fable 5（最佳品質）"),
+            new PortfolioAdviceSettingsDto.ModelOption("claude-opus-5", "Opus 5（居中）"),
+            new PortfolioAdviceSettingsDto.ModelOption("claude-sonnet-5", "Sonnet 5（最省）")
     );
 
     private static final List<PortfolioAdviceSettingsDto.EffortOption> AVAILABLE_EFFORTS = List.of(

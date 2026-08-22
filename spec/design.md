@@ -2993,7 +2993,7 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
 
 ### 模型頁面可調（成本控管）
 
-分析**模型**與**思考深度（effort）**可由管理者在頁面切換（模型：Opus 5 / Fable 5 / Sonnet 5；effort：low / medium / high），另有**每日自動分析開關（enabled）**可停用各啟用中寄送時點的自動分析（停用時所有時段皆不觸發，省整筆花費），皆持久化、下次分析生效、免改環境變數或重啟。（**Task 179 起「新聞搜尋次數（web search）」下拉已移除**，新聞固定讀本地 `news_headline`。）
+分析**模型**與**思考深度（effort）**可由管理者在頁面切換（模型：Fable 5（最佳品質）/ Opus 5（居中）/ Sonnet 5（最省）；effort：low / medium / high），另有**每日自動分析開關（enabled）**可停用各啟用中寄送時點的自動分析（停用時所有時段皆不觸發，省整筆花費），皆持久化、下次分析生效、免改環境變數或重啟。（**Task 179 起「新聞搜尋次數（web search）」下拉已移除**，新聞固定讀本地 `news_headline`。）
 
 - **資料模型**（Liquibase `v1.38.0-market-analysis-setting.sql` 建表；`v1.39.0` 增 `effort`、`v1.40.0` 增 `web_search_max_uses`、`v1.41.0` 增 `enabled`；**`v1.54.0` `DROP` `web_search_max_uses`（Task 179）**。單列設定表，比照 `backup_setting`）：
   ```sql
@@ -3015,8 +3015,8 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
   ```
   Entity `MarketAnalysisSetting`（`@Id Integer id`、`model`、`effort`、`enabled`；**`webSearchMaxUses` 於 Task 179 移除**）＋ `MarketAnalysisSettingRepository`。
 - **解析**：`resolveModel()` = 設定表 `model`（非空）→ 否則 `@Value("${anthropic.model:claude-opus-5}")` 環境預設；`resolveEffort()` = `effort`（白名單內）→ 否則 `medium`；`isEnabled()` = `enabled` → 否則 `true`。`submitBatch` 每次呼叫前各取一次（故切換即時生效）；effort 以 `OutputConfig.builder().effort(...)`。**新聞來源固定本地 `news_headline`：不再有 `resolveWebSearchMaxUses()`、不再 `addTool(WebSearchTool…)`**；有本地新聞則 prompt 指示據清單列 `newsHighlights`、無則切為「不得杜撰新聞、`newsHighlights` 回空」。`isEnabled()` 則由 **`MarketAnalysisScheduler`** 於**每分鐘 tick 命中啟用寄送時點之後**檢查（未命中即零成本 return、根本不查 `enabled`，見 Requirement 31「關鍵業務邏輯」的排程段落），以及開機 self-heal 開頭檢查：`false` 即 return 略過（不呼叫 LLM），手動 `generate()` 不檢查此旗標。
-- **可選白名單／開關**：後端 curated 常數 `AVAILABLE_MODELS`（Opus 5／Fable 5／Sonnet 5）、`AVAILABLE_EFFORTS`（`low`／`medium`／`high`）皆為「技術白名單」而非使用者可自訂的業務分類，故**不**套用「Enum 必須入庫由 `/api/settings/*` 管理」規範；`enabled` 為布林開關（非白名單）。`effort` 不列 `xhigh`／`max`（更貴、與省錢目的相反）。（`AVAILABLE_WEB_SEARCHES` 白名單於 Task 179 移除。）`updateSettings(model, effort, enabled)` 對有帶的白名單欄各自驗證（非法 → 400），`enabled` 直接設值，未帶之欄不變；至少須一項；回傳清單時若現值不在白名單則補入（下拉恆含現值）。
-  - **成本觀點**：`enabled` 是最粗的槓桿——停用即當天完全不跑、零花費；`effort` 是主要槓桿（thinking 按 output token 計價，Opus $25/1M 最貴，`medium` 較隱含 `high` 省且對方向判斷足夠）。（新聞改讀本地 `news_headline`，已無付費 `web_search` 成本。）
+- **可選白名單／開關**：後端 curated 常數 `AVAILABLE_MODELS` 依品質由高到低排列：Fable 5／Opus 5／Sonnet 5；Fable 5 為 Anthropic 目前最強、也最貴模型 $10/$50 每 1M token，Opus 5 居中 $5/$25，Sonnet 5 最省 $3/$15（見 Anthropic 官方定價）。`AVAILABLE_EFFORTS`（`low`／`medium`／`high`）皆為「技術白名單」而非使用者可自訂的業務分類，故**不**套用「Enum 必須入庫由 `/api/settings/*` 管理」規範；`enabled` 為布林開關（非白名單）。`effort` 不列 `xhigh`／`max`（更貴、與省錢目的相反）。（`AVAILABLE_WEB_SEARCHES` 白名單於 Task 179 移除。）`updateSettings(model, effort, enabled)` 對有帶的白名單欄各自驗證（非法 → 400），`enabled` 直接設值，未帶之欄不變；至少須一項；回傳清單時若現值不在白名單則補入（下拉恆含現值）。
+  - **成本觀點**：`enabled` 是最粗的槓桿——停用即當天完全不跑、零花費；`model` 本身即為第一層成本槓桿（三選一中 Fable $50/1M 最貴、Opus $25/1M 居中、Sonnet $15/1M 最省，見上）；`effort` 為次一層槓桿（thinking 按所選模型 output token 計價，`medium` 較隱含 `high` 省且對方向判斷足夠）。（新聞改讀本地 `news_headline`，已無付費 `web_search` 成本。）
 - **API**：
   | Method | Path | 說明 |
   |---|---|---|
