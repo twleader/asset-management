@@ -67,6 +67,13 @@ public class DailyMarketAnalysis {
     @Column(name = "us_context", columnDefinition = "TEXT")
     private String usContext;
 
+    /**
+     * 分類分點 fragment（{@code MarketAnalysisResult.FactorGroups} 的 JSON 序列化，Requirement 95／Task 358）。
+     * 只有本機規則引擎路徑會寫入；LLM 路徑與既有列一律維持 {@code null}。
+     */
+    @Column(name = "factor_groups", columnDefinition = "TEXT")
+    private String factorGroups;
+
     /** 所用模型（claude-opus-4-8）。 */
     @Column(name = "model", length = 64)
     private String model;

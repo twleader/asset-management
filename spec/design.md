@@ -8754,3 +8754,70 @@ line 的 mark point 繼續掃 visible close。candle mode 分別掃 active frame
 `ChartSeriesAlignerTest` 新增 table-driven daily／weekly tests：合法日、中段 invalid、尾端 close-only/indicator-only、daily 全欄 cutoff、兩個 frame 的 currentClose/previousClose 與 `Latest` 實際 current/prev 欄位、一般週、假期短週、ISO 跨年週、壞日省略、D＋同週 indicator-only D+1 封頂、requestedStart 週三省略首個截斷週且下一週正常、requestedStart 週一休市仍保留合法短週，以及 empty prices／全 close-only／全 invalid 都回兩個非 null 空 frame；既有 top-level 日期聯集與 latest 測試照跑。`stockAnalysisDialog.contract.test.js` source assert daily/weekly 分支直接讀 `series.daily/weekly.currentClose/previousClose/latest`、空 frame 顯示局部訊息，且只禁止 K 分支從 frame arrays 推導 cutoff/join/prev；明文 allowlist 既有 intraday 昨收、line `lastNonNull` 與可視 Y 軸 slice。另檢查三模式、Candlestick/value order、紅綠、當日互斥、tooltip 與週末取樣提示；由 `npm test` 執行，另跑 production build。
 
 runtime 只需重建 BFF／frontend；若與 Task 348 同批交付，依共同 diff 一次重建 external、business、BFF、frontend。實際以 `00697B`、一般股票與 `0000` 切三模式，抽一根日 K 對照 history O/H/L/C、抽一根週 K 手算週開高低收；再切當日，確認仍為分鐘折線。
+
+## Requirement 95／Task 358：今日股市分析頁面分類分點呈現
+
+### 問題與既有結構
+
+`LocalMarketAnalysisEngine.evaluate()`（`:218-236`）在計分過程中已經把每個訊號的中文敘述分別 `add` 進三個區域變數：`twFragments`（技術面四項 MA／KD／MACD／RSI **與**量能面一項，五者混在同一個 list）、`usFragments`（SOX／IXIC／SPX 三項）、`chipFragments`（外資最新／外資近三日／投信／自營四項）。`evaluate()` 尾端把 `twFragments` 與 `usFragments` 分別 join 成既有欄位 `twContext`／`usContext`（`:261-264`），`buildSummary()`（`:624-648`）再把 `twFragments`／`usFragments`／`chipFragments` 三者依序黏成單一 `summary` 字串裡的「技術面：」「美股連動：」「籌碼面：」三段。**結構化資訊（每個訊號各自一句話）在 `buildSummary()` 這一步被摧毀成連續文字**，`TodayMarketAnalysisView.vue:123` 又原樣把整段 `summary` 塞進單一 `<div>`，使用者看到的是一段沒有分行的長句。
+
+本 Requirement 不重新分析、不改變任何訊號的計分邏輯，只把既有已經分好類的 fragment list 重新暴露成一個新的結構化欄位，並在前端改用分點呈現。
+
+### 資料模型異動
+
+```
+LocalMarketAnalysisEngine.evaluate(...)
+  twFragments      ← MA／KD／MACD／RSI 四項敘述（volumeSignal 移出後不再含量能）
+  volumeFragments  ← 新增，量能面一項敘述（原本錯誤地混在 twFragments）
+  usFragments      ← 不變（SOX／IXIC／SPX）
+  chipFragments    ← 不變（外資最新／外資近三日／投信／自營）
+       │
+       ▼
+  twContext = join(twFragments ∪ volumeFragments)   ← 既有欄位，文字內容須與拆分前逐字相同
+  usContext = join(usFragments)                       ← 既有欄位，不變
+  summary   = buildSummary(...)                       ← 既有欄位，文字內容須與拆分前逐字相同
+  factorGroups = FactorGroups(twFragments, volumeFragments, usFragments, chipFragments)  ← 新增，四個未 join 的原始陣列
+       │
+       ▼
+  MarketAnalysisResult(bias, confidence, summary, keyFactors, newsHighlights,
+                        twContext, usContext, factorGroups)   ← factorGroups 為新增第 8 個欄位
+```
+
+`volumeSignal()`（`:444-488`）的第三個參數由 `List<String> twFragments` 改名為 `List<String> volumeFragments`，方法內 `desc` 的 `add` 目標同步改變；除此之外**量能訊號的計算邏輯一個字不改**（權重 `W_TW_VOLUME`、`VOLUME_MA_DAYS`、`VOLUME_SURGE_RATIO`／`VOLUME_SHRINK_RATIO` 門檻皆不變）。`ALL_SIGNAL_KEYS`（`:91-93`）、`confidence` 完整度折減分母、`keyFactors` 產生邏輯（`:249-259`，每個非零方向分的 `Signal.factor()` 進 `keyFactors`）**全部不受影響**——這些都不依賴 `twFragments`／`volumeFragments` 的分割方式，只依賴各自獨立的 `Signal` 物件。
+
+`MarketAnalysisResult.FactorGroups` 為新增巢狀 record：
+
+```java
+public record FactorGroups(
+        List<String> twTechnical,   // MA／KD／MACD／RSI 四項敘述子集
+        List<String> twVolume,      // 量能面一項敘述（0 或 1 筆，量能訊號未計分時為空陣列）
+        List<String> us,            // SOX／IXIC／SPX 敘述子集
+        List<String> chip           // 外資最新／外資近三日／投信／自營敘述子集
+) {}
+```
+
+`factorGroups` 對 LLM 路徑恆為 `null`——LLM 的既有 system prompt JSON schema（`bias/confidence/summary/keyFactors[]/newsHighlights[]/twContext/usContext`）不新增這個 key，不要求模型輸出分類，`MarketAnalysisResult` 靠既有 `@JsonIgnoreProperties(ignoreUnknown = true)` 與 record 缺欄位為 null 的既有語意自然留空。
+
+### DB 與 DTO
+
+新增 Liquibase changeset `v1.108.0-market-analysis-factor-groups.sql`（建檔前重查 `databasechangelog`，目前已知最高版號為 `v1.107.0-deposit-type-withdrawal-order.sql`）：
+
+```sql
+ALTER TABLE daily_market_analysis ADD COLUMN IF NOT EXISTS factor_groups TEXT;
+```
+
+`DailyMarketAnalysis` entity 新增 `factorGroups`（`TEXT`，nullable，比照既有 `summary`／`keyFactors`／`newsHighlights`／`twContext`／`usContext` 同為無 `NOT NULL` 的 `TEXT` 欄位）；本機路徑 `applyLocalResult` 寫入 `objectMapper.writeValueAsString(result.factorGroups())`（`factorGroups()` 為 `null` 時寫入 `null`），LLM 路徑既有 `applyResult` 不動、`factor_groups` 恆為 `NULL`。既有列與所有既有分析（不論引擎）在本次上線當下一律為 `NULL`，這是預期行為、不回填。
+
+`MarketAnalysisDto` 新增欄位 `factorGroups`，`from(e, mapper)` 新增一個與既有 `parse()`（回傳 `List`，失敗時退回 `List.of()`）**不同語意**的解析：JSON 為 `null`／空白／損毀時回傳 `null`（不是空物件）。`null` 代表「本次分析沒有分類資料，前端走既有整段呈現」，與「有分類物件、其中某分類剛好空陣列」（代表「有算過但零命中」）語意不同，兩者混淆會讓前端無法分辨。
+
+### 前端
+
+`TodayMarketAnalysisView.vue` 既有 `summary`／`keyFactors`／`twContext`／`usContext` 呈現方式**全部保留**（向下相容 fallback）。`today.factorGroups` truthy 時，額外渲染四個並列的分類區塊（台股技術面／台股量能面／美股連動／籌碼面），沿用既有「關鍵因素」`<ul class="factor-list"><li>` 樣式與空狀態 `<div class="muted">—</div>` 寫法；台股（技術面＋量能面）與美股連動須分屬視覺上不同的區塊或欄位，不得同欄混排。`today.factorGroups` 為 `null`（LLM 分析或欄位為 `NULL` 的舊資料）時不渲染這四個區塊，畫面與本 Requirement 實作前完全一致。歷史列表 `el-table` 的 `summary` 欄不受影響，維持整段摘要，不比照分點展開（列表頁保持精簡）。
+
+BFF `TodayMarketAnalysisBffController` 的 `Mono.zip` passthrough 形狀不變，`today` 內容因 `MarketAnalysisDto` 新增欄位自然增長，不需改動 BFF 程式碼。`GET /api/public/market-analysis/today`（Requirement 79）同理自然增長，不修改契約邊界，不動 `docs/openapi/docker-external-api.yaml`。
+
+### 測試與 runtime
+
+後端：`LocalMarketAnalysisEngineTest`／`MarketAnalysisServiceLocalEngineTest` 新增斷言——`factorGroups` 四個清單與既有 `twContext`（`twFragments`＋`volumeFragments` 合併後的字串）／`usContext` 語意一致（逐條比對子句而非整段字串相等）；`volumeSignal()` 敘述不再出現在 `twFragments`；量能訊號缺值時 `twVolume` 為空陣列；LLM 路徑 `factorGroups` 恆為 `null`、DB `factor_groups` 恆為 `NULL`；`MarketAnalysisDto.from()` 對 `NULL`／空白／損毀 JSON 三種情形皆回傳 `null`；`applyLocalResult` 序列化後可經 `MarketAnalysisDto.from()` round-trip 還原；既有 `twContext`／`summary` 字串斷言不因拆分 `twFragments`／`volumeFragments` 而回歸。
+
+前端：本專案目前僅 `frontend/src/utils/*.test.js` 這類工具函式層級 contract test，`TodayMarketAnalysisView.vue` 無既有 view 元件測試前例，本 Requirement 不新增前端自動化測試，改以 `/run-stack` 實機驗證：`--no-cache` 重建並 recreate `business-services`／`bff`／`frontend` 後，登入頁面分別驗證 `engine=local` 新分析顯示四個分類區塊且台股／美股視覺分開、`engine=llm` 或舊資料（`factorGroups=null`）維持既有整段呈現不報錯、歷史列表 `summary` 欄未被更動。

@@ -154,6 +154,42 @@
         </el-col>
       </el-row>
 
+      <!-- 分類分點呈現（Requirement 95／Task 358）：本機規則引擎結果才有此欄，LLM 路徑為 null 時整塊不顯示 -->
+      <template v-if="today.factorGroups">
+        <el-row :gutter="16" style="margin-top:8px">
+          <el-col :xs="24" :md="12">
+            <div class="block-title">台股技術面</div>
+            <ul class="factor-list" v-if="today.factorGroups.twTechnical && today.factorGroups.twTechnical.length">
+              <li v-for="(f, i) in today.factorGroups.twTechnical" :key="i">{{ f }}</li>
+            </ul>
+            <div v-else class="muted">—</div>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <div class="block-title">台股量能面</div>
+            <ul class="factor-list" v-if="today.factorGroups.twVolume && today.factorGroups.twVolume.length">
+              <li v-for="(f, i) in today.factorGroups.twVolume" :key="i">{{ f }}</li>
+            </ul>
+            <div v-else class="muted">—</div>
+          </el-col>
+        </el-row>
+        <el-row :gutter="16" style="margin-top:8px">
+          <el-col :xs="24" :md="12">
+            <div class="block-title">美股連動</div>
+            <ul class="factor-list" v-if="today.factorGroups.us && today.factorGroups.us.length">
+              <li v-for="(f, i) in today.factorGroups.us" :key="i">{{ f }}</li>
+            </ul>
+            <div v-else class="muted">—</div>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <div class="block-title">籌碼面</div>
+            <ul class="factor-list" v-if="today.factorGroups.chip && today.factorGroups.chip.length">
+              <li v-for="(f, i) in today.factorGroups.chip" :key="i">{{ f }}</li>
+            </ul>
+            <div v-else class="muted">—</div>
+          </el-col>
+        </el-row>
+      </template>
+
       <div class="foot-meta">
         由 {{ today.model || 'Claude' }} 產生於 {{ formatTime(today.generatedAt) }}
         <span class="disclaimer">　·　本分析由 AI 產生，僅供參考，不構成投資建議</span>

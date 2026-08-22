@@ -217,6 +217,7 @@ public class LocalMarketAnalysisEngine {
 
         List<Signal> signals = new ArrayList<>();
         List<String> twFragments = new ArrayList<>();
+        List<String> volumeFragments = new ArrayList<>();
         List<String> usFragments = new ArrayList<>();
         List<String> chipFragments = new ArrayList<>();
 
@@ -224,7 +225,7 @@ public class LocalMarketAnalysisEngine {
         addIfPresent(signals, kdSignal(ind, twFragments));
         addIfPresent(signals, macdSignal(ind, prevInd, twFragments));
         addIfPresent(signals, rsiSignal(ind, twFragments));
-        addIfPresent(signals, volumeSignal(closes, volumes, twFragments));
+        addIfPresent(signals, volumeSignal(closes, volumes, volumeFragments));
 
         addIfPresent(signals, usSignal("SOX", "費城半導體", W_US_SOX, us, usFragments));
         addIfPresent(signals, usSignal("IXIC", "那斯達克綜合", W_US_IXIC, us, usFragments));
@@ -258,21 +259,33 @@ public class LocalMarketAnalysisEngine {
                     : "本次 " + signals.size() + " 項可計算訊號方向分皆為 0（中性），未出現偏多或偏空的具體證據。");
         }
 
-        String twContext = twFragments.isEmpty() ? "（台股日線資料不足，本次未產生技術面敘述）"
-                : String.join("；", twFragments) + "。";
+        List<String> twAndVolume = concat(twFragments, volumeFragments);
+        String twContext = twAndVolume.isEmpty() ? "（台股日線資料不足，本次未產生技術面敘述）"
+                : String.join("；", twAndVolume) + "。";
         String usContext = usFragments.isEmpty() ? "（美股日線資料不足，本次未產生連動敘述）"
                 : String.join("；", usFragments) + "。";
         String summary = buildSummary(analysisDate, bias, normalized, confidence,
-                signals.size(), twFragments, usFragments, chipFragments);
+                signals.size(), twFragments, volumeFragments, usFragments, chipFragments);
+
+        MarketAnalysisResult.FactorGroups factorGroups = new MarketAnalysisResult.FactorGroups(
+                List.copyOf(twFragments), List.copyOf(volumeFragments),
+                List.copyOf(usFragments), List.copyOf(chipFragments));
 
         return new MarketAnalysisResult(bias, confidence, summary, keyFactors,
-                selectNews(recentNews), twContext, usContext);
+                selectNews(recentNews), twContext, usContext, factorGroups);
     }
 
     private static void addIfPresent(List<Signal> signals, Signal s) {
         if (s != null) {
             signals.add(s);
         }
+    }
+
+    /** 回傳 {@code a} 接 {@code b} 的新 {@code ArrayList}，不修改任一輸入 list。 */
+    private static List<String> concat(List<String> a, List<String> b) {
+        List<String> result = new ArrayList<>(a);
+        result.addAll(b);
+        return result;
     }
 
     // ===== 台股技術面 =====
@@ -441,7 +454,7 @@ public class LocalMarketAnalysisEngine {
     }
 
     /** (e) 量能：當日成交金額對近 {@value #VOLUME_MA_DAYS} 交易日均值的比值，並與當日漲跌方向配對（量價配合）。 */
-    private Signal volumeSignal(List<double[]> closes, List<double[]> volumes, List<String> twFragments) {
+    private Signal volumeSignal(List<double[]> closes, List<double[]> volumes, List<String> volumeFragments) {
         if (volumes.size() < VOLUME_MA_DAYS + 1 || closes.size() < 2) {
             return null;   // 量能視窗或漲跌幅資料不足 → 不計分
         }
@@ -483,7 +496,7 @@ public class LocalMarketAnalysisEngine {
         String desc = "台股成交金額 " + num(latest / ONE_HUNDRED_MILLION.doubleValue()) + " 億元，為近 "
                 + VOLUME_MA_DAYS + " 日均量的 " + num(ratio) + " 倍，同日指數 "
                 + pct(changePct) + "，" + pattern;
-        twFragments.add(desc);
+        volumeFragments.add(desc);
         return new Signal(SIG_TW_VOLUME, direction, W_TW_VOLUME, desc);
     }
 
@@ -623,8 +636,8 @@ public class LocalMarketAnalysisEngine {
 
     private static String buildSummary(LocalDate analysisDate, String bias, double normalized,
                                        int confidence, int signalCount,
-                                       List<String> twFragments, List<String> usFragments,
-                                       List<String> chipFragments) {
+                                       List<String> twFragments, List<String> volumeFragments,
+                                       List<String> usFragments, List<String> chipFragments) {
         StringBuilder sb = new StringBuilder();
         // 自我標示：使歷史列表與每日 email 在純文字閱讀時即可分辨兩種來源，不必回查 model 欄位
         sb.append("【本機規則引擎產生，非 LLM 研判】");
@@ -633,8 +646,9 @@ public class LocalMarketAnalysisEngine {
           .append("（值域 -100～+100），信心 ").append(confidence)
           .append("％，實際參與計分訊號 ").append(signalCount).append("／")
           .append(ALL_SIGNAL_KEYS.size()).append(" 項。");
-        if (!twFragments.isEmpty()) {
-            sb.append("技術面：").append(String.join("；", twFragments)).append("。");
+        List<String> twAndVolume = concat(twFragments, volumeFragments);
+        if (!twAndVolume.isEmpty()) {
+            sb.append("技術面：").append(String.join("；", twAndVolume)).append("。");
         }
         if (!usFragments.isEmpty()) {
             sb.append("美股連動：").append(String.join("；", usFragments)).append("。");

@@ -177,6 +177,23 @@ class LocalMarketAnalysisEngineTest {
         assertTrue(r.confidence() > 0);
         assertNotNull(r.twContext());
         assertTrue(r.twContext().contains("47,625.50"), r.twContext());
+
+        // 357.2: factorGroups 分類須與 twContext／keyFactors 語意一致（逐條比對，非整段字串比對）
+        assertNotNull(r.factorGroups());
+        List<String> twTechnical = r.factorGroups().twTechnical();
+        List<String> twVolume = r.factorGroups().twVolume();
+        assertTrue(twTechnical.stream().anyMatch(f -> f.contains("台股收盤 47,625.50 點")), twTechnical.toString());
+        assertTrue(twTechnical.stream().anyMatch(f -> f.contains("KD 於 K=62.30／D=58.10")), twTechnical.toString());
+        assertTrue(twTechnical.stream().anyMatch(f -> f.contains("MACD OSC")), twTechnical.toString());
+        assertTrue(twTechnical.stream().anyMatch(f -> f.contains("RSI10")), twTechnical.toString());
+        // 357.1a: 量能敘述不得再出現在 twTechnical（曾經因參數命名混用而被誤併入）
+        assertFalse(twTechnical.stream().anyMatch(f -> f.contains("成交金額")), twTechnical.toString());
+        assertEquals(1, twVolume.size());
+        assertTrue(twVolume.get(0).contains("台股成交金額 12,000.00 億元，為近 20 日均量的 1.50 倍"), twVolume.toString());
+        // 357.1c: twContext 逐字等於「twTechnical 接 twVolume」join 的結果（拆分前後不得回歸）
+        List<String> concatenated = new ArrayList<>(twTechnical);
+        concatenated.addAll(twVolume);
+        assertEquals(String.join("；", concatenated) + "。", r.twContext());
     }
 
     /**
@@ -231,6 +248,30 @@ class LocalMarketAnalysisEngineTest {
                 NO_IND, NO_IND, null, List.of(), List.of());
 
         assertFalse(String.join(" ", r.keyFactors()).contains("成交金額"), r.keyFactors().toString());
+        // 357.2: 量能訊號缺值時 twVolume 為空陣列（不是 null、不是整塊缺席）
+        assertNotNull(r.factorGroups());
+        assertTrue(r.factorGroups().twVolume().isEmpty(), r.factorGroups().twVolume().toString());
+    }
+
+    /** 357.2: factorGroups 的 us／chip 分類須與 usContext／keyFactors 逐條一致。 */
+    @Test
+    void factorGroups_usAndChipMatchFragmentsUsedForUsContextAndChipKeyFactors() {
+        MarketAnalysisResult r = engine.evaluate(DATE, List.of(), List.of(),
+                allUsUp1Pct(), NO_IND, NO_IND,
+                net(DATE, 150, 50, 30), threeDaysOfNet(), List.of());
+
+        assertNotNull(r.factorGroups());
+        assertEquals(3, r.factorGroups().us().size());
+        assertEquals(String.join("；", r.factorGroups().us()) + "。", r.usContext());
+
+        List<String> chip = r.factorGroups().chip();
+        assertTrue(chip.stream().anyMatch(f -> f.contains("外資") && f.contains("買超")), chip.toString());
+        assertTrue(chip.stream().anyMatch(f -> f.contains("投信") && f.contains("買超")), chip.toString());
+        assertTrue(chip.stream().anyMatch(f -> f.contains("自營商") && f.contains("買超")), chip.toString());
+        assertTrue(chip.stream().anyMatch(f -> f.contains("近 3 個交易日累計")), chip.toString());
+        for (String f : chip) {
+            assertTrue(r.keyFactors().contains(f), "chip fragment 應同時出現在 keyFactors: " + f);
+        }
     }
 
     // ===== summary 自我標示為機器產生 =====

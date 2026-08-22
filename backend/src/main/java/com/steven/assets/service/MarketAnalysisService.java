@@ -542,6 +542,9 @@ public class MarketAnalysisService {
                 r.keyFactors() != null ? r.keyFactors() : List.of()));
         row.setNewsHighlights(objectMapper.writeValueAsString(
                 r.newsHighlights() != null ? r.newsHighlights() : List.of()));
+        row.setFactorGroups(r.factorGroups() == null
+                ? null
+                : objectMapper.writeValueAsString(r.factorGroups()));
     }
 
     /**
@@ -835,6 +838,7 @@ public class MarketAnalysisService {
         row.setNewsHighlights(null);
         row.setTwContext(null);
         row.setUsContext(null);
+        row.setFactorGroups(null);
         row.setRawResponse(null);
     }
 
