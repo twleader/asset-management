@@ -153,6 +153,26 @@ class MarketAnalysisServiceLocalEngineTest {
         assertTrue(row.getSummary().startsWith("【本機規則引擎產生，非 LLM 研判】"), row.getSummary());
     }
 
+    /** 357.4a：本機路徑須把 {@code result.factorGroups()} 序列化落庫；round-trip 後四個分類逐條相同。 */
+    @Test
+    void localEngine_persistsFactorGroupsAsRoundTrippableJson() throws Exception {
+        engineSetting(MarketAnalysisService.ENGINE_LOCAL);
+        when(usRepo.findByIndexCodeAndTradingDateGreaterThanEqualOrderByTradingDateAsc(eq("SOX"), any()))
+                .thenReturn(List.of(us("SOX", DATE.minusDays(1), "7000"), us("SOX", DATE, "7350")));
+        MarketAnalysisService svc = newService(mock(TechnicalIndicatorService.class),
+                new LocalMarketAnalysisEngine(), "");
+
+        DailyMarketAnalysis row = svc.generate(DATE, "test");
+
+        assertNotNull(row.getFactorGroups(), row.getFactorGroups());
+        MarketAnalysisResult.FactorGroups parsed = objectMapper.readValue(
+                row.getFactorGroups(), MarketAnalysisResult.FactorGroups.class);
+        assertTrue(parsed.us().stream().anyMatch(f -> f.contains("費城半導體")), parsed.us().toString());
+        assertTrue(parsed.twTechnical().isEmpty() || parsed.twTechnical() != null);
+        assertTrue(parsed.twVolume().isEmpty());
+        assertTrue(parsed.chip().isEmpty());
+    }
+
     // ===== (e) engine=llm 時既有批次路徑行為不回歸 =====
 
     @Test
@@ -376,7 +396,7 @@ class MarketAnalysisServiceLocalEngineTest {
 
         LocalMarketAnalysisEngine engine = mock(LocalMarketAnalysisEngine.class);
         when(engine.evaluate(any(), any(), any(), any(), any(), any(), any(), any(), any()))
-                .thenReturn(new MarketAnalysisResult("NEUTRAL", 0, "s", List.of(), List.of(), "tw", "us"));
+                .thenReturn(new MarketAnalysisResult("NEUTRAL", 0, "s", List.of(), List.of(), "tw", "us", null));
 
         MarketAnalysisService svc = newService(technical, engine, "");
         svc.generate(DATE, "test");
@@ -423,7 +443,7 @@ class MarketAnalysisServiceLocalEngineTest {
 
         LocalMarketAnalysisEngine engine = mock(LocalMarketAnalysisEngine.class);
         when(engine.evaluate(any(), any(), any(), any(), any(), any(), any(), any(), any()))
-                .thenReturn(new MarketAnalysisResult("NEUTRAL", 0, "s", List.of(), List.of(), "tw", "us"));
+                .thenReturn(new MarketAnalysisResult("NEUTRAL", 0, "s", List.of(), List.of(), "tw", "us", null));
 
         MarketAnalysisService svc = newService(technical, engine, "");
         svc.generate(DATE, "test");
@@ -469,7 +489,7 @@ class MarketAnalysisServiceLocalEngineTest {
 
         LocalMarketAnalysisEngine engine = mock(LocalMarketAnalysisEngine.class);
         when(engine.evaluate(any(), any(), any(), any(), any(), any(), any(), any(), any()))
-                .thenReturn(new MarketAnalysisResult("NEUTRAL", 0, "s", List.of(), List.of(), "tw", "us"));
+                .thenReturn(new MarketAnalysisResult("NEUTRAL", 0, "s", List.of(), List.of(), "tw", "us", null));
         MarketAnalysisService svc = newService(mock(TechnicalIndicatorService.class), engine, "");
 
         svc.generate(DATE, "test");
