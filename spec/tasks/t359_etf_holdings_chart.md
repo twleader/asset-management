@@ -72,6 +72,10 @@
 - [ ] **359.4e** **前端配合調整（回頭修 359.1）**：`holdingsPieOption`（`StockAnalysisDialog.vue:607` 起）不需要、也不應該再自己排序或截斷——`holdings` 陣列現在由 BFF 保證已經是「前 10 大 + 其它」，前端只單純把陣列映射進 pie series data（沿用 359.1c 既有的欄位映射與 null-safe 處理即可）。「其它」的配色：從既有 `ETF_HOLDINGS_PIE_COLORS`（10 色迴圈）跳出來，用固定灰階（比照 Dashboard `TW_PIE_COLORS` 陣列最後一色 `'#94a3b8'`）——最簡單的判斷方式是 `stockCode == null` 時套用這個固定色，其餘沿用迴圈色票。
 - [ ] **359.4f** `StockAnalysisDialog.vue:603-605`（`ETF_HOLDINGS_PIE_COLORS` 常數上方）現有的既有註解寫著「本頁 holdings 是 API 回傳的明確持股清單，不合成『其它』分類」——這句話在 359.4 之後不再成立，**必須同步改寫或移除**，不要留下與新行為矛盾的既有註解。
 - [ ] **359.4g** 既有 `stockAnalysisDialog.contract.test.js` 對 `holdingsSection` 的既有逐字斷言（`value: Number(h.weight)`／`code: h.stockCode || ''`／`name: h.stockName || h.stockCode || ''`／`shares: h.shares`，約 104~109 行）在調整 359.4e 的映射寫法後，需重新確認是否仍然綠燈；若寫法變動導致這些斷言失效，同步更新，不得留下假綠或假紅。
+- [ ] **359.4h** `spec/design.md` 有三處會因為 359.4a 落地而變成對現況的錯誤斷言，必須同步更新（CLAUDE.md SDD 第 2 步「design.md 反映變更」，不是可省略項）：
+  1. `spec/design.md:111` 目前寫「本檔的六條 route 皆為精確路徑」（描述 `StockAnalysisBffRoutes`）——`stock-analysis-etf-holdings` 移除後只剩 5 條，改成「五條」，並補一句 `/etf-holdings` 已改走 `StockAnalysisChartBffController` 的真實 controller method、不再出現在這份 route 表裡。
+  2. `spec/design.md:116` 目前寫「`GET /api/bff/stock-analysis/etf-holdings` → `/api/market-data/etf-holdings`」（與其餘純 passthrough bullet 同一種「→」記法）——比照同檔第 113 行 `/chart-series` 的既有寫法重寫，註明「由 `StockAnalysisChartBffController` 提供，非 Gateway passthrough」，並簡述排序＋截斷＋「其它」聚合的行為。
+  3. `bff/.../StockAnalysisBffRoutes.java` 與 `bff/.../StockAnalysisChartBffController.java` 兩處既有類註解裡寫死的「六條」字樣（359.4a 已引用這兩段註解的技術主張，但沒提醒連帶改字），一併改成「五條」。
 
 ## 驗證
 
