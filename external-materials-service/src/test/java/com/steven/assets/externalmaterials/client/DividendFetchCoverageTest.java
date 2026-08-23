@@ -343,11 +343,13 @@ class DividendFetchCoverageTest {
     }
 
     @Test
-    void taiwanStockDividendResultPureStockEventLandsExRightsDateInHistoricalAndUpcomingPaths()
+    void taiwanStockDividendResultPureStockRowIsExcludedInHistoricalAndUpcomingPaths()
             throws Exception {
-        // 357.2f：TaiwanStockDividendResult 的 stock_or_cache_dividend 含「權」不含「息」
-        // →純配股，必須落 exRightsDate、exDividendDate 為 null，在歷史（fetchTw／
-        // fetchTwDividendResult）與 upcoming（fetchFinMindUpcomingScope／
+        // Task 363／Requirement 99：TaiwanStockDividendResult 的 stock_or_cache_dividend
+        // 含「權」不含「息」的列，其 stock_and_cache_dividend 存的其實是除權參考價落差、
+        // 不是配股率（見任務檔 t363 背景段落實測），一律不得再解析為 DividendEvent。
+        // 修正前本測試斷言該列會落 exRightsDate；修正後改斷言完全不產生事件，在歷史
+        // （fetchTw／fetchTwDividendResult）與 upcoming（fetchFinMindUpcomingScope／
         // parseFinMindResultRows）兩條路徑皆須驗證。
         String emptyPrimary = "{\"status\":200,\"msg\":\"Success\",\"data\":[]}";
         String resultBody = """
@@ -358,19 +360,14 @@ class DividendFetchCoverageTest {
         DividendFetchClient historicalClient = new DividendFetchClient(
                 "", null, Clock.fixed(NOW, ZoneOffset.UTC), historyClient(emptyPrimary, resultBody));
         var observations = historicalClient.fetchObservations("00751B", "台股", 10);
-        var historicalEvent = observations.get(0).events().stream()
-                .filter(e -> "2026-06-15".equals(e.exRightsDate())).findFirst().orElseThrow();
-        assertThat(historicalEvent.exDividendDate()).isNull();
-        assertThat(historicalEvent.stockDividend()).isEqualByComparingTo("0.30");
-        assertThat(historicalEvent.cashDividend()).isEqualByComparingTo("0");
+        assertThat(observations.get(0).events())
+                .noneMatch(e -> "2026-06-15".equals(e.exRightsDate()));
 
         DividendFetchClient upcomingClient = new DividendFetchClient(
                 "", null, Clock.fixed(NOW, ZoneOffset.UTC), historyClient(emptyPrimary, resultBody));
         var scope = upcomingClient.fetchProviderUpcomingScope(
                 "00751B", "台股", LocalDate.of(2026, 6, 1), LocalDate.of(2026, 7, 16));
-        var upcomingEvent = scope.events().stream()
-                .filter(e -> "2026-06-15".equals(e.exRightsDate())).findFirst().orElseThrow();
-        assertThat(upcomingEvent.exDividendDate()).isNull();
+        assertThat(scope.events()).noneMatch(e -> "2026-06-15".equals(e.exRightsDate()));
     }
 
     @Test

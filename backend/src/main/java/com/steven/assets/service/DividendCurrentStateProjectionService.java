@@ -31,6 +31,25 @@ public class DividendCurrentStateProjectionService {
 
     private final DividendCurrentStateRepository repository;
 
+    /**
+     * Task 363／Requirement 99：一次性維護用途——取消單一 current-state ACTIVE 列
+     * （例如 fallback 表「權」型列灌入的錯誤配股率髒資料）。刻意不直接信任呼叫端傳入
+     * 的 {@code id}：先以 {@link DividendCurrentStateRepository#findActiveEventDetails}
+     * （{@code collapseDuplicateActiveEvents} 已在用同一方法）確認該 id 確實屬於
+     * {@code code}／{@code market} 底下目前 ACTIVE 的列，找到才呼叫
+     * {@link DividendCurrentStateRepository#cancelActiveEvent}，否則不做任何寫入並回傳
+     * {@code false}——避免誤取消到其他標的或已非 ACTIVE 的列。
+     */
+    @Transactional
+    public boolean cancelEventById(String code, String market, long id) {
+        if (code == null || market == null) return false;
+        boolean exists = repository.findActiveEventDetails(code, market).stream()
+                .anyMatch(row -> row.id() == id);
+        if (!exists) return false;
+        repository.cancelActiveEvent(id);
+        return true;
+    }
+
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public boolean projectOne(String code, String market, Instant decisionInstant) {
         if (code == null || market == null || decisionInstant == null) return false;
