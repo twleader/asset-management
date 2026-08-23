@@ -143,9 +143,14 @@ public class MarketDataFetchService {
             String stockCode, String market, boolean supported, String source,
             String asOfDate, String message, List<EtfHolding> holdings) {}
 
+    /**
+     * @param exDividendDate 除息日（現金股利基準日），yyyy-MM-dd 或 null
+     * @param exRightsDate   除權日（股票股利基準日），yyyy-MM-dd 或 null（Task 357／Requirement 94：
+     *                       停止與除息日互相 fallback，只配股事件此欄有值、exDividendDate 為 null）
+     */
     public record DividendRow(
             Integer year, BigDecimal cashDividend, BigDecimal stockDividend,
-            String exDividendDate, BigDecimal yieldPct,
+            String exDividendDate, String exRightsDate, BigDecimal yieldPct,
             String cashPaymentDate, String stockPaymentDate,
             Integer fillDays, BigDecimal previousClose) {}
 
@@ -809,9 +814,10 @@ public class MarketDataFetchService {
                 if (ts <= 0 || amt <= 0) continue;
                 LocalDate exDate = java.time.Instant.ofEpochSecond(ts)
                         .atZone(java.time.ZoneId.of("Europe/London")).toLocalDate();
+                // UK-only：Yahoo chart events=div 只有現金配息，exRightsDate 恆 null。
                 rows.add(new DividendRow(exDate.getYear(),
                         BigDecimal.valueOf(amt).setScale(4, RoundingMode.HALF_UP),
-                        BigDecimal.ZERO, exDate.toString(), null, null, null,
+                        BigDecimal.ZERO, exDate.toString(), null, null, null, null,
                         null, null));
             }
             rows.sort((a, b) -> {
@@ -849,12 +855,22 @@ public class MarketDataFetchService {
                 double stock = item.path("StockEarningsDistribution").asDouble(0)
                              + item.path("StockStatutorySurplus").asDouble(0);
                 if (cash == 0 && stock == 0) continue;
-                String exDate = item.path("CashExDividendTradingDate").asText("");
-                if (exDate.isEmpty()) exDate = item.path("StockExDividendTradingDate").asText("");
+                // 357.2a：除息日／除權日各自落地，不再互相 fallback；year 推導與
+                // calcDividendBasis 的觀察基準改用 anchorDate（兩者中較早且非 null 者），
+                // 保留原本 lenient 兩層 fallback 確保既有可解析格式逐位不變。
+                String cashExDate = item.path("CashExDividendTradingDate").asText("");
+                String stockExDate = item.path("StockExDividendTradingDate").asText("");
+                LocalDate anchor = anchorDividendDate(
+                        parseIsoDateOrNull(cashExDate), parseIsoDateOrNull(stockExDate));
                 Integer year = null;
-                if (exDate.length() >= 4) {
-                    try { year = Integer.parseInt(exDate.substring(0, 4)); }
-                    catch (NumberFormatException ignore) {}
+                if (anchor != null) {
+                    year = anchor.getYear();
+                } else {
+                    String primaryEx = !cashExDate.isEmpty() ? cashExDate : stockExDate;
+                    if (primaryEx.length() >= 4) {
+                        try { year = Integer.parseInt(primaryEx.substring(0, 4)); }
+                        catch (NumberFormatException ignore) {}
+                    }
                 }
                 if (year == null) {
                     String date = item.path("date").asText("");
@@ -864,20 +880,29 @@ public class MarketDataFetchService {
                 }
                 String cashPay = item.path("CashDividendPaymentDate").asText("");
                 String stockPay = item.path("StockDividendPaymentDate").asText("");
-                StockSourceQuery.DividendBasis basis = exDate.isEmpty()
+                // 填息天數以 anchorDate 為觀察基準：股價因除息或除權而產生的向下調整，
+                // 其後的「填息」行為以事件實際發生日為準，不論該事件是現金股利或股票
+                // 股利；只配股事件沒有除息日，若仍要求除息日才能算填息天數，這類事件的
+                // 填息天數會永遠是 EMPTY，故不能沿用舊有「以除息日為準」的寫法。
+                StockSourceQuery.DividendBasis basis = anchor == null
                         ? StockSourceQuery.DividendBasis.EMPTY
-                        : store.calcDividendBasis(stockCode, "台股", LocalDate.parse(exDate));
+                        : store.calcDividendBasis(stockCode, "台股", anchor);
                 rows.add(new DividendRow(year,
                         BigDecimal.valueOf(cash).setScale(4, RoundingMode.HALF_UP),
                         BigDecimal.valueOf(stock).setScale(4, RoundingMode.HALF_UP),
-                        exDate.isEmpty() ? null : exDate, null,
+                        cashExDate.isEmpty() ? null : cashExDate,
+                        stockExDate.isEmpty() ? null : stockExDate, null,
                         cashPay.isEmpty() ? null : cashPay,
                         stockPay.isEmpty() ? null : stockPay,
                         basis.fillDays(), basis.previousClose()));
             }
+            // 排序改用 anchorDate（除息日或除權日中較早者）：修正前只配股事件的
+            // exDividendDate 恆為 null 會退化為空字串排到最後，屬顯示順序瑕疵（非資料
+            // 遺失），357.2a 拆欄後必須一併修正，否則同一批回應內配股事件會被排到
+            // 不合理的位置。
             rows.sort((a, b) -> {
-                String ea = a.exDividendDate() != null ? a.exDividendDate() : "";
-                String eb = b.exDividendDate() != null ? b.exDividendDate() : "";
+                String ea = rowAnchorDate(a);
+                String eb = rowAnchorDate(b);
                 return eb.compareTo(ea);
             });
             return new DividendHistoryResult(stockCode, "台股", "FinMind", null, rows);
@@ -926,9 +951,10 @@ public class MarketDataFetchService {
                     }
                     StockSourceQuery.DividendBasis basis = store.calcDividendBasis(
                             stockCode, "美股", LocalDate.parse(exIso));
+                    // US-only：NASDAQ dividends 只有現金股利，exRightsDate 恆 null。
                     rows.add(new DividendRow(year,
                             BigDecimal.valueOf(amt).setScale(4, RoundingMode.HALF_UP),
-                            BigDecimal.ZERO, exIso, null, payIso, null,
+                            BigDecimal.ZERO, exIso, null, null, payIso, null,
                             basis.fillDays(), basis.previousClose()));
                 }
                 if (rows.isEmpty()) continue;
@@ -943,6 +969,27 @@ public class MarketDataFetchService {
             }
         }
         return new DividendHistoryResult(stockCode, "美股", "NASDAQ", "查無股利資料", List.of());
+    }
+
+    /**
+     * Task 357／357.2c：事件的錨定日期＝除息日與除權日中較早且非 null 者。只有一個日期
+     * 時恆等於該日期本身（與拆欄前 fallback 取到的值逐位相同）。
+     */
+    private static LocalDate anchorDividendDate(LocalDate exDividendDate, LocalDate exRightsDate) {
+        if (exDividendDate == null) return exRightsDate;
+        if (exRightsDate == null) return exDividendDate;
+        return exDividendDate.isBefore(exRightsDate) ? exDividendDate : exRightsDate;
+    }
+
+    private static LocalDate parseIsoDateOrNull(String value) {
+        if (value == null || value.isBlank()) return null;
+        try { return LocalDate.parse(value); } catch (RuntimeException e) { return null; }
+    }
+
+    private static String rowAnchorDate(DividendRow row) {
+        LocalDate anchor = anchorDividendDate(
+                parseIsoDateOrNull(row.exDividendDate()), parseIsoDateOrNull(row.exRightsDate()));
+        return anchor == null ? "" : anchor.toString();
     }
 
     // ─── 台股年度休市（TWSE primary / DGPA provisional）────────────────────────

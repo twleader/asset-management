@@ -161,10 +161,12 @@ public class HistoricalBondYieldBetaEvidenceAdapter implements BondYieldBetaEvid
 
         LocalDate from = prices.getFirst().getTradingDate();
         LocalDate to = prices.getLast().getTradingDate();
+        // Task 357／357.3d-1b：改用 anchorDate，理由同 BacktestService.eventsWithin()——
+        // repository 層的 findAdjustmentEvents 之外，這裡是獨立的二次過濾。
         List<StockDividendHistory> events = history.events().stream()
-                .filter(event -> event != null && event.getExDividendDate() != null
-                        && !event.getExDividendDate().isBefore(from)
-                        && !event.getExDividendDate().isAfter(to))
+                .filter(event -> event != null && event.anchorDate() != null
+                        && !event.anchorDate().isBefore(from)
+                        && !event.anchorDate().isAfter(to))
                 .toList();
         List<StockPriceHistory> desc = new ArrayList<>(prices);
         desc.sort(Comparator.comparing(StockPriceHistory::getTradingDate).reversed());
@@ -265,8 +267,9 @@ public class HistoricalBondYieldBetaEvidenceAdapter implements BondYieldBetaEvid
             LocalDate to = prices.getLast().getTradingDate();
             List<StockDividendHistory> loaded = dividendRepository.findAdjustmentEvents(
                     code, market, from, to);
+            // Task 357：改用 anchorDate，理由同上。
             events = loaded == null ? List.of() : loaded.stream()
-                    .filter(event -> event != null && event.getExDividendDate() != null)
+                    .filter(event -> event != null && event.anchorDate() != null)
                     .toList();
         }
         List<TreasuryYieldDto.StoredBatch> batches = treasuryRepository

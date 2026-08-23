@@ -63,6 +63,49 @@ class TaiwanOfficialDividendCalendarClientTest {
     }
 
     @Test
+    void pureStockOfficialRowLandsExRightsDateWithNullExDividendDate() throws Exception {
+        // 357.2e(a)：kind 不含「息」但 stock>0（純配股）→ 該 date 進 exRightsDate、
+        // exDividendDate 為 null。TWSE 無 CashDividend 欄位時 cash 應解析為 null。
+        HttpClient http = sequential(
+                response(200, """
+                        [{"Date":"1150810","Code":"9999","Name":"測試配股",
+                          "Exdividend":"除權","StockDividendRatio":"0.05000000"}]
+                        """, NOW, NOW.minusSeconds(3600)),
+                response(200, "[]", NOW, NOW.minusSeconds(1800)));
+        var client = new TaiwanOfficialDividendCalendarClient(
+                http, new ObjectMapper(), Clock.fixed(NOW, ZoneOffset.UTC));
+
+        var scope = client.fetch("9999", "台股", TODAY, HORIZON);
+
+        assertThat(scope.complete()).isTrue();
+        assertThat(scope.events()).singleElement().satisfies(event -> {
+            assertThat(event.exDividendDate()).isNull();
+            assertThat(event.exRightsDate()).isEqualTo("2026-08-10");
+            assertThat(event.stockDividend()).isEqualByComparingTo("0.50000000");
+        });
+    }
+
+    @Test
+    void pureStockOfficialRowDoesNotThrowEndToEndThroughSelectTarget() throws Exception {
+        // 357.2e(b)：selectTarget() 修正前對純配股列 LocalDate.parse(null) 會直接拋 NPE
+        // 並中斷整個 fetch()；此為端到端延伸，同構於既有測試風格。
+        HttpClient http = sequential(
+                response(200, """
+                        [{"Date":"1150810","Code":"8888","Name":"測試配股二",
+                          "Exdividend":"除權","StockDividendRatio":"0.20000000"}]
+                        """, NOW, NOW.minusSeconds(3600)),
+                response(200, "[]", NOW, NOW.minusSeconds(1800)));
+        var client = new TaiwanOfficialDividendCalendarClient(
+                http, new ObjectMapper(), Clock.fixed(NOW, ZoneOffset.UTC));
+
+        var scope = client.fetch("8888", "台股", TODAY, HORIZON);
+
+        assertThat(scope.complete()).isTrue();
+        assertThat(scope.events()).hasSize(1);
+        assertThat(scope.events().get(0).exRightsDate()).isEqualTo("2026-08-10");
+    }
+
+    @Test
     void currentEmptyOfficialArraysAreProviderProvenEmpty() throws Exception {
         HttpClient http = sequential(
                 response(200, "[]", NOW, NOW.minusSeconds(3600)),

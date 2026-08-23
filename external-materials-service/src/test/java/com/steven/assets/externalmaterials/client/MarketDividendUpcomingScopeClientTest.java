@@ -42,7 +42,7 @@ class MarketDividendUpcomingScopeClientTest {
         var officialUnavailable = DividendUpcomingScopeClient.UpcomingScope.unavailable("official down");
         var providerEvent = new DividendFetchClient.DividendEvent(
                 2026, new java.math.BigDecimal("0.25"), java.math.BigDecimal.ZERO,
-                "2026-08-10", null, null);
+                "2026-08-10", null, null, null);
         var providerScope = new DividendUpcomingScopeClient.UpcomingScope(
                 "FinMind", from, to, java.time.Instant.parse("2026-08-09T00:00:00Z"),
                 true, List.of(providerEvent), null);

@@ -235,10 +235,27 @@
                     <strong>{{ row.candidateAction || '—' }} → {{ row.action || '—' }}</strong>
                     <small v-if="row.evidence?.actionGateReasons?.length">{{ row.evidence.actionGateReasons.join('；') }}</small>
                   </div>
-                  <div class="confirm-item" v-if="row.evidence?.nextDistributionStatus">
-                    <span>下一配息（已知時點）</span>
-                    <strong>{{ row.evidence.nextDistributionDate || '—' }} · {{ row.evidence.nextDistributionStatus }}</strong>
-                    <small>{{ row.evidence.nextDistributionKnownAt || '—' }} · {{ row.evidence.nextDistributionProvider || '—' }}</small>
+                  <div class="confirm-item dividend-confirm-item" v-if="row.evidence?.nextDistributionStatus">
+                    <span>下一配息（已知時點）· {{ row.evidence.nextDistributionStatus }}</span>
+                    <div class="dividend-date-grid">
+                      <div class="dividend-date-cell">
+                        <small>除息</small>
+                        <strong>{{ row.evidence.nextExDividendDate || '—' }}</strong>
+                      </div>
+                      <div class="dividend-date-cell">
+                        <small>除權</small>
+                        <strong>{{ row.evidence.nextExRightsDate || '—' }}</strong>
+                      </div>
+                      <div class="dividend-date-cell">
+                        <small>發放股息</small>
+                        <strong>{{ row.evidence.nextCashPaymentDate || '—' }}</strong>
+                      </div>
+                      <div class="dividend-date-cell">
+                        <small>發放股權</small>
+                        <strong>{{ row.evidence.nextStockPaymentDate || '—' }}</strong>
+                      </div>
+                    </div>
+                    <small>取得時點 {{ fmtDateOnly(row.evidence.nextDistributionKnownAt) }} · {{ row.evidence.nextDistributionProvider || '—' }}</small>
                     <small v-if="row.evidence.nextDistributionSourceUrls?.length">來源：{{ row.evidence.nextDistributionSourceUrls.join('、') }}</small>
                     <small>5／20 個交易日內：{{ row.evidence.distributionsWithinFiveSessions ?? '—' }}／{{ row.evidence.distributionsWithinTwentySessions ?? '—' }}</small>
                     <small v-if="row.evidence.nextDistributionMissingReason">證據說明：{{ row.evidence.nextDistributionMissingReason }}</small>
@@ -1474,6 +1491,15 @@ function fmtTime(value) {
   return d.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
+// Task 357／357.6b：nextDistributionKnownAt 是 ISO-8601 date-time（API／匯出維持不變，
+// 精確時點的可稽核性見 Requirement 86）；僅此處前端呈現截成 yyyy-MM-dd。取字串前 10 碼
+// 而非 new Date() 轉换再格式化，避免瀏覽器本地時區把日界線位移一天。
+function fmtDateOnly(value) {
+  if (!value) return '—'
+  const s = String(value).substring(0, 10)
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : '—'
+}
+
 function priceColor(value) {
   const n = Number(value)
   if (!Number.isFinite(n) || n === 0) return '#64748b'
@@ -1890,6 +1916,13 @@ onUnmounted(() => {
 .confirm-grid { display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)); gap: 10px; }
 .confirm-item { border: 1px solid #e2e8f0; border-radius: 8px; background: white; padding: 12px; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
 .confirm-item span, .confirm-item small { color: #64748b; font-size: 12px; }
+/* Task 357／357.7b：下一配息四個日期（除息／除權／發放股息／發放股權）各自獨立標籤，
+   不得擠成一行——2 欄 × 2 列，小螢幕（見下方 @media）再降為單欄，避免標籤與日期黏在一起難以分辨是哪個。 */
+.dividend-confirm-item { width: 100%; grid-column: 1 / -1; }
+.dividend-date-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px 12px; width: 100%; margin: 2px 0; }
+.dividend-date-cell { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; border-radius: 6px; background: #f8fafc; border: 1px solid #e2e8f0; }
+.dividend-date-cell small { color: #64748b; font-size: 11px; }
+.dividend-date-cell strong { color: #0f172a; font-size: 13px; }
 .fundamental-panel { margin-top: 18px; border: 1px solid #cbd5e1; border-radius: 9px; background: #fff; padding: 14px 16px; }
 .evidence-detail-panel { margin-top: 18px; border: 1px solid #cbd5e1; border-radius: 9px; background: #fff; padding: 14px 16px; }
 .evidence-groups-panel { margin-top: 16px; border-top: 1px solid #e2e8f0; padding-top: 12px; }

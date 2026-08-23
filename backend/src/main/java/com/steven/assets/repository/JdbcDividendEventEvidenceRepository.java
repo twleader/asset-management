@@ -106,14 +106,20 @@ public class JdbcDividendEventEvidenceRepository implements DividendEventEvidenc
 
             List<Long> snapshotIds = refs.stream().map(SnapshotRef::id).distinct().toList();
             String placeholders = String.join(",", Collections.nCopies(snapshotIds.size(), "?"));
+            // Task 357／357.3d-1：這是交易雷達「下一配息」的資料來源；純配股事件的
+            // ex_dividend_date 為 null，改用 anchorDate = COALESCE(ex_dividend_date,
+            // ex_rights_date) 判斷事件是否存在，否則這類事件永遠不會成為下一配息證據。
             List<RawEvent> rawEvents = jdbc.query("""
-                    SELECT snapshot_id, ex_dividend_date, cash_dividend, stock_dividend,
-                           cash_payment_date, stock_payment_date, source_available_at
+                    SELECT snapshot_id, ex_dividend_date, ex_rights_date, cash_dividend,
+                           stock_dividend, cash_payment_date, stock_payment_date,
+                           source_available_at
                     FROM stock_dividend_snapshot_event
-                    WHERE snapshot_id IN (%s) AND ex_dividend_date IS NOT NULL
+                    WHERE snapshot_id IN (%s)
+                      AND COALESCE(ex_dividend_date, ex_rights_date) IS NOT NULL
                     """.formatted(placeholders), (rs, rowNum) -> new RawEvent(
                     rs.getLong("snapshot_id"),
                     rs.getObject("ex_dividend_date", LocalDate.class),
+                    rs.getObject("ex_rights_date", LocalDate.class),
                     rs.getBigDecimal("cash_dividend"), rs.getBigDecimal("stock_dividend"),
                     rs.getObject("cash_payment_date", LocalDate.class),
                     rs.getObject("stock_payment_date", LocalDate.class),
@@ -133,7 +139,7 @@ public class JdbcDividendEventEvidenceRepository implements DividendEventEvidenc
                                 event.cashPaymentDate(), event.stockPaymentDate(),
                                 max(ref.observedAt(), max(ref.sourceAvailableAt(),
                                         event.sourceAvailableAt())), ref.provider(),
-                                sourceUrls(ref.sourceUrl())))
+                                sourceUrls(ref.sourceUrl()), event.exRightsDate()))
                         .toList();
                 out.add(new DividendEventEvidenceResolver.SnapshotObservation(
                         ref.provider(), ref.scopeFrom(), ref.scopeTo(), ref.observedAt(),
@@ -170,6 +176,7 @@ public class JdbcDividendEventEvidenceRepository implements DividendEventEvidenc
     private record RawEvent(
             long snapshotId,
             LocalDate exDividendDate,
+            LocalDate exRightsDate,
             BigDecimal cashDividend,
             BigDecimal stockDividend,
             LocalDate cashPaymentDate,

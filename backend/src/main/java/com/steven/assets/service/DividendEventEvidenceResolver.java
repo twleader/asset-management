@@ -28,10 +28,31 @@ public final class DividendEventEvidenceResolver {
             LocalDate stockPaymentDate,
             Instant knownAt,
             String provider,
-            List<String> sourceUrls) {
+            List<String> sourceUrls,
+            /**
+             * 除權日（Task 357／Requirement 94）。追加在既有欄位之後（而非插入
+             * exDividendDate 之後），保留下方兩個既有相容建構式的呼叫端不動；
+             * production 落地路徑（{@code JdbcDividendEventEvidenceRepository}）
+             * 一律使用本欄位齊全的建構式，不得依賴相容建構式讓本欄位靜默變 null。
+             */
+            LocalDate exRightsDate) {
         public Event {
             sourceUrls = sourceUrls == null ? List.of() : sourceUrls.stream()
                     .filter(url -> url != null && !url.isBlank()).distinct().toList();
+        }
+
+        /** Compatibility shape：357 之前既有的「含 sourceUrls」呼叫端／測試。 */
+        public Event(
+                LocalDate exDividendDate,
+                BigDecimal cashDividend,
+                BigDecimal stockDividend,
+                LocalDate cashPaymentDate,
+                LocalDate stockPaymentDate,
+                Instant knownAt,
+                String provider,
+                List<String> sourceUrls) {
+            this(exDividendDate, cashDividend, stockDividend, cashPaymentDate, stockPaymentDate,
+                    knownAt, provider, sourceUrls, null);
         }
 
         /** Compatibility shape before event-level source URL disclosure. */
@@ -45,6 +66,11 @@ public final class DividendEventEvidenceResolver {
                 String provider) {
             this(exDividendDate, cashDividend, stockDividend, cashPaymentDate, stockPaymentDate,
                     knownAt, provider, List.of());
+        }
+
+        /** anchorDate = COALESCE(exDividendDate, exRightsDate)。 */
+        public LocalDate anchorDate() {
+            return exDividendDate != null ? exDividendDate : exRightsDate;
         }
     }
 
@@ -158,15 +184,19 @@ public final class DividendEventEvidenceResolver {
             return Resolution.MISSING;
         }
         Instant knownAt = max(selected.observedAt(), selected.sourceAvailableAt());
+        // Task 357／357.3d-1b：這是交易雷達「下一配息」證據本身，改用 anchorDate =
+        // COALESCE(exDividendDate, exRightsDate)，否則純配股的未來事件永遠不會成為
+        // 「下一配息」（Requirement 94 的頭號承諾）。
         List<Event> datedFuture = selected.events().stream()
                 .filter(Objects::nonNull)
-                .filter(e -> e.exDividendDate() != null && e.exDividendDate().isAfter(decisionDate)
-                        && !e.exDividendDate().isAfter(horizon))
+                .filter(e -> e.anchorDate() != null && e.anchorDate().isAfter(decisionDate)
+                        && !e.anchorDate().isAfter(horizon))
                 .map(e -> e.knownAt() == null ? new Event(e.exDividendDate(), e.cashDividend(),
                         e.stockDividend(), e.cashPaymentDate(), e.stockPaymentDate(), knownAt,
-                        e.provider() == null ? selected.provider() : e.provider(), e.sourceUrls()) : e)
+                        e.provider() == null ? selected.provider() : e.provider(), e.sourceUrls(),
+                        e.exRightsDate()) : e)
                 .filter(e -> e.knownAt() == null || !e.knownAt().isAfter(decisionInstant))
-                .sorted(Comparator.comparing(Event::exDividendDate))
+                .sorted(Comparator.comparing(Event::anchorDate))
                 .toList();
         List<Event> unknownAmount = datedFuture.stream()
                 .filter(e -> !positive(e.cashDividend()) && !positive(e.stockDividend()))
@@ -201,10 +231,11 @@ public final class DividendEventEvidenceResolver {
         }
         LocalDate fifth = sessionAt(usableSessions, 5);
         LocalDate twentieth = sessionAt(usableSessions, 20);
+        // anchorDate：純配股事件 exDividendDate() 為 null，裸呼叫 isAfter() 會 NPE。
         int within5 = future.stream().filter(e -> fifth != null
-                && !e.exDividendDate().isAfter(fifth)).toList().size();
+                && !e.anchorDate().isAfter(fifth)).toList().size();
         int within20 = future.stream().filter(e -> twentieth != null
-                && !e.exDividendDate().isAfter(twentieth)).toList().size();
+                && !e.anchorDate().isAfter(twentieth)).toList().size();
         return new Resolution(Status.AVAILABLE, future.get(0), within5, within20,
                 selected.provider(), future.get(0).sourceUrls(), selected.observedAt(),
                 future.get(0).knownAt(), null);

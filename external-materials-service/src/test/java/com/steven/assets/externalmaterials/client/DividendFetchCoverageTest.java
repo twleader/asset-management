@@ -33,7 +33,7 @@ class DividendFetchCoverageTest {
     void verifiedUpcomingIsSeparateFromAndDoesNotDiscardHistoricalObservation() throws Exception {
         var upcomingEvent = new DividendFetchClient.DividendEvent(
                 2026, new BigDecimal("0.27"), BigDecimal.ZERO,
-                "2026-08-10", "2026-08-13", null);
+                "2026-08-10", null, "2026-08-13", null);
         DividendUpcomingScopeClient upcoming = (code, market, from, to) ->
                 new DividendUpcomingScopeClient.UpcomingScope(
                         "NASDAQ_DIVIDEND_CALENDAR", from, to, NOW, true,
@@ -98,7 +98,7 @@ class DividendFetchCoverageTest {
     void incompleteUpcomingWithKnownEventIsRetainedAsNonAuthoritativeObservation() throws Exception {
         var upcomingEvent = new DividendFetchClient.DividendEvent(
                 2026, new BigDecimal("0.18"), BigDecimal.ZERO,
-                TODAY.plusDays(8).toString(), TODAY.plusDays(12).toString(), null);
+                TODAY.plusDays(8).toString(), null, TODAY.plusDays(12).toString(), null);
         DividendUpcomingScopeClient upcoming = (code, market, from, to) ->
                 new DividendUpcomingScopeClient.UpcomingScope(
                         "NASDAQ_DIVIDEND_CALENDAR", from, from.plusDays(10), NOW, false,
@@ -260,6 +260,147 @@ class DividendFetchCoverageTest {
         assertThat(scope.complete()).isFalse();
         assertThat(scope.events()).isEmpty();
         assertThat(scope.errorReason()).contains("do not prove complete");
+    }
+
+    // ─── Task 357／Requirement 94：除息日／除權日各自落地 ────────────────────
+
+    @Test
+    void taiwanExDividendAndExRightsDatesLandIndependentlyWithoutOverwriting() throws Exception {
+        String primary = """
+                {"status":200,"msg":"Success","data":[
+                  {"CashEarningsDistribution":2.0,"CashStatutorySurplus":0,
+                   "StockEarningsDistribution":0.5,"StockStatutorySurplus":0,
+                   "CashExDividendTradingDate":"2026-07-09","StockExDividendTradingDate":"2026-07-20",
+                   "CashDividendPaymentDate":"2026-08-14"},
+                  {"CashEarningsDistribution":1.0,"CashStatutorySurplus":0,
+                   "StockEarningsDistribution":0,"StockStatutorySurplus":0,
+                   "CashExDividendTradingDate":"2026-06-01","StockExDividendTradingDate":""},
+                  {"CashEarningsDistribution":0,"CashStatutorySurplus":0,
+                   "StockEarningsDistribution":0.3,"StockStatutorySurplus":0,
+                   "CashExDividendTradingDate":"","StockExDividendTradingDate":"2026-05-10"}
+                ]}
+                """;
+        String resultTable = "{\"status\":200,\"msg\":\"Success\",\"data\":[]}";
+        DividendFetchClient client = new DividendFetchClient(
+                "", null, Clock.fixed(NOW, ZoneOffset.UTC), historyClient(primary, resultTable));
+
+        var observations = client.fetchObservations("7556", "台股", 10);
+        var events = observations.get(0).events();
+
+        assertThat(events).hasSize(3);
+        var mixed = events.stream()
+                .filter(e -> "2026-07-09".equals(e.exDividendDate())).findFirst().orElseThrow();
+        assertThat(mixed.exRightsDate()).isEqualTo("2026-07-20");
+
+        var cashOnly = events.stream()
+                .filter(e -> "2026-06-01".equals(e.exDividendDate())).findFirst().orElseThrow();
+        assertThat(cashOnly.exRightsDate()).isNull();
+
+        // 357.2b 陷阱：只配股（無除息日）的事件不得被視為 malformed 而整批拒收。
+        var stockOnly = events.stream()
+                .filter(e -> "2026-05-10".equals(e.exRightsDate())).findFirst().orElseThrow();
+        assertThat(stockOnly.exDividendDate()).isNull();
+    }
+
+    @Test
+    void pureStockRowWithoutCashExDateIsNotRejectedAsMalformedInUpcomingScope() throws Exception {
+        // 357.2b：parseFinMindDividendRows 對只配股（無 CashExDividendTradingDate）的列，
+        // 不得因為缺除息日就 return ParseEvents.invalid(...) 整批丟棄。
+        String primary = """
+                {"status":200,"msg":"Success","data":[{"CashEarningsDistribution":0,
+                "CashStatutorySurplus":0,"StockEarningsDistribution":0.3,"StockStatutorySurplus":0,
+                "StockExDividendTradingDate":"2026-08-20"}]}
+                """;
+        String resultTable = "{\"status\":200,\"msg\":\"Success\",\"data\":[]}";
+        DividendFetchClient client = new DividendFetchClient(
+                "", null, Clock.fixed(NOW, ZoneOffset.UTC), historyClient(primary, resultTable));
+
+        var scope = client.fetchProviderUpcomingScope("2881", "台股",
+                TODAY.minusDays(30), TODAY.plusDays(15));
+
+        assertThat(scope.complete()).isTrue();
+        assertThat(scope.events()).singleElement().satisfies(e -> {
+            assertThat(e.exDividendDate()).isNull();
+            assertThat(e.exRightsDate()).isEqualTo("2026-08-20");
+        });
+    }
+
+    @Test
+    void bothExDatesBlankIsStillMalformedInUpcomingScope() throws Exception {
+        String primary = """
+                {"status":200,"msg":"Success","data":[{"CashEarningsDistribution":1.0,
+                "CashStatutorySurplus":0,"StockEarningsDistribution":0,"StockStatutorySurplus":0}]}
+                """;
+        String resultTable = "{\"status\":200,\"msg\":\"Success\",\"data\":[]}";
+        DividendFetchClient client = new DividendFetchClient(
+                "", null, Clock.fixed(NOW, ZoneOffset.UTC), historyClient(primary, resultTable));
+
+        var scope = client.fetchProviderUpcomingScope("2330", "台股",
+                TODAY.minusDays(30), TODAY.plusDays(15));
+
+        assertThat(scope.complete()).isFalse();
+        assertThat(scope.errorReason()).contains("row malformed");
+    }
+
+    @Test
+    void taiwanStockDividendResultPureStockEventLandsExRightsDateInHistoricalAndUpcomingPaths()
+            throws Exception {
+        // 357.2f：TaiwanStockDividendResult 的 stock_or_cache_dividend 含「權」不含「息」
+        // →純配股，必須落 exRightsDate、exDividendDate 為 null，在歷史（fetchTw／
+        // fetchTwDividendResult）與 upcoming（fetchFinMindUpcomingScope／
+        // parseFinMindResultRows）兩條路徑皆須驗證。
+        String emptyPrimary = "{\"status\":200,\"msg\":\"Success\",\"data\":[]}";
+        String resultBody = """
+                {"status":200,"msg":"Success","data":[{"stock_and_cache_dividend":0.30,
+                "stock_or_cache_dividend":"除權","date":"2026-06-15"}]}
+                """;
+
+        DividendFetchClient historicalClient = new DividendFetchClient(
+                "", null, Clock.fixed(NOW, ZoneOffset.UTC), historyClient(emptyPrimary, resultBody));
+        var observations = historicalClient.fetchObservations("00751B", "台股", 10);
+        var historicalEvent = observations.get(0).events().stream()
+                .filter(e -> "2026-06-15".equals(e.exRightsDate())).findFirst().orElseThrow();
+        assertThat(historicalEvent.exDividendDate()).isNull();
+        assertThat(historicalEvent.stockDividend()).isEqualByComparingTo("0.30");
+        assertThat(historicalEvent.cashDividend()).isEqualByComparingTo("0");
+
+        DividendFetchClient upcomingClient = new DividendFetchClient(
+                "", null, Clock.fixed(NOW, ZoneOffset.UTC), historyClient(emptyPrimary, resultBody));
+        var scope = upcomingClient.fetchProviderUpcomingScope(
+                "00751B", "台股", LocalDate.of(2026, 6, 1), LocalDate.of(2026, 7, 16));
+        var upcomingEvent = scope.events().stream()
+                .filter(e -> "2026-06-15".equals(e.exRightsDate())).findFirst().orElseThrow();
+        assertThat(upcomingEvent.exDividendDate()).isNull();
+    }
+
+    @Test
+    void mergeDoesNotCollapseSameAmountPureStockEventsFromDifferentYears() throws Exception {
+        // 357.2g：2885 於 2022 與 2025 兩年的純配股事件 stock_dividend 皆為 0.3。修正前
+        // taiwanEventKey() 對 exDividendDate()==null 退化為固定字串 "NO_DATE"，兩筆事件
+        // 會產生相同 key 並在 mergeTaiwanEvents 互相覆蓋，導致其中一筆消失。
+        String primary = """
+                {"status":200,"msg":"Success","data":[
+                  {"CashEarningsDistribution":0,"CashStatutorySurplus":0,
+                   "StockEarningsDistribution":0.3,"StockStatutorySurplus":0,
+                   "StockExDividendTradingDate":"2022-09-22"},
+                  {"CashEarningsDistribution":0,"CashStatutorySurplus":0,
+                   "StockEarningsDistribution":0.3,"StockStatutorySurplus":0,
+                   "StockExDividendTradingDate":"2025-09-25"}
+                ]}
+                """;
+        String resultTable = "{\"status\":200,\"msg\":\"Success\",\"data\":[]}";
+        DividendFetchClient client = new DividendFetchClient(
+                "", null, Clock.fixed(NOW, ZoneOffset.UTC), historyClient(primary, resultTable));
+
+        var observations = client.fetchObservations("2885", "台股", 10);
+        var events = observations.get(0).events();
+
+        assertThat(events).extracting(DividendFetchClient.DividendEvent::exRightsDate)
+                .containsExactlyInAnyOrder("2022-09-22", "2025-09-25");
+        assertThat(events).allSatisfy(e -> {
+            assertThat(e.exDividendDate()).isNull();
+            assertThat(e.stockDividend()).isEqualByComparingTo("0.3");
+        });
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})

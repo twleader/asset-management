@@ -3,6 +3,7 @@ package com.steven.assets.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.steven.assets.security.CurrentUserContext;
+import org.apache.poi.ss.usermodel.CellType;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
@@ -89,6 +90,50 @@ class TradingRadarExportServiceTest {
             assertThat(stock.getRow(1).getCell(0).getStringCellValue()).isEqualTo("2026-07-20T10:00:00+08:00");
             assertThat(wb.getSheet("大盤總覽")).isNotNull();
             assertThat(wb.getSheet("台美公開資訊")).isNotNull();
+        }
+    }
+
+    /**
+     * Task 357／357.6d：「下一配息」四個日期欄必須出現在表頭最末，且值來自
+     * {@code evidence.nextExDividendDate} 等四個新欄位、缺值為空白格而非 0 或字串 "null"。
+     * {@link com.steven.assets.service.export.ExportDoc.Table} 的建構期驗證
+     * （headers／columnFormats／每列 cell 數必須三者相等，見 ExportDoc.java）已經是本斷言
+     * 的機械保證：只要下方任何一個長度對不上，{@code service.manualDoc(...)} 本身就會先
+     * 拋 {@code IllegalArgumentException}，本測試再額外驗證「值真的落在正確欄位」。
+     */
+    @Test
+    void 下一配息四個日期欄出現在表頭最末且值正確對齊() throws Exception {
+        when(currentUserContext.getEffectiveUserId()).thenReturn(1L);
+        String json = "{\"ruleVersion\":\"TW_RULES_V5\",\"generatedAt\":\"2026-08-22T09:00:00+08:00\","
+                + "\"market\":{\"regime\":\"NEUTRAL\",\"regimeLabel\":\"中性\",\"score\":40,\"stale\":false},"
+                + "\"stocks\":[{\"stockCode\":\"2885\",\"action\":\"HOLD\",\"score\":60,\"held\":true,"
+                + "\"evidence\":{\"nextExDividendDate\":null,\"nextExRightsDate\":\"2026-09-10\","
+                + "\"nextCashPaymentDate\":null,\"nextStockPaymentDate\":\"2026-10-05\"}}],"
+                + "\"skippedNonTwStocks\":0}";
+        when(store.range(eq(1L), anyLong(), anyLong()))
+                .thenReturn(new TradingRadarSnapshotStore.SnapshotRange(
+                        List.of(mapper.readTree(json)), 1, 0));
+
+        byte[] data = excelDocRenderer.render(
+                service.manualDoc("2026-08-22T00:00:00", "2026-08-22T23:59:59").doc());
+
+        try (Workbook wb = new XSSFWorkbook(new ByteArrayInputStream(data))) {
+            Sheet stock = wb.getSheet("個股決策");
+            org.apache.poi.ss.usermodel.Row header = stock.getRow(0);
+            int lastCol = header.getLastCellNum() - 1;
+            // 四個新欄一律緊鄰在整張表最末四格。
+            assertThat(header.getCell(lastCol - 3).getStringCellValue()).isEqualTo("下一除息日");
+            assertThat(header.getCell(lastCol - 2).getStringCellValue()).isEqualTo("下一除權日");
+            assertThat(header.getCell(lastCol - 1).getStringCellValue()).isEqualTo("下一發放股息日");
+            assertThat(header.getCell(lastCol).getStringCellValue()).isEqualTo("下一發放股權日");
+
+            org.apache.poi.ss.usermodel.Row dataRow = stock.getRow(1);
+            assertThat(dataRow.getCell(lastCol - 3).getCellType())
+                    .as("nextExDividendDate 缺值必須是 BLANK 而非 0").isEqualTo(CellType.BLANK);
+            assertThat(dataRow.getCell(lastCol - 2).getStringCellValue()).isEqualTo("2026-09-10");
+            assertThat(dataRow.getCell(lastCol - 1).getCellType())
+                    .as("nextCashPaymentDate 缺值必須是 BLANK 而非 0").isEqualTo(CellType.BLANK);
+            assertThat(dataRow.getCell(lastCol).getStringCellValue()).isEqualTo("2026-10-05");
         }
     }
 

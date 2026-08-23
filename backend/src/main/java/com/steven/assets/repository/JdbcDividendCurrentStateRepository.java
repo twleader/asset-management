@@ -94,29 +94,38 @@ public class JdbcDividendCurrentStateRepository implements DividendCurrentStateR
     public List<ActiveFutureEvent> findActiveFutureEvents(
             String code, String market, LocalDate afterDate,
             LocalDate scopeFrom, LocalDate scopeTo) {
+        // Task 357／357.3d-1b：純配股事件的 ex_dividend_date 為 null，SQL 對 NULL 比較
+        // 恆為 UNKNOWN、等同隱性排除；改用 anchorDate = COALESCE(ex_dividend_date,
+        // ex_rights_date) 三處比較，否則這類事件永遠不會被視為「ACTIVE 未來事件」。
         return jdbc.query("""
-                SELECT id, event_key, year, ex_dividend_date, cash_dividend, stock_dividend,
-                       cash_payment_date, stock_payment_date
+                SELECT id, event_key, year, ex_dividend_date, ex_rights_date, cash_dividend,
+                       stock_dividend, cash_payment_date, stock_payment_date
                   FROM stock_dividend_history
                  WHERE stock_code=? AND market=? AND event_status='ACTIVE'
-                   AND ex_dividend_date>? AND ex_dividend_date>=? AND ex_dividend_date<=?
+                   AND COALESCE(ex_dividend_date, ex_rights_date)>?
+                   AND COALESCE(ex_dividend_date, ex_rights_date)>=?
+                   AND COALESCE(ex_dividend_date, ex_rights_date)<=?
                 """, (rs, rowNum) -> new ActiveFutureEvent(rs.getLong("id"),
                 rs.getString("event_key"), rs.getObject("year", Integer.class),
                 rs.getObject("ex_dividend_date", LocalDate.class),
                 rs.getBigDecimal("cash_dividend"), rs.getBigDecimal("stock_dividend"),
                 rs.getObject("cash_payment_date", LocalDate.class),
-                rs.getObject("stock_payment_date", LocalDate.class)),
+                rs.getObject("stock_payment_date", LocalDate.class),
+                rs.getObject("ex_rights_date", LocalDate.class)),
                 code, market, afterDate, scopeFrom, scopeTo);
     }
 
     @Override
     public List<ActiveEventDetail> findActiveEventDetails(String code, String market) {
+        // Task 357／357.3d-1b：不得再要求 ex_dividend_date IS NOT NULL，否則純配股
+        // 事件永遠不會被納入 collapseDuplicateActiveEvents() 的去重掃描。
         return jdbc.query("""
-                SELECT id, event_key, year, ex_dividend_date, cash_dividend, stock_dividend,
-                       cash_payment_date, stock_payment_date, yield_pct, previous_close, fill_days
+                SELECT id, event_key, year, ex_dividend_date, ex_rights_date, cash_dividend,
+                       stock_dividend, cash_payment_date, stock_payment_date, yield_pct,
+                       previous_close, fill_days
                   FROM stock_dividend_history
                  WHERE stock_code=? AND market=? AND event_status='ACTIVE'
-                   AND ex_dividend_date IS NOT NULL
+                   AND COALESCE(ex_dividend_date, ex_rights_date) IS NOT NULL
                  ORDER BY id
                 """, (rs, rowNum) -> new ActiveEventDetail(rs.getLong("id"),
                 rs.getString("event_key"), rs.getObject("year", Integer.class),
@@ -125,7 +134,8 @@ public class JdbcDividendCurrentStateRepository implements DividendCurrentStateR
                 rs.getObject("cash_payment_date", LocalDate.class),
                 rs.getObject("stock_payment_date", LocalDate.class),
                 rs.getBigDecimal("yield_pct"), rs.getBigDecimal("previous_close"),
-                rs.getObject("fill_days", Integer.class)), code, market);
+                rs.getObject("fill_days", Integer.class),
+                rs.getObject("ex_rights_date", LocalDate.class)), code, market);
     }
 
     @Override
@@ -136,7 +146,7 @@ public class JdbcDividendCurrentStateRepository implements DividendCurrentStateR
         if (current == null) return;
         deleteCancelledTupleTwins(current.stockCode(), current.market(), id, current.year(),
                 current.exDividendDate(), current.cashDividend(), current.stockDividend(),
-                cashPaymentDate, stockPaymentDate, eventKey);
+                cashPaymentDate, stockPaymentDate, eventKey, current.exRightsDate());
         jdbc.update("""
                 UPDATE stock_dividend_history
                    SET event_key=?, cash_payment_date=?, stock_payment_date=?,
@@ -165,14 +175,17 @@ public class JdbcDividendCurrentStateRepository implements DividendCurrentStateR
         if (ids.isEmpty()) {
             // Not even the relaxed segment matched, so no existing row shares this
             // ex-date/amount identity and uk_dividend_event cannot collide.
+            // ex_rights_date（Task 357）從 event 落地一次，之後視同 ex_dividend_date
+            // 一樣是身分／不可變欄位，不在下方 UPDATE 分支被覆寫。
             jdbc.update("""
                     INSERT INTO stock_dividend_history
                         (stock_code,market,year,cash_dividend,stock_dividend,ex_dividend_date,
-                         cash_payment_date,stock_payment_date,source,event_key,event_status,updated_at)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,'ACTIVE',NOW())
+                         ex_rights_date,cash_payment_date,stock_payment_date,source,event_key,
+                         event_status,updated_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,'ACTIVE',NOW())
                     """, code, market, event.year(), event.cashDividend(),
-                    event.stockDividend(), event.exDividendDate(), event.cashPaymentDate(),
-                    event.stockPaymentDate(), provider, event.eventKey());
+                    event.stockDividend(), event.exDividendDate(), event.exRightsDate(),
+                    event.cashPaymentDate(), event.stockPaymentDate(), provider, event.eventKey());
             return;
         }
         long targetId = ids.getFirst();
@@ -180,14 +193,17 @@ public class JdbcDividendCurrentStateRepository implements DividendCurrentStateR
         if (current == null) return;
         // Read-then-write: payment dates are announcement metadata, so a source that
         // omits them must not erase dates an earlier source already published.
-        // Amounts, source and event_key follow the incoming event.
+        // Amounts, source and event_key follow the incoming event.  ex_dividend_date
+        // and ex_rights_date are identity columns fixed at INSERT time (Task 357);
+        // the tuple-twin lookups below therefore key off current.exRightsDate(),
+        // never event.exRightsDate().
         LocalDate cashPaymentDate = event.cashPaymentDate() != null
                 ? event.cashPaymentDate() : current.cashPaymentDate();
         LocalDate stockPaymentDate = event.stockPaymentDate() != null
                 ? event.stockPaymentDate() : current.stockPaymentDate();
         Long activeTwin = findActiveTupleTwin(code, market, targetId, current.year(),
                 current.exDividendDate(), event.cashDividend(), event.stockDividend(),
-                cashPaymentDate, stockPaymentDate, event.eventKey());
+                cashPaymentDate, stockPaymentDate, event.eventKey(), current.exRightsDate());
         if (activeTwin != null) {
             // Should be unreachable (collapse runs first and the full-value segment
             // precedes the relaxed one); reconcile against the ACTIVE occupant of the
@@ -196,7 +212,7 @@ public class JdbcDividendCurrentStateRepository implements DividendCurrentStateR
         }
         deleteCancelledTupleTwins(code, market, targetId, current.year(),
                 current.exDividendDate(), event.cashDividend(), event.stockDividend(),
-                cashPaymentDate, stockPaymentDate, event.eventKey());
+                cashPaymentDate, stockPaymentDate, event.eventKey(), current.exRightsDate());
         jdbc.update(reviveCancelled ? """
                 UPDATE stock_dividend_history
                    SET cash_dividend=?, stock_dividend=?, cash_payment_date=?, stock_payment_date=?,
@@ -219,8 +235,8 @@ public class JdbcDividendCurrentStateRepository implements DividendCurrentStateR
 
     private Snapshot loadSnapshot(String code, String market, SnapshotRef ref) {
         List<Event> events = jdbc.query("""
-                SELECT event_key, year, ex_dividend_date, cash_dividend, stock_dividend,
-                       cash_payment_date, stock_payment_date
+                SELECT event_key, year, ex_dividend_date, ex_rights_date, cash_dividend,
+                       stock_dividend, cash_payment_date, stock_payment_date
                   FROM stock_dividend_snapshot_event
                  WHERE snapshot_id=?
                 """, (rs, rowNum) -> new Event(
@@ -228,7 +244,8 @@ public class JdbcDividendCurrentStateRepository implements DividendCurrentStateR
                 rs.getObject("ex_dividend_date", LocalDate.class),
                 rs.getBigDecimal("cash_dividend"), rs.getBigDecimal("stock_dividend"),
                 rs.getObject("cash_payment_date", LocalDate.class),
-                rs.getObject("stock_payment_date", LocalDate.class)), ref.id());
+                rs.getObject("stock_payment_date", LocalDate.class),
+                rs.getObject("ex_rights_date", LocalDate.class)), ref.id());
         return new Snapshot(ref.id(), code, market, ref.provider(),
                 ref.scopeFrom(), ref.scopeTo(), ref.observedAt(), events);
     }
@@ -279,26 +296,34 @@ public class JdbcDividendCurrentStateRepository implements DividendCurrentStateR
 
     private List<Long> findByFullValue(
             String code, String market, ProjectedEvent event, boolean activeOnly) {
+        // Task 357／357.3a-0b：ex_dividend_date 換成 IS NOT DISTINCT FROM（純配股事件
+        // 此欄為 null，裸 `=?` 對 NULL 恆為 UNKNOWN、永遠找不到既有列）；並在最末追加
+        // ex_rights_date 的比對，讓「金額相同但除權日不同」的事件不會在這一段被誤判成
+        // 同一列（沿用既有參數順序，只在尾端新增，避免牽動既有測試對其他欄位的斷言）。
         return jdbc.query(activeOnly ? """
                 SELECT id FROM stock_dividend_history
-                 WHERE stock_code=? AND market=? AND year=? AND ex_dividend_date=?
+                 WHERE stock_code=? AND market=? AND year=?
+                   AND ex_dividend_date IS NOT DISTINCT FROM ?
                    AND cash_dividend IS NOT DISTINCT FROM ?
                    AND stock_dividend IS NOT DISTINCT FROM ?
                    AND cash_payment_date IS NOT DISTINCT FROM ?
                    AND stock_payment_date IS NOT DISTINCT FROM ?
+                   AND ex_rights_date IS NOT DISTINCT FROM ?
                    AND event_status='ACTIVE'
                  ORDER BY id LIMIT 1
                 """ : """
                 SELECT id FROM stock_dividend_history
-                 WHERE stock_code=? AND market=? AND year=? AND ex_dividend_date=?
+                 WHERE stock_code=? AND market=? AND year=?
+                   AND ex_dividend_date IS NOT DISTINCT FROM ?
                    AND cash_dividend IS NOT DISTINCT FROM ?
                    AND stock_dividend IS NOT DISTINCT FROM ?
                    AND cash_payment_date IS NOT DISTINCT FROM ?
                    AND stock_payment_date IS NOT DISTINCT FROM ?
+                   AND ex_rights_date IS NOT DISTINCT FROM ?
                  ORDER BY id LIMIT 1
                 """, (rs, rowNum) -> rs.getLong(1), code, market, event.year(),
                 event.exDividendDate(), event.cashDividend(), event.stockDividend(),
-                event.cashPaymentDate(), event.stockPaymentDate());
+                event.cashPaymentDate(), event.stockPaymentDate(), event.exRightsDate());
     }
 
     private List<Long> findByDateAndAmount(
@@ -306,27 +331,33 @@ public class JdbcDividendCurrentStateRepository implements DividendCurrentStateR
         // Null amounts count as zero, matching the uk_dividend_event COALESCE
         // convention.  Rows that already carry a payment date sort first so
         // enrichment is never re-anchored onto an emptier duplicate.
+        // Task 357：ex_dividend_date 換成 IS NOT DISTINCT FROM，並在最末追加
+        // ex_rights_date 的 null-safe 比對——這是「除息日＋金額」相同即視為同一事件的
+        // 寬鬆層，若不納入除權日，兩筆除息日皆為 null、金額相同但除權日不同的純配股
+        // 事件（如 2885 2022／2025）會在 event_key 缺漏時被此層誤判成同一列。
         return jdbc.query(activeOnly ? """
                 SELECT id FROM stock_dividend_history
-                 WHERE stock_code=? AND market=? AND ex_dividend_date=?
+                 WHERE stock_code=? AND market=? AND ex_dividend_date IS NOT DISTINCT FROM ?
                    AND COALESCE(cash_dividend,0)=COALESCE(?,0)
                    AND COALESCE(stock_dividend,0)=COALESCE(?,0)
+                   AND ex_rights_date IS NOT DISTINCT FROM ?
                    AND event_status='ACTIVE'
                  ORDER BY (cash_payment_date IS NULL), id LIMIT 1
                 """ : """
                 SELECT id FROM stock_dividend_history
-                 WHERE stock_code=? AND market=? AND ex_dividend_date=?
+                 WHERE stock_code=? AND market=? AND ex_dividend_date IS NOT DISTINCT FROM ?
                    AND COALESCE(cash_dividend,0)=COALESCE(?,0)
                    AND COALESCE(stock_dividend,0)=COALESCE(?,0)
+                   AND ex_rights_date IS NOT DISTINCT FROM ?
                  ORDER BY (cash_payment_date IS NULL), id LIMIT 1
                 """, (rs, rowNum) -> rs.getLong(1), code, market, event.exDividendDate(),
-                event.cashDividend(), event.stockDividend());
+                event.cashDividend(), event.stockDividend(), event.exRightsDate());
     }
 
     private CurrentRow readCurrentRow(long id) {
         List<CurrentRow> rows = jdbc.query("""
-                SELECT stock_code, market, year, ex_dividend_date, cash_dividend, stock_dividend,
-                       cash_payment_date, stock_payment_date
+                SELECT stock_code, market, year, ex_dividend_date, ex_rights_date, cash_dividend,
+                       stock_dividend, cash_payment_date, stock_payment_date
                   FROM stock_dividend_history
                  WHERE id=?
                 """, (rs, rowNum) -> new CurrentRow(
@@ -335,13 +366,17 @@ public class JdbcDividendCurrentStateRepository implements DividendCurrentStateR
                 rs.getObject("ex_dividend_date", LocalDate.class),
                 rs.getBigDecimal("cash_dividend"), rs.getBigDecimal("stock_dividend"),
                 rs.getObject("cash_payment_date", LocalDate.class),
-                rs.getObject("stock_payment_date", LocalDate.class)), id);
+                rs.getObject("stock_payment_date", LocalDate.class),
+                rs.getObject("ex_rights_date", LocalDate.class)), id);
         return rows.isEmpty() ? null : rows.getFirst();
     }
 
     private Long findActiveTupleTwin(String code, String market, long excludeId, Integer year,
             LocalDate exDividendDate, BigDecimal cashDividend, BigDecimal stockDividend,
-            LocalDate cashPaymentDate, LocalDate stockPaymentDate, String eventKey) {
+            LocalDate cashPaymentDate, LocalDate stockPaymentDate, String eventKey,
+            LocalDate exRightsDate) {
+        // Task 357：ex_rights_date 追加在既有欄位之後（新參數置於最尾端），保留既有
+        // 呼叫端與測試對前面欄位索引的斷言不動。
         List<Long> twins = jdbc.query("""
                 SELECT id FROM stock_dividend_history
                  WHERE stock_code=? AND market=? AND event_status='ACTIVE' AND id<>?
@@ -352,22 +387,25 @@ public class JdbcDividendCurrentStateRepository implements DividendCurrentStateR
                    AND COALESCE(cash_payment_date, DATE '1970-01-01')=COALESCE(?, DATE '1970-01-01')
                    AND COALESCE(stock_payment_date, DATE '1970-01-01')=COALESCE(?, DATE '1970-01-01')
                    AND COALESCE(event_key,'')=COALESCE(?,'')
+                   AND COALESCE(ex_rights_date, DATE '1970-01-01')=COALESCE(?, DATE '1970-01-01')
                  ORDER BY id LIMIT 1
                 """, (rs, rowNum) -> rs.getLong(1), code, market, excludeId, year,
                 exDividendDate, cashDividend, stockDividend, cashPaymentDate,
-                stockPaymentDate, eventKey);
+                stockPaymentDate, eventKey, exRightsDate);
         return twins.isEmpty() ? null : twins.getFirst();
     }
 
     private void deleteCancelledTupleTwins(String code, String market, long keepId, Integer year,
             LocalDate exDividendDate, BigDecimal cashDividend, BigDecimal stockDividend,
-            LocalDate cashPaymentDate, LocalDate stockPaymentDate, String eventKey) {
+            LocalDate cashPaymentDate, LocalDate stockPaymentDate, String eventKey,
+            LocalDate exRightsDate) {
         // uk_dividend_event does not include event_status, so a CANCELLED tombstone
         // still occupies its tuple.  Remove tombstones equal to the post-write tuple
         // under the index's COALESCE convention before writing, or the UPDATE would
         // hit a duplicate-key violation and roll the whole projection back.  Any
         // tombstone that differs on the index columns keeps its finalized meaning
         // and is left untouched.
+        // Task 357：ex_rights_date 追加在既有欄位之後（新參數置於最尾端），理由同上。
         jdbc.update("""
                 DELETE FROM stock_dividend_history
                  WHERE stock_code=? AND market=? AND event_status='CANCELLED' AND id<>?
@@ -378,12 +416,13 @@ public class JdbcDividendCurrentStateRepository implements DividendCurrentStateR
                    AND COALESCE(cash_payment_date, DATE '1970-01-01')=COALESCE(?, DATE '1970-01-01')
                    AND COALESCE(stock_payment_date, DATE '1970-01-01')=COALESCE(?, DATE '1970-01-01')
                    AND COALESCE(event_key,'')=COALESCE(?,'')
+                   AND COALESCE(ex_rights_date, DATE '1970-01-01')=COALESCE(?, DATE '1970-01-01')
                 """, code, market, keepId, year, exDividendDate, cashDividend, stockDividend,
-                cashPaymentDate, stockPaymentDate, eventKey);
+                cashPaymentDate, stockPaymentDate, eventKey, exRightsDate);
     }
 
     private record CurrentRow(String stockCode, String market, Integer year,
                               LocalDate exDividendDate, BigDecimal cashDividend,
                               BigDecimal stockDividend, LocalDate cashPaymentDate,
-                              LocalDate stockPaymentDate) {}
+                              LocalDate stockPaymentDate, LocalDate exRightsDate) {}
 }

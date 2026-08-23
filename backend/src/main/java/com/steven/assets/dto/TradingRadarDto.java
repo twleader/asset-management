@@ -336,6 +336,12 @@ public final class TradingRadarDto {
             Double mediumRiskCoverage,
             String candidateAction,
             String shortCandidateAction,
+            /**
+             * anchorDate = {@code COALESCE(nextExDividendDate, nextExRightsDate)}
+             * （Task 357／Requirement 94）。357 之前只代表除息日；純配股事件此欄現在
+             * 落的是除權日。既有消費端若只需要「下一次事件哪天發生」可繼續用本欄；
+             * 需要區分除息／除權／發放股息／發放股權，改用下方四個新欄位。
+             */
             String nextDistributionDate,
             String nextDistributionKnownAt,
             String nextDistributionProvider,
@@ -359,7 +365,17 @@ public final class TradingRadarDto {
             Integer swingDownsideRisk,
             Integer swingEvidenceConfidence,
             Double swingRiskCoverage,
-            String swingCandidateAction
+            String swingCandidateAction,
+            /**
+             * 「下一配息」同一次事件的四個日期（Task 357／Requirement 94），一律
+             * {@code yyyy-MM-dd} 或 null（缺值不得以 0／空字串／往年推估頂替）。追加在
+             * 既有欄位之後而非插入 next* 群組之間，以保留既有相容建構式與
+             * {@code EMPTY} 的呼叫端不動。
+             */
+            String nextExDividendDate,
+            String nextExRightsDate,
+            String nextCashPaymentDate,
+            String nextStockPaymentDate
     ) {
         public RadarEvidence {
             actionGateReasons = actionGateReasons == null ? List.of() : List.copyOf(actionGateReasons);
@@ -387,7 +403,7 @@ public final class TradingRadarDto {
                     premiumAsOfDate, premiumSource, premiumStale, assetProfile, actionGateReasons,
                     java.util.Map.of(), java.util.Map.of(), null, null, null, null, null, null, null, null,
                     null, null, null, List.of(), null, null, null, null, null, null, null,
-                    null, null, null, null);
+                    null, null, null, null, null, null, null, null);
         }
 
         public static final RadarEvidence EMPTY = new RadarEvidence(
@@ -395,7 +411,7 @@ public final class TradingRadarDto {
                 null, null, false, null, List.of(), java.util.Map.of(), java.util.Map.of(),
                 null, null, null, null, null, null, null, null,
                 null, null, null, List.of(), null, null, null, null, null, null, null,
-                null, null, null, null);
+                null, null, null, null, null, null, null, null);
 
         public static RadarEvidence withConfidence(
                 String acceptedPriceAsOfDate,
@@ -494,6 +510,12 @@ public final class TradingRadarDto {
                             feature.missingReason()));
                 }
             }
+            // Task 357／Requirement 94：nextDistributionDate 重新定義為 anchorDate =
+            // COALESCE(exDividendDate, exRightsDate)——純配股的下一事件 exDividendDate()
+            // 為 null，裸呼叫 .toString() 會 NPE；四個新欄位各自揭露原始值，缺值為 null。
+            com.steven.assets.service.DividendEventEvidenceResolver.Event nextEvent =
+                    distribution == null ? null : distribution.nextEvent();
+            java.time.LocalDate nextAnchor = nextEvent == null ? null : nextEvent.anchorDate();
             return new RadarEvidence(acceptedPriceAsOfDate, acceptedPriceSource, acceptedPriceQuality,
                     livePriceAccepted, returnStdDev60Ratio, returnStdDev60AsOfDate, returnStdDev60Source,
                     premiumAsOfDate, premiumSource, premiumStale, assetProfile,
@@ -505,8 +527,7 @@ public final class TradingRadarDto {
                     evidence == null ? null : evidence.shortRisk().riskCoverage(),
                     evidence == null ? null : evidence.mediumRisk().riskCoverage(),
                     candidateAction, shortCandidateAction,
-                    distribution == null || distribution.nextEvent() == null
-                            ? null : distribution.nextEvent().exDividendDate().toString(),
+                    nextAnchor == null ? null : nextAnchor.toString(),
                     distribution == null || distribution.knownAt() == null
                             ? null : distribution.knownAt().toString(),
                     distribution == null ? null : distribution.provider(),
@@ -519,7 +540,15 @@ public final class TradingRadarDto {
                     evidence == null ? null : evidence.swingDownsideRisk(),
                     evidence == null ? null : evidence.swingConfidence(),
                     evidence == null ? null : evidence.swingRisk().riskCoverage(),
-                    swingCandidateAction);
+                    swingCandidateAction,
+                    nextEvent == null || nextEvent.exDividendDate() == null
+                            ? null : nextEvent.exDividendDate().toString(),
+                    nextEvent == null || nextEvent.exRightsDate() == null
+                            ? null : nextEvent.exRightsDate().toString(),
+                    nextEvent == null || nextEvent.cashPaymentDate() == null
+                            ? null : nextEvent.cashPaymentDate().toString(),
+                    nextEvent == null || nextEvent.stockPaymentDate() == null
+                            ? null : nextEvent.stockPaymentDate().toString());
         }
     }
 

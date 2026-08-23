@@ -231,6 +231,61 @@ class DividendEventEvidenceResolverTest {
         assertEquals(0, result.eventsWithinTwentySessions());
     }
 
+    /**
+     * Task 357／357.3d-1b：這是交易雷達「下一配息」證據本身。純配股事件的
+     * exDividendDate 為 null，改用 anchorDate（{@code COALESCE(exDividendDate,
+     * exRightsDate)}）後才能通過 resolve() 的區間過濾與排序，否則這類事件永遠不會
+     * 成為「下一配息」（Requirement 94 的頭號承諾）。
+     */
+    @Test
+    void pureStockEventWithNullExDividendDateStillBecomesTheNextEvent() {
+        LocalDate exRights = DECISION_DATE.plusDays(5);
+        var pureStock = new DividendEventEvidenceResolver.Event(
+                null, BigDecimal.ZERO, new BigDecimal("0.30"), null, null,
+                Instant.parse("2026-08-06T00:00:00Z"), "FINMIND", List.of(), exRights);
+        var observation = new DividendEventEvidenceResolver.SnapshotObservation(
+                "FINMIND", DECISION_DATE, DECISION_DATE.plusDays(45),
+                Instant.parse("2026-08-06T00:00:00Z"), null,
+                DividendEventEvidenceResolver.Status.AVAILABLE, true, List.of(pureStock));
+
+        var result = DividendEventEvidenceResolver.resolve(
+                List.of(observation), DECISION_DATE, DECISION, sessions20());
+
+        assertEquals(DividendEventEvidenceResolver.Status.AVAILABLE, result.status());
+        assertEquals(exRights, result.nextEvent().anchorDate());
+        assertNull(result.nextEvent().exDividendDate());
+        assertEquals(exRights, result.nextEvent().exRightsDate());
+        assertEquals(1, result.eventsWithinTwentySessions());
+    }
+
+    /**
+     * 357.5a：解析「下一次尚未發生的配息事件」時，必須是同一次事件的四個日期一併輸出，
+     * 不得四個日期各自往後找最近的一個。構造一筆「除息在前、除權在後、發放更後」的事件，
+     * 斷言四個值同屬該筆。
+     */
+    @Test
+    void nextEventCarriesAllFourDatesFromTheSameRealEvent() {
+        LocalDate exDividend = DECISION_DATE.plusDays(3);
+        LocalDate exRights = DECISION_DATE.plusDays(5);
+        LocalDate cashPay = DECISION_DATE.plusDays(30);
+        LocalDate stockPay = DECISION_DATE.plusDays(40);
+        var event = new DividendEventEvidenceResolver.Event(
+                exDividend, new BigDecimal("2.00"), new BigDecimal("1.00"), cashPay, stockPay,
+                Instant.parse("2026-08-06T00:00:00Z"), "FINMIND", List.of(), exRights);
+        var observation = new DividendEventEvidenceResolver.SnapshotObservation(
+                "FINMIND", DECISION_DATE, DECISION_DATE.plusDays(45),
+                Instant.parse("2026-08-06T00:00:00Z"), null,
+                DividendEventEvidenceResolver.Status.AVAILABLE, true, List.of(event));
+
+        var result = DividendEventEvidenceResolver.resolve(
+                List.of(observation), DECISION_DATE, DECISION, sessions20());
+
+        assertEquals(exDividend, result.nextEvent().exDividendDate());
+        assertEquals(exRights, result.nextEvent().exRightsDate());
+        assertEquals(cashPay, result.nextEvent().cashPaymentDate());
+        assertEquals(stockPay, result.nextEvent().stockPaymentDate());
+    }
+
     private static List<LocalDate> sessions20() {
         List<LocalDate> out = new java.util.ArrayList<>();
         LocalDate date = DECISION_DATE.plusDays(1);

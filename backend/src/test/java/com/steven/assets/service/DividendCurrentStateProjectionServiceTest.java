@@ -352,6 +352,74 @@ class DividendCurrentStateProjectionServiceTest {
         verify(repository).cancelActiveEvent(999L);
     }
 
+    /**
+     * Task 357／357.3d-0：純配股事件的 exDividendDate 為 null，withinScope() 若仍用裸
+     * {@code exDividendDate() != null} 會把這類事件整批擋在投影閘門外；改用 anchorDate
+     * 後必須實際通過並帶著 exRightsDate 落地成 ProjectedEvent（357.3a-0b：不得讓相容
+     * 建構式把這個新欄位靜默吃成 null）。
+     */
+    @Test
+    void pureStockEventWithNullExDividendDatePassesWithinScopeAndCarriesExRightsDate() {
+        DividendCurrentStateRepository repository = mock(DividendCurrentStateRepository.class);
+        LocalDate decisionDate = LocalDate.of(2026, 8, 9);
+        LocalDate horizon = decisionDate.plusDays(45);
+        LocalDate exRights = LocalDate.of(2026, 8, 20);
+        var pureStock = new DividendCurrentStateRepository.Event(
+                "rights-key", 2026, null, BigDecimal.ZERO, new BigDecimal("0.30"), null, null, exRights);
+        var snapshot = new DividendCurrentStateRepository.Snapshot(
+                20L, "2885", "台股", "FinMind", decisionDate, horizon, DECISION, List.of(pureStock));
+        when(repository.findLatestHistorical(any(), any(), any(), any())).thenReturn(Optional.empty());
+        when(repository.findLatestComplete(eq("2885"), eq("台股"), eq(DECISION),
+                any(LocalDate.class), any(LocalDate.class))).thenReturn(Optional.of(snapshot));
+        when(repository.findActiveFutureEvents(any(), any(), any(), any(), any()))
+                .thenReturn(List.of());
+
+        boolean projected = new DividendCurrentStateProjectionService(repository)
+                .projectOne("2885", "台股", DECISION);
+
+        assertThat(projected).isTrue();
+        ArgumentCaptor<DividendCurrentStateRepository.ProjectedEvent> captor =
+                ArgumentCaptor.forClass(DividendCurrentStateRepository.ProjectedEvent.class);
+        verify(repository).upsertActiveEvent(eq("2885"), eq("台股"), eq("FinMind"), captor.capture());
+        assertThat(captor.getValue().exDividendDate()).isNull();
+        assertThat(captor.getValue().exRightsDate()).isEqualTo(exRights);
+        assertThat(captor.getValue().anchorDate()).isEqualTo(exRights);
+    }
+
+    /**
+     * Task 357／357.3d-0c（回歸測試，真實資料）：2885 於 2022-08-12 與 2025-08-12 各有一筆
+     * 純配股事件、{@code stock_dividend} 皆為 0.300000（運行中 DB 實測）。除息日拆欄後兩者的
+     * exDividendDate 皆為 null；{@code relaxedIdentity()} 若仍用裸 exDividendDate 而非
+     * anchorDate，兩者的 identity 會退化成相同的 {@code "NULL|0|0.3"} 而在
+     * collapseDuplicateActiveEvents() 被誤判為同一事件、其中一筆被 cancel。改用 anchorDate
+     * （= exRightsDate）後兩者的 anchorDate 分屬不同年份，identity 不再碰撞。
+     */
+    @Test
+    void twoRealPureStockEventsWithSameAmountDifferentYearsAreNotCollapsedTogether() {
+        DividendCurrentStateRepository repository = mock(DividendCurrentStateRepository.class);
+        var event2022 = new DividendCurrentStateRepository.ActiveEventDetail(
+                201L, "2885-2022-key", 2022, null, BigDecimal.ZERO, new BigDecimal("0.300000"),
+                null, null, null, null, null, LocalDate.of(2022, 8, 12));
+        var event2025 = new DividendCurrentStateRepository.ActiveEventDetail(
+                202L, "2885-2025-key", 2025, null, BigDecimal.ZERO, new BigDecimal("0.300000"),
+                null, null, null, null, null, LocalDate.of(2025, 8, 12));
+        when(repository.findActiveEventDetails("2885", "台股"))
+                .thenReturn(List.of(event2022, event2025));
+        when(repository.findLatestHistorical(any(), any(), any(), any()))
+                .thenReturn(Optional.empty());
+        when(repository.findLatestComplete(any(), any(), any(), any(), any()))
+                .thenReturn(Optional.empty());
+
+        new DividendCurrentStateProjectionService(repository)
+                .projectOne("2885", "台股", DECISION);
+
+        // 兩筆真實事件必須各自維持 ACTIVE、互不覆蓋——這正是本回歸測試要釘住的行為。
+        verify(repository, never()).cancelActiveEvent(201L);
+        verify(repository, never()).cancelActiveEvent(202L);
+        verify(repository, never()).applyMergedEnrichment(
+                anyLong(), any(), any(), any(), any(), any(), any());
+    }
+
     @Test
     void missingCompleteAndHistoricalEvidenceLeavesCurrentStateUntouched() {
         DividendCurrentStateRepository repository = mock(DividendCurrentStateRepository.class);

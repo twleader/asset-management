@@ -114,11 +114,14 @@ public class DividendSnapshotStore {
         if (events == null) return;
         for (DividendFetchClient.DividendEvent event : distinctCanonicalEvents(events)) {
             String key = canonicalEventHash(event);
+            // 357.3a-0：ex_rights_date 緊接 ex_dividend_date 之後同步寫入；只改
+            // canonicalEvent()（雜湊輸入）不改這裡的 INSERT 會讓雜湊算對但值仍寫不進去。
             jdbc.update("INSERT INTO stock_dividend_snapshot_event "
-                            + "(snapshot_id,event_key,year,ex_dividend_date,cash_dividend,stock_dividend," 
-                            + "cash_payment_date,stock_payment_date,source_available_at) "
-                            + "VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT (snapshot_id,event_key) DO NOTHING",
-                    snapshotId, key, event.year(), parse(event.exDividendDate()), event.cashDividend(),
+                            + "(snapshot_id,event_key,year,ex_dividend_date,ex_rights_date,cash_dividend,"
+                            + "stock_dividend,cash_payment_date,stock_payment_date,source_available_at) "
+                            + "VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT (snapshot_id,event_key) DO NOTHING",
+                    snapshotId, key, event.year(), parse(event.exDividendDate()),
+                    parse(event.exRightsDate()), event.cashDividend(),
                     event.stockDividend(), parse(event.cashPaymentDate()), parse(event.stockPaymentDate()),
                     toTimestamp(sourceAvailableAt));
         }
@@ -187,9 +190,15 @@ public class DividendSnapshotStore {
         return sha256(canonicalEvent(event));
     }
 
+    /**
+     * 357.3a-0：追加 exRightsDate（緊接除息日之後）——除權日是事件身分的一部分，長期
+     * 排除在 canonical 之外會讓「同一事件」的判定永遠少一個維度。此變更會讓既有
+     * event_key 全數改變，遷移機制見 {@link DividendEventKeyMigration}。
+     */
     private static String canonicalEvent(DividendFetchClient.DividendEvent event) {
         if (event == null) return "NULL";
         return String.join("|", value(event.year()), value(parse(event.exDividendDate())),
+                value(parse(event.exRightsDate())),
                 decimal(event.cashDividend()), decimal(event.stockDividend()),
                 value(parse(event.cashPaymentDate())), value(parse(event.stockPaymentDate())));
     }

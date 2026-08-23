@@ -149,9 +149,10 @@ public class NasdaqDividendCalendarClient implements DividendUpcomingScopeClient
                     return DayCalendar.failed("Nasdaq dividend calendar row 無法完整解析 date=" + requested);
                 }
                 LocalDate payment = parseDate(row.path("payment_Date").asText(null));
+                // US-only：Nasdaq dividend_Rate 只有現金股利，exRightsDate 恆 null。
                 events.add(new SymbolEvent(symbol, new DividendFetchClient.DividendEvent(
                         exDate.getYear(), amount.setScale(4, RoundingMode.HALF_UP), BigDecimal.ZERO,
-                        exDate.toString(), payment == null ? null : payment.toString(), null)));
+                        exDate.toString(), null, payment == null ? null : payment.toString(), null)));
             }
             return DayCalendar.complete(events);
         } catch (RuntimeException | com.fasterxml.jackson.core.JsonProcessingException e) {

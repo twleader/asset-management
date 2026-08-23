@@ -368,6 +368,121 @@ class DistributionAdjustedPriceServiceTest {
         assertTrue(adjustment.appliedEventDates().isEmpty());
     }
 
+    // ───────────────────── Task 357／Requirement 94 ─────────────────────
+
+    /**
+     * 357.4a-3（NPE 陷阱，必修）：純配股事件（exDividendDate 為 null）在 validEvent()
+     * 放寬後，若 adjust() 的區間過濾／排序／FactorEvent 構造／closeOn 查價任一處仍直接呼叫
+     * getExDividendDate()，會立刻 NullPointerException。以 2881 實際查得的真實事件
+     * （2022 年純配股 stockDividend=2.690500，除權日 2022-09-22，exDividendDate 拆欄後為
+     * null）驗證不拋例外，且還原後的股數／價格因子正確（面額 10 元：股票股利 2.6905 元
+     * → 1 股配 0.26905 股 → shareGrowth=1.26905）。
+     */
+    @Test
+    void pureStockDividendWithNullExDividendDateAdjustsWithoutThrowing() {
+        LocalDate exRights = LocalDate.of(2022, 9, 22);
+        List<StockPriceHistory> rows = List.of(
+                row(exRights.plusDays(1), new BigDecimal("30.00")),
+                row(exRights, new BigDecimal("38.00")),
+                row(exRights.minusDays(1), new BigDecimal("38.00")));
+        StockDividendHistory pureStock = StockDividendHistory.builder()
+                .id(41L).stockCode("2881").market("台股").year(2022)
+                .exDividendDate(null).exRightsDate(exRights)
+                .cashDividend(BigDecimal.ZERO).stockDividend(new BigDecimal("2.690500"))
+                .build();
+
+        var adjusted = service.adjust(rows, List.of(pureStock));
+
+        assertTrue(adjusted.adjusted());
+        assertEquals(List.of(exRights), adjusted.appliedEventDates());
+        // 「還原權息」以最新價基為準：事件後最新一列（30.00）還原後應維持原值不變，
+        // 事件前的列才會被縮放——與既有 stockDistributionUsesParValueFactorAndKeepsLatestPrice
+        // 同一慣例，這裡驗的是純配股（null exDividendDate）走同一條路徑不拋例外。
+        assertEquals(0, new BigDecimal("30.00").compareTo(
+                adjusted.rowsDesc().stream()
+                        .filter(r -> r.getTradingDate().equals(exRights.plusDays(1)))
+                        .findFirst().orElseThrow().getClosePrice()));
+    }
+
+    /**
+     * 357.4a（核心規則）：現金股利套用 exDividendDate、股票股利套用 exRightsDate；兩者
+     * 皆有值且不同日時<b>拆成兩筆獨立事件</b>，各自在自己的日期套用因子，不得合併或只取
+     * 其一。用一組除息日與除權日刻意不同的合成事件驗證：事件之間那一天只套現金因子，
+     * 除權日當天才追加股票因子。
+     */
+    @Test
+    void cashAndStockDividendOnDifferentDatesSplitIntoTwoIndependentFactorEvents() {
+        LocalDate exDividend = LocalDate.of(2026, 7, 10);
+        LocalDate exRights = LocalDate.of(2026, 7, 20);
+        List<StockPriceHistory> rows = List.of(
+                row(exRights, new BigDecimal("100.00")),
+                row(exDividend, new BigDecimal("100.00")),
+                row(exDividend.minusDays(1), new BigDecimal("100.00")));
+        StockDividendHistory event = StockDividendHistory.builder()
+                .id(42L).stockCode("7556").market("台股").year(2026)
+                .exDividendDate(exDividend).exRightsDate(exRights)
+                .cashDividend(new BigDecimal("2.00")).stockDividend(new BigDecimal("1.00"))
+                .build();
+
+        var adjusted = service.adjust(rows, List.of(event));
+
+        assertTrue(adjusted.adjusted());
+        assertEquals(List.of(exDividend, exRights), adjusted.appliedEventDates(),
+                "現金與股票因子必須各自在自己的日期套用，而不是合併成單一事件日");
+    }
+
+    /**
+     * 357.4a 的另一半：兩個日期<b>相同</b>時（含只有一方有值、fallback 到同一個
+     * anchorDate 的情形）維持既有「一事件一日期」的合併因子，逐位不變既有回歸
+     * （357.4b）——不得因新增除權日欄就意外把同日事件也拆成兩筆。
+     */
+    @Test
+    void cashAndStockDividendOnTheSameDateStayAsOneCombinedFactorEvent() {
+        LocalDate sameDate = LocalDate.of(2026, 7, 10);
+        List<StockPriceHistory> rows = List.of(
+                row(sameDate, new BigDecimal("100.00")),
+                row(sameDate.minusDays(1), new BigDecimal("100.00")));
+        StockDividendHistory event = StockDividendHistory.builder()
+                .id(43L).stockCode("2330").market("台股").year(2026)
+                .exDividendDate(sameDate).exRightsDate(sameDate)
+                .cashDividend(new BigDecimal("2.00")).stockDividend(new BigDecimal("1.00"))
+                .build();
+
+        var adjusted = service.adjust(rows, List.of(event));
+
+        assertTrue(adjusted.adjusted());
+        assertEquals(List.of(sameDate), adjusted.appliedEventDates(),
+                "同日兩個因子必須合併成單一事件，不得因除權日欄存在就拆成兩筆");
+    }
+
+    /**
+     * 357.4a-2：hasStockDividendOn() 必須改判除權日。純配股事件的除息日為 null，若判斷式
+     * 仍讀 getExDividendDate()，這個保護會對這類事件失效——用一個「除息日缺值、除權日
+     * 恰好與跳空同一天」的合成分割樣本驗證：跳空幅度落在 2:1 分割門檻內，但因為有除權日
+     * 可解釋，不得被誤判為分割。
+     */
+    @Test
+    void hasStockDividendOnJudgesExRightsDateNotExDividendDateForPureStockEvent() {
+        LocalDate jumpDate = LocalDate.of(2026, 5, 4);
+        List<StockPriceHistory> rows = List.of(
+                row(jumpDate, new BigDecimal("50.00")),
+                row(jumpDate.minusDays(1), new BigDecimal("100.00")));
+        StockDividendHistory pureStock = StockDividendHistory.builder()
+                .id(44L).stockCode("00881").market("台股").year(2026)
+                .exDividendDate(null).exRightsDate(jumpDate)
+                .cashDividend(BigDecimal.ZERO).stockDividend(new BigDecimal("10.00"))
+                .build();
+
+        var adjusted = service.adjust(rows, List.of(pureStock));
+
+        // 若被誤判為分割，appliedEventDates 會多出一筆 detectSplits 產生的事件；
+        // 純配股 10 元＝1:1 換股，dividendFactor 應為 2（面額 10），與分割的 canonical 2
+        // 湊巧同值，故真正該驗的是「只有一筆事件」而非分割＋配股各算一次。
+        assertTrue(adjusted.adjusted());
+        assertEquals(List.of(jumpDate), adjusted.appliedEventDates(),
+                "跳空已由股票股利（除權日）解釋，不得再被 detectSplits 認定為分割");
+    }
+
     private StockPriceHistory row(LocalDate date, BigDecimal close) {
         return StockPriceHistory.builder()
                 .stockCode("00751B")

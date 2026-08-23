@@ -59,18 +59,18 @@ public class DividendCurrentStateProjectionService {
         for (DividendCurrentStateRepository.Event event : snapshot.events()) {
             if (withinScope(event, snapshot)) {
                 if (positive(event.cashDividend(), event.stockDividend())) {
-                    authoritativePositiveDates.add(event.exDividendDate());
+                    authoritativePositiveDates.add(event.anchorDate());
                     // Keep both the provider-generated key and a value identity.  The latter
                     // lets a legacy current-state row (created before event_key was introduced)
                     // reconcile with a new append-only snapshot without creating a duplicate.
                     addIdentities(authoritativeIdentities, event.eventKey(), event.year(),
-                            event.exDividendDate(), event.cashDividend(), event.stockDividend(),
+                            event.anchorDate(), event.cashDividend(), event.stockDividend(),
                             event.cashPaymentDate(), event.stockPaymentDate());
                 } else {
                     // A date-only announcement is authoritative for the date, but does not
                     // prove that an earlier amount was cancelled.  Keep existing amount rows
                     // until a positive canonical event (or an explicitly absent date) says so.
-                    datesWithUnresolvedAmount.add(event.exDividendDate());
+                    datesWithUnresolvedAmount.add(event.anchorDate());
                 }
             }
             DividendCurrentStateRepository.ProjectedEvent projected = projectable(event, snapshot);
@@ -82,10 +82,13 @@ public class DividendCurrentStateProjectionService {
         for (DividendCurrentStateRepository.ActiveFutureEvent existing
                 : repository.findActiveFutureEvents(snapshot.code(), snapshot.market(), decisionDate,
                 snapshot.scopeFrom(), snapshot.scopeTo())) {
-            if (existing != null && existing.exDividendDate() != null
-                    && !datesWithUnresolvedAmount.contains(existing.exDividendDate())
+            // Task 357／357.3d-0c：純配股事件的 exDividendDate() 為 null，一律改用
+            // anchorDate = COALESCE(exDividendDate, exRightsDate)，否則這類事件永遠
+            // 無法進入 CANCEL 判定（existing.exDividendDate() != null 會直接把它們濾掉）。
+            if (existing != null && existing.anchorDate() != null
+                    && !datesWithUnresolvedAmount.contains(existing.anchorDate())
                     && !(unknownIdentity(existing)
-                    && authoritativePositiveDates.contains(existing.exDividendDate()))
+                    && authoritativePositiveDates.contains(existing.anchorDate()))
                     && !matchesAnyIdentity(authoritativeIdentities, existing)) {
                 repository.cancelActiveEvent(existing.id());
             }
@@ -105,8 +108,11 @@ public class DividendCurrentStateProjectionService {
                 new LinkedHashMap<>();
         for (DividendCurrentStateRepository.ActiveEventDetail row
                 : repository.findActiveEventDetails(code, market)) {
+            // Task 357／357.3d-0c：anchorDate 取代裸 exDividendDate，否則同金額不同年度
+            // 的純配股事件（如 2885 2022／2025，anchorDate 分屬不同年）會被誤判成同一
+            // 真實事件而互相覆蓋。
             groups.computeIfAbsent(
-                    relaxedIdentity(row.exDividendDate(), row.cashDividend(), row.stockDividend()),
+                    relaxedIdentity(row.anchorDate(), row.cashDividend(), row.stockDividend()),
                     key -> new ArrayList<>()).add(row);
         }
         int collapsedRows = 0;
@@ -173,7 +179,9 @@ public class DividendCurrentStateProjectionService {
         if (!covers(snapshot, decisionDate, decisionDate)) return false;
         for (DividendCurrentStateRepository.Event event : snapshot.events()) {
             DividendCurrentStateRepository.ProjectedEvent projected = projectable(event, snapshot);
-            if (projected != null && !projected.exDividendDate().isAfter(decisionDate)) {
+            // Task 357／357.4a-3 同構陷阱：projected.exDividendDate() 對純配股事件為
+            // null，裸呼叫 isAfter() 會直接 NPE；改用 anchorDate。
+            if (projected != null && !projected.anchorDate().isAfter(decisionDate)) {
                 repository.upsertHistoricalEvent(
                         snapshot.code(), snapshot.market(), snapshot.provider(), projected);
             }
@@ -197,31 +205,34 @@ public class DividendCurrentStateProjectionService {
                 || !positive(event.cashDividend(), event.stockDividend())) {
             return null;
         }
-        int year = event.year() == null ? event.exDividendDate().getYear() : event.year();
+        // Task 357：year 推導改用 anchorDate（純配股事件 exDividendDate() 為 null 時
+        // 呼叫 getYear() 會 NPE）；ProjectedEvent 顯式帶入 exRightsDate，不依賴任何
+        // 相容建構式的預設 null（357.3a-0b）。
+        int year = event.year() == null ? event.anchorDate().getYear() : event.year();
         return new DividendCurrentStateRepository.ProjectedEvent(
                 event.eventKey(), year, event.exDividendDate(), event.cashDividend(), event.stockDividend(),
-                event.cashPaymentDate(), event.stockPaymentDate());
+                event.cashPaymentDate(), event.stockPaymentDate(), event.exRightsDate());
     }
 
     private static void addIdentities(
-            Set<String> identities, String eventKey, Integer year, LocalDate exDate,
+            Set<String> identities, String eventKey, Integer year, LocalDate anchorDate,
             BigDecimal cash, BigDecimal stock, LocalDate cashPayment, LocalDate stockPayment) {
         if (eventKey != null && !eventKey.isBlank()) identities.add("key:" + eventKey);
-        identities.add("value:" + valueIdentity(year, exDate, cash, stock, cashPayment, stockPayment));
+        identities.add("value:" + valueIdentity(year, anchorDate, cash, stock, cashPayment, stockPayment));
         // Relaxed identity: an existing row for the same ex-date and amounts is the
         // same real event even when its event_key or payment dates differ, and must
         // not be cancelled just because those metadata fields disagree.
-        identities.add("date-amount:" + relaxedIdentity(exDate, cash, stock));
+        identities.add("date-amount:" + relaxedIdentity(anchorDate, cash, stock));
     }
 
     private static boolean matchesAnyIdentity(
             Set<String> identities, DividendCurrentStateRepository.ActiveFutureEvent existing) {
         if (existing.eventKey() != null && !existing.eventKey().isBlank()
                 && identities.contains("key:" + existing.eventKey())) return true;
-        if (identities.contains("value:" + valueIdentity(existing.year(), existing.exDividendDate(),
+        if (identities.contains("value:" + valueIdentity(existing.year(), existing.anchorDate(),
                 existing.cashDividend(), existing.stockDividend(), existing.cashPaymentDate(),
                 existing.stockPaymentDate()))) return true;
-        return identities.contains("date-amount:" + relaxedIdentity(existing.exDividendDate(),
+        return identities.contains("date-amount:" + relaxedIdentity(existing.anchorDate(),
                 existing.cashDividend(), existing.stockDividend()));
     }
 
@@ -233,19 +244,26 @@ public class DividendCurrentStateProjectionService {
     }
 
     private static String valueIdentity(
-            Integer year, LocalDate exDate, BigDecimal cash, BigDecimal stock,
+            Integer year, LocalDate anchorDate, BigDecimal cash, BigDecimal stock,
             LocalDate cashPayment, LocalDate stockPayment) {
-        return token(year) + "|" + token(exDate) + "|" + decimal(cash) + "|" + decimal(stock)
+        return token(year) + "|" + token(anchorDate) + "|" + decimal(cash) + "|" + decimal(stock)
                 + "|" + token(cashPayment) + "|" + token(stockPayment);
     }
 
     /**
-     * Ex-date plus amounts, the identity of one real dividend event.  Null amounts
-     * count as zero, the same convention as the uk_dividend_event index and the
-     * relaxed reconciliation segment in the JDBC adapter.
+     * anchorDate（{@code COALESCE(exDividendDate, exRightsDate)}）plus amounts, the
+     * identity of one real dividend event.  Null amounts count as zero, the same
+     * convention as the uk_dividend_event index and the relaxed reconciliation
+     * segment in the JDBC adapter.
+     *
+     * <p><b>Task 357／357.3d-0c：</b>callers must pass the caller-computed anchorDate,
+     * never the raw ex-dividend date.  A pure stock-dividend event has a null
+     * exDividendDate; passing it here degenerates to the fixed token {@code "NULL"}
+     * and collides same-amount pure-stock events across different years (e.g. 2885
+     * in 2022 and 2025, both {@code stock_dividend=0.3}) into one identity.</p>
      */
-    private static String relaxedIdentity(LocalDate exDate, BigDecimal cash, BigDecimal stock) {
-        return token(exDate) + "|" + zeroIfNull(cash) + "|" + zeroIfNull(stock);
+    private static String relaxedIdentity(LocalDate anchorDate, BigDecimal cash, BigDecimal stock) {
+        return token(anchorDate) + "|" + zeroIfNull(cash) + "|" + zeroIfNull(stock);
     }
 
     private static String token(Object value) { return value == null ? "NULL" : value.toString(); }
@@ -258,13 +276,20 @@ public class DividendCurrentStateProjectionService {
         return value == null ? "0" : value.stripTrailingZeros().toPlainString();
     }
 
+    /**
+     * Task 357／357.3d-0：改用 anchorDate = COALESCE(exDividendDate, exRightsDate)。
+     * 這是回補機制自身依賴的寫入閘門——{@code projectOne()} 與 {@code projectable()}
+     * 都靠它決定事件能不能通過投影；若仍用裸 {@code exDividendDate() != null}，純配股
+     * 事件永遠無法通過，回補會靜默失效且不會被任何既有測試攔到。
+     */
     private static boolean withinScope(
             DividendCurrentStateRepository.Event event,
             DividendCurrentStateRepository.Snapshot snapshot) {
-        return event != null && event.exDividendDate() != null
+        LocalDate anchor = event == null ? null : event.anchorDate();
+        return anchor != null
                 && snapshot != null && snapshot.scopeFrom() != null && snapshot.scopeTo() != null
-                && !event.exDividendDate().isBefore(snapshot.scopeFrom())
-                && !event.exDividendDate().isAfter(snapshot.scopeTo());
+                && !anchor.isBefore(snapshot.scopeFrom())
+                && !anchor.isAfter(snapshot.scopeTo());
     }
 
     private static boolean positive(BigDecimal cash, BigDecimal stock) {

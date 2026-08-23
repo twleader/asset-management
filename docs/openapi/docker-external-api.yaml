@@ -1379,7 +1379,7 @@ components:
       additionalProperties: false
     RadarEvidence:
       type: object
-      required: [acceptedPriceAsOfDate, acceptedPriceSource, acceptedPriceQuality, livePriceAccepted, returnStdDev60Ratio, returnStdDev60AsOfDate, returnStdDev60Source, premiumAsOfDate, premiumSource, premiumStale, assetProfile, actionGateReasons, evidenceGroups, marketFeatures, shortEvidenceConfidence, mediumEvidenceConfidence, shortDownsideRisk, mediumDownsideRisk, shortRiskCoverage, mediumRiskCoverage, candidateAction, shortCandidateAction, nextDistributionDate, nextDistributionKnownAt, nextDistributionProvider, nextDistributionSourceUrls, nextDistributionStatus, nextDistributionMissingReason, distributionsWithinFiveSessions, distributionsWithinTwentySessions, treasuryRateContext, normalizedBias, shortNormalizedBias, swingDownsideRisk, swingEvidenceConfidence, swingRiskCoverage, swingCandidateAction]
+      required: [acceptedPriceAsOfDate, acceptedPriceSource, acceptedPriceQuality, livePriceAccepted, returnStdDev60Ratio, returnStdDev60AsOfDate, returnStdDev60Source, premiumAsOfDate, premiumSource, premiumStale, assetProfile, actionGateReasons, evidenceGroups, marketFeatures, shortEvidenceConfidence, mediumEvidenceConfidence, shortDownsideRisk, mediumDownsideRisk, shortRiskCoverage, mediumRiskCoverage, candidateAction, shortCandidateAction, nextDistributionDate, nextDistributionKnownAt, nextDistributionProvider, nextDistributionSourceUrls, nextDistributionStatus, nextDistributionMissingReason, distributionsWithinFiveSessions, distributionsWithinTwentySessions, treasuryRateContext, normalizedBias, shortNormalizedBias, swingDownsideRisk, swingEvidenceConfidence, swingRiskCoverage, swingCandidateAction, nextExDividendDate, nextExRightsDate, nextCashPaymentDate, nextStockPaymentDate]
       properties:
         acceptedPriceAsOfDate: {type: [string, 'null'], format: date}
         acceptedPriceSource: {type: [string, 'null']}
@@ -1434,6 +1434,10 @@ components:
         swingEvidenceConfidence: {type: [integer, 'null'], format: int32}
         swingRiskCoverage: {type: [number, 'null'], format: double}
         swingCandidateAction: {type: [string, 'null']}
+        nextExDividendDate: {type: [string, 'null'], format: date}
+        nextExRightsDate: {type: [string, 'null'], format: date}
+        nextCashPaymentDate: {type: [string, 'null'], format: date}
+        nextStockPaymentDate: {type: [string, 'null'], format: date}
       additionalProperties: false
     AssetProfile:
       type: object
