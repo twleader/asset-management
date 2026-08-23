@@ -85,6 +85,45 @@ services:
       retries: 10
       start_period: 10s
 
+  # ── Yuanta Broker Adapter (Python / SPARK API via pythonnet) ─
+  # Optional, network-internal and read-only. Process liveness remains healthy when disabled.
+  # No proprietary component is downloaded or bundled by this image — see secrets/yuanta/README.md.
+  yuanta-broker-service:
+    platform: linux/amd64
+    build:
+      context: ./yuanta-broker-service
+      dockerfile: Dockerfile
+    container_name: asset-yuanta-broker-service
+    restart: unless-stopped
+    environment:
+      YUANTA_ENABLED: ${YUANTA_ENABLED:-false}
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - ${YUANTA_SECRETS_DIR_HOST:-./secrets/yuanta}:/run/secrets/yuanta:ro
+    networks:
+      - asset-net
+    user: "10002:10002"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import json,urllib.request;
+          data=json.load(urllib.request.urlopen('http://127.0.0.1:8080/internal/health',timeout=3));
+          assert data['status']=='UP'
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
   # ── Business Services (Spring Boot MVC) ────────────────────
   # Internal only — not exposed to host. BFF is the sole entry point.
   business-services:

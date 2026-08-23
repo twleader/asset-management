@@ -1,0 +1,23 @@
+# Fully pinned production dependency closure.
+#
+# pythonnet + clr-loader are the ONLY Yuanta-SDK-related packages here — unlike
+# fubon-broker-service's fubon_neo wheel, there is no proprietary component to
+# hash-verify and install: pythonnet is a normal public PyPI package (pure
+# "none-any" wheel, no .NET required at pip-install time) that only needs a
+# real .NET 8 CoreCLR runtime present when `import clr` actually executes at
+# request time in the runtime image. The proprietary `YuantaSparkAPI.dll`
+# itself is never downloaded or bundled — see secrets/yuanta/README.md.
+annotated-types==0.8.0
+anyio==4.14.2
+click==8.4.2
+clr-loader==0.3.1
+fastapi==0.116.1
+h11==0.16.0
+idna==3.19
+pydantic==2.11.7
+pydantic-core==2.33.2
+pythonnet==3.1.0
+starlette==0.47.3
+typing-extensions==4.16.0
+typing-inspection==0.4.4
+uvicorn==0.35.0

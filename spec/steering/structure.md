@@ -396,6 +396,28 @@ fubon-broker-service/
 - `secrets/fubon/sdk/` 只掛Python；Java services只可掛`secrets/fubon/shared/`。disabled或misconfigured時process/service仍healthy，functional feature回typed failure、零外呼/零寫入。
 - business-services 是庫存 persistence與tenant/transaction owner；external-materials-service是Redis live quote唯一writer。Python不得跨越這兩個責任邊界。
 
+### 4.6 Yuanta Broker Service `yuanta-broker-service/`（scaffold，尚待官方帳號啟用）
+
+```
+yuanta-broker-service/
+├── Dockerfile                 # Python 3.13 multi-stage；runtime platform linux/amd64
+├── .dockerignore              # 排除 DLL／憑證等 SDK 安裝媒介與 secrets
+├── requirements.txt           # exact-pinned runtime dependencies（含 pythonnet）
+├── src/yuanta_broker_service/
+│   ├── app.py                 # exact internal routes（14 支）；關閉 docs/redoc/openapi
+│   ├── config.py              # mounted-file config state（lazy、fail closed）
+│   ├── security.py            # internal token constant-time verify＋redaction
+│   ├── sdk_gateway.py         # pythonnet/clr 載入 YuantaSparkAPI.dll；集中 raw→normalized 映射
+│   └── models.py              # normalized decimal-string wire DTO
+└── tests/                     # FakeYuantaSparkGateway；永不需要真實憑證
+```
+
+- 元大官方提供兩套 API：**SPARK API**（`pythonnet` + .NET 8 CoreCLR，官方文件列出 Linux 登入簽章）與**舊版 OneAPI／YuantaOneCom**（COM + .NET Framework 4.5.2，僅限 Windows）。本服務只能用 SPARK API；OneAPI 無 Linux/Docker 路徑，禁止整合。
+- 唯讀：只允許查詢類（帳務 6 支、行情 5 支、回報 1 支）與 `Subscribe*`／`Unsubscribe*`；**禁止** import 或呼叫任何下單／改單／刪單／`SendFutureCombined`／`GetFutDepositOptimum`（全專案鐵則，見 CLAUDE.md〈券商 API 只能查詢，不得交易〉）。
+- `YuantaSparkAPI.dll` 無公開直鏈可供 build time 雜湊釘選，與 Fubon 官方 wheel 不同；DLL／憑證一律由使用者依官方申請流程取得後掛載 `secrets/yuanta/`，不得進 image/build context。
+- Compose 固定 `platform: linux/amd64`、無 host port、只接 `asset-net`、non-root/read-only/tmpfs/drop capabilities。`YUANTA_ENABLED=false`（預設）時 process 仍 healthy、狀態 `NOT_CONFIGURED`，不拖垮既有 stack。
+- **本次任務不建立 Java 消費端**：無具體功能要消費這些查詢前，不預先蓋 `integration/yuanta` proxy 層（YAGNI）；日後有功能需要時，比照既有 `integration/fubon` 慣例新增。
+
 ## 5. Frontend `frontend/`
 
 ### 5.1 目錄結構
@@ -483,9 +505,9 @@ frontend/
 
 ```
 spec/
-├── requirements.md       # 101 個 Requirements（最新為 102；100 由另一在途 worktree 佔用）
+├── requirements.md       # 102 個 Requirements（最新為 102）
 ├── design.md             # 架構圖、ERD、Service 職責、Sequence
-├── tasks.md              # 索引（Task 1–228、264–267、269–292、297–309、311–342、344–363、365、366）＋尚未歸檔的 201 起區段
+├── tasks.md              # 索引（Task 1–228、264–267、269–292、297–309、311–342、344–366）＋尚未歸檔的 201 起區段
 ├── tasks/                # 任務檔
 │   ├── README.md         # 自足任務檔規範
 │   ├── archive/          # Task 1–200 歷史，已凍結

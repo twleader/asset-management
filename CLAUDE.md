@@ -354,9 +354,9 @@ cd frontend
 
 | 文件 | 說明 |
 |------|------|
-| `spec/requirements.md` | User Stories + Acceptance Criteria（101 個 Requirements；最新為 102；編號 100 由另一在途 worktree 佔用） |
+| `spec/requirements.md` | User Stories + Acceptance Criteria（102 個 Requirements；最新為 102） |
 | `spec/design.md` | 架構圖、ERD、API 端點、關鍵業務邏輯 |
-| `spec/tasks.md` | 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–363、365、366）＋尚未歸檔的 Task 201 起區段；Task 229–263、268、293–296 以各自 `spec/tasks/tNNN_*.md` 為準 |
+| `spec/tasks.md` | 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–366）＋尚未歸檔的 Task 201 起區段；Task 229–263、268、293–296 以各自 `spec/tasks/tNNN_*.md` 為準 |
 | `spec/tasks/README.md` | 自足任務檔規範（新任務寫這裡，不再追加 `tasks.md`） |
 | `spec/tasks/tNNN_*.md` | 自足任務檔（Task 201 之後的新任務） |
 | `spec/tasks/archive/` | Task 1–200 歷史，已凍結不再修改 |
@@ -365,5 +365,5 @@ cd frontend
 | 工具 | 用途 |
 |------|------|
 | `scripts/spec-check.sh` | spec 變更的機械前置檢查（撞號／重號／changeset／計數漂移） |
-| `scripts/tests/schema-sql-drift-test.sh` | `db/schema.sql` 與運行中 DB 的逐位元同步檢查（由 spec-check B10 呼叫，亦可單獨執行） |
+| `scripts/tests/schema-sql-drift-test.sh` | `db/schema.sql` 與運行中 DB 的逐位元同步檢查（Task 366 起；由 spec-check B10 呼叫，亦可單獨執行） |
 | `/spec-review` | 實作前的獨立對抗式審查（產出 findings，不打分數；critical／major 修完即可開工） |
