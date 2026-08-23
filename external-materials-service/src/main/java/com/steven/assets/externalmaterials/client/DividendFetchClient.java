@@ -417,11 +417,13 @@ public class DividendFetchClient {
     }
 
     /**
-     * 357.2f：此資料集僅有單一日期欄（無現金／股票兩個原始日期可 fallback），依既有
-     * {@code stock_or_cache_dividend} 判準（含「權」不含「息」→ 純配股）分派到
-     * {@link DividendEvent#exRightsDate()} 或 {@link DividendEvent#exDividendDate()}，
-     * 不得像修正前一律塞進 exDividendDate（那正是除權日被誤標成除息日的原始缺陷，
-     * 主要影響個股資料集查無的 ETF）。
+     * 363.1b：此資料集僅有單一日期欄（無現金／股票兩個原始日期可 fallback）。
+     * {@code stock_or_cache_dividend} 含「權」不含「息」的「權」型列，其
+     * {@code stock_and_cache_dividend} 存的其實是除權參考價落差、不是配股率
+     * （見任務檔 t363 背景段落實測），一律不組出事件、只留 {@code log.warn} 稽核軌跡；
+     * 「息」型列（現金配息）落 {@link DividendEvent#exDividendDate()}，既有解析邏輯不變。
+     * malformed 判定（{@code amount}／{@code ex} 缺失或不可解析）仍在型別判定之前執行，
+     * 不得因排除「權」列而略過既有的資料完整性檢查。
      */
     private ParseEvents parseFinMindResultRows(JsonNode rows, LocalDate from, LocalDate to) {
         List<DividendEvent> events = new ArrayList<>();
@@ -435,11 +437,17 @@ public class DividendFetchClient {
             if (!date.isBefore(from) && !date.isAfter(to) && amount.signum() > 0) {
                 String type = item.path("stock_or_cache_dividend").asText("");
                 boolean stock = type.contains("權") && !type.contains("息");
-                events.add(new DividendEvent(date.getYear(), stock ? BigDecimal.ZERO : amount,
-                        stock ? amount : BigDecimal.ZERO,
-                        stock ? null : date.toString(),
-                        stock ? date.toString() : null,
-                        null, null));
+                // 363.1b：fallback 表 TaiwanStockDividendResult 的「權」型列
+                // stock_and_cache_dividend 存的其實是除權參考價落差，不是配股率
+                // （見任務檔 t363 背景段落實測）。個股配股改由主表 TaiwanStockDividend
+                // 單一來源覆蓋，此處一律不再組出配股事件，只留稽核軌跡。
+                if (stock) {
+                    log.warn("FinMind TaiwanStockDividendResult 權型列已知不可信、已排除 "
+                            + "exDate={} amount={}", date, amount);
+                    continue;
+                }
+                events.add(new DividendEvent(date.getYear(), amount, BigDecimal.ZERO,
+                        date.toString(), null, null, null));
             }
         }
         return ParseEvents.valid(events);
@@ -701,7 +709,10 @@ public class DividendFetchClient {
     /**
      * Fallback：FinMind TaiwanStockDividendResult（除權息結果表）。
      * 僅 date（除息日）+ stock_and_cache_dividend（合併配息金額），無發放日、無現金/配股拆分。
-     * ETF 收益分配皆為「除息」，stock_or_cache_dividend 含「權」且不含「息」才當配股，其餘當現金配息。
+     * 363.1a：stock_or_cache_dividend 含「權」且不含「息」的列，其 stock_and_cache_dividend
+     * 存的其實是除權參考價落差、不是配股率（見任務檔 t363 背景段落實測），一律不組出
+     * DividendEvent，只留 log.warn 稽核軌跡；台股個股的配股事件改由主表
+     * TaiwanStockDividend 單一來源覆蓋。其餘（「息」型，即現金配息）維持既有解析。
      */
     private EventBatch fetchTwDividendResult(String stockCode, int years, LocalDate today) {
         List<DividendEvent> out = new ArrayList<>();
@@ -722,14 +733,21 @@ public class DividendFetchClient {
                 String type = item.path("stock_or_cache_dividend").asText("");
                 boolean isStock = type.contains("權") && !type.contains("息");
                 BigDecimal amt = BigDecimal.valueOf(amount).setScale(4, RoundingMode.HALF_UP);
-                // 357.2f：純配股（isStock）落 exRightsDate，現金落 exDividendDate，
-                // 不得像修正前一律塞進 exDividendDate。
+                // 363.1a：fallback 表 TaiwanStockDividendResult 的「權」型列
+                // stock_and_cache_dividend 存的其實是除權參考價落差，不是配股率
+                // （見任務檔 t363 背景段落實測）。個股配股改由主表 TaiwanStockDividend
+                // 單一來源覆蓋，此處一律不再組出配股事件，只留稽核軌跡。
+                if (isStock) {
+                    log.warn("台股除權息結果表『權』型列已知不可信、已排除 "
+                            + "stockCode={} exDate={} amount={}", stockCode, exDate, amount);
+                    continue;
+                }
                 out.add(new DividendEvent(
                         year,
-                        isStock ? BigDecimal.ZERO : amt,
-                        isStock ? amt : BigDecimal.ZERO,
-                        isStock ? null : nullIfEmpty(exDate),
-                        isStock ? nullIfEmpty(exDate) : null,
+                        amt,
+                        BigDecimal.ZERO,
+                        nullIfEmpty(exDate),
+                        null,
                         null, null
                 ));
             }
