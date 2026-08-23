@@ -70,6 +70,33 @@ merge 進 main**：main 是所有 worktree 共用的分支，壞掉的變更會�
 > 且多個 worktree 共用同一份 local `main` ref，變更一旦 merge 進 main，別的 session 推 main
 > 時也會一併帶上去。因此「只想留在本機」的變更不要走這條流程，停在 feature 分支 commit 即可。
 
+### 動工前偵測「別的 session 正在動同一個檔案」，撞到就停下等它 commit＋merge
+
+**開始編輯任何檔案前，先確認是否有另一個 worktree／session 正對同一檔案有未提交
+或未 merge 的變更。** 若有撞到（同一路徑在別的 worktree 顯示為 modified／untracked，
+或別的分支已領先且動過同一檔案而尚未 merge 進 main），**停下、不要動那個檔案**，
+等對方完成「修改完＋commit＋merge 進 main」之後，回到 main 重新拉取最新狀態，
+再繼續自己的工作。不得為了搶進度而在對方變更尚未落地時就對同一檔案並行編輯。
+
+**判斷方式：**
+```bash
+# 掃所有 worktree 是否有該檔案的未提交變更
+for wt in $(/opt/homebrew/bin/git worktree list --porcelain | grep '^worktree ' | cut -d' ' -f2); do
+  /opt/homebrew/bin/git -C "$wt" status --porcelain -- <path/to/file> 2>/dev/null | grep -q . && echo "撞到：$wt"
+done
+```
+也可用 `git log --all --oneline -- <path/to/file>` 確認是否有其他分支已對該檔案提交
+但尚未 merge 進 main。
+
+**例外：** 使用者明確指示「不用等，直接改」或該檔案的衝突風險極低（如各自新增互不
+重疊的檔案）時可略過此規則；但只要是同一檔案的實質內容變更，一律先等待。
+
+> **成因：** 本專案同時開 30+ 個 worktree，多個 session 平行工作。若對同一檔案同時
+> 下手，輕則產生 merge 衝突需人工排解，重則其中一邊的變更在 merge 時被靜默覆蓋、
+> 事後難以追查是誰的哪次改動消失了。[[feedback_check_parallel_worktree_before_start]]
+> 已記錄「帶 Task 編號動手前掃平行 worktree」，本條把範圍擴大到**任何檔案編輯前**，
+> 且要求主動等待而非僅止於偵測避讓。
+
 ### Commit-msg Hook（強制 SDD 同步）
 
 本專案內建 commit-msg hook（`scripts/git-hooks/commit-msg`），staged 變更若觸及
