@@ -104,15 +104,18 @@ class DividendFetchWindowAnchorTest {
     }
 
     // ---- 361.3d：fallback 表上下界 ----
+    // Task 363／Requirement 99 起，fallback 表「權」型列一律不再解析為事件（見
+    // DividendFallbackStockExclusionTest），本測試改用「息」型列驗證 fallback 表
+    // 自身 date 欄的上下界過濾邏輯不受影響。
 
     @Test
     void fallbackTableFiltersByOwnDateColumn() throws Exception {
         String primary = "{\"data\":[]}";
         String resultTable = """
                 {"data":[
-                  {"date":"2026-08-18","stock_and_cache_dividend":0.4,"stock_or_cache_dividend":"除權"},
-                  {"date":"2026-09-15","stock_and_cache_dividend":0.5,"stock_or_cache_dividend":"除權"},
-                  {"date":"2015-01-01","stock_and_cache_dividend":0.6,"stock_or_cache_dividend":"除權"}
+                  {"date":"2026-08-18","stock_and_cache_dividend":0.4,"stock_or_cache_dividend":"息"},
+                  {"date":"2026-09-15","stock_and_cache_dividend":0.5,"stock_or_cache_dividend":"息"},
+                  {"date":"2015-01-01","stock_and_cache_dividend":0.6,"stock_or_cache_dividend":"息"}
                 ]}
                 """;
         HttpClient client = capturingHistoryClient(primary, resultTable, new ArrayList<>());
@@ -121,7 +124,7 @@ class DividendFetchWindowAnchorTest {
         var observations = fetcher.fetchObservations("2885", "台股", 10);
         var events = observations.get(0).events();
 
-        assertThat(events).extracting(DividendFetchClient.DividendEvent::exRightsDate)
+        assertThat(events).extracting(DividendFetchClient.DividendEvent::exDividendDate)
                 .containsExactly("2026-08-18");
     }
 

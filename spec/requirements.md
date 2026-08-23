@@ -3663,4 +3663,43 @@ FROM stock_price_history WHERE market='台股';
 
 #### 不在本需求範圍（已查證，另案處理）
 
-- **`TaiwanStockDividendResult` 的「權」列金額語意錯誤。** 實測該表 `stock_or_cache_dividend="權"` 的列，其 `stock_and_cache_dividend` 存的是**除權參考價落差**而非配股率：`2885` 2026-08-18 為 `2.626924`（= `before_price 68.30 − after_price 65.67`），2025-08-12 為 `0.966991`（= `33.20 − 32.23`）。因此 `stock_dividend_history` 中 `2885` 於 2020／2022／2023／2024／2025 每年都有兩列純配股（主表的真實配股率 ＋ fallback 表的價差），配股歷史被灌水一倍以上，且會經 `findAdjustmentEvents` 汙染還原權息。此為**獨立於本需求的既有缺陷**，修正涉及刪除既有列與還原權息回歸，須另開需求與任務評估，不得夾帶在本次修正中。
+- **`TaiwanStockDividendResult` 的「權」列金額語意錯誤。** 實測該表 `stock_or_cache_dividend="權"` 的列，其 `stock_and_cache_dividend` 存的是**除權參考價落差**而非配股率：`2885` 2026-08-18 為 `2.626924`（= `before_price 68.30 − after_price 65.67`），2025-08-12 為 `0.966991`（= `33.20 − 32.23`）。因此 `stock_dividend_history` 中 `2885` 於 2020／2022／2023／2024／2025 每年都有兩列純配股（主表的真實配股率 ＋ fallback 表的價差），配股歷史被灌水一倍以上，且會經 `findAdjustmentEvents` 汙染還原權息。此為**獨立於本需求的既有缺陷**，修正涉及刪除既有列與還原權息回歸，須另開需求與任務評估，不得夾帶在本次修正中。**已另開 Requirement 99／Task 363 處理，見下方。**
+
+---
+
+### Requirement 99／Task 363: `TaiwanStockDividendResult`「權」列不得再當配股率入庫——金額語意錯誤且部分事件無法查證，須停止落地並清理既有髒資料
+
+> **編號說明**：Requirement 98／Task 362 已由另一支 worktree（`trading-radar-disclosure-gap-bdc041`，處理交易雷達 evidence 揭露，尚未 merge）佔用，依專案慣例讓號，本需求續編為 99／363。本需求延續 Requirement 97「不在本需求範圍」段記錄的既有缺陷。
+
+**User Story:** 作為系統維運者，我要求 `stock_dividend_history` 的配股（股票股利）事件只能來自可查證的真實配股率，不得把 FinMind fallback 表算出的除權參考價落差當成配股率入庫；同一次除權息事件在該表中不得同時存在「正確值」與「灌水值」兩列。
+
+**背景（運行中系統實測＋外部公開資料交叉驗證，2026-08-23）。** Requirement 97 已用 `2885` 證實：`TaiwanStockDividendResult`（fallback 表）中 `stock_or_cache_dividend` 含「權」不含「息」的列，其 `stock_and_cache_dividend` 欄實際存的是 `before_price − after_price`（除權參考價落差），不是配股率。本需求在動工前擴大取樣，範圍涵蓋兩種情境：
+
+**情境一：同一 anchorDate 主表（`TaiwanStockDividend`）與 fallback 表都有資料（「重複列」情境）。** 對運行中 DB `stock_dividend_history` 全表查詢「現金股利 = 0 且股票股利 > 0」的 ACTIVE 列，`2885` 之外還查到 `2881`（5 個年度）、`2891`（1 個年度）皆有同一 `ex_rights_date` 兩列並存、其中一列明顯是價差量級（如 `2881` 2021 年 `8.4644` vs 另一列 `1.0`，同檔股價約 50–70 元，量級與價差吻合）。**共 12 個年度事件、24 列**受影響（`2881`×5、`2885`×6、`2891`×1）。
+
+**情境二：只有 fallback 表有資料、主表查無同 anchorDate 事件（「單列」情境，即 Requirement 97 原先假設「可能是 ETF 覆蓋」的情況）。** 實測結果推翻了原先的假設：
+
+- **台股 ETF 完全不觸發本缺陷。** 對本系統實際納管的全部 7 檔主流 ETF（`0050`／`0056`／`006208`／`00878`／`00919`／`00929`／`00713`）直接查詢 FinMind `TaiwanStockDividendResult`，**零筆**「權」型列；運行中 DB 全部 57 檔納管標的中，「現金股利=0 且股票股利>0」的列**僅出現在個股**（`2881`／`2882`／`2885`／`2891`／`3037`／`7556`），無一檔 ETF。台灣 ETF 的收益分配一律走「息」（現金），不會有「權」（配股）事件，故 Requirement 97 原先「fallback 表補上 ETF 覆蓋」的顧慮在配股（「權」）語意上不成立——那個顧慮只適用於「息」型列（現金配息），本需求不改動「息」型列的既有邏輯。
+- **個股的單列 fallback 事件經公開資料交叉驗證，4 個樣本 4 個都對不上任何真實除權息紀錄**，不只是「金額錯」，連日期本身都無法追溯：
+  - `2882`（國泰金）DB 中兩個孤立事件：`2019-10-14` 股票股利 `0.2288`、`2022-12-05` 股票股利 `0.8332`。經 Goodinfo 除權息日程表核對，`2882` 過去 20 年僅兩次真實配股：`2019-07-01`（現金 1.2＋股票 0.3）與 `2023-07-13`（純股票 0.9）——**兩個 DB 事件的日期與金額皆與任何一次真實事件對不上**。
+  - `3037`（欣興）DB 中 `2025-11-14` 股票股利 `1.8247`。經 Goodinfo 核對，`3037` 自 2009 年起**每一個年度股票股利皆為 0**（純現金股利），近 17 年無任何一次配股，`2025-11-14` 附近沒有除權事件。**此列完全是憑空產生的事件**。
+  - `7556`（意德士）DB 中 `2025-08-18` 股票股利 `1.142`。經 Goodinfo 核對，`7556` 2024 年度（2025 發放）真實配股為 `0.5`、除權交易日為 `2025-07-03`——**日期差 46 天、金額差逾一倍**，同樣對不上任何真實事件。
+
+  4 個樣本 0 個能與獨立公開資料源核對一致，顯示 fallback 表「權」列的資料品質問題**不只是「金額算錯」，在無主表可交叉核對時，連事件本身的真實性都無法確認**。
+
+**結論：** 本缺陷的正確修法不是「主表優先、fallback 表只在主表查無時補位」（原先設想的方向），而是**`TaiwanStockDividendResult` 的「權」型列一律不得再解讀為配股事件並入庫**——因為（a）ETF 從未觸發此列，Requirement 97 原先「fallback 補 ETF 覆蓋」的假設不成立於配股語意；（b）個股配股已由主表 `TaiwanStockDividend` 完整覆蓋（`StockEarningsDistribution` + `StockStatutorySurplus`）；（c）fallback 表「權」列本身查證結果是系統性不可信，不僅重複情境金額錯，孤立情境下連事件真實性都無法確認。「息」型列（現金配息，含 ETF 收益分配）不在此列，其資料品質未發現問題，本需求不改動。
+
+#### Acceptance Criteria
+
+- [ ] **AC1**：`DividendFetchClient.parseFinMindResultRows`（upcoming scope 用）與 `DividendFetchClient.fetchTwDividendResult`（歷史落地用）不得再把 `TaiwanStockDividendResult` 中 `stock_or_cache_dividend` 含「權」不含「息」的列解析為 `DividendEvent`（無論是否有同 anchorDate 的主表事件可比對）。這兩個方法只保留「息」型列（現金股利，`exDividendDate` 落地、`stockDividend=0`）的既有解析邏輯不變。
+- [ ] **AC2**：被排除的「權」型列必須留下可稽核的軌跡（沿用既有 `log.warn` 慣例即可，不必新增資料表），內容至少含股票代碼、`date`、`stock_and_cache_dividend` 原始值，標明「fallback 表配股列已知不可信、已排除」，以便未來若 FinMind 修正資料源或改變欄位語意時可回頭復查。
+- [ ] **AC3**：`mergeTaiwanEvents`／`taiwanEventKey` 因 AC1 之後 fallback 表不再產生「權」型 `DividendEvent`，兩表合併時同一 anchorDate 不會再出現「主表真實配股率」與「fallback 價差」並存的情況；不需另外修改合併鍵邏輯本身，但既有合併測試須涵蓋「fallback 只回息型列、主表回配股列」的案例，確認合併後只保留主表的配股列。
+- [ ] **AC4**：既有測試若斷言「fallback 表『權』型列會被解析為股票股利事件」，必須連同一併修正為斷言「不會被解析」；不得保留舊斷言、只在別處新增矛盾的新測試。
+- [ ] **AC5**：既有髒資料清理——對運行中 DB 全表掃描 `stock_dividend_history` 中「同標的、同 `ex_rights_date`、現金股利=0、股票股利>0、`event_status='ACTIVE'`」且**存在兩列以上**的事件（情境一，已知 12 個年度事件、24 列，見上方背景），逐一以下列規則判定何者保留：
+  - 若能重新查詢 FinMind `TaiwanStockDividend` 取得該 anchorDate 的 `StockEarningsDistribution`／`StockStatutorySurplus`，以此比對兩列何者數值相符（相符者為主表來源，保留），另一列標記 `CANCELLED`。
+  - 若受 FinMind 每日配額限制無法即時查詢，允許以「取兩列中較小者為主表值、較大者為 fallback 價差值」的量級啟發式作為暫定判斷，**但僅限兩值比例（較大值 ÷ 較小值）≥ 2 倍時適用**；已知 12 組樣本中 `2885` 2020 年（1.84 倍）與 `2891` 2016 年（1.68 倍）比例未達 2 倍門檻，**不得**對這兩組套用量級啟發式，一律須改走上一條的 FinMind 主表核對。比例 ≥ 2 倍不代表恆真——重新查詢時若能核對主表則以主表為準，量級啟發式僅是查無主表資料或配額受限時的次要判斷，**必須在任務完成報告中列出每一列的判定依據與數值**，供後續人工複核；不得無憑據批次刪除。具體核對指令與 12 組樣本的完整比例列表見 `spec/tasks/t363_dividend_fallback_stock_rate_fix.md` 363.3c。
+  - 保留列的 CANCEL 動作必須通過應用層（`DividendCurrentStateProjectionService` 或等價的 current-state 寫入路徑），不得繞過投影邏輯直接下 SQL `UPDATE`／`DELETE`，以維持 `event_status` 生命週期與稽核軌跡的一致性；若既有投影邏輯無法觸發這類「過去事件」的取消（如 Requirement 97 AC4b／AC5 已記載的 `LEAST(...) > decisionDate` 限制），須說明實際採用的清理路徑（例如直接以 repository 層方法呼叫，而非 SQL），並記錄於任務完成報告。
+- [ ] **AC6**：既有髒資料清理——對運行中 DB 中「同標的、同 `ex_rights_date`、現金股利=0、股票股利>0、`event_status='ACTIVE'`」且**只有單一一列**、且該標的／年度經公開資料源（Goodinfo 或公開資訊觀測站）核對後確認**查無對應真實配股事件**的列（情境二，已知樣本：`2882` 兩列、`3037` 一列、`7556` 一列，見上方背景），一併標記 `CANCELLED`，並在任務完成報告中列出查證來源與結論。若清理時發現除已知 4 個樣本外還有其他孤立「權」型列，須逐一查證後才可清理，不得未查證逕行批次刪除或批次保留。
+- [ ] **AC7**：AC5／AC6 的清理範圍限於本需求背景段落所述、經運行中 DB 查詢與外部核對確認的既有列；若清理當下發現額外受影響標的，須比照同一查證流程處理並記入完成報告，不得因與樣本數不同而略過。
+- [ ] **AC8**：修正後的抓取邏輯（AC1）必須以固定 `Clock` 與構造回應的單元測試釘住：構造一筆 `stock_or_cache_dividend="權"` 的 fallback 列與（可選）一筆主表配股列，驗證前者不再產生 `stockDividend > 0` 的事件、後者（若存在）維持正常解析。
+- [ ] **AC9**：本需求不改變 `TaiwanStockDividendResult` 「息」型列（現金配息）的既有解析、落地與 ETF 覆蓋邏輯，也不改變 Requirement 97 已修正的抓取視窗（`end_date`／`anchorDate` 過濾）邏輯，兩者維持現狀。
