@@ -137,7 +137,7 @@ class PortfolioAdviceServiceEngineTest {
                 depositRepo, depositTypeRepo, fundRepo, stockRepo, projectionService, objectMapper, tenantGuard,
                 assetClassifier, stockMasterRepo, fundClassOverrideRepo, stockStyleRepo, engine);
         ReflectionTestUtils.setField(svc, "apiKey", apiKey);
-        ReflectionTestUtils.setField(svc, "defaultModel", "claude-opus-4-8");
+        ReflectionTestUtils.setField(svc, "defaultModel", "claude-opus-5");
         return svc;
     }
 
@@ -145,7 +145,7 @@ class PortfolioAdviceServiceEngineTest {
         PortfolioAdviceSetting s = new PortfolioAdviceSetting();
         s.setId(PortfolioAdviceSetting.SINGLETON_ID);
         s.setEngine(engine);
-        s.setModel("claude-opus-4-8");
+        s.setModel("claude-opus-5");
         s.setEffort("medium");
         s.setWebSearchMaxUses(4);
         when(settingRepo.findById(PortfolioAdviceSetting.SINGLETON_ID)).thenReturn(Optional.of(s));
@@ -305,7 +305,7 @@ class PortfolioAdviceServiceEngineTest {
         engineSetting(PortfolioAdviceService.ENGINE_HYBRID);
         PortfolioAdviceService svc = newService(new LocalPortfolioAllocationEngine(), "test-key");
 
-        MessageCreateParams params = svc.buildHybridParams("claude-haiku-4-5", "medium", "sys", "usr");
+        MessageCreateParams params = svc.buildHybridParams("claude-fable-5", "medium", "sys", "usr");
 
         assertTrue(params.tools().isEmpty() || params.tools().get().isEmpty(),
                 "hybrid 檔位強制停用 web_search，送出的 params 不得含任何 tool");
@@ -364,7 +364,7 @@ class PortfolioAdviceServiceEngineTest {
 
         assertEquals(PortfolioAdvice.STATUS_PROCESSING, row.getStatus(), "hybrid 須維持既有非同步形狀");
         assertTrue(row.getModel().startsWith(PortfolioAdviceService.HYBRID_MODEL_PREFIX), row.getModel());
-        assertEquals("hybrid-allocation:v1+claude-opus-4-8", row.getModel());
+        assertEquals("hybrid-allocation:v1+claude-opus-5", row.getModel());
         assertTrue(row.getModel().length() <= 64);
 
         PortfolioAdvice done = awaitCompletion(row.getId());
@@ -404,7 +404,7 @@ class PortfolioAdviceServiceEngineTest {
         PortfolioAdvice row = svc.generate(input());
 
         assertEquals(PortfolioAdvice.STATUS_NOT_CONFIGURED, row.getStatus());
-        assertEquals("claude-opus-4-8", row.getModel());
+        assertEquals("claude-opus-5", row.getModel());
         verifyNoInteractions(engine);
     }
 
@@ -523,7 +523,7 @@ class PortfolioAdviceServiceEngineTest {
         verify(settingRepo).save(captor.capture());
         PortfolioAdviceSetting saved = captor.getValue();
         assertEquals(PortfolioAdviceService.ENGINE_HYBRID, saved.getEngine());
-        assertEquals("claude-opus-4-8", saved.getModel());   // 未提供 → 不變
+        assertEquals("claude-opus-5", saved.getModel());   // 未提供 → 不變
         assertEquals("medium", saved.getEffort());           // 未提供 → 不變
         assertEquals(4, saved.getWebSearchMaxUses());        // 未提供 → 不變
     }
@@ -539,10 +539,32 @@ class PortfolioAdviceServiceEngineTest {
         assertEquals(List.of(PortfolioAdviceService.ENGINE_LOCAL, PortfolioAdviceService.ENGINE_HYBRID,
                         PortfolioAdviceService.ENGINE_LLM),
                 dto.availableEngines().stream().map(PortfolioAdviceSettingsDto.EngineOption::id).toList());
-        // 既有三個下拉的內容不回歸
-        assertEquals(3, dto.availableModels().size());
-        assertEquals(3, dto.availableEfforts().size());
-        assertEquals(4, dto.availableWebSearches().size());
+        // 既有三個下拉的「內容」不回歸（只斷言數量的話，清單一換代就得再改一次數字）
+        assertEquals(List.of("claude-fable-5", "claude-opus-5", "claude-sonnet-5"),
+                dto.availableModels().stream().map(PortfolioAdviceSettingsDto.ModelOption::id).toList(),
+                "已存設定的 model 在白名單內 → 不得額外補一筆「目前值」選項");
+        assertEquals(List.of("low", "medium", "high"),
+                dto.availableEfforts().stream().map(PortfolioAdviceSettingsDto.EffortOption::id).toList());
+        assertEquals(List.of(0, 3, 4, 6),
+                dto.availableWebSearches().stream().map(PortfolioAdviceSettingsDto.WebSearchOption::value).toList());
+    }
+
+    @Test
+    void getSettings_prependsStoredValueWhenItFellOffTheWhitelist() {
+        PortfolioAdviceSetting s = new PortfolioAdviceSetting();
+        s.setId(PortfolioAdviceSetting.SINGLETON_ID);
+        s.setEngine(PortfolioAdviceService.ENGINE_HYBRID);
+        s.setModel("claude-opus-4-8");   // 已下架的舊 model id（尚未被 v1.109.0 changeset 更新到的環境）
+        s.setEffort("medium");
+        s.setWebSearchMaxUses(4);
+        when(settingRepo.findById(PortfolioAdviceSetting.SINGLETON_ID)).thenReturn(Optional.of(s));
+        PortfolioAdviceService svc = newService(new LocalPortfolioAllocationEngine(), "");
+
+        PortfolioAdviceSettingsDto dto = svc.getSettings();
+
+        assertEquals(List.of("claude-opus-4-8", "claude-fable-5", "claude-opus-5", "claude-sonnet-5"),
+                dto.availableModels().stream().map(PortfolioAdviceSettingsDto.ModelOption::id).toList(),
+                "白名單外的既存值須補在最前面，避免下拉選單靜默改掉使用者目前的設定");
     }
 
     @Test
