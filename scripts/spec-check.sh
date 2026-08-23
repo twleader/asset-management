@@ -13,7 +13,9 @@
 #   B5 spec 宣稱的測試類不存在          ← Task 160「單元驗證」但無該測試檔
 #   B6 @Scheduled 變更未同步排程登錄表  ← Task 195 兩處漂移的根因
 #   B7 文件計數宣告漂移
+#   B8 spec 拿 db/changelog/*.sql 當 DB 現況基準線 ← Task 148→197→201 的教訓
 #   B9 9090 gateway/OpenAPI 契約漂移 ← Task 347 將 runtime/Swagger 同步升為機械閘門
+#   B10 db/schema.sql 稽核基準線漂移   ← Task 367：漂移累積到 11 張表才被人工發現
 #
 # 用法：
 #   scripts/spec-check.sh [base-ref]      # base-ref 預設 origin/main
@@ -67,6 +69,9 @@ added_lines() {  # $1 = 路徑 pattern
     | grep -E '^\+' | grep -v '^+++' | sed 's/^+//'
   untracked_files | grep -E "$(printf '%s' "$1" | sed 's/\*\*/.*/g; s/\*/[^\/]*/g')" 2>/dev/null \
     | while IFS= read -r uf; do [ -f "$uf" ] && cat "$uf"; done
+  # 工作樹沒有未追蹤檔時上面那條 pipeline 的 grep 會回 1，`set -uo pipefail` 讓整個函式回 1。
+  # B8 曾因此恆不觸發（Task 367 實測），故顯式回 0——本函式的產出是 stdout，離開碼沒有意義。
+  return 0
 }
 
 # ── B1. Task / Requirement 編號碰撞 ────────────────────────────────
@@ -197,8 +202,11 @@ for doc in CLAUDE.md spec/steering/structure.md; do
 done
 
 # ── B8. spec 對 DB 現況的斷言引用了 changelog（錯誤基準線）────────
-if added_lines 'spec/**' | grep -qE 'db/changelog/.*\.sql'; then
-  check "spec 引用了 db/changelog/*.sql —— 若用途是描述 DB 現況即為錯誤基準線（Task 148→197→201 的教訓：照永不執行的 changelog 改，反而改成與 DB 不一致）。現況一律以運行中 DB 為準：docker exec asset-postgres psql -U assets -d assets -c '\\d <table>'。注意 db/schema.sql 只是離線鏡像、已知落後（Task 241 實測缺 crawler_export_setting／asset_transaction），不可當基準線。若本次引用只是「新 changeset 放哪／現有最大版號」則屬正當用途，可忽略本項。"
+# 用 grep -c 取計數再判斷，不讓 added_lines 的離開碼決定是否觸發（Task 367：那顆 pipefail
+# 地雷讓本項恆不觸發；grep -c 會讀完全部輸入，也不會對上游造成 SIGPIPE）。
+b8_hit=$(added_lines 'spec/**' | grep -cE 'db/changelog/.*\.sql' || true)
+if [ "${b8_hit:-0}" -gt 0 ]; then
+  check "spec 引用了 db/changelog/*.sql —— 若用途是描述 DB 現況即為錯誤基準線（Task 148→197→201 的教訓：照永不執行的 changelog 改，反而改成與 DB 不一致）。現況一律以運行中 DB 為準：docker exec asset-postgres psql -U assets -d assets -c '\\d <table>'。db/schema.sql 由 B10 機械查核與運行中 DB 的同步，可用來查欄位型別／位數／nullable／索引；但運行中 DB 可能已套用其他 worktree 尚未 merge 的 changeset，涉及「main 現況」的斷言仍須複驗 databasechangelog 尾端。若本次引用只是「新 changeset 放哪／現有最大版號」則屬正當用途，可忽略本項。"
 fi
 
 # ── 摘要 ──────────────────────────────────────────────────────────
@@ -214,6 +222,32 @@ else
   openapi_status=$?
   printf '%s\n' "$openapi_output"
   [ "$openapi_status" -eq 0 ] || block "9090 gateway/OpenAPI contract 失敗（完整訊息如上）"
+fi
+
+# ── B10. db/schema.sql 稽核基準線是否仍等於運行中 DB ──────────────
+# lagging 檢查：spec-check 跑在實作「之前」，漂移產生於實作「之後」，所以這裡攔到的是
+# 「上一輪沒重產的漂移」。全機多個 worktree 共用同一套 asset-postgres，別人跑過 /run-stack
+# 就會把它尚未 merge 的 changeset 套進共用 DB，因此必須依「本次變更有沒有碰 schema」分流，
+# 否則與 schema 無關的任務會被別人造成的漂移擋下，最後全體繞過閘門。
+DRIFT_TEST='scripts/tests/schema-sql-drift-test.sh'
+DRIFT_HINT='處置：先查 SELECT filename FROM databasechangelog ORDER BY orderexecuted DESC LIMIT 5（注意是 filename 欄、不是 id 欄——一個 .sql 可含多個 changeset id），逐一 git cat-file -e origin/main:<該檔> 確認是否都在 origin/main；查無時先排除「版號避讓」情形（本專案一年 12 次避讓，改 id 會讓 Liquibase 重跑，DB 會留下同 slug、僅差一個 minor 版號的舊紀錄，那不算未 merge 的 schema）。確認確有 main 沒有的 schema 物件才停下回報，不得以重產把別人未 merge 的 schema 帶進 main。'
+if [ ! -f "$DRIFT_TEST" ]; then
+  block "缺 $DRIFT_TEST，db/schema.sql 無機械防漂移"
+else
+  drift_output=$(bash "$DRIFT_TEST" 2>&1)
+  drift_status=$?
+  printf '%s\n' "$drift_output"
+  case "$drift_status" in
+    0) ;;
+    2) check "db/schema.sql 是否漂移無法查證（asset-postgres 未運行或 docker 不可用）——本次不判定，待容器起來後重跑" ;;
+    *)
+      if printf '%s\n' "$DIFF_FILES" | grep -qE '^db/schema\.sql$|^backend/src/main/resources/db/changelog/'; then
+        block "db/schema.sql 未通過漂移檢查（成因見上方完整訊息）——本次變更已碰到 schema／changelog，須先處理。$DRIFT_HINT"
+      else
+        check "db/schema.sql 未通過漂移檢查（成因見上方完整訊息）。本次變更未碰 schema／changelog，漂移可能來自其他 worktree 尚未 merge 的 changeset。$DRIFT_HINT"
+      fi
+      ;;
+  esac
 fi
 
 echo
