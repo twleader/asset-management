@@ -100,7 +100,7 @@ class MarketAnalysisServiceLocalEngineTest {
                 emailDispatcher, marketDataService, sendTimeService,
                 technical, institutionalRepo, engine);
         ReflectionTestUtils.setField(svc, "apiKey", apiKey);
-        ReflectionTestUtils.setField(svc, "defaultModel", "claude-opus-4-8");
+        ReflectionTestUtils.setField(svc, "defaultModel", "claude-opus-5");
         ReflectionTestUtils.setField(svc, "newsMaxAgeDays", 5);
         ReflectionTestUtils.setField(svc, "newsVerifyPublishedDate", true);
         ReflectionTestUtils.setField(svc, "newsRegionBlockEnabled", true);
@@ -110,7 +110,7 @@ class MarketAnalysisServiceLocalEngineTest {
     private void engineSetting(String engine) {
         MarketAnalysisSetting s = new MarketAnalysisSetting();
         s.setId(MarketAnalysisSetting.SINGLETON_ID);
-        s.setModel("claude-opus-4-8");
+        s.setModel("claude-opus-5");
         s.setEffort("medium");
         s.setEnabled(Boolean.TRUE);
         s.setEngine(engine);
@@ -184,7 +184,7 @@ class MarketAnalysisServiceLocalEngineTest {
         DailyMarketAnalysis row = svc.generate(DATE, "test");
 
         assertEquals(DailyMarketAnalysis.STATUS_NOT_CONFIGURED, row.getStatus());
-        assertEquals("claude-opus-4-8", row.getModel());
+        assertEquals("claude-opus-5", row.getModel());
         verifyNoInteractions(engine);
     }
 
@@ -243,7 +243,7 @@ class MarketAnalysisServiceLocalEngineTest {
         verify(settingRepo).save(captor.capture());
         MarketAnalysisSetting saved = captor.getValue();
         assertEquals(MarketAnalysisService.ENGINE_LLM, saved.getEngine());
-        assertEquals("claude-opus-4-8", saved.getModel());   // 未提供 → 不變
+        assertEquals("claude-opus-5", saved.getModel());   // 未提供 → 不變
         assertEquals("medium", saved.getEffort());           // 未提供 → 不變
         assertEquals(Boolean.TRUE, saved.getEnabled());      // 未提供 → 不變
     }
@@ -257,9 +257,31 @@ class MarketAnalysisServiceLocalEngineTest {
         MarketAnalysisSettingsDto dto = svc.getSettings();
 
         assertEquals(MarketAnalysisService.ENGINE_LOCAL, dto.engine());
-        assertEquals(2, dto.availableEngines().size());
-        assertEquals(MarketAnalysisService.ENGINE_LOCAL, dto.availableEngines().get(0).id());
-        assertEquals(MarketAnalysisService.ENGINE_LLM, dto.availableEngines().get(1).id());
+        assertEquals(List.of(MarketAnalysisService.ENGINE_LOCAL, MarketAnalysisService.ENGINE_LLM),
+                dto.availableEngines().stream().map(MarketAnalysisSettingsDto.EngineOption::id).toList());
+        // 模型下拉的「內容」不回歸（只斷言數量的話，清單一換代就得再改一次數字）
+        assertEquals(List.of("claude-fable-5", "claude-opus-5", "claude-sonnet-5"),
+                dto.availableModels().stream().map(MarketAnalysisSettingsDto.ModelOption::id).toList(),
+                "已存設定的 model 在白名單內 → 不得額外補一筆「目前值」選項");
+    }
+
+    @Test
+    void getSettings_prependsStoredModelWhenItFellOffTheWhitelist() {
+        MarketAnalysisSetting s = new MarketAnalysisSetting();
+        s.setId(MarketAnalysisSetting.SINGLETON_ID);
+        s.setModel("claude-opus-4-8");   // 已下架的舊 model id（尚未被 v1.109.0 changeset 更新到的環境）
+        s.setEffort("medium");
+        s.setEnabled(Boolean.TRUE);
+        s.setEngine(MarketAnalysisService.ENGINE_LOCAL);
+        when(settingRepo.findById(MarketAnalysisSetting.SINGLETON_ID)).thenReturn(Optional.of(s));
+        MarketAnalysisService svc = newService(mock(TechnicalIndicatorService.class),
+                new LocalMarketAnalysisEngine(), "");
+
+        MarketAnalysisSettingsDto dto = svc.getSettings();
+
+        assertEquals(List.of("claude-opus-4-8", "claude-fable-5", "claude-opus-5", "claude-sonnet-5"),
+                dto.availableModels().stream().map(MarketAnalysisSettingsDto.ModelOption::id).toList(),
+                "白名單外的既存值須補在最前面，避免下拉選單靜默改掉使用者目前的設定");
     }
 
     @Test
