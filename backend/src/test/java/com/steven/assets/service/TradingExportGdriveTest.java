@@ -91,6 +91,8 @@ class TradingExportGdriveTest {
     @Mock private TradingRadarService radarService;
     @Mock private PriceQueryService priceQueryService;
     @Mock private MarketDataService marketDataService;
+    // Requirement 102 / Task 366：排程整合「發布到 Blog」新增的建構子依賴。
+    @Mock private BlogPublishService blogPublishService;
 
     @TempDir Path baseDir;
 
@@ -106,7 +108,7 @@ class TradingExportGdriveTest {
                 new com.steven.assets.service.export.ExcelDocRenderer(),
                 new com.steven.assets.service.export.JsonDocRenderer(new com.fasterxml.jackson.databind.ObjectMapper()),
                 new com.steven.assets.service.export.DualFormatExportWriter(gdrive),
-                baseDir.toString(), radarService, priceQueryService, marketDataService);
+                baseDir.toString(), radarService, priceQueryService, marketDataService, blogPublishService);
         calendar = new TradingCalendarExportScheduleService(calendarRepo, calendarExportService,
                 currentUserProvider, gdrive, baseDir.toString());
         when(radarSettingRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));

@@ -9141,4 +9141,307 @@ BFF `TodayMarketAnalysisBffController` 的 `Mono.zip` passthrough 形狀不變�
 
 後端：`LocalMarketAnalysisEngineTest`／`MarketAnalysisServiceLocalEngineTest` 新增斷言——`factorGroups` 四個清單與既有 `twContext`（`twFragments`＋`volumeFragments` 合併後的字串）／`usContext` 語意一致（逐條比對子句而非整段字串相等）；`volumeSignal()` 敘述不再出現在 `twFragments`；量能訊號缺值時 `twVolume` 為空陣列；LLM 路徑 `factorGroups` 恆為 `null`、DB `factor_groups` 恆為 `NULL`；`MarketAnalysisDto.from()` 對 `NULL`／空白／損毀 JSON 三種情形皆回傳 `null`；`applyLocalResult` 序列化後可經 `MarketAnalysisDto.from()` round-trip 還原；既有 `twContext`／`summary` 字串斷言不因拆分 `twFragments`／`volumeFragments` 而回歸。
 
+## Requirement 102／Task 366：交易雷達結果匯出到 Blogger（新增 blog 輸出通道）
+
+交易雷達既有兩個輸出通道——瀏覽器手動下載 Excel（Requirement 48）與排程自動寫入伺服器目錄／Google Drive
+（Task 231／Requirement 51）。本 Requirement 新增第三個通道：把同一份快照的**精簡摘要版**發布/更新到
+使用者自己的公開 Blogger 部落格 `https://twleader.blogspot.com/`。與既有兩個通道的關鍵差異：既有通道
+輸出**完整鑑識欄位**（190+ 欄，供使用者自己回溯稽核），本通道輸出**公開可讀摘要**（大盤卡／個股三軌動作
+與分數／公開資訊），且目的地是**全機唯一、綁定特定 Google 帳號**的外部服務，故啟用權限比照既有 Google
+Drive 同步先例，只限主要管理者（`ADMIN_EMAIL`／`isConfiguredAdmin`）。
+
+### 為何放在 `backend`（business）而非 `external-materials-service`
+
+`external-materials-service` 存在的理由是「集中管理外部**行情**資料的抓取與正規化，避免多處直連導致
+即時價／收盤價不一致」（見〈架構規範〉的 BFF／資料來源規範）。Blogger 發布不是抓行情，是把本系統**已經
+算好的結果**寫出去，語意上與既有 `ProcessRcloneClient`／`GdriveSelfCheck`（Google Drive 上傳，同樣是
+「把本地產出的檔案送到外部服務」）同類，兩者都放在 `backend/src/main/java/com/steven/assets/service/`。
+本 Requirement 比照此既有先例，新增的 OAuth／Blogger API 呼叫同樣留在 `backend`，不下放到
+`external-materials-service`，也不新增第三個微服務。
+
+### 一次性 OAuth2 連接流程
+
+沿用既有登入用 `GOOGLE_CLIENT_ID`／`GOOGLE_CLIENT_SECRET`（`docker-compose.yml:340-341`），但**不**
+借用 BFF 既有的 `oauth2Login`（`SecurityConfig.java:127`，那條路徑語意是「登入本 App」、走
+`/oauth2/authorization/google` → `/login/oauth2/code/google`，scope 只有 `openid`／`profile`／
+`email`、不會索取 `access_type=offline`）。本 Requirement 另外新增一組獨立的授權範圍與 callback，
+直接呼叫 Google 的 OAuth2 端點（不透過 Spring Security 的 `oauth2Login` filter chain）：
+
+**BFF 這一頁全走既有 `TradingRadarBffRoutes` 的 wildcard gateway rewrite**
+（`/api/bff/trading-radar/**` → `/api/trading-radar/**`，method 與路徑後綴原樣穿透），本 Requirement
+新增的 6 支端點在 business 端與 BFF 端**路徑後綴與 HTTP method 一律相同**，不需要在
+`TradingRadarBffController` 新增任何方法（那支 controller 存在的唯二理由是既有兩支端點在 business
+端刻意命名不同，見其類別 Javadoc；本次全部同名，wildcard 本就會轉發）。唯一需要改的 BFF 檔案是
+`SecurityConfig.java`——新增涵蓋這 6 支端點的 `hasAuthority(AuthConstants.AUTHORITY_CONFIGURED_ADMIN)`
+規則（見下方〈API 端點〉表）。**BFF 層的 `hasAuthority` 不是唯一防線**：`authorize-url`／
+`callback` 兩支在 business 層的 controller 方法內也各自呼叫
+`BlogPublishOutputSupport.isBlogAllowedFor(...)` 覆核一次（見下方流程圖的呼叫端說明與〈API 端點〉表），
+與另外四支端點的既有防禦深度一致——`callback` 是本 Requirement 唯一真正把 Google token 寫入全域
+憑證（有副作用）的端點，不得只靠 BFF 單層防護。
+
+```
+使用者（tw.leader@gmail.com，主要管理者，已登入本 App）
+  │ 於交易雷達頁新設定卡按〔連接 Blogger 帳號〕
+  ▼
+GET /api/bff/trading-radar/blog-oauth/authorize-url   （BFF，需 APP_CONFIGURED_ADMIN）
+  └─ wildcard rewrite → GET /api/trading-radar/blog-oauth/authorize-url   （business，同路徑後綴同 method）
+       └─ controller 先呼叫 BlogPublishOutputSupport.isBlogAllowedFor(ownerId)，
+          false 則擲 AdminRequiredException（403）——與 BFF 層防線獨立、縱深防禦
+       └─ BlogOAuthService.buildAuthorizeUrl()
+            state = 隨機 token，存進記憶體內單例 map（value＝建立時間），10 分鐘後視為過期
+            回傳 { url: "https://accounts.google.com/o/oauth2/v2/auth"
+                      + "?client_id=" + GOOGLE_CLIENT_ID
+                      + "&redirect_uri=" + <本 App 對外網域>/api/bff/trading-radar/blog-oauth/callback
+                      + "&response_type=code"
+                      + "&scope=https://www.googleapis.com/auth/blogger"
+                      + "&access_type=offline&prompt=consent&state=" + state }
+  ◀── { url }
+前端：window.location.href = url   （整頁導向，非 XHR——瀏覽器需要真的離開本頁去 Google）
+
+使用者在 Google 同意畫面：可切換／登入 shi.chihung@gmail.com（與觸發此動作的 App 登入帳號無關），
+同意存取 Blogger
+
+Google 302 導回 redirect_uri，帶 ?code=...&state=...
+  ▼
+GET /api/bff/trading-radar/blog-oauth/callback?code&state   （BFF，需 APP_CONFIGURED_ADMIN；
+                                                              瀏覽器整頁導向帶著既有 App session cookie，
+                                                              故此請求仍是已登入狀態，非匿名端點）
+  └─ wildcard rewrite → GET /api/trading-radar/blog-oauth/callback?code&state   （business）
+       └─ controller 同樣先呼叫 BlogPublishOutputSupport.isBlogAllowedFor(ownerId)，
+          false 則 302 導回 ?blogOauth=error&reason=forbidden（不進行 token 換取）
+       └─ BlogOAuthService.exchangeCode(code, state) 於 controller 方法內同步執行，
+          完成後直接回 ResponseEntity.status(302).location(...).build()（Gateway 原樣轉發
+          此 302／Location header，不需 BFF 另寫轉導邏輯）：
+            1. state 不存在／已過期 → 302 導回 /trading-radar?blogOauth=error&reason=state_expired
+            2. POST https://oauth2.googleapis.com/token
+                 grant_type=authorization_code, code, client_id, client_secret, redirect_uri
+               → { access_token, refresh_token?, expires_in }
+            3. refresh_token 缺漏 → 302 導回 ?blogOauth=error&reason=missing_refresh_token
+               （AC1.2 的訊息：先前已同意過，需重新走一次本功能產生的連結——本功能連結固定帶
+               prompt=consent，正常情況不會發生）
+            4. GET https://www.googleapis.com/blogger/v3/blogs/byurl?url=https://twleader.blogspot.com/
+               （Bearer access_token）→ blogId
+            5. GET https://www.googleapis.com/blogger/v3/users/self（Bearer access_token）
+               → 顯示用帳號資訊（displayName／url），僅供設定頁顯示，不參與任何授權判斷
+            6. upsert 單例 BlogPublishCredential：blogId／accessToken／accessTokenExpiresAt／
+               refreshToken／accountLabel／connectedAt
+            7. 成功 → 302 導回 /trading-radar?blogOauth=connected
+```
+
+**`state` 儲存刻意用行程內記憶體、不落 DB／Redis**：本功能全機只有一位主要管理者能觸發、單一
+`business-services` 執行個體（非叢集部署），且整個授權往返通常在數十秒內完成，比照既有
+`TradingRadarExportScheduleService.ticking`（`AtomicBoolean`）等同類「行程內狀態即足夠」的既有慣例，
+不為此新增分散式狀態的複雜度。
+
+**部署前置準備（使用者手動、不在程式碼驗收範圍）**：
+1. 於 Google Cloud Console 該 OAuth 2.0 Client 的「已授權的重新導向 URI」新增
+   `<本 App 對外網域>/api/bff/trading-radar/blog-oauth/callback`（與既有登入用的
+   `/login/oauth2/code/google` 並存，同一個 Client 可註冊多筆 redirect URI）。
+2. 於同一 GCP 專案啟用 Blogger API v3。
+3. 若 OAuth 同意畫面仍是「測試中」狀態，將 `shi.chihung@gmail.com` 加入測試使用者名單。
+4. 準備一個 `APP_PUBLIC_BASE_URL` 環境變數值：**必須是 `https://` 開頭**（Google 對非
+   `localhost` 的 `redirect_uri` 要求 HTTPS），且必須是執行〔連接 Blogger 帳號〕當下瀏覽器能
+   直接連到的來源（例如 Tailscale 為本機自動核發的 `https://<裝置>.<tailnet>.ts.net` 網域）——
+   **不需要永久公開**，只在做這次一次性授權時需要能連得到；連接完成後即便該網域之後打不通，
+   已存的 `refresh_token` 仍可正常續期與發布（回 AC1／AC2 的邏輯與外部網域無關）。
+
+**為何新增 `APP_PUBLIC_BASE_URL` 而不沿用既有 `forward-headers-strategy: framework` 機制**
+（`bff/src/main/resources/application.yml:3-4`，讓 BFF 的 `oauth2Login` 從 `X-Forwarded-Proto/Host`
+動態推導外部網域，不需要手動維護字串）：那個機制是 **Spring Security 在 reactive `oauth2Login`
+filter chain 內建的行為**，本 Requirement 刻意不借用 `oauth2Login`（理由見上方），改在 **business**
+（傳統 Spring MVC、非 reactive、也未設定該項）手刻 controller 端點組 `redirect_uri`。若要複製同一套
+「信任反向代理回傳的 forwarded header」機制，需要在 business 也開一道新的信任邊界（`server.forward-headers-strategy`
+＋確認 BFF 的 Spring Cloud Gateway 確實逐跳轉發正確的 `X-Forwarded-*`、且該信任鏈不會被繞過偽造），
+對一支「全機只有一位主要管理者、一次性使用」的設定流程而言，新增這條信任鏈的複雜度與其對應的安全
+考量，並不比一個由使用者手動填寫、僅在連接當下使用的明確環境變數更划算。
+
+### Access token 續期
+
+`BlogOAuthService.ensureAccessToken()`：讀 `BlogPublishCredential.accessTokenExpiresAt`，距今
+不足 60 秒或已過期時，用已存的 `refreshToken` 呼叫
+`POST https://oauth2.googleapis.com/token`（`grant_type=refresh_token`）換新的
+`access_token`／`expires_in`。**回應通常不含 `refresh_token`**——更新 entity 時只覆寫
+`accessToken`／`accessTokenExpiresAt`，`refreshToken` 欄位不論本次回應是否帶新值都用
+「回應有值才覆寫、否則保留原值」的合併邏輯（不得整包覆寫成 null）。若 Google 回
+`invalid_grant`（refresh token 已被使用者於 Google 端撤銷或失效），標記
+`BlogPublishCredential` 為「需要重新連接」（沿用既有 entity、新增一個 `needsReconnect` 布林
+或直接以「呼叫端捕捉 `invalid_grant` 錯誤字串」判斷，實作時擇一，不新增第二張表）；其餘網路
+或伺服器錯誤（逾時、5xx）視為暫時性失敗，**不清除 `refreshToken`、不標記需要重新連接**，下次
+發布再重試即可。
+
+### 資料模型
+
+**新增全域單例表**（不綁 `owner_user_id`，不套 `@Filter`，語意與 rclone remote 一致——全機只有一個
+Blogger 目的地）：
+
+| 表 | 欄位 | 說明 |
+|---|---|---|
+| `blog_publish_credential` | `id`（`BIGINT PRIMARY KEY DEFAULT 1 CHECK (id = 1)`，見下方說明）／`blog_id`（Blogger 內部 blog ID，`byurl` 解析所得）／`blog_url`（固定 `https://twleader.blogspot.com/`，供設定頁顯示與未來若換部落格時可讀出目前綁定的是哪一個）／`account_label`（Google `users/self` 回傳的顯示名稱，**僅供 UI 顯示，不參與任何授權或權限判斷**）／`access_token`／`access_token_expires_at`／`refresh_token`／`needs_reconnect`（boolean，預設 `false`）／`connected_at`／`updated_at` | **DB 層以 `CHECK (id = 1)` 強制全表恆只有一列**，service 層一律以固定 `id=1` 查/寫（找不到就以 `id=1` 新增，找到就更新同一列），插入第二列在 DB 層即被拒絕 |
+
+**本表刻意不採用「既有 `ExportScheduleSetting`／`TradingRadarExportSetting` 靠 `UNIQUE(owner_user_id)` 保證一使用者一列」的既有寫法**——那個既有先例本身就有 DB 層 UNIQUE 約束兜底，不是純應用層 upsert；而本表連 `owner_user_id` 這種天然業務鍵都沒有（全域單例，沒有 owner 概念），若比照既有先例卻略去對應的 DB 層約束，防護反而比既有先例更弱。並發情境（callback 被重放、雙分頁同時完成連接、容器 recreate 中途）下若只靠應用層判斷「有沒有既有列」再決定新增或更新，會出現競速寫出兩列的視窗；`CHECK (id = 1)` 讓「只能有一列」在 DB 層即為不可違反的事實（第二次 `INSERT id=1` 直接違反 PK/CHECK 而失敗），比 `UNIQUE(owner_user_id)` 更直接（本表沒有第二個維度可以 UNIQUE），寫入端一律用 `findById(1L)` 定位這一列，不存在不確定挑到哪一列的問題。
+
+**`trading_radar_export_setting` 新增五欄**（比照既有 `gdrive_*` 四欄同一組樣式，changeset
+與 Task 245 的 `v1.76.0` 同一種寫法）：
+
+| 欄位 | 型別 | 說明 |
+|---|---|---|
+| `blog_enabled` | boolean, not null, 預設 `false` | 是否在既有排程到點時一併發布/更新 blog 文章；**只有 `isDriveAllowedFor` 同一套主要管理者判定為真的 owner 才能設為 true**，判定與 Drive 完全共用同一支 `UserAdminService.isConfiguredAdmin`（新增 `BlogPublishOutputSupport.isBlogAllowedFor(ownerId)`，內部即呼叫 `isConfiguredAdmin`，與 `GdriveOutputSupport.isDriveAllowedFor` 平行存在、不合併——兩者未來可能各自獨立開放對象，合併會讓其中一方要開放時被迫連動另一方） |
+| `blog_last_post_id` | varchar(64), nullable | Blogger 回傳的 `postId`，用於下次改走 `PUT` 更新而非 `POST` 新建 |
+| `blog_last_post_url` | varchar(512), nullable | Blogger 回傳的文章網址，供設定頁顯示可點擊連結 |
+| `blog_last_run_at` | timestamp, nullable | 上次「判斷是否要發布」的時間（含成功／失敗／跳過），語意比照 `gdrive_last_run_at` |
+| `blog_last_status` | varchar(512), nullable | 上次發布結果的可讀文字，與 `lastRunStatus`／`gdriveLastStatus` 刻意分離、不得併入——三個通道的成敗必須各自可分辨 |
+
+Changeset：`backend/src/main/resources/db/changelog/changes/v1.112.0-trading-radar-blog-publish.sql`，
+於 `db.changelog-master.yaml` 新增一筆 `include`（緊接 `v1.111.0-dividend-event-uniqueness.sql` 之後）。
+
+### 建立/更新文章（不逐日新增貼文）
+
+`BlogPublishService` 對外有兩個入口，**業務判斷（含「查無快照」）全部封裝在 service 內部，
+controller 只轉譯結果為 HTTP 狀態碼**——全庫既有三個 `TradingRadarSnapshotStore` 呼叫端
+（`TradingRadarExportService`／`TradingRadarExportScheduleService`／`TradingRadarService`）
+皆為 Service 層，沒有任何 Controller 直接呼叫它的既有先例，本 Requirement 不開先例：
+
+```
+BlogPublishService.publishLatest(ownerId)          ← 手動發布（POST /blog-publish）呼叫這支
+  1. snapshot = TradingRadarSnapshotStore 讀該 owner 最新一筆（當日範圍內最後一筆）
+  2. 查無快照 → 回 PublishResult(false, "當日尚無交易雷達快照，請先重新整理", null)
+  3. 否則 → 委派 publish(ownerId, snapshot)（下方核心方法）
+
+BlogPublishService.publish(ownerId, snapshotJsonNode)   ← 核心方法，排程路徑（366.9a）直接呼叫
+                                                            這支、傳入該輪已查好的快照，不重查一次
+  1. token = blogOAuthService.ensureAccessToken()          ← AC2，缺 refreshToken 時擲例外（尚未連接）
+  2. html = BlogContentRenderer.render(snapshotJsonNode)   ← AC7 白名單內容，見下節
+  3. setting = settingRepo.findByOwnerUserId(ownerId)
+  4. postId = setting?.blogLastPostId
+  5. 若 postId == null：
+       POST https://www.googleapis.com/blogger/v3/blogs/{blogId}/posts?isDraft=false
+       body { title: "交易雷達每日結果", content: html }
+       → 存 postId／url 回 setting
+     否則：
+       PUT https://www.googleapis.com/blogger/v3/blogs/{blogId}/posts/{postId}
+       body { title: "交易雷達每日結果", content: html }
+       → 404 時視為文章已被手動刪除，回退成上面的 POST 建立分支並覆寫 postId／url
+  6. 寫回 blog_last_run_at / blog_last_status（成功／失敗訊息，含 HTTP 狀態碼與可讀原因）
+```
+
+標題固定 `交易雷達每日結果`（同一篇文章持續更新，不逐日新增貼文，避免 blog 被灌爆）。內文固定第一行
+`最後更新：{Asia/Taipei yyyy-MM-dd HH:mm}`，第二行固定免責聲明：「本頁內容由系統規則自動產生，僅供個人
+投資紀錄公開，不構成任何投資建議。」（比照既有〈交易雷達每日結果不得表述為預測〉的既有紀律延伸到公開頁面）。
+
+### 白名單內容組裝（`BlogContentRenderer`，全新元件，不複用 `TradingRadarExportService`）
+
+`TradingRadarExportService` 的 190+ 欄（PE/PB provenance、利率批次 ID、evidence group 覆蓋率等）是給
+使用者自己稽核用的鑑識資料，不適合公開頁面——一般讀者不需要、也不應該看到這些內部判斷細節。本 Requirement
+新增獨立的 `BlogContentRenderer`，直接讀同一份快照 `JsonNode`（`TradingRadarSnapshotStore` 取得的最新一筆，
+與既有〔重新整理〕〔匯出 Excel〕共用同一份資料來源，不另外重算），只取：
+
+| 區塊 | 欄位 |
+|---|---|
+| 大盤卡 | 只取 `snapshot.path("market")`（**台股大盤，不含 `usMarket`**——見下方說明）的 `regime`／`regimeLabel`／`score`／`asOfDate`／`price`／`changePercent`／`reasons`／`risks` |
+| 個股決策（每檔一個 `<details>`） | `stockCode`／`stockName`／`market`／`held`／`price`／`changePercent`／`shortActionLabel`／`shortScore`／`shortReasons`／`shortRisks`（一周軌）／`swingActionLabel`／`swingScore`／`swingReasons`／`swingRisks`（1周~1月軌）／`actionLabel`／`score`／`reasons`／`risks`（1月~6月軌，`TradingRadarDto.java:828` 既有註解：無前綴的 `score`／`action`／`reasons`／`risks` 一律是這一軌）——**三軌各自的內部代碼欄位（`shortAction`／`swingAction`／`action`）一律不讀**，只讀對應的 `*Label` 中文標籤，理由見下方說明 |
+| 公開資訊 | `publishedAt`／`source`／`title`／`summary`／`url`（**只有 `http://`／`https://` 開頭才輸出為可點擊連結，且輸出前仍須做 366.5f 的 HTML escape**，見下方說明） |
+
+**大盤卡明確排除 `usMarket`（美股大盤）**：`TradingRadarDto.Response` 雖同時有 `market`（台股）與
+`usMarket`（美股，Task 335 起存在，前端頁面以分頁並列呈現），但既有
+`TradingRadarExportService.marketSheet()`（Excel「大盤總覽」分頁）本身就只讀 `market` 節點、
+從未輸出過 `usMarket`——本 Requirement 的 blog 內容比照既有匯出的既定範圍，不擴大，`usMarket`
+因此列入〈明確排除〉清單，不是遺漏。
+
+**個股決策三軌一律讀各自的 `*ActionLabel`（既有中文標籤欄位：`shortActionLabel`／
+`swingActionLabel`——`TradingRadarDto.java:838`，`TradingRadarView.vue:707-709` 既有頁面正在
+使用——／無前綴的 `actionLabel`），不得讀任一軌的內部代碼欄位（`shortAction`／`swingAction`／
+`action`）**——三軌顯示方式一致，缺值時 fallback「今日不交易」（比照 `TradingRadarView.vue:709`
+既有寫法 `row.swingActionLabel || '今日不交易'`），不得顯示原始英文/內部代碼。**三軌各自的支持
+訊號／風險提醒也要分開顯示**（一周軌 `shortReasons`／`shortRisks`，1周~1月軌
+`swingReasons`／`swingRisks`，1月~6月軌 `reasons`／`risks`）——`swingReasons`／`swingRisks`
+雖然是既有欄位（`TradingRadarDto.java:840-841`），但既有 `TradingRadarExportService` 的 Excel
+匯出從未輸出這兩欄（該匯出的「個股決策」分頁只有「短期支持訊號／風險提醒」「中期支持訊號／風險提醒」
+兩組，缺 1周~1月軌），本 Requirement 的白名單內容**不比照這個既有匯出缺口**，三軌理由/風險缺一不可
+地全部顯示，理由是本頁的賣點正是「三軌對照」，缺一軌的理由會讓讀者誤以為該軌沒有對應依據。
+
+**公開資訊的 `url` 需要兩層防護，缺一不可**：這批網址來自背景爬蟲抓取的第三方來源
+（`publicInformation[].url`），不是使用者輸入也不是系統自產，公開發布前必須比照一般外部輸入驗證：
+1. **scheme 白名單**：只有 `http://`／`https://` 開頭才輸出為 `<a href="...">`，其餘 scheme
+   （含 `javascript:`）一律降級為純文字或整項捨棄——防的是「這個網址本身執行什麼」。
+2. **HTML escape**（366.5f）：即使通過第 1 層，`url` 字串本身仍要做跟 `stockName`／`title` 等
+   其他文字欄位相同的 HTML escape 才能填進 `href="..."` 屬性——防的是「網址裡的雙引號提前結束
+   `href` 屬性、讓後續字元被解讀成新屬性或新標籤」（例如
+   `https://evil.example/"><script>...` 這種以合法 scheme 開頭、但內含雙引號的網址，只做第 1 層
+   會直接讓輸出的 HTML 出現 `<script>` 標籤，正面違反本頁「全程不得包含 `<script>` 標籤」的
+   不變式）。兩層防護的攻擊面不同（scheme 防的是連結本身，escape 防的是屬性逃逸），**缺一層都不夠**。
+
+**明確排除**（AC7.4 的白名單邊界）：`evidence`／`fundamental`／`extendedIndicators`／
+`weeklyIndicators`／`dailyCandle`／`usMarket`／任何 provenance／provider／sourceUrl／利率／
+treasury 相關欄位、任何本機或容器內路徑字串、Google Drive／Blogger 連接狀態。**輸出的 HTML 全程
+不含 `<script>` 標籤**，逐檔展開一律用原生
+`<details><summary>{代碼} {名稱} — {中文動作}</summary>...內容...</details>`。
+`BlogContentRenderer` 是純函數（輸入 `JsonNode`、輸出 `String` HTML），不注入任何 repository，方便
+單元測試以固定假快照斷言輸出不含禁止字串。
+
+### 排程整合
+
+`TradingRadarExportScheduleService.runScheduled(...)` 既有流程（本機 Excel／JSON 落檔 → 啟用時
+Google Drive 上傳）**完全不變**，本 Requirement 只在該方法**最後**追加一步：`setting.blogEnabled`
+為真時呼叫 `blogPublishService.publish(ownerId, 當輪已讀出的快照)`，結果寫入
+`blog_last_run_at`／`blog_last_status`。**發布失敗（含尚未完成 OAuth 連接）只記錄狀態，不得讓
+本機／Drive 既有流程失敗或回滾**——沿用 `applyGdriveStatus` 既有註解「本機成功、Drive 失敗是正常
+且必須可分辨的狀態」的同一套設計原則，三個通道彼此獨立成敗。**`run-now`（立即匯出到目錄）不觸發
+blog 發布**——語意是驗證本機／Drive 落點，不是公開發布，避免使用者為了測試路徑而意外多發一次公開文章。
+
+### API 端點
+
+**六支端點在 business 與 BFF 兩端路徑後綴與 HTTP method 完全相同**，全部經既有
+`TradingRadarBffRoutes` wildcard rewrite 轉發，`TradingRadarBffController` 不需新增任何方法：
+
+| 方法與路徑（BFF＝business 路徑後綴相同） | 權限（BFF `SecurityConfig.java`） | 說明 |
+|---|---|---|
+| `GET /api/(bff/)trading-radar/blog-oauth/authorize-url` | `APP_CONFIGURED_ADMIN` | 產生 Google 授權導向網址 |
+| `GET /api/(bff/)trading-radar/blog-oauth/callback` | `APP_CONFIGURED_ADMIN`（瀏覽器整頁導向帶既有 session cookie，非匿名端點） | Google 導回後換 token、resolve blogId，直接回 302 導回前端頁面，Gateway 原樣轉發 |
+| `POST /api/(bff/)trading-radar/blog-oauth/disconnect` | `APP_CONFIGURED_ADMIN` | 清除已存憑證 |
+| `GET /api/(bff/)trading-radar/blog-status` | `APP_CONFIGURED_ADMIN` | 回連接狀態（`connected`／`accountLabel`／`blogUrl`）、`blogEnabled`、上次發布時間與狀態、文章網址。與畫面可見性（`v-if="auth.isConfiguredAdmin"`）一致，不額外開放給一般使用者 |
+| `PUT /api/(bff/)trading-radar/blog-enabled` | `APP_CONFIGURED_ADMIN` | 切換 `blog_enabled`（body `{enabled: boolean}`） |
+| `POST /api/(bff/)trading-radar/blog-publish` | `APP_CONFIGURED_ADMIN` | 手動立即發布/更新（前端已完成確認對話框後才呼叫） |
+
+`GET /api/trading-radar/blog-status` 的回應**不得包含** `access_token`／`refresh_token` 明碼——這是
+唯讀狀態端點，只回布林值、標籤字串與時間戳。九條 9090／Tailscale 公開路由（`docs/openapi/docker-external-api.yaml`
+現有清單）**不新增任何一條**，以上端點全部只掛在既有已登入的 `/api/bff/**` 路徑下，不對外公開。
+
+`SecurityConfig.java` 新增規則需放在既有 `.pathMatchers("/api/bff/backup-restore/**").hasAuthority(...)`
+同一群組附近，六條路徑（含 `blog-oauth/**` 覆蓋 authorize-url／callback／disconnect 三支）：
+
+```java
+.pathMatchers("/api/bff/trading-radar/blog-oauth/**").hasAuthority(AuthConstants.AUTHORITY_CONFIGURED_ADMIN)
+.pathMatchers("/api/bff/trading-radar/blog-status").hasAuthority(AuthConstants.AUTHORITY_CONFIGURED_ADMIN)
+.pathMatchers(HttpMethod.PUT, "/api/bff/trading-radar/blog-enabled").hasAuthority(AuthConstants.AUTHORITY_CONFIGURED_ADMIN)
+.pathMatchers(HttpMethod.POST, "/api/bff/trading-radar/blog-publish").hasAuthority(AuthConstants.AUTHORITY_CONFIGURED_ADMIN)
+```
+
+### 前端
+
+`TradingRadarView.vue`：
+- `.header-actions` 新增〔匯出到 blog〕按鈕（`v-if="auth.isConfiguredAdmin"`），緊接既有〔重新整理〕。
+  點擊 → 未連接時提示並捲動到設定卡；已連接時彈 `ElMessageBox.confirm` 說明「即將公開發布/更新到
+  `https://twleader.blogspot.com/`，任何人皆可瀏覽，內容含個股代號、三軌分數與加減碼建議」，確認後才呼叫
+  `POST /api/bff/trading-radar/blog-publish`。
+- 新增〔匯出到 Blog 設定〕卡片（`v-if="auth.isConfiguredAdmin"`），緊接既有〔匯出輸出檔案設定〕卡片之後：
+  未連接時顯示〔連接 Blogger 帳號〕按鈕（`window.location.href = (await api).url`，整頁導向）；已連接
+  顯示帳號標籤／最近文章網址（可點擊）／〔中斷連接〕／「同步發布到 blog」開關（`blogEnabled`，
+  `PUT /api/bff/trading-radar/blog-enabled` 即時生效，比照既有 Drive 開關）／上次發布時間與狀態文字。
+- 頁面掛載時讀 `?blogOauth=connected|error&reason=` query 參數顯示對應 `ElMessage`，顯示後以
+  `router.replace` 清掉 query（避免重新整理頁面時重複跳訊息）。
+- `api/index.js` 的 `tradingRadar` 新增 `getBlogStatus()`／`getBlogAuthorizeUrl()`／
+  `disconnectBlog()`／`setBlogEnabled(enabled)`／`publishBlog()`。
+
+### 測試與驗證
+
+後端：`BlogOAuthService` 的單元測試（換取／續期／`invalid_grant`／保留既有 `refreshToken` 的合併邏輯，
+皆以可替換的 HTTP client 假物件測試，不真的打 Google）；`BlogContentRenderer` 的單元測試（固定假快照 →
+斷言輸出不含〈不得上傳到 blog 的畫面元素〉對應字串／不含 `<script>`／`<details>` 數與個股數一致）；
+`BlogPublishService` 的單元測試（`postId` 為空走建立、非空走更新、更新 404 回退建立並覆寫 `postId`）；
+既有 `TradingRadarExportScheduleServiceTest` 新增案例：`blog_enabled=true` 時排程完成後呼叫發布、發布擲例外
+不影響既有本機／Drive 狀態欄位。
+
+前端無元件測試框架（同 Requirement 95 前例），改以 `/run-stack` 實機驗證，見 requirements.md
+Requirement 102 的 AC9。
+
 前端：本專案目前僅 `frontend/src/utils/*.test.js` 這類工具函式層級 contract test，`TodayMarketAnalysisView.vue` 無既有 view 元件測試前例，本 Requirement 不新增前端自動化測試，改以 `/run-stack` 實機驗證：`--no-cache` 重建並 recreate `business-services`／`bff`／`frontend` 後，登入頁面分別驗證 `engine=local` 新分析顯示四個分類區塊且台股／美股視覺分開、`engine=llm` 或舊資料（`factorGroups=null`）維持既有整段呈現不報錯、歷史列表 `summary` 欄未被更動。

@@ -65,6 +65,7 @@ class RadarManualExportDualFormatTest {
     @Mock private TradingRadarService radarService;
     @Mock private PriceQueryService priceQueryService;
     @Mock private MarketDataService marketDataService;
+    @Mock private BlogPublishService blogPublishService;
 
     private final ObjectMapper mapper = new ObjectMapper();
     private final ExcelDocRenderer excel = new ExcelDocRenderer();
@@ -95,7 +96,7 @@ class RadarManualExportDualFormatTest {
         service = new TradingRadarExportScheduleService(
                 timeRepo, settingRepo, exportService, store, currentUserProvider, gdrive,
                 excel, json, dualWriter, tmp.toString(),
-                radarService, priceQueryService, marketDataService);
+                radarService, priceQueryService, marketDataService, blogPublishService);
     }
 
     private void givenSnapshots(int count) throws Exception {

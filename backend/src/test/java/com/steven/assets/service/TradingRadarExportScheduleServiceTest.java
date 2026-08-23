@@ -71,6 +71,8 @@ class TradingRadarExportScheduleServiceTest {
     @Mock private TradingRadarService radarService;
     @Mock private PriceQueryService priceQueryService;
     @Mock private MarketDataService marketDataService;
+    // Requirement 102 / Task 366：排程整合「發布到 Blog」新增的建構子依賴。
+    @Mock private BlogPublishService blogPublishService;
 
     @TempDir Path baseDir;
 
@@ -85,7 +87,7 @@ class TradingRadarExportScheduleServiceTest {
                 new com.steven.assets.service.export.ExcelDocRenderer(),
                 new com.steven.assets.service.export.JsonDocRenderer(new com.fasterxml.jackson.databind.ObjectMapper()),
                 new com.steven.assets.service.export.DualFormatExportWriter(gdrive),
-                baseDir.toString(), radarService, priceQueryService, marketDataService);
+                baseDir.toString(), radarService, priceQueryService, marketDataService, blogPublishService);
         // 預設交易日；休市日分支由專屬測試覆寫。類別已標 @MockitoSettings(LENIENT)，
         // 不需要 HTTP-only 測試裡額外呼叫 lenient()。
         when(marketDataService.isTradingDay(anyString(), any(LocalDate.class))).thenReturn(true);
@@ -402,6 +404,57 @@ class TradingRadarExportScheduleServiceTest {
         verify(settingRepo, atLeastOnce()).save(cap.capture());
         assertThat(cap.getValue().getOwnerUserId()).isEqualTo(1L);
         assertThat(cap.getValue().getOutputSubpath()).isEqualTo(TradingRadarExportSetting.DEFAULT_SUBPATH);
+    }
+
+    // ===== Blog 發布整合（Requirement 102 / Task 366）=====
+
+    @Test
+    void blogEnabled為真時排程完成既有產出後會呼叫BlogPublishService() throws Exception {
+        TradingRadarExportTime t = time(1L, 0, 0, yesterday());
+        when(timeRepo.findAll()).thenReturn(List.of(t));
+        TradingRadarExportSetting s = setting(1L, "out");
+        s.setBlogEnabled(true);
+        when(settingRepo.findByOwnerUserId(1L)).thenReturn(Optional.of(s));
+        givenSnapshots(1L);
+
+        service.tick();
+
+        verify(blogPublishService).publish(eq(1L), any());
+    }
+
+    @Test
+    void blogEnabled為假時完全不呼叫BlogPublishService() throws Exception {
+        TradingRadarExportTime t = time(1L, 0, 0, yesterday());
+        when(timeRepo.findAll()).thenReturn(List.of(t));
+        when(settingRepo.findByOwnerUserId(1L)).thenReturn(Optional.of(setting(1L, "out")));
+        givenSnapshots(1L);
+
+        service.tick();
+
+        verify(blogPublishService, never()).publish(anyLong(), any());
+    }
+
+    /**
+     * blog 發布失敗不得回滾既有本機／Drive 狀態寫入——三個輸出通道各自成敗，
+     * {@code publishToBlogQuietly} 的例外處理不得影響 {@code runScheduled} 既有的 finally 收尾。
+     */
+    @Test
+    void blog發布擲例外不影響既有本機與狀態寫入且仍設guard() throws Exception {
+        TradingRadarExportTime t = time(1L, 0, 0, yesterday());
+        when(timeRepo.findAll()).thenReturn(List.of(t));
+        TradingRadarExportSetting s = setting(1L, "out");
+        s.setBlogEnabled(true);
+        when(settingRepo.findByOwnerUserId(1L)).thenReturn(Optional.of(s));
+        givenSnapshots(1L);
+        when(blogPublishService.publish(eq(1L), any())).thenThrow(new RuntimeException("blog 發布炸了"));
+
+        service.tick();
+
+        assertThat(expectedFile(1L, "out")).exists();
+        assertThat(s.getLastRunStatus()).startsWith("xlsx 成功：").contains("／json 成功：");
+        assertThat(s.getBlogLastStatus()).contains("失敗").contains("blog 發布炸了");
+        assertThat(s.getBlogLastRunAt()).isNotNull();
+        assertThat(t.getLastRunDate()).isEqualTo(today());
     }
 
     // ===== HTTP 路徑 =====

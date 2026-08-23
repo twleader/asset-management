@@ -187,6 +187,14 @@ services:
       # ${VAR:-default} 無法在 default 裡再套用容器內才解析的 EXPORT_OUTPUT_DIR；日後若
       # 改動上方 EXPORT_OUTPUT_DIR，這一行必須同步。
       DIVIDEND_BACKFILL_STATE_DIR: ${DIVIDEND_BACKFILL_STATE_DIR:-/home/steven/dividend-backfill-t357}
+      # 交易雷達「發布到 Blog」（Requirement 102 / Task 366）：Blogger OAuth。沿用既有登入用的
+      # GOOGLE_CLIENT_ID／GOOGLE_CLIENT_SECRET（與下方 bff 服務同一組值），不新建第二組 OAuth
+      # Client；business 這裡是全新注入點——本功能自己直接呼叫 Google token 端點，不經 BFF 的
+      # oauth2Login。APP_PUBLIC_BASE_URL 為本 App 對外可從瀏覽器存取的網域，供組 callback
+      # redirect_uri，必須是 https:// 開頭；未設定時 buildAuthorizeUrl() 會擲例外，不影響其餘既有端點。
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-placeholder-client-id}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-placeholder-secret}
+      APP_PUBLIC_BASE_URL: ${APP_PUBLIC_BASE_URL:-}
     volumes:
       # rclone 設定以 read-only 從 host 掛入。主檔 rclone.conf 含三個 section：
       #   [GoogleDriver]（drive.file，備份底層）／[gdrive-crypt]（加密層，DB 備份用）／

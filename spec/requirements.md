@@ -3929,3 +3929,207 @@ PE／PB／殖利率三個 `Component` 的 `contribution` 取算術平均，成�
 - [ ] **AC11**：**不在本次範圍**：不調整任何權重、門檻或因子組成；不把 PE／PB／殖利率拆成獨立因子；
   不處理 Requirement 98／Task 362 已另案處理的九項市場數值特徵與美債殖利率零權重揭露；不新增
   `@Scheduled`；不變更任何 API 路徑或 9090／Tailscale 路由；不動 `db/changelog/`（本次無 DB schema 變更）。
+
+### Requirement 102／Task 366: 交易雷達結果新增「匯出到 blog」輸出通道，發布到 twleader.blogspot.com
+
+**User Story:** 作為使用者，我想把交易雷達的每日結果（大盤總覽、個股三軌分數與加減碼建議、台美公開資訊）
+發布到我自己的公開 Blogger 部落格 `https://twleader.blogspot.com/`，一方面留一份可從任何裝置瀏覽的歷史紀錄，
+一方面練習公開揭露自己的判斷依據。我要能在頁面上按一顆按鈕立即發布/更新一次，也要能像既有 Excel 排程一樣，
+設定好之後每天自動發布，不必每天手動按。
+
+**背景與既有決策（2026-08-22，已記錄於專案記憶，本 Requirement 為正式落地）：**
+
+- **發布範圍：公開、全部都發**，含個股代號、三軌分數與加減碼建議。使用者已被明確告知「公開部落格會被
+  Google 索引、等同公開個人投資組合」，並重申仍要全發——這是他的決定，本 Requirement 不再重新評估。
+- **觸發入口**：交易雷達頁頁首右上角，與既有〔⬇ 匯出 Excel〕〔⟳ 重新整理〕並排新增第三顆按鈕
+  〔匯出到 blog〕（`TradingRadarView.vue` 的 `.header-actions` 區塊，見 [design.md] 第 3 節的既有程式碼行號）。
+  按下去等同「立即發布/更新一次」，屬「發布公開內容」，**每次手動觸發都要先跳確認對話框、使用者按下確認才
+  真的送出**——不得省略確認直接發布。
+- **排程自動發布**：與手動按鈕**同一個任務範圍一起做**（2026-08-23 使用者確認，推翻原先「排在獨立任務」的
+  暫定排序）。啟用後**沿用既有〔匯出執行時間設定〕卡片已設定的每日執行時間點**（`trading_radar_export_time`），
+  不新增第二套排程時間 UI——同一個時間點到點時，若使用者已啟用「同步發布到 blog」，在既有 Excel／JSON
+  落檔與（啟用時）Drive 上傳之後，一併發布/更新一次 blog 文章。啟用後的排程發布**不再逐次跳確認框**——
+  使用者透過「啟用」這個開關本身，已對「這個排程會自動、重複地公開發布」做出一次性授權，語意等同既有
+  Google Drive 同步開關（每天自動上傳、不逐次詢問）。
+- **只有「主要管理者」（`ADMIN_EMAIL`，即 `UserAdminService.isConfiguredAdmin`）能看到與啟用本功能**，
+  比照既有 Google Drive 同步開關的既有先例（`GdriveOutputSupport.isDriveAllowedFor`）——理由相同：
+  blog 是全機唯一一個、綁定特定 Google 帳號的目的地，非該帳號擁有者的使用者若也能觸發，會把不屬於自己的
+  資料發布到別人看得到、且與自己無關的公開網址上。
+- **blog 擁有帳號與 App 登入帳號是兩個不同的 Google 帳號**（2026-08-23 使用者澄清）：本 App 既有的
+  Google 登入（`GOOGLE_CLIENT_ID`／`GOOGLE_CLIENT_SECRET`，BFF `oauth2Login`）與 `ADMIN_EMAIL`
+  （主要管理者）目前設定為 `tw.leader@gmail.com`；而 `twleader.blogspot.com` 這個 Blogger 部落格是以
+  **`shi.chihung@gmail.com`** 建立、歸屬於該帳號。這兩者**不需要是同一個 Google 帳號**——OAuth
+  授權同意畫面是瀏覽器對 Google 的獨立互動，與「目前登入本 App 的是誰」無關；`tw.leader@gmail.com`
+  以主要管理者身分登入本 App 後，點擊〔連接 Blogger 帳號〕，瀏覽器導去 Google 同意畫面時，使用者可
+  自行在該畫面**切換或登入 `shi.chihung@gmail.com`** 完成同意，取得的 refresh token 綁定的是
+  `shi.chihung@gmail.com` 這個 Blogger 帳號，與觸發連接動作的 App 登入身分（`tw.leader@gmail.com`）
+  各自獨立、互不影響。
+- **OAuth2 憑證：沿用既有登入用的 `GOOGLE_CLIENT_ID`／`GOOGLE_CLIENT_SECRET`**（2026-08-23 使用者選定），
+  不新建第二組 OAuth Client。這組 Client 目前只用於 BFF 的 Gmail 登入（`docker-compose.yml:340-341`
+  的 `GOOGLE_CLIENT_ID`／`GOOGLE_CLIENT_SECRET`，`application.yml` 的 `spring.security.oauth2.client`
+  登入用 registration）。本 Requirement 為同一個 Client **新增一組獨立的授權範圍與 callback**（scope
+  `https://www.googleapis.com/auth/blogger`、`access_type=offline`、`prompt=consent`），刻意**不**
+  借用 Spring Security 既有的 `oauth2Login` 機制（那條路徑語意是「登入本 App」，登入成功會建立/更新
+  `AppUser` 並核發本 App 的 session，用來走「額外授權一個第三方 API 範圍」語意不符、也不會索取
+  `access_type=offline`），而是另外寫一支獨立的 controller 端點直接呼叫 Google 的
+  `/o/oauth2/v2/auth`（產生導向網址）與 `/token`（換 code 拿 token）端點。
+  **前置準備（部署面、非本次程式碼可完成，需使用者於 Google Cloud Console 手動操作一次）：**
+  1. 於既有 OAuth 2.0 Client（`GOOGLE_CLIENT_ID` 對應的那一個）的「已授權的重新導向 URI」清單，
+     新增一筆本 Requirement 的 callback 網址（見 [design.md] 的確切路徑）。
+  2. 在同一個 GCP 專案啟用 **Blogger API v3**。
+  3. 若該 OAuth 同意畫面的發布狀態仍是「測試中」，需把 `shi.chihung@gmail.com` 加進測試使用者名單，
+     否則該帳號在同意畫面會被 Google 擋下、無法完成授權。
+  上述三項由使用者在完成本 Requirement 的程式碼後、實際執行〔連接 Blogger 帳號〕之前自行完成；
+  程式碼本身不假設、不檢查這三項是否已完成，失敗時的錯誤處理見 AC 中「連線失敗」相關條款。
+
+**不得上傳到 blog 的畫面元素（2026-08-22 使用者明確指出，必須逐一遵守）：**
+
+發到 blog 的內容是**唯讀報表**，凡是「操作系統本身」的控制項一律不得出現：
+
+1. 通知卡片的〔🔔 設定〕按鈕（雷達頁「通知」欄，`TradingRadarView.vue:807`）。
+2. 〔匯出執行時間設定〕整張卡片——時間點清單、啟用開關、移除／新增時間點、儲存設定
+   （`TradingRadarView.vue:826-859`）。
+3. 〔匯出輸出檔案設定〕整張卡片——輸出資料夾路徑、選擇／儲存設定／立即匯出到目錄按鈕、上次執行結果、
+   同步 Google Drive 開關與 Drive 落點（`TradingRadarView.vue:861-`，含本 Requirement 新增的
+   〔匯出到 Blog 設定〕卡片本身）。
+
+> 這些元素除了是操作按鈕之外，還會洩漏**主機絕對路徑**（`/home/steven/...`、`/Users/steven/...`）與
+> Google Drive／Blogger 帳號的連接狀態——在公開部落格上屬於不該外流的環境資訊，比按鈕無用更嚴重。
+> **因此 blog 版面不能是「整頁 HTML 照搬再遮蔽」**，必須由後端依白名單重新組出一份「只含報表區塊」的
+> HTML（大盤卡、個股決策表、台美公開資訊），不得複用既有 Excel 匯出的完整鑑識欄位（PE／PB provenance、
+> 利率批次 ID、evidence group 覆蓋率等 100+ 欄純屬內部稽核用途，公開讀者不需要也不應該看到這些內部
+> 判斷細節，只需要看到分數、動作與其摘要理由）。
+
+**逐項展開優先用原生 `<details>/<summary>`，不要用 JS**：Blogger 文章允許 `<script>`，但回編輯器用
+「撰寫」模式再存檔會被改壞，且 RSS／Email 訂閱一定剝掉 `<script>`；`<details>` 是純標籤，三者都活得下來。
+本 Requirement 的 blog 內容全程不得包含 `<script>` 標籤。
+
+**Acceptance Criteria:**
+
+- [ ] **AC1（OAuth 連接，一次性設定）**：新增 ADMIN-only（`APP_CONFIGURED_ADMIN`）端點，讓使用者能：
+  0. **取得授權導向網址與 callback 換取 token 這兩支端點，business 層都必須各自覆核一次呼叫者是否為
+     主要管理者**（`isConfiguredAdmin`），不得只靠 BFF 的 `hasAuthority` 單一防線——callback 是本
+     Requirement 唯一真正把 Google token 寫入全域憑證（有副作用）的端點，防禦深度必須與 AC1.4 的
+     〔中斷連接〕、AC5 的啟用切換一致。
+  1. 取得 Google 授權導向網址（scope 固定為 `https://www.googleapis.com/auth/blogger`，
+     `access_type=offline`、`prompt=consent`，`redirect_uri` 為本次新增的 callback 路徑，`state`
+     為伺服器產生、限時有效的隨機值，防止 CSRF）。
+  2. Google 導回 callback 後，後端以 `code` 向 Google `/token` 端點換取 `access_token`／
+     `refresh_token`／`expires_in`，**若回應缺少 `refresh_token`**（使用者先前已對同一個
+     OAuth Client 授權過、Google 對重複授權預設不重發 refresh token），需明確告知使用者原因並提示
+     「請改用一律附帶 `prompt=consent` 的連結重新授權」（本 Requirement 產生的授權連結本就固定帶
+     `prompt=consent`，故正常情況不會遇到，只在使用者繞過本功能自行組網址時才會發生，訊息需講清楚
+     成因而非只顯示原始錯誤字串）。
+  3. 換到 `refresh_token` 後，以新拿到的 `access_token` 呼叫 Blogger API
+     `GET /blogger/v3/blogs/byurl?url=https://twleader.blogspot.com/` 解析出 `blogId`，
+     連同 `access_token`／`refresh_token`／`access_token` 到期時間、方才呼叫者於 Google 端顯示的
+     帳號資訊（供設定頁顯示「已連接：xxx@gmail.com」），一併存入新增的**全域單列**設定資料表
+     （不綁定 `owner_user_id`，語意與 rclone remote 一致——全機只有一個 blog 目的地）。**該表用
+     `CHECK (id = 1)` 在 DB 層強制全表恆只有一列**（不是只靠應用層 upsert 慣例假設不會有第二列）
+     ——本表連 `owner_user_id` 這種天然業務鍵都沒有，若真的靠應用層競速寫出兩列，後續讀取會不確定
+     地取到其中一列，中斷連接／續期／發布因此出現難以重現的錯亂，比既有 `ExportScheduleSetting`／
+     `TradingRadarExportSetting` 等表（皆有 `UNIQUE(owner_user_id)` 兜底）更需要 DB 層保護。
+  4. 設定頁提供〔中斷連接〕動作，清除已存的 token／`blogId`（ADMIN-only），供憑證需要重新授權時使用。
+  5. `state` 驗證失敗、`code` 已過期或 Google 回傳授權失敗（使用者在同意畫面按了拒絕）時，callback
+     一律導回交易雷達頁並帶上可讀的失敗原因查詢參數，不得讓使用者看到未經處理的例外堆疊或空白頁。
+- [ ] **AC2（access token 續期）**：`access_token` 到期或即將到期（提前 60 秒視為到期）時，
+  發布動作（手動或排程）前自動用已存的 `refresh_token` 向 Google `/token` 端點換新的
+  `access_token` 並更新到期時間；**`refresh_token` 一律保留原值**（Google 的 refresh grant
+  回應通常不包含新的 `refresh_token`，若响应中缺此欄位不得把已存的舊值覆寫成 `null`）。若 refresh
+  失敗（例如使用者已於 Google 端撤銷授權），本次發布視為失敗、寫入可讀的失敗狀態，**不清除已存的
+  `refresh_token`**（避免暫時性網路錯誤就要求使用者重新走一次 AC1 的完整授權流程；只有 Google
+  明確回傳 `invalid_grant` 這類「憑證確定失效」的錯誤時才提示使用者需要在設定頁重新連接）。
+- [ ] **AC3（手動立即發布按鈕）**：交易雷達頁頁首 `.header-actions` 區塊新增〔匯出到 blog〕按鈕，
+  緊接在既有〔重新整理〕之後；**只有 `auth.isConfiguredAdmin` 為真時才顯示**（比照既有
+  Google Drive 開關的顯示條件）。點擊後：
+  1. 若尚未完成 AC1 的連接（無有效 `refresh_token`），彈出提示並附〔前往設定〕捷徑（捲動或導向
+     AC6 的設定卡片），不呼叫任何發布端點。
+  2. 若已連接，先彈出確認對話框，文案需清楚說明「即將把交易雷達目前結果公開發布/更新到
+     `https://twleader.blogspot.com/`，任何人皆可瀏覽，內容含個股代號、三軌分數與加減碼建議」，
+     使用者按下確認後才呼叫發布端點；取消則不送出任何請求。
+  3. 發布端點以**當下最新一次背景重算的快照**（與既有〔重新整理〕〔匯出 Excel〕共用的
+     `TradingRadarSnapshotStore` 讀法一致，不得為了本功能另外重算一次或改變既有快照時效）組出
+     AC7 定義的白名單 HTML 內容，呼叫 Blogger API 建立或更新文章（見 AC4）。
+  4. 呼叫期間按鈕顯示 loading 狀態；完成後以 `ElMessage` 顯示成功／失敗，成功時附上可點擊的文章網址。
+- [ ] **AC4（建立或更新同一篇文章，不逐日新增貼文）**：**同一個 blog 目的地全程只維護一篇文章**，
+  不因為每天發布一次就每天新增一篇：
+  1. 尚無已存 `postId`（`blog_last_post_id`）時，呼叫
+     `POST /blogger/v3/blogs/{blogId}/posts?isDraft=false` 建立新文章，存下回應的 `postId` 與
+     文章網址 `url`。
+  2. 已有 `postId` 時，呼叫 `PUT /blogger/v3/blogs/{blogId}/posts/{postId}` 更新內容；若該次呼叫
+     回 404（文章已被人在 Blogger 端手動刪除），視為「尚無文章」回退成建立新文章並覆寫存下的
+     `postId`／`url`，不得讓整次發布因此失敗。
+  3. 文章標題固定為 `交易雷達每日結果`（不含日期字面，因為是同一篇文章持續更新，不是每天一篇新文），
+     內容第一段固定顯示「最後更新：{Asia/Taipei 時間 yyyy-MM-dd HH:mm}」與一行不得省略的免責聲明
+     （非投資建議、判斷全由本地規則產生、僅供個人紀錄公開）。
+  4. 建立或更新成功後，把 `postId`／文章網址／本次發布時間／狀態文字寫回設定資料列，供 AC6
+     的設定卡片顯示。
+- [ ] **AC5（排程自動發布，沿用既有時間點）**：`trading_radar_export_setting` 新增
+  `blog_enabled`（boolean，預設 `false`，**只有 `isDriveAllowedFor` 同一套主要管理者判定為真時才能
+  設為 `true`**，語意與 `gdrive_enabled` 完全比照）。`TradingRadarExportScheduleService`
+  既有的 `runScheduled(...)`（`trading_radar_export_time` 到點觸發、當日 guard、非交易日不動作等
+  既有規則**一個都不改**）在本機 Excel／JSON 落檔與（啟用時）Google Drive 上傳完成之後，若
+  `blog_enabled` 為真，額外呼叫本次新增的發布邏輯（AC4 的建立/更新流程），並把結果寫進
+  AC5 新增的兩欄狀態（`blog_last_run_at`／`blog_last_status`）；**發布失敗（含尚未完成 AC1 授權）
+  只記錄狀態、不得讓當輪既有本機／Drive 產出流程失敗或回滾**，比照既有 Drive 同步「本機成功、
+  Drive 失敗是正常且必須可分辨的狀態」的既有先例（`TradingRadarExportScheduleService.applyGdriveStatus`
+  的既有註解）。`run-now`（立即匯出到目錄，既有既有按鈕）**不觸發** blog 發布——那顆按鈕語意是
+  「驗證本機／Drive 落點」，不是公開發布，本 Requirement 不擴大其既有語意。
+- [ ] **AC6（設定卡片）**：新增〔匯出到 Blog 設定〕卡片，**只有 `auth.isConfiguredAdmin` 為真時才顯示
+  整張卡片**，緊接在既有〔匯出輸出檔案設定〕卡片之後。內容：
+  1. 連接狀態：已連接時顯示 Google 端回報的帳號資訊與最近一次發布的文章網址（可點擊開新分頁）；
+     未連接時顯示〔連接 Blogger 帳號〕按鈕，觸發 AC1 的授權導向。
+  2. 已連接時顯示〔中斷連接〕按鈕（AC1.4）與「同步發布到 blog」開關（對應 `blog_enabled`），
+     開關旁註明「沿用上方〔匯出執行時間設定〕的執行時間點」，不重複一套時間 UI。
+  3. 上次發布時間與狀態文字（對應 `blog_last_run_at`／`blog_last_status`），語意與既有
+     `gdrive_last_run_at`／`gdrive_last_status` 一致（成功／失敗／尚未執行三態皆可讀）。
+- [ ] **AC7（blog 內容白名單，逐區塊組裝，不得整頁照搬）**：新增獨立的內容組裝邏輯（非既有
+  `TradingRadarExportService` 的 Excel/JSON 欄位，避免把 100+ 欄鑑識欄位帶進公開頁面），只含：
+  1. **大盤卡**：`regime`／中文標籤／分數／完成日 K／最新點位與漲跌%／支持訊號（`reasons`）／
+     風險提醒（`risks`），**只取台股大盤（`market`）**，不含美股大盤（`usMarket`）——比照既有
+     `TradingRadarExportService.marketSheet()` 的「大盤總覽」分頁本就只讀 `market` 節點、
+     從未輸出 `usMarket` 的既有範圍，本次維持一致，不擴大既有匯出範圍。
+  2. **個股決策表**：每檔一個 `<details><summary>{代碼} {名稱} — {中文動作}</summary>...</details>`，
+     展開內容含現價／漲跌%／是否持有／一周｜1周~1月｜1月~6月 三軌的動作與分數（1周~1月軌一律讀
+     `swingActionLabel` 這個既有中文標籤欄位，**不得**改讀內部代碼欄位 `swingAction`，與另兩軌
+     一致皆顯示中文標籤，缺值時 fallback「今日不交易」，比照前端 `TradingRadarView.vue:709`
+     既有的同一顯示慣例）／各軌各自的支持訊號與風險提醒（`reasons`/`shortReasons`/`swingReasons`
+     與對應的 `risks`/`shortRisks`/`swingRisks`，三軌缺一不可，**不含**逐欄鑑識證據、
+     estimate provenance、利率批次、evidence group 覆蓋率等內部診斷欄位）。
+  3. **台美公開資訊**：發布時間／來源／標題／摘要／原文網址的清單；原文網址**只有 `http://`／
+     `https://` 開頭才輸出為可點擊連結**，其餘 scheme（含 `javascript:`）一律降級為純文字或整項
+     捨棄——這批網址來自背景爬蟲抓取的第三方來源，非使用者輸入也非系統自產，公開發布前必須比照
+     一般外部輸入驗證，不得原樣信任。
+  4. 內容中**不得出現**〈不得上傳到 blog 的畫面元素〉列出的三類控制項與其對應資料、**不得出現**任何
+     本機或容器內絕對路徑字串、**不得出現** Google Drive 或 Blogger 的連接狀態／帳號資訊、
+     **不得出現**美股大盤（`usMarket`）——理由見 AC7.1。
+  5. 逐項展開一律用原生 `<details>/<summary>`，內容全程不得出現 `<script>` 標籤。
+- [ ] **AC8（測試）**：
+  1. 新增 OAuth 換取/續期邏輯的單元測試：正常換取寫入四個欄位、續期時保留既有 `refresh_token`、
+     `invalid_grant` 觸發需要重新連接的狀態、一般網路錯誤不清除既有 `refresh_token`。
+  2. 新增內容組裝邏輯的單元測試：以固定假快照 JSON 驗證輸出 HTML 不含〈不得上傳到 blog 的畫面元素〉
+     任何一項對應字串／資料、不含 `<script>`、逐檔 `<details>` 數量與快照個股數一致。
+  3. 新增建立/更新流程的單元測試（以可替換的 HTTP client 假物件）：首次呼叫走建立並存下
+     `postId`；`postId` 已存在時走更新；更新回 404 時回退為建立並覆寫 `postId`。
+  4. `TradingRadarExportScheduleServiceTest` 新增或修改案例：`blog_enabled=true` 時排程完成本機／
+     Drive 產出後會呼叫發布邏輯；發布邏輯擲例外時既有本機／Drive 狀態欄位與檔案仍正常寫入，
+     不因發布失敗而回滾。
+- [ ] **AC9（驗證，含使用者需手動完成的前置設定）**：
+  1. `/run-stack` 重建並 recreate `business-services`／`bff`／`frontend`，`mvn test` 全綠。
+  2. 使用者需先於 Google Cloud Console 完成〈前置準備〉三項（新增 redirect URI、啟用 Blogger API v3、
+     視需要加測試使用者），此三項**不在本次程式碼驗收範圍內**，由使用者自行確認完成。
+  3. 完成前置準備後，登入本 App（`tw.leader@gmail.com`，主要管理者）進交易雷達頁，於新設定卡片按
+     〔連接 Blogger 帳號〕，於 Google 同意畫面切換／登入 `shi.chihung@gmail.com` 完成授權，導回後
+     設定卡片顯示已連接帳號資訊。
+  4. 按頁首〔匯出到 blog〕，確認彈出對話框並確認後，`https://twleader.blogspot.com/` 出現/更新
+     該篇文章，內容通過 AC7 的白名單檢查（人工核對不含三類禁止元素、不含絕對路徑、不含
+     Drive／Blogger 連接狀態）。
+  5. 開啟設定卡片的「同步發布到 blog」開關並儲存；等待既有〔匯出執行時間設定〕下一個到點時間，
+     確認 Excel／JSON 落檔（與既有 Drive 同步，如已啟用）照常完成後，blog 文章同步更新、
+     `blog_last_run_at`／`blog_last_status` 隨之更新。
+- [ ] **AC10（不在本次範圍）**：不建立第二組 OAuth Client；不支援發布到除 `twleader.blogspot.com`
+  以外的其他 blog／其他帳號；不支援多篇歷史文章歸檔（同一目的地固定只維護一篇，見 AC4）；
+  不對 blog 文章內容加上任何互動式 JS（排序／篩選皆不做，見〈逐項展開優先用原生
+  `<details>/<summary>`〉）；不新增或變更任何 9090／Tailscale 公開路由；不影響既有
+  `TradingRadarRuleEngine` 的評分邏輯，`RULE_VERSION` 不升版（本 Requirement 純屬新增輸出通道，
+  不改變任何 `score`／`action`／`reasons`／`risks` 的既有計算結果或既有匯出格式）。
