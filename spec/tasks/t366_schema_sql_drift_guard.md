@@ -4,7 +4,7 @@
 **前置任務:** 無
 **Liquibase changeset:** 無（本任務不建表、不改任何 changeset。**嚴禁**碰 `backend/src/main/resources/db/changelog/` 底下任何檔案——連 `--comment` 註解都算進 Liquibase checksum，改動會導致 `ValidationFailed` → business-services crash loop）
 
-> **編號說明**：Task 364 已由 `yuanta-securities-api-093d9b`（`t364_yuanta_broker_service.md`，未 merge）佔用，Task 365 已由 `trading-radar-valuation-label-cadb86`（`t365_radar_valuation_label_fix.md`，未 merge，且該檔自述已從 364 讓過一次號）佔用，故本任務為 **366**。Requirement 100／101 同樣被那兩支佔用，本需求為 **102**。
+> **編號說明**：Task 365／Requirement 101（`trading-radar-valuation-label-cadb86`）**已於本任務撰寫期間 merge 進 main**（`origin/main` 2366e265，本分支已合入）；Task 364／Requirement 100 由 `yuanta-securities-api-093d9b`（`t364_yuanta_broker_service.md`）佔用、尚未 merge。本任務一併避開兩者，編為 **Task 366／Requirement 102**。
 > `scripts/spec-check.sh` 的 B1 撞號檢查以 `git merge-base HEAD origin/main` 三方比對，**看不到任何尚未 merge 的平行 worktree**，`BLOCK: 0` 不能當成沒撞號的證據。
 
 ## 背景

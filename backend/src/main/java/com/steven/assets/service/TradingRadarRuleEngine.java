@@ -58,7 +58,7 @@ public class TradingRadarRuleEngine {
      * 另外，極端時機（EXTREME_OVERBOUGHT／EXTREME_OVERSOLD）新增季線乖離自身分位替代路徑，
      * 使低波動標的的保護不再形同虛設（Task 299）。</p>
      */
-    public static final String RULE_VERSION = "TW_RULES_V16";
+    public static final String RULE_VERSION = "TW_RULES_V17";
 
     /**
      * 三軌持有期（Task 356.1a）。
@@ -223,7 +223,7 @@ public class TradingRadarRuleEngine {
     static final String[] WEIGHT_TABLE_LABELS = {
             "週線 MA5", "月線 MA20", "季線 MA60", "年線 MA240", "KD／J", "MACD", "RSI",
             "乖離率 BIAS", "個股相對量", "市場環境", "完成日漲跌", "匯率", "ETF 折溢價",
-            "EPS 年增", "近似 ROE", "近三月營收年增", "PE 自身分位", "產業營收年增",
+            "EPS 年增", "近似 ROE", "近三月營收年增", "估值（PE／PB／殖利率）", "產業營收年增",
             "日K 棒", "週線趨勢", "週線動能", "週線乖離", "週K 棒與量能",
     };
 
@@ -1680,7 +1680,7 @@ public class TradingRadarRuleEngine {
             revenue = fundamentalContribution(
                     fundamental.revenueContribution(), "近三月營收年增", reasons, risks);
             pe = fundamentalContribution(fundamental.peContribution(),
-                    fundamental.peLoss() ? "PE（可信來源顯示虧損）" : "PE 自身分位",
+                    fundamental.peLoss() ? "PE（可信來源顯示虧損）" : "估值（PE／PB／殖利率）",
                     reasons, risks);
             industry = fundamentalContribution(
                     fundamental.industryContribution(), "產業營收年增", reasons, risks);

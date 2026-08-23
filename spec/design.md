@@ -4820,6 +4820,65 @@ Requirement 65 的 duplicate 要求已達成。**缺值時則否**：`:365-368`�
 缺值日與畫面不符。九項在 production 全部不進評分，`DISCLOSURE_ONLY` 不是 production 有效性的區別。
 
 
+### 估值 composite 因子的標籤修正（`TW_RULES_V17`，Requirement 101／Task 365）
+
+**落差本身。** 權重表（`TradingRadarRuleEngine.WEIGHT_TABLE`／`WEIGHT_TABLE_LABELS[16]`）與交易雷達的
+風險文案（`TradingRadarRuleEngine.java:1683`）都把掛在 `SW_PE`／`SWG_PE`／`MW_PE`（`0.02`／`0.03`／`0.04`）
+上的因子標為「PE 自身分位」，但 `FundamentalAnalysisService.valuationComposite()` 的非虧損分支
+（`:491-500`）實際上是 PE／PB／殖利率三個 `Component` 的**算術平均**：`available.stream()
+.mapToDouble(Component::contribution).average()`。`severeFinancial`（EPS 或 ROE 貢獻 `<= -0.8`，
+`:249-250`）成立時殖利率被排除在分子之外（`:491`：`Component yield = severeFinancial ? null : rawYield;`），
+但 PE／PB 仍可能同時貢獻，並非單因子。使用者因此會誤以為只有 PE 進了評分，而 PB 與殖利率其實也有——
+且三者合計權重僅 `0.04`，遠低於「產業營收年增」單一因子的 `0.10`，這個比例落差本身也被隱藏了。
+
+**可信虧損分支不在此列，維持原字面。** `loss.loss()` 為真時，`ValuationComposite.loss(...)`
+（`FundamentalAnalysisService.java:901-913`）把 `contribution` **寫死 `-1.0`**，不論 PB／殖利率是否
+可得都不參與平均——PB／殖利率只被保留供揭露（`peValue/pePercentile` 之外的獨立欄位），不進分子。
+故 `fundamentalContribution(..., "PE（可信來源顯示虧損）", ...)` 這一支標籤本身正確，**不在本次修正
+範圍**；只改非虧損分支的標籤。同理，`TradingRadarExportService.FUNDAMENTAL_HEADERS` 的
+`"PE值"／"PE自身分位"／"PE可信虧損"` 三欄對應的是 `peValue`／`pePercentile`／`peLossFlag`——**PE 元件
+自身**的數值與分位（`TradingRadarExportService.java:592`），與 composite 的合成分數是两回事，欄名正確，
+不在本次範圍。前端 `valuationEvidence.js` 的逐分量卡片（`projectValuationEvidence`）本就把 PE／PB／
+殖利率分開呈現，同樣不在本次範圍。
+
+**改動範圍，三處字面標籤：**
+
+| 位置 | 舊字面 | 新字面 | 是否影響 API／匯出輸出 |
+|---|---|---|---|
+| `TradingRadarRuleEngine.WEIGHT_TABLE_LABELS[16]` | `"PE 自身分位"` | `"估值（PE／PB／殖利率）"` | 否——package-private，僅供測試失敗訊息（`TradingRadarThreeHorizonWeightTest`）指出是哪一列，無任何 API／DTO／匯出消費端 |
+| `TradingRadarRuleEngine.java:1683`（非虧損分支） | `"PE 自身分位"` | `"估值（PE／PB／殖利率）"` | **是**——這是 `fundamentalContribution(...)` 傳入 `reasons.add(label + "表現正向，已納入評分。 ")`／`risks.add(...)` 的字面標籤，`\|contribution\| >= 0.5` 時直接寫進 `reasons`／`risks` 陣列，即 API payload 與畫面「原因」「風險」清單的內容 |
+| `BacktestService.java:4300` | `"PE 自身分位／可信虧損"` | `"估值（PE／PB／殖利率）／可信虧損"` | 是——`fundamentalCoverageNotes()` 的 metric label，寫進回測報表 `notes` 欄，但屬管理端診斷輸出，不受 `trading_radar_notification_setting` 的 `ruleVersion` 基準機制約束 |
+
+**升版判準：`TW_RULES_V16` → `TW_RULES_V17`，且不是本檔既有四條不升版先例的任何一條。**
+`spec/design.md` 的先例權威清單（Task 263 段落）明訂四條互斥先例：Task 249「同一份輸入前後產生完全
+相同的輸出」、Task 281「**新增欄位**純揭露」、Task 336「顯示值本身的捨入缺陷修正」、Task 362「規則引擎
+輸出（`action`／`score`／`regime`／`reasons`／`risks`）與 API payload 的每一個欄位值**逐位不變**，變動
+的僅是說明性文字」。本次**不成立 Task 362**——這是與 Task 362 的關鍵區別，必須明確記載：Task 362 修正的
+是匯出檔「證據閘門原因」欄與 OpenAPI `description`，兩者都不是 `reasons`／`risks` 本身；本次修正的
+`TradingRadarRuleEngine.java:1683` 標籤**直接組成** `reasons`／`risks` 陣列的元素字串，凡估值 composite
+因子的 `contribution` 達 `±0.5` 門檻的歷史決策，其 `reasons`／`risks` 陣列內容必然改變，不滿足「逐位不變」。
+也不成立 Task 249（輸出不同）、Task 281（未新增欄位）、Task 336（非捨入修正）。**故套用本檔判準的預設
+規則：「使用者可觀察行為有實質變化」須升版**——與 Task 228（V6）／Task 232（V7）先例相同：即使因子組成、
+權重與正規化方式完全不變，純文字／標籤變化只要反映到 `reasons`／`risks`，就構成使用者可觀察行為變化。
+
+**`score`／`action`／`regime`／`candidateAction` 逐位不變，僅 `reasons`／`risks` 文字內容可能變。**
+本次不調整任何權重常數、門檻或因子組成，`valuationComposite()` 的計算邏輯一個字元未動；三軌分數與
+最終建議動作對所有標的逐位相同。變的只有：當該因子的 `contribution` 達 `±0.5` 且被寫入 `reasons`／
+`risks` 時，陣列裡對應那一則文字的**內容**（不是陣列長度、不是其他因子的文字、不是分數）。
+
+**七處版號 hardcode 與既有版號測試斷言，比照 Task 360／362 前例逐一同步**（`grep -ran "TW_RULES_V16"`
+清單）：`TradingRadarRuleEngine.java:61`、`TradingRadarDto.java:9`、`TradingRadarService.java:752`
+註解、`TradingRadarView.vue:28`／`:823`／`:1144`、`docs/openapi/docker-external-api.yaml:579`；
+連帶既有版號測試斷言（`TradingRadarControllerCurrentTest`／`TradingRadarV13ActionPolicyTest`／
+`BacktestServiceTest`／`TradingRadarRuleEngineTest`／`TreasuryYieldServiceTest`）一併改為 `TW_RULES_V17`。
+`RULE_VERSION` 升版會觸發 `TradingRadarNotificationService` 的通知基準重建（Requirement 83／Task 342
+更正後的行為）：首輪不寄信、不刪訂閱狀態列、不刪收件人，唯一影響是跨部署邊界那一次狀態轉換被吞掉，
+與既有升版行為一致，非本次新增風險。
+
+**刻意不做。** 不調整 `SW_PE`／`SWG_PE`／`MW_PE` 任一權重值（`0.02`／`0.03`／`0.04`）；不把 PE／PB／
+殖利率拆成三個獨立因子；不調整因子在權重表中的欄位順序。三者皆屬權重校準，需 Requirement 56 的回測
+量測支持，`t333` 的 `333.10` 明文禁止未經量測調整權重／因子組成——與 `t333` 的既有排除項一致。
+
 ### 規則回測框架（Requirement 56／Task 273）
 
 `TradingRadarRuleEngine` 是純函數（`import` 只有 `BigDecimal`／`RoundingMode`／`ArrayList`／`List`／`Component`，不碰 repository／網路／時間），而 `stock_price_history` 有 154,834 筆／71 檔／2016-08-01 ~ 2026-07-31（各標的交易日數自 318 至 2439 不等，49 檔中 12 檔不足 2400 筆；扣掉暖機後最短者只剩下極少的可用交易日，須逐標的揭露樣本數——Task 356 把暖機由 240 放大到 305 之後，318 筆的標的只剩約 13 個可用訊號日、低於 `MIN_SAMPLES = 30` 而整檔標記為樣本不足，該清單須在完成報告中列出）。**這兩件事合起來使回測在技術上是現成的**——把歷史序列逐日切片餵給同一支引擎即可，不需要模擬器，也不需要第二份規則實作。

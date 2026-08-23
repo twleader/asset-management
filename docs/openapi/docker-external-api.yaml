@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: 資產管理系統 Docker 外部 API
-  version: 1.2.0
+  version: 1.3.0
   description: |
     本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的九條精確路徑：
     八條唯讀 GET ＋ 一條寫入 POST（`/api/public/crawler-data/rescan`，唯一有外部抓取副作用者，
@@ -576,7 +576,7 @@ paths:
                 synthetic:
                   summary: 去識別化、無實際持倉的合成範例
                   value:
-                    ruleVersion: TW_RULES_V16
+                    ruleVersion: TW_RULES_V17
                     actionPolicyVersion: EVIDENCE_GATE_V1
                     generatedAt: '2026-01-15T02:15:30Z'
                     market:

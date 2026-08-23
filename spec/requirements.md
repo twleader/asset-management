@@ -3799,11 +3799,112 @@ FROM stock_price_history WHERE market='台股';
 - [ ] **AC8**：修正後的抓取邏輯（AC1）必須以固定 `Clock` 與構造回應的單元測試釘住：構造一筆 `stock_or_cache_dividend="權"` 的 fallback 列與（可選）一筆主表配股列，驗證前者不再產生 `stockDividend > 0` 的事件、後者（若存在）維持正常解析。
 - [ ] **AC9**：本需求不改變 `TaiwanStockDividendResult` 「息」型列（現金配息）的既有解析、落地與 ETF 覆蓋邏輯，也不改變 Requirement 97 已修正的抓取視窗（`end_date`／`anchorDate` 過濾）邏輯，兩者維持現狀。
 
+---
+
+### Requirement 101／Task 365: 交易雷達估值因子的權重表標籤與風險文案誤標「PE 自身分位」——實為 PE／PB／殖利率三者算術平均
+
+> **編號說明**：本工作建檔時 `Requirement 100／Task 364` 已由另一支平行 worktree
+> （`yuanta-securities-api-093d9b`，元大證券 SPARK API 唯讀查詢服務 scaffold）佔用，依專案慣例讓號，
+> 本需求續編為 101／365。
+
+**User Story:** 作為使用者，我在交易雷達展開個股評分細節或收到某檔的「原因」「風險」提示時，看到寫著「PE 自身分位」的因子，我會合理地以為分數只反映 PE 一項指標。事實上該因子是 PE、PB、殖利率三者的算術平均，PB 與殖利率也實際參與了評分——只是標籤沒有告訴我。我希望標籤與文案如實反映這個因子的組成，不要讓我誤判分數的依據。
+
+**背景（程式碼可逐行查證）。** `FundamentalAnalysisService.valuationComposite()` 的非虧損分支
+（`FundamentalAnalysisService.java:491-500`）：
+
+```java
+Component yield = severeFinancial ? null : rawYield;
+List<Component> available = java.util.stream.Stream.of(pe, pb, yield)
+        .filter(java.util.Objects::nonNull).toList();
+...
+Double contribution = available.isEmpty()
+        ? null
+        : available.stream().mapToDouble(Component::contribution).average().orElse(0.0);
+```
+
+PE／PB／殖利率三個 `Component` 的 `contribution` 取算術平均，成為單一 `contribution` 值。`severeFinancial`
+（EPS 或 ROE 貢獻 `<= -0.8`，`:249-250`）成立時殖利率被排除在分子之外，但 PE、PB 仍可能同時貢獻，並非
+單一因子。該 composite 掛在權重 `SW_PE = 0.02`（`TradingRadarRuleEngine.java:113`）／`SWG_PE = 0.03`
+（`:139`）／`MW_PE = 0.04`（`:164`）上，但：
+
+- 權重表標籤 `TradingRadarRuleEngine.WEIGHT_TABLE_LABELS[16]`（`:226`）寫「PE 自身分位」；
+- 風險文案 `TradingRadarRuleEngine.java:1683` 非虧損分支：`fundamental.peLoss() ? "PE（可信來源顯示虧損）" : "PE 自身分位"`，同樣寫「PE 自身分位」，且此字面**直接組成** `reasons`／`risks` 陣列的元素（`fundamentalContribution()`，`:2543-2550`：`reasons.add(label + "表現正向，已納入評分。 ")`）；
+- `BacktestService.java:4300` 的回測覆蓋率診斷 metric 標籤同樣寫「PE 自身分位／可信虧損」。
+
+結果是：PB 與殖利率有進評分（本身是好事），但使用者以為只有 PE；且估值三面向合計權重僅 `0.04`（中期軌），
+遠低於「產業營收年增」單一因子的 `0.10`，這個比例落差本身也未被揭露。**可信虧損分支不受影響**——`loss.loss()`
+為真時 `ValuationComposite.loss(...)`（`FundamentalAnalysisService.java:901-913`）把 `contribution` 寫死
+`-1.0`，PB／殖利率不參與平均、只保留供揭露，故 `"PE（可信來源顯示虧損）"` 這支標籤本身正確，維持原字面。
+
+**Requirement 96／98 已預告本落差另案處理。** `spec/requirements.md` 的 Requirement 96「不在本次範圍」段
+與 `spec/tasks/t360_radar_j_polarity_fix.md`（236）、`spec/tasks/t362_radar_zero_weight_disclosure.md`
+（443）皆明文寫著「不處理 `MW_PE` 標籤寫『PE 自身分位』但實為 PE／PB／殖利率三者平均的命名落差（另案）」。
+本 Requirement 就是那個另案。
+
+**Acceptance Criteria:**
+
+- [ ] **AC1**：`TradingRadarRuleEngine.WEIGHT_TABLE_LABELS[16]` 由 `"PE 自身分位"` 改為
+  `"估值（PE／PB／殖利率）"`。此陣列為 package-private，僅供測試失敗訊息（`TradingRadarThreeHorizonWeightTest`）
+  指出是哪一列，本身不經任何 API／DTO／匯出消費端輸出，改動零外部影響。
+- [ ] **AC2**：`TradingRadarRuleEngine.java:1683` 的非虧損分支標籤由 `"PE 自身分位"` 改為
+  `"估值（PE／PB／殖利率）"`；`fundamental.peLoss()` 為真時的分支標籤 `"PE（可信來源顯示虧損）"` 維持不變
+  （理由見上方背景——該分支 `contribution` 純由 PE 損失決定，PB／殖利率不參與平均）。
+- [ ] **AC3**：`BacktestService.java:4300` 的診斷 metric 標籤由 `"PE 自身分位／可信虧損"` 改為
+  `"估值（PE／PB／殖利率）／可信虧損"`，與 AC1／AC2 用語一致。
+- [ ] **AC4**：`TradingRadarExportService.FUNDAMENTAL_HEADERS` 中的 `"PE值"`／`"PE自身分位"`／`"PE可信虧損"`
+  三欄**不在本次範圍、不得變動**——這三欄對應 `peValue`／`pePercentile`／`peLossFlag`，是 PE 元件**自身**
+  的數值與分位（`TradingRadarExportService.java:592`），與 composite 合成分數是兩回事，欄名本身正確。
+  前端 `frontend/src/utils/valuationEvidence.js` 的逐分量卡片（`projectValuationEvidence`）本就把 PE／PB／
+  殖利率分開呈現各自的 provider／percentile／來源，同樣不在本次範圍。
+- [ ] **AC5**：**`RULE_VERSION` 由 `TW_RULES_V16` 升為 `TW_RULES_V17`**。AC2 的標籤字面直接組成
+  `reasons`／`risks` 陣列元素，凡估值 composite 因子 `contribution` 達 `±0.5` 門檻的歷史決策，其
+  `reasons`／`risks` 內容必然改變，不滿足 `spec/design.md` 先例權威清單任一條不升版先例（Task 249／
+  281／336／362）的成立條件——尤其不成立 Task 362：Task 362 修正的是匯出檔「證據閘門原因」欄與
+  OpenAPI `description`，兩者皆非 `reasons`／`risks` 本身，本次則直接改變 `reasons`／`risks` 陣列內容。
+  套用本檔判準的預設規則「使用者可觀察行為有實質變化」須升版，與 Task 228（V6）／Task 232（V7）先例
+  相同——純文字／標籤變化只要反映到 `reasons`／`risks`，即構成使用者可觀察行為變化。`score`／`action`／
+  `regime`／`candidateAction` 對所有標的逐位不變，變的只有 `reasons`／`risks` 陣列中對應那一則文字的內容。
+- [ ] **AC6**：七處版號 hardcode 與既有版號測試斷言，比照 Task 360／362 前例同步改為 `TW_RULES_V17`：
+  `TradingRadarRuleEngine.java:61`、`TradingRadarDto.java:9`、`TradingRadarService.java:752` 註解、
+  `TradingRadarView.vue:28`／`:823`／`:1144`、`docs/openapi/docker-external-api.yaml:579`；連帶
+  `TradingRadarControllerCurrentTest`／`TradingRadarV13ActionPolicyTest`／`BacktestServiceTest`／
+  `TradingRadarRuleEngineTest`／`TreasuryYieldServiceTest` 中既有的 `"TW_RULES_V16"` 斷言與註解一併更新。
+  `info.version` 依既有慣例升版。
+- [ ] **AC7**：**不得調整任何權重值**——`SW_PE`／`SWG_PE`／`MW_PE`（`0.02`／`0.03`／`0.04`）維持不變；
+  **不得**把 PE／PB／殖利率拆成三個獨立因子；**不得**調整因子在權重表中的欄位順序或其他任一因子的權重。
+  三者皆屬權重校準，需 Requirement 56 的回測量測支持，`spec/tasks/t333_radar_gap_backlog_2026_08_15.md`
+  的 `333.10` 明文禁止未經量測調整權重／因子組成，本次未附回測結果，不得夾帶。
+- [ ] **AC8**：測試（後端）——
+  1. 新增或修改測試斷言：非虧損分支下 `reasons`／`risks` 中若含估值 composite 因子的文字，字面須為
+     `"估值（PE／PB／殖利率）"` 開頭，不得再出現獨立的 `"PE 自身分位"` 字串；`peLoss()` 為真分支的
+     `"PE（可信來源顯示虧損）"` 字面維持既有測試斷言不變。
+  2. `RULE_VERSION` 相關既有測試（`TradingRadarRuleEngineTest`／`BacktestServiceTest` 等）斷言改為
+     `"TW_RULES_V17"`。
+  3. 新增一則對 `valuationComposite()` 非虧損分支的最小回歸測試（若既有測試已涵蓋 PE／PB／殖利率三者
+     取平均的邏輯本身，可指名既有測試檔案與方法作為對照，不必重寫），確認本次修改只動標籤字面、不動
+     計算邏輯——`available.stream().mapToDouble(Component::contribution).average()` 的算式與門檻
+     一個字元未動。
+- [ ] **AC9**：前端無元件測試框架（`frontend/package.json` 的 `test` 只跑 `src/utils/` 純函數測試），
+  本次不涉及 `.vue` 檔的邏輯變更（僅 `TradingRadarView.vue` 三處版號 hardcode 字面同步），不得宣稱有
+  前端自動化測試覆蓋此文案本身；文案由 AC10 的實機驗證守門。
+- [ ] **AC10**：**驗證（實機）**：`/run-stack` 重建並 recreate `business-services`／`frontend`，登入後於
+  「今日交易雷達」頁確認：
+  (a) 頁面版號 tag 顯示 `TW_RULES_V17`；
+  (b) 抽查一檔估值 composite 因子達 `±0.5` 門檻、且 `peLoss()` 為 false 的個股，其「原因」或「風險」清單
+  中對應文字已改為「估值（PE／PB／殖利率）…」，不再是「PE 自身分位…」；
+  (c) 抽查一檔 `peLoss()` 為 true（可信來源顯示虧損）的個股，其文字仍為「PE（可信來源顯示虧損）…」；
+  (d) 抽查數檔的三軌 `score`／`action` 與變更前一致（本次不得改動任何分數，僅文字與版號改變）；
+  (e) `GET /api/public/trading-radar/today`（Requirement 86 第九條公開路由）`ruleVersion` 回
+  `TW_RULES_V17`。
+- [ ] **AC11**：**不在本次範圍**：不調整任何權重、門檻或因子組成；不把 PE／PB／殖利率拆成獨立因子；
+  不處理 Requirement 98／Task 362 已另案處理的九項市場數值特徵與美債殖利率零權重揭露；不新增
+  `@Scheduled`；不變更任何 API 路徑或 9090／Tailscale 路由；不動 `db/changelog/`（本次無 DB schema 變更）。
 ### Requirement 102／Task 366: `db/schema.sql` 稽核基準線必須與運行中 DB 機械同步——漂移須被 `spec-check.sh` 自動攔下
 
-> **編號說明（實測，2026-08-23，全機 56 個 worktree 逐一掃描）**：
-> - Requirement 100 由 `yuanta-securities-api-093d9b` 佔用、Requirement 101 由 `trading-radar-valuation-label-cadb86` 佔用，兩者皆未 merge，故本需求續編為 **102**。
-> - Task 364 由 `yuanta-securities-api-093d9b` 的 `spec/tasks/t364_yuanta_broker_service.md` 佔用（該 worktree 的 `spec/tasks.md` 已有 `| 364 |` 索引列）；Task 365 由 `trading-radar-valuation-label-cadb86` 的 `spec/tasks/t365_radar_valuation_label_fix.md` 佔用（該檔檔頭自述「編號原為 Requirement 100／Task 364」，已讓過一次號）。兩者皆未 merge，本需求依專案慣例一併避開，對應 **Task 366**。
+> **編號說明（實測，2026-08-23，全機 56 個 worktree 逐一掃描；本分支已合入 `origin/main` 2366e265）**：
+> - Requirement 101／Task 365 原由 `trading-radar-valuation-label-cadb86` 佔用，**已於本需求撰寫期間 merge 進 main**（2366e265）。
+> - Requirement 100／Task 364 由 `yuanta-securities-api-093d9b`（`spec/tasks/t364_yuanta_broker_service.md`）佔用，尚未 merge；該 worktree 的 `spec/tasks.md` 已有 `| 364 |` 索引列。
+> - 本需求一併避開兩者，編為 **Requirement 102／Task 366**。（`t365_radar_valuation_label_fix.md` 檔頭自述「編號原為 Requirement 100／Task 364」，即已對 yuanta 讓過一次號。）
 > - 注意：`scripts/spec-check.sh` 的 B1 撞號檢查以 `git merge-base HEAD origin/main` 三方比對，**結構上看不到任何尚未 merge 的平行 worktree**，因此 `BLOCK: 0` 不足以證明沒撞號；編號前必須另行掃描全機 worktree。
 
 **User Story:** 作為程式碼審查者與規格稽核者（含 `spec-auditor`／`arch-auditor` 兩支唯讀 subagent），我要求版控中的 `db/schema.sql` 與運行中 `asset-postgres` 的 schema 保持同步，且一旦不同步就在 `scripts/spec-check.sh` 被機械指出來；我不必再靠散落在各處、彼此矛盾的「這個檔已知落後」註記自行判斷哪一段可信。
