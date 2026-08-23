@@ -309,6 +309,24 @@ skill 有沒有自己宣告：`/commit-merge-push` 沒宣告 → 繼承主 agent
 - 歷史快照的匯總欄位（`asset_snapshot` 的 `total_*`，供歷史回溯）
 - 歷史交易記錄中的名稱字串（如 `realized_gain.broker`，記錄成交當下的券商名稱）
 
+### `db/schema.sql` 是 DB schema 的唯一標準（Requirement 104／Task 368）
+
+**表存在與否、欄位、型別、位數、nullable、預設值、CHECK、索引，一律以 `db/schema.sql` 為準。**
+它與運行中 DB 的同步由 `scripts/spec-check.sh` 的 B10 機械查核（B10 呼叫
+`scripts/tests/schema-sql-drift-test.sh` 逐位元全文比對）。
+
+**發現它與運行中 DB 不一致，就是這個檔過期——依它檔頭「重新產生」段的指令重產本檔，
+並把它納入本次變更**，不要改用別的來源當基準，也不需要再拿別的來源複驗一次。任務若動到
+`backend/src/main/resources/db/changelog/**`，收尾步驟就必須包含重產本檔。
+
+**`db/changelog/**` 一律不得用於描述 schema 現況**——Liquibase 只做增量，那裡還有永不執行的
+changeset，照它去斷言 schema 會把原本正確的說成錯的（Task 148→197→201 花了 53 個 Task 才發現）。
+`databasechangelog` 資料表的正當用途限縮為「某個 migration 有沒有執行過／某個版號有沒有被
+佔用」，那不是 schema 形貌問題。
+
+> B10 是 lagging 檢查、跑在實作**之前**：剛動過 `db/changelog/**` 的當下本檔可能尚未重產，
+> 此時在本檔查不到某張表，代表**本檔過期需要重產**。
+
 ### 禁止 Enum 寫死
 所有業務分類（銀行、券商、存款類型、市場類型）**必須存入資料庫**，由 `DataInitializer` 提供 Seed Data，並提供 `/api/settings/*` 管理端點與前端設定頁面。
 
@@ -381,9 +399,9 @@ cd frontend
 
 | 文件 | 說明 |
 |------|------|
-| `spec/requirements.md` | User Stories + Acceptance Criteria（102 個 Requirements；最新為 103） |
+| `spec/requirements.md` | User Stories + Acceptance Criteria（103 個 Requirements；最新為 104） |
 | `spec/design.md` | 架構圖、ERD、API 端點、關鍵業務邏輯 |
-| `spec/tasks.md` | 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–365、367）＋尚未歸檔的 Task 201 起區段；Task 229–263、268、293–296 以各自 `spec/tasks/tNNN_*.md` 為準 |
+| `spec/tasks.md` | 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–365、367–368）＋尚未歸檔的 Task 201 起區段；Task 229–263、268、293–296 以各自 `spec/tasks/tNNN_*.md` 為準 |
 | `spec/tasks/README.md` | 自足任務檔規範（新任務寫這裡，不再追加 `tasks.md`） |
 | `spec/tasks/tNNN_*.md` | 自足任務檔（Task 201 之後的新任務） |
 | `spec/tasks/archive/` | Task 1–200 歷史，已凍結不再修改 |

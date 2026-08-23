@@ -21,7 +21,7 @@ tools: Read, Grep, Glob, Bash
 ## 查證前務必知道的專案陷阱
 
 - **`grep -r` 會靜默跳過部分 `.java`。** `AlertNotificationDispatcher`、`PerformanceComparisonService` 等檔被 `file(1)` 判定為 data，普通 `grep -r` 整檔跳過，會讓你誤判「零呼叫端」。**一律用 `grep -ran`。**
-- **DB 現況的離線查證依據是 `db/schema.sql`（pg_dump），不是 `db/changelog/**`。** `db/schema.sql` 由 `scripts/spec-check.sh` B10 機械查核與運行中 DB 的同步（`scripts/tests/schema-sql-drift-test.sh` 逐位元比對），可作為欄位型別／位數／nullable／預設值／索引的離線查證依據。但它反映的是**運行中 DB**，而運行中 DB 可能含其他 worktree 尚未 merge 的 changeset；涉及「main 現況」的斷言仍須以 `docker exec asset-postgres psql -U assets -d assets -c '\d <table>'` 並比對 `databasechangelog` 尾端複驗。**B10 還是 lagging 檢查**——它跑在實作**之前**，剛動過 `db/changelog/**` 的當下該檔可能尚未重產，在裡面查不到某張表不等於它不存在。`db/changelog/**` 一律不得用於描述現況——Liquibase 只做增量，那裡還有永不執行的 changeset；照它去斷言 schema，會把原本正確的說成錯的（Task 148→197→201 花了 53 個 Task 才發現）。
+- **`db/schema.sql`（pg_dump）是 DB schema 的唯一標準，不是 `db/changelog/**`。** 表存在與否、欄位、型別、位數、nullable、預設值、CHECK、索引**一律以 `db/schema.sql` 為準**；它與運行中 DB 的同步由 `scripts/spec-check.sh` 的 B10 機械查核（`scripts/tests/schema-sql-drift-test.sh` 逐位元全文比對）。**發現本檔與運行中 DB 不一致，就是這個檔過期**——處置是把「`db/schema.sql` 已漂移、需依它檔頭的指令重產」列為 finding，**不要**改用 `db/changelog/**` 或運行中 DB 當基準改寫斷言。**B10 是 lagging 檢查**——它跑在實作**之前**，剛動過 `db/changelog/**` 的當下本檔可能尚未重產；此時在本檔查不到某張表，代表**本檔過期需要重產**。`db/changelog/**` 一律不得用於描述現況——Liquibase 只做增量，那裡還有永不執行的 changeset；照它去斷言 schema，會把原本正確的說成錯的（Task 148→197→201 花了 53 個 Task 才發現）。
 - **`spec/requirements.md` 的 `- [ ]` 不具完成語意。** 該檔未勾選項遠多於已勾選（實測 733 對 66），checkbox 在那份文件裡不是進度標記——見該檔開頭的文件慣例說明。**不要拿它當「未實作」的證據**；要確認實作狀態就去 grep 程式碼。要重新推導比例：`grep -c '^\s*- \[ \]' spec/requirements.md`。
 - **新功能尚未實作的識別字是合法的。** 你要區分「對現況的錯誤斷言」與「對未來的正當描述」——前者是 critical，後者不是 finding。
 
@@ -34,7 +34,7 @@ tools: Read, Grep, Glob, Bash
 | **可查證性** | 0.30 | diff 裡描述**既有事實**的 CamelCase 類名、`/api/...` 路徑、`.vue` 檔名、方法名，逐一 `grep -ran` 全樹是否存在。前例：Task 61 宣稱的 `WatchListService`／`WatchListController`／`/api/watch-list` **四項全部從未存在**；`design.md` 的 `UsaMap`（實為 `UsFlag`）、Gateway `GlobalFilter`（實為 `WebClientConfig.tenantHeaderFilter()`）、`FundDividendSourceQuery`（實為 `FundNavSourceQuery`）。 |
 | **內部一致性** | 0.25 | 同一份文件的表格 vs 敘述、標題 vs 內文、ERD vs 表清單是否打架。前例：`design.md` 的 API 表仍列 Task 179 已移除的 `webSearchMaxUses`，而**同一節的敘述已寫「Task 179 移除」**；Requirement 31 標題寫「每交易日 08:45」但 AC 內文早已改為可設定。 |
 | **架構鐵則** | 0.25 | 見下方檢查表。違反 `CLAUDE.md`／`spec/steering/structure.md` 的既有規範。 |
-| **資料來源正確性** | 0.20 | 即時價只能從 Redis、收盤價只讀 `stock_price_history`、business-services 不直連外部行情 API；對 DB 現況的斷言以 `db/schema.sql` 為離線查證依據（由 `scripts/spec-check.sh` B10 機械查核與運行中 DB 的同步），但它反映的是**運行中 DB**、可能含其他 worktree 尚未 merge 的 changeset，涉及「main 現況」的斷言仍須以 `psql -c '\d <table>'` 加 `databasechangelog` 尾端複驗，`db/changelog/**` 一律不得用於描述現況；已改為 DB 可設定的排程時點不得在 spec 裡寫死成字面時間（Task 195：「寫死正是本次漂移成因」）。 |
+| **資料來源正確性** | 0.20 | 即時價只能從 Redis、收盤價只讀 `stock_price_history`、business-services 不直連外部行情 API；對 DB schema 形貌（表／欄位／型別／位數／nullable／預設值／CHECK／索引）的斷言一律以 `db/schema.sql` 為**唯一標準**（由 `scripts/spec-check.sh` B10 機械查核與運行中 DB 的同步），發現它與運行中 DB 不一致即代表本檔過期，處置是把「需依其檔頭指令重產」列為 finding、而非改用別的來源改寫斷言，`db/changelog/**` 一律不得用於描述現況；已改為 DB 可設定的排程時點不得在 spec 裡寫死成字面時間（Task 195：「寫死正是本次漂移成因」）。 |
 
 ## 架構鐵則檢查表（是非題，逐條答）
 

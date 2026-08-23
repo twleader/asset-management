@@ -206,7 +206,7 @@ done
 # 地雷讓本項恆不觸發；grep -c 會讀完全部輸入，也不會對上游造成 SIGPIPE）。
 b8_hit=$(added_lines 'spec/**' | grep -cE 'db/changelog/.*\.sql' || true)
 if [ "${b8_hit:-0}" -gt 0 ]; then
-  check "spec 引用了 db/changelog/*.sql —— 若用途是描述 DB 現況即為錯誤基準線（Task 148→197→201 的教訓：照永不執行的 changelog 改，反而改成與 DB 不一致）。現況一律以運行中 DB 為準：docker exec asset-postgres psql -U assets -d assets -c '\\d <table>'。db/schema.sql 由 B10 機械查核與運行中 DB 的同步，可用來查欄位型別／位數／nullable／索引；但運行中 DB 可能已套用其他 worktree 尚未 merge 的 changeset，涉及「main 現況」的斷言仍須複驗 databasechangelog 尾端。若本次引用只是「新 changeset 放哪／現有最大版號」則屬正當用途，可忽略本項。"
+  check "spec 引用了 db/changelog/*.sql —— 若用途是描述 DB 現況即為錯誤基準線（Task 148→197→201 的教訓：照永不執行的 changelog 改，反而改成與 DB 不一致）。db/schema.sql 是 DB schema 的唯一標準：表存在與否、欄位、型別、位數、nullable、預設值、CHECK、索引一律以它為準，它與運行中 DB 的同步由 B10 機械查核。發現它與運行中 DB 不一致，就是這個檔過期——依它檔頭「重新產生」段的指令重產本檔並納入本次變更，不要改用別的來源當基準。若本次引用只是「新 changeset 放哪／現有最大版號」則屬正當用途，可忽略本項。"
 fi
 
 # ── 摘要 ──────────────────────────────────────────────────────────
@@ -225,12 +225,13 @@ else
 fi
 
 # ── B10. db/schema.sql 稽核基準線是否仍等於運行中 DB ──────────────
+# db/schema.sql 是 DB schema 的唯一標準：不一致＝這個檔過期＝依其檔頭指令重產。
 # lagging 檢查：spec-check 跑在實作「之前」，漂移產生於實作「之後」，所以這裡攔到的是
-# 「上一輪沒重產的漂移」。全機多個 worktree 共用同一套 asset-postgres，別人跑過 /run-stack
-# 就會把它尚未 merge 的 changeset 套進共用 DB，因此必須依「本次變更有沒有碰 schema」分流，
-# 否則與 schema 無關的任務會被別人造成的漂移擋下，最後全體繞過閘門。
+# 「上一輪沒重產的漂移」。嚴重度依「本次變更有沒有碰 schema」分流，理由有二：一律 BLOCK
+# 會讓與 schema 無關的任務被頻繁中斷（本專案兩週就 land 二十餘支 changeset），最後全體
+# 繞過閘門；且 db/schema.sql 是 4600+ 行的產物檔，逼多條分支同時重產會製造大量 merge 衝突。
 DRIFT_TEST='scripts/tests/schema-sql-drift-test.sh'
-DRIFT_HINT='處置：先查 SELECT filename FROM databasechangelog ORDER BY orderexecuted DESC LIMIT 5（注意是 filename 欄、不是 id 欄——一個 .sql 可含多個 changeset id），逐一 git cat-file -e origin/main:<該檔> 確認是否都在 origin/main；查無時先排除「版號避讓」情形（本專案一年 12 次避讓，改 id 會讓 Liquibase 重跑，DB 會留下同 slug、僅差一個 minor 版號的舊紀錄，那不算未 merge 的 schema）。確認確有 main 沒有的 schema 物件才停下回報，不得以重產把別人未 merge 的 schema 帶進 main。'
+DRIFT_HINT='處置：依 db/schema.sql 檔頭「重新產生」段的指令重產本檔，並把它納入本次變更。'
 if [ ! -f "$DRIFT_TEST" ]; then
   block "缺 $DRIFT_TEST，db/schema.sql 無機械防漂移"
 else
@@ -244,7 +245,7 @@ else
       if printf '%s\n' "$DIFF_FILES" | grep -qE '^db/schema\.sql$|^backend/src/main/resources/db/changelog/'; then
         block "db/schema.sql 未通過漂移檢查（成因見上方完整訊息）——本次變更已碰到 schema／changelog，須先處理。$DRIFT_HINT"
       else
-        check "db/schema.sql 未通過漂移檢查（成因見上方完整訊息）。本次變更未碰 schema／changelog，漂移可能來自其他 worktree 尚未 merge 的 changeset。$DRIFT_HINT"
+        check "本次變更未碰 schema／changelog，但 db/schema.sql 未通過漂移檢查（成因見上方完整訊息）。$DRIFT_HINT"
       fi
       ;;
   esac

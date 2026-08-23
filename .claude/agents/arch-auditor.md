@@ -39,7 +39,7 @@ tools: Read, Grep, Glob, Bash
 
 ## 查證前務必知道的專案陷阱
 
-- **DB 現況不要查 `db/changelog/**`；`db/schema.sql` 則可用於離線查證。** Liquibase 只做增量，`db/changelog/**` 還有永不執行的 changeset，一律不得用於描述現況。`db/schema.sql` 由 `scripts/spec-check.sh` B10 機械查核與運行中 DB 的同步（`scripts/tests/schema-sql-drift-test.sh` 逐位元比對），可作為欄位型別／位數／nullable／預設值／索引的離線查證依據；但它反映的是**運行中 DB**，而運行中 DB 可能含其他 worktree 尚未 merge 的 changeset，涉及「main 現況」的斷言仍須以 `docker exec asset-postgres psql -U assets -d assets -c '\d <table>'` 並比對 `databasechangelog` 尾端複驗。**另外，B10 是 lagging 檢查**（跑在實作**之前**），而你的時機在實作**之後**——剛動過 `db/changelog/**` 的那個視窗裡該檔很可能尚未重產，此時在裡面查不到某張表**不等於**它不存在，一律以 `psql` 複驗。查不到（容器沒跑）就在報告寫「無法查證」，**不要用 changelog 推測**。
+- **DB 現況不要查 `db/changelog/**`；`db/schema.sql` 是 DB schema 的唯一標準。** Liquibase 只做增量，`db/changelog/**` 還有永不執行的 changeset，一律不得用於描述現況。表存在與否、欄位、型別、位數、nullable、預設值、CHECK、索引**一律以 `db/schema.sql` 為準**；它與運行中 DB 的同步由 `scripts/spec-check.sh` 的 B10 機械查核（`scripts/tests/schema-sql-drift-test.sh` 逐位元全文比對）。**另外，B10 是 lagging 檢查**（跑在實作**之前**），而你的時機在實作**之後**——剛動過 `db/changelog/**` 的那個視窗裡本檔可能尚未重產；此時在本檔查不到某張表，代表**本檔過期**，處置是把「`db/schema.sql` 已漂移、需依它檔頭的指令重產」列為 finding，不要改用別的來源當基準改寫斷言。查不到（容器沒跑）就在報告寫「無法查證」，**不要用 changelog 推測**。
 - **新功能尚未接上的識別字是合法的。** 要區分「違反架構」與「這一版還沒寫完」——後者不是架構 finding。
 - **`- [ ]` 在 `spec/requirements.md` 不具完成語意**，不要拿它當「未實作」的證據。
 
@@ -148,5 +148,5 @@ critical: N   major: N   minor: N
 - 不要全樹掃描後把既有技術債當成本次 finding。
 - 不要發明 `CLAUDE.md`／`structure.md` 沒寫的規範，也不要提風格與可讀性建議。
 - 不要重做 `spec-auditor` 的事（審 `spec/` 文件本身的可查證性與一致性）——你審的是**程式碼**。
-- 不要用 `db/changelog/**` 推測 DB 現況（`db/schema.sql` 可用於離線查證，它由 `spec-check.sh` B10 機械查核與運行中 DB 的同步；但 B10 跑在實作**之前**、你跑在實作**之後**，剛動過 changelog 的當下該檔可能尚未重產，涉及「main 現況」或新表存在與否的斷言仍須以 `psql` 加 `databasechangelog` 尾端複驗）。
+- 不要用 `db/changelog/**` 推測 DB 現況（`db/schema.sql` 是 DB schema 的唯一標準，它由 `spec-check.sh` B10 機械查核與運行中 DB 的同步；B10 跑在實作**之前**、你跑在實作**之後**，剛動過 changelog 的當下本檔可能尚未重產，此時查不到某張表代表本檔過期，處置是把「需依其檔頭指令重產」列為 finding）。
 - 不要宣告「通過／不通過」或給分數。

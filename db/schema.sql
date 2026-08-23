@@ -2,11 +2,13 @@
 -- 資產管理系統 — Schema-only 基準線（純結構、**不含任何資料**）
 --
 -- 用途
---   供程式碼審查與規格稽核比對「Entity / Liquibase changelog / 實際 DB」三者是否一致。
---   在此檔納入版控之前，真正的基準線 db/init/01_dump.sql 因含真實個人財務資料而被
---   .gitignore 排除（資安 Requirement 29），導致任何從 git 取得原始碼的人（CI／新進成員／
---   稽核）都無法查證欄位位數與 nullable，此類問題永遠無法被驗證或回歸測試。本檔即為
---   該基準線「去除資料」後的可版控鏡像。
+--   本檔是 DB schema 的唯一標準，由 pg_dump --schema-only 直接自運行中的 asset-postgres
+--   產生（見下方「重新產生」段）。表存在與否、欄位、型別、位數、nullable、預設值、CHECK、
+--   索引一律以本檔為準，供程式碼審查與規格稽核比對「Entity / Liquibase changelog /
+--   實際 DB」三者是否一致。在此檔納入版控之前，含真實個人財務資料的 db/init/01_dump.sql
+--   因資安 Requirement 29 被 .gitignore 排除，任何從 git 取得原始碼的人（CI／新進成員／
+--   稽核）都無法查證欄位位數與 nullable，此類問題永遠無法被驗證或回歸測試。
+--   db/changelog/** 一律不得用於描述 schema 現況——那裡有永不執行的 changeset。
 --
 -- ⚠ 本檔「不會」被執行
 --   它刻意放在 db/ 而非 db/init/。docker-compose 只把 ./db/init 掛進
@@ -36,8 +38,12 @@
 --   檔頭後「全文」比對，不是只比表名），並由 scripts/spec-check.sh 的 B10 實際執行。
 --   這是 lagging 檢查：spec-check 跑在實作「之前」，schema 漂移卻產生於實作「之後」，
 --   因此改動 schema 後未重產本檔，會在「下一次」spec-check 被機械指出，而不是當場攔下。
---   運行中的 asset-postgres 是多個 worktree 共用的可變狀態，別人尚未 merge 的 changeset
---   也會出現在其中；涉及「main 現況」的斷言仍須複驗 databasechangelog 尾端。
+--   剛動過 db/changelog/** 的當下本檔可能尚未重產，此時在本檔查不到某張表，代表本檔過期
+--   需要重產（不確定時跑 bash scripts/tests/schema-sql-drift-test.sh：回 0 就是本檔新鮮、
+--   該表確實不存在）。發現本檔與運行中 DB 不一致，唯一的處置是依上方
+--   「重新產生」段的指令重產本檔並納入本次變更，不要改用別的來源當基準。運行中的
+--   asset-postgres 是多個 worktree 共用的可變狀態，本檔因此可能短暫含尚未 merge 的表；
+--   那不影響它的標準地位——那些 changeset 其後都會 land，本檔的下一次重產也會自動收斂。
 --
 -- 產生資訊：PostgreSQL 16.14 / pg_dump 16.14，來源 asset-postgres 容器，2026-08-23
 -- 產生當下表數：85 張 CREATE TABLE（對照：SELECT count(*) FROM pg_tables WHERE schemaname='public';）
