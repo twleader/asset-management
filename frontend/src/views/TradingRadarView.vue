@@ -8,6 +8,7 @@
       <div class="header-actions">
         <el-button :icon="Download" @click="openExport">匯出 Excel</el-button>
         <el-button :icon="Refresh" :loading="refreshing" @click="manualRefresh">重新整理</el-button>
+        <el-button v-if="auth.isConfiguredAdmin" :icon="Promotion" :loading="publishingBlog" @click="onPublishBlog">匯出到 blog</el-button>
       </div>
     </div>
 
@@ -926,6 +927,61 @@
       </div>
     </el-card>
 
+    <!--
+      匯出到 blog（Requirement 102 / Task 366）：把交易雷達精簡摘要公開發布到 twleader.blogspot.com。
+      僅「主要管理者」可見可設——blog 是全機唯一、綁定特定 Google 帳號的目的地。真正的閘門在後端。
+    -->
+    <el-card v-if="auth.isConfiguredAdmin" id="blog-publish-card" shadow="never" class="sched-card">
+      <template #header>
+        <div class="card-head">
+          <span class="card-title">匯出到 Blog 設定</span>
+          <span class="card-sub">交易雷達精簡摘要公開發布到 {{ blogStatus.blogUrl || 'https://twleader.blogspot.com/' }}</span>
+        </div>
+      </template>
+
+      <el-alert
+        type="warning"
+        :closable="false"
+        show-icon
+        class="sched-note"
+        description="發布內容為公開頁面，任何人皆可瀏覽，內容含個股代號、三軌分數與加減碼建議；請確認您了解此為公開行為。"
+      />
+
+      <template v-if="!blogStatus.connected">
+        <div class="dialog-note dir-hint">尚未連接 Blogger 帳號，請先完成連接才能發布。</div>
+        <div class="sched-actions">
+          <el-button type="primary" :loading="connectingBlog" @click="onConnectBlog">連接 Blogger 帳號</el-button>
+        </div>
+      </template>
+      <template v-else>
+        <div class="sched-row">
+          <span class="dir-label">已連接：{{ blogStatus.accountLabel || '（未知帳號）' }}</span>
+          <el-button type="danger" plain :loading="disconnectingBlog" @click="onDisconnectBlog">中斷連接</el-button>
+        </div>
+
+        <div class="sched-row">
+          <span class="dir-label">同步發布到 blog</span>
+          <el-switch
+            v-model="blogStatus.blogEnabled"
+            :loading="savingBlogEnabled"
+            @change="onToggleBlogEnabled"
+          />
+          <span class="switch-note">沿用上方〔匯出執行時間設定〕的執行時間點</span>
+        </div>
+
+        <div class="dialog-note dir-hint">
+          上次發布：
+          <template v-if="blogStatus.lastRunAt">
+            {{ formatTime(blogStatus.lastRunAt) }} — {{ blogStatus.lastStatus || '—' }}
+          </template>
+          <template v-else>尚未發布過</template>
+          <template v-if="blogStatus.lastPostUrl">
+            <br>文章連結：<a :href="blogStatus.lastPostUrl" target="_blank" rel="noopener">{{ blogStatus.lastPostUrl }}</a>
+          </template>
+        </div>
+      </template>
+    </el-card>
+
     <el-dialog v-model="dirPicker.visible" :title="dirPickerTitle" width="560px">
       <div class="dir-picker-path">
         目前選擇：<code>{{ dirPickerPreview }}</code>
@@ -1087,14 +1143,14 @@
 </template>
 
 <script setup>
-import { Bell, Download, Plus, Refresh } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { Bell, Download, Plus, Promotion, Refresh } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import dayjs from 'dayjs'
 import { bffApi } from '@/api'
 import { showGdriveSelfCheckWarning } from '@/utils/gdriveSelfCheck'
 import { showDualExportResult } from '@/utils/dualExportMessage'
 import { useAuthStore } from '@/stores/authStore'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
 import TaiwanMap from '@/components/TaiwanMap.vue'
 import UsFlag from '@/components/UsFlag.vue'
@@ -1102,6 +1158,7 @@ import { isClosePending, marketToday, mergeSseQuote } from '@/utils/displayQuote
 import { projectValuationEvidence } from '@/utils/valuationEvidence'
 
 const router = useRouter()
+const route = useRoute()
 const loading = ref(false)
 const refreshing = ref(false)
 const exporting = ref(false)
@@ -1125,6 +1182,21 @@ const dirPicker = reactive({
 })
 const dirTreeProps = { label: 'name', isLeaf: 'leaf' }
 const auth = useAuthStore()
+
+// 匯出到 blog（Requirement 102 / Task 366）：發布到 twleader.blogspot.com，僅主要管理者可見可用
+const publishingBlog = ref(false)
+const connectingBlog = ref(false)
+const disconnectingBlog = ref(false)
+const savingBlogEnabled = ref(false)
+const blogStatus = reactive({
+  connected: false,
+  accountLabel: '',
+  blogUrl: 'https://twleader.blogspot.com/',
+  blogEnabled: false,
+  lastRunAt: null,
+  lastStatus: null,
+  lastPostUrl: null
+})
 
 const dirPickerTitle = computed(() =>
   dirPicker.mode === 'gdrive' ? '選擇 Google Drive 資料夾' : '選擇輸出資料夾')
@@ -1802,9 +1874,122 @@ function confirmDirPick() {
   dirPicker.visible = false
 }
 
+// ===== 匯出到 blog（Requirement 102 / Task 366）=====
+
+async function loadBlogStatus() {
+  if (!auth.isConfiguredAdmin) return
+  try {
+    const res = await bffApi.tradingRadar.getBlogStatus()
+    if (res) Object.assign(blogStatus, res)
+  } catch {
+    // 錯誤訊息由 axios 攔截器統一處理
+  }
+}
+
+// 頁首〔匯出到 blog〕＝立即發布/更新一次，屬「發布公開內容」，每次手動觸發都要先跳確認對話框
+async function onPublishBlog() {
+  let status
+  try {
+    status = await bffApi.tradingRadar.getBlogStatus()
+  } catch {
+    return
+  }
+  if (!status?.connected) {
+    ElMessage.warning('尚未連接 Blogger 帳號，請先於下方設定卡完成連接')
+    document.getElementById('blog-publish-card')?.scrollIntoView({ behavior: 'smooth' })
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      '即將把交易雷達目前結果公開發布/更新到 https://twleader.blogspot.com/，任何人皆可瀏覽，內容含個股代號、三軌分數與加減碼建議，確定要發布嗎？',
+      '公開發布確認',
+      { confirmButtonText: '確定發布', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch {
+    return   // 使用者取消，不送出任何請求、不顯示錯誤訊息
+  }
+  publishingBlog.value = true
+  try {
+    const res = await bffApi.tradingRadar.publishBlog()
+    ElMessage({
+      type: 'success',
+      dangerouslyUseHTMLString: true,
+      message: res?.postUrl
+        ? `發布成功：<a href="${res.postUrl}" target="_blank" rel="noopener">${res.postUrl}</a>`
+        : '發布成功'
+    })
+    loadBlogStatus().catch(() => {})
+  } catch {
+    // 錯誤訊息由 axios 攔截器統一處理
+  } finally {
+    publishingBlog.value = false
+  }
+}
+
+async function onConnectBlog() {
+  connectingBlog.value = true
+  try {
+    const res = await bffApi.tradingRadar.getBlogAuthorizeUrl()
+    if (res?.url) window.location.href = res.url
+  } catch {
+    // 錯誤訊息由 axios 攔截器統一處理
+  } finally {
+    connectingBlog.value = false
+  }
+}
+
+async function onDisconnectBlog() {
+  try {
+    await ElMessageBox.confirm(
+      '確定要中斷 Blogger 帳號連接嗎？中斷後「同步發布到 blog」會需要重新連接才能再次發布。',
+      '確認中斷連接',
+      { type: 'warning' }
+    )
+  } catch {
+    return
+  }
+  disconnectingBlog.value = true
+  try {
+    await bffApi.tradingRadar.disconnectBlog()
+    ElMessage.success('已中斷 Blogger 帳號連接')
+    await loadBlogStatus()
+  } catch {
+    // 錯誤訊息由 axios 攔截器統一處理
+  } finally {
+    disconnectingBlog.value = false
+  }
+}
+
+async function onToggleBlogEnabled(enabled) {
+  savingBlogEnabled.value = true
+  try {
+    const res = await bffApi.tradingRadar.setBlogEnabled(enabled)
+    if (res) Object.assign(blogStatus, res)
+  } catch {
+    blogStatus.blogEnabled = !enabled   // 失敗要復原開關，不能讓畫面顯示與後端實際狀態不一致
+  } finally {
+    savingBlogEnabled.value = false
+  }
+}
+
+// 連接／發布完成後由後端 302 導回本頁並帶 blogOauth／reason query；顯示一次訊息後清掉，
+// 避免使用者重新整理頁面時重複跳出
+function handleBlogOauthRedirect() {
+  const { blogOauth, reason } = route.query
+  if (!blogOauth) return
+  if (blogOauth === 'connected') {
+    ElMessage.success('已成功連接 Blogger 帳號')
+  } else if (blogOauth === 'error') {
+    ElMessage.error('連接 Blogger 帳號失敗：' + (reason || '未知原因'))
+  }
+  router.replace({ query: { ...route.query, blogOauth: undefined, reason: undefined } })
+}
+
 onMounted(() => {
   load(false).catch(() => {}).finally(openPriceStream)
   loadExportSchedule().catch(() => {})
+  loadBlogStatus().catch(() => {})
+  handleBlogOauthRedirect()
 })
 
 onUnmounted(() => {

@@ -86,4 +86,38 @@ public class TradingRadarExportSetting {
 
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
+
+    // ── 發布到 Blog（Requirement 102 / Task 366，changeset v1.112.0）─────────────
+    // 與上方 gdrive_* 五欄語意平行但彼此獨立：本機／Drive／Blog 三個輸出通道各自成敗，
+    // 一個通道失敗不得覆蓋另一個通道的狀態欄。
+
+    /**
+     * 是否啟用「排程自動發布到 Blog」。沿用既有〔匯出執行時間設定〕的時間點
+     * （{@link TradingRadarExportTime}），不另外開一套 Blog 專屬排程時間 UI。
+     *
+     * <p>與 {@link #gdriveEnabled} 相同的權限模型：blog 全機唯一、綁定特定 Google 帳號
+     * （{@code shi.chihung@gmail.com}），只有主要管理者可啟用，判定走
+     * {@code BlogPublishOutputSupport.isBlogAllowedFor}。
+     */
+    @Column(name = "blog_enabled", nullable = false)
+    private boolean blogEnabled;
+
+    /** 已發布文章的 Blogger post id；null 代表尚未發布過（下次發布走建立而非更新）。 */
+    @Column(name = "blog_last_post_id", length = 64)
+    private String blogLastPostId;
+
+    /** 已發布文章的公開網址，供設定頁顯示可點擊連結。 */
+    @Column(name = "blog_last_post_url", length = 512)
+    private String blogLastPostUrl;
+
+    /** 上次 Blog 發布的<b>判斷</b>時間（含成功／失敗，不含「查無快照未執行」）。 */
+    @Column(name = "blog_last_run_at")
+    private LocalDateTime blogLastRunAt;
+
+    /**
+     * 上次 Blog 發布結果。<b>與 {@link #lastRunStatus}／{@link #gdriveLastStatus} 刻意分離、
+     * 不得併入</b>：三個輸出通道的成敗必須各自可分辨。
+     */
+    @Column(name = "blog_last_status", length = 512)
+    private String blogLastStatus;
 }

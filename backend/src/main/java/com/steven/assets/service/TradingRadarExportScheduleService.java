@@ -68,6 +68,8 @@ public class TradingRadarExportScheduleService {
     private static final int STATUS_MAX = 500;
     /** {@code trading_radar_export_setting.gdrive_last_status} 的欄位上限（{@code varchar(512)}）。 */
     private static final int GDRIVE_STATUS_MAX = 512;
+    /** {@code trading_radar_export_setting.blog_last_status} 的欄位上限（{@code varchar(512)}）。 */
+    private static final int BLOG_STATUS_MAX = 512;
     /** 背景重算失敗且當日確實零快照時的降級終點（Task 260）。 */
     static final String NO_SNAPSHOT_STATUS = "當日尚無快照，未產檔";
     /** 非台股交易日時的狀態文字（休市日不產檔，Task 260）。 */
@@ -87,6 +89,9 @@ public class TradingRadarExportScheduleService {
     private final TradingRadarService radarService;
     private final PriceQueryService priceQueryService;
     private final MarketDataService marketDataService;
+    // 排程整合「發布到 Blog」（Requirement 102 / Task 366）：本機／Drive 產出流程完全不動，
+    // 只在 runScheduled 最後追加這一步；run-now 刻意不觸發（見 runNow 的既有語意）。
+    private final BlogPublishService blogPublishService;
 
     private final AtomicBoolean ticking = new AtomicBoolean(false);
 
@@ -102,7 +107,8 @@ public class TradingRadarExportScheduleService {
                                             @Value("${EXPORT_OUTPUT_DIR:/home/steven}") String baseDir,
                                             TradingRadarService radarService,
                                             PriceQueryService priceQueryService,
-                                            MarketDataService marketDataService) {
+                                            MarketDataService marketDataService,
+                                            BlogPublishService blogPublishService) {
         this.timeRepo = timeRepo;
         this.settingRepo = settingRepo;
         this.exportService = exportService;
@@ -116,6 +122,7 @@ public class TradingRadarExportScheduleService {
         this.radarService = radarService;
         this.priceQueryService = priceQueryService;
         this.marketDataService = marketDataService;
+        this.blogPublishService = blogPublishService;
     }
 
     // ===== 設定 CRUD（HTTP 路徑）=====
@@ -284,8 +291,8 @@ public class TradingRadarExportScheduleService {
         refreshPricesQuietly();
         recomputeQuietly(ownerId);
         try {
-            var r = writeDailyExport(ownerId, today);
-            if (r == null) {
+            var outcome = writeDailyExport(ownerId, today);
+            if (outcome == null) {
                 recordStatus(ownerId, NO_SNAPSHOT_STATUS);
                 // 沒產檔就完全不上傳（絕不上傳前一次的舊檔），但已啟用時仍寫狀態欄說明原因，
                 // 否則狀態會停在上一次的成功、顯示過期的好消息。
@@ -294,8 +301,10 @@ public class TradingRadarExportScheduleService {
                         null, 0L, NO_SNAPSHOT_STATUS + "（重算失敗且當日無既有快照）",
                         null, skipped == null ? null : skipped.status(), null, 0L, null);
             }
+            var r = outcome.write();
             recordStatus(ownerId, r.localStatus());
             applyGdriveStatus(ownerId, r);
+            // 366.9b：run-now 不觸發 blog 發布，維持既有語意（run-now 的用途是驗證本機／Drive 落點）。
             // 既有三欄語意不變：一律指 xlsx 那一份
             return new TradingRadarExportDto.RunNowResponse(
                     r.xlsxFile() == null ? null : r.xlsxFile().toString(),
@@ -423,17 +432,22 @@ public class TradingRadarExportScheduleService {
     private void runScheduled(TradingRadarExportTime t, LocalDate today) {
         long ownerId = t.getOwnerUserId();
         try {
-            var r = writeDailyExport(ownerId, today);
-            if (r == null) {
+            var outcome = writeDailyExport(ownerId, today);
+            if (outcome == null) {
                 recordStatus(ownerId, NO_SNAPSHOT_STATUS);
                 syncGdrive(ownerId, null, "當日無交易雷達快照");
                 log.info("交易雷達排程匯出略過（當日無快照）owner={} {}:{}",
                         ownerId, t.getRunHour(), t.getRunMinute());
+                // 366.9c：沒有快照可發布時不呼叫 blog 發布（比照既有 Drive 同步在無快照時的既有邏輯）。
             } else {
+                var r = outcome.write();
                 recordStatus(ownerId, r.localStatus());
                 applyGdriveStatus(ownerId, r);
                 log.info("交易雷達排程匯出 owner={} {}:{} → {}",
                         ownerId, t.getRunHour(), t.getRunMinute(), r.localStatus());
+                // Requirement 102 / Task 366：本機／Drive 產出流程完全不動，只在此追加 blog 發布這一步，
+                // 沿用同一輪已讀出的快照（outcome.latestSnapshot()），不得為此再查一次 Redis。
+                publishToBlogQuietly(ownerId, outcome.latestSnapshot());
             }
         } catch (Exception e) {
             recordStatus(ownerId, "失敗：" + e.getMessage());
@@ -451,19 +465,29 @@ public class TradingRadarExportScheduleService {
     // ===== 輔助 =====
 
     /**
+     * {@link #writeDailyExport} 的結果：本機／Drive 落檔結果 ＋ 該輪讀到的最新一筆原始快照
+     * （Requirement 102 / Task 366：供 {@link #runScheduled} 呼叫 blog 發布復用，不得為此
+     * 再查一次 Redis）。
+     */
+    private record DailyExportOutcome(
+            com.steven.assets.service.export.DualFormatExportWriter.DualResult write,
+            JsonNode latestSnapshot) {}
+
+    /**
      * 產出該 owner 當日（00:00～當下）快照的 Excel 並寫入其設定目錄，回傳實際落點；
      * <b>當日查無快照時回 {@code null} 且不寫檔</b>——呼叫端已在此之前先回補行情並重算一次
      * （Task 260），故此處查無快照代表「背景重算失敗且當日確實零快照」的降級終點，
      * 不再是常態路徑；若照寫會在使用者目錄留下只有表頭的無用檔，並蓋掉同名前一版。
      */
-    private com.steven.assets.service.export.DualFormatExportWriter.DualResult writeDailyExport(
-            long ownerId, LocalDate today) throws IOException {
+    private DailyExportOutcome writeDailyExport(long ownerId, LocalDate today) throws IOException {
         long fromEpoch = today.atStartOfDay(TW_ZONE).toInstant().toEpochMilli();
         long toEpoch = ZonedDateTime.now(TW_ZONE).toInstant().toEpochMilli();
 
-        if (snapshotStore.range(ownerId, fromEpoch, toEpoch).snapshots().isEmpty()) {
+        var range = snapshotStore.range(ownerId, fromEpoch, toEpoch);
+        if (range.snapshots().isEmpty()) {
             return null;
         }
+        JsonNode latestSnapshot = range.snapshots().get(range.snapshots().size() - 1);
 
         // 一次查詢取得 doc，再 render 兩種格式（不得為兩種格式各查一次 Redis 快照）
         var doc = exportService.radarDoc(ownerId, fromEpoch, toEpoch);
@@ -481,8 +505,35 @@ public class TradingRadarExportScheduleService {
         }
         String baseName = "交易雷達_" + ownerId + "_" + today.format(FILE_DATE);
         TradingRadarExportSetting cfg = settingRepo.findByOwnerUserId(ownerId).orElse(null);
-        return dualWriter.write(ownerId, resolveDir(currentSubpath(ownerId)), baseName, json, xlsx,
+        var writeResult = dualWriter.write(ownerId, resolveDir(currentSubpath(ownerId)), baseName, json, xlsx,
                 cfg != null && cfg.isGdriveEnabled(), cfg == null ? null : cfg.getGdriveSubpath());
+        return new DailyExportOutcome(writeResult, latestSnapshot);
+    }
+
+    /**
+     * 排程「發布到 Blog」（Requirement 102 / Task 366）：{@code blogEnabled} 為真時呼叫
+     * {@link BlogPublishService#publish}，沿用同一輪已讀出的快照。<b>永不讓例外往外逸出</b>
+     * ——影響本方法既有的 {@code finally} 收尾（{@code lastRunDate} 等）是絕對不允許的；
+     * {@link BlogPublishService#publish} 本身承諾永不擲出，這裡的 try/catch 是最後一道防線。
+     */
+    private void publishToBlogQuietly(long ownerId, JsonNode snapshot) {
+        try {
+            TradingRadarExportSetting s = settingRepo.findByOwnerUserId(ownerId).orElse(null);
+            if (s == null || !s.isBlogEnabled()) return;
+            blogPublishService.publish(ownerId, snapshot);
+        } catch (Exception e) {
+            log.warn("交易雷達排程 blog 發布失敗 owner={}：{}", ownerId, e.getMessage(), e);
+            try {
+                TradingRadarExportSetting s = settingRepo.findByOwnerUserId(ownerId).orElse(null);
+                if (s != null) {
+                    s.setBlogLastRunAt(LocalDateTime.now(TW_ZONE));
+                    s.setBlogLastStatus(truncate("失敗：" + e.getMessage(), BLOG_STATUS_MAX));
+                    settingRepo.save(s);
+                }
+            } catch (RuntimeException inner) {
+                log.error("寫入 blog 發布失敗狀態時再度失敗 owner={}", ownerId, inner);
+            }
+        }
     }
 
     private String currentSubpath(long ownerId) {

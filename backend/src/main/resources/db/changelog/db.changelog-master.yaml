@@ -368,3 +368,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/v1.111.0-dividend-event-uniqueness.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.112.0-trading-radar-blog-publish.sql
+      relativeToChangelogFile: false

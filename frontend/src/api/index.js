@@ -319,7 +319,13 @@ export const bffApi = {
     getNotification: (stockCode, market) =>
       api.get(`/bff/trading-radar/notifications/${encodeURIComponent(stockCode)}`, { params: { market } }),
     updateNotification: (stockCode, market, payload) =>
-      api.put(`/bff/trading-radar/notifications/${encodeURIComponent(stockCode)}`, payload, { params: { market } })
+      api.put(`/bff/trading-radar/notifications/${encodeURIComponent(stockCode)}`, payload, { params: { market } }),
+    // 匯出到 blog（Requirement 102 / Task 366）：發布到 twleader.blogspot.com，僅主要管理者可見可用
+    getBlogStatus: () => api.get('/bff/trading-radar/blog-status'),
+    getBlogAuthorizeUrl: () => api.get('/bff/trading-radar/blog-oauth/authorize-url'),
+    disconnectBlog: () => api.post('/bff/trading-radar/blog-oauth/disconnect'),
+    setBlogEnabled: (enabled) => api.put('/bff/trading-radar/blog-enabled', { enabled }),
+    publishBlog: () => api.post('/bff/trading-radar/blog-publish')
   },
 
   // AssetAllocationAdvice（資產配置建議，Requirement 32）
