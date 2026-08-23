@@ -3798,3 +3798,72 @@ FROM stock_price_history WHERE market='台股';
 - [ ] **AC7**：AC5／AC6 的清理範圍限於本需求背景段落所述、經運行中 DB 查詢與外部核對確認的既有列；若清理當下發現額外受影響標的，須比照同一查證流程處理並記入完成報告，不得因與樣本數不同而略過。
 - [ ] **AC8**：修正後的抓取邏輯（AC1）必須以固定 `Clock` 與構造回應的單元測試釘住：構造一筆 `stock_or_cache_dividend="權"` 的 fallback 列與（可選）一筆主表配股列，驗證前者不再產生 `stockDividend > 0` 的事件、後者（若存在）維持正常解析。
 - [ ] **AC9**：本需求不改變 `TaiwanStockDividendResult` 「息」型列（現金配息）的既有解析、落地與 ETF 覆蓋邏輯，也不改變 Requirement 97 已修正的抓取視窗（`end_date`／`anchorDate` 過濾）邏輯，兩者維持現狀。
+
+### Requirement 102／Task 366: `db/schema.sql` 稽核基準線必須與運行中 DB 機械同步——漂移須被 `spec-check.sh` 自動攔下
+
+> **編號說明（實測，2026-08-23，全機 56 個 worktree 逐一掃描）**：
+> - Requirement 100 由 `yuanta-securities-api-093d9b` 佔用、Requirement 101 由 `trading-radar-valuation-label-cadb86` 佔用，兩者皆未 merge，故本需求續編為 **102**。
+> - Task 364 由 `yuanta-securities-api-093d9b` 的 `spec/tasks/t364_yuanta_broker_service.md` 佔用（該 worktree 的 `spec/tasks.md` 已有 `| 364 |` 索引列）；Task 365 由 `trading-radar-valuation-label-cadb86` 的 `spec/tasks/t365_radar_valuation_label_fix.md` 佔用（該檔檔頭自述「編號原為 Requirement 100／Task 364」，已讓過一次號）。兩者皆未 merge，本需求依專案慣例一併避開，對應 **Task 366**。
+> - 注意：`scripts/spec-check.sh` 的 B1 撞號檢查以 `git merge-base HEAD origin/main` 三方比對，**結構上看不到任何尚未 merge 的平行 worktree**，因此 `BLOCK: 0` 不足以證明沒撞號；編號前必須另行掃描全機 worktree。
+
+**User Story:** 作為程式碼審查者與規格稽核者（含 `spec-auditor`／`arch-auditor` 兩支唯讀 subagent），我要求版控中的 `db/schema.sql` 與運行中 `asset-postgres` 的 schema 保持同步，且一旦不同步就在 `scripts/spec-check.sh` 被機械指出來；我不必再靠散落在各處、彼此矛盾的「這個檔已知落後」註記自行判斷哪一段可信。
+
+**背景（運行中系統實測，2026-08-23，`origin/main` 851268a8）。**
+
+`db/schema.sql` 檔頭自述用途是「供程式碼審查與規格稽核比對 Entity／Liquibase changelog／實際 DB 三者是否一致」，但它靠人工重產、無任何機械保證，實測已大幅漂移：
+
+- **表數**：`db/schema.sql` 只有 **74** 個 `CREATE TABLE`；運行中 DB（`SELECT tablename FROM pg_tables WHERE schemaname='public'`）為 **85** 張。
+- **缺 11 張表**，全部由已註冊進 `db.changelog-master.yaml` 且已套用的 changeset 建立，且多數正被交易雷達使用：
+  `treasury_yield_batch`／`treasury_yield_daily`（v1.92.0）、`stock_dividend_snapshot`／`stock_dividend_snapshot_event`／`stock_dividend_fetch_observation`（v1.94.0）、`etf_nav_observation`（v1.95.0）、`twse_institutional_daily`（v1.96.0）、`stock_dividend_fetch_attempt`（v1.100.0）、`export_schedule_time`（v1.102.0）、`commodity_export_schedule_time`（v1.103.0）、`realized_gain_export_schedule_time`（v1.104.0）。反向為空——**沒有任何一張表只存在於鏡像而不存在於 DB**。
+- **漂移不只是缺表，7 張既有表的欄位、預設值與索引也已不同**——只比對表名的檢查會漏掉這一整類：
+  - `commodity_price_history` 缺 `provider`／`fetched_at`／`source_available_at`／`source_url` 四欄、`CHECK ck_commodity_source_time` 與索引 `idx_commodity_price_available`
+  - `stock_dividend_history` 缺 `event_key`／`event_status`／`ex_rights_date` 三欄與索引 `idx_dividend_event_key`；`source` 實際已由 `varchar(50)` 放寬為 `varchar(128)`
+  - `stock_dividend_history` 的 `uk_dividend_event` 唯一索引在鏡像中仍是 **4 欄舊版**，運行中 DB 已是 **10 欄**（由 `v1.111.0-dividend-event-uniqueness.sql` 建立，較 `v1.99.0` 的 9 欄多一個 `COALESCE(ex_rights_date, …)`；`databasechangelog` 最新一筆即為 `v1.111.0`）
+  - `daily_market_analysis` 缺 `factor_groups`；`deposit_type` 缺 `withdrawal_order`；`market_analysis_setting` 缺 `engine` 且 `model` 預設值仍是已下架的 `claude-opus-4-8`（實際為 `claude-opus-5`）；`portfolio_advice_setting` 缺 `engine`；`trading_radar_notification_setting` 缺 `action_policy_version`
+- 依檔頭指令重產後，相對現檔的差異為 **新增 765 行、刪除 9 行**（9 行中 6 行是「原本的最後一欄少了逗號」這種純格式位移，3 行是上述 `source` 位數、`model` 預設值與舊版 `uk_dividend_event` 的真實變更）。
+
+**這份漂移正在造成稽核者誤判，而且兩支 auditor 的指引互相矛盾：**
+
+| 位置 | 現行文字 | 問題 |
+|---|---|---|
+| `.claude/agents/spec-auditor.md`「專案陷阱」與「資料來源正確性」維度 | 「DB 現況的**唯一基準**是 `db/schema.sql`」「對 DB 現況的斷言**必須引用** `db/schema.sql`」 | 明確要求審查者採信一份落後 11 張表的檔案 |
+| `.claude/agents/arch-auditor.md`「專案陷阱」與「不要做的事」 | 「也**不要盡信** `db/schema.sql`」「不要用……落後的 `db/schema.sql` 推測 DB 現況」 | 與上一列直接對立，同一份檔案在兩支 auditor 眼中一個是唯一基準、一個不可信 |
+| `scripts/spec-check.sh` B8 的 CHECK 文字 | 「`db/schema.sql` 只是離線鏡像、已知落後（Task 241 實測缺 `crawler_export_setting`／`asset_transaction`）」 | 舉的兩個例子**現在都已存在於鏡像中**，例子本身已過期 |
+| `spec/design.md`「Schema 基準線與 DB 層唯一鍵」 | 「截至 Task 245 它只有 **55** 張 `CREATE TABLE`」 | 相對現況（74 張）已過期 |
+| `spec/steering/structure.md` 的 `db/` 樹狀說明、`spec/tasks/README.md` 自足性自查段 | 同樣以 `crawler_export_setting`／`asset_transaction` 為「已落後」的例證 | 同上，例證已失效 |
+
+**根因是缺乏機械閘門，不是缺乏提醒。** 11 支任務檔各自寫過對本檔的告誡或反向引用，但**口徑從未統一**——`t231`／`t342`／`t356` 直接把它當基準線引用，`t242`／`t245`／`t287`／`t295`／`t330`／`t357`／`t360` 則記其落後。重產動作也做過至少兩次（Task 200.x 建檔、Task 204.9b 重產），但每次都是人工、事後、且只在有人恰好發現時才做。同期 Requirement 96 與 `spec/tasks/t360_radar_j_polarity_fix.md` 都把「`db/schema.sql` 與實際 schema 的漂移」列為「不處理，另案」。本需求即為該另案。
+
+**為什麼選 `scripts/spec-check.sh` 而不是 CI 或檔頭註記：** repo 內沒有 `.github/`，本專案不存在任何 CI runner，且 CI runner 也接觸不到本機的 `asset-postgres`；檔頭註記只是換一種人工比對，仍無強制力。`spec-check.sh` 是本專案唯一實際被每個任務跑到的機械證據閘門，且已有 B9（9090 gateway／OpenAPI 契約）以「呼叫 `scripts/tests/` 下的獨立測試腳本、依離開碼分流」的形式建立同型前例。檔頭註記（表數宣告）仍然採用，但降為腳本可離線自檢的一項附加條件，不作為主要機制。
+
+**本機制的兩項已知限制，刻意寫在需求裡而不是留給實作者發現：**
+
+1. **B10 是 lagging 檢查，不是 leading。** `scripts/spec-check.sh` 只在實作**之前**被呼叫（呼叫點僅 `.claude/skills/spec-review/SKILL.md`；`scripts/git-hooks/commit-msg` 只是在訊息裡提到它、並不執行），而 schema 漂移產生於實作**之後**（寫 changeset →`/run-stack` 套用）。因此 B10 攔得到的是「上一輪沒重產的漂移」，攔不到「這一輪即將產生的」。本需求接受這個限制：本專案每個任務都會跑 `spec-check`，漂移可望在數日內被發現，而非像本次累積 19 支 changeset。
+2. **運行中的 `asset-postgres` 是全機 56 個 worktree 共用的可變狀態。** 別的 worktree 只要跑過 `/run-stack`，它尚未 merge 的 changeset 就會套進共用 DB，使**與你無關的漂移**出現在你的 `spec-check`。本需求以 AC6 的嚴重度分流處理，不得靠「大家都重產一次」解決——那會把別人未 merge 的 schema 帶進 main。
+
+#### Acceptance Criteria
+
+- [ ] **AC1**：`db/schema.sql` 依其檔頭第 16–22 行載明的指令重新產生，並保留該檔頭區塊（重產只置換 `pg_dump` 本體）。產生指令固定為 `docker exec asset-postgres pg_dump -U assets -d assets --schema-only --no-owner --no-privileges`，輸出須濾除 `pg_dump` 16 帶隨機 token 的 `\restrict`／`\unrestrict` 兩行（`grep -v '^\\restrict\|^\\unrestrict'`；反斜線必須寫成 `\\`）。重產後檔案的 `CREATE TABLE` 張數須等於 `SELECT count(*) FROM pg_tables WHERE schemaname='public'`（動工當下實測為 85，但**以實跑值為準**，不得照抄本數字），且背景段列出的 11 張缺表與 7 張既有表的欄位／索引漂移全部消失。
+- [ ] **AC2**：`db/schema.sql` 檔頭的「產生資訊」必須同時載明**產生日期**與**產生當下的 `CREATE TABLE` 張數**，格式須讓「產生當下表數：<數字> 張」可被穩定 grep 出來，供人工翻閱時直接與 `SELECT count(*) FROM pg_tables WHERE schemaname='public'` 對照。
+- [ ] **AC3**：新增獨立可執行的漂移測試 `scripts/tests/schema-sql-drift-test.sh`，語意為「`db/schema.sql` 去除專案檔頭後，是否逐位元等於此刻重跑 `pg_dump` 的輸出」。比對必須是**全文比對**而非只比表名——背景段已證實漂移大量發生在欄位、預設值與索引定義上。檔頭與 `pg_dump` 本體的分界不得寫死行號，須以「第一個**整行等於** `-- PostgreSQL database dump` 的行」定位、本體起點為其前一行，且該前一行必須恰為 `--`，否則視為檔頭結構已被破壞並失敗（用整行相等而非 substring，才不會誤命中檔尾的 `-- PostgreSQL database dump complete`）。
+  已實測支撐本 AC：連跑兩次 `pg_dump`（濾除後）位元級完全相同，輸出中無 `setval`、無時間戳，故資料寫入不會讓比對失敗。**唯一的非 schema 變動來源是 `-- Dumped from database version` 與 `-- Dumped by pg_dump version` 兩行**：postgres 映像小版本升級（如 16.14→16.15）會讓 schema 一字未改也判為漂移。此情形不得靜默忽略，但腳本輸出必須明示「差異僅在 `pg_dump`／server 版本註解行，成因為映像升級，重產即可」，讓看到的人不必自行推敲。
+- [ ] **AC4**：`scripts/tests/schema-sql-drift-test.sh` 的離開碼必須三態可辨：`0`＝同步；`1`＝已證實漂移（含檔頭結構破壞、檔頭表數宣告不符）；`2`＝無法查證（`docker` 指令不存在、`asset-postgres` 未運行、或 `pg_dump` 失敗）。**所有 `docker`／`pg_dump` 呼叫都必須顯式捕捉離開碼並轉成 `2`**，不得依賴 `set -e` 的預設行為讓腳本以 docker 的離開碼（1／125）結束——那會被 AC6 的分流誤記為 BLOCK。漂移時的輸出必須可直接行動：至少列出「僅存在於運行中 DB 的表」「僅存在於 `db/schema.sql` 的表」與差異行數（新增／刪除各幾行），並附上完整的重產指令。
+- [ ] **AC5**：`scripts/tests/schema-sql-drift-test.sh` 同時驗證 AC2 的檔頭宣告張數等於檔案實際 `CREATE TABLE` 張數（防止有人手改檔案卻沒重產）。**檔頭缺少該宣告行、或宣告值與實際不符，一律以離開碼 `1` 失敗。** 這是純離線檢查，必須在任何 `docker` 呼叫**之前**執行並在失敗時直接回 `1`，不受容器是否運行影響（否則沒開 Docker 時會被 `2` 蓋掉）。
+- [ ] **AC6**：`scripts/spec-check.sh` 新增一項 **B10**，呼叫 AC3 的腳本並依離開碼與**歸屬**分流：
+  - 離開碼 `0` → 不輸出 BLOCK／CHECK。
+  - 離開碼 `2` → **CHECK**（無法查證）。不得升為 BLOCK——`spec-check.sh` 必須在 Docker 未啟動時仍可完整跑完。
+  - 離開碼 `1` → 依本次變更是否碰得到 schema 決定嚴重度：本分支的變更清單（`DIFF_FILES`，含未追蹤新檔）若含 `db/schema.sql` 或 `backend/src/main/resources/db/changelog/` 底下任何檔案 → **BLOCK**（漂移歸屬於你，必須先處理）；否則 → **CHECK**，訊息須明示「此漂移可能來自其他 worktree 尚未 merge 的 changeset；請先比對 `SELECT id FROM databasechangelog ORDER BY orderexecuted DESC LIMIT 5` 與本分支 `db.changelog-master.yaml` 尾端再決定是否重產，**不得**以重產把別人未 merge 的 schema 帶進 main」。
+  - 腳本檔不存在 → **BLOCK**。
+  - B10 的 fallback BLOCK／CHECK 訊息**不得寫死成「與運行中 DB 不一致」**——離開碼 `1` 也可能來自檔頭表數不符或檔頭結構破壞（此時本體與 DB 完全同步），須改為不指定成因、指向腳本的完整輸出。
+  - 這條分流是刻意的取捨：全機 56 個 worktree 共用一套 `asset-postgres`，不分流會讓與 schema 無關的任務被別人造成的漂移擋下，最後全體繞過閘門。
+- [ ] **AC7**：B10 不得與既有 B8 重複或衝突。B8 的主題是「spec 引用了 `db/changelog/*.sql` 描述 DB 現況」，維持 CHECK 不變；但其括號內對 `db/schema.sql` 的描述必須改寫——移除已過期的 `crawler_export_setting`／`asset_transaction` 例證，改述為「`db/schema.sql` 由 B10 機械檢查與運行中 DB 的同步，可用於查欄位型別／位數／nullable／索引」，並**新增**「運行中 DB 可能已套用其他 worktree 尚未 merge 的 changeset，涉及 main 現況的斷言仍須複驗 `databasechangelog`」這句警告（B8 現行文字**沒有**這一句，文字可取自 `spec/tasks/README.md` 既有段落）。
+- [ ] **AC8**：兩支 auditor 的矛盾指引必須一併消除：`.claude/agents/spec-auditor.md`（「專案陷阱」第 2 點、「審查維度」表的「資料來源正確性」列）與 `.claude/agents/arch-auditor.md`（「專案陷阱」第 1 點、「不要做的事」清單）四處改為同一套口徑——「`db/schema.sql` 由 `spec-check.sh` B10 機械檢查與運行中 DB 的同步，可作為欄位型別／位數／nullable／預設值／索引的離線查證依據；但它反映的是**運行中 DB**，而運行中 DB 可能含其他 worktree 尚未 merge 的 changeset，故涉及『main 現況』的斷言仍須以 `psql` 加 `databasechangelog` 複驗；`db/changelog/**` 一律不得用於描述現況」。不得留下任何一處仍寫「不可信」「不要盡信」或「唯一基準」的舊文字。
+- [ ] **AC9**：`spec/steering/structure.md` 的 `db/` 樹狀說明與 `spec/tasks/README.md` 的自足性自查段，兩處對 `db/schema.sql` 的描述同步改為 AC8 的口徑，並移除**把過期數字當現況**的敘述與 `crawler_export_setting`／`asset_transaction` 例證。**作為歷史脈絡的引用可以保留**（例如 `spec/design.md` 改寫後保留的「Task 245 當時僅 55 張 `CREATE TABLE`」），不得因本 AC 反過來把歷史脈絡刪掉。`spec/design.md` 該段已於本需求的 spec 階段改寫完成，實作階段只需複驗其敘述與最終落地的機制一致（含「B10 生效時點」的措辭不得對現況說謊）。
+- [ ] **AC10**：本需求**不**變更任何 Liquibase changeset、不新增資料表、不改任何 Entity、不改任何 API 或 9090／Tailscale 路由；`db/schema.sql` 仍維持「放在 `db/` 而非 `db/init/`、不參與 DB 初始化」的既有性質。
+  **也不改 `scripts/git-hooks/commit-msg` 的觸發清單**——把 `db/changelog/**` → 必須同 commit 附 `db/schema.sql` 加進 hook 確實能綁住「產生漂移的那一個 commit」（補上限制 1 的時間差），但那是使用者所列三個選項之外的第四種機制，本需求刻意只採用一種，避免同一件事有兩套閘門各自演化。作為不加 hook 的補償，`spec/tasks/README.md` 的自足性自查清單須新增一條：**任務若動到 `db/changelog/**`，收尾步驟必須包含重產 `db/schema.sql`**。
+- [ ] **AC11**：已完成的歷史任務檔（`spec/tasks/t231`／`t242`／`t245`／`t287`／`t295`／`t330`／`t342`／`t345`／`t356`／`t357`／`t360`）中對「`db/schema.sql` 當時已落後」或「當時可當基準線」的記述**一律不修改**——那些是派工當下的事實紀錄，改寫等同竄改歷史。`spec/tasks.md` 中 Task 201／204.9b 的完成記錄同理不改。本需求只改「對未來仍具指引效力」的現行文件（AC7／AC8／AC9 所列五處）。
+- [ ] **AC12**：驗收須實證 B10 三個方向都會動作，且注入用的數字一律由實跑取得、不得寫死：
+  - （a）同步狀態下 `bash scripts/spec-check.sh` 的 BLOCK 數不因 B10 增加；
+  - （b）在 `db/schema.sql` 注入一處表名差異後，腳本回 `1` 且同時列出「僅存在於 DB」與「僅存在於檔案」兩份清單；此時因變更清單已含 `db/schema.sql`，B10 須為 **BLOCK**；
+  - （c）把檔頭「產生當下表數」改成不符的值（先 `grep -c '^CREATE TABLE'` 讀出實際值再減一，並在 `sed` 之後驗證確實改到，避免 `sed` 沒匹配卻靜默 exit 0）後，腳本仍須回 `1`，且 B10 的訊息不得宣稱「與運行中 DB 不一致」。
+  - 每一項驗證後都必須還原 `db/schema.sql`，最終 `bash scripts/spec-check.sh` 須為 `BLOCK: 0`、離開碼 0。
