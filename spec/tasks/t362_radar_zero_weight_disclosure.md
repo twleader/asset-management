@@ -525,6 +525,28 @@ Docker Compose project `asset-management`，自本 worktree（變更未 merge）
   使用者會反推成「只有那兩項無效、其他有效」。
 - 九碼 feature 在全部 38 檔標的的 evidence 中皆完整present。
 
+**映像被平行 worktree 覆蓋一次，最終從 main 重建（過程紀錄，本專案已知陷阱的又一次實例）**
+
+第一次驗收是從**本 feature worktree** 建的，當下 jar 確實含新字串、端點正常。但約 97 秒後
+`asset-management-business-services:latest` 被另一個 session 重建覆蓋（實測：本次 build log 完成於
+`17:50:55`，而事後查得的映像 created 為 `17:52:32`），`frontend` 則仍是本次那一份——於是出現
+「前端有、JVM 沒有」的典型症狀，`arch-auditor` 據此正確判定後端那一半不 serve。
+
+**最終處置依 `/run-stack` Step 1b**：先 merge 進 main（main 是所有人已提交工作的聯集，是唯一收斂點），
+再從 `/Users/steven/Project/asset-management-main` 以 `--no-cache` 重建 `business-services`／`frontend`
+並 `--force-recreate`＋`restart bff`。最終驗收（映像基準線
+`business=sha256:dbd6e53f…`、`frontend=sha256:aadf4f3d…`）：
+
+- business jar 命中 `NOT_SCORED`／`hasBondRateComponent` 計 4；frontend bundle 命中新文案。
+- **同一份映像也含 Task 363 的 `DividendCurrentStateProjectionService`／`InternalDividendMaintenanceController`**
+  ——證明是聯集而非把別人的工作洗掉。
+- `GET 127.0.0.1:9090/api/public/trading-radar/today` → `ruleVersion = TW_RULES_V16`、38 檔；
+  `curl -sI http://localhost/` → 200；`docker logs asset-bff --since 2m` 的
+  `Connection refused|500 Server Error` 計數為 0。
+
+> **教訓**：變更尚未 merge 時從自己的 worktree build 只能得到「當下有效」的驗收，在多 session 並行下
+> 隨時會被洗掉。要讓變更真正 serve，仍須 merge 後從 main 的 worktree 重建。
+
 ### 未完成／待使用者確認
 
 1. **前端畫面的視覺確認未做。** `http://localhost/` 導向 Google OAuth 登入頁，執行代理不得代為登入，
