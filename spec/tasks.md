@@ -29,7 +29,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 
 ---
 
-## 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–360）
+## 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–360、362）
 
 | Task | 標題 | 位置 |
 |---|---|---|
@@ -359,6 +359,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 358 | 今日股市分析頁面改為分類分點呈現：技術面／量能面／美股連動／籌碼面各自獨立、台股與美股分開區塊（Requirement 95） | [tasks/t358_market_analysis_structured_sections.md](tasks/t358_market_analysis_structured_sections.md) |
 | 359 | 股票分析彈窗「持股明細」改接既有 ETF 成分股 API、以圓餅圖呈現（比照 Dashboard 台股個股穿透）（Requirement 13） | [tasks/t359_etf_holdings_chart.md](tasks/t359_etf_holdings_chart.md) |
 | 360 | 修正交易雷達 J 值因子的極性——評分鏈誤用畫面慣例 `J9 = 3D − 2K`，使「跌深承接」變成「追漲加分」；改用標準 `3K − 2D` 並升版 `TW_RULES_V16`（Requirement 96） | [tasks/t360_radar_j_polarity_fix.md](tasks/t360_radar_j_polarity_fix.md) |
+| 362 | 交易雷達 evidence 面板明示零權重資料源「不進評分」——九項市場數值特徵與美債殖利率，涵蓋前端／匯出／公開 OpenAPI 契約；不移除任何數值、不升版（Requirement 98） | [tasks/t362_radar_zero_weight_disclosure.md](tasks/t362_radar_zero_weight_disclosure.md) |
 
 > **註：Task 229–263、268、293–296 以各自任務檔為準。**
 
