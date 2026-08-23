@@ -354,9 +354,9 @@ cd frontend
 
 | 文件 | 說明 |
 |------|------|
-| `spec/requirements.md` | User Stories + Acceptance Criteria（98 個 Requirements；最新為 99） |
+| `spec/requirements.md` | User Stories + Acceptance Criteria（99 個 Requirements；最新為 99） |
 | `spec/design.md` | 架構圖、ERD、API 端點、關鍵業務邏輯 |
-| `spec/tasks.md` | 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–361、363）＋尚未歸檔的 Task 201 起區段；Task 229–263、268、293–296、362 以各自 `spec/tasks/tNNN_*.md` 為準 |
+| `spec/tasks.md` | 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–363）＋尚未歸檔的 Task 201 起區段；Task 229–263、268、293–296 以各自 `spec/tasks/tNNN_*.md` 為準 |
 | `spec/tasks/README.md` | 自足任務檔規範（新任務寫這裡，不再追加 `tasks.md`） |
 | `spec/tasks/tNNN_*.md` | 自足任務檔（Task 201 之後的新任務） |
 | `spec/tasks/archive/` | Task 1–200 歷史，已凍結不再修改 |

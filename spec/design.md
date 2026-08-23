@@ -4562,7 +4562,7 @@ TaiexIndexPoller（週一～五 09:00–13:30 Asia/Taipei，每 2 分鐘，Marke
 
 `TechnicalIndicatorService.computeAllForTaiex()` 比照既有 `computeAll()` 對一般個股的既有作法：完成日序列最新一筆非今日時，查 `PriceQueryService.getLive("0000","台股")`，若其 `tradingDate` 為今日則暫加一筆合成列（`close/high/low` 取自 live price，缺值以 close 補）到序列最前，MA20／60／240 與當期 KD 皆含這筆；`taiexKd` 算前一期時排除這筆，維持既有「當期 vs 前一期」語意。
 
-> **Task 263 改變了這筆合成列的 high／low 取值，盤中 TAIEX 的 K／D 因此與修正前不同（是修正，非 regression）。** Task 228 的 `TaiexIndexPoller` 傳 `highPrice`／`lowPrice = null`，`PriceCacheWriter` 的 `mergeHigh(null, agg)` 回退為聚合值，故 `price:台股:0000` 的 high／low 實際上是**「5 分格收盤價」的本地 max/min**；Task 263 起改為 Yahoo **「5 分格 high／low 陣列」的 max/min**，區間必然變寬（實測 2026-07-31：low 由 39933.30 變 41610.41）。這兩欄直接進 KD 的 RSV 分母，連帶影響三處：本方法的合成今日列 → 觀察清單 `0000` 的 K／D 欄；`taiexSeriesAsc` 的今日點（Task 261）→ 走勢圖 KD 子圖；以及經 `MarketSummary.kValue`／`dValue` → 交易雷達的 regime／score，並可能連動 Requirement 44 的狀態轉換寄信。故 **`RULE_VERSION` 由 `TW_RULES_V7` 升為 `TW_RULES_V8`**（`TradingRadarView.vue` 的顯示 fallback 與 `radar` ref 初始值兩處 hardcode 同步）：本專案的升版判準不是「公式有沒有變」——Task 228（V6）與 Task 232（V7）的 AC 都明文寫著「因子組成、權重與正規化方式完全相同」卻照樣升版，理由都是「使用者可觀察行為有實質變化」；不升版的先例有**三個**（Task 336 之前為兩個）：Task 249 成立的關鍵是「同一份輸入前後產生完全相同的輸出」（本次不符合）；**Task 281 為第二個先例**，成立條件是「新增欄位**純揭露**——不進 `StockInput`／`MarketInput`，`action`／`score`／`regime`／`reasons`／`risks` 逐位不變」，其輸出**結構**確有變化（DTO 多一個巢狀欄位、匯出檔多 15 欄、快照雜湊改變）但**規則集本身未變**，故不升版。**Task 336 追加第三個先例**，成立條件是「**規則引擎輸出（`action`／`score`／`regime`／`reasons`／`risks`）逐位不變，且變動的僅是顯示值本身的捨入缺陷修正——該修正使既有實作彼此趨於一致、不引入任何新值**」：Task 336 把 IXIC 均線的 double 累加改為 BigDecimal 精確路徑，`MarketSummary.monthlyMa` 在 2/2540 個交易日會由 `7667.67`／`23293.77` 變為 `7667.68`／`23293.78`，故**不**滿足 Task 249 的「輸出完全相同」（顯示值有變），也**不**滿足 Task 281 的「不進 `MarketInput`」（MA 確實進 `priceVsMa` 的分數）；但 2319 個可重放交易日的 `score`／`regime` 逐位不變，且變動後的值正是「股市大盤查詢」頁**早已對使用者發布**的那一個，屬缺陷修正而非規則變更。**這三條互斥、不得混用**：Task 281 不滿足 Task 249 的條件，Task 336 兩者皆不滿足，援引錯了會得到相反結論。V8 與 V7 的因子組成、權重、正規化方式相同，**不另訂不可比性揭露**。~~`RULE_VERSION` 在程式碼裡只是標籤（`TradingRadarService` 塞進 DTO、`TradingRadarExportService` 寫進 Excel，`trading_radar_notification_state` 無該欄），升版不觸發 Requirement 44 的通知基準重建。~~ 【**此句自 Task 264 起已成假敘述，Requirement 83／Task 342 更正**：欄位在 `trading_radar_notification_setting`（不是 `_state`），由 changeset `v1.83.0-radar-notification-rule-version.sql` 新增；`TradingRadarNotificationService` 的 `baselineValid` 判定含 `RULE_VERSION.equals(setting.getRuleVersion())`，**升版確實會觸發通知基準重建**——不成立時只重建 baseline、寫入版本字串並 return，**不寄信、不刪訂閱狀態列、不刪收件人**，唯一損失是「跨部署邊界的那一次狀態轉換被靜默吞掉」。本檔他處與 `spec/requirements.md` 對此的描述才是正確的。】
+> **Task 263 改變了這筆合成列的 high／low 取值，盤中 TAIEX 的 K／D 因此與修正前不同（是修正，非 regression）。** Task 228 的 `TaiexIndexPoller` 傳 `highPrice`／`lowPrice = null`，`PriceCacheWriter` 的 `mergeHigh(null, agg)` 回退為聚合值，故 `price:台股:0000` 的 high／low 實際上是**「5 分格收盤價」的本地 max/min**；Task 263 起改為 Yahoo **「5 分格 high／low 陣列」的 max/min**，區間必然變寬（實測 2026-07-31：low 由 39933.30 變 41610.41）。這兩欄直接進 KD 的 RSV 分母，連帶影響三處：本方法的合成今日列 → 觀察清單 `0000` 的 K／D 欄；`taiexSeriesAsc` 的今日點（Task 261）→ 走勢圖 KD 子圖；以及經 `MarketSummary.kValue`／`dValue` → 交易雷達的 regime／score，並可能連動 Requirement 44 的狀態轉換寄信。故 **`RULE_VERSION` 由 `TW_RULES_V7` 升為 `TW_RULES_V8`**（`TradingRadarView.vue` 的顯示 fallback 與 `radar` ref 初始值兩處 hardcode 同步）：本專案的升版判準不是「公式有沒有變」——Task 228（V6）與 Task 232（V7）的 AC 都明文寫著「因子組成、權重與正規化方式完全相同」卻照樣升版，理由都是「使用者可觀察行為有實質變化」；不升版的先例有**三個**（Task 336 之前為兩個）：Task 249 成立的關鍵是「同一份輸入前後產生完全相同的輸出」（本次不符合）；**Task 281 為第二個先例**，成立條件是「新增欄位**純揭露**——不進 `StockInput`／`MarketInput`，`action`／`score`／`regime`／`reasons`／`risks` 逐位不變」，其輸出**結構**確有變化（DTO 多一個巢狀欄位、匯出檔多 15 欄、快照雜湊改變）但**規則集本身未變**，故不升版。**Task 336 追加第三個先例**，成立條件是「**規則引擎輸出（`action`／`score`／`regime`／`reasons`／`risks`）逐位不變，且變動的僅是顯示值本身的捨入缺陷修正——該修正使既有實作彼此趨於一致、不引入任何新值**」：Task 336 把 IXIC 均線的 double 累加改為 BigDecimal 精確路徑，`MarketSummary.monthlyMa` 在 2/2540 個交易日會由 `7667.67`／`23293.77` 變為 `7667.68`／`23293.78`，故**不**滿足 Task 249 的「輸出完全相同」（顯示值有變），也**不**滿足 Task 281 的「不進 `MarketInput`」（MA 確實進 `priceVsMa` 的分數）；但 2319 個可重放交易日的 `score`／`regime` 逐位不變，且變動後的值正是「股市大盤查詢」頁**早已對使用者發布**的那一個，屬缺陷修正而非規則變更。**Task 362 追加第四個先例**，成立條件是「**規則引擎輸出（`action`／`score`／`regime`／`reasons`／`risks`）與 API payload 的每一個欄位值逐位不變，且不新增、移除或改名任何欄位；變動的僅是「說明性文字」——畫面文案、匯出檔中專供揭露用的儲存格文字，以及 OpenAPI schema 的 `description`**」：Task 362 為零權重資料源加上「不進評分」標示，**不**滿足 Task 249 的「輸出完全相同」（匯出檔「證據閘門原因」欄的儲存格文字有變），**不**滿足 Task 281 的「**新增欄位**純揭露」（本次一個欄位都沒新增，OpenAPI 的 `required` 清單與匯出 header 逐字不變），也**不**是 Task 336 的顯示值捨入修正。**這四條互斥、不得混用**：Task 281 不滿足 Task 249 的條件，Task 336 前兩者皆不滿足，Task 362 前三者皆不滿足，援引錯了會得到相反結論。**另注意判準本身不得被收窄**——`spec/requirements.md` 的 Requirement 43 追加（Task 281）AC 逐字禁止把「使用者可觀察**行為**有實質變化」收窄成「決策行為」後拿去當後續任務的先例。V8 與 V7 的因子組成、權重、正規化方式相同，**不另訂不可比性揭露**。~~`RULE_VERSION` 在程式碼裡只是標籤（`TradingRadarService` 塞進 DTO、`TradingRadarExportService` 寫進 Excel，`trading_radar_notification_state` 無該欄），升版不觸發 Requirement 44 的通知基準重建。~~ 【**此句自 Task 264 起已成假敘述，Requirement 83／Task 342 更正**：欄位在 `trading_radar_notification_setting`（不是 `_state`），由 changeset `v1.83.0-radar-notification-rule-version.sql` 新增；`TradingRadarNotificationService` 的 `baselineValid` 判定含 `RULE_VERSION.equals(setting.getRuleVersion())`，**升版確實會觸發通知基準重建**——不成立時只重建 baseline、寫入版本字串並 return，**不寄信、不刪訂閱狀態列、不刪收件人**，唯一損失是「跨部署邊界的那一次狀態轉換被靜默吞掉」。本檔他處與 `spec/requirements.md` 對此的描述才是正確的。】
 
 `TradingRadarService.buildMarket()` 的 `stale` 判定改為：
 
@@ -4746,6 +4746,75 @@ V15 與 V16 的分數不可直接比較，須明文揭露。既有 `rule_version
 **刻意不一起做。** 不調整 `SW_KD_J`／`SWG_KD_J`／`MW_KD_J`，也不調整 `SW_WEEKLY_MOMENTUM`／`SWG_WEEKLY_MOMENTUM`／`MW_WEEKLY_MOMENTUM` 任一權重（本次修正同樣改變週線動能因子的分數，該組權重同樣有被順手調整的風險）——極性錯誤可由代數證明對錯，
 權重校準則需 Requirement 56 的回測量測支持（`t333` 333.10 明文禁止未量測就調門檻）。兩者混在同一次
 變更會使升版後的分數變化無法歸因。
+
+### 零權重資料源的揭露（Requirement 98／Task 362，純揭露、不升版）
+
+畫面的證據面板同時呈現「參與評分的因子」與「不參與評分的觀測值」，兩者之間沒有任何視覺或文字區隔，
+使用者無從分辨。零權重來自兩條互不相干的機制，**兩者的影響範圍不同，文案不得合寫成一句**：
+
+| 對象 | `score` | `action` | 機制 |
+|---|---|---|---|
+| 九項 typed market feature<br>（`IXIC_RET5`／`SOX_RET5`／`SPX_RET5`／`DJI_RET5`／`INDEX_VOLUME_RATIO20`／`TW_INSTITUTIONAL_NET_TURNOVER`／`WTI_RET5`／`BRENT_RET5`／`GOLD_RET5`） | 無 | 無 | `TradingRadarRuleEngine` 的 market-feature 區塊被 `if (candidate != null && context != null)` 包住；production **交易雷達**路徑唯一呼叫端（`TradingRadarService.java:966`）走 `evaluateStock(input)` → `evaluateStockInternal(input, null, null)`，整段從不進入；`BacktestService` 另有三個 `evaluateStock` 呼叫端，同樣是 baseline 多載 |
+| 美債殖利率**數值** | 無 | 無 | 權重取自 `candidateWeight(candidate, SHORT_TREASURY\|MEDIUM_TREASURY, 0.0)`；`candidate == null` 時直接回 baseline `0.0`，且 `Accumulator.add(0.0, x)` 對 `sumW`／`sumWC` 各加 `0`（**分母也不動**），對 `score()` 的影響嚴格為零 |
+| 美債殖利率**可得性** | 無 | **有** | curve batch 是否完整 → `ASSET_SPECIFIC` 的 `bond_rate` component → 該 group 覆蓋率未達 `.70` 時關閉債券的買進閘門 |
+| 美債殖利率**風險單位** | 無 | **有，方向固定** | production 的 `rateObservation(...)` 一律回 `RateObservation.contextOnly(...)`，`riskUnit` 恆 `null` → risk 群 `asset_rate` 恆非 `AVAILABLE` → `TradingRadarEvidenceGate.riskEvidenceOpen()` 對 `profile.bond()` 恆 `false` → **債券的 REDUCE／EXIT 恆降級為候選揭露** |
+
+**兩個必須避開的反向錯誤。** 其一，對美債殖利率寫「不影響決策」是**錯的**——數值不計分，但資料齊備與否確實動到閘門；
+寫成前者會讓使用者在債券買進訊號被擋下時，找不到任何可對應的畫面說明。其二，對市場數值特徵寫
+「大盤數據不影響評分」也是**錯的**——`IXIC_RET5`／`SOX_RET5` 所代表的資訊另由大盤 regime 因子
+（`acc.add(marketWeight, factors.market())`，三軌權重皆非零）進入 baseline。正確表述是
+「**本面板的這些數值**不進評分，大盤趨勢另由盤勢因子計入」。
+
+**採「標示」而非「移除」。** 三條理由任一單獨成立即足以否決移除：(a) Requirement 65 已明訂缺值須
+「明示『未納入』與原因」，精神是揭露而非隱藏；(b) 這些 provenance 欄位是未來 V13 promotion 的可稽核證據；
+(c) `docs/openapi/docker-external-api.yaml` 已把 `marketFeatures` 與 `treasuryRateContext` 列入
+`RadarEvidence` 的 `required`，前端移除會造成「公開契約有、畫面沒有」的新落差。
+
+**揭露面共三層六處，缺一不可。** 前端 `TradingRadarView.vue` 的市場數值特徵面板與美債殖利率情境區塊；
+匯出 `TradingRadarExportService` 的 `MARKET_FEATURE ` 行與新增的 `TREASURY_RATE ` 行（兩者都落在同一個
+既有的「證據閘門原因」`LIST_LINES` 欄，零 header 變更；後者須有輸出條件，且判別式必須是
+「該列 `ASSET_SPECIFIC` 有 `bond_rate` component」——**不能**用 `treasuryRateContext`：全樹無 Jackson
+null-exclusion 設定，該 key 每列都存在（非債券時為 `null`），且債券但 curve 不可得時它同樣為 `null`，
+而那正是最需要揭露的情境）；OpenAPI 的 `MarketFeatureEvidence` 與 `TreasuryRateContext`
+兩個 schema `description`。**OpenAPI 那一處不可省**——`GET /api/public/trading-radar/today` 是
+Requirement 86 第九條 gateway／Tailscale 路由，其消費者不經過前端畫面。匯出的**欄名、欄數與欄序一律不變**
+（該檔 Javadoc 已明載這些欄位刻意後置以保持舊檔索引相容），標示只加在儲存格內容。
+
+**不升 `RULE_VERSION`，但既有三條先例一條都不適用——本任務新增第四條判準。** 本次**不新增任何欄位**，
+故 Task 281（「**新增欄位**純揭露」）的字面條件不成立；匯出檔「證據閘門原因」欄的儲存格文字會變，
+故 Task 249（「同一份輸入前後產生完全相同的輸出」）亦不成立；更不是 Task 336 的捨入缺陷修正。
+比照 Task 336 當初的作法，在上方 Task 263 段落那份權威清單新增**第四條**：「規則引擎輸出與 API payload
+的每一個欄位值逐位不變，且不新增／移除／改名任何欄位；變動的僅是**說明性文字**——畫面文案、匯出檔中
+專供揭露用的儲存格文字，以及 OpenAPI schema 的 `description`」。三軌 `score`／`action`／`candidateAction`
+對所有標的逐位不變，維持 `TW_RULES_V16`。**反面說明**：若因「畫面文字也算使用者可觀察」而升版，會產生兩個
+分數完全相同的版號，反而破壞「不同版號的分數不可直接比較」這句既有免責文案的意義。**不得**改用
+「使用者可觀察的**評分行為**有實質變化」這種收窄後的判準——`spec/requirements.md` 的 Requirement 43
+追加（Task 281）AC 已逐字禁止把原判準收窄後拿去當後續任務的先例。
+
+**唯一的自動化防漂移機制在後端測試，不在前端。** `frontend/package.json` 的 `test` script 是
+`node --test` 跑 `src/utils/` 底下五支純函數測試，全樹沒有任何 `.vue` 元件測試（無 vitest、無 jsdom），
+故前端文案只能靠實機驗證守門。真正的守門是後端「baseline 路徑下 market feature 與 treasury 皆零影響」
+的釘樁測試——它在 V13 promote 的那一天必然失敗，強迫同步更新本次文案，否則文案會靜默變成謊言。
+
+**接進 baseline 評分是另一件事，且目前被阻塞。** 正規路徑是 V13 candidate 的 holdout／walk-forward
+promotion，而 `spec/tasks/t316_radar_v13_validation_closure.md` 記載的真實 FULL_MARKET 執行結論是
+`INSUFFICIENT`（execution timeout，10 分 15 秒無 completed report），至今沒有任何一次完成的全市場
+holdout report。故其前置不是「跑一次回測」而是先讓 full-market backtest 跑得完；在那之前配任何權重都會
+違反 `t333` 的 `333.10`。**`duplicateOf` 去重已落地，不是缺口，但它是「有值時才成立」的條件行為。**
+`TradingRadarMarketFeatureResolver.java:395-400` 的 `indexReturn()` **在成功路徑**對 `IXIC`／`SOX` 設
+`regimeDuplicate = true`，`duplicateOf` 寫入 `"MARKET_REGIME"`、`status` 寫入 `DISCLOSURE_ONLY`，
+此時 `aggregate()`（`:222-226`）的去重分支觸發，該碼不進 candidate 分數的分子與 coverage 分母，
+Requirement 65 的 duplicate 要求已達成。**缺值時則否**：`:365-368`／`:379-380`／`:382-386` 三條早退路徑走
+`CandidateMarketFeature.unavailable(...)`，`duplicateOf` 為 `null`、`status` 為 `MISSING`，去重分支不觸發、
+該碼仍計入 coverage 分母（`:236`）。
+
+**對揭露文案的實質約束**：面板逐項顯示 `feature.status`，production 只有三種值——`DISCLOSURE_ONLY`
+（IXIC／SOX 有值時）、`AVAILABLE`、`MISSING`（含 IXIC／SOX 缺值日）；`NOT_APPLICABLE` 只有測試會建
+（`CandidateMarketFeature.notApplicable(...)` 在 main 樹無呼叫端），不必為它設計文案。文案須解釋 `DISCLOSURE_ONLY`
+**這個狀態**的意義（candidate／回測路徑的去重標記，該碼資訊已由盤勢因子代表），否則使用者會反向推論成
+「只有那一項無效、其他有效」——正是本節要消除的誤解。**不得寫成「IXIC／SOX 固定顯示 `DISCLOSURE_ONLY`」**，
+缺值日與畫面不符。九項在 production 全部不進評分，`DISCLOSURE_ONLY` 不是 production 有效性的區別。
+
 
 ### 規則回測框架（Requirement 56／Task 273）
 

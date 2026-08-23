@@ -416,6 +416,84 @@ class TradingRadarV13ActionPolicyTest {
         assertThat(missingResult.risks()).anyMatch(text -> text.contains("V13_MARKET_FEATURE_UNAVAILABLE"));
     }
 
+    /**
+     * Task 362.8(a)：production 的 market feature 權重 baseline 是字面 {@code 0.0}，
+     * 影響嚴格為零而非「權重很小」。
+     *
+     * <p>刻意做成 candidate-vs-candidate 的權重隔離：兩邊都是<b>同一個</b>
+     * {@code candidateWeightDeltas} 為空的 candidate、同一組參數，只有
+     * {@code CandidateContext} 的 market feature aggregate 從 {@code +1.0} 換成 {@code -1.0}
+     * 這兩個飽和極值。若拿 candidate 去比 {@code evaluateStock(input)}，normalized bias 置換與
+     * sigma profile gate 兩處與本次無關的分歧會讓等式必紅。</p>
+     *
+     * <p>有人把 {@code candidateWeight(candidate, featureKey, 0.0)} 的 baseline 改成非零時，本測試必紅。</p>
+     */
+    @Test
+    void marketFeatureAggregateExtremesCannotMoveScoreWithoutCandidateWeight() {
+        var input = neutralMarketInput(false);
+        RuleParameters noDelta = candidate(Map.of());
+
+        var positive = engine.evaluateCandidate(input, noDelta, extremeFeatureContext(1.0));
+        var negative = engine.evaluateCandidate(input, noDelta, extremeFeatureContext(-1.0));
+
+        assertThat(positive.score()).isEqualTo(negative.score());
+        assertThat(positive.shortScore()).isEqualTo(negative.shortScore());
+        assertThat(positive.swingScore()).isEqualTo(negative.swingScore());
+        assertThat(positive.action()).isEqualTo(negative.action());
+        assertThat(positive.shortAction()).isEqualTo(negative.shortAction());
+        assertThat(positive.swingAction()).isEqualTo(negative.swingAction());
+        assertThat(positive.risks())
+                .as("零權重時引擎必須明說 aggregate 可得但未配置分數權重")
+                .anyMatch(text -> text.contains("V13_MARKET_FEATURE_DISCLOSURE_ONLY"));
+    }
+
+    /**
+     * Task 362.8(a) 的正向對照：既有的
+     * {@code candidateMarketFeatureContributionChangesScoreButMissingFeaturesDoNot()} 只斷言
+     * reasons 與「缺值等同無權重」，<b>沒有</b>分數變高的斷言；
+     * {@code candidateApiRerunsFullEngineWithImmutableMarketAndTreasuryWeights()} 的
+     * {@code marketWeighted} 用的是盤勢 regime 的 {@code SHORT_MARKET}／{@code MEDIUM_MARKET}，
+     * 不是這裡的 {@code *_MARKET_FEATURE}。故正向那條在此補齊。
+     */
+    @Test
+    void nonZeroMarketFeatureWeightDoesRaiseCandidateScore() {
+        var input = neutralMarketInput(false);
+        var context = extremeFeatureContext(1.0);
+
+        var noWeight = engine.evaluateCandidate(input, candidate(Map.of()), context);
+        var weighted = engine.evaluateCandidate(input, candidate(Map.of(
+                RuleParameters.CandidateWeight.SHORT_MARKET_FEATURE, new BigDecimal("0.50"),
+                RuleParameters.CandidateWeight.MEDIUM_MARKET_FEATURE, new BigDecimal("0.50"))),
+                context);
+
+        assertThat(weighted.score()).isGreaterThan(noWeight.score());
+        assertThat(weighted.shortScore()).isGreaterThan(noWeight.shortScore());
+        assertThat(weighted.reasons()).anyMatch(text -> text.contains("V13_MARKET_FEATURE_CONTRIBUTION"));
+    }
+
+    /**
+     * Task 362.8(a)：treasury contribution 的權重 baseline 同樣是字面 {@code 0.0}。
+     *
+     * <p>正向對照是既有的
+     * {@code candidateApiRerunsFullEngineWithImmutableMarketAndTreasuryWeights()}
+     * （{@code SHORT_TREASURY}／{@code MEDIUM_TREASURY} 非零 delta 時分數變高）。</p>
+     */
+    @Test
+    void treasuryContributionExtremesCannotMoveScoreWithoutCandidateWeight() {
+        var input = neutralMarketInput(false);
+        RuleParameters noDelta = candidate(Map.of());
+
+        var positive = engine.evaluateCandidate(input, noDelta, context("1", "1"));
+        var negative = engine.evaluateCandidate(input, noDelta, context("-1", "-1"));
+
+        assertThat(positive.score()).isEqualTo(negative.score());
+        assertThat(positive.shortScore()).isEqualTo(negative.shortScore());
+        assertThat(positive.swingScore()).isEqualTo(negative.swingScore());
+        assertThat(positive.action()).isEqualTo(negative.action());
+        assertThat(positive.shortAction()).isEqualTo(negative.shortAction());
+        assertThat(positive.swingAction()).isEqualTo(negative.swingAction());
+    }
+
     @Test
     void bondProfileExcludesEquityOnlyMarketFeaturesFromCandidateScore() {
         Instant decision = Instant.parse("2026-08-08T08:00:00Z");
@@ -655,6 +733,23 @@ class TradingRadarV13ActionPolicyTest {
                 null, null, null, BigDecimal.ONE, BigDecimal.ONE,
                 null, profile, marketFeatures, null,
                 aggregate.shortTerm(), aggregate.mediumTerm());
+    }
+
+    /**
+     * 只有 market feature aggregate 不同、其餘欄位逐一固定的 candidate context。
+     *
+     * <p>{@code ±1.0} 是合法的飽和極值（{@code AggregatedContribution} 的緊湊建構式限定
+     * {@code -1..1}）；{@code marketFeatures} 給空 evidence 是因為引擎在 contribution 非 null 時
+     * 仍會取 aggregate 來組 disclosure 文字，該欄不得為 null。</p>
+     */
+    private static TradingRadarRuleEngine.CandidateContext extremeFeatureContext(Double contribution) {
+        return new TradingRadarRuleEngine.CandidateContext(
+                true, true, BigDecimal.ONE, BigDecimal.ZERO, BigDecimal.ZERO,
+                null, null, null, BigDecimal.ONE, BigDecimal.ONE,
+                null, null,
+                TradingRadarMarketFeatureResolver.Evidence.empty(
+                        "美股", Instant.parse("2026-08-08T08:00:00Z"), "固定樣板"),
+                null, contribution, contribution);
     }
 
     private static RuleParameters normalizedCandidate(String id, String floor, String multiple) {
