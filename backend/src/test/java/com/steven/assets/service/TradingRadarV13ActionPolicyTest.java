@@ -109,7 +109,8 @@ class TradingRadarV13ActionPolicyTest {
         assertThat(policy.v13Active()).isFalse();
         assertThat(policy.action()).isEqualTo(baseline.action());
         assertThat(production).isEqualTo(baseline);
-        // Task 360：production 版號已升 TW_RULES_V16，不再等於 RuleParameters 的任何一個標籤。
+        // Task 360：production 版號已升 TW_RULES_V16，不再等於 RuleParameters 的任何一個標籤；
+        // Task 365 再升為 TW_RULES_V17（估值因子標籤與風險文案修正，與 RuleParameters 命名空間無關）。
         // RuleParameters 的 V12／V13 是 calibration／candidate 命名空間，production 不得竊用——
         // 尤其 V13_VERSION 是 evaluateCandidate() 的 guard（不符即 throw），
         // 把它當 production 版號會讓「這是不是 candidate」的判別式失效。
