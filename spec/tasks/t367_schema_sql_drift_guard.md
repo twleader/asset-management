@@ -110,7 +110,7 @@ $ bash scripts/spec-check.sh | grep -c 'CHECK │'
 
 ## 要做什麼
 
-- [ ] **367.1 重產 `db/schema.sql`。** 指令：
+- [x] **367.1 重產 `db/schema.sql`。** 指令：
 
   ```bash
   cd <本 worktree 根目錄>
@@ -124,7 +124,7 @@ $ bash scripts/spec-check.sh | grep -c 'CHECK │'
   - 已實測：連跑兩次 `pg_dump`（濾除後）**位元級完全相同**，輸出中無 `setval`、無時間戳，故「逐位元比對」是成立的不變條件。
   - 接著把現有檔案的專案檔頭（現況為第 1–26 行，第 26 行恰為 `--`；第 27 行起是 `pg_dump` 本體，本體首行亦為 `--`、第 28 行為 `-- PostgreSQL database dump`）接到 `/tmp/fresh-schema.sql` 之前，寫回 `db/schema.sql`。**不要手改 `pg_dump` 本體的任何一個字元。**
 
-- [ ] **367.2 更新檔頭的「產生資訊」。** 現行第 25 行為：
+- [x] **367.2 更新檔頭的「產生資訊」。** 現行第 25 行為：
 
   ```
   -- 產生資訊：PostgreSQL 16.14 / pg_dump 16.14，來源 asset-postgres 容器，2026-08-09
@@ -140,11 +140,11 @@ $ bash scripts/spec-check.sh | grep -c 'CHECK │'
   `<N>` 必須是實際數出來的（`grep -c '^CREATE TABLE' db/schema.sql`），**不得照抄本任務檔背景段寫的 85**——動工當下若有別的 worktree 又套了新 changeset，實際值會不同。
   **格式必須讓「`產生當下表數：<數字> 張`」可被穩定 grep 出來**，367.5 的腳本要解析它。
 
-- [ ] **367.3 修正並補充檔頭的「重新產生」段（第 16–23 行）。**
+- [x] **367.3 修正並補充檔頭的「重新產生」段（第 16–23 行）。**
   - （a）第 19 行的 `> db/schema.sql` 改為 `> /tmp/fresh-schema.sql`；第 20 行的「接著把本段標頭補回檔首」改寫成可執行的步驟（例如：「再把本檔第 1 行至『`-- PostgreSQL database dump`』前一行的檔頭，接到 `/tmp/fresh-schema.sql` 之前寫回 `db/schema.sql`」）。
   - （b）補一小段說明：本檔與運行中 DB 的同步由 `scripts/tests/schema-sql-drift-test.sh` 逐位元比對、由 `scripts/spec-check.sh` 的 B10 執行。**措辭必須與「lagging 檢查」一致**——寫「改動 schema 後未重產本檔，會在**下一次** `spec-check` 被指出」，不得寫成「立即攔下」。
 
-- [ ] **367.4 新增 `scripts/tests/schema-sql-drift-test.sh`（獨立可執行）。** 語意：「`db/schema.sql` 去除專案檔頭後，是否逐位元等於此刻重跑 `pg_dump` 的輸出」。硬性要求：
+- [x] **367.4 新增 `scripts/tests/schema-sql-drift-test.sh`（獨立可執行）。** 語意：「`db/schema.sql` 去除專案檔頭後，是否逐位元等於此刻重跑 `pg_dump` 的輸出」。硬性要求：
 
   - **全文比對，不是只比表名。** 背景段已證實漂移大量發生在欄位、預設值與索引定義上；只比表名會漏掉 `commodity_price_history` 四欄、`stock_dividend_history` 的 `source` 位數與 `uk_dividend_event` 這一整類。
   - **檔頭／`pg_dump` 本體的分界不得寫死行號。** 以「檔案中第一個**整行等於** `-- PostgreSQL database dump` 的行」定位（**整行相等，不是 substring**——檔尾有 `-- PostgreSQL database dump complete`，用 substring 會定位錯），本體起點為其**前一行**；並斷言該前一行內容恰為 `--`，否則視為檔頭結構被破壞、以離開碼 `1` 失敗並說明原因。
@@ -158,9 +158,9 @@ $ bash scripts/spec-check.sh | grep -c 'CHECK │'
   - 沿用 `scripts/tests/` 既有慣例：`#!/usr/bin/env bash`、以 `repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"` 定位 repo、輸出 `PASS:` / `FAIL:` 行、暫存檔用 `mktemp` 並以 `trap ... EXIT` 清掉。
   - 容器名允許以環境變數覆寫（沿用 `${T350_REDIS_CONTAINER:-asset-redis}` 的慣例），預設 `asset-postgres`，變數名用 `SCHEMA_DRIFT_CONTAINER`。
 
-- [ ] **367.5 腳本同時驗證檔頭宣告的張數（純離線檢查）。** 讀 367.2 寫進檔頭的「產生當下表數：N 張」，與 `db/schema.sql` 實際的 `CREATE TABLE` 行數比對。**不一致、或檔頭根本沒有這一行，一律以離開碼 `1` 失敗**（缺行時訊息說明「檔頭缺產生當下表數宣告，請依 367.2 補上」）。這段必須排在**任何 `docker` 呼叫之前**並在失敗時直接 `exit 1`——否則沒開 Docker 時會先被 `2` 蓋掉，這個離線分支永遠測不到。
+- [x] **367.5 腳本同時驗證檔頭宣告的張數（純離線檢查）。** 讀 367.2 寫進檔頭的「產生當下表數：N 張」，與 `db/schema.sql` 實際的 `CREATE TABLE` 行數比對。**不一致、或檔頭根本沒有這一行，一律以離開碼 `1` 失敗**（缺行時訊息說明「檔頭缺產生當下表數宣告，請依 367.2 補上」）。這段必須排在**任何 `docker` 呼叫之前**並在失敗時直接 `exit 1`——否則沒開 Docker 時會先被 `2` 蓋掉，這個離線分支永遠測不到。
 
-- [ ] **367.6 `scripts/spec-check.sh` 新增 B10（含嚴重度分流）。** 位置放在既有 B9（9090 gateway／OpenAPI）之後、`echo "════ 結果 ════"` 之前。骨架：
+- [x] **367.6 `scripts/spec-check.sh` 新增 B10（含嚴重度分流）。** 位置放在既有 B9（9090 gateway／OpenAPI）之後、`echo "════ 結果 ════"` 之前。骨架：
 
   ```bash
   # ── B10. db/schema.sql 稽核基準線是否仍等於運行中 DB ──────────────
@@ -193,7 +193,7 @@ $ bash scripts/spec-check.sh | grep -c 'CHECK │'
   - **分流不得簡化掉**（理由見「三項刻意接受的限制」第 2 條）。
   - `scripts/spec-check.sh:24` 是 `set -uo pipefail`（**沒有 `-e`**），子腳本回 1／2 不會中斷；`case` 三分支的變數都已賦值，不會觸發 `-u`。`printf '%s\n' "$DIFF_FILES" | grep -qE` 這個寫法不會踩到 367.7 要修的那顆 `pipefail` 地雷（`printf` 是 builtin、輸出必定非空），B6 第 183 行已有同型可用前例。
 
-- [ ] **367.7 修好 B8——先修 bug，再改文字。** 兩件事都要做，只做後者等於沒做（理由見背景段「B8 的觸發條件本身壞掉」）。
+- [x] **367.7 修好 B8——先修 bug，再改文字。** 兩件事都要做，只做後者等於沒做（理由見背景段「B8 的觸發條件本身壞掉」）。
   - **（a）修 bug（硬性）**：讓 `added_lines()` 的離開碼不再決定 B8 是否觸發。最小改法二擇一：在 `added_lines()` 末尾補一行 `return 0`；或把 B8 改成
     `b8_hit=$(added_lines 'spec/**' | grep -cE 'db/changelog/.*\.sql' || true); if [ "${b8_hit:-0}" -gt 0 ]; then`。
     改完必須**實證會印出來**：本分支的 spec 新增行本來就有多行命中該樣式（第三輪審查當下實測 13 行；**驗收判準是「命中 ≥1 行且 B8 的 CHECK 確實印出」，不得寫死行數**），跑 `bash scripts/spec-check.sh` 應該看到 B8 的 CHECK 出現（B8 是 CHECK 不是 BLOCK，不影響離開碼）。
@@ -203,7 +203,7 @@ $ bash scripts/spec-check.sh | grep -c 'CHECK │'
     - **新增**（B8 現行文字沒有這一句，不是「保留」）：運行中 DB 可能已套用其他 worktree 尚未 merge 的 changeset，涉及「main 現況」的斷言仍須複驗 `databasechangelog`。文字可取自 `spec/tasks/README.md` 既有段落。
   - **（c）順帶**把 B10 與**遺漏的 B8** 一併補進 `scripts/spec-check.sh` 檔頭的檢查清單註解（第 9–16 行；現況是 B7 之後直接跳到 B9）。
 
-- [ ] **367.8 統一兩支 auditor 的口徑。** 修改 `.claude/agents/spec-auditor.md`（第 24 行「專案陷阱」第 2 點、第 37 行「資料來源正確性」列）與 `.claude/agents/arch-auditor.md`（第 42 行「專案陷阱」第 1 點、第 151 行「不要做的事」），四處改成同一套敘述：
+- [x] **367.8 統一兩支 auditor 的口徑。** 修改 `.claude/agents/spec-auditor.md`（第 24 行「專案陷阱」第 2 點、第 37 行「資料來源正確性」列）與 `.claude/agents/arch-auditor.md`（第 42 行「專案陷阱」第 1 點、第 151 行「不要做的事」），四處改成同一套敘述：
 
   > `db/schema.sql` 由 `scripts/spec-check.sh` B10 機械查核與運行中 DB 的同步，可作為欄位型別／位數／nullable／預設值／索引的離線查證依據。但它反映的是**運行中 DB**，而運行中 DB 可能含其他 worktree 尚未 merge 的 changeset；涉及「main 現況」的斷言仍須以 `docker exec asset-postgres psql -U assets -d assets -c '\d <table>'` 並比對 `databasechangelog` 尾端複驗。`db/changelog/**` 一律不得用於描述現況（那裡有永不執行的 changeset）。
 
@@ -213,19 +213,19 @@ $ bash scripts/spec-check.sh | grep -c 'CHECK │'
 
   （`.agents/`——Codex 側的 skill 副本——實測沒有 auditor 檔、也零命中 `schema.sql`，不需同步。）
 
-- [ ] **367.9 同步其餘四份現行指引文件。**
+- [x] **367.9 同步其餘四份現行指引文件。**
   - `spec/steering/structure.md:19-22` 的 `db/` 樹狀說明 → 367.8 的口徑，移除「截至 Task 245 仍缺 `crawler_export_setting` 與 `asset_transaction`」。
   - `spec/tasks/README.md:100-102` 的自足性自查段 → 同上。**第 103–106 行「但運行中 DB 也不等於 main 的現況」整段必須原樣保留**，那正是新口徑要強調的部分。
   - `spec/design.md:5949`（`index_export_schedule` 段）末句「`db/schema.sql` 缺少這張歷史表，不能用它斷言現況」→ 該三張 `index_export_schedule*` 表現在都在鏡像裡（各 `grep -c '^CREATE TABLE public.index_export_schedule…'` 均為 1），此句已不成立。改寫時**保留它真正要防的意思**：本檔是 v1.88.0 **遷移後**的狀態，不能用來推測遷移前的欄位形貌；要確認 parent 是否已套用仍須查 `databasechangelog` 與 `\d index_export_schedule`。
   - `scripts/README.md` 兩處：（i）`spec-check.sh` 那一列逐項列舉了檢查名稱（「編號撞號／重號、Liquibase changeset 版號碰撞與冪等性、宣稱的測試類是否存在、文件計數漂移，並執行 9090 gateway/OpenAPI 防漂移契約」），加了 B10 之後會過期，須補上 B10；（ii）同檔的測試腳本表（已登錄 `tests/configure-tailscale-api-gateway-test.sh` 與 `tests/docker-external-api-openapi-test.rb`）須新增 `tests/schema-sql-drift-test.sh` 一列。本任務既然已更新 `CLAUDE.md` 的同性質工具表，就不能漏掉更正式的這一份。
   - **移除的只是「把過期數字／例證當現況」的敘述；作為歷史脈絡的引用可以保留**（例如 `spec/design.md` 第 849 行起已改寫段落中的「Task 245 當時僅 55 張 `CREATE TABLE`」不要刪）。
 
-- [ ] **367.10 `spec/tasks/README.md` 的「檔案結構」任務檔模板新增一條收尾約定。** 加在模板的 `## 驗證` 段（不是「自足性自查」清單——那份清單的讀者是寫任務檔的人、時機在寫檔當下，收尾那一刻不會再讀到）。文字大意：**任務若動到 `backend/src/main/resources/db/changelog/**`，驗證／收尾步驟必須包含重產 `db/schema.sql`（`bash scripts/tests/schema-sql-drift-test.sh` 應回 0）。** 這是刻意不改 `commit-msg` hook 的補償措施，強度低於 hook，見「三項刻意接受的限制」第 3 條。
+- [x] **367.10 `spec/tasks/README.md` 的「檔案結構」任務檔模板新增一條收尾約定。** 加在模板的 `## 驗證` 段（不是「自足性自查」清單——那份清單的讀者是寫任務檔的人、時機在寫檔當下，收尾那一刻不會再讀到）。文字大意：**任務若動到 `backend/src/main/resources/db/changelog/**`，驗證／收尾步驟必須包含重產 `db/schema.sql`（`bash scripts/tests/schema-sql-drift-test.sh` 應回 0）。** 這是刻意不改 `commit-msg` hook 的補償措施，強度低於 hook，見「三項刻意接受的限制」第 3 條。
   先例：`spec/tasks/t290_tw_official_close_reconciliation.md:46` 就已經寫過「同步 `db/schema.sql`」這種收尾要求，本條是把個案慣例升為模板。
 
-- [ ] **367.11 複驗 `spec/design.md` 第 849 行起的段落。** 該段已於 spec 階段改寫，實作階段只需確認：(a) 它描述的機制與最終落地的腳本／B10 一致；(b) 措辭沒有對現況說謊（「保證同步」這類絕對措辭已改為「在每次 `spec-check` 時機械查核」，並已載明 lagging 與分流兩項性質）。
+- [x] **367.11 複驗 `spec/design.md` 第 849 行起的段落。** 該段已於 spec 階段改寫，實作階段只需確認：(a) 它描述的機制與最終落地的腳本／B10 一致；(b) 措辭沒有對現況說謊（「保證同步」這類絕對措辭已改為「在每次 `spec-check` 時機械查核」，並已載明 lagging 與分流兩項性質）。
 
-- [ ] **367.12 不得做的事（逐條都是硬性禁令）：**
+- [x] **367.12 不得做的事（逐條都是硬性禁令）：**
   - 不新增／修改／刪除任何 Liquibase changeset，不碰 `backend/src/main/resources/db/changelog/` 底下任何檔案（含註解——會讓 checksum 失效造成 crash loop）。
   - 不新增資料表、不改任何 Entity、不改任何 API 路徑、不改 9090／Tailscale 路由、不新增 `@Scheduled`。
   - **不改 `scripts/git-hooks/commit-msg` 的觸發清單。** 把「staged 含 `db/changelog/**` → 必須同 commit 附 `db/schema.sql`」加進 hook 確實能綁住產生漂移的那個 commit，但那是使用者所列三個選項之外的第四種機制；本任務刻意只採用一種閘門，補償措施是 367.10。若實作時認為非加不可，**停下來回報，不要自行加**。
@@ -390,4 +390,244 @@ git diff --stat
 
 ## 完成報告
 
-（實作者做完後回填：實際改了哪些檔、上述十組驗證的實際輸出、與原計畫的偏差及原因。）
+**實作日期：** 2026-08-23（本 worktree：`.claude/worktrees/schema-sql-regenerate-drift-check-633729`）
+
+### 實際改了哪些檔
+
+`git status --short`：
+
+```
+ M .claude/agents/arch-auditor.md
+ M .claude/agents/spec-auditor.md
+ M db/schema.sql
+ M scripts/README.md
+ M scripts/spec-check.sh
+ M spec/design.md
+ M spec/steering/structure.md
+ M spec/tasks/README.md
+?? scripts/tests/schema-sql-drift-test.sh
+```
+
+`git diff --stat`（未含未追蹤新檔）：
+
+```
+ .claude/agents/arch-auditor.md |   4 +-
+ .claude/agents/spec-auditor.md |   4 +-
+ db/schema.sql                  | 802 ++++++++++++++++++++++++++++++++++++++++-
+ scripts/README.md              |   3 +-
+ scripts/spec-check.sh          |  38 +-
+ spec/design.md                 |   4 +-
+ spec/steering/structure.md     |  12 +-
+ spec/tasks/README.md           |  17 +-
+ 8 files changed, 854 insertions(+), 30 deletions(-)
+```
+
+新檔 `scripts/tests/schema-sql-drift-test.sh`（已 `chmod +x`）。
+**未觸及** `backend/`、`bff/`、`external-materials-service/`、`frontend/`、`api-gateway/`、
+`docker-compose.yml`，尤其未觸及 `backend/src/main/resources/db/changelog/`（367.12 硬性禁令）。
+
+### 驗證輸出
+
+**（0）舊文字基準命中數 → 改動前 10 行 / 改動後 0 行**
+
+改動前（8 個位置、10 行，與本任務檔背景段預測一致）：
+
+```
+.claude/agents/spec-auditor.md:24     唯一基準是 db/schema.sql
+.claude/agents/spec-auditor.md:37     必須引用 db/schema.sql
+.claude/agents/arch-auditor.md:42     不要盡信 db/schema.sql
+.claude/agents/arch-auditor.md:151    落後的 db/schema.sql
+spec/tasks/README.md:100-101          不是可信基準線 ＋ 截至 Task 245 它仍沒有…
+spec/steering/structure.md:19-20      不是可信基準線 ＋ 截至 Task 245 仍缺…
+scripts/spec-check.sh:201             Task 241 實測缺… ＋ 不可當基準線
+spec/design.md:5949                   缺少這張歷史表
+```
+
+改完後同一條 grep 輸出 `0`（`/tmp/schema-legacy-after.txt` 為空）。八個位置全部改到。
+
+**（1）重產結果本身**
+
+```
+file=85 db=85
+OK
+```
+
+11 張原本缺的表 `grep -c` 全部為 `1`：`twse_institutional_daily`／`etf_nav_observation`／
+`stock_dividend_snapshot`／`stock_dividend_snapshot_event`／`stock_dividend_fetch_observation`／
+`stock_dividend_fetch_attempt`／`treasury_yield_batch`／`treasury_yield_daily`／
+`export_schedule_time`／`commodity_export_schedule_time`／`realized_gain_export_schedule_time`。
+
+欄位／預設值／索引：
+
+```
+2006:    source character varying(128),
+1344:    model character varying(64) DEFAULT 'claude-opus-5'::character varying NOT NULL,
+```
+
+`uk_dividend_event` 已是 10 欄版（含 `COALESCE(ex_rights_date, '1970-01-01'::date)` 與
+`COALESCE(event_key, ''::character varying)`）。
+`ck_commodity_source_time|action_policy_version|withdrawal_order|factor_groups|idx_dividend_event_key|idx_commodity_price_available`
+合計 `grep -c` ＝ **8**（門檻 ≥6）。
+
+本體（去專案檔頭）相對舊檔的差異實測為 **新增 765 行、刪除 9 行**，與背景段預測完全相同；
+9 行刪除中 6 行是「原本最後一欄少了逗號」的格式位移，3 行是 `source varchar(50)`、
+`model` 舊預設值 `claude-opus-4-8`、舊 4 欄版 `uk_dividend_event`。沒有任何表被移除。
+
+**（2）同步狀態下的漂移測試 → `exit=0`**
+
+```
+PASS: db/schema.sql（去除專案檔頭後）逐位元等於 asset-postgres 此刻的 pg_dump 輸出
+      表數：85 張（檔頭宣告一致）
+exit=0
+```
+
+**（3）漂移＋歸屬本次 → 腳本 `exit=1`、B10 BLOCK、spec-check `exit=1`**
+
+把 `CREATE TABLE public.twse_institutional_daily (` 改名為 `zzz_injected_drift` 後：
+
+```
+FAIL: db/schema.sql 與運行中 DB（asset-postgres）的 schema 不一致 —— 稽核基準線已漂移
+
+  差異行數：新增 1 行、刪除 1 行（相對現行 db/schema.sql）
+  僅存在於運行中 DB（db/schema.sql 缺這些表）：
+    - public.twse_institutional_daily
+  僅存在於 db/schema.sql（運行中 DB 沒有這些表）：
+    - public.zzz_injected_drift
+exit=1
+```
+
+`bash scripts/spec-check.sh`：
+
+```
+變更檔數: 10（含未追蹤新檔）
+BLOCK │ db/schema.sql 未通過漂移檢查（成因見上方完整訊息）——本次變更已碰到 schema／changelog，須先處理。處置：先查 SELECT filename FROM databasechangelog …（完整 $DRIFT_HINT）
+BLOCK: 1   CHECK: 1
+spec-check exit=1
+```
+
+還原後重跑腳本 `exit=0`。
+
+**（4）漂移＋不歸屬本次 → B10 CHECK、spec-check `exit=0`**
+
+在 367.1 重產**之前**、367.4／367.6 已完成時跑 `bash scripts/spec-check.sh HEAD`：
+
+```
+變更檔數: 2（含未追蹤新檔）        ← 只有 scripts/spec-check.sh 與新檔 scripts/tests/schema-sql-drift-test.sh，
+                                     DIFF_FILES 不含 db/schema.sql、也不含 db/changelog/
+CHECK │ db/schema.sql 未通過漂移檢查（成因見上方完整訊息）。本次變更未碰 schema／changelog，
+        漂移可能來自其他 worktree 尚未 merge 的 changeset。處置：…（完整 $DRIFT_HINT）
+BLOCK: 0   CHECK: 1
+exit=0
+```
+
+**（5）無法查證 → 腳本 `exit=2`、B10 CHECK（未停任何容器，用假容器名）**
+
+```
+$ SCHEMA_DRIFT_CONTAINER=asset-postgres-does-not-exist bash scripts/tests/schema-sql-drift-test.sh
+SKIP: 容器 asset-postgres-does-not-exist 不在運行（docker inspect 回「查無此容器」）—— db/schema.sql 是否漂移「無法查證」
+      可用 SCHEMA_DRIFT_CONTAINER 覆寫容器名。
+exit=2
+
+$ SCHEMA_DRIFT_CONTAINER=asset-postgres-does-not-exist bash scripts/spec-check.sh
+CHECK │ db/schema.sql 是否漂移無法查證（asset-postgres 未運行或 docker 不可用）——本次不判定，待容器起來後重跑
+BLOCK: 0   CHECK: 2
+spec-check exit=0                 ← 記為 CHECK 而非 BLOCK
+```
+
+**（6）檔頭張數宣告守門 → `exit=1`，訊息不宣稱「與運行中 DB 不一致」**
+
+實跑取得 `n=85`，注入 84 並以 `grep -q` 確認注入成功後：
+
+```
+FAIL: db/schema.sql 檔頭宣告「產生當下表數：84 張」，但檔案實際有 85 個 CREATE TABLE
+      —— 檔案疑似被手改而未重產。此為離線檢查，本項失敗並不代表與運行中 DB 不一致。
+exit=1
+```
+
+還原後重跑 `exit=0`。
+
+**（7）B8 修好後真的印得出來**
+
+`git diff origin/main...HEAD -- 'spec/**' | grep -E '^\+' | grep -cE 'db/changelog/.*\.sql'` ＝ **12**（>0）。
+`bash scripts/spec-check.sh 2>&1 | grep 'CHECK │'` 確實印出 B8 的 CHECK，且文字已改為新口徑
+（移除 `crawler_export_setting`／`asset_transaction` 過期例證，改述為「由 B10 機械查核」，
+並新增「運行中 DB 可能已套用其他 worktree 尚未 merge 的 changeset，涉及 main 現況的斷言仍須複驗
+`databasechangelog` 尾端」）。修正前同一條指令輸出 0 行。
+
+**（8）最終完整 spec-check**
+
+```
+════ spec-check ════
+base: origin/main (2d2524fd)  head: claude/schema-sql-regenerate-drift-check-633729
+變更檔數: 13（含未追蹤新檔）
+
+CHECK │ spec 引用了 db/changelog/*.sql —— …（B8，預期出現）
+PASS: 9090 gateway/OpenAPI 九路 parity、response manifest、parameters、examples 與 refs 完整
+PASS: db/schema.sql（去除專案檔頭後）逐位元等於 asset-postgres 此刻的 pg_dump 輸出
+      表數：85 張（檔頭宣告一致）
+
+════ 結果 ════
+BLOCK: 0   CHECK: 1
+exit=0
+```
+
+B7（Requirements 計數）無 BLOCK。無 B10 BLOCK，故不需走「重產與驗收之間別人又套 changeset」的
+`databasechangelog` 判讀流程。
+
+**（9）未誤觸實作檔**
+
+`git status --short` 與 `git diff --stat` 見上；以
+`grep -E '^(backend/|bff/|external-materials-service/|frontend/|api-gateway/|docker-compose\.yml)'`
+過濾變更清單，輸出為空。本任務不涉及可執行程式碼，未跑 `/run-stack`、未停或重啟任何容器。
+
+### 與原計畫的偏差
+
+1. **驗證(4) 實際觸發的是「檔頭缺表數宣告」這一關，不是本體 diff。** 該時點 `db/schema.sql`
+   尚未重產、檔頭也還沒有 367.2 的「產生當下表數：N 張」，而 367.5 的離線檢查刻意排在所有
+   docker 呼叫之前，所以腳本在那一關就回 `1`。離開碼與 B10 的分流結果（CHECK、`exit=0`）仍完全
+   符合驗證(4) 的判準（`DIFF_FILES` 不含 `db/schema.sql` 與 `db/changelog/`）。**本體漂移導致
+   BLOCK 的端到端情境由驗證(3) 補足**，兩者合計涵蓋 AC13 要求的四種結局。
+2. **367.7(a) 兩種最小改法都採用，而非二擇一。** 除了在 `added_lines()` 末尾補 `return 0`，
+   B8 也改成 `b8_hit=$(added_lines 'spec/**' | grep -cE '…' || true)` 再判斷。只補 `return 0`
+   時，`added_lines | grep -qE` 的 `grep -q` 會在第一個匹配就結束、可能讓上游收到 SIGPIPE，
+   在 `pipefail` 下整條 pipeline 仍可能回 141；`grep -c` 會讀完全部輸入，不存在這個殘留風險。
+   兩者皆為任務檔列出的合法改法，同時採用不擴大變更範圍。
+3. **367.11 複驗時發現 `spec/design.md` 該段殘留一處避讓前的舊編號。** 段落開頭已正確寫
+   「Requirement 103／Task 367」，但同段中間仍寫「**Task 366 起**改由 `scripts/tests/…`」。
+   依 367.11(b)「措辭不得對現況說謊」一併改為「**Task 367 起**」。該段其餘內容（lagging、
+   嚴重度分流、Task 245 當時 55 張的歷史脈絡）複驗與最終落地的腳本／B10 完全一致，未改動。
+   同段引用的兩項 schema 事實也在重產後複驗仍成立：`stock_price_history` 的
+   `close_price numeric(15,4) NOT NULL`／`open|high|low_price numeric(15,4)` 可空／`volume bigint` 可空，
+   `exchange_rate_history` 的 `buy_rate`／`sell_rate` 皆 `numeric(10,4)` 且皆 nullable。
+4. **檔頭由 26 行擴為 44 行**（367.3 的三步驟重產指令＋新增的「防漂移閘門」段），因此
+   `git diff --numstat -- db/schema.sql` 是 `788 / 14`；扣掉檔頭後的本體差異才是任務檔預測的
+   `765 / 9`（已於上方驗證(1) 實測確認）。本體未手改任何一個字元。
+5. **`scripts/README.md` 的 `spec-check.sh` 那一列順帶補上了 B8**（原本連 B8 都沒列），
+   與 367.7(c) 對 `spec-check.sh` 檔頭註解「補上遺漏的 B8」同一理由。
+
+### 三項刻意接受的限制（未解決，也不宣稱已解決）
+
+1. B10 是 **lagging** 檢查：`spec-check.sh` 只在 `/spec-review` 這條路徑、實作**之前**被執行，
+   漂移卻產生於實作**之後**，故它攔到的是「上一輪沒重產的漂移」。**時間差仍然存在。**
+2. `asset-postgres` 是全機多個 worktree 共用的可變狀態，別人未 merge 的 changeset 會出現在
+   你的比對結果裡——這正是 367.6 嚴重度分流存在的理由，分流未被簡化。
+3. 367.10 寫進 `spec/tasks/README.md` 任務檔模板的收尾約定，**強度低於 commit-msg hook**；
+   依 367.12 未改 `scripts/git-hooks/commit-msg` 的觸發清單。時間差未消除。
+
+### arch-auditor 查證（實作後，唯讀）
+
+`arch-auditor` 以本次完整 diff（13 支檔，含未追蹤新檔全文）查證：**critical 0 / major 0 / minor 1**。
+
+它獨立複驗（未採信實作者敘述）的項目：禁區零誤觸（`backend/`／`bff/`／`external-materials-service/`／
+`frontend/`／`api-gateway/`／`docker-compose.yml`／`db/changelog/` 全無變更）；`db/schema.sql` 仍不參與 DB
+初始化（compose 僅掛 `./db/init`）且無任何 runtime 參照、內容零資料；新腳本 11 種失敗模式逐一實測全部落在
+三態契約內（含無 `docker` 指令、`pg_dump` 失敗、路徑含空白）；`spec-check.sh` 的 `drift_status=$?` 緊鄰、
+空 `DIFF_FILES` 不誤命中、`b8_hit` 既不恆觸發也不恆不觸發；自行重跑 `pg_dump` 比對得 IDENTICAL；逐一查證
+`databasechangelog` 的 130 個 filename，8 筆查無者全部是已知的版號避讓，**確認重產沒有把任何未 merge 的
+schema 帶進 main**。
+
+**唯一 minor 已修**：`.claude/agents/arch-auditor.md`（兩處）、`.claude/agents/spec-auditor.md`、
+`spec/steering/structure.md` 的新口徑只搬了「運行中 DB ≠ main 現況」這一半，漏掉 `spec/design.md` 同批
+新增、且明文「引用前要知道」的 **lagging** 性質。這對 `arch-auditor` 特別要緊——它的執行時機在實作**之後**，
+正好落在「剛動完 changelog、`/run-stack` 已套用、但 `db/schema.sql` 尚未重產」的視窗，依新口徑直接引用會
+得到「查無該表」的錯誤斷言。四處均已補上「B10 是 lagging 檢查、在裡面查不到某張表不等於它不存在」。

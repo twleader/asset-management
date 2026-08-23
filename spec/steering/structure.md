@@ -16,10 +16,16 @@ asset-management/
 ├── frontend/                      # Vue 3 SPA
 ├── db/
 │   ├── init/                      # 容器初始化 SQL（01_dump.sql 含真實資料，gitignored）
-│   └── schema.sql                 # schema-only 鏡像（離線參考用，**不是可信基準線**——靠人工重新
-│                                  #   產出，實測已落後：截至 Task 245 仍缺 crawler_export_setting
-│                                  #   與 asset_transaction。DB 現況一律查運行中的 DB：
-│                                  #   docker exec asset-postgres psql -U assets -d assets -c '\d <table>'）
+│   └── schema.sql                 # schema-only 鏡像（離線查證用；與運行中 DB 的同步由
+│                                  #   scripts/spec-check.sh 的 B10 機械查核——B10 呼叫
+│                                  #   scripts/tests/schema-sql-drift-test.sh 逐位元比對。可查
+│                                  #   欄位型別／位數／nullable／預設值／索引。但它反映的是
+│                                  #   「運行中 DB」，可能含其他 worktree 尚未 merge 的 changeset；
+│                                  #   涉及「main 現況」的斷言仍須複驗：
+│                                  #   docker exec asset-postgres psql -U assets -d assets -c '\d <table>'
+│                                  #   並比對 databasechangelog 尾端。另注意 B10 是 lagging 檢查、
+│                                  #   跑在實作「之前」，剛動過 db/changelog/** 的當下本檔可能尚未
+│                                  #   重產，在裡面查不到某張表不等於它不存在）
 ├── data/                          # H2 本機開發 DB（gitignored）
 ├── scripts/                       # 維運腳本 + git hooks
 │   ├── db-export.sh

@@ -81,6 +81,16 @@ docker compose -p asset-management up -d --no-deps --force-recreate business-ser
 curl -s http://localhost:8080/actuator/health
 ```
 
+任務若動到 `backend/src/main/resources/db/changelog/**`，驗證／收尾步驟**必須包含重產
+`db/schema.sql`**（重產方式見該檔檔頭「重新產生」段），並以下列指令確認回 0：
+
+```bash
+bash scripts/tests/schema-sql-drift-test.sh   # 0=同步 1=漂移 2=無法查證
+```
+
+漏掉這一步不會當場被擋下——`scripts/spec-check.sh` 的 B10 是 lagging 檢查，跑在下一個任務的
+實作**之前**，所以漂移只會在下一次 `spec-check` 才被指出，屆時已難以歸屬是誰造成的。
+
 ## 完成報告
 
 （實作者做完後回填：實際改了哪些檔、驗證輸出、與原計畫的偏差及原因。）
@@ -97,9 +107,10 @@ curl -s http://localhost:8080/actuator/health
 - 欄位型別、精度、nullable、命名，是不是寫死在檔案裡而不是要對方去查？
   （對 DB 現況的斷言**以運行中的 DB 為準**：`docker exec asset-postgres psql -U assets -d assets -c '\d <table>'`。
   **不要引用 `db/changelog/**`** 描述現況——那裡面有永不執行的 changeset，照著改會把原本正確的改成錯的。
-  `db/schema.sql` 只能當離線參考，**不是可信基準線**：它是被 `.gitignore` 排除的真基準線 `db/init/01_dump.sql`
-  的去資料鏡像，靠人工重新產出，**實測已落後**——截至 Task 245 它仍沒有 `crawler_export_setting`（v1.64.0）
-  與 `asset_transaction`（v1.72.0）。查不到某張表時，先確認是「真的沒有」還是「鏡像沒跟上」。
+  `db/schema.sql` 可以當離線查證依據：它是被 `.gitignore` 排除的真基準線 `db/init/01_dump.sql` 的去資料鏡像，
+  與運行中 DB 的同步由 `scripts/spec-check.sh` 的 B10 機械查核（B10 呼叫 `scripts/tests/schema-sql-drift-test.sh`
+  逐位元比對），可用來查欄位型別／位數／nullable／預設值／索引。
+  注意 B10 是 lagging 檢查：改動 schema 後未重產該檔，會在**下一次** `spec-check` 被指出，不是當場攔下。
   **但運行中 DB 也不等於 main 的現況**：全機只有一套 `asset-*` 容器、多個 worktree 並行推進，DB 可能已套用
   其他分支尚未 merge 的 changeset。下斷言前先比對
   `SELECT id FROM databasechangelog ORDER BY orderexecuted DESC LIMIT 5` 與 main 的

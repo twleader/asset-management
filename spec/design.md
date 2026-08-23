@@ -846,7 +846,7 @@ twse_index_year_end_history  (TWSE 指數年末值；Task 97 起已不使用—�
 >
 > 📌 **查證來源：運行中的 DB。** `docker exec asset-postgres psql -U assets -d assets -c '\d <table>'`——欄位型別／位數／nullable 一律以它為準。
 >
-> ✅ **`db/schema.sql` 是可用的離線查證依據，其與運行中 DB 的同步由機械閘門逐次查核（Requirement 103／Task 367）。** 它是 `db/init/01_dump.sql`（含真實個人財務資料，被 `.gitignore` 排除）「去除全部資料」後的可版控鏡像。過去它靠人工重產、長期落後（Task 245 當時僅 55 張 `CREATE TABLE`，Task 367 動工前為 74 張、運行中 DB 已是 85 張），**Task 366 起**改由 `scripts/tests/schema-sql-drift-test.sh` 逐位元比對「去除專案檔頭後的檔案內容 vs 此刻重跑 `pg_dump` 的輸出」，並由 `scripts/spec-check.sh` 的 **B10** 在每次 spec 機械檢查時執行。因此欄位型別、位數、nullable、預設值與索引定義都可以直接引用本檔。
+> ✅ **`db/schema.sql` 是可用的離線查證依據，其與運行中 DB 的同步由機械閘門逐次查核（Requirement 103／Task 367）。** 它是 `db/init/01_dump.sql`（含真實個人財務資料，被 `.gitignore` 排除）「去除全部資料」後的可版控鏡像。過去它靠人工重產、長期落後（Task 245 當時僅 55 張 `CREATE TABLE`，Task 367 動工前為 74 張、運行中 DB 已是 85 張），**Task 367 起**改由 `scripts/tests/schema-sql-drift-test.sh` 逐位元比對「去除專案檔頭後的檔案內容 vs 此刻重跑 `pg_dump` 的輸出」，並由 `scripts/spec-check.sh` 的 **B10** 在每次 spec 機械檢查時執行。因此欄位型別、位數、nullable、預設值與索引定義都可以直接引用本檔。
 >
 > **B10 的兩項已知性質，引用前要知道：**（a）它是 **lagging** 檢查——`spec-check.sh` 只在實作**之前**被呼叫，漂移卻產生於實作之後，所以它攔到的是「上一輪沒重產的漂移」，不是「這一輪即將產生的」；（b）**嚴重度分流**——本次變更若碰到 `db/schema.sql` 或 `backend/src/main/resources/db/changelog/**` 則漂移記為 BLOCK，否則記為 CHECK（因為全機 56 個 worktree 共用一套 `asset-postgres`，漂移可能是別人造成的），`asset-postgres` 未運行時一律降為 CHECK「無法查證」。
 >
@@ -5946,7 +5946,7 @@ CREATE TABLE index_export_schedule_time_market (
 `market` 不設 CHECK 約束：合法代碼清單在 `MacroHistoryService.DAILY_INDEX_CODES`（Java 端單一來源），
 寫進 DDL 會變成第二份清單，日後新增指數要改兩處且漏改只在 runtime 才炸。改由 service 層對每個時間點的 market 清單逐一白名單驗證，並拒絕空清單。
 
-`index_export_schedule_time_market` 刻意一列一指數，不使用逗號字串、JSON 或 PostgreSQL array；同一時間點的一組指數是可增刪的關聯資料，符合資料庫正規化，也讓每個時間點可以有不同指數集合。`v1.88.0-index-export-multi-time-market.sql` 建立兩張新表，先將既有 `index_export_schedule.run_hour/run_minute/market/last_run_*` 轉成一個 `index_export_schedule_time` 與一筆關聯，再移除舊欄位與舊 constraint；migration 使用 `IF EXISTS`／`IF NOT EXISTS`／`ON CONFLICT DO NOTHING`，需以 PostgreSQL `DO $$ ... EXECUTE ... $$` block 讀取仍存在的舊欄位，Liquibase changeset 設 `splitStatements:false`（或可驗證的等價方案），才能安全應對多 worktree 版號避讓重跑。實作前必須以運行中 DB 的 `\d index_export_schedule` 與 `databasechangelog` 確認 v1.66.0 parent 已存在且已套用；`db/schema.sql` 缺少這張歷史表，不能用它斷言現況。
+`index_export_schedule_time_market` 刻意一列一指數，不使用逗號字串、JSON 或 PostgreSQL array；同一時間點的一組指數是可增刪的關聯資料，符合資料庫正規化，也讓每個時間點可以有不同指數集合。`v1.88.0-index-export-multi-time-market.sql` 建立兩張新表，先將既有 `index_export_schedule.run_hour/run_minute/market/last_run_*` 轉成一個 `index_export_schedule_time` 與一筆關聯，再移除舊欄位與舊 constraint；migration 使用 `IF EXISTS`／`IF NOT EXISTS`／`ON CONFLICT DO NOTHING`，需以 PostgreSQL `DO $$ ... EXECUTE ... $$` block 讀取仍存在的舊欄位，Liquibase changeset 設 `splitStatements:false`（或可驗證的等價方案），才能安全應對多 worktree 版號避讓重跑。實作前必須以運行中 DB 的 `\d index_export_schedule` 與 `databasechangelog` 確認 v1.66.0 parent 已存在且已套用；`db/schema.sql` 雖由 `spec-check.sh` B10 機械查核與運行中 DB 的同步（三張 `index_export_schedule*` 表現在都在其中），但它記錄的是 v1.88.0 **遷移後**的狀態，不能用來推測遷移前的欄位形貌，也不能據以判斷 parent 是否已套用——那仍須查 `databasechangelog` 與 `\d index_export_schedule`。
 
 滾動範圍、路徑安全（`resolveDir` + `startsWith(base)`）、`writeAtomically`、
 每分鐘 poll ＋每時間點當日 guard ＋ `ApplicationReadyEvent` 自癒 ＋ `AtomicBoolean` 防重入、
