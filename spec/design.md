@@ -9448,3 +9448,66 @@ blog 發布**——語意是驗證本機／Drive 落點，不是公開發布，�
 Requirement 102 的 AC9。
 
 前端：本專案目前僅 `frontend/src/utils/*.test.js` 這類工具函式層級 contract test，`TodayMarketAnalysisView.vue` 無既有 view 元件測試前例，本 Requirement 不新增前端自動化測試，改以 `/run-stack` 實機驗證：`--no-cache` 重建並 recreate `business-services`／`bff`／`frontend` 後，登入頁面分別驗證 `engine=local` 新分析顯示四個分類區塊且台股／美股視覺分開、`engine=llm` 或舊資料（`factorGroups=null`）維持既有整段呈現不報錯、歷史列表 `summary` 欄未被更動。
+
+### Requirement 105／Task 369：儀表板「股價/漲跌(%)」欄位 live 報價缺 `priceChange` 時的降級設計
+
+`DashboardView.vue` 的 `getRealtimePrice(row)` 修正為「`price` 與 `priceChange`/`changePercent` 各自獨立可為 null」，不再以 `priceChange == null` 作為整包丟棄的條件：
+
+```js
+function getRealtimePrice(row) {
+  if (!shouldApplyLive(row.market)) return null
+  const key = `${row.market}_${row.stockCode}`
+  const p = stockPrices.value[key]
+  if (!p || p.price == null) return null
+  if (!isAcceptedTodayQuote(p, marketToday(row.market))) return null
+  return {
+    price: Number(p.price),
+    priceChange: p.priceChange != null ? Number(p.priceChange) : null,
+    changePercent: p.changePercent != null ? Number(p.changePercent) : null
+  }
+}
+```
+
+`priceNumberColor(row)` 的「是否為 live」判斷改用「`getRealtimePrice(row)` 是否回傳非 null 物件」——AC1 修正後此判斷本身即涵蓋「有 live 股價、缺漲跌」的情況，維持現有一行邏輯不變（`getRealtimePrice(row)` truthy → 深色）。`getPriceCell(row)`／模板既有 `priceChange != null` 顯示判斷、`changeColor`／`changeArrow` 一律不動：`priceChange` 為 `null` 時模板本就不渲染漲跌 ▲/▼ 與百分比区段，只是修正前這個分支因上游整包丟棄而永遠進不去。
+
+Tooltip（`getQuoteForRow` 週邊、第 1280～1290 行附近，與表格「股價」欄同源呼叫 `getRealtimePrice`）不需額外程式碼改動，因為呼叫的是同一個修正後的函式，自然與表格欄位一致。
+
+後端 `PriceCacheWriter.buildPayload()`、`PriceQueryService.historyToLive()` 產生 `priceChange: null` 的既有保守行為（缺 `previousClose`／前一交易日收盤價時不亂猜）不變，本需求只解決前端把「缺漲跌」誤判為「整包報價不可用」的問題。
+
+本修正即是使程式碼符合本檔既有段落（`per-market 基準日判斷一律由 BFF 完成` 一段）既定原則「live vs frozen 仍由 `basedate == 該市場當地今日` 決定，不得以 `priceChange` 是否為 null 判定」——`getRealtimePrice` 是否回傳 truthy 物件本應只取決於 `price` 是否有效，`priceChange` 缺值不改變「是否為 live」這一判斷維度，兩段描述的是同一份程式碼行為的兩個角度，互為 xref（以段落內容而非行號引用，避免文件增修時位移失準）。
+
+### 修正後複查：AC7～AC9 修的是第二個、才是使用者實際看到畫面的根因
+
+實機以 `docker exec asset-business-services curl http://localhost:8080/api/market-data/prices` 查證，休市時報價快取的 `priceChange`／`changePercent` 實際上都有值（例：`quoteStatus: "PREVIOUS_CLOSE"`, `priceChange: 0.85`），AC1 要修的「`priceChange` 為 null」情境根本沒發生——`isAcceptedTodayQuote()` 只接受 `LIVE`／`VERIFIED_CLOSE`，`PREVIOUS_CLOSE` 在 `getRealtimePrice()` 一開始就被拒絕，AC1 的分支沒有機會執行到。真正吃掉漲跌%的是 `getPriceCell()` 快照後備分支的 `belongsToRow` 判斷：
+
+```js
+const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
+```
+
+`p.tradingDate` 是報價快取記錄的「該市場最後交易日」，`latest.value?.snapshotDate` 對最新快照而言是**今天的日曆日期**——休市（非交易日產生的今日快照）時兩者恆不相等，`belongsToRow` 恆為 `false`，`priceChange`／`changePercent` 因此被強制設為 `null`，即使 `p` 裡明明有值。這與同一函式上方的既有中文註解「收盤/週末**亦可顯示**」直接矛盾，是程式碼與其自身註解意圖不一致的 bug，不是設計如此。
+
+修正：`belongsToRow` 改判斷「目前檢視的是不是最新快照」，不比對日期字串：
+
+```js
+function getPriceCell(row) {
+  if (isRowClosePending(row)) return null
+  const live = getRealtimePrice(row)
+  if (live) {
+    return { price: live.price, priceChange: live.priceChange, changePercent: live.changePercent }
+  }
+  if (row.stockPrice == null) return null
+  const p = stockPrices.value[`${row.market}_${row.stockCode}`]
+  // stockPrices 快取只反映「目前最新」報價；選了歷史快照時其漲跌不對應該列收盤價 → 只顯示收盤價。
+  // 判準是「目前是否正在看最新快照」，不能拿 p.tradingDate（該市場最後成交日）比對
+  // latest.value.snapshotDate（今天日曆日）——休市/週末兩者恆不相等，會讓漲跌%整片消失。
+  const isLatestSnapshotView = selectedSnapshotId.value == null || selectedSnapshotId.value === store.latestSnapshot?.id
+  const belongsToRow = p && isLatestSnapshotView
+  return {
+    price: Number(row.stockPrice),
+    priceChange: belongsToRow && p.priceChange != null ? Number(p.priceChange) : null,
+    changePercent: belongsToRow && p.changePercent != null ? Number(p.changePercent) : null
+  }
+}
+```
+
+`selectedSnapshotId` 與 `store.latestSnapshot`（`frontend/src/stores/assetStore.js` 既有 getter，`snapshots[0]`）皆為既有欄位，不需新增狀態。選歷史快照（`selectedSnapshotId` 不等於最新快照 id）時 `isLatestSnapshotView` 為 `false`，維持既有「只顯示凍結收盤價、不帶漲跌%」行為不變。`priceNumberColor(row)` 與 `getRealtimePrice(row)` 完全不受此修正影響——休市時股價數字仍依既有邏輯顯示灰色（非 live），本修正只讓漲跌%不再被錯誤地一併清空。
