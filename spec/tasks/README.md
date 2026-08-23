@@ -88,8 +88,9 @@ curl -s http://localhost:8080/actuator/health
 bash scripts/tests/schema-sql-drift-test.sh   # 0=同步 1=漂移 2=無法查證
 ```
 
-漏掉這一步不會當場被擋下——`scripts/spec-check.sh` 的 B10 是 lagging 檢查，跑在下一個任務的
-實作**之前**，所以漂移只會在下一次 `spec-check` 才被指出，屆時已難以歸屬是誰造成的。
+`db/schema.sql` 是 DB schema 的唯一標準，你動了 schema 就有義務讓它保持正確。漏掉這一步不會
+當場被擋下——`scripts/spec-check.sh` 的 B10 是 lagging 檢查，跑在下一個任務的實作**之前**，
+所以漂移只會在下一次 `spec-check` 才被指出，屆時已經有人得替你重產。
 
 ## 完成報告
 
@@ -105,16 +106,15 @@ bash scripts/tests/schema-sql-drift-test.sh   # 0=同步 1=漂移 2=無法查證
 - 檔案裡有沒有出現 `requirements.md`／`design.md`／`spec.init` 之類的**文件名指引**？有就是沒複寫完。
 - 有沒有出現「同上」「如前所述」「參考另一個任務」？收件者看不到那些。
 - 欄位型別、精度、nullable、命名，是不是寫死在檔案裡而不是要對方去查？
-  （對 DB 現況的斷言**以運行中的 DB 為準**：`docker exec asset-postgres psql -U assets -d assets -c '\d <table>'`。
+  （對 DB schema 形貌的斷言**以 `db/schema.sql` 為唯一標準**：表存在與否、欄位、型別、位數、nullable、
+  預設值、CHECK、索引一律以它為準。
   **不要引用 `db/changelog/**`** 描述現況——那裡面有永不執行的 changeset，照著改會把原本正確的改成錯的。
-  `db/schema.sql` 可以當離線查證依據：它是被 `.gitignore` 排除的真基準線 `db/init/01_dump.sql` 的去資料鏡像，
-  與運行中 DB 的同步由 `scripts/spec-check.sh` 的 B10 機械查核（B10 呼叫 `scripts/tests/schema-sql-drift-test.sh`
-  逐位元比對），可用來查欄位型別／位數／nullable／預設值／索引。
-  注意 B10 是 lagging 檢查：改動 schema 後未重產該檔，會在**下一次** `spec-check` 被指出，不是當場攔下。
-  **但運行中 DB 也不等於 main 的現況**：全機只有一套 `asset-*` 容器、多個 worktree 並行推進，DB 可能已套用
-  其他分支尚未 merge 的 changeset。下斷言前先比對
-  `SELECT id FROM databasechangelog ORDER BY orderexecuted DESC LIMIT 5` 與 main 的
-  `db.changelog-master.yaml` 尾端。）
+  `db/schema.sql` 與運行中 DB 的同步由 `scripts/spec-check.sh` 的 B10 機械查核（B10 呼叫
+  `scripts/tests/schema-sql-drift-test.sh` 逐位元全文比對）。
+  **發現它與運行中 DB 不一致，就是這個檔過期**——依它檔頭「重新產生」段的指令重產並納入本次變更，
+  不要改用別的來源當基準。
+  注意 B10 是 lagging 檢查：改動 schema 後未重產該檔，會在**下一次** `spec-check` 被指出，不是當場攔下；
+  剛動過 `db/changelog/**` 的當下在本檔查不到某張表，代表**本檔過期需要重產**。）
 - 驗證段的指令，是不是**貼上去就能跑**？
 - 涉及 `@Scheduled` 的話，有沒有一項是「同步 `SchedulePublicBffController.JOBS`」？漏掉這項是排程列表頁漂移的固定成因。
 

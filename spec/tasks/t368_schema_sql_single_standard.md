@@ -34,7 +34,7 @@ Task 367 已把 `db/schema.sql` 重產到與運行中 DB 逐位元一致（85 �
 
 ## 要做什麼
 
-- [ ] **368.1 先記下基準命中數（改任何檔之前跑）。** 舊措辭有多種寫法，只用單一樣式的「零命中」grep 會靜默假通過：
+- [x] **368.1 先記下基準命中數（改任何檔之前跑）。** 舊措辭有多種寫法，只用單一樣式的「零命中」grep 會靜默假通過：
 
   ```bash
   grep -ranE '仍須.*複驗|仍須以 `psql`|仍須查|尚未 merge 的 changeset|不得以重產|停下回報|離線查證依據|離線查證用|可用於離線查證|離線參考|不等於它不存在|一律以 `psql` 複驗|排除「版號避讓」|git cat-file -e origin/main|以運行中 DB 為準|以運行中的 DB 為準|查證來源：運行中的 DB|查證位數/nullable 一律以|以 `db/init/01_dump\.sql` 為準|一律以 dump 為準|難以歸屬|並比對 databasechangelog 尾端|psql -U assets -d assets -c' \
@@ -59,26 +59,26 @@ Task 367 已把 `db/schema.sql` 重產到與運行中 DB 逐位元一致（85 �
 
   （樣式刻意不含 `spec/requirements.md`、`spec/tasks.md` 與 `spec/tasks/t367_*.md`——Requirement 103 的原文、本任務的 Requirement 104 敘述、索引列與 Task 367 的完成報告都必然提到這些字眼，那是歷史紀錄與規範敘述，強制清零等於竄改歷史，違反 AC10。`scripts/tests/schema-sql-drift-test.sh` 內既有四處「純離線檢查／此為離線檢查」指的是「不需 docker」，語意無關，樣式刻意不涵蓋，**也不得順手改掉**。）
 
-- [ ] **368.2 統一的新口徑（下列各處一律採用同一段語意，措辭可依上下文調整長短）：**
+- [x] **368.2 統一的新口徑（下列各處一律採用同一段語意，措辭可依上下文調整長短）：**
 
   > **`db/schema.sql` 是 DB schema 的唯一標準。** 表存在與否、欄位、型別、位數、nullable、預設值、CHECK、索引**一律以 `db/schema.sql` 為準**。它與運行中 DB 的同步由 `scripts/spec-check.sh` 的 B10 機械查核（`scripts/tests/schema-sql-drift-test.sh` 逐位元全文比對）。**發現它與運行中 DB 不一致，就是這個檔過期——依它檔頭的指令重產並納入本次變更**，不要改用別的來源當基準。`db/changelog/**` 一律不得用於描述現況（那裡有永不執行的 changeset）。
 
-- [ ] **368.3 `.claude/agents/spec-auditor.md`（兩處）。**
+- [x] **368.3 `.claude/agents/spec-auditor.md`（兩處）。**
   - **第 24 行**「查證前務必知道的專案陷阱」第 2 點：現行文字是「DB 現況的**離線查證依據**是 `db/schema.sql`……但它反映的是運行中 DB……涉及『main 現況』的斷言**仍須**以 `docker exec asset-postgres psql …` 並比對 `databasechangelog` 尾端複驗。**B10 還是 lagging 檢查**……在裡面查不到某張表不等於它不存在。」→ 改為 368.2 的口徑；刪掉「仍須……複驗」整句；lagging 那句改寫成「查不到某張表代表**本檔過期需要重產**」。**保留**該點原有的最後一段（`db/changelog/**` 一律不得用於描述現況、Task 148→197→201 的教訓）。
   - **第 37 行**「審查維度」表的「資料來源正確性」列：把其中關於 `db/schema.sql` 的那一段改為 368.2 的口徑。**只改那一段**——同一格裡的「即時價只能從 Redis、收盤價只讀 `stock_price_history`、business-services 不直連外部行情 API」與「已改為 DB 可設定的排程時點不得在 spec 裡寫死成字面時間（Task 195）」必須原樣保留。
   - 另加一句（Requirement 104 AC6）：**若查證時發現本檔與運行中 DB 不符，處置是把「`db/schema.sql` 已漂移、需依檔頭指令重產」列為 finding**，不是改用 `db/changelog/**` 或運行中 DB 改寫斷言。
 
-- [ ] **368.4 `.claude/agents/arch-auditor.md`（兩處）。**
+- [x] **368.4 `.claude/agents/arch-auditor.md`（兩處）。**
   - **第 42 行**「查證前務必知道的專案陷阱」第 1 點：改為 368.2 的口徑；刪掉「涉及『main 現況』的斷言仍須以 `psql` 並比對 `databasechangelog` 尾端複驗」與「一律以 `psql` 複驗」。lagging 改寫成「你的時機在實作**之後**，剛動過 `db/changelog/**` 的視窗裡本檔可能尚未重產；此時在本檔查不到某張表，代表**本檔過期**——把『需依檔頭指令重產』列為 finding」。**保留**該點原有的「查不到（容器沒跑）就在報告寫『無法查證』，**不要用 changelog 推測**」。
   - **第 151 行**「不要做的事」清單那一條：同樣去掉「仍須以 `psql` 加 `databasechangelog` 尾端複驗」，改成指向「重產」。
 
-- [ ] **368.5 `spec/steering/structure.md` 的 `db/` 樹狀說明（第 19 行起的 `schema.sql` 註解區塊）。** 改為 368.2 的口徑；刪掉「但它反映的是『運行中 DB』，可能含其他 worktree 尚未 merge 的 changeset；涉及『main 現況』的斷言仍須複驗：`docker exec …` 並比對 databasechangelog 尾端」整段。lagging 只留事實與「重產」處置。註解區塊要維持原有的樹狀對齊格式（`│` 與 `#` 的縮排）。
+- [x] **368.5 `spec/steering/structure.md` 的 `db/` 樹狀說明（第 19 行起的 `schema.sql` 註解區塊）。** 改為 368.2 的口徑；刪掉「但它反映的是『運行中 DB』，可能含其他 worktree 尚未 merge 的 changeset；涉及『main 現況』的斷言仍須複驗：`docker exec …` 並比對 databasechangelog 尾端」整段。lagging 只留事實與「重產」處置。註解區塊要維持原有的樹狀對齊格式（`│` 與 `#` 的縮排）。
 
-- [ ] **368.6 `spec/tasks/README.md`（兩處）。**
+- [x] **368.6 `spec/tasks/README.md`（兩處）。**
   - **任務檔模板 `## 驗證` 段**那條收尾約定（「任務若動到 `backend/src/main/resources/db/changelog/**`，驗證／收尾步驟**必須包含重產 `db/schema.sql`**」）：保留，但把後面「漏掉這一步不會當場被擋下——B10 是 lagging 檢查，跑在下一個任務的實作**之前**，所以漂移只會在下一次 `spec-check` 才被指出，屆時已難以歸屬是誰造成的」調整為與新口徑一致的措辭（重點是「本檔是唯一標準，你動了 schema 就有義務讓它保持正確」，而不是「屆時難以歸屬」）。
   - **自足性自查段**關於 `db/schema.sql` 的那幾行，含**「但運行中 DB 也不等於 main 的現況」整段**（現行要求「下斷言前先比對 `SELECT id FROM databasechangelog …` 與 main 的 `db.changelog-master.yaml` 尾端」）：改為 368.2 的口徑。該段原本存在的理由已被 Requirement 104 取代，**改寫而非保留**——這與 Task 367 的 **367.9**（見 `spec/tasks/t367_schema_sql_drift_guard.md:216`，該條下的 `:218` 子項寫「第 103–106 行『但運行中 DB 也不等於 main 的現況』整段必須原樣保留」）相反，是刻意的推翻，實作時不要照舊任務檔辦。（注意不要看成 `366.x`——`Task 366` 是另一支在途 worktree `export-to-blog-0f382e` 的「交易雷達匯出到 blog」，與本任務無關。）開頭「對 DB 現況的斷言**以運行中的 DB 為準**」那句也要改成以 `db/schema.sql` 為準；同段「它是被 `.gitignore` 排除的**真基準線** `db/init/01_dump.sql` 的去資料鏡像」的從屬敘述也要一併拿掉（理由同 368.10(a)）。
 
-- [ ] **368.7 `spec/design.md`（兩處，第一處是整個 blockquote 不是單行）。**
+- [x] **368.7 `spec/design.md`（兩處，第一處是整個 blockquote 不是單行）。**
   - **「Schema 基準線與 DB 層唯一鍵（重要澄清）」整個 blockquote（約 845–859 行，實作前用 `grep -n 'Schema 基準線與 DB 層唯一鍵' spec/design.md` 定位起點）。** 段內目前有**三種互相競爭的標準**，全部要收斂到 368.2 的口徑：
     - `📌 **查證來源：運行中的 DB。** … 欄位型別／位數／nullable **一律以它為準**` → 改為以 `db/schema.sql` 為準。
     - `✅ db/schema.sql 是可用的離線查證依據…` 那條、其下「B10 的兩項已知性質」→ 改為「唯一標準」；**分流**與 **lagging** 兩項的事實描述保留，處置一律改成「重產本檔」。
@@ -90,7 +90,7 @@ Task 367 已把 `db/schema.sql` 重產到與運行中 DB 逐位元一致（85 �
     - `exchange_rate_history` 那條已經是引 `db/schema.sql`，不動。
   - `index_export_schedule` 段末句（Task 367 已改寫過一次）：**「migration 有沒有套用」屬於 `databasechangelog` 的正當用途，`databasechangelog` 那半句保留**；但同句的 **`與 \d index_export_schedule`** 是運行中 DB 的**形貌**查詢（parent 的 legacy 欄位還在不在），依 AC2 不在豁免範圍，**刪掉並改指 `db/schema.sql`**。同時拿掉任何把 `db/schema.sql` 講成次等來源的措辭。
 
-- [ ] **368.8 `scripts/spec-check.sh`（三處）。**
+- [x] **368.8 `scripts/spec-check.sh`（三處）。**
   - **B8 的 CHECK 文字（整句都要看，不只後半）**：現行訊息有**兩處**與新口徑衝突——
     (i) 開頭「**現況一律以運行中 DB 為準：`docker exec asset-postgres psql -U assets -d assets -c '\d <table>'`**」（這句 368 的初稿漏了，它是每次 `spec-check` 都會印出來的那一條）；
     (ii) 句尾「但運行中 DB 可能已套用其他 worktree 尚未 merge 的 changeset，涉及「main 現況」的斷言**仍須複驗 `databasechangelog` 尾端**」。
@@ -98,18 +98,18 @@ Task 367 已把 `db/schema.sql` 重產到與運行中 DB 逐位元一致（85 �
   - **B10 的 `DRIFT_HINT`**：整段（`先查 SELECT filename FROM databasechangelog …／排除「版號避讓」／確認確有 main 沒有的 schema 物件才停下回報，不得以重產把別人未 merge 的 schema 帶進 main`）**全部刪除**，改為單一句：`處置：依 db/schema.sql 檔頭「重新產生」段的指令重產本檔，並把它納入本次變更。`
   - **B10 上方的區塊註解**：現行「……別人跑過 `/run-stack` 就會把它尚未 merge 的 changeset 套進共用 DB，因此必須依『本次變更有沒有碰 schema』分流……」——分流的**行為不變**（見 368.9），但註解要改成新的理由：分流是為了不讓與 schema 無關的任務被頻繁中斷（本專案兩週就 land 二十餘支 changeset）、以及避免多條分支同時重產 4600+ 行產物檔造成 merge 衝突；不再以「別人未 merge 的 schema 不該被帶進 main」為理由。
 
-- [ ] **368.9 B10 的嚴重度分流維持不變，但兩種訊息「整句重寫」。** 分流條件與級別不動：本次變更碰到 `db/schema.sql` 或 `backend/src/main/resources/db/changelog/` → BLOCK；否則 → CHECK。
+- [x] **368.9 B10 的嚴重度分流維持不變，但兩種訊息「整句重寫」。** 分流條件與級別不動：本次變更碰到 `db/schema.sql` 或 `backend/src/main/resources/db/changelog/` → BLOCK；否則 → CHECK。
   訊息則是**理由與處置一起重寫**（不是只換處置那半句）——現行 CHECK 訊息的理由句含「漂移可能來自其他 worktree **尚未 merge 的 changeset**」，那正是 368.1 清零樣式要抓的措辭，只改處置會讓驗證(1) 過不了。新的 CHECK 理由改為「本次變更未碰 schema／changelog，但 `db/schema.sql` 未通過漂移檢查（成因見上方完整訊息）」——**「成因見上方完整訊息」必須保留、不要改寫成「本檔已過期」**：離開碼 1 也可能來自檔頭表數不符或檔頭結構破壞，此時本體與 DB 完全同步，斷言「過期」會誤導（Requirement 103 AC7 對此有明文，該條未被 Requirement 104 作廢）。處置句兩者共用「依 `db/schema.sql` 檔頭『重新產生』段的指令重產本檔，並把它納入本次變更」。
   **不要因為「唯一標準」就改成一律 BLOCK**——理由見 368.8 第三點與 Requirement 104 AC4。
 
-- [ ] **368.10 `db/schema.sql` 的整個檔頭（不只「防漂移閘門」段）。**
+- [x] **368.10 `db/schema.sql` 的整個檔頭（不只「防漂移閘門」段）。**
   **（a）「用途」段第 6–9 行的從屬敘述**：現行寫「真正的基準線 `db/init/01_dump.sql` 因含真實個人財務資料而被 `.gitignore` 排除……本檔即為該基準線『去除資料』後的可版控鏡像」。這句把本檔的權威性掛在另一個檔上，與「唯一標準」直接衝突，而且**已不符實際產生方式**——檔頭第 17–31 行的重產流程是直接對 `asset-postgres` 跑 `pg_dump --schema-only`，跟 `01_dump.sql` 無關；`01_dump.sql` 靠人工跑 `scripts/db-export.sh` 更新、沒有任何機械閘門保證新鮮度（且本 worktree 根本沒有 `db/init/` 目錄）。改為：**本檔是 DB schema 的唯一標準，由 `pg_dump --schema-only` 直接自運行中的 `asset-postgres` 產生**。「全新環境初始化／還原一律仍用 `db/init/01_dump.sql`」那一行（實測在第 14 行，實作前以 `grep -n` 複驗）**保留**——那是初始化來源，不是查證標準。
   **（b）「防漂移閘門」段。** 現行末兩行是「運行中的 asset-postgres 是多個 worktree 共用的可變狀態，別人尚未 merge 的 changeset 也會出現在其中；涉及『main 現況』的斷言仍須複驗 databasechangelog 尾端。」→ 改為：本檔是 DB schema 的唯一標準；它反映運行中的共用 DB，可能短暫含尚未 merge 的表，那**不影響它的標準地位**，發現不一致一律重產本檔。lagging 那兩行保留事實、處置改成「重產」。
   **注意**：改檔頭會讓 `CREATE TABLE` 張數以外的內容變動，但檔頭不參與 `scripts/tests/schema-sql-drift-test.sh` 的本體比對（該腳本以「第一個整行等於 `-- PostgreSQL database dump` 的前一行」切分），故**不需要重產本體**；改完仍須跑一次該腳本確認回 0。
 
-- [ ] **368.11 `scripts/tests/schema-sql-drift-test.sh` 的 FAIL 訊息。** **只加在「本體漂移」那一次 `print_regen` 呼叫的前面**（現況在該檔第 187 行附近、`FAIL: … 稽核基準線已漂移` 那一段的結尾）。**不得把這句放進 `print_regen()` 函式本體**——該函式另被五條與運行中 DB 無關的離線失敗路徑呼叫（檔頭結構破壞 ×3、檔頭表數宣告 ×2），其中兩條的既有輸出還明寫「此為離線檢查，與運行中 DB 無關」「本項失敗並不代表與運行中 DB 不一致」，緊接著印「本檔已過期」會自我打臉，也違反 368.9 同一段的論證與 Requirement 103 AC13(e)。要加的句子是：「`db/schema.sql` 是 DB schema 的唯一標準，不一致代表**本檔已過期**，依下列指令重產即可。」不要動任何比對邏輯、離開碼、切分規則或版本註解行的特別處理。**也不得動檔內既有四處「純離線檢查／此為離線檢查」的措辭**——那指的是「不需 docker」，與被清除的「離線查證依據」語意無關，清零樣式刻意不涵蓋它們。
+- [x] **368.11 `scripts/tests/schema-sql-drift-test.sh` 的 FAIL 訊息。** **只加在「本體漂移」那一次 `print_regen` 呼叫的前面**（現況在該檔第 187 行附近、`FAIL: … 稽核基準線已漂移` 那一段的結尾）。**不得把這句放進 `print_regen()` 函式本體**——該函式另被五條與運行中 DB 無關的離線失敗路徑呼叫（檔頭結構破壞 ×3、檔頭表數宣告 ×2），其中兩條的既有輸出還明寫「此為離線檢查，與運行中 DB 無關」「本項失敗並不代表與運行中 DB 不一致」，緊接著印「本檔已過期」會自我打臉，也違反 368.9 同一段的論證與 Requirement 103 AC13(e)。要加的句子是：「`db/schema.sql` 是 DB schema 的唯一標準，不一致代表**本檔已過期**，依下列指令重產即可。」不要動任何比對邏輯、離開碼、切分規則或版本註解行的特別處理。**也不得動檔內既有四處「純離線檢查／此為離線檢查」的措辭**——那指的是「不需 docker」，與被清除的「離線查證依據」語意無關，清零樣式刻意不涵蓋它們。
 
-- [ ] **368.12 不得做的事（逐條都是硬性禁令）：**
+- [x] **368.12 不得做的事（逐條都是硬性禁令）：**
   - **不改任何機制**：漂移測試的比對方式、檔頭切分規則、離開碼三態（0／1／2）、B10 的分流條件、B8 的觸發條件與級別，一律不動。本任務只改文字。
   - 不新增／修改／刪除任何 Liquibase changeset，不碰 `backend/src/main/resources/db/changelog/` 底下任何檔案。
   - 不動 `backend/`、`bff/`、`external-materials-service/`、`frontend/`、`api-gateway/`、`docker-compose.yml`、`scripts/git-hooks/`。
@@ -117,7 +117,7 @@ Task 367 已把 `db/schema.sql` 重產到與運行中 DB 逐位元一致（85 �
   - **不重產 `db/schema.sql` 的 pg_dump 本體**（本任務只改檔頭文字；若動工當下本體本來就漂移了，那是另一回事，照 B10 的指示重產並在完成報告說明）。
   - **不要裸跑 `git clean -fd`**。（本 worktree 目前沒有 `db/init/` 目錄——這正是 368.10(a) 的論據之一——但主 clone 與部分 worktree 有，且該目錄未追蹤，一律會被清掉。）要復原改動只用 `git checkout -- <path>`。
 
-- [ ] **368.13 `CLAUDE.md` 補上這個定性。** 現行全檔對 `db/schema.sql` 只有「工具」表的一行機制描述（`scripts/tests/schema-sql-drift-test.sh` 那列），對「schema 現況要查哪裡」零敘述（`grep -n 'DB 現況' CLAUDE.md` 零命中；`運行中 DB` 只在工具表第 368 列出現一次，且屬機制描述、非查證指引）。**臨時派出的 subagent 不繼承 `spec-auditor`／`arch-auditor` 的 prompt，只讀得到 `CLAUDE.md`**——不寫進去，等於這個標準對它們不存在。請在「架構規範」的〈資料庫完整正規化〉小節之後、或〈Spec 文件位置〉的表格附近，加一小段 368.2 的口徑（含「不一致就重產本檔」與「`db/changelog/**` 不得用於描述現況」）。不要動 `CLAUDE.md` 的其他章節。
+- [x] **368.13 `CLAUDE.md` 補上這個定性。** 現行全檔對 `db/schema.sql` 只有「工具」表的一行機制描述（`scripts/tests/schema-sql-drift-test.sh` 那列），對「schema 現況要查哪裡」零敘述（`grep -n 'DB 現況' CLAUDE.md` 零命中；`運行中 DB` 只在工具表第 368 列出現一次，且屬機制描述、非查證指引）。**臨時派出的 subagent 不繼承 `spec-auditor`／`arch-auditor` 的 prompt，只讀得到 `CLAUDE.md`**——不寫進去，等於這個標準對它們不存在。請在「架構規範」的〈資料庫完整正規化〉小節之後、或〈Spec 文件位置〉的表格附近，加一小段 368.2 的口徑（含「不一致就重產本檔」與「`db/changelog/**` 不得用於描述現況」）。不要動 `CLAUDE.md` 的其他章節。
 
 ## 驗證
 
@@ -218,4 +218,196 @@ git diff --stat
 
 ## 完成報告
 
-（實作者做完後回填：實際改了哪些檔、上述八組驗證的實際輸出、與原計畫的偏差及原因。）
+**實作日期：** 2026-08-23（本 worktree `schema-sql-regenerate-drift-check-633729`）
+
+### 實際改了哪些檔（9 個，全部只改定性與處置文字）
+
+```
+ .claude/agents/arch-auditor.md         |  4 ++--
+ .claude/agents/spec-auditor.md         |  4 ++--
+ CLAUDE.md                              | 18 ++++++++++++++++++
+ db/schema.sql                          | 18 +++++++++++-------
+ scripts/spec-check.sh                  | 13 +++++++------
+ scripts/tests/schema-sql-drift-test.sh |  1 +
+ spec/design.md                         | 15 +++++++--------
+ spec/steering/structure.md             | 19 +++++++++----------
+ spec/tasks/README.md                   | 22 +++++++++++-----------
+ 9 files changed, 68 insertions(+), 46 deletions(-)
+```
+
+未觸及 `backend/`、`bff/`、`external-materials-service/`、`frontend/`、`api-gateway/`、
+`docker-compose.yml`、`scripts/git-hooks/`，也未觸及 `backend/src/main/resources/db/changelog/`
+與 `spec/tasks/t367_schema_sql_drift_guard.md`。`db/schema.sql` 只改檔頭文字，`pg_dump` 本體未重產。
+
+### 368.1 基準命中數與「逐條對回位置」對照表
+
+改動前實跑 `wc -l` = **26**，與任務檔預估一致；分布亦完全相同
+（`spec-auditor.md` 2／`arch-auditor.md` 2／`structure.md` 6／`tasks/README.md` 4／
+`design.md` 6／`spec-check.sh` 4／`db/schema.sql` 2）。逐條對回：
+
+| # | 命中位置 | 對應條目 |
+|---|---|---|
+| 1 | `.claude/agents/spec-auditor.md:24` | 368.3 第一處 |
+| 2 | `.claude/agents/spec-auditor.md:37` | 368.3 第二處（審查維度表） |
+| 3 | `.claude/agents/arch-auditor.md:42` | 368.4 第一處 |
+| 4 | `.claude/agents/arch-auditor.md:151` | 368.4 第二處（「不要做的事」） |
+| 5 | `spec/tasks/README.md:92`（`難以歸屬`） | 368.6 (a) 模板收尾約定 |
+| 6–8 | `spec/tasks/README.md:108`（`以運行中的 DB 為準`）／`:110`（`離線查證依據`）／`:115`（`尚未 merge 的 changeset`） | 368.6 (b) 自足性自查段 |
+| 9 | `scripts/spec-check.sh:209` | 368.8 第一點（B8 CHECK 文字，同一行同時命中 (i) 與 (ii)） |
+| 10 | `scripts/spec-check.sh:230` | 368.8 第三點（B10 上方註解） |
+| 11 | `scripts/spec-check.sh:233` | 368.8 第二點（`DRIFT_HINT`） |
+| 12 | `scripts/spec-check.sh:247` | 368.9（B10 的 CHECK 訊息理由句） |
+| 13–18 | `spec/steering/structure.md:19／23／24／25／26／28` | 368.5（含被換行拆開的 25／26 兩行） |
+| 19–20 | `db/schema.sql:39／40` | 368.10(b) 防漂移閘門段 |
+| 21 | `spec/design.md:847` | 368.7 第一點（📌 查證來源） |
+| 22 | `spec/design.md:849` | 368.7 第二點（✅ 離線查證依據＋鏡像從屬敘述） |
+| 23 | `spec/design.md:853` | 368.7 第三點（⚠ 整條刪除、禁令上移） |
+| 24–25 | `spec/design.md:854／855` | 368.7 第四點（`以 db/init/01_dump.sql 為準`／`一律以 dump 為準`） |
+| 26 | `spec/design.md:5949` | 368.7 第二項（`index_export_schedule` 段末句） |
+
+368.3–368.10 指名的每一個位置都至少有一筆命中，樣式沒有漏寫法。
+`CLAUDE.md`（368.13）與 `scripts/tests/schema-sql-drift-test.sh`（368.11）零命中，
+與任務檔 368.1 的說明一致——那兩項是「新增文字」不是「改寫舊文字」。
+
+### 驗證 (1)–(8) 實際輸出
+
+**(1) 舊措辭清零** — 26 → **0**。
+
+> 過程備註：第一次跑回 **1**，殘留在 `spec/design.md:854`
+> 「查證位數/nullable 一律以 `db/schema.sql` 為準」——只換了受詞（dump → `db/schema.sql`），
+> 前綴 `查證位數/nullable 一律以` 仍命中清零樣式的該條 alternative。改寫成
+> 「位數與 nullable 一律以唯一標準 `db/schema.sql` 為準」後歸零。這正是 368.1 警告的
+> 「光看 `wc -l` 不算數」的反面案例：語意已正確，但措辭仍留在被禁清單裡。
+
+**(2) 新口徑到位** — 九個檔全部命中 `唯一標準`：
+
+```
+.claude/agents/spec-auditor.md
+.claude/agents/arch-auditor.md
+spec/tasks/README.md
+spec/steering/structure.md
+scripts/spec-check.sh
+scripts/tests/schema-sql-drift-test.sh
+spec/design.md
+db/schema.sql
+CLAUDE.md
+```
+
+**(3) 保留條款沒有被誤刪** — 十條實際值全部符合：
+
+| 檢查 | 要求 | 實際 |
+|---|---|---|
+| `即時價只能從 Redis`（spec-auditor） | ≥1 | 1 |
+| `Task 195`（spec-auditor） | ≥1 | 1 |
+| `Task 148→197→201`（spec-auditor） | =1 | 1 |
+| `不要用 changelog 推測`（arch-auditor） | ≥1 | 1 |
+| `Liquibase 只做增量`（arch-auditor） | =1 | 1 |
+| ``不要用 `db/changelog/**` 推測``（arch-auditor） | =1 | 1 |
+| ``不要引用 `db/changelog``（design.md） | =1 | 1 |
+| `index_export_schedule` 那一行的 `databasechangelog` | =1 | 1 |
+| `必須包含重產`（tasks/README） | =1 | 1 |
+| 自足性自查段的 `db/changelog`（`awk` 限定範圍） | ≥1 | 2 |
+
+**(4) 機制未被動到**（base = `git merge-base origin/main HEAD` = `41d1201a`）
+
+第一條（drift-test 濾掉訊息行後）：**空輸出**。完整 diff 只有一行新增：
+
+```diff
+@@ -184,5 +184,6 @@ if [ "${non_version_changes:-0}" -eq 0 ]; then
+ fi
+
+ echo
++echo "  ※ $schema_rel 是 DB schema 的唯一標準，不一致代表「本檔已過期」，依下列指令重產即可。"
+ print_regen
+ exit 1
+```
+
+第二條（spec-check 的邏輯行樣式）只印出兩對 `check` 訊息字串的增刪，
+`DRIFT_TEST=`、`drift_status=$?`、`case` 結構、分流的 `grep -qE` 條件皆未出現在增刪行中。
+
+**(5) 腳本與閘門仍然正常**
+
+```
+bash scripts/tests/schema-sql-drift-test.sh
+PASS: db/schema.sql（去除專案檔頭後）逐位元等於 asset-postgres 此刻的 pg_dump 輸出
+      表數：85 張（檔頭宣告一致）
+exit=0
+
+SCHEMA_DRIFT_CONTAINER=asset-postgres-does-not-exist bash scripts/tests/schema-sql-drift-test.sh
+SKIP: 容器 asset-postgres-does-not-exist 不在運行（docker inspect 回「查無此容器」）—— db/schema.sql 是否漂移「無法查證」
+      可用 SCHEMA_DRIFT_CONTAINER 覆寫容器名。
+exit=2
+```
+
+注入檔頭表數 85 → 84 後，腳本回離開碼 **1**，且該離線路徑**沒有**印出「本檔已過期」
+（證實 368.11 的「只加在本體漂移那一次 `print_regen` 前面」確實生效）：
+
+```
+FAIL: db/schema.sql 檔頭宣告「產生當下表數：84 張」，但檔案實際有 85 個 CREATE TABLE
+      —— 檔案疑似被手改而未重產。此為離線檢查，本項失敗並不代表與運行中 DB 不一致。
+```
+
+同一注入下 `bash scripts/spec-check.sh` 的 BLOCK 訊息全文（本次變更碰到 `db/schema.sql` → BLOCK 分支）：
+
+```
+BLOCK │ db/schema.sql 未通過漂移檢查（成因見上方完整訊息）——本次變更已碰到 schema／changelog，須先處理。處置：依 db/schema.sql 檔頭「重新產生」段的指令重產本檔，並把它納入本次變更。
+```
+
+不含 `databasechangelog`／`git cat-file`／`停下回報`。同次輸出的 B8 CHECK 全文：
+
+```
+CHECK │ spec 引用了 db/changelog/*.sql —— 若用途是描述 DB 現況即為錯誤基準線（Task 148→197→201 的教訓：照永不執行的 changelog 改，反而改成與 DB 不一致）。db/schema.sql 是 DB schema 的唯一標準：表存在與否、欄位、型別、位數、nullable、預設值、CHECK、索引一律以它為準，它與運行中 DB 的同步由 B10 機械查核。發現它與運行中 DB 不一致，就是這個檔過期——依它檔頭「重新產生」段的指令重產本檔並納入本次變更，不要改用別的來源當基準。若本次引用只是「新 changeset 放哪／現有最大版號」則屬正當用途，可忽略本項。
+```
+
+測後已用 `/tmp/t368-backup.sql` 還原 `db/schema.sql`，並重跑漂移測試確認回 `PASS / exit=0`。
+
+**(6) 最終 spec-check**
+
+```
+════ 結果 ════
+BLOCK: 0   CHECK: 1
+→ 機械檢查通過（不代表 spec 正確，仍須跑對抗式審查）。
+exit=0
+```
+
+唯一的 CHECK 是 B8（spec 引用 `db/changelog/*.sql`），屬任務檔預期。B7 未 BLOCK：
+`spec/requirements.md` 實際 103 個 `### Requirement`，`CLAUDE.md` 與
+`spec/steering/structure.md` 宣稱值皆為 103，相符。
+
+**(7) 沒有誤觸實作檔** — `git status --short` 為上列 9 個檔；
+`git diff origin/main...HEAD --stat` 為 spec 階段的 6 個檔
+（`CLAUDE.md`／`spec/requirements.md`／`spec/steering/structure.md`／`spec/tasks.md`／
+`spec/tasks/README.md`／`spec/tasks/t368_*.md`）；`git diff --stat` 為上列 9 個檔。
+三者合併後以禁區樣式掃描 `backend/|bff/|external-materials-service/|frontend/|api-gateway/|
+docker-compose.yml|scripts/git-hooks/|t367_schema_sql_drift_guard.md`，**零命中**。
+
+**(8) 不需 `/run-stack`** — 改動的 9 個檔（agent prompt、steering、design、任務檔規範、
+兩支 shell 腳本、`db/schema.sql`、`CLAUDE.md`）都不進任何 container image；
+`db/schema.sql` 亦不參與 DB 初始化（只有 `db/init/` 被掛進 `docker-entrypoint-initdb.d`）。
+
+### 與原計畫的偏差
+
+1. **`spec/design.md` 的「查證位數/nullable 一律以 …」需要改前綴、不只改受詞。**
+   368.7 第四點只寫「改為以 `db/schema.sql` 為準」，照字面做會讓驗證(1) 停在 1 行。
+   最終措辭：「位數與 nullable 一律以唯一標準 `db/schema.sql` 為準，勿照抄 v1.0.0。」
+   語意與 368.2 一致，且不再命中清零樣式。
+2. **368.11 的訊息只新增一行、不另加空白 `echo`。** 初版加了一行 `echo`（空行）＋訊息行，
+   驗證(4) 第一條會多印出一個 `+echo`。改為沿用原本 `print_regen` 前既有的那個空行，
+   驗證(4) 第一條回到空輸出。訊息內容與位置不變。
+3. **AC10 的「在 Requirement 103 的敘述處加一行指向本需求」在 spec 階段就已完成**
+   （`spec/requirements.md:3940` 已有「⚠ 本需求對 `db/schema.sql` 的定性已被
+   Requirement 104／Task 368 取代」整段），本次實作因此未再改動 Requirement 103——
+   這也與派工時「只動 Requirement 104 那一段」的指示一致。
+4. **`db/schema.sql` 檔頭改動未影響漂移測試。** 如 368.10 註記，檔頭不參與本體比對；
+   改後 `grep -c '^CREATE TABLE'` 仍為 85、檔頭宣告仍為 85、分界行（`--` →
+   `-- PostgreSQL database dump`）結構未變，腳本回 `PASS / 0`。
+
+### arch-auditor 查證（實作後，唯讀）
+
+`arch-auditor` 以 `git merge-base origin/main HEAD`（41d1201a）起的完整 diff 查證：**critical 0 / major 0 / minor 1**。
+
+它獨立複驗（未採信實作者敘述）的重點：**「不改機制」屬實**——`scripts/` 全部變動只有 5 行（4 改 1 增），全是字串與註解；逐項確認 `cmp -s`、`grep -nxF` 定位、`body_start = marker_line - 1`、前一行必為 `--`、離開碼三態與各失敗路徑分派、`docker`／`pg_dump` 失敗轉 2、版本註解行特別處理、`print_regen()` 本體、`drift_status=$?` 取值時機、`case` 結構、分流 `grep -qE` 條件、B8 的 `b8_hit` 觸發條件與 CHECK 級別**全部未動**，兩支腳本 mode 仍為 100755。另自行重跑 `pg_dump` 與 `tail -n +49` 比對得 IDENTICAL、表數三方一致（85）、禁區零命中、保留款七項全在、九檔新口徑無殘留競爭來源、`databasechangelog` 的切分（只用於「版號是否被佔用／migration 是否已套用」）在 `design.md` 六處殘留中全部成立。
+
+新增的那行 `echo` 位置也經確認合規：只落在「本體漂移」那一條 exit-1 路徑（第 187 行），五條離線失敗路徑都在第 110 行以前就 `exit 1`，不會與「此為離線檢查，與運行中 DB 無關」自我打臉。
+
+**唯一 minor 已修**：`db/schema.sql` 檔頭把「查不到某張表＝本檔過期」寫成**無條件句**，而同一口徑在其餘五處（`CLAUDE.md`／`structure.md`／`arch-auditor.md`／`spec-auditor.md`／`design.md`）都帶「剛動過 `db/changelog/**` 的當下」這個條件子句。無條件句會把「這張表本來就不存在」誤判成「本檔過期」——在本檔與 DB 逐位元一致（漂移測試回 0）的今天就已經是偽。已補回條件子句，並加一句「不確定時跑 `bash scripts/tests/schema-sql-drift-test.sh`：回 0 就是本檔新鮮、該表確實不存在」。改動落在檔頭第 41 行附近，不觸及 `body_start`，改後漂移測試仍回 0。

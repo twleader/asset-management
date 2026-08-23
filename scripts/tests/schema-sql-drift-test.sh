@@ -184,5 +184,6 @@ if [ "${non_version_changes:-0}" -eq 0 ]; then
 fi
 
 echo
+echo "  ※ $schema_rel 是 DB schema 的唯一標準，不一致代表「本檔已過期」，依下列指令重產即可。"
 print_regen
 exit 1
