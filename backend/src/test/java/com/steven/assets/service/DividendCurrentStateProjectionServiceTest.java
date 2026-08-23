@@ -436,4 +436,117 @@ class DividendCurrentStateProjectionServiceTest {
         verify(repository, never()).findActiveFutureEvents(any(), any(), any(), any(), any());
         verify(repository, never()).cancelActiveEvent(anyLong());
     }
+
+    /**
+     * Task 361.3h(1)：純配股事件的 keeper 判準——重現 2885 的實際情境。錯誤列
+     * （ex_dividend_date=除權日、ex_rights_date=NULL）id 較小，正確列（NULL、除權日）id
+     * 較大；361.2e 前的舊判準會退回「最小 id」而保留錯誤列，本測試釘住修正後保留正確列。
+     */
+    @Test
+    void collapsePrefersDateAllocationConsistentPureStockRowOverSmallerIdMisplacedRow() {
+        DividendCurrentStateRepository repository = mock(DividendCurrentStateRepository.class);
+        var misplaced = new DividendCurrentStateRepository.ActiveEventDetail(
+                1004L, "old-key", 2026, LocalDate.of(2026, 8, 18), BigDecimal.ZERO,
+                new BigDecimal("0.400000"), null, null, null, null, null, null);
+        var correct = new DividendCurrentStateRepository.ActiveEventDetail(
+                1212L, "new-key", 2026, null, BigDecimal.ZERO, new BigDecimal("0.400000"),
+                null, null, null, null, null, LocalDate.of(2026, 8, 18));
+        when(repository.findActiveEventDetails("2885", "台股"))
+                .thenReturn(List.of(misplaced, correct));
+        when(repository.findLatestHistorical(any(), any(), any(), any()))
+                .thenReturn(Optional.empty());
+        when(repository.findLatestComplete(any(), any(), any(), any(), any()))
+                .thenReturn(Optional.empty());
+
+        new DividendCurrentStateProjectionService(repository)
+                .projectOne("2885", "台股", DECISION);
+
+        verify(repository).cancelActiveEvent(1004L);
+        verify(repository, never()).cancelActiveEvent(1212L);
+        verify(repository).applyMergedEnrichment(
+                eq(1212L), any(), any(), any(), any(), any(), any());
+    }
+
+    /** Task 361.3h(2)：對稱案例——純現金事件。 */
+    @Test
+    void collapsePrefersDateAllocationConsistentPureCashRowOverMisplacedRow() {
+        DividendCurrentStateRepository repository = mock(DividendCurrentStateRepository.class);
+        var misplaced = new DividendCurrentStateRepository.ActiveEventDetail(
+                2001L, "old-key", 2026, null, new BigDecimal("1.800000"), BigDecimal.ZERO,
+                null, null, null, null, null, LocalDate.of(2026, 7, 21));
+        var correct = new DividendCurrentStateRepository.ActiveEventDetail(
+                2002L, "new-key", 2026, LocalDate.of(2026, 7, 21),
+                new BigDecimal("1.800000"), BigDecimal.ZERO, null, null, null, null, null, null);
+        when(repository.findActiveEventDetails("2885", "台股"))
+                .thenReturn(List.of(misplaced, correct));
+        when(repository.findLatestHistorical(any(), any(), any(), any()))
+                .thenReturn(Optional.empty());
+        when(repository.findLatestComplete(any(), any(), any(), any(), any()))
+                .thenReturn(Optional.empty());
+
+        new DividendCurrentStateProjectionService(repository)
+                .projectOne("2885", "台股", DECISION);
+
+        verify(repository).cancelActiveEvent(2001L);
+        verify(repository, never()).cancelActiveEvent(2002L);
+    }
+
+    /**
+     * Task 361.3h(3)：兩列皆自洽時，既有三層判準（發放日 → yieldPct → 最小 id）行為不變
+     * ——沿用既有 {@code collapseMergesEnrichmentOntoKeeperAndCancelsBareDuplicate} 的資料
+     * 形狀，兩列皆為現金事件且 ex_rights_date 皆為 null（自洽），有 cashPaymentDate／yieldPct
+     * 那列仍應勝出。
+     */
+    @Test
+    void collapseKeepsExistingThreeTierPreferenceWhenBothRowsAreDateAllocationConsistent() {
+        DividendCurrentStateRepository repository = mock(DividendCurrentStateRepository.class);
+        var enriched = new DividendCurrentStateRepository.ActiveEventDetail(
+                151L, null, 2026, LocalDate.of(2026, 1, 20), new BigDecimal("2.65"),
+                null, LocalDate.of(2026, 2, 12), null, new BigDecimal("7.3878"),
+                new BigDecimal("35.87"), 3);
+        var bare = new DividendCurrentStateRepository.ActiveEventDetail(
+                1024L, "2b6394", 2026, LocalDate.of(2026, 1, 20),
+                new BigDecimal("2.650000"), new BigDecimal("0.000000"),
+                null, null, null, null, null);
+        when(repository.findActiveEventDetails("00881", "台股")).thenReturn(List.of(enriched, bare));
+        when(repository.findLatestHistorical(any(), any(), any(), any()))
+                .thenReturn(Optional.empty());
+        when(repository.findLatestComplete(any(), any(), any(), any(), any()))
+                .thenReturn(Optional.empty());
+
+        new DividendCurrentStateProjectionService(repository)
+                .projectOne("00881", "台股", DECISION);
+
+        verify(repository).cancelActiveEvent(1024L);
+        verify(repository, never()).cancelActiveEvent(151L);
+    }
+
+    /**
+     * Task 361.3h(4)：同時配息又配股的事件（cash&gt;0 且 stock&gt;0）不受新判準影響——
+     * 兩個日期欄本來就都該有值，不落入純配股／純現金分支，仍走既有三層判準。
+     */
+    @Test
+    void collapseUnaffectedForCashAndStockComboEvent() {
+        DividendCurrentStateRepository repository = mock(DividendCurrentStateRepository.class);
+        var withPaymentDate = new DividendCurrentStateRepository.ActiveEventDetail(
+                301L, "combo-a", 2026, LocalDate.of(2026, 7, 21), new BigDecimal("1.00"),
+                new BigDecimal("0.20"), LocalDate.of(2026, 8, 5), null, null, null, null,
+                LocalDate.of(2026, 7, 21));
+        var bareDuplicate = new DividendCurrentStateRepository.ActiveEventDetail(
+                302L, "combo-b", 2026, LocalDate.of(2026, 7, 21), new BigDecimal("1.000000"),
+                new BigDecimal("0.200000"), null, null, null, null, null,
+                LocalDate.of(2026, 7, 21));
+        when(repository.findActiveEventDetails("2885", "台股"))
+                .thenReturn(List.of(withPaymentDate, bareDuplicate));
+        when(repository.findLatestHistorical(any(), any(), any(), any()))
+                .thenReturn(Optional.empty());
+        when(repository.findLatestComplete(any(), any(), any(), any(), any()))
+                .thenReturn(Optional.empty());
+
+        new DividendCurrentStateProjectionService(repository)
+                .projectOne("2885", "台股", DECISION);
+
+        verify(repository).cancelActiveEvent(302L);
+        verify(repository, never()).cancelActiveEvent(301L);
+    }
 }

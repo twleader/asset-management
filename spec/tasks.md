@@ -358,6 +358,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 357 | 配息事件的四個日期各自獨立落地與顯示：除息／除權／發放股息／發放股權，格式 `yyyy-MM-dd`（Requirement 94） | [tasks/t357_dividend_four_dates.md](tasks/t357_dividend_four_dates.md) |
 | 358 | 今日股市分析頁面改為分類分點呈現：技術面／量能面／美股連動／籌碼面各自獨立、台股與美股分開區塊（Requirement 95） | [tasks/t358_market_analysis_structured_sections.md](tasks/t358_market_analysis_structured_sections.md) |
 | 359 | 股票分析彈窗「持股明細」改接既有 ETF 成分股 API、以圓餅圖呈現（比照 Dashboard 台股個股穿透）（Requirement 13） | [tasks/t359_etf_holdings_chart.md](tasks/t359_etf_holdings_chart.md) |
+| 361 | FinMind 配息抓取視窗停止以 `date` 欄代理除權息日：請求不送 `end_date`，上界改由 client 端以 `anchorDate` 過濾，消除約 6 天寬的滑動漏抓盲區（Requirement 97） | [tasks/t361_dividend_fetch_window_anchor.md](tasks/t361_dividend_fetch_window_anchor.md) |
 
 > **註：Task 229–263、268、293–296 以各自任務檔為準。**
 

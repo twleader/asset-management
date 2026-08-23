@@ -1934,6 +1934,12 @@ FinMind 自 2025 年起對匿名呼叫額度收緊，超量會回 `402 Payment R
 >
 > **發放股權日（`StockDividendPaymentDate`）FinMind 恆為空**——2026-08-22 經 `GET /internal/dividend-history` 實測 `7556` 連續六年、`2881` 五年皆為 `null`；DB 9968 筆 `stock_dividend_snapshot_event` 中 343 筆有股票股利、`stock_payment_date` 0 筆有值；另一資料集 `TaiwanStockDividendResult` 雖有 `date`（除息／除權日）欄，但不含任何**發放**日期欄。故一律揭露為「資料源未提供」，**不得推估、不得以發放股息日冒充**。
 
+> **Task 361 起：FinMind 請求一律不送 `end_date`，區間上界改由 client 端以 `anchorDate` 過濾。** FinMind `TaiwanStockDividend` 的 `date` 欄**不是除權息日**，而是晚於它的基準／發放相關日期（2026-08-23 實測 `2885` 四列，落後固定 6 天：`date=2026-08-24` 對應 `StockExDividendTradingDate=2026-08-18`、`date=2026-07-27` 對應 `CashExDividendTradingDate=2026-07-21`），而 FinMind 的區間過濾是**在 `date` 欄上做 server-side 過濾**。修正前 `DividendFetchClient.finmindData` 送 `end_date=today`、`fetchFinMindBounded` 送 `end_date=to`，於是形成一個**約 6 天寬、隨每日滑動的盲區**：除權息日落在區間上界往前推約 6 天內的事件，其 `date` 仍在上界之外，整列在伺服器端就被剔除。實證後果為 `2885` 2026 年的純配股事件（配股 0.4、除權日 2026-08-18）從未進入落地路徑，Task 357 的歷史回補因而無對象可修，該列停留在拆欄前的錯誤值。`TaiwanStockDividendResult` 不受影響——該表的 `date` 就是除權息日。修正為：請求只送 `start_date`（`date` 恆晚於除權息日，下界只會多收一列、不會漏抓），上界一律在 client 端以 `anchorDate = min(除息日, 除權日)` 過濾；upcoming scope 的 `parseFinMindDividendRows`／`parseFinMindResultRows` 本來就以 `anchorDate` 過濾 `[from, to]`，正確的過濾欄位一直都在 client 端。
+>
+> **為何不改用「`end_date` 加緩衝」**：任何有限緩衝都只是對「`date` 與除權息日最大落差」的猜測，無法證明上界，失效時症狀同樣是靜默漏抓；client 端握有真正該過濾的欄位，不應把可證明正確的過濾換成猜測。**這一行是未來最可能被順手加回去的地方。**
+>
+> **與唯讀顯示路徑的既有差異（不得宣稱兩者等價）**：`MarketDataFetchService.getTwDividendHistory` 本來就不送 `end_date`，故不受此盲區影響、Task 361 亦未改動它；但它**也沒有 client 端上界過濾**，會顯示「已公告但尚未除權息」的未來事件，而落地路徑 `fetchTw` 自 Task 361 起明確排除未來事件（歷史 snapshot 的語意是已發生事件，未來事件由 upcoming scope 機制負責）。兩條路徑此後在傳輸層一致，但上界語意刻意不同。
+
 `external-materials-service` 的 `DividendFetchClient.fetchTw` 抓台股股利歷史，台股採兩段資料源：
 
 ```
