@@ -846,7 +846,7 @@ twse_index_year_end_history  (TWSE 指數年末值；Task 97 起已不使用—�
 >
 > 📌 **查證來源：運行中的 DB。** `docker exec asset-postgres psql -U assets -d assets -c '\d <table>'`——欄位型別／位數／nullable 一律以它為準。
 >
-> ✅ **`db/schema.sql` 是可用的離線查證依據，其與運行中 DB 的同步由機械閘門逐次查核（Requirement 102／Task 366）。** 它是 `db/init/01_dump.sql`（含真實個人財務資料，被 `.gitignore` 排除）「去除全部資料」後的可版控鏡像。過去它靠人工重產、長期落後（Task 245 當時僅 55 張 `CREATE TABLE`，Task 366 動工前為 74 張、運行中 DB 已是 85 張），**Task 366 起**改由 `scripts/tests/schema-sql-drift-test.sh` 逐位元比對「去除專案檔頭後的檔案內容 vs 此刻重跑 `pg_dump` 的輸出」，並由 `scripts/spec-check.sh` 的 **B10** 在每次 spec 機械檢查時執行。因此欄位型別、位數、nullable、預設值與索引定義都可以直接引用本檔。
+> ✅ **`db/schema.sql` 是可用的離線查證依據，其與運行中 DB 的同步由機械閘門逐次查核（Requirement 103／Task 367）。** 它是 `db/init/01_dump.sql`（含真實個人財務資料，被 `.gitignore` 排除）「去除全部資料」後的可版控鏡像。過去它靠人工重產、長期落後（Task 245 當時僅 55 張 `CREATE TABLE`，Task 367 動工前為 74 張、運行中 DB 已是 85 張），**Task 366 起**改由 `scripts/tests/schema-sql-drift-test.sh` 逐位元比對「去除專案檔頭後的檔案內容 vs 此刻重跑 `pg_dump` 的輸出」，並由 `scripts/spec-check.sh` 的 **B10** 在每次 spec 機械檢查時執行。因此欄位型別、位數、nullable、預設值與索引定義都可以直接引用本檔。
 >
 > **B10 的兩項已知性質，引用前要知道：**（a）它是 **lagging** 檢查——`spec-check.sh` 只在實作**之前**被呼叫，漂移卻產生於實作之後，所以它攔到的是「上一輪沒重產的漂移」，不是「這一輪即將產生的」；（b）**嚴重度分流**——本次變更若碰到 `db/schema.sql` 或 `backend/src/main/resources/db/changelog/**` 則漂移記為 BLOCK，否則記為 CHECK（因為全機 56 個 worktree 共用一套 `asset-postgres`，漂移可能是別人造成的），`asset-postgres` 未運行時一律降為 CHECK「無法查證」。
 >
