@@ -352,12 +352,19 @@ public class PerformanceComparisonBffController {
     // ── 股利再投入（等效 total-return index） ──
 
     /**
-     * 把原始 closes 轉為含息調整 closes：每逢除息日，用「1 + 配股/10 + 現金/收盤」放大持股數，
-     * 各日調整值 = 持股數 × 當日收盤。丟回既有 normalize()/pct() 即得含息報酬%。
+     * 把原始 closes 轉為含息調整 closes：每逢除息／除權日，用「1 + 配股/10 + 現金/收盤」放大
+     * 持股數，各日調整值 = 持股數 × 當日收盤。丟回既有 normalize()/pct() 即得含息報酬%。
+     *
+     * <p>Task 357／357.3e-2：{@code dividends-readonly} 的 {@code exDividendDate} 為 null
+     * 的列（純配股事件）<b>不得整列略過</b>——先取 anchorDate =
+     * {@code exDividendDate ?? exRightsDate} 判斷該事件是否落在再投入區間內；套用日期則沿用
+     * 357.4a 的規則：現金股利套 {@code exDividendDate}、股票股利套 {@code exRightsDate}，
+     * 兩者皆有值且不同日時拆成兩筆各自套用其因子，不得合併或只取其一。不改的話這類事件的股票
+     * 股利再投入會被整列跳過，含息報酬系統性少計。
      *
      * @param closes 已排序的 date→close
-     * @param divs   dividends-readonly 裸陣列（每筆含 exDividendDate/cashDividend/stockDividend）
-     * @param today  今日（除息日需 &lt;= today）
+     * @param divs   dividends-readonly 裸陣列（每筆含 exDividendDate/exRightsDate/cashDividend/stockDividend）
+     * @param today  今日（套用日期需 &lt;= today）
      */
     private TreeMap<String, BigDecimal> reinvestDividends(
             TreeMap<String, BigDecimal> closes, List<Map<String, Object>> divs, LocalDate today) {
@@ -365,14 +372,26 @@ public class PerformanceComparisonBffController {
         String firstKey = closes.firstKey();
         String todayIso = today.toString();
 
-        // exDate!=null 且 exDate<=today 且 exDate>=區間首日，依 exDate 升冪
+        // anchorDate!=null 且套用日期<=today 且>=區間首日，依套用日期升冪。
         List<ExDiv> ex = new ArrayList<>();
         for (Map<String, Object> d : divs) {
-            String exDate = asString(d.get("exDividendDate"));
-            if (exDate == null || exDate.isBlank()) continue;
-            if (exDate.compareTo(todayIso) > 0) continue;
-            if (exDate.compareTo(firstKey) < 0) continue;
-            ex.add(new ExDiv(exDate, toBigDecimal(d.get("cashDividend")), toBigDecimal(d.get("stockDividend"))));
+            String exDividendDate = asString(d.get("exDividendDate"));
+            String exRightsDate = asString(d.get("exRightsDate"));
+            BigDecimal cash = toBigDecimal(d.get("cashDividend"));
+            BigDecimal stock = toBigDecimal(d.get("stockDividend"));
+            boolean hasCash = cash != null && cash.signum() > 0;
+            boolean hasStock = stock != null && stock.signum() > 0;
+            boolean splitDates = exDividendDate != null && !exDividendDate.isBlank()
+                    && exRightsDate != null && !exRightsDate.isBlank()
+                    && !exDividendDate.equals(exRightsDate);
+            if (hasCash && hasStock && splitDates) {
+                addExDivIfInRange(ex, exDividendDate, cash, null, todayIso, firstKey);
+                addExDivIfInRange(ex, exRightsDate, null, stock, todayIso, firstKey);
+                continue;
+            }
+            String applyDate = exDividendDate != null && !exDividendDate.isBlank()
+                    ? exDividendDate : exRightsDate;
+            addExDivIfInRange(ex, applyDate, cash, stock, todayIso, firstKey);
         }
         ex.sort(Comparator.comparing(ExDiv::exDate));
 
@@ -395,6 +414,15 @@ public class PerformanceComparisonBffController {
             adj.put(date, shares.multiply(close));
         }
         return adj;
+    }
+
+    /** 缺日期或不在再投入區間內一律不加入（Task 357：日期換成 anchorDate 語意的呼叫端自行決定）。 */
+    private static void addExDivIfInRange(List<ExDiv> ex, String date, BigDecimal cash,
+            BigDecimal stock, String todayIso, String firstKey) {
+        if (date == null || date.isBlank()) return;
+        if (date.compareTo(todayIso) > 0) return;
+        if (date.compareTo(firstKey) < 0) return;
+        ex.add(new ExDiv(date, cash, stock));
     }
 
     private static BigDecimal nz(BigDecimal x) {

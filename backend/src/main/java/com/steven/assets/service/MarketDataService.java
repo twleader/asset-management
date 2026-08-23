@@ -69,7 +69,22 @@ public class MarketDataService {
             Integer year, BigDecimal cashDividend, BigDecimal stockDividend,
             String exDividendDate, BigDecimal yieldPct,
             String cashPaymentDate, String stockPaymentDate,
-            Integer fillDays, BigDecimal previousClose) {
+            Integer fillDays, BigDecimal previousClose,
+            /**
+             * 除權日（Task 357／Requirement 94），ISO {@code yyyy-MM-dd} 或 null。
+             * 追加在既有欄位之後，供下游 bff／frontend 計算
+             * anchorDate = {@code exDividendDate ?? exRightsDate}（357.3e-1／357.3e-2）。
+             */
+            String exRightsDate) {
+        /** Compatibility constructor：357 之前既有的完整形狀（不含除權日）。 */
+        public DividendRow(Integer year, BigDecimal cashDividend, BigDecimal stockDividend,
+                           String exDividendDate, BigDecimal yieldPct,
+                           String cashPaymentDate, String stockPaymentDate,
+                           Integer fillDays, BigDecimal previousClose) {
+            this(year, cashDividend, stockDividend, exDividendDate, yieldPct,
+                    cashPaymentDate, stockPaymentDate, fillDays, previousClose, null);
+        }
+
         public DividendRow(Integer year, BigDecimal cashDividend, BigDecimal stockDividend,
                            String exDividendDate, BigDecimal yieldPct) {
             this(year, cashDividend, stockDividend, exDividendDate, yieldPct, null, null, null, null);

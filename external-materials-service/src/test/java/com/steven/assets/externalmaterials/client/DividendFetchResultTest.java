@@ -31,7 +31,7 @@ class DividendFetchResultTest {
         DividendFetchClient.DividendFetchResult result = new DividendFetchClient.DividendFetchResult(
                 "NASDAQ", List.of(new DividendFetchClient.DividendEvent(
                         2026, new BigDecimal("1.00"), BigDecimal.ZERO,
-                        "2026-01-10", "2026-02-01", null)));
+                        "2026-01-10", null, "2026-02-01", null)));
 
         assertFalse(result.complete());
         assertTrue(result.status() == DividendFetchClient.FetchStatus.PARTIAL);
@@ -56,10 +56,10 @@ class DividendFetchResultTest {
     void canonicalSnapshotHashIsOrderIndependentAndEventKeyIsStable() {
         var a = new DividendFetchClient.DividendEvent(
                 2026, new BigDecimal("1.0000"), BigDecimal.ZERO,
-                "2026-01-10", null, null);
+                "2026-01-10", null, null, null);
         var b = new DividendFetchClient.DividendEvent(
                 2025, new BigDecimal("0.5000"), BigDecimal.ZERO,
-                "2025-01-10", null, null);
+                "2025-01-10", null, null, null);
         assertTrue(DividendSnapshotStore.canonicalContentHash(List.of(a, b))
                 .equals(DividendSnapshotStore.canonicalContentHash(List.of(b, a))));
         assertTrue(DividendSnapshotStore.canonicalEventHash(a)

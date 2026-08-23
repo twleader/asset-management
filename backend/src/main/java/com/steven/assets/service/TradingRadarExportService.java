@@ -241,6 +241,9 @@ public class TradingRadarExportService {
         headers.addAll(LIVE_PREMIUM_HEADERS);
         // Task 356.12a：週K 摘要 7 欄 ＋ 日K 棒 3 欄同樣附加在真正最末（即時折溢價之後）。
         headers.addAll(WEEKLY_CANDLE_HEADERS);
+        // Task 357／Requirement 94：「下一配息」四個日期同樣附加在真正最末，理由同上——
+        // 既有「下一配息日」欄（EVIDENCE_HEADERS）保留為 anchorDate，不動既有欄位索引。
+        headers.addAll(DIVIDEND_FOUR_DATES_HEADERS);
 
         List<List<Object>> rows = new ArrayList<>();
         for (JsonNode s : snapshots) {
@@ -298,6 +301,7 @@ public class TradingRadarExportService {
                 row.addAll(Arrays.asList(
                         num(d, "etfPremiumLivePct"), nullableText(d, "etfPremiumLiveNavAsOf")));
                 row.addAll(weeklyCandleCells(d));
+                row.addAll(dividendFourDatesCells(evidence));
                 rows.add(row);
             }
         }
@@ -338,6 +342,7 @@ public class TradingRadarExportService {
         formats.addAll(VALUATION_COMPONENT_FORMATS);
         formats.addAll(LIVE_PREMIUM_FORMATS); // Task 320：與 headers／rows 同位置（尾端）
         formats.addAll(WEEKLY_CANDLE_FORMATS); // Task 356.12a：與 headers／rows 同位置（真正最末）
+        formats.addAll(DIVIDEND_FOUR_DATES_FORMATS); // Task 357：同上，真正最末
         return new ExportDoc.Sheet("個股決策",
                 List.of(new ExportDoc.Table(null, null, headers, true, false, false, formats, rows)),
                 headers.size());
@@ -464,13 +469,27 @@ public class TradingRadarExportService {
                 num(weekly, "volumeRatio"), num(weekly, "changePercent"));
     }
 
-    /** V13 evidence/confidence columns appended after legacy decision columns. */
+    /**
+     * V13 evidence/confidence columns appended after legacy decision columns.
+     *
+     * <p>Task 357／Requirement 94：「下一配息日」自本任務起重新定義為 anchorDate =
+     * {@code COALESCE(nextExDividendDate, nextExRightsDate)}，純配股事件此欄現在落的
+     * 是除權日。需要區分四種日期，改用 {@link #DIVIDEND_FOUR_DATES_HEADERS}（附加在
+     * 整張表真正最末，不動本欄既有欄位索引）。</p>
+     */
     private static final List<String> EVIDENCE_HEADERS = List.of(
             "短期證據信心", "1周~1月證據信心", "中期證據信心",
             "短期下檔風險", "1周~1月下檔風險", "中期下檔風險",
             "短期風險覆蓋", "1周~1月風險覆蓋", "中期風險覆蓋",
             "中期候選動作", "短期候選動作", "1周~1月候選動作",
             "證據閘門原因", "下一配息日", "配息證據狀態", "配息已知時間");
+
+    /** Task 357：「下一配息」同一次事件的四個日期，附加在整張表真正最末。 */
+    private static final List<String> DIVIDEND_FOUR_DATES_HEADERS = List.of(
+            "下一除息日", "下一除權日", "下一發放股息日", "下一發放股權日");
+
+    private static final List<ExportDoc.Format> DIVIDEND_FOUR_DATES_FORMATS = List.of(
+            ExportDoc.Format.DATE, ExportDoc.Format.DATE, ExportDoc.Format.DATE, ExportDoc.Format.DATE);
 
     private static final List<ExportDoc.Format> EVIDENCE_FORMATS = List.of(
             ExportDoc.Format.NUM2, ExportDoc.Format.NUM2, ExportDoc.Format.NUM2,
@@ -706,6 +725,18 @@ public class TradingRadarExportService {
     private static String nullableText(JsonNode node, String field) {
         JsonNode value = node.path(field);
         return value.isMissingNode() || value.isNull() ? null : value.asText();
+    }
+
+    /**
+     * Task 357：「下一配息」四個日期，缺值一律 JSON null／Excel 空白格，不得以
+     * 0 或空字串頂替（357.5b）。
+     */
+    private static List<Object> dividendFourDatesCells(JsonNode evidence) {
+        return Arrays.asList(
+                nullableText(evidence, "nextExDividendDate"),
+                nullableText(evidence, "nextExRightsDate"),
+                nullableText(evidence, "nextCashPaymentDate"),
+                nullableText(evidence, "nextStockPaymentDate"));
     }
 
     private static JsonNode evidenceComponent(JsonNode evidence, String group, String name) {

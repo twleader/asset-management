@@ -3527,11 +3527,11 @@ FROM stock_price_history WHERE market='台股';
 
 **User Story:** 作為投資人，我希望在交易雷達的「下一配息」區塊看到**四個**日期——除息日、除權日、發放股息日、發放股權日——而且一律是 `yyyy-MM-dd`，因為除息與除權是兩件不同的事（一個扣現金、一個增股數），發放日又各自不同；現在只給我一個日期加一串 ISO timestamp，我沒辦法據此安排。
 
-> **本 Requirement 的成因是一個沉默的資料遺失，不只是顯示問題。** FinMind 的 `TaiwanStockDividend` 同時提供 `CashExDividendTradingDate`（除息）與 `StockExDividendTradingDate`（除權），但本專案有**三處**抓取路徑都寫成「先取現金除息日，空的才退而取除權日」，再一起存進單一欄 `ex_dividend_date`。**因此只要一檔同時配息又配股，除權日就在入庫當下被丟棄**，且無任何錯誤或警示。DB 的 `stock_dividend_snapshot_event` 與 `stock_dividend_history` 都只有 `ex_dividend_date`／`cash_payment_date`／`stock_payment_date` 三個日期欄，沒有除權日欄位。要滿足本 Requirement 必須先補回這個欄位並停止壓合。
+> **本 Requirement 的成因是一個沉默的資料遺失，不只是顯示問題。** FinMind 的 `TaiwanStockDividend` 同時提供 `CashExDividendTradingDate`（除息）與 `StockExDividendTradingDate`（除權），但本專案有**六處**抓取路徑都會把兩者壓成單一欄 `ex_dividend_date`：三處是「先取現金除息日，空的才退而取除權日」的兩欄互相 fallback；另三處——TWSE/TPEx 官方除權除息日曆（`TaiwanOfficialDividendCalendarClient`，upcoming 45 日 scope 的主要來源）與 `TaiwanStockDividendResult`（服務個股資料集查無的 ETF，於歷史落地與 upcoming scope 各有一個解析點）——機制不同但結果相同：本來就只有單一日期欄，依型別字串判準路由卻沒有把判讀結果帶進落地值，純配股事件同樣落在 `ex_dividend_date`。**因此只要一檔同時配息又配股（或純配股走上述任一單欄位來源），除權日就在入庫當下被丟棄**，且無任何錯誤或警示。DB 的 `stock_dividend_snapshot_event` 與 `stock_dividend_history` 都只有 `ex_dividend_date`／`cash_payment_date`／`stock_payment_date` 三個日期欄，沒有除權日欄位。要滿足本 Requirement 必須先補回這個欄位並停止壓合。
 >
-> **同一個缺陷已經在畫面上輸出錯誤資訊：**「股票分析 → 股利歷史」的「除息日」欄，對純配股標的顯示的其實是除權日（`2881` 於 2021–2025 現金股利皆為 0，該欄卻有日期）。
+> **同一個缺陷已經在畫面上輸出錯誤資訊：**「股票分析 → 股利歷史」的「除息日」欄，對純配股事件顯示的其實是除權日。**經運行中 DB 查證，`2881` 是混合配息配股標的（2021–2025 各年皆有非零現金股利，與 7556／9933 同類）**，但同一標的的現金股利與股票股利各自入列為獨立事件（同年多列）；其中「純配股的那一列子事件」現金股利為 0，該列的「除息日」欄卻顯示日期——那正是被壓合進去的除權日。（不是「`2881` 整年零現金股利」，避免與 DB 實際年度加總混淆。）
 >
-> **四個日期中只有三個取得得到。** 2026-08-22 經既有 `GET /internal/dividend-history` 實打 FinMind 驗證：除息日、除權日、發放股息日皆有值；**發放股權日（`StockDividendPaymentDate`）恆為 `null`**——`7556` 連續六年、`2881` 五年皆然，DB 9968 筆 snapshot event 中 343 筆有股票股利、`stock_payment_date` 0 筆有值，另一資料集 `TaiwanStockDividendResult` 也不含任何日期欄。本 Requirement 因此交付「三個可得日期 ＋ 一個誠實標示為『資料源未提供』的缺值」，**不得推估、不得以發放股息日冒充**；是否另尋來源為獨立任務。
+> **四個日期中只有三個取得得到。** 2026-08-22 經既有 `GET /internal/dividend-history` 實打 FinMind 驗證：除息日、除權日、發放股息日皆有值；**發放股權日（`StockDividendPaymentDate`）恆為 `null`**——`7556` 連續六年、`2881` 五年皆然，DB 9968 筆 snapshot event 中 343 筆有股票股利、`stock_payment_date` 0 筆有值，另一資料集 `TaiwanStockDividendResult` 雖有 `date`（除息／除權日，見 357.2f）欄，但不含任何**發放**日期欄。本 Requirement 因此交付「三個可得日期 ＋ 一個誠實標示為『資料源未提供』的缺值」，**不得推估、不得以發放股息日冒充**；是否另尋來源為獨立任務。
 
 **Acceptance Criteria:**
 

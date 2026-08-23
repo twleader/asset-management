@@ -131,6 +131,38 @@ class JdbcDividendCurrentStateRepositoryTest {
         verify(absent, never()).getObject("observed_at", Instant.class);
     }
 
+    /**
+     * Task 357／357.3a-0b（最高優先，端到端驗收要求的核心斷言）：{@code upsertActiveEvent()}
+     * 是全程式庫唯一寫入 {@code stock_dividend_history} 的出處。用 2881 實際查得的純配股
+     * 事件（exDividendDate 拆欄後為 null、除權日 2022-09-22）驗證 INSERT 語句真的把
+     * {@code ex_rights_date} 寫進對應欄位——只驗到 {@code ProjectedEvent} record 本身有
+     * 這個欄位是不夠的，record 加欄位觸發的編譯期安全網不會延伸到字串 SQL。
+     */
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void insertPathCarriesExRightsDateIntoTheInsertStatement() {
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        // findMatchingIds 的三層查詢皆未 stub → Mockito 對 List 回傳型別預設回空集合，
+        // 落入 INSERT 分支（見 upsertEvent() 的 ids.isEmpty() 分支）。
+        var repository = new JdbcDividendCurrentStateRepository(jdbc);
+
+        repository.upsertActiveEvent("2881", "台股", "FinMind",
+                new DividendCurrentStateRepository.ProjectedEvent(
+                        "rights-key", 2022, null, BigDecimal.ZERO, new BigDecimal("2.690500"),
+                        null, null, LocalDate.of(2022, 9, 22)));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> params = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbc).update(sql.capture(), params.capture());
+        assertThat(sql.getValue()).contains("INSERT INTO stock_dividend_history")
+                .contains("ex_rights_date");
+        // 欄位清單順序：stock_code,market,year,cash_dividend,stock_dividend,
+        // ex_dividend_date,ex_rights_date,cash_payment_date,stock_payment_date,source,event_key
+        assertThat(params.getValue()[5]).as("ex_dividend_date（純配股事件為 null）").isNull();
+        assertThat(params.getValue()[6]).as("ex_rights_date 必須真的寫進 INSERT 參數")
+                .isEqualTo(LocalDate.of(2022, 9, 22));
+    }
+
     @Test
     @SuppressWarnings({"unchecked", "rawtypes"})
     void relaxedMatchUpdatesInsteadOfInsertingAndKeepsExistingPaymentDate() throws Exception {

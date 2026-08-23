@@ -111,7 +111,8 @@ class TradingRadarOpenApiSchemaContractTest {
                     "distributionsWithinFiveSessions", "distributionsWithinTwentySessions",
                     "treasuryRateContext", "normalizedBias", "shortNormalizedBias",
                     "swingDownsideRisk", "swingEvidenceConfidence", "swingRiskCoverage",
-                    "swingCandidateAction")),
+                    "swingCandidateAction", "nextExDividendDate", "nextExRightsDate",
+                    "nextCashPaymentDate", "nextStockPaymentDate")),
             Map.entry("AssetProfile", set(
                     "assetClass", "assetClassSource", "instrumentKind", "instrumentKindSource",
                     "stockStyle", "stockStyleSource", "bondTerm", "bondTermSource", "quoteCurrency",
@@ -146,7 +147,9 @@ class TradingRadarOpenApiSchemaContractTest {
             Map.entry("RadarEvidence", formats(
                     "acceptedPriceAsOfDate", "date", "returnStdDev60AsOfDate", "date",
                     "premiumAsOfDate", "date", "nextDistributionDate", "date",
-                    "nextDistributionKnownAt", "date-time")),
+                    "nextDistributionKnownAt", "date-time",
+                    "nextExDividendDate", "date", "nextExRightsDate", "date",
+                    "nextCashPaymentDate", "date", "nextStockPaymentDate", "date")),
             Map.entry("EvidenceComponent", formats("asOfDate", "date")),
             Map.entry("MarketFeatureEvidence", formats(
                     "asOfDate", "date", "availableAt", "date-time")),

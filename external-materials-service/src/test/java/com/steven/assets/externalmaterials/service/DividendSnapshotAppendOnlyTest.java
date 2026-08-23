@@ -36,7 +36,7 @@ class DividendSnapshotAppendOnlyTest {
         when(jdbc.queryForObject(anyString(), eq(Long.class), any(Object[].class))).thenReturn(42L);
         var event = new DividendFetchClient.DividendEvent(
                 2026, new BigDecimal("0.27"), BigDecimal.ZERO,
-                "2026-08-10", "2026-08-13", null);
+                "2026-08-10", null, "2026-08-13", null);
         Instant sourceAvailable = Instant.parse("2026-08-09T12:00:00.123456Z");
         Instant observed = Instant.parse("2026-08-09T12:01:00.654321Z");
         var fetched = new DividendFetchClient.DividendFetchResult(
@@ -52,7 +52,7 @@ class DividendSnapshotAppendOnlyTest {
         ArgumentCaptor<Object[]> eventArgs = ArgumentCaptor.forClass(Object[].class);
         verify(jdbc).update(startsWith("INSERT INTO stock_dividend_snapshot_event"),
                 eventArgs.capture());
-        assertThat(eventArgs.getValue()[8]).isEqualTo(Timestamp.from(sourceAvailable));
+        assertThat(eventArgs.getValue()[9]).isEqualTo(Timestamp.from(sourceAvailable));
         ArgumentCaptor<Object[]> observationArgs = ArgumentCaptor.forClass(Object[].class);
         verify(jdbc).update(startsWith("INSERT INTO stock_dividend_fetch_observation"),
                 observationArgs.capture());
@@ -78,7 +78,7 @@ class DividendSnapshotAppendOnlyTest {
 
         var event = new DividendFetchClient.DividendEvent(
                 2026, new BigDecimal("0.27"), BigDecimal.ZERO,
-                "2026-08-10", "2026-08-13", null);
+                "2026-08-10", null, "2026-08-13", null);
         var fetched = new DividendFetchClient.DividendFetchResult(
                 "NASDAQ_DIVIDEND_CALENDAR", List.of(event, event), DividendFetchClient.FetchStatus.COMPLETE,
                 LocalDate.of(2026, 8, 9), LocalDate.of(2026, 9, 23),
@@ -119,7 +119,7 @@ class DividendSnapshotAppendOnlyTest {
                 .thenReturn(0, 1);
         var event = new DividendFetchClient.DividendEvent(
                 2026, new BigDecimal("0.27"), BigDecimal.ZERO,
-                "2026-08-10", "2026-08-13", null);
+                "2026-08-10", null, "2026-08-13", null);
         var fetched = new DividendFetchClient.DividendFetchResult(
                 "NASDAQ_DIVIDEND_CALENDAR", List.of(event), DividendFetchClient.FetchStatus.COMPLETE,
                 LocalDate.of(2026, 8, 9), LocalDate.of(2026, 9, 23),
@@ -154,7 +154,7 @@ class DividendSnapshotAppendOnlyTest {
         when(jdbc.queryForObject(anyString(), eq(Integer.class), any(Object[].class))).thenReturn(2);
         var event = new DividendFetchClient.DividendEvent(
                 2026, new BigDecimal("0.27"), BigDecimal.ZERO,
-                "2026-08-10", "2026-08-13", null);
+                "2026-08-10", null, "2026-08-13", null);
         var fetched = new DividendFetchClient.DividendFetchResult(
                 "NASDAQ_DIVIDEND_CALENDAR", List.of(event), DividendFetchClient.FetchStatus.COMPLETE,
                 LocalDate.of(2026, 8, 9), LocalDate.of(2026, 9, 23),
@@ -178,7 +178,7 @@ class DividendSnapshotAppendOnlyTest {
         when(jdbc.queryForObject(anyString(), eq(Long.class), any(Object[].class))).thenReturn(77L);
         var event = new DividendFetchClient.DividendEvent(
                 2026, new BigDecimal("0.27"), BigDecimal.ZERO,
-                "2026-08-10", null, null);
+                "2026-08-10", null, null, null);
         var fetched = new DividendFetchClient.DividendFetchResult(
                 "NASDAQ_DIVIDEND_CALENDAR", List.of(event), DividendFetchClient.FetchStatus.COMPLETE,
                 LocalDate.of(2026, 8, 9), LocalDate.of(2026, 9, 23), null, null);
@@ -190,13 +190,58 @@ class DividendSnapshotAppendOnlyTest {
         ArgumentCaptor<Object[]> eventArgs = ArgumentCaptor.forClass(Object[].class);
         verify(jdbc).update(startsWith("INSERT INTO stock_dividend_snapshot_event"),
                 eventArgs.capture());
-        assertThat(eventArgs.getValue()[8]).isNull();
+        assertThat(eventArgs.getValue()[9]).isNull();
         ArgumentCaptor<Object[]> observationArgs = ArgumentCaptor.forClass(Object[].class);
         verify(jdbc).update(startsWith("INSERT INTO stock_dividend_fetch_observation"),
                 observationArgs.capture());
         assertThat(observationArgs.getValue()[1]).isEqualTo(Timestamp.from(observed));
         assertThat(observationArgs.getValue()[6]).isNull();
         assertNoBareInstantInJdbcCalls(jdbc);
+    }
+
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void exRightsDateIsWrittenToItsOwnColumnRightAfterExDividendDate() {
+        // 357.3a-0：appendEvents() 的 INSERT 語句須同步加入 ex_rights_date 欄位與
+        // event.exRightsDate() 參數，緊接在 ex_dividend_date 之後——只改 canonicalEvent()
+        // 雜湊函式不改這裡的 INSERT，會讓雜湊算對但值仍寫不進去。
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        when(jdbc.query(anyString(), any(org.springframework.jdbc.core.PreparedStatementSetter.class),
+                any(org.springframework.jdbc.core.ResultSetExtractor.class))).thenReturn(null);
+        when(jdbc.queryForObject(anyString(), eq(Long.class), any(Object[].class))).thenReturn(99L);
+        var event = new DividendFetchClient.DividendEvent(
+                2026, BigDecimal.ZERO, new BigDecimal("0.30"),
+                null, "2026-09-25", null, null);
+        var fetched = new DividendFetchClient.DividendFetchResult(
+                "FinMind", List.of(event), DividendFetchClient.FetchStatus.COMPLETE,
+                LocalDate.of(2016, 1, 1), LocalDate.of(2026, 12, 31),
+                Instant.parse("2026-08-09T12:00:00Z"), null);
+
+        new DividendSnapshotStore(jdbc).record("2885", "台股", fetched,
+                Instant.parse("2026-08-09T12:01:00Z"));
+
+        ArgumentCaptor<Object[]> eventArgs = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbc).update(startsWith("INSERT INTO stock_dividend_snapshot_event "
+                        + "(snapshot_id,event_key,year,ex_dividend_date,ex_rights_date,cash_dividend,"
+                        + "stock_dividend,cash_payment_date,stock_payment_date,source_available_at)"),
+                eventArgs.capture());
+        // 欄位順序：snapshot_id,event_key,year,ex_dividend_date,ex_rights_date,...
+        assertThat(eventArgs.getValue()[3]).isNull();
+        assertThat(eventArgs.getValue()[4]).isEqualTo(LocalDate.of(2026, 9, 25));
+    }
+
+    @Test
+    void canonicalEventHashChangesWhenOnlyExRightsDateDiffers() {
+        // 357.3a-0：exRightsDate 是 canonicalEvent() 的一部分，同金額同年度但除權日不同
+        // 的兩筆事件必須產生不同 event_key，否則 357.2g 修好的 taiwanEventKey() 去重
+        // 保護，一到落地層的 canonical hash 又會重新踩坑。
+        var withRights2022 = new DividendFetchClient.DividendEvent(
+                2022, BigDecimal.ZERO, new BigDecimal("0.3"), null, "2022-09-22", null, null);
+        var withRights2025 = new DividendFetchClient.DividendEvent(
+                2025, BigDecimal.ZERO, new BigDecimal("0.3"), null, "2025-09-25", null, null);
+
+        assertThat(DividendSnapshotStore.canonicalEventHash(withRights2022))
+                .isNotEqualTo(DividendSnapshotStore.canonicalEventHash(withRights2025));
     }
 
     @Test

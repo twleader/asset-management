@@ -158,7 +158,7 @@ public class TaiwanOfficialDividendCalendarClient implements DividendUpcomingSco
             BigDecimal stock = stockDividend(row, "StockDividendRatio", "TWSE");
             BigDecimal cash = optionalDecimal(row, "CashDividend", "TWSE");
             if (kind.contains("息") || positive(stock)) {
-                events.add(new OfficialEvent(code, toEvent(date, cash, stock)));
+                events.add(new OfficialEvent(code, toEvent(date, cash, stock, kind)));
             }
         }
         return List.copyOf(events);
@@ -175,16 +175,33 @@ public class TaiwanOfficialDividendCalendarClient implements DividendUpcomingSco
             BigDecimal stock = stockDividend(row, "StockDividendRatio", "TPEx");
             BigDecimal cash = optionalDecimal(row, "CashDividend", "TPEx");
             if (kind.contains("息") || positive(stock)) {
-                events.add(new OfficialEvent(code, toEvent(date, cash, stock)));
+                events.add(new OfficialEvent(code, toEvent(date, cash, stock, kind)));
             }
         }
         return List.copyOf(events);
     }
 
+    /**
+     * 357.2e：本來就只有單一日期欄（無現金／股票兩個原始日期可 fallback），依 {@code kind}
+     * 判讀結果分派：合併列（現金與股票皆為正）兩欄同填同一天（台股官方日曆的合併配股配息
+     * 事件除權與除息基準日本來就是同一天）；{@code kind} 含「息」→ 純現金／合併已在上面處理，
+     * 落 exDividendDate；{@code kind} 不含「息」（呼叫端 filter 已保證此時 stock 必為正，即
+     * 純配股）→ 落 exRightsDate、exDividendDate 為 null。修正前不論 kind 為何一律塞進
+     * exDividendDate，是除權日被誤標成除息日的原始缺陷之一。
+     */
     private static DividendFetchClient.DividendEvent toEvent(
-            LocalDate date, BigDecimal cash, BigDecimal stock) {
+            LocalDate date, BigDecimal cash, BigDecimal stock, String kind) {
+        String iso = date.toString();
+        if (positive(cash) && positive(stock)) {
+            return new DividendFetchClient.DividendEvent(
+                    date.getYear(), cash, stock, iso, iso, null, null);
+        }
+        if (kind != null && kind.contains("息")) {
+            return new DividendFetchClient.DividendEvent(
+                    date.getYear(), cash, stock, iso, null, null, null);
+        }
         return new DividendFetchClient.DividendEvent(
-                date.getYear(), cash, stock, date.toString(), null, null);
+                date.getYear(), cash, stock, null, iso, null, null);
     }
 
     @SafeVarargs
@@ -194,8 +211,11 @@ public class TaiwanOfficialDividendCalendarClient implements DividendUpcomingSco
         Map<LocalDate, DividendFetchClient.DividendEvent> byDate = new LinkedHashMap<>();
         for (List<OfficialEvent> source : sources) {
             for (OfficialEvent event : source) {
-                LocalDate date = LocalDate.parse(event.event().exDividendDate());
-                if (!target.equals(event.code().toUpperCase(Locale.ROOT))
+                // 357.2e：純配股列的 exDividendDate 拆分後為 null，dedupe key 必須改用
+                // anchorDate（COALESCE(exDividendDate, exRightsDate)）解析，否則
+                // LocalDate.parse(null) 會直接拋 NPE 並中斷整個 fetch()。
+                LocalDate date = anchorDate(event.event());
+                if (date == null || !target.equals(event.code().toUpperCase(Locale.ROOT))
                         || date.isBefore(from) || date.isAfter(to)) {
                     continue;
                 }
@@ -207,6 +227,19 @@ public class TaiwanOfficialDividendCalendarClient implements DividendUpcomingSco
             }
         }
         return List.copyOf(byDate.values());
+    }
+
+    private static LocalDate anchorDate(DividendFetchClient.DividendEvent event) {
+        LocalDate ex = parseDateOrNull(event.exDividendDate());
+        LocalDate rights = parseDateOrNull(event.exRightsDate());
+        if (ex == null) return rights;
+        if (rights == null) return ex;
+        return ex.isBefore(rights) ? ex : rights;
+    }
+
+    private static LocalDate parseDateOrNull(String value) {
+        try { return value == null ? null : LocalDate.parse(value); }
+        catch (RuntimeException e) { return null; }
     }
 
     private static String requiredText(JsonNode row, String field, String source) {

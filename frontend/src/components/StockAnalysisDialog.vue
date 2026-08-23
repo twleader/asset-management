@@ -177,6 +177,12 @@
                 <span v-else>{{ row.exDividendDate || '—' }}</span>
               </template>
             </el-table-column>
+            <el-table-column label="除權日" width="120" align="center">
+              <template #default="{ row }">
+                <span v-if="row.isYearSummary" style="color:#94a3b8">—</span>
+                <span v-else>{{ row.exRightsDate || '—' }}</span>
+              </template>
+            </el-table-column>
             <el-table-column label="現金股利發放日" width="140" align="center">
               <template #default="{ row }">
                 <span v-if="row.isYearSummary" style="color:#94a3b8">—</span>

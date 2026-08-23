@@ -82,14 +82,22 @@ public class DividendHistoryService {
                     h.getCashPaymentDate() != null ? h.getCashPaymentDate().toString() : null,
                     h.getStockPaymentDate() != null ? h.getStockPaymentDate().toString() : null,
                     h.getFillDays(),
-                    h.getPreviousClose()
+                    h.getPreviousClose(),
+                    h.getExRightsDate() != null ? h.getExRightsDate().toString() : null
             ));
         }
+        // Task 357：次要排序鍵改用 anchorDate，否則純配股事件（exDividendDate 為
+        // null）排序退化成空字串、被推到同年度所有列的最前面（顯示順序瑕疵）。
         out.sort(Comparator
                 .comparing(DividendRow::year, Comparator.reverseOrder())
-                .thenComparing(r -> r.exDividendDate() == null ? "" : r.exDividendDate(), Comparator.reverseOrder()));
+                .thenComparing(r -> anchorDate(r) == null ? "" : anchorDate(r), Comparator.reverseOrder()));
         String source = rows.get(0).getSource();
         return new DividendHistoryResult(code, market, source, null, out);
+    }
+
+    /** anchorDate = exDividendDate ?? exRightsDate（Task 357），皆為 ISO 字串或 null。 */
+    private static String anchorDate(DividendRow row) {
+        return row.exDividendDate() != null ? row.exDividendDate() : row.exRightsDate();
     }
 
     private void projectFailSoft(String code, String market) {
@@ -122,12 +130,15 @@ public class DividendHistoryService {
                     h.getCashPaymentDate() != null ? h.getCashPaymentDate().toString() : null,
                     h.getStockPaymentDate() != null ? h.getStockPaymentDate().toString() : null,
                     h.getFillDays(),
-                    h.getPreviousClose()
+                    h.getPreviousClose(),
+                    h.getExRightsDate() != null ? h.getExRightsDate().toString() : null
             ));
         }
+        // Task 357：次要排序鍵改用 anchorDate，否則純配股事件（exDividendDate 為
+        // null）排序退化成空字串、被推到同年度所有列的最前面（顯示順序瑕疵）。
         out.sort(Comparator
                 .comparing(DividendRow::year, Comparator.reverseOrder())
-                .thenComparing(r -> r.exDividendDate() == null ? "" : r.exDividendDate(), Comparator.reverseOrder()));
+                .thenComparing(r -> anchorDate(r) == null ? "" : anchorDate(r), Comparator.reverseOrder()));
         String source = rows.get(0).getSource();
         return new DividendHistoryResult(code, market, source, null, out);
     }

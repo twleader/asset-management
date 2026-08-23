@@ -4174,10 +4174,12 @@ public class BacktestService {
     private List<StockDividendHistory> eventsWithin(
             List<StockDividendHistory> all, LocalDate from, LocalDate to) {
         if (all == null || all.isEmpty()) return List.of();
+        // Task 357／357.3d-1b：改用 anchorDate，否則純配股事件（getExDividendDate()
+        // 為 null）在這個獨立於 repository SQL 之外的二次過濾會被排除。
         return all.stream()
-                .filter(e -> e.getExDividendDate() != null
-                        && !e.getExDividendDate().isBefore(from)
-                        && !e.getExDividendDate().isAfter(to))
+                .filter(e -> e.anchorDate() != null
+                        && !e.anchorDate().isBefore(from)
+                        && !e.anchorDate().isAfter(to))
                 .toList();
     }
 

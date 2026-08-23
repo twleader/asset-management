@@ -1930,24 +1930,27 @@ FinMind 自 2025 年起對匿名呼叫額度收緊，超量會回 `402 Payment R
 
 #### 股利歷史資料來源（stock_dividend_history）
 
-> **Task 357 起：除息日與除權日拆為兩個獨立欄位。** FinMind 的 `CashExDividendTradingDate`（除息）與 `StockExDividendTradingDate`（除權）在此之前被**三處**抓取路徑壓成單一 `ex_dividend_date`（先取現金、空的才退取除權），只要一檔同時配息又配股、除權日即在入庫當下被丟棄；純配股的標的其「除息日」欄顯示的實際上是除權日（`2881` 2021–2025 現金股利皆為 0 卻有除息日）。Task 357 新增 `ex_rights_date`、停止壓合，並定義 `anchorDate = min(除息日, 除權日)` 供區間過濾與年度推導使用；落地值仍必須是各自的真實日期，不得以 anchorDate 回填。
+> **Task 357 起：除息日與除權日拆為兩個獨立欄位。** FinMind 的 `CashExDividendTradingDate`（除息）與 `StockExDividendTradingDate`（除權）在此之前被**六處**抓取路徑壓成單一 `ex_dividend_date`（其中三處是這兩個原始欄位互相 fallback；另三處——TWSE/TPEx 官方日曆與 `TaiwanStockDividendResult` 的兩個解析點——本來就只有單一日期欄，依型別字串判準路由卻沒有把判讀結果帶進落地值），只要一檔同時配息又配股（或純配股走上述任一單欄位來源）、除權日即在入庫當下被丟棄；純配股事件的「除息日」欄顯示的實際上是除權日（`2881` 是混合配息配股標的，其現金股利與股票股利各自入列為獨立事件；純配股的那一列子事件現金股利為 0 卻有除息日——不是該標的整年零現金股利）。Task 357 新增 `ex_rights_date`、停止壓合，並定義 `anchorDate = min(除息日, 除權日)` 供區間過濾與年度推導使用；落地值仍必須是各自的真實日期，不得以 anchorDate 回填。詳見 `spec/tasks/t357_dividend_four_dates.md` 357.2a–f。
 >
-> **發放股權日（`StockDividendPaymentDate`）FinMind 恆為空**——2026-08-22 經 `GET /internal/dividend-history` 實測 `7556` 連續六年、`2881` 五年皆為 `null`；DB 9968 筆 `stock_dividend_snapshot_event` 中 343 筆有股票股利、`stock_payment_date` 0 筆有值；另一資料集 `TaiwanStockDividendResult` 不含任何日期欄。故一律揭露為「資料源未提供」，**不得推估、不得以發放股息日冒充**。
+> **發放股權日（`StockDividendPaymentDate`）FinMind 恆為空**——2026-08-22 經 `GET /internal/dividend-history` 實測 `7556` 連續六年、`2881` 五年皆為 `null`；DB 9968 筆 `stock_dividend_snapshot_event` 中 343 筆有股票股利、`stock_payment_date` 0 筆有值；另一資料集 `TaiwanStockDividendResult` 雖有 `date`（除息／除權日）欄，但不含任何**發放**日期欄。故一律揭露為「資料源未提供」，**不得推估、不得以發放股息日冒充**。
 
 `external-materials-service` 的 `DividendFetchClient.fetchTw` 抓台股股利歷史，台股採兩段資料源：
 
 ```
 1. FinMind TaiwanStockDividend（盈餘分配表）
-     ├─ 個股 / 股票型 ETF（如 2330、0056）：有資料 → 直接採用
-     └─ 債券 ETF / 收益分配型 ETF（如 00751B）：回空陣列 []
-                                                  ↓ fallback
-2. FinMind TaiwanStockDividendResult（除權息結果表）
-     以 date=除息日、stock_and_cache_dividend=配息金額組成 DividendEvent
-     stock_or_cache_dividend 含「權」且不含「息」→ 股票股利；其餘 → 現金股利
+     ├─ 個股 / 股票型 ETF（如 2330、0056）：通常有資料
+     └─ 債券 ETF / 收益分配型 ETF（如 00751B）：通常回空陣列 []
+2. FinMind TaiwanStockDividendResult（除權息結果表）—— fetchTw() 無條件同時查詢，非「1 回空才查」
+     以 date=除息／除權日、stock_and_cache_dividend=配息金額組成 DividendEvent
+     stock_or_cache_dividend 含「權」且不含「息」→ 股票股利，date 落 exRightsDate、exDividendDate=null
+     其餘 → 現金股利，date 落 exDividendDate、exRightsDate=null（Task 357 起停止壓合，見 357.2f）
      此表無發放日 → cashPaymentDate / stockPaymentDate = null
+     ↓
+mergeTaiwanEvents()：以事件鍵（Task 357 起為 anchorDate＋金額，見 357.2g）合併兩個資料源的結果，
+較完整的一筆（detailScore 較高者）勝出
 ```
 
-> **為何需要 fallback**：`TaiwanStockDividend` 是上市櫃**公司**的盈餘分配政策表（盈餘分配、法定公積、員工股利），ETF 的配息屬「收益分配」性質，債券 ETF 配的是成分債券利息，根本不在此表 → 查無。但 ETF 每季除息事件都會落在 `TaiwanStockDividendResult`，故以此為 fallback。`fetchTw` 先打盈餘分配表，**只有回空時**才打結果表，避免影響既有個股 / 股票型 ETF（兩表欄位語意不同，個股仍以盈餘分配表的現金 / 配股拆分為準）。
+> **為何需要兩段資料源**：`TaiwanStockDividend` 是上市櫃**公司**的盈餘分配政策表（盈餘分配、法定公積、員工股利），ETF 的配息屬「收益分配」性質，債券 ETF 配的是成分債券利息，根本不在此表 → 查無。但 ETF 每季除息事件都會落在 `TaiwanStockDividendResult`，故以此補上。**`fetchTw()` 對兩張表一律無條件查詢，不是「表 1 回空才查表 2」**——程式碼註解明講「即使主表已有資料，也必須查第二張表並以事件鍵合併，否則會把『主表有資料』誤當成完整覆蓋」；兩者的結果經 `mergeTaiwanEvents()` 以事件鍵合併去重，較完整的一筆勝出，個股與 ETF 皆可能同時命中兩張表。
 
 美股 `DividendFetchClient.fetchUs` 同採兩段資料源：
 

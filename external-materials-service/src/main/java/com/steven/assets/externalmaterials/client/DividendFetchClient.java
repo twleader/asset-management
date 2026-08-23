@@ -64,11 +64,17 @@ public class DividendFetchClient {
     private static final ZoneId ET = ZoneId.of("America/New_York");
     private static final ZoneId TAIPEI = ZoneId.of("Asia/Taipei");
 
+    /**
+     * @param exDividendDate 除息日（現金股利基準日），ISO yyyy-MM-dd 或 null（Task 357／Requirement 94：
+     *                       停止與除權日互相 fallback，只配股事件此欄一律 null，不得以除權日冒充）
+     * @param exRightsDate   除權日（股票股利基準日），ISO yyyy-MM-dd 或 null；只配息事件此欄一律 null
+     */
     public record DividendEvent(
             Integer year,
             BigDecimal cashDividend,
             BigDecimal stockDividend,
             String exDividendDate,        // ISO YYYY-MM-DD or null
+            String exRightsDate,          // ISO YYYY-MM-DD or null
             String cashPaymentDate,       // ISO or null
             String stockPaymentDate       // ISO or null
     ) {}
@@ -334,8 +340,9 @@ public class DividendFetchClient {
                 }
                 LocalDate date = Instant.ofEpochSecond(epoch).atZone(ET).toLocalDate();
                 if (!date.isBefore(from) && !date.isAfter(to)) {
+                    // US-only：Yahoo chart events=div 無股票股利概念，exRightsDate 恆 null。
                     events.add(new DividendEvent(date.getYear(), amount.setScale(4, RoundingMode.HALF_UP),
-                            BigDecimal.ZERO, date.toString(), null, null));
+                            BigDecimal.ZERO, date.toString(), null, null, null));
                 }
             }
             // Even a valid non-empty historical row does not establish that future rows are
@@ -359,8 +366,9 @@ public class DividendFetchClient {
                 LocalDate ex = LocalDate.of(Integer.parseInt(parts[2]), Integer.parseInt(parts[0]),
                         Integer.parseInt(parts[1]));
                 if (!ex.isBefore(from) && !ex.isAfter(to)) {
+                    // US-only：NASDAQ dividends API 只回現金股利，exRightsDate 恆 null。
                     events.add(new DividendEvent(ex.getYear(), amount.setScale(4, RoundingMode.HALF_UP),
-                            BigDecimal.ZERO, ex.toString(), null, null));
+                            BigDecimal.ZERO, ex.toString(), null, null, null));
                 }
             } catch (RuntimeException e) {
                 return ParseEvents.invalid("Nasdaq historical dividend date malformed");
@@ -369,6 +377,14 @@ public class DividendFetchClient {
         return ParseEvents.valid(events);
     }
 
+    /**
+     * 357.2a／357.2b／357.2c：{@code CashExDividendTradingDate}（除息日）與
+     * {@code StockExDividendTradingDate}（除權日）不再互相 fallback，各自落到
+     * {@link DividendEvent#exDividendDate()}／{@link DividendEvent#exRightsDate()}。
+     * malformed 判定、區間過濾、year 推導三處改用 {@code anchorDate}（兩者中較早且非
+     * null 者）；只配股（無除息日）的列不得因此被判為 malformed 而整批拒收——兩個
+     * 日期至少要有一個可解析才是有效，兩個都缺才是無效。
+     */
     private ParseEvents parseFinMindDividendRows(JsonNode rows, LocalDate from, LocalDate to) {
         List<DividendEvent> events = new ArrayList<>();
         for (JsonNode item : rows) {
@@ -376,17 +392,22 @@ public class DividendFetchClient {
             BigDecimal cashSurplus = requiredDecimal(item, "CashStatutorySurplus");
             BigDecimal stock = requiredDecimal(item, "StockEarningsDistribution");
             BigDecimal stockSurplus = requiredDecimal(item, "StockStatutorySurplus");
-            String ex = firstNonBlank(item.path("CashExDividendTradingDate").asText(null),
-                    item.path("StockExDividendTradingDate").asText(null));
+            String cashEx = nullIfEmpty(item.path("CashExDividendTradingDate").asText(null));
+            String stockEx = nullIfEmpty(item.path("StockExDividendTradingDate").asText(null));
+            LocalDate cashExDate = parseDateIso(cashEx);
+            LocalDate stockExDate = parseDateIso(stockEx);
+            LocalDate anchor = anchorDate(cashExDate, stockExDate);
             if (cash == null || cashSurplus == null || stock == null || stockSurplus == null
-                    || ex == null || parseDateIso(ex) == null) {
+                    || anchor == null) {
                 return ParseEvents.invalid("FinMind TaiwanStockDividend row malformed");
             }
-            LocalDate date = parseDateIso(ex);
-            if (!date.isBefore(from) && !date.isAfter(to)
+            if (!anchor.isBefore(from) && !anchor.isAfter(to)
                     && cash.add(cashSurplus).add(stock).add(stockSurplus).signum() > 0) {
-                events.add(new DividendEvent(date.getYear(), cash.add(cashSurplus).setScale(4, RoundingMode.HALF_UP),
-                        stock.add(stockSurplus).setScale(4, RoundingMode.HALF_UP), date.toString(),
+                events.add(new DividendEvent(anchor.getYear(),
+                        cash.add(cashSurplus).setScale(4, RoundingMode.HALF_UP),
+                        stock.add(stockSurplus).setScale(4, RoundingMode.HALF_UP),
+                        cashExDate == null ? null : cashExDate.toString(),
+                        stockExDate == null ? null : stockExDate.toString(),
                         nullIfEmpty(item.path("CashDividendPaymentDate").asText("")),
                         nullIfEmpty(item.path("StockDividendPaymentDate").asText(""))));
             }
@@ -394,6 +415,13 @@ public class DividendFetchClient {
         return ParseEvents.valid(events);
     }
 
+    /**
+     * 357.2f：此資料集僅有單一日期欄（無現金／股票兩個原始日期可 fallback），依既有
+     * {@code stock_or_cache_dividend} 判準（含「權」不含「息」→ 純配股）分派到
+     * {@link DividendEvent#exRightsDate()} 或 {@link DividendEvent#exDividendDate()}，
+     * 不得像修正前一律塞進 exDividendDate（那正是除權日被誤標成除息日的原始缺陷，
+     * 主要影響個股資料集查無的 ETF）。
+     */
     private ParseEvents parseFinMindResultRows(JsonNode rows, LocalDate from, LocalDate to) {
         List<DividendEvent> events = new ArrayList<>();
         for (JsonNode item : rows) {
@@ -407,7 +435,10 @@ public class DividendFetchClient {
                 String type = item.path("stock_or_cache_dividend").asText("");
                 boolean stock = type.contains("權") && !type.contains("息");
                 events.add(new DividendEvent(date.getYear(), stock ? BigDecimal.ZERO : amount,
-                        stock ? amount : BigDecimal.ZERO, date.toString(), null, null));
+                        stock ? amount : BigDecimal.ZERO,
+                        stock ? null : date.toString(),
+                        stock ? date.toString() : null,
+                        null, null));
             }
         }
         return ParseEvents.valid(events);
@@ -516,9 +547,15 @@ public class DividendFetchClient {
                              + item.path("StockStatutorySurplus").asDouble(0);
                 if (cash == 0 && stock == 0) continue;
 
-                String exDate = item.path("CashExDividendTradingDate").asText("");
-                if (exDate.isEmpty()) exDate = item.path("StockExDividendTradingDate").asText("");
-                Integer year = parseYear(exDate);
+                // 357.2a／357.2b／357.2c：除息日／除權日各自落地，不再互相 fallback。
+                // year 推導改用 anchorDate（兩者中較早且非 null 者），只配股（無除息日）
+                // 的事件不得因此被 continue 靜默丟棄——保留原本 lenient parseYear 與
+                // item.date 兩層 fallback，確保既有可解析格式逐位不變。
+                String cashExDate = nullIfEmpty(item.path("CashExDividendTradingDate").asText(""));
+                String stockExDate = nullIfEmpty(item.path("StockExDividendTradingDate").asText(""));
+                LocalDate anchor = anchorDate(parseDateIso(cashExDate), parseDateIso(stockExDate));
+                Integer year = anchor != null ? anchor.getYear()
+                        : parseYear(firstNonBlank(cashExDate, stockExDate));
                 if (year == null) {
                     String date = item.path("date").asText("");
                     year = parseYear(date);
@@ -531,7 +568,8 @@ public class DividendFetchClient {
                         year,
                         BigDecimal.valueOf(cash).setScale(4, RoundingMode.HALF_UP),
                         BigDecimal.valueOf(stock).setScale(4, RoundingMode.HALF_UP),
-                        nullIfEmpty(exDate),
+                        cashExDate,
+                        stockExDate,
                         cashPay, stockPay
                 ));
             }
@@ -600,8 +638,17 @@ public class DividendFetchClient {
         return all;
     }
 
+    /**
+     * 357.2g：key 改用 {@code anchorDate}（COALESCE(exDividendDate, exRightsDate)），
+     * 不得再對 {@code exDividendDate()==null} 退化為固定字串 {@code "NO_DATE"}——
+     * 357.2a／357.2f 之後純配股事件的 exDividendDate 恆為 null，若仍用固定字串組 key，
+     * 同一標的、不同年度、金額相同的兩筆純配股事件會產生相同 key 而在合併時互相覆蓋
+     * （已用運行中 DB 實測證實：2885 於 2022 與 2025 兩年的純配股事件 stock_dividend
+     * 皆為 0.300000）。
+     */
     private static String taiwanEventKey(DividendEvent event) {
-        String date = event.exDividendDate() == null ? "NO_DATE" : event.exDividendDate();
+        LocalDate anchor = anchorDate(event);
+        String date = anchor == null ? "NO_DATE" : anchor.toString();
         BigDecimal cash = event.cashDividend() == null ? BigDecimal.ZERO : event.cashDividend();
         BigDecimal stock = event.stockDividend() == null ? BigDecimal.ZERO : event.stockDividend();
         return date + "|" + normalized(cash.add(stock));
@@ -615,6 +662,7 @@ public class DividendFetchClient {
                 winner.cashDividend() == null ? other.cashDividend() : winner.cashDividend(),
                 winner.stockDividend() == null ? other.stockDividend() : winner.stockDividend(),
                 winner.exDividendDate() == null ? other.exDividendDate() : winner.exDividendDate(),
+                winner.exRightsDate() == null ? other.exRightsDate() : winner.exRightsDate(),
                 winner.cashPaymentDate() == null ? other.cashPaymentDate() : winner.cashPaymentDate(),
                 winner.stockPaymentDate() == null ? other.stockPaymentDate() : winner.stockPaymentDate());
     }
@@ -626,6 +674,7 @@ public class DividendFetchClient {
         if (event.cashDividend() != null && event.cashDividend().signum() != 0) score++;
         if (event.stockDividend() != null && event.stockDividend().signum() != 0) score++;
         if (event.exDividendDate() != null) score++;
+        if (event.exRightsDate() != null) score++;
         if (event.cashPaymentDate() != null) score++;
         if (event.stockPaymentDate() != null) score++;
         return score;
@@ -636,7 +685,7 @@ public class DividendFetchClient {
     }
 
     private static LocalDate eventDateForSort(DividendEvent event) {
-        return parseDateIso(event == null ? null : event.exDividendDate());
+        return event == null ? null : anchorDate(event);
     }
 
     /**
@@ -658,11 +707,14 @@ public class DividendFetchClient {
                 String type = item.path("stock_or_cache_dividend").asText("");
                 boolean isStock = type.contains("權") && !type.contains("息");
                 BigDecimal amt = BigDecimal.valueOf(amount).setScale(4, RoundingMode.HALF_UP);
+                // 357.2f：純配股（isStock）落 exRightsDate，現金落 exDividendDate，
+                // 不得像修正前一律塞進 exDividendDate。
                 out.add(new DividendEvent(
                         year,
                         isStock ? BigDecimal.ZERO : amt,
                         isStock ? amt : BigDecimal.ZERO,
-                        nullIfEmpty(exDate),
+                        isStock ? null : nullIfEmpty(exDate),
+                        isStock ? nullIfEmpty(exDate) : null,
                         null, null
                 ));
             }
@@ -752,11 +804,13 @@ public class DividendFetchClient {
                                     Integer.parseInt(pp[2]), Integer.parseInt(pp[0]), Integer.parseInt(pp[1]));
                         } catch (Exception ignore) {}
                     }
+                    // US-only：NASDAQ dividends 只回現金股利，exRightsDate 恆 null。
                     rows.add(new DividendEvent(
                             year,
                             BigDecimal.valueOf(amt).setScale(4, RoundingMode.HALF_UP),
                             BigDecimal.ZERO,
                             exIso,
+                            null,
                             payIso, null
                     ));
                 }
@@ -896,11 +950,13 @@ public class DividendFetchClient {
                 if (amt <= 0 || ts <= 0) continue;
                 LocalDate exDate = Instant.ofEpochSecond(ts).atZone(ET).toLocalDate();
                 if (exDate.getYear() < fromYear) continue;
+                // US-only：Yahoo chart events=div 只有現金配息，exRightsDate 恆 null。
                 out.add(new DividendEvent(
                         exDate.getYear(),
                         BigDecimal.valueOf(amt).setScale(4, RoundingMode.HALF_UP),
                         BigDecimal.ZERO,
                         exDate.toString(),
+                        null,
                         null, null
                 ));
             }
@@ -929,6 +985,24 @@ public class DividendFetchClient {
     private static LocalDate parseDateIso(String value) {
         try { return value == null ? null : LocalDate.parse(value); }
         catch (RuntimeException e) { return null; }
+    }
+
+    /**
+     * 357.2c：事件的錨定日期＝除息日與除權日中較早且非 null 者。只有一個日期時恆等於
+     * 該日期本身（與修正前 {@code firstNonBlank} 取到的 {@code ex} 逐位相同），兩個日期
+     * 皆存在時取較早者，避免事件因為只比較其中一個日期而落在 scope 區間外被漏抓。
+     * 僅供 malformed 判定／區間過濾／year 推導／merge key 使用，**不得**用來覆蓋
+     * {@link DividendEvent#exDividendDate()} 本身落地的原始日期。
+     */
+    private static LocalDate anchorDate(LocalDate exDividendDate, LocalDate exRightsDate) {
+        if (exDividendDate == null) return exRightsDate;
+        if (exRightsDate == null) return exDividendDate;
+        return exDividendDate.isBefore(exRightsDate) ? exDividendDate : exRightsDate;
+    }
+
+    private static LocalDate anchorDate(DividendEvent event) {
+        if (event == null) return null;
+        return anchorDate(parseDateIso(event.exDividendDate()), parseDateIso(event.exRightsDate()));
     }
 
     private static String joinErrors(String first, String second) {

@@ -25,10 +25,10 @@ class DividendPersisterAppendOnlyTest {
         DividendSnapshotStore snapshots = mock(DividendSnapshotStore.class);
         var historicalEvent = new DividendFetchClient.DividendEvent(
                 2026, new BigDecimal("0.25"), BigDecimal.ZERO,
-                "2026-08-01", "2026-08-07", null);
+                "2026-08-01", null, "2026-08-07", null);
         var upcomingEvent = new DividendFetchClient.DividendEvent(
                 2026, new BigDecimal("0.27"), BigDecimal.ZERO,
-                "2026-08-20", "2026-08-28", null);
+                "2026-08-20", null, "2026-08-28", null);
         var historical = new DividendFetchClient.DividendFetchResult(
                 "NASDAQ", List.of(historicalEvent), DividendFetchClient.FetchStatus.PARTIAL,
                 LocalDate.of(2016, 8, 9), LocalDate.of(2026, 8, 9), Instant.now(),

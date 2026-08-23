@@ -38,6 +38,14 @@ public class StockDividendHistory {
     @Column(name = "ex_dividend_date")
     private LocalDate exDividendDate;
 
+    /**
+     * 除權日（Task 357 / Requirement 94）。與 {@link #exDividendDate} 各自獨立落地，
+     * 不再互相 fallback：只配股事件此欄有值、exDividendDate 為 null；只配息事件則相反。
+     * nullable 且無預設值——「這個事件沒有除權」與「還沒回補」都必須能表示成 null。
+     */
+    @Column(name = "ex_rights_date")
+    private LocalDate exRightsDate;
+
     @Column(name = "yield_pct")
     private BigDecimal yieldPct;
 
@@ -65,4 +73,15 @@ public class StockDividendHistory {
 
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
+
+    /**
+     * anchorDate = COALESCE(exDividendDate, exRightsDate)（Task 357／Requirement 94）。
+     *
+     * <p>純配股事件的 {@link #exDividendDate} 為 {@code null}；供全庫所有把
+     * 「除息日是否存在」當作事件存在性／區間過濾／排序依據的呼叫端共用，
+     * 取代直接呼叫 {@code getExDividendDate()}，避免純配股事件被排除或 NPE。</p>
+     */
+    public LocalDate anchorDate() {
+        return exDividendDate != null ? exDividendDate : exRightsDate;
+    }
 }
