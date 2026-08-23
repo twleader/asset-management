@@ -4051,3 +4051,34 @@ Task 367 已把 `db/schema.sql` 重產到與運行中 DB 逐位元一致（85 �
 - [x] **AC8**：驗收不得只用單一樣式的「零命中」grep——舊措辭有「仍須複驗」「尚未 merge 的 changeset」「不得以重產」「停下回報」「離線查證依據」等多種寫法。須先跑一次涵蓋全部寫法的 grep 記下基準命中數，改完後必須降為 0，且改完後仍須 `bash scripts/tests/schema-sql-drift-test.sh` 回 0、`bash scripts/spec-check.sh` 為 `BLOCK: 0`（本需求只改 `db/schema.sql` 的**檔頭文字**，`pg_dump` 本體不重產——檔頭不參與該腳本的本體比對）。
 - [x] **AC9**：本需求**不**改變 B10／漂移測試的任何機制與離開碼語意（三態 0／1／2 不變）、不改 `scripts/git-hooks/commit-msg`、不新增或修改任何 Liquibase changeset、不動 `backend/`／`bff/`／`external-materials-service/`／`frontend/`／`api-gateway/`／`docker-compose.yml`；`db/schema.sql` 仍維持「放在 `db/` 而非 `db/init/`、不參與 DB 初始化」。本需求只改**定性與處置文字**。
 - [x] **AC10**：已完成的歷史任務檔（含 `spec/tasks/t367_schema_sql_drift_guard.md` 的完成報告）**不修改**——那是 Task 367 派工與交付當下的事實紀錄。定性的改變由本需求與 `spec/tasks/t368_*.md` 記錄，並在 Requirement 103 的敘述處加一行指向本需求，讓讀到舊定性的人知道它已被取代。
+
+### Requirement 105／Task 369: 儀表板「股價/漲跌(%)」欄位在 `priceChange` 缺值時整包消失——改為股價與漲跌%各自獨立降級
+
+**編號說明**：續編為 Requirement 105／Task 369——104／368（`db/schema.sql` 定性為 DB schema 唯一標準）已由 `claude/schema-sql-regenerate-drift-check-633729` merge 進 main（commit `abd88bf3`），本 worktree 於 2026-08-24 merge origin/main 追上後續編為 105。
+
+**使用者回報**：儀表板「股票持股」卡片（台股／美股／英股皆休市時最容易重現）的「股價/漲跌(%)」欄位只顯示灰色股價數字，完全沒有漲跌 ▲/▼ 與百分比。
+
+**根因**：`frontend/src/views/DashboardView.vue` 的 `getRealtimePrice(row)` 對報價物件採「全有或全無」判斷——只要 `p.priceChange == null`（上游 `PriceCacheWriter.buildPayload()` 缺 `previousClose`，或台股非開盤時段 `PriceQueryService.historyToLive()` 查不到前一交易日收盤價，皆合理產生此值），就整個 `return null`，連帶把本來有效的即時 `price` 一起丟棄；`getPriceCell(row)` 落到快照後備分支，`priceNumberColor(row)` 因 `getRealtimePrice(row)` 為 `null` 且 `isBaselineToday` 為真而顯示灰色。股價本身仍顯示（因為快照後備分支的 `row.stockPrice` 有值），但漲跌%完全不見，且顏色被誤判為「非 live」的灰色。
+
+- [x] **AC1**：`getRealtimePrice(row)` 不得因 `priceChange` 為 `null` 就整包 `return null`；當 `p.price != null` 且通過既有 `isAcceptedTodayQuote` 檢查時，一律回傳含 `price` 的物件，`priceChange`／`changePercent` 個別允許為 `null`（沿用現有物件形狀 `{ price, priceChange, changePercent }`，`changePercent` 已經是 nullable）。
+- [x] **AC2**：`priceNumberColor(row)` 判斷「是否顯示深色（live）」不得依賴「`priceChange` 是否有值」——AC1 修正後 `getRealtimePrice(row)` 對「有 live 股價但缺漲跌」也會回傳 truthy 物件，此時應顯示深色（代表股價本身是即時的），不得因缺漲跌就退回灰色判斷分支。
+- [x] **AC3**：模板既有 `v-if="getPriceCell(row).priceChange != null"` 判斷式不變——`priceChange` 為 `null` 時，「股價/漲跌(%)」欄只顯示股價數字、不顯示漲跌 ▲/▼ 與百分比（不得顯示 `NaN`、`undefined` 或空的百分比括號），這是刻意的降級樣式，不是本次要修的問題。
+- [x] **AC4**：`getPriceCell(row)` 的快照後備分支（`live` 為 `null` 時的分支）與 `belongsToRow` 判斷邏輯不變——本需求只改「有 live 報價但缺漲跌」這一種情境的處理方式，不改「無 live 報價、落到快照後備」的既有邏輯。
+- [x] **AC5**：涉及本欄位的既有 tooltip 邏輯（`DashboardView.vue` 第 1280～1290 行附近、與表格「股價」欄同源取用 `getRealtimePrice`）須同步受惠於 AC1 的修正，不得與表格欄位顯示不一致（例如表格顯示深色即時股價、tooltip 卻仍顯示舊快照收盤價）。
+- [x] **AC6**：本需求純屬前端顯示邏輯修正，不改後端／BFF 任何 DTO、API 契約或資料來源；`PriceCacheWriter.buildPayload()` 與 `PriceQueryService.historyToLive()` 在缺 `previousClose`／前一交易日收盤價時繼續回傳 `priceChange: null`（維持既有「不亂猜漲跌」的保守行為），不在本需求範圍內改動。
+
+**驗收**：`/run-stack` 重建並 recreate `frontend` 後，於瀏覽器實機驗證休市時段（或以 DevTools 手動在 `stockPrices` 注入一筆 `price` 有值、`priceChange` 為 `null` 的報價）「股價/漲跌(%)」欄股價顯示為深色數字、漲跌%欄位留空（不顯示 `NaN`），且與同一列的 tooltip 呈現一致。
+
+**修正後複查發現：AC1–AC6 之外還有第二個獨立根因，才是使用者實際看到的畫面（三個市場皆休市、股價灰色且完全無漲跌%）。**
+
+實機以 `docker exec asset-business-services curl http://localhost:8080/api/market-data/prices` 查證，休市時 `stockPrices` 內每筆報價實際長這樣：`{"stockCode":"0050","price":104.65,"priceChange":0.85,"changePercent":0.818882,"tradingDate":"2026-08-21","quoteStatus":"PREVIOUS_CLOSE"}`——`priceChange`／`changePercent` **都有值**，不是 null；但 `quoteStatus` 為 `PREVIOUS_CLOSE`，不是 `isAcceptedTodayQuote()` 只接受的 `LIVE`／`VERIFIED_CLOSE`，所以 `getRealtimePrice()` 一開始就在 `isAcceptedTodayQuote` 這一關被拒絕（AC1 修正的 `priceChange == null` 分支這裡根本沒機會執行到）。真正決定畫面的是 `getPriceCell()` 的快照後備分支（第 603～618 行）：
+
+```js
+const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
+```
+
+`p.tradingDate` 是報價快取記錄的「該市場最後一個交易日」（休市當下即為上一個交易日，如週一查詢會是週五）；`latest.value?.snapshotDate` 是目前檢視的快照日期，對「最新快照」而言就是**今天的日曆日期**（即使休市當天也會產生今日快照）。休市時這兩個日期恆不相等，`belongsToRow` 恆為 `false`，於是即使 `p.priceChange`／`p.changePercent` 明明有值，也會被這個判斷式硬性捨棄成 `null`——這正是程式碼自己的註解「收盤/週末**亦可顯示**」所承諾、卻被這行比對式破壞掉的行為。AC1 的修正是真的、也該保留（改善「有 live 報價但缺漲跌」的情境），但它**不是**使用者回報畫面的成因；沒有 AC7 這個修正，使用者看到的畫面不會改變。
+
+- [x] **AC7**：`getPriceCell(row)` 的 `belongsToRow` 判斷式**不得以 `p.tradingDate === latest.value?.snapshotDate` 判定**（休市時恆不相等，會讓收盤日的漲跌%全數消失，與程式碼既有註解「收盤/週末亦可顯示」矛盾）。改為判斷「目前是否正在檢視最新快照」——只要 `selectedSnapshotId` 為 `null` 或等於 `store.latestSnapshot?.id`，此時 `stockPrices` 快取的報價（不論其 `tradingDate` 是今天還是上一個交易日）都對應目前顯示的這一列，`priceChange`／`changePercent` 應正常帶出；選了**歷史**快照（`selectedSnapshotId` 不等於最新快照 id）時仍只顯示凍結收盤價、不帶漲跌%，這個既有行為不變。
+- [x] **AC8**：AC7 的修正只動 `belongsToRow` 這一行判斷式的比較依據，`getPriceCell` 其餘程式碼（`isRowClosePending`、`getRealtimePrice` 呼叫、`row.stockPrice == null` 判斷、回傳物件形狀）不動；`priceNumberColor(row)` 不因 AC7 而改變既有行為——休市時 `getRealtimePrice(row)` 仍回傳 `null`（`isAcceptedTodayQuote` 拒絕 `PREVIOUS_CLOSE`），股價數字依既有邏輯仍顯示灰色，AC7 只補回漲跌%，不改變顏色判斷。
+- [x] **AC9**：驗收須以實機 API 回應驗證，不得只憑程式碼推論：`docker exec asset-business-services curl http://localhost:8080/api/market-data/prices` 找一筆 `quoteStatus` 為 `PREVIOUS_CLOSE`、`priceChange` 非 null 的報價（休市時大量存在），登入儀表板確認該檔股票「股價/漲跌(%)」欄同時顯示股價（灰色）與漲跌 ▲/▼ 百分比（非空、非 `NaN`）；並確認選歷史快照（非最新）時同一檔股票只顯示股價、不顯示漲跌%（AC7 後半段的既有行為不得回歸壞掉）。

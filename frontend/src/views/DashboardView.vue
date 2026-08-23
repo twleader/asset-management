@@ -572,10 +572,9 @@ function getRealtimePrice(row) {
   const p = stockPrices.value[key]
   if (!p || p.price == null) return null
   if (!isAcceptedTodayQuote(p, marketToday(row.market))) return null
-  if (p.priceChange == null) return null
   return {
     price: Number(p.price),
-    priceChange: Number(p.priceChange),
+    priceChange: p.priceChange != null ? Number(p.priceChange) : null,
     changePercent: p.changePercent != null ? Number(p.changePercent) : null
   }
 }
@@ -608,8 +607,9 @@ function getPriceCell(row) {
   }
   if (row.stockPrice == null) return null
   const p = stockPrices.value[`${row.market}_${row.stockCode}`]
-  // stockPrices map 對應「最新快照」的 basedate；選了歷史快照時其漲跌不對應該列收盤價 → 只顯示收盤價。
-  const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
+  // stockPrices map 只對應「目前正在檢視的是最新快照」的情境；選了歷史快照時其漲跌不對應該列收盤價 → 只顯示收盤價。
+  const isLatestSnapshotView = selectedSnapshotId.value == null || selectedSnapshotId.value === store.latestSnapshot?.id
+  const belongsToRow = p && isLatestSnapshotView
   return {
     price: Number(row.stockPrice),
     priceChange: belongsToRow && p.priceChange != null ? Number(p.priceChange) : null,
