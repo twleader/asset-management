@@ -3798,3 +3798,33 @@ FROM stock_price_history WHERE market='台股';
 - [ ] **AC7**：AC5／AC6 的清理範圍限於本需求背景段落所述、經運行中 DB 查詢與外部核對確認的既有列；若清理當下發現額外受影響標的，須比照同一查證流程處理並記入完成報告，不得因與樣本數不同而略過。
 - [ ] **AC8**：修正後的抓取邏輯（AC1）必須以固定 `Clock` 與構造回應的單元測試釘住：構造一筆 `stock_or_cache_dividend="權"` 的 fallback 列與（可選）一筆主表配股列，驗證前者不再產生 `stockDividend > 0` 的事件、後者（若存在）維持正常解析。
 - [ ] **AC9**：本需求不改變 `TaiwanStockDividendResult` 「息」型列（現金配息）的既有解析、落地與 ETF 覆蓋邏輯，也不改變 Requirement 97 已修正的抓取視窗（`end_date`／`anchorDate` 過濾）邏輯，兩者維持現狀。
+
+---
+
+### Requirement 100／Task 364: 元大證券 SPARK API 唯讀查詢服務（Docker Linux adapter，scaffold，尚待官方帳號啟用）
+
+**User Story:** 作為在元大證券開戶的使用者，我希望系統能以元大官方 API 唯讀查詢我的帳務（庫存、損益、交割款、期貨權益數）、行情（報價、五檔、分時、K線、標的資訊）與委託成交回報，且該整合與富邦既有整合遵循同一套隔離、fail-closed 與唯讀鐵則；目前尚無元大官方帳號／憑證，本次先把可獨立驗收的服務骨架與唯讀查詢契約做完，待日後取得官方帳號再啟用。
+
+> **官方 API 選型與排除理由（必讀，決定本需求可否落地於本專案 Docker 架構）。** 元大證券公開兩套客戶端 API：
+> 1. **元大 OneAPI（`YuantaOneAPI`／`YuantaOneCom`）**：COM 元件 ＋ .NET Framework 4.5.2，官方範例與元件僅支援 Windows（32/64 位元），無 Linux／macOS 版本、無 Docker 部署路徑。
+> 2. **元大 SPARK API**：以 `pythonnet` 透過 **.NET SDK 8.0**（CoreCLR）載入 `YuantaSparkAPI.dll`，官方文件明確列出 **Linux 版本的登入函式簽章** `Login(PfxPath, PfxPass, Account, Pass)`（與 Windows 版 `Login(Account, Pass)` 不同），代表官方將 Linux 視為受支援平台。
+>
+> 本專案所有服務一律跑在 `docker-compose.yml` 定義的 Linux 容器（既有 `fubon-broker-service` 即 `platform: linux/amd64`），OneAPI 無法在此架構下執行。**本需求只採用 SPARK API，禁止以任何形式整合 OneAPI／YuantaOneCom。**
+>
+> **這個結論是根據元大官方文件之描述所做的推論，本專案未持有元大證券帳號、未實測驗證。** 本專案目前無法申請元大帳號，因此無法實際下載 `YuantaSparkAPI.dll` 驗證「文件記載 Linux 登入簽章」是否等於「官方正式支援生產環境的 Linux 容器部署」，也無法驗證是否僅支援特定 glibc／發行版版本。若日後取得官方帳號後發現 Linux 容器內 `pythonnet` 無法成功載入 DLL 或呼叫 `Login`，這是需要重新評估本需求架構決策的前提性風險，不得視為單純 bug 逐一修補。
+
+**Acceptance Criteria:**
+
+- [ ] **SDK 只能存在於獨立 Linux Python 服務：**新增 network-internal `yuanta-broker-service/`（Python 3.13、FastAPI、`platform: linux/amd64`），比照 `spec/steering/structure.md §4.5 Fubon Broker Service` 的既有邊界：Spring modules（`backend`／`bff`／`external-materials-service`）一律不得 import `pythonnet`／`clr`／`YuantaSparkAPI.dll`，只能經 `X-Internal-Service-Token` 呼叫本服務的 normalized internal HTTP API。本次任務**不新增任何 Java 呼叫端**——尚無 BFF／前端／持久化消費者，Java 側不建立未被使用的 proxy 層；未來若有具體功能需要消費這些查詢，由該功能的任務另行新增 Java client，屆時比照 `integration/fubon` 的既有慣例。
+- [ ] **不得預先下載或雜湊固定官方 DLL：**與富邦官方公開發布可雜湊驗證的 Linux wheel 不同，元大 `YuantaSparkAPI.dll` 僅開放給已完成申請（簽署風險預告書＋測試環境驗證）的元大證券客戶下載，無公開直鏈可供 build time 下載與 SHA-256 雜湊釘選。因此 image **不得**在 build stage 下載／打包任何元大專有元件；`YuantaSparkAPI.dll`、其相依 `.dll`／`.so` 與憑證一律由使用者依官方申請流程取得後，經 host 目錄以唯讀 volume 掛入容器（掛載路徑 `/run/secrets/yuanta/sdk/dll/`），與 `fubon-broker-service` 的 secrets 掛載模式一致；build context／Git 不得出現任何 `.dll`／`.so`／憑證檔案。
+- [ ] **容器與秘密 fail closed：**服務不得發布 host port，只加入 `asset-net`，以 non-root、`read_only:true`、`tmpfs:/tmp`、`cap_drop:[ALL]`、`security_opt:no-new-privileges:true` 執行；健康檢查只用 Python stdlib 打容器內 `GET /internal/health`。秘密由 host `secrets/yuanta/` 唯讀掛入 `/run/secrets/yuanta`，其中頂層 `internal-service-token`（本次任務無 Java 消費端，不比照 Fubon 拆分 `sdk/`／`shared/`）是本服務 internal API 的唯一認證密鑰來源；`.env.example` 只放 `YUANTA_ENABLED=false` 與 `YUANTA_SECRETS_DIR_HOST=./secrets/yuanta`，不放秘密值或 DLL 路徑以外的敏感 literal。`YUANTA_ENABLED=false`（預設值）時 process 仍 healthy、狀態為 `NOT_CONFIGURED`，不得拖垮既有 stack、不得成為任何其他 service 的啟動必需條件；`true` 但 DLL／PFX 憑證／帳密／`internal-service-token` 缺漏或 `pythonnet` 載入 `.dll` 失敗時為 `MISCONFIGURED`，所有 functional endpoint 固定回 503 且絕不呼叫 SDK。config 讀取一律 lazy：`YUANTA_ENABLED=true` 但秘密缺漏不得在 process 啟動階段拋錯或讓容器變 unhealthy。**`configState` 只代表元件與憑證齊備、DLL 可被載入，不代表已成功登入或已建立行情連線**——登入與行情連線是各自獨立、各自在第一次被對應 endpoint 呼叫時才 lazy 觸發的能力，失敗時只讓該次呼叫回 503（`reason=LOGIN_FAILED`／`MARKET_DATA_UNAVAILABLE`），不降級全域 `configState`，下次呼叫可重試；`configState != READY` 時所有 functional endpoint 一律 503、不嘗試呼叫任何能力。
+- [ ] **唯讀邊界為最高優先鐵則，明確列出禁用清單：**本服務只可 import／呼叫元大 SPARK API 中的查詢與訂閱類函式（`Login`／`LogOut`／帳務查詢／行情查詢／委託成交回報查詢／`Subscribe*`／`Unsubscribe*`）；**禁止 import、封裝或呼叫任何下單／改單／刪單／複式單／保證金操作類函式**，包含但不限於元大官方 API 中名稱以 `Send` 開頭者（例如下單、刪改單、`SendFutureCombined` 期貨複式單組合）與 `GetFutDepositOptimum`（保證金最佳化計算雖屬查詢語意，但官方文件將其與下單流程並列，本需求**不納入**避免邊界模糊）。此邊界對應 `CLAUDE.md`〈券商 API 只能查詢，不得交易〉全專案鐵則，程式碼中不得出現任何具下單語意的 endpoint、排程或前端按鈕。
+- [ ] **查詢範圍固定為以下三大類，逐項提供 normalized internal endpoint（皆為 `POST`，皆需 `X-Internal-Service-Token`，input/output 皆為本服務自有 schema，不得序列化 SDK raw object）：**
+  - 帳務查詢（需先 `Login` 並選定帳號）：股票庫存、期貨庫存、未實現損益、已實現損益、交割款、期貨權益數，共 6 支。
+  - 行情查詢（不需登入特定帳戶，僅需已建立行情連線）：報價表查詢、最佳五檔、分時明細、K線查詢、標的資訊查詢，共 5 支。
+  - 委託成交回報查詢（需先 `Login`）：委託成交綜合回報，共 1 支。
+  - 加上既有 `GET /internal/health`（唯一免 token）與 `GET /internal/config`，總計 14 支 route；使用 FastAPI 時必須 `docs_url=None, redoc_url=None, openapi_url=None`，route allowlist 精確等於上述 14 支，其餘 path/method 一律 404/405。
+- [ ] **帳號選擇比照富邦既有模式：**元大證券帳號可同時包含證券帳號與期貨帳號，登入後從回傳帳號清單中依查詢類別選出對應帳戶（證券類查詢用證券帳號、期貨類查詢用期貨帳號）；比照 `fubon-broker-service` 的 selector 規則——設定檔提供可選 `sdk/stock-account-selector`／`sdk/futures-account-selector`，未設定時只允許該類型帳號「恰好一個」候選，零個或多個候選一律拒絕並回 `MISCONFIGURED`。raw 帳號只留在 Python process 記憶體，回應與 log 只可帶 HMAC fingerprint，不得出現明碼證券/期貨帳號、身分證字號或營業員代碼。
+- [ ] **decimal／數量 wire 格式沿用本專案既有慣例：**所有金額／價格類欄位皆以不含 `e/E` 的 canonical decimal string 傳輸，precision ≤ 20、scale 0–10；股數／口數／量類欄位為非負 exact integer；Java 端（若未來新增消費者）比照 `fubon-broker-service` 慣例只從 `^(0|[1-9][0-9]*)(\.[0-9]+)?$` 建 `BigDecimal`，拒絕 JSON float／scientific notation／non-finite。**元大 SPARK API 實際回應欄位名稱與確切精度尚未經真實帳號驗證**（本需求撰寫時無官方帳號可供測試），`sdk_gateway.py` 必須把「SPARK API raw 欄位 → normalized wire 欄位」的映射集中在單一模組，方便日後取得官方帳號後依實測結果調整，不得散落在多個檔案。
+- [ ] **測試不得需要真實憑證：**`tests/` 提供 fake SPARK gateway（不 import `pythonnet`／`clr`），覆蓋 `NOT_CONFIGURED`／`MISCONFIGURED`／成功／帳號 selector 全部落入零個或多個候選／逐一 endpoint 的 400（缺參數）／503（disabled）／401/403（缺 token）情境；CI／`docker buildx --target test` 全程不得要求任何元大官方元件或帳密即可通過。
+- [ ] **不在本次範圍：**不下單／改單／刪單／期貨複式單／保證金最佳化；不寫入 `asset_snapshot`／`stock_holding` 或任何既有 DB 資料表，不新增 Liquibase changeset；不取代或影響現有台股即時報價 Redis pipeline（`external-materials-service` 既有 `PricePoller`／`PriceCacheWriter` 完全不變）；不新增 BFF route、前端頁面或 9090 公開路由；不建立 Java 消費端（見上方第一條）；在無官方帳號／憑證的情況下，不得宣稱已完成真實查詢驗證——完成報告須明列「真實元大帳號查詢」為未執行，待使用者取得官方帳號後另行驗收。
