@@ -4297,7 +4297,7 @@ public class BacktestService {
                 new Metric("EPS 年增", TradingRadarRuleEngine.FundamentalInput::epsContribution),
                 new Metric("近似 ROE", TradingRadarRuleEngine.FundamentalInput::roeContribution),
                 new Metric("近三月營收年增", TradingRadarRuleEngine.FundamentalInput::revenueContribution),
-                new Metric("PE 自身分位／可信虧損", TradingRadarRuleEngine.FundamentalInput::peContribution),
+                new Metric("估值（PE／PB／殖利率）／可信虧損", TradingRadarRuleEngine.FundamentalInput::peContribution),
                 new Metric("產業營收年增", TradingRadarRuleEngine.FundamentalInput::industryContribution));
         List<String> notes = new ArrayList<>();
         for (Metric metric : metrics) {

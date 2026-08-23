@@ -558,8 +558,8 @@ class TradingRadarRuleEngineTest {
      * 正規化未動，但使用者可觀察行為有實質變化即升版。</p>
      */
     @Test
-    void ruleVersion_isV16() {
-        assertEquals("TW_RULES_V16", TradingRadarRuleEngine.RULE_VERSION);
+    void ruleVersion_isV17() {
+        assertEquals("TW_RULES_V17", TradingRadarRuleEngine.RULE_VERSION);
     }
 
     // ═══ Task 360：J 值因子極性修正（standardJPosition）═══
@@ -1084,6 +1084,40 @@ class TradingRadarRuleEngineTest {
         assertNotEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, result.action());
         assertEquals(TradingRadarRuleEngine.CounterTrendState.OVERSOLD_WATCH, result.counterTrend().state());
         assertTrue(result.counterTrend().risks().stream().anyMatch(v -> v.contains("基本面多項惡化")));
+    }
+
+    /**
+     * Task 365：非虧損分支下，估值 composite（PE／PB／殖利率算術平均）的 contribution 達 ±0.5 門檻時，
+     * reasons／risks 文字須以「估值（PE／PB／殖利率）」開頭，不得再出現舊字面「PE 自身分位」——
+     * 該 composite 本就是三者平均，不是 PE 自身分位。
+     */
+    @Test
+    void valuationCompositeReasonUsesCompositeLabelNotPeLabel() {
+        var base = strongStock(false, TradingRadarRuleEngine.MarketRegime.RISK_ON);
+        var positive = engine.evaluateStock(withFundamental(base,
+                new TradingRadarRuleEngine.FundamentalInput(true, 0.0, 0.0, 0.0, 1.0, 0.0, false)));
+
+        assertTrue(positive.reasons().stream().anyMatch(r -> r.startsWith("估值（PE／PB／殖利率）")),
+                "peContribution ≥ 0.5 且非可信虧損時，reasons 須含複合標籤文字");
+        assertTrue(positive.reasons().stream().noneMatch(r -> r.contains("PE 自身分位")),
+                "不得殘留舊字面「PE 自身分位」");
+        assertTrue(positive.risks().stream().noneMatch(r -> r.contains("PE 自身分位")));
+    }
+
+    /**
+     * Task 365：{@code peLoss()} 為真的可信虧損分支標籤「PE（可信來源顯示虧損）」維持不變、
+     * 不得套用估值 composite 的複合標籤（理由：{@code contribution} 寫死 -1.0，不論 PB／殖利率
+     * 是否可得都不參與平均，語意上就是 PE 自身的可信虧損判定）。
+     */
+    @Test
+    void peLossRiskKeepsLossLabelUnchanged() {
+        var base = strongStock(false, TradingRadarRuleEngine.MarketRegime.RISK_ON);
+        var lossy = engine.evaluateStock(withFundamental(base,
+                new TradingRadarRuleEngine.FundamentalInput(true, 0.0, 0.0, 0.0, -1.0, 0.0, true)));
+
+        assertTrue(lossy.risks().stream().anyMatch(r -> r.startsWith("PE（可信來源顯示虧損）")),
+                "peLoss() 為真且 contribution ≤ -0.5 時，risks 須維持原「PE（可信來源顯示虧損）」標籤");
+        assertTrue(lossy.risks().stream().noneMatch(r -> r.contains("PE 自身分位")));
     }
 
     @Test
