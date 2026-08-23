@@ -1,5 +1,7 @@
 package com.steven.assets.service;
 
+import com.steven.assets.model.DividendDates;
+
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -46,9 +48,9 @@ public interface DividendCurrentStateRepository {
                     cashPaymentDate, stockPaymentDate);
         }
 
-        /** anchorDate = COALESCE(exDividendDate, exRightsDate)。 */
+        /** anchorDate = min(exDividendDate, exRightsDate)；算術本體見 {@link DividendDates#anchorDate}。 */
         public LocalDate anchorDate() {
-            return exDividendDate != null ? exDividendDate : exRightsDate;
+            return DividendDates.anchorDate(exDividendDate, exRightsDate);
         }
     }
 
@@ -92,9 +94,9 @@ public interface DividendCurrentStateRepository {
                     cashPaymentDate, stockPaymentDate);
         }
 
-        /** anchorDate = COALESCE(exDividendDate, exRightsDate)。 */
+        /** anchorDate = min(exDividendDate, exRightsDate)；算術本體見 {@link DividendDates#anchorDate}。 */
         public LocalDate anchorDate() {
-            return exDividendDate != null ? exDividendDate : exRightsDate;
+            return DividendDates.anchorDate(exDividendDate, exRightsDate);
         }
     }
 
@@ -122,9 +124,9 @@ public interface DividendCurrentStateRepository {
             this(id, null, null, exDividendDate, null, null, null, null);
         }
 
-        /** anchorDate = COALESCE(exDividendDate, exRightsDate)。 */
+        /** anchorDate = min(exDividendDate, exRightsDate)；算術本體見 {@link DividendDates#anchorDate}。 */
         public LocalDate anchorDate() {
-            return exDividendDate != null ? exDividendDate : exRightsDate;
+            return DividendDates.anchorDate(exDividendDate, exRightsDate);
         }
     }
 
@@ -143,9 +145,9 @@ public interface DividendCurrentStateRepository {
                     cashPaymentDate, stockPaymentDate, yieldPct, previousClose, fillDays, null);
         }
 
-        /** anchorDate = COALESCE(exDividendDate, exRightsDate)。 */
+        /** anchorDate = min(exDividendDate, exRightsDate)；算術本體見 {@link DividendDates#anchorDate}。 */
         public LocalDate anchorDate() {
-            return exDividendDate != null ? exDividendDate : exRightsDate;
+            return DividendDates.anchorDate(exDividendDate, exRightsDate);
         }
     }
 
@@ -161,7 +163,7 @@ public interface DividendCurrentStateRepository {
             LocalDate scopeFrom, LocalDate scopeTo);
 
     /**
-     * 某檔全部 ACTIVE 且 anchorDate（{@code COALESCE(ex_dividend_date, ex_rights_date)}）
+     * 某檔全部 ACTIVE 且 anchorDate（{@code LEAST(ex_dividend_date, ex_rights_date)}）
      * 非 null 的事件列（含 enrichment 欄位），id 升冪（Task 357：不再排除純配股事件）。
      */
     List<ActiveEventDetail> findActiveEventDetails(String code, String market);

@@ -1,5 +1,6 @@
 package com.steven.assets.externalmaterials.service;
 
+import com.steven.assets.externalmaterials.model.DividendDates;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.steven.assets.externalmaterials.client.EtfNavFetchClient;
@@ -975,10 +976,9 @@ public class MarketDataFetchService {
      * Task 357／357.2c：事件的錨定日期＝除息日與除權日中較早且非 null 者。只有一個日期
      * 時恆等於該日期本身（與拆欄前 fallback 取到的值逐位相同）。
      */
+    /** 算術本體委派 {@link DividendDates#anchorDate}；本 module 內只有那一份實作。 */
     private static LocalDate anchorDividendDate(LocalDate exDividendDate, LocalDate exRightsDate) {
-        if (exDividendDate == null) return exRightsDate;
-        if (exRightsDate == null) return exDividendDate;
-        return exDividendDate.isBefore(exRightsDate) ? exDividendDate : exRightsDate;
+        return DividendDates.anchorDate(exDividendDate, exRightsDate);
     }
 
     private static LocalDate parseIsoDateOrNull(String value) {

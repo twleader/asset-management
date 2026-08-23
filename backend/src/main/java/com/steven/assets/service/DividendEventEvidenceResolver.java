@@ -1,5 +1,7 @@
 package com.steven.assets.service;
 
+import com.steven.assets.model.DividendDates;
+
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -68,9 +70,9 @@ public final class DividendEventEvidenceResolver {
                     knownAt, provider, List.of());
         }
 
-        /** anchorDate = COALESCE(exDividendDate, exRightsDate)。 */
+        /** anchorDate = min(exDividendDate, exRightsDate)；算術本體見 {@link DividendDates#anchorDate}。 */
         public LocalDate anchorDate() {
-            return exDividendDate != null ? exDividendDate : exRightsDate;
+            return DividendDates.anchorDate(exDividendDate, exRightsDate);
         }
     }
 
@@ -185,7 +187,7 @@ public final class DividendEventEvidenceResolver {
         }
         Instant knownAt = max(selected.observedAt(), selected.sourceAvailableAt());
         // Task 357／357.3d-1b：這是交易雷達「下一配息」證據本身，改用 anchorDate =
-        // COALESCE(exDividendDate, exRightsDate)，否則純配股的未來事件永遠不會成為
+        // min(exDividendDate, exRightsDate)，否則純配股的未來事件永遠不會成為
         // 「下一配息」（Requirement 94 的頭號承諾）。
         List<Event> datedFuture = selected.events().stream()
                 .filter(Objects::nonNull)

@@ -13,31 +13,41 @@ public interface StockDividendHistoryRepository extends JpaRepository<StockDivid
     /**
      * 查詢某檔最近 N 年的股利歷史，年份遞減、同年依 anchorDate 遞減。
      *
-     * <p>Task 357：改用 {@code COALESCE(exDividendDate, exRightsDate)}，否則純配股
-     * 事件（exDividendDate 為 null）在同年度排序會退化到 NULLS LAST 尾端，順序不正確。</p>
+     * <p>Task 357：改用 {@code LEAST(exDividendDate, exRightsDate)}，否則純配股
+     * 事件（exDividendDate 為 null）在同年度排序會退化到 NULLS LAST 尾端，順序不正確。
+     * {@code NULLS LAST} 保留給真正兩欄皆空的年度彙總列。</p>
      */
     @Query("""
         SELECT h FROM StockDividendHistory h
         WHERE h.stockCode = :code AND h.market = :market AND h.year >= :sinceYear
           AND h.eventStatus = 'ACTIVE'
-        ORDER BY h.year DESC, COALESCE(h.exDividendDate, h.exRightsDate) DESC NULLS LAST
+        ORDER BY h.year DESC, LEAST(h.exDividendDate, h.exRightsDate) DESC NULLS LAST
         """)
     List<StockDividendHistory> findByStockSinceYear(String code, String market, int sinceYear);
 
     /**
      * 交易雷達還原權息用的區間事件；排除年度彙總列與零值事件。
      *
-     * <p>Task 357：區間比較改用 anchorDate = {@code COALESCE(exDividendDate,
+     * <p>Task 357：區間比較改用 anchorDate = {@code LEAST(exDividendDate,
      * exRightsDate)}——純配股事件的 exDividendDate 為 null，裸欄位 BETWEEN 對 NULL
-     * 恆為 UNKNOWN、等同隱性排除。</p>
+     * 恆為 UNKNOWN、等同隱性排除。兩欄皆空的年度彙總列仍然被排除（{@code LEAST} 為
+     * {@code null} 時 {@code BETWEEN} 不成立）。</p>
+     *
+     * <p><b>用 {@code LEAST} 而非 {@code COALESCE}。</b>PostgreSQL 的 {@code LEAST} 忽略
+     * {@code NULL}、全 {@code NULL} 才回 {@code NULL}，與 Java 端
+     * {@link com.steven.assets.model.DividendDates#anchorDate}（取較早者）<b>逐位相同</b>；
+     * {@code COALESCE} 取「第一個非 null」，在兩欄皆有值且除權日較早時會取到較晚的除息日，
+     * 讓一個實際落在視窗內的事件被排除——與本任務要修的缺陷同型。下游
+     * {@code BacktestService} 等二次過濾一律用 {@code anchorDate()}，兩側語意必須一致，
+     * 否則 SQL 篩掉的東西下游永遠救不回來。</p>
      */
     @Query("""
         SELECT h FROM StockDividendHistory h
         WHERE h.stockCode = :code AND h.market = :market
-          AND COALESCE(h.exDividendDate, h.exRightsDate) BETWEEN :fromDate AND :toDate
+          AND LEAST(h.exDividendDate, h.exRightsDate) BETWEEN :fromDate AND :toDate
           AND h.eventStatus = 'ACTIVE'
           AND (COALESCE(h.cashDividend, 0) > 0 OR COALESCE(h.stockDividend, 0) > 0)
-        ORDER BY COALESCE(h.exDividendDate, h.exRightsDate) ASC, h.id ASC
+        ORDER BY LEAST(h.exDividendDate, h.exRightsDate) ASC, h.id ASC
         """)
     List<StockDividendHistory> findAdjustmentEvents(
             String code, String market, LocalDate fromDate, LocalDate toDate);

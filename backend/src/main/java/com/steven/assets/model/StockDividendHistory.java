@@ -75,13 +75,16 @@ public class StockDividendHistory {
     private LocalDateTime updatedAt;
 
     /**
-     * anchorDate = COALESCE(exDividendDate, exRightsDate)（Task 357／Requirement 94）。
+     * anchorDate = {@code min(exDividendDate, exRightsDate)}（Task 357／Requirement 94）——
+     * <b>不是 {@code COALESCE}</b>，理由見 {@link DividendDates#anchorDate}。
      *
      * <p>純配股事件的 {@link #exDividendDate} 為 {@code null}；供全庫所有把
      * 「除息日是否存在」當作事件存在性／區間過濾／排序依據的呼叫端共用，
      * 取代直接呼叫 {@code getExDividendDate()}，避免純配股事件被排除或 NPE。</p>
+     *
+     * <p>算術本體一律委派 {@link DividendDates#anchorDate}，backend 內只有那一份實作。</p>
      */
     public LocalDate anchorDate() {
-        return exDividendDate != null ? exDividendDate : exRightsDate;
+        return DividendDates.anchorDate(exDividendDate, exRightsDate);
     }
 }

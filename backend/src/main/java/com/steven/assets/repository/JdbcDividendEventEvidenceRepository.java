@@ -107,15 +107,18 @@ public class JdbcDividendEventEvidenceRepository implements DividendEventEvidenc
             List<Long> snapshotIds = refs.stream().map(SnapshotRef::id).distinct().toList();
             String placeholders = String.join(",", Collections.nCopies(snapshotIds.size(), "?"));
             // Task 357／357.3d-1：這是交易雷達「下一配息」的資料來源；純配股事件的
-            // ex_dividend_date 為 null，改用 anchorDate = COALESCE(ex_dividend_date,
+            // ex_dividend_date 為 null，改用 anchorDate = LEAST(ex_dividend_date,
             // ex_rights_date) 判斷事件是否存在，否則這類事件永遠不會成為下一配息證據。
+            // **是 LEAST 不是 COALESCE**：LEAST 忽略 NULL、取較早者，與 Java 端
+            // DividendDates.anchorDate 逐位相同；COALESCE 取「第一個非 null」，兩欄皆有值
+            // 且除權日較早時會取到較晚的除息日，讓落在視窗內的事件被排除。
             List<RawEvent> rawEvents = jdbc.query("""
                     SELECT snapshot_id, ex_dividend_date, ex_rights_date, cash_dividend,
                            stock_dividend, cash_payment_date, stock_payment_date,
                            source_available_at
                     FROM stock_dividend_snapshot_event
                     WHERE snapshot_id IN (%s)
-                      AND COALESCE(ex_dividend_date, ex_rights_date) IS NOT NULL
+                      AND LEAST(ex_dividend_date, ex_rights_date) IS NOT NULL
                     """.formatted(placeholders), (rs, rowNum) -> new RawEvent(
                     rs.getLong("snapshot_id"),
                     rs.getObject("ex_dividend_date", LocalDate.class),

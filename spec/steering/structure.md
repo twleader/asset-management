@@ -254,9 +254,48 @@ bff/src/main/java/com/steven/assets/bff/
      `WeeklyBarAggregatorTest` 與 `ChartSeriesAlignerTest` 各自以相同的週界案例
      （一般週、短週、ISO 跨年、單日成週）釘住，壞週案例則各自斷言刻意不同。
      完整脈絡見 `spec/design.md` 的「三軌持有期與真正的週K／日K 棒」小節。
-   - **上述四組具名例外之外，不得再新增任何一份同義值的獨立實作**：新的同義值一律回到本鐵則。
+   - **具名例外之五（Task 357 登記，狀態：併存、刻意不合併）：配息事件的「錨定日」
+     （`anchorDate ＝ min(除息日, 除權日)`，Requirement 94 / Task 357.2c）有兩份實作**——
+     (a) `backend/.../model/DividendDates#anchorDate`（canonical，吃 `LocalDate`；backend 內
+     所有進入點——`StockDividendHistory#anchorDate()`、`DividendCurrentStateRepository` 的
+     `Event`／`ProjectedEvent`／`ActiveFutureEvent`／`ActiveEventDetail` 四個 record、
+     `DividendEventEvidenceResolver.Event`——一律委派它，**該 module 內只有這一份**）；
+     (b) `external-materials-service/.../model/DividendDates#anchorDate`（同樣吃 `LocalDate`；
+     三條抓取路徑 `client.DividendFetchClient`、`client.TaiwanOfficialDividendCalendarClient`
+     與 `service.MarketDataFetchService` 都委派它）。
+     SQL 側的 `LEAST(ex_dividend_date, ex_rights_date)`（`JdbcDividendEventEvidenceRepository`、
+     `JdbcDividendCurrentStateRepository`、`StockDividendHistoryRepository` 的兩支 JPQL）語意與
+     (a) 逐位相同（**是 `LEAST` 不是 `COALESCE`**），視為同一份規則在資料庫端的等價寫法，
+     不另計為實作。
+     **免罪理由：** (a)–(b) 是**建置結構**——`backend` 與 `external-materials-service` 是兩個
+     獨立 Maven artifact，後者的 `pom.xml` 不依賴 `backend`，全 repo 三個 `pom.xml` 無
+     aggregator、無共用程式模組，跨不過去（與具名例外之二 (a) 對 {(b),(c)}、具名例外之四
+     同一條理由）。
+     **不適用建置結構理由的那一組已於 Task 357 收斂，不列為例外：** ext 端原本在
+     `client.DividendFetchClient`、`client.TaiwanOfficialDividendCalendarClient` 與
+     `service.MarketDataFetchService` 各有一份等價的四行實作，三者同在
+     `asset-external-materials-service` 這一個 artifact、同一個 Spring context，寫成
+     「無共用模組故無法收斂」是錯的（正是本鐵則最下方那句「引用例外時須逐條核對免罪理由
+     是否真的適用」要擋的事，與具名例外之二 (b) 對 (c) 同型）。已抽成 (b) 這一支純日期算術
+     helper：放在新的 `model/` package 而不是 `client/` 或 `service/`，兩個 package 都往內
+     依賴它，不必為了一個純函式讓 `service` 反過來依賴 `client`。backend 端同理，四個 record
+     ＋ entity 的五份逐字相同實作已收斂成 (a)。
+     **`min` 不是 `coalesce`，這是語意差異不是寫法偏好：** `coalesce` 取「第一個非 null」，
+     在**兩欄皆有值且除權日較早**時會取到較晚的除息日，讓一個實際落在視窗內的事件被區間
+     過濾排除——正是 Task 357 要消滅的那種靜默消失換個形狀。兩者只有在「至多一個非 null」
+     或「純 null 檢查」時才等價，所以只用純配股（除息日 null）的案例測不出差別。
+     （`spec/requirements.md` 的 357.3d-1 字面寫 `COALESCE(...)`「即 anchorDate 的落地形式」，
+     與 357.2c 的 `min` 定義互相矛盾；以 357.2c 為準。）
+     **同步機制：** 兩份的清單以本條為權威，(b) 的 Javadoc 指名 (a) 為「必須同步的對應實作」。
+     兩份各以相同四個案例釘住（只有除息日／只有除權日／兩者皆有取較早／兩者皆 null 視為
+     無日期）：`DividendAnchorDateLeastTest`（backend，直接呼叫 (a)，並以捕捉到的 SQL 字串
+     釘住 `LEAST`）、`DividendDatesTest`（ext，直接呼叫 (b)，並以反射確認三條抓取路徑都委派它）。
+     **任一側改動比較邏輯，兩側必須同 commit 跟上。**
+   - **上述五組具名例外之外，不得再新增任何一份同義值的獨立實作**：新的同義值一律回到本鐵則。
      引用例外時須逐條核對免罪理由是否真的適用——Task 335 的 arch 稽核正是發現「(3) 的『含 live』
-     理由對 IXIC 不成立」才揭出第二組；Task 342 的稽核則是發現量比欄同時被兩支 helper 餵養。
+     理由對 IXIC 不成立」才揭出第二組；Task 342 的稽核則是發現量比欄同時被兩支 helper 餵養；
+     Task 357 的稽核則是發現 `external-materials-service` 內部三處各有一份等價的錨定日實作，
+     而它們同屬一個 artifact、「無共用模組」在那裡不成立（已收斂，見例外之五）。
 5. **前端只 render，BFF 預先聚合 / 排序 / 過濾 / 計算 profit / profitRate 等衍生值。**
 
 ---
@@ -268,6 +307,7 @@ bff/src/main/java/com/steven/assets/bff/
 ```
 external-materials-service/src/main/java/com/steven/assets/externalmaterials/
 ├── config/             # WebClient、Redis 連線
+├── model/              # DividendDates（錨定日 `min(除息日, 除權日)` 純算術，client 與 service 共用；見 §3.2 鐵則 4 具名例外之五）
 ├── client/             # PriceFetchClient、TwseInfoFetchClient、DividendFetchClient、ExchangeRateFetchClient、MacroDataFetchClient、NewsFetchClient、BotFxFetchClient、YahooFxFetchClient、FundNavFetchClient、FundDividendFetchClient
 ├── service/
 │   ├── PricePoller            # 2 分鐘 cron：抓 live 寫 Redis

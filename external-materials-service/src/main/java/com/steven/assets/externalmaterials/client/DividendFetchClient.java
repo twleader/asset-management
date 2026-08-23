@@ -1,5 +1,6 @@
 package com.steven.assets.externalmaterials.client;
 
+import com.steven.assets.externalmaterials.model.DividendDates;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -639,7 +640,7 @@ public class DividendFetchClient {
     }
 
     /**
-     * 357.2g：key 改用 {@code anchorDate}（COALESCE(exDividendDate, exRightsDate)），
+     * 357.2g：key 改用 {@code anchorDate}（{@code min(exDividendDate, exRightsDate)}），
      * 不得再對 {@code exDividendDate()==null} 退化為固定字串 {@code "NO_DATE"}——
      * 357.2a／357.2f 之後純配股事件的 exDividendDate 恆為 null，若仍用固定字串組 key，
      * 同一標的、不同年度、金額相同的兩筆純配股事件會產生相同 key 而在合併時互相覆蓋
@@ -988,16 +989,15 @@ public class DividendFetchClient {
     }
 
     /**
-     * 357.2c：事件的錨定日期＝除息日與除權日中較早且非 null 者。只有一個日期時恆等於
-     * 該日期本身（與修正前 {@code firstNonBlank} 取到的 {@code ex} 逐位相同），兩個日期
-     * 皆存在時取較早者，避免事件因為只比較其中一個日期而落在 scope 區間外被漏抓。
-     * 僅供 malformed 判定／區間過濾／year 推導／merge key 使用，**不得**用來覆蓋
-     * {@link DividendEvent#exDividendDate()} 本身落地的原始日期。
+     * 357.2c：事件的錨定日期＝除息日與除權日中較早且非 null 者。
+     *
+     * <p>算術本體一律委派 {@link DividendDates#anchorDate}——本 module 內只有那一份實作
+     * （見 {@code spec/steering/structure.md} §3.2 鐵則 4 具名例外之五）。僅供 malformed
+     * 判定／區間過濾／year 推導／merge key 使用，<b>不得</b>用來覆蓋
+     * {@link DividendEvent#exDividendDate()} 本身落地的原始日期。</p>
      */
     private static LocalDate anchorDate(LocalDate exDividendDate, LocalDate exRightsDate) {
-        if (exDividendDate == null) return exRightsDate;
-        if (exRightsDate == null) return exDividendDate;
-        return exDividendDate.isBefore(exRightsDate) ? exDividendDate : exRightsDate;
+        return DividendDates.anchorDate(exDividendDate, exRightsDate);
     }
 
     private static LocalDate anchorDate(DividendEvent event) {

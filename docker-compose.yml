@@ -133,6 +133,14 @@ services:
       # Google Drive 目錄列舉（Requirement 50 / Task 241）：供「爬蟲資訊查詢」頁的 Drive 資料夾樹用。
       # 備份（gdrive-crypt）與輸出（GDriveOutput）共用同一份 rclone.conf 的不同 section。
       GDRIVE_OUTPUT_REMOTE: ${GDRIVE_OUTPUT_REMOTE:-GDriveOutput}
+      # 配息四日期的一次性歷史回補（Requirement 94 / Task 357.3a）。**預設 false，常態不啟用**。
+      # 這三個 passthrough 存在的唯一理由是：`docker compose up` 只會展開 compose 檔裡出現過的
+      # 變數，沒有這幾行就無法用「DIVIDEND_BACKFILL_ENABLED=true docker compose up -d
+      # --no-deps --force-recreate business-services」觸發回補（up 不吃 -e）。
+      # 回補完成後不需要移除，關著的旗標不改變任何行為。
+      DIVIDEND_BACKFILL_ENABLED: ${DIVIDEND_BACKFILL_ENABLED:-false}
+      DIVIDEND_BACKFILL_BATCH_SIZE: ${DIVIDEND_BACKFILL_BATCH_SIZE:-10}
+      DIVIDEND_BACKFILL_BATCH_PAUSE_MILLIS: ${DIVIDEND_BACKFILL_BATCH_PAUSE_MILLIS:-5000}
     volumes:
       # rclone 設定以 read-only 從 host 掛入。主檔 rclone.conf 含三個 section：
       #   [GoogleDriver]（drive.file，備份底層）／[gdrive-crypt]（加密層，DB 備份用）／

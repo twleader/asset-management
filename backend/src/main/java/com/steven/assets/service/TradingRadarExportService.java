@@ -473,7 +473,7 @@ public class TradingRadarExportService {
      * V13 evidence/confidence columns appended after legacy decision columns.
      *
      * <p>Task 357／Requirement 94：「下一配息日」自本任務起重新定義為 anchorDate =
-     * {@code COALESCE(nextExDividendDate, nextExRightsDate)}，純配股事件此欄現在落的
+     * {@code LEAST(nextExDividendDate, nextExRightsDate)}（取較早者，非 COALESCE），純配股事件此欄現在落的
      * 是除權日。需要區分四種日期，改用 {@link #DIVIDEND_FOUR_DATES_HEADERS}（附加在
      * 整張表真正最末，不動本欄既有欄位索引）。</p>
      */
