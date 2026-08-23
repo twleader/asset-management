@@ -18,11 +18,23 @@ import java.util.Objects;
 public class TradingRadarRuleEngine {
 
     /**
-     * V15：持有期由兩軌拆為<b>三軌</b>——一周（{@link Horizon#SHORT}）、1周~1月
+     * V16：修正 J 值因子的<b>極性錯誤</b>——KD／J 因子（日線）與週線動能因子（週線）的 J 位置分量
+     * 改由 {@link #standardJPosition(BigDecimal, BigDecimal)} 以標準 J（{@code 3K − 2D}）現算，
+     * 不再直接餵入本專案為對齊券商畫面而採的顯示慣例 {@code j9 = 3D − 2K}
+     * （Task 360／Requirement 96）。原式在股票上漲（{@code K > D}）時加分、下跌時扣分，
+     * 與該分量自述的「低檔有利於承接、高檔不鼓勵追價」及 Requirement 43／59「不追高殺低」相反。
+     *
+     * <p><b>本版未調整任何權重、門檻或因子組成</b>，只改這一個分量的算式；
+     * {@code j9}／{@code k3d2} 的計算與所有顯示／匯出欄位逐位不變。
+     * 但個股 {@code score}／{@code action} 會實質變動（實測 35 檔全部受影響），
+     * <b>V15 與 V16 的分數不可直接比較</b>；大盤 {@code score} 不受影響
+     * （{@code evaluateMarket()} 全程不吃 {@code j9}）。</p>
+     *
+     * <p>V15（歷史）：持有期由兩軌拆為<b>三軌</b>——一周（{@link Horizon#SHORT}）、1周~1月
      * （{@link Horizon#SWING}）、1月~6月（{@link Horizon#MEDIUM}），並新增五個因子：
      * 日K 棒、週線趨勢、週線動能、週線乖離、週K 棒與量能（Task 356／Requirement 93）。
      * 因子數由 18 增為 23，<b>23 × 3 個權重全部重新給值</b>（含既有 18 個因子的新值），
-     * 三軌各自合計 {@code 1.00}。
+     * 三軌各自合計 {@code 1.00}。</p>
      *
      * <p><b>這組權重全部是判斷性取值、無回測依據</b>：改動來源是「為 5 個新因子讓出
      * 0.16–0.19 的權重，並讓每一列跨軌單調」，不是任何量測結果。
@@ -46,7 +58,7 @@ public class TradingRadarRuleEngine {
      * 另外，極端時機（EXTREME_OVERBOUGHT／EXTREME_OVERSOLD）新增季線乖離自身分位替代路徑，
      * 使低波動標的的保護不再形同虛設（Task 299）。</p>
      */
-    public static final String RULE_VERSION = "TW_RULES_V15";
+    public static final String RULE_VERSION = "TW_RULES_V16";
 
     /**
      * 三軌持有期（Task 356.1a）。
@@ -1845,8 +1857,7 @@ public class TradingRadarRuleEngine {
             if (direction > 0) reasons.add("週KD 為 K>D，週線動能轉強。 ");
             if (direction < 0) risks.add("週KD 為 K<D，週線動能轉弱。 ");
         }
-        Double jPosition = weekly.j9() == null
-                ? null : clampUnit((50.0 - weekly.j9().doubleValue()) / 50.0);
+        Double jPosition = standardJPosition(weekly.k(), weekly.d());
         Double kd = averageAvailable(direction, position, jPosition);
 
         Double macd = null;
@@ -2321,6 +2332,35 @@ public class TradingRadarRuleEngine {
         return Math.max(-1.0, Math.min(1.0, v));
     }
 
+    /**
+     * 標準 J（{@code 3K − 2D}）的位置分量：低檔為正、高檔為負。
+     *
+     * <p><b>刻意不讀 {@code j9}。</b>本專案的 {@code j9 = 3D − 2K} 是為了與使用者券商畫面相符
+     * 而採的顯示慣例，方向與坊間標準 {@code J = 3K − 2D} 相反。令 {@code avg = (K+D)/2}、
+     * {@code m = K − D}，則 {@code 3D − 2K = avg − 2.5m}、{@code 3K − 2D = avg + 2.5m}，
+     * 代入本式的 {@code (50 − value)/50}（語意為「低檔為正」）分別得到
+     * {@code (50−avg)/50 + m/20}（動能越強分數越高＝追漲）與 {@code (50−avg)/50 − m/20}
+     * （動能越強分數越低＝不追價）。後者才符合 Requirement 43／59「不追高殺低」與
+     * {@code t291:59} 自述的「低檔有利於承接、高檔不鼓勵追價」。Task 291（日線）與
+     * Task 356.6b（週線）都直接接入 {@code j9} 而未檢視慣例方向，由 Requirement 96／Task 360 修正。</p>
+     *
+     * <p>改寫成 {@code (j9 − 50)/50} <b>不是</b>修法：那會連位置項一起反轉，變成高檔加分。</p>
+     *
+     * <p><b>為什麼由 {@code k}／{@code d} 現算而不讀 {@code k3d2}：因為 {@link WeeklyInput}
+     * 沒有 {@code k3d2} 欄位</b>，為此新增 record 欄位會踩到本專案已知的「相容建構式吃掉新欄位
+     * → production 少傳引數、新欄位靜默 null、既有測試全綠」陷阱。<b>理由不是精度，精度其實相反</b>：
+     * {@code k}／{@code d}／{@code j9}／{@code k3d2} 是在 {@code TechnicalIndicatorService:435}
+     * 的同一行一起 {@code scale2(...)} 捨入到 2 位小數的，故由 2 位 {@code k}／{@code d} 現算
+     * {@code 3k − 2d} 的誤差上界為 {@code 0.025}，直接讀 {@code k3d2} 只有 {@code 0.005}——
+     * 讀 {@code k3d2} 反而較精確，只是兩者代入 {@code /50} 後分別為 {@code 5e-4} 與 {@code 1e-4}，
+     * 皆可忽略。</p>
+     */
+    static Double standardJPosition(BigDecimal k, BigDecimal d) {
+        if (k == null || d == null) return null;
+        double j = 3.0 * k.doubleValue() - 2.0 * d.doubleValue();
+        return clampUnit((50.0 - j) / 50.0);
+    }
+
     private static String percent(double value) {
         return BigDecimal.valueOf(value * 100.0).setScale(1, RoundingMode.HALF_UP)
                 .toPlainString() + "%";
@@ -2392,8 +2432,7 @@ public class TradingRadarRuleEngine {
             if (average < 25) reasons.add("KD 位於低檔，具跌深承接條件。 ");
             if (average > 75) risks.add("KD 位於高檔，不鼓勵追價。 ");
         }
-        BigDecimal j = input.extendedIndicators() == null ? null : input.extendedIndicators().j9();
-        Double jPosition = j == null ? null : clampUnit((50.0 - j.doubleValue()) / 50.0);
+        Double jPosition = standardJPosition(k, d);
         // 本系統 W%R 值域為 0（高檔）至 100（低檔），故低檔為正貢獻，與被併入前的 wrContribution 同式。
         BigDecimal wr9 = input.extendedIndicators() == null ? null : input.extendedIndicators().wr9();
         Double wrPosition = wr9 == null ? null : clampUnit((wr9.doubleValue() - 50.0) / 50.0);

@@ -9,6 +9,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -110,7 +111,13 @@ class TradingRadarRuleEngineTest {
 
         // V11 的「不殺低」只在 KD 深度超賣且季線乖離 <= -10% 的 EXTREME_OVERSOLD 生效。
         // 本案對季線乖離為 -7.9%，雖屬 OVERSOLD_WATCH，仍不可偽裝已觸發極端低檔保護。
-        assertEquals(33, stock.score());
+        //
+        // V16（Task 360）：K=18.5 < D=28.0（K<D、KD 均值 23.25 屬低檔）。
+        // V15 時 extendedIndicators 為 null → KD/J 只有 direction −1.0 與 position +0.535
+        // 兩分量 → −0.2325；改用標準 J = 3×18.5 − 2×28 = −0.5 → clampUnit((50+0.5)/50) 飽和為 +1.0，
+        // 三分量平均 (−1.0 + 0.535 + 1.0)/3 = +0.178333。**分數上升** 33 → 37，
+        // 正是 360.7g 對 K<D 標的的預期方向（深度超賣不再被當成超買扣分）。
+        assertEquals(37, stock.score());
         assertEquals(TradingRadarRuleEngine.Action.REDUCE_CANDIDATE, stock.action());
         assertEquals(TradingRadarRuleEngine.CounterTrendState.OVERSOLD_WATCH,
                 stock.counterTrend().state());
@@ -181,12 +188,19 @@ class TradingRadarRuleEngineTest {
         // V15：本 fixture 的 weekly／dailyCandle 皆為 null，五個新因子一律缺值、**不進 sumW**，
         // 故分數變動完全來自既有 18 個因子的權重改配（Task 356.7）。
         // 債券不套大盤因子，可用因子為 MA20 .04／MA60 .06／MA240 .06／KD_J .05／完成日漲跌 .01，
-        // Σw=0.22、Σ(w×c)=0.183 → 0.8318 → 92；個股再加上 MARKET .05 × (−1.0)，
-        // Σw=0.27、Σ(w×c)=0.133 → 0.4926 → 75。兩者都遠離 50，可反證新因子沒有被以 0 冒充缺值
-        //（若被冒充，sumW 會變大而把分數往 50 拉）。
-        assertEquals(75, equity.score());
+        // Σw=0.22；個股再加上 MARKET .05 × (−1.0)，Σw=0.27。兩者都遠離 50，
+        // 可反證新因子沒有被以 0 冒充缺值（若被冒充，sumW 會變大而把分數往 50 拉）。
+        //
+        // V16（Task 360）：本 fixture 以相容建構式建立、extendedIndicators 為 null，
+        // 故 V15 時 KD/J 只有 direction +1.0 與 position (50−50)/50 = 0 兩個分量 → 0.5。
+        // 改用 standardJPosition(k, d) 後 J 位置分量恆可得：K=60／D=40 → 標準 J = 3×60 − 2×40 = 100
+        // → clampUnit((50−100)/50) = −1.0，三分量平均 (1.0 + 0 − 1.0)/3 = 0。
+        // 債券 Σ(w×c) 由 0.183 降為 0.158 → 0.71818 → 86；個股 0.133 → 0.108 → 0.4926→0.4 → 70。
+        // 變動方向符合 360.7g 準則（K>D 的標的分數下降）；分量數 2→3 的可得性變化只發生在
+        // 這類手寫語料，production 組裝路徑的 j9 與 k／d 本來就同時可得（360.6a）。
+        assertEquals(70, equity.score());
         assertEquals(TradingRadarRuleEngine.Action.HOLD, equity.action());
-        assertEquals(92, bond.score());
+        assertEquals(86, bond.score());
         assertEquals(TradingRadarRuleEngine.Action.ADD_CANDIDATE, bond.action());
         assertTrue(bond.reasons().stream().anyMatch(reason -> reason.contains("資產類別為債券")));
     }
@@ -205,7 +219,9 @@ class TradingRadarRuleEngineTest {
         assertNull(equity.score());
         assertEquals(TradingRadarRuleEngine.Action.NO_TRADE, equity.action());
         // V15：同 bondDoesNotUseEquityRiskOffPenaltyOrBuyGate 的權重改配，由 90 回到 92。
-        assertEquals(92, bond.score());
+        // V16（Task 360）：同一 fixture 的 KD/J 由 0.5 變 0（K=60>D=40 → 標準 J 位置 −1.0），
+        // 92 → 86，與該測試逐位一致。
+        assertEquals(86, bond.score());
         assertEquals(TradingRadarRuleEngine.Action.ADD_CANDIDATE, bond.action());
     }
 
@@ -432,9 +448,15 @@ class TradingRadarRuleEngineTest {
         // V15（Task 356.7）：可用因子為 MA20 .04／MA60 .06／MA240 .06／KD_J .05／MARKET .05／
         // 完成日漲跌 .01，Σw=0.27、Σ(w×c)=0.193625 → 0.71713 → 86。
         // 五個新因子（日K 棒／週線趨勢／動能／乖離／週K 量能）在本 fixture 全部缺值而不進 sumW。
+        //
+        // V16（Task 360）：J 位置分量改由 standardJPosition(k, d) 現算且恆可得——
+        // 標準 J = 3×82.3 − 2×75.2 = 96.5 → clampUnit((50−96.5)/50) = −0.93，
+        // 三分量平均 (1.0 − 0.575 − 0.93)/3 = −0.168333。
+        // Σ(w×c) = 0.183 + 0.05×(−0.168333) = 0.1745833 → /0.27 = 0.6466 → 82.33 → 82。
+        // K>D 的標的分數下降，符合 360.7g 準則；動作維持 ADD_CANDIDATE 是本測試釘住的重點。
         var held = engine.evaluateStock(strongStockWithKd(true, "82.3", "75.2"));
 
-        assertEquals(86, held.score(), "V15 三軌權重改配後為 86 分");
+        assertEquals(82, held.score(), "V16 J 極性修正後為 82 分");
         assertEquals(TradingRadarRuleEngine.Action.ADD_CANDIDATE, held.action());
         assertEquals(TradingRadarRuleEngine.KdHeat.ELEVATED, held.kdHeat());
     }
@@ -443,11 +465,16 @@ class TradingRadarRuleEngineTest {
     void kdHeat_kAloneOverheated_closesBuyGateWithoutDeductingScore() {
         // K=86／D=70 → avg 78 未過 80，僅 K 過 85。KD/J 位置 (50-78)/50=-0.56，
         // 併入 direction +1.0 後平均 0.22；V15 權重下 Σ(w×c)/Σw=0.194/0.27=0.71852
-        // → 86（Task 356.7）。分數仍 ≥ 75，證明降級來自閘門而非扣分。
+        // → 86（Task 356.7）。
+        //
+        // V16（Task 360）：標準 J = 3×86 − 2×70 = 118 → clampUnit((50−118)/50) 飽和為 −1.0，
+        // 三分量平均 (1.0 − 0.56 − 1.0)/3 = −0.186667；
+        // Σ(w×c) = 0.183 + 0.05×(−0.186667) = 0.1736667 → /0.27 = 0.64321 → 82.16 → 82。
+        // 分數仍 ≥ 75，證明降級仍來自閘門而非扣分（本測試的核心不變式未受影響）。
         var held = engine.evaluateStock(strongStockWithKd(true, "86", "70"));
         var notHeld = engine.evaluateStock(strongStockWithKd(false, "86", "70"));
 
-        assertEquals(86, held.score(), "過熱硬閘門不在 KD/J 因子之外再重複扣分");
+        assertEquals(82, held.score(), "過熱硬閘門不在 KD/J 因子之外再重複扣分");
         assertEquals(TradingRadarRuleEngine.KdHeat.OVERHEATED, held.kdHeat());
         assertEquals(TradingRadarRuleEngine.Action.HOLD, held.action());
         assertEquals(TradingRadarRuleEngine.Action.WATCH, notHeld.action());
@@ -523,14 +550,98 @@ class TradingRadarRuleEngineTest {
     }
 
     /**
-     * Task 263 升為 V8：大盤即時點位的 high／low 改由 Yahoo 5 分 K 的 high／low 陣列提供
-     * （原本是「5 分格收盤價」的本地聚合），K／D 與 regime／score 因此與修正前不同。
-     * 升版判準沿用 Task 228（V6）與 Task 232（V7）——因子組成、權重、正規化完全未動，
-     * 但使用者可觀察行為有實質變化即升版。
+     * Task 360 升為 V16（360.7e）：KD／J（日線）與週線動能（週線）的 J 位置分量改由標準 J
+     * （{@code 3K − 2D}）現算，不再餵入本專案為對齊券商畫面而採的顯示慣例 {@code j9 = 3D − 2K}。
+     * 權重、門檻與因子組成完全未動，但個股 {@code score}／{@code action} 有實質變化。
+     *
+     * <p>升版判準沿用 Task 263（V8）與更早的 Task 228（V6）／Task 232（V7）——因子組成、權重、
+     * 正規化未動，但使用者可觀察行為有實質變化即升版。</p>
      */
     @Test
-    void ruleVersion_isV15() {
-        assertEquals("TW_RULES_V15", TradingRadarRuleEngine.RULE_VERSION);
+    void ruleVersion_isV16() {
+        assertEquals("TW_RULES_V16", TradingRadarRuleEngine.RULE_VERSION);
+    }
+
+    // ═══ Task 360：J 值因子極性修正（standardJPosition）═══
+    //
+    // 本專案的 j9 = 3D − 2K 是對齊券商畫面的顯示慣例，方向與坊間標準 J = 3K − 2D 相反。
+    // Task 291（日線）與 Task 356.6b（週線）都把 j9 直接餵進語意為「低檔為正」的
+    // clampUnit((50 − value)/50)，導致該分量在上漲（K>D）時加分、下跌時扣分，
+    // 與其自述用途及 Requirement 43／59「不追高殺低」完全相反。
+    //
+    // kdJContribution()／weeklyMomentumContribution() 都是 private 實例方法且分量值不外露，
+    // 故此處只測純函數 standardJPosition；「兩條路徑皆已改」由
+    // TradingRadarThreeHorizonEngineTest 以分數方向驗證（360.7d）。
+
+    /** 360.7a：缺值、動能為零、clamp 飽和三種基本性質。 */
+    @Test
+    void standardJPosition_basicProperties() {
+        // 任一輸入缺值即回 null（可得性與既有 j9 路徑等價：j9 與 k／d 同出一個 KdPoint）。
+        assertNull(TradingRadarRuleEngine.standardJPosition(null, new BigDecimal("50")));
+        assertNull(TradingRadarRuleEngine.standardJPosition(new BigDecimal("50"), null));
+        assertNull(TradingRadarRuleEngine.standardJPosition(null, null));
+
+        // K == D（動能項 m = K − D 為零）時退化為純位置項 clampUnit((50 − K)/50)。
+        assertEquals(0.0, TradingRadarRuleEngine.standardJPosition(
+                new BigDecimal("50"), new BigDecimal("50")), 1e-9);
+        assertEquals(0.6, TradingRadarRuleEngine.standardJPosition(
+                new BigDecimal("20"), new BigDecimal("20")), 1e-9);
+        assertEquals(-0.6, TradingRadarRuleEngine.standardJPosition(
+                new BigDecimal("80"), new BigDecimal("80")), 1e-9);
+
+        // clamp 飽和：K=100,D=0 → J=300 → (50−300)/50 = −5 → −1.0。
+        assertEquals(-1.0, TradingRadarRuleEngine.standardJPosition(
+                new BigDecimal("100"), new BigDecimal("0")), 1e-9);
+        // K=0,D=100 → J=−200 → (50+200)/50 = +5 → +1.0。
+        assertEquals(1.0, TradingRadarRuleEngine.standardJPosition(
+                new BigDecimal("0"), new BigDecimal("100")), 1e-9);
+    }
+
+    /**
+     * 360.7b：極性回歸測試（本任務核心防迴歸點）。
+     *
+     * <p>兩組皆為 2026-08-23 對執行中 stack 的實測值。誤寫回 {@code 3D − 2K}（或
+     * {@code (j9 − 50)/50}）時本測試必紅。</p>
+     */
+    @Test
+    void standardJPosition_polarity_deepOversoldPositive_strongMomentumNegative() {
+        // NVDA 實測 K=23.7、D=45.5：KD 均值 34.6 屬明確超賣且 K<D（動能轉弱）→ 應為正（有利承接）。
+        // 誤用 j9 = 3D − 2K = 89.1 時得 (50−89.1)/50 = −0.78，深度超賣反被當超買扣分。
+        Double oversold = TradingRadarRuleEngine.standardJPosition(
+                BigDecimal.valueOf(23.7), BigDecimal.valueOf(45.5));
+        assertNotNull(oversold);
+        assertTrue(oversold > 0,
+                "深度超賣（K=23.7 < D=45.5）的 J 位置分量必須為正，實際為 " + oversold);
+
+        // 00882 實測 K=62.0、D=44.5：KD 均值 53.3 中性偏高且 K>D（動能強勢）→ 應為負（不鼓勵追價）。
+        // 誤用 j9 = 3D − 2K = 9.4 時得 (50−9.4)/50 = +0.81，強勢追漲反拿到承接滿分。
+        Double strong = TradingRadarRuleEngine.standardJPosition(
+                BigDecimal.valueOf(62.0), BigDecimal.valueOf(44.5));
+        assertNotNull(strong);
+        assertTrue(strong < 0,
+                "動能強勢（K=62.0 > D=44.5）的 J 位置分量必須為負，實際為 " + strong);
+    }
+
+    /**
+     * 360.7c：代數等價斷言。令 {@code avg = (K+D)/2}、{@code m = K − D}，
+     * 則 {@code 3K − 2D = avg + 2.5m}，代入 {@code (50 − J)/50} 得
+     * {@code (50 − avg)/50 − m/20}——位置項與 j9 版相同，只有動能項反號。
+     */
+    @Test
+    void standardJPosition_matchesPositionMinusMomentumDecomposition() {
+        double[][] cases = {{40, 45}, {55, 50}, {48, 52}};
+        double[] expected = {0.4, -0.3, 0.2};
+        for (int i = 0; i < cases.length; i++) {
+            double k = cases[i][0];
+            double d = cases[i][1];
+            double decomposed = (50.0 - (k + d) / 2.0) / 50.0 - (k - d) / 20.0;
+            Double actual = TradingRadarRuleEngine.standardJPosition(
+                    BigDecimal.valueOf(k), BigDecimal.valueOf(d));
+            assertNotNull(actual);
+            assertEquals(expected[i], decomposed, 1e-9,
+                    "分解式自身的預期值 K=" + k + " D=" + d);
+            assertEquals(decomposed, actual, 1e-9, "K=" + k + " D=" + d);
+        }
     }
 
     // ═══ Task 342：跨市場「不適用」與「資料不足」分家、量價文案只列舉實際採用的分量 ═══
@@ -767,17 +878,23 @@ class TradingRadarRuleEngineTest {
         var lowWr = engine.evaluateStock(kdJIsolationStock("60", "40", null, "10", "8.0"));
         var withJ9NoWr = engine.evaluateStock(kdJIsolationStock("60", "40", "50", null, "8.0"));
 
-        // wr9=null → averageAvailable(1.0,0.0)=0.5 → Σ(w×c)=0.07×0.5=0.035
-        // → sigma=0.035/0.52=0.067308 → 53.365 → 53。
-        assertEquals(53, noWr.score());
-        // wr9=90（低檔）→ wrPosition=+0.8，併入平均後 avg(1.0,0.0,0.8)=0.6，應把貢獻往正向拉。
-        assertEquals(54, highWr.score(), "W%R 低檔（貢獻為正）應把 KD/J 貢獻往正向拉");
+        // V16（Task 360）：J 位置分量改由 standardJPosition(k, d) 現算且恆可得——
+        // 標準 J = 3×60 − 2×40 = 100 → clampUnit((50−100)/50) 飽和為 −1.0（下列四臂皆同）。
+        //
+        // wr9=null → averageAvailable(1.0, 0.0, -1.0)=0.0 → Σ(w×c)=0 → sigma=0 → 50。
+        // （V15 時 j9 缺值使該分量整個缺值，avg(1.0,0.0)=0.5 → 53。）
+        assertEquals(50, noWr.score());
+        // wr9=90（低檔）→ wrPosition=+0.8，併入平均後 avg(1.0,0.0,-1.0,0.8)=0.2，應把貢獻往正向拉。
+        assertEquals(51, highWr.score(), "W%R 低檔（貢獻為正）應把 KD/J 貢獻往正向拉");
         assertTrue(highWr.score() > noWr.score());
-        // wr9=10（高檔）→ wrPosition=-0.8，併入平均後 avg(1.0,0.0,-0.8)=0.0667，應把貢獻往負向拉。
-        assertEquals(50, lowWr.score(), "W%R 高檔（貢獻為負）應把 KD/J 貢獻往負向拉");
+        // wr9=10（高檔）→ wrPosition=-0.8，併入平均後 avg(1.0,0.0,-1.0,-0.8)=-0.2，應把貢獻往負向拉。
+        assertEquals(49, lowWr.score(), "W%R 高檔（貢獻為負）應把 KD/J 貢獻往負向拉");
         assertTrue(lowWr.score() < noWr.score());
-        // j9=50、wr9=null → 退回三分量平均 avg(1.0,0.0,0.0)=0.3333，與併入 W%R 前的版本一致。
-        assertEquals(52, withJ9NoWr.score(), "wr9 缺值時應退回三分量（direction／position／J9）平均");
+        // j9=50、wr9=null → j9 自 Task 360 起完全不進評分鏈，故與 noWr 逐位相同（V15 時為 52）。
+        // 這一臂自此改為「j9 已退出評分鏈」的守護，不再是「wr9 缺值時退回三分量平均」。
+        assertEquals(noWr.score(), withJ9NoWr.score(),
+                "j9 不得再影響 KD/J 因子（Task 360：改讀 k／d 現算的標準 J）");
+        assertEquals(50, withJ9NoWr.score());
     }
 
     @Test
@@ -1485,19 +1602,22 @@ class TradingRadarRuleEngineTest {
                 "因子段 risks 兩軌必須逐位相同（同一份 computeFactors 結果）");
 
         // (b) 18 因子貢獻值固定為下列已知值（由 fixture 的技術面／基本面／外幣／ETF 輸入導出）：
-        //   ma5=+1.0 ma20=+1.0 ma60=+1.0 ma240=+1.0 kdJ=+0.25 macd=+0.5 rsi=+0.5 bias=+0.5
+        //   ma5=+1.0 ma20=+1.0 ma60=+1.0 ma240=+1.0 kdJ=0.0 macd=+0.5 rsi=+0.5 bias=+0.5
         //   volume=-1.0 market=+0.5 dayMove=+0.5 fx=+0.4 etfPremium=+0.6
         //   eps=roe=revenue=pe=industry=+0.5
-        // 18 因子全部有值，兩軌有效權重總和皆為 1.0（即 SHORT/MEDIUM_WEIGHT_SUM），故
-        // sigma＝Σ(w×c)：
-        //   短期 Σ(w×c)＝0.05+0.06+0.04+0.02+0.14×0.25+0.08×0.5+0.06×0.5+0.07×0.5
-        //     +0.08×(-1)+0.09×0.5+0.04×0.5+0.04×0.4+0.03×0.6+0.03×0.5+0.03×0.5+0.04×0.5
-        //     +0.02×0.5+0.08×0.5 = 0.429 → score=round(50+50×0.429)=round(71.45)=71
-        //   中期 Σ(w×c)＝0.02+0.05+0.08+0.07+0.07×0.25+0.05×0.5+0.04×0.5+0.08×0.5
-        //     +0.05×(-1)+0.06×0.5+0.02×0.5+0.03×0.4+0.02×0.6+0.07×0.5+0.07×0.5+0.05×0.5
-        //     +0.05×0.5+0.12×0.5 = 0.5165 → score=round(50+50×0.5165)=round(75.825)=76
-        assertEquals(71, result.shortScore(), "短期軌以 SW_ 權重加權同一組貢獻值");
-        assertEquals(76, result.score(), "中期軌以 MW_ 權重加權同一組貢獻值");
+        // 本 fixture 的 weekly／dailyCandle 皆為 null，V15 新增的五個因子一律缺值不進 sumW，
+        // 故有效權重總和為既有 18 因子之和：短期 Σw=0.84、中期 Σw=0.81。
+        //
+        // V16（Task 360）：kdJ 由 +0.25 變 0——K=60／D=40 → 標準 J = 100 →
+        // clampUnit((50−100)/50) = −1.0，取代 V15 時由 j9=50 得到的 0；
+        // 四分量平均 (1.0 + 0.0 − 1.0 + 0.0)/4 = 0（wr9=50 → wrPosition=0）。
+        // K>D 的標的分數下降，符合 360.7g 準則。
+        //   短期 Σ(w×c)＝0.329 + 0.12×0.0 = 0.329 → sigma=0.329/0.84=0.391667
+        //     → score=round(50+50×0.391667)=round(69.583)=70（V15 為 0.359/0.84 → 71）
+        //   中期 Σ(w×c)＝0.409 + 0.05×0.0 = 0.409 → sigma=0.409/0.81=0.504938
+        //     → score=round(50+50×0.504938)=round(75.247)=75（V15 為 0.4215/0.81 → 76）
+        assertEquals(70, result.shortScore(), "短期軌以 SW_ 權重加權同一組貢獻值");
+        assertEquals(75, result.score(), "中期軌以 MW_ 權重加權同一組貢獻值");
     }
 
     /**

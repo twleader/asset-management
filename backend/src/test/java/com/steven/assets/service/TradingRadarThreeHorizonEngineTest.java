@@ -192,9 +192,16 @@ class TradingRadarThreeHorizonEngineTest {
     @Test
     @DisplayName("356.5b 十字線（high > low 且 close == open）實體方向為 0，不是缺值")
     void dojiWithRealRangeContributesZeroBodyDirection() {
-        // H=20 L=10 O=C=15：收盤位置 0.5 → 0、實體 0、下影線 0.5 → +1；三分量平均 1/3。
+        // H=20 L=10 O=C=12：收盤位置 0.2 → (0.2−0.5)×2 = −0.6、實體 0（十字線）、
+        // 下影線 0.2 → (0.2−0.25)×4 = −0.2；三分量平均 −0.266667。
+        //
+        // ⚠️ 原本用的是 O=C=15（三分量平均 +1/3）。Task 360 把 base() 的 KD/J 貢獻由 0.5
+        // 壓到 0（K=60>D=40 → 標準 J 位置 −1.0），base() 的 sigma 因此由 0.588 降到 0.406，
+        // 恰與 +1/3 相近：兩臂的 50+50σ 變成 69.744 與 70.303，被 score() 的 Math.round
+        // 吃成同一個整數，斷言退化成恆等。改用收在區間下緣的十字線讓兩臂重新可判別；
+        // 受測性質（close == open 時實體為 0、整根 K 棒仍計入 sumW 而非缺值）完全不變。
         var doji = engine.evaluateStock(base()
-                .dailyCandle(candle("15", "20", "10", "15")).build());
+                .dailyCandle(candle("12", "20", "10", "12")).build());
         var missing = engine.evaluateStock(base().build());
 
         assertThat(doji.risks()).noneMatch(risk -> risk.contains("沒有價格區間"));
@@ -271,7 +278,9 @@ class TradingRadarThreeHorizonEngineTest {
     @Test
     @DisplayName("356.7a 週線動能缺值是重分配權重，不是計 0")
     void weeklyMomentumMissingRedistributesInsteadOfScoringZero() {
-        // k == d == j9 == 50、osc == 0、rsi5 == rsi10 == 50 → 三分量皆 0 → 貢獻正好 0。
+        // k == d == 50、osc == 0、rsi5 == rsi10 == 50 → 三分量皆 0 → 貢獻正好 0。
+        // （Task 360 起 J 位置分量改由 k／d 現算標準 J：k == d == 50 → J == 50 → 0；
+        //  j9 已不進評分鏈，此處保留 j9("50") 只是不動既有語料。）
         var zeroContribution = engine.evaluateStock(base()
                 .weekly(weekly(60).k("50").d("50").j9("50").osc("0")
                         .rsi5("50").rsi10("50").build()).build());
@@ -482,6 +491,78 @@ class TradingRadarThreeHorizonEngineTest {
         assertThat(bearish.score()).isLessThan(neutral.score());
         assertThat(neutral.risks()).anyMatch(risk -> risk.contains("不採計日K 棒收盤位置"));
         assertThat(bullish.reasons()).anyMatch(reason -> reason.contains("週MA10"));
+    }
+
+    // ═══ 360.7d：J 值極性修正確實接進日線與週線兩條路徑 ════════════════════════
+    //
+    // kdJContribution() 與 weeklyMomentumContribution() 都是 private 實例方法、分量值也不外露
+    // （公開路徑只吐 score／action），且本次唯一允許新增的可測進入點是純函數
+    // TradingRadarRuleEngine.standardJPosition（在 TradingRadarRuleEngineTest 直測）。
+    // 故這兩條路徑「有沒有真的改到」只能由分數方向反推。
+    //
+    // ⚠️ 不得用「K>D vs K<D」的反向比較：jPosition 與 direction = signum(K−D) 是同一個
+    // averageAvailable 的兄弟分量，對稱例值（60/40 vs 40/60）下兩者分量和逐位相等
+    // （+1 與 −1.0 相消、−1 與 +1.0 相消），該斷言在正確實作下也必然失敗。
+    // 改以「同向、不同動能幅度」固定 direction 與 position，只變動能量級。
+
+    @Test
+    @DisplayName("360.7d-1 日線：同為 K>D 時動能越強，一周軌分數越低（不追價）")
+    void dailyStrongerMomentumLowersShortScore() {
+        // 兩組 KD 均值皆為 50 → position = 0；皆 K>D → direction = +1。差別只有動能量級。
+        // 正確實作：jPosition 分別為 clampUnit((50−60)/50) = −0.20 與 clampUnit((50−150)/50) = −1.00。
+        // 誤寫回 3D − 2K：分別為 +0.20 與 clampUnit((50−(−50))/50) = +1.00，方向相反 → 本測試必紅。
+        var mild = engine.evaluateStock(base().k("52").d("48").build());
+        var strong = engine.evaluateStock(base().k("70").d("30").build());
+
+        assertThat(mild.shortScore()).isNotNull();
+        assertThat(strong.shortScore()).isNotNull();
+        // 實測 75 → 70（SW_KD_J = 0.12，J 佔該因子 1/4）。
+        assertThat(strong.shortScore()).isLessThan(mild.shortScore());
+        assertThat(strong.swingScore()).isLessThan(mild.swingScore());
+        assertThat(strong.score()).isLessThan(mild.score());
+    }
+
+    @Test
+    @DisplayName("360.7d-1 週線：同為週K>週D 時動能越強，一周軌分數越低（週線漏改的唯一防護）")
+    void weeklyStrongerMomentumLowersShortScore() {
+        // 日線 k／d 固定為 base() 的 60／40 不變，只動週線的 k／d。
+        // ⚠️ 週線 J 只佔週線動能因子的 1/3（本 fixture 的週MACD／週RSI 皆缺值），
+        // 而 SW_WEEKLY_MOMENTUM 只有 0.03，故一周軌的實測落差僅 70 → 69（未取整前 1.11 分）。
+        // 落差雖 > 1 分（`Math.round` 下 |Δ| ≥ 1 即保證整數不同），但餘裕很小：
+        // 三軌都斷言，一來加大防護，二來日後若某軌因權重調整而退化成恆等，會立刻變紅而不是靜默失效。
+        var mild = engine.evaluateStock(base()
+                .weekly(weekly(60).k("52").d("48").build()).build());
+        var strong = engine.evaluateStock(base()
+                .weekly(weekly(60).k("70").d("30").build()).build());
+
+        assertThat(mild.shortScore()).isNotNull();
+        assertThat(strong.shortScore()).isNotNull();
+        assertThat(strong.shortScore()).isLessThan(mild.shortScore());
+        assertThat(strong.swingScore()).isLessThan(mild.swingScore());
+        assertThat(strong.score()).isLessThan(mild.score());
+    }
+
+    @Test
+    @DisplayName("360.7d-2 j9 已退出評分鏈：只改日線與週線的 j9，三軌分數逐位不變")
+    void j9NoLongerAffectsAnyHorizonScore() {
+        // 固定 k／d 與其餘所有輸入，只把日線 ExtendedIndicators 與週線的 j9 換成差異極大的值。
+        // 修正前 j9 直接進 kdJContribution／weeklyMomentumContribution，此斷言必紅；
+        // 修正後兩處都改讀 k／d，j9 對 score 再無任何通道。
+        var lowJ9 = engine.evaluateStock(base()
+                .extended(extended("0", "1", "50", "50", "0", "0", "50"))
+                .weekly(weekly(60).k("60").d("40").j9("0").osc("1")
+                        .rsi5("50").rsi10("50").build())
+                .build());
+        var highJ9 = engine.evaluateStock(base()
+                .extended(extended("100", "1", "50", "50", "0", "0", "50"))
+                .weekly(weekly(60).k("60").d("40").j9("100").osc("1")
+                        .rsi5("50").rsi10("50").build())
+                .build());
+
+        assertThat(lowJ9.shortScore()).isNotNull();
+        assertThat(highJ9.shortScore()).isEqualTo(lowJ9.shortScore());
+        assertThat(highJ9.swingScore()).isEqualTo(lowJ9.swingScore());
+        assertThat(highJ9.score()).isEqualTo(lowJ9.score());
     }
 
     // ═══ helper ═════════════════════════════════════════════════════════════

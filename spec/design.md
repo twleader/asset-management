@@ -2029,6 +2029,19 @@ J9 / K3D2 亦以該圈**未捨入**的 k、d 計算後才捨入（與遞迴內�
 
 > `J9` 與 `K3D2` 是同一對 K/D 的兩種鏡像慣例（前者偏重 D、後者偏重 K），**刻意兩者都給**：使用者要在同一畫面對照兩種流派的乖離訊號。因為互為鏡像，兩條都畫會讓子圖線條過密無法判讀，故只畫 J9。
 > 註：`J9 = 3D − 2K` 的方向由使用者提供的畫面實測值反推確立（K9=40.36、D9=32.74 → J9=17.50、K3D2=55.60），與坊間常見的 `J = 3K − 2D` 相反；兩個方向的值本專案都提供，不需二擇一。
+>
+> ⚠️ **顯示用與評分用是兩個不同的選擇，不得混用（Requirement 96／Task 360）。**
+> **顯示**一律用 `J9 = 3D − 2K`（與使用者券商畫面相符，即上一段反推確立的結論，繼續有效）；
+> **評分鏈**一律用標準 `J = 3K − 2D`，由 `k`／`d` 現算（`TradingRadarRuleEngine.standardJPosition()`），不讀 `j9`。
+> **不讀 `k3d2` 的理由不是精度**——`k`／`d`／`j9`／`k3d2` 是在 `TechnicalIndicatorService.java:435` 的同一行一起 `scale2` 捨入到 2 位小數的，
+> 讀 `k3d2` 精度其實更好；真正的理由是 `WeeklyInput` 沒有 `k3d2` 欄位，詳見〈J 值因子的極性修正〉一節。
+> 理由是代數的、不是偏好問題：令 `avg = (K+D)/2`、`m = K − D`，則 `3D − 2K = avg − 2.5m`、`3K − 2D = avg + 2.5m`。
+> 評分鏈的位置式 `(50 − value)/50` 語意為「低檔為正」，代入前者得 `(50−avg)/50 + m/20`——**動能越強（K>D）分數越高**，
+> 與 Requirement 43／59「不追高殺低」及 `t291:59` 自述的「低檔有利於承接、高檔不鼓勵追價」相反；代入後者才得到正確的 `(50−avg)/50 − m/20`。
+> Task 291（日線）與 Task 356.6b（週線）都把 `J9 位置` 直接接進評分鏈而未檢視慣例方向（兩份任務檔全文皆零次出現 `k3d2`／`3K`／`3D`），
+> 實測 35 檔的 J 位置平均絕對偏差達 **1.05**（滿格 2.00）；單檔一周軌**日線 KD／J 因子單獨**的分數偏差最大 **±3.00**，
+> 計入同樣吃此極性錯誤的週線動能因子後合計 **≥ ±3.33**。由 Requirement 96 修正。
+> **注意 `(j9 − 50)/50` 不是修法**：那會連位置項一起反轉，錯得更徹底。
 
 **同源保證（機械判準）**：序列與 `computeAll()` 共用同一套今日 live 併入規則（最新歷史列非該市場今日、且 live 的 `tradingDate` 等於今日 → 以 `closePrice=price`、`highPrice=highPrice ?? price`、`lowPrice=lowPrice ?? price` 併為今日列）。因此**當 `end >= MarketZones.today(market)` 時，序列最後一筆的 `k`/`d`/`ma20`/`ma60`/`ma240` 必須逐位等於 `computeAll()` 的對應欄位，倒數第二筆的 `k`/`d` 必須等於 `previousK`/`previousD`**（`end` 早於今日時序列不併 live，兩者本就不必相等）。`0000`＋`台股` 走 `twse_index_daily_history` 的特例（含 Redis 今日即時點位併入、舊資料 high/low 為 null 時 fallback close）序列版同樣適用。
 
@@ -4455,7 +4468,7 @@ TradingRadarView
        ├─ AssetSnapshotRepository.findLatestWithStocks（當前持股，owner-scoped）
        ├─ StockAlertRepository.findDistinctStockCodeMarket（觀察，owner-scoped）
        ├─ PriceQueryService（只讀 Redis；miss → stock_price_history；`0000/台股` 自 Task 228 起亦可命中）
-       └─ TradingRadarRuleEngine（TW_RULES_V3 分數規則不變，RULE_VERSION 為 TW_RULES_V15（Task 356 起）；見 Task 264 的二維決策段落與下方「三軌持有期與真正的週K／日K 棒」小節）
+       └─ TradingRadarRuleEngine（TW_RULES_V3 分數規則不變，RULE_VERSION 為 TW_RULES_V16（Task 360 起；Task 356 為 V15）；見 Task 264 的二維決策段落與下方「三軌持有期與真正的週K／日K 棒」小節）
 ```
 
 `GET /api/trading-radar` 這條請求鏈**刻意不注入** `MarketAnalysisService`、LLM SDK、新聞爬蟲或任何 refresh endpoint，只重讀既有資料，不對外抓行情、不送出 Batch、不產生 AI 費用；SSE 盤中自動更新走的也是這條。**Task 249 起，使用者手動按下「重新整理」改走 `POST /api/trading-radar/refresh`，會同步觸發一次台股行情回補後才重算**（見下方「手動重新整理觸發行情回補」小節）；該路徑仍不注入任何 LLM client、不觸發新聞爬蟲、不送出 Batch、不產生 AI 費用。大盤即時點位在 `GET` 路徑上同樣只由獨立背景排程（`TaiexIndexPoller`，見「大盤新鮮度與盤中即時判斷」小節）寫入 Redis。現有行情／大盤排程若在背景更新 PostgreSQL 或 Redis，雷達下次讀取自然看見新值；兩者生命週期分離。
@@ -4495,7 +4508,7 @@ adjustedOHLC(date) = rawOHLC(date) * sharesAtDate / finalShares
 1. `TechnicalIndicatorService.computeFromSeries()` 計算 MA5／20／60／240、當期與前一期 KD；
 2. `TradingRadarRuleEngine.confirm()` 計算 MA20／60／240 兩收盤日確認；
 3. 規則引擎的單日漲跌（±5% 扣分、逆勢「停止續跌」）＝原始現價相對還原後前一根可比收盤；DTO `changePercent` 仍保留市場報價原始漲跌，兩者語意分離；
-4. **同一支 `computeFromSeries()` 另回傳 `FullIndicators.extended()`**——J9／K3D2／RSV／EMA12／EMA26／DIF／MACD／OSC／RSI5／RSI10／BIAS10／BIAS20／BIAS10-BIAS20／W%R9 共 14 個純揭露值（Task 281），供 DTO 的 `extendedIndicators` 與匯出檔。**吃的就是第 1 項的同一個 `series` 參數**，不是另一次取數，故 `j9 = 3D − 2K` 對該列的 `k`／`d` **在未捨入精度上恆成立**。⚠️ **呈現層不成立**：`kdSeriesAsc` 對 `k`／`d`／`j9` 是各自 `setScale(2, HALF_UP)`，故 API 與匯出檔的 2 位小數值代回該式最多可差 `3×0.005 + 2×0.005 + 0.005 = 0.03`（`k3d2` 同；`dif`／`osc`／`b10b20` 為 0.015；只有 `wr9 = 100 − rsv` 精確）。這組值只供匯出檔揭露，不進 `StockInput`、不影響 `action`／`score`，`RULE_VERSION` 不升版。
+4. **同一支 `computeFromSeries()` 另回傳 `FullIndicators.extended()`**——J9／K3D2／RSV／EMA12／EMA26／DIF／MACD／OSC／RSI5／RSI10／BIAS10／BIAS20／BIAS10-BIAS20／W%R9 共 14 個純揭露值（Task 281），供 DTO 的 `extendedIndicators` 與匯出檔。**吃的就是第 1 項的同一個 `series` 參數**，不是另一次取數，故 `j9 = 3D − 2K` 對該列的 `k`／`d` **在未捨入精度上恆成立**。⚠️ **呈現層不成立**：`kdSeriesAsc` 對 `k`／`d`／`j9` 是各自 `setScale(2, HALF_UP)`，故 API 與匯出檔的 2 位小數值代回該式最多可差 `3×0.005 + 2×0.005 + 0.005 = 0.03`（`k3d2` 同；`dif`／`osc`／`b10b20` 為 0.015；只有 `wr9 = 100 − rsv` 精確）。這組值只供匯出檔揭露，不進 `StockInput`、不影響 `action`／`score`，`RULE_VERSION` 不升版。【⚠️ **上句僅描述 Task 281 落地當下的事實，之後兩度變更**：**Task 291 起** `extendedIndicators` 已由 `RadarInputAssembler` 接入 `StockInput`（`TechnicalIndicatorService.java:58` 與 `TradingRadarRuleEngine.java:356` 的 record 註解均已載明「Task 291 起納入評分」），`j9`／`wr9`／`macd`／`rsi`／`bias` 皆影響 `score`／`action`；**Task 360 起 `j9` 退回純顯示**，J 位置改由 `k`／`d` 現算標準 `3K − 2D`，`wr9`／`macd`／`rsi`／`bias` 仍影響 `score`／`action`（`j9` 唯一殘存的評分鏈接觸是 `TradingRadarEvidenceConfidenceResolver.java:594` 的 `allAvailable(...)`，只判**存在與否**、不讀值）。見〈J 值因子的極性修正〉一節。】
 
 禁止只調 MA 不調 KD／確認／規則漲跌，否則會在同一筆決策中混用兩種價基。此調整只發生在交易雷達請求鏈，不覆寫 `stock_price_history`／`stock_dividend_history`，也不改其他頁面既有價格圖與行情漲跌的原始價口徑。
 
@@ -4635,6 +4648,93 @@ boolean stale = !todayEodPresent && !liveFreshToday;
 **1周~1月 軌不納入 V13 candidate／promotion 機制。** promotion registry 的候選參數是以 `5／20／60／120` 對**兩軌**做樣本外校準選出的，沒有任何針對該軌的 holdout 證據；硬套等於未經校準就上線。該軌一律走 V15 baseline，`evaluatePromoted` 的任一 promoted key 都不得影響它，並以測試釘住——不得因為「registry 現在是空的」就留下未來會靜默生效的路徑。
 
 **升版判準。** 因子集合、權重與可觀察輸出全部改變，`TW_RULES_V14` → `TW_RULES_V15`，這是本檔既有升版判準（「使用者可觀察行為有實質變化」）下最無爭議的一類，三個不升版先例（Task 249 輸出完全相同／Task 281 純揭露／Task 336 顯示值捨入修正）**一個都不適用**。V14 與 V15 的分數不可直接比較，須明文揭露；既有 `rule_version` 機制會重建通知基準、首輪不寄信。
+
+### J 值因子的極性修正（`TW_RULES_V16`，Requirement 96／Task 360）
+
+**缺陷。** 評分鏈的 J 位置分量誤用了畫面慣例 `J9 = 3D − 2K`。`TradingRadarRuleEngine.kdJContribution()`
+（日線）與 `weeklyMomentumContribution()`（週線）都以 `clampUnit((50 − j9)/50)` 當作「低檔為正」的位置分量，
+但 `j9` 的方向與坊間標準 `J = 3K − 2D` 相反（見〈走勢圖技術指標序列〉一節的 J9／K3D2 慣例註記），故該分量的**動能項極性是反的**。
+
+**代數。** 令 `avg = (K+D)/2`、`m = K − D`：
+
+```
+3D − 2K = avg − 2.5m        (本專案 j9，畫面慣例)
+3K − 2D = avg + 2.5m        (坊間標準 J)
+
+現行 jPosition = (50 − j9)/50   = (50 − avg)/50 + m/20    ← 動能越強分數越高（追漲）
+正確 jPosition = (50 − J)/50    = (50 − avg)/50 − m/20    ← 動能越強分數越低（不追價）
+```
+
+兩者恆差 `m/10`。位置項 `(50 − avg)/50` 在兩式中相同且方向正確，**錯的只有動能項**——這也是為什麼
+`(j9 − 50)/50` 不是修法：那會把位置項一併反轉，變成高檔加分。
+
+**實測影響（2026-08-23，35 檔 K/D 與 j9/k3d2 皆可得的標的）。**
+
+| 指標 | 值 |
+|---|---|
+| J 位置平均絕對偏差 | **1.05**（值域滿格 `[-1,+1]`，即偏差逾半格） |
+| `K > D`（12 檔，正在漲） | 現行版平均比標準版 **高 +0.70** |
+| `K < D`（23 檔，正在跌） | 現行版平均比標準版 **低 −1.23** |
+| 一周軌**日線 KD／J 因子單獨**的偏差 | **±3.00 分**（`SW_KD_J = 0.12`、jPosition 佔群組 1/4、`score = 50 + 50σ`） |
+| 一周軌**週線動能因子**追加的偏差 | **±0.33 分**（`SW_WEEKLY_MOMENTUM = 0.03`、週線 jPosition 佔 1/9）；週MACD／週RSI 皆缺值時佔 1/3 → **±1.00 分**（`50 × 0.03 × 2.00 ÷ 3`） |
+| 一周軌合計上界 | **≥ ±3.33 分**（缺值情境可達 `±4.00`）；`Accumulator.score()` 的缺值權重重分配（`sigma = sumWC / sumW`）會在 `sumW < 1.0` 時等比放大單因子影響，實際可再高於此 |
+
+逐檔極端例：
+
+| 標的 | K | D | KD 均值 | 現行 `j9` → jPos | 標準 `J` → jPos | 判讀 |
+|---|---|---|---|---|---|---|
+| `00881` | 37.4 | 58.2 | 47.8（中性偏低） | 99.9 → **−1.00** | −4.2 → **+1.00** | 吃滿超買懲罰，實則跌深 |
+| `NVDA` | 23.7 | 45.5 | 34.6（明確超賣） | 89.1 → **−0.78** | −19.9 → **+1.00** | 超賣卻被扣分 |
+| `00882` | 62.0 | 44.5 | 53.3（中性偏高） | 9.4 → **+0.81** | 97.0 → **−0.94** | 強勢追漲卻拿承接加分 |
+
+> 表列 K／D 為 1 位小數，代回 `3D − 2K` 與表列 `j9` 的實測落差皆 ≤ `0.1`（理論上界 `3×0.05 + 2×0.05 = 0.25`）；標準 `J = 3K − 2D` 三欄代回則完全吻合。
+
+**成因：同一個疏漏發生過兩次。** `j9 = 3D − 2K` 由 Task 261／262 為對齊券商畫面而反推確立，
+當時**只供顯示**；Task 281 更明文「不進 `StockInput`、不影響 `action`／`score`」（該句自 Task 291
+起已不成立，見〈還原權息技術序列〉一節第 4 點的行內註記）。
+
+- **日線**那一處由 **Task 291** 拉進評分鏈（`t291:44`／`:59`）。
+- **週線**那一處由 **Task 356.6b** 引入，`t356:142` 逐字寫著「再與 `clamp((50 - avg(k,d)) / 50)`
+  及 `clamp((50 - j9) / 50)` 取平均（使低檔有利於承接、高檔不鼓勵追價）」。
+
+**兩份任務檔對 `k3d2`／`鏡像`／`3K`／`3D` 都是零命中**——兩次都在複製「J9 位置」這個看似自明的
+寫法時沒有回頭檢視慣例方向。對照組是同一函式裡的 W%R，其上方留有「本系統 W%R 值域為 0（高檔）
+至 100（低檔），故低檔為正貢獻」的極性說明，證明作者逐一確認過 W%R 的方向，唯獨 J 值沒有。
+這正是必須在〈走勢圖技術指標序列〉一節留下顯示／評分分流註記的理由：沒有它，下一個把 J 拉進新因子的人
+會第三次踩進來。
+
+**修法。** 新增 `standardJPosition(BigDecimal k, BigDecimal d)` 純函數，回傳
+`clampUnit((50 − (3k − 2d))/50)`，日線 `kdJContribution()` 與週線 `weeklyMomentumContribution()`
+兩處改呼叫它，由 `k`／`d` 現算。
+
+**選 `k`／`d` 的理由只有一個，而且不是精度。** `WeeklyInput`（`TradingRadarRuleEngine.java:399-416`）
+沒有 `k3d2` 欄位，為此新增 record 欄位會踩到本專案已知的「相容建構式吃掉新欄位 → production 少傳
+引數、新欄位靜默 `null`、既有測試全綠」陷阱。**精度上其實相反，須據實記載**：`k`／`d`／`j9`／`k3d2`
+是在 `TechnicalIndicatorService.java:435` 的**同一行**一起 `scale2(...)` 捨入到 2 位小數的
+（`RadarInputAssembler.java:499-500` 日線沿用、`:422-423` 週線再捨一次），故——
+
+| 取法 | 相對真值 `3K − 2D` 的誤差上界 | 對 `jPosition`（`/50`）的影響 |
+|---|---|---|
+| 由 2 位 `k`／`d` 現算 `3k − 2d` | `3×0.005 + 2×0.005 = 0.025` | `5e-4` |
+| 直接讀 `k3d2` | `0.005` | `1e-4` |
+
+**讀 `k3d2` 反而較精確**，只是兩者皆可忽略，故不影響選擇。〈還原權息技術序列〉一節第 4 點提到的 `0.03` 是「以 2 位小數值
+代回 `j9 = 3D − 2K` 原式」的殘差（`3×0.005 + 2×0.005 + 0.005`），**不是 `k3d2` 自身的誤差**，
+不得誤讀為「`k3d2` 較不準」。
+
+**顯示不變。** `j9`／`k3d2` 的計算、DTO 欄位、走勢圖 J9 線、雷達展開列的 J 值顯示、匯出檔欄位
+一律逐位不變——畫面必須繼續與使用者券商相符。本次只改「評分鏈讀哪個值」。
+
+**升版判準。** `score`／`action` 對實測 35 檔全部實質變動，`TW_RULES_V15` → `TW_RULES_V16`，
+屬既有判準「使用者可觀察行為有實質變化」最無爭議的一類；三個不升版先例（Task 249 輸出完全相同／
+Task 281 純揭露／Task 336 顯示值捨入修正）**一個都不適用**——本次既非輸出相同、亦非純揭露，
+且雖屬「缺陷修正」卻**改變了 `score` 本身**，故與 Task 336 的成立條件（`score` 逐位不變）不符。
+V15 與 V16 的分數不可直接比較，須明文揭露。既有 `rule_version` 機制會重建通知基準、首輪不寄信，
+此為預期行為，不得寫 V15→V16 的沿用特例。
+
+**刻意不一起做。** 不調整 `SW_KD_J`／`SWG_KD_J`／`MW_KD_J`，也不調整 `SW_WEEKLY_MOMENTUM`／`SWG_WEEKLY_MOMENTUM`／`MW_WEEKLY_MOMENTUM` 任一權重（本次修正同樣改變週線動能因子的分數，該組權重同樣有被順手調整的風險）——極性錯誤可由代數證明對錯，
+權重校準則需 Requirement 56 的回測量測支持（`t333` 333.10 明文禁止未量測就調門檻）。兩者混在同一次
+變更會使升版後的分數變化無法歸因。
 
 ### 規則回測框架（Requirement 56／Task 273）
 
