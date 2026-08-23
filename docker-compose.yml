@@ -141,6 +141,13 @@ services:
       DIVIDEND_BACKFILL_ENABLED: ${DIVIDEND_BACKFILL_ENABLED:-false}
       DIVIDEND_BACKFILL_BATCH_SIZE: ${DIVIDEND_BACKFILL_BATCH_SIZE:-10}
       DIVIDEND_BACKFILL_BATCH_PAUSE_MILLIS: ${DIVIDEND_BACKFILL_BATCH_PAUSE_MILLIS:-5000}
+      # Task 361.4a-0：同一組 passthrough 缺 STATE_DIR 會讓回補靜默續用上次的 ledger 帳、
+      # 誤判整批標的「已跑過」而 no-op。預設值寫死 t357 既有的預設路徑（不可用空字串預設，
+      # 空字串會被 Spring 當成明確指定的空路徑覆蓋掉 application.yml 的巢狀預設）。
+      # 路徑刻意寫死為 ${EXPORT_OUTPUT_DIR}/dividend-backfill-t357 的展開值——compose 的
+      # ${VAR:-default} 無法在 default 裡再套用容器內才解析的 EXPORT_OUTPUT_DIR；日後若
+      # 改動上方 EXPORT_OUTPUT_DIR，這一行必須同步。
+      DIVIDEND_BACKFILL_STATE_DIR: ${DIVIDEND_BACKFILL_STATE_DIR:-/home/steven/dividend-backfill-t357}
     volumes:
       # rclone 設定以 read-only 從 host 掛入。主檔 rclone.conf 含三個 section：
       #   [GoogleDriver]（drive.file，備份底層）／[gdrive-crypt]（加密層，DB 備份用）／

@@ -144,13 +144,36 @@ public class DividendCurrentStateProjectionService {
         }
     }
 
-    /** Keeper preference: has payment date, then has yield enrichment, then oldest. */
+    /**
+     * Keeper preference：361.2e——最前面先比「日期欄占位與金額拆分自洽」，再依既有三層
+     * 判準（有 cashPaymentDate → 有 yieldPct → id 最小）。純配股事件（cash==0 且
+     * stock&gt;0）不可能有除息日，ex_dividend_date 非空即不自洽；純現金事件（stock==0
+     * 且 cash&gt;0）不可能有除權日，ex_rights_date 非空即不自洽。其餘一律視為自洽。
+     * 此判準只由列自身推得，故可安全放在最前面；不需要外部證據。
+     */
     private static final Comparator<DividendCurrentStateRepository.ActiveEventDetail>
             KEEPER_PREFERENCE = Comparator
             .comparing((DividendCurrentStateRepository.ActiveEventDetail row)
+                    -> !isDateAllocationConsistent(row))
+            .thenComparing((DividendCurrentStateRepository.ActiveEventDetail row)
                     -> row.cashPaymentDate() == null)
             .thenComparing(row -> row.yieldPct() == null)
             .thenComparing(DividendCurrentStateRepository.ActiveEventDetail::id);
+
+    /**
+     * 361.2e：金額比對一律 null 視 0，口徑與 {@code relaxedIdentity} 及
+     * {@code uk_dividend_event} 索引的 {@code COALESCE(...,0)} 一致。
+     */
+    private static boolean isDateAllocationConsistent(
+            DividendCurrentStateRepository.ActiveEventDetail row) {
+        BigDecimal cash = row.cashDividend() == null ? BigDecimal.ZERO : row.cashDividend();
+        BigDecimal stock = row.stockDividend() == null ? BigDecimal.ZERO : row.stockDividend();
+        boolean pureStock = cash.signum() == 0 && stock.signum() > 0;
+        boolean pureCash = stock.signum() == 0 && cash.signum() > 0;
+        if (pureStock) return row.exDividendDate() == null;
+        if (pureCash) return row.exRightsDate() == null;
+        return true;
+    }
 
     private static <T> T firstNonNull(
             List<DividendCurrentStateRepository.ActiveEventDetail> ranked,

@@ -4,8 +4,9 @@
 **前置任務:** 無
 **Liquibase changeset:** 無（不改資料庫）
 
-> **編號說明**：`Requirement 97／Task 361` 在建檔當下已由平行 worktree `great-lehmann-336be2`
-> （FinMind 配息抓取視窗錨定日）寫入但尚未 merge，故本工作依專案慣例讓號為 98／362。
+> **編號說明**：本工作建檔時 `Requirement 97／Task 361`（FinMind 配息抓取視窗錨定日）正由平行 worktree
+> `great-lehmann-336be2` 進行中，故依專案慣例讓號為 98／362。該工作已於 `c1f22070` merge 進 main，
+> 本任務檔隨後合入，**編號連續、無缺號**。
 
 ## 背景
 

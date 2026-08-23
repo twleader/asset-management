@@ -3610,14 +3610,68 @@ FROM stock_price_history WHERE market='台股';
 - [ ] **測試（後端）**：至少涵蓋——(a) `standardJPosition()` 的純函數斷言，含 `k`／`d` 任一為 `null` 回 `null`、`K = D` 時等於 `(50 − K)/50`（動能項為零）、以及 clamp 上下界飽和；(b) **極性回歸測試**：固定 `K = 23.7`／`D = 45.5`（取自 `NVDA` 實測）時 `standardJPosition` 為正（跌深承接），固定 `K = 62.0`／`D = 44.5`（取自 `00882` 實測）時為負（不鼓勵追價）——此測試必須在把式子誤寫回 `3D − 2K` 或 `(j9 − 50)/50` 時失敗，是本 Requirement 的核心防迴歸點；(c) 代數等價斷言：對任意 `K`／`D`，`standardJPosition(k, d)` 等於 `clampUnit((50 − avg)/50 − (K − D)/20)`（未飽和區間內），證明位置項與動能項極性皆正確；(d) 日線與週線兩條路徑皆已改用新函數——`kdJContribution()` 與 `weeklyMomentumContribution()` 皆為 `private` 且分量值不外露，**不得為測試放寬其可見性**，故本項以**分數方向**驗證，放在 `TradingRadarThreeHorizonEngineTest` 並沿用其既有 `weekly(int)`／`StockBuilder`。**不得用「K>D vs K<D」的反向比較**：`jPosition` 與 `direction = signum(K−D)` 是同一個 `averageAvailable` 的兄弟分量，對稱的 60/40 與 40/60 在正確實作下分量和皆為 `0`（逐位相等），且一般性地 `Δ(K<D − K>D) ≤ 0` 恆成立，該斷言在修正前後都紅、等於沒有防護。改以兩條斷言：**(d-1)** 固定 `direction` 與 `position`、只變動能量級——`k=52,d=48` vs `k=70,d=30`（兩組 `avg` 皆 50），斷言後者 `shortScore` **較低**（正確實作分量和 `0.80` vs `0.00`；誤寫回 `3D − 2K` 則為 `1.20` vs `2.00`，方向相反必紅），日線與週線各做一組；**(d-2)** 固定 `k`／`d` 與其餘輸入、只改 `j9` 為兩個差異極大的值，斷言三軌分數**逐位不變**，直接證明 `j9` 已退出評分鏈；(e) `RULE_VERSION` 等於 `TW_RULES_V16`；(f) `j9` 顯示值未變——既有的 `j9 = 3D − 2K` 回歸斷言須逐字通過，具體為 `backend/src/test/java/com/steven/assets/service/TechnicalIndicatorSeriesAlignmentTest.java:429-430` 與 `:544-545` 的 `assertThat(e.j9()...).isCloseTo(3 * d - 2 * k, within(0.03))`／`e.k3d2() ≈ 3 * k - 2 * d`，以及 `backend/src/test/java/com/steven/assets/service/TechnicalIndicatorMa10AppendTest.java:77` 的 `assertThat(ind.extended().j9()).isEqualByComparingTo("72.98")`，證明本次未動到顯示路徑。**注意 〈走勢圖技術指標序列〉一節的 Yahoo 逐位比對表 的 2330 九值 Yahoo 逐位比對（K9 42.65／D9 32.92／J9 13.45 等）是文件層的一次性人工核對紀錄，本專案並無對應的自動化測試類**（全樹 grep `42.65`／`13.45`／`32.92` 於 `backend/src/test` 零命中；`backend/src/test` 底下與該服務相關的測試檔只有 `TechnicalIndicatorSeriesAlignmentTest`／`TechnicalIndicatorMa10AppendTest`／`TechnicalIndicatorIndexKdCrossCheckTest`／`TechnicalIndicatorNasdaqTest`／`TechnicalIndicatorTaiexLiveBlendTest` 五支，沒有任何一支涵蓋那九個值），不得把它寫成「既有測試」。
 - [ ] **驗證（實機）**：`/run-stack` 以 `--no-cache` 重建並 recreate `business-services`／`frontend`（JVM service 的 cached build 可能不含變更，本專案已有 stale jar 事故前例），登入後於「今日交易雷達」頁確認：(a) 畫面版號 tag 顯示 `TW_RULES_V16`；(b) 展開列的 `J9` 顯示值與變更前一致（未被評分修正污染）；(c) 以 `NVDA`（日線 K=23.7、D=45.5，深度超賣、K<D）為例，其**一周軌**分數應較變更前提高，`00882`（日線 K=62.0、D=44.5，動能強勢、K>D）應降低——預期限縮在一周軌是因為 `SW_KD_J = 0.12` 為三軌中最大、最不易被抵銷。**若某軌未如預期變動，先排除兩個合理原因再判定為異常**：(i) 該標的的週K `k`／`d` 方向與日線相反時，週線動能因子的 J 分量會往反方向動（量級較小但存在）；(ii) `score` 經 `Math.round` 取整（`:2316`），不足 0.5 分的變化會被吃掉；(d) `GET /api/public/trading-radar/today`（Requirement 86 第九條公開路由）仍正常回應且 `ruleVersion` 為 `TW_RULES_V16`。
 - [ ] **不在本次範圍**：不修改 `j9`／`k3d2` 的計算與顯示；不調整任何權重、門檻或因子組成；不處理「商品價格／公債殖利率／三大法人在 production 恆為零權重」（V13 candidate 路徑未 promote，屬既有設計，其揭露落差另案處理）；不處理 `MW_PE` 標籤寫「PE 自身分位」但實為 PE／PB／殖利率三者平均的命名落差（另案）；不處理 `db/schema.sql` 與實際 schema 的漂移（另案）；不新增 `@Scheduled`；不變更任何 API 路徑或 9090／Tailscale 路由。
+### Requirement 97／Task 361: FinMind 配息抓取視窗不得再以 `date` 欄當除權息日的代理——修正「最近約 6 天內除權息事件靜默漏抓」
+
+> **編號說明**：Requirement 96／Task 360 已由另一支 worktree（`trading-radar-logic-check`）佔用，依專案慣例讓號，本需求續編為 97／Task 361。
+
+**User Story:** 作為系統維運者，我要求配息歷史落地路徑抓到的事件集合，與唯讀顯示路徑一致；不得因為抓取請求的上界建在錯誤的欄位語意上，讓剛除權息的事件在入庫當下靜默消失。
+
+**背景（運行中系統實測，2026-08-23）。** `2885`（元大金）2026 年的純配股事件（配股 0.4、除權日 `2026-08-18`）在 `stock_dividend_history` 中仍帶著 Task 357 修正前的錯誤欄位（`ex_dividend_date=2026-08-18`、`ex_rights_date` 為空），Task 357 的歷史回補無法修正它——因為**該事件根本沒有出現在落地路徑的抓取結果裡**，投影沒有對象可修。
+
+兩條路徑對同一個 FinMind dataset 拿到不同的列：
+
+| 路徑 | 請求 | `2885` 2026 配股 0.4 那列 |
+|---|---|---|
+| `MarketDataFetchService.getTwDividendHistory`（唯讀顯示） | 只帶 `start_date` | **有** |
+| `DividendFetchClient.finmindData`（落地主路徑） | `start_date` **＋ `end_date=today`** | **無** |
+
+根因是 **FinMind `TaiwanStockDividend` 的 `date` 欄不是除權息日**，而是晚於它的基準／發放相關日期，且 FinMind 的區間過濾是**在 `date` 欄上做 server-side 過濾**。實測落後固定為 6 天：
+
+| 事件 | `date` | `CashExDividendTradingDate` | `StockExDividendTradingDate` |
+|---|---|---|---|
+| `2885` 2026 配股 0.4 | **2026-08-24** | （空） | 2026-08-18 |
+| `2885` 2026 現金 1.8 | 2026-07-27 | 2026-07-21 | （空） |
+| `2885` 2025 配股 0.3 | 2025-08-18 | （空） | 2025-08-12 |
+| `2885` 2025 現金 1.55 | 2025-07-07 | 2025-07-01 | （空） |
+
+因此 `end_date=today` 形成一個**約 6 天寬、隨每日滑動的盲區**：除權息日落在「今天往前推約 6 天」之內的事件，其 `date` 仍在未來，整列被 FinMind 伺服器端剔除，`fetchTw` 從未看見它。`2026-08-18` 距查詢當日 5 天，正好落在盲區；同一檔其他年度的同型事件早已離開盲區，故全部正常——**這不是 Task 357 拆欄邏輯造成的，是既有的抓取視窗缺陷，Task 357 的回補只是讓它現形。**
+
+`TaiwanStockDividendResult` 不受影響，因為該表的 `date` **就是**除權息日。這解釋了為何 snapshot 裡只剩 fallback 表那一筆而主表那筆消失。
+
+**同型缺陷同時存在於 upcoming 45 日 scope。** `DividendFetchClient.fetchFinMindBounded` 對 `TaiwanStockDividend` 送 `end_date=to`，`to` 為 `decisionDate+45d`；除權息日落在窗尾約 6 天內的事件同樣會因 `date > to` 被伺服器端剔除。該路徑的 `parseFinMindDividendRows` 已在 client 端以 `anchorDate` 過濾 `[from, to]`，代表**正確的過濾欄位一直都在 client 端**，server-side 的 `date` 上界是多餘且有害的一層。此路徑的產出用於判定 upcoming scope 是否 COMPLETE，漏抓會被誤讀為「該區間無事件」。
+
+#### Acceptance Criteria
+
+- [ ] **AC1**：`DividendFetchClient` 對 FinMind data API 的請求**不得再送 `end_date`**。上界一律改在 client 端以事件自身的日期欄過濾，不得以 `date` 欄代理除權息日。下界維持送 `start_date`，但**其語意由 `date >= start_date` 收緊為 client 端的 `anchorDate >= from`**：`date` 恆晚於除權息日約 6 天，故修正前「除權息日早於 `from` 0～6 天、但 `date` 已在 `from` 之後」的邊界列會被伺服器放行並落地，修正後這些列會被剔除。因保留年限為 10 年（`DividendPersister.RETAIN_YEARS`），此差異只發生在十年前的區間下緣，**刻意接受**。下界方向不會造成漏抓。
+- [ ] **AC2**：`fetchTw`（主表歷史落地）必須在 client 端以 `anchorDate = min(除息日, 除權日)` 過濾，只保留 `from <= anchorDate <= today` 的事件。移除 server-side 上界後不得讓「已公告但尚未除權息」的未來事件混入歷史落地路徑——歷史 snapshot 的語意是已發生事件，未來事件由既有 upcoming scope 機制負責。
+- [ ] **AC3**：`fetchTwDividendResult`（fallback 表歷史落地）必須在 client 端以該表的 `date`（即除權息日）過濾 `from <= date <= today`。
+      **不得沿用「此表完全沒有 client 端過濾」的說法**：所有台股／美股歷史觀測的收尾方法 `DividendFetchClient.result(...)` 已有一層 client 端上界，但它**過濾的鍵是 `exDividendDate`**——`exDividendDate` 為 null 的列（Task 357 之後，純配股事件正是這種）一律直接放行。也就是現金列本來就被擋過一次，純配股列則完全不受任何 client 端上界約束。移除 `end_date` 後未來的純配股事件正是從這個洞漏出來。
+- [ ] **AC3b**：`DividendFetchClient.result(...)` 既有的 client 端上界，其過濾鍵必須由 `exDividendDate` 改為 `anchorDate`（除息日與除權日中較早且非 null 者），與本需求其餘各處一致。**留著兩套語意不同的上界是本缺陷的復發溫床**：下一個人讀到 `result(...)` 用 `exDividendDate` 過濾，很容易照著推論而再次寫出對純配股事件無效的邊界。改動後 `anchorDate` 為 null 的事件維持既有的放行語意（不因無法解析日期而被靜默丟棄），只把「有日期且晚於上界」的列擋掉。
+- [ ] **AC4**：`fetchFinMindBounded` 移除 `end_date` 後，`parseFinMindDividendRows` 與 `parseFinMindResultRows` 既有的 `[from, to]` client 端過濾維持不變即為正確；但兩者「malformed 列 → 整批 `ParseEvents.invalid`」的 fail-closed 語意，其涵蓋範圍會因回應多出窗外列而擴大。此擴大必須是**刻意接受**並以測試釘住：窗外列同樣參與 malformed 判定（無法先判斷窗內外才判 malformed——`anchorDate` 不可解析正是 malformed 的定義），不得為此放寬 fail-closed。
+- [ ] **AC4b**：**只修抓取視窗不足以修好既有的錯誤列，必須同時處理 current-state 的收斂偏好。** 經查證，`stock_dividend_history` 的 `ex_dividend_date`／`ex_rights_date` 是 Task 357 定義的 **identity 欄、只在 INSERT 時決定**（`JdbcDividendCurrentStateRepository` 全部四處 `UPDATE stock_dividend_history` 皆不含這兩欄），且三段 match 查詢都以 `ex_dividend_date IS NOT DISTINCT FROM ? AND ex_rights_date IS NOT DISTINCT FROM ?` 比對。因此修好抓取後送進來的 `(ex_dividend_date=NULL, ex_rights_date=2026-08-18)` 不會 match 到既有的 `(2026-08-18, NULL)` 錯誤列，而是**新 INSERT 一列**，變成同一事件兩列 ACTIVE。接著 `DividendCurrentStateProjectionService.collapseDuplicateActiveEvents` 會把兩列歸為同一 `relaxedIdentity`（anchorDate 與金額皆相同）並收斂成一列——但現行 `KEEPER_PREFERENCE`（有發放日 → 有 `yield_pct` → **id 最小**）在兩列皆無發放日與 yield 時退回「取最舊 id」，**保留的正是那列錯誤的**。故必須在 `KEEPER_PREFERENCE` 最前面加一層判準：**優先保留「日期欄占位與金額拆分自洽」的列**——純配股事件（`cash = 0 且 stock > 0`）不可能有除息日，故 `ex_dividend_date` 非空即為不自洽；純現金事件（`cash > 0 且 stock = 0`）不可能有除權日，`ex_rights_date` 非空即為不自洽。此判準只由列自身推得、不需外部證據，且**只在恰有一邊金額為零時適用**（同時配息又配股的事件兩個日期本來就該有值，一律視為自洽、由既有判準決定）。
+- [ ] **AC5**：`2885` 的驗收——修正後重跑 `POST /internal/dividend/sync?code=2885&market=台股`（此端點只 append `external-materials-service` 端的 snapshot evidence，**不寫 `stock_dividend_history`**），**再顯式觸發 backend 的 current-state 投影**（`DividendCurrentStateProjectionService.projectOne`；其可觸發的呼叫端為 `DividendHistoryService.findFromDb`——即讀一次 business 的 `/api/market-data/dividends`——或直接跑 AC7 的全庫回補，該回補第二段本身就會 `projectOne`）。**漏掉投影這一步，下面的 SQL 必然仍是舊資料，會被誤診成實作失敗。**
+      投影後，`stock_dividend_history` 中查詢
+      `WHERE stock_code='2885' AND year=2026 AND stock_dividend = 0.400000 AND event_status='ACTIVE'`
+      必須**恰好回傳一列**，且該列 `ex_dividend_date = NULL`、`ex_rights_date = 2026-08-18`。
+      **投影必須跑兩次**：`DividendCurrentStateProjectionService.projectOne` 的 `collapseDuplicateActiveEvents` 在方法開頭執行、新列在後段才 upsert，因此第一次投影結束時是新舊兩列並存的正常中間態，第二次投影開頭的收斂才會把錯誤列 CANCELLED（錯誤列的 anchor 已是過去，不會被 `LEAST(...) > decisionDate` 的 cancel pass 處理）。
+      **必須加上 `stock_dividend = 0.400000 AND event_status='ACTIVE'` 過濾並要求恰好一列**：不加的話，同年同日還有一列 `stock_dividend = 2.626900`（來自 fallback 表、語意本身有問題，見下方「不在本需求範圍」）與可能殘留的舊 ACTIVE 錯誤列，肉眼極易誤判為已修好。
+      同時 `1.800000` 現金那列維持 `ex_dividend_date = 2026-07-21`、`ex_rights_date = NULL`。
+- [ ] **AC6**：滑動盲區必須以**不依賴當日日期**的測試釘住：以固定 `Clock` 與構造回應（含一列 `date` 晚於 `today`、`StockExDividendTradingDate` 早於 `today`）驗證該列會進入結果。用真實日期寫的測試會在 6 天後自動變綠而失去意義。
+- [ ] **AC6b**：全庫回補必須真的跑到，不得因續跑帳而靜默 no-op。既有回補機制 `DividendBackfillService` 以 `DividendBackfillLedger.completedKeys()` 判定已完成標的並跳過；其 state-dir 預設指向 Task 357 的續跑帳，沿用會讓本次回補的 pending 清單為空。切換 state-dir 需要 `DIVIDEND_BACKFILL_STATE_DIR` 環境變數，而 **`docker-compose.yml` 目前只 passthrough `DIVIDEND_BACKFILL_ENABLED`／`_BATCH_SIZE`／`_BATCH_PAUSE_MILLIS` 三個變數，沒有 `_STATE_DIR`**（`docker compose up` 只展開 compose 檔裡出現過的變數，`up` 不吃 `-e`）。故必須先補上該 passthrough，並在回補後以 log 證明實際處理檔數不為零。
+- [ ] **AC7**：全庫回補——盲區是每日滑動的，過去每一次同步都可能漏掉當時剛除權息的事件。必須對全部納管台股標的重跑同步與投影，並在任務完成報告中列出實際被補回的列數與逐列明細（若為 0 亦須據實記錄）。
+- [ ] **AC8**：`MarketDataFetchService.getTwDividendHistory`（唯讀顯示路徑）本來就未送 `end_date`，不因本需求改動其請求。**但須明確記錄其既有差異**：該路徑亦無 client 端上界過濾，會顯示「已公告但尚未除權息」的未來事件；此差異為既有行為，本需求不改變它，亦不得在 spec 中宣稱兩條路徑此後完全等價。
+
+#### 不在本需求範圍（已查證，另案處理）
+
+- **`TaiwanStockDividendResult` 的「權」列金額語意錯誤。** 實測該表 `stock_or_cache_dividend="權"` 的列，其 `stock_and_cache_dividend` 存的是**除權參考價落差**而非配股率：`2885` 2026-08-18 為 `2.626924`（= `before_price 68.30 − after_price 65.67`），2025-08-12 為 `0.966991`（= `33.20 − 32.23`）。因此 `stock_dividend_history` 中 `2885` 於 2020／2022／2023／2024／2025 每年都有兩列純配股（主表的真實配股率 ＋ fallback 表的價差），配股歷史被灌水一倍以上，且會經 `findAdjustmentEvents` 汙染還原權息。此為**獨立於本需求的既有缺陷**，修正涉及刪除既有列與還原權息回歸，須另開需求與任務評估，不得夾帶在本次修正中。
 
 ---
 
 ### Requirement 98／Task 362: 交易雷達 evidence 面板必須明示零權重資料源「不進評分」——九項市場數值特徵與美債殖利率的揭露落差
 
-> **編號說明**：`Requirement 97／Task 361` 在建檔當下已由平行 worktree
-> `great-lehmann-336be2`（FinMind 配息抓取視窗錨定日）寫入但尚未 merge，故本工作依專案慣例
-> 讓號為 98／362，不與之爭用。本檔的 `Requirement 97` 因此在 main 上暫時缺號，屬正常避讓結果。
+> **編號說明**：本工作建檔時 `Requirement 97／Task 361`（FinMind 配息抓取視窗錨定日）
+> 正由平行 worktree `great-lehmann-336be2` 進行中，故依專案慣例讓號為 98／362，不與之爭用。
+> 該工作已於 `c1f22070` merge 進 main，本檔隨後合入，**編號連續、無缺號**。
 
 **User Story:** 作為使用者，我在「今日交易雷達」展開某一檔時，會看到 WTI／布蘭特／黃金報酬、三大法人淨額比、四個美股指數報酬、大盤量比，以及（債券標的）美債殖利率情境的具體數值。我希望畫面明確告訴我「這些數字有沒有影響這一檔的分數」——現在它們與真正參與評分的因子並列在同一組證據面板裡，我會合理地以為分數已經把它們算進去了，而事實上沒有。
 
