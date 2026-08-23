@@ -445,11 +445,17 @@ public class DividendFetchClient {
         return ParseEvents.valid(events);
     }
 
+    /**
+     * 361.1b：不再送 {@code end_date}（理由同 {@link #finmindData}）。{@code to}
+     * 保留於簽章僅為維持呼叫端與既有測試現狀，本方法內部不再使用它——真正的上界過濾
+     * 已在呼叫端 {@link #parseFinMindDividendRows}／{@link #parseFinMindResultRows} 以
+     * client 端 {@code [from, to]} 過濾完成（361.2c 維持不變）。
+     */
     private BoundedFinMindDataset fetchFinMindBounded(
             String dataset, String stockCode, LocalDate from, LocalDate to) {
         try {
             String url = "https://api.finmindtrade.com/api/v4/data?dataset=" + dataset
-                    + "&data_id=" + stockCode + "&start_date=" + from + "&end_date=" + to;
+                    + "&data_id=" + stockCode + "&start_date=" + from;
             HttpRequest.Builder builder = HttpRequest.newBuilder().uri(URI.create(url))
                     .timeout(Duration.ofSeconds(15)).header("User-Agent", UA)
                     .header("Accept", "application/json").header("Accept-Encoding", "identity");
@@ -501,10 +507,16 @@ public class DividendFetchClient {
         return null;
     }
 
+    /**
+     * 361.1c：稽核揭露字串必須與實際送出的 URL 逐字一致——{@code finmindData}／
+     * {@code fetchFinMindBounded} 皆已不送 {@code end_date}（見各自 javadoc），此處
+     * 隨之移除，避免揭露字串宣稱送了實際上沒送的參數。{@code to} 保留於簽章僅為
+     * 維持既有呼叫端不動，不再進入回傳字串。
+     */
     private static String finmindEndpoint(String dataset, String stockCode,
                                           LocalDate from, LocalDate to) {
         return "https://api.finmindtrade.com/api/v4/data?dataset=" + dataset
-                + "&data_id=" + stockCode + "&start_date=" + from + "&end_date=" + to;
+                + "&data_id=" + stockCode + "&start_date=" + from;
     }
 
     private static String yahooEndpoint(String stockCode, LocalDate from, LocalDate to) {
@@ -535,6 +547,7 @@ public class DividendFetchClient {
     private DividendFetchResult fetchTw(String stockCode, int years, LocalDate today) {
         List<DividendEvent> out = new ArrayList<>();
         boolean primaryFailed = false;
+        LocalDate from = today.minusYears(Math.max(1, years));
         try {
             JsonNode data = finmindData("TaiwanStockDividend", stockCode, years, today);
             // null means the provider did not return a valid successful dataset;
@@ -549,19 +562,15 @@ public class DividendFetchClient {
                 if (cash == 0 && stock == 0) continue;
 
                 // 357.2a／357.2b／357.2c：除息日／除權日各自落地，不再互相 fallback。
-                // year 推導改用 anchorDate（兩者中較早且非 null 者），只配股（無除息日）
-                // 的事件不得因此被 continue 靜默丟棄——保留原本 lenient parseYear 與
-                // item.date 兩層 fallback，確保既有可解析格式逐位不變。
+                // 361.2a：移除 end_date 上界後，client 端以 anchorDate（兩者中較早且非
+                // null 者）判定落地資格與過濾 [from, today]；anchor 為 null（無法判定
+                // 發生時點）者一律不落地，既有的 parseYear／item.date 兩層 fallback 隨之
+                // 移除——它們推導出的 year 已不足以構成落地資格。
                 String cashExDate = nullIfEmpty(item.path("CashExDividendTradingDate").asText(""));
                 String stockExDate = nullIfEmpty(item.path("StockExDividendTradingDate").asText(""));
                 LocalDate anchor = anchorDate(parseDateIso(cashExDate), parseDateIso(stockExDate));
-                Integer year = anchor != null ? anchor.getYear()
-                        : parseYear(firstNonBlank(cashExDate, stockExDate));
-                if (year == null) {
-                    String date = item.path("date").asText("");
-                    year = parseYear(date);
-                    if (year == null) continue;
-                }
+                if (anchor == null || anchor.isBefore(from) || anchor.isAfter(today)) continue;
+                Integer year = anchor.getYear();
                 String cashPay = nullIfEmpty(item.path("CashDividendPaymentDate").asText(""));
                 String stockPay = nullIfEmpty(item.path("StockDividendPaymentDate").asText(""));
 
@@ -696,6 +705,7 @@ public class DividendFetchClient {
      */
     private EventBatch fetchTwDividendResult(String stockCode, int years, LocalDate today) {
         List<DividendEvent> out = new ArrayList<>();
+        LocalDate from = today.minusYears(Math.max(1, years));
         try {
             JsonNode data = finmindData("TaiwanStockDividendResult", stockCode, years, today);
             if (data == null) return EventBatch.failed();
@@ -703,8 +713,12 @@ public class DividendFetchClient {
                 double amount = item.path("stock_and_cache_dividend").asDouble(0);
                 if (amount == 0) continue;
                 String exDate = item.path("date").asText("");
-                Integer year = parseYear(exDate);
-                if (year == null) continue;
+                // 361.2b：此表的 date 欄本身就是除權息日，移除 end_date 上界後改由
+                // client 端以 [from, today] 過濾；不可解析者維持既有 lenient continue，
+                // 不升級為整批拒收。
+                LocalDate exLocalDate = parseDateIso(exDate);
+                if (exLocalDate == null || exLocalDate.isBefore(from) || exLocalDate.isAfter(today)) continue;
+                Integer year = exLocalDate.getYear();
                 String type = item.path("stock_or_cache_dividend").asText("");
                 boolean isStock = type.contains("權") && !type.contains("息");
                 BigDecimal amt = BigDecimal.valueOf(amount).setScale(4, RoundingMode.HALF_UP);
@@ -726,15 +740,21 @@ public class DividendFetchClient {
         }
     }
 
-    /** FinMind data API 共用呼叫，回傳 data 陣列節點；非 200 或非陣列回 null。 */
+    /** FinMind data API 共用呼叫，回傳 data 陣列節點；非 200 或非陣列回 null。
+     *
+     * <p>361.1a：不再送 {@code end_date}——FinMind 對 {@code TaiwanStockDividend} 的
+     * {@code date} 欄做 server-side 過濾，而該欄晚於真正的除權息日（實測落後約 6
+     * 天），帶固定的 {@code end_date=today} 會把「除權息日落在最近約 6 天內」的事件在
+     * 伺服器端剔除，形成隨每日滑動的漏抓盲區。移除後改由 client 端以事件自身的
+     * 除息／除權日過濾上界（見 {@link #fetchTw}／{@link #fetchTwDividendResult}）。</p>
+     */
     private JsonNode finmindData(
             String dataset, String stockCode, int years, LocalDate today) throws Exception {
-        String startDate = today.minusYears(years).toString();
+        String startDate = today.minusYears(Math.max(1, years)).toString();
         String url = "https://api.finmindtrade.com/api/v4/data"
                 + "?dataset=" + dataset
                 + "&data_id=" + stockCode
-                + "&start_date=" + startDate
-                + "&end_date=" + today;
+                + "&start_date=" + startDate;
         HttpRequest.Builder b = HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .timeout(Duration.ofSeconds(15))
@@ -905,10 +925,14 @@ public class DividendFetchClient {
         FetchStatus status = explicit == FetchStatus.FAILED ? FetchStatus.FAILED : FetchStatus.PARTIAL;
         String reason = errorReason == null
                 ? "historical provider 未證明 upcoming 45-day scope" : errorReason;
+        // 361.2b-2：鍵由 exDividendDate 改為 anchorDate——exDividendDate 對純配股事件
+        // （exDividendDate 恆為 null）一律放行、形同無上界。放行語意不變：event 為
+        // null、anchorDate 為 null、或不可解析者一律放行，只擋「有可解析日期且晚於
+        // to」的列。與 361.2a／361.2b 的落地資格判準（anchor 為 null 一律拒收）刻意
+        // 分工不同，不得為消除重複而擇一移除，見任務檔 361.2b-2 說明。
         List<DividendEvent> bounded = events == null ? List.of() : events.stream()
-                .filter(event -> event == null || event.exDividendDate() == null
-                        || parseDateIso(event.exDividendDate()) == null
-                        || !parseDateIso(event.exDividendDate()).isAfter(to))
+                .filter(event -> event == null || anchorDate(event) == null
+                        || !anchorDate(event).isAfter(to))
                 .toList();
         return new DividendFetchResult(source, bounded, status, from, to, clock.instant(), reason,
                 sourceUrls);
