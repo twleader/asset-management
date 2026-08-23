@@ -289,7 +289,7 @@ docker compose -p asset-management restart bff
 
 **357.3d-0c 2885 回歸測試結果（真實資料）**：以運行中 DB 實測值（`2885` 2022-08-12 與 2025-08-12 兩筆純配股事件，`stock_dividend` 皆為 `0.300000`）建立 `DividendCurrentStateProjectionServiceTest.twoRealPureStockEventsWithSameAmountDifferentYearsAreNotCollapsedTogether`。**已做突變驗證**：暫時把 `collapseDuplicateActiveEvents()` 的 `relaxedIdentity(row.anchorDate(), ...)` 改回 `relaxedIdentity(row.exDividendDate(), ...)`（即回退到未修正前的行為），重新執行該測試 → **紅燈**（`Tests run: 1, Failures: 1`，斷言 `cancelActiveEvent(202L)` 未被呼叫失敗，證實兩筆事件在未修正前確實會被誤判合併）；還原修正後重跑 → 綠燈。`JdbcDividendCurrentStateRepositoryTest.insertPathCarriesExRightsDateIntoTheInsertStatement`（357.3a-0b 端到端斷言）也做了同樣的突變驗證：暫時把 INSERT 語句的 `ex_rights_date` 欄位與參數移除 → 紅燈；還原後 → 綠燈。
 
-**357.3a／357.3b／357.3c 回補 runner**：新增 `DividendHistoricalBackfillRunner`（`backend/src/main/java/com/steven/assets/service/`），不對外曝露、不新增排程或端點。串起既有 `POST /internal/dividend/sync` 與 backend 端 `DividendCurrentStateProjectionService.projectOne()`；逐檔 try/catch、失敗清單、批次間 800ms 延遲（FinMind 額度保護）。已用本機 `HttpServer` 頂替 ext 服務完成單元測試（`DividendHistoricalBackfillRunnerTest`，4 個案例：成功清單、單檔失敗不中斷整批、`projectOne` 回 `false` 視為失敗並揭露原因、空清單直接回空結果）。**尚未對 7556／9933／2881／2885／2891 五檔實際執行**——原因見下方「風險與待辦」。執行前查得的 baseline（`stock_dividend_history`，2026-08-22，`docker exec asset-postgres psql`）：74 列全部 `ex_rights_date` 為空、7556／9933／2881/2885/2891 現況與 spec 背景表描述一致（詳見完成報告附錄／StructuredOutput risksOrOpenQuestions）。
+**357.3a／357.3b／357.3c 回補 runner**：本輪新增一支不對外曝露、不新增排程或端點的回補 runner（`backend/src/main/java/com/steven/assets/service/`），串起既有 `POST /internal/dividend/sync` 與 backend 端 `DividendCurrentStateProjectionService.projectOne()`；逐檔 try/catch、失敗清單、批次間 800ms 延遲（FinMind 額度保護），並以本機 `HttpServer` 頂替 ext 服務完成 4 個單元測試（成功清單、單檔失敗不中斷整批、`projectOne` 回 `false` 視為失敗並揭露原因、空清單直接回空結果）。**此實作已於後續收斂中由 §E 的 `DividendBackfillService` 一組取代並連同其測試刪除**（見 §E），本段保留以記錄當輪的決策脈絡。**尚未對 7556／9933／2881／2885／2891 五檔實際執行**——原因見下方「風險與待辦」。執行前查得的 baseline（`stock_dividend_history`，2026-08-22，`docker exec asset-postgres psql`）：74 列全部 `ex_rights_date` 為空、7556／9933／2881/2885/2891 現況與 spec 背景表描述一致（詳見完成報告附錄／StructuredOutput risksOrOpenQuestions）。
 
 **357.4a／357.4a-2／357.4a-3（`DistributionAdjustedPriceService`）**：新增 `addFactorEvents()` 依 357.4a 規則分派套用日期與因子（現金→`ex_dividend_date`、股票→`ex_rights_date`，兩者皆有且不同日才拆兩筆；同日或單邊 fallback 到 anchorDate 時維持既有合併因子，逐位不變）；`validEvent()`／區間過濾／排序／`FactorEvent` 構造／`closeOn` 查價全數改用 anchorDate，`validEvent()` 放寬與這四處改動在同一次修改內完成（未分兩步）。`hasStockDividendOn()` 改判 `exRightsDate`（缺值時退回 anchorDate）。新增 4 個測試：純配股（`getExDividendDate()` 為 null）不拋例外並正確還原（以 2881 真實除權日 2022-09-22、`stock_dividend=2.690500` 為樣本）、現金與股票除息除權日不同日時確實拆成兩筆、同日時維持單筆合併（回歸不變）、`hasStockDividendOn` 改判除權日後跳空不被誤判為分割。
 
@@ -392,7 +392,9 @@ COALESCE('2026-09-05','2026-08-28') = 2026-09-05   ← 第一個非 null
 
 本輪補入一組帶完整觸發機制的 runner（`DividendBackfillService`／`Starter`／`Ledger`／`TargetRepository` ＋ 兩支實作，`@ConditionalOnProperty` 預設關閉、無排程、無 controller、無 9090 路由），**上述 A 的回補即由它執行**。
 
-main 既有的 `DividendHistoricalBackfillRunner` 功能重疊且**無任何觸發路徑**（無 starter／排程／端點），本輪**未刪除**——因本報告上一段已指名該類別與其測試，刪除會讓 `scripts/spec-check.sh` 因「spec 提到不存在的測試類」BLOCK。建議另開任務收斂為單一實作。
+main 既有的那支回補 runner（上方 backend 模組範圍完成報告「357.3a／357.3b／357.3c 回補 runner」段所述）功能與本組重疊，且**無任何觸發路徑**（無 starter／排程／端點），從未也無法被執行；當輪**未刪除**——因該段已指名其類別與測試類，刪除會讓 `scripts/spec-check.sh` 因「spec 提到不存在的測試類」BLOCK。
+
+**收斂結果（後續一輪）**：已刪除該重疊 runner 與其測試類（`backend/src/main/java/com/steven/assets/service/` 與 `backend/src/test/java/com/steven/assets/service/` 各一檔），全專案回補實作收斂為單一一套 `DividendBackfillService`／`Starter`／`Ledger`／`TargetRepository` ＋ 兩支實作 ＋ `DividendResyncClient`／`ExternalDividendResyncClient`——它是被刪那支的功能超集（多出分批、可中斷續跑的 ledger、逐檔失敗清單、357.3b 修正偵測與 `report.tsv` 稽核帳），且已實戰執行過一次完整回補（60 檔、0 失敗、23 筆修正、35 筆除權日落地）。刪除後 backend 測試數由 1397 降為 1393（減少的 4 個即被刪測試類的 4 個案例），其餘零回歸；上方完成報告的計數表為當輪的歷史紀錄，未回頭改寫。
 
 #### F. 驗證
 
