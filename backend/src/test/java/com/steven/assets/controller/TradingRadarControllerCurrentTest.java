@@ -24,7 +24,7 @@ class TradingRadarControllerCurrentTest {
     void current只委派service且controller不持有repository或webClient() {
         TradingRadarService service = mock(TradingRadarService.class);
         TradingRadarDto.Response expected = new TradingRadarDto.Response(
-                "TW_RULES_V15", "EVIDENCE_GATE_V1", "2026-08-21T00:00:00Z",
+                "TW_RULES_V16", "EVIDENCE_GATE_V1", "2026-08-21T00:00:00Z",
                 null, null, List.of(), 0, List.of());
         when(service.getCurrent()).thenReturn(expected);
         TradingRadarController controller = new TradingRadarController(

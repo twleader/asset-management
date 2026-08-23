@@ -576,7 +576,7 @@ paths:
                 synthetic:
                   summary: 去識別化、無實際持倉的合成範例
                   value:
-                    ruleVersion: TW_RULES_V15
+                    ruleVersion: TW_RULES_V16
                     actionPolicyVersion: EVIDENCE_GATE_V1
                     generatedAt: '2026-01-15T02:15:30Z'
                     market:

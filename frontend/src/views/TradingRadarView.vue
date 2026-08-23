@@ -25,7 +25,7 @@
         <div class="card-head">
           <div>
             <span class="section-title">{{ marketCardTab }}大盤風險</span>
-            <el-tag size="small" effect="plain" type="info" class="rule-tag">{{ radar.ruleVersion || 'TW_RULES_V15' }}</el-tag>
+            <el-tag size="small" effect="plain" type="info" class="rule-tag">{{ radar.ruleVersion || 'TW_RULES_V16' }}</el-tag>
           </div>
           <div class="as-of-group">
             <span class="as-of">完成日 K：{{ currentMarket.asOfDate || '資料不足' }}</span>
@@ -818,7 +818,7 @@
       :closable="false"
       show-icon
       title="規則式決策輔助，不是獲利保證"
-      description="評分只比較市場上的獲利機會，不納入成本價、可用資金、配置或其他個人理財需求。財報、估值與產業歷史自上線後累積；缺值權重會重分配，因此不同標的的分數組成可能不同。系統不保證獲利、不會自動下單；資料不足時以「今日不交易」為準。一周、1周~1月、1月~6月三軌分數只描述目前位置相對於自身歷史的獲利機會，不是獲利機率，也不是報酬預測；TW_RULES_V14 與 TW_RULES_V15 為不同規則版本，兩者的分數不可直接比較。"
+      description="評分只比較市場上的獲利機會，不納入成本價、可用資金、配置或其他個人理財需求。財報、估值與產業歷史自上線後累積；缺值權重會重分配，因此不同標的的分數組成可能不同。系統不保證獲利、不會自動下單；資料不足時以「今日不交易」為準。一周、1周~1月、1月~6月三軌分數只描述目前位置相對於自身歷史的獲利機會，不是獲利機率，也不是報酬預測；TW_RULES_V15 與 TW_RULES_V16 為不同規則版本，兩者的分數不可直接比較。"
     />
 
     <el-card shadow="never" class="sched-card">
@@ -1139,7 +1139,7 @@ const dirPickerPreview = computed(() => {
   if (!joined) return base
   return isGdrive ? base + joined : base + '/' + joined
 })
-const radar = ref({ market: {}, usMarket: {}, stocks: [], publicInformation: [], skippedNonTwStocks: 0, ruleVersion: 'TW_RULES_V15' })
+const radar = ref({ market: {}, usMarket: {}, stocks: [], publicInformation: [], skippedNonTwStocks: 0, ruleVersion: 'TW_RULES_V16' })
 const notificationVisible = ref(false)
 const notificationLoading = ref(false)
 const notificationSaving = ref(false)
