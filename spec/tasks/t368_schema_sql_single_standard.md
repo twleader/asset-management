@@ -37,7 +37,7 @@ Task 367 已把 `db/schema.sql` 重產到與運行中 DB 逐位元一致（85 �
 - [ ] **368.1 先記下基準命中數（改任何檔之前跑）。** 舊措辭有多種寫法，只用單一樣式的「零命中」grep 會靜默假通過：
 
   ```bash
-  grep -ranE '仍須.*複驗|仍須以 `psql`|仍須查|尚未 merge 的 changeset|不得以重產|停下回報|離線查證依據|離線查證用|可用於離線查證|離線參考|不等於它不存在|一律以 `psql` 複驗|排除「版號避讓」|git cat-file -e origin/main|以運行中 DB 為準|以運行中的 DB 為準|查證來源：運行中的 DB|查證位數/nullable 一律以|以 `db/init/01_dump\.sql` 為準|一律以 dump 為準|難以歸屬' \
+  grep -ranE '仍須.*複驗|仍須以 `psql`|仍須查|尚未 merge 的 changeset|不得以重產|停下回報|離線查證依據|離線查證用|可用於離線查證|離線參考|不等於它不存在|一律以 `psql` 複驗|排除「版號避讓」|git cat-file -e origin/main|以運行中 DB 為準|以運行中的 DB 為準|查證來源：運行中的 DB|查證位數/nullable 一律以|以 `db/init/01_dump\.sql` 為準|一律以 dump 為準|難以歸屬|並比對 databasechangelog 尾端|psql -U assets -d assets -c' \
     .claude/agents/ spec/steering/structure.md spec/tasks/README.md spec/design.md \
     scripts/spec-check.sh scripts/tests/schema-sql-drift-test.sh db/schema.sql CLAUDE.md \
     | tee /tmp/t368-before.txt | wc -l
@@ -53,7 +53,9 @@ Task 367 已把 `db/schema.sql` 重產到與運行中 DB 逐位元一致（85 �
 
   這兩個檔在掃描路徑裡，只是為了確保**新寫進去的文字不含任何被禁的措辭**。
 
-  改動前實測基準命中數為 **24 行**，分布在 `spec-auditor.md`(2)／`arch-auditor.md`(2)／`structure.md`(4)／`tasks/README.md`(4)／`design.md`(6)／`spec-check.sh`(4)／`db/schema.sql`(2)——對應 368.3–368.10 指名的全部位置，一個不缺。
+  改動前實測基準命中數為 **26 行**，分布在 `spec-auditor.md`(2)／`arch-auditor.md`(2)／`structure.md`(6)／`tasks/README.md`(4)／`design.md`(6)／`spec-check.sh`(4)／`db/schema.sql`(2)——對應 368.3–368.10 指名的全部位置，一個不缺。
+
+  > 樣式最後兩個 alternative（`並比對 databasechangelog 尾端`、`psql -U assets -d assets -c`）是為了 `spec/steering/structure.md`：它是樹狀註解，**違規祈使句與關鍵詞被換行拆到不同行**（第 25–26 行「`docker exec asset-postgres psql … -c '\d <table>'` ／ 並比對 databasechangelog 尾端」），只刪 23／24／28 而漏掉 25／26，驗證(1) 會回 0 但檔案仍在叫人去查運行中 DB。其餘七個位置的違規句都與關鍵詞同行，沒有這個問題。（`psql -U assets -d assets -c` 不會誤傷 `db/schema.sql` 的重產指令——那條是 `pg_dump -U assets -d assets`，沒有 `-c`。）
 
   （樣式刻意不含 `spec/requirements.md`、`spec/tasks.md` 與 `spec/tasks/t367_*.md`——Requirement 103 的原文、本任務的 Requirement 104 敘述、索引列與 Task 367 的完成報告都必然提到這些字眼，那是歷史紀錄與規範敘述，強制清零等於竄改歷史，違反 AC10。`scripts/tests/schema-sql-drift-test.sh` 內既有四處「純離線檢查／此為離線檢查」指的是「不需 docker」，語意無關，樣式刻意不涵蓋，**也不得順手改掉**。）
 
@@ -101,11 +103,11 @@ Task 367 已把 `db/schema.sql` 重產到與運行中 DB 逐位元一致（85 �
   **不要因為「唯一標準」就改成一律 BLOCK**——理由見 368.8 第三點與 Requirement 104 AC4。
 
 - [ ] **368.10 `db/schema.sql` 的整個檔頭（不只「防漂移閘門」段）。**
-  **（a）「用途」段第 6–9 行的從屬敘述**：現行寫「真正的基準線 `db/init/01_dump.sql` 因含真實個人財務資料而被 `.gitignore` 排除……本檔即為該基準線『去除資料』後的可版控鏡像」。這句把本檔的權威性掛在另一個檔上，與「唯一標準」直接衝突，而且**已不符實際產生方式**——檔頭第 17–31 行的重產流程是直接對 `asset-postgres` 跑 `pg_dump --schema-only`，跟 `01_dump.sql` 無關；`01_dump.sql` 靠人工跑 `scripts/db-export.sh` 更新、沒有任何機械閘門保證新鮮度（且本 worktree 根本沒有 `db/init/` 目錄）。改為：**本檔是 DB schema 的唯一標準，由 `pg_dump --schema-only` 直接自運行中的 `asset-postgres` 產生**。第 15 行「全新環境初始化／還原一律仍用 `db/init/01_dump.sql`」**保留**——那是初始化來源，不是查證標準。
+  **（a）「用途」段第 6–9 行的從屬敘述**：現行寫「真正的基準線 `db/init/01_dump.sql` 因含真實個人財務資料而被 `.gitignore` 排除……本檔即為該基準線『去除資料』後的可版控鏡像」。這句把本檔的權威性掛在另一個檔上，與「唯一標準」直接衝突，而且**已不符實際產生方式**——檔頭第 17–31 行的重產流程是直接對 `asset-postgres` 跑 `pg_dump --schema-only`，跟 `01_dump.sql` 無關；`01_dump.sql` 靠人工跑 `scripts/db-export.sh` 更新、沒有任何機械閘門保證新鮮度（且本 worktree 根本沒有 `db/init/` 目錄）。改為：**本檔是 DB schema 的唯一標準，由 `pg_dump --schema-only` 直接自運行中的 `asset-postgres` 產生**。「全新環境初始化／還原一律仍用 `db/init/01_dump.sql`」那一行（實測在第 14 行，實作前以 `grep -n` 複驗）**保留**——那是初始化來源，不是查證標準。
   **（b）「防漂移閘門」段。** 現行末兩行是「運行中的 asset-postgres 是多個 worktree 共用的可變狀態，別人尚未 merge 的 changeset 也會出現在其中；涉及『main 現況』的斷言仍須複驗 databasechangelog 尾端。」→ 改為：本檔是 DB schema 的唯一標準；它反映運行中的共用 DB，可能短暫含尚未 merge 的表，那**不影響它的標準地位**，發現不一致一律重產本檔。lagging 那兩行保留事實、處置改成「重產」。
   **注意**：改檔頭會讓 `CREATE TABLE` 張數以外的內容變動，但檔頭不參與 `scripts/tests/schema-sql-drift-test.sh` 的本體比對（該腳本以「第一個整行等於 `-- PostgreSQL database dump` 的前一行」切分），故**不需要重產本體**；改完仍須跑一次該腳本確認回 0。
 
-- [ ] **368.11 `scripts/tests/schema-sql-drift-test.sh` 的 FAIL 訊息。** 在 `print_regen` 之前或之中加一句定性：「`db/schema.sql` 是 DB schema 的唯一標準，不一致代表**本檔已過期**，依下列指令重產即可。」不要動任何比對邏輯、離開碼、切分規則或版本註解行的特別處理。**也不得動檔內既有四處「純離線檢查／此為離線檢查」的措辭**——那指的是「不需 docker」，與被清除的「離線查證依據」語意無關，清零樣式刻意不涵蓋它們。
+- [ ] **368.11 `scripts/tests/schema-sql-drift-test.sh` 的 FAIL 訊息。** **只加在「本體漂移」那一次 `print_regen` 呼叫的前面**（現況在該檔第 187 行附近、`FAIL: … 稽核基準線已漂移` 那一段的結尾）。**不得把這句放進 `print_regen()` 函式本體**——該函式另被五條與運行中 DB 無關的離線失敗路徑呼叫（檔頭結構破壞 ×3、檔頭表數宣告 ×2），其中兩條的既有輸出還明寫「此為離線檢查，與運行中 DB 無關」「本項失敗並不代表與運行中 DB 不一致」，緊接著印「本檔已過期」會自我打臉，也違反 368.9 同一段的論證與 Requirement 103 AC13(e)。要加的句子是：「`db/schema.sql` 是 DB schema 的唯一標準，不一致代表**本檔已過期**，依下列指令重產即可。」不要動任何比對邏輯、離開碼、切分規則或版本註解行的特別處理。**也不得動檔內既有四處「純離線檢查／此為離線檢查」的措辭**——那指的是「不需 docker」，與被清除的「離線查證依據」語意無關，清零樣式刻意不涵蓋它們。
 
 - [ ] **368.12 不得做的事（逐條都是硬性禁令）：**
   - **不改任何機制**：漂移測試的比對方式、檔頭切分規則、離開碼三態（0／1／2）、B10 的分流條件、B8 的觸發條件與級別，一律不動。本任務只改文字。
@@ -113,7 +115,7 @@ Task 367 已把 `db/schema.sql` 重產到與運行中 DB 逐位元一致（85 �
   - 不動 `backend/`、`bff/`、`external-materials-service/`、`frontend/`、`api-gateway/`、`docker-compose.yml`、`scripts/git-hooks/`。
   - **不修改 `spec/tasks/t367_schema_sql_drift_guard.md`**（含其完成報告）——那是 Task 367 派工與交付當下的事實紀錄，定性的改變由 Requirement 104 與本檔記錄。也不改其他歷史任務檔。
   - **不重產 `db/schema.sql` 的 pg_dump 本體**（本任務只改檔頭文字；若動工當下本體本來就漂移了，那是另一回事，照 B10 的指示重產並在完成報告說明）。
-  - **不要裸跑 `git clean -fd`**——會刪掉未追蹤但重要的 `db/init/`。要復原只用 `git checkout -- <path>`。
+  - **不要裸跑 `git clean -fd`**。（本 worktree 目前沒有 `db/init/` 目錄——這正是 368.10(a) 的論據之一——但主 clone 與部分 worktree 有，且該目錄未追蹤，一律會被清掉。）要復原改動只用 `git checkout -- <path>`。
 
 - [ ] **368.13 `CLAUDE.md` 補上這個定性。** 現行全檔對 `db/schema.sql` 只有「工具」表的一行機制描述（`scripts/tests/schema-sql-drift-test.sh` 那列），對「schema 現況要查哪裡」零敘述（`grep -n 'DB 現況' CLAUDE.md` 零命中；`運行中 DB` 只在工具表第 368 列出現一次，且屬機制描述、非查證指引）。**臨時派出的 subagent 不繼承 `spec-auditor`／`arch-auditor` 的 prompt，只讀得到 `CLAUDE.md`**——不寫進去，等於這個標準對它們不存在。請在「架構規範」的〈資料庫完整正規化〉小節之後、或〈Spec 文件位置〉的表格附近，加一小段 368.2 的口徑（含「不一致就重產本檔」與「`db/changelog/**` 不得用於描述現況」）。不要動 `CLAUDE.md` 的其他章節。
 
@@ -124,7 +126,7 @@ Task 367 已把 `db/schema.sql` 重產到與運行中 DB 逐位元一致（85 �
 **（1）舊措辭清零**
 
 ```bash
-grep -ranE '仍須.*複驗|仍須以 `psql`|仍須查|尚未 merge 的 changeset|不得以重產|停下回報|離線查證依據|離線查證用|可用於離線查證|離線參考|不等於它不存在|一律以 `psql` 複驗|排除「版號避讓」|git cat-file -e origin/main|以運行中 DB 為準|以運行中的 DB 為準|查證來源：運行中的 DB|查證位數/nullable 一律以|以 `db/init/01_dump\.sql` 為準|一律以 dump 為準|難以歸屬' \
+grep -ranE '仍須.*複驗|仍須以 `psql`|仍須查|尚未 merge 的 changeset|不得以重產|停下回報|離線查證依據|離線查證用|可用於離線查證|離線參考|不等於它不存在|一律以 `psql` 複驗|排除「版號避讓」|git cat-file -e origin/main|以運行中 DB 為準|以運行中的 DB 為準|查證來源：運行中的 DB|查證位數/nullable 一律以|以 `db/init/01_dump\.sql` 為準|一律以 dump 為準|難以歸屬|並比對 databasechangelog 尾端|psql -U assets -d assets -c' \
   .claude/agents/ spec/steering/structure.md spec/tasks/README.md spec/design.md \
   scripts/spec-check.sh scripts/tests/schema-sql-drift-test.sh db/schema.sql CLAUDE.md | wc -l
 ```
@@ -154,20 +156,24 @@ grep -c '不要引用 `db/changelog'              spec/design.md                
 sed -n "$(grep -n 'index_export_schedule_time_market` 刻意一列一指數' spec/design.md | cut -d: -f1)p" spec/design.md | grep -c databasechangelog
                                                                                # 必須 =1（parent 是否已套用，屬正當用途）
 grep -c '必須包含重產'                         spec/tasks/README.md             # 必須 =1（368.6 的收尾約定沒被連帶刪掉）
-grep -c 'db/changelog'                        spec/tasks/README.md             # 必須 ≥1（108–117 整段改寫時的禁令不得連帶消失）
+awk '/^## 自足性自查/,0' spec/tasks/README.md | grep -c 'db/changelog'          # 必須 ≥1（自足性自查段的禁令不得連帶消失）
+#   ↑ 不可寫成 `grep -c 'db/changelog' spec/tasks/README.md ≥1`——那是空檢查：368.6 明令保留的收尾約定
+#     （第 84 行「任務若動到 backend/src/main/resources/db/changelog/**…」）本身就命中，禁令刪光也照樣 ≥1。
 ```
 
 > 上一版這裡寫的是 `grep -c 'databasechangelog' spec/design.md # 必須 ≥1`——那是**空檢查**：該檔現有 10 筆 `databasechangelog`，就算 `index_export_schedule` 段那半句被整句刪光也照樣通過。改成只看那一行。
 
 **（4）機制未被動到（368.12 第一條）**
 
+> 兩條都用 `git merge-base origin/main HEAD` 當基準，**刻意不用三點 diff**：三點 diff 只看 HEAD，實作者在 commit 之前跑會得到空輸出＝假通過，而「還沒 commit 就先驗證」正是最常見的順序。
+
 ```bash
-git diff origin/main...HEAD -- scripts/tests/schema-sql-drift-test.sh | grep -E '^[+-]' | grep -vE '^(\+\+\+|---)' | grep -vE '唯一標準|已過期|^[+-]#'
+git diff "$(git merge-base origin/main HEAD)" -- scripts/tests/schema-sql-drift-test.sh | grep -E '^[+-]' | grep -vE '^(\+\+\+|---)' | grep -vE '唯一標準|已過期|^[+-]#'
 ```
 輸出應為空或僅剩訊息字串行——**不得**出現 `exit`、`cmp`、`diff`、`marker_line`、`body_start`、`grep -c '^CREATE TABLE'` 等邏輯行的增刪。
 
 ```bash
-git diff origin/main...HEAD -- scripts/spec-check.sh | grep -E '^[+-]' | grep -vE '^(\+\+\+|---)' | grep -E 'DRIFT_TEST=|drift_status|case |grep -qE|block |check '
+git diff "$(git merge-base origin/main HEAD)" -- scripts/spec-check.sh | grep -E '^[+-]' | grep -vE '^(\+\+\+|---)' | grep -E 'DRIFT_TEST=|drift_status|case |grep -qE|block |check '
 ```
 `case` 結構、`drift_status=$?`、分流的 `grep -qE` 條件必須沒有被改動（只有 `block`／`check` 的訊息字串與 `DRIFT_HINT=` 那一行會變）。
 
