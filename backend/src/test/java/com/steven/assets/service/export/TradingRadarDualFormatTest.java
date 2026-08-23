@@ -2,10 +2,12 @@ package com.steven.assets.service.export;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.steven.assets.security.CurrentUserContext;
 import com.steven.assets.service.TradingRadarExportService;
 import com.steven.assets.service.TradingRadarSnapshotStore;
+import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellType;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
@@ -738,6 +740,92 @@ class TradingRadarDualFormatTest {
      * <b>不與 golden 比對</b>——golden 的 fixture 刻意沒有這兩欄（驗 {@code list()} 缺欄位時的行為），
      * 在這裡另建一份才驗得到「有陣列時的兩種呈現」。
      */
+    /**
+     * Task 362.4／362.5：兩處揭露都落在<b>既有的</b>「證據閘門原因」LIST_LINES 欄，
+     * 零 header 變更。{@code TREASURY_RATE} 行的輸出條件是該列的 {@code ASSET_SPECIFIC}
+     * 有沒有 {@code bond_rate} component——不是 {@code treasuryRateContext} 是否 missing
+     * （Jackson 預設 ALWAYS，非債券列同樣有那個 key，{@code isMissingNode()} 恆為 false），
+     * 也不是「{@code treasuryRateContext} 非 null ⟺ 債券」（curve 不可得的債券列該欄同樣為 null，
+     * 而那正是最需要揭露的情境）。
+     */
+    @Test
+    @DisplayName("Task 362：MARKET_FEATURE 行帶不進評分標示；只有 bond_rate 列才輸出 TREASURY_RATE 行")
+    void 零權重資料源在證據閘門原因欄明示不進評分() throws Exception {
+        when(store.range(1L, 0L, 1L)).thenReturn(new TradingRadarSnapshotStore.SnapshotRange(
+                List.of(snapshotNodeWithZeroWeightDisclosure()), 1, 0));
+
+        Sheet sheet = GoldenWorkbooks.read(service.exportForOwner(1L, 0L, 1L)).getSheet("個股決策");
+        int col = STOCK_HEADERS_V11.indexOf("證據閘門原因");
+        String bondCell = cellText(sheet.getRow(1), col);
+        String plainCell = cellText(sheet.getRow(2), col);
+
+        assertThat(bondCell)
+                .contains("MARKET_FEATURE IXIC_RET5")
+                .contains(" scoring=NOT_SCORED（此數值不計入評分；大盤趨勢另由盤勢因子計入）")
+                .contains("TREASURY_RATE scoring=NOT_SCORED 殖利率數值不計入評分；"
+                        + "曲線資料是否齊備影響債券標的的證據閘門");
+        assertThat(bondCell)
+                .as("既有的 EVIDENCE_COMPONENT 揭露不得被標示擠掉")
+                .contains("EVIDENCE_COMPONENT ASSET_SPECIFIC/bond_rate status=MISSING");
+        assertThat(plainCell)
+                .as("沒有 bond_rate component 的列不得出現 TREASURY_RATE 揭露行")
+                .doesNotContain("TREASURY_RATE");
+
+        // 欄名、欄數與欄序逐位不變：標示只加在儲存格內容。
+        assertThat(headerRow(sheet)).containsExactlyElementsOf(STOCK_HEADERS_V11);
+        assertThat(sheet.getRow(1).getLastCellNum()).isEqualTo(sheet.getRow(0).getLastCellNum());
+        assertThat(sheet.getRow(2).getLastCellNum()).isEqualTo(sheet.getRow(0).getLastCellNum());
+
+        // JSON 側：同一欄是字串陣列，TREASURY_RATE 固定是最後一行。
+        JsonNode rows = mapper.readTree(jsonRenderer.render(service.radarDoc(1L, 0L, 1L)))
+                .at("/sheets/2/tables/0/rows");
+        JsonNode bondReasons = rows.get(0).get("證據閘門原因");
+        assertThat(bondReasons.isArray()).isTrue();
+        assertThat(bondReasons.get(bondReasons.size() - 1).asText()).isEqualTo(
+                "TREASURY_RATE scoring=NOT_SCORED 殖利率數值不計入評分；曲線資料是否齊備影響債券標的的證據閘門");
+        assertThat(rows.get(1).get("證據閘門原因").isNull())
+                .as("非債券且無 evidence 的列維持原本的 null，不得憑空長出揭露行").isTrue();
+    }
+
+    private static String cellText(Row row, int index) {
+        Cell cell = row.getCell(index);
+        return cell == null || cell.getCellType() == CellType.BLANK ? "" : cell.getStringCellValue();
+    }
+
+    /**
+     * 債券列（有 {@code bond_rate} component ＋ 一個 market feature）與非債券對照列
+     * （{@code snapshotNode()} 的個股天生沒有 {@code evidence} 節點）。
+     */
+    private static JsonNode snapshotNodeWithZeroWeightDisclosure() {
+        ObjectNode root = (ObjectNode) snapshotNodeWithTreasury();
+        ObjectNode bond = (ObjectNode) root.path("stocks").get(0);
+        bond.put("code", "00679B");
+        bond.put("name", "元大美債20年");
+        bond.put("assetClass", "BOND");
+        ObjectNode evidence = (ObjectNode) bond.path("evidence");
+        ArrayNode components = evidence.putObject("evidenceGroups")
+                .putObject("ASSET_SPECIFIC").putArray("components");
+        components.addObject()
+                .put("name", "bond_rate")
+                .put("applicability", "MISSING")
+                .put("provider", "TREASURY_YIELD")
+                .put("missingReason", "決策時點前無完整 Treasury curve batch");
+        ObjectNode feature = evidence.putObject("marketFeatures").putObject("IXIC_RET5");
+        feature.put("code", "IXIC_RET5");
+        feature.put("status", "DISCLOSURE_ONLY");
+        feature.put("value", 0.42);
+        feature.put("provider", "NASDAQ");
+        feature.put("asOfDate", "2026-07-30");
+        feature.put("availableAt", "2026-07-31T04:00:00Z");
+        feature.put("availabilityBasis", "CLOSE_18_ET");
+        feature.put("duplicateOf", "MARKET_REGIME");
+        feature.put("sourceUrl", "https://example.test/ixic");
+
+        ObjectNode plain = (ObjectNode) ((ObjectNode) snapshotNode()).path("stocks").get(0);
+        ((ArrayNode) root.path("stocks")).add(plain);
+        return root;
+    }
+
     private static com.fasterxml.jackson.databind.JsonNode snapshotNodeWithArrays() {
         ObjectNode root = (ObjectNode) snapshotNode();
         ObjectNode m = (ObjectNode) root.path("market");

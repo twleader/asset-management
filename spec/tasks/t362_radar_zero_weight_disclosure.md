@@ -444,16 +444,93 @@ cd backend && /usr/local/apache-maven/apache-maven-3.9.11/bin/mvn -q test -Dextr
 
 ## 完成報告
 
-**完成日期：** 待填
+**完成日期：** 2026-08-23
 
 ### 實際改動
 
-待填。
+**前端** `frontend/src/views/TradingRadarView.vue`（6 行）
+- 362.1 `:565` 標題改為「市場數值特徵（僅供揭露，這些數值目前不進評分）」，其下新增一行 `.muted`
+  說明：大盤趨勢另由盤勢因子計入評分、`DISCLOSURE_ONLY` 是候選／回測路徑的去重狀態而非有效性區別、
+  本面板九項在正式評分中一律不生效。`v-for` 內容與 `marketFeatureEntries()` 未動。
+- 362.2 `:535` 之後（`<strong>` 數值之下）新增
+  `<small>殖利率數值本身不計入評分；這筆曲線資料是否齊備，會影響債券標的的證據閘門。</small>`。
+  **刻意放在數值之後而非標題之後**：`.confirm-item` 是 flex column 且 `span` 與 `small` 同色同字級
+  （`:1919-1920`），插在標題後會把數值擠到第三行，與同面板其他項目（如 `:528-532` 債券利率證據）
+  的「標題 → 值 → 說明」模式不一致。既有 provenance 小字與來源連結一行未刪。
+- 362.3 `:163` 改為 `我的{{ marketTab }}決策`。
+
+**後端** `backend/src/main/java/com/steven/assets/service/TradingRadarExportService.java`（+52 行）
+- 362.4 新增常數 `MARKET_FEATURE_DISCLOSURE`＝` scoring=NOT_SCORED（此數值不計入評分；大盤趨勢另由盤勢因子計入）`，
+  接在既有 `MARKET_FEATURE … source=…` 之後。
+- 362.5 新增常數 `TREASURY_RATE_DISCLOSURE`＝`TREASURY_RATE scoring=NOT_SCORED 殖利率數值不計入評分；曲線資料是否齊備影響債券標的的證據閘門`，
+  在 `DIVIDEND_EVENT` 區塊之後、`return` 之前條件輸出；判別式為新增的私有方法 `hasBondRateComponent(JsonNode)`，
+  走 `evidenceGroups.ASSET_SPECIFIC.components[].name == "bond_rate"`。另在 `DETAIL_EVIDENCE_HEADERS`
+  上方補 Javadoc 說明利率 12 欄語意。
+- **`DETAIL_EVIDENCE_HEADERS`／`VALUATION_COMPONENT_HEADERS`／`LIVE_PREMIUM_HEADERS` 三個清單零變更**，
+  欄名、欄數、欄序未動。
+
+**契約** `docs/openapi/docker-external-api.yaml`（+33／−1）
+- `info.version` `1.1.0` → `1.2.0`；`MarketFeatureEvidence` 與 `TreasuryRateContext` 各加 `description`
+  （後者依三段語意分述，並寫明不得標成「僅供參考」）。唯一刪除的行是舊 version；property、`required`、
+  `paths` 皆未動，實測仍為 9 條 path。
+
+**零改動確認**：`TradingRadarRuleEngine.java`／`TradingRadarService.java`／`TradingRadarDto.java`
+`git diff --stat` 為空；`RULE_VERSION` 維持 `TW_RULES_V16`，七處版號 hardcode 一處未碰。
+未新增／移除任何 DTO 欄位、API 路徑、`@Scheduled`；`db/changelog/` 未動。
 
 ### 測試結果
 
-待填。
+- **全量後端測試通過**：`mvn test -DextraArgLine=-Dnet.bytebuddy.experimental=true`，
+  **EXIT=0，1408 tests、0 failures、0 errors、0 skipped**。
+- 新增測試：`TradingRadarV13ActionPolicyTest` 三支
+  （`marketFeatureAggregateExtremesCannotMoveScoreWithoutCandidateWeight`、
+  `nonZeroMarketFeatureWeightDoesRaiseCandidateScore`、
+  `treasuryContributionExtremesCannotMoveScoreWithoutCandidateWeight`）、
+  `TradingRadarTreasuryRateObservationTest` 一支（362.8c）、
+  `TradingRadarDualFormatTest` 一支（362.8d，含債券列／非債券列對照）。
+  362.8(b) 依規格引用既有測試未新寫。
+- **反向驗證（確認守門非虛設）**：把 `TradingRadarRuleEngine` 的 `featureWeight` 與 `treasuryWeight`
+  baseline 由字面 `0.0` 暫時改為 `0.30`，`TradingRadarV13ActionPolicyTest` 由 26 passed 轉為
+  **3 failures**，其中兩支正是本次新增的零影響釘樁；已 `git checkout` 還原，該檔 `git diff` 為空。
+- 前端無元件測試框架，未撰寫任何 Vue 測試（`frontend/package.json` 的 test script 只跑
+  `src/utils/` 底下五支 `node --test`）。
 
 ### 實機驗證
 
-待填。
+Docker Compose project `asset-management`，自本 worktree（變更未 merge）以 `--no-cache` 重建
+`business-services` 與 `frontend`、`--force-recreate` 後 `restart bff`，八個容器全部 healthy。
+
+**產物確認非 stale image**
+- `docker exec asset-frontend grep` 於 `TradingRadarView-DPvJlSFC.js` 命中「僅供揭露，這些數值目前不進評分」、
+  「殖利率數值本身不計入評分」與編譯後的插值 `我的"+n(a(ne))+"決策`。
+- `docker exec asset-business-services unzip -p /app/app.jar … | strings` 命中
+  `TREASURY_RATE scoring=NOT_SCORED`、` scoring=NOT_SCORED` 與 `hasBondRateComponent`。
+
+**端點**
+- `GET http://127.0.0.1:9090/api/public/trading-radar/today`（Requirement 86 第九條）正常回應，
+  `ruleVersion = TW_RULES_V16`（未升版），38 檔標的。
+- `curl -sI http://localhost/` → `HTTP/1.1 200 OK`；`docker logs asset-bff --since 3m`
+  的 `Connection refused|500 Server Error` 計數為 **0**。
+
+**真實資料印證了 362.5 判別式的必要性（本次最有價值的實測）**
+- `treasuryRateContext` 非 null 的標的：**6 檔**；有 `bond_rate` component 的標的：**7 檔**。
+- 差的那一檔是 **`00859B`**：`bond_rate.applicability = MISSING`、
+  `missingReason = "strict bond profile 不完整，Treasury 利率風險不納入"`，而其 `treasuryRateContext` 為 `null`。
+- 亦即若照被審查否決的寫法（以 `treasuryRateContext` 判定），`00859B` 這種「證據不完整、閘門受影響」
+  的標的**剛好一行揭露都拿不到**——正是最需要解釋的那一類。改用 `bond_rate` 後涵蓋。
+
+**真實資料印證了 362.1 的文案約束**
+- `IXIC_RET5` 與 `SOX_RET5` 實際回 `status = DISCLOSURE_ONLY`、`duplicateOf = MARKET_REGIME`；
+  `SPX_RET5` 為 `AVAILABLE`。三者在 production 一律不計分——若文案不解釋這個 `status` 差異，
+  使用者會反推成「只有那兩項無效、其他有效」。
+- 九碼 feature 在全部 38 檔標的的 evidence 中皆完整present。
+
+### 未完成／待使用者確認
+
+1. **前端畫面的視覺確認未做。** `http://localhost/` 導向 Google OAuth 登入頁，執行代理不得代為登入，
+   故 362.1／362.2／362.3 的**畫面呈現**（排版、換行、插值渲染）未經人眼確認。已確認的是編譯後
+   bundle 確實含這三處變更。需使用者登入後於「今日交易雷達」頁確認驗證段的 (a)(b)(c)。
+2. **實機匯出未觸發。** `POST /api/trading-radar/export` 有落檔與 Google Drive 上傳的副作用，
+   且會覆蓋同名前一版檔案，故未自動執行。該路徑的行為由 `TradingRadarDualFormatTest` 新增的
+   測試覆蓋（含債券列含 `TREASURY_RATE` 行、非債券列不含的對照斷言）。若需實機匯出證據，
+   由使用者自行觸發。

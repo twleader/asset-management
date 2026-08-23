@@ -160,7 +160,7 @@
       <template #header>
         <div class="card-head">
           <div>
-            <span class="section-title">我的台股決策</span>
+            <span class="section-title">我的{{ marketTab }}決策</span>
             <span class="stock-count">{{ currentStocks.length }} 檔</span>
           </div>
           <span v-if="radar.skippedNonTwStocks" class="as-of">第一版未評分英股 {{ radar.skippedNonTwStocks }} 檔</span>
@@ -533,6 +533,7 @@
                   <div v-if="row.evidence.treasuryRateContext" class="confirm-item">
                     <span>美債殖利率情境</span>
                     <strong>{{ row.evidence.treasuryRateContext.tenor || '—' }} · {{ fmtNumber(row.evidence.treasuryRateContext.value, 4) }}%</strong>
+                    <small>殖利率數值本身不計入評分；這筆曲線資料是否齊備，會影響債券標的的證據閘門。</small>
                     <small>曲線日 {{ row.evidence.treasuryRateContext.curveDate || '—' }} · {{ row.evidence.treasuryRateContext.provider || '—' }} · batch #{{ row.evidence.treasuryRateContext.batchId ?? '—' }}</small>
                     <small>批次完整 {{ boolLabel(row.evidence.treasuryRateContext.complete) }} · 落後 {{ row.evidence.treasuryRateContext.lagDays ?? '—' }} 日</small>
                     <small>可得 {{ formatTime(row.evidence.treasuryRateContext.availableAt) }} · {{ row.evidence.treasuryRateContext.availabilityBasis || '可得時間基礎未標示' }}</small>
@@ -562,7 +563,8 @@
                   </div>
                 </div>
                 <div v-if="marketFeatureEntries(row).length" class="evidence-groups-panel market-feature-panel">
-                  <div class="fundamental-title">市場數值特徵（只呈現，不在前端重算）</div>
+                  <div class="fundamental-title">市場數值特徵（僅供揭露，這些數值目前不進評分）</div>
+                  <div class="muted">大盤趨勢另由盤勢因子計入評分，非本面板數值；狀態欄可能出現的「DISCLOSURE_ONLY」是候選／回測路徑用來標記「該項資訊已由盤勢因子代表」的去重狀態，不是正式評分中哪一項有效的區別——本面板九項數值在正式評分中一律不生效。</div>
                   <ul class="evidence-component-list">
                     <li v-for="feature in marketFeatureEntries(row)" :key="`${row.market}-${row.stockCode}-${feature.key}`">
                       <span>{{ feature.key }} · {{ feature.value ?? '—' }} · {{ feature.status || '—' }}</span>

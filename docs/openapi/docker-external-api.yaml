@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: 資產管理系統 Docker 外部 API
-  version: 1.1.0
+  version: 1.2.0
   description: |
     本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的九條精確路徑：
     八條唯讀 GET ＋ 一條寫入 POST（`/api/public/crawler-data/rescan`，唯一有外部抓取副作用者，
@@ -1499,6 +1499,23 @@ components:
       additionalProperties: false
     MarketFeatureEvidence:
       type: object
+      description: |
+        九項 typed 市場數值特徵（IXIC_RET5／SOX_RET5／SPX_RET5／DJI_RET5／
+        INDEX_VOLUME_RATIO20／TW_INSTITUTIONAL_NET_TURNOVER／WTI_RET5／BRENT_RET5／GOLD_RET5）
+        的逐項揭露值。
+
+        **這些數值在 production 不進評分**：交易雷達走的是規則引擎的 baseline 路徑
+        （candidate 參數集未 promote），typed market feature 區塊整段不執行，故本 schema 的
+        任何欄位都不影響 `score`、`shortScore`、`swingScore` 與各軌 `action`。欄位保留是為了
+        provenance 可稽核（provider／asOfDate／availableAt／availabilityBasis／missingReason／
+        sourceUrl），不代表已被採計。
+
+        注意：這不等於「大盤數據不影響評分」——大盤趨勢另由盤勢 regime 因子以非零權重計入分數，
+        此處不進評分的是**本 schema 的這些數值**。
+
+        `status` 的 `DISCLOSURE_ONLY` 是 candidate／回測路徑的**去重**標記（該碼資訊已由盤勢因子
+        代表，`duplicateOf` 指出被去重到哪個因子），**不是** production 有效性的區別；同一個 code
+        在來源缺值時會是 `MISSING`，可得時是 `AVAILABLE`，三者在 production 一律同樣不計分。
       required: [code, value, asOfDate, availableAt, availabilityBasis, provider, sourceUrl, profileApplicability, duplicateOf, status, missingReason]
       properties:
         code: {type: [string, 'null']}
@@ -1530,6 +1547,21 @@ components:
       additionalProperties: false
     TreasuryRateContext:
       type: object
+      description: |
+        決策時點可得的美國公債殖利率曲線批次（含 tenor、值、曲線日與完整 provenance）。
+        三段語意不同，不得合併理解：
+
+        1. **殖利率數值不計入評分**：candidate 權重未 promote，baseline 為字面 `0.0`，
+           加權累加器連分母都不動，故對 `score` 與 `action` 的影響嚴格為零，不是「權重很小」。
+        2. **曲線資料是否齊備會影響證據閘門**：債券標的的 `ASSET_SPECIFIC` 群一律建立
+           `bond_rate` component，其 applicability 隨本批次的可得性在 AVAILABLE／STALE／MISSING
+           之間變動；該群覆蓋率未達門檻時，債券的買進動作會被降級為候選揭露。
+        3. **殖利率風險單位尚未 promote**：production 只提供 context，不產出量化 riskUnit，
+           故債券的減碼／出場動作一律降級為候選揭露。
+
+        因此不得把本 schema 標成「不影響決策」或「僅供參考」。非債券標的與曲線批次不完整的
+        債券標的，`RadarEvidence.treasuryRateContext` 皆為 `null`；後者仍會在
+        `ASSET_SPECIFIC` 留下 `bond_rate` 的缺漏原因。
       required: [batchId, complete, tenor, value, curveDate, provider, sourceManifest, availableAt, availabilityBasis, fetchedAt, lagDays, staleReason]
       properties:
         batchId: {type: integer, format: int64}

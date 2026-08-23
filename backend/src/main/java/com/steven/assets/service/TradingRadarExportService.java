@@ -501,6 +501,13 @@ public class TradingRadarExportService {
     /**
      * V13 原始證據欄位：只攤平後端已解析的值，不在匯出端重算 composite、門檻或
      * profile。這些欄位刻意放在既有欄位之後，讓舊版欄位索引與既有檔案相容。
+     *
+     * <p>Task 362.5：「利率批次ID」起至「利率來源Manifest」的 12 欄全部是
+     * {@code treasuryRateContext} 的 provenance 攤平值，<b>殖利率數值不計入評分</b>
+     * （candidate 未 promote，權重 baseline 為字面 0.0）；但這批曲線資料齊備與否會經
+     * {@code ASSET_SPECIFIC} 的 {@code bond_rate} component 影響債券標的的證據閘門，
+     * 故不得標成「僅供參考」。同一份揭露以 {@code TREASURY_RATE} 行寫進「證據閘門原因」欄，
+     * 讓匯出檔的消費者看得到；此處 Javadoc 只供讀 code 的人查證，不新增任何欄位。</p>
      */
     private static final List<String> DETAIL_EVIDENCE_HEADERS = List.of(
             "PB值", "殖利率%", "PB自身分位", "殖利率自身分位", "估值Composite", "估值覆蓋",
@@ -652,6 +659,29 @@ public class TradingRadarExportService {
     }
 
     /**
+     * Task 362.4：九項 typed market feature 在 production 是<b>純揭露</b>觀測值。
+     *
+     * <p>{@code TradingRadarService} 走的是 {@code evaluateStock(StockInput)} 單參數多載，
+     * candidate 與 context 恆為 null，規則引擎整段 market feature 區塊從不進入；因此這些數值
+     * 對三軌分數與動作皆無影響。標示只加在儲存格內容，欄名、欄數與欄序一律不動。</p>
+     *
+     * <p>不得寫成「大盤數據不影響評分」：大盤趨勢另由盤勢 regime 因子（非零權重）計入分數，
+     * 這裡不進評分的是<b>本面板的這些數值</b>。</p>
+     */
+    private static final String MARKET_FEATURE_DISCLOSURE =
+            " scoring=NOT_SCORED（此數值不計入評分；大盤趨勢另由盤勢因子計入）";
+
+    /**
+     * Task 362.5：美債殖利率的三段語意——數值不計分，但曲線資料齊備與否確實動到證據閘門。
+     *
+     * <p>權重 baseline 是字面 {@code 0.0}，{@code Accumulator.add} 連分母都不動，故殖利率
+     * 數值對分數影響嚴格為零；而 {@code ASSET_SPECIFIC} 覆蓋率未達 .70 時債券的買進閘門會關閉，
+     * 故不得寫成「不影響決策」或「僅供參考」。</p>
+     */
+    private static final String TREASURY_RATE_DISCLOSURE =
+            "TREASURY_RATE scoring=NOT_SCORED 殖利率數值不計入評分；曲線資料是否齊備影響債券標的的證據閘門";
+
+    /**
      * Keep the existing Excel/JSON column contract while making every resolved
      * evidence group and typed market feature auditable.  The cells are an
      * ordered disclosure list (Excel newline / JSON array); no score or gate is
@@ -701,7 +731,8 @@ public class TradingRadarExportService {
                         + " availableAt=" + textOrDash(feature, "availableAt")
                         + " basis=" + textOrDash(feature, "availabilityBasis")
                         + " reason=" + textOrDash(feature, "missingReason")
-                        + " source=" + textOrDash(feature, "sourceUrl"));
+                        + " source=" + textOrDash(feature, "sourceUrl")
+                        + MARKET_FEATURE_DISCLOSURE);
             }
         }
         if (!evidence.path("nextDistributionStatus").isMissingNode()) {
@@ -713,7 +744,30 @@ public class TradingRadarExportService {
                     + " within20=" + textOrDash(evidence, "distributionsWithinTwentySessions")
                     + " reason=" + textOrDash(evidence, "nextDistributionMissingReason"));
         }
+        // Task 362.5：債券列才輸出。判別式必須是 ASSET_SPECIFIC 的 bond_rate component
+        // ——`treasuryRateContext` 非 missing 不代表是債券（Jackson 預設 ALWAYS，非債券列
+        // 也有該 key 且為 null），而 curve 不可得的債券列該 context 同樣為 null，那正是
+        // 最需要向使用者解釋「買進閘門被關掉」的情境。
+        if (hasBondRateComponent(evidence)) {
+            lines.add(TREASURY_RATE_DISCLOSURE);
+        }
         return lines.isEmpty() ? null : List.copyOf(lines);
+    }
+
+    /**
+     * 該列是否為債券標的：以 {@code ASSET_SPECIFIC} 是否建立 {@code bond_rate} component 判定。
+     *
+     * <p>{@code TradingRadarEvidenceConfidenceResolver} 對<b>所有</b> bond profile 無條件建立
+     * 這個 component，只有 applicability 隨 curve 可得性在 AVAILABLE／STALE／MISSING 之間變動，
+     * 故 curve 不可得的債券列同樣判為 true。</p>
+     */
+    private static boolean hasBondRateComponent(JsonNode evidence) {
+        JsonNode components = evidence.path("evidenceGroups").path("ASSET_SPECIFIC").path("components");
+        if (!components.isArray()) return false;
+        for (JsonNode component : components) {
+            if ("bond_rate".equals(component.path("name").asText())) return true;
+        }
+        return false;
     }
 
     private static String textOrDash(JsonNode node, String field) {

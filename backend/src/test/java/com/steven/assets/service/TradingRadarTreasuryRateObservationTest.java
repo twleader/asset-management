@@ -66,6 +66,54 @@ class TradingRadarTreasuryRateObservationTest {
         verify(treasuryYieldService).resolveRateContext(decision, "Y30");
     }
 
+    /**
+     * Task 362.8(c)：殖利率<b>數值</b>不計分，但這批 curve 資料齊備與否確實動到證據閘門。
+     *
+     * <p>同一支 profile、同一個決策時點，只換 {@code TreasuryYieldService} 是否交得出完整
+     * batch，{@code ASSET_SPECIFIC} 的 {@code bond_rate} component applicability 就從
+     * {@code AVAILABLE} 掉到 {@code MISSING}——覆蓋率因此下降並關閉債券的買進閘門。
+     * 這條是為了證明「不影響決策」「僅供參考」那類寫法是錯的。</p>
+     */
+    @Test
+    void curve批次可得與否會改變bondRate證據的applicability() {
+        var profile = TradingRadarAssetProfileResolver.resolve(
+                "TLT", "美股", "iShares 20+ Year Treasury Bond ETF", null, null,
+                null, null, null, null);
+
+        when(treasuryYieldService.resolveRateContext(decision, "Y30"))
+                .thenReturn(Optional.of(context("Y30")));
+        var complete = service.resolveTreasuryRateObservation(profile, decision);
+        when(treasuryYieldService.resolveRateContext(decision, "Y30"))
+                .thenReturn(Optional.empty());
+        var missing = service.resolveTreasuryRateObservation(profile, decision);
+
+        assertThat(complete.hasCompleteContext()).isTrue();
+        assertThat(complete.riskUnit()).as("數值不計分：riskUnit 仍為 null").isNull();
+        assertThat(missing.context()).isNull();
+
+        assertThat(bondRateApplicability(profile, complete))
+                .isEqualTo(TradingRadarEvidenceConfidenceResolver.Applicability.AVAILABLE);
+        assertThat(bondRateApplicability(profile, missing))
+                .isEqualTo(TradingRadarEvidenceConfidenceResolver.Applicability.MISSING);
+    }
+
+    private TradingRadarEvidenceConfidenceResolver.Applicability bondRateApplicability(
+            TradingRadarAssetProfileResolver.AssetProfile profile,
+            TradingRadarEvidenceConfidenceResolver.RateObservation observation) {
+        var inputs = new TradingRadarEvidenceConfidenceResolver.Inputs(
+                "美股", decision, null, null,
+                TradingRadarRuleEngine.MarketRegime.NEUTRAL, false,
+                TradingRadarEvidenceConfidenceResolver.MarketContext.EMPTY,
+                null, profile, null, null, null, false, null, null,
+                observation, TradingRadarRuleEngine.TimingState.NEUTRAL,
+                DividendEventEvidenceResolver.Resolution.MISSING);
+        var group = TradingRadarEvidenceConfidenceResolver.resolve(inputs)
+                .groups().get(TradingRadarEvidenceConfidenceResolver.Group.ASSET_SPECIFIC);
+        return group.components().stream()
+                .filter(component -> "bond_rate".equals(component.name()))
+                .findFirst().orElseThrow().applicability();
+    }
+
     private TreasuryYieldDto.RateContext context(String tenor) {
         Map<String, String> manifest = new LinkedHashMap<>();
         for (String key : TreasuryYieldBatchRepository.TENOR_ORDER) {
