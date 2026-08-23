@@ -83,7 +83,7 @@ public class DividendCurrentStateProjectionService {
                 : repository.findActiveFutureEvents(snapshot.code(), snapshot.market(), decisionDate,
                 snapshot.scopeFrom(), snapshot.scopeTo())) {
             // Task 357／357.3d-0c：純配股事件的 exDividendDate() 為 null，一律改用
-            // anchorDate = COALESCE(exDividendDate, exRightsDate)，否則這類事件永遠
+            // anchorDate = min(exDividendDate, exRightsDate)，否則這類事件永遠
             // 無法進入 CANCEL 判定（existing.exDividendDate() != null 會直接把它們濾掉）。
             if (existing != null && existing.anchorDate() != null
                     && !datesWithUnresolvedAmount.contains(existing.anchorDate())
@@ -251,7 +251,7 @@ public class DividendCurrentStateProjectionService {
     }
 
     /**
-     * anchorDate（{@code COALESCE(exDividendDate, exRightsDate)}）plus amounts, the
+     * anchorDate（{@code min(exDividendDate, exRightsDate)}）plus amounts, the
      * identity of one real dividend event.  Null amounts count as zero, the same
      * convention as the uk_dividend_event index and the relaxed reconciliation
      * segment in the JDBC adapter.
@@ -277,7 +277,7 @@ public class DividendCurrentStateProjectionService {
     }
 
     /**
-     * Task 357／357.3d-0：改用 anchorDate = COALESCE(exDividendDate, exRightsDate)。
+     * Task 357／357.3d-0：改用 anchorDate = min(exDividendDate, exRightsDate)。
      * 這是回補機制自身依賴的寫入閘門——{@code projectOne()} 與 {@code projectable()}
      * 都靠它決定事件能不能通過投影；若仍用裸 {@code exDividendDate() != null}，純配股
      * 事件永遠無法通過，回補會靜默失效且不會被任何既有測試攔到。

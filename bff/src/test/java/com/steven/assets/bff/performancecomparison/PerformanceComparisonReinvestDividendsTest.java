@@ -45,7 +45,10 @@ class PerformanceComparisonReinvestDividendsTest {
     /**
      * 純配股事件（{@code exDividendDate=null}、{@code exRightsDate} 有值）修正前的舊邏輯是整列略過
      * （只看 {@code exDividendDate}），還原後等同純價格報酬 -5.00%。修正後改用
-     * {@code anchorDate = COALESCE(exDividendDate, exRightsDate)} 判斷是否套用，該事件不得被跳過：
+     * 套用日期 {@code exDividendDate ?? exRightsDate} 判斷是否套用，該事件不得被跳過
+     * （<b>這是「套用日期」不是錨定日</b>——357.4a 規定現金股利套除息日、股票股利套除權日，
+     * 兩者皆有且不同日時拆成兩筆；錨定日 {@code min(除息日, 除權日)} 是 backend 用於區間
+     * 過濾／排序的另一個概念，兩者不得互相頂替）：
      * 股票股利因子（1 + 1.0/10）在 {@code exRightsDate} 生效，含息報酬應為 +4.50%。
      */
     @Test

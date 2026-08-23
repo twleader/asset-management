@@ -58,6 +58,23 @@ app:
   internal:
     # Business → external Treasury API shared credential; secret value only comes from runtime env.
     treasury-token: ${INTERNAL_TREASURY_TOKEN:}
+  # 配息四日期的一次性歷史回補（Requirement 94 / Task 357.3a、357.3c）。
+  # **預設關閉**：enabled=false 時 DividendBackfillStarter 連 bean 都不會建立，
+  # 常態啟動完全不受影響。回補時以環境變數開啟並 recreate business-services 觸發，
+  # 完成後拿掉旗標再 recreate 一次即回到常態。不新增排程、不新增端點、不新增 9090 路由。
+  dividend-backfill:
+    enabled: ${DIVIDEND_BACKFILL_ENABLED:false}
+    # FinMind 有額度限制（357.3c）：分批 ＋ 批次間停頓。單檔之間的節流沿用
+    # external-materials-service 既有的 DividendPersister.syncOne（台股 300ms／美股 500ms）。
+    batch-size: ${DIVIDEND_BACKFILL_BATCH_SIZE:10}
+    batch-pause-millis: ${DIVIDEND_BACKFILL_BATCH_PAUSE_MILLIS:5000}
+    # 續跑進度與稽核帳的落點。必須在容器外（host 家目錄 volume），否則 recreate 後續跑
+    # 會退化成整批重跑。
+    state-dir: ${DIVIDEND_BACKFILL_STATE_DIR:${EXPORT_OUTPUT_DIR:/home/steven}/dividend-backfill-t357}
+    # 前後比對 current-state 的起始年度（357.3b 的修正偵測）。取得夠早即可，不影響抓取範圍。
+    since-year: ${DIVIDEND_BACKFILL_SINCE_YEAR:2000}
+    # 單檔 /internal/dividend/sync 的等待上限；逾時記成該檔失敗並續跑下一檔。
+    request-timeout: ${DIVIDEND_BACKFILL_REQUEST_TIMEOUT:5m}
 
 notification:
   email:

@@ -1,5 +1,6 @@
 package com.steven.assets.externalmaterials.client;
 
+import com.steven.assets.externalmaterials.model.DividendDates;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -212,7 +213,7 @@ public class TaiwanOfficialDividendCalendarClient implements DividendUpcomingSco
         for (List<OfficialEvent> source : sources) {
             for (OfficialEvent event : source) {
                 // 357.2e：純配股列的 exDividendDate 拆分後為 null，dedupe key 必須改用
-                // anchorDate（COALESCE(exDividendDate, exRightsDate)）解析，否則
+                // anchorDate（min(exDividendDate, exRightsDate)）解析，否則
                 // LocalDate.parse(null) 會直接拋 NPE 並中斷整個 fetch()。
                 LocalDate date = anchorDate(event.event());
                 if (date == null || !target.equals(event.code().toUpperCase(Locale.ROOT))
@@ -229,12 +230,10 @@ public class TaiwanOfficialDividendCalendarClient implements DividendUpcomingSco
         return List.copyOf(byDate.values());
     }
 
+    /** 算術本體委派 {@link DividendDates#anchorDate}；本 module 內只有那一份實作。 */
     private static LocalDate anchorDate(DividendFetchClient.DividendEvent event) {
-        LocalDate ex = parseDateOrNull(event.exDividendDate());
-        LocalDate rights = parseDateOrNull(event.exRightsDate());
-        if (ex == null) return rights;
-        if (rights == null) return ex;
-        return ex.isBefore(rights) ? ex : rights;
+        return DividendDates.anchorDate(
+                parseDateOrNull(event.exDividendDate()), parseDateOrNull(event.exRightsDate()));
     }
 
     private static LocalDate parseDateOrNull(String value) {

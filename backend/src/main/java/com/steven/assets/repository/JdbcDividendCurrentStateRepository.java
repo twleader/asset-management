@@ -95,16 +95,21 @@ public class JdbcDividendCurrentStateRepository implements DividendCurrentStateR
             String code, String market, LocalDate afterDate,
             LocalDate scopeFrom, LocalDate scopeTo) {
         // Task 357／357.3d-1b：純配股事件的 ex_dividend_date 為 null，SQL 對 NULL 比較
-        // 恆為 UNKNOWN、等同隱性排除；改用 anchorDate = COALESCE(ex_dividend_date,
+        // 恆為 UNKNOWN、等同隱性排除；改用 anchorDate = LEAST(ex_dividend_date,
         // ex_rights_date) 三處比較，否則這類事件永遠不會被視為「ACTIVE 未來事件」。
+        // **是 LEAST 不是 COALESCE**：這三處是區間比較（>、>=、<=），兩欄皆有值且除權日
+        // 較早時 COALESCE 會取到較晚的除息日，把實際落在 scope 內的事件擋在外面；LEAST
+        // 忽略 NULL、取較早者，與 Java 端 DividendDates.anchorDate 逐位相同。
+        // 注意：下方 relaxed／strict 對帳段落的 COALESCE(ex_dividend_date, DATE '1970-01-01')
+        // 是 uk_dividend_event 的 null-sentinel 比對，兩個日期欄各自獨立比對，不得改成 LEAST。
         return jdbc.query("""
                 SELECT id, event_key, year, ex_dividend_date, ex_rights_date, cash_dividend,
                        stock_dividend, cash_payment_date, stock_payment_date
                   FROM stock_dividend_history
                  WHERE stock_code=? AND market=? AND event_status='ACTIVE'
-                   AND COALESCE(ex_dividend_date, ex_rights_date)>?
-                   AND COALESCE(ex_dividend_date, ex_rights_date)>=?
-                   AND COALESCE(ex_dividend_date, ex_rights_date)<=?
+                   AND LEAST(ex_dividend_date, ex_rights_date)>?
+                   AND LEAST(ex_dividend_date, ex_rights_date)>=?
+                   AND LEAST(ex_dividend_date, ex_rights_date)<=?
                 """, (rs, rowNum) -> new ActiveFutureEvent(rs.getLong("id"),
                 rs.getString("event_key"), rs.getObject("year", Integer.class),
                 rs.getObject("ex_dividend_date", LocalDate.class),
@@ -125,7 +130,7 @@ public class JdbcDividendCurrentStateRepository implements DividendCurrentStateR
                        previous_close, fill_days
                   FROM stock_dividend_history
                  WHERE stock_code=? AND market=? AND event_status='ACTIVE'
-                   AND COALESCE(ex_dividend_date, ex_rights_date) IS NOT NULL
+                   AND LEAST(ex_dividend_date, ex_rights_date) IS NOT NULL
                  ORDER BY id
                 """, (rs, rowNum) -> new ActiveEventDetail(rs.getLong("id"),
                 rs.getString("event_key"), rs.getObject("year", Integer.class),

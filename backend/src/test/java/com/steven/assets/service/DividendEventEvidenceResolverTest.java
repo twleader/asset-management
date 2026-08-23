@@ -233,8 +233,8 @@ class DividendEventEvidenceResolverTest {
 
     /**
      * Task 357／357.3d-1b：這是交易雷達「下一配息」證據本身。純配股事件的
-     * exDividendDate 為 null，改用 anchorDate（{@code COALESCE(exDividendDate,
-     * exRightsDate)}）後才能通過 resolve() 的區間過濾與排序，否則這類事件永遠不會
+     * exDividendDate 為 null，改用 anchorDate（{@code min(exDividendDate,
+     * exRightsDate)}，SQL 側為 {@code LEAST}）後才能通過 resolve() 的區間過濾與排序，否則這類事件永遠不會
      * 成為「下一配息」（Requirement 94 的頭號承諾）。
      */
     @Test

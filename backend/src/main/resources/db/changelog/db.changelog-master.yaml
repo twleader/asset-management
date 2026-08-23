@@ -365,3 +365,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/v1.110.0-dividend-ex-rights-date.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.111.0-dividend-event-uniqueness.sql
+      relativeToChangelogFile: false

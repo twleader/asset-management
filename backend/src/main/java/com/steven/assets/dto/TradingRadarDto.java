@@ -337,7 +337,7 @@ public final class TradingRadarDto {
             String candidateAction,
             String shortCandidateAction,
             /**
-             * anchorDate = {@code COALESCE(nextExDividendDate, nextExRightsDate)}
+             * anchorDate = {@code LEAST(nextExDividendDate, nextExRightsDate)}（取較早者，非 COALESCE）
              * （Task 357／Requirement 94）。357 之前只代表除息日；純配股事件此欄現在
              * 落的是除權日。既有消費端若只需要「下一次事件哪天發生」可繼續用本欄；
              * 需要區分除息／除權／發放股息／發放股權，改用下方四個新欄位。
@@ -511,7 +511,7 @@ public final class TradingRadarDto {
                 }
             }
             // Task 357／Requirement 94：nextDistributionDate 重新定義為 anchorDate =
-            // COALESCE(exDividendDate, exRightsDate)——純配股的下一事件 exDividendDate()
+            // min(exDividendDate, exRightsDate)——純配股的下一事件 exDividendDate()
             // 為 null，裸呼叫 .toString() 會 NPE；四個新欄位各自揭露原始值，缺值為 null。
             com.steven.assets.service.DividendEventEvidenceResolver.Event nextEvent =
                     distribution == null ? null : distribution.nextEvent();
