@@ -42,6 +42,7 @@ public class AssetService {
     private final com.steven.assets.security.TenantGuard tenantGuard;
     private final AssetSnapshotMutationLock snapshotMutationLock;
     private final SnapshotAggregateCalculator aggregateCalculator;
+    private final SnapshotStockScopeOwnershipPort stockScopeOwnershipPort;
 
     /**
      * 算 FundHolding currentValue：若 units 非空 → 嘗試 NAV(basedate) × FX(basedate) 自動算
@@ -275,13 +276,18 @@ public class AssetService {
             }
             snapshot.setSnapshotDate(req.snapshotDate());
         }
+
+        // The integration decides once, after the locked target's final date is known.
+        SnapshotStockScopeOwnership scopeOwnership = stockScopeOwnershipPort.capture(
+                new SnapshotUpdateTarget(snapshot.getId(), snapshot.getOwnerUserId(), snapshot.getSnapshotDate()));
         snapshot.setUsdExchangeRate(req.usdExchangeRate());
         snapshot.setNotes(req.notes());
 
         snapshot.getDeposits().clear();
         snapshot.getFunds().clear();
-        // Fubon 台股 scope 是 server-owned。保留 lock 後的真實 rows，忽略前端較舊 payload 的同 scope。
-        snapshot.getStocks().removeIf(stock -> !isFubonTw(stock));
+        // Preserve only scopes the one captured decision says are source-owned.
+        snapshot.getStocks().removeIf(stock -> !scopeOwnership.isSourceOwned(
+                stock.getMarket(), stock.getBroker() == null ? null : stock.getBroker().getCode()));
 
         if (req.deposits() != null) {
             req.deposits().forEach(d -> {
@@ -310,7 +316,7 @@ public class AssetService {
             java.util.Map<String, Integer> displayOrderMap = assignDisplayOrder(req.stocks());
             req.stocks().forEach(st -> {
                 BrokerEntity broker = st.brokerId() != null ? brokerRepo.findById(st.brokerId()).orElse(null) : null;
-                if ("台股".equals(st.market()) && broker != null && "fubon".equals(broker.getCode())) {
+                if (scopeOwnership.isSourceOwned(st.market(), broker == null ? null : broker.getCode())) {
                     return;
                 }
                 snapshot.getStocks().add(StockHolding.builder()
@@ -884,12 +890,6 @@ public class AssetService {
         snapshotRepo.save(latest);
         log.info("roll 最新快照 owner={} id={} {} → {}", ownerId, latest.getId(), old, today);
         return true;
-    }
-
-    private boolean isFubonTw(StockHolding stock) {
-        return "台股".equals(stock.getMarket())
-                && stock.getBroker() != null
-                && "fubon".equals(stock.getBroker().getCode());
     }
 
     private AssetSnapshotDto.SnapshotSummaryResponse toSummaryResponse(AssetSnapshot s) {
