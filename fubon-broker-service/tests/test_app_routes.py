@@ -46,8 +46,9 @@ class Quotes:
     def __init__(self):
         self.calls = 0
 
-    async def read(self, codes):
+    async def read(self, codes, purpose):
         self.calls += 1
+        assert purpose in {"LIVE", "INVENTORY"}
         return {"batchId": "batch", "quotes": [{"stockCode": codes[0], "status": "SUCCESS"}]}
 
 
@@ -96,7 +97,7 @@ def test_exact_four_routes_auth_and_methods(tmp_path):
         ).status_code == 401
         assert client.get("/internal/config", headers=headers).status_code == 200
         assert client.post("/internal/portfolio/read", headers=headers, json={"dryRun": True}).status_code == 200
-        assert client.post("/internal/market-data/tw-quotes", headers=headers, json={"codes": ["2330"]}).status_code == 200
+        assert client.post("/internal/market-data/tw-quotes", headers=headers, json={"codes": ["2330"], "purpose": "LIVE"}).status_code == 200
         assert client.get("/docs").status_code == 404
         assert client.get("/redoc").status_code == 404
         assert client.get("/openapi.json").status_code == 404
@@ -152,7 +153,7 @@ def test_runtime_misconfiguration_returns_503_without_retrying_functionality(tmp
         assert client.get("/internal/config", headers=headers).status_code == 503
         assert client.post("/internal/portfolio/read", headers=headers, json={"dryRun": True}).status_code == 503
         assert client.post(
-            "/internal/market-data/tw-quotes", headers=headers, json={"codes": ["2330"]}
+            "/internal/market-data/tw-quotes", headers=headers, json={"codes": ["2330"], "purpose": "LIVE"}
         ).status_code == 503
     assert portfolio.calls == quotes.calls == 0
 

@@ -70,6 +70,24 @@ class FubonInventorySyncServiceTest {
     }
 
     @Test
+    void inventoryFlagDisabledStopsBeforeAnyAdapterOrPersistenceAccess() {
+        FubonInventorySyncService disabled = configured(false, false);
+        FubonDtos.SyncResponse result = disabled.syncManual(false);
+        assertThat(result.outcome()).isEqualTo(FubonOutcome.INVENTORY_SYNC_DISABLED);
+        verifyNoInteractions(configState, brokerClient, marketDataService, userAdminService, snapshotRepository,
+                brokerRepository, stockRepository, writer);
+    }
+
+    @Test
+    void simultaneousLiveAndInventoryFlagsStopBeforeAnyAdapterOrPersistenceAccess() {
+        FubonInventorySyncService conflict = configured(true, true);
+        FubonDtos.SyncResponse result = conflict.syncManual(false);
+        assertThat(result.outcome()).isEqualTo(FubonOutcome.INVENTORY_SYNC_CAPACITY_CONFLICT);
+        verifyNoInteractions(configState, brokerClient, marketDataService, userAdminService, snapshotRepository,
+                brokerRepository, stockRepository, writer);
+    }
+
+    @Test
     void calendarUnknownStopsAfterAccountingAndNeverCallsQuoteOrDatabase() {
         ready();
         when(brokerClient.readPortfolio()).thenReturn(FubonDtos.CallResult.success(portfolio(TODAY)));
@@ -114,6 +132,13 @@ class FubonInventorySyncServiceTest {
         assertThat(result.positionCount()).isEqualTo(1);
         assertThat(result.replaceCount()).isZero();
         verifyNoInteractions(userAdminService, snapshotRepository, brokerRepository, stockRepository, writer);
+    }
+
+    private FubonInventorySyncService configured(boolean inventoryEnabled, boolean liveEnabled) {
+        Clock clock = Clock.fixed(Instant.parse("2026-08-21T04:00:00Z"), ZoneOffset.UTC);
+        return new FubonInventorySyncService(configState, brokerClient, marketDataService, userAdminService,
+                snapshotRepository, brokerRepository, stockRepository, writer, counters, clock,
+                inventoryEnabled, liveEnabled);
     }
 
     @Test

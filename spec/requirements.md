@@ -3319,6 +3319,8 @@ FROM stock_price_history WHERE market='台股';
 - [ ] **Docker 實機驗證：**無快取重建/recreate `external-materials-service`、`business-services`、`bff`、`frontend`，並依上游重建後 restart BFF。實際從畫面驗證主圖與排程匯出兩個下拉的前兩項文字、TPEX 10 年日線非空。Authenticated legacy `GET /api/bff/gdp-twse/index-daily?market=TPEX&years=10` 的契約沒有 market/range/label；驗證 `dates/closes/ma5/ma20/ma60/ma240/volumes/turnovers` 非空且等長、`hasVolume=true`、至少一筆 `volume>0`、`turnovers` 全為 null，以及起訖日。host public `127.0.0.1:9090/api/public/market-index?market=TPEX&range=10y` 另驗證 `market=TPEX`、`range=10y`、`marketLabel=台股櫃買市場`、`hasVolume=true`、至少一筆正 volume、turnovers 全 null、起訖日、筆數與陣列等長；DB `index_code='TPEX'` 至少一列有正 volume，不能只看 HTTP 200 或只證明 OHLC。部署驗收時若已休市，不可繞過 `MarketClock` 強行把盤後最後價寫成 LIVE；上市／上櫃官方路由可以唯讀查詢驗證，2 分鐘盤中寫入則以排程與單測證據為主並誠實註明時段限制。
 - [ ] **不在本次範圍：**不改任何個股排程為 2 秒；不抓取全體上市櫃公司報價（只限每位 owner 最新快照持股與觀察／警示清單的去重聯集）；不為持股 schema 新增 tse/otc exchange 欄位；不建新個股 API；不把 TPEX 指數改為 2 分鐘 Redis 指數價；不改 `0000` 的 TAIEX 語意；不推動 Liquibase schema 變更。
 
+> **目前狀態更新（Requirement 106／Task 370 優先）：** 本 Requirement 的台股個股 2 分鐘排程與 catalog 文案，僅對 `market='台股'`、非 `0000` 的 priority LIVE pipeline 被 Requirement 106 取代為每 10 秒、Fubon → TWSE MIS → Yahoo；本 Requirement 的 TPEX 指數、美／英股與其餘條款不變。
+
 ---
 
 ### Requirement 86／Task 347: 今日交易雷達 Docker 外部唯讀 API，且所有 9090 API 必須有完整 OpenAPI 3 文件
@@ -3391,6 +3393,8 @@ FROM stock_price_history WHERE market='台股';
 - [ ] **測試與實機驗證：**除既定Lua/day-HL/tick/DB/close/batch/cron矩陣外，MIS fixture必含官方實例型態`d=20260821,t=13:30:00,ot=14:30:00,tlong=1787293800000,positive z`仍RESOLVED且freshness=05:30Z；壞d/t才INVALID，壞/缺tlong只記anomaly。Lua 必驗同日 `VERIFIED_CLOSE(T1)`／`LIVE(T1)` 各自遇較晚 `PREVIOUS_CLOSE(T2)` 都 REJECTED_STALE 且payload／index／TTL／publish／tick零mutation，較舊時間即使狀態較高也不得覆寫較新時間。incoming status的missing/null/number/empty四類各自FAILED零mutation；existing同四類各視rank0，incoming較舊time仍拒絕、相等或較新才修復。美股FinMind最後row date不等target須DB/Redis零寫。Docker synthetic用隔離唯一key，不進任何public index；runtime只接受成功phase。
 - [ ] **不在本次範圍：**不改 2 分鐘 cron、不提高成 2 秒／5 秒輪詢、不使用推估價、不新增 DB schema／Redis key／公開 endpoint、不改 business-services／frontend 的報價消費規則，也不承諾低流動性標的在 5 分鐘內一定有成交；沒有真實成交時，嚴格交易流程繼續 fail-closed。
 
+> **目前狀態更新（Requirement 106／Task 370 優先）：** Requirement 106 對台股 priority LIVE path 保留本 Requirement 的 MIS `d+t` freshness 與 `tlong` 只診斷規則，但取代「同時間可接受」以及 stale actual-trade 可寫 `price:dayhl:*` 的兩個例外：三來源 LIVE 的 equal/older 一律完整零 Redis 副作用。`VERIFIED_CLOSE`、正式收盤與非台股 producer 仍依本 Requirement。
+
 ---
 
 ### Requirement 90／Task 352: Docker Linux 富邦證券庫存同步至管理者最新資產快照
@@ -3417,6 +3421,8 @@ FROM stock_price_history WHERE market='台股';
 
 ---
 
+> **目前狀態更新（Requirement 106／Task 370 優先）：** Requirement 90 原本「`.env`／`.env.example` 只放 `FUBON_ENABLED`」的設定清單，僅為本 Requirement 新增兩個**非秘密 feature flag** 的窄例外：`FUBON_TW_LIVE_QUOTES_ENABLED` 與 `FUBON_INVENTORY_SYNC_ENABLED`。後者預設 false，且與十秒 LIVE 同時 true 時必須 fail closed 為 `INVENTORY_SYNC_CAPACITY_CONFLICT`；其餘 secret 隔離、lazy config、唯讀 adapter、inventory 對帳與寫入規則仍完整有效。
+
 ### Requirement 91／Task 353: 富邦台股逐檔 intraday quote 作為可切換的 LIVE provider
 
 **User Story:** 作為台股即時報價使用者，我希望在已啟用富邦整合時，由富邦官方 intraday quote 提供現有 19 欄報價契約與可信來源時間，停止依賴 TWSE MIS／Yahoo 網頁抓取；未設定富邦的環境仍可維持目前行為。
@@ -3433,6 +3439,8 @@ FROM stock_price_history WHERE market='台股';
 - [ ] **相容、邊界與禁止 fallback 測試：**fake adapter/HTTP fixture使用官方raw keys `previousClose/openPrice/highPrice/lowPrice`，並釘住只有錯誤`open/high/low` alias時整筆拒絕；另至少涵蓋合法市場pair、16位microseconds、trial/actual衝突、wrong symbol/date、future/older/equal、429/timeout/partial/>100/cache/single-flight，以及decimal `"9999999999.9999999999"`接受、`"10000000000.0000000000"`／`"0.00000000001"`拒絕、volume `0/9,223,372,036,854,775,807`接受與負值/9,223,372,036,854,775,808拒絕。四入口×enabled/disabled strategy都要分別驗known true下盤中success/provider failure、known false、calendar authority empty與authority throw，逐案精確斷言Fubon/MIS HTTP及Redis writer/tick/pubsub call count；false/empty/throw全為0，enabled任何失敗零MIS/Yahoo fallback，disabled零Fubon。真Redis Lua另以current missing＋`marketOpenAuthorized=false`驗`MARKET_CLOSED`且value/index TTL/pubsub/tick完全不變，再驗open時newer/takeover契約；並直接執行production script覆蓋wrong-type latest/index、非法TTL、malformed或JSON/ARGV不一致，以及FUBON來源同日VERIFIED_CLOSE遭較新LIVE防降級，逐案驗payload bytes、index type/member、兩種TTL、publish count與tick均不變，證明錯誤後沒有partial mutation。公開 `/api/quotes`／`one` 19欄與ETF enrichment不回歸。
 - [ ] **Docker 實機驗證：**無秘密且 disabled 的正式 Compose 可健康啟動；amd64 Python image 內 `from fubon_neo.sdk import FubonSDK` 成功、`uname -m` 為 x86_64、無 host port。安裝真實 secrets 後，開盤中須以同代號查 normalized endpoint與 Redis/API，證明來源為 `FUBON_INTRADAY`、`isTrial`不為true且使用actual pair、provider timestamp前進，並證明MIS/Yahoo沒有被呼叫；若休市或無secrets，完成報告必須明列live證據未取得，不得以fixture／舊cache冒充。
 - [ ] **不在本次範圍：**不把富邦當成美股、英股或 FX provider；不替換官方盤後收盤、歷史序列、ETF NAV／折溢價、基本面或新聞來源；不新增公開 endpoint、Redis key/schema、DB schema或 Liquibase，也不把 `closePrice` 的欄名誤解成盤後官方定案收盤。
+
+> **目前狀態更新（Requirement 106／Task 370 優先）：** enabled-only provider、enabled failure 不 fallback、30 秒 success cache、dispatcher 100 檔截斷、富邦 scoped Redis takeover 與富邦不寫 DB 的舊語意，均只在台股 priority LIVE pipeline 被 Requirement 106 取代；known-open gate、actual-trade 驗證、官方來源 OHLC 與無下單邊界仍保留。富邦 accepted quote 的 source OHLC 進 snapshot/cache、只 append tick、不寫 day-H/L tracker。
 
 ---
 
@@ -4287,3 +4295,31 @@ const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
 - [x] **AC7**：`getPriceCell(row)` 的 `belongsToRow` 判斷式**不得以 `p.tradingDate === latest.value?.snapshotDate` 判定**（休市時恆不相等，會讓收盤日的漲跌%全數消失，與程式碼既有註解「收盤/週末亦可顯示」矛盾）。改為判斷「目前是否正在檢視最新快照」——只要 `selectedSnapshotId` 為 `null` 或等於 `store.latestSnapshot?.id`，此時 `stockPrices` 快取的報價（不論其 `tradingDate` 是今天還是上一個交易日）都對應目前顯示的這一列，`priceChange`／`changePercent` 應正常帶出；選了**歷史**快照（`selectedSnapshotId` 不等於最新快照 id）時仍只顯示凍結收盤價、不帶漲跌%，這個既有行為不變。
 - [x] **AC8**：AC7 的修正只動 `belongsToRow` 這一行判斷式的比較依據，`getPriceCell` 其餘程式碼（`isRowClosePending`、`getRealtimePrice` 呼叫、`row.stockPrice == null` 判斷、回傳物件形狀）不動；`priceNumberColor(row)` 不因 AC7 而改變既有行為——休市時 `getRealtimePrice(row)` 仍回傳 `null`（`isAcceptedTodayQuote` 拒絕 `PREVIOUS_CLOSE`），股價數字依既有邏輯仍顯示灰色，AC7 只補回漲跌%，不改變顏色判斷。
 - [x] **AC9**：驗收須以實機 API 回應驗證，不得只憑程式碼推論：`docker exec asset-business-services curl http://localhost:8080/api/market-data/prices` 找一筆 `quoteStatus` 為 `PREVIOUS_CLOSE`、`priceChange` 非 null 的報價（休市時大量存在），登入儀表板確認該檔股票「股價/漲跌(%)」欄同時顯示股價（灰色）與漲跌 ▲/▼ 百分比（非空、非 `NaN`）；並確認選歷史快照（非最新）時同一檔股票只顯示股價、不顯示漲跌%（AC7 後半段的既有行為不得回歸壞掉）。
+
+### Requirement 106／Task 370：台股盤中報價改為每 10 秒富邦優先，並把最新完整快照安全持久化
+
+**User Story：** 作為台股投資人，我希望系統在交易時段每 10 秒更新持股與觀察清單的即時行情，依序使用富邦證券 API、TWSE MIS、Yahoo Finance；無論哪一個來源回來，都只能以較新的行情時間更新 Redis 與資料庫，且富邦所提供的完整報價欄位都要同步保存，不能因來源切換、網路延遲或重送而讓較舊資料倒退。
+
+- [ ] **每 10 秒的唯一台股 LIVE producer：** `external-materials-service` 的台股排程改為每 10 秒觸發、Asia/Taipei 交易日 09:00–13:30 的 known-open gate 仍是唯一授權；手動 refresh、啟動 warmup 與排程都必須共用同一個 dispatcher。前一輪尚未結束時，本輪明確 skip，不得並行對同一標的發出來源請求、寫 Redis、寫 DB、追加 tick 或累積日內高低。同步更新公開排程清單的 cron、友善文字與來源順序；美股、英股、大盤、ETF NAV、收盤及分時收尾排程不變。
+
+- [ ] **美股富邦 API 的明確範圍：** 富邦目前公開的市場資料契約僅涵蓋台灣證券市場，故本 Requirement 不得對美股送富邦 request、不得因 `FUBON_ENABLED` 改變美股 cadence；美股保持既有 2 分鐘 producer。日後只有官方美股 endpoint 明確提供 actual trade 與來源 timestamp、並另立需求完成 adapter／容量／測試後，才可改為 10 秒。
+
+- [ ] **富邦主開關、台股 LIVE 與庫存同步嚴格隔離：** `FUBON_ENABLED` 是 Python adapter／shared secret 的主開關；`FUBON_TW_LIVE_QUOTES_ENABLED` 是 external 台股 LIVE chain 的專屬開關；`FUBON_INVENTORY_SYNC_ENABLED` 是 backend 庫存同步（排程及手動 endpoint）的專屬開關。tracked `.env.example` 固定為 `true`／`true`／`false`；三者都不得包含秘密。只有前兩者皆 true 才可查富邦台股 LIVE，任一 false 時 external 不讀 token／不打富邦，直接 MIS → Yahoo。inventory flag=false 時 scheduler 與手動庫存同步都必須 typed `INVENTORY_SYNC_DISABLED`，零 adapter HTTP／SDK、零資產寫入。若 LIVE 與 inventory flag 同為 true，庫存同步必須 typed `INVENTORY_SYNC_CAPACITY_CONFLICT`、零 adapter／資產 side effect；LIVE 保留完整 40 檔×每 10 秒、240 calls/min 的預算。如此不得讓使用者只為行情將庫存同步意外啟用，亦不得讓兩個 consumer 爭搶同一個 adapter budget。
+
+- [ ] **固定來源鏈，按「尚未得到可接受新行情」逐檔 fallback：** `FUBON_ENABLED=true` 且 `FUBON_TW_LIVE_QUOTES_ENABLED=true` 時每輪先呼叫富邦正規化 quote endpoint；富邦對個別代號失敗、無成交、欄位／日期／時間不合法、逾時、限流、或該筆相對既有資料為舊／同時間而被丟棄時，該代號才交給 TWSE MIS；MIS 同樣未產生可接受新行情時，最後才詢問 Yahoo。富邦整體 misconfigured／服務失敗必須讓所有代號立即落到 MIS，再由 Yahoo 補最後缺口，不能像舊的切換模式一樣整輪停止。`FUBON_ENABLED=false` 或 `FUBON_TW_LIVE_QUOTES_ENABLED=false` 時明確跳過富邦，走 MIS → Yahoo；不得在 disabled 狀態讀取富邦 token 或打富邦端點。來源順序是嘗試優先序，不是允許較舊的高優先來源覆蓋較新的低優先來源。
+
+- [ ] **每個來源都必須提供可驗證、當日且真實成交的時間戳：** 富邦只接受既有 adapter 已驗證的 `lastTrade`／`closePrice` 實際成交價與其 UTC `updatedAt`；TWSE MIS 必須有唯一相符 code、正數 `z`，並依 Requirement 89 的既定契約以 strict `d+t`（Asia/Taipei）作 freshness。`tlong` 只是來源更新時間：存在時只驗 strict epoch milliseconds 與台北日期等於 `d`，異常只記錄 source-time anomaly，不能要求它等於 `t`、不能用它推進 freshness，也不能把合法 `d/t/z` 降級；Yahoo 台股 fallback 必須以當日正數 regular-market/最新 bar 的實際成交價與來源 epoch time 形成 observation，缺少時間、時間不屬台北當日、未來時間、非正價格或只剩昨收／開盤／買賣價時一律 reject。所有來源都不得以昨收、開盤、買價、賣價、中間價、試撮或程式取得時間偽裝成 live 成交價。
+
+- [ ] **既有契約的明確取代範圍：** Requirement 106 是 `market='台股'`、非 `0000` 的三來源 priority LIVE pipeline 的目前權威，僅取代下列舊條款：(1) Requirement 85／Task 346 的台股個股 2 分鐘 cron 與 catalog 文案，改為本 Requirement 的 10 秒節拍；美／英股仍為 2 分鐘；(2) Requirement 91／Task 353 的 enabled-only provider、enabled failure 不 fallback、30 秒 **LIVE** success cache 與 dispatcher 靜默 100 檔截斷，改為 Fubon → MIS → Yahoo、LIVE purpose no cross-round cache、40 檔 Fubon round-robin 與全量 outcome；inventory-only purpose 的既有 30 秒 cache 保留，但只能在 live flag=false 時使用；(3) Requirement 89／Task 350 的同時間 LIVE 可接受與 stale actual-trade 可更新 `price:dayhl:*` 的例外，改為此 pipeline 的 equal/older 完整零 Redis 副作用。Requirement 89 的 MIS `d+t` freshness／`tlong` 診斷契約仍保留；`VERIFIED_CLOSE`、正式 `stock_price_history` 收盤流程與非台股 producer 亦仍沿用各自既有規則。
+
+- [ ] **不以市場代碼猜測美股富邦能力：** 上項「非台股 producer 不變」明確包含美股；現有富邦公開市場資料未支援美股，任何未來美股十秒改動必須另立 requirement，不能復用本台股 dispatcher、token 或 source chain 暗中查詢。
+
+- [ ] **Redis 單調寫入與所有副作用：** `price:{market}:{code}` 的共同 atomic Lua primitive 對本 Requirement 的台股 LIVE source 先比 `tradingDate`，同日必須 `incoming.updatedAt > existing.updatedAt` 才可 SET／SADD／EXPIRE／PUBLISH；**相同時間也必須丟棄**。同日已是 `VERIFIED_CLOSE` 的 cache 不得被任何 LIVE observation 降級。被拒絕的 older/equal observation 必須完全零副作用：不改 latest cache、不重設 TTL、不 publish、不寫 `price:index:*`、不追加 `price:ticks:*`，也不得污染 `price:dayhl:*`。富邦 accepted quote 的已驗證 source `highPrice/lowPrice` 原樣進 payload、只 append tick、不寫 `price:dayhl:*`；MIS/Yahoo 僅能在 latest quote 已被 Redis 接受後觀察自己的 day-H/L，且可先唯讀既有 aggregate 做 payload 合併。stale observation 不得寫入高低 bucket。
+
+- [ ] **新增盤中最新快照表，與正式日收盤嚴格分離：** 新增 `stock_intraday_quote`，以 `(stock_code VARCHAR(20), market VARCHAR(20))` 為 composite primary key；欄位固定為 `trading_date DATE NOT NULL`、`provider_updated_at TIMESTAMPTZ NOT NULL`、`source VARCHAR(64) NOT NULL`、`actual_price NUMERIC(20,10) NOT NULL`、`previous_close/open_price/high_price/low_price/buy_price/sell_price NUMERIC(20,10) NULL`、`volume BIGINT NULL`。正數價格欄必須有正值 CHECK、volume 必須非負，且 `provider_updated_at AT TIME ZONE 'Asia/Taipei'` 的日期必須等於 `trading_date`。這張表只保存每檔最新盤中 snapshot；不得存可由價格／昨收推導的 change 或 change percent。`stock_price_history` 仍只由盤後權威收盤流程寫入，盤中任何來源都不得寫入或改寫其當日列、`close_source` 或正式 OHLCV。
+
+- [ ] **DB 為 canonical、只接受新資料，富邦完整欄位同步更新：** 每一筆有效 LIVE observation 先走單一原子 upsert：`ON CONFLICT (stock_code, market) DO UPDATE ... WHERE EXCLUDED.provider_updated_at > stock_intraday_quote.provider_updated_at`；較舊或相同 timestamp 必須回零列、不得改任何欄位。repository 必須在同一 transaction 回傳 APPLIED 的新 row，或 STALE_OR_EQUAL 的既有 canonical row；只有 DB 已 APPLIED 或取得既有 canonical row 後，才可把**該 canonical row**交給 Redis common writer。DB `FAILED` 時 Redis、tick、day-H/L 全部零 mutation。富邦接受時，`actualPrice/previousClose/openPrice/highPrice/lowPrice/buyPrice/sellPrice/volume/tradingDate/updatedAt/source` 必須一一落入上述表；有效 `stockName` 只在同一筆較新 snapshot 被 DB 接受時，於同一 transaction 更新 `stock.name`，避免名稱被較舊回應倒灌。MIS/Yahoo 對其有提供且已驗證的同名欄位也寫入；缺少欄位維持 null，不得拿舊 snapshot、Redis 或衍生值捏造。DB APPLIED／Redis 失敗時，重播同 timestamp 只能以 DB canonical row 補 Redis；DB STALE_OR_EQUAL 且 incoming raw payload 不同時，不得把 raw payload 寫入 Redis。任一端已有較新 tuple 時只可拒絕，永遠不可覆寫。
+
+- [ ] **富邦速率、circuit 與容量邊界：** 富邦 REST 的 **LIVE purpose** 每 10 秒輪詢不得跨輪重用成功 quote cache；只允許同時抵達、同一 purpose 的相同代號共享 in-flight request。adapter request 必須有 strict `purpose=LIVE|INVENTORY`；LIVE 缺 purpose 一律 reject，且永不讀／寫 success cache。INVENTORY 只可在 live flag=false、inventory flag=true 的單 consumer 模式保留既有每 code 30 秒 success cache，絕不可把 inventory cached payload 回給 LIVE。adapter 的 process-wide rate budget 保持不高於 240 calls/min，10 秒 normal round 最多 40 個富邦代號；目前清單在此額度內時每檔每輪都先富邦。輸入代碼先以穩定字典序正規化，dispatcher 不得再靜默截斷 100 檔；超過 40 時以 cursor round-robin 選最多 40 檔，未入選者同輪立即從 MIS 開始。MIS fallback 再依既有單批 320 上限明確分批、合併回同一穩定順序，每個 requested code 都必須有 outcome；不能突破速率限制、不能靜默遺失，也不能讓單一代號永遠飢餓。adapter response 必須保留逐 code 的 rate/circuit reason，coordinator 收到 `RATE_LIMITED`／`RATE_LIMIT_CIRCUIT_OPEN`／budget exhausted 後建立至少 60 秒 local skip-until；已知 circuit 期間零 Java→Fubon HTTP 與 SDK quote call、整批直接 MIS → Yahoo。冷啟或重啟首次偵測可有一個 adapter status request，但 adapter 在 circuit open 時必須是零 SDK quote call，之後立即設 local skip-until。
+
+- [ ] **測試與不變項：** 測試需證明 Fubon 成功且 DB APPLIED 時不打 MIS/Yahoo、Fubon 個別/整批失敗與 stale/equal 時正確 fallback、MIS 失敗才打 Yahoo、disabled 時零富邦呼叫；Redis 真實 Lua integration 必須覆蓋跨來源 newer/older/equal、publish/TTL/index/tick/day-HL 零副作用、Fubon source OHLC 不進 tracker 與 verified-close 不降級；PostgreSQL integration 必須覆蓋完整富邦欄位、原子 newer-wins、equal/older 零更新及 stock name 不倒灌；並覆蓋 DB APPLIED/Redis failure 後同 timestamp 只以 canonical row 修復、DB equal 但 raw payload 不同不可回灌、DB failure 零 Redis mutation。dispatcher 測試至少覆蓋 41、100、321 code 的全量 outcome/cursor cycle與 circuit local skip；scheduler 與公開 catalog 都精確為 10 秒。公開 quote API 的既有 19 欄、SSE、DB→Redis 盤外同步與正式收盤來源契約不新增欄位、不改語意。

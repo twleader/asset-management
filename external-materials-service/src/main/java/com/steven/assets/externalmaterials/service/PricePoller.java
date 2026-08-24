@@ -20,7 +20,7 @@ import java.util.function.Consumer;
 
 /**
  * 盤中股價輪詢：
- * - 台股：週一～五 09:00–13:30 Asia/Taipei，每 2 分鐘
+ * - 台股：週一～五 09:00–13:30 Asia/Taipei，每 10 秒
  * - 美股：週一～五 09:30–16:00 America/New_York，每 2 分鐘
  *
  * <p>台股四個入口都經同一 known-open dispatcher。Disabled mode 使用 Task 350 的 MIS
@@ -89,7 +89,7 @@ public class PricePoller {
         });
     }
 
-    @Scheduled(cron = "0 0/2 9-13 * * MON-FRI", zone = "Asia/Taipei")
+    @Scheduled(cron = "*/10 * 9-13 * * MON-FRI", zone = "Asia/Taipei")
     public void scheduledTwIntradayUpdate() {
         Set<String> tw = new LinkedHashSet<>(), us = new LinkedHashSet<>(), uk = new LinkedHashSet<>();
         source.collectHeldStockCodes(tw, us, uk);

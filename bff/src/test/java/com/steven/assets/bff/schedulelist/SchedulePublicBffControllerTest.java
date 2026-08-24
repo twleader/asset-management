@@ -73,13 +73,13 @@ class SchedulePublicBffControllerTest {
     }
 
     @Test
-    @DisplayName("台股個股與全量 code-keyed 回補文案精確反映兩分鐘與 TPEX 範圍")
+    @DisplayName("台股個股與全量 code-keyed 回補文案精確反映十秒與 TPEX 範圍")
     void 台股個股與全量回補契約() {
         assertThat(jobs()).filteredOn(j -> "台股個股即時價（盤中）".equals(j.name()))
                 .singleElement().satisfies(job -> {
-                    assertThat(job.schedule()).isEqualTo("交易日 09:00–13:30 每 2 分鐘");
-                    assertThat(job.cron()).isEqualTo("0 0/2 9-13 * * MON-FRI");
-                    assertThat(job.description()).contains("上市／上櫃", "TWSE MIS", "Redis");
+                    assertThat(job.schedule()).isEqualTo("交易日 09:00–13:30 每 10 秒");
+                    assertThat(job.cron()).isEqualTo("*/10 * 9-13 * * MON-FRI");
+                    assertThat(job.description()).contains("富邦證券 API", "TWSE MIS", "Yahoo", "Redis");
                 });
         assertThat(jobs()).filteredOn(j -> "櫃買／海外 code-keyed 指數日線回補".equals(j.name()))
                 .singleElement().satisfies(job ->

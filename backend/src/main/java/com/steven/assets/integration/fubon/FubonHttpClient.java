@@ -66,7 +66,7 @@ public class FubonHttpClient implements FubonBrokerClient {
             FubonDtos.QuoteBatchResponse response = client.post()
                     .uri("/internal/market-data/tw-quotes")
                     .header(TOKEN_HEADER, config.token())
-                    .bodyValue(new FubonDtos.QuoteReadRequest(List.copyOf(codes)))
+                    .bodyValue(new FubonDtos.QuoteReadRequest(List.copyOf(codes), "INVENTORY"))
                     .retrieve()
                     .bodyToMono(FubonDtos.QuoteBatchResponse.class)
                     .timeout(timeout)

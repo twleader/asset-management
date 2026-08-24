@@ -53,10 +53,10 @@ class PricePollerTpexContractTest {
     }
 
     @Test
-    void scheduledAnnotationsRemainTwoMinuteTwAndUs() throws Exception {
+    void scheduledAnnotationsUseTenSecondTwAndKeepTwoMinuteUs() throws Exception {
         Scheduled tw = scheduled("scheduledTwIntradayUpdate");
         Scheduled us = scheduled("scheduledUsIntradayUpdate");
-        org.assertj.core.api.Assertions.assertThat(tw.cron()).isEqualTo("0 0/2 9-13 * * MON-FRI");
+        org.assertj.core.api.Assertions.assertThat(tw.cron()).isEqualTo("*/10 * 9-13 * * MON-FRI");
         org.assertj.core.api.Assertions.assertThat(tw.zone()).isEqualTo("Asia/Taipei");
         org.assertj.core.api.Assertions.assertThat(us.cron()).isEqualTo("0 0/2 9-16 * * MON-FRI");
         org.assertj.core.api.Assertions.assertThat(us.zone()).isEqualTo("America/New_York");

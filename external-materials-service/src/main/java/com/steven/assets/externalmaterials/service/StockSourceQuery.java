@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -702,6 +703,88 @@ public class StockSourceQuery {
                         code, market, name);
             } catch (Exception ignored) {}
         }
+    }
+
+    /**
+     * Stores the latest intraday observation independently from the authoritative daily close.
+     * PostgreSQL performs the freshness decision so concurrent poller rounds cannot regress a quote.
+     */
+    @Transactional
+    public IntradayPersistenceResult persistIntradayQuote(
+            com.steven.assets.externalmaterials.client.PriceFetchClient.PriceResult quote) {
+        if (quote == null || quote.stockCode() == null || quote.market() == null
+                || quote.tradingDate() == null || quote.freshnessInstant() == null
+                || quote.price() == null || quote.price().signum() <= 0) {
+            return IntradayPersistenceResult.failed();
+        }
+        try {
+            List<String> applied = jdbc.query("""
+                    INSERT INTO stock_intraday_quote
+                      (stock_code, market, trading_date, provider_updated_at, source, actual_price,
+                       previous_close, open_price, high_price, low_price, buy_price, sell_price, volume)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (stock_code, market) DO UPDATE SET
+                      trading_date=EXCLUDED.trading_date, provider_updated_at=EXCLUDED.provider_updated_at,
+                      source=EXCLUDED.source, actual_price=EXCLUDED.actual_price,
+                      previous_close=EXCLUDED.previous_close, open_price=EXCLUDED.open_price,
+                      high_price=EXCLUDED.high_price, low_price=EXCLUDED.low_price,
+                      buy_price=EXCLUDED.buy_price, sell_price=EXCLUDED.sell_price, volume=EXCLUDED.volume
+                    WHERE EXCLUDED.provider_updated_at > stock_intraday_quote.provider_updated_at
+                    RETURNING stock_code, market, trading_date, provider_updated_at, source, actual_price,
+                      previous_close, open_price, high_price, low_price, buy_price, sell_price, volume
+                    """, (rs, rowNum) -> rs.getString("stock_code"),
+                    quote.stockCode(), quote.market(), quote.tradingDate(), java.sql.Timestamp.from(quote.freshnessInstant()), quote.source(),
+                    quote.price(), quote.previousClose(), quote.openPrice(), quote.highPrice(), quote.lowPrice(),
+                    quote.buyPrice(), quote.sellPrice(), quote.volume());
+            if (!applied.isEmpty()) {
+                if (quote.stockName() != null && !quote.stockName().isBlank()
+                        && !quote.stockName().equalsIgnoreCase(quote.stockCode())) {
+                    jdbc.update("UPDATE stock SET name=? WHERE code=? AND market=?",
+                            quote.stockName(), quote.stockCode(), quote.market());
+                }
+            }
+            List<IntradayQuote> canonical = jdbc.query("""
+                    SELECT q.stock_code, q.market, q.trading_date, q.provider_updated_at, q.source, q.actual_price,
+                      q.previous_close, q.open_price, q.high_price, q.low_price, q.buy_price, q.sell_price, q.volume,
+                      s.name AS stock_name
+                    FROM stock_intraday_quote q LEFT JOIN stock s ON s.code=q.stock_code AND s.market=q.market
+                    WHERE q.stock_code=? AND q.market=?
+                    """, (rs, rowNum) -> readIntradayQuote(rs), quote.stockCode(), quote.market());
+            return canonical.isEmpty()
+                    ? IntradayPersistenceResult.failed()
+                    : (applied.isEmpty() ? IntradayPersistenceResult.stale(canonical.getFirst())
+                    : IntradayPersistenceResult.applied(canonical.getFirst()));
+        } catch (Exception ex) {
+            log.warn("盤中 snapshot 寫入失敗 market={} code={}", quote.market(), quote.stockCode(), ex);
+            return IntradayPersistenceResult.failed();
+        }
+    }
+
+    private static IntradayQuote readIntradayQuote(java.sql.ResultSet rs) throws java.sql.SQLException {
+        return new IntradayQuote(rs.getString("stock_code"), rs.getString("market"),
+                rs.getObject("trading_date", LocalDate.class), rs.getTimestamp("provider_updated_at").toInstant(),
+                rs.getString("source"), rs.getBigDecimal("actual_price"), rs.getBigDecimal("previous_close"),
+                rs.getBigDecimal("open_price"), rs.getBigDecimal("high_price"), rs.getBigDecimal("low_price"),
+                rs.getBigDecimal("buy_price"), rs.getBigDecimal("sell_price"),
+                rs.getObject("volume", Long.class), rs.getString("stock_name"));
+    }
+
+    public record IntradayQuote(String stockCode, String market, LocalDate tradingDate, Instant updatedAt,
+                                String source, BigDecimal actualPrice, BigDecimal previousClose,
+                                BigDecimal openPrice, BigDecimal highPrice, BigDecimal lowPrice,
+                                BigDecimal buyPrice, BigDecimal sellPrice, Long volume, String stockName) {
+        public com.steven.assets.externalmaterials.client.PriceFetchClient.PriceResult asPriceResult() {
+            return new com.steven.assets.externalmaterials.client.PriceFetchClient.PriceResult(stockCode, market,
+                    actualPrice, null, null, source, stockName, buyPrice, sellPrice, openPrice, previousClose,
+                    highPrice, lowPrice, volume, tradingDate, updatedAt);
+        }
+    }
+
+    public record IntradayPersistenceResult(Status status, IntradayQuote canonical) {
+        public enum Status { APPLIED, STALE_OR_EQUAL, FAILED }
+        static IntradayPersistenceResult applied(IntradayQuote quote) { return new IntradayPersistenceResult(Status.APPLIED, quote); }
+        static IntradayPersistenceResult stale(IntradayQuote quote) { return new IntradayPersistenceResult(Status.STALE_OR_EQUAL, quote); }
+        static IntradayPersistenceResult failed() { return new IntradayPersistenceResult(Status.FAILED, null); }
     }
 
     /** 取得除息日前一交易日收盤 (basis) + 填息天數（除息日後幾天股價回到 basis）。 */

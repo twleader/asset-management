@@ -371,3 +371,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/v1.112.0-trading-radar-blog-publish.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.113.0-stock-intraday-quote.sql
+      relativeToChangelogFile: false

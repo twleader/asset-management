@@ -21,7 +21,15 @@ public class TwLiveQuoteOutcomeCounters {
         STALE_OR_EQUAL,
         CURRENT_MALFORMED,
         WRITE_FAILED,
-        TICK_APPEND_FAILED
+        TICK_APPEND_FAILED,
+        IN_FLIGHT_SKIPPED,
+        DB_APPLIED,
+        DB_STALE_OR_EQUAL,
+        DB_FAILED,
+        REDIS_WRITTEN,
+        REDIS_REJECTED,
+        REDIS_FAILED,
+        CANONICAL_REPAIR
     }
 
     private final EnumMap<Outcome, LongAdder> values = new EnumMap<>(Outcome.class);

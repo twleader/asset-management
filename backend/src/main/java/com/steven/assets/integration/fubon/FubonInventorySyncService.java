@@ -49,6 +49,8 @@ public class FubonInventorySyncService {
     private final FubonInventoryWriter writer;
     private final FubonOutcomeCounters counters;
     private final Clock clock;
+    private final boolean inventoryEnabled;
+    private final boolean liveQuotesEnabled;
 
     @Autowired
     public FubonInventorySyncService(
@@ -60,9 +62,11 @@ public class FubonInventorySyncService {
             BrokerRepository brokerRepository,
             StockRepository stockRepository,
             FubonInventoryWriter writer,
-            FubonOutcomeCounters counters) {
+            FubonOutcomeCounters counters,
+            @org.springframework.beans.factory.annotation.Value("${fubon.inventory-sync-enabled:false}") boolean inventoryEnabled,
+            @org.springframework.beans.factory.annotation.Value("${fubon.tw-live-quotes-enabled:false}") boolean liveQuotesEnabled) {
         this(configState, brokerClient, marketDataService, userAdminService, snapshotRepository,
-                brokerRepository, stockRepository, writer, counters, Clock.system(TW_ZONE));
+                brokerRepository, stockRepository, writer, counters, Clock.system(TW_ZONE), inventoryEnabled, liveQuotesEnabled);
     }
 
     FubonInventorySyncService(
@@ -76,6 +80,15 @@ public class FubonInventorySyncService {
             FubonInventoryWriter writer,
             FubonOutcomeCounters counters,
             Clock clock) {
+        this(configState, brokerClient, marketDataService, userAdminService, snapshotRepository, brokerRepository,
+                stockRepository, writer, counters, clock, true, false);
+    }
+
+    FubonInventorySyncService(
+            FubonConfigState configState, FubonBrokerClient brokerClient, MarketDataService marketDataService,
+            UserAdminService userAdminService, AssetSnapshotRepository snapshotRepository, BrokerRepository brokerRepository,
+            StockRepository stockRepository, FubonInventoryWriter writer, FubonOutcomeCounters counters, Clock clock,
+            boolean inventoryEnabled, boolean liveQuotesEnabled) {
         this.configState = configState;
         this.brokerClient = brokerClient;
         this.marketDataService = marketDataService;
@@ -86,6 +99,8 @@ public class FubonInventorySyncService {
         this.writer = writer;
         this.counters = counters;
         this.clock = clock;
+        this.inventoryEnabled = inventoryEnabled;
+        this.liveQuotesEnabled = liveQuotesEnabled;
     }
 
     /** Manual endpoint flow: accounting may run before the tri-state calendar gate. */
@@ -134,6 +149,8 @@ public class FubonInventorySyncService {
     }
 
     private FubonDtos.SyncResponse localConfigGate(boolean dryRun) {
+        FubonDtos.SyncResponse featureGate = inventoryFeatureGate(dryRun);
+        if (featureGate != null) return featureGate;
         FubonConfigState.Snapshot config = configState.snapshot();
         return switch (config.state()) {
             case DISABLED -> finish(FubonOutcome.DISABLED, dryRun, null, 0, 0, null,
@@ -142,6 +159,15 @@ public class FubonInventorySyncService {
                     "MISCONFIGURED", null);
             case READY -> null;
         };
+    }
+
+    /** Scheduler calls this before config/token/calendar reads so consumer flags have precedence. */
+    FubonDtos.SyncResponse inventoryFeatureGate(boolean dryRun) {
+        if (!inventoryEnabled) return finish(FubonOutcome.INVENTORY_SYNC_DISABLED, dryRun, null, 0, 0, null,
+                "INVENTORY_SYNC_DISABLED", null);
+        if (liveQuotesEnabled) return finish(FubonOutcome.INVENTORY_SYNC_CAPACITY_CONFLICT, dryRun, null, 0, 0, null,
+                "INVENTORY_SYNC_CAPACITY_CONFLICT", null);
+        return null;
     }
 
     private PortfolioBatch readAndValidatePortfolio(boolean dryRun, LocalDate expectedDate) {
