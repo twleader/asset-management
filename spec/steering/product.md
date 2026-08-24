@@ -77,7 +77,7 @@
 ## 5. Out of Scope（明確不做）
 
 - **多使用者 / 認證 / 授權** — 已於 Requirement 28 導入（Spring Security OAuth2 Gmail 登入 + 多租戶資料隔離），不再屬 Out of Scope。
-- **真實券商下單** — 純記錄與分析，不對外送單。
+- **真實券商下單** — 絕對禁止。系統只做記錄、分析與建議；不得透過任何券商 API／SDK 建立、送出、買入、賣出、改單、撤單或重送委託。使用者若採納建議，須自行在券商官方介面操作。
 - **加密貨幣、保險、不動產** — 目前資產類別限存款／股票／基金；新增類別需走 SDD 重新評估。
 - **行動 App** — Web SPA（Vue 3）即為使用者介面；響應式但非原生 App。
 - **Excel 批次匯入** — 原 `ExcelImportService` 已停用 controller endpoint，僅保留匯出。
