@@ -1,6 +1,7 @@
 package com.steven.assets.service;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.stereotype.Service;
@@ -25,6 +26,7 @@ public class PublicMarketDataReadOnlyService {
 
     private final WebClient externalClient;
 
+    @Autowired
     public PublicMarketDataReadOnlyService(
             @Value("${external-materials.base-url:http://external-materials-service:8080}") String externalUrl) {
         this(WebClient.builder().baseUrl(externalUrl).build());
