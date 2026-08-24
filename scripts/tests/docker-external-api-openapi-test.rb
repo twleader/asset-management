@@ -7,6 +7,7 @@ require 'yaml'
 ROOT = File.expand_path('../..', __dir__)
 NGINX = File.join(ROOT, 'api-gateway/nginx.conf')
 OPENAPI = File.join(ROOT, 'docs/openapi/docker-external-api.yaml')
+COMPOSE = File.join(ROOT, 'docker-compose.yml')
 HTTP_METHODS = %w[get put post delete options head patch trace].freeze
 
 MANIFEST = {
@@ -68,6 +69,7 @@ def walk(value, &block)
 end
 
 document = YAML.safe_load(File.read(OPENAPI), aliases: false)
+compose = YAML.safe_load(File.read(COMPOSE), aliases: false)
 assert!(document.fetch('openapi').to_s.match?(/\A3\./), 'OpenAPI 版本必須是 3.x')
 assert!(document.dig('info', 'version') == '1.4.0', 'Requirement 108 後 OpenAPI info.version 必須為 1.4.0')
 assert!(document['security'] == [], 'OpenAPI global security 必須明確為空陣列')
@@ -77,6 +79,16 @@ assert!(server_urls.include?('http://127.0.0.1:9090'), '缺 loopback 9090 server
 assert!(server_urls.any? { |url| url.match?(%r{\Ahttps://[^/]+\.ts\.net:9090\z}) },
         '缺 Tailscale 私網 HTTPS :9090 server')
 assert!(server_urls.length == 2, 'servers 只能列 loopback 與 Tailscale 私網')
+
+gateway_healthcheck = compose.dig('services', 'api-gateway', 'healthcheck', 'test')
+expected_gateway_healthcheck = [
+  'CMD-SHELL',
+  'wget -qO- http://127.0.0.1:9090/api/public/market-index >/dev/null || exit 1'
+]
+assert!(gateway_healthcheck == expected_gateway_healthcheck,
+        'api-gateway healthcheck 必須只探測既有輕量 public market-index，不能讀完整 /api/quotes')
+assert!(MANIFEST.key?(['GET', '/api/public/market-index']),
+        'gateway healthcheck target 必須是既有九路公開 GET，不得藉 healthcheck 新增 route')
 
 paths = document.fetch('paths')
 openapi_routes = {}
